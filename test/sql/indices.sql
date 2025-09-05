@@ -1950,6 +1950,42 @@ EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
 
+-- no doubled parameter
+CREATE TABLE concur_reindex_tab (c1 int, c2 text) USING orioledb;
+CREATE INDEX concur_reindex_ind ON concur_reindex_tab(c1, c2);
+INSERT INTO concur_reindex_tab VALUES (1, 'a');
+DROP TABLE concur_reindex_tab;
+
+-- doubled parameter
+CREATE TABLE concur_reindex_tab (c1 int, c2 text) USING orioledb;
+CREATE INDEX concur_reindex_ind ON concur_reindex_tab(c1, c1, c2);
+INSERT INTO concur_reindex_tab VALUES (1, 'a');
+DROP TABLE concur_reindex_tab;
+
+-- tripled parameter
+CREATE TABLE concur_reindex_tab (c1 int, c2 text) USING orioledb;
+CREATE INDEX concur_reindex_ind ON concur_reindex_tab(c1, c1, c1, c2);
+INSERT INTO concur_reindex_tab VALUES (1, 'a');
+DROP TABLE concur_reindex_tab;
+
+-- quadruple parameter
+CREATE TABLE concur_reindex_tab (c1 int, c2 text) USING orioledb;
+CREATE INDEX concur_reindex_ind ON concur_reindex_tab(c1, c1, c1, c1, c2);
+INSERT INTO concur_reindex_tab VALUES (1, 'a');
+DROP TABLE concur_reindex_tab;
+
+-- doubled parameter with equal parametes count
+CREATE TABLE concur_reindex_tab (c1 int, c2 int, c3 text) USING orioledb;
+CREATE INDEX concur_reindex_ind ON concur_reindex_tab(c1, c1, c2, c3);
+INSERT INTO concur_reindex_tab VALUES (1, 1, 'a');
+DROP TABLE concur_reindex_tab;
+
+-- doubled two parameter
+CREATE TABLE concur_reindex_tab (c1 int, c2 int, c3 text) USING orioledb;
+CREATE INDEX concur_reindex_ind ON concur_reindex_tab(c1, c1, c2, c2, c3);
+INSERT INTO concur_reindex_tab VALUES (1, 1, 'a');
+DROP TABLE concur_reindex_tab;
+
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices CASCADE;
