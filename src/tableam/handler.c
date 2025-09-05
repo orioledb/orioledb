@@ -1727,15 +1727,19 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 		{
 			tts_orioledb_store_tuple(slot, tuple, descr, COMMITSEQNO_INPROGRESS,
 									 PrimaryIndexNumber, false, NULL);
-			ItemPointerSetBlockNumber(&slot->tts_tid, ItemPointerGetBlockNumber(&fake_iptr));
-			ItemPointerSetOffsetNumber(&slot->tts_tid, ItemPointerGetOffsetNumber(&fake_iptr));
-			if ((OffsetNumber) (ItemPointerGetOffsetNumber(&fake_iptr) + 1) == InvalidOffsetNumber)
+
+			if (!pk->primaryIsCtid)
 			{
-				ItemPointerSetBlockNumber(&fake_iptr, ItemPointerGetBlockNumber(&fake_iptr) + 1);
-				ItemPointerSetOffsetNumber(&fake_iptr, 1);
+				ItemPointerSetBlockNumber(&slot->tts_tid, ItemPointerGetBlockNumber(&fake_iptr));
+				ItemPointerSetOffsetNumber(&slot->tts_tid, ItemPointerGetOffsetNumber(&fake_iptr));
+				if ((OffsetNumber) (ItemPointerGetOffsetNumber(&fake_iptr) + 1) == InvalidOffsetNumber)
+				{
+					ItemPointerSetBlockNumber(&fake_iptr, ItemPointerGetBlockNumber(&fake_iptr) + 1);
+					ItemPointerSetOffsetNumber(&fake_iptr, 1);
+				}
+				else
+					ItemPointerSetOffsetNumber(&fake_iptr, ItemPointerGetOffsetNumber(&fake_iptr) + 1);
 			}
-			else
-				ItemPointerSetOffsetNumber(&fake_iptr, ItemPointerGetOffsetNumber(&fake_iptr) + 1);
 
 			liverows += 1;
 
