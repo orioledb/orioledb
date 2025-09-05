@@ -71,6 +71,7 @@ step "s1_delete100" {
 	WHERE id BETWEEN 100 and 140; }
 step "s1_update10000" { call update_table(10000); }
 step "s1_update100000" { call update_table(100000); }
+step "s1_selectnow" { select now(); }
 
 step "s1_select" { SELECT * FROM o_iso_rr; }
 step "s1_select20" {
@@ -181,4 +182,4 @@ permutation "s1_insert_big1" "s1_begin" "s2_begin" "s2_delete_big_end" "s1_count
 permutation "s1_insert_big1" "s1_begin" "s1_count200_end" "s2_begin" "s2_delete_big_end" "s2_commit" "s1_delete150" "s1_delete100" "s1_rollback"
 permutation "s1_insert_big1" "s1_begin" "s2_begin" "s2_delete_big_end" "s2_commit" "s1_count200_end" "s1_delete150" "s1_delete100" "s1_rollback"
 
-permutation "s2_insert_one" "s2_begin" "s2_select_one" "s1_update10000" "s1_update100000" "s2_commit"
+permutation "s2_insert_one" "s2_begin" "s2_select_one" "s1_selectnow" "s1_update10000" "s1_selectnow" "s1_update100000" "s1_selectnow" "s2_commit"
