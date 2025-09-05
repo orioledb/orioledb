@@ -327,6 +327,27 @@ SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback ORDER BY val_3;
 
 ROLLBACK;
 
+CREATE TABLE o_test_alter_type_reuse_index (
+	id int,
+	phone varchar(15) NULL UNIQUE DEFAULT NULL
+) USING orioledb;
+ALTER TABLE o_test_alter_type_reuse_index ALTER COLUMN phone TYPE text;
+SELECT * FROM o_test_alter_type_reuse_index;
+
+CREATE TABLE o_test_alter_type_not_reuse_index (
+	id int,
+	phone varchar(15) NULL UNIQUE DEFAULT NULL
+) USING orioledb;
+ALTER TABLE o_test_alter_type_not_reuse_index ALTER COLUMN phone TYPE text COLLATE "POSIX";
+SELECT * FROM o_test_alter_type_not_reuse_index;
+
+CREATE TABLE o_test_alter_type_typmod_changed (
+	id int,
+	phone varchar(15) NULL UNIQUE DEFAULT NULL
+) USING orioledb;
+ALTER TABLE o_test_alter_type_typmod_changed ALTER COLUMN phone TYPE varchar(5);
+SELECT * FROM o_test_alter_type_typmod_changed;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA alter_type CASCADE;
 RESET search_path;
