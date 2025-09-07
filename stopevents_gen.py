@@ -25,6 +25,6 @@ f.write('/* Generated file, see stopevents_gen.py */\n\n')
 f.write('static const char *const stopeventnames[] = {')
 for i, e in enumerate(event_names):
 	f.write(f'"{e}",\n')
-f.write('};')
+f.write('};\n')
 
 f.close()
