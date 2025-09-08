@@ -1,13 +1,13 @@
 setup
 {
 	CREATE EXTENSION IF NOT EXISTS orioledb;
+
 	DROP TABLE IF EXISTS public._inforg175;
 	CREATE TABLE public._inforg175 (
 		_fld176 bytea NOT NULL,
 		_fld177 varchar NOT NULL
 	)
 	WITH (autovacuum_enabled='true', toast.autovacuum_enabled='true');
-	ALTER TABLE public._inforg175 OWNER TO usr1cv8;
 	CREATE UNIQUE INDEX _inforg175_bydims_b ON public._inforg175 USING btree (_fld176);
 
 	ALTER TABLE public._inforg175 CLUSTER ON _inforg175_bydims_b;
