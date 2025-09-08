@@ -212,7 +212,7 @@ if [[ "$RUNNING_MODE" == "init" || "$RUNNING_MODE" == "all" ]]; then
     # preinstall a wheel-only cryptography version known to provide musllinux wheels for cp38.
     python -m pip install --only-binary=:all: "cryptography<42" || true
     # Then install the rest of test deps, preferring wheels and using system-site cffi where possible.
-    python -m pip install --upgrade --prefer-binary psycopg2-binary six testgres moto[s3] flask flask_cors boto3 pyOpenSSL
+    python -m pip install --upgrade --prefer-binary psycopg2-binary six testgres==1.11.0 moto[s3] flask flask_cors boto3 pyOpenSSL
     python -m pip freeze
 
     # Grant ownership to the 'postgres' user
