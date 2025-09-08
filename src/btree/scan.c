@@ -293,7 +293,8 @@ static bool
 load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 						Page page,
 						BTreePageItemLocator *intLoc,
-						OffsetNumber *startOffset)
+						OffsetNumber *startOffset,
+						const bool prev_leftmost_or_none)
 {
 	bool		has_next = false;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
@@ -303,8 +304,15 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 
 	if (!O_TUPLE_IS_NULL(prevHikey))
 	{
-		STOPEVENT(STOPEVENT_SEQ_SCAN_LOAD_INTERNAL_PAGE,
-				  btree_lokey_stopevent_params(scan->desc, prevHikey));
+		if (!prev_leftmost_or_none) {
+			STOPEVENT(STOPEVENT_SEQ_SCAN_LOAD_INTERNAL_NONLEFTMOST_PAGE,
+				btree_lokey_stopevent_params(scan->desc, prevHikey));
+		}
+		else
+		{
+			STOPEVENT(STOPEVENT_SEQ_SCAN_LOAD_INTERNAL_PAGE,
+				btree_lokey_stopevent_params(scan->desc, prevHikey));
+		}
 		findResult = find_page(&scan->context, &prevHikey, BTreeKeyNonLeafKey, 1);
 	}
 	else
@@ -615,6 +623,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				  OFixedKey *keyRangeLow, OFixedKey *keyRangeHigh)
 {
 	ParallelOScanDesc poscan = scan->poscan;
+	bool prev_leftmost_or_none = true;
 
 	if (!poscan)
 	{
@@ -623,6 +632,11 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 
 		while (true)
 		{
+			if (scan->context.img)
+			{
+				prev_leftmost_or_none = O_PAGE_IS(scan->context.img, LEFTMOST);
+			}
+
 			/* Try to load next internal page if needed */
 			if (!pageIsLoaded)
 			{
@@ -635,7 +649,8 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				if (!load_next_internal_page(scan, scan->prevHikey.tuple,
 											 NULL,
 											 &scan->intLoc,
-											 &scan->intStartOffset))
+											 &scan->intStartOffset,
+											 prev_leftmost_or_none))
 				{
 					/* first page only */
 					Assert(O_PAGE_IS(scan->context.img, LEFTMOST));
@@ -714,7 +729,8 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 												 fixed_shmem_key_get_tuple(&curPage->prevHikey),
 												 curPage->img,
 												 &loc,
-												 &curPage->startOffset);
+												 &curPage->startOffset,
+												 prev_leftmost_or_none);
 				if (!loaded)
 				{
 					SpinLockAcquire(&poscan->intpageAccess);
@@ -760,7 +776,8 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 												 fixed_shmem_key_get_tuple(&nextPage->prevHikey),
 												 nextPage->img,
 												 &loc,
-												 &nextPage->startOffset);
+												 &nextPage->startOffset,
+												 prev_leftmost_or_none);
 				Assert(loaded);
 
 				SpinLockAcquire(&poscan->intpageAccess);

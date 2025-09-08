@@ -25,3 +25,4 @@ load_page_refind
 after_ionum_set
 build_index_placeholder_inserted
 seq_scan_load_internal_page
+seq_scan_load_internal_nonleftmost_page
