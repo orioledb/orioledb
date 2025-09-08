@@ -267,7 +267,8 @@ load_next_historical_page(BTreeSeqScan *scan)
 }
 
 static Jsonb *
-btree_lokey_stopevent_params(BTreeDescr *desc, OTuple lokey)
+btree_lokey_stopevent_params(BTreeDescr *desc, OTuple lokey,
+							 bool prevIsLeftmostOrNone)
 {
 	JsonbParseState *state = NULL;
 	Jsonb	   *res;
@@ -277,6 +278,7 @@ btree_lokey_stopevent_params(BTreeDescr *desc, OTuple lokey)
 	btree_desc_stopevent_params_internal(desc, &state);
 	jsonb_push_key(&state, "lokey");
 	(void) o_btree_key_to_jsonb(desc, lokey, &state);
+	jsonb_push_bool_key(&state, "prevIsLeftmostOrNone", prevIsLeftmostOrNone);
 	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
 	MemoryContextSwitchTo(mctx);
 
@@ -285,7 +287,7 @@ btree_lokey_stopevent_params(BTreeDescr *desc, OTuple lokey)
 
 /*
  * Loads next internal page and. Outputs page, start locator and offset.
- *.
+ *
  * In case of parallel scan the caller should hold a lock preventing the other workers from modifying
  * a page in a shared state and updating prevHikey.
  */
@@ -293,7 +295,8 @@ static bool
 load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 						Page page,
 						BTreePageItemLocator *intLoc,
-						OffsetNumber *startOffset)
+						OffsetNumber *startOffset,
+						const bool prevIsLeftmostOrNone)
 {
 	bool		has_next = false;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
@@ -304,7 +307,7 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 	if (!O_TUPLE_IS_NULL(prevHikey))
 	{
 		STOPEVENT(STOPEVENT_SEQ_SCAN_LOAD_INTERNAL_PAGE,
-				  btree_lokey_stopevent_params(scan->desc, prevHikey));
+				  btree_lokey_stopevent_params(scan->desc, prevHikey, prevIsLeftmostOrNone));
 		findResult = find_page(&scan->context, &prevHikey, BTreeKeyNonLeafKey, 1);
 	}
 	else
@@ -620,22 +623,27 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 	{
 		/* Non-parallel case */
 		bool		pageIsLoaded = scan->firstPageIsLoaded;
+		bool		prevIsLeftmostOrNone = true;
 
 		while (true)
 		{
+
 			/* Try to load next internal page if needed */
 			if (!pageIsLoaded)
 			{
 				if (scan->firstPageIsLoaded)
 				{
 					Assert(!O_PAGE_IS(scan->context.img, RIGHTMOST));
+					if (scan->context.img)
+						prevIsLeftmostOrNone = O_PAGE_IS(scan->context.img, LEFTMOST);
 					copy_fixed_hikey(scan->desc, &scan->prevHikey, scan->context.img);
 				}
 
 				if (!load_next_internal_page(scan, scan->prevHikey.tuple,
 											 NULL,
 											 &scan->intLoc,
-											 &scan->intStartOffset))
+											 &scan->intStartOffset,
+											 prevIsLeftmostOrNone))
 				{
 					/* first page only */
 					Assert(O_PAGE_IS(scan->context.img, LEFTMOST));
@@ -714,7 +722,8 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 												 fixed_shmem_key_get_tuple(&curPage->prevHikey),
 												 curPage->img,
 												 &loc,
-												 &curPage->startOffset);
+												 &curPage->startOffset,
+												 false);
 				if (!loaded)
 				{
 					SpinLockAcquire(&poscan->intpageAccess);
@@ -760,7 +769,8 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 												 fixed_shmem_key_get_tuple(&nextPage->prevHikey),
 												 nextPage->img,
 												 &loc,
-												 &nextPage->startOffset);
+												 &nextPage->startOffset,
+												 false);
 				Assert(loaded);
 
 				SpinLockAcquire(&poscan->intpageAccess);
