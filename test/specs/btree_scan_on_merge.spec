@@ -6,7 +6,7 @@ setup
 	CREATE TABLE public._inforg175 (
 		_fld176 bytea NOT NULL,
 		_fld177 varchar NOT NULL
-	)
+	) USING orioledb
 	WITH (autovacuum_enabled='true', toast.autovacuum_enabled='true');
 	CREATE UNIQUE INDEX _inforg175_bydims_b ON public._inforg175 USING btree (_fld176);
 
