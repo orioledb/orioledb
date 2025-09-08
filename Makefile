@@ -132,6 +132,7 @@ REGRESSCHECKS = btree_sys_check \
 ISOLATIONCHECKS = bitmap_hist_scan \
 				  btree_iterate \
 				  btree_print_backend_id \
+				  btree_scan_on_merge \
 				  btree_scan \
 				  concurrent_update_delete \
 				  fkeys \
