@@ -190,6 +190,8 @@ RUN set -eux; \
 	cp /usr/src/postgresql/contrib/orioledb/docker/config.sub config/config.sub; \
 # configure options taken from:
 # https://anonscm.debian.org/cgit/pkg-postgresql/postgresql.git/tree/debian/rules?h=9.5
+	# Add debug-friendly configure flags when DEBUG_MODE=true
+	CFG_DEBUG_OPTS=""; if [ "$DEBUG_MODE" = "true" ]; then CFG_DEBUG_OPTS="--enable-debug --enable-cassert"; fi; \
 	( CC=${BUILD_CC_COMPILER} ./configure \
 		--build="$gnuArch" \
 # "/usr/src/postgresql/src/backend/access/common/tupconvert.c:105: undefined reference to `libintl_gettext'"
@@ -197,8 +199,7 @@ RUN set -eux; \
 		--enable-integer-datetimes \
 #       --enable-thread-safety \   # unrecognized options in alpine
 		--enable-tap-tests \
-# skip debugging info -- we want tiny size instead
-#		--enable-debug \
+		$CFG_DEBUG_OPTS \
 		--disable-rpath \
 		--with-uuid=e2fs \
 #		--with-gnu-ld \         # not supported on Alpine
