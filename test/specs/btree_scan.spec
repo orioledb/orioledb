@@ -8,9 +8,9 @@ setup
 		val varchar NOT NULL
 	) USING orioledb
 	WITH (autovacuum_enabled='true', toast.autovacuum_enabled='true');
-	CREATE UNIQUE INDEX _inforg175_bydims_b ON public.o_btree_scan USING btree (id);
+	CREATE UNIQUE INDEX o_btree_scan_ix ON public.o_btree_scan USING btree (id);
 
-	ALTER TABLE public.o_btree_scan CLUSTER ON _inforg175_bydims_b;
+	ALTER TABLE public.o_btree_scan CLUSTER ON o_btree_scan_ix;
 
 	CREATE OR REPLACE FUNCTION generate_random_varchar(length INTEGER) RETURNS TEXT AS $$
 		DECLARE
