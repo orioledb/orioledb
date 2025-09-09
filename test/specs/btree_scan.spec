@@ -55,8 +55,7 @@ step "s2_setup" { SELECT pg_stopevent_set('seq_scan_load_internal_page', 'true')
 step "s2_delete1" { DELETE FROM o_btree_scan WHERE id < '3900'; }
 step "s2_delete2" { DELETE FROM o_btree_scan WHERE id < '4095'; }
 step "s2_checkpoint" { CHECKPOINT; }
-step "s2_sleep" { SELECT pg_sleep(10); }
 step "s2_reset" { SELECT pg_stopevent_reset('seq_scan_load_internal_page'); }
 
 
-permutation "s1_setup" "s2_setup" "s2_delete1" "s2_checkpoint" "s2_sleep" "s2_delete2" "s1_delete_hung" "s2_checkpoint" "s2_sleep" "s2_reset"
+permutation "s1_setup" "s2_setup" "s2_delete1" "s2_checkpoint" "s2_delete2" "s1_delete_hung" "s2_checkpoint" "s2_reset"
