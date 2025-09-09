@@ -285,7 +285,7 @@ btree_lokey_stopevent_params(BTreeDescr *desc, OTuple lokey)
 
 /*
  * Loads next internal page and. Outputs page, start locator and offset.
- *.
+ *
  * In case of parallel scan the caller should hold a lock preventing the other workers from modifying
  * a page in a shared state and updating prevHikey.
  */
@@ -305,11 +305,6 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 	if (!O_TUPLE_IS_NULL(prevHikey))
 	{
 		if (!prev_leftmost_or_none) {
-			STOPEVENT(STOPEVENT_SEQ_SCAN_LOAD_INTERNAL_NONLEFTMOST_PAGE,
-				btree_lokey_stopevent_params(scan->desc, prevHikey));
-		}
-		else
-		{
 			STOPEVENT(STOPEVENT_SEQ_SCAN_LOAD_INTERNAL_PAGE,
 				btree_lokey_stopevent_params(scan->desc, prevHikey));
 		}

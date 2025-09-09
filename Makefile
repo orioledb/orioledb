@@ -129,35 +129,33 @@ REGRESSCHECKS = btree_sys_check \
 				trigger \
 				types \
 				rewind
-ISOLATIONCHECKS = btree_scan_on_merge
-#				  bitmap_hist_scan \
-#				  btree_iterate \
-#				  btree_print_backend_id \
-#				  btree_scan_on_merge \
-#				  btree_scan \
-#				  concurrent_update_delete \
-#				  fkeys \
-#				  included \
-#				  insert_fails \
-#				  ioc_deadlock \
-#				  ioc_lost_update \
-#				  isol_ddl \
-#				  isol_rc \
-#				  isol_rr \
-#				  isol_rr_bscan \
-#				  isol_rr_fk \
-#				  isol_rr_seqscan \
-#				  load_refind_page \
-#				  merge \
-#				  partition_move \
-#				  rightlink \
-#				  rll \
-#				  rll_deadlock \
-#				  rll_mix \
-#				  rll_subtrans \
-#				  table_lock_test \
-#				  concurrent_truncate \
-#				  uniq
+ISOLATIONCHECKS = bitmap_hist_scan \
+				  btree_iterate \
+				  btree_print_backend_id \
+				  btree_scan \
+				  concurrent_update_delete \
+				  fkeys \
+				  included \
+				  insert_fails \
+				  ioc_deadlock \
+				  ioc_lost_update \
+				  isol_ddl \
+				  isol_rc \
+				  isol_rr \
+				  isol_rr_bscan \
+				  isol_rr_fk \
+				  isol_rr_seqscan \
+				  load_refind_page \
+				  merge \
+				  partition_move \
+				  rightlink \
+				  rll \
+				  rll_deadlock \
+				  rll_mix \
+				  rll_subtrans \
+				  table_lock_test \
+				  concurrent_truncate \
+				  uniq
 TESTGRESCHECKS_PART_1 = test/t/checkpointer_test.py \
 						test/t/correlation_test.py \
 						test/t/eviction_bgwriter_test.py \
