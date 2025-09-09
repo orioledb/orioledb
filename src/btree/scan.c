@@ -584,7 +584,11 @@ get_current_downlink_key(BTreeSeqScan *scan,
 	}
 	else
 	{
-		Assert(O_TUPLE_IS_NULL(prevHiKey));
+		/*
+		 * It might happen that due to concurrent page merge, we're visiting
+		 * the leftmost page the second time.  In this case, prevHiKey is not
+		 * NULL, so there is no assertion here.
+		 */
 		clear_fixed_key(curKey);
 	}
 }
