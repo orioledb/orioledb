@@ -89,6 +89,10 @@ class RewindXidTest(BaseTest):
 		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		#		ev = int(c)
 		#		print(len, ev, len - ev)
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test;')),
+		    "[(10005,)]"
+		)
 
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
@@ -156,7 +160,10 @@ class RewindXidTest(BaseTest):
 		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		#		ev = int(c)
 		#		print(len, ev, len - ev)
-
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
+		    "[(10005,)]"
+		)
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
 		    (xid, invalidoxid))
@@ -231,7 +238,14 @@ class RewindXidTest(BaseTest):
 		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		#		ev = int(c)
 		#		print(len, ev, len - ev)
-
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test;')),
+		    "[(5005,)]"
+		)
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
+		    "[(5005,)]"
+		)
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
@@ -316,7 +330,10 @@ class RewindXidTest(BaseTest):
 		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		#		ev = int(c)
 		#		print(len, ev, len - ev)
-
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
+		    "[(20024,)]"
+		)
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
 		    (xid, invalidoxid))
@@ -404,6 +421,14 @@ class RewindXidTest(BaseTest):
 		    '1250'
 		],
 		                       stderr=sys.stderr)
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test;')),
+		    "[(20024,)]"
+		)
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
+		    "[(20024,)]"
+		)
 
 		#		a, *b = (node.execute(
 		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -412,7 +437,6 @@ class RewindXidTest(BaseTest):
 		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		#		ev = int(c)
 		#		print(len, ev, len - ev)
-
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
@@ -496,7 +520,10 @@ class RewindXidTest(BaseTest):
 		    '500'
 		],
 		                       stderr=sys.stderr)
-
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test;')),
+		    "[(10000,)]"
+		)
 		time.sleep(5)
 
 		#		a, *b = (node.execute(
@@ -589,7 +616,10 @@ class RewindXidTest(BaseTest):
 		    '625'
 		],
 		                       stderr=sys.stderr)
-
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test;')),
+		    "[(10016,)]"
+		)
 		#		a, *b = (node.execute(
 		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
 		#		len = int(a)
@@ -673,7 +703,6 @@ class RewindXidTest(BaseTest):
 		    '624'
 		],
 		                       stderr=sys.stderr)
-
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1, oxid1))
@@ -683,6 +712,10 @@ class RewindXidTest(BaseTest):
 		    '625'
 		],
 		                       stderr=sys.stderr)
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
+		    "[(10000,)]"
+		)
 
 		#		a, *b = (node.execute(
 		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -766,7 +799,6 @@ class RewindXidTest(BaseTest):
 		    '624'
 		],
 		                       stderr=sys.stderr)
-
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2, oxid2))
@@ -776,6 +808,10 @@ class RewindXidTest(BaseTest):
 		    '625'
 		],
 		                       stderr=sys.stderr)
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
+		    "[(10000,)]"
+		)
 
 		#		a, *b = (node.execute(
 		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -864,7 +900,6 @@ class RewindXidTest(BaseTest):
 		    '624'
 		],
 		                       stderr=sys.stderr)
-
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1, oxid1))
@@ -874,6 +909,10 @@ class RewindXidTest(BaseTest):
 		    '625'
 		],
 		                       stderr=sys.stderr)
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
+		    "[(40000,)]"
+		)
 
 		#		a, *b = (node.execute(
 		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -965,7 +1004,6 @@ class RewindXidTest(BaseTest):
 		    '624'
 		],
 		                       stderr=sys.stderr)
-
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2, oxid2))
@@ -975,6 +1013,10 @@ class RewindXidTest(BaseTest):
 		    '625'
 		],
 		                       stderr=sys.stderr)
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
+		    "[(40000,)]"
+		)
 
 		#		a, *b = (node.execute(
 		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -1305,7 +1347,6 @@ class RewindXidTest(BaseTest):
 		    '624'
 		],
 		                       stderr=sys.stderr)
-
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid1, oxid1))
@@ -1315,6 +1356,14 @@ class RewindXidTest(BaseTest):
 		    '625'
 		],
 		                       stderr=sys.stderr)
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test;')),
+		    "[(40000,)]"
+		)
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
+		    "[(40000,)]"
+		)
 
 		#		a, *b = (node.execute(
 		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
@@ -1422,7 +1471,6 @@ class RewindXidTest(BaseTest):
 		    '624'
 		],
 		                       stderr=sys.stderr)
-
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_set_complete(%d,%ld);\n" % (xid2, oxid2))
@@ -1432,6 +1480,14 @@ class RewindXidTest(BaseTest):
 		    '625'
 		],
 		                       stderr=sys.stderr)
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test;')),
+		    "[(40000,)]"
+		)
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
+		    "[(40000,)]"
+		)
 
 		#		a, *b = (node.execute(
 		#		    'postgres', 'select orioledb_get_rewind_queue_length();\n'))[0]
