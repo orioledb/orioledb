@@ -77,8 +77,7 @@ class RewindXidTest(BaseTest):
 		                       stderr=sys.stderr)
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test;')),
-		    "[(20,)]"
-		)
+		    "[(20,)]")
 
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
@@ -135,8 +134,7 @@ class RewindXidTest(BaseTest):
 		                       stderr=sys.stderr)
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
-		    "[(20,)]"
-		)
+		    "[(20,)]")
 
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
@@ -210,8 +208,7 @@ class RewindXidTest(BaseTest):
 		                       stderr=sys.stderr)
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
-		    "[(96,)]"
-		)
+		    "[(96,)]")
 
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
@@ -280,12 +277,10 @@ class RewindXidTest(BaseTest):
 		                       stderr=sys.stderr)
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test;')),
-		    "[(20,)]"
-		)
+		    "[(20,)]")
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
-		    "[(20,)]"
-		)
+		    "[(20,)]")
 
 		node.safe_psql(
 		    'postgres',
@@ -380,12 +375,10 @@ class RewindXidTest(BaseTest):
 		                       stderr=sys.stderr)
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test;')),
-		    "[(96,)]"
-		)
+		    "[(96,)]")
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
-		    "[(96,)]"
-		)
+		    "[(96,)]")
 
 		node.safe_psql(
 		    'postgres',
@@ -476,20 +469,18 @@ class RewindXidTest(BaseTest):
 		                       stderr=sys.stderr)
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test;')),
-		    "[(20,)]"
-		)
+		    "[(20,)]")
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
-		    "[(20,)]"
-		)
+		    "[(20,)]")
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_ddl;')),
-		    "[(15,)]"
-		)
+		    "[(15,)]")
 		self.assertEqual(
-		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap_ddl;')),
-		    "[(15,)]"
-		)
+		    str(
+		        node.execute('postgres',
+		                     'SELECT count(*) FROM o_test_heap_ddl;')),
+		    "[(15,)]")
 
 		node.safe_psql(
 		    'postgres',
@@ -586,20 +577,18 @@ class RewindXidTest(BaseTest):
 		                       stderr=sys.stderr)
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test;')),
-		    "[(20,)]"
-		)
+		    "[(20,)]")
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
-		    "[(20,)]"
-		)
+		    "[(20,)]")
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_ddl;')),
-		    "[(20,)]"
-		)
+		    "[(20,)]")
 		self.assertEqual(
-		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap_ddl;')),
-		    "[(20,)]"
-		)
+		    str(
+		        node.execute('postgres',
+		                     'SELECT count(*) FROM o_test_heap_ddl;')),
+		    "[(20,)]")
 
 		node.safe_psql('postgres', "DROP TABLE o_test_heap_ddl;\n")
 		node.safe_psql('postgres', "DROP TABLE o_test_ddl;\n")
@@ -676,12 +665,12 @@ class RewindXidTest(BaseTest):
 		                       stderr=sys.stderr)
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_ddl;')),
-		    "[(5,)]"
-		)
+		    "[(5,)]")
 		self.assertEqual(
-		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap_ddl;')),
-		    "[(5,)]"
-		)
+		    str(
+		        node.execute('postgres',
+		                     'SELECT count(*) FROM o_test_heap_ddl;')),
+		    "[(5,)]")
 
 		a, *b = (node.execute('postgres',
 		                      'select orioledb_get_current_oxid();\n'))[0]
@@ -702,12 +691,12 @@ class RewindXidTest(BaseTest):
 		                       stderr=sys.stderr)
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_ddl;')),
-		    "[(15,)]"
-		)
+		    "[(15,)]")
 		self.assertEqual(
-		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap_ddl;')),
-		    "[(15,)]"
-		)
+		    str(
+		        node.execute('postgres',
+		                     'SELECT count(*) FROM o_test_heap_ddl;')),
+		    "[(15,)]")
 
 		node.safe_psql(
 		    'postgres',
