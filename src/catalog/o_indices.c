@@ -837,7 +837,7 @@ cache_scan_tupdesc_and_slot(OIndexDescr *index_descr, OIndex *oIndex)
 	cur_attr = 0;
 	for (i = 0; i < nfields; i++)
 	{
-		if (duplicate != NIL && linitial_int(duplicate) == i)
+		if (duplicate != NIL && linitial_int(duplicate) == cur_attr)
 		{
 			int			src_attnum = lsecond_int(duplicate);
 
