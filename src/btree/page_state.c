@@ -941,7 +941,14 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 
 		/* Bump change‑counter if reads had been blocked */
 		if (O_PAGE_STATE_READ_IS_BLOCKED(state))
-			newState += PAGE_STATE_CHANGE_COUNT_ONE;
+		{
+			uint64		changeCount = (newState & PAGE_STATE_CHANGE_COUNT_MASK);
+
+			newState &= ~PAGE_STATE_CHANGE_COUNT_MASK;
+			changeCount += PAGE_STATE_CHANGE_COUNT_ONE;
+			changeCount &= PAGE_STATE_CHANGE_COUNT_MASK;
+			newState |= changeCount;
+		}
 
 		newState |= newTail;
 
