@@ -173,8 +173,8 @@ ucm_inc_recursive(UsageCountMap *map, int i, int32 prev, int32 next)
 
 	if (next != UCM_INVALID_LEVEL)
 	{
-		next_mask = UCM_LEVEL_MASK << (next * UCM_LEVEL_BITS),
-			next_one = 1 << (next * UCM_LEVEL_BITS);
+		next_mask = UCM_LEVEL_MASK << (next * UCM_LEVEL_BITS);
+		next_one = 1 << (next * UCM_LEVEL_BITS);
 	}
 	else
 	{
