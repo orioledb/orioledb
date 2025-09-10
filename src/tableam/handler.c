@@ -197,7 +197,7 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 		bridge_bound.row_keys = NULL;
 		bridge_bound.keys[0].value = tupleid;
 		bridge_bound.keys[0].type = TIDOID;
-		bridge_bound.keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
+		bridge_bound.keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		bridge_bound.keys[0].comparator = NULL;
 		csn = COMMITSEQNO_INPROGRESS;
 
@@ -2320,7 +2320,7 @@ get_keys_from_rowid(OIndexDescr *id, Datum pkDatum, OBTreeKeyBound *key,
 
 		key->keys[0].value = PointerGetDatum(p);
 		key->keys[0].type = TIDOID;
-		key->keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
+		key->keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		key->keys[0].comparator = NULL;
 
 		if (id->bridging)

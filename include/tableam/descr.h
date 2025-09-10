@@ -177,8 +177,7 @@ struct OIndexDescr
 };
 
 /*
- * ItemPointerGetOffsetNumber
- *		As above, but verifies that the item pointer looks valid.
+ * TODO: Remove usage of this function or document its purpose
  */
 static inline OffsetNumber
 OIndexKeyAttnumToTupleAttnum(BTreeKeyType keyType, OIndexDescr *idx, int attnum)

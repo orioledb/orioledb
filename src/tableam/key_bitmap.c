@@ -58,7 +58,7 @@ o_keybitmap_insert(RBTree *rbtree, uint64 value)
 
 	/*
 	 * For the moment, fill only the fields of node that will be looked at by
-	 * bm_rbt_combiner or bt_rbt_comparator.
+	 * bm_rbt_combiner or bm_rbt_comparator.
 	 */
 	node.key = value;
 	node.bitmap = NULL;
@@ -73,7 +73,7 @@ o_keybitmap_test(RBTree *rbtree, uint64 value)
 
 	/*
 	 * For the moment, fill only the fields of node that will be looked at by
-	 * bt_rbt_comparator.
+	 * bm_rbt_comparator.
 	 */
 	node.key = value;
 	node.bitmap = NULL;
@@ -219,7 +219,7 @@ o_keybitmap_get_next(RBTree *rbtree, uint64 prev, bool *found)
 
 	/*
 	 * For the moment, fill only the fields of node that will be looked at by
-	 * bt_rbt_comparator.
+	 * bm_rbt_comparator.
 	 */
 	lowNode.key = prev;
 	lowNode.bitmap = NULL;

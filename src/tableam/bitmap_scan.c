@@ -19,6 +19,7 @@
 #include "btree/page_chunks.h"
 #include "tableam/bitmap_scan.h"
 #include "tableam/index_scan.h"
+#include "tableam/tree.h"
 #include "tuple/slot.h"
 
 #include "access/relation.h"
@@ -31,15 +32,26 @@
 
 #include <math.h>
 
-typedef struct OBitmapScan
+
+typedef struct BitmapSeqScanArg
 {
 	OTableDescr *tbl_desc;
+	RBTree	   *bitmap;
+	TIDBitmap  *bridged_bitmap;
+} BitmapSeqScanArg;
+
+typedef struct OBitmapScan
+{
 	ScanState  *ss;
 	OSnapshot	oSnapshot;
 	MemoryContext cxt;
-	RBTree	   *saved_bitmap;
 	Oid			typeoid;
+	TBMIterator *tbmiterator;
+	TBMIterateResult *tbmres;
+	int			cur_tuple;
+	int			page_ntuples;
 	BTreeSeqScan *seq_scan;
+	BitmapSeqScanArg arg;
 } OBitmapScan;
 
 static bool o_bitmap_is_range_valid(OTuple low, OTuple high, void *arg);
@@ -144,23 +156,24 @@ primary_tuple_get_data(OTuple tuple, OIndexDescr *primary, bool onlyPkey)
 	FormData_pg_attribute *attr;
 	Datum		val;
 	bool		is_null;
+	BTreeKeyType keyType = onlyPkey ? BTreeKeyNonLeafKey : BTreeKeyLeafTuple;
+	TupleDesc	tupdesc = onlyPkey ? primary->nonLeafTupdesc : primary->leafTupdesc;
+	OTupleFixedFormatSpec *spec = onlyPkey ? &primary->nonLeafSpec : &primary->leafSpec;
 
 	Assert(primary->nFields == 1);
 
 	Assert(!O_TUPLE_IS_NULL(tuple));
 
-	attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, primary, 1);
-	attr = &primary->leafTupdesc->attrs[attnum - 1];
-	if (onlyPkey)
-		attnum = 1;
-	val = o_toast_nocachegetattr(tuple, attnum, primary->leafTupdesc,
-								 &primary->leafSpec, &is_null);
+	attnum = OIndexKeyAttnumToTupleAttnum(keyType, primary, 1);
+	attr = &tupdesc->attrs[attnum - 1];
+	val = o_toast_nocachegetattr(tuple, attnum, tupdesc, spec, &is_null);
 	return val_get_uint64(val, attr->atttypid);
 }
 
 static double
 o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
-				  BitmapIndexScanState *node, RBTree *bitmap)
+				  BitmapIndexScanState *node,
+				  RBTree *bitmap, TIDBitmap *tbm_result)
 {
 	OScanState	ostate = {0};
 	OTableDescr *descr;
@@ -255,8 +268,54 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 		{
 			uint64		data;
 
-			data = seconary_tuple_get_pk_data(tuple, indexDescr);
-			o_keybitmap_insert(bitmap, data);
+			if (!tbm_result)
+			{
+				data = seconary_tuple_get_pk_data(tuple, indexDescr);
+				o_keybitmap_insert(bitmap, data);
+			}
+			else
+			{
+				if (indexDescr->desc.type != oIndexPrimary)
+				{
+					OBTreeKeyBound bound;
+					OTuple		ptup;
+					OIndexDescr *primary = GET_PRIMARY(descr);
+					AttrNumber	attnum;
+					Datum		val;
+					bool		is_null;
+					TupleDesc	tupdesc = primary->leafTupdesc;
+					OTupleFixedFormatSpec *spec = &primary->leafSpec;
+					ItemPointer bridge_iptr;
+
+					/* fetch primary index key from tuple and search raw tuple */
+					o_fill_pindex_tuple_key_bound(&indexDescr->desc, tuple, &bound);
+
+					o_btree_load_shmem(&primary->desc);
+					ptup = o_btree_find_tuple_by_key(&primary->desc,
+													 (Pointer) &bound, BTreeKeyBound,
+													 &ostate.oSnapshot, NULL,
+													 mcxt, NULL);
+
+					/*
+					 * in concurrent DELETE/UPDATE it might happen, we should
+					 * to try fetch next tuple
+					 */
+					if (!O_TUPLE_IS_NULL(ptup))
+					{
+						attnum = primary->primaryIsCtid ? 2 : 1;
+						val = o_toast_nocachegetattr(ptup, attnum, tupdesc, spec, &is_null);
+						Assert(!is_null);
+						bridge_iptr = DatumGetItemPointer(val);
+						tbm_add_tuples(tbm_result, bridge_iptr, 1, false);
+						pfree(tuple.data);
+						tuple = ptup;
+					}
+				}
+				else
+				{
+					Assert(false);
+				}
+			}
 			nTuples += 1;
 		}
 	} while (!O_TUPLE_IS_NULL(tuple));
@@ -269,10 +328,148 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 	return nTuples;
 }
 
-static RBTree *
-o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
+static void
+exec_bitmap_index_state(OBitmapHeapPlanState *bitmap_state, PlanState *planstate,
+						RBTree **rbt_result, TIDBitmap **tbm_result)
 {
-	RBTree	   *result = NULL;
+	double		nTuples = 0;
+	BitmapIndexScanState *node;
+	Instrumentation *instrument;
+	OBTOptions *options;
+	ExprContext *econtext = bitmap_state->scan->ss->ps.ps_ExprContext;
+
+	node = (BitmapIndexScanState *) planstate;
+	instrument = node->ss.ps.instrument;
+	options = (OBTOptions *) node->biss_RelationDesc->rd_options;
+
+	if (node->biss_NumRuntimeKeys != 0)
+		ExecIndexEvalRuntimeKeys(econtext,
+								 node->biss_RuntimeKeys,
+								 node->biss_NumRuntimeKeys);
+	if (node->biss_NumArrayKeys != 0)
+		node->biss_RuntimeKeysReady =
+			ExecIndexEvalArrayKeys(econtext,
+								   node->biss_ArrayKeys,
+								   node->biss_NumArrayKeys);
+	else
+		node->biss_RuntimeKeysReady = true;
+
+	/* reset index scan */
+	if (node->biss_RuntimeKeysReady)
+		index_rescan(node->biss_ScanDesc,
+					 node->biss_ScanKeys, node->biss_NumScanKeys,
+					 NULL, 0);
+
+	if (instrument)
+		InstrStartNode(instrument);
+
+	if (node->biss_RelationDesc->rd_rel->relam != BTREE_AM_OID ||
+		(options && !options->orioledb_index))
+	{
+		bool		doscan;
+		IndexScanDesc scandesc;
+
+		if (*tbm_result == NULL)
+			*tbm_result = tbm_create(work_mem * 1024L, NULL);
+
+		/*
+		 * extract necessary information from index scan node
+		 */
+		scandesc = node->biss_ScanDesc;
+
+		/*
+		 * If we have runtime keys and they've not already been set up, do it
+		 * now. Array keys are also treated as runtime keys; note that if
+		 * ExecReScan returns with biss_RuntimeKeysReady still false, then
+		 * there is an empty array key so we should do nothing.
+		 */
+		if (!node->biss_RuntimeKeysReady &&
+			(node->biss_NumRuntimeKeys != 0 || node->biss_NumArrayKeys != 0))
+		{
+			ExecReScan((PlanState *) node);
+			doscan = node->biss_RuntimeKeysReady;
+		}
+		else
+			doscan = true;
+
+		while (doscan)
+		{
+			nTuples += (double) index_getbitmap(scandesc, *tbm_result);
+
+			CHECK_FOR_INTERRUPTS();
+
+			doscan = ExecIndexAdvanceArrayKeys(node->biss_ArrayKeys,
+											   node->biss_NumArrayKeys);
+			if (doscan)			/* reset index scan */
+				index_rescan(node->biss_ScanDesc,
+							 node->biss_ScanKeys, node->biss_NumScanKeys,
+							 NULL, 0);
+		}
+	}
+	else
+	{
+		if (*tbm_result == NULL && *rbt_result == NULL)
+			*rbt_result = o_keybitmap_create();
+		nTuples = o_index_getbitmap(bitmap_state, node, *rbt_result, *tbm_result);
+	}
+	if (instrument)
+		InstrStopNode(instrument, nTuples);
+}
+
+static void
+add_rbt_to_tbm(OBitmapHeapPlanState *bitmap_state, TIDBitmap *tbm, RBTree *rbt)
+{
+	BTreeSeqScan *seq_scan;
+	BitmapSeqScanArg arg;
+	OIndexDescr *primary = GET_PRIMARY(bitmap_state->scan->arg.tbl_desc);
+
+	arg.tbl_desc = bitmap_state->scan->arg.tbl_desc;
+	arg.bitmap = rbt;
+
+	seq_scan = make_btree_seq_scan_cb(&primary->desc,
+									  &bitmap_state->scan->oSnapshot,
+									  &bitmap_seq_scan_callbacks, &arg);
+
+	while (true)
+	{
+		OTuple		tuple;
+		BTreeLocationHint hint;
+		CommitSeqNo tupleCsn;
+
+		tuple = btree_seq_scan_getnext(seq_scan, bitmap_state->scan->cxt, &tupleCsn,
+									   &hint);
+
+		if (O_TUPLE_IS_NULL(tuple))
+		{
+			break;
+		}
+		else
+		{
+			AttrNumber	attnum;
+			Datum		val;
+			bool		is_null;
+			TupleDesc	tupdesc = primary->leafTupdesc;
+			OTupleFixedFormatSpec *spec = &primary->leafSpec;
+			ItemPointer bridge_iptr;
+
+			Assert(primary->nFields == 1);
+
+			attnum = primary->primaryIsCtid ? 2 : 1;
+			val = o_toast_nocachegetattr(tuple, attnum, tupdesc, spec, &is_null);
+			Assert(!is_null);
+			bridge_iptr = DatumGetItemPointer(val);
+			tbm_add_tuples(tbm, bridge_iptr, 1, false);
+		}
+	}
+	free_btree_seq_scan(seq_scan);
+}
+
+static void
+o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate,
+				  RBTree **rbt_result, TIDBitmap **tbm_result)
+{
+	Assert(rbt_result && tbm_result);
+	Assert(*rbt_result == NULL || *tbm_result == NULL);
 
 	switch (nodeTag(planstate))
 	{
@@ -288,15 +485,58 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 				for (i = 0; i < node->nplans; i++)
 				{
 					PlanState  *subnode = node->bitmapplans[i];
-					RBTree	   *subresult = o_exec_bitmapqual(bitmap_state,
-															  subnode);
+					RBTree	   *rbt_subresult = NULL;
+					TIDBitmap  *tbm_subresult = NULL;
 
-					if (result == NULL)
-						result = subresult; /* first subplan */
-					else
+					o_exec_bitmapqual(bitmap_state, subnode, &rbt_subresult, &tbm_subresult);
+
+					Assert(rbt_subresult || tbm_subresult);
+
+					if (tbm_subresult != NULL)
 					{
-						o_keybitmap_intersect(result, subresult);
-						o_keybitmap_free(subresult);
+						if (*tbm_result == NULL)
+						{
+							*tbm_result = tbm_subresult;	/* first subplan */
+						}
+						else
+						{
+							tbm_intersect(*tbm_result, tbm_subresult);
+							tbm_free(tbm_subresult);
+						}
+					}
+					else if (rbt_subresult != NULL)
+					{
+						if (*tbm_result == NULL)
+						{
+							if (*rbt_result == NULL)
+							{
+								*rbt_result = rbt_subresult;	/* first subplan */
+							}
+							else if (*rbt_result != NULL)
+							{
+								o_keybitmap_intersect(*rbt_result, rbt_subresult);
+								o_keybitmap_free(rbt_subresult);
+							}
+						}
+						else
+						{
+							TIDBitmap  *temp_bitmap = tbm_create(work_mem * 1024L, NULL);
+
+							Assert(*rbt_result == NULL);
+
+							add_rbt_to_tbm(bitmap_state, temp_bitmap, rbt_subresult);
+							tbm_intersect(*tbm_result, temp_bitmap);
+							tbm_free(temp_bitmap);
+						}
+					}
+
+					if (*tbm_result != NULL && *rbt_result != NULL)
+					{
+						TIDBitmap  *temp_bitmap = tbm_create(work_mem * 1024L, NULL);
+
+						add_rbt_to_tbm(bitmap_state, temp_bitmap, *rbt_result);
+						tbm_intersect(*tbm_result, temp_bitmap);
+						tbm_free(temp_bitmap);
 					}
 
 					/*
@@ -307,7 +547,8 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 					 * selectivity should make this case more likely to
 					 * occur.)
 					 */
-					if (o_keybitmap_is_empty(result))
+					if ((*rbt_result && o_keybitmap_is_empty(*rbt_result)) ||
+						(*tbm_result && tbm_is_empty(*tbm_result)))
 						break;
 				}
 				if (instrument)
@@ -326,31 +567,64 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 				for (i = 0; i < node->nplans; i++)
 				{
 					PlanState  *subnode = node->bitmapplans[i];
-					RBTree	   *subresult;
+					RBTree	   *rbt_subresult = NULL;
+					TIDBitmap  *tbm_subresult = NULL;
 
 					if (IsA(subnode, BitmapIndexScanState))
 					{
-						if (result == NULL) /* first subplan */
-						{
-							result = o_keybitmap_create();
-						}
+						rbt_subresult = *rbt_result;
+						tbm_subresult = *tbm_result;
+						Assert(!(rbt_subresult && tbm_subresult));
+						o_exec_bitmapqual(bitmap_state, subnode, &rbt_subresult, &tbm_subresult);
 
-						bitmap_state->scan->saved_bitmap = result;
-						subresult = o_exec_bitmapqual(bitmap_state, subnode);
-						Assert(result == subresult);
+						/*
+						 * In other situations union should be already made
+						 * inside of o_exec_bitmapqual
+						 */
+						if (*rbt_result == NULL && rbt_subresult != NULL)
+							*rbt_result = rbt_subresult;
+						if (*tbm_result == NULL && tbm_subresult != NULL)
+							*tbm_result = tbm_subresult;
 					}
 					else
 					{
 						/* standard implementation */
-						subresult = o_exec_bitmapqual(bitmap_state, subnode);
+						o_exec_bitmapqual(bitmap_state, subnode, &rbt_subresult, &tbm_subresult);
 
-						if (result == NULL)
-							result = subresult; /* first subplan */
-						else
+						if (tbm_subresult != NULL)
 						{
-							o_keybitmap_union(result, subresult);
-							o_keybitmap_free(subresult);
+							if (*tbm_result == NULL)
+								*tbm_result = tbm_subresult;	/* first subplan */
+							else
+							{
+								tbm_union(*tbm_result, tbm_subresult);
+								tbm_free(tbm_subresult);
+							}
 						}
+						else if (rbt_subresult != NULL)
+						{
+							if (*rbt_result == NULL)
+							{
+								*rbt_result = rbt_subresult;	/* first subplan */
+							}
+							else if (*tbm_result == NULL)
+							{
+								o_keybitmap_union(*rbt_result, rbt_subresult);
+								o_keybitmap_free(rbt_subresult);
+							}
+							else
+							{
+								add_rbt_to_tbm(bitmap_state, *tbm_result, rbt_subresult);
+								o_keybitmap_free(rbt_subresult);
+							}
+						}
+					}
+
+					if (*tbm_result != NULL && *rbt_result != NULL)
+					{
+						add_rbt_to_tbm(bitmap_state, *tbm_result, *rbt_result);
+						o_keybitmap_free(*rbt_result);
+						*rbt_result = NULL;
 					}
 				}
 				if (instrument)
@@ -358,115 +632,13 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 				break;
 			}
 		case T_BitmapIndexScanState:
-			{
-				double		nTuples = 0;
-				BitmapIndexScanState *node;
-				Instrumentation *instrument;
-				OBTOptions *options;
-				ExprContext *econtext = bitmap_state->scan->ss->ps.ps_ExprContext;
-
-				node = (BitmapIndexScanState *) planstate;
-				instrument = node->ss.ps.instrument;
-				options = (OBTOptions *) node->biss_RelationDesc->rd_options;
-
-				if (node->biss_NumRuntimeKeys != 0)
-					ExecIndexEvalRuntimeKeys(econtext,
-											 node->biss_RuntimeKeys,
-											 node->biss_NumRuntimeKeys);
-				if (node->biss_NumArrayKeys != 0)
-					node->biss_RuntimeKeysReady =
-						ExecIndexEvalArrayKeys(econtext,
-											   node->biss_ArrayKeys,
-											   node->biss_NumArrayKeys);
-				else
-					node->biss_RuntimeKeysReady = true;
-
-				/* reset index scan */
-				if (node->biss_RuntimeKeysReady)
-					index_rescan(node->biss_ScanDesc,
-								 node->biss_ScanKeys, node->biss_NumScanKeys,
-								 NULL, 0);
-
-				if (instrument)
-					InstrStartNode(instrument);
-
-				if (bitmap_state->scan->saved_bitmap)
-				{
-					result = bitmap_state->scan->saved_bitmap;
-					/* reset for next time */
-					bitmap_state->scan->saved_bitmap = NULL;
-				}
-				else
-				{
-					result = o_keybitmap_create();
-				}
-
-				if (node->biss_RelationDesc->rd_rel->relam != BTREE_AM_OID ||
-					(options && !options->orioledb_index))
-				{
-					TIDBitmap  *bridged_bitmap = tbm_create(work_mem * 1024L, NULL);
-					TBMIterator *tbmiterator;
-					TBMIterateResult *tbmres;
-					OIndexDescr *bridge = bitmap_state->scan->tbl_desc->bridge;
-					CommitSeqNo tupleCsn;
-					ItemPointerData iptr;
-
-					nTuples = (double) index_getbitmap(node->biss_ScanDesc, bridged_bitmap);
-
-					tbmiterator = tbm_begin_iterate(bridged_bitmap);
-
-					while ((tbmres = tbm_iterate(tbmiterator)) != NULL)
-					{
-						for (int i = 0; i < tbmres->ntuples; i++)
-						{
-							OBTreeKeyBound bridge_bound;
-							OTuple		bridge_tup;
-							uint64		data;
-
-							ItemPointerSet(&iptr, tbmres->blockno, tbmres->offsets[i]);
-
-							bridge_bound.nkeys = 1;
-							bridge_bound.keys[0].value = PointerGetDatum(&iptr);
-							bridge_bound.keys[0].type = TIDOID;
-							bridge_bound.keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
-							bridge_bound.keys[0].comparator = NULL;
-							bridge_bound.n_row_keys = 0;
-							bridge_bound.row_keys = NULL;
-
-							o_btree_load_shmem(&bridge->desc);
-
-							bridge_tup = o_btree_find_tuple_by_key(&bridge->desc,
-																   (Pointer) &bridge_bound, BTreeKeyBound,
-																   &o_in_progress_snapshot, &tupleCsn,
-																   CurrentMemoryContext, NULL);
-							if (!O_TUPLE_IS_NULL(bridge_tup))
-							{
-								data = seconary_tuple_get_pk_data(bridge_tup, bridge);
-								o_keybitmap_insert(result, data);
-
-								pfree(bridge_tup.data);
-							}
-						}
-					}
-
-					tbm_end_iterate(tbmiterator);
-					tbm_free(bridged_bitmap);
-				}
-				else
-				{
-					nTuples = o_index_getbitmap(bitmap_state, node, result);
-				}
-				if (instrument)
-					InstrStopNode(instrument, nTuples);
-				break;
-			}
+			exec_bitmap_index_state(bitmap_state, planstate, rbt_result, tbm_result);
+			break;
 		default:
 			elog(ERROR, "%s: unrecognized node type: %d",
 				 PG_FUNCNAME_MACRO, (int) nodeTag(planstate));
 			break;
 	}
-
-	return result;
 }
 
 OBitmapScan *
@@ -481,20 +653,160 @@ o_make_bitmap_scan(OBitmapHeapPlanState *bitmap_state, ScanState *ss,
 	scan->oSnapshot = *oSnapshot;
 	scan->cxt = cxt;
 	scan->ss = ss;
-	scan->tbl_desc = relation_get_descr(rel);
+	scan->arg.tbl_desc = relation_get_descr(rel);
 	bitmap_state->scan = scan;
-	scan->saved_bitmap = o_exec_bitmapqual(bitmap_state, bitmapqualplanstate);
-	scan->seq_scan = make_btree_seq_scan_cb(&GET_PRIMARY(scan->tbl_desc)->desc,
-											&scan->oSnapshot,
-											&bitmap_seq_scan_callbacks, scan);
+	o_exec_bitmapqual(bitmap_state, bitmapqualplanstate,
+					  &scan->arg.bitmap,
+					  &scan->arg.bridged_bitmap);
+
+	if (scan->arg.bitmap)
+	{
+		scan->seq_scan = make_btree_seq_scan_cb(&GET_PRIMARY(scan->arg.tbl_desc)->desc,
+												&scan->oSnapshot,
+												&bitmap_seq_scan_callbacks, &scan->arg);
+	}
+	else
+	{
+		Assert(scan->arg.bridged_bitmap);
+		scan->tbmiterator = tbm_begin_iterate(scan->arg.bridged_bitmap);
+	}
+
 	return scan;
+}
+
+static void
+o_tbmiterator_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
+{
+	OIndexDescr *bridge = scan->arg.tbl_desc->bridge;
+
+	scan->cur_tuple = 0;
+	scan->page_ntuples = 0;
+
+	if (scan->arg.bitmap)
+		o_keybitmap_free(scan->arg.bitmap);
+	scan->arg.bitmap = o_keybitmap_create();
+	if (scan->seq_scan)
+		free_btree_seq_scan(scan->seq_scan);
+	scan->seq_scan = make_btree_seq_scan_cb(&GET_PRIMARY(scan->arg.tbl_desc)->desc,
+											&scan->oSnapshot,
+											&bitmap_seq_scan_callbacks, &scan->arg);
+	if (scan->tbmres->ntuples >= 0)
+	{
+		/*
+		 * Bitmap is non-lossy, so we just look through the offsets listed in
+		 * tbmres; but we have to follow any HOT chain starting at each such
+		 * offset.
+		 */
+		int			curoff;
+
+		scan->page_ntuples = scan->tbmres->ntuples;
+		for (curoff = 0; curoff < scan->tbmres->ntuples; curoff++)
+		{
+			OffsetNumber offnum = scan->tbmres->offsets[curoff];
+			ItemPointerData iptr;
+			OBTreeKeyBound bridge_bound;
+			OTuple		bridge_tup;
+			uint64		data;
+			CommitSeqNo tupleCsn;
+
+			ItemPointerSet(&iptr, scan->tbmres->blockno, offnum);
+
+			bridge_bound.nkeys = 1;
+			bridge_bound.keys[0].value = ItemPointerGetDatum(&iptr);
+			bridge_bound.keys[0].type = TIDOID;
+			bridge_bound.keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
+			bridge_bound.keys[0].comparator = NULL;
+			bridge_bound.n_row_keys = 0;
+			bridge_bound.row_keys = NULL;
+
+			o_btree_load_shmem(&bridge->desc);
+
+			bridge_tup = o_btree_find_tuple_by_key(&bridge->desc,
+												   (Pointer) &bridge_bound, BTreeKeyBound,
+												   &o_in_progress_snapshot, &tupleCsn,
+												   CurrentMemoryContext, NULL);
+
+			if (!O_TUPLE_IS_NULL(bridge_tup))
+			{
+				data = seconary_tuple_get_pk_data(bridge_tup, bridge);
+				o_keybitmap_insert(scan->arg.bitmap, data);
+
+				pfree(bridge_tup.data);
+			}
+		}
+	}
+	else
+	{
+		/*
+		 * Bitmap is lossy, so we must examine each line pointer on the page.
+		 */
+
+		OTableDescr *tbl_descr = scan->arg.tbl_desc;
+		BTreeIterator *it;
+		ItemPointerData start_iptr;
+		ItemPointerData end_iptr;
+		OBTreeKeyBound start_bound;
+		OBTreeKeyBound end_bound;
+		TupleTableSlot *primarySlot;
+		ExprContext *tup_econtext = bitmap_state->scan->ss->ps.ps_ExprContext;
+		CommitSeqNo tupleCsn;
+
+		ItemPointerSet(&start_iptr, scan->tbmres->blockno, 0);
+		start_bound.nkeys = 1;
+		start_bound.keys[0].value = ItemPointerGetDatum(&start_iptr);
+		start_bound.keys[0].type = TIDOID;
+		start_bound.keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
+		start_bound.keys[0].comparator = bridge->fields[0].comparator;
+		start_bound.n_row_keys = 0;
+		start_bound.row_keys = NULL;
+
+		ItemPointerSet(&end_iptr, scan->tbmres->blockno, MaxOffsetNumber);
+		end_bound.nkeys = 1;
+		end_bound.keys[0].value = ItemPointerGetDatum(&end_iptr);
+		end_bound.keys[0].type = TIDOID;
+		end_bound.keys[0].flags = O_VALUE_BOUND_UPPER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
+		end_bound.keys[0].comparator = bridge->fields[0].comparator;
+		end_bound.n_row_keys = 0;
+		end_bound.row_keys = NULL;
+
+		o_btree_load_shmem(&bridge->desc);
+		it = o_btree_iterator_create(&bridge->desc, (Pointer) &start_bound, BTreeKeyBound,
+									 &o_in_progress_snapshot, ForwardScanDirection);
+		primarySlot = MakeSingleTupleTableSlot(tbl_descr->tupdesc, &TTSOpsOrioleDB);
+
+		do
+		{
+			OTuple		tup = o_btree_iterator_fetch(it, &tupleCsn,
+													 (Pointer) &end_bound,
+													 BTreeKeyBound, true,
+													 NULL);
+			uint64		data;
+
+			if (O_TUPLE_IS_NULL(tup))
+				break;
+
+			data = seconary_tuple_get_pk_data(tup, bridge);
+			o_keybitmap_insert(scan->arg.bitmap, data);
+			scan->page_ntuples++;
+
+			pfree(tup.data);
+			ExecClearTuple(primarySlot);
+			MemoryContextReset(tup_econtext->ecxt_per_tuple_memory);
+		} while (true);
+
+		ExecDropSingleTupleTableSlot(primarySlot);
+		btree_iterator_free(it);
+	}
 }
 
 TupleTableSlot *
 o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 {
-	bool		valid = false;
+	bool		fetched;
 	TupleTableSlot *slot = NULL;
+	OCustomScanState *ocstate = (OCustomScanState *) node;
+	OBitmapHeapPlanState *bitmap_state =
+		(OBitmapHeapPlanState *) ocstate->o_plan_state;
 
 	do
 	{
@@ -503,51 +815,102 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 		MemoryContext tupleCxt = node->ss.ss_ScanTupleSlot->tts_mcxt;
 		CommitSeqNo tupleCsn;
 
-		tuple = btree_seq_scan_getnext(scan->seq_scan, tupleCxt, &tupleCsn,
-									   &hint);
+		fetched = false;
 
-		if (O_TUPLE_IS_NULL(tuple))
+		if (scan->tbmiterator != NULL && scan->tbmres == NULL)
 		{
-			slot = ExecClearTuple(node->ss.ss_ScanTupleSlot);
-			valid = true;
-		}
-		else
-		{
-			OTableDescr *descr;
-			uint64		value;
+			scan->tbmres = tbm_iterate(scan->tbmiterator);
 
-			descr = relation_get_descr(node->ss.ss_currentRelation);
-			value = primary_tuple_get_data(tuple, GET_PRIMARY(descr), false);
-
-			if (o_keybitmap_test(scan->saved_bitmap, value))
+			if (scan->tbmres == NULL)
 			{
-				TupleTableSlot *scan_slot;
-				MemoryContext oldcxt;
+				slot = ExecClearTuple(node->ss.ss_ScanTupleSlot);
+				fetched = true;
+			}
 
-				slot = node->ss.ss_ScanTupleSlot;
-				oldcxt = MemoryContextSwitchTo(slot->tts_mcxt);
-				scan_slot = MakeSingleTupleTableSlot(descr->tupdesc,
-													 &TTSOpsOrioleDB);
-				MemoryContextSwitchTo(oldcxt);
-				tts_orioledb_store_tuple(scan_slot, tuple,
-										 descr, tupleCsn,
-										 PrimaryIndexNumber,
-										 true, &hint);
+			if (!fetched)
+				o_tbmiterator_next_page(scan, bitmap_state);
+		}
 
-				slot = scan_slot;
-				valid = true;
+		if (!fetched)
+		{
+			Assert(scan->seq_scan);
+
+			tuple = btree_seq_scan_getnext(scan->seq_scan, tupleCxt, &tupleCsn,
+										   &hint);
+
+			if (O_TUPLE_IS_NULL(tuple))
+			{
+				slot = ExecClearTuple(node->ss.ss_ScanTupleSlot);
+				fetched = true;
+			}
+			else
+			{
+				OTableDescr *descr;
+				uint64		value;
+
+				descr = relation_get_descr(node->ss.ss_currentRelation);
+				value = primary_tuple_get_data(tuple, GET_PRIMARY(descr), false);
+
+				if (o_keybitmap_test(scan->arg.bitmap, value))
+				{
+					TupleTableSlot *scan_slot;
+					MemoryContext oldcxt;
+
+					slot = node->ss.ss_ScanTupleSlot;
+					oldcxt = MemoryContextSwitchTo(slot->tts_mcxt);
+					scan_slot = MakeSingleTupleTableSlot(descr->tupdesc,
+														 &TTSOpsOrioleDB);
+					MemoryContextSwitchTo(oldcxt);
+					tts_orioledb_store_tuple(scan_slot, tuple,
+											 descr, tupleCsn,
+											 PrimaryIndexNumber,
+											 true, &hint);
+					if (scan->tbmres && scan->tbmres->recheck)
+					{
+						ExprContext *tup_econtext = bitmap_state->scan->ss->ps.ps_ExprContext;
+						ExprState  *bitmapqualorig_state;
+
+						bitmapqualorig_state = ExecInitQual(bitmap_state->bitmapqualorig, NULL);
+
+						slot_getallattrs(scan_slot);
+						tup_econtext->ecxt_scantuple = scan_slot;
+
+						if (!ExecQual((ExprState *) bitmapqualorig_state, tup_econtext))
+						{
+							pfree(tuple.data);
+							slot = ExecClearTuple(node->ss.ss_ScanTupleSlot);
+						}
+						else
+						{
+							slot = scan_slot;
+							fetched = true;
+						}
+					}
+					else
+					{
+						slot = scan_slot;
+						fetched = true;
+					}
+				}
+
+				if (scan->tbmres)
+				{
+					scan->cur_tuple++;
+					if (scan->cur_tuple >= scan->page_ntuples)
+						scan->tbmres = NULL;
+				}
 			}
 		}
 
-		if (!valid)
+		if (!fetched)
 			InstrCountFiltered2(node, 1);
 		else if (!TupIsNull(slot) && !o_exec_qual(node->ss.ps.ps_ExprContext,
 												  node->ss.ps.qual, slot))
 			InstrCountFiltered1(node, 1);
 
-	} while (!valid || (!TupIsNull(slot) &&
-						!o_exec_qual(node->ss.ps.ps_ExprContext,
-									 node->ss.ps.qual, slot)));
+	} while (!fetched || (!TupIsNull(slot) &&
+						  !o_exec_qual(node->ss.ps.ps_ExprContext,
+									   node->ss.ps.qual, slot)));
 	return slot;
 }
 
@@ -555,15 +918,15 @@ void
 o_free_bitmap_scan(OBitmapScan *scan)
 {
 	free_btree_seq_scan(scan->seq_scan);
-	o_keybitmap_free(scan->saved_bitmap);
+	o_keybitmap_free(scan->arg.bitmap);
 	pfree(scan);
 }
 
 static bool
 o_bitmap_is_range_valid(OTuple low, OTuple high, void *arg)
 {
-	OBitmapScan *bitmap_scan = (OBitmapScan *) arg;
-	OIndexDescr *primary = GET_PRIMARY(bitmap_scan->tbl_desc);
+	BitmapSeqScanArg *barg = (BitmapSeqScanArg *) arg;
+	OIndexDescr *primary = GET_PRIMARY(barg->tbl_desc);
 	uint64		lowValue,
 				highValue;
 
@@ -577,19 +940,19 @@ o_bitmap_is_range_valid(OTuple low, OTuple high, void *arg)
 	else
 		highValue = UINT64_MAX;
 
-	return o_keybitmap_range_is_valid(bitmap_scan->saved_bitmap,
+	return o_keybitmap_range_is_valid(barg->bitmap,
 									  lowValue, highValue);
 }
 
 static bool
 o_bitmap_get_next_key(OFixedKey *key, bool inclusive, void *arg)
 {
-	OBitmapScan *bitmap_scan = (OBitmapScan *) arg;
+	BitmapSeqScanArg *barg = (BitmapSeqScanArg *) arg;
 	bool		found;
 	uint64		prev_value = 0;
 	uint64		res_value;
 	OTupleHeader tuphdr;
-	OIndexDescr *primary = GET_PRIMARY(bitmap_scan->tbl_desc);
+	OIndexDescr *primary = GET_PRIMARY(barg->tbl_desc);
 
 	if (!O_TUPLE_IS_NULL(key->tuple))
 	{
@@ -602,7 +965,7 @@ o_bitmap_get_next_key(OFixedKey *key, bool inclusive, void *arg)
 		}
 	}
 
-	res_value = o_keybitmap_get_next(bitmap_scan->saved_bitmap, prev_value,
+	res_value = o_keybitmap_get_next(barg->bitmap, prev_value,
 									 &found);
 
 	if (found)
