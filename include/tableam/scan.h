@@ -33,6 +33,13 @@ typedef struct OPlanState
 	PlanState  *plan_state;
 } OPlanState;
 
+typedef struct OCustomScanState
+{
+	CustomScanState css;
+	OEACallsCounters eaCounters;
+	OPlanState *o_plan_state;
+} OCustomScanState;
+
 extern set_rel_pathlist_hook_type old_set_rel_pathlist_hook;
 
 extern void orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,

@@ -318,7 +318,7 @@ tuplesort_begin_orioledb_toast(OIndexDescr *toast,
 		sortKey->ssup_cxt = CurrentMemoryContext;
 		sortKey->ssup_collation = primary->fields[i].collation;
 		sortKey->ssup_nulls_first = primary->fields[i].nullfirst;
-		sortKey->ssup_attno = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, primary, i + 1);
+		sortKey->ssup_attno = i + 1;
 		sortKey->abbreviate = (i == 0);
 		sortKey->ssup_reverse = !primary->fields[i].ascending;
 		/* FIXME: no abbrev converter yet */

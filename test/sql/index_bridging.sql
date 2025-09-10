@@ -398,6 +398,18 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 SET LOCAL enable_indexscan = off;
 EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35];
+SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35];
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 20];
+SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 20];
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bitmap_scans WHERE j > ARRAY[26, 42];
+SELECT * FROM o_test_bitmap_scans WHERE j > ARRAY[26, 42];
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20];
+SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20];
+EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20] OR j > ARRAY[26, 42];
 SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20] OR j > ARRAY[26, 42];
 
@@ -691,6 +703,101 @@ select pg_size_pretty(pg_table_size('size_test'::regclass));
 select pg_size_pretty(pg_indexes_size('size_test'::regclass));
 select pg_size_pretty(pg_total_relation_size('size_test'::regclass));
 select pg_size_pretty(pg_table_size('size_test_i2_brin_idx'::regclass));
+
+CREATE TABLE tbl_with_pkey_bridged_toast (
+	i1 int,
+	i2 int,
+	i3 int,
+	i4 int,
+	t text,
+	PRIMARY KEY(i1)
+) USING orioledb;
+
+INSERT INTO tbl_with_pkey_bridged_toast
+	(SELECT id, id, id * 12, id * 17 % 31 + id*2, generate_string(id, 3000) FROM generate_series(11, 650) id);
+
+INSERT INTO tbl_with_pkey_bridged_toast
+	(SELECT id, id, id * 12, id * 17 % 20, generate_string(id, 3000) FROM generate_series(1, 10) id);
+CREATE INDEX tbl_with_pkey_bridged_toast_idx1 ON tbl_with_pkey_bridged_toast USING brin (i2) WITH (pages_per_range=1);
+CREATE INDEX tbl_with_pkey_bridged_toast_idx2 ON tbl_with_pkey_bridged_toast USING hash (i3);
+CREATE INDEX tbl_with_pkey_bridged_toast_idx3 ON tbl_with_pkey_bridged_toast USING btree (i4) WITH (orioledb_index=true);
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM tbl_with_pkey_bridged_toast
+	WHERE
+		i4 BETWEEN 8 AND 13
+		-- ;
+		OR
+		i2 BETWEEN 299 AND 305
+		-- ;
+		OR
+		i3 IN (7356, 6996, 7692)
+		-- ;
+		OR
+		i4 BETWEEN 13 AND 17
+		;
+	ORDER BY i2;
+SELECT * FROM tbl_with_pkey_bridged_toast
+	WHERE
+		i4 BETWEEN 8 AND 13
+		-- ;
+		OR
+		i2 BETWEEN 299 AND 305
+		-- ;
+		OR
+		i3 IN (7356, 6996, 7692)
+		-- ;
+		OR
+		i4 BETWEEN 13 AND 17
+		;
+	ORDER BY i2;
+COMMIT;
+
+CREATE TABLE bitmap_test
+(
+	id serial primary key,
+	i int4,
+	j int4,
+	k int4,
+	h int4
+) USING orioledb;
+
+INSERT INTO bitmap_test (i, j, k, h)
+	SELECT
+		(v * 1032 + 1854) % 2000,
+		(v * 5011 + 2159) % 2000,
+		(v * 5011 + 2102) % 2000,
+		(v * 4102 + 5857) % 2000
+		FROM generate_series(1,5000) v;
+
+CREATE INDEX bitmap_test_ix1 ON bitmap_test (i);
+CREATE INDEX bitmap_test_ix2 ON bitmap_test (j);
+CREATE INDEX bitmap_test_ix3 ON bitmap_test (k) WITH (orioledb_index=false);
+CREATE INDEX bitmap_test_ix4 ON bitmap_test (h);
+ANALYZE bitmap_test;
+
+SET enable_seqscan = off;
+
+CREATE VIEW bitmap_test_mv AS (SELECT * FROM bitmap_test WHERE i < 100 AND h < 100 OR j < 100 LIMIT 20);
+EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_mv;
+SELECT count(*) FROM bitmap_test_mv;
+SELECT * FROM bitmap_test_mv;
+DROP VIEW bitmap_test_mv;
+
+CREATE VIEW bitmap_test_mv AS (SELECT * FROM bitmap_test WHERE i < 100 AND j < 100 OR h < 100 LIMIT 20);
+EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_mv;
+SELECT count(*) FROM bitmap_test_mv;
+SELECT * FROM bitmap_test_mv;
+DROP VIEW bitmap_test_mv;
+
+CREATE VIEW bitmap_test_mv AS (SELECT * FROM bitmap_test WHERE i < 100 AND j < 100 AND k < 200 OR h < 100 LIMIT 20);
+EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_mv;
+SELECT count(*) FROM bitmap_test_mv;
+SELECT * FROM bitmap_test_mv;
+DROP VIEW bitmap_test_mv;
+
+RESET enable_seqscan;
 
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
