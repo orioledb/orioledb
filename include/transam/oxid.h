@@ -113,6 +113,8 @@ extern XLogRecPtr oxid_get_xlog_ptr(OXid oxid);
 extern void oxid_match_snapshot(OXid oxid, OSnapshot *snapshot,
 								CommitSeqNo *outCsn, XLogRecPtr *outPtr);
 extern void fill_current_oxid_osnapshot(OXid *oxid, OSnapshot *snapshot);
+extern void fill_current_oxid_osnapshot_no_check(OXid *oxid,
+												 OSnapshot *snapshot);
 extern int	oxid_get_procnum(OXid oxid);
 extern bool xid_is_finished(OXid xid);
 extern bool xid_is_finished_for_everybody(OXid xid);

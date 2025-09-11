@@ -21,6 +21,7 @@
 #include "catalog/o_indices.h"
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
+#include "storage/lockdefs.h"
 #include "tableam/operations.h"
 #include "catalog/pg_am.h"
 #include "tableam/toast.h"
@@ -1044,9 +1045,22 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			foreach(lc, relations)
 			{
 				VacuumRelation *vrel = lfirst_node(VacuumRelation, lc);
-				Relation	rel = relation_open(vrel->oid, AccessShareLock);
-				bool		orioledb = is_orioledb_rel(rel);
+				Relation	rel;
+				bool		orioledb;
 
+				if (options & VACOPT_SKIP_LOCKED)
+				{
+					if (ConditionalLockRelationOid(vrel->oid, AccessShareLock))
+						rel = relation_open(vrel->oid, NoLock);
+					else
+						continue;
+				}
+				else
+				{
+					rel = relation_open(vrel->oid, AccessShareLock);
+				}
+
+				orioledb = is_orioledb_rel(rel);
 				if (orioledb)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -2894,7 +2908,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 		Assert(OidIsValid(objectId));
 
-		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+		fill_current_oxid_osnapshot_no_check(&oxid, &oSnapshot);
 
 		o_tables_drop_columns_by_type(oxid, oSnapshot.csn, objectId);
 
