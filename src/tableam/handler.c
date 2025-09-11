@@ -497,7 +497,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &marg.csn, NULL, NULL);
 
 	mres = o_tbl_delete(relation, descr, &pkey, oxid, cid,
-						oSnapshot.csn, &hint, &marg);
+						marg.csn, &hint, &marg);
 
 	if (mres.self_modified)
 	{
@@ -597,7 +597,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 											   INDEX_ATTR_BITMAP_KEY);
 
 	mres = o_tbl_update(descr, slot, &old_pkey, relation, oxid, cid,
-						oSnapshot.csn, &hint, &marg, bridge_ctid);
+						marg.csn, &hint, &marg, bridge_ctid);
 
 	if (mres.self_modified)
 	{
