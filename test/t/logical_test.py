@@ -128,6 +128,7 @@ class LogicalTest(BaseTest):
 			publisher.start()
 
 			subscriber = self.getSubsriber()
+
 			with subscriber.start() as subscriber:
 				create_sql = """
 					CREATE EXTENSION IF NOT EXISTS orioledb;
