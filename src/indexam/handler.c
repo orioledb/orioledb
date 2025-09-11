@@ -505,6 +505,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	OTuple		tuple;
 	CommitSeqNo csn;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
+	int			ctid_off = 0;
 
 	if (options && !options->orioledb_index)
 	{
@@ -564,7 +565,12 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	}
 	Assert(ix_num < descr->nIndices);
 
-	if (index_descr->leafTupdesc->natts != rel->rd_att->natts)
+	if (index_descr->primaryIsCtid)
+		ctid_off++;
+	if (index_descr->bridging)
+		ctid_off++;
+
+	if (index_descr->leafTupdesc->natts - ctid_off <= rel->rd_att->natts)
 	{
 		/* Remove duplicates like we do in orioledb tables */
 		int			skipped = 0;
