@@ -1385,11 +1385,7 @@ oxid_match_snapshot(OXid oxid, OSnapshot *snapshot,
 void
 fill_current_oxid_osnapshot(OXid *oxid, OSnapshot *snapshot)
 {
-	if (XactIsoLevel == XACT_SERIALIZABLE)
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("orioledb does not support SERIALIZABLE isolation level")),
-				errdetail("Stay tuned, it will be added in future releases."));
+	o_check_isolation_level();
 
 	if (ActiveSnapshotSet())
 	{

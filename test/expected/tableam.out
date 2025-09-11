@@ -36,6 +36,16 @@ CREATE INDEX o_tableam1_ix_options ON o_tableam1 (value) WITH (compression = on)
 ERROR:  unrecognized parameter "compression"
 ALTER TABLE o_tableam1 ADD EXCLUDE USING btree (value WITH =);
 ERROR:  exclusion indices are not supported.
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+SELECT * FROM o_tableam1;
+ERROR:  orioledb does not support SERIALIZABLE isolation level
+DETAIL:  Stay tuned, it will be added in future releases.
+ROLLBACK;
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+UPDATE o_tableam1 SET value = 'value';
+ERROR:  orioledb does not support SERIALIZABLE isolation level
+DETAIL:  Stay tuned, it will be added in future releases.
+ROLLBACK;
 SELECT orioledb_tbl_indices('o_tableam1'::regclass);
               orioledb_tbl_indices              
 ------------------------------------------------

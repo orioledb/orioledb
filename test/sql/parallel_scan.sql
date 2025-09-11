@@ -101,7 +101,7 @@ CREATE TABLE o_test_o_scan_register (
 
 INSERT INTO o_test_o_scan_register (val_1, val_2) VALUES ('A', 0), ('B', 0);
 
-BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
 SELECT orioledb_parallel_debug_start();
 
 EXPLAIN (COSTS OFF) SELECT val_1, val_2 FROM o_test_o_scan_register

@@ -31,7 +31,6 @@ session "s1"
 
 step "s1_begin_1" { BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED; }
 step "s1_begin_2" { BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ; }
-step "s1_begin_3" { BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE; }
 
 step "s1_merge_1" { MERGE INTO o_test_1 t
                     USING o_test_2 s
@@ -98,7 +97,6 @@ session "s2"
 
 step "s2_begin_1" { BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED; }
 step "s2_begin_2" { BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ; }
-step "s2_begin_3" { BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE; }
 
 step "s2_commit" { COMMIT; }
 
@@ -159,25 +157,25 @@ step "s2_merge_5" { MERGE INTO o_test_1 t
 
 permutation "s1_begin_2" "s1_merge_1" "s2_begin_1" "s2_select_1" "s2_select_2" "s1_commit" "s2_select_1" "s2_select_2" "s2_commit"
 permutation "s1_begin_2" "s1_merge_2" "s2_begin_2" "s2_select_1" "s2_select_2" "s1_commit" "s2_select_1" "s2_select_2" "s2_commit"
-permutation "s1_begin_2" "s1_merge_3" "s2_begin_3" "s2_select_1" "s2_select_2" "s1_commit" "s2_select_1" "s2_select_2" "s2_commit"
+permutation "s1_begin_2" "s1_merge_3" "s2_begin_2" "s2_select_1" "s2_select_2" "s1_commit" "s2_select_1" "s2_select_2" "s2_commit"
 permutation "s1_begin_2" "s1_merge_4" "s2_begin_1" "s2_select_1" "s2_select_2" "s1_commit" "s2_select_1" "s2_select_2" "s2_commit"
 
 permutation "s1_begin_2" "s1_merge_1" "s2_begin_2" "s2_select_1" "s2_select_2" "s1_commit"  "s2_select_1" "s2_select_2" "s2_commit"
-permutation "s1_begin_2" "s1_merge_2" "s2_begin_3" "s2_select_1" "s2_select_2" "s1_commit" "s2_select_1" "s2_select_2" "s2_commit"
+permutation "s1_begin_2" "s1_merge_2" "s2_begin_2" "s2_select_1" "s2_select_2" "s1_commit" "s2_select_1" "s2_select_2" "s2_commit"
 permutation "s1_begin_2" "s1_merge_3" "s2_begin_1" "s2_select_1" "s2_select_2" "s1_commit" "s2_select_1" "s2_select_2" "s2_commit"
 permutation "s1_begin_2" "s1_merge_4" "s2_begin_2" "s2_select_1" "s2_select_2" "s1_commit" "s2_select_1" "s2_select_2" "s2_commit"
-permutation "s1_begin_2" "s1_merge_3" "s2_begin_3" "s2_select_1" "s2_select_2" "s1_commit" "s2_select_1" "s2_select_2" "s2_commit"
+permutation "s1_begin_2" "s1_merge_3" "s2_begin_2" "s2_select_1" "s2_select_2" "s1_commit" "s2_select_1" "s2_select_2" "s2_commit"
 
-permutation "s1_begin_3" "s2_begin_3" "s1_merge_1" "s1_merge_2" "s1_merge_3" "s1_commit" "s2_commit"
-permutation "s1_begin_1" "s2_begin_3" "s1_merge_1" "s1_merge_2" "s1_merge_3" "s1_commit" "s2_commit"
+permutation "s1_begin_2" "s2_begin_2" "s1_merge_1" "s1_merge_2" "s1_merge_3" "s1_commit" "s2_commit"
+permutation "s1_begin_1" "s2_begin_2" "s1_merge_1" "s1_merge_2" "s1_merge_3" "s1_commit" "s2_commit"
 permutation "s1_begin_1" "s2_begin_1" "s1_merge_1" "s1_merge_2" "s1_merge_4" "s1_commit" "s2_commit"
 
 permutation "s2_begin_2" "s2_alter_add" "s1_begin_1" "s2_merge_3" "s2_rollback" "s1_select_1" "s1_select_2" "s1_commit"
 permutation "s1_begin_2" "s2_create_table" "s2_begin_1" "s2_merge_2" "s1_drop" "s2_commit" "s1_commit" "s2_drop_2"
-permutation "s1_begin_1" "s1_create_table_2" "s1_commit" "s1_begin_3" "s2_begin_1" "s2_merge_5" "s1_create_table" "s1_commit" "s2_commit" "s1_drop_2"
-permutation "s2_begin_1" "s2_update" "s2_merge_4" "s1_begin_3" "s1_alter_drop" "s2_commit" "s1_alter_add" "s1_commit"
+permutation "s1_begin_1" "s1_create_table_2" "s1_commit" "s1_begin_2" "s2_begin_1" "s2_merge_5" "s1_create_table" "s1_commit" "s2_commit" "s1_drop_2"
+permutation "s2_begin_1" "s2_update" "s2_merge_4" "s1_begin_2" "s1_alter_drop" "s2_commit" "s1_alter_add" "s1_commit"
 
-permutation "s2_begin_3" "s2_alter_rename" "s2_drop" "s1_begin_1"  "s2_merge_1" "s1_alter_rename" "s2_commit" "s1_update" "s1_commit"
+permutation "s2_begin_2" "s2_alter_rename" "s2_drop" "s1_begin_1"  "s2_merge_1" "s1_alter_rename" "s2_commit" "s1_update" "s1_commit"
 
 permutation "s1_begin_1" "s2_begin_1"
             "s2_update_2" "s1_select_1_2" "s2_select_1_2"

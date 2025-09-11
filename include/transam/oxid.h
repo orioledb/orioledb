@@ -56,8 +56,19 @@ typedef struct OSnapshot
 extern OSnapshot o_in_progress_snapshot;
 extern OSnapshot o_non_deleted_snapshot;
 
+static inline void
+o_check_isolation_level(void)
+{
+	if (XactIsoLevel == XACT_SERIALIZABLE)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("orioledb does not support SERIALIZABLE isolation level")),
+				errdetail("Stay tuned, it will be added in future releases."));
+}
+
 #define O_LOAD_SNAPSHOT(o_snapshot, snapshot) \
 	do { \
+		o_check_isolation_level(); \
 		(o_snapshot)->xmin = (snapshot)->csnSnapshotData.xmin; \
 		(o_snapshot)->csn = (snapshot)->csnSnapshotData.snapshotcsn; \
 		(o_snapshot)->xlogptr = (snapshot)->csnSnapshotData.xlogptr; \
@@ -67,6 +78,7 @@ extern OSnapshot o_non_deleted_snapshot;
 
 #define O_LOAD_SNAPSHOT_CSN(o_snapshot, csnValue) \
 	do { \
+		o_check_isolation_level(); \
 		(o_snapshot)->xmin = 0; \
 		(o_snapshot)->csn = (csnValue); \
 		(o_snapshot)->xlogptr = InvalidXLogRecPtr; \

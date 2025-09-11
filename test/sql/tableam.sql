@@ -28,6 +28,12 @@ CREATE TABLE o_tableam1
 CREATE INDEX CONCURRENTLY o_tableam1_ix_concurrently ON o_tableam1 (key);
 CREATE INDEX o_tableam1_ix_options ON o_tableam1 (value) WITH (compression = on);
 ALTER TABLE o_tableam1 ADD EXCLUDE USING btree (value WITH =);
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+SELECT * FROM o_tableam1;
+ROLLBACK;
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+UPDATE o_tableam1 SET value = 'value';
+ROLLBACK;
 
 SELECT orioledb_tbl_indices('o_tableam1'::regclass);
 
