@@ -1383,10 +1383,8 @@ oxid_match_snapshot(OXid oxid, OSnapshot *snapshot,
 }
 
 void
-fill_current_oxid_osnapshot(OXid *oxid, OSnapshot *snapshot)
+fill_current_oxid_osnapshot_no_check(OXid *oxid, OSnapshot *snapshot)
 {
-	o_check_isolation_level();
-
 	if (ActiveSnapshotSet())
 	{
 		Snapshot	activeSnapshot = GetActiveSnapshot();
@@ -1402,6 +1400,13 @@ fill_current_oxid_osnapshot(OXid *oxid, OSnapshot *snapshot)
 		snapshot->xmin = InvalidXLogRecPtr;
 	}
 	*oxid = get_current_oxid();
+}
+
+void
+fill_current_oxid_osnapshot(OXid *oxid, OSnapshot *snapshot)
+{
+	o_check_isolation_level();
+	fill_current_oxid_osnapshot_no_check(oxid, snapshot);
 }
 
 int
