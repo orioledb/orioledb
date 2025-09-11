@@ -128,12 +128,7 @@ class LogicalTest(BaseTest):
 		with self.node as publisher:
 			publisher.start()
 
-			baseDir = mkdtemp(prefix=self.myName + '_tgsb_')
-			subscriber = testgres.get_new_node('subscriber',
-			                                   port=self.getBasePort() + 1,
-			                                   base_dir=baseDir)
-			subscriber.init(["--no-locale", "--encoding=UTF8"])
-			subscriber.append_conf(shared_preload_libraries='orioledb')
+			subscriber = self.initNode('tgsb', 'subscriber')
 			subscriber.append_conf(wal_level='logical')
 
 			with subscriber.start() as subscriber:
