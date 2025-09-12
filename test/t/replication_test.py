@@ -313,6 +313,47 @@ class ReplicationTest(BaseTest):
 
 				self.assertEqual(con2.execute("TABLE o_test"), [])
 
+	def test_replication_simple_truncate(self):
+		with self.node as master:
+			master.start()
+			test_data = (
+			    ("CREATE TABLE o_test (id int) USING orioledb;",
+			     "ctid as primary key"),
+			    ("CREATE TABLE o_test (id int primary key) USING orioledb;",
+			     "explicit primary key"),
+			)
+
+			check_stmt = "SELECT COUNT(*) FROM o_test;"
+
+			master.execute("CREATE EXTENSION orioledb;")
+
+			# create a backup
+			with self.getReplica().start() as replica:
+				for test in test_data:
+					master.safe_psql("DROP TABLE IF EXISTS o_test;" + test[0])
+					master.safe_psql("INSERT INTO o_test VALUES(1);")
+
+					# wait for synchronization
+					self.catchup_orioledb(replica)
+					replica.poll_query_until(
+					    "SELECT orioledb_has_retained_undo();", expected=False)
+
+					self.assertEqual(1, replica.execute(check_stmt)[0][0])
+
+					master.execute("TRUNCATE o_test;")
+
+					self.catchup_orioledb(replica)
+					replica.poll_query_until(
+					    "SELECT orioledb_has_retained_undo();", expected=False)
+
+					self.assertEqual(0,
+					                 master.execute(check_stmt)[0][0],
+					                 "Empty on master: " + test[1])
+
+					self.assertEqual(0,
+					                 replica.execute(check_stmt)[0][0],
+					                 "Empty on replica:" + test[1])
+
 	def test_replication_non_root_eviction(self):
 		with self.node as master:
 			self.node.append_conf(
