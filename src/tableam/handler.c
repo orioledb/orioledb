@@ -791,7 +791,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 		 */
 		o_tables_drop_by_oids(old_oids, oxid, COMMITSEQNO_INPROGRESS);
 		o_tables_add(new_o_table, oxid, oSnapshot.csn);
-		o_tables_table_meta_unlock(new_o_table, old_o_table->oids.relnode);
+		o_tables_table_meta_unlock(new_o_table, InvalidOid);
 		o_table_free(new_o_table);
 
 		orioledb_free_rd_amcache(rel);
