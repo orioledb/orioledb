@@ -121,6 +121,7 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 (1 row)
 
 CREATE INDEX o_test_ix_ams_ix1 on o_test_ix_ams using btree (j) WITH (orioledb_index = off, deduplicate_items = off);
+WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 NOTICE:  index bridging is enabled for orioledb table 'o_test_ix_ams'
 DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
@@ -978,6 +979,7 @@ SELECT * FROM o_test_ix_ams ORDER BY j;
 
 COMMIT;
 CREATE INDEX o_test_ix_ams_ix2 on o_test_ix_ams using btree (k) WITH (orioledb_index = off, deduplicate_items = off);
+WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
                           orioledb_tbl_indices                          
@@ -1664,6 +1666,7 @@ CREATE TABLE o_test_bridging_with_regular_no_pkey (
 ) USING orioledb WITH (index_bridging);
 CREATE INDEX o_test_bridging_with_regular_no_pkey_ix1 on
 	o_test_bridging_with_regular_no_pkey using btree (j) WITH (orioledb_index = off);
+WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 CREATE INDEX o_test_bridging_with_regular_no_pkey_ix2 on
 	o_test_bridging_with_regular_no_pkey using btree (j);
@@ -1809,6 +1812,7 @@ CREATE TABLE o_test_bridging_with_regular_pkey (
 ) USING orioledb WITH (index_bridging);
 CREATE INDEX o_test_bridging_with_regular_pkey_ix1 on
 	o_test_bridging_with_regular_pkey using btree (j) WITH (orioledb_index = off);
+WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 CREATE INDEX o_test_bridging_with_regular_pkey_ix2 on
 	o_test_bridging_with_regular_pkey using btree (k);
@@ -1928,6 +1932,7 @@ CREATE INDEX o_test_bitmap_scans_ix2 on o_test_bitmap_scans using btree (j);
 CREATE INDEX o_test_bitmap_scans_ix3 on o_test_bitmap_scans using gin (j);
 CREATE INDEX o_test_bitmap_scans_ix4 on o_test_bitmap_scans using gist (p);
 CREATE INDEX o_test_bitmap_scans_ix5 on o_test_bitmap_scans using btree (j2) WITH (orioledb_index = off);
+WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 BEGIN;
 SET LOCAL enable_seqscan = off;
@@ -1963,6 +1968,76 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 SET LOCAL enable_indexscan = off;
 EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35];
+                     QUERY PLAN                     
+----------------------------------------------------
+ Custom Scan (o_scan) on o_test_bitmap_scans
+   Bitmap heap scan
+   Recheck Cond: (j = '{19,35}'::integer[])
+   ->  Bitmap Index Scan on o_test_bitmap_scans_ix1
+         Index Cond: (j = '{19,35}'::integer[])
+(5 rows)
+
+SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35];
+ i |    j    |   j2    |   p   
+---+---------+---------+-------
+ 2 | {19,35} | {68,97} | (7,7)
+(1 row)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 20];
+                     QUERY PLAN                     
+----------------------------------------------------
+ Custom Scan (o_scan) on o_test_bitmap_scans
+   Bitmap heap scan
+   Recheck Cond: (j <@ '{20,20}'::integer[])
+   ->  Bitmap Index Scan on o_test_bitmap_scans_ix3
+         Index Cond: (j <@ '{20,20}'::integer[])
+(5 rows)
+
+SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 20];
+ i | j | j2 | p 
+---+---+----+---
+(0 rows)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bitmap_scans WHERE j > ARRAY[26, 42];
+                     QUERY PLAN                     
+----------------------------------------------------
+ Custom Scan (o_scan) on o_test_bitmap_scans
+   Bitmap heap scan
+   Recheck Cond: (j > '{26,42}'::integer[])
+   ->  Bitmap Index Scan on o_test_bitmap_scans_ix2
+         Index Cond: (j > '{26,42}'::integer[])
+(5 rows)
+
+SELECT * FROM o_test_bitmap_scans WHERE j > ARRAY[26, 42];
+ i  |    j    |    j2    |    p    
+----+---------+----------+---------
+ 10 | {27,43} | {76,105} | (15,15)
+(1 row)
+
+EXPLAIN (COSTS OFF)
+	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20];
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_bitmap_scans
+   Bitmap heap scan
+   Recheck Cond: ((j = '{19,35}'::integer[]) OR (j <@ '{20,20}'::integer[]))
+   ->  BitmapOr
+         ->  Bitmap Index Scan on o_test_bitmap_scans_ix1
+               Index Cond: (j = '{19,35}'::integer[])
+         ->  Bitmap Index Scan on o_test_bitmap_scans_ix3
+               Index Cond: (j <@ '{20,20}'::integer[])
+(8 rows)
+
+SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20];
+ i |    j    |   j2    |   p   
+---+---------+---------+-------
+ 2 | {19,35} | {68,97} | (7,7)
+(1 row)
+
+EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20] OR j > ARRAY[26, 42];
                                                 QUERY PLAN                                                 
 -----------------------------------------------------------------------------------------------------------
@@ -1982,9 +2057,8 @@ SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20] O
  i  |    j    |    j2    |    p    
 ----+---------+----------+---------
   2 | {19,35} | {68,97}  | (7,7)
-  3 | {20,36} | {69,98}  | (8,8)
  10 | {27,43} | {76,105} | (15,15)
-(3 rows)
+(2 rows)
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_bitmap_scans
@@ -2034,6 +2108,7 @@ Indexes:
 Options: index_bridging=true
 
 CREATE INDEX o_test_index_bridging_options_ix2 ON o_test_index_bridging_options USING btree (i) WITH (orioledb_index = off);
+WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 \d+ o_test_index_bridging_options
                     Table "index_bridging.o_test_index_bridging_options"
@@ -2439,6 +2514,7 @@ SELECT * FROM o_test_non_index_bridging_options;
 (10 rows)
 
 CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (orioledb_index = off);
+WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 \d+ o_test_non_index_bridging_options
                   Table "index_bridging.o_test_non_index_bridging_options"
@@ -2633,6 +2709,7 @@ Indexes:
     "o_test_non_index_bridging_options_ix1" btree (i)
 
 CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (orioledb_index = off);
+WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 NOTICE:  index bridging is enabled for orioledb table 'o_test_non_index_bridging_options'
 DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
@@ -3243,6 +3320,7 @@ SELECT orioledb_tbl_structure('o_test_non_index_bridging_options'::regclass, 'ne
 (1 row)
 
 CREATE INDEX o_test_non_index_bridging_options_ix2 ON o_test_non_index_bridging_options USING btree (i) WITH (orioledb_index = off);
+WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 NOTICE:  index bridging is enabled for orioledb table 'o_test_non_index_bridging_options'
 DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
@@ -3353,6 +3431,7 @@ CREATE INDEX o_test_bridged_hash_btree_bitmap_scans_ix2
 	ON o_test_bridged_hash_btree_bitmap_scans USING hash (v);
 CREATE INDEX o_test_bridged_hash_btree_bitmap_scans_ix3
 	ON o_test_bridged_hash_btree_bitmap_scans USING btree (v) WITH (orioledb_index = off);
+WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 SELECT orioledb_tbl_indices('o_test_bridged_hash_btree_bitmap_scans'::regclass, true);
                  orioledb_tbl_indices                 
@@ -3505,10 +3584,12 @@ SELECT orioledb_tbl_indices('o_test_bridged_index_only_scan'::regclass, true);
 (1 row)
 
 CREATE INDEX o_test_bridged_index_only_scan_ix1 ON o_test_bridged_index_only_scan USING btree (t) WITH (orioledb_index = off);
+WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 NOTICE:  index bridging is enabled for orioledb table 'o_test_bridged_index_only_scan'
 DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
 CREATE INDEX o_test_bridged_index_only_scan_ix2 ON o_test_bridged_index_only_scan USING btree (id2) WITH (orioledb_index = off);
+WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 SELECT orioledb_tbl_indices('o_test_bridged_index_only_scan'::regclass, true);
                   orioledb_tbl_indices                  
@@ -3626,6 +3707,7 @@ SELECT orioledb_tbl_indices('o_test_toast_with_bridged'::regclass, true);
 (1 row)
 
 CREATE INDEX o_test_toast_with_bridged_ix1 ON o_test_toast_with_bridged USING btree (id) WITH (orioledb_index = off);
+WARNING:  using bridged btree index for orioledb
 DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
 NOTICE:  index bridging is enabled for orioledb table 'o_test_toast_with_bridged'
 DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
@@ -3826,9 +3908,264 @@ select pg_size_pretty(pg_table_size('size_test_i2_brin_idx'::regclass));
  48 kB
 (1 row)
 
+CREATE TABLE tbl_with_pkey_bridged_toast (
+	i1 int,
+	i2 int,
+	i3 int,
+	i4 int,
+	t text,
+	PRIMARY KEY(i1)
+) USING orioledb;
+INSERT INTO tbl_with_pkey_bridged_toast
+	(SELECT id, id, id * 12, id * 17 % 31 + id*2, generate_string(id, 3000) FROM generate_series(11, 650) id);
+INSERT INTO tbl_with_pkey_bridged_toast
+	(SELECT id, id, id * 12, id * 17 % 20, generate_string(id, 3000) FROM generate_series(1, 10) id);
+CREATE INDEX tbl_with_pkey_bridged_toast_idx1 ON tbl_with_pkey_bridged_toast USING brin (i2) WITH (pages_per_range=1);
+NOTICE:  index bridging is enabled for orioledb table 'tbl_with_pkey_bridged_toast'
+DETAIL:  index access method 'brin' is supported only via index bridging for OrioleDB table
+CREATE INDEX tbl_with_pkey_bridged_toast_idx2 ON tbl_with_pkey_bridged_toast USING hash (i3);
+CREATE INDEX tbl_with_pkey_bridged_toast_idx3 ON tbl_with_pkey_bridged_toast USING btree (i4) WITH (orioledb_index=true);
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM tbl_with_pkey_bridged_toast
+	WHERE
+		i4 BETWEEN 8 AND 13
+		-- ;
+		OR
+		i2 BETWEEN 299 AND 305
+		-- ;
+		OR
+		i3 IN (7356, 6996, 7692)
+		-- ;
+		OR
+		i4 BETWEEN 13 AND 17
+		;
+                                                                         QUERY PLAN                                                                         
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on tbl_with_pkey_bridged_toast
+   Bitmap heap scan
+   Recheck Cond: (((i4 >= 8) AND (i4 <= 13)) OR ((i2 >= 299) AND (i2 <= 305)) OR (i3 = ANY ('{7356,6996,7692}'::integer[])) OR ((i4 >= 13) AND (i4 <= 17)))
+   ->  BitmapOr
+         ->  Bitmap Index Scan on tbl_with_pkey_bridged_toast_idx3
+               Index Cond: ((i4 >= 8) AND (i4 <= 13))
+         ->  Bitmap Index Scan on tbl_with_pkey_bridged_toast_idx1
+               Index Cond: ((i2 >= 299) AND (i2 <= 305))
+         ->  Bitmap Index Scan on tbl_with_pkey_bridged_toast_idx2
+               Index Cond: (i3 = ANY ('{7356,6996,7692}'::integer[]))
+         ->  Bitmap Index Scan on tbl_with_pkey_bridged_toast_idx3
+               Index Cond: ((i4 >= 13) AND (i4 <= 17))
+(12 rows)
+
+	ORDER BY i2;
+ERROR:  syntax error at or near "ORDER"
+LINE 1: ORDER BY i2;
+        ^
+SELECT * FROM tbl_with_pkey_bridged_toast
+	WHERE
+		i4 BETWEEN 8 AND 13
+		-- ;
+		OR
+		i2 BETWEEN 299 AND 305
+		-- ;
+		OR
+		i3 IN (7356, 6996, 7692)
+		-- ;
+		OR
+		i4 BETWEEN 13 AND 17
+		;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block
+	ORDER BY i2;
+ERROR:  syntax error at or near "ORDER"
+LINE 1: ORDER BY i2;
+        ^
+COMMIT;
+CREATE TABLE bitmap_test
+(
+	id serial primary key,
+	i int4,
+	j int4,
+	k int4,
+	h int4
+) USING orioledb;
+INSERT INTO bitmap_test (i, j, k, h)
+	SELECT
+		(v * 1032 + 1854) % 2000,
+		(v * 5011 + 2159) % 2000,
+		(v * 5011 + 2102) % 2000,
+		(v * 4102 + 5857) % 2000
+		FROM generate_series(1,5000) v;
+CREATE INDEX bitmap_test_ix1 ON bitmap_test (i);
+CREATE INDEX bitmap_test_ix2 ON bitmap_test (j);
+CREATE INDEX bitmap_test_ix3 ON bitmap_test (k) WITH (orioledb_index=false);
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
+NOTICE:  index bridging is enabled for orioledb table 'bitmap_test'
+DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
+CREATE INDEX bitmap_test_ix4 ON bitmap_test (h);
+ANALYZE bitmap_test;
+SET enable_seqscan = off;
+CREATE VIEW bitmap_test_mv AS (SELECT * FROM bitmap_test WHERE i < 100 AND h < 100 OR j < 100 LIMIT 20);
+EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_mv;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Aggregate
+   ->  Limit
+         ->  Result
+               ->  Custom Scan (o_scan) on bitmap_test
+                     Bitmap heap scan
+                     Recheck Cond: (((i < 100) AND (h < 100)) OR (j < 100))
+                     ->  BitmapOr
+                           ->  BitmapAnd
+                                 ->  Bitmap Index Scan on bitmap_test_ix1
+                                       Index Cond: (i < 100)
+                                 ->  Bitmap Index Scan on bitmap_test_ix4
+                                       Index Cond: (h < 100)
+                           ->  Bitmap Index Scan on bitmap_test_ix2
+                                 Index Cond: (j < 100)
+(14 rows)
+
+SELECT count(*) FROM bitmap_test_mv;
+ count 
+-------
+    20
+(1 row)
+
+SELECT * FROM bitmap_test_mv;
+ id  |  i   | j  |  k   |  h   
+-----+------+----+------+------
+  77 | 1318 |  6 | 1949 | 1711
+  79 | 1382 | 28 | 1971 | 1915
+  81 | 1446 | 50 | 1993 |  119
+  83 | 1510 | 72 |   15 |  323
+  85 | 1574 | 94 |   37 |  527
+ 168 | 1230 |  7 | 1950 |  993
+ 170 | 1294 | 29 | 1972 | 1197
+ 172 | 1358 | 51 | 1994 | 1401
+ 174 | 1422 | 73 |   16 | 1605
+ 176 | 1486 | 95 |   38 | 1809
+ 259 | 1142 |  8 | 1951 |  275
+ 261 | 1206 | 30 | 1973 |  479
+ 263 | 1270 | 52 | 1995 |  683
+ 265 | 1334 | 74 |   17 |  887
+ 267 | 1398 | 96 |   39 | 1091
+ 350 | 1054 |  9 | 1952 | 1557
+ 352 | 1118 | 31 | 1974 | 1761
+ 354 | 1182 | 53 | 1996 | 1965
+ 356 | 1246 | 75 |   18 |  169
+ 358 | 1310 | 97 |   40 |  373
+(20 rows)
+
+DROP VIEW bitmap_test_mv;
+CREATE VIEW bitmap_test_mv AS (SELECT * FROM bitmap_test WHERE i < 100 AND j < 100 OR h < 100 LIMIT 20);
+EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_mv;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Aggregate
+   ->  Limit
+         ->  Result
+               ->  Custom Scan (o_scan) on bitmap_test
+                     Bitmap heap scan
+                     Recheck Cond: (((i < 100) AND (j < 100)) OR (h < 100))
+                     ->  BitmapOr
+                           ->  BitmapAnd
+                                 ->  Bitmap Index Scan on bitmap_test_ix1
+                                       Index Cond: (i < 100)
+                                 ->  Bitmap Index Scan on bitmap_test_ix2
+                                       Index Cond: (j < 100)
+                           ->  Bitmap Index Scan on bitmap_test_ix4
+                                 Index Cond: (h < 100)
+(14 rows)
+
+SELECT count(*) FROM bitmap_test_mv;
+ count 
+-------
+    20
+(1 row)
+
+SELECT * FROM bitmap_test_mv;
+ id  |  i   |  j   |  k   | h  
+-----+------+------+------+----
+   2 | 1918 |  181 |  124 | 61
+  41 |  166 | 1610 | 1553 | 39
+  61 |  806 | 1830 | 1773 | 79
+  80 |  414 | 1039 |  982 | 17
+ 100 | 1054 | 1259 | 1202 | 57
+ 120 | 1694 | 1479 | 1422 | 97
+ 139 | 1302 |  688 |  631 | 35
+ 159 | 1942 |  908 |  851 | 75
+ 178 | 1550 |  117 |   60 | 13
+ 198 |  190 |  337 |  280 | 53
+ 218 |  830 |  557 |  500 | 93
+ 237 |  438 | 1766 | 1709 | 31
+ 257 | 1078 | 1986 | 1929 | 71
+ 276 |  686 | 1195 | 1138 |  9
+ 296 | 1326 | 1415 | 1358 | 49
+ 316 | 1966 | 1635 | 1578 | 89
+ 335 | 1574 |  844 |  787 | 27
+ 355 |  214 | 1064 | 1007 | 67
+ 374 | 1822 |  273 |  216 |  5
+ 394 |  462 |  493 |  436 | 45
+(20 rows)
+
+DROP VIEW bitmap_test_mv;
+CREATE VIEW bitmap_test_mv AS (SELECT * FROM bitmap_test WHERE i < 100 AND j < 100 AND k < 200 OR h < 100 LIMIT 20);
+EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_mv;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Limit
+         ->  Result
+               ->  Custom Scan (o_scan) on bitmap_test
+                     Bitmap heap scan
+                     Recheck Cond: (((i < 100) AND (j < 100) AND (k < 200)) OR (h < 100))
+                     ->  BitmapOr
+                           ->  BitmapAnd
+                                 ->  Bitmap Index Scan on bitmap_test_ix1
+                                       Index Cond: (i < 100)
+                                 ->  Bitmap Index Scan on bitmap_test_ix2
+                                       Index Cond: (j < 100)
+                                 ->  Bitmap Index Scan on bitmap_test_ix3
+                                       Index Cond: (k < 200)
+                           ->  Bitmap Index Scan on bitmap_test_ix4
+                                 Index Cond: (h < 100)
+(16 rows)
+
+SELECT count(*) FROM bitmap_test_mv;
+ count 
+-------
+    20
+(1 row)
+
+SELECT * FROM bitmap_test_mv;
+ id  |  i   |  j   |  k   | h  
+-----+------+------+------+----
+   2 | 1918 |  181 |  124 | 61
+  41 |  166 | 1610 | 1553 | 39
+  61 |  806 | 1830 | 1773 | 79
+  80 |  414 | 1039 |  982 | 17
+ 100 | 1054 | 1259 | 1202 | 57
+ 120 | 1694 | 1479 | 1422 | 97
+ 139 | 1302 |  688 |  631 | 35
+ 159 | 1942 |  908 |  851 | 75
+ 178 | 1550 |  117 |   60 | 13
+ 198 |  190 |  337 |  280 | 53
+ 218 |  830 |  557 |  500 | 93
+ 237 |  438 | 1766 | 1709 | 31
+ 257 | 1078 | 1986 | 1929 | 71
+ 276 |  686 | 1195 | 1138 |  9
+ 296 | 1326 | 1415 | 1358 | 49
+ 316 | 1966 | 1635 | 1578 | 89
+ 335 | 1574 |  844 |  787 | 27
+ 355 |  214 | 1064 | 1007 | 67
+ 374 | 1822 |  273 |  216 |  5
+ 394 |  462 |  493 |  436 | 45
+(20 rows)
+
+DROP VIEW bitmap_test_mv;
+RESET enable_seqscan;
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 11 other objects
+NOTICE:  drop cascades to 13 other objects
 DETAIL:  drop cascades to table o_test_ix_ams
 drop cascades to table o_test_bridging_with_regular_no_pkey
 drop cascades to table o_test_bridging_with_regular_pkey
@@ -3840,8 +4177,10 @@ drop cascades to table o_test_bridged_hash_btree_bitmap_scans
 drop cascades to table o_test_bridged_index_only_scan
 drop cascades to table o_test_toast_with_bridged
 drop cascades to table size_test
+drop cascades to table tbl_with_pkey_bridged_toast
+drop cascades to table bitmap_test
 DROP SCHEMA index_bridging CASCADE;
-NOTICE:  drop cascades to 5 other objects
+NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to function btree_index_content(name)
 drop cascades to function hash_index_content(name)
 drop cascades to function gist_index_content(name)

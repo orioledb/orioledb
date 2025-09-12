@@ -74,13 +74,6 @@ typedef struct OBitmapHeapPath
 	OPath		o_path;
 } OBitmapHeapPath;
 
-typedef struct OCustomScanState
-{
-	CustomScanState css;
-	OEACallsCounters eaCounters;
-	OPlanState *o_plan_state;
-} OCustomScanState;
-
 set_rel_pathlist_hook_type old_set_rel_pathlist_hook = NULL;
 OEACallsCounters *ea_counters = NULL;
 
