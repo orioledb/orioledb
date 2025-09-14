@@ -597,7 +597,8 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 
 		if (csn >= context->opCsn)
 		{
-			if (tuphdr->deleted != BTreeLeafTupleNonDeleted)
+			if (tuphdr->deleted == BTreeLeafTupleDeleted ||
+				tuphdr->deleted == BTreeLeafTupleMovedPartitions)
 				ereport(ERROR,
 						(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
 						 errmsg("could not serialize access due to concurrent delete")));

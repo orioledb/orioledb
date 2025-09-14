@@ -33,5 +33,5 @@ step s2_delete:
  <waiting ...>
 step s1_commit: COMMIT;
 step s2_delete: <... completed>
-ERROR:  tuple to be locked was already moved to another partition due to concurrent update
+ERROR:  tuple to be deleted was already moved to another partition due to concurrent update
 step s2_commit: COMMIT;
