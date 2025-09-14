@@ -1205,7 +1205,11 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									get_tablespace_name(tablespaceOid))));
 			}
 
-			elog(WARNING, "Concurrent REINDEX not implemented for orioledb tables yet, using simple one");
+			if (orioledb_strict_mode)
+				elog(ERROR, "REINDEX CONCURRENTLY is not supported for orioledb tables yet");
+			else
+				elog(WARNING, "REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead");
+
 			foreach(lc, stmt->params)
 			{
 				DefElem    *opt = (DefElem *) lfirst(lc);
