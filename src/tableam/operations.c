@@ -830,14 +830,14 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 	{
 		if (arg->deleted == BTreeLeafTupleMovedPartitions)
 		{
-			if (arg->options & TABLE_MODIFY_LOCK_UPDATED)
+			if (!IsolationUsesXactSnapshot())
 				ereport(ERROR,
 						(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
 						 errmsg("tuple to be locked was already moved to another partition due to concurrent update")));
 		}
 		else if (arg->deleted == BTreeLeafTuplePKChanged)
 		{
-			if (arg->options & TABLE_MODIFY_LOCK_UPDATED)
+			if (!IsolationUsesXactSnapshot())
 				ereport(ERROR,
 						(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
 						 errmsg("tuple to be locked has its primary key changed due to concurrent update")));
@@ -928,17 +928,17 @@ o_tbl_delete(Relation rel, OTableDescr *descr, OBTreeKeyBound *primary_key,
 	{
 		if (arg->deleted == BTreeLeafTupleMovedPartitions)
 		{
-			if (arg->options & TABLE_MODIFY_LOCK_UPDATED)
+			if (!IsolationUsesXactSnapshot())
 				ereport(ERROR,
 						(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-						 errmsg("tuple to be locked was already moved to another partition due to concurrent update")));
+						 errmsg("tuple to be deleted was already moved to another partition due to concurrent update")));
 		}
 		else if (arg->deleted == BTreeLeafTuplePKChanged)
 		{
-			if (arg->options & TABLE_MODIFY_LOCK_UPDATED)
+			if (!IsolationUsesXactSnapshot())
 				ereport(ERROR,
 						(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-						 errmsg("tuple to be locked has its primary key changed due to concurrent update")));
+						 errmsg("tuple to be deleted has its primary key changed due to concurrent update")));
 		}
 	}
 
