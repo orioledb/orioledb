@@ -47,9 +47,13 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
     git apply patches/test_setup_enable_oriole.diff
     # Initialize data directory and set OrioleDB as default AM
     initdb --locale=C -D $GITHUB_WORKSPACE/pgsql/pgdata
-    sed -i "s/^#*default_table_access_method.*/default_table_access_method = 'orioledb'/" $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+
     sed -i "s/^#*shared_preload_libraries.*/shared_preload_libraries = 'orioledb'/" $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log start
+    make -C src/test/regress installcheck -j $(nproc) || status=$?
+
+    sed -i "s/^#*default_table_access_method.*/default_table_access_method = 'orioledb'/" $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+    pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log restart
     # Run Postgress regression tests
     make -C src/test/regress installcheck-oriole -j $(nproc) || status=$?
 else
