@@ -146,6 +146,7 @@ bool		enable_rewind = false;
 int			rewind_max_time = 0;
 int			rewind_max_transactions = 0;
 int			logical_xid_buffers_guc = 64;
+bool		orioledb_strict_mode = false;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -849,6 +850,17 @@ _PG_init(void)
 							NULL,
 							NULL,
 							NULL);
+
+	DefineCustomBoolVariable("orioledb.strict_mode",
+							 "Always throw an explicit error when a feature is not supported.",
+							 NULL,
+							 &orioledb_strict_mode,
+							 false,
+							 PGC_POSTMASTER,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
 
 	if (orioledb_s3_mode)
 	{
