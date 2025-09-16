@@ -49,6 +49,7 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
     sed -i "s/^#*shared_preload_libraries.*/shared_preload_libraries = 'orioledb'/" $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log start
     make -C src/test/regress installcheck -j $(nproc) || status=$?
+    make -C src/test/isolation installcheck -j $(nproc) || status=$?
 
     if [ $status -eq 0 ]; then
         sed -i "s/^#*default_table_access_method.*/default_table_access_method = 'orioledb'/" $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
