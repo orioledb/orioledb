@@ -490,16 +490,18 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	marg.scanSlot = oldSlot;
 	marg.tmpSlot = descr->oldTuple;
 	marg.modified = false;
+	marg.selfModified = false;
 	marg.deleted = BTreeLeafTupleNonDeleted;
 	marg.changingPart = changingPart;
 	marg.keyAttrs = NULL;
+	marg.cid = cid;
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &marg.csn, NULL, NULL);
 
-	mres = o_tbl_delete(relation, descr, &pkey, oxid, cid,
+	mres = o_tbl_delete(relation, descr, &pkey, oxid,
 						marg.csn, &hint, &marg);
 
-	if (mres.self_modified)
+	if (marg.selfModified)
 	{
 		tmfd->xmax = GetCurrentTransactionId();
 		tmfd->cmax = GetCurrentCommandId(true);
@@ -538,10 +540,10 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 
 	if (mres.success)
 	{
-		return mres.self_modified ? TM_SelfModified : TM_Ok;
+		return marg.selfModified ? TM_SelfModified : TM_Ok;
 	}
 
-	return mres.self_modified ? TM_SelfModified : (marg.modified ? TM_Updated : TM_Deleted);
+	return marg.selfModified ? TM_SelfModified : (marg.modified ? TM_Updated : TM_Deleted);
 }
 
 static TM_Result
@@ -591,15 +593,17 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	marg.scanSlot = oldSlot;
 	marg.tmpSlot = descr->oldTuple;
 	marg.modified = false;
+	marg.selfModified = false;
 	marg.deleted = BTreeLeafTupleNonDeleted;
 	marg.newSlot = (OTableSlot *) slot;
 	marg.keyAttrs = RelationGetIndexAttrBitmap(relation,
 											   INDEX_ATTR_BITMAP_KEY);
+	marg.cid = cid;
 
-	mres = o_tbl_update(descr, slot, &old_pkey, relation, oxid, cid,
+	mres = o_tbl_update(descr, slot, &old_pkey, relation, oxid,
 						marg.csn, &hint, &marg, bridge_ctid);
 
-	if (mres.self_modified)
+	if (marg.selfModified)
 	{
 		tmfd->xmax = GetCurrentTransactionId();
 		tmfd->cmax = GetCurrentCommandId(true);

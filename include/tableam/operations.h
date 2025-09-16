@@ -16,6 +16,7 @@
 
 #include "btree/btree.h"
 #include "btree/modify.h"
+#include "c.h"
 #include "catalog/o_tables.h"
 #include "tableam/descr.h"
 #include "tuple/slot.h"
@@ -38,7 +39,6 @@ typedef struct OTableModifyResult
 	OIndexNumber failedIxNum;
 	/* the modified tuple */
 	TupleTableSlot *oldTuple;
-	bool		self_modified;
 } OTableModifyResult;
 
 typedef struct
@@ -65,7 +65,9 @@ typedef struct
 	CommitSeqNo csn;
 	UndoLocation tup_undo_location;
 	BTreeLeafTupleDeletedStatus deleted;
+	CommandId	cid;
 	bool		modified;
+	bool		selfModified;
 	bool		changingPart;
 	Bitmapset  *keyAttrs;
 	int			options;
@@ -110,7 +112,6 @@ extern OBTreeModifyResult o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey,
 extern OTableModifyResult o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 									   OBTreeKeyBound *oldPkey,
 									   Relation rel, OXid oxid,
-									   CommandId cid,
 									   CommitSeqNo csn,
 									   BTreeLocationHint *hint,
 									   OModifyCallbackArg *arg,
@@ -127,7 +128,7 @@ extern OTableModifyResult o_update_secondary_index(OIndexDescr *id,
 extern OTableModifyResult o_tbl_delete(Relation rel,
 									   OTableDescr *descr,
 									   OBTreeKeyBound *primary_key,
-									   OXid oxid, CommandId cid,
+									   OXid oxid,
 									   CommitSeqNo csn,
 									   BTreeLocationHint *hint,
 									   OModifyCallbackArg *arg);

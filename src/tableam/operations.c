@@ -665,7 +665,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 
 OTableModifyResult
 o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
-			 OBTreeKeyBound *oldPkey, Relation rel, OXid oxid, CommandId cid,
+			 OBTreeKeyBound *oldPkey, Relation rel, OXid oxid,
 			 CommitSeqNo csn, BTreeLocationHint *hint,
 			 OModifyCallbackArg *arg, ItemPointer bridge_ctid)
 {
@@ -822,11 +822,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 	}
 	csn = arg->csn;
 
-	mres.self_modified = COMMITSEQNO_IS_INPROGRESS(arg->csn) &&
-		(arg->oxid == get_current_oxid_if_any()) &&
-		UndoLocationIsValid(arg->tup_undo_location) &&
-		(arg->tup_undo_location >= command_get_undo_location(cid));
-	if (!mres.self_modified)
+	if (!arg->selfModified)
 	{
 		if (arg->deleted == BTreeLeafTupleMovedPartitions)
 		{
@@ -912,7 +908,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 
 OTableModifyResult
 o_tbl_delete(Relation rel, OTableDescr *descr, OBTreeKeyBound *primary_key,
-			 OXid oxid, CommandId cid, CommitSeqNo csn,
+			 OXid oxid, CommitSeqNo csn,
 			 BTreeLocationHint *hint, OModifyCallbackArg *arg)
 {
 	OTableModifyResult result;
@@ -920,11 +916,7 @@ o_tbl_delete(Relation rel, OTableDescr *descr, OBTreeKeyBound *primary_key,
 	result = o_tbl_indices_delete(descr, primary_key, oxid,
 								  csn, hint, arg);
 
-	result.self_modified = COMMITSEQNO_IS_INPROGRESS(arg->csn) &&
-		(arg->oxid == get_current_oxid_if_any()) &&
-		UndoLocationIsValid(arg->tup_undo_location) &&
-		(arg->tup_undo_location >= command_get_undo_location(cid));
-	if (!result.self_modified)
+	if (!arg->selfModified)
 	{
 		if (arg->deleted == BTreeLeafTupleMovedPartitions)
 		{
@@ -1703,6 +1695,10 @@ o_delete_callback(BTreeDescr *descr,
 		o_arg->csn = COMMITSEQNO_INPROGRESS;
 		o_arg->oxid = XACT_INFO_GET_OXID(xactInfo);
 		o_arg->tup_undo_location = location;
+
+		if (UndoLocationIsValid(location) &&
+			location >= command_get_undo_location(o_arg->cid))
+			o_arg->selfModified = true;
 	}
 
 	o_arg->modified = modified;
@@ -1713,7 +1709,9 @@ o_delete_callback(BTreeDescr *descr,
 						   o_arg->csn, PrimaryIndexNumber, hint);
 	}
 
-	if (!modified)
+	if (o_arg->selfModified)
+		return OBTreeCallbackActionDoNothing;
+	else if (!modified)
 		return OBTreeCallbackActionDelete;
 	else if (o_arg->options & TABLE_MODIFY_LOCK_UPDATED)
 		return OBTreeCallbackActionLock;
@@ -1778,6 +1776,10 @@ o_update_callback(BTreeDescr *descr,
 		version = o_tuple_get_version(tup) + 1;
 		o_tuple_set_version(&id->leafSpec, newtup, version);
 		o_arg->newSlot->tuple = *newtup;
+
+		if (UndoLocationIsValid(location) &&
+			location >= command_get_undo_location(o_arg->cid))
+			o_arg->selfModified = true;
 	}
 
 	modified = o_callback_is_modified(o_arg->oxid, o_arg->csn, xactInfo);
@@ -1803,10 +1805,10 @@ o_update_callback(BTreeDescr *descr,
 			*lock_mode = RowLockNoKeyUpdate;
 	}
 
-	if (!modified)
-	{
+	if (o_arg->selfModified)
+		return OBTreeCallbackActionDoNothing;
+	else if (!modified)
 		return OBTreeCallbackActionUpdate;
-	}
 
 	if (o_arg->options & TABLE_MODIFY_LOCK_UPDATED)
 		return OBTreeCallbackActionLock;
