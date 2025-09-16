@@ -278,37 +278,44 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			SnapBuildUpdateCSNSnaphot(ctx->snapshot_builder, &csnSnapshot);
 
 			txn = get_reorder_buffer_txn(ctx->reorder, logicalXid);
-			if (txn->toptxn)
-				txn = txn->toptxn;
 
-			dlist_foreach(cur_txn_i, &txn->subtxns)
+			/* unknown transaction, nothing to replay */
+			if (txn != NULL)
 			{
-				ReorderBufferTXN *cur_txn;
+				if (txn->toptxn)
+					txn = txn->toptxn;
 
-				cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+				dlist_foreach(cur_txn_i, &txn->subtxns)
+				{
+					ReorderBufferTXN *cur_txn;
 
-				ReorderBufferCommitChild(ctx->reorder, txn->xid, cur_txn->xid,
-										 startXLogPtr, endXLogPtr);
+					cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
 
+					ReorderBufferCommitChild(ctx->reorder, txn->xid, cur_txn->xid,
+											 startXLogPtr, endXLogPtr);
+
+				}
+
+				/*
+				 * SnapBuildXactNeedsSkip() does strict comparison.  So,
+				 * subtract endXLogPtr by one to fit snapshot just taken after
+				 * commit.
+				 */
+				if (rec_type == WAL_REC_COMMIT &&
+					!SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr - 1))
+				{
+					ReorderBufferCommit(ctx->reorder, logicalXid,
+										startXLogPtr, endXLogPtr,
+										0, XLogRecGetOrigin(buf->record),
+										buf->origptr);
+				}
+				else
+				{
+					ReorderBufferAbort(ctx->reorder, logicalXid,
+									   startXLogPtr, 0);
+				}
 			}
 
-			/*
-			 * SnapBuildXactNeedsSkip() does strict comparison.  So, subtract
-			 * endXLogPtr by one to fit snapshot just taken after commit.
-			 */
-			if (rec_type == WAL_REC_COMMIT &&
-				!SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr - 1))
-			{
-				ReorderBufferCommit(ctx->reorder, logicalXid,
-									startXLogPtr, endXLogPtr,
-									0, XLogRecGetOrigin(buf->record),
-									buf->origptr);
-			}
-			else
-			{
-				ReorderBufferAbort(ctx->reorder, logicalXid,
-								   startXLogPtr, 0);
-			}
 			UpdateDecodingStats(ctx);
 
 			oxid = InvalidOXid;
