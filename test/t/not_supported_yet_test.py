@@ -49,7 +49,8 @@ class NotSupportedYetTest(BaseTest):
 		""")
 		self.assertEqual(
 		    err.decode("utf-8").split("\n")[0],
-		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead")
+		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead"
+		)
 
 		# Using simple reindex instead of concurrent for orioledb indices
 		_, _, err = node.psql("""
@@ -58,7 +59,8 @@ class NotSupportedYetTest(BaseTest):
 		""")
 		self.assertEqual(
 		    err.decode("utf-8").split("\n")[0],
-		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead")
+		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead"
+		)
 
 		# Using simple reindex instead of concurrent for schema containing orioledb tables
 		_, _, err = node.psql("""
@@ -66,7 +68,8 @@ class NotSupportedYetTest(BaseTest):
 		""")
 		self.assertEqual(
 		    err.decode("utf-8").split("\n")[0],
-		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead")
+		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead"
+		)
 
 		# Using simple reindex instead of concurrent for database containing orioledb tables
 		_, _, err = node.psql("""
@@ -74,7 +77,8 @@ class NotSupportedYetTest(BaseTest):
 		""")
 		self.assertEqual(
 		    err.decode("utf-8").split("\n")[0],
-		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead")
+		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead"
+		)
 
 		node.stop()
 
@@ -299,8 +303,9 @@ class NotSupportedYetTest(BaseTest):
 			""")
 
 		self.assertErrorMessageEquals(
-		    e, "concurrent index creation is not supported for orioledb tables yet")
-
+		    e,
+		    "concurrent index creation is not supported for orioledb tables yet"
+		)
 
 		node.safe_psql("""
 			REINDEX TABLE o_test;
