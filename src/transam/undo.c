@@ -62,6 +62,9 @@ static pairingheap retainUndoLocHeaps[(int) UndoLogsCount] =
 	}
 };
 
+/* A minimal subtransaciton id, where OrioleDB got involved */
+static SubTransactionId minParentSubId = InvalidSubTransactionId;
+
 typedef void (*UndoCallback) (UndoLogType undoType, UndoLocation location,
 							  UndoStackItem *item, OXid oxid, bool abort,
 							  bool changeCountsValid);
@@ -1584,6 +1587,7 @@ undo_xact_callback(XactEvent event, void *arg)
 			orioledb_reset_xmin_hook();
 			reset_command_undo_locations();
 			oxid_needs_wal_flush = false;
+			minParentSubId = InvalidSubTransactionId;
 		}
 
 		if (enable_rewind && event == XACT_EVENT_COMMIT)
@@ -1653,6 +1657,7 @@ undo_xact_callback(XactEvent event, void *arg)
 				reset_cur_undo_locations();
 				reset_command_undo_locations();
 				oxid_needs_wal_flush = false;
+				minParentSubId = InvalidSubTransactionId;
 				break;
 			case XACT_EVENT_ABORT:
 				if (!RecoveryInProgress())
@@ -1676,6 +1681,7 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					pg_atomic_write_u64(&curProcData->undoRetainLocations[i].snapshotRetainUndoLocation, InvalidUndoLocation);
+				minParentSubId = InvalidSubTransactionId;
 				break;
 			default:
 				break;
@@ -1825,15 +1831,24 @@ rollback_to_savepoint(UndoLogType undoType, UndoStackKind kind,
 	if (undoType == UndoLogRegularPageLevel)
 		return;
 
-	sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS(undoType);
-	init_undo_item_buf(&buf);
-	location = pg_atomic_read_u64(&sharedLocations->subxactLocation);
-	applyResult = search_for_undo_sub_location(undoType, kind, location, &buf, parentSubid,
-											   &toLoc.location, &toLoc.subxactLocation);
-	free_undo_item_buf(&buf);
+	if (parentSubid != InvalidSubTransactionId)
+	{
+		sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS(undoType);
+		init_undo_item_buf(&buf);
+		location = pg_atomic_read_u64(&sharedLocations->subxactLocation);
+		applyResult = search_for_undo_sub_location(undoType, kind, location, &buf, parentSubid,
+												   &toLoc.location, &toLoc.subxactLocation);
+		free_undo_item_buf(&buf);
 
-	if (!applyResult)
-		return;
+		if (!applyResult)
+			return;
+	}
+	else
+	{
+		toLoc.location = InvalidUndoLocation;
+		toLoc.subxactLocation = InvalidUndoLocation;
+
+	}
 
 	oxid = get_current_oxid_if_any();
 	if (OXidIsValid(oxid))
@@ -1884,27 +1899,40 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 	switch (event)
 	{
 		case SUBXACT_EVENT_START_SUB:
-			(void) get_current_oxid();
-			add_subxact_undo_item(parentSubid);
-			prentLogicalXid = get_current_logical_xid();
-			assign_subtransaction_logical_xid();
-			add_savepoint_wal_record(parentSubid, prentLogicalXid);
+			if (have_retained_undo_location())
+			{
+				(void) get_current_oxid();
+				add_subxact_undo_item(parentSubid);
+				prentLogicalXid = get_current_logical_xid();
+				assign_subtransaction_logical_xid();
+				add_savepoint_wal_record(parentSubid, prentLogicalXid);
+				if (minParentSubId == InvalidSubTransactionId)
+					minParentSubId = parentSubid;
+			}
 			break;
 		case SUBXACT_EVENT_COMMIT_SUB:
-			update_subxact_undo_location_on_commit(parentSubid);
+			if (parentSubid >= minParentSubId && minParentSubId != InvalidSubTransactionId)
+				update_subxact_undo_location_on_commit(parentSubid);
 			break;
 		case SUBXACT_EVENT_ABORT_SUB:
-			for (i = 0; i < (int) UndoLogsCount; i++)
-				rollback_to_savepoint((UndoLogType) i, UndoStackFull,
-									  parentSubid, true);
-			add_rollback_to_savepoint_wal_record(parentSubid);
+			if (parentSubid < minParentSubId || minParentSubId == InvalidSubTransactionId)
+				parentSubid = InvalidSubTransactionId;
 
-			/*
-			 * It might happen that we've released some row-level locks.  Some
-			 * waiters must be woken up.  We currently can't distinguish them
-			 * and just wake up everybody.
-			 */
-			oxid_notify_all();
+			if (have_retained_undo_location())
+			{
+				(void) get_current_oxid();
+				for (i = 0; i < (int) UndoLogsCount; i++)
+					rollback_to_savepoint((UndoLogType) i, UndoStackFull,
+										  parentSubid, true);
+				add_rollback_to_savepoint_wal_record(parentSubid);
+
+				/*
+				 * It might happen that we've released some row-level locks.
+				 * Some waiters must be woken up.  We currently can't
+				 * distinguish them and just wake up everybody.
+				 */
+				oxid_notify_all();
+			}
 			break;
 		default:
 			break;
