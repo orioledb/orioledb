@@ -24,6 +24,15 @@ else
 fi
 
 cd postgresql
+
+if [ $CHECK_TYPE = "pg_tests" ]; then
+    # Backport float tests patch
+    wget -O float-patch.patch "https://git.postgresql.org/gitweb/?p=postgresql.git;a=patch;h=da83b1ea10c2b7937d4c9e922465321749c6785b"
+    git apply float-patch.patch
+    # Apply test setup SQL patches to reflect enabled OrioleDB
+    git apply patches/test_setup_enable_oriole.diff
+fi
+
 ./configure $CONFIG_ARGS
 make -sj `nproc`
 make -sj `nproc` install

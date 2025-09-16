@@ -200,6 +200,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/unlogged_test.py \
 						test/t/vacuum_test.py
 TESTGRESCHECKS_PART_3 = test/t/rewind_time_test.py
+PG_TESTS_CHECKS = test.pg_tests.regress
 
 PG_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test --temp-instance=./test/tmp_check
 PG_ISOLATION_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test/output_iso --temp-instance=./test/tmp_check_iso
@@ -262,6 +263,9 @@ else
 installcheck:
 	echo "Checks skipped! Build and run installcheck with IS_DEV=1"
 endif
+
+pg_tests_check:
+	python3 -W ignore::DeprecationWarning -m unittest -v $(PG_TESTS_CHECKS)
 
 else
 subdir = contrib/orioledb
@@ -370,6 +374,7 @@ pgindent: orioledb.typedefs
 yapf:
 	yapf -i test/t/*.py
 	yapf -i *.py
+	yapf -i test/pg_tests/*.py
 
 .PHONY: submake-orioledb submake-regress check \
 	regresscheck isolationcheck testgrescheck pgindent \

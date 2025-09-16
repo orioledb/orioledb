@@ -38,6 +38,8 @@ lib*.pc
 # Local excludes in root directory
 /test/t/__pycache__/
 /test/__pycache__/
+/test/pg_tests/__pycache__/
+/test/pg_tests/_g_*.py
 /test/log/
 /log_docker_build/
 /test/results/

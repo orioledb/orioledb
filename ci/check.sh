@@ -39,19 +39,7 @@ elif [ $CHECK_TYPE = "sanitize" ]; then
 	) \
 		make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?
 elif [ $CHECK_TYPE = "pg_tests" ]; then
-    cd ../postgresql
-    # Backport float tests patch
-    wget -O float-patch.patch "https://git.postgresql.org/gitweb/?p=postgresql.git;a=patch;h=da83b1ea10c2b7937d4c9e922465321749c6785b"
-    git apply float-patch.patch
-    # Apply test setup SQL patches to reflect enabled OrioleDB
-    git apply patches/test_setup_enable_oriole.diff
-    # Initialize data directory and set OrioleDB as default AM
-    initdb --locale=C -D $GITHUB_WORKSPACE/pgsql/pgdata
-    sed -i "s/^#*default_table_access_method.*/default_table_access_method = 'orioledb'/" $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
-    sed -i "s/^#*shared_preload_libraries.*/shared_preload_libraries = 'orioledb'/" $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
-    pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log start
-    # Run Postgress regression tests
-    make -C src/test/regress installcheck-oriole -j $(nproc) || status=$?
+    make USE_PGXS=1 IS_DEV=1 pg_tests_check -j $(nproc) || status=$?
 else
 	make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?
 fi
