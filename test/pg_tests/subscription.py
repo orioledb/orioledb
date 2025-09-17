@@ -18,26 +18,26 @@ if not 'PG_SRC_PATH' in os.environ:
 	      file=sys.stderr)
 
 script_path = os.path.dirname(os.path.realpath(__file__))
-recoverydir = join(os.environ['PG_SRC_PATH'], 'src/test/recovery/t')
+subscriptiondir = join(os.environ['PG_SRC_PATH'], 'src/test/subscription/t')
 bindir = pathlib.Path(shutil.which("postgres")).parent.resolve()
 include_path = join(script_path, "perl_include")
 
 tests = [
-    f for f in listdir(recoverydir)
-    if isfile(join(recoverydir, f)) and f.endswith(".pl")
+    f for f in listdir(subscriptiondir)
+    if isfile(join(subscriptiondir, f)) and f.endswith(".pl")
 ]
 
-single_test_path = os.path.join(script_path, '_g_rec_single_test.py')
+single_test_path = os.path.join(script_path, '_g_sub_single_test.py')
 temp_config_path = os.path.join(script_path, 'perl_temp.conf')
-generate_perl_test_calls(tests, single_test_path, include_path, recoverydir,
-                         expectedFailures, temp_config_path)
+generate_perl_test_calls(tests, single_test_path, include_path,
+                         subscriptiondir, expectedFailures, temp_config_path)
 
-from . import _g_rec_single_test
+from . import _g_sub_single_test
 
-# shortcuts for calling single tests like this "test.pg_tests.recovery.test_replslot_limit"
+# shortcuts for calling single tests like this "test.pg_tests.subscription.test_matviews"
 for test in tests:
 	globals()[file_name_to_test_name(
-	    test)] = lambda testname=test: _g_rec_single_test.Run(
+	    test)] = lambda testname=test: _g_sub_single_test.Run(
 	        file_name_to_test_name(testname))
 
-from ._g_rec_single_test import Run
+from ._g_sub_single_test import Run

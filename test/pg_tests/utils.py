@@ -107,26 +107,34 @@ def pg_isolation_regress(node: PostgresNode,
 		if os.path.exists(outputdir):
 			shutil.rmtree(outputdir)
 
-def prove(node: PostgresNode, test, test_path, include_path, timeout=30, verbose=False, clean=True):
+
+def prove(node: PostgresNode,
+          test,
+          test_path,
+          include_path,
+          temp_config_path,
+          timeout=30,
+          verbose=False):
 	regressdir = os.path.join(os.environ['PG_SRC_PATH'], 'src/test/regress')
 	pg_regress_path = os.path.join(regressdir, 'pg_regress')
 	prove_path = shutil.which("prove")
-	results_path = os.path.join(node.base_dir, 'results')
-	os.makedirs(results_path, exist_ok=True)
-	outputdir = os.path.join(results_path, test)
 	cmd = [
-	    prove_path, "-I", include_path,
+	    prove_path,
+	    "-I",
+	    include_path,
 	]
 	cmd += [os.path.join(test_path, test)]
 	cmd_env = os.environ.copy()
 	cmd_env["PGPORT"] = str(node.port)
 	cmd_env["TESTLOGDIR"] = node.logs_dir
-	cmd_env["TESTDATADIR"] = node.data_dir
+	cmd_env["TESTDATADIR"] = node.base_dir
 	cmd_env["PG_REGRESS"] = pg_regress_path
+	cmd_env["TEMP_CONFIG"] = temp_config_path
+	cmd_env["PG_TEST_INITDB_EXTRA_OPTS"] = "--no-locale --encoding=UTF8"
 	process = Popen(cmd,
 	                stderr=subprocess.PIPE,
 	                stdout=subprocess.PIPE,
-					env=cmd_env)
+	                env=cmd_env)
 	output, error = process.communicate(timeout=timeout)
 
 	if verbose:
@@ -134,9 +142,6 @@ def prove(node: PostgresNode, test, test_path, include_path, timeout=30, verbose
 		print(error.decode("utf-8"))
 	if process.returncode != 0:
 		raise Exception(f"error when running: {cmd}")
-	elif clean:
-		if os.path.exists(outputdir):
-			shutil.rmtree(outputdir)
 
 
 def normalize_name(name: str):

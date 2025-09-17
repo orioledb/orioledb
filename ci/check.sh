@@ -39,7 +39,8 @@ elif [ $CHECK_TYPE = "sanitize" ]; then
 	) \
 		make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?
 elif [ $CHECK_TYPE = "pg_tests" ]; then
-    make USE_PGXS=1 IS_DEV=1 pg_tests_check -j $(nproc) || status=$?
+	export PG_SRC_PATH="$PWD/../postgresql"
+	make USE_PGXS=1 IS_DEV=1 pg_tests_check -j $(nproc) || status=$?
 else
 	make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?
 fi
