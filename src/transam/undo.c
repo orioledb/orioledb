@@ -207,6 +207,7 @@ static CommandIdInfo commandInfosStatic[16];
 static CommandIdInfo *commandInfos = commandInfosStatic;
 static int	commandIndex = -1,
 			commandInfosLength = lengthof(commandInfosStatic);
+static CommandId currentCommandId;
 
 Size
 undo_shmem_needs(void)
@@ -2306,48 +2307,39 @@ reset_command_undo_locations(void)
  * If every stored `cid` is smaller than the requested one,
  * `MaxUndoLocation` is returned.
  */
-UndoLocation
-command_get_undo_location(CommandId cid)
+CommandId
+undo_location_get_command(UndoLocation location)
 {
 	int			lo = 0;			/* left bound (inclusive)  */
-	int			hi = commandIndex;	/* right bound (inclusive) */
-	int			pos = commandIndex + 1; /* “not found” sentinel    */
+	int			hi = commandIndex + 1;	/* right bound (not inclusive) */
 
-	/* No commands have been saved yet */
-	if (commandIndex < 0)
-		return MaxUndoLocation;
+	/*
+	 * XXX: Parallel workers don't have valid commandInfos array.  Do they
+	 * need it?
+	 */
+	if (IsParallelWorker())
+		return 0;
 
-	while (lo <= hi)
+	Assert(commandIndex >= 0);
+
+	while (lo < hi)
 	{
-		int			mid = lo + ((hi - lo) >> 1);
+		int			mid = lo + (hi - lo) / 2;
 
-		if (commandInfos[mid].cid >= cid)
-		{
-			/*
-			 * Keep the candidate and search to the left to find the first
-			 * element >= cid
-			 */
-			pos = mid;
-			hi = mid - 1;
-		}
-		else
-		{
-			/* The current cid is smaller; search the right half */
+		if (commandInfos[mid].undoLocation <= location)
 			lo = mid + 1;
-		}
+		else
+			hi = mid;
 	}
-
-	/* cid is larger than any stored value: return the sentinel */
-	if (pos > commandIndex)
-		return MaxUndoLocation;
-
-	return commandInfos[pos].undoLocation;
+	lo--;
+	Assert(lo >= 0 && lo <= commandIndex);
+	return commandInfos[lo].cid;
 }
 
 UndoLocation
 current_command_get_undo_location(void)
 {
-	CommandId	cid = GetCurrentCommandId(false);
+	CommandId	cid = o_get_current_command();
 
 	if (commandIndex < 0 || commandInfos[commandIndex].cid != cid)
 	{
@@ -2358,7 +2350,8 @@ current_command_get_undo_location(void)
 		update_command_undo_location(cid, loc);
 	}
 
-	return command_get_undo_location(cid);
+	Assert(commandIndex >= 0 && commandInfos[commandIndex].cid == cid);
+	return commandInfos[commandIndex].undoLocation;
 }
 
 void
@@ -2386,6 +2379,18 @@ update_command_undo_location(CommandId commandId, UndoLocation undoLocation)
 		commandInfos[commandIndex].cid = commandId;
 		commandInfos[commandIndex].undoLocation = undoLocation;
 	}
+}
+
+void
+o_set_current_command(CommandId commandId)
+{
+	currentCommandId = commandId;
+}
+
+CommandId
+o_get_current_command(void)
+{
+	return currentCommandId;
 }
 
 static void

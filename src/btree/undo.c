@@ -361,7 +361,7 @@ make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
 
 	undoLocation += offsetof(BTreeModifyUndoStackItem, tuphdr);
 
-	commandId = GetCurrentCommandId(false);
+	commandId = o_get_current_command();
 	if (desc->undoType == UndoLogRegular &&
 		commandId != InvalidCommandId &&
 		!is_recovery_process())

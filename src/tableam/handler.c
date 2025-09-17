@@ -402,6 +402,8 @@ orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 	if (OidIsValid(relation->rd_rel->relrewrite))
 		return slot;
 
+	o_set_current_command(cid);
+
 	descr = relation_get_descr(relation);
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 	return o_tbl_insert(descr, relation, slot, oxid, oSnapshot.csn);
@@ -447,6 +449,8 @@ orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
 	o_btree_check_size_of_tuple(o_tuple_size(tup, &id->leafSpec),
 								RelationGetRelationName(rel),
 								false);
+
+	o_set_current_command(cid);
 
 	slot = o_tbl_insert_with_arbiter(rel, descr, slot, arbiterIndexes, cid,
 									 lockmode, lockedSlot);
@@ -494,7 +498,9 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	marg.deleted = BTreeLeafTupleNonDeleted;
 	marg.changingPart = changingPart;
 	marg.keyAttrs = NULL;
-	marg.cid = cid;
+	marg.modifyCid = cid;
+	marg.tupleCid = InvalidCommandId;
+	o_set_current_command(cid);
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &marg.csn, NULL, NULL);
 
@@ -503,8 +509,9 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 
 	if (marg.selfModified)
 	{
+		Assert(marg.tupleCid != InvalidCommandId);
 		tmfd->xmax = GetCurrentTransactionId();
-		tmfd->cmax = GetCurrentCommandId(true);
+		tmfd->cmax = marg.tupleCid;
 		return TM_SelfModified;
 	}
 
@@ -598,15 +605,18 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	marg.newSlot = (OTableSlot *) slot;
 	marg.keyAttrs = RelationGetIndexAttrBitmap(relation,
 											   INDEX_ATTR_BITMAP_KEY);
-	marg.cid = cid;
+	marg.modifyCid = cid;
+	marg.tupleCid = InvalidCommandId;
+	o_set_current_command(cid);
 
 	mres = o_tbl_update(descr, slot, &old_pkey, relation, oxid,
 						marg.csn, &hint, &marg, bridge_ctid);
 
 	if (marg.selfModified)
 	{
+		Assert(marg.tupleCid != InvalidCommandId);
 		tmfd->xmax = GetCurrentTransactionId();
-		tmfd->cmax = GetCurrentCommandId(true);
+		tmfd->cmax = marg.tupleCid;
 		return TM_SelfModified;
 	}
 
@@ -677,10 +687,13 @@ orioledb_tuple_lock(Relation rel, Datum tupleid, Snapshot snapshot,
 	larg.selfModified = false;
 	larg.deleted = BTreeLeafTupleNonDeleted;
 	larg.tupUndoLocation = InvalidUndoLocation;
+	larg.modifyCid = cid;
+	larg.tupleCid = InvalidCommandId;
+	o_set_current_command(cid);
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint, &larg.csn, NULL, NULL);
 
-	res = o_tbl_lock(descr, &pkey, mode, oxid, cid, &larg, &hint);
+	res = o_tbl_lock(descr, &pkey, mode, oxid, &larg, &hint);
 
 	if (larg.modified)
 	{
@@ -692,8 +705,9 @@ orioledb_tuple_lock(Relation rel, Datum tupleid, Snapshot snapshot,
 
 	if (larg.selfModified)
 	{
+		Assert(larg.tupleCid != InvalidCommandId);
 		tmfd->xmax = GetCurrentTransactionId();
-		tmfd->cmax = GetCurrentCommandId(true);
+		tmfd->cmax = larg.tupleCid;
 		return TM_SelfModified;
 	}
 	else

@@ -315,6 +315,8 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 					XACT_INFO_OXID_IS_CURRENT(xactInfo) &&
 					oSnapshot->csn != COMMITSEQNO_MAX_NORMAL)
 				{
+					CommandId	tupleCid;
+
 					if (IS_SYS_TREE_OIDS(desc->oids))
 						break;
 
@@ -323,10 +325,9 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 					 * command or below.  MaxUndoLocation means there are no
 					 * undo records yet, so we need to recheck.
 					 */
-					if (oSnapshot->cidUndoLocation == MaxUndoLocation)
-						oSnapshot->cidUndoLocation = command_get_undo_location(oSnapshot->cid);
+					tupleCid = undo_location_get_command(UndoLocationGetValue(tupHdr.undoLocation));
 
-					if (UndoLocationGetValue(tupHdr.undoLocation) < oSnapshot->cidUndoLocation)
+					if (tupleCid < oSnapshot->cid)
 						break;
 				}
 			}

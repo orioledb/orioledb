@@ -705,9 +705,15 @@ o_btree_modify_insert_update(BTreeModifyInternalContext *context)
 		BTreeLeafTuphdr *leafTuphdr = &context->leafTuphdr;
 
 		if (desc->undoType == UndoLogRegular)
+		{
 			leafTuphdr->undoLocation = InvalidUndoLocation;
-		if (desc->undoType == UndoLogRegular)
 			leafTuphdr->undoLocation |= current_command_get_undo_location();
+		}
+	}
+
+	if (desc->undoType == UndoLogRegular && !is_recovery_process())
+	{
+		Assert(undo_location_get_command(UndoLocationGetValue(context->leafTuphdr.undoLocation)) == o_get_current_command());
 	}
 
 	tuplen = o_btree_len(desc, context->tuple, OTupleLength);
@@ -761,9 +767,10 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 										O_PAGE_GET_CHANGE_COUNT(page),
 										NULL);
 		if (desc->undoType == UndoLogRegular)
+		{
 			leafTuphdr->undoLocation = InvalidUndoLocation;
-		if (desc->undoType == UndoLogRegular)
 			leafTuphdr->undoLocation |= current_command_get_undo_location();
+		}
 	}
 }
 

@@ -352,8 +352,7 @@ tuple_lock_mode_to_row_lock_mode(LockTupleMode mode)
 
 OBTreeModifyResult
 o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey, LockTupleMode mode,
-		   OXid oxid, CommandId cid, OLockCallbackArg *larg,
-		   BTreeLocationHint *hint)
+		   OXid oxid, OLockCallbackArg *larg, BTreeLocationHint *hint)
 {
 	RowLockMode lock_mode;
 	OBTreeModifyResult res;
@@ -377,11 +376,6 @@ o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey, LockTupleMode mode,
 						 hint, &callbackInfo);
 
 	Assert(res == OBTreeModifyResultLocked || res == OBTreeModifyResultFound || res == OBTreeModifyResultNotFound);
-
-	larg->selfModified = COMMITSEQNO_IS_INPROGRESS(larg->csn) &&
-		(larg->oxid == get_current_oxid_if_any()) &&
-		UndoLocationIsValid(larg->tupUndoLocation) &&
-		(larg->tupUndoLocation >= command_get_undo_location(cid));
 
 	return res;
 }
@@ -549,7 +543,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 				if (COMMITSEQNO_IS_INPROGRESS(ioc_arg.csn) &&
 					(ioc_arg.oxid == get_current_oxid_if_any()) &&
 					UndoLocationIsValid(ioc_arg.tupUndoLocation) &&
-					(ioc_arg.tupUndoLocation >= command_get_undo_location(cid)))
+					(undo_location_get_command(ioc_arg.tupUndoLocation) >= cid))
 				{
 					ereport(ERROR,
 							(errcode(ERRCODE_CARDINALITY_VIOLATION),
@@ -616,8 +610,9 @@ o_tbl_insert_with_arbiter(Relation rel,
 			larg.selfModified = false;
 			larg.deleted = BTreeLeafTupleNonDeleted;
 			larg.tupUndoLocation = InvalidUndoLocation;
+			larg.modifyCid = cid;
 
-			lockResult = o_tbl_lock(descr, &key, lockmode, oxid, cid, &larg, &hint);
+			lockResult = o_tbl_lock(descr, &key, lockmode, oxid, &larg, &hint);
 
 			if (larg.selfModified)
 			{
@@ -1411,12 +1406,12 @@ o_tbl_index_insert(OTableDescr *descr,
 								tup, BTreeKeyLeafTuple,
 								(Pointer) &knew, BTreeKeyBound,
 								oxid, csn, RowLockUpdate,
-								NULL, callbackInfo) == OBTreeModifyResultInserted;
+								NULL, callbackInfo);
 	else
 		result = o_btree_insert_unique(bd, tup, BTreeKeyLeafTuple,
 									   (Pointer) &knew, BTreeKeyBound,
 									   oxid, csn, RowLockUpdate,
-									   NULL, callbackInfo) == OBTreeModifyResultInserted;
+									   NULL, callbackInfo);
 
 	((OTableSlot *) slot)->version = o_tuple_get_version(tup);
 
@@ -1688,6 +1683,14 @@ o_delete_callback(BTreeDescr *descr,
 
 	modified = o_callback_is_modified(o_arg->oxid, o_arg->csn, xactInfo);
 
+	if (descr->type == oIndexPrimary &&
+		XACT_INFO_OXID_IS_CURRENT(xactInfo))
+	{
+		o_arg->tupleCid = undo_location_get_command(UndoLocationGetValue(location));
+		if (o_arg->tupleCid >= o_arg->modifyCid)
+			o_arg->selfModified = true;
+	}
+
 	if (XACT_INFO_IS_FINISHED(xactInfo))
 		o_arg->csn = modified ? (XACT_INFO_MAP_CSN(xactInfo) + 1) : o_arg->csn;
 	else
@@ -1695,10 +1698,6 @@ o_delete_callback(BTreeDescr *descr,
 		o_arg->csn = COMMITSEQNO_INPROGRESS;
 		o_arg->oxid = XACT_INFO_GET_OXID(xactInfo);
 		o_arg->tup_undo_location = location;
-
-		if (UndoLocationIsValid(location) &&
-			location >= command_get_undo_location(o_arg->cid))
-			o_arg->selfModified = true;
 	}
 
 	o_arg->modified = modified;
@@ -1739,6 +1738,13 @@ o_delete_deleted_callback(BTreeDescr *desc,
 	if (desc->type != oIndexPrimary)
 		return OBTreeCallbackActionDelete;
 
+	if (XACT_INFO_OXID_IS_CURRENT(xactInfo))
+	{
+		o_arg->tupleCid = undo_location_get_command(UndoLocationGetValue(location));
+		if (o_arg->tupleCid >= o_arg->modifyCid)
+			o_arg->selfModified = true;
+	}
+
 	modified = o_callback_is_modified(o_arg->oxid, o_arg->csn, xactInfo);
 
 	if (XACT_INFO_IS_FINISHED(xactInfo))
@@ -1777,8 +1783,8 @@ o_update_callback(BTreeDescr *descr,
 		o_tuple_set_version(&id->leafSpec, newtup, version);
 		o_arg->newSlot->tuple = *newtup;
 
-		if (UndoLocationIsValid(location) &&
-			location >= command_get_undo_location(o_arg->cid))
+		o_arg->tupleCid = undo_location_get_command(UndoLocationGetValue(location));
+		if (o_arg->tupleCid >= o_arg->modifyCid)
 			o_arg->selfModified = true;
 	}
 
@@ -1829,6 +1835,14 @@ o_update_deleted_callback(BTreeDescr *descr,
 	bool		modified;
 
 	o_arg->deleted = deleted;
+
+	if (descr->type == oIndexPrimary &&
+		XACT_INFO_OXID_IS_CURRENT(xactInfo))
+	{
+		o_arg->tupleCid = undo_location_get_command(UndoLocationGetValue(location));
+		if (o_arg->tupleCid >= o_arg->modifyCid)
+			o_arg->selfModified = true;
+	}
 
 	modified = o_callback_is_modified(o_arg->oxid, o_arg->csn, xactInfo);
 
@@ -1883,6 +1897,15 @@ o_lock_modify_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 	TupleTableSlot *slot = o_arg->scanSlot;
 
 	o_arg->modified = o_callback_is_modified(o_arg->oxid, o_arg->csn, xactInfo);
+
+	Assert(descr->type == oIndexPrimary);
+
+	if (XACT_INFO_OXID_IS_CURRENT(xactInfo))
+	{
+		o_arg->tupleCid = undo_location_get_command(UndoLocationGetValue(location));
+		if (o_arg->tupleCid >= o_arg->modifyCid)
+			o_arg->selfModified = true;
+	}
 
 	if (XACT_INFO_IS_FINISHED(xactInfo))
 	{

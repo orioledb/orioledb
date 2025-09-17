@@ -65,7 +65,8 @@ typedef struct
 	CommitSeqNo csn;
 	UndoLocation tup_undo_location;
 	BTreeLeafTupleDeletedStatus deleted;
-	CommandId	cid;
+	CommandId	modifyCid;
+	CommandId	tupleCid;
 	bool		modified;
 	bool		selfModified;
 	bool		changingPart;
@@ -83,6 +84,8 @@ typedef struct
 	LockWaitPolicy waitPolicy;
 	UndoLocation tupUndoLocation;
 	BTreeLeafTupleDeletedStatus deleted;
+	CommandId	modifyCid;
+	CommandId	tupleCid;
 	bool		wouldBlock;
 	bool		modified;
 	bool		selfModified;
@@ -106,7 +109,6 @@ extern OBTreeModifyResult o_tbl_index_insert(OTableDescr *descr,
 											 BTreeModifyCallbackInfo *callbackInfo);
 extern OBTreeModifyResult o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey,
 									 LockTupleMode mode, OXid oxid,
-									 CommandId cid,
 									 OLockCallbackArg *larg,
 									 BTreeLocationHint *hint);
 extern OTableModifyResult o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,

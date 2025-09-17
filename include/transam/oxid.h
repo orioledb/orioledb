@@ -49,8 +49,6 @@ typedef struct OSnapshot
 	XLogRecPtr	xlogptr;
 	XLogRecPtr	xmin;
 	CommandId	cid;
-	UndoLocation cidUndoLocation;	/* Cached location of first undo record
-									 * for cid */
 } OSnapshot;
 
 extern OSnapshot o_in_progress_snapshot;
@@ -73,7 +71,6 @@ o_check_isolation_level(void)
 		(o_snapshot)->csn = (snapshot)->csnSnapshotData.snapshotcsn; \
 		(o_snapshot)->xlogptr = (snapshot)->csnSnapshotData.xlogptr; \
 		(o_snapshot)->cid = (snapshot)->curcid; \
-		(o_snapshot)->cidUndoLocation = MaxUndoLocation; \
 	} while (false)
 
 #define O_LOAD_SNAPSHOT_CSN(o_snapshot, csnValue) \
@@ -83,7 +80,6 @@ o_check_isolation_level(void)
 		(o_snapshot)->csn = (csnValue); \
 		(o_snapshot)->xlogptr = InvalidXLogRecPtr; \
 		(o_snapshot)->cid = 0; \
-		(o_snapshot)->cidUndoLocation = MaxUndoLocation; \
 	} while (false)
 
 #define XLOG_PTR_ALIGN(ptr) ((ptr) + ((ptr) & 1))
