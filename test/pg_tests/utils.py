@@ -6,6 +6,7 @@ import subprocess
 from subprocess import Popen
 from testgres.node import PostgresNode
 
+
 def parse_regress_schedule(schedule):
 	with open(schedule, 'r') as f:
 		groups = []
@@ -24,7 +25,12 @@ def parse_regress_schedule(schedule):
 		return (groups, dict(depends))
 
 
-def pg_regress(node: PostgresNode, test, first=True, fail_ok=False, verbose=False, clean=True):
+def pg_regress(node: PostgresNode,
+               test,
+               first=True,
+               fail_ok=False,
+               verbose=False,
+               clean=True):
 	regressdir = os.path.join(os.environ['PG_SRC_PATH'], 'src/test/regress')
 	pg_regress_path = os.path.join(regressdir, 'pg_regress')
 	results_path = os.path.join(node.base_dir, 'results')
@@ -61,6 +67,7 @@ def normalize_name(name: str):
 	name = name.replace('.', '_').replace('-', '_')
 	return f"test_{name}"
 
+
 def parse_isolation_schedule(schedule):
 	with open(schedule, 'r') as f:
 		tests = []
@@ -71,8 +78,13 @@ def parse_isolation_schedule(schedule):
 		return tests
 
 
-def pg_isolation_regress(node: PostgresNode, test, verbose=False, clean=True):
-	isolationdir = os.path.join(os.environ['PG_SRC_PATH'], 'src/test/isolation')
+def pg_isolation_regress(node: PostgresNode,
+                         test,
+                         timeout=30,
+                         verbose=False,
+                         clean=True):
+	isolationdir = os.path.join(os.environ['PG_SRC_PATH'],
+	                            'src/test/isolation')
 	pg_regress_path = os.path.join(isolationdir, 'pg_isolation_regress')
 	results_path = os.path.join(node.base_dir, 'results')
 	os.makedirs(results_path, exist_ok=True)
@@ -89,7 +101,7 @@ def pg_isolation_regress(node: PostgresNode, test, verbose=False, clean=True):
 	                cwd=isolationdir,
 	                stderr=subprocess.PIPE,
 	                stdout=subprocess.PIPE)
-	output, error = process.communicate()
+	output, error = process.communicate(timeout=timeout)
 
 	if verbose:
 		print(output.decode("utf-8"))

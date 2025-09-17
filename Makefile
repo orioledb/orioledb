@@ -200,7 +200,8 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/unlogged_test.py \
 						test/t/vacuum_test.py
 TESTGRESCHECKS_PART_3 = test/t/rewind_time_test.py
-PG_TESTS_CHECKS = test.pg_tests.regress
+PG_TESTS_CHECKS = test.pg_tests.regress \
+				  test.pg_tests.isolation
 
 PG_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test --temp-instance=./test/tmp_check
 PG_ISOLATION_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test/output_iso --temp-instance=./test/tmp_check_iso

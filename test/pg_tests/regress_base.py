@@ -104,7 +104,8 @@ class GroupBase(BaseTest):
 
 	def getTestList(self, test):
 		from ._g_r_single_test import Run as SingleTest
-		return [(test, test == "test_setup", test in SingleTest.expectedFailures)]
+		return [(test, test == "test_setup", test
+		         in SingleTest.expectedFailures)]
 
 	def runParallelTest(node, name):
 		from ._g_r_single_test import Run as SingleTest
@@ -118,6 +119,7 @@ class GroupBase(BaseTest):
 		subresult = ParralelTextTestResult()
 		test(subresult)
 		return subresult
+
 
 class SingleBase(BaseTest):
 	depends = {}
@@ -151,8 +153,12 @@ class SingleBase(BaseTest):
 
 	def getTestList(self, test):
 		result = ["test_setup", "create_index"]
-		result += [t for stack_level in SingleBase.getTestStack([test], self.depends) for t in stack_level]
-		result = [(t, t == "test_setup", t in self.expectedFailures and t != test) for t in result]
+		result += [
+		    t for stack_level in SingleBase.getTestStack([test], self.depends)
+		    for t in stack_level
+		]
+		result = [(t, t == "test_setup", t in self.expectedFailures
+		           and t != test) for t in result]
 		return result
 
 	def runTest(self, test):
