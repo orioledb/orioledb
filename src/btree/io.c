@@ -1864,6 +1864,7 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 		return InvalidDiskDownlink;
 	}
 
+	Assert(FileExtentIsValid(page_desc->fileExtent));
 	return MAKE_ON_DISK_DOWNLINK(page_desc->fileExtent);
 }
 
@@ -1918,6 +1919,7 @@ perform_page_io_autonomous(BTreeDescr *desc, uint32 chkpNum, Page img, FileExten
 		return InvalidDiskDownlink;
 	}
 
+	Assert(FileExtentIsValid(*extent));
 	return MAKE_ON_DISK_DOWNLINK(*extent);
 }
 
@@ -2005,6 +2007,7 @@ perform_page_io_build(BTreeDescr *desc, Page img,
 		return InvalidDiskDownlink;
 	}
 
+	Assert(FileExtentIsValid(*extent));
 	return MAKE_ON_DISK_DOWNLINK(*extent);
 }
 
@@ -2036,6 +2039,7 @@ prepare_non_leaf_page(Page p)
 				return false;
 
 			/* XXX: should we also consider checkpoint number of child page? */
+			Assert(FileExtentIsValid(desc->fileExtent));
 			tuphdr->downlink = MAKE_ON_DISK_DOWNLINK(desc->fileExtent);
 		}
 	}
@@ -2102,6 +2106,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 		 * Easy case: page isn't dirty and doesn't need to be written to the
 		 * disk.  Then we just have to change downlink in the parent.
 		 */
+		Assert(FileExtentIsValid(page_desc->fileExtent));
 		int_hdr->downlink = MAKE_ON_DISK_DOWNLINK(page_desc->fileExtent);
 		PAGE_INC_N_ONDISK(parent_page);
 
@@ -2390,6 +2395,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	}
 	else
 	{
+		Assert(FileExtentIsValid(root_desc->fileExtent));
 		new_downlink = MAKE_ON_DISK_DOWNLINK(root_desc->fileExtent);
 		unlock_page(root_blkno);
 	}
