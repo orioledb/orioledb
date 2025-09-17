@@ -1,0 +1,19 @@
+diff --git a/test/pg_tests/perl_include/PostgreSQL/Test/Cluster.pm b/test/pg_tests/perl_include/PostgreSQL/Test/Cluster.pm
+index f2d9afd398..22cd753453 100644
+--- a/test/pg_tests/perl_include/PostgreSQL/Test/Cluster.pm
++++ b/test/pg_tests/perl_include/PostgreSQL/Test/Cluster.pm
+@@ -1060,6 +1060,14 @@ sub start
+ 	}
+ 
+ 	$self->_update_pid(1);
++
++	if ((! -e $self->data_dir . '/standby.signal') && (! -e $self->data_dir . '/recovery.signal'))
++	{
++		$self->safe_psql(
++			'template1', qq{CREATE EXTENSION IF NOT EXISTS orioledb;});
++		$self->safe_psql(
++			'postgres', qq{CREATE EXTENSION IF NOT EXISTS orioledb;});
++	}
+ 	return 1;
+ }
+ 

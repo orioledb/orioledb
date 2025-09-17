@@ -63,11 +63,6 @@ def pg_regress(node: PostgresNode,
 			shutil.rmtree(outputdir)
 
 
-def normalize_name(name: str):
-	name = name.replace('.', '_').replace('-', '_')
-	return f"test_{name}"
-
-
 def parse_isolation_schedule(schedule):
 	with open(schedule, 'r') as f:
 		tests = []
@@ -111,3 +106,44 @@ def pg_isolation_regress(node: PostgresNode,
 	elif clean:
 		if os.path.exists(outputdir):
 			shutil.rmtree(outputdir)
+
+def prove(node: PostgresNode, test, test_path, include_path, timeout=30, verbose=False, clean=True):
+	regressdir = os.path.join(os.environ['PG_SRC_PATH'], 'src/test/regress')
+	pg_regress_path = os.path.join(regressdir, 'pg_regress')
+	prove_path = shutil.which("prove")
+	results_path = os.path.join(node.base_dir, 'results')
+	os.makedirs(results_path, exist_ok=True)
+	outputdir = os.path.join(results_path, test)
+	cmd = [
+	    prove_path, "-I", include_path,
+	]
+	cmd += [os.path.join(test_path, test)]
+	cmd_env = os.environ.copy()
+	cmd_env["PGPORT"] = str(node.port)
+	cmd_env["TESTLOGDIR"] = node.logs_dir
+	cmd_env["TESTDATADIR"] = node.data_dir
+	cmd_env["PG_REGRESS"] = pg_regress_path
+	process = Popen(cmd,
+	                stderr=subprocess.PIPE,
+	                stdout=subprocess.PIPE,
+					env=cmd_env)
+	output, error = process.communicate(timeout=timeout)
+
+	if verbose:
+		print(output.decode("utf-8"))
+		print(error.decode("utf-8"))
+	if process.returncode != 0:
+		raise Exception(f"error when running: {cmd}")
+	elif clean:
+		if os.path.exists(outputdir):
+			shutil.rmtree(outputdir)
+
+
+def normalize_name(name: str):
+	name = name.replace('.', '_').replace('-', '_')
+	return f"test_{name}"
+
+
+def file_name_to_test_name(file: str):
+	name = re.sub(r'^\d+_', '', file.split('.')[0])
+	return f"test_{name}"

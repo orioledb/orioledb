@@ -19,7 +19,6 @@ if not 'PG_SRC_PATH' in os.environ:
 
 script_path = os.path.dirname(os.path.realpath(__file__))
 regressdir = os.path.join(os.environ['PG_SRC_PATH'], 'src/test/regress')
-bindir = pathlib.Path(shutil.which("postgres")).parent.resolve()
 schedule = os.path.join(regressdir, 'parallel_schedule')
 
 groups, depends = parse_regress_schedule(schedule)

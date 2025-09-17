@@ -65,7 +65,6 @@ if not 'PG_SRC_PATH' in os.environ:
 
 script_path = os.path.dirname(os.path.realpath(__file__))
 isolationdir = os.path.join(os.environ['PG_SRC_PATH'], 'src/test/isolation')
-bindir = pathlib.Path(shutil.which("postgres")).parent.resolve()
 schedule = os.path.join(isolationdir, 'isolation_schedule')
 
 tests = parse_isolation_schedule(schedule)

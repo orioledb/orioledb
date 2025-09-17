@@ -201,7 +201,8 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/vacuum_test.py
 TESTGRESCHECKS_PART_3 = test/t/rewind_time_test.py
 PG_TESTS_CHECKS = test.pg_tests.regress \
-				  test.pg_tests.isolation
+				  test.pg_tests.isolation \
+				  test.pg_tests.recovery
 
 PG_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test --temp-instance=./test/tmp_check
 PG_ISOLATION_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test/output_iso --temp-instance=./test/tmp_check_iso
@@ -265,7 +266,13 @@ installcheck:
 	echo "Checks skipped! Build and run installcheck with IS_DEV=1"
 endif
 
-pg_tests_check:
+test/pg_tests/perl_include:
+	cp -sR $(pkglibdir)/pgxs/src/test/perl/ test/pg_tests/perl_include
+	rm test/pg_tests/perl_include/PostgreSQL/Test/Cluster.pm
+	cp $(pkglibdir)/pgxs/src/test/perl/PostgreSQL/Test/Cluster.pm test/pg_tests/perl_include/PostgreSQL/Test/Cluster.pm
+	patch <test/pg_tests/perl_patches/PostgreSQL/Test/Cluster.pm.patch -p1
+
+pg_tests_check: test/pg_tests/perl_include
 	python3 -W ignore::DeprecationWarning -m unittest -v $(PG_TESTS_CHECKS)
 
 else
