@@ -141,7 +141,7 @@ get_reorder_buffer_txn(ReorderBuffer *rb, TransactionId xid)
  */
 static HeapTuple
 convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
-					   OFixedTuple tuple)
+					   OFixedTuple *tuple)
 {
 	int			natts = descr->tupdesc->natts;
 	Datum	   *old_values = palloc0(natts * sizeof(Datum));
@@ -150,13 +150,13 @@ convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
 	int			ctid_off = indexDescr->primaryIsCtid ? 1 : 0;
 
 	/*
-	 * Decode original tuple.
+	 * Decode original tuple. Drop ctid attribute if exists.
 	 */
 	Assert(descr->toast);
 	for (int i = 0; i < natts; i++)
 	{
-		old_values[i] = o_fastgetattr(tuple.tuple, i + 1,
-									  descr->tupdesc,
+		old_values[i] = o_fastgetattr(tuple->tuple, i + ctid_off + 1,
+									  indexDescr->leafTupdesc,
 									  &indexDescr->leafSpec,
 									  &isnull[i]);
 		new_values[i] = old_values[i];
@@ -616,7 +616,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						{
 							HeapTuple	newheaptuple;
 
-							newheaptuple = convert_toast_pointers(descr, indexDescr, tuple);
+							newheaptuple = convert_toast_pointers(descr, indexDescr, &tuple);
 							change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, true);
 							Assert(change->data.tp.newtuple);
 						}
@@ -635,7 +635,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					ReorderBufferQueueChange(ctx->reorder, logicalXid,
 											 changeXLogPtr,
 											 change, (ix_type == oIndexToast));
-
 				}
 				else if (rec_type == WAL_REC_UPDATE)
 				{
@@ -658,7 +657,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					{
 						HeapTuple	newheaptuple;
 
-						newheaptuple = convert_toast_pointers(descr, indexDescr, tuple);
+						newheaptuple = convert_toast_pointers(descr, indexDescr, &tuple);
 						ExecForceStoreHeapTuple(newheaptuple, descr->newTuple, false);
 						change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, true);
 					}
@@ -708,7 +707,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						{
 							HeapTuple	oldheaptuple;
 
-							oldheaptuple = convert_toast_pointers(descr, indexDescr, tuple);
+							oldheaptuple = convert_toast_pointers(descr, indexDescr, &tuple);
 							change->data.tp.oldtuple = record_buffer_tuple(ctx->reorder, oldheaptuple, true);
 						}
 						else	/* Tuple without TOASTed attrs */
