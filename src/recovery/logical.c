@@ -390,10 +390,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				descr = o_fetch_table_descr(cur_oids);
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
 			}
-			else
+			else if(ix_type == oIndexToast)
 			{
-				Assert(ix_type == oIndexToast);
-
 				indexDescr = o_fetch_index_descr(cur_oids, ix_type, false, NULL);
 				descr = o_fetch_table_descr(indexDescr->tableOids);
 				o_toast_tupDesc = descr->toast->leafTupdesc;
@@ -415,6 +413,11 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				 * indexDescr = o_fetch_index_descr(cur_oids, ix_type, false,
 				 * NULL);
 				 */
+			}
+			else
+			{
+				Assert(ix_type == oIndexBridge);
+				// TODO
 			}
 
 			if (descr && descr->toast)

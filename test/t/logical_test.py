@@ -225,6 +225,13 @@ class LogicalTest(BaseTest):
 			                        data3 text,
 			                        i   int
 					) USING orioledb;
+					CREATE TABLE o_test_bridge (
+						data1 text PRIMARY KEY,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+					CREATE INDEX ON o_test_bridge USING brin (data2);
 				"""
 				publisher.safe_psql(create_sql)
 				subscriber.safe_psql(create_sql)
@@ -236,11 +243,16 @@ class LogicalTest(BaseTest):
 					with publisher.connect() as con2:
 						con1.execute("INSERT INTO o_test1 VALUES('foofoo','barbar', 'aaaaaa', 1);")
 						con2.execute("INSERT INTO o_test1 VALUES('mmm','nnn', 'ooo', 2);")
+						con1.execute("INSERT INTO o_test_bridge VALUES('foofoo','barbar', 'aaaaaa', 1);")
+						con2.execute("INSERT INTO o_test_bridge VALUES('mmm','nnn', 'ooo', 2);")
 						con1.commit()
 						con2.commit()
 
 					self.assertListEqual(
 					    publisher.execute('SELECT * FROM o_test1 ORDER BY i'),
+					    [('foofoo','barbar', 'aaaaaa', 1), ('mmm','nnn', 'ooo', 2)])
+					self.assertListEqual(
+					    publisher.execute('SELECT * FROM o_test_bridge ORDER BY i'),
 					    [('foofoo','barbar', 'aaaaaa', 1), ('mmm','nnn', 'ooo', 2)])
 
 					# wait until changes apply on subscriber and check them
@@ -249,6 +261,9 @@ class LogicalTest(BaseTest):
 					self.assertListEqual(
 					    subscriber.execute(
 					        'SELECT * FROM o_test1 ORDER BY i'), [('foofoo','barbar', 'aaaaaa', 1), ('mmm','nnn', 'ooo', 2)])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_bridge ORDER BY i'), [('foofoo','barbar', 'aaaaaa', 1), ('mmm','nnn', 'ooo', 2)])
 
 	def test_recvlogical_and_drop_database(self):
 		node = self.node
