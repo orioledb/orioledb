@@ -3028,9 +3028,11 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 				rightPage,
 				page = O_GET_IN_MEMORY_PAGE(blkno);
 	BTreePageItemLocator loc;
-	BTreeNonLeafTuphdr *tuphdr;
+	BTreeNonLeafTuphdr	*tuphdr = NULL;
+	OrioleDBPageDesc	*rpage_desc = NULL;
 	OTuple		key PG_USED_FOR_ASSERTS_ONLY;
 	bool		mergeParent = false;
+	int			rpage_level = -1;
 
 	if (RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(page)))
 		return false;
@@ -3072,12 +3074,29 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 	}
 
 	rightBlkno = DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink);
-	rightPage = O_GET_IN_MEMORY_PAGE(rightBlkno);
 
 	if (!try_lock_page(rightBlkno))
 	{
 		unlock_page(parentBlkno);
 		return false;
+	}
+
+	rightPage = O_GET_IN_MEMORY_PAGE(rightBlkno);
+	rpage_desc = O_GET_IN_MEMORY_PAGEDESC(rightBlkno);
+	rpage_level = PAGE_GET_LEVEL(rightPage);
+
+	/*
+	 * Leaf pages are going to be written immediately. So, check
+	 * there is no IO in progress.
+	 */
+	if (rpage_level == 0)
+	{
+		if (rpage_desc->ionum >= 0)
+		{
+			unlock_page(parentBlkno);
+			unlock_page(rightBlkno);
+			return false;
+		}
 	}
 
 	if (RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(rightPage)))
@@ -3515,6 +3534,7 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 				{
 					Assert(state->stack[level].autonomous == false);
 					parent_dirty = false;
+					Assert(FileExtentIsValid(O_GET_IN_MEMORY_PAGEDESC(blkno)->fileExtent));
 					downlink = MAKE_ON_DISK_DOWNLINK(O_GET_IN_MEMORY_PAGEDESC(blkno)->fileExtent);
 
 					/* prepare_leaf_page() unlocks page */
@@ -4638,6 +4658,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 		else
 		{
 			parent_dirty = false;
+			Assert(FileExtentIsValid(O_GET_IN_MEMORY_PAGEDESC(blkno)->fileExtent));
 			written_downlink = MAKE_ON_DISK_DOWNLINK(O_GET_IN_MEMORY_PAGEDESC(blkno)->fileExtent);
 		}
 		Assert(FileExtentIsValid(O_GET_IN_MEMORY_PAGEDESC(blkno)->fileExtent));
