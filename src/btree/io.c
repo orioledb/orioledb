@@ -2038,6 +2038,12 @@ prepare_non_leaf_page(Page p)
 			if (IS_DIRTY(child))
 				return false;
 
+			/*
+			 * After clean dirty, there may be an ionum set for an in-progress IO
+			 */
+			if (desc->ionum >= 0)
+				return false;
+
 			/* XXX: should we also consider checkpoint number of child page? */
 			Assert(FileExtentIsValid(desc->fileExtent));
 			tuphdr->downlink = MAKE_ON_DISK_DOWNLINK(desc->fileExtent);
