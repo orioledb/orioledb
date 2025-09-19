@@ -234,21 +234,27 @@ class LogicalTest(BaseTest):
 
 				with publisher.connect() as con1:
 					with publisher.connect() as con2:
-						con1.execute("INSERT INTO o_test1 VALUES('foofoo','barbar', 'aaaaaa', 1);")
-						con2.execute("INSERT INTO o_test1 VALUES('mmm','nnn', 'ooo', 2);")
+						con1.execute(
+						    "INSERT INTO o_test1 VALUES('foofoo','barbar', 'aaaaaa', 1);"
+						)
+						con2.execute(
+						    "INSERT INTO o_test1 VALUES('mmm','nnn', 'ooo', 2);"
+						)
 						con1.commit()
 						con2.commit()
 
 					self.assertListEqual(
 					    publisher.execute('SELECT * FROM o_test1 ORDER BY i'),
-					    [('foofoo','barbar', 'aaaaaa', 1), ('mmm','nnn', 'ooo', 2)])
+					    [('foofoo', 'barbar', 'aaaaaa', 1),
+					     ('mmm', 'nnn', 'ooo', 2)])
 
 					# wait until changes apply on subscriber and check them
 					sub.catchup()
 					# sub.poll_query_until("SELECT orioledb_recovery_synchronized();", expected=True)
 					self.assertListEqual(
-					    subscriber.execute(
-					        'SELECT * FROM o_test1 ORDER BY i'), [('foofoo','barbar', 'aaaaaa', 1), ('mmm','nnn', 'ooo', 2)])
+					    subscriber.execute('SELECT * FROM o_test1 ORDER BY i'),
+					    [('foofoo', 'barbar', 'aaaaaa', 1),
+					     ('mmm', 'nnn', 'ooo', 2)])
 
 	def test_recvlogical_and_drop_database(self):
 		node = self.node
