@@ -27,7 +27,7 @@ jobs:
           - cpu: amd64
             distr: alpine
             runner: ubuntu-24.04
-            distr_version: 3.21
+            distr_version: 3.22
           - cpu: amd64
             distr: ubuntu
             runner: ubuntu-24.04
@@ -35,7 +35,7 @@ jobs:
           - cpu: arm64
             distr: alpine
             runner: ubuntu-24.04-arm
-            distr_version: 3.21
+            distr_version: 3.22
           - cpu: arm64
             distr: ubuntu
             runner: ubuntu-24.04-arm
