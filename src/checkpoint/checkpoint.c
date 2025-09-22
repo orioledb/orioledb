@@ -3032,7 +3032,6 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 	OrioleDBPageDesc	*rpage_desc = NULL;
 	OTuple		key PG_USED_FOR_ASSERTS_ONLY;
 	bool		mergeParent = false;
-	int			rpage_level = -1;
 
 	if (RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(page)))
 		return false;
@@ -3083,20 +3082,15 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 
 	rightPage = O_GET_IN_MEMORY_PAGE(rightBlkno);
 	rpage_desc = O_GET_IN_MEMORY_PAGEDESC(rightBlkno);
-	rpage_level = PAGE_GET_LEVEL(rightPage);
 
 	/*
-	 * Leaf pages are going to be written immediately. So, check
-	 * there is no IO in progress.
+	 * Сheck there is no IO in progress for the right page.
 	 */
-	if (rpage_level == 0)
+	if (rpage_desc->ionum >= 0)
 	{
-		if (rpage_desc->ionum >= 0)
-		{
-			unlock_page(parentBlkno);
-			unlock_page(rightBlkno);
-			return false;
-		}
+		unlock_page(parentBlkno);
+		unlock_page(rightBlkno);
+		return false;
 	}
 
 	if (RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(rightPage)))
