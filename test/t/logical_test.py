@@ -333,6 +333,7 @@ class LogicalTest(BaseTest):
 						con2.commit()
 						con2.execute("SELECT orioledb_get_current_oxid();")
 
+					subscriber.execute("SELECT orioledb_get_current_oxid();")
 					self.assertListEqual(
 					    publisher.execute(
 					        'SELECT * FROM o_test_ctid ORDER BY i'),
