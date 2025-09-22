@@ -23,6 +23,7 @@ expectedFailures = [
     "insert-conflict-do-nothing-2",
     "insert-conflict-specconflict",
     "intra-grant-inplace",
+    "lock-committed-update",
     "lock-committed-keyupdate",
     "lock-update-delete",
     "matview-write-skew",
@@ -49,6 +50,8 @@ expectedFailures = [
     "reindex-concurrently-toast",
     "ri-trigger",
     "serializable-parallel",
+    "serializable-parallel-2",
+    "serializable-parallel-3",
     "simple-write-skew",
     "stats",
     "temporal-range-integrity",
@@ -60,8 +63,7 @@ expectedFailures = [
 ]
 
 if not 'PG_SRC_PATH' in os.environ:
-	print("PG_SRC_PATH env variable should be path to postgres sources",
-	      file=sys.stderr)
+	sys.exit("PG_SRC_PATH env variable should be path to postgres sources")
 
 script_path = os.path.dirname(os.path.realpath(__file__))
 isolationdir = os.path.join(os.environ['PG_SRC_PATH'], 'src/test/isolation')

@@ -1,9 +1,10 @@
 import inspect
-from itertools import repeat
 import sys
-from types import MethodType
 import os
+import time
 
+from itertools import repeat
+from types import MethodType
 from multiprocessing.pool import ThreadPool
 from unittest import TextTestResult
 from unittest.runner import _WritelnDecorator
@@ -22,12 +23,15 @@ class ParralelTextTestResult(TextTestResult):
 		self.stream.write("\n" + self.getDescription(test) + " started \n")
 		self.stream.flush()
 		self._newline = False
+		self.startTime = time.time()
 
 	def printParallelTestStatus(self, test, status):
 		res = "\n" + self.getDescription(test)
 		res += f" finished: {status}"
-		if len(self.collectedDurations) > 0:
+		if hasattr(self, 'collectedDurations') and len(self.collectedDurations) > 0:
 			res += ": %.3fs" % self.collectedDurations[0][1]
+		else:
+			res += ": %.3fs" % (time.time() - self.startTime)
 		res += "\n"
 		self.stream.write(res)
 		self.stream.flush()
@@ -100,12 +104,11 @@ class GroupBase(BaseTest):
 		if expected != real:
 			raise self.failureException(msg)
 		else:
-			print(msg)
+			print(msg, flush=True)
 
 	def getTestList(self, test):
 		from ._g_r_single_test import Run as SingleTest
-		return [(test, test == "test_setup", test
-		         in SingleTest.expectedFailures)]
+		return [(test, test == "test_setup", test == "create_index")]
 
 	def runParallelTest(node, name):
 		from ._g_r_single_test import Run as SingleTest

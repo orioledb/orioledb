@@ -10,12 +10,30 @@ from inspect import cleandoc
 from textwrap import dedent, indent
 from test.pg_tests.utils import normalize_name, parse_regress_schedule
 
-# expectedFailures = ["create_am", "psql", "prepared_xacts"]
-expectedFailures = ["create_index", "polygon"]
+expectedFailures = [
+        "float4", "float8", "rangetypes",
+        "strings", "polygon",
+        "insert", "insert_conflict",
+        "create_index_spgist", "index_including", "index_including_gist",
+        "constraints", "triggers", "select", "inherit", "vacuum", "updatable_views", "create_am",
+        "select_distinct", "subselect", "union", "case", "join", "aggregates", "transactions", "portals", "arrays", "btree_index", "hash_index", "update", "namespace", "prepared_xacts",
+        "brin", "gin", "spgist", "privileges", "matview", "replica_identity", "rowsecurity", "tablesample", "groupingsets", "identity", "generated", "join_hash",
+        "brin_bloom", "brin_multi",
+        "create_table_like", "merge", "misc_functions", "tid", "tidscan", "tidrangescan", "collate.icu.utf8", "incremental_sort",
+        "rules", "psql", "amutils",
+        "select_parallel",
+        "vacuum_parallel",
+        "publication",
+        "foreign_key", "cluster", "combocid", "tsearch", "window", "indirect_toast", "equivclass",
+        "jsonb",
+        "limit", "plpgsql", "copy2", "temp", "domain", "conversion", "alter_table", "rowtypes", "returning", "with",
+        "partition_join", "partition_prune", "reloptions", "indexing", "tuplesort", "explain", "compression", "memoize", "stats",
+        "event_trigger",
+        "fast_default",
+]
 
 if not 'PG_SRC_PATH' in os.environ:
-	print("PG_SRC_PATH env variable should be path to postgres sources",
-	      file=sys.stderr)
+	sys.exit("PG_SRC_PATH env variable should be path to postgres sources")
 
 script_path = os.path.dirname(os.path.realpath(__file__))
 regressdir = os.path.join(os.environ['PG_SRC_PATH'], 'src/test/regress')

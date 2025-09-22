@@ -273,7 +273,7 @@ test/pg_tests/perl_include:
 	cp $(pkglibdir)/pgxs/src/test/perl/PostgreSQL/Test/Cluster.pm test/pg_tests/perl_include/PostgreSQL/Test/Cluster.pm
 	patch <test/pg_tests/perl_patches/PostgreSQL/Test/Cluster.pm.patch -p1
 
-pg_tests_check: test/pg_tests/perl_include
+pg_tests_check: test/pg_tests/perl_include $(INSTALL_REQUIREMENT)
 	python3 -W ignore::DeprecationWarning -m unittest -v $(PG_TESTS_CHECKS)
 
 else

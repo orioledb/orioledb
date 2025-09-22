@@ -30,6 +30,7 @@ def pg_regress(node: PostgresNode,
                first=True,
                fail_ok=False,
                verbose=False,
+               timeout=30,
                clean=True):
 	regressdir = os.path.join(os.environ['PG_SRC_PATH'], 'src/test/regress')
 	pg_regress_path = os.path.join(regressdir, 'pg_regress')
@@ -51,11 +52,11 @@ def pg_regress(node: PostgresNode,
 	                cwd=regressdir,
 	                stderr=subprocess.PIPE,
 	                stdout=subprocess.PIPE)
-	output, error = process.communicate()
+	output, error = process.communicate(timeout=timeout)
 
 	if verbose:
-		print(output.decode("utf-8"))
-		print(error.decode("utf-8"))
+		print(output.decode("utf-8"), flush=True)
+		print(error.decode("utf-8"), flush=True)
 	if process.returncode != 0 and not fail_ok:
 		raise Exception(f"error when running: {cmd}")
 	elif clean:
@@ -99,8 +100,8 @@ def pg_isolation_regress(node: PostgresNode,
 	output, error = process.communicate(timeout=timeout)
 
 	if verbose:
-		print(output.decode("utf-8"))
-		print(error.decode("utf-8"))
+		print(output.decode("utf-8"), flush=True)
+		print(error.decode("utf-8"), flush=True)
 	if process.returncode != 0:
 		raise Exception(f"error when running: {cmd}")
 	elif clean:
@@ -138,8 +139,8 @@ def prove(node: PostgresNode,
 	output, error = process.communicate(timeout=timeout)
 
 	if verbose:
-		print(output.decode("utf-8"))
-		print(error.decode("utf-8"))
+		print(output.decode("utf-8"), flush=True)
+		print(error.decode("utf-8"), flush=True)
 	if process.returncode != 0:
 		raise Exception(f"error when running: {cmd}")
 
