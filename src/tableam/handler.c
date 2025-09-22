@@ -791,7 +791,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 		new_o_table = o_table_tableam_create(new_oids, tupdesc,
 											 rel->rd_rel->relpersistence,
 											 old_o_table->fillfactor,
-											 rel->rd_rel->reltablespace);
+											 rel->rd_rel->reltablespace, old_o_table->replident);
 		o_opclass_cache_add_table(new_o_table);
 		o_table_fill_oids(new_o_table, rel, newrnode, false);
 

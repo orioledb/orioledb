@@ -750,7 +750,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				Assert(ix_type == oIndexBridge);
 			}
 
-			if (descr && descr->toast)
+		if (descr && descr->toast)
 				elog(DEBUG4, "reloid: %d natts: %u toast natts: %u", cur_oids.reloid, descr->tupdesc->natts, descr->toast->leafTupdesc->natts);
 
 		}
