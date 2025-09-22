@@ -955,6 +955,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_DisableRule:
 						case AT_SetTableSpace:
 						case AT_SetStorage:
+						case AT_ReplicaIdentity:
 							break;
 						default:
 							ereport(ERROR,
@@ -969,6 +970,11 @@ orioledb_utility_command(PlannedStmt *pstmt,
 					{
 						case AT_AlterColumnType:
 							o_alter_column_type(cmd, queryString, rel);
+							break;
+						case AT_ReplicaIdentity:
+							ATExecReplicaIdentity(rel, (ReplicaIdentityStmt *) cmd->def, lockmode);
+							elog(WARNING, "Set replident %u", rel->rd_rel->replident);
+//							o_alter_replica_identity(cmd, queryString, rel);
 							break;
 						default:
 							break;
@@ -1485,6 +1491,16 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	free_parsestate(pstate);
 }
 
+/* Set replica identity to FULL *//
+static void 
+o_alter_replica_identity(AlterTableCmd *cmd, const char *queryString, Relation rel)
+{
+	elog(WARNING, "Current replident %u", rel->rd_rel->replident);
+
+	elog(WARNING, "Setting replident %u", );
+	
+}
+
 static void
 o_alter_column_type(AlterTableCmd *cmd, const char *queryString, Relation rel)
 {
@@ -1934,7 +1950,8 @@ create_o_table_for_rel(Relation rel)
 	o_table = o_table_tableam_create(oids, tupdesc,
 									 rel->rd_rel->relpersistence,
 									 RelationGetFillFactor(rel, BTREE_DEFAULT_FILLFACTOR),
-									 rel->rd_rel->reltablespace);
+									 rel->rd_rel->reltablespace
+									 rel->rd_rel->replident);
 	o_opclass_cache_add_table(o_table);
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);

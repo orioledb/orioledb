@@ -629,6 +629,7 @@ fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 	old_context = MemoryContextSwitchTo(descrCxt);
 	descr->refcnt = 0;
 	descr->oids = o_table->oids;
+	descr->replident = o_table->replident;
 	descr->tupdesc = o_table_tupdesc(o_table);
 	descr->oldTuple = MakeSingleTupleTableSlot(descr->tupdesc,
 											   &TTSOpsOrioleDB);

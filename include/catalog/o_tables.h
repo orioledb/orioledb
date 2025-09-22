@@ -99,6 +99,7 @@ typedef struct
 	Oid			tid_btree_ops_oid;	/* have to store it here */
 	bool		has_primary;
 	char		persistence;
+	char		replident;
 	uint8		fillfactor;
 	uint16		data_version;
 	OTableIndex *indices;
