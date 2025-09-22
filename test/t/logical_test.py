@@ -331,9 +331,10 @@ class LogicalTest(BaseTest):
 						)
 						con1.commit()
 						con2.commit()
-						con2.execute("SELECT orioledb_get_current_oxid();")
+#						con2.execute("SELECT orioledb_get_current_oxid();")
 
-					subscriber.execute("SELECT orioledb_get_current_oxid();")
+					publisher.execute("CHECKPOINT;")
+#					subscriber.execute("SELECT orioledb_get_current_oxid();")
 					self.assertListEqual(
 					    publisher.execute(
 					        'SELECT * FROM o_test_ctid ORDER BY i'),
@@ -373,6 +374,7 @@ class LogicalTest(BaseTest):
 					# wait until changes apply on subscriber and check them
 					sub.catchup()
 					# sub.poll_query_until("SELECT orioledb_recovery_synchronized();", expected=True)
+					subscriber.execute("CHECKPOINT;")
 					self.assertListEqual(
 					    subscriber.execute(
 					        'SELECT * FROM o_test_ctid ORDER BY i'),
