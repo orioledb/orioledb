@@ -331,9 +331,10 @@ class LogicalTest(BaseTest):
 						)
 						con1.commit()
 						con2.commit()
+						con2.execute("CHECKPOINT;")
 #						con2.execute("SELECT orioledb_get_current_oxid();")
 
-					publisher.execute("CHECKPOINT;")
+					publisher.safe_psql("CHECKPOINT;")
 #					subscriber.execute("SELECT orioledb_get_current_oxid();")
 					self.assertListEqual(
 					    publisher.execute(
@@ -374,7 +375,7 @@ class LogicalTest(BaseTest):
 					# wait until changes apply on subscriber and check them
 					sub.catchup()
 					# sub.poll_query_until("SELECT orioledb_recovery_synchronized();", expected=True)
-					subscriber.execute("CHECKPOINT;")
+					subscriber.safe_psql("CHECKPOINT;")
 					self.assertListEqual(
 					    subscriber.execute(
 					        'SELECT * FROM o_test_ctid ORDER BY i'),
@@ -390,11 +391,11 @@ class LogicalTest(BaseTest):
 					        'SELECT * FROM o_test_secondary ORDER BY i'),
 					    [('foofoo', 'barbar', 'aaaaaa', 1),
 					     ('mmm', 'nnn', 'ooo', 2)])
-#					self.assertListEqual(
-#					    subscriber.execute(
-#					        'SELECT * FROM o_test_ctid_bridge ORDER BY i'),
-#					    [('foofoo', 'barbar', 'aaaaaa', 1),
-#					     ('mmm', 'nnn', 'ooo', 2)])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_ctid_bridge ORDER BY i'),
+					    [('foofoo', 'barbar', 'aaaaaa', 1),
+					     ('mmm', 'nnn', 'ooo', 2)])
 					self.assertListEqual(
 					    subscriber.execute(
 					        'SELECT * FROM o_test_ctid_secondary ORDER BY i'),
