@@ -3028,8 +3028,8 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 				rightPage,
 				page = O_GET_IN_MEMORY_PAGE(blkno);
 	BTreePageItemLocator loc;
-	BTreeNonLeafTuphdr	*tuphdr = NULL;
-	OrioleDBPageDesc	*rpage_desc = NULL;
+	BTreeNonLeafTuphdr *tuphdr = NULL;
+	OrioleDBPageDesc *rpage_desc = NULL;
 	OTuple		key PG_USED_FOR_ASSERTS_ONLY;
 	bool		mergeParent = false;
 
