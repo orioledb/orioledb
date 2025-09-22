@@ -2031,22 +2031,23 @@ prepare_non_leaf_page(Page p)
 			OInMemoryBlkno child = DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink);
 			OrioleDBPageDesc *desc = O_GET_IN_MEMORY_PAGEDESC(child);
 
+			if (!try_lock_page(child))
+				return false;
+
 			/*
 			 * It's worth less to write non-leaf page, if it's going to anyway
 			 * become dirty after writing of child.
 			 */
-			if (IS_DIRTY(child))
+			if (IS_DIRTY(child) || desc->ionum >= 0)
+			{
+				unlock_page(child);
 				return false;
-
-			/*
-			 * After clean dirty, there may be an ionum set for an in-progress IO
-			 */
-			if (desc->ionum >= 0)
-				return false;
+			}
 
 			/* XXX: should we also consider checkpoint number of child page? */
 			Assert(FileExtentIsValid(desc->fileExtent));
 			tuphdr->downlink = MAKE_ON_DISK_DOWNLINK(desc->fileExtent);
+			unlock_page(child);
 		}
 	}
 
