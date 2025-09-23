@@ -64,6 +64,8 @@ typedef struct
 	uint8		datoid[sizeof(Oid)];
 	uint8		reloid[sizeof(Oid)];
 	uint8		relnode[sizeof(Oid)];
+	char		relreplident;
+	uint8 		relreplident_ix_num;
 } WALRecRelation;
 
 typedef struct

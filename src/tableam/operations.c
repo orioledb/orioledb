@@ -864,7 +864,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 
 				elog(DEBUG3, "CALL o_wal_update");
 
-				o_wal_update(&primary->desc, final_tup);
+				o_wal_update(&primary->desc, final_tup, rel->rd_rel->relreplident);
 			}
 		}
 		else if (mres.action == BTreeOperationDelete)
@@ -892,7 +892,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 				OTuple		old_tup = ((OTableSlot *) oldSlot)->tuple,
 							final_tup = tts_orioledb_form_tuple(slot, descr);
 
-				o_wal_reinsert(&primary->desc, old_tup, final_tup);
+				o_wal_reinsert(&primary->desc, old_tup, final_tup, rel->rd_rel->relreplident);
 			}
 		}
 		else
@@ -964,7 +964,7 @@ o_tbl_delete(Relation rel, OTableDescr *descr, OBTreeKeyBound *primary_key,
 			primary_tuple = ((OTableSlot *) result.oldTuple)->tuple;
 
 			if (primary->desc.storageType == BTreeStoragePersistence)
-				o_wal_delete(&primary->desc, primary_tuple);
+				o_wal_delete(&primary->desc, primary_tuple, rel->rd_rel->relreplident);
 		}
 		else
 		{
