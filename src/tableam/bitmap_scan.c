@@ -917,8 +917,10 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 void
 o_free_bitmap_scan(OBitmapScan *scan)
 {
-	free_btree_seq_scan(scan->seq_scan);
-	o_keybitmap_free(scan->arg.bitmap);
+	if (scan->seq_scan)
+		free_btree_seq_scan(scan->seq_scan);
+	if (scan->arg.bitmap)
+		o_keybitmap_free(scan->arg.bitmap);
 	pfree(scan);
 }
 
