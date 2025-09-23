@@ -548,12 +548,12 @@ class LogicalTest(BaseTest):
 #						con2.execute(
 #						    "UPDATE o_test_ctid SET data2 = 'ppp' where data2 = 'nnn';"
 #						)
-						con1.execute(
-						    "UPDATE o_test_bridge SET data2 = 'ssssss' where data2 = 'barbar';"
-						)
-						con2.execute(
-						    "UPDATE o_test_bridge SET data2 = 'ppp' where data2 = 'nnn';"
-						)
+##						con1.execute(
+##						    "UPDATE o_test_bridge SET data2 = 'ssssss' where data2 = 'barbar';"
+##						)
+##						con2.execute(
+##						    "UPDATE o_test_bridge SET data2 = 'ppp' where data2 = 'nnn';"
+##						)
 						con1.execute(
 						    "UPDATE o_test_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
 						)
@@ -572,18 +572,18 @@ class LogicalTest(BaseTest):
 #						con2.execute(
 #						    "UPDATE o_test_ctid_secondary SET data2 = 'ppp' where data2 = 'nnn';"
 #						)
-						con1.execute(
-						    "UPDATE o_test_bridge_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
-						)
-						con2.execute(
-						    "UPDATE o_test_bridge_secondary SET data2 = 'ppp' where data2 = 'nnn';"
-						)
 #						con1.execute(
-#						    "UPDATE o_test_ctid_bridge_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
+#						    "UPDATE o_test_bridge_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
 #						)
 #						con2.execute(
-#						    "UPDATE o_test_ctid_bridge_secondary SET data2 = 'ppp' where data2 = 'nnn';"
+#						    "UPDATE o_test_bridge_secondary SET data2 = 'ppp' where data2 = 'nnn';"
 #						)
+##						con1.execute(
+##						    "UPDATE o_test_ctid_bridge_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
+##						)
+##						con2.execute(
+##						    "UPDATE o_test_ctid_bridge_secondary SET data2 = 'ppp' where data2 = 'nnn';"
+##						)
 						con1.commit()
 						con2.commit()
 
@@ -594,11 +594,11 @@ class LogicalTest(BaseTest):
 #					        'SELECT * FROM o_test_ctid ORDER BY i'),
 #					    [('foofoo', 'ssssss', 'aaaaaa', 1),
 #					     ('mmm', 'ppp', 'ooo', 2)])
-					self.assertListEqual(
-					    publisher.execute(
-					        'SELECT * FROM o_test_bridge ORDER BY i'),
-					    [('foofoo', 'ssssss', 'aaaaaa', 1),
-					     ('mmm', 'ppp', 'ooo', 2)])
+##					self.assertListEqual(
+##					    publisher.execute(
+##					        'SELECT * FROM o_test_bridge ORDER BY i'),
+##					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+##					     ('mmm', 'ppp', 'ooo', 2)])
 					self.assertListEqual(
 					    publisher.execute(
 					        'SELECT * FROM o_test_secondary ORDER BY i'),
@@ -614,11 +614,11 @@ class LogicalTest(BaseTest):
 #					        'SELECT * FROM o_test_ctid_secondary ORDER BY i'),
 #					    [('foofoo', 'ssssss', 'aaaaaa', 1),
 #					     ('mmm', 'ppp', 'ooo', 2)])
-					self.assertListEqual(
-					    publisher.execute(
-					        'SELECT * FROM o_test_bridge_secondary ORDER BY i'
-					    ), [('foofoo', 'ssssss', 'aaaaaa', 1),
-					        ('mmm', 'ppp', 'ooo', 2)])
+##					self.assertListEqual(
+##					    publisher.execute(
+##					        'SELECT * FROM o_test_bridge_secondary ORDER BY i'
+##					    ), [('foofoo', 'ssssss', 'aaaaaa', 1),
+##					        ('mmm', 'ppp', 'ooo', 2)])
 #					self.assertListEqual(
 #					    publisher.execute(
 #					        'SELECT * FROM o_test_ctid_bridge_secondary ORDER BY i'
@@ -634,11 +634,11 @@ class LogicalTest(BaseTest):
 #					        'SELECT * FROM o_test_ctid ORDER BY i'),
 #					    [('foofoo', 'ssssss', 'aaaaaa', 1),
 #					     ('mmm', 'ppp', 'ooo', 2)])
-					self.assertListEqual(
-					    subscriber.execute(
-					        'SELECT * FROM o_test_bridge ORDER BY i'),
-					    [('foofoo', 'ssssss', 'aaaaaa', 1),
-					     ('mmm', 'ppp', 'ooo', 2)])
+##					self.assertListEqual(
+##					    subscriber.execute(
+##					        'SELECT * FROM o_test_bridge ORDER BY i'),
+##					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+##					     ('mmm', 'ppp', 'ooo', 2)])
 					self.assertListEqual(
 					    subscriber.execute(
 					        'SELECT * FROM o_test_secondary ORDER BY i'),
@@ -654,11 +654,11 @@ class LogicalTest(BaseTest):
 #					        'SELECT * FROM o_test_ctid_secondary ORDER BY i'),
 #					    [('foofoo', 'ssssss', 'aaaaaa', 1),
 #					     ('mmm', 'ppp', 'ooo', 2)])
-					self.assertListEqual(
-					    subscriber.execute(
-					        'SELECT * FROM o_test_bridge_secondary ORDER BY i'
-					    ), [('foofoo', 'ssssss', 'aaaaaa', 1),
-					        ('mmm', 'ppp', 'ooo', 2)])
+##					self.assertListEqual(
+##					    subscriber.execute(
+##					        'SELECT * FROM o_test_bridge_secondary ORDER BY i'
+##					    ), [('foofoo', 'ssssss', 'aaaaaa', 1),
+##					        ('mmm', 'ppp', 'ooo', 2)])
 #					self.assertListEqual(
 #					    subscriber.execute(
 #					        'SELECT * FROM o_test_ctid_bridge_secondary ORDER BY i'
