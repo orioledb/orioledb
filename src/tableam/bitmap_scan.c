@@ -921,6 +921,10 @@ o_free_bitmap_scan(OBitmapScan *scan)
 		free_btree_seq_scan(scan->seq_scan);
 	if (scan->arg.bitmap)
 		o_keybitmap_free(scan->arg.bitmap);
+	if (scan->tbmiterator)
+		tbm_end_iterate(scan->tbmiterator);
+	if (scan->arg.bridged_bitmap)
+		tbm_free(scan->arg.bridged_bitmap);
 	pfree(scan);
 }
 
