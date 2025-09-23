@@ -37,35 +37,65 @@
  */
 static void
 tts_copy_identity(TupleTableSlot *srcSlot, TupleTableSlot *dstSlot,
-				  OIndexDescr *idx)
+				  OTableDescr *desc)
 {
 	int			i;
 	int			nattrs = dstSlot->tts_tupleDescriptor->natts;
+	int			ctid_off = 0;
+	OIndexDescr		idx = GET_PRIMARY(desc); 
 
-	slot_getallattrs(srcSlot);
+	if (idx->primaryIsCtid)
+		ctid_off++;
+	if (idx->bridging)
+		ctid_off++;
 
-	dstSlot->tts_nvalid = nattrs;
-	for (i = 0; i < nattrs; i++)
+	/* Select destination attributes according to replica indentity */
+	if (desc->replident == REPLICA_IDENTITY_FULL)
 	{
-		dstSlot->tts_isnull[i] = true;
-		dstSlot->tts_values[i] = (Datum) 0;
+		nattrs = descr->tupdesc->natts;
+
+		slot_getallattrs(srcSlot);
+		dstSlot->tts_nvalid = nattrs;
+		for (i = 0; i < nattrs; i++)
+		{
+			dstSlot->tts_isnull[i] = true;
+			dstSlot->tts_values[i] = (Datum) 0;
+		}
+
+		for (i = 0; i < nattrs; i++)
+		{
+			int			attnum;
+
+			attnum = idx->tableAttnums[i] - 1;
+			if (attnum >= 0)
+			{
+				dstSlot->tts_values[i] = srcSlot->tts_values[i];
+				dstSlot->tts_isnull[i] = srcSlot->tts_isnull[i];
+			}
+			else if (attnum == -1)
+			{
+				dstSlot->tts_tid = srcSlot->tts_tid;
+			}
+		}
+	}
+	else if (desc->replident == REPLICA_IDENTITY_DEFAULT)
+	{
+		if (indexDescr->primaryIsCtid)
+		{
+			/* REPLICA_IDENTITY_DEFAULT is supported only with real non-ctid primary index */
+			elog(ERROR, "No default replica identity");
+		}
+		else
+		{
+			nattrs = idx->nFields;
+		        //TODO
+		}
+	}
+	else if (desc->replident == REPLICA_IDENTITY_INDEX)
+	{
+		//TODO
 	}
 
-	for (i = 0; i < idx->nonLeafTupdesc->natts; i++)
-	{
-		int			attnum;
-
-		attnum = idx->tableAttnums[i] - 1;
-		if (attnum >= 0)
-		{
-			dstSlot->tts_values[i] = srcSlot->tts_values[i];
-			dstSlot->tts_isnull[i] = srcSlot->tts_isnull[i];
-		}
-		else if (attnum == -1)
-		{
-			dstSlot->tts_tid = srcSlot->tts_tid;
-		}
-	}
 	dstSlot->tts_flags &= ~TTS_FLAG_EMPTY;
 }
 
@@ -518,7 +548,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				snap->active_count++;
 			}
 
-
 			if ((ix_type == oIndexInvalid || ix_type == oIndexToast) &&
 				cur_oids.datoid == ctx->slot->data.database)
 			{
@@ -526,14 +555,14 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				memcpy(tuple.fixedData, ptr, length);
 				tuple.tuple.data = tuple.fixedData;
 
+				change = ReorderBufferGetChange(ctx->reorder);
+				change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
+				change->data.tp.rlocator.dbOid = cur_oids.datoid;
+				change->data.tp.rlocator.relNumber = cur_oids.relnode;
+
 				if (rec_type == WAL_REC_INSERT)
 				{
-
-					change = ReorderBufferGetChange(ctx->reorder);
 					change->action = REORDER_BUFFER_CHANGE_INSERT;
-					change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
-					change->data.tp.rlocator.dbOid = cur_oids.datoid;
-					change->data.tp.rlocator.relNumber = cur_oids.relnode;
 
 					/* Decode TOAST chunks */
 					if (ix_type == oIndexToast)
@@ -551,6 +580,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 									chunk_seq_isnull;
 						int			pk_natts;
 						bool		need_to_free = false;
+
+						change->data.tp.clear_toast_afterwards = false;
 
 						Assert(o_toast_tupDesc);
 						pk_natts = o_toast_tupDesc->natts - TOAST_LEAF_FIELDS_NUM;
@@ -603,7 +634,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						Assert(heap_toast_tupDesc);
 						toasttup = heap_form_tuple(heap_toast_tupDesc, t_values, t_isnull);
 						change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, toasttup, true);
-						change->data.tp.clear_toast_afterwards = false;
 
 						if (need_to_free && new_chunk)
 						{
@@ -614,9 +644,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					else
 					{
 						Assert(ix_type != oIndexToast);
+						change->data.tp.clear_toast_afterwards = true;
 
 						/*
-						 * Primary table contains TOASTed attributes needs
+						 * Primary table contains TOASTable attributes needs
 						 * conversion of them
 						 */
 						if (descr->ntoastable > 0)
@@ -627,7 +658,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 							change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, true);
 							Assert(change->data.tp.newtuple);
 						}
-						else	/* Tuple without TOASTed attrs */
+						else	/* Tuple without TOASTable attrs */
 						{
 							tts_orioledb_store_tuple(descr->newTuple, tuple.tuple,
 													 descr, COMMITSEQNO_INPROGRESS,
@@ -635,8 +666,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 													 NULL);
 							change->data.tp.newtuple = record_buffer_tuple_slot(ctx->reorder, descr->newTuple);
 						}
-						change->data.tp.clear_toast_afterwards = true;
-
 					}
 
 					ReorderBufferQueueChange(ctx->reorder, logicalXid,
@@ -647,17 +676,13 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				{
 					Assert(ix_type != oIndexToast);
 
-					change = ReorderBufferGetChange(ctx->reorder);
 					change->action = REORDER_BUFFER_CHANGE_UPDATE;
 					change->data.tp.clear_toast_afterwards = true;
-					change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
-					change->data.tp.rlocator.dbOid = cur_oids.datoid;
-					change->data.tp.rlocator.relNumber = cur_oids.relnode;
 
 					elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 
 					/*
-					 * Primary table contains TOASTed attributes needs
+					 * Primary table contains TOASTable attributes needs
 					 * conversion of them
 					 */
 					if (descr->ntoastable > 0)
@@ -668,7 +693,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						ExecForceStoreHeapTuple(newheaptuple, descr->newTuple, false);
 						change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, true);
 					}
-					else		/* Tuple without TOASTed attrs */
+					else		/* Tuple without TOASTable attrs */
 					{
 						tts_orioledb_store_tuple(descr->newTuple, tuple.tuple,
 												 descr, COMMITSEQNO_INPROGRESS,
@@ -677,8 +702,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 						change->data.tp.newtuple = record_buffer_tuple_slot(ctx->reorder, descr->newTuple);
 					}
-					tts_copy_identity(descr->newTuple, descr->oldTuple,
-									  GET_PRIMARY(descr));
+					tts_copy_identity(descr->newTuple, descr->oldTuple, descr, replident);
 					change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
 
 					ReorderBufferQueueChange(ctx->reorder, logicalXid,
@@ -687,11 +711,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				}
 				else if (rec_type == WAL_REC_DELETE)
 				{
-					change = ReorderBufferGetChange(ctx->reorder);
 					change->action = REORDER_BUFFER_CHANGE_DELETE;
-					change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
-					change->data.tp.rlocator.dbOid = cur_oids.datoid;
-					change->data.tp.rlocator.relNumber = cur_oids.relnode;
 					elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 					if (ix_type == oIndexToast)
 					{
