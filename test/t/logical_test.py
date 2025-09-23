@@ -412,6 +412,259 @@ class LogicalTest(BaseTest):
 					    ), [('foofoo', 'barbar', 'aaaaaa', 1),
 					        ('mmm', 'nnn', 'ooo', 2)])
 
+	def test_update_logical_subscription(self):
+		with self.node as publisher:
+			publisher.start()
+
+			baseDir = mkdtemp(prefix=self.myName + '_tgsb_')
+			subscriber = testgres.get_new_node('subscriber',
+			                                   port=self.getBasePort() + 1,
+			                                   base_dir=baseDir)
+			subscriber.init(["--no-locale", "--encoding=UTF8"])
+			subscriber.append_conf(shared_preload_libraries='orioledb')
+			subscriber.append_conf(wal_level='logical')
+
+			with subscriber.start() as subscriber:
+				create_sql = """
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE o_test_ctid (
+						data1 text,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+					CREATE TABLE o_test_bridge (
+						data1 text PRIMARY KEY,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+					CREATE INDEX ON o_test_bridge USING spgist (data2);
+					CREATE TABLE o_test_secondary (
+						data1 text PRIMARY KEY,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+					CREATE INDEX ON o_test_secondary (data2);
+					CREATE TABLE o_test_ctid_bridge (
+						data1 text,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+					CREATE INDEX ON o_test_ctid_bridge USING spgist (data1);
+					CREATE TABLE o_test_ctid_secondary (
+						data1 text,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+					CREATE INDEX ON o_test_secondary (data2);
+
+					CREATE TABLE o_test_bridge_secondary (
+						data1 text PRIMARY KEY,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+					CREATE INDEX ON o_test_bridge_secondary USING spgist (data2);
+					CREATE INDEX ON o_test_bridge_secondary (data3);
+					CREATE TABLE o_test_ctid_bridge_secondary (
+						data1 text,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+					CREATE INDEX ON o_test_ctid_bridge_secondary USING spgist (data2);
+					CREATE INDEX ON o_test_ctid_bridge_secondary (data3);
+				"""
+				publisher.safe_psql(create_sql)
+				subscriber.safe_psql(create_sql)
+
+				pub = publisher.publish('test_pub',
+				                        tables=[
+				                            'o_test_ctid', 'o_test_bridge',
+				                            'o_test_secondary',
+				                            'o_test_ctid_bridge',
+				                            'o_test_ctid_secondary',
+				                            'o_test_ctid_bridge_secondary',
+				                            'o_test_bridge_secondary'
+				                        ])
+				sub = subscriber.subscribe(pub, 'test_sub')
+
+				with publisher.connect() as con1:
+					with publisher.connect() as con2:
+						con1.execute(
+						    "INSERT INTO o_test_ctid VALUES('foofoo','barbar', 'aaaaaa', 1);"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_ctid VALUES('mmm','nnn', 'ooo', 2);"
+						)
+						con1.execute(
+						    "INSERT INTO o_test_bridge VALUES('foofoo','barbar', 'aaaaaa', 1);"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_bridge VALUES('mmm','nnn', 'ooo', 2);"
+						)
+						con1.execute(
+						    "INSERT INTO o_test_secondary VALUES('foofoo','barbar', 'aaaaaa', 1);"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_secondary VALUES('mmm','nnn', 'ooo', 2);"
+						)
+						con1.execute(
+						    "INSERT INTO o_test_ctid_bridge VALUES('foofoo','barbar', 'aaaaaa', 1);"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_ctid_bridge VALUES('mmm','nnn', 'ooo', 2);"
+						)
+						con1.execute(
+						    "INSERT INTO o_test_ctid_secondary VALUES('foofoo','barbar', 'aaaaaa', 1);"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_ctid_secondary VALUES('mmm','nnn', 'ooo', 2);"
+						)
+						con1.execute(
+						    "INSERT INTO o_test_bridge_secondary VALUES('foofoo','barbar', 'aaaaaa', 1);"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_bridge_secondary VALUES('mmm','nnn', 'ooo', 2);"
+						)
+						con1.execute(
+						    "INSERT INTO o_test_ctid_bridge_secondary VALUES('foofoo','barbar', 'aaaaaa', 1);"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_ctid_bridge_secondary VALUES('mmm','nnn', 'ooo', 2);"
+						)
+						con1.commit()
+						con2.commit()
+
+				with publisher.connect() as con1:
+					with publisher.connect() as con2:
+#						con1.execute(
+#						    "UPDATE o_test_ctid SET data2 = 'ssssss' where data2 = 'barbar';"
+#						)
+#						con2.execute(
+#						    "UPDATE o_test_ctid SET data2 = 'ppp' where data2 = 'nnn';"
+#						)
+						con1.execute(
+						    "UPDATE o_test_bridge SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test_bridge SET data2 = 'ppp' where data2 = 'nnn';"
+						)
+						con1.execute(
+						    "UPDATE o_test_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test_secondary SET data2 = 'ppp' where data2 = 'nnn';"
+						)
+#						con1.execute(
+#						    "UPDATE o_test_ctid_bridge SET data2 = 'ssssss' where data2 = 'barbar';"
+#						)
+#						con2.execute(
+#						    "UPDATE o_test_ctid_bridge SET data2 = 'ppp' where data2 = 'nnn';"
+#						)
+#						con1.execute(
+#						    "UPDATE o_test_ctid_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
+#						)
+#						con2.execute(
+#						    "UPDATE o_test_ctid_secondary SET data2 = 'ppp' where data2 = 'nnn';"
+#						)
+						con1.execute(
+						    "UPDATE o_test_bridge_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test_bridge_secondary SET data2 = 'ppp' where data2 = 'nnn';"
+						)
+#						con1.execute(
+#						    "UPDATE o_test_ctid_bridge_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
+#						)
+#						con2.execute(
+#						    "UPDATE o_test_ctid_bridge_secondary SET data2 = 'ppp' where data2 = 'nnn';"
+#						)
+						con1.commit()
+						con2.commit()
+
+#					publisher.safe_psql("CHECKPOINT;")
+#					subscriber.execute("SELECT orioledb_get_current_oxid();")
+#					self.assertListEqual(
+#					    publisher.execute(
+#					        'SELECT * FROM o_test_ctid ORDER BY i'),
+#					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+#					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test_bridge ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test_secondary ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
+#					self.assertListEqual(
+#					    publisher.execute(
+#					        'SELECT * FROM o_test_ctid_bridge ORDER BY i'),
+#					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+#					     ('mmm', 'ppp', 'ooo', 2)])
+#					self.assertListEqual(
+#					    publisher.execute(
+#					        'SELECT * FROM o_test_ctid_secondary ORDER BY i'),
+#					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+#					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test_bridge_secondary ORDER BY i'
+					    ), [('foofoo', 'ssssss', 'aaaaaa', 1),
+					        ('mmm', 'ppp', 'ooo', 2)])
+#					self.assertListEqual(
+#					    publisher.execute(
+#					        'SELECT * FROM o_test_ctid_bridge_secondary ORDER BY i'
+#					    ), [('foofoo', 'ssssss', 'aaaaaa', 1),
+#					        ('mmm', 'ppp', 'ooo', 2)])
+
+					# wait until changes apply on subscriber and check them
+					sub.catchup()
+					# sub.poll_query_until("SELECT orioledb_recovery_synchronized();", expected=True)
+#					subscriber.safe_psql("CHECKPOINT;")
+#					self.assertListEqual(
+#					    subscriber.execute(
+#					        'SELECT * FROM o_test_ctid ORDER BY i'),
+#					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+#					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_bridge ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_secondary ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
+#					self.assertListEqual(
+#					    subscriber.execute(
+#					        'SELECT * FROM o_test_ctid_bridge ORDER BY i'),
+#					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+#					     ('mmm', 'ppp', 'ooo', 2)])
+#					self.assertListEqual(
+#					    subscriber.execute(
+#					        'SELECT * FROM o_test_ctid_secondary ORDER BY i'),
+#					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+#					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_bridge_secondary ORDER BY i'
+					    ), [('foofoo', 'ssssss', 'aaaaaa', 1),
+					        ('mmm', 'ppp', 'ooo', 2)])
+#					self.assertListEqual(
+#					    subscriber.execute(
+#					        'SELECT * FROM o_test_ctid_bridge_secondary ORDER BY i'
+#					    ), [('foofoo', 'ssssss', 'aaaaaa', 1),
+#					        ('mmm', 'ppp', 'ooo', 2)])
+
 	def test_recvlogical_and_drop_database(self):
 		node = self.node
 		node.start()
