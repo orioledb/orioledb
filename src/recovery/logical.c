@@ -37,35 +37,65 @@
  */
 static void
 tts_copy_identity(TupleTableSlot *srcSlot, TupleTableSlot *dstSlot,
-				  OIndexDescr *idx)
+				  OTableDescr *desc, char relreplident)
 {
 	int			i;
 	int			nattrs = dstSlot->tts_tupleDescriptor->natts;
+	int			ctid_off = 0;
+	OIndexDescr		idx = GET_PRIMARY(desc); 
 
-	slot_getallattrs(srcSlot);
+	if (idx->primaryIsCtid)
+		ctid_off++;
+	if (idx->bridging)
+		ctid_off++;
 
-	dstSlot->tts_nvalid = nattrs;
-	for (i = 0; i < nattrs; i++)
+	/* Select destination attributes according to replica indentity */
+	if (relreplident == REPLICA_IDENTITY_FULL)
 	{
-		dstSlot->tts_isnull[i] = true;
-		dstSlot->tts_values[i] = (Datum) 0;
+		nattrs = descr->tupdesc->natts;
+
+		slot_getallattrs(srcSlot);
+		dstSlot->tts_nvalid = nattrs;
+		for (i = 0; i < nattrs; i++)
+		{
+			dstSlot->tts_isnull[i] = true;
+			dstSlot->tts_values[i] = (Datum) 0;
+		}
+
+		for (i = 0; i < nattrs; i++)
+		{
+			int			attnum;
+
+			attnum = idx->tableAttnums[i] - 1;
+			if (attnum >= 0)
+			{
+				dstSlot->tts_values[i] = srcSlot->tts_values[i];
+				dstSlot->tts_isnull[i] = srcSlot->tts_isnull[i];
+			}
+			else if (attnum == -1)
+			{
+				dstSlot->tts_tid = srcSlot->tts_tid;
+			}
+		}
+	}
+	else if (relreplident == REPLICA_IDENTITY_DEFAULT)
+	{
+		if (indexDescr->primaryIsCtid)
+		{
+			/* REPLICA_IDENTITY_DEFAULT is supported only with real non-ctid primary index */
+			elog(ERROR, "No default replica identity");
+		}
+		else
+		{
+			nattrs = idx->nFields;
+		        //TODO
+		}
+	}
+	else if (relreplident == REPLICA_IDENTITY_INDEX)
+	{
+		//TODO
 	}
 
-	for (i = 0; i < idx->nonLeafTupdesc->natts; i++)
-	{
-		int			attnum;
-
-		attnum = idx->tableAttnums[i] - 1;
-		if (attnum >= 0)
-		{
-			dstSlot->tts_values[i] = srcSlot->tts_values[i];
-			dstSlot->tts_isnull[i] = srcSlot->tts_isnull[i];
-		}
-		else if (attnum == -1)
-		{
-			dstSlot->tts_tid = srcSlot->tts_tid;
-		}
-	}
 	dstSlot->tts_flags &= ~TTS_FLAG_EMPTY;
 }
 
@@ -239,8 +269,11 @@ set_snapshot(LogicalDecodingContext *ctx,
 
 static void
 decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType ix_type, ReorderBufferChange *change, OTableDescr *descr, OIndexDescr *indexDescr,
-						 TupleDescData *o_toast_tupDesc, TupleDescData *heap_toast_tupDesc, OFixedTuple tuple1, OFixedTuple tuple2, OffsetNumber debug_length)
+						 TupleDescData *o_toast_tupDesc, TupleDescData *heap_toast_tupDesc, OFixedTuple tuple1, OFixedTuple tuple2, OffsetNumber debug_length, char relreplident)
 {
+	if (relreplident != REPLICA_IDENTITY_DEFAULT)
+		elog(LOG, "WAL_REC_UPDATE REPLICA IDENTITY %c", relreplident);
+
 	if (rec_type == WAL_REC_INSERT)
 	{
 		change->action = REORDER_BUFFER_CHANGE_INSERT;
@@ -372,7 +405,7 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 			ExecForceStoreHeapTuple(newheaptuple, descr->newTuple, false);
 			change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, true);
 		}
-		else					/* Tuple without TOASTed attrs */
+		else					/* Tuple without TOASTable attrs */
 		{
 			elog(DEBUG4, "WAL_REC_UPDATE plain");
 
@@ -382,13 +415,14 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 									 NULL);
 			change->data.tp.newtuple = record_buffer_tuple_slot(ctx->reorder, descr->newTuple);
 		}
-		tts_copy_identity(descr->newTuple, descr->oldTuple,
-						  GET_PRIMARY(descr));
+
+		tts_copy_identity(descr->newTuple, descr->oldTuple, relreplident);
 		change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
 	}
 	else if (rec_type == WAL_REC_DELETE)
 	{
 		change->action = REORDER_BUFFER_CHANGE_DELETE;
+
 		if (ix_type == oIndexToast)
 		{
 			elog(DEBUG4, "WAL_REC_DELETE TOAST");
@@ -449,7 +483,7 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 			oldheaptuple = convert_toast_pointers(descr, indexDescr, &tuple2);
 			ExecForceStoreHeapTuple(oldheaptuple, descr->newTuple, false);
 			tts_copy_identity(descr->newTuple, descr->oldTuple,
-							  GET_PRIMARY(descr));
+							  relreplident);
 			change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
 
 			/* Store full tuple into reorderbuffer newtuple */
@@ -495,6 +529,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	OIndexDescr *indexDescr = NULL;
 	int			sys_tree_num = -1;
 	ORelOids	cur_oids = {0, 0, 0};
+	char		relreplident = REPLICA_IDENTITY_DEFAULT;
 	OXid		oxid = InvalidOXid;
 	TransactionId logicalXid = InvalidTransactionId;
 	uint8		rec_type;
@@ -662,6 +697,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			ptr += sizeof(Oid);
 			memcpy(&cur_oids.relnode, ptr, sizeof(Oid));
 			ptr += sizeof(Oid);
+			memcpy(&relreplident, ptr, sizeod(char));
+			ptr += sizeof(char);
 
 			elog(DEBUG4, "WAL_REC_RELATION");
 			if (IS_SYS_TREE_OIDS(cur_oids))
@@ -803,7 +840,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				change->data.tp.rlocator.relNumber = cur_oids.relnode;
 				elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 
-				decode_modify_wal_tuples(ctx, rec_type, ix_type, change, descr, indexDescr, o_toast_tupDesc, heap_toast_tupDesc, tuple1, tuple2, debug_length);
+				decode_modify_wal_tuples(ctx, rec_type, ix_type, change, descr, indexDescr, o_toast_tupDesc, heap_toast_tupDesc, tuple1, tuple2, debug_length, relreplident);
 
 				ReorderBufferQueueChange(ctx->reorder, logicalXid,
 										 changeXLogPtr,
