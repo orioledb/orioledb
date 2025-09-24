@@ -15,7 +15,7 @@ if [ $oomcount != $oomsbefore ]; then
 fi
 
 # show diff if it exists
-for f in ` find ./orioledb/test ./postgresql/src/test -name regression.diffs ` ; do
+for f in ` find ./orioledb/test ./postgresql/src/test -type f \( -name 'regression.diffs' -o -name 'isolation_filtered.diffs' \) ` ; do
 	echo "========= Contents of $f"
 	cat $f
 	status=1

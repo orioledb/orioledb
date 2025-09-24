@@ -46,18 +46,25 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
     # Initialize data directory and set OrioleDB as default AM
     initdb -N --encoding=UTF-8 --locale=C -D $GITHUB_WORKSPACE/pgsql/pgdata
 
-    sed -i "s/^#*shared_preload_libraries.*/shared_preload_libraries = 'orioledb'/" $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+    echo "shared_preload_libraries = 'orioledb'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log start
     make -C src/test/regress installcheck -j $(nproc) || status=$?
     make -C src/test/isolation installcheck -j $(nproc) || status=$?
 
     if [ $status -eq 0 ]; then
-        sed -i "s/^#*default_table_access_method.*/default_table_access_method = 'orioledb'/" $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+        echo "default_table_access_method = 'orioledb'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+        echo "orioledb.strict_mode = true" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
         # Apply test setup SQL patches to reflect enabled OrioleDB
         git apply patches/test_setup_enable_oriole.diff
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log restart
         # Run Postgress regression tests
         make -C src/test/regress installcheck-oriole -j $(nproc) || status=$?
+
+        make -C src/test/isolation EXTRA_REGRESS_OPTS="--load-extension=orioledb" installcheck -j $(nproc) || true
+        if [ -f src/test/isolation/output_iso/regression.diffs ]; then
+          python3 ../orioledb/ci/filter_isolation_diff.py --diff src/test/isolation/output_iso/regression.diffs > src/test/isolation_filtered.diffs
+          [ -s src/test/isolation_filtered.diffs ] || rm src/test/isolation_filtered.diffs src/test/isolation/output_iso/regression.diffs
+        fi
     fi
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log stop
 else
