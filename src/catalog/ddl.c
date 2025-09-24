@@ -1295,7 +1295,21 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			is_orioledb_rel(matviewRel))
 		{
 			if (!stmt->skipData)
+			{
 				savedDataQuery = linitial_node(Query, matviewRel->rd_rules->rules[0]->actions);
+				if (stmt->concurrent)
+				{
+					if (orioledb_strict_mode)
+					{
+						elog(ERROR, "REFRESH MATERIALIZED VIEW CONCURRENTLY is not supported for orioledb tables yet");
+					}
+					else
+					{
+						stmt->concurrent = false;
+						elog(WARNING, "REFRESH MATERIALIZED VIEW CONCURRENTLY is not supported for orioledb tables yet, using a plain REFRESH MATERIALIZED VIEW instead");
+					}
+				}
+			}
 			stmt->skipData = true;
 		}
 		table_close(matviewRel, AccessShareLock);
