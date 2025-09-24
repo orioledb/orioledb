@@ -799,6 +799,16 @@ DROP VIEW bitmap_test_mv;
 
 RESET enable_seqscan;
 
+CREATE TABLE test_no_bmscan_on_text_pkey (data1 text PRIMARY KEY, data2 text, data3 text, i int) USING orioledb;
+CREATE INDEX ON test_no_bmscan_on_text_pkey USING spgist (data2);
+INSERT INTO test_no_bmscan_on_text_pkey VALUES('foofoo','barbar', 'aaaaaa', 1);
+INSERT INTO test_no_bmscan_on_text_pkey VALUES('mmm','nnn', 'ooo', 2);
+SELECT data3 from test_no_bmscan_on_text_pkey where data3 = 'aaaaaa';
+
+SELECT orioledb_tbl_indices('test_no_bmscan_on_text_pkey'::regclass, true);
+EXPLAIN (COSTS OFF) SELECT data2 from test_no_bmscan_on_text_pkey where data2 = 'barbar';
+SELECT data2 from test_no_bmscan_on_text_pkey where data2 = 'barbar';
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;

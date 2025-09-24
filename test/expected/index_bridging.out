@@ -4163,9 +4163,55 @@ SELECT * FROM bitmap_test_mv;
 
 DROP VIEW bitmap_test_mv;
 RESET enable_seqscan;
+CREATE TABLE test_no_bmscan_on_text_pkey (data1 text PRIMARY KEY, data2 text, data3 text, i int) USING orioledb;
+CREATE INDEX ON test_no_bmscan_on_text_pkey USING spgist (data2);
+NOTICE:  index bridging is enabled for orioledb table 'test_no_bmscan_on_text_pkey'
+DETAIL:  index access method 'spgist' is supported only via index bridging for OrioleDB table
+INSERT INTO test_no_bmscan_on_text_pkey VALUES('foofoo','barbar', 'aaaaaa', 1);
+INSERT INTO test_no_bmscan_on_text_pkey VALUES('mmm','nnn', 'ooo', 2);
+SELECT data3 from test_no_bmscan_on_text_pkey where data3 = 'aaaaaa';
+ data3  
+--------
+ aaaaaa
+(1 row)
+
+SELECT orioledb_tbl_indices('test_no_bmscan_on_text_pkey'::regclass, true);
+                        orioledb_tbl_indices                        
+--------------------------------------------------------------------
+ Index test_no_bmscan_on_text_pkey_pkey                            +
+     Index type: primary, unique                                   +
+     Leaf tuple size: 5, non-leaf tuple size: 1                    +
+     Non-leaf tuple fields: data1                                  +
+     Leaf tuple fields: index_bridging_ctid, data1, data2, data3, i+
+ Index index_bridge                                                +
+     Index type: secondary                                         +
+     Leaf tuple size: 2, non-leaf tuple size: 1                    +
+     Non-leaf tuple fields: index_bridging_ctid                    +
+     Leaf tuple fields: index_bridging_ctid, data1                 +
+ Index toast                                                       +
+     Index type: secondary                                         +
+     Leaf tuple size: 4, non-leaf tuple size: 3                    +
+     Non-leaf tuple fields: data1, attnum, chunknum                +
+     Leaf tuple fields: data1, attnum, chunknum, data              +
+ 
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT data2 from test_no_bmscan_on_text_pkey where data2 = 'barbar';
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Index Only Scan using test_no_bmscan_on_text_pkey_data2_idx on test_no_bmscan_on_text_pkey
+   Index Cond: (data2 = 'barbar'::text)
+(2 rows)
+
+SELECT data2 from test_no_bmscan_on_text_pkey where data2 = 'barbar';
+ data2  
+--------
+ barbar
+(1 row)
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 13 other objects
+NOTICE:  drop cascades to 14 other objects
 DETAIL:  drop cascades to table o_test_ix_ams
 drop cascades to table o_test_bridging_with_regular_no_pkey
 drop cascades to table o_test_bridging_with_regular_pkey
@@ -4179,6 +4225,7 @@ drop cascades to table o_test_toast_with_bridged
 drop cascades to table size_test
 drop cascades to table tbl_with_pkey_bridged_toast
 drop cascades to table bitmap_test
+drop cascades to table test_no_bmscan_on_text_pkey
 DROP SCHEMA index_bridging CASCADE;
 NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to function btree_index_content(name)
