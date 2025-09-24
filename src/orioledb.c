@@ -1735,14 +1735,6 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 
 					options = (OBTOptions *) index->rd_options;
 
-					if (index->rd_rel->relam != BTREE_AM_OID || (options && !options->orioledb_index))
-					{
-						index_close(index, AccessShareLock);
-						continue;
-					}
-
-					index_close(index, AccessShareLock);
-
 					/*
 					 * TODO: Remove when parallel index scan will be
 					 * implemented
@@ -1761,6 +1753,14 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 						hasbitmap = hasbitmap && valid;
 					}
 					info->amhasgetbitmap = hasbitmap;
+
+					if (index->rd_rel->relam != BTREE_AM_OID || (options && !options->orioledb_index))
+					{
+						index_close(index, AccessShareLock);
+						continue;
+					}
+
+					index_close(index, AccessShareLock);
 
 					for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
 					{
