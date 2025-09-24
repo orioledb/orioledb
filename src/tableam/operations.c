@@ -889,8 +889,9 @@ o_tbl_insert_with_arbiter(Relation rel,
 	OSnapshot	oSnapshot;
 	CommitSeqNo csn;
 	OXid		oxid;
-	bool		specConflict;
 	Datum		conflictTid;
+
+	elog(WARNING, "o_tbl_insert_with_arbiter BEGIN");
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 	csn = oSnapshot.csn;
@@ -909,6 +910,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 		int			i,
 					failedIndexNumber = -1;
 		bool		success = true;
+		bool		specConflict = false;
 
 		BTreeModifyCallbackInfo callbackInfo = {
 			.waitCallback = o_insert_with_arbiter_wait_callback,
@@ -1064,6 +1066,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 				}
 				STOPEVENT(STOPEVENT_IOC_BEFORE_UPDATE, NULL);
 			}
+			elog(WARNING, "o_tbl_insert_with_arbiter RETURN 0");
 			return NULL;
 		}
 
@@ -1170,10 +1173,12 @@ o_tbl_insert_with_arbiter(Relation rel,
 				}
 			}
 		}
+		elog(WARNING, "o_tbl_insert_with_arbiter RETURN 1");
 		return NULL;
 	}
 
 	Assert(false);
+	elog(WARNING, "o_tbl_insert_with_arbiter RETURN 2");
 	return NULL;
 }
 

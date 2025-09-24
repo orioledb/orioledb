@@ -147,6 +147,7 @@ SELECT * FROM ranges;
 INSERT INTO ranges VALUES(int4range(-6, -3), '[2, 5)');
 SELECT * FROM ranges;
 SELECT orioledb_tbl_structure('ranges'::regclass);
+\q
 
 -- succeed, because violation is ignored
 INSERT INTO ranges VALUES(int4range(-6, -3), '[2, 5)')
@@ -172,28 +173,6 @@ SELECT orioledb_tbl_structure('ranges'::regclass);
 INSERT INTO ranges VALUES(int4range(-4, -3), '[12, 15)');
 SELECT * FROM ranges;
 SELECT orioledb_tbl_structure('ranges'::regclass);
-
-DROP EXTENSION orioledb CASCADE;
-DROP SCHEMA ddl CASCADE;
-RESET search_path;
-\q
-
--- -- succeed because c1 doesn't overlap
--- INSERT INTO ranges VALUES('<(20,20), 1>', '<(0,0), 5>');
--- -- succeed because c2 doesn't overlap
--- INSERT INTO ranges VALUES('<(20,20), 10>', '<(10,10), 5>');
-
--- SELECT orioledb_tbl_structure('ranges'::regclass);
--- SELECT * FROM ranges;
-
--- -- CREATE INDEX ranges_ix2 ON ranges USING gist (c1, (c2::circle));
--- ALTER TABLE ranges ADD EXCLUDE USING gist (c1 WITH &&, (c2::circle) WITH &&);
-
--- -- try reindexing an existing constraint
--- REINDEX INDEX ranges_c1_c2_excl;
--- REINDEX INDEX ranges_ix1;
-
--- DROP TABLE ranges;
 
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;
