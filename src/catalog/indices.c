@@ -285,9 +285,6 @@ o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTa
 	int			nattrs;
 	OIndexType	ix_type;
 
-	if (index->rd_index->indisexclusion)
-		elog(ERROR, "exclusion indices are not supported.");
-
 	if (o_table == NULL)
 	{
 		o_table = o_tables_get(oids);
