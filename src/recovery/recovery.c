@@ -1689,6 +1689,9 @@ orioledb_recovery_synchronized(PG_FUNCTION_ARGS)
 {
 	XLogRecPtr	ptr = pg_atomic_read_u64(recovery_ptr);
 
+	if (!ptr)
+		PG_RETURN_BOOL(true);
+
 	if (ptr != recovery_get_current_ptr())
 		PG_RETURN_BOOL(false);
 
