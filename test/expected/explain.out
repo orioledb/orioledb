@@ -1331,12 +1331,68 @@ SELECT explain_as_json($$
  0
 (1 row)
 
+CREATE TABLE test_explain_bridged_index (
+  num      integer PRIMARY KEY,
+  the_geom box NOT NULL
+) 
+USING orioledb;
+INSERT INTO test_explain_bridged_index (num, the_geom)
+SELECT (x*1000 + y) AS num,
+       box( point(x+1, y+1), point(x, y) )
+FROM generate_series(0, 99)  AS x
+CROSS JOIN generate_series(0, 99) AS y;
+CREATE INDEX test_the_geom_brin
+  ON test_explain_bridged_index
+  USING BRIN (the_geom)
+  WITH (pages_per_range = 64);
+NOTICE:  index bridging is enabled for orioledb table 'test_explain_bridged_index'
+DETAIL:  index access method 'brin' is supported only via index bridging for OrioleDB table
+ANALYZE test_explain_bridged_index;
+BEGIN;
+SET LOCAL enable_indexscan  = off;
+SET LOCAL enable_bitmapscan = on;
+SET LOCAL enable_seqscan    = off;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text($$ 
+		EXPLAIN (ANALYZE, BUFFERS, VERBOSE)
+			SELECT num, the_geom::text AS wkt_like
+				FROM test_explain_bridged_index
+				WHERE the_geom && box( point(125,135), point(125,125) )
+				ORDER BY num;
+	$$) as t;
+                                                         regexp_replace                                                         
+--------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Output: num, ((the_geom)::text)
+   Sort Key: test_explain_bridged_indexxnum
+   Sort Method: quicksort  Memory: xkB
+   Buffers: shared hit=x
+   ->  Result  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+         Output: num, (the_geom)::text
+         Buffers: shared hit=x
+         ->  Custom Scan (o_scan) on explainxtest_explain_bridged_index  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+               Output: num, the_geom
+               Bitmap heap scan
+               Recheck Cond: (test_explain_bridged_indexxthe_geom && '(x,x),(x,x)'::box)
+               ->  Bitmap Index Scan on test_the_geom_brin  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+                     Index Cond: (test_explain_bridged_indexxthe_geom && '(x,x),(x,x)'::box)
+                     Buffers: shared hit=x
+               Other pages: read=x
+               Buffers: shared hit=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(21 rows)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to table o_explain
 drop cascades to table o_test_explain_verbose_rowid
 drop cascades to table o_explain_formats
 drop cascades to table o_explain_json
+drop cascades to table test_explain_bridged_index
 DROP SCHEMA explain CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to function generate_string(integer,integer)

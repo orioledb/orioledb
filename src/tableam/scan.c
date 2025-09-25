@@ -963,8 +963,22 @@ o_explain_node(PlanState *planstate, OExplainContext *ec)
 						if (indexDescr->oids.reloid == bm_scan->indexid)
 							break;
 					}
-					Assert(ix_num < descr->nIndices);
-					eanalyze_counters_explain(descr, &eaCounters[ix_num], ec->es);
+#ifdef USE_ASSERT_CHECKING
+					if (ix_num >= descr->nIndices)
+					{
+						Relation	index = index_open(bm_scan->indexid, AccessShareLock);
+
+						if (index->rd_rel->relam == BTREE_AM_OID &&
+							!(index->rd_options && !((OBTOptions *) index->rd_options)->orioledb_index))
+						{
+							Assert(false);
+						}
+
+						index_close(index, AccessShareLock);
+					}
+					else
+#endif
+						eanalyze_counters_explain(descr, &eaCounters[ix_num], ec->es);
 				}
 				switch (ec->es->format)
 				{
