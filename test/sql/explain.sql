@@ -356,6 +356,36 @@ SELECT explain_as_json($$
 			   SELECT * FROM o_explain_json ORDER BY val_1;
 	   $$)->0->'Plan'->'Actual Rows';
 
+CREATE TABLE test_explain_bridged_index (
+  num      integer PRIMARY KEY,
+  the_geom box NOT NULL
+) 
+USING orioledb;
+INSERT INTO test_explain_bridged_index (num, the_geom)
+SELECT (x*1000 + y) AS num,
+       box( point(x+1, y+1), point(x, y) )
+FROM generate_series(0, 99)  AS x
+CROSS JOIN generate_series(0, 99) AS y;
+CREATE INDEX test_the_geom_brin
+  ON test_explain_bridged_index
+  USING BRIN (the_geom)
+  WITH (pages_per_range = 64);
+ANALYZE test_explain_bridged_index;
+BEGIN;
+SET LOCAL enable_indexscan  = off;
+SET LOCAL enable_bitmapscan = on;
+SET LOCAL enable_seqscan    = off;
+
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text($$ 
+		EXPLAIN (ANALYZE, BUFFERS, VERBOSE)
+			SELECT num, the_geom::text AS wkt_like
+				FROM test_explain_bridged_index
+				WHERE the_geom && box( point(125,135), point(125,125) )
+				ORDER BY num;
+	$$) as t;
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA explain CASCADE;
 RESET search_path;

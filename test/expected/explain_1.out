@@ -83,9 +83,7 @@ EXPLAIN (BUFFERS TRUE) SELECT count(*) FROM o_explain;
 ------------------------------------------------------------------
  Aggregate  (cost=21.64..21.65 rows=1 width=8)
    ->  Seq Scan on o_explain  (cost=0.00..19.31 rows=931 width=0)
- Planning:
-   Buffers: shared hit=1
-(4 rows)
+(2 rows)
 
 -- test lowecase letters
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -96,11 +94,9 @@ FROM query_to_text($$ EXPLAIN (analyze TRUE, buffers TRUE)
 -------------------------------------------------------------------------------------
  Aggregate  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    ->  Seq Scan on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
- Planning:
-   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(6 rows)
+(4 rows)
 
 -- does not use TOAST tree (does not fetch TOASTed values)
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -111,11 +107,9 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 -------------------------------------------------------------------------------------
  Aggregate  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    ->  Seq Scan on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
- Planning:
-   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(6 rows)
+(4 rows)
 
 -- Add text_ops to pg_amop cache to keep ANALYZE BUFFERS consistent during runs
 SELECT * FROM o_explain WHERE val = 'A' ORDER BY val LIMIT 1;
@@ -158,26 +152,26 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
                                           regexp_replace                                           
 ---------------------------------------------------------------------------------------------------
  Insert on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Buffers: shared hit=x
    ->  Function Scan on generate_series id  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
  Planning Time: x ms
  Execution Time: x ms
-(4 rows)
+(5 rows)
 
 -- use secondary index for scan
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT *
 					FROM o_explain ORDER BY val; $$) as t;
-                                      regexp_replace                                       
--------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index only scan of: o_explain_sec_non_val
-   Secondary index (o_explain_sec_non_val) pages: read=x
+                                                  regexp_replace                                                  
+------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using o_explain_sec_non_val on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Heap Fetches: x
  Planning:
-   Buffers: shared hit=x read=x
+   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(7 rows)
+(6 rows)
 
 -- do not use secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -187,11 +181,9 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
                                 regexp_replace                                 
 -------------------------------------------------------------------------------
  Seq Scan on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
- Planning:
-   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(5 rows)
+(3 rows)
 
 DROP TABLE o_explain;
 CREATE TABLE o_explain (
@@ -226,142 +218,108 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT SUM(val2) FROM o_explain WHERE val2 > 0
 					AND val2 < 1000; $$) as t;
-                                         regexp_replace                                          
--------------------------------------------------------------------------------------------------
+                                                     regexp_replace                                                      
+-------------------------------------------------------------------------------------------------------------------------
  Aggregate  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   ->  Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-         Forward index only scan of: o_explain_sec_non_valx
-         Conds: ((valx > x) AND (valx < x))
-         Secondary index (o_explain_sec_non_valx) pages: read=x
- Planning:
-   Buffers: shared hit=x
+   ->  Index Only Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+         Index Cond: ((valx > x) AND (valx < x))
+         Heap Fetches: x
  Planning Time: x ms
  Execution Time: x ms
-(9 rows)
+(6 rows)
 
+-- TODO: Make this work again if this is important (uses scan index now)
 -- uses only secondary index - primary index is ctid index stored in secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT ctid FROM o_explain WHERE val2 > 0
 					AND val2 < 1000; $$) as t;
-                                      regexp_replace                                       
--------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index scan of: o_explain_sec_non_valx
-   Conds: ((valx > x) AND (valx < x))
-   Primary pages: read=x
-   Secondary index (o_explain_sec_non_valx) pages: read=x
- Planning:
+                                                regexp_replace                                                
+--------------------------------------------------------------------------------------------------------------
+ Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Index Cond: ((valx > x) AND (valx < x))
    Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(9 rows)
+(5 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT key FROM o_explain WHERE val2 > 0
 					AND val2 < 1000; $$) as t;
-                                      regexp_replace                                       
--------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index scan of: o_explain_sec_non_valx
-   Conds: ((valx > x) AND (valx < x))
-   Primary pages: read=x
-   Secondary index (o_explain_sec_non_valx) pages: read=x
- Planning:
-   Buffers: shared hit=x
+                                                regexp_replace                                                
+--------------------------------------------------------------------------------------------------------------
+ Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Index Cond: ((valx > x) AND (valx < x))
  Planning Time: x ms
  Execution Time: x ms
-(9 rows)
+(4 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT key, val1 FROM o_explain WHERE val2 > 0
 					AND val2 < 1000; $$) as t;
-                                      regexp_replace                                       
--------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index scan of: o_explain_sec_non_valx
-   Conds: ((valx > x) AND (valx < x))
-   Primary pages: read=x
-   Secondary index (o_explain_sec_non_valx) pages: read=x
- Planning:
-   Buffers: shared hit=x
+                                                regexp_replace                                                
+--------------------------------------------------------------------------------------------------------------
+ Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Index Cond: ((valx > x) AND (valx < x))
  Planning Time: x ms
  Execution Time: x ms
-(9 rows)
+(4 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT key, val2 FROM o_explain WHERE val2 > 0
 					AND val2 < 1000; $$) as t;
-                                      regexp_replace                                       
--------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index scan of: o_explain_sec_non_valx
-   Conds: ((valx > x) AND (valx < x))
-   Primary pages: read=x
-   Secondary index (o_explain_sec_non_valx) pages: read=x
- Planning:
-   Buffers: shared hit=x
+                                                regexp_replace                                                
+--------------------------------------------------------------------------------------------------------------
+ Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Index Cond: ((valx > x) AND (valx < x))
  Planning Time: x ms
  Execution Time: x ms
-(9 rows)
+(4 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val1 FROM o_explain WHERE val2 > 0; $$) as t;
-                                      regexp_replace                                       
--------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index scan of: o_explain_sec_non_valx
-   Conds: (valx > x)
-   Primary pages: read=x
-   Secondary index (o_explain_sec_non_valx) pages: read=x
- Planning:
-   Buffers: shared hit=x
+                                                regexp_replace                                                
+--------------------------------------------------------------------------------------------------------------
+ Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Index Cond: (valx > x)
  Planning Time: x ms
  Execution Time: x ms
-(9 rows)
+(4 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val1, val2 FROM o_explain WHERE val2 > 0
 					AND val2 < 1000; $$) as t;
-                                      regexp_replace                                       
--------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index scan of: o_explain_sec_non_valx
-   Conds: ((valx > x) AND (valx < x))
-   Primary pages: read=x
-   Secondary index (o_explain_sec_non_valx) pages: read=x
- Planning:
-   Buffers: shared hit=x
+                                                regexp_replace                                                
+--------------------------------------------------------------------------------------------------------------
+ Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Index Cond: ((valx > x) AND (valx < x))
  Planning Time: x ms
  Execution Time: x ms
-(9 rows)
+(4 rows)
 
 -- uses only secondary index for fetching values from secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val2 FROM o_explain WHERE val2 > 0
 					AND val2 < 1000; $$) as t;
-                                      regexp_replace                                       
--------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index only scan of: o_explain_sec_non_valx
-   Conds: ((valx > x) AND (valx < x))
-   Secondary index (o_explain_sec_non_valx) pages: read=x
- Planning:
-   Buffers: shared hit=x
+                                                  regexp_replace                                                   
+-------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Index Cond: ((valx > x) AND (valx < x))
+   Heap Fetches: x
  Planning Time: x ms
  Execution Time: x ms
-(8 rows)
+(5 rows)
 
 SELECT * FROM o_explain WHERE val2 BETWEEN 1 AND 10;
  key | val1 | val2 
@@ -413,123 +371,96 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 							WHERE val2 > 0 AND val2 < 1000
 							ORDER BY val2
 					) s; $$) as t;
-                                         regexp_replace                                          
--------------------------------------------------------------------------------------------------
+                                                     regexp_replace                                                      
+-------------------------------------------------------------------------------------------------------------------------
  Aggregate  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   ->  Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-         Forward index only scan of: o_explain_sec_non_valx
-         Conds: ((valx > x) AND (valx < x))
-         Secondary index (o_explain_sec_non_valx) pages: read=x
- Planning:
-   Buffers: shared hit=x
+   ->  Index Only Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+         Index Cond: ((valx > x) AND (valx < x))
+         Heap Fetches: x
  Planning Time: x ms
  Execution Time: x ms
-(9 rows)
+(6 rows)
 
 -- uses secondary index, primary key is stored in secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT key FROM o_explain WHERE val2 > 0
 					AND val2 < 1000 ORDER BY val2; $$) as t;
-                                      regexp_replace                                       
--------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index only scan of: o_explain_sec_non_valx
-   Conds: ((valx > x) AND (valx < x))
-   Secondary index (o_explain_sec_non_valx) pages: read=x
- Planning:
-   Buffers: shared hit=x
+                                                  regexp_replace                                                   
+-------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Index Cond: ((valx > x) AND (valx < x))
+   Heap Fetches: x
  Planning Time: x ms
  Execution Time: x ms
-(8 rows)
+(5 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT key, val1 FROM o_explain WHERE val2 > 0
 					AND val2 < 1000 ORDER BY val2; $$) as t;
-                                      regexp_replace                                       
--------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index scan of: o_explain_sec_non_valx
-   Conds: ((valx > x) AND (valx < x))
-   Primary pages: read=x
-   Secondary index (o_explain_sec_non_valx) pages: read=x
- Planning:
-   Buffers: shared hit=x
+                                                regexp_replace                                                
+--------------------------------------------------------------------------------------------------------------
+ Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Index Cond: ((valx > x) AND (valx < x))
  Planning Time: x ms
  Execution Time: x ms
-(9 rows)
+(4 rows)
 
 -- uses only secondary index for fetching secondary index value and primary key
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT key, val2 FROM o_explain WHERE val2 > 0
 					AND val2 < 1000 ORDER BY val2; $$) as t;
-                                      regexp_replace                                       
--------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index only scan of: o_explain_sec_non_valx
-   Conds: ((valx > x) AND (valx < x))
-   Secondary index (o_explain_sec_non_valx) pages: read=x
- Planning:
-   Buffers: shared hit=x
+                                                  regexp_replace                                                   
+-------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Index Cond: ((valx > x) AND (valx < x))
+   Heap Fetches: x
  Planning Time: x ms
  Execution Time: x ms
-(8 rows)
+(5 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val1 FROM o_explain WHERE val2 > 0
 					AND val2 < 1000 ORDER BY val2; $$) as t;
-                                      regexp_replace                                       
--------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index scan of: o_explain_sec_non_valx
-   Conds: ((valx > x) AND (valx < x))
-   Primary pages: read=x
-   Secondary index (o_explain_sec_non_valx) pages: read=x
- Planning:
-   Buffers: shared hit=x
+                                                regexp_replace                                                
+--------------------------------------------------------------------------------------------------------------
+ Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Index Cond: ((valx > x) AND (valx < x))
  Planning Time: x ms
  Execution Time: x ms
-(9 rows)
+(4 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val1, val2 FROM o_explain WHERE val2 > 0
 					AND val2 < 1000 ORDER BY val2; $$) as t;
-                                      regexp_replace                                       
--------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index scan of: o_explain_sec_non_valx
-   Conds: ((valx > x) AND (valx < x))
-   Primary pages: read=x
-   Secondary index (o_explain_sec_non_valx) pages: read=x
- Planning:
-   Buffers: shared hit=x
+                                                regexp_replace                                                
+--------------------------------------------------------------------------------------------------------------
+ Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Index Cond: ((valx > x) AND (valx < x))
  Planning Time: x ms
  Execution Time: x ms
-(9 rows)
+(4 rows)
 
 -- uses only secondary index for fetching values from secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val2 FROM o_explain WHERE val2 > 0
 					AND val2 < 1000 ORDER BY val2; $$) as t;
-                                      regexp_replace                                       
--------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index only scan of: o_explain_sec_non_valx
-   Conds: ((valx > x) AND (valx < x))
-   Secondary index (o_explain_sec_non_valx) pages: read=x
- Planning:
-   Buffers: shared hit=x
+                                                  regexp_replace                                                   
+-------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Index Cond: ((valx > x) AND (valx < x))
+   Heap Fetches: x
  Planning Time: x ms
  Execution Time: x ms
-(8 rows)
+(5 rows)
 
 SELECT * FROM o_explain WHERE val2 BETWEEN 1 AND 10;
  key | val1 | val2 
@@ -564,7 +495,7 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
  Update on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    ->  Seq Scan on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
  Planning:
-   Buffers: shared hit=x read=x
+   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
 (6 rows)
@@ -619,7 +550,7 @@ EXPLAIN (VERBOSE, COSTS OFF)
 --------------------------------------------------------
  Update on explain.o_test_explain_verbose_rowid
    ->  Seq Scan on explain.o_test_explain_verbose_rowid
-         Output: val_1, 10, rowid
+         Output: 10, rowid
 (3 rows)
 
 CREATE TABLE o_explain_formats (
@@ -646,7 +577,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
                Secondary index (o_explain_formats_val_key) pages: read=x
          Primary pages: read=x
  Planning:
-   Buffers: shared hit=x read=x
+   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
 (14 rows)
@@ -660,6 +591,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
  - Plan:                                              +
      Node Type: "Sort"                                +
      Parallel Aware: false                            +
+     Async Capable: false                             +
      Startup Cost: x                                  +
      Total Cost: x                                    +
      Plan Rows: x                                     +
@@ -688,6 +620,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
          Parent Relationship: "Outer"                 +
          Custom Plan Provider: "o_scan"               +
          Parallel Aware: false                        +
+         Async Capable: false                         +
          Relation Name: "o_explain_formats"           +
          Alias: "o_explain_formats"                   +
          Startup Cost: x                              +
@@ -705,6 +638,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
            - Node Type: "Bitmap Index Scan"           +
              Parent Relationship: "Outer"             +
              Parallel Aware: false                    +
+             Async Capable: false                     +
              Index Name: "o_explain_formats_val_key"  +
              Startup Cost: x                          +
              Total Cost: x                            +
@@ -767,6 +701,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
      "Plan": {                                             +
        "Node Type": "Sort",                                +
        "Parallel Aware": false,                            +
+       "Async Capable": false,                             +
        "Startup Cost": x,                                  +
        "Total Cost": x,                                    +
        "Plan Rows": x,                                     +
@@ -795,6 +730,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
            "Parent Relationship": "Outer",                 +
            "Custom Plan Provider": "o_scan",               +
            "Parallel Aware": false,                        +
+           "Async Capable": false,                         +
            "Relation Name": "o_explain_formats",           +
            "Alias": "o_explain_formats",                   +
            "Startup Cost": x,                              +
@@ -813,6 +749,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
                "Node Type": "Bitmap Index Scan",           +
                "Parent Relationship": "Outer",             +
                "Parallel Aware": false,                    +
+               "Async Capable": false,                     +
                "Index Name": "o_explain_formats_val_key",  +
                "Startup Cost": x,                          +
                "Total Cost": x,                            +
@@ -886,6 +823,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
      <Plan>                                                                +
        <Node-Type>Sort</Node-Type>                                         +
        <Parallel-Aware>false</Parallel-Aware>                              +
+       <Async-Capable>false</Async-Capable>                                +
        <Startup-Cost>x</Startup-Cost>                                      +
        <Total-Cost>x</Total-Cost>                                          +
        <Plan-Rows>x</Plan-Rows>                                            +
@@ -916,6 +854,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
            <Parent-Relationship>Outer</Parent-Relationship>                +
            <Custom-Plan-Provider>o_scan</Custom-Plan-Provider>             +
            <Parallel-Aware>false</Parallel-Aware>                          +
+           <Async-Capable>false</Async-Capable>                            +
            <Relation-Name>o_explain_formats</Relation-Name>                +
            <Alias>o_explain_formats</Alias>                                +
            <Startup-Cost>x</Startup-Cost>                                  +
@@ -934,6 +873,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
                <Node-Type>Bitmap Index Scan</Node-Type>                    +
                <Parent-Relationship>Outer</Parent-Relationship>            +
                <Parallel-Aware>false</Parallel-Aware>                      +
+               <Async-Capable>false</Async-Capable>                        +
                <Index-Name>o_explain_formats_val_key</Index-Name>          +
                <Startup-Cost>x</Startup-Cost>                              +
                <Total-Cost>x</Total-Cost>                                  +
@@ -1004,72 +944,61 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 	FROM query_to_text($$ EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
 							SELECT * FROM o_explain_formats
 								WHERE val > 5 ORDER BY val; $$) as t;
-                                          regexp_replace                                           
----------------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain_formats  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index scan of: o_explain_formats_val_key
-   Conds: (val > x)
-   Primary pages: read=x
-   Secondary index (o_explain_formats_val_key) pages: read=x
- Planning:
-   Buffers: shared hit=x
+                                                     regexp_replace                                                      
+-------------------------------------------------------------------------------------------------------------------------
+ Index Scan using o_explain_formats_val_key on o_explain_formats  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Index Cond: (val > x)
  Planning Time: x ms
  Execution Time: x ms
-(9 rows)
+(4 rows)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 	FROM query_to_text($$ EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
 							SELECT * FROM o_explain_formats
 								WHERE val > 5 ORDER BY val; $$) as t;
-                regexp_replace                 
------------------------------------------------
- - Plan:                                      +
-     Node Type: "Custom Scan"                 +
-     Custom Plan Provider: "o_scan"           +
-     Parallel Aware: false                    +
-     Relation Name: "o_explain_formats"       +
-     Alias: "o_explain_formats"               +
-     Startup Cost: x                          +
-     Total Cost: x                            +
-     Plan Rows: x                             +
-     Plan Width: x                            +
-     Actual Startup Time: x                   +
-     Actual Total Time: x                     +
-     Actual Rows: x                           +
-     Actual Loops: x                          +
-     Scan Direction: "Forward"                +
-     Index Name: "o_explain_formats_val_key"  +
-     Custom Scan Subtype: "Index Scan"        +
-     Index Cond: "(val > x)"                  +
-     Rows Removed by Index Recheck: x         +
-     Primary Pages:                           +
-       Read: x                                +
-     Secondary Index Pages:                   +
-       Index Name: "o_explain_formats_val_key"+
-       Read: x                                +
-     Shared Hit Blocks: x                     +
-     Shared Read Blocks: x                    +
-     Shared Dirtied Blocks: x                 +
-     Shared Written Blocks: x                 +
-     Local Hit Blocks: x                      +
-     Local Read Blocks: x                     +
-     Local Dirtied Blocks: x                  +
-     Local Written Blocks: x                  +
-     Temp Read Blocks: x                      +
-     Temp Written Blocks: x                   +
-   Planning:                                  +
-     Shared Hit Blocks: x                     +
-     Shared Read Blocks: x                    +
-     Shared Dirtied Blocks: x                 +
-     Shared Written Blocks: x                 +
-     Local Hit Blocks: x                      +
-     Local Read Blocks: x                     +
-     Local Dirtied Blocks: x                  +
-     Local Written Blocks: x                  +
-     Temp Read Blocks: x                      +
-     Temp Written Blocks: x                   +
-   Planning Time: x                           +
-   Triggers:                                  +
+               regexp_replace                
+---------------------------------------------
+ - Plan:                                    +
+     Node Type: "Index Scan"                +
+     Parallel Aware: false                  +
+     Async Capable: false                   +
+     Scan Direction: "Forward"              +
+     Index Name: "o_explain_formats_val_key"+
+     Relation Name: "o_explain_formats"     +
+     Alias: "o_explain_formats"             +
+     Startup Cost: x                        +
+     Total Cost: x                          +
+     Plan Rows: x                           +
+     Plan Width: x                          +
+     Actual Startup Time: x                 +
+     Actual Total Time: x                   +
+     Actual Rows: x                         +
+     Actual Loops: x                        +
+     Index Cond: "(val > x)"                +
+     Rows Removed by Index Recheck: x       +
+     Shared Hit Blocks: x                   +
+     Shared Read Blocks: x                  +
+     Shared Dirtied Blocks: x               +
+     Shared Written Blocks: x               +
+     Local Hit Blocks: x                    +
+     Local Read Blocks: x                   +
+     Local Dirtied Blocks: x                +
+     Local Written Blocks: x                +
+     Temp Read Blocks: x                    +
+     Temp Written Blocks: x                 +
+   Planning:                                +
+     Shared Hit Blocks: x                   +
+     Shared Read Blocks: x                  +
+     Shared Dirtied Blocks: x               +
+     Shared Written Blocks: x               +
+     Local Hit Blocks: x                    +
+     Local Read Blocks: x                   +
+     Local Dirtied Blocks: x                +
+     Local Written Blocks: x                +
+     Temp Read Blocks: x                    +
+     Temp Written Blocks: x                 +
+   Planning Time: x                         +
+   Triggers:                                +
    Execution Time: x
 (1 row)
 
@@ -1077,64 +1006,56 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 	FROM query_to_text($$ EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS)
 							SELECT * FROM o_explain_formats
 								WHERE val > 5 ORDER BY val; $$) as t;
-                   regexp_replace                   
-----------------------------------------------------
- [                                                 +
-   {                                               +
-     "Plan": {                                     +
-       "Node Type": "Custom Scan",                 +
-       "Custom Plan Provider": "o_scan",           +
-       "Parallel Aware": false,                    +
-       "Relation Name": "o_explain_formats",       +
-       "Alias": "o_explain_formats",               +
-       "Startup Cost": x,                          +
-       "Total Cost": x,                            +
-       "Plan Rows": x,                             +
-       "Plan Width": x,                            +
-       "Actual Startup Time": x,                   +
-       "Actual Total Time": x,                     +
-       "Actual Rows": x,                           +
-       "Actual Loops": x,                          +
-       "Scan Direction": "Forward",                +
-       "Index Name": "o_explain_formats_val_key",  +
-       "Custom Scan Subtype": "Index Scan",        +
-       "Index Cond": "(val > x)",                  +
-       "Rows Removed by Index Recheck": x,         +
-       "Primary Pages": {                          +
-         "Read": x                                 +
-       },                                          +
-       "Secondary Index Pages": {                  +
-         "Index Name": "o_explain_formats_val_key",+
-         "Read": x                                 +
-       },                                          +
-       "Shared Hit Blocks": x,                     +
-       "Shared Read Blocks": x,                    +
-       "Shared Dirtied Blocks": x,                 +
-       "Shared Written Blocks": x,                 +
-       "Local Hit Blocks": x,                      +
-       "Local Read Blocks": x,                     +
-       "Local Dirtied Blocks": x,                  +
-       "Local Written Blocks": x,                  +
-       "Temp Read Blocks": x,                      +
-       "Temp Written Blocks": x                    +
-     },                                            +
-     "Planning": {                                 +
-       "Shared Hit Blocks": x,                     +
-       "Shared Read Blocks": x,                    +
-       "Shared Dirtied Blocks": x,                 +
-       "Shared Written Blocks": x,                 +
-       "Local Hit Blocks": x,                      +
-       "Local Read Blocks": x,                     +
-       "Local Dirtied Blocks": x,                  +
-       "Local Written Blocks": x,                  +
-       "Temp Read Blocks": x,                      +
-       "Temp Written Blocks": x                    +
-     },                                            +
-     "Planning Time": x,                           +
-     "Triggers": [                                 +
-     ],                                            +
-     "Execution Time": x                           +
-   }                                               +
+                  regexp_replace                  
+--------------------------------------------------
+ [                                               +
+   {                                             +
+     "Plan": {                                   +
+       "Node Type": "Index Scan",                +
+       "Parallel Aware": false,                  +
+       "Async Capable": false,                   +
+       "Scan Direction": "Forward",              +
+       "Index Name": "o_explain_formats_val_key",+
+       "Relation Name": "o_explain_formats",     +
+       "Alias": "o_explain_formats",             +
+       "Startup Cost": x,                        +
+       "Total Cost": x,                          +
+       "Plan Rows": x,                           +
+       "Plan Width": x,                          +
+       "Actual Startup Time": x,                 +
+       "Actual Total Time": x,                   +
+       "Actual Rows": x,                         +
+       "Actual Loops": x,                        +
+       "Index Cond": "(val > x)",                +
+       "Rows Removed by Index Recheck": x,       +
+       "Shared Hit Blocks": x,                   +
+       "Shared Read Blocks": x,                  +
+       "Shared Dirtied Blocks": x,               +
+       "Shared Written Blocks": x,               +
+       "Local Hit Blocks": x,                    +
+       "Local Read Blocks": x,                   +
+       "Local Dirtied Blocks": x,                +
+       "Local Written Blocks": x,                +
+       "Temp Read Blocks": x,                    +
+       "Temp Written Blocks": x                  +
+     },                                          +
+     "Planning": {                               +
+       "Shared Hit Blocks": x,                   +
+       "Shared Read Blocks": x,                  +
+       "Shared Dirtied Blocks": x,               +
+       "Shared Written Blocks": x,               +
+       "Local Hit Blocks": x,                    +
+       "Local Read Blocks": x,                   +
+       "Local Dirtied Blocks": x,                +
+       "Local Written Blocks": x,                +
+       "Temp Read Blocks": x,                    +
+       "Temp Written Blocks": x                  +
+     },                                          +
+     "Planning Time": x,                         +
+     "Triggers": [                               +
+     ],                                          +
+     "Execution Time": x                         +
+   }                                             +
  ]
 (1 row)
 
@@ -1147,9 +1068,11 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
  <explain xmlns="http://wwwxpostgresqlxorg/x/explain">                 +
    <Query>                                                             +
      <Plan>                                                            +
-       <Node-Type>Custom Scan</Node-Type>                              +
-       <Custom-Plan-Provider>o_scan</Custom-Plan-Provider>             +
+       <Node-Type>Index Scan</Node-Type>                               +
        <Parallel-Aware>false</Parallel-Aware>                          +
+       <Async-Capable>false</Async-Capable>                            +
+       <Scan-Direction>Forward</Scan-Direction>                        +
+       <Index-Name>o_explain_formats_val_key</Index-Name>              +
        <Relation-Name>o_explain_formats</Relation-Name>                +
        <Alias>o_explain_formats</Alias>                                +
        <Startup-Cost>x</Startup-Cost>                                  +
@@ -1160,18 +1083,8 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
        <Actual-Total-Time>x</Actual-Total-Time>                        +
        <Actual-Rows>x</Actual-Rows>                                    +
        <Actual-Loops>x</Actual-Loops>                                  +
-       <Scan-Direction>Forward</Scan-Direction>                        +
-       <Index-Name>o_explain_formats_val_key</Index-Name>              +
-       <Custom-Scan-Subtype>Index Scan</Custom-Scan-Subtype>           +
        <Index-Cond>(val &gt; x)</Index-Cond>                           +
        <Rows-Removed-by-Index-Recheck>x</Rows-Removed-by-Index-Recheck>+
-       <Primary-Pages>                                                 +
-         <Read>x</Read>                                                +
-       </Primary-Pages>                                                +
-       <Secondary-Index-Pages>                                         +
-         <Index-Name>o_explain_formats_val_key</Index-Name>            +
-         <Read>x</Read>                                                +
-       </Secondary-Index-Pages>                                        +
        <Shared-Hit-Blocks>x</Shared-Hit-Blocks>                        +
        <Shared-Read-Blocks>x</Shared-Read-Blocks>                      +
        <Shared-Dirtied-Blocks>x</Shared-Dirtied-Blocks>                +
@@ -1210,69 +1123,63 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 	FROM query_to_text($$ EXPLAIN (FORMAT TEXT, ANALYZE, BUFFERS)
 							SELECT val FROM o_explain_formats
 								WHERE val > 5 ORDER BY val; $$) as t;
-                                          regexp_replace                                           
----------------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_explain_formats  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Forward index only scan of: o_explain_formats_val_key
-   Conds: (val > x)
-   Secondary index (o_explain_formats_val_key) pages: read=x
- Planning:
-   Buffers: shared hit=x
+                                                        regexp_replace                                                        
+------------------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using o_explain_formats_val_key on o_explain_formats  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Index Cond: (val > x)
+   Heap Fetches: x
  Planning Time: x ms
  Execution Time: x ms
-(8 rows)
+(5 rows)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 	FROM query_to_text($$ EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
 							SELECT val FROM o_explain_formats
 								WHERE val > 5 ORDER BY val; $$) as t;
-                regexp_replace                 
------------------------------------------------
- - Plan:                                      +
-     Node Type: "Custom Scan"                 +
-     Custom Plan Provider: "o_scan"           +
-     Parallel Aware: false                    +
-     Relation Name: "o_explain_formats"       +
-     Alias: "o_explain_formats"               +
-     Startup Cost: x                          +
-     Total Cost: x                            +
-     Plan Rows: x                             +
-     Plan Width: x                            +
-     Actual Startup Time: x                   +
-     Actual Total Time: x                     +
-     Actual Rows: x                           +
-     Actual Loops: x                          +
-     Scan Direction: "Forward"                +
-     Index Name: "o_explain_formats_val_key"  +
-     Custom Scan Subtype: "Index Only Scan"   +
-     Index Cond: "(val > x)"                  +
-     Rows Removed by Index Recheck: x         +
-     Secondary Index Pages:                   +
-       Index Name: "o_explain_formats_val_key"+
-       Read: x                                +
-     Shared Hit Blocks: x                     +
-     Shared Read Blocks: x                    +
-     Shared Dirtied Blocks: x                 +
-     Shared Written Blocks: x                 +
-     Local Hit Blocks: x                      +
-     Local Read Blocks: x                     +
-     Local Dirtied Blocks: x                  +
-     Local Written Blocks: x                  +
-     Temp Read Blocks: x                      +
-     Temp Written Blocks: x                   +
-   Planning:                                  +
-     Shared Hit Blocks: x                     +
-     Shared Read Blocks: x                    +
-     Shared Dirtied Blocks: x                 +
-     Shared Written Blocks: x                 +
-     Local Hit Blocks: x                      +
-     Local Read Blocks: x                     +
-     Local Dirtied Blocks: x                  +
-     Local Written Blocks: x                  +
-     Temp Read Blocks: x                      +
-     Temp Written Blocks: x                   +
-   Planning Time: x                           +
-   Triggers:                                  +
+               regexp_replace                
+---------------------------------------------
+ - Plan:                                    +
+     Node Type: "Index Only Scan"           +
+     Parallel Aware: false                  +
+     Async Capable: false                   +
+     Scan Direction: "Forward"              +
+     Index Name: "o_explain_formats_val_key"+
+     Relation Name: "o_explain_formats"     +
+     Alias: "o_explain_formats"             +
+     Startup Cost: x                        +
+     Total Cost: x                          +
+     Plan Rows: x                           +
+     Plan Width: x                          +
+     Actual Startup Time: x                 +
+     Actual Total Time: x                   +
+     Actual Rows: x                         +
+     Actual Loops: x                        +
+     Index Cond: "(val > x)"                +
+     Rows Removed by Index Recheck: x       +
+     Heap Fetches: x                        +
+     Shared Hit Blocks: x                   +
+     Shared Read Blocks: x                  +
+     Shared Dirtied Blocks: x               +
+     Shared Written Blocks: x               +
+     Local Hit Blocks: x                    +
+     Local Read Blocks: x                   +
+     Local Dirtied Blocks: x                +
+     Local Written Blocks: x                +
+     Temp Read Blocks: x                    +
+     Temp Written Blocks: x                 +
+   Planning:                                +
+     Shared Hit Blocks: x                   +
+     Shared Read Blocks: x                  +
+     Shared Dirtied Blocks: x               +
+     Shared Written Blocks: x               +
+     Local Hit Blocks: x                    +
+     Local Read Blocks: x                   +
+     Local Dirtied Blocks: x                +
+     Local Written Blocks: x                +
+     Temp Read Blocks: x                    +
+     Temp Written Blocks: x                 +
+   Planning Time: x                         +
+   Triggers:                                +
    Execution Time: x
 (1 row)
 
@@ -1280,61 +1187,57 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 	FROM query_to_text($$ EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS)
 							SELECT val FROM o_explain_formats
 								WHERE val > 5 ORDER BY val; $$) as t;
-                   regexp_replace                   
-----------------------------------------------------
- [                                                 +
-   {                                               +
-     "Plan": {                                     +
-       "Node Type": "Custom Scan",                 +
-       "Custom Plan Provider": "o_scan",           +
-       "Parallel Aware": false,                    +
-       "Relation Name": "o_explain_formats",       +
-       "Alias": "o_explain_formats",               +
-       "Startup Cost": x,                          +
-       "Total Cost": x,                            +
-       "Plan Rows": x,                             +
-       "Plan Width": x,                            +
-       "Actual Startup Time": x,                   +
-       "Actual Total Time": x,                     +
-       "Actual Rows": x,                           +
-       "Actual Loops": x,                          +
-       "Scan Direction": "Forward",                +
-       "Index Name": "o_explain_formats_val_key",  +
-       "Custom Scan Subtype": "Index Only Scan",   +
-       "Index Cond": "(val > x)",                  +
-       "Rows Removed by Index Recheck": x,         +
-       "Secondary Index Pages": {                  +
-         "Index Name": "o_explain_formats_val_key",+
-         "Read": x                                 +
-       },                                          +
-       "Shared Hit Blocks": x,                     +
-       "Shared Read Blocks": x,                    +
-       "Shared Dirtied Blocks": x,                 +
-       "Shared Written Blocks": x,                 +
-       "Local Hit Blocks": x,                      +
-       "Local Read Blocks": x,                     +
-       "Local Dirtied Blocks": x,                  +
-       "Local Written Blocks": x,                  +
-       "Temp Read Blocks": x,                      +
-       "Temp Written Blocks": x                    +
-     },                                            +
-     "Planning": {                                 +
-       "Shared Hit Blocks": x,                     +
-       "Shared Read Blocks": x,                    +
-       "Shared Dirtied Blocks": x,                 +
-       "Shared Written Blocks": x,                 +
-       "Local Hit Blocks": x,                      +
-       "Local Read Blocks": x,                     +
-       "Local Dirtied Blocks": x,                  +
-       "Local Written Blocks": x,                  +
-       "Temp Read Blocks": x,                      +
-       "Temp Written Blocks": x                    +
-     },                                            +
-     "Planning Time": x,                           +
-     "Triggers": [                                 +
-     ],                                            +
-     "Execution Time": x                           +
-   }                                               +
+                  regexp_replace                  
+--------------------------------------------------
+ [                                               +
+   {                                             +
+     "Plan": {                                   +
+       "Node Type": "Index Only Scan",           +
+       "Parallel Aware": false,                  +
+       "Async Capable": false,                   +
+       "Scan Direction": "Forward",              +
+       "Index Name": "o_explain_formats_val_key",+
+       "Relation Name": "o_explain_formats",     +
+       "Alias": "o_explain_formats",             +
+       "Startup Cost": x,                        +
+       "Total Cost": x,                          +
+       "Plan Rows": x,                           +
+       "Plan Width": x,                          +
+       "Actual Startup Time": x,                 +
+       "Actual Total Time": x,                   +
+       "Actual Rows": x,                         +
+       "Actual Loops": x,                        +
+       "Index Cond": "(val > x)",                +
+       "Rows Removed by Index Recheck": x,       +
+       "Heap Fetches": x,                        +
+       "Shared Hit Blocks": x,                   +
+       "Shared Read Blocks": x,                  +
+       "Shared Dirtied Blocks": x,               +
+       "Shared Written Blocks": x,               +
+       "Local Hit Blocks": x,                    +
+       "Local Read Blocks": x,                   +
+       "Local Dirtied Blocks": x,                +
+       "Local Written Blocks": x,                +
+       "Temp Read Blocks": x,                    +
+       "Temp Written Blocks": x                  +
+     },                                          +
+     "Planning": {                               +
+       "Shared Hit Blocks": x,                   +
+       "Shared Read Blocks": x,                  +
+       "Shared Dirtied Blocks": x,               +
+       "Shared Written Blocks": x,               +
+       "Local Hit Blocks": x,                    +
+       "Local Read Blocks": x,                   +
+       "Local Dirtied Blocks": x,                +
+       "Local Written Blocks": x,                +
+       "Temp Read Blocks": x,                    +
+       "Temp Written Blocks": x                  +
+     },                                          +
+     "Planning Time": x,                         +
+     "Triggers": [                               +
+     ],                                          +
+     "Execution Time": x                         +
+   }                                             +
  ]
 (1 row)
 
@@ -1347,9 +1250,11 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
  <explain xmlns="http://wwwxpostgresqlxorg/x/explain">                 +
    <Query>                                                             +
      <Plan>                                                            +
-       <Node-Type>Custom Scan</Node-Type>                              +
-       <Custom-Plan-Provider>o_scan</Custom-Plan-Provider>             +
+       <Node-Type>Index Only Scan</Node-Type>                          +
        <Parallel-Aware>false</Parallel-Aware>                          +
+       <Async-Capable>false</Async-Capable>                            +
+       <Scan-Direction>Forward</Scan-Direction>                        +
+       <Index-Name>o_explain_formats_val_key</Index-Name>              +
        <Relation-Name>o_explain_formats</Relation-Name>                +
        <Alias>o_explain_formats</Alias>                                +
        <Startup-Cost>x</Startup-Cost>                                  +
@@ -1360,15 +1265,9 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
        <Actual-Total-Time>x</Actual-Total-Time>                        +
        <Actual-Rows>x</Actual-Rows>                                    +
        <Actual-Loops>x</Actual-Loops>                                  +
-       <Scan-Direction>Forward</Scan-Direction>                        +
-       <Index-Name>o_explain_formats_val_key</Index-Name>              +
-       <Custom-Scan-Subtype>Index Only Scan</Custom-Scan-Subtype>      +
        <Index-Cond>(val &gt; x)</Index-Cond>                           +
        <Rows-Removed-by-Index-Recheck>x</Rows-Removed-by-Index-Recheck>+
-       <Secondary-Index-Pages>                                         +
-         <Index-Name>o_explain_formats_val_key</Index-Name>            +
-         <Read>x</Read>                                                +
-       </Secondary-Index-Pages>                                        +
+       <Heap-Fetches>x</Heap-Fetches>                                  +
        <Shared-Hit-Blocks>x</Shared-Hit-Blocks>                        +
        <Shared-Read-Blocks>x</Shared-Read-Blocks>                      +
        <Shared-Dirtied-Blocks>x</Shared-Dirtied-Blocks>                +
@@ -1432,12 +1331,69 @@ SELECT explain_as_json($$
  0
 (1 row)
 
+CREATE TABLE test_explain_bridged_index (
+  num      integer PRIMARY KEY,
+  the_geom box NOT NULL
+) 
+USING orioledb;
+INSERT INTO test_explain_bridged_index (num, the_geom)
+SELECT (x*1000 + y) AS num,
+       box( point(x+1, y+1), point(x, y) )
+FROM generate_series(0, 99)  AS x
+CROSS JOIN generate_series(0, 99) AS y;
+CREATE INDEX test_the_geom_brin
+  ON test_explain_bridged_index
+  USING BRIN (the_geom)
+  WITH (pages_per_range = 64);
+NOTICE:  index bridging is enabled for orioledb table 'test_explain_bridged_index'
+DETAIL:  index access method 'brin' is supported only via index bridging for OrioleDB table
+ANALYZE test_explain_bridged_index;
+BEGIN;
+SET LOCAL enable_indexscan  = off;
+SET LOCAL enable_bitmapscan = on;
+SET LOCAL enable_seqscan    = off;
+SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
+	FROM query_to_text($$ 
+		EXPLAIN (ANALYZE, BUFFERS, VERBOSE)
+			SELECT num, the_geom::text AS wkt_like
+				FROM test_explain_bridged_index
+				WHERE the_geom && box( point(125,135), point(125,125) )
+				ORDER BY num;
+	$$) as t;
+                                                         regexp_replace                                                         
+--------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Output: num, ((the_geom)::text)
+   Sort Key: test_explain_bridged_indexxnum
+   Sort Method: quicksort  Memory: xkB
+   Buffers: shared hit=x
+   ->  Result  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+         Output: num, (the_geom)::text
+         Buffers: shared hit=x
+         ->  Custom Scan (o_scan) on explainxtest_explain_bridged_index  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+               Output: num, the_geom
+               Bitmap heap scan
+               Recheck Cond: (test_explain_bridged_indexxthe_geom && '(x,x),(x,x)'::box)
+               ->  Bitmap Index Scan on test_the_geom_brin  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+                     Index Cond: (test_explain_bridged_indexxthe_geom && '(x,x),(x,x)'::box)
+                     Buffers: shared hit=x
+               Primary pages: read=x
+               Other pages: read=x, lock=x, load=x
+               Buffers: shared hit=x
+ Planning:
+   Buffers: shared hit=x
+ Planning Time: x ms
+ Execution Time: x ms
+(22 rows)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 4 other objects
+NOTICE:  drop cascades to 5 other objects
 DETAIL:  drop cascades to table o_explain
 drop cascades to table o_test_explain_verbose_rowid
 drop cascades to table o_explain_formats
 drop cascades to table o_explain_json
+drop cascades to table test_explain_bridged_index
 DROP SCHEMA explain CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to function generate_string(integer,integer)
