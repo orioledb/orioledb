@@ -641,7 +641,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			continue;
 		}
 
-		if (level > targetLevel || downlinkLocationFlag)
+		if (level > targetLevel || (downlinkLocationFlag && level > 0))
 		{
 			OBTreeFastPathFindResult result;
 
