@@ -399,9 +399,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				o_toast_tupDesc = descr->toast->leafTupdesc;
 				/* Init heap tupledesc for toast table */
 				heap_toast_tupDesc = CreateTemplateTupleDesc(3);
-				TupleDescInitEntry(heap_toast_tupDesc, (AttrNumber) 1, "chunk_id", OIDOID, -1, 0);
-				TupleDescInitEntry(heap_toast_tupDesc, (AttrNumber) 2, "chunk_seq", INT4OID, -1, 0);
-				TupleDescInitEntry(heap_toast_tupDesc, (AttrNumber) 3, "chunk_data", BYTEAOID, -1, 0);
+				o_tables_tupdesc_init_builtin(heap_toast_tupDesc, (AttrNumber) 1, "chunk_id", OIDOID);
+				o_tables_tupdesc_init_builtin(heap_toast_tupDesc, (AttrNumber) 2, "chunk_seq", INT4OID);
+				o_tables_tupdesc_init_builtin(heap_toast_tupDesc, (AttrNumber) 3, "chunk_data", BYTEAOID);
 				/* Ensure that the toast table doesn't itself get toasted */
 				TupleDescAttr(heap_toast_tupDesc, 0)->attstorage = TYPSTORAGE_PLAIN;
 				TupleDescAttr(heap_toast_tupDesc, 1)->attstorage = TYPSTORAGE_PLAIN;
