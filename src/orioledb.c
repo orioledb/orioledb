@@ -1031,6 +1031,7 @@ _PG_init(void)
 	prev_base_init_startup_hook = base_init_startup_hook;
 	base_init_startup_hook = o_base_init_startup_hook;
 	IndexAMRoutineHook = orioledb_indexam_routine_hook;
+	GetReplayXlogPtrHook = recovery_get_effective_replay_ptr;
 	if (enable_rewind)
 		VacuumHorizonHook = orioledb_vacuum_horizon_hook;
 	orioledb_setup_ddl_hooks();
