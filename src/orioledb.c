@@ -265,6 +265,21 @@ static RmgrData rmgr =
 	.rm_decode = orioledb_decode
 };
 
+static void
+assign_rewind(bool newval, void *extra)
+{
+#ifndef IS_DEV
+	enable_rewind = false;
+	if (newval == true)
+	{
+		ereport(WARNING,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("orioledb rewind mode is supported only in development release")),
+				errdetail("to use rewind build OrioleDB with IS_DEV=1 set."));
+	}
+#endif
+}
+
 void
 _PG_init(void)
 {
@@ -814,7 +829,6 @@ _PG_init(void)
 							   NULL,
 							   NULL,
 							   NULL);
-
 	DefineCustomBoolVariable("orioledb.enable_rewind",
 							 "Enable rewind for OrioleDB tables",
 							 NULL,
@@ -823,9 +837,8 @@ _PG_init(void)
 							 PGC_POSTMASTER,
 							 0,
 							 NULL,
-							 NULL,
+							 &assign_rewind,
 							 NULL);
-
 	DefineCustomIntVariable("orioledb.rewind_max_time",
 							"Sets the maximum time to hold information for OrioleDB rewind.",
 							NULL,
