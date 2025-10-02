@@ -127,14 +127,7 @@ class LogicalTest(BaseTest):
 		with self.node as publisher:
 			publisher.start()
 
-			baseDir = mkdtemp(prefix=self.myName + '_tgsb_')
-			subscriber = testgres.get_new_node('subscriber',
-			                                   port=self.getBasePort() + 1,
-			                                   base_dir=baseDir)
-			subscriber.init(["--no-locale", "--encoding=UTF8"])
-			subscriber.append_conf(shared_preload_libraries='orioledb')
-			subscriber.append_conf(wal_level='logical')
-
+			subscriber = self.getSubsriber()
 			with subscriber.start() as subscriber:
 				create_sql = """
 					CREATE EXTENSION IF NOT EXISTS orioledb;
@@ -208,13 +201,7 @@ class LogicalTest(BaseTest):
 		with self.node as publisher:
 			publisher.start()
 
-			baseDir = mkdtemp(prefix=self.myName + '_tgsb_')
-			subscriber = testgres.get_new_node('subscriber',
-			                                   port=self.getBasePort() + 1,
-			                                   base_dir=baseDir)
-			subscriber.init(["--no-locale", "--encoding=UTF8"])
-			subscriber.append_conf(shared_preload_libraries='orioledb')
-			subscriber.append_conf(wal_level='logical')
+			subscriber = self.getSubsriber()
 
 			with subscriber.start() as subscriber:
 				create_sql = """
@@ -331,6 +318,8 @@ class LogicalTest(BaseTest):
 						)
 						con1.commit()
 						con2.commit()
+
+
 #						con2.execute("CHECKPOINT;")
 #						con2.execute("SELECT orioledb_get_current_oxid();")
 
@@ -374,8 +363,10 @@ class LogicalTest(BaseTest):
 
 					# wait until changes apply on subscriber and check them
 					sub.catchup()
-					subscriber.poll_query_until("SELECT orioledb_recovery_synchronized();", expected=True)
-#					subscriber.safe_psql("CHECKPOINT;")
+					subscriber.poll_query_until(
+					    "SELECT orioledb_recovery_synchronized();",
+					    expected=True)
+					#					subscriber.safe_psql("CHECKPOINT;")
 					self.assertListEqual(
 					    subscriber.execute(
 					        'SELECT * FROM o_test_ctid ORDER BY i'),
