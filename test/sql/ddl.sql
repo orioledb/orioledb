@@ -103,13 +103,6 @@ INSERT INTO ranges0 VALUES('D', -5, '62');
 SELECT * FROM ranges0;
 SELECT orioledb_tbl_structure('ranges0'::regclass);
 
-CREATE OR REPLACE FUNCTION int4range_immutable(input_str text)
-  RETURNS int4range
-AS
-$$
-    select int4range(input_str);
-$$ LANGUAGE sql IMMUTABLE;
-
 CREATE OR REPLACE FUNCTION int4range_overlaps(a int4range, b int4range)
   RETURNS boolean
 AS
@@ -132,9 +125,13 @@ CREATE TABLE ranges (
 ) USING orioledb;
 
 ALTER TABLE ranges
-	ADD EXCLUDE USING btree (c1 WITH <->, (int4range_immutable(c2)) WITH <->)
+	ADD EXCLUDE USING btree (c1 WITH <->, (orioledb_int4range_immutable(c2)) WITH <->)
   WITH (orioledb_index=false)
   WHERE (NOT c1 @> 0::int4);
+-- CREATE UNIQUE INDEX ON ranges (c1, orioledb_int4range_immutable(c2))
+--   WITH (orioledb_index=false)
+--   WHERE (NOT c1 @> 0::int4);
+\d+ ranges
 
 -- these should succeed because they don't match the index predicate
 INSERT INTO ranges VALUES(int4range(-1, 3), '[-2, 2]');
@@ -143,7 +140,12 @@ INSERT INTO ranges VALUES(int4range(-6, 2), '[-21, 14]');
 -- succeed
 INSERT INTO ranges VALUES(int4range(-5, -2), '[2, 5)');
 SELECT * FROM ranges;
+-- fail, duplicate
+INSERT INTO ranges VALUES(int4range(-5, -2), '[2, 5)');
+SELECT * FROM ranges;
 -- fail, overlaps
+SET log_error_verbosity = 'terse';
+SELECT * FROM pg_proc WHERE oid = 16491;
 INSERT INTO ranges VALUES(int4range(-6, -3), '[2, 5)');
 SELECT * FROM ranges;
 SELECT orioledb_tbl_structure('ranges'::regclass);

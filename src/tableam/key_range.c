@@ -98,6 +98,7 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 		res->high.keys[i].flags = O_VALUE_BOUND_PLUS_INFINITY;
 	}
 
+	elog(WARNING, "numberOfKeys: %d", numberOfKeys);
 	for (i = 0; i < numberOfKeys; i++)
 	{
 		bool		setLow = false,
@@ -107,6 +108,34 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 		OBTreeValueBound low = {0, 0, O_VALUE_BOUND_MINUS_INFINITY, NULL};
 		OBTreeValueBound high = {0, 0, O_VALUE_BOUND_PLUS_INFINITY, NULL};
 		OIndexField *field = &fields[attnum];
+
+		elog(WARNING, "fn_oid[%d]: %u", i, key->sk_func.fn_oid);
+		elog(WARNING, "sk_sybtype[%d]: %d", i, key->sk_subtype);
+		elog(WARNING, "sk_strategy[%d]: %s", i,
+			 key->sk_strategy == BTLessStrategyNumber ? "BTLessStrategyNumber" :
+			 key->sk_strategy == BTLessEqualStrategyNumber ? "BTLessEqualStrategyNumber" :
+			 key->sk_strategy == BTEqualStrategyNumber ? "BTEqualStrategyNumber" :
+			 key->sk_strategy == BTGreaterStrategyNumber ? "BTGreaterStrategyNumber" :
+			 key->sk_strategy == BTGreaterEqualStrategyNumber ? "BTGreaterEqualStrategyNumber" :
+			 "WRONG");
+		elog(WARNING, "sk_flags[%d]: %X: %s%s%s%s%s%s%s%s%s %s%s%s%s %s", i,
+			 key->sk_flags,
+
+			 key->sk_flags & SK_ISNULL ? "SK_ISNULL " : "",
+			 key->sk_flags & SK_UNARY ? "SK_UNARY " : "",
+			 key->sk_flags & SK_ROW_HEADER ? "SK_ROW_HEADER " : "",
+			 key->sk_flags & SK_ROW_MEMBER ? "SK_ROW_MEMBER " : "",
+			 key->sk_flags & SK_ROW_END ? "SK_ROW_END " : "",
+			 key->sk_flags & SK_SEARCHARRAY ? "SK_SEARCHARRAY " : "",
+			 key->sk_flags & SK_SEARCHNULL ? "SK_SEARCHNULL " : "",
+			 key->sk_flags & SK_SEARCHNOTNULL ? "SK_SEARCHNOTNULL " : "",
+			 key->sk_flags & SK_ORDER_BY ? "SK_ORDER_BY " : "",
+			 
+			 key->sk_flags & SK_BT_REQFWD ? "SK_BT_REQFWD " : "",
+			 key->sk_flags & SK_BT_REQBKWD ? "SK_BT_REQBKWD " : "",
+			 key->sk_flags & SK_BT_DESC ? "SK_BT_DESC " : "",
+			 key->sk_flags & SK_BT_NULLS_FIRST ? "SK_BT_NULLS_FIRST " : "",
+			 "");
 
 		switch (key->sk_strategy)
 		{

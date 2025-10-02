@@ -656,6 +656,7 @@ serialize_o_index(OIndex *o_index, int *size)
 	o_serialize_node((Node *) o_index->duplicates, &str);
 
 	appendBinaryStringInfo(&str, (Pointer) &o_index->tablespace, sizeof(Oid));
+	appendBinaryStringInfo(&str, (Pointer) &o_index->exclops, sizeof(Oid) * o_index->nNonLeafFields);
 
 	*size = str.len;
 	return str.data;
@@ -700,7 +701,7 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	oIndex->expressions = (List *) o_deserialize_node(&ptr);
 	oIndex->duplicates = (List *) o_deserialize_node(&ptr);
 	MemoryContextSwitchTo(old_mcxt);
-
+	
 	if (oIndex->data_version >= 2)
 	{
 		len = sizeof(Oid);
@@ -711,6 +712,20 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	else
 		oIndex->tablespace = DEFAULTTABLESPACE_OID;
 
+	if (oIndex->data_version >= 3)
+	{
+		mcxt = OGetIndexContext(oIndex);
+		old_mcxt = MemoryContextSwitchTo(mcxt);
+		len = sizeof(Oid) * oIndex->nNonLeafFields;
+		Assert((ptr - data) + len <= length);
+		elog(WARNING, "%s: len: %d", oIndex->name.data, len);
+		oIndex->exclops = (Oid *) palloc(len);
+		memcpy(&oIndex->exclops, ptr, len);
+		ptr += len;
+		MemoryContextSwitchTo(old_mcxt);
+	}
+	else 
+		oIndex->exclops = NULL;
 	Assert((ptr - data) == length);
 
 	return oIndex;

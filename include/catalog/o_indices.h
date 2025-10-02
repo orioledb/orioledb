@@ -77,6 +77,7 @@ typedef struct
 	 */
 	List	   *duplicates;
 	Oid			tablespace;
+	Oid		   *exclops;
 	MemoryContext index_mctx;
 } OIndex;
 

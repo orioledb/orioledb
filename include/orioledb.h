@@ -67,7 +67,7 @@
  * For different ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION
  * conversion is done at first reading of disk page on the fly.
  */
-#define ORIOLEDB_DATA_VERSION	2	/* Version of system catalog */
+#define ORIOLEDB_DATA_VERSION	3	/* Version of system catalog */
 #define ORIOLEDB_PAGE_VERSION	1	/* Version of binary page format */
 #define ORIOLEDB_COMPRESS_VERSION 1 /* Version of page compression (only for
 									 * compressed pages) */

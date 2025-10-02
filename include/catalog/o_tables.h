@@ -55,6 +55,7 @@ typedef struct
 	Oid			opclass;
 	SortByDir	ordering;
 	SortByNulls nullsOrdering;
+	Oid			exclop;
 } OTableIndexField;
 
 /*

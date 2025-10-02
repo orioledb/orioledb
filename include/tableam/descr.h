@@ -56,6 +56,9 @@ typedef struct
 typedef struct OComparator OComparator;
 typedef struct OComparatorKey OComparatorKey;
 
+typedef struct OExclusionFn OExclusionFn;
+typedef struct OExclusionFnKey OExclusionFnKey;
+
 /*
  * The index field descriptor
  */
@@ -68,11 +71,14 @@ typedef struct
 	bool		ascending;
 	bool		nullfirst;
 
+	Oid			exclusion_op;
+
 	/*
 	 * A cached comparator to compare inputtype values according to opfamily
 	 * and opclass.
 	 */
 	OComparator *comparator;
+	OExclusionFn *exclusion_fn;
 } OIndexField;
 
 typedef struct AttrNumberMap

@@ -351,12 +351,14 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 	bool		tup_fetched = false;
 	IndexScanDesc scan = &ostate->scandesc;
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
-
+	
+	elog(WARNING, "o_iterate_index 0");
 	if (ostate->exact || ostate->curKeyRange.empty)
 	{
 		if (!switch_to_next_range(indexDescr, ostate, tupleCxt))
 		{
 			O_TUPLE_SET_NULL(tup);
+			elog(WARNING, "o_iterate_index 1");
 			return tup;
 		}
 	}
@@ -366,6 +368,7 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 		OBTreeKeyBound *bound;
 		bool		tup_is_valid = true;
 
+		elog(WARNING, "o_iterate_index 2");
 		if (ostate->exact)
 		{
 			if (hint)
@@ -375,6 +378,8 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 											&ostate->curKeyRange.low,
 											BTreeKeyBound, &ostate->oSnapshot,
 											tupleCsn, tupleCxt, hint);
+			elog(WARNING, "o_iterate_index 3: tup IS %sNULL", 
+				 O_TUPLE_IS_NULL(tup) ? "" : "NOT ");
 			if (!O_TUPLE_IS_NULL(tup))
 				tup_fetched = true;
 		}
@@ -389,6 +394,8 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 											 bound, BTreeKeyBound,
 											 true, hint);
 
+				elog(WARNING, "o_iterate_index 4: tup IS %sNULL", 
+					 O_TUPLE_IS_NULL(tup) ? "" : "NOT ");
 				if (O_TUPLE_IS_NULL(tup))
 					tup_is_valid = true;
 				else
@@ -415,6 +422,8 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 			tup_fetched = true;
 		}
 	} while (!tup_fetched);
+	elog(WARNING, "o_iterate_index 5: tup IS %sNULL", 
+		 O_TUPLE_IS_NULL(tup) ? "" : "NOT ");
 	return tup;
 }
 
@@ -451,7 +460,8 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 	{
 		tup = o_iterate_index(id, ostate, tupleCsn, tupleCxt,
 							  ostate->ixNum == PrimaryIndexNumber ? hint : NULL);
-
+		elog(WARNING, "o_index_scan_getnext: ITERATE INDEX tup IS %sNULL", 
+			 O_TUPLE_IS_NULL(tup) ? "" : "NOT ");
 		if (!scan_primary || O_TUPLE_IS_NULL(tup))
 			break;
 

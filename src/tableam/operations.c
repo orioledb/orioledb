@@ -41,6 +41,7 @@
 #include "parser/parsetree.h"
 #include "storage/bufmgr.h"
 #include "utils/datum.h"
+#include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 
 static OTableModifyResult o_tbl_indices_overwrite(OTableDescr *descr,
@@ -145,6 +146,8 @@ static OBTreeModifyCallbackAction o_lock_deleted_callback(BTreeDescr *descr, OTu
 static inline bool is_keys_eq(BTreeDescr *desc, OBTreeKeyBound *k1, OBTreeKeyBound *k2);
 static void o_report_duplicate(Relation rel, OIndexDescr *id,
 							   TupleTableSlot *slot);
+
+PG_FUNCTION_INFO_V1(orioledb_int4range_immutable);
 
 static TupleTableSlot *
 update_arg_get_slot(OModifyCallbackArg *arg)
@@ -963,7 +966,6 @@ o_tbl_insert_with_arbiter(Relation rel,
 					bytea	   *rowid;
 					Pointer		p;
 					OIndexDescr *primary = GET_PRIMARY(descr);
-					int			i;
 
 					ExecCopySlot(lockedSlot, slot);
 
@@ -1910,7 +1912,7 @@ o_tbl_index_insert(OTableDescr *descr,
 	OBTreeKeyBound knew;
 	bool		primary = (bd->type == oIndexPrimary);
 
-	OBTreeModifyResult result;
+	OBTreeModifyResult result = 152;
 
 	if (!primary)
 	{
@@ -1936,16 +1938,22 @@ o_tbl_index_insert(OTableDescr *descr,
 	o_btree_load_shmem(bd);
 	if (primary || !id->unique ||
 		(!id->nulls_not_distinct && o_has_nulls(tup)))
+	{
 		result = o_btree_modify(bd, BTreeOperationInsert,
 								tup, BTreeKeyLeafTuple,
 								(Pointer) &knew, BTreeKeyBound,
 								oxid, csn, RowLockUpdate,
-								NULL, callbackInfo) == OBTreeModifyResultInserted;
+								NULL, callbackInfo);
+		elog(WARNING, "o_tbl_index_insert: result 0: %d", result);
+	}
 	else
+	{
 		result = o_btree_insert_unique(bd, tup, BTreeKeyLeafTuple,
 									   (Pointer) &knew, BTreeKeyBound,
 									   oxid, csn, RowLockUpdate,
-									   NULL, callbackInfo) == OBTreeModifyResultInserted;
+									   NULL, callbackInfo);
+		elog(WARNING, "o_tbl_index_insert: result 1: %d", result);
+	}
 
 	((OTableSlot *) slot)->version = o_tuple_get_version(tup);
 
@@ -2563,3 +2571,15 @@ o_truncate_table(ORelOids oids)
 
 	pfree(treeOids);
 }
+
+Datum
+orioledb_int4range_immutable(PG_FUNCTION_ARGS)
+{
+	char *range_input = text_to_cstring(PG_GETARG_TEXT_PP(0));
+	Datum range;
+
+	range = OidInputFunctionCall(F_RANGE_IN, range_input,
+								 INT4RANGEOID, -1);
+	PG_RETURN_DATUM(range);
+}
+
