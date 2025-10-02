@@ -75,6 +75,7 @@ class TestPortManager(PortManager__Generic):
 
 class BaseTest(unittest.TestCase):
 	replica = None
+	subscriber = None
 	restoredNode = None
 	basePort = None
 	_myName = None
@@ -108,6 +109,24 @@ class BaseTest(unittest.TestCase):
 			replica.append_conf(port=replica.port)
 			self.replica = replica
 		return self.replica
+
+	def getSubsriber(self) -> testgres.PostgresNode:
+		if self.subscriber is None:
+			(test_path, t) = os.path.split(
+			    os.path.dirname(inspect.getfile(self.__class__)))
+			baseDir = os.path.join(test_path, 'tmp_check_t',
+			                       self.myName + '_tgss')
+			if os.path.exists(baseDir):
+				shutil.rmtree(baseDir)
+
+			subscriber = testgres.get_new_node('subscriber',
+			                                   port=self.getBasePort() + 1,
+			                                   base_dir=baseDir)
+			subscriber.init(["--no-locale", "--encoding=UTF8"])
+			subscriber.append_conf(shared_preload_libraries='orioledb')
+			subscriber.append_conf(wal_level='logical')
+			self.subscriber = subscriber
+		return self.subscriber
 
 	def restoreNode(self, port: int, filename: str) -> testgres.PostgresNode:
 		self.assertIsNone(self.restoredNode)
@@ -189,6 +208,17 @@ class BaseTest(unittest.TestCase):
 				self.replica.cleanup()
 			else:
 				print("\nReplica base directory: " + self.replica.base_dir)
+		if self.subscriber:
+			if self.subscriber.status() == NodeStatus.Running:
+				self.subscriber.stop(
+				)  # just comment it if node should not stops on fails
+				pass
+			if ok:
+				self.subscriber._custom_base_dir = None
+				self.subscriber.cleanup()
+			else:
+				print("\nSubscriber base directory: " +
+				      self.subscriber.base_dir)
 		if self.restoredNode:
 			if self.restoredNode.status() == NodeStatus.Running:
 				self.restoredNode.stop(
