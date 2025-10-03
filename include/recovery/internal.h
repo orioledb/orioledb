@@ -61,6 +61,7 @@ typedef enum
 	RecoveryMsgTypeLeaderParallelIndexBuild,
 	RecoveryMsgTypeWorkerParallelIndexBuild,
 	RecoveryMsgTypeInit,
+	RecoveryMsgTypeReinsert
 } RecoveryMsgType;
 
 #define RECOVERY_MODIFY_OXID (0x0100)

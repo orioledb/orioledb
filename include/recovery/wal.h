@@ -32,6 +32,9 @@
 #define WAL_REC_JOINT_COMMIT (12)
 #define WAL_REC_TRUNCATE	(13)
 #define WAL_REC_BRIDGE_ERASE (14)
+#define WAL_REC_REINSERT (15)	/* UPDATE with changed pkey represented as
+								 * DELETE + INSERT in OrioleDB but externally
+								 * exported as an UPDATE in logical decoding */
 
 #define FIRST_WAL_VERSION (16)
 
@@ -72,11 +75,16 @@ typedef struct
 	uint8		new_relnode[sizeof(Oid)];
 } WALRecOTablesUnlockMeta;
 
+/* Commented non-real fields could be accessed with pointer arithmetics */
 typedef struct
 {
 	uint8		recType;
 	uint8		tupleFormatFlags;
 	uint8		length[sizeof(OffsetNumber)];
+	/* tuple[length] */
+	/* uint8 oldTupleFormatFlags; (For optional second tuple) */
+	/* uint8 oldLength[sizeof(OffsetNumber)]; (For optional second tuple) */
+	/* oldTuple[oldLength] (For optional second tuple) */
 } WALRecModify;
 
 typedef struct
@@ -146,6 +154,7 @@ extern void o_wal_insert(BTreeDescr *desc, OTuple tuple);
 extern void o_wal_update(BTreeDescr *desc, OTuple tuple);
 extern void o_wal_delete(BTreeDescr *desc, OTuple tuple);
 extern void o_wal_delete_key(BTreeDescr *desc, OTuple key);
+extern void o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple);
 extern void add_truncate_wal_record(ORelOids oids);
 extern bool get_local_wal_has_material_changes(void);
 extern void set_local_wal_has_material_changes(bool value);
