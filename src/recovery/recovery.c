@@ -2897,10 +2897,13 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		else
 		{
 			OFixedTuple tuple;
+			OFixedTuple oldtuple;
+
 
 			Assert(rec_type == WAL_REC_INSERT ||
 				   rec_type == WAL_REC_UPDATE ||
-				   rec_type == WAL_REC_DELETE);
+				   rec_type == WAL_REC_DELETE ||
+				   rec_type == WAL_REC_REINSERT);
 
 			tuple.tuple.formatFlags = *ptr;
 			ptr++;
@@ -2964,11 +2967,11 @@ replay_container(Pointer startPtr, Pointer endPtr,
 					pfree(db_prefix);
 				}
 			}
+			ptr += length;
 
 			if (sys_tree_num > 0 || indexDescr == NULL)
 			{
 				/* nothing to do here */
-				ptr += length;
 				continue;
 			}
 
@@ -2977,17 +2980,43 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				elog(LOG, "WAL change for bridge index");
 			}
 
-			if (single)
+			/* Reinsert is processed as DELETE + INSERT */
+			if (rec_type == WAL_REC_REINSERT)
 			{
-				recovery_switch_to_oxid(oxid, -1);
-				apply_modify_record(descr, indexDescr, type, tuple.tuple);
+				Assert(type == RecoveryMsgTypeReinsert);
+
+				oldtuple.tuple.formatFlags = *ptr;
+				ptr++;
+				memcpy(&length, ptr, sizeof(OffsetNumber));
+				ptr += sizeof(OffsetNumber);
+				memcpy(oldtuple.fixedData, ptr, length);
+				ptr += length;
+				oldtuple.tuple.data = oldtuple.fixedData;
+
+				if (single)
+				{
+					recovery_switch_to_oxid(oxid, -1);
+					apply_modify_record(descr, indexDescr, RecoveryMsgTypeDelete, oldtuple.tuple);
+					apply_modify_record(descr, indexDescr, RecoveryMsgTypeInsert, tuple.tuple);
+				}
+				else
+				{
+					spread_idx_modify(&indexDescr->desc, RecoveryMsgTypeDelete, oldtuple.tuple);
+					spread_idx_modify(&indexDescr->desc, RecoveryMsgTypeInsert, tuple.tuple);
+				}
 			}
 			else
 			{
-				spread_idx_modify(&indexDescr->desc, type, tuple.tuple);
+				if (single)
+				{
+					recovery_switch_to_oxid(oxid, -1);
+					apply_modify_record(descr, indexDescr, type, tuple.tuple);
+				}
+				else
+				{
+					spread_idx_modify(&indexDescr->desc, type, tuple.tuple);
+				}
 			}
-
-			ptr += length;
 		}
 	}
 	update_recovery_undo_loc_flush(single, -1);
@@ -3574,6 +3603,13 @@ recovery_msg_from_wal_record(uint8 wal_record)
 			return RecoveryMsgTypeUpdate;
 		case WAL_REC_BRIDGE_ERASE:
 			return RecoveryMsgTypeBridgeErase;
+		case WAL_REC_REINSERT:
+
+			/*
+			 * Temporary one for convenience. Boils down to
+			 * RecoveryMsgTypeInsert + RecoveryMsgTypeDelete
+			 */
+			return RecoveryMsgTypeReinsert;
 		default:
 			Assert(false);
 			elog(ERROR, "Wrong WAL record modify type %d", wal_record);
