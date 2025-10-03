@@ -3625,7 +3625,7 @@ recovery_msg_from_wal_record(uint8 wal_record)
 		case WAL_REC_REINSERT:
 
 			/*
-			 * Temporary one for convenience. Boils down to
+			 * Temporary one for convenience. Splits down to
 			 * RecoveryMsgTypeInsert + RecoveryMsgTypeDelete
 			 */
 			return RecoveryMsgTypeReinsert;
