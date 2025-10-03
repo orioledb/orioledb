@@ -732,7 +732,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
 						ReorderBufferQueueChange(ctx->reorder, logicalXid,
 												 changeXLogPtr,
-												 change, true);
+												 change, false);
 
 					}
 					else
