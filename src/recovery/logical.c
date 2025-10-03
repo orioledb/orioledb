@@ -676,7 +676,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					change->data.tp.rlocator.dbOid = cur_oids.datoid;
 					change->data.tp.rlocator.relNumber = cur_oids.relnode;
 
-
 					elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 
 					/*
@@ -730,10 +729,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 														  PrimaryIndexNumber, false,
 														  NULL);
 						change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
-						ReorderBufferQueueChange(ctx->reorder, logicalXid,
-												 changeXLogPtr,
-												 change, false);
-
 					}
 					else
 					{
@@ -751,10 +746,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 							elog(DEBUG3, "WAL_REC_DELETE NON-TOAST toastable");
 							oldheaptuple = convert_toast_pointers(descr, indexDescr, &tuple);
 							change->data.tp.oldtuple = record_buffer_tuple(ctx->reorder, oldheaptuple, true);
-							ReorderBufferQueueChange(ctx->reorder, logicalXid,
-													 changeXLogPtr,
-													 change, false);
-
 						}
 						else	/* Tuple without TOASTed attrs */
 						{
@@ -764,11 +755,11 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 															  PrimaryIndexNumber, false,
 															  NULL);
 							change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
-							ReorderBufferQueueChange(ctx->reorder, logicalXid,
-													 changeXLogPtr,
-													 change, false);
 						}
 					}
+					ReorderBufferQueueChange(ctx->reorder, logicalXid,
+											 changeXLogPtr,
+											 change, false);
 				}
 				else if (rec_type == WAL_REC_REINSERT)
 				{
