@@ -855,6 +855,8 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			{
 				OTuple		final_tup = tts_orioledb_form_tuple(slot, descr);
 
+				elog(DEBUG3, "CALL o_wal_update");
+
 				o_wal_update(&primary->desc, final_tup);
 			}
 		}
@@ -883,8 +885,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 				OTuple		old_tup = ((OTableSlot *) oldSlot)->tuple,
 							final_tup = tts_orioledb_form_tuple(slot, descr);
 
-				o_wal_delete(&primary->desc, old_tup);
-				o_wal_insert(&primary->desc, final_tup);
+				o_wal_reinsert(&primary->desc, old_tup, final_tup);
 			}
 		}
 		else
