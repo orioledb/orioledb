@@ -2653,6 +2653,61 @@ invalidate_typcache(void)
 }
 
 /*
+ * Read tuples from modify WAL record.
+ * tuple1 is mandatory basic tuple for all modify records,
+ * tuple2 is optional, e.g. WAL record could also have old tuple in case of REINSERT
+ */
+void
+read_modify_wal_tuples(uint8 rec_type, Pointer *ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1)
+{
+	bool		contains_second_tuple = (rec_type == WAL_REC_REINSERT);
+	OffsetNumber length;
+
+	Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
+
+	tuple1->tuple.formatFlags = **ptr;
+	(*ptr)++;
+
+	memcpy(&length, *ptr, sizeof(OffsetNumber));
+	*ptr += sizeof(OffsetNumber);
+
+	Assert(length > 0);
+	if (length != 0)
+	{
+		memcpy(tuple1->fixedData, *ptr, length);
+		*ptr += length;
+
+		tuple1->tuple.data = tuple1->fixedData;
+	}
+	else
+		O_TUPLE_SET_NULL(tuple1->tuple);
+
+	*length1 = length;
+
+	if (contains_second_tuple)
+	{
+		tuple2->tuple.formatFlags = **ptr;
+		(*ptr)++;
+
+		memcpy(&length, *ptr, sizeof(OffsetNumber));
+		*ptr += sizeof(OffsetNumber);
+
+		Assert(length > 0);
+		if (length != 0)
+		{
+			memcpy(tuple2->fixedData, *ptr, length);
+			*ptr += length;
+
+			tuple2->tuple.data = tuple2->fixedData;
+		}
+		else
+			O_TUPLE_SET_NULL(tuple2->tuple);
+	}
+	else
+		O_TUPLE_SET_NULL(tuple2->tuple);
+}
+
+/*
  * Replays a single orioledb WAL container.
  */
 static bool
@@ -2664,7 +2719,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 	OXid		oxid = InvalidOXid;
 	ORelOids	cur_oids = {0, 0, 0},
 			   *treeOids;
-	OffsetNumber length;
+	OffsetNumber unused;
 	bool		success;
 	uint16		type;
 	uint8		rec_type;
@@ -2913,25 +2968,15 @@ replay_container(Pointer startPtr, Pointer endPtr,
 								   RecoveryMsgTypeBridgeErase, tuple, 0);
 			}
 		}
-		else
+		else if (rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT)
 		{
-			OFixedTuple tuple;
-			OFixedTuple oldtuple;
+			OFixedTuple tuple1;
+			OFixedTuple tuple2;
+			Pointer		sys_tree_oids_ptr;
 
+			sys_tree_oids_ptr = ptr + sizeof(uint8) + sizeof(OffsetNumber);
 
-			Assert(rec_type == WAL_REC_INSERT ||
-				   rec_type == WAL_REC_UPDATE ||
-				   rec_type == WAL_REC_DELETE ||
-				   rec_type == WAL_REC_REINSERT);
-
-			tuple.tuple.formatFlags = *ptr;
-			ptr++;
-
-			memcpy(&length, ptr, sizeof(OffsetNumber));
-			ptr += sizeof(OffsetNumber);
-
-			memcpy(tuple.fixedData, ptr, length);
-			tuple.tuple.data = tuple.fixedData;
+			read_modify_wal_tuples(rec_type, &ptr, &tuple1, &tuple2, &unused);
 
 			type = recovery_msg_from_wal_record(rec_type);
 
@@ -2952,7 +2997,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 					workers_synchronize(xlogPtr, true);
 
 				success = apply_sys_tree_modify_record(sys_tree_num, type,
-													   tuple.tuple, oxid,
+													   tuple1.tuple, oxid,
 													   COMMITSEQNO_INPROGRESS);
 
 				if (sys_tree_num == SYS_TREES_O_INDICES && success)
@@ -2961,13 +3006,13 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 					if (type == RecoveryMsgTypeDelete)
 					{
-						treeOids = o_indices_get_oids(ptr, &tmp_oids);
+						treeOids = o_indices_get_oids(sys_tree_oids_ptr, &tmp_oids);
 						if (treeOids)
 							add_undo_drop_relnode(tmp_oids, treeOids, 1);
 					}
 					else if (type == RecoveryMsgTypeInsert)
 					{
-						treeOids = o_indices_get_oids(ptr, &tmp_oids);
+						treeOids = o_indices_get_oids(sys_tree_oids_ptr, &tmp_oids);
 						if (treeOids)
 							add_undo_create_relnode(tmp_oids, treeOids, 1, true);
 					}
@@ -2978,7 +3023,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 					char	   *prefix;
 					char	   *db_prefix;
 
-					memcpy(&key, ptr, sizeof(OSysCacheKey1));
+					memcpy(&key, sys_tree_oids_ptr, sizeof(OSysCacheKey1));
 					o_get_prefixes_for_relnode(key.common.datoid, DatumGetObjectId(key.keys[0]),
 											   &prefix, &db_prefix);
 					o_verify_dir_exists_or_create(prefix, NULL, NULL);
@@ -2986,7 +3031,6 @@ replay_container(Pointer startPtr, Pointer endPtr,
 					pfree(db_prefix);
 				}
 			}
-			ptr += length;
 
 			if (sys_tree_num > 0 || indexDescr == NULL)
 			{
@@ -2999,29 +3043,24 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				elog(LOG, "WAL change for bridge index");
 			}
 
+			Assert(!O_TUPLE_IS_NULL(tuple1.tuple));
+
 			/* Reinsert is processed as DELETE + INSERT */
 			if (rec_type == WAL_REC_REINSERT)
 			{
 				Assert(type == RecoveryMsgTypeReinsert);
-
-				oldtuple.tuple.formatFlags = *ptr;
-				ptr++;
-				memcpy(&length, ptr, sizeof(OffsetNumber));
-				ptr += sizeof(OffsetNumber);
-				memcpy(oldtuple.fixedData, ptr, length);
-				ptr += length;
-				oldtuple.tuple.data = oldtuple.fixedData;
+				Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
 
 				if (single)
 				{
 					recovery_switch_to_oxid(oxid, -1);
-					apply_modify_record(descr, indexDescr, RecoveryMsgTypeDelete, oldtuple.tuple);
-					apply_modify_record(descr, indexDescr, RecoveryMsgTypeInsert, tuple.tuple);
+					apply_modify_record(descr, indexDescr, RecoveryMsgTypeDelete, tuple2.tuple);
+					apply_modify_record(descr, indexDescr, RecoveryMsgTypeInsert, tuple1.tuple);
 				}
 				else
 				{
-					spread_idx_modify(&indexDescr->desc, RecoveryMsgTypeDelete, oldtuple.tuple);
-					spread_idx_modify(&indexDescr->desc, RecoveryMsgTypeInsert, tuple.tuple);
+					spread_idx_modify(&indexDescr->desc, RecoveryMsgTypeDelete, tuple2.tuple);
+					spread_idx_modify(&indexDescr->desc, RecoveryMsgTypeInsert, tuple1.tuple);
 				}
 			}
 			else
@@ -3029,13 +3068,17 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				if (single)
 				{
 					recovery_switch_to_oxid(oxid, -1);
-					apply_modify_record(descr, indexDescr, type, tuple.tuple);
+					apply_modify_record(descr, indexDescr, type, tuple1.tuple);
 				}
 				else
 				{
-					spread_idx_modify(&indexDescr->desc, type, tuple.tuple);
+					spread_idx_modify(&indexDescr->desc, type, tuple1.tuple);
 				}
 			}
+		}
+		else
+		{
+			elog(FATAL, "Unknown modify WAL record");
 		}
 	}
 	update_recovery_undo_loc_flush(single, -1);
@@ -3625,7 +3668,7 @@ recovery_msg_from_wal_record(uint8 wal_record)
 		case WAL_REC_REINSERT:
 
 			/*
-			 * Temporary one for convenience. Boils down to
+			 * Temporary one for convenience. Splits down to
 			 * RecoveryMsgTypeInsert + RecoveryMsgTypeDelete
 			 */
 			return RecoveryMsgTypeReinsert;
