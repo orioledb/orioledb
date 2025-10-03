@@ -256,6 +256,58 @@ class LogicalTest(BaseTest):
 					    [('foofoo', 'barbar', 'aaaaaa', 1),
 					     ('mmm', 'nnn', 'ooo', 2)])
 
+
+# Update with changed pkey on a table with TOAST attributes
+
+	def test_logical_subscription_toast_update_pkey(self):
+		with self.node as publisher:
+			publisher.start()
+
+			baseDir = mkdtemp(prefix=self.myName + '_tgsb_')
+			subscriber = testgres.get_new_node('subscriber',
+			                                   port=self.getBasePort() + 1,
+			                                   base_dir=baseDir)
+			subscriber.init(["--no-locale", "--encoding=UTF8"])
+			subscriber.append_conf(shared_preload_libraries='orioledb')
+			subscriber.append_conf(wal_level='logical')
+
+			with subscriber.start() as subscriber:
+				create_sql = """
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE o_test1 (id int PRIMARY KEY, bid int, junk text
+					) USING orioledb;
+				"""
+				publisher.safe_psql(create_sql)
+				subscriber.safe_psql(create_sql)
+
+				pub = publisher.publish('test_pub', tables=['o_test1'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+
+				with publisher.connect() as con1:
+					with publisher.connect() as con2:
+						con1.execute(
+						    "INSERT INTO o_test1 (id, bid, junk) VALUES (1, 1, repeat(pi()::text,20000));"
+						)
+						con2.execute(
+						    "INSERT INTO o_test1 (id, bid) VALUES (2, 2);")
+						con1.execute("UPDATE o_test1 SET id = 6 WHERE id = 1;")
+
+						con1.commit()
+						con2.commit()
+
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT id, bid FROM o_test1 ORDER BY id'),
+					    [(2, 2), (6, 1)])
+
+					# wait until changes apply on subscriber and check them
+					sub.catchup()
+					# sub.poll_query_until("SELECT orioledb_recovery_synchronized();", expected=True)
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT id, bid FROM o_test1 ORDER BY id'),
+					    [(2, 2), (6, 1)])
+
 	def test_recvlogical_and_drop_database(self):
 		node = self.node
 		node.start()
