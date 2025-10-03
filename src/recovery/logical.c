@@ -303,6 +303,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			CommitSeqNo csn;
 			CSNSnapshotData *csnSnapshot;
 
+			elog(DEBUG3, "WAL_REC_COMMIT");
 			memcpy(&xmin, ptr, sizeof(xmin));
 			ptr += sizeof(xmin);
 			memcpy(&csn, ptr, sizeof(csn));
@@ -410,6 +411,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			memcpy(&cur_oids.relnode, ptr, sizeof(Oid));
 			ptr += sizeof(Oid);
 
+			elog(DEBUG3, "WAL_REC_RELATION");
 			if (IS_SYS_TREE_OIDS(cur_oids))
 				sys_tree_num = cur_oids.relnode;
 			else
@@ -425,9 +427,13 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			{
 				descr = o_fetch_table_descr(cur_oids);
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
+				elog(DEBUG3, "WAL_REC_RELATION oIndexInvalid");
+
 			}
 			else if (ix_type == oIndexToast)
 			{
+				elog(DEBUG3, "WAL_REC_RELATION oIndexToast");
+
 				indexDescr = o_fetch_index_descr(cur_oids, ix_type, false, NULL);
 				descr = o_fetch_table_descr(indexDescr->tableOids);
 				o_toast_tupDesc = descr->toast->leafTupdesc;
@@ -456,7 +462,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 
 			if (descr && descr->toast)
-				elog(DEBUG4, "reloid: %d natts: %u toast natts: %u", cur_oids.reloid, descr->tupdesc->natts, descr->toast->leafTupdesc->natts);
+				elog(DEBUG3, "reloid: %d natts: %u toast natts: %u", cur_oids.reloid, descr->tupdesc->natts, descr->toast->leafTupdesc->natts);
 
 		}
 		else if (rec_type == WAL_REC_O_TABLES_META_LOCK)
@@ -522,7 +528,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			OFixedTuple tuple;
 			ReorderBufferChange *change;
 
-			Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE);
+			Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
 
 			ReorderBufferProcessXid(ctx->reorder, logicalXid, changeXLogPtr);
 
@@ -535,6 +541,19 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			if (SnapBuildCurrentState(ctx->snapshot_builder) < SNAPBUILD_FULL_SNAPSHOT)
 			{
 				ptr += length;
+
+				/* Skip optional part of modify record */
+				if (rec_type == WAL_REC_REINSERT)
+				{
+					OffsetNumber oldlength;
+
+					ptr++;
+					memcpy(&oldlength, ptr, sizeof(OffsetNumber));
+					Assert(oldlength > 0);
+					ptr += sizeof(OffsetNumber);
+					ptr += oldlength;
+				}
+
 				continue;
 			}
 
@@ -545,6 +564,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			{
 				Assert(descr != NULL);
 				memcpy(tuple.fixedData, ptr, length);
+				ptr += length;
 				tuple.tuple.data = tuple.fixedData;
 
 				if (rec_type == WAL_REC_INSERT)
@@ -572,6 +592,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 									chunk_seq_isnull;
 						int			pk_natts;
 						bool		need_to_free = false;
+
+						elog(DEBUG3, "WAL_REC_INSERT TOAST");
 
 						Assert(o_toast_tupDesc);
 						pk_natts = o_toast_tupDesc->natts - TOAST_LEAF_FIELDS_NUM;
@@ -644,12 +666,14 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						{
 							HeapTuple	newheaptuple;
 
+							elog(DEBUG3, "WAL_REC_INSERT NON-TOAST toastable");
 							newheaptuple = convert_toast_pointers(descr, indexDescr, &tuple);
 							change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, true);
 							Assert(change->data.tp.newtuple);
 						}
 						else	/* Tuple without TOASTed attrs */
 						{
+							elog(DEBUG3, "WAL_REC_INSERT NON-TOAST plain");
 							tts_orioledb_store_tuple(descr->newTuple, tuple.tuple,
 													 descr, COMMITSEQNO_INPROGRESS,
 													 PrimaryIndexNumber, false,
@@ -675,6 +699,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					change->data.tp.rlocator.dbOid = cur_oids.datoid;
 					change->data.tp.rlocator.relNumber = cur_oids.relnode;
 
+
 					elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 
 					/*
@@ -685,12 +710,16 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					{
 						HeapTuple	newheaptuple;
 
+						elog(DEBUG3, "WAL_REC_UPDATE toastable");
+
 						newheaptuple = convert_toast_pointers(descr, indexDescr, &tuple);
 						ExecForceStoreHeapTuple(newheaptuple, descr->newTuple, false);
 						change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, true);
 					}
 					else		/* Tuple without TOASTed attrs */
 					{
+						elog(DEBUG3, "WAL_REC_UPDATE plain");
+
 						tts_orioledb_store_tuple(descr->newTuple, tuple.tuple,
 												 descr, COMMITSEQNO_INPROGRESS,
 												 PrimaryIndexNumber, false,
@@ -716,12 +745,18 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 					if (ix_type == oIndexToast)
 					{
+						elog(DEBUG3, "WAL_REC_DELETE TOAST");
+
 						change->data.tp.clear_toast_afterwards = false;
 						tts_orioledb_store_non_leaf_tuple(descr->oldTuple, tuple.tuple,
 														  descr, COMMITSEQNO_INPROGRESS,
 														  PrimaryIndexNumber, false,
 														  NULL);
 						change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
+						ReorderBufferQueueChange(ctx->reorder, logicalXid,
+												 changeXLogPtr,
+												 change, true);
+
 					}
 					else
 					{
@@ -735,26 +770,112 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						{
 							HeapTuple	oldheaptuple;
 
+/* 							change->data.tp.clear_toast_afterwards = true; */
+							elog(DEBUG3, "WAL_REC_DELETE NON-TOAST toastable");
 							oldheaptuple = convert_toast_pointers(descr, indexDescr, &tuple);
 							change->data.tp.oldtuple = record_buffer_tuple(ctx->reorder, oldheaptuple, true);
+							ReorderBufferQueueChange(ctx->reorder, logicalXid,
+													 changeXLogPtr,
+													 change, false);
+
 						}
 						else	/* Tuple without TOASTed attrs */
 						{
+							elog(DEBUG3, "WAL_REC_DELETE NON-TOAST plain");
 							tts_orioledb_store_non_leaf_tuple(descr->oldTuple, tuple.tuple,
 															  descr, COMMITSEQNO_INPROGRESS,
 															  PrimaryIndexNumber, false,
 															  NULL);
 							change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
-
+							ReorderBufferQueueChange(ctx->reorder, logicalXid,
+													 changeXLogPtr,
+													 change, false);
 						}
 					}
+				}
+				else if (rec_type == WAL_REC_REINSERT)
+				{
+					OFixedTuple oldtuple;
+					OffsetNumber oldlength;
+
+					Assert(ix_type != oIndexToast);
+
+					oldtuple.tuple.formatFlags = *ptr;
+					ptr++;
+					memcpy(&oldlength, ptr, sizeof(OffsetNumber));
+					ptr += sizeof(OffsetNumber);
+					Assert(oldlength > 0);
+					memcpy(oldtuple.fixedData, ptr, oldlength);
+					ptr += oldlength;
+
+					oldtuple.tuple.data = oldtuple.fixedData;
+
+					change = ReorderBufferGetChange(ctx->reorder);
+					change->action = REORDER_BUFFER_CHANGE_UPDATE;
+					change->data.tp.clear_toast_afterwards = true;
+					change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
+					change->data.tp.rlocator.dbOid = cur_oids.datoid;
+					change->data.tp.rlocator.relNumber = cur_oids.relnode;
+
+					elog(DEBUG4, "reloid: %u", cur_oids.reloid);
+
+					/*
+					 * Primary table contains TOASTed attributes needs
+					 * conversion of them
+					 */
+					if (descr->ntoastable > 0)
+					{
+						HeapTuple	newheaptuple;
+						HeapTuple	oldheaptuple;
+
+						elog(DEBUG3, "WAL_REC_REINSERT toastable");
+						oldheaptuple = convert_toast_pointers(descr, indexDescr, &oldtuple);
+						change->data.tp.oldtuple = record_buffer_tuple(ctx->reorder, oldheaptuple, true);
+
+						newheaptuple = convert_toast_pointers(descr, indexDescr, &tuple);
+						ExecForceStoreHeapTuple(newheaptuple, descr->newTuple, false);
+						change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, true);
+
+					}
+					else		/* Tuple without TOASTed attrs */
+					{
+						elog(DEBUG3, "WAL_REC_REINSERT plain");
+						tts_orioledb_store_non_leaf_tuple(descr->oldTuple, oldtuple.tuple,
+														  descr, COMMITSEQNO_INPROGRESS,
+														  PrimaryIndexNumber, false,
+														  NULL);
+						change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
+
+						tts_orioledb_store_tuple(descr->newTuple, tuple.tuple,
+												 descr, COMMITSEQNO_INPROGRESS,
+												 PrimaryIndexNumber, false,
+												 NULL);
+
+						change->data.tp.newtuple = record_buffer_tuple_slot(ctx->reorder, descr->newTuple);
+					}
+
 					ReorderBufferQueueChange(ctx->reorder, logicalXid,
 											 changeXLogPtr,
-											 change, (ix_type == oIndexToast));
+											 change, false);
 				}
 			}
+			else
+			{
+				ptr += length;
 
-			ptr += length;
+				/* Skip optional part of modify record */
+				if (rec_type == WAL_REC_REINSERT)
+				{
+					OffsetNumber oldlength;
+
+					ptr++;
+					memcpy(&oldlength, ptr, sizeof(OffsetNumber));
+					Assert(oldlength > 0);
+					ptr += sizeof(OffsetNumber);
+					ptr += oldlength;
+				}
+
+			}
 		}
 	}
 }
