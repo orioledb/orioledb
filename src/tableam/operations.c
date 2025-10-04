@@ -281,7 +281,9 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		.arg = slot
 	};
 
-	if (slot->tts_ops != descr->newTuple->tts_ops)
+	if (slot->tts_ops != descr->newTuple->tts_ops ||
+		(((OTableSlot *) slot)->descr != NULL &&
+		 ((OTableSlot *) slot)->descr != descr))
 	{
 		ExecCopySlot(descr->newTuple, slot);
 		slot = descr->newTuple;
