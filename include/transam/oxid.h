@@ -86,7 +86,7 @@ o_check_isolation_level(void)
 
 extern Size oxid_shmem_needs(void);
 extern void oxid_init_shmem(Pointer ptr, bool found);
-extern bool wait_for_oxid(OXid oxid);
+extern bool wait_for_oxid(OXid oxid, bool errorOk);
 extern void oxid_notify(OXid oxid);
 extern void oxid_notify_all(void);
 extern void advance_oxids(OXid new_xid);

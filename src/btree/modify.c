@@ -421,7 +421,7 @@ wait_for_tuple(BTreeDescr *desc, OTuple tuple, OXid oxid,
 		(void) LockAcquire(hwLockTag, *hwLockMode, false, false);
 	}
 
-	wait_for_oxid(oxid);
+	wait_for_oxid(oxid, false);
 }
 
 static ConflictResolution
@@ -1279,7 +1279,7 @@ retry:
 					}
 				}
 				unlock_page(blkno);
-				wait_for_oxid(XACT_INFO_GET_OXID(xactInfo));
+				wait_for_oxid(XACT_INFO_GET_OXID(xactInfo), false);
 				findResult = refind_page(&pageFindContext, key,
 										 BTreeKeyUniqueLowerBound, 0,
 										 blkno, pageChangeCount);
@@ -1355,7 +1355,7 @@ retry:
 					if (cbAction == OBTreeCallbackActionXidExit)
 						return OBTreeModifyResultFound;
 				}
-				wait_for_oxid(XACT_INFO_GET_OXID(xactInfo));
+				wait_for_oxid(XACT_INFO_GET_OXID(xactInfo), false);
 				BTREE_PAGE_FIND_SET(&pageFindContext, MODIFY);
 				findResult = refind_page(&pageFindContext, key,
 										 BTreeKeyUniqueLowerBound, 0,

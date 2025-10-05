@@ -618,7 +618,7 @@ fsync_xidmap_range(OXid xmin, OXid xmax, uint32 wait_event_info)
  * oxid was finished.
  */
 bool
-wait_for_oxid(OXid oxid)
+wait_for_oxid(OXid oxid, bool errorOk)
 {
 	int			procnum;
 	CommitSeqNo csn;
@@ -646,7 +646,12 @@ wait_for_oxid(OXid oxid)
 		return true;
 	}
 
-	Assert(VirtualTransactionIdIsValid(vxid));
+	if (vxid.BACKENDID < 0 || !VirtualTransactionIdIsValid(vxid))
+	{
+		Assert(errorOk);
+		return true;
+	}
+
 	GET_CUR_PROCDATA()->waitingForOxid = true;
 	result = VirtualXactLock(vxid, true);
 	GET_CUR_PROCDATA()->waitingForOxid = false;

@@ -212,6 +212,31 @@ convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
 	return heap_form_tuple(descr->tupdesc, new_values, isnull);
 }
 
+static bool
+set_snapshot(LogicalDecodingContext *ctx,
+			 TransactionId logicalXid, XLogRecPtr changeXLogPtr)
+{
+	/*
+	 * If the reorderbuffer doesn't yet have a snapshot, add one now, it will
+	 * be needed to decode the change we're currently processing.
+	 */
+	if (!ReorderBufferXidHasBaseSnapshot(ctx->reorder, logicalXid))
+	{
+		Snapshot	snap;
+
+		if (SnapBuildCurrentState(ctx->snapshot_builder) < SNAPBUILD_CONSISTENT)
+			return false;
+
+		snap = SnapBuildGetOrBuildSnapshot(ctx->snapshot_builder);
+		ReorderBufferSetBaseSnapshot(ctx->reorder, logicalXid,
+									 changeXLogPtr,
+									 snap);
+		snap->active_count++;
+	}
+
+	return true;
+}
+
 /*
  * Handle OrioleDB records for LogicalDecodingProcessRecord().
  */
@@ -238,6 +263,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 	while (ptr < endPtr)
 	{
+		XLogRecPtr	changeXLogPtr = startXLogPtr + (ptr - startPtr);
+
 		rec_type = *ptr;
 		ptr++;
 
@@ -257,11 +284,16 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 		if (rec_type == WAL_REC_XID)
 		{
+			CSNSnapshotData *csnSnapshot;
+
 			memcpy(&oxid, ptr, sizeof(oxid));
 			ptr += sizeof(oxid);
 
 			memcpy(&logicalXid, ptr, sizeof(TransactionId));
 			ptr += sizeof(TransactionId);
+
+			csnSnapshot = SnapBuildGetCSNSnaphot(ctx->snapshot_builder);
+			csnSnapshot->nextXid = Max(csnSnapshot->nextXid, oxid);
 		}
 		else if (rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK)
 		{
@@ -269,18 +301,20 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			dlist_iter	cur_txn_i;
 			ReorderBufferTXN *txn;
 			CommitSeqNo csn;
-			CSNSnapshotData csnSnapshot;
+			CSNSnapshotData *csnSnapshot;
 
 			memcpy(&xmin, ptr, sizeof(xmin));
 			ptr += sizeof(xmin);
 			memcpy(&csn, ptr, sizeof(csn));
 			ptr += sizeof(csn);
 
-			csnSnapshot.snapshotcsn = csn;
-			csnSnapshot.xmin = xmin;
-			csnSnapshot.xlogptr = endXLogPtr;
+			csnSnapshot = SnapBuildGetCSNSnaphot(ctx->snapshot_builder);
+			csnSnapshot->snapshotcsn = csn;
+			csnSnapshot->xlogptr = endXLogPtr;
+			csnSnapshot->xmin = xmin;
 
-			SnapBuildUpdateCSNSnaphot(ctx->snapshot_builder, &csnSnapshot);
+			if (!set_snapshot(ctx, logicalXid, changeXLogPtr))
+				continue;
 
 			txn = get_reorder_buffer_txn(ctx->reorder, logicalXid);
 
@@ -331,7 +365,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			TransactionId xid;
 			OXid		xmin;
 			CommitSeqNo csn;
-			CSNSnapshotData csnSnapshot;
+			CSNSnapshotData *csnSnapshot;
 
 			memcpy(&xid, ptr, sizeof(xid));
 			ptr += sizeof(xid);
@@ -340,11 +374,13 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			memcpy(&csn, ptr, sizeof(csn));
 			ptr += sizeof(csn);
 
-			csnSnapshot.snapshotcsn = csn;
-			csnSnapshot.xmin = xmin;
-			csnSnapshot.xlogptr = endXLogPtr;
+			csnSnapshot = SnapBuildGetCSNSnaphot(ctx->snapshot_builder);
+			csnSnapshot->snapshotcsn = csn;
+			csnSnapshot->xlogptr = endXLogPtr;
+			csnSnapshot->xmin = xmin;
 
-			SnapBuildUpdateCSNSnaphot(ctx->snapshot_builder, &csnSnapshot);
+			if (!set_snapshot(ctx, logicalXid, changeXLogPtr))
+				continue;
 
 			if (!SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr))
 			{
@@ -485,7 +521,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		{
 			OFixedTuple tuple;
 			ReorderBufferChange *change;
-			XLogRecPtr	changeXLogPtr = startXLogPtr + (ptr - startPtr);
 
 			Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE);
 
@@ -503,21 +538,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				continue;
 			}
 
-			/*
-			 * If the reorderbuffer doesn't yet have a snapshot, add one now,
-			 * it will be needed to decode the change we're currently
-			 * processing.
-			 */
-			if (!ReorderBufferXidHasBaseSnapshot(ctx->reorder, logicalXid))
-			{
-				Snapshot	snap = SnapBuildGetOrBuildSnapshot(ctx->snapshot_builder);
-
-				ReorderBufferSetBaseSnapshot(ctx->reorder, logicalXid,
-											 changeXLogPtr,
-											 snap);
-				snap->active_count++;
-			}
-
+			(void) set_snapshot(ctx, logicalXid, changeXLogPtr);
 
 			if ((ix_type == oIndexInvalid || ix_type == oIndexToast) &&
 				cur_oids.datoid == ctx->slot->data.database)
