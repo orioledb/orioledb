@@ -27,11 +27,13 @@
 #include "recovery/logical.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
+#include "replication/snapbuild.h"
 #include "s3/control.h"
 #include "s3/headers.h"
 #include "s3/queue.h"
 #include "s3/requests.h"
 #include "s3/worker.h"
+#include "storage/standby.h"
 #include "tableam/handler.h"
 #include "tableam/scan.h"
 #include "tableam/toast.h"
@@ -39,6 +41,7 @@
 #include "transam/undo.h"
 #include "tuple/toast.h"
 #include "utils/compress.h"
+#include "utils/dsa.h"
 #include "utils/guc.h"
 #include "utils/memdebug.h"
 #include "utils/page_pool.h"
@@ -217,6 +220,8 @@ static void orioledb_get_relation_info_hook(PlannerInfo *root,
 											bool inhparent,
 											RelOptInfo *rel);
 static bool orioledb_skip_tree_height_hook(Relation indexRelation);
+static void orioledb_get_running_transactions_extension(RunningTransactionsExtension *extension);
+static void orioledb_wait_snapshot(RunningTransactionsExtension *extension);
 
 static bool check_debug_max_bridge_ctid(char **newval, void **extra, GucSource source);
 static void assign_debug_max_bridge_ctid(const char *newval, void *extra);
@@ -1019,6 +1024,8 @@ _PG_init(void)
 	prev_base_init_startup_hook = base_init_startup_hook;
 	base_init_startup_hook = o_base_init_startup_hook;
 	IndexAMRoutineHook = orioledb_indexam_routine_hook;
+	getRunningTransactionsExtension = orioledb_get_running_transactions_extension;
+	waitSnapshotHook = orioledb_wait_snapshot;
 	if (enable_rewind)
 		VacuumHorizonHook = orioledb_vacuum_horizon_hook;
 	orioledb_setup_ddl_hooks();
@@ -1784,6 +1791,30 @@ orioledb_skip_tree_height_hook(Relation indexRelation)
 
 	table_close(tbl, NoLock);
 	return result;
+}
+
+static void
+orioledb_get_running_transactions_extension(RunningTransactionsExtension *extension)
+{
+	extension->csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
+	extension->runXmin = pg_atomic_read_u64(&xid_meta->runXmin);
+
+	pg_read_barrier();
+
+	extension->nextXid = pg_atomic_read_u64(&xid_meta->nextXid);
+}
+
+static void
+orioledb_wait_snapshot(RunningTransactionsExtension *extension)
+{
+	OXid		oxid;
+
+	oxid = pg_atomic_read_u64(&xid_meta->runXmin);
+	while (oxid < extension->nextXid)
+	{
+		while (!wait_for_oxid(oxid, true));
+		oxid++;
+	}
 }
 
 Datum
