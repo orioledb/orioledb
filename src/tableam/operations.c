@@ -572,7 +572,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 		if (OXidIsValid(ioc_arg.conflictOxid))
 		{
 			/* helps avoid deadlocks */
-			(void) wait_for_oxid(ioc_arg.conflictOxid);
+			(void) wait_for_oxid(ioc_arg.conflictOxid, false);
 			continue;
 		}
 
