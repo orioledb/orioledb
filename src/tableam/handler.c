@@ -893,6 +893,26 @@ orioledb_relation_nontransactional_truncate(Relation rel)
 		add_truncate_wal_record(oids);
 }
 
+static bool
+orioledb_relation_reindex(Relation rel, const ReindexStmt *stmt, int flags, const ReindexParams *params)
+{
+	ORelOids	oids;
+	OTable	   *o_table;
+	bool        result;
+
+	ORelOidsSetFromRel(oids, rel);
+	o_table = o_tables_get(oids);
+	Assert(o_table != NULL);
+
+	result = reindex_relation(stmt, rel, flags, params);
+	// Redefine primary index
+	redefine_indices(rel, o_table, true, false);
+
+	o_table_free(o_table);
+
+	return result;
+}
+
 static void
 orioledb_relation_copy_data(Relation rel, const RelFileNode *new_relfilenode)
 {
@@ -2217,6 +2237,7 @@ static const TableAmRoutine orioledb_am_methods = {
 
 	.relation_set_new_filelocator = orioledb_relation_set_new_filenode,
 	.relation_nontransactional_truncate = orioledb_relation_nontransactional_truncate,
+	.relation_reindex = orioledb_relation_reindex,
 	.relation_copy_data = orioledb_relation_copy_data,
 	.relation_copy_for_cluster = orioledb_relation_copy_for_cluster,
 	.relation_vacuum = orioledb_vacuum_rel,
