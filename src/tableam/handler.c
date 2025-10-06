@@ -777,6 +777,19 @@ orioledb_relation_set_new_filenode(Relation rel,
 					new_oids,
 				   *newTreeOids;
 		bool		is_temp;
+		Oid			toast_relid;
+
+		/* If toast relation exists, set new filenode for it */
+		toast_relid = rel->rd_rel->reltoastrelid;
+		if (OidIsValid(toast_relid))
+		{
+			Relation	toastrel = relation_open(toast_relid,
+												 AccessExclusiveLock);
+
+			RelationSetNewRelfilenode(toastrel,
+									  toastrel->rd_rel->relpersistence);
+			table_close(toastrel, NoLock);
+		}
 
 		ORelOidsSetFromRel(old_oids, rel);
 		old_o_table = o_tables_get(old_oids);
@@ -891,6 +904,12 @@ orioledb_relation_nontransactional_truncate(Relation rel)
 
 	if (RelationIsPermanent(rel))
 		add_truncate_wal_record(oids);
+}
+
+static bool
+orioledb_relation_reindex(Relation rel, const ReindexStmt *stmt, int flags, const ReindexParams *params)
+{
+	return reindex_relation(stmt, rel, flags, params);
 }
 
 static void
@@ -2217,6 +2236,7 @@ static const TableAmRoutine orioledb_am_methods = {
 
 	.relation_set_new_filelocator = orioledb_relation_set_new_filenode,
 	.relation_nontransactional_truncate = orioledb_relation_nontransactional_truncate,
+	.relation_reindex = orioledb_relation_reindex,
 	.relation_copy_data = orioledb_relation_copy_data,
 	.relation_copy_for_cluster = orioledb_relation_copy_for_cluster,
 	.relation_vacuum = orioledb_vacuum_rel,

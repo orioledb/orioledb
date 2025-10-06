@@ -160,10 +160,10 @@ void
 assign_new_oids(OTable *oTable, Relation rel, bool drop_pkey)
 {
 	Oid			toast_relid;
-	ReindexParams params;
 
 	CheckTableForSerializableConflictIn(rel);
 
+	/* If toast relation exists, set new filenode for it */
 	toast_relid = rel->rd_rel->reltoastrelid;
 	if (OidIsValid(toast_relid))
 	{
@@ -190,8 +190,6 @@ assign_new_oids(OTable *oTable, Relation rel, bool drop_pkey)
 		ListCell   *indexId;
 
 		in_indexes_rebuild = true;
-		params.options = 0;
-		params.tablespaceOid = InvalidOid;
 
 		/* not using simple reindex_relation here anymore, */
 		/* because we hold a lock on relation already */
@@ -211,19 +209,6 @@ assign_new_oids(OTable *oTable, Relation rel, bool drop_pkey)
 			index_close(iRel, AccessExclusiveLock);
 		}
 
-		/*
-		 * If the relation has a secondary toast rel, reindex that too while
-		 * we still hold the lock on the main table.
-		 */
-		if (OidIsValid(toast_relid))
-		{
-			params.options &= ~(REINDEXOPT_MISSING_OK);
-#if PG_VERSION_NUM >= 170000
-			reindex_relation(NULL, toast_relid, REINDEX_REL_PROCESS_TOAST, &params);
-#else
-			reindex_relation(toast_relid, REINDEX_REL_PROCESS_TOAST, &params);
-#endif
-		}
 		RelationSetNewRelfilenode(rel, rel->rd_rel->relpersistence);
 	}
 	PG_CATCH();
@@ -1947,7 +1932,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	pfree(index_tuples);
 }
 
-static void
+void
 drop_primary_index(Relation rel, OTable *o_table)
 {
 	OTable	   *old_o_table;

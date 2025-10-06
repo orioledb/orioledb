@@ -27,6 +27,7 @@
 #include "tuple/slot.h"
 #include "utils/compress.h"
 #include "utils/planner.h"
+#include "utils/relcache.h"
 #include "utils/stopevent.h"
 
 #include "access/amapi.h"
@@ -41,12 +42,14 @@
 #include "utils/selfuncs.h"
 #include "utils/syscache.h"
 #include "utils/lsyscache.h"
+#include "nodes/pg_list.h"
 
 #include <math.h>
 
 #define DEFAULT_PAGE_CPU_MULTIPLIER 50.0
 
 static IndexBuildResult *orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo);
+static void orioledb_amreuse(Relation index);
 static void orioledb_ambuildempty(Relation index);
 static bool orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 							  Datum tupleid, Relation heapRel,
@@ -144,6 +147,7 @@ orioledb_btree_handler(void)
 	amroutine->amkeytype = InvalidOid;
 
 	amroutine->ambuild = orioledb_ambuild;
+	amroutine->amreuse = orioledb_amreuse;
 	amroutine->ambuildempty = orioledb_ambuildempty;
 	amroutine->aminsert = NULL;
 	amroutine->aminsertextended = orioledb_aminsert;
@@ -238,6 +242,20 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 /* Check if name is used */
 
 
+void
+orioledb_amreuse(Relation index)
+{
+	if (o_reuse_indices)
+	{
+		o_reuse_indices = lappend_oid(o_reuse_indices, index->rd_id);
+	}
+	else
+	{
+		o_reuse_indices = list_make1_oid(index->rd_id);
+	}
+}
+
+
 IndexBuildResult *
 orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 {
@@ -284,20 +302,28 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 
 	result->heap_tuples = 0.0;
 	result->index_tuples = 0.0;
-	if (index->rd_index->indisprimary)
-	{
-		*result = o_pkey_result;
-		memset(&o_pkey_result, 0, sizeof(o_pkey_result));
-	}
 
-	if (in_nontransactional_truncate || (!index->rd_index->indisprimary && !OidIsValid(o_saved_relrewrite)))
+
+	if (in_nontransactional_truncate || !OidIsValid(o_saved_relrewrite))
 	{
 		ORelOids	tbl_oids;
+		OTable	   *o_table;
 
 		ORelOidsSetFromRel(tbl_oids, heap);
-		if (!in_nontransactional_truncate)
-			o_define_index_validate(tbl_oids, index, indexInfo, NULL);
-		o_define_index(heap, index, InvalidOid, reindex, InvalidIndexNumber, false, result);
+		o_table = o_tables_get(tbl_oids);
+
+		if (index->rd_index->indisprimary && o_table->has_primary)
+		{
+			/* If table already has primary index, redefine it */
+			drop_primary_index(heap, o_table);
+			redefine_pkey_for_rel(heap);
+		}
+		else
+		{
+			if (!in_nontransactional_truncate)
+				o_define_index_validate(tbl_oids, index, indexInfo, NULL);
+			o_define_index(heap, index, InvalidOid, reindex, InvalidIndexNumber, false, result);
+		}
 	}
 
 	return result;
