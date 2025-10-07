@@ -2988,7 +2988,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 					char	   *prefix;
 					char	   *db_prefix;
 
-					memcpy(&key, ptr, sizeof(OSysCacheKey1));
+					memcpy(&key, sys_tree_oids_ptr, sizeof(OSysCacheKey1));
 					o_get_prefixes_for_relnode(key.common.datoid, DatumGetObjectId(key.keys[0]),
 											   &prefix, &db_prefix);
 					o_verify_dir_exists_or_create(prefix, NULL, NULL);
