@@ -2680,7 +2680,7 @@ read_modify_wal_tuples(uint8 rec_type, Pointer *ptr, OFixedTuple *tuple1, OFixed
 			tuple2->tuple.data = tuple2->fixedData;
 		}
 		else
-			O_TUPLE_SET_NULL(tuple1->tuple);
+			O_TUPLE_SET_NULL(tuple2->tuple);
 	}
 }
 
