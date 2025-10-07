@@ -238,57 +238,6 @@ set_snapshot(LogicalDecodingContext *ctx,
 }
 
 /*
- * Read tuples from modify WAL record.
- * tuple1 is mandatory basic tuple for all modify records,
- * tuple2 is optional, e.g. WAL record could also have old tuple in case of REINSERT
- */
-static void
-read_modify_wal_tuples(uint8 rec_type, Pointer *ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1)
-{
-	bool		contains_second_tuple = (rec_type == WAL_REC_REINSERT);
-	OffsetNumber length;
-
-	Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
-
-	tuple1->tuple.formatFlags = **ptr;
-	(*ptr)++;
-
-	memcpy(&length, *ptr, sizeof(OffsetNumber));
-	*ptr += sizeof(OffsetNumber);
-
-	if (length != 0)
-	{
-		memcpy(tuple1->fixedData, *ptr, length);
-		*ptr += length;
-
-		tuple1->tuple.data = tuple1->fixedData;
-	}
-	else
-		O_TUPLE_SET_NULL(tuple1->tuple);
-
-	*length1 = length;
-
-	if (contains_second_tuple)
-	{
-		tuple2->tuple.formatFlags = **ptr;
-		(*ptr)++;
-
-		memcpy(&length, *ptr, sizeof(OffsetNumber));
-		*ptr += sizeof(OffsetNumber);
-
-		if (length != 0)
-		{
-			memcpy(tuple2->fixedData, *ptr, length);
-			*ptr += length;
-
-			tuple2->tuple.data = tuple2->fixedData;
-		}
-		else
-			O_TUPLE_SET_NULL(tuple1->tuple);
-	}
-}
-
-/*
  * Handle OrioleDB records for LogicalDecodingProcessRecord().
  */
 void
@@ -880,7 +829,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		}
 		else
 		{
-			elog(ERROR, "Unknown modify WAL record");
+			elog(FATAL, "Unknown modify WAL record");
 		}
 	}
 }
