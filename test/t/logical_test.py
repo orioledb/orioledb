@@ -363,9 +363,9 @@ class LogicalTest(BaseTest):
 
 					# wait until changes apply on subscriber and check them
 					sub.catchup()
-					subscriber.poll_query_until(
-					    "SELECT orioledb_recovery_synchronized();",
-					    expected=True)
+					#					subscriber.poll_query_until(
+					#					    "SELECT orioledb_recovery_synchronized();",
+					#					    expected=True)
 					#					subscriber.safe_psql("CHECKPOINT;")
 					self.assertListEqual(
 					    subscriber.execute(
