@@ -78,7 +78,13 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	Assert(!is_recovery_process());
 	Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
 
-	required_length = sizeof(WALRecModify) + length + length2;
+	required_length = sizeof(WALRecModify) + length;
+
+	if (length2)
+	{
+		Assert(!O_TUPLE_IS_NULL(tuple2));
+		required_length += sizeof(uint8) + sizeof(OffsetNumber) + length2;
+	}
 
 	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
 		required_length += sizeof(WALRecRelation);
@@ -162,7 +168,7 @@ add_local_modify(uint8 record_type, OTuple record, OffsetNumber length, OTuple r
 	{
 		Assert(length2);
 		Assert(!O_TUPLE_IS_NULL(record2));
-		Assert(local_wal_buffer_offset + sizeof(*wal_rec) + length + sizeof(uint8) + sizeof(OffsetNumber) + length2 <= LOCAL_WAL_BUFFER_SIZE);
+		Assert(local_wal_buffer_offset + sizeof(uint8) + sizeof(OffsetNumber) + length2 <= LOCAL_WAL_BUFFER_SIZE);
 
 		memcpy(&local_wal_buffer[local_wal_buffer_offset], &record2.formatFlags, sizeof(uint8));
 		local_wal_buffer_offset++;
