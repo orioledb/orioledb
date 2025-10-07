@@ -319,7 +319,6 @@ class LogicalTest(BaseTest):
 						con1.commit()
 						con2.commit()
 
-
 #						con2.execute("CHECKPOINT;")
 #						con2.execute("SELECT orioledb_get_current_oxid();")
 
