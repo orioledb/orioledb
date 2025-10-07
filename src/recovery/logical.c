@@ -584,14 +584,11 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			/* Skip */
 		}
-		else
+		else if (rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT)
 		{
 			OFixedTuple tuple1;
 			OFixedTuple tuple2;
-
 			ReorderBufferChange *change;
-
-			Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
 
 			ReorderBufferProcessXid(ctx->reorder, logicalXid, changeXLogPtr);
 
@@ -606,10 +603,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				cur_oids.datoid == ctx->slot->data.database)
 			{
 				Assert(descr != NULL);
+				Assert(!O_TUPLE_IS_NULL(tuple1.tuple));
 
 				if (rec_type == WAL_REC_INSERT)
 				{
-
 					change = ReorderBufferGetChange(ctx->reorder);
 					change->action = REORDER_BUFFER_CHANGE_INSERT;
 					change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
@@ -886,6 +883,14 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 											 change, false);
 				}
 			}
+			else
+			{
+				elog(DEBUG3, "Logical decoding modify ix_type, %u", ix_type);
+			}
+		}
+		else
+		{
+			elog(ERROR, "Unknown modify WAL record");
 		}
 	}
 }
