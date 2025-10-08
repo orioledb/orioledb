@@ -854,9 +854,9 @@ tts_orioledb_store_non_leaf_tuple(TupleTableSlot *slot, OTuple tuple,
 									  shouldfree, hint);
 }
 
-static Datum
-get_tbl_att(TupleTableSlot *slot, int attnum, bool primaryIsCtid,
-			bool *isnull, Oid *typid)
+Datum
+o_get_tbl_att(TupleTableSlot *slot, int attnum, bool primaryIsCtid,
+			  bool *isnull, Oid *typid)
 {
 	int			i;
 	Datum		value;
@@ -921,8 +921,8 @@ get_tbl_att(TupleTableSlot *slot, int attnum, bool primaryIsCtid,
 	return value;
 }
 
-static Datum
-get_idx_expr_att(TupleTableSlot *slot, OIndexDescr *idx,
+Datum
+o_get_idx_expr_att(TupleTableSlot *slot, OIndexDescr *idx,
 				 ExprState *exp_state, bool *isnull)
 {
 	Datum		result;
@@ -957,13 +957,13 @@ tts_orioledb_get_index_values(TupleTableSlot *slot, OIndexDescr *idx,
 		int			attnum = idx->tableAttnums[i];
 
 		if (attnum != EXPR_ATTNUM)
-			values[i] = get_tbl_att(slot, attnum, idx->primaryIsCtid,
-									&isnull[i], NULL);
+			values[i] = o_get_tbl_att(slot, attnum, idx->primaryIsCtid,
+									  &isnull[i], NULL);
 		else
 		{
-			values[i] = get_idx_expr_att(slot, idx,
-										 (ExprState *) lfirst(indexpr_item),
-										 &isnull[i]);
+			values[i] = o_get_idx_expr_att(slot, idx,
+										   (ExprState *) lfirst(indexpr_item),
+										   &isnull[i]);
 			indexpr_item = lnext(idx->expressions_state, indexpr_item);
 		}
 	}
@@ -1029,13 +1029,13 @@ tts_orioledb_fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx,
 		attnum = idx->tableAttnums[i];
 
 		if (attnum != EXPR_ATTNUM)
-			value = get_tbl_att(slot, attnum, idx->primaryIsCtid,
-								&isnull, &typid);
+			value = o_get_tbl_att(slot, attnum, idx->primaryIsCtid,
+								  &isnull, &typid);
 		else
 		{
-			value = get_idx_expr_att(slot, idx,
-									 (ExprState *) lfirst(indexpr_item),
-									 &isnull);
+			value = o_get_idx_expr_att(slot, idx,
+									   (ExprState *) lfirst(indexpr_item),
+									   &isnull);
 			typid = idx->nonLeafTupdesc->attrs[i].atttypid;
 			indexpr_item = lnext(idx->expressions_state, indexpr_item);
 		}
@@ -1046,6 +1046,10 @@ tts_orioledb_fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx,
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
 		bound->keys[i].comparator = idx->fields[i].comparator;
+		if (idx->desc.type == oIndexExclusion)
+			bound->keys[i].exclusion_fn = idx->fields[i].exclusion_fn;
+		else
+			bound->keys[i].exclusion_fn = NULL;
 	}
 }
 
@@ -1068,13 +1072,13 @@ appendStringInfoIndexKey(StringInfo str, TupleTableSlot *slot, OIndexDescr *id)
 		int			attnum = id->tableAttnums[i];
 
 		if (attnum != EXPR_ATTNUM)
-			value = get_tbl_att(slot, attnum, id->primaryIsCtid,
-								&isnull, NULL);
+			value = o_get_tbl_att(slot, attnum, id->primaryIsCtid,
+								  &isnull, NULL);
 		else
 		{
-			value = get_idx_expr_att(slot, id,
-									 (ExprState *) lfirst(indexpr_item),
-									 &isnull);
+			value = o_get_idx_expr_att(slot, id,
+									   (ExprState *) lfirst(indexpr_item),
+									   &isnull);
 			indexpr_item = lnext(id->expressions_state, indexpr_item);
 		}
 

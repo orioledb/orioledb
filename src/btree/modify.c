@@ -1153,7 +1153,7 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 	OInMemoryBlkno blkno;
 	uint32		pageChangeCount;
 	LWLock	   *uniqueLock;
-	OBTreeModifyResult result;
+	OBTreeModifyResult result = 456;
 	Jsonb	   *params = NULL;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
@@ -1353,7 +1353,9 @@ retry:
 														  xactInfo, &lockMode, &cbHint, callbackInfo->arg);
 					Assert(cbAction != OBTreeCallbackActionXidNoWait);
 					if (cbAction == OBTreeCallbackActionXidExit)
+					{
 						return OBTreeModifyResultFound;
+					}
 				}
 				wait_for_oxid(XACT_INFO_GET_OXID(xactInfo), false);
 				BTREE_PAGE_FIND_SET(&pageFindContext, MODIFY);

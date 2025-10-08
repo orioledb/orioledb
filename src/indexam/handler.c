@@ -490,6 +490,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	OIndexDescr *index_descr;
 	OTableDescr *descr;
 	OIndexNumber ix_num;
+	OBTreeModifyResult iresult;
 	bool		success;
 	BTreeModifyCallbackInfo callbackInfo =
 	{
@@ -612,8 +613,10 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 
 	fill_current_oxid_osnapshot(&oxid, &o_snapshot);
 
-	success = (o_tbl_index_insert(descr, descr->indices[ix_num], &tuple, slot,
-								  oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
+	iresult = o_tbl_index_insert(descr, descr->indices[ix_num], &tuple, slot,
+								 oxid, o_snapshot.csn, &callbackInfo);
+
+	success = (iresult == OBTreeModifyResultInserted);
 
 	if (!success)
 	{
@@ -1549,7 +1552,9 @@ search_next_dup_range(List *duplicates, int dup_range_lc_id, int *dup_range_star
 			{
 				*dup_range_start = dup_range_lc_id + 1;
 			}
-		} else {
+		}
+		else
+		{
 			*dup_range_start = dup_range_lc_id + 1;
 		}
 		dup_range_lc_id--;

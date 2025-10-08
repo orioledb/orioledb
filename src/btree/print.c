@@ -273,6 +273,9 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 		case oIndexBridge:
 			appendStringInfo(outbuf, ", ix_type = bridge");
 			break;
+		case oIndexExclusion:
+			appendStringInfo(outbuf, ", ix_type = exclusion");
+			break;
 		default:
 			appendStringInfo(outbuf, ", ix_type = wrong");
 			break;
