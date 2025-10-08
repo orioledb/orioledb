@@ -336,7 +336,8 @@ tuplesort_begin_orioledb_toast(OIndexDescr *toast,
 	sortKey->abbreviate = false;
 	sortKey->ssup_reverse = false;
 	oFillFieldOpClassAndComparator(&field, toast->oids.datoid,
-								   INT2_BTREE_OPS_OID);
+								   INT2_BTREE_OPS_OID,
+								   InvalidOid);
 	o_finish_sort_support_function(field.comparator, sortKey);
 
 	/* CHUNKN_POS */
@@ -348,7 +349,8 @@ tuplesort_begin_orioledb_toast(OIndexDescr *toast,
 	sortKey->abbreviate = false;
 	sortKey->ssup_reverse = false;
 	oFillFieldOpClassAndComparator(&field, toast->oids.datoid,
-								   INT4_BTREE_OPS_OID);
+								   INT4_BTREE_OPS_OID,
+								   InvalidOid);
 	o_finish_sort_support_function(field.comparator, sortKey);
 
 	MemoryContextSwitchTo(oldcontext);

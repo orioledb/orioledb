@@ -42,6 +42,7 @@
 #include "pgstat.h"
 #include "storage/bufmgr.h"
 #include "utils/datum.h"
+#include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 
 static OTableModifyResult o_tbl_indices_overwrite(OTableDescr *descr,
@@ -143,9 +144,12 @@ static OBTreeModifyCallbackAction o_lock_deleted_callback(BTreeDescr *descr, OTu
 														  UndoLocation location,
 														  RowLockMode *lock_mode, BTreeLocationHint *hint,
 														  void *arg);
+static void fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bound);
 static inline bool is_keys_eq(BTreeDescr *desc, OBTreeKeyBound *k1, OBTreeKeyBound *k2);
 static void o_report_duplicate(Relation rel, OIndexDescr *id,
 							   TupleTableSlot *slot);
+
+PG_FUNCTION_INFO_V1(orioledb_int4range_immutable);
 
 static TupleTableSlot *
 update_arg_get_slot(OModifyCallbackArg *arg)
@@ -267,7 +271,7 @@ delete_old_bridge_index_ctid(OTableDescr *descr, Relation relation,
 							   tss_orioledb_print_idx_key(bridge_slot, descr->bridge))));
 }
 
-// TODO: Merge with o_apply_new_bridge_index_ctid
+/*  TODO: Merge with o_apply_new_bridge_index_ctid */
 static void
 reinsert_bridge_ctid_on_pkey_changed(OTableDescr *descr, Relation relation,
 									 TupleTableSlot *slot, CommitSeqNo csn)
@@ -479,6 +483,7 @@ fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *pkey)
 		pkey->keys[0].type = TIDOID;
 		pkey->keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		pkey->keys[0].comparator = idx->fields[0].comparator;
+		pkey->keys[0].exclusion_fn = NULL;
 	}
 	else
 	{
@@ -498,6 +503,7 @@ fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *pkey)
 			if (slot->tts_isnull[attnum - 1])
 				pkey->keys[i].flags |= O_VALUE_BOUND_NULL;
 			pkey->keys[i].comparator = idx->fields[pk_from + i].comparator;
+			pkey->keys[i].exclusion_fn = NULL;
 		}
 	}
 }
@@ -516,6 +522,7 @@ bridged_index_fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *primary, OBTree
 		pkey->keys[0].type = TIDOID;
 		pkey->keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		pkey->keys[0].comparator = primary->fields[0].comparator;
+		pkey->keys[0].exclusion_fn = NULL;
 	}
 	else
 	{
@@ -524,7 +531,7 @@ bridged_index_fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *primary, OBTree
 		pkey->nkeys = primary->nKeyFields;
 		for (i = 0; i < primary->nKeyFields; i++)
 		{
-			int		attnum = primary->tableAttnums[i];
+			int			attnum = primary->tableAttnums[i];
 
 			pkey->keys[i].value = slot->tts_values[attnum - 1];
 			pkey->keys[i].type = primary->leafTupdesc->attrs[attnum - 1].atttypid;
@@ -532,6 +539,7 @@ bridged_index_fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *primary, OBTree
 			if (slot->tts_isnull[attnum - 1])
 				pkey->keys[i].flags |= O_VALUE_BOUND_NULL;
 			pkey->keys[i].comparator = primary->fields[attnum - 1].comparator;
+			pkey->keys[i].exclusion_fn = NULL;
 		}
 	}
 }
@@ -665,10 +673,10 @@ OExecCheckIndexConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
 
 static List *
 OExecInsertIndexTuples(ResultRelInfo *resultRelInfo,
-					  TupleTableSlot *slot,
-					  EState *estate,
-					  bool *specConflict,
-					  List *arbiterIndexes)
+					   TupleTableSlot *slot,
+					   EState *estate,
+					   bool *specConflict,
+					   List *arbiterIndexes)
 {
 	List	   *result = NIL;
 	int			i;
@@ -694,7 +702,8 @@ OExecInsertIndexTuples(ResultRelInfo *resultRelInfo,
 
 	if (table_get_row_ref_type(heapRelation) == ROW_REF_ROWID)
 	{
-		bool	isnull;
+		bool		isnull;
+
 		tupleidDatum = slot_getsysattr(slot, RowIdAttributeNumber, &isnull);
 		Assert(!isnull);
 	}
@@ -806,7 +815,7 @@ OExecInsertIndexTuples(ResultRelInfo *resultRelInfo,
 						 tupleidDatum,	/* tid of heap tuple */
 						 heapRelation,	/* heap relation */
 						 checkUnique,	/* type of uniqueness check to do */
-						 false,	/* UPDATE without logical change? */
+						 false, /* UPDATE without logical change? */
 						 indexInfo);	/* index AM may need this */
 		o_current_index = NULL;
 
@@ -872,6 +881,79 @@ OExecInsertIndexTuples(ResultRelInfo *resultRelInfo,
 	return result;
 }
 
+int
+o_exclusion_cmp(OIndexDescr *id, OBTreeKeyBound *key1, OTuple *tuple2)
+{
+	TupleDesc	tupdesc;
+	OTupleFixedFormatSpec *spec;
+	int			i,
+				n,
+				attnum;
+	Datum		value;
+	bool		isnull;
+
+	tupdesc = id->leafTupdesc;
+	spec = &id->leafSpec;
+
+	for (i = 0; i < id->nKeyFields; i++)
+	{
+		uint8		flags = key1->keys[i].flags;
+		int			cmp;
+
+		if (flags & O_VALUE_BOUND_UNBOUNDED)
+			return (flags & O_VALUE_BOUND_LOWER) ? -1 : 1;
+
+		attnum = i + 1;
+		value = o_fastgetattr(*tuple2, attnum, tupdesc, spec, &isnull);
+
+		cmp = o_idx_cmp_range_key_to_value(&key1->keys[i], &id->fields[i],
+										   value, isnull);
+		if (cmp != 0)
+			return cmp;
+	}
+
+	return 0;
+}
+
+
+static bool
+o_check_exclusion_constraint(OTableDescr *descr, OIndexDescr *index, TupleTableSlot *slot)
+{
+	OSnapshot	o_snapshot;
+	OXid		oxid;	
+	BTreeIterator *iter;
+	OTuple			tuple;
+	OBTreeKeyBound	bound;
+
+
+	fill_current_oxid_osnapshot(&oxid, &o_snapshot);
+	iter = o_btree_iterator_create(&index->desc, NULL, BTreeKeyNone, &o_snapshot, ForwardScanDirection);
+	tuple = o_btree_iterator_fetch(iter, NULL, NULL, BTreeKeyNone, true, NULL);
+	slot_getallattrs(slot);
+	tts_orioledb_fill_key_bound(slot, index, &bound);
+	while (!O_TUPLE_IS_NULL(tuple))
+	{
+		int res = o_exclusion_cmp(index, &bound, &tuple);
+		if (res == 0)
+		{
+			res = o_idx_cmp(&index->desc,
+							(Pointer) &bound, BTreeKeyBound, 
+							(Pointer) &tuple, BTreeKeyLeafTuple);
+			if (res == 0)
+				continue;
+			else
+				return false;
+		}
+		
+		tuple = o_btree_iterator_fetch(iter, NULL, NULL,
+									   BTreeKeyNone, true, NULL);
+
+	}
+	btree_iterator_free(iter);
+
+	return true;
+}
+
 TupleTableSlot *
 o_tbl_insert_with_arbiter(Relation rel,
 						  OTableDescr *descr,
@@ -890,8 +972,6 @@ o_tbl_insert_with_arbiter(Relation rel,
 	CommitSeqNo csn;
 	OXid		oxid;
 	Datum		conflictTid;
-
-	elog(WARNING, "o_tbl_insert_with_arbiter BEGIN");
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 	csn = oSnapshot.csn;
@@ -941,6 +1021,15 @@ o_tbl_insert_with_arbiter(Relation rel,
 			{
 				success = false;
 				failedIndexNumber = i;
+			} 
+			else if (descr->indices[i]->desc.type == oIndexExclusion)
+			{
+				if (!o_check_exclusion_constraint(descr, descr->indices[i], slot))
+				{
+					success = false;
+					failedIndexNumber = i;
+				}
+
 			}
 		}
 
@@ -959,7 +1048,6 @@ o_tbl_insert_with_arbiter(Relation rel,
 					bytea	   *rowid;
 					Pointer		p;
 					OIndexDescr *primary = GET_PRIMARY(descr);
-					int			i;
 
 					ExecCopySlot(lockedSlot, slot);
 
@@ -1012,6 +1100,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 			ioc_arg.conflictIxNum = InvalidIndexNumber;
 			result = o_tbl_index_insert(descr, descr->indices[i], NULL, slot,
 										oxid, csn, &callbackInfo);
+
 			if (result != OBTreeModifyResultInserted)
 			{
 				success = false;
@@ -1066,7 +1155,6 @@ o_tbl_insert_with_arbiter(Relation rel,
 				}
 				STOPEVENT(STOPEVENT_IOC_BEFORE_UPDATE, NULL);
 			}
-			elog(WARNING, "o_tbl_insert_with_arbiter RETURN 0");
 			return NULL;
 		}
 
@@ -1105,8 +1193,8 @@ o_tbl_insert_with_arbiter(Relation rel,
 			{
 				/*
 				 * HACK: we save index tuple to slot during
-				 * o_insert_with_arbiter_modify_callback, but lockedSlot is for
-				 * table tuple here
+				 * o_insert_with_arbiter_modify_callback, but lockedSlot is
+				 * for table tuple here
 				 */
 				saved_td = lockedSlot->tts_tupleDescriptor;
 				lockedSlot->tts_tupleDescriptor = conflict_td->leafTupdesc;
@@ -1173,12 +1261,10 @@ o_tbl_insert_with_arbiter(Relation rel,
 				}
 			}
 		}
-		elog(WARNING, "o_tbl_insert_with_arbiter RETURN 1");
 		return NULL;
 	}
 
 	Assert(false);
-	elog(WARNING, "o_tbl_insert_with_arbiter RETURN 2");
 	return NULL;
 }
 
@@ -1562,6 +1648,12 @@ fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bound)
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
 		bound->keys[i].comparator = idx->fields[i].comparator;
+		if (idx->desc.type == oIndexExclusion)
+		{
+			bound->keys[i].exclusion_fn = idx->fields[i].exclusion_fn;
+		}
+		else
+			bound->keys[i].exclusion_fn = NULL;
 	}
 }
 
@@ -2598,4 +2690,15 @@ o_truncate_table(ORelOids oids)
 	o_tables_rel_unlock(&oids, AccessExclusiveLock);
 
 	pfree(treeOids);
+}
+
+Datum
+orioledb_int4range_immutable(PG_FUNCTION_ARGS)
+{
+	char	   *range_input = text_to_cstring(PG_GETARG_TEXT_PP(0));
+	Datum		range;
+
+	range = OidInputFunctionCall(F_RANGE_IN, range_input,
+								 INT4RANGEOID, -1);
+	PG_RETURN_DATUM(range);
 }
