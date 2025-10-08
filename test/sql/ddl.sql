@@ -103,18 +103,11 @@ INSERT INTO ranges0 VALUES('D', -5, '62');
 SELECT * FROM ranges0;
 SELECT orioledb_tbl_structure('ranges0'::regclass);
 
-CREATE OR REPLACE FUNCTION int4range_immutable(input_str text)
-  RETURNS int4range
-AS
-$$
-    select int4range(input_str);
-$$ LANGUAGE sql IMMUTABLE;
-
 CREATE OR REPLACE FUNCTION int4range_overlaps(a int4range, b int4range)
   RETURNS boolean
 AS
 $$
-    select lower(a) >= lower(b) OR upper(a) <= upper(b);
+    select a && b;
 $$ LANGUAGE sql IMMUTABLE;
 
 CREATE OPERATOR <-> (
@@ -128,13 +121,20 @@ ALTER OPERATOR FAMILY range_ops USING btree ADD OPERATOR 3 <->(int4range, int4ra
 
 CREATE TABLE ranges (
   c1 int4range,
-  c2 TEXT
+  c2 TEXT -- ,
+  -- i1 serial,
+  -- i2 serial,
+  -- PRIMARY KEY (i1, i2)
 ) USING orioledb;
 
 ALTER TABLE ranges
-	ADD EXCLUDE USING btree (c1 WITH <->, (int4range_immutable(c2)) WITH <->)
+	ADD EXCLUDE USING btree (c1 WITH <->, (orioledb_int4range_immutable(c2)) WITH <->)
   WITH (orioledb_index=false)
   WHERE (NOT c1 @> 0::int4);
+-- CREATE UNIQUE INDEX ON ranges (c1, orioledb_int4range_immutable(c2))
+--   WITH (orioledb_index=false)
+--   WHERE (NOT c1 @> 0::int4);
+\d+ ranges
 
 -- these should succeed because they don't match the index predicate
 INSERT INTO ranges VALUES(int4range(-1, 3), '[-2, 2]');
@@ -143,36 +143,35 @@ INSERT INTO ranges VALUES(int4range(-6, 2), '[-21, 14]');
 -- succeed
 INSERT INTO ranges VALUES(int4range(-5, -2), '[2, 5)');
 SELECT * FROM ranges;
+-- fail, duplicate
+INSERT INTO ranges VALUES(int4range(-5, -2), '[2, 5)');
+SELECT * FROM ranges;
 -- fail, overlaps
 INSERT INTO ranges VALUES(int4range(-6, -3), '[2, 5)');
 SELECT * FROM ranges;
-SELECT orioledb_tbl_structure('ranges'::regclass);
-\q
 
 -- succeed, because violation is ignored
 INSERT INTO ranges VALUES(int4range(-6, -3), '[2, 5)')
-  ON CONFLICT ON CONSTRAINT ranges_c1_int4range_immutable_excl DO NOTHING RETURNING *;
+  ON CONFLICT ON CONSTRAINT ranges_c1_orioledb_int4range_immutable_excl DO NOTHING RETURNING *;
 
 SELECT * FROM ranges;
-SELECT orioledb_tbl_structure('ranges'::regclass);
 
 SELECT * FROM ranges;
-SELECT orioledb_tbl_structure('ranges'::regclass);
 
 -- fail, because DO UPDATE variant requires unique index
 INSERT INTO ranges VALUES(int4range(-6, -3), '[2, 5)')
-  ON CONFLICT ON CONSTRAINT ranges_c1_int4range_immutable_excl DO UPDATE SET c2 = EXCLUDED.c2;
+  ON CONFLICT ON CONSTRAINT ranges_c1_orioledb_int4range_immutable_excl DO UPDATE SET c2 = EXCLUDED.c2;
 SELECT * FROM ranges;
-SELECT orioledb_tbl_structure('ranges'::regclass);
 
 -- succeed because c1 doesn't overlap
+SET log_error_verbosity = 'terse';
+SELECT orioledb_tbl_indices('ranges'::regclass);
+SELECT orioledb_tbl_structure('ranges'::regclass);
 INSERT INTO ranges VALUES(int4range(-16, -13), '[2, 5)');
 SELECT * FROM ranges;
-SELECT orioledb_tbl_structure('ranges'::regclass);
 -- succeed because c2 doesn't overlap
 INSERT INTO ranges VALUES(int4range(-4, -3), '[12, 15)');
 SELECT * FROM ranges;
-SELECT orioledb_tbl_structure('ranges'::regclass);
 
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;
