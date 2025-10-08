@@ -316,4 +316,5 @@ DROP TABLE o_storage_index_test;
 DROP TABLE o_storage_test;
 DROP TABLE o_plain_varlena;
 DROP SCHEMA alter_storage CASCADE;
+NOTICE:  drop cascades to extension orioledb
 RESET search_path;
