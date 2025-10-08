@@ -200,6 +200,7 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 		bridge_bound.keys[0].type = TIDOID;
 		bridge_bound.keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		bridge_bound.keys[0].comparator = NULL;
+		bridge_bound.keys[0].exclusion_fn = NULL;
 		csn = COMMITSEQNO_INPROGRESS;
 
 		o_btree_load_shmem(&descr->bridge->desc);
@@ -414,6 +415,7 @@ orioledb_row_ref_equals(Relation rel, Datum tupleidDatum1, Datum tupleidDatum2)
 						NULL, NULL, NULL);
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleidDatum2, &rowid2, NULL,
 						NULL, NULL, NULL);
+
 	return is_keys_eq(&GET_PRIMARY(descr)->desc, &rowid1, &rowid2);
 }
 
@@ -2413,6 +2415,7 @@ get_keys_from_rowid(OIndexDescr *primary, Datum pkDatum, OBTreeKeyBound *key,
 		key->keys[0].type = TIDOID;
 		key->keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		key->keys[0].comparator = NULL;
+		key->keys[0].exclusion_fn = NULL;
 
 		if (primary->bridging)
 		{

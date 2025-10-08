@@ -419,6 +419,8 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		ix_type = oIndexPrimary;
 	else if (index->rd_index->indisunique)
 		ix_type = oIndexUnique;
+	else if (index->rd_index->indisexclusion)
+		ix_type = oIndexExclusion;
 	else
 		ix_type = oIndexRegular;
 
