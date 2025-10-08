@@ -199,6 +199,7 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 		bridge_bound.keys[0].type = TIDOID;
 		bridge_bound.keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
 		bridge_bound.keys[0].comparator = NULL;
+		bridge_bound.keys[0].exclusion_fn = NULL;
 		csn = COMMITSEQNO_INPROGRESS;
 
 		o_btree_load_shmem(&descr->bridge->desc);
@@ -889,6 +890,7 @@ orioledb_relation_nontransactional_truncate(Relation rel)
 
 	if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
 		in_nontransactional_truncate = true;
+	elog(WARNING, "orioledb_relation_nontransactional_truncate");
 
 	ORelOidsSetFromRel(oids, rel);
 	if (!OidIsValid(rel->rd_rel->oid) || rel->rd_rel->relkind == RELKIND_TOASTVALUE)
@@ -2365,6 +2367,7 @@ get_keys_from_rowid(OIndexDescr *primary, Datum pkDatum, OBTreeKeyBound *key,
 		key->keys[0].type = TIDOID;
 		key->keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
 		key->keys[0].comparator = NULL;
+		key->keys[0].exclusion_fn = NULL;
 
 		if (primary->bridging)
 		{

@@ -430,6 +430,7 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate)
 							bridge_bound.keys[0].type = TIDOID;
 							bridge_bound.keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
 							bridge_bound.keys[0].comparator = NULL;
+							bridge_bound.keys[0].exclusion_fn = NULL;
 							bridge_bound.n_row_keys = 0;
 							bridge_bound.row_keys = NULL;
 

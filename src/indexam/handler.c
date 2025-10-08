@@ -490,6 +490,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	OIndexDescr *index_descr;
 	OTableDescr *descr;
 	OIndexNumber ix_num;
+	OBTreeModifyResult iresult;
 	bool		success;
 	BTreeModifyCallbackInfo callbackInfo =
 	{
@@ -505,6 +506,13 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	OTuple		tuple;
 	CommitSeqNo csn;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
+
+	elog(WARNING, "orioledb_aminsert: checkUnique: %s", 
+		 checkUnique == UNIQUE_CHECK_NO ? "UNIQUE_CHECK_NO" :	 
+		 checkUnique == UNIQUE_CHECK_YES ? "UNIQUE_CHECK_YES" :	    
+         checkUnique == UNIQUE_CHECK_PARTIAL ? "UNIQUE_CHECK_PARTIAL" :
+         checkUnique == UNIQUE_CHECK_EXISTING ? "UNIQUE_CHECK_EXISTING" :
+		 "WRONG");
 
 	o_current_index = NULL;
 
@@ -612,8 +620,19 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 
 	fill_current_oxid_osnapshot(&oxid, &o_snapshot);
 
-	success = (o_tbl_index_insert(descr, descr->indices[ix_num], &tuple, slot,
-								  oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
+	iresult = o_tbl_index_insert(descr, descr->indices[ix_num], &tuple, slot,
+								  oxid, o_snapshot.csn, &callbackInfo);
+	elog(WARNING, "iresult: %d: %s", 
+		 iresult,
+		 iresult == OBTreeModifyResultInserted ? "OBTreeModifyResultInserted" :
+		 iresult == OBTreeModifyResultUpdated ? "OBTreeModifyResultUpdated" :
+		 iresult == OBTreeModifyResultDeleted ? "OBTreeModifyResultDeleted" :
+		 iresult == OBTreeModifyResultLocked ? "OBTreeModifyResultLocked" :
+		 iresult == OBTreeModifyResultFound ? "OBTreeModifyResultFound" :
+		 iresult == OBTreeModifyResultNotFound ? "OBTreeModifyResultNotFound" :
+		 "WRONG");
+
+	success = (iresult == OBTreeModifyResultInserted);
 
 	if (!success)
 	{
@@ -1411,6 +1430,8 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	OIndexNumber ix_num;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
+	elog(WARNING, "orioledb_ambeginscan");
+
 	o_current_index = NULL;
 
 	if (options && !options->orioledb_index)
@@ -1785,8 +1806,22 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	CommitSeqNo csn;
 	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
 
+	elog(WARNING, "orioledb_amgettuple");
+	elog(WARNING, "orioledb_amgettuple: xs_snapshot: %s", 
+		 scan->xs_snapshot->snapshot_type == SNAPSHOT_MVCC ? "SNAPSHOT_MVCC" :
+		 scan->xs_snapshot->snapshot_type == SNAPSHOT_SELF ? "SNAPSHOT_SELF" :
+		 scan->xs_snapshot->snapshot_type == SNAPSHOT_ANY ? "SNAPSHOT_ANY" :
+		 scan->xs_snapshot->snapshot_type == SNAPSHOT_TOAST ? "SNAPSHOT_TOAST" :
+		 scan->xs_snapshot->snapshot_type == SNAPSHOT_DIRTY ? "SNAPSHOT_DIRTY" :
+		 scan->xs_snapshot->snapshot_type == SNAPSHOT_HISTORIC_MVCC ? "SNAPSHOT_HISTORIC_MVCC" :
+		 scan->xs_snapshot->snapshot_type == SNAPSHOT_NON_VACUUMABLE ? "SNAPSHOT_NON_VACUUMABLE" :
+		 "WRONG");
 	if (options && !options->orioledb_index)
-		return btgettuple(scan, dir);
+	{
+		bool btres = btgettuple(scan, dir);
+		elog(WARNING, "amgettuple TUPLE IS%s NULL", btres == false ? "" : " NOT");	 
+		return btres;
+	}
 
 	o_scan->scanDir = dir;
 
@@ -1806,6 +1841,7 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	tuple = o_index_scan_getnext(descr, o_scan, &csn, scan_primary,
 								 tupleCxt, &hint);
 
+	elog(WARNING, "amgettuple TUPLE IS%s NULL", O_TUPLE_IS_NULL(tuple) ? "" : " NOT");	 
 	if (O_TUPLE_IS_NULL(tuple))
 	{
 		if (!scan->xs_rowid.isnull)

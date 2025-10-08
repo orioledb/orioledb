@@ -508,6 +508,65 @@ o_btree_iterator_set_callback(BTreeIterator *it,
 	it->fetchCallbackArg = arg;
 }
 
+#include "tableam/descr.h"
+#include "tableam/key_range.h"
+#include "tableam/toast.h"
+
+#include "utils/lsyscache.h"
+
+static void
+log_o_tuple(TupleDesc tupDesc, OTupleFixedFormatSpec *spec,
+			OTuple tup, char *prefix)
+{
+	StringInfo buf = makeStringInfo();
+	Form_pg_attribute atti;
+	Datum value;
+	bool  isnull;
+	int			attnum,
+				i;
+
+	appendStringInfo(buf, "(");
+
+	for (i = 0; i < tupDesc->natts; i++)
+	{
+		Oid			output = InvalidOid;
+		bool		varlena;
+
+		if (i > 0)
+			appendStringInfo(buf, ", ");
+		attnum = i + 1;
+		value = o_fastgetattr(tup, attnum, tupDesc, spec, &isnull);
+		if (isnull)
+		{
+			appendStringInfo(buf, "null");
+		}
+		else
+		{
+			atti = TupleDescAttr(tupDesc, i);
+			getTypeOutputInfo(atti->atttypid, &output, &varlena);
+			if (!atti->attbyval && atti->attlen && !isnull)
+			{
+				Pointer		p = DatumGetPointer(value);
+
+				if (IS_TOAST_POINTER(p))
+				{
+					appendStringInfo(buf, "TOASTed");
+					continue;
+				}
+			}
+			appendStringInfo(buf, "'%s'",
+							 OidOutputFunctionCall(output, value));
+		}
+	}
+
+	appendStringInfo(buf, ")");
+	elog(WARNING, "%s: %s", prefix, buf->data);
+	pfree(buf->data);
+	pfree(buf);
+}
+
+
+
 OTuple
 o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 					   void *end, BTreeKeyType endType,
@@ -520,6 +579,14 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 
 	result = o_btree_iterator_fetch_internal(it, tupleCsn);
 
+	if (!IS_SYS_TREE_OIDS(desc->oids))
+	{
+		elog(WARNING, "%s: o_btree_iterator_fetch_internal result: IS %sNULL", 
+			 ((OIndexDescr *)desc->arg)->name.data,
+			 O_TUPLE_IS_NULL(result) ? "" : "NOT ");
+		elog(WARNING, "end: %p", end);
+		elog(WARNING, "endType: %d", endType);
+	}
 	if (!O_TUPLE_IS_NULL(result) && end != NULL)
 	{
 		int			cmp = o_btree_cmp(desc, &result, BTreeKeyLeafTuple, end, endType);
@@ -527,8 +594,43 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 		if (IT_IS_BACKWARD(it))
 			cmp *= -1;
 
+		if (!IS_SYS_TREE_OIDS(desc->oids) && endType == BTreeKeyBound)
+		{
+			OIndexDescr *idx_descr = (OIndexDescr *) desc->arg;
+			TupleDesc tupdesc = idx_descr->nonLeafTupdesc;
+			OTupleFixedFormatSpec *spec = &idx_descr->nonLeafSpec;
+			log_o_tuple(tupdesc, spec, result, "RESULT");
+			OBTreeKeyBound *bound = (OBTreeKeyBound *) end;
+			elog(WARNING, "end: %d", bound->nkeys);
+			for (int i = 0; i < bound->nkeys; i++)
+			{
+				Form_pg_attribute attr = &tupdesc->attrs[i];
+				Oid			output = InvalidOid;
+				bool		varlena;
+
+				getTypeOutputInfo(attr->atttypid, &output, &varlena);
+
+				elog(WARNING, "end[%d]: %u %s%s%s%s%s%s %s", i, 
+					 attr->atttypid,
+					 bound->keys[i].flags & O_VALUE_BOUND_INCLUSIVE ? "O_VALUE_BOUND_INCLUSIVE " : "",
+					 bound->keys[i].flags & O_VALUE_BOUND_NULL ? "O_VALUE_BOUND_NULL " : "",
+					 bound->keys[i].flags & O_VALUE_BOUND_UNBOUNDED ? "O_VALUE_BOUND_UNBOUNDED " : "",
+					 bound->keys[i].flags & O_VALUE_BOUND_LOWER ? "O_VALUE_BOUND_LOWER " : "",
+					 bound->keys[i].flags & O_VALUE_BOUND_UPPER ? "O_VALUE_BOUND_UPPER " : "",
+					 bound->keys[i].flags & O_VALUE_BOUND_COERCIBLE ? "O_VALUE_BOUND_COERCIBLE " : "",
+					 bound->keys[i].flags & O_VALUE_BOUND_UNBOUNDED ? "" : OidOutputFunctionCall(output, bound->keys[i].value));
+			}
+		}
+
+		if (!IS_SYS_TREE_OIDS(desc->oids))
+		{
+			elog(WARNING, "cmp: %d", cmp);
+			elog(WARNING, "endIsIncluded: %c", endIsIncluded ? 'Y' : 'N');
+		}
+		
 		if (cmp >= (endIsIncluded ? 1 : 0))
 		{
+			
 			pfree(result.data);
 			O_TUPLE_SET_NULL(result);
 			return result;

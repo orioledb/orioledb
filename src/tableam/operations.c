@@ -41,6 +41,7 @@
 #include "parser/parsetree.h"
 #include "storage/bufmgr.h"
 #include "utils/datum.h"
+#include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 
 static OTableModifyResult o_tbl_indices_overwrite(OTableDescr *descr,
@@ -145,6 +146,8 @@ static OBTreeModifyCallbackAction o_lock_deleted_callback(BTreeDescr *descr, OTu
 static inline bool is_keys_eq(BTreeDescr *desc, OBTreeKeyBound *k1, OBTreeKeyBound *k2);
 static void o_report_duplicate(Relation rel, OIndexDescr *id,
 							   TupleTableSlot *slot);
+
+PG_FUNCTION_INFO_V1(orioledb_int4range_immutable);
 
 static TupleTableSlot *
 update_arg_get_slot(OModifyCallbackArg *arg)
@@ -483,6 +486,7 @@ fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *pkey)
 		pkey->keys[0].type = TIDOID;
 		pkey->keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		pkey->keys[0].comparator = idx->fields[0].comparator;
+		pkey->keys[0].exclusion_fn = NULL;
 	}
 	else
 	{
@@ -502,6 +506,7 @@ fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *pkey)
 			if (slot->tts_isnull[attnum - 1])
 				pkey->keys[i].flags |= O_VALUE_BOUND_NULL;
 			pkey->keys[i].comparator = idx->fields[pk_from + i].comparator;
+			pkey->keys[i].exclusion_fn = NULL;
 		}
 	}
 }
@@ -520,6 +525,7 @@ bridged_index_fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *primary, OBTree
 		pkey->keys[0].type = TIDOID;
 		pkey->keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		pkey->keys[0].comparator = primary->fields[0].comparator;
+		pkey->keys[0].exclusion_fn = NULL;
 	}
 	else
 	{
@@ -536,6 +542,7 @@ bridged_index_fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *primary, OBTree
 			if (slot->tts_isnull[attnum - 1])
 				pkey->keys[i].flags |= O_VALUE_BOUND_NULL;
 			pkey->keys[i].comparator = primary->fields[attnum - 1].comparator;
+			pkey->keys[i].exclusion_fn = NULL;
 		}
 	}
 }
@@ -813,6 +820,7 @@ OExecInsertIndexTuples(ResultRelInfo *resultRelInfo,
 						 false,	/* UPDATE without logical change? */
 						 indexInfo);	/* index AM may need this */
 		o_current_index = NULL;
+		elog(WARNING, "OExecInsertIndexTuples: INSERTED");
 
 		/*
 		 * If the index has an associated exclusion constraint, check that.
@@ -849,6 +857,7 @@ OExecInsertIndexTuples(ResultRelInfo *resultRelInfo,
 				waitMode = CEOUC_WAIT;
 			}
 
+			elog(WARNING, "OExecInsertIndexTuples: CHECK EXCLUSION");
 			satisfiesConstraint =
 				check_exclusion_or_unique_constraint(heapRelation,
 													 indexRelation, indexInfo,
@@ -896,6 +905,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 	Datum		conflictTid;
 
 	elog(WARNING, "o_tbl_insert_with_arbiter BEGIN");
+	elog(WARNING, "arbiterIndexes: %s", nodeToString(arbiterIndexes));
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 	csn = oSnapshot.csn;
@@ -947,6 +957,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 				failedIndexNumber = i;
 			}
 		}
+		elog(WARNING, "success 0: %c", success ? 'Y' : 'N');
 
 		if (descr->bridge)
 		{
@@ -963,7 +974,6 @@ o_tbl_insert_with_arbiter(Relation rel,
 					bytea	   *rowid;
 					Pointer		p;
 					OIndexDescr *primary = GET_PRIMARY(descr);
-					int			i;
 
 					ExecCopySlot(lockedSlot, slot);
 
@@ -1003,6 +1013,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 				success = false;
 			}
 		}
+		elog(WARNING, "success 1: %c", success ? 'Y' : 'N');
 
 		ioc_arg.copyPrimaryOxid = true;
 		for (i = 0; (i < descr->nIndices) && success; i++)
@@ -1022,6 +1033,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 				failedIndexNumber = i;
 			}
 		}
+		elog(WARNING, "success 2: %c", success ? 'Y' : 'N');
 
 		/* Successful insert case */
 		if (success)
@@ -1034,6 +1046,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 			tup = tts_orioledb_form_tuple(slot, descr);
 			if (primary->storageType == BTreeStoragePersistence)
 				o_wal_insert(primary, tup);
+			elog(WARNING, "o_tbl_insert_with_arbiter RETURN 3");
 			return slot;
 		}
 
@@ -1564,6 +1577,13 @@ fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bound)
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
 		bound->keys[i].comparator = idx->fields[i].comparator;
+		if (idx->desc.type == oIndexExclusion)
+		{
+			elog(WARNING, "exclusion_fn[%d]: %p", i, idx->fields[i].exclusion_fn);
+			bound->keys[i].exclusion_fn = idx->fields[i].exclusion_fn;
+		}
+		else
+			bound->keys[i].exclusion_fn = NULL;
 	}
 }
 
@@ -1910,10 +1930,13 @@ o_tbl_index_insert(OTableDescr *descr,
 	OBTreeKeyBound knew;
 	bool		primary = (bd->type == oIndexPrimary);
 
-	OBTreeModifyResult result;
+	OBTreeModifyResult result = 152;
 
+	elog(WARNING, "primary: %c", primary ? 'Y' : 'N');
+	elog(WARNING, "%s: ix_type: %d", id->name.data, bd->type); 
 	if (!primary)
 	{
+		elog(WARNING, "own_tup: %p", own_tup);
 		if (own_tup)
 		{
 			fill_key_bound(slot, id, &knew);
@@ -1936,16 +1959,22 @@ o_tbl_index_insert(OTableDescr *descr,
 	o_btree_load_shmem(bd);
 	if (primary || !id->unique ||
 		(!id->nulls_not_distinct && o_has_nulls(tup)))
+	{
 		result = o_btree_modify(bd, BTreeOperationInsert,
 								tup, BTreeKeyLeafTuple,
 								(Pointer) &knew, BTreeKeyBound,
 								oxid, csn, RowLockUpdate,
-								NULL, callbackInfo) == OBTreeModifyResultInserted;
+								NULL, callbackInfo);
+		elog(WARNING, "o_tbl_index_insert: result 0: %d", result);
+	}
 	else
+	{
 		result = o_btree_insert_unique(bd, tup, BTreeKeyLeafTuple,
 									   (Pointer) &knew, BTreeKeyBound,
 									   oxid, csn, RowLockUpdate,
-									   NULL, callbackInfo) == OBTreeModifyResultInserted;
+									   NULL, callbackInfo);
+		elog(WARNING, "o_tbl_index_insert: result 1: %d", result);
+	}
 
 	((OTableSlot *) slot)->version = o_tuple_get_version(tup);
 
@@ -2563,3 +2592,15 @@ o_truncate_table(ORelOids oids)
 
 	pfree(treeOids);
 }
+
+Datum
+orioledb_int4range_immutable(PG_FUNCTION_ARGS)
+{
+	char *range_input = text_to_cstring(PG_GETARG_TEXT_PP(0));
+	Datum range;
+
+	range = OidInputFunctionCall(F_RANGE_IN, range_input,
+								 INT4RANGEOID, -1);
+	PG_RETURN_DATUM(range);
+}
+

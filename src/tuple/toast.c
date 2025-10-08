@@ -134,6 +134,7 @@ o_toast_cmp(BTreeDescr *desc,
 			else
 				return field->nullfirst ? 1 : -1;
 		}
+		elog(WARNING, "o_call_comparator CALL 9");
 		cmp = o_call_comparator(field->comparator, v1, v2);
 		if (cmp)
 			return field->ascending ? cmp : -cmp;

@@ -506,10 +506,14 @@ o_fill_key_bound(OIndexDescr *id, OTuple tuple,
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
 		bound->keys[i].comparator = id->fields[i].comparator;
+		if (id->desc.type == oIndexExclusion)
+			bound->keys[i].exclusion_fn = id->fields[i].exclusion_fn;
+		else
+			bound->keys[i].exclusion_fn = NULL;
 	}
 }
 
-/* fills secondary index key bound from primary index tuple */
+/* fills bridge index key bound from bridge index tuple */
 void
 o_fill_bridge_index_key_bound(BTreeDescr *secondary, OTuple tuple, OBTreeKeyBound *bound)
 {
@@ -524,6 +528,7 @@ o_fill_bridge_index_key_bound(BTreeDescr *secondary, OTuple tuple, OBTreeKeyBoun
 	if (isnull)
 		bound->keys[0].flags |= O_VALUE_BOUND_NULL;
 	bound->keys[0].comparator = td->fields[td->nFields - 1].comparator;
+	bound->keys[0].exclusion_fn = NULL;
 }
 
 /* fills primary index key bound from tuple that belongs secondary index */
@@ -553,6 +558,7 @@ o_fill_pindex_tuple_key_bound(BTreeDescr *desc,
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
 		bound->keys[i].comparator = id->pk_comparators[i];
+		bound->keys[i].exclusion_fn = NULL;
 	}
 }
 
@@ -588,9 +594,26 @@ o_idx_cmp_range_key_to_value(OBTreeValueBound *bound1, OIndexField *field,
 		if ((bound1->flags & O_VALUE_BOUND_COERCIBLE) && bound1->value == value)
 			cmp = 0;
 		else if (o_bound_is_coercible(bound1, field))
-			cmp = o_call_comparator(field->comparator, bound1->value, value);
+		{
+			elog(WARNING, "bound1->exclusion_fn: %p", bound1->exclusion_fn);
+			if (bound1->exclusion_fn)
+				cmp = o_call_exclusion_fn(field->exclusion_fn, bound1->value, value);
+			else
+			{
+				elog(WARNING, "o_call_comparator CALL 0");
+				cmp = o_call_comparator(field->comparator, bound1->value, value);
+			}
+		}
 		else
-			cmp = o_call_comparator(bound1->comparator, bound1->value, value);
+		{
+			if (bound1->exclusion_fn)
+				cmp = o_call_exclusion_fn(bound1->exclusion_fn, bound1->value, value);
+			else
+			{
+				elog(WARNING, "o_call_comparator CALL 1");
+				cmp = o_call_comparator(bound1->comparator, bound1->value, value);
+			}
+		}
 
 		if (!field->ascending)
 			cmp = -cmp;
@@ -669,6 +692,7 @@ o_idx_cmp_tuples(OIndexDescr *id,
 
 			if (!isnull1 && !isnull2)
 			{
+				elog(WARNING, "o_call_comparator CALL 2");
 				cmp = o_call_comparator(field->comparator, value1, value2);
 				if (!field->ascending)
 					cmp = -cmp;
@@ -778,21 +802,33 @@ o_idx_cmp_value_bounds(OBTreeValueBound *bound1,
 			bool		coercible2 = o_bound_is_coercible(bound2, field);
 
 			if (coercible1 && coercible2)
+			{
+				elog(WARNING, "o_call_comparator CALL 3");
 				res = o_call_comparator(field->comparator, bound1->value,
 										bound2->value);
+			}
 			else if (coercible1)
+			{
+				elog(WARNING, "o_call_comparator CALL 4");
 				res = -o_call_comparator(bound2->comparator, bound2->value,
 										 bound1->value);
+			}
 			else if (coercible2)
+			{
+				elog(WARNING, "o_call_comparator CALL 5");
 				res = o_call_comparator(bound1->comparator, bound1->value,
 										bound2->value);
+			}
 			else
+			{
+				elog(WARNING, "o_call_comparator CALL 6");
 				res = o_call_comparator(o_find_comparator(field->opfamily,
 														  bound1->type,
 														  bound2->type,
 														  field->collation),
 										bound1->value,
 										bound2->value);
+			}
 		}
 
 		if (!field->ascending)

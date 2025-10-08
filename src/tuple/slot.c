@@ -1045,6 +1045,10 @@ tts_orioledb_fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx,
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
 		bound->keys[i].comparator = idx->fields[i].comparator;
+		if (idx->desc.type == oIndexExclusion)
+			bound->keys[i].exclusion_fn = idx->fields[i].exclusion_fn;
+		else
+			bound->keys[i].exclusion_fn = NULL;
 	}
 }
 
@@ -1631,6 +1635,7 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 										  &primary->nonLeafSpec, &isnull);
 				Assert(!isnull);
 
+				elog(WARNING, "o_call_comparator CALL 8");
 				cmp = o_call_comparator(pkfield->comparator,
 										old_value, new_value);
 				Assert(cmp == 0);

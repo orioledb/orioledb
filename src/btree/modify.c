@@ -1145,7 +1145,7 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 	OInMemoryBlkno blkno;
 	uint32		pageChangeCount;
 	LWLock	   *uniqueLock;
-	OBTreeModifyResult result;
+	OBTreeModifyResult result = 456;
 	Jsonb	   *params = NULL;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
@@ -1250,6 +1250,7 @@ retry:
 				}
 				unlock_page(blkno);
 				LWLockRelease(uniqueLock);
+				elog(WARNING, "o_btree_insert_unique: RETUNRN 0: %d", OBTreeModifyResultFound);
 				return OBTreeModifyResultFound;
 			}
 			else
@@ -1267,6 +1268,7 @@ retry:
 					if (cbAction == OBTreeCallbackActionXidExit)
 					{
 						unlock_page(blkno);
+						elog(WARNING, "o_btree_insert_unique: RETUNRN 1");
 						return OBTreeModifyResultFound;
 					}
 				}
@@ -1329,6 +1331,7 @@ retry:
 					Assert(cbAction == OBTreeCallbackActionDoNothing);
 				}
 				LWLockRelease(uniqueLock);
+				elog(WARNING, "o_btree_insert_unique: RETUNRN 2");
 				return OBTreeModifyResultFound;
 			}
 			else
@@ -1345,7 +1348,10 @@ retry:
 														  xactInfo, &lockMode, &cbHint, callbackInfo->arg);
 					Assert(cbAction != OBTreeCallbackActionXidNoWait);
 					if (cbAction == OBTreeCallbackActionXidExit)
+					{
+						elog(WARNING, "o_btree_insert_unique: RETUNRN 3");
 						return OBTreeModifyResultFound;
+					}
 				}
 				wait_for_oxid(XACT_INFO_GET_OXID(xactInfo));
 				BTREE_PAGE_FIND_SET(&pageFindContext, MODIFY);
@@ -1371,6 +1377,7 @@ retry:
 									 callbackInfo);
 
 	LWLockRelease(uniqueLock);
+	elog(WARNING, "o_btree_insert_unique: result 0: %d", result);
 	return result;
 }
 
