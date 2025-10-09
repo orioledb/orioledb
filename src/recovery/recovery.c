@@ -703,10 +703,10 @@ orioledb_redo(XLogReaderState *record)
 	if (record->ReadRecPtr >= checkpoint_state->controlReplayStartPtr)
 	{
 		if (!replay_container(msg_start, msg_start + msg_len,
-						 recovery_single, record->ReadRecPtr))
+							  recovery_single, record->ReadRecPtr))
 		{
 			abort_recovery(workers_pool, false);
-			elog(ERROR, "orioledb recovery worker failed to replay container.");
+			elog(ERROR, "orioledb recovery worker failed to replay WAL container.");
 		}
 	}
 
@@ -2652,7 +2652,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 	int			sys_tree_num = -1;
 	Pointer		ptr = startPtr;
 	XLogRecPtr	xlogPtr;
-	uint16  wal_version;
+	uint16		wal_version;
 
 	wal_version = check_wal_container_version(&ptr);
 	if (wal_version > CURRENT_WAL_VERSION)

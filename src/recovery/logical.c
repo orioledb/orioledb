@@ -260,7 +260,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	OIndexType	ix_type = oIndexInvalid;
 	TupleDescData *o_toast_tupDesc = NULL;
 	TupleDescData *heap_toast_tupDesc = NULL;
-	uint16	wal_version;
+	uint16		wal_version;
 
 	wal_version = check_wal_container_version(&ptr);
 

@@ -42,18 +42,24 @@ static inline void add_local_modify(uint8 record_type, OTuple record, OffsetNumb
 uint16
 check_wal_container_version(Pointer *ptr)
 {
-	uint16  wal_version;
+	uint16		wal_version;
 
 	if (**ptr >= FIRST_WAL_VERSION)
 	{
-		/* Container starts with a valid WAL version. First WAL record is just after it.  */
+		/*
+		 * Container starts with a valid WAL version. First WAL record is just
+		 * after it.
+		 */
 		memcpy(&wal_version, *ptr, sizeof(uint16));
 		(*ptr) += sizeof(uint16);
 	}
 	else
 	{
-		/* Container starts with rec_type of first WAL record (its maximum value was under FIRST_WAL_VERSION at the
-		 * time of introducing WAL versioning. Consider this as version 0 and don't increase pointer */
+		/*
+		 * Container starts with rec_type of first WAL record (its maximum
+		 * value was under FIRST_WAL_VERSION at the time of introducing WAL
+		 * versioning. Consider this as version 0 and don't increase pointer
+		 */
 		wal_version = 0;
 	}
 
@@ -64,7 +70,7 @@ check_wal_container_version(Pointer *ptr)
 		elog(FATAL, "Can't apply WAL container version %u that is newer than supported %u", wal_version, CURRENT_WAL_VERSION);
 #else
 		elog(WARNING, "Can't apply WAL container version %u that is newer than supported %u", wal_version, CURRENT_WAL_VERSION);
-		/* Further fail and output is caller-specific */ 
+		/* Further fail and output is caller-specific */
 #endif
 	}
 	else if (wal_version < CURRENT_WAL_VERSION)
@@ -323,7 +329,7 @@ static void
 add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 {
 	WALRecXid  *rec;
-	uint16 *wal_version_header;
+	uint16	   *wal_version_header;
 
 	Assert(!is_recovery_process());
 	Assert(OXidIsValid(oxid));
