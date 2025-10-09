@@ -219,7 +219,11 @@ assign_new_oids(OTable *oTable, Relation rel, bool drop_pkey)
 		{
 			params.options &= ~(REINDEXOPT_MISSING_OK);
 #if PG_VERSION_NUM >= 170000
-			reindex_relation(NULL, toast_relid, REINDEX_REL_PROCESS_TOAST, &params);
+    		{
+                Relation	toast_rel = table_open(toast_relid, ShareLock);
+    			table_relation_reindex(toast_rel, NULL, REINDEX_REL_PROCESS_TOAST, &params);
+    			table_close(toast_rel, NoLock);
+    		}
 #else
 			reindex_relation(toast_relid, REINDEX_REL_PROCESS_TOAST, &params);
 #endif
@@ -2047,4 +2051,88 @@ o_find_ix_num_by_name(OTableDescr *descr, char *ix_name)
 		}
 	}
 	return result;
+}
+
+void
+redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_tablespace)
+{
+	ListCell   *index;
+
+	elog(WARNING, "redefine_indices: is primary=%d",
+		 primary);
+
+	foreach(index, RelationGetIndexList(rel))
+	{
+		bool		closed = false;
+		Oid			indexOid = lfirst_oid(index);
+		Relation	ind = relation_open(indexOid, AccessShareLock);
+
+		if ((primary && ind->rd_index->indisprimary) || (!primary && !ind->rd_index->indisprimary))
+		{
+			OBTOptions *options = (OBTOptions *) ind->rd_options;
+
+			if (ind->rd_rel->relam != BTREE_AM_OID || (options && !options->orioledb_index))
+			{
+				ReindexParams reindex_params = {0};
+
+				relation_close(ind, AccessShareLock);
+				reindex_index(
+#if PG_VERSION_NUM >= 170000
+							  NULL,
+#endif
+							  indexOid, 0, ind->rd_rel->relpersistence, &reindex_params);
+				closed = true;
+			}
+			else
+			{
+				o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
+				relation_close(ind, AccessShareLock);
+				o_define_index(rel, NULL, ind->rd_rel->oid, false, InvalidIndexNumber, set_tablespace, NULL);
+				closed = true;
+			}
+		}
+		if (!closed)
+			relation_close(ind, AccessShareLock);
+	}
+
+	if (primary)
+	{
+		ORelOids	oids;
+		OTable	   *updated_o_table;
+
+		/*
+		 * Partial reimplementation of assign_new_oids just for toast, because
+		 * it isn't called for tables without pkeys here, but it should
+		 */
+
+		ORelOidsSetFromRel(oids, rel);
+		updated_o_table = o_tables_get(oids);
+		Assert(updated_o_table != NULL);
+
+		if (!updated_o_table->has_primary)
+		{
+			Oid			toast_relid;
+			Relation	toast_rel;
+			OSnapshot	oSnapshot;
+			OXid		oxid;
+
+			toast_relid = rel->rd_rel->reltoastrelid;
+			toast_rel = table_open(toast_relid, AccessExclusiveLock);
+			RelationSetNewRelfilenode(toast_rel, toast_rel->rd_rel->relpersistence);
+			ORelOidsSetFromRel(updated_o_table->toast_oids, toast_rel);
+			o_tablespace_cache_add_relnode(updated_o_table->toast_oids.datoid,
+										   updated_o_table->toast_oids.relnode,
+										   updated_o_table->tablespace);
+			table_close(toast_rel, AccessExclusiveLock);
+			fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+			o_tables_table_meta_lock(updated_o_table);
+			o_tables_update(updated_o_table, oxid, oSnapshot.csn);
+			o_tables_after_update(updated_o_table, oxid, oSnapshot.csn);
+			o_tables_table_meta_unlock(updated_o_table, InvalidOid);
+			recreate_table_descr_by_oids(updated_o_table->oids);
+			orioledb_free_rd_amcache(rel);
+		}
+		o_table_free(updated_o_table);
+	}
+
 }
