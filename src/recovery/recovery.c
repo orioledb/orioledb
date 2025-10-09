@@ -292,7 +292,7 @@ static void flush_current_undo_stack(void);
 static void o_handle_startup_proc_interrupts_hook(void);
 static void abort_recovery(RecoveryWorkerState *workers_pool, bool send_to_idx_pool);
 
-static void replay_container(Pointer ptr, Pointer endPtr,
+static bool replay_container(Pointer ptr, Pointer endPtr,
 							 bool single, XLogRecPtr xlogRecPtr);
 
 static void worker_send_modify(int worker_id, BTreeDescr *desc,
@@ -702,8 +702,12 @@ orioledb_redo(XLogReaderState *record)
 
 	if (record->ReadRecPtr >= checkpoint_state->controlReplayStartPtr)
 	{
-		replay_container(msg_start, msg_start + msg_len,
-						 recovery_single, record->ReadRecPtr);
+		if (!replay_container(msg_start, msg_start + msg_len,
+							  recovery_single, record->ReadRecPtr))
+		{
+			abort_recovery(workers_pool, false);
+			elog(ERROR, "orioledb recovery worker failed to replay WAL container.");
+		}
 	}
 
 	if (unexpected_worker_detach)
@@ -2632,7 +2636,7 @@ invalidate_typcache(void)
 /*
  * Replays a single orioledb WAL container.
  */
-static void
+static bool
 replay_container(Pointer startPtr, Pointer endPtr,
 				 bool single, XLogRecPtr xlogRecPtr)
 {
@@ -2648,6 +2652,14 @@ replay_container(Pointer startPtr, Pointer endPtr,
 	int			sys_tree_num = -1;
 	Pointer		ptr = startPtr;
 	XLogRecPtr	xlogPtr;
+	uint16		wal_version;
+
+	wal_version = check_wal_container_version(&ptr);
+	if (wal_version > CURRENT_WAL_VERSION)
+	{
+		/* WAL from future version */
+		return false;
+	}
 
 	while (ptr < endPtr)
 	{
@@ -2979,6 +2991,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		}
 	}
 	update_recovery_undo_loc_flush(single, -1);
+	return true;
 }
 
 /*
