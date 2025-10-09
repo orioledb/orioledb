@@ -33,6 +33,11 @@
 #define WAL_REC_TRUNCATE	(13)
 #define WAL_REC_BRIDGE_ERASE (14)
 
+#define FIRST_WAL_VERSION (16)
+
+/* Bump it when WAL format changes */
+#define CURRENT_WAL_VERSION (16)
+
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
 #define OWalInvalidCommitPos		UINT64_MAX
@@ -144,5 +149,6 @@ extern void o_wal_delete_key(BTreeDescr *desc, OTuple key);
 extern void add_truncate_wal_record(ORelOids oids);
 extern bool get_local_wal_has_material_changes(void);
 extern void set_local_wal_has_material_changes(bool value);
+extern uint16 check_wal_container_version(Pointer *ptr);
 
 #endif							/* __WAL_H__ */

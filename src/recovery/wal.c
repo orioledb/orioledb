@@ -39,6 +39,47 @@ static void add_rel_wal_record(ORelOids oids, OIndexType type);
 static void flush_local_wal_if_needed(int required_length);
 static inline void add_local_modify(uint8 record_type, OTuple record, OffsetNumber length);
 
+uint16
+check_wal_container_version(Pointer *ptr)
+{
+	uint16  wal_version;
+
+	if (**ptr >= FIRST_WAL_VERSION)
+	{
+		/* Container starts with a valid WAL version. First WAL record is just after it.  */
+		memcpy(&wal_version, *ptr, sizeof(uint16));
+		(*ptr) += sizeof(uint16);
+	}
+	else
+	{
+		/* Container starts with rec_type of first WAL record (its maximum value was under FIRST_WAL_VERSION at the
+		 * time of introducing WAL versioning. Consider this as version 0 and don't increase pointer */
+		wal_version = 0;
+	}
+
+	if (wal_version > CURRENT_WAL_VERSION)
+	{
+#ifdef IS_DEV
+		/* Always fail tests on difference */
+		elog(FATAL, "Can't apply WAL container version %u that is newer than supported %u", wal_version, CURRENT_WAL_VERSION);
+#else
+		elog(WARNING, "Can't apply WAL container version %u that is newer than supported %u", wal_version, CURRENT_WAL_VERSION);
+		/* Further fail and output is caller-specific */ 
+#endif
+	}
+	else if (wal_version < CURRENT_WAL_VERSION)
+	{
+#ifdef IS_DEV
+		/* Always fail tests on difference */
+		elog(FATAL, "WAL container version %u is older than current %u. Applying with conversion.", wal_version, CURRENT_WAL_VERSION);
+#else
+		elog(LOG, "WAL container version %u is older than current %u. Applying with conversion.", wal_version, CURRENT_WAL_VERSION);
+#endif
+	}
+
+	return wal_version;
+}
+
 void
 add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 					  OTuple tuple, OffsetNumber length)
@@ -164,6 +205,7 @@ wal_commit(OXid oxid, TransactionId logicalXid)
 
 	if (local_wal_buffer_offset == 0)
 		add_xid_wal_record(oxid, logicalXid);
+
 	add_finish_wal_record(WAL_REC_COMMIT, pg_atomic_read_u64(&xid_meta->runXmin));
 	walPos = flush_local_wal(true);
 	local_wal_has_material_changes = false;
@@ -183,6 +225,7 @@ wal_joint_commit(OXid oxid, TransactionId logicalXid, TransactionId xid)
 
 	if (local_wal_buffer_offset == 0)
 		add_xid_wal_record(oxid, logicalXid);
+
 	add_joint_commit_wal_record(xid, pg_atomic_read_u64(&xid_meta->runXmin));
 	walPos = flush_local_wal(true);
 	local_wal_has_material_changes = false;
@@ -222,6 +265,7 @@ wal_rollback(OXid oxid, TransactionId logicalXid)
 	Assert(local_wal_buffer_offset + sizeof(WALRecFinish) <= LOCAL_WAL_BUFFER_SIZE);
 	if (local_wal_buffer_offset == 0)
 		add_xid_wal_record(oxid, logicalXid);
+
 	add_finish_wal_record(WAL_REC_ROLLBACK, pg_atomic_read_u64(&xid_meta->runXmin));
 	wait_pos = flush_local_wal(false);
 	local_wal_has_material_changes = false;
@@ -279,10 +323,17 @@ static void
 add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 {
 	WALRecXid  *rec;
+	uint16 *wal_version_header;
 
 	Assert(!is_recovery_process());
 	Assert(OXidIsValid(oxid));
-	Assert(local_wal_buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal_buffer_offset == 0);
+	Assert(sizeof(*rec) + sizeof(uint16) <= LOCAL_WAL_BUFFER_SIZE);
+
+	wal_version_header = (uint16 *) (&local_wal_buffer[local_wal_buffer_offset]);
+	Assert(CURRENT_WAL_VERSION >= FIRST_WAL_VERSION);
+	*wal_version_header = CURRENT_WAL_VERSION;
+	local_wal_buffer_offset += sizeof(uint16);
 
 	rec = (WALRecXid *) (&local_wal_buffer[local_wal_buffer_offset]);
 	rec->recType = WAL_REC_XID;

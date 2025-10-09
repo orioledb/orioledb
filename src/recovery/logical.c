@@ -260,6 +260,16 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	OIndexType	ix_type = oIndexInvalid;
 	TupleDescData *o_toast_tupDesc = NULL;
 	TupleDescData *heap_toast_tupDesc = NULL;
+	uint16	wal_version;
+
+	wal_version = check_wal_container_version(&ptr);
+
+	if (wal_version > CURRENT_WAL_VERSION)
+	{
+		/* WAL from future version */
+		elog(ERROR, "Can't logically decode WAL version %u that is newer than supported %u", wal_version, CURRENT_WAL_VERSION);
+		return;
+	}
 
 	while (ptr < endPtr)
 	{
