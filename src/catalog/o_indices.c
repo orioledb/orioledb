@@ -1032,6 +1032,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 
 	old_mcxt = MemoryContextSwitchTo(mcxt);
 	descr->predicate = list_copy_deep(oIndex->predicate);
+	descr->duplicates = list_copy_deep(oIndex->duplicates);
 	if (descr->predicate)
 		descr->predicate_str = pstrdup(oIndex->predicate_str);
 	descr->expressions = list_copy_deep(oIndex->expressions);
