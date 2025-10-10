@@ -293,7 +293,8 @@ static void o_handle_startup_proc_interrupts_hook(void);
 static void abort_recovery(RecoveryWorkerState *workers_pool, bool send_to_idx_pool);
 
 static bool replay_container(Pointer ptr, Pointer endPtr,
-							 bool single, XLogRecPtr xlogRecPtr);
+							 bool single, XLogRecPtr xlogRecPtr,
+							 XLogRecPtr xlogRecEndPtr);
 
 static void worker_send_modify(int worker_id, BTreeDescr *desc,
 							   RecoveryMsgType recType,
@@ -702,8 +703,8 @@ orioledb_redo(XLogReaderState *record)
 
 	if (record->ReadRecPtr >= checkpoint_state->controlReplayStartPtr)
 	{
-		if (!replay_container(msg_start, msg_start + msg_len,
-							  recovery_single, record->ReadRecPtr))
+		if (!replay_container(msg_start, msg_start + msg_len, recovery_single,
+							  record->ReadRecPtr, record->EndRecPtr))
 		{
 			abort_recovery(workers_pool, false);
 			elog(ERROR, "orioledb recovery worker failed to replay WAL container.");
@@ -768,31 +769,17 @@ o_recovery_finish_hook(bool cleanup)
 	recovery_undo_loc_flush->completedCheckpointNumber = UINT32_MAX;
 }
 
-/*
- * Returns minimum ptr which is already reached by all recovery workers.
- */
-XLogRecPtr
-recovery_get_current_ptr(void)
+static XLogRecPtr
+get_workers_commit_ptr(void)
 {
 	static CommitSeqNo prev_ptr = InvalidXLogRecPtr;
 	static uint64 prev_changes = UINT64_MAX;
 	uint64		old_changes;
 
-	Assert(RecoveryInProgress());
-
-	/* fast check - single process recovery */
-	if (*recovery_single_process)
-	{
-		prev_ptr = pg_atomic_read_u64(recovery_ptr);
-		return prev_ptr;
-	}
-
 	/* fast check - nothing changed */
 	old_changes = pg_atomic_read_u32(worker_ptrs_changes);
 	if (old_changes == prev_changes)
-	{
 		return prev_ptr;
-	}
 
 	pg_read_barrier();
 
@@ -821,6 +808,38 @@ recovery_get_current_ptr(void)
 		prev_ptr = min_ptr;
 		return prev_ptr;
 	}
+}
+
+/*
+ * Returns minimum ptr which is already reached by all recovery workers.
+ */
+XLogRecPtr
+recovery_get_current_ptr(void)
+{
+	Assert(RecoveryInProgress());
+
+	/* fast check - single process recovery */
+	if (*recovery_single_process)
+		return pg_atomic_read_u64(recovery_ptr);
+
+	return get_workers_commit_ptr();
+}
+
+XLogRecPtr
+recovery_get_effective_replay_ptr(void)
+{
+	XLogRecPtr	ptr,
+				finishedPtr;
+
+	if (!RecoveryInProgress() || *recovery_single_process)
+		return InvalidXLogRecPtr;
+
+	ptr = pg_atomic_read_u64(recovery_ptr);
+	finishedPtr = pg_atomic_read_u64(recovery_finished_list_ptr);
+	if (ptr == finishedPtr)
+		return InvalidXLogRecPtr;
+	else
+		return finishedPtr;
 }
 
 static XLogRecPtr
@@ -2638,7 +2657,7 @@ invalidate_typcache(void)
  */
 static bool
 replay_container(Pointer startPtr, Pointer endPtr,
-				 bool single, XLogRecPtr xlogRecPtr)
+				 bool single, XLogRecPtr xlogRecPtr, XLogRecPtr xlogRecEndPtr)
 {
 	OTableDescr *descr = NULL;
 	OIndexDescr *indexDescr = NULL;
@@ -2701,7 +2720,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			if (!single)
 			{
 				Assert(cur_state != NULL);
-				workers_send_oxid_finish(xlogPtr, commit);
+				workers_send_oxid_finish(xlogRecEndPtr, commit);
 				if (cur_state->systree_modified || cur_state->checkpoint_xid)
 				{
 					sync = true;

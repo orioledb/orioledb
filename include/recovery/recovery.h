@@ -44,6 +44,8 @@ is_recovery_in_progress(void)
 }
 
 extern XLogRecPtr recovery_get_current_ptr(void);
+extern XLogRecPtr recovery_get_effective_replay_ptr(void);
+
 extern int	recovery_queue_size_guc;
 extern int	recovery_pool_size_guc;
 extern int	recovery_idx_pool_size_guc;
