@@ -49,6 +49,19 @@ AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
 
+CREATE FUNCTION orioledb_page_items(IN relname oid, IN blkno int8, IN datalimit int default -1,
+    OUT itemoffset smallint,
+    OUT chunckno smallint,
+    OUT itemheader text,
+    OUT itemheaderfields jsonb,
+    OUT itemlen smallint,
+    OUT itemdata text
+)
+RETURNS SETOF record
+AS 'MODULE_PATHNAME', 'orioledb_page_items'
+LANGUAGE C STRICT PARALLEL SAFE;
+
+
 --CREATE FUNCTION orioledb_rewind_queue_age()
 --RETURNS bigint
 --AS 'MODULE_PATHNAME'
