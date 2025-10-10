@@ -35,6 +35,7 @@ elif [ $CHECK_TYPE = "sanitize" ]; then
 		strict_init_order=1:
 		detect_odr_violation=0:
 		log_path=$PWD/asan.log:
+		max_uar_stack_size_log=25:
 	END
 	) \
 		make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?

@@ -103,7 +103,6 @@
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
 
-static bool isTopLevel PG_USED_FOR_ASSERTS_ONLY = false;
 List	   *drop_index_list = NIL;
 List	   *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
@@ -132,6 +131,9 @@ static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
 static void o_find_collation_dependencies(Oid colloid);
 static void redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_tablespace);
 static void redefine_pkey_for_rel(Relation rel);
+
+static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
+static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
 
 void
 orioledb_setup_ddl_hooks(void)
@@ -867,11 +869,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						 DestReceiver *dest,
 						 struct QueryCompletion *qc)
 {
+	bool		isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
+	ParseState *pstate;
 	bool		call_next = true;
-
-#ifdef USE_ASSERT_CHECKING
-	isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
-#endif
 
 	/* copied from standard_ProcessUtility */
 	if (readOnlyTree)
@@ -882,6 +882,10 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	o_saved_reltablespace = InvalidOid;
 	savedDataQuery = NULL;
 	in_nontransactional_truncate = false;
+
+	pstate = make_parsestate(NULL);
+	pstate->p_sourcetext = queryString;
+	pstate->p_queryEnv = env;
 
 	if (IsA(pstmt->utilityStmt, AlterTableStmt) &&
 		!is_alter_table_partition(pstmt))
@@ -1342,7 +1346,14 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			}
 			table_close(rel, lockmode);
 		}
+	}
+	else if (IsA(pstmt->utilityStmt, CreatedbStmt))
+	{
+		/* no event triggers for global objects */
+		PreventInTransactionBlock(isTopLevel, "CREATE DATABASE");
+		o_createdb(pstate, (CreatedbStmt *) pstmt->utilityStmt);
 
+		call_next = false;
 	}
 
 	if (call_next)
@@ -1470,6 +1481,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			alter_type_exprs = NIL;
 		}
 	}
+
+	free_parsestate(pstate);
 }
 
 static void
@@ -1777,6 +1790,7 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
 				rewrite = true;
 		}
 	}
+
 	return rewrite;
 }
 
@@ -3815,6 +3829,162 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 	if (old_objectaccess_hook)
 		old_objectaccess_hook(access, classId, objectId, subId, arg);
+}
+
+/*
+ * Look up info about the database named "name".  If the database exists,
+ * obtain the specified lock type on it, fill in any of the remaining
+ * parameters that aren't NULL, and return true.  If no such database,
+ * return false.
+ */
+static bool
+get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP)
+{
+	bool		result = false;
+	Relation	relation;
+
+	Assert(name);
+
+	/* Caller may wish to grab a better lock on pg_database beforehand... */
+	relation = table_open(DatabaseRelationId, AccessShareLock);
+
+	/*
+	 * Loop covers the rare case where the database is renamed before we can
+	 * lock it.  We try again just in case we can find a new one of the same
+	 * name.
+	 */
+	for (;;)
+	{
+		ScanKeyData scanKey;
+		SysScanDesc scan;
+		HeapTuple	tuple;
+		Oid			dbOid;
+
+		/*
+		 * there's no syscache for database-indexed-by-name, so must do it the
+		 * hard way
+		 */
+		ScanKeyInit(&scanKey,
+					Anum_pg_database_datname,
+					BTEqualStrategyNumber, F_NAMEEQ,
+					CStringGetDatum(name));
+
+		scan = systable_beginscan(relation, DatabaseNameIndexId, true,
+								  NULL, 1, &scanKey);
+
+		tuple = systable_getnext(scan);
+
+		if (!HeapTupleIsValid(tuple))
+		{
+			/* definitely no database of that name */
+			systable_endscan(scan);
+			break;
+		}
+
+		dbOid = ((Form_pg_database) GETSTRUCT(tuple))->oid;
+
+		systable_endscan(scan);
+
+		/*
+		 * Now that we have a database OID, we can try to lock the DB.
+		 */
+		if (lockmode != NoLock)
+			LockSharedObject(DatabaseRelationId, dbOid, 0, lockmode);
+
+		/*
+		 * And now, re-fetch the tuple by OID.  If it's still there and still
+		 * the same name, we win; else, drop the lock and loop back to try
+		 * again.
+		 */
+		tuple = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(dbOid));
+		if (HeapTupleIsValid(tuple))
+		{
+			Form_pg_database dbform = (Form_pg_database) GETSTRUCT(tuple);
+
+			if (strcmp(name, NameStr(dbform->datname)) == 0)
+			{
+				/* oid of the database */
+				if (dbIdP)
+					*dbIdP = dbOid;
+
+				ReleaseSysCache(tuple);
+				result = true;
+				break;
+			}
+			/* can only get here if it was just renamed */
+			ReleaseSysCache(tuple);
+		}
+
+		if (lockmode != NoLock)
+			UnlockSharedObject(DatabaseRelationId, dbOid, 0, lockmode);
+	}
+
+	table_close(relation, AccessShareLock);
+
+	return result;
+}
+
+/*
+ * OrioleDB implementation of CREATE DATABASE.
+ */
+static Oid
+o_createdb(ParseState *pstate, const CreatedbStmt *stmt)
+{
+	Oid			src_dboid;
+	ListCell   *option;
+	DefElem    *dtemplate = NULL;
+	const char *dbtemplate = NULL;
+	Oid			result;
+
+	/*
+	 * Currently we don't support a template database which has OrioleDB
+	 * tables. The function raises an error otherwise.
+	 */
+
+	/* Extract options from the statement node tree */
+	foreach(option, stmt->options)
+	{
+		DefElem    *defel = (DefElem *) lfirst(option);
+
+		if (strcmp(defel->defname, "template") == 0)
+			dtemplate = defel;
+	}
+
+	if (dtemplate && dtemplate->arg)
+		dbtemplate = defGetString(dtemplate);
+	if (!dbtemplate)
+		dbtemplate = "template1";	/* Default template database name */
+
+	/*
+	 * Similar to createdb() we obtain share lock on the template database
+	 * within get_db_info().
+	 */
+	if (!get_db_info(dbtemplate, ShareLock, &src_dboid))
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_DATABASE),
+				 errmsg("template database \"%s\" does not exist",
+						dbtemplate)));
+
+	if (o_tables_num(src_dboid) > 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("template database \"%s\" has OrioleDB tables",
+						dbtemplate)));
+
+	/*
+	 * Call standard PostgreSQL createdb().  It will create and copy
+	 * PostgreSQL catalog and user objects.
+	 *
+	 * createdb() will leave source pg_database entry in ShareLock mode and
+	 * therefore no new connections will be allowed until end of transaction.
+	 */
+	result = createdb(pstate, stmt);
+
+	/*
+	 * Now we need to copy OrioleDB objects.
+	 */
+
+	return result;
 }
 
 int16

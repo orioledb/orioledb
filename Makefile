@@ -99,6 +99,7 @@ REGRESSCHECKS = btree_sys_check \
 				btree_compression \
 				btree_print \
 				createas \
+				database \
 				ddl \
 				explain \
 				fillfactor \
