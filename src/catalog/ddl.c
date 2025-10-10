@@ -3054,6 +3054,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			}
 			else if (rel->rd_rel->relkind == RELKIND_INDEX)
 			{
+				/* Checks and adds bridged indexes */
+				
 				Relation	tbl;
 
 				CommandCounterIncrement();
@@ -3077,7 +3079,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					{
 						int			ix_num = InvalidIndexNumber;
 						int			i;
-						bool		define = false;
 						bool		add_bridging = false;
 
 						for (i = 0; i < o_table->nindices; i++)
@@ -3105,8 +3106,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 											errdetail("This feature is intended for testing purposes and is not recommended for normal usage."));
 									add_bridging = true;
 								}
-								else
-									define = true;
 							}
 							else
 							{
@@ -3115,8 +3114,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						}
 						else if (rel->rd_rel->relam == BTREE_AM_OID)
 						{
-							define = true;
-
 							if (!in_rewrite && !rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
 							{
 								OBTOptions *options = (OBTOptions *) rel->rd_options;
@@ -3127,16 +3124,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 											errmsg("using bridged btree index for orioledb"),
 											errdetail("This feature is intended for testing purposes and is not recommended for normal usage."));
 							}
-						}
-
-						if (define)
-						{
-							if (rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
-								o_define_index_validate(table_oids, rel, NULL, NULL);
-							relation_close(rel, AccessShareLock);
-							closed = true;
-							if (!in_rewrite && (rel->rd_index->indisprimary || ix_num != InvalidIndexNumber))
-								o_define_index(tbl, NULL, rel->rd_rel->oid, false, ix_num, false, &o_pkey_result);
 						}
 
 						if (add_bridging)
