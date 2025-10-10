@@ -216,6 +216,8 @@ wal_commit(OXid oxid, TransactionId logicalXid)
 	flush_local_wal_if_needed(sizeof(WALRecFinish));
 	Assert(local_wal_buffer_offset + sizeof(WALRecFinish) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
+	add_wal_container_header_if_needed();
+
 	if (!local_wal_contains_xid)
 		add_xid_wal_record(oxid, logicalXid);
 
@@ -235,6 +237,8 @@ wal_joint_commit(OXid oxid, TransactionId logicalXid, TransactionId xid)
 
 	flush_local_wal_if_needed(sizeof(WALRecJointCommit));
 	Assert(local_wal_buffer_offset + sizeof(WALRecJointCommit) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+
+	add_wal_container_header_if_needed();
 
 	if (!local_wal_contains_xid)
 		add_xid_wal_record(oxid, logicalXid);
@@ -276,6 +280,8 @@ wal_rollback(OXid oxid, TransactionId logicalXid)
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(WALRecFinish));
 	Assert(local_wal_buffer_offset + sizeof(WALRecFinish) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+
+	add_wal_container_header_if_needed();
 	if (!local_wal_contains_xid)
 		add_xid_wal_record(oxid, logicalXid);
 
