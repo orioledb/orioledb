@@ -1046,6 +1046,65 @@ class ReplicationTest(BaseTest):
 				                 con3.execute("SELECT * FROM foo ORDER BY i;"))
 				con3.close()
 
+	def test_replication_hot_read(self):
+		with self.node as master:
+			master.start()
+
+			# create a backup
+			with self.getReplica().start() as replica:
+				master.execute("CREATE EXTENSION orioledb;")
+				master.execute("CREATE TABLE o_test\n"
+				               "    (id integer primary key NOT NULL)\n"
+				               "USING orioledb;")
+				master.execute("INSERT INTO o_test VALUES (1);")
+				master.execute("""CREATE OR REPLACE FUNCTION test_repl()
+									RETURNS VOID AS $$
+									DECLARE
+										max_val INTEGER;
+										initial_max_val INTEGER;
+									BEGIN
+										SELECT * INTO initial_max_val FROM o_test ORDER BY id DESC LIMIT 1;
+										LOOP
+											SELECT * INTO max_val FROM o_test ORDER BY id DESC LIMIT 1;
+											EXIT WHEN max_val > initial_max_val;
+										END LOOP;
+										RETURN;
+									END;
+									$$ LANGUAGE plpgsql;""")
+
+				# wait for synchronization
+				self.catchup_orioledb(replica)
+
+				con_master = master.connect(autocommit=True)
+				con_repl = replica.connect(autocommit=True)
+
+				t_master = ThreadQueryExecutor(
+				    con_master,
+				    "INSERT INTO o_test SELECT x from generate_series(2, 5000000) x;",
+				)
+				t_repl = ThreadQueryExecutor(con_repl, "SELECT test_repl();")
+
+				try:
+					t_repl.start()
+					t_master.start()
+
+					t_repl.join()
+					t_master.join()
+				except Exception as e:
+					print(f"Test not done: {e}")
+
+				self.catchup_orioledb(replica)
+				replica.poll_query_until(
+				    "SELECT orioledb_has_retained_undo();", expected=False)
+
+				self.assertEqual(
+				    master.execute("SELECT COUNT(*) FROM o_test;")[0][0],
+				    5000000, "master check")
+
+				self.assertEqual(
+				    replica.execute("SELECT COUNT(*) FROM o_test;")[0][0],
+				    5000000, "replica check")
+
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
 		oid_list = [
