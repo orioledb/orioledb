@@ -2671,6 +2671,7 @@ read_modify_wal_tuples(uint8 rec_type, Pointer *ptr, OFixedTuple *tuple1, OFixed
 	memcpy(&length, *ptr, sizeof(OffsetNumber));
 	*ptr += sizeof(OffsetNumber);
 
+	Assert(length > 0);
 	if (length != 0)
 	{
 		memcpy(tuple1->fixedData, *ptr, length);

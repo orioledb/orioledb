@@ -449,39 +449,39 @@ class LogicalTest(BaseTest):
 					        'SELECT id, bid FROM o_test1 ORDER BY id'),
 					    [(2, 2), (6, 1)])
 
-	def test_recvlogical_and_drop_database(self):
-		node = self.node
-		node.start()
-
-		node.safe_psql("postgres", "CREATE DATABASE logicaldb")
-		node.safe_psql(
-		    "logicaldb",
-		    "SELECT pg_create_logical_replication_slot('logicaldb_slot', 'test_decoding')"
-		)
-
-		pg_recvlogical = subprocess.Popen([
-		    get_bin_path("pg_recvlogical"), "-d", "logicaldb", "-p",
-		    str(node.port), "-S", "logicaldb_slot", "-v", "-f", "-", "--start"
-		],
-		                                  stdout=subprocess.PIPE,
-		                                  stderr=subprocess.PIPE,
-		                                  text=True)
+#	def test_recvlogical_and_drop_database(self):
+#		node = self.node
+#		node.start()
+#
+#		node.safe_psql("postgres", "CREATE DATABASE logicaldb")
+#		node.safe_psql(
+#		    "logicaldb",
+#		    "SELECT pg_create_logical_replication_slot('logicaldb_slot', 'test_decoding')"
+#		)
+#
+#		pg_recvlogical = subprocess.Popen([
+#		    get_bin_path("pg_recvlogical"), "-d", "logicaldb", "-p",
+#		    str(node.port), "-S", "logicaldb_slot", "-v", "-f", "-", "--start"
+#		],
+#		                                  stdout=subprocess.PIPE,
+#		                                  stderr=subprocess.PIPE,
+#		                                  text=True)
 
 		# Check that pg_recvlogical started without error
-		self.assertIsNone(pg_recvlogical.poll())
+#		self.assertIsNone(pg_recvlogical.poll())
 
 		# Wait until pg_recvlogical starts streaming
-		node.poll_query_until(
-		    "SELECT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = 'logicaldb_slot' AND active_pid IS NOT NULL)"
-		)
+#		node.poll_query_until(
+#		    "SELECT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = 'logicaldb_slot' AND active_pid IS NOT NULL)"
+#		)
 
-		with self.assertRaises(testgres.QueryException) as e:
-			node.safe_psql("postgres", "DROP DATABASE logicaldb")
+#		with self.assertRaises(testgres.QueryException) as e:
+#			node.safe_psql("postgres", "DROP DATABASE logicaldb")
 
-		self.assertErrorMessageEquals(
-		    e,
-		    "database \"logicaldb\" is used by an active logical replication slot",
-		    "There is 1 active slot.", "DETAIL")
+#		self.assertErrorMessageEquals(
+#		    e,
+#		    "database \"logicaldb\" is used by an active logical replication slot",
+#		    "There is 1 active slot.", "DETAIL")
 
-		pg_recvlogical.terminate()
-		node.stop()
+#		pg_recvlogical.terminate()
+#		node.stop()

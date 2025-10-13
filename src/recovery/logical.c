@@ -670,7 +670,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						change->data.tp.clear_toast_afterwards = true;
 
 					}
-
 					ReorderBufferQueueChange(ctx->reorder, logicalXid,
 											 changeXLogPtr,
 											 change, (ix_type == oIndexToast));
@@ -711,7 +710,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 												 descr, COMMITSEQNO_INPROGRESS,
 												 PrimaryIndexNumber, false,
 												 NULL);
-
 						change->data.tp.newtuple = record_buffer_tuple_slot(ctx->reorder, descr->newTuple);
 					}
 					tts_copy_identity(descr->newTuple, descr->oldTuple,
@@ -743,7 +741,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						ReorderBufferQueueChange(ctx->reorder, logicalXid,
 												 changeXLogPtr,
 												 change, true);
-
 					}
 					else
 					{
@@ -760,10 +757,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 							elog(LOG, "WAL_REC_DELETE NON-TOAST toastable");
 							oldheaptuple = convert_toast_pointers(descr, indexDescr, &tuple1);
 							change->data.tp.oldtuple = record_buffer_tuple(ctx->reorder, oldheaptuple, true);
-							ReorderBufferQueueChange(ctx->reorder, logicalXid,
-													 changeXLogPtr,
-													 change, false);
-
 						}
 						else	/* Tuple without TOASTed attrs */
 						{
@@ -773,10 +766,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 															  PrimaryIndexNumber, false,
 															  NULL);
 							change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
-							ReorderBufferQueueChange(ctx->reorder, logicalXid,
+						}
+						ReorderBufferQueueChange(ctx->reorder, logicalXid,
 													 changeXLogPtr,
 													 change, false);
-						}
 					}
 				}
 				else if (rec_type == WAL_REC_REINSERT)
@@ -831,6 +824,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 											 changeXLogPtr,
 											 change, false);
 				}
+				else
+				{
+					elog(FATAL, "Unknown modify WAL record");
+				}
 			}
 			else
 			{
@@ -839,7 +836,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		}
 		else
 		{
-			elog(FATAL, "Unknown modify WAL record");
+			elog(FATAL, "Unknown WAL record");
 		}
 	}
 }
