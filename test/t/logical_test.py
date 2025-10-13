@@ -188,7 +188,6 @@ class LogicalTest(BaseTest):
 
 					# wait until changes apply on subscriber and check them
 					sub.catchup()
-					# sub.poll_query_until("SELECT orioledb_recovery_synchronized();", expected=True)
 					self.assertListEqual(
 					    subscriber.execute(
 					        'SELECT * FROM o_test1 ORDER BY id'), [(2, '2'),
@@ -363,10 +362,6 @@ class LogicalTest(BaseTest):
 
 					# wait until changes apply on subscriber and check them
 					sub.catchup()
-					#					subscriber.poll_query_until(
-					#					    "SELECT orioledb_recovery_synchronized();",
-					#					    expected=True)
-					#					subscriber.safe_psql("CHECKPOINT;")
 					self.assertListEqual(
 					    subscriber.execute(
 					        'SELECT * FROM o_test_ctid ORDER BY i'),

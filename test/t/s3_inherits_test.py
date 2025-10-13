@@ -3,13 +3,6 @@ import os
 
 from .s3_base_test import S3BaseTest
 
-
-def catchup_orioledb(replica):
-	replica.catchup()
-	replica.poll_query_until("SELECT orioledb_recovery_synchronized();",
-	                         expected=True)
-
-
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 

@@ -311,8 +311,6 @@ class BaseTest(unittest.TestCase):
 	def catchup_orioledb(self, replica):
 		# wait for synchronization
 		replica.catchup()
-		replica.poll_query_until("SELECT orioledb_recovery_synchronized();",
-		                         expected=True)
 
 	@staticmethod
 	def sparse_files_supported():
