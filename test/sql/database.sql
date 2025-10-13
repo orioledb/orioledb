@@ -1,0 +1,25 @@
+CREATE DATABASE heapdb_template;
+\c heapdb_template
+
+CREATE TABLE heap_table (i int) USING heap;
+
+\c postgres
+
+-- This CREATE DATABASE should succeed
+CREATE DATABASE heapdb TEMPLATE heapdb_template;
+
+CREATE DATABASE orioledb_template;
+\c orioledb_template
+
+CREATE EXTENSION orioledb;
+
+CREATE TABLE oriole_table (i int) USING orioledb;
+
+\c postgres
+
+-- This CREATE DATABASE should fail
+CREATE DATABASE orioledb TEMPLATE orioledb_template;
+
+DROP DATABASE orioledb_template;
+DROP DATABASE heapdb;
+DROP DATABASE heapdb_template;

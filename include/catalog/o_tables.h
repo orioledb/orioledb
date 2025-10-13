@@ -160,6 +160,9 @@ extern OTable *o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version);
 /* Returns OTable by its index oids */
 extern OTable *o_tables_get_by_tree(ORelOids oids, OIndexType type);
 
+/* Returns number of OrioleDB tables in the database */
+extern int	o_tables_num(Oid datoid);
+
 /* Updates OTable description in o_tables list */
 extern bool o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn);
 

@@ -96,11 +96,18 @@ typedef struct
 	OIndexNumber ixNum;
 } OTableIndexOidsKey;
 
+typedef struct OTablesNumArg
+{
+	Oid			datoid;
+	int			result;
+} OTablesNumArg;
+
 static void o_table_tupdesc_init_entry(TupleDesc desc, AttrNumber att_num, char *name, OTableField *field);
 static void o_tables_foreach_callback(ORelOids oids, void *arg);
 static void o_tables_drop_all_callback(ORelOids oids, void *arg);
 static void o_tables_truncate_unlogged_callback(OTable *o_table, void *arg);
 static void o_table_oids_array_callback(ORelOids oids, void *arg);
+static void o_tables_num_callback(ORelOids oids, void *arg);
 static inline void o_tables_rel_fill_locktag(LOCKTAG *tag, ORelOids *oids, int lockmode, bool checkpoint);
 
 static BTreeDescr *
@@ -1179,6 +1186,20 @@ o_tables_get_by_tree(ORelOids oids, OIndexType type)
 	return o_tables_get(tableOids);
 }
 
+/* Returns number of OrioleDB tables in the database */
+int
+o_tables_num(Oid datoid)
+{
+	OTablesNumArg num_arg;
+
+	num_arg.datoid = datoid;
+	num_arg.result = 0;
+	o_tables_foreach_oids(o_tables_num_callback, &o_non_deleted_snapshot,
+						  &num_arg);
+
+	return num_arg.result;
+}
+
 void
 o_table_free(OTable *table)
 {
@@ -1542,6 +1563,15 @@ o_table_oids_array_callback(ORelOids oids, void *arg)
 	values[1] = oids.reloid;
 	values[2] = oids.relnode;
 	tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+}
+
+static void
+o_tables_num_callback(ORelOids oids, void *arg)
+{
+	OTablesNumArg *num_arg = (OTablesNumArg *) arg;
+
+	if (oids.datoid == num_arg->datoid)
+		num_arg->result++;
 }
 
 OTableField *
