@@ -505,7 +505,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	 */
 	Assert(objectName || objectKind != REINDEX_OBJECT_SCHEMA);
 
-	if (objectKind == REINDEX_OBJECT_SYSTEM)
+	if (objectKind == REINDEX_OBJECT_SYSTEM && concurrently)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("cannot reindex system catalogs concurrently")));
@@ -516,6 +516,30 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	 * by caller. At the same time do permission checks that need different
 	 * processing depending on the object type.
 	 */
+#if PG_VERSION_NUM >= 170006
+	if (objectKind == REINDEX_OBJECT_SCHEMA)
+	{
+		objectOid = get_namespace_oid(objectName, false);
+
+		if (!object_ownercheck(NamespaceRelationId, objectOid, GetUserId()) &&
+			!has_privs_of_role(GetUserId(), ROLE_PG_MAINTAIN))
+			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_SCHEMA,
+						   objectName);
+	}
+	else
+	{
+		objectOid = MyDatabaseId;
+
+		if (objectName && strcmp(objectName, get_database_name(objectOid)) != 0)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("can only reindex the currently open database")));
+		if (!object_ownercheck(DatabaseRelationId, objectOid, GetUserId()) &&
+			!has_privs_of_role(GetUserId(), ROLE_PG_MAINTAIN))
+			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_DATABASE,
+						   get_database_name(objectOid));
+	}
+#else
 	if (objectKind == REINDEX_OBJECT_SCHEMA)
 	{
 		objectOid = get_namespace_oid(objectName, false);
@@ -536,6 +560,9 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_DATABASE,
 						   get_database_name(objectOid));
 	}
+#endif
+
+
 
 	/*
 	 * Create a memory context that will survive forced transaction commits we
