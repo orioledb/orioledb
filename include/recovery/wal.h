@@ -75,17 +75,26 @@ typedef struct
 	uint8		new_relnode[sizeof(Oid)];
 } WALRecOTablesUnlockMeta;
 
-/* Commented non-real fields could be accessed with pointer arithmetics */
+/* Modify record that contains one tuple */
 typedef struct
 {
 	uint8		recType;
 	uint8		tupleFormatFlags;
 	uint8		length[sizeof(OffsetNumber)];
 	/* tuple[length] */
-	/* uint8 oldTupleFormatFlags; (For optional second tuple) */
-	/* uint8 oldLength[sizeof(OffsetNumber)]; (For optional second tuple) */
-	/* oldTuple[oldLength] (For optional second tuple) */
-} WALRecModify;
+} WALRecModify1;
+
+/* Modify records that contains 2 tuples, old and new. Needed for REINSERT and for REPLICA IDENTITY FULL */
+typedef struct
+{
+	uint8		recType;
+	uint8		tupleFormatFlags1;
+	uint8           tupleFormatFlags2;
+	uint8		length1[sizeof(OffsetNumber)];
+	uint8		length2[sizeof(OffsetNumber)];
+	/* tuple1[length1] */
+	/* tuple2[length2] */
+} WALRecModify2;
 
 typedef struct
 {

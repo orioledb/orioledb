@@ -2658,53 +2658,68 @@ invalidate_typcache(void)
  * tuple2 is optional, e.g. WAL record could also have old tuple in case of REINSERT
  */
 void
-read_modify_wal_tuples(uint8 rec_type, Pointer *ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1)
+read_modify_wal_tuples(uint8 rec_type, Pointer *ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1_out)
 {
-	bool		contains_second_tuple = (rec_type == WAL_REC_REINSERT);
-	OffsetNumber length;
+	bool		contains_two_tuples = (rec_type == WAL_REC_REINSERT);
+	OffsetNumber length1;
+	OffsetNumber length2;
 
 	Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
 
-	tuple1->tuple.formatFlags = **ptr;
-	(*ptr)++;
-
-	memcpy(&length, *ptr, sizeof(OffsetNumber));
-	*ptr += sizeof(OffsetNumber);
-
-	Assert(length > 0);
-	if (length != 0)
+	if(!contains_two_tuples)
 	{
-		memcpy(tuple1->fixedData, *ptr, length);
-		*ptr += length;
+		tuple1->tuple.formatFlags = **ptr;
+		(*ptr)++;
 
-		tuple1->tuple.data = tuple1->fixedData;
+		memcpy(&length1, *ptr, sizeof(OffsetNumber));
+		*ptr += sizeof(OffsetNumber);
+
+		Assert(length1 > 0);
+		if (length1 != 0)
+		{
+			memcpy(tuple1->fixedData, *ptr, length1);
+			*ptr += length1;
+
+			tuple1->tuple.data = tuple1->fixedData;
+		}
+		else
+			O_TUPLE_SET_NULL(tuple1->tuple);
 	}
 	else
-		O_TUPLE_SET_NULL(tuple1->tuple);
-
-	*length1 = length;
-
-	if (contains_second_tuple)
-	{
+	{	
+		tuple1->tuple.formatFlags = **ptr;
+		(*ptr)++;
 		tuple2->tuple.formatFlags = **ptr;
 		(*ptr)++;
 
-		memcpy(&length, *ptr, sizeof(OffsetNumber));
+		memcpy(&length1, *ptr, sizeof(OffsetNumber));
+		*ptr += sizeof(OffsetNumber);
+		memcpy(&length2, *ptr, sizeof(OffsetNumber));
 		*ptr += sizeof(OffsetNumber);
 
-		Assert(length > 0);
-		if (length != 0)
+		Assert(length1 > 0);
+		if (length1 != 0)
 		{
-			memcpy(tuple2->fixedData, *ptr, length);
-			*ptr += length;
+			memcpy(tuple1->fixedData, *ptr, length1);
+			*ptr += length1;
+
+			tuple1->tuple.data = tuple1->fixedData;
+		}
+		else
+			O_TUPLE_SET_NULL(tuple1->tuple);
+
+		Assert(length2 > 0);
+		if (length2 != 0)
+		{
+			memcpy(tuple2->fixedData, *ptr, length2);
+			*ptr += length2;
 
 			tuple2->tuple.data = tuple2->fixedData;
 		}
 		else
 			O_TUPLE_SET_NULL(tuple2->tuple);
 	}
-	else
-		O_TUPLE_SET_NULL(tuple2->tuple);
+	*length1_out = length1;
 }
 
 /*

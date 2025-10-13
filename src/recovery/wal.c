@@ -128,13 +128,17 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 
 	Assert(!is_recovery_process());
 	Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
+	Assert(!O_TUPLE_IS_NULL(tuple));
 
-	required_length = sizeof(WALRecModify) + length;
-
-	if (length2)
+	if (length2 == 0)
+	{
+		Assert(O_TUPLE_IS_NULL(tuple2));
+		required_length = sizeof(WALRecModify1) + length;
+	}
+	else
 	{
 		Assert(!O_TUPLE_IS_NULL(tuple2));
-		required_length += sizeof(uint8) + sizeof(OffsetNumber) + length2;
+		required_length =  sizeof(WALRecModify2) + length + length2;
 	}
 
 	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
@@ -202,41 +206,50 @@ add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr)
  * Adds the record to the local_wal_buffer.
  */
 static inline void
-add_local_modify(uint8 record_type, OTuple record, OffsetNumber length, OTuple record2, OffsetNumber length2)
+add_local_modify(uint8 record_type, OTuple record1, OffsetNumber length1, OTuple record2, OffsetNumber length2)
 {
-	WALRecModify *wal_rec;
+	Assert(!O_TUPLE_IS_NULL(record1));
+	Assert(length1);
 
-	Assert(local_wal_buffer_offset + sizeof(*wal_rec) + length + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
-
-	wal_rec = (WALRecModify *) (&local_wal_buffer[local_wal_buffer_offset]);
-	wal_rec->recType = record_type;
-	wal_rec->tupleFormatFlags = record.formatFlags;
-	memcpy(wal_rec->length, &length, sizeof(OffsetNumber));
-	local_wal_buffer_offset += sizeof(*wal_rec);
-
-	memcpy(&local_wal_buffer[local_wal_buffer_offset], record.data, length);
-	local_wal_buffer_offset += length;
-
-	/* Fill optional part of WALRecModify for REINSERT case */
-	if (record_type == WAL_REC_REINSERT)
+	if(record_type != WAL_REC_REINSERT)
 	{
-		Assert(length2);
-		Assert(!O_TUPLE_IS_NULL(record2));
-		Assert(local_wal_buffer_offset + sizeof(uint8) + sizeof(OffsetNumber) + length2 <= LOCAL_WAL_BUFFER_SIZE);
+		/* One-tuple modify record */
+		WALRecModify1 *wal_rec;
 
-		memcpy(&local_wal_buffer[local_wal_buffer_offset], &record2.formatFlags, sizeof(uint8));
-		local_wal_buffer_offset++;
-		memcpy(&local_wal_buffer[local_wal_buffer_offset], &length2, sizeof(OffsetNumber));
-		local_wal_buffer_offset += sizeof(OffsetNumber);
-		memcpy(&local_wal_buffer[local_wal_buffer_offset], record2.data, length2);
-		local_wal_buffer_offset += length2;
+		Assert(local_wal_buffer_offset + sizeof(*wal_rec) + length1 + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+		Assert(O_TUPLE_IS_NULL(record2));
+		Assert(length2 == 0);
+
+		wal_rec = (WALRecModify1 *) (&local_wal_buffer[local_wal_buffer_offset]);
+		wal_rec->recType = record_type;
+		wal_rec->tupleFormatFlags = record1.formatFlags;
+		memcpy(wal_rec->length, &length1, sizeof(OffsetNumber));
+		local_wal_buffer_offset += sizeof(*wal_rec);
+
+		memcpy(&local_wal_buffer[local_wal_buffer_offset], record1.data, length1);
+		local_wal_buffer_offset += length1;
 	}
 	else
 	{
-		Assert(O_TUPLE_IS_NULL(record2));
-		Assert(length2 == 0);
-	}
+		/* Two-tuple modify record */
+		WALRecModify2 *wal_rec;
 
+		Assert(length2);
+		Assert(!O_TUPLE_IS_NULL(record2));
+		Assert(local_wal_buffer_offset + sizeof(*wal_rec) + length1 + length2 + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+		wal_rec = (WALRecModify2 *) (&local_wal_buffer[local_wal_buffer_offset]);
+		wal_rec->recType = record_type;
+		wal_rec->tupleFormatFlags1 = record1.formatFlags;
+		wal_rec->tupleFormatFlags2 = record2.formatFlags;
+		memcpy(wal_rec->length1, &length1, sizeof(OffsetNumber));
+		memcpy(wal_rec->length2, &length2, sizeof(OffsetNumber));
+		local_wal_buffer_offset += sizeof(*wal_rec);
+
+		memcpy(&local_wal_buffer[local_wal_buffer_offset], record1.data, length1);
+		local_wal_buffer_offset += length1;
+		memcpy(&local_wal_buffer[local_wal_buffer_offset], record2.data, length2);
+		local_wal_buffer_offset += length2;
+	}
 	local_wal_has_material_changes = true;
 }
 
