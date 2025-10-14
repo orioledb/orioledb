@@ -15,8 +15,6 @@ and enhancing the current table access methods, OrioleDB opens the door to
 a future of more powerful storage models that are optimized for cloud and
 modern hardware architectures.
 
-OrioleDB is currently distributed under the standard PostgreSQL license.
-
 1. Designed for modern hardware.  OrioleDB design avoids legacy CPU bottlenecks
    on modern servers containing dozens and hundreds CPU cores, providing
    optimized usage of modern storage technologies such as SSD and NVRAM.
@@ -59,6 +57,25 @@ The key technical differentiations of OrioleDB are as follows:
 See [introduction](doc/intro.mdx), [getting started](doc/usage/getting-started.mdx), and [architecture](doc/architecture/overview.mdx)
  documentation as well as
 [PostgresBuild 2021 slides](https://www.slideshare.net/AlexanderKorotkov/solving-postgresql-wicked-problems).  To start the development see [OrioleDB development quickstart](doc/contributing/local-builds.mdx), and [project structure](doc/contributing/structure.mdx).
+
+## License
+
+OrioleDB is dual-licensed under the Apache License 2.0 and the PostgreSQL License.
+
+You may choose either license to govern your use of this work.
+1. [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
+2. [PostgreSQL License](https://www.postgresql.org/about/licence/)
+
+`SPDX-License-Identifier: Apache-2.0 OR PostgreSQL`
+
+All contributions to OrioleDB are made under both the Apache License 2.0 and
+the PostgreSQL License.
+
+See [LICENSE-APACHE.txt](./LICENSE-APACHE.txt) and
+[LICENSE-POSTGRESQL.txt](./LICENSE-POSTGRESQL.txt) for details.
+
+**Patent Grant:**. Supabase provides a separate patent grant for OrioleDB.
+See [PATENTS.txt](./PATENTS.txt) for details.
 
 ## Status
 
