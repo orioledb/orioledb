@@ -55,8 +55,12 @@ PG_FUNCTION_INFO_V1(orioledb_relation_size);
 PG_FUNCTION_INFO_V1(orioledb_tbl_are_indices_equal);
 PG_FUNCTION_INFO_V1(orioledb_table_pages);
 PG_FUNCTION_INFO_V1(orioledb_tree_stat);
+PG_FUNCTION_INFO_V1(orioledb_page_items);
 
 extern void log_btree(BTreeDescr *desc);
+
+static
+bool page_in_memory(int blkno, int lookingForBlockNo);
 
 static void
 o_tuple_print(TupleDesc tupDesc, OTupleFixedFormatSpec *spec,
@@ -1682,4 +1686,317 @@ orioledb_tree_stat(PG_FUNCTION_ARGS)
 	pfree(stat);
 
 	return (Datum) 0;
+}
+
+/*
+ * cross-call data structure for SRF for page items
+ */
+typedef struct ua_page_items
+{
+	Page		page;
+	OffsetNumber offset;
+	BTreePageItemLocator itemLocator;
+	bool		isLeaf;
+	int 		dataLimit;
+	TupleDesc	tupd;
+} ua_page_items;
+
+static Datum
+orioledb_page_print_tuples(ua_page_items *uargs)
+{
+	Datum		values[6];
+	bool		nulls[6];
+	HeapTuple	tuple;
+	char	   *dump,
+			   *datacstring;
+	int			off;
+	int			j = 0;
+
+	BTreePageItemLocator *currLocator = &(uargs->itemLocator);
+	int hdrSize = uargs->isLeaf ? BTreeLeafTuphdrSize : BTreeNonLeafTuphdrSize;
+	Pointer	itemPtr = BTREE_PAGE_LOCATOR_GET_ITEM(uargs->page, currLocator);
+	Pointer nextItemPtr = (Pointer)currLocator->chunk + currLocator->chunkSize;
+	int		dataSize;
+
+	if (currLocator->itemOffset < currLocator->chunkItemsCount - 1)
+	{
+		BTreePageItemLocator nextLocator;
+		memcpy(&nextLocator, currLocator, sizeof(BTreePageItemLocator));
+		BTREE_PAGE_LOCATOR_NEXT(uargs->page, &nextLocator);
+		Assert(BTREE_PAGE_LOCATOR_IS_VALID(uargs->page, &nextLocator));
+		nextItemPtr = BTREE_PAGE_LOCATOR_GET_ITEM(uargs->page, &nextLocator);
+	}
+
+	dataSize = nextItemPtr - itemPtr - hdrSize;
+	if (uargs->dataLimit >= 0 && dataSize > uargs->dataLimit)
+		dataSize = uargs->dataLimit;
+
+	memset(nulls, false, sizeof(nulls));
+	// offset
+	values[j++] = Int32GetDatum(uargs->offset);
+
+	// chunk no
+	values[j++] =Int32GetDatum(currLocator->chunkOffset + 1);
+
+	// item header
+	dump = palloc0(hdrSize * 3 + 1);
+	datacstring = dump;
+	for (off = 0; off < hdrSize; off++)
+	{
+		if (off > 0)
+			*dump++ = ' ';
+		sprintf(dump, "%02x", *(itemPtr + off) & 0xff);
+		dump += 2;
+	}
+	values[j++] = CStringGetTextDatum(datacstring);
+	pfree(datacstring);
+
+	// header content
+	if (uargs->isLeaf)
+	{
+		JsonbParseState *state = NULL;
+		JsonbValue jval;
+
+		(void) pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+
+		jsonb_push_key(&state, "deleted");
+		jval.type = jbvBool;
+		jval.val.boolean = ((BTreeLeafTuphdr *)itemPtr)->deleted;
+		(void) pushJsonbValue(&state, WJB_VALUE, &jval);
+
+		jsonb_push_key(&state, "chainHasLocks");
+		jval.type = jbvBool;
+		jval.val.boolean = ((BTreeLeafTuphdr *)itemPtr)->chainHasLocks;
+		(void) pushJsonbValue(&state, WJB_VALUE, &jval);
+
+		jsonb_push_key(&state, "oxid");
+		jval.type = jbvNumeric;
+		jval.val.numeric = DatumGetNumeric(DirectFunctionCall1(int4_numeric, XACT_INFO_GET_OXID(((BTreeLeafTuphdr *)itemPtr)->xactInfo)));
+		(void) pushJsonbValue(&state, WJB_VALUE, &jval);
+
+		values[j++] = PointerGetDatum(JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL)));
+	}
+	else
+	{
+		JsonbParseState *state = NULL;
+		uint64 downlink = ((BTreeNonLeafTuphdr *)itemPtr)->downlink;
+		JsonbValue jval;
+
+		(void) pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+
+		if (DOWNLINK_IS_IN_MEMORY(downlink))
+		{
+			jsonb_push_key(&state, "storage");
+			jval.type = jbvString;
+			jval.val.string.len = strlen("memory");
+			jval.val.string.val = "memory";
+			(void) pushJsonbValue(&state, WJB_VALUE, &jval);
+
+			jsonb_push_key(&state, "blkno");
+			jval.type = jbvNumeric;
+			jval.val.numeric = DatumGetNumeric(DirectFunctionCall1(int4_numeric, DOWNLINK_GET_IN_MEMORY_BLKNO(downlink)));
+			(void) pushJsonbValue(&state, WJB_VALUE, &jval);
+
+			jsonb_push_key(&state, "changecount");
+			jval.type = jbvNumeric;
+			jval.val.numeric = DatumGetNumeric(DirectFunctionCall1(int4_numeric, DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(downlink)));
+			(void) pushJsonbValue(&state, WJB_VALUE, &jval);
+		}
+		else if (DOWNLINK_IS_IN_IO(downlink))
+		{
+			jsonb_push_key(&state, "storage");
+			jval.type = jbvString;
+			jval.val.string.len = strlen("IO");
+			jval.val.string.val = "IO";
+			(void) pushJsonbValue(&state, WJB_VALUE, &jval);
+
+			jsonb_push_key(&state, "changecount");
+			jval.type = jbvNumeric;
+			jval.val.numeric = DatumGetNumeric(DirectFunctionCall1(int4_numeric, DOWNLINK_GET_IO_LOCKNUM(downlink)));
+			(void) pushJsonbValue(&state, WJB_VALUE, &jval);
+		}
+		else
+		{
+			Assert(DOWNLINK_IS_ON_DISK(downlink));
+			jsonb_push_key(&state, "storage");
+			jval.type = jbvString;
+			jval.val.string.len = strlen("disk");
+			jval.val.string.val = "disk";
+			(void) pushJsonbValue(&state, WJB_VALUE, &jval);
+
+			jsonb_push_key(&state, "length");
+			jval.type = jbvNumeric;
+			jval.val.numeric = DatumGetNumeric(DirectFunctionCall1(int4_numeric, DOWNLINK_GET_DISK_LEN(downlink)));
+			(void) pushJsonbValue(&state, WJB_VALUE, &jval);
+
+			jsonb_push_key(&state, "offset");
+			jval.type = jbvNumeric;
+			jval.val.numeric = DatumGetNumeric(DirectFunctionCall1(int4_numeric, DOWNLINK_GET_DISK_OFF(downlink)));
+			(void) pushJsonbValue(&state, WJB_VALUE, &jval);
+		}
+		values[j++] = PointerGetDatum(JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL)));
+	}
+
+	// item data len
+	values[j++] = Int32GetDatum(nextItemPtr - itemPtr - hdrSize);
+
+	//item data
+	if (dataSize > 0)
+	{
+		Pointer dataPtr = itemPtr + hdrSize;
+		dump = palloc0(dataSize * 3 + 1);
+		datacstring = dump;
+		for (off = 0; off < dataSize; off++)
+		{
+			if (off > 0)
+				*dump++ = ' ';
+			sprintf(dump, "%02x", *(dataPtr + off) & 0xff);
+			dump += 2;
+		}
+		values[j++] = CStringGetTextDatum(datacstring);
+		pfree(datacstring);
+	}
+	else
+	{
+		nulls[j++] = true;
+	}
+
+	tuple = heap_form_tuple(uargs->tupd, values, nulls);
+	return HeapTupleGetDatum(tuple);
+}
+
+static
+bool page_in_memory(int blkno, int lookingForBlockNo)
+{
+	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+	BTreePageItemLocator loc;
+
+	if (p && blkno == lookingForBlockNo)
+		return true;
+
+	if (O_PAGE_IS(p, LEAF))
+		return false;
+
+	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
+	{
+		BTreeNonLeafTuphdr *hdr;
+
+		hdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
+		if (DOWNLINK_IS_IN_MEMORY(hdr->downlink))
+			if (page_in_memory(DOWNLINK_GET_IN_MEMORY_BLKNO(hdr->downlink), lookingForBlockNo))
+				return true;
+	}
+	return false;
+}
+
+Datum
+orioledb_page_items(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	int			blockno = PG_GETARG_INT32(1);
+	int 		dataLimit = PG_GETARG_INT32(2);
+	OTableDescr *descr;
+	Relation	rel;
+	Datum		result;
+	FuncCallContext *fctx;
+	MemoryContext mctx;
+	ua_page_items *uargs;
+
+	if (!superuser())
+		ereport(ERROR,
+				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+				 errmsg("must be superuser to use pageinspect functions %d", relid)));
+
+	if (SRF_IS_FIRSTCALL())
+	{
+		TupleDesc	tupleDesc;
+		SharedRootInfoKey key = {0};
+		SharedRootInfo *sharedRootInfo = NULL;
+		BTreeDescr *td;
+		Page		p = NULL;
+		OIndexDescr *id;
+
+		orioledb_check_shmem();
+
+		fctx = SRF_FIRSTCALL_INIT();
+
+		rel = relation_open(relid, AccessShareLock);
+
+		if (!rel)
+			ereport(ERROR,
+					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+					errmsg("relation oid %u does not exists", relid)));
+
+		descr = relation_get_descr(rel);
+
+		if (!descr)
+			ereport(ERROR,
+					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+					errmsg("relation oid %u is not orioledb", relid)));
+
+
+		id = descr->indices[PrimaryIndexNumber];
+
+		td = &id->desc;
+
+		key.datoid = td->oids.datoid;
+		key.relnode = td->oids.relnode;
+		sharedRootInfo = o_find_shared_root_info(&key);
+
+		if (sharedRootInfo != NULL && !sharedRootInfo->placeholder)
+		{
+			o_btree_load_shmem(td);
+			if (page_in_memory(td->rootInfo.rootPageBlkno, blockno))
+				p = O_GET_IN_MEMORY_PAGE(blockno);
+			else
+				ereport(ERROR, (errmsg("page %d not in memory or does't relate to rel %d", blockno, relid)));
+		}
+
+		/*
+		 * We copy the page into local storage to avoid holding pin on the
+		 * buffer longer than we must, and possibly failing to release it at
+		 * all if the calling query doesn't fetch all rows.
+		 */
+		mctx = MemoryContextSwitchTo(fctx->multi_call_memory_ctx);
+
+		Assert(p);
+
+		uargs = palloc0(sizeof(ua_page_items));
+
+		uargs->page = palloc(BLCKSZ);
+		memcpy(uargs->page, p, BLCKSZ);
+	
+		uargs->offset = FirstOffsetNumber;
+		uargs->isLeaf = O_PAGE_IS(uargs->page, LEAF);
+		uargs->dataLimit = dataLimit;
+		BTREE_PAGE_LOCATOR_FIRST(uargs->page, &(uargs->itemLocator));
+
+		fctx->max_calls = ((BTreePageHeader *) uargs->page)->itemsCount;
+
+		relation_close(rel, AccessShareLock);
+
+		/* Build a tuple descriptor for our result type */
+		if (get_call_result_type(fcinfo, NULL, &tupleDesc) != TYPEFUNC_COMPOSITE)
+			elog(ERROR, "return type must be a row type");
+		tupleDesc = BlessTupleDesc(tupleDesc);
+
+		uargs->tupd = tupleDesc;
+
+		fctx->user_fctx = uargs;
+
+		MemoryContextSwitchTo(mctx);
+	}
+
+	fctx = SRF_PERCALL_SETUP();
+	uargs = fctx->user_fctx;
+
+	if (fctx->call_cntr < fctx->max_calls)
+	{
+		result = orioledb_page_print_tuples(uargs);
+		uargs->offset++;
+		BTREE_PAGE_LOCATOR_NEXT(uargs->page, &(uargs->itemLocator));
+		SRF_RETURN_NEXT(fctx, result);
+	}
+
+	SRF_RETURN_DONE(fctx);
 }
