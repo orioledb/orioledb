@@ -2666,7 +2666,7 @@ read_modify_wal_tuples(uint8 rec_type, Pointer *ptr, OFixedTuple *tuple1, OFixed
 
 	Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
 
-	if(!contains_two_tuples)
+	if (!contains_two_tuples)
 	{
 		tuple1->tuple.formatFlags = **ptr;
 		(*ptr)++;
@@ -2686,7 +2686,7 @@ read_modify_wal_tuples(uint8 rec_type, Pointer *ptr, OFixedTuple *tuple1, OFixed
 			O_TUPLE_SET_NULL(tuple1->tuple);
 	}
 	else
-	{	
+	{
 		tuple1->tuple.formatFlags = **ptr;
 		(*ptr)++;
 		tuple2->tuple.formatFlags = **ptr;

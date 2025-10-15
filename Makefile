@@ -315,7 +315,7 @@ override with_temp_install += PGCTLTIMEOUT=3000 PG_TEST_TIMEOUT_DEFAULT=500 \
 	valgrind --vgdb=yes --leak-check=no --gen-suppressions=all \
 	--num-callers=50 --suppressions=valgrind.supp --time-stamp=yes \
 	--log-file=pid-%p.log --trace-children=yes \
-	--trace-children-skip=*/initdb --track-origins=yes
+	--trace-children-skip=*/initdb
 else
 override with_temp_install += PGCTLTIMEOUT=900
 endif

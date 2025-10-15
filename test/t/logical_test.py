@@ -428,7 +428,8 @@ class LogicalTest(BaseTest):
 				publisher.safe_psql(create_sql)
 				subscriber.safe_psql(create_sql)
 
-				pub = publisher.publish('test_pub', tables=['o_test', 'o_test_secondary'])
+				pub = publisher.publish('test_pub',
+				                        tables=['o_test', 'o_test_secondary'])
 				sub = subscriber.subscribe(pub, 'test_sub')
 
 				with publisher.connect() as con1:
@@ -442,10 +443,12 @@ class LogicalTest(BaseTest):
 						con2.execute(
 						    "INSERT INTO o_test (id, bid) VALUES (2, 2);")
 						con2.execute(
-						    "INSERT INTO o_test_secondary (id, bid) VALUES (2, 2);")
+						    "INSERT INTO o_test_secondary (id, bid) VALUES (2, 2);"
+						)
 
 						con1.execute("UPDATE o_test SET id = 6 WHERE id = 1;")
-						con1.execute("UPDATE o_test_secondary SET id = 6 WHERE id = 1;")
+						con1.execute(
+						    "UPDATE o_test_secondary SET id = 6 WHERE id = 1;")
 
 						con1.commit()
 						con2.commit()
@@ -456,8 +459,8 @@ class LogicalTest(BaseTest):
 					    [(2, 2), (6, 1)])
 					self.assertListEqual(
 					    publisher.execute(
-					        'SELECT id, bid FROM o_test_secondary ORDER BY id'),
-					    [(2, 2), (6, 1)])
+					        'SELECT id, bid FROM o_test_secondary ORDER BY id'
+					    ), [(2, 2), (6, 1)])
 
 					# wait until changes apply on subscriber and check them
 					sub.catchup()
@@ -468,42 +471,42 @@ class LogicalTest(BaseTest):
 					    [(2, 2), (6, 1)])
 					self.assertListEqual(
 					    subscriber.execute(
-					        'SELECT id, bid FROM o_test_secondary ORDER BY id'),
-					    [(2, 2), (6, 1)])
+					        'SELECT id, bid FROM o_test_secondary ORDER BY id'
+					    ), [(2, 2), (6, 1)])
 
-#	def test_recvlogical_and_drop_database(self):
-#		node = self.node
-#		node.start()
-#
-#		node.safe_psql("postgres", "CREATE DATABASE logicaldb")
-#		node.safe_psql(
-#		    "logicaldb",
-#		    "SELECT pg_create_logical_replication_slot('logicaldb_slot', 'test_decoding')"
-#		)
-#
-#		pg_recvlogical = subprocess.Popen([
-#		    get_bin_path("pg_recvlogical"), "-d", "logicaldb", "-p",
-#		    str(node.port), "-S", "logicaldb_slot", "-v", "-f", "-", "--start"
-#		],
-#		                                  stdout=subprocess.PIPE,
-#		                                  stderr=subprocess.PIPE,
-#		                                  text=True)
+	def test_recvlogical_and_drop_database(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("postgres", "CREATE DATABASE logicaldb")
+		node.safe_psql(
+		    "logicaldb",
+		    "SELECT pg_create_logical_replication_slot('logicaldb_slot', 'test_decoding')"
+		)
+
+		pg_recvlogical = subprocess.Popen([
+		    get_bin_path("pg_recvlogical"), "-d", "logicaldb", "-p",
+		    str(node.port), "-S", "logicaldb_slot", "-v", "-f", "-", "--start"
+		],
+		                                  stdout=subprocess.PIPE,
+		                                  stderr=subprocess.PIPE,
+		                                  text=True)
 
 		# Check that pg_recvlogical started without error
-#		self.assertIsNone(pg_recvlogical.poll())
+		self.assertIsNone(pg_recvlogical.poll())
 
 		# Wait until pg_recvlogical starts streaming
-#		node.poll_query_until(
-#		    "SELECT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = 'logicaldb_slot' AND active_pid IS NOT NULL)"
-#		)
+		node.poll_query_until(
+		    "SELECT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = 'logicaldb_slot' AND active_pid IS NOT NULL)"
+		)
 
-#		with self.assertRaises(testgres.QueryException) as e:
-#			node.safe_psql("postgres", "DROP DATABASE logicaldb")
+		with self.assertRaises(testgres.QueryException) as e:
+			node.safe_psql("postgres", "DROP DATABASE logicaldb")
 
-#		self.assertErrorMessageEquals(
-#		    e,
-#		    "database \"logicaldb\" is used by an active logical replication slot",
-#		    "There is 1 active slot.", "DETAIL")
+		self.assertErrorMessageEquals(
+		    e,
+		    "database \"logicaldb\" is used by an active logical replication slot",
+		    "There is 1 active slot.", "DETAIL")
 
-#		pg_recvlogical.terminate()
-#		node.stop()
+		pg_recvlogical.terminate()
+		node.stop()

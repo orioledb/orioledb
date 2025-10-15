@@ -89,7 +89,7 @@ typedef struct
 {
 	uint8		recType;
 	uint8		tupleFormatFlags1;
-	uint8           tupleFormatFlags2;
+	uint8		tupleFormatFlags2;
 	uint8		length1[sizeof(OffsetNumber)];
 	uint8		length2[sizeof(OffsetNumber)];
 	/* tuple1[length1] */

@@ -138,7 +138,7 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	else
 	{
 		Assert(!O_TUPLE_IS_NULL(tuple2));
-		required_length =  sizeof(WALRecModify2) + length + length2;
+		required_length = sizeof(WALRecModify2) + length + length2;
 	}
 
 	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
@@ -211,7 +211,7 @@ add_local_modify(uint8 record_type, OTuple record1, OffsetNumber length1, OTuple
 	Assert(!O_TUPLE_IS_NULL(record1));
 	Assert(length1);
 
-	if(record_type != WAL_REC_REINSERT)
+	if (record_type != WAL_REC_REINSERT)
 	{
 		/* One-tuple modify record */
 		WALRecModify1 *wal_rec;
