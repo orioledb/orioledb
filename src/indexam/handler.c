@@ -534,6 +534,13 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 	o_current_index = NULL;
+	elog(WARNING, "orioledb_aminsert: checkUnique: %s",
+		 checkUnique == UNIQUE_CHECK_NO ? "UNIQUE_CHECK_NO" :
+		 checkUnique == UNIQUE_CHECK_YES ? "UNIQUE_CHECK_YES" :
+		 checkUnique == UNIQUE_CHECK_PARTIAL ? "UNIQUE_CHECK_PARTIAL" :
+		 checkUnique == UNIQUE_CHECK_EXISTING ? "UNIQUE_CHECK_EXISTING" :
+		 "WRONG"
+		);
 
 	if (options && !options->orioledb_index)
 	{
@@ -573,12 +580,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 		return true;
 
 	ORelOidsSetFromRel(oids, rel);
-	if (rel->rd_index->indisprimary)
-		ix_type = oIndexPrimary;
-	else if (rel->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
+	ix_type = o_index_rel_get_ix_type(rel);
 	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
@@ -646,7 +648,8 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 
 	if (!success)
 	{
-		o_report_duplicate(heapRel, descr->indices[ix_num], slot);
+		if (rel->rd_index->indimmediate)
+			o_report_duplicate(heapRel, descr->indices[ix_num], slot);
 	}
 
 	if (tuple.data)
@@ -688,12 +691,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 		return true;
 
 	ORelOidsSetFromRel(oids, rel);
-	if (rel->rd_index->indisprimary)
-		ix_type = oIndexPrimary;
-	else if (rel->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
+	ix_type = o_index_rel_get_ix_type(rel);
 	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
@@ -794,7 +792,8 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 					break;
 				}
 			case BTreeOperationInsert:
-				o_report_duplicate(heapRel, index_descr, new_slot);
+				if (rel->rd_index->indimmediate)
+					o_report_duplicate(heapRel, index_descr, new_slot);
 				break;
 			default:
 				if (old_tuple.data)
@@ -842,10 +841,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 		return true;
 
 	ORelOidsSetFromRel(oids, rel);
-	if (rel->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
+	ix_type = o_index_rel_get_ix_type(rel);
 	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
@@ -1462,12 +1458,7 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	scan->xs_want_rowid = true;
 
 	ORelOidsSetFromRel(oids, rel);
-	if (rel->rd_index->indisprimary)
-		ix_type = oIndexPrimary;
-	else if (rel->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
+	ix_type = o_index_rel_get_ix_type(rel);
 	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);

@@ -164,14 +164,92 @@ INSERT INTO ranges VALUES(int4range(-6, -3), '[2, 5)')
 SELECT * FROM ranges;
 
 -- succeed because c1 doesn't overlap
-SET log_error_verbosity = 'terse';
-SELECT orioledb_tbl_indices('ranges'::regclass);
-SELECT orioledb_tbl_structure('ranges'::regclass);
 INSERT INTO ranges VALUES(int4range(-16, -13), '[2, 5)');
 SELECT * FROM ranges;
 -- succeed because c2 doesn't overlap
 INSERT INTO ranges VALUES(int4range(-4, -3), '[12, 15)');
 SELECT * FROM ranges;
+
+CREATE TABLE unique_tbl (
+	i int UNIQUE DEFERRABLE, 
+	t text
+) USING orioledb;
+
+INSERT INTO unique_tbl VALUES (0, 'one');
+INSERT INTO unique_tbl VALUES (1, 'two');
+INSERT INTO unique_tbl VALUES (2, 'tree');
+INSERT INTO unique_tbl VALUES (3, 'four');
+INSERT INTO unique_tbl VALUES (4, 'five');
+
+BEGIN;
+
+-- check is done at end of transaction, so this should succeed
+UPDATE unique_tbl SET i = 1 WHERE i = 0;
+
+ROLLBACK;
+
+-- check is done at end of statement, so this should succeed
+UPDATE unique_tbl SET i = i+1;
+
+SELECT * FROM unique_tbl;
+
+-- explicitly defer the constraint
+BEGIN;
+
+SET CONSTRAINTS unique_tbl_i_key DEFERRED;
+
+INSERT INTO unique_tbl VALUES (3, 'three');
+DELETE FROM unique_tbl WHERE t = 'tree'; -- makes constraint valid again
+
+COMMIT; -- should succeed
+
+SELECT * FROM unique_tbl;
+
+-- try adding an initially deferred constraint
+ALTER TABLE unique_tbl DROP CONSTRAINT unique_tbl_i_key;
+ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_i_key
+	UNIQUE (i) DEFERRABLE INITIALLY DEFERRED;
+
+BEGIN;
+
+INSERT INTO unique_tbl VALUES (1, 'five');
+INSERT INTO unique_tbl VALUES (5, 'one');
+UPDATE unique_tbl SET i = 4 WHERE i = 2;
+UPDATE unique_tbl SET i = 2 WHERE i = 4 AND t = 'four';
+DELETE FROM unique_tbl WHERE i = 1 AND t = 'one';
+DELETE FROM unique_tbl WHERE i = 5 AND t = 'five';
+
+COMMIT;
+
+SELECT * FROM unique_tbl;
+
+-- should fail at commit-time
+BEGIN;
+INSERT INTO unique_tbl VALUES (3, 'Three'); -- should succeed for now
+-- SET log_error_verbosity = 'terse';
+COMMIT; -- should fail
+\q
+
+-- make constraint check immediate
+BEGIN;
+
+SET CONSTRAINTS ALL IMMEDIATE;
+
+INSERT INTO unique_tbl VALUES (3, 'Three'); -- should fail
+
+COMMIT;
+
+-- forced check when SET CONSTRAINTS is called
+BEGIN;
+
+SET CONSTRAINTS ALL DEFERRED;
+
+INSERT INTO unique_tbl VALUES (3, 'Three'); -- should succeed for now
+
+SET CONSTRAINTS ALL IMMEDIATE; -- should fail
+
+COMMIT;
+
 
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;
