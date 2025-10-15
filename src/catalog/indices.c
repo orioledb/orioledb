@@ -284,12 +284,7 @@ o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTa
 	}
 
 	/* check index type */
-	if (index->rd_index->indisprimary)
-		ix_type = oIndexPrimary;
-	else if (index->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
+	ix_type = o_index_rel_get_ix_type(index);
 
 	/* check index fields number */
 	nattrs = index->rd_index->indnatts;
@@ -417,15 +412,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		Assert(options->orioledb_index);
 	}
 
-	if (index->rd_index->indisprimary)
-		ix_type = oIndexPrimary;
-	else if (index->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else if (index->rd_index->indisexclusion)
-		ix_type = oIndexExclusion;
-	else
-		ix_type = oIndexRegular;
-
+	ix_type = o_index_rel_get_ix_type(index);
 	indnatts = index->rd_index->indnatts;
 	indnkeyatts = index->rd_index->indnkeyatts;
 	tablespace = index->rd_rel->reltablespace;
@@ -662,7 +649,7 @@ static void
 _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int request)
 {
 	ParallelContext *pcxt = NULL;
-	ParallelRecoveryContext *recoveryContext;
+	ParallelRecoveryContext *recoveryContext = NULL;
 	int			nworkers;
 	shm_toc_estimator *estimator;
 	shm_toc    *toc;

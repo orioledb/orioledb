@@ -1050,10 +1050,7 @@ tts_orioledb_fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx,
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
 		bound->keys[i].comparator = idx->fields[i].comparator;
-		if (idx->desc.type == oIndexExclusion)
-			bound->keys[i].exclusion_fn = idx->fields[i].exclusion_fn;
-		else
-			bound->keys[i].exclusion_fn = NULL;
+		bound->keys[i].exclusion_fn = NULL;
 	}
 }
 
