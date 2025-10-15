@@ -133,6 +133,22 @@ typedef enum
 	oIndexRegular = 6,
 } OIndexType;
 
+static inline OIndexType
+o_index_rel_get_ix_type(Relation index)
+{
+	OIndexType ix_type;
+
+	if (index->rd_index->indisprimary)
+		ix_type = oIndexPrimary;
+	else if (index->rd_index->indisunique)
+		ix_type = oIndexUnique;
+	else if (index->rd_index->indisexclusion)
+		ix_type = oIndexExclusion;
+	else
+		ix_type = oIndexRegular;
+	return ix_type;
+}
+
 #define PROC_XID_ARRAY_SIZE	32
 
 typedef enum
