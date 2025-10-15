@@ -796,12 +796,16 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						HeapTuple	oldheaptuple;
 
 						elog(LOG, "WAL_REC_REINSERT toastable");
+						/* Store primary key into reorderbuffer oldtuple */
 						oldheaptuple = convert_toast_pointers(descr, indexDescr, &tuple2);
-						change->data.tp.oldtuple = record_buffer_tuple(ctx->reorder, oldheaptuple, true);
+						ExecForceStoreHeapTuple(oldheaptuple, descr->newTuple, false);
+						tts_copy_identity(descr->newTuple, descr->oldTuple,
+									  GET_PRIMARY(descr));
+						change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
 
+						/* Store full tuple into reorderbuffer newtuple */
 						newheaptuple = convert_toast_pointers(descr, indexDescr, &tuple1);
 						change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, true);
-
 					}
 					else		/* Tuple without TOASTed attrs */
 					{
