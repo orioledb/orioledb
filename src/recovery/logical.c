@@ -178,19 +178,19 @@ convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
 
 		if (isnull[toast_attn])
 		{
-			elog(LOG, "NULL attr %u", toast_attn);
+			elog(DEBUG4, "NULL attr %u", toast_attn);
 			continue;
 		}
 
 		old_toastptr = (struct varlena *) DatumGetPointer(old_values[toast_attn]);
 		if (old_toastptr == NULL || !VARATT_IS_EXTERNAL(old_toastptr))
 		{
-			elog(LOG, "NON-toast or empty attr %u", toast_attn);
+			elog(DEBUG4, "NON-toast or empty attr %u", toast_attn);
 			continue;
 		}
 
 		memcpy(&otv, old_toastptr, sizeof(otv));
-		elog(LOG, "reloid: Old toast value: %u toast_attn: %u compression %u, raw_size, %u, toasted_size %u",
+		elog(DEBUG4, "reloid: Old toast value: %u toast_attn: %u compression %u, raw_size, %u, toasted_size %u",
 			 descr->oids.reloid, toast_attn + 1, otv.compression,
 			 otv.raw_size, otv.toasted_size);
 
@@ -199,7 +199,7 @@ convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
 		ve.va_toastrelid = descr->toast->oids.reloid;
 		ve.va_valueid = ObjectIdGetDatum(toast_attn + 1 + 8000);
 
-		elog(LOG, "New toast pointer compression: %u rawsize: %u, extinfo_size: %u, toastrelid %u, valueid %u  ",
+		elog(DEBUG4, "New toast pointer compression: %u rawsize: %u, extinfo_size: %u, toastrelid %u, valueid %u  ",
 			 (ve.va_extinfo >> VARLENA_EXTSIZE_BITS), ve.va_rawsize,
 			 (ve.va_extinfo & VARLENA_EXTSIZE_MASK),
 			 ve.va_toastrelid, ve.va_valueid);
@@ -278,7 +278,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		rec_type = *ptr;
 		ptr++;
 
-		elog(LOG, "RECEIVE: %s", rec_type == WAL_REC_XID ? "XID" :
+		elog(DEBUG4, "RECEIVE: %s", rec_type == WAL_REC_XID ? "XID" :
 			 rec_type == WAL_REC_COMMIT ? "COMMIT" :
 			 rec_type == WAL_REC_ROLLBACK ? "ROLLBACK" :
 			 rec_type == WAL_REC_JOINT_COMMIT ? "JOINT COMMIT" :
@@ -314,7 +314,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			CommitSeqNo csn;
 			CSNSnapshotData *csnSnapshot;
 
-			elog(LOG, "WAL_REC_COMMIT");
+			elog(DEBUG4, "WAL_REC_COMMIT");
 			memcpy(&xmin, ptr, sizeof(xmin));
 			ptr += sizeof(xmin);
 			memcpy(&csn, ptr, sizeof(csn));
@@ -422,7 +422,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			memcpy(&cur_oids.relnode, ptr, sizeof(Oid));
 			ptr += sizeof(Oid);
 
-			elog(LOG, "WAL_REC_RELATION");
+			elog(DEBUG4, "WAL_REC_RELATION");
 			if (IS_SYS_TREE_OIDS(cur_oids))
 				sys_tree_num = cur_oids.relnode;
 			else
@@ -438,12 +438,12 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			{
 				descr = o_fetch_table_descr(cur_oids);
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
-				elog(LOG, "WAL_REC_RELATION oIndexInvalid");
+				elog(DEBUG4, "WAL_REC_RELATION oIndexInvalid");
 
 			}
 			else if (ix_type == oIndexToast)
 			{
-				elog(LOG, "WAL_REC_RELATION oIndexToast");
+				elog(DEBUG4, "WAL_REC_RELATION oIndexToast");
 
 				indexDescr = o_fetch_index_descr(cur_oids, ix_type, false, NULL);
 				descr = o_fetch_table_descr(indexDescr->tableOids);
@@ -473,7 +473,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 
 			if (descr && descr->toast)
-				elog(LOG, "reloid: %d natts: %u toast natts: %u", cur_oids.reloid, descr->tupdesc->natts, descr->toast->leafTupdesc->natts);
+				elog(DEBUG4, "reloid: %d natts: %u toast natts: %u", cur_oids.reloid, descr->tupdesc->natts, descr->toast->leafTupdesc->natts);
 
 		}
 		else if (rec_type == WAL_REC_O_TABLES_META_LOCK)
@@ -580,7 +580,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						int			pk_natts;
 						bool		need_to_free = false;
 
-						elog(LOG, "WAL_REC_INSERT TOAST");
+						elog(DEBUG4, "WAL_REC_INSERT TOAST");
 
 						Assert(o_toast_tupDesc);
 						pk_natts = o_toast_tupDesc->natts - TOAST_LEAF_FIELDS_NUM;
@@ -624,7 +624,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						t_isnull[0] = false;
 						t_isnull[1] = false;
 						t_isnull[2] = false;
-						elog(LOG, "reloid: %u (attnum, seq, oldsize, newsize): (%u, %u, %u, %u) length_get: %u pk_natts: %u",
+						elog(DEBUG4, "reloid: %u (attnum, seq, oldsize, newsize): (%u, %u, %u, %u) length_get: %u pk_natts: %u",
 							 cur_oids.reloid, attnum,
 							 chunk_seq,
 							 old_chunk_size, new_chunk_size,
@@ -653,14 +653,14 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						{
 							HeapTuple	newheaptuple;
 
-							elog(LOG, "WAL_REC_INSERT NON-TOAST toastable");
+							elog(DEBUG4, "WAL_REC_INSERT NON-TOAST toastable");
 							newheaptuple = convert_toast_pointers(descr, indexDescr, &tuple1);
 							change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, true);
 							Assert(change->data.tp.newtuple);
 						}
 						else	/* Tuple without TOASTed attrs */
 						{
-							elog(LOG, "WAL_REC_INSERT NON-TOAST plain");
+							elog(DEBUG4, "WAL_REC_INSERT NON-TOAST plain");
 							tts_orioledb_store_tuple(descr->newTuple, tuple1.tuple,
 													 descr, COMMITSEQNO_INPROGRESS,
 													 PrimaryIndexNumber, false,
@@ -686,7 +686,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					change->data.tp.rlocator.relNumber = cur_oids.relnode;
 
 
-					elog(LOG, "reloid: %u", cur_oids.reloid);
+					elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 
 					/*
 					 * Primary table contains TOASTed attributes needs
@@ -696,7 +696,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					{
 						HeapTuple	newheaptuple;
 
-						elog(LOG, "WAL_REC_UPDATE toastable");
+						elog(DEBUG4, "WAL_REC_UPDATE toastable");
 
 						newheaptuple = convert_toast_pointers(descr, indexDescr, &tuple1);
 						ExecForceStoreHeapTuple(newheaptuple, descr->newTuple, false);
@@ -704,7 +704,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					}
 					else		/* Tuple without TOASTed attrs */
 					{
-						elog(LOG, "WAL_REC_UPDATE plain");
+						elog(DEBUG4, "WAL_REC_UPDATE plain");
 
 						tts_orioledb_store_tuple(descr->newTuple, tuple1.tuple,
 												 descr, COMMITSEQNO_INPROGRESS,
@@ -727,10 +727,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
 					change->data.tp.rlocator.dbOid = cur_oids.datoid;
 					change->data.tp.rlocator.relNumber = cur_oids.relnode;
-					elog(LOG, "reloid: %u", cur_oids.reloid);
+					elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 					if (ix_type == oIndexToast)
 					{
-						elog(LOG, "WAL_REC_DELETE TOAST");
+						elog(DEBUG4, "WAL_REC_DELETE TOAST");
 
 						change->data.tp.clear_toast_afterwards = false;
 						tts_orioledb_store_non_leaf_tuple(descr->oldTuple, tuple1.tuple,
@@ -754,13 +754,13 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						{
 							HeapTuple	oldheaptuple;
 
-							elog(LOG, "WAL_REC_DELETE NON-TOAST toastable");
+							elog(DEBUG4, "WAL_REC_DELETE NON-TOAST toastable");
 							oldheaptuple = convert_toast_pointers(descr, indexDescr, &tuple1);
 							change->data.tp.oldtuple = record_buffer_tuple(ctx->reorder, oldheaptuple, true);
 						}
 						else	/* Tuple without TOASTed attrs */
 						{
-							elog(LOG, "WAL_REC_DELETE NON-TOAST plain");
+							elog(DEBUG4, "WAL_REC_DELETE NON-TOAST plain");
 							tts_orioledb_store_non_leaf_tuple(descr->oldTuple, tuple1.tuple,
 															  descr, COMMITSEQNO_INPROGRESS,
 															  PrimaryIndexNumber, false,
@@ -768,8 +768,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 							change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
 						}
 						ReorderBufferQueueChange(ctx->reorder, logicalXid,
-													 changeXLogPtr,
-													 change, false);
+												 changeXLogPtr,
+												 change, false);
 					}
 				}
 				else if (rec_type == WAL_REC_REINSERT)
@@ -784,7 +784,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					change->data.tp.rlocator.dbOid = cur_oids.datoid;
 					change->data.tp.rlocator.relNumber = cur_oids.relnode;
 
-					elog(LOG, "reloid: %u", cur_oids.reloid);
+					elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 
 					/*
 					 * Primary table contains TOASTed attributes needs
@@ -795,12 +795,12 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						HeapTuple	newheaptuple;
 						HeapTuple	oldheaptuple;
 
-						elog(LOG, "WAL_REC_REINSERT toastable");
+						elog(DEBUG4, "WAL_REC_REINSERT toastable");
 						/* Store primary key into reorderbuffer oldtuple */
 						oldheaptuple = convert_toast_pointers(descr, indexDescr, &tuple2);
 						ExecForceStoreHeapTuple(oldheaptuple, descr->newTuple, false);
 						tts_copy_identity(descr->newTuple, descr->oldTuple,
-									  GET_PRIMARY(descr));
+										  GET_PRIMARY(descr));
 						change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
 
 						/* Store full tuple into reorderbuffer newtuple */
@@ -809,7 +809,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					}
 					else		/* Tuple without TOASTed attrs */
 					{
-						elog(LOG, "WAL_REC_REINSERT plain");
+						elog(DEBUG4, "WAL_REC_REINSERT plain");
 						tts_orioledb_store_non_leaf_tuple(descr->oldTuple, tuple2.tuple,
 														  descr, COMMITSEQNO_INPROGRESS,
 														  PrimaryIndexNumber, false,
@@ -835,7 +835,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else
 			{
-				elog(LOG, "Logical decoding modify ix_type, %u", ix_type);
+				elog(DEBUG4, "Logical decoding modify ix_type, %u", ix_type);
 			}
 		}
 		else
