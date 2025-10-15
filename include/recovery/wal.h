@@ -82,7 +82,7 @@ typedef struct
 	uint8		tupleFormatFlags;
 	uint8		length[sizeof(OffsetNumber)];
 	/* tuple[length] */
-}			WALRecModify1;
+} WALRecModify1;
 
 /* Modify records that contains 2 tuples, old and new. Needed for REINSERT and for REPLICA IDENTITY FULL */
 typedef struct
@@ -94,7 +94,7 @@ typedef struct
 	uint8		length2[sizeof(OffsetNumber)];
 	/* tuple1[length1] */
 	/* tuple2[length2] */
-}			WALRecModify2;
+} WALRecModify2;
 
 typedef struct
 {
