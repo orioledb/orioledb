@@ -110,6 +110,7 @@ Oid			o_saved_relrewrite = InvalidOid;
 Oid			o_saved_reltablespace = InvalidOid;
 static ORelOids saved_oids;
 static bool in_rewrite = false;
+static bool in_refresh_mat_view = false;
 List	   *reindex_list = NIL;
 Query	   *savedDataQuery = NULL;
 IndexBuildResult o_pkey_result = {0};
@@ -503,7 +504,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	 */
 	Assert(objectName || objectKind != REINDEX_OBJECT_SCHEMA);
 
-	if (objectKind == REINDEX_OBJECT_SYSTEM)
+	if (objectKind == REINDEX_OBJECT_SYSTEM && concurrently)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("cannot reindex system catalogs concurrently")));
@@ -514,6 +515,30 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	 * by caller. At the same time do permission checks that need different
 	 * processing depending on the object type.
 	 */
+#if PG_VERSION_NUM >= 170006
+	if (objectKind == REINDEX_OBJECT_SCHEMA)
+	{
+		objectOid = get_namespace_oid(objectName, false);
+
+		if (!object_ownercheck(NamespaceRelationId, objectOid, GetUserId()) &&
+			!has_privs_of_role(GetUserId(), ROLE_PG_MAINTAIN))
+			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_SCHEMA,
+						   objectName);
+	}
+	else
+	{
+		objectOid = MyDatabaseId;
+
+		if (objectName && strcmp(objectName, get_database_name(objectOid)) != 0)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("can only reindex the currently open database")));
+		if (!object_ownercheck(DatabaseRelationId, objectOid, GetUserId()) &&
+			!has_privs_of_role(GetUserId(), ROLE_PG_MAINTAIN))
+			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_DATABASE,
+						   get_database_name(objectOid));
+	}
+#else
 	if (objectKind == REINDEX_OBJECT_SCHEMA)
 	{
 		objectOid = get_namespace_oid(objectName, false);
@@ -534,6 +559,9 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_DATABASE,
 						   get_database_name(objectOid));
 	}
+#endif
+
+
 
 	/*
 	 * Create a memory context that will survive forced transaction commits we
@@ -878,7 +906,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		pstmt = copyObject(pstmt);
 
 	in_rewrite = false;
-	o_saved_relrewrite = InvalidOid;
+	if (!in_refresh_mat_view && OidIsValid(o_saved_relrewrite))
+		o_saved_relrewrite = InvalidOid;
 	o_saved_reltablespace = InvalidOid;
 	savedDataQuery = NULL;
 	in_nontransactional_truncate = false;
@@ -1187,8 +1216,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			case REINDEX_OBJECT_SCHEMA:
 			case REINDEX_OBJECT_SYSTEM:
 			case REINDEX_OBJECT_DATABASE:
-				if (concurrently)
-					has_orioledb = check_multiple_tables(stmt->name, stmt->kind, concurrently);
+				has_orioledb = check_multiple_tables(stmt->name, stmt->kind, concurrently);
 				break;
 			default:
 				elog(ERROR, "unrecognized object type: %d",
@@ -1298,6 +1326,11 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		if (matviewRel->rd_rel->relkind == RELKIND_MATVIEW &&
 			is_orioledb_rel(matviewRel))
 		{
+			if (stmt->concurrent)
+			{
+				elog(WARNING, "Concurrent REFRESH MATERIALIZED VIEW not implemented for orioledb materialized vies yet, using simple one");
+				stmt->concurrent = false;
+			}
 			if (!stmt->skipData)
 			{
 				savedDataQuery = linitial_node(Query, matviewRel->rd_rules->rules[0]->actions);
@@ -1315,6 +1348,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				}
 			}
 			stmt->skipData = true;
+			in_refresh_mat_view = true;
 		}
 		table_close(matviewRel, AccessShareLock);
 	}
@@ -1481,7 +1515,10 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			alter_type_exprs = NIL;
 		}
 	}
-
+	else if (IsA(pstmt->utilityStmt, RefreshMatViewStmt))
+	{
+		in_refresh_mat_view = false;
+	}
 	free_parsestate(pstate);
 }
 
@@ -4089,7 +4126,9 @@ o_ddl_cleanup(void)
 		reindex_list = NIL;
 	}
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
-	o_saved_relrewrite = InvalidOid;
+	if (!in_refresh_mat_view)
+		o_saved_relrewrite = InvalidOid;
+	in_refresh_mat_view = false;
 	in_rewrite = false;
 	o_in_add_column = false;
 }
