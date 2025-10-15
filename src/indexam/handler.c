@@ -62,6 +62,7 @@ static bool orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 							  Datum oldTupleid,
 							  Relation heapRel,
 							  IndexUniqueCheck checkUnique,
+							  bool indexUnchanged,
 							  IndexInfo *indexInfo);
 static bool orioledb_amdelete(Relation rel,
 							  Datum *values, bool *isnull,
@@ -534,11 +535,11 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 	o_current_index = NULL;
-
 	if (options && !options->orioledb_index)
 	{
 		bytea	   *rowid;
 		Pointer		p;
+		bool		result;
 
 		ORelOidsSetFromRel(oids, heapRel);
 
@@ -562,8 +563,13 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 		}
 
 		o_current_index = rel;
-		return btinsert(rel, values, isnull, tupleid, heapRel,
-						checkUnique, indexUnchanged, indexInfo);
+		if (!indexUnchanged)
+			result = btinsert(rel, values, isnull, tupleid, heapRel,
+							  checkUnique, indexUnchanged, indexInfo);
+		else
+			result = true; /* FIXME: Wrong assumption? */
+		o_current_index = NULL;
+		return result;
 	}
 
 	if (OidIsValid(rel->rd_rel->relrewrite))
@@ -573,12 +579,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 		return true;
 
 	ORelOidsSetFromRel(oids, rel);
-	if (rel->rd_index->indisprimary)
-		ix_type = oIndexPrimary;
-	else if (rel->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
+	ix_type = o_index_rel_get_ix_type(rel);
 	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
@@ -640,13 +641,18 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	fill_current_oxid_osnapshot(&oxid, &o_snapshot);
 
 	iresult = o_tbl_index_insert(descr, descr->indices[ix_num], &tuple, slot,
-								 oxid, o_snapshot.csn, &callbackInfo);
+								 oxid, o_snapshot.csn, &callbackInfo,
+								 checkUnique);
 
-	success = (iresult == OBTreeModifyResultInserted);
+	if (checkUnique != UNIQUE_CHECK_EXISTING)
+		success = (iresult == OBTreeModifyResultInserted);
+	else
+		success = (iresult == OBTreeModifyResultNotFound);
 
 	if (!success)
 	{
-		o_report_duplicate(heapRel, descr->indices[ix_num], slot);
+		if (checkUnique == UNIQUE_CHECK_YES || checkUnique == UNIQUE_CHECK_EXISTING)
+			o_report_duplicate(heapRel, descr->indices[ix_num], slot);
 	}
 
 	if (tuple.data)
@@ -661,6 +667,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 				  Datum *valuesOld, bool *isnullOld, Datum oldTupleid,
 				  Relation heapRel,
 				  IndexUniqueCheck checkUnique,
+				  bool indexUnchanged,
 				  IndexInfo *indexInfo)
 {
 	OTableModifyResult result;
@@ -682,18 +689,27 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 	if (options && !options->orioledb_index)
-		return true;
+	{
+		bool		satisfiesConstraint;
+
+		/* Call index_insert here, to mimic non MVCC aware part of ExecUpdateIndexTuples */
+		satisfiesConstraint = index_insert(rel, /* index relation */
+										   values,	/* array of index Datums */
+										   isnull,	/* null flags */
+										   tupleid,	/* tid of heap tuple */
+										   heapRel,	/* heap relation */
+										   checkUnique,	/* type of uniqueness check to do */
+										   indexUnchanged,	/* UPDATE without logical change? */
+										   indexInfo);	/* index AM may need this */
+
+		return satisfiesConstraint;
+	}
 
 	if (rel->rd_index->indisprimary)
 		return true;
 
 	ORelOidsSetFromRel(oids, rel);
-	if (rel->rd_index->indisprimary)
-		ix_type = oIndexPrimary;
-	else if (rel->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
+	ix_type = o_index_rel_get_ix_type(rel);
 	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
@@ -733,11 +749,11 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	tts_orioledb_store_non_leaf_tuple(new_slot, new_tuple, descr, csn, ix_num, false, NULL);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-
 	result = o_update_secondary_index(index_descr, ix_num,
 									  new_valid, old_valid,
 									  new_slot, new_tuple,
-									  old_slot, oxid, oSnapshot.csn);
+									  old_slot, oxid, oSnapshot.csn,
+									  checkUnique);
 
 	for (i = 0; i < index_descr->leafTupdesc->natts; i++)
 	{
@@ -794,7 +810,8 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 					break;
 				}
 			case BTreeOperationInsert:
-				o_report_duplicate(heapRel, index_descr, new_slot);
+				if (checkUnique == UNIQUE_CHECK_YES || checkUnique == UNIQUE_CHECK_EXISTING)
+					o_report_duplicate(heapRel, index_descr, new_slot);
 				break;
 			default:
 				if (old_tuple.data)
@@ -834,7 +851,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	bool	   *vfree;
 	int			i;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
-
+	
 	if (options && !options->orioledb_index)
 		return true;
 
@@ -842,10 +859,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 		return true;
 
 	ORelOidsSetFromRel(oids, rel);
-	if (rel->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
+	ix_type = o_index_rel_get_ix_type(rel);
 	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
@@ -1462,12 +1476,7 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	scan->xs_want_rowid = true;
 
 	ORelOidsSetFromRel(oids, rel);
-	if (rel->rd_index->indisprimary)
-		ix_type = oIndexPrimary;
-	else if (rel->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
+	ix_type = o_index_rel_get_ix_type(rel);
 	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
@@ -1817,7 +1826,9 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
 
 	if (options && !options->orioledb_index)
+	{
 		return btgettuple(scan, dir);
+	}
 
 	o_scan->scanDir = dir;
 
