@@ -28,6 +28,7 @@
 #include "access/skey.h"
 #include "executor/nodeIndexscan.h"
 #include "parser/parse_coerce.h"
+#include "pgstat.h"
 
 void
 init_index_scan_state(OPlanState *o_plan_state, OScanState *ostate, Relation index,
@@ -444,6 +445,8 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 		}
 		_bt_preprocess_keys(&ostate->scandesc);
 		ostate->curKeyRange.empty = true;
+
+		pgstat_count_index_scan(ostate->scandesc.indexRelation);
 	}
 
 	o_btree_load_shmem(&id->desc);

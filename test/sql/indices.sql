@@ -291,6 +291,7 @@ CREATE INDEX o_test65_reg1 ON o_test65(id DESC);
 INSERT INTO o_test65 SELECT i+1, i FROM generate_series(1, 60) AS i;
 SELECT count(*) FROM o_test65;
 SELECT id, val FROM o_test65;
+SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT val, id FROM o_test65 ORDER BY id;
 SELECT val, id FROM o_test65 ORDER BY id;
 EXPLAIN (COSTS off) SELECT id, val FROM o_test65 ORDER BY id;
@@ -311,6 +312,7 @@ EXPLAIN (COSTS off) SELECT id, val FROM o_test65 WHERE id <= 30 OR id > 45;
 SELECT id, val FROM o_test65 WHERE id <= 30 OR id > 45;
 EXPLAIN (COSTS off) SELECT id, val FROM o_test65 WHERE id >= 30 OR id < 15;
 SELECT id, val FROM o_test65 WHERE id >= 30 OR id < 15;
+RESET enable_seqscan;
 
 -- 2 fields secondary index
 CREATE TABLE test66
