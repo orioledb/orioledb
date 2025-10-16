@@ -904,12 +904,12 @@ CREATE TABLE o_test1 (
 INSERT INTO o_test1 SELECT id, generate_string(id, 3000), id + 100 FROM generate_series(3, 100) id;
 INSERT INTO o_test1 SELECT id, generate_string(id, 4000), id + 100 FROM generate_series(101, 200) id;
 INSERT INTO o_test1 VALUES (201, 'asd', 444);
-SELECT length(t), count(*) FROM o_test1 GROUP BY length(t);
+SELECT length(t), count(*) FROM o_test1 GROUP BY length(t) ORDER BY 1, 2;
  length | count 
 --------+-------
-   4000 |   100
-   3000 |    98
       3 |     1
+   3000 |    98
+   4000 |   100
 (3 rows)
 
 SELECT id, length(t), val FROM o_test1 WHERE id = 4;
@@ -952,15 +952,15 @@ DELETE FROM o_test1 WHERE id > 120 and id < 200;
 INSERT INTO o_test1 (SELECT id, id || generate_string(18, 4000) FROM generate_series(121, 199, 1) id);
 DELETE FROM o_test1 WHERE id > 220 and id < 300;
 INSERT INTO o_test1 (SELECT id, id || generate_string(19, 5000) FROM generate_series(221, 299, 1) id);
-SELECT length(t), count(*) FROM o_test1 GROUP BY length(t);
+SELECT length(t), count(*) FROM o_test1 GROUP BY length(t) ORDER BY 1, 2;
  length | count 
 --------+-------
-   4003 |    79
-   6002 |    89
-   3003 |    22
    3001 |     9
    3002 |     1
+   3003 |    22
+   4003 |    79
    5003 |    79
+   6002 |    89
 (6 rows)
 
 DROP TABLE o_test1;
