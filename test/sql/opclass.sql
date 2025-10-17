@@ -1,5 +1,6 @@
 CREATE SCHEMA opclass;
 SET SESSION search_path = 'opclass';
+SET enable_seqscan = off;
 CREATE EXTENSION orioledb;
 
 CREATE TABLE o_test_custom_opclass (
@@ -628,7 +629,6 @@ CREATE OPERATOR #># (
 
 CREATE INDEX rec_val_ix ON o_test_custom_opclass(rec_val);
 
-SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass ORDER BY rec_val
 	USING OPERATOR(#<#);
 SELECT * FROM o_test_custom_opclass ORDER BY rec_val
@@ -674,7 +674,6 @@ SELECT * FROM o_test_custom_opclass ORDER BY rec_val
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_custom_opclass
 	ORDER BY rec_val;
 SELECT * FROM o_test_custom_opclass ORDER BY rec_val;
-RESET enable_seqscan;
 
 CREATE TABLE o_test_call_cmp_func_in_abort(
 	val_1 int
@@ -728,3 +727,4 @@ ROLLBACK;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA opclass CASCADE;
 RESET search_path;
+RESET enable_seqscan;

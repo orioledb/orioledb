@@ -61,6 +61,7 @@
 #include "parser/parse_relation.h"
 #include "parser/parse_type.h"
 #include "parser/parsetree.h"
+#include "pgstat.h"
 #include "storage/bufmgr.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
@@ -1524,6 +1525,9 @@ orioledb_beginscan(Relation relation, Snapshot snapshot,
 	if (descr)
 		scan->scan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc, &scan->o_snapshot, parallel_scan);
 
+	if (scan->rs_base.rs_flags & SO_TYPE_SEQSCAN)
+		pgstat_count_heap_scan(scan->rs_base.rs_rd);
+
 	return &scan->rs_base;
 }
 
@@ -1545,6 +1549,9 @@ orioledb_rescan(TableScanDesc sscan, ScanKey key, bool set_params,
 
 	scan->scan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc, &scan->o_snapshot,
 									 scan->rs_base.rs_parallel);
+
+	if (scan->rs_base.rs_flags & SO_TYPE_SEQSCAN)
+		pgstat_count_heap_scan(scan->rs_base.rs_rd);
 }
 
 static void
@@ -1630,6 +1637,8 @@ orioledb_getnextslot(TableScanDesc sscan, ScanDirection direction,
 							  scan->rs_base.rs_key);
 	}
 	while (!result);
+
+	pgstat_count_heap_getnext(scan->rs_base.rs_rd);
 
 	return true;
 }

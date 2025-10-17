@@ -38,6 +38,7 @@
 #include "commands/vacuum.h"
 #include "nodes/execnodes.h"
 #include "parser/parsetree.h"
+#include "pgstat.h"
 #include "storage/bufmgr.h"
 #include "utils/datum.h"
 #include "utils/lsyscache.h"
@@ -315,12 +316,11 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		mres.failedIxNum = 0;
 		mres.action = BTreeOperationInsert;
 		mres.oldTuple = NULL;
-	}
 
-	if (!mres.success)
-	{
 		o_report_duplicate(relation, descr->indices[mres.failedIxNum], slot);
 	}
+	else
+		pgstat_count_heap_insert(relation, 1);
 
 	o_toast_insert_values(relation, descr, slot, oxid, csn);
 
@@ -515,6 +515,8 @@ o_tbl_insert_with_arbiter(Relation rel,
 		if (success)
 		{
 			BTreeDescr *primary = &GET_PRIMARY(descr)->desc;
+
+			pgstat_count_heap_insert(rel, 1);
 
 			/* all inserts are OK */
 			tts_orioledb_insert_toast_values(slot, descr, oxid, csn);
@@ -837,6 +839,9 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 		}
 	}
 
+	if (mres.success)
+		pgstat_count_heap_update(rel, false, false);
+
 	if (mres.success && mres.oldTuple != NULL)
 	{
 		if (mres.action == BTreeOperationUpdate)
@@ -931,6 +936,9 @@ o_tbl_delete(Relation rel, OTableDescr *descr, OBTreeKeyBound *primary_key,
 						 errmsg("tuple to be locked has its primary key changed due to concurrent update")));
 		}
 	}
+
+	if (result.success)
+		pgstat_count_heap_delete(rel);
 
 	if (result.success && result.oldTuple != NULL)
 	{
