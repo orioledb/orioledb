@@ -132,4 +132,5 @@ PGDLLEXPORT void _o_index_parallel_build_main(dsm_segment *seg, shm_toc *toc);
 extern void _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
 										  OTable *recovery_o_table, OTable *recovery_old_o_table);
 extern Size _o_index_parallel_estimate_shared(Size o_table_size);
+extern void drop_primary_index(Relation rel, OTable *o_table);
 #endif							/* __INDICES_H__ */
