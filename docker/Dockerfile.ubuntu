@@ -209,7 +209,11 @@ RUN set -eux; \
 		# Therefore, the extra ${POSTGRESQL_VERSION} is added as a workaround.
 		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} ubuntu:${UBUNTU_VERSION}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
 	|| cat config.log ); \
-	echo "ORIOLEDB_PATCHSET_VERSION = `echo $PGTAG | cut -d'_' -f2`" >> src/Makefile.global; \
+	if printf "%s\n" "$PGTAG" | grep -Fqe "patches${PG_MAJOR}_"; then \
+		echo "ORIOLEDB_PATCHSET_VERSION = `echo $PGTAG | cut -d'_' -f2`" >> src/Makefile.global; \
+	else \
+		echo "ORIOLEDB_PATCHSET_VERSION = $PGTAG" >> src/Makefile.global; \
+	fi ; \
 	# install postgresql
 	make -j "$(nproc)"; \
 	make -C contrib -j "$(nproc)"; \
