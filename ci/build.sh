@@ -25,6 +25,9 @@ fi
 
 cd postgresql
 ./configure $CONFIG_ARGS
+if printf "%s\n" "$PGTAG" | grep -v -Fqe "patches$(sed -n "/PACKAGE_VERSION='\(.*\)'/ s//\1/ p" configure | cut -d'.' -f1 )_"; then \
+	echo "ORIOLEDB_PATCHSET_VERSION = $PGTAG" >> src/Makefile.global; \
+fi ;
 make -sj `nproc`
 make -sj `nproc` install
 make -C contrib -sj `nproc`

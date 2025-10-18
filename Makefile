@@ -329,15 +329,52 @@ include/utils/stopevents_defs.h: stopevents.txt stopevents_gen.py
 ifndef ORIOLEDB_PATCHSET_VERSION
 ORIOLEDB_PATCHSET_VERSION=1
 endif
-CUR_ORIOLEDB_PATCHSET_VERSION := $(shell grep '^$(MAJORVERSION):' .pgtags | cut -d'_' -f2)
+
+CUR_ORIOLEDB_PATCHSET_VERSION := $(shell grep '^$(MAJORVERSION):' .pgtags | cut -d' ' -f2)
 
 check_patchset_version:
-	@if [ $(CUR_ORIOLEDB_PATCHSET_VERSION) != $(ORIOLEDB_PATCHSET_VERSION) ]; then \
-		echo "Wrong orioledb patchset version:"\
-				"expected $(CUR_ORIOLEDB_PATCHSET_VERSION),"\
-				"got $(ORIOLEDB_PATCHSET_VERSION)"; \
-		echo "Rebuild and install patched orioledb/postgres using tag"\
-				"'patches$(MAJORVERSION)_$(CUR_ORIOLEDB_PATCHSET_VERSION)'"; \
+	@status=0 ; \
+	PATCHSET_IS_HASH=1 ; \
+	expr 0 + $(ORIOLEDB_PATCHSET_VERSION) 2>/dev/null || status=$$? ; \
+	if [ "$$status" -eq 0 ] && [ $$(expr length $(ORIOLEDB_PATCHSET_VERSION)) -lt 6 ]; then \
+		PATCHSET_IS_HASH=0 ; \
+	fi ; \
+	CUR_PATCHSET_IS_HASH=1 ; \
+	if printf '%s\n' "$(CUR_ORIOLEDB_PATCHSET_VERSION)" | grep -Fqe '_'; then \
+		CUR_PATCHSET_IS_HASH=0 ; \
+	fi ; \
+	EXPECTED=$(CUR_ORIOLEDB_PATCHSET_VERSION) ; \
+	if [ "$$CUR_PATCHSET_IS_HASH" -eq 0 ] ; then \
+		EXPECTED=$$(echo $$EXPECTED | cut -d'_' -f2) ; \
+	fi ; \
+	GOT=$(ORIOLEDB_PATCHSET_VERSION) ; \
+	DIFFER=0 ; \
+	if [ "$$PATCHSET_IS_HASH" -eq 0 ]; then \
+		if [ "$$CUR_PATCHSET_IS_HASH" -eq 0 ]; then \
+			if [ "$$EXPECTED" != "$(ORIOLEDB_PATCHSET_VERSION)" ]; then \
+				DIFFER=1 ; \
+				USE="tag 'patches$(MAJORVERSION)_$$EXPECTED'" ; \
+			fi ; \
+		else \
+			DIFFER=1 ; \
+			USE="commit $$EXPECTED" ; \
+		fi ; \
+	else \
+		if [ "$$CUR_PATCHSET_IS_HASH" -eq 0 ]; then \
+			DIFFER=1 ; \
+			USE="tag 'patches$(MAJORVERSION)_$$EXPECTED'" ; \
+		else \
+			if [ $(CUR_ORIOLEDB_PATCHSET_VERSION) != $(ORIOLEDB_PATCHSET_VERSION) ]; then \
+				DIFFER=1 ; \
+				USE="commit '$$EXPECTED'" ; \
+			fi ; \
+		fi ; \
+	fi ; \
+	if [ "$$DIFFER" -eq 1 ]; then \
+		echo "Wrong orioledb patchset version:" \
+				"expected $$EXPECTED," \
+				"got $$GOT"; \
+		echo "Rebuild and install patched orioledb/postgres using $$USE"; \
 		false; \
 	fi
 
