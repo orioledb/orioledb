@@ -1433,7 +1433,7 @@ o_toast_insert_values(Relation rel, OTableDescr *descr,
 				(errcode(ERRCODE_INTERNAL_ERROR),
 				 errmsg("Unable to insert TOASTable value in \"%s\"",
 						RelationGetRelationName(rel)),
-				 errdetail("Unable to remove value for primary key %s from TOAST",
+				 errdetail("Unable to insert value for primary key %s into TOAST",
 						   tss_orioledb_print_idx_key(slot,
 													  GET_PRIMARY(descr)))));
 	}
