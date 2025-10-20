@@ -554,14 +554,15 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			{
 				Assert(descr != NULL);
 				Assert(!O_TUPLE_IS_NULL(tuple1.tuple));
+				change = ReorderBufferGetChange(ctx->reorder);
+				change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
+				change->data.tp.rlocator.dbOid = cur_oids.datoid;
+				change->data.tp.rlocator.relNumber = cur_oids.relnode;
+				elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 
 				if (rec_type == WAL_REC_INSERT)
 				{
-					change = ReorderBufferGetChange(ctx->reorder);
 					change->action = REORDER_BUFFER_CHANGE_INSERT;
-					change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
-					change->data.tp.rlocator.dbOid = cur_oids.datoid;
-					change->data.tp.rlocator.relNumber = cur_oids.relnode;
 
 					/* Decode TOAST chunks */
 					if (ix_type == oIndexToast)
@@ -670,21 +671,13 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						change->data.tp.clear_toast_afterwards = true;
 
 					}
-					ReorderBufferQueueChange(ctx->reorder, logicalXid,
-											 changeXLogPtr,
-											 change, (ix_type == oIndexToast));
 				}
 				else if (rec_type == WAL_REC_UPDATE)
 				{
 					Assert(ix_type != oIndexToast);
 
-					change = ReorderBufferGetChange(ctx->reorder);
 					change->action = REORDER_BUFFER_CHANGE_UPDATE;
 					change->data.tp.clear_toast_afterwards = true;
-					change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
-					change->data.tp.rlocator.dbOid = cur_oids.datoid;
-					change->data.tp.rlocator.relNumber = cur_oids.relnode;
-
 
 					elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 
@@ -715,19 +708,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					tts_copy_identity(descr->newTuple, descr->oldTuple,
 									  GET_PRIMARY(descr));
 					change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
-
-					ReorderBufferQueueChange(ctx->reorder, logicalXid,
-											 changeXLogPtr,
-											 change, false);
 				}
 				else if (rec_type == WAL_REC_DELETE)
 				{
-					change = ReorderBufferGetChange(ctx->reorder);
 					change->action = REORDER_BUFFER_CHANGE_DELETE;
-					change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
-					change->data.tp.rlocator.dbOid = cur_oids.datoid;
-					change->data.tp.rlocator.relNumber = cur_oids.relnode;
-					elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 					if (ix_type == oIndexToast)
 					{
 						elog(DEBUG4, "WAL_REC_DELETE TOAST");
@@ -738,9 +722,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 														  PrimaryIndexNumber, false,
 														  NULL);
 						change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
-						ReorderBufferQueueChange(ctx->reorder, logicalXid,
-												 changeXLogPtr,
-												 change, true);
 					}
 					else
 					{
@@ -767,9 +748,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 															  NULL);
 							change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
 						}
-						ReorderBufferQueueChange(ctx->reorder, logicalXid,
-												 changeXLogPtr,
-												 change, false);
 					}
 				}
 				else if (rec_type == WAL_REC_REINSERT)
@@ -777,14 +755,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					Assert(ix_type != oIndexToast);
 					Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
 
-					change = ReorderBufferGetChange(ctx->reorder);
 					change->action = REORDER_BUFFER_CHANGE_UPDATE;
 					change->data.tp.clear_toast_afterwards = true;
-					change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
-					change->data.tp.rlocator.dbOid = cur_oids.datoid;
-					change->data.tp.rlocator.relNumber = cur_oids.relnode;
 
-					elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 
 					/*
 					 * Primary table contains TOASTed attributes needs
@@ -823,18 +796,18 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 						change->data.tp.newtuple = record_buffer_tuple_slot(ctx->reorder, descr->newTuple);
 					}
-
-					ReorderBufferQueueChange(ctx->reorder, logicalXid,
-											 changeXLogPtr,
-											 change, false);
 				}
 				else
 				{
 					elog(FATAL, "Unknown modify WAL record");
 				}
+				ReorderBufferQueueChange(ctx->reorder, logicalXid,
+											 changeXLogPtr,
+											 change, (ix_type == oIndexToast));
 			}
 			else
 			{
+				/* Do nothing */
 				elog(DEBUG4, "Logical decoding modify ix_type, %u", ix_type);
 			}
 		}
