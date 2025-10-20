@@ -467,6 +467,8 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 	OTableSlot *oslot = (OTableSlot *) slot;
 	const FormData_pg_attribute *att;
 
+	ASAN_UNPOISON_MEMORY_REGION(isnull, sizeof(*isnull));
+
 	if (attnum == RowIdAttributeNumber)
 	{
 		Datum		values[2 * INDEX_MAX_KEYS];
