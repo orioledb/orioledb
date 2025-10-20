@@ -493,7 +493,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	Pointer		ptr = startPtr;
 	OTableDescr *descr = NULL;
 	OIndexDescr *indexDescr = NULL;
-	int			sys_tree_num = -1;
 	ORelOids	cur_oids = {0, 0, 0};
 	OXid		oxid = InvalidOXid;
 	TransactionId logicalXid = InvalidTransactionId;
@@ -577,25 +576,46 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				if (txn->toptxn)
 					txn = txn->toptxn;
 
-				dlist_foreach(cur_txn_i, &txn->subtxns)
+				if (rec_type == WAL_REC_COMMIT)
 				{
-					ReorderBufferTXN *cur_txn;
+					/*
+					 * SnapBuildXactNeedsSkip() does strict comparison.  So,
+					 * subtract endXLogPtr by one to fit snapshot just taken
+					 * after commit.
+					 */
+					if (SnapBuildXactNeedsSkip(ctx->snapshot_builder,
+											   endXLogPtr - 1) ||
+						ctx->fast_forward)
+					{
+						dlist_foreach(cur_txn_i, &txn->subtxns)
+						{
+							ReorderBufferTXN *cur_txn;
 
-					cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+							cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+							ReorderBufferForget(ctx->reorder, cur_txn->xid,
+												startXLogPtr);
+						}
+						ReorderBufferForget(ctx->reorder, txn->xid,
+											startXLogPtr);
 
-					ReorderBufferCommitChild(ctx->reorder, txn->xid, cur_txn->xid,
-											 startXLogPtr, endXLogPtr);
+						oxid = InvalidOXid;
+						logicalXid = InvalidTransactionId;
 
-				}
+						/* Skip processing of this transaction */
+						continue;
+					}
 
-				/*
-				 * SnapBuildXactNeedsSkip() does strict comparison.  So,
-				 * subtract endXLogPtr by one to fit snapshot just taken after
-				 * commit.
-				 */
-				if (rec_type == WAL_REC_COMMIT &&
-					!SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr - 1))
-				{
+					/*
+					 * Proceed to commit this transaction and subtransactions
+					 */
+					dlist_foreach(cur_txn_i, &txn->subtxns)
+					{
+						ReorderBufferTXN *cur_txn;
+
+						cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+						ReorderBufferCommitChild(ctx->reorder, txn->xid, cur_txn->xid,
+												 startXLogPtr, endXLogPtr);
+					}
 					ReorderBufferCommit(ctx->reorder, logicalXid,
 										startXLogPtr, endXLogPtr,
 										0, XLogRecGetOrigin(buf->record),
@@ -603,6 +623,16 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				}
 				else
 				{
+					Assert(rec_type == WAL_REC_ROLLBACK);
+
+					dlist_foreach(cur_txn_i, &txn->subtxns)
+					{
+						ReorderBufferTXN *cur_txn;
+
+						cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+						ReorderBufferAbort(ctx->reorder, cur_txn->xid,
+										   startXLogPtr, 0);
+					}
 					ReorderBufferAbort(ctx->reorder, logicalXid,
 									   startXLogPtr, 0);
 				}
@@ -635,25 +665,28 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			if (!set_snapshot(ctx, logicalXid, changeXLogPtr))
 				continue;
 
-			if (!SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr))
+			/* Skip actual commit processing */
+			if (SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr - 1) ||
+				ctx->fast_forward)
+			{
+				ReorderBufferForget(ctx->reorder, logicalXid, startXLogPtr);
+			}
+			else
 			{
 				ReorderBufferCommit(ctx->reorder, logicalXid,
 									startXLogPtr, endXLogPtr,
 									0, XLogRecGetOrigin(buf->record),
 									buf->origptr);
+				UpdateDecodingStats(ctx);
 			}
-			else
-			{
-				ReorderBufferAbort(ctx->reorder, logicalXid,
-								   startXLogPtr, 0);
-			}
-			UpdateDecodingStats(ctx);
 
 			oxid = InvalidOXid;
 			logicalXid = InvalidTransactionId;
 		}
 		else if (rec_type == WAL_REC_RELATION)
 		{
+			int			sys_tree_num = -1;
+
 			ix_type = *ptr;
 			ptr++;
 			memcpy(&cur_oids.datoid, ptr, sizeof(Oid));
@@ -664,6 +697,11 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			ptr += sizeof(Oid);
 
 			elog(DEBUG4, "WAL_REC_RELATION");
+
+			/* Skip actual relation processing in fast_forward mode */
+			if (ctx->fast_forward)
+				continue;
+
 			if (IS_SYS_TREE_OIDS(cur_oids))
 				sys_tree_num = cur_oids.relnode;
 			else
@@ -762,7 +800,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			memcpy(&parentLogicalXid, ptr, sizeof(TransactionId));
 			ptr += sizeof(TransactionId);
 
-			ReorderBufferAssignChild(ctx->reorder, parentLogicalXid, logicalXid, buf->origptr);
+			if (!ctx->fast_forward)
+				ReorderBufferAssignChild(ctx->reorder, parentLogicalXid, logicalXid, buf->origptr);
 
 			/* Skip */
 		}
@@ -789,6 +828,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				continue;
 
 			(void) set_snapshot(ctx, logicalXid, changeXLogPtr);
+
+			/* Skip actual record processing in fast_forward mode */
+			if (ctx->fast_forward)
+				continue;
 
 			if ((ix_type == oIndexInvalid || ix_type == oIndexToast) &&
 				cur_oids.datoid == ctx->slot->data.database)
