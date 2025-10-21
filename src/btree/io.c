@@ -2495,6 +2495,87 @@ index_oids_get_btree_descr(ORelOids oids, OIndexType type)
 	return desc;
 }
 
+typedef struct
+{
+	bool		indexRegularLock;
+	bool		indexCheckpointerLock;
+	bool		tableRegularLock;
+	bool		tableCheckpointerLock;
+	ORelOids	tableOids;
+} EvictBtreeLocksState;
+
+/*
+ * Acquire all the locks required to completely evict the tree.  We need to
+ * take both regular and checkpointer locks.  Also, for PK we need to lock
+ * the table as well, because a concurrent seq scan can lock only the table.
+ */
+static BTreeDescr *
+get_evict_btree_locks(OInMemoryBlkno blkno, ORelOids oids, OIndexType type,
+					  EvictBtreeLocksState *state)
+{
+	BTreeDescr *desc;
+	OIndexDescr *id;
+	bool		recovery = is_recovery_in_progress();
+	bool		nested = false;
+
+	if (!recovery && !(state->indexRegularLock = o_tables_rel_try_lock_extended(&oids, AccessExclusiveLock, &nested, false)))
+		return NULL;
+
+	if (nested)
+		return NULL;
+
+	if (!(state->indexCheckpointerLock = o_tables_rel_try_lock_extended(&oids, AccessExclusiveLock, &nested, true)))
+		return NULL;
+
+	if (nested)
+		return NULL;
+
+	desc = index_oids_get_btree_descr(oids, type);
+
+	if (desc == NULL ||
+		desc->rootInfo.rootPageBlkno != blkno)
+		return NULL;
+
+	if (desc->type != oIndexPrimary)
+		return desc;
+
+	id = (OIndexDescr *) desc->arg;
+	state->tableOids = id->tableOids;
+
+	if (!recovery && !(state->tableRegularLock = o_tables_rel_try_lock_extended(&state->tableOids, AccessExclusiveLock, &nested, false)))
+		return NULL;
+
+	if (nested)
+		return NULL;
+
+	if (!(state->tableCheckpointerLock = o_tables_rel_try_lock_extended(&state->tableOids, AccessExclusiveLock, &nested, true)))
+		return NULL;
+
+	if (nested)
+		return NULL;
+
+	desc = index_oids_get_btree_descr(oids, type);
+
+	if (desc == NULL ||
+		desc->rootInfo.rootPageBlkno != blkno)
+		return NULL;
+
+	return desc;
+}
+
+static void
+release_evict_btree_locks(ORelOids oids, EvictBtreeLocksState *state)
+{
+	if (state->indexRegularLock)
+		o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, false);
+	if (state->indexCheckpointerLock)
+		o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, true);
+	if (state->tableRegularLock)
+		o_tables_rel_unlock_extended(&state->tableOids, AccessExclusiveLock, false);
+	if (state->tableCheckpointerLock)
+		o_tables_rel_unlock_extended(&state->tableOids, AccessExclusiveLock, true);
+}
+
 /*
  * Examine single page and evict it if possible.
  */
@@ -2699,9 +2780,8 @@ retry:
 
 	if (evict && is_root)
 	{
-		bool		recovery = is_recovery_in_progress();
-		bool		acquired;
-		bool		nested = false;
+		EvictBtreeLocksState locksState;
+		bool		result = false;
 
 		if (tree_is_under_checkpoint(desc))
 		{
@@ -2709,54 +2789,23 @@ retry:
 			return OWalkPageSkipped;
 		}
 
-		if (!recovery)
-			acquired = o_tables_rel_try_lock_extended(&oids, AccessExclusiveLock, &nested, false);
-		else
-			acquired = true;
+		memset(&locksState, 0, sizeof(locksState));
 
-		if (acquired)
+		desc = get_evict_btree_locks(blkno, oids, page_desc->type, &locksState);
+
+		if (desc)
 		{
-			if (!nested &&
-				o_tables_rel_try_lock_extended(&oids, AccessExclusiveLock, &nested, true))
-			{
-				bool		result = false;
-
-				if (!nested)
-				{
-					/*
-					 * Descriptor might be already invalidated.
-					 */
-					desc = index_oids_get_btree_descr(oids, page_desc->type);
-
-					if (desc != NULL &&
-						desc->rootInfo.rootPageBlkno == blkno)
-					{
-						result = evict_btree(desc, checkpoint_number);
-						o_invalidate_oids(oids);
-					}
-					else
-					{
-						unlock_page(blkno);
-					}
-				}
-				else
-				{
-					unlock_page(blkno);
-				}
-
-				if (!recovery)
-					o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, false);
-				o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, true);
-				return result ? OWalkPageEvicted : OWalkPageSkipped;
-			}
-			else
-			{
-				if (!recovery)
-					o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, false);
-			}
+			result = evict_btree(desc, checkpoint_number);
+			o_invalidate_oids(oids);
 		}
-		unlock_page(blkno);
-		return OWalkPageSkipped;
+		else
+		{
+			unlock_page(blkno);
+		}
+
+		release_evict_btree_locks(oids, &locksState);
+
+		return result ? OWalkPageEvicted : OWalkPageSkipped;
 	}
 
 	STOPEVENT(STOPEVENT_BEFORE_WRITE_PAGE, NULL);
