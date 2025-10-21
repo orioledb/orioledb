@@ -5,6 +5,7 @@ import unittest
 
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
+from .base_test import wait_stopevent
 from .base_test import wait_checkpointer_stopevent
 from .base_test import wait_bgwriter_stopevent
 
@@ -431,6 +432,73 @@ class EvictionTest(BaseTest):
 
 		self.assertTrue(
 		    con2.execute("SELECT pg_stopevent_reset('after_write_page');")[0]
+		    [0])
+
+		t1.join()
+		con1.commit()
+
+		con1.close()
+		con2.close()
+		node.stop()
+
+	def test_eviction_concurrent_seqscan(self):
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
+		    "orioledb.main_buffers = 8MB\n"
+		    "bgwriter_delay = 200\n"
+		    "orioledb.enable_stopevents = true\n"
+		    "checkpoint_timeout = 86400\n"
+		    "max_wal_size = 1GB\n")
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_evicted (\n"
+		    "  id int8 NOT NULL,\n"
+		    "  val int8 NOT NULL,\n"
+		    "  PRIMARY KEY (id, val)\n"
+		    ") USING orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "  id int8 NOT NULL,\n"
+		    "  val int8 NOT NULL,\n"
+		    "  PRIMARY KEY (id, val)\n"
+		    ") USING orioledb;\n")
+
+		con1 = node.connect()
+		con2 = node.connect()
+		con3 = node.connect()
+
+		con3_pid = con3.pid
+
+		n = 150000
+		con1.execute(
+		    "INSERT INTO o_evicted (id, val)\n"
+		    "  (SELECT id, id + 1 FROM generate_series(%s, %s, 1) id);\n" %
+		    (str(1), str(n)))
+		con1.commit()
+
+		# Prepare a generic query plan, which locks table only.  Otherwise,
+		# PK will be locked during planning.
+		con3.execute("SET plan_cache_mode = 'force_generic_plan';")
+		con3.execute("PREPARE q AS SELECT * FROM o_evicted;")
+		con3.execute("EXECUTE q;")
+		con3.commit()
+
+		con2.execute(
+		    "SELECT pg_stopevent_set('seq_scan_load_internal_page', 'true');")
+
+		t1 = ThreadQueryExecutor(con3, "EXECUTE q;")
+		t1.start()
+
+		wait_stopevent(node, con3_pid)
+
+		# Check table lock prevents eviction of PK
+		con1.execute("SELECT orioledb_evict_pages('o_evicted'::regclass, 10);")
+		con1.commit()
+
+		self.assertTrue(
+		    con2.execute(
+		        "SELECT pg_stopevent_reset('seq_scan_load_internal_page');")[0]
 		    [0])
 
 		t1.join()
