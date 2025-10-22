@@ -531,7 +531,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			 rec_type == WAL_REC_INSERT ? "INSERT" :
 			 rec_type == WAL_REC_UPDATE ? "UPDATE" :
 			 rec_type == WAL_REC_DELETE ? "DELETE" :
-			 rec_type == WAL_REC_REINSERT ? "REINSERT" : "_UNKNOWN");
+			 rec_type == WAL_REC_REINSERT ? "REINSERT" :
+			 rec_type == WAL_REC_REPLAY_FEEDBACK ? "FEEDBACK" : "_UNKNOWN");
 
 		if (rec_type == WAL_REC_XID)
 		{
@@ -755,7 +756,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				elog(DEBUG4, "reloid: %d natts: %u toast natts: %u", cur_oids.reloid, descr->tupdesc->natts, descr->toast->leafTupdesc->natts);
 
 		}
-		else if (rec_type == WAL_REC_O_TABLES_META_LOCK)
+		else if (rec_type == WAL_REC_O_TABLES_META_LOCK || rec_type == WAL_REC_REPLAY_FEEDBACK)
 		{
 			/* Skip */
 		}

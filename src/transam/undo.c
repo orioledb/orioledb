@@ -33,6 +33,7 @@
 #include "utils/page_pool.h"
 #include "utils/snapshot.h"
 #include "utils/stopevent.h"
+#include "replication/syncrep.h"
 #include "rewind/rewind.h"
 
 #include "access/transam.h"
@@ -1625,10 +1626,16 @@ undo_xact_callback(XactEvent event, void *arg)
 					flushPos = wal_commit(oxid,
 										  get_current_logical_xid());
 					set_oxid_xlog_ptr(oxid, flushPos);
+
+					/* Flush WAL if needed */
 					if (!XLogRecPtrIsInvalid(flushPos) &&
 						(synchronous_commit > SYNCHRONOUS_COMMIT_OFF ||
 						 oxid_needs_wal_flush))
 						XLogFlush(flushPos);
+
+					/* Wait for synchronous replication if needed */
+					if (!XLogRecPtrIsInvalid(flushPos))
+						SyncRepWaitForLSN(flushPos, true);
 				}
 				else
 				{
