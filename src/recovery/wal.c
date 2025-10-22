@@ -257,6 +257,7 @@ XLogRecPtr
 wal_commit(OXid oxid, TransactionId logicalXid)
 {
 	XLogRecPtr	walPos;
+	int			recLength;
 
 	Assert(!is_recovery_process());
 
@@ -270,8 +271,9 @@ wal_commit(OXid oxid, TransactionId logicalXid)
 		return InvalidXLogRecPtr;
 	}
 
-	flush_local_wal_if_needed(sizeof(WALRecFinish));
-	Assert(local_wal_buffer_offset + sizeof(WALRecFinish) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	recLength = sizeof(WALRecFinish) + ((synchronous_commit >= SYNCHRONOUS_COMMIT_REMOTE_APPLY) ? sizeof(WALRec) : 0);
+	flush_local_wal_if_needed(recLength);
+	Assert(local_wal_buffer_offset + recLength + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	add_wal_container_header_if_needed();
 
@@ -354,6 +356,7 @@ static void
 add_finish_wal_record(uint8 rec_type, OXid xmin)
 {
 	WALRecFinish *rec;
+	int			recLength PG_USED_FOR_ASSERTS_ONLY;
 	CommitSeqNo csn;
 
 	Assert(!is_recovery_process());
@@ -361,15 +364,29 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 
 	add_wal_container_header_if_needed();
 	add_xid_wal_record_if_needed();
-	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+
+	recLength = sizeof(WALRecFinish);
+	if (rec_type == WAL_REC_COMMIT &&
+		synchronous_commit >= SYNCHRONOUS_COMMIT_REMOTE_APPLY)
+		recLength += sizeof(WALRec);
+
+	Assert(local_wal_buffer_offset + recLength + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	rec = (WALRecFinish *) (&local_wal_buffer[local_wal_buffer_offset]);
 	rec->recType = rec_type;
 	memcpy(rec->xmin, &xmin, sizeof(xmin));
 	csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 	memcpy(rec->csn, &csn, sizeof(csn));
-
 	local_wal_buffer_offset += sizeof(*rec);
+
+	if (rec_type == WAL_REC_COMMIT &&
+		synchronous_commit >= SYNCHRONOUS_COMMIT_REMOTE_APPLY)
+	{
+		WALRec	   *feedbackRec = (WALRec *) (&local_wal_buffer[local_wal_buffer_offset]);
+
+		feedbackRec->recType = WAL_REC_REPLAY_FEEDBACK;
+		local_wal_buffer_offset += sizeof(*feedbackRec);
+	}
 }
 
 static void
