@@ -2784,7 +2784,7 @@ retry:
 			return OWalkPageSkipped;
 		}
 
-		MemSet(&locksState, 0, sizeof(locksState));
+		memset(&locksState, 0, sizeof(locksState));
 
 		desc = get_evict_btree_locks(blkno, oids, page_desc->type, &locksState);
 
