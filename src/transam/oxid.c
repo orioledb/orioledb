@@ -30,6 +30,7 @@
 #include "storage/procsignal.h"
 #include "storage/proc.h"
 #include "utils/snapmgr.h"
+#include "recovery/wal.h"
 
 #define XID_FILE_SIZE (0x1000000)
 #define OXID_BUFFERS_TAG (0)
@@ -431,12 +432,9 @@ oxid_subxact_callback(
 			{
 				release_logical_xid(&logicalXidMeta);
 
-				if (heapXid != logicalXidMeta.xid)
+				if (!logicalXidMeta.useHeap && heapXid != logicalXidMeta.xid)
 				{
-					Assert(!logicalXidMeta.useHeap);
-					logicalXidMeta.xid = heapXid;
-					logicalXidMeta.useHeap = true;
-					// @TODO switch xid !!!
+					add_switch_logical_xid_wal_record(logicalXidMeta.xid, heapXid);
 				}
 			}
 			else if (TransactionIdIsValid(logicalXidMeta.xid))
@@ -1265,12 +1263,16 @@ get_current_logical_xid(void)
 	TransactionId heapXid;
 
 	heapXid = GetCurrentTransactionIdIfAny();
-	if (TransactionIdIsValid(heapXid) && TransactionIdIsValid(logicalXidMeta.xid) && heapXid != logicalXidMeta.xid)
+
+	if (TransactionIdIsValid(heapXid) &&
+		TransactionIdIsValid(logicalXidMeta.xid) &&
+		!logicalXidMeta.useHeap &&
+		heapXid != logicalXidMeta.xid)
 	{
-		Assert(!logicalXidMeta.useHeap);
+		add_switch_logical_xid_wal_record(logicalXidMeta.xid, heapXid);
+
 		logicalXidMeta.xid = heapXid;
 		logicalXidMeta.useHeap = true;
-		// @TODO switch xid !!!
 	}
 
 	return logicalXidMeta.xid;

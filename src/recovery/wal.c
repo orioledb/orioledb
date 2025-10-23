@@ -508,6 +508,27 @@ add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode)
 }
 
 void
+add_switch_logical_xid_wal_record(TransactionId logicalXid_old, TransactionId logicalXid_new)
+{
+	WALRecSwitchLogicalXid  *rec;
+
+	Assert(!is_recovery_process());
+	Assert(TransactionIdIsValid(logicalXid_old));
+	Assert(TransactionIdIsValid(logicalXid_new));
+	flush_local_wal_if_needed(sizeof(*rec));
+	Assert(local_wal_buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
+
+	add_wal_container_header_if_needed();
+
+	rec = (WALRecSwitchLogicalXid *) (&local_wal_buffer[local_wal_buffer_offset]);
+	rec->recType = WAL_REC_SWITCH_LOGICAL_XID;
+	memcpy(rec->oldXid, &logicalXid_old, sizeof(TransactionId));
+	memcpy(rec->newXid, &logicalXid_new, sizeof(TransactionId));
+
+	local_wal_buffer_offset += sizeof(*rec);
+}
+
+void
 add_savepoint_wal_record(SubTransactionId parentSubid,
 						 TransactionId prentLogicalXid)
 {

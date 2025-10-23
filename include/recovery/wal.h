@@ -25,21 +25,22 @@
 #define WAL_REC_INSERT		(5)
 #define WAL_REC_UPDATE		(6)
 #define WAL_REC_DELETE		(7)
-#define WAL_REC_O_TABLES_META_LOCK (8)
-#define WAL_REC_O_TABLES_META_UNLOCK (9)
-#define WAL_REC_SAVEPOINT	(10)
-#define WAL_REC_ROLLBACK_TO_SAVEPOINT (11)
-#define WAL_REC_JOINT_COMMIT (12)
-#define WAL_REC_TRUNCATE	(13)
-#define WAL_REC_BRIDGE_ERASE (14)
-#define WAL_REC_REINSERT (15)	/* UPDATE with changed pkey represented as
-								 * DELETE + INSERT in OrioleDB but externally
-								 * exported as an UPDATE in logical decoding */
+#define WAL_REC_O_TABLES_META_LOCK		(8)
+#define WAL_REC_O_TABLES_META_UNLOCK	(9)
+#define WAL_REC_SAVEPOINT				(10)
+#define WAL_REC_ROLLBACK_TO_SAVEPOINT	(11)
+#define WAL_REC_JOINT_COMMIT			(12)
+#define WAL_REC_TRUNCATE				(13)
+#define WAL_REC_BRIDGE_ERASE			(14)
+#define WAL_REC_REINSERT				(15)	/* UPDATE with changed pkey represented as \
+												 * DELETE + INSERT in OrioleDB but externally \
+												 * exported as an UPDATE in logical decoding */
+#define WAL_REC_SWITCH_LOGICAL_XID		(16)
 
-#define FIRST_WAL_VERSION (16)
+#define FIRST_WAL_VERSION (17)
 
 /* Bump it when WAL format changes */
-#define CURRENT_WAL_VERSION (16)
+#define CURRENT_WAL_VERSION (17)
 
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
@@ -56,6 +57,13 @@ typedef struct
 	uint8		oxid[sizeof(OXid)];
 	uint8		logicalXid[sizeof(TransactionId)];
 } WALRecXid;
+
+typedef struct
+{
+	uint8		recType;
+	uint8		oldXid[sizeof(TransactionId)];
+	uint8		newXid[sizeof(TransactionId)];
+} WALRecSwitchLogicalXid;
 
 typedef struct
 {
@@ -148,6 +156,7 @@ extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr);
 extern void add_o_tables_meta_lock_wal_record(void);
 extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);
+extern void add_switch_logical_xid_wal_record(TransactionId logicalXid_old, TransactionId logicalXid_new);
 extern void add_savepoint_wal_record(SubTransactionId parentSubid,
 									 TransactionId prentLogicalXid);
 extern void add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid);
