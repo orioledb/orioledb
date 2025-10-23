@@ -94,7 +94,7 @@ orioledb_get_current_oxid(PG_FUNCTION_ARGS)
 Datum
 orioledb_get_current_logical_xid(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_DATUM(get_current_logical_xid());
+	PG_RETURN_DATUM(get_current_logical_xid_if_any());
 }
 
 Datum
