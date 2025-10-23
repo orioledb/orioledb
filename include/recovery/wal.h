@@ -65,7 +65,7 @@ typedef struct
 	uint8		reloid[sizeof(Oid)];
 	uint8		relnode[sizeof(Oid)];
 	char		relreplident;
-	uint8 		relreplident_ix_num;
+	uint8		relreplident_ix_num;
 } WALRecRelation;
 
 typedef struct
@@ -84,7 +84,7 @@ typedef struct
 	uint8		tupleFormatFlags;
 	uint8		length[sizeof(OffsetNumber)];
 	/* tuple[length] */
-} WALRecModify1;
+}			WALRecModify1;
 
 /* Modify records that contains 2 tuples, old and new. Needed for REINSERT and for REPLICA IDENTITY FULL */
 typedef struct
@@ -96,7 +96,7 @@ typedef struct
 	uint8		length2[sizeof(OffsetNumber)];
 	/* tuple1[length1] */
 	/* tuple2[length2] */
-} WALRecModify2;
+}			WALRecModify2;
 
 typedef struct
 {
@@ -162,8 +162,8 @@ extern void wal_after_commit(void);
 extern void wal_rollback(OXid oxid, TransactionId logicalXid);
 extern XLogRecPtr log_logical_wal_container(Pointer ptr, int length);
 extern void o_wal_insert(BTreeDescr *desc, OTuple tuple);
-extern void o_wal_update(BTreeDescr *desc, OTuple tuple);
-extern void o_wal_delete(BTreeDescr *desc, OTuple tuple);
+extern void o_wal_update(BTreeDescr *desc, OTuple tuple, char relreplident);
+extern void o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident);
 extern void o_wal_delete_key(BTreeDescr *desc, OTuple key);
 extern void o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple);
 extern void add_truncate_wal_record(ORelOids oids);

@@ -963,14 +963,20 @@ o_drop_shared_root_info(Oid datoid, Oid relnode)
 {
 	SharedRootInfoKey key;
 	OTuple		key_tuple;
+	OTuple		tuple;
 
 	key.datoid = datoid;
 	key.relnode = relnode;
 	key_tuple.data = (Pointer) &key;
 	key_tuple.formatFlags = 0;
 
+	tuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO),
+									   &keyTuple, BTreeKeyNonLeafKey,
+									   &o_in_progress_snapshot, NULL,
+									   CurrentMemoryContext, NULL);
+
 	return o_btree_autonomous_delete(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO),
-									 key_tuple, BTreeKeyNonLeafKey, NULL);
+									 tuple, BTreeKeyLeafTuple, NULL);
 }
 
 static OIndexDescr *
