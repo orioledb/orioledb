@@ -1495,8 +1495,9 @@ o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType keyType,
 										   RowLockUpdate,
 										   hint, BTreeLeafTupleNonDeleted,
 										   &nullCallbackInfo);
+			Assert(IS_SYS_TREE_OIDS(desc->oids));
 			if (keyType == BTreeKeyLeafTuple)
-				o_wal_delete(desc, key);
+				o_wal_delete(desc, key, REPLICA_IDENTITY_DEFAULT);
 			else if (keyType == BTreeKeyNonLeafKey)
 				o_wal_delete_key(desc, key);
 		}

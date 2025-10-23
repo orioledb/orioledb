@@ -1685,16 +1685,30 @@ recovery_rec_update(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size)
 	return tuple;
 }
 
+/*
+ *  This function should be used for WAL recording for real tables. As it depends on replica
+ *  identity what should be contained in wal record: key or full tuple.
+ */
 OTuple
-recovery_rec_delete(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size)
+recovery_rec_delete(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size, char relreplident)
 {
 	OTuple		key;
 
-	key = o_btree_tuple_make_key(desc, tuple, NULL, true, allocated);
-	*size = o_btree_len(desc, key, OKeyLength);
-	return key;
+	if (relreplident == REPLICA_IDENTITY_FULL)
+	{
+		*allocated = false;
+		*size = o_btree_len(desc, tuple, OTupleLength);
+		return tuple;
+	}
+	else
+	{
+		*size = o_btree_len(desc, tuple, OKeyLength);
+		key = o_btree_tuple_make_key(desc, tuple, NULL, true, allocated);
+		return key;
+	}
 }
 
+/* Use for system trees only, that could not be logically replicated */
 OTuple
 recovery_rec_delete_key(BTreeDescr *desc, OTuple key, bool *allocated, int *size)
 {
@@ -3080,6 +3094,13 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			}
 			else
 			{
+				/*
+				 * For UPDATE's with REPLICA_IDENTITY_FULL tuple2 from WAL
+				 * record could be safely ignored (it's needed only for
+				 * logical decoding). For UPDATE/DELETE with
+				 * REPLICA_IDENTITY_FULL tuple1 representation is full tuple,
+				 * not a key. We need to convert it to a key.
+				 */
 				if (single)
 				{
 					recovery_switch_to_oxid(oxid, -1);

@@ -631,17 +631,37 @@ o_wal_insert(BTreeDescr *desc, OTuple tuple)
  * Makes WAL update record.
  */
 void
-o_wal_update(BTreeDescr *desc, OTuple tuple, char relreplident)
+o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident)
 {
-	OTuple		wal_record;
+	OTuple		wal_record1;
+	OTuple		wal_record2;
 	bool		call_pfree;
-	int			size;
+	bool		call_pfree2;
+	int			size1;
+	int			size2;
 
 	elog(DEBUG3, "o_wal_update");
-	wal_record = recovery_rec_update(desc, tuple, &call_pfree, &size);
-	add_modify_wal_record(WAL_REC_UPDATE, desc, wal_record, size, relreplident);
-	if (call_pfree)
-		pfree(wal_record.data);
+
+	wal_record1 = recovery_rec_update(desc, tuple, &call_pfree1, &size1, relreplident);
+
+	/*
+	 * For REPLICA_IDENTITY_FULL include new and old tuples into
+	 * WAL_REC_UPDATE
+	 */
+	if (relreplident != REPLICA_IDENTITY_FULL)
+	{
+		add_modify_wal_record(WAL_REC_UPDATE, desc, wal_record1, size1, relreplident);
+	}
+	else
+	{
+		wal_record2 = recovery_rec_update(desc, oldtuple, &call_pfree2, &size2, relreplident);
+		add_modify_wal_record_extended(WAL_REC_UPDATE, desc, wal_record1, size1, wal_record2, size2, relreplident);
+	}
+
+	if (call_pfree1)
+		pfree(wal_record1.data);
+	if (call_pfree2)
+		pfree(wal_record2.data);
 }
 
 /*
@@ -654,8 +674,9 @@ o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident)
 	bool		call_pfree;
 	int			size;
 
-	wal_record = recovery_rec_delete(desc, tuple, &call_pfree, &size);
-	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, repreplident);
+	wal_record = recovery_rec_delete(desc, tuple, &call_pfree, &size, relreplident);
+	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, relreplident);
+
 	if (call_pfree)
 		pfree(wal_record.data);
 }
@@ -673,8 +694,7 @@ o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relrepli
 	int			newsize;
 	int			oldsize;
 
-	/* Oldtuple could be squished down to a key */
-	oldrecord = recovery_rec_delete(desc, oldtuple, &old_call_pfree, &oldsize);
+	oldrecord = recovery_rec_delete(desc, oldtuple, &old_call_pfree, &oldsize, relreplident);
 	newrecord = recovery_rec_insert(desc, newtuple, &new_call_pfree, &newsize);
 	add_modify_wal_record_extended(WAL_REC_REINSERT, desc, newrecord, newsize, oldrecord, oldsize, relreplident);
 	if (old_call_pfree)
@@ -687,15 +707,18 @@ o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relrepli
 	}
 }
 
+/* Could be used only for system trees that are not replicated logically */
 void
-o_wal_delete_key(BTreeDescr *desc, OTuple key, char relreplident)
+o_wal_delete_key(BTreeDescr *desc, OTuple key)
 {
 	OTuple		wal_record;
 	bool		call_pfree;
 	int			size;
 
+	Assert(IS_SYS_TREE_OIDS(desc->oids));
 	wal_record = recovery_rec_delete_key(desc, key, &call_pfree, &size);
-	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, relreplident);
+	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, REPLICA_IDENTITY_DEFAULT);
+
 	if (call_pfree)
 		pfree(wal_record.data);
 }
