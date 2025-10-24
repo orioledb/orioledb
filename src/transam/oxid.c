@@ -434,7 +434,7 @@ oxid_subxact_callback(
 
 				if (!logicalXidMeta.useHeap && heapXid != logicalXidMeta.xid)
 				{
-					add_switch_logical_xid_wal_record(logicalXidMeta.xid, heapXid);
+					//add_switch_logical_xid_wal_record(logicalXidMeta.xid, heapXid);
 				}
 			}
 			else if (TransactionIdIsValid(logicalXidMeta.xid))
@@ -1269,7 +1269,7 @@ get_current_logical_xid(void)
 		!logicalXidMeta.useHeap &&
 		heapXid != logicalXidMeta.xid)
 	{
-		add_switch_logical_xid_wal_record(logicalXidMeta.xid, heapXid);
+		//add_switch_logical_xid_wal_record(logicalXidMeta.xid, heapXid);
 
 		logicalXidMeta.xid = heapXid;
 		logicalXidMeta.useHeap = true;
