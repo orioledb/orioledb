@@ -439,7 +439,6 @@ oxid_subxact_callback(
 			}
 			else if (TransactionIdIsValid(logicalXidMeta.xid))
 			{
-				Assert(!logicalXidMeta.useHeap);
 				release_logical_xid(&logicalXidMeta);
 			}
 
