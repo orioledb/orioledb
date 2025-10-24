@@ -67,7 +67,7 @@ jobs:
       - name: Get the required tag name
         shell: bash
         run: |
-          echo "PGTAG=$(grep '^${{ github.event.inputs.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+          bash ./orioledb/ci/get_pgtag.sh ${{ github.event.inputs.pg_version }} orioledb/.pgtags
       - name: Checkout PostgreSQL code into workspace directory
         uses: actions/checkout@v4
         with:
