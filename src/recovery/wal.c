@@ -510,7 +510,7 @@ add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode)
 void
 add_switch_logical_xid_wal_record(TransactionId logicalXid_old, TransactionId logicalXid_new)
 {
-	WALRecSwitchLogicalXid  *rec;
+	WALRecSwitchLogicalXid *rec;
 
 	Assert(!is_recovery_process());
 	Assert(TransactionIdIsValid(logicalXid_old));
