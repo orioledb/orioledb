@@ -2756,6 +2756,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 	Pointer		ptr = startPtr;
 	XLogRecPtr	xlogPtr;
 	uint16		wal_version;
+	char		relreplident;
 
 	wal_version = check_wal_container_version(&ptr);
 	if (wal_version > CURRENT_WAL_VERSION)
@@ -2855,6 +2856,9 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			ptr += sizeof(Oid);
 			memcpy(&cur_oids.relnode, ptr, sizeof(Oid));
 			ptr += sizeof(Oid);
+			memcpy(&relreplident, ptr, sizeof(char));
+			ptr += sizeof(char);
+
 
 			if (IS_SYS_TREE_OIDS(cur_oids))
 				sys_tree_num = cur_oids.relnode;
@@ -3080,6 +3084,19 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				Assert(type == RecoveryMsgTypeReinsert);
 				Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
 
+				 
+				/* For REINSERT with REPLICA_IDENTITY_FULL tuple2 (old tuple)
+				 * representation is full tuple, not a key. We need to rewrite
+				 * it with a key.
+				 */
+				if (relreplident == REPLICA_IDENTITY_FULL)
+				{
+					bool allocated;
+
+					tuple2.tuple = o_btree_tuple_make_key(&(GET_PRIMARY(descr))->desc, tuple2.tuple, tuple2.tuple.data, true, &allocated);
+					Assert (!allocated);
+				}
+
 				if (single)
 				{
 					recovery_switch_to_oxid(oxid, -1);
@@ -3095,12 +3112,21 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			else
 			{
 				/*
-				 * For UPDATE's with REPLICA_IDENTITY_FULL tuple2 from WAL
+				 * For UPDATE with REPLICA_IDENTITY_FULL tuple2 from WAL
 				 * record could be safely ignored (it's needed only for
-				 * logical decoding). For UPDATE/DELETE with
-				 * REPLICA_IDENTITY_FULL tuple1 representation is full tuple,
-				 * not a key. We need to convert it to a key.
+				 * logical decoding).
+				 *
+				 * For DELETE with REPLICA_IDENTITY_FULL tuple1 representation
+				 * is full tuple, not a key. We need to rewrite it with a key.
 				 */
+				if (relreplident == REPLICA_IDENTITY_FULL && rec_type == WAL_REC_DELETE)
+				{
+					bool allocated;
+
+					tuple1.tuple = o_btree_tuple_make_key(&(GET_PRIMARY(descr))->desc, tuple1.tuple, tuple1.tuple.data, true, &allocated);
+					Assert (!allocated);
+				}
+
 				if (single)
 				{
 					recovery_switch_to_oxid(oxid, -1);

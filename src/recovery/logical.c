@@ -697,7 +697,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			ptr += sizeof(Oid);
 			memcpy(&cur_oids.relnode, ptr, sizeof(Oid));
 			ptr += sizeof(Oid);
-			memcpy(&relreplident, ptr, sizeod(char));
+			memcpy(&relreplident, ptr, sizeof(char));
 			ptr += sizeof(char);
 
 			elog(DEBUG4, "WAL_REC_RELATION");
