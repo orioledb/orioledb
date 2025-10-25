@@ -23,6 +23,10 @@ jobs:
             distr: ubuntu
 
     name: docker ${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}
+    # Only run on push events OR pull requests from forks
+    if: |
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.distr-version == 'edge' || matrix.distr-version == 'devel' }}
 

@@ -6,6 +6,10 @@ on:
 
 jobs:
   static:
+    # Only run on push events OR pull requests from forks
+    if: |
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name != github.repository
     runs-on:
       - ubuntu-24.04
     strategy:
