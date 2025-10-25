@@ -22,7 +22,6 @@ jobs:
           - distr-version: "noble"
             distr: ubuntu
 
-    name: docker ${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}
     # Only run on push events OR pull requests from forks
     if: |
       github.event_name == 'push' ||

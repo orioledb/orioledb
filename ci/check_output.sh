@@ -10,14 +10,19 @@ oomcount=$(cat $syslogfile | grep oom-kill | wc -l)
 [ -f ./ooms.tmp ] && { oomsbefore=$(cat ./ooms.tmp); rm ./ooms.tmp; } || \
 	{ oomsbefore=0; echo "File ooms.tmp not found. check.sh should be run before check-output.sh"; status=1;}
 if [ $oomcount != $oomsbefore ]; then
-    echo "======== OOM-kller came during the tests"
+    echo "======== OOM-killer came during the tests"
     status=1
 fi
 
 # show diff if it exists
 for f in ` find ./orioledb/test ./postgresql/src/test -type f \( -name 'regression.diffs' -o -name 'isolation_filtered.diffs' \) ` ; do
-	echo "========= Contents of $f"
-	cat $f
+	echo "========= Contents of $f (first 500 lines)"
+	head -n 500 $f
+	line_count=$(wc -l < $f)
+	if [ $line_count -gt 500 ]; then
+		echo "... (truncated $(($line_count - 500)) lines)"
+		echo "Full log available as artifact"
+	fi
 	status=1
 done
 
