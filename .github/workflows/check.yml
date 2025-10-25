@@ -90,6 +90,16 @@ jobs:
       - name: Check output
         run: bash ./orioledb/ci/check_output.sh
         if: ${{ success() || failure() }}
+      - name: Upload sanitizer logs artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_sanitizer.info
+          path: |
+            orioledb/asan.log.*
+            orioledb/ubsan.log.*
+          retention-days: 1
+          overwrite: true
       - name: Show stuck processes
         run: bash ./orioledb/ci/list_stuck.sh
         if: ${{ always() }}
