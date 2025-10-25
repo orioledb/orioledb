@@ -30,6 +30,7 @@
 #include "storage/procsignal.h"
 #include "storage/proc.h"
 #include "utils/snapmgr.h"
+#include "recovery/wal.h"
 
 #define XID_FILE_SIZE (0x1000000)
 #define OXID_BUFFERS_TAG (0)
@@ -63,13 +64,43 @@
 		(XLOG_PTR_SPECIAL_BIT | ((uint64) procnum << 15) | \
 		 ((uint64) level << 31) | (status))
 
-static OXid curOxid = InvalidOXid;
-
 /*
- * A 32-bit transaction id to be used during logical decoding.
+ * OrioleDB uses three transaction id entities:
+ *     - [uint32 TransactionId] native PG heap transaction id (heap xid)
+ *     - [uint64 OXid] extended OrioleDB transaction id (oxid)
+ *     - [uint32 TransactionId] logical transaction id for compatibility with logical decoding PG API (logical xid)
+ *
+ * Each one of these xids uses an independent sequence / algorithm to allocate a new xid.
+ *
+ * xact types of xid assignment:
+ *     - readonly           - no xid (*)
+ *     - heap write         - heap xid
+ *     - oriole write       - oriole xid
+ *     - heap->oriole write - heap xid
+ *     - oriole->heap write - switch xid (*)
  */
-static TransactionId logicalXid = InvalidTransactionId;
-static List *prevLogicalXids = NIL;
+static OXid curOxid = InvalidOXid;	/* a 64-bit OrioleDB oxid */
+
+static LogicalXidMeta logicalXidMeta = {InvalidTransactionId, false};
+
+static inline void
+reset_logical_xid_meta()
+{
+	logicalXidMeta.xid = InvalidTransactionId;
+	logicalXidMeta.useHeap = false;
+}
+
+static inline LogicalXidMeta *
+clone_logical_xid_meta()
+{
+	LogicalXidMeta *clone = (LogicalXidMeta *) palloc(sizeof(LogicalXidMeta));
+
+	memcpy(clone, &logicalXidMeta, sizeof(LogicalXidMeta));
+	return clone;
+}
+
+static List *prevLogicalXids = NIL; /* remember all xids on subxact's chain
+									 * for correct release */
 static OXidMapItem *xidBuffer;
 
 XidMeta    *xid_meta;
@@ -239,7 +270,7 @@ oxid_init_shmem(Pointer ptr, bool found)
 #define	MAX_N_TRIES (16)
 
 static TransactionId
-acquire_logical_xid(void)
+acquire_logical_xid(bool *useHeapXid)
 {
 	TransactionId result,
 				sub;
@@ -251,6 +282,25 @@ acquire_logical_xid(void)
 
 	Assert(i >= 0 && i < max_procs);
 
+	/*
+	 * Set logical xid = heap xid if a heap xid is already allocated for the
+	 * current transaction
+	 */
+	result = GetCurrentTransactionIdIfAny();
+	if (TransactionIdIsValid(result))
+	{
+		if (useHeapXid)
+			*useHeapXid = true;
+		return result;
+	}
+
+	if (useHeapXid)
+		*useHeapXid = false;
+
+	/*
+	 * If no valid heap xid is present for the current transaction, allocate
+	 * new Oriole logical xid
+	 */
 	while (true)
 	{
 		uint32		value = pg_atomic_read_u32(&logicalXidsShmemMap[i]);
@@ -305,36 +355,122 @@ acquire_logical_xid(void)
 }
 
 static void
-release_logical_xid(TransactionId xid)
+release_logical_xid(LogicalXidMeta *lxm)
 {
-	uint32		itemsCount = logical_xid_buffers_guc * (BLCKSZ / sizeof(pg_atomic_uint32));
-	uint32		mynum = xid % (itemsCount * 32);
+	uint32		itemsCount = 0,
+				mynum = 0;
 	uint32		value PG_USED_FOR_ASSERTS_ONLY;
+	TransactionId xid;
 
-	Assert(TransactionIdIsNormal(xid));
+	/*
+	 * Ignore deallocation for a logical xid if it was set from an existing
+	 * heap xid
+	 */
+	if (lxm && !lxm->useHeap)
+	{
+		xid = lxm->xid;
 
-	value = pg_atomic_fetch_and_u32(&logicalXidsShmemMap[mynum / 32],
-									~(1 << (mynum % 32)));
+		itemsCount = logical_xid_buffers_guc * (BLCKSZ / sizeof(pg_atomic_uint32));
+		mynum = xid % (itemsCount * 32);
 
-	Assert((value & (1 << (mynum % 32))) != 0);
+		Assert(TransactionIdIsNormal(xid));
+
+		value = pg_atomic_fetch_and_u32(&logicalXidsShmemMap[mynum / 32],
+										~(1 << (mynum % 32)));
+
+		Assert((value & (1 << (mynum % 32))) != 0);
+	}
 }
 
 void
 assign_subtransaction_logical_xid(void)
 {
 	TransactionId nextLogicalXid;
+	bool		useHeapXid = false;
 
-	nextLogicalXid = acquire_logical_xid();
+	nextLogicalXid = acquire_logical_xid(&useHeapXid);
 
-	if (TransactionIdIsValid(logicalXid))
+	/*
+	 * Check previous logical xid if present and store it in a list of xids
+	 * only if it was allocated by Oriole. Here we need to know exactly if
+	 * previous logical xid has been allocated by Oriole or not: in that case
+	 * it has been assigned from an existent heap xid so we do not need to
+	 * release it.
+	 */
+	if (TransactionIdIsValid(logicalXidMeta.xid))
 	{
 		MemoryContext mcxt = MemoryContextSwitchTo(TopMemoryContext);
 
-		prevLogicalXids = lappend_xid(prevLogicalXids, logicalXid);
+		prevLogicalXids = lappend(prevLogicalXids, clone_logical_xid_meta());
 		MemoryContextSwitchTo(mcxt);
 	}
 
-	logicalXid = nextLogicalXid;
+	logicalXidMeta.xid = nextLogicalXid;
+	logicalXidMeta.useHeap = useHeapXid;
+}
+
+static inline void
+setup_prev_logical_xid_meta()
+{
+	int			llen = 0;
+	LogicalXidMeta *ptr = NULL;
+
+	llen = list_length(prevLogicalXids);
+	if (llen > 0)
+	{
+		ptr = (LogicalXidMeta *) llast(prevLogicalXids);
+		if (ptr)
+		{
+			logicalXidMeta.xid = ptr->xid;
+			logicalXidMeta.useHeap = ptr->useHeap;
+			pfree(ptr);
+		}
+		prevLogicalXids = list_delete_last(prevLogicalXids);
+	}
+	else
+	{
+		reset_logical_xid_meta();
+	}
+}
+
+void
+oxid_subxact_callback(
+					  SubXactEvent event, SubTransactionId mySubid,
+					  SubTransactionId parentSubid, void *arg)
+{
+	TransactionId heapXid;
+
+	switch (event)
+	{
+		case SUBXACT_EVENT_COMMIT_SUB:
+			{
+				heapXid = GetCurrentTransactionIdIfAny();
+
+				if (TransactionIdIsValid(heapXid) && TransactionIdIsValid(logicalXidMeta.xid))
+				{
+					release_logical_xid(&logicalXidMeta);
+
+					if (!logicalXidMeta.useHeap && heapXid != logicalXidMeta.xid)
+					{
+						/*
+						 *
+						 * add_switch_logical_xid_wal_record(logicalXidMeta.xid,
+						 * heapXid);
+						 */
+					}
+				}
+				else if (TransactionIdIsValid(logicalXidMeta.xid))
+				{
+					release_logical_xid(&logicalXidMeta);
+				}
+
+				setup_prev_logical_xid_meta();
+
+				break;
+			}
+		default:
+			break;
+	}
 }
 
 /*
@@ -1089,7 +1225,7 @@ get_current_oxid(void)
 												  nestingLevel,
 												  COMMITSEQNO_STATUS_IN_PROGRESS));
 		curOxid = newOxid;
-		logicalXid = acquire_logical_xid();
+		logicalXidMeta.xid = acquire_logical_xid(&logicalXidMeta.useHeap);
 	}
 
 	return curOxid;
@@ -1103,10 +1239,14 @@ set_current_oxid(OXid oxid)
 }
 
 void
-set_current_logical_xid(TransactionId xid)
+set_current_logical_xid(LogicalXidMeta *in)
 {
-	Assert(!TransactionIdIsValid(logicalXid));
-	logicalXid = xid;
+	if (in)
+	{
+		Assert(!TransactionIdIsValid(logicalXidMeta.xid));
+		logicalXidMeta.xid = in->xid;
+		logicalXidMeta.useHeap = in->useHeap;
+	}
 }
 
 void
@@ -1127,7 +1267,7 @@ void
 reset_current_oxid(void)
 {
 	curOxid = InvalidOXid;
-	logicalXid = InvalidTransactionId;
+	reset_logical_xid_meta();
 }
 
 OXid
@@ -1142,7 +1282,38 @@ get_current_oxid_if_any(void)
 TransactionId
 get_current_logical_xid(void)
 {
-	return logicalXid;
+	TransactionId heapXid;
+
+	heapXid = GetCurrentTransactionIdIfAny();
+
+	if (TransactionIdIsValid(heapXid) &&
+		TransactionIdIsValid(logicalXidMeta.xid) &&
+		!logicalXidMeta.useHeap &&
+		heapXid != logicalXidMeta.xid)
+	{
+		/* add_switch_logical_xid_wal_record(logicalXidMeta.xid, heapXid); */
+
+		logicalXidMeta.xid = heapXid;
+		logicalXidMeta.useHeap = true;
+	}
+
+	return logicalXidMeta.xid;
+}
+
+TransactionId
+get_current_logical_xid_if_any(void)
+{
+	return logicalXidMeta.xid;
+}
+
+void
+setup_current_logical_xid(LogicalXidMeta *output)
+{
+	if (output)
+	{
+		output->xid = logicalXidMeta.xid;
+		output->useHeap = logicalXidMeta.useHeap;
+	}
 }
 
 void
@@ -1196,22 +1367,25 @@ advance_run_xmin(OXid oxid)
 static void
 release_assigned_logical_xids(void)
 {
-	if (TransactionIdIsValid(logicalXid))
+	if (TransactionIdIsValid(logicalXidMeta.xid))
 	{
-		release_logical_xid(logicalXid);
-		logicalXid = InvalidTransactionId;
+		release_logical_xid(&logicalXidMeta);
+		reset_logical_xid_meta();
 	}
 
 	if (GET_CUR_PROCDATA()->autonomousNestingLevel == 0)
 	{
-		ListCell   *lc;
+		ListCell   *lc = NULL;
+		LogicalXidMeta *ptr = NULL;
 
 		foreach(lc, prevLogicalXids)
 		{
-			TransactionId xid;
-
-			xid = lfirst_xid(lc);
-			release_logical_xid(xid);
+			ptr = lfirst(lc);
+			if (ptr)
+			{
+				release_logical_xid(ptr);
+				pfree(ptr);
+			}
 		}
 		list_free(prevLogicalXids);
 		prevLogicalXids = NIL;

@@ -1986,7 +1986,7 @@ start_autonomous_transaction(OAutonomousTxState *state)
 
 	state->needs_wal_flush = oxid_needs_wal_flush;
 	state->oxid = get_current_oxid();
-	state->logicalXid = get_current_logical_xid();
+	setup_current_logical_xid(&state->logicalXidMeta);
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		state->has_retained_undo_location[i] = undo_type_has_retained_location((UndoLogType) i);
 	state->local_wal_has_material_changes = get_local_wal_has_material_changes();
@@ -2027,7 +2027,7 @@ abort_autonomous_transaction(OAutonomousTxState *state)
 	oxid_needs_wal_flush = state->needs_wal_flush;
 	GET_CUR_PROCDATA()->autonomousNestingLevel--;
 	set_current_oxid(state->oxid);
-	set_current_logical_xid(state->logicalXid);
+	set_current_logical_xid(&state->logicalXidMeta);
 	set_local_wal_has_material_changes(state->local_wal_has_material_changes);
 }
 
@@ -2065,7 +2065,7 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 	oxid_needs_wal_flush = state->needs_wal_flush;
 	GET_CUR_PROCDATA()->autonomousNestingLevel--;
 	set_current_oxid(state->oxid);
-	set_current_logical_xid(state->logicalXid);
+	set_current_logical_xid(&state->logicalXidMeta);
 	set_local_wal_has_material_changes(state->local_wal_has_material_changes);
 }
 
