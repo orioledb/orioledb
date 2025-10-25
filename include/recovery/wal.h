@@ -35,6 +35,7 @@
 #define WAL_REC_REINSERT (15)	/* UPDATE with changed pkey represented as
 								 * DELETE + INSERT in OrioleDB but externally
 								 * exported as an UPDATE in logical decoding */
+#define WAL_REC_REPLAY_FEEDBACK	(16)
 
 #define FIRST_WAL_VERSION (16)
 
