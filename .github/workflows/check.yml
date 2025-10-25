@@ -117,19 +117,45 @@ jobs:
         run: bash ./orioledb/ci/build.sh
       - name: Install post build prerequisites
         run: bash ./orioledb/ci/post_build_prerequisites.sh
+
       - name: Check
         timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 150 || 20 }}
         run: bash ./orioledb/ci/check.sh
       - name: Check output
         run: bash ./orioledb/ci/check_output.sh
         if: ${{ success() || failure() }}
+
+      - name: Upload regression tests diffs
+        uses: actions/upload-artifact@v4
+        if: ${{ failure() }}
+        with:
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_regression.diffs
+          path: |
+            ./orioledb/test/**/regression.diffs
+            ./orioledb/test/**/isolation_filtered.diffs
+            ./orioledb/test/log/*.log
+            ./postgresql/src/test/**/regression.diffs
+            ./postgresql/src/test/**/isolation_filtered.diffs
+          retention-days: 2
+          if-no-files-found: ignore
+      - name: Upload testgres tests logs
+        uses: actions/upload-artifact@v4
+        if: ${{ failure() }}
+        with:
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_testgres.logs
+          path: |
+            ./orioledb/test/tmp_check_t/*/logs/*log
+          retention-days: 2
+          if-no-files-found: ignore
+
       - name: Show stuck processes
         run: bash ./orioledb/ci/list_stuck.sh
         if: ${{ always() }}
+
       - name: Run lcov
         if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
         run: bash ./orioledb/ci/lcov.sh
-      - name: create artifact for coverage.info
+      - name: Create artifact for coverage.info
         if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
         uses: actions/upload-artifact@v4
         with:
