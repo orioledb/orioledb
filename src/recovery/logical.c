@@ -819,6 +819,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			OFixedTuple tuple1;
 			OFixedTuple tuple2;
 			OffsetNumber debug_length;
+			ReorderBufferTXN *txn;
 
 			ReorderBufferProcessXid(ctx->reorder, logicalXid, changeXLogPtr);
 
@@ -828,6 +829,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				continue;
 
 			(void) set_snapshot(ctx, logicalXid, changeXLogPtr);
+
+			txn = get_reorder_buffer_txn(ctx->reorder, logicalXid);
+			txn->txn_flags |= RBTXN_DISTR_SKIP_CLEANUP;
 
 			/* Skip actual record processing in fast_forward mode */
 			if (ctx->fast_forward)
