@@ -31,20 +31,53 @@ jobs:
           )
 
           # Reduced matrix: used for all other push events
-          combos = [
+          branch_combos = [
               ("amd64", 16, "gcc"),
               ("amd64", 17, "clang"),
               ("arm64", 16, "clang"),
               ("arm64", 17, "gcc"),
           ]
-          reduced = {
-              "include": [
-                  {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
-                  for (c, pg, comp), ct in itertools.product(combos, full["check_type"])
-              ]
-          }
 
-          matrix = full if event == "pull_request" or ref == "main" else reduced
+          # Reverse matrix used for pull requests
+          reverse_combos = [
+              ("amd64", 16, "clang"),
+              ("amd64", 17, "gcc"),
+              ("arm64", 16, "gcc"),
+              ("arm64", 17, "clang"),
+          ]
+
+          # Make matrix for the PR
+          if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
+              with open(os.environ["GITHUB_EVENT_PATH"], "r") as f:
+                  event = json.load(f)
+
+              head_repo = event["pull_request"]["head"]["repo"]["full_name"]
+              base_repo = event["pull_request"]["base"]["repo"]["full_name"]
+
+              # If the PR is from a fork use full matrix
+              if head_repo != base_repo:
+                  matrix = full
+              # If the PR is from the main repository use reduced reverse matrix
+              else:
+                  matrix = {
+                      "include": [
+                          {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
+                          for (c, pg, comp), ct in itertools.product(reverse_combos, full["check_type"])
+                      ]
+                  }
+          # Make matrix for branches
+          else:
+              # Use full matrix for the main branch
+              if ref == "main":
+                  matrix = full
+              # Use reduced matrix for other branches
+              else:
+                  matrix = {
+                      "include": [
+                          {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
+                          for (c, pg, comp), ct in itertools.product(branch_combos, full["check_type"])
+                      ]
+                  }
 
           # Export as job output
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
