@@ -35,7 +35,7 @@ orioledb_idx_structure
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
-state = free, datoid equal, relnode equal, ix_type = primary, clean
+state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
     Item 0: offset = 520, downlink = 1
@@ -63,7 +63,7 @@ orioledb_idx_structure
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
-state = free, datoid equal, relnode equal, ix_type = primary, clean
+state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
     Item 0: offset = 520, downlink = 1
@@ -107,7 +107,7 @@ orioledb_idx_structure
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
-state = free, datoid equal, relnode equal, ix_type = primary, clean
+state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
     Item 0: offset = 520, downlink = 1
@@ -372,7 +372,7 @@ orioledb_idx_structure
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
-state = free, datoid equal, relnode equal, ix_type = primary, clean
+state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
     Item 0: offset = 520, downlink = 1
@@ -416,7 +416,7 @@ orioledb_idx_structure
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
-state = free, datoid equal, relnode equal, ix_type = primary, clean
+state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
     Item 0: offset = 520, downlink = 1
@@ -566,7 +566,7 @@ orioledb_idx_structure
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
-state = free, datoid equal, relnode equal, ix_type = primary, clean
+state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
     Item 0: offset = 520, downlink = 1
@@ -610,7 +610,7 @@ orioledb_idx_structure
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Index o_merge_pkey contents
 Page 0: level = 1, maxKeyLen = 8
-state = free, datoid equal, relnode equal, ix_type = primary, clean
+state = free, datoid equal, relnode equal, ix_type = primary, dirty
     Leftmost, Rightmost
   Chunk 0: offset = 0, location = 512, hikey location = 64
     Item 0: offset = 520, downlink = 1
