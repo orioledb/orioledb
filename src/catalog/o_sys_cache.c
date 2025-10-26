@@ -1022,6 +1022,8 @@ o_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key)
 {
 	bool		res;
 
+	Assert(!is_recovery_in_progress());
+
 	res = update_deleted_value(sys_cache, key, true);
 
 	if (res)
