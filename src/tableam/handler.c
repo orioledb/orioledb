@@ -1748,8 +1748,11 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 	double		deadrows = 0;	/* # dead rows seen */
 	double		rowstoskip = -1;	/* -1 means not set yet */
 	BlockSamplerData bs;
-	BlockNumber totalblocks = TREE_NUM_LEAF_PAGES(&pk->desc);
+	BlockNumber totalblocks;
 	ItemPointerData fake_iptr = {0};
+
+	o_btree_load_shmem(&pk->desc);
+	totalblocks = TREE_NUM_LEAF_PAGES(&pk->desc);
 
 	ItemPointerSetBlockNumber(&fake_iptr, 0);
 	ItemPointerSetOffsetNumber(&fake_iptr, 1);
