@@ -651,7 +651,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 			TimestampDifference(rewindMeta->complete_timestamp, GetCurrentTimestamp(), &secs, &usecs);
 			ereport(ERROR,
 					(errcode(ERRCODE_INTERNAL_ERROR),
-					 errmsg("Requested rewind to %d s which is in the past from the eraliest retained", rewind_time)),
+					 errmsg("Requested rewind to %d s which is in the past from the earliest retained", rewind_time)),
 					errdetail("request rewind to less than %ld s", secs));
 			return;
 		}
@@ -684,7 +684,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 			{
 				ereport(ERROR,
 						(errcode(ERRCODE_INTERNAL_ERROR),
-						 errmsg("Requested rewind to XID %u which is in the past from the eraliest retained", rewind_xid)),
+						 errmsg("Requested rewind to XID %u which is in the past from the earliest retained", rewind_xid)),
 						errdetail("request rewind to XID more than %u", oldest));
 				return;
 			}
@@ -706,7 +706,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 			{
 				ereport(ERROR,
 						(errcode(ERRCODE_INTERNAL_ERROR),
-						 errmsg("Requested rewind to OXid %lu which is in the past from the eraliest retained", rewind_oxid)),
+						 errmsg("Requested rewind to OXid %lu which is in the past from the earliest retained", rewind_oxid)),
 						errdetail("request rewind to OXid more than %lu", rewindMeta->complete_oxid));
 				return;
 			}
@@ -744,7 +744,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 		{
 			ereport(ERROR,
 					(errcode(ERRCODE_INTERNAL_ERROR),
-					 errmsg("Requested rewind to %s which is in the past from the eraliest retained", pstrdup(timestamptz_to_str(rewind_timestamp)))),
+					 errmsg("Requested rewind to %s which is in the past from the earliest retained", pstrdup(timestamptz_to_str(rewind_timestamp)))),
 					errdetail("request rewind to later than %s", pstrdup(timestamptz_to_str(rewindMeta->complete_timestamp))));
 			return;
 		}
