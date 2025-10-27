@@ -103,8 +103,8 @@ add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 }
 
 /*
- * Extended version of add_modify_wal_record for WAL records that can accommodate two tuples. Now the only user of this is
- * REINSERT action. It will also be needed for WAL logging with REPLICA IDENTITY FULL.
+ * Extended version of add_modify_wal_record for WAL records that can accommodate two tuples.
+ * This is used for UPDATE/DELETE with REPLICA IDENTITY FULL and for REINSERT
  */
 static void
 add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
@@ -144,6 +144,9 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
 		required_length += sizeof(WALRecRelation);
 
+	if (relreplident != REPLICA_IDENTITY_DEFAULT)
+		required_length += sizeof(WALRecRelReplident);
+
 	flush_local_wal_if_needed(required_length);
 	Assert(local_wal_buffer_offset + required_length + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
@@ -151,7 +154,11 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	add_xid_wal_record_if_needed();
 
 	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
-		add_rel_wal_record(oids, type, relreplident);
+	{
+		add_rel_wal_record(oids, type);
+		if (relreplident != REPLICA_IDENTITY_DEFAULT)
+			add_relreplident_wal_record(relreplident);
+	}
 
 	add_local_modify(rec_type, tuple, length, tuple2, length2);
 }
@@ -192,7 +199,7 @@ add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr)
 		add_xid_wal_record_if_needed();
 
 	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
-		add_rel_wal_record(oids, type, REPLICA_IDENTITY_DEFAULT);
+		add_rel_wal_record(oids, type);
 
 	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
@@ -443,6 +450,20 @@ add_xid_wal_record_if_needed(void)
 		Assert(oxid != InvalidOXid);
 		add_xid_wal_record(oxid, logicalXid);
 	}
+}
+
+static void
+add_relreplident_wal_record(char relreplident)
+{
+	WALRecRelReplident *rec = (WALRecRelReplident *) (&local_wal_buffer[local_wal_buffer_offset]);
+
+	Assert(!is_recovery_process());
+	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+
+	rec->recType = WAL_REC_RELREPLIDENT;
+	rec->relreplident = relreplident;
+
+	local_wal_buffer_offset += sizeof(*rec);
 }
 
 static void

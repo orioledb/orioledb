@@ -50,7 +50,20 @@ tts_copy_identity(TupleTableSlot *srcSlot, TupleTableSlot *dstSlot,
 		ctid_off++;
 
 	/* Select destination attributes according to replica indentity */
-	if (relreplident == REPLICA_IDENTITY_FULL)
+	if (relreplident == REPLICA_IDENTITY_DEFAULT)
+	{
+		if (indexDescr->primaryIsCtid)
+		{
+			/* REPLICA_IDENTITY_DEFAULT is supported only with real non-ctid primary index */
+			elog(ERROR, "No default replica identity");
+		}
+		else
+		{
+			nattrs = idx->nFields;
+		        //TODO
+		}
+	}
+	elseif (relreplident == REPLICA_IDENTITY_FULL)
 	{
 		nattrs = descr->tupdesc->natts;
 
@@ -78,22 +91,13 @@ tts_copy_identity(TupleTableSlot *srcSlot, TupleTableSlot *dstSlot,
 			}
 		}
 	}
-	else if (relreplident == REPLICA_IDENTITY_DEFAULT)
-	{
-		if (indexDescr->primaryIsCtid)
-		{
-			/* REPLICA_IDENTITY_DEFAULT is supported only with real non-ctid primary index */
-			elog(ERROR, "No default replica identity");
-		}
-		else
-		{
-			nattrs = idx->nFields;
-		        //TODO
-		}
-	}
 	else if (relreplident == REPLICA_IDENTITY_INDEX)
 	{
-		//TODO
+		elog(ERROR, "REPLICA_IDENTITY_INDEX is not supported");
+	}
+	else
+	{
+		elog(ERROR, "Replica identity '%c' is not supported", relreplident);
 	}
 
 	dstSlot->tts_flags &= ~TTS_FLAG_EMPTY;
@@ -274,9 +278,11 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 	if (relreplident != REPLICA_IDENTITY_DEFAULT)
 		elog(LOG, "WAL_REC_UPDATE REPLICA IDENTITY %c", relreplident);
 
+	Assert(!O_TUPLE_IS_NULL(tuple1.tuple));
 	if (rec_type == WAL_REC_INSERT)
 	{
 		change->action = REORDER_BUFFER_CHANGE_INSERT;
+		Assert(O_TUPLE_IS_NULL(tuple2.tuple));
 
 		/* Decode TOAST chunks */
 		if (ix_type == oIndexToast)
@@ -422,6 +428,7 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 	else if (rec_type == WAL_REC_DELETE)
 	{
 		change->action = REORDER_BUFFER_CHANGE_DELETE;
+		Assert(O_TUPLE_IS_NULL(tuple2.tuple) && (!O_TUPLE_IS_NULL(tuple1.tuple));
 
 		if (ix_type == oIndexToast)
 		{
@@ -464,7 +471,7 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 	else if (rec_type == WAL_REC_REINSERT)
 	{
 		Assert(ix_type != oIndexToast);
-		Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
+		Assert(!O_TUPLE_IS_NULL(tuple2.tuple) && );
 
 		change->action = REORDER_BUFFER_CHANGE_UPDATE;
 		change->data.tp.clear_toast_afterwards = true;
@@ -697,8 +704,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			ptr += sizeof(Oid);
 			memcpy(&cur_oids.relnode, ptr, sizeof(Oid));
 			ptr += sizeof(Oid);
-			memcpy(&relreplident, ptr, sizeof(char));
-			ptr += sizeof(char);
+
+			relreplident = REPLICA_IDENTITY_DEFAULT;
 
 			elog(DEBUG4, "WAL_REC_RELATION");
 			if (IS_SYS_TREE_OIDS(cur_oids))
@@ -717,7 +724,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				descr = o_fetch_table_descr(cur_oids);
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
 				elog(DEBUG4, "WAL_REC_RELATION oIndexInvalid");
-
 			}
 			else if (ix_type == oIndexToast)
 			{
@@ -750,9 +756,14 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				Assert(ix_type == oIndexBridge);
 			}
 
-		if (descr && descr->toast)
+			if (descr && descr->toast)
 				elog(DEBUG4, "reloid: %d natts: %u toast natts: %u", cur_oids.reloid, descr->tupdesc->natts, descr->toast->leafTupdesc->natts);
 
+		}
+		else if (rec_type == WAL_REC_RELREPLIDENT)
+		{
+			relreplident = *ptr;
+			ptr++;
 		}
 		else if (rec_type == WAL_REC_O_TABLES_META_LOCK)
 		{

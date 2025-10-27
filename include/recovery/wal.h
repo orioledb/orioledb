@@ -35,6 +35,7 @@
 #define WAL_REC_REINSERT (15)	/* UPDATE with changed pkey represented as
 								 * DELETE + INSERT in OrioleDB but externally
 								 * exported as an UPDATE in logical decoding */
+#define WAL_REC_RELREPLIDENT (17)
 
 #define FIRST_WAL_VERSION (16)
 
@@ -64,9 +65,15 @@ typedef struct
 	uint8		datoid[sizeof(Oid)];
 	uint8		reloid[sizeof(Oid)];
 	uint8		relnode[sizeof(Oid)];
+} WALRecRelation;
+
+typedef struct
+{
+	uint8		recType;
 	char		relreplident;
 	uint8		relreplident_ix_num;
-} WALRecRelation;
+} WALRecRelReplident;
+
 
 typedef struct
 {
