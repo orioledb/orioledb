@@ -2856,9 +2856,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			ptr += sizeof(Oid);
 			memcpy(&cur_oids.relnode, ptr, sizeof(Oid));
 			ptr += sizeof(Oid);
-			memcpy(&relreplident, ptr, sizeof(char));
-			ptr += sizeof(char);
 
+			relreplident = REPLICA_IDENTITY_DEFAULT;
 
 			if (IS_SYS_TREE_OIDS(cur_oids))
 				sys_tree_num = cur_oids.relnode;
@@ -2895,6 +2894,11 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
 				pfree(db_prefix);
 			}
+		}
+		else if (rec_type == WAL_REC_RELREPLIDENT)
+		{
+			memcpy(&relreplident, ptr, sizeof(char));
+			ptr += sizeof(char);
 		}
 		else if (rec_type == WAL_REC_O_TABLES_META_LOCK)
 		{
