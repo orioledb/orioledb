@@ -1950,8 +1950,7 @@ create_o_table_for_rel(Relation rel)
 	o_table = o_table_tableam_create(oids, tupdesc,
 									 rel->rd_rel->relpersistence,
 									 RelationGetFillFactor(rel, BTREE_DEFAULT_FILLFACTOR),
-									 rel->rd_rel->reltablespace
-									 rel->rd_rel->replident);
+									 rel->rd_rel->reltablespace);
 	o_opclass_cache_add_table(o_table);
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);

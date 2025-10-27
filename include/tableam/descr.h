@@ -237,7 +237,6 @@ struct OTableDescr
 	int			nIndices;
 	/* number of unique trees */
 	int			nUniqueIndices;
-	char			replident;
 };
 
 typedef struct
