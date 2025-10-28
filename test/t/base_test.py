@@ -146,14 +146,9 @@ class BaseTest(unittest.TestCase):
 		                       self.myName + '_' + suffix)
 		if os.path.exists(baseDir):
 			shutil.rmtree(baseDir)
-		if not self._os_ops:
-			self._os_ops = PostgresNode._get_os_ops(ConnectionParams())
-			self._os_ops.is_port_free = MethodType(
-			    TestPortManager.is_port_free, self._os_ops)
-		if not self._port_manager:
-			self._port_manager = TestPortManager(self._os_ops,
-			                                     self.getBasePort())
-		node = testgres.get_new_node(name,
+		port_manager = TestPortManager(
+		    PostgresNode._get_os_ops(ConnectionParams()), base_port)
+		node = testgres.get_new_node('test',
 		                             base_dir=baseDir,
 		                             port_manager=port_manager)
 		node.init(["--no-locale", "--encoding=UTF8"])  # run initdb
