@@ -487,11 +487,11 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 
 #define XID_ASSIGNED(logicalXid, heapXid) (logicalXid == heapXid)
 
-static inline void
-decode_process_commit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
-					  const OXid oxid, const TransactionId logicalXid, const TransactionId heapXid,
-					  const XLogRecPtr startXLogPtr, const XLogRecPtr endXLogPtr,
-					  const uint8 rec_type, const char *rec_type_str)
+static inline bool
+decode_process_need_commit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
+						   const OXid oxid, const TransactionId logicalXid, const TransactionId heapXid,
+						   const XLogRecPtr startXLogPtr, const XLogRecPtr endXLogPtr,
+						   const uint8 rec_type, const char *rec_type_str)
 {
 	Assert(TransactionIdIsValid(logicalXid));
 
@@ -508,18 +508,17 @@ decode_process_commit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
 	else
 	{
 		/* Commit Oriole transaction */
-		ReorderBufferCommit(ctx->reorder, logicalXid,
-							startXLogPtr, endXLogPtr,
-							0, XLogRecGetOrigin(buf->record),
-							buf->origptr);
+		return true;
 	}
+
+	return false;
 }
 
-static inline void
-decode_process_abort(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
-					 const OXid oxid, const TransactionId logicalXid, const TransactionId heapXid,
-					 const XLogRecPtr startXLogPtr,
-					 const uint8 rec_type, const char *rec_type_str)
+static inline bool
+decode_process_need_abort(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
+						  const OXid oxid, const TransactionId logicalXid, const TransactionId heapXid,
+						  const XLogRecPtr startXLogPtr,
+						  const uint8 rec_type, const char *rec_type_str)
 {
 	if (TransactionIdIsValid(heapXid))
 	{
@@ -534,9 +533,10 @@ decode_process_abort(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
 	else
 	{
 		/* Abort Oriole transaction */
-		ReorderBufferAbort(ctx->reorder, logicalXid,
-						   startXLogPtr, 0);
+		return true;
 	}
+
+	return false;
 }
 
 /*
@@ -666,38 +666,80 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				if (txn->toptxn)
 					txn = txn->toptxn;
 
-				dlist_foreach(cur_txn_i, &txn->subtxns)
+				if (rec_type == WAL_REC_COMMIT)
 				{
-					ReorderBufferTXN *cur_txn;
+					/*
+					 * SnapBuildXactNeedsSkip() does strict comparison.  So,
+					 * subtract endXLogPtr by one to fit snapshot just taken
+					 * after commit.
+					 */
+					if (SnapBuildXactNeedsSkip(ctx->snapshot_builder,
+											   endXLogPtr - 1) ||
+						ctx->fast_forward)
+					{
+						dlist_foreach(cur_txn_i, &txn->subtxns)
+						{
+							ReorderBufferTXN *cur_txn;
 
-					cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+							cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+							ReorderBufferForget(ctx->reorder, cur_txn->xid,
+												startXLogPtr);
+						}
+						ReorderBufferForget(ctx->reorder, txn->xid,
+											startXLogPtr);
 
-					ReorderBufferCommitChild(ctx->reorder, txn->xid, cur_txn->xid,
-											 startXLogPtr, endXLogPtr);
+						oxid = InvalidOXid;
+						logicalXid = InvalidTransactionId;
 
-				}
+						/* Skip processing of this transaction */
+						continue;
+					}
 
-				Assert(TransactionIdIsValid(logicalXid));
+					Assert(TransactionIdIsValid(logicalXid));
 
-				/*
-				 * SnapBuildXactNeedsSkip() does strict comparison.  So,
-				 * subtract endXLogPtr by one to fit snapshot just taken after
-				 * commit.
-				 */
-				if (rec_type == WAL_REC_COMMIT &&
-					!SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr - 1))
-				{
-					decode_process_commit(ctx, buf,
-										  oxid, logicalXid, heapXid,
-										  startXLogPtr, endXLogPtr,
-										  rec_type, rec_type_str);
+					if (decode_process_need_commit(ctx, buf,
+												   oxid, logicalXid, heapXid,
+												   startXLogPtr, endXLogPtr,
+												   rec_type, rec_type_str))
+					{
+						/*
+						 * Proceed to commit this transaction and
+						 * subtransactions
+						 */
+						dlist_foreach(cur_txn_i, &txn->subtxns)
+						{
+							ReorderBufferTXN *cur_txn;
+
+							cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+							ReorderBufferCommitChild(ctx->reorder, txn->xid, cur_txn->xid,
+													 startXLogPtr, endXLogPtr);
+						}
+						ReorderBufferCommit(ctx->reorder, logicalXid,
+											startXLogPtr, endXLogPtr,
+											0, XLogRecGetOrigin(buf->record),
+											buf->origptr);
+					}
 				}
 				else
 				{
-					decode_process_abort(ctx, buf,
-										 oxid, logicalXid, heapXid,
-										 startXLogPtr,
-										 rec_type, rec_type_str);
+					Assert(rec_type == WAL_REC_ROLLBACK);
+
+					if (decode_process_need_abort(ctx, buf,
+												  oxid, logicalXid, heapXid,
+												  startXLogPtr,
+												  rec_type, rec_type_str))
+					{
+						dlist_foreach(cur_txn_i, &txn->subtxns)
+						{
+							ReorderBufferTXN *cur_txn;
+
+							cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+							ReorderBufferAbort(ctx->reorder, cur_txn->xid,
+											   startXLogPtr, 0);
+						}
+						ReorderBufferAbort(ctx->reorder, logicalXid,
+										   startXLogPtr, 0);
+					}
 				}
 			}
 
@@ -734,22 +776,26 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			if (!set_snapshot(ctx, logicalXid, changeXLogPtr))
 				continue;
 
-			if (!SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr))
+			/* Skip actual commit processing */
+			if (SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr - 1) ||
+				ctx->fast_forward)
 			{
-				decode_process_commit(ctx, buf,
-									  oxid, logicalXid, heapXid,
-									  startXLogPtr, endXLogPtr,
-									  rec_type, rec_type_str);
+				ReorderBufferForget(ctx->reorder, logicalXid, startXLogPtr);
 			}
 			else
 			{
-				decode_process_abort(ctx, buf,
-									 oxid, logicalXid, heapXid,
-									 startXLogPtr,
-									 rec_type, rec_type_str);
+				if (decode_process_need_commit(ctx, buf,
+											   oxid, logicalXid, heapXid,
+											   startXLogPtr, endXLogPtr,
+											   rec_type, rec_type_str))
+				{
+					ReorderBufferCommit(ctx->reorder, logicalXid,
+										startXLogPtr, endXLogPtr,
+										0, XLogRecGetOrigin(buf->record),
+										buf->origptr);
+					UpdateDecodingStats(ctx);
+				}
 			}
-
-			UpdateDecodingStats(ctx);
 
 			oxid = InvalidOXid;
 			logicalXid = InvalidTransactionId;
