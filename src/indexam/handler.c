@@ -290,7 +290,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	}
 
 	relname = makeString(index->rd_rel->relname.data);
-	if (!in_nontransactional_truncate && list_member(reindex_list, relname))
+	if (list_member(reindex_list, relname))
 	{
 		reindex = true;
 		reindex_list = list_delete(reindex_list, relname);
