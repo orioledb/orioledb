@@ -496,7 +496,7 @@ class S3Test(S3BaseTest):
 		while node.status() == NodeStatus.Running:
 			pass
 
-		with self.initNode('tgsb') as new_node:
+		with self.initNode(self.getBasePort() + 1, 'tgsb') as new_node:
 			self.loader.download(new_node.data_dir)
 			new_node.append_conf(port=new_node.port)
 
@@ -553,7 +553,7 @@ class S3Test(S3BaseTest):
 		while node.status() == NodeStatus.Running:
 			pass
 
-		with self.initNode('tgsb') as new_node:
+		with self.initNode(self.getBasePort() + 1, 'tgsb') as new_node:
 			self.loader.download(new_node.data_dir)
 			new_node.append_conf(port=new_node.port)
 
@@ -609,7 +609,7 @@ class S3Test(S3BaseTest):
 		while node.status() == NodeStatus.Running:
 			pass
 
-		with self.initNode('tgsb') as new_node:
+		with self.initNode(self.getBasePort() + 1, 'tgsb') as new_node:
 			self.loader.download(new_node.data_dir)
 			new_node.append_conf(port=new_node.port)
 
@@ -662,7 +662,7 @@ class S3Test(S3BaseTest):
 		while node.status() == NodeStatus.Running:
 			pass
 
-		with self.initNode('tgsb') as new_node:
+		with self.initNode(self.getBasePort() + 1, 'tgsb') as new_node:
 			self.loader.download(new_node.data_dir)
 			new_node.append_conf(port=new_node.port)
 
@@ -714,7 +714,7 @@ class S3Test(S3BaseTest):
 		while node.status() == NodeStatus.Running:
 			pass
 
-		with self.initNode('tgsb') as new_node:
+		with self.initNode(self.getBasePort() + 1, 'tgsb') as new_node:
 			self.loader.download(new_node.data_dir)
 			new_node.append_conf(port=new_node.port)
 
@@ -752,7 +752,7 @@ class S3Test(S3BaseTest):
 			node.stop()
 
 			# Test that PostgreSQL won't start in case of absent control file
-			new_node = self.initNode('tgsb')
+			new_node = self.initNode(self.getBasePort() + 1, 'tgsb')
 			new_node.append_conf(f"""
 				orioledb.s3_mode = true
 				orioledb.s3_host = '{self.host}:{self.port}/{self.bucket_name}'
