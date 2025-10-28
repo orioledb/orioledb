@@ -1073,6 +1073,10 @@ page_unique_check(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 		BTREE_PAGE_READ_LEAF_ITEM(pageTuphdr, tuple, p, locator);
 		cmp = o_btree_cmp(desc, &tuple, BTreeKeyLeafTuple,
 						  key, BTreeKeyUniqueUpperBound);
+		if (!IS_SYS_TREE_OIDS(desc->oids))
+		{
+			elog(WARNING, "page_unique_check: cmp: %d", cmp);
+		}
 		if (cmp > 0)
 			return false;
 
@@ -1086,10 +1090,14 @@ page_unique_check(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 				continue;
 			}
 			*xactInfo = tuphdr.xactInfo;
+			if (!IS_SYS_TREE_OIDS(desc->oids))
+				elog(WARNING, "page_unique_check: RETURN TRUE 0");
 			return true;
 		}
 
 		*xactInfo = tuphdr.xactInfo;
+		if (!IS_SYS_TREE_OIDS(desc->oids))
+			elog(WARNING, "page_unique_check: RETURN TRUE 1");
 		return true;
 	}
 	return false;
@@ -1156,6 +1164,7 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 	OBTreeModifyResult result = 456;
 	Jsonb	   *params = NULL;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
+	elog(WARNING, "o_btree_insert_unique");
 
 	if (STOPEVENTS_ENABLED())
 		params = prepare_modify_start_params(desc);
@@ -1258,6 +1267,7 @@ retry:
 				}
 				unlock_page(blkno);
 				LWLockRelease(uniqueLock);
+				elog(WARNING, "FOUND 0");
 				return OBTreeModifyResultFound;
 			}
 			else
@@ -1275,6 +1285,7 @@ retry:
 					if (cbAction == OBTreeCallbackActionXidExit)
 					{
 						unlock_page(blkno);
+						elog(WARNING, "FOUND 1");
 						return OBTreeModifyResultFound;
 					}
 				}
@@ -1337,6 +1348,7 @@ retry:
 					Assert(cbAction == OBTreeCallbackActionDoNothing);
 				}
 				LWLockRelease(uniqueLock);
+				elog(WARNING, "FOUND 2");
 				return OBTreeModifyResultFound;
 			}
 			else
@@ -1354,6 +1366,7 @@ retry:
 					Assert(cbAction != OBTreeCallbackActionXidNoWait);
 					if (cbAction == OBTreeCallbackActionXidExit)
 					{
+						elog(WARNING, "FOUND 3");
 						return OBTreeModifyResultFound;
 					}
 				}
