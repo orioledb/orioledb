@@ -219,7 +219,7 @@ o_apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
 		fill_current_oxid_osnapshot(&oxid, &o_snapshot);
 
 		success = (o_tbl_index_insert(descr, descr->bridge, &tuple, bridge_slot,
-									  oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
+									  oxid, o_snapshot.csn, &callbackInfo, true) == OBTreeModifyResultInserted);
 
 		if (!success && !overflow)
 			o_report_duplicate(relation, descr->bridge, bridge_slot);
@@ -330,7 +330,7 @@ reinsert_bridge_ctid_on_pkey_changed(OTableDescr *descr, Relation relation,
 		fill_current_oxid_osnapshot(&oxid, &o_snapshot);
 
 		success = (o_tbl_index_insert(descr, descr->bridge, &tuple, bridge_slot,
-									  oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
+									  oxid, o_snapshot.csn, &callbackInfo, true) == OBTreeModifyResultInserted);
 
 		if (!success && !overflow)
 			o_report_duplicate(relation, descr->bridge, bridge_slot);
@@ -390,7 +390,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 								false);
 
 	mres.success = (o_tbl_index_insert(descr, descr->indices[0], NULL, slot,
-									   oxid, csn, &callbackInfo) == OBTreeModifyResultInserted);
+									   oxid, csn, &callbackInfo, true) == OBTreeModifyResultInserted);
 	if (!mres.success)
 	{
 		mres.failedIxNum = 0;
@@ -887,7 +887,6 @@ o_exclusion_cmp(OIndexDescr *id, OBTreeKeyBound *key1, OTuple *tuple2)
 	TupleDesc	tupdesc;
 	OTupleFixedFormatSpec *spec;
 	int			i,
-				n,
 				attnum;
 	Datum		value;
 	bool		isnull;
@@ -1016,7 +1015,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 
 			ioc_arg.conflictIxNum = i;
 			result = o_tbl_index_insert(descr, descr->indices[i], NULL, slot,
-										oxid, csn, &callbackInfo);
+										oxid, csn, &callbackInfo, true);
 			if (result != OBTreeModifyResultInserted)
 			{
 				success = false;
@@ -1099,7 +1098,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 
 			ioc_arg.conflictIxNum = InvalidIndexNumber;
 			result = o_tbl_index_insert(descr, descr->indices[i], NULL, slot,
-										oxid, csn, &callbackInfo);
+										oxid, csn, &callbackInfo, true);
 
 			if (result != OBTreeModifyResultInserted)
 			{
@@ -1666,7 +1665,8 @@ o_update_secondary_index(OIndexDescr *id,
 						 OTuple new_ix_tup,
 						 TupleTableSlot *oldSlot,
 						 OXid oxid,
-						 CommitSeqNo csn)
+						 CommitSeqNo csn,
+						 bool checkUnique)
 {
 	OTableModifyResult res;
 	OBTreeKeyBound old_key,
@@ -1682,6 +1682,7 @@ o_update_secondary_index(OIndexDescr *id,
 
 	fill_key_bound(oldSlot, id, &old_key);
 	fill_key_bound(newSlot, id, &new_key);
+	elog(WARNING, "o_update_secondary_index");
 
 	if (is_keys_eq(&id->desc, &old_key, &new_key) && (old_valid == new_valid))
 		return res;
@@ -1708,7 +1709,7 @@ o_update_secondary_index(OIndexDescr *id,
 									id->name.data,
 									true);
 
-		if (!id->unique || o_has_nulls(new_ix_tup))
+		if (!id->unique || !checkUnique || o_has_nulls(new_ix_tup))
 			res.success = o_btree_modify(&id->desc, BTreeOperationInsert,
 										 new_ix_tup, BTreeKeyLeafTuple,
 										 (Pointer) &new_key, BTreeKeyBound,
@@ -1720,6 +1721,7 @@ o_update_secondary_index(OIndexDescr *id,
 												oxid, csn, RowLockUpdate,
 												NULL, &callbackInfo) == OBTreeModifyResultInserted;
 
+		elog(WARNING, "res.success: %c", res.success ? 'Y' : 'N');
 		if (!res.success)
 			res.action = BTreeOperationInsert;
 	}
@@ -1888,6 +1890,31 @@ o_tbl_indices_reinsert(OTableDescr *descr,
 	return result;
 }
 
+void
+log_o_bound(TupleDesc tupDesc, OBTreeKeyBound *bound, char *prefix)
+{
+	elog(WARNING, "%s: %d", prefix, bound->nkeys);
+	for (int i = 0; i < bound->nkeys; i++)
+	{
+		Form_pg_attribute attr = &tupDesc->attrs[i];
+		Oid			output = InvalidOid;
+		bool		varlena;
+	
+		getTypeOutputInfo(attr->atttypid, &output, &varlena);
+	
+		elog(WARNING, "%s[%d]: %u %s%s%s%s%s%s %s", 
+			 prefix, i,
+			 attr->atttypid,
+			 bound->keys[i].flags & O_VALUE_BOUND_INCLUSIVE ? "O_VALUE_BOUND_INCLUSIVE " : "",
+			 bound->keys[i].flags & O_VALUE_BOUND_NULL ? "O_VALUE_BOUND_NULL " : "",
+			 bound->keys[i].flags & O_VALUE_BOUND_UNBOUNDED ? "O_VALUE_BOUND_UNBOUNDED " : "",
+			 bound->keys[i].flags & O_VALUE_BOUND_LOWER ? "O_VALUE_BOUND_LOWER " : "",
+			 bound->keys[i].flags & O_VALUE_BOUND_UPPER ? "O_VALUE_BOUND_UPPER " : "",
+			 bound->keys[i].flags & O_VALUE_BOUND_COERCIBLE ? "O_VALUE_BOUND_COERCIBLE " : "",
+			 bound->keys[i].flags & O_VALUE_BOUND_UNBOUNDED ? "" : OidOutputFunctionCall(output, bound->keys[i].value));
+	}
+}
+
 OTableModifyResult
 o_tbl_index_delete(OIndexDescr *id, OIndexNumber ix_num, TupleTableSlot *slot,
 				   OXid oxid, CommitSeqNo csn)
@@ -1909,11 +1936,21 @@ o_tbl_index_delete(OIndexDescr *id, OIndexNumber ix_num, TupleTableSlot *slot,
 
 	fill_key_bound(slot, id, &bound);
 	o_btree_load_shmem(&id->desc);
+	log_o_bound(id->nonLeafTupdesc, &bound, "DELETE BOUND");
 	res = o_btree_modify(&id->desc, BTreeOperationDelete,
 						 nullTup, BTreeKeyNone,
 						 (Pointer) &bound, BTreeKeyBound,
 						 oxid, csn, RowLockUpdate,
 						 NULL, &callbackInfo);
+	elog(WARNING, "%s: res: %s", id->name.data,
+		 res == OBTreeModifyResultInserted ? "OBTreeModifyResultInserted" :
+		 res == OBTreeModifyResultUpdated ? "OBTreeModifyResultUpdated" :
+		 res == OBTreeModifyResultDeleted ? "OBTreeModifyResultDeleted" :
+		 res == OBTreeModifyResultLocked ? "OBTreeModifyResultLocked" :
+		 res == OBTreeModifyResultFound ? "OBTreeModifyResultFound" :
+		 res == OBTreeModifyResultNotFound ? "OBTreeModifyResultNotFound" :
+		 "WRONG");
+	elog(WARNING, "marg.deleted: %c", marg.deleted ? 'Y' : 'N');
 
 	memset(&result, 0, sizeof(result));
 	result.success = (res == OBTreeModifyResultDeleted) || marg.deleted;
@@ -1993,7 +2030,8 @@ o_tbl_index_insert(OTableDescr *descr,
 				   OTuple *own_tup,
 				   TupleTableSlot *slot,
 				   OXid oxid, CommitSeqNo csn,
-				   BTreeModifyCallbackInfo *callbackInfo)
+				   BTreeModifyCallbackInfo *callbackInfo,
+				   bool checkUnique)
 {
 	BTreeDescr *bd = &id->desc;
 	OTuple		tup;
@@ -2025,6 +2063,7 @@ o_tbl_index_insert(OTableDescr *descr,
 
 	o_btree_load_shmem(bd);
 	if (primary || !id->unique ||
+		!checkUnique ||
 		(!id->nulls_not_distinct && o_has_nulls(tup)))
 		result = o_btree_modify(bd, BTreeOperationInsert,
 								tup, BTreeKeyLeafTuple,

@@ -181,6 +181,7 @@ INSERT INTO unique_tbl VALUES (2, 'tree');
 INSERT INTO unique_tbl VALUES (3, 'four');
 INSERT INTO unique_tbl VALUES (4, 'five');
 
+SELECT orioledb_tbl_structure('unique_tbl'::regclass);
 BEGIN;
 
 -- check is done at end of transaction, so this should succeed
@@ -188,22 +189,31 @@ UPDATE unique_tbl SET i = 1 WHERE i = 0;
 
 ROLLBACK;
 
+SELECT orioledb_tbl_structure('unique_tbl'::regclass);
+
 -- check is done at end of statement, so this should succeed
-UPDATE unique_tbl SET i = i+1;
+-- UPDATE unique_tbl SET i = i+1;
+UPDATE unique_tbl SET i = i+2+(3-i/2*3);
+SELECT orioledb_tbl_structure('unique_tbl'::regclass);
 
 SELECT * FROM unique_tbl;
+\q
 
 -- explicitly defer the constraint
 BEGIN;
 
 SET CONSTRAINTS unique_tbl_i_key DEFERRED;
 
+SELECT orioledb_tbl_structure('unique_tbl'::regclass);
 INSERT INTO unique_tbl VALUES (3, 'three');
+SELECT orioledb_tbl_structure('unique_tbl'::regclass);
 DELETE FROM unique_tbl WHERE t = 'tree'; -- makes constraint valid again
+SELECT orioledb_tbl_structure('unique_tbl'::regclass);
 
 COMMIT; -- should succeed
 
 SELECT * FROM unique_tbl;
+\q
 
 -- try adding an initially deferred constraint
 ALTER TABLE unique_tbl DROP CONSTRAINT unique_tbl_i_key;
