@@ -18,12 +18,12 @@ import unittest
 
 from threading import Thread
 from testgres.enums import NodeStatus
+from testgres.exceptions import PortForException
 from testgres.node import PostgresNode
-from testgres.operations.os_ops import OsOperations
-from testgres.node import PortManager__Generic
+from testgres.operations.os_ops import OsOperations, ConnectionParams
+from testgres.port_manager import PortManager__Generic
 from testgres.utils import get_pg_version, get_pg_config
 from typing import Any
-from types import MethodType
 
 
 class TestPortManager(PortManager__Generic):
@@ -33,18 +33,44 @@ class TestPortManager(PortManager__Generic):
 		self._available_ports: typing.Set[int] = set(
 		    [base_port, base_port + 1])
 
-	def is_port_free(self, number: int):
-		assert type(number) == int  # noqa: E721
-		assert number >= 0
-		assert number <= 65535  # OK?
+	def is_port_free(self, port: int):
+		port_free = port in self._available_ports
 
-		with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-			s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-			try:
-				s.bind(("", number))
-				return True
-			except OSError:
-				return False
+		if port_free:
+			with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+				s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+				try:
+					s.bind(("", port))
+					return True
+				except OSError:
+					return False
+		return False
+
+	def reserve_port(self) -> int:
+		assert self._guard is not None
+		assert type(self._available_ports) == set  # noqa: E721t
+		assert type(self._reserved_ports) == set  # noqa: E721
+
+		with self._guard:
+			t = tuple(self._available_ports)
+			assert len(t) == len(self._available_ports)
+			t = None
+
+			for port in self._available_ports:
+				assert not (port in self._reserved_ports)
+
+				port_free = self.is_port_free(port)
+
+				if not port_free:
+					continue
+
+				self._reserved_ports.add(port)
+				self._available_ports.discard(port)
+				assert port in self._reserved_ports
+				assert not (port in self._available_ports)
+				return port
+
+		raise PortForException("Can't select a port.")
 
 
 class BaseTest(unittest.TestCase):
@@ -53,8 +79,6 @@ class BaseTest(unittest.TestCase):
 	restoredNode = None
 	basePort = None
 	_myName = None
-	_os_ops = None
-	_port_manager = None
 
 	def getTestNum(self):
 		testFullName = inspect.getfile(self.__class__)
@@ -88,7 +112,18 @@ class BaseTest(unittest.TestCase):
 
 	def getSubsriber(self) -> testgres.PostgresNode:
 		if self.subscriber is None:
-			subscriber = self.initNode('tgss', 'subscriber')
+			(test_path, t) = os.path.split(
+			    os.path.dirname(inspect.getfile(self.__class__)))
+			baseDir = os.path.join(test_path, 'tmp_check_t',
+			                       self.myName + '_tgss')
+			if os.path.exists(baseDir):
+				shutil.rmtree(baseDir)
+
+			subscriber = testgres.get_new_node('subscriber',
+			                                   port=self.getBasePort() + 1,
+			                                   base_dir=baseDir)
+			subscriber.init(["--no-locale", "--encoding=UTF8"])
+			subscriber.append_conf(shared_preload_libraries='orioledb')
 			subscriber.append_conf(wal_level='logical')
 			self.subscriber = subscriber
 		return self.subscriber
@@ -96,7 +131,7 @@ class BaseTest(unittest.TestCase):
 	def restoreNode(self, port: int, filename: str) -> testgres.PostgresNode:
 		self.assertIsNone(self.restoredNode)
 
-		restoredNode = self.initNode("restored_tgsn")
+		restoredNode = self.initNode(port, "restored_tgsn")
 		restoredNode.start()
 		restoredNode.restore(filename)
 
@@ -104,7 +139,7 @@ class BaseTest(unittest.TestCase):
 
 		return restoredNode
 
-	def initNode(self, suffix='tgsn', name='test') -> testgres.PostgresNode:
+	def initNode(self, base_port: int, suffix='tgsn') -> testgres.PostgresNode:
 		(test_path,
 		 t) = os.path.split(os.path.dirname(inspect.getfile(self.__class__)))
 		baseDir = os.path.join(test_path, 'tmp_check_t',
@@ -112,7 +147,7 @@ class BaseTest(unittest.TestCase):
 		if os.path.exists(baseDir):
 			shutil.rmtree(baseDir)
 		if not self._os_ops:
-			self._os_ops = PostgresNode._get_os_ops()
+			self._os_ops = PostgresNode._get_os_ops(ConnectionParams())
 			self._os_ops.is_port_free = MethodType(
 			    TestPortManager.is_port_free, self._os_ops)
 		if not self._port_manager:
@@ -120,8 +155,7 @@ class BaseTest(unittest.TestCase):
 			                                     self.getBasePort())
 		node = testgres.get_new_node(name,
 		                             base_dir=baseDir,
-		                             os_ops=self._os_ops,
-		                             port_manager=self._port_manager)
+		                             port_manager=port_manager)
 		node.init(["--no-locale", "--encoding=UTF8"])  # run initdb
 		node.append_conf(
 		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
@@ -143,7 +177,7 @@ class BaseTest(unittest.TestCase):
 
 	def setUp(self):
 		self.startTime = time.time()
-		self.node = self.initNode()
+		self.node = self.initNode(self.getBasePort())
 
 	def list2reason(self, exc_list):
 		if exc_list and exc_list[-1][0] is self:
