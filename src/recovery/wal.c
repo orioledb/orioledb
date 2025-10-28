@@ -50,24 +50,42 @@ wal_record_type_to_string(int wal_record)
 {
 	switch (wal_record)
 	{
-		/* 0 */ case WAL_REC_NONE: return "NONE";
-		/* 1 */ case WAL_REC_XID: return "XID";
-		/* 2 */ case WAL_REC_COMMIT: return "COMMIT";
-		/* 3 */ case WAL_REC_ROLLBACK: return "ROLLBACK";
-		/* 4 */ case WAL_REC_RELATION: return "RELATION";
-		/* 5 */ case WAL_REC_INSERT: return "INSERT";
-		/* 6 */ case WAL_REC_UPDATE: return "UPDATE";
-		/* 7 */ case WAL_REC_DELETE: return "DELETE";
-		/* 8 */ case WAL_REC_O_TABLES_META_LOCK: return "O_TABLES_META_LOCK";
-		/* 9 */ case WAL_REC_O_TABLES_META_UNLOCK: return "O_TABLES_META_UNLOCK";
-		/*10 */ case WAL_REC_SAVEPOINT: return "SAVEPOINT";
-		/*11 */ case WAL_REC_ROLLBACK_TO_SAVEPOINT: return "ROLLBACK_TO_SAVEPOINT";
-		/*12 */ case WAL_REC_JOINT_COMMIT: return "JOINT_COMMIT";
-		/*13 */ case WAL_REC_TRUNCATE: return "TRUNCATE";
-		/*14 */ case WAL_REC_BRIDGE_ERASE: return "BRIDGE_ERASE";
-		/*15 */ case WAL_REC_REINSERT: return "REINSERT";
-		/*16 */ case WAL_REC_SWITCH_LOGICAL_XID: return "SWITCH_LOGICAL_XID";
-		default: return "UNKNOWN";
+		 /* 0 */ case WAL_REC_NONE:
+			return "NONE";
+		 /* 1 */ case WAL_REC_XID:
+			return "XID";
+		 /* 2 */ case WAL_REC_COMMIT:
+			return "COMMIT";
+		 /* 3 */ case WAL_REC_ROLLBACK:
+			return "ROLLBACK";
+		 /* 4 */ case WAL_REC_RELATION:
+			return "RELATION";
+		 /* 5 */ case WAL_REC_INSERT:
+			return "INSERT";
+		 /* 6 */ case WAL_REC_UPDATE:
+			return "UPDATE";
+		 /* 7 */ case WAL_REC_DELETE:
+			return "DELETE";
+		 /* 8 */ case WAL_REC_O_TABLES_META_LOCK:
+			return "O_TABLES_META_LOCK";
+		 /* 9 */ case WAL_REC_O_TABLES_META_UNLOCK:
+			return "O_TABLES_META_UNLOCK";
+		 /* 10 */ case WAL_REC_SAVEPOINT:
+			return "SAVEPOINT";
+		 /* 11 */ case WAL_REC_ROLLBACK_TO_SAVEPOINT:
+			return "ROLLBACK_TO_SAVEPOINT";
+		 /* 12 */ case WAL_REC_JOINT_COMMIT:
+			return "JOINT_COMMIT";
+		 /* 13 */ case WAL_REC_TRUNCATE:
+			return "TRUNCATE";
+		 /* 14 */ case WAL_REC_BRIDGE_ERASE:
+			return "BRIDGE_ERASE";
+		 /* 15 */ case WAL_REC_REINSERT:
+			return "REINSERT";
+		 /* 16 */ case WAL_REC_SWITCH_LOGICAL_XID:
+			return "SWITCH_LOGICAL_XID";
+		default:
+			return "UNKNOWN";
 	}
 	return "UNKNOWN";
 }

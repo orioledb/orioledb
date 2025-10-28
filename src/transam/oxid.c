@@ -94,6 +94,7 @@ static inline LogicalXidMeta *
 clone_logical_xid_meta(void)
 {
 	LogicalXidMeta *clone = (LogicalXidMeta *) palloc(sizeof(LogicalXidMeta));
+
 	Assert(clone);
 	memcpy(clone, &logicalXidMeta, sizeof(LogicalXidMeta));
 	return clone;
@@ -1223,9 +1224,13 @@ get_current_oxid(void)
 												  COMMITSEQNO_STATUS_IN_PROGRESS));
 		curOxid = newOxid;
 
-		if (nestingLevel > 0) /* Check if an autonomous transaction is in progress */
+		/* Check if an autonomous transaction is in progress */
+		if (nestingLevel > 0)
 		{
-			/* Autonomous transactions should be ignored during logical decoding, so invalidate logical xid info */
+			/*
+			 * Autonomous transactions should be ignored during logical
+			 * decoding, so invalidate logical xid info
+			 */
 			reset_logical_xid_meta();
 		}
 		else

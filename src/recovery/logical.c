@@ -489,9 +489,9 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 
 static inline void
 decode_process_commit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
-	const OXid oxid, const TransactionId logicalXid, const TransactionId heapXid,
-	const XLogRecPtr startXLogPtr, const XLogRecPtr endXLogPtr,
-	const uint8 rec_type, const char *rec_type_str)
+					  const OXid oxid, const TransactionId logicalXid, const TransactionId heapXid,
+					  const XLogRecPtr startXLogPtr, const XLogRecPtr endXLogPtr,
+					  const uint8 rec_type, const char *rec_type_str)
 {
 	Assert(TransactionIdIsValid(logicalXid));
 
@@ -499,7 +499,7 @@ decode_process_commit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
 	{
 		/* Transaction is mixed */
 
-		if (XID_ASSIGNED(logicalXid, heapXid)) // @TODO
+		if (XID_ASSIGNED(logicalXid, heapXid))
 		{
 			/* Commit as heap transaction so ignore commit here */
 			elog(DEBUG4, "IGNORED COMMIT on record type %d (%s) oxid %lu logicalXId %u heapXid %u", rec_type, rec_type_str, oxid, logicalXid, heapXid);
@@ -509,23 +509,23 @@ decode_process_commit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
 	{
 		/* Commit Oriole transaction */
 		ReorderBufferCommit(ctx->reorder, logicalXid,
-			startXLogPtr, endXLogPtr,
-			0, XLogRecGetOrigin(buf->record),
-			buf->origptr);
+							startXLogPtr, endXLogPtr,
+							0, XLogRecGetOrigin(buf->record),
+							buf->origptr);
 	}
 }
 
 static inline void
 decode_process_abort(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
-	const OXid oxid, const TransactionId logicalXid, const TransactionId heapXid,
-	const XLogRecPtr startXLogPtr,
-	const uint8 rec_type, const char *rec_type_str)
+					 const OXid oxid, const TransactionId logicalXid, const TransactionId heapXid,
+					 const XLogRecPtr startXLogPtr,
+					 const uint8 rec_type, const char *rec_type_str)
 {
 	if (TransactionIdIsValid(heapXid))
 	{
 		/* Transaction is mixed */
 
-		if (XID_ASSIGNED(logicalXid, heapXid)) // @TODO
+		if (XID_ASSIGNED(logicalXid, heapXid))
 		{
 			/* Abort as heap transaction so ignore commit here */
 			elog(DEBUG4, "IGNORED ABORT on record type %d (%s) oxid %lu logicalXId %u heapXid %u", rec_type, rec_type_str, oxid, logicalXid, heapXid);
@@ -535,7 +535,7 @@ decode_process_abort(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
 	{
 		/* Abort Oriole transaction */
 		ReorderBufferAbort(ctx->reorder, logicalXid,
-			startXLogPtr, 0);
+						   startXLogPtr, 0);
 	}
 }
 
@@ -575,19 +575,20 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 	while (ptr < endPtr)
 	{
+		const char *rec_type_str;
 		XLogRecPtr	changeXLogPtr = startXLogPtr + (ptr - startPtr);
 
-		READ(ptr, rec_type)
+		READ(ptr, rec_type);
 
-		const char *rec_type_str = wal_record_type_to_string(rec_type);
+		rec_type_str = wal_record_type_to_string(rec_type);
 
 		elog(DEBUG4, "RECEIVE record type %d (%s)", rec_type, rec_type_str);
 
 		if (rec_type == WAL_REC_XID)
 		{
-			READ(ptr, oxid)
-			READ(ptr, logicalXid)
-			READ(ptr, heapXid)
+			READ(ptr, oxid);
+			READ(ptr, logicalXid);
+			READ(ptr, heapXid);
 
 			if (TransactionIdIsValid(logicalXid))
 			{
@@ -605,15 +606,16 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		}
 		else if (rec_type == WAL_REC_SWITCH_LOGICAL_XID)
 		{
-			TransactionId oldXid, newXid;
+			TransactionId oldXid,
+						newXid;
 
-			READ(ptr, oldXid)
-			READ(ptr, newXid)
+			READ(ptr, oldXid);
+			READ(ptr, newXid);
 
 			elog(DEBUG4, "RECEIVE record type %d (%s) %u=>%u oxid %lu logicalXId %u heapXid %u",
-				rec_type, rec_type_str,
-				oldXid, newXid,
-				oxid, logicalXid, heapXid);
+				 rec_type, rec_type_str,
+				 oldXid, newXid,
+				 oxid, logicalXid, heapXid);
 
 			Assert(TransactionIdIsValid(oldXid));
 			Assert(TransactionIdIsValid(newXid));
@@ -621,8 +623,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			Assert(heapXid == newXid);
 
 			ReorderBufferAssignChild(ctx->reorder,
-				heapXid, logicalXid,
-				buf->origptr);
+									 heapXid, logicalXid,
+									 buf->origptr);
 
 			logicalXid = newXid;
 		}
@@ -636,8 +638,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			elog(DEBUG4, "WAL_REC_COMMIT");
 
-			READ(ptr, xmin)
-			READ(ptr, csn)
+			READ(ptr, xmin);
+			READ(ptr, csn);
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
@@ -686,16 +688,16 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					!SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr - 1))
 				{
 					decode_process_commit(ctx, buf,
-						oxid, logicalXid, heapXid,
-						startXLogPtr, endXLogPtr,
-						rec_type, rec_type_str);
+										  oxid, logicalXid, heapXid,
+										  startXLogPtr, endXLogPtr,
+										  rec_type, rec_type_str);
 				}
 				else
 				{
 					decode_process_abort(ctx, buf,
-						oxid, logicalXid, heapXid,
-						startXLogPtr,
-						rec_type, rec_type_str);
+										 oxid, logicalXid, heapXid,
+										 startXLogPtr,
+										 rec_type, rec_type_str);
 				}
 			}
 
@@ -711,9 +713,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			CommitSeqNo csn;
 			CSNSnapshotData *csnSnapshot;
 
-			READ(ptr, xid)
-			READ(ptr, xmin)
-			READ(ptr, csn)
+			READ(ptr, xid);
+			READ(ptr, xmin);
+			READ(ptr, csn);
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
@@ -735,16 +737,16 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			if (!SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr))
 			{
 				decode_process_commit(ctx, buf,
-					oxid, logicalXid, heapXid,
-					startXLogPtr, endXLogPtr,
-					rec_type, rec_type_str);
+									  oxid, logicalXid, heapXid,
+									  startXLogPtr, endXLogPtr,
+									  rec_type, rec_type_str);
 			}
 			else
 			{
 				decode_process_abort(ctx, buf,
-					oxid, logicalXid, heapXid,
-					startXLogPtr,
-					rec_type, rec_type_str);
+									 oxid, logicalXid, heapXid,
+									 startXLogPtr,
+									 rec_type, rec_type_str);
 			}
 
 			UpdateDecodingStats(ctx);
@@ -757,9 +759,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			ix_type = *ptr;
 			ptr++;
 
-			READ(ptr, cur_oids.datoid)
-			READ(ptr, cur_oids.reloid)
-			READ(ptr, cur_oids.relnode)
+			READ(ptr, cur_oids.datoid);
+			READ(ptr, cur_oids.reloid);
+			READ(ptr, cur_oids.relnode);
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
@@ -831,10 +833,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			ORelOids	oids;
 			Oid			oldRelnode;
 
-			READ(ptr, oids.datoid)
-			READ(ptr, oids.reloid)
-			READ(ptr, oldRelnode)
-			READ(ptr, oids.relnode)
+			READ(ptr, oids.datoid);
+			READ(ptr, oids.reloid);
+			READ(ptr, oldRelnode);
+			READ(ptr, oids.relnode);
 
 			/* Skip */
 		}
@@ -842,9 +844,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		{
 			ORelOids	oids;
 
-			READ(ptr, oids.datoid)
-			READ(ptr, oids.reloid)
-			READ(ptr, oids.relnode)
+			READ(ptr, oids.datoid);
+			READ(ptr, oids.reloid);
+			READ(ptr, oids.relnode);
 
 			/* Skip */
 		}
@@ -853,9 +855,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			SubTransactionId parentSubid;
 			TransactionId parentLogicalXid;
 
-			READ(ptr, parentSubid)
-			READ(ptr, logicalXid)
-			READ(ptr, parentLogicalXid)
+			READ(ptr, parentSubid);
+			READ(ptr, logicalXid);
+			READ(ptr, parentLogicalXid);
 
 			ReorderBufferAssignChild(ctx->reorder, parentLogicalXid, logicalXid, buf->origptr);
 
