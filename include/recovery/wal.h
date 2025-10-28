@@ -14,9 +14,7 @@
 #ifndef __WAL_H__
 #define __WAL_H__
 
-/*
- * Data sturctures for transactions in-progress recording.
- */
+/* WAL record types */
 #define WAL_REC_NONE		(0)
 #define WAL_REC_XID			(1)
 #define WAL_REC_COMMIT		(2)
@@ -39,15 +37,24 @@
 												 * UPDATE in logical decoding */
 #define WAL_REC_SWITCH_LOGICAL_XID		(16)
 
+/*
+ * Value has been fixed at the moment of introducing WAL versioning.
+ * Now, when we have WAL version in the beginning of each container
+ * we should never change this value.
+ */
 #define FIRST_WAL_VERSION (16)
 
-/* Bump it when WAL format changes */
+/* Bump it when WAL format changes compared to previous release. */
 #define CURRENT_WAL_VERSION (16)
 
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
 #define OWalInvalidCommitPos		UINT64_MAX
 
+
+/*
+ * Data structures for transactions in-progress recording.
+ */
 typedef struct
 {
 	uint8		recType;

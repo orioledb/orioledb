@@ -29,11 +29,14 @@ def main():
 		tag_format = f"commit '{expected}'"
 
 	# Check if provided version is numeric (not a hash)
-	is_numeric = re.match(r'^\d+$',
-	                      provided_version) and len(provided_version) < 6
+	is_numeric = re.match(
+	    r'^\d+$', provided_version) is not None and len(provided_version) < 6
+	# Check if provided version is part of `git describe --tags`
+	is_describe_tag = re.match(r'^\d+-\d+-g[0-9a-f]+$',
+	                           provided_version) is not None
 
 	# Compare appropriately
-	if is_numeric:
+	if is_numeric or is_describe_tag:
 		actual_mismatch = (expected_num != provided_version)
 	else:
 		actual_mismatch = (expected != provided_version)

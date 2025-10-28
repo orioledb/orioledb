@@ -71,6 +71,7 @@
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/makefuncs.h"
+#include "nodes/pg_list.h"
 #include "optimizer/optimizer.h"
 #include "optimizer/planner.h"
 #include "parser/parse_coerce.h"
@@ -108,6 +109,7 @@ List	   *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
 Oid			o_saved_relrewrite = InvalidOid;
 Oid			o_saved_reltablespace = InvalidOid;
+List	   *o_reuse_indices = NIL;
 static ORelOids saved_oids;
 static bool in_rewrite = false;
 List	   *reindex_list = NIL;
@@ -130,7 +132,6 @@ static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
 								Relation rel);
 static void o_find_collation_dependencies(Oid colloid);
 static void redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_tablespace);
-static void redefine_pkey_for_rel(Relation rel);
 
 static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
 static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
@@ -1370,94 +1371,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									dest, qc);
 	}
 
-	if (IsA(pstmt->utilityStmt, TruncateStmt) && !in_nontransactional_truncate)
-	{
-		TruncateStmt *tstmt = (TruncateStmt *) pstmt->utilityStmt;
-		List	   *relids = NIL;
-		List	   *rels = NIL;
-		ListCell   *cell;
-
-		/*
-		 * Open, exclusive-lock, and check all the explicitly-specified
-		 * relations
-		 */
-		foreach(cell, tstmt->relations)
-		{
-			RangeVar   *rv = lfirst(cell);
-			Relation	rel;
-			bool		recurse = rv->inh;
-			Oid			myrelid;
-			LOCKMODE	lockmode = AccessShareLock;
-
-			myrelid = RangeVarGetRelid(rv, lockmode, false);
-
-			/* don't throw error for "TRUNCATE foo, foo" */
-			if (list_member_oid(relids, myrelid))
-				continue;
-
-			/* open the relation, we already hold a lock on it */
-			rel = table_open(myrelid, NoLock);
-
-			rels = lappend(rels, rel);
-			relids = lappend_oid(relids, myrelid);
-
-			if (recurse)
-			{
-				ListCell   *child;
-				List	   *children;
-
-				children = find_all_inheritors(myrelid, lockmode, NULL);
-
-				foreach(child, children)
-				{
-					Oid			childrelid = lfirst_oid(child);
-
-					if (list_member_oid(relids, childrelid))
-						continue;
-
-					/* find_all_inheritors already got lock */
-					rel = table_open(childrelid, NoLock);
-					rels = lappend(rels, rel);
-					relids = lappend_oid(relids, childrelid);
-				}
-			}
-		}
-
-		if (tstmt->behavior == DROP_CASCADE)
-		{
-			for (;;)
-			{
-				List	   *newrelids;
-
-				newrelids = heap_truncate_find_FKs(relids);
-				if (newrelids == NIL)
-					break;		/* nothing else to add */
-
-				foreach(cell, newrelids)
-				{
-					Oid			relid = lfirst_oid(cell);
-					Relation	rel;
-
-					rel = table_open(relid, AccessExclusiveLock);
-					rels = lappend(rels, rel);
-					relids = lappend_oid(relids, relid);
-				}
-			}
-		}
-
-		foreach(cell, rels)
-		{
-			Relation	rel = (Relation) lfirst(cell);
-
-			if (is_orioledb_rel(rel))
-			{
-				redefine_pkey_for_rel(rel);
-			}
-
-			table_close(rel, NoLock);
-		}
-	}
-	else if (IsA(pstmt->utilityStmt, ReindexStmt))
+	if (IsA(pstmt->utilityStmt, ReindexStmt))
 	{
 		if (reindex_list)
 		{
@@ -2314,7 +2228,7 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_table
 
 }
 
-static void
+void
 redefine_pkey_for_rel(Relation rel)
 {
 	ORelOids	oids;
@@ -2773,9 +2687,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						is_open = false;
 
 						relname = makeString(rel->rd_rel->relname.data);
-						if (!(drop_arg->dropflags &
-							  PERFORM_DELETION_INTERNAL) ||
-							list_member(drop_index_list, relname))
+						if (list_member_oid(o_reuse_indices, objectId))
+						{
+							/* Do not drop index if it is set for reuse */
+							elog(DEBUG1, "object_access_hook: skipping index %d drop as it is set for reuse", objectId);
+						}
+						else if (!(drop_arg->dropflags &
+								   PERFORM_DELETION_INTERNAL) ||
+								 list_member(drop_index_list, relname))
 						{
 							drop_index_list = list_delete(drop_index_list,
 														  relname);
@@ -3068,6 +2987,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			}
 			else if (rel->rd_rel->relkind == RELKIND_INDEX)
 			{
+				/* Checks and adds bridged indexes */
 				Relation	tbl;
 
 				CommandCounterIncrement();
@@ -3077,8 +2997,12 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					 tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
 					is_orioledb_rel(tbl))
 				{
+					OSnapshot	oSnapshot;
+					OXid		oxid;
 					OTable	   *o_table;
 					ORelOids	table_oids;
+
+					fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
 					ORelOidsSetFromRel(table_oids, tbl);
 					o_table = o_tables_get(table_oids);
@@ -3091,7 +3015,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					{
 						int			ix_num = InvalidIndexNumber;
 						int			i;
-						bool		define = false;
 						bool		add_bridging = false;
 
 						for (i = 0; i < o_table->nindices; i++)
@@ -3104,6 +3027,20 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						}
 
 						Assert(rel->rd_rel->relkind == RELKIND_INDEX);
+
+						/* In case of index reuse, update the index oid */
+						if (ix_num != InvalidIndexNumber && list_member_oid(o_reuse_indices, o_table->indices[ix_num].oids.reloid))
+						{
+							Oid			old_oid = o_table->indices[ix_num].oids.reloid;
+
+							elog(DEBUG1, "object_access_hook: updating index oid %d to %d", old_oid, objectId);
+							o_table->indices[ix_num].oids.reloid = objectId;
+							o_tables_rel_meta_lock(tbl);
+							o_tables_update(o_table, oxid, oSnapshot.csn);
+							o_tables_rel_meta_unlock(tbl, InvalidOid);
+							o_invalidate_oids(o_table->oids);
+							o_reuse_indices = list_delete_oid(o_reuse_indices, old_oid);
+						}
 
 						if (!o_table->index_bridging)
 						{
@@ -3119,8 +3056,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 											errdetail("This feature is intended for testing purposes and is not recommended for normal usage."));
 									add_bridging = true;
 								}
-								else
-									define = true;
 							}
 							else
 							{
@@ -3129,8 +3064,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						}
 						else if (rel->rd_rel->relam == BTREE_AM_OID)
 						{
-							define = true;
-
 							if (!in_rewrite && !rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
 							{
 								OBTOptions *options = (OBTOptions *) rel->rd_options;
@@ -3141,16 +3074,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 											errmsg("using bridged btree index for orioledb"),
 											errdetail("This feature is intended for testing purposes and is not recommended for normal usage."));
 							}
-						}
-
-						if (define)
-						{
-							if (rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
-								o_define_index_validate(table_oids, rel, NULL, NULL);
-							relation_close(rel, AccessShareLock);
-							closed = true;
-							if (!in_rewrite && (rel->rd_index->indisprimary || ix_num != InvalidIndexNumber))
-								o_define_index(tbl, NULL, rel->rd_rel->oid, false, ix_num, false, &o_pkey_result);
 						}
 
 						if (add_bridging)

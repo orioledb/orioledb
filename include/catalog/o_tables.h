@@ -22,6 +22,7 @@
 #include "executor/execExpr.h"
 #include "catalog/objectaddress.h"
 #include "nodes/parsenodes.h"
+#include "orioledb.h"
 
 /*
  * Describes a field of an orioledb table.
@@ -325,5 +326,8 @@ o_tables_table_meta_unlock(OTable *o_table, Oid oldRelnode)
 }
 
 extern Oid	o_saved_relrewrite;
+extern List *o_reuse_indices;
+
+extern void redefine_pkey_for_rel(Relation rel);
 
 #endif							/* __O_TABLES_H__ */

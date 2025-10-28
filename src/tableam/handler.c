@@ -778,6 +778,19 @@ orioledb_relation_set_new_filenode(Relation rel,
 					new_oids,
 				   *newTreeOids;
 		bool		is_temp;
+		Oid			toast_relid;
+
+		/* If toast relation exists, set new filenode for it */
+		toast_relid = rel->rd_rel->reltoastrelid;
+		if (OidIsValid(toast_relid))
+		{
+			Relation	toastrel = relation_open(toast_relid,
+												 AccessExclusiveLock);
+
+			RelationSetNewRelfilenode(toastrel,
+									  toastrel->rd_rel->relpersistence);
+			table_close(toastrel, NoLock);
+		}
 
 		ORelOidsSetFromRel(old_oids, rel);
 		old_o_table = o_tables_get(old_oids);
@@ -1735,8 +1748,11 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 	double		deadrows = 0;	/* # dead rows seen */
 	double		rowstoskip = -1;	/* -1 means not set yet */
 	BlockSamplerData bs;
-	BlockNumber totalblocks = TREE_NUM_LEAF_PAGES(&pk->desc);
+	BlockNumber totalblocks;
 	ItemPointerData fake_iptr = {0};
+
+	o_btree_load_shmem(&pk->desc);
+	totalblocks = TREE_NUM_LEAF_PAGES(&pk->desc);
 
 	ItemPointerSetBlockNumber(&fake_iptr, 0);
 	ItemPointerSetOffsetNumber(&fake_iptr, 1);

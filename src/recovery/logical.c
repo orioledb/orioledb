@@ -553,7 +553,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	Pointer		ptr = startPtr;
 	OTableDescr *descr = NULL;
 	OIndexDescr *indexDescr = NULL;
-	int			sys_tree_num = -1;
 	ORelOids	cur_oids = {0, 0, 0};
 	OXid		oxid = InvalidOXid;
 	TransactionId logicalXid = InvalidTransactionId;
@@ -802,6 +801,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		}
 		else if (rec_type == WAL_REC_RELATION)
 		{
+			int			sys_tree_num = -1;
+
 			ix_type = *ptr;
 			ptr++;
 
@@ -816,6 +817,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 
 			elog(DEBUG4, "WAL_REC_RELATION");
+
+			/* Skip actual relation processing in fast_forward mode */
+			if (ctx->fast_forward)
+				continue;
 
 			if (IS_SYS_TREE_OIDS(cur_oids))
 				sys_tree_num = cur_oids.relnode;
@@ -905,7 +910,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			READ(ptr, logicalXid);
 			READ(ptr, parentLogicalXid);
 
-			ReorderBufferAssignChild(ctx->reorder, parentLogicalXid, logicalXid, buf->origptr);
+			if (!ctx->fast_forward)
+				ReorderBufferAssignChild(ctx->reorder, parentLogicalXid, logicalXid, buf->origptr);
 
 			/* Skip */
 		}
@@ -922,6 +928,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			OFixedTuple tuple1;
 			OFixedTuple tuple2;
 			OffsetNumber debug_length;
+			ReorderBufferTXN *txn;
 
 			read_modify_wal_tuples(rec_type, &ptr, &tuple1, &tuple2, &debug_length);
 
@@ -937,6 +944,13 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				continue;
 
 			(void) set_snapshot(ctx, logicalXid, changeXLogPtr);
+
+			txn = get_reorder_buffer_txn(ctx->reorder, logicalXid);
+			txn->txn_flags |= RBTXN_DISTR_SKIP_CLEANUP;
+
+			/* Skip actual record processing in fast_forward mode */
+			if (ctx->fast_forward)
+				continue;
 
 			if ((ix_type == oIndexInvalid || ix_type == oIndexToast) &&
 				cur_oids.datoid == ctx->slot->data.database)

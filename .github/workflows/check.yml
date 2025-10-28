@@ -31,20 +31,53 @@ jobs:
           )
 
           # Reduced matrix: used for all other push events
-          combos = [
+          branch_combos = [
               ("amd64", 16, "gcc"),
               ("amd64", 17, "clang"),
               ("arm64", 16, "clang"),
               ("arm64", 17, "gcc"),
           ]
-          reduced = {
-              "include": [
-                  {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
-                  for (c, pg, comp), ct in itertools.product(combos, full["check_type"])
-              ]
-          }
 
-          matrix = full if event == "pull_request" or ref == "main" else reduced
+          # Reverse matrix used for pull requests
+          reverse_combos = [
+              ("amd64", 16, "clang"),
+              ("amd64", 17, "gcc"),
+              ("arm64", 16, "gcc"),
+              ("arm64", 17, "clang"),
+          ]
+
+          # Make matrix for the PR
+          if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
+              with open(os.environ["GITHUB_EVENT_PATH"], "r") as f:
+                  event = json.load(f)
+
+              head_repo = event["pull_request"]["head"]["repo"]["full_name"]
+              base_repo = event["pull_request"]["base"]["repo"]["full_name"]
+
+              # If the PR is from a fork use full matrix
+              if head_repo != base_repo:
+                  matrix = full
+              # If the PR is from the main repository use reduced reverse matrix
+              else:
+                  matrix = {
+                      "include": [
+                          {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
+                          for (c, pg, comp), ct in itertools.product(reverse_combos, full["check_type"])
+                      ]
+                  }
+          # Make matrix for branches
+          else:
+              # Use full matrix for the main branch
+              if ref == "main":
+                  matrix = full
+              # Use reduced matrix for other branches
+              else:
+                  matrix = {
+                      "include": [
+                          {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
+                          for (c, pg, comp), ct in itertools.product(branch_combos, full["check_type"])
+                      ]
+                  }
 
           # Export as job output
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
@@ -84,19 +117,45 @@ jobs:
         run: bash ./orioledb/ci/build.sh
       - name: Install post build prerequisites
         run: bash ./orioledb/ci/post_build_prerequisites.sh
+
       - name: Check
         timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 150 || 20 }}
         run: bash ./orioledb/ci/check.sh
       - name: Check output
         run: bash ./orioledb/ci/check_output.sh
         if: ${{ success() || failure() }}
+
+      - name: Upload regression tests diffs
+        uses: actions/upload-artifact@v4
+        if: ${{ failure() }}
+        with:
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_regression.diffs
+          path: |
+            ./orioledb/test/**/regression.diffs
+            ./orioledb/test/**/isolation_filtered.diffs
+            ./orioledb/test/log/*.log
+            ./postgresql/src/test/**/regression.diffs
+            ./postgresql/src/test/**/isolation_filtered.diffs
+          retention-days: 2
+          if-no-files-found: ignore
+      - name: Upload testgres tests logs
+        uses: actions/upload-artifact@v4
+        if: ${{ failure() }}
+        with:
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_testgres.logs
+          path: |
+            ./orioledb/test/tmp_check_t/*/logs/*log
+          retention-days: 2
+          if-no-files-found: ignore
+
       - name: Show stuck processes
         run: bash ./orioledb/ci/list_stuck.sh
         if: ${{ always() }}
+
       - name: Run lcov
         if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
         run: bash ./orioledb/ci/lcov.sh
-      - name: create artifact for coverage.info
+      - name: Create artifact for coverage.info
         if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
         uses: actions/upload-artifact@v4
         with:
