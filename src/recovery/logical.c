@@ -485,33 +485,8 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 	ptr += sizeof(value); \
 }
 
-#define XID_ASSIGNED(logicalXid, heapXid) (logicalXid == heapXid)
-
-static inline bool
-decode_txn_need_finalize(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
-						 const OXid oxid, const TransactionId logicalXid, const TransactionId heapXid,
-						 const uint8 rec_type, const char *rec_type_str)
-{
-	Assert(TransactionIdIsValid(logicalXid));
-
-	if (TransactionIdIsValid(heapXid))
-	{
-		/* Transaction is mixed */
-
-		if (XID_ASSIGNED(logicalXid, heapXid))
-		{
-			/* Finalize (commit/abort) as heap transaction so ignore here */
-			elog(DEBUG4, "IGNORED on record type %d (%s) oxid %lu logicalXId %u heapXid %u", rec_type, rec_type_str, oxid, logicalXid, heapXid);
-		}
-	}
-	else
-	{
-		/* Finalize (commit/abort) Oriole transaction */
-		return true;
-	}
-
-	return false;
-}
+#define LOGICAL_XID_ASSIGNED_FROM_HEAP(logicalXid, heapXid) (TransactionIdIsValid(heapXid) && logicalXid == heapXid)
+#define TXN_NEED_FINALIZE(logicalXid, heapXid) (!TransactionIdIsValid(heapXid) && TransactionIdIsValid(logicalXid))
 
 /*
  * Handle OrioleDB records for LogicalDecodingProcessRecord().
@@ -639,6 +614,18 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				if (txn->toptxn)
 					txn = txn->toptxn;
 
+				Assert(TransactionIdIsValid(logicalXid));
+
+				if (LOGICAL_XID_ASSIGNED_FROM_HEAP(logicalXid, heapXid))
+				{
+					/*
+					 * Finalize (commit/abort) as heap transaction so ignore
+					 * here
+					 */
+					elog(DEBUG4, "IGNORED on record type %d (%s) oxid %lu logicalXId %u heapXid %u", rec_type, rec_type_str, oxid, logicalXid, heapXid);
+					continue;
+				}
+
 				if (rec_type == WAL_REC_COMMIT)
 				{
 					/*
@@ -650,6 +637,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 											   endXLogPtr - 1) ||
 						ctx->fast_forward)
 					{
+						elog(DEBUG4, "FORGET record type %d (%s) oxid %lu logicalXid %u heapXid %u", rec_type, rec_type_str, oxid, logicalXid, heapXid);
+
 						dlist_foreach(cur_txn_i, &txn->subtxns)
 						{
 							ReorderBufferTXN *cur_txn;
@@ -668,11 +657,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						continue;
 					}
 
-					Assert(TransactionIdIsValid(logicalXid));
-
-					if (decode_txn_need_finalize(ctx, buf,
-												 oxid, logicalXid, heapXid,
-												 rec_type, rec_type_str))
+					if (TXN_NEED_FINALIZE(logicalXid, heapXid))
 					{
 						/*
 						 * Proceed to commit this transaction and
@@ -696,9 +681,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				{
 					Assert(rec_type == WAL_REC_ROLLBACK);
 
-					if (decode_txn_need_finalize(ctx, buf,
-												 oxid, logicalXid, heapXid,
-												 rec_type, rec_type_str))
+					if (TXN_NEED_FINALIZE(logicalXid, heapXid))
 					{
 						dlist_foreach(cur_txn_i, &txn->subtxns)
 						{
@@ -747,17 +730,23 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			if (!set_snapshot(ctx, logicalXid, changeXLogPtr))
 				continue;
 
+			if (LOGICAL_XID_ASSIGNED_FROM_HEAP(logicalXid, heapXid))
+			{
+				/* Finalize (commit/abort) as heap transaction so ignore here */
+				elog(DEBUG4, "IGNORED on record type %d (%s) oxid %lu logicalXId %u heapXid %u", rec_type, rec_type_str, oxid, logicalXid, heapXid);
+				continue;
+			}
+
 			/* Skip actual commit processing */
 			if (SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr - 1) ||
 				ctx->fast_forward)
 			{
+				elog(DEBUG4, "FORGET record type %d (%s) oxid %lu logicalXid %u heapXid %u", rec_type, rec_type_str, oxid, logicalXid, heapXid);
 				ReorderBufferForget(ctx->reorder, logicalXid, startXLogPtr);
 			}
 			else
 			{
-				if (decode_txn_need_finalize(ctx, buf,
-											 oxid, logicalXid, heapXid,
-											 rec_type, rec_type_str))
+				if (TXN_NEED_FINALIZE(logicalXid, heapXid))
 				{
 					ReorderBufferCommit(ctx->reorder, logicalXid,
 										startXLogPtr, endXLogPtr,
