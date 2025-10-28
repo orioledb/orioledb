@@ -3088,17 +3088,18 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				Assert(type == RecoveryMsgTypeReinsert);
 				Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
 
-				 
-				/* For REINSERT with REPLICA_IDENTITY_FULL tuple2 (old tuple)
+
+				/*
+				 * For REINSERT with REPLICA_IDENTITY_FULL tuple2 (old tuple)
 				 * representation is full tuple, not a key. We need to rewrite
 				 * it with a key.
 				 */
 				if (relreplident == REPLICA_IDENTITY_FULL)
 				{
-					bool allocated;
+					bool		allocated;
 
 					tuple2.tuple = o_btree_tuple_make_key(&(GET_PRIMARY(descr))->desc, tuple2.tuple, tuple2.tuple.data, true, &allocated);
-					Assert (!allocated);
+					Assert(!allocated);
 				}
 
 				if (single)
@@ -3125,10 +3126,10 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				 */
 				if (relreplident == REPLICA_IDENTITY_FULL && rec_type == WAL_REC_DELETE)
 				{
-					bool allocated;
+					bool		allocated;
 
 					tuple1.tuple = o_btree_tuple_make_key(&(GET_PRIMARY(descr))->desc, tuple1.tuple, tuple1.tuple.data, true, &allocated);
-					Assert (!allocated);
+					Assert(!allocated);
 				}
 
 				if (single)
