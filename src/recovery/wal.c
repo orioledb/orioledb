@@ -728,7 +728,7 @@ o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relrepli
 	}
 }
 
-/* Could be used only for system trees that are not replicated logically */
+/* Could be used only for system trees and bridge trees that are not replicated logically */
 void
 o_wal_delete_key(BTreeDescr *desc, OTuple key)
 {

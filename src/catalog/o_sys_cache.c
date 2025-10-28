@@ -954,7 +954,7 @@ typedef struct
 	UndoStackItem header;
 	OSysCache  *sys_cache;
 	OSysCacheKey4 key;
-}			SysCacheDeleteUndoStackItem;
+} SysCacheDeleteUndoStackItem;
 
 static void
 o_add_undo_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key)

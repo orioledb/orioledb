@@ -253,16 +253,12 @@ delete_old_bridge_index_ctid(OTableDescr *descr, Relation relation,
 	if (primary->desc.storageType == BTreeStoragePersistence)
 	{
 		OTuple		keyTuple;
-		OTuple		tuple;
 
 		keyTuple.formatFlags = O_TUPLE_FLAGS_FIXED_FORMAT;
 		keyTuple.data = (Pointer) &bridge_oslot->bridge_ctid;
 
-		tuple = o_btree_find_tuple_by_key(&descr->bridge->desc,					// ?
-                                                                          &keyTuple, BTreeKeyNonLeafKey,
-                                                                          &o_in_progress_snapshot, NULL,
-                                                                          CurrentMemoryContext, NULL);
-		o_wal_delete(&descr->bridge->desc, tuple);
+		/* o_wal_delete_key can be used as long as bridge index can't have replica identity */
+		o_wal_delete_key(&descr->bridge->desc, keyTuple);
 		flush_local_wal(false);
 	}
 
