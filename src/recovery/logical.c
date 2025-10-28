@@ -488,10 +488,9 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 #define XID_ASSIGNED(logicalXid, heapXid) (logicalXid == heapXid)
 
 static inline bool
-decode_process_need_commit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
-						   const OXid oxid, const TransactionId logicalXid, const TransactionId heapXid,
-						   const XLogRecPtr startXLogPtr, const XLogRecPtr endXLogPtr,
-						   const uint8 rec_type, const char *rec_type_str)
+decode_txn_need_finalize(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
+						 const OXid oxid, const TransactionId logicalXid, const TransactionId heapXid,
+						 const uint8 rec_type, const char *rec_type_str)
 {
 	Assert(TransactionIdIsValid(logicalXid));
 
@@ -501,38 +500,13 @@ decode_process_need_commit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
 
 		if (XID_ASSIGNED(logicalXid, heapXid))
 		{
-			/* Commit as heap transaction so ignore commit here */
-			elog(DEBUG4, "IGNORED COMMIT on record type %d (%s) oxid %lu logicalXId %u heapXid %u", rec_type, rec_type_str, oxid, logicalXid, heapXid);
+			/* Finalize (commit/abort) as heap transaction so ignore here */
+			elog(DEBUG4, "IGNORED on record type %d (%s) oxid %lu logicalXId %u heapXid %u", rec_type, rec_type_str, oxid, logicalXid, heapXid);
 		}
 	}
 	else
 	{
-		/* Commit Oriole transaction */
-		return true;
-	}
-
-	return false;
-}
-
-static inline bool
-decode_process_need_abort(LogicalDecodingContext *ctx, XLogRecordBuffer *buf,
-						  const OXid oxid, const TransactionId logicalXid, const TransactionId heapXid,
-						  const XLogRecPtr startXLogPtr,
-						  const uint8 rec_type, const char *rec_type_str)
-{
-	if (TransactionIdIsValid(heapXid))
-	{
-		/* Transaction is mixed */
-
-		if (XID_ASSIGNED(logicalXid, heapXid))
-		{
-			/* Abort as heap transaction so ignore commit here */
-			elog(DEBUG4, "IGNORED ABORT on record type %d (%s) oxid %lu logicalXId %u heapXid %u", rec_type, rec_type_str, oxid, logicalXid, heapXid);
-		}
-	}
-	else
-	{
-		/* Abort Oriole transaction */
+		/* Finalize (commit/abort) Oriole transaction */
 		return true;
 	}
 
@@ -696,10 +670,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 					Assert(TransactionIdIsValid(logicalXid));
 
-					if (decode_process_need_commit(ctx, buf,
-												   oxid, logicalXid, heapXid,
-												   startXLogPtr, endXLogPtr,
-												   rec_type, rec_type_str))
+					if (decode_txn_need_finalize(ctx, buf,
+												 oxid, logicalXid, heapXid,
+												 rec_type, rec_type_str))
 					{
 						/*
 						 * Proceed to commit this transaction and
@@ -723,10 +696,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				{
 					Assert(rec_type == WAL_REC_ROLLBACK);
 
-					if (decode_process_need_abort(ctx, buf,
-												  oxid, logicalXid, heapXid,
-												  startXLogPtr,
-												  rec_type, rec_type_str))
+					if (decode_txn_need_finalize(ctx, buf,
+												 oxid, logicalXid, heapXid,
+												 rec_type, rec_type_str))
 					{
 						dlist_foreach(cur_txn_i, &txn->subtxns)
 						{
@@ -783,10 +755,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else
 			{
-				if (decode_process_need_commit(ctx, buf,
-											   oxid, logicalXid, heapXid,
-											   startXLogPtr, endXLogPtr,
-											   rec_type, rec_type_str))
+				if (decode_txn_need_finalize(ctx, buf,
+											 oxid, logicalXid, heapXid,
+											 rec_type, rec_type_str))
 				{
 					ReorderBufferCommit(ctx->reorder, logicalXid,
 										startXLogPtr, endXLogPtr,
