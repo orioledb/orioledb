@@ -58,6 +58,7 @@ typedef struct
 	uint8		recType;
 	uint8		oxid[sizeof(OXid)];
 	uint8		logicalXid[sizeof(TransactionId)];
+	uint8		heapXid[sizeof(TransactionId)];
 } WALRecXid;
 
 typedef struct
@@ -152,6 +153,8 @@ typedef struct
 #define LOCAL_WAL_BUFFER_SIZE	(8192)
 #define ORIOLEDB_WAL_PREFIX	"o_wal"
 #define ORIOLEDB_WAL_PREFIX_SIZE (5)
+
+extern const char *wal_record_type_to_string(int wal_record);
 
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, OffsetNumber length);

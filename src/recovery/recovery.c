@@ -2763,6 +2763,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 			/* don't need logicalXid here */
 			ptr += sizeof(TransactionId);
+			/* don't need heapXid here */
+			ptr += sizeof(TransactionId);
 
 			advance_oxids(oxid);
 			recovery_switch_to_oxid(oxid, -1);

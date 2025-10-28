@@ -45,6 +45,33 @@ static void add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 
 #define XID_RESERVED_LENGTH ((local_wal_contains_xid) ? 0 : sizeof(WALRecXid))
 
+const char *
+wal_record_type_to_string(int wal_record)
+{
+	switch (wal_record)
+	{
+		/* 0 */ case WAL_REC_NONE: return "NONE";
+		/* 1 */ case WAL_REC_XID: return "XID";
+		/* 2 */ case WAL_REC_COMMIT: return "COMMIT";
+		/* 3 */ case WAL_REC_ROLLBACK: return "ROLLBACK";
+		/* 4 */ case WAL_REC_RELATION: return "RELATION";
+		/* 5 */ case WAL_REC_INSERT: return "INSERT";
+		/* 6 */ case WAL_REC_UPDATE: return "UPDATE";
+		/* 7 */ case WAL_REC_DELETE: return "DELETE";
+		/* 8 */ case WAL_REC_O_TABLES_META_LOCK: return "O_TABLES_META_LOCK";
+		/* 9 */ case WAL_REC_O_TABLES_META_UNLOCK: return "O_TABLES_META_UNLOCK";
+		/*10 */ case WAL_REC_SAVEPOINT: return "SAVEPOINT";
+		/*11 */ case WAL_REC_ROLLBACK_TO_SAVEPOINT: return "ROLLBACK_TO_SAVEPOINT";
+		/*12 */ case WAL_REC_JOINT_COMMIT: return "JOINT_COMMIT";
+		/*13 */ case WAL_REC_TRUNCATE: return "TRUNCATE";
+		/*14 */ case WAL_REC_BRIDGE_ERASE: return "BRIDGE_ERASE";
+		/*15 */ case WAL_REC_REINSERT: return "REINSERT";
+		/*16 */ case WAL_REC_SWITCH_LOGICAL_XID: return "SWITCH_LOGICAL_XID";
+		default: return "UNKNOWN";
+	}
+	return "UNKNOWN";
+}
+
 uint16
 check_wal_container_version(Pointer *ptr)
 {
@@ -417,6 +444,7 @@ static void
 add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 {
 	WALRecXid  *rec;
+	TransactionId heapXid;
 
 	Assert(!local_wal_contains_xid);
 	local_wal_contains_xid = true;
@@ -424,10 +452,15 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 	Assert(OXidIsValid(oxid));
 	Assert(local_wal_buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
 
+	heapXid = GetCurrentTransactionIdIfAny();
+
+	elog(DEBUG4, "WAL_REC_XID oxid %lu logicalXid %u heapXid %u", oxid, logicalXid, heapXid);
+
 	rec = (WALRecXid *) (&local_wal_buffer[local_wal_buffer_offset]);
 	rec->recType = WAL_REC_XID;
 	memcpy(rec->oxid, &oxid, sizeof(OXid));
 	memcpy(rec->logicalXid, &logicalXid, sizeof(TransactionId));
+	memcpy(rec->heapXid, &heapXid, sizeof(TransactionId));
 
 	local_wal_buffer_offset += sizeof(*rec);
 }
@@ -519,8 +552,10 @@ add_switch_logical_xid_wal_record(TransactionId logicalXid_old, TransactionId lo
 	Assert(local_wal_buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
 
 	add_wal_container_header_if_needed();
+	add_xid_wal_record_if_needed();
 
 	rec = (WALRecSwitchLogicalXid *) (&local_wal_buffer[local_wal_buffer_offset]);
+
 	rec->recType = WAL_REC_SWITCH_LOGICAL_XID;
 	memcpy(rec->oldXid, &logicalXid_old, sizeof(TransactionId));
 	memcpy(rec->newXid, &logicalXid_new, sizeof(TransactionId));

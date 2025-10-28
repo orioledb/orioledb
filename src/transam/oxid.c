@@ -72,29 +72,29 @@
  *
  * Each one of these xids uses an independent sequence / algorithm to allocate a new xid.
  *
- * xact types of xid assignment:
+ * xact types of xid assignment for logical decoding & replay:
  *     - readonly           - no xid (*)
- *     - heap write         - heap xid
- *     - oriole write       - oriole xid
- *     - heap->oriole write - heap xid
- *     - oriole->heap write - switch xid (*)
+ *     - heap write         - heap xid - COMMIT heap xact
+ *     - oriole write       - oriole xid - COMMIT oriole xact
+ *     - heap->oriole write - heap xid - merged xact: COMMIT both as heap xact
+ *     - oriole->heap write - switch xid (*) - COMMIT oriole xact as a subxact of a top heap xact
  */
 static OXid curOxid = InvalidOXid;	/* a 64-bit OrioleDB oxid */
 
 static LogicalXidMeta logicalXidMeta = {InvalidTransactionId, false};
 
 static inline void
-reset_logical_xid_meta()
+reset_logical_xid_meta(void)
 {
 	logicalXidMeta.xid = InvalidTransactionId;
 	logicalXidMeta.useHeap = false;
 }
 
 static inline LogicalXidMeta *
-clone_logical_xid_meta()
+clone_logical_xid_meta(void)
 {
 	LogicalXidMeta *clone = (LogicalXidMeta *) palloc(sizeof(LogicalXidMeta));
-
+	Assert(clone);
 	memcpy(clone, &logicalXidMeta, sizeof(LogicalXidMeta));
 	return clone;
 }
@@ -452,11 +452,8 @@ oxid_subxact_callback(
 
 					if (!logicalXidMeta.useHeap && heapXid != logicalXidMeta.xid)
 					{
-						/*
-						 *
-						 * add_switch_logical_xid_wal_record(logicalXidMeta.xid,
-						 * heapXid);
-						 */
+						elog(DEBUG4, "SWITCH_LOGICAL_XID %u -> %u", logicalXidMeta.xid, heapXid);
+						add_switch_logical_xid_wal_record(logicalXidMeta.xid, heapXid);
 					}
 				}
 				else if (TransactionIdIsValid(logicalXidMeta.xid))
@@ -1225,7 +1222,16 @@ get_current_oxid(void)
 												  nestingLevel,
 												  COMMITSEQNO_STATUS_IN_PROGRESS));
 		curOxid = newOxid;
-		logicalXidMeta.xid = acquire_logical_xid(&logicalXidMeta.useHeap);
+
+		if (nestingLevel > 0) /* Check if an autonomous transaction is in progress */
+		{
+			/* Autonomous transactions should be ignored during logical decoding, so invalidate logical xid info */
+			reset_logical_xid_meta();
+		}
+		else
+		{
+			logicalXidMeta.xid = acquire_logical_xid(&logicalXidMeta.useHeap);
+		}
 	}
 
 	return curOxid;
@@ -1291,8 +1297,8 @@ get_current_logical_xid(void)
 		!logicalXidMeta.useHeap &&
 		heapXid != logicalXidMeta.xid)
 	{
-		/* add_switch_logical_xid_wal_record(logicalXidMeta.xid, heapXid); */
-
+		elog(DEBUG4, "SWITCH_LOGICAL_XID %u -> %u", logicalXidMeta.xid, heapXid);
+		add_switch_logical_xid_wal_record(logicalXidMeta.xid, heapXid);
 		logicalXidMeta.xid = heapXid;
 		logicalXidMeta.useHeap = true;
 	}
