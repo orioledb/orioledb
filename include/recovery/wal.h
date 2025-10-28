@@ -39,10 +39,10 @@
 												 * UPDATE in logical decoding */
 #define WAL_REC_SWITCH_LOGICAL_XID		(16)
 
-#define FIRST_WAL_VERSION (17)
+#define FIRST_WAL_VERSION (16)
 
 /* Bump it when WAL format changes */
-#define CURRENT_WAL_VERSION (17)
+#define CURRENT_WAL_VERSION (16)
 
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
