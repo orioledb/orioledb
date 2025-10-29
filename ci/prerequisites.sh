@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -eu
+set -eux
 
 # print the hostname to be able to identify runner by logs
 echo "HOSTNAME=`hostname`"
