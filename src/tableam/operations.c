@@ -258,7 +258,7 @@ delete_old_bridge_index_ctid(OTableDescr *descr, Relation relation,
 		keyTuple.data = (Pointer) &bridge_oslot->bridge_ctid;
 
 		/* o_wal_delete_key can be used as long as bridge index can't have replica identity */
-		o_wal_delete_key(&descr->bridge->desc, keyTuple);
+		o_wal_delete_key(&descr->bridge->desc, keyTuple, true);
 		flush_local_wal(false);
 	}
 
@@ -284,7 +284,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		.arg = slot
 	};
 
-	CheckCmdReplicaIdentity(rel, CMD_INSERT);
+	CheckCmdReplicaIdentity(relation, CMD_INSERT);
 
 	if (slot->tts_ops != descr->newTuple->tts_ops ||
 		(((OTableSlot *) slot)->descr != NULL &&

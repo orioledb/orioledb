@@ -152,7 +152,7 @@ typedef struct
 #define ORIOLEDB_WAL_PREFIX_SIZE (5)
 
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
-								  OTuple tuple, OffsetNumber length);
+								  OTuple tuple, OffsetNumber length, char relreplident);
 extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr);
 extern void add_o_tables_meta_lock_wal_record(void);
 extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);
@@ -168,10 +168,10 @@ extern void wal_after_commit(void);
 extern void wal_rollback(OXid oxid, TransactionId logicalXid);
 extern XLogRecPtr log_logical_wal_container(Pointer ptr, int length);
 extern void o_wal_insert(BTreeDescr *desc, OTuple tuple);
-extern void o_wal_update(BTreeDescr *desc, OTuple tuple, char relreplident);
+extern void o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident);
 extern void o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident);
-extern void o_wal_delete_key(BTreeDescr *desc, OTuple key);
-extern void o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple);
+extern void o_wal_delete_key(BTreeDescr *desc, OTuple key, bool is_bridge_index);
+extern void o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relreplident);
 extern void add_truncate_wal_record(ORelOids oids);
 extern bool get_local_wal_has_material_changes(void);
 extern void set_local_wal_has_material_changes(bool value);

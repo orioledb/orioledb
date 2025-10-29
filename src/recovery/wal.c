@@ -41,7 +41,8 @@ static void add_rel_wal_record(ORelOids oids, OIndexType type);
 static void flush_local_wal_if_needed(int required_length);
 static inline void add_local_modify(uint8 record_type, OTuple record, OffsetNumber length, OTuple record2, OffsetNumber length2);
 static void add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
-										   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2);
+										   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2, char relreplident);
+static void add_relreplident_wal_record(char relreplident);
 
 #define XID_RESERVED_LENGTH ((local_wal_contains_xid) ? 0 : sizeof(WALRecXid))
 
@@ -467,7 +468,7 @@ add_relreplident_wal_record(char relreplident)
 }
 
 static void
-add_rel_wal_record(ORelOids oids, OIndexType type, char relreplident)
+add_rel_wal_record(ORelOids oids, OIndexType type)
 {
 	WALRecRelation *rec = (WALRecRelation *) (&local_wal_buffer[local_wal_buffer_offset]);
 
@@ -479,7 +480,6 @@ add_rel_wal_record(ORelOids oids, OIndexType type, char relreplident)
 	memcpy(rec->datoid, &oids.datoid, sizeof(Oid));
 	memcpy(rec->reloid, &oids.reloid, sizeof(Oid));
 	memcpy(rec->relnode, &oids.relnode, sizeof(Oid));
-	memcpy(rec->relreplident, &relreplident, sizeof(char));
 
 	local_wal_buffer_offset += sizeof(*rec);
 
@@ -656,14 +656,14 @@ o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident)
 {
 	OTuple		wal_record1;
 	OTuple		wal_record2;
-	bool		call_pfree;
-	bool		call_pfree2;
+	bool		call_pfree1;
+	bool		call_pfree2 = false;
 	int			size1;
 	int			size2;
 
 	elog(DEBUG3, "o_wal_update");
 
-	wal_record1 = recovery_rec_update(desc, tuple, &call_pfree1, &size1, relreplident);
+	wal_record1 = recovery_rec_update(desc, tuple, &call_pfree1, &size1);
 
 	/*
 	 * For REPLICA_IDENTITY_FULL include new and old tuples into
@@ -675,7 +675,7 @@ o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident)
 	}
 	else
 	{
-		wal_record2 = recovery_rec_update(desc, oldtuple, &call_pfree2, &size2, relreplident);
+		wal_record2 = recovery_rec_update(desc, oldtuple, &call_pfree2, &size2);
 		add_modify_wal_record_extended(WAL_REC_UPDATE, desc, wal_record1, size1, wal_record2, size2, relreplident);
 	}
 
@@ -730,13 +730,13 @@ o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relrepli
 
 /* Could be used only for system trees and bridge trees that are not replicated logically */
 void
-o_wal_delete_key(BTreeDescr *desc, OTuple key)
+o_wal_delete_key(BTreeDescr *desc, OTuple key, bool is_bridge_index)
 {
 	OTuple		wal_record;
 	bool		call_pfree;
 	int			size;
 
-	Assert(IS_SYS_TREE_OIDS(desc->oids));
+	Assert(IS_SYS_TREE_OIDS(desc->oids) || is_bridge_index);
 	wal_record = recovery_rec_delete_key(desc, key, &call_pfree, &size);
 	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, REPLICA_IDENTITY_DEFAULT);
 

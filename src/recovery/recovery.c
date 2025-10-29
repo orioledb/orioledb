@@ -2682,6 +2682,8 @@ read_modify_wal_tuples(uint8 rec_type, Pointer *ptr, OFixedTuple *tuple1, OFixed
 
 	if (!contains_two_tuples)
 	{
+		O_TUPLE_SET_NULL(tuple2->tuple);
+
 		tuple1->tuple.formatFlags = **ptr;
 		(*ptr)++;
 

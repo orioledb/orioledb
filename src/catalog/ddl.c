@@ -134,6 +134,7 @@ static void redefine_pkey_for_rel(Relation rel);
 
 static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
 static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
+static void o_alter_replica_identity(Relation rel, ReplicaIdentityStmt *stmt, LOCKMODE lockmode);
 
 void
 orioledb_setup_ddl_hooks(void)
@@ -1490,7 +1491,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 }
 
 /*
- * Privane copy of relation_mark_replica_identity: Update a table's replica identity
+ * Private copy of o_mark_replica_identity: Update a table's replica identity
  *
  * Iff ri_type = REPLICA_IDENTITY_INDEX, indexOid must be the Oid of a suitable
  * index. Otherwise, it must be InvalidOid.
@@ -1594,23 +1595,21 @@ o_alter_replica_identity(Relation rel, ReplicaIdentityStmt *stmt, LOCKMODE lockm
 	Relation	indexRel;
 	int			key;
 
-	elog(WARNING, "Current replident %u", rel->rd_rel->replident);
-
-	elog(WARNING, "Setting replident %u", );
+	elog(WARNING, "Current replident %c, setting replident %c", rel->rd_rel->relreplident, stmt->identity_type);
 
 	if (stmt->identity_type == REPLICA_IDENTITY_DEFAULT)
 	{
-		relation_mark_replica_identity(rel, stmt->identity_type, InvalidOid, true);
+		o_mark_replica_identity(rel, stmt->identity_type, InvalidOid, true);
 		return;
 	}
 	else if (stmt->identity_type == REPLICA_IDENTITY_FULL)
 	{
-		relation_mark_replica_identity(rel, stmt->identity_type, InvalidOid, true);
+		o_mark_replica_identity(rel, stmt->identity_type, InvalidOid, true);
 		return;
 	}
 //	else if (stmt->identity_type == REPLICA_IDENTITY_NOTHING)
 //	{
-//		relation_mark_replica_identity(rel, stmt->identity_type, InvalidOid, true);
+//		o_mark_replica_identity(rel, stmt->identity_type, InvalidOid, true);
 //		return;
 //	}
 //	else if (stmt->identity_type == REPLICA_IDENTITY_INDEX)
@@ -1691,7 +1690,7 @@ o_alter_replica_identity(Relation rel, ReplicaIdentityStmt *stmt, LOCKMODE lockm
 	}
 
 	/* This index is suitable for use as a replica identity. Mark it. */
-	relation_mark_replica_identity(rel, stmt->identity_type, indexOid, true);
+	o_mark_replica_identity(rel, stmt->identity_type, indexOid, true);
 
 	index_close(indexRel, NoLock);
 }

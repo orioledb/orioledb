@@ -1499,7 +1499,7 @@ o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType keyType,
 			if (keyType == BTreeKeyLeafTuple)
 				o_wal_delete(desc, key, REPLICA_IDENTITY_DEFAULT);
 			else if (keyType == BTreeKeyNonLeafKey)
-				o_wal_delete_key(desc, key);
+				o_wal_delete_key(desc, key, false);
 		}
 		PG_CATCH();
 		{
