@@ -58,7 +58,9 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         echo "orioledb.strict_mode = true" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
         # Apply test setup SQL patches to reflect enabled OrioleDB
         git apply patches/test_setup_enable_oriole.diff
-        git apply patches/subscription_enable_oriole.diff
+        if [ $PG_VERSION = "17" ]; then
+			git apply patches/subscription_enable_oriole.diff
+        fi
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log restart
         # Run Postgress regression tests
         make -C src/test/regress installcheck-oriole -j $(nproc) || status=$?
