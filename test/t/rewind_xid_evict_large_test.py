@@ -47,7 +47,7 @@ class RewindXidTest(BaseTest):
 		    "orioledb.rewind_max_transactions 100000\n"
 		    "orioledb.enable_rewind = true\n"
 		    "orioledb.rewind_buffers = 1280\n"
-            "orioledb.main_buffers = '224MB'\n")
+		    "orioledb.main_buffers = '224MB'\n")
 		node.start()
 
 		node.safe_psql(
