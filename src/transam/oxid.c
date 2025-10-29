@@ -96,7 +96,7 @@ orioledb_get_current_heap_xid(PG_FUNCTION_ARGS)
  */
 static OXid curOxid = InvalidOXid;	/* a 64-bit OrioleDB oxid */
 
-static LogicalXidMeta logicalXidMeta = {InvalidTransactionId, false};
+static LogicalXid logicalXidMeta = {InvalidTransactionId, false};
 
 static inline void
 reset_logical_xid_meta(void)
@@ -105,13 +105,13 @@ reset_logical_xid_meta(void)
 	logicalXidMeta.useHeap = false;
 }
 
-static inline LogicalXidMeta *
+static inline LogicalXid *
 clone_logical_xid_meta(void)
 {
-	LogicalXidMeta *clone = (LogicalXidMeta *) palloc(sizeof(LogicalXidMeta));
+	LogicalXid *clone = (LogicalXid *) palloc(sizeof(LogicalXid));
 
 	Assert(clone);
-	memcpy(clone, &logicalXidMeta, sizeof(LogicalXidMeta));
+	memcpy(clone, &logicalXidMeta, sizeof(LogicalXid));
 	return clone;
 }
 
@@ -371,7 +371,7 @@ acquire_logical_xid(bool *useHeapXid)
 }
 
 static void
-release_logical_xid(LogicalXidMeta *lxm)
+release_logical_xid(LogicalXid *lxm)
 {
 	uint32		itemsCount = 0,
 				mynum = 0;
@@ -429,12 +429,12 @@ static inline void
 setup_prev_logical_xid_meta()
 {
 	int			llen = 0;
-	LogicalXidMeta *ptr = NULL;
+	LogicalXid *ptr = NULL;
 
 	llen = list_length(prevLogicalXids);
 	if (llen > 0)
 	{
-		ptr = (LogicalXidMeta *) llast(prevLogicalXids);
+		ptr = (LogicalXid *) llast(prevLogicalXids);
 		if (ptr)
 		{
 			logicalXidMeta.xid = ptr->xid;
@@ -1265,7 +1265,7 @@ set_current_oxid(OXid oxid)
 }
 
 void
-set_current_logical_xid(LogicalXidMeta *in)
+set_current_logical_xid(LogicalXid *in)
 {
 	if (in)
 	{
@@ -1333,7 +1333,7 @@ get_current_logical_xid_if_any(void)
 }
 
 void
-setup_current_logical_xid(LogicalXidMeta *output)
+setup_current_logical_xid(LogicalXid *output)
 {
 	if (output)
 	{
@@ -1402,7 +1402,7 @@ release_assigned_logical_xids(void)
 	if (GET_CUR_PROCDATA()->autonomousNestingLevel == 0)
 	{
 		ListCell   *lc = NULL;
-		LogicalXidMeta *ptr = NULL;
+		LogicalXid *ptr = NULL;
 
 		foreach(lc, prevLogicalXids)
 		{

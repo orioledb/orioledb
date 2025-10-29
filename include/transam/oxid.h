@@ -50,7 +50,7 @@ typedef struct
 	bool		useHeap;		/* flag indicates if current logical xid was
 								 * set from an existing heap xid */
 
-} LogicalXidMeta;
+} LogicalXid;
 
 typedef struct OSnapshot
 {
@@ -108,13 +108,13 @@ extern void assign_subtransaction_logical_xid(void);
 extern void set_oxid_csn(OXid oxid, CommitSeqNo csn);
 extern void set_oxid_xlog_ptr(OXid oxid, XLogRecPtr ptr);
 extern void set_current_oxid(OXid oxid);
-extern void set_current_logical_xid(LogicalXidMeta *in);
+extern void set_current_logical_xid(LogicalXid *in);
 extern void parallel_worker_set_oxid(void);
 extern void reset_current_oxid(void);
 extern OXid get_current_oxid_if_any(void);
 extern TransactionId get_current_logical_xid(void);
 extern TransactionId get_current_logical_xid_if_any(void);
-extern void setup_current_logical_xid(LogicalXidMeta *output);
+extern void setup_current_logical_xid(LogicalXid *output);
 extern void current_oxid_precommit(void);
 extern void current_oxid_xlog_precommit(void);
 extern void current_oxid_commit(CommitSeqNo csn);
