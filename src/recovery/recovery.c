@@ -2752,9 +2752,12 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 	while (ptr < endPtr)
 	{
+		const char *rec_type_str;
 		xlogPtr = xlogRecPtr + (ptr - startPtr);
 		rec_type = *ptr;
 		ptr++;
+
+		rec_type_str = wal_record_type_to_string(rec_type);
 
 		if (rec_type == WAL_REC_XID)
 		{
@@ -2768,6 +2771,12 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 			advance_oxids(oxid);
 			recovery_switch_to_oxid(oxid, -1);
+		}
+		else if (rec_type == WAL_REC_SWITCH_LOGICAL_XID)
+		{
+			/* Ignore */
+			ptr += sizeof(TransactionId);
+			ptr += sizeof(TransactionId);
 		}
 		else if (rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK)
 		{
@@ -3095,7 +3104,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		}
 		else
 		{
-			elog(FATAL, "Unknown modify WAL record");
+			elog(FATAL, "Unknown modify WAL record %d (%s)", rec_type, rec_type_str);
 		}
 	}
 	update_recovery_undo_loc_flush(single, -1);
