@@ -65,8 +65,6 @@ PG_FUNCTION_INFO_V1(orioledb_rewind_by_time);
 PG_FUNCTION_INFO_V1(orioledb_rewind_to_timestamp);
 PG_FUNCTION_INFO_V1(orioledb_rewind_to_transaction);
 PG_FUNCTION_INFO_V1(orioledb_get_current_oxid);
-PG_FUNCTION_INFO_V1(orioledb_get_current_logical_xid);
-PG_FUNCTION_INFO_V1(orioledb_get_current_heap_xid);
 PG_FUNCTION_INFO_V1(orioledb_get_rewind_queue_length);
 PG_FUNCTION_INFO_V1(orioledb_get_rewind_evicted_length);
 PG_FUNCTION_INFO_V1(orioledb_get_complete_oxid);
@@ -89,18 +87,6 @@ Datum
 orioledb_get_current_oxid(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_DATUM(get_current_oxid());
-}
-
-Datum
-orioledb_get_current_logical_xid(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_DATUM(get_current_logical_xid_if_any());
-}
-
-Datum
-orioledb_get_current_heap_xid(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_DATUM(GetCurrentTransactionIdIfAny());
 }
 
 Datum

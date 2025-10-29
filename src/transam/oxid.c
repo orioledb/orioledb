@@ -64,6 +64,21 @@
 		(XLOG_PTR_SPECIAL_BIT | ((uint64) procnum << 15) | \
 		 ((uint64) level << 31) | (status))
 
+PG_FUNCTION_INFO_V1(orioledb_get_current_logical_xid);
+PG_FUNCTION_INFO_V1(orioledb_get_current_heap_xid);
+
+Datum
+orioledb_get_current_logical_xid(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_DATUM(get_current_logical_xid_if_any());
+}
+
+Datum
+orioledb_get_current_heap_xid(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_DATUM(GetCurrentTransactionIdIfAny());
+}
+
 /*
  * OrioleDB uses three transaction id entities:
  *     - [uint32 TransactionId] native PG heap transaction id (heap xid)
