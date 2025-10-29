@@ -6,7 +6,7 @@ on:
 
 jobs:
   matrix:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       matrix: ${{ steps.gen.outputs.matrix }}
     steps:
@@ -90,7 +90,7 @@ jobs:
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
 
     # Select runner based on CPU architecture
-    runs-on: ${{ matrix.cpu == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.cpu == 'arm64' && 'blacksmith-8vcpu-ubuntu-2404-arm' || 'blacksmith-8vcpu-ubuntu-2404' }}
     env:
       LLVM_VER: 18
       CPU: ${{ matrix.cpu }}
@@ -167,7 +167,7 @@ jobs:
 
   finish:
     needs: check
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout extension code into workspace directory
         uses: actions/checkout@v4
@@ -184,7 +184,7 @@ jobs:
 
   cleanup:
     needs: finish
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: remove artifacts
         uses: geekyeggo/delete-artifact@v5
