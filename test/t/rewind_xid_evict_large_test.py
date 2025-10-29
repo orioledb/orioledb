@@ -40,6 +40,26 @@ class RewindXidTest(BaseTest):
 
 	# Tests with eviction: large scale (not suitable for valgrind)
 
+	def test_rewind_shmem_allocation(self):
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "orioledb.rewind_max_time = 1200\n"
+		    "orioledb.rewind_max_transactions 100000\n"
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 1280\n"
+            "orioledb.main_buffers = '224MB'\n")
+		node.start()
+
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "    id serial NOT NULL,\n"
+		    "	val text,\n"
+		    "    PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n")
+
+		node.stop()
+
 	def test_rewind_xid_oriole_evict(self):
 		node = self.node
 		node.append_conf(

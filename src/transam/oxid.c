@@ -202,7 +202,7 @@ void
 oxid_init_shmem(Pointer ptr, bool found)
 {
 	xid_meta = (XidMeta *) ptr;
-	ptr += MAXALIGN(sizeof(XidMeta));
+	ptr += CACHELINEALIGN(sizeof(XidMeta));
 	xidBuffer = (OXidMapItem *) ptr;
 	ptr += xid_circular_buffer_size * sizeof(OXidMapItem);
 	o_buffers_shmem_init(&buffersDesc, ptr, found);

@@ -321,7 +321,7 @@ rewind_shmem_needs(void)
 	rewindBuffersDesc.buffersCount = rewind_buffers_count;
 
 	size = CACHELINEALIGN(sizeof(RewindMeta));
-	size = add_size(size, mul_size(rewind_circular_buffer_size, sizeof(RewindItem)));
+	size = add_size(size, mul_size(rewind_circular_buffer_size * 2, sizeof(RewindItem)));
 	size = add_size(size, o_buffers_shmem_needs(&rewindBuffersDesc));
 
 	return size;
@@ -871,7 +871,7 @@ rewind_init_shmem(Pointer ptr, bool found)
 
 	Assert(sizeof(struct RewindItem) == sizeof(struct SubxidsItem));
 	rewindMeta = (RewindMeta *) ptr;
-	ptr += MAXALIGN(sizeof(RewindMeta));
+	ptr += CACHELINEALIGN(sizeof(RewindMeta));
 	rewindAddBuffer = (RewindItem *) ptr;
 	ptr += rewind_circular_buffer_size * sizeof(RewindItem);
 	rewindCompleteBuffer = (RewindItem *) ptr;
