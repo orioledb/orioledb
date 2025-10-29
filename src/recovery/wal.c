@@ -570,7 +570,6 @@ add_switch_logical_xid_wal_record(TransactionId logicalXid_old, TransactionId lo
 	Assert(local_wal_buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
 
 	add_wal_container_header_if_needed();
-	add_xid_wal_record_if_needed();
 
 	rec = (WALRecSwitchLogicalXid *) (&local_wal_buffer[local_wal_buffer_offset]);
 
