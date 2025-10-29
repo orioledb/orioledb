@@ -560,13 +560,12 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			Assert(TransactionIdIsValid(oldXid));
 			Assert(TransactionIdIsValid(newXid));
 			Assert(logicalXid == oldXid);
-			Assert(heapXid == newXid);
 
 			ReorderBufferAssignChild(ctx->reorder,
-									 heapXid, logicalXid,
+									 logicalXid, newXid,
 									 buf->origptr);
 
-			logicalXid = newXid;
+			heapXid = newXid;
 		}
 		else if (rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK)
 		{
@@ -635,8 +634,11 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 							ReorderBufferTXN *cur_txn;
 
 							cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
-							ReorderBufferForget(ctx->reorder, cur_txn->xid,
-												startXLogPtr);
+							if (cur_txn) /* may becomes NULL if sub-txn is heap and finalized before */
+							{
+								ReorderBufferForget(ctx->reorder, cur_txn->xid,
+													startXLogPtr);
+							}
 						}
 						ReorderBufferForget(ctx->reorder, txn->xid,
 											startXLogPtr);
@@ -659,8 +661,11 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 							ReorderBufferTXN *cur_txn;
 
 							cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
-							ReorderBufferCommitChild(ctx->reorder, txn->xid, cur_txn->xid,
-													 startXLogPtr, endXLogPtr);
+							if (cur_txn) /* may becomes NULL if sub-txn is heap and finalized before */
+							{
+								ReorderBufferCommitChild(ctx->reorder, txn->xid, cur_txn->xid,
+														startXLogPtr, endXLogPtr);
+							}
 						}
 						ReorderBufferCommit(ctx->reorder, logicalXid,
 											startXLogPtr, endXLogPtr,
@@ -679,8 +684,11 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 							ReorderBufferTXN *cur_txn;
 
 							cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
-							ReorderBufferAbort(ctx->reorder, cur_txn->xid,
+							if (cur_txn) /* may becomes NULL if sub-txn is heap and finalized before */
+							{
+								ReorderBufferAbort(ctx->reorder, cur_txn->xid,
 											   startXLogPtr, 0);
+							}
 						}
 						ReorderBufferAbort(ctx->reorder, logicalXid,
 										   startXLogPtr, 0);

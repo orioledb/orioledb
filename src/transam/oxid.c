@@ -1319,8 +1319,6 @@ get_current_logical_xid(void)
 	{
 		elog(DEBUG4, "SWITCH_LOGICAL_XID %u -> %u", logicalXidMeta.xid, heapXid);
 		add_switch_logical_xid_wal_record(logicalXidMeta.xid, heapXid);
-		logicalXidMeta.xid = heapXid;
-		logicalXidMeta.useHeap = true;
 	}
 
 	return logicalXidMeta.xid;
