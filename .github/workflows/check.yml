@@ -95,6 +95,7 @@ jobs:
       LLVM_VER: 18
       CPU: ${{ matrix.cpu }}
       CHECK_TYPE: ${{ matrix.check_type }}
+      PG_VERSION: ${{ matrix.pg_version }}
       COMPILER: ${{ matrix.compiler }}
     steps:
       - name: Checkout extension code into workspace directory
