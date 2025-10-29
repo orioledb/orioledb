@@ -27,18 +27,6 @@ RETURNS bigint
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
--- Get current logical xid to remember it
-CREATE FUNCTION orioledb_get_current_logical_xid()
-RETURNS int
-AS 'MODULE_PATHNAME'
-VOLATILE LANGUAGE C;
-
--- Get current heap xid to remember it
-CREATE FUNCTION orioledb_get_current_heap_xid()
-RETURNS int
-AS 'MODULE_PATHNAME'
-VOLATILE LANGUAGE C;
-
 CREATE FUNCTION orioledb_get_rewind_queue_length()
 RETURNS bigint
 AS 'MODULE_PATHNAME'
