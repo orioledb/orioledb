@@ -163,6 +163,52 @@ typedef struct
 
 extern const char *wal_record_type_to_string(int wal_record);
 
+/* API for parsing WAL-records */
+
+/* Parser for WAL_REC_XID */
+extern Pointer wal_parse_rec_xid(Pointer ptr, OXid *oxid, TransactionId *logicalXid, TransactionId *heapXid);
+
+/* Parser for WAL_REC_COMMIT and WAL_REC_ROLLBACK */
+extern Pointer wal_parse_rec_finish(Pointer ptr, OXid *xmin, CommitSeqNo *csn);
+
+/* Parser for WAL_REC_JOINT_COMMIT */
+extern Pointer wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid *xmin, CommitSeqNo *csn);
+
+/* Parser for WAL_REC_RELATION */
+extern Pointer wal_parse_rec_relation(Pointer ptr, uint8 *treeType, Oid *datoid, Oid *reloid, Oid *relnode);
+
+#define WAL_PARSE_REC_RELATION(ptr, treeType, oids) \
+	wal_parse_rec_relation(ptr, &treeType, &oids.datoid, &oids.reloid, &oids.relnode)
+
+/* Parser for WAL_REC_O_TABLES_META_UNLOCK */
+extern Pointer wal_parse_rec_o_tables_meta_unlock(Pointer ptr, Oid *datoid, Oid *reloid, Oid *old_relnode, Oid *new_relnode);
+
+#define WAL_PARSE_REC_O_TABLES_META_UNLOCK(ptr, oids, old_relnode) \
+	wal_parse_rec_o_tables_meta_unlock(ptr, &oids.datoid, &oids.reloid, &old_relnode, &oids.relnode)
+
+/* Parser for WAL_REC_SAVEPOINT */
+extern Pointer wal_parse_rec_savepoint(Pointer ptr, SubTransactionId *parentSubid, TransactionId *logicalXid, TransactionId *parentLogicalXid);
+
+/* Parser for WAL_REC_ROLLBACK_TO_SAVEPOINT */
+extern Pointer wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid);
+
+/* Parser for WAL_REC_TRUNCATE */
+extern Pointer wal_parse_rec_truncate(Pointer ptr, Oid *datoid, Oid *reloid, Oid *relnode);
+
+#define WAL_PARSE_REC_TRUNCATE(ptr, oids) \
+	wal_parse_rec_truncate(ptr, &oids.datoid, &oids.reloid, &oids.relnode)
+
+/* Parser for WAL_REC_BRIDGE_ERASE */
+extern Pointer wal_parse_rec_bridge_erase(Pointer ptr, ItemPointerData *iptr);
+
+/* Parser for WAL_REC_SWITCH_LOGICAL_XID */
+extern Pointer wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *oldXid, TransactionId *newXid);
+
+/* Parser for WAL_REC_INSERT */
+/* Parser for WAL_REC_UPDATE */
+/* Parser for WAL_REC_DELETE */
+/* Parser for WAL_REC_REINSERT */
+
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, OffsetNumber length);
 extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr);

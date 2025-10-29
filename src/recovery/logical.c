@@ -479,12 +479,6 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 	}
 }
 
-#define READ(ptr, value) \
-{ \
-	memcpy(&value, ptr, sizeof(value)); \
-	ptr += sizeof(value); \
-}
-
 #define LOGICAL_XID_ASSIGNED_FROM_HEAP(logicalXid, heapXid) (TransactionIdIsValid(heapXid) && logicalXid == heapXid)
 #define TXN_NEED_FINALIZE(logicalXid, heapXid) (!TransactionIdIsValid(heapXid) && TransactionIdIsValid(logicalXid))
 
@@ -534,9 +528,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 		if (rec_type == WAL_REC_XID)
 		{
-			READ(ptr, oxid);
-			READ(ptr, logicalXid);
-			READ(ptr, heapXid);
+			ptr = wal_parse_rec_xid(ptr, &oxid, &logicalXid, &heapXid);
 
 			if (TransactionIdIsValid(logicalXid))
 			{
@@ -557,8 +549,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			TransactionId oldXid,
 						newXid;
 
-			READ(ptr, oldXid);
-			READ(ptr, newXid);
+			ptr = wal_parse_rec_switch_logical_xid(ptr, &oldXid, &newXid);
 
 			elog(DEBUG4, "RECEIVE record type %d (%s) %u=>%u oxid %lu logicalXId %u heapXid %u",
 				 rec_type, rec_type_str,
@@ -586,8 +577,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			elog(DEBUG4, "WAL_REC_COMMIT");
 
-			READ(ptr, xmin);
-			READ(ptr, csn);
+			ptr = wal_parse_rec_finish(ptr, &xmin, &csn);
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
@@ -709,9 +699,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			CommitSeqNo csn;
 			CSNSnapshotData *csnSnapshot;
 
-			READ(ptr, xid);
-			READ(ptr, xmin);
-			READ(ptr, csn);
+			ptr = wal_parse_rec_joint_commit(ptr, &xid, &xmin, &csn);
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
@@ -762,13 +750,11 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		else if (rec_type == WAL_REC_RELATION)
 		{
 			int			sys_tree_num = -1;
+			uint8 treeType = 0;
 
-			ix_type = *ptr;
-			ptr++;
+			ptr = WAL_PARSE_REC_RELATION(ptr, treeType, cur_oids);
 
-			READ(ptr, cur_oids.datoid);
-			READ(ptr, cur_oids.reloid);
-			READ(ptr, cur_oids.relnode);
+			ix_type = treeType;
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
@@ -844,10 +830,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			ORelOids	oids;
 			Oid			oldRelnode;
 
-			READ(ptr, oids.datoid);
-			READ(ptr, oids.reloid);
-			READ(ptr, oldRelnode);
-			READ(ptr, oids.relnode);
+			ptr = WAL_PARSE_REC_O_TABLES_META_UNLOCK(ptr, oids, oldRelnode);
 
 			/* Skip */
 		}
@@ -855,9 +838,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		{
 			ORelOids	oids;
 
-			READ(ptr, oids.datoid);
-			READ(ptr, oids.reloid);
-			READ(ptr, oids.relnode);
+			ptr = WAL_PARSE_REC_TRUNCATE(ptr, oids);
 
 			/* Skip */
 		}
@@ -866,9 +847,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			SubTransactionId parentSubid;
 			TransactionId parentLogicalXid;
 
-			READ(ptr, parentSubid);
-			READ(ptr, logicalXid);
-			READ(ptr, parentLogicalXid);
+			ptr = wal_parse_rec_savepoint(ptr, &parentSubid, &logicalXid, &parentLogicalXid);
 
 			if (!ctx->fast_forward)
 				ReorderBufferAssignChild(ctx->reorder, parentLogicalXid, logicalXid, buf->origptr);
@@ -879,7 +858,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		{
 			SubTransactionId parentSubid;
 
-			READ(ptr, parentSubid);
+			ptr = wal_parse_rec_rollback_to_savepoint(ptr, &parentSubid);
 
 			/* Skip */
 		}

@@ -90,6 +90,141 @@ wal_record_type_to_string(int wal_record)
 	return "UNKNOWN";
 }
 
+#define PARSE(ptr, valptr) \
+{ \
+	if (valptr) \
+	{ \
+		memcpy(valptr, ptr, sizeof(*(valptr))); \
+	} \
+	ptr += sizeof(*(valptr)); \
+}
+
+/* Parser for WAL_REC_XID */
+Pointer
+wal_parse_rec_xid(Pointer ptr, OXid *oxid, TransactionId *logicalXid, TransactionId *heapXid)
+{
+	Assert(ptr);
+
+	PARSE(ptr, oxid);
+	PARSE(ptr, logicalXid);
+	PARSE(ptr, heapXid);
+
+	return ptr;
+}
+
+/* Parser for WAL_REC_COMMIT and WAL_REC_ROLLBACK */
+Pointer
+wal_parse_rec_finish(Pointer ptr, OXid *xmin, CommitSeqNo *csn)
+{
+	Assert(ptr);
+
+	PARSE(ptr, xmin);
+	PARSE(ptr, csn);
+
+	return ptr;
+}
+
+/* Parser for WAL_REC_JOINT_COMMIT */
+Pointer
+wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid *xmin, CommitSeqNo *csn)
+{
+	Assert(ptr);
+
+	PARSE(ptr, xid);
+	PARSE(ptr, xmin);
+	PARSE(ptr, csn);
+
+	return ptr;
+}
+
+/* Parser for WAL_REC_RELATION */
+Pointer
+wal_parse_rec_relation(Pointer ptr, uint8 *treeType, Oid *datoid, Oid *reloid, Oid *relnode)
+{
+	Assert(ptr);
+
+	PARSE(ptr, treeType);
+	PARSE(ptr, datoid);
+	PARSE(ptr, reloid);
+	PARSE(ptr, relnode);
+
+	return ptr;
+}
+
+/* Parser for WAL_REC_O_TABLES_META_UNLOCK */
+Pointer
+wal_parse_rec_o_tables_meta_unlock(Pointer ptr, Oid *datoid, Oid *reloid, Oid *old_relnode, Oid *new_relnode)
+{
+	Assert(ptr);
+
+	PARSE(ptr, datoid);
+	PARSE(ptr, reloid);
+	PARSE(ptr, old_relnode);
+	PARSE(ptr, new_relnode);
+
+	return ptr;
+}
+
+/* Parser for WAL_REC_SAVEPOINT */
+Pointer
+wal_parse_rec_savepoint(Pointer ptr, SubTransactionId *parentSubid, TransactionId *logicalXid, TransactionId *parentLogicalXid)
+{
+	Assert(ptr);
+
+	PARSE(ptr, parentSubid);
+	PARSE(ptr, logicalXid);
+	PARSE(ptr, parentLogicalXid);
+
+	return ptr;
+}
+
+/* Parser for WAL_REC_ROLLBACK_TO_SAVEPOINT */
+Pointer
+wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid)
+{
+	Assert(ptr);
+
+	PARSE(ptr, parentSubid);
+
+	return ptr;
+}
+
+/* Parser for WAL_REC_TRUNCATE */
+Pointer
+wal_parse_rec_truncate(Pointer ptr, Oid *datoid, Oid *reloid, Oid *relnode)
+{
+	Assert(ptr);
+
+	PARSE(ptr, datoid);
+	PARSE(ptr, reloid);
+	PARSE(ptr, relnode);
+
+	return ptr;
+}
+
+/* Parser for WAL_REC_BRIDGE_ERASE */
+Pointer
+wal_parse_rec_bridge_erase(Pointer ptr, ItemPointerData *iptr)
+{
+	Assert(ptr);
+
+	PARSE(ptr, iptr);
+
+	return ptr;
+}
+
+/* Parser for WAL_REC_SWITCH_LOGICAL_XID */
+Pointer
+wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *oldXid, TransactionId *newXid)
+{
+	Assert(ptr);
+
+	PARSE(ptr, oldXid);
+	PARSE(ptr, newXid);
+
+	return ptr;
+}
+
 uint16
 check_wal_container_version(Pointer *ptr)
 {
