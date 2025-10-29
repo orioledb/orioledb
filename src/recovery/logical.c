@@ -520,7 +520,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		const char *rec_type_str;
 		XLogRecPtr	changeXLogPtr = startXLogPtr + (ptr - startPtr);
 
-		READ(ptr, rec_type);
+		rec_type = *ptr;
+		ptr++;
 
 		rec_type_str = wal_record_type_to_string(rec_type);
 
@@ -750,7 +751,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		else if (rec_type == WAL_REC_RELATION)
 		{
 			int			sys_tree_num = -1;
-			uint8 treeType = 0;
+			uint8		treeType = 0;
 
 			ptr = WAL_PARSE_REC_RELATION(ptr, treeType, cur_oids);
 

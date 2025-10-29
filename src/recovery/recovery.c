@@ -2753,6 +2753,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 	while (ptr < endPtr)
 	{
 		const char *rec_type_str;
+
 		xlogPtr = xlogRecPtr + (ptr - startPtr);
 		rec_type = *ptr;
 		ptr++;
@@ -2761,7 +2762,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 		if (rec_type == WAL_REC_XID)
 		{
-			ptr = wal_parse_rec_xid(ptr, &oxid, NULL/* don't need logicalXid here */, NULL/* don't need heapXid here */);
+			/* don't need logicalXid & heapXid here */
+			ptr = wal_parse_rec_xid(ptr, &oxid, NULL, NULL);
 
 			advance_oxids(oxid);
 			recovery_switch_to_oxid(oxid, -1);
@@ -2777,7 +2779,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 						sync = false;
 			OXid		xmin;
 
-			ptr = wal_parse_rec_finish(ptr, &xmin, NULL/* skip csn field */);
+			ptr = wal_parse_rec_finish(ptr, &xmin, NULL /* skip csn field */ );
 
 			recovery_xmin = Max(recovery_xmin, xmin);
 
@@ -2817,7 +2819,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			TransactionId xid;
 			OXid		xmin;
 
-			ptr = wal_parse_rec_joint_commit(ptr, &xid, &xmin, NULL/* skip csn field */);
+			ptr = wal_parse_rec_joint_commit(ptr, &xid, &xmin, NULL /* skip csn field */ );
 
 			cur_state->xid = xid;
 			recovery_xmin = Max(recovery_xmin, xmin);
@@ -2825,7 +2827,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		}
 		else if (rec_type == WAL_REC_RELATION)
 		{
-			uint8 treeType;
+			uint8		treeType;
 			OIndexType	ix_type;
 
 			ptr = WAL_PARSE_REC_RELATION(ptr, treeType, cur_oids);
