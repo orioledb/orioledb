@@ -128,17 +128,10 @@ orioledb_get_rewind_queue_length(PG_FUNCTION_ARGS)
 {
 	if (!enable_rewind)
 	{
-#ifdef IS_DEV
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("orioledb rewind mode is turned off")),
 				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
-#else
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("orioledb rewind mode is supported only in development release")),
-				errdetail("to use rewind build OrioleDB with IS_DEV=1 set."));
-#endif
 	}
 
 	PG_RETURN_UINT64(pg_atomic_read_u64(&rewindMeta->addPosReserved) - rewindMeta->completePos);
@@ -149,17 +142,10 @@ orioledb_get_rewind_evicted_length(PG_FUNCTION_ARGS)
 {
 	if (!enable_rewind)
 	{
-#ifdef IS_DEV
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("orioledb rewind mode is turned off")),
 				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
-#else
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("orioledb rewind mode is supported only in development release")),
-				errdetail("to use rewind build OrioleDB with IS_DEV=1 set."));
-#endif
 	}
 
 	PG_RETURN_UINT64(pg_atomic_read_u64(&rewindMeta->evictPos) - rewindMeta->restorePos);
@@ -249,7 +235,6 @@ orioledb_rewind_sync(PG_FUNCTION_ARGS)
 
 /* Testing functions end */
 
-
 static inline
 void
 print_rewind_item(RewindItem *rewindItem, uint64 pos, int source_buffer)
@@ -285,17 +270,10 @@ log_print_rewind_queue(void)
 
 	if (!enable_rewind)
 	{
-#ifdef IS_DEV
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("orioledb rewind mode is turned off")),
 				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
-#else
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("orioledb rewind mode is supported only in development release")),
-				errdetail("to use rewind build OrioleDB with IS_DEV=1 set."));
-#endif
 		return;
 	}
 
@@ -614,17 +592,10 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 
 	if (!enable_rewind)
 	{
-#ifdef IS_DEV
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("orioledb rewind mode is turned off")),
 				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
-#else
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("orioledb rewind mode is supported only in development release")),
-				errdetail("to use rewind build OrioleDB with IS_DEV=1 set."));
-#endif
 		return;
 	}
 
