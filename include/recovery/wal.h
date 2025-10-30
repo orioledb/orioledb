@@ -71,8 +71,8 @@ typedef struct
 typedef struct
 {
 	uint8		recType;
-	uint8		oldXid[sizeof(TransactionId)];
-	uint8		newXid[sizeof(TransactionId)];
+	uint8		topXid[sizeof(TransactionId)];
+	uint8		subXid[sizeof(TransactionId)];
 } WALRecSwitchLogicalXid;
 
 typedef struct
@@ -202,7 +202,7 @@ extern Pointer wal_parse_rec_truncate(Pointer ptr, Oid *datoid, Oid *reloid, Oid
 extern Pointer wal_parse_rec_bridge_erase(Pointer ptr, ItemPointerData *iptr);
 
 /* Parser for WAL_REC_SWITCH_LOGICAL_XID */
-extern Pointer wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *oldXid, TransactionId *newXid);
+extern Pointer wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *topXid, TransactionId *subXid);
 
 /* Parser for WAL_REC_INSERT */
 /* Parser for WAL_REC_UPDATE */
@@ -214,7 +214,7 @@ extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr);
 extern void add_o_tables_meta_lock_wal_record(void);
 extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);
-extern void add_switch_logical_xid_wal_record(TransactionId logicalXid_old, TransactionId logicalXid_new);
+extern void add_switch_logical_xid_wal_record(TransactionId logicalXid_top, TransactionId logicalXid_sub);
 extern void add_savepoint_wal_record(SubTransactionId parentSubid,
 									 TransactionId prentLogicalXid);
 extern void add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid);

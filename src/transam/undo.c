@@ -1565,6 +1565,11 @@ undo_xact_callback(XactEvent event, void *arg)
 						MyProc->lockGroupLeader != MyProc) ||
 		IsInParallelMode();
 
+	TransactionId heapXid = GetTopTransactionIdIfAny();
+	TransactionId logicalXid = get_current_logical_xid_if_any();
+
+	elog(DEBUG4, "undo_xact_callback event %d oxid %lu logicalXid %u top heapXid %u", event, oxid, logicalXid, heapXid);
+
 	/*
 	 * Cleanup EXPLAY ANALYZE counters pointer to handle case when execution
 	 * of node was interrupted by exception.
@@ -1604,26 +1609,55 @@ undo_xact_callback(XactEvent event, void *arg)
 	}
 	else
 	{
-		TransactionId xid = GetTopTransactionIdIfAny();
+		heapXid = GetTopTransactionIdIfAny();
+		logicalXid = get_current_logical_xid_if_any();
 		XLogRecPtr	flushPos = InvalidXLogRecPtr;
+
+		elog(DEBUG4, "event %d oxid %lu logicalXid %u top heapXid %u", event, oxid, logicalXid, heapXid);
+
+		/*
+		 * Transaction cases:
+		 * h - h : independent heap transaction
+		 * o - o : independent Oriole transaction
+		 * h - o - o+h : Oriole txn acts as a sub-txn of a heap txn (logical xid is assigned from an existent heap xid, finalize both as one item in reordered buffers)
+		 * o - h - h - o : switch xid case: heap txn acts as a sub-txn of an Oriole txn
+		 */
 
 		Assert(!RecoveryInProgress());
 		switch (event)
 		{
 			case XACT_EVENT_PRE_COMMIT:
-				if (TransactionIdIsValid(xid))
-					wal_joint_commit(oxid,
-									 get_current_logical_xid(),
-									 xid);
-				else
-					current_oxid_xlog_precommit();
-				break;
-			case XACT_EVENT_COMMIT:
-				if (!TransactionIdIsValid(xid))
+
+				/*
+				 * PRE_COMMIT means that Oriole transaction is going to be commited BEFORE corresponding heap transaction.
+				 * This can only happen in a case when Oriole transaction acts as sub-transaction of heap transaction.
+				 * To ensure correctness of LSN order in reordered buffers, Oriole txn is allowed be a sub-txn of heap txn only if it has started AFTER heap txn.
+				 * The single case for it is the next: h - o - o+h,
+				 * but in this case Oriole logical xid is assigned from an existent heap xid, so it is not necessary to separately commit Oriole txn.
+				 */
+
+				elog(DEBUG4, "XACT_EVENT_PRE_COMMIT oxid %lu logicalXid %u top heapXid %u", oxid, logicalXid, heapXid);
+
+				if (!TransactionIdIsValid(heapXid))
 				{
-					current_oxid_xlog_precommit();
+					current_oxid_xlog_precommit(); // @TODO check logicalXid if valid ?
+				}
+
+				break;
+
+			case XACT_EVENT_COMMIT:
+
+				if (!TransactionIdIsValid(heapXid))
+				{
+					/* Commit independent Oriole transaction */
+
+					elog(DEBUG4, "XACT_EVENT_COMMIT [independent Oriole transaction] oxid %lu logicalXid %u top heapXid %u", oxid, logicalXid, heapXid);
+
+					current_oxid_xlog_precommit(); // @TODO check logicalXid if valid ?
+
 					flushPos = wal_commit(oxid,
 										  get_current_logical_xid());
+					//Assert(InvalidXLogRecPtr != flushPos);
 					set_oxid_xlog_ptr(oxid, flushPos);
 					if (!XLogRecPtrIsInvalid(flushPos) &&
 						(synchronous_commit > SYNCHRONOUS_COMMIT_OFF ||
@@ -1632,7 +1666,30 @@ undo_xact_callback(XactEvent event, void *arg)
 				}
 				else
 				{
+					Assert(TransactionIdIsValid(heapXid));
+
+					/*
+					 * Cases:
+					 * - commit independent heap transaction
+					 * - commit mixed Oriole-heap transaction
+					 */
+
 					set_oxid_xlog_ptr(oxid, XactLastCommitEnd);
+
+					/* Mixed Oriole-heap transaction */
+					if (TransactionIdIsValid(logicalXid) && logicalXid != heapXid)
+					{
+						elog(DEBUG4, "XACT_EVENT_COMMIT [mixed Oriole-heap transaction] oxid %lu logicalXid %u top heapXid %u", oxid, logicalXid, heapXid);
+
+						flushPos = wal_commit(oxid,
+										  get_current_logical_xid());
+						//Assert(InvalidXLogRecPtr != flushPos);
+						set_oxid_xlog_ptr(oxid, flushPos);
+						if (!XLogRecPtrIsInvalid(flushPos) &&
+							(synchronous_commit > SYNCHRONOUS_COMMIT_OFF ||
+							oxid_needs_wal_flush))
+							XLogFlush(flushPos);
+					}
 				}
 
 				current_oxid_precommit();

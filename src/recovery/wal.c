@@ -29,6 +29,7 @@ static char local_wal_buffer[LOCAL_WAL_BUFFER_SIZE];
 static int	local_wal_buffer_offset = 0;
 static bool local_wal_has_material_changes = false;
 static bool local_wal_contains_xid = false;
+static bool local_wal_contains_switch_xid = false;
 static ORelOids local_oids = {InvalidOid, InvalidOid, InvalidOid};
 static OIndexType local_type = oIndexInvalid;
 
@@ -215,12 +216,12 @@ wal_parse_rec_bridge_erase(Pointer ptr, ItemPointerData *iptr)
 
 /* Parser for WAL_REC_SWITCH_LOGICAL_XID */
 Pointer
-wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *oldXid, TransactionId *newXid)
+wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *topXid, TransactionId *subXid)
 {
 	Assert(ptr);
 
-	PARSE(ptr, oldXid);
-	PARSE(ptr, newXid);
+	PARSE(ptr, topXid);
+	PARSE(ptr, subXid);
 
 	return ptr;
 }
@@ -539,6 +540,8 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 	Assert(!is_recovery_process());
 	Assert(rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK);
 
+	ereport(DEBUG4, errmsg("[%s] rec_type %d (%s)", __func__, rec_type, wal_record_type_to_string(rec_type)));
+
 	add_wal_container_header_if_needed();
 	add_xid_wal_record_if_needed();
 	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
@@ -550,6 +553,8 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 	memcpy(rec->csn, &csn, sizeof(csn));
 
 	local_wal_buffer_offset += sizeof(*rec);
+
+	local_wal_contains_switch_xid = false;
 }
 
 static void
@@ -572,6 +577,8 @@ add_joint_commit_wal_record(TransactionId xid, OXid xmin)
 	csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 	memcpy(rec->csn, &csn, sizeof(csn));
 	local_wal_buffer_offset += sizeof(*rec);
+
+	local_wal_contains_switch_xid = false;
 }
 
 static void
@@ -587,6 +594,7 @@ add_wal_container_header_if_needed(void)
 		local_wal_buffer_offset += sizeof(uint16);
 
 		local_wal_contains_xid = false;
+		local_wal_contains_switch_xid = false;
 	}
 }
 
@@ -694,13 +702,17 @@ add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode)
 }
 
 void
-add_switch_logical_xid_wal_record(TransactionId logicalXid_old, TransactionId logicalXid_new)
+add_switch_logical_xid_wal_record(TransactionId logicalXid_top, TransactionId logicalXid_sub)
 {
+	if (local_wal_contains_switch_xid) return;
+
+	local_wal_contains_switch_xid = true;
+
 	WALRecSwitchLogicalXid *rec;
 
 	Assert(!is_recovery_process());
-	Assert(TransactionIdIsValid(logicalXid_old));
-	Assert(TransactionIdIsValid(logicalXid_new));
+	Assert(TransactionIdIsValid(logicalXid_top));
+	Assert(TransactionIdIsValid(logicalXid_sub));
 	flush_local_wal_if_needed(sizeof(*rec));
 	Assert(local_wal_buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
 
@@ -709,8 +721,8 @@ add_switch_logical_xid_wal_record(TransactionId logicalXid_old, TransactionId lo
 	rec = (WALRecSwitchLogicalXid *) (&local_wal_buffer[local_wal_buffer_offset]);
 
 	rec->recType = WAL_REC_SWITCH_LOGICAL_XID;
-	memcpy(rec->oldXid, &logicalXid_old, sizeof(TransactionId));
-	memcpy(rec->newXid, &logicalXid_new, sizeof(TransactionId));
+	memcpy(rec->topXid, &logicalXid_top, sizeof(TransactionId));
+	memcpy(rec->subXid, &logicalXid_sub, sizeof(TransactionId));
 
 	local_wal_buffer_offset += sizeof(*rec);
 }

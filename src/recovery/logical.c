@@ -480,7 +480,6 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 }
 
 #define LOGICAL_XID_ASSIGNED_FROM_HEAP(logicalXid, heapXid) (TransactionIdIsValid(heapXid) && logicalXid == heapXid)
-#define TXN_NEED_FINALIZE(logicalXid, heapXid) (!TransactionIdIsValid(heapXid) && TransactionIdIsValid(logicalXid))
 
 /*
  * Handle OrioleDB records for LogicalDecodingProcessRecord().
@@ -515,6 +514,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		return;
 	}
 
+	elog(DEBUG4, "[%s] STARTED", __func__);
+
 	while (ptr < endPtr)
 	{
 		const char *rec_type_str;
@@ -547,25 +548,26 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		}
 		else if (rec_type == WAL_REC_SWITCH_LOGICAL_XID)
 		{
-			TransactionId oldXid,
-						newXid;
+			TransactionId topXid,
+						subXid;
 
-			ptr = wal_parse_rec_switch_logical_xid(ptr, &oldXid, &newXid);
+			ptr = wal_parse_rec_switch_logical_xid(ptr, &topXid, &subXid);
 
 			elog(DEBUG4, "RECEIVE record type %d (%s) %u=>%u oxid %lu logicalXId %u heapXid %u",
 				 rec_type, rec_type_str,
-				 oldXid, newXid,
+				 topXid, subXid,
 				 oxid, logicalXid, heapXid);
 
-			Assert(TransactionIdIsValid(oldXid));
-			Assert(TransactionIdIsValid(newXid));
-			Assert(logicalXid == oldXid);
+			Assert(TransactionIdIsValid(topXid));
+			Assert(TransactionIdIsValid(subXid));
+			///Assert(logicalXid == oldXid);
 
 			ReorderBufferAssignChild(ctx->reorder,
-									 logicalXid, newXid,
+									 topXid, subXid, // @NOTE XID_NOCHANGE
 									 buf->origptr);
 
-			heapXid = newXid;
+			//logicalXid = oldXid;
+			//heapXid = newXid;
 		}
 		else if (rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK)
 		{
@@ -575,7 +577,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			CommitSeqNo csn;
 			CSNSnapshotData *csnSnapshot;
 
-			elog(DEBUG4, "WAL_REC_COMMIT");
+			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
+				 rec_type, rec_type_str,
+				 oxid, logicalXid, heapXid);
 
 			ptr = wal_parse_rec_finish(ptr, &xmin, &csn);
 
@@ -597,6 +601,13 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				continue;
 
 			txn = get_reorder_buffer_txn(ctx->reorder, logicalXid);
+
+			if (txn == NULL)
+			{
+				elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u :: unknown transaction, nothing to replay",
+					rec_type, rec_type_str,
+					oxid, logicalXid, heapXid);
+			}
 
 			/* unknown transaction, nothing to replay */
 			if (txn != NULL)
@@ -650,49 +661,43 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						continue;
 					}
 
-					if (TXN_NEED_FINALIZE(logicalXid, heapXid))
+					/*
+						* Proceed to commit this transaction and
+						* subtransactions
+						*/
+					dlist_foreach(cur_txn_i, &txn->subtxns)
 					{
-						/*
-						 * Proceed to commit this transaction and
-						 * subtransactions
-						 */
-						dlist_foreach(cur_txn_i, &txn->subtxns)
-						{
-							ReorderBufferTXN *cur_txn;
+						ReorderBufferTXN *cur_txn;
 
-							cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
-							if (cur_txn) /* may becomes NULL if sub-txn is heap and finalized before */
-							{
-								ReorderBufferCommitChild(ctx->reorder, txn->xid, cur_txn->xid,
-														startXLogPtr, endXLogPtr);
-							}
+						cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+						if (cur_txn) /* may becomes NULL if sub-txn is heap and finalized before */
+						{
+							ReorderBufferCommitChild(ctx->reorder, txn->xid, cur_txn->xid,
+													startXLogPtr, endXLogPtr);
 						}
-						ReorderBufferCommit(ctx->reorder, logicalXid,
-											startXLogPtr, endXLogPtr,
-											0, XLogRecGetOrigin(buf->record),
-											buf->origptr);
 					}
+					ReorderBufferCommit(ctx->reorder, logicalXid,
+										startXLogPtr, endXLogPtr,
+										0, XLogRecGetOrigin(buf->record),
+										buf->origptr);
 				}
 				else
 				{
 					Assert(rec_type == WAL_REC_ROLLBACK);
 
-					if (TXN_NEED_FINALIZE(logicalXid, heapXid))
+					dlist_foreach(cur_txn_i, &txn->subtxns)
 					{
-						dlist_foreach(cur_txn_i, &txn->subtxns)
-						{
-							ReorderBufferTXN *cur_txn;
+						ReorderBufferTXN *cur_txn;
 
-							cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
-							if (cur_txn) /* may becomes NULL if sub-txn is heap and finalized before */
-							{
-								ReorderBufferAbort(ctx->reorder, cur_txn->xid,
-											   startXLogPtr, 0);
-							}
+						cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+						if (cur_txn) /* may becomes NULL if sub-txn is heap and finalized before */
+						{
+							ReorderBufferAbort(ctx->reorder, cur_txn->xid,
+											startXLogPtr, 0);
 						}
-						ReorderBufferAbort(ctx->reorder, logicalXid,
-										   startXLogPtr, 0);
 					}
+					ReorderBufferAbort(ctx->reorder, logicalXid,
+										startXLogPtr, 0);
 				}
 			}
 
@@ -703,6 +708,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		}
 		else if (rec_type == WAL_REC_JOINT_COMMIT)
 		{
+#if 0
 			TransactionId xid;
 			OXid		xmin;
 			CommitSeqNo csn;
@@ -743,18 +749,19 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else
 			{
-				if (TXN_NEED_FINALIZE(logicalXid, heapXid))
-				{
+				//if (TXN_NEED_FINALIZE(logicalXid, heapXid))
+				//{
 					ReorderBufferCommit(ctx->reorder, logicalXid,
 										startXLogPtr, endXLogPtr,
 										0, XLogRecGetOrigin(buf->record),
 										buf->origptr);
 					UpdateDecodingStats(ctx);
-				}
+				//}
 			}
 
 			oxid = InvalidOXid;
 			logicalXid = InvalidTransactionId;
+#endif
 		}
 		else if (rec_type == WAL_REC_RELATION)
 		{

@@ -307,10 +307,8 @@ acquire_logical_xid(bool *useHeapXid)
 	{
 		if (useHeapXid)
 			*useHeapXid = true;
-		return result;
-	}
-
-	if (useHeapXid)
+		//return result; // @NOTE XID_NOCHANGE !!!
+	} else if (useHeapXid)
 		*useHeapXid = false;
 
 	/*
@@ -367,6 +365,8 @@ acquire_logical_xid(bool *useHeapXid)
 
 	Assert(result % divider == mynum);
 
+	elog(DEBUG4, "[%s] result %u", __func__, result);
+
 	return result;
 }
 
@@ -382,7 +382,7 @@ release_logical_xid(LogicalXid *lxm)
 	 * Ignore deallocation for a logical xid if it was set from an existing
 	 * heap xid
 	 */
-	if (lxm && !lxm->useHeap)
+	if (lxm/* && !lxm->useHeap*/)
 	{
 		xid = lxm->xid;
 
@@ -405,6 +405,17 @@ assign_subtransaction_logical_xid(void)
 	bool		useHeapXid = false;
 
 	nextLogicalXid = acquire_logical_xid(&useHeapXid);
+
+	if (useHeapXid)
+	{
+		TransactionId heapXid;
+		heapXid = GetCurrentTransactionIdIfAny();
+		if (TransactionIdIsValid(heapXid))
+		{
+			elog(DEBUG4, "SWITCH_LOGICAL_XID H2O %u -> %u", heapXid, nextLogicalXid);
+			add_switch_logical_xid_wal_record(heapXid, nextLogicalXid);
+		}
+	}
 
 	/*
 	 * Check previous logical xid if present and store it in a list of xids
@@ -468,7 +479,7 @@ oxid_subxact_callback(
 
 					if (!logicalXidMeta.useHeap && heapXid != logicalXidMeta.xid)
 					{
-						elog(DEBUG4, "SWITCH_LOGICAL_XID %u -> %u", logicalXidMeta.xid, heapXid);
+						elog(DEBUG4, "%s SWITCH_LOGICAL_XID O2H %u -> %u", __func__, logicalXidMeta.xid, heapXid);
 						add_switch_logical_xid_wal_record(logicalXidMeta.xid, heapXid);
 					}
 				}
@@ -1251,6 +1262,15 @@ get_current_oxid(void)
 		else
 		{
 			logicalXidMeta.xid = acquire_logical_xid(&logicalXidMeta.useHeap);
+			if (logicalXidMeta.useHeap)
+			{
+				TransactionId heapXid;
+				heapXid = GetCurrentTransactionIdIfAny(); // top txn
+				elog(DEBUG4, "SWITCH_LOGICAL_XID H2O %u -> %u", heapXid, logicalXidMeta.xid);
+				add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
+				// @TODO
+				///logicalXidMeta.useHeap = false;
+			}
 		}
 	}
 
@@ -1317,7 +1337,7 @@ get_current_logical_xid(void)
 		!logicalXidMeta.useHeap &&
 		heapXid != logicalXidMeta.xid)
 	{
-		elog(DEBUG4, "SWITCH_LOGICAL_XID %u -> %u", logicalXidMeta.xid, heapXid);
+		elog(DEBUG4, "%s SWITCH_LOGICAL_XID O2H %u -> %u", __func__, logicalXidMeta.xid, heapXid);
 		add_switch_logical_xid_wal_record(logicalXidMeta.xid, heapXid);
 	}
 
