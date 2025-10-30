@@ -90,7 +90,7 @@ jobs:
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
 
     # Select runner based on CPU architecture
-    runs-on: ${{ matrix.cpu == 'arm64' && 'blacksmith-8vcpu-ubuntu-2404-arm' || 'blacksmith-8vcpu-ubuntu-2404' }}
+    runs-on: ${{ matrix.cpu == 'arm64' && 'blacksmith-4vcpu-ubuntu-2404-arm' || 'blacksmith-4vcpu-ubuntu-2404' }}
     env:
       LLVM_VER: 18
       CPU: ${{ matrix.cpu }}
