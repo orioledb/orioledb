@@ -19,9 +19,9 @@ status=0
 
 cd orioledb
 if [ $CHECK_TYPE = "valgrind_1" ]; then
-	make USE_PGXS=1 IS_DEV=1 VALGRIND=1 regresscheck isolationcheck testgrescheck_part_1 -j $(nproc) || status=$?
+	make USE_PGXS=1 IS_DEV=1 VALGRIND=1 regresscheck isolationcheck testgrescheck_part_1 -j $((2*$(nproc))) || status=$?
 elif [ $CHECK_TYPE = "valgrind_2" ]; then
-	make USE_PGXS=1 IS_DEV=1 VALGRIND=1 testgrescheck_part_2 -j $(nproc) || status=$?
+	make USE_PGXS=1 IS_DEV=1 VALGRIND=1 testgrescheck_part_2 -j $((2*$(nproc))) || status=$?
 elif [ $CHECK_TYPE = "sanitize" ]; then
 	UBSAN_OPTIONS="log_path=$PWD/ubsan.log" \
 	ASAN_OPTIONS=$(cat <<-END
@@ -38,7 +38,7 @@ elif [ $CHECK_TYPE = "sanitize" ]; then
 		max_uar_stack_size_log=25:
 	END
 	) \
-		make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?
+		make USE_PGXS=1 IS_DEV=1 installcheck -j $((2*$(nproc))) || status=$?
 elif [ $CHECK_TYPE = "pg_tests" ]; then
     cd ../postgresql
     # Backport float tests patch
@@ -49,9 +49,9 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
 
     echo "shared_preload_libraries = 'orioledb'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log start
-    make -C src/test/regress installcheck -j $(nproc) || status=$?
-    make -C src/test/isolation installcheck -j $(nproc) || status=$?
-    make -C src/test/subscription installcheck -j $(nproc) || status=$?
+    make -C src/test/regress installcheck -j $((2*$(nproc))) || status=$?
+    make -C src/test/isolation installcheck -j $((2*$(nproc))) || status=$?
+    make -C src/test/subscription installcheck -j $((2*$(nproc))) || status=$?
 
     if [ $status -eq 0 ]; then
         echo "default_table_access_method = 'orioledb'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
@@ -63,21 +63,21 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         fi
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log restart
         # Run Postgress regression tests
-        make -C src/test/regress installcheck-oriole -j $(nproc) || status=$?
+        make -C src/test/regress installcheck-oriole -j $((2*$(nproc))) || status=$?
 
-        make -C src/test/isolation EXTRA_REGRESS_OPTS="--load-extension=orioledb" installcheck -j $(nproc) || true
+        make -C src/test/isolation EXTRA_REGRESS_OPTS="--load-extension=orioledb" installcheck -j $((2*$(nproc))) || true
         if [ -f src/test/isolation/output_iso/regression.diffs ]; then
           python3 ../orioledb/ci/filter_isolation_diff.py --diff src/test/isolation/output_iso/regression.diffs > src/test/isolation_filtered.diffs
           [ -s src/test/isolation_filtered.diffs ] || rm src/test/isolation_filtered.diffs src/test/isolation/output_iso/regression.diffs
         fi
         
         if [ $PG_VERSION = "17" ]; then
-            make -C src/test/subscription installcheck-oriole -j $(nproc) || status=$?
+            make -C src/test/subscription installcheck-oriole -j $((2*$(nproc))) || status=$?
         fi
     fi
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log stop
 else
-	make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?
+	make USE_PGXS=1 IS_DEV=1 installcheck -j $((2*$(nproc))) || status=$?
 fi
 cd ..
 
