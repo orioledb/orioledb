@@ -44,7 +44,7 @@
   ((void)(addr), (void)(size))
 #endif
 
-#define ORIOLEDB_VERSION "OrioleDB public beta 12"
+#define ORIOLEDB_VERSION "OrioleDB public beta 13"
 /*
  * Clusters with different ORIOLEDB_BINARY_VERSION are completely incompatible.
  * Within the same ORIOLEDB_BINARY_VERSION clusters either fully compatible

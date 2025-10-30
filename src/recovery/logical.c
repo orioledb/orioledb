@@ -839,7 +839,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				elog(DEBUG4, "reloid: %d natts: %u toast natts: %u", cur_oids.reloid, descr->tupdesc->natts, descr->toast->leafTupdesc->natts);
 
 		}
-		else if (rec_type == WAL_REC_O_TABLES_META_LOCK)
+		else if (rec_type == WAL_REC_O_TABLES_META_LOCK || rec_type == WAL_REC_REPLAY_FEEDBACK)
 		{
 			/* Skip */
 		}

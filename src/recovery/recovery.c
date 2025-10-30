@@ -2825,6 +2825,10 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			recovery_xmin = Max(recovery_xmin, xmin);
 			dlist_push_tail(&joint_commit_list, &cur_state->joint_commit_list_node);
 		}
+		else if (rec_type == WAL_REC_REPLAY_FEEDBACK)
+		{
+			XLogRequestWalReceiverReply();
+		}
 		else if (rec_type == WAL_REC_RELATION)
 		{
 			uint8		treeType;

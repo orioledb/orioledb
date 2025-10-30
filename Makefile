@@ -307,10 +307,6 @@ ifeq ($(strip $(COMMIT_HASH)),)
 endif
 override CFLAGS_SL += -DCOMMIT_HASH=$(COMMIT_HASH) -Wno-error=deprecated-declarations
 
-ifdef IS_DEV
-override CFLAGS_SL += -DIS_DEV
-endif
-
 ifdef VALGRIND
 override with_temp_install += PGCTLTIMEOUT=3000 PG_TEST_TIMEOUT_DEFAULT=500 \
 	valgrind --vgdb=no --leak-check=no \
