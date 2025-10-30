@@ -307,8 +307,9 @@ acquire_logical_xid(bool *useHeapXid)
 	{
 		if (useHeapXid)
 			*useHeapXid = true;
-		//return result; // @NOTE XID_NOCHANGE !!!
-	} else if (useHeapXid)
+		/* return result; // @NOTE XID_NOCHANGE !!! */
+	}
+	else if (useHeapXid)
 		*useHeapXid = false;
 
 	/*
@@ -382,7 +383,7 @@ release_logical_xid(LogicalXid *lxm)
 	 * Ignore deallocation for a logical xid if it was set from an existing
 	 * heap xid
 	 */
-	if (lxm/* && !lxm->useHeap*/)
+	if (lxm /* && !lxm->useHeap */ )
 	{
 		xid = lxm->xid;
 
@@ -409,6 +410,7 @@ assign_subtransaction_logical_xid(void)
 	if (useHeapXid)
 	{
 		TransactionId heapXid;
+
 		heapXid = GetCurrentTransactionIdIfAny();
 		if (TransactionIdIsValid(heapXid))
 		{
@@ -1265,11 +1267,13 @@ get_current_oxid(void)
 			if (logicalXidMeta.useHeap)
 			{
 				TransactionId heapXid;
-				heapXid = GetCurrentTransactionIdIfAny(); // top txn
+
+				heapXid = GetCurrentTransactionIdIfAny();
+				/* top txn */
 				elog(DEBUG4, "SWITCH_LOGICAL_XID H2O %u -> %u", heapXid, logicalXidMeta.xid);
 				add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
-				// @TODO
-				///logicalXidMeta.useHeap = false;
+				/* @TODO */
+				/* /logicalXidMeta.useHeap = false; */
 			}
 		}
 	}

@@ -704,7 +704,8 @@ add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode)
 void
 add_switch_logical_xid_wal_record(TransactionId logicalXid_top, TransactionId logicalXid_sub)
 {
-	if (local_wal_contains_switch_xid) return;
+	if (local_wal_contains_switch_xid)
+		return;
 
 	local_wal_contains_switch_xid = true;
 
