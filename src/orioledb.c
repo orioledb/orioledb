@@ -1016,6 +1016,7 @@ _PG_init(void)
 	set_plain_rel_pathlist_hook = orioledb_set_plain_rel_pathlist_hook;
 	RegisterXactCallback(undo_xact_callback, NULL);
 	RegisterSubXactCallback(undo_subxact_callback, NULL);
+	RegisterSubXactCallback(oxid_subxact_callback, NULL);
 	CacheRegisterUsercacheCallback(orioledb_usercache_hook, PointerGetDatum(NULL));
 	CheckPoint_hook = o_perform_checkpoint;
 	after_checkpoint_cleanup_hook = o_after_checkpoint_cleanup_hook;
