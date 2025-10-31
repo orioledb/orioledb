@@ -34,6 +34,7 @@
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "utils/dsa.h"
+#include "utils/elog.h"
 #include "utils/inval.h"
 #include "utils/page_pool.h"
 #include "utils/stopevent.h"
@@ -57,6 +58,7 @@
 #include "utils/memutils.h"
 #include "utils/typcache.h"
 
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -138,6 +140,28 @@ typedef struct
 	dlist_node	node;
 } CheckpointUndoStack;
 
+#define WORKER_UNDO_TEMP_FILE (ORIOLEDB_DATA_DIR"/recovery_worker_%d.undotmp")
+
+typedef struct WorkerUndoTempHeader
+{
+	int			worker_id;
+	uint32		num_transactions;
+} WorkerUndoTempHeader;
+
+typedef struct WorkerUndoTempEntry
+{
+	OXid		oxid;
+	CommitSeqNo csn;
+	UndoStackLocations undoStacks[UndoLogsCount];
+	uint32		numCheckpointStacks;
+	/* How many checkpoint stacks follow */
+} WorkerUndoTempEntry;
+
+typedef struct WorkerUndoTempCheckpointStack
+{
+	UndoLogType undoType;
+	UndoStackLocations undoStack;
+} WorkerUndoTempCheckpointStack;
 
 PG_FUNCTION_INFO_V1(orioledb_recovery_synchronized);
 
@@ -418,6 +442,7 @@ recovery_shmem_init(Pointer ptr, bool found)
 			pg_atomic_init_u64(&worker_ptrs[i].commitPtr, InvalidXLogRecPtr);
 			pg_atomic_init_u64(&worker_ptrs[i].retainPtr, InvalidXLogRecPtr);
 			worker_ptrs[i].flushedUndoLocCompletedCheckpointNumber = 0;
+			pg_atomic_init_flag(&worker_ptrs[i].hasTempFile);
 		}
 		pg_atomic_init_u64(recovery_ptr, InvalidXLogRecPtr);
 		pg_atomic_init_u64(recovery_main_retain_ptr, InvalidXLogRecPtr);
@@ -2011,53 +2036,212 @@ update_recovery_undo_loc_flush(bool single, int worker_id)
 	update_undo_loc_flush_completed_number(single);
 }
 
+/*
+ * Save the recovery worker state to the temporary file.
+ */
+static void
+save_state_to_file(int worker_id)
+{
+	char	   *filename;
+	File		tempFile;
+	WorkerUndoTempHeader header;
+	HASH_SEQ_STATUS hash_seq;
+	RecoveryXidState *state;
+	off_t		offset = sizeof(header);
+
+	/* Create worker-specific temp file */
+	filename = psprintf(WORKER_UNDO_TEMP_FILE, worker_id);
+	tempFile = PathNameOpenFile(filename, O_WRONLY | O_CREAT | O_TRUNC | PG_BINARY);
+	if (tempFile < 0)
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not open file %s: %m", filename)));
+
+	/* Write header */
+	header.worker_id = worker_id;
+	header.num_transactions = hash_get_num_entries(recovery_xid_state_hash);
+	if (OFileWrite(tempFile, (char *) &header, sizeof(header), 0,
+				   WAIT_EVENT_DATA_FILE_WRITE) != sizeof(header))
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not write recovery worker undo header to file \"%s\": %m",
+						filename)));
+
+	/* Write all transaction states */
+	hash_seq_init(&hash_seq, recovery_xid_state_hash);
+	while ((state = hash_seq_search(&hash_seq)) != NULL)
+	{
+		WorkerUndoTempEntry entry;
+		dlist_iter	iter;
+
+		/* Save complete transaction state */
+		memset(&entry, 0, sizeof(entry));
+		entry.oxid = state->oxid;
+		entry.csn = state->csn;
+		entry.numCheckpointStacks = 0;
+
+		dlist_foreach(iter, &state->checkpoint_undo_stacks)
+		{
+			entry.numCheckpointStacks++;
+		}
+
+		/* Update current undo locations if needed */
+		if (cur_state == state)
+		{
+			for (int i = 0; i < UndoLogsCount; i++)
+				state->undo_stacks[i] = get_cur_undo_locations((UndoLogType) i);
+		}
+		memcpy(entry.undoStacks, state->undo_stacks, sizeof(entry.undoStacks));
+
+		if (OFileWrite(tempFile, (char *) &entry, sizeof(entry), offset,
+					   WAIT_EVENT_DATA_FILE_WRITE) != sizeof(entry))
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not write file \"%s\": %m",
+							filename)));
+		offset += sizeof(entry);
+
+		/* Also write checkpoint stacks */
+		dlist_foreach(iter, &state->checkpoint_undo_stacks)
+		{
+			CheckpointUndoStack *stack = dlist_container(CheckpointUndoStack,
+														 node,
+														 iter.cur);
+			WorkerUndoTempCheckpointStack tempStack;
+
+			memset(&tempStack, 0, sizeof(tempStack));
+			tempStack.undoType = stack->undoType;
+			tempStack.undoStack = stack->undoStack;
+
+			if (OFileWrite(tempFile, (char *) &tempStack, sizeof(tempStack),
+						   offset, WAIT_EVENT_DATA_FILE_WRITE) != sizeof(tempStack))
+				ereport(FATAL,
+						(errcode_for_file_access(),
+						 errmsg("could not write file \"%s\": %m", filename)));
+
+			offset += sizeof(tempStack);
+		}
+	}
+
+	if (FileSync(tempFile, WAIT_EVENT_DATA_FILE_WRITE) < 0)
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not sync file \"%s\": %m", filename)));
+
+	FileClose(tempFile);
+	pfree(filename);
+}
+
+/*
+ * Read the recovery worker state from the temporary file.
+ */
+void
+recovery_load_state_from_file(int worker_id, uint32 chkpnum, bool shutdown)
+{
+	char	   *filename = psprintf(WORKER_UNDO_TEMP_FILE, worker_id);
+	File		tempFile = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
+	WorkerUndoTempHeader header;
+	off_t		offset;
+
+	if (tempFile < 0)
+	{
+		if (errno != ENOENT)
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not open file \"%s\": %m", filename)));
+		return;
+	}
+
+	/* Read header */
+	if (OFileRead(tempFile, (char *) &header, sizeof(header), 0,
+				  WAIT_EVENT_DATA_FILE_READ) != sizeof(header))
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not read recovery worker undo header from file \"%s\": %m",
+						filename)));
+
+	offset = sizeof(header);
+
+	/* Process each transaction entry */
+	for (int i = 0; i < header.num_transactions; i++)
+	{
+		WorkerUndoTempEntry entry;
+
+		/* Read main entry */
+		if (OFileRead(tempFile, (char *) &entry, sizeof(entry), offset,
+					  WAIT_EVENT_DATA_FILE_READ) != sizeof(entry))
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not read file \"%s\": %m",
+							filename)));
+		offset += sizeof(entry);
+
+		/* Skip if transaction is finished */
+		if (!COMMITSEQNO_IS_INPROGRESS(entry.csn))
+		{
+			/* Still need to skip checkpoint stack entries */
+			offset += entry.numCheckpointStacks * sizeof(CheckpointUndoStack);
+			continue;
+		}
+
+		/* Process main undo stacks (Regular, PageLevel, System) */
+		for (int j = 0; j < UndoLogsCount; j++)
+		{
+			XidFileRec	rec;
+
+			rec.oxid = entry.oxid;
+			rec.undoType = (UndoLogType) j;
+			rec.undoLocation = entry.undoStacks[j];
+			write_to_xids_queue(&rec);
+		}
+
+		/* Process checkpoint stacks */
+		for (int j = 0; j < entry.numCheckpointStacks; j++)
+		{
+			XidFileRec	rec;
+			WorkerUndoTempCheckpointStack stack;
+
+			if (OFileRead(tempFile, (char *) &stack, sizeof(stack), offset,
+						  WAIT_EVENT_DATA_FILE_READ) != sizeof(stack))
+				ereport(FATAL,
+						(errcode_for_file_access(),
+						 errmsg("could not read file \"%s\": %m",
+								filename)));
+			offset += sizeof(stack);
+
+			/* Write checkpoint stack to XID queue */
+			rec.oxid = entry.oxid;
+			rec.undoType = stack.undoType;
+			rec.undoLocation = stack.undoStack;
+			write_to_xids_queue(&rec);
+		}
+	}
+
+	FileClose(tempFile);
+
+	/*
+	 * We no longer need the temporary file if it's shutdown (last)
+	 * checkpoint. So, cleanup.
+	 */
+	if (shutdown)
+		unlink(filename);
+	pfree(filename);
+}
+
 void
 recovery_on_proc_exit(int code, Datum arg)
 {
 	int			worker_id = (int) arg;
-	uint32		myCompletedNumber,
-				requestNumber;
-	bool		single = *recovery_single_process;
 
 	if (!recovery_xid_state_hash)
 		return;
 
 	elog(LOG, "recovery on exit: %d", worker_id);
 
-	requestNumber = recovery_undo_loc_flush->finishRequestCheckpointNumber;
-	if (worker_id < 0)
-		myCompletedNumber = recovery_undo_loc_flush->recoveryMainCompletedCheckpointNumber;
-	else
-		myCompletedNumber = worker_ptrs[worker_id].flushedUndoLocCompletedCheckpointNumber;
+	save_state_to_file(worker_id);
 
-	if (recovery_undo_loc_flush->completedCheckpointNumber >= requestNumber)
-	{
-		requestNumber = checkpoint_state->lastCheckpointNumber + 1;
-		before_writing_xids_file(requestNumber);
-	}
-
-	/*
-	 * Process immediate request if any.
-	 */
-	if (myCompletedNumber < requestNumber)
-		recovery_write_to_xids_queue(worker_id, requestNumber);
-
-	SpinLockAcquire(&recovery_undo_loc_flush->exitLock);
-	update_undo_loc_flush_completed_number(single);
-	SpinLockRelease(&recovery_undo_loc_flush->exitLock);
-
-	/*
-	 * Also write our xids to the last checkpoint caused by fast shutdown.
-	 */
-	LWLockAcquire(&checkpoint_state->oXidQueueLock, LW_EXCLUSIVE);
-	requestNumber = checkpoint_state->lastCheckpointNumber + 1;
-	before_writing_xids_file(requestNumber);
-	LWLockRelease(&checkpoint_state->oXidQueueLock);
-
-	recovery_write_to_xids_queue(worker_id, requestNumber);
-	SpinLockAcquire(&recovery_undo_loc_flush->exitLock);
-	update_undo_loc_flush_completed_number(single);
-	SpinLockRelease(&recovery_undo_loc_flush->exitLock);
+	/* Mark worker as having saved state and exited */
+	pg_atomic_test_set_flag(&worker_ptrs[worker_id].hasTempFile);
 }
 
 static void
@@ -3696,4 +3880,40 @@ recovery_msg_from_wal_record(uint8 wal_record)
 			elog(ERROR, "Wrong WAL record modify type %d", wal_record);
 	}
 	return (uint16) 0;			/* keep compiler quiet */
+}
+
+static bool
+is_process_running(pid_t pid)
+{
+	if (kill(pid, 0) == 0)
+		return true;
+
+	if (errno == ESRCH)
+		return false;
+	else if (errno == EPERM)
+		return true;
+	else
+		return false;
+}
+
+/*
+ * Check from non-recovery process that recovery workers are finished.
+ */
+bool
+check_recovery_workers_finished(void)
+{
+	int			finish = recovery_idx_pool_size_guc ? index_build_leader : recovery_last_worker;
+	int			i;
+
+	for (i = recovery_first_worker; i <= finish; i++)
+	{
+		shm_mq	   *mq = GET_WORKER_QUEUE(i);
+		PGPROC	   *receiver = shm_mq_get_receiver(mq);
+
+		if (receiver && receiver->pid > 0 && is_process_running(receiver->pid))
+		{
+			return false;
+		}
+	}
+	return true;
 }
