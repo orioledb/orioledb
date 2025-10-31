@@ -802,6 +802,7 @@ finish_write_xids(uint32 chkpnum)
 	int			i,
 				j,
 				k;
+	int			total_recovery_workers = recovery_pool_size_guc + recovery_idx_pool_size_guc;
 
 	memset(&xidRec, 0, sizeof(xidRec));
 	ASAN_UNPOISON_MEMORY_REGION(&xidRec, sizeof(xidRec));
@@ -841,6 +842,15 @@ finish_write_xids(uint32 chkpnum)
 		LWLockRelease(&oProcData[i].undoStackLocationsFlushLock);
 	}
 
+	/* Check for exited recovery workers with temp files */
+	for (i = 0; i < total_recovery_workers; i++)
+	{
+		if (!pg_atomic_unlocked_test_flag(&worker_ptrs[i].has_temp_file))
+		{
+			recovery_load_and_process_state_from_temp_file(i, chkpnum);
+		}
+	}
+
 	if (enable_rewind)
 	{
 		checkpoint_write_rewind_xids();
@@ -849,11 +859,31 @@ finish_write_xids(uint32 chkpnum)
 	recovery_undo_loc_flush->immediateRequestCheckpointNumber = chkpnum;
 
 	/*
-	 * Wait till recovery undo position will be flushed.
+	 * Wait till recovery undo position will be flushed. But don't wait for
+	 * exited workers.
 	 */
 	while (recovery_undo_loc_flush->completedCheckpointNumber <
 		   recovery_undo_loc_flush->immediateRequestCheckpointNumber)
 	{
+		bool		all_workers_done = true;
+
+		for (i = 0; i < total_recovery_workers; i++)
+		{
+			/* Skip workers that have exited and saved state */
+			if (!pg_atomic_unlocked_test_flag(&worker_ptrs[i].has_temp_file))
+				continue;
+
+			if (worker_ptrs[i].flushedUndoLocCompletedCheckpointNumber <
+				recovery_undo_loc_flush->immediateRequestCheckpointNumber)
+			{
+				all_workers_done = false;
+				break;
+			}
+		}
+
+		if (all_workers_done)
+			break;
+
 		WakeupRecovery();
 		pg_usleep(10000L);
 	}

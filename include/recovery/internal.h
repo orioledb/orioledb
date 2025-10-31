@@ -134,6 +134,7 @@ typedef struct
 	pg_atomic_uint64 commitPtr;
 	pg_atomic_uint64 retainPtr;
 	uint32		flushedUndoLocCompletedCheckpointNumber;
+	pg_atomic_flag has_temp_file;
 } RecoveryWorkerPtrs;
 
 typedef struct
