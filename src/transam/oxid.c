@@ -91,8 +91,8 @@ orioledb_get_current_heap_xid(PG_FUNCTION_ARGS)
  *     - readonly           - no xid (*)
  *     - heap write         - heap xid - COMMIT heap xact
  *     - oriole write       - oriole xid - COMMIT oriole xact
- *     - heap->oriole write - heap xid - merged xact: COMMIT both as heap xact
- *     - oriole->heap write - switch xid (*) - COMMIT oriole xact as a subxact of a top heap xact
+ *     - heap->oriole write - SWITCH_LOGICAL_XID H2O: Oriole txn acts as a sub-txn of a top heap txn
+ *     - oriole->heap write - SWITCH_LOGICAL_XID O2H: heap txn acts as a sub-txn of a top Oriole txn
  */
 static OXid curOxid = InvalidOXid;	/* a 64-bit OrioleDB oxid */
 
@@ -666,7 +666,7 @@ clear_rewind_oxid(OXid oxid)
 	CommitSeqNo csn;
 
 	map_oxid(oxid, &csn, &xlogPtr, false);
-/* 	elog(LOG, "csn unset from rewind %lu -> %lu", csn | COMMITSEQNO_RETAINED_FOR_REWIND, csn); */
+/* 	elog(DEBUG4, "csn unset from rewind %lu -> %lu", csn | COMMITSEQNO_RETAINED_FOR_REWIND, csn); */
 	set_oxid_csn(oxid, csn);
 }
 

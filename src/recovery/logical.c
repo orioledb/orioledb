@@ -550,6 +550,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		{
 			TransactionId topXid,
 						subXid;
+			ReorderBufferTXN *topTXN;
+			ReorderBufferTXN *subTXN;
 
 			ptr = wal_parse_rec_switch_logical_xid(ptr, &topXid, &subXid);
 
@@ -562,9 +564,17 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			Assert(TransactionIdIsValid(subXid));
 			/* /Assert(logicalXid == oldXid); */
 
-			ReorderBufferAssignChild(ctx->reorder,
-									 topXid, subXid, //@NOTE XID_NOCHANGE
-									 buf->origptr);
+			topTXN = ReorderBufferTXNByXid(ctx->reorder,
+										   topXid, false, NULL, InvalidXLogRecPtr, false);
+			subTXN = ReorderBufferTXNByXid(ctx->reorder,
+										   subXid, false, NULL, InvalidXLogRecPtr, false);
+
+			if (topTXN && subTXN)
+			{
+				ReorderBufferAssignChild(ctx->reorder,
+										 topXid, subXid, //@NOTE XID_NOCHANGE
+										 buf->origptr);
+			}
 
 			/* logicalXid = oldXid; */
 			/* heapXid = newXid; */
@@ -710,7 +720,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		}
 		else if (rec_type == WAL_REC_JOINT_COMMIT)
 		{
-#if 0
 			TransactionId xid;
 			OXid		xmin;
 			CommitSeqNo csn;
@@ -763,7 +772,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			oxid = InvalidOXid;
 			logicalXid = InvalidTransactionId;
-#endif
+
 		}
 		else if (rec_type == WAL_REC_RELATION)
 		{

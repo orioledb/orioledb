@@ -83,7 +83,9 @@ wal_record_type_to_string(int wal_record)
 			return "BRIDGE_ERASE";
 		 /* 15 */ case WAL_REC_REINSERT:
 			return "REINSERT";
-		 /* 16 */ case WAL_REC_SWITCH_LOGICAL_XID:
+		 /* 16 */ case WAL_REC_REPLAY_FEEDBACK:
+			return "REPLAY_FEEDBACK";
+		 /* 17 */ case WAL_REC_SWITCH_LOGICAL_XID:
 			return "SWITCH_LOGICAL_XID";
 		default:
 			return "UNKNOWN";
@@ -465,6 +467,8 @@ wal_commit(OXid oxid, TransactionId logicalXid)
 	walPos = flush_local_wal(true);
 	local_wal_has_material_changes = false;
 
+	elog(DEBUG4, "COMMIT oxid %lu logicalXid %u", oxid, logicalXid);
+
 	return walPos;
 }
 
@@ -528,6 +532,8 @@ wal_rollback(OXid oxid, TransactionId logicalXid)
 	add_finish_wal_record(WAL_REC_ROLLBACK, pg_atomic_read_u64(&xid_meta->runXmin));
 	wait_pos = flush_local_wal(false);
 	local_wal_has_material_changes = false;
+
+	elog(DEBUG4, "ROLLBACK oxid %lu logicalXid %u", oxid, logicalXid);
 
 	if (synchronous_commit > SYNCHRONOUS_COMMIT_OFF)
 		XLogFlush(wait_pos);
