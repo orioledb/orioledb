@@ -666,6 +666,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 
 
 	success = (iresult == OBTreeModifyResultInserted);
+	elog(WARNING, "aminsert: success: %c", success ? 'Y' : 'N');
 
 	if (!success)
 	{
@@ -786,6 +787,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	}
 	pfree(vfree);
 
+	elog(WARNING, "amupdate: result.success: %c", result.success ? 'Y' : 'N');
 	if (!result.success)
 	{
 		switch (result.action)
