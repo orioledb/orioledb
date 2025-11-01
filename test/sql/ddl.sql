@@ -192,8 +192,8 @@ ROLLBACK;
 SELECT orioledb_tbl_structure('unique_tbl'::regclass);
 
 -- check is done at end of statement, so this should succeed
--- UPDATE unique_tbl SET i = i+1;
-UPDATE unique_tbl SET i = i+2+(3-i/2*3);
+UPDATE unique_tbl SET i = i+1;
+-- UPDATE unique_tbl SET i = i+2+(3-i/2*3);
 SELECT orioledb_tbl_structure('unique_tbl'::regclass);
 
 SELECT * FROM unique_tbl;
