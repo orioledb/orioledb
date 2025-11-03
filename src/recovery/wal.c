@@ -50,7 +50,7 @@ check_wal_container_version(Pointer *ptr)
 {
 	uint16		wal_version;
 
-	if (**ptr >= FIRST_WAL_VERSION)
+	if (**ptr >= FIRST_ORIOLEDB_WAL_VERSION)
 	{
 		/*
 		 * Container starts with a valid WAL version. First WAL record is just
@@ -63,29 +63,29 @@ check_wal_container_version(Pointer *ptr)
 	{
 		/*
 		 * Container starts with rec_type of first WAL record (its maximum
-		 * value was under FIRST_WAL_VERSION at the time of introducing WAL
+		 * value was under FIRST_ORIOLEDB_WAL_VERSION at the time of introducing WAL
 		 * versioning. Consider this as version 0 and don't increase pointer
 		 */
 		wal_version = 0;
 	}
 
-	if (wal_version > CURRENT_WAL_VERSION)
+	if (wal_version > ORIOLEDB_WAL_VERSION)
 	{
 #ifdef IS_DEV
 		/* Always fail tests on difference */
-		elog(FATAL, "Can't apply WAL container version %u that is newer than supported %u. Intentionally fail tests", wal_version, CURRENT_WAL_VERSION);
+		elog(FATAL, "Can't apply WAL container version %u that is newer than supported %u. Intentionally fail tests", wal_version, ORIOLEDB_WAL_VERSION);
 #else
-		elog(WARNING, "Can't apply WAL container version %u that is newer than supported %u", wal_version, CURRENT_WAL_VERSION);
+		elog(WARNING, "Can't apply WAL container version %u that is newer than supported %u", wal_version, ORIOLEDB_WAL_VERSION);
 		/* Further fail and output is caller-specific */
 #endif
 	}
-	else if (wal_version < CURRENT_WAL_VERSION)
+	else if (wal_version < ORIOLEDB_WAL_VERSION)
 	{
 #ifdef IS_DEV
 		/* Always fail tests on difference */
-		elog(FATAL, "WAL container version %u is older than current %u. Intentionally fail tests", wal_version, CURRENT_WAL_VERSION);
+		elog(FATAL, "WAL container version %u is older than current %u. Intentionally fail tests", wal_version, ORIOLEDB_WAL_VERSION);
 #else
-		elog(LOG, "WAL container version %u is older than current %u. Applying with conversion.", wal_version, CURRENT_WAL_VERSION);
+		elog(LOG, "WAL container version %u is older than current %u. Applying with conversion.", wal_version, ORIOLEDB_WAL_VERSION);
 #endif
 	}
 
@@ -419,8 +419,8 @@ add_wal_container_header_if_needed(void)
 		uint16	   *wal_version_header;
 
 		wal_version_header = (uint16 *) (&local_wal_buffer[local_wal_buffer_offset]);
-		Assert(CURRENT_WAL_VERSION >= FIRST_WAL_VERSION);
-		*wal_version_header = CURRENT_WAL_VERSION;
+		Assert(ORIOLEDB_WAL_VERSION >= FIRST_ORIOLEDB_WAL_VERSION);
+		*wal_version_header = ORIOLEDB_WAL_VERSION;
 		local_wal_buffer_offset += sizeof(uint16);
 
 		local_wal_contains_xid = false;
