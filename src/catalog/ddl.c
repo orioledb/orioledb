@@ -1595,7 +1595,7 @@ o_alter_replica_identity(Relation rel, ReplicaIdentityStmt *stmt, LOCKMODE lockm
 	Relation	indexRel;
 	int			key;
 
-	elog(WARNING, "Current replident %c, setting replident %c", rel->rd_rel->relreplident, stmt->identity_type);
+	elog(LOG, "Current replident %c, setting replident %c", rel->rd_rel->relreplident, stmt->identity_type);
 
 	if (stmt->identity_type == REPLICA_IDENTITY_DEFAULT)
 	{

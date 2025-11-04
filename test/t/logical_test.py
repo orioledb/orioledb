@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+/#!/usr/bin/env python3
 # coding: utf-8
 
 import json
@@ -530,6 +530,11 @@ class LogicalTest(BaseTest):
 				"""
 				publisher.safe_psql(create_sql)
 				subscriber.safe_psql(create_sql)
+				alter_sql = """
+					ALTER TABLE o_test_ctid REPLICA IDENTITY FULL;
+				"""
+				publisher.safe_psql(alter_sql)
+				subscriber.safe_psql(alter_sql)
 
 				pub = publisher.publish('test_pub',
 				                        tables=[
@@ -591,18 +596,18 @@ class LogicalTest(BaseTest):
 
 				with publisher.connect() as con1:
 					with publisher.connect() as con2:
+						con1.execute(
+						    "UPDATE o_test_ctid SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test_ctid SET data2 = 'ppp' where data2 = 'nnn';"
+						)
 #						con1.execute(
-#						    "UPDATE o_test_ctid SET data2 = 'ssssss' where data2 = 'barbar';"
+#						    "UPDATE o_test_bridge SET data2 = 'ssssss' where data2 = 'barbar';"
 #						)
 #						con2.execute(
-#						    "UPDATE o_test_ctid SET data2 = 'ppp' where data2 = 'nnn';"
+#						    "UPDATE o_test_bridge SET data2 = 'ppp' where data2 = 'nnn';"
 #						)
-##						con1.execute(
-##						    "UPDATE o_test_bridge SET data2 = 'ssssss' where data2 = 'barbar';"
-##						)
-##						con2.execute(
-##						    "UPDATE o_test_bridge SET data2 = 'ppp' where data2 = 'nnn';"
-##						)
 						con1.execute(
 						    "UPDATE o_test_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
 						)
@@ -638,16 +643,16 @@ class LogicalTest(BaseTest):
 
 #					publisher.safe_psql("CHECKPOINT;")
 #					subscriber.execute("SELECT orioledb_get_current_oxid();")
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test_ctid ORDER BY i'),
+					    [('1, foofoo', 'ssssss', 'aaaaaa'),
+					     ('2, mmm', 'ppp', 'ooo')])
 #					self.assertListEqual(
 #					    publisher.execute(
-#					        'SELECT * FROM o_test_ctid ORDER BY i'),
+#					        'SELECT * FROM o_test_bridge ORDER BY i'),
 #					    [('1, foofoo', 'ssssss', 'aaaaaa'),
-#					     ('2, mmm', 'ppp', 'ooo')])
-##					self.assertListEqual(
-##					    publisher.execute(
-##					        'SELECT * FROM o_test_bridge ORDER BY i'),
-##					    [('1, foofoo', 'ssssss', 'aaaaaa'),
-##					     (2, 'mmm', 'ppp', 'ooo')])
+#					     (2, 'mmm', 'ppp', 'ooo')])
 					self.assertListEqual(
 					    publisher.execute(
 					        'SELECT * FROM o_test_secondary ORDER BY i'),
@@ -678,16 +683,16 @@ class LogicalTest(BaseTest):
 					sub.catchup()
 					# sub.poll_query_until("SELECT orioledb_recovery_synchronized();", expected=True)
 #					subscriber.safe_psql("CHECKPOINT;")
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_ctid ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
 #					self.assertListEqual(
 #					    subscriber.execute(
-#					        'SELECT * FROM o_test_ctid ORDER BY i'),
+#					        'SELECT * FROM o_test_bridge ORDER BY i'),
 #					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
 #					     (2, 'mmm', 'ppp', 'ooo')])
-##					self.assertListEqual(
-##					    subscriber.execute(
-##					        'SELECT * FROM o_test_bridge ORDER BY i'),
-##					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
-##					     (2, 'mmm', 'ppp', 'ooo')])
 					self.assertListEqual(
 					    subscriber.execute(
 					        'SELECT * FROM o_test_secondary ORDER BY i'),
