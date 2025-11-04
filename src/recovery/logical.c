@@ -765,10 +765,12 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			OFixedTuple tuple1;
 			OFixedTuple tuple2;
 			OffsetNumber debug_length;
+			bool	read_two_tuples;
 
 			ReorderBufferProcessXid(ctx->reorder, logicalXid, changeXLogPtr);
-
-			read_modify_wal_tuples(rec_type, &ptr, &tuple1, &tuple2, &debug_length);
+			
+			read_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
+			read_modify_wal_tuples(rec_type, &ptr, &tuple1, &tuple2, &debug_length, read_two_tuples);
 
 			if (SnapBuildCurrentState(ctx->snapshot_builder) < SNAPBUILD_FULL_SNAPSHOT)
 				continue;

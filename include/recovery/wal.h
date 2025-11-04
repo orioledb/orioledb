@@ -175,6 +175,8 @@ extern void o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, c
 extern void add_truncate_wal_record(ORelOids oids);
 extern bool get_local_wal_has_material_changes(void);
 extern void set_local_wal_has_material_changes(bool value);
+extern void read_modify_wal_tuples(uint8 rec_type, Pointer *ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1, bool read_two_tuples);
+
 extern uint16 check_wal_container_version(Pointer *ptr);
 
 #endif							/* __WAL_H__ */

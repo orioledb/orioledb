@@ -134,7 +134,7 @@ static void redefine_pkey_for_rel(Relation rel);
 
 static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
 static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
-static void o_alter_replica_identity(Relation rel, ReplicaIdentityStmt *stmt, LOCKMODE lockmode);
+static void o_validate_replica_identity(Relation rel, ReplicaIdentityStmt *stmt);
 
 void
 orioledb_setup_ddl_hooks(void)
@@ -973,7 +973,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 							o_alter_column_type(cmd, queryString, rel);
 							break;
 						case AT_ReplicaIdentity:
-//							o_alter_replica_identity(rel, (ReplicaIdentityStmt *) cmd->def, lockmode);
+							o_validate_replica_identity(rel, (ReplicaIdentityStmt *) cmd->def);
 							break;
 						default:
 							break;
@@ -1490,209 +1490,27 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	free_parsestate(pstate);
 }
 
-/*
- * Private copy of o_mark_replica_identity: Update a table's replica identity
- *
- * Iff ri_type = REPLICA_IDENTITY_INDEX, indexOid must be the Oid of a suitable
- * index. Otherwise, it must be InvalidOid.
- *
- * Caller had better hold an exclusive lock on the relation, as the results
- * of running two of these concurrently wouldn't be pretty.
- */
 static void
-o_mark_replica_identity(Relation rel, char ri_type, Oid indexOid,
-							   bool is_internal)
+o_validate_replica_identity(Relation rel, ReplicaIdentityStmt *stmt)
 {
-	Relation	pg_index;
-	Relation	pg_class;
-	HeapTuple	pg_class_tuple;
-	HeapTuple	pg_index_tuple;
-	Form_pg_class pg_class_form;
-	Form_pg_index pg_index_form;
-	ListCell   *index;
-
-	/*
-	 * Check whether relreplident has changed, and update it if so.
-	 */
-	pg_class = table_open(RelationRelationId, RowExclusiveLock);
-	pg_class_tuple = SearchSysCacheCopy1(RELOID,
-										 ObjectIdGetDatum(RelationGetRelid(rel)));
-	if (!HeapTupleIsValid(pg_class_tuple))
-		elog(ERROR, "cache lookup failed for relation \"%s\"",
-			 RelationGetRelationName(rel));
-	pg_class_form = (Form_pg_class) GETSTRUCT(pg_class_tuple);
-	if (pg_class_form->relreplident != ri_type)
-	{
-		pg_class_form->relreplident = ri_type;
-		CatalogTupleUpdate(pg_class, &pg_class_tuple->t_self, pg_class_tuple);
-	}
-	table_close(pg_class, RowExclusiveLock);
-	heap_freetuple(pg_class_tuple);
-
-	/*
-	 * Update the per-index indisreplident flags correctly.
-	 */
-	pg_index = table_open(IndexRelationId, RowExclusiveLock);
-	foreach(index, RelationGetIndexList(rel))
-	{
-		Oid			thisIndexOid = lfirst_oid(index);
-		bool		dirty = false;
-
-		pg_index_tuple = SearchSysCacheCopy1(INDEXRELID,
-											 ObjectIdGetDatum(thisIndexOid));
-		if (!HeapTupleIsValid(pg_index_tuple))
-			elog(ERROR, "cache lookup failed for index %u", thisIndexOid);
-		pg_index_form = (Form_pg_index) GETSTRUCT(pg_index_tuple);
-
-		if (thisIndexOid == indexOid)
-		{
-			/* Set the bit if not already set. */
-			if (!pg_index_form->indisreplident)
-			{
-				dirty = true;
-				pg_index_form->indisreplident = true;
-			}
-		}
-		else
-		{
-			/* Unset the bit if set. */
-			if (pg_index_form->indisreplident)
-			{
-				dirty = true;
-				pg_index_form->indisreplident = false;
-			}
-		}
-
-		if (dirty)
-		{
-			CatalogTupleUpdate(pg_index, &pg_index_tuple->t_self, pg_index_tuple);
-			InvokeObjectPostAlterHookArg(IndexRelationId, thisIndexOid, 0,
-										 InvalidOid, is_internal);
-
-			/*
-			 * Invalidate the relcache for the table, so that after we commit
-			 * all sessions will refresh the table's replica identity index
-			 * before attempting any UPDATE or DELETE on the table.  (If we
-			 * changed the table's pg_class row above, then a relcache inval
-			 * is already queued due to that; but we might not have.)
-			 */
-			CacheInvalidateRelcache(rel);
-		}
-		heap_freetuple(pg_index_tuple);
-	}
-
-	table_close(pg_index, RowExclusiveLock);
-}
-
-/*
- * Set replica identity for relation. Private copy of ATExecReplicaIdentity with some changes
- * ALTER TABLE <name> REPLICA IDENTITY ...
- */
-static void
-o_alter_replica_identity(Relation rel, ReplicaIdentityStmt *stmt, LOCKMODE lockmode)
-{
-	Oid			indexOid;
-	Relation	indexRel;
-	int			key;
-
 	elog(LOG, "Current replident %c, setting replident %c", rel->rd_rel->relreplident, stmt->identity_type);
 
 	if (stmt->identity_type == REPLICA_IDENTITY_DEFAULT)
 	{
-		o_mark_replica_identity(rel, stmt->identity_type, InvalidOid, true);
 		return;
 	}
 	else if (stmt->identity_type == REPLICA_IDENTITY_FULL)
 	{
-		o_mark_replica_identity(rel, stmt->identity_type, InvalidOid, true);
 		return;
 	}
-//	else if (stmt->identity_type == REPLICA_IDENTITY_NOTHING)
-//	{
-//		o_mark_replica_identity(rel, stmt->identity_type, InvalidOid, true);
-//		return;
-//	}
-//	else if (stmt->identity_type == REPLICA_IDENTITY_INDEX)
-//	{
-//		 /* fallthrough */ ;
-//	}
-	else
-		elog(ERROR, "unexpected identity type %u", stmt->identity_type);
-
-	/* Check that the index exists */
-	indexOid = get_relname_relid(stmt->name, rel->rd_rel->relnamespace);
-	if (!OidIsValid(indexOid))
-		ereport(ERROR,
-				(errcode(ERRCODE_UNDEFINED_OBJECT),
-				 errmsg("index \"%s\" for table \"%s\" does not exist",
-						stmt->name, RelationGetRelationName(rel))));
-
-	indexRel = index_open(indexOid, ShareLock);
-
-	/* Check that the index is on the relation we're altering. */
-	if (indexRel->rd_index == NULL ||
-		indexRel->rd_index->indrelid != RelationGetRelid(rel))
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("\"%s\" is not an index for table \"%s\"",
-						RelationGetRelationName(indexRel),
-						RelationGetRelationName(rel))));
-	/* The AM must support uniqueness, and the index must in fact be unique. */
-	if (!indexRel->rd_indam->amcanunique ||
-		!indexRel->rd_index->indisunique)
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("cannot use non-unique index \"%s\" as replica identity",
-						RelationGetRelationName(indexRel))));
-	/* Deferred indexes are not guaranteed to be always unique. */
-	if (!indexRel->rd_index->indimmediate)
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("cannot use non-immediate index \"%s\" as replica identity",
-						RelationGetRelationName(indexRel))));
-	/* Expression indexes aren't supported. */
-	if (RelationGetIndexExpressions(indexRel) != NIL)
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("cannot use expression index \"%s\" as replica identity",
-						RelationGetRelationName(indexRel))));
-	/* Predicate indexes aren't supported. */
-	if (RelationGetIndexPredicate(indexRel) != NIL)
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("cannot use partial index \"%s\" as replica identity",
-						RelationGetRelationName(indexRel))));
-
-	/* Check index for nullable columns. */
-	for (key = 0; key < IndexRelationGetNumberOfKeyAttributes(indexRel); key++)
-	{
-		int16		attno = indexRel->rd_index->indkey.values[key];
-		Form_pg_attribute attr;
-
-		/*
-		 * Reject any other system columns.  (Going forward, we'll disallow
-		 * indexes containing such columns in the first place, but they might
-		 * exist in older branches.)
-		 */
-		if (attno <= 0)
-			ereport(ERROR,
-					(errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
-					 errmsg("index \"%s\" cannot be used as replica identity because column %d is a system column",
-							RelationGetRelationName(indexRel), attno)));
-
-		attr = TupleDescAttr(rel->rd_att, attno - 1);
-		if (!attr->attnotnull)
-			ereport(ERROR,
-					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-					 errmsg("index \"%s\" cannot be used as replica identity because column \"%s\" is nullable",
-							RelationGetRelationName(indexRel),
-							NameStr(attr->attname))));
+	else if (stmt->identity_type == REPLICA_IDENTITY_NOTHING)
+	{	
+		elog(ERROR, "replica identity type NOTHING is not supported for OrioleDB tables yet");
 	}
-
-	/* This index is suitable for use as a replica identity. Mark it. */
-	o_mark_replica_identity(rel, stmt->identity_type, indexOid, true);
-
-	index_close(indexRel, NoLock);
+	else if (stmt->identity_type == REPLICA_IDENTITY_INDEX)
+	{	
+		elog(ERROR, "replica identity type INDEX is not supported for OrioleDB tables yet");
+	}
 }
 
 static void

@@ -2667,78 +2667,6 @@ invalidate_typcache(void)
 }
 
 /*
- * Read tuples from modify WAL record.
- * tuple1 is mandatory basic tuple for all modify records,
- * tuple2 is optional, e.g. WAL record could also have old tuple in case of REINSERT
- */
-void
-read_modify_wal_tuples(uint8 rec_type, Pointer *ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1_out)
-{
-	bool		contains_two_tuples = (rec_type == WAL_REC_REINSERT);
-	OffsetNumber length1;
-	OffsetNumber length2;
-
-	Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
-
-	if (!contains_two_tuples)
-	{
-		O_TUPLE_SET_NULL(tuple2->tuple);
-
-		tuple1->tuple.formatFlags = **ptr;
-		(*ptr)++;
-
-		memcpy(&length1, *ptr, sizeof(OffsetNumber));
-		*ptr += sizeof(OffsetNumber);
-
-		Assert(length1 > 0);
-		if (length1 != 0)
-		{
-			memcpy(tuple1->fixedData, *ptr, length1);
-			*ptr += length1;
-
-			tuple1->tuple.data = tuple1->fixedData;
-		}
-		else
-			O_TUPLE_SET_NULL(tuple1->tuple);
-	}
-	else
-	{
-		tuple1->tuple.formatFlags = **ptr;
-		(*ptr)++;
-		tuple2->tuple.formatFlags = **ptr;
-		(*ptr)++;
-
-		memcpy(&length1, *ptr, sizeof(OffsetNumber));
-		*ptr += sizeof(OffsetNumber);
-		memcpy(&length2, *ptr, sizeof(OffsetNumber));
-		*ptr += sizeof(OffsetNumber);
-
-		Assert(length1 > 0);
-		if (length1 != 0)
-		{
-			memcpy(tuple1->fixedData, *ptr, length1);
-			*ptr += length1;
-
-			tuple1->tuple.data = tuple1->fixedData;
-		}
-		else
-			O_TUPLE_SET_NULL(tuple1->tuple);
-
-		Assert(length2 > 0);
-		if (length2 != 0)
-		{
-			memcpy(tuple2->fixedData, *ptr, length2);
-			*ptr += length2;
-
-			tuple2->tuple.data = tuple2->fixedData;
-		}
-		else
-			O_TUPLE_SET_NULL(tuple2->tuple);
-	}
-	*length1_out = length1;
-}
-
-/*
  * Replays a single orioledb WAL container.
  */
 static bool
@@ -3012,10 +2940,12 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			OFixedTuple tuple1;
 			OFixedTuple tuple2;
 			Pointer		sys_tree_oids_ptr;
+			bool 	    has_two_tuples;
 
 			sys_tree_oids_ptr = ptr + sizeof(uint8) + sizeof(OffsetNumber);
 
-			read_modify_wal_tuples(rec_type, &ptr, &tuple1, &tuple2, &unused);
+			has_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
+			read_modify_wal_tuples(rec_type, &ptr, &tuple1, &tuple2, &unused, has_two_tuples);
 
 			type = recovery_msg_from_wal_record(rec_type);
 

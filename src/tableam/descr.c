@@ -962,7 +962,6 @@ o_drop_shared_root_info(Oid datoid, Oid relnode)
 {
 	SharedRootInfoKey key;
 	OTuple		key_tuple;
-	OTuple		tuple;
 
 	key.datoid = datoid;
 	key.relnode = relnode;

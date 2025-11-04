@@ -1,4 +1,4 @@
-/#!/usr/bin/env python3
+#!/usr/bin/env python3
 # coding: utf-8
 
 import json
@@ -483,6 +483,7 @@ class LogicalTest(BaseTest):
 						data2 text,
 			                        data3 text
 					) USING orioledb;
+					ALTER TABLE o_test_ctid REPLICA IDENTITY FULL;
 					CREATE TABLE o_test_bridge (
 			                        i   int PRIMARY KEY,
 						data1 text,
@@ -530,11 +531,6 @@ class LogicalTest(BaseTest):
 				"""
 				publisher.safe_psql(create_sql)
 				subscriber.safe_psql(create_sql)
-				alter_sql = """
-					ALTER TABLE o_test_ctid REPLICA IDENTITY FULL;
-				"""
-				publisher.safe_psql(alter_sql)
-				subscriber.safe_psql(alter_sql)
 
 				pub = publisher.publish('test_pub',
 				                        tables=[
@@ -553,7 +549,7 @@ class LogicalTest(BaseTest):
 						    "INSERT INTO o_test_ctid VALUES(1, 'foofoo','barbar', 'aaaaaa');"
 						)
 						con2.execute(
-						    "INSERT INTO o_test_ctid VALUES(1, 'mmm','nnn', 'ooo');"
+						    "INSERT INTO o_test_ctid VALUES(2, 'mmm','nnn', 'ooo');"
 						)
 						con1.execute(
 						    "INSERT INTO o_test_bridge VALUES(1, 'foofoo','barbar', 'aaaaaa');"
@@ -646,8 +642,8 @@ class LogicalTest(BaseTest):
 					self.assertListEqual(
 					    publisher.execute(
 					        'SELECT * FROM o_test_ctid ORDER BY i'),
-					    [('1, foofoo', 'ssssss', 'aaaaaa'),
-					     ('2, mmm', 'ppp', 'ooo')])
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
 #					self.assertListEqual(
 #					    publisher.execute(
 #					        'SELECT * FROM o_test_bridge ORDER BY i'),

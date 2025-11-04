@@ -114,6 +114,7 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	int			required_length;
 	ORelOids	oids = desc->oids;
 	OIndexType	type = desc->type;
+	bool 			write_two_tuples;
 
 	/* Do not write WAL during recovery */
 	if (OXidIsValid(recovery_oxid))
@@ -131,13 +132,17 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
 	Assert(!O_TUPLE_IS_NULL(tuple));
 
-	if (length2 == 0)
+	write_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
+
+	if (!write_two_tuples)
 	{
-		Assert(O_TUPLE_IS_NULL(tuple2));
+		Assert (length2 == 0);
+		Assert (O_TUPLE_IS_NULL(tuple2));
 		required_length = sizeof(WALRecModify1) + length;
 	}
 	else
 	{
+		Assert(length2 > 0);
 		Assert(!O_TUPLE_IS_NULL(tuple2));
 		required_length = sizeof(WALRecModify2) + length + length2;
 	}
@@ -219,31 +224,12 @@ add_local_modify(uint8 record_type, OTuple record1, OffsetNumber length1, OTuple
 	Assert(!O_TUPLE_IS_NULL(record1));
 	Assert(length1);
 
-	if (record_type != WAL_REC_REINSERT)
-	{
-		/* One-tuple modify record */
-		WALRecModify1 *wal_rec;
-
-		Assert(local_wal_buffer_offset + sizeof(*wal_rec) + length1 + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
-		Assert(O_TUPLE_IS_NULL(record2));
-		Assert(length2 == 0);
-
-		wal_rec = (WALRecModify1 *) (&local_wal_buffer[local_wal_buffer_offset]);
-		wal_rec->recType = record_type;
-		wal_rec->tupleFormatFlags = record1.formatFlags;
-		memcpy(wal_rec->length, &length1, sizeof(OffsetNumber));
-		local_wal_buffer_offset += sizeof(*wal_rec);
-
-		memcpy(&local_wal_buffer[local_wal_buffer_offset], record1.data, length1);
-		local_wal_buffer_offset += length1;
-	}
-	else
+	if (!O_TUPLE_IS_NULL(record2))
 	{
 		/* Two-tuple modify record */
 		WALRecModify2 *wal_rec;
 
 		Assert(length2);
-		Assert(!O_TUPLE_IS_NULL(record2));
 		Assert(local_wal_buffer_offset + sizeof(*wal_rec) + length1 + length2 + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 		wal_rec = (WALRecModify2 *) (&local_wal_buffer[local_wal_buffer_offset]);
 		wal_rec->recType = record_type;
@@ -258,6 +244,24 @@ add_local_modify(uint8 record_type, OTuple record1, OffsetNumber length1, OTuple
 		memcpy(&local_wal_buffer[local_wal_buffer_offset], record2.data, length2);
 		local_wal_buffer_offset += length2;
 	}
+	else
+	{
+		/* One-tuple modify record */
+		WALRecModify1 *wal_rec;
+
+		Assert(local_wal_buffer_offset + sizeof(*wal_rec) + length1 + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+		Assert(length2 == 0);
+
+		wal_rec = (WALRecModify1 *) (&local_wal_buffer[local_wal_buffer_offset]);
+		wal_rec->recType = record_type;
+		wal_rec->tupleFormatFlags = record1.formatFlags;
+		memcpy(wal_rec->length, &length1, sizeof(OffsetNumber));
+		local_wal_buffer_offset += sizeof(*wal_rec);
+
+		memcpy(&local_wal_buffer[local_wal_buffer_offset], record1.data, length1);
+		local_wal_buffer_offset += length1;
+	}
+
 	local_wal_has_material_changes = true;
 }
 
@@ -781,4 +785,53 @@ void
 set_local_wal_has_material_changes(bool value)
 {
 	local_wal_has_material_changes = value;
+}
+
+/*
+ * Read one or two tuples from modify WAL record.
+ * Two tuples in certain cases: (1) WAL_REC_REINSERT, (2) WAL_REC_UPDATE with REPLICA_IDENTITY_FULL
+ */
+void
+read_modify_wal_tuples(uint8 rec_type, Pointer *ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1_out, bool read_two_tuples)
+{
+	OffsetNumber length1;
+	OffsetNumber length2;
+
+	Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
+
+	if (!read_two_tuples)
+	{
+		tuple1->tuple.formatFlags = **ptr;
+		(*ptr)++;
+		memcpy(&length1, *ptr, sizeof(OffsetNumber));
+		*ptr += sizeof(OffsetNumber);
+
+		Assert(length1 > 0);
+		memcpy(tuple1->fixedData, *ptr, length1);
+		*ptr += length1;
+		tuple1->tuple.data = tuple1->fixedData;
+		O_TUPLE_SET_NULL(tuple2->tuple);
+	}
+	else
+	{
+		tuple1->tuple.formatFlags = **ptr;
+		(*ptr)++;
+		tuple2->tuple.formatFlags = **ptr;
+		(*ptr)++;
+		memcpy(&length1, *ptr, sizeof(OffsetNumber));
+		*ptr += sizeof(OffsetNumber);
+		memcpy(&length2, *ptr, sizeof(OffsetNumber));
+		*ptr += sizeof(OffsetNumber);
+
+		Assert(length1 > 0 && length2 > 0);
+
+		memcpy(tuple1->fixedData, *ptr, length1);
+		*ptr += length1;
+		tuple1->tuple.data = tuple1->fixedData;
+
+		memcpy(tuple2->fixedData, *ptr, length2);
+		*ptr += length2;
+		tuple2->tuple.data = tuple2->fixedData;
+	}
+	*length1_out = length1;
 }
