@@ -1449,7 +1449,7 @@ o_btree_autonomous_insert(BTreeDescr *desc, OTuple tuple)
 										   RowLockUpdate,
 										   NULL, BTreeLeafTupleNonDeleted,
 										   &nullCallbackInfo);
-			o_wal_insert(desc, tuple);
+			o_wal_insert(desc, tuple, REPLICA_IDENTITY_DEFAULT);
 		}
 		PG_CATCH();
 		{

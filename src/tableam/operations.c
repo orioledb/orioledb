@@ -222,7 +222,7 @@ apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
 
 	if (primary->desc.storageType == BTreeStoragePersistence)
 	{
-		o_wal_insert(&descr->bridge->desc, tuple);
+		o_wal_insert(&descr->bridge->desc, tuple, REPLICA_IDENTITY_DEFAULT);
 		flush_local_wal(false);
 	}
 
@@ -331,7 +331,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 	/* Tuple might be changed in the callback */
 	tup = tts_orioledb_form_tuple(slot, descr);
 	if (primary->desc.storageType == BTreeStoragePersistence)
-		o_wal_insert(&primary->desc, tup);
+		o_wal_insert(&primary->desc, tup, relation->rd_rel->relreplident);
 
 	return slot;
 }
@@ -527,7 +527,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 
 			tup = tts_orioledb_form_tuple(slot, descr);
 			if (primary->storageType == BTreeStoragePersistence)
-				o_wal_insert(primary, tup);
+				o_wal_insert(primary, tup, rel->rd_rel->relreplident);
 			return slot;
 		}
 

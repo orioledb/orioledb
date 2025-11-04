@@ -640,14 +640,14 @@ log_logical_wal_container(Pointer ptr, int length)
  * Makes WAL insert record.
  */
 void
-o_wal_insert(BTreeDescr *desc, OTuple tuple)
+o_wal_insert(BTreeDescr *desc, OTuple tuple, char relreplident)
 {
 	OTuple		wal_record;
 	bool		call_pfree;
 	int			size;
 
 	wal_record = recovery_rec_insert(desc, tuple, &call_pfree, &size);
-	add_modify_wal_record(WAL_REC_INSERT, desc, wal_record, size, REPLICA_IDENTITY_DEFAULT);
+	add_modify_wal_record(WAL_REC_INSERT, desc, wal_record, size, relreplident);
 	if (call_pfree)
 		pfree(wal_record.data);
 }
