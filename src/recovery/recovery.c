@@ -2686,7 +2686,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 	Pointer		ptr = startPtr;
 	XLogRecPtr	xlogPtr;
 	uint16		wal_version;
-	char		relreplident;
+	char		relreplident = REPLICA_IDENTITY_DEFAULT;
 
 	wal_version = check_wal_container_version(&ptr);
 	if (wal_version > CURRENT_WAL_VERSION)

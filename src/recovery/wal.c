@@ -681,12 +681,12 @@ o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident)
 	{
 		wal_record2 = recovery_rec_update(desc, oldtuple, &call_pfree2, &size2);
 		add_modify_wal_record_extended(WAL_REC_UPDATE, desc, wal_record1, size1, wal_record2, size2, relreplident);
+		if (call_pfree2)
+			pfree(wal_record2.data);
 	}
 
 	if (call_pfree1)
 		pfree(wal_record1.data);
-	if (call_pfree2)
-		pfree(wal_record2.data);
 }
 
 /*
