@@ -5611,7 +5611,7 @@ void
 systrees_modify_end(bool any_wal)
 {
 	if (any_wal)
-		(void) flush_local_wal(false);
+		(void) flush_local_wal(false, false);
 	LWLockRelease(&checkpoint_state->oSysTreesLock);
 	add_systrees_lock_undo(true);
 }

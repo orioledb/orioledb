@@ -1966,7 +1966,7 @@ o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 	if (!is_recovery_process())
 	{
 		add_o_tables_meta_unlock_wal_record(oids, oldRelnode);
-		(void) flush_local_wal(false);
+		(void) flush_local_wal(false, false);
 
 		LWLockRelease(&checkpoint_state->oTablesMetaLock);
 	}

@@ -509,14 +509,21 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	TupleDescData *o_toast_tupDesc = NULL;
 	TupleDescData *heap_toast_tupDesc = NULL;
 	uint16		wal_version;
+	uint8		wal_flags;
 
-	wal_version = check_wal_container_version(&ptr);
+	ptr = wal_container_read_header(ptr, &wal_version, &wal_flags);
 
 	if (wal_version > ORIOLEDB_WAL_VERSION)
 	{
 		/* WAL from future version */
 		elog(ERROR, "Can't logically decode WAL version %u that is newer than supported %u", wal_version, ORIOLEDB_WAL_VERSION);
 		return;
+	}
+
+	if (wal_flags & WAL_CONTAINER_HAS_XACT_INFO)
+	{
+		/* We skip WAL_REC_XACT_INFO */
+		ptr += sizeof(WALRecXactInfo);
 	}
 
 	elog(DEBUG4, "OrioleDB decode started startXLogPtr %X/%X endXLogPtr %X/%X", LSN_FORMAT_ARGS(startXLogPtr), LSN_FORMAT_ARGS(endXLogPtr));
