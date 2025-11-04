@@ -96,7 +96,7 @@ class BaseTest(unittest.TestCase):
 			                              '20000')) + self.getTestNum() * 2
 		return self.basePort
 
-	def getReplica(self) -> testgres.PostgresNode:
+	def getReplica(self, has_restoring: bool = False) -> testgres.PostgresNode:
 		if self.replica is None:
 			(test_path, t) = os.path.split(
 			    os.path.dirname(inspect.getfile(self.__class__)))
@@ -107,7 +107,13 @@ class BaseTest(unittest.TestCase):
 			replica = self.node.backup(
 			    base_dir=baseDir).spawn_replica('replica')
 			replica.append_conf(port=replica.port)
+
 			self.replica = replica
+
+			if has_restoring:
+				self.enableRestoring(
+				    self.replica, os.path.join(self.node.base_dir, "archives"))
+
 		return self.replica
 
 	def getSubsriber(self) -> testgres.PostgresNode:
@@ -139,7 +145,11 @@ class BaseTest(unittest.TestCase):
 
 		return restoredNode
 
-	def initNode(self, base_port: int, suffix='tgsn') -> testgres.PostgresNode:
+	def initNode(self,
+	             base_port: int,
+	             suffix='tgsn',
+	             has_archiving: bool = False,
+	             allows_streaming: bool = False) -> testgres.PostgresNode:
 		(test_path,
 		 t) = os.path.split(os.path.dirname(inspect.getfile(self.__class__)))
 		baseDir = os.path.join(test_path, 'tmp_check_t',
@@ -156,7 +166,28 @@ class BaseTest(unittest.TestCase):
 		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
 		    "orioledb.use_sparse_files = true\n"
 		    "restart_after_crash = false\n")
+
+		if has_archiving:
+			self.enableArchiving(node)
+		if allows_streaming:
+			self.enableStreaming(node)
+
 		return node
+
+	def enableArchiving(self, node: testgres.PostgresNode):
+		path = os.path.join(node.base_dir, "archives")
+		node.append_conf(f"archive_mode = on\n"
+		                 f"archive_command = 'cp \"%p\" \"{path}/%f\"'")
+
+	def enableStreaming(self, node: testgres.PostgresNode):
+		node.append_conf("wal_level = replica\n"
+		                 "max_wal_senders = 3\n"
+		                 "max_replication_slots = 3")
+
+	def enableRestoring(self, node: testgres.PostgresNode, path: str):
+		node.append_conf(f"restore_command = 'cp \"{path}/%f\" \"%p\"'")
+		with open(os.path.join(node.data_dir, "recovery.signal"), mode='a'):
+			pass
 
 	@property
 	def myName(self):

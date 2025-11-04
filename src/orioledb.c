@@ -1039,6 +1039,9 @@ _PG_init(void)
 	getRunningTransactionsExtension = orioledb_get_running_transactions_extension;
 	waitSnapshotHook = orioledb_wait_snapshot;
 	GetReplayXlogPtrHook = recovery_get_effective_replay_ptr;
+
+	RecoveryStopsBeforeHook = orioledb_recovery_stops_before_hook;
+
 	if (enable_rewind)
 		VacuumHorizonHook = orioledb_vacuum_horizon_hook;
 	orioledb_setup_ddl_hooks();
