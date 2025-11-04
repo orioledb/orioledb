@@ -1623,8 +1623,8 @@ undo_xact_callback(XactEvent event, void *arg)
 				if (!TransactionIdIsValid(xid))
 				{
 					current_oxid_xlog_precommit();
-					flushPos = wal_commit(oxid,
-										  get_current_logical_xid());
+					flushPos = wal_commit(oxid, get_current_logical_xid(),
+										  false);
 					set_oxid_xlog_ptr(oxid, flushPos);
 
 					/* Flush WAL if needed */
@@ -1669,8 +1669,7 @@ undo_xact_callback(XactEvent event, void *arg)
 				break;
 			case XACT_EVENT_ABORT:
 				if (!RecoveryInProgress())
-					wal_rollback(oxid,
-								 get_current_logical_xid());
+					wal_rollback(oxid, get_current_logical_xid(), false);
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					apply_undo_stack((UndoLogType) i, oxid, NULL, true);
 				reset_cur_undo_locations();
@@ -1999,7 +1998,7 @@ start_autonomous_transaction(OAutonomousTxState *state)
 	state->local_wal_has_material_changes = get_local_wal_has_material_changes();
 
 	if (!is_recovery_process() && !local_wal_is_empty())
-		flush_local_wal(false);
+		flush_local_wal(false, false);
 
 	oxid_needs_wal_flush = false;
 	reset_current_oxid();
@@ -2016,8 +2015,7 @@ abort_autonomous_transaction(OAutonomousTxState *state)
 		int			i;
 
 		if (!is_recovery_process())
-			wal_rollback(oxid,
-						 get_current_logical_xid());
+			wal_rollback(oxid, get_current_logical_xid(), true);
 		current_oxid_abort();
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			apply_undo_stack((UndoLogType) i, oxid, NULL, true);
@@ -2049,8 +2047,7 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 		int			i;
 
 		if (!is_recovery_process())
-			wal_commit(oxid,
-					   get_current_logical_xid());
+			wal_commit(oxid, get_current_logical_xid(), true);
 
 		current_oxid_precommit();
 		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
