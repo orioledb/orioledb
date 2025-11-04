@@ -178,19 +178,19 @@ convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
 
 		if (isnull[toast_attn])
 		{
-			elog(DEBUG4, "NULL attr %u", toast_attn);
+			elog(LOG, "NULL attr %u", toast_attn);
 			continue;
 		}
 
 		old_toastptr = (struct varlena *) DatumGetPointer(old_values[toast_attn]);
 		if (old_toastptr == NULL || !VARATT_IS_EXTERNAL(old_toastptr))
 		{
-			elog(DEBUG4, "NON-toast or empty attr %u", toast_attn);
+			elog(LOG, "NON-toast or empty attr %u", toast_attn);
 			continue;
 		}
 
 		memcpy(&otv, old_toastptr, sizeof(otv));
-		elog(DEBUG4, "reloid: Old toast value: %u toast_attn: %u compression %u, raw_size, %u, toasted_size %u",
+		elog(LOG, "reloid: Old toast value: %u toast_attn: %u compression %u, raw_size, %u, toasted_size %u",
 			 descr->oids.reloid, toast_attn + 1, otv.compression,
 			 otv.raw_size, otv.toasted_size);
 
@@ -199,7 +199,7 @@ convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
 		ve.va_toastrelid = descr->toast->oids.reloid;
 		ve.va_valueid = ObjectIdGetDatum(toast_attn + 1 + 8000);
 
-		elog(DEBUG4, "New toast pointer compression: %u rawsize: %u, extinfo_size: %u, toastrelid %u, valueid %u  ",
+		elog(LOG, "New toast pointer compression: %u rawsize: %u, extinfo_size: %u, toastrelid %u, valueid %u  ",
 			 (ve.va_extinfo >> VARLENA_EXTSIZE_BITS), ve.va_rawsize,
 			 (ve.va_extinfo & VARLENA_EXTSIZE_MASK),
 			 ve.va_toastrelid, ve.va_valueid);
@@ -334,14 +334,14 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 			{
 				HeapTuple	newheaptuple;
 
-				elog(DEBUG4, "WAL_REC_INSERT NON-TOAST toastable");
+				elog(LOG, "WAL_REC_INSERT NON-TOAST toastable");
 				newheaptuple = convert_toast_pointers(descr, indexDescr, &tuple1);
 				change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, true);
 				Assert(change->data.tp.newtuple);
 			}
 			else				/* Tuple without TOASTed attrs */
 			{
-				elog(DEBUG4, "WAL_REC_INSERT NON-TOAST plain");
+				elog(LOG, "WAL_REC_INSERT NON-TOAST plain");
 				tts_orioledb_store_tuple(descr->newTuple, tuple1.tuple,
 										 descr, COMMITSEQNO_INPROGRESS,
 										 PrimaryIndexNumber, false,
@@ -366,7 +366,7 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 		{
 			HeapTuple	newheaptuple;
 
-			elog(DEBUG4, "WAL_REC_UPDATE toastable");
+			elog(LOG, "WAL_REC_UPDATE toastable");
 
 			newheaptuple = convert_toast_pointers(descr, indexDescr, &tuple1);
 			ExecForceStoreHeapTuple(newheaptuple, descr->newTuple, false);
@@ -374,7 +374,7 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 		}
 		else					/* Tuple without TOASTed attrs */
 		{
-			elog(DEBUG4, "WAL_REC_UPDATE plain");
+			elog(LOG, "WAL_REC_UPDATE plain");
 
 			tts_orioledb_store_tuple(descr->newTuple, tuple1.tuple,
 									 descr, COMMITSEQNO_INPROGRESS,
