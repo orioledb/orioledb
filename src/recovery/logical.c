@@ -392,7 +392,7 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 		}
 		else
 		{
-			/* Reconstruct old tuple key new tuple and stor into reorderbuffer */
+			/* Reconstruct old tuple key from new tuple and store into reorderbuffer */
 			tts_copy_identity(descr->newTuple, descr->oldTuple, GET_PRIMARY(descr));
 			change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
 		}
