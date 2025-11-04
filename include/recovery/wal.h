@@ -64,6 +64,8 @@
  */
 #define ORIOLEDB_WAL_VERSION (17)
 
+#define ORIOLEDB_XACT_INFO_WAL_VERSION (17)
+
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
 #define OWalInvalidCommitPos		UINT64_MAX
@@ -177,6 +179,19 @@ typedef struct
 	uint8		iptr[sizeof(ItemPointerData)];
 } WALRecBridgeErase;
 
+/*
+ * Following WAL records don't have recType field and they are controlled by
+ * WAL_CONTAINER_HAS_* flags.
+ */
+
+#define WAL_CONTAINER_HAS_XACT_INFO	(1U << 0)
+
+typedef struct
+{
+	uint8		xactTime[sizeof(TimestampTz)];
+	uint8		xid[sizeof(TransactionId)];
+} WALRecXactInfo;
+
 #define LOCAL_WAL_BUFFER_SIZE	(8192)
 #define ORIOLEDB_WAL_PREFIX	"o_wal"
 #define ORIOLEDB_WAL_PREFIX_SIZE (5)
@@ -225,13 +240,16 @@ extern void add_savepoint_wal_record(SubTransactionId parentSubid,
 									 TransactionId prentLogicalXid);
 extern void add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid);
 extern bool local_wal_is_empty(void);
-extern XLogRecPtr flush_local_wal(bool commit);
-extern XLogRecPtr wal_commit(OXid oxid, TransactionId logicalXid);
+extern XLogRecPtr flush_local_wal(bool isCommit, bool withXactTime);
+extern XLogRecPtr wal_commit(OXid oxid, TransactionId logicalXid,
+							 bool isAutonomous);
 extern XLogRecPtr wal_joint_commit(OXid oxid, TransactionId logicalXid,
 								   TransactionId xid);
 extern void wal_after_commit(void);
-extern void wal_rollback(OXid oxid, TransactionId logicalXid);
-extern XLogRecPtr log_logical_wal_container(Pointer ptr, int length);
+extern void wal_rollback(OXid oxid, TransactionId logicalXid,
+						 bool isAutonomous);
+extern XLogRecPtr log_logical_wal_container(Pointer ptr, int length,
+											bool withXactTime);
 extern void o_wal_insert(BTreeDescr *desc, OTuple tuple);
 extern void o_wal_update(BTreeDescr *desc, OTuple tuple);
 extern void o_wal_delete(BTreeDescr *desc, OTuple tuple);
@@ -240,6 +258,8 @@ extern void o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple);
 extern void add_truncate_wal_record(ORelOids oids);
 extern bool get_local_wal_has_material_changes(void);
 extern void set_local_wal_has_material_changes(bool value);
-extern uint16 check_wal_container_version(Pointer *ptr);
+
+extern Pointer wal_container_read_header(Pointer ptr, uint16 *version,
+										 uint8 *flags);
 
 #endif							/* __WAL_H__ */

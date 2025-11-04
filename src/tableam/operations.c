@@ -223,7 +223,7 @@ apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
 	if (primary->desc.storageType == BTreeStoragePersistence)
 	{
 		o_wal_insert(&descr->bridge->desc, tuple);
-		flush_local_wal(false);
+		flush_local_wal(false, false);
 	}
 
 	if (tuple.data)
@@ -257,7 +257,7 @@ delete_old_bridge_index_ctid(OTableDescr *descr, Relation relation,
 		keyTuple.formatFlags = O_TUPLE_FLAGS_FIXED_FORMAT;
 		keyTuple.data = (Pointer) &bridge_oslot->bridge_ctid;
 		o_wal_delete_key(&descr->bridge->desc, keyTuple);
-		flush_local_wal(false);
+		flush_local_wal(false, false);
 	}
 
 	if (!result.success)
