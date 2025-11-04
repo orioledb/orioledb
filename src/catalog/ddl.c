@@ -973,7 +973,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 							o_alter_column_type(cmd, queryString, rel);
 							break;
 						case AT_ReplicaIdentity:
-							o_alter_replica_identity(rel, (ReplicaIdentityStmt *) cmd->def, lockmode);
+//							o_alter_replica_identity(rel, (ReplicaIdentityStmt *) cmd->def, lockmode);
 							break;
 						default:
 							break;
