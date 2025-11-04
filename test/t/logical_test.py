@@ -476,6 +476,68 @@ class LogicalTest(BaseTest):
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
+
+	def test_logical_subscription_toastable_pkey_update(self):
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+
+			with subscriber.start() as subscriber:
+				create_sql = """
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE o_test (
+						data1 text PRIMARY KEY,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+				"""
+				publisher.safe_psql(create_sql)
+				subscriber.safe_psql(create_sql)
+
+				pub = publisher.publish('test_pub',
+				                        tables=[
+				                            'o_test'
+				                        ])
+				sub = subscriber.subscribe(pub, 'test_sub')
+
+				with publisher.connect() as con1:
+					with publisher.connect() as con2:
+						con1.execute(
+						    "INSERT INTO o_test VALUES('foofoo','barbar', 'aaaaaa', 1);"
+						)
+						con2.execute(
+						    "INSERT INTO o_test VALUES('mmm','nnn', 'ooo', 2);"
+						)
+						con1.commit()
+						con2.commit()
+
+				with publisher.connect() as con1:
+					with publisher.connect() as con2:
+						con1.execute(
+						    "UPDATE o_test SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test SET data2 = 'ppp' where data2 = 'nnn';"
+						)
+						con1.commit()
+						con2.commit()
+
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
+
+					# wait until changes apply on subscriber and check them
+					sub.catchup()
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_secondary ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
+
 	def test_recvlogical_and_drop_database(self):
 		node = self.node
 		node.start()
