@@ -547,8 +547,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		{
 			TransactionId topXid,
 						subXid;
-			ReorderBufferTXN *topTXN;
-			ReorderBufferTXN *subTXN;
 
 			ptr = wal_parse_rec_switch_logical_xid(ptr, &topXid, &subXid);
 
@@ -560,26 +558,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			Assert(TransactionIdIsValid(topXid));
 			Assert(TransactionIdIsValid(subXid));
 
-			/* /topTXN = ReorderBufferTXNByXid(ctx->reorder, */
-
-			/*
-			 * /							   topXid, false, NULL,
-			 * InvalidXLogRecPtr, false);
-			 */
-			/* /subTXN = ReorderBufferTXNByXid(ctx->reorder, */
-
-			/*
-			 * /							   subXid, false, NULL,
-			 * InvalidXLogRecPtr, false);
-			 */
-			/* /Assert(!(!topTXN && subTXN)); */
-
-			/* /if (topTXN && subTXN) */
-			/* /{ */
 			ReorderBufferAssignChild(ctx->reorder,
 									 topXid, subXid,
 									 buf->origptr);
-			/* /} */
 		}
 		else if (rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK)
 		{
@@ -743,7 +724,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else
 			{
-				/* Oriole txn acts as a sub-txn to heap txn, needs ReorderBufferCommitChild */
+				/*
+				 * Oriole txn acts as a sub-txn to heap txn, needs
+				 * ReorderBufferCommitChild
+				 */
 				elog(DEBUG4, "SKIP_COMMIT_CHILD record type %d (%s) oxid %lu logicalXid %u", rec_type, rec_type_str, oxid, logicalXid);
 
 				UpdateDecodingStats(ctx);
