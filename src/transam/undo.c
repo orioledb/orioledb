@@ -1747,13 +1747,13 @@ undo_xact_callback(XactEvent event, void *arg)
 				elog(DEBUG4, "[%s] XACT_EVENT_ABORT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
 						__func__, oxid, logicalXidMeta.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidMeta.useHeap);
 
-				Assert(TransactionIdIsValid(logicalXidMeta.xid));
-
 				if (!RecoveryInProgress())
 					wal_rollback(oxid,
 								 get_current_logical_xid_if_any());
+
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					apply_undo_stack((UndoLogType) i, oxid, NULL, true);
+
 				reset_cur_undo_locations();
 				reset_command_undo_locations();
 				current_oxid_abort();
@@ -1770,8 +1770,11 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					pg_atomic_write_u64(&curProcData->undoRetainLocations[i].snapshotRetainUndoLocation, InvalidUndoLocation);
+
 				minParentSubId = InvalidSubTransactionId;
+
 				break;
+
 			default:
 				break;
 		}
