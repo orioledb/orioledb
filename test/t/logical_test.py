@@ -65,8 +65,10 @@ class LogicalTest(BaseTest):
 		node.safe_psql("""
 			CREATE EXTENSION IF NOT EXISTS orioledb;
 			CREATE TABLE data(
-				id serial primary key,
-				data text
+				data1 text PRIMARY KEY,
+				data2 text,
+				data3 text,
+				i int
 			) USING orioledb;
 		""")
 
@@ -75,10 +77,9 @@ class LogicalTest(BaseTest):
 		)
 
 		with node.connect() as con1:
-			con1.execute("INSERT INTO data(data) VALUES('1');")
-			con1.execute("INSERT INTO data(data) VALUES('2');")
-			con1.execute("UPDATE data SET data = 'NO' WHERE id = 1;")
-			con1.execute("DELETE FROM data WHERE id = 1;")
+			con1.execute("INSERT INTO data VALUES('foofoo','barbar', 'aaaaaa', 1);")
+			con1.execute("INSERT INTO data VALUES('mmm','nnn', 'ooo', 2);")
+			con1.execute("UPDATE data SET data2 = 'aaaaaa' WHERE data2 = 'barbar';")
 			con1.commit()
 
 		result = node.execute(
