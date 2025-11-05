@@ -14,9 +14,11 @@ from .base_test import BaseTest
 
 class LogicalTest(BaseTest):
 
+
 	def setUp(self):
 		super().setUp()
 		self.node.append_conf('postgresql.conf', "wal_level = logical\n")
+
 
 	def squashLogicalChanges(self, rows):
 		result = ''
@@ -26,6 +28,7 @@ class LogicalTest(BaseTest):
 				line = line[0:line.index(' ')]
 			result = result + line + "\n"
 		return result
+
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
@@ -53,9 +56,95 @@ class LogicalTest(BaseTest):
 		        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
 		    ))
 		self.assertEqual(
-		    result,
-		    "BEGIN\ntable public.data: INSERT: id[integer]:1 data[text]:'1'\ntable public.data: INSERT: id[integer]:2 data[text]:'2'\nCOMMIT\n"
+			result,
+			"BEGIN\n"
+			"table public.data: INSERT: id[integer]:1 data[text]:'1'\n"
+			"table public.data: INSERT: id[integer]:2 data[text]:'2'\n"
+			"COMMIT\n")
+
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_h2o(self):
+		node = self.node
+		node.start()  # start PostgreSQL
+		node.safe_psql(
+		    'postgres',
+			"CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n" # oriole relation
+			"CREATE TABLE h_data(id serial primary key, data text);\n" # heap relation
 		)
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n")
+
+		# part 1
+
+		node.safe_psql(
+		    'postgres', '''
+				BEGIN;
+				INSERT INTO h_data(data) VALUES('10');
+				INSERT INTO o_data(data) VALUES('20');
+				INSERT INTO h_data(data) VALUES('30');
+				INSERT INTO o_data(data) VALUES('40');
+				COMMIT;
+			''')
+
+		result = self.squashLogicalChanges(
+		    node.execute(
+		        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
+		    ))
+
+		self.assertEqual(
+		    result,
+				"BEGIN\n"
+				"table public.h_data: INSERT: id[integer]:1 data[text]:'10'\n"
+				"table public.h_data: INSERT: id[integer]:2 data[text]:'30'\n"
+				"table public.o_data: INSERT: id[integer]:1 data[text]:'20'\n"
+				"table public.o_data: INSERT: id[integer]:2 data[text]:'40'\n"
+				"COMMIT\n")
+
+		# part 2
+
+		node.safe_psql(
+		    'postgres', '''
+				BEGIN;
+				INSERT INTO h_data(data) VALUES('50');
+				DELETE FROM o_data WHERE id=2;
+				INSERT INTO h_data(data) SELECT data FROM o_data;
+				INSERT INTO o_data SELECT * FROM h_data WHERE id > 1;
+				DELETE FROM h_data WHERE id > 1;
+				COMMIT;
+			''')
+
+		self.assertEqual(node.execute(
+		    'postgres', "SELECT * FROM h_data;\n"
+			), [(1,'10')])
+
+		self.assertEqual(node.execute(
+		    'postgres', "SELECT * FROM o_data;\n"
+			), [(1,'20'), (2,'30'), (3,'50'), (4,'20')])
+
+		result = self.squashLogicalChanges(
+		    node.execute(
+		        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
+		    ))
+
+		self.assertEqual(
+		    result,
+				"BEGIN\n"
+				"table public.h_data: INSERT: id[integer]:3 data[text]:'50'\n"
+				"table public.h_data: INSERT: id[integer]:4 data[text]:'20'\n"
+				"table public.h_data: DELETE: id[integer]:2\n"
+				"table public.h_data: DELETE: id[integer]:3\n"
+				"table public.h_data: DELETE: id[integer]:4\n"
+				"table public.o_data: DELETE: id[integer]:2\n"
+				"table public.o_data: INSERT: id[integer]:2 data[text]:'30'\n"
+				"table public.o_data: INSERT: id[integer]:3 data[text]:'50'\n"
+				"table public.o_data: INSERT: id[integer]:4 data[text]:'20'\n"
+				"COMMIT\n")
+
 
 	@unittest.skipIf(not BaseTest.extension_installed("wal2json"),
 	                 "'wal2json' is not installed")
@@ -122,6 +211,7 @@ class LogicalTest(BaseTest):
 		            }
 		        }]
 		    })
+
 
 	def test_logical_subscription(self):
 		with self.node as publisher:
@@ -195,6 +285,7 @@ class LogicalTest(BaseTest):
 					self.assertListEqual(
 					    subscriber.execute(
 					        'SELECT * FROM o_test2 ORDER BY id'), [])
+
 
 	def test_logical_subscription_ctid(self):
 		with self.node as publisher:
@@ -473,6 +564,7 @@ class LogicalTest(BaseTest):
 					    subscriber.execute(
 					        'SELECT id, bid FROM o_test_secondary ORDER BY id'
 					    ), [(2, 2), (6, 1)])
+
 
 	def test_recvlogical_and_drop_database(self):
 		node = self.node
