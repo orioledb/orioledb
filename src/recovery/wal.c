@@ -104,13 +104,12 @@ wal_record_type_to_string(int wal_record)
 
 /* Parser for WAL_REC_XID */
 Pointer
-wal_parse_rec_xid(Pointer ptr, OXid *oxid, TransactionId *logicalXid, TransactionId *heapXid)
+wal_parse_rec_xid(Pointer ptr, OXid *oxid, TransactionId *logicalXid)
 {
 	Assert(ptr);
 
 	PARSE(ptr, oxid);
 	PARSE(ptr, logicalXid);
-	PARSE(ptr, heapXid);
 
 	return ptr;
 }
@@ -643,7 +642,6 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 	rec->recType = WAL_REC_XID;
 	memcpy(rec->oxid, &oxid, sizeof(OXid));
 	memcpy(rec->logicalXid, &logicalXid, sizeof(TransactionId));
-	memcpy(rec->heapXid, &heapXid, sizeof(TransactionId));
 
 	local_wal_buffer_offset += sizeof(*rec);
 }

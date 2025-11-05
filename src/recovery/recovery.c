@@ -2762,8 +2762,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 		if (rec_type == WAL_REC_XID)
 		{
-			/* don't need logicalXid & heapXid here */
-			ptr = wal_parse_rec_xid(ptr, &oxid, NULL, NULL);
+			/* don't need logicalXid here */
+			ptr = wal_parse_rec_xid(ptr, &oxid, NULL);
 
 			advance_oxids(oxid);
 			recovery_switch_to_oxid(oxid, -1);
