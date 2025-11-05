@@ -109,7 +109,7 @@ extern OBTreeModifyResult o_tbl_index_insert(OTableDescr *descr,
 											 TupleTableSlot *slot,
 											 OXid oxid, CommitSeqNo csn,
 											 BTreeModifyCallbackInfo *callbackInfo,
-											 bool checkUnique);
+											 IndexUniqueCheck checkUnique);
 extern OBTreeModifyResult o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey,
 									 LockTupleMode mode, OXid oxid,
 									 OLockCallbackArg *larg,
@@ -130,7 +130,7 @@ extern OTableModifyResult o_update_secondary_index(OIndexDescr *id,
 												   TupleTableSlot *oldSlot,
 												   OXid oxid,
 												   CommitSeqNo csn,
-												   bool checkUnique);
+												   IndexUniqueCheck checkUnique);
 extern OTableModifyResult o_tbl_delete(Relation rel,
 									   OTableDescr *descr,
 									   OBTreeKeyBound *primary_key,

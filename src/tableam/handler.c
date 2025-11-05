@@ -415,7 +415,6 @@ orioledb_row_ref_equals(Relation rel, Datum tupleidDatum1, Datum tupleidDatum2)
 						NULL, NULL, NULL);
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleidDatum2, &rowid2, NULL,
 						NULL, NULL, NULL);
-
 	return is_keys_eq(&GET_PRIMARY(descr)->desc, &rowid1, &rowid2);
 }
 
