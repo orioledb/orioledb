@@ -534,14 +534,6 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 	o_current_index = NULL;
-	elog(WARNING, "orioledb_aminsert: checkUnique: %s",
-		 checkUnique == UNIQUE_CHECK_NO ? "UNIQUE_CHECK_NO" :
-		 checkUnique == UNIQUE_CHECK_YES ? "UNIQUE_CHECK_YES" :
-		 checkUnique == UNIQUE_CHECK_PARTIAL ? "UNIQUE_CHECK_PARTIAL" :
-		 checkUnique == UNIQUE_CHECK_EXISTING ? "UNIQUE_CHECK_EXISTING" :
-		 "WRONG"
-		);
-
 	if (options && !options->orioledb_index)
 	{
 		bytea	   *rowid;
@@ -641,32 +633,14 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 
 	fill_current_oxid_osnapshot(&oxid, &o_snapshot);
 
-	// {
-	// 	extern Datum orioledb_tbl_structure(PG_FUNCTION_ARGS);
-	// 	Datum res;
-	// 	text  *options = cstring_to_text("");
-	// 	res = DirectFunctionCall3(orioledb_tbl_structure, 
-	// 	              ObjectIdGetDatum(index_descr->tableOids.reloid),
-	// 	              PointerGetDatum(options),
-	// 	              Int32GetDatum(32));
-	// 	
-	// 	elog(WARNING, "TREE: %s", text_to_cstring(DatumGetTextP(res)));
-	// }
 	iresult = o_tbl_index_insert(descr, descr->indices[ix_num], &tuple, slot,
 								 oxid, o_snapshot.csn, &callbackInfo,
-								 (checkUnique == UNIQUE_CHECK_YES || checkUnique == UNIQUE_CHECK_EXISTING));
-	elog(WARNING, "iresult: %s", 
-		 iresult == OBTreeModifyResultInserted ? "OBTreeModifyResultInserted" :
-		 iresult == OBTreeModifyResultUpdated ? "OBTreeModifyResultUpdated" :
-		 iresult == OBTreeModifyResultDeleted ? "OBTreeModifyResultDeleted" :
-		 iresult == OBTreeModifyResultLocked ? "OBTreeModifyResultLocked" :
-		 iresult == OBTreeModifyResultFound ? "OBTreeModifyResultFound" :
-		 iresult == OBTreeModifyResultNotFound ? "OBTreeModifyResultNotFound" :
-		 "WRONG");
+								 checkUnique);
 
-
-	success = (iresult == OBTreeModifyResultInserted);
-	elog(WARNING, "aminsert: success: %c", success ? 'Y' : 'N');
+	if (checkUnique != UNIQUE_CHECK_EXISTING)
+		success = (iresult == OBTreeModifyResultInserted);
+	else
+		success = (iresult == OBTreeModifyResultNotFound);
 
 	if (!success)
 	{
@@ -706,14 +680,6 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	int			i;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
-	elog(WARNING, "orioledb_amupdate: checkUnique: %s",
-		 checkUnique == UNIQUE_CHECK_NO ? "UNIQUE_CHECK_NO" :
-		 checkUnique == UNIQUE_CHECK_YES ? "UNIQUE_CHECK_YES" :
-		 checkUnique == UNIQUE_CHECK_PARTIAL ? "UNIQUE_CHECK_PARTIAL" :
-		 checkUnique == UNIQUE_CHECK_EXISTING ? "UNIQUE_CHECK_EXISTING" :
-		 "WRONG"
-		);
-
 	if (options && !options->orioledb_index)
 		return true;
 
@@ -727,17 +693,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	descr = o_fetch_table_descr(index_descr->tableOids);
 	Assert(descr != NULL);
 
-	// {
-	// 	extern Datum orioledb_tbl_structure(PG_FUNCTION_ARGS);
-	// 	Datum res;
-	// 	text  *options = cstring_to_text("");
-	// 	res = DirectFunctionCall3(orioledb_tbl_structure, 
-	// 	              ObjectIdGetDatum(index_descr->tableOids.reloid),
-	// 	              PointerGetDatum(options),
-	// 	              Int32GetDatum(32));
-	// 	
-	// 	elog(WARNING, "TREE: %s", text_to_cstring(DatumGetTextP(res)));
-	// }
+
 
 	/* Find ix_num */
 	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
@@ -773,12 +729,11 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	tts_orioledb_store_non_leaf_tuple(new_slot, new_tuple, descr, csn, ix_num, false, NULL);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-
 	result = o_update_secondary_index(index_descr, ix_num,
 									  new_valid, old_valid,
 									  new_slot, new_tuple,
 									  old_slot, oxid, oSnapshot.csn,
-									  (checkUnique == UNIQUE_CHECK_YES || checkUnique == UNIQUE_CHECK_EXISTING));
+									  checkUnique);
 
 	for (i = 0; i < index_descr->leafTupdesc->natts; i++)
 	{
@@ -787,7 +742,6 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	}
 	pfree(vfree);
 
-	elog(WARNING, "amupdate: result.success: %c", result.success ? 'Y' : 'N');
 	if (!result.success)
 	{
 		switch (result.action)
@@ -878,8 +832,6 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	int			i;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 	
-	elog(WARNING, "orioledb_amdelete");
-
 	if (options && !options->orioledb_index)
 		return true;
 
@@ -926,15 +878,8 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	}
 	pfree(vfree);
 
-	elog(WARNING, "result.success: %c", result.success ? 'Y' : 'N');
 	if (!result.success)
 	{
-		elog(WARNING, "result.action: %s",
-			 result.action == BTreeOperationInsert ? "BTreeOperationInsert" :
-			 result.action == BTreeOperationLock ? "BTreeOperationLock" :
-			 result.action == BTreeOperationUpdate ? "BTreeOperationUpdate" :
-			 result.action == BTreeOperationDelete ? "BTreeOperationDelete" :
-			 "WRONG");
 		switch (result.action)
 		{
 			case BTreeOperationUpdate:
