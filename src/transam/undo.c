@@ -1561,6 +1561,8 @@ undo_xact_callback(XactEvent event, void *arg)
 	int			nsubxids = 0;
 	TransactionId *subxids = NULL;
 	TransactionId heapXid;
+	XLogRecPtr	flushPos;
+	LogicalXid logicalXidMeta;
 
 	/* elog(LOG, "UNDO XACT CALLBACK"); */
 	isParallelWorker = (MyProc->lockGroupLeader != NULL &&
@@ -1608,9 +1610,7 @@ undo_xact_callback(XactEvent event, void *arg)
 	{
 		heapXid = GetTopTransactionIdIfAny();
 
-		XLogRecPtr	flushPos = InvalidXLogRecPtr;
-		LogicalXid logicalXidMeta;
-
+		flushPos = InvalidXLogRecPtr;
 		retrieve_current_logical_xid(&logicalXidMeta);
 
 		if (TransactionIdIsValid(heapXid) && TransactionIdIsValid(logicalXidMeta.xid))

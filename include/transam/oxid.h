@@ -48,7 +48,8 @@ typedef struct
 	TransactionId xid;			/* a 32-bit transaction id to be used during
 								 * logical decoding */
 	bool		useHeap;		/* flag indicates if current logical xid was
-								 * set from an existing heap xid */
+								 * allocated when heap xid has been already
+								 * set */
 
 } LogicalXid;
 
