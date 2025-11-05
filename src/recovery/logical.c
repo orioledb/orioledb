@@ -626,11 +626,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 							ReorderBufferTXN *cur_txn;
 
 							cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
-							if (cur_txn)
-							{
-								ReorderBufferForget(ctx->reorder, cur_txn->xid,
-													startXLogPtr);
-							}
+							ReorderBufferForget(ctx->reorder, cur_txn->xid,
+												startXLogPtr);
 						}
 						ReorderBufferForget(ctx->reorder, txn->xid,
 											startXLogPtr);
@@ -650,11 +647,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						ReorderBufferTXN *cur_txn;
 
 						cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
-						if (cur_txn)
-						{
-							ReorderBufferCommitChild(ctx->reorder, txn->xid, cur_txn->xid,
-													 startXLogPtr, endXLogPtr);
-						}
+						ReorderBufferCommitChild(ctx->reorder, txn->xid, cur_txn->xid,
+												 startXLogPtr, endXLogPtr);
 					}
 					elog(DEBUG4, "COMMIT record type %d (%s) oxid %lu logicalXid %u", rec_type, rec_type_str, oxid, logicalXid);
 					ReorderBufferCommit(ctx->reorder, logicalXid,
@@ -671,11 +665,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						ReorderBufferTXN *cur_txn;
 
 						cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
-						if (cur_txn)
-						{
-							ReorderBufferAbort(ctx->reorder, cur_txn->xid,
-											   startXLogPtr, 0);
-						}
+						ReorderBufferAbort(ctx->reorder, cur_txn->xid,
+										   startXLogPtr, 0);
 					}
 					elog(DEBUG4, "ABORT record type %d (%s) oxid %lu logicalXid %u", rec_type, rec_type_str, oxid, logicalXid);
 					ReorderBufferAbort(ctx->reorder, logicalXid,

@@ -299,15 +299,16 @@ acquire_logical_xid(bool *isValidHeapXid)
 
 	Assert(i >= 0 && i < max_procs);
 
+	/*
+	 * Check whether any valid heap xid is present at the moment of allocation
+	 * of xid Oriole
+	 */
 	if (isValidHeapXid)
 	{
 		*isValidHeapXid = TransactionIdIsValid(GetCurrentTransactionIdIfAny());
 	}
 
-	/*
-	 * If no valid heap xid is present for the current transaction, allocate
-	 * new Oriole logical xid
-	 */
+	/* Allocate new Oriole logical xid */
 	while (true)
 	{
 		uint32		value = pg_atomic_read_u32(&logicalXidsShmemMap[i]);
@@ -399,7 +400,7 @@ assign_subtransaction_logical_xid(void)
 		heapXid = GetCurrentTransactionIdIfAny();
 		if (TransactionIdIsValid(heapXid))
 		{
-			elog(DEBUG4, "SWITCH_LOGICAL_XID H2O %u -> %u", heapXid, nextLogicalXid);
+			elog(DEBUG4, "SWITCH_LOGICAL_XID H2O heap xid %u -> oriole xid %u", heapXid, nextLogicalXid);
 			add_switch_logical_xid_wal_record(heapXid, nextLogicalXid);
 		}
 	}
@@ -464,7 +465,7 @@ oxid_subxact_callback(
 					{
 						if (!logicalXidMeta.useHeap && heapXid != logicalXidMeta.xid)
 						{
-							elog(DEBUG4, "%s SWITCH_LOGICAL_XID O2H %u -> %u", __func__, heapXid, logicalXidMeta.xid);
+							elog(DEBUG4, "%s SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u", __func__, heapXid, logicalXidMeta.xid);
 							add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
 						}
 					}
@@ -1251,7 +1252,7 @@ get_current_oxid(void)
 				/* top txn */
 				heapXid = GetCurrentTransactionIdIfAny();
 
-				elog(DEBUG4, "SWITCH_LOGICAL_XID H2O %u -> %u", heapXid, logicalXidMeta.xid);
+				elog(DEBUG4, "SWITCH_LOGICAL_XID H2O heap xid %u -> oriole xid %u", heapXid, logicalXidMeta.xid);
 				add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
 			}
 		}
@@ -1320,7 +1321,7 @@ get_current_logical_xid(void)
 		!logicalXidMeta.useHeap &&
 		heapXid != logicalXidMeta.xid)
 	{
-		elog(DEBUG4, "%s SWITCH_LOGICAL_XID O2H %u -> %u", __func__, heapXid, logicalXidMeta.xid);
+		elog(DEBUG4, "%s SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u", __func__, heapXid, logicalXidMeta.xid);
 		add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
 	}
 
