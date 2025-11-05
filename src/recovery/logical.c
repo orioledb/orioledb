@@ -511,7 +511,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		return;
 	}
 
-	elog(DEBUG4, "[%s] STARTED", __func__);
+	elog(DEBUG4, "[%s] STARTED startXLogPtr %X/%X endXLogPtr %X/%X", __func__, LSN_FORMAT_ARGS(startXLogPtr), LSN_FORMAT_ARGS(endXLogPtr));
 
 	while (ptr < endPtr)
 	{
@@ -675,6 +675,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 													 startXLogPtr, endXLogPtr);
 						}
 					}
+					elog(DEBUG4, "COMMIT record type %d (%s) oxid %lu logicalXid %u", rec_type, rec_type_str, oxid, logicalXid);
 					ReorderBufferCommit(ctx->reorder, logicalXid,
 										startXLogPtr, endXLogPtr,
 										0, XLogRecGetOrigin(buf->record),
@@ -695,6 +696,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 											   startXLogPtr, 0);
 						}
 					}
+					elog(DEBUG4, "ABORT record type %d (%s) oxid %lu logicalXid %u", rec_type, rec_type_str, oxid, logicalXid);
 					ReorderBufferAbort(ctx->reorder, logicalXid,
 									   startXLogPtr, 0);
 				}
@@ -736,14 +738,14 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				ctx->fast_forward)
 			{
 				elog(DEBUG4, "FORGET record type %d (%s) oxid %lu logicalXid %u", rec_type, rec_type_str, oxid, logicalXid);
+
 				ReorderBufferForget(ctx->reorder, logicalXid, startXLogPtr);
 			}
 			else
 			{
-				ReorderBufferCommit(ctx->reorder, logicalXid,
-									startXLogPtr, endXLogPtr,
-									0, XLogRecGetOrigin(buf->record),
-									buf->origptr);
+				/* Oriole txn acts as a sub-txn to heap txn, needs ReorderBufferCommitChild */
+				elog(DEBUG4, "SKIP_COMMIT_CHILD record type %d (%s) oxid %lu logicalXid %u", rec_type, rec_type_str, oxid, logicalXid);
+
 				UpdateDecodingStats(ctx);
 			}
 

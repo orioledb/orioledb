@@ -1664,8 +1664,8 @@ undo_xact_callback(XactEvent event, void *arg)
 				{
 					Assert(logicalXidMeta.xid != heapXid);
 
-					elog(DEBUG4, "[%s] XACT_EVENT_PRE_COMMIT wal_joint_commit oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
-						__func__, oxid, logicalXidMeta.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidMeta.useHeap);
+					elog(DEBUG4, "[%s] XACT_EVENT_PRE_COMMIT wal_joint_commit for SWITCH_LOGICAL_XID %s oxid %lu logicalXid %u top heapXid %u current heapXid %u",
+						__func__, logicalXidMeta.useHeap ? "H2O" : "O2H", oxid, logicalXidMeta.xid, heapXid, GetCurrentTransactionIdIfAny());
 
 					wal_joint_commit(oxid,
 									get_current_logical_xid(),
