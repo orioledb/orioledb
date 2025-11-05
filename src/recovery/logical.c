@@ -560,17 +560,26 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			Assert(TransactionIdIsValid(topXid));
 			Assert(TransactionIdIsValid(subXid));
 
-			topTXN = ReorderBufferTXNByXid(ctx->reorder,
-										   topXid, false, NULL, InvalidXLogRecPtr, false);
-			subTXN = ReorderBufferTXNByXid(ctx->reorder,
-										   subXid, false, NULL, InvalidXLogRecPtr, false);
+			/* /topTXN = ReorderBufferTXNByXid(ctx->reorder, */
 
-			if (topTXN && subTXN)
-			{
-				ReorderBufferAssignChild(ctx->reorder,
-										 topXid, subXid, //@NOTE XID_NOCHANGE
-										 buf->origptr);
-			}
+			/*
+			 * /							   topXid, false, NULL,
+			 * InvalidXLogRecPtr, false);
+			 */
+			/* /subTXN = ReorderBufferTXNByXid(ctx->reorder, */
+
+			/*
+			 * /							   subXid, false, NULL,
+			 * InvalidXLogRecPtr, false);
+			 */
+			/* /Assert(!(!topTXN && subTXN)); */
+
+			/* /if (topTXN && subTXN) */
+			/* /{ */
+			ReorderBufferAssignChild(ctx->reorder,
+									 topXid, subXid,
+									 buf->origptr);
+			/* /} */
 		}
 		else if (rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK)
 		{

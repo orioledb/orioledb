@@ -1730,6 +1730,7 @@ undo_xact_callback(XactEvent event, void *arg)
 					add_to_rewind_buffer(oxid, xid1, nsubxids, subxids);
 					reset_precommit_xid_subxids();
 				}
+
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					on_commit_undo_stack((UndoLogType) i, oxid, true);
 
@@ -1738,15 +1739,19 @@ undo_xact_callback(XactEvent event, void *arg)
 				reset_command_undo_locations();
 				oxid_needs_wal_flush = false;
 				minParentSubId = InvalidSubTransactionId;
+
 				break;
+
 			case XACT_EVENT_ABORT:
 
 				elog(DEBUG4, "[%s] XACT_EVENT_ABORT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
 						__func__, oxid, logicalXidMeta.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidMeta.useHeap);
 
+				Assert(TransactionIdIsValid(logicalXidMeta.xid));
+
 				if (!RecoveryInProgress())
 					wal_rollback(oxid,
-								 get_current_logical_xid());
+								 get_current_logical_xid_if_any());
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					apply_undo_stack((UndoLogType) i, oxid, NULL, true);
 				reset_cur_undo_locations();
