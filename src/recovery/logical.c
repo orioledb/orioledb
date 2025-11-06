@@ -504,10 +504,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 	wal_version = check_wal_container_version(&ptr);
 
-	if (wal_version > CURRENT_WAL_VERSION)
+	if (wal_version > ORIOLEDB_WAL_VERSION)
 	{
 		/* WAL from future version */
-		elog(ERROR, "Can't logically decode WAL version %u that is newer than supported %u", wal_version, CURRENT_WAL_VERSION);
+		elog(ERROR, "Can't logically decode WAL version %u that is newer than supported %u", wal_version, ORIOLEDB_WAL_VERSION);
 		return;
 	}
 

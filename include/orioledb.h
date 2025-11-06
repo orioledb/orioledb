@@ -50,6 +50,10 @@
  * Within the same ORIOLEDB_BINARY_VERSION clusters either fully compatible
  * or could be converted on the fly. See comment for ORIOLEDB_DATA_VERSION,
  * ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION below.
+ *
+ * ORIOLEDB_WAL_VERSION works even between different ORIOLEDB_BINARY_VERSION's
+ * In this case convesrion of WAL records is still allowed and should be implemented
+ * ( see check_wal_container_version() )
  */
 #define ORIOLEDB_BINARY_VERSION 7
 #define ORIOLEDB_DATA_DIR "orioledb_data"

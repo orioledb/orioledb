@@ -2744,7 +2744,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 	uint16		wal_version;
 
 	wal_version = check_wal_container_version(&ptr);
-	if (wal_version > CURRENT_WAL_VERSION)
+	if (wal_version > ORIOLEDB_WAL_VERSION)
 	{
 		/* WAL from future version */
 		return false;

@@ -780,8 +780,19 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 					 * need to save tuples for the iterators code from the
 					 * parent.
 					 */
+					BTreePageHeader *hdr = (BTreePageHeader *) context->parentImg;
+					OffsetNumber chunkIdx = loc.chunkOffset;
+
 					memcpy(context->parentImg, intCxt.pagePtr, ORIOLEDB_BLCKSZ);
 					context->partial.isPartial = false;
+
+					/*
+					 * We need to ensure that chunk in locator points to
+					 * context memory instead of "in memory" block
+					 */
+					context->items[context->index].locator.chunk =
+						(BTreePageChunk *) (context->parentImg + SHORT_GET_LOCATION(hdr->chunkDesc[chunkIdx].shortLocation));
+
 				}
 			}
 			else

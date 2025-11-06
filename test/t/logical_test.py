@@ -566,6 +566,8 @@ class LogicalTest(BaseTest):
 					    ), [(2, 2), (6, 1)])
 
 
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
 	def test_recvlogical_and_drop_database(self):
 		node = self.node
 		node.start()
