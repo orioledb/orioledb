@@ -17,6 +17,9 @@ import random
 
 class RewindTest(BaseTest):
 
+	def wait_shutdown_and_start(self, node):
+		super().wait_shutdown_and_start(node)
+
 	def test_rewind_oriole(self):
 		node = self.node
 		node.append_conf(
@@ -47,10 +50,8 @@ class RewindTest(BaseTest):
 			    "	VALUES (%d, %d || 'val');\n" % (i, i))
 
 		node.safe_psql('postgres', "select orioledb_rewind_by_time(9);\n")
-		time.sleep(1)
 
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT * FROM o_test;')),
@@ -89,9 +90,7 @@ class RewindTest(BaseTest):
 
 		node.safe_psql('postgres', "select orioledb_rewind_by_time(9);\n")
 
-		time.sleep(1)
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT * FROM o_test_heap;')),
@@ -100,6 +99,8 @@ class RewindTest(BaseTest):
 		node.stop()
 
 
+## Tests disabled for not to strain CI as they are much similar to neighbouring
+#
 #	def test_rewind_heap_subxids(self):
 #		node = self.node
 #		node.append_conf(
@@ -145,9 +146,7 @@ class RewindTest(BaseTest):
 #		node.safe_psql('postgres',
 #		               "select orioledb_rewind_by_time(9);\n")
 #
-#		time.sleep(1)
-#		node.is_started = False
-#		node.start()
+#		self.wait_shutdown_and_start(node)
 #
 #		self.maxDiff = None
 #		self.assertEqual(
@@ -206,10 +205,8 @@ class RewindTest(BaseTest):
 #
 #		node.safe_psql('postgres',
 #		               "select orioledb_rewind_by_time(9);\n")
-#		time.sleep(1)
 #
-#		node.is_started = False
-#		node.start()
+#		self.wait_shutdown_and_start(node)
 #
 #		self.assertEqual(
 #		    str(
@@ -225,7 +222,7 @@ class RewindTest(BaseTest):
 #		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]")
 #		node.stop()
 
-	def test_rewind__subxids(self):
+	def test_rewind_subxids(self):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 100\n"
@@ -294,9 +291,7 @@ class RewindTest(BaseTest):
 
 		node.safe_psql('postgres', "select orioledb_rewind_by_time(9);\n")
 
-		time.sleep(1)
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.maxDiff = None
 		self.assertEqual(
