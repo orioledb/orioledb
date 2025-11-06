@@ -1014,6 +1014,24 @@ o_tbl_insert_with_arbiter(Relation rel,
 				!list_member_oid(arbiterIndexes, descr->indices[i]->oids.reloid))
 				continue;
 
+			if (descr->indices[i]->desc.type == oIndexExclusion ||
+				descr->indices[i]->desc.type == oIndexUnique)
+			{
+				int ri_ix_desc;
+
+				/* It could be better to save indimmediate to our descriptors but it is not needed for any other operation */
+				for (ri_ix_desc = 0; ri_ix_desc < resultRelInfo->ri_NumIndices; ri_ix_desc++)
+				{
+					Relation	indexRelation = resultRelInfo->ri_IndexRelationDescs[ri_ix_desc];
+					if (indexRelation->rd_rel->oid == descr->indices[i]->oids.reloid&& !indexRelation->rd_index->indimmediate)
+						ereport(ERROR,
+								(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+								 errmsg("ON CONFLICT does not support deferrable unique constraints/exclusion constraints as arbiters"),
+								 errtableconstraint(resultRelInfo->ri_RelationDesc,
+													RelationGetRelationName(indexRelation))));
+				}
+			}
+
 			ioc_arg.conflictIxNum = i;
 			result = o_tbl_index_insert(descr, descr->indices[i], NULL, slot,
 										oxid, csn, &callbackInfo, true);
