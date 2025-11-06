@@ -20,6 +20,9 @@ import tempfile
 
 class RewindXidTest(BaseTest):
 
+	def wait_shutdown_and_start(self, node):
+		super().wait_shutdown_and_start(node)
+
 	# Small tests:
 	# test_rewind_xid_oriole
 	# test_rewind_xid_heap
@@ -82,10 +85,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
 		    (invalidxid, oxid))
-		time.sleep(1)
 
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT * FROM o_test ORDER BY id;')),
@@ -139,9 +140,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
 		    (xid, invalidoxid))
-		time.sleep(1)
-		node.is_started = False
-		node.start()
+
+		self.wait_shutdown_and_start(node)
 
 		self.assertEqual(
 		    str(
@@ -213,9 +213,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
 		    (xid, invalidoxid))
-		time.sleep(1)
-		node.is_started = False
-		node.start()
+
+		self.wait_shutdown_and_start(node)
 
 		self.maxDiff = None
 		self.assertEqual(
@@ -285,10 +284,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
-		time.sleep(1)
 
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT * FROM o_test ORDER BY id;')),
@@ -384,9 +381,7 @@ class RewindXidTest(BaseTest):
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
 
-		time.sleep(1)
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.maxDiff = None
 		self.assertEqual(
@@ -485,10 +480,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
-		time.sleep(1)
 
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT * FROM o_test ORDER BY id;')),
@@ -596,10 +589,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
-		time.sleep(1)
 
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT * FROM o_test ORDER BY id;')),
@@ -701,10 +692,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
-		time.sleep(1)
 
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.assertEqual(
 		    str(
@@ -799,10 +788,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
-		time.sleep(1)
 
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.assertEqual(
 		    str(
