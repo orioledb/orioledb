@@ -354,6 +354,8 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 	}
 	else if (rec_type == WAL_REC_UPDATE)
 	{
+		HeapTuple	newheaptuple = NULL;
+
 		Assert(ix_type != oIndexToast);
 
 		change->action = REORDER_BUFFER_CHANGE_UPDATE;
@@ -364,13 +366,16 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 		 */
 		if (descr->ntoastable > 0)
 		{
-			HeapTuple	newheaptuple;
-
 			elog(DEBUG4, "WAL_REC_UPDATE toastable");
 
 			newheaptuple = convert_toast_pointers(descr, indexDescr, &tuple1);
+
+			/*
+			 * Slot filled by ExecForceStoreHeapTuple depends on newheaptuple.
+			 * Don't free newheaptuple while we need this slot
+			 */
 			ExecForceStoreHeapTuple(newheaptuple, descr->newTuple, false);
-			change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, true);
+			change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, false);
 		}
 		else					/* Tuple without TOASTed attrs */
 		{
@@ -385,6 +390,8 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 		tts_copy_identity(descr->newTuple, descr->oldTuple,
 						  GET_PRIMARY(descr));
 		change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
+		if (newheaptuple)
+			heap_freetuple(newheaptuple);
 	}
 	else if (rec_type == WAL_REC_DELETE)
 	{
