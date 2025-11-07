@@ -58,6 +58,68 @@ class LogicalTest(BaseTest):
 		    "table public.data: INSERT: id[integer]:2 data[text]:'2'\n"
 		    "COMMIT\n")
 
+#@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+#                 "'test_decoding' is not installed")
+#def test_switch_logical_xid_BUG_COMMIT(self):
+#	# System catalogs Oriole changes visibility during logical decoding
+#	node = self.node
+#	node.start()  # start PostgreSQL
+#	node.safe_psql(
+#	    'postgres',
+#	    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+#		"CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"  # oriole relation
+#	)
+#
+#	node.safe_psql(
+#	    'postgres',
+#	    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+#	)
+#
+#	node.safe_psql(
+#	    'postgres', '''
+#			BEGIN;
+#			INSERT INTO o_data(data) VALUES('20');
+#			INSERT INTO o_data(data) VALUES('40');
+#			DROP TABLE IF EXISTS o_data;
+#			COMMIT;
+#		''')
+#
+#	result = self.squashLogicalChanges(
+#	    node.execute( # TRAP: failed Assert("descr != NULL") because there is no relation `o_data` in orioledb_table
+#	        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
+#	    ))
+#	print(result)
+
+#@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+#                 "'test_decoding' is not installed")
+#def test_switch_logical_xid_BUG_ABORT(self):
+#	# System catalogs Oriole changes visibility during logical decoding
+#	node = self.node
+#	node.start()  # start PostgreSQL
+#	node.safe_psql(
+#	    'postgres',
+#	    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+#	)
+#
+#	node.safe_psql(
+#	    'postgres',
+#	    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+#	)
+#
+#	node.safe_psql(
+#	    'postgres', '''
+#			BEGIN;
+#			CREATE TABLE o_data(id serial primary key, data text) USING orioledb;
+#			INSERT INTO o_data(data) VALUES('10');
+#			ABORT;
+#		''')
+#
+#	result = self.squashLogicalChanges(
+#	    node.execute( # TRAP: failed Assert("descr != NULL") because there is no relation `o_data` in orioledb_table
+#	        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
+#	    ))
+#	print(result)
+
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_switch_logical_xid_h2o(self):
