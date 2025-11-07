@@ -402,7 +402,7 @@ class LogicalTest(BaseTest):
 					        ('mmm', 'nnn', 'ooo', 2)])
 
 
-# Update with changed pkey on a table with TOAST attributes
+# Update with changed pkey on a table with TOAST attributes (i.e reinsert)
 
 	def test_logical_subscription_toast_update_pkey(self):
 		with self.node as publisher:
@@ -476,6 +476,148 @@ class LogicalTest(BaseTest):
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
+
+	# Update with non-changed pkey of by-reference type
+	def test_logical_subscription_byref_pkey_update(self):
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+
+			with subscriber.start() as subscriber:
+				create_sql = """
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE o_test (
+						data1 text PRIMARY KEY,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+					CREATE TABLE o_test_secondary (
+						data1 text PRIMARY KEY,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+					CREATE INDEX ON o_test_secondary (data2);
+					CREATE TABLE o_test_toast (
+						data1 text PRIMARY KEY,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+					CREATE TABLE o_test_toasted_update (
+						data1 text PRIMARY KEY,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+					CREATE TABLE o_test_toast_secondary (
+						data1 text PRIMARY KEY,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+					CREATE INDEX ON o_test_toast_secondary (data2);
+				"""
+				publisher.safe_psql(create_sql)
+				subscriber.safe_psql(create_sql)
+
+				pub = publisher.publish('test_pub',
+				                        tables=[
+				                            'o_test, o_test_secondary',
+				                            'o_test_toast',
+				                            'o_test_toast_secondary',
+				                            'o_test_toasted_update'
+				                        ])
+				sub = subscriber.subscribe(pub, 'test_sub')
+
+				with publisher.connect() as con1:
+					with publisher.connect() as con2:
+						con1.execute(
+						    "INSERT INTO o_test VALUES('foofoo','barbar', 'aaaaaa', 1);"
+						    "INSERT INTO o_test_secondary VALUES('foofoo','barbar', 'aaaaaa', 1);"
+						    "INSERT INTO o_test_toast VALUES('foofoo','barbar', repeat(pi()::text,20000), 1);"
+						    "INSERT INTO o_test_toast_secondary VALUES('foofoo','barbar', repeat(pi()::text,20000), 1);"
+						    "INSERT INTO o_test_toasted_update VALUES('foofoo','barbar', repeat(pi()::text,20000), 1);"
+						)
+						con2.execute(
+						    "INSERT INTO o_test VALUES('mmm','nnn', 'ooo', 2);"
+						    "INSERT INTO o_test_secondary VALUES('mmm','nnn', 'ooo', 2);"
+						    "INSERT INTO o_test_toast VALUES('mmm','nnn', repeat(pi()::text,20000), 2);"
+						    "INSERT INTO o_test_toast_secondary VALUES('mmm','nnn', repeat(pi()::text,20000), 2);"
+						    "INSERT INTO o_test_toasted_update VALUES('mmm','nnn', repeat(pi()::text,20000), 2);"
+						)
+						con1.commit()
+						con2.commit()
+
+				with publisher.connect() as con1:
+					with publisher.connect() as con2:
+						con1.execute(
+						    "UPDATE o_test SET data2 = 'ssssss' where data2 = 'barbar';"
+						    "UPDATE o_test_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
+						    "UPDATE o_test_toast SET data2 = 'ssssss' where data2 = 'barbar';"
+						    "UPDATE o_test_toast_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
+						    "UPDATE o_test_toasted_update SET data3 = repeat('123', 20000) where data3 = repeat(pi()::text,20000) and data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test SET data2 = 'ppp' where data2 = 'nnn';"
+						    "UPDATE o_test_secondary SET data2 = 'ppp' where data2 = 'nnn';"
+						    "UPDATE o_test_toast SET data2 = 'ppp' where data2 = 'nnn';"
+						    "UPDATE o_test_toast_secondary SET data2 = 'ppp' where data2 = 'nnn';"
+						    "UPDATE o_test_toasted_update SET data3 = repeat('246', 20000) where data3 = repeat(pi()::text,20000) and data2 = 'nnn';"
+						)
+						con1.commit()
+						con2.commit()
+
+					self.assertListEqual(
+					    publisher.execute('SELECT * FROM o_test ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test_secondary ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT data1, data2, i FROM o_test_toast ORDER BY i'
+					    ), [('foofoo', 'ssssss', 1), ('mmm', 'ppp', 2)])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT data1, data2, i FROM o_test_toast_secondary ORDER BY i'
+					    ), [('foofoo', 'ssssss', 1), ('mmm', 'ppp', 2)])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT data1, data2, left(data3, 20), i  FROM o_test_toasted_update ORDER BY i'
+					    ), [('foofoo', 'barbar', '12312312312312312312', 1),
+					        ('mmm', 'nnn', '24624624624624624624', 2)])
+
+					# wait until changes apply on subscriber and check them
+					sub.catchup()
+					self.assertListEqual(
+					    subscriber.execute('SELECT * FROM o_test ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_secondary ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT data1, data2, i FROM o_test_toast ORDER BY i'
+					    ), [('foofoo', 'ssssss', 1), ('mmm', 'ppp', 2)])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT data1, data2, i FROM o_test_toast_secondary ORDER BY i'
+					    ), [('foofoo', 'ssssss', 1), ('mmm', 'ppp', 2)])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT data1, data2, left(data3, 20), i FROM o_test_toasted_update ORDER BY i'
+					    ), [('foofoo', 'barbar', '12312312312312312312', 1),
+					        ('mmm', 'nnn', '24624624624624624624', 2)])
+
 	def test_recvlogical_and_drop_database(self):
 		node = self.node
 		node.start()
