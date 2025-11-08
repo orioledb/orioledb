@@ -157,6 +157,11 @@ typedef struct WorkerUndoTempEntry
 	/* How many checkpoint stacks follow */
 } WorkerUndoTempEntry;
 
+typedef struct WorkerUndoTempCheckpointStack
+{
+	UndoLogType undoType;
+	UndoStackLocations undoStack;
+} WorkerUndoTempCheckpointStack;
 
 PG_FUNCTION_INFO_V1(orioledb_recovery_synchronized);
 
@@ -2031,7 +2036,7 @@ update_recovery_undo_loc_flush(bool single, int worker_id)
 	update_undo_loc_flush_completed_number(single);
 }
 
-/* See also recovery_load_and_process_state_from_temp_file */
+/* See also recovery_load_and_process_state_from_temp_file() */
 static void
 save_state_to_temp_file(int worker_id)
 {
@@ -2059,6 +2064,7 @@ save_state_to_temp_file(int worker_id)
 		dlist_iter	iter;
 
 		/* Save complete transaction state */
+		memset(&entry, 0, sizeof(entry));
 		entry.oxid = state->oxid;
 		entry.csn = state->csn;
 		entry.numCheckpointStacks = 0;
@@ -2085,9 +2091,14 @@ save_state_to_temp_file(int worker_id)
 			CheckpointUndoStack *stack = dlist_container(CheckpointUndoStack,
 														 node,
 														 iter.cur);
+			WorkerUndoTempCheckpointStack tempStack;
 
-			OFileWrite(tempFile, (char *) stack, sizeof(CheckpointUndoStack), offset, WAIT_EVENT_DATA_FILE_WRITE);
-			offset += sizeof(CheckpointUndoStack);
+			memset(&tempStack, 0, sizeof(tempStack));
+			tempStack.undoType = stack->undoType;
+			tempStack.undoStack = stack->undoStack;
+
+			OFileWrite(tempFile, (char *) &tempStack, sizeof(tempStack), offset, WAIT_EVENT_DATA_FILE_WRITE);
+			offset += sizeof(tempStack);
 		}
 	}
 
@@ -2096,7 +2107,8 @@ save_state_to_temp_file(int worker_id)
 
 /* See also save_state_to_temp_file */
 void
-recovery_load_and_process_state_from_temp_file(int worker_id, uint32 chkpnum)
+recovery_load_and_process_state_from_temp_file(int worker_id, uint32 chkpnum,
+											   bool shutdown)
 {
 	char	   *filename = psprintf(WORKER_UNDO_TEMP_FILE, worker_id);
 	File		tempFile = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
@@ -2142,7 +2154,7 @@ recovery_load_and_process_state_from_temp_file(int worker_id, uint32 chkpnum)
 		for (int j = 0; j < entry.numCheckpointStacks; j++)
 		{
 			XidFileRec	rec;
-			CheckpointUndoStack stack;
+			WorkerUndoTempCheckpointStack stack;
 
 			OFileRead(tempFile, (char *) &stack, sizeof(stack), offset,
 					  WAIT_EVENT_DATA_FILE_READ);
@@ -2157,6 +2169,14 @@ recovery_load_and_process_state_from_temp_file(int worker_id, uint32 chkpnum)
 	}
 
 	FileClose(tempFile);
+
+	/*
+	 * We no longer need the temporary file if it's shutdown (last)
+	 * checkpoint. So, cleanup.
+	 */
+	if (shutdown)
+		unlink(filename);
+	pfree(filename);
 }
 
 void

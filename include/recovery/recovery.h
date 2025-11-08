@@ -63,6 +63,6 @@ extern OTuple recovery_rec_delete_key(BTreeDescr *desc, OTuple key, bool *alloca
 extern void recovery_cleanup_old_files(uint32 max_chkp_num,
 									   bool before_recovery);
 
-extern void recovery_load_and_process_state_from_temp_file(int worker_id, uint32 chkpnum);
+extern void recovery_load_and_process_state_from_temp_file(int worker_id, uint32 chkpnum, bool shutdown);
 
 #endif							/* __RECOVERY_H__ */
