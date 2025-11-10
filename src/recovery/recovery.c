@@ -152,7 +152,7 @@ typedef struct WorkerUndoTempEntry
 {
 	OXid		oxid;
 	CommitSeqNo csn;
-	UndoStackLocations undo_stacks[UndoLogsCount];
+	UndoStackLocations undoStacks[UndoLogsCount];
 	uint32		numCheckpointStacks;
 	/* How many checkpoint stacks follow */
 } WorkerUndoTempEntry;
@@ -442,7 +442,7 @@ recovery_shmem_init(Pointer ptr, bool found)
 			pg_atomic_init_u64(&worker_ptrs[i].commitPtr, InvalidXLogRecPtr);
 			pg_atomic_init_u64(&worker_ptrs[i].retainPtr, InvalidXLogRecPtr);
 			worker_ptrs[i].flushedUndoLocCompletedCheckpointNumber = 0;
-			pg_atomic_init_flag(&worker_ptrs[i].has_temp_file);
+			pg_atomic_init_flag(&worker_ptrs[i].hasTempFile);
 		}
 		pg_atomic_init_u64(recovery_ptr, InvalidXLogRecPtr);
 		pg_atomic_init_u64(recovery_main_retain_ptr, InvalidXLogRecPtr);
@@ -2036,9 +2036,11 @@ update_recovery_undo_loc_flush(bool single, int worker_id)
 	update_undo_loc_flush_completed_number(single);
 }
 
-/* See also recovery_load_and_process_state_from_temp_file() */
+/*
+ * Save the recovery worker state to the temporary file.
+ */
 static void
-save_state_to_temp_file(int worker_id)
+save_state_to_file(int worker_id)
 {
 	char	   *filename;
 	File		tempFile;
@@ -2050,11 +2052,20 @@ save_state_to_temp_file(int worker_id)
 	/* Create worker-specific temp file */
 	filename = psprintf(WORKER_UNDO_TEMP_FILE, worker_id);
 	tempFile = PathNameOpenFile(filename, O_WRONLY | O_CREAT | O_TRUNC | PG_BINARY);
+	if (tempFile < 0)
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not open file %s: %m", filename)));
 
 	/* Write header */
 	header.worker_id = worker_id;
 	header.num_transactions = hash_get_num_entries(recovery_xid_state_hash);
-	OFileWrite(tempFile, (char *) &header, sizeof(header), 0, WAIT_EVENT_DATA_FILE_WRITE);
+	if (OFileWrite(tempFile, (char *) &header, sizeof(header), 0,
+				   WAIT_EVENT_DATA_FILE_WRITE) != sizeof(header))
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not write recovery worker undo header to file \"%s\": %m",
+						filename)));
 
 	/* Write all transaction states */
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
@@ -2080,9 +2091,14 @@ save_state_to_temp_file(int worker_id)
 			for (int i = 0; i < UndoLogsCount; i++)
 				state->undo_stacks[i] = get_cur_undo_locations((UndoLogType) i);
 		}
-		memcpy(entry.undo_stacks, state->undo_stacks, sizeof(entry.undo_stacks));
+		memcpy(entry.undoStacks, state->undo_stacks, sizeof(entry.undoStacks));
 
-		OFileWrite(tempFile, (char *) &entry, sizeof(entry), offset, WAIT_EVENT_DATA_FILE_WRITE);
+		if (OFileWrite(tempFile, (char *) &entry, sizeof(entry), offset,
+					   WAIT_EVENT_DATA_FILE_WRITE) != sizeof(entry))
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not write file \"%s\": %m",
+							filename)));
 		offset += sizeof(entry);
 
 		/* Also write checkpoint stacks */
@@ -2097,18 +2113,30 @@ save_state_to_temp_file(int worker_id)
 			tempStack.undoType = stack->undoType;
 			tempStack.undoStack = stack->undoStack;
 
-			OFileWrite(tempFile, (char *) &tempStack, sizeof(tempStack), offset, WAIT_EVENT_DATA_FILE_WRITE);
+			if (OFileWrite(tempFile, (char *) &tempStack, sizeof(tempStack),
+						    offset, WAIT_EVENT_DATA_FILE_WRITE) != sizeof(tempStack))
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not write file \"%s\": %m", filename)));
+
 			offset += sizeof(tempStack);
 		}
 	}
 
+	if (FileSync(tempFile, WAIT_EVENT_DATA_FILE_WRITE) < 0)
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not sync file \"%s\": %m", filename)));
+
 	FileClose(tempFile);
+	pfree(filename);
 }
 
-/* See also save_state_to_temp_file */
+/*
+ * Read the recovery worker state from the temporary file.
+ */
 void
-recovery_load_and_process_state_from_temp_file(int worker_id, uint32 chkpnum,
-											   bool shutdown)
+recovery_load_state_from_file(int worker_id, uint32 chkpnum, bool shutdown)
 {
 	char	   *filename = psprintf(WORKER_UNDO_TEMP_FILE, worker_id);
 	File		tempFile = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
@@ -2116,10 +2144,22 @@ recovery_load_and_process_state_from_temp_file(int worker_id, uint32 chkpnum,
 	off_t		offset;
 
 	if (tempFile < 0)
+	{
+		if (errno != ENOENT)
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not open file \"%s\": %m", filename)));
 		return;
+	}
 
 	/* Read header */
-	OFileRead(tempFile, (char *) &header, sizeof(header), 0, WAIT_EVENT_DATA_FILE_READ);
+	if (OFileRead(tempFile, (char *) &header, sizeof(header), 0,
+				  WAIT_EVENT_DATA_FILE_READ) != sizeof(header))
+		ereport(FATAL,
+				(errcode_for_file_access(),
+				 errmsg("could not read recovery worker undo header from file \"%s\": %m",
+						filename)));
+
 	offset = sizeof(header);
 
 	/* Process each transaction entry */
@@ -2128,7 +2168,12 @@ recovery_load_and_process_state_from_temp_file(int worker_id, uint32 chkpnum,
 		WorkerUndoTempEntry entry;
 
 		/* Read main entry */
-		OFileRead(tempFile, (char *) &entry, sizeof(entry), offset, WAIT_EVENT_DATA_FILE_READ);
+		if (OFileRead(tempFile, (char *) &entry, sizeof(entry), offset,
+					  WAIT_EVENT_DATA_FILE_READ) != sizeof(entry))
+			ereport(FATAL,
+					(errcode_for_file_access(),
+					 errmsg("could not read file \"%s\": %m",
+							filename)));
 		offset += sizeof(entry);
 
 		/* Skip if transaction is finished */
@@ -2146,7 +2191,7 @@ recovery_load_and_process_state_from_temp_file(int worker_id, uint32 chkpnum,
 
 			rec.oxid = entry.oxid;
 			rec.undoType = (UndoLogType) j;
-			rec.undoLocation = entry.undo_stacks[j];
+			rec.undoLocation = entry.undoStacks[j];
 			write_to_xids_queue(&rec);
 		}
 
@@ -2156,8 +2201,12 @@ recovery_load_and_process_state_from_temp_file(int worker_id, uint32 chkpnum,
 			XidFileRec	rec;
 			WorkerUndoTempCheckpointStack stack;
 
-			OFileRead(tempFile, (char *) &stack, sizeof(stack), offset,
-					  WAIT_EVENT_DATA_FILE_READ);
+			if (OFileRead(tempFile, (char *) &stack, sizeof(stack), offset,
+						  WAIT_EVENT_DATA_FILE_READ) != sizeof(stack))
+				ereport(FATAL,
+						(errcode_for_file_access(),
+						 errmsg("could not read file \"%s\": %m",
+								filename)));
 			offset += sizeof(stack);
 
 			/* Write checkpoint stack to XID queue */
@@ -2189,10 +2238,10 @@ recovery_on_proc_exit(int code, Datum arg)
 
 	elog(LOG, "recovery on exit: %d", worker_id);
 
-	save_state_to_temp_file(worker_id);
+	save_state_to_file(worker_id);
 
 	/* Mark worker as having saved state and exited */
-	pg_atomic_test_set_flag(&worker_ptrs[worker_id].has_temp_file);
+	pg_atomic_test_set_flag(&worker_ptrs[worker_id].hasTempFile);
 }
 
 static void

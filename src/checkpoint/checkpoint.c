@@ -861,11 +861,11 @@ finish_write_xids(uint32 chkpnum, bool shutdown)
 		for (i = 0; i < total_recovery_workers; i++)
 		{
 			/* Check for exited recovery workers with temp files */
-			if (!pg_atomic_unlocked_test_flag(&worker_ptrs[i].has_temp_file))
+			if (!pg_atomic_unlocked_test_flag(&worker_ptrs[i].hasTempFile))
 			{
 				if (!temp_file_loaded[i])
 				{
-					recovery_load_and_process_state_from_temp_file(i, chkpnum, shutdown);
+					recovery_load_state_from_file(i, chkpnum, shutdown);
 					temp_file_loaded[i] = true;
 				}
 				continue;
