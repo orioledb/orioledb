@@ -2004,10 +2004,12 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 			}
 
 			break;
+
 		case SUBXACT_EVENT_COMMIT_SUB:
 			if (parentSubid >= minParentSubId && minParentSubId != InvalidSubTransactionId)
 				update_subxact_undo_location_on_commit(parentSubid);
 			break;
+
 		case SUBXACT_EVENT_ABORT_SUB:
 			if (parentSubid < minParentSubId || minParentSubId == InvalidSubTransactionId)
 				parentSubid = InvalidSubTransactionId;
@@ -2024,8 +2026,6 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 					if (!RecoveryInProgress())
 					{
 						add_rollback_to_savepoint_wal_record(parentSubid);
-
-						setup_prev_logical_xid_meta();
 					}
 				}
 
@@ -2036,10 +2036,14 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 				 */
 				oxid_notify_all();
 			}
+
 			break;
+
 		default:
 			break;
 	}
+
+	oxid_subxact_callback(event, mySubid, parentSubid, arg);
 }
 
 bool

@@ -49,7 +49,7 @@
  * This is unlike ORIOLEDB_DATA_VERSION, ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION,
  * that make sense only inside one ORIOLEDB_BINARY_VERSION.
  */
-#define ORIOLEDB_WAL_VERSION (16)
+#define ORIOLEDB_WAL_VERSION (17)
 
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)

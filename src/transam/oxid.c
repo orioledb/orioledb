@@ -441,7 +441,7 @@ assign_subtransaction_logical_xid(void)
 	logicalXidMeta.useHeap = isValidHeapXid;
 }
 
-void
+static void
 setup_prev_logical_xid_meta(void)
 {
 	int			llen = 0;
@@ -506,7 +506,10 @@ oxid_subxact_callback(
 							}
 						}
 
-						setup_prev_logical_xid_meta();
+						if (!RecoveryInProgress())
+						{
+							setup_prev_logical_xid_meta();
+						}
 					}
 				}
 
@@ -522,11 +525,11 @@ oxid_subxact_callback(
 					{
 						if (!RecoveryInProgress())
 						{
-							elog(DEBUG4, "%s Add wal_rollback for oxid %lu logical xid %u top xid %u",
+							elog(DEBUG4, "%s Rollback for oxid %lu logical xid %u top xid %u",
 								 __func__, get_current_oxid_if_any(), get_current_logical_xid_if_any(), GetTopTransactionIdIfAny());
-						}
 
-						/* setup_prev_logical_xid_meta(); */
+							setup_prev_logical_xid_meta();
+						}
 					}
 				}
 
