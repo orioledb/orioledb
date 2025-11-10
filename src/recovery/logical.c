@@ -570,10 +570,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			CommitSeqNo csn;
 			CSNSnapshotData *csnSnapshot;
 
+			ptr = wal_parse_rec_finish(ptr, &xmin, &csn);
+
 			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u",
 				 rec_type, rec_type_str, oxid, logicalXid);
-
-			ptr = wal_parse_rec_finish(ptr, &xmin, &csn);
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
@@ -603,8 +603,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			/* unknown transaction, nothing to replay */
 			if (txn != NULL)
 			{
-				if (txn->toptxn)
-					txn = txn->toptxn;
+				/* if (txn->toptxn) */
+				/* txn = txn->toptxn; */
 
 				Assert(TransactionIdIsValid(logicalXid));
 
@@ -830,6 +830,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			ptr = wal_parse_rec_savepoint(ptr, &parentSubid, &logicalXid, &parentLogicalXid);
 
+			elog(DEBUG4, "APPLY record type %d (%s) oxid %lu logicalXid %u parentLogicalXid %u", rec_type, rec_type_str, oxid, logicalXid, parentLogicalXid);
+
 			if (!ctx->fast_forward)
 				ReorderBufferAssignChild(ctx->reorder, parentLogicalXid, logicalXid, buf->origptr);
 
@@ -838,10 +840,55 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		else if (rec_type == WAL_REC_ROLLBACK_TO_SAVEPOINT)
 		{
 			SubTransactionId parentSubid;
+			OXid		xmin;
+			dlist_iter	cur_txn_i;
+			ReorderBufferTXN *txn;
+			CommitSeqNo csn;
+			CSNSnapshotData *csnSnapshot;
 
-			ptr = wal_parse_rec_rollback_to_savepoint(ptr, &parentSubid);
+			ptr = wal_parse_rec_rollback_to_savepoint(ptr, &parentSubid, &xmin, &csn);
 
-			/* Skip */
+			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u parentSubid %u",
+				 rec_type, rec_type_str, oxid, logicalXid, parentSubid);
+
+			csnSnapshot = SnapBuildGetCSNSnaphot(ctx->snapshot_builder);
+			csnSnapshot->snapshotcsn = csn;
+			csnSnapshot->xlogptr = endXLogPtr;
+			csnSnapshot->xmin = xmin;
+
+			if (!set_snapshot(ctx, logicalXid, changeXLogPtr))
+				continue;
+
+			txn = get_reorder_buffer_txn(ctx->reorder, logicalXid);
+
+			if (txn == NULL)
+			{
+				elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u :: unknown transaction, nothing to replay",
+					 rec_type, rec_type_str, oxid, logicalXid);
+			}
+
+			/* unknown transaction, nothing to replay */
+			if (txn != NULL)
+			{
+				Assert(TransactionIdIsValid(logicalXid));
+
+				dlist_foreach(cur_txn_i, &txn->subtxns)
+				{
+					ReorderBufferTXN *cur_txn;
+
+					cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
+					ReorderBufferAbort(ctx->reorder, cur_txn->xid,
+									   startXLogPtr, 0);
+				}
+				elog(DEBUG4, "ABORT record type %d (%s) oxid %lu logicalXid %u", rec_type, rec_type_str, oxid, logicalXid);
+				ReorderBufferAbort(ctx->reorder, logicalXid,
+								   startXLogPtr, 0);
+			}
+
+			UpdateDecodingStats(ctx);
+
+			oxid = InvalidOXid;
+			logicalXid = InvalidTransactionId;
 		}
 		else if (rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT)
 		{

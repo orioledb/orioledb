@@ -182,11 +182,13 @@ wal_parse_rec_savepoint(Pointer ptr, SubTransactionId *parentSubid, TransactionI
 
 /* Parser for WAL_REC_ROLLBACK_TO_SAVEPOINT */
 Pointer
-wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid)
+wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid, OXid *xmin, CommitSeqNo *csn)
 {
 	Assert(ptr);
 
 	PARSE(ptr, parentSubid);
+	PARSE(ptr, xmin);
+	PARSE(ptr, csn);
 
 	return ptr;
 }
@@ -300,6 +302,12 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	/* Do not write WAL during recovery */
 	if (OXidIsValid(recovery_oxid))
 		return;
+
+	if (!O_IS_TRANSACTION_AUTONOMOUS())
+	{
+		(void) GetTopTransactionId();
+		(void) get_current_logical_xid();
+	}
 
 	if (!IS_SYS_TREE_OIDS(oids) && type == oIndexPrimary)
 	{
@@ -777,18 +785,25 @@ void
 add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 {
 	WALRecRollbackToSavepoint *rec;
+	OXid		runXmin;
+	CommitSeqNo csn;
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
 	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	add_wal_container_header_if_needed();
+	local_wal_contains_xid = false;
 	add_xid_wal_record_if_needed();
 
 	rec = (WALRecRollbackToSavepoint *) (&local_wal_buffer[local_wal_buffer_offset]);
 
 	rec->recType = WAL_REC_ROLLBACK_TO_SAVEPOINT;
 	memcpy(rec->parentSubid, &parentSubid, sizeof(SubTransactionId));
+	runXmin = pg_atomic_read_u64(&xid_meta->runXmin);
+	memcpy(rec->xmin, &runXmin, sizeof(runXmin));
+	csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
+	memcpy(rec->csn, &csn, sizeof(csn));
 
 	local_wal_buffer_offset += sizeof(*rec);
 }

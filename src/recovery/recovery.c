@@ -2760,6 +2760,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 		rec_type_str = wal_record_type_to_string(rec_type);
 
+		elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu", rec_type, rec_type_str, oxid);
+
 		if (rec_type == WAL_REC_XID)
 		{
 			/* don't need logicalXid here */
@@ -2929,7 +2931,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		{
 			SubTransactionId parentSubid;
 
-			ptr = wal_parse_rec_rollback_to_savepoint(ptr, &parentSubid);
+			ptr = wal_parse_rec_rollback_to_savepoint(ptr, &parentSubid, NULL, NULL);
 
 			if (!single)
 			{

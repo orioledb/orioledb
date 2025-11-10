@@ -129,6 +129,8 @@ typedef struct
 {
 	uint8		recType;
 	uint8		parentSubid[sizeof(SubTransactionId)];
+	uint8		xmin[sizeof(OXid)];
+	uint8		csn[sizeof(CommitSeqNo)];
 } WALRecRollbackToSavepoint;
 
 typedef struct
@@ -193,7 +195,7 @@ extern Pointer wal_parse_rec_o_tables_meta_unlock(Pointer ptr, Oid *datoid, Oid 
 extern Pointer wal_parse_rec_savepoint(Pointer ptr, SubTransactionId *parentSubid, TransactionId *logicalXid, TransactionId *parentLogicalXid);
 
 /* Parser for WAL_REC_ROLLBACK_TO_SAVEPOINT */
-extern Pointer wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid);
+extern Pointer wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid, OXid *xmin, CommitSeqNo *csn);
 
 /* Parser for WAL_REC_TRUNCATE */
 extern Pointer wal_parse_rec_truncate(Pointer ptr, Oid *datoid, Oid *reloid, Oid *relnode);

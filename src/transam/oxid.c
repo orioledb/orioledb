@@ -134,6 +134,7 @@ static OBuffersDesc buffersDesc = {
 	.bufferCtlTrancheName = "xidBuffersCtlTranche"
 };
 
+static TransactionId acquire_logical_xid_wrapper(bool *isValidHeapXid);
 static void advance_global_xmin(OXid newXid);
 
 Size
@@ -385,25 +386,45 @@ release_logical_xid(LogicalXid *lxm)
 	}
 }
 
+static TransactionId
+acquire_logical_xid_wrapper(bool *isValidHeapXid)
+{
+	TransactionId nextLogicalXid;
+	TransactionId heapXid;
+
+	Assert(isValidHeapXid);
+
+	nextLogicalXid = acquire_logical_xid(isValidHeapXid);
+
+	if (*isValidHeapXid)
+	{
+		heapXid = GetCurrentTransactionIdIfAny();
+		Assert(TransactionIdIsValid(heapXid));
+
+		elog(DEBUG4, "[%s] SWITCH_LOGICAL_XID H2O heap xid %u -> oriole xid %u", __func__, heapXid, nextLogicalXid);
+		add_switch_logical_xid_wal_record(heapXid, nextLogicalXid);
+	}
+	else
+	{
+		/* Regular sub-transaction: top xid is present while no current xid */
+		heapXid = GetTopTransactionIdIfAny();
+		if (TransactionIdIsValid(heapXid))
+		{
+			elog(DEBUG4, "[%s] SWITCH_LOGICAL_XID H2O heap xid %u -> oriole xid %u", __func__, heapXid, nextLogicalXid);
+			add_switch_logical_xid_wal_record(heapXid, nextLogicalXid);
+		}
+	}
+
+	return nextLogicalXid;
+}
+
 void
 assign_subtransaction_logical_xid(void)
 {
 	TransactionId nextLogicalXid;
 	bool		isValidHeapXid = false;
 
-	nextLogicalXid = acquire_logical_xid(&isValidHeapXid);
-
-	if (isValidHeapXid)
-	{
-		TransactionId heapXid;
-
-		heapXid = GetCurrentTransactionIdIfAny();
-		if (TransactionIdIsValid(heapXid))
-		{
-			elog(DEBUG4, "SWITCH_LOGICAL_XID H2O heap xid %u -> oriole xid %u", heapXid, nextLogicalXid);
-			add_switch_logical_xid_wal_record(heapXid, nextLogicalXid);
-		}
-	}
+	nextLogicalXid = acquire_logical_xid_wrapper(&isValidHeapXid);
 
 	/*
 	 * Check previous logical xid if present and store it in a list of xids
@@ -420,8 +441,8 @@ assign_subtransaction_logical_xid(void)
 	logicalXidMeta.useHeap = isValidHeapXid;
 }
 
-static inline void
-setup_prev_logical_xid_meta()
+void
+setup_prev_logical_xid_meta(void)
 {
 	int			llen = 0;
 	LogicalXid *ptr = NULL;
@@ -455,26 +476,63 @@ oxid_subxact_callback(
 	{
 		case SUBXACT_EVENT_COMMIT_SUB:
 			{
-				heapXid = GetCurrentTransactionIdIfAny();
-
-				if (TransactionIdIsValid(logicalXidMeta.xid))
+				if (TRANSACTION_HAS_UNDO_CHANGES())
+					/* txn writes */
 				{
-					release_logical_xid(&logicalXidMeta);
-
-					if (TransactionIdIsValid(heapXid))
+					if (TransactionIdIsValid(logicalXidMeta.xid))
 					{
-						if (!logicalXidMeta.useHeap && heapXid != logicalXidMeta.xid)
+						release_logical_xid(&logicalXidMeta);
+
+						heapXid = GetCurrentTransactionIdIfAny();
+						if (TransactionIdIsValid(heapXid))
 						{
-							elog(DEBUG4, "%s SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u", __func__, heapXid, logicalXidMeta.xid);
-							add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
+							if (!logicalXidMeta.useHeap)
+							{
+								elog(DEBUG4, "%s SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u", __func__, heapXid, logicalXidMeta.xid);
+								add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
+							}
 						}
+						else
+						{
+							if (!RecoveryInProgress())
+							{
+								elog(DEBUG4, "%s Add wal_joint_commit for oxid %lu logical xid %u top xid %u",
+									 __func__, get_current_oxid_if_any(), get_current_logical_xid_if_any(), GetTopTransactionIdIfAny());
+
+								wal_joint_commit(
+												 get_current_oxid_if_any(),
+												 get_current_logical_xid_if_any(),
+												 GetTopTransactionIdIfAny());
+							}
+						}
+
+						setup_prev_logical_xid_meta();
 					}
 				}
 
-				setup_prev_logical_xid_meta();
+				break;
+			}
+
+		case SUBXACT_EVENT_ABORT_SUB:
+			{
+				if (TRANSACTION_HAS_UNDO_CHANGES())
+					/* txn writes */
+				{
+					if (TransactionIdIsValid(logicalXidMeta.xid))
+					{
+						if (!RecoveryInProgress())
+						{
+							elog(DEBUG4, "%s Add wal_rollback for oxid %lu logical xid %u top xid %u",
+								 __func__, get_current_oxid_if_any(), get_current_logical_xid_if_any(), GetTopTransactionIdIfAny());
+						}
+
+						/* setup_prev_logical_xid_meta(); */
+					}
+				}
 
 				break;
 			}
+
 		default:
 			break;
 	}
@@ -1244,17 +1302,7 @@ get_current_oxid(void)
 		}
 		else
 		{
-			logicalXidMeta.xid = acquire_logical_xid(&logicalXidMeta.useHeap);
-			if (logicalXidMeta.useHeap)
-			{
-				TransactionId heapXid;
-
-				/* top txn */
-				heapXid = GetCurrentTransactionIdIfAny();
-
-				elog(DEBUG4, "SWITCH_LOGICAL_XID H2O heap xid %u -> oriole xid %u", heapXid, logicalXidMeta.xid);
-				add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
-			}
+			logicalXidMeta.xid = acquire_logical_xid_wrapper(&logicalXidMeta.useHeap);
 		}
 	}
 
@@ -1315,14 +1363,24 @@ get_current_logical_xid(void)
 	TransactionId heapXid;
 
 	heapXid = GetCurrentTransactionIdIfAny();
-
-	if (TransactionIdIsValid(heapXid) &&
-		TransactionIdIsValid(logicalXidMeta.xid) &&
-		!logicalXidMeta.useHeap &&
-		heapXid != logicalXidMeta.xid)
+	if (TransactionIdIsValid(heapXid))
 	{
-		elog(DEBUG4, "%s SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u", __func__, heapXid, logicalXidMeta.xid);
-		add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
+		if (TransactionIdIsValid(heapXid) &&
+			TransactionIdIsValid(logicalXidMeta.xid) &&
+			!logicalXidMeta.useHeap)
+		{
+			elog(DEBUG4, "[%s] SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u", __func__, heapXid, logicalXidMeta.xid);
+			add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
+		}
+	}
+	else
+	{
+		heapXid = GetTopTransactionIdIfAny();
+		if (TransactionIdIsValid(heapXid) && TransactionIdIsValid(logicalXidMeta.xid))
+		{
+			elog(DEBUG4, "[%s] SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u", __func__, heapXid, logicalXidMeta.xid);
+			add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
+		}
 	}
 
 	return logicalXidMeta.xid;

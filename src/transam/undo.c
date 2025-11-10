@@ -1991,16 +1991,18 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 	switch (event)
 	{
 		case SUBXACT_EVENT_START_SUB:
-			if (have_retained_undo_location())
+
+			if (TRANSACTION_HAS_UNDO_CHANGES()) // txn writes
 			{
 				(void) get_current_oxid();
 				add_subxact_undo_item(parentSubid);
-				prentLogicalXid = get_current_logical_xid();
+				prentLogicalXid = GetTopTransactionId();
 				assign_subtransaction_logical_xid();
 				add_savepoint_wal_record(parentSubid, prentLogicalXid);
 				if (minParentSubId == InvalidSubTransactionId)
 					minParentSubId = parentSubid;
 			}
+
 			break;
 		case SUBXACT_EVENT_COMMIT_SUB:
 			if (parentSubid >= minParentSubId && minParentSubId != InvalidSubTransactionId)
@@ -2010,13 +2012,22 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 			if (parentSubid < minParentSubId || minParentSubId == InvalidSubTransactionId)
 				parentSubid = InvalidSubTransactionId;
 
-			if (have_retained_undo_location())
+			if (TRANSACTION_HAS_UNDO_CHANGES()) // txn writes
 			{
 				(void) get_current_oxid();
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					rollback_to_savepoint((UndoLogType) i, UndoStackFull,
 										  parentSubid, true);
-				add_rollback_to_savepoint_wal_record(parentSubid);
+
+				if (TransactionIdIsValid(get_current_logical_xid_if_any()))
+				{
+					if (!RecoveryInProgress())
+					{
+						add_rollback_to_savepoint_wal_record(parentSubid);
+
+						setup_prev_logical_xid_meta();
+					}
+				}
 
 				/*
 				 * It might happen that we've released some row-level locks.
