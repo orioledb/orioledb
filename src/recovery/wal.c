@@ -141,28 +141,30 @@ wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid *xmin, CommitSe
 
 /* Parser for WAL_REC_RELATION */
 Pointer
-wal_parse_rec_relation(Pointer ptr, uint8 *treeType, Oid *datoid, Oid *reloid, Oid *relnode)
+wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids)
 {
 	Assert(ptr);
+	Assert(oids);
 
 	PARSE(ptr, treeType);
-	PARSE(ptr, datoid);
-	PARSE(ptr, reloid);
-	PARSE(ptr, relnode);
+	PARSE(ptr, &oids->datoid);
+	PARSE(ptr, &oids->reloid);
+	PARSE(ptr, &oids->relnode);
 
 	return ptr;
 }
 
 /* Parser for WAL_REC_O_TABLES_META_UNLOCK */
 Pointer
-wal_parse_rec_o_tables_meta_unlock(Pointer ptr, Oid *datoid, Oid *reloid, Oid *old_relnode, Oid *new_relnode)
+wal_parse_rec_o_tables_meta_unlock(Pointer ptr, ORelOids *oids, Oid *old_relnode)
 {
 	Assert(ptr);
+	Assert(oids);
 
-	PARSE(ptr, datoid);
-	PARSE(ptr, reloid);
+	PARSE(ptr, &oids->datoid);
+	PARSE(ptr, &oids->reloid);
 	PARSE(ptr, old_relnode);
-	PARSE(ptr, new_relnode);
+	PARSE(ptr, &oids->relnode);
 
 	return ptr;
 }
@@ -195,13 +197,14 @@ wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid, 
 
 /* Parser for WAL_REC_TRUNCATE */
 Pointer
-wal_parse_rec_truncate(Pointer ptr, Oid *datoid, Oid *reloid, Oid *relnode)
+wal_parse_rec_truncate(Pointer ptr, ORelOids *oids)
 {
 	Assert(ptr);
+	Assert(oids);
 
-	PARSE(ptr, datoid);
-	PARSE(ptr, reloid);
-	PARSE(ptr, relnode);
+	PARSE(ptr, &oids->datoid);
+	PARSE(ptr, &oids->reloid);
+	PARSE(ptr, &oids->relnode);
 
 	return ptr;
 }

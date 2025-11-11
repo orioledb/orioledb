@@ -746,7 +746,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			int			sys_tree_num = -1;
 			uint8		treeType = 0;
 
-			ptr = WAL_PARSE_REC_RELATION(ptr, treeType, cur_oids);
+			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids);
 
 			ix_type = treeType;
 
@@ -828,7 +828,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			ORelOids	oids;
 			Oid			oldRelnode;
 
-			ptr = WAL_PARSE_REC_O_TABLES_META_UNLOCK(ptr, oids, oldRelnode);
+			ptr = wal_parse_rec_o_tables_meta_unlock(ptr, &oids, &oldRelnode);
 
 			/* Skip */
 		}
@@ -836,7 +836,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		{
 			ORelOids	oids;
 
-			ptr = WAL_PARSE_REC_TRUNCATE(ptr, oids);
+			ptr = wal_parse_rec_truncate(ptr, &oids);
 
 			/* Skip */
 		}

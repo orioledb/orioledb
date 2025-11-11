@@ -195,16 +195,10 @@ extern Pointer wal_parse_rec_finish(Pointer ptr, OXid *xmin, CommitSeqNo *csn);
 extern Pointer wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid *xmin, CommitSeqNo *csn);
 
 /* Parser for WAL_REC_RELATION */
-extern Pointer wal_parse_rec_relation(Pointer ptr, uint8 *treeType, Oid *datoid, Oid *reloid, Oid *relnode);
-
-#define WAL_PARSE_REC_RELATION(ptr, treeType, oids) \
-	wal_parse_rec_relation(ptr, &treeType, &oids.datoid, &oids.reloid, &oids.relnode)
+extern Pointer wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids);
 
 /* Parser for WAL_REC_O_TABLES_META_UNLOCK */
-extern Pointer wal_parse_rec_o_tables_meta_unlock(Pointer ptr, Oid *datoid, Oid *reloid, Oid *old_relnode, Oid *new_relnode);
-
-#define WAL_PARSE_REC_O_TABLES_META_UNLOCK(ptr, oids, old_relnode) \
-	wal_parse_rec_o_tables_meta_unlock(ptr, &oids.datoid, &oids.reloid, &old_relnode, &oids.relnode)
+extern Pointer wal_parse_rec_o_tables_meta_unlock(Pointer ptr, ORelOids *oids, Oid *old_relnode);
 
 /* Parser for WAL_REC_SAVEPOINT */
 extern Pointer wal_parse_rec_savepoint(Pointer ptr, SubTransactionId *parentSubid, TransactionId *logicalXid, TransactionId *parentLogicalXid);
@@ -213,10 +207,7 @@ extern Pointer wal_parse_rec_savepoint(Pointer ptr, SubTransactionId *parentSubi
 extern Pointer wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid, OXid *xmin, CommitSeqNo *csn);
 
 /* Parser for WAL_REC_TRUNCATE */
-extern Pointer wal_parse_rec_truncate(Pointer ptr, Oid *datoid, Oid *reloid, Oid *relnode);
-
-#define WAL_PARSE_REC_TRUNCATE(ptr, oids) \
-	wal_parse_rec_truncate(ptr, &oids.datoid, &oids.reloid, &oids.relnode)
+extern Pointer wal_parse_rec_truncate(Pointer ptr, ORelOids *oids);
 
 /* Parser for WAL_REC_BRIDGE_ERASE */
 extern Pointer wal_parse_rec_bridge_erase(Pointer ptr, ItemPointerData *iptr);

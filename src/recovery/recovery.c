@@ -2836,7 +2836,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			uint8		treeType;
 			OIndexType	ix_type;
 
-			ptr = WAL_PARSE_REC_RELATION(ptr, treeType, cur_oids);
+			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids);
 
 			ix_type = treeType;
 
@@ -2887,7 +2887,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			ORelOids	oids;
 			Oid			oldRelnode;
 
-			ptr = WAL_PARSE_REC_O_TABLES_META_UNLOCK(ptr, oids, oldRelnode);
+			ptr = wal_parse_rec_o_tables_meta_unlock(ptr, &oids, &oldRelnode);
 
 			if (!single)
 				workers_synchronize(xlogPtr, true);
@@ -2905,7 +2905,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		{
 			ORelOids	oids;
 
-			ptr = WAL_PARSE_REC_TRUNCATE(ptr, oids);
+			ptr = wal_parse_rec_truncate(ptr, &oids);
 
 			if (!single)
 				workers_synchronize(xlogPtr, true);
