@@ -196,7 +196,7 @@ class LogicalTest(BaseTest):
 					    subscriber.execute(
 					        'SELECT * FROM o_test2 ORDER BY id'), [])
 
-	def test_logical_subscription_ctid(self):
+	def test_logical_subscription_toastable_insert(self):
 		with self.node as publisher:
 			publisher.start()
 
@@ -414,6 +414,9 @@ class LogicalTest(BaseTest):
 					CREATE EXTENSION IF NOT EXISTS orioledb;
 					CREATE TABLE o_test (id int PRIMARY KEY, bid int, junk text
 					) USING orioledb;
+					CREATE TABLE o_test_ctid (id int, bid int, junk text
+					) USING orioledb;
+					ALTER TABLE o_test_ctid REPLICA IDENTITY FULL;
 					CREATE TABLE o_test_secondary (id int PRIMARY KEY, bid int, junk text
 					) USING orioledb;
 					CREATE INDEX ON o_test_secondary (bid);
@@ -422,7 +425,7 @@ class LogicalTest(BaseTest):
 				subscriber.safe_psql(create_sql)
 
 				pub = publisher.publish('test_pub',
-				                        tables=['o_test', 'o_test_secondary'])
+				                        tables=['o_test', 'o_test_ctid', 'o_test_secondary'])
 				sub = subscriber.subscribe(pub, 'test_sub')
 
 				with publisher.connect() as con1:
@@ -431,15 +434,21 @@ class LogicalTest(BaseTest):
 						    "INSERT INTO o_test (id, bid, junk) VALUES (1, 1, repeat(pi()::text,20000));"
 						)
 						con1.execute(
+						    "INSERT INTO o_test_ctid (id, bid, junk) VALUES (1, 1, repeat(pi()::text,20000));"
+						)
+						con1.execute(
 						    "INSERT INTO o_test_secondary (id, bid, junk) VALUES (1, 1, repeat(pi()::text,20000));"
 						)
 						con2.execute(
 						    "INSERT INTO o_test (id, bid) VALUES (2, 2);")
 						con2.execute(
+						    "INSERT INTO o_test_ctid (id, bid) VALUES (2, 2);")
+						con2.execute(
 						    "INSERT INTO o_test_secondary (id, bid) VALUES (2, 2);"
 						)
 
 						con1.execute("UPDATE o_test SET id = 6 WHERE id = 1;")
+						con1.execute("UPDATE o_test_ctid SET id = 6 WHERE id = 1;")
 						con1.execute(
 						    "UPDATE o_test_secondary SET id = 6 WHERE id = 1;")
 
@@ -449,6 +458,10 @@ class LogicalTest(BaseTest):
 					self.assertListEqual(
 					    publisher.execute(
 					        'SELECT id, bid FROM o_test ORDER BY id'),
+					    [(2, 2), (6, 1)])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT id, bid FROM o_test_ctid ORDER BY id'),
 					    [(2, 2), (6, 1)])
 					self.assertListEqual(
 					    publisher.execute(
@@ -464,11 +477,168 @@ class LogicalTest(BaseTest):
 					    [(2, 2), (6, 1)])
 					self.assertListEqual(
 					    subscriber.execute(
+					        'SELECT id, bid FROM o_test_ctid ORDER BY id'),
+					    [(2, 2), (6, 1)])
+					self.assertListEqual(
+					    subscriber.execute(
 					        'SELECT id, bid FROM o_test_secondary ORDER BY id'
 					    ), [(2, 2), (6, 1)])
 
-	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
-	                 "'test_decoding' is not installed")
+	def test_logical_subscription_toastable_update(self):
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+
+			with subscriber.start() as subscriber:
+				create_sql = """
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE o_test (
+			                        i   int PRIMARY KEY,
+						data1 text,
+						data2 text,
+			                        data3 text
+					) USING orioledb;
+					CREATE TABLE o_test_ctid (
+			                        i   int,
+						data1 text,
+						data2 text,
+			                        data3 text
+					) USING orioledb;
+					ALTER TABLE o_test_ctid REPLICA IDENTITY FULL;
+					CREATE TABLE o_test_secondary (
+			                        i   int PRIMARY KEY,
+						data1 text,
+						data2 text,
+			                        data3 text
+					) USING orioledb;
+					CREATE INDEX ON o_test_secondary (data2);
+					CREATE TABLE o_test_ctid_secondary (
+			                        i   int,
+						data1 text,
+						data2 text,
+			                        data3 text
+					) USING orioledb;
+					ALTER TABLE o_test_ctid_secondary REPLICA IDENTITY FULL;
+					CREATE INDEX ON o_test_secondary (data2);
+				"""
+				publisher.safe_psql(create_sql)
+				subscriber.safe_psql(create_sql)
+
+				pub = publisher.publish('test_pub',
+				                        tables=[
+				                            'o_test',
+                                            'o_test_ctid',
+				                            'o_test_secondary',
+				                            'o_test_ctid_secondary',
+				                        ])
+				sub = subscriber.subscribe(pub, 'test_sub')
+
+				with publisher.connect() as con1:
+					with publisher.connect() as con2:
+						con1.execute(
+						    "INSERT INTO o_test VALUES(1, 'foofoo','barbar', 'aaaaaa');"
+						)
+						con2.execute(
+						    "INSERT INTO o_test VALUES(2, 'mmm','nnn', 'ooo');"
+						)
+						con1.execute(
+						    "INSERT INTO o_test_ctid VALUES(1, 'foofoo','barbar', 'aaaaaa');"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_ctid VALUES(2, 'mmm','nnn', 'ooo');"
+						)
+						con1.execute(
+						    "INSERT INTO o_test_secondary VALUES(1, 'foofoo','barbar', 'aaaaaa');"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_secondary VALUES(2, 'mmm','nnn', 'ooo');"
+						)
+						con1.execute(
+						    "INSERT INTO o_test_ctid_secondary VALUES(1, 'foofoo','barbar', 'aaaaaa');"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_ctid_secondary VALUES(2, 'mmm','nnn', 'ooo');"
+						)
+						con1.commit()
+						con2.commit()
+
+				with publisher.connect() as con1:
+					with publisher.connect() as con2:
+						con1.execute(
+						    "UPDATE o_test_ctid SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test_ctid SET data2 = 'ppp' where data2 = 'nnn';"
+						)
+						con1.execute(
+						    "UPDATE o_test SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test SET data2 = 'ppp' where data2 = 'nnn';"
+						)
+						con1.execute(
+						    "UPDATE o_test_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test_secondary SET data2 = 'ppp' where data2 = 'nnn';"
+						)
+						con1.execute(
+						    "UPDATE o_test_ctid_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test_ctid_secondary SET data2 = 'ppp' where data2 = 'nnn';"
+						)
+						con1.commit()
+						con2.commit()
+
+#					publisher.safe_psql("CHECKPOINT;")
+#					subscriber.execute("SELECT orioledb_get_current_oxid();")
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test_ctid ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test_secondary ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test_ctid_secondary ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
+
+					# wait until changes apply on subscriber and check them
+					sub.catchup()
+					# sub.poll_query_until("SELECT orioledb_recovery_synchronized();", expected=True)
+#					subscriber.safe_psql("CHECKPOINT;")
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_ctid ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_secondary ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_ctid_secondary ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
 
 	# Update with non-changed pkey of by-reference type
 	def test_logical_subscription_byref_pkey_update(self):
@@ -611,6 +781,10 @@ class LogicalTest(BaseTest):
 					    ), [('foofoo', 'barbar', '12312312312312312312', 1),
 					        ('mmm', 'nnn', '24624624624624624624', 2)])
 
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+
 	def test_recvlogical_and_drop_database(self):
 		node = self.node
 		node.start()
@@ -647,3 +821,5 @@ class LogicalTest(BaseTest):
 
 		pg_recvlogical.terminate()
 		node.stop()
+
+
