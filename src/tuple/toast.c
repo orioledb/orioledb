@@ -446,7 +446,7 @@ generic_toast_insert_optional_wal(ToastAPI *api, void *key, Pointer data,
 
 		if (desc->storageType == BTreeStoragePersistence && wal)
 			add_modify_wal_record(WAL_REC_INSERT, desc, tup,
-								  o_btree_len(desc, tup, OTupleLength));
+								  o_btree_len(desc, tup, OTupleLength), REPLICA_IDENTITY_DEFAULT);
 
 		pfree(tup.data);
 
@@ -588,7 +588,7 @@ generic_toast_update_optional_wal(ToastAPI *api, void *key, Pointer data,
 			rec_type = (result == OBTreeModifyResultUpdated) ? WAL_REC_UPDATE :
 				WAL_REC_INSERT;
 			add_modify_wal_record(rec_type, desc, tup,
-								  o_btree_len(desc, tup, OTupleLength));
+								  o_btree_len(desc, tup, OTupleLength), REPLICA_IDENTITY_DEFAULT);
 		}
 
 		offset += length;
@@ -675,14 +675,14 @@ generic_toast_delete_optional_wal(ToastAPI *api, void *key, OXid oxid,
 				walKey = o_btree_tuple_make_key(desc, tuple, NULL, true,
 												&key_allocated);
 				add_modify_wal_record(WAL_REC_DELETE, desc, walKey,
-									  o_btree_len(desc, walKey, OKeyLength));
+									  o_btree_len(desc, walKey, OKeyLength), REPLICA_IDENTITY_DEFAULT);
 				if (key_allocated)
 					pfree(walKey.data);
 			}
 			else
 			{
 				add_modify_wal_record(WAL_REC_DELETE, desc, tuple,
-									  o_btree_len(desc, tuple, OTupleLength));
+									  o_btree_len(desc, tuple, OTupleLength), REPLICA_IDENTITY_DEFAULT);
 			}
 		}
 

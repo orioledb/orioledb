@@ -134,7 +134,8 @@ static void o_find_collation_dependencies(Oid colloid);
 static void redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_tablespace);
 
 static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
-static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
+static Oid	o_createdb(ParseState *pstate, const CreatedbStmt * stmt);
+static void o_validate_replica_identity(Relation rel, ReplicaIdentityStmt * stmt);
 
 void
 orioledb_setup_ddl_hooks(void)
@@ -956,6 +957,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_DisableRule:
 						case AT_SetTableSpace:
 						case AT_SetStorage:
+						case AT_ReplicaIdentity:
 							break;
 						default:
 							ereport(ERROR,
@@ -970,6 +972,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 					{
 						case AT_AlterColumnType:
 							o_alter_column_type(cmd, queryString, rel);
+							break;
+						case AT_ReplicaIdentity:
+							o_validate_replica_identity(rel, (ReplicaIdentityStmt *) cmd->def);
 							break;
 						default:
 							break;
@@ -1397,6 +1402,29 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	}
 
 	free_parsestate(pstate);
+}
+
+static void
+o_validate_replica_identity(Relation rel, ReplicaIdentityStmt * stmt)
+{
+	elog(LOG, "Current replident %c, setting replident %c", rel->rd_rel->relreplident, stmt->identity_type);
+
+	if (stmt->identity_type == REPLICA_IDENTITY_DEFAULT)
+	{
+		return;
+	}
+	else if (stmt->identity_type == REPLICA_IDENTITY_FULL)
+	{
+		return;
+	}
+	else if (stmt->identity_type == REPLICA_IDENTITY_NOTHING)
+	{
+		elog(ERROR, "replica identity type NOTHING is not supported for OrioleDB tables yet");
+	}
+	else if (stmt->identity_type == REPLICA_IDENTITY_INDEX)
+	{
+		elog(ERROR, "replica identity type INDEX is not supported for OrioleDB tables yet");
+	}
 }
 
 static void

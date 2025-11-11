@@ -222,7 +222,7 @@ apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
 
 	if (primary->desc.storageType == BTreeStoragePersistence)
 	{
-		o_wal_insert(&descr->bridge->desc, tuple);
+		o_wal_insert(&descr->bridge->desc, tuple, REPLICA_IDENTITY_DEFAULT);
 		flush_local_wal(false);
 	}
 
@@ -256,7 +256,9 @@ delete_old_bridge_index_ctid(OTableDescr *descr, Relation relation,
 
 		keyTuple.formatFlags = O_TUPLE_FLAGS_FIXED_FORMAT;
 		keyTuple.data = (Pointer) &bridge_oslot->bridge_ctid;
-		o_wal_delete_key(&descr->bridge->desc, keyTuple);
+
+		/* o_wal_delete_key can be used as long as bridge index can't have replica identity */
+		o_wal_delete_key(&descr->bridge->desc, keyTuple, true);
 		flush_local_wal(false);
 	}
 
@@ -281,6 +283,8 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		.needsUndoForSelfCreated = false,
 		.arg = slot
 	};
+
+	CheckCmdReplicaIdentity(relation, CMD_INSERT);
 
 	if (slot->tts_ops != descr->newTuple->tts_ops ||
 		(((OTableSlot *) slot)->descr != NULL &&
@@ -327,7 +331,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 	/* Tuple might be changed in the callback */
 	tup = tts_orioledb_form_tuple(slot, descr);
 	if (primary->desc.storageType == BTreeStoragePersistence)
-		o_wal_insert(&primary->desc, tup);
+		o_wal_insert(&primary->desc, tup, relation->rd_rel->relreplident);
 
 	return slot;
 }
@@ -523,7 +527,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 
 			tup = tts_orioledb_form_tuple(slot, descr);
 			if (primary->storageType == BTreeStoragePersistence)
-				o_wal_insert(primary, tup);
+				o_wal_insert(primary, tup, rel->rd_rel->relreplident);
 			return slot;
 		}
 
@@ -674,6 +678,8 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 	OTuple		newTup;
 	OIndexDescr *primary = GET_PRIMARY(descr);
 	bool		touched_indices = false;
+
+	CheckCmdReplicaIdentity(rel, CMD_UPDATE);
 
 	if (slot->tts_ops != descr->newTuple->tts_ops)
 	{
@@ -844,15 +850,13 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 
 	if (mres.success && mres.oldTuple != NULL)
 	{
+		oldSlot = mres.oldTuple;
+
 		if (mres.action == BTreeOperationUpdate)
 		{
-			oldSlot = mres.oldTuple;
 			if (touched_indices)
-			{
-				OTableSlot *oslot = (OTableSlot *) oldSlot;
+				delete_old_bridge_index_ctid(descr, rel, &((OTableSlot *) oldSlot)->bridge_ctid, csn);
 
-				delete_old_bridge_index_ctid(descr, rel, &oslot->bridge_ctid, csn);
-			}
 			mres.failedIxNum = TOASTIndexNumber;
 			mres.success = tts_orioledb_update_toast_values(oldSlot, slot, descr,
 															oxid, csn);
@@ -863,19 +867,14 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 				OTuple		final_tup = tts_orioledb_form_tuple(slot, descr);
 
 				elog(DEBUG3, "CALL o_wal_update");
-
-				o_wal_update(&primary->desc, final_tup);
+				o_wal_update(&primary->desc, final_tup, ((OTableSlot *) oldSlot)->tuple, rel->rd_rel->relreplident);
 			}
 		}
 		else if (mres.action == BTreeOperationDelete)
 		{
-			oldSlot = mres.oldTuple;
 			if (descr->bridge)
-			{
-				OTableSlot *oslot = (OTableSlot *) oldSlot;
+				delete_old_bridge_index_ctid(descr, rel, &((OTableSlot *) oldSlot)->bridge_ctid, csn);
 
-				delete_old_bridge_index_ctid(descr, rel, &oslot->bridge_ctid, csn);
-			}
 			/* reinsert TOAST value */
 			mres.failedIxNum = TOASTIndexNumber;
 			/* insert new value in TOAST table */
@@ -889,10 +888,9 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			if (mres.success &&
 				primary->desc.storageType == BTreeStoragePersistence)
 			{
-				OTuple		old_tup = ((OTableSlot *) oldSlot)->tuple,
-							final_tup = tts_orioledb_form_tuple(slot, descr);
+				OTuple		final_tup = tts_orioledb_form_tuple(slot, descr);
 
-				o_wal_reinsert(&primary->desc, old_tup, final_tup);
+				o_wal_reinsert(&primary->desc, ((OTableSlot *) oldSlot)->tuple, final_tup, rel->rd_rel->relreplident);
 			}
 		}
 		else
@@ -915,6 +913,8 @@ o_tbl_delete(Relation rel, OTableDescr *descr, OBTreeKeyBound *primary_key,
 			 BTreeLocationHint *hint, OModifyCallbackArg *arg)
 {
 	OTableModifyResult result;
+
+	CheckCmdReplicaIdentity(rel, CMD_DELETE);
 
 	result = o_tbl_indices_delete(descr, primary_key, oxid,
 								  csn, hint, arg);
@@ -964,7 +964,7 @@ o_tbl_delete(Relation rel, OTableDescr *descr, OBTreeKeyBound *primary_key,
 			primary_tuple = ((OTableSlot *) result.oldTuple)->tuple;
 
 			if (primary->desc.storageType == BTreeStoragePersistence)
-				o_wal_delete(&primary->desc, primary_tuple);
+				o_wal_delete(&primary->desc, primary_tuple, rel->rd_rel->relreplident);
 		}
 		else
 		{
