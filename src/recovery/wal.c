@@ -41,7 +41,8 @@ static void add_rel_wal_record(ORelOids oids, OIndexType type);
 static void flush_local_wal_if_needed(int required_length);
 static inline void add_local_modify(uint8 record_type, OTuple record, OffsetNumber length, OTuple record2, OffsetNumber length2);
 static void add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
-										   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2);
+										   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2, char relreplident);
+static void add_relreplident_wal_record(char relreplident);
 
 #define XID_RESERVED_LENGTH ((local_wal_contains_xid) ? 0 : sizeof(WALRecXid))
 
@@ -95,25 +96,26 @@ check_wal_container_version(Pointer *ptr)
 
 void
 add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
-					  OTuple tuple, OffsetNumber length)
+					  OTuple tuple, OffsetNumber length, char relreplident)
 {
 	OTuple		nulltup;
 
 	O_TUPLE_SET_NULL(nulltup);
-	add_modify_wal_record_extended(rec_type, desc, tuple, length, nulltup, 0);
+	add_modify_wal_record_extended(rec_type, desc, tuple, length, nulltup, 0, relreplident);
 }
 
 /*
- * Extended version of add_modify_wal_record for WAL records that can accommodate two tuples. Now the only user of this is
- * REINSERT action. It will also be needed for WAL logging with REPLICA IDENTITY FULL.
+ * Extended version of add_modify_wal_record for WAL records that can accommodate two tuples.
+ * This is used for UPDATE/DELETE with REPLICA IDENTITY FULL and for REINSERT
  */
 static void
 add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
-							   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2)
+							   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2, char relreplident)
 {
 	int			required_length;
 	ORelOids	oids = desc->oids;
 	OIndexType	type = desc->type;
+	bool 			write_two_tuples;
 
 	/* Do not write WAL during recovery */
 	if (OXidIsValid(recovery_oxid))
@@ -131,19 +133,26 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
 	Assert(!O_TUPLE_IS_NULL(tuple));
 
-	if (length2 == 0)
+	write_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
+
+	if (!write_two_tuples)
 	{
-		Assert(O_TUPLE_IS_NULL(tuple2));
+		Assert (length2 == 0);
+		Assert (O_TUPLE_IS_NULL(tuple2));
 		required_length = sizeof(WALRecModify1) + length;
 	}
 	else
 	{
+		Assert(length2 > 0);
 		Assert(!O_TUPLE_IS_NULL(tuple2));
 		required_length = sizeof(WALRecModify2) + length + length2;
 	}
 
 	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
 		required_length += sizeof(WALRecRelation);
+
+	if (relreplident != REPLICA_IDENTITY_DEFAULT)
+		required_length += sizeof(WALRecRelReplident);
 
 	flush_local_wal_if_needed(required_length);
 	Assert(local_wal_buffer_offset + required_length + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
@@ -152,7 +161,11 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	add_xid_wal_record_if_needed();
 
 	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
+	{
 		add_rel_wal_record(oids, type);
+		if (relreplident != REPLICA_IDENTITY_DEFAULT)
+			add_relreplident_wal_record(relreplident);
+	}
 
 	add_local_modify(rec_type, tuple, length, tuple2, length2);
 }
@@ -212,31 +225,12 @@ add_local_modify(uint8 record_type, OTuple record1, OffsetNumber length1, OTuple
 	Assert(!O_TUPLE_IS_NULL(record1));
 	Assert(length1);
 
-	if (record_type != WAL_REC_REINSERT)
-	{
-		/* One-tuple modify record */
-		WALRecModify1 *wal_rec;
-
-		Assert(local_wal_buffer_offset + sizeof(*wal_rec) + length1 + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
-		Assert(O_TUPLE_IS_NULL(record2));
-		Assert(length2 == 0);
-
-		wal_rec = (WALRecModify1 *) (&local_wal_buffer[local_wal_buffer_offset]);
-		wal_rec->recType = record_type;
-		wal_rec->tupleFormatFlags = record1.formatFlags;
-		memcpy(wal_rec->length, &length1, sizeof(OffsetNumber));
-		local_wal_buffer_offset += sizeof(*wal_rec);
-
-		memcpy(&local_wal_buffer[local_wal_buffer_offset], record1.data, length1);
-		local_wal_buffer_offset += length1;
-	}
-	else
+	if (!O_TUPLE_IS_NULL(record2))
 	{
 		/* Two-tuple modify record */
 		WALRecModify2 *wal_rec;
 
 		Assert(length2);
-		Assert(!O_TUPLE_IS_NULL(record2));
 		Assert(local_wal_buffer_offset + sizeof(*wal_rec) + length1 + length2 + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 		wal_rec = (WALRecModify2 *) (&local_wal_buffer[local_wal_buffer_offset]);
 		wal_rec->recType = record_type;
@@ -251,6 +245,24 @@ add_local_modify(uint8 record_type, OTuple record1, OffsetNumber length1, OTuple
 		memcpy(&local_wal_buffer[local_wal_buffer_offset], record2.data, length2);
 		local_wal_buffer_offset += length2;
 	}
+	else
+	{
+		/* One-tuple modify record */
+		WALRecModify1 *wal_rec;
+
+		Assert(local_wal_buffer_offset + sizeof(*wal_rec) + length1 + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+		Assert(length2 == 0);
+
+		wal_rec = (WALRecModify1 *) (&local_wal_buffer[local_wal_buffer_offset]);
+		wal_rec->recType = record_type;
+		wal_rec->tupleFormatFlags = record1.formatFlags;
+		memcpy(wal_rec->length, &length1, sizeof(OffsetNumber));
+		local_wal_buffer_offset += sizeof(*wal_rec);
+
+		memcpy(&local_wal_buffer[local_wal_buffer_offset], record1.data, length1);
+		local_wal_buffer_offset += length1;
+	}
+
 	local_wal_has_material_changes = true;
 }
 
@@ -464,6 +476,20 @@ add_xid_wal_record_if_needed(void)
 }
 
 static void
+add_relreplident_wal_record(char relreplident)
+{
+	WALRecRelReplident *rec = (WALRecRelReplident *) (&local_wal_buffer[local_wal_buffer_offset]);
+
+	Assert(!is_recovery_process());
+	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+
+	rec->recType = WAL_REC_RELREPLIDENT;
+	rec->relreplident = relreplident;
+
+	local_wal_buffer_offset += sizeof(*rec);
+}
+
+static void
 add_rel_wal_record(ORelOids oids, OIndexType type)
 {
 	WALRecRelation *rec = (WALRecRelation *) (&local_wal_buffer[local_wal_buffer_offset]);
@@ -632,14 +658,14 @@ log_logical_wal_container(Pointer ptr, int length)
  * Makes WAL insert record.
  */
 void
-o_wal_insert(BTreeDescr *desc, OTuple tuple)
+o_wal_insert(BTreeDescr *desc, OTuple tuple, char relreplident)
 {
 	OTuple		wal_record;
 	bool		call_pfree;
 	int			size;
 
 	wal_record = recovery_rec_insert(desc, tuple, &call_pfree, &size);
-	add_modify_wal_record(WAL_REC_INSERT, desc, wal_record, size);
+	add_modify_wal_record(WAL_REC_INSERT, desc, wal_record, size, relreplident);
 	if (call_pfree)
 		pfree(wal_record.data);
 }
@@ -648,31 +674,52 @@ o_wal_insert(BTreeDescr *desc, OTuple tuple)
  * Makes WAL update record.
  */
 void
-o_wal_update(BTreeDescr *desc, OTuple tuple)
+o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident)
 {
-	OTuple		wal_record;
-	bool		call_pfree;
-	int			size;
+	OTuple		wal_record1;
+	OTuple		wal_record2;
+	bool		call_pfree1;
+	bool		call_pfree2 = false;
+	int			size1;
+	int			size2;
 
 	elog(DEBUG3, "o_wal_update");
-	wal_record = recovery_rec_update(desc, tuple, &call_pfree, &size);
-	add_modify_wal_record(WAL_REC_UPDATE, desc, wal_record, size);
-	if (call_pfree)
-		pfree(wal_record.data);
+
+	wal_record1 = recovery_rec_update(desc, tuple, &call_pfree1, &size1);
+
+	/*
+	 * For REPLICA_IDENTITY_FULL include new and old tuples into
+	 * WAL_REC_UPDATE
+	 */
+	if (relreplident != REPLICA_IDENTITY_FULL)
+	{
+		add_modify_wal_record(WAL_REC_UPDATE, desc, wal_record1, size1, relreplident);
+	}
+	else
+	{
+		wal_record2 = recovery_rec_update(desc, oldtuple, &call_pfree2, &size2);
+		add_modify_wal_record_extended(WAL_REC_UPDATE, desc, wal_record1, size1, wal_record2, size2, relreplident);
+		if (call_pfree2)
+			pfree(wal_record2.data);
+	}
+
+	if (call_pfree1)
+		pfree(wal_record1.data);
 }
 
 /*
  * Makes WAL delete record.
  */
 void
-o_wal_delete(BTreeDescr *desc, OTuple tuple)
+o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident)
 {
 	OTuple		wal_record;
 	bool		call_pfree;
 	int			size;
 
-	wal_record = recovery_rec_delete(desc, tuple, &call_pfree, &size);
-	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size);
+	wal_record = recovery_rec_delete(desc, tuple, &call_pfree, &size, relreplident);
+	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, relreplident);
+
 	if (call_pfree)
 		pfree(wal_record.data);
 }
@@ -681,7 +728,7 @@ o_wal_delete(BTreeDescr *desc, OTuple tuple)
  * Makes WAL delete+insert record.
  */
 void
-o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple)
+o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relreplident)
 {
 	OTuple		oldrecord;
 	OTuple		newrecord;
@@ -690,10 +737,9 @@ o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple)
 	int			newsize;
 	int			oldsize;
 
-	/* Oldtuple could be squished down to a key */
-	oldrecord = recovery_rec_delete(desc, oldtuple, &old_call_pfree, &oldsize);
+	oldrecord = recovery_rec_delete(desc, oldtuple, &old_call_pfree, &oldsize, relreplident);
 	newrecord = recovery_rec_insert(desc, newtuple, &new_call_pfree, &newsize);
-	add_modify_wal_record_extended(WAL_REC_REINSERT, desc, newrecord, newsize, oldrecord, oldsize);
+	add_modify_wal_record_extended(WAL_REC_REINSERT, desc, newrecord, newsize, oldrecord, oldsize, relreplident);
 	if (old_call_pfree)
 	{
 		pfree(oldrecord.data);
@@ -704,15 +750,18 @@ o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple)
 	}
 }
 
+/* Could be used only for system trees and bridge trees that are not replicated logically */
 void
-o_wal_delete_key(BTreeDescr *desc, OTuple key)
+o_wal_delete_key(BTreeDescr *desc, OTuple key, bool is_bridge_index)
 {
 	OTuple		wal_record;
 	bool		call_pfree;
 	int			size;
 
+	Assert(IS_SYS_TREE_OIDS(desc->oids) || is_bridge_index);
 	wal_record = recovery_rec_delete_key(desc, key, &call_pfree, &size);
-	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size);
+	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, REPLICA_IDENTITY_DEFAULT);
+
 	if (call_pfree)
 		pfree(wal_record.data);
 }
@@ -754,4 +803,55 @@ void
 set_local_wal_has_material_changes(bool value)
 {
 	local_wal_has_material_changes = value;
+}
+
+/*
+ * Read one or two tuples from modify WAL record.
+ * Two tuples in certain cases: (1) WAL_REC_REINSERT, (2) WAL_REC_UPDATE with REPLICA_IDENTITY_FULL
+ */
+Pointer
+wal_parse_rec_modify(uint8 rec_type, Pointer ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1_out, bool read_two_tuples)
+{
+	OffsetNumber length1;
+	OffsetNumber length2;
+
+	Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
+
+	if (!read_two_tuples)
+	{
+		tuple1->tuple.formatFlags = *ptr;
+		ptr++;
+		memcpy(&length1, ptr, sizeof(OffsetNumber));
+		ptr += sizeof(OffsetNumber);
+
+		Assert(length1 > 0);
+		memcpy(tuple1->fixedData, ptr, length1);
+		ptr += length1;
+		tuple1->tuple.data = tuple1->fixedData;
+		O_TUPLE_SET_NULL(tuple2->tuple);
+	}
+	else
+	{
+		tuple1->tuple.formatFlags = *ptr;
+		ptr++;
+		tuple2->tuple.formatFlags = *ptr;
+		ptr++;
+		memcpy(&length1, ptr, sizeof(OffsetNumber));
+		ptr += sizeof(OffsetNumber);
+		memcpy(&length2, ptr, sizeof(OffsetNumber));
+		ptr += sizeof(OffsetNumber);
+
+		Assert(length1 > 0 && length2 > 0);
+
+		memcpy(tuple1->fixedData, ptr, length1);
+		ptr += length1;
+		tuple1->tuple.data = tuple1->fixedData;
+
+		memcpy(tuple2->fixedData, ptr, length2);
+		ptr += length2;
+		tuple2->tuple.data = tuple2->fixedData;
+	}
+	*length1_out = length1;
+
+	return ptr;
 }

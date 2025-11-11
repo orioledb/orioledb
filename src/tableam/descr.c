@@ -969,7 +969,7 @@ o_drop_shared_root_info(Oid datoid, Oid relnode)
 	key_tuple.formatFlags = 0;
 
 	return o_btree_autonomous_delete(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO),
-									 key_tuple, BTreeKeyNonLeafKey, NULL);
+									 key_tuple, BTreeKeyLeafTuple, NULL);
 }
 
 static OIndexDescr *

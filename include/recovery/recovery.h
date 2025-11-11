@@ -37,7 +37,6 @@ extern void recovery_send_leader_oids(ORelOids oids, OIndexNumber ix_num,
 extern void recovery_send_worker_oids(dsm_handle seg_handle);
 extern void workers_send_finish(bool send_to_idx_pool);
 extern void update_proc_retain_undo_location(int worker_id);
-extern void read_modify_wal_tuples(uint8 rec_type, Pointer *ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1);
 
 static inline bool
 is_recovery_in_progress(void)
@@ -57,7 +56,7 @@ typedef struct BTreeDescr BTreeDescr;
 
 extern OTuple recovery_rec_insert(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size);
 extern OTuple recovery_rec_update(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size);
-extern OTuple recovery_rec_delete(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size);
+extern OTuple recovery_rec_delete(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size, char relreplident);
 extern OTuple recovery_rec_delete_key(BTreeDescr *desc, OTuple key, bool *allocated, int *size);
 
 extern void recovery_cleanup_old_files(uint32 max_chkp_num,
