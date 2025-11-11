@@ -827,7 +827,13 @@ o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 				OBTreeModifyResultUpdated;
 
 			if (result)
-				o_wal_update(desc, tup);
+			{
+				OTuple		nulltup;
+
+				O_TUPLE_SET_NULL(nulltup);
+				Assert(IS_SYS_TREE_OIDS(desc->oids));
+				o_wal_update(desc, tup, nulltup, REPLICA_IDENTITY_DEFAULT);
+			}
 		}
 		PG_CATCH();
 		{

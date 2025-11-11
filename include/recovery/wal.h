@@ -48,6 +48,7 @@
  * in Oriole's sub-part due to incorrect state of the MVCC-historical snapshot.
  */
 #define WAL_REC_SWITCH_LOGICAL_XID	(17)
+#define WAL_REC_RELREPLIDENT		(18)
 
 /*
  * Value has been fixed at the moment of introducing WAL versioning.
@@ -103,6 +104,13 @@ typedef struct
 	uint8		reloid[sizeof(Oid)];
 	uint8		relnode[sizeof(Oid)];
 } WALRecRelation;
+
+typedef struct
+{
+	uint8		recType;
+	uint8		relreplident;
+	uint8		relreplident_ix_oid[sizeof(Oid)];
+} WALRecRelReplident;
 
 typedef struct
 {
@@ -212,6 +220,9 @@ extern Pointer wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid 
 /* Parser for WAL_REC_RELATION */
 extern Pointer wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids);
 
+/* Parser for WAL_REC_RELREPLIDENT */
+extern Pointer wal_parse_rec_relreplident(Pointer ptr, char *relreplident, Oid *relreplident_ix_oid);
+
 /* Parser for WAL_REC_O_TABLES_META_UNLOCK */
 extern Pointer wal_parse_rec_o_tables_meta_unlock(Pointer ptr, ORelOids *oids, Oid *old_relnode);
 
@@ -230,8 +241,11 @@ extern Pointer wal_parse_rec_bridge_erase(Pointer ptr, ItemPointerData *iptr);
 /* Parser for WAL_REC_SWITCH_LOGICAL_XID */
 extern Pointer wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *topXid, TransactionId *subXid);
 
+/* Parser for WAL_REC_INSERT, WAL_REC_UPDATE, WAL_REC_DELETE or WAL_REC_REINSERT */
+extern Pointer wal_parse_rec_modify(Pointer ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1, bool read_two_tuples);
+
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
-								  OTuple tuple, OffsetNumber length);
+								  OTuple tuple, OffsetNumber length, char relreplident);
 extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr);
 extern void add_o_tables_meta_lock_wal_record(void);
 extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);
@@ -250,11 +264,11 @@ extern void wal_rollback(OXid oxid, TransactionId logicalXid,
 						 bool isAutonomous);
 extern XLogRecPtr log_logical_wal_container(Pointer ptr, int length,
 											bool withXactTime);
-extern void o_wal_insert(BTreeDescr *desc, OTuple tuple);
-extern void o_wal_update(BTreeDescr *desc, OTuple tuple);
-extern void o_wal_delete(BTreeDescr *desc, OTuple tuple);
-extern void o_wal_delete_key(BTreeDescr *desc, OTuple key);
-extern void o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple);
+extern void o_wal_insert(BTreeDescr *desc, OTuple tuple, char relreplident);
+extern void o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident);
+extern void o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident);
+extern void o_wal_delete_key(BTreeDescr *desc, OTuple key, bool is_bridge_index);
+extern void o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relreplident);
 extern void add_truncate_wal_record(ORelOids oids);
 extern bool get_local_wal_has_material_changes(void);
 extern void set_local_wal_has_material_changes(bool value);

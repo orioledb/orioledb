@@ -1776,6 +1776,7 @@ replay_erase_bridge_item(OIndexDescr *bridge, ItemPointer iptr)
 	unlock_page(context.items[context.index].blkno);
 }
 
+/* Insert WAL record always stores one tuple, not a key. */
 OTuple
 recovery_rec_insert(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size)
 {
@@ -1784,6 +1785,10 @@ recovery_rec_insert(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size)
 	return tuple;
 }
 
+/*
+ *  Update WAL record always stores tuples, not keys. For REPLICA_IDENTITY_FULL
+ *  new and old tuples, otherwise only new tuple.
+ */
 OTuple
 recovery_rec_update(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size)
 {
@@ -1792,16 +1797,33 @@ recovery_rec_update(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size)
 	return tuple;
 }
 
+/*
+ *  This function should be used for WAL recording for real tables that can be logically replicated.
+ *  For them it depends on replica identity what should be contained in wal record: key or full tuple.
+ */
 OTuple
-recovery_rec_delete(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size)
+recovery_rec_delete(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size, char relreplident)
 {
 	OTuple		key;
 
-	key = o_btree_tuple_make_key(desc, tuple, NULL, true, allocated);
-	*size = o_btree_len(desc, key, OKeyLength);
-	return key;
+	if (relreplident == REPLICA_IDENTITY_FULL)
+	{
+		*allocated = false;
+		*size = o_btree_len(desc, tuple, OTupleLength);
+		return tuple;
+	}
+	else
+	{
+		key = o_btree_tuple_make_key(desc, tuple, NULL, true, allocated);
+		*size = o_btree_len(desc, key, OKeyLength);
+		return key;
+	}
 }
 
+/*
+ * This function could be used only for system trees and bridge indices, that could not be logically
+ * replicated and can't have replica identity.
+ */
 OTuple
 recovery_rec_delete_key(BTreeDescr *desc, OTuple key, bool *allocated, int *size)
 {
@@ -2924,76 +2946,6 @@ invalidate_typcache(void)
 }
 
 /*
- * Read tuples from modify WAL record.
- * tuple1 is mandatory basic tuple for all modify records,
- * tuple2 is optional, e.g. WAL record could also have old tuple in case of REINSERT
- */
-void
-read_modify_wal_tuples(uint8 rec_type, Pointer *ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1_out)
-{
-	bool		contains_two_tuples = (rec_type == WAL_REC_REINSERT);
-	OffsetNumber length1;
-	OffsetNumber length2;
-
-	Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
-
-	if (!contains_two_tuples)
-	{
-		tuple1->tuple.formatFlags = **ptr;
-		(*ptr)++;
-
-		memcpy(&length1, *ptr, sizeof(OffsetNumber));
-		*ptr += sizeof(OffsetNumber);
-
-		Assert(length1 > 0);
-		if (length1 != 0)
-		{
-			memcpy(tuple1->fixedData, *ptr, length1);
-			*ptr += length1;
-
-			tuple1->tuple.data = tuple1->fixedData;
-		}
-		else
-			O_TUPLE_SET_NULL(tuple1->tuple);
-	}
-	else
-	{
-		tuple1->tuple.formatFlags = **ptr;
-		(*ptr)++;
-		tuple2->tuple.formatFlags = **ptr;
-		(*ptr)++;
-
-		memcpy(&length1, *ptr, sizeof(OffsetNumber));
-		*ptr += sizeof(OffsetNumber);
-		memcpy(&length2, *ptr, sizeof(OffsetNumber));
-		*ptr += sizeof(OffsetNumber);
-
-		Assert(length1 > 0);
-		if (length1 != 0)
-		{
-			memcpy(tuple1->fixedData, *ptr, length1);
-			*ptr += length1;
-
-			tuple1->tuple.data = tuple1->fixedData;
-		}
-		else
-			O_TUPLE_SET_NULL(tuple1->tuple);
-
-		Assert(length2 > 0);
-		if (length2 != 0)
-		{
-			memcpy(tuple2->fixedData, *ptr, length2);
-			*ptr += length2;
-
-			tuple2->tuple.data = tuple2->fixedData;
-		}
-		else
-			O_TUPLE_SET_NULL(tuple2->tuple);
-	}
-	*length1_out = length1;
-}
-
-/*
  * Replays a single orioledb WAL container.
  */
 static bool
@@ -3005,7 +2957,6 @@ replay_container(Pointer startPtr, Pointer endPtr,
 	OXid		oxid = InvalidOXid;
 	ORelOids	cur_oids = {0, 0, 0},
 			   *treeOids;
-	OffsetNumber unused;
 	bool		success;
 	uint16		type;
 	uint8		rec_type;
@@ -3014,6 +2965,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 	XLogRecPtr	xlogPtr;
 	uint16		wal_version;
 	uint8		wal_flags;
+	char		relreplident = REPLICA_IDENTITY_DEFAULT;
 
 	ptr = wal_container_read_header(ptr, &wal_version, &wal_flags);
 	if (wal_version > ORIOLEDB_WAL_VERSION)
@@ -3119,6 +3071,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 			ix_type = treeType;
 
+			relreplident = REPLICA_IDENTITY_DEFAULT;
+
 			if (IS_SYS_TREE_OIDS(cur_oids))
 				sys_tree_num = cur_oids.relnode;
 			else
@@ -3154,6 +3108,10 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
 				pfree(db_prefix);
 			}
+		}
+		else if (rec_type == WAL_REC_RELREPLIDENT)
+		{
+			ptr = wal_parse_rec_relreplident(ptr, &relreplident, NULL);
 		}
 		else if (rec_type == WAL_REC_O_TABLES_META_LOCK)
 		{
@@ -3248,11 +3206,14 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		{
 			OFixedTuple tuple1;
 			OFixedTuple tuple2;
+			OffsetNumber unused;
 			Pointer		sys_tree_oids_ptr;
+			bool		read_two_tuples;
 
 			sys_tree_oids_ptr = ptr + sizeof(uint8) + sizeof(OffsetNumber);
 
-			read_modify_wal_tuples(rec_type, &ptr, &tuple1, &tuple2, &unused);
+			read_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
+			ptr = wal_parse_rec_modify(ptr, &tuple1, &tuple2, &unused, read_two_tuples);
 
 			type = recovery_msg_from_wal_record(rec_type);
 
@@ -3327,6 +3288,18 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				Assert(type == RecoveryMsgTypeReinsert);
 				Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
 
+				if (relreplident == REPLICA_IDENTITY_FULL)
+				{
+					bool		allocated;
+
+					/*
+					 * tuple2 (old tuple) representation is full tuple, not a
+					 * key. We need to rewrite it with a key.
+					 */
+					tuple2.tuple = o_btree_tuple_make_key(&(GET_PRIMARY(descr))->desc, tuple2.tuple, tuple2.tuple.data, true, &allocated);
+					Assert(!allocated);
+				}
+
 				if (single)
 				{
 					recovery_switch_to_oxid(oxid, -1);
@@ -3339,8 +3312,41 @@ replay_container(Pointer startPtr, Pointer endPtr,
 					spread_idx_modify(&indexDescr->desc, RecoveryMsgTypeInsert, tuple1.tuple);
 				}
 			}
-			else
+			else				/* WAL_REC_INSERT, WAL_REC_UPDATE or
+								 * WAL_REC_DELETE */
 			{
+				if (relreplident == REPLICA_IDENTITY_FULL)
+				{
+					if (rec_type == WAL_REC_DELETE)
+					{
+						bool		allocated;
+
+						/*
+						 * tuple1 representation is full tuple, not a key. We
+						 * need to rewrite it with a key.
+						 */
+						tuple1.tuple = o_btree_tuple_make_key(&(GET_PRIMARY(descr))->desc, tuple1.tuple, tuple1.tuple.data, true, &allocated);
+						Assert(!allocated);
+						Assert(O_TUPLE_IS_NULL(tuple2.tuple));
+					}
+					else if (rec_type == WAL_REC_UPDATE)
+					{
+						/*
+						 * tuple2 from WAL record could be safely ignored
+						 * (it's needed only for logical decoding).
+						 */
+						Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
+					}
+					else
+					{
+						Assert(O_TUPLE_IS_NULL(tuple2.tuple));
+					}
+				}
+				else
+				{
+					Assert(O_TUPLE_IS_NULL(tuple2.tuple));
+				}
+
 				if (single)
 				{
 					recovery_switch_to_oxid(oxid, -1);
