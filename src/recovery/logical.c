@@ -540,6 +540,11 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else
 			{
+				/*
+				 * Oriole logical xid stays invalid for an autonomous
+				 * transactions (internal Oriole's mechanism intended for
+				 * independed commit of Oriole system catalog changes)
+				 */
 				elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec_type, rec_type_str, oxid);
 			}
 		}
@@ -577,6 +582,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
+				/*
+				 * Oriole logical xid stays invalid for an autonomous
+				 * transactions
+				 */
 				elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec_type, rec_type_str, oxid);
 
 				UpdateDecodingStats(ctx);
@@ -690,6 +699,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
+				/*
+				 * Oriole logical xid stays invalid for an autonomous
+				 * transactions
+				 */
 				elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec_type, rec_type_str, oxid);
 
 				UpdateDecodingStats(ctx);
@@ -739,6 +752,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
+				/*
+				 * Oriole logical xid stays invalid for an autonomous
+				 * transactions
+				 */
 				elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec_type, rec_type_str, oxid);
 				continue;
 			}
@@ -901,6 +918,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
+				/*
+				 * Oriole logical xid stays invalid for an autonomous
+				 * transactions
+				 */
 				elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec_type, rec_type_str, oxid);
 				continue;
 			}

@@ -34,6 +34,21 @@
 								 * DELETE + INSERT in OrioleDB but externally
 								 * exported as an UPDATE in logical decoding */
 #define WAL_REC_REPLAY_FEEDBACK	(16)
+
+/*
+ * A SWITCH XID condition appears in a case of mixed transaction:
+ * when both heap and Oriole apply changes within a single transaction,
+ * so both logical xids appears: one logical xid assigned by heap and another one logical xid assigned by Oriole.
+ * In this case, the main transaction consists of two parts: heap and Oriole.
+ * Oriole's modifications come with their own Oriole logical xid as a sub-transaction to the top heap transaction.
+ *
+ * This WAL record type is intended to define the connection between top heap xid and child xid Oriole.
+ *
+ * Otherwise, without this connection, main transaction suddenly becomes splitted into two independent parts.
+ * From logical decoder's point of view this looks like two independent transactions but in fact internally related to each other.
+ * This situation outcomes in troubles for logical decoder with visibility of heap modifications
+ * in Oriole's sub-part due to incorrect state of the MVCC-historical snapshot.
+ */
 #define WAL_REC_SWITCH_LOGICAL_XID	(17)
 
 /*

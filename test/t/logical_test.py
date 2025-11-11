@@ -262,6 +262,41 @@ COMMIT\n""")
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__COMMIT_SAVEPOINT_mixed_01(
+	        self):  # COMMIT SAVEPOINT x3
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			CREATE TABLE h_tmp(id serial primary key, data text);
+			SAVEPOINT s3;
+			INSERT INTO h_tmp(data) VALUES('100');
+			COMMIT;
+		""")
+
+		self.assertEqual(self.node.execute("SELECT * FROM h_tmp;"),
+		                 [(1, '100')])
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(
+		    result, f"""BEGIN
+table public.h_tmp: INSERT: id[integer]:1 data[text]:'100'
+table public.{o_relname}: INSERT: id[integer]:1 data[text]:'10'
+table public.{o_relname}: INSERT: id[integer]:2 data[text]:'20'
+table public.{o_relname}: INSERT: id[integer]:3 data[text]:'30'
+COMMIT\n""")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
 	def test_switch_logical_xid_subtxn__ABORT_SAVEPOINT(
 	        self):  # ABORT SAVEPOINT x5
 		node = self.node
@@ -281,6 +316,32 @@ COMMIT\n""")
 			SAVEPOINT s4;
 			INSERT INTO {o_relname}(data) VALUES('50');
 			SAVEPOINT s5;
+			ABORT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(result, "")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__ABORT_SAVEPOINT_mixed_01(
+	        self):  # ABORT SAVEPOINT x3
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			CREATE TABLE h_tmp(id serial primary key, data text);
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s3;
+			INSERT INTO h_tmp(data) VALUES('100');
 			ABORT;
 		""")
 
@@ -427,6 +488,7 @@ COMMIT\n""")
 		node.safe_psql(
 		    'postgres', f"""
 			BEGIN;
+			CREATE TABLE h_tmp(id serial primary key, data text);
 			INSERT INTO {o_relname}(data) VALUES('10');
 			SAVEPOINT s1;
 			INSERT INTO {o_relname}(data) VALUES('20');
@@ -437,6 +499,7 @@ COMMIT\n""")
 			SAVEPOINT s4;
 			INSERT INTO {o_relname}(data) VALUES('50');
 			ROLLBACK TO s1;
+			INSERT INTO h_tmp(data) VALUES('100');
 			COMMIT;
 		""")
 
@@ -444,6 +507,7 @@ COMMIT\n""")
 		#print(result)
 		self.assertEqual(
 		    result, f"""BEGIN
+table public.h_tmp: INSERT: id[integer]:1 data[text]:'100'
 table public.{o_relname}: INSERT: id[integer]:1 data[text]:'10'
 COMMIT\n""")
 
