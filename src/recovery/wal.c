@@ -189,8 +189,10 @@ wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid, 
 	Assert(ptr);
 
 	PARSE(ptr, parentSubid);
+#if ORIOLEDB_WAL_VERSION >= (17)
 	PARSE(ptr, xmin);
 	PARSE(ptr, csn);
+#endif
 
 	return ptr;
 }
@@ -788,8 +790,10 @@ void
 add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 {
 	WALRecRollbackToSavepoint *rec;
+#if ORIOLEDB_WAL_VERSION >= (17)
 	OXid		runXmin;
 	CommitSeqNo csn;
+#endif
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
@@ -803,10 +807,12 @@ add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 
 	rec->recType = WAL_REC_ROLLBACK_TO_SAVEPOINT;
 	memcpy(rec->parentSubid, &parentSubid, sizeof(SubTransactionId));
+#if ORIOLEDB_WAL_VERSION >= (17)
 	runXmin = pg_atomic_read_u64(&xid_meta->runXmin);
 	memcpy(rec->xmin, &runXmin, sizeof(runXmin));
 	csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 	memcpy(rec->csn, &csn, sizeof(csn));
+#endif
 
 	local_wal_buffer_offset += sizeof(*rec);
 }

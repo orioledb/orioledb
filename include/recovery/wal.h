@@ -144,8 +144,10 @@ typedef struct
 {
 	uint8		recType;
 	uint8		parentSubid[sizeof(SubTransactionId)];
+#if ORIOLEDB_WAL_VERSION >= (17)
 	uint8		xmin[sizeof(OXid)];
 	uint8		csn[sizeof(CommitSeqNo)];
+#endif
 } WALRecRollbackToSavepoint;
 
 typedef struct
