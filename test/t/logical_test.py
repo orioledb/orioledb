@@ -318,6 +318,7 @@ class LogicalTest(BaseTest):
 						con1.commit()
 						con2.commit()
 
+
 #						con2.execute("CHECKPOINT;")
 #						con2.execute("SELECT orioledb_get_current_oxid();")
 
@@ -401,20 +402,12 @@ class LogicalTest(BaseTest):
 					    ), [('foofoo', 'barbar', 'aaaaaa', 1),
 					        ('mmm', 'nnn', 'ooo', 2)])
 
-
-# Update with changed pkey on a table with TOAST attributes (i.e reinsert)
-
+	# Update with changed pkey on a table with TOAST attributes (i.e reinsert)
 	def test_logical_subscription_toast_update_pkey(self):
 		with self.node as publisher:
 			publisher.start()
 
-			baseDir = mkdtemp(prefix=self.myName + '_tgsb_')
-			subscriber = testgres.get_new_node('subscriber',
-			                                   port=self.getBasePort() + 1,
-			                                   base_dir=baseDir)
-			subscriber.init(["--no-locale", "--encoding=UTF8"])
-			subscriber.append_conf(shared_preload_libraries='orioledb')
-			subscriber.append_conf(wal_level='logical')
+			subscriber = self.getSubsriber()
 
 			with subscriber.start() as subscriber:
 				create_sql = """
