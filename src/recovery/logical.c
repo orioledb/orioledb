@@ -66,6 +66,7 @@ tts_copy_identity(TupleTableSlot *srcSlot, TupleTableSlot *dstSlot,
 			dstSlot->tts_tid = srcSlot->tts_tid;
 		}
 	}
+
 	dstSlot->tts_flags &= ~TTS_FLAG_EMPTY;
 }
 
@@ -136,12 +137,12 @@ get_reorder_buffer_txn(ReorderBuffer *rb, TransactionId xid)
 }
 
 /*
- * Convert tuples from the main relation from OrioleDB to haep format with
+ * Convert tuples from the main relation from OrioleDB to heap format with
  * conversion of TOAST pointers to PG format.
  */
 static HeapTuple
-convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
-					   OFixedTuple *tuple)
+o_convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
+						 OTuple tuple)
 {
 	int			natts = descr->tupdesc->natts;
 	Datum	   *old_values = palloc0(natts * sizeof(Datum));
@@ -160,7 +161,7 @@ convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
 	Assert(descr->toast);
 	for (int i = 0; i < natts; i++)
 	{
-		old_values[i] = o_fastgetattr(tuple->tuple, i + ctid_off + 1,
+		old_values[i] = o_fastgetattr(tuple, i + ctid_off + 1,
 									  indexDescr->leafTupdesc,
 									  &indexDescr->leafSpec,
 									  &isnull[i]);
@@ -237,119 +238,184 @@ set_snapshot(LogicalDecodingContext *ctx,
 	return true;
 }
 
-static void
-decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType ix_type, ReorderBufferChange *change, OTableDescr *descr, OIndexDescr *indexDescr,
-						 TupleDescData *o_toast_tupDesc, TupleDescData *heap_toast_tupDesc, OFixedTuple tuple1, OFixedTuple tuple2, OffsetNumber debug_length)
+/*
+ * Make reorder buffer tuple from OrioleDB tuple. Convert toast pointers is needed.
+ *
+ * If caller requests force_store_to_slot it warrantied that tuple is also stored into provided
+ * heap slot. Also heaptuple filled by this function is left valid as the slot can depend on
+ * tuple contents. heaptuple should be freed by the caller but only after the slot is not needed
+ * anymore.
+ *
+ * If store to slot is not requested, HeapTuple is freed inside o_convert_non_toast_tuple() and this
+ * function only returns reodrer buffer tuple without any side effects.
+ */
+static REORDER_BUFFER_TUPLE_TYPE
+o_convert_non_toast_tuple(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexDescr *indexDescr, OTuple tuple, bool force_store_to_slot, TupleTableSlot *store_slot, HeapTuple *heaptuple, bool leafTuple)
 {
+	REORDER_BUFFER_TUPLE_TYPE result;
+
+	if (leafTuple)
+	{
+		if (descr->ntoastable > 0)
+		{
+			/*
+			 * Primary table can have TOAST pointers. Convert them from Oriole
+			 * to heap format
+			 */
+			elog(DEBUG4, "Convert LEAF NON-TOAST toastable");
+
+			*heaptuple = o_convert_toast_pointers(descr, indexDescr, tuple);
+			if (force_store_to_slot)
+			{
+				/*
+				 * Caller should free heaptuple after slot is not needed
+				 * anymore
+				 */
+				ExecForceStoreHeapTuple(*heaptuple, store_slot, false);
+				result = record_buffer_tuple(reorderbuf, *heaptuple, false);
+			}
+			else
+				result = record_buffer_tuple(reorderbuf, *heaptuple, true);
+
+			Assert(result);
+		}
+		else
+		{
+			/* Primary table without TOASTable attrs */
+			elog(DEBUG4, "Convert LEAF NON-TOAST plain");
+
+			tts_orioledb_store_tuple(store_slot, tuple,
+									 descr, COMMITSEQNO_INPROGRESS,
+									 PrimaryIndexNumber, false,
+									 NULL);
+			result = record_buffer_tuple_slot(reorderbuf, store_slot);
+		}
+	}
+	else						/* Non-leaf tuple in a primary table can't
+								 * have TOAST pointers */
+	{
+		elog(DEBUG4, "Convert NON-LEAF");
+		tts_orioledb_store_non_leaf_tuple(store_slot, tuple,
+										  descr, COMMITSEQNO_INPROGRESS,
+										  PrimaryIndexNumber, false,
+										  NULL);
+		result = record_buffer_tuple_slot(reorderbuf, store_slot);
+	}
+
+	return result;
+}
+
+/* Convert chunk in a TOAST relation from OrioleDB format to reorder buffer (heap) format */
+static REORDER_BUFFER_TUPLE_TYPE
+o_convert_toast_chunk(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexDescr *indexDescr, OTuple tuple, TupleDescData *o_toast_tupDesc, TupleDescData *heap_toast_tupDesc, OffsetNumber debug_length)
+{
+	uint16		attnum;
+	uint32		chunk_seq;
+	uint32		old_chunk_size, /* without header */
+				new_chunk_size; /* without header */
+	Pointer		old_chunk;
+	Pointer		new_chunk = NULL;
+	HeapTuple	toasttup;
+	Datum		t_values[3];
+	bool		t_isnull[3];
+	bool		attnum_isnull,
+				chunk_seq_isnull;
+	int			pk_natts;
+	bool		need_to_free = false;
+	REORDER_BUFFER_TUPLE_TYPE result;
+
+	Assert(o_toast_tupDesc);
+	pk_natts = o_toast_tupDesc->natts - TOAST_LEAF_FIELDS_NUM;
+	attnum = (uint16) o_fastgetattr(tuple, pk_natts + ATTN_POS, o_toast_tupDesc, &indexDescr->leafSpec, &attnum_isnull);
+	chunk_seq = (uint32) o_fastgetattr(tuple, pk_natts + CHUNKN_POS, o_toast_tupDesc, &indexDescr->leafSpec, &chunk_seq_isnull);
+	Assert((!attnum_isnull) && (!chunk_seq_isnull));
+	Assert(attnum > 0);
+
+	/* Toast chunk in VARATT_4B uncompressed format */
+	old_chunk = o_fastgetattr_ptr(tuple, pk_natts + DATA_POS, o_toast_tupDesc, &indexDescr->leafSpec);
+	old_chunk_size = VARSIZE(old_chunk) - VARHDRSZ;
+
+	/*
+	 * ReorderBufferToastReplace() expects first toasted chunk without the
+	 * header of the whole toasted value and reconstructs it itself. Cut this
+	 * extra header from OrioleDB toasted chunk.
+	 */
+	if (chunk_seq == 0)
+	{
+		int			extra_header_size;
+
+		Assert(VARATT_IS_4B(VARDATA(old_chunk)));
+		extra_header_size = VARHDRSZ;
+		new_chunk_size = old_chunk_size - extra_header_size;
+		need_to_free = true;
+		new_chunk = palloc0(new_chunk_size + VARHDRSZ);
+		memcpy(new_chunk, old_chunk, VARHDRSZ);
+		SET_VARSIZE(new_chunk, new_chunk_size + VARHDRSZ);
+		memcpy(VARDATA(new_chunk), VARDATA(old_chunk) + extra_header_size, new_chunk_size);
+	}
+	else
+	{
+		new_chunk = old_chunk;
+		new_chunk_size = old_chunk_size;
+	}
+
+	t_values[0] = ObjectIdGetDatum(attnum + 8000);
+	t_values[1] = Int32GetDatum(chunk_seq);
+	t_values[2] = PointerGetDatum(new_chunk);
+	t_isnull[0] = false;
+	t_isnull[1] = false;
+	t_isnull[2] = false;
+	elog(DEBUG4, "(attnum, seq, oldsize, newsize): (%u, %u, %u, %u) length_get: %u pk_natts: %u",
+		 attnum,
+		 chunk_seq,
+		 old_chunk_size, new_chunk_size,
+		 debug_length, pk_natts);
+
+	Assert(heap_toast_tupDesc);
+	toasttup = heap_form_tuple(heap_toast_tupDesc, t_values, t_isnull);
+
+	result = record_buffer_tuple(reorderbuf, toasttup, true);
+
+	if (need_to_free && new_chunk)
+	{
+		pfree(new_chunk);
+		need_to_free = false;
+	}
+
+	return result;
+}
+
+
+static void
+o_decode_modify_tuples(ReorderBuffer *reorderbuf, uint8 rec_type, OIndexType ix_type, ReorderBufferChange *change, OTableDescr *descr, OIndexDescr *indexDescr,
+					   TupleDescData *o_toast_tupDesc, TupleDescData *heap_toast_tupDesc, OTuple tuple1, OTuple tuple2, OffsetNumber debug_length, char relreplident)
+{
+	if (relreplident != REPLICA_IDENTITY_DEFAULT)
+		elog(DEBUG4, "REPLICA IDENTITY %c", relreplident);
+
+	Assert(!O_TUPLE_IS_NULL(tuple1));
 	if (rec_type == WAL_REC_INSERT)
 	{
 		change->action = REORDER_BUFFER_CHANGE_INSERT;
+		Assert(O_TUPLE_IS_NULL(tuple2));
 
 		/* Decode TOAST chunks */
 		if (ix_type == oIndexToast)
 		{
-			uint16		attnum;
-			uint32		chunk_seq;
-			uint32		old_chunk_size, /* without header */
-						new_chunk_size; /* without header */
-			Pointer		old_chunk;
-			Pointer		new_chunk = NULL;
-			HeapTuple	toasttup;
-			Datum		t_values[3];
-			bool		t_isnull[3];
-			bool		attnum_isnull,
-						chunk_seq_isnull;
-			int			pk_natts;
-			bool		need_to_free = false;
-
 			elog(DEBUG4, "WAL_REC_INSERT TOAST");
-
-			Assert(o_toast_tupDesc);
-			pk_natts = o_toast_tupDesc->natts - TOAST_LEAF_FIELDS_NUM;
-			attnum = (uint16) o_fastgetattr(tuple1.tuple, pk_natts + ATTN_POS, o_toast_tupDesc, &indexDescr->leafSpec, &attnum_isnull);
-			chunk_seq = (uint32) o_fastgetattr(tuple1.tuple, pk_natts + CHUNKN_POS, o_toast_tupDesc, &indexDescr->leafSpec, &chunk_seq_isnull);
-			Assert((!attnum_isnull) && (!chunk_seq_isnull));
-			Assert(attnum > 0);
-
-			/* Toast chunk in VARATT_4B uncompressed format */
-			old_chunk = o_fastgetattr_ptr(tuple1.tuple, pk_natts + DATA_POS, o_toast_tupDesc, &indexDescr->leafSpec);
-			old_chunk_size = VARSIZE(old_chunk) - VARHDRSZ;
-
-			/*
-			 * ReorderBufferToastReplace() expects first toasted chunk without
-			 * the header of the whole toasted value and reconstructs it
-			 * itself. Cut this extra header from OrioleDB toasted chunk.
-			 */
-			if (chunk_seq == 0)
-			{
-				int			extra_header_size;
-
-				Assert(VARATT_IS_4B(VARDATA(old_chunk)));
-				extra_header_size = VARHDRSZ;
-				new_chunk_size = old_chunk_size - extra_header_size;
-				need_to_free = true;
-				new_chunk = palloc0(new_chunk_size + VARHDRSZ);
-				memcpy(new_chunk, old_chunk, VARHDRSZ);
-				SET_VARSIZE(new_chunk, new_chunk_size + VARHDRSZ);
-				memcpy(VARDATA(new_chunk), VARDATA(old_chunk) + extra_header_size, new_chunk_size);
-			}
-			else
-			{
-				new_chunk = old_chunk;
-				new_chunk_size = old_chunk_size;
-			}
-
-			t_values[0] = ObjectIdGetDatum(attnum + 8000);
-			t_values[1] = Int32GetDatum(chunk_seq);
-			t_values[2] = PointerGetDatum(new_chunk);
-			t_isnull[0] = false;
-			t_isnull[1] = false;
-			t_isnull[2] = false;
-			elog(DEBUG4, "(attnum, seq, oldsize, newsize): (%u, %u, %u, %u) length_get: %u pk_natts: %u",
-				 attnum,
-				 chunk_seq,
-				 old_chunk_size, new_chunk_size,
-				 debug_length, pk_natts);
-
-			Assert(heap_toast_tupDesc);
-			toasttup = heap_form_tuple(heap_toast_tupDesc, t_values, t_isnull);
-			change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, toasttup, true);
+			change->data.tp.newtuple = o_convert_toast_chunk(reorderbuf, descr, indexDescr, tuple1, o_toast_tupDesc, heap_toast_tupDesc, debug_length);
 			change->data.tp.clear_toast_afterwards = false;
-
-			if (need_to_free && new_chunk)
-			{
-				pfree(new_chunk);
-				need_to_free = false;
-			}
 		}
 		else
 		{
+			HeapTuple	newheaptuple = NULL;
+
 			Assert(ix_type != oIndexToast);
 
-			/*
-			 * Primary table contains TOASTed attributes needs conversion of
-			 * them
-			 */
-			if (descr->ntoastable > 0)
-			{
-				HeapTuple	newheaptuple;
-
-				elog(DEBUG4, "WAL_REC_INSERT NON-TOAST toastable");
-				newheaptuple = convert_toast_pointers(descr, indexDescr, &tuple1);
-				change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, true);
-				Assert(change->data.tp.newtuple);
-			}
-			else				/* Tuple without TOASTed attrs */
-			{
-				elog(DEBUG4, "WAL_REC_INSERT NON-TOAST plain");
-				tts_orioledb_store_tuple(descr->newTuple, tuple1.tuple,
-										 descr, COMMITSEQNO_INPROGRESS,
-										 PrimaryIndexNumber, false,
-										 NULL);
-				change->data.tp.newtuple = record_buffer_tuple_slot(ctx->reorder, descr->newTuple);
-			}
+			elog(DEBUG4, "WAL_REC_INSERT NON-TOAST");
+			/* Store full new tuple into reorderbuffer */
+			change->data.tp.newtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, false, descr->newTuple, &newheaptuple, true);
 			change->data.tp.clear_toast_afterwards = true;
-
 		}
 	}
 	else if (rec_type == WAL_REC_UPDATE)
@@ -358,127 +424,80 @@ decode_modify_wal_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType
 
 		Assert(ix_type != oIndexToast);
 
+		elog(DEBUG4, "WAL_REC_UPDATE NEWTUPLE");
+
 		change->action = REORDER_BUFFER_CHANGE_UPDATE;
 		change->data.tp.clear_toast_afterwards = true;
+		change->data.tp.newtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, (relreplident != REPLICA_IDENTITY_FULL), descr->newTuple, &newheaptuple, true);
 
-		/*
-		 * Primary table contains TOASTed attributes needs conversion of them
-		 */
-		if (descr->ntoastable > 0)
+		if (relreplident == REPLICA_IDENTITY_FULL)
 		{
-			elog(DEBUG4, "WAL_REC_UPDATE toastable");
+			HeapTuple	oldheaptuple = NULL;
 
-			newheaptuple = convert_toast_pointers(descr, indexDescr, &tuple1);
+			elog(DEBUG4, "WAL_REC_UPDATE OLDTUPLE REPLIDENT FULL");
+
+			/* Store full old tuple into reorderbuffer */
+			Assert(!O_TUPLE_IS_NULL(tuple2));
+			change->data.tp.oldtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple2, false, descr->oldTuple, &oldheaptuple, true);
+		}
+		else
+		{
+			elog(DEBUG4, "WAL_REC_UPDATE OLDTUPLE REPLIDENT DEFAULT");
 
 			/*
-			 * Slot filled by ExecForceStoreHeapTuple depends on newheaptuple.
-			 * Don't free newheaptuple while we need this slot
+			 * Reconstruct old tuple key from new tuple and store into
+			 * reorderbuffer
 			 */
-			ExecForceStoreHeapTuple(newheaptuple, descr->newTuple, false);
-			change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, false);
-		}
-		else					/* Tuple without TOASTed attrs */
-		{
-			elog(DEBUG4, "WAL_REC_UPDATE plain");
+			tts_copy_identity(descr->newTuple, descr->oldTuple, GET_PRIMARY(descr));
+			change->data.tp.oldtuple = record_buffer_tuple_slot(reorderbuf, descr->oldTuple);
 
-			tts_orioledb_store_tuple(descr->newTuple, tuple1.tuple,
-									 descr, COMMITSEQNO_INPROGRESS,
-									 PrimaryIndexNumber, false,
-									 NULL);
-			change->data.tp.newtuple = record_buffer_tuple_slot(ctx->reorder, descr->newTuple);
+			if (newheaptuple)
+				heap_freetuple(newheaptuple);
 		}
-		tts_copy_identity(descr->newTuple, descr->oldTuple,
-						  GET_PRIMARY(descr));
-		change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
-		if (newheaptuple)
-			heap_freetuple(newheaptuple);
 	}
 	else if (rec_type == WAL_REC_DELETE)
 	{
 		change->action = REORDER_BUFFER_CHANGE_DELETE;
+		Assert(O_TUPLE_IS_NULL(tuple2));
+
 		if (ix_type == oIndexToast)
 		{
 			elog(DEBUG4, "WAL_REC_DELETE TOAST");
 
 			change->data.tp.clear_toast_afterwards = false;
-			tts_orioledb_store_non_leaf_tuple(descr->oldTuple, tuple1.tuple,
+			tts_orioledb_store_non_leaf_tuple(descr->oldTuple, tuple1,
 											  descr, COMMITSEQNO_INPROGRESS,
 											  PrimaryIndexNumber, false,
 											  NULL);
-			change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
+			change->data.tp.oldtuple = record_buffer_tuple_slot(reorderbuf, descr->oldTuple);
 		}
 		else
 		{
+			HeapTuple	oldheaptuple = NULL;
+
+			elog(DEBUG4, "WAL_REC_DELETE NON-TOAST");
+
 			change->data.tp.clear_toast_afterwards = true;
-
-			/*
-			 * Primary table contains TOASTed attributes needs conversion of
-			 * them
-			 */
-			if (descr->ntoastable > 0)
-			{
-				HeapTuple	oldheaptuple;
-
-				elog(DEBUG4, "WAL_REC_DELETE NON-TOAST toastable");
-				oldheaptuple = convert_toast_pointers(descr, indexDescr, &tuple1);
-				change->data.tp.oldtuple = record_buffer_tuple(ctx->reorder, oldheaptuple, true);
-			}
-			else				/* Tuple without TOASTed attrs */
-			{
-				elog(DEBUG4, "WAL_REC_DELETE NON-TOAST plain");
-				tts_orioledb_store_non_leaf_tuple(descr->oldTuple, tuple1.tuple,
-												  descr, COMMITSEQNO_INPROGRESS,
-												  PrimaryIndexNumber, false,
-												  NULL);
-				change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
-			}
+			change->data.tp.oldtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, false, descr->oldTuple, &oldheaptuple, (relreplident == REPLICA_IDENTITY_FULL));
 		}
 	}
 	else if (rec_type == WAL_REC_REINSERT)
 	{
+		HeapTuple	oldheaptuple = NULL;
+		HeapTuple	newheaptuple = NULL;
+
 		Assert(ix_type != oIndexToast);
-		Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
+		Assert(!O_TUPLE_IS_NULL(tuple2));
 
 		change->action = REORDER_BUFFER_CHANGE_UPDATE;
 		change->data.tp.clear_toast_afterwards = true;
 
+		elog(DEBUG4, "WAL_REC_REINSERT");
 
-		/*
-		 * Primary table contains TOASTed attributes needs conversion of them
-		 */
-		if (descr->ntoastable > 0)
-		{
-			HeapTuple	newheaptuple;
-			HeapTuple	oldheaptuple;
-
-			elog(DEBUG4, "WAL_REC_REINSERT toastable");
-			/* Store primary key into reorderbuffer oldtuple */
-			oldheaptuple = convert_toast_pointers(descr, indexDescr, &tuple2);
-			ExecForceStoreHeapTuple(oldheaptuple, descr->newTuple, false);
-			tts_copy_identity(descr->newTuple, descr->oldTuple,
-							  GET_PRIMARY(descr));
-			change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
-
-			/* Store full tuple into reorderbuffer newtuple */
-			newheaptuple = convert_toast_pointers(descr, indexDescr, &tuple1);
-			change->data.tp.newtuple = record_buffer_tuple(ctx->reorder, newheaptuple, true);
-		}
-		else					/* Tuple without TOASTed attrs */
-		{
-			elog(DEBUG4, "WAL_REC_REINSERT plain");
-			tts_orioledb_store_non_leaf_tuple(descr->oldTuple, tuple2.tuple,
-											  descr, COMMITSEQNO_INPROGRESS,
-											  PrimaryIndexNumber, false,
-											  NULL);
-			change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
-
-			tts_orioledb_store_tuple(descr->newTuple, tuple1.tuple,
-									 descr, COMMITSEQNO_INPROGRESS,
-									 PrimaryIndexNumber, false,
-									 NULL);
-
-			change->data.tp.newtuple = record_buffer_tuple_slot(ctx->reorder, descr->newTuple);
-		}
+		/* Store old tuple or key into reorderbuffer */
+		change->data.tp.oldtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple2, false, descr->oldTuple, &oldheaptuple, (relreplident == REPLICA_IDENTITY_FULL));
+		/* Store full new tuple into reorderbuffer */
+		change->data.tp.newtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, false, descr->newTuple, &newheaptuple, true);
 	}
 	else
 	{
@@ -501,6 +520,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	OTableDescr *descr = NULL;
 	OIndexDescr *indexDescr = NULL;
 	ORelOids	cur_oids = {0, 0, 0};
+	char		relreplident = REPLICA_IDENTITY_DEFAULT;
 	OXid		oxid = InvalidOXid;
 	TransactionId logicalXid = InvalidTransactionId,
 				heapXid = InvalidTransactionId;
@@ -766,6 +786,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids);
 
 			ix_type = treeType;
+			relreplident = REPLICA_IDENTITY_DEFAULT;
+			descr = NULL;
+
+			elog(DEBUG4, "WAL_REC_RELATION");
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
@@ -777,11 +801,12 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				continue;
 			}
 
-			elog(DEBUG4, "WAL_REC_RELATION");
-
 			/* Skip actual relation processing in fast_forward mode */
 			if (ctx->fast_forward)
+			{
+				elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec_type, rec_type_str, oxid);
 				continue;
+			}
 
 			if (IS_SYS_TREE_OIDS(cur_oids))
 				sys_tree_num = cur_oids.relnode;
@@ -799,7 +824,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				descr = o_fetch_table_descr(cur_oids);
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
 				elog(DEBUG4, "WAL_REC_RELATION oIndexInvalid");
-
 			}
 			else if (ix_type == oIndexToast)
 			{
@@ -835,6 +859,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			if (descr && descr->toast)
 				elog(DEBUG4, "reloid: %d natts: %u toast natts: %u", cur_oids.reloid, descr->tupdesc->natts, descr->toast->leafTupdesc->natts);
 
+		}
+		else if (rec_type == WAL_REC_RELREPLIDENT)
+		{
+			ptr = wal_parse_rec_relreplident(ptr, &relreplident, NULL);
 		}
 		else if (rec_type == WAL_REC_O_TABLES_META_LOCK || rec_type == WAL_REC_REPLAY_FEEDBACK)
 		{
@@ -948,8 +976,12 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			OFixedTuple tuple2;
 			OffsetNumber debug_length;
 			ReorderBufferTXN *txn;
+			bool		read_two_tuples;
 
-			read_modify_wal_tuples(rec_type, &ptr, &tuple1, &tuple2, &debug_length);
+			ReorderBufferProcessXid(ctx->reorder, logicalXid, changeXLogPtr);
+
+			read_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
+			ptr = wal_parse_rec_modify(ptr, &tuple1, &tuple2, &debug_length, read_two_tuples);
 
 			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
 				 rec_type, rec_type_str, oxid, logicalXid, heapXid);
@@ -991,7 +1023,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				change->data.tp.rlocator.relNumber = cur_oids.relnode;
 				elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 
-				decode_modify_wal_tuples(ctx, rec_type, ix_type, change, descr, indexDescr, o_toast_tupDesc, heap_toast_tupDesc, tuple1, tuple2, debug_length);
+				o_decode_modify_tuples(ctx->reorder, rec_type, ix_type, change, descr, indexDescr, o_toast_tupDesc, heap_toast_tupDesc, tuple1.tuple, tuple2.tuple, debug_length, relreplident);
 
 				ReorderBufferQueueChange(ctx->reorder, logicalXid,
 										 changeXLogPtr,
@@ -1005,6 +1037,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		}
 		else
 		{
+			Assert(false);
 			elog(FATAL, "Unknown WAL record");
 		}
 	}
