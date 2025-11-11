@@ -868,9 +868,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			ptr = wal_parse_rec_rollback_to_savepoint(ptr, &parentSubid, &xmin, &csn);
 
-			/* Skip action for non-initialized xmin for WAL version compatibility */
-			if (!OXidIsValid(xmin))
-				continue;
+#if ORIOLEDB_WAL_VERSION < (17)
+			/* Skip */
+			continue;
+#endif
 
 			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u parentSubid %u",
 				 rec_type, rec_type_str, oxid, logicalXid, parentSubid);
