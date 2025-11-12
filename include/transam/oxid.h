@@ -50,7 +50,6 @@ typedef struct
 	bool		useHeap;		/* flag indicates if current logical xid was
 								 * allocated when heap xid has been already
 								 * set */
-
 } LogicalXid;
 
 typedef struct OSnapshot
@@ -94,9 +93,7 @@ o_check_isolation_level(void)
 
 #define XLOG_PTR_ALIGN(ptr) ((ptr) + ((ptr) & 1))
 
-extern void oxid_subxact_callback(
-								  SubXactEvent event, SubTransactionId mySubid,
-								  SubTransactionId parentSubid, void *arg);
+extern void oxid_subxact_callback(SubXactEvent event, SubTransactionId mySubid, SubTransactionId parentSubid, void *arg);
 
 extern Size oxid_shmem_needs(void);
 extern void oxid_init_shmem(Pointer ptr, bool found);

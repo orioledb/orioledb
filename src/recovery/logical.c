@@ -739,7 +739,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			oxid = InvalidOXid;
 			logicalXid = InvalidTransactionId;
-
 		}
 		else if (rec_type == WAL_REC_RELATION)
 		{
