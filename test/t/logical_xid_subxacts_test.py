@@ -30,13 +30,14 @@ class LogicalXidSubxactsTest(BaseTest):
 	heap_xid = 0
 	oriole_xid = 1
 
+	def run_check(self, con, stmt, cb):
+		output = con.execute(f"""{stmt}""")
+		#print(output)
+		self.assertTrue(cb(output[0][0]))
+
 	def check(self, con, on_heap, on_oriole):
-		output = con.execute(f"""{self.orioledb_get_current_heap_xid}""")
-		print(output)
-		self.assertTrue(on_heap(output[0][0]))
-		output = con.execute(f"""{self.orioledb_get_current_logical_xid}""")
-		print(output)
-		self.assertTrue(on_oriole(output[0][0]))
+		self.run_check(con, self.orioledb_get_current_heap_xid, on_heap)
+		self.run_check(con, self.orioledb_get_current_logical_xid, on_oriole)
 
 	def init(self):
 		node = self.node
