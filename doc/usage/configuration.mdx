@@ -230,8 +230,8 @@ Maximum number of rewind transaction items that are stored for a rewind. Older r
 | ----------- | --- |
 | **Default** | 1MB |
 
-Size of OrioleDB in-memory rewind buffers. Each MB can acommodate around 8000 rewind transaction items. If you have
-enough memory set it near a value (`orioledb.rewind_max_transactions` / 8000) MB to avoid writing rewind info to disk.
+Size of OrioleDB in-memory rewind buffers. Each MB can acommodate around 15000 rewind transaction items. If you have
+enough memory set it near a value (`orioledb.rewind_max_transactions` / 15000) MB to avoid writing rewind info to disk.
 
 ### `orioledb.logical_xid_buffers`
 
