@@ -20,8 +20,8 @@ class LogicalXidSubxactsTest(BaseTest):
 	o_table = "o_test"
 	h_table = "h_test"
 
-	orioledb_get_current_heap_xid = "SELECT * FROM orioledb_get_current_heap_xid();"
-	orioledb_get_current_logical_xid = "SELECT * FROM orioledb_get_current_logical_xid();"
+	orioledb_get_current_heap_xid = "SELECT orioledb_get_current_heap_xid();"
+	orioledb_get_current_logical_xid = "SELECT orioledb_get_current_logical_xid();"
 
 	check_stmt = f"""
 		{orioledb_get_current_heap_xid}
@@ -31,10 +31,12 @@ class LogicalXidSubxactsTest(BaseTest):
 	oriole_xid = 1
 
 	def check(self, con, on_heap, on_oriole):
-		output = con.execute(f"""{self.check_stmt}""")
+		output = con.execute(f"""{self.orioledb_get_current_heap_xid}""")
 		print(output)
-		self.assertTrue(on_heap(output[self.heap_xid][0]))
-		self.assertTrue(on_oriole(output[self.oriole_xid][0]))
+		self.assertTrue(on_heap(output[0][0]))
+		output = con.execute(f"""{self.orioledb_get_current_logical_xid}""")
+		print(output)
+		self.assertTrue(on_oriole(output[0][0]))
 
 	def init(self):
 		node = self.node
@@ -66,6 +68,8 @@ class LogicalXidSubxactsTest(BaseTest):
 		self.check(con, aboveZero, equalZero)
 
 		con.commit()
+		con.close()
+		node.stop()
 
 	# top xact: readonly
 	# sub xact: oriole write
@@ -89,6 +93,8 @@ class LogicalXidSubxactsTest(BaseTest):
 		self.check(con, equalZero, aboveZero)
 
 		con.commit()
+		con.close()
+		node.stop()
 
 	# top xact: readonly
 	# sub xact: heap->oriole write
@@ -112,6 +118,8 @@ class LogicalXidSubxactsTest(BaseTest):
 		self.check(con, aboveZero, aboveZero)
 
 		con.commit()
+		con.close()
+		node.stop()
 
 	# top xact: readonly
 	# sub xact: heap->oriole write
@@ -142,6 +150,8 @@ class LogicalXidSubxactsTest(BaseTest):
 		self.check(con, equalZero, aboveZero)
 
 		con.commit()
+		con.close()
+		node.stop()
 
 	# top xact: readonly
 	# sub xact: oriole->heap write
@@ -169,6 +179,8 @@ class LogicalXidSubxactsTest(BaseTest):
 		self.check(con, aboveZero, aboveZero)
 
 		con.commit()
+		con.close()
+		node.stop()
 
 	# top xact: readonly
 	# sub xact: oriole->heap write
@@ -205,3 +217,5 @@ class LogicalXidSubxactsTest(BaseTest):
 		self.check(con, equalZero, aboveZero)
 
 		con.commit()
+		con.close()
+		node.stop()
