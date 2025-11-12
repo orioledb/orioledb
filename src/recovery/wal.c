@@ -815,6 +815,12 @@ add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 	memcpy(rec->csn, &csn, sizeof(csn));
 
 	local_wal_buffer_offset += sizeof(*rec);
+
+	/*
+	 * Force adding xid record on future changes going after this rollback to
+	 * sp, this is necessary for correct xids restoring in logical decoder
+	 */
+	local_wal_contains_xid = false;
 }
 
 bool
