@@ -866,12 +866,13 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			xmin = InvalidOXid;
 			csn = 0;
 
-			ptr = wal_parse_rec_rollback_to_savepoint(ptr, &parentSubid, &xmin, &csn);
+			ptr = wal_parse_rec_rollback_to_savepoint(ptr, &parentSubid, &xmin, &csn, wal_version);
 
-#if ORIOLEDB_WAL_VERSION < (17)
-			/* Skip */
-			continue;
-#endif
+			if (wal_version < 17)
+			{
+				/* Skip */
+				continue;
+			}
 
 			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u parentSubid %u",
 				 rec_type, rec_type_str, oxid, logicalXid, parentSubid);

@@ -94,13 +94,14 @@ wal_record_type_to_string(int wal_record)
 }
 
 #define PARSE(ptr, valptr) \
+do \
 { \
 	if (valptr) \
 	{ \
 		memcpy(valptr, ptr, sizeof(*(valptr))); \
 	} \
 	ptr += sizeof(*(valptr)); \
-}
+} while(0)
 
 /* Parser for WAL_REC_XID */
 Pointer
@@ -184,15 +185,16 @@ wal_parse_rec_savepoint(Pointer ptr, SubTransactionId *parentSubid, TransactionI
 
 /* Parser for WAL_REC_ROLLBACK_TO_SAVEPOINT */
 Pointer
-wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid, OXid *xmin, CommitSeqNo *csn)
+wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid, OXid *xmin, CommitSeqNo *csn, uint16 wal_version)
 {
 	Assert(ptr);
 
 	PARSE(ptr, parentSubid);
-#if ORIOLEDB_WAL_VERSION >= (17)
-	PARSE(ptr, xmin);
-	PARSE(ptr, csn);
-#endif
+	if (wal_version >= 17)
+	{
+		PARSE(ptr, xmin);
+		PARSE(ptr, csn);
+	}
 
 	return ptr;
 }
@@ -790,29 +792,27 @@ void
 add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 {
 	WALRecRollbackToSavepoint *rec;
-#if ORIOLEDB_WAL_VERSION >= (17)
 	OXid		runXmin;
 	CommitSeqNo csn;
-#endif
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
+	local_wal_contains_xid = false;
 	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	add_wal_container_header_if_needed();
-	local_wal_contains_xid = false;
+
 	add_xid_wal_record_if_needed();
 
 	rec = (WALRecRollbackToSavepoint *) (&local_wal_buffer[local_wal_buffer_offset]);
 
 	rec->recType = WAL_REC_ROLLBACK_TO_SAVEPOINT;
 	memcpy(rec->parentSubid, &parentSubid, sizeof(SubTransactionId));
-#if ORIOLEDB_WAL_VERSION >= (17)
+
 	runXmin = pg_atomic_read_u64(&xid_meta->runXmin);
 	memcpy(rec->xmin, &runXmin, sizeof(runXmin));
 	csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 	memcpy(rec->csn, &csn, sizeof(csn));
-#endif
 
 	local_wal_buffer_offset += sizeof(*rec);
 }

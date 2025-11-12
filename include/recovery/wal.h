@@ -144,10 +144,8 @@ typedef struct
 {
 	uint8		recType;
 	uint8		parentSubid[sizeof(SubTransactionId)];
-#if ORIOLEDB_WAL_VERSION >= (17)
-	uint8		xmin[sizeof(OXid)];
-	uint8		csn[sizeof(CommitSeqNo)];
-#endif
+	uint8		xmin[sizeof(OXid)]; /* Since ORIOLEDB_WAL_VERSION = 17 */
+	uint8		csn[sizeof(CommitSeqNo)];	/* Since ORIOLEDB_WAL_VERSION = 17 */
 } WALRecRollbackToSavepoint;
 
 typedef struct
@@ -206,7 +204,7 @@ extern Pointer wal_parse_rec_o_tables_meta_unlock(Pointer ptr, ORelOids *oids, O
 extern Pointer wal_parse_rec_savepoint(Pointer ptr, SubTransactionId *parentSubid, TransactionId *logicalXid, TransactionId *parentLogicalXid);
 
 /* Parser for WAL_REC_ROLLBACK_TO_SAVEPOINT */
-extern Pointer wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid, OXid *xmin, CommitSeqNo *csn);
+extern Pointer wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid, OXid *xmin, CommitSeqNo *csn, uint16 wal_version);
 
 /* Parser for WAL_REC_TRUNCATE */
 extern Pointer wal_parse_rec_truncate(Pointer ptr, ORelOids *oids);
@@ -216,11 +214,6 @@ extern Pointer wal_parse_rec_bridge_erase(Pointer ptr, ItemPointerData *iptr);
 
 /* Parser for WAL_REC_SWITCH_LOGICAL_XID */
 extern Pointer wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *topXid, TransactionId *subXid);
-
-/* Parser for WAL_REC_INSERT */
-/* Parser for WAL_REC_UPDATE */
-/* Parser for WAL_REC_DELETE */
-/* Parser for WAL_REC_REINSERT */
 
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, OffsetNumber length);

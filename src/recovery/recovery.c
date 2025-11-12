@@ -2931,7 +2931,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		{
 			SubTransactionId parentSubid;
 
-			ptr = wal_parse_rec_rollback_to_savepoint(ptr, &parentSubid, NULL, NULL);
+			ptr = wal_parse_rec_rollback_to_savepoint(ptr, &parentSubid, NULL, NULL, wal_version);
 
 			if (!single)
 			{
