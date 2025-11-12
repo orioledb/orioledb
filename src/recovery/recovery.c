@@ -2114,10 +2114,10 @@ save_state_to_file(int worker_id)
 			tempStack.undoStack = stack->undoStack;
 
 			if (OFileWrite(tempFile, (char *) &tempStack, sizeof(tempStack),
-						    offset, WAIT_EVENT_DATA_FILE_WRITE) != sizeof(tempStack))
-			ereport(FATAL,
-					(errcode_for_file_access(),
-					 errmsg("could not write file \"%s\": %m", filename)));
+						   offset, WAIT_EVENT_DATA_FILE_WRITE) != sizeof(tempStack))
+				ereport(FATAL,
+						(errcode_for_file_access(),
+						 errmsg("could not write file \"%s\": %m", filename)));
 
 			offset += sizeof(tempStack);
 		}
@@ -3880,4 +3880,40 @@ recovery_msg_from_wal_record(uint8 wal_record)
 			elog(ERROR, "Wrong WAL record modify type %d", wal_record);
 	}
 	return (uint16) 0;			/* keep compiler quiet */
+}
+
+static bool
+is_process_running(pid_t pid)
+{
+	if (kill(pid, 0) == 0)
+		return true;
+
+	if (errno == ESRCH)
+		return false;
+	else if (errno == EPERM)
+		return true;
+	else
+		return false;
+}
+
+/*
+ * Check from non-recovery process that recovery workers are finished.
+ */
+bool
+check_recovery_workers_finished(void)
+{
+	int			finish = recovery_idx_pool_size_guc ? index_build_leader : recovery_last_worker;
+	int			i;
+
+	for (i = recovery_first_worker; i <= finish; i++)
+	{
+		shm_mq	   *mq = GET_WORKER_QUEUE(i);
+		PGPROC	   *receiver = shm_mq_get_receiver(mq);
+
+		if (receiver && receiver->pid > 0 && is_process_running(receiver->pid))
+		{
+			return false;
+		}
+	}
+	return true;
 }

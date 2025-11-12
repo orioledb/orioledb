@@ -1144,6 +1144,8 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	orioledb_check_shmem();
 
+	STOPEVENT(STOPEVENT_CHECKPOINT_BEFORE_START, NULL);
+
 	if (chkp_main_context == NULL)
 	{
 		chkp_main_context = AllocSetContextCreate(TopMemoryContext,
