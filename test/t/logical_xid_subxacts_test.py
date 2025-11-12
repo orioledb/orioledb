@@ -32,9 +32,9 @@ class LogicalXidSubxactsTest(BaseTest):
 
 	def check(self, con, on_heap, on_oriole):
 		output = con.execute(f"""{self.check_stmt}""")
+		print(output)
 		self.assertTrue(on_heap(output[self.heap_xid][0]))
 		self.assertTrue(on_oriole(output[self.oriole_xid][0]))
-		#print(output)
 
 	def init(self):
 		node = self.node
