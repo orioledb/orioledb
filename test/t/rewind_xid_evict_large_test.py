@@ -20,6 +20,9 @@ import tempfile
 
 class RewindXidTest(BaseTest):
 
+	def wait_shutdown_and_start(self, node):
+		super().wait_shutdown_and_start(node)
+
 	# Evict tests:
 	# test_rewind_xid_oriole_evict
 	# test_rewind_xid_heap_evict
@@ -116,10 +119,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
 		    (invalidxid, oxid))
-		time.sleep(1)
 
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT * FROM o_test ORDER BY 1;')),
@@ -185,10 +186,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
 		    (xid, invalidoxid))
-		time.sleep(1)
 
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.assertEqual(
 		    str(
@@ -265,10 +264,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
-		time.sleep(1)
 
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT * FROM o_test ORDER BY 1;')),
@@ -352,9 +349,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
 		    (xid, invalidoxid))
-		time.sleep(1)
-		node.is_started = False
-		node.start()
+
+		self.wait_shutdown_and_start(node)
 
 		self.maxDiff = None
 		self.assertEqual(
@@ -454,9 +450,7 @@ class RewindXidTest(BaseTest):
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
 
-		time.sleep(1)
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.maxDiff = None
 		self.assertEqual(
@@ -556,10 +550,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid2, oxid2))
-		time.sleep(1)
 
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.maxDiff = None
 		self.assertEqual(
@@ -648,7 +640,7 @@ class RewindXidTest(BaseTest):
 
 		a, *b = (node.execute('postgres', 'SELECT pg_current_xact_id();'))[0]
 		xidc = int(a)
-		print(xidc)
+		#		print(xidc)
 
 		with self.assertRaises(QueryException) as e:
 			node.safe_psql(
@@ -745,10 +737,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid2, oxid2))
-		time.sleep(1)
 
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.maxDiff = None
 		self.assertEqual(
@@ -941,10 +931,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid2, oxid2))
-		time.sleep(1)
 
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.maxDiff = None
 		self.assertEqual(
@@ -1054,6 +1042,8 @@ class RewindXidTest(BaseTest):
 		node.stop()
 
 
+## Tests disabled for not to strain CI as they are much similar to neighbouring
+#
 #	def test_rewind_xid_evict_complete_after(self):
 #		node = self.node
 #		node.append_conf(
@@ -1149,10 +1139,8 @@ class RewindXidTest(BaseTest):
 #
 #		node.safe_psql('postgres',
 #		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid2,oxid2))
-#		time.sleep(1)
 #
-#		node.is_started = False
-#		node.start()
+#		self.wait_shutdown_and_start(node)
 #
 #		self.maxDiff = None
 #		self.assertEqual(
@@ -1265,10 +1253,8 @@ class RewindXidTest(BaseTest):
 #
 #		node.safe_psql('postgres',
 #		               "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid1,oxid1))
-#		time.sleep(1)
 #
-#		node.is_started = False
-#		node.start()
+#		self.wait_shutdown_and_start(node)
 #
 #		self.maxDiff = None
 #		self.assertEqual(
@@ -1393,10 +1379,8 @@ class RewindXidTest(BaseTest):
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid2, oxid2))
-		time.sleep(1)
 
-		node.is_started = False
-		node.start()
+		self.wait_shutdown_and_start(node)
 
 		self.maxDiff = None
 		self.assertEqual(

@@ -11,6 +11,7 @@
  *
  *-------------------------------------------------------------------------
  */
+#include "c.h"
 #include "postgres.h"
 
 #include "orioledb.h"
@@ -18,10 +19,12 @@
 #include "utils/stopevent.h"
 
 #include "commands/dbcommands.h"
+#include "catalog/indices.h"
 #include "miscadmin.h"
 #include "nodes/execnodes.h"
 #include "pgstat.h"
 #include "postmaster/bgworker.h"
+#include "recovery/recovery.h"
 #include "storage/condition_variable.h"
 #include "storage/proclist.h"
 #include "storage/shmem.h"
@@ -31,14 +34,18 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/stopevents_data.h"
+#include "varatt.h"
 
 #define QUERY_BUFFER_SIZE 1024
+
+#define STOP_EVENT_FLAG_RECOVERY_WORKERS_RUNNING (1)
 
 typedef struct
 {
 	char		condition[QUERY_BUFFER_SIZE];
 	bool		enabled;
 	int			nWaiters;
+	uint32		flags;
 	slock_t		lock;
 	ConditionVariable cv;
 } StopEvent;
@@ -105,6 +112,22 @@ pg_stopevent_set(PG_FUNCTION_ARGS)
 	text	   *event_name = PG_GETARG_TEXT_PP(0);
 	JsonPath   *condition = PG_GETARG_JSONPATH_P(1);
 	StopEvent  *event;
+	uint32		flags = 0;
+
+	if (PG_NARGS() >= 3)
+	{
+		text	   *flagsText = PG_GETARG_TEXT_PP(2);
+		char	   *p,
+				   *end = VARDATA_ANY(flagsText) + VARSIZE_ANY_EXHDR(flagsText);
+
+		for (p = VARDATA_ANY(flagsText); p < end; p++)
+		{
+			if (*p == 'r')
+				flags |= STOP_EVENT_FLAG_RECOVERY_WORKERS_RUNNING;
+			else
+				elog(ERROR, "wrong stopevent flag");
+		}
+	}
 
 	event = find_stop_event(event_name);
 
@@ -113,6 +136,7 @@ pg_stopevent_set(PG_FUNCTION_ARGS)
 
 	SpinLockAcquire(&event->lock);
 	event->enabled = true;
+	event->flags = flags;
 	memcpy(&event->condition, condition, VARSIZE_ANY(condition));
 	SpinLockRelease(&event->lock);
 
@@ -336,9 +360,15 @@ handle_stopevent(int event_id, Jsonb *params)
 			ConditionVariablePrepareToSleep(&event->cv);
 			for (;;)
 			{
+				if (event->flags & STOP_EVENT_FLAG_RECOVERY_WORKERS_RUNNING)
+				{
+					if (check_recovery_workers_finished())
+						break;
+				}
+
 				if (!check_stopevent_condition(event, params))
 					break;
-				ConditionVariableSleep(&event->cv, PG_WAIT_EXTENSION);
+				ConditionVariableTimedSleep(&event->cv, 1000, PG_WAIT_EXTENSION);
 			}
 			ConditionVariableCancelSleep();
 		}

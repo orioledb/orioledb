@@ -796,12 +796,14 @@ start_write_xids(uint32 chkpnum)
  * Write information about undo locations of in-progress transactions.
  */
 static void
-finish_write_xids(uint32 chkpnum)
+finish_write_xids(uint32 chkpnum, bool shutdown)
 {
 	XidFileRec	xidRec;
 	int			i,
 				j,
 				k;
+	int			total_recovery_workers = recovery_pool_size_guc + recovery_idx_pool_size_guc;
+	bool	   *temp_file_loaded;
 
 	memset(&xidRec, 0, sizeof(xidRec));
 	ASAN_UNPOISON_MEMORY_REGION(&xidRec, sizeof(xidRec));
@@ -842,21 +844,48 @@ finish_write_xids(uint32 chkpnum)
 	}
 
 	if (enable_rewind)
-	{
 		checkpoint_write_rewind_xids();
-	}
 
 	recovery_undo_loc_flush->immediateRequestCheckpointNumber = chkpnum;
 
 	/*
-	 * Wait till recovery undo position will be flushed.
+	 * Wait till recovery undo position will be flushed. But don't wait for
+	 * exited workers.
 	 */
+	temp_file_loaded = (bool *) palloc0(sizeof(bool) * total_recovery_workers);
 	while (recovery_undo_loc_flush->completedCheckpointNumber <
 		   recovery_undo_loc_flush->immediateRequestCheckpointNumber)
 	{
+		bool		all_workers_done = true;
+
+		for (i = 0; i < total_recovery_workers; i++)
+		{
+			/* Check for exited recovery workers with temp files */
+			if (!pg_atomic_unlocked_test_flag(&worker_ptrs[i].hasTempFile))
+			{
+				if (!temp_file_loaded[i])
+				{
+					recovery_load_state_from_file(i, chkpnum, shutdown);
+					temp_file_loaded[i] = true;
+				}
+				continue;
+			}
+
+			if (worker_ptrs[i].flushedUndoLocCompletedCheckpointNumber <
+				recovery_undo_loc_flush->immediateRequestCheckpointNumber)
+			{
+				all_workers_done = false;
+				break;
+			}
+		}
+
+		if (all_workers_done)
+			break;
+
 		WakeupRecovery();
 		pg_usleep(10000L);
 	}
+	pfree(temp_file_loaded);
 }
 
 void
@@ -1115,6 +1144,8 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	orioledb_check_shmem();
 
+	STOPEVENT(STOPEVENT_CHECKPOINT_BEFORE_START, NULL);
+
 	if (chkp_main_context == NULL)
 	{
 		chkp_main_context = AllocSetContextCreate(TopMemoryContext,
@@ -1218,7 +1249,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	if (XLogRecPtrIsInvalid(checkpoint_state->toastConsistentPtr))
 		checkpoint_state->toastConsistentPtr = GetXLogInsertRecPtr();
 
-	finish_write_xids(cur_chkp_num);
+	finish_write_xids(cur_chkp_num, (flags & CHECKPOINT_IS_SHUTDOWN) ? true : false);
 	close_xids_file();
 	LWLockRelease(&checkpoint_state->oXidQueueLock);
 

@@ -7,6 +7,7 @@ checkpoint_step
 checkpoint_writeback
 checkpoint_table_start
 checkpoint_before_post_process
+checkpoint_before_start
 index_insert
 ioc_before_update
 modify_start

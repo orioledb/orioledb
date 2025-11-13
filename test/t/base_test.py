@@ -325,6 +325,12 @@ class BaseTest(unittest.TestCase):
 		stat = os.stat(fname)
 		return (stat.st_blocks == 0)
 
+	def wait_shutdown_and_start(self, node):
+		while node.status() == NodeStatus.Running:
+			time.sleep(0.1)
+		node.is_started = False
+		node.start()
+
 
 # execute SQL query Thread for PostgreSql node's connection
 class ThreadQueryExecutor(Thread):

@@ -4,6 +4,8 @@
 import os
 import re
 import subprocess
+import time
+from testgres import NodeStatus
 
 from .base_test import BaseTest, ThreadQueryExecutor, wait_checkpointer_stopevent
 
@@ -1104,6 +1106,54 @@ class ReplicationTest(BaseTest):
 				self.assertEqual(
 				    replica.execute("SELECT COUNT(*) FROM o_test;")[0][0],
 				    5000000, "replica check")
+
+	def test_replica_checkpoint_temp_files(self):
+		with self.node as master:
+			master.start()
+
+			# create a backup
+			with self.getReplica() as replica:
+				master.safe_psql("""
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE IF NOT EXISTS test (
+						key integer NOT NULL
+					);
+				""")
+				replica.append_conf("orioledb.enable_stopevents = true")
+				replica.start()
+
+				master.execute(
+				    "INSERT INTO test (SELECT id FROM generate_series(1, 1000, 1) id);"
+				)
+
+				# wait for synchronization
+				self.catchup_orioledb(replica)
+
+				con1 = replica.connect()
+				con2 = replica.connect()
+
+				con2.execute(
+				    "SELECT pg_stopevent_set('checkpoint_before_start', 'true', 'r');"
+				)
+				master.execute("CHECKPOINT")
+				t1 = ThreadQueryExecutor(con1, "CHECKPOINT;")
+
+				t1.start()
+				wait_checkpointer_stopevent(replica)
+
+				master.stop()
+				replica.stop(wait=False)
+
+				try:
+					t1.join()
+				except Exception:
+					pass
+
+				con1.close()
+				con2.close()
+
+				while replica.status() == NodeStatus.Running:
+					time.sleep(0.1)
 
 	def has_only_one_relnode(self, node):
 		orioledb_files = self.get_orioledb_files(node)
