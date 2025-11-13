@@ -70,13 +70,13 @@ PG_FUNCTION_INFO_V1(orioledb_get_current_heap_xid);
 Datum
 orioledb_get_current_logical_xid(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_UINT64(get_current_logical_xid_if_any());
+	PG_RETURN_INT64(get_current_logical_xid_if_any());
 }
 
 Datum
 orioledb_get_current_heap_xid(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_UINT64(GetCurrentTransactionIdIfAny());
+	PG_RETURN_INT64(GetCurrentTransactionIdIfAny());
 }
 
 /*

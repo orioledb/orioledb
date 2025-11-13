@@ -5,12 +5,12 @@
 
 -- Get current logical xid to remember it
 CREATE FUNCTION orioledb_get_current_logical_xid()
-RETURNS bigint
+RETURNS int8
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
 -- Get current heap xid to remember it
 CREATE FUNCTION orioledb_get_current_heap_xid()
-RETURNS bigint
+RETURNS int8
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
