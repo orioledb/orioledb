@@ -471,8 +471,7 @@ oxid_subxact_callback(
 	{
 		case SUBXACT_EVENT_COMMIT_SUB:
 			{
-				if (TRANSACTION_HAS_UNDO_CHANGES())
-					/* txn writes */
+				if (have_retained_undo_location())
 				{
 					if (TransactionIdIsValid(logicalXidMeta.xid))
 					{
@@ -511,8 +510,7 @@ oxid_subxact_callback(
 
 		case SUBXACT_EVENT_ABORT_SUB:
 			{
-				if (TRANSACTION_HAS_UNDO_CHANGES())
-					/* txn writes */
+				if (have_retained_undo_location())
 				{
 					if (TransactionIdIsValid(logicalXidMeta.xid))
 					{

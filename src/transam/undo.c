@@ -1999,7 +1999,7 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 	{
 		case SUBXACT_EVENT_START_SUB:
 
-			if (TRANSACTION_HAS_UNDO_CHANGES()) // txn writes
+			if (have_retained_undo_location())
 			{
 				(void) get_current_oxid();
 				add_subxact_undo_item(parentSubid);
@@ -2021,7 +2021,7 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 			if (parentSubid < minParentSubId || minParentSubId == InvalidSubTransactionId)
 				parentSubid = InvalidSubTransactionId;
 
-			if (TRANSACTION_HAS_UNDO_CHANGES()) // txn writes
+			if (have_retained_undo_location())
 			{
 				(void) get_current_oxid();
 				for (i = 0; i < (int) UndoLogsCount; i++)

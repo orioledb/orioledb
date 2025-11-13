@@ -392,8 +392,6 @@ extern void o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit,
 											   RelFileNode *onAbort,
 											   int nOnCommit, int nOnAbort);
 
-#define TRANSACTION_HAS_UNDO_CHANGES() (have_retained_undo_location())
-
 static inline void
 reserve_undo_size(UndoLogType type, Size size)
 {
