@@ -84,6 +84,8 @@ typedef struct
 	uint8		recType;
 	uint8		oxid[sizeof(OXid)];
 	uint8		logicalXid[sizeof(TransactionId)];
+	/* Since ORIOLEDB_WAL_VERSION = 17 */
+	uint8		heapXid[sizeof(TransactionId)];
 } WALRecXid;
 
 typedef struct
@@ -186,7 +188,7 @@ extern const char *wal_record_type_to_string(int wal_record);
 /* API for parsing WAL-records */
 
 /* Parser for WAL_REC_XID */
-extern Pointer wal_parse_rec_xid(Pointer ptr, OXid *oxid, TransactionId *logicalXid);
+extern Pointer wal_parse_rec_xid(Pointer ptr, OXid *oxid, TransactionId *logicalXid, TransactionId *heapXid, uint16 wal_version);
 
 /* Parser for WAL_REC_COMMIT and WAL_REC_ROLLBACK */
 extern Pointer wal_parse_rec_finish(Pointer ptr, OXid *xmin, CommitSeqNo *csn);

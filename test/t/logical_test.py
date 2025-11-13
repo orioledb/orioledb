@@ -225,6 +225,42 @@ class LogicalTest(BaseTest):
 		    "table public.o_data: INSERT: id[integer]:4 data[text]:'20'\n"
 		    "COMMIT\n")
 
+	def test_switch_logical_xid_subtxn__mixed_ROLLBACK(self):
+		o_relname = self.o_relname
+
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+			with subscriber.start() as subscriber:
+				create_sql = f"""
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+				"""
+				publisher.safe_psql(create_sql)
+				subscriber.safe_psql(create_sql)
+
+				pub = publisher.publish('test_pub', tables=[f'{o_relname}'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+
+				with publisher.connect() as con1:
+					con1.begin()
+					con1.execute(f"""
+						SAVEPOINT s0;
+						ALTER TABLE {o_relname} RENAME COLUMN data TO newdata;
+						INSERT INTO {o_relname}(newdata) VALUES(100);
+						ROLLBACK TO s0;
+						INSERT INTO {o_relname}(data) VALUES(200);
+					""")
+					con1.commit()
+
+				# wait until changes apply on subscriber and check them
+				sub.catchup()
+
+				with subscriber.connect() as con:
+					output = con.execute(f"""SELECT * FROM {o_relname};""")
+					self.assertEqual(output, [(2, '200')])
+
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_switch_logical_xid_subtxn__COMMIT_SAVEPOINT(

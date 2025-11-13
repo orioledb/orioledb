@@ -306,7 +306,7 @@ acquire_logical_xid(bool *isValidHeapXid)
 	 */
 	if (isValidHeapXid)
 	{
-		*isValidHeapXid = TransactionIdIsValid(GetCurrentTransactionIdIfAny());
+		*isValidHeapXid = TransactionIdIsValid(GetTopTransactionIdIfAny());
 	}
 
 	/* Allocate new Oriole logical xid */
@@ -398,15 +398,8 @@ acquire_logical_xid_wrapper(bool *isValidHeapXid)
 
 	if (*isValidHeapXid)
 	{
-		heapXid = GetCurrentTransactionIdIfAny();
-		Assert(TransactionIdIsValid(heapXid));
+		/* Support native heap mechanics: assign all sub-txns to a top one */
 
-		elog(DEBUG4, "[%s] SWITCH_LOGICAL_XID H2O heap xid %u -> oriole xid %u", __func__, heapXid, nextLogicalXid);
-		add_switch_logical_xid_wal_record(heapXid, nextLogicalXid);
-	}
-	else
-	{
-		/* Regular sub-transaction: top xid is present while no current xid */
 		heapXid = GetTopTransactionIdIfAny();
 		if (TransactionIdIsValid(heapXid))
 		{
@@ -483,7 +476,7 @@ oxid_subxact_callback(
 					{
 						release_logical_xid(&logicalXidMeta);
 
-						heapXid = GetCurrentTransactionIdIfAny();
+						heapXid = GetTopTransactionIdIfAny();
 						if (TransactionIdIsValid(heapXid))
 						{
 							if (!logicalXidMeta.useHeap)
@@ -491,9 +484,7 @@ oxid_subxact_callback(
 								elog(DEBUG4, "%s SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u", __func__, heapXid, logicalXidMeta.xid);
 								add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
 							}
-						}
-						else
-						{
+
 							if (!RecoveryInProgress())
 							{
 								elog(DEBUG4, "%s Add wal_joint_commit for oxid %lu logical xid %u top xid %u",
@@ -1365,25 +1356,11 @@ get_current_logical_xid(void)
 {
 	TransactionId heapXid;
 
-	heapXid = GetCurrentTransactionIdIfAny();
-	if (TransactionIdIsValid(heapXid))
+	heapXid = GetTopTransactionIdIfAny();
+	if (TransactionIdIsValid(heapXid) && TransactionIdIsValid(logicalXidMeta.xid) && !logicalXidMeta.useHeap)
 	{
-		if (TransactionIdIsValid(heapXid) &&
-			TransactionIdIsValid(logicalXidMeta.xid) &&
-			!logicalXidMeta.useHeap)
-		{
-			elog(DEBUG4, "[%s] SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u", __func__, heapXid, logicalXidMeta.xid);
-			add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
-		}
-	}
-	else
-	{
-		heapXid = GetTopTransactionIdIfAny();
-		if (TransactionIdIsValid(heapXid) && TransactionIdIsValid(logicalXidMeta.xid))
-		{
-			elog(DEBUG4, "[%s] SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u", __func__, heapXid, logicalXidMeta.xid);
-			add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
-		}
+		elog(DEBUG4, "[%s] SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u", __func__, heapXid, logicalXidMeta.xid);
+		add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
 	}
 
 	return logicalXidMeta.xid;
