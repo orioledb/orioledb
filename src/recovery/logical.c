@@ -563,17 +563,17 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			ptr = wal_parse_rec_switch_logical_xid(ptr, &topXid, &subXid);
 
-			elog(DEBUG4, "RECEIVE record type %d (%s) %u=>%u oxid %lu logicalXId %u heapXid %u",
+			elog(DEBUG4, "RECEIVE record type %d (%s) %u=>%u oxid %lu logicalXId %u heapXid %u changeXLogPtr %X/%X",
 				 rec_type, rec_type_str,
 				 topXid, subXid,
-				 oxid, logicalXid, heapXid);
+				 oxid, logicalXid, heapXid, LSN_FORMAT_ARGS(changeXLogPtr));
 
 			Assert(TransactionIdIsValid(topXid));
 			Assert(TransactionIdIsValid(subXid));
 
 			ReorderBufferAssignChild(ctx->reorder,
 									 topXid, subXid,
-									 buf->origptr);
+									 changeXLogPtr);
 		}
 		else if (rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK)
 		{

@@ -1356,15 +1356,6 @@ get_current_oxid_if_any(void)
 TransactionId
 get_current_logical_xid(void)
 {
-	TransactionId heapXid;
-
-	heapXid = GetTopTransactionIdIfAny();
-	if (TransactionIdIsValid(heapXid) && TransactionIdIsValid(logicalXidMeta.xid) && !logicalXidMeta.useHeap)
-	{
-		elog(DEBUG4, "[%s] SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u", __func__, heapXid, logicalXidMeta.xid);
-		add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
-	}
-
 	return logicalXidMeta.xid;
 }
 

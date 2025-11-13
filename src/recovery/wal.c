@@ -314,12 +314,6 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	if (OXidIsValid(recovery_oxid))
 		return;
 
-	if (!O_IS_TRANSACTION_AUTONOMOUS())
-	{
-		(void) GetTopTransactionId();
-		(void) get_current_logical_xid();
-	}
-
 	if (!IS_SYS_TREE_OIDS(oids) && type == oIndexPrimary)
 	{
 		OIndexDescr *id = (OIndexDescr *) desc->arg;

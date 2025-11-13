@@ -1615,10 +1615,17 @@ undo_xact_callback(XactEvent event, void *arg)
 
 		if (TransactionIdIsValid(heapXid) && TransactionIdIsValid(logicalXidMeta.xid))
 		{
-			elog(DEBUG4, "[%s] event %d oxid %lu logicalXid %u top heapXid %u SWITCH_LOGICAL_XID %s",
-				__func__, event, oxid, logicalXidMeta.xid, heapXid,
-				logicalXidMeta.useHeap ? "H2O" : "O2H");
-		} else
+			if (event == XACT_EVENT_PRE_COMMIT)
+			{
+				elog(DEBUG4, "[%s] event %d oxid %lu SWITCH_LOGICAL_XID %s heap xid %u -> oriole xid %u",
+					__func__, event, oxid,
+					logicalXidMeta.useHeap ? "H2O" : "O2H",
+					heapXid, logicalXidMeta.xid);
+
+				add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
+			}
+		}
+		else
 		{
 			if (TransactionIdIsValid(heapXid))
 			{
