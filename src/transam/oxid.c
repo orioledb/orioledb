@@ -67,18 +67,6 @@
 PG_FUNCTION_INFO_V1(orioledb_get_current_logical_xid);
 PG_FUNCTION_INFO_V1(orioledb_get_current_heap_xid);
 
-Datum
-orioledb_get_current_logical_xid(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_INT64(get_current_logical_xid_if_any());
-}
-
-Datum
-orioledb_get_current_heap_xid(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_INT64(GetCurrentTransactionIdIfAny());
-}
-
 /*
  * OrioleDB uses three transaction id entities:
  *     - [uint32 TransactionId] native PG heap transaction id (heap xid)
@@ -114,6 +102,18 @@ clone_logical_xid_meta(void)
 	Assert(clone);
 	memcpy(clone, &logicalXidMeta, sizeof(LogicalXid));
 	return clone;
+}
+
+Datum
+orioledb_get_current_logical_xid(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_INT64(logicalXidMeta.xid);
+}
+
+Datum
+orioledb_get_current_heap_xid(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_INT64(GetCurrentTransactionIdIfAny());
 }
 
 static List *prevLogicalXids = NIL; /* remember all xids on subxact's chain
@@ -426,6 +426,7 @@ assign_subtransaction_logical_xid(void)
 	{
 		MemoryContext mcxt = MemoryContextSwitchTo(TopMemoryContext);
 
+		elog(DEBUG4, "[%s] STORE xid %u useHeap %d", __func__, logicalXidMeta.xid, logicalXidMeta.useHeap);
 		prevLogicalXids = lappend(prevLogicalXids, clone_logical_xid_meta());
 		MemoryContextSwitchTo(mcxt);
 	}
@@ -448,6 +449,7 @@ setup_prev_logical_xid_meta(void)
 		{
 			logicalXidMeta.xid = ptr->xid;
 			logicalXidMeta.useHeap = ptr->useHeap;
+			elog(DEBUG4, "[%s] RESTORE xid %u useHeap %d", __func__, logicalXidMeta.xid, logicalXidMeta.useHeap);
 			pfree(ptr);
 		}
 		prevLogicalXids = list_delete_last(prevLogicalXids);
@@ -488,11 +490,11 @@ oxid_subxact_callback(
 							if (!RecoveryInProgress())
 							{
 								elog(DEBUG4, "%s Add wal_joint_commit for oxid %lu logical xid %u top xid %u",
-									 __func__, get_current_oxid_if_any(), get_current_logical_xid_if_any(), GetTopTransactionIdIfAny());
+									 __func__, get_current_oxid_if_any(), logicalXidMeta.xid, GetTopTransactionIdIfAny());
 
 								wal_joint_commit(
 												 get_current_oxid_if_any(),
-												 get_current_logical_xid_if_any(),
+												 logicalXidMeta.xid,
 												 GetTopTransactionIdIfAny());
 							}
 						}
@@ -517,7 +519,7 @@ oxid_subxact_callback(
 						if (!RecoveryInProgress())
 						{
 							elog(DEBUG4, "%s Rollback for oxid %lu logical xid %u top xid %u",
-								 __func__, get_current_oxid_if_any(), get_current_logical_xid_if_any(), GetTopTransactionIdIfAny());
+								 __func__, get_current_oxid_if_any(), logicalXidMeta.xid, GetTopTransactionIdIfAny());
 
 							setup_prev_logical_xid_meta();
 						}
@@ -1363,12 +1365,6 @@ get_current_logical_xid(void)
 		add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
 	}
 
-	return logicalXidMeta.xid;
-}
-
-TransactionId
-get_current_logical_xid_if_any(void)
-{
 	return logicalXidMeta.xid;
 }
 

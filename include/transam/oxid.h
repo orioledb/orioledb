@@ -111,7 +111,6 @@ extern void parallel_worker_set_oxid(void);
 extern void reset_current_oxid(void);
 extern OXid get_current_oxid_if_any(void);
 extern TransactionId get_current_logical_xid(void);
-extern TransactionId get_current_logical_xid_if_any(void);
 extern void retrieve_current_logical_xid(LogicalXid *output);
 extern void current_oxid_precommit(void);
 extern void current_oxid_xlog_precommit(void);

@@ -1748,8 +1748,7 @@ undo_xact_callback(XactEvent event, void *arg)
 						__func__, oxid, logicalXidMeta.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidMeta.useHeap);
 
 				if (!RecoveryInProgress())
-					wal_rollback(oxid,
-								 get_current_logical_xid_if_any());
+					wal_rollback(oxid, logicalXidMeta.xid);
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					apply_undo_stack((UndoLogType) i, oxid, NULL, true);
@@ -1981,6 +1980,7 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 {
 	TransactionId prentLogicalXid;
 	int			i;
+	LogicalXid logicalXidMeta;
 
 	/*
 	 * Cleanup EXPLAY ANALYZE counters pointer to handle case when execution
@@ -2021,7 +2021,8 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 					rollback_to_savepoint((UndoLogType) i, UndoStackFull,
 										  parentSubid, true);
 
-				if (TransactionIdIsValid(get_current_logical_xid_if_any()))
+				retrieve_current_logical_xid(&logicalXidMeta);
+				if (TransactionIdIsValid(logicalXidMeta.xid))
 				{
 					if (!RecoveryInProgress())
 					{

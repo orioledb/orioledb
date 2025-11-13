@@ -90,6 +90,19 @@ class LogicalTest(BaseTest):
 		    "table public.data: INSERT: id[integer]:2 data[text]:'2'\n"
 		    "COMMIT\n")
 
+#
+# The next two tests reproduce an existing issue: incorrect state of OrioleDB system catalogs during logical decoding.
+#
+# TRAP: failed Assert("descr != NULL"), File: "src/recovery/logical.c", Line: 975
+#
+# This problem arises because changes to Oriole system trees are not included in MVCC-historical snapshot and
+# are not applied on replaying changes from the reorder buffer.
+#
+# During logical decoding, when processing each command, we observe a final state of the Oriole system catalogs
+# rather than some intermediate state that was relevant at the time when the current command has been executed within transaction.
+#
+# These tests should be enabled but only after this issue has been resolved.
+#
 #@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 #                 "'test_decoding' is not installed")
 #def test_switch_logical_xid_BUG_COMMIT(self):

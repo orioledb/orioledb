@@ -705,6 +705,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			ptr = wal_parse_rec_joint_commit(ptr, &xid, &xmin, &csn);
 
+			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
+				 rec_type, rec_type_str, oxid, logicalXid, heapXid);
+
 			if (!TransactionIdIsValid(logicalXid))
 			{
 				/*
@@ -936,6 +939,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			ReorderBufferTXN *txn;
 
 			read_modify_wal_tuples(rec_type, &ptr, &tuple1, &tuple2, &debug_length);
+
+			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
+				 rec_type, rec_type_str, oxid, logicalXid, heapXid);
 
 			if (!TransactionIdIsValid(logicalXid))
 			{

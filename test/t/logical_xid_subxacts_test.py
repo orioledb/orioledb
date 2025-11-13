@@ -220,3 +220,89 @@ class LogicalXidSubxactsTest(BaseTest):
 		con.commit()
 		con.close()
 		node.stop()
+
+	def test_top_ro_sub_ALTER_01(self):
+		node = self.node
+		self.init()
+		con = node.connect()
+		con.begin()
+
+		self.check(con, equalZero, equalZero)
+
+		con.execute(f"""SELECT COUNT(*) FROM {self.o_table};""")
+		self.check(con, equalZero, equalZero)
+
+		con.execute("SAVEPOINT sp1;")
+		self.check(con, equalZero, equalZero)
+
+		con.execute(f"""ALTER TABLE {self.o_table} RENAME COLUMN b TO data;""")
+		self.check(con, aboveZero, aboveZero)
+
+		con.execute(
+		    f"""INSERT INTO {self.o_table}(a, data) VALUES(1, '100');""")
+		self.check(con, aboveZero, aboveZero)
+
+		con.execute("ROLLBACK TO sp1;")
+		self.check(con, equalZero, aboveZero)
+
+		con.execute(f"""INSERT INTO {self.o_table}(a, b) VALUES(2, '200');""")
+		self.check(con, equalZero, aboveZero)
+
+		con.commit()
+		con.close()
+		node.stop()
+
+	def test_top_ro_sub_ALTER_02(self):
+		node = self.node
+		self.init()
+		con = node.connect()
+		con.begin()
+
+		self.check(con, equalZero, equalZero)
+
+		con.execute(f"""SELECT COUNT(*) FROM {self.o_table};""")
+		self.check(con, equalZero, equalZero)
+
+		con.execute("SAVEPOINT sp1;")
+		self.check(con, equalZero, equalZero)
+
+		con.execute(f"""ALTER TABLE {self.o_table} RENAME COLUMN b TO data;""")
+		self.check(con, aboveZero, aboveZero)
+
+		con.execute(
+		    f"""INSERT INTO {self.o_table}(a, data) VALUES(1, '100');""")
+		self.check(con, aboveZero, aboveZero)
+
+		con.execute("ROLLBACK TO sp1;")
+		self.check(con, equalZero, aboveZero)
+
+		con.execute(f"""ALTER TABLE {self.o_table} RENAME COLUMN b TO data;""")
+		self.check(con, aboveZero, aboveZero)
+
+		con.execute(
+		    f"""INSERT INTO {self.o_table}(a, data) VALUES(2, '200');""")
+		self.check(con, aboveZero, aboveZero)
+
+		con.execute("SAVEPOINT sp2;")
+		self.check(con, equalZero, aboveZero)
+
+		con.execute(
+		    f"""INSERT INTO {self.o_table}(a, data) VALUES(3, '300');""")
+		self.check(con, equalZero, aboveZero)
+
+		con.execute("SAVEPOINT sp3;")
+		self.check(con, equalZero, aboveZero)
+
+		con.execute(
+		    f"""ALTER TABLE {self.o_table} RENAME COLUMN data TO newdata;""")
+		self.check(con, aboveZero, aboveZero)
+
+		con.execute("SAVEPOINT sp4;")
+		self.check(con, equalZero, aboveZero)
+
+		con.execute("SAVEPOINT sp5;")
+		self.check(con, equalZero, aboveZero)
+
+		con.commit()
+		con.close()
+		node.stop()
