@@ -280,8 +280,7 @@ o_convert_non_toast_tuple(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexD
 			/* Primary table without TOASTable attrs */
 			elog(DEBUG4, "Convert LEAF NON-TOAST plain");
 
-			if (leafTuple)
-				tts_orioledb_store_tuple(store_slot, tuple->tuple,
+			tts_orioledb_store_tuple(store_slot, tuple->tuple,
 								 descr, COMMITSEQNO_INPROGRESS,
 								 PrimaryIndexNumber, false,
 								 NULL);

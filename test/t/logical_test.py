@@ -520,7 +520,7 @@ class LogicalTest(BaseTest):
 			                        data3 text
 					) USING orioledb;
 					ALTER TABLE o_test_ctid_secondary REPLICA IDENTITY FULL;
-					CREATE INDEX ON o_test_secondary (data2);
+					CREATE INDEX ON o_test_ctid_secondary (data2);
 				"""
 				publisher.safe_psql(create_sql)
 				subscriber.safe_psql(create_sql)
