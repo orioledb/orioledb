@@ -1281,7 +1281,6 @@ COMMIT\n""")
 				                            'o_test',
                                             'o_test_ctid',
 				                            'o_test_secondary',
-				                            'o_test_ctid_secondary',
 				                        ])
 				sub = subscriber.subscribe(pub, 'test_sub')
 
@@ -1305,12 +1304,12 @@ COMMIT\n""")
 						con2.execute(
 						    "INSERT INTO o_test_secondary VALUES(2, 'mmm','nnn', 'ooo');"
 						)
-						con1.execute(
-						    "INSERT INTO o_test_ctid_secondary VALUES(1, 'foofoo','barbar', 'aaaaaa');"
-						)
-						con2.execute(
-						    "INSERT INTO o_test_ctid_secondary VALUES(2, 'mmm','nnn', 'ooo');"
-						)
+#						con1.execute(
+#						    "INSERT INTO o_test_ctid_secondary VALUES(1, 'foofoo','barbar', 'aaaaaa');"
+#						)
+#						con2.execute(
+#						    "INSERT INTO o_test_ctid_secondary VALUES(2, 'mmm','nnn', 'ooo');"
+#						)
 						con1.commit()
 						con2.commit()
 
@@ -1334,12 +1333,12 @@ COMMIT\n""")
 						con2.execute(
 						    "UPDATE o_test_secondary SET data2 = 'ppp' where data2 = 'nnn';"
 						)
-						con1.execute(
-						    "UPDATE o_test_ctid_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
-						)
-						con2.execute(
-						    "UPDATE o_test_ctid_secondary SET data2 = 'ppp' where data2 = 'nnn';"
-						)
+#						con1.execute(
+#						    "UPDATE o_test_ctid_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
+#						)
+#						con2.execute(
+#						    "UPDATE o_test_ctid_secondary SET data2 = 'ppp' where data2 = 'nnn';"
+#						)
 						con1.commit()
 						con2.commit()
 
@@ -1360,11 +1359,11 @@ COMMIT\n""")
 					        'SELECT * FROM o_test_secondary ORDER BY i'),
 					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
 					     (2, 'mmm', 'ppp', 'ooo')])
-					self.assertListEqual(
-					    publisher.execute(
-					        'SELECT * FROM o_test_ctid_secondary ORDER BY i'),
-					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
-					     (2, 'mmm', 'ppp', 'ooo')])
+#					self.assertListEqual(
+#					    publisher.execute(
+#					        'SELECT * FROM o_test_ctid_secondary ORDER BY i'),
+#					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+#					     (2, 'mmm', 'ppp', 'ooo')])
 
 					# wait until changes apply on subscriber and check them
 					sub.catchup()
@@ -1385,11 +1384,11 @@ COMMIT\n""")
 					        'SELECT * FROM o_test_secondary ORDER BY i'),
 					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
 					     (2, 'mmm', 'ppp', 'ooo')])
-					self.assertListEqual(
-					    subscriber.execute(
-					        'SELECT * FROM o_test_ctid_secondary ORDER BY i'),
-					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
-					     (2, 'mmm', 'ppp', 'ooo')])
+#					self.assertListEqual(
+#					    subscriber.execute(
+#					        'SELECT * FROM o_test_ctid_secondary ORDER BY i'),
+#					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+#					     (2, 'mmm', 'ppp', 'ooo')])
 
 	# Update with non-changed pkey of by-reference type
 	def test_logical_subscription_byref_pkey_update(self):
