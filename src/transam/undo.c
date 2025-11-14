@@ -1611,7 +1611,7 @@ undo_xact_callback(XactEvent event, void *arg)
 		heapXid = GetTopTransactionIdIfAny();
 
 		flushPos = InvalidXLogRecPtr;
-		retrieve_current_logical_xid(&logicalXidMeta);
+		get_current_logical_xid_meta(&logicalXidMeta);
 
 		if (TransactionIdIsValid(heapXid) && TransactionIdIsValid(logicalXidMeta.xid))
 		{
@@ -2029,7 +2029,7 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 					rollback_to_savepoint((UndoLogType) i, UndoStackFull,
 										  parentSubid, true);
 
-				retrieve_current_logical_xid(&logicalXidMeta);
+				get_current_logical_xid_meta(&logicalXidMeta);
 				if (TransactionIdIsValid(logicalXidMeta.xid))
 				{
 					if (!RecoveryInProgress())
@@ -2101,7 +2101,7 @@ start_autonomous_transaction(OAutonomousTxState *state)
 
 	state->needs_wal_flush = oxid_needs_wal_flush;
 	state->oxid = get_current_oxid();
-	retrieve_current_logical_xid(&state->logicalXidMeta);
+	get_current_logical_xid_meta(&state->logicalXidMeta);
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		state->has_retained_undo_location[i] = undo_type_has_retained_location((UndoLogType) i);
 	state->local_wal_has_material_changes = get_local_wal_has_material_changes();

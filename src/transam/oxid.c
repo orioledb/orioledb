@@ -1358,7 +1358,7 @@ get_current_logical_xid(void)
 }
 
 void
-retrieve_current_logical_xid(LogicalXid *output)
+get_current_logical_xid_meta(LogicalXid *output)
 {
 	if (output)
 	{
