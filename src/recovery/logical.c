@@ -535,26 +535,14 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 		if (rec_type == WAL_REC_XID)
 		{
+			CSNSnapshotData *csnSnapshot;
+
 			ptr = wal_parse_rec_xid(ptr, &oxid, &logicalXid, &heapXid, wal_version);
 
-			if (TransactionIdIsValid(logicalXid))
-			{
-				CSNSnapshotData *csnSnapshot;
+			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u", rec_type, rec_type_str, oxid, logicalXid, heapXid);
 
-				elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u", rec_type, rec_type_str, oxid, logicalXid, heapXid);
-
-				csnSnapshot = SnapBuildGetCSNSnaphot(ctx->snapshot_builder);
-				csnSnapshot->nextXid = Max(csnSnapshot->nextXid, oxid);
-			}
-			else
-			{
-				/*
-				 * Oriole logical xid stays invalid for an autonomous
-				 * transactions (internal Oriole's mechanism intended for
-				 * independed commit of Oriole system catalog changes)
-				 */
-				elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec_type, rec_type_str, oxid);
-			}
+			csnSnapshot = SnapBuildGetCSNSnaphot(ctx->snapshot_builder);
+			csnSnapshot->nextXid = Max(csnSnapshot->nextXid, oxid);
 		}
 		else if (rec_type == WAL_REC_SWITCH_LOGICAL_XID)
 		{
@@ -588,19 +576,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
 				 rec_type, rec_type_str, oxid, logicalXid, heapXid);
 
-			if (!TransactionIdIsValid(logicalXid))
-			{
-				/*
-				 * Oriole logical xid stays invalid for an autonomous
-				 * transactions
-				 */
-				elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec_type, rec_type_str, oxid);
-
-				UpdateDecodingStats(ctx);
-				oxid = InvalidOXid;
-				continue;
-			}
-
 			csnSnapshot = SnapBuildGetCSNSnaphot(ctx->snapshot_builder);
 			csnSnapshot->snapshotcsn = csn;
 			csnSnapshot->xlogptr = endXLogPtr;
@@ -608,6 +583,21 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			if (!set_snapshot(ctx, logicalXid, changeXLogPtr))
 				continue;
+
+			if (!TransactionIdIsValid(logicalXid))
+			{
+				/*
+				 * Oriole logical xid stays invalid for an autonomous
+				 * transactions (internal Oriole's mechanism intended for
+				 * independed commit of Oriole system catalog changes)
+				 */
+				elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec_type, rec_type_str, oxid);
+
+				UpdateDecodingStats(ctx);
+				oxid = InvalidOXid;
+
+				continue;
+			}
 
 			txn = get_reorder_buffer_txn(ctx->reorder, logicalXid);
 
@@ -705,6 +695,14 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
 				 rec_type, rec_type_str, oxid, logicalXid, heapXid);
 
+			csnSnapshot = SnapBuildGetCSNSnaphot(ctx->snapshot_builder);
+			csnSnapshot->snapshotcsn = csn;
+			csnSnapshot->xlogptr = endXLogPtr;
+			csnSnapshot->xmin = xmin;
+
+			if (!set_snapshot(ctx, logicalXid, changeXLogPtr))
+				continue;
+
 			if (!TransactionIdIsValid(logicalXid))
 			{
 				/*
@@ -717,14 +715,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				oxid = InvalidOXid;
 				continue;
 			}
-
-			csnSnapshot = SnapBuildGetCSNSnaphot(ctx->snapshot_builder);
-			csnSnapshot->snapshotcsn = csn;
-			csnSnapshot->xlogptr = endXLogPtr;
-			csnSnapshot->xmin = xmin;
-
-			if (!set_snapshot(ctx, logicalXid, changeXLogPtr))
-				continue;
 
 			/* Skip actual commit processing */
 			if (SnapBuildXactNeedsSkip(ctx->snapshot_builder, endXLogPtr - 1) ||
@@ -771,8 +761,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec_type, rec_type_str, oxid);
 				continue;
 			}
-
-			elog(DEBUG4, "WAL_REC_RELATION");
 
 			/* Skip actual relation processing in fast_forward mode */
 			if (ctx->fast_forward)
@@ -894,6 +882,16 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			if (!set_snapshot(ctx, logicalXid, changeXLogPtr))
 				continue;
 
+			if (!TransactionIdIsValid(logicalXid))
+			{
+				/*
+				 * Oriole logical xid stays invalid for an autonomous
+				 * transactions
+				 */
+				elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec_type, rec_type_str, oxid);
+				continue;
+			}
+
 			txn = get_reorder_buffer_txn(ctx->reorder, logicalXid);
 
 			if (txn == NULL)
@@ -937,6 +935,13 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
 				 rec_type, rec_type_str, oxid, logicalXid, heapXid);
 
+			ReorderBufferProcessXid(ctx->reorder, logicalXid, changeXLogPtr);
+
+			if (SnapBuildCurrentState(ctx->snapshot_builder) < SNAPBUILD_FULL_SNAPSHOT)
+				continue;
+
+			(void) set_snapshot(ctx, logicalXid, changeXLogPtr);
+
 			if (!TransactionIdIsValid(logicalXid))
 			{
 				/*
@@ -946,13 +951,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec_type, rec_type_str, oxid);
 				continue;
 			}
-
-			ReorderBufferProcessXid(ctx->reorder, logicalXid, changeXLogPtr);
-
-			if (SnapBuildCurrentState(ctx->snapshot_builder) < SNAPBUILD_FULL_SNAPSHOT)
-				continue;
-
-			(void) set_snapshot(ctx, logicalXid, changeXLogPtr);
 
 			txn = get_reorder_buffer_txn(ctx->reorder, logicalXid);
 			txn->txn_flags |= RBTXN_DISTR_SKIP_CLEANUP;
