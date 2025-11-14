@@ -620,9 +620,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			/* unknown transaction, nothing to replay */
 			if (txn != NULL)
 			{
-				/* if (txn->toptxn) */
-				/* txn = txn->toptxn; */
-
 				Assert(TransactionIdIsValid(logicalXid));
 
 				if (rec_type == WAL_REC_COMMIT)
@@ -877,9 +874,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			ReorderBufferTXN *txn;
 			CommitSeqNo csn;
 			CSNSnapshotData *csnSnapshot;
-
-			xmin = InvalidOXid;
-			csn = 0;
 
 			ptr = wal_parse_rec_rollback_to_savepoint(ptr, &parentSubid, &xmin, &csn, wal_version);
 
