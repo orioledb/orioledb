@@ -53,5 +53,6 @@ lib*.pc
 # Ignore generated scripts
 sql/orioledb--1.0.sql
 sql/orioledb--1.4--1.5.sql
+sql/orioledb--1.5--1.6.sql
 # Exclude the PostGIS Docker build directory
 /docker-postgis

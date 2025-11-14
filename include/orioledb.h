@@ -398,6 +398,9 @@ extern bool orioledb_strict_mode;
 	(AssertMacro(MYPROCNUMBER >= 0 && \
 				 MYPROCNUMBER < max_procs), \
 	 &oProcData[MYPROCNUMBER])
+#define O_GET_AUTONOMOUS_NESTING_LEVEL() (GET_CUR_PROCDATA()->autonomousNestingLevel)
+#define O_IS_TRANSACTION_AUTONOMOUS() \
+	(AssertMacro(O_GET_AUTONOMOUS_NESTING_LEVEL() >= 0), O_GET_AUTONOMOUS_NESTING_LEVEL() > 0)
 #define O_GET_IN_MEMORY_PAGE(blkno) \
 	(AssertMacro(OInMemoryBlknoIsValid(blkno)), \
 	 (Page)(o_shared_buffers + (((uint64) (blkno)) * ((uint64) ORIOLEDB_BLCKSZ))))
