@@ -471,7 +471,7 @@ o_decode_modify_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType i
 			elog(DEBUG4, "WAL_REC_DELETE NON-TOAST");
 
 			change->data.tp.clear_toast_afterwards = true;
-			change->data.tp.oldtuple = o_convert_non_toast_tuple(ctx->reorder, descr, indexDescr, tuple1, false, descr->oldTuple, &oldheaptuple, false);
+			change->data.tp.oldtuple = o_convert_non_toast_tuple(ctx->reorder, descr, indexDescr, tuple1, false, descr->oldTuple, &oldheaptuple, (relreplident == REPLICA_IDENTITY_FULL));
 		}
 	}
 	else if (rec_type == WAL_REC_REINSERT)
@@ -487,27 +487,8 @@ o_decode_modify_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType i
 
 		elog(DEBUG4, "WAL_REC_REINSERT");
 
-		if (relreplident == REPLICA_IDENTITY_FULL)
-		{
-
-			/* Store full old tuple into reorderbuffer */
-			change->data.tp.oldtuple = o_convert_non_toast_tuple(ctx->reorder, descr, indexDescr, tuple2, false, descr->oldTuple, &oldheaptuple, false);
-		}
-		else
-		{
-			/* Store old tuple key into reorderbuffer */
-			/*
-			 * NB: we use descr->newTuple for temp storage of old tuple. Maybe
-			 * there is a way to avoid this.
-			 */
-			o_convert_non_toast_tuple(ctx->reorder, descr, indexDescr, tuple2, true, descr->newTuple, &oldheaptuple, false);
-			tts_copy_identity(descr->newTuple, descr->oldTuple, GET_PRIMARY(descr));
-			change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
-
-			if (oldheaptuple)
-				heap_freetuple(oldheaptuple);
-		}
-
+		/* Store old tuple or key into reorderbuffer */
+		change->data.tp.oldtuple = o_convert_non_toast_tuple(ctx->reorder, descr, indexDescr, tuple2, false, descr->oldTuple, &oldheaptuple, (relreplident == REPLICA_IDENTITY_FULL));
 		/* Store full new tuple into reorderbuffer */
 		change->data.tp.newtuple = o_convert_non_toast_tuple(ctx->reorder, descr, indexDescr, tuple1, false, descr->newTuple, &newheaptuple, true);
 	}
