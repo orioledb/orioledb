@@ -1562,7 +1562,7 @@ undo_xact_callback(XactEvent event, void *arg)
 	TransactionId *subxids = NULL;
 	TransactionId heapXid;
 	XLogRecPtr	flushPos;
-	LogicalXid logicalXidMeta;
+	LogicalXidCtx logicalXidContext;
 
 	/* elog(LOG, "UNDO XACT CALLBACK"); */
 	isParallelWorker = (MyProc->lockGroupLeader != NULL &&
@@ -1611,18 +1611,18 @@ undo_xact_callback(XactEvent event, void *arg)
 		heapXid = GetTopTransactionIdIfAny();
 
 		flushPos = InvalidXLogRecPtr;
-		get_current_logical_xid_meta(&logicalXidMeta);
+		get_current_logical_xid_ctx(&logicalXidContext);
 
-		if (TransactionIdIsValid(heapXid) && TransactionIdIsValid(logicalXidMeta.xid))
+		if (TransactionIdIsValid(heapXid) && TransactionIdIsValid(logicalXidContext.xid))
 		{
 			if (event == XACT_EVENT_PRE_COMMIT)
 			{
-				if (!logicalXidMeta.useHeap)
+				if (!logicalXidContext.useHeap)
 				{
 					elog(DEBUG4, "[%s] event %d oxid %lu SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u",
-						__func__, event, oxid, heapXid, logicalXidMeta.xid);
+						__func__, event, oxid, heapXid, logicalXidContext.xid);
 
-					add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
+					add_switch_logical_xid_wal_record(heapXid, logicalXidContext.xid);
 				}
 			}
 		}
@@ -1633,10 +1633,10 @@ undo_xact_callback(XactEvent event, void *arg)
 				elog(DEBUG4, "[%s] event %d oxid %lu top heapXid %u independent heap transaction",
 					__func__, event, oxid, heapXid);
 			}
-			else if (TransactionIdIsValid(logicalXidMeta.xid))
+			else if (TransactionIdIsValid(logicalXidContext.xid))
 			{
 				elog(DEBUG4, "[%s] event %d oxid %lu logicalXid %u independent Oriole transaction",
-					__func__, event, oxid, logicalXidMeta.xid);
+					__func__, event, oxid, logicalXidContext.xid);
 			}
 		}
 
@@ -1661,19 +1661,19 @@ undo_xact_callback(XactEvent event, void *arg)
 				 */
 
 				elog(DEBUG4, "[%s] XACT_EVENT_PRE_COMMIT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
-					__func__, oxid, logicalXidMeta.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidMeta.useHeap);
+					__func__, oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
 				if (!TransactionIdIsValid(heapXid))
 				{
 					current_oxid_xlog_precommit(); // @TODO check logicalXid if valid ?
 				}
 
-				if (TransactionIdIsValid(logicalXidMeta.xid) && TransactionIdIsValid(heapXid))
+				if (TransactionIdIsValid(logicalXidContext.xid) && TransactionIdIsValid(heapXid))
 				{
-					Assert(logicalXidMeta.xid != heapXid);
+					Assert(logicalXidContext.xid != heapXid);
 
 					elog(DEBUG4, "[%s] XACT_EVENT_PRE_COMMIT wal_joint_commit for SWITCH_LOGICAL_XID %s oxid %lu logicalXid %u top heapXid %u current heapXid %u",
-						__func__, logicalXidMeta.useHeap ? "H2O" : "O2H", oxid, logicalXidMeta.xid, heapXid, GetCurrentTransactionIdIfAny());
+						__func__, logicalXidContext.useHeap ? "H2O" : "O2H", oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny());
 
 					wal_joint_commit(oxid,
 									get_current_logical_xid(),
@@ -1685,14 +1685,14 @@ undo_xact_callback(XactEvent event, void *arg)
 			case XACT_EVENT_COMMIT:
 
 				elog(DEBUG4, "[%s] XACT_EVENT_COMMIT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
-						__func__, oxid, logicalXidMeta.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidMeta.useHeap);
+						__func__, oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
 				if (!TransactionIdIsValid(heapXid))
 				{
 					/* Commit o - o : independent Oriole transaction */
 
 					elog(DEBUG4, "[%s] XACT_EVENT_COMMIT [independent Oriole transaction] oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
-						__func__, oxid, logicalXidMeta.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidMeta.useHeap);
+						__func__, oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
 					current_oxid_xlog_precommit(); // @TODO check logicalXid if valid ?
 
@@ -1753,10 +1753,10 @@ undo_xact_callback(XactEvent event, void *arg)
 			case XACT_EVENT_ABORT:
 
 				elog(DEBUG4, "[%s] XACT_EVENT_ABORT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
-						__func__, oxid, logicalXidMeta.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidMeta.useHeap);
+						__func__, oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
 				if (!RecoveryInProgress())
-					wal_rollback(oxid, logicalXidMeta.xid);
+					wal_rollback(oxid, logicalXidContext.xid);
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					apply_undo_stack((UndoLogType) i, oxid, NULL, true);
@@ -1988,7 +1988,7 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 {
 	TransactionId prentLogicalXid;
 	int			i;
-	LogicalXid logicalXidMeta;
+	LogicalXidCtx logicalXidContext;
 
 	/*
 	 * Cleanup EXPLAY ANALYZE counters pointer to handle case when execution
@@ -2029,8 +2029,8 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 					rollback_to_savepoint((UndoLogType) i, UndoStackFull,
 										  parentSubid, true);
 
-				get_current_logical_xid_meta(&logicalXidMeta);
-				if (TransactionIdIsValid(logicalXidMeta.xid))
+				get_current_logical_xid_ctx(&logicalXidContext);
+				if (TransactionIdIsValid(logicalXidContext.xid))
 				{
 					if (!RecoveryInProgress())
 					{
@@ -2101,7 +2101,7 @@ start_autonomous_transaction(OAutonomousTxState *state)
 
 	state->needs_wal_flush = oxid_needs_wal_flush;
 	state->oxid = get_current_oxid();
-	get_current_logical_xid_meta(&state->logicalXidMeta);
+	get_current_logical_xid_ctx(&state->logicalXidContext);
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		state->has_retained_undo_location[i] = undo_type_has_retained_location((UndoLogType) i);
 	state->local_wal_has_material_changes = get_local_wal_has_material_changes();
@@ -2142,7 +2142,7 @@ abort_autonomous_transaction(OAutonomousTxState *state)
 	oxid_needs_wal_flush = state->needs_wal_flush;
 	GET_CUR_PROCDATA()->autonomousNestingLevel--;
 	set_current_oxid(state->oxid);
-	set_current_logical_xid(&state->logicalXidMeta);
+	set_current_logical_xid(&state->logicalXidContext);
 	set_local_wal_has_material_changes(state->local_wal_has_material_changes);
 }
 
@@ -2180,7 +2180,7 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 	oxid_needs_wal_flush = state->needs_wal_flush;
 	GET_CUR_PROCDATA()->autonomousNestingLevel--;
 	set_current_oxid(state->oxid);
-	set_current_logical_xid(&state->logicalXidMeta);
+	set_current_logical_xid(&state->logicalXidContext);
 	set_local_wal_has_material_changes(state->local_wal_has_material_changes);
 }
 

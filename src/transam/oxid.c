@@ -85,29 +85,29 @@ PG_FUNCTION_INFO_V1(orioledb_get_current_heap_xid);
  */
 static OXid curOxid = InvalidOXid;	/* a 64-bit OrioleDB oxid */
 
-static LogicalXid logicalXidMeta = {InvalidTransactionId, false};
+static LogicalXidCtx logicalXidContext = {InvalidTransactionId, false};
 
 static inline void
 reset_logical_xid_meta(void)
 {
-	logicalXidMeta.xid = InvalidTransactionId;
-	logicalXidMeta.useHeap = false;
+	logicalXidContext.xid = InvalidTransactionId;
+	logicalXidContext.useHeap = false;
 }
 
-static inline LogicalXid *
+static inline LogicalXidCtx *
 clone_logical_xid_meta(void)
 {
-	LogicalXid *clone = (LogicalXid *) palloc(sizeof(LogicalXid));
+	LogicalXidCtx *clone = (LogicalXidCtx *) palloc(sizeof(LogicalXidCtx));
 
 	Assert(clone);
-	memcpy(clone, &logicalXidMeta, sizeof(LogicalXid));
+	memcpy(clone, &logicalXidContext, sizeof(LogicalXidCtx));
 	return clone;
 }
 
 Datum
 orioledb_get_current_logical_xid(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_INT64(logicalXidMeta.xid);
+	PG_RETURN_INT64(logicalXidContext.xid);
 }
 
 Datum
@@ -366,18 +366,18 @@ acquire_logical_xid(bool *isValidHeapXid)
 }
 
 static void
-release_logical_xid(LogicalXid *lxm)
+release_logical_xid(LogicalXidCtx *ctx)
 {
 	uint32		itemsCount = 0,
 				mynum = 0;
 	uint32		value PG_USED_FOR_ASSERTS_ONLY;
 
-	if (lxm)
+	if (ctx)
 	{
 		itemsCount = logical_xid_buffers_guc * (BLCKSZ / sizeof(pg_atomic_uint32));
-		mynum = lxm->xid % (itemsCount * 32);
+		mynum = ctx->xid % (itemsCount * 32);
 
-		Assert(TransactionIdIsNormal(lxm->xid));
+		Assert(TransactionIdIsNormal(ctx->xid));
 
 		value = pg_atomic_fetch_and_u32(&logicalXidsShmemMap[mynum / 32],
 										~(1 << (mynum % 32)));
@@ -422,34 +422,34 @@ assign_subtransaction_logical_xid(void)
 	/*
 	 * Check previous logical xid if present and store it in a list of xids
 	 */
-	if (TransactionIdIsValid(logicalXidMeta.xid))
+	if (TransactionIdIsValid(logicalXidContext.xid))
 	{
 		MemoryContext mcxt = MemoryContextSwitchTo(TopMemoryContext);
 
-		elog(DEBUG4, "[%s] STORE xid %u useHeap %d", __func__, logicalXidMeta.xid, logicalXidMeta.useHeap);
+		elog(DEBUG4, "[%s] STORE xid %u useHeap %d", __func__, logicalXidContext.xid, logicalXidContext.useHeap);
 		prevLogicalXids = lappend(prevLogicalXids, clone_logical_xid_meta());
 		MemoryContextSwitchTo(mcxt);
 	}
 
-	logicalXidMeta.xid = nextLogicalXid;
-	logicalXidMeta.useHeap = isValidHeapXid;
+	logicalXidContext.xid = nextLogicalXid;
+	logicalXidContext.useHeap = isValidHeapXid;
 }
 
 static void
 setup_prev_logical_xid_meta(void)
 {
 	int			llen = 0;
-	LogicalXid *ptr = NULL;
+	LogicalXidCtx *ptr = NULL;
 
 	llen = list_length(prevLogicalXids);
 	if (llen > 0)
 	{
-		ptr = (LogicalXid *) llast(prevLogicalXids);
+		ptr = (LogicalXidCtx *) llast(prevLogicalXids);
 		if (ptr)
 		{
-			logicalXidMeta.xid = ptr->xid;
-			logicalXidMeta.useHeap = ptr->useHeap;
-			elog(DEBUG4, "[%s] RESTORE xid %u useHeap %d", __func__, logicalXidMeta.xid, logicalXidMeta.useHeap);
+			logicalXidContext.xid = ptr->xid;
+			logicalXidContext.useHeap = ptr->useHeap;
+			elog(DEBUG4, "[%s] RESTORE xid %u useHeap %d", __func__, logicalXidContext.xid, logicalXidContext.useHeap);
 			pfree(ptr);
 		}
 		prevLogicalXids = list_delete_last(prevLogicalXids);
@@ -473,27 +473,27 @@ oxid_subxact_callback(
 			{
 				if (have_retained_undo_location())
 				{
-					if (TransactionIdIsValid(logicalXidMeta.xid))
+					if (TransactionIdIsValid(logicalXidContext.xid))
 					{
-						release_logical_xid(&logicalXidMeta);
+						release_logical_xid(&logicalXidContext);
 
 						heapXid = GetTopTransactionIdIfAny();
 						if (TransactionIdIsValid(heapXid))
 						{
-							if (!logicalXidMeta.useHeap)
+							if (!logicalXidContext.useHeap)
 							{
-								elog(DEBUG4, "%s SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u", __func__, heapXid, logicalXidMeta.xid);
-								add_switch_logical_xid_wal_record(heapXid, logicalXidMeta.xid);
+								elog(DEBUG4, "%s SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u", __func__, heapXid, logicalXidContext.xid);
+								add_switch_logical_xid_wal_record(heapXid, logicalXidContext.xid);
 							}
 
 							if (!RecoveryInProgress())
 							{
 								elog(DEBUG4, "%s Add wal_joint_commit for oxid %lu logical xid %u top xid %u",
-									 __func__, get_current_oxid_if_any(), logicalXidMeta.xid, GetTopTransactionIdIfAny());
+									 __func__, get_current_oxid_if_any(), logicalXidContext.xid, GetTopTransactionIdIfAny());
 
 								wal_joint_commit(
 												 get_current_oxid_if_any(),
-												 logicalXidMeta.xid,
+												 logicalXidContext.xid,
 												 GetTopTransactionIdIfAny());
 							}
 						}
@@ -512,12 +512,12 @@ oxid_subxact_callback(
 			{
 				if (have_retained_undo_location())
 				{
-					if (TransactionIdIsValid(logicalXidMeta.xid))
+					if (TransactionIdIsValid(logicalXidContext.xid))
 					{
 						if (!RecoveryInProgress())
 						{
 							elog(DEBUG4, "%s Rollback for oxid %lu logical xid %u top xid %u",
-								 __func__, get_current_oxid_if_any(), logicalXidMeta.xid, GetTopTransactionIdIfAny());
+								 __func__, get_current_oxid_if_any(), logicalXidContext.xid, GetTopTransactionIdIfAny());
 
 							setup_prev_logical_xid_meta();
 						}
@@ -1296,7 +1296,7 @@ get_current_oxid(void)
 		}
 		else
 		{
-			logicalXidMeta.xid = acquire_logical_xid_wrapper(&logicalXidMeta.useHeap);
+			logicalXidContext.xid = acquire_logical_xid_wrapper(&logicalXidContext.useHeap);
 		}
 	}
 
@@ -1311,13 +1311,13 @@ set_current_oxid(OXid oxid)
 }
 
 void
-set_current_logical_xid(LogicalXid *in)
+set_current_logical_xid(LogicalXidCtx *in)
 {
 	if (in)
 	{
-		Assert(!TransactionIdIsValid(logicalXidMeta.xid));
-		logicalXidMeta.xid = in->xid;
-		logicalXidMeta.useHeap = in->useHeap;
+		Assert(!TransactionIdIsValid(logicalXidContext.xid));
+		logicalXidContext.xid = in->xid;
+		logicalXidContext.useHeap = in->useHeap;
 	}
 }
 
@@ -1354,16 +1354,16 @@ get_current_oxid_if_any(void)
 TransactionId
 get_current_logical_xid(void)
 {
-	return logicalXidMeta.xid;
+	return logicalXidContext.xid;
 }
 
 void
-get_current_logical_xid_meta(LogicalXid *output)
+get_current_logical_xid_ctx(LogicalXidCtx *output)
 {
 	if (output)
 	{
-		output->xid = logicalXidMeta.xid;
-		output->useHeap = logicalXidMeta.useHeap;
+		output->xid = logicalXidContext.xid;
+		output->useHeap = logicalXidContext.useHeap;
 	}
 }
 
@@ -1418,16 +1418,16 @@ advance_run_xmin(OXid oxid)
 static void
 release_assigned_logical_xids(void)
 {
-	if (TransactionIdIsValid(logicalXidMeta.xid))
+	if (TransactionIdIsValid(logicalXidContext.xid))
 	{
-		release_logical_xid(&logicalXidMeta);
+		release_logical_xid(&logicalXidContext);
 		reset_logical_xid_meta();
 	}
 
 	if (GET_CUR_PROCDATA()->autonomousNestingLevel == 0)
 	{
 		ListCell   *lc = NULL;
-		LogicalXid *ptr = NULL;
+		LogicalXidCtx *ptr = NULL;
 
 		foreach(lc, prevLogicalXids)
 		{
