@@ -690,12 +690,14 @@ static void
 add_relreplident_wal_record(char relreplident)
 {
 	WALRecRelReplident *rec = (WALRecRelReplident *) (&local_wal_buffer[local_wal_buffer_offset]);
+	Oid 	ix_oid = InvalidOid;
 
 	Assert(!is_recovery_process());
 	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	rec->recType = WAL_REC_RELREPLIDENT;
 	rec->relreplident = relreplident;
+	memcpy(&rec->relreplident_ix_oid, &ix_oid, sizeof(Oid));
 
 	local_wal_buffer_offset += sizeof(*rec);
 }
