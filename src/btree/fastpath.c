@@ -476,7 +476,7 @@ fastpath_find_chunk(Pointer pagePtr,
 	pg_read_barrier();
 
 	/* Possible we need to visit the rightlink */
-	if (*chunkIndex >= count)
+	if (*chunkIndex >= imgHdr->chunksCount)
 		return OBTreeFastPathFindSlowpath;
 
 	state = pg_atomic_read_u64(&hdr->o_header.state);
