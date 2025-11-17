@@ -209,7 +209,7 @@ xmin_pairingheap_cmp(const pairingheap_node *a,
 }
 
 /* Current recovery transaction state. */
-static RecoveryXidState *cur_state = NULL;
+static RecoveryXidState *cur_recovery_xid_state = NULL;
 
 /* Recovery transaction hash for the current process. */
 static HTAB *recovery_xid_state_hash = NULL;
@@ -522,6 +522,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			state->in_finished_list = false;
 			for (j = 0; j < (int) UndoLogsCount; j++)
 				state->in_retain_undo_heaps[j] = false;
+			memset(state->undo_stacks, 0, sizeof(state->undo_stacks));
 			for (j = 0; j < (int) UndoLogsCount; j++)
 				undo_stack_locations_set_invalid(&state->undo_stacks[j]);
 			dlist_init(&state->checkpoint_undo_stacks);
@@ -568,17 +569,18 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 static void
 apply_xids_branches(void)
 {
+	RecoveryXidState *state;
 	HASH_SEQ_STATUS hash_seq;
 
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
-	while ((cur_state = (RecoveryXidState *) hash_seq_search(&hash_seq)) != NULL)
+	while ((state = (RecoveryXidState *) hash_seq_search(&hash_seq)) != NULL)
 	{
 		dlist_iter	iter;
 
-		oxid_needs_wal_flush = cur_state->needs_wal_flush;
-		recovery_oxid = cur_state->oxid;
+		oxid_needs_wal_flush = state->needs_wal_flush;
+		recovery_oxid = state->oxid;
 
-		dlist_foreach(iter, &cur_state->checkpoint_undo_stacks)
+		dlist_foreach(iter, &state->checkpoint_undo_stacks)
 		{
 			CheckpointUndoStack *stack = dlist_container(CheckpointUndoStack,
 														 node,
@@ -608,7 +610,7 @@ apply_xids_branches(void)
 	oxid_needs_wal_flush = false;
 	recovery_oxid = InvalidOXid;
 	reset_cur_undo_locations();
-	cur_state = NULL;
+	cur_recovery_xid_state = NULL;
 }
 
 void
@@ -1019,16 +1021,16 @@ recovery_init(int worker_id)
 }
 
 static void
-walk_checkpoint_stacks(CommitSeqNo csn,
+walk_checkpoint_stacks(RecoveryXidState *recovery_xid_state, CommitSeqNo csn,
 					   SubTransactionId parentSubid,
 					   bool flushUndoPos)
 {
 	dlist_mutable_iter miter;
 
-	oxid_needs_wal_flush = cur_state->needs_wal_flush;
-	recovery_oxid = cur_state->oxid;
+	oxid_needs_wal_flush = recovery_xid_state->needs_wal_flush;
+	recovery_oxid = recovery_xid_state->oxid;
 
-	dlist_foreach_modify(miter, &cur_state->checkpoint_undo_stacks)
+	dlist_foreach_modify(miter, &recovery_xid_state->checkpoint_undo_stacks)
 	{
 		CheckpointUndoStack *stack = dlist_container(CheckpointUndoStack,
 													 node,
@@ -1065,19 +1067,21 @@ void
 recovery_finish(int worker_id)
 {
 	bool		flush_undo_pos = need_flush_undo_pos(worker_id);
+	RecoveryXidState *cur_state;
 	HASH_SEQ_STATUS hash_seq;
 	int			i;
 
 	delay_if_queued_for_idxbuild();
 
-	if (cur_state)
+	if (cur_recovery_xid_state)
 	{
-		cur_state->needs_wal_flush = oxid_needs_wal_flush;
+		cur_recovery_xid_state->needs_wal_flush = oxid_needs_wal_flush;
 		for (i = 0; i < (int) UndoLogsCount; i++)
 		{
-			cur_state->undo_stacks[i] = get_cur_undo_locations((UndoLogType) i);
-			cur_state->retain_locs[i] = curRetainUndoLocations[i];
+			cur_recovery_xid_state->undo_stacks[i] = get_cur_undo_locations((UndoLogType) i);
+			cur_recovery_xid_state->retain_locs[i] = curRetainUndoLocations[i];
 		}
+		cur_recovery_xid_state = NULL;
 	}
 
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
@@ -1099,7 +1103,7 @@ recovery_finish(int worker_id)
 				flush_current_undo_stack();
 			for (i = 0; i < (int) UndoLogsCount; i++)
 				apply_undo_stack((UndoLogType) i, recovery_oxid, NULL, true);
-			walk_checkpoint_stacks(COMMITSEQNO_ABORTED,
+			walk_checkpoint_stacks(cur_state, COMMITSEQNO_ABORTED,
 								   InvalidSubTransactionId,
 								   flush_undo_pos);
 		}
@@ -1161,6 +1165,7 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 
 	if (recovery_oxid != oxid)
 	{
+		RecoveryXidState *cur_state = cur_recovery_xid_state;
 		bool		found;
 
 		if (cur_state)
@@ -1225,6 +1230,8 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			else
 				cur_state->used_by = NULL;
 		}
+
+		cur_recovery_xid_state = cur_state;
 		update_proc_retain_undo_location(worker_id);
 	}
 }
@@ -1302,6 +1309,8 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 	bool		flush_undo_pos = need_flush_undo_pos(worker_id);
 	int			i;
 
+	Assert(cur_recovery_xid_state != NULL);
+
 	delay_if_queued_for_idxbuild();
 
 	if (!COMMITSEQNO_IS_ABORTED(csn) && sync)
@@ -1312,7 +1321,8 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 			flush_current_undo_stack();
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			on_commit_undo_stack((UndoLogType) i, oxid, true);
-		walk_checkpoint_stacks(csn, InvalidSubTransactionId, flush_undo_pos);
+		walk_checkpoint_stacks(cur_recovery_xid_state, csn,
+							   InvalidSubTransactionId, flush_undo_pos);
 		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 		set_oxid_csn(oxid, csn);
 		set_oxid_xlog_ptr(oxid, XLOG_PTR_ALIGN(ptr));
@@ -1323,9 +1333,11 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 			flush_current_undo_stack();
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			on_commit_undo_stack((UndoLogType) i, oxid, true);
-		walk_checkpoint_stacks(csn, InvalidSubTransactionId, flush_undo_pos);
-		cur_state->in_finished_list = true;
-		dlist_push_tail(&finished_list, &cur_state->finished_list_node);
+		walk_checkpoint_stacks(cur_recovery_xid_state, csn,
+							   InvalidSubTransactionId, flush_undo_pos);
+		cur_recovery_xid_state->in_finished_list = true;
+		dlist_push_tail(&finished_list,
+						&cur_recovery_xid_state->finished_list_node);
 	}
 	else
 	{
@@ -1333,7 +1345,8 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 			flush_current_undo_stack();
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			apply_undo_stack((UndoLogType) i, oxid, NULL, true);
-		walk_checkpoint_stacks(csn, InvalidSubTransactionId, flush_undo_pos);
+		walk_checkpoint_stacks(cur_recovery_xid_state, csn,
+							   InvalidSubTransactionId, flush_undo_pos);
 		if (worker_id < 0)
 		{
 			if (sync)
@@ -1348,19 +1361,20 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 				 * the workers.  Otherwise, workers can consider it as
 				 * committed due to runXmin.
 				 */
-				cur_state->in_finished_list = true;
-				dlist_push_tail(&finished_list, &cur_state->finished_list_node);
+				cur_recovery_xid_state->in_finished_list = true;
+				dlist_push_tail(&finished_list,
+								&cur_recovery_xid_state->finished_list_node);
 			}
 		}
 	}
 
-	cur_state->csn = csn;
-	cur_state->ptr = ptr;
+	cur_recovery_xid_state->csn = csn;
+	cur_recovery_xid_state->ptr = ptr;
 
-	if (cur_state->o_tables_meta_locked)
+	if (cur_recovery_xid_state->o_tables_meta_locked)
 	{
 		o_tables_meta_unlock_no_wal();
-		cur_state->o_tables_meta_locked = false;
+		cur_recovery_xid_state->o_tables_meta_locked = false;
 	}
 
 	oxid_needs_wal_flush = false;
@@ -1369,21 +1383,22 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
-		if (!UndoLocationIsValid(cur_state->retain_locs[i]) &&
+		if (!UndoLocationIsValid(cur_recovery_xid_state->retain_locs[i]) &&
 			UndoLocationIsValid(curRetainUndoLocations[i]))
 		{
-			cur_state->retain_locs[i] = curRetainUndoLocations[i];
-			pairingheap_add(retain_undo_queues[i], &cur_state->retain_undo_ph_nodes[i]);
-			cur_state->in_retain_undo_heaps[i] = true;
+			cur_recovery_xid_state->retain_locs[i] = curRetainUndoLocations[i];
+			pairingheap_add(retain_undo_queues[i],
+							&cur_recovery_xid_state->retain_undo_ph_nodes[i]);
+			cur_recovery_xid_state->in_retain_undo_heaps[i] = true;
 		}
 		curRetainUndoLocations[i] = InvalidUndoLocation;
 	}
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		release_undo_size((UndoLogType) i);
-	check_delete_xid_state(cur_state, worker_id);
+	check_delete_xid_state(cur_recovery_xid_state, worker_id);
 
-	cur_state = NULL;
+	cur_recovery_xid_state = NULL;
 
 	update_proc_retain_undo_location(worker_id);
 }
@@ -1394,10 +1409,12 @@ checkpoint_rollback_to_savepoint(SubTransactionId parentSubid)
 	int			i;
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
-		cur_state->undo_stacks[i] = get_cur_undo_locations((UndoLogType) i);
-	walk_checkpoint_stacks(COMMITSEQNO_ABORTED, parentSubid, false);
+		cur_recovery_xid_state->undo_stacks[i] = get_cur_undo_locations((UndoLogType) i);
+	walk_checkpoint_stacks(cur_recovery_xid_state, COMMITSEQNO_ABORTED,
+						   parentSubid, false);
 	for (i = 0; i < (int) UndoLogsCount; i++)
-		set_cur_undo_locations((UndoLogType) i, cur_state->undo_stacks[i]);
+		set_cur_undo_locations((UndoLogType) i,
+							   cur_recovery_xid_state->undo_stacks[i]);
 }
 
 void
@@ -1830,15 +1847,18 @@ update_proc_retain_undo_location(int worker_id)
 	int			i;
 	bool		allRetainQueuesEmpty = true;
 
-	for (i = 0; i < (int) UndoLogsCount; i++)
+	if (cur_recovery_xid_state != NULL)
 	{
-		if (cur_state &&
-			!UndoLocationIsValid(cur_state->retain_locs[i]) &&
-			UndoLocationIsValid(curRetainUndoLocations[i]))
+		for (i = 0; i < (int) UndoLogsCount; i++)
 		{
-			cur_state->retain_locs[i] = curRetainUndoLocations[i];
-			cur_state->in_retain_undo_heaps[i] = true;
-			pairingheap_add(retain_undo_queues[i], &cur_state->retain_undo_ph_nodes[i]);
+			if (!UndoLocationIsValid(cur_recovery_xid_state->retain_locs[i]) &&
+				UndoLocationIsValid(curRetainUndoLocations[i]))
+			{
+				cur_recovery_xid_state->retain_locs[i] = curRetainUndoLocations[i];
+				cur_recovery_xid_state->in_retain_undo_heaps[i] = true;
+				pairingheap_add(retain_undo_queues[i],
+								&cur_recovery_xid_state->retain_undo_ph_nodes[i]);
+			}
 		}
 	}
 
@@ -1949,10 +1969,11 @@ recovery_write_to_xids_queue(int worker_id, uint32 requestNumber)
 	RecoveryXidState *state;
 	int			i;
 
-	if (cur_state)
+	if (cur_recovery_xid_state)
 	{
 		for (i = 0; i < (int) UndoLogsCount; i++)
-			cur_state->undo_stacks[i] = get_cur_undo_locations((UndoLogType) i);
+			cur_recovery_xid_state->undo_stacks[i] =
+				get_cur_undo_locations((UndoLogType) i);
 	}
 
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
@@ -2067,6 +2088,14 @@ save_state_to_file(int worker_id)
 				 errmsg("could not write recovery worker undo header to file \"%s\": %m",
 						filename)));
 
+	/* Update current undo locations if needed */
+	if (cur_recovery_xid_state != NULL)
+	{
+		for (int i = 0; i < UndoLogsCount; i++)
+			cur_recovery_xid_state->undo_stacks[i] =
+				get_cur_undo_locations((UndoLogType) i);
+	}
+
 	/* Write all transaction states */
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
 	while ((state = hash_seq_search(&hash_seq)) != NULL)
@@ -2085,12 +2114,6 @@ save_state_to_file(int worker_id)
 			entry.numCheckpointStacks++;
 		}
 
-		/* Update current undo locations if needed */
-		if (cur_state == state)
-		{
-			for (int i = 0; i < UndoLogsCount; i++)
-				state->undo_stacks[i] = get_cur_undo_locations((UndoLogType) i);
-		}
 		memcpy(entry.undoStacks, state->undo_stacks, sizeof(entry.undoStacks));
 
 		if (OFileWrite(tempFile, (char *) &entry, sizeof(entry), offset,
@@ -2646,7 +2669,7 @@ recovery_send_init(int worker_num)
 static void
 handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 {
-	if (!cur_state->o_tables_meta_locked)
+	if (!cur_recovery_xid_state->o_tables_meta_locked)
 	{
 		/*
 		 * It might happend that we didn't replay WAL_REC_O_TABLES_META_LOCK
@@ -2816,7 +2839,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 		o_tables_meta_unlock_no_wal();
 	}
 
-	cur_state->o_tables_meta_locked = false;
+	cur_recovery_xid_state->o_tables_meta_locked = false;
 }
 
 static void
@@ -2974,16 +2997,16 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			commit = (rec_type == WAL_REC_COMMIT);
 
 			Assert(oxid != InvalidOXid);
+			Assert(cur_recovery_xid_state != NULL);
 
 			if (!single)
 			{
-				Assert(cur_state != NULL);
 				workers_send_oxid_finish(xlogRecEndPtr, commit);
-				if (cur_state->systree_modified || cur_state->checkpoint_xid)
+				if (cur_recovery_xid_state->systree_modified || cur_recovery_xid_state->checkpoint_xid)
 				{
 					sync = true;
 					workers_synchronize(xlogPtr, false);
-					if (cur_state->invalidate_typcache)
+					if (cur_recovery_xid_state->invalidate_typcache)
 						invalidate_typcache();
 				}
 			}
@@ -2991,7 +3014,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			{
 				sync = true;
 				pg_atomic_write_u64(recovery_ptr, xlogPtr);
-				if (cur_state->invalidate_typcache)
+				if (cur_recovery_xid_state->invalidate_typcache)
 					invalidate_typcache();
 
 			}
@@ -3007,9 +3030,10 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 			ptr = wal_parse_rec_joint_commit(ptr, &xid, &xmin, NULL /* skip csn field */ );
 
-			cur_state->xid = xid;
+			cur_recovery_xid_state->xid = xid;
 			recovery_xmin = Max(recovery_xmin, xmin);
-			dlist_push_tail(&joint_commit_list, &cur_state->joint_commit_list_node);
+			dlist_push_tail(&joint_commit_list,
+							&cur_recovery_xid_state->joint_commit_list_node);
 		}
 		else if (rec_type == WAL_REC_REPLAY_FEEDBACK)
 		{
@@ -3062,9 +3086,9 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		}
 		else if (rec_type == WAL_REC_O_TABLES_META_LOCK)
 		{
-			Assert(!cur_state->o_tables_meta_locked);
+			Assert(!cur_recovery_xid_state->o_tables_meta_locked);
 			o_tables_meta_lock_no_wal();
-			cur_state->o_tables_meta_locked = true;
+			cur_recovery_xid_state->o_tables_meta_locked = true;
 		}
 		else if (rec_type == WAL_REC_O_TABLES_META_UNLOCK)
 		{
@@ -3076,7 +3100,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			if (!single)
 				workers_synchronize(xlogPtr, true);
 
-			Assert(cur_state->o_tables_meta_locked);
+			Assert(cur_recovery_xid_state->o_tables_meta_locked);
 			handle_o_tables_meta_unlock(oids, oldRelnode);
 
 			if (!single)
@@ -3168,11 +3192,11 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				Assert(sys_tree_supports_transactions(sys_tree_num));
 				recovery_switch_to_oxid(oxid, -1);
 
-				cur_state->systree_modified = true;
+				cur_recovery_xid_state->systree_modified = true;
 				if (IS_TYPCACHE_SYSTREE(sys_tree_num))
-					cur_state->invalidate_typcache = true;
+					cur_recovery_xid_state->invalidate_typcache = true;
 				if (sys_tree_num == SYS_TREES_O_TABLES)
-					Assert(cur_state->o_tables_meta_locked);
+					Assert(cur_recovery_xid_state->o_tables_meta_locked);
 
 				if (!single)
 					workers_synchronize(xlogPtr, true);
@@ -3286,15 +3310,16 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn)
 
 		recovery_switch_to_oxid(state->oxid, -1);
 
+		Assert(cur_recovery_xid_state != NULL);
 		if (!single)
 		{
-			Assert(cur_state != NULL);
 			workers_send_oxid_finish(lsn, true);
-			if (cur_state->systree_modified || cur_state->checkpoint_xid)
+			if (cur_recovery_xid_state->systree_modified ||
+				cur_recovery_xid_state->checkpoint_xid)
 			{
 				sync = true;
 				workers_synchronize(lsn, false);
-				if (cur_state->invalidate_typcache)
+				if (cur_recovery_xid_state->invalidate_typcache)
 					invalidate_typcache();
 			}
 		}
@@ -3302,7 +3327,7 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn)
 		{
 			sync = true;
 			pg_atomic_write_u64(recovery_ptr, lsn);
-			if (cur_state->invalidate_typcache)
+			if (cur_recovery_xid_state->invalidate_typcache)
 				invalidate_typcache();
 		}
 
@@ -3482,15 +3507,16 @@ worker_send_modify(int worker_id, BTreeDescr *desc,
 	data += sizeof(RecoveryMsgHeader);
 	state->queue_buf_len += sizeof(RecoveryMsgHeader);
 
-	Assert(cur_state || recType == RecoveryMsgTypeBridgeErase);
-	if (recType != RecoveryMsgTypeBridgeErase && state->oxid != cur_state->oxid)
+	Assert(cur_recovery_xid_state || recType == RecoveryMsgTypeBridgeErase);
+	if (recType != RecoveryMsgTypeBridgeErase &&
+		state->oxid != cur_recovery_xid_state->oxid)
 	{
-		memcpy(data, &cur_state->oxid, sizeof(OXid));
+		memcpy(data, &cur_recovery_xid_state->oxid, sizeof(OXid));
 		data += sizeof(OXid);
 		state->queue_buf_len += sizeof(OXid);
 		header->type |= RECOVERY_MODIFY_OXID;
-		state->oxid = cur_state->oxid;
-		cur_state->used_by[worker_id] = true;
+		state->oxid = cur_recovery_xid_state->oxid;
+		cur_recovery_xid_state->used_by[worker_id] = true;
 	}
 
 	if (!ORelOidsIsEqual(state->oids, oids) || state->type != type)
@@ -3575,18 +3601,18 @@ workers_send_savepoint(SubTransactionId parentSubId)
 	RecoveryMsgSavepoint msg;
 	int			i;
 
-	Assert(cur_state);
+	Assert(cur_recovery_xid_state);
 
 	msg.header.type = RecoveryMsgTypeSavepoint;
-	msg.oxid = cur_state->oxid;
+	msg.oxid = cur_recovery_xid_state->oxid;
 	msg.parentSubId = parentSubId;
 
 	for (i = 0; i < recovery_pool_size_guc; i++)
 	{
-		if (cur_state->used_by[i])
+		if (cur_recovery_xid_state->used_by[i])
 		{
 			state = &workers_pool[i];
-			if (state->oxid == cur_state->oxid)
+			if (state->oxid == cur_recovery_xid_state->oxid)
 				state->oxid = InvalidOXid;
 
 			worker_send_msg(i, (Pointer) &msg, sizeof(msg));
@@ -3611,19 +3637,19 @@ workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 	RecoveryMsgRollbackToSavepoint msg;
 	int			i;
 
-	Assert(cur_state);
+	Assert(cur_recovery_xid_state);
 
 	msg.header.type = RecoveryMsgTypeRollbackToSavepointt;
-	msg.oxid = cur_state->oxid;
+	msg.oxid = cur_recovery_xid_state->oxid;
 	msg.ptr = ptr;
 	msg.parentSubId = parentSubId;
 
 	for (i = 0; i < recovery_pool_size_guc; i++)
 	{
-		if (cur_state->used_by[i])
+		if (cur_recovery_xid_state->used_by[i])
 		{
 			state = &workers_pool[i];
-			if (state->oxid == cur_state->oxid)
+			if (state->oxid == cur_recovery_xid_state->oxid)
 				state->oxid = InvalidOXid;
 
 			worker_send_msg(i, (Pointer) &msg, sizeof(msg));
@@ -3649,7 +3675,7 @@ workers_send_oxid_finish(XLogRecPtr ptr, bool commit)
 	int			i;
 
 	oxid_ptr_record.header.type = commit ? RecoveryMsgTypeCommit : RecoveryMsgTypeRollback;
-	oxid_ptr_record.oxid = cur_state->oxid;
+	oxid_ptr_record.oxid = cur_recovery_xid_state->oxid;
 	oxid_ptr_record.ptr = ptr;
 
 	for (i = 0; i < recovery_pool_size_guc; i++)
@@ -3660,10 +3686,11 @@ workers_send_oxid_finish(XLogRecPtr ptr, bool commit)
 		 * notify them by phone because all the works read the xids file and
 		 * need to update their local hashes.
 		 */
-		if (cur_state->used_by[i] || cur_state->checkpoint_xid)
+		if (cur_recovery_xid_state->used_by[i] ||
+			cur_recovery_xid_state->checkpoint_xid)
 		{
 			state = &workers_pool[i];
-			if (state->oxid == cur_state->oxid)
+			if (state->oxid == cur_recovery_xid_state->oxid)
 				state->oxid = InvalidOXid;
 
 			worker_send_msg(i, (Pointer) &oxid_ptr_record, sizeof(oxid_ptr_record));
