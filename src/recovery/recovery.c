@@ -2936,20 +2936,28 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 	while (ptr < endPtr)
 	{
+		const char *rec_type_str;
+
 		xlogPtr = xlogRecPtr + (ptr - startPtr);
 		rec_type = *ptr;
 		ptr++;
 
+		rec_type_str = wal_record_type_to_string(rec_type);
+
+		elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu", rec_type, rec_type_str, oxid);
+
 		if (rec_type == WAL_REC_XID)
 		{
-			memcpy(&oxid, ptr, sizeof(oxid));
-			ptr += sizeof(oxid);
-
-			/* don't need logicalXid here */
-			ptr += sizeof(TransactionId);
+			/* don't need logicalXid & heapXid here */
+			ptr = wal_parse_rec_xid(ptr, &oxid, NULL, NULL, wal_version);
 
 			advance_oxids(oxid);
 			recovery_switch_to_oxid(oxid, -1);
+		}
+		else if (rec_type == WAL_REC_SWITCH_LOGICAL_XID)
+		{
+			/* Ignore */
+			ptr = wal_parse_rec_switch_logical_xid(ptr, NULL, NULL);
 		}
 		else if (rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK)
 		{
@@ -2957,11 +2965,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 						sync = false;
 			OXid		xmin;
 
-			memcpy(&xmin, ptr, sizeof(xmin));
-			ptr += sizeof(xmin);
-
-			/* skip csn field */
-			ptr += sizeof(CommitSeqNo);
+			ptr = wal_parse_rec_finish(ptr, &xmin, NULL /* skip csn field */ );
 
 			recovery_xmin = Max(recovery_xmin, xmin);
 
@@ -3001,13 +3005,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			TransactionId xid;
 			OXid		xmin;
 
-			memcpy(&xid, ptr, sizeof(xid));
-			ptr += sizeof(xid);
-			memcpy(&xmin, ptr, sizeof(xmin));
-			ptr += sizeof(xmin);
-
-			/* skip csn field */
-			ptr += sizeof(CommitSeqNo);
+			ptr = wal_parse_rec_joint_commit(ptr, &xid, &xmin, NULL /* skip csn field */ );
 
 			cur_state->xid = xid;
 			recovery_xmin = Max(recovery_xmin, xmin);
@@ -3019,16 +3017,12 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		}
 		else if (rec_type == WAL_REC_RELATION)
 		{
+			uint8		treeType;
 			OIndexType	ix_type;
 
-			ix_type = *ptr;
-			ptr++;
-			memcpy(&cur_oids.datoid, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-			memcpy(&cur_oids.reloid, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-			memcpy(&cur_oids.relnode, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
+			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids);
+
+			ix_type = treeType;
 
 			if (IS_SYS_TREE_OIDS(cur_oids))
 				sys_tree_num = cur_oids.relnode;
@@ -3077,14 +3071,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			ORelOids	oids;
 			Oid			oldRelnode;
 
-			memcpy(&oids.datoid, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-			memcpy(&oids.reloid, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-			memcpy(&oldRelnode, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-			memcpy(&oids.relnode, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
+			ptr = wal_parse_rec_o_tables_meta_unlock(ptr, &oids, &oldRelnode);
 
 			if (!single)
 				workers_synchronize(xlogPtr, true);
@@ -3102,12 +3089,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		{
 			ORelOids	oids;
 
-			memcpy(&oids.datoid, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-			memcpy(&oids.reloid, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
-			memcpy(&oids.relnode, ptr, sizeof(Oid));
-			ptr += sizeof(Oid);
+			ptr = wal_parse_rec_truncate(ptr, &oids);
 
 			if (!single)
 				workers_synchronize(xlogPtr, true);
@@ -3122,9 +3104,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		{
 			SubTransactionId parentSubid;
 
-			memcpy(&parentSubid, ptr, sizeof(SubTransactionId));
-			ptr += sizeof(SubTransactionId);
-			ptr += 2 * sizeof(TransactionId);
+			ptr = wal_parse_rec_savepoint(ptr, &parentSubid, NULL, NULL);
 
 			recovery_savepoint(parentSubid, -1);
 
@@ -3135,8 +3115,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		{
 			SubTransactionId parentSubid;
 
-			memcpy(&parentSubid, ptr, sizeof(SubTransactionId));
-			ptr += sizeof(SubTransactionId);
+			ptr = wal_parse_rec_rollback_to_savepoint(ptr, &parentSubid, NULL, NULL, wal_version);
 
 			if (!single)
 			{
@@ -3149,8 +3128,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		{
 			ItemPointerData iptr;
 
-			memcpy(&iptr, ptr, sizeof(iptr));
-			ptr += sizeof(iptr);
+			ptr = wal_parse_rec_bridge_erase(ptr, &iptr);
 
 			Assert(indexDescr);
 
@@ -3281,7 +3259,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		}
 		else
 		{
-			elog(FATAL, "Unknown modify WAL record");
+			elog(FATAL, "Unknown modify WAL record %d (%s)", rec_type, rec_type_str);
 		}
 	}
 	update_recovery_undo_loc_flush(single, -1);
