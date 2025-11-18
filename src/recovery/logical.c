@@ -964,7 +964,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			ReorderBufferProcessXid(ctx->reorder, logicalXid, changeXLogPtr);
 
 			read_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
-			ptr = wal_parse_rec_modify(rec_type, ptr, &tuple1, &tuple2, &debug_length, read_two_tuples);
+			ptr = wal_parse_rec_modify(ptr, &tuple1, &tuple2, &debug_length, read_two_tuples);
 
 			elog(LOG, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
 				 rec_type, rec_type_str, oxid, logicalXid, heapXid);

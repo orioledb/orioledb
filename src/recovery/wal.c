@@ -168,6 +168,8 @@ wal_parse_rec_relreplident(Pointer ptr, char *relreplident, Oid *relreplident_ix
 {
 	Assert(ptr);
 	Assert(relreplident);
+	/* Should be set only once and only from default */
+	Assert(*relreplident == REPLICA_IDENTITY_DEFAULT);
 
 	PARSE(ptr, relreplident);
 	PARSE(ptr, relreplident_ix_oid);
@@ -1082,21 +1084,18 @@ set_local_wal_has_material_changes(bool value)
  * Two tuples in certain cases: (1) WAL_REC_REINSERT, (2) WAL_REC_UPDATE with REPLICA_IDENTITY_FULL
  */
 Pointer
-wal_parse_rec_modify(uint8 rec_type, Pointer ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1_out, bool read_two_tuples)
+wal_parse_rec_modify(Pointer ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1_out, bool read_two_tuples)
 {
 	OffsetNumber length1;
 	OffsetNumber length2;
 
-	Assert(rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT);
-
 	if (!read_two_tuples)
 	{
-		tuple1->tuple.formatFlags = *ptr;
-		ptr++;
+		PARSE(ptr, &tuple1->tuple.formatFlags);
 		memcpy(&length1, ptr, sizeof(OffsetNumber));
 		ptr += sizeof(OffsetNumber);
-
 		Assert(length1 > 0);
+
 		memcpy(tuple1->fixedData, ptr, length1);
 		ptr += length1;
 		tuple1->tuple.data = tuple1->fixedData;
@@ -1104,10 +1103,8 @@ wal_parse_rec_modify(uint8 rec_type, Pointer ptr, OFixedTuple *tuple1, OFixedTup
 	}
 	else
 	{
-		tuple1->tuple.formatFlags = *ptr;
-		ptr++;
-		tuple2->tuple.formatFlags = *ptr;
-		ptr++;
+		PARSE(ptr, &tuple1->tuple.formatFlags);
+		PARSE(ptr, &tuple2->tuple.formatFlags);
 		memcpy(&length1, ptr, sizeof(OffsetNumber));
 		ptr += sizeof(OffsetNumber);
 		memcpy(&length2, ptr, sizeof(OffsetNumber));

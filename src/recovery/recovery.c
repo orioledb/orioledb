@@ -2862,7 +2862,6 @@ replay_container(Pointer startPtr, Pointer endPtr,
 	OXid		oxid = InvalidOXid;
 	ORelOids	cur_oids = {0, 0, 0},
 			   *treeOids;
-	OffsetNumber unused;
 	bool		success;
 	uint16		type;
 	uint8		rec_type;
@@ -3009,8 +3008,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		}
 		else if (rec_type == WAL_REC_RELREPLIDENT)
 		{
-			memcpy(&relreplident, ptr, sizeof(char));
-			ptr += sizeof(char);
+			ptr = wal_parse_rec_relreplident(ptr, &relreplident, NULL);
 		}
 		else if (rec_type == WAL_REC_O_TABLES_META_LOCK)
 		{
@@ -3105,13 +3103,14 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		{
 			OFixedTuple tuple1;
 			OFixedTuple tuple2;
+			OffsetNumber unused;
 			Pointer		sys_tree_oids_ptr;
 			bool 	    has_two_tuples;
 
 			sys_tree_oids_ptr = ptr + sizeof(uint8) + sizeof(OffsetNumber);
 
 			has_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
-			ptr = wal_parse_rec_modify(rec_type, ptr, &tuple1, &tuple2, &unused, has_two_tuples);
+			ptr = wal_parse_rec_modify(ptr, &tuple1, &tuple2, &unused, has_two_tuples);
 
 			type = recovery_msg_from_wal_record(rec_type);
 

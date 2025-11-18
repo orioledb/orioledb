@@ -226,6 +226,9 @@ extern Pointer wal_parse_rec_bridge_erase(Pointer ptr, ItemPointerData *iptr);
 /* Parser for WAL_REC_SWITCH_LOGICAL_XID */
 extern Pointer wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *topXid, TransactionId *subXid);
 
+/* Parser for WAL_REC_INSERT, WAL_REC_UPDATE, WAL_REC_DELETE or WAL_REC_REINSERT */
+extern Pointer wal_parse_rec_modify(Pointer ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1, bool read_two_tuples);
+
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, OffsetNumber length, char relreplident);
 extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr);
@@ -251,7 +254,6 @@ extern void o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, c
 extern void add_truncate_wal_record(ORelOids oids);
 extern bool get_local_wal_has_material_changes(void);
 extern void set_local_wal_has_material_changes(bool value);
-extern Pointer wal_parse_rec_modify(uint8 rec_type, Pointer ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1, bool read_two_tuples);
 
 extern uint16 check_wal_container_version(Pointer *ptr);
 
