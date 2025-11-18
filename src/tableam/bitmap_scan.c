@@ -716,6 +716,7 @@ o_tbmiterator_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 			bridge_bound.keys[0].type = TIDOID;
 			bridge_bound.keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 			bridge_bound.keys[0].comparator = NULL;
+			bridge_bound.keys[0].exclusion_fn = NULL;
 			bridge_bound.n_row_keys = 0;
 			bridge_bound.row_keys = NULL;
 

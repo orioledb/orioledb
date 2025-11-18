@@ -1057,12 +1057,6 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 								   callbackInfo);
 }
 
-#include "tableam/descr.h"
-#include "tableam/key_range.h"
-#include "tableam/toast.h"
-
-#include "utils/lsyscache.h"
-
 static bool
 page_unique_check(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 				  Pointer key, OXid opOxid, OTupleXactInfo *xactInfo,
@@ -1328,8 +1322,6 @@ retry:
 		else
 			refind = true;
 
-		if (Log_error_verbosity == PGERROR_TERSE)
-			elog(WARNING, "FASTPATH: refind: %c", refind ? 'Y' : 'N');
 		if (refind)
 		{
 			/*
@@ -1424,9 +1416,6 @@ retry:
 		}
 		else
 			refind = true;
-
-		if (Log_error_verbosity == PGERROR_TERSE)
-			elog(WARNING, "SLOWPATH: refind: %c", refind ? 'Y' : 'N');
 
 		if (refind)
 		{

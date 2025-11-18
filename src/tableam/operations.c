@@ -219,7 +219,7 @@ o_apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
 		fill_current_oxid_osnapshot(&oxid, &o_snapshot);
 
 		success = (o_tbl_index_insert(descr, descr->bridge, &tuple, bridge_slot,
-									  oxid, o_snapshot.csn, &callbackInfo, true) == OBTreeModifyResultInserted);
+									  oxid, o_snapshot.csn, &callbackInfo, UNIQUE_CHECK_YES) == OBTreeModifyResultInserted);
 
 		if (!success && !overflow)
 			o_report_duplicate(relation, descr->bridge, bridge_slot);
@@ -330,7 +330,7 @@ reinsert_bridge_ctid_on_pkey_changed(OTableDescr *descr, Relation relation,
 		fill_current_oxid_osnapshot(&oxid, &o_snapshot);
 
 		success = (o_tbl_index_insert(descr, descr->bridge, &tuple, bridge_slot,
-									  oxid, o_snapshot.csn, &callbackInfo, true) == OBTreeModifyResultInserted);
+									  oxid, o_snapshot.csn, &callbackInfo, UNIQUE_CHECK_YES) == OBTreeModifyResultInserted);
 
 		if (!success && !overflow)
 			o_report_duplicate(relation, descr->bridge, bridge_slot);
@@ -390,7 +390,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 								false);
 
 	mres.success = (o_tbl_index_insert(descr, descr->indices[0], NULL, slot,
-									   oxid, csn, &callbackInfo, true) == OBTreeModifyResultInserted);
+									   oxid, csn, &callbackInfo, UNIQUE_CHECK_YES) == OBTreeModifyResultInserted);
 	if (!mres.success)
 	{
 		mres.failedIxNum = 0;
@@ -615,8 +615,6 @@ OExecCheckIndexConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
 							 indexRelation->rd_index->indexrelid))
 			continue;
 		
-		elog(WARNING, "OExecCheckIndexConstraints: indexRelation->rd_index->indimmediate: %c", indexRelation->rd_index->indimmediate ? 'Y' : 'N');
-
 		if (!indexRelation->rd_index->indimmediate)
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -916,6 +914,49 @@ o_exclusion_cmp(OIndexDescr *id, OBTreeKeyBound *key1, OTuple *tuple2)
 	return 0;
 }
 
+static void
+exclusion_fill_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bound)
+{
+	int			i;
+	int			ctid_off = idx->primaryIsCtid ? 1 : 0;
+	ListCell   *indexpr_item = list_head(idx->expressions_state);
+
+	slot_getsomeattrs(slot, idx->maxTableAttnum - ctid_off);
+
+	bound->nkeys = idx->nonLeafTupdesc->natts;
+	for (i = 0; i < bound->nkeys; i++)
+	{
+		Datum		value;
+		bool		isnull;
+		int			attnum;
+		Oid			typid;
+
+		attnum = idx->tableAttnums[i];
+
+		if (attnum != EXPR_ATTNUM)
+			value = o_get_tbl_att(slot, attnum, idx->primaryIsCtid,
+								  &isnull, &typid);
+		else
+		{
+			value = o_get_idx_expr_att(slot, idx,
+									   (ExprState *) lfirst(indexpr_item),
+									   &isnull);
+			typid = idx->nonLeafTupdesc->attrs[i].atttypid;
+			indexpr_item = lnext(idx->expressions_state, indexpr_item);
+		}
+
+		bound->keys[i].value = value;
+		bound->keys[i].type = typid;
+		bound->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
+		if (isnull)
+			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
+		bound->keys[i].comparator = idx->fields[i].comparator;
+		if (idx->fields[i].exclusion_fn)
+			bound->keys[i].exclusion_fn = idx->fields[i].exclusion_fn;
+		else
+			bound->keys[i].exclusion_fn = NULL;
+	}
+}
 
 static bool
 o_check_exclusion_constraint(OTableDescr *descr, OIndexDescr *index, TupleTableSlot *slot)
@@ -930,7 +971,7 @@ o_check_exclusion_constraint(OTableDescr *descr, OIndexDescr *index, TupleTableS
 	iter = o_btree_iterator_create(&index->desc, NULL, BTreeKeyNone, &o_snapshot, ForwardScanDirection);
 	tuple = o_btree_iterator_fetch(iter, NULL, NULL, BTreeKeyNone, true, NULL);
 	slot_getallattrs(slot);
-	tts_orioledb_fill_key_bound(slot, index, &bound);
+	exclusion_fill_bound(slot, index, &bound);
 	while (!O_TUPLE_IS_NULL(tuple))
 	{
 		int res = o_exclusion_cmp(index, &bound, &tuple);
@@ -939,9 +980,7 @@ o_check_exclusion_constraint(OTableDescr *descr, OIndexDescr *index, TupleTableS
 			res = o_idx_cmp(&index->desc,
 							(Pointer) &bound, BTreeKeyBound, 
 							(Pointer) &tuple, BTreeKeyLeafTuple);
-			if (res == 0)
-				continue;
-			else
+			if (res != 0)
 				return false;
 		}
 		
@@ -1014,27 +1053,19 @@ o_tbl_insert_with_arbiter(Relation rel,
 				!list_member_oid(arbiterIndexes, descr->indices[i]->oids.reloid))
 				continue;
 
-			if (descr->indices[i]->desc.type == oIndexExclusion ||
-				descr->indices[i]->desc.type == oIndexUnique)
-			{
-				int ri_ix_desc;
-
-				/* It could be better to save indimmediate to our descriptors but it is not needed for any other operation */
-				for (ri_ix_desc = 0; ri_ix_desc < resultRelInfo->ri_NumIndices; ri_ix_desc++)
-				{
-					Relation	indexRelation = resultRelInfo->ri_IndexRelationDescs[ri_ix_desc];
-					if (indexRelation->rd_rel->oid == descr->indices[i]->oids.reloid&& !indexRelation->rd_index->indimmediate)
-						ereport(ERROR,
-								(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-								 errmsg("ON CONFLICT does not support deferrable unique constraints/exclusion constraints as arbiters"),
-								 errtableconstraint(resultRelInfo->ri_RelationDesc,
-													RelationGetRelationName(indexRelation))));
-				}
-			}
+			if ((descr->indices[i]->desc.type == oIndexExclusion ||
+				 descr->indices[i]->desc.type == oIndexUnique) &&
+				!descr->indices[i]->immediate)
+					ereport(ERROR,
+							(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+							 errmsg("ON CONFLICT does not support deferrable unique constraints/exclusion constraints as arbiters"),
+							 errtableconstraint(resultRelInfo->ri_RelationDesc,
+												descr->indices[i]->name.data)));
 
 			ioc_arg.conflictIxNum = i;
 			result = o_tbl_index_insert(descr, descr->indices[i], NULL, slot,
-										oxid, csn, &callbackInfo, true);
+										oxid, csn, &callbackInfo, 
+										descr->indices[i]->desc.type == oIndexExclusion ? UNIQUE_CHECK_NO : UNIQUE_CHECK_YES);
 			if (result != OBTreeModifyResultInserted)
 			{
 				success = false;
@@ -1117,7 +1148,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 
 			ioc_arg.conflictIxNum = InvalidIndexNumber;
 			result = o_tbl_index_insert(descr, descr->indices[i], NULL, slot,
-										oxid, csn, &callbackInfo, true);
+										oxid, csn, &callbackInfo, UNIQUE_CHECK_YES);
 
 			if (result != OBTreeModifyResultInserted)
 			{

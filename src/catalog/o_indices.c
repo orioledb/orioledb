@@ -201,6 +201,7 @@ make_ctid_o_index(OTable *table)
 	result->nPrimaryFields = 0;
 	result->nKeyFields = 1;
 	result->nUniqueFields = 1;
+	result->immediate = true;
 
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
@@ -272,6 +273,7 @@ make_primary_o_index(OTable *table)
 	result->nIncludedFields = tableIndex->nfields - tableIndex->nkeyfields;
 	result->nPrimaryFields = 0;
 	result->nKeyFields = tableIndex->nkeyfields;
+	result->immediate = tableIndex->immediate;
 
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
@@ -423,6 +425,7 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
 	result->nKeyFields = tableIndex->nkeyfields;
+	result->immediate = tableIndex->immediate;
 
 	nadded = 0;
 	/* Switching context to store duplicates */
@@ -492,6 +495,7 @@ make_toast_o_index(OTable *table)
 	}
 	result->nLeafFields += TOAST_LEAF_FIELDS_NUM;
 	result->nNonLeafFields += TOAST_NON_LEAF_FIELDS_NUM;
+	result->immediate = true;
 
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
@@ -663,6 +667,7 @@ serialize_o_index(OIndex *o_index, int *size)
 	appendBinaryStringInfo(&str, (Pointer) &o_index->tablespace, sizeof(Oid));
 	if (o_index->indexType == oIndexExclusion)
 		appendBinaryStringInfo(&str, (Pointer) o_index->exclops, sizeof(Oid) * o_index->nKeyFields);
+	appendBinaryStringInfo(&str, (Pointer) &o_index->immediate, sizeof(bool));
 
 	*size = str.len;
 	return str.data;
@@ -731,6 +736,16 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	}
 	else
 		oIndex->exclops = NULL;
+	if (oIndex->data_version >= 3)
+	{
+		len = sizeof(bool);
+		Assert((ptr - data) + len <= length);
+		memcpy(&oIndex->immediate, ptr, len);
+		ptr += len;
+
+	}
+	else
+		oIndex->immediate = true;
 	Assert((ptr - data) == length);
 
 	return oIndex;
@@ -973,6 +988,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	descr->bridging = oIndex->bridging;
 	descr->unique = (oIndex->indexType == oIndexUnique ||
 					 oIndex->indexType == oIndexPrimary);
+	descr->immediate = oIndex->immediate;
 	descr->nulls_not_distinct = oIndex->nulls_not_distinct;
 	descr->nUniqueFields = oIndex->nUniqueFields;
 	descr->nFields = oIndex->nNonLeafFields;

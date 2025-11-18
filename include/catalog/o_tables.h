@@ -81,6 +81,7 @@ typedef struct
 	List	   *predicate;		/* list of Expr */
 	Oid			tablespace;
 	Oid		   *exclops;
+	bool		immediate;
 	MemoryContext index_mctx;
 } OTableIndex;
 

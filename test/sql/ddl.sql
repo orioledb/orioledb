@@ -13,10 +13,8 @@ ALTER TABLE o_test_is_null_assert ADD PRIMARY KEY (key);
 INSERT INTO o_test_is_null_assert (key,val,val2) VALUES (2, 0, 0);
 BEGIN;
 SELECT * FROM o_test_is_null_assert WHERE key = 2 ORDER BY key;
-SELECT orioledb_tbl_structure('o_test_is_null_assert'::regclass, 'nue');
 UPDATE o_test_is_null_assert SET val2 = val2 WHERE key = 2;
 UPDATE o_test_is_null_assert SET val2 = val2 WHERE key = 2;
-SELECT orioledb_tbl_structure('o_test_is_null_assert'::regclass, 'nue');
 COMMIT;
 
 CREATE TABLE o_test_ioc1
@@ -27,7 +25,6 @@ CREATE TABLE o_test_ioc1
 ) USING orioledb;
 
 INSERT INTO o_test_ioc1 VALUES (7, 20);
-SELECT orioledb_tbl_structure('o_test_ioc1'::regclass);
 SELECT * FROM o_test_ioc1 ORDER BY id1;
 
 BEGIN;
@@ -37,48 +34,37 @@ SELECT * FROM o_test_ioc1 ORDER BY id1;
 COMMIT;
 
 DELETE FROM o_test_ioc1 WHERE id2 = 20;
-SELECT orioledb_tbl_structure('o_test_ioc1'::regclass);
 SELECT * FROM o_test_ioc1 ORDER BY id1;
 
 INSERT INTO o_test_ioc1 VALUES (6, 19);
-SELECT orioledb_tbl_structure('o_test_ioc1'::regclass);
 SELECT * FROM o_test_ioc1 ORDER BY id1;
 
 INSERT INTO o_test_ioc1 VALUES (5, 18);
-SELECT orioledb_tbl_structure('o_test_ioc1'::regclass);
 SELECT * FROM o_test_ioc1 ORDER BY id1;
 
 INSERT INTO o_test_ioc1 VALUES (4, 17);
-SELECT orioledb_tbl_structure('o_test_ioc1'::regclass);
 SELECT * FROM o_test_ioc1 ORDER BY id1;
 
 INSERT INTO o_test_ioc1 VALUES (3, 16);
-SELECT orioledb_tbl_structure('o_test_ioc1'::regclass);
 SELECT * FROM o_test_ioc1 ORDER BY id1;
 
 INSERT INTO o_test_ioc1 VALUES (3, 15);
-SELECT orioledb_tbl_structure('o_test_ioc1'::regclass);
 SELECT * FROM o_test_ioc1 ORDER BY id1;
 
 INSERT INTO o_test_ioc1 VALUES (3, 14);
-SELECT orioledb_tbl_structure('o_test_ioc1'::regclass);
 SELECT * FROM o_test_ioc1 ORDER BY id1;
 
 INSERT INTO o_test_ioc1 VALUES (3, 13) ON CONFLICT (id1) DO NOTHING;
-SELECT orioledb_tbl_structure('o_test_ioc1'::regclass);
 SELECT * FROM o_test_ioc1 ORDER BY id1;
 
 BEGIN;
 SELECT * FROM o_test_ioc1 WHERE id1 = 3 FOR UPDATE;
-SELECT orioledb_tbl_structure('o_test_ioc1'::regclass);
 COMMIT;
 
 INSERT INTO o_test_ioc1 VALUES (3, 12) ON CONFLICT (id1) DO UPDATE SET id2 = EXCLUDED.id2 * 10;
-SELECT orioledb_tbl_structure('o_test_ioc1'::regclass);
 SELECT * FROM o_test_ioc1 ORDER BY id1;
 
 INSERT INTO o_test_ioc1 VALUES (2, 11);
-SELECT orioledb_tbl_structure('o_test_ioc1'::regclass);
 SELECT * FROM o_test_ioc1 ORDER BY id1;
 
 CREATE TABLE ranges0 (
@@ -96,12 +82,10 @@ INSERT INTO ranges0 VALUES('B', -6, '12');
 -- succeed
 INSERT INTO ranges0 VALUES('C', -5, '55');
 SELECT * FROM ranges0;
-SELECT orioledb_tbl_structure('ranges0'::regclass);
 
 -- fail, overlaps
 INSERT INTO ranges0 VALUES('D', -5, '62');
 SELECT * FROM ranges0;
-SELECT orioledb_tbl_structure('ranges0'::regclass);
 
 CREATE OR REPLACE FUNCTION int4range_overlaps(a int4range, b int4range)
   RETURNS boolean
@@ -131,9 +115,6 @@ ALTER TABLE ranges
 	ADD EXCLUDE USING btree (c1 WITH <->, (orioledb_int4range_immutable(c2)) WITH <->)
   WITH (orioledb_index=false)
   WHERE (NOT c1 @> 0::int4);
--- CREATE UNIQUE INDEX ON ranges (c1, orioledb_int4range_immutable(c2))
---   WITH (orioledb_index=false)
---   WHERE (NOT c1 @> 0::int4);
 \d+ ranges
 
 -- these should succeed because they don't match the index predicate
@@ -171,8 +152,9 @@ INSERT INTO ranges VALUES(int4range(-4, -3), '[12, 15)');
 SELECT * FROM ranges;
 
 CREATE TABLE unique_tbl (
-	i int UNIQUE DEFERRABLE, 
-	t text
+	i int,
+	t text,
+	UNIQUE (i) WITH (orioledb_index=false) DEFERRABLE
 ) USING orioledb;
 
 INSERT INTO unique_tbl VALUES (0, 'one');
@@ -181,19 +163,6 @@ INSERT INTO unique_tbl VALUES (2, 'tree');
 INSERT INTO unique_tbl VALUES (3, 'four');
 INSERT INTO unique_tbl VALUES (4, 'five');
 
--- BEGIN;
--- 
--- SET CONSTRAINTS unique_tbl_i_key DEFERRED;
--- 
--- SELECT orioledb_tbl_structure('unique_tbl'::regclass);
--- INSERT INTO unique_tbl VALUES (5, 'FIVE');
--- SELECT orioledb_tbl_structure('unique_tbl'::regclass);
--- INSERT INTO unique_tbl VALUES (1, 'ONE');
--- SELECT orioledb_tbl_structure('unique_tbl'::regclass);
--- 
--- COMMIT;
-
-SELECT orioledb_tbl_structure('unique_tbl'::regclass);
 BEGIN;
 
 -- default is immediate so this should fail right away
@@ -201,12 +170,8 @@ UPDATE unique_tbl SET i = 1 WHERE i = 0;
 
 ROLLBACK;
 
-SELECT orioledb_tbl_structure('unique_tbl'::regclass);
-
 -- check is done at end of statement, so this should succeed
 UPDATE unique_tbl SET i = i+1;
--- UPDATE unique_tbl SET i = i+2+(3-i/2*3);
-SELECT orioledb_tbl_structure('unique_tbl'::regclass);
 
 SELECT * FROM unique_tbl;
 
@@ -215,12 +180,9 @@ BEGIN;
 
 SET CONSTRAINTS unique_tbl_i_key DEFERRED;
 
-SELECT orioledb_tbl_structure('unique_tbl'::regclass);
 INSERT INTO unique_tbl VALUES (3, 'three');
 SELECT * FROM unique_tbl;
-SELECT orioledb_tbl_structure('unique_tbl'::regclass);
 DELETE FROM unique_tbl WHERE t = 'tree'; -- makes constraint valid again
-SELECT orioledb_tbl_structure('unique_tbl'::regclass);
 SELECT * FROM unique_tbl;
 
 COMMIT; -- should succeed
@@ -273,11 +235,10 @@ COMMIT;
 CREATE TABLE deferred_excl (
   f1 int,
   f2 int,
-  CONSTRAINT deferred_excl_con EXCLUDE (f1 WITH =) INITIALLY DEFERRED
+  CONSTRAINT deferred_excl_con EXCLUDE (f1 WITH =) WITH (orioledb_index=false) INITIALLY DEFERRED
 ) USING orioledb;
 INSERT INTO deferred_excl VALUES(1);
 INSERT INTO deferred_excl VALUES(2);
-SET log_error_verbosity = 'terse';
 INSERT INTO deferred_excl VALUES(1); -- fail
 INSERT INTO deferred_excl VALUES(1) ON CONFLICT ON CONSTRAINT deferred_excl_con DO NOTHING; -- fail
 BEGIN;

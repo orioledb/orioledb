@@ -582,8 +582,6 @@ cmp_inclusive2(uint8 f1, uint8 f2)
 	return cmp1 - cmp2;
 }
 
-#include "utils/lsyscache.h"
-
 int
 o_idx_cmp_range_key_to_value(OBTreeValueBound *bound1, OIndexField *field,
 							 Datum value, bool isnull)
@@ -597,6 +595,7 @@ o_idx_cmp_range_key_to_value(OBTreeValueBound *bound1, OIndexField *field,
 			cmp = 0;
 		else if (o_bound_is_coercible(bound1, field))
 		{
+			// if (field->exclusion_fn)
 			if (bound1->exclusion_fn)
 				cmp = o_call_exclusion_fn(field->exclusion_fn, bound1->value, value);
 			else

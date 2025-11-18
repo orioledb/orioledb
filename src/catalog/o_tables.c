@@ -359,6 +359,7 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 		index->nexprfields = list_length(index_rel->rd_indexprs);
 		index->exprfields = palloc0(index->nexprfields * sizeof(OTableField));
 	}
+	index->immediate = index_rel->rd_index->indimmediate;
 	index->predicate = (List *)
 		expression_planner((Expr *) index_rel->rd_indpred);
 	if (index->predicate)
@@ -1696,8 +1697,7 @@ serialize_o_table_index(OTableIndex *o_table_index, StringInfo str)
 	appendBinaryStringInfo(str, (Pointer) &o_table_index->tablespace, sizeof(Oid));
 	if (o_table_index->type == oIndexExclusion)
 		appendBinaryStringInfo(str, (Pointer) o_table_index->exclops, sizeof(Oid) * o_table_index->nkeyfields);
-
-
+	appendBinaryStringInfo(str, &o_table_index->immediate, sizeof(bool));
 }
 
 Pointer
@@ -1782,6 +1782,14 @@ deserialize_o_table_index(OTableIndex *o_table_index, Pointer *ptr, uint16 data_
 	}
 	else
 		o_table_index->exclops = NULL;
+	if (data_version >= 3)
+	{
+		len = sizeof(bool);
+		memcpy(&o_table_index->immediate, *ptr, len);
+		*ptr += len;
+	}
+	else
+		o_table_index->immediate = true;
 	MemoryContextSwitchTo(old_mcxt);
 }
 

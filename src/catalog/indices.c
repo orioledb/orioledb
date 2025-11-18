@@ -537,6 +537,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	table_index->oids.datoid = MyDatabaseId;
 	table_index->oids.reloid = index->rd_rel->oid;
 	table_index->tablespace = tablespace;
+	table_index->immediate = index->rd_index->indimmediate;
 
 	if (!reuse_relnode && is_build)
 		o_tables_table_meta_lock(NULL);
