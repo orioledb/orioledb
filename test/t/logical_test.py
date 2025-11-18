@@ -12,7 +12,33 @@ from testgres.utils import get_bin_path
 from .base_test import BaseTest
 
 
+def clear_table(
+    node, table
+):  # BUG on orioledb sys relations visibility: new relfilenode during truncate
+	node.safe_psql('postgres', f'TRUNCATE TABLE {table};')
+	node.execute(
+	    "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
+	)
+
+
+def node_prepare_orel(node, table):
+	node.start()  # start PostgreSQL
+	node.safe_psql(
+	    'postgres',
+	    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+	    f'CREATE TABLE {table}(id serial primary key, data text) USING orioledb;\n'  # oriole relation
+	)
+
+	node.safe_psql(
+	    'postgres',
+	    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+	)
+
+
 class LogicalTest(BaseTest):
+
+	o_relname = "o_data"
+	h_relname = "h_data"
 
 	def setUp(self):
 		super().setUp()
@@ -26,6 +52,12 @@ class LogicalTest(BaseTest):
 				line = line[0:line.index(' ')]
 			result = result + line + "\n"
 		return result
+
+	def retrieve_logical_changes(self):
+		return self.squashLogicalChanges(
+		    self.node.execute(
+		        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
+		    ))
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
@@ -53,9 +85,728 @@ class LogicalTest(BaseTest):
 		        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
 		    ))
 		self.assertEqual(
-		    result,
-		    "BEGIN\ntable public.data: INSERT: id[integer]:1 data[text]:'1'\ntable public.data: INSERT: id[integer]:2 data[text]:'2'\nCOMMIT\n"
+		    result, "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:1 data[text]:'1'\n"
+		    "table public.data: INSERT: id[integer]:2 data[text]:'2'\n"
+		    "COMMIT\n")
+
+#
+# The next two tests reproduce an existing issue: incorrect state of OrioleDB system catalogs during logical decoding.
+#
+# TRAP: failed Assert("descr != NULL"), File: "src/recovery/logical.c", Line: 975
+#
+# This problem arises because changes to Oriole system trees are not included in MVCC-historical snapshot and
+# are not applied on replaying changes from the reorder buffer.
+#
+# During logical decoding, when processing each command, we observe a final state of the Oriole system catalogs
+# rather than some intermediate state that was relevant at the time when the current command has been executed within transaction.
+#
+# These tests should be enabled but only after this issue has been resolved.
+#
+#@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+#                 "'test_decoding' is not installed")
+#def test_switch_logical_xid_BUG_COMMIT(self):
+#	# System catalogs Oriole changes visibility during logical decoding
+#	node = self.node
+#	node.start()  # start PostgreSQL
+#	node.safe_psql(
+#	    'postgres',
+#	    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+#		"CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"  # oriole relation
+#	)
+#
+#	node.safe_psql(
+#	    'postgres',
+#	    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+#	)
+#
+#	node.safe_psql(
+#	    'postgres', '''
+#			BEGIN;
+#			INSERT INTO o_data(data) VALUES('20');
+#			INSERT INTO o_data(data) VALUES('40');
+#			DROP TABLE IF EXISTS o_data;
+#			COMMIT;
+#		''')
+#
+#	result = self.squashLogicalChanges(
+#	    node.execute( # TRAP: failed Assert("descr != NULL") because there is no relation `o_data` in orioledb_table
+#	        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
+#	    ))
+#	#print(result)
+
+#@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+#                 "'test_decoding' is not installed")
+#def test_switch_logical_xid_BUG_ABORT(self):
+#	# System catalogs Oriole changes visibility during logical decoding
+#	node = self.node
+#	node.start()  # start PostgreSQL
+#	node.safe_psql(
+#	    'postgres',
+#	    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+#	)
+#
+#	node.safe_psql(
+#	    'postgres',
+#	    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+#	)
+#
+#	node.safe_psql(
+#	    'postgres', '''
+#			BEGIN;
+#			CREATE TABLE o_data(id serial primary key, data text) USING orioledb;
+#			INSERT INTO o_data(data) VALUES('10');
+#			ABORT;
+#		''')
+#
+#	result = self.squashLogicalChanges(
+#	    node.execute( # TRAP: failed Assert("descr != NULL") because there is no relation `o_data` in orioledb_table
+#	        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
+#	    ))
+#	#print(result)
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_h2o(self):
+		node = self.node
+		node.start()  # start PostgreSQL
+		node.safe_psql(
+		    'postgres',
+		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"  # oriole relation
+		    "CREATE TABLE h_data(id serial primary key, data text);\n"  # heap relation
 		)
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		# part 1
+
+		node.safe_psql(
+		    'postgres', '''
+				BEGIN;
+				INSERT INTO h_data(data) VALUES('10');
+				INSERT INTO o_data(data) VALUES('20');
+				INSERT INTO h_data(data) VALUES('30');
+				INSERT INTO o_data(data) VALUES('40');
+				COMMIT;
+			''')
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(
+		    result, "BEGIN\n"
+		    "table public.h_data: INSERT: id[integer]:1 data[text]:'10'\n"
+		    "table public.h_data: INSERT: id[integer]:2 data[text]:'30'\n"
+		    "table public.o_data: INSERT: id[integer]:1 data[text]:'20'\n"
+		    "table public.o_data: INSERT: id[integer]:2 data[text]:'40'\n"
+		    "COMMIT\n")
+
+		# part 2
+
+		node.safe_psql(
+		    'postgres', '''
+				BEGIN;
+				INSERT INTO h_data(data) VALUES('50');
+				DELETE FROM o_data WHERE id=2;
+				INSERT INTO h_data(data) SELECT data FROM o_data;
+				INSERT INTO o_data SELECT * FROM h_data WHERE id > 1;
+				DELETE FROM h_data WHERE id > 1;
+				COMMIT;
+			''')
+
+		self.assertEqual(node.execute('postgres', "SELECT * FROM h_data;\n"),
+		                 [(1, '10')])
+
+		self.assertEqual(node.execute('postgres', "SELECT * FROM o_data;\n"),
+		                 [(1, '20'), (2, '30'), (3, '50'), (4, '20')])
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(
+		    result, "BEGIN\n"
+		    "table public.h_data: INSERT: id[integer]:3 data[text]:'50'\n"
+		    "table public.h_data: INSERT: id[integer]:4 data[text]:'20'\n"
+		    "table public.h_data: DELETE: id[integer]:2\n"
+		    "table public.h_data: DELETE: id[integer]:3\n"
+		    "table public.h_data: DELETE: id[integer]:4\n"
+		    "table public.o_data: DELETE: id[integer]:2\n"
+		    "table public.o_data: INSERT: id[integer]:2 data[text]:'30'\n"
+		    "table public.o_data: INSERT: id[integer]:3 data[text]:'50'\n"
+		    "table public.o_data: INSERT: id[integer]:4 data[text]:'20'\n"
+		    "COMMIT\n")
+
+	def test_switch_logical_xid_subtxn__mixed_ROLLBACK(self):
+		o_relname = self.o_relname
+
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+			with subscriber.start() as subscriber:
+				create_sql = f"""
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+				"""
+				publisher.safe_psql(create_sql)
+				subscriber.safe_psql(create_sql)
+
+				pub = publisher.publish('test_pub', tables=[f'{o_relname}'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+
+				with publisher.connect() as con1:
+					con1.begin()
+					con1.execute(f"""
+						SAVEPOINT s0;
+						ALTER TABLE {o_relname} RENAME COLUMN data TO newdata;
+						INSERT INTO {o_relname}(newdata) VALUES(100);
+						ROLLBACK TO s0;
+						INSERT INTO {o_relname}(data) VALUES(200);
+					""")
+					con1.commit()
+
+				# wait until changes apply on subscriber and check them
+				sub.catchup()
+
+				with subscriber.connect() as con:
+					output = con.execute(f"""SELECT * FROM {o_relname};""")
+					self.assertEqual(output, [(2, '200')])
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__COMMIT_SAVEPOINT(
+	        self):  # COMMIT SAVEPOINT x5
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s3;
+			INSERT INTO {o_relname}(data) VALUES('40');
+			SAVEPOINT s4;
+			INSERT INTO {o_relname}(data) VALUES('50');
+			SAVEPOINT s5;
+			COMMIT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(
+		    result, f"""BEGIN
+table public.{o_relname}: INSERT: id[integer]:1 data[text]:'10'
+table public.{o_relname}: INSERT: id[integer]:2 data[text]:'20'
+table public.{o_relname}: INSERT: id[integer]:3 data[text]:'30'
+table public.{o_relname}: INSERT: id[integer]:4 data[text]:'40'
+table public.{o_relname}: INSERT: id[integer]:5 data[text]:'50'
+COMMIT\n""")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__COMMIT_SAVEPOINT_mixed_01(
+	        self):  # COMMIT SAVEPOINT x3
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			CREATE TABLE h_tmp(id serial primary key, data text);
+			SAVEPOINT s3;
+			INSERT INTO h_tmp(data) VALUES('100');
+			COMMIT;
+		""")
+
+		self.assertEqual(self.node.execute("SELECT * FROM h_tmp;"),
+		                 [(1, '100')])
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(
+		    result, f"""BEGIN
+table public.h_tmp: INSERT: id[integer]:1 data[text]:'100'
+table public.{o_relname}: INSERT: id[integer]:1 data[text]:'10'
+table public.{o_relname}: INSERT: id[integer]:2 data[text]:'20'
+table public.{o_relname}: INSERT: id[integer]:3 data[text]:'30'
+COMMIT\n""")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__ABORT_SAVEPOINT(
+	        self):  # ABORT SAVEPOINT x5
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s3;
+			INSERT INTO {o_relname}(data) VALUES('40');
+			SAVEPOINT s4;
+			INSERT INTO {o_relname}(data) VALUES('50');
+			SAVEPOINT s5;
+			ABORT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(result, "")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__ABORT_SAVEPOINT_mixed_01(
+	        self):  # ABORT SAVEPOINT x3
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			CREATE TABLE h_tmp(id serial primary key, data text);
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s3;
+			INSERT INTO h_tmp(data) VALUES('100');
+			ABORT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(result, "")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__COMMIT_SAVEPOINT_0(
+	        self):  # COMMIT SAVEPOINT x5 + empty SAVEPOINT
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			SAVEPOINT s0;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s3;
+			INSERT INTO {o_relname}(data) VALUES('40');
+			SAVEPOINT s4;
+			INSERT INTO {o_relname}(data) VALUES('50');
+			SAVEPOINT s5;
+			COMMIT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(
+		    result, f"""BEGIN
+table public.{o_relname}: INSERT: id[integer]:1 data[text]:'10'
+table public.{o_relname}: INSERT: id[integer]:2 data[text]:'20'
+table public.{o_relname}: INSERT: id[integer]:3 data[text]:'30'
+table public.{o_relname}: INSERT: id[integer]:4 data[text]:'40'
+table public.{o_relname}: INSERT: id[integer]:5 data[text]:'50'
+COMMIT\n""")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__ABORT_SAVEPOINT_0(
+	        self):  # ABORT SAVEPOINT x5 + empty SAVEPOINT
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			SAVEPOINT s0;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s3;
+			INSERT INTO {o_relname}(data) VALUES('40');
+			SAVEPOINT s4;
+			INSERT INTO {o_relname}(data) VALUES('50');
+			SAVEPOINT s5;
+			ABORT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(result, "")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__COMMIT_SAVEPOINT_0xN(
+	        self):  # COMMIT SAVEPOINT x3 + empty SAVEPOINT xN
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			SAVEPOINT s0;
+			SAVEPOINT s00;
+			SAVEPOINT s000;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s3;
+			SAVEPOINT s0000;
+			SAVEPOINT s00000;
+			COMMIT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(
+		    result, f"""BEGIN
+table public.{o_relname}: INSERT: id[integer]:1 data[text]:'10'
+table public.{o_relname}: INSERT: id[integer]:2 data[text]:'20'
+table public.{o_relname}: INSERT: id[integer]:3 data[text]:'30'
+COMMIT\n""")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__ABORT_SAVEPOINT_0xN(
+	        self):  # ABORT SAVEPOINT x3 + empty SAVEPOINT xN
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			SAVEPOINT s0;
+			SAVEPOINT s00;
+			SAVEPOINT s000;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s3;
+			SAVEPOINT s0000;
+			SAVEPOINT s00000;
+			ABORT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(result, "")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__COMMIT_SAVEPOINT_ROLLBACK_s1(
+	        self):  # COMMIT SAVEPOINT x2 ROLLBACK s1
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			CREATE TABLE h_tmp(id serial primary key, data text);
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s3;
+			INSERT INTO {o_relname}(data) VALUES('40');
+			SAVEPOINT s4;
+			INSERT INTO {o_relname}(data) VALUES('50');
+			ROLLBACK TO s1;
+			INSERT INTO h_tmp(data) VALUES('100');
+			COMMIT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(
+		    result, f"""BEGIN
+table public.h_tmp: INSERT: id[integer]:1 data[text]:'100'
+table public.{o_relname}: INSERT: id[integer]:1 data[text]:'10'
+COMMIT\n""")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__ABORT_SAVEPOINT_ROLLBACK_s1(
+	        self):  # ABORT SAVEPOINT x2 ROLLBACK s1
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s3;
+			INSERT INTO {o_relname}(data) VALUES('40');
+			SAVEPOINT s4;
+			INSERT INTO {o_relname}(data) VALUES('50');
+			ROLLBACK TO s1;
+			ABORT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(result, "")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__COMMIT_SAVEPOINT_ROLLBACK_s2(
+	        self):  # COMMIT SAVEPOINT x2 ROLLBACK s2
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s3;
+			INSERT INTO {o_relname}(data) VALUES('40');
+			SAVEPOINT s4;
+			INSERT INTO {o_relname}(data) VALUES('50');
+			ROLLBACK TO s2;
+			COMMIT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(
+		    result, f"""BEGIN
+table public.{o_relname}: INSERT: id[integer]:1 data[text]:'10'
+table public.{o_relname}: INSERT: id[integer]:2 data[text]:'20'
+COMMIT\n""")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__ABORT_SAVEPOINT_ROLLBACK_s2(
+	        self):  # ABORT SAVEPOINT x2 ROLLBACK s2
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s3;
+			INSERT INTO {o_relname}(data) VALUES('40');
+			SAVEPOINT s4;
+			INSERT INTO {o_relname}(data) VALUES('50');
+			ROLLBACK TO s2;
+			ABORT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(result, "")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__COMMIT_SAVEPOINT_ROLLBACK_s3(
+	        self):  # COMMIT SAVEPOINT x2 ROLLBACK s3
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s3;
+			INSERT INTO {o_relname}(data) VALUES('40');
+			SAVEPOINT s4;
+			INSERT INTO {o_relname}(data) VALUES('50');
+			ROLLBACK TO s3;
+			SAVEPOINT s5;
+			INSERT INTO {o_relname}(data) VALUES('60');
+			COMMIT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(
+		    result, f"""BEGIN
+table public.{o_relname}: INSERT: id[integer]:1 data[text]:'10'
+table public.{o_relname}: INSERT: id[integer]:2 data[text]:'20'
+table public.{o_relname}: INSERT: id[integer]:3 data[text]:'30'
+table public.{o_relname}: INSERT: id[integer]:6 data[text]:'60'
+COMMIT\n""")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__ABORT_SAVEPOINT_ROLLBACK_s3(
+	        self):  # ABORT SAVEPOINT x2 ROLLBACK s3
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s3;
+			INSERT INTO {o_relname}(data) VALUES('40');
+			SAVEPOINT s4;
+			INSERT INTO {o_relname}(data) VALUES('50');
+			ROLLBACK TO s3;
+			SAVEPOINT s5;
+			INSERT INTO {o_relname}(data) VALUES('60');
+			ABORT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(result, "")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__COMMIT_SAVEPOINT_ROLLBACK_s0(
+	        self):  # COMMIT SAVEPOINT x2 ROLLBACK s0
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			SAVEPOINT s0;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			ROLLBACK TO s0;
+			COMMIT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(result, '''BEGIN\nCOMMIT\n''')
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__COMMIT_SAVEPOINT_ROLLBACK_s3_empty(
+	        self):  # COMMIT SAVEPOINT x2 ROLLBACK s3 empty
+		node = self.node
+		o_relname = self.o_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s3;
+			SAVEPOINT s4;
+			SAVEPOINT s5;
+			ROLLBACK TO s3;
+			COMMIT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(
+		    result, f"""BEGIN
+table public.{o_relname}: INSERT: id[integer]:1 data[text]:'10'
+table public.{o_relname}: INSERT: id[integer]:2 data[text]:'20'
+table public.{o_relname}: INSERT: id[integer]:3 data[text]:'30'
+COMMIT\n""")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_subtxn__COMMIT_SAVEPOINT_ROLLBACK_h2o(
+	        self):  # COMMIT SAVEPOINT x2 ROLLBACK s3 empty
+		node = self.node
+		o_relname = self.o_relname
+		h_relname = self.h_relname
+		node_prepare_orel(node, o_relname)
+
+		node.safe_psql(
+		    'postgres', f"""
+			BEGIN;
+			SAVEPOINT s0;
+			SAVEPOINT s00;
+			SAVEPOINT s000;
+			CREATE TABLE {h_relname}(id serial primary key, data text);
+			SAVEPOINT s1;
+			INSERT INTO {o_relname}(data) VALUES('10');
+			SAVEPOINT s2;
+			INSERT INTO {o_relname}(data) VALUES('20');
+			SAVEPOINT s3;
+			INSERT INTO {o_relname}(data) VALUES('30');
+			SAVEPOINT s4;
+			SAVEPOINT s5;
+			SAVEPOINT s6;
+			ROLLBACK TO s3;
+			COMMIT;
+		""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+		self.assertEqual(
+		    result, f"""BEGIN
+table public.{o_relname}: INSERT: id[integer]:1 data[text]:'10'
+table public.{o_relname}: INSERT: id[integer]:2 data[text]:'20'
+COMMIT\n""")
 
 	@unittest.skipIf(not BaseTest.extension_installed("wal2json"),
 	                 "'wal2json' is not installed")

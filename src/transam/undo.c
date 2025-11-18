@@ -1560,6 +1560,9 @@ undo_xact_callback(XactEvent event, void *arg)
 	TransactionId xid1 = InvalidTransactionId;
 	int			nsubxids = 0;
 	TransactionId *subxids = NULL;
+	TransactionId heapXid;
+	XLogRecPtr	flushPos;
+	LogicalXidCtx logicalXidContext;
 
 	/* elog(LOG, "UNDO XACT CALLBACK"); */
 	isParallelWorker = (MyProc->lockGroupLeader != NULL &&
@@ -1605,24 +1608,101 @@ undo_xact_callback(XactEvent event, void *arg)
 	}
 	else
 	{
-		TransactionId xid = GetTopTransactionIdIfAny();
-		XLogRecPtr	flushPos = InvalidXLogRecPtr;
+		heapXid = GetTopTransactionIdIfAny();
+
+		flushPos = InvalidXLogRecPtr;
+		get_current_logical_xid_ctx(&logicalXidContext);
+
+		if (TransactionIdIsValid(heapXid) && TransactionIdIsValid(logicalXidContext.xid))
+		{
+			if (event == XACT_EVENT_PRE_COMMIT)
+			{
+				if (!logicalXidContext.useHeap)
+				{
+					elog(DEBUG4, "event %d oxid %lu SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u",
+						 event, oxid, heapXid, logicalXidContext.xid);
+
+					add_switch_logical_xid_wal_record(heapXid, logicalXidContext.xid);
+				}
+			}
+		}
+		else
+		{
+			if (TransactionIdIsValid(heapXid))
+			{
+				elog(DEBUG4, "event %d oxid %lu top heapXid %u independent heap transaction",
+					 event, oxid, heapXid);
+			}
+			else if (TransactionIdIsValid(logicalXidContext.xid))
+			{
+				elog(DEBUG4, "event %d oxid %lu logicalXid %u independent Oriole transaction",
+					 event, oxid, logicalXidContext.xid);
+			}
+		}
+
+		/*
+		 * Transaction cases:
+		 *
+		 * h - h : independent heap transaction
+		 *
+		 * o - o : independent Oriole transaction
+		 *
+		 * h - o - o - h : SWITCH_LOGICAL_XID H2O: Oriole txn acts as a
+		 * sub-txn of a top heap txn
+		 *
+		 * o - h - o - h : SWITCH_LOGICAL_XID O2H: Oriole txn acts as a
+		 * sub-txn of a top heap txn
+		 */
 
 		Assert(!RecoveryInProgress());
 		switch (event)
 		{
 			case XACT_EVENT_PRE_COMMIT:
-				if (TransactionIdIsValid(xid))
-					wal_joint_commit(oxid,
-									 get_current_logical_xid(),
-									 xid);
-				else
-					current_oxid_xlog_precommit();
-				break;
-			case XACT_EVENT_COMMIT:
-				if (!TransactionIdIsValid(xid))
+
+				/*
+				 * PRE_COMMIT means that Oriole transaction is going to be
+				 * commited BEFORE corresponding heap transaction. This can
+				 * only happen in a case when Oriole transaction acts as
+				 * sub-transaction of heap transaction. This is the case for
+				 * SWITCH_LOGICAL_XID.
+				 */
+
+				elog(DEBUG4, "XACT_EVENT_PRE_COMMIT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
+					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
+
+				if (!TransactionIdIsValid(heapXid))
 				{
 					current_oxid_xlog_precommit();
+				}
+
+				if (TransactionIdIsValid(logicalXidContext.xid) && TransactionIdIsValid(heapXid))
+				{
+					Assert(logicalXidContext.xid != heapXid);
+
+					elog(DEBUG4, "XACT_EVENT_PRE_COMMIT wal_joint_commit for SWITCH_LOGICAL_XID %s oxid %lu logicalXid %u top heapXid %u current heapXid %u",
+						 logicalXidContext.useHeap ? "H2O" : "O2H", oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny());
+
+					wal_joint_commit(oxid,
+									 get_current_logical_xid(),
+									 heapXid);
+				}
+
+				break;
+
+			case XACT_EVENT_COMMIT:
+
+				elog(DEBUG4, "XACT_EVENT_COMMIT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
+					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
+
+				if (!TransactionIdIsValid(heapXid))
+				{
+					/* Commit o - o : independent Oriole transaction */
+
+					elog(DEBUG4, "XACT_EVENT_COMMIT [independent Oriole transaction] oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
+						 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
+
+					current_oxid_xlog_precommit();
+
 					flushPos = wal_commit(oxid,
 										  get_current_logical_xid());
 					set_oxid_xlog_ptr(oxid, flushPos);
@@ -1639,6 +1719,12 @@ undo_xact_callback(XactEvent event, void *arg)
 				}
 				else
 				{
+					Assert(TransactionIdIsValid(heapXid));
+
+					/*
+					 * Case h - h : independent heap transaction
+					 */
+
 					set_oxid_xlog_ptr(oxid, XactLastCommitEnd);
 				}
 
@@ -1658,6 +1744,7 @@ undo_xact_callback(XactEvent event, void *arg)
 					add_to_rewind_buffer(oxid, xid1, nsubxids, subxids);
 					reset_precommit_xid_subxids();
 				}
+
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					on_commit_undo_stack((UndoLogType) i, oxid, true);
 
@@ -1666,13 +1753,20 @@ undo_xact_callback(XactEvent event, void *arg)
 				reset_command_undo_locations();
 				oxid_needs_wal_flush = false;
 				minParentSubId = InvalidSubTransactionId;
+
 				break;
+
 			case XACT_EVENT_ABORT:
+
+				elog(DEBUG4, "XACT_EVENT_ABORT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
+					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
+
 				if (!RecoveryInProgress())
-					wal_rollback(oxid,
-								 get_current_logical_xid());
+					wal_rollback(oxid, logicalXidContext.xid);
+
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					apply_undo_stack((UndoLogType) i, oxid, NULL, true);
+
 				reset_cur_undo_locations();
 				reset_command_undo_locations();
 				current_oxid_abort();
@@ -1689,8 +1783,11 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					pg_atomic_write_u64(&curProcData->undoRetainLocations[i].snapshotRetainUndoLocation, InvalidUndoLocation);
+
 				minParentSubId = InvalidSubTransactionId;
+
 				break;
+
 			default:
 				break;
 		}
@@ -1897,6 +1994,7 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 {
 	TransactionId prentLogicalXid;
 	int			i;
+	LogicalXidCtx logicalXidContext;
 
 	/*
 	 * Cleanup EXPLAY ANALYZE counters pointer to handle case when execution
@@ -1907,21 +2005,25 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 	switch (event)
 	{
 		case SUBXACT_EVENT_START_SUB:
+
 			if (have_retained_undo_location())
 			{
 				(void) get_current_oxid();
 				add_subxact_undo_item(parentSubid);
-				prentLogicalXid = get_current_logical_xid();
+				prentLogicalXid = GetTopTransactionId();
 				assign_subtransaction_logical_xid();
 				add_savepoint_wal_record(parentSubid, prentLogicalXid);
 				if (minParentSubId == InvalidSubTransactionId)
 					minParentSubId = parentSubid;
 			}
+
 			break;
+
 		case SUBXACT_EVENT_COMMIT_SUB:
 			if (parentSubid >= minParentSubId && minParentSubId != InvalidSubTransactionId)
 				update_subxact_undo_location_on_commit(parentSubid);
 			break;
+
 		case SUBXACT_EVENT_ABORT_SUB:
 			if (parentSubid < minParentSubId || minParentSubId == InvalidSubTransactionId)
 				parentSubid = InvalidSubTransactionId;
@@ -1932,7 +2034,15 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					rollback_to_savepoint((UndoLogType) i, UndoStackFull,
 										  parentSubid, true);
-				add_rollback_to_savepoint_wal_record(parentSubid);
+
+				get_current_logical_xid_ctx(&logicalXidContext);
+				if (TransactionIdIsValid(logicalXidContext.xid))
+				{
+					if (!RecoveryInProgress())
+					{
+						add_rollback_to_savepoint_wal_record(parentSubid);
+					}
+				}
 
 				/*
 				 * It might happen that we've released some row-level locks.
@@ -1941,10 +2051,14 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 				 */
 				oxid_notify_all();
 			}
+
 			break;
+
 		default:
 			break;
 	}
+
+	oxid_subxact_callback(event, mySubid, parentSubid, arg);
 }
 
 bool
@@ -1993,7 +2107,7 @@ start_autonomous_transaction(OAutonomousTxState *state)
 
 	state->needs_wal_flush = oxid_needs_wal_flush;
 	state->oxid = get_current_oxid();
-	state->logicalXid = get_current_logical_xid();
+	get_current_logical_xid_ctx(&state->logicalXidContext);
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		state->has_retained_undo_location[i] = undo_type_has_retained_location((UndoLogType) i);
 	state->local_wal_has_material_changes = get_local_wal_has_material_changes();
@@ -2034,7 +2148,7 @@ abort_autonomous_transaction(OAutonomousTxState *state)
 	oxid_needs_wal_flush = state->needs_wal_flush;
 	GET_CUR_PROCDATA()->autonomousNestingLevel--;
 	set_current_oxid(state->oxid);
-	set_current_logical_xid(state->logicalXid);
+	set_current_logical_xid(&state->logicalXidContext);
 	set_local_wal_has_material_changes(state->local_wal_has_material_changes);
 }
 
@@ -2072,7 +2186,7 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 	oxid_needs_wal_flush = state->needs_wal_flush;
 	GET_CUR_PROCDATA()->autonomousNestingLevel--;
 	set_current_oxid(state->oxid);
-	set_current_logical_xid(state->logicalXid);
+	set_current_logical_xid(&state->logicalXidContext);
 	set_local_wal_has_material_changes(state->local_wal_has_material_changes);
 }
 
