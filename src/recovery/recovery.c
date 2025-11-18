@@ -3105,12 +3105,12 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			OFixedTuple tuple2;
 			OffsetNumber unused;
 			Pointer		sys_tree_oids_ptr;
-			bool 	    has_two_tuples;
+			bool 	    read_two_tuples;
 
 			sys_tree_oids_ptr = ptr + sizeof(uint8) + sizeof(OffsetNumber);
 
-			has_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
-			ptr = wal_parse_rec_modify(ptr, &tuple1, &tuple2, &unused, has_two_tuples);
+			read_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
+			ptr = wal_parse_rec_modify(ptr, &tuple1, &tuple2, &unused, read_two_tuples);
 
 			type = recovery_msg_from_wal_record(rec_type);
 
@@ -3185,16 +3185,11 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				Assert(type == RecoveryMsgTypeReinsert);
 				Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
 
-
-				/*
-				 * For REINSERT with REPLICA_IDENTITY_FULL tuple2 (old tuple)
-				 * representation is full tuple, not a key. We need to rewrite
-				 * it with a key.
-				 */
 				if (relreplident == REPLICA_IDENTITY_FULL)
 				{
 					bool		allocated;
 
+					/* tuple2 (old tuple) representation is full tuple, not a key. We need to rewrite it with a key. */
 					tuple2.tuple = o_btree_tuple_make_key(&(GET_PRIMARY(descr))->desc, tuple2.tuple, tuple2.tuple.data, true, &allocated);
 					Assert(!allocated);
 				}
@@ -3211,23 +3206,33 @@ replay_container(Pointer startPtr, Pointer endPtr,
 					spread_idx_modify(&indexDescr->desc, RecoveryMsgTypeInsert, tuple1.tuple);
 				}
 			}
-			else
+			else /* WAL_REC_INSERT, WAL_REC_UPDATE or WAL_REC_DELETE */
 			{
-				/*
-				 * For UPDATE with REPLICA_IDENTITY_FULL tuple2 from WAL
-				 * record could be safely ignored (it's needed only for
-				 * logical decoding).
-				 *
-				 * For DELETE with REPLICA_IDENTITY_FULL tuple1 representation
-				 * is full tuple, not a key. We need to rewrite it with a key.
-				 */
-				if (relreplident == REPLICA_IDENTITY_FULL && rec_type == WAL_REC_DELETE)
+				if (relreplident == REPLICA_IDENTITY_FULL)
 				{
-					bool		allocated;
+					if (rec_type == WAL_REC_DELETE)
+					{
+						bool		allocated;
 
-					tuple1.tuple = o_btree_tuple_make_key(&(GET_PRIMARY(descr))->desc, tuple1.tuple, tuple1.tuple.data, true, &allocated);
-					Assert(!allocated);
+ 						/* tuple1 representation is full tuple, not a key. We need to rewrite it with a key. */
+						tuple1.tuple = o_btree_tuple_make_key(&(GET_PRIMARY(descr))->desc, tuple1.tuple, tuple1.tuple.data, true, &allocated);
+						Assert(!allocated);
+						Assert(O_TUPLE_IS_NULL(tuple2.tuple));
+					}
+					else if (rec_type == WAL_REC_UPDATE)
+					{
+						/* tuple2 from WAL record could be safely ignored (it's needed only for logical decoding). */
+						Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
+					}
+					else
+					{
+						Assert(O_TUPLE_IS_NULL(tuple2.tuple));
+					}
 				}
+				else
+					{
+						Assert(O_TUPLE_IS_NULL(tuple2.tuple));
+					}
 
 				if (single)
 				{
