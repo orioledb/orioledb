@@ -36,6 +36,20 @@
 #define WAL_REC_REPLAY_FEEDBACK	(16)
 
 /*
+ * Record type for a case when both heap and Oriole apply changes within a single transaction,
+ * so one logical xid is assigned by heap, and the other is assigned by Oriole.
+ *
+ * This record defines a connection between Oriole's sub-transaction xid and a xid of the top heap transaction
+ * which is needed for logical decoder.
+ *
+ * Otherwise, without this connection, main transaction suddenly becomes splitted into two independent parts.
+ * From logical decoder's point of view this looks like two independent transactions but in fact internally related to each other.
+ * This situation outcomes in troubles for logical decoder with visibility of heap modifications
+ * in Oriole's sub-part due to incorrect state of the MVCC-historical snapshot.
+ */
+#define WAL_REC_SWITCH_LOGICAL_XID	(17)
+
+/*
  * Value has been fixed at the moment of introducing WAL versioning.
  * Now, when we have WAL version in the beginning of each container
  * we should never change this value.
@@ -48,7 +62,7 @@
  * This is unlike ORIOLEDB_DATA_VERSION, ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION,
  * that make sense only inside one ORIOLEDB_BINARY_VERSION.
  */
-#define ORIOLEDB_WAL_VERSION (16)
+#define ORIOLEDB_WAL_VERSION (17)
 
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
@@ -68,7 +82,16 @@ typedef struct
 	uint8		recType;
 	uint8		oxid[sizeof(OXid)];
 	uint8		logicalXid[sizeof(TransactionId)];
+	/* Since ORIOLEDB_WAL_VERSION = 17 */
+	uint8		heapXid[sizeof(TransactionId)];
 } WALRecXid;
+
+typedef struct
+{
+	uint8		recType;
+	uint8		topXid[sizeof(TransactionId)];
+	uint8		subXid[sizeof(TransactionId)];
+} WALRecSwitchLogicalXid;
 
 typedef struct
 {
@@ -121,6 +144,8 @@ typedef struct
 {
 	uint8		recType;
 	uint8		parentSubid[sizeof(SubTransactionId)];
+	uint8		xmin[sizeof(OXid)]; /* Since ORIOLEDB_WAL_VERSION = 17 */
+	uint8		csn[sizeof(CommitSeqNo)];	/* Since ORIOLEDB_WAL_VERSION = 17 */
 } WALRecRollbackToSavepoint;
 
 typedef struct
@@ -156,11 +181,46 @@ typedef struct
 #define ORIOLEDB_WAL_PREFIX	"o_wal"
 #define ORIOLEDB_WAL_PREFIX_SIZE (5)
 
+extern const char *wal_record_type_to_string(int wal_record);
+
+/* API for parsing WAL-records */
+
+/* Parser for WAL_REC_XID */
+extern Pointer wal_parse_rec_xid(Pointer ptr, OXid *oxid, TransactionId *logicalXid, TransactionId *heapXid, uint16 wal_version);
+
+/* Parser for WAL_REC_COMMIT and WAL_REC_ROLLBACK */
+extern Pointer wal_parse_rec_finish(Pointer ptr, OXid *xmin, CommitSeqNo *csn);
+
+/* Parser for WAL_REC_JOINT_COMMIT */
+extern Pointer wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid *xmin, CommitSeqNo *csn);
+
+/* Parser for WAL_REC_RELATION */
+extern Pointer wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids);
+
+/* Parser for WAL_REC_O_TABLES_META_UNLOCK */
+extern Pointer wal_parse_rec_o_tables_meta_unlock(Pointer ptr, ORelOids *oids, Oid *old_relnode);
+
+/* Parser for WAL_REC_SAVEPOINT */
+extern Pointer wal_parse_rec_savepoint(Pointer ptr, SubTransactionId *parentSubid, TransactionId *logicalXid, TransactionId *parentLogicalXid);
+
+/* Parser for WAL_REC_ROLLBACK_TO_SAVEPOINT */
+extern Pointer wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid, OXid *xmin, CommitSeqNo *csn, uint16 wal_version);
+
+/* Parser for WAL_REC_TRUNCATE */
+extern Pointer wal_parse_rec_truncate(Pointer ptr, ORelOids *oids);
+
+/* Parser for WAL_REC_BRIDGE_ERASE */
+extern Pointer wal_parse_rec_bridge_erase(Pointer ptr, ItemPointerData *iptr);
+
+/* Parser for WAL_REC_SWITCH_LOGICAL_XID */
+extern Pointer wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *topXid, TransactionId *subXid);
+
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, OffsetNumber length);
 extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr);
 extern void add_o_tables_meta_lock_wal_record(void);
 extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);
+extern void add_switch_logical_xid_wal_record(TransactionId logicalXid_top, TransactionId logicalXid_sub);
 extern void add_savepoint_wal_record(SubTransactionId parentSubid,
 									 TransactionId prentLogicalXid);
 extern void add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid);
