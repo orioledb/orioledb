@@ -106,7 +106,8 @@ SELECT * FROM o_ddl_check;
 
 -- Fails on unknown option
 ALTER TABLE o_ddl_check OPTIONS (SET hello 'world');
-ERROR:  "o_ddl_check" is not a foreign table
+ERROR:  ALTER action OPTIONS cannot be performed on relation "o_ddl_check"
+DETAIL:  This operation is not supported for tables.
 ALTER TABLE o_ddl_check ALTER f2 DROP NOT NULL;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
                   orioledb_table_description                  
