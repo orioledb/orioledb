@@ -34,7 +34,6 @@
 								 * DELETE + INSERT in OrioleDB but externally
 								 * exported as an UPDATE in logical decoding */
 #define WAL_REC_REPLAY_FEEDBACK	(16)
-#define WAL_REC_RELREPLIDENT (17)
 
 /*
  * Record type for a case when both heap and Oriole apply changes within a single transaction,
@@ -49,6 +48,7 @@
  * in Oriole's sub-part due to incorrect state of the MVCC-historical snapshot.
  */
 #define WAL_REC_SWITCH_LOGICAL_XID	(17)
+#define WAL_REC_RELREPLIDENT		(18)
 
 /*
  * Value has been fixed at the moment of introducing WAL versioning.
@@ -106,7 +106,7 @@ typedef struct
 typedef struct
 {
 	uint8		recType;
-	char		relreplident;
+	uint8		relreplident;
 	uint8		relreplident_ix_oid[sizeof(Oid)];
 } WALRecRelReplident;
 
@@ -204,6 +204,9 @@ extern Pointer wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid 
 
 /* Parser for WAL_REC_RELATION */
 extern Pointer wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids);
+
+/* Parser for WAL_REC_RELREPLIDENT */
+extern Pointer wal_parse_rec_relreplident(Pointer ptr, char *relreplident, Oid *relreplident_ix_oid);
 
 /* Parser for WAL_REC_O_TABLES_META_UNLOCK */
 extern Pointer wal_parse_rec_o_tables_meta_unlock(Pointer ptr, ORelOids *oids, Oid *old_relnode);

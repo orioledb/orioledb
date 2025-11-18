@@ -88,6 +88,8 @@ wal_record_type_to_string(int wal_record)
 			return "REPLAY_FEEDBACK";
 		 /* 17 */ case WAL_REC_SWITCH_LOGICAL_XID:
 			return "SWITCH_LOGICAL_XID";
+		 /* 18 */ case WAL_REC_RELREPLIDENT:
+			return "RELREPLIDENT";
 		default:
 			return "UNKNOWN";
 	}
@@ -156,6 +158,19 @@ wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids)
 	PARSE(ptr, &oids->datoid);
 	PARSE(ptr, &oids->reloid);
 	PARSE(ptr, &oids->relnode);
+
+	return ptr;
+}
+
+/* Parser for WAL_REC_RELREPLIDENT */
+Pointer
+wal_parse_rec_relreplident(Pointer ptr, char *relreplident, Oid *relreplident_ix_oid)
+{
+	Assert(ptr);
+	Assert(relreplident);
+
+	PARSE(ptr, relreplident);
+	PARSE(ptr, relreplident_ix_oid);
 
 	return ptr;
 }
@@ -343,6 +358,8 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 		required_length = sizeof(WALRecModify2) + length + length2;
 	}
 
+
+	elog(LOG, "add_modify_wal_record_extended length1 %d length2 %d", length, length2); 
 	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
 		required_length += sizeof(WALRecRelation);
 
@@ -697,7 +714,7 @@ add_relreplident_wal_record(char relreplident)
 
 	rec->recType = WAL_REC_RELREPLIDENT;
 	rec->relreplident = relreplident;
-	memcpy(&rec->relreplident_ix_oid, &ix_oid, sizeof(Oid));
+	memcpy(rec->relreplident_ix_oid, &ix_oid, sizeof(Oid));
 
 	local_wal_buffer_offset += sizeof(*rec);
 }
