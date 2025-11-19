@@ -354,7 +354,8 @@ extern void add_new_undo_stack_item_to_process(UndoLogType undoType,
 											   LocalTransactionId localXid);
 extern void read_shared_undo_locations(UndoStackLocations *to, UndoStackSharedLocations *from);
 extern void write_shared_undo_locations(UndoStackSharedLocations *to, UndoStackLocations *from);
-extern UndoStackLocations get_cur_undo_locations(UndoLogType undoType);
+extern void get_cur_undo_locations(UndoStackLocations *locations,
+								   UndoLogType undoType);
 extern void set_cur_undo_locations(UndoLogType undoType,
 								   UndoStackLocations locations);
 extern void reset_cur_undo_locations(void);
