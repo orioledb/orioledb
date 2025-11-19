@@ -1727,8 +1727,8 @@ recovery_rec_delete(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size, 
 	}
 	else
 	{
-		*size = o_btree_len(desc, tuple, OKeyLength);
 		key = o_btree_tuple_make_key(desc, tuple, NULL, true, allocated);
+		*size = o_btree_len(desc, key, OKeyLength);
 		return key;
 	}
 }
