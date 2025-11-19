@@ -382,7 +382,7 @@ o_convert_toast_chunk(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexDescr
 
 
 static void
-o_decode_modify_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType ix_type, ReorderBufferChange *change, OTableDescr *descr, OIndexDescr *indexDescr,
+o_decode_modify_tuples(ReorderBuffer *reorderbuf, uint8 rec_type, OIndexType ix_type, ReorderBufferChange *change, OTableDescr *descr, OIndexDescr *indexDescr,
 						 TupleDescData *o_toast_tupDesc, TupleDescData *heap_toast_tupDesc, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber debug_length, char relreplident)
 {
 	if (relreplident != REPLICA_IDENTITY_DEFAULT)
@@ -398,7 +398,7 @@ o_decode_modify_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType i
 		if (ix_type == oIndexToast)
 		{
 			elog(DEBUG4, "WAL_REC_INSERT TOAST");
-			change->data.tp.newtuple = o_convert_toast_chunk(ctx->reorder, descr, indexDescr, tuple1, o_toast_tupDesc, heap_toast_tupDesc, debug_length);
+			change->data.tp.newtuple = o_convert_toast_chunk(reorderbuf, descr, indexDescr, tuple1, o_toast_tupDesc, heap_toast_tupDesc, debug_length);
 			change->data.tp.clear_toast_afterwards = false;
 		}
 		else
@@ -409,7 +409,7 @@ o_decode_modify_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType i
 
 			elog(DEBUG4, "WAL_REC_INSERT NON-TOAST");
 			/* Store full new tuple into reorderbuffer */
-			change->data.tp.newtuple = o_convert_non_toast_tuple(ctx->reorder, descr, indexDescr, tuple1, false, descr->newTuple, &newheaptuple, true);
+			change->data.tp.newtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, false, descr->newTuple, &newheaptuple, true);
 			change->data.tp.clear_toast_afterwards = true;
 		}
 	}
@@ -423,7 +423,7 @@ o_decode_modify_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType i
 
 		change->action = REORDER_BUFFER_CHANGE_UPDATE;
 		change->data.tp.clear_toast_afterwards = true;
-		change->data.tp.newtuple = o_convert_non_toast_tuple(ctx->reorder, descr, indexDescr, tuple1, (relreplident != REPLICA_IDENTITY_FULL), descr->newTuple, &newheaptuple, true);
+		change->data.tp.newtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, (relreplident != REPLICA_IDENTITY_FULL), descr->newTuple, &newheaptuple, true);
 
 		if (relreplident == REPLICA_IDENTITY_FULL)
 		{
@@ -432,7 +432,7 @@ o_decode_modify_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType i
 
 			/* Store full old tuple into reorderbuffer */
 			Assert(!O_TUPLE_IS_NULL(tuple2->tuple));
-			change->data.tp.oldtuple = o_convert_non_toast_tuple(ctx->reorder, descr, indexDescr, tuple2, false, descr->oldTuple, &oldheaptuple, true);
+			change->data.tp.oldtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple2, false, descr->oldTuple, &oldheaptuple, true);
 		}
 		else
 		{
@@ -442,7 +442,7 @@ o_decode_modify_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType i
 			 * reorderbuffer
 			 */
 			tts_copy_identity(descr->newTuple, descr->oldTuple, GET_PRIMARY(descr));
-			change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
+			change->data.tp.oldtuple = record_buffer_tuple_slot(reorderbuf, descr->oldTuple);
 		}
 
 		if (newheaptuple)
@@ -462,7 +462,7 @@ o_decode_modify_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType i
 											  descr, COMMITSEQNO_INPROGRESS,
 											  PrimaryIndexNumber, false,
 											  NULL);
-			change->data.tp.oldtuple = record_buffer_tuple_slot(ctx->reorder, descr->oldTuple);
+			change->data.tp.oldtuple = record_buffer_tuple_slot(reorderbuf, descr->oldTuple);
 		}
 		else
 		{
@@ -471,7 +471,7 @@ o_decode_modify_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType i
 			elog(DEBUG4, "WAL_REC_DELETE NON-TOAST");
 
 			change->data.tp.clear_toast_afterwards = true;
-			change->data.tp.oldtuple = o_convert_non_toast_tuple(ctx->reorder, descr, indexDescr, tuple1, false, descr->oldTuple, &oldheaptuple, (relreplident == REPLICA_IDENTITY_FULL));
+			change->data.tp.oldtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, false, descr->oldTuple, &oldheaptuple, (relreplident == REPLICA_IDENTITY_FULL));
 		}
 	}
 	else if (rec_type == WAL_REC_REINSERT)
@@ -488,9 +488,9 @@ o_decode_modify_tuples(LogicalDecodingContext *ctx, uint8 rec_type, OIndexType i
 		elog(DEBUG4, "WAL_REC_REINSERT");
 
 		/* Store old tuple or key into reorderbuffer */
-		change->data.tp.oldtuple = o_convert_non_toast_tuple(ctx->reorder, descr, indexDescr, tuple2, false, descr->oldTuple, &oldheaptuple, (relreplident == REPLICA_IDENTITY_FULL));
+		change->data.tp.oldtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple2, false, descr->oldTuple, &oldheaptuple, (relreplident == REPLICA_IDENTITY_FULL));
 		/* Store full new tuple into reorderbuffer */
-		change->data.tp.newtuple = o_convert_non_toast_tuple(ctx->reorder, descr, indexDescr, tuple1, false, descr->newTuple, &newheaptuple, true);
+		change->data.tp.newtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, false, descr->newTuple, &newheaptuple, true);
 	}
 	else
 	{
@@ -1006,7 +1006,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				change->data.tp.rlocator.relNumber = cur_oids.relnode;
 				elog(DEBUG4, "reloid: %u", cur_oids.reloid);
 
-				o_decode_modify_tuples(ctx, rec_type, ix_type, change, descr, indexDescr, o_toast_tupDesc, heap_toast_tupDesc, &tuple1, &tuple2, debug_length, relreplident);
+				o_decode_modify_tuples(ctx->reorder, rec_type, ix_type, change, descr, indexDescr, o_toast_tupDesc, heap_toast_tupDesc, &tuple1, &tuple2, debug_length, relreplident);
 
 				ReorderBufferQueueChange(ctx->reorder, logicalXid,
 										 changeXLogPtr,
