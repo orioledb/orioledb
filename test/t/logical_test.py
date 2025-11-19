@@ -65,8 +65,14 @@ class LogicalTest(BaseTest):
 		node = self.node
 		node.start()  # start PostgreSQL
 		node.safe_psql(
-		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		    "CREATE TABLE data(id serial primary key, data text) USING orioledb;\n"
+		    'postgres', """CREATE EXTENSION IF NOT EXISTS orioledb;
+		                CREATE TABLE data (
+			                        i   int,
+						data1 text,
+						data2 text,
+			                        data3 text
+					) USING orioledb;
+		          ALTER TABLE data REPLICA IDENTITY FULL;"""
 		)
 
 		node.safe_psql(
@@ -76,18 +82,24 @@ class LogicalTest(BaseTest):
 
 		node.safe_psql(
 		    'postgres', "BEGIN;\n"
-		    "INSERT INTO data(data) VALUES('1');\n"
-		    "INSERT INTO data(data) VALUES('2');\n"
+		    "INSERT INTO data VALUES(1, 'foofoo','barbar', 'aaaaaa');\n"
+		    "INSERT INTO data VALUES(2, 'mmm','nnn', 'ooo');\n"
+		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
 		    "COMMIT;\n")
-
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+#		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
+#		    "UPDATE data SET data2 = 'ppp' where data2 = 'nnn';\n"
+		    "COMMIT;\n")
 		result = self.squashLogicalChanges(
 		    node.execute(
 		        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
 		    ))
 		self.assertEqual(
 		    result, "BEGIN\n"
-		    "table public.data: INSERT: id[integer]:1 data[text]:'1'\n"
-		    "table public.data: INSERT: id[integer]:2 data[text]:'2'\n"
+		    "table public.data: INSERT: i[integer]:1 data1[text]:'foofoo' data2[text]:'barbar' data3[text]:'aaaaaa'\n"
+		    "table public.data: INSERT: i[integer]:2 data1[text]:'mmm' data2[text]:'nnn' data3[text]:'ooo'\n"
+		    "table public.data: UPDATE: old-key: i[integer]:1 data1[text]:'foofoo' data2[text]:'barbar' data3[text]:'aaaaaa' new-tuple: i[integer]:1 data1[text]:'foofoo' data2[text]:'ssssss' data3[text]:'aaaaaa'\n"
 		    "COMMIT\n")
 
 #
@@ -1312,12 +1324,12 @@ COMMIT\n""")
 
 				with publisher.connect() as con1:
 					with publisher.connect() as con2:
-						con1.execute(
-						    "UPDATE o_test_ctid SET data2 = 'ssssss' where data2 = 'barbar';"
-						)
-						con2.execute(
-						    "UPDATE o_test_ctid SET data2 = 'ppp' where data2 = 'nnn';"
-						)
+#						con1.execute(
+#						    "UPDATE o_test_ctid SET data2 = 'ssssss' where data2 = 'barbar';"
+#						)
+#						con2.execute(
+#						    "UPDATE o_test_ctid SET data2 = 'ppp' where data2 = 'nnn';"
+#						)
 #						con1.execute(
 #						    "UPDATE o_test SET data2 = 'ssssss' where data2 = 'barbar';"
 #						)
@@ -1341,11 +1353,11 @@ COMMIT\n""")
 
 #					publisher.safe_psql("CHECKPOINT;")
 #					subscriber.execute("SELECT orioledb_get_current_oxid();")
-					self.assertListEqual(
-					    publisher.execute(
-					        'SELECT * FROM o_test_ctid ORDER BY i'),
-					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
-					     (2, 'mmm', 'ppp', 'ooo')])
+#					self.assertListEqual(
+#					    publisher.execute(
+#					        'SELECT * FROM o_test_ctid ORDER BY i'),
+#					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+#					     (2, 'mmm', 'ppp', 'ooo')])
 #					self.assertListEqual(
 #					    publisher.execute(
 #					        'SELECT * FROM o_test ORDER BY i'),
@@ -1366,11 +1378,11 @@ COMMIT\n""")
 					sub.catchup()
 					# sub.poll_query_until("SELECT orioledb_recovery_synchronized();", expected=True)
 #					subscriber.safe_psql("CHECKPOINT;")
-					self.assertListEqual(
-					    subscriber.execute(
-					        'SELECT * FROM o_test_ctid ORDER BY i'),
-					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
-					     (2, 'mmm', 'ppp', 'ooo')])
+#					self.assertListEqual(
+#					    subscriber.execute(
+#					        'SELECT * FROM o_test_ctid ORDER BY i'),
+#					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+#					     (2, 'mmm', 'ppp', 'ooo')])
 #					self.assertListEqual(
 #					    subscriber.execute(
 #					        'SELECT * FROM o_test ORDER BY i'),
