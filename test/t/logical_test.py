@@ -84,11 +84,11 @@ class LogicalTest(BaseTest):
 		    'postgres', "BEGIN;\n"
 		    "INSERT INTO data VALUES(1, 'foofoo','barbar', 'aaaaaa');\n"
 		    "INSERT INTO data VALUES(2, 'mmm','nnn', 'ooo');\n"
-#		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
+		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
 		    "COMMIT;\n")
 		node.safe_psql(
 		    'postgres', "BEGIN;\n"
-		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
+#		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
 #		    "UPDATE data SET data2 = 'ppp' where data2 = 'nnn';\n"
 		    "COMMIT;\n")
 		result = self.squashLogicalChanges(
@@ -1319,17 +1319,17 @@ COMMIT\n""")
 #						con2.execute(
 #						    "INSERT INTO o_test_ctid_secondary VALUES(2, 'mmm','nnn', 'ooo');"
 #						)
+						con1.execute(
+						    "UPDATE o_test_ctid SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test_ctid SET data2 = 'ppp' where data2 = 'nnn';"
+						)
 						con1.commit()
 						con2.commit()
 
 				with publisher.connect() as con1:
 					with publisher.connect() as con2:
-#						con1.execute(
-#						    "UPDATE o_test_ctid SET data2 = 'ssssss' where data2 = 'barbar';"
-#						)
-#						con2.execute(
-#						    "UPDATE o_test_ctid SET data2 = 'ppp' where data2 = 'nnn';"
-#						)
 #						con1.execute(
 #						    "UPDATE o_test SET data2 = 'ssssss' where data2 = 'barbar';"
 #						)
@@ -1353,11 +1353,11 @@ COMMIT\n""")
 
 #					publisher.safe_psql("CHECKPOINT;")
 #					subscriber.execute("SELECT orioledb_get_current_oxid();")
-#					self.assertListEqual(
-#					    publisher.execute(
-#					        'SELECT * FROM o_test_ctid ORDER BY i'),
-#					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
-#					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test_ctid ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
 #					self.assertListEqual(
 #					    publisher.execute(
 #					        'SELECT * FROM o_test ORDER BY i'),
@@ -1378,11 +1378,11 @@ COMMIT\n""")
 					sub.catchup()
 					# sub.poll_query_until("SELECT orioledb_recovery_synchronized();", expected=True)
 #					subscriber.safe_psql("CHECKPOINT;")
-#					self.assertListEqual(
-#					    subscriber.execute(
-#					        'SELECT * FROM o_test_ctid ORDER BY i'),
-#					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
-#					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_ctid ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
 #					self.assertListEqual(
 #					    subscriber.execute(
 #					        'SELECT * FROM o_test ORDER BY i'),
