@@ -444,7 +444,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 	csn = oSnapshot.csn;
-	undoStackLocations = get_cur_undo_locations(UndoLogRegular);
+	get_cur_undo_locations(&undoStackLocations, UndoLogRegular);
 
 	ioc_arg.desc = descr;
 	ioc_arg.oxid = oxid;
