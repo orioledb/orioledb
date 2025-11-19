@@ -1456,23 +1456,20 @@ write_shared_undo_locations(UndoStackSharedLocations *to, UndoStackLocations *fr
 	pg_atomic_write_u64(&to->onCommitLocation, from->onCommitLocation);
 }
 
-UndoStackLocations
-get_cur_undo_locations(UndoLogType undoType)
+void
+get_cur_undo_locations(UndoStackLocations *locations, UndoLogType undoType)
 {
-	UndoStackLocations location;
 	UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS(undoType);
 
-	read_shared_undo_locations(&location, sharedLocations);
-
-	return location;
+	read_shared_undo_locations(locations, sharedLocations);
 }
 
 void
-set_cur_undo_locations(UndoLogType undoType, UndoStackLocations location)
+set_cur_undo_locations(UndoLogType undoType, UndoStackLocations locations)
 {
 	UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS(undoType);
 
-	write_shared_undo_locations(sharedLocations, &location);
+	write_shared_undo_locations(sharedLocations, &locations);
 }
 
 void
@@ -2070,9 +2067,11 @@ have_current_undo(UndoLogType undoType)
 	}
 	else
 	{
-		UndoStackLocations location = get_cur_undo_locations(undoType);
+		UndoStackLocations locations;
 
-		return (!UndoLocationIsValid(location.location));
+		get_cur_undo_locations(&locations, undoType);
+
+		return (!UndoLocationIsValid(locations.location));
 	}
 }
 

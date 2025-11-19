@@ -1078,7 +1078,8 @@ recovery_finish(int worker_id)
 		cur_recovery_xid_state->needs_wal_flush = oxid_needs_wal_flush;
 		for (i = 0; i < (int) UndoLogsCount; i++)
 		{
-			cur_recovery_xid_state->undo_stacks[i] = get_cur_undo_locations((UndoLogType) i);
+			get_cur_undo_locations(&cur_recovery_xid_state->undo_stacks[i],
+								   (UndoLogType) i);
 			cur_recovery_xid_state->retain_locs[i] = curRetainUndoLocations[i];
 		}
 		cur_recovery_xid_state = NULL;
@@ -1173,7 +1174,8 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			cur_state->needs_wal_flush = oxid_needs_wal_flush;
 			for (i = 0; i < (int) UndoLogsCount; i++)
 			{
-				cur_state->undo_stacks[i] = get_cur_undo_locations((UndoLogType) i);
+				get_cur_undo_locations(&cur_state->undo_stacks[i],
+									   (UndoLogType) i);
 
 				if (!UndoLocationIsValid(cur_state->retain_locs[i]) &&
 					UndoLocationIsValid(curRetainUndoLocations[i]))
@@ -1213,6 +1215,13 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			cur_state->ptr = InvalidXLogRecPtr;
 			cur_state->needs_wal_flush = false;
 			cur_state->in_finished_list = false;
+
+			/*
+			 * undo_stacks might be copied into a temp file, so initialize it
+			 * with zeroes.
+			 */
+			memset(cur_state->undo_stacks, 0, sizeof(cur_state->undo_stacks));
+
 			dlist_init(&cur_state->checkpoint_undo_stacks);
 			oxid_needs_wal_flush = false;
 			reset_cur_undo_locations();
@@ -1293,7 +1302,7 @@ flush_current_undo_stack(void)
 	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
 		rec.undoType = (UndoLogType) i;
-		rec.undoLocation = get_cur_undo_locations((UndoLogType) i);
+		get_cur_undo_locations(&rec.undoLocation, (UndoLogType) i);
 		write_to_xids_queue(&rec);
 	}
 }
@@ -1409,7 +1418,8 @@ checkpoint_rollback_to_savepoint(SubTransactionId parentSubid)
 	int			i;
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
-		cur_recovery_xid_state->undo_stacks[i] = get_cur_undo_locations((UndoLogType) i);
+		get_cur_undo_locations(&cur_recovery_xid_state->undo_stacks[i],
+							   (UndoLogType) i);
 	walk_checkpoint_stacks(cur_recovery_xid_state, COMMITSEQNO_ABORTED,
 						   parentSubid, false);
 	for (i = 0; i < (int) UndoLogsCount; i++)
@@ -1972,8 +1982,8 @@ recovery_write_to_xids_queue(int worker_id, uint32 requestNumber)
 	if (cur_recovery_xid_state)
 	{
 		for (i = 0; i < (int) UndoLogsCount; i++)
-			cur_recovery_xid_state->undo_stacks[i] =
-				get_cur_undo_locations((UndoLogType) i);
+			get_cur_undo_locations(&cur_recovery_xid_state->undo_stacks[i],
+								   (UndoLogType) i);
 	}
 
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
@@ -2079,6 +2089,7 @@ save_state_to_file(int worker_id)
 				 errmsg("could not open file %s: %m", filename)));
 
 	/* Write header */
+	memset(&header, 0, sizeof(header));
 	header.worker_id = worker_id;
 	header.num_transactions = hash_get_num_entries(recovery_xid_state_hash);
 	if (OFileWrite(tempFile, (char *) &header, sizeof(header), 0,
@@ -2092,8 +2103,8 @@ save_state_to_file(int worker_id)
 	if (cur_recovery_xid_state != NULL)
 	{
 		for (int i = 0; i < UndoLogsCount; i++)
-			cur_recovery_xid_state->undo_stacks[i] =
-				get_cur_undo_locations((UndoLogType) i);
+			get_cur_undo_locations(&cur_recovery_xid_state->undo_stacks[i],
+								   (UndoLogType) i);
 	}
 
 	/* Write all transaction states */
