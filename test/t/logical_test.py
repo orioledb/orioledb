@@ -84,11 +84,11 @@ class LogicalTest(BaseTest):
 		    'postgres', "BEGIN;\n"
 		    "INSERT INTO data VALUES(1, 'foofoo','barbar', 'aaaaaa');\n"
 		    "INSERT INTO data VALUES(2, 'mmm','nnn', 'ooo');\n"
-		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
+#		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
 		    "COMMIT;\n")
 		node.safe_psql(
 		    'postgres', "BEGIN;\n"
-#		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
+		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
 #		    "UPDATE data SET data2 = 'ppp' where data2 = 'nnn';\n"
 		    "COMMIT;\n")
 		result = self.squashLogicalChanges(
