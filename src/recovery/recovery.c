@@ -146,7 +146,7 @@ typedef struct WorkerUndoTempHeader
 {
 	int			worker_id;
 	uint32		num_transactions;
-} WorkerUndoTempHeader;
+}			WorkerUndoTempHeader;
 
 typedef struct WorkerUndoTempEntry
 {
@@ -155,13 +155,13 @@ typedef struct WorkerUndoTempEntry
 	UndoStackLocations undoStacks[UndoLogsCount];
 	uint32		numCheckpointStacks;
 	/* How many checkpoint stacks follow */
-} WorkerUndoTempEntry;
+}			WorkerUndoTempEntry;
 
 typedef struct WorkerUndoTempCheckpointStack
 {
 	UndoLogType undoType;
 	UndoStackLocations undoStack;
-} WorkerUndoTempCheckpointStack;
+}			WorkerUndoTempCheckpointStack;
 
 PG_FUNCTION_INFO_V1(orioledb_recovery_synchronized);
 
@@ -1694,6 +1694,7 @@ replay_erase_bridge_item(OIndexDescr *bridge, ItemPointer iptr)
 	unlock_page(context.items[context.index].blkno);
 }
 
+/* Insert WAL record always stores one tuple, not a key. */
 OTuple
 recovery_rec_insert(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size)
 {
@@ -1702,6 +1703,10 @@ recovery_rec_insert(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size)
 	return tuple;
 }
 
+/*
+ *  Update WAL record always stores tuples, not keys. For REPLICA_IDENTITY_FULL
+ *  new and old tuples, otherwise only new tuple.
+ */
 OTuple
 recovery_rec_update(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size)
 {
@@ -1711,8 +1716,8 @@ recovery_rec_update(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size)
 }
 
 /*
- *  This function should be used for WAL recording for real tables. As it depends on replica
- *  identity what should be contained in wal record: key or full tuple.
+ *  This function should be used for WAL recording for real tables that can be logically replicated.
+ *  For them it depends on replica identity what should be contained in wal record: key or full tuple.
  */
 OTuple
 recovery_rec_delete(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size, char relreplident)
@@ -1733,7 +1738,10 @@ recovery_rec_delete(BTreeDescr *desc, OTuple tuple, bool *allocated, int *size, 
 	}
 }
 
-/* Use for system trees only, that could not be logically replicated */
+/*
+ * This function could be used only for system trees and bridge indices, that could not be logically
+ * replicated and can't have replica identity.
+ */
 OTuple
 recovery_rec_delete_key(BTreeDescr *desc, OTuple key, bool *allocated, int *size)
 {
@@ -3105,7 +3113,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			OFixedTuple tuple2;
 			OffsetNumber unused;
 			Pointer		sys_tree_oids_ptr;
-			bool 	    read_two_tuples;
+			bool		read_two_tuples;
 
 			sys_tree_oids_ptr = ptr + sizeof(uint8) + sizeof(OffsetNumber);
 
@@ -3189,7 +3197,10 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				{
 					bool		allocated;
 
-					/* tuple2 (old tuple) representation is full tuple, not a key. We need to rewrite it with a key. */
+					/*
+					 * tuple2 (old tuple) representation is full tuple, not a
+					 * key. We need to rewrite it with a key.
+					 */
 					tuple2.tuple = o_btree_tuple_make_key(&(GET_PRIMARY(descr))->desc, tuple2.tuple, tuple2.tuple.data, true, &allocated);
 					Assert(!allocated);
 				}
@@ -3206,7 +3217,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 					spread_idx_modify(&indexDescr->desc, RecoveryMsgTypeInsert, tuple1.tuple);
 				}
 			}
-			else /* WAL_REC_INSERT, WAL_REC_UPDATE or WAL_REC_DELETE */
+			else				/* WAL_REC_INSERT, WAL_REC_UPDATE or
+								 * WAL_REC_DELETE */
 			{
 				if (relreplident == REPLICA_IDENTITY_FULL)
 				{
@@ -3214,14 +3226,20 @@ replay_container(Pointer startPtr, Pointer endPtr,
 					{
 						bool		allocated;
 
- 						/* tuple1 representation is full tuple, not a key. We need to rewrite it with a key. */
+						/*
+						 * tuple1 representation is full tuple, not a key. We
+						 * need to rewrite it with a key.
+						 */
 						tuple1.tuple = o_btree_tuple_make_key(&(GET_PRIMARY(descr))->desc, tuple1.tuple, tuple1.tuple.data, true, &allocated);
 						Assert(!allocated);
 						Assert(O_TUPLE_IS_NULL(tuple2.tuple));
 					}
 					else if (rec_type == WAL_REC_UPDATE)
 					{
-						/* tuple2 from WAL record could be safely ignored (it's needed only for logical decoding). */
+						/*
+						 * tuple2 from WAL record could be safely ignored
+						 * (it's needed only for logical decoding).
+						 */
 						Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
 					}
 					else
@@ -3230,9 +3248,9 @@ replay_container(Pointer startPtr, Pointer endPtr,
 					}
 				}
 				else
-					{
-						Assert(O_TUPLE_IS_NULL(tuple2.tuple));
-					}
+				{
+					Assert(O_TUPLE_IS_NULL(tuple2.tuple));
+				}
 
 				if (single)
 				{

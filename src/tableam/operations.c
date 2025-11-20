@@ -257,7 +257,10 @@ delete_old_bridge_index_ctid(OTableDescr *descr, Relation relation,
 		keyTuple.formatFlags = O_TUPLE_FLAGS_FIXED_FORMAT;
 		keyTuple.data = (Pointer) &bridge_oslot->bridge_ctid;
 
-		/* o_wal_delete_key can be used as long as bridge index can't have replica identity */
+		/*
+		 * o_wal_delete_key can be used as long as bridge index can't have
+		 * replica identity
+		 */
 		o_wal_delete_key(&descr->bridge->desc, keyTuple, true);
 		flush_local_wal(false);
 	}

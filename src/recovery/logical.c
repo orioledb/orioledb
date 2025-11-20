@@ -142,7 +142,7 @@ get_reorder_buffer_txn(ReorderBuffer *rb, TransactionId xid)
  */
 static HeapTuple
 o_convert_toast_pointers(OTableDescr *descr, OIndexDescr *indexDescr,
-					   OFixedTuple *tuple)
+						 OFixedTuple *tuple)
 {
 	int			natts = descr->tupdesc->natts;
 	Datum	   *old_values = palloc0(natts * sizeof(Datum));
@@ -259,14 +259,18 @@ o_convert_non_toast_tuple(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexD
 		if (descr->ntoastable > 0)
 		{
 			/*
-			 * Primary table can have TOAST pointers. Convert them from Oriole to heap format
+			 * Primary table can have TOAST pointers. Convert them from Oriole
+			 * to heap format
 			 */
 			elog(LOG, "Convert LEAF NON-TOAST toastable");
 
 			*heaptuple = o_convert_toast_pointers(descr, indexDescr, tuple);
 			if (force_store_to_slot)
 			{
-				/* Caller should free heaptuple after slot is not needed anymore */
+				/*
+				 * Caller should free heaptuple after slot is not needed
+				 * anymore
+				 */
 				ExecForceStoreHeapTuple(*heaptuple, store_slot, false);
 				result = record_buffer_tuple(reorderbuf, *heaptuple, false);
 			}
@@ -281,26 +285,27 @@ o_convert_non_toast_tuple(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexD
 			elog(LOG, "Convert LEAF NON-TOAST plain");
 
 			tts_orioledb_store_tuple(store_slot, tuple->tuple,
-								 descr, COMMITSEQNO_INPROGRESS,
-								 PrimaryIndexNumber, false,
-								 NULL);
+									 descr, COMMITSEQNO_INPROGRESS,
+									 PrimaryIndexNumber, false,
+									 NULL);
 			result = record_buffer_tuple_slot(reorderbuf, store_slot);
 		}
 	}
-	else /* Non-leaf tuple in a primary table can't have TOAST pointers */
+	else						/* Non-leaf tuple in a primary table can't
+								 * have TOAST pointers */
 	{
 		elog(LOG, "Convert NON-LEAF");
 		tts_orioledb_store_non_leaf_tuple(store_slot, tuple->tuple,
-							 descr, COMMITSEQNO_INPROGRESS,
-							 PrimaryIndexNumber, false,
-							 NULL);
+										  descr, COMMITSEQNO_INPROGRESS,
+										  PrimaryIndexNumber, false,
+										  NULL);
 		result = record_buffer_tuple_slot(reorderbuf, store_slot);
 	}
 
 	return result;
 }
 
-/* Convert chunk in a TOAST relation from OrioleDB format to reorder buffer (heap) format */ 
+/* Convert chunk in a TOAST relation from OrioleDB format to reorder buffer (heap) format */
 static REORDER_BUFFER_TUPLE_TYPE
 o_convert_toast_chunk(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexDescr *indexDescr, OFixedTuple *tuple, TupleDescData *o_toast_tupDesc, TupleDescData *heap_toast_tupDesc, OffsetNumber debug_length)
 {
@@ -317,7 +322,7 @@ o_convert_toast_chunk(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexDescr
 				chunk_seq_isnull;
 	int			pk_natts;
 	bool		need_to_free = false;
-	REORDER_BUFFER_TUPLE_TYPE 	result;
+	REORDER_BUFFER_TUPLE_TYPE result;
 
 	Assert(o_toast_tupDesc);
 	pk_natts = o_toast_tupDesc->natts - TOAST_LEAF_FIELDS_NUM;
@@ -331,9 +336,9 @@ o_convert_toast_chunk(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexDescr
 	old_chunk_size = VARSIZE(old_chunk) - VARHDRSZ;
 
 	/*
-	 * ReorderBufferToastReplace() expects first toasted chunk without
-	 * the header of the whole toasted value and reconstructs it
-	 * itself. Cut this extra header from OrioleDB toasted chunk.
+	 * ReorderBufferToastReplace() expects first toasted chunk without the
+	 * header of the whole toasted value and reconstructs it itself. Cut this
+	 * extra header from OrioleDB toasted chunk.
 	 */
 	if (chunk_seq == 0)
 	{
@@ -383,7 +388,7 @@ o_convert_toast_chunk(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexDescr
 
 static void
 o_decode_modify_tuples(ReorderBuffer *reorderbuf, uint8 rec_type, OIndexType ix_type, ReorderBufferChange *change, OTableDescr *descr, OIndexDescr *indexDescr,
-						 TupleDescData *o_toast_tupDesc, TupleDescData *heap_toast_tupDesc, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber debug_length, char relreplident)
+					   TupleDescData *o_toast_tupDesc, TupleDescData *heap_toast_tupDesc, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber debug_length, char relreplident)
 {
 	if (relreplident != REPLICA_IDENTITY_DEFAULT)
 		elog(LOG, "REPLICA IDENTITY %c", relreplident);
@@ -428,6 +433,7 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, uint8 rec_type, OIndexType ix_
 		if (relreplident == REPLICA_IDENTITY_FULL)
 		{
 			HeapTuple	oldheaptuple = NULL;
+
 			elog(LOG, "WAL_REC_UPDATE OLDTUPLE REPLIDENT FULL");
 
 			/* Store full old tuple into reorderbuffer */
@@ -437,6 +443,7 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, uint8 rec_type, OIndexType ix_
 		else
 		{
 			elog(LOG, "WAL_REC_UPDATE OLDTUPLE REPLIDENT DEFAULT");
+
 			/*
 			 * Reconstruct old tuple key from new tuple and store into
 			 * reorderbuffer

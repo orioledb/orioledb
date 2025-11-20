@@ -327,7 +327,7 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	int			required_length;
 	ORelOids	oids = desc->oids;
 	OIndexType	type = desc->type;
-	bool 			write_two_tuples;
+	bool		write_two_tuples;
 
 	/* Do not write WAL during recovery */
 	if (OXidIsValid(recovery_oxid))
@@ -349,8 +349,8 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 
 	if (!write_two_tuples)
 	{
-		Assert (length2 == 0);
-		Assert (O_TUPLE_IS_NULL(tuple2));
+		Assert(length2 == 0);
+		Assert(O_TUPLE_IS_NULL(tuple2));
 		required_length = sizeof(WALRecModify1) + length;
 	}
 	else
@@ -361,7 +361,7 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	}
 
 
-	elog(LOG, "add_modify_wal_record_extended length1 %d length2 %d", length, length2); 
+	elog(LOG, "add_modify_wal_record_extended length1 %d length2 %d", length, length2);
 	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
 		required_length += sizeof(WALRecRelation);
 
@@ -709,7 +709,7 @@ static void
 add_relreplident_wal_record(char relreplident)
 {
 	WALRecRelReplident *rec = (WALRecRelReplident *) (&local_wal_buffer[local_wal_buffer_offset]);
-	Oid 	ix_oid = InvalidOid;
+	Oid			ix_oid = InvalidOid;
 
 	Assert(!is_recovery_process());
 	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
