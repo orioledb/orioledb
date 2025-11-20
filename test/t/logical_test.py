@@ -84,12 +84,12 @@ class LogicalTest(BaseTest):
 		    'postgres', "BEGIN;\n"
 		    "INSERT INTO data VALUES(1, 'foofoo','barbar', 'aaaaaa');\n"
 		    "INSERT INTO data VALUES(2, 'mmm','nnn', 'ooo');\n"
-		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
+#		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
 		    "COMMIT;\n")
 		node.safe_psql(
 		    'postgres', "BEGIN;\n"
-#		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
-#		    "UPDATE data SET data2 = 'ppp' where data2 = 'nnn';\n"
+		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
+		    "UPDATE data SET data2 = 'ppp' where data2 = 'nnn';\n"
 		    "COMMIT;\n")
 		result = self.squashLogicalChanges(
 		    node.execute(
@@ -99,7 +99,10 @@ class LogicalTest(BaseTest):
 		    result, "BEGIN\n"
 		    "table public.data: INSERT: i[integer]:1 data1[text]:'foofoo' data2[text]:'barbar' data3[text]:'aaaaaa'\n"
 		    "table public.data: INSERT: i[integer]:2 data1[text]:'mmm' data2[text]:'nnn' data3[text]:'ooo'\n"
+		    "COMMIT\n"
+		    "BEGIN\n"
 		    "table public.data: UPDATE: old-key: i[integer]:1 data1[text]:'foofoo' data2[text]:'barbar' data3[text]:'aaaaaa' new-tuple: i[integer]:1 data1[text]:'foofoo' data2[text]:'ssssss' data3[text]:'aaaaaa'\n"
+		    "table public.data: UPDATE: old-key: i[integer]:2 data1[text]:'mmm' data2[text]:'nnn' data3[text]:'ooo' new-tuple: i[integer]:2 data1[text]:'mmm' data2[text]:'ppp' data3[text]:'ooo'\n"
 		    "COMMIT\n")
 
 #
