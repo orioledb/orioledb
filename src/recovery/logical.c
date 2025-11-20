@@ -443,10 +443,10 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, uint8 rec_type, OIndexType ix_
 			 */
 			tts_copy_identity(descr->newTuple, descr->oldTuple, GET_PRIMARY(descr));
 			change->data.tp.oldtuple = record_buffer_tuple_slot(reorderbuf, descr->oldTuple);
-		}
 
-		if (newheaptuple)
-			heap_freetuple(newheaptuple);
+			if (newheaptuple)
+				heap_freetuple(newheaptuple);
+		}
 	}
 	else if (rec_type == WAL_REC_DELETE)
 	{
