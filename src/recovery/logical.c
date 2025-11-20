@@ -772,6 +772,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids);
 
 			ix_type = treeType;
+			relreplident = REPLICA_IDENTITY_DEFAULT;
+			descr = NULL;
+
+			elog(LOG, "WAL_REC_RELATION");
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
@@ -783,13 +787,12 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				continue;
 			}
 
-			relreplident = REPLICA_IDENTITY_DEFAULT;
-
-			elog(LOG, "WAL_REC_RELATION");
-
 			/* Skip actual relation processing in fast_forward mode */
 			if (ctx->fast_forward)
+			{
+				elog(LOG, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec_type, rec_type_str, oxid);
 				continue;
+			}
 
 			if (IS_SYS_TREE_OIDS(cur_oids))
 				sys_tree_num = cur_oids.relnode;
@@ -840,7 +843,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 
 			if (descr && descr->toast)
-				elog(DEBUG4, "reloid: %d natts: %u toast natts: %u", cur_oids.reloid, descr->tupdesc->natts, descr->toast->leafTupdesc->natts);
+				elog(LOG, "reloid: %d natts: %u toast natts: %u", cur_oids.reloid, descr->tupdesc->natts, descr->toast->leafTupdesc->natts);
 
 		}
 		else if (rec_type == WAL_REC_RELREPLIDENT)
