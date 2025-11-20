@@ -134,8 +134,8 @@ static void o_find_collation_dependencies(Oid colloid);
 static void redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_tablespace);
 
 static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
-static Oid	o_createdb(ParseState *pstate, const CreatedbStmt * stmt);
-static void o_validate_replica_identity(Relation rel, ReplicaIdentityStmt * stmt);
+static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
+static void o_validate_replica_identity(Relation rel, ReplicaIdentityStmt *stmt);
 
 void
 orioledb_setup_ddl_hooks(void)

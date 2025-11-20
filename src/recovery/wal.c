@@ -938,6 +938,7 @@ o_wal_insert(BTreeDescr *desc, OTuple tuple, char relreplident)
 	bool		call_pfree;
 	int			size;
 
+	Assert(!O_TUPLE_IS_NULL(tuple));
 	wal_record = recovery_rec_insert(desc, tuple, &call_pfree, &size);
 	add_modify_wal_record(WAL_REC_INSERT, desc, wal_record, size, relreplident);
 	if (call_pfree)
@@ -959,6 +960,7 @@ o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident)
 
 	elog(DEBUG3, "o_wal_update");
 
+	Assert(!O_TUPLE_IS_NULL(tuple));
 	wal_record1 = recovery_rec_update(desc, tuple, &call_pfree1, &size1);
 
 	/*
@@ -971,6 +973,7 @@ o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident)
 	}
 	else
 	{
+		Assert(!O_TUPLE_IS_NULL(oldtuple));
 		wal_record2 = recovery_rec_update(desc, oldtuple, &call_pfree2, &size2);
 		add_modify_wal_record_extended(WAL_REC_UPDATE, desc, wal_record1, size1, wal_record2, size2, relreplident);
 		if (call_pfree2)
@@ -991,6 +994,7 @@ o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident)
 	bool		call_pfree;
 	int			size;
 
+	Assert(!O_TUPLE_IS_NULL(tuple));
 	wal_record = recovery_rec_delete(desc, tuple, &call_pfree, &size, relreplident);
 	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, relreplident);
 
@@ -1010,6 +1014,9 @@ o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relrepli
 	bool		old_call_pfree;
 	int			newsize;
 	int			oldsize;
+
+	Assert(!O_TUPLE_IS_NULL(newtuple));
+	Assert(!O_TUPLE_IS_NULL(oldtuple));
 
 	oldrecord = recovery_rec_delete(desc, oldtuple, &old_call_pfree, &oldsize, relreplident);
 	newrecord = recovery_rec_insert(desc, newtuple, &new_call_pfree, &newsize);
@@ -1033,6 +1040,7 @@ o_wal_delete_key(BTreeDescr *desc, OTuple key, bool is_bridge_index)
 	int			size;
 
 	Assert(IS_SYS_TREE_OIDS(desc->oids) || is_bridge_index);
+	Assert(!O_TUPLE_IS_NULL(key));
 	wal_record = recovery_rec_delete_key(desc, key, &call_pfree, &size);
 	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, REPLICA_IDENTITY_DEFAULT);
 
