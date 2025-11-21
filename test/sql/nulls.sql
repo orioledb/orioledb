@@ -156,6 +156,15 @@ INSERT INTO o_test_unique_nulls_not_distinct(val_2) VALUES ('six');
 INSERT INTO o_test_unique_nulls_not_distinct(val_2) VALUES ('seven');
 TABLE o_test_unique_nulls_not_distinct;
 
+CREATE TABLE o_test_unique_nulls_update (
+    id serial PRIMARY KEY,
+    path varchar,
+    payload bytea,
+    CONSTRAINT c_path_u UNIQUE (path)
+) using orioledb;
+INSERT INTO o_test_unique_nulls_update (id, payload) VALUES (3, '\x01');
+UPDATE o_test_unique_nulls_update SET payload = '\x02'::bytea WHERE id = 3;
+
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA nulls_schema CASCADE;

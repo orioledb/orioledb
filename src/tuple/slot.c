@@ -1834,6 +1834,22 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 	return result;
 }
 
+/*
+ * tts_orioledb_modified - Check if specified attributes were modified between two tuples
+ *
+ * Compares the values of specific attributes between an old and new tuple slot
+ * to determine if any modifications have occurred. This is primarily used during
+ * UPDATE operations to distinguish between key and non-key updates.
+ *
+ * Parameters:
+ *   oldSlot - The original tuple slot before modification
+ *   newSlot - The new tuple slot with pending changes
+ *   attrs   - Bitmap set indicating which attributes to check for modifications.
+ *
+ * Returns:
+ *   true if any of the specified attributes have different values between
+ *   the old and new slots, false if all specified attributes are unchanged.
+ */
 bool
 tts_orioledb_modified(TupleTableSlot *oldSlot,
 					  TupleTableSlot *newSlot,
@@ -1866,11 +1882,11 @@ tts_orioledb_modified(TupleTableSlot *oldSlot,
 			bool		isnull1 = oldSlot->tts_isnull[i],
 						isnull2 = newSlot->tts_isnull[i];
 
-			if (isnull1 || isnull2)
-			{
-				if (isnull1 != isnull2)
-					return true;
-			}
+			if (isnull1 != isnull2)
+				return true;
+
+			if (isnull1)
+				continue;
 
 			if (!datumIsEqual(val1, val2, att->attbyval, att->attlen))
 				return true;

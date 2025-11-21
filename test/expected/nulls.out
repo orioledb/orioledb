@@ -388,6 +388,14 @@ TABLE o_test_unique_nulls_not_distinct;
        | six
 (1 row)
 
+CREATE TABLE o_test_unique_nulls_update (
+    id serial PRIMARY KEY,
+    path varchar,
+    payload bytea,
+    CONSTRAINT c_path_u UNIQUE (path)
+) using orioledb;
+INSERT INTO o_test_unique_nulls_update (id, payload) VALUES (3, '\x01');
+UPDATE o_test_unique_nulls_update SET payload = '\x02'::bytea WHERE id = 3;
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
 ------------------------------
@@ -395,12 +403,13 @@ SELECT orioledb_parallel_debug_stop();
 (1 row)
 
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 6 other objects
+NOTICE:  drop cascades to 7 other objects
 DETAIL:  drop cascades to table o_test_null_clauses
 drop cascades to table o_test_null_comparison
 drop cascades to table o_test_null_row_comparison
 drop cascades to table o_test_row_comparison_nulls_first
 drop cascades to table o_test_nulls
 drop cascades to table o_test_unique_nulls_not_distinct
+drop cascades to table o_test_unique_nulls_update
 DROP SCHEMA nulls_schema CASCADE;
 RESET search_path;
