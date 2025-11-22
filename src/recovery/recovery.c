@@ -869,6 +869,61 @@ recovery_get_effective_replay_ptr(void)
 		return finishedPtr;
 }
 
+/*
+ * This function is called by the RecoveryStopsHook. It decides whether we want
+ * to stop applying WAL records.
+ *
+ * Returns true if we are stopping, false otherwise.
+ */
+bool
+orioledb_recovery_stops_before_hook(XLogReaderState *record,
+									TransactionId *recordXid,
+									TimestampTz *recordXtime)
+{
+	Pointer		startPtr = XLogRecGetData(record);
+	Pointer		ptr = startPtr;
+	uint16		wal_version;
+	uint8		wal_flags;
+	TimestampTz xactTime;
+	TransactionId xid;
+
+	/* Currently we consider ony recovery_target_time */
+	if (recoveryTarget != RECOVERY_TARGET_TIME)
+		return false;
+
+	/* If for some reason data is empty just exit */
+	if (XLogRecGetDataLen(record) == 0)
+		return false;
+
+	ptr = wal_container_read_header(ptr, &wal_version, &wal_flags);
+	/* Unexpected new WAL record which we cannot read */
+	if (wal_version > ORIOLEDB_WAL_VERSION)
+		elog(PANIC, "cannot read WAL record of version %u newer than supported %u",
+			 wal_version, ORIOLEDB_WAL_VERSION);
+
+	/*
+	 * If the WAL record is too old just return false and decide not to stop
+	 * applying WAL records further.
+	 */
+	else if (wal_version < ORIOLEDB_XACT_INFO_WAL_VERSION)
+		return false;
+
+	if ((wal_flags & WAL_CONTAINER_HAS_XACT_INFO) == 0)
+		return false;
+
+	memcpy(&xactTime, ptr, sizeof(xactTime));
+	ptr += sizeof(xactTime);
+	memcpy(&xid, ptr, sizeof(xid));
+
+	*recordXid = xid;
+	*recordXtime = xactTime;
+
+	if (recoveryTargetInclusive)
+		return xactTime > recoveryTargetTime;
+	else
+		return xactTime >= recoveryTargetTime;
+}
+
 static XLogRecPtr
 recovery_get_retain_ptr(void)
 {
@@ -2121,9 +2176,7 @@ save_state_to_file(int worker_id)
 		entry.numCheckpointStacks = 0;
 
 		dlist_foreach(iter, &state->checkpoint_undo_stacks)
-		{
 			entry.numCheckpointStacks++;
-		}
 
 		memcpy(entry.undoStacks, state->undo_stacks, sizeof(entry.undoStacks));
 
@@ -2960,12 +3013,19 @@ replay_container(Pointer startPtr, Pointer endPtr,
 	Pointer		ptr = startPtr;
 	XLogRecPtr	xlogPtr;
 	uint16		wal_version;
+	uint8		wal_flags;
 
-	wal_version = check_wal_container_version(&ptr);
+	ptr = wal_container_read_header(ptr, &wal_version, &wal_flags);
 	if (wal_version > ORIOLEDB_WAL_VERSION)
 	{
 		/* WAL from future version */
 		return false;
+	}
+
+	if (wal_flags & WAL_CONTAINER_HAS_XACT_INFO)
+	{
+		/* We skip WAL_REC_XACT_INFO */
+		ptr += sizeof(WALRecXactInfo);
 	}
 
 	while (ptr < endPtr)

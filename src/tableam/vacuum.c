@@ -1335,7 +1335,7 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 	lazy_scan_bridge_index(vacrel);
 
 	if (!local_wal_is_empty())
-		flush_local_wal(false);
+		flush_local_wal(false, false);
 
 	/*
 	 * Free resources managed by dead_items_alloc.  This ends parallel mode in

@@ -3,6 +3,7 @@
 
 import os
 import random
+import time
 
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
@@ -2212,3 +2213,37 @@ class RecoveryTest(BaseTest):
 		self.assertEqual(", ".join([str(x[0]) for x in result]), "1, 2")
 
 		node.stop()
+
+
+class RecoveryWithArchivingTest(BaseTest):
+
+	def setUp(self):
+		self.startTime = time.time()
+		self.node = self.initNode(self.getBasePort(),
+		                          suffix="tgsn",
+		                          has_archiving=True,
+		                          allows_streaming=True)
+
+	def test_recovery_target_time(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		with self.getReplica(has_restoring=True) as replica:
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1,1000))")
+			recovery_time = node.execute("SELECT now()")[0][0]
+
+			replica.append_conf(f"recovery_target_time = '{recovery_time}'")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+
+			replica.start()
+
+			self.assertTrue(replica.execute("SELECT count(*) from tab_int"),
+			                1000)
