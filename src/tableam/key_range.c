@@ -287,6 +287,57 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 	return exact;
 }
 
+/*
+ * Try to convert a value from one trivial type to another.
+ * Returns true if conversion is successful without overflow.
+ * For integer types: int8 -> int4 -> int2
+ */
+static bool
+o_try_convert_trivial_type(Datum *value, Oid fromType, Oid toType)
+{
+	/* No conversion needed if types are the same */
+	if (fromType == toType)
+		return true;
+
+	/* Handle integer type conversions */
+	if (fromType == INT8OID && toType == INT4OID)
+	{
+		int64		val64 = DatumGetInt64(*value);
+
+		/* Check for overflow */
+		if (val64 < INT_MIN || val64 > INT_MAX)
+			return false;
+
+		*value = Int32GetDatum((int32) val64);
+		return true;
+	}
+	else if (fromType == INT8OID && toType == INT2OID)
+	{
+		int64		val64 = DatumGetInt64(*value);
+
+		/* Check for overflow */
+		if (val64 < SHRT_MIN || val64 > SHRT_MAX)
+			return false;
+
+		*value = Int16GetDatum((int16) val64);
+		return true;
+	}
+	else if (fromType == INT4OID && toType == INT2OID)
+	{
+		int32		val32 = DatumGetInt32(*value);
+
+		/* Check for overflow */
+		if (val32 < SHRT_MIN || val32 > SHRT_MAX)
+			return false;
+
+		*value = Int16GetDatum((int16) val32);
+		return true;
+	}
+
+	/* Conversion not supported for this type pair */
+	return false;
+}
+
 static void
 o_fill_key_bounds(Datum v, Oid type,
 				  OBTreeValueBound *low, OBTreeValueBound *high,
@@ -294,9 +345,25 @@ o_fill_key_bounds(Datum v, Oid type,
 {
 	bool		coercible = false;
 	OComparator *comparator = NULL;
+	Datum converted_value = v;
 
 	if (!low && !high)
 		return;
+
+	/*
+	 * Try to convert the value to the index field type for trivial types.
+	 * This optimization allows queries like "SELECT ... WHERE int4_col BETWEEN
+	 * 1::bigint AND 10::bigint" to use optimized comparisons, even though PostgreSQL uses
+	 * int8 for the literal values. Note that this case can also happen with parameters from
+	 * subqueries and prepared statements.
+	 */
+	if (type != field->inputtype && 
+		o_try_convert_trivial_type(&converted_value, type, field->inputtype))
+	{
+		/* Conversion successful, use the converted value and type */
+		type = field->inputtype;
+		v = converted_value;
+	}
 
 	if (type == field->opclass || type == field->inputtype ||
 		IsBinaryCoercible(type, field->inputtype))

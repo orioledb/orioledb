@@ -2689,70 +2689,70 @@ SELECT count(*) FROM o_pk3;
 SELECT id1, id2 FROM o_pk3;
  id1 |   id2    
 -----+----------
-   1 | xy
-   1 | xxy
-   1 | xxxy
-   1 | xxxxy
-   2 | xy
-   2 | xxy
-   2 | xxxy
-   2 | xxxxy
-   3 | xy
-   3 | xxy
-   3 | xxxy
-   3 | xxxxy
-   4 | xy
-   4 | xxy
-   4 | xxxy
-   4 | xxxxy
-   1 | xyy
-   1 | xxyy
-   1 | xxxyy
-   1 | xxxxyy
-   2 | xyy
-   2 | xxyy
-   2 | xxxyy
-   2 | xxxxyy
-   3 | xyy
-   3 | xxyy
-   3 | xxxyy
-   3 | xxxxyy
-   4 | xyy
-   4 | xxyy
-   4 | xxxyy
-   4 | xxxxyy
-   1 | xyyy
-   1 | xxyyy
-   1 | xxxyyy
-   1 | xxxxyyy
-   2 | xyyy
-   2 | xxyyy
-   2 | xxxyyy
-   2 | xxxxyyy
-   3 | xyyy
-   3 | xxyyy
-   3 | xxxyyy
-   3 | xxxxyyy
-   4 | xyyy
-   4 | xxyyy
-   4 | xxxyyy
-   4 | xxxxyyy
    1 | xyyyy
+   1 | xyyy
+   1 | xyy
+   1 | xy
    1 | xxyyyy
+   1 | xxyyy
+   1 | xxyy
+   1 | xxy
    1 | xxxyyyy
+   1 | xxxyyy
+   1 | xxxyy
+   1 | xxxy
    1 | xxxxyyyy
+   1 | xxxxyyy
+   1 | xxxxyy
+   1 | xxxxy
    2 | xyyyy
+   2 | xyyy
+   2 | xyy
+   2 | xy
    2 | xxyyyy
+   2 | xxyyy
+   2 | xxyy
+   2 | xxy
    2 | xxxyyyy
+   2 | xxxyyy
+   2 | xxxyy
+   2 | xxxy
    2 | xxxxyyyy
+   2 | xxxxyyy
+   2 | xxxxyy
+   2 | xxxxy
    3 | xyyyy
+   3 | xyyy
+   3 | xyy
+   3 | xy
    3 | xxyyyy
+   3 | xxyyy
+   3 | xxyy
+   3 | xxy
    3 | xxxyyyy
+   3 | xxxyyy
+   3 | xxxyy
+   3 | xxxy
    3 | xxxxyyyy
+   3 | xxxxyyy
+   3 | xxxxyy
+   3 | xxxxy
    4 | xyyyy
+   4 | xyyy
+   4 | xyy
+   4 | xy
    4 | xxyyyy
+   4 | xxyyy
+   4 | xxyy
+   4 | xxy
    4 | xxxyyyy
+   4 | xxxyyy
+   4 | xxxyy
+   4 | xxxy
    4 | xxxxyyyy
+   4 | xxxxyyy
+   4 | xxxxyy
+   4 | xxxxy
 (64 rows)
 
 \i 'sql/composite_pk_quals'
@@ -2866,39 +2866,33 @@ INSERT INTO o_pk6
 SELECT i % 5, '2021-01-01'::date + interval '1 month' * (i / 5) FROM generate_series(0, 24) i;
 SET enable_seqscan = OFF;
 EXPLAIN (COSTS off) SELECT * FROM o_pk6 WHERE i <= 2 AND dt = '2021-03-01'::timestamp;
-                                            QUERY PLAN                                             
----------------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_pk6
-   Bitmap heap scan
-   Recheck Cond: ((dt = 'Mon Mar 01 00:00:00 2021'::timestamp without time zone) AND (i <= 2))
-   ->  Bitmap Index Scan on o_pk6_idx
-         Index Cond: ((dt = 'Mon Mar 01 00:00:00 2021'::timestamp without time zone) AND (i <= 2))
-(5 rows)
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Index Only Scan using o_pk6_idx on o_pk6
+   Index Cond: ((dt = 'Mon Mar 01 00:00:00 2021'::timestamp without time zone) AND (i <= 2))
+(2 rows)
 
 SELECT * FROM o_pk6 WHERE i = 2 AND dt >= '2021-03-01'::timestamp;
  i |            dt            
 ---+--------------------------
- 2 | Mon Mar 01 00:00:00 2021
- 2 | Thu Apr 01 00:00:00 2021
  2 | Sat May 01 00:00:00 2021
+ 2 | Thu Apr 01 00:00:00 2021
+ 2 | Mon Mar 01 00:00:00 2021
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk6 WHERE i <= 2 AND dt = '2021-03-01'::date;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Custom Scan (o_scan) on o_pk6
-   Bitmap heap scan
-   Recheck Cond: ((dt = '03-01-2021'::date) AND (i <= 2))
-   ->  Bitmap Index Scan on o_pk6_idx
-         Index Cond: ((dt = '03-01-2021'::date) AND (i <= 2))
-(5 rows)
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Index Only Scan using o_pk6_idx on o_pk6
+   Index Cond: ((dt = '03-01-2021'::date) AND (i <= 2))
+(2 rows)
 
 SELECT * FROM o_pk6 WHERE i = 2 AND dt >= '2021-03-01'::date;
  i |            dt            
 ---+--------------------------
- 2 | Mon Mar 01 00:00:00 2021
- 2 | Thu Apr 01 00:00:00 2021
  2 | Sat May 01 00:00:00 2021
+ 2 | Thu Apr 01 00:00:00 2021
+ 2 | Mon Mar 01 00:00:00 2021
 (3 rows)
 
 RESET enable_seqscan;
