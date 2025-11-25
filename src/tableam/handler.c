@@ -137,6 +137,7 @@ orioledb_index_fetch_begin(Relation rel)
 
 		o_scan->bridged_tuple = (o_current_index->rd_rel->relam != BTREE_AM_OID) ||
 			(options && !options->orioledb_index);
+		o_current_index = NULL;
 	}
 
 	o_scan->xs_base.rel = rel;

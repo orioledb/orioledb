@@ -62,6 +62,7 @@ static bool orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 							  Datum oldTupleid,
 							  Relation heapRel,
 							  IndexUniqueCheck checkUnique,
+							  bool indexUnchanged,
 							  IndexInfo *indexInfo);
 static bool orioledb_amdelete(Relation rel,
 							  Datum *values, bool *isnull,
@@ -538,6 +539,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	{
 		bytea	   *rowid;
 		Pointer		p;
+		bool		result;
 
 		ORelOidsSetFromRel(oids, heapRel);
 
@@ -561,8 +563,13 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 		}
 
 		o_current_index = rel;
-		return btinsert(rel, values, isnull, tupleid, heapRel,
-						checkUnique, indexUnchanged, indexInfo);
+		if (!indexUnchanged)
+			result = btinsert(rel, values, isnull, tupleid, heapRel,
+							  checkUnique, indexUnchanged, indexInfo);
+		else
+			result = true; /* FIXME: Wrong assumption? */
+		o_current_index = NULL;
+		return result;
 	}
 
 	if (OidIsValid(rel->rd_rel->relrewrite))
@@ -660,6 +667,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 				  Datum *valuesOld, bool *isnullOld, Datum oldTupleid,
 				  Relation heapRel,
 				  IndexUniqueCheck checkUnique,
+				  bool indexUnchanged,
 				  IndexInfo *indexInfo)
 {
 	OTableModifyResult result;
@@ -681,7 +689,21 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 	if (options && !options->orioledb_index)
-		return true;
+	{
+		bool		satisfiesConstraint;
+
+		/* Call index_insert here, to mimic non MVCC aware part of ExecUpdateIndexTuples */
+		satisfiesConstraint = index_insert(rel, /* index relation */
+										   values,	/* array of index Datums */
+										   isnull,	/* null flags */
+										   tupleid,	/* tid of heap tuple */
+										   heapRel,	/* heap relation */
+										   checkUnique,	/* type of uniqueness check to do */
+										   indexUnchanged,	/* UPDATE without logical change? */
+										   indexInfo);	/* index AM may need this */
+
+		return satisfiesConstraint;
+	}
 
 	if (rel->rd_index->indisprimary)
 		return true;
@@ -692,8 +714,6 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
 	Assert(descr != NULL);
-
-
 
 	/* Find ix_num */
 	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
@@ -1806,7 +1826,9 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
 
 	if (options && !options->orioledb_index)
+	{
 		return btgettuple(scan, dir);
+	}
 
 	o_scan->scanDir = dir;
 
