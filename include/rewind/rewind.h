@@ -42,6 +42,10 @@ extern void log_print_rewind_queue(void);
 
 #define SUBXIDS_PER_ITEM	(25)
 
+
+#define PG_CTL_CMD_LEN (8)		/* Actually we only need 4 extra chars */
+#define PG_CTL_MAX_CMD_LEN (MAXPGPATH + PG_CTL_CMD_LEN)
+
 /* RewindItem and SubxidsItem should have same size to be castable to each other */
 /* Empty RewindItem and SubxidsItem have invalid oxid and tag */
 typedef struct RewindItem
