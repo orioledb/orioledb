@@ -724,8 +724,6 @@ tts_orioledb_copyslot(TupleTableSlot *dstslot, TupleTableSlot *srcslot)
 	tts_orioledb_clear(dstslot);
 
 	if (srcslot->tts_ops == &TTSOpsOrioleDB)
-//	       	&&
-//		((OTableSlot *) srcslot)->descr == dstoslot->descr)
 	{
 		OTableSlot *srcoslot = (OTableSlot *) srcslot;
 

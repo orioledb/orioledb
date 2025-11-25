@@ -1539,12 +1539,6 @@ orioledb_beginscan(Relation relation, Snapshot snapshot,
 	else
 	{
 		O_LOAD_SNAPSHOT(&scan->o_snapshot, snapshot);
-		if (snapshot->snapshot_type == SNAPSHOT_DIRTY)
-		{
-			elog(LOG, "SNAPSHOT_DIRTY 2");
-			scan->o_snapshot.is_dirty = true;
-		}
-
 	}
 
 	ItemPointerSetBlockNumber(&scan->iptr, 0);

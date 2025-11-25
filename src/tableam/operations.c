@@ -289,9 +289,10 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 
 	CheckCmdReplicaIdentity(relation, CMD_INSERT);
 
-	if (slot->tts_ops != descr->newTuple->tts_ops ||
-		(((OTableSlot *) slot)->descr != NULL &&
-		 ((OTableSlot *) slot)->descr != descr))
+	if (slot->tts_ops != descr->newTuple->tts_ops)
+//	       	||
+//		(((OTableSlot *) slot)->descr != NULL &&
+//		 ((OTableSlot *) slot)->descr != descr))
 	{
 		ExecCopySlot(descr->newTuple, slot);
 		slot = descr->newTuple;

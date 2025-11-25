@@ -58,7 +58,6 @@ typedef struct OSnapshot
 	XLogRecPtr	xlogptr;
 	XLogRecPtr	xmin;
 	CommandId	cid;
-	bool		is_dirty;
 } OSnapshot;
 
 extern OSnapshot o_in_progress_snapshot;
@@ -81,7 +80,6 @@ o_check_isolation_level(void)
 		(o_snapshot)->csn = (snapshot)->csnSnapshotData.snapshotcsn; \
 		(o_snapshot)->xlogptr = (snapshot)->csnSnapshotData.xlogptr; \
 		(o_snapshot)->cid = (snapshot)->curcid; \
-		(o_snapshot)->is_dirty = false; \
 	} while (false)
 
 #define O_LOAD_SNAPSHOT_CSN(o_snapshot, csnValue) \
