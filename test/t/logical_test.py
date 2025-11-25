@@ -1287,70 +1287,149 @@ COMMIT\n""")
 					) USING orioledb;
 					ALTER TABLE o_test_ctid_secondary REPLICA IDENTITY FULL;
 					CREATE INDEX ON o_test_ctid_secondary (data2);
+					CREATE TABLE o_test_2 (
+						data1 text PRIMARY KEY,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+					CREATE TABLE o_test_ctid_2 (
+						data1 text,
+						data2 text,
+			                        data3 text,
+			                        i   int
+					) USING orioledb;
+					ALTER TABLE o_test_ctid_2 REPLICA IDENTITY FULL;
+					CREATE TABLE o_test_secondary_2 (
+						data1 text PRIMARY KEY,
+						data2 text,
+			                        data3 text,
+                                    i int
+					) USING orioledb;
+					CREATE INDEX ON o_test_secondary_2 (data2);
+					CREATE TABLE o_test_ctid_secondary_2 (
+						data1 text,
+						data2 text,
+			                        data3 text,
+                                    i int
+					) USING orioledb;
+					ALTER TABLE o_test_ctid_secondary_2 REPLICA IDENTITY FULL;
+					CREATE INDEX ON o_test_ctid_secondary_2 (data2);
+
 				"""
 				publisher.safe_psql(create_sql)
 				subscriber.safe_psql(create_sql)
 
 				pub = publisher.publish('test_pub',
-				                        tables=['o_test_ctid'
+				                        tables=['o_test', 'o_test_ctid', 'o_test_secondary', 'o_test_ctid_secondary', 'o_test_2', 'o_test_ctid_2', 'o_test_secondary_2', 'o_test_ctid_secondary_2'
 				                        ])
 				sub = subscriber.subscribe(pub, 'test_sub')
 
 				with publisher.connect() as con1:
 					with publisher.connect() as con2:
-#						con1.execute(
-#						    "INSERT INTO o_test VALUES(1, 'foofoo','barbar', 'aaaaaa');"
-#						)
-#						con2.execute(
-#						    "INSERT INTO o_test VALUES(2, 'mmm','nnn', 'ooo');"
-#						)
+						con1.execute(
+						    "INSERT INTO o_test VALUES(1, 'foofoo','barbar', 'aaaaaa');"
+						)
+						con2.execute(
+						    "INSERT INTO o_test VALUES(2, 'mmm','nnn', 'ooo');"
+						)
 						con1.execute(
 						    "INSERT INTO o_test_ctid VALUES(1, 'foofoo','barbar', 'aaaaaa');"
 						)
 						con2.execute(
 						    "INSERT INTO o_test_ctid VALUES(2, 'mmm','nnn', 'ooo');"
 						)
-#						con1.execute(
-#						    "INSERT INTO o_test_secondary VALUES(1, 'foofoo','barbar', 'aaaaaa');"
-#						)
-#						con2.execute(
-#						    "INSERT INTO o_test_secondary VALUES(2, 'mmm','nnn', 'ooo');"
-#						)
-#						con1.execute(
-#						    "INSERT INTO o_test_ctid_secondary VALUES(1, 'foofoo','barbar', 'aaaaaa');"
-#						)
-#						con2.execute(
-#						    "INSERT INTO o_test_ctid_secondary VALUES(2, 'mmm','nnn', 'ooo');"
-#						)
+						con1.execute(
+						    "INSERT INTO o_test_secondary VALUES(1, 'foofoo','barbar', 'aaaaaa');"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_secondary VALUES(2, 'mmm','nnn', 'ooo');"
+						)
+						con1.execute(
+						    "INSERT INTO o_test_ctid_secondary VALUES(1, 'foofoo','barbar', 'aaaaaa');"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_ctid_secondary VALUES(2, 'mmm','nnn', 'ooo');"
+						)
+						con1.execute(
+						    "INSERT INTO o_test_2 VALUES('foofoo','barbar', 'aaaaaa', 1);"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_2 VALUES('mmm','nnn', 'ooo', 2);"
+						)
+						con1.execute(
+						    "INSERT INTO o_test_ctid_2 VALUES('foofoo','barbar', 'aaaaaa', 1);"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_ctid_2 VALUES('mmm','nnn', 'ooo', 2);"
+						)
+						con1.execute(
+						    "INSERT INTO o_test_secondary_2 VALUES('foofoo','barbar', 'aaaaaa', 1);"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_secondary_2 VALUES('mmm','nnn', 'ooo', 2);"
+						)
+						con1.execute(
+						    "INSERT INTO o_test_ctid_secondary_2 VALUES('foofoo','barbar', 'aaaaaa', 1);"
+						)
+						con2.execute(
+						    "INSERT INTO o_test_ctid_secondary_2 VALUES('mmm','nnn', 'ooo', 2);"
+						)
+
 						con1.commit()
 						con2.commit()
 
 				with publisher.connect() as con1:
 					with publisher.connect() as con2:
-#						con1.execute(
-#						    "UPDATE o_test SET data2 = 'ssssss' where data2 = 'barbar';"
-#						)
-#						con2.execute(
-#						    "UPDATE o_test SET data2 = 'ppp' where data2 = 'nnn';"
-#						)
+						con1.execute(
+						    "UPDATE o_test SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test SET data2 = 'ppp' where data2 = 'nnn';"
+						)
 						con1.execute(
 						    "UPDATE o_test_ctid SET data2 = 'ssssss' where data2 = 'barbar';"
 						)
 						con2.execute(
 						    "UPDATE o_test_ctid SET data2 = 'ppp' where data2 = 'nnn';"
 						)
-#						con1.execute(
-#						    "UPDATE o_test_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
-#						)
-#						con2.execute(
-#						    "UPDATE o_test_secondary SET data2 = 'ppp' where data2 = 'nnn';"
-#						)
-#						con1.execute(
-#						    "UPDATE o_test_ctid_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
-#						)
-#						con2.execute(
-#						    "UPDATE o_test_ctid_secondary SET data2 = 'ppp' where data2 = 'nnn';"
-#						)
+						con1.execute(
+						    "UPDATE o_test_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test_secondary SET data2 = 'ppp' where data2 = 'nnn';"
+						)
+						con1.execute(
+						    "UPDATE o_test_ctid_secondary SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test_ctid_secondary SET data2 = 'ppp' where data2 = 'nnn';"
+						)
+						con1.execute(
+						    "UPDATE o_test_2 SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test_2 SET data2 = 'ppp' where data2 = 'nnn';"
+						)
+						con1.execute(
+						    "UPDATE o_test_ctid_2 SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test_ctid_2 SET data2 = 'ppp' where data2 = 'nnn';"
+						)
+						con1.execute(
+						    "UPDATE o_test_secondary_2 SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test_secondary_2 SET data2 = 'ppp' where data2 = 'nnn';"
+						)
+						con1.execute(
+						    "UPDATE o_test_ctid_secondary_2 SET data2 = 'ssssss' where data2 = 'barbar';"
+						)
+						con2.execute(
+						    "UPDATE o_test_ctid_secondary_2 SET data2 = 'ppp' where data2 = 'nnn';"
+						)
+
 						con1.commit()
 						con2.commit()
 
@@ -1361,46 +1440,86 @@ COMMIT\n""")
 					        'SELECT * FROM o_test_ctid ORDER BY i'),
 					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
 					     (2, 'mmm', 'ppp', 'ooo')])
-#					self.assertListEqual(
-#					    publisher.execute(
-#					        'SELECT * FROM o_test ORDER BY i'),
-#					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
-#					     (2, 'mmm', 'ppp', 'ooo')])
-#					self.assertListEqual(
-#					    publisher.execute(
-#					        'SELECT * FROM o_test_secondary ORDER BY i'),
-#					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
-#					     (2, 'mmm', 'ppp', 'ooo')])
-#					self.assertListEqual(
-#					    publisher.execute(
-#					        'SELECT * FROM o_test_ctid_secondary ORDER BY i'),
-#					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
-#					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test_secondary ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test_ctid_secondary ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test_ctid_2 ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test_2 ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test_secondary_2 ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1 ),
+					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT * FROM o_test_ctid_secondary_2 ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
 
 					# wait until changes apply on subscriber and check them
 					sub.catchup()
 					# sub.poll_query_until("SELECT orioledb_recovery_synchronized();", expected=True)
 #					subscriber.safe_psql("CHECKPOINT;")
-#					self.assertListEqual(
-#					    subscriber.execute(
-#					        'SELECT * FROM o_test_ctid ORDER BY i'),
-#					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
-#					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_ctid ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
 					self.assertListEqual(
 					    subscriber.execute(
 					        'SELECT * FROM o_test ORDER BY i'),
 					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
 					     (2, 'mmm', 'ppp', 'ooo')])
-#					self.assertListEqual(
-#					    subscriber.execute(
-#					        'SELECT * FROM o_test_secondary ORDER BY i'),
-#					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
-#					     (2, 'mmm', 'ppp', 'ooo')])
-#					self.assertListEqual(
-#					    subscriber.execute(
-#					        'SELECT * FROM o_test_ctid_secondary ORDER BY i'),
-#					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
-#					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_secondary ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_ctid_secondary ORDER BY i'),
+					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
+					     (2, 'mmm', 'ppp', 'ooo')])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_ctid_2 ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_2 ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_secondary_2 ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT * FROM o_test_ctid_secondary_2 ORDER BY i'),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
+					     ('mmm', 'ppp', 'ooo', 2)])
 
 	# Update with non-changed pkey of by-reference type
 	def test_logical_subscription_byref_pkey_update(self):

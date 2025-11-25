@@ -1527,10 +1527,25 @@ orioledb_beginscan(Relation relation, Snapshot snapshot,
 		scan->rs_base.rs_key = NULL;
 	}
 
-	if (scan->rs_base.rs_flags & SO_TYPE_ANALYZE)
+	if ((scan->rs_base.rs_flags & SO_TYPE_ANALYZE) || (snapshot->snapshot_type == SNAPSHOT_DIRTY))
+	{
+		if(snapshot->snapshot_type == SNAPSHOT_DIRTY)
+			elog(LOG, "SNAPSHOT_DIRTY 1");
+
 		scan->o_snapshot = o_in_progress_snapshot;
+		snapshot->xmin = InvalidTransactionId;
+		snapshot->xmax = InvalidTransactionId;
+	}
 	else
+	{
 		O_LOAD_SNAPSHOT(&scan->o_snapshot, snapshot);
+		if (snapshot->snapshot_type == SNAPSHOT_DIRTY)
+		{
+			elog(LOG, "SNAPSHOT_DIRTY 2");
+			scan->o_snapshot.is_dirty = true;
+		}
+
+	}
 
 	ItemPointerSetBlockNumber(&scan->iptr, 0);
 	ItemPointerSetOffsetNumber(&scan->iptr, FirstOffsetNumber);
