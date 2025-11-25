@@ -3116,11 +3116,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			bool		read_two_tuples;
 
 			sys_tree_oids_ptr = ptr + sizeof(uint8) + sizeof(OffsetNumber);
+
 			read_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
-
-			if (read_two_tuples)
-				sys_tree_oids_ptr += sizeof(uint8) + sizeof(OffsetNumber);
-
 			ptr = wal_parse_rec_modify(ptr, &tuple1, &tuple2, &unused, read_two_tuples);
 
 			type = recovery_msg_from_wal_record(rec_type);
