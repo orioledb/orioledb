@@ -339,7 +339,7 @@ reinsert_bridge_ctid_on_pkey_changed(OTableDescr *descr, Relation relation,
 	if (primary->desc.storageType == BTreeStoragePersistence)
 	{
 		o_wal_insert(&descr->bridge->desc, tuple);
-		flush_local_wal(false);
+		flush_local_wal(false, false);
 	}
 
 	if (tuple.data)
