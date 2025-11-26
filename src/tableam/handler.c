@@ -124,21 +124,12 @@ typedef struct OrioledbIndexFetchData
  * for greater and lower where clauses.
  */
 static IndexFetchTableData *
-orioledb_index_fetch_begin(Relation rel)
+orioledb_index_fetch_begin(Relation rel, Relation indexRel)
 {
 	OrioledbIndexFetchData *o_scan = palloc0(sizeof(OrioledbIndexFetchData));
-
-	/* TODO: Remove this hack */
-	extern Relation o_current_index;
-
-	if (o_current_index)
-	{
-		OBTOptions *options = (OBTOptions *) o_current_index->rd_options;
-
-		o_scan->bridged_tuple = (o_current_index->rd_rel->relam != BTREE_AM_OID) ||
-			(options && !options->orioledb_index);
-		o_current_index = NULL;
-	}
+	OBTOptions *options = (OBTOptions *) indexRel->rd_options;
+	o_scan->bridged_tuple = (indexRel->rd_rel->relam != BTREE_AM_OID) ||
+		(options && !options->orioledb_index);
 
 	o_scan->xs_base.rel = rel;
 
@@ -840,7 +831,8 @@ orioledb_relation_set_new_filenode(Relation rel,
 		new_o_table = o_table_tableam_create(new_oids, tupdesc,
 											 rel->rd_rel->relpersistence,
 											 old_o_table->fillfactor,
-											 rel->rd_rel->reltablespace);
+											 rel->rd_rel->reltablespace,
+											 old_o_table->index_bridging);
 		o_opclass_cache_add_table(new_o_table);
 
 		/* Setup bridging if it was set on old table */

@@ -1800,7 +1800,7 @@ o_add_exclusion_fn_to_cache(OExclusionFn *exclusion_fn)
 }
 
 int
-o_call_exclusion_fn(OExclusionFn *exclusion_fn, Datum left, Datum right)
+o_call_exclusion_fn(OExclusionFn *exclusion_fn, Datum left, Datum right, Oid collation)
 {
 	int			cmp;
 	Datum		ret;
@@ -1808,7 +1808,7 @@ o_call_exclusion_fn(OExclusionFn *exclusion_fn, Datum left, Datum right)
 	/* FIX: There should be a better way */
 	if (o_is_syscache_hooks_set() && exclusion_fn->finfo.fn_addr == fmgr_sql)
 		exclusion_fn->finfo.fn_addr = o_fmgr_sql;
-	ret = FunctionCall2(&exclusion_fn->finfo, left, right);
+	ret = FunctionCall2Coll(&exclusion_fn->finfo, collation, left, right);
 	cmp = DatumGetBool(ret) ? 0 : 1;
 
 	return cmp;

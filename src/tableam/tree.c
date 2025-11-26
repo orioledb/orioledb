@@ -595,18 +595,15 @@ o_idx_cmp_range_key_to_value(OBTreeValueBound *bound1, OIndexField *field,
 			cmp = 0;
 		else if (o_bound_is_coercible(bound1, field))
 		{
-			// if (field->exclusion_fn)
 			if (bound1->exclusion_fn)
-				cmp = o_call_exclusion_fn(field->exclusion_fn, bound1->value, value);
+				cmp = o_call_exclusion_fn(bound1->exclusion_fn, bound1->value, value, field->collation);
 			else
 				cmp = o_call_comparator(field->comparator, bound1->value, value);
 		}
 		else
 		{
-			if (bound1->exclusion_fn)
-				cmp = o_call_exclusion_fn(bound1->exclusion_fn, bound1->value, value);
-			else
-				cmp = o_call_comparator(bound1->comparator, bound1->value, value);
+			Assert(!bound1->exclusion_fn);
+			cmp = o_call_comparator(bound1->comparator, bound1->value, value);
 		}
 
 		if (!field->ascending)

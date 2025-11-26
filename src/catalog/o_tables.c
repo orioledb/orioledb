@@ -678,7 +678,7 @@ orioledb_attr_to_field(OTableField *field, Form_pg_attribute attr)
 
 OTable *
 o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
-					   uint8 fillfactor, Oid tablespace)
+					   uint8 fillfactor, Oid tablespace, bool bridging)
 {
 	OTable	   *o_table;
 	int			i;
@@ -696,6 +696,7 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 	o_table->fillfactor = fillfactor;
 	o_table->persistence = relpersistence;
 	o_table->data_version = ORIOLEDB_DATA_VERSION;
+	o_table->index_bridging = bridging;
 
 	for (i = 0; i < tupdesc->natts; i++)
 	{
@@ -1938,6 +1939,13 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, boo
 	{
 		/* Parent partition can't have toast_oids */
 		ORelOidsSetInvalid(oTable->toast_oids);
+	}
+	if (oTable->index_bridging)
+	{
+		oTable->bridge_oids.datoid = MyDatabaseId;
+		oTable->bridge_oids.relnode = GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
+														  rel->rd_rel->relpersistence);
+		oTable->bridge_oids.reloid = oTable->bridge_oids.relnode;
 	}
 
 	for (i = 0; i < oTable->nindices; i++)

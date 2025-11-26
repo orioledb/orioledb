@@ -126,7 +126,7 @@ extern void o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
 /* Creates and fills OTable. */
 extern OTable *o_table_tableam_create(ORelOids oids, TupleDesc tupdesc,
 									  char relpersistence, uint8 fillfactor,
-									  Oid tablespace);
+									  Oid tablespace, bool bridging);
 
 OTableField *o_tables_get_builtin_field(Oid type);
 extern void o_tables_tupdesc_init_builtin(TupleDesc desc, AttrNumber att_num,
