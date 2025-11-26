@@ -513,8 +513,12 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 						 */
 						bool	array_advanced;
 
+#if PG_VERSION_NUM >= 170000
 						array_advanced = o_bt_advance_array_keys_increment(ostate, 
 																		   ostate->scanDir);
+#else
+						array_advanced = _bt_advance_array_keys(scan, ForwardScanDirection);
+#endif
 						if (!array_advanced)
 						{
 							/* 
