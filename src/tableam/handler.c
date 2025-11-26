@@ -1527,11 +1527,13 @@ orioledb_beginscan(Relation relation, Snapshot snapshot,
 		scan->rs_base.rs_key = NULL;
 	}
 
-	if ((scan->rs_base.rs_flags & SO_TYPE_ANALYZE) || (snapshot->snapshot_type == SNAPSHOT_DIRTY))
+	if (scan->rs_base.rs_flags & SO_TYPE_ANALYZE)
 	{
-		if(snapshot->snapshot_type == SNAPSHOT_DIRTY)
-			elog(LOG, "SNAPSHOT_DIRTY 1");
-
+		scan->o_snapshot = o_in_progress_snapshot;
+	}
+	else if (snapshot->snapshot_type == SNAPSHOT_DIRTY)
+	{
+		elog(DEBUG4, "SNAPSHOT_DIRTY 1");
 		scan->o_snapshot = o_in_progress_snapshot;
 		snapshot->xmin = InvalidTransactionId;
 		snapshot->xmax = InvalidTransactionId;

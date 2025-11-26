@@ -266,32 +266,16 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 		CommitSeqNo tupcsn;
 		XLogRecPtr	tupptr;
 
-		elog(LOG, "find_tuple_version DIRTY SNAPSHOT");
-
-		elog(LOG, "find_tuple_version 1 csn %lu", oSnapshot->csn);
-	
 		oxid_match_snapshot(XACT_INFO_GET_OXID(xactInfo), oSnapshot,
 							&tupcsn, &tupptr);
-	
-		elog(LOG, "find_tuple_version 2 csn %lu", oSnapshot->csn);
-
 		if (tupleCsn)
 		{
 			if (COMMITSEQNO_IS_NORMAL(tupcsn))
-			{
 				*tupleCsn = COMMITSEQNO_IS_NORMAL(oSnapshot->csn) ? Max(oSnapshot->csn, tupcsn + 1) : COMMITSEQNO_MAX_NORMAL - 1;
-				elog(LOG, "find_tuple_version 3-1 csn %lu", oSnapshot->csn);
-			}
 			else if (COMMITSEQNO_IS_FROZEN(tupcsn))
-			{
 				*tupleCsn = COMMITSEQNO_IS_NORMAL(oSnapshot->csn) ? oSnapshot->csn : COMMITSEQNO_MAX_NORMAL - 1;
-				elog(LOG, "find_tuple_version 3-2 csn %lu", oSnapshot->csn);
-			}
 			else
-			{
 				*tupleCsn = COMMITSEQNO_INPROGRESS;
-				elog(LOG, "find_tuple_version 3-3  csn %lu", oSnapshot->csn);
-			}
 		}
 
 		if (cb)
@@ -302,8 +286,6 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 			TupleFetchCallbackCheckType check_type = version_check ?
 				OTupleFetchCallbackVersionCheck :
 				OTupleFetchCallbackKeyCheck;
-
-			elog(LOG, "find_tuple_version 4 csn %lu", oSnapshot->csn);
 
 			cbResult = cb(curTuple, tupOxid, oSnapshot, arg, check_type);
 
@@ -319,16 +301,10 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 		if (!txIsFinished)
 		{
-			elog(LOG, "find_tuple_version 5 csn %lu", oSnapshot->csn);
-
 			if (!cb)
 			{
-				elog(LOG, "find_tuple_version 5-1 csn %lu", oSnapshot->csn);
-
 				if (COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn))
 					break;
-
-				elog(LOG, "find_tuple_version 5-2 csn %lu", oSnapshot->csn);
 
 				/*
 				 * We see the changes made by our transaction.  Exception are
@@ -340,12 +316,9 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 					oSnapshot->csn != COMMITSEQNO_MAX_NORMAL)
 				{
 					CommandId	tupleCid;
-					elog(LOG, "find_tuple_version 5-3 csn %lu", oSnapshot->csn);
 
 					if (IS_SYS_TREE_OIDS(desc->oids))
 						break;
-	
-					elog(LOG, "find_tuple_version 5-4 csn %lu", oSnapshot->csn);
 					/*
 					 * Use cached UndoLocation if we have undo records in this
 					 * command or below.  MaxUndoLocation means there are no
@@ -355,33 +328,23 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 					if (tupleCid < oSnapshot->cid)
 						break;
-					elog(LOG, "find_tuple_version 5-5 csn %lu", oSnapshot->csn);
 				}
 			}
 		}
 		else
 		{
-			elog(LOG, "find_tuple_version 6 csn %lu", oSnapshot->csn);
-
 			if (COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn))
 				break;
-
-			elog(LOG, "find_tuple_version 6-1 csn %lu", oSnapshot->csn);
 		}
 
 		if (!COMMITSEQNO_IS_INPROGRESS(tupcsn) &&
 			!COMMITSEQNO_IS_ABORTED(tupcsn))
 		{
-			elog(LOG, "find_tuple_version 7 csn %lu", oSnapshot->csn);
-
 			if (COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn))
 			{
-				elog(LOG, "find_tuple_version 7-1 csn %lu", oSnapshot->csn);
-
 				Assert(XLogRecPtrIsInvalid(oSnapshot->xlogptr));
 				break;
 			}
-			elog(LOG, "find_tuple_version 7-2 csn %lu", oSnapshot->csn);
 
 			if (XLogRecPtrIsInvalid(oSnapshot->xlogptr))
 			{
@@ -395,14 +358,10 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 			}
 		}
 
-		elog(LOG, "find_tuple_version 8 csn %lu", oSnapshot->csn);
-
 		undoLocation = tupHdr.undoLocation;
 
 		if (!UndoLocationIsValid(undoLocation))
 		{
-			elog(LOG, "find_tuple_version 9 csn %lu", oSnapshot->csn);
-
 			O_TUPLE_SET_NULL(result);
 			MemoryContextSwitchTo(prevMctx);
 			return result;
@@ -411,34 +370,25 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 		if (tupHdr.deleted != BTreeLeafTupleNonDeleted ||
 			XACT_INFO_IS_LOCK_ONLY(tupHdr.xactInfo))
 		{
-			elog(LOG, "find_tuple_version 10 csn %lu", oSnapshot->csn);
-
 			get_prev_leaf_header_from_undo(desc->undoType, &tupHdr, true);
 		}
 		else
 		{
-			elog(LOG, "find_tuple_version 11  csn %lu", oSnapshot->csn);
-
 			if (curTupleAllocated)
 				pfree(curTuple.data);
 			get_prev_leaf_header_and_tuple_from_undo(desc->undoType, &tupHdr,
 													 &curTuple, 0);
 			curTupleAllocated = true;
 		}
-		elog(LOG, "find_tuple_version 12 csn %lu", oSnapshot->csn);
 
 		Assert(UNDO_REC_EXISTS(desc->undoType, undoLocation));
 	}
 
 	if (COMMITSEQNO_IS_NON_DELETED(oSnapshot->csn))
 	{
-		elog(LOG, "find_tuple_version 13 csn %lu", oSnapshot->csn);
-
 		if (tupHdr.deleted != BTreeLeafTupleNonDeleted &&
 			XACT_INFO_IS_FINISHED(tupHdr.xactInfo))
 		{
-			elog(LOG, "find_tuple_version 13-1 csn %lu", oSnapshot->csn);
-
 			O_TUPLE_SET_NULL(result);
 			MemoryContextSwitchTo(prevMctx);
 			return result;
@@ -446,8 +396,6 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	}
 	else if (tupHdr.deleted != BTreeLeafTupleNonDeleted && !cb)
 	{
-		elog(LOG, "find_tuple_version 14 csn %lu", oSnapshot->csn);
-
 		O_TUPLE_SET_NULL(result);
 		MemoryContextSwitchTo(prevMctx);
 		return result;
@@ -455,8 +403,6 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 	if (!curTupleAllocated)
 	{
-		elog(LOG, "find_tuple_version 15 csn %lu", oSnapshot->csn);
-
 		result_size = o_btree_len(desc, curTuple, OTupleLength);
 		/* TODO: check result tuple size */
 		result.data = (Pointer) MemoryContextAlloc(mcxt, result_size);
@@ -465,8 +411,6 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	}
 	else
 	{
-		elog(LOG, "find_tuple_version 16 csn %lu", oSnapshot->csn);
-
 		result = curTuple;
 	}
 

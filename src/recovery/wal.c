@@ -361,7 +361,7 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	}
 
 
-	elog(LOG, "add_modify_wal_record_extended length1 %d length2 %d", length, length2);
+	elog(DEBUG4, "add_modify_wal_record_extended length1 %d length2 %d", length, length2);
 	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
 		required_length += sizeof(WALRecRelation);
 
