@@ -4858,7 +4858,7 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		Assert(!have_locked_pages());
 		Assert(!have_retained_undo_location());
 
-		if (td->type >= oIndexUnique &&
+		if (td->type == oIndexRegular &&
 			XLogRecPtrIsInvalid(checkpoint_state->toastConsistentPtr))
 		{
 			checkpoint_state->toastConsistentPtr = get_checkpoint_xlog_ptr();
