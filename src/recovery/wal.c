@@ -1106,6 +1106,9 @@ wal_parse_rec_modify(Pointer ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, Offs
 
 		Assert(tuple1->fixedData);
 		memcpy(tuple1->fixedData, ptr, length1);
+		if (length1 != MAXALIGN(length1))
+			memset(&tuple1->fixedData[length1], 0, MAXALIGN(length1) - length1);
+
 		ptr += length1;
 		tuple1->tuple.data = tuple1->fixedData;
 		O_TUPLE_SET_NULL(tuple2->tuple);
@@ -1123,11 +1126,17 @@ wal_parse_rec_modify(Pointer ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, Offs
 
 		Assert(tuple1->fixedData);
 		memcpy(tuple1->fixedData, ptr, length1);
+		if (length1 != MAXALIGN(length1))
+			memset(&tuple1->fixedData[length1], 0, MAXALIGN(length1) - length1);
+
 		ptr += length1;
 		tuple1->tuple.data = tuple1->fixedData;
 
 		Assert(tuple2->fixedData);
 		memcpy(tuple2->fixedData, ptr, length2);
+		if (length2 != MAXALIGN(length2))
+			memset(&tuple2->fixedData[length2], 0, MAXALIGN(length2) - length2);
+
 		ptr += length2;
 		tuple2->tuple.data = tuple2->fixedData;
 	}
