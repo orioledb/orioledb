@@ -530,7 +530,6 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 
 		if (cmp >= (endIsIncluded ? 1 : 0))
 		{
-
 			pfree(result.data);
 			O_TUPLE_SET_NULL(result);
 			return result;

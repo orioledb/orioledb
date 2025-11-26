@@ -305,7 +305,7 @@ extern OComparator *o_find_comparator(Oid opfamily,
 									  Oid collation);
 extern int	o_call_comparator(OComparator *comparator, Datum left,
 							  Datum right);
-extern int	o_call_exclusion_fn(OExclusionFn *exclusion_fn, Datum left, Datum right);
+extern int	o_call_exclusion_fn(OExclusionFn *exclusion_fn, Datum left, Datum right, Oid collation);
 extern void o_invalidate_comparator_cache(Oid opfamily, Oid lefttype,
 										  Oid righttype);
 
