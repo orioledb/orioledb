@@ -315,6 +315,8 @@ o_fill_key_bounds(Datum v, Oid type,
 			low->flags |= O_VALUE_BOUND_COERCIBLE;
 		if (field->exclusion_fn)
 			low->exclusion_fn = field->exclusion_fn;
+		else
+			low->exclusion_fn = NULL;
 	}
 	if (high != NULL)
 	{
@@ -325,6 +327,8 @@ o_fill_key_bounds(Datum v, Oid type,
 			high->flags |= O_VALUE_BOUND_COERCIBLE;
 		if (field->exclusion_fn)
 			high->exclusion_fn = field->exclusion_fn;
+		else
+			high->exclusion_fn = NULL;
 	}
 }
 
