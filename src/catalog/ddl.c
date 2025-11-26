@@ -1405,7 +1405,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 }
 
 static void
-o_validate_replica_identity(Relation rel, ReplicaIdentityStmt * stmt)
+o_validate_replica_identity(Relation rel, ReplicaIdentityStmt *stmt)
 {
 	elog(LOG, "Current replident %c, setting replident %c", rel->rd_rel->relreplident, stmt->identity_type);
 

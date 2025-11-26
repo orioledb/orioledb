@@ -146,7 +146,7 @@ typedef struct WorkerUndoTempHeader
 {
 	int			worker_id;
 	uint32		num_transactions;
-}			WorkerUndoTempHeader;
+} WorkerUndoTempHeader;
 
 typedef struct WorkerUndoTempEntry
 {
@@ -155,13 +155,13 @@ typedef struct WorkerUndoTempEntry
 	UndoStackLocations undoStacks[UndoLogsCount];
 	uint32		numCheckpointStacks;
 	/* How many checkpoint stacks follow */
-}			WorkerUndoTempEntry;
+} WorkerUndoTempEntry;
 
 typedef struct WorkerUndoTempCheckpointStack
 {
 	UndoLogType undoType;
 	UndoStackLocations undoStack;
-}			WorkerUndoTempCheckpointStack;
+} WorkerUndoTempCheckpointStack;
 
 PG_FUNCTION_INFO_V1(orioledb_recovery_synchronized);
 

@@ -72,8 +72,7 @@ class LogicalTest(BaseTest):
 						data2 text,
 			                        data3 text
 					) USING orioledb;
-		          ALTER TABLE data REPLICA IDENTITY FULL;"""
-		)
+		          ALTER TABLE data REPLICA IDENTITY FULL;""")
 
 		node.safe_psql(
 		    'postgres',
@@ -81,10 +80,11 @@ class LogicalTest(BaseTest):
 		)
 
 		node.safe_psql(
-		    'postgres', "BEGIN;\n"
+		    'postgres',
+		    "BEGIN;\n"
 		    "INSERT INTO data VALUES(1, 'foofoo','barbar', 'aaaaaa');\n"
 		    "INSERT INTO data VALUES(2, 'mmm','nnn', 'ooo');\n"
-#		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
+		    #		    "UPDATE data SET data2 = 'ssssss' where data2 = 'barbar';\n"
 		    "COMMIT;\n")
 		node.safe_psql(
 		    'postgres', "BEGIN;\n"
@@ -1084,7 +1084,6 @@ COMMIT\n""")
 						con1.commit()
 						con2.commit()
 
-
 #						con2.execute("CHECKPOINT;")
 #						con2.execute("SELECT orioledb_get_current_oxid();")
 
@@ -1190,8 +1189,9 @@ COMMIT\n""")
 				publisher.safe_psql(create_sql)
 				subscriber.safe_psql(create_sql)
 
-				pub = publisher.publish('test_pub',
-				                        tables=['o_test', 'o_test_ctid', 'o_test_secondary'])
+				pub = publisher.publish(
+				    'test_pub',
+				    tables=['o_test', 'o_test_ctid', 'o_test_secondary'])
 				sub = subscriber.subscribe(pub, 'test_sub')
 
 				with publisher.connect() as con1:
@@ -1214,7 +1214,8 @@ COMMIT\n""")
 						)
 
 						con1.execute("UPDATE o_test SET id = 6 WHERE id = 1;")
-						con1.execute("UPDATE o_test_ctid SET id = 6 WHERE id = 1;")
+						con1.execute(
+						    "UPDATE o_test_ctid SET id = 6 WHERE id = 1;")
 						con1.execute(
 						    "UPDATE o_test_secondary SET id = 6 WHERE id = 1;")
 
@@ -1320,9 +1321,13 @@ COMMIT\n""")
 				publisher.safe_psql(create_sql)
 				subscriber.safe_psql(create_sql)
 
-				pub = publisher.publish('test_pub',
-				                        tables=['o_test', 'o_test_ctid', 'o_test_secondary', 'o_test_ctid_secondary', 'o_test_2', 'o_test_ctid_2', 'o_test_secondary_2', 'o_test_ctid_secondary_2'
-				                        ])
+				pub = publisher.publish(
+				    'test_pub',
+				    tables=[
+				        'o_test', 'o_test_ctid', 'o_test_secondary',
+				        'o_test_ctid_secondary', 'o_test_2', 'o_test_ctid_2',
+				        'o_test_secondary_2', 'o_test_ctid_secondary_2'
+				    ])
 				sub = subscriber.subscribe(pub, 'test_sub')
 
 				with publisher.connect() as con1:
@@ -1433,6 +1438,7 @@ COMMIT\n""")
 						con1.commit()
 						con2.commit()
 
+
 #					publisher.safe_psql("CHECKPOINT;")
 #					subscriber.execute("SELECT orioledb_get_current_oxid();")
 					self.assertListEqual(
@@ -1441,8 +1447,7 @@ COMMIT\n""")
 					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
 					     (2, 'mmm', 'ppp', 'ooo')])
 					self.assertListEqual(
-					    publisher.execute(
-					        'SELECT * FROM o_test ORDER BY i'),
+					    publisher.execute('SELECT * FROM o_test ORDER BY i'),
 					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
 					     (2, 'mmm', 'ppp', 'ooo')])
 					self.assertListEqual(
@@ -1461,33 +1466,31 @@ COMMIT\n""")
 					    [('foofoo', 'ssssss', 'aaaaaa', 1),
 					     ('mmm', 'ppp', 'ooo', 2)])
 					self.assertListEqual(
-					    publisher.execute(
-					        'SELECT * FROM o_test_2 ORDER BY i'),
+					    publisher.execute('SELECT * FROM o_test_2 ORDER BY i'),
 					    [('foofoo', 'ssssss', 'aaaaaa', 1),
 					     ('mmm', 'ppp', 'ooo', 2)])
 					self.assertListEqual(
 					    publisher.execute(
 					        'SELECT * FROM o_test_secondary_2 ORDER BY i'),
-					    [('foofoo', 'ssssss', 'aaaaaa', 1 ),
+					    [('foofoo', 'ssssss', 'aaaaaa', 1),
 					     ('mmm', 'ppp', 'ooo', 2)])
 					self.assertListEqual(
 					    publisher.execute(
-					        'SELECT * FROM o_test_ctid_secondary_2 ORDER BY i'),
-					    [('foofoo', 'ssssss', 'aaaaaa', 1),
-					     ('mmm', 'ppp', 'ooo', 2)])
+					        'SELECT * FROM o_test_ctid_secondary_2 ORDER BY i'
+					    ), [('foofoo', 'ssssss', 'aaaaaa', 1),
+					        ('mmm', 'ppp', 'ooo', 2)])
 
 					# wait until changes apply on subscriber and check them
 					sub.catchup()
 					# sub.poll_query_until("SELECT orioledb_recovery_synchronized();", expected=True)
-#					subscriber.safe_psql("CHECKPOINT;")
+					#					subscriber.safe_psql("CHECKPOINT;")
 					self.assertListEqual(
 					    subscriber.execute(
 					        'SELECT * FROM o_test_ctid ORDER BY i'),
 					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
 					     (2, 'mmm', 'ppp', 'ooo')])
 					self.assertListEqual(
-					    subscriber.execute(
-					        'SELECT * FROM o_test ORDER BY i'),
+					    subscriber.execute('SELECT * FROM o_test ORDER BY i'),
 					    [(1, 'foofoo', 'ssssss', 'aaaaaa'),
 					     (2, 'mmm', 'ppp', 'ooo')])
 					self.assertListEqual(
@@ -1517,9 +1520,9 @@ COMMIT\n""")
 					     ('mmm', 'ppp', 'ooo', 2)])
 					self.assertListEqual(
 					    subscriber.execute(
-					        'SELECT * FROM o_test_ctid_secondary_2 ORDER BY i'),
-					    [('foofoo', 'ssssss', 'aaaaaa', 1),
-					     ('mmm', 'ppp', 'ooo', 2)])
+					        'SELECT * FROM o_test_ctid_secondary_2 ORDER BY i'
+					    ), [('foofoo', 'ssssss', 'aaaaaa', 1),
+					        ('mmm', 'ppp', 'ooo', 2)])
 
 	# Update with non-changed pkey of by-reference type
 	def test_logical_subscription_byref_pkey_update(self):
@@ -1662,7 +1665,6 @@ COMMIT\n""")
 					    ), [('foofoo', 'barbar', '12312312312312312312', 1),
 					        ('mmm', 'nnn', '24624624624624624624', 2)])
 
-
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_recvlogical_and_drop_database(self):
@@ -1701,5 +1703,3 @@ COMMIT\n""")
 
 		pg_recvlogical.terminate()
 		node.stop()
-
-

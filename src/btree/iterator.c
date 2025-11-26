@@ -319,6 +319,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 					if (IS_SYS_TREE_OIDS(desc->oids))
 						break;
+
 					/*
 					 * Use cached UndoLocation if we have undo records in this
 					 * command or below.  MaxUndoLocation means there are no
