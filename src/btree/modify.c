@@ -1172,7 +1172,7 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 	OInMemoryBlkno blkno;
 	uint32		pageChangeCount;
 	LWLock	   *uniqueLock;
-	OBTreeModifyResult result = 456;
+	OBTreeModifyResult result;
 	Jsonb	   *params = NULL;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 	bool		found_but_insert;

@@ -534,7 +534,6 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	CommitSeqNo csn;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
-	o_current_index = NULL;
 	if (options && !options->orioledb_index)
 	{
 		bytea	   *rowid;
@@ -562,13 +561,12 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 			tupleid = PointerGetDatum(p);
 		}
 
-		o_current_index = rel;
 		if (!indexUnchanged)
 			result = btinsert(rel, values, isnull, tupleid, heapRel,
 							  checkUnique, indexUnchanged, indexInfo);
 		else
 			result = true; /* FIXME: Wrong assumption? */
-		o_current_index = NULL;
+
 		return result;
 	}
 
@@ -689,21 +687,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 	if (options && !options->orioledb_index)
-	{
-		bool		satisfiesConstraint;
-
-		/* Call index_insert here, to mimic non MVCC aware part of ExecUpdateIndexTuples */
-		satisfiesConstraint = index_insert(rel, /* index relation */
-										   values,	/* array of index Datums */
-										   isnull,	/* null flags */
-										   tupleid,	/* tid of heap tuple */
-										   heapRel,	/* heap relation */
-										   checkUnique,	/* type of uniqueness check to do */
-										   indexUnchanged,	/* UPDATE without logical change? */
-										   indexInfo);	/* index AM may need this */
-
-		return satisfiesConstraint;
-	}
+		return true;
 
 	if (rel->rd_index->indisprimary)
 		return true;
@@ -1439,9 +1423,6 @@ orioledb_amadjustmembers(Oid opfamilyoid, Oid opclassoid, List *operators,
 {
 }
 
-/* TODO: Remove this hack; probably patch table_index_fetch_begin to accept indexRelation */
-Relation	o_current_index = NULL;
-
 IndexScanDesc
 orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 {
@@ -1454,11 +1435,8 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	OIndexNumber ix_num;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
-	o_current_index = NULL;
-
 	if (options && !options->orioledb_index)
 	{
-		o_current_index = rel;
 		return btbeginscan(rel, nkeys, norderbys);
 	}
 
@@ -1812,6 +1790,7 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 	ItemPointerCopy(&slot->tts_tid, &scan->xs_itup->t_tid);
 }
 
+
 bool
 orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 {
@@ -1844,7 +1823,6 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 
 	descr = relation_get_descr(scan->heapRelation);
 	scan_primary = o_scan->ixNum == PrimaryIndexNumber || !scan->xs_want_itup;
-
 	tuple = o_index_scan_getnext(descr, o_scan, &csn, scan_primary,
 								 tupleCxt, &hint);
 
@@ -1992,8 +1970,6 @@ bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 	Pointer		p;
 	IndexAmRoutine *amroutine = NULL;
 
-	o_current_index = rel;
-
 	ORelOidsSetFromRel(oids, heapRel);
 
 	descr = o_fetch_table_descr(oids);
@@ -2027,8 +2003,6 @@ IndexScanDesc
 bridged_ambeginscan(Relation rel, int nkeys, int norderbys)
 {
 	IndexAmRoutine *amroutine = find_bridged_am(rel);
-
-	o_current_index = rel;
 
 	Assert(amroutine != NULL);
 
