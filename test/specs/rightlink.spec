@@ -34,7 +34,8 @@ step "s2_setup" {
 	SET application_name = 's2';
 	SET enable_seqscan = off; }
 step "s2_setup_seq" {
-	SET orioledb.enable_stopevents = true; }
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's2'; }
 
 step "s2_bp_split_leaf" { SELECT pg_stopevent_set('page_split', '$.level == 0'); }
 step "s2_bp_split_node" { SELECT pg_stopevent_set('page_split', '$.level > 0'); }
@@ -118,80 +119,80 @@ permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s2_bp_split_node"
 ###
 # rightlink has been removed when other process executes find_page at 0 lvl page test
 # forward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_leaf" "s1_split_node" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_node")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_leaf" "s1_split_node" "s3_bp_down_rightlink" "s2_select" "s3_reset_split_node" ("s1_split_node") "s3_reset_down"
 # backward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_leaf" "s1_split_node" "s3_bp_down_rightlink" "s2_bselect" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_node")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_leaf" "s1_split_node" "s3_bp_down_rightlink" "s2_bselect" "s3_reset_split_node" ("s1_split_node") "s3_reset_down"
 # sequential
-permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_leaf" "s1_split_node" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_node")
+permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_leaf" "s1_split_node" "s3_bp_down_rightlink" "s2_select" "s3_reset_split_node" ("s1_split_node") "s3_reset_down"
 
 # forward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_leaf" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_node_v2")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_leaf" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_select" "s3_reset_split_node" ("s1_split_node_v2") "s3_reset_down"
 # backward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_leaf" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_bselect" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_node_v2")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_leaf" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_bselect" "s3_reset_split_node" ("s1_split_node_v2") "s3_reset_down"
 # sequential
-permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_leaf" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_node_v2")
+permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_leaf" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_select" "s3_reset_split_node" ("s1_split_node_v2") "s3_reset_down"
 
 ###
 # rightlink has been removed when other process executes find_page at 1 lvl page test
 ###
 # forward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_node")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node" "s3_bp_down_rightlink" "s2_select" "s3_reset_split_node" ("s1_split_node") "s3_reset_down"
 # backward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node" "s3_bp_down_rightlink" "s2_bselect" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_node")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node" "s3_bp_down_rightlink" "s2_bselect" "s3_reset_split_node" ("s1_split_node") "s3_reset_down"
 # sequential
-permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_node")
+permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node" "s3_bp_down_rightlink" "s2_select" "s3_reset_split_node" ("s1_split_node") "s3_reset_down"
 
 # forward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_node_v2")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_select" "s3_reset_split_node" ("s1_split_node_v2") "s3_reset_down"
 # backward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_bselect" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_node_v2")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_bselect" "s3_reset_split_node" ("s1_split_node_v2") "s3_reset_down"
 # sequential
-permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_node_v2")
+permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_select" "s3_reset_split_node" ("s1_split_node_v2") "s3_reset_down"
 
 ###
 # rightlink has been removed on node mix (it does not test something meaningful cases but can be useful on errors catch)
 ###
 # forward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_bp_down" "s3_reset_split_node" "s3_reset_down" ("s1_split_node")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node" "s3_bp_down_rightlink" "s2_select" "s3_bp_down" "s3_reset_split_node" ("s1_split_node") "s3_reset_down"
 # backward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node" "s3_bp_down_rightlink" "s2_bselect" ("s3_reset_down") "s3_bp_down" "s3_reset_split_node" "s3_reset_down" ("s1_split_node")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node" "s3_bp_down_rightlink" "s2_bselect" "s3_bp_down" "s3_reset_split_node" ("s1_split_node") "s3_reset_down"
 # sequential
-permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_bp_down" "s3_reset_split_node" "s3_reset_down" ("s1_split_node")
+permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node" "s3_bp_down_rightlink" "s2_select" "s3_bp_down" "s3_reset_split_node" ("s1_split_node") "s3_reset_down"
 
 # forward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_bp_down" "s3_reset_split_node" "s3_reset_down" ("s1_split_node_v2")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_select" "s3_bp_down" "s3_reset_split_node" ("s1_split_node_v2") "s3_reset_down"
 # backward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_bselect" ("s3_reset_down") "s3_bp_down" "s3_reset_split_node" "s3_reset_down" ("s1_split_node_v2")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_bselect" "s3_bp_down" "s3_reset_split_node" ("s1_split_node_v2") "s3_reset_down"
 # sequential
-permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_bp_down" "s3_reset_split_node" "s3_reset_down" ("s1_split_node_v2")
+permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_node_v2" "s3_bp_down_rightlink" "s2_select" "s3_bp_down" "s3_reset_split_node" ("s1_split_node_v2") "s3_reset_down"
 
 ###
 # rightlink has been removed on leaf mix (it does not test something meaningful cases but can be useful on errors catch)
 ###
 # forward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_bp_down" "s3_reset_split_node" "s3_reset_down" ("s1_split_leaf")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf" "s3_bp_down_rightlink" "s2_select" "s3_bp_down" "s3_reset_split_node" ("s1_split_leaf") "s3_reset_down"
 # backward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf" "s3_bp_down_rightlink" "s2_bselect" ("s3_reset_down") "s3_bp_down" "s3_reset_split_node" "s3_reset_down" ("s1_split_leaf")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf" "s3_bp_down_rightlink" "s2_bselect" "s3_bp_down" "s3_reset_split_node" ("s1_split_leaf") "s3_reset_down"
 # sequential
-permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_bp_down" "s3_reset_split_node" "s3_reset_down" ("s1_split_leaf")
+permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf" "s3_bp_down_rightlink" "s2_select" "s3_bp_down" "s3_reset_split_node" ("s1_split_leaf") "s3_reset_down"
 
 # forward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf_v2" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_bp_down" "s3_reset_split_node" "s3_reset_down" ("s1_split_leaf_v2")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf_v2" "s3_bp_down_rightlink" "s2_select" "s3_bp_down" "s3_reset_split_node" ("s1_split_leaf_v2") "s3_reset_down"
 # backward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf_v2" "s3_bp_down_rightlink" "s2_bselect" ("s3_reset_down") "s3_bp_down" "s3_reset_split_node" "s3_reset_down" ("s1_split_leaf_v2")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf_v2" "s3_bp_down_rightlink" "s2_bselect" "s3_bp_down" "s3_reset_split_node" ("s1_split_leaf_v2") "s3_reset_down"
 # sequential
-permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf_v2" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_bp_down" "s3_reset_split_node" "s3_reset_down" ("s1_split_leaf_v2")
+permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf_v2" "s3_bp_down_rightlink" "s2_select" "s3_bp_down" "s3_reset_split_node" ("s1_split_leaf_v2") "s3_reset_down"
 
 # forward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_leaf")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf" "s3_bp_down_rightlink" "s2_select" "s3_reset_split_node" ("s1_split_leaf") "s3_reset_down"
 # backward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf" "s3_bp_down_rightlink" "s2_bselect" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_leaf")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf" "s3_bp_down_rightlink" "s2_bselect" "s3_reset_split_node" ("s1_split_leaf") "s3_reset_down"
 # sequential
-permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_leaf")
+permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf" "s3_bp_down_rightlink" "s2_select" "s3_reset_split_node" ("s1_split_leaf") "s3_reset_down"
 
 # forward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf_v2" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_leaf_v2")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf_v2" "s3_bp_down_rightlink" "s2_select" "s3_reset_split_node" ("s1_split_leaf_v2") "s3_reset_down"
 # backward
-permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf_v2" "s3_bp_down_rightlink" "s2_bselect" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_leaf_v2")
+permutation "s1_setup" "s2_setup" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf_v2" "s3_bp_down_rightlink" "s2_bselect" "s3_reset_split_node" ("s1_split_leaf_v2") "s3_reset_down"
 # sequential
-permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf_v2" "s3_bp_down_rightlink" "s2_select" ("s3_reset_down") "s3_reset_split_node" "s3_reset_down" ("s1_split_leaf_v2")
+permutation "s1_setup" "s2_setup_seq" "s1_split_node_prepare" "s3_bp_split_node" "s1_split_leaf_v2" "s3_bp_down_rightlink" "s2_select" "s3_reset_split_node" ("s1_split_leaf_v2") "s3_reset_down"
