@@ -1037,7 +1037,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		}
 		else
 		{
-			Assert(false);
 			elog(FATAL, "Unknown WAL record");
 		}
 	}

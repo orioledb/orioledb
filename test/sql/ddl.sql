@@ -545,7 +545,7 @@ SELECT * FROM test_replica_identity_set;
 CREATE TABLE test_replica_identity_fail (i int PRIMARY KEY, t text) USING orioledb;
 INSERT INTO test_replica_identity_fail VALUES(1, 'foofoo');
 INSERT INTO test_replica_identity_fail VALUES(2, 'barbar');
-ALTER TABLE test_replica_identity_set REPLICA IDENTITY NOTHING;
+ALTER TABLE test_replica_identity_fail REPLICA IDENTITY NOTHING;
 INSERT INTO test_replica_identity_fail VALUES(3, 'aaaaaa');
 SELECT * FROM test_replica_identity_fail;
 \d+ test_replica_identity_fail
