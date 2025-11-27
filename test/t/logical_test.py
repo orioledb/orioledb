@@ -65,13 +65,41 @@ class LogicalTest(BaseTest):
 		node = self.node
 		node.start()  # start PostgreSQL
 		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE data(id serial primary key, data text) USING orioledb;\n"
+		)
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO data(data) VALUES('1');\n"
+		    "INSERT INTO data(data) VALUES('2');\n"
+		    "COMMIT;\n")
+		result = self.squashLogicalChanges(
+		    node.execute(
+		        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
+		    ))
+		self.assertEqual(
+		    result, "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:1 data[text]:'1'\n"
+		    "table public.data: INSERT: id[integer]:2 data[text]:'2'\n"
+		    "COMMIT\n")
+
+	def test_simple_replident(self):
+		node = self.node
+		node.start()  # start PostgreSQL
+		node.safe_psql(
 		    'postgres', """CREATE EXTENSION IF NOT EXISTS orioledb;
 		                CREATE TABLE data (
 			                        i   int,
-						data1 text,
-						data2 text,
+			                        data1 text,
+			                        data2 text,
 			                        data3 text
-					) USING orioledb;
+			                        ) USING orioledb;
 		          ALTER TABLE data REPLICA IDENTITY FULL;""")
 
 		node.safe_psql(
