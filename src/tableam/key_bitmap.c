@@ -28,17 +28,6 @@ static void bm_rbt_combiner(RBTNode *existing, const RBTNode *newdata, void *arg
 static RBTNode *bm_rbt_allocfunc(void *arg);
 static void bm_rbt_freefunc(RBTNode *x, void *arg);
 
-#define HIGH_PART_MASK	(0xFFFFFFFFFFFFFC00)
-#define LOW_PART_MASK	(0x00000000000003FF)
-#define BITMAP_SIZE		0x80
-
-typedef struct
-{
-	RBTNode		rbtnode;
-	uint64		key;
-	uint8	   *bitmap;
-} OKeyBitmapRBTNode;
-
 RBTree *
 o_keybitmap_create(void)
 {
