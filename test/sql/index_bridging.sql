@@ -809,6 +809,48 @@ SELECT orioledb_tbl_indices('test_no_bmscan_on_text_pkey'::regclass, true);
 EXPLAIN (COSTS OFF) SELECT data2 from test_no_bmscan_on_text_pkey where data2 = 'barbar';
 SELECT data2 from test_no_bmscan_on_text_pkey where data2 = 'barbar';
 
+CREATE TEMP TABLE hash_i4_test_table_with_pk (
+    seqno   int4 PRIMARY KEY,
+    random  int4
+) USING orioledb;
+
+INSERT INTO hash_i4_test_table_with_pk (seqno, random) VALUES
+    (1, 1001),
+    (2, 1002),
+    (3, 1003),
+    (4, 1004),
+    (5, 1005);
+
+CREATE INDEX hash_i4_index ON hash_i4_test_table_with_pk USING hash (random int4_ops);
+
+UPDATE hash_i4_test_table_with_pk SET seqno = 2000 WHERE random = 1004;
+
+SET enable_seqscan = OFF;
+EXPLAIN SELECT h.seqno FROM hash_i4_test_table_with_pk h WHERE h.random = 1004;
+SELECT h.seqno FROM hash_i4_test_table_with_pk h WHERE h.random = 1004;
+
+SET enable_seqscan = ON;
+DROP table hash_i4_test_table_with_pk;
+
+CREATE TEMP TABLE gin_test_table_with_pk (
+    id   serial PRIMARY KEY,
+    tags int4[]
+) USING orioledb;
+
+INSERT INTO gin_test_table_with_pk (id, tags) VALUES
+	(411, '{802, 654}'::int[]),
+	(412, '{814, 738}'::int[]);
+
+CREATE INDEX idx_gin_tags ON gin_test_table_with_pk USING gin (tags);
+
+UPDATE gin_test_table_with_pk SET id = 2000 WHERE tags @> '{814}';
+
+SET enable_seqscan = OFF;
+EXPLAIN SELECT id, tags FROM gin_test_table_with_pk WHERE tags @> '{814}';
+SELECT id, tags FROM gin_test_table_with_pk WHERE tags @> '{814}';
+
+DROP table gin_test_table_with_pk;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;

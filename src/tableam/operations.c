@@ -697,15 +697,8 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 
 	if (descr->bridge)
 	{
-		List	   *indexIds;
-		ListCell   *indexId;
 		int			attnum;
 		TupleTableSlot *newSlot;
-		Bitmapset  *changed_attrs = NULL;
-
-		/* not using simple reindex_relation here anymore, */
-		/* because we hold a lock on relation already */
-		indexIds = RelationGetIndexList(rel);
 
 		oldSlot = arg->scanSlot;
 		newSlot = &arg->newSlot->base;
@@ -719,7 +712,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 				 !datumIsEqual(oldSlot->tts_values[attnum], newSlot->tts_values[attnum],
 							   attr->attbyval, attr->attlen)))
 			{
-				changed_attrs = bms_add_member(changed_attrs, attnum);
+				touched_indices = true;
 			}
 		}
 
@@ -732,70 +725,9 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			 */
 			for (attnum = oldSlot->tts_nvalid; attnum < oldSlot->tts_tupleDescriptor->natts; attnum++)
 			{
-				 /* Assuming that tts_isnull big enough */ ;
-				oldSlot->tts_isnull[attnum] = true;
-				changed_attrs = bms_add_member(changed_attrs, attnum);
+				//  /* Assuming that tts_isnull big enough */ ;
+				touched_indices = true;
 			}
-		}
-
-		foreach(indexId, indexIds)
-		{
-			Oid			indexOid = lfirst_oid(indexId);
-			Relation	index_rel = index_open(indexOid, AccessExclusiveLock);
-			bool		intresting = index_rel->rd_rel->relam != BTREE_AM_OID;
-
-			if (!intresting)
-			{
-				OBTOptions *options = (OBTOptions *) index_rel->rd_options;
-
-				intresting = options && !options->orioledb_index;
-			}
-			if (intresting)
-			{
-				for (attnum = 0; attnum < index_rel->rd_index->indnatts; attnum++)
-				{
-					AttrNumber	tbl_attnum = index_rel->rd_index->indkey.values[attnum];
-
-					if (index_rel->rd_indpred != NIL)
-					{
-						ExprState  *predicate;
-						EState	   *estate;
-						ExprContext *econtext;
-
-						estate = CreateExecutorState();
-						predicate = ExecPrepareQual(index_rel->rd_indpred, estate);
-
-						econtext = GetPerTupleExprContext(estate);
-						econtext->ecxt_scantuple = newSlot;
-
-						/*
-						 * Skip this index-update if the predicate isn't
-						 * satisfied
-						 */
-						if (!ExecQual(predicate, econtext))
-						{
-							FreeExecutorState(estate);
-							continue;
-						}
-						FreeExecutorState(estate);
-					}
-
-					if (AttributeNumberIsValid(tbl_attnum))
-					{
-						if (bms_is_member(tbl_attnum - 1, changed_attrs))
-							touched_indices = true;
-					}
-					else
-					{
-						Assert(false);	/* Expression indices not implemented
-										 * yet. */
-					}
-
-					if (touched_indices)
-						break;
-				}
-			}
-			index_close(index_rel, AccessExclusiveLock);
 		}
 	}
 

@@ -853,18 +853,21 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty                               +
      Leftmost, Rightmost                                                                           +
    Chunk 0: offset = 0, location = 256, hikey location = 64                                        +
-     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)', '1', '198', '(41,5)', '6', '7', null)        +
-     Item 1: offset = 344, tuple = ('(0,2)', '(0,2)', '10', '180', '(401,50)', '60', '70', null)   +
-     Item 2: offset = 424, tuple = ('(0,3)', '(0,3)', '100', '0', '(4001,500)', '600', '700', null)+
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,4)', '1', '198', '(41,5)', '6', '7', null)        +
+     Item 1: offset = 344, tuple = ('(0,2)', '(0,5)', '10', '180', '(401,50)', '60', '70', null)   +
+     Item 2: offset = 424, tuple = ('(0,3)', '(0,6)', '100', '0', '(4001,500)', '600', '700', null)+
                                                                                                    +
  Index index_bridge contents                                                                       +
  Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                               +
  state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                +
      Leftmost, Rightmost                                                                           +
    Chunk 0: offset = 0, location = 256, hikey location = 64                                        +
-     Item 0: offset = 264, tuple = ('(0,1)', '(0,1)')                                              +
-     Item 1: offset = 296, tuple = ('(0,2)', '(0,2)')                                              +
-     Item 2: offset = 328, tuple = ('(0,3)', '(0,3)')                                              +
+     Item 0: deleted, offset = 272, tuple = ('(0,1)', '(0,1)')                                     +
+     Item 1: deleted, offset = 304, tuple = ('(0,2)', '(0,2)')                                     +
+     Item 2: deleted, offset = 336, tuple = ('(0,3)', '(0,3)')                                     +
+     Item 3: offset = 368, tuple = ('(0,4)', '(0,1)')                                              +
+     Item 4: offset = 400, tuple = ('(0,5)', '(0,2)')                                              +
+     Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                              +
                                                                                                    +
  Index toast: not loaded                                                                           +
  
@@ -888,12 +891,9 @@ EXPLAIN (COSTS OFF)
 (1 row)
 
 SELECT * FROM o_test_ix_ams ORDER BY j;
-  i  |  j  |     p      | pk1 | pk2 | k 
------+-----+------------+-----+-----+---
- 100 |   0 | (4001,500) | 600 | 700 |  
-  10 | 180 | (401,50)   |  60 |  70 |  
-   1 | 198 | (41,5)     |   6 |   7 |  
-(3 rows)
+ i | j | p | pk1 | pk2 | k 
+---+---+---+-----+-----+---
+(0 rows)
 
 COMMIT;
 -- Now it should update bridging_ctid-s
@@ -906,21 +906,24 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty                                  +
      Leftmost, Rightmost                                                                              +
    Chunk 0: offset = 0, location = 256, hikey location = 64                                           +
-     Item 0: offset = 264, tuple = ('(0,1)', '(0,4)', '1', '1099', '(41,5)', '6', '7', null)          +
-     Item 1: offset = 344, tuple = ('(0,2)', '(0,5)', '10', '1090', '(401,50)', '60', '70', null)     +
-     Item 2: offset = 424, tuple = ('(0,3)', '(0,6)', '100', '1000', '(4001,500)', '600', '700', null)+
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,7)', '1', '1099', '(41,5)', '6', '7', null)          +
+     Item 1: offset = 344, tuple = ('(0,2)', '(0,8)', '10', '1090', '(401,50)', '60', '70', null)     +
+     Item 2: offset = 424, tuple = ('(0,3)', '(0,9)', '100', '1000', '(4001,500)', '600', '700', null)+
                                                                                                       +
  Index index_bridge contents                                                                          +
  Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                  +
  state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                   +
      Leftmost, Rightmost                                                                              +
    Chunk 0: offset = 0, location = 256, hikey location = 64                                           +
-     Item 0: deleted, offset = 272, tuple = ('(0,1)', '(0,1)')                                        +
-     Item 1: deleted, offset = 304, tuple = ('(0,2)', '(0,2)')                                        +
-     Item 2: deleted, offset = 336, tuple = ('(0,3)', '(0,3)')                                        +
-     Item 3: offset = 368, tuple = ('(0,4)', '(0,1)')                                                 +
-     Item 4: offset = 400, tuple = ('(0,5)', '(0,2)')                                                 +
-     Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                 +
+     Item 0: deleted, offset = 280, tuple = ('(0,1)', '(0,1)')                                        +
+     Item 1: deleted, offset = 312, tuple = ('(0,2)', '(0,2)')                                        +
+     Item 2: deleted, offset = 344, tuple = ('(0,3)', '(0,3)')                                        +
+     Item 3: deleted, offset = 376, tuple = ('(0,4)', '(0,1)')                                        +
+     Item 4: deleted, offset = 408, tuple = ('(0,5)', '(0,2)')                                        +
+     Item 5: deleted, offset = 440, tuple = ('(0,6)', '(0,3)')                                        +
+     Item 6: offset = 472, tuple = ('(0,7)', '(0,1)')                                                 +
+     Item 7: offset = 504, tuple = ('(0,8)', '(0,2)')                                                 +
+     Item 8: offset = 536, tuple = ('(0,9)', '(0,3)')                                                 +
                                                                                                       +
  Index toast: not loaded                                                                              +
  
@@ -955,9 +958,9 @@ REINDEX INDEX o_test_ix_ams_ix1;
 SELECT * FROM btree_index_content('o_test_ix_ams_ix1');
  ctid  | htid  | tids 
 -------+-------+------
- (0,4) | (0,4) | 
- (0,5) | (0,5) | 
- (0,6) | (0,6) | 
+ (0,7) | (0,7) | 
+ (0,8) | (0,8) | 
+ (0,9) | (0,9) | 
 (3 rows)
 
 BEGIN;
@@ -1005,9 +1008,9 @@ SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
 SELECT * FROM btree_index_content('o_test_ix_ams_ix2');
  ctid  | htid  | tids 
 -------+-------+------
- (0,4) | (0,4) | 
- (0,5) | (0,5) | 
- (0,6) | (0,6) | 
+ (0,7) | (0,7) | 
+ (0,8) | (0,8) | 
+ (0,9) | (0,9) | 
 (3 rows)
 
 BEGIN;
@@ -1036,21 +1039,24 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty                                  +
      Leftmost, Rightmost                                                                              +
    Chunk 0: offset = 0, location = 256, hikey location = 64                                           +
-     Item 0: offset = 264, tuple = ('(0,1)', '(0,4)', '1', '1099', '(41,5)', '6', '7', null)          +
-     Item 1: offset = 344, tuple = ('(0,2)', '(0,5)', '10', '1090', '(401,50)', '60', '70', null)     +
-     Item 2: offset = 424, tuple = ('(0,3)', '(0,6)', '100', '1000', '(4001,500)', '600', '700', null)+
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,7)', '1', '1099', '(41,5)', '6', '7', null)          +
+     Item 1: offset = 344, tuple = ('(0,2)', '(0,8)', '10', '1090', '(401,50)', '60', '70', null)     +
+     Item 2: offset = 424, tuple = ('(0,3)', '(0,9)', '100', '1000', '(4001,500)', '600', '700', null)+
                                                                                                       +
  Index index_bridge contents                                                                          +
  Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                  +
  state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                   +
      Leftmost, Rightmost                                                                              +
    Chunk 0: offset = 0, location = 256, hikey location = 64                                           +
-     Item 0: deleted, offset = 272, tuple = ('(0,1)', '(0,1)')                                        +
-     Item 1: deleted, offset = 304, tuple = ('(0,2)', '(0,2)')                                        +
-     Item 2: deleted, offset = 336, tuple = ('(0,3)', '(0,3)')                                        +
-     Item 3: offset = 368, tuple = ('(0,4)', '(0,1)')                                                 +
-     Item 4: offset = 400, tuple = ('(0,5)', '(0,2)')                                                 +
-     Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                 +
+     Item 0: deleted, offset = 280, tuple = ('(0,1)', '(0,1)')                                        +
+     Item 1: deleted, offset = 312, tuple = ('(0,2)', '(0,2)')                                        +
+     Item 2: deleted, offset = 344, tuple = ('(0,3)', '(0,3)')                                        +
+     Item 3: deleted, offset = 376, tuple = ('(0,4)', '(0,1)')                                        +
+     Item 4: deleted, offset = 408, tuple = ('(0,5)', '(0,2)')                                        +
+     Item 5: deleted, offset = 440, tuple = ('(0,6)', '(0,3)')                                        +
+     Item 6: offset = 472, tuple = ('(0,7)', '(0,1)')                                                 +
+     Item 7: offset = 504, tuple = ('(0,8)', '(0,2)')                                                 +
+     Item 8: offset = 536, tuple = ('(0,9)', '(0,3)')                                                 +
                                                                                                       +
  Index toast: not loaded                                                                              +
  
@@ -1058,42 +1064,45 @@ SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
 
 INSERT INTO o_test_ix_ams VALUES (1000, 2000, point(4000, 5000), 6000, 7000, 8000);
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
-                                           orioledb_tbl_structure                                            
--------------------------------------------------------------------------------------------------------------
- Index ctid_primary contents                                                                                +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                        +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                                        +
-     Leftmost, Rightmost                                                                                    +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                                                 +
-     Item 0: offset = 264, tuple = ('(0,1)', '(0,4)', '1', '1099', '(41,5)', '6', '7', null)                +
-     Item 1: offset = 344, tuple = ('(0,2)', '(0,5)', '10', '1090', '(401,50)', '60', '70', null)           +
-     Item 2: offset = 424, tuple = ('(0,3)', '(0,6)', '100', '1000', '(4001,500)', '600', '700', null)      +
-     Item 3: offset = 504, tuple = ('(0,4)', '(0,7)', '1000', '2000', '(4000,5000)', '6000', '7000', '8000')+
-                                                                                                            +
- Index index_bridge contents                                                                                +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                        +
- state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                         +
-     Leftmost, Rightmost                                                                                    +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                                                 +
-     Item 0: deleted, offset = 272, tuple = ('(0,1)', '(0,1)')                                              +
-     Item 1: deleted, offset = 304, tuple = ('(0,2)', '(0,2)')                                              +
-     Item 2: deleted, offset = 336, tuple = ('(0,3)', '(0,3)')                                              +
-     Item 3: offset = 368, tuple = ('(0,4)', '(0,1)')                                                       +
-     Item 4: offset = 400, tuple = ('(0,5)', '(0,2)')                                                       +
-     Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                       +
-     Item 6: offset = 464, tuple = ('(0,7)', '(0,4)')                                                       +
-                                                                                                            +
- Index toast: not loaded                                                                                    +
+                                            orioledb_tbl_structure                                            
+--------------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                                 +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                         +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                         +
+     Leftmost, Rightmost                                                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                  +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,7)', '1', '1099', '(41,5)', '6', '7', null)                 +
+     Item 1: offset = 344, tuple = ('(0,2)', '(0,8)', '10', '1090', '(401,50)', '60', '70', null)            +
+     Item 2: offset = 424, tuple = ('(0,3)', '(0,9)', '100', '1000', '(4001,500)', '600', '700', null)       +
+     Item 3: offset = 504, tuple = ('(0,4)', '(0,10)', '1000', '2000', '(4000,5000)', '6000', '7000', '8000')+
+                                                                                                             +
+ Index index_bridge contents                                                                                 +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                         +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                          +
+     Leftmost, Rightmost                                                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                  +
+     Item 0: deleted, offset = 280, tuple = ('(0,1)', '(0,1)')                                               +
+     Item 1: deleted, offset = 312, tuple = ('(0,2)', '(0,2)')                                               +
+     Item 2: deleted, offset = 344, tuple = ('(0,3)', '(0,3)')                                               +
+     Item 3: deleted, offset = 376, tuple = ('(0,4)', '(0,1)')                                               +
+     Item 4: deleted, offset = 408, tuple = ('(0,5)', '(0,2)')                                               +
+     Item 5: deleted, offset = 440, tuple = ('(0,6)', '(0,3)')                                               +
+     Item 6: offset = 472, tuple = ('(0,7)', '(0,1)')                                                        +
+     Item 7: offset = 504, tuple = ('(0,8)', '(0,2)')                                                        +
+     Item 8: offset = 536, tuple = ('(0,9)', '(0,3)')                                                        +
+     Item 9: offset = 568, tuple = ('(0,10)', '(0,4)')                                                       +
+                                                                                                             +
+ Index toast: not loaded                                                                                     +
  
 (1 row)
 
 SELECT * FROM btree_index_content('o_test_ix_ams_ix2');
- ctid  | htid  | tids 
--------+-------+------
- (0,4) | (0,4) | 
- (0,5) | (0,5) | 
- (0,6) | (0,6) | 
- (0,7) | (0,7) | 
+  ctid  |  htid  | tids 
+--------+--------+------
+ (0,7)  | (0,7)  | 
+ (0,8)  | (0,8)  | 
+ (0,9)  | (0,9)  | 
+ (0,10) | (0,10) | 
 (4 rows)
 
 BEGIN;
@@ -1156,12 +1165,12 @@ SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
 (1 row)
 
 SELECT * FROM hash_index_content('o_test_ix_ams_hash_ix');
- ctid  
--------
- (0,4)
- (0,5)
- (0,6)
- (0,7)
+  ctid  
+--------
+ (0,11)
+ (0,12)
+ (0,13)
+ (0,14)
 (4 rows)
 
 BEGIN;
@@ -1197,13 +1206,9 @@ EXPLAIN (COSTS OFF)
 (5 rows)
 
 SELECT * FROM o_test_ix_ams WHERE j < 2100;
-  i   |  j   |      p      | pk1  | pk2  |  k   
-------+------+-------------+------+------+------
-    1 | 1099 | (41,5)      |    6 |    7 | 1099
-   10 | 1090 | (401,50)    |   60 |   70 | 1090
-  100 | 1000 | (4001,500)  |  600 |  700 | 1000
- 1000 | 2000 | (4000,5000) | 6000 | 7000 | 8000
-(4 rows)
+ i | j | p | pk1 | pk2 | k 
+---+---+---+-----+-----+---
+(0 rows)
 
 COMMIT;
 BEGIN;
@@ -1228,32 +1233,39 @@ SELECT * FROM o_test_ix_ams WHERE k = 8000;
 
 COMMIT;
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
-                                           orioledb_tbl_structure                                            
--------------------------------------------------------------------------------------------------------------
- Index ctid_primary contents                                                                                +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                        +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                                        +
-     Leftmost, Rightmost                                                                                    +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                                                 +
-     Item 0: offset = 264, tuple = ('(0,1)', '(0,4)', '1', '1099', '(41,5)', '6', '7', '1099')              +
-     Item 1: offset = 344, tuple = ('(0,2)', '(0,5)', '10', '1090', '(401,50)', '60', '70', '1090')         +
-     Item 2: offset = 424, tuple = ('(0,3)', '(0,6)', '100', '1000', '(4001,500)', '600', '700', '1000')    +
-     Item 3: offset = 504, tuple = ('(0,4)', '(0,7)', '1000', '2000', '(4000,5000)', '6000', '7000', '8000')+
-                                                                                                            +
- Index index_bridge contents                                                                                +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                        +
- state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                         +
-     Leftmost, Rightmost                                                                                    +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                                                 +
-     Item 0: deleted, offset = 272, tuple = ('(0,1)', '(0,1)')                                              +
-     Item 1: deleted, offset = 304, tuple = ('(0,2)', '(0,2)')                                              +
-     Item 2: deleted, offset = 336, tuple = ('(0,3)', '(0,3)')                                              +
-     Item 3: offset = 368, tuple = ('(0,4)', '(0,1)')                                                       +
-     Item 4: offset = 400, tuple = ('(0,5)', '(0,2)')                                                       +
-     Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                       +
-     Item 6: offset = 464, tuple = ('(0,7)', '(0,4)')                                                       +
-                                                                                                            +
- Index toast: not loaded                                                                                    +
+                                            orioledb_tbl_structure                                            
+--------------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                                 +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                         +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                         +
+     Leftmost, Rightmost                                                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                  +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,11)', '1', '1099', '(41,5)', '6', '7', '1099')              +
+     Item 1: offset = 344, tuple = ('(0,2)', '(0,12)', '10', '1090', '(401,50)', '60', '70', '1090')         +
+     Item 2: offset = 424, tuple = ('(0,3)', '(0,13)', '100', '1000', '(4001,500)', '600', '700', '1000')    +
+     Item 3: offset = 504, tuple = ('(0,4)', '(0,14)', '1000', '2000', '(4000,5000)', '6000', '7000', '8000')+
+                                                                                                             +
+ Index index_bridge contents                                                                                 +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                         +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                          +
+     Leftmost, Rightmost                                                                                     +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                  +
+     Item 0: deleted, offset = 288, tuple = ('(0,1)', '(0,1)')                                               +
+     Item 1: deleted, offset = 320, tuple = ('(0,2)', '(0,2)')                                               +
+     Item 2: deleted, offset = 352, tuple = ('(0,3)', '(0,3)')                                               +
+     Item 3: deleted, offset = 384, tuple = ('(0,4)', '(0,1)')                                               +
+     Item 4: deleted, offset = 416, tuple = ('(0,5)', '(0,2)')                                               +
+     Item 5: deleted, offset = 448, tuple = ('(0,6)', '(0,3)')                                               +
+     Item 6: deleted, offset = 480, tuple = ('(0,7)', '(0,1)')                                               +
+     Item 7: deleted, offset = 512, tuple = ('(0,8)', '(0,2)')                                               +
+     Item 8: deleted, offset = 544, tuple = ('(0,9)', '(0,3)')                                               +
+     Item 9: deleted, offset = 576, tuple = ('(0,10)', '(0,4)')                                              +
+     Item 10: offset = 608, tuple = ('(0,11)', '(0,1)')                                                      +
+     Item 11: offset = 640, tuple = ('(0,12)', '(0,2)')                                                      +
+     Item 12: offset = 672, tuple = ('(0,13)', '(0,3)')                                                      +
+     Item 13: offset = 704, tuple = ('(0,14)', '(0,4)')                                                      +
+                                                                                                             +
+ Index toast: not loaded                                                                                     +
  
 (1 row)
 
@@ -1338,32 +1350,39 @@ SELECT *, r IS NULL FROM o_test_ix_ams;
 (4 rows)
 
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
-                                              orioledb_tbl_structure                                               
--------------------------------------------------------------------------------------------------------------------
- Index ctid_primary contents                                                                                      +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                              +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                                              +
-     Leftmost, Rightmost                                                                                          +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                                                       +
-     Item 0: offset = 264, tuple = ('(0,1)', '(0,4)', '1', '1099', '(41,5)', '6', '7', '1099', null)              +
-     Item 1: offset = 344, tuple = ('(0,2)', '(0,5)', '10', '1090', '(401,50)', '60', '70', '1090', null)         +
-     Item 2: offset = 424, tuple = ('(0,3)', '(0,6)', '100', '1000', '(4001,500)', '600', '700', '1000', null)    +
-     Item 3: offset = 504, tuple = ('(0,4)', '(0,7)', '1000', '2000', '(4000,5000)', '6000', '7000', '8000', null)+
-                                                                                                                  +
- Index index_bridge contents                                                                                      +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                              +
- state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                               +
-     Leftmost, Rightmost                                                                                          +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                                                       +
-     Item 0: deleted, offset = 272, tuple = ('(0,1)', '(0,1)')                                                    +
-     Item 1: deleted, offset = 304, tuple = ('(0,2)', '(0,2)')                                                    +
-     Item 2: deleted, offset = 336, tuple = ('(0,3)', '(0,3)')                                                    +
-     Item 3: offset = 368, tuple = ('(0,4)', '(0,1)')                                                             +
-     Item 4: offset = 400, tuple = ('(0,5)', '(0,2)')                                                             +
-     Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                             +
-     Item 6: offset = 464, tuple = ('(0,7)', '(0,4)')                                                             +
-                                                                                                                  +
- Index toast: not loaded                                                                                          +
+                                               orioledb_tbl_structure                                               
+--------------------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                                       +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                               +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                               +
+     Leftmost, Rightmost                                                                                           +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                        +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,11)', '1', '1099', '(41,5)', '6', '7', '1099', null)              +
+     Item 1: offset = 344, tuple = ('(0,2)', '(0,12)', '10', '1090', '(401,50)', '60', '70', '1090', null)         +
+     Item 2: offset = 424, tuple = ('(0,3)', '(0,13)', '100', '1000', '(4001,500)', '600', '700', '1000', null)    +
+     Item 3: offset = 504, tuple = ('(0,4)', '(0,14)', '1000', '2000', '(4000,5000)', '6000', '7000', '8000', null)+
+                                                                                                                   +
+ Index index_bridge contents                                                                                       +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                               +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                                +
+     Leftmost, Rightmost                                                                                           +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                        +
+     Item 0: deleted, offset = 288, tuple = ('(0,1)', '(0,1)')                                                     +
+     Item 1: deleted, offset = 320, tuple = ('(0,2)', '(0,2)')                                                     +
+     Item 2: deleted, offset = 352, tuple = ('(0,3)', '(0,3)')                                                     +
+     Item 3: deleted, offset = 384, tuple = ('(0,4)', '(0,1)')                                                     +
+     Item 4: deleted, offset = 416, tuple = ('(0,5)', '(0,2)')                                                     +
+     Item 5: deleted, offset = 448, tuple = ('(0,6)', '(0,3)')                                                     +
+     Item 6: deleted, offset = 480, tuple = ('(0,7)', '(0,1)')                                                     +
+     Item 7: deleted, offset = 512, tuple = ('(0,8)', '(0,2)')                                                     +
+     Item 8: deleted, offset = 544, tuple = ('(0,9)', '(0,3)')                                                     +
+     Item 9: deleted, offset = 576, tuple = ('(0,10)', '(0,4)')                                                    +
+     Item 10: offset = 608, tuple = ('(0,11)', '(0,1)')                                                            +
+     Item 11: offset = 640, tuple = ('(0,12)', '(0,2)')                                                            +
+     Item 12: offset = 672, tuple = ('(0,13)', '(0,3)')                                                            +
+     Item 13: offset = 704, tuple = ('(0,14)', '(0,4)')                                                            +
+                                                                                                                   +
+ Index toast: not loaded                                                                                           +
  
 (1 row)
 
@@ -1421,32 +1440,43 @@ SELECT orioledb_tbl_indices('o_test_ix_ams'::regclass, true);
 (1 row)
 
 SELECT orioledb_tbl_structure('o_test_ix_ams'::regclass, 'ne');
-                                                orioledb_tbl_structure                                                 
------------------------------------------------------------------------------------------------------------------------
- Index ctid_primary contents                                                                                          +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                                  +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                  +
-     Leftmost, Rightmost                                                                                              +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                                                           +
-     Item 0: offset = 264, tuple = ('(0,1)', '(0,4)', '1', '1099', '(41,5)', '6', '7', '1099', '{7,11}')              +
-     Item 1: offset = 376, tuple = ('(0,2)', '(0,5)', '10', '1090', '(401,50)', '60', '70', '1090', '{70,11}')        +
-     Item 2: offset = 488, tuple = ('(0,3)', '(0,6)', '100', '1000', '(4001,500)', '600', '700', '1000', '{0,11}')    +
-     Item 3: offset = 600, tuple = ('(0,4)', '(0,7)', '1000', '2000', '(4000,5000)', '6000', '7000', '8000', '{0,11}')+
-                                                                                                                      +
- Index index_bridge contents                                                                                          +
- Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                                  +
- state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                                   +
-     Leftmost, Rightmost                                                                                              +
-   Chunk 0: offset = 0, location = 256, hikey location = 64                                                           +
-     Item 0: deleted, offset = 272, tuple = ('(0,1)', '(0,1)')                                                        +
-     Item 1: deleted, offset = 304, tuple = ('(0,2)', '(0,2)')                                                        +
-     Item 2: deleted, offset = 336, tuple = ('(0,3)', '(0,3)')                                                        +
-     Item 3: offset = 368, tuple = ('(0,4)', '(0,1)')                                                                 +
-     Item 4: offset = 400, tuple = ('(0,5)', '(0,2)')                                                                 +
-     Item 5: offset = 432, tuple = ('(0,6)', '(0,3)')                                                                 +
-     Item 6: offset = 464, tuple = ('(0,7)', '(0,4)')                                                                 +
-                                                                                                                      +
- Index toast: not loaded                                                                                              +
+                                                 orioledb_tbl_structure                                                 
+------------------------------------------------------------------------------------------------------------------------
+ Index ctid_primary contents                                                                                           +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                                   +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                   +
+     Leftmost, Rightmost                                                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                            +
+     Item 0: offset = 264, tuple = ('(0,1)', '(0,15)', '1', '1099', '(41,5)', '6', '7', '1099', '{7,11}')              +
+     Item 1: offset = 376, tuple = ('(0,2)', '(0,16)', '10', '1090', '(401,50)', '60', '70', '1090', '{70,11}')        +
+     Item 2: offset = 488, tuple = ('(0,3)', '(0,17)', '100', '1000', '(4001,500)', '600', '700', '1000', '{0,11}')    +
+     Item 3: offset = 600, tuple = ('(0,4)', '(0,18)', '1000', '2000', '(4000,5000)', '6000', '7000', '8000', '{0,11}')+
+                                                                                                                       +
+ Index index_bridge contents                                                                                           +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                                   +
+ state = free, datoid equal, relnode equal, ix_type = bridge, dirty                                                    +
+     Leftmost, Rightmost                                                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                            +
+     Item 0: deleted, offset = 296, tuple = ('(0,1)', '(0,1)')                                                         +
+     Item 1: deleted, offset = 328, tuple = ('(0,2)', '(0,2)')                                                         +
+     Item 2: deleted, offset = 360, tuple = ('(0,3)', '(0,3)')                                                         +
+     Item 3: deleted, offset = 392, tuple = ('(0,4)', '(0,1)')                                                         +
+     Item 4: deleted, offset = 424, tuple = ('(0,5)', '(0,2)')                                                         +
+     Item 5: deleted, offset = 456, tuple = ('(0,6)', '(0,3)')                                                         +
+     Item 6: deleted, offset = 488, tuple = ('(0,7)', '(0,1)')                                                         +
+     Item 7: deleted, offset = 520, tuple = ('(0,8)', '(0,2)')                                                         +
+     Item 8: deleted, offset = 552, tuple = ('(0,9)', '(0,3)')                                                         +
+     Item 9: deleted, offset = 584, tuple = ('(0,10)', '(0,4)')                                                        +
+     Item 10: deleted, offset = 616, tuple = ('(0,11)', '(0,1)')                                                       +
+     Item 11: deleted, offset = 648, tuple = ('(0,12)', '(0,2)')                                                       +
+     Item 12: deleted, offset = 680, tuple = ('(0,13)', '(0,3)')                                                       +
+     Item 13: deleted, offset = 712, tuple = ('(0,14)', '(0,4)')                                                       +
+     Item 14: offset = 744, tuple = ('(0,15)', '(0,1)')                                                                +
+     Item 15: offset = 776, tuple = ('(0,16)', '(0,2)')                                                                +
+     Item 16: offset = 808, tuple = ('(0,17)', '(0,3)')                                                                +
+     Item 17: offset = 840, tuple = ('(0,18)', '(0,4)')                                                                +
+                                                                                                                       +
+ Index toast: not loaded                                                                                               +
  
 (1 row)
 
@@ -1483,12 +1513,12 @@ SELECT * FROM o_test_ix_ams WHERE r @> array[11, 11];
 COMMIT;
 CREATE INDEX o_test_ix_ams_ix4 ON o_test_ix_ams USING gist (p);
 SELECT * FROM gist_index_content('o_test_ix_ams_ix4');
- ctid  |              keys               
--------+---------------------------------
- (0,4) | (p)=("(41,5),(41,5)")
- (0,5) | (p)=("(401,50),(401,50)")
- (0,6) | (p)=("(4001,500),(4001,500)")
- (0,7) | (p)=("(4000,5000),(4000,5000)")
+  ctid  |              keys               
+--------+---------------------------------
+ (0,15) | (p)=("(41,5),(41,5)")
+ (0,16) | (p)=("(401,50),(401,50)")
+ (0,17) | (p)=("(4001,500),(4001,500)")
+ (0,18) | (p)=("(4000,5000),(4000,5000)")
 (4 rows)
 
 BEGIN;
@@ -3839,9 +3869,8 @@ SELECT * FROM o_test_toast_with_bridged ORDER BY id;
   1 | x                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |  10
   2 | xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                           |  78
   3 | 551e8b15be547418fbf590c79023f435b2e9e6ceae7dd8da7c62f0a74071d4ea921eeedc8c29ecd667e57d288b89132c2623411305352849a23a56da226d4c9d21ef536a074f046f121cfc381d2397da977137de1e3462d86105158877c4975784175aeec4328db2ae8afb3f0f3bce90661377912e25ef84d0a444560eb25fb147bc381cef72def876c01d64ec146d17b87df386a61a2c9dbf0cb44dee81268195e54ae668b3b178ac059e71473c20cfe0b4c7b1023aea1573dbd6e7984399f1397f00f2715072061179fb3e62006b0dfd58814826761284aa062be32c3fd46c8100d4c9f64004d64beb67b6c6fb3692065f5aee0a956890cc7b1849c69d893b51f43151bdc541a12575c22c894133d5d47a5557de984ab04b0591d756b48403bf27fc48662612a8f22ca22a9861d4503b8b142c1ac496a6296549aa614019592af9620b3b66699af44b7b9deb7f11f96b0619e1568c15f12870cb3ade059e96ea4bb151e1766ebcda420ec04e064dbc48005dd1872b80dab6e7f68e235f190afbe9a47cac5263df029867f7208de89c61611be4c30be9f9d1aaa6ae473cfca9b6fcdf3f1fb7fced7ed0867e17af95cf1c8e047c33031cf492ea43ea4eea83793941dbf123dc937d7f812decd703033cd6ab43ee51dbcaf8ff51cd779ab4de09fd77037458a73b97a40c3eeafe200e0534e910f4b4b93064b566591b9ca9dc9763067bb5c0e35287d563388ebef687f6c34409b31e8161062fb8d14233ba7ba66e11faab72ef3953cc9ce60eaa92f7ba13f7ad64efd0634bf6eca83840b100749b4d9a57a5e475a97092864bc40da3dee9fca5bc1d6ef7c7ed95fe14edaac5203933a9862d0dd1889d01359e8980041d9f081f323e08808606de0d3e7158be1e69e3e638352fa8e796a5e625f30248d948117c6dcd75037475e23fb96dee84346752ea74dcb9de7e99244e2f710f111e2ea824327f4cfebc203a2c2b9355c01d5ec20a0a4c52f9d7de117ff94a1e49fc5216af072c09453ac394d4a8f47dd03906c91dc358bb3320566b242fbc02662d59b36408528033ed00afcb00894f8302d4dc0cb839f76ad1f9cb0d2ba2ed3c87c623839ceee2113c9861862a15c842d351d12be0a41ddcf0e68cd3dc10ccacf8b7dfa11a76fcca96bcc5226f10c96bdaf1cdb88c4ead866290ea2046de4e17ebe43f09a47aef6bf1d444c6f370a4acff9eedbd895a6990d9573c96d220dec156bfdf3da928305509de856d842bd0d3e966c27f87164a1872fa8fe299412ec3d8bc37a2eaaa63bd48d1d2db931140483a09291a98fa3c5ccf4ac2ad4984fb7468a686fa65d77dfb0280ab660fd38c8c734ec1fd475cddaac21d028cade401b7a53aa04ffe813c9f983810a3bf66c9e47981ee07694374f48f7adfe2edd665a1dc04c12cc4180c9fdf45240a4b5b1c28353d1dbae63434b7bf4e816e06473aa159da5ef179ea6f2c0b5ae4488d16e6423092e31b516bb2c042c1407c53da28f81884409c4d1880c2cd9d314232ba34a465934096a821f11e33ac1e692628b6e2ef0cceb8b6064a36ffcbc7d9ae1e18c423292db5066666f9b1fa03e6995d160fbee71584374770a017166a71582d9f372292b797c383cd99b5d336b75a1c5776fe27ec81926b4394214a1a0a529280625bf25c4c7b2e4fbe70dda95cfe9c176ff82a29369c977578f9c29735e64d7457371839171406b4f642066c7cbc9c45f9f8f7055e28d51ebfdfb5a71c689808a426d9f2361bb76b7b871dbce69e2a65b80b761c4e09f18ef82ec60efe1ac70f2f98f8fad8875d07e25f4060f564d17bfc437d405b766a888a05b4a7bf94c5679d76cb73fca979dfd05acc9aa8add0c573fefe39a550aab81d9af360323ee3bf101ce0 |  66
-  4 | e2af2ac479786b8ca94a7185f2a92edbb31672ea96b21c03eeb4a4fb569c90f279a77410296881ddd54da7bf5ef6960d00c76ccaa803d01846d73bb7d889187a07ce24690400c26de1a5dd16cf491b05e0bce7b5cfbea359d0d79fb8d4c8dce0ec8fdb80448974cbf3a1756c3944d0479c3358e15971561ff0f548b5a45e109bb59f0927e2b3c59b18515fc95e713ad60b677ef9c8e698b458df3764f91f946cab980b40d0de84c93f9436046a336525a76d8ed656277d0355d9891438a4d316bceefa8bb09baadc5becacf1a1703eab465a0dbfc3c2516c5e91faf904a6a228f6e6a2424c357d235a3964318f17ae94981cf9c2d35ed957190305d76d242bf34bb0d256be98a3f3d770594dcb1e8f003b08ddef685ca3958b7865cfdb33d3a09a8dac5ad603ae15925049f21236f9a223cd9ad67b9cbcaa7eee47fe09011dc30d7d312ea4967ad76d5d0e8513a3751e1652d0949fa852c0ef62bcfeadcd9d8dfac4c9f26740177b77f17b02a2dbd42f139b7922e32c019c4a0f0cff9c6a54c24c57cfebc5231433c31828bff5cd6b1f55ffca7de7a212fb701cff40f46dc5f82a67d579d6ee74ccbaf9038b1d8301b79770f37b0897b8747d82e80438b888eea4ff7081731b943a5f6d89c62b5d74d89c54c9070e021d582ee1a73cbd2c1d06acfee51d21f508978e0908fe43a590ed48dfc0bcf15b56c4f6310d6926f84121328c99e26f62e9dbadcb25f3b98a71b4cb73c569b68f1f2e6d5ba0522dde05d2a7e879a1ea5164222b05654be981633fb4ba67dce7975f20c0b5ee06fec6e503c12361c1a6eadb5a55520c4ddb61580e70369654ac78a0cc5c1d7d18212d3383e92041217424be9bfd240f09b9e39d91a26af74f441c5cc7242c6ca80f79099b40e594343297c27d3258ad93c88d680e407db9df682b64efc4ef11ad75f45509752a69a1388759e317a651be0fc4ca39ecad8d3060e3d11246beb942586a51befce58ad3cb161d5ee7b555ed57fd9ea8b289eff11bccb2a8fd0639944cd762ffa1cc5fb6e394f3b7f5b6ec8bc28a02f11c79dce2b5a0fe651df8594219f2b8352118a9492e4374c04c836981b39c3f457b9242f2d5d3802e8e9f9ac5921ffe8af8072385133014af34ffd10ee623cdd0f9ebf895bdba3cfb90931cc5e0c870fe65efeea6f2bcf77f9be5da02097696e840a4833e0b94c7a3fc6572f03c24c6d603f071e7f31cdb6c72d9c722d05998f1947ad1d0ce970d89dd8955de97def5b36b86b0f1f8380ae998a6051549d3ce46687b943ac1f248521d701af26895ae681e7db37cf32385c109d7804b2d7d7f1b07151d8954780af6cb7114c73fd7025d3563a3e43267b79a62a0291d567c92508afc748d586e2d5e170cca557ebad337cd06fb783895f24182b9b4c76389a4cd0143b2118be0212aa607d3330539078d1affbecce62d7a813b70cf18cddf256d6221565a6c885ac6d8d02aabeb853708118d0ab55a74908e10f732b53b98410a096acfee7c5a7d751e9efe561418bc5c0e362333b1de34f032a524aaaf696abdb4c28220414e7c7fbc8fa44a2c62d2f8e78faee4061466847fa348cbb414e734e812ee487f0ab4e9a734999cf2006bb8b4f240067d11093b1c9f9898c3a8501b8ef432a655e9a44848ee4a647d8f6b97f8d7e6b787bd645b65b8385715a9d723d2da33d4ee6c77c25f4fecdd72f6e376add1dc0d531c010915aef51ac842a1616bacfe9fd6c9c401a55d71f85a685f5a52dc86055e8b16b674e96c1576019c3a8c1bd71d3a1e1c70dab612b14d5fd5b1277cc4e4f7ec7eb1fafa1a0b28d1a6c9727886503047f7301c87946fe13a0392e6112f0d2b448f2e15568dfcffc544bd33abd997789164d363f64ba2b0eadb8496 |  56
   5 | a9a8d7170b9ee2c655e43ad9a5c5fb1bc135d8cb879d41a1d48dbe9766befe3015ad051bab9daab2d0b92eddabf93b63764cd5899f9f5e9eef1389d27209dd66a207f819b23ff90dc3d15cbad3a3e8994e01761c26ec8abdd1d8449d2c90685ddd434ab20cded902a94dc877db0c695492c97571e19ffd7041c364304ee9c87032564c0aed3bee4d253460c6253e1203ca5107aa4ddd98502fc311688150ca084820e879772fc8a3b32e6e521b3b3d0878f9a2ed2d3f459c37638ff72b4b46196e4cc7be2a7eb9eff8f0d1ac8d3f452e34497bdb2cff4cb1f42efed87c2e1aa1fdf8e61ac10b407103bf4ab1c58a9e15f2445759ef4b0af89796643837e8e9f48205cfc1aec8529ace6d7f1ccefd8802dd24139704e6fe6784c37682817f86d4a2c187abf0c70afd57dcc6813456c9fd8edb177a36e36b83b2852334ce5c04a55da155c6481d454da732f99a6692a78110825fdda799a10e2560bc3fa7e4be22767bbf936999afa8395e10e118b32cb66d045e12944045ad394c45268e16ec39b80a21b7db0c66c8ae78786eaeedc09bd77053d9d94e914f146862e61d9f3f45b5804ec5c94b1728ff80152601c82070c9e8edb48be65e47ca8af63cfb68a687dba57dbdcc7421329c5e7700e6d36f6ebe1a6f076e3189d3bc7198e96714938904e19f44fb0622f9b7b5a98d264166aa06b1b45422893d84a1b49c2c12133634ba302b03dc0665bd326639c7f7d835e2c2917fbf9353e868d6e3a1cf3edb9b9908b52d1d506b5259cfa44baf338a7a8882fc05d67c370fbf3ed55b8d574c0978dbc31bb940f0480c1d1de7efef9dd092a4c73686bb4d2c5840c85aa43daa4121c67b18959d0a2d6a382ffc43582730f1db59e42a07aeac7ba801ef26d4e46f4412045ba724c1b008963db6423e1687ab092312bc116d7d6c872a0ac8f9fd0ee8d9152d50af0f890c74e56d45e4f6360e54feed900b76252bdd43e8e139f954109f1f952333d9627e26adbe5aa7a92f0acf687490d042c0c25b59896fdd728de7cdcf679857bf934ccde276f9a8deec755aba153c3573c6dcfdd6feecfc825791459c5bb65a204504930cd2409e6d66037fad6269d7384ed4db305b0a6241664203ddecdcb09e13e1564de9e41f60723f249bbbe1f24d213cb69a7ab4ea677bdd14693db986d43b82a78c1edf2a09f224c74c4e874125ab0999a109565da6716f9622750a13bc5685db4dcd4a902c351491c279b3af0e538714e3cc373dac7632880eaa7f7b97a7622f991469839bffe7047f98b0db5f5de336d3dfedfcfbcb3a804eb8df0e5d8bee2c14d409ba3d0dfea221006590d0b494e204393e44cb650c2aee1aed0edeafdb2a4a16f136e1ee239891d962296a2c1049ffc64ff5fd3fddfcf04c9b346563b4c1dd2c2594cedff54ba2173e9a500c4e8c5830b8d1aa56bc0cb6b264a5889150bd7d8dcad23f8f66401019440236e812c68c0adc2b9347e4df717bbc7bd3a39ec5e53cef4ccfae1b4d8034a6d48d823a9d8c6ea4e5126e10d3f9909a0301ddf4905d3f8f65bccca810dcf2452cf63b80fbe6878ba2978bcadf5f6ce1223c177bd9df584f2115a933fae6d345d7e550477daeb318845c2cd80d671c117b4cc87e29ebaf918ef875243587c98605620575845cfc0bdc9334ed930ab1e3879771bfdb81f1d9232ddaa78216175296e4a5af4fd67093d5e25aaf42a210c69d34716d5ebe6de1ff6bdcbd6248913b095d862a960c82d34153dd9a885f975291c3336069a1da64ba8e7fe4d3c4fa8f402ad52c0cc4897056023107f0e02c8935d00adebee183b9b6482a2c0ab9651b3ef83754ff166fe89d358c4a10693ba3fe8009117b31d94c8c113fcc34a5a57252120708a1ff364572f6a8ff08 |  12
-(5 rows)
+(4 rows)
 
 COMMIT;
 DELETE FROM o_test_toast_with_bridged WHERE id BETWEEN 2 AND 4;
@@ -4209,6 +4238,65 @@ SELECT data2 from test_no_bmscan_on_text_pkey where data2 = 'barbar';
  barbar
 (1 row)
 
+CREATE TEMP TABLE hash_i4_test_table_with_pk (
+    seqno   int4 PRIMARY KEY,
+    random  int4
+) USING orioledb;
+INSERT INTO hash_i4_test_table_with_pk (seqno, random) VALUES
+    (1, 1001),
+    (2, 1002),
+    (3, 1003),
+    (4, 1004),
+    (5, 1005);
+CREATE INDEX hash_i4_index ON hash_i4_test_table_with_pk USING hash (random int4_ops);
+NOTICE:  index bridging is enabled for orioledb table 'hash_i4_test_table_with_pk'
+DETAIL:  index access method 'hash' is supported only via index bridging for OrioleDB table
+UPDATE hash_i4_test_table_with_pk SET seqno = 2000 WHERE random = 1004;
+SET enable_seqscan = OFF;
+EXPLAIN SELECT h.seqno FROM hash_i4_test_table_with_pk h WHERE h.random = 1004;
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Index Scan using hash_i4_index on hash_i4_test_table_with_pk h  (cost=0.00..8.02 rows=1 width=4)
+   Index Cond: (random = 1004)
+(2 rows)
+
+SELECT h.seqno FROM hash_i4_test_table_with_pk h WHERE h.random = 1004;
+ seqno 
+-------
+  2000
+(1 row)
+
+SET enable_seqscan = ON;
+DROP table hash_i4_test_table_with_pk;
+CREATE TEMP TABLE gin_test_table_with_pk (
+    id   serial PRIMARY KEY,
+    tags int4[]
+) USING orioledb;
+INSERT INTO gin_test_table_with_pk (id, tags) VALUES
+	(411, '{802, 654}'::int[]),
+	(412, '{814, 738}'::int[]);
+CREATE INDEX idx_gin_tags ON gin_test_table_with_pk USING gin (tags);
+NOTICE:  index bridging is enabled for orioledb table 'gin_test_table_with_pk'
+DETAIL:  index access method 'gin' is supported only via index bridging for OrioleDB table
+UPDATE gin_test_table_with_pk SET id = 20000 WHERE tags @> '{814}';
+SET enable_seqscan = OFF;
+EXPLAIN SELECT id, tags FROM gin_test_table_with_pk WHERE tags @> '{814}';
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on gin_test_table_with_pk  (cost=12.77..16.78 rows=1 width=36)
+   Bitmap heap scan
+   Recheck Cond: (tags @> '{814}'::integer[])
+   ->  Bitmap Index Scan on idx_gin_tags  (cost=0.00..12.77 rows=1 width=0)
+         Index Cond: (tags @> '{814}'::integer[])
+(5 rows)
+
+SELECT id, tags FROM gin_test_table_with_pk WHERE tags @> '{814}';
+  id   |   tags    
+-------+-----------
+ 20000 | {814,738}
+(1 row)
+
+DROP table gin_test_table_with_pk;
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 14 other objects
