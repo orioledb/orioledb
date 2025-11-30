@@ -1019,6 +1019,14 @@ COMMIT;
 
 DROP TABLE o_test_1;
 
+-- Check slots' compatibility
+CREATE TABLE o_test_1 (i int, t text) USING orioledb;
+CREATE TABLE o_test_2 (i int, t text, PRIMARY KEY (i, t)) USING orioledb;
+INSERT INTO o_test_2 VALUES (1, 't');
+INSERT INTO o_test_1 (SELECT * FROM o_test_2);
+DROP TABLE o_test_1;
+DROP TABLE o_test_2;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA tableam CASCADE;
 RESET search_path;

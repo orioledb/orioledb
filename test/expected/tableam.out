@@ -4875,6 +4875,13 @@ ERROR:  cursor can only scan forward
 HINT:  Declare it with SCROLL option to enable backward scan.
 COMMIT;
 DROP TABLE o_test_1;
+-- Check slots' compatibility
+CREATE TABLE o_test_1 (i int, t text) USING orioledb;
+CREATE TABLE o_test_2 (i int, t text, PRIMARY KEY (i, t)) USING orioledb;
+INSERT INTO o_test_2 VALUES (1, 't');
+INSERT INTO o_test_1 (SELECT * FROM o_test_2);
+DROP TABLE o_test_1;
+DROP TABLE o_test_2;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 17 other objects
 DETAIL:  drop cascades to table o_tableam6
