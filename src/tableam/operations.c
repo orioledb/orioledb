@@ -293,6 +293,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		(((OTableSlot *) slot)->descr != NULL &&
 		 ((OTableSlot *) slot)->descr != descr))
 	{
+		((OTableSlot *) descr->newTuple)->descr = descr;
 		ExecCopySlot(descr->newTuple, slot);
 		slot = descr->newTuple;
 	}
