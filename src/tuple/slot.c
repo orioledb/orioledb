@@ -721,13 +721,14 @@ tts_orioledb_copyslot(TupleTableSlot *dstslot, TupleTableSlot *srcslot)
 	OTableSlot *dstoslot = (OTableSlot *) dstslot;
 
 	Assert(srcdesc->natts <= dstslot->tts_tupleDescriptor->natts);
-	tts_orioledb_clear(dstslot);
 
 	if (srcslot->tts_ops == &TTSOpsOrioleDB &&
-		((OTableSlot *) srcslot)->descr == dstoslot->descr)
+		(((OTableSlot *) srcslot)->descr == dstoslot->descr ||
+		 ((OTableSlot *) dstslot)->descr == NULL))
 	{
 		OTableSlot *srcoslot = (OTableSlot *) srcslot;
 
+		tts_orioledb_clear(dstslot);
 		dstoslot->version = srcoslot->version;
 		if (!O_TUPLE_IS_NULL(srcoslot->tuple))
 		{
@@ -757,6 +758,7 @@ tts_orioledb_copyslot(TupleTableSlot *dstslot, TupleTableSlot *srcslot)
 		}
 	}
 
+	tts_orioledb_clear(dstslot);
 	slot_getallattrs(srcslot);
 
 	for (int natt = 0; natt < srcdesc->natts; natt++)
