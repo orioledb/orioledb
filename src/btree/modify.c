@@ -1059,7 +1059,8 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 
 static bool
 page_unique_check(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
-				  Pointer key, OXid opOxid, OTupleXactInfo *xactInfo)
+				  Pointer key, OXid opOxid, OTupleXactInfo *xactInfo,
+				  IndexUniqueCheck checkUnique)
 {
 	(void) page_locator_find_real_item(p, NULL, locator);
 
@@ -1075,6 +1076,16 @@ page_unique_check(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 						  key, BTreeKeyUniqueUpperBound);
 		if (cmp > 0)
 			return false;
+		else if (cmp < 0 && checkUnique == UNIQUE_CHECK_EXISTING)
+		{
+			cmp = o_btree_cmp(desc, &tuple, BTreeKeyLeafTuple,
+							  key, BTreeKeyBound);
+			if (cmp == 0)
+			{
+				BTREE_PAGE_LOCATOR_NEXT(p, locator);
+				continue;
+			}
+		}
 
 		tuphdr = *pageTuphdr;
 		(void) find_non_lock_only_undo_record(desc->undoType, &tuphdr);
@@ -1097,7 +1108,8 @@ page_unique_check(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 
 static bool
 slowpath_unique_check(BTreeDescr *desc, OBTreeFindPageContext *pageFindContext,
-					  Pointer key, OXid opOxid, OTupleXactInfo *xactInfo)
+					  Pointer key, OXid opOxid, OTupleXactInfo *xactInfo,
+					  IndexUniqueCheck checkUnique)
 {
 	Page		p;
 	OFixedKey	hikey_buf;
@@ -1113,7 +1125,7 @@ slowpath_unique_check(BTreeDescr *desc, OBTreeFindPageContext *pageFindContext,
 		OTuple		hikey;
 
 		if (page_unique_check(desc, p, &pageFindContext->items[pageFindContext->index].locator,
-							  key, opOxid, xactInfo))
+							  key, opOxid, xactInfo, checkUnique))
 			return true;
 
 		if (O_PAGE_IS(p, RIGHTMOST))
@@ -1144,7 +1156,8 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 					  Pointer key, BTreeKeyType keyType,
 					  OXid opOxid, CommitSeqNo opCsn,
 					  RowLockMode lockMode, BTreeLocationHint *hint,
-					  BTreeModifyCallbackInfo *callbackInfo)
+					  BTreeModifyCallbackInfo *callbackInfo,
+					  IndexUniqueCheck checkUnique)
 {
 	OBTreeFindPageContext pageFindContext;
 	int			pageReserveKind;
@@ -1153,9 +1166,10 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 	OInMemoryBlkno blkno;
 	uint32		pageChangeCount;
 	LWLock	   *uniqueLock;
-	OBTreeModifyResult result;
+	OBTreeModifyResult result = 456;
 	Jsonb	   *params = NULL;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
+	bool		found_but_insert;
 
 	if (STOPEVENTS_ENABLED())
 		params = prepare_modify_start_params(desc);
@@ -1190,6 +1204,7 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 retry:
 
 	fastpath = false;
+	found_but_insert = false;
 	blkno = pageFindContext.items[pageFindContext.index].blkno;
 	pageChangeCount = pageFindContext.items[pageFindContext.index].pageChangeCount;
 	p = O_GET_IN_MEMORY_PAGE(blkno);
@@ -1228,10 +1243,11 @@ retry:
 	 */
 	if (fastpath && LWLockConditionalAcquire(uniqueLock, LW_EXCLUSIVE))
 	{
-		OTupleXactInfo xactInfo;
+		OTupleXactInfo	xactInfo;
+		bool			refind = false;
 
 		if (page_unique_check(desc, p, &pageFindContext.items[pageFindContext.index].locator,
-							  key, opOxid, &xactInfo))
+							  key, opOxid, &xactInfo, checkUnique))
 		{
 			OTuple		curTuple;
 			BTreeLocationHint cbHint = {pageFindContext.items[pageFindContext.index].blkno, pageFindContext.items[pageFindContext.index].pageChangeCount};
@@ -1256,9 +1272,17 @@ retry:
 					 */
 					Assert(cbAction == OBTreeCallbackActionDoNothing);
 				}
-				unlock_page(blkno);
-				LWLockRelease(uniqueLock);
-				return OBTreeModifyResultFound;
+				if (checkUnique == UNIQUE_CHECK_YES)
+				{
+					unlock_page(blkno);
+					LWLockRelease(uniqueLock);
+					return OBTreeModifyResultFound;
+				}
+				else
+				{
+					found_but_insert = true;
+					refind = true;
+				}
 			}
 			else
 			{
@@ -1274,8 +1298,16 @@ retry:
 					Assert(cbAction != OBTreeCallbackActionXidNoWait);
 					if (cbAction == OBTreeCallbackActionXidExit)
 					{
-						unlock_page(blkno);
-						return OBTreeModifyResultFound;
+						if (checkUnique == UNIQUE_CHECK_YES)
+						{
+							unlock_page(blkno);
+							return OBTreeModifyResultFound;
+						}
+						else
+						{
+							found_but_insert = true;
+							refind = true;
+						}
 					}
 				}
 				unlock_page(blkno);
@@ -1288,6 +1320,9 @@ retry:
 			}
 		}
 		else
+			refind = true;
+
+		if (refind)
 		{
 			/*
 			 * We've to find approprivate offset for the new tuple.  It should
@@ -1300,7 +1335,8 @@ retry:
 	}
 	else
 	{
-		OTupleXactInfo xactInfo;
+		OTupleXactInfo	xactInfo;
+		bool			refind = false;
 
 		/*
 		 * Evade deadlock: unlock the page before taking an unique lwlock.
@@ -1310,7 +1346,7 @@ retry:
 		LWLockAcquire(uniqueLock, LW_EXCLUSIVE);
 
 		if (slowpath_unique_check(desc, &pageFindContext, key,
-								  opOxid, &xactInfo))
+								  opOxid, &xactInfo, checkUnique))
 		{
 			BTreePageItemLocator *loc = &pageFindContext.items[pageFindContext.index].locator;
 			OTuple		curTuple;
@@ -1337,7 +1373,13 @@ retry:
 					Assert(cbAction == OBTreeCallbackActionDoNothing);
 				}
 				LWLockRelease(uniqueLock);
-				return OBTreeModifyResultFound;
+				if (checkUnique == UNIQUE_CHECK_YES)
+					return OBTreeModifyResultFound;
+				else
+				{
+					found_but_insert = true;
+					refind = true;
+				}
 			}
 			else
 			{
@@ -1353,7 +1395,15 @@ retry:
 														  xactInfo, &lockMode, &cbHint, callbackInfo->arg);
 					Assert(cbAction != OBTreeCallbackActionXidNoWait);
 					if (cbAction == OBTreeCallbackActionXidExit)
-						return OBTreeModifyResultFound;
+					{
+						if (checkUnique == UNIQUE_CHECK_YES)
+							return OBTreeModifyResultFound;
+						else
+						{
+							found_but_insert = true;
+							refind = true;
+						}
+					}
 				}
 				wait_for_oxid(XACT_INFO_GET_OXID(xactInfo), false);
 				BTREE_PAGE_FIND_SET(&pageFindContext, MODIFY);
@@ -1365,6 +1415,9 @@ retry:
 			}
 		}
 		else
+			refind = true;
+
+		if (refind)
 		{
 			BTREE_PAGE_FIND_SET(&pageFindContext, MODIFY);
 			findResult = find_page(&pageFindContext, key, BTreeKeyBound, 0);
@@ -1372,11 +1425,21 @@ retry:
 		}
 	}
 
-	result = o_btree_modify_internal(&pageFindContext, BTreeOperationInsert,
-									 tuple, tupleType, key,
-									 keyType, opOxid, opCsn, lockMode,
-									 BTreeLeafTupleNonDeleted, pageReserveKind,
-									 callbackInfo);
+	if (checkUnique != UNIQUE_CHECK_EXISTING)
+	{
+		result = o_btree_modify_internal(&pageFindContext, BTreeOperationInsert,
+										 tuple, tupleType, key,
+										 keyType, opOxid, opCsn, lockMode,
+										 BTreeLeafTupleNonDeleted, pageReserveKind,
+										 callbackInfo);
+	}
+	else
+	{
+		unlock_page(blkno);
+		result = found_but_insert ? OBTreeModifyResultFound : OBTreeModifyResultNotFound;
+	}
+	if (result == OBTreeModifyResultInserted && found_but_insert)
+		result = OBTreeModifyResultFound;
 
 	LWLockRelease(uniqueLock);
 	return result;

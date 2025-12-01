@@ -1751,6 +1751,12 @@ undo_xact_callback(XactEvent event, void *arg)
 				oxid_needs_wal_flush = false;
 				minParentSubId = InvalidSubTransactionId;
 
+				/*
+				 * TODO: Find a better place or add a hook at the end of
+				 * heap_truncate_one_rel
+				 */
+				in_nontransactional_truncate = false;
+
 				break;
 
 			case XACT_EVENT_ABORT:
@@ -1769,6 +1775,12 @@ undo_xact_callback(XactEvent event, void *arg)
 				current_oxid_abort();
 				set_oxid_xlog_ptr(oxid, InvalidXLogRecPtr);
 				oxid_needs_wal_flush = false;
+
+				/*
+				 * TODO: Find a better place or add a hook at the end of
+				 * heap_truncate_one_rel
+				 */
+				in_nontransactional_truncate = false;
 
 				/*
 				 * Remove registered snapshot one-by-one, so that we can avoid

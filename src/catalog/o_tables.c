@@ -342,6 +342,7 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 	Datum		datum;
 	oidvector  *indclass;
 	bool		isnull;
+	int			i;
 
 	if (index->index_mctx)
 	{
@@ -358,6 +359,7 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 		index->nexprfields = list_length(index_rel->rd_indexprs);
 		index->exprfields = palloc0(index->nexprfields * sizeof(OTableField));
 	}
+	index->immediate = index_rel->rd_index->indimmediate;
 	index->predicate = (List *)
 		expression_planner((Expr *) index_rel->rd_indpred);
 	if (index->predicate)
@@ -377,6 +379,22 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 		index->expressions = lappend(index->expressions, node);
 	}
 	o_collect_funcexpr((Node *) index->expressions);
+	if (index->type == oIndexExclusion)
+	{
+		Oid		   *op_operators,
+				   *op_procs;
+		uint16	   *op_strats;
+
+		Assert(index_rel->rd_index->indisexclusion);
+		RelationGetExclusionInfo(index_rel, &op_operators, &op_procs, &op_strats);
+
+		index->exclops = palloc0(index->nkeyfields * sizeof(Oid));
+		for (i = 0; i < index->nkeyfields; i++)
+		{
+			index->exclops[i] = index_rel->rd_exclops[i];
+			o_collect_op_by_oid(index->exclops[i]);
+		}
+	}
 	MemoryContextSwitchTo(old_mcxt);
 
 	/* Must get indclass the hard way */
@@ -1677,6 +1695,9 @@ serialize_o_table_index(OTableIndex *o_table_index, StringInfo str)
 		o_serialize_string(o_table_index->predicate_str, str);
 	o_serialize_node((Node *) o_table_index->expressions, str);
 	appendBinaryStringInfo(str, (Pointer) &o_table_index->tablespace, sizeof(Oid));
+	if (o_table_index->type == oIndexExclusion)
+		appendBinaryStringInfo(str, (Pointer) o_table_index->exclops, sizeof(Oid) * o_table_index->nkeyfields);
+	appendBinaryStringInfo(str, &o_table_index->immediate, sizeof(bool));
 }
 
 Pointer
@@ -1725,7 +1746,7 @@ serialize_o_table(OTable *o_table, int *size)
 }
 
 static void
-deserialize_o_table_index(OTableIndex *o_table_index, Pointer *ptr)
+deserialize_o_table_index(OTableIndex *o_table_index, Pointer *ptr, uint16 data_version)
 {
 	int			len;
 	MemoryContext mcxt,
@@ -1752,6 +1773,23 @@ deserialize_o_table_index(OTableIndex *o_table_index, Pointer *ptr)
 	memcpy(&o_table_index->tablespace, *ptr, len);
 	*ptr += len;
 
+	if (data_version >= 3 && o_table_index->type == oIndexExclusion)
+	{
+		len = sizeof(Oid) * o_table_index->nkeyfields;
+		o_table_index->exclops = (Oid *) palloc0(len);
+		memcpy(o_table_index->exclops, *ptr, len);
+		*ptr += len;
+	}
+	else
+		o_table_index->exclops = NULL;
+	if (data_version >= 3)
+	{
+		len = sizeof(bool);
+		memcpy(&o_table_index->immediate, *ptr, len);
+		*ptr += len;
+	}
+	else
+		o_table_index->immediate = true;
 	MemoryContextSwitchTo(old_mcxt);
 }
 
@@ -1778,7 +1816,7 @@ deserialize_o_table(Pointer data, Size length)
 	o_table->indices = (OTableIndex *) palloc0(len);
 	for (i = 0; i < o_table->nindices; i++)
 	{
-		deserialize_o_table_index(&o_table->indices[i], &ptr);
+		deserialize_o_table_index(&o_table->indices[i], &ptr, o_table->data_version);
 	}
 	Assert((ptr - data) <= length);
 
