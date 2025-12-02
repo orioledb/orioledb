@@ -1661,9 +1661,17 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 		old_idx_tup = tts_orioledb_make_key(oldSlot, descr);
 		o_tuple_set_version(&primary->nonLeafSpec, &old_idx_tup,
 							o_tuple_get_version(idx_tup));
-		/* old_idx_tup and idx_tup are equal */
-		Assert(o_tuple_size(old_idx_tup, &primary->nonLeafSpec) ==
-			   o_tuple_size(idx_tup, &primary->nonLeafSpec));
+
+		/*
+		 * old_idx_tup and idx_tup are equal using comparator, but some
+		 * collations could consider equal tuples of different sizes. E.g.
+		 * when we update tuple on logical subscriber key could be equal in a
+		 * subscriber collation, but size of old and new keys could be
+		 * different. (see PG test src/test/subscription/012_collation.pl)
+		 *
+		 * So we refrain from checking size equality here.
+		 */
+
 		Assert(old_idx_tup.formatFlags == idx_tup.formatFlags);
 
 		/*
