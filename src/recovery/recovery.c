@@ -3111,7 +3111,9 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		}
 		else if (rec_type == WAL_REC_RELREPLIDENT)
 		{
-			ptr = wal_parse_rec_relreplident(ptr, &relreplident, NULL);
+			Oid			relreplident_ix_oid;	/* Unused yet */
+
+			ptr = wal_parse_rec_relreplident(ptr, &relreplident, &relreplident_ix_oid);
 		}
 		else if (rec_type == WAL_REC_O_TABLES_META_LOCK)
 		{
