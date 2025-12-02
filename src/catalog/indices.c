@@ -38,6 +38,7 @@
 #include "access/genam.h"
 #include "access/relation.h"
 #include "access/table.h"
+#include "access/xact.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/namespace.h"
@@ -56,6 +57,8 @@
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
 #include "utils/tuplesort.h"
+#include "optimizer/plancat.h"
+#include "optimizer/paths.h"
 
 /* copied from nbtsort.c with modifications*/
 
@@ -1370,6 +1373,77 @@ build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDescr *idx,
 	free_btree_seq_scan(sscan);
 }
 
+/*
+ * Simplified version of compute_parallel_worker, without RelOptInfo parameter.
+ */
+static int
+o_compute_parallel_worker(double table_pages, double index_pages,
+						  int max_workers)
+{
+	int			parallel_workers = 0;
+
+	/*
+	 * If the number of pages being scanned is insufficient to justify a
+	 * parallel scan, just return zero ... unless it's an inheritance child.
+	 * In that case, we want to generate a parallel path here anyway.  It
+	 * might not be worthwhile just for this relation, but when combined with
+	 * all of its inheritance siblings it may well pay off.
+	 */
+	if ((table_pages >= 0 && table_pages < min_parallel_table_scan_size) ||
+		(index_pages >= 0 && index_pages < min_parallel_index_scan_size))
+		return 0;
+
+	if (table_pages >= 0)
+	{
+		int			heap_parallel_threshold;
+		int			heap_parallel_workers = 1;
+
+		/*
+		 * Select the number of workers based on the log of the size of the
+		 * relation.  This probably needs to be a good deal more
+		 * sophisticated, but we need something here for now.  Note that the
+		 * upper limit of the min_parallel_table_scan_size GUC is chosen to
+		 * prevent overflow here.
+		 */
+		heap_parallel_threshold = Max(min_parallel_table_scan_size, 1);
+		while (table_pages >= (BlockNumber) (heap_parallel_threshold * 3))
+		{
+			heap_parallel_workers++;
+			heap_parallel_threshold *= 3;
+			if (heap_parallel_threshold > INT_MAX / 3)
+				break;			/* avoid overflow */
+		}
+
+		parallel_workers = heap_parallel_workers;
+	}
+
+	if (index_pages >= 0)
+	{
+		int			index_parallel_workers = 1;
+		int			index_parallel_threshold;
+
+		/* same calculation as for heap_pages above */
+		index_parallel_threshold = Max(min_parallel_index_scan_size, 1);
+		while (index_pages >= (BlockNumber) (index_parallel_threshold * 3))
+		{
+			index_parallel_workers++;
+			index_parallel_threshold *= 3;
+			if (index_parallel_threshold > INT_MAX / 3)
+				break;			/* avoid overflow */
+		}
+
+		if (parallel_workers > 0)
+			parallel_workers = Min(parallel_workers, index_parallel_workers);
+		else
+			parallel_workers = index_parallel_workers;
+	}
+
+	/* In no case use more than caller supplied maximum number of workers */
+	parallel_workers = Min(parallel_workers, max_workers);
+
+	return parallel_workers;
+}
+
 void
 build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 					  bool in_dedicated_recovery_worker, bool set_tablespace,
@@ -1389,13 +1463,47 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	double	   *index_tuples;
 	OIndexDescr *idx;
 
+	Relation	rel;
+	int			parallel_workers;
+	BlockNumber table_blocks;
+	double		reltuples;
+	double		allvisfrac;
+
 	index_tuples = palloc0(sizeof(double));
 	ctid = 1;
 	idx = descr->indices[o_table->has_primary ? ix_num : ix_num + 1];
 	buildstate.btleader = NULL;
 
+	/* If we are inside transaction - compute number of parallel workers, */
+	/* else fallback to maximum */
+	if (IsTransactionState())
+	{
+		rel = table_open(descr->oids.reloid, NoLock);
+		estimate_rel_size(rel, NULL, &table_blocks, &reltuples, &allvisfrac);
+		parallel_workers = o_compute_parallel_worker(table_blocks, -1, max_parallel_maintenance_workers);
+
+		/*
+		 * Cap workers based on available maintenance_work_mem as needed.
+		 *
+		 * Note that each tuplesort participant receives an even share of the
+		 * total maintenance_work_mem budget.  Aim to leave participants
+		 * (including the leader as a participant) with no less than 32MB of
+		 * memory.  This leaves cases where maintenance_work_mem is set to
+		 * 64MB immediately past the threshold of being capable of launching a
+		 * single parallel worker to sort.
+		 */
+		while (parallel_workers > 0 &&
+			   maintenance_work_mem / (parallel_workers + 1) < 32768L)
+			parallel_workers--;
+		table_close(rel, NoLock);
+	}
+	else
+	{
+		parallel_workers = max_parallel_maintenance_workers;
+	}
+
 	/* Attempt to launch parallel worker scan when required */
-	if (in_dedicated_recovery_worker || (ActiveSnapshotSet() && max_parallel_maintenance_workers > 0))
+	if (in_dedicated_recovery_worker || (ActiveSnapshotSet() && parallel_workers > 0))
 	{
 		btspool = (oIdxSpool *) palloc0(sizeof(oIdxSpool));
 		btspool->o_table = o_table;
@@ -1406,7 +1514,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 		buildstate.spool = btspool;
 		buildstate.isrebuild = false;
 
-		_o_index_begin_parallel(&buildstate, false, max_parallel_maintenance_workers);
+		_o_index_begin_parallel(&buildstate, false, parallel_workers);
 	}
 
 	if (buildstate.btleader)
