@@ -171,7 +171,13 @@ wal_parse_rec_relreplident(Pointer ptr, char *relreplident, Oid *relreplident_ix
 	Assert(*relreplident == REPLICA_IDENTITY_DEFAULT);
 
 	PARSE(ptr, relreplident);
+
+	/*
+	 * relreplident_ix_oid is reserved in the WAL_REC_RELREPLIDENT for the
+	 * future implementation of REPLICA IDENTITY USING INDEX and not used now
+	 */
 	PARSE(ptr, relreplident_ix_oid);
+	Assert(*relreplident_ix_oid == InvalidOid);
 
 	return ptr;
 }
