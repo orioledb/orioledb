@@ -806,6 +806,21 @@ orioledb_relation_set_new_filenode(Relation rel,
 											 old_o_table->fillfactor,
 											 rel->rd_rel->reltablespace);
 		o_opclass_cache_add_table(new_o_table);
+
+		/* Setup bridging if it was set on old table */
+		if (old_o_table->index_bridging)
+		{
+			new_o_table->index_bridging = true;
+			new_o_table->bridge_oids.datoid = MyDatabaseId;
+			new_o_table->bridge_oids.relnode = GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
+																   rel->rd_rel->relpersistence);
+			new_o_table->bridge_oids.reloid = new_o_table->bridge_oids.relnode;
+		}
+		else
+		{
+			ORelOidsSetInvalid(new_o_table->bridge_oids);
+		}
+
 		o_table_fill_oids(new_o_table, rel, newrnode, false);
 
 		newTreeOids = o_table_make_index_oids(new_o_table, &newTreeOidsNum);
