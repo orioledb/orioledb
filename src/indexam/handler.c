@@ -1781,7 +1781,7 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		scan->xs_rowid.value = (Datum) NULL;
 
 		scan->xs_itupdesc = index_descr->itupdesc;
-		scan->xs_itup = o_form_index_tuple(tuple, index_descr, descr, &scan->xs_itup->t_tid, o_scan, scan->xs_itup);
+		scan->xs_itup = o_form_index_tuple(tuple, index_descr, descr, NULL, o_scan, scan->xs_itup);
 		return;		
 	}
 
