@@ -19,6 +19,47 @@
 
 #include "access/sdir.h"
 
+/* maximum size of attribute map for fast index tuple build */
+#define MAX_ITUP_ATTR_MAP_SIZE 4
+
+/**
+ * FastItupBuildState
+ *
+ * Describes which "fast" construction strategy (if any) can be used to produce
+ * an index tuple (FastItup) for a particular index scan/tuple situation.
+ *
+ * Values:
+ *  - UndefinedFastItupBuildState
+ *      State has not been determined yet; callers should treat this as
+ *      uninitialized and perform the necessary checks to compute the actual
+ *      state before attempting a fast build.
+ *
+ *  - ZeroCopyIndexTuplePossible
+ *      A zero-copy construction path is applicable: the index tuple can be
+ *      produced by directly copying data from OTuple representation.
+ *		This is the fastest construction strategy.
+ *
+ *  - MappingIndexTupleBuildPossible
+ * 		A mapping-based construction strategy can be used, where the index tuple
+ *  	has few attributes and we can build a small mapping table for it.
+ * 		Using this table later allows to build index tuples faster
+ * 		than the traditional way, but not as fast as zero-copy. 
+ *      
+ *
+ *  - NoFastItupBuildPossible
+ *      No fast construction strategy applies; a full, traditional index tuple
+ *      build (materializing and copying necessary data) must be used. This is
+ *      the most general but typically the least performant path.
+ *
+ */
+typedef enum FastItupBuildState
+{
+	UndefinedFastItupBuildState = 0,
+	ZeroCopyIndexTuplePossible,
+	MappingIndexTupleBuildPossible,
+	NoFastItupBuildPossible
+} FastItupBuildState;
+
 typedef struct OScanState
 {
 	IndexScanDescData scandesc;
@@ -38,6 +79,13 @@ typedef struct OScanState
 	/* used only by direct modify functions */
 	CmdType		cmd;
 	OSnapshot	oSnapshot;
+
+	/* fast index tuple build info */
+	FastItupBuildState 	itup_can_zero_copy;	
+	/* pre-computed data size for fixed-size indexes */					
+	Size 				itup_fixed_data_size;
+	/* attribute map for fast index tuples creation */
+	uint8				itup_attr_map[MAX_ITUP_ATTR_MAP_SIZE];
 } OScanState;
 
 typedef struct OIndexPlanState

@@ -79,10 +79,10 @@ FROM query_to_text($$ EXPLAIN ANALYZE
 
 -- just explain buffers without analyze, fails
 EXPLAIN (BUFFERS TRUE) SELECT count(*) FROM o_explain;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Aggregate  (cost=21.64..21.65 rows=1 width=8)
-   ->  Seq Scan on o_explain  (cost=0.00..19.31 rows=931 width=0)
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Aggregate  (cost=25.88..25.89 rows=1 width=8)
+   ->  Seq Scan on o_explain  (cost=0.00..22.70 rows=1270 width=0)
 (2 rows)
 
 -- test lowecase letters
