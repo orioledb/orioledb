@@ -695,15 +695,15 @@ undo_item_buf_read_item(UndoItemBuf *buf,
 						UndoLogType undoType,
 						UndoLocation location)
 {
-	LocationIndex itemSize;
+	Size itemSize;
 
 	ASAN_UNPOISON_MEMORY_REGION(buf->data, buf->length);
 	undo_read(undoType, location, sizeof(UndoStackItem), buf->data);
 
-	itemSize = ((UndoStackItem *) buf->data)->itemSize;
+	itemSize = UNDO_GET_ITEM_SIZE(((UndoStackItem *) buf->data));
 	if (itemSize > buf->length)
 	{
-		buf->length *= 2;
+		buf->length = pg_nextpower2_32(itemSize);
 		if (buf->data == buf->staticData)
 		{
 			buf->data = palloc(buf->length);
@@ -748,7 +748,7 @@ o_add_branch_undo_item(UndoLogType undoType, UndoLocation newLocation)
 	item->prevBranchLocation = pg_atomic_read_u64(&sharedLocations->branchLocation);
 	item->header.type = BranchUndoItemType;
 	item->header.indexType = oIndexPrimary;
-	item->header.itemSize = size;
+	UNDO_SET_ITEM_SIZE(&item->header, size);
 	item->header.prev = newLocation;
 
 	release_reserved_undo_location(undoType);
@@ -1836,7 +1836,7 @@ add_subxact_undo_item(SubTransactionId parentSubid)
 		item->parentSubid = parentSubid;
 		item->header.type = SubXactUndoItemType;
 		item->header.indexType = oIndexPrimary;
-		item->header.itemSize = size;
+		UNDO_SET_ITEM_SIZE(&item->header, size);
 		add_new_undo_stack_item(undoType, location);
 		release_undo_size(undoType);
 		pg_atomic_write_u64(&sharedLocations->subxactLocation, location);
@@ -2533,7 +2533,7 @@ void
 o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
 								   int nOnCommit, int nOnAbort)
 {
-	LocationIndex size;
+	Size size;
 	UndoLocation location;
 	RewindRelFileNodeUndoStackItem *item;
 
@@ -2541,7 +2541,7 @@ o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
 	item = (RewindRelFileNodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(size));
 
 	item->header.base.type = RewindRelFileNodeUndoItemType;
-	item->header.base.itemSize = size;
+	UNDO_SET_ITEM_SIZE(&item->header.base, size);
 	item->header.base.indexType = oIndexPrimary;
 
 	item->nCommitRels = nOnCommit;

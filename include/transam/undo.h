@@ -242,13 +242,35 @@ typedef enum
 	InvalidateComparatorUndoItemType,
 } UndoItemType;
 
+/** 
+ * Undo stack item header
+ * 
+ * prev - location of previous undo stack item
+ * itemSize - size of this undo stack item
+ * type - type of this undo stack item
+ * indexType - index type (oIndexPrimary, oIndexSecondary, etc.)
+ * 
+ * Note: itemSize is stored as two separate fields to optimize space usage.
+ */
 struct UndoStackItem
 {
-	UndoLocation prev;
-	LocationIndex itemSize;
-	uint8		type;
-	uint8		indexType;
+	UndoLocation 	prev;
+	uint16 			itemSizeLo;  	/* low 16 bits of size */
+	uint8			type;
+	uint8			indexType;
+	uint32 			itemSizeHi;  	/* high 32 bits of size */
 };
+
+#define UNDO_GET_ITEM_SIZE(item) \
+    ((((uint64) ((item)->itemSizeHi)) << 16) | \
+      (uint64) ((item)->itemSizeLo))
+
+#define UNDO_SET_ITEM_SIZE(item, sz)        \
+    do {                                    \
+        Assert((sz) < (1ULL << 48));        \
+        (item)->itemSizeHi = (uint32)((sz) >> 16); \
+        (item)->itemSizeLo = (uint16)((sz) & 0xFFFF); \
+    } while (0)
 
 typedef struct
 {

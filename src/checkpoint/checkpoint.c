@@ -5587,7 +5587,7 @@ add_systrees_lock_undo(bool lock)
 	item->lock = lock;
 	item->header.type = SysTreesLockUndoItemType;
 	item->header.indexType = oIndexPrimary;
-	item->header.itemSize = size;
+	UNDO_SET_ITEM_SIZE(&item->header, size);
 
 	add_new_undo_stack_item(UndoLogSystem, location);
 	release_undo_size(UndoLogSystem);
