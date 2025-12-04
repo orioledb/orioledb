@@ -534,6 +534,22 @@ CREATE TABLE test_35_columns (
 INSERT INTO test_35_columns (col27, col10) VALUES ('A', 'J');
 SELECT gid, col10, col15, col27, col33, col34 FROM test_35_columns;
 
+CREATE TABLE test_replica_identity_set (i int PRIMARY KEY, t text) USING orioledb;
+INSERT INTO test_replica_identity_set VALUES(1, 'foofoo');
+INSERT INTO test_replica_identity_set VALUES(2, 'barbar');
+ALTER TABLE test_replica_identity_set REPLICA IDENTITY FULL;
+INSERT INTO test_replica_identity_set VALUES(3, 'aaaaaa');
+SELECT * FROM test_replica_identity_set;
+\d+ test_replica_identity_set
+
+CREATE TABLE test_replica_identity_fail (i int PRIMARY KEY, t text) USING orioledb;
+INSERT INTO test_replica_identity_fail VALUES(1, 'foofoo');
+INSERT INTO test_replica_identity_fail VALUES(2, 'barbar');
+ALTER TABLE test_replica_identity_fail REPLICA IDENTITY NOTHING;
+INSERT INTO test_replica_identity_fail VALUES(3, 'aaaaaa');
+SELECT * FROM test_replica_identity_fail;
+\d+ test_replica_identity_fail
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;
 RESET search_path;
