@@ -969,7 +969,7 @@ o_add_undo_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key)
 	item = (SysCacheDeleteUndoStackItem *) get_undo_record_unreserved(UndoLogSystem,
 																	  &location,
 																	  MAXALIGN(size));
-	item->header.itemSize = size;
+	UNDO_SET_ITEM_SIZE(&item->header, size);
 	item->header.type = SysCacheDeleteUndoItemType;
 	item->header.indexType = oIndexPrimary;
 	item->sys_cache = sys_cache;

@@ -318,7 +318,7 @@ make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
 	item = (BTreeModifyUndoStackItem *) get_undo_record(desc->undoType,
 														&undoLocation,
 														MAXALIGN(size));
-	item->header.itemSize = size;
+	UNDO_SET_ITEM_SIZE(&item->header, size);
 	if (action == BTreeOperationLock)
 		item->header.type = RowLockUndoItemType;
 	else
@@ -391,7 +391,7 @@ make_waiter_undo_record(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno,
 	item = (BTreeModifyUndoStackItem *) get_undo_record(desc->undoType,
 														&undoLocation,
 														MAXALIGN(size));
-	item->header.itemSize = size;
+	UNDO_SET_ITEM_SIZE(&item->header, size);
 	item->header.type = ModifyUndoItemType;
 	item->header.indexType = desc->type;
 	item->action = BTreeOperationInsert;
@@ -947,7 +947,7 @@ add_undo_relnode(ORelOids oldOids, ORelOids *oldTreeOids, int oldNumTreeOids,
 				 ORelOids newOids, ORelOids *newTreeOids, int newNumTreeOids,
 				 bool fsync)
 {
-	LocationIndex size;
+	Size size;
 	UndoLocation location;
 	RelnodeUndoStackItem *item;
 
@@ -955,7 +955,7 @@ add_undo_relnode(ORelOids oldOids, ORelOids *oldTreeOids, int oldNumTreeOids,
 	item = (RelnodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(size));
 
 	item->header.base.type = RelnodeUndoItemType;
-	item->header.base.itemSize = size;
+	UNDO_SET_ITEM_SIZE(&item->header.base, size);
 	item->header.base.indexType = oIndexPrimary;
 	Assert(ORelOidsIsValid(oldOids) || ORelOidsIsValid(newOids));
 	if (ORelOidsIsValid(oldOids))
@@ -1672,7 +1672,7 @@ get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 
 	*tuphdr = item.tuphdr;
 	tuple->formatFlags = tuphdr->formatFlags;
-	tupleSize = item.header.itemSize - sizeof(BTreeModifyUndoStackItem);
+	tupleSize = UNDO_GET_ITEM_SIZE(&item.header) - sizeof(BTreeModifyUndoStackItem);
 	if (sizeAvailable == 0)
 		tuple->data = palloc(tupleSize);
 	Assert(sizeAvailable == 0 || sizeAvailable >= tupleSize);
