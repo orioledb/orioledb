@@ -113,6 +113,7 @@ List	   *o_reuse_indices = NIL;
 static ORelOids saved_oids;
 static bool in_rewrite = false;
 List	   *reindex_list = NIL;
+bool		o_use_build_index_v2 = false;
 Query	   *savedDataQuery = NULL;
 IndexBuildResult o_pkey_result = {0};
 bool		o_in_add_column = false;
@@ -645,6 +646,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 				{
 					String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
 
+					elog(WARNING, "check_multiple_tables: %s", ix_name->sval);
 					reindex_list = list_append_unique(reindex_list, ix_name);
 				}
 				relation_close(ind, AccessShareLock);
@@ -888,6 +890,11 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	pstate = make_parsestate(NULL);
 	pstate->p_sourcetext = queryString;
 	pstate->p_queryEnv = env;
+
+	elog(WARNING, "orioledb_utility_command: utilityStmt %d",
+		 pstmt->utilityStmt->type);
+
+	o_use_build_index_v2 = false;
 
 	if (IsA(pstmt->utilityStmt, AlterTableStmt) &&
 		!is_alter_table_partition(pstmt))
@@ -1193,7 +1200,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			case REINDEX_OBJECT_SCHEMA:
 			case REINDEX_OBJECT_SYSTEM:
 			case REINDEX_OBJECT_DATABASE:
-				if (concurrently)
+				// if (concurrently)
 					has_orioledb = check_multiple_tables(stmt->name, stmt->kind, concurrently);
 				break;
 			default:
@@ -1228,6 +1235,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 					stmt->params = foreach_delete_current(stmt->params, lc);
 			}
 		}
+
+		o_use_build_index_v2 = tablespacename == NULL;
 	}
 	else if (IsA(pstmt->utilityStmt, TransactionStmt))
 	{
@@ -2594,6 +2603,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							int subId, void *arg)
 {
 	Relation	rel;
+
+	elog(WARNING, "orioledb_object_access_hook: access %d, objectId %d",
+		 access, objectId);
 
 	if (access == OAT_POST_CREATE && classId == ExtensionRelationId)
 	{

@@ -861,10 +861,14 @@ drop_indices_for_rel(Relation rel, bool primary)
 		Relation	ind;
 		bool		closed = false;
 		OBTOptions *options;
+		String	   *relname;
 
 		indexOid = lfirst_oid(index);
 		ind = relation_open(indexOid, AccessShareLock);
 		options = (OBTOptions *) ind->rd_options;
+
+		relname = makeString(ind->rd_rel->relname.data);
+		reindex_list = list_delete(reindex_list, relname);
 
 		if (ind->rd_rel->relam == BTREE_AM_OID && !(options && !options->orioledb_index) &&
 			((primary && ind->rd_index->indisprimary) || (!primary && !ind->rd_index->indisprimary)))
@@ -877,6 +881,8 @@ drop_indices_for_rel(Relation rel, bool primary)
 			if (GET_PRIMARY(descr)->primaryIsCtid)
 				ix_num--;
 			relation_close(ind, AccessShareLock);
+
+			elog(WARNING, "drop_indices_for_rel: ix_num %d", ix_num);
 			o_index_drop(rel, ix_num);
 			closed = true;
 		}
@@ -897,11 +903,16 @@ orioledb_relation_nontransactional_truncate(Relation rel)
 	if (!OidIsValid(rel->rd_rel->oid) || rel->rd_rel->relkind == RELKIND_TOASTVALUE)
 		return;
 
+	elog(WARNING, "orioledb_relation_nontransactional_truncate");
+
 	o_truncate_table(oids);
 
-	drop_indices_for_rel(rel, false);
-	/* drop primary after all indices to not rebuild them */
-	drop_indices_for_rel(rel, true);
+	if (!o_use_build_index_v2)
+	{
+		drop_indices_for_rel(rel, false);
+		/* drop primary after all indices to not rebuild them */
+		drop_indices_for_rel(rel, true);
+	}
 
 	if (RelationIsPermanent(rel))
 		add_truncate_wal_record(oids);

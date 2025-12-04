@@ -110,6 +110,8 @@ typedef struct oIdxShared
 extern void o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTable *o_table);
 extern void o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 						   OIndexNumber old_ix_num, bool set_tablespace, IndexBuildResult *result);
+extern void o_build_index(Relation heap, Relation index,
+						  IndexBuildResult *result);
 
 extern void o_index_drop(Relation tbl, OIndexNumber ix_num);
 extern OIndexNumber o_find_ix_num_by_name(OTableDescr *descr,

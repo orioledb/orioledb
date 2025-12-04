@@ -936,14 +936,45 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 				new_keys_num = 0,
 				i = 0,
 				j = 0;
-	bool		reuse_relnode = false;
 
 	old_keys = o_table_make_index_keys(old_table, &old_keys_num);
 	new_keys = o_table_make_index_keys(new_table, &new_keys_num);
 
+	if (old_table != NULL && new_table != NULL)
+		elog(WARNING, "o_tables_oids_indexes: old_table (%d, %d, %d), old_nindices %d, new_table (%d, %d, %d), new_nindices %d, old_keys_num %d, new_keys_num %d",
+			 old_table->oids.datoid, old_table->oids.reloid, old_table->oids.relnode,
+			 old_table->nindices,
+			 new_table->oids.datoid, new_table->oids.reloid, new_table->oids.relnode,
+			 new_table->nindices,
+			 old_keys_num, new_keys_num);
+	else if (old_table != NULL)
+		elog(WARNING, "o_tables_oids_indexes: old_table (%d, %d, %d), old_nindices %d, old_keys_num %d",
+			 old_table->oids.datoid, old_table->oids.reloid, old_table->oids.relnode,
+			 old_table->nindices,
+			 old_keys_num);
+	else if (new_table != NULL)
+		elog(WARNING, "o_tables_oids_indexes: new_table (%d, %d, %d), new_nindices %d, new_keys_num %d",
+			 new_table->oids.datoid, new_table->oids.reloid, new_table->oids.relnode,
+			 new_table->nindices,
+			 new_keys_num);
+
+	if (old_table != NULL && (old_table->nindices > 0))
+	{
+		elog(WARNING, "o_tables_oids_indexes: old_indices:");
+		for (int i = 0; i < old_table->nindices; i++)
+			elog(WARNING, "----> %s", NameStr(old_table->indices[i].name));
+	}
+	if (new_table != NULL && (new_table->nindices > 0))
+	{
+		elog(WARNING, "o_tables_oids_indexes: new_indices:");
+		for (int i = 0; i < new_table->nindices; i++)
+			elog(WARNING, "----> %s", NameStr(new_table->indices[i].name));
+	}
+
 	while (i < old_keys_num || j < new_keys_num)
 	{
 		int			cmp;
+		bool		reuse_relnode = false;
 
 		if (i >= old_keys_num)
 		{
@@ -1016,7 +1047,6 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 									   oxid, csn);
 				Assert(result);
 			}
-			reuse_relnode = false;
 			j++;
 		}
 	}
