@@ -132,6 +132,9 @@ read_evicted_data(Oid datoid, Oid relnode, bool delete)
 	if (datoid == SYS_TREES_DATOID)
 		return NULL;
 
+	elog(WARNING, "read_evicted_data: datoid %d, relnode %d, delete %d",
+		 datoid, relnode, delete);
+
 	key.datoid = datoid;
 	key.relnode = relnode;
 	keyTuple.formatFlags = 0;
@@ -164,6 +167,9 @@ insert_evicted_data(EvictedTreeData *data)
 
 	tuple.formatFlags = 0;
 	tuple.data = (Pointer) data;
+
+	elog(WARNING, "insert_evicted_data: datoid %d, relnode %d",
+		 data->key.datoid, data->key.relnode);
 
 	success = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_EVICTED_DATA),
 										tuple);

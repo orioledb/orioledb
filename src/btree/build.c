@@ -409,22 +409,22 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 S3TaskLocation
 btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 {
-	File		file;
-	uint32		checkpoint_number;
-	bool		checkpoint_concurrent;
-	char	   *filename;
 	S3TaskLocation result = 0;
 
 	Assert(desc->storageType == BTreeStoragePersistence ||
 		   desc->storageType == BTreeStorageTemporary ||
 		   desc->storageType == BTreeStorageUnlogged);
 
-	checkpoint_number = get_cur_checkpoint_number(&desc->oids, desc->type,
-												  &checkpoint_concurrent);
-
 	if (desc->storageType == BTreeStoragePersistence || desc->storageType == BTreeStorageUnlogged)
 	{
+		File		file;
+		char	   *filename;
+		uint32		checkpoint_number;
+		bool		checkpoint_concurrent;
 		SeqBufTag	prev_chkp_tag;
+
+		checkpoint_number = get_cur_checkpoint_number(&desc->oids, desc->type,
+													  &checkpoint_concurrent);
 
 		memset(&prev_chkp_tag, 0, sizeof(prev_chkp_tag));
 		prev_chkp_tag.datoid = desc->oids.datoid;

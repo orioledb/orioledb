@@ -304,6 +304,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	result->index_tuples = 0.0;
 
 
+	elog(WARNING, "orioledb_ambuild");
 	if (in_nontransactional_truncate || !OidIsValid(o_saved_relrewrite))
 	{
 		ORelOids	tbl_oids;
@@ -320,9 +321,14 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 		}
 		else
 		{
-			if (!in_nontransactional_truncate)
-				o_define_index_validate(tbl_oids, index, indexInfo, NULL);
-			o_define_index(heap, index, InvalidOid, reindex, InvalidIndexNumber, false, result);
+			if (o_use_build_index_v2)
+				o_build_index(heap, index, result);
+			else
+			{
+				if (!in_nontransactional_truncate)
+					o_define_index_validate(tbl_oids, index, indexInfo, NULL);
+				o_define_index(heap, index, InvalidOid, reindex, InvalidIndexNumber, false, result);
+			}
 		}
 	}
 

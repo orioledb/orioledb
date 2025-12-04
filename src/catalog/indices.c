@@ -396,6 +396,9 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 
 	Assert(index == NULL || !(OidIsValid(indoid)));
 
+	elog(WARNING, "o_define_index: reindex %d, reuse_relnode %d",
+		 reindex, reuse_relnode);
+
 	if (OidIsValid(indoid))
 		index = index_open(indoid, AccessShareLock);
 
@@ -640,6 +643,66 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		o_table_free(old_o_table);
 	if (o_table != old_o_table)
 		o_table_free(o_table);
+}
+
+/*
+ * Build the index.
+ */
+void
+o_build_index(Relation heap, Relation index, IndexBuildResult *result)
+{
+	ORelOids	oids;
+	OTable	   *o_table;
+	OTableDescr *descr;
+	OIndexNumber ix_num = InvalidIndexNumber;
+	OTableIndex *o_index;
+
+	Assert(heap != NULL && index != NULL);
+
+	ORelOidsSetFromRel(oids, heap);
+
+	o_table = o_tables_get(oids);
+	if (o_table == NULL)
+		elog(FATAL, "orioledb table does not exists for oids = %u, %u, %u",
+			 oids.datoid, oids.reloid, oids.relnode);
+
+	for (uint16 i = 0; i < o_table->nindices; i++)
+	{
+		if (o_table->indices[i].oids.reloid == index->rd_rel->oid)
+		{
+			ix_num = i;
+			break;
+		}
+	}
+
+	if (ix_num == InvalidIndexNumber)
+		elog(FATAL, "cannot find index definition in OTableDescr for oid = %u",
+			 index->rd_rel->oid);
+
+	// o_tables_table_meta_lock(o_table);
+
+	descr = o_fetch_table_descr(o_table->oids);
+	o_index = &o_table->indices[ix_num];
+
+	if (STOPEVENTS_ENABLED())
+	{
+		Jsonb	   *params;
+
+		params = index_build_params(o_index);
+		STOPEVENT(STOPEVENT_BUILD_INDEX_PLACEHOLDER_INSERTED, params);
+	}
+
+	if (o_index->type == oIndexPrimary)
+		/* TODO Check when we need to get different old_o_table */
+		rebuild_indices(o_table, descr, o_table, descr, false, result);
+	else
+		/* TODO Check if we need to pas set_tablespace argument */
+		build_secondary_index(o_table, descr, ix_num, false, false, result);
+
+	/* TODO Handle oldRelnode argument */
+	// o_tables_table_meta_unlock(o_table, InvalidOid);
+
+	o_table_free(o_table);
 }
 
 /*
@@ -2113,6 +2176,8 @@ o_index_drop(Relation tbl, OIndexNumber ix_num)
 			 (unsigned) oids.datoid, (unsigned) oids.reloid, (unsigned) oids.relnode);
 	}
 
+	elog(WARNING, "o_index_drop: ix_num %d, nindices %d",
+		 ix_num, o_table->nindices);
 	Assert(ix_num != InvalidIndexNumber && ix_num < o_table->nindices);
 	if (o_table->indices[ix_num].type == oIndexPrimary)
 		drop_primary_index(tbl, o_table);
