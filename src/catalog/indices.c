@@ -38,7 +38,6 @@
 #include "access/genam.h"
 #include "access/relation.h"
 #include "access/table.h"
-#include "access/xact.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/namespace.h"
