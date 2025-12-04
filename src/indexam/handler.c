@@ -534,7 +534,15 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	CommitSeqNo csn;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
-	o_current_index = NULL;
+	if (Log_error_verbosity == PGERROR_TERSE)
+		elog(WARNING, "orioledb_aminsert: %s, indexUnchanged: %c",
+			 checkUnique == UNIQUE_CHECK_NO ? "UNIQUE_CHECK_NO" :
+			 checkUnique == UNIQUE_CHECK_YES ? "UNIQUE_CHECK_YES" :
+			 checkUnique == UNIQUE_CHECK_PARTIAL ? "UNIQUE_CHECK_PARTIAL" :
+			 checkUnique == UNIQUE_CHECK_EXISTING ? "UNIQUE_CHECK_EXISTING" :
+			 "WRONG",
+			 indexUnchanged ? 'Y' : 'N');
+
 	if (options && !options->orioledb_index)
 	{
 		bytea	   *rowid;
@@ -562,21 +570,31 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 			tupleid = PointerGetDatum(p);
 		}
 
-		o_current_index = rel;
 		if (!indexUnchanged)
 			result = btinsert(rel, values, isnull, tupleid, heapRel,
 							  checkUnique, indexUnchanged, indexInfo);
 		else
 			result = true; /* FIXME: Wrong assumption? */
-		o_current_index = NULL;
+
+		if (Log_error_verbosity == PGERROR_TERSE)
+			elog(WARNING, "orioledb_aminsert: RET 0: %c", result ? 'Y' : 'N');
+
 		return result;
 	}
 
 	if (OidIsValid(rel->rd_rel->relrewrite))
+	{
+		if (Log_error_verbosity == PGERROR_TERSE)
+			elog(WARNING, "orioledb_aminsert: RET 1: Y");
 		return true;
+	}
 
 	if (rel->rd_index->indisprimary)
+	{
+		if (Log_error_verbosity == PGERROR_TERSE)
+			elog(WARNING, "orioledb_aminsert: RET 2: Y");
 		return true;
+	}
 
 	ORelOidsSetFromRel(oids, rel);
 	ix_type = o_index_rel_get_ix_type(rel);
@@ -658,6 +676,8 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	if (tuple.data)
 		pfree(tuple.data);
 
+	if (Log_error_verbosity == PGERROR_TERSE)
+		elog(WARNING, "orioledb_aminsert: RET 3: %c", success ? 'Y' : 'N');
 	return success;
 }
 
@@ -1439,9 +1459,6 @@ orioledb_amadjustmembers(Oid opfamilyoid, Oid opclassoid, List *operators,
 {
 }
 
-/* TODO: Remove this hack; probably patch table_index_fetch_begin to accept indexRelation */
-Relation	o_current_index = NULL;
-
 IndexScanDesc
 orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 {
@@ -1454,11 +1471,8 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	OIndexNumber ix_num;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
-	o_current_index = NULL;
-
 	if (options && !options->orioledb_index)
 	{
-		o_current_index = rel;
 		return btbeginscan(rel, nkeys, norderbys);
 	}
 
@@ -1992,8 +2006,6 @@ bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 	Pointer		p;
 	IndexAmRoutine *amroutine = NULL;
 
-	o_current_index = rel;
-
 	ORelOidsSetFromRel(oids, heapRel);
 
 	descr = o_fetch_table_descr(oids);
@@ -2027,8 +2039,6 @@ IndexScanDesc
 bridged_ambeginscan(Relation rel, int nkeys, int norderbys)
 {
 	IndexAmRoutine *amroutine = find_bridged_am(rel);
-
-	o_current_index = rel;
 
 	Assert(amroutine != NULL);
 

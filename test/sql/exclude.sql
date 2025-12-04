@@ -387,6 +387,7 @@ INSERT INTO ib_unique_tbl VALUES (4, 'five');
 
 BEGIN;
 
+SET LOCAL log_error_verbosity = 'terse';
 -- default is immediate so this should fail right away
 UPDATE ib_unique_tbl SET i = 1 WHERE i = 0;
 
@@ -461,7 +462,9 @@ CREATE TABLE ib_deferred_excl (
 ) USING orioledb;
 INSERT INTO ib_deferred_excl VALUES(1);
 INSERT INTO ib_deferred_excl VALUES(2);
+SET log_error_verbosity = 'terse';
 INSERT INTO ib_deferred_excl VALUES(1); -- fail
+\q
 INSERT INTO ib_deferred_excl VALUES(1) ON CONFLICT ON CONSTRAINT ib_deferred_excl_con DO NOTHING; -- fail
 BEGIN;
 INSERT INTO ib_deferred_excl VALUES(2); -- no fail here

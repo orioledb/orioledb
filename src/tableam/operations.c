@@ -807,7 +807,6 @@ OExecInsertIndexTuples(ResultRelInfo *resultRelInfo,
 		else
 			checkUnique = UNIQUE_CHECK_PARTIAL;
 
-		o_current_index = indexRelation;
 		satisfiesConstraint =
 			index_insert(indexRelation, /* index relation */
 						 values,	/* array of index Datums */
@@ -817,7 +816,6 @@ OExecInsertIndexTuples(ResultRelInfo *resultRelInfo,
 						 checkUnique,	/* type of uniqueness check to do */
 						 false, /* UPDATE without logical change? */
 						 indexInfo);	/* index AM may need this */
-		o_current_index = NULL;
 
 		/*
 		 * If the index has an associated exclusion constraint, check that.
