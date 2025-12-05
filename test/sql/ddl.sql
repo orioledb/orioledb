@@ -542,10 +542,19 @@ INSERT INTO test_replica_identity_set VALUES(3, 'aaaaaa');
 SELECT * FROM test_replica_identity_set;
 \d+ test_replica_identity_set
 
+CREATE TABLE test_replica_identity_set_2 (i int PRIMARY KEY, t text) USING orioledb;
+INSERT INTO test_replica_identity_set_2 VALUES(1, 'foofoo');
+INSERT INTO test_replica_identity_set_2 VALUES(2, 'barbar');
+ALTER TABLE test_replica_identity_set_2 REPLICA IDENTITY NOTHING;
+INSERT INTO test_replica_identity_set_2 VALUES(3, 'aaaaaa');
+SELECT * FROM test_replica_identity_set_2;
+\d+ test_replica_identity_set_2
+
 CREATE TABLE test_replica_identity_fail (i int PRIMARY KEY, t text) USING orioledb;
+CREATE INDEX test_replica_identity_fail_t on test_replica_identity_fail(t);
 INSERT INTO test_replica_identity_fail VALUES(1, 'foofoo');
 INSERT INTO test_replica_identity_fail VALUES(2, 'barbar');
-ALTER TABLE test_replica_identity_fail REPLICA IDENTITY NOTHING;
+ALTER TABLE test_replica_identity_fail REPLICA IDENTITY USING INDEX test_replica_identity_fail_t;
 INSERT INTO test_replica_identity_fail VALUES(3, 'aaaaaa');
 SELECT * FROM test_replica_identity_fail;
 \d+ test_replica_identity_fail

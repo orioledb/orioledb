@@ -1493,11 +1493,35 @@ Indexes:
     "test_replica_identity_set_pkey" PRIMARY KEY, btree (i)
 Replica Identity: FULL
 
+CREATE TABLE test_replica_identity_set_2 (i int PRIMARY KEY, t text) USING orioledb;
+INSERT INTO test_replica_identity_set_2 VALUES(1, 'foofoo');
+INSERT INTO test_replica_identity_set_2 VALUES(2, 'barbar');
+ALTER TABLE test_replica_identity_set_2 REPLICA IDENTITY NOTHING;
+INSERT INTO test_replica_identity_set_2 VALUES(3, 'aaaaaa');
+SELECT * FROM test_replica_identity_set_2;
+ i |   t    
+---+--------
+ 1 | foofoo
+ 2 | barbar
+ 3 | aaaaaa
+(3 rows)
+
+\d+ test_replica_identity_set_2
+                          Table "ddl.test_replica_identity_set_2"
+ Column |  Type   | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+---------+-----------+----------+---------+----------+--------------+-------------
+ i      | integer |           | not null |         | plain    |              | 
+ t      | text    |           |          |         | extended |              | 
+Indexes:
+    "test_replica_identity_set_2_pkey" PRIMARY KEY, btree (i)
+Replica Identity: NOTHING
+
 CREATE TABLE test_replica_identity_fail (i int PRIMARY KEY, t text) USING orioledb;
+CREATE INDEX test_replica_identity_fail_t on test_replica_identity_fail(t);
 INSERT INTO test_replica_identity_fail VALUES(1, 'foofoo');
 INSERT INTO test_replica_identity_fail VALUES(2, 'barbar');
-ALTER TABLE test_replica_identity_fail REPLICA IDENTITY NOTHING;
-ERROR:  replica identity type NOTHING is not supported for OrioleDB tables yet
+ALTER TABLE test_replica_identity_fail REPLICA IDENTITY USING INDEX test_replica_identity_fail_t;
+ERROR:  replica identity type INDEX is not supported for OrioleDB tables yet
 INSERT INTO test_replica_identity_fail VALUES(3, 'aaaaaa');
 SELECT * FROM test_replica_identity_fail;
  i |   t    
@@ -1515,9 +1539,10 @@ SELECT * FROM test_replica_identity_fail;
  t      | text    |           |          |         | extended |              | 
 Indexes:
     "test_replica_identity_fail_pkey" PRIMARY KEY, btree (i)
+    "test_replica_identity_fail_t" btree (t)
 
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 24 other objects
+NOTICE:  drop cascades to 25 other objects
 DETAIL:  drop cascades to table o_ddl_missing
 drop cascades to table o_test_add_column
 drop cascades to table o_test_multiple_analyzes
@@ -1541,6 +1566,7 @@ drop cascades to table o_test_empty
 drop cascades to table o_test_plpgsql_default
 drop cascades to table test_35_columns
 drop cascades to table test_replica_identity_set
+drop cascades to table test_replica_identity_set_2
 drop cascades to table test_replica_identity_fail
 DROP SCHEMA ddl CASCADE;
 NOTICE:  drop cascades to 5 other objects
