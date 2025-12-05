@@ -30,10 +30,68 @@
 #include "utils/arrayaccess.h"
 #include "utils/lsyscache.h"
 
+#define MIN_RANGE_SIZE_FOR_LOCKSTEP 16
+#define THRESHOLD_PERCENTAGE_LOCKSTEP 0.8
+
 static bool o_key_range_is_unbounded(OBTreeKeyRange *range, int attnum);
 static void o_fill_key_bounds(Datum v, Oid type,
 							  OBTreeValueBound *low, OBTreeValueBound *high,
 							  OIndexField *field);
+
+/*
+ * Check if an array is sparse (has many holes between first and last elements).
+ * Returns true if lockstep scanning should be used, false if exact matching is better.
+ * 
+ * For sparse arrays with >THRESHOLD_PERCENTAGE_LOCKSTEP holes, exact matching avoids scanning many
+ * non-matching tuples. For dense arrays, lockstep scanning is more efficient.
+ */
+static bool
+should_use_lockstep_scan(BTArrayKeyInfo *arrayKey, OIndexField *field)
+{
+	Datum		first_val;
+	Datum		last_val;
+	
+	/* Small arrays always use range scan (minimal overhead) */
+	if (arrayKey->num_elems <= MIN_RANGE_SIZE_FOR_LOCKSTEP)
+		return true;
+	
+	/*
+	 * For larger arrays, estimate sparseness by comparing range distance
+	 * with number of elements. Only works for numeric types.
+	 */
+	first_val = arrayKey->elem_values[0];
+	last_val = arrayKey->elem_values[arrayKey->num_elems - 1];
+	
+	if (field->inputtype == INT4OID)
+	{
+		int32		first = DatumGetInt32(first_val);
+		int32		last = DatumGetInt32(last_val);
+		int64		range_size = (int64) last - (int64) first + 1;
+		
+		return (range_size * THRESHOLD_PERCENTAGE_LOCKSTEP <= arrayKey->num_elems);
+	}
+	else if (field->inputtype == INT8OID)
+	{
+		int64		first = DatumGetInt64(first_val);
+		int64		last = DatumGetInt64(last_val);
+		
+		/* Check for overflow risk */
+		if (last > first && (last - first) < INT64_MAX / 2)
+		{
+			int64		range_size = last - first + 1;
+			
+			return (range_size * THRESHOLD_PERCENTAGE_LOCKSTEP <= arrayKey->num_elems);
+		}
+		else
+		{
+			/* Very large range or overflow risk, use exact matching */
+			return false;
+		}
+	}
+	
+	/* For non-integer types don't use lockstep */
+	return false;
+}
 
 static OBTreeValueBound *
 o_fill_row_key_bound(OBTreeKeyBound *bound,
@@ -81,13 +139,18 @@ o_fill_row_key_bound(OBTreeKeyBound *bound,
 
 bool
 o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
-						int numberOfKeys, BTArrayKeyInfo *arrayKeys,
-						int numPrefixExactKeys,
-						int resultNKeys, OIndexField *fields)
+						int numberOfKeys, int numberOfArrayKeys,
+						BTArrayKeyInfo *arrayKeys, int numPrefixExactKeys,
+						int resultNKeys, OIndexField *fields, bool *use_lockstep)
 {
 	int			i;
 	bool		exact = true;
-
+	bool 		lockstep;
+	
+	/* sanity check */
+	Assert(use_lockstep);
+	
+	*use_lockstep = false;
 	res->empty = false;
 	res->low.nkeys = resultNKeys;
 	res->high.nkeys = resultNKeys;
@@ -96,6 +159,21 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 	{
 		res->low.keys[i].flags = O_VALUE_BOUND_MINUS_INFINITY;
 		res->high.keys[i].flags = O_VALUE_BOUND_PLUS_INFINITY;
+	}
+	
+	/* check if we should use lockstep scanning */
+	lockstep = numberOfKeys == numberOfArrayKeys;
+	for (i = 0; i < numberOfKeys; i++)
+	{
+		ScanKeyData *key = &keyData[i];
+		AttrNumber	attnum = key->sk_attno - 1;
+		OIndexField *field = &fields[attnum];
+		
+		if ((key->sk_flags & SK_SEARCHARRAY) &&
+			key->sk_strategy == BTEqualStrategyNumber)
+		{
+			lockstep &= should_use_lockstep_scan(arrayKeys, field);
+		}
 	}
 
 	for (i = 0; i < numberOfKeys; i++)
@@ -181,7 +259,28 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 			Assert(arrayKeys && arrayKeys->num_elems > 0);
 			if (o_key_range_is_unbounded(res, attnum))
 			{
-				if (i < numPrefixExactKeys)
+				if ((i >= numPrefixExactKeys) || lockstep)
+				{
+					*use_lockstep = lockstep;
+
+					/*
+					* For lockstep scanning optimization: use a range from first
+					* to last array element instead of treating each as exact.
+					* This allows the iterator to scan sequentially through the
+					* index while comparing against sorted array elements.
+					*/
+					o_fill_key_bounds(arrayKeys->elem_values[0],
+										key->sk_subtype,
+										setLow ? &low : NULL,
+										NULL,
+										field);
+					o_fill_key_bounds(arrayKeys->elem_values[arrayKeys->num_elems - 1],
+										key->sk_subtype,
+										NULL,
+										setHigh ? &high : NULL,
+										field);
+				}
+				else
 				{
 					o_fill_key_bounds(arrayKeys->elem_values[arrayKeys->cur_elem],
 									  key->sk_subtype,
@@ -189,19 +288,7 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 									  setHigh ? &high : NULL,
 									  field);
 				}
-				else
-				{
-					o_fill_key_bounds(arrayKeys->elem_values[0],
-									  key->sk_subtype,
-									  setLow ? &low : NULL,
-									  NULL,
-									  field);
-					o_fill_key_bounds(arrayKeys->elem_values[arrayKeys->num_elems - 1],
-									  key->sk_subtype,
-									  NULL,
-									  setHigh ? &high : NULL,
-									  field);
-				}
+
 				if (setLow)
 					res->low.keys[attnum] = low;
 				if (setHigh)
@@ -311,16 +398,14 @@ o_fill_key_bounds(Datum v, Oid type,
 		low->value = v;
 		low->type = type;
 		low->comparator = comparator;
-		if (coercible)
-			low->flags |= O_VALUE_BOUND_COERCIBLE;
+		low->flags |= coercible ? O_VALUE_BOUND_COERCIBLE : O_VALUE_BOUND_NON_COERCIBLE;
 	}
 	if (high != NULL)
 	{
 		high->value = v;
 		high->type = type;
 		high->comparator = comparator;
-		if (coercible)
-			high->flags |= O_VALUE_BOUND_COERCIBLE;
+		high->flags |= coercible ? O_VALUE_BOUND_COERCIBLE : O_VALUE_BOUND_NON_COERCIBLE;
 	}
 }
 
