@@ -30,6 +30,7 @@
 #include "postmaster/bgwriter.h"
 #include "postmaster/autovacuum.h"
 #include "storage/bufmgr.h"
+#include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/proc.h"
 #include "storage/sinvaladt.h"
@@ -79,6 +80,8 @@ PG_FUNCTION_INFO_V1(orioledb_rewind_set_complete);
 #define	REWIND_MODE_XID	(3)
 
 static void orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, TransactionId rewind_xid, TimestampTz rewind_timestamp);
+static void try_restart_pg(void);
+static void cleanup_fds(void);
 
 /* Interface functions */
 
@@ -784,10 +787,9 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 	do_rewind(rewind_mode, rewind_time, rewindStartTimeStamp, rewind_oxid, rewind_xid, rewind_timestamp);
 
 	LWLockRelease(&rewindMeta->rewindEvictLock);
-	elog(LOG, "Rewind complete");
-	/* Restart Postgres */
-	(void) kill(PostmasterPid, SIGTERM);
-	return;
+	elog(LOG, "Rewind complete. Will attempt to restart");
+
+	try_restart_pg();
 }
 
 TransactionId
@@ -1688,4 +1690,112 @@ OXid
 get_rewind_run_xmin(void)
 {
 	return pg_atomic_read_u64(&rewindMeta->runXmin);
+}
+
+
+/*
+ * try_restart_pg
+ *
+ * Attempt to restart the PostgreSQL instance.
+ *
+ * This function spawns a persistent, detached process that executes
+ * "pg_ctl restart". Detachment ensures the child process survives
+ * once the postmaster exits.
+ *
+ * dependency: This implementation relies on fork(2) and setsid(2).
+ * On systems lacking these primitives (e.g. Windows), this is currently
+ * not supported, so we shutdown instead.
+ */
+static void
+try_restart_pg(void)
+{
+	/* Flush stdio channels just before fork, to avoid double-output problems */
+	fflush(NULL);
+	/* WIN32 doesn't support fork */
+#ifdef WIN32
+	elog(LOG, "Restart not supported on Windows. Stopping instead");
+	goto bail_and_shutdown;
+#else							/* !WIN32 */
+#ifndef HAVE_SETSID
+	/* We can do better, but bail for now */
+	elog(LOG, "Restart on platforms without setsid(2) is not yet supported."
+		 " Stopping instead");
+	goto bail_and_shutdown;
+#else							/* HAVE_SETSID */
+	{
+		pid_t		pid;
+
+		pid = fork();
+
+		if (pid < 0)
+		{
+			/* fork failed */
+			elog(LOG, "Attempt to restart failed. Stopping instead");
+			goto bail_and_shutdown;
+		}
+
+		if (pid > 0)
+		{
+			/* fork successful, in parent: return to client */
+			return;
+		}
+
+		/* fork succeeded, in child */
+		if (setsid() < 0)
+		{
+			/* setsid failed, bail for now */
+			elog(LOG, "setsid(2) failed with error: %m\n"
+				 "Stopping instead");
+			goto bail_and_shutdown;
+		}
+
+		{
+			/* We're in a session that will survive when the parent goes away */
+			char		bindir[MAXPGPATH];
+			char		cmd[PG_CTL_MAX_CMD_LEN];
+			char	   *lastslash;
+
+			strlcpy(bindir, my_exec_path, MAXPGPATH);
+
+			lastslash = strrchr(bindir, '/');
+			Assert(lastslash != NULL);
+			*lastslash = '\0';
+			snprintf(cmd, sizeof(cmd), "%s/pg_ctl", bindir);
+
+			/* Do a little dance with fds to make logger shutdown cleanly */
+			cleanup_fds();
+			/* Sleep 0.5s to let the parent return */
+			pg_usleep(500000);
+			execl(cmd, cmd, "restart", "-D", DataDir, (char *) NULL);
+			/* If we got here, means execl failed, bail */
+			elog(LOG, "Attempt to restart failed with error: %m");
+			goto bail_and_shutdown;
+		}
+#endif							/* !HAVE_SETSID */
+	}
+#endif							/* !WIN32 */
+bail_and_shutdown:
+	elog(WARNING, "Restart failed. Shutting down instead!");
+	(void) kill(PostmasterPid, SIGTERM);
+	return;
+}
+
+static void
+cleanup_fds(void)
+{
+	int			devnull = open("/dev/null", O_RDWR);
+
+	if (devnull >= 0)
+	{
+		/*
+		 * We can't just close stderr/stdout fds, so redirect them to
+		 * /dev/null instead
+		 */
+		dup2(devnull, fileno(stderr));
+		dup2(devnull, fileno(stdout));
+
+		/* Be paranoid: we don't want to ever close stderr/stdout */
+		if (devnull > fileno(stdout) && devnull > fileno(stderr))
+			close(devnull);
+	}
 }
