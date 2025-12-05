@@ -426,6 +426,9 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, uint8 rec_type, OIndexType ix_
 
 		elog(DEBUG4, "WAL_REC_UPDATE NEWTUPLE");
 
+		if (relreplident == REPLICA_IDENTITY_NOTHING)
+			return;
+
 		change->action = REORDER_BUFFER_CHANGE_UPDATE;
 		change->data.tp.clear_toast_afterwards = true;
 		change->data.tp.newtuple = o_convert_non_toast_tuple(reorderbuf, descr, indexDescr, tuple1, (relreplident != REPLICA_IDENTITY_FULL), descr->newTuple, &newheaptuple, true);
@@ -459,6 +462,9 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, uint8 rec_type, OIndexType ix_
 	{
 		change->action = REORDER_BUFFER_CHANGE_DELETE;
 		Assert(O_TUPLE_IS_NULL(tuple2));
+
+		if (relreplident == REPLICA_IDENTITY_NOTHING)
+			return;
 
 		if (ix_type == oIndexToast)
 		{

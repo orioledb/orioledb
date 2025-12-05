@@ -1419,6 +1419,7 @@ o_validate_replica_identity(Relation rel, ReplicaIdentityStmt *stmt)
 	}
 	else if (stmt->identity_type == REPLICA_IDENTITY_NOTHING)
 	{
+		return;
 		elog(ERROR, "replica identity type NOTHING is not supported for OrioleDB tables yet");
 	}
 	else if (stmt->identity_type == REPLICA_IDENTITY_INDEX)
