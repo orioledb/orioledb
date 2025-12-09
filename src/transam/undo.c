@@ -2529,6 +2529,10 @@ o_rewind_relfilenode_item_callback(UndoLogType undoType,
 		DropRelationFiles(&item->rels[item->nCommitRels], item->nAbortRels, false);
 }
 
+/*
+ * Add rewind relfilenode undo items. Create enough UndoStackItems to
+ * accommodate all RelFileNode-s provided.
+ */
 void
 o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
 								   int nOnCommit, int nOnAbort)
@@ -2536,16 +2540,16 @@ o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
 	Size		chunk_size;
 	UndoLocation location;
 	RewindRelFileNodeUndoStackItem *item;
-	int			chunk_items;
+	int			chunk_items = (UINT16_MAX - offsetof(RewindRelFileNodeUndoStackItem, rels)) / sizeof(RelFileNode);
 	int			chunk_oncommits;
 	int			chunk_onaborts;
 	int			cur_oncommit = 0;
 	int			cur_onabort = 0;
 	int			chunkno = 0;
 
+
 	while (nOnCommit > 0 || nOnAbort > 0)
 	{
-		chunk_items = (UINT16_MAX - offsetof(RewindRelFileNodeUndoStackItem, rels)) / sizeof(RelFileNode);
 		chunk_oncommits = Min(chunk_items, nOnCommit);
 		chunk_onaborts = Min(chunk_items - chunk_oncommits, nOnAbort);
 
@@ -2553,7 +2557,8 @@ o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
 		chunkno += 1;
 		Assert(chunk_size < UINT16_MAX);
 
-		elog(DEBUG4, "chunk %u, chunk_size %lu, chunk_items %u, cur_oncommit %u, chunk_oncommits %u, cur_onabort %u, chunk_onaborts %u, nOnCommit left %u, nOnAbort left %u", chunkno, chunk_size, chunk_items, cur_oncommit, chunk_oncommits, cur_onabort, chunk_onaborts, nOnCommit, nOnAbort);
+		elog(DEBUG4, "chunk %u, chunk_items %u, cur_oncommit %u, chunk_oncommits %u, cur_onabort %u, chunk_onaborts %u, nOnCommit left %u, nOnAbort left %u", chunkno, chunk_items, cur_oncommit, chunk_oncommits, cur_onabort, chunk_onaborts, nOnCommit, nOnAbort);
+
 		item = (RewindRelFileNodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(chunk_size));
 
 		item->header.base.type = RewindRelFileNodeUndoItemType;
@@ -2564,10 +2569,10 @@ o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
 
 		memcpy(item->rels, &onCommit[cur_oncommit], sizeof(RelFileNode) * chunk_oncommits);
 		memcpy(&item->rels[chunk_oncommits], &onAbort[cur_onabort], sizeof(RelFileNode) * chunk_onaborts);
-		nOnCommit -= chunk_oncommits;
-		nOnAbort -= chunk_onaborts;
 		cur_oncommit += chunk_oncommits;
+		nOnCommit -= chunk_oncommits;
 		cur_onabort += chunk_onaborts;
+		nOnAbort -= chunk_onaborts;
 
 		add_new_undo_stack_item(UndoLogSystem, location);
 
