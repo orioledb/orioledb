@@ -20,11 +20,11 @@ class RewindTest(BaseTest):
 	def wait_shutdown_and_start(self, node):
 		super().wait_shutdown_and_start(node)
 
-	def wait_restart(self, node):
-		time.sleep(5)
-		while node.status() != NodeStatus.Running:
-			time.sleep(0.2)
-		node.is_started = True
+	def wait_restart(self, node, previous_start_time):
+		super().wait_restart(node, previous_start_time)
+
+	def get_pg_start_time(self, node):
+		return super().get_pg_start_time(node)
 
 	def test_rewind_oriole(self):
 		node = self.node
@@ -55,9 +55,10 @@ class RewindTest(BaseTest):
 			    'postgres', "INSERT INTO o_test\n"
 			    "	VALUES (%d, %d || 'val');\n" % (i, i))
 
+		previous_start_time = self.get_pg_start_time(node)
 		node.safe_psql('postgres', "select orioledb_rewind_by_time(9);\n")
 
-		self.wait_restart(node)
+		self.wait_restart(node, previous_start_time)
 
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT * FROM o_test;')),
@@ -94,9 +95,10 @@ class RewindTest(BaseTest):
 			    'postgres', "INSERT INTO o_test_heap\n"
 			    "	VALUES (%d, %d || 'val');\n" % (i, i))
 
+		previous_start_time = self.get_pg_start_time(node)
 		node.safe_psql('postgres', "select orioledb_rewind_by_time(9);\n")
 
-		self.wait_restart(node)
+		self.wait_restart(node, previous_start_time)
 
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT * FROM o_test_heap;')),
@@ -295,9 +297,10 @@ class RewindTest(BaseTest):
 			    (i, i, i, i, i + 1, i + 1, i + 1, i + 1, i + 2, i + 2, i + 2,
 			     i + 2, i + 3, i + 3, i + 3, i + 3))
 
+		previous_start_time = self.get_pg_start_time(node)
 		node.safe_psql('postgres', "select orioledb_rewind_by_time(9);\n")
 
-		self.wait_restart(node)
+		self.wait_restart(node, previous_start_time)
 
 		self.maxDiff = None
 		self.assertEqual(
