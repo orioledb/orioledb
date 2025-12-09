@@ -128,9 +128,9 @@ typedef enum
 	oIndexToast = 1,
 	oIndexBridge = 2,
 	oIndexPrimary = 3,
-	oIndexExclusion = 4,
-	oIndexUnique = 5,
-	oIndexRegular = 6,
+	oIndexUnique = 4,
+	oIndexRegular = 5,
+	oIndexExclusion = 6,
 } OIndexType;
 
 static inline OIndexType
