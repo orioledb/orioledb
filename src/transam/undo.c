@@ -703,7 +703,7 @@ undo_item_buf_read_item(UndoItemBuf *buf,
 	itemSize = ((UndoStackItem *) buf->data)->itemSize;
 	if (itemSize > buf->length)
 	{
-		buf->length *= 2;
+		buf->length *= pg_nextpower2_32(itemSize);
 		if (buf->data == buf->staticData)
 		{
 			buf->data = palloc(buf->length);
@@ -2533,24 +2533,44 @@ void
 o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
 								   int nOnCommit, int nOnAbort)
 {
-	LocationIndex size;
+	Size		chunk_size;
 	UndoLocation location;
 	RewindRelFileNodeUndoStackItem *item;
+	int			chunk_items;
+	int			chunk_oncommits;
+	int			chunk_onaborts;
+	int			cur_oncommit = 0;
+	int			cur_onabort = 0;
+	int			chunkno = 0;
 
-	size = offsetof(RewindRelFileNodeUndoStackItem, rels) + sizeof(RelFileNode) * (nOnCommit + nOnAbort);
-	item = (RewindRelFileNodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(size));
+	while (nOnCommit > 0 || nOnAbort > 0)
+	{
+		chunk_items = (UINT16_MAX - offsetof(RewindRelFileNodeUndoStackItem, rels)) / sizeof(RelFileNode);
+		chunk_oncommits = Min(chunk_items, nOnCommit);
+		chunk_onaborts = Min(chunk_items - chunk_oncommits, nOnAbort);
 
-	item->header.base.type = RewindRelFileNodeUndoItemType;
-	item->header.base.itemSize = size;
-	item->header.base.indexType = oIndexPrimary;
+		chunk_size = offsetof(RewindRelFileNodeUndoStackItem, rels) + sizeof(RelFileNode) * (chunk_oncommits + chunk_onaborts);
+		chunkno += 1;
+		Assert(chunk_size < UINT16_MAX);
 
-	item->nCommitRels = nOnCommit;
-	item->nAbortRels = nOnAbort;
+		elog(DEBUG4, "chunk %u, chunk_size %lu, chunk_items %u, cur_oncommit %u, chunk_oncommits %u, cur_onabort %u, chunk_onaborts %u, nOnCommit left %u, nOnAbort left %u", chunkno, chunk_size, chunk_items, cur_oncommit, chunk_oncommits, cur_onabort, chunk_onaborts, nOnCommit, nOnAbort);
+		item = (RewindRelFileNodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(chunk_size));
 
-	memcpy(item->rels, onCommit, sizeof(RelFileNode) * nOnCommit);
-	memcpy(&item->rels[nOnCommit], onAbort, sizeof(RelFileNode) * nOnAbort);
+		item->header.base.type = RewindRelFileNodeUndoItemType;
+		item->header.base.itemSize = (LocationIndex) chunk_size;
+		item->header.base.indexType = oIndexPrimary;
+		item->nCommitRels = chunk_oncommits;
+		item->nAbortRels = chunk_onaborts;
 
-	add_new_undo_stack_item(UndoLogSystem, location);
+		memcpy(item->rels, &onCommit[cur_oncommit], sizeof(RelFileNode) * chunk_oncommits);
+		memcpy(&item->rels[chunk_oncommits], &onAbort[cur_onabort], sizeof(RelFileNode) * chunk_onaborts);
+		nOnCommit -= chunk_oncommits;
+		nOnAbort -= chunk_onaborts;
+		cur_oncommit += chunk_oncommits;
+		cur_onabort += chunk_onaborts;
 
-	release_undo_size(UndoLogSystem);
+		add_new_undo_stack_item(UndoLogSystem, location);
+
+		release_undo_size(UndoLogSystem);
+	}
 }
