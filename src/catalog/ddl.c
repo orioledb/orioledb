@@ -482,6 +482,7 @@ get_all_vacuum_rels(int options)
 	return vacrels;
 }
 
+/* Based on postgres function ReindexMultipleTables */
 static bool
 check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool concurrently)
 {
@@ -505,7 +506,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	 */
 	Assert(objectName || objectKind != REINDEX_OBJECT_SCHEMA);
 
-	if (objectKind == REINDEX_OBJECT_SYSTEM)
+	if (objectKind == REINDEX_OBJECT_SYSTEM && concurrently)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("cannot reindex system catalogs concurrently")));
@@ -620,7 +621,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 		 * Skip system tables, since index_create() would reject indexing them
 		 * concurrently (and it would likely fail if we tried).
 		 */
-		if (IsCatalogRelationOid(relid))
+		if (concurrently && IsCatalogRelationOid(relid))
 		{
 			if (!concurrent_warning)
 				ereport(WARNING,
