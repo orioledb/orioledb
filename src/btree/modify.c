@@ -1177,6 +1177,8 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 	bool		found_but_insert;
 
+	Assert(checkUnique == UNIQUE_CHECK_YES || checkUnique == UNIQUE_CHECK_EXISTING || checkUnique == UNIQUE_CHECK_PARTIAL);
+
 	if (STOPEVENTS_ENABLED())
 		params = prepare_modify_start_params(desc);
 	STOPEVENT(STOPEVENT_MODIFY_START, params);
