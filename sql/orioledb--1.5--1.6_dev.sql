@@ -14,3 +14,8 @@ CREATE FUNCTION orioledb_get_current_heap_xid()
 RETURNS int8
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_int4range_immutable(input_str text)
+RETURNS int4range
+AS 'MODULE_PATHNAME'
+IMMUTABLE LANGUAGE C;
