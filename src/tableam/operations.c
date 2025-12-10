@@ -940,7 +940,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 	InsertOnConflictCallbackArg ioc_arg;
 	UndoStackLocations undoStackLocations;
 	OTuple		tup;
-	OSnapshot	oSnapshot;
+	OSnapshot	oSnapshot = {0};
 	CommitSeqNo csn;
 	OXid		oxid;
 	Datum		conflictTid;
