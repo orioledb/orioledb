@@ -89,6 +89,8 @@ typedef struct
 #define O_MERGE_UNDO_IMAGE_SIZE (MAXALIGN(sizeof(UndoPageImageHeader)) + ORIOLEDB_BLCKSZ * 2)
 /* undo location of a page image */
 #define O_UNDO_GET_IMAGE_LOCATION(undo_loc, left) ((undo_loc) + MAXALIGN(sizeof(UndoPageImageHeader)) + ((left) ? 0 : ORIOLEDB_BLCKSZ))
+/* maximum size of undo record */
+#define O_MAX_UNDO_RECORD_SIZE O_MERGE_UNDO_IMAGE_SIZE
 
 extern bool page_item_rollback(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 							   bool loop, BTreeLeafTuphdr *non_lock_tuphdr_ptr,

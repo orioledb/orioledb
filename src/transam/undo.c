@@ -218,13 +218,13 @@ undo_shmem_needs(void)
 
 	regular_row_undo_circular_buffer_fraction = 1.0 - regular_block_undo_circular_buffer_fraction - system_undo_circular_buffer_fraction;
 	o_undo_circular_sizes[UndoLogRegular] = regular_row_undo_circular_buffer_fraction * undo_circular_buffer_size;
-	o_undo_circular_sizes[UndoLogRegular] = Max(o_undo_circular_sizes[UndoLogRegular], 4 * max_procs * ORIOLEDB_BLCKSZ);
+	o_undo_circular_sizes[UndoLogRegular] = Max(o_undo_circular_sizes[UndoLogRegular], max_procs * 2 * O_MAX_UNDO_RECORD_SIZE);
 	o_undo_circular_sizes[UndoLogRegular] = CACHELINEALIGN(o_undo_circular_sizes[UndoLogRegular]);
 	o_undo_circular_sizes[UndoLogRegularPageLevel] = regular_block_undo_circular_buffer_fraction * undo_circular_buffer_size;
-	o_undo_circular_sizes[UndoLogRegularPageLevel] = Max(o_undo_circular_sizes[UndoLogRegularPageLevel], 4 * max_procs * ORIOLEDB_BLCKSZ);
+	o_undo_circular_sizes[UndoLogRegularPageLevel] = Max(o_undo_circular_sizes[UndoLogRegularPageLevel], max_procs * 2 * O_MAX_UNDO_RECORD_SIZE);
 	o_undo_circular_sizes[UndoLogRegularPageLevel] = CACHELINEALIGN(o_undo_circular_sizes[UndoLogRegularPageLevel]);
 	o_undo_circular_sizes[UndoLogSystem] = system_undo_circular_buffer_fraction * undo_circular_buffer_size;
-	o_undo_circular_sizes[UndoLogSystem] = Max(o_undo_circular_sizes[UndoLogSystem], 4 * max_procs * ORIOLEDB_BLCKSZ);
+	o_undo_circular_sizes[UndoLogSystem] = Max(o_undo_circular_sizes[UndoLogSystem], max_procs * 2 * O_MAX_UNDO_RECORD_SIZE);
 	o_undo_circular_sizes[UndoLogSystem] = CACHELINEALIGN(o_undo_circular_sizes[UndoLogSystem]);
 	undoBuffersDesc.buffersCount = undo_buffers_count;
 
@@ -703,7 +703,7 @@ undo_item_buf_read_item(UndoItemBuf *buf,
 	itemSize = ((UndoStackItem *) buf->data)->itemSize;
 	if (itemSize > buf->length)
 	{
-		buf->length *= 2;
+		buf->length = pg_nextpower2_32(itemSize);
 		if (buf->data == buf->staticData)
 		{
 			buf->data = palloc(buf->length);
@@ -1303,7 +1303,7 @@ get_undo_record(UndoLogType undoType, UndoLocation *undoLocation, Size size)
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
 	Size		circularBufferSize = o_undo_circular_sizes[(int) undoType];
 
-	Assert(size == MAXALIGN(size));
+	Assert(size == MAXALIGN(size) && size <= O_MAX_UNDO_RECORD_SIZE);
 	Assert(undoType != UndoLogNone);
 
 	set_my_reserved_location(undoType);
@@ -2537,20 +2537,36 @@ o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
 	UndoLocation location;
 	RewindRelFileNodeUndoStackItem *item;
 
-	size = offsetof(RewindRelFileNodeUndoStackItem, rels) + sizeof(RelFileNode) * (nOnCommit + nOnAbort);
-	item = (RewindRelFileNodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(size));
+	while (nOnCommit + nOnAbort > 0)
+	{
+		int			itemsLeft = (O_MAX_UNDO_RECORD_SIZE - offsetof(RewindRelFileNodeUndoStackItem, rels)) / sizeof(RelFileNode);
+		int			stepOnCommit;
+		int			stepOnAbort;
 
-	item->header.base.type = RewindRelFileNodeUndoItemType;
-	item->header.base.itemSize = size;
-	item->header.base.indexType = oIndexPrimary;
+		stepOnCommit = Min(nOnCommit, itemsLeft);
+		itemsLeft -= stepOnCommit;
+		stepOnAbort = Min(nOnAbort, itemsLeft);
 
-	item->nCommitRels = nOnCommit;
-	item->nAbortRels = nOnAbort;
+		size = offsetof(RewindRelFileNodeUndoStackItem, rels) + sizeof(RelFileNode) * (stepOnCommit + stepOnAbort);
+		item = (RewindRelFileNodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(size));
 
-	memcpy(item->rels, onCommit, sizeof(RelFileNode) * nOnCommit);
-	memcpy(&item->rels[nOnCommit], onAbort, sizeof(RelFileNode) * nOnAbort);
+		item->header.base.type = RewindRelFileNodeUndoItemType;
+		item->header.base.itemSize = size;
+		item->header.base.indexType = oIndexPrimary;
 
-	add_new_undo_stack_item(UndoLogSystem, location);
+		item->nCommitRels = stepOnCommit;
+		item->nAbortRels = stepOnAbort;
 
-	release_undo_size(UndoLogSystem);
+		memcpy(item->rels, onCommit, sizeof(RelFileNode) * stepOnCommit);
+		memcpy(&item->rels[stepOnCommit], onAbort, sizeof(RelFileNode) * stepOnAbort);
+
+		add_new_undo_stack_item(UndoLogSystem, location);
+
+		release_undo_size(UndoLogSystem);
+
+		onCommit += stepOnCommit;
+		nOnCommit -= stepOnCommit;
+		onAbort += stepOnAbort;
+		nOnAbort -= stepOnAbort;
+	}
 }
