@@ -801,15 +801,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				cur_version);
 
 			{
-				extern Datum orioledb_sys_tree_structure(PG_FUNCTION_ARGS);
-				Datum res;
-				text  *options = cstring_to_text("");
-				res = DirectFunctionCall3(orioledb_sys_tree_structure, 
-					ObjectIdGetDatum(2),
-					PointerGetDatum(options),
-					Int32GetDatum(32));
-
-				elog(WARNING, "TREE: %s", text_to_cstring(DatumGetTextP(res)));
+				extern const text *retrieve_orioledb_sys_tree_structure(int systree, int depth);
+				elog(WARNING, "%s", text_to_cstring(retrieve_orioledb_sys_tree_structure(SYS_TREES_O_TABLES, 32)));
 			}
 
 			ix_type = treeType;
