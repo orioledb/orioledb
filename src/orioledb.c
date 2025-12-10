@@ -1161,9 +1161,7 @@ ppools_shmem_init(Pointer ptr, bool found)
 		{
 			page_descs[i].fileExtent.len = InvalidFileExtentLen;
 			page_descs[i].fileExtent.off = InvalidFileExtentOff;
-			page_descs[i].oids.datoid = InvalidOid;
-			page_descs[i].oids.reloid = InvalidOid;
-			page_descs[i].oids.relnode = InvalidOid;
+			page_descs[i].oids = create_oids();
 			page_descs[i].ionum = -1;
 			page_descs[i].type = 0;
 			page_descs[i].flags = 0;
@@ -1540,6 +1538,11 @@ void
 o_invalidate_oids(ORelOids oids)
 {
 	SharedInvalidationMessage msg;
+
+	elog(LOG, "[%s] [ %u %u %u ]", __func__,
+		oids.datoid,
+		oids.reloid,
+		oids.relnode);
 
 	Assert(ORelOidsIsValid(oids));
 

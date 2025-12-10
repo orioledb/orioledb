@@ -660,9 +660,7 @@ o_recovery_start_hook(void)
 			state = &workers_pool[i];
 			shm_mq_set_sender(GET_WORKER_QUEUE(i), MyProc);
 			state->type = oIndexInvalid;
-			state->oids.datoid = InvalidOid;
-			state->oids.reloid = InvalidOid;
-			state->oids.relnode = InvalidOid;
+			state->oids = create_oids();
 			state->oxid = InvalidOXid;
 
 			workers_pool[i].handle = recovery_worker_register(i);
@@ -1038,9 +1036,7 @@ recovery_init(int worker_id)
 			state = &workers_pool[i];
 			shm_mq_set_sender(GET_WORKER_QUEUE(i), MyProc);
 			state->type = oIndexInvalid;
-			state->oids.datoid = InvalidOid;
-			state->oids.reloid = InvalidOid;
-			state->oids.relnode = InvalidOid;
+			state->oids = create_oids();
 			state->oxid = InvalidOXid;
 
 			workers_pool[i].handle = recovery_worker_register(i);
@@ -2676,9 +2672,7 @@ clean_workers_oids(void)
 	{
 		RecoveryWorkerState *state = &workers_pool[i];
 
-		state->oids.datoid = InvalidOid;
-		state->oids.reloid = InvalidOid;
-		state->oids.relnode = InvalidOid;
+		state->oids = create_oids();
 		state->type = oIndexInvalid;
 	}
 }
@@ -2704,7 +2698,7 @@ recovery_send_leader_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_ver
 	msg.o_table_version = o_table_version;
 	msg.old_o_table_version = old_o_table_version;
 
-	Assert(o_tables_get_by_oids_and_version(oids, &o_table_version) != NULL);
+	Assert(o_tables_get_by_oids_and_version(oids, &o_table_version, NULL) != NULL);
 
 	/* Remember oids of index build added to a queue in a hash table */
 	state = (RecoveryIdxBuildQueueState *) hash_search(idxbuild_oids_hash,
@@ -2776,7 +2770,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 		OIndexNumber ix_num;
 		uint16		nindices;
 
-		new_o_table = o_tables_get(oids);
+		new_o_table = o_tables_get(oids, NULL, NULL);
 		Assert(new_o_table);
 
 		if (!OidIsValid(oldRelnode))
@@ -2784,13 +2778,13 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 			uint32		version = new_o_table->version - 1;
 
 			old_o_table = o_tables_get_by_oids_and_version(oids,
-														   &version);
+														   &version, NULL);
 		}
 		else
 		{
 			ORelOids	oldOids = {oids.datoid, oids.reloid, oldRelnode};
 
-			old_o_table = o_tables_get(oldOids);
+			old_o_table = o_tables_get(oldOids, NULL, NULL);
 		}
 		Assert(old_o_table);
 
@@ -2812,7 +2806,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 			{
 				if (tbl_data_exists(&old_o_table->oids))
 				{
-					old_descr = o_fetch_table_descr(old_o_table->oids);
+					old_descr = o_fetch_table_descr(old_o_table->oids, NULL, NULL);
 					rebuild_indices_insert_placeholders(&tmp_descr);
 					o_tables_meta_unlock_no_wal();
 
@@ -2879,7 +2873,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 				o_fill_tmp_table_descr(&tmp_descr, new_o_table);
 				if (tbl_data_exists(&old_o_table->indices[ix_num].oids))
 				{
-					old_descr = o_fetch_table_descr(old_o_table->oids);
+					old_descr = o_fetch_table_descr(old_o_table->oids, NULL, NULL);
 					rebuild_indices_insert_placeholders(&tmp_descr);
 					o_tables_meta_unlock_no_wal();
 
@@ -3067,7 +3061,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			uint8		treeType;
 			OIndexType	ix_type;
 
-			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids);
+			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids, NULL, NULL, NULL, NULL);
 
 			ix_type = treeType;
 
@@ -3086,7 +3080,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			}
 			else if (ix_type == oIndexInvalid)
 			{
-				descr = o_fetch_table_descr(cur_oids);
+				descr = o_fetch_table_descr(cur_oids, NULL, NULL);
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
 			}
 			else
@@ -3094,7 +3088,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				Assert(ix_type == oIndexToast || ix_type == oIndexBridge);
 				descr = NULL;
 				indexDescr = o_fetch_index_descr(cur_oids, ix_type,
-												 false, NULL);
+												 false, NULL, NULL);
 			}
 
 			if (sys_tree_num == -1)

@@ -201,6 +201,18 @@ typedef struct
 	Oid			relnode;
 } ORelOids;
 
+static inline ORelOids
+create_oids(void)
+{
+	ORelOids oids;
+
+	oids.datoid = InvalidOid;
+	oids.reloid = InvalidOid;
+	oids.relnode = InvalidOid;
+
+	return oids;
+}
+
 typedef uint64 S3TaskLocation;
 
 typedef RelFileLocator RelFileNode;

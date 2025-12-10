@@ -310,7 +310,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 		OTable	   *o_table;
 
 		ORelOidsSetFromRel(tbl_oids, heap);
-		o_table = o_tables_get(tbl_oids);
+		o_table = o_tables_get(tbl_oids, NULL, NULL);
 
 		if (index->rd_index->indisprimary && o_table->has_primary)
 		{
@@ -540,7 +540,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 
 		ORelOidsSetFromRel(oids, heapRel);
 
-		descr = o_fetch_table_descr(oids);
+		descr = o_fetch_table_descr(oids, NULL, NULL);
 		Assert(descr != NULL);
 
 		rowid = DatumGetByteaP(tupleid);
@@ -576,9 +576,9 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 		ix_type = oIndexUnique;
 	else
 		ix_type = oIndexRegular;
-	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
+	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL, NULL);
 	Assert(index_descr != NULL);
-	descr = o_fetch_table_descr(index_descr->tableOids);
+	descr = o_fetch_table_descr(index_descr->tableOids, NULL, NULL);
 	Assert(descr != NULL);
 	/* Find ix_num */
 	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
@@ -686,9 +686,9 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 		ix_type = oIndexUnique;
 	else
 		ix_type = oIndexRegular;
-	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
+	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL, NULL);
 	Assert(index_descr != NULL);
-	descr = o_fetch_table_descr(index_descr->tableOids);
+	descr = o_fetch_table_descr(index_descr->tableOids, NULL, NULL);
 	Assert(descr != NULL);
 
 	/* Find ix_num */
@@ -838,9 +838,9 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 		ix_type = oIndexUnique;
 	else
 		ix_type = oIndexRegular;
-	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
+	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL, NULL);
 	Assert(index_descr != NULL);
-	descr = o_fetch_table_descr(index_descr->tableOids);
+	descr = o_fetch_table_descr(index_descr->tableOids, NULL, NULL);
 	Assert(descr != NULL);
 
 	/* Find ix_num */
@@ -1460,9 +1460,9 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 		ix_type = oIndexUnique;
 	else
 		ix_type = oIndexRegular;
-	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
+	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL, NULL);
 	Assert(index_descr != NULL);
-	descr = o_fetch_table_descr(index_descr->tableOids);
+	descr = o_fetch_table_descr(index_descr->tableOids, NULL, NULL);
 	Assert(descr != NULL);
 	/* Find ix_num */
 	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
@@ -1892,7 +1892,7 @@ bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 
 	ORelOidsSetFromRel(oids, heapRel);
 
-	descr = o_fetch_table_descr(oids);
+	descr = o_fetch_table_descr(oids, NULL, NULL);
 	Assert(descr != NULL);
 
 	rowid = DatumGetByteaP(tupleid);

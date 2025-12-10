@@ -207,6 +207,9 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 *    increasing page change count and reusing the page during page unlock.
 	 */
 	headerCsn = header->csn;
+	elog(LOG, "[%s] csn %lu headerCsn %lu :: read_undo %d COMMITSEQNO_IS_NORMAL(csn) %d",
+		__func__, csn, headerCsn, read_undo, COMMITSEQNO_IS_NORMAL(csn));
+
 	if (read_undo && COMMITSEQNO_IS_NORMAL(csn) && headerCsn >= csn)
 	{
 		UndoLocation pageUndoLoc;
@@ -216,6 +219,9 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 		pg_read_barrier();
 		if (header->o_header.pageChangeCount != pageChangeCount)
 			return false;
+
+		elog(LOG, "[%s] csn %lu headerCsn %lu :: 1 headerCsn >= csn, read_page_from_undo",
+			__func__, csn, headerCsn);
 
 		pageUndoLoc = read_page_from_undo(desc, img, headerUndoLocation, csn,
 										  key, keyType, lokey);
@@ -239,6 +245,9 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 	if (read_undo && COMMITSEQNO_IS_NORMAL(csn) && header->csn >= csn)
 	{
 		UndoLocation pageUndoLoc;
+
+		elog(LOG, "[%s] csn %lu headerCsn %lu :: 2 headerCsn >= csn, read_page_from_undo",
+			__func__, csn, headerCsn);
 
 		pageUndoLoc = read_page_from_undo(desc, img, header->undoLocation, csn,
 										  key, keyType, lokey);
@@ -389,9 +398,7 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 					 checkpoint_state->punchHolesTrancheId);
 
 	page_desc->type = oIndexInvalid;
-	page_desc->oids.datoid = InvalidOid;
-	page_desc->oids.reloid = InvalidOid;
-	page_desc->oids.relnode = InvalidOid;
+	page_desc->oids = create_oids();
 	page_desc->fileExtent.len = InvalidFileExtentLen;
 	page_desc->fileExtent.off = InvalidFileExtentOff;
 

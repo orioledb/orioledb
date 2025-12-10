@@ -2482,7 +2482,7 @@ index_oids_get_btree_descr(ORelOids oids, OIndexType type)
 	bool		nested;
 
 	/* Check is this table is visible for us */
-	indexDescr = o_fetch_index_descr(oids, type, false, &nested);
+	indexDescr = o_fetch_index_descr(oids, type, false, &nested, NULL);
 
 	if (indexDescr == NULL)
 		return NULL;

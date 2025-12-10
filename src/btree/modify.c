@@ -698,6 +698,7 @@ o_btree_modify_insert_update(BTreeModifyInternalContext *context)
 
 	if (context->undoIsReserved && context->needsUndo)
 	{
+		elog(LOG, "[%s] o_btree_modify_add_undo_record", __func__);
 		o_btree_modify_add_undo_record(context);
 	}
 	else if (!context->needsUndo)
@@ -761,6 +762,7 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 	}
 	else
 	{
+		elog(LOG, "[%s] oids [ %u %u %u ]", __func__, desc->oids.datoid, desc->oids.reloid, desc->oids.relnode);
 		/* Still need the undo item to deal with transaction rollback */
 		undoLocation = make_undo_record(desc, context->tuple, true,
 										BTreeOperationInsert, blkno,
@@ -770,6 +772,8 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 		{
 			leafTuphdr->undoLocation = InvalidUndoLocation;
 			leafTuphdr->undoLocation |= current_command_get_undo_location();
+
+			elog(LOG, "[%s] oids [ %u %u %u ] leafTuphdr->undoLocation %lu", __func__, desc->oids.datoid, desc->oids.reloid, desc->oids.relnode, leafTuphdr->undoLocation);
 		}
 	}
 }
@@ -1449,7 +1453,7 @@ o_btree_autonomous_insert(BTreeDescr *desc, OTuple tuple)
 										   RowLockUpdate,
 										   NULL, BTreeLeafTupleNonDeleted,
 										   &nullCallbackInfo);
-			o_wal_insert(desc, tuple, REPLICA_IDENTITY_DEFAULT);
+			o_wal_insert(desc, tuple, REPLICA_IDENTITY_DEFAULT, O_TABLE_INVALID_VERSION /* no version is necessary here for system trees other than OTable */); // @TODO !!! VERSION
 		}
 		PG_CATCH();
 		{
@@ -1497,9 +1501,9 @@ o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType keyType,
 										   &nullCallbackInfo);
 			Assert(IS_SYS_TREE_OIDS(desc->oids));
 			if (keyType == BTreeKeyLeafTuple)
-				o_wal_delete(desc, key, REPLICA_IDENTITY_DEFAULT);
+				o_wal_delete(desc, key, REPLICA_IDENTITY_DEFAULT, O_TABLE_INVALID_VERSION /* no version is necessary here for system trees other than OTable */); // @TODO !!! VERSION
 			else if (keyType == BTreeKeyNonLeafKey)
-				o_wal_delete_key(desc, key, false);
+				o_wal_delete_key(desc, key, false, O_TABLE_INVALID_VERSION /* no version is necessary here for system trees other than OTable */); // @TODO !!! VERSION
 		}
 		PG_CATCH();
 		{

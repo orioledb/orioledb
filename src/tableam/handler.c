@@ -793,7 +793,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 		}
 
 		ORelOidsSetFromRel(old_oids, rel);
-		old_o_table = o_tables_get(old_oids);
+		old_o_table = o_tables_get(old_oids, NULL, NULL);
 		Assert(old_o_table != NULL);
 		oldTreeOids = o_table_make_index_oids(old_o_table, &oldTreeOidsNum);
 
@@ -833,7 +833,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 
 		orioledb_free_rd_amcache(rel);
 
-		Assert(o_fetch_table_descr(new_oids) != NULL);
+		Assert(o_fetch_table_descr(new_oids, NULL, NULL) != NULL);
 		is_temp = rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP;
 		add_undo_truncate_relnode(old_oids, oldTreeOids, oldTreeOidsNum,
 								  new_oids, newTreeOids, newTreeOidsNum, !is_temp);
@@ -1238,7 +1238,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		tblOids.reloid = tbl->rd_rel->oid;
 		tblOids.relnode = tbl->rd_rel->relfilenode;
 
-		table_desc = o_fetch_table_descr(tblOids);
+		table_desc = o_fetch_table_descr(tblOids, NULL, NULL);
 		ixnum = find_tree_in_descr(table_desc, idxOids);
 		if (ixnum == InvalidIndexNumber)
 		{
@@ -2320,7 +2320,7 @@ relation_get_descr(Relation rel)
 	if (rel->rd_amcache)
 		return (OTableDescr *) rel->rd_amcache;
 
-	result = o_fetch_table_descr(oids);
+	result = o_fetch_table_descr(oids, NULL, NULL);
 	rel->rd_amcache = result;
 	if (result)
 		table_descr_inc_refcnt(result);

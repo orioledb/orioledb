@@ -216,22 +216,35 @@ oTablesGetTupleDataSize(OTuple tuple, void *arg)
 	return chunk->dataLength;
 }
 
+static uint32
+oTablesGetTupleKeyVersion(void *arg /* tuple.data */)
+{
+	OTableChunkKey *tupleKey = (OTableChunkKey *) arg;
+
+	return tupleKey->version;
+}
+
 static TupleFetchCallbackResult
 oTablesVersionCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 					   void *arg, TupleFetchCallbackCheckType check_type)
 {
 	OTableChunkKey *tupleKey = (OTableChunkKey *) tuple.data;
 	OTableChunkKey *boundKey = (OTableChunkKey *) arg;
+	bool tupIsCurrentOxid = tupOxid == get_current_oxid_if_any();
+	bool inProgress = COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn);
+
+	elog(LOG, "[%s] 1 tupleKey->version %u boundKey->version %u", __func__, tupleKey->version, tupleKey->version, boundKey->version);
 
 	if (check_type != OTupleFetchCallbackVersionCheck)
 		return OTupleFetchNext;
 
-	if (!(COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn) &&
-		  tupOxid == get_current_oxid_if_any()))
+	if (inProgress && !tupIsCurrentOxid)
 		return OTupleFetchNext;
 
 	if (boundKey->version == O_TABLE_INVALID_VERSION)
 		boundKey->version = tupleKey->version;
+
+	elog(LOG, "[%s] 2 tupleKey->version %u boundKey->version %u", __func__, tupleKey->version, tupleKey->version, boundKey->version);
 
 	if (tupleKey->version > boundKey->version)
 		return OTupleFetchNext;
@@ -253,7 +266,8 @@ ToastAPI	oTablesToastAPI = {
 	.getTupleChunknum = oTablesGetTupleChunknum,
 	.getTupleDataSize = oTablesGetTupleDataSize,
 	.deleteLogFullTuple = false,
-	.versionCallback = oTablesVersionCallback
+	.versionCallback = oTablesGetTupleKeyVersion,
+	.fetchCallback = oTablesVersionCallback
 };
 
 void
@@ -1031,11 +1045,16 @@ o_tables_drop_by_oids(ORelOids oids, OXid oxid, CommitSeqNo csn)
 				any_wal = false;
 	BTreeDescr *sys_tree = NULL;
 
+	elog(LOG, "[%s] oids [ %u %u %u ]", __func__,
+		oids.datoid,
+		oids.reloid,
+		oids.relnode);
+
 	key.oids = oids;
 	key.chunknum = 0;
 
 	systrees_modify_start();
-	table = o_tables_get(oids);
+	table = o_tables_get(oids, NULL, NULL);
 	Assert(table);
 	if (table)
 	{
@@ -1104,6 +1123,11 @@ o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
 	int			len;
 	BTreeDescr *sys_tree;
 
+	elog(LOG, "[%s] oids [ %u %u %u ]", __func__,
+		table->oids.datoid,
+		table->oids.reloid,
+		table->oids.relnode);
+
 	data = serialize_o_table(table, &len);
 
 	key.oids = table->oids;
@@ -1126,7 +1150,7 @@ o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
  * Same as o_tables_get, if version not NULL find o_tables with passed version
  */
 OTable *
-o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version)
+o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version, OSnapshot *snapshot)
 {
 	OTableChunkKey key,
 			   *found_key = NULL;
@@ -1141,10 +1165,13 @@ o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version)
 	else
 		key.version = O_TABLE_INVALID_VERSION;
 
+	elog(LOG, "[%s] Setup a OTableChunkKey key for oids [ %u %u %u ] key.version %u",
+		__func__, oids.datoid, oids.reloid, oids.relnode, key.version);
+
 	found_key = &key;
 	result = generic_toast_get_any_with_key(&oTablesToastAPI, (Pointer) &key,
 											&dataLength,
-											&o_non_deleted_snapshot,
+											snapshot ? snapshot : &o_non_deleted_snapshot,
 											get_sys_tree(SYS_TREES_O_TABLES),
 											(Pointer *) &found_key);
 
@@ -1163,9 +1190,9 @@ o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version)
  * Find OTable by its oids
  */
 OTable *
-o_tables_get(ORelOids oids)
+o_tables_get(ORelOids oids, OSnapshot *snapshot, uint32 *version)
 {
-	return o_tables_get_by_oids_and_version(oids, NULL);
+	return o_tables_get_by_oids_and_version(oids, version, snapshot);
 }
 
 /*
@@ -1183,7 +1210,7 @@ o_tables_get_by_tree(ORelOids oids, OIndexType type)
 	if (!result)
 		return NULL;
 
-	return o_tables_get(tableOids);
+	return o_tables_get(tableOids, NULL, NULL);
 }
 
 /* Returns number of OrioleDB tables in the database */
@@ -1233,8 +1260,10 @@ o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
 	key.chunknum = 0;
 	key.version = table->version + 1;
 
+	elog(LOG, "[%s] key.version %u table->version %u csn %u", __func__, key.version, table->version, csn);
+
 	systrees_modify_start();
-	old_table = o_tables_get(table->oids);
+	old_table = o_tables_get(table->oids, NULL, NULL);
 	o_tables_oids_indexes(old_table, table, oxid, csn);
 	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
 	result = generic_toast_update_optional_wal(&oTablesToastAPI,
@@ -1259,6 +1288,10 @@ o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn)
 								   O_INVALIDATE_OIDS_ON_ABORT);
 		o_invalidate_oids(o_table->indices[PrimaryIndexNumber].oids);
 	}
+	elog(LOG, "[%s] ======= SHARED INVALIDATE oids [ %u %u %u ]", __func__,
+		o_table->oids.datoid,
+		o_table->oids.reloid,
+		o_table->oids.relnode);
 	o_add_invalidate_undo_item(o_table->oids,
 							   O_INVALIDATE_OIDS_ON_ABORT);
 	o_invalidate_oids(o_table->oids);
@@ -1375,7 +1408,7 @@ describe_table(ORelOids oids)
 				max_type_str,
 				max_collation_str;
 
-	table = o_tables_get(oids);
+	table = o_tables_get(oids, NULL, NULL);
 	if (table == NULL)
 		elog(ERROR, "unable to find orioledb table description.");
 
@@ -1510,7 +1543,7 @@ o_tables_foreach_callback(ORelOids oids, void *arg)
 
 	Assert(ORelOidsIsValid(oids));
 
-	table = o_tables_get(oids);
+	table = o_tables_get(oids, NULL, NULL);
 	if (table != NULL)
 	{
 		foreach_arg->callback(table, foreach_arg->arg);
