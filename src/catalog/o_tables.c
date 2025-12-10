@@ -216,18 +216,30 @@ oTablesGetTupleDataSize(OTuple tuple, void *arg)
 	return chunk->dataLength;
 }
 
+static uint32
+oTablesGetTupleKeyVersion(OTuple tuple, void *arg)
+{
+	OTableChunk *chunk = (OTableChunk *) tuple.data;
+
+	return chunk->key.version;
+}
+
 static TupleFetchCallbackResult
-oTablesVersionCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
-					   void *arg, TupleFetchCallbackCheckType check_type)
+oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
+					 void *arg, TupleFetchCallbackCheckType check_type)
 {
 	OTableChunkKey *tupleKey = (OTableChunkKey *) tuple.data;
 	OTableChunkKey *boundKey = (OTableChunkKey *) arg;
+	bool		tupIsCurrentOxid = tupOxid == get_current_oxid_if_any();
+	bool		inProgress = COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn);
+
+	if (boundKey->version != O_TABLE_INVALID_VERSION)
+		check_type = OTupleFetchCallbackVersionCheck;
 
 	if (check_type != OTupleFetchCallbackVersionCheck)
 		return OTupleFetchNext;
 
-	if (!(COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn) &&
-		  tupOxid == get_current_oxid_if_any()))
+	if (inProgress && !tupIsCurrentOxid)
 		return OTupleFetchNext;
 
 	if (boundKey->version == O_TABLE_INVALID_VERSION)
@@ -252,8 +264,9 @@ ToastAPI	oTablesToastAPI = {
 	.getTupleData = oTablesGetTupleData,
 	.getTupleChunknum = oTablesGetTupleChunknum,
 	.getTupleDataSize = oTablesGetTupleDataSize,
+	.getTupleKeyVersion = oTablesGetTupleKeyVersion,
 	.deleteLogFullTuple = false,
-	.versionCallback = oTablesVersionCallback
+	.fetchCallback = oTablesFetchCallback
 };
 
 void
@@ -1126,7 +1139,7 @@ o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
  * Same as o_tables_get, if version not NULL find o_tables with passed version
  */
 OTable *
-o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version)
+o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version, OSnapshot *snapshot)
 {
 	OTableChunkKey key,
 			   *found_key = NULL;
@@ -1144,7 +1157,7 @@ o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version)
 	found_key = &key;
 	result = generic_toast_get_any_with_key(&oTablesToastAPI, (Pointer) &key,
 											&dataLength,
-											&o_non_deleted_snapshot,
+											snapshot ? snapshot : &o_non_deleted_snapshot,
 											get_sys_tree(SYS_TREES_O_TABLES),
 											(Pointer *) &found_key);
 
@@ -1165,7 +1178,7 @@ o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version)
 OTable *
 o_tables_get(ORelOids oids)
 {
-	return o_tables_get_by_oids_and_version(oids, NULL);
+	return o_tables_get_by_oids_and_version(oids, NULL, NULL);
 }
 
 /*

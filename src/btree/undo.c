@@ -419,7 +419,7 @@ get_tree_descr(ORelOids oids, OIndexType type)
 	}
 	else
 	{
-		OIndexDescr *descr = o_fetch_index_descr(oids, type, false, NULL);
+		OIndexDescr *descr = o_fetch_index_descr(oids, type, false, NULL, NULL);
 
 		if (!descr)
 			return NULL;

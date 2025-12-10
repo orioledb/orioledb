@@ -521,6 +521,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	OIndexDescr *indexDescr = NULL;
 	ORelOids	cur_oids = {0, 0, 0};
 	char		relreplident = REPLICA_IDENTITY_DEFAULT;
+	uint32		cur_version = O_TABLE_INVALID_VERSION;
 	OXid		oxid = InvalidOXid;
 	TransactionId logicalXid = InvalidTransactionId,
 				heapXid = InvalidTransactionId;
@@ -782,8 +783,14 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		{
 			int			sys_tree_num = -1;
 			uint8		treeType = 0;
+			OXid		xmin;
 
-			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids);
+			OSnapshot	snapshot;
+
+			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids, &xmin, &snapshot.csn, &snapshot.cid, &cur_version);
+
+			snapshot.xmin = xmin;
+			snapshot.xlogptr = changeXLogPtr;
 
 			ix_type = treeType;
 			relreplident = REPLICA_IDENTITY_DEFAULT;
@@ -821,7 +828,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else if (ix_type == oIndexInvalid)
 			{
-				descr = o_fetch_table_descr(cur_oids);
+				descr = o_fetch_table_descr(cur_oids, &snapshot, &cur_version);
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
 				elog(DEBUG4, "WAL_REC_RELATION oIndexInvalid");
 			}
@@ -829,8 +836,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			{
 				elog(DEBUG4, "WAL_REC_RELATION oIndexToast");
 
-				indexDescr = o_fetch_index_descr(cur_oids, ix_type, false, NULL);
-				descr = o_fetch_table_descr(indexDescr->tableOids);
+				indexDescr = o_fetch_index_descr(cur_oids, ix_type, false, NULL, &snapshot);
+				descr = o_fetch_table_descr(indexDescr->tableOids, &snapshot, &cur_version);
 				o_toast_tupDesc = descr->toast->leafTupdesc;
 				/* Init heap tupledesc for toast table */
 				heap_toast_tupDesc = CreateTemplateTupleDesc(3);

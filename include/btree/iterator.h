@@ -50,7 +50,7 @@ extern BTreeIterator *o_btree_iterator_create(BTreeDescr *desc, void *key,
 extern void o_btree_iterator_set_tuple_ctx(BTreeIterator *it,
 										   MemoryContext tupleCxt);
 extern void o_btree_iterator_set_callback(BTreeIterator *it,
-										  TupleFetchCallback callback,
+										  TupleFetchCallback fetchCallback,
 										  void *arg);
 extern OTuple o_btree_iterator_fetch(BTreeIterator *it,
 									 CommitSeqNo *tuple_csn,
@@ -73,7 +73,7 @@ extern OTuple o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 										   MemoryContext mcxt,
 										   BTreeLocationHint *hint,
 										   bool *deleted,
-										   TupleFetchCallback cb,
+										   TupleFetchCallback fetchCallback,
 										   void *arg);
 
 extern OTuple o_find_tuple_version(BTreeDescr *desc, Page p,
@@ -81,7 +81,7 @@ extern OTuple o_find_tuple_version(BTreeDescr *desc, Page p,
 								   OSnapshot *oSnapshot,
 								   CommitSeqNo *tupleCsn,
 								   MemoryContext mcxt,
-								   TupleFetchCallback cb,
+								   TupleFetchCallback fetchCallback,
 								   void *arg);
 
 #endif							/* __BTREE_ITERATOR_H__ */

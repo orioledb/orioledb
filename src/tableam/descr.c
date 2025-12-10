@@ -55,8 +55,8 @@ typedef struct
 } InvalidateComparatorUndoStackItem;
 
 static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType,
-									bool miss_ok);
-static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table);
+									bool miss_ok, OSnapshot *snapshot);
+static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot);
 static void init_shared_root_info(OPagePool *pool,
 								  SharedRootInfo *sharedRootInfo);
 static bool o_tree_init_free_extents(BTreeDescr *desc);
@@ -629,6 +629,7 @@ fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 	old_context = MemoryContextSwitchTo(descrCxt);
 	descr->refcnt = 0;
 	descr->oids = o_table->oids;
+	descr->version = o_table->version;
 	descr->tupdesc = o_table_tupdesc(o_table);
 	descr->oldTuple = MakeSingleTupleTableSlot(descr->tupdesc,
 											   &TTSOpsOrioleDB);
@@ -639,14 +640,14 @@ fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 }
 
 static void
-fill_table_descr(OTableDescr *descr, OTable *o_table)
+fill_table_descr(OTableDescr *descr, OTable *o_table, OSnapshot *snapshot)
 {
 	MemoryContext old_context;
 
 	fill_table_descr_common_fields(descr, o_table);
 
 	old_context = MemoryContextSwitchTo(descrCxt);
-	o_table_descr_fill_indices(descr, o_table);
+	o_table_descr_fill_indices(descr, o_table, snapshot);
 	MemoryContextSwitchTo(old_context);
 
 	o_table_free(o_table);
@@ -708,7 +709,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 }
 
 static OTableDescr *
-create_table_descr(ORelOids oids)
+create_table_descr(ORelOids oids, OSnapshot *snapshot, uint32 *version)
 {
 	OTableDescr *descr;
 	bool		found;
@@ -718,7 +719,7 @@ create_table_descr(ORelOids oids)
 	old_enable_stopevents = enable_stopevents;
 	enable_stopevents = false;
 
-	o_table = o_tables_get(oids);
+	o_table = o_tables_get_by_oids_and_version(oids, version, snapshot);
 
 	if (o_table == NULL)
 	{
@@ -730,9 +731,9 @@ create_table_descr(ORelOids oids)
 						&o_table->oids,
 						HASH_ENTER,
 						&found);
-	Assert(!found);
+	/* Assert(!found); */
 
-	fill_table_descr(descr, o_table);
+	fill_table_descr(descr, o_table, snapshot);
 
 	enable_stopevents = old_enable_stopevents;
 	return descr;
@@ -768,15 +769,16 @@ find_tree_in_descr(OTableDescr *descr, ORelOids oids)
  * o_fetch_table_descr fetches OTableDescr from cache, or creates a new one.
  */
 OTableDescr *
-o_fetch_table_descr(ORelOids oids)
+o_fetch_table_descr(ORelOids oids, OSnapshot *snapshot, uint32 *version)
 {
-	OTableDescr *table_descr;
-	bool		found;
+	OTableDescr *table_descr = NULL;
+	bool		found = false;
 
-	table_descr = hash_search(oTableDescrHash, &oids, HASH_FIND, &found);
+	if (!version)
+		table_descr = hash_search(oTableDescrHash, &oids, HASH_FIND, &found);
 
 	if (!found)
-		table_descr = create_table_descr(oids);
+		table_descr = create_table_descr(oids, snapshot, version);
 
 	return table_descr;
 }
@@ -786,14 +788,14 @@ o_fetch_table_descr(ORelOids oids)
  * creates a new one.
  */
 OIndexDescr *
-o_fetch_index_descr(ORelOids oids, OIndexType type, bool lock, bool *nested)
+o_fetch_index_descr(ORelOids oids, OIndexType type, bool lock, bool *nested, OSnapshot *snapshot)
 {
 	OIndexDescr *index_descr = NULL;
 
 	if (lock)
 		o_tables_rel_lock_extended(&oids, AccessShareLock, true);
 
-	index_descr = get_index_descr(oids, type, true);
+	index_descr = get_index_descr(oids, type, true, snapshot);
 
 	if (!index_descr && lock)
 	{
@@ -973,7 +975,7 @@ o_drop_shared_root_info(Oid datoid, Oid relnode)
 }
 
 static OIndexDescr *
-get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok)
+get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OSnapshot *snapshot)
 {
 	bool		found;
 	OIndexDescr *result;
@@ -981,10 +983,10 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok)
 	MemoryContext mcxt;
 
 	result = hash_search(oIndexDescrHash, &ixOids, HASH_ENTER, &found);
-	if (found)
-		return result;
+	//if (found)
+	//	return result;
 
-	oIndex = o_indices_get(ixOids, ixType);
+	oIndex = o_indices_get(ixOids, ixType, snapshot);
 	Assert(oIndex || miss_ok);
 	if (!oIndex && miss_ok)
 	{
@@ -1009,7 +1011,7 @@ recreate_index_descr(OIndexDescr *descr)
 	int			refcnt;
 	MemoryContext mcxt;
 
-	oIndex = o_indices_get(descr->oids, descr->desc.type);
+	oIndex = o_indices_get(descr->oids, descr->desc.type, NULL);
 	if (!oIndex)
 	{
 		descr->valid = false;
@@ -1027,7 +1029,7 @@ recreate_index_descr(OIndexDescr *descr)
 }
 
 static void
-o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
+o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot)
 {
 	OIndexNumber cur_ix,
 				ctid_idx_off = 0;
@@ -1056,13 +1058,13 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
 			ixType = table->indices[cur_ix - ctid_idx_off].type;
 		}
 
-		descr->indices[cur_ix] = get_index_descr(ixOids, ixType, false);
+		descr->indices[cur_ix] = get_index_descr(ixOids, ixType, false, snapshot);
 		descr->indices[cur_ix]->refcnt++;
 	}
 
 	if (ORelOidsIsValid(table->bridge_oids))
 	{
-		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false);
+		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false, snapshot);
 		descr->bridge->refcnt++;
 	}
 	else
@@ -1070,7 +1072,7 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
 
 	if (ORelOidsIsValid(table->toast_oids))
 	{
-		descr->toast = get_index_descr(table->toast_oids, oIndexToast, false);
+		descr->toast = get_index_descr(table->toast_oids, oIndexToast, false, snapshot);
 		descr->toast->refcnt++;
 	}
 	else
@@ -1540,6 +1542,7 @@ o_tableam_descr_init(void)
 								  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 }
 
+/* @TODO maybe add version */
 static bool
 recreate_table_descr(OTableDescr *descr)
 {
@@ -1550,13 +1553,13 @@ recreate_table_descr(OTableDescr *descr)
 	old_enable_stopevents = enable_stopevents;
 	enable_stopevents = false;
 
-	o_table = o_tables_get(descr->oids);
+	o_table = o_tables_get(descr->oids); /* @TODO */
 	if (!o_table)
 		return false;
 
 	refcnt = descr->refcnt;
 	table_descr_free(descr);
-	fill_table_descr(descr, o_table);
+	fill_table_descr(descr, o_table, NULL); /* @TODO */
 	descr->refcnt = refcnt;
 
 	enable_stopevents = old_enable_stopevents;
@@ -1581,7 +1584,7 @@ recreate_table_descr_by_oids(ORelOids oids)
 		recreate_table_descr(descr);
 	}
 	else
-		(void) create_table_descr(oids);
+		(void) create_table_descr(oids, NULL, NULL);
 }
 
 void

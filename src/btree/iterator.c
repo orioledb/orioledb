@@ -117,7 +117,7 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 							 CommitSeqNo *out_csn, MemoryContext mcxt,
 							 BTreeLocationHint *hint,
 							 bool *deleted,
-							 TupleFetchCallback cb,
+							 TupleFetchCallback fetchCallback,
 							 void *arg)
 {
 	BTreePageItemLocator loc;
@@ -213,7 +213,7 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 		if (cmp == 0)
 		{
 			return o_find_tuple_version(desc, img, &loc, read_o_snapshot,
-										out_csn, mcxt, cb, arg);
+										out_csn, mcxt, fetchCallback, arg);
 		}
 	}
 
@@ -238,7 +238,8 @@ o_btree_find_tuple_by_key(BTreeDescr *desc, void *key, BTreeKeyType kind,
 OTuple
 o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 					 OSnapshot *oSnapshot, CommitSeqNo *tupleCsn,
-					 MemoryContext mcxt, TupleFetchCallback cb,
+					 MemoryContext mcxt,
+					 TupleFetchCallback fetchCallback,
 					 void *arg)
 {
 	BTreeLeafTuphdr tupHdr,
@@ -246,9 +247,11 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	OTuple		curTuple;
 	OTuple		result;
 	int			result_size;
+	MemoryContext prevMctx;
 	UndoLocation undoLocation = InvalidUndoLocation;
 	bool		curTupleAllocated = false;
-	MemoryContext prevMctx;
+
+	/* @TODO ! !! */
 
 	prevMctx = MemoryContextSwitchTo(mcxt);
 
@@ -268,6 +271,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 		oxid_match_snapshot(XACT_INFO_GET_OXID(xactInfo), oSnapshot,
 							&tupcsn, &tupptr);
+
 		if (tupleCsn)
 		{
 			if (COMMITSEQNO_IS_NORMAL(tupcsn))
@@ -278,16 +282,21 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 				*tupleCsn = COMMITSEQNO_INPROGRESS;
 		}
 
-		if (cb)
+		if (fetchCallback)
 		{
 			TupleFetchCallbackResult cbResult;
+
+			/*
+			 * Fetch from undo chain if txn is in progress OR historical
+			 * version
+			 */
 			bool		version_check = !txIsFinished;
 			OXid		tupOxid = version_check ? XACT_INFO_GET_OXID(xactInfo) : InvalidOXid;
 			TupleFetchCallbackCheckType check_type = version_check ?
 				OTupleFetchCallbackVersionCheck :
 				OTupleFetchCallbackKeyCheck;
 
-			cbResult = cb(curTuple, tupOxid, oSnapshot, arg, check_type);
+			cbResult = fetchCallback(curTuple, tupOxid, oSnapshot, arg, check_type);
 
 			if (cbResult == OTupleFetchMatch)
 				break;
@@ -301,7 +310,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 		if (!txIsFinished)
 		{
-			if (!cb)
+			if (!fetchCallback)
 			{
 				if (COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn))
 					break;
@@ -395,7 +404,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 			return result;
 		}
 	}
-	else if (tupHdr.deleted != BTreeLeafTupleNonDeleted && !cb)
+	else if (tupHdr.deleted != BTreeLeafTupleNonDeleted && !fetchCallback)
 	{
 		O_TUPLE_SET_NULL(result);
 		MemoryContextSwitchTo(prevMctx);
@@ -429,6 +438,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	it = (BTreeIterator *) palloc(sizeof(BTreeIterator));
+
 	it->combinedResult = !have_current_undo(desc->undoType) && COMMITSEQNO_IS_NORMAL(o_snapshot->csn);
 	it->oSnapshot = *o_snapshot;
 	it->scanDir = scanDir;
@@ -502,10 +512,10 @@ o_btree_iterator_set_tuple_ctx(BTreeIterator *it, MemoryContext tupleCxt)
 
 void
 o_btree_iterator_set_callback(BTreeIterator *it,
-							  TupleFetchCallback callback,
+							  TupleFetchCallback fetchCallback,
 							  void *arg)
 {
-	it->fetchCallback = callback;
+	it->fetchCallback = fetchCallback;
 	it->fetchCallbackArg = arg;
 }
 

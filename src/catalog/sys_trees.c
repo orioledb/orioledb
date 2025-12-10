@@ -538,6 +538,20 @@ orioledb_sys_tree_structure(PG_FUNCTION_ARGS)
 	PG_RETURN_POINTER(cstring_to_text(buf.data));
 }
 
+const text *
+retrieve_orioledb_sys_tree_structure(int systree, int depth)
+{
+	Datum		res;
+	text	   *options = cstring_to_text("");
+
+	res = DirectFunctionCall3(orioledb_sys_tree_structure,
+							  ObjectIdGetDatum(systree),
+							  PointerGetDatum(options),
+							  Int32GetDatum(depth));
+
+	return DatumGetTextP(res);
+}
+
 Datum
 orioledb_sys_tree_check(PG_FUNCTION_ARGS)
 {
@@ -953,7 +967,7 @@ o_table_chunk_tup_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer ar
 {
 	OTableChunk *chunk = (OTableChunk *) tup.data;
 
-	appendStringInfo(buf, "(((%u, %u, %u), %u, %u), %u)",
+	appendStringInfo(buf, "(((%u, %u, %u), chunknum %u, version %u), dataLength %u)",
 					 chunk->key.oids.datoid,
 					 chunk->key.oids.relnode,
 					 chunk->key.oids.reloid,

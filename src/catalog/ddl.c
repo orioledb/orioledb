@@ -2055,7 +2055,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	if (!old_o_table->has_primary)
 		primary_init_nfields--;
 
-	old_descr = o_fetch_table_descr(old_o_table->oids);
+	old_descr = o_fetch_table_descr(old_o_table->oids, NULL, NULL);
 	descr = relation_get_descr(rel);
 	old_slot = MakeSingleTupleTableSlot(old_descr->tupdesc, &TTSOpsOrioleDB);
 	new_slot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
@@ -2382,9 +2382,9 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 	o_table->primary_init_nfields = o_table->nfields + 1;
 
 	o_tables_table_meta_lock(NULL);
-	old_descr = o_fetch_table_descr(old_o_table->oids);
+	old_descr = o_fetch_table_descr(old_o_table->oids, NULL, NULL);
 	recreate_o_table(old_o_table, o_table);
-	descr = o_fetch_table_descr(o_table->oids);
+	descr = o_fetch_table_descr(o_table->oids, NULL, NULL);
 	o_tablespace_cache_add_table(o_table);
 	rebuild_indices_insert_placeholders(descr);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
@@ -2429,18 +2429,16 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 	old_o_table = o_table;
 	o_table = o_tables_get(o_table->oids);
 	o_table->index_bridging = false;
-	o_table->bridge_oids.datoid = InvalidOid;
-	o_table->bridge_oids.reloid = InvalidOid;
-	o_table->bridge_oids.relnode = InvalidOid;
+	ORelOidsSetInvalid(o_table->bridge_oids);
 	assign_new_oids(o_table, tbl, false);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 	o_table->primary_init_nfields = o_table->nfields - 1;
 
 	o_tables_table_meta_lock(NULL);
-	old_descr = o_fetch_table_descr(old_o_table->oids);
+	old_descr = o_fetch_table_descr(old_o_table->oids, NULL, NULL);
 	recreate_o_table(old_o_table, o_table);
-	descr = o_fetch_table_descr(o_table->oids);
+	descr = o_fetch_table_descr(o_table->oids, NULL, NULL);
 	o_tablespace_cache_add_table(o_table);
 	rebuild_indices_insert_placeholders(descr);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
@@ -3577,7 +3575,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						/*
 						 * We come here during "ALTER TABLE ... SET <OPTION>"
 						 */
-						descr = o_fetch_table_descr(oids);
+						descr = o_fetch_table_descr(oids, NULL, NULL);
 						Assert(descr);
 
 						if (options)

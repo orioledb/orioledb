@@ -37,11 +37,11 @@ static void add_finish_wal_record(uint8 rec_type, OXid xmin);
 static void add_joint_commit_wal_record(TransactionId xid, OXid xmin);
 static void add_xid_wal_record(OXid oxid, TransactionId logicalXid);
 static void add_xid_wal_record_if_needed(void);
-static void add_rel_wal_record(ORelOids oids, OIndexType type);
+static void add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version);
 static void flush_local_wal_if_needed(int required_length);
 static inline void add_local_modify(uint8 record_type, OTuple record, OffsetNumber length, OTuple record2, OffsetNumber length2);
 static void add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
-										   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2, char relreplident);
+										   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2, char relreplident, uint32 version);
 static void add_relreplident_wal_record(char relreplident);
 
 #define XID_RESERVED_LENGTH ((local_wal_contains_xid) ? 0 : sizeof(WALRecXid))
@@ -148,7 +148,7 @@ wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid *xmin, CommitSe
 
 /* Parser for WAL_REC_RELATION */
 Pointer
-wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids)
+wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin, CommitSeqNo *csn, CommandId *cid, uint32 *version)
 {
 	Assert(ptr);
 	Assert(oids);
@@ -157,6 +157,12 @@ wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids)
 	PARSE(ptr, &oids->datoid);
 	PARSE(ptr, &oids->reloid);
 	PARSE(ptr, &oids->relnode);
+
+	PARSE(ptr, xmin);
+	PARSE(ptr, csn);
+	PARSE(ptr, cid);
+
+	PARSE(ptr, version);
 
 	return ptr;
 }
@@ -326,12 +332,12 @@ wal_container_read_header(Pointer ptr, uint16 *version, uint8 *flags)
 
 void
 add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
-					  OTuple tuple, OffsetNumber length, char relreplident)
+					  OTuple tuple, OffsetNumber length, char relreplident, uint32 version)
 {
 	OTuple		nulltup;
 
 	O_TUPLE_SET_NULL(nulltup);
-	add_modify_wal_record_extended(rec_type, desc, tuple, length, nulltup, 0, relreplident);
+	add_modify_wal_record_extended(rec_type, desc, tuple, length, nulltup, 0, relreplident, version);
 }
 
 /*
@@ -340,7 +346,7 @@ add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
  */
 static void
 add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
-							   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2, char relreplident)
+							   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2, char relreplident, uint32 version)
 {
 	int			required_length;
 	ORelOids	oids = desc->oids;
@@ -393,7 +399,7 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 
 	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
 	{
-		add_rel_wal_record(oids, type);
+		add_rel_wal_record(oids, type, version);
 		if (relreplident != REPLICA_IDENTITY_DEFAULT)
 			add_relreplident_wal_record(relreplident);
 	}
@@ -435,7 +441,7 @@ add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr)
 		add_xid_wal_record_if_needed();
 
 	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
-		add_rel_wal_record(oids, type);
+		add_rel_wal_record(oids, type, O_TABLE_INVALID_VERSION /* @TODO !!! version */ );
 
 	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
@@ -507,9 +513,7 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	{
 		local_wal_buffer_offset = 0;
 		local_type = oIndexInvalid;
-		local_oids.datoid = InvalidOid;
-		local_oids.reloid = InvalidOid;
-		local_oids.relnode = InvalidOid;
+		ORelOidsSetInvalid(local_oids);
 		return InvalidXLogRecPtr;
 	}
 
@@ -570,9 +574,7 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	{
 		local_wal_buffer_offset = 0;
 		local_type = oIndexInvalid;
-		local_oids.datoid = InvalidOid;
-		local_oids.reloid = InvalidOid;
-		local_oids.relnode = InvalidOid;
+		ORelOidsSetInvalid(local_oids);
 		return;
 	}
 
@@ -715,8 +717,11 @@ add_relreplident_wal_record(char relreplident)
 }
 
 static void
-add_rel_wal_record(ORelOids oids, OIndexType type)
+add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version)
 {
+	OXid		runXmin;
+	CommitSeqNo csn;
+	CommandId	cid;
 	WALRecRelation *rec = (WALRecRelation *) (&local_wal_buffer[local_wal_buffer_offset]);
 
 	Assert(!is_recovery_process());
@@ -727,6 +732,19 @@ add_rel_wal_record(ORelOids oids, OIndexType type)
 	memcpy(rec->datoid, &oids.datoid, sizeof(Oid));
 	memcpy(rec->reloid, &oids.reloid, sizeof(Oid));
 	memcpy(rec->relnode, &oids.relnode, sizeof(Oid));
+
+	runXmin = pg_atomic_read_u64(&xid_meta->runXmin);
+	memcpy(rec->xmin, &runXmin, sizeof(runXmin));
+
+	csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
+	memcpy(rec->csn, &csn, sizeof(csn));
+
+	cid = o_get_current_command();
+	memcpy(rec->cid, &cid, sizeof(cid));
+
+	memcpy(rec->version, &version, sizeof(version));
+
+	elog(DEBUG4, "[%s] WAL_REC_RELATION xmin/csn/cid %lu/%lu/%lu version %u", __func__, runXmin, csn, cid, version);
 
 	local_wal_buffer_offset += sizeof(*rec);
 
@@ -883,9 +901,7 @@ flush_local_wal(bool isCommit, bool withXactTime)
 	local_wal_contains_xid = false;
 	local_wal_contains_switch_xid = false;
 	local_type = oIndexInvalid;
-	local_oids.datoid = InvalidOid;
-	local_oids.reloid = InvalidOid;
-	local_oids.relnode = InvalidOid;
+	ORelOidsSetInvalid(local_oids);
 	local_wal_has_material_changes = true;
 
 	return location;
@@ -904,9 +920,7 @@ flush_local_wal_if_needed(int required_length)
 		local_wal_contains_xid = false;
 		local_wal_contains_switch_xid = false;
 		local_type = oIndexInvalid;
-		local_oids.datoid = InvalidOid;
-		local_oids.reloid = InvalidOid;
-		local_oids.relnode = InvalidOid;
+		ORelOidsSetInvalid(local_oids);
 		local_wal_has_material_changes = true;
 	}
 }
@@ -947,15 +961,19 @@ log_logical_wal_container(Pointer ptr, int length, bool withXactTime)
  * Makes WAL insert record.
  */
 void
-o_wal_insert(BTreeDescr *desc, OTuple tuple, char relreplident)
+o_wal_insert(BTreeDescr *desc, OTuple tuple, char relreplident, uint32 version)
 {
 	OTuple		wal_record;
 	bool		call_pfree;
 	int			size;
 
+	elog(DEBUG4, "[%s] [ %u %u %u ] version %u", __func__,
+		 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
+		 version);
+
 	Assert(!O_TUPLE_IS_NULL(tuple));
 	wal_record = recovery_rec_insert(desc, tuple, &call_pfree, &size);
-	add_modify_wal_record(WAL_REC_INSERT, desc, wal_record, size, relreplident);
+	add_modify_wal_record(WAL_REC_INSERT, desc, wal_record, size, relreplident, version);
 	if (call_pfree)
 		pfree(wal_record.data);
 }
@@ -964,7 +982,7 @@ o_wal_insert(BTreeDescr *desc, OTuple tuple, char relreplident)
  * Makes WAL update record.
  */
 void
-o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident)
+o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident, uint32 version)
 {
 	OTuple		wal_record1;
 	OTuple		wal_record2;
@@ -973,7 +991,9 @@ o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident)
 	int			size1;
 	int			size2;
 
-	elog(DEBUG3, "o_wal_update");
+	elog(DEBUG4, "[%s] [ %u %u %u ] version %u", __func__,
+		 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
+		 version);
 
 	Assert(!O_TUPLE_IS_NULL(tuple));
 	wal_record1 = recovery_rec_update(desc, tuple, &call_pfree1, &size1);
@@ -984,13 +1004,13 @@ o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident)
 	 */
 	if (relreplident != REPLICA_IDENTITY_FULL)
 	{
-		add_modify_wal_record(WAL_REC_UPDATE, desc, wal_record1, size1, relreplident);
+		add_modify_wal_record(WAL_REC_UPDATE, desc, wal_record1, size1, relreplident, version);
 	}
 	else
 	{
 		Assert(!O_TUPLE_IS_NULL(oldtuple));
 		wal_record2 = recovery_rec_update(desc, oldtuple, &call_pfree2, &size2);
-		add_modify_wal_record_extended(WAL_REC_UPDATE, desc, wal_record1, size1, wal_record2, size2, relreplident);
+		add_modify_wal_record_extended(WAL_REC_UPDATE, desc, wal_record1, size1, wal_record2, size2, relreplident, version);
 		if (call_pfree2)
 			pfree(wal_record2.data);
 	}
@@ -1003,15 +1023,19 @@ o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident)
  * Makes WAL delete record.
  */
 void
-o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident)
+o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident, uint32 version)
 {
 	OTuple		wal_record;
 	bool		call_pfree;
 	int			size;
 
+	elog(DEBUG4, "[%s] [ %u %u %u ] version %u", __func__,
+		 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
+		 version);
+
 	Assert(!O_TUPLE_IS_NULL(tuple));
 	wal_record = recovery_rec_delete(desc, tuple, &call_pfree, &size, relreplident);
-	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, relreplident);
+	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, relreplident, version);
 
 	if (call_pfree)
 		pfree(wal_record.data);
@@ -1021,7 +1045,7 @@ o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident)
  * Makes WAL delete+insert record.
  */
 void
-o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relreplident)
+o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relreplident, uint32 version)
 {
 	OTuple		oldrecord;
 	OTuple		newrecord;
@@ -1035,7 +1059,7 @@ o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relrepli
 
 	oldrecord = recovery_rec_delete(desc, oldtuple, &old_call_pfree, &oldsize, relreplident);
 	newrecord = recovery_rec_insert(desc, newtuple, &new_call_pfree, &newsize);
-	add_modify_wal_record_extended(WAL_REC_REINSERT, desc, newrecord, newsize, oldrecord, oldsize, relreplident);
+	add_modify_wal_record_extended(WAL_REC_REINSERT, desc, newrecord, newsize, oldrecord, oldsize, relreplident, version);
 	if (old_call_pfree)
 	{
 		pfree(oldrecord.data);
@@ -1048,7 +1072,7 @@ o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relrepli
 
 /* Could be used only for system trees and bridge trees that are not replicated logically */
 void
-o_wal_delete_key(BTreeDescr *desc, OTuple key, bool is_bridge_index)
+o_wal_delete_key(BTreeDescr *desc, OTuple key, bool is_bridge_index, uint32 version)
 {
 	OTuple		wal_record;
 	bool		call_pfree;
@@ -1057,7 +1081,7 @@ o_wal_delete_key(BTreeDescr *desc, OTuple key, bool is_bridge_index)
 	Assert(IS_SYS_TREE_OIDS(desc->oids) || is_bridge_index);
 	Assert(!O_TUPLE_IS_NULL(key));
 	wal_record = recovery_rec_delete_key(desc, key, &call_pfree, &size);
-	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, REPLICA_IDENTITY_DEFAULT);
+	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, REPLICA_IDENTITY_DEFAULT, version);
 
 	if (call_pfree)
 		pfree(wal_record.data);

@@ -155,8 +155,9 @@ ToastAPI	oIndicesToastAPI = {
 	.getTupleData = oIndicesGetTupleData,
 	.getTupleChunknum = oIndicesGetTupleChunknum,
 	.getTupleDataSize = oIndicesGetTupleDataSize,
+	.getTupleKeyVersion = NULL, /* @TODO */
 	.deleteLogFullTuple = true,
-	.versionCallback = NULL
+	.fetchCallback = NULL
 };
 
 static void
@@ -1142,7 +1143,7 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 }
 
 OIndex *
-o_indices_get(ORelOids oids, OIndexType type)
+o_indices_get(ORelOids oids, OIndexType type, OSnapshot *snapshot)
 {
 	OIndexChunkKey key;
 	Size		dataLength;
@@ -1154,7 +1155,7 @@ o_indices_get(ORelOids oids, OIndexType type)
 	key.chunknum = 0;
 
 	result = generic_toast_get_any(&oIndicesToastAPI, (Pointer) &key,
-								   &dataLength, &o_non_deleted_snapshot,
+								   &dataLength, snapshot ? snapshot : &o_non_deleted_snapshot,
 								   get_sys_tree(SYS_TREES_O_INDICES));
 
 	if (result == NULL)
@@ -1178,7 +1179,7 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	BTreeDescr *sys_tree;
 
 	oIndex = make_o_index(table, ixNum);
-	oIndexOld = o_indices_get(oIndex->indexOids, oIndex->indexType);
+	oIndexOld = o_indices_get(oIndex->indexOids, oIndex->indexType, NULL);
 	if (oIndexOld)
 	{
 		oIndex->createOxid = oIndexOld->createOxid;
@@ -1378,7 +1379,7 @@ describe_index(TupleDesc tupdesc, ORelOids oids, OIndexType type)
 	Datum		values[2];
 	bool		isnull[2] = {false};
 
-	index = o_indices_get(oids, type);
+	index = o_indices_get(oids, type, NULL);
 	if (index == NULL)
 		elog(ERROR, "unable to find orioledb index description.");
 
