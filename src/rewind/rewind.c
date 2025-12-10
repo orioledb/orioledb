@@ -34,6 +34,7 @@
 #include "storage/latch.h"
 #include "storage/proc.h"
 #include "storage/sinvaladt.h"
+#include "utils/elog.h"
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
@@ -787,7 +788,7 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 	do_rewind(rewind_mode, rewind_time, rewindStartTimeStamp, rewind_oxid, rewind_xid, rewind_timestamp);
 
 	LWLockRelease(&rewindMeta->rewindEvictLock);
-	elog(LOG, "Rewind complete. Will attempt to restart");
+	elog(LOG, "Rewind complete");
 
 	try_restart_pg();
 }
@@ -1713,13 +1714,18 @@ try_restart_pg(void)
 	fflush(NULL);
 	/* WIN32 doesn't support fork */
 #ifdef WIN32
-	elog(LOG, "Restart not supported on Windows. Stopping instead");
+	ereport(WARNING,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("restart is not supported on Windows"),
+			 errdetail("The database system will shut down.")));
 	goto bail_and_shutdown;
 #else							/* !WIN32 */
 #ifndef HAVE_SETSID
-	/* We can do better, but bail for now */
-	elog(LOG, "Restart on platforms without setsid(2) is not yet supported."
-		 " Stopping instead");
+	/* We could do better, but bail for now */
+	ereport(WARNING,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("restart is not supported on platforms without setsid()"),
+			 errdetail("The database system will shut down.")));
 	goto bail_and_shutdown;
 #else							/* HAVE_SETSID */
 	{
@@ -1730,13 +1736,16 @@ try_restart_pg(void)
 		if (pid < 0)
 		{
 			/* fork failed */
-			elog(LOG, "Attempt to restart failed. Stopping instead");
+			elog(DEBUG3, "fork failed while attempting to restart,"
+				 " stopping instead");
 			goto bail_and_shutdown;
 		}
 
 		if (pid > 0)
 		{
 			/* fork successful, in parent: return to client */
+			ereport(NOTICE,
+					(errmsg("attempting to restart database system")));
 			return;
 		}
 
@@ -1744,8 +1753,8 @@ try_restart_pg(void)
 		if (setsid() < 0)
 		{
 			/* setsid failed, bail for now */
-			elog(LOG, "setsid(2) failed with error: %m\n"
-				 "Stopping instead");
+			elog(DEBUG3, "setsid() failed with error: %m."
+				 " Stopping instead");
 			goto bail_and_shutdown;
 		}
 
@@ -1768,14 +1777,17 @@ try_restart_pg(void)
 			pg_usleep(500000);
 			execl(cmd, cmd, "restart", "-D", DataDir, (char *) NULL);
 			/* If we got here, means execl failed, bail */
-			elog(LOG, "Attempt to restart failed with error: %m");
+			elog(DEBUG3, "execl() failed with error: %m."
+				 " Stopping instead");
 			goto bail_and_shutdown;
 		}
 #endif							/* !HAVE_SETSID */
 	}
 #endif							/* !WIN32 */
 bail_and_shutdown:
-	elog(WARNING, "Restart failed. Shutting down instead!");
+	ereport(WARNING,
+			(errmsg("could not restart instance"),
+			 errdetail("Sending shutdown request to postmaster.")));
 	(void) kill(PostmasterPid, SIGTERM);
 	return;
 }
