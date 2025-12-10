@@ -769,10 +769,20 @@ walk_undo_range(UndoLogType undoType,
 	UndoStackItem *item;
 	UndoItemTypeDescr *descr;
 
+	UndoLocation location_tmp;
+	location_tmp = location;
+	while (UndoLocationIsValid(location_tmp)) {
+		item = undo_item_buf_read_item(buf, undoType, location_tmp);
+		elog(LOG, "[%s] walk :: type %d", __func__, item->type);
+
+		location_tmp = item->prev;
+	}
+
 	while (UndoLocationIsValid(location) && (location > toLoc || !UndoLocationIsValid(toLoc)))
 	{
 		item = undo_item_buf_read_item(buf, undoType, location);
 		descr = item_type_get_descr(item->type);
+		elog(LOG, "[%s] type %d", __func__, item->type);
 		descr->callback(undoType, location, item, oxid,
 						abort_val, changeCountsValid);
 
@@ -902,6 +912,7 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		 */
 		location = pg_atomic_read_u64(&sharedLocations->location);
 		newOnCommitLocation = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
+		elog(LOG, "[%s] ABORT location %lu newOnCommitLocation %lu", __func__, location, newOnCommitLocation);
 		location = walk_undo_range_with_buf(undoType, location,
 											toLocation ? toLocation->location : InvalidUndoLocation,
 											oxid, true, &newOnCommitLocation,
@@ -987,6 +998,13 @@ void
 free_retained_undo_location(UndoLogType undoType)
 {
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
+
+	if (UndoLogSystem == undoType) {
+		elog(LOG, "[%s] IGNORED free for SYSTREE :: proc transactionUndoRetainLocation %lu curRetainUndoLocations %lu",
+			__func__, pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].transactionUndoRetainLocation),
+			curRetainUndoLocations[undoType]);
+		return; // @NOTE @INFO ignore systrees
+	}
 
 	Assert(pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].reservedUndoLocation) == InvalidUndoLocation);
 	pg_atomic_write_u64(&curProcData->undoRetainLocations[(int) undoType].transactionUndoRetainLocation, InvalidUndoLocation);
@@ -1444,6 +1462,13 @@ read_shared_undo_locations(UndoStackLocations *to, UndoStackSharedLocations *fro
 	to->branchLocation = pg_atomic_read_u64(&from->branchLocation);
 	to->subxactLocation = pg_atomic_read_u64(&from->subxactLocation);
 	to->onCommitLocation = pg_atomic_read_u64(&from->onCommitLocation);
+
+	elog(LOG, "[%s] location %lu %s branchLocation %lu %s subxactLocation %lu %s onCommitLocation %lu %s",
+		__func__,
+		to->location, UndoLocationIsValid(to->location) ? "" : "INVAL",
+		to->branchLocation, UndoLocationIsValid(to->branchLocation) ? "" : "INVAL",
+		to->subxactLocation, UndoLocationIsValid(to->subxactLocation) ? "" : "INVAL",
+		to->onCommitLocation, UndoLocationIsValid(to->onCommitLocation) ? "" : "INVAL");
 }
 
 void
@@ -1454,6 +1479,13 @@ write_shared_undo_locations(UndoStackSharedLocations *to, UndoStackLocations *fr
 	pg_atomic_write_u64(&to->branchLocation, from->branchLocation);
 	pg_atomic_write_u64(&to->subxactLocation, from->subxactLocation);
 	pg_atomic_write_u64(&to->onCommitLocation, from->onCommitLocation);
+
+	elog(LOG, "[%s] location %lu %s branchLocation %lu %s subxactLocation %lu %s onCommitLocation %lu %s",
+		__func__,
+		from->location, UndoLocationIsValid(from->location) ? "" : "INVAL",
+		from->branchLocation, UndoLocationIsValid(from->branchLocation) ? "" : "INVAL",
+		from->subxactLocation, UndoLocationIsValid(from->subxactLocation) ? "" : "INVAL",
+		from->onCommitLocation, UndoLocationIsValid(from->onCommitLocation) ? "" : "INVAL");
 }
 
 void
@@ -1478,8 +1510,12 @@ reset_cur_undo_locations(void)
 	UndoStackLocations location = {InvalidUndoLocation, InvalidUndoLocation, InvalidUndoLocation, InvalidUndoLocation};
 	int			i;
 
-	for (i = 0; i < (int) UndoLogsCount; i++)
-		set_cur_undo_locations((UndoLogType) i, location);
+	elog(LOG, "[%s]", __func__);
+
+	for (i = 0; i < (int) UndoLogsCount; i++) {
+		if ((UndoLogType) i != UndoLogSystem)
+			set_cur_undo_locations((UndoLogType) i, location);
+	}
 }
 
 #define RetainUndoLocationPHNodeGetSnapshot(location, undoType) \
@@ -1560,6 +1596,9 @@ undo_xact_callback(XactEvent event, void *arg)
 	TransactionId heapXid;
 	XLogRecPtr	flushPos;
 	LogicalXidCtx logicalXidContext;
+	UndoStackLocations undoStackLocations;
+
+	get_cur_undo_locations(&undoStackLocations, UndoLogSystem);
 
 	/* elog(LOG, "UNDO XACT CALLBACK"); */
 	isParallelWorker = (MyProc->lockGroupLeader != NULL &&
@@ -1742,8 +1781,11 @@ undo_xact_callback(XactEvent event, void *arg)
 					reset_precommit_xid_subxids();
 				}
 
-				for (i = 0; i < (int) UndoLogsCount; i++)
-					on_commit_undo_stack((UndoLogType) i, oxid, true);
+				for (i = 0; i < (int) UndoLogsCount; i++) {
+					if ((UndoLogType)i != UndoLogSystem) {
+						on_commit_undo_stack((UndoLogType) i, oxid, true);
+					}
+				}
 
 				wal_after_commit();
 				reset_cur_undo_locations();
@@ -1758,11 +1800,22 @@ undo_xact_callback(XactEvent event, void *arg)
 				elog(DEBUG4, "XACT_EVENT_ABORT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
 					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
+
+				{
+					extern const text *retrieve_orioledb_sys_tree_structure(int systree, int depth);
+					elog(WARNING, "before apply_undo_stack: %s", text_to_cstring(retrieve_orioledb_sys_tree_structure(SYS_TREES_O_TABLES, 32)));
+				}
+
 				if (!RecoveryInProgress())
 					wal_rollback(oxid, logicalXidContext.xid, false);
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
-					apply_undo_stack((UndoLogType) i, oxid, NULL, true);
+					apply_undo_stack((UndoLogType) i, oxid, (UndoLogType)i == UndoLogSystem ? &undoStackLocations : NULL, true);
+
+				{
+					extern const text *retrieve_orioledb_sys_tree_structure(int systree, int depth);
+					elog(WARNING, "after apply_undo_stack: %s", text_to_cstring(retrieve_orioledb_sys_tree_structure(SYS_TREES_O_TABLES, 32)));
+				}
 
 				reset_cur_undo_locations();
 				reset_command_undo_locations();
@@ -1774,12 +1827,18 @@ undo_xact_callback(XactEvent event, void *arg)
 				 * Remove registered snapshot one-by-one, so that we can avoid
 				 * double removing in undo_snapshot_deregister_hook().
 				 */
-				for (i = 0; i < (int) UndoLogsCount; i++)
-					while (!pairingheap_is_empty(&retainUndoLocHeaps[i]))
-						pairingheap_remove_first(&retainUndoLocHeaps[i]);
+				for (i = 0; i < (int) UndoLogsCount; i++) {
+					if ((UndoLogType)i != UndoLogSystem) {
+						while (!pairingheap_is_empty(&retainUndoLocHeaps[i]))
+							pairingheap_remove_first(&retainUndoLocHeaps[i]);
+					}
+				}
 
-				for (i = 0; i < (int) UndoLogsCount; i++)
-					pg_atomic_write_u64(&curProcData->undoRetainLocations[i].snapshotRetainUndoLocation, InvalidUndoLocation);
+				for (i = 0; i < (int) UndoLogsCount; i++) {
+					if ((UndoLogType)i != UndoLogSystem) {
+						pg_atomic_write_u64(&curProcData->undoRetainLocations[i].snapshotRetainUndoLocation, InvalidUndoLocation);
+					}
+				}
 
 				minParentSubId = InvalidSubTransactionId;
 
@@ -2195,10 +2254,14 @@ undo_read(UndoLogType undoType, UndoLocation location, Size size, Pointer buf)
 
 	writtenLocation = pg_atomic_read_u64(&meta->writtenLocation);
 
+	elog(LOG, "[%s] type %d READ FROM location %lu writtenLocation %lu", __func__, undoType, location, writtenLocation);
+
 	if (location + size > writtenLocation)
 	{
 		UndoLocation maxLoc,
 					minLoc;
+
+		elog(LOG, "[%s] type %d READ FROM location %lu writtenLocation %lu :: READY", __func__, undoType, location, writtenLocation);
 
 		pg_read_barrier();
 
@@ -2231,6 +2294,8 @@ undo_write(UndoLogType undoType, UndoLocation location, Size size, Pointer buf)
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	UndoRetainSharedLocations *sharedLocations = &curProcData->undoRetainLocations[(int) undoType];
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
+
+	elog(LOG, "[%s] type %d WRITE TO location %lu", __func__, undoType, location);
 
 	Assert(location >= pg_atomic_read_u64(&sharedLocations->snapshotRetainUndoLocation) ||
 		   location >= pg_atomic_read_u64(&sharedLocations->transactionUndoRetainLocation) ||
