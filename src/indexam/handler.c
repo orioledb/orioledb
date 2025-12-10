@@ -34,6 +34,8 @@
 #include "access/relation.h"
 #include "commands/progress.h"
 #include "commands/vacuum.h"
+#include "access/htup_details.h"
+#include "access/itup.h"
 #include "nodes/pathnodes.h"
 #include "optimizer/optimizer.h"
 #include "parser/parsetree.h"
@@ -1541,6 +1543,211 @@ fill_hitup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 	scan->xs_hitup = ExecCopySlotHeapTuple(slot);
 }
 
+/*
+ * Convert OTuple directly to IndexTuple.
+ * 1. If possible, create a zero-copy IndexTuple from OTuple data.
+ * 2. Otherwise, extract attributes and form IndexTuple normally.
+ *
+ * If old_tuple is provided, try to reuse its memory if possible.
+ * This avoids repeated palloc/free for each tuple.
+ * 
+ * For case 2, precomputed attribute mapping in o_scan is used to speed up
+ * lookups.
+ */
+static IndexTuple
+o_form_index_tuple(OTuple otuple, OIndexDescr *index_descr, 
+				   OTableDescr *descr, ItemPointerData *tid, OScanState *o_scan, IndexTuple old_tuple)
+{
+	TupleDesc	itupdesc = index_descr->itupdesc;
+	TupleDesc	leafTupdesc = index_descr->leafTupdesc;
+	OTupleFixedFormatSpec *leaf_spec = &index_descr->leafSpec;
+	Datum		values[INDEX_MAX_KEYS];
+	bool		isnull[INDEX_MAX_KEYS];
+	IndexTuple	result;
+	int			natts = itupdesc->natts;
+
+	/*
+	 * Fast path: zero-copy for compatible formats.
+	 * When IndexTuple and OTuple formats are identical (same attributes, fixed-length,
+	 * same order), we can create a minimal IndexTuple wrapper that points
+	 * directly to the OTuple data without copying anything.
+	 */
+	if (o_scan->itup_can_zero_copy == ZeroCopyIndexTuplePossible && (otuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
+	{
+		Size	tuple_size;
+
+		/* Total size = IndexTuple header + pre-computed data size */
+		tuple_size = sizeof(IndexTupleData) + o_scan->itup_fixed_data_size;
+
+		/* Try to recycle the old tuple "slot", and avoid palloc per tuple */
+		if (old_tuple && old_tuple->t_info == tuple_size)
+			result = old_tuple;
+		else
+			/* Allocate IndexTuple */
+			result = (IndexTuple) palloc(tuple_size);
+
+		/* Set size in t_info */
+		result->t_info = tuple_size;
+
+		/* Copy TID */
+		if (tid)
+			ItemPointerCopy(tid, &result->t_tid);
+
+		/*
+		 * Zero-copy: directly memcpy the data portion from OTuple.
+		 * OTuple fixed format stores data right after the header, which matches
+		 * IndexTuple layout for fixed-length.
+		 */
+		memcpy((char *) result + sizeof(IndexTupleData),
+			   (char *) otuple.data,
+			   o_scan->itup_fixed_data_size);
+
+		return result;
+	}
+	else if (old_tuple)
+	{
+		/* remove old tuple */
+		pfree(old_tuple);
+	}
+
+	/*
+	 * Extract attributes directly from OTuple using o_fastgetattr.
+	 * This bypasses the slot materialization overhead.
+	 */
+	for (int i = 0; i < natts; i++)
+	{
+		if (o_scan->itup_can_zero_copy == MappingIndexTupleBuildPossible)
+		{
+			Assert(natts <= MAX_ITUP_ATTR_MAP_SIZE);
+			/* Use attribute mapping to extract attributes */
+			values[i] = o_fastgetattr(otuple, o_scan->itup_attr_map[i] + 1,
+									  leafTupdesc, leaf_spec, &isnull[i]);
+		}
+		else
+		{
+			Assert(o_scan->itup_can_zero_copy == ZeroCopyIndexTuplePossible);
+			/* No zero-copy possible; extract attributes in order */
+			values[i] = o_fastgetattr(otuple, i + 1,
+									  leafTupdesc, leaf_spec, &isnull[i]);
+		}
+	}
+
+	/* Form the index tuple using the extracted values */
+	result = index_form_tuple(itupdesc, values, isnull);
+
+	/* Copy the TID */
+	if (tid)
+		ItemPointerCopy(tid, &result->t_tid);
+
+	return result;
+}
+
+/**
+ * supports_fast_itup_build - Determine whether index tuples can zero-copied as OTuples 
+ * or built using attribute mapping.
+ */
+static bool
+supports_fast_itup_build(OTuple tuple, OScanState *o_scan, OIndexDescr *index_descr)
+{
+	if (o_scan->itup_can_zero_copy == UndefinedFastItupBuildState)
+	{
+		TupleDesc	itupdesc = index_descr->itupdesc;
+		TupleDesc	leafTupdesc = index_descr->leafTupdesc;
+		int			natts = itupdesc->natts;
+		int			leaf_natts = leafTupdesc->natts;
+		bool		all_fixed_length = true;
+		bool		can_zero_copy = true;
+		Size		data_size = 0;
+
+		for (int i = 0; i < natts; i++)
+		{
+			Form_pg_attribute attr = TupleDescAttr(itupdesc, i);
+			if (attr->attlen < 0)
+				all_fixed_length = false;
+			
+			/* Align to the attribute's alignment requirement */
+			data_size = att_align_nominal(data_size, attr->attalign);
+			/* Add the attribute's length */
+			data_size += attr->attlen;
+		}
+
+		o_scan->itup_fixed_data_size = data_size;
+	
+		/*
+		 * Check if zero-copy is possible: IndexTuple and OTuple formats must be identical.
+		 * This means:
+		 * 1. Same number of attributes (no included columns or duplicates)
+		 * 2. Attributes in same order
+		 */
+		if (natts == leaf_natts && all_fixed_length)
+		{
+			/* Check if attributes are in the same order */
+			for (int i = 0; i < natts; i++)
+			{
+				Form_pg_attribute itup_attr = TupleDescAttr(itupdesc, i);
+				Form_pg_attribute leaf_attr = TupleDescAttr(leafTupdesc, i);
+
+				if (itup_attr->attlen != leaf_attr->attlen ||
+					itup_attr->attalign != leaf_attr->attalign ||
+					strncmp(itup_attr->attname.data, leaf_attr->attname.data, NAMEDATALEN) != 0)
+				{
+					can_zero_copy = false;
+					break;
+				}
+			}
+		}
+		else
+		{
+			can_zero_copy = false;
+		}
+		
+		if (can_zero_copy)
+			o_scan->itup_can_zero_copy = ZeroCopyIndexTuplePossible;	
+		else
+			o_scan->itup_can_zero_copy = NoFastItupBuildPossible;	
+
+		/* Zero copy not possible; try attribute mapping */
+		if (o_scan->itup_can_zero_copy == NoFastItupBuildPossible && all_fixed_length && 
+			natts <= MAX_ITUP_ATTR_MAP_SIZE)
+		{
+			bool		mapping_possible = true;
+			for (int i = 0; i < natts; i++)
+			{
+				Form_pg_attribute itup_attr = TupleDescAttr(itupdesc, i);
+				bool		found = false;
+
+				for (int j = 0; j < leaf_natts; j++)
+				{
+					Form_pg_attribute leaf_attr = TupleDescAttr(leafTupdesc, j);
+
+					if (itup_attr->attlen == leaf_attr->attlen &&
+						itup_attr->attalign == leaf_attr->attalign &&
+						strncmp(itup_attr->attname.data, leaf_attr->attname.data, NAMEDATALEN) == 0)
+					{
+						o_scan->itup_attr_map[i] = j;
+						found = true;
+						break;
+					}
+				}
+				if (!found)
+				{
+					/* attribute not found */
+					mapping_possible = false;
+					break;
+				}
+			}
+			
+			if (mapping_possible)
+				o_scan->itup_can_zero_copy = MappingIndexTupleBuildPossible;
+			else
+				o_scan->itup_can_zero_copy = NoFastItupBuildPossible;
+		}
+	}
+	
+	return o_scan->itup_can_zero_copy == ZeroCopyIndexTuplePossible 
+			|| o_scan->itup_can_zero_copy == MappingIndexTupleBuildPossible;
+}
+
 /* TODO: Rewrite */
 static void
 fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
@@ -1555,6 +1762,28 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 	int			result_size,
 				tuple_size = 0;
 	Pointer		ptr;
+
+	/* 
+	 * Fast path: try to build IndexTuple directly from OTuple or
+	 * using attribute mapping (if natts is small enough).
+	 */
+	if (supports_fast_itup_build(tuple, o_scan, index_descr))
+	{		
+		if (!scan->xs_rowid.isnull)
+		{
+			/* free previously returned rowid */
+			if (scan->xs_rowid.value)
+				pfree(DatumGetPointer(scan->xs_rowid.value));
+			scan->xs_rowid.isnull = true;
+		}
+		scan->xs_rowid.isnull = false;
+		/* we don't set rowid for xs_itup */
+		scan->xs_rowid.value = (Datum) NULL;
+
+		scan->xs_itupdesc = index_descr->itupdesc;
+		scan->xs_itup = o_form_index_tuple(tuple, index_descr, descr, NULL, o_scan, scan->xs_itup);
+		return;		
+	}
 
 	slot = index_descr->index_slot;
 	tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, o_scan->ixNum, false, hint);
@@ -1751,7 +1980,8 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 		if (!scan->xs_rowid.isnull)
 		{
 			/* free previously returned rowid */
-			pfree(DatumGetPointer(scan->xs_rowid.value));
+			if (scan->xs_rowid.value)
+				pfree(DatumGetPointer(scan->xs_rowid.value));
 			scan->xs_rowid.isnull = true;
 		}
 		if (scan->xs_itup)

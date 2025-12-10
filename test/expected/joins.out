@@ -193,14 +193,15 @@ SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
 (64 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_joins2 FULL JOIN o_joins1 USING(id1, id2);
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Hash Full Join
-   Hash Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
-   ->  Seq Scan on o_joins2
-   ->  Hash
-         ->  Seq Scan on o_joins1
-(5 rows)
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Merge Full Join
+   Merge Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
+   ->  Custom Scan (o_scan) on o_joins1
+         Forward index only scan of: o_joins1_pkey
+(6 rows)
 
 SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
  id1 |   id2    

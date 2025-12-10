@@ -24095,10 +24095,12 @@ SELECT * FROM o_test_pkey_mixed_build ORDER BY f2;
 (3 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build ORDER BY f3;
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- Index Scan using o_test_pkey_mixed_build_ix3 on o_test_pkey_mixed_build
-(1 row)
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Sort
+   Sort Key: f3
+   ->  Index Only Scan using o_test_pkey_mixed_build_uniq1 on o_test_pkey_mixed_build
+(3 rows)
 
 SELECT * FROM o_test_pkey_mixed_build ORDER BY f3;
  f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 
@@ -24109,10 +24111,12 @@ SELECT * FROM o_test_pkey_mixed_build ORDER BY f3;
 (3 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build ORDER BY i1;
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- Index Scan using o_test_pkey_mixed_build_ix4 on o_test_pkey_mixed_build
-(1 row)
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Sort
+   Sort Key: i1
+   ->  Index Only Scan using o_test_pkey_mixed_build_uniq1 on o_test_pkey_mixed_build
+(3 rows)
 
 SELECT * FROM o_test_pkey_mixed_build ORDER BY i1;
  f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 

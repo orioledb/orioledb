@@ -3730,11 +3730,8 @@ SELECT smart_explain(
  Sort
    Sort Key: bitmap_test_complex.id
    InitPlan 1
-     ->  Custom Scan (o_scan) on bitmap_test_complex bitmap_test_complex_1
-           Bitmap heap scan
-           Recheck Cond: (id2 = 1)
-           ->  Bitmap Index Scan on bitmap_test_complex_ix2
-                 Index Cond: (id2 = 1)
+     ->  Index Only Scan using bitmap_test_complex_ix2 on bitmap_test_complex bitmap_test_complex_1
+           Index Cond: (id2 = 1)
    InitPlan 2
      ->  Index Only Scan using bitmap_test_complex_ix4 on bitmap_test_complex bitmap_test_complex_2
            Index Cond: (id = 1)
@@ -3743,7 +3740,7 @@ SELECT smart_explain(
          Recheck Cond: (id = ANY (ARRAY[abs((InitPlan 1).col1), (InitPlan 2).col1, 2, 11, 12, 15]))
          ->  Bitmap Index Scan on bitmap_test_complex_ix4
                Index Cond: (id = ANY (ARRAY[abs((InitPlan 1).col1), (InitPlan 2).col1, 2, 11, 12, 15]))
-(16 rows)
+(13 rows)
 
 SELECT * FROM bitmap_test_complex WHERE id IN
 	(ABS((SELECT id FROM bitmap_test_complex WHERE id2 = 1)),
