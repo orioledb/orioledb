@@ -950,44 +950,7 @@ add_undo_relnode(ORelOids oldOids, ORelOids *oldTreeOids, int oldNumTreeOids,
 	LocationIndex size;
 	UndoLocation location;
 	RelnodeUndoStackItem *item;
-
-	size = offsetof(RelnodeUndoStackItem, oids) + sizeof(ORelOids) * (oldNumTreeOids + newNumTreeOids);
-	item = (RelnodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(size));
-
-	item->header.base.type = RelnodeUndoItemType;
-	item->header.base.itemSize = size;
-	item->header.base.indexType = oIndexPrimary;
-	Assert(ORelOidsIsValid(oldOids) || ORelOidsIsValid(newOids));
-	if (ORelOidsIsValid(oldOids))
-	{
-		item->datoid = oldOids.datoid;
-		item->relid = oldOids.reloid;
-	}
-	else
-	{
-		item->datoid = newOids.datoid;
-		item->relid = newOids.reloid;
-	}
-	item->oldRelnode = oldOids.relnode;
-	item->oldNumTreeOids = oldNumTreeOids;
-	item->newRelnode = newOids.relnode;
-	item->newNumTreeOids = newNumTreeOids;
-	item->fsync = fsync;
-
-	if (oldNumTreeOids > 0)
-	{
-		Assert(oldTreeOids);
-		memcpy(item->oids,
-			   oldTreeOids,
-			   sizeof(ORelOids) * oldNumTreeOids);
-	}
-	if (newNumTreeOids > 0)
-	{
-		Assert(newTreeOids);
-		memcpy(&item->oids[oldNumTreeOids],
-			   newTreeOids,
-			   sizeof(ORelOids) * newNumTreeOids);
-	}
+	int			stepItemsCapacity = (O_MAX_UNDO_RECORD_SIZE - offsetof(RelnodeUndoStackItem, oids)) / sizeof(ORelOids);
 
 	/*
 	 * This might happend before we accessed oxid.  So, ensure we've assigned
@@ -996,9 +959,64 @@ add_undo_relnode(ORelOids oldOids, ORelOids *oldTreeOids, int oldNumTreeOids,
 	(void) get_current_oxid();
 
 	oxid_needs_wal_flush = true;
-	add_new_undo_stack_item(UndoLogSystem, location);
 
-	release_undo_size(UndoLogSystem);
+	Assert(oldNumTreeOids >= 0 && newNumTreeOids >= 0);
+
+	while (oldNumTreeOids + newNumTreeOids > 0)
+	{
+		int			stepOldTreeOids;
+		int			stepNewTreeOids;
+
+		stepOldTreeOids = Min(oldNumTreeOids, stepItemsCapacity);
+		stepNewTreeOids = Min(newNumTreeOids, stepItemsCapacity - stepOldTreeOids);
+
+		size = offsetof(RelnodeUndoStackItem, oids) + sizeof(ORelOids) * (stepOldTreeOids + stepNewTreeOids);
+		item = (RelnodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(size));
+
+		item->header.base.type = RelnodeUndoItemType;
+		item->header.base.itemSize = size;
+		item->header.base.indexType = oIndexPrimary;
+		Assert(ORelOidsIsValid(oldOids) || ORelOidsIsValid(newOids));
+		if (ORelOidsIsValid(oldOids))
+		{
+			item->datoid = oldOids.datoid;
+			item->relid = oldOids.reloid;
+		}
+		else
+		{
+			item->datoid = newOids.datoid;
+			item->relid = newOids.reloid;
+		}
+		item->oldRelnode = oldOids.relnode;
+		item->oldNumTreeOids = stepOldTreeOids;
+		item->newRelnode = newOids.relnode;
+		item->newNumTreeOids = stepNewTreeOids;
+		item->fsync = fsync;
+
+		if (oldNumTreeOids > 0)
+		{
+			Assert(oldTreeOids);
+			memcpy(item->oids,
+				   oldTreeOids,
+				   sizeof(ORelOids) * stepOldTreeOids);
+		}
+		if (newNumTreeOids > 0)
+		{
+			Assert(newTreeOids);
+			memcpy(&item->oids[oldNumTreeOids],
+				   newTreeOids,
+				   sizeof(ORelOids) * stepNewTreeOids);
+		}
+
+		add_new_undo_stack_item(UndoLogSystem, location);
+
+		release_undo_size(UndoLogSystem);
+
+		oldTreeOids += stepOldTreeOids;
+		oldNumTreeOids -= stepOldTreeOids;
+		newTreeOids += stepNewTreeOids;
+		newNumTreeOids -= stepNewTreeOids;
+	}
 }
 
 void
