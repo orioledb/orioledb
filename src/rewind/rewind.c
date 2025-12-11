@@ -83,6 +83,7 @@ PG_FUNCTION_INFO_V1(orioledb_rewind_set_complete);
 static void orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, TransactionId rewind_xid, TimestampTz rewind_timestamp);
 static void try_restart_pg(void);
 static void cleanup_fds(void);
+static void bootstrap_signals(void);
 
 /* Interface functions */
 
@@ -1703,93 +1704,103 @@ get_rewind_run_xmin(void)
  * "pg_ctl restart". Detachment ensures the child process survives
  * once the postmaster exits.
  *
- * dependency: This implementation relies on fork(2) and setsid(2).
- * On systems lacking these primitives (e.g. Windows), this is currently
- * not supported, so we shutdown instead.
+ * dependency: This implementation relies on fork(2) and setsid(2). Systems
+ * lacking these primitives (e.g. Windows), are not supported, so we can't end
+ * up here. See orioledb_enable_rewind_check_hook for details.
  */
 static void
 try_restart_pg(void)
 {
+	pid_t		pid;
+	sigset_t	blocked_sigset,
+				old_sigset;
+
+	/* Block all signals until we're done */
+	sigfillset(&blocked_sigset);
+	sigprocmask(SIG_BLOCK, &blocked_sigset, &old_sigset);
+
 	/* Flush stdio channels just before fork, to avoid double-output problems */
 	fflush(NULL);
-	/* WIN32 doesn't support fork */
-#ifdef WIN32
-	ereport(WARNING,
-			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-			 errmsg("restart is not supported on Windows"),
-			 errdetail("The database system will shut down.")));
-	goto bail_and_shutdown;
-#else							/* !WIN32 */
-#ifndef HAVE_SETSID
-	/* We could do better, but bail for now */
-	ereport(WARNING,
-			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-			 errmsg("restart is not supported on platforms without setsid()"),
-			 errdetail("The database system will shut down.")));
-	goto bail_and_shutdown;
-#else							/* HAVE_SETSID */
+
+	pid = fork();
+
+	if (pid < 0)
 	{
-		pid_t		pid;
+		/* fork failed, restore signals and bail */
+		sigprocmask(SIG_SETMASK, &old_sigset, NULL);
 
-		pid = fork();
+		elog(DEBUG3, "fork failed while attempting to restart,"
+			 " stopping instead");
 
-		if (pid < 0)
-		{
-			/* fork failed */
-			elog(DEBUG3, "fork failed while attempting to restart,"
-				 " stopping instead");
-			goto bail_and_shutdown;
-		}
-
-		if (pid > 0)
-		{
-			/* fork successful, in parent: return to client */
-			ereport(NOTICE,
-					(errmsg("attempting to restart database system")));
-			return;
-		}
-
-		/* fork succeeded, in child */
-		if (setsid() < 0)
-		{
-			/* setsid failed, bail for now */
-			elog(DEBUG3, "setsid() failed with error: %m."
-				 " Stopping instead");
-			goto bail_and_shutdown;
-		}
-
-		{
-			/* We're in a session that will survive when the parent goes away */
-			char		bindir[MAXPGPATH];
-			char		cmd[PG_CTL_MAX_CMD_LEN];
-			char	   *lastslash;
-
-			strlcpy(bindir, my_exec_path, MAXPGPATH);
-
-			lastslash = strrchr(bindir, '/');
-			Assert(lastslash != NULL);
-			*lastslash = '\0';
-			snprintf(cmd, sizeof(cmd), "%s/pg_ctl", bindir);
-
-			/* Do a little dance with fds to make logger shutdown cleanly */
-			cleanup_fds();
-			/* Sleep 0.5s to let the parent return */
-			pg_usleep(500000);
-			execl(cmd, cmd, "restart", "-D", DataDir, (char *) NULL);
-			/* If we got here, means execl failed, bail */
-			elog(DEBUG3, "execl() failed with error: %m."
-				 " Stopping instead");
-			goto bail_and_shutdown;
-		}
-#endif							/* !HAVE_SETSID */
+		ereport(WARNING,
+				(errmsg("could not restart instance"),
+				 errdetail("Sending shutdown request to postmaster.")));
+		(void) kill(PostmasterPid, SIGTERM);
+		return;
 	}
-#endif							/* !WIN32 */
-bail_and_shutdown:
-	ereport(WARNING,
-			(errmsg("could not restart instance"),
-			 errdetail("Sending shutdown request to postmaster.")));
+
+	if (pid > 0)
+	{
+		/* fork successful, in parent. Restore signals and return to client */
+		sigprocmask(SIG_SETMASK, &old_sigset, NULL);
+		ereport(NOTICE,
+				(errmsg("attempting to restart database system")));
+		return;
+	}
+
+	/* fork succeeded, in child */
+	if (setsid() < 0)
+	{
+		/* setsid failed: */
+		goto emergency_shutdown;
+	}
+
+	{
+		/* We're in a session that will survive when the parent goes away */
+		sigset_t	empty_mask;
+		char		bindir[MAXPGPATH];
+		char		cmd[PG_CTL_MAX_CMD_LEN];
+		char	   *lastslash;
+
+		strlcpy(bindir, my_exec_path, MAXPGPATH);
+
+		lastslash = strrchr(bindir, '/');
+
+		/* if for some reason we got a bogus bindir */
+		if (lastslash == NULL)
+			goto emergency_shutdown;
+
+		*lastslash = '\0';
+		snprintf(cmd, sizeof(cmd), "%s/pg_ctl", bindir);
+
+		/* Do a little dance with fds to make logger shutdown cleanly */
+		cleanup_fds();
+		/* Sleep 0.5s to let the parent return */
+		pg_usleep(500000);
+		/* Be paranoid: restore default signal handlers and mask before execl */
+		bootstrap_signals();
+		sigemptyset(&empty_mask);
+		sigprocmask(SIG_SETMASK, &empty_mask, NULL);
+
+		execl(cmd, cmd, "restart", "-D", DataDir, (char *) NULL);
+		/* execl failed: */
+		goto emergency_shutdown;
+	}
+
+emergency_shutdown:
+
+	/*
+	 * If we got here, either execl or setsid failed. We can't just bail
+	 * because logging isn't safe since we can't guarantee allocating memory
+	 * won't result in a deadlock. Additionally we might've already cleaned up
+	 * the FDs so elog won't reach the logger anyway. We also can't really
+	 * proc_exit() or even exit(): Both will result in a crash while executing
+	 * on-exit callbacks. So we request a shutdown and _exit(). 71 exit code
+	 * is "system error". We don't want to put too much effort into
+	 * investigating here.
+	 */
 	(void) kill(PostmasterPid, SIGTERM);
-	return;
+	_exit(71);
 }
 
 static void
@@ -1803,11 +1814,23 @@ cleanup_fds(void)
 		 * We can't just close stderr/stdout fds, so redirect them to
 		 * /dev/null instead
 		 */
+		dup2(devnull, fileno(stdin));
 		dup2(devnull, fileno(stderr));
 		dup2(devnull, fileno(stdout));
 
-		/* Be paranoid: we don't want to ever close stderr/stdout */
-		if (devnull > fileno(stdout) && devnull > fileno(stderr))
+		/* Be paranoid: we don't want to ever close stdin/stderr/stdout */
+		if (devnull > fileno(stdin) && devnull > fileno(stdout)
+			&& devnull > fileno(stderr))
 			close(devnull);
 	}
+}
+
+static void
+bootstrap_signals(void)
+{
+	pqsignal(SIGHUP, SIG_DFL);
+	pqsignal(SIGPIPE, SIG_DFL);
+	pqsignal(SIGINT, SIG_DFL);
+	pqsignal(SIGTERM, SIG_DFL);
+	pqsignal(SIGQUIT, SIG_DFL);
 }
