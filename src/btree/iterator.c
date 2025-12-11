@@ -292,7 +292,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 			 * version
 			 */
 			bool		version_check = !txIsFinished || (boundKeyVersion != O_TABLE_INVALID_VERSION);
-			OXid		tupOxid = version_check ? XACT_INFO_GET_OXID(xactInfo) : InvalidOXid;
+			OXid		tupOxid = !txIsFinished ? XACT_INFO_GET_OXID(xactInfo) : InvalidOXid;
 			TupleFetchCallbackCheckType check_type = version_check ?
 				OTupleFetchCallbackVersionCheck :
 				OTupleFetchCallbackKeyCheck;
