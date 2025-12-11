@@ -401,17 +401,17 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35];
 SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35];
 EXPLAIN (COSTS OFF)
-	SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 20];
-SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 20];
+	SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 36, 15];
+SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 36, 15];
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_bitmap_scans WHERE j > ARRAY[26, 42];
 SELECT * FROM o_test_bitmap_scans WHERE j > ARRAY[26, 42];
 EXPLAIN (COSTS OFF)
-	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20];
-SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20];
+	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 36, 15];
+SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 36, 15];
 EXPLAIN (COSTS OFF)
-	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20] OR j > ARRAY[26, 42];
-SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20] OR j > ARRAY[26, 42];
+	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 36, 15] OR j > ARRAY[26, 42];
+SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 36, 15] OR j > ARRAY[26, 42];
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_bitmap_scans
@@ -808,6 +808,34 @@ SELECT data3 from test_no_bmscan_on_text_pkey where data3 = 'aaaaaa';
 SELECT orioledb_tbl_indices('test_no_bmscan_on_text_pkey'::regclass, true);
 EXPLAIN (COSTS OFF) SELECT data2 from test_no_bmscan_on_text_pkey where data2 = 'barbar';
 SELECT data2 from test_no_bmscan_on_text_pkey where data2 = 'barbar';
+
+-- Test bridge index behavior when table is truncated.
+CREATE TABLE brin_test_multi (a INT, b BIGINT) using orioledb WITH (fillfactor=10) ;
+INSERT INTO brin_test_multi
+SELECT i/5 + mod(911 * i + 483, 25),
+       i/10 + mod(751 * i + 221, 41)
+  FROM generate_series(1,1000) s(i);
+
+SELECT COUNT(*) FROM brin_test_multi WHERE a < 37;
+
+CREATE INDEX brin_test_multi_idx ON brin_test_multi USING brin (a int4_minmax_multi_ops) WITH (pages_per_range=5);
+
+SELECT orioledb_tbl_indices('brin_test_multi'::regclass, true);
+\d+ brin_test_multi
+
+TRUNCATE brin_test_multi;
+
+SELECT orioledb_tbl_indices('brin_test_multi'::regclass, true);
+\d+ brin_test_multi
+
+INSERT INTO brin_test_multi
+SELECT i/5 + mod(911 * i + 483, 25),
+       i/10 + mod(751 * i + 221, 41)
+  FROM generate_series(1,1000) s(i);
+
+set enable_seqscan = off;
+EXPLAIN SELECT COUNT(*) FROM brin_test_multi WHERE a < 37;
+SELECT COUNT(*) FROM brin_test_multi WHERE a < 37;
 
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
