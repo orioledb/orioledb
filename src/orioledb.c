@@ -1539,11 +1539,6 @@ o_invalidate_oids(ORelOids oids)
 {
 	SharedInvalidationMessage msg;
 
-	elog(LOG, "[%s] [ %u %u %u ]", __func__,
-		 oids.datoid,
-		 oids.reloid,
-		 oids.relnode);
-
 	Assert(ORelOidsIsValid(oids));
 
 	msg.usr.id = SHAREDINVALUSERCACHE_ID;

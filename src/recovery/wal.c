@@ -744,7 +744,7 @@ add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version)
 
 	memcpy(rec->version, &version, sizeof(version));
 
-	elog(LOG, "[%s] WAL_REC_RELATION xmin/csn/cid %lu/%lu/%lu version %u", __func__, runXmin, csn, cid, version);
+	elog(DEBUG4, "[%s] WAL_REC_RELATION xmin/csn/cid %lu/%lu/%lu version %u", __func__, runXmin, csn, cid, version);
 
 	local_wal_buffer_offset += sizeof(*rec);
 
@@ -967,7 +967,7 @@ o_wal_insert(BTreeDescr *desc, OTuple tuple, char relreplident, uint32 version)
 	bool		call_pfree;
 	int			size;
 
-	elog(LOG, "[%s] [ %u %u %u ] version %u", __func__,
+	elog(DEBUG4, "[%s] [ %u %u %u ] version %u", __func__,
 		 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
 		 version);
 
@@ -991,7 +991,7 @@ o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident,
 	int			size1;
 	int			size2;
 
-	elog(LOG, "[%s] [ %u %u %u ] version %u", __func__,
+	elog(DEBUG4, "[%s] [ %u %u %u ] version %u", __func__,
 		 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
 		 version);
 
@@ -1029,7 +1029,7 @@ o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident, uint32 version)
 	bool		call_pfree;
 	int			size;
 
-	elog(LOG, "[%s] [ %u %u %u ] version %u", __func__,
+	elog(DEBUG4, "[%s] [ %u %u %u ] version %u", __func__,
 		 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
 		 version);
 

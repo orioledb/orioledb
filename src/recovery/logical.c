@@ -792,20 +792,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			snapshot.xmin = xmin;
 			snapshot.xlogptr = changeXLogPtr;
 
-			elog(LOG, "[%s] WAL_REC_RELATION cur_oids [ %u %u %u ] treeType %d xmin/csn/cid %lu/%lu/%lu version %u", __func__,
-				 cur_oids.datoid,
-				 cur_oids.reloid,
-				 cur_oids.relnode,
-				 treeType,
-				 snapshot.xmin, snapshot.csn, snapshot.cid,
-				 cur_version);
-
-			{
-				extern const text *retrieve_orioledb_sys_tree_structure(int systree, int depth);
-
-				elog(WARNING, "%s", text_to_cstring(retrieve_orioledb_sys_tree_structure(SYS_TREES_O_TABLES, 32)));
-			}
-
 			ix_type = treeType;
 			relreplident = REPLICA_IDENTITY_DEFAULT;
 			descr = NULL;
@@ -842,9 +828,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else if (ix_type == oIndexInvalid)
 			{
-				elog(LOG, "[%s] WAL_REC_RELATION oIndexInvalid :: o_fetch_table_descr :: cur_version %u",
-					 __func__, cur_version);
-
 				descr = o_fetch_table_descr(cur_oids, &snapshot, &cur_version);
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
 				elog(DEBUG4, "WAL_REC_RELATION oIndexInvalid");
@@ -1011,7 +994,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			read_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
 			ptr = wal_parse_rec_modify(ptr, &tuple1, &tuple2, &debug_length, read_two_tuples);
 
-			elog(LOG, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
+			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
 				 rec_type, rec_type_str, oxid, logicalXid, heapXid);
 
 			if (!TransactionIdIsValid(logicalXid))

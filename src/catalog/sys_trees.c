@@ -926,15 +926,6 @@ o_table_chunk_cmp(BTreeDescr *desc,
 	else
 		key2 = (OTableChunkKey *) (((OTuple *) p2)->data);
 
-	elog(LOG, "[%s] compare p1 vs p2 :: [ %u %u %u ] VS [ %u %u %u ]",
-		 __func__,
-		 key1->oids.datoid,
-		 key1->oids.reloid,
-		 key1->oids.relnode,
-		 key2->oids.datoid,
-		 key2->oids.reloid,
-		 key2->oids.relnode);
-
 	if (key1->oids.datoid < key2->oids.datoid)
 		return -1;
 	else if (key1->oids.datoid > key2->oids.datoid)

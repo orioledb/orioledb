@@ -719,11 +719,7 @@ create_table_descr(ORelOids oids, OSnapshot *snapshot, uint32 *version)
 	old_enable_stopevents = enable_stopevents;
 	enable_stopevents = false;
 
-	elog(LOG, "[%s] Going to retrieve a table for oids [ %u %u %u ]", __func__, oids.datoid, oids.reloid, oids.relnode);
-
 	o_table = o_tables_get(oids, snapshot, version);
-
-	elog(LOG, "[%s] Table for oids [ %u %u %u ] retrieved %s", __func__, oids.datoid, oids.reloid, oids.relnode, o_table ? "OK" : "FAIL");
 
 	if (o_table == NULL)
 	{
@@ -784,18 +780,6 @@ o_fetch_table_descr(ORelOids oids, OSnapshot *snapshot, uint32 *version)
 	if (!found)
 		table_descr = create_table_descr(oids, snapshot, version);
 
-	elog(LOG, "[%s] OTableDescr natts %d %s", __func__,
-		 table_descr->tupdesc->natts,
-		 found ? "FOUND IN CACHE" : "from btree");
-
-	int			i = 0;
-
-	for (i = 0; i < table_descr->tupdesc->natts; ++i)
-	{
-		elog(LOG, "[%s] OTableDescr att #%d attname `%s`", __func__, i,
-			 table_descr->tupdesc->attrs[i].attname.data);
-	}
-
 	return table_descr;
 }
 
@@ -855,8 +839,6 @@ o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode)
 	HASH_SEQ_STATUS scan_status;
 	OTableDescr *tableDescr;
 	OIndexDescr *indexDescr;
-
-	elog(LOG, "[%s] invalidate oids [ %u %u %u ]", __func__, datoid, reloid, relfilenode);
 
 	if (!OidIsValid(datoid) || !OidIsValid(reloid) || !OidIsValid(relfilenode))
 	{

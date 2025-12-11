@@ -233,8 +233,6 @@ oTablesVersionCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 	bool		tupIsCurrentOxid = tupOxid == get_current_oxid_if_any();
 	bool		inProgress = COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn);
 
-	elog(LOG, "[%s] 1 tupleKey->version %u boundKey->version %u", __func__, tupleKey->version, tupleKey->version, boundKey->version);
-
 	if (check_type != OTupleFetchCallbackVersionCheck)
 		return OTupleFetchNext;
 
@@ -243,8 +241,6 @@ oTablesVersionCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 
 	if (boundKey->version == O_TABLE_INVALID_VERSION)
 		boundKey->version = tupleKey->version;
-
-	elog(LOG, "[%s] 2 tupleKey->version %u boundKey->version %u", __func__, tupleKey->version, tupleKey->version, boundKey->version);
 
 	if (tupleKey->version > boundKey->version)
 		return OTupleFetchNext;
@@ -1045,11 +1041,6 @@ o_tables_drop_by_oids(ORelOids oids, OXid oxid, CommitSeqNo csn)
 				any_wal = false;
 	BTreeDescr *sys_tree = NULL;
 
-	elog(LOG, "[%s] oids [ %u %u %u ]", __func__,
-		 oids.datoid,
-		 oids.reloid,
-		 oids.relnode);
-
 	key.oids = oids;
 	key.chunknum = 0;
 
@@ -1123,11 +1114,6 @@ o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
 	int			len;
 	BTreeDescr *sys_tree;
 
-	elog(LOG, "[%s] oids [ %u %u %u ]", __func__,
-		 table->oids.datoid,
-		 table->oids.reloid,
-		 table->oids.relnode);
-
 	data = serialize_o_table(table, &len);
 
 	key.oids = table->oids;
@@ -1164,9 +1150,6 @@ o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version, OSnapshot *snap
 		key.version = *version;
 	else
 		key.version = O_TABLE_INVALID_VERSION;
-
-	elog(LOG, "[%s] Setup a OTableChunkKey key for oids [ %u %u %u ] key.version %u",
-		 __func__, oids.datoid, oids.reloid, oids.relnode, key.version);
 
 	found_key = &key;
 	result = generic_toast_get_any_with_key(&oTablesToastAPI, (Pointer) &key,
@@ -1260,8 +1243,6 @@ o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
 	key.chunknum = 0;
 	key.version = table->version + 1;
 
-	elog(LOG, "[%s] key.version %u table->version %u csn %u", __func__, key.version, table->version, csn);
-
 	systrees_modify_start();
 	old_table = o_tables_get(table->oids, NULL, NULL);
 	o_tables_oids_indexes(old_table, table, oxid, csn);
@@ -1288,10 +1269,6 @@ o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn)
 								   O_INVALIDATE_OIDS_ON_ABORT);
 		o_invalidate_oids(o_table->indices[PrimaryIndexNumber].oids);
 	}
-	elog(LOG, "[%s] ======= SHARED INVALIDATE oids [ %u %u %u ]", __func__,
-		 o_table->oids.datoid,
-		 o_table->oids.reloid,
-		 o_table->oids.relnode);
 	o_add_invalidate_undo_item(o_table->oids,
 							   O_INVALIDATE_OIDS_ON_ABORT);
 	o_invalidate_oids(o_table->oids);

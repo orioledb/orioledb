@@ -698,7 +698,6 @@ o_btree_modify_insert_update(BTreeModifyInternalContext *context)
 
 	if (context->undoIsReserved && context->needsUndo)
 	{
-		elog(LOG, "[%s] o_btree_modify_add_undo_record", __func__);
 		o_btree_modify_add_undo_record(context);
 	}
 	else if (!context->needsUndo)
@@ -762,7 +761,6 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 	}
 	else
 	{
-		elog(LOG, "[%s] oids [ %u %u %u ]", __func__, desc->oids.datoid, desc->oids.reloid, desc->oids.relnode);
 		/* Still need the undo item to deal with transaction rollback */
 		undoLocation = make_undo_record(desc, context->tuple, true,
 										BTreeOperationInsert, blkno,
@@ -772,8 +770,6 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 		{
 			leafTuphdr->undoLocation = InvalidUndoLocation;
 			leafTuphdr->undoLocation |= current_command_get_undo_location();
-
-			elog(LOG, "[%s] oids [ %u %u %u ] leafTuphdr->undoLocation %lu", __func__, desc->oids.datoid, desc->oids.reloid, desc->oids.relnode, leafTuphdr->undoLocation);
 		}
 	}
 }

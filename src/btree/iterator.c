@@ -254,8 +254,6 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	bool		curTupleAllocated = false;
 	uint32		boundKeyVersion = versionCallback ? versionCallback(arg) : O_TABLE_INVALID_VERSION;
 
-	/* @TODO ! !! */
-
 	prevMctx = MemoryContextSwitchTo(mcxt);
 
 	BTREE_PAGE_READ_LEAF_ITEM(tupHdrPtr, curTuple, p, loc);
@@ -274,13 +272,6 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 		oxid_match_snapshot(XACT_INFO_GET_OXID(xactInfo), oSnapshot,
 							&tupcsn, &tupptr);
-
-		elog(LOG, "[%s] [ [ %u %u %u ] oxid xactInfo %lu oSnapshot->xmin %lu ] txIsFinished %d tupcsn %lu tupHdr.deleted %d tupHdr.undoLocation %lu boundKey->version %ld",
-			 __func__,
-			 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
-			 XACT_INFO_GET_OXID(xactInfo), oSnapshot->xmin,
-			 txIsFinished, tupcsn, tupHdr.deleted, tupHdr.undoLocation,
-			 boundKeyVersion);
 
 		if (tupleCsn)
 		{
@@ -434,17 +425,6 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 		result = curTuple;
 	}
 
-	elog(LOG, "[%s] return valid result", __func__);
-	OTableChunk *chunk = (OTableChunk *) result.data;
-
-	elog(LOG, "[%s] result (((%u, %u, %u), chunknum %u, version %u), dataLength %u)", __func__,
-		 chunk->key.oids.datoid,
-		 chunk->key.oids.reloid,
-		 chunk->key.oids.relnode,
-		 chunk->key.chunknum,
-		 chunk->key.version,
-		 chunk->dataLength);
-
 	Assert(!UndoLocationIsValid(undoLocation) || UNDO_REC_EXISTS(desc->undoType, undoLocation));
 	MemoryContextSwitchTo(prevMctx);
 	return result;
@@ -459,9 +439,6 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	it = (BTreeIterator *) palloc(sizeof(BTreeIterator));
-	elog(LOG, "[%s] have_current_undo(desc->undoType) %d COMMITSEQNO_IS_NORMAL %d o_snapshot->csn %lu",
-		 __func__, have_current_undo(desc->undoType), COMMITSEQNO_IS_NORMAL(o_snapshot->csn), o_snapshot->csn);
-
 	it->combinedResult = !have_current_undo(desc->undoType) && COMMITSEQNO_IS_NORMAL(o_snapshot->csn);
 	it->oSnapshot = *o_snapshot;
 	it->scanDir = scanDir;
@@ -555,8 +532,6 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 
 	ASAN_UNPOISON_MEMORY_REGION(&result, sizeof(result));
 
-	elog(LOG, "[%s] Going to o_btree_iterator_fetch_internal tupleCsn %lu", __func__, tupleCsn);
-
 	result = o_btree_iterator_fetch_internal(it, tupleCsn);
 
 	if (!O_TUPLE_IS_NULL(result) && end != NULL)
@@ -618,18 +593,8 @@ load_page_from_undo(BTreeIterator *it, void *key, BTreeKeyType kind)
 	BTreePageHeader *header = (BTreePageHeader *) context->img;
 	BTreeDescr *desc = context->desc;
 
-	elog(LOG, "[%s] it->combinedResult %d header->csn %lu it->oSnapshot.csn %lu :: load condition: header->csn >= it->oSnapshot.csn %d", __func__,
-		 it->combinedResult,
-		 header->csn, it->oSnapshot.csn,
-		 header->csn >= it->oSnapshot.csn);
-
 	if (it->combinedResult && header->csn >= it->oSnapshot.csn)
 	{
-		elog(LOG, "[%s] it->combinedResult %d header->csn %lu it->oSnapshot.csn %lu header->undoLocation %lu : INIT", __func__,
-			 it->combinedResult,
-			 header->csn, it->oSnapshot.csn,
-			 header->undoLocation);
-
 		undo_it_init(&it->undoIt, header->undoLocation, key, kind);
 
 		if (key)

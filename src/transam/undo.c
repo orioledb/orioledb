@@ -769,22 +769,10 @@ walk_undo_range(UndoLogType undoType,
 	UndoStackItem *item;
 	UndoItemTypeDescr *descr;
 
-	UndoLocation location_tmp;
-
-	location_tmp = location;
-	while (UndoLocationIsValid(location_tmp))
-	{
-		item = undo_item_buf_read_item(buf, undoType, location_tmp);
-		elog(LOG, "[%s] walk :: type %d", __func__, item->type);
-
-		location_tmp = item->prev;
-	}
-
 	while (UndoLocationIsValid(location) && (location > toLoc || !UndoLocationIsValid(toLoc)))
 	{
 		item = undo_item_buf_read_item(buf, undoType, location);
 		descr = item_type_get_descr(item->type);
-		elog(LOG, "[%s] type %d", __func__, item->type);
 		descr->callback(undoType, location, item, oxid,
 						abort_val, changeCountsValid);
 
@@ -914,7 +902,6 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		 */
 		location = pg_atomic_read_u64(&sharedLocations->location);
 		newOnCommitLocation = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
-		elog(LOG, "[%s] ABORT location %lu newOnCommitLocation %lu", __func__, location, newOnCommitLocation);
 		location = walk_undo_range_with_buf(undoType, location,
 											toLocation ? toLocation->location : InvalidUndoLocation,
 											oxid, true, &newOnCommitLocation,
@@ -1003,9 +990,6 @@ free_retained_undo_location(UndoLogType undoType)
 
 	if (UndoLogSystem == undoType)
 	{
-		elog(LOG, "[%s] IGNORED free for SYSTREE :: proc transactionUndoRetainLocation %lu curRetainUndoLocations %lu",
-			 __func__, pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].transactionUndoRetainLocation),
-			 curRetainUndoLocations[undoType]);
 		return;
 		/* @NOTE @ INFO ignore systrees */
 	}
@@ -1466,13 +1450,6 @@ read_shared_undo_locations(UndoStackLocations *to, UndoStackSharedLocations *fro
 	to->branchLocation = pg_atomic_read_u64(&from->branchLocation);
 	to->subxactLocation = pg_atomic_read_u64(&from->subxactLocation);
 	to->onCommitLocation = pg_atomic_read_u64(&from->onCommitLocation);
-
-	elog(LOG, "[%s] location %lu %s branchLocation %lu %s subxactLocation %lu %s onCommitLocation %lu %s",
-		 __func__,
-		 to->location, UndoLocationIsValid(to->location) ? "" : "INVAL",
-		 to->branchLocation, UndoLocationIsValid(to->branchLocation) ? "" : "INVAL",
-		 to->subxactLocation, UndoLocationIsValid(to->subxactLocation) ? "" : "INVAL",
-		 to->onCommitLocation, UndoLocationIsValid(to->onCommitLocation) ? "" : "INVAL");
 }
 
 void
@@ -1483,13 +1460,6 @@ write_shared_undo_locations(UndoStackSharedLocations *to, UndoStackLocations *fr
 	pg_atomic_write_u64(&to->branchLocation, from->branchLocation);
 	pg_atomic_write_u64(&to->subxactLocation, from->subxactLocation);
 	pg_atomic_write_u64(&to->onCommitLocation, from->onCommitLocation);
-
-	elog(LOG, "[%s] location %lu %s branchLocation %lu %s subxactLocation %lu %s onCommitLocation %lu %s",
-		 __func__,
-		 from->location, UndoLocationIsValid(from->location) ? "" : "INVAL",
-		 from->branchLocation, UndoLocationIsValid(from->branchLocation) ? "" : "INVAL",
-		 from->subxactLocation, UndoLocationIsValid(from->subxactLocation) ? "" : "INVAL",
-		 from->onCommitLocation, UndoLocationIsValid(from->onCommitLocation) ? "" : "INVAL");
 }
 
 void
@@ -1513,8 +1483,6 @@ reset_cur_undo_locations(void)
 {
 	UndoStackLocations location = {InvalidUndoLocation, InvalidUndoLocation, InvalidUndoLocation, InvalidUndoLocation};
 	int			i;
-
-	elog(LOG, "[%s]", __func__);
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
@@ -2267,14 +2235,10 @@ undo_read(UndoLogType undoType, UndoLocation location, Size size, Pointer buf)
 
 	writtenLocation = pg_atomic_read_u64(&meta->writtenLocation);
 
-	elog(LOG, "[%s] type %d READ FROM location %lu writtenLocation %lu", __func__, undoType, location, writtenLocation);
-
 	if (location + size > writtenLocation)
 	{
 		UndoLocation maxLoc,
 					minLoc;
-
-		elog(LOG, "[%s] type %d READ FROM location %lu writtenLocation %lu :: READY", __func__, undoType, location, writtenLocation);
 
 		pg_read_barrier();
 
@@ -2307,8 +2271,6 @@ undo_write(UndoLogType undoType, UndoLocation location, Size size, Pointer buf)
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	UndoRetainSharedLocations *sharedLocations = &curProcData->undoRetainLocations[(int) undoType];
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
-
-	elog(LOG, "[%s] type %d WRITE TO location %lu", __func__, undoType, location);
 
 	Assert(location >= pg_atomic_read_u64(&sharedLocations->snapshotRetainUndoLocation) ||
 		   location >= pg_atomic_read_u64(&sharedLocations->transactionUndoRetainLocation) ||
