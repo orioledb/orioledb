@@ -541,12 +541,13 @@ orioledb_sys_tree_structure(PG_FUNCTION_ARGS)
 const text *
 retrieve_orioledb_sys_tree_structure(int systree, int depth)
 {
-	Datum res;
-	text  *options = cstring_to_text("");
+	Datum		res;
+	text	   *options = cstring_to_text("");
+
 	res = DirectFunctionCall3(orioledb_sys_tree_structure,
-		ObjectIdGetDatum(systree),
-		PointerGetDatum(options),
-		Int32GetDatum(depth));
+							  ObjectIdGetDatum(systree),
+							  PointerGetDatum(options),
+							  Int32GetDatum(depth));
 
 	return DatumGetTextP(res);
 }
@@ -926,13 +927,13 @@ o_table_chunk_cmp(BTreeDescr *desc,
 		key2 = (OTableChunkKey *) (((OTuple *) p2)->data);
 
 	elog(LOG, "[%s] compare p1 vs p2 :: [ %u %u %u ] VS [ %u %u %u ]",
-		__func__,
-		key1->oids.datoid,
-		key1->oids.reloid,
-		key1->oids.relnode,
-		key2->oids.datoid,
-		key2->oids.reloid,
-		key2->oids.relnode);
+		 __func__,
+		 key1->oids.datoid,
+		 key1->oids.reloid,
+		 key1->oids.relnode,
+		 key2->oids.datoid,
+		 key2->oids.reloid,
+		 key2->oids.relnode);
 
 	if (key1->oids.datoid < key2->oids.datoid)
 		return -1;

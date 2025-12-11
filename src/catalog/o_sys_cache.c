@@ -833,7 +833,13 @@ o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 
 				O_TUPLE_SET_NULL(nulltup);
 				Assert(IS_SYS_TREE_OIDS(desc->oids));
-				o_wal_update(desc, tup, nulltup, REPLICA_IDENTITY_DEFAULT, O_TABLE_INVALID_VERSION /* no version is necessary here for system trees other than OTable */); // @TODO !!! VERSION
+
+				/*
+				 * no version is necessary here for system trees other than
+				 * OTable
+				 */
+				o_wal_update(desc, tup, nulltup, REPLICA_IDENTITY_DEFAULT, O_TABLE_INVALID_VERSION);
+				/* @TODO ! !!VERSION */
 			}
 		}
 		PG_CATCH();

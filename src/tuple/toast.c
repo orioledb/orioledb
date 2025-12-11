@@ -397,7 +397,7 @@ ToastAPI	tableToastAPI = {
 	.getTupleChunknum = tableGetTupleChunknum,
 	.getTupleDataSize = tableGetTupleDataSize,
 	.deleteLogFullTuple = false,
-	.versionCallback = NULL, // @TODO @NOTE !!!
+	.versionCallback = NULL, //@TODO @ NOTE ! !!
 	.fetchCallback = tableVersionCallback
 };
 
@@ -447,7 +447,9 @@ generic_toast_insert_optional_wal(ToastAPI *api, void *key, Pointer data,
 
 		if (desc->storageType == BTreeStoragePersistence && wal)
 		{
-			uint32 version = api->versionCallback ? api->versionCallback(tup.data) : O_TABLE_INVALID_VERSION; // @TODO !!! VERSION
+			uint32		version = api->versionCallback ? api->versionCallback(tup.data) : O_TABLE_INVALID_VERSION;
+
+			/* @TODO ! !!VERSION */
 			add_modify_wal_record(WAL_REC_INSERT, desc, tup,
 								  o_btree_len(desc, tup, OTupleLength), REPLICA_IDENTITY_DEFAULT, version);
 		}
@@ -588,7 +590,9 @@ generic_toast_update_optional_wal(ToastAPI *api, void *key, Pointer data,
 		if (desc->storageType == BTreeStoragePersistence && wal)
 		{
 			uint8		rec_type;
-			uint32 version = api->versionCallback ? api->versionCallback(tup.data) : O_TABLE_INVALID_VERSION; // @TODO !!! VERSION
+			uint32		version = api->versionCallback ? api->versionCallback(tup.data) : O_TABLE_INVALID_VERSION;
+
+			/* @TODO ! !!VERSION */
 
 			rec_type = (result == OBTreeModifyResultUpdated) ? WAL_REC_UPDATE :
 				WAL_REC_INSERT;
@@ -673,7 +677,7 @@ generic_toast_delete_optional_wal(ToastAPI *api, void *key, OXid oxid,
 
 		if (desc->storageType == BTreeStoragePersistence && wal)
 		{
-			uint32 version;
+			uint32		version;
 
 			if (!api->deleteLogFullTuple)
 			{
@@ -681,7 +685,8 @@ generic_toast_delete_optional_wal(ToastAPI *api, void *key, OXid oxid,
 
 				walKey = o_btree_tuple_make_key(desc, tuple, NULL, true,
 												&key_allocated);
-				version = api->versionCallback ? api->versionCallback(walKey.data) : O_TABLE_INVALID_VERSION; // @TODO !!! VERSION
+				version = api->versionCallback ? api->versionCallback(walKey.data) : O_TABLE_INVALID_VERSION;
+				/* @TODO ! !!VERSION */
 
 				add_modify_wal_record(WAL_REC_DELETE, desc, walKey,
 									  o_btree_len(desc, walKey, OKeyLength), REPLICA_IDENTITY_DEFAULT, version);
@@ -690,7 +695,8 @@ generic_toast_delete_optional_wal(ToastAPI *api, void *key, OXid oxid,
 			}
 			else
 			{
-				version = api->versionCallback ? api->versionCallback(tuple.data) : O_TABLE_INVALID_VERSION; // @TODO !!! VERSION
+				version = api->versionCallback ? api->versionCallback(tuple.data) : O_TABLE_INVALID_VERSION;
+				/* @TODO ! !!VERSION */
 
 				add_modify_wal_record(WAL_REC_DELETE, desc, tuple,
 									  o_btree_len(desc, tuple, OTupleLength), REPLICA_IDENTITY_DEFAULT, version);
@@ -726,7 +732,7 @@ generic_toast_get(ToastAPI *api, void *key, Size data_size,
 	it = o_btree_iterator_create(desc, key, BTreeKeyBound,
 								 o_snapshot, ForwardScanDirection);
 	if (api->fetchCallback)
-		o_btree_iterator_set_callback(it, api->versionCallback /* @TODO may be NULL */, api->fetchCallback, (void *) key);
+		o_btree_iterator_set_callback(it, api->versionCallback /* @TODO may be NULL */ , api->fetchCallback, (void *) key);
 
 	data = palloc(data_size);
 	actual_size = 0;
@@ -865,7 +871,7 @@ generic_toast_get_any_with_key(ToastAPI *api, void *key, Size *data_size,
 	it = o_btree_iterator_create(desc, key, BTreeKeyBound,
 								 o_snapshot, ForwardScanDirection);
 	if (api->fetchCallback && found_key && *found_key)
-		o_btree_iterator_set_callback(it, api->versionCallback /* @TODO may be NULL */, api->fetchCallback,
+		o_btree_iterator_set_callback(it, api->versionCallback /* @TODO may be NULL */ , api->fetchCallback,
 									  (void *) *found_key);
 
 	data = generic_toast_get_any_common(api, key, data_size, o_snapshot, arg, it,

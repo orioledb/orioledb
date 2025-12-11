@@ -735,7 +735,7 @@ create_table_descr(ORelOids oids, OSnapshot *snapshot, uint32 *version)
 						&o_table->oids,
 						HASH_ENTER,
 						&found);
-	//Assert(!found);
+	/* Assert(!found); */
 
 	fill_table_descr(descr, o_table);
 
@@ -785,13 +785,15 @@ o_fetch_table_descr(ORelOids oids, OSnapshot *snapshot, uint32 *version)
 		table_descr = create_table_descr(oids, snapshot, version);
 
 	elog(LOG, "[%s] OTableDescr natts %d %s", __func__,
-		table_descr->tupdesc->natts,
-		found ? "FOUND IN CACHE" : "from btree");
+		 table_descr->tupdesc->natts,
+		 found ? "FOUND IN CACHE" : "from btree");
 
-	int i = 0;
-	for (i = 0; i < table_descr->tupdesc->natts; ++i) {
+	int			i = 0;
+
+	for (i = 0; i < table_descr->tupdesc->natts; ++i)
+	{
 		elog(LOG, "[%s] OTableDescr att #%d attname `%s`", __func__, i,
-		table_descr->tupdesc->attrs[i].attname.data);
+			 table_descr->tupdesc->attrs[i].attname.data);
 	}
 
 	return table_descr;

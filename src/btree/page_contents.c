@@ -208,7 +208,7 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 */
 	headerCsn = header->csn;
 	elog(LOG, "[%s] csn %lu headerCsn %lu :: read_undo %d COMMITSEQNO_IS_NORMAL(csn) %d",
-		__func__, csn, headerCsn, read_undo, COMMITSEQNO_IS_NORMAL(csn));
+		 __func__, csn, headerCsn, read_undo, COMMITSEQNO_IS_NORMAL(csn));
 
 	if (read_undo && COMMITSEQNO_IS_NORMAL(csn) && headerCsn >= csn)
 	{
@@ -221,7 +221,7 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 			return false;
 
 		elog(LOG, "[%s] csn %lu headerCsn %lu :: 1 headerCsn >= csn, read_page_from_undo",
-			__func__, csn, headerCsn);
+			 __func__, csn, headerCsn);
 
 		pageUndoLoc = read_page_from_undo(desc, img, headerUndoLocation, csn,
 										  key, keyType, lokey);
@@ -247,7 +247,7 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 		UndoLocation pageUndoLoc;
 
 		elog(LOG, "[%s] csn %lu headerCsn %lu :: 2 headerCsn >= csn, read_page_from_undo",
-			__func__, csn, headerCsn);
+			 __func__, csn, headerCsn);
 
 		pageUndoLoc = read_page_from_undo(desc, img, header->undoLocation, csn,
 										  key, keyType, lokey);

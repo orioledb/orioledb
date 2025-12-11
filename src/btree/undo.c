@@ -55,10 +55,10 @@ page_add_image_to_undo(BTreeDescr *desc, Pointer p, CommitSeqNo imageCsn,
 	Assert(O_PAGE_IS(p, LEAF));
 
 	elog(LOG, "[%s] oids [ %u %u %u ] imageCsn %lu", __func__,
-		desc->oids.datoid,
-		desc->oids.reloid,
-		desc->oids.relnode,
-		imageCsn);
+		 desc->oids.datoid,
+		 desc->oids.reloid,
+		 desc->oids.relnode,
+		 imageCsn);
 
 	Assert(desc->undoType != UndoLogNone);
 	if (splitKey)
@@ -326,8 +326,8 @@ make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
 														MAXALIGN(size));
 
 	elog(LOG, "[%s] for oids [ %u %u %u ] undoLocation %lu desc->undoType %d",
-		__func__, desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
-		undoLocation, desc->undoType);
+		 __func__, desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
+		 undoLocation, desc->undoType);
 
 	item->header.itemSize = size;
 	if (action == BTreeOperationLock)
@@ -1099,7 +1099,7 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 		if (is_right != NULL)
 			*is_right = true;
 		undo_read(undoType, left_loc, ORIOLEDB_BLCKSZ, dest);
-		elog(LOG, "[%s] 0 undoLocation %lu left_loc %lu chunksCount %d", __func__, undoLocation, left_loc, ((BTreePageHeader*)dest)->chunksCount);
+		elog(LOG, "[%s] 0 undoLocation %lu left_loc %lu chunksCount %d", __func__, undoLocation, left_loc, ((BTreePageHeader *) dest)->chunksCount);
 		if (page_lokey && header.type == UndoPageImageSplit)
 		{
 			bool		set_page_lokey = false;
@@ -1629,12 +1629,12 @@ find_non_lock_only_undo_record(UndoLogType undoType, BTreeLeafTuphdr *tuphdr)
 	UndoLocation undoLocation = InvalidUndoLocation;
 
 	elog(LOG, "[%s] XACT_INFO_IS_LOCK_ONLY %d XACT_INFO_IS_FINISHED %d",
-		__func__, XACT_INFO_IS_LOCK_ONLY(xactInfo), XACT_INFO_IS_FINISHED(xactInfo));
+		 __func__, XACT_INFO_IS_LOCK_ONLY(xactInfo), XACT_INFO_IS_FINISHED(xactInfo));
 
 	while (XACT_INFO_IS_LOCK_ONLY(xactInfo) || !XACT_INFO_IS_FINISHED(xactInfo))
 	{
 		elog(LOG, "[%s] in while XACT_INFO_IS_LOCK_ONLY %d XACT_INFO_IS_FINISHED %d",
-		__func__, XACT_INFO_IS_LOCK_ONLY(xactInfo), XACT_INFO_IS_FINISHED(xactInfo));
+			 __func__, XACT_INFO_IS_LOCK_ONLY(xactInfo), XACT_INFO_IS_FINISHED(xactInfo));
 
 		if (!XACT_INFO_IS_LOCK_ONLY(xactInfo))
 			return undoLocation;

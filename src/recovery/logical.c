@@ -783,9 +783,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		{
 			int			sys_tree_num = -1;
 			uint8		treeType = 0;
-			OXid xmin;
+			OXid		xmin;
 
-			OSnapshot snapshot;
+			OSnapshot	snapshot;
 
 			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids, &xmin, &snapshot.csn, &snapshot.cid, &cur_version);
 
@@ -793,15 +793,16 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			snapshot.xlogptr = changeXLogPtr;
 
 			elog(LOG, "[%s] WAL_REC_RELATION cur_oids [ %u %u %u ] treeType %d xmin/csn/cid %lu/%lu/%lu version %u", __func__,
-				cur_oids.datoid,
-				cur_oids.reloid,
-				cur_oids.relnode,
-				treeType,
-				snapshot.xmin, snapshot.csn, snapshot.cid,
-				cur_version);
+				 cur_oids.datoid,
+				 cur_oids.reloid,
+				 cur_oids.relnode,
+				 treeType,
+				 snapshot.xmin, snapshot.csn, snapshot.cid,
+				 cur_version);
 
 			{
 				extern const text *retrieve_orioledb_sys_tree_structure(int systree, int depth);
+
 				elog(WARNING, "%s", text_to_cstring(retrieve_orioledb_sys_tree_structure(SYS_TREES_O_TABLES, 32)));
 			}
 
@@ -842,7 +843,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			else if (ix_type == oIndexInvalid)
 			{
 				elog(LOG, "[%s] WAL_REC_RELATION oIndexInvalid :: o_fetch_table_descr :: cur_version %u",
-					__func__, cur_version);
+					 __func__, cur_version);
 
 				descr = o_fetch_table_descr(cur_oids, &snapshot, &cur_version);
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;

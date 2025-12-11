@@ -204,7 +204,7 @@ typedef struct
 static inline ORelOids
 create_oids(void)
 {
-	ORelOids oids;
+	ORelOids	oids;
 
 	oids.datoid = InvalidOid;
 	oids.reloid = InvalidOid;

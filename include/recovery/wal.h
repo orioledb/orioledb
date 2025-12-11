@@ -105,7 +105,7 @@ typedef struct
 	uint8		relnode[sizeof(Oid)];
 	uint8		xmin[sizeof(OXid)]; /* @TODO @INFO */
 	uint8		csn[sizeof(CommitSeqNo)];	/* @TODO @INFO */
-	uint8		cid[sizeof(CommandId)];	/* @TODO @INFO */
+	uint8		cid[sizeof(CommandId)]; /* @TODO @INFO */
 	uint8		version[sizeof(uint32)];	/* @TODO @INFO */
 } WALRecRelation;
 

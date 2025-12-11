@@ -252,7 +252,9 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	MemoryContext prevMctx;
 	UndoLocation undoLocation = InvalidUndoLocation;
 	bool		curTupleAllocated = false;
-	uint32 boundKeyVersion = versionCallback ? versionCallback(arg) : O_TABLE_INVALID_VERSION; // @TODO !!!
+	uint32		boundKeyVersion = versionCallback ? versionCallback(arg) : O_TABLE_INVALID_VERSION;
+
+	/* @TODO ! !! */
 
 	prevMctx = MemoryContextSwitchTo(mcxt);
 
@@ -274,11 +276,11 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 							&tupcsn, &tupptr);
 
 		elog(LOG, "[%s] [ [ %u %u %u ] oxid xactInfo %lu oSnapshot->xmin %lu ] txIsFinished %d tupcsn %lu tupHdr.deleted %d tupHdr.undoLocation %lu boundKey->version %ld",
-			__func__,
-			desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
-			XACT_INFO_GET_OXID(xactInfo), oSnapshot->xmin,
-			txIsFinished, tupcsn, tupHdr.deleted, tupHdr.undoLocation,
-			boundKeyVersion);
+			 __func__,
+			 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
+			 XACT_INFO_GET_OXID(xactInfo), oSnapshot->xmin,
+			 txIsFinished, tupcsn, tupHdr.deleted, tupHdr.undoLocation,
+			 boundKeyVersion);
 
 		if (tupleCsn)
 		{
@@ -293,7 +295,11 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 		if (fetchCallback)
 		{
 			TupleFetchCallbackResult cbResult;
-			/* Fetch from undo chain if txn is in progress OR historical version */
+
+			/*
+			 * Fetch from undo chain if txn is in progress OR historical
+			 * version
+			 */
 			bool		version_check = !txIsFinished || (boundKeyVersion != O_TABLE_INVALID_VERSION);
 			OXid		tupOxid = version_check ? XACT_INFO_GET_OXID(xactInfo) : InvalidOXid;
 			TupleFetchCallbackCheckType check_type = version_check ?
@@ -430,13 +436,14 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 	elog(LOG, "[%s] return valid result", __func__);
 	OTableChunk *chunk = (OTableChunk *) result.data;
+
 	elog(LOG, "[%s] result (((%u, %u, %u), chunknum %u, version %u), dataLength %u)", __func__,
-		chunk->key.oids.datoid,
-		chunk->key.oids.reloid,
-		chunk->key.oids.relnode,
-		chunk->key.chunknum,
-		chunk->key.version,
-		chunk->dataLength);
+		 chunk->key.oids.datoid,
+		 chunk->key.oids.reloid,
+		 chunk->key.oids.relnode,
+		 chunk->key.chunknum,
+		 chunk->key.version,
+		 chunk->dataLength);
 
 	Assert(!UndoLocationIsValid(undoLocation) || UNDO_REC_EXISTS(desc->undoType, undoLocation));
 	MemoryContextSwitchTo(prevMctx);
@@ -453,7 +460,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 
 	it = (BTreeIterator *) palloc(sizeof(BTreeIterator));
 	elog(LOG, "[%s] have_current_undo(desc->undoType) %d COMMITSEQNO_IS_NORMAL %d o_snapshot->csn %lu",
-		__func__, have_current_undo(desc->undoType), COMMITSEQNO_IS_NORMAL(o_snapshot->csn), o_snapshot->csn);
+		 __func__, have_current_undo(desc->undoType), COMMITSEQNO_IS_NORMAL(o_snapshot->csn), o_snapshot->csn);
 
 	it->combinedResult = !have_current_undo(desc->undoType) && COMMITSEQNO_IS_NORMAL(o_snapshot->csn);
 	it->oSnapshot = *o_snapshot;
@@ -612,16 +619,16 @@ load_page_from_undo(BTreeIterator *it, void *key, BTreeKeyType kind)
 	BTreeDescr *desc = context->desc;
 
 	elog(LOG, "[%s] it->combinedResult %d header->csn %lu it->oSnapshot.csn %lu :: load condition: header->csn >= it->oSnapshot.csn %d", __func__,
-		it->combinedResult,
-		header->csn, it->oSnapshot.csn,
-		header->csn >= it->oSnapshot.csn);
+		 it->combinedResult,
+		 header->csn, it->oSnapshot.csn,
+		 header->csn >= it->oSnapshot.csn);
 
 	if (it->combinedResult && header->csn >= it->oSnapshot.csn)
 	{
 		elog(LOG, "[%s] it->combinedResult %d header->csn %lu it->oSnapshot.csn %lu header->undoLocation %lu : INIT", __func__,
-			it->combinedResult,
-			header->csn, it->oSnapshot.csn,
-			header->undoLocation);
+			 it->combinedResult,
+			 header->csn, it->oSnapshot.csn,
+			 header->undoLocation);
 
 		undo_it_init(&it->undoIt, header->undoLocation, key, kind);
 

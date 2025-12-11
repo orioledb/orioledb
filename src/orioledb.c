@@ -1540,9 +1540,9 @@ o_invalidate_oids(ORelOids oids)
 	SharedInvalidationMessage msg;
 
 	elog(LOG, "[%s] [ %u %u %u ]", __func__,
-		oids.datoid,
-		oids.reloid,
-		oids.relnode);
+		 oids.datoid,
+		 oids.reloid,
+		 oids.relnode);
 
 	Assert(ORelOidsIsValid(oids));
 

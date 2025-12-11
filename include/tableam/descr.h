@@ -210,7 +210,7 @@ OIndexKeyAttnumToTupleAttnum(BTreeKeyType keyType, OIndexDescr *idx, int attnum)
 struct OTableDescr
 {
 	ORelOids	oids;
-	uint32 version;
+	uint32		version;
 
 	/* reference count */
 	int			refcnt;
