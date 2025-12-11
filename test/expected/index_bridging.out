@@ -1985,20 +1985,21 @@ SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35];
 (1 row)
 
 EXPLAIN (COSTS OFF)
-	SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 20];
+	SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 36, 15];
                      QUERY PLAN                     
 ----------------------------------------------------
  Custom Scan (o_scan) on o_test_bitmap_scans
    Bitmap heap scan
-   Recheck Cond: (j <@ '{20,20}'::integer[])
+   Recheck Cond: (j <@ '{20,36,15}'::integer[])
    ->  Bitmap Index Scan on o_test_bitmap_scans_ix3
-         Index Cond: (j <@ '{20,20}'::integer[])
+         Index Cond: (j <@ '{20,36,15}'::integer[])
 (5 rows)
 
-SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 20];
- i | j | j2 | p 
----+---+----+---
-(0 rows)
+SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 36, 15];
+ i |    j    |   j2    |   p   
+---+---------+---------+-------
+ 3 | {20,36} | {69,98} | (8,8)
+(1 row)
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_bitmap_scans WHERE j > ARRAY[26, 42];
@@ -2018,47 +2019,49 @@ SELECT * FROM o_test_bitmap_scans WHERE j > ARRAY[26, 42];
 (1 row)
 
 EXPLAIN (COSTS OFF)
-	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20];
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
+	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 36, 15];
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_bitmap_scans
    Bitmap heap scan
-   Recheck Cond: ((j = '{19,35}'::integer[]) OR (j <@ '{20,20}'::integer[]))
+   Recheck Cond: ((j = '{19,35}'::integer[]) OR (j <@ '{20,36,15}'::integer[]))
    ->  BitmapOr
          ->  Bitmap Index Scan on o_test_bitmap_scans_ix1
                Index Cond: (j = '{19,35}'::integer[])
          ->  Bitmap Index Scan on o_test_bitmap_scans_ix3
-               Index Cond: (j <@ '{20,20}'::integer[])
+               Index Cond: (j <@ '{20,36,15}'::integer[])
 (8 rows)
 
-SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20];
+SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 36, 15];
  i |    j    |   j2    |   p   
 ---+---------+---------+-------
  2 | {19,35} | {68,97} | (7,7)
-(1 row)
+ 3 | {20,36} | {69,98} | (8,8)
+(2 rows)
 
 EXPLAIN (COSTS OFF)
-	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20] OR j > ARRAY[26, 42];
-                                                QUERY PLAN                                                 
------------------------------------------------------------------------------------------------------------
+	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 36, 15] OR j > ARRAY[26, 42];
+                                                  QUERY PLAN                                                  
+--------------------------------------------------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_bitmap_scans
    Bitmap heap scan
-   Recheck Cond: ((j = '{19,35}'::integer[]) OR (j > '{26,42}'::integer[]) OR (j <@ '{20,20}'::integer[]))
+   Recheck Cond: ((j = '{19,35}'::integer[]) OR (j > '{26,42}'::integer[]) OR (j <@ '{20,36,15}'::integer[]))
    ->  BitmapOr
          ->  Bitmap Index Scan on o_test_bitmap_scans_ix1
                Index Cond: (j = '{19,35}'::integer[])
          ->  Bitmap Index Scan on o_test_bitmap_scans_ix2
                Index Cond: (j > '{26,42}'::integer[])
          ->  Bitmap Index Scan on o_test_bitmap_scans_ix3
-               Index Cond: (j <@ '{20,20}'::integer[])
+               Index Cond: (j <@ '{20,36,15}'::integer[])
 (10 rows)
 
-SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20] OR j > ARRAY[26, 42];
+SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 36, 15] OR j > ARRAY[26, 42];
  i  |    j    |    j2    |    p    
 ----+---------+----------+---------
   2 | {19,35} | {68,97}  | (7,7)
+  3 | {20,36} | {69,98}  | (8,8)
  10 | {27,43} | {76,105} | (15,15)
-(2 rows)
+(3 rows)
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_bitmap_scans
@@ -4209,9 +4212,109 @@ SELECT data2 from test_no_bmscan_on_text_pkey where data2 = 'barbar';
  barbar
 (1 row)
 
+-- Test bridge index behavior when table is truncated.
+CREATE TABLE brin_test_multi (a INT, b BIGINT) using orioledb WITH (fillfactor=10) ;
+INSERT INTO brin_test_multi
+SELECT i/5 + mod(911 * i + 483, 25),
+       i/10 + mod(751 * i + 221, 41)
+  FROM generate_series(1,1000) s(i);
+SELECT COUNT(*) FROM brin_test_multi WHERE a < 37;
+ count 
+-------
+   124
+(1 row)
+
+CREATE INDEX brin_test_multi_idx ON brin_test_multi USING brin (a int4_minmax_multi_ops) WITH (pages_per_range=5);
+NOTICE:  index bridging is enabled for orioledb table 'brin_test_multi'
+DETAIL:  index access method 'brin' is supported only via index bridging for OrioleDB table
+SELECT orioledb_tbl_indices('brin_test_multi'::regclass, true);
+                  orioledb_tbl_indices                  
+--------------------------------------------------------
+ Index ctid_primary                                    +
+     Index type: primary, unique, ctid                 +
+     Leaf tuple size: 4, non-leaf tuple size: 1        +
+     Non-leaf tuple fields: ctid                       +
+     Leaf tuple fields: ctid, index_bridging_ctid, a, b+
+ Index index_bridge                                    +
+     Index type: secondary                             +
+     Leaf tuple size: 2, non-leaf tuple size: 1        +
+     Non-leaf tuple fields: index_bridging_ctid        +
+     Leaf tuple fields: index_bridging_ctid, ctid      +
+ Index toast                                           +
+     Index type: secondary                             +
+     Leaf tuple size: 4, non-leaf tuple size: 3        +
+     Non-leaf tuple fields: ctid, attnum, chunknum     +
+     Leaf tuple fields: ctid, attnum, chunknum, data   +
+ 
+(1 row)
+
+\d+ brin_test_multi
+                          Table "index_bridging.brin_test_multi"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ a      | integer |           |          |         | plain   |              | 
+ b      | bigint  |           |          |         | plain   |              | 
+Indexes:
+    "brin_test_multi_idx" brin (a int4_minmax_multi_ops) WITH (pages_per_range='5')
+Options: fillfactor=10, index_bridging=true
+
+TRUNCATE brin_test_multi;
+SELECT orioledb_tbl_indices('brin_test_multi'::regclass, true);
+                  orioledb_tbl_indices                  
+--------------------------------------------------------
+ Index ctid_primary                                    +
+     Index type: primary, unique, ctid                 +
+     Leaf tuple size: 4, non-leaf tuple size: 1        +
+     Non-leaf tuple fields: ctid                       +
+     Leaf tuple fields: ctid, index_bridging_ctid, a, b+
+ Index index_bridge                                    +
+     Index type: secondary                             +
+     Leaf tuple size: 2, non-leaf tuple size: 1        +
+     Non-leaf tuple fields: index_bridging_ctid        +
+     Leaf tuple fields: index_bridging_ctid, ctid      +
+ Index toast                                           +
+     Index type: secondary                             +
+     Leaf tuple size: 4, non-leaf tuple size: 3        +
+     Non-leaf tuple fields: ctid, attnum, chunknum     +
+     Leaf tuple fields: ctid, attnum, chunknum, data   +
+ 
+(1 row)
+
+\d+ brin_test_multi
+                          Table "index_bridging.brin_test_multi"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ a      | integer |           |          |         | plain   |              | 
+ b      | bigint  |           |          |         | plain   |              | 
+Indexes:
+    "brin_test_multi_idx" brin (a int4_minmax_multi_ops) WITH (pages_per_range='5')
+Options: fillfactor=10, index_bridging=true
+
+INSERT INTO brin_test_multi
+SELECT i/5 + mod(911 * i + 483, 25),
+       i/10 + mod(751 * i + 221, 41)
+  FROM generate_series(1,1000) s(i);
+set enable_seqscan = off;
+EXPLAIN SELECT COUNT(*) FROM brin_test_multi WHERE a < 37;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Aggregate  (cost=244.38..244.39 rows=1 width=8)
+   ->  Custom Scan (o_scan) on brin_test_multi  (cost=13.07..233.80 rows=4233 width=0)
+         Bitmap heap scan
+         Recheck Cond: (a < 37)
+         ->  Bitmap Index Scan on brin_test_multi_idx  (cost=0.00..12.02 rows=12698 width=0)
+               Index Cond: (a < 37)
+(6 rows)
+
+SELECT COUNT(*) FROM brin_test_multi WHERE a < 37;
+ count 
+-------
+   124
+(1 row)
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 14 other objects
+NOTICE:  drop cascades to 15 other objects
 DETAIL:  drop cascades to table o_test_ix_ams
 drop cascades to table o_test_bridging_with_regular_no_pkey
 drop cascades to table o_test_bridging_with_regular_pkey
@@ -4226,6 +4329,7 @@ drop cascades to table size_test
 drop cascades to table tbl_with_pkey_bridged_toast
 drop cascades to table bitmap_test
 drop cascades to table test_no_bmscan_on_text_pkey
+drop cascades to table brin_test_multi
 DROP SCHEMA index_bridging CASCADE;
 NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to function btree_index_content(name)
