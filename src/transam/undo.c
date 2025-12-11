@@ -2536,16 +2536,17 @@ o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
 	LocationIndex size;
 	UndoLocation location;
 	RewindRelFileNodeUndoStackItem *item;
+	int			stepItemsCapacity = (O_MAX_UNDO_RECORD_SIZE - offsetof(RewindRelFileNodeUndoStackItem, rels)) / sizeof(RelFileNode);
+
+	Assert(nOnCommit >= 0 && nOnAbort >= 0);
 
 	while (nOnCommit + nOnAbort > 0)
 	{
-		int			itemsLeft = (O_MAX_UNDO_RECORD_SIZE - offsetof(RewindRelFileNodeUndoStackItem, rels)) / sizeof(RelFileNode);
 		int			stepOnCommit;
 		int			stepOnAbort;
 
-		stepOnCommit = Min(nOnCommit, itemsLeft);
-		itemsLeft -= stepOnCommit;
-		stepOnAbort = Min(nOnAbort, itemsLeft);
+		stepOnCommit = Min(nOnCommit, stepItemsCapacity);
+		stepOnAbort = Min(nOnAbort, stepItemsCapacity - stepOnCommit);
 
 		size = offsetof(RewindRelFileNodeUndoStackItem, rels) + sizeof(RelFileNode) * (stepOnCommit + stepOnAbort);
 		item = (RewindRelFileNodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(size));
