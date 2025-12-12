@@ -518,6 +518,7 @@ OExecCheckIndexConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
 	 * For each index, form index tuple and check if it satisfies the
 	 * constraint.
 	 */
+	Assert(numIndices > 0);		/* for clang-analyzer */
 	for (i = 0; i < numIndices; i++)
 	{
 		Relation	indexRelation = relationDescs[i];
@@ -827,6 +828,7 @@ o_exclusion_cmp(OIndexDescr *id, OBTreeKeyBound *key1, OTuple *tuple2)
 	tupdesc = id->leafTupdesc;
 	spec = &id->leafSpec;
 
+	Assert(id->nKeyFields > 0); /* for clang-analyzer */
 	for (i = 0; i < id->nKeyFields; i++)
 	{
 		uint8		flags = key1->keys[i].flags;
@@ -857,6 +859,7 @@ exclusion_fill_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bou
 	slot_getsomeattrs(slot, idx->maxTableAttnum - ctid_off);
 
 	bound->nkeys = idx->nonLeafTupdesc->natts;
+	Assert(bound->nkeys > 0);	/* for clang-analyzer */
 	for (i = 0; i < bound->nkeys; i++)
 	{
 		Datum		value;
@@ -1588,6 +1591,7 @@ fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bound)
 	slot_getallattrs(slot);
 
 	bound->nkeys = idx->nonLeafTupdesc->natts;
+	Assert(bound->nkeys > 0);	/* for clang-analyzer */
 	for (i = 0; i < bound->nkeys; i++)
 	{
 		Datum		value;
