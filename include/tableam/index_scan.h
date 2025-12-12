@@ -32,6 +32,7 @@ typedef struct OScanState
 	bool		curKeyRangeIsLoaded;
 	int			numPrefixExactKeys;
 	bool		exact;
+	bool		use_lockstep;
 	OBTreeKeyRange curKeyRange;
 	BTreeIterator *iterator;
 	List	   *indexQuals;
