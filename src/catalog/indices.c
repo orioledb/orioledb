@@ -277,7 +277,7 @@ o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTa
 
 	if (o_table == NULL)
 	{
-		o_table = o_tables_get(oids);
+		o_table = o_tables_get(oids, NULL, NULL);
 		if (o_table == NULL)
 		{
 			elog(FATAL, "orioledb table does not exists for oids = %u, %u, %u",
@@ -434,7 +434,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	if (OidIsValid(indoid))
 		index_close(index, AccessShareLock);
 
-	old_o_table = o_tables_get(oids);
+	old_o_table = o_tables_get(oids, NULL, NULL);
 	if (old_o_table == NULL)
 	{
 		elog(FATAL, "orioledb table does not exists for oids = %u, %u, %u",
@@ -464,7 +464,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			{
 				o_table_free(old_o_table);
 				ORelOidsSetFromRel(oids, heap);
-				old_o_table = o_tables_get(oids);
+				old_o_table = o_tables_get(oids, NULL, NULL);
 				if (old_o_table == NULL)
 				{
 					elog(FATAL, "orioledb table does not exists "
@@ -490,7 +490,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			/* Rebuild, assign new oids */
 			if (ix_type == oIndexPrimary)
 			{
-				new_o_table = o_tables_get(oids);
+				new_o_table = o_tables_get(oids, NULL, NULL);
 				o_table = new_o_table;
 				assign_new_oids(new_o_table, heap, false);
 				oids = new_o_table->oids;
@@ -564,7 +564,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	if (!reuse_relnode && table_index->type == oIndexPrimary)
 	{
 		Assert(old_o_table);
-		old_descr = o_fetch_table_descr(old_o_table->oids);
+		old_descr = o_fetch_table_descr(old_o_table->oids, NULL, NULL);
 
 		recreate_o_table(old_o_table, o_table);
 	}
@@ -581,7 +581,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		recreate_table_descr_by_oids(oids);
 	}
 
-	descr = o_fetch_table_descr(o_table->oids);
+	descr = o_fetch_table_descr(o_table->oids, NULL, NULL);
 
 	if (!reuse_relnode && is_build)
 	{
@@ -2049,7 +2049,7 @@ drop_primary_index(Relation rel, OTable *o_table)
 	Assert(o_table->indices[PrimaryIndexNumber].type == oIndexPrimary);
 
 	old_o_table = o_table;
-	o_table = o_tables_get(o_table->oids);
+	o_table = o_tables_get(o_table->oids, NULL, NULL);
 	assign_new_oids(o_table, rel, true);
 
 	memmove(&o_table->indices[0],
@@ -2060,9 +2060,9 @@ drop_primary_index(Relation rel, OTable *o_table)
 	o_table->primary_init_nfields = o_table->nfields + 1;	/* + ctid field */
 
 	o_tables_table_meta_lock(NULL);
-	old_descr = o_fetch_table_descr(old_o_table->oids);
+	old_descr = o_fetch_table_descr(old_o_table->oids, NULL, NULL);
 	recreate_o_table(old_o_table, o_table);
-	descr = o_fetch_table_descr(o_table->oids);
+	descr = o_fetch_table_descr(o_table->oids, NULL, NULL);
 	o_tablespace_cache_add_table(o_table);
 	rebuild_indices_insert_placeholders(descr);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
@@ -2105,7 +2105,7 @@ o_index_drop(Relation tbl, OIndexNumber ix_num)
 	OTable	   *o_table;
 
 	ORelOidsSetFromRel(oids, tbl);
-	o_table = o_tables_get(oids);
+	o_table = o_tables_get(oids, NULL, NULL);
 
 	if (o_table == NULL)
 	{

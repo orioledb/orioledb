@@ -212,7 +212,7 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 			OTable	   *o_table;
 
 			ORelOidsSetFromRel(oids, relation);
-			o_table = o_tables_get(oids);
+			o_table = o_tables_get(oids, NULL, NULL);
 
 			Assert(o_table);
 

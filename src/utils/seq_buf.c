@@ -105,9 +105,7 @@ init_seq_buf(SeqBufDescPrivate *seqBufPrivate, SeqBufDescShared *shared,
 		{
 			OrioleDBPageDesc *page_desc = O_GET_IN_MEMORY_PAGEDESC(shared->pages[i]);
 
-			page_desc->oids.datoid = InvalidOid;
-			page_desc->oids.reloid = InvalidOid;
-			page_desc->oids.relnode = InvalidOid;
+			page_desc->oids = create_oids();
 			page_desc->type = 0;
 		}
 

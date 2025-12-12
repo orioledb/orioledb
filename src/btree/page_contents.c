@@ -389,9 +389,7 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 					 checkpoint_state->punchHolesTrancheId);
 
 	page_desc->type = oIndexInvalid;
-	page_desc->oids.datoid = InvalidOid;
-	page_desc->oids.reloid = InvalidOid;
-	page_desc->oids.relnode = InvalidOid;
+	page_desc->oids = create_oids();
 	page_desc->fileExtent.len = InvalidFileExtentLen;
 	page_desc->fileExtent.off = InvalidFileExtentOff;
 

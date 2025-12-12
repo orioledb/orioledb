@@ -1541,7 +1541,7 @@ fetch_index_descr_by_oid(Oid relid)
 	tblOids.reloid = rel->rd_rel->oid;
 	tblOids.relnode = rel->rd_rel->relfilenode;
 
-	descr = o_fetch_table_descr(tblOids);
+	descr = o_fetch_table_descr(tblOids, NULL, NULL);
 
 	if (index)
 		ixnum = find_tree_in_descr(descr, idxOids);

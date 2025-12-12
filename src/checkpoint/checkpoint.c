@@ -502,7 +502,7 @@ perform_writeback_and_relock(BTreeDescr *desc,
 
 		perform_writeback(desc, writeback);
 
-		indexDescr = o_fetch_index_descr(treeOids, type, true, NULL);
+		indexDescr = o_fetch_index_descr(treeOids, type, true, NULL, NULL);
 		if (!indexDescr)
 			return NULL;
 		desc = &indexDescr->desc;
@@ -1409,7 +1409,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 			if (item->freeExtents)
 			{
 				descr = o_fetch_index_descr(item->oids, item->type,
-											true, NULL);
+											true, NULL, NULL);
 				if (descr == NULL)
 				{
 					/* table might be deleted */
@@ -1445,7 +1445,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 					OIndexDescr *id;
 
 					id = o_fetch_index_descr(item->oids, item->type,
-											 true, NULL);
+											 true, NULL, NULL);
 					if (id == NULL)
 					{
 						/* table might be deleted */
@@ -4827,7 +4827,7 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		STOPEVENT(STOPEVENT_CHECKPOINT_TABLE_START, params);
 	}
 
-	descr = o_fetch_index_descr(treeOids, type, true, NULL);
+	descr = o_fetch_index_descr(treeOids, type, true, NULL, NULL);
 	if (descr != NULL)
 		loaded = o_btree_load_shmem_checkpoint(&descr->desc);
 	if (loaded)
