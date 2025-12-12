@@ -927,7 +927,7 @@ o_get_tbl_att(TupleTableSlot *slot, int attnum, bool primaryIsCtid,
 
 Datum
 o_get_idx_expr_att(TupleTableSlot *slot, OIndexDescr *idx,
-				 ExprState *exp_state, bool *isnull)
+				   ExprState *exp_state, bool *isnull)
 {
 	Datum		result;
 

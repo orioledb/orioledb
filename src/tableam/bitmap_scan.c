@@ -758,6 +758,7 @@ o_tbmiterator_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 		start_bound.keys[0].type = TIDOID;
 		start_bound.keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
 		start_bound.keys[0].comparator = bridge->fields[0].comparator;
+		start_bound.keys[0].exclusion_fn = NULL;
 		start_bound.n_row_keys = 0;
 		start_bound.row_keys = NULL;
 
@@ -767,6 +768,7 @@ o_tbmiterator_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 		end_bound.keys[0].type = TIDOID;
 		end_bound.keys[0].flags = O_VALUE_BOUND_UPPER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
 		end_bound.keys[0].comparator = bridge->fields[0].comparator;
+		end_bound.keys[0].exclusion_fn = NULL;
 		end_bound.n_row_keys = 0;
 		end_bound.row_keys = NULL;
 

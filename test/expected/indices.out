@@ -7505,9 +7505,9 @@ SELECT orioledb_tbl_structure('o_test_pkey_mixed'::regclass, 'nue');
  state = free, datoid equal, relnode equal, ix_type = regular, dirty                              +
      Leftmost, Rightmost                                                                          +
    Chunk 0: offset = 0, location = 256, hikey location = 64                                       +
-     Item 0: offset = 264, tuple = ('4', '1', '9', '2', '8', '8', '6', '7')                       +
-     Item 1: offset = 312, tuple = ('40', '10', '90', '20', '80', '80', '60', '70')               +
-     Item 2: offset = 360, tuple = ('400', '100', '900', '200', '800', '800', '600', '700')       +
+     Item 0: offset = 264, tuple = ('4', '1', '9', '2', '8', '5', '6', '7')                       +
+     Item 1: offset = 312, tuple = ('40', '10', '90', '20', '80', '50', '60', '70')               +
+     Item 2: offset = 360, tuple = ('400', '100', '900', '200', '800', '500', '600', '700')       +
                                                                                                   +
  Index toast: not loaded                                                                          +
  
@@ -7579,9 +7579,9 @@ EXPLAIN (COSTS OFF) SELECT i1, f1, pk4, f2, pk4, pk3, i2, pk1, pk2 FROM o_test_p
 SELECT i1, f1, pk4, f2, pk4, pk3, i2, pk1, pk2 FROM o_test_pkey_mixed ORDER BY i1;
  i1  | f1  | pk4 | f2  | pk4 | pk3 | i2  | pk1 | pk2 
 -----+-----+-----+-----+-----+-----+-----+-----+-----
-   4 |   1 |   9 |   2 |   9 |   8 |   8 |   6 |   7
-  40 |  10 |  90 |  20 |  90 |  80 |  80 |  60 |  70
- 400 | 100 | 900 | 200 | 900 | 800 | 800 | 600 | 700
+   4 |   1 |   9 |   2 |   9 |   8 |   5 |   6 |   7
+  40 |  10 |  90 |  20 |  90 |  80 |  50 |  60 |  70
+ 400 | 100 | 900 | 200 | 900 | 800 | 500 | 600 | 700
 (3 rows)
 
 RESET enable_seqscan;
