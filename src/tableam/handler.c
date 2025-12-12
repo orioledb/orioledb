@@ -128,6 +128,7 @@ orioledb_index_fetch_begin(Relation rel, Relation indexRel)
 {
 	OrioledbIndexFetchData *o_scan = palloc0(sizeof(OrioledbIndexFetchData));
 	OBTOptions *options = (OBTOptions *) indexRel->rd_options;
+
 	o_scan->bridged_tuple = (indexRel->rd_rel->relam != BTREE_AM_OID) ||
 		(options && !options->orioledb_index);
 

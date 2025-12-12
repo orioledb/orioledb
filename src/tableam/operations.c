@@ -547,7 +547,7 @@ OExecCheckIndexConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
 			!list_member_oid(arbiterIndexes,
 							 indexRelation->rd_index->indexrelid))
 			continue;
-		
+
 		elog(WARNING, "OExecCheckIndexConstraints: indexRelation->rd_index->indimmediate: %c", indexRelation->rd_index->indimmediate ? 'Y' : 'N');
 
 		if (!indexRelation->rd_index->indimmediate)
@@ -895,10 +895,10 @@ static bool
 o_check_exclusion_constraint(OTableDescr *descr, OIndexDescr *index, TupleTableSlot *slot)
 {
 	OSnapshot	o_snapshot;
-	OXid		oxid;	
+	OXid		oxid;
 	BTreeIterator *iter;
-	OTuple			tuple;
-	OBTreeKeyBound	bound;
+	OTuple		tuple;
+	OBTreeKeyBound bound;
 
 	fill_current_oxid_osnapshot(&oxid, &o_snapshot);
 	iter = o_btree_iterator_create(&index->desc, NULL, BTreeKeyNone, &o_snapshot, ForwardScanDirection);
@@ -907,16 +907,17 @@ o_check_exclusion_constraint(OTableDescr *descr, OIndexDescr *index, TupleTableS
 	exclusion_fill_bound(slot, index, &bound);
 	while (!O_TUPLE_IS_NULL(tuple))
 	{
-		int res = o_exclusion_cmp(index, &bound, &tuple);
+		int			res = o_exclusion_cmp(index, &bound, &tuple);
+
 		if (res == 0)
 		{
 			res = o_idx_cmp(&index->desc,
-							(Pointer) &bound, BTreeKeyBound, 
+							(Pointer) &bound, BTreeKeyBound,
 							(Pointer) &tuple, BTreeKeyLeafTuple);
 			if (res != 0)
 				return false;
 		}
-		
+
 		tuple = o_btree_iterator_fetch(iter, NULL, NULL,
 									   BTreeKeyNone, true, NULL);
 
@@ -989,21 +990,21 @@ o_tbl_insert_with_arbiter(Relation rel,
 			if ((descr->indices[i]->desc.type == oIndexExclusion ||
 				 descr->indices[i]->desc.type == oIndexUnique) &&
 				!descr->indices[i]->immediate)
-					ereport(ERROR,
-							(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-							 errmsg("ON CONFLICT does not support deferrable unique constraints/exclusion constraints as arbiters"),
-							 errtableconstraint(resultRelInfo->ri_RelationDesc,
-												descr->indices[i]->name.data)));
+				ereport(ERROR,
+						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+						 errmsg("ON CONFLICT does not support deferrable unique constraints/exclusion constraints as arbiters"),
+						 errtableconstraint(resultRelInfo->ri_RelationDesc,
+											descr->indices[i]->name.data)));
 
 			ioc_arg.conflictIxNum = i;
 			result = o_tbl_index_insert(descr, descr->indices[i], NULL, slot,
-										oxid, csn, &callbackInfo, 
+										oxid, csn, &callbackInfo,
 										descr->indices[i]->desc.type == oIndexExclusion ? UNIQUE_CHECK_NO : UNIQUE_CHECK_YES);
 			if (result != OBTreeModifyResultInserted)
 			{
 				success = false;
 				failedIndexNumber = i;
-			} 
+			}
 			else if (descr->indices[i]->desc.type == oIndexExclusion)
 			{
 				if (!o_check_exclusion_constraint(descr, descr->indices[i], slot))
@@ -1691,7 +1692,7 @@ o_update_secondary_index(OIndexDescr *id,
 			res.success = o_btree_insert_unique(&id->desc, new_ix_tup, BTreeKeyLeafTuple,
 												(Pointer) &new_key, BTreeKeyBound,
 												oxid, csn, RowLockUpdate,
-												NULL, &callbackInfo, 
+												NULL, &callbackInfo,
 												checkUnique) == OBTreeModifyResultInserted;
 
 		if (!res.success)
@@ -1976,7 +1977,7 @@ o_tbl_index_insert(OTableDescr *descr,
 	bool		primary = (bd->type == oIndexPrimary);
 
 	OBTreeModifyResult result;
-	
+
 	if (!primary)
 	{
 		if (own_tup)
