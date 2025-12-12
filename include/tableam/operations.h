@@ -154,7 +154,7 @@ extern bool o_is_index_predicate_satisfied(OIndexDescr *idx,
 										   ExprContext *econtext);
 extern void o_truncate_table(ORelOids oids);
 extern void o_apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation, TupleTableSlot *slot, CommitSeqNo csn);
-extern int o_exclusion_cmp(OIndexDescr *id, OBTreeKeyBound *key1, OTuple *tuple2);
+extern int	o_exclusion_cmp(OIndexDescr *id, OBTreeKeyBound *key1, OTuple *tuple2);
 
 
 #endif

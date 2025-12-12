@@ -565,7 +565,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 			result = btinsert(rel, values, isnull, tupleid, heapRel,
 							  checkUnique, indexUnchanged, indexInfo);
 		else
-			result = true; /* FIXME: Wrong assumption? */
+			result = true;		/* FIXME: Wrong assumption? */
 
 		return result;
 	}
@@ -835,7 +835,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 	bool	   *vfree;
 	int			i;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
-	
+
 	if (options && !options->orioledb_index)
 		return true;
 

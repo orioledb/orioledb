@@ -1251,8 +1251,8 @@ retry:
 	 */
 	if (fastpath && LWLockConditionalAcquire(uniqueLock, LW_EXCLUSIVE))
 	{
-		OTupleXactInfo	xactInfo;
-		bool			refind = false;
+		OTupleXactInfo xactInfo;
+		bool		refind = false;
 
 		if (page_unique_check(desc, p, &pageFindContext.items[pageFindContext.index].locator,
 							  key, opOxid, &xactInfo, checkUnique))
@@ -1343,8 +1343,8 @@ retry:
 	}
 	else
 	{
-		OTupleXactInfo	xactInfo;
-		bool			refind = false;
+		OTupleXactInfo xactInfo;
+		bool		refind = false;
 
 		/*
 		 * Evade deadlock: unlock the page before taking an unique lwlock.

@@ -72,6 +72,7 @@
 #include "nodes/nodeFuncs.h"
 #include "nodes/makefuncs.h"
 #include "nodes/pg_list.h"
+#include "nodes/primnodes.h"
 #include "optimizer/optimizer.h"
 #include "optimizer/planner.h"
 #include "parser/parse_coerce.h"
@@ -521,8 +522,11 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	{
 		objectOid = get_namespace_oid(objectName, false);
 
-		if (!object_ownercheck(NamespaceRelationId, objectOid, GetUserId()) &&
-			!has_privs_of_role(GetUserId(), ROLE_PG_MAINTAIN))
+		if (!object_ownercheck(NamespaceRelationId, objectOid, GetUserId())
+#if PG_VERSION_NUM >= 170000
+			&& !has_privs_of_role(GetUserId(), ROLE_PG_MAINTAIN)
+#endif
+			)
 			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_SCHEMA,
 						   objectName);
 	}
@@ -534,7 +538,11 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("can only reindex the currently open database")));
-		if (!object_ownercheck(DatabaseRelationId, objectOid, GetUserId()))
+		if (!object_ownercheck(DatabaseRelationId, objectOid, GetUserId())
+#if PG_VERSION_NUM >= 170000
+			&& !has_privs_of_role(GetUserId(), ROLE_PG_MAINTAIN)
+#endif
+			)
 			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_DATABASE,
 						   get_database_name(objectOid));
 	}
