@@ -136,7 +136,7 @@ typedef enum
 static inline OIndexType
 o_index_rel_get_ix_type(Relation index)
 {
-	OIndexType ix_type;
+	OIndexType	ix_type;
 
 	if (index->rd_index->indisprimary)
 		ix_type = oIndexPrimary;
