@@ -1622,12 +1622,14 @@ fill_current_oxid_osnapshot_no_check(OXid *oxid, OSnapshot *snapshot)
 		snapshot->csn = activeSnapshot->csnSnapshotData.snapshotcsn;
 		snapshot->xlogptr = activeSnapshot->csnSnapshotData.xlogptr;
 		snapshot->xmin = activeSnapshot->csnSnapshotData.xmin;
+		snapshot->cid = activeSnapshot->curcid;
 	}
 	else
 	{
 		snapshot->csn = COMMITSEQNO_INPROGRESS;
 		snapshot->xlogptr = InvalidXLogRecPtr;
 		snapshot->xmin = InvalidXLogRecPtr;
+		snapshot->cid = 0;
 	}
 	*oxid = get_current_oxid();
 }

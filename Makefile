@@ -101,6 +101,7 @@ REGRESSCHECKS = btree_sys_check \
 				createas \
 				database \
 				ddl \
+				exclude \
 				explain \
 				fillfactor \
 				foreign_keys \

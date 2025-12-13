@@ -71,7 +71,7 @@
  * For different ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION
  * conversion is done at first reading of disk page on the fly.
  */
-#define ORIOLEDB_DATA_VERSION	2	/* Version of system catalog */
+#define ORIOLEDB_DATA_VERSION	3	/* Version of system catalog */
 #define ORIOLEDB_PAGE_VERSION	1	/* Version of binary page format */
 #define ORIOLEDB_COMPRESS_VERSION 1 /* Version of page compression (only for
 									 * compressed pages) */
@@ -130,7 +130,24 @@ typedef enum
 	oIndexPrimary = 3,
 	oIndexUnique = 4,
 	oIndexRegular = 5,
+	oIndexExclusion = 6,
 } OIndexType;
+
+static inline OIndexType
+o_index_rel_get_ix_type(Relation index)
+{
+	OIndexType	ix_type;
+
+	if (index->rd_index->indisprimary)
+		ix_type = oIndexPrimary;
+	else if (index->rd_index->indisunique)
+		ix_type = oIndexUnique;
+	else if (index->rd_index->indisexclusion)
+		ix_type = oIndexExclusion;
+	else
+		ix_type = oIndexRegular;
+	return ix_type;
+}
 
 #define PROC_XID_ARRAY_SIZE	32
 

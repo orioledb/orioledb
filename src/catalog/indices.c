@@ -272,9 +272,6 @@ o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTa
 	int			nattrs;
 	OIndexType	ix_type;
 
-	if (index->rd_index->indisexclusion)
-		elog(ERROR, "exclusion indices are not supported.");
-
 	if (o_table == NULL)
 	{
 		o_table = o_tables_get(oids);
@@ -287,12 +284,7 @@ o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTa
 	}
 
 	/* check index type */
-	if (index->rd_index->indisprimary)
-		ix_type = oIndexPrimary;
-	else if (index->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
+	ix_type = o_index_rel_get_ix_type(index);
 
 	/* check index fields number */
 	nattrs = index->rd_index->indnatts;
@@ -420,13 +412,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		Assert(options->orioledb_index);
 	}
 
-	if (index->rd_index->indisprimary)
-		ix_type = oIndexPrimary;
-	else if (index->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
-
+	ix_type = o_index_rel_get_ix_type(index);
 	indnatts = index->rd_index->indnatts;
 	indnkeyatts = index->rd_index->indnkeyatts;
 	tablespace = index->rd_rel->reltablespace;
@@ -553,6 +539,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	table_index->oids.datoid = MyDatabaseId;
 	table_index->oids.reloid = index->rd_rel->oid;
 	table_index->tablespace = tablespace;
+	table_index->immediate = index->rd_index->indimmediate;
 
 	if (!reuse_relnode && is_build)
 		o_tables_table_meta_lock(NULL);
@@ -662,7 +649,7 @@ static void
 _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int request)
 {
 	ParallelContext *pcxt = NULL;
-	ParallelRecoveryContext *recoveryContext;
+	ParallelRecoveryContext *recoveryContext = NULL;
 	int			nworkers;
 	shm_toc_estimator *estimator;
 	shm_toc    *toc;
