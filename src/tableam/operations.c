@@ -549,8 +549,6 @@ OExecCheckIndexConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
 							 indexRelation->rd_index->indexrelid))
 			continue;
 
-		elog(WARNING, "OExecCheckIndexConstraints: indexRelation->rd_index->indimmediate: %c", indexRelation->rd_index->indimmediate ? 'Y' : 'N');
-
 		if (!indexRelation->rd_index->indimmediate)
 			ereport(ERROR,
 					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
