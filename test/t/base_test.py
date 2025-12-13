@@ -370,7 +370,9 @@ class BaseTest(unittest.TestCase):
 	def wait_restart(self, node, previous_start_time, timeout_s=900):
 		node.poll_query_until(
 		    f"select pg_postmaster_start_time() != '{previous_start_time}'",
-		    expected=True, sleep_time=1, max_attempts=timeout_s)
+		    expected=True,
+		    sleep_time=1,
+		    max_attempts=timeout_s)
 
 
 # execute SQL query Thread for PostgreSql node's connection
