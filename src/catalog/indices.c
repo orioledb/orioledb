@@ -1473,6 +1473,13 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	idx = descr->indices[o_table->has_primary ? ix_num : ix_num + 1];
 	buildstate.btleader = NULL;
 
+	elog(LOG, "Build secondary index: %d", o_table->has_primary ? ix_num : ix_num + 1);
+	{
+		volatile bool a = true;
+		while(a)
+			pg_usleep(10000L);
+	}
+
 	/* If we are inside transaction - compute number of parallel workers, */
 	/* else fallback to maximum */
 	if (IsTransactionState())
@@ -1847,6 +1854,14 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 		bridge_ctid = 0;
 
 	buildstate.btleader = NULL;
+
+	elog(LOG, "Rebuild indices: %d", nallindices);
+	{
+		volatile bool a = true;
+		while(a)
+			pg_usleep(10000L);
+	}
+
 
 	/* Attempt to launch parallel worker scan when required */
 	if ((in_dedicated_recovery_worker || (ActiveSnapshotSet() && max_parallel_maintenance_workers > 0)) &&
