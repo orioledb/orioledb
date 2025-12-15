@@ -139,6 +139,9 @@ static void rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
 static void rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr, ParallelOScanDesc poscan,
 											 Tuplesortstate **sortstates, bool progress, double *heap_tuples,
 											 double *index_tuples[], uint64 *ctid, uint64 *bridge_ctid);
+static int	o_calculate_index_workers(BTreeDescr *primary, bool shmem_loaded, int nindices);
+static int	o_estimate_parallel_workers(double table_pages, double index_pages,
+										int max_workers);
 
 
 /* copied from tablecmds.c */
@@ -1373,11 +1376,59 @@ build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDescr *idx,
 }
 
 /*
+ * If we are inside transaction, cap workers based on available maintenance_work_mem as need, else fallback to maximum.
+ * Capping is similar to plan_create_index_workers()
+ */
+static int
+o_calculate_index_workers(BTreeDescr *primary, bool shmem_loaded, int nindices)
+{
+	int			parallel_workers;
+	BlockNumber table_blocks;
+
+	if (IsTransactionState())
+	{
+		Assert(primary);
+
+		if (tbl_data_exists(&primary->oids))
+		{
+			if (!shmem_loaded)
+				o_btree_load_shmem(primary);
+
+			table_blocks = (uint64) TREE_NUM_LEAF_PAGES(primary) * ORIOLEDB_BLCKSZ;
+			parallel_workers = o_estimate_parallel_workers(table_blocks, -1, max_parallel_maintenance_workers);
+			elog(DEBUG4, "o_calculate_index_workers: %d workers", parallel_workers);
+		}
+		else
+			parallel_workers = 0;
+
+		/*
+		 * Cap workers based on available maintenance_work_mem as needed.
+		 *
+		 * Note that each tuplesort participant receives an even share of the
+		 * total maintenance_work_mem budget.  Aim to leave participants
+		 * (including the leader as a participant) with no less than 32MB of
+		 * memory.  This leaves cases where maintenance_work_mem is set to
+		 * 64MB immediately past the threshold of being capable of launching a
+		 * single parallel worker to sort.
+		 */
+		while (parallel_workers > 0 &&
+			   maintenance_work_mem / (nindices * (parallel_workers + 1)) < 32768L)
+			parallel_workers--;
+	}
+	else
+	{
+		parallel_workers = max_parallel_maintenance_workers;
+	}
+
+	return parallel_workers;
+}
+
+/*
  * Simplified version of compute_parallel_worker, without RelOptInfo parameter.
  */
 static int
-o_compute_parallel_worker(double table_pages, double index_pages,
-						  int max_workers)
+o_estimate_parallel_workers(double table_pages, double index_pages,
+							int max_workers)
 {
 	int			parallel_workers = 0;
 
@@ -1462,58 +1513,30 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	double	   *index_tuples;
 	OIndexDescr *idx;
 
-	Relation	rel;
-	int			parallel_workers;
-	BlockNumber table_blocks;
-	double		reltuples;
-	double		allvisfrac;
-
 	index_tuples = palloc0(sizeof(double));
 	ctid = 1;
 	idx = descr->indices[o_table->has_primary ? ix_num : ix_num + 1];
 	buildstate.btleader = NULL;
 
-	/* If we are inside transaction - compute number of parallel workers, */
-	/* else fallback to maximum */
-	if (IsTransactionState())
-	{
-		rel = table_open(descr->oids.reloid, NoLock);
-		estimate_rel_size(rel, NULL, &table_blocks, &reltuples, &allvisfrac);
-		parallel_workers = o_compute_parallel_worker(table_blocks, -1, max_parallel_maintenance_workers);
-
-		/*
-		 * Cap workers based on available maintenance_work_mem as needed.
-		 *
-		 * Note that each tuplesort participant receives an even share of the
-		 * total maintenance_work_mem budget.  Aim to leave participants
-		 * (including the leader as a participant) with no less than 32MB of
-		 * memory.  This leaves cases where maintenance_work_mem is set to
-		 * 64MB immediately past the threshold of being capable of launching a
-		 * single parallel worker to sort.
-		 */
-		while (parallel_workers > 0 &&
-			   maintenance_work_mem / (parallel_workers + 1) < 32768L)
-			parallel_workers--;
-		table_close(rel, NoLock);
-	}
-	else
-	{
-		parallel_workers = max_parallel_maintenance_workers;
-	}
-
 	/* Attempt to launch parallel worker scan when required */
-	if (in_dedicated_recovery_worker || (ActiveSnapshotSet() && parallel_workers > 0))
+	if (in_dedicated_recovery_worker || (ActiveSnapshotSet() && max_parallel_maintenance_workers > 0))
 	{
-		btspool = (oIdxSpool *) palloc0(sizeof(oIdxSpool));
-		btspool->o_table = o_table;
-		btspool->descr = descr;
+		int			parallel_workers = o_calculate_index_workers(&GET_PRIMARY(descr)->desc, false, 1);
 
-		buildstate.worker_heap_sort_fn = &build_secondary_index_worker_sort;
-		buildstate.ix_num = ix_num;
-		buildstate.spool = btspool;
-		buildstate.isrebuild = false;
+		if (parallel_workers > 0)
+		{
+			btspool = (oIdxSpool *) palloc0(sizeof(oIdxSpool));
+			btspool->o_table = o_table;
+			btspool->descr = descr;
 
-		_o_index_begin_parallel(&buildstate, false, parallel_workers);
+			buildstate.worker_heap_sort_fn = &build_secondary_index_worker_sort;
+			buildstate.ix_num = ix_num;
+			buildstate.spool = btspool;
+			buildstate.isrebuild = false;
+
+			elog(DEBUG4, "Parallel index build by %d workers", parallel_workers);
+			_o_index_begin_parallel(&buildstate, false, parallel_workers);
+		}
 	}
 
 	if (buildstate.btleader)
@@ -1618,7 +1641,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 /*
  * Perform a worker's portion of a parallel sort for all indexes rebuild
  *
- * This generates a tuplesorts for all indexes for passed btspool.  All
+ * This generates partial tuplesorts for each indexes for passed btspool. All
  * other spool fields should already be set when this is called.
  *
  * sortmem is the amount of working memory to use within each worker,
@@ -1713,6 +1736,14 @@ rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
 	pfree(btspool->sortstates);
 }
 
+/*
+ * Run single OrioleDB table scan. Extract attributes for each index and put them
+ * into each index sort state.
+ *
+ * In case of parallel indexes rebuild process only a part of the table as a worker
+ * and for each tuple put extracted attributes for each index into each index partial
+ * sort state.
+ */
 static void
 rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr,
 								 ParallelOScanDesc poscan, Tuplesortstate **sortstates,
@@ -1853,18 +1884,24 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 		!descr->indices[PrimaryIndexNumber]->primaryIsCtid &&
 		!(descr->bridge && !old_descr->bridge))
 	{
-		btspool = (oIdxSpool *) palloc0(sizeof(oIdxSpool));
-		btspool->o_table = o_table;
-		btspool->descr = descr;
-		btspool->old_o_table = old_o_table;
-		btspool->old_descr = old_descr;
+		int			parallel_workers = o_calculate_index_workers(old_td, true, nallindices + 1);
 
-		buildstate.worker_heap_sort_fn = &rebuild_indices_worker_sort;
-		buildstate.ix_num = InvalidIndexNumber;
-		buildstate.spool = btspool;
-		buildstate.isrebuild = true;
+		if (parallel_workers > 0)
+		{
+			btspool = (oIdxSpool *) palloc0(sizeof(oIdxSpool));
+			btspool->o_table = o_table;
+			btspool->descr = descr;
+			btspool->old_o_table = old_o_table;
+			btspool->old_descr = old_descr;
 
-		_o_index_begin_parallel(&buildstate, false, max_parallel_maintenance_workers);
+			buildstate.worker_heap_sort_fn = &rebuild_indices_worker_sort;
+			buildstate.ix_num = InvalidIndexNumber;
+			buildstate.spool = btspool;
+			buildstate.isrebuild = true;
+
+			elog(DEBUG4, "Parallel index rebuild by %d workers", parallel_workers);
+			_o_index_begin_parallel(&buildstate, false, parallel_workers);
+		}
 	}
 
 	if (buildstate.btleader)
