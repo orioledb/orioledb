@@ -30,8 +30,6 @@ typedef enum
 	OTupleFetchCallbackKeyCheck
 } TupleFetchCallbackCheckType;
 
-typedef uint32 (*TupleVersionCallback) (void *arg);
-
 typedef TupleFetchCallbackResult (*TupleFetchCallback) (OTuple tuple,
 														OXid tupOxid,
 														OSnapshot *oSnapshot,
@@ -52,7 +50,6 @@ extern BTreeIterator *o_btree_iterator_create(BTreeDescr *desc, void *key,
 extern void o_btree_iterator_set_tuple_ctx(BTreeIterator *it,
 										   MemoryContext tupleCxt);
 extern void o_btree_iterator_set_callback(BTreeIterator *it,
-										  TupleVersionCallback versionCallback,
 										  TupleFetchCallback fetchCallback,
 										  void *arg);
 extern OTuple o_btree_iterator_fetch(BTreeIterator *it,
@@ -76,7 +73,7 @@ extern OTuple o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 										   MemoryContext mcxt,
 										   BTreeLocationHint *hint,
 										   bool *deleted,
-										   TupleFetchCallback cb,
+										   TupleFetchCallback fetchCallback,
 										   void *arg);
 
 extern OTuple o_find_tuple_version(BTreeDescr *desc, Page p,
@@ -84,7 +81,6 @@ extern OTuple o_find_tuple_version(BTreeDescr *desc, Page p,
 								   OSnapshot *oSnapshot,
 								   CommitSeqNo *tupleCsn,
 								   MemoryContext mcxt,
-								   TupleVersionCallback versionCallback,
 								   TupleFetchCallback fetchCallback,
 								   void *arg);
 

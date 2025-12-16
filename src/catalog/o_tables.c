@@ -217,21 +217,24 @@ oTablesGetTupleDataSize(OTuple tuple, void *arg)
 }
 
 static uint32
-oTablesGetTupleKeyVersion(void *arg /* tuple.data */ )
+oTablesGetTupleKeyVersion(OTuple tuple, void *arg)
 {
-	OTableChunkKey *tupleKey = (OTableChunkKey *) arg;
+	OTableChunk *chunk = (OTableChunk *) tuple.data;
 
-	return tupleKey->version;
+	return chunk->key.version;
 }
 
 static TupleFetchCallbackResult
-oTablesVersionCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
-					   void *arg, TupleFetchCallbackCheckType check_type)
+oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
+					 void *arg, TupleFetchCallbackCheckType check_type)
 {
 	OTableChunkKey *tupleKey = (OTableChunkKey *) tuple.data;
 	OTableChunkKey *boundKey = (OTableChunkKey *) arg;
 	bool		tupIsCurrentOxid = tupOxid == get_current_oxid_if_any();
 	bool		inProgress = COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn);
+
+	if (boundKey->version != O_TABLE_INVALID_VERSION)
+		check_type = OTupleFetchCallbackVersionCheck;
 
 	if (check_type != OTupleFetchCallbackVersionCheck)
 		return OTupleFetchNext;
@@ -261,9 +264,9 @@ ToastAPI	oTablesToastAPI = {
 	.getTupleData = oTablesGetTupleData,
 	.getTupleChunknum = oTablesGetTupleChunknum,
 	.getTupleDataSize = oTablesGetTupleDataSize,
+	.getTupleKeyVersion = oTablesGetTupleKeyVersion,
 	.deleteLogFullTuple = false,
-	.versionCallback = oTablesGetTupleKeyVersion,
-	.fetchCallback = oTablesVersionCallback
+	.fetchCallback = oTablesFetchCallback
 };
 
 void

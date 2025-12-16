@@ -109,8 +109,8 @@ ToastAPI	oSysCacheToastAPI = {
 	.getTupleData = oSysCacheToastGetTupleData,
 	.getTupleChunknum = oSysCacheToastGetTupleChunknum,
 	.getTupleDataSize = oSysCacheToastGetTupleDataSize,
+	.getTupleKeyVersion = NULL, /* @TODO */
 	.deleteLogFullTuple = false,
-	.versionCallback = NULL,
 	.fetchCallback = NULL
 };
 

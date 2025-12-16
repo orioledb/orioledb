@@ -1459,7 +1459,6 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 										 tupleCsn,
 										 mctx,
 										 NULL,
-										 NULL,
 										 NULL);
 			BTREE_PAGE_LOCATOR_NEXT(scan->histImg, &scan->histLoc);
 			if (!O_TUPLE_IS_NULL(tuple))
@@ -1512,7 +1511,6 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 									 &scan->oSnapshot,
 									 tupleCsn,
 									 mctx,
-									 NULL,
 									 NULL,
 									 NULL);
 		BTREE_PAGE_LOCATOR_NEXT(scan->leafImg, &scan->leafLoc);

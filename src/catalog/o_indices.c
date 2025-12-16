@@ -155,8 +155,8 @@ ToastAPI	oIndicesToastAPI = {
 	.getTupleData = oIndicesGetTupleData,
 	.getTupleChunknum = oIndicesGetTupleChunknum,
 	.getTupleDataSize = oIndicesGetTupleDataSize,
+	.getTupleKeyVersion = NULL, /* @TODO */
 	.deleteLogFullTuple = true,
-	.versionCallback = NULL,
 	.fetchCallback = NULL
 };
 
