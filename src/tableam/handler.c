@@ -912,7 +912,7 @@ orioledb_relation_nontransactional_truncate(Relation rel)
 	if (!OidIsValid(rel->rd_rel->oid) || rel->rd_rel->relkind == RELKIND_TOASTVALUE)
 		return;
 
-	o_truncate_table(oids);
+	o_truncate_table(oids, false);
 
 	drop_indices_for_rel(rel, false);
 	/* drop primary after all indices to not rebuild them */
