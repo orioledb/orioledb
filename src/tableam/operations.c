@@ -2051,7 +2051,7 @@ o_truncate_table(ORelOids oids)
 
 	o_tables_rel_lock(&oids, AccessExclusiveLock);
 
-	o_table = o_tables_get(oids, NULL, NULL);
+	o_table = o_tables_get(oids);
 	Assert(o_table != NULL);
 	is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
 

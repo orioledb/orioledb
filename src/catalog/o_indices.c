@@ -887,7 +887,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 
 		if (!oTable)
 		{
-			oTable = o_tables_get(descr->tableOids, NULL, NULL);
+			oTable = o_tables_get(descr->tableOids);
 			free_oTable = true;
 		}
 

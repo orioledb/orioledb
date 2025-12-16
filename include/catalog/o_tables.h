@@ -153,7 +153,7 @@ extern void o_tables_truncate_all_unlogged(void);
 extern bool o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn);
 
 /* Returns OTable by its oids */
-extern OTable *o_tables_get(ORelOids oids, OSnapshot *snapshot, uint32 *version);
+extern OTable *o_tables_get(ORelOids oids);
 
 /* Returns OTable by its oids and version */
 extern OTable *o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version, OSnapshot *snapshot);

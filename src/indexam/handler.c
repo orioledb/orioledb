@@ -310,7 +310,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 		OTable	   *o_table;
 
 		ORelOidsSetFromRel(tbl_oids, heap);
-		o_table = o_tables_get(tbl_oids, NULL, NULL);
+		o_table = o_tables_get(tbl_oids);
 
 		if (index->rd_index->indisprimary && o_table->has_primary)
 		{

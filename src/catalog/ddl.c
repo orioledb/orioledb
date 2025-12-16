@@ -1607,7 +1607,7 @@ o_find_composite_type_dependencies(Oid typeOid, Relation origRelation)
 
 			ORelOidsSetFromRel(table_oids, rel);
 
-			table = o_tables_get(table_oids, NULL, NULL);
+			table = o_tables_get(table_oids);
 			if (table == NULL)
 			{
 				elog(NOTICE, "orioledb table %s not found", RelationGetRelationName(rel));
@@ -1757,7 +1757,7 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 	ORelOidsSetFromRel(oids, rel);
 	ORelOidsSetFromRel(toastOids, toast_rel);
 
-	o_table = o_tables_get(oids, NULL, NULL);
+	o_table = o_tables_get(oids);
 
 	if (!only_fillfactor)
 	{
@@ -2225,7 +2225,7 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_table
 		 */
 
 		ORelOidsSetFromRel(oids, rel);
-		updated_o_table = o_tables_get(oids, NULL, NULL);
+		updated_o_table = o_tables_get(oids);
 		Assert(updated_o_table != NULL);
 
 		if (!updated_o_table->has_primary)
@@ -2263,7 +2263,7 @@ redefine_pkey_for_rel(Relation rel)
 	OTable	   *o_table;
 
 	ORelOidsSetFromRel(oids, rel);
-	o_table = o_tables_get(oids, NULL, NULL);
+	o_table = o_tables_get(oids);
 	Assert(o_table != NULL);
 
 	redefine_indices(rel, o_table, true, false);
@@ -2374,7 +2374,7 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 	}
 
 	old_o_table = o_table;
-	o_table = o_tables_get(o_table->oids, NULL, NULL);
+	o_table = o_tables_get(o_table->oids);
 	o_table->index_bridging = true;
 	assign_new_oids(o_table, tbl, false);
 
@@ -2427,7 +2427,7 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 	int			ix_num = InvalidIndexNumber;
 
 	old_o_table = o_table;
-	o_table = o_tables_get(o_table->oids, NULL, NULL);
+	o_table = o_tables_get(o_table->oids);
 	o_table->index_bridging = false;
 	ORelOidsSetInvalid(o_table->bridge_oids);
 	assign_new_oids(o_table, tbl, false);
@@ -2656,7 +2656,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				ORelOids	oids;
 
 				ORelOidsSetFromRel(oids, rel);
-				o_table = o_tables_get(oids, NULL, NULL);
+				o_table = o_tables_get(oids);
 				if (o_table == NULL)
 				{
 					/* table does not exist */
@@ -2942,7 +2942,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 				ORelOidsSetFromRel(oids, rel);
 
-				o_table = o_tables_get(oids, NULL, NULL);
+				o_table = o_tables_get(oids);
 				if (o_table == NULL)
 				{
 					/* table does not exist */
@@ -3031,7 +3031,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
 					ORelOidsSetFromRel(table_oids, tbl);
-					o_table = o_tables_get(table_oids, NULL, NULL);
+					o_table = o_tables_get(table_oids);
 					if (o_table == NULL)
 					{
 						elog(NOTICE, "orioledb table %s not found",
@@ -3128,7 +3128,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			OXid		oxid;
 
 			ORelOidsSetFromRel(oids, rel);
-			o_table = o_tables_get(oids, NULL, NULL);
+			o_table = o_tables_get(oids);
 			if (o_table == NULL)
 			{
 				/* table does not exist */
@@ -3199,7 +3199,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				ORelOids	oids;
 
 				ORelOidsSetFromRel(oids, rel);
-				o_table = o_tables_get(oids, NULL, NULL);
+				o_table = o_tables_get(oids);
 				if (o_table == NULL)
 				{
 					/* table does not exist */
@@ -3321,7 +3321,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					ORelOids	table_oids;
 
 					ORelOidsSetFromRel(table_oids, tbl);
-					o_table = o_tables_get(table_oids, NULL, NULL);
+					o_table = o_tables_get(table_oids);
 					if (o_table == NULL)
 					{
 						elog(NOTICE, "orioledb table %s not found",
@@ -3441,7 +3441,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					CommandCounterIncrement();
 
-					old_o_table = o_tables_get(saved_oids, NULL, NULL);
+					old_o_table = o_tables_get(saved_oids);
 					Assert(old_o_table != NULL);
 
 					create_o_table_for_rel(tbl);
@@ -3449,7 +3449,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					set_toast_oids_and_options(tbl, rel, false, old_o_table->index_bridging);
 
 					ORelOidsSetFromRel(new_oids, tbl);
-					new_o_table = o_tables_get(new_oids, NULL, NULL);
+					new_o_table = o_tables_get(new_oids);
 					Assert(new_o_table != NULL);
 
 					relation_close(tbl, AccessShareLock);
@@ -3463,7 +3463,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					redefine_indices(tbl, new_o_table, true, false);
 
 					o_table_free(new_o_table);
-					new_o_table = o_tables_get(new_oids, NULL, NULL);
+					new_o_table = o_tables_get(new_oids);
 					Assert(new_o_table != NULL);
 
 					switch (tbl->rd_rel->relkind)
@@ -3522,14 +3522,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								   *new_o_table;
 
 						Assert(ORelOidsIsValid(saved_oids));
-						old_o_table = o_tables_get(saved_oids, NULL, NULL);
+						old_o_table = o_tables_get(saved_oids);
 						Assert(old_o_table != NULL);
 
 						create_o_table_for_rel(tbl);
 
 						set_toast_oids_and_options(tbl, rel, false, old_o_table->index_bridging);
 
-						new_o_table = o_tables_get(oids, NULL, NULL);
+						new_o_table = o_tables_get(oids);
 						Assert(new_o_table != NULL);
 
 						relation_close(tbl, AccessShareLock);
@@ -3543,7 +3543,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						redefine_indices(tbl, new_o_table, true, true);
 
 						o_table_free(new_o_table);
-						new_o_table = o_tables_get(oids, NULL, NULL);
+						new_o_table = o_tables_get(oids);
 						Assert(new_o_table != NULL);
 
 						switch (tbl->rd_rel->relkind)
@@ -3609,7 +3609,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							}
 
 							ORelOidsSetFromRel(table_oids, tbl);
-							o_table = o_tables_get(table_oids, NULL, NULL);
+							o_table = o_tables_get(table_oids);
 							if (o_table == NULL)
 							{
 								elog(ERROR, "orioledb table %s not found",

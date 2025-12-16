@@ -2770,7 +2770,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 		OIndexNumber ix_num;
 		uint16		nindices;
 
-		new_o_table = o_tables_get(oids, NULL, NULL);
+		new_o_table = o_tables_get(oids);
 		Assert(new_o_table);
 
 		if (!OidIsValid(oldRelnode))
@@ -2784,7 +2784,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 		{
 			ORelOids	oldOids = {oids.datoid, oids.reloid, oldRelnode};
 
-			old_o_table = o_tables_get(oldOids, NULL, NULL);
+			old_o_table = o_tables_get(oldOids);
 		}
 		Assert(old_o_table);
 

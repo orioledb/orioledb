@@ -719,7 +719,7 @@ create_table_descr(ORelOids oids, OSnapshot *snapshot, uint32 *version)
 	old_enable_stopevents = enable_stopevents;
 	enable_stopevents = false;
 
-	o_table = o_tables_get(oids, snapshot, version);
+	o_table = o_tables_get_by_oids_and_version(oids, version, snapshot);
 
 	if (o_table == NULL)
 	{
@@ -1542,6 +1542,7 @@ o_tableam_descr_init(void)
 								  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 }
 
+/* @TODO maybe add version */
 static bool
 recreate_table_descr(OTableDescr *descr)
 {
@@ -1552,7 +1553,7 @@ recreate_table_descr(OTableDescr *descr)
 	old_enable_stopevents = enable_stopevents;
 	enable_stopevents = false;
 
-	o_table = o_tables_get(descr->oids, NULL, NULL);
+	o_table = o_tables_get(descr->oids); /* @TODO */
 	if (!o_table)
 		return false;
 

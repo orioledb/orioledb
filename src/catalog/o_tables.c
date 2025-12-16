@@ -1048,7 +1048,7 @@ o_tables_drop_by_oids(ORelOids oids, OXid oxid, CommitSeqNo csn)
 	key.chunknum = 0;
 
 	systrees_modify_start();
-	table = o_tables_get(oids, NULL, NULL);
+	table = o_tables_get(oids);
 	Assert(table);
 	if (table)
 	{
@@ -1176,9 +1176,9 @@ o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version, OSnapshot *snap
  * Find OTable by its oids
  */
 OTable *
-o_tables_get(ORelOids oids, OSnapshot *snapshot, uint32 *version)
+o_tables_get(ORelOids oids)
 {
-	return o_tables_get_by_oids_and_version(oids, version, snapshot);
+	return o_tables_get_by_oids_and_version(oids, NULL, NULL);
 }
 
 /*
@@ -1196,7 +1196,7 @@ o_tables_get_by_tree(ORelOids oids, OIndexType type)
 	if (!result)
 		return NULL;
 
-	return o_tables_get(tableOids, NULL, NULL);
+	return o_tables_get(tableOids);
 }
 
 /* Returns number of OrioleDB tables in the database */
@@ -1247,7 +1247,7 @@ o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
 	key.version = table->version + 1;
 
 	systrees_modify_start();
-	old_table = o_tables_get(table->oids, NULL, NULL);
+	old_table = o_tables_get(table->oids);
 	o_tables_oids_indexes(old_table, table, oxid, csn);
 	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
 	result = generic_toast_update_optional_wal(&oTablesToastAPI,
@@ -1388,7 +1388,7 @@ describe_table(ORelOids oids)
 				max_type_str,
 				max_collation_str;
 
-	table = o_tables_get(oids, NULL, NULL);
+	table = o_tables_get(oids);
 	if (table == NULL)
 		elog(ERROR, "unable to find orioledb table description.");
 
@@ -1523,7 +1523,7 @@ o_tables_foreach_callback(ORelOids oids, void *arg)
 
 	Assert(ORelOidsIsValid(oids));
 
-	table = o_tables_get(oids, NULL, NULL);
+	table = o_tables_get(oids);
 	if (table != NULL)
 	{
 		foreach_arg->callback(table, foreach_arg->arg);

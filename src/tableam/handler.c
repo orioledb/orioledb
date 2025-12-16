@@ -793,7 +793,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 		}
 
 		ORelOidsSetFromRel(old_oids, rel);
-		old_o_table = o_tables_get(old_oids, NULL, NULL);
+		old_o_table = o_tables_get(old_oids);
 		Assert(old_o_table != NULL);
 		oldTreeOids = o_table_make_index_oids(old_o_table, &oldTreeOidsNum);
 
