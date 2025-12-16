@@ -2,6 +2,78 @@ CREATE SCHEMA ddl;
 SET SESSION search_path = 'ddl';
 CREATE EXTENSION orioledb;
 
+CREATE EXTENSION pageinspect;
+
+CREATE FUNCTION hash_index_content(index name) RETURNS TABLE (ctid tid) AS $$
+	SELECT ctid FROM
+		generate_series(2,
+						(pg_relation_size(index::regclass) /
+						 current_setting('block_size')::BIGINT)) p,
+		LATERAL hash_page_type(get_raw_page(index, p - 1)) pt,
+		LATERAL hash_page_items(get_raw_page(index, p - 1))
+		WHERE pt = 'bucket'
+		ORDER BY ctid
+$$ LANGUAGE SQL;
+
+
+CREATE TEMP TABLE hash_i4_heap (
+    seqno   int4,
+    random  int4
+) USING orioledb;
+
+\set filename '/home/bdebribuh/projects/postgres-patches17_temp/src/test/regress/data/hash.data'
+-- COPY hash_i4_heap FROM :'filename';
+INSERT INTO hash_i4_heap VALUES (20000, 1492795354);
+
+CREATE INDEX hash_i4_index ON hash_i4_heap USING hash (random int4_ops);
+
+SELECT * FROM hash_index_content('hash_i4_index');
+UPDATE hash_i4_heap
+   SET seqno = 20000
+ WHERE random = 1492795354;
+SELECT * FROM hash_index_content('hash_i4_index');
+
+BEGIN;
+SET LOCAL enable_seqscan = OFF;
+SET LOCAL enable_bitmapscan = OFF;
+EXPLAIN (COSTS OFF) SELECT h.seqno AS i20000
+  FROM hash_i4_heap h
+ WHERE h.random = 1492795354;
+SELECT h.seqno AS i20000
+  FROM hash_i4_heap h
+ WHERE h.random = 1492795354;
+COMMIT;
+
+SELECT * FROM hash_i4_heap ORDER BY seqno;
+
+CREATE TEMP TABLE gin_test_table (
+    id   serial PRIMARY KEY,
+    tags int4[]
+) USING orioledb;
+
+INSERT INTO gin_test_table (id, tags) VALUES
+(411, '{802, 654}'::int[]),
+(412, '{814, 738}'::int[]);  -- This row will be updated
+
+CREATE INDEX idx_gin_tags ON gin_test_table USING gin (tags);
+
+UPDATE gin_test_table
+SET id = 20000
+WHERE tags @> '{814}';
+
+BEGIN;
+SET LOCAL enable_seqscan = OFF;
+-- SET LOCAL enable_bitmapscan = OFF;
+EXPLAIN (COSTS OFF) SELECT id, tags
+FROM gin_test_table
+WHERE tags @> '{814}';
+SELECT id, tags
+FROM gin_test_table
+WHERE tags @> '{814}';
+COMMIT;
+
+\q
+
 CREATE TABLE o_ddl_check
 (
 	f1 text,
