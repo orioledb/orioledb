@@ -1126,6 +1126,18 @@ o_delete_chkp_num(Oid datoid, Oid relnode)
 						  &nullCallbackInfo);
 }
 
+/*
+ * Get appropriate xlog position to use in checkpoint control file.
+ */
+static XLogRecPtr
+get_checkpoint_xlog_ptr(void)
+{
+	if (is_recovery_in_progress())
+		return GetCurrentReplayRecPtr(NULL);
+	else
+		return GetXLogInsertRecPtr();
+}
+
 void
 o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 {
@@ -1210,16 +1222,15 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	pg_write_barrier();
 
-	checkpoint_state->replayStartPtr = GetXLogInsertRecPtr();
+	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
+	LWLockAcquire(&checkpoint_state->oSysTreesLock, LW_EXCLUSIVE);
+
+	checkpoint_state->replayStartPtr = get_checkpoint_xlog_ptr();
 	wait_finish_active_commits(checkpoint_state->replayStartPtr);
 
 	LWLockAcquire(&checkpoint_state->oXidQueueLock, LW_EXCLUSIVE);
 	before_writing_xids_file(cur_chkp_num);
 	start_write_xids(cur_chkp_num);
-
-
-	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
-	LWLockAcquire(&checkpoint_state->oSysTreesLock, LW_EXCLUSIVE);
 
 	checkpoint_sys_trees(flags, cur_chkp_num, &chkp_tbl_arg);
 
@@ -1229,7 +1240,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	 * the state there is no partial changes to tables and indices system
 	 * trees.
 	 */
-	checkpoint_state->sysTreesStartPtr = GetXLogInsertRecPtr();
+	checkpoint_state->sysTreesStartPtr = get_checkpoint_xlog_ptr();
 	LWLockRelease(&checkpoint_state->oSysTreesLock);
 	LWLockRelease(&checkpoint_state->oTablesMetaLock);
 
@@ -1247,7 +1258,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	 * toastConsistentPtr.
 	 */
 	if (XLogRecPtrIsInvalid(checkpoint_state->toastConsistentPtr))
-		checkpoint_state->toastConsistentPtr = GetXLogInsertRecPtr();
+		checkpoint_state->toastConsistentPtr = get_checkpoint_xlog_ptr();
 
 	finish_write_xids(cur_chkp_num, (flags & CHECKPOINT_IS_SHUTDOWN) ? true : false);
 	close_xids_file();
@@ -4847,7 +4858,7 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		if (td->type >= oIndexUnique &&
 			XLogRecPtrIsInvalid(checkpoint_state->toastConsistentPtr))
 		{
-			checkpoint_state->toastConsistentPtr = GetXLogInsertRecPtr();
+			checkpoint_state->toastConsistentPtr = get_checkpoint_xlog_ptr();
 		}
 
 		LWLockRelease(&checkpoint_state->oTablesMetaLock);
