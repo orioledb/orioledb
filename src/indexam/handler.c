@@ -687,9 +687,23 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 	if (options && !options->orioledb_index)
-		return true;
+	{
+		bool		satisfiesConstraint;
 
-	if (rel->rd_index->indisprimary)
+		/* Call index_insert here, to mimic non MVCC aware part of ExecUpdateIndexTuples */
+		satisfiesConstraint = index_insert(rel, /* index relation */
+										   values,	/* array of index Datums */
+										   isnull,	/* null flags */
+										   tupleid,	/* tid of heap tuple */
+										   heapRel,	/* heap relation */
+										   checkUnique,	/* type of uniqueness check to do */
+										   indexUnchanged,	/* UPDATE without logical change? */
+										   indexInfo);	/* index AM may need this */
+
+		return satisfiesConstraint;
+	}
+
+ 	if (rel->rd_index->indisprimary)
 		return true;
 
 	ORelOidsSetFromRel(oids, rel);
