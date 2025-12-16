@@ -983,8 +983,10 @@ class ReplicationTest(BaseTest):
 						CREATE TABLE o_test_2(val_1 serial, val_2 text)USING orioledb;
 						CREATE TABLE o_test_3(val_1 serial)USING orioledb;
 						CREATE TABLE o_test_4(val_1 serial, val_2 text)USING orioledb;
+						CREATE TABLE o_test_5(val_1 serial)USING orioledb;
+						CREATE TABLE o_test_6(val_1 serial, val_2 text)USING orioledb;
 
-						DROP TABLE o_test_1, o_test_2, o_test_3, o_test_4;
+						DROP TABLE o_test_1, o_test_2, o_test_3, o_test_4, o_test_5, o_test_6;
 
 						CREATE TEMPORARY TABLE o_test_5(val_1 int PRIMARY KEY, val_2 int) USING orioledb;
 
