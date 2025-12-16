@@ -56,7 +56,7 @@ typedef struct
 
 static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType,
 									bool miss_ok, OSnapshot *snapshot);
-static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table);
+static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot);
 static void init_shared_root_info(OPagePool *pool,
 								  SharedRootInfo *sharedRootInfo);
 static bool o_tree_init_free_extents(BTreeDescr *desc);
@@ -640,14 +640,14 @@ fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 }
 
 static void
-fill_table_descr(OTableDescr *descr, OTable *o_table)
+fill_table_descr(OTableDescr *descr, OTable *o_table, OSnapshot *snapshot)
 {
 	MemoryContext old_context;
 
 	fill_table_descr_common_fields(descr, o_table);
 
 	old_context = MemoryContextSwitchTo(descrCxt);
-	o_table_descr_fill_indices(descr, o_table);
+	o_table_descr_fill_indices(descr, o_table, snapshot);
 	MemoryContextSwitchTo(old_context);
 
 	o_table_free(o_table);
@@ -733,7 +733,7 @@ create_table_descr(ORelOids oids, OSnapshot *snapshot, uint32 *version)
 						&found);
 	/* Assert(!found); */
 
-	fill_table_descr(descr, o_table);
+	fill_table_descr(descr, o_table, snapshot);
 
 	enable_stopevents = old_enable_stopevents;
 	return descr;
@@ -983,8 +983,8 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OSnapshot *sna
 	MemoryContext mcxt;
 
 	result = hash_search(oIndexDescrHash, &ixOids, HASH_ENTER, &found);
-	if (found)
-		return result;
+	//if (found)
+	//	return result;
 
 	oIndex = o_indices_get(ixOids, ixType, snapshot);
 	Assert(oIndex || miss_ok);
@@ -1029,7 +1029,7 @@ recreate_index_descr(OIndexDescr *descr)
 }
 
 static void
-o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
+o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot)
 {
 	OIndexNumber cur_ix,
 				ctid_idx_off = 0;
@@ -1058,13 +1058,13 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
 			ixType = table->indices[cur_ix - ctid_idx_off].type;
 		}
 
-		descr->indices[cur_ix] = get_index_descr(ixOids, ixType, false, NULL);
+		descr->indices[cur_ix] = get_index_descr(ixOids, ixType, false, snapshot);
 		descr->indices[cur_ix]->refcnt++;
 	}
 
 	if (ORelOidsIsValid(table->bridge_oids))
 	{
-		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false, NULL);
+		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false, snapshot);
 		descr->bridge->refcnt++;
 	}
 	else
@@ -1072,7 +1072,7 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table)
 
 	if (ORelOidsIsValid(table->toast_oids))
 	{
-		descr->toast = get_index_descr(table->toast_oids, oIndexToast, false, NULL);
+		descr->toast = get_index_descr(table->toast_oids, oIndexToast, false, snapshot);
 		descr->toast->refcnt++;
 	}
 	else
@@ -1559,7 +1559,7 @@ recreate_table_descr(OTableDescr *descr)
 
 	refcnt = descr->refcnt;
 	table_descr_free(descr);
-	fill_table_descr(descr, o_table);
+	fill_table_descr(descr, o_table, NULL); /* @TODO */
 	descr->refcnt = refcnt;
 
 	enable_stopevents = old_enable_stopevents;
