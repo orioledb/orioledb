@@ -201,7 +201,7 @@ ppool_free_page(OPagePool *pool, OInMemoryBlkno blkno, bool haveLock)
 	if (!haveLock)
 		lock_page(blkno);
 	O_PAGE_CHANGE_COUNT_INC(p);
-	page_desc->oids = create_oids();
+	ORelOidsSetInvalid(page_desc->oids);
 	page_desc->type = 0;
 	page_desc->fileExtent.off = InvalidFileExtentOff;
 	page_desc->fileExtent.len = InvalidFileExtentLen;

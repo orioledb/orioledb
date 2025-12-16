@@ -2429,7 +2429,7 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 	old_o_table = o_table;
 	o_table = o_tables_get(o_table->oids, NULL, NULL);
 	o_table->index_bridging = false;
-	o_table->bridge_oids = create_oids();
+	ORelOidsSetInvalid(o_table->bridge_oids);
 	assign_new_oids(o_table, tbl, false);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);

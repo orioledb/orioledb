@@ -660,7 +660,7 @@ o_recovery_start_hook(void)
 			state = &workers_pool[i];
 			shm_mq_set_sender(GET_WORKER_QUEUE(i), MyProc);
 			state->type = oIndexInvalid;
-			state->oids = create_oids();
+			ORelOidsSetInvalid(state->oids);
 			state->oxid = InvalidOXid;
 
 			workers_pool[i].handle = recovery_worker_register(i);
@@ -1036,7 +1036,7 @@ recovery_init(int worker_id)
 			state = &workers_pool[i];
 			shm_mq_set_sender(GET_WORKER_QUEUE(i), MyProc);
 			state->type = oIndexInvalid;
-			state->oids = create_oids();
+			ORelOidsSetInvalid(state->oids);
 			state->oxid = InvalidOXid;
 
 			workers_pool[i].handle = recovery_worker_register(i);
@@ -2672,7 +2672,7 @@ clean_workers_oids(void)
 	{
 		RecoveryWorkerState *state = &workers_pool[i];
 
-		state->oids = create_oids();
+		ORelOidsSetInvalid(state->oids);
 		state->type = oIndexInvalid;
 	}
 }

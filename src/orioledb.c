@@ -1161,7 +1161,7 @@ ppools_shmem_init(Pointer ptr, bool found)
 		{
 			page_descs[i].fileExtent.len = InvalidFileExtentLen;
 			page_descs[i].fileExtent.off = InvalidFileExtentOff;
-			page_descs[i].oids = create_oids();
+			ORelOidsSetInvalid(page_descs[i].oids);
 			page_descs[i].ionum = -1;
 			page_descs[i].type = 0;
 			page_descs[i].flags = 0;

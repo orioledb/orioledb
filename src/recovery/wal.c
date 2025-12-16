@@ -513,7 +513,7 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	{
 		local_wal_buffer_offset = 0;
 		local_type = oIndexInvalid;
-		local_oids = create_oids();
+		ORelOidsSetInvalid(local_oids);
 		return InvalidXLogRecPtr;
 	}
 
@@ -574,7 +574,7 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	{
 		local_wal_buffer_offset = 0;
 		local_type = oIndexInvalid;
-		local_oids = create_oids();
+		ORelOidsSetInvalid(local_oids);
 		return;
 	}
 
@@ -901,7 +901,7 @@ flush_local_wal(bool isCommit, bool withXactTime)
 	local_wal_contains_xid = false;
 	local_wal_contains_switch_xid = false;
 	local_type = oIndexInvalid;
-	local_oids = create_oids();
+	ORelOidsSetInvalid(local_oids);
 	local_wal_has_material_changes = true;
 
 	return location;
@@ -920,7 +920,7 @@ flush_local_wal_if_needed(int required_length)
 		local_wal_contains_xid = false;
 		local_wal_contains_switch_xid = false;
 		local_type = oIndexInvalid;
-		local_oids = create_oids();
+		ORelOidsSetInvalid(local_oids);
 		local_wal_has_material_changes = true;
 	}
 }
