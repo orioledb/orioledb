@@ -92,6 +92,11 @@ typedef struct oIdxLeader
 	 * successfully launched, plus one leader process if it participates as a
 	 * worker (only DISABLE_LEADER_PARTICIPATION builds avoid leader
 	 * participating as a worker).
+	 *
+	 * In case of index rebuild actual number of sort states is
+	 * (nparticipanttuplesorts * nallindices) as rebuild fills and sorts all
+	 * indexes sortstates in each worker. There is some semantic discrepancy
+	 * here as name  nparticipanttuplesorts is inherited from PG unchanged.
 	 */
 	int			nparticipanttuplesorts;
 
@@ -122,7 +127,7 @@ typedef struct oIdxBuildState
 
 	/* Oriole-specific */
 	oIdxLeader *btleader;
-	void		(*worker_heap_sort_fn) (oIdxSpool *, void *, Sharedsort **, int sortmem, bool progress);
+	void		(*worker_heap_sort_fn) (oIdxSpool *, void *, Sharedsort **, int worker_sortmem, bool progress);
 	OIndexNumber ix_num;
 	bool		isrebuild;
 } oIdxBuildState;
@@ -130,11 +135,11 @@ typedef struct oIdxBuildState
 static void _o_index_end_parallel(oIdxLeader *btleader);
 static void _o_index_leader_participate_as_worker(oIdxBuildState *buildstate);
 static void build_secondary_index_worker_sort(oIdxSpool *btspool, void *btshared,
-											  Sharedsort **sharedsort, int sortmem,
+											  Sharedsort **sharedsort, int worker_sortmem,
 											  bool progress);
 static void build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDescr *idx, ParallelOScanDesc poscan, Tuplesortstate **sortstates, bool progress, double *heap_tuples, double *index_tuples[]);
 static void rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
-										Sharedsort **sharedsort, int sortmem,
+										Sharedsort **sharedsort, int worker_sortmem,
 										bool progress);
 static void rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr, ParallelOScanDesc poscan,
 											 Tuplesortstate **sortstates, bool progress, double *heap_tuples,
@@ -1065,7 +1070,7 @@ _o_index_leader_participate_as_worker(oIdxBuildState *buildstate)
 {
 	oIdxLeader *btleader = buildstate->btleader;
 	oIdxSpool  *leaderworker;
-	int			sortmem;
+	int			worker_sortmem;
 
 	/* Allocate memory and initialize private spool */
 	leaderworker = (oIdxSpool *) palloc0(sizeof(oIdxSpool));
@@ -1081,11 +1086,11 @@ _o_index_leader_participate_as_worker(oIdxBuildState *buildstate)
 	 * (when requested number of workers were not launched, this will be
 	 * somewhat higher than it is for other workers).
 	 */
-	sortmem = maintenance_work_mem / btleader->nparticipanttuplesorts;
+	worker_sortmem = maintenance_work_mem / btleader->nparticipanttuplesorts;
 
 	/* Perform work common to all participants */
 	buildstate->worker_heap_sort_fn(leaderworker, btleader->btshared, btleader->sharedsort,
-									sortmem, true);
+									worker_sortmem, true);
 
 	pfree(leaderworker);
 #ifdef BTREE_BUILD_STATS
@@ -1120,10 +1125,9 @@ _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
 	Sharedsort **sharedsort;
 	WalUsage   *walusage;
 	BufferUsage *bufferusage;
-	int			sortmem;
+	int			worker_sortmem;
 	int			i;
 	int			nallindices;
-
 
 #ifdef BTREE_BUILD_STATS
 	if (log_btree_build_stats)
@@ -1198,9 +1202,9 @@ _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
 	InstrStartParallelQuery();
 
 	/* Perform sorting of spool */
-	sortmem = maintenance_work_mem / btshared->scantuplesortstates;
+	worker_sortmem = maintenance_work_mem / btshared->scantuplesortstates;
 	btshared->worker_heap_sort_fn(btspool, btshared, sharedsort,
-								  sortmem, false);
+								  worker_sortmem, false);
 
 	pfree((void *) sharedsort);
 
@@ -1239,12 +1243,12 @@ _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
  * This generates a tuplesort for passed btspool.  All
  * other spool fields should already be set when this is called.
  *
- * sortmem is the amount of working memory to use within each worker,
+ * worker_sortmem is the amount of working memory to use within each worker,
  * expressed in KBs.
  */
 static void
 build_secondary_index_worker_sort(oIdxSpool *btspool, void *bt_shared, Sharedsort **sharedsort,
-								  int sortmem, bool progress)
+								  int worker_sortmem, bool progress)
 {
 	SortCoordinate coordinate;
 	double	   *indtuples,
@@ -1275,7 +1279,7 @@ build_secondary_index_worker_sort(oIdxSpool *btspool, void *bt_shared, Sharedsor
 
 	/* Begin "partial" tuplesort */
 	btspool->sortstates = palloc0(sizeof(Pointer));
-	btspool->sortstates[0] = tuplesort_begin_orioledb_index(idx, work_mem, false, coordinate);
+	btspool->sortstates[0] = tuplesort_begin_orioledb_index(idx, worker_sortmem, false, coordinate);
 
 	build_secondary_index_worker_heap_scan(btspool->descr, idx, poscan, btspool->sortstates, progress, &heaptuples, &indtuples);
 
@@ -1540,7 +1544,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 
 	/* Begin serial/leader tuplesort */
 	sortstates = (Tuplesortstate **) palloc0(sizeof(Pointer));
-	sortstates[0] = tuplesort_begin_orioledb_index(idx, work_mem, false, coordinate);
+	sortstates[0] = tuplesort_begin_orioledb_index(idx, maintenance_work_mem, false, coordinate);
 
 	/* Fill spool using either serial or parallel heap scan */
 	if (!buildstate.btleader)
@@ -1621,12 +1625,12 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
  * This generates a tuplesorts for all indexes for passed btspool.  All
  * other spool fields should already be set when this is called.
  *
- * sortmem is the amount of working memory to use within each worker,
+ * worker_sortmem is the amount of working memory to use within each worker,
  * expressed in KBs.
  */
 static void
 rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
-							Sharedsort **sharedsort, int sortmem,
+							Sharedsort **sharedsort, int worker_sortmem,
 							bool progress)
 {
 	SortCoordinate coordinate;
@@ -1637,6 +1641,7 @@ rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
 	int			i;
 	int			nIndices = btspool->descr->nIndices;
 	int			nallindices = nIndices + 1;
+	int			sortstate_sortmem;	/* Memory per sort state */
 
 	if (btspool->descr->bridge)
 		nallindices += 1;
@@ -1663,16 +1668,17 @@ rebuild_indices_worker_sort(oIdxSpool *btspool, void *bt_shared,
 
 	/* Begin "partial" tuplesorts for all indexes to be rebuilt */
 	btspool->sortstates = palloc0(sizeof(Pointer) * nallindices);
+	sortstate_sortmem = worker_sortmem / nallindices;
 	for (i = PrimaryIndexNumber; i < nIndices; i++)
 	{
-		btspool->sortstates[i] = tuplesort_begin_orioledb_index(btspool->descr->indices[i], work_mem, false, &(coordinate[i]));
+		btspool->sortstates[i] = tuplesort_begin_orioledb_index(btspool->descr->indices[i], sortstate_sortmem, false, &(coordinate[i]));
 	}
 	btspool->sortstates[nIndices] = tuplesort_begin_orioledb_toast(btspool->descr->toast,
 																   btspool->descr->indices[PrimaryIndexNumber],
-																   work_mem, false, &(coordinate[nIndices]));
+																   sortstate_sortmem, false, &(coordinate[nIndices]));
 	if (btspool->descr->bridge)
 	{
-		btspool->sortstates[nIndices + 1] = tuplesort_begin_orioledb_index(btspool->descr->bridge, work_mem, false, &(coordinate[nIndices + 1]));
+		btspool->sortstates[nIndices + 1] = tuplesort_begin_orioledb_index(btspool->descr->bridge, sortstate_sortmem, false, &(coordinate[nIndices + 1]));
 	}
 
 	rebuild_indices_worker_heap_scan(btspool->old_descr, btspool->descr,
@@ -1828,6 +1834,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	BTreeDescr *old_td;
 	BTreeMetaPage *meta;
 	int			nallindices = descr->nIndices + 1;
+	int			leader_sortmem;
 
 	if (descr->bridge)
 		nallindices += 1;
@@ -1892,20 +1899,22 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	}
 
 	/* Begin serial/leader tuplesorts */
+	leader_sortmem = maintenance_work_mem / nallindices;
+
 	for (i = PrimaryIndexNumber; i < descr->nIndices; i++)
 	{
-		sortstates[i] = tuplesort_begin_orioledb_index(descr->indices[i], work_mem, false, coordinate[i]);
+		sortstates[i] = tuplesort_begin_orioledb_index(descr->indices[i], leader_sortmem, false, coordinate[i]);
 	}
 
 	btree_open_smgr(&descr->toast->desc);
 	sortstates[descr->nIndices] = tuplesort_begin_orioledb_toast(descr->toast,
 																 descr->indices[PrimaryIndexNumber],
-																 work_mem, false, coordinate[descr->nIndices]);
+																 leader_sortmem, false, coordinate[descr->nIndices]);
 
 	if (descr->bridge)
 	{
 		btree_open_smgr(&descr->bridge->desc);
-		sortstates[descr->nIndices + 1] = tuplesort_begin_orioledb_index(descr->bridge, work_mem, false, coordinate[descr->nIndices + 1]);
+		sortstates[descr->nIndices + 1] = tuplesort_begin_orioledb_index(descr->bridge, leader_sortmem, false, coordinate[descr->nIndices + 1]);
 	}
 
 	/* Fill spool using either serial or parallel heap scan */
