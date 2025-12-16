@@ -3152,7 +3152,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			if (!single)
 				workers_synchronize(xlogPtr, true);
 
-			o_truncate_table(oids);
+			o_truncate_table(oids, true);
 
 			AcceptInvalidationMessages();
 			if (!single)

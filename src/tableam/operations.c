@@ -2038,7 +2038,7 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 }
 
 void
-o_truncate_table(ORelOids oids)
+o_truncate_table(ORelOids oids, bool missingOK)
 {
 	ORelOids   *treeOids;
 	OTable	   *o_table;
@@ -2050,7 +2050,19 @@ o_truncate_table(ORelOids oids)
 	o_tables_rel_lock(&oids, AccessExclusiveLock);
 
 	o_table = o_tables_get(oids);
-	Assert(o_table != NULL);
+	if (o_table == NULL)
+	{
+		if (!missingOK)
+		{
+			Assert(o_table != NULL);
+			elog(ERROR, "o_truncate_table() missing table for oids (%u, %u, %u)",
+				 oids.datoid, oids.reloid, oids.relnode);
+		}
+		else
+		{
+			return;
+		}
+	}
 	is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
 
 	treeOids = o_table_make_index_oids(o_table, &treeOidsNum);

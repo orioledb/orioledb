@@ -1547,7 +1547,7 @@ o_tables_truncate_unlogged_callback(OTable *o_table, void *arg)
 {
 	if (o_table->persistence == RELPERSISTENCE_UNLOGGED)
 	{
-		o_truncate_table(o_table->oids);
+		o_truncate_table(o_table->oids, false);
 		AcceptInvalidationMessages();
 	}
 }
