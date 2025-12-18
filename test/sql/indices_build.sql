@@ -729,6 +729,31 @@ CREATE INDEX o_test_max_parallel_maintenance_workers_idx_build_ix1
 	ON o_test_max_parallel_maintenance_workers_idx_build (val_2);
 COMMIT;
 
+-- Check shared memory allocation at parallel index rebuild
+SET maintenance_work_mem to "600MB";
+set max_parallel_maintenance_workers to 3;
+
+CREATE TABLE t (i SERIAL PRIMARY KEY, t text) using orioledb;
+INSERT INTO  t (t) (select repeat('x', 25)  FROM generate_series(1,1000,1) x);
+CREATE INDEX ON t(t);
+CREATE INDEX ON t(t);
+CREATE INDEX ON t(t);
+CREATE INDEX ON t(t);
+CREATE INDEX ON t(t);
+REINDEX TABLE t;
+
+CREATE TABLE t_bridge (i SERIAL PRIMARY KEY, t text) using orioledb;
+INSERT INTO  t_bridge (t) (select repeat('x', 25)  FROM generate_series(1,1000,1) x);
+CREATE INDEX ON t_bridge using brin (t);
+CREATE INDEX ON t_bridge(t);
+CREATE INDEX ON t_bridge(t);
+CREATE INDEX ON t_bridge(t);
+CREATE INDEX ON t_bridge(t);
+REINDEX TABLE t_bridge;
+
+RESET maintenance_work_mem;
+RESET max_parallel_maintenance_workers;
+
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices_build CASCADE;
