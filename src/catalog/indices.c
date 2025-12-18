@@ -690,7 +690,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	int			old_o_table_size = 0;
 	Pointer		old_o_table_serialized = NULL;
 	int			i;
-	int			nallindices = buildstate->spool->descr->nIndices + 1;
+	int			nallindices;
 	bool		in_recovery = is_recovery_in_progress();
 #ifdef DISABLE_LEADER_PARTICIPATION
 	leaderparticipates = false;
@@ -701,6 +701,9 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	 * build indexes in parallel.
 	 */
 	Assert(MyBackendType == B_BACKEND || in_recovery);
+
+	/* All indices plus TOAST index */
+	nallindices = buildstate->spool->descr->nIndices + 1;
 
 	if (btspool->descr->bridge)
 		nallindices += 1;
@@ -740,7 +743,6 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	 * Estimate size for our own PARALLEL_KEY_BTREE_SHARED workspace, and
 	 * PARALLEL_KEY_TUPLESORT tuplesort workspace
 	 */
-	/* Calls orioledb_parallelscan_estimate via tableam handler */
 	estbtshared = _o_index_parallel_estimate_shared(o_table_size + old_o_table_size);
 	shm_toc_estimate_chunk(estimator, estbtshared);
 	shm_toc_estimate_keys(estimator, 1);
@@ -749,7 +751,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	if (buildstate->isrebuild)	/* Rebuild indices */
 	{
 		/* All indices plus TOAST sort states */
-		shm_toc_estimate_chunk(estimator, mul_size(estsort, nallindices));
+		shm_toc_estimate_chunk(estimator, mul_size(BUFFERALIGN(estsort), nallindices));
 		shm_toc_estimate_keys(estimator, nallindices);
 	}
 	else						/* Add secondary index */
@@ -818,12 +820,12 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	/* Put shared data into DSM */
 	btshared = (oIdxShared *) shm_toc_allocate(toc, estbtshared);
 
-	memmove(&btshared->o_table_serialized, o_table_serialized, o_table_size);
+	memcpy(&btshared->o_table_serialized, o_table_serialized, o_table_size);
 	if (buildstate->isrebuild)
 	{
 		Assert(old_o_table_serialized);
-		memmove(((Pointer) &btshared->o_table_serialized) + o_table_size,
-				old_o_table_serialized, old_o_table_size);
+		memcpy(((Pointer) &btshared->o_table_serialized) + o_table_size,
+			   old_o_table_serialized, old_o_table_size);
 
 		sharedsort = (Sharedsort **) palloc0(sizeof(Sharedsort *) * nallindices);
 		for (i = 0; i < nallindices; i++)
@@ -1004,8 +1006,8 @@ _o_index_end_parallel(oIdxLeader *btleader)
 }
 
 /*
- * Returns size of shared memory required to store state for a parallel
- * OrioleDB index build based on the snapshot its parallel scan will use.
+ * Returns size of shared memory required to store shared state for a parallel
+ * OrioleDB index build.
  */
 Size
 _o_index_parallel_estimate_shared(Size o_table_size)
@@ -2011,6 +2013,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 					index_tuples[i] = buildstate.btleader->btshared->indtuples[i];
 			}
 		}
+
 		_o_index_end_parallel(buildstate.btleader);
 	}
 
