@@ -85,3 +85,6 @@ doc/
 
 # Exclude the PostGIS Docker build directory
 docker-postgis
+
+# Misc
+make.flags
