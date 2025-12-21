@@ -1133,7 +1133,20 @@ static XLogRecPtr
 get_checkpoint_xlog_ptr(void)
 {
 	if (is_recovery_in_progress())
-		return GetCurrentReplayRecPtr(NULL);
+	{
+		XLogRecPtr	resultPtr = GetCurrentReplayRecPtr(NULL),
+					effectivePtr;
+
+		/* Wait before all workers reach the target ptr */
+		while (true)
+		{
+			effectivePtr = recovery_get_effective_replay_ptr();
+			if (XLogRecPtrIsInvalid(effectivePtr) || effectivePtr >= resultPtr)
+				break;
+			pg_usleep(100);
+		}
+		return resultPtr;
+	}
 	else
 		return GetXLogInsertRecPtr();
 }
