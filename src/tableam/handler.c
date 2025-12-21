@@ -155,6 +155,7 @@ orioledb_index_fetch_end(IndexFetchTableData *scan)
 static bool
 orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 						   Datum tupleid,
+						   bool is_rowid,
 						   Snapshot snapshot,
 						   TupleTableSlot *slot,
 						   bool *call_again, bool *all_dead)
@@ -186,6 +187,26 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 		OBTreeKeyBound bridge_bound;
 		OTuple		bridge_tup;
 
+		if (is_rowid)
+		{
+			bytea	   *rowid;
+			Pointer		p;
+
+			Assert(GET_PRIMARY(descr)->bridging);
+			rowid = DatumGetByteaP(tupleid);
+			p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+			if (!GET_PRIMARY(descr)->primaryIsCtid)
+			{
+				p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+			}
+			else
+			{
+				p += MAXALIGN(sizeof(ORowIdAddendumCtid));
+				p += MAXALIGN(sizeof(ItemPointerData));
+			}
+			tupleid = ItemPointerGetDatum((ItemPointer) p);
+		}
+	
 		bridge_bound.nkeys = 1;
 		bridge_bound.n_row_keys = 0;
 		bridge_bound.row_keys = NULL;
