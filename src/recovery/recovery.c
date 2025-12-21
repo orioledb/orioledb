@@ -2967,9 +2967,6 @@ replay_container(Pointer startPtr, Pointer endPtr,
 	uint8		wal_flags;
 	char		relreplident = REPLICA_IDENTITY_DEFAULT;
 
-	if (xlogRecPtr < checkpoint_state->controlSysTreesStartPtr)
-		return true;
-
 	ptr = wal_container_read_header(ptr, &wal_version, &wal_flags);
 	if (wal_version > ORIOLEDB_WAL_VERSION)
 	{
