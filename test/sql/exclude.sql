@@ -387,7 +387,6 @@ INSERT INTO ib_unique_tbl VALUES (4, 'five');
 
 BEGIN;
 
-SET LOCAL log_error_verbosity = 'terse';
 -- default is immediate so this should fail right away
 UPDATE ib_unique_tbl SET i = 1 WHERE i = 0;
 
@@ -462,7 +461,6 @@ CREATE TABLE ib_deferred_excl (
 ) USING orioledb;
 INSERT INTO ib_deferred_excl VALUES(1);
 INSERT INTO ib_deferred_excl VALUES(2);
-SET log_error_verbosity = 'terse';
 INSERT INTO ib_deferred_excl VALUES(1); -- fail
 INSERT INTO ib_deferred_excl VALUES(1) ON CONFLICT ON CONSTRAINT ib_deferred_excl_con DO NOTHING; -- fail
 BEGIN;
@@ -474,10 +472,12 @@ INSERT INTO ib_deferred_excl VALUES(3); -- no fail here
 COMMIT; -- should fail here
 -- bug #13148: deferred constraint versus HOT update
 BEGIN;
+SET LOCAL log_error_verbosity = 'terse';
 INSERT INTO ib_deferred_excl VALUES(2, 1); -- no fail here
 DELETE FROM ib_deferred_excl WHERE f1 = 2 AND f2 IS NULL; -- remove old row
 UPDATE ib_deferred_excl SET f2 = 2 WHERE f1 = 2;
 COMMIT; -- should not fail
+
 SELECT * FROM ib_deferred_excl;
 
 DROP EXTENSION orioledb CASCADE;
