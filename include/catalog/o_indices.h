@@ -23,6 +23,7 @@ typedef struct
 {
 	ORelOids	indexOids;
 	OIndexType	indexType;
+	uint32		indexVersion;
 	ORelOids	tableOids;
 	char		table_persistence;
 	uint8		fillfactor;
@@ -91,7 +92,7 @@ extern bool o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid,
 						  CommitSeqNo csn);
 extern bool o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid,
 						  CommitSeqNo csn);
-extern OIndex *o_indices_get(ORelOids oids, OIndexType type, OSnapshot *snapshot);
+extern OIndex *o_indices_get(ORelOids oids, OIndexType type, OSnapshot *snapshot, uint32 *version);
 extern bool o_indices_update(OTable *table, OIndexNumber ixNum,
 							 OXid oxid, CommitSeqNo csn);
 extern bool o_indices_find_table_oids(ORelOids indexOids, OIndexType type,

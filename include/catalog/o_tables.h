@@ -67,6 +67,7 @@ typedef struct
 	ORelOids	oids;
 	OIndexType	type;
 	OCompress	compress;
+	uint32		version;
 	bool		nulls_not_distinct;
 	uint8		nfields;
 	/* number of index fields */
@@ -89,6 +90,8 @@ typedef struct
 {
 	ORelOids	oids;
 	ORelOids	toast_oids;
+	uint32		toast_version;
+	uint32		primary_version;
 	ORelOids	bridge_oids;
 	OCompress	default_compress;
 	OCompress	primary_compress;

@@ -55,7 +55,7 @@ typedef struct
 } InvalidateComparatorUndoStackItem;
 
 static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType,
-									bool miss_ok, OSnapshot *snapshot);
+									bool miss_ok, OSnapshot *snapshot, uint32 *version);
 static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot);
 static void init_shared_root_info(OPagePool *pool,
 								  SharedRootInfo *sharedRootInfo);
@@ -795,7 +795,8 @@ o_fetch_index_descr(ORelOids oids, OIndexType type, bool lock, bool *nested, OSn
 	if (lock)
 		o_tables_rel_lock_extended(&oids, AccessShareLock, true);
 
-	index_descr = get_index_descr(oids, type, true, snapshot);
+		// @TODO !!! Add version
+	index_descr = get_index_descr(oids, type, true, snapshot, NULL);
 
 	if (!index_descr && lock)
 	{
@@ -975,7 +976,7 @@ o_drop_shared_root_info(Oid datoid, Oid relnode)
 }
 
 static OIndexDescr *
-get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OSnapshot *snapshot)
+get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OSnapshot *snapshot, uint32 *version)
 {
 	bool		found;
 	OIndexDescr *result;
@@ -986,7 +987,7 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OSnapshot *sna
 	//if (found)
 	//	return result;
 
-	oIndex = o_indices_get(ixOids, ixType, snapshot);
+	oIndex = o_indices_get(ixOids, ixType, snapshot, version);
 	Assert(oIndex || miss_ok);
 	if (!oIndex && miss_ok)
 	{
@@ -1011,7 +1012,7 @@ recreate_index_descr(OIndexDescr *descr)
 	int			refcnt;
 	MemoryContext mcxt;
 
-	oIndex = o_indices_get(descr->oids, descr->desc.type, NULL);
+	oIndex = o_indices_get(descr->oids, descr->desc.type, NULL, NULL);
 	if (!oIndex)
 	{
 		descr->valid = false;
@@ -1046,25 +1047,28 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapsho
 	{
 		ORelOids	ixOids;
 		OIndexType	ixType;
+		uint32 version;
 
 		if (!table->has_primary && cur_ix == 0)
 		{
 			ixOids = table->oids;
 			ixType = oIndexPrimary;
+			version = table->primary_version;
 		}
 		else
 		{
 			ixOids = table->indices[cur_ix - ctid_idx_off].oids;
 			ixType = table->indices[cur_ix - ctid_idx_off].type;
+			version = table->indices[cur_ix - ctid_idx_off].version;
 		}
 
-		descr->indices[cur_ix] = get_index_descr(ixOids, ixType, false, snapshot);
+		descr->indices[cur_ix] = get_index_descr(ixOids, ixType, false, snapshot, &version);
 		descr->indices[cur_ix]->refcnt++;
 	}
 
 	if (ORelOidsIsValid(table->bridge_oids))
 	{
-		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false, snapshot);
+		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false, snapshot, &descr->version);
 		descr->bridge->refcnt++;
 	}
 	else
@@ -1072,7 +1076,7 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapsho
 
 	if (ORelOidsIsValid(table->toast_oids))
 	{
-		descr->toast = get_index_descr(table->toast_oids, oIndexToast, false, snapshot);
+		descr->toast = get_index_descr(table->toast_oids, oIndexToast, false, snapshot, &table->toast_version);
 		descr->toast->refcnt++;
 	}
 	else

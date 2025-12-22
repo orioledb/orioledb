@@ -96,6 +96,7 @@ typedef struct
 	OIndexType	type;
 	ORelOids	oids;
 	uint32		chunknum;
+	uint32		version;
 } OIndexChunkKey;
 
 typedef struct

@@ -281,6 +281,113 @@ class LogicalTest(BaseTest):
 		    "table public.o_data: INSERT: id[integer]:4 data[text]:'20'\n"
 		    "COMMIT\n")
 
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_XXX_01(self):
+		node = self.node
+		node.start()  # start PostgreSQL
+		node.safe_psql(
+		    'postgres',
+		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"  # oriole relation
+		)
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		# part 1
+
+		node.safe_psql(
+		    'postgres', '''
+				BEGIN;
+				INSERT INTO o_data(data) VALUES(100);
+				ALTER TABLE o_data RENAME COLUMN data TO data_2;
+				ALTER TABLE o_data ADD COLUMN data_3 text;
+				INSERT INTO o_data(data_2,data_3) VALUES(300,400);
+				COMMIT;
+			''')
+
+		result = self.retrieve_logical_changes()
+		print(result)
+		self.assertEqual(
+		    result, "BEGIN\n"
+		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
+			"table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
+		    "COMMIT\n")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_XXX_02(self):
+		node = self.node
+		node.start()  # start PostgreSQL
+		node.safe_psql(
+		    'postgres',
+		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"  # oriole relation
+			"CREATE INDEX idx_users_data ON o_data (data);"
+		)
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		# part 1
+
+		node.safe_psql(
+		    'postgres', '''
+				BEGIN;
+				INSERT INTO o_data(data) VALUES(100);
+				ALTER TABLE o_data RENAME COLUMN data TO data_2;
+				ALTER TABLE o_data ADD COLUMN data_3 text;
+				INSERT INTO o_data(data_2,data_3) VALUES(300,400);
+				COMMIT;
+			''')
+
+		result = self.retrieve_logical_changes()
+		print(result)
+		self.assertEqual(
+		    result, "BEGIN\n"
+		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
+			"table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
+		    "COMMIT\n")
+
+	def test_switch_logical_xid_subtxn__REPRO(self):
+		o_relname = self.o_relname
+
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+			with subscriber.start() as subscriber:
+				create_sql = f"""
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+				"""
+				publisher.safe_psql(create_sql)
+				subscriber.safe_psql(create_sql)
+
+				pub = publisher.publish('test_pub', tables=[f'{o_relname}'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+
+				with publisher.connect() as con1:
+					con1.begin()
+					con1.execute(f"""
+						INSERT INTO {o_relname}(data) VALUES(100);
+						ALTER TABLE {o_relname} ADD COLUMN data_2 text;
+						INSERT INTO {o_relname}(data,data_2) VALUES(100,200);
+					""")
+					con1.commit()
+
+				# wait until changes apply on subscriber and check them
+				sub.catchup()
+
+				with subscriber.connect() as con:
+					output = con.execute(f"""SELECT * FROM {o_relname};""")
+					self.assertEqual(output, [(2, '200')])
+
 	def test_switch_logical_xid_subtxn__mixed_ROLLBACK(self):
 		o_relname = self.o_relname
 
