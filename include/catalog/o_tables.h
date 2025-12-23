@@ -155,8 +155,8 @@ extern bool o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn);
 /* Returns OTable by its oids */
 extern OTable *o_tables_get(ORelOids oids);
 
-/* Returns OTable by its oids and version */
-extern OTable *o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version, OSnapshot *snapshot);
+/* Returns OTable by its oids, version and snapshot */
+extern OTable *o_tables_get_extended(ORelOids oids, uint32 version, OSnapshot snapshot);
 
 /* Returns OTable by its index oids */
 extern OTable *o_tables_get_by_tree(ORelOids oids, OIndexType type);

@@ -564,7 +564,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	if (!reuse_relnode && table_index->type == oIndexPrimary)
 	{
 		Assert(old_o_table);
-		old_descr = o_fetch_table_descr(old_o_table->oids, NULL, NULL);
+		old_descr = o_fetch_table_descr(old_o_table->oids);
 
 		recreate_o_table(old_o_table, o_table);
 	}
@@ -581,7 +581,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		recreate_table_descr_by_oids(oids);
 	}
 
-	descr = o_fetch_table_descr(o_table->oids, NULL, NULL);
+	descr = o_fetch_table_descr(o_table->oids);
 
 	if (!reuse_relnode && is_build)
 	{
@@ -2060,9 +2060,9 @@ drop_primary_index(Relation rel, OTable *o_table)
 	o_table->primary_init_nfields = o_table->nfields + 1;	/* + ctid field */
 
 	o_tables_table_meta_lock(NULL);
-	old_descr = o_fetch_table_descr(old_o_table->oids, NULL, NULL);
+	old_descr = o_fetch_table_descr(old_o_table->oids);
 	recreate_o_table(old_o_table, o_table);
-	descr = o_fetch_table_descr(o_table->oids, NULL, NULL);
+	descr = o_fetch_table_descr(o_table->oids);
 	o_tablespace_cache_add_table(o_table);
 	rebuild_indices_insert_placeholders(descr);
 	o_tables_table_meta_unlock(NULL, InvalidOid);

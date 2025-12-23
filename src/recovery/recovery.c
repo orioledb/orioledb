@@ -2698,7 +2698,7 @@ recovery_send_leader_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_ver
 	msg.o_table_version = o_table_version;
 	msg.old_o_table_version = old_o_table_version;
 
-	Assert(o_tables_get_by_oids_and_version(oids, &o_table_version, NULL) != NULL);
+	Assert(o_tables_get_extended(oids, o_table_version, o_non_deleted_snapshot) != NULL);
 
 	/* Remember oids of index build added to a queue in a hash table */
 	state = (RecoveryIdxBuildQueueState *) hash_search(idxbuild_oids_hash,
@@ -2775,10 +2775,10 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 
 		if (!OidIsValid(oldRelnode))
 		{
-			uint32		version = new_o_table->version - 1;
+			uint32		version = (new_o_table->version == O_TABLE_INVALID_VERSION) ? O_TABLE_INVALID_VERSION : new_o_table->version  - 1;
 
-			old_o_table = o_tables_get_by_oids_and_version(oids,
-														   &version, NULL);
+			old_o_table = o_tables_get_extended(oids,
+														   version, o_non_deleted_snapshot);
 		}
 		else
 		{
@@ -2806,7 +2806,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 			{
 				if (tbl_data_exists(&old_o_table->oids))
 				{
-					old_descr = o_fetch_table_descr(old_o_table->oids, NULL, NULL);
+					old_descr = o_fetch_table_descr(old_o_table->oids);
 					rebuild_indices_insert_placeholders(&tmp_descr);
 					o_tables_meta_unlock_no_wal();
 
@@ -2873,7 +2873,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 				o_fill_tmp_table_descr(&tmp_descr, new_o_table);
 				if (tbl_data_exists(&old_o_table->indices[ix_num].oids))
 				{
-					old_descr = o_fetch_table_descr(old_o_table->oids, NULL, NULL);
+					old_descr = o_fetch_table_descr(old_o_table->oids);
 					rebuild_indices_insert_placeholders(&tmp_descr);
 					o_tables_meta_unlock_no_wal();
 
@@ -3080,7 +3080,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			}
 			else if (ix_type == oIndexInvalid)
 			{
-				descr = o_fetch_table_descr(cur_oids, NULL, NULL);
+				descr = o_fetch_table_descr(cur_oids);
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
 			}
 			else
@@ -3088,7 +3088,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 				Assert(ix_type == oIndexToast || ix_type == oIndexBridge);
 				descr = NULL;
 				indexDescr = o_fetch_index_descr(cur_oids, ix_type,
-												 false, NULL, NULL);
+												 false, NULL);
 			}
 
 			if (sys_tree_num == -1)

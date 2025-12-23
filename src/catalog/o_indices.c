@@ -1143,7 +1143,13 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 }
 
 OIndex *
-o_indices_get(ORelOids oids, OIndexType type, OSnapshot *snapshot)
+o_indices_get(ORelOids oids, OIndexType type)
+{
+	return o_indices_get_extended(oids, type, o_non_deleted_snapshot);
+}
+
+OIndex *
+o_indices_get_extended(ORelOids oids, OIndexType type, OSnapshot snapshot)
 {
 	OIndexChunkKey key;
 	Size		dataLength;
@@ -1155,7 +1161,7 @@ o_indices_get(ORelOids oids, OIndexType type, OSnapshot *snapshot)
 	key.chunknum = 0;
 
 	result = generic_toast_get_any(&oIndicesToastAPI, (Pointer) &key,
-								   &dataLength, snapshot ? snapshot : &o_non_deleted_snapshot,
+								   &dataLength, &snapshot,
 								   get_sys_tree(SYS_TREES_O_INDICES));
 
 	if (result == NULL)
@@ -1179,7 +1185,7 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	BTreeDescr *sys_tree;
 
 	oIndex = make_o_index(table, ixNum);
-	oIndexOld = o_indices_get(oIndex->indexOids, oIndex->indexType, NULL);
+	oIndexOld = o_indices_get(oIndex->indexOids, oIndex->indexType);
 	if (oIndexOld)
 	{
 		oIndex->createOxid = oIndexOld->createOxid;
@@ -1379,7 +1385,7 @@ describe_index(TupleDesc tupdesc, ORelOids oids, OIndexType type)
 	Datum		values[2];
 	bool		isnull[2] = {false};
 
-	index = o_indices_get(oids, type, NULL);
+	index = o_indices_get(oids, type);
 	if (index == NULL)
 		elog(ERROR, "unable to find orioledb index description.");
 

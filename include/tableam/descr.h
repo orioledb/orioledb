@@ -268,9 +268,12 @@ typedef struct
 /*
  * Please, read commit before o_bree_load_shmemd() definition.
  */
-extern OTableDescr *o_fetch_table_descr(ORelOids oids, OSnapshot *snapshot, uint32 *version);
+extern OTableDescr *o_fetch_table_descr_extended(ORelOids oids, OSnapshot snapshot, uint32 version);
+extern OIndexDescr *o_fetch_index_descr_extended(ORelOids oids, OIndexType type,
+										bool lock, bool *nested, OSnapshot snapshot);
+extern OTableDescr *o_fetch_table_descr(ORelOids oids);
 extern OIndexDescr *o_fetch_index_descr(ORelOids oids, OIndexType type,
-										bool lock, bool *nested, OSnapshot *snapshot);
+										bool lock, bool *nested);
 
 extern void recreate_table_descr_by_oids(ORelOids oids);
 extern void o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table);

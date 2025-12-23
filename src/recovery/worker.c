@@ -387,7 +387,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					AcceptInvalidationMessages();
 					if (ix_type == oIndexInvalid)
 					{
-						descr = o_fetch_table_descr(oids, NULL, NULL);
+						descr = o_fetch_table_descr(oids);
 						table_descr_inc_refcnt(descr);
 						indexDescr = GET_PRIMARY(descr);
 					}
@@ -395,7 +395,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					{
 						indexDescr = o_fetch_index_descr(oids, ix_type,
 														 false,
-														 NULL, NULL);
+														 NULL);
 					}
 					o_get_prefixes_for_relnode(indexDescr->oids.datoid,
 											   indexDescr->oids.relnode, &prefix, &db_prefix);
@@ -451,7 +451,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				Assert(ORelOidsIsValid(msg->oids));
 				recovery_oxid = msg->oxid;
 
-				o_table = o_tables_get_by_oids_and_version(msg->oids, &msg->o_table_version, NULL);
+				o_table = o_tables_get_extended(msg->oids, msg->o_table_version, o_non_deleted_snapshot);
 				Assert(o_table);
 				Assert(o_table->version == msg->o_table_version);
 
@@ -465,7 +465,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				{
 					Assert(ORelOidsIsValid(msg->old_oids));
 
-					old_o_table = o_tables_get_by_oids_and_version(msg->old_oids, &msg->old_o_table_version, NULL);
+					old_o_table = o_tables_get_extended(msg->old_oids, msg->old_o_table_version, o_non_deleted_snapshot);
 					Assert(old_o_table);
 					Assert(old_o_table->version == msg->old_o_table_version);
 				}

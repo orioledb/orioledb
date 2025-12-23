@@ -1139,7 +1139,7 @@ o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
  * Same as o_tables_get, if version not NULL find o_tables with passed version
  */
 OTable *
-o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version, OSnapshot *snapshot)
+o_tables_get_extended(ORelOids oids, uint32 version, OSnapshot snapshot)
 {
 	OTableChunkKey key,
 			   *found_key = NULL;
@@ -1149,15 +1149,12 @@ o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version, OSnapshot *snap
 
 	key.oids = oids;
 	key.chunknum = 0;
-	if (version)
-		key.version = *version;
-	else
-		key.version = O_TABLE_INVALID_VERSION;
+	key.version = version;
 
 	found_key = &key;
 	result = generic_toast_get_any_with_key(&oTablesToastAPI, (Pointer) &key,
 											&dataLength,
-											snapshot ? snapshot : &o_non_deleted_snapshot,
+											&snapshot,
 											get_sys_tree(SYS_TREES_O_TABLES),
 											(Pointer *) &found_key);
 
@@ -1178,7 +1175,7 @@ o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version, OSnapshot *snap
 OTable *
 o_tables_get(ORelOids oids)
 {
-	return o_tables_get_by_oids_and_version(oids, NULL, NULL);
+	return o_tables_get_extended(oids, O_TABLE_INVALID_VERSION, o_non_deleted_snapshot);
 }
 
 /*
