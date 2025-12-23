@@ -287,8 +287,7 @@ class LogicalTest(BaseTest):
 		node = self.node
 		node.start()
 		node.safe_psql(
-		    'postgres',
-		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
 		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
 		)
 
@@ -324,11 +323,9 @@ class LogicalTest(BaseTest):
 		node = self.node
 		node.start()
 		node.safe_psql(
-		    'postgres',
-		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
 		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
-		    "CREATE INDEX data_idx ON o_data(data);"
-		)
+		    "CREATE INDEX data_idx ON o_data(data);")
 
 		node.safe_psql(
 		    'postgres',
@@ -362,8 +359,7 @@ class LogicalTest(BaseTest):
 		node = self.node
 		node.start()
 		node.safe_psql(
-		    'postgres',
-		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
 		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
 		    "CREATE INDEX data_idx ON o_data USING btree(data) WITH (orioledb_index = off);"
 		)
