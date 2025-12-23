@@ -693,6 +693,7 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 	o_table->data_version = ORIOLEDB_DATA_VERSION;
 	o_table->toast_version = UINT32_MAX;
 	o_table->primary_version = UINT32_MAX;
+	o_table->bridge_version = UINT32_MAX;
 
 	for (i = 0; i < tupdesc->natts; i++)
 	{

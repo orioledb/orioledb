@@ -1080,7 +1080,7 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot snapshot
 
 	if (ORelOidsIsValid(table->bridge_oids))
 	{
-		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false, snapshot, descr->version);
+		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false, snapshot, table->bridge_version);
 		descr->bridge->refcnt++;
 	}
 	else

@@ -611,6 +611,7 @@ make_bridge_o_index(OTable *table)
 		Assert(primary->type == oIndexPrimary);
 	}
 
+	result->indexVersion = ++table->bridge_version;
 	result->indexOids = table->bridge_oids;
 	result->indexType = oIndexBridge;
 	namestrcpy(&result->name, "index_bridge");
@@ -816,8 +817,7 @@ get_version(OTable *table, OIndexNumber ixNum)
 	}
 	else if (ixNum == BridgeIndexNumber)
 	{
-		return NULL;
-		/* @TODO ! !! */
+		return &table->bridge_version;
 	}
 	return NULL;
 	/* @TODO ! !! */

@@ -283,21 +283,19 @@ class LogicalTest(BaseTest):
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
-	def test_XXX_01(self):
+	def test_systrees_versions_simple(self):
 		node = self.node
-		node.start()  # start PostgreSQL
+		node.start()
 		node.safe_psql(
 		    'postgres',
 		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"  # oriole relation
+		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
 		)
 
 		node.safe_psql(
 		    'postgres',
 		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
 		)
-
-		# part 1
 
 		node.safe_psql(
 		    'postgres', '''
@@ -308,6 +306,9 @@ class LogicalTest(BaseTest):
 				INSERT INTO o_data(data_2,data_3) VALUES(300,400);
 				COMMIT;
 			''')
+		# Final version of relation descr from systree o_tables after this COMMIT will be with three attrs (id,data_2,data_3),
+		# which does not match with the first version (id,data).
+		# But it is necessary to observe both these versions in logical decoder to properly decode INSERT'ed tuples.
 
 		result = self.retrieve_logical_changes()
 		print(result)
@@ -319,21 +320,58 @@ class LogicalTest(BaseTest):
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
-	def test_XXX_02(self):
+	def test_systrees_versions_index(self):
 		node = self.node
-		node.start()  # start PostgreSQL
+		node.start()
 		node.safe_psql(
 		    'postgres',
 		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"  # oriole relation
-		    "CREATE INDEX idx_users_data ON o_data (data);")
+		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
+		    "CREATE INDEX data_idx ON o_data(data);"
+		)
 
 		node.safe_psql(
 		    'postgres',
 		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
 		)
 
-		# part 1
+		node.safe_psql(
+		    'postgres', '''
+				BEGIN;
+				INSERT INTO o_data(data) VALUES(100);
+				ALTER TABLE o_data RENAME COLUMN data TO data_2;
+				ALTER TABLE o_data ADD COLUMN data_3 text;
+				INSERT INTO o_data(data_2,data_3) VALUES(300,400);
+				COMMIT;
+			''')
+		# Final version of relation tupedescr from systree o_indices after this COMMIT will be with three attrs (id,data_2,data_3),
+		# which does not match with the first version (id,data).
+		# But it is necessary to observe both these versions in logical decoder to properly decode INSERT'ed tuples.
+
+		result = self.retrieve_logical_changes()
+		print(result)
+		self.assertEqual(
+		    result, "BEGIN\n"
+		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
+		    "table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
+		    "COMMIT\n")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_systrees_versions_index_bridge_01(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres',
+		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
+		    "CREATE INDEX data_idx ON o_data USING btree(data) WITH (orioledb_index = off);"
+		)
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
 
 		node.safe_psql(
 		    'postgres', '''
