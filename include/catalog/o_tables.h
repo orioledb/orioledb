@@ -90,9 +90,9 @@ typedef struct
 {
 	ORelOids	oids;
 	ORelOids	toast_oids;
-	uint32		toast_version;
-	uint32		primary_version;
-	uint32		bridge_version;
+	uint32		toast_ixversion;
+	uint32		primary_ixversion;
+	uint32		bridge_ixversion;
 	ORelOids	bridge_oids;
 	OCompress	default_compress;
 	OCompress	primary_compress;

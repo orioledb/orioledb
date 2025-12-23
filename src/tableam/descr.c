@@ -1065,7 +1065,7 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot snapshot
 		{
 			ixOids = table->oids;
 			ixType = oIndexPrimary;
-			version = table->primary_version;
+			version = table->primary_ixversion;
 		}
 		else
 		{
@@ -1080,7 +1080,7 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot snapshot
 
 	if (ORelOidsIsValid(table->bridge_oids))
 	{
-		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false, snapshot, table->bridge_version);
+		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false, snapshot, table->bridge_ixversion);
 		descr->bridge->refcnt++;
 	}
 	else
@@ -1088,7 +1088,7 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot snapshot
 
 	if (ORelOidsIsValid(table->toast_oids))
 	{
-		descr->toast = get_index_descr(table->toast_oids, oIndexToast, false, snapshot, table->toast_version);
+		descr->toast = get_index_descr(table->toast_oids, oIndexToast, false, snapshot, table->toast_ixversion);
 		descr->toast->refcnt++;
 	}
 	else

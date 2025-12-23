@@ -267,11 +267,11 @@ make_ctid_o_index(OTable *table)
 	result->nPrimaryFields = 0;
 	result->nKeyFields = 1;
 	result->nUniqueFields = 1;
-	result->indexVersion = ++table->primary_version;
+	result->indexVersion = ++table->primary_ixversion;
 
 	elog(LOG, "[%s] oids [ %u %u %u ] version %u", __func__,
 		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
-		 table->primary_version);
+		 table->primary_ixversion);
 
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
@@ -343,12 +343,12 @@ make_primary_o_index(OTable *table)
 	result->nIncludedFields = tableIndex->nfields - tableIndex->nkeyfields;
 	result->nPrimaryFields = 0;
 	result->nKeyFields = tableIndex->nkeyfields;
-	result->indexVersion = ++table->primary_version;
+	result->indexVersion = ++table->primary_ixversion;
 	tableIndex->version = result->indexVersion;
 
 	elog(LOG, "[%s] oids [ %u %u %u ] version %u", __func__,
 		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
-		 table->primary_version);
+		 table->primary_ixversion);
 
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
@@ -542,7 +542,7 @@ make_toast_o_index(OTable *table)
 		Assert(primary->type == oIndexPrimary);
 	}
 
-	result->indexVersion = ++table->toast_version;
+	result->indexVersion = ++table->toast_ixversion;
 	result->indexOids = table->toast_oids;
 	result->indexType = oIndexToast;
 	namestrcpy(&result->name, "toast");
@@ -570,7 +570,7 @@ make_toast_o_index(OTable *table)
 
 	elog(LOG, "[%s] oids [ %u %u %u ] version %u", __func__,
 		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
-		 table->toast_version);
+		 table->toast_ixversion);
 
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
@@ -611,7 +611,7 @@ make_bridge_o_index(OTable *table)
 		Assert(primary->type == oIndexPrimary);
 	}
 
-	result->indexVersion = ++table->bridge_version;
+	result->indexVersion = ++table->bridge_ixversion;
 	result->indexOids = table->bridge_oids;
 	result->indexType = oIndexBridge;
 	namestrcpy(&result->name, "index_bridge");
@@ -809,15 +809,15 @@ get_version(OTable *table, OIndexNumber ixNum)
 
 	if (ixNum == PrimaryIndexNumber)
 	{
-		return primaryIsCtid ? &table->primary_version : &table->indices[0].version;
+		return primaryIsCtid ? &table->primary_ixversion : &table->indices[0].version;
 	}
 	else if (ixNum == TOASTIndexNumber)
 	{
-		return &table->toast_version;
+		return &table->toast_ixversion;
 	}
 	else if (ixNum == BridgeIndexNumber)
 	{
-		return &table->bridge_version;
+		return &table->bridge_ixversion;
 	}
 	return NULL;
 	/* @TODO ! !! */
