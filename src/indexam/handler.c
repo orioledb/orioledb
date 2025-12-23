@@ -48,7 +48,7 @@
 
 #define DEFAULT_PAGE_CPU_MULTIPLIER 50.0
 
-static IndexBuildResult *orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo);
+static IndexBuildResult *orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo, bool isreindex);
 static void orioledb_amreuse(Relation index);
 static void orioledb_ambuildempty(Relation index);
 static bool orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
@@ -147,7 +147,8 @@ orioledb_btree_handler(void)
 		VACUUM_OPTION_PARALLEL_BULKDEL | VACUUM_OPTION_PARALLEL_COND_CLEANUP;
 	amroutine->amkeytype = InvalidOid;
 
-	amroutine->ambuild = orioledb_ambuild;
+	amroutine->ambuild = NULL;
+	amroutine->ambuildextended = orioledb_ambuild;
 	amroutine->amreuse = orioledb_amreuse;
 	amroutine->ambuildempty = orioledb_ambuildempty;
 	amroutine->aminsert = NULL;
@@ -258,9 +259,8 @@ orioledb_amreuse(Relation index)
 
 
 IndexBuildResult *
-orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
+orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo, bool isreindex)
 {
-	bool		reindex = false;
 	IndexBuildResult *result;
 	String	   *relname;
 	OBTOptions *options = (OBTOptions *) index->rd_options;
@@ -291,11 +291,6 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	}
 
 	relname = makeString(index->rd_rel->relname.data);
-	if (!in_nontransactional_truncate && list_member(reindex_list, relname))
-	{
-		reindex = true;
-		reindex_list = list_delete(reindex_list, relname);
-	}
 
 	(void) btbuild(heap, index, indexInfo);
 
@@ -303,7 +298,6 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 
 	result->heap_tuples = 0.0;
 	result->index_tuples = 0.0;
-
 
 	if (in_nontransactional_truncate || !OidIsValid(o_saved_relrewrite))
 	{
@@ -313,18 +307,11 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 		ORelOidsSetFromRel(tbl_oids, heap);
 		o_table = o_tables_get(tbl_oids);
 
-		if (index->rd_index->indisprimary && o_table->has_primary)
-		{
-			/* If table already has primary index, redefine it */
-			drop_primary_index(heap, o_table);
-			redefine_pkey_for_rel(heap);
-		}
-		else
-		{
-			if (!in_nontransactional_truncate)
-				o_define_index_validate(tbl_oids, index, indexInfo, NULL);
-			o_define_index(heap, index, InvalidOid, reindex, InvalidIndexNumber, false, result);
-		}
+		if (index->rd_index->indisprimary)
+			isreindex = o_table->has_primary;
+		if (!in_nontransactional_truncate)
+			o_define_index_validate(tbl_oids, index, indexInfo, NULL, isreindex);
+		o_define_index(heap, index, InvalidOid, isreindex, InvalidIndexNumber, false, result);
 	}
 
 	return result;

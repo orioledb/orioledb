@@ -484,7 +484,6 @@ typedef struct OTableDescr OTableDescr;
 typedef struct OIndexDescr OIndexDescr;
 
 /* ddl.c */
-extern List *reindex_list;
 extern IndexBuildResult o_pkey_result;
 extern bool o_in_add_column;
 

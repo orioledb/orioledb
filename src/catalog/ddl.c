@@ -113,7 +113,6 @@ Oid			o_saved_reltablespace = InvalidOid;
 List	   *o_reuse_indices = NIL;
 static ORelOids saved_oids;
 static bool in_rewrite = false;
-List	   *reindex_list = NIL;
 Query	   *savedDataQuery = NULL;
 IndexBuildResult o_pkey_result = {0};
 bool		o_in_add_column = false;
@@ -641,28 +640,8 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 		}
 
 		tbl = relation_open(relid, AccessShareLock);
-		if (is_orioledb_rel(tbl))
-		{
-			ListCell   *index;
-
-			foreach(index, RelationGetIndexList(tbl))
-			{
-				Oid			indexOid = lfirst_oid(index);
-				Relation	ind = relation_open(indexOid, AccessShareLock);
-				OBTOptions *options = (OBTOptions *) ind->rd_options;
-
-				if (ind->rd_rel->relam == BTREE_AM_OID && !(options && !options->orioledb_index))
-				{
-					String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
-
-					reindex_list = list_append_unique(reindex_list, ix_name);
-				}
-				relation_close(ind, AccessShareLock);
-			}
-
-			if (concurrently)
-				has_orioledb = true;
-		}
+		if (is_orioledb_rel(tbl) && concurrently)
+			has_orioledb = true;
 		relation_close(tbl, AccessShareLock);
 	}
 	table_endscan(scan);
@@ -1152,10 +1131,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						iRel->rd_rel->relam == BTREE_AM_OID &&
 						!(options && !options->orioledb_index))
 					{
-						String	   *ix_name;
-
-						ix_name = makeString(pstrdup(iRel->rd_rel->relname.data));
-						reindex_list = list_append_unique(reindex_list, ix_name);
 						if (concurrently)
 							has_orioledb = true;
 					}
@@ -1176,27 +1151,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						break;
 					}
 					tbl = relation_open(tblOid, AccessShareLock);
-					if (is_orioledb_rel(tbl))
-					{
-						ListCell   *index;
-
-						foreach(index, RelationGetIndexList(tbl))
-						{
-							Oid			indexOid = lfirst_oid(index);
-							Relation	ind = relation_open(indexOid, AccessShareLock);
-							OBTOptions *options = (OBTOptions *) ind->rd_options;
-
-							if (ind->rd_rel->relam == BTREE_AM_OID && !(options && !options->orioledb_index))
-							{
-								String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
-
-								reindex_list = list_append_unique(reindex_list, ix_name);
-							}
-							relation_close(ind, AccessShareLock);
-							if (concurrently)
-								has_orioledb = true;
-						}
-					}
+					if (is_orioledb_rel(tbl) && concurrently)
+						has_orioledb = true;
 					relation_close(tbl, AccessShareLock);
 				}
 				break;
@@ -1385,15 +1341,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									dest, qc);
 	}
 
-	if (IsA(pstmt->utilityStmt, ReindexStmt))
-	{
-		if (reindex_list)
-		{
-			list_free_deep(reindex_list);
-			reindex_list = NIL;
-		}
-	}
-	else if (IsA(pstmt->utilityStmt, DropStmt))
+	if (IsA(pstmt->utilityStmt, DropStmt))
 	{
 		if (partition_drop_index_list)
 		{
@@ -2214,7 +2162,7 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_table
 			}
 			else
 			{
-				o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
+				o_define_index_validate(new_o_table->oids, ind, NULL, NULL, false);
 				relation_close(ind, AccessShareLock);
 				o_define_index(rel, NULL, ind->rd_rel->oid, false, InvalidIndexNumber, set_tablespace, NULL);
 				closed = true;
@@ -4046,11 +3994,6 @@ o_ddl_cleanup(void)
 	{
 		list_free(partition_drop_index_list);
 		partition_drop_index_list = NIL;
-	}
-	if (reindex_list)
-	{
-		list_free_deep(reindex_list);
-		reindex_list = NIL;
 	}
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
 	o_saved_relrewrite = InvalidOid;

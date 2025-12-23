@@ -275,7 +275,7 @@ o_validate_index_elements(List *expressions, List *predicate)
 }
 
 void
-o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTable *o_table)
+o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTable *o_table, bool reindex)
 {
 	int			nattrs;
 	OIndexType	ix_type;
@@ -303,7 +303,7 @@ o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTa
 			int			nattrs_max = 0,
 						ix;
 
-			if (o_table->has_primary)
+			if (o_table->has_primary && !reindex)
 				elog(ERROR, "table already has primary index");
 
 			for (ix = 0; ix < o_table->nindices; ix++)
@@ -452,9 +452,10 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			reindex = ix_num != InvalidIndexNumber &&
 				ix_num < o_table->nindices;
 
-			o_index_drop(heap, ix_num);
+			if (reindex)
+				o_index_drop(heap, ix_num);
 
-			if (ix_type == oIndexPrimary)
+			if (reindex && ix_type == oIndexPrimary)
 			{
 				o_table_free(old_o_table);
 				ORelOidsSetFromRel(oids, heap);
@@ -471,7 +472,8 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			is_build = true;
 			table_index = &o_table->indices[ix_num];
 		}
-		else
+
+		if (!reindex)
 		{
 			ORelOids	primary_oids;
 
@@ -621,7 +623,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		else
 		{
 			Assert(!is_recovery_in_progress());
-			build_secondary_index(o_table, descr, ix_num, false, set_tablespace, result);
+			build_secondary_index(o_table, descr, ix_num, false, set_tablespace, result, reindex);
 		}
 	}
 	else
@@ -1490,7 +1492,7 @@ o_estimate_parallel_workers(double table_pages, double index_pages,
 void
 build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 					  bool in_dedicated_recovery_worker, bool set_tablespace,
-					  IndexBuildResult *result)
+					  IndexBuildResult *result, bool reindex)
 {
 	Tuplesortstate **sortstates;
 	Relation	tableRelation,
@@ -1597,6 +1599,14 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	 */
 	o_tables_table_meta_lock(o_table);
 
+	if (reindex)
+	{
+		EvictedTreeData *evicted_data;
+
+		evicted_data = read_evicted_data(idx->desc.oids.datoid,
+										 idx->desc.oids.relnode,
+										 true);
+	}
 	btree_write_file_header(&idx->desc, &fileHeader);
 	if (!set_tablespace)
 		o_drop_shared_root_info(idx->desc.oids.datoid,
@@ -2150,6 +2160,7 @@ o_index_drop(Relation tbl, OIndexNumber ix_num)
 	}
 
 	Assert(ix_num != InvalidIndexNumber && ix_num < o_table->nindices);
+
 	if (o_table->indices[ix_num].type == oIndexPrimary)
 		drop_primary_index(tbl, o_table);
 	else

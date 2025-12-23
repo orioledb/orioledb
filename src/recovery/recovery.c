@@ -2867,7 +2867,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 											  invalid_oids, 0, false);
 				}
 				else
-					build_secondary_index(new_o_table, &tmp_descr, ix_num, false, false, NULL);
+					build_secondary_index(new_o_table, &tmp_descr, ix_num, false, false, NULL, false);
 			}
 			o_free_tmp_table_descr(&tmp_descr);
 		}

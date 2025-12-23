@@ -176,6 +176,13 @@ TABLE o_test_on_commit_not_delete_index;
 REINDEX TABLE o_test_on_commit_not_delete_index;
 TABLE o_test_on_commit_not_delete_index;
 
+CREATE TEMP TABLE concur_temp_tab_2 (c1 int, c2 text) USING orioledb ON COMMIT DELETE ROWS;
+CREATE INDEX concur_temp_ind_2 ON concur_temp_tab_2(c2);
+
+SELECT pg_my_temp_schema()::regnamespace as temp_schema_name \gset
+REINDEX SCHEMA CONCURRENTLY :temp_schema_name;
+\d concur_temp_tab_2
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA temp_schema CASCADE;
 RESET search_path;
