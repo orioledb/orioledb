@@ -744,7 +744,7 @@ add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version)
 
 	memcpy(rec->version, &version, sizeof(version));
 
-	elog(DEBUG4, "[%s] WAL_REC_RELATION xmin/csn/cid %lu/%lu/%lu version %u", __func__, runXmin, csn, cid, version);
+	elog(DEBUG4, "[%s] WAL_REC_RELATION xmin/csn/cid %lu/%lu/%u version %u", __func__, runXmin, csn, cid, version);
 
 	local_wal_buffer_offset += sizeof(*rec);
 

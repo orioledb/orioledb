@@ -801,7 +801,7 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	return oIndex;
 }
 
-uint32 *
+static uint32 *
 get_version(OTable *table, OIndexNumber ixNum)
 {
 	bool		primaryIsCtid = table->nindices == 0 || table->indices[0].type != oIndexPrimary;
@@ -1267,7 +1267,13 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 }
 
 OIndex *
-o_indices_get(ORelOids oids, OIndexType type, OSnapshot *snapshot, uint32 *version)
+o_indices_get(ORelOids oids, OIndexType type)
+{
+	return o_indices_get_extended(oids, type, o_non_deleted_snapshot, O_TABLE_INVALID_VERSION);
+}
+
+OIndex *
+o_indices_get_extended(ORelOids oids, OIndexType type, OSnapshot snapshot, uint32 version)
 {
 	OIndexChunkKey key,
 				*found_key = NULL;
@@ -1278,7 +1284,7 @@ o_indices_get(ORelOids oids, OIndexType type, OSnapshot *snapshot, uint32 *versi
 	key.type = type;
 	key.oids = oids;
 	key.chunknum = 0;
-	key.version = version ? *version : O_TABLE_INVALID_VERSION;
+	key.version = version;
 
 	elog(LOG, "[%s] key oids [ %u %u %u ]; type %u; chunknum %u; version %u", __func__,
 		key.oids.datoid, key.oids.reloid, key.oids.relnode,
@@ -1289,7 +1295,7 @@ o_indices_get(ORelOids oids, OIndexType type, OSnapshot *snapshot, uint32 *versi
 	found_key = &key;
 	result = generic_toast_get_any_with_key(&oIndicesToastAPI, (Pointer) &key,
 								   &dataLength,
-								   snapshot ? snapshot : &o_non_deleted_snapshot,
+								   &snapshot,
 								   get_sys_tree(SYS_TREES_O_INDICES),
 								   (Pointer *) &found_key);
 
@@ -1316,8 +1322,8 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	uint32 version;
 
 	oIndex = make_o_index(table, ixNum);
-	version = oIndex->indexVersion - 1;
-	oIndexOld = o_indices_get(oIndex->indexOids, oIndex->indexType, NULL, &version); /* @TODO snapshot */
+	version = oIndex->indexVersion == O_TABLE_INVALID_VERSION ? O_TABLE_INVALID_VERSION : oIndex->indexVersion - 1;
+	oIndexOld = o_indices_get_extended(oIndex->indexOids, oIndex->indexType, o_non_deleted_snapshot, version); /* @TODO snapshot */
 	if (oIndexOld)
 	{
 		oIndex->createOxid = oIndexOld->createOxid;
@@ -1533,7 +1539,7 @@ describe_index(TupleDesc tupdesc, ORelOids oids, OIndexType type)
 	bool		isnull[2] = {false};
 
 	/* Only actual versions are needed here */
-	index = o_indices_get(oids, type, NULL, NULL);
+	index = o_indices_get(oids, type);
 	if (index == NULL)
 		elog(ERROR, "unable to find orioledb index description.");
 

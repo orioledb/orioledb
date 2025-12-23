@@ -139,7 +139,7 @@ extern Pointer generic_toast_get_any_with_callback(ToastAPI *api, Pointer key,
 												   Size *data_size,
 												   OSnapshot *snapshot,
 												   void *arg,
-												   TupleFetchCallback fetchCallback,
+												   TupleFetchCallback fetch_callback,
 												   void *callback_arg);
 
 /* Copies TupleDescs to toast definition */

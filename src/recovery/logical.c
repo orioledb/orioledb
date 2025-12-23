@@ -828,7 +828,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else if (ix_type == oIndexInvalid)
 			{
-				descr = o_fetch_table_descr(cur_oids, &snapshot, &cur_version);
+				descr = o_fetch_table_descr_extended(cur_oids, snapshot, cur_version);
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
 				elog(DEBUG4, "WAL_REC_RELATION oIndexInvalid");
 			}
@@ -836,8 +836,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			{
 				elog(DEBUG4, "WAL_REC_RELATION oIndexToast");
 
-				indexDescr = o_fetch_index_descr(cur_oids, ix_type, false, NULL, &snapshot);
-				descr = o_fetch_table_descr(indexDescr->tableOids, &snapshot, &cur_version);
+				indexDescr = o_fetch_index_descr_extended(cur_oids, ix_type, false, NULL, snapshot);
+				descr = o_fetch_table_descr_extended(indexDescr->tableOids, snapshot, cur_version);
 				o_toast_tupDesc = descr->toast->leafTupdesc;
 				/* Init heap tupledesc for toast table */
 				heap_toast_tupDesc = CreateTemplateTupleDesc(3);
