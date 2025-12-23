@@ -483,7 +483,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				}
 				else
 				{
-					build_secondary_index(o_table, o_descr, msg->ix_num, true, false, NULL);
+					build_secondary_index(o_table, o_descr, msg->ix_num, true, false, NULL, false);
 				}
 
 				/*
