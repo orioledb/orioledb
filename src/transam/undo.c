@@ -35,6 +35,7 @@
 #include "utils/stopevent.h"
 #include "replication/syncrep.h"
 #include "rewind/rewind.h"
+#include "catalog/sys_trees.h"
 
 #include "access/transam.h"
 #include "miscadmin.h"
@@ -1776,11 +1777,7 @@ undo_xact_callback(XactEvent event, void *arg)
 					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
 
-				{
-					extern const text *retrieve_orioledb_sys_tree_structure(int systree, int depth);
-
-					elog(WARNING, "before apply_undo_stack: %s", text_to_cstring(retrieve_orioledb_sys_tree_structure(SYS_TREES_O_TABLES, 32)));
-				}
+				elog(WARNING, "before apply_undo_stack: %s", text_to_cstring(retrieve_orioledb_sys_tree_structure(SYS_TREES_O_TABLES, 32)));
 
 				if (!RecoveryInProgress())
 					wal_rollback(oxid, logicalXidContext.xid, false);
@@ -1788,11 +1785,7 @@ undo_xact_callback(XactEvent event, void *arg)
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					apply_undo_stack((UndoLogType) i, oxid, (UndoLogType) i == UndoLogSystem ? &undoStackLocations : NULL, true);
 
-				{
-					extern const text *retrieve_orioledb_sys_tree_structure(int systree, int depth);
-
-					elog(WARNING, "after apply_undo_stack: %s", text_to_cstring(retrieve_orioledb_sys_tree_structure(SYS_TREES_O_TABLES, 32)));
-				}
+				elog(WARNING, "after apply_undo_stack: %s", text_to_cstring(retrieve_orioledb_sys_tree_structure(SYS_TREES_O_TABLES, 32)));
 
 				reset_cur_undo_locations();
 				reset_command_undo_locations();
