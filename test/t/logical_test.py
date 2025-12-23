@@ -314,7 +314,7 @@ class LogicalTest(BaseTest):
 		self.assertEqual(
 		    result, "BEGIN\n"
 		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
-			"table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
+		    "table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
 		    "COMMIT\n")
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
@@ -326,8 +326,7 @@ class LogicalTest(BaseTest):
 		    'postgres',
 		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
 		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"  # oriole relation
-			"CREATE INDEX idx_users_data ON o_data (data);"
-		)
+		    "CREATE INDEX idx_users_data ON o_data (data);")
 
 		node.safe_psql(
 		    'postgres',
@@ -351,7 +350,7 @@ class LogicalTest(BaseTest):
 		self.assertEqual(
 		    result, "BEGIN\n"
 		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
-			"table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
+		    "table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
 		    "COMMIT\n")
 
 	def test_switch_logical_xid_subtxn__REPRO(self):

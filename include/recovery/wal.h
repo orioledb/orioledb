@@ -104,10 +104,10 @@ typedef struct
 	uint8		reloid[sizeof(Oid)];
 	uint8		relnode[sizeof(Oid)];
 	/* Since ORIOLEDB_WAL_VERSION = 17 */
-	uint8		xmin[sizeof(OXid)]; /* @TODO @INFO */
-	uint8		csn[sizeof(CommitSeqNo)];	/* @TODO @INFO */
-	uint8		cid[sizeof(CommandId)]; /* @TODO @INFO */
-	uint8		version[sizeof(uint32)];	/* @TODO @INFO */
+	uint8		xmin[sizeof(OXid)];
+	uint8		csn[sizeof(CommitSeqNo)];
+	uint8		cid[sizeof(CommandId)];
+	uint8		version[sizeof(uint32)];
 } WALRecRelation;
 
 typedef struct

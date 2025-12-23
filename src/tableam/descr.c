@@ -807,7 +807,7 @@ o_fetch_index_descr_extended(ORelOids oids, OIndexType type, bool lock, bool *ne
 	if (lock)
 		o_tables_rel_lock_extended(&oids, AccessShareLock, true);
 
-		// @TODO !!! Add version
+	/* @TODO !!! Add version */
 	index_descr = get_index_descr(oids, type, true, snapshot, O_TABLE_INVALID_VERSION);
 
 	if (!index_descr && lock)
@@ -996,8 +996,8 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OSnapshot snap
 	MemoryContext mcxt;
 
 	result = hash_search(oIndexDescrHash, &ixOids, HASH_ENTER, &found);
-	//if (found)
-	//	return result;
+	/* if (found) */
+	/* return result; */
 
 	oIndex = o_indices_get_extended(ixOids, ixType, snapshot, version);
 	Assert(oIndex || miss_ok);
@@ -1059,7 +1059,7 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot snapshot
 	{
 		ORelOids	ixOids;
 		OIndexType	ixType;
-		uint32 version;
+		uint32		version;
 
 		if (!table->has_primary && cur_ix == 0)
 		{
@@ -1569,13 +1569,13 @@ recreate_table_descr(OTableDescr *descr)
 	old_enable_stopevents = enable_stopevents;
 	enable_stopevents = false;
 
-	o_table = o_tables_get(descr->oids); /* @TODO */
+	o_table = o_tables_get(descr->oids);	/* @TODO */
 	if (!o_table)
 		return false;
 
 	refcnt = descr->refcnt;
 	table_descr_free(descr);
-	fill_table_descr(descr, o_table, o_non_deleted_snapshot); /* @TODO */
+	fill_table_descr(descr, o_table, o_non_deleted_snapshot);	/* @TODO */
 	descr->refcnt = refcnt;
 
 	enable_stopevents = old_enable_stopevents;

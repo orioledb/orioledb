@@ -1262,7 +1262,11 @@ void
 o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn)
 {
 	o_opclass_cache_add_table(o_table);
-	//o_indices_update(o_table, PrimaryIndexNumber, oxid, csn); // @NOTE moved out from here
+
+	/*
+	 * o_indices_update(o_table, PrimaryIndexNumber, oxid, csn); // @NOTE
+	 * moved out from here
+	 */
 	if (o_table->has_primary)
 	{
 		o_add_invalidate_undo_item(o_table->indices[PrimaryIndexNumber].oids,

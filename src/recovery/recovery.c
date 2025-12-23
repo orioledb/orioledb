@@ -2775,10 +2775,10 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 
 		if (!OidIsValid(oldRelnode))
 		{
-			uint32		version = (new_o_table->version == O_TABLE_INVALID_VERSION) ? O_TABLE_INVALID_VERSION : new_o_table->version  - 1;
+			uint32		version = (new_o_table->version == O_TABLE_INVALID_VERSION) ? O_TABLE_INVALID_VERSION : new_o_table->version - 1;
 
 			old_o_table = o_tables_get_extended(oids,
-														   version, o_non_deleted_snapshot);
+												version, o_non_deleted_snapshot);
 		}
 		else
 		{

@@ -85,20 +85,20 @@ oIndicesGetNextKey(void *key, void *arg)
 	static OIndexChunkKey nextKey;
 
 	elog(LOG, "[%s] GET NEXT FOR ckey [ %u %u %u ]; type %u; chunknum %u; version %u", __func__,
-		ckey->oids.datoid, ckey->oids.reloid, ckey->oids.relnode,
-		ckey->type,
-		ckey->chunknum,
-		ckey->version);
+		 ckey->oids.datoid, ckey->oids.reloid, ckey->oids.relnode,
+		 ckey->type,
+		 ckey->chunknum,
+		 ckey->version);
 
 	nextKey = *ckey;
 	nextKey.oids.relnode++;
 	nextKey.chunknum = 0;
 
 	elog(LOG, "[%s] NEXT IS [ %u %u %u ]; type %u; chunknum %u; version %u", __func__,
-		nextKey.oids.datoid, nextKey.oids.reloid, nextKey.oids.relnode,
-		nextKey.type,
-		nextKey.chunknum,
-		nextKey.version);
+		 nextKey.oids.datoid, nextKey.oids.reloid, nextKey.oids.relnode,
+		 nextKey.type,
+		 nextKey.chunknum,
+		 nextKey.version);
 
 	return &nextKey;
 }
@@ -165,7 +165,7 @@ oIndicesGetTupleDataSize(OTuple tuple, void *arg)
 
 static TupleFetchCallbackResult
 oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
-					 void *arg, TupleFetchCallbackCheckType check_type)
+					  void *arg, TupleFetchCallbackCheckType check_type)
 {
 	OIndexChunkKey *tupleKey = (OIndexChunkKey *) tuple.data;
 	OIndexChunkKey *boundKey = (OIndexChunkKey *) arg;
@@ -177,16 +177,16 @@ oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 		check_type = OTupleFetchCallbackVersionCheck;
 
 	elog(LOG, "[%s] tupleKey [ %u %u %u ]; type %u; chunknum %u; version %u", __func__,
-		tupleKey->oids.datoid, tupleKey->oids.reloid, tupleKey->oids.relnode,
-		tupleKey->type,
-		tupleKey->chunknum,
-		tupleKey->version);
+		 tupleKey->oids.datoid, tupleKey->oids.reloid, tupleKey->oids.relnode,
+		 tupleKey->type,
+		 tupleKey->chunknum,
+		 tupleKey->version);
 
 	elog(LOG, "[%s] boundKey [ %u %u %u ]; type %u; chunknum %u; version %u", __func__,
-		boundKey->oids.datoid, boundKey->oids.reloid, boundKey->oids.relnode,
-		boundKey->type,
-		boundKey->chunknum,
-		boundKey->version);
+		 boundKey->oids.datoid, boundKey->oids.reloid, boundKey->oids.relnode,
+		 boundKey->type,
+		 boundKey->chunknum,
+		 boundKey->version);
 
 	elog(LOG, "[%s] 1 tupleKey->version %u boundKey->version %u", __func__, tupleKey->version, boundKey->version);
 
@@ -270,8 +270,8 @@ make_ctid_o_index(OTable *table)
 	result->indexVersion = ++table->primary_version;
 
 	elog(LOG, "[%s] oids [ %u %u %u ] version %u", __func__,
-		table->oids.datoid, table->oids.reloid, table->oids.relnode,
-		table->primary_version);
+		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
+		 table->primary_version);
 
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
@@ -347,8 +347,8 @@ make_primary_o_index(OTable *table)
 	tableIndex->version = result->indexVersion;
 
 	elog(LOG, "[%s] oids [ %u %u %u ] version %u", __func__,
-		table->oids.datoid, table->oids.reloid, table->oids.relnode,
-		table->primary_version);
+		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
+		 table->primary_version);
 
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
@@ -569,8 +569,8 @@ make_toast_o_index(OTable *table)
 	result->nNonLeafFields += TOAST_NON_LEAF_FIELDS_NUM;
 
 	elog(LOG, "[%s] oids [ %u %u %u ] version %u", __func__,
-		table->oids.datoid, table->oids.reloid, table->oids.relnode,
-		table->toast_version);
+		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
+		 table->toast_version);
 
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
@@ -805,6 +805,7 @@ static uint32 *
 get_version(OTable *table, OIndexNumber ixNum)
 {
 	bool		primaryIsCtid = table->nindices == 0 || table->indices[0].type != oIndexPrimary;
+
 	if (ixNum == PrimaryIndexNumber)
 	{
 		return primaryIsCtid ? &table->primary_version : &table->indices[0].version;
@@ -815,9 +816,11 @@ get_version(OTable *table, OIndexNumber ixNum)
 	}
 	else if (ixNum == BridgeIndexNumber)
 	{
-		return NULL; // @TODO !!!
+		return NULL;
+		/* @TODO ! !! */
 	}
-	return NULL; // @TODO !!!
+	return NULL;
+	/* @TODO ! !! */
 }
 
 OIndex *
@@ -1206,7 +1209,7 @@ o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	Pointer		data;
 	int			len;
 	BTreeDescr *sys_tree;
-	uint32 *version_ptr;
+	uint32	   *version_ptr;
 
 	oIndex = make_o_index(table, ixNum);
 	version_ptr = get_version(table, ixNum);
@@ -1217,14 +1220,15 @@ o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	key.oids = oIndex->indexOids;
 	key.type = oIndex->indexType;
 	key.chunknum = 0;
-	key.version = 0; //oIndex->indexVersion;
+	key.version = 0;
+	/* oIndex->indexVersion; */
 
 	elog(LOG, "[%s] key oids [ %u %u %u ]; ixNum %u type %u; chunknum %u; version %u", __func__,
-		key.oids.datoid, key.oids.reloid, key.oids.relnode,
-		ixNum,
-		key.type,
-		key.chunknum,
-		key.version);
+		 key.oids.datoid, key.oids.reloid, key.oids.relnode,
+		 ixNum,
+		 key.type,
+		 key.chunknum,
+		 key.version);
 
 	data = serialize_o_index(oIndex, &len);
 	free_o_index(oIndex);
@@ -1252,10 +1256,10 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	key.version = oIndex->indexVersion;
 
 	elog(LOG, "[%s] key oids [ %u %u %u ]; type %u; chunknum %u; version %u", __func__,
-		key.oids.datoid, key.oids.reloid, key.oids.relnode,
-		key.type,
-		key.chunknum,
-		key.version);
+		 key.oids.datoid, key.oids.reloid, key.oids.relnode,
+		 key.type,
+		 key.chunknum,
+		 key.version);
 
 	free_o_index(oIndex);
 
@@ -1276,7 +1280,7 @@ OIndex *
 o_indices_get_extended(ORelOids oids, OIndexType type, OSnapshot snapshot, uint32 version)
 {
 	OIndexChunkKey key,
-				*found_key = NULL;
+			   *found_key = NULL;
 	Size		dataLength;
 	Pointer		result;
 	OIndex	   *oIndex;
@@ -1287,17 +1291,17 @@ o_indices_get_extended(ORelOids oids, OIndexType type, OSnapshot snapshot, uint3
 	key.version = version;
 
 	elog(LOG, "[%s] key oids [ %u %u %u ]; type %u; chunknum %u; version %u", __func__,
-		key.oids.datoid, key.oids.reloid, key.oids.relnode,
-		key.type,
-		key.chunknum,
-		key.version);
+		 key.oids.datoid, key.oids.reloid, key.oids.relnode,
+		 key.type,
+		 key.chunknum,
+		 key.version);
 
 	found_key = &key;
 	result = generic_toast_get_any_with_key(&oIndicesToastAPI, (Pointer) &key,
-								   &dataLength,
-								   &snapshot,
-								   get_sys_tree(SYS_TREES_O_INDICES),
-								   (Pointer *) &found_key);
+											&dataLength,
+											&snapshot,
+											get_sys_tree(SYS_TREES_O_INDICES),
+											(Pointer *) &found_key);
 
 	if (result == NULL)
 		return NULL;
@@ -1319,11 +1323,11 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	Pointer		data;
 	int			len;
 	BTreeDescr *sys_tree;
-	uint32 version;
+	uint32		version;
 
 	oIndex = make_o_index(table, ixNum);
 	version = oIndex->indexVersion == O_TABLE_INVALID_VERSION ? O_TABLE_INVALID_VERSION : oIndex->indexVersion - 1;
-	oIndexOld = o_indices_get_extended(oIndex->indexOids, oIndex->indexType, o_non_deleted_snapshot, version); /* @TODO snapshot */
+	oIndexOld = o_indices_get_extended(oIndex->indexOids, oIndex->indexType, o_non_deleted_snapshot, version);	/* @TODO snapshot */
 	if (oIndexOld)
 	{
 		oIndex->createOxid = oIndexOld->createOxid;
@@ -1336,10 +1340,10 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	key.version = oIndex->indexVersion;
 
 	elog(LOG, "[%s] key oids [ %u %u %u ]; type %u; chunknum %u; version %u", __func__,
-		key.oids.datoid, key.oids.reloid, key.oids.relnode,
-		key.type,
-		key.chunknum,
-		key.version);
+		 key.oids.datoid, key.oids.reloid, key.oids.relnode,
+		 key.type,
+		 key.chunknum,
+		 key.version);
 
 	free_o_index(oIndex);
 	systrees_modify_start();
@@ -1397,7 +1401,10 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 	chunkKey.chunknum = 0;
 	chunkKey.version = O_TABLE_INVALID_VERSION;
 
-	/* Only actual versions are needed here, so it's fine to use o_non_deleted_snapshot and O_TABLE_INVALID_VERSION */
+	/*
+	 * Only actual versions are needed here, so it's fine to use
+	 * o_non_deleted_snapshot and O_TABLE_INVALID_VERSION
+	 */
 
 	it = o_btree_iterator_create(desc, (Pointer) &chunkKey, BTreeKeyBound,
 								 &o_non_deleted_snapshot, ForwardScanDirection);
