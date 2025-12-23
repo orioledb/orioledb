@@ -34,6 +34,7 @@ typedef struct OTableSlot
 	CommitSeqNo csn;
 	int			ixnum;
 	bool		leafTuple;
+	bool		bridgeChanged;
 	uint32		version;
 	OTupleReaderState state;
 	BTreeLocationHint hint;
