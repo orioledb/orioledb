@@ -538,21 +538,19 @@ orioledb_sys_tree_structure(PG_FUNCTION_ARGS)
 	PG_RETURN_POINTER(cstring_to_text(buf.data));
 }
 
-// Unused function 
-//
-//static const text *
-//retrieve_orioledb_sys_tree_structure(int systree, int depth)
-//{
-//	Datum		res;
-//	text	   *options = cstring_to_text("");
-//
-//	res = DirectFunctionCall3(orioledb_sys_tree_structure,
-//							  ObjectIdGetDatum(systree),
-//							  PointerGetDatum(options),
-//							  Int32GetDatum(depth));
-//
-//	return DatumGetTextP(res);
-//}
+const text *
+retrieve_orioledb_sys_tree_structure(int systree, int depth)
+{
+	Datum		res;
+	text	   *options = cstring_to_text("");
+
+	res = DirectFunctionCall3(orioledb_sys_tree_structure,
+							  ObjectIdGetDatum(systree),
+							  PointerGetDatum(options),
+							  Int32GetDatum(depth));
+
+	return DatumGetTextP(res);
+}
 
 Datum
 orioledb_sys_tree_check(PG_FUNCTION_ARGS)
