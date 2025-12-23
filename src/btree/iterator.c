@@ -117,7 +117,7 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 							 CommitSeqNo *out_csn, MemoryContext mcxt,
 							 BTreeLocationHint *hint,
 							 bool *deleted,
-							 TupleFetchCallback fetchCallback,
+							 TupleFetchCallback cb,
 							 void *arg)
 {
 	BTreePageItemLocator loc;
@@ -213,7 +213,7 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 		if (cmp == 0)
 		{
 			return o_find_tuple_version(desc, img, &loc, read_o_snapshot,
-										out_csn, mcxt, fetchCallback, arg);
+										out_csn, mcxt, cb, arg);
 		}
 	}
 
@@ -238,8 +238,7 @@ o_btree_find_tuple_by_key(BTreeDescr *desc, void *key, BTreeKeyType kind,
 OTuple
 o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 					 OSnapshot *oSnapshot, CommitSeqNo *tupleCsn,
-					 MemoryContext mcxt,
-					 TupleFetchCallback fetchCallback,
+					 MemoryContext mcxt, TupleFetchCallback cb,
 					 void *arg)
 {
 	BTreeLeafTuphdr tupHdr,
@@ -247,9 +246,9 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	OTuple		curTuple;
 	OTuple		result;
 	int			result_size;
-	MemoryContext prevMctx;
 	UndoLocation undoLocation = InvalidUndoLocation;
 	bool		curTupleAllocated = false;
+	MemoryContext prevMctx;
 
 	/* @TODO ! !! */
 
@@ -282,7 +281,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 				*tupleCsn = COMMITSEQNO_INPROGRESS;
 		}
 
-		if (fetchCallback)
+		if (cb)
 		{
 			TupleFetchCallbackResult cbResult;
 
@@ -296,7 +295,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 				OTupleFetchCallbackVersionCheck :
 				OTupleFetchCallbackKeyCheck;
 
-			cbResult = fetchCallback(curTuple, tupOxid, oSnapshot, arg, check_type);
+			cbResult = cb(curTuple, tupOxid, oSnapshot, arg, check_type);
 
 			if (cbResult == OTupleFetchMatch)
 				break;
@@ -310,7 +309,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 		if (!txIsFinished)
 		{
-			if (!fetchCallback)
+			if (!cb)
 			{
 				if (COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn))
 					break;
@@ -404,7 +403,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 			return result;
 		}
 	}
-	else if (tupHdr.deleted != BTreeLeafTupleNonDeleted && !fetchCallback)
+	else if (tupHdr.deleted != BTreeLeafTupleNonDeleted && !cb)
 	{
 		O_TUPLE_SET_NULL(result);
 		MemoryContextSwitchTo(prevMctx);
@@ -512,10 +511,10 @@ o_btree_iterator_set_tuple_ctx(BTreeIterator *it, MemoryContext tupleCxt)
 
 void
 o_btree_iterator_set_callback(BTreeIterator *it,
-							  TupleFetchCallback fetchCallback,
+							  TupleFetchCallback callback,
 							  void *arg)
 {
-	it->fetchCallback = fetchCallback;
+	it->fetchCallback = callback;
 	it->fetchCallbackArg = arg;
 }
 
