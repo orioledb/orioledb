@@ -406,5 +406,6 @@ extern void update_command_undo_location(CommandId commandId,
 										 UndoLocation undoLocation);
 extern void o_set_current_command(CommandId commandId);
 extern CommandId o_get_current_command(void);
+extern UndoLocation *get_current_replication_retain_undo_location(void);
 
 #endif							/* __UNDO_H__ */

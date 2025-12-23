@@ -36,6 +36,7 @@
 #include "replication/syncrep.h"
 #include "rewind/rewind.h"
 #include "catalog/sys_trees.h"
+#include "btree/modify.h"
 
 #include "access/transam.h"
 #include "miscadmin.h"
@@ -44,7 +45,8 @@
 #include "storage/md.h"
 #include "storage/proc.h"
 #include "utils/memutils.h"
-
+#include "btree/iterator.h"
+#include "replication/slot.h"
 
 #define GET_UNDO_REC(undoType, loc) (o_undo_buffers[(int) (undoType)] + \
 	(loc) % o_undo_circular_sizes[(int) (undoType)])
@@ -568,6 +570,93 @@ wait_for_even_write_in_progress_changecount(UndoMeta *meta)
 	finish_spin_delay(&status);
 }
 
+/*
+ * Get undoLocation from SYS_TREES_XID_UNDO_LOCATION system tree by a xid
+ * provided or closest following.
+ */
+static UndoLocation *
+read_replication_retain_undo_location(TransactionId xid, bool delete)
+{
+	TransactionId	key = xid;
+	OTuple          keyTuple;
+	OTuple          result;
+
+	keyTuple.formatFlags = 0;
+	keyTuple.data = (Pointer) &key;
+
+	result = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION),
+			&keyTuple, BTreeKeyUniqueLowerBound,
+			&o_in_progress_snapshot, NULL,
+			CurrentMemoryContext, NULL);
+
+	if (O_TUPLE_IS_NULL(result))
+		return NULL;
+
+	/* TODO: delete older ones */
+	return &((ReplicationRetainUndoTuple *) result.data)->undoLocation;
+}
+
+UndoLocation * 
+get_current_replication_retain_undo_location(void)
+{
+	TransactionId   xmin;
+	TransactionId	catalog_xmin;
+
+	ReplicationSlotsComputeRequiredXmin(false);
+	ProcArrayGetReplicationSlotXmin(&xmin, &catalog_xmin);
+
+	return read_replication_retain_undo_location(xmin, true);
+}
+
+/*
+ * Insert the item into SYS_TREES_XID_UNDO_LOCATION. If item with this xid exists
+ * update it only if this update decreases undoLocation. Skip otherwise.
+ */
+static void
+insert_replication_retain_undo_location(TransactionId xid, UndoLocation undoLocation)
+{
+	TransactionId   key = xid;
+	OTuple          keyTuple;
+	OTuple          tuple;
+	OTuple		existing_tuple;
+	bool            success PG_USED_FOR_ASSERTS_ONLY;
+	ReplicationRetainUndoTuple	data;
+
+	keyTuple.formatFlags = 0;
+	keyTuple.data = (Pointer) &key;
+	existing_tuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION),
+			&keyTuple, BTreeKeyNonLeafKey,
+			&o_in_progress_snapshot, NULL,
+			CurrentMemoryContext, NULL);
+
+	if (!O_TUPLE_IS_NULL(existing_tuple))
+	{
+		if(((ReplicationRetainUndoTuple *) existing_tuple.data)->undoLocation > undoLocation)
+		{
+			/* Update item if this moves undoLocation backwards */
+			success = o_btree_autonomous_delete(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION),
+					keyTuple, BTreeKeyNonLeafKey, NULL);
+			Assert(success);
+			/* fall through */
+		}
+		else
+		{
+			/* Don't update item if this leaves undoLocation unchanged or moves forward */
+			return;
+		}
+	}
+
+	data.xid = xid;
+	data.undoLocation = undoLocation;
+	tuple.formatFlags = 0;
+	tuple.data = (Pointer) &data;
+
+	success = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION),
+			tuple);
+
+	Assert(success);
+}
+
 static void
 set_my_reserved_location(UndoLogType undoType)
 {
@@ -593,7 +682,15 @@ set_my_reserved_location(UndoLogType undoType)
 		pg_atomic_write_u64(&shared->reservedUndoLocation, lastUsedLocation);
 
 		if (overwriteTransactionRetainUndoLoc)
+		{
 			pg_atomic_write_u64(&shared->transactionUndoRetainLocation, lastUsedLocation);
+			if(undoType == UndoLogSystem)
+			{
+				TransactionId xid = GetCurrentTransactionId();
+
+				insert_replication_retain_undo_location(xid, lastUsedLocation);
+			}
+		}
 
 		wait_for_even_min_undo_locations_changecount(meta);
 
