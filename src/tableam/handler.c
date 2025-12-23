@@ -191,6 +191,7 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 		{
 			bytea	   *rowid;
 			Pointer		p;
+			ORowIdBridgeData *bridgeData;
 
 			Assert(GET_PRIMARY(descr)->bridging);
 			rowid = DatumGetByteaP(tupleid);
@@ -204,9 +205,10 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 				p += MAXALIGN(sizeof(ORowIdAddendumCtid));
 				p += MAXALIGN(sizeof(ItemPointerData));
 			}
-			tupleid = ItemPointerGetDatum((ItemPointer) p);
+			bridgeData = (ORowIdBridgeData *) p;
+			tupleid = ItemPointerGetDatum(&bridgeData->bridgeCtid);
 		}
-	
+
 		bridge_bound.nkeys = 1;
 		bridge_bound.n_row_keys = 0;
 		bridge_bound.row_keys = NULL;
@@ -2426,8 +2428,12 @@ get_keys_from_rowid(OIndexDescr *primary, Datum pkDatum, OBTreeKeyBound *key,
 		if (primary->bridging)
 		{
 			if (bridge_ctid)
-				*bridge_ctid = (ItemPointer) p;
-			p += MAXALIGN(sizeof(ItemPointerData));
+			{
+				ORowIdBridgeData *bridgeData = (ORowIdBridgeData *) p;
+
+				*bridge_ctid = &bridgeData->bridgeCtid;
+			}
+			p += MAXALIGN(sizeof(ORowIdBridgeData));
 		}
 
 		tuple.data = p;
@@ -2461,7 +2467,11 @@ get_keys_from_rowid(OIndexDescr *primary, Datum pkDatum, OBTreeKeyBound *key,
 		{
 			p += MAXALIGN(sizeof(ItemPointerData));
 			if (bridge_ctid)
-				*bridge_ctid = (ItemPointer) p;
+			{
+				ORowIdBridgeData *bridgeData = (ORowIdBridgeData *) p;
+
+				*bridge_ctid = &bridgeData->bridgeCtid;
+			}
 		}
 	}
 }
