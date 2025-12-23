@@ -206,6 +206,7 @@ o_apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
 	do
 	{
 		oslot->bridge_ctid = btree_bridge_ctid_get_and_inc(&primary->desc, &overflow);
+		oslot->bridgeChanged = true;
 
 		values[0] = PointerGetDatum(&oslot->bridge_ctid);
 		isnull[0] = false;
@@ -1113,13 +1114,16 @@ o_tbl_insert_with_arbiter(Relation rel,
 					rowid = DatumGetByteaP(conflictTid);
 					p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 
-					if (!GET_PRIMARY(descr)->primaryIsCtid)
+					if (!primary->primaryIsCtid)
 					{
 						ORowIdAddendumNonCtid *add;
 						OTuple		tuple;
 
 						add = (ORowIdAddendumNonCtid *) p;
 						p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+
+						if (primary->bridging)
+							p += MAXALIGN(sizeof(ORowIdBridgeData));
 
 						tuple.data = p;
 						tuple.formatFlags = add->flags;
@@ -1535,8 +1539,6 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 		{
 			if (descr->bridge)
 			{
-				OTableSlot *oslot = (OTableSlot *) oldSlot;
-
 				delete_old_bridge_index_ctid(descr, rel, &((OTableSlot *) oldSlot)->bridge_ctid, csn);
 				reinsert_bridge_ctid_on_pkey_changed(descr, rel, slot, csn);
 			}

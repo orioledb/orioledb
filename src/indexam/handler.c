@@ -443,7 +443,7 @@ append_rowid_values(OIndexDescr *id,
 
 		tuple.data = p;
 		if (id->bridging)
-			tuple.data += MAXALIGN(sizeof(ItemPointerData));
+			tuple.data += MAXALIGN(sizeof(ORowIdBridgeData));
 
 		tuple.formatFlags = add->flags;
 		*version = o_tuple_get_version(tuple);
@@ -539,6 +539,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 		bytea	   *rowid;
 		Pointer		p;
 		bool		result;
+		ORowIdBridgeData *bridgeData;
 
 		ORelOidsSetFromRel(oids, heapRel);
 
@@ -551,15 +552,15 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 		if (!GET_PRIMARY(descr)->primaryIsCtid)
 		{
 			p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-
-			tupleid = PointerGetDatum(p);
+			bridgeData = (ORowIdBridgeData *) p;
 		}
 		else
 		{
 			p += MAXALIGN(sizeof(ORowIdAddendumCtid));
 			p += MAXALIGN(sizeof(ItemPointerData));
-			tupleid = PointerGetDatum(p);
+			bridgeData = (ORowIdBridgeData *) p;
 		}
+		tupleid = PointerGetDatum(&bridgeData->bridgeCtid);
 
 		if (!indexUnchanged)
 			result = btinsert(rel, values, isnull, tupleid, heapRel,
@@ -690,20 +691,26 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	{
 		bool		satisfiesConstraint;
 
-		/* Call index_insert here, to mimic non MVCC aware part of ExecUpdateIndexTuples */
+		/*
+		 * Call index_insert here, to mimic non MVCC aware part of
+		 * ExecUpdateIndexTuples
+		 */
 		satisfiesConstraint = index_insert(rel, /* index relation */
 										   values,	/* array of index Datums */
 										   isnull,	/* null flags */
-										   tupleid,	/* tid of heap tuple */
-										   heapRel,	/* heap relation */
-										   checkUnique,	/* type of uniqueness check to do */
-										   indexUnchanged,	/* UPDATE without logical change? */
-										   indexInfo);	/* index AM may need this */
+										   tupleid, /* tid of heap tuple */
+										   heapRel, /* heap relation */
+										   checkUnique, /* type of uniqueness
+														 * check to do */
+										   indexUnchanged,	/* UPDATE without
+															 * logical change? */
+										   indexInfo);	/* index AM may need
+														 * this */
 
 		return satisfiesConstraint;
 	}
 
- 	if (rel->rd_index->indisprimary)
+	if (rel->rd_index->indisprimary)
 		return true;
 
 	ORelOidsSetFromRel(oids, rel);
@@ -1612,17 +1619,21 @@ o_new_rowid(OIndexDescr *primary, TupleTableSlot *slot,
 			MAXALIGN(sizeof(ORowIdAddendumCtid)) +
 			MAXALIGN(sizeof(ItemPointerData));
 		if (primary->bridging)
-			result_size += MAXALIGN(sizeof(ItemPointerData));
+			result_size += MAXALIGN(sizeof(ORowIdBridgeData));
 		rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
 		SET_VARSIZE(rowid, result_size);
 		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 		memcpy(ptr, &addCtid, sizeof(ORowIdAddendumCtid));
 		ptr += MAXALIGN(sizeof(ORowIdAddendumCtid));
 		memcpy(ptr, &slot->tts_tid, sizeof(ItemPointerData));
+		ptr += MAXALIGN(sizeof(ItemPointerData));
+
 		if (primary->bridging)
 		{
-			ptr += MAXALIGN(sizeof(ItemPointerData));
-			memcpy(ptr, &oslot->bridge_ctid, sizeof(ItemPointerData));
+			ORowIdBridgeData *bridgedData = (ORowIdBridgeData *) ptr;
+
+			bridgedData->bridgeCtid = oslot->bridge_ctid;
+			bridgedData->bridgeChanged = oslot->bridgeChanged;
 		}
 	}
 	else
@@ -1651,11 +1662,16 @@ o_new_rowid(OIndexDescr *primary, TupleTableSlot *slot,
 		SET_VARSIZE(rowid, result_size);
 		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 		if (primary->bridging)
-			memcpy(ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid)), &oslot->bridge_ctid, sizeof(ItemPointerData));
+		{
+			ORowIdBridgeData *bridgedData = (ORowIdBridgeData *) (ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid)));
+
+			bridgedData->bridgeCtid = oslot->bridge_ctid;
+			bridgedData->bridgeChanged = oslot->bridgeChanged;
+		}
 
 		temp_tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
 		if (primary->bridging)
-			temp_tuple.data += MAXALIGN(sizeof(ItemPointerData));
+			temp_tuple.data += MAXALIGN(sizeof(ORowIdBridgeData));
 		o_tuple_fill(pk_tupdesc, pk_spec,
 					 &temp_tuple, tuple_size, NULL, NULL, oslot->version, rowid_values, rowid_isnull, NULL);
 
@@ -1983,6 +1999,7 @@ bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 	bytea	   *rowid;
 	Pointer		p;
 	IndexAmRoutine *amroutine = NULL;
+	ORowIdBridgeData *bridgeData;
 
 	ORelOidsSetFromRel(oids, heapRel);
 
@@ -1995,15 +2012,19 @@ bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 	if (!GET_PRIMARY(descr)->primaryIsCtid)
 	{
 		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-
-		tupleid = PointerGetDatum(p);
+		bridgeData = (ORowIdBridgeData *) p;
 	}
 	else
 	{
 		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
 		p += MAXALIGN(sizeof(ItemPointerData));
-		tupleid = PointerGetDatum(p);
+		bridgeData = (ORowIdBridgeData *) p;
 	}
+
+	if (!bridgeData->bridgeChanged)
+		return true;
+
+	tupleid = PointerGetDatum(&bridgeData->bridgeCtid);
 
 	amroutine = find_bridged_am(rel);
 
