@@ -3061,7 +3061,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			uint8		treeType;
 			OIndexType	ix_type;
 
-			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids, NULL, NULL, NULL, NULL);
+			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids, NULL, NULL, NULL, NULL, wal_version);
 
 			ix_type = treeType;
 

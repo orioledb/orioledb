@@ -787,10 +787,17 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			OSnapshot	snapshot;
 
-			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids, &xmin, &snapshot.csn, &snapshot.cid, &cur_version);
+			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids, &xmin, &snapshot.csn, &snapshot.cid, &cur_version, wal_version);
 
 			snapshot.xmin = xmin;
 			snapshot.xlogptr = changeXLogPtr;
+
+			if (wal_version < 17)
+			{
+				/* Override undefined values from WAL */
+				snapshot = o_non_deleted_snapshot;
+				cur_version = O_TABLE_INVALID_VERSION;
+			}
 
 			ix_type = treeType;
 			relreplident = REPLICA_IDENTITY_DEFAULT;

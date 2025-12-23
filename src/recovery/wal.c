@@ -148,7 +148,7 @@ wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid *xmin, CommitSe
 
 /* Parser for WAL_REC_RELATION */
 Pointer
-wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin, CommitSeqNo *csn, CommandId *cid, uint32 *version)
+wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin, CommitSeqNo *csn, CommandId *cid, uint32 *version, uint16 wal_version)
 {
 	Assert(ptr);
 	Assert(oids);
@@ -158,11 +158,14 @@ wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin,
 	PARSE(ptr, &oids->reloid);
 	PARSE(ptr, &oids->relnode);
 
-	PARSE(ptr, xmin);
-	PARSE(ptr, csn);
-	PARSE(ptr, cid);
+	if (wal_version >= 17)
+	{
+		PARSE(ptr, xmin);
+		PARSE(ptr, csn);
+		PARSE(ptr, cid);
 
-	PARSE(ptr, version);
+		PARSE(ptr, version);
+	}
 
 	return ptr;
 }
@@ -733,6 +736,7 @@ add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version)
 	memcpy(rec->reloid, &oids.reloid, sizeof(Oid));
 	memcpy(rec->relnode, &oids.relnode, sizeof(Oid));
 
+	/* Since ORIOLEDB_WAL_VERSION = 17 */
 	runXmin = pg_atomic_read_u64(&xid_meta->runXmin);
 	memcpy(rec->xmin, &runXmin, sizeof(runXmin));
 
