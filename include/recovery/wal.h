@@ -103,6 +103,7 @@ typedef struct
 	uint8		datoid[sizeof(Oid)];
 	uint8		reloid[sizeof(Oid)];
 	uint8		relnode[sizeof(Oid)];
+	/* Since ORIOLEDB_WAL_VERSION = 17 */
 	uint8		xmin[sizeof(OXid)]; /* @TODO @INFO */
 	uint8		csn[sizeof(CommitSeqNo)];	/* @TODO @INFO */
 	uint8		cid[sizeof(CommandId)]; /* @TODO @INFO */
@@ -222,7 +223,7 @@ extern Pointer wal_parse_rec_finish(Pointer ptr, OXid *xmin, CommitSeqNo *csn);
 extern Pointer wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid *xmin, CommitSeqNo *csn);
 
 /* Parser for WAL_REC_RELATION */
-extern Pointer wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin, CommitSeqNo *csn, CommandId *cid, uint32 *version);
+extern Pointer wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin, CommitSeqNo *csn, CommandId *cid, uint32 *version, uint16 wal_version);
 
 /* Parser for WAL_REC_RELREPLIDENT */
 extern Pointer wal_parse_rec_relreplident(Pointer ptr, char *relreplident, Oid *relreplident_ix_oid);
