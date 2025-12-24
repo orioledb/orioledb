@@ -443,13 +443,13 @@ typedef enum OPagePoolType
 } OPagePoolType;
 #define OPagePoolTypesCount 3
 
-typedef struct OPagePool OPagePool;
+typedef struct PagePool PagePool;
 struct BTreeDescr;
 
 extern void o_verify_dir_exists_or_create(char *dirname, bool *created, bool *found);
 extern uint64 orioledb_device_alloc(struct BTreeDescr *descr, uint32 size);
-extern OPagePool *get_ppool(OPagePoolType type);
-extern OPagePool *get_ppool_by_blkno(OInMemoryBlkno blkno);
+extern PagePool *get_ppool(OPagePoolType type);
+extern PagePool *get_ppool_by_blkno(OInMemoryBlkno blkno);
 extern OInMemoryBlkno get_dirty_pages_count_sum(void);
 extern void jsonb_push_key(JsonbParseState **state, char *key);
 extern void jsonb_push_null_key(JsonbParseState **state, char *key);

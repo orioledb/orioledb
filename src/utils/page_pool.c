@@ -164,15 +164,17 @@ ppool_get_metapage(OPagePool *pool)
  *
  * Free page should be previously reserved by o_pool_reserve_pages().
  */
-OInMemoryBlkno
-ppool_get_page(OPagePool *pool, int kind)
+PagePointer
+o_ppool_get_page(PagePool *pool, int kind)
 {
-	OInMemoryBlkno result;
+    OPagePool *o_pool = (OPagePool *) pool;
+	PagePointer result;
 
-	Assert(pool->numPagesReserved[kind] > 0);
-	pool->numPagesReserved[kind]--;
+	Assert(o_pool->numPagesReserved[kind] > 0);
+	o_pool->numPagesReserved[kind]--;
 
-	result = ucm_occupy_free_page(&pool->ucm);
+	result.ptr.blkno = ucm_occupy_free_page(&o_pool->ucm);
+	result.type = PPTR_TYPE_BLKNO;
 	Assert(pool->offset <= result && result < pool->offset + pool->size);
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(O_GET_IN_MEMORY_PAGE(result), ORIOLEDB_BLCKSZ);
