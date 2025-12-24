@@ -1373,7 +1373,7 @@ orioledb_amoptions(Datum reloptions, bool validate)
 		add_local_bool_reloption(&relopts, "deduplicate_items",
 								 "Enables \"deduplicate items\" feature for "
 								 "this btree index",
-								 true,
+								 false,
 								 offsetof(OBTOptions, bt_options) +
 								 offsetof(BTOptions, deduplicate_items));
 

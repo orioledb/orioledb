@@ -3054,6 +3054,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						int			ix_num = InvalidIndexNumber;
 						int			i;
 						bool		add_bridging = false;
+						bool		btree_bridging = false;
 
 						for (i = 0; i < o_table->nindices; i++)
 						{
@@ -3088,11 +3089,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 								if (options && !options->orioledb_index)
 								{
-									ereport(WARNING,
-											errcode(ERRCODE_WARNING),
-											errmsg("using bridged btree index for orioledb"),
-											errdetail("This feature is intended for testing purposes and is not recommended for normal usage."));
 									add_bridging = true;
+									btree_bridging = true;
 								}
 							}
 							else
@@ -3107,11 +3105,16 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 								if (options && !options->orioledb_index)
-									ereport(WARNING,
-											errcode(ERRCODE_WARNING),
-											errmsg("using bridged btree index for orioledb"),
-											errdetail("This feature is intended for testing purposes and is not recommended for normal usage."));
+									btree_bridging = true;
 							}
+						}
+
+						if (btree_bridging)
+						{
+							ereport(WARNING,
+									errcode(ERRCODE_WARNING),
+									errmsg("using bridged btree index for orioledb"),
+									errdetail("This feature is intended for testing purposes and is not recommended for normal usage."));
 						}
 
 						if (add_bridging)
