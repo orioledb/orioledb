@@ -25,12 +25,35 @@
 
 #include "utils/memdebug.h"
 
+/* PagePoolOps for a shared memory based page pool */
+static const PagePoolOps o_page_pool_ops = {
+	.alloc_page = o_ppool_get_page,
+	.alloc_metapage = o_ppool_get_metapage,
+	.free_page = o_ppool_free_page,
+
+	.reserve_pages = o_ppool_reserve_pages,
+	.release_reserved = o_ppool_release_reserved,
+
+	.free_pages_count = o_ppool_free_pages_count,
+	.dirty_pages_count = o_ppool_dirty_pages_count,
+	.run_clock = o_ppool_run_clock,
+	.size = o_ppool_size,
+
+	.ucm_inc_usage = o_ucm_inc_usage,
+	.ucm_change_usage = o_ucm_change_usage,
+	.ucm_get_epoch = o_ucm_get_epoch,
+	.ucm_epoch_needs_shift = o_ucm_epoch_needs_shift,
+	.ucm_epoch_shift = o_ucm_epoch_shift,
+	.ucm_update_state = o_ucm_update_state,
+	.ucm_after_update_state = o_ucm_after_update_state,
+};
+
 /*
  * Calculates shared memory space needed for a page pool. Be careful,
  * it prepares local memory structures to initialize.
  */
 Size
-ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug)
+o_ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug)
 {
 	Size		result = 0;
 
@@ -54,7 +77,7 @@ ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size
  * must be already called for the pool.
  */
 void
-ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found)
+o_ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found)
 {
 	pool->availablePagesCount = (pg_atomic_uint64 *) ptr;
 	ptr += CACHELINEALIGN(sizeof(pg_atomic_uint64));
@@ -74,6 +97,7 @@ ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found)
 	pool->location = pg_prng_uint64_range(&pool->prngSeed,
 										  pool->offset,
 										  pool->offset + pool->size - 1);
+	pool->base.ops = &o_page_pool_ops;
 }
 
 /*
@@ -90,24 +114,25 @@ ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found)
  * lock, and then allocate them using ucm_occupy_free_page().
  */
 void
-ppool_reserve_pages(OPagePool *pool, int kind, int count)
+o_ppool_reserve_pages(PagePool *pool, int kind, int count)
 {
 	uint64		val;
+	OPagePool  *o_pool = (OPagePool *) pool;
 
 	Assert(!have_locked_pages());
 
-	count -= pool->numPagesReserved[kind];
+	count -= o_pool->numPagesReserved[kind];
 	if (count <= 0)
 		return;
 
-	val = pg_atomic_sub_fetch_u64(pool->availablePagesCount, count);
+	val = pg_atomic_sub_fetch_u64(o_pool->availablePagesCount, count);
 	while (val & (UINT64CONST(1) << 63))
 	{
-		ppool_run_clock(pool, true, NULL);
-		val = pg_atomic_read_u64(pool->availablePagesCount);
+		(*pool->ops->run_clock) (pool, true, NULL);
+		val = pg_atomic_read_u64(o_pool->availablePagesCount);
 	}
 
-	pool->numPagesReserved[kind] += count;
+	o_pool->numPagesReserved[kind] += count;
 }
 
 /*
@@ -115,25 +140,26 @@ ppool_reserve_pages(OPagePool *pool, int kind, int count)
  * released in one call).
  */
 void
-ppool_release_reserved(OPagePool *pool, uint32 mask)
+o_ppool_release_reserved(PagePool *pool, uint32 mask)
 {
 	int			sum = 0,
 				kind;
+	OPagePool  *o_pool = (OPagePool *) pool;
 
 	for (kind = 0; kind < PPOOL_RESERVE_COUNT; kind++)
 	{
 		if (mask & (1 << kind))
 		{
-			sum += pool->numPagesReserved[kind];
-			pool->numPagesReserved[kind] = 0;
+			sum += o_pool->numPagesReserved[kind];
+			o_pool->numPagesReserved[kind] = 0;
 		}
 	}
 	if (sum != 0)
-		pg_atomic_add_fetch_u64(pool->availablePagesCount, sum);
+		pg_atomic_add_fetch_u64(o_pool->availablePagesCount, sum);
 }
 
 /*
- * Release all reserved pages in all the pools.
+ * Release all reserved pages in all the shared memory pools.
  */
 void
 ppool_release_all_pages(void)
@@ -142,9 +168,9 @@ ppool_release_all_pages(void)
 
 	for (i = 0; i < (int) OPagePoolTypesCount; i++)
 	{
-		OPagePool  *pool = get_ppool((OPagePoolType) i);
+		PagePool   *pool = get_ppool((OPagePoolType) i);
 
-		ppool_release_reserved(pool, PPOOL_RESERVE_MASK_ALL);
+		(*pool->ops->release_reserved) (pool, PPOOL_RESERVE_MASK_ALL);
 	}
 }
 
@@ -152,11 +178,12 @@ ppool_release_all_pages(void)
  * Reserves and allocate page for metadata. Metadata pages are typically
  * allocated without holding any page locks.
  */
+/*  THOUGHT: can be shared for both ppool impls */
 OInMemoryBlkno
-ppool_get_metapage(OPagePool *pool)
+o_ppool_get_metapage(PagePool *pool)
 {
-	ppool_reserve_pages(pool, PPOOL_RESERVE_META, 1);
-	return ppool_get_page(pool, PPOOL_RESERVE_META);
+	(*pool->ops->reserve_pages) (pool, PPOOL_RESERVE_META, 1);
+	return (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);
 }
 
 /*
@@ -165,15 +192,16 @@ ppool_get_metapage(OPagePool *pool)
  * Free page should be previously reserved by o_pool_reserve_pages().
  */
 OInMemoryBlkno
-ppool_get_page(OPagePool *pool, int kind)
+o_ppool_get_page(PagePool *pool, int kind)
 {
+	OPagePool  *o_pool = (OPagePool *) pool;
 	OInMemoryBlkno result;
 
-	Assert(pool->numPagesReserved[kind] > 0);
-	pool->numPagesReserved[kind]--;
+	Assert(o_pool->numPagesReserved[kind] > 0);
+	o_pool->numPagesReserved[kind]--;
 
-	result = ucm_occupy_free_page(&pool->ucm);
-	Assert(pool->offset <= result && result < pool->offset + pool->size);
+	result = ucm_occupy_free_page(&o_pool->ucm);
+	Assert(o_pool->offset <= result && result < o_pool->offset + o_pool->size);
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(O_GET_IN_MEMORY_PAGE(result), ORIOLEDB_BLCKSZ);
 
@@ -184,12 +212,13 @@ ppool_get_page(OPagePool *pool, int kind)
  * Return free page to the pool.
  */
 void
-ppool_free_page(OPagePool *pool, OInMemoryBlkno blkno, bool haveLock)
+o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	OrioleDBPageDesc *page_desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
+	OPagePool  *o_pool = (OPagePool *) pool;
 
-	Assert(pool->offset <= blkno && blkno < pool->offset + pool->size);
+	Assert(o_pool->offset <= blkno && blkno < o_pool->offset + o_pool->size);
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
 	Assert(!IS_DIRTY(blkno));
@@ -207,18 +236,19 @@ ppool_free_page(OPagePool *pool, OInMemoryBlkno blkno, bool haveLock)
 	page_desc->fileExtent.len = InvalidFileExtentLen;
 	unlock_page(blkno);
 
-	page_change_usage_count(&pool->ucm, blkno, UCM_FREE_PAGES_LEVEL);
+	page_change_usage_count(&o_pool->ucm, blkno, UCM_FREE_PAGES_LEVEL);
 
-	pg_atomic_add_fetch_u64(pool->availablePagesCount, 1);
+	pg_atomic_add_fetch_u64(o_pool->availablePagesCount, 1);
 }
 
 /*
  * Return count of free pages in the pool.
  */
 OInMemoryBlkno
-ppool_free_pages_count(OPagePool *pool)
+o_ppool_free_pages_count(PagePool *pool)
 {
-	uint64		count = pg_atomic_read_u64(pool->availablePagesCount);
+	OPagePool  *o_pool = (OPagePool *) pool;
+	uint64		count = pg_atomic_read_u64(o_pool->availablePagesCount);
 
 	if (count & (UINT64CONST(1) << 63))
 		return 0;
@@ -230,27 +260,30 @@ ppool_free_pages_count(OPagePool *pool)
  * Return count of dirty pages in the pool.
  */
 OInMemoryBlkno
-ppool_dirty_pages_count(OPagePool *pool)
+o_ppool_dirty_pages_count(PagePool *pool)
 {
-	return pg_atomic_read_u32(pool->dirtyPagesCount);
+	OPagePool  *o_pool = (OPagePool *) pool;
+
+	return pg_atomic_read_u32(o_pool->dirtyPagesCount);
 }
 
 /*
  * Run clock replacement algorithm until we evict at least one page.
  */
 void
-ppool_run_clock(OPagePool *pool, bool evict,
-				volatile sig_atomic_t *shutdown_requested)
+o_ppool_run_clock(PagePool *pool, bool evict,
+				  volatile sig_atomic_t *shutdown_requested)
 {
 	uint64		blkno;
 	Size		undoRegularSize = get_reserved_undo_size(UndoLogRegularPageLevel);
 	Size		undoSystemSize = get_reserved_undo_size(UndoLogSystem);
 	bool		haveRetainRegularLoc = undo_type_has_retained_location(UndoLogRegularPageLevel);
 	bool		haveRetainSystemLoc = undo_type_has_retained_location(UndoLogSystem);
+	OPagePool  *o_pool = (OPagePool *) pool;
 
-	blkno = pg_prng_uint64_range(&pool->prngSeed,
-								 pool->offset,
-								 pool->offset + pool->size - 1);
+	blkno = pg_prng_uint64_range(&o_pool->prngSeed,
+								 o_pool->offset,
+								 o_pool->offset + o_pool->size - 1);
 
 	/*
 	 * Shouldn't be called while holding a page lock: one should reserve the
@@ -262,7 +295,7 @@ ppool_run_clock(OPagePool *pool, bool evict,
 	reserve_undo_size(UndoLogRegularPageLevel, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 	reserve_undo_size(UndoLogSystem, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 
-	Assert(blkno >= pool->offset && blkno < pool->offset + pool->size);
+	Assert(blkno >= o_pool->offset && blkno < o_pool->offset + o_pool->size);
 	/* Our attempts to evict pages shouldn't themselves affect UCM */
 	set_skip_ucm();
 
@@ -271,9 +304,9 @@ ppool_run_clock(OPagePool *pool, bool evict,
 		if (shutdown_requested != NULL && *shutdown_requested)
 			break;
 
-		blkno = ucm_next_blkno(&pool->ucm, blkno, 1);
+		blkno = ucm_next_blkno(&o_pool->ucm, blkno, 1);
 
-		Assert(blkno >= pool->offset && blkno < pool->offset + pool->size);
+		Assert(blkno >= o_pool->offset && blkno < o_pool->offset + o_pool->size);
 		if (walk_page(blkno, evict) != OWalkPageSkipped)
 		{
 			Assert(!have_locked_pages());
@@ -281,8 +314,8 @@ ppool_run_clock(OPagePool *pool, bool evict,
 		}
 		Assert(!have_locked_pages());
 		blkno++;
-		if (blkno >= pool->offset + pool->size)
-			blkno = pool->offset;
+		if (blkno >= o_pool->offset + o_pool->size)
+			blkno = o_pool->offset;
 	}
 
 	unset_skip_ucm();
@@ -305,4 +338,71 @@ ppool_run_clock(OPagePool *pool, bool evict,
 		free_retained_undo_location(UndoLogRegularPageLevel);
 	if (!haveRetainSystemLoc)
 		free_retained_undo_location(UndoLogSystem);
+}
+
+/*
+ * Return the size of the page pool.
+ */
+OInMemoryBlkno
+o_ppool_size(PagePool *pool)
+{
+	OPagePool  *o_pool = (OPagePool *) pool;
+
+	return o_pool->size;
+}
+
+void
+o_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno)
+{
+	OPagePool  *o_pool = (OPagePool *) pool;
+
+	page_inc_usage_count(&o_pool->ucm, blkno);
+}
+
+void
+o_ucm_change_usage(PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount)
+{
+	OPagePool  *o_pool = (OPagePool *) pool;
+
+	page_change_usage_count(&o_pool->ucm, blkno, usageCount);
+}
+
+uint32
+o_ucm_get_epoch(PagePool *pool)
+{
+	OPagePool  *o_pool = (OPagePool *) pool;
+
+	return pg_atomic_read_u32(o_pool->ucm.epoch);
+}
+
+bool
+o_ucm_epoch_needs_shift(PagePool *pool)
+{
+	OPagePool  *o_pool = (OPagePool *) pool;
+
+	return ucm_epoch_needs_shift(&o_pool->ucm);
+}
+
+void
+o_ucm_epoch_shift(PagePool *pool)
+{
+	OPagePool  *o_pool = (OPagePool *) pool;
+
+	ucm_epoch_shift(&o_pool->ucm);
+}
+
+uint64
+o_ucm_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 state)
+{
+	OPagePool  *o_pool = (OPagePool *) pool;
+
+	return ucm_update_state(&o_pool->ucm, blkno, state);
+}
+
+void
+o_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState)
+{
+	OPagePool  *o_pool = (OPagePool *) pool;
+
+	ucm_after_update_state(&o_pool->ucm, blkno, oldState, newState);
 }

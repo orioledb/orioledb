@@ -730,9 +730,9 @@ sys_tree_init_if_needed(int i)
 
 		if (!header->initialized)
 		{
-			OPagePool  *pool = get_ppool(sysTreesMeta[i].poolType);
+			PagePool   *pool = get_ppool(sysTreesMeta[i].poolType);
 
-			ppool_reserve_pages(pool, PPOOL_RESERVE_META, 8);
+			(*pool->ops->reserve_pages) (pool, PPOOL_RESERVE_META, 8);
 			LWLockAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[0],
 						  LW_EXCLUSIVE);
 			if (header->initialized)
@@ -747,7 +747,7 @@ sys_tree_init_if_needed(int i)
 			pg_write_barrier();
 			header->initialized = true;
 			LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[0]);
-			ppool_release_reserved(pool, PPOOL_RESERVE_META);
+			(*pool->ops->release_reserved) (pool, PPOOL_RESERVE_META);
 		}
 		else
 		{
@@ -768,7 +768,7 @@ sys_tree_init_if_needed(int i)
 static void
 sys_tree_init(int i, bool init_shmem)
 {
-	OPagePool  *pool;
+	PagePool   *pool;
 	SysTreeShmemHeader *header;
 	SysTreeMeta *meta;
 	BTreeDescr *descr;
@@ -783,8 +783,8 @@ sys_tree_init(int i, bool init_shmem)
 
 	if (init_shmem)
 	{
-		header->rootInfo.rootPageBlkno = ppool_get_page(pool, PPOOL_RESERVE_META);
-		header->rootInfo.metaPageBlkno = ppool_get_page(pool, PPOOL_RESERVE_META);
+		header->rootInfo.rootPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);
+		header->rootInfo.metaPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);
 		header->rootInfo.rootPageChangeCount = O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(header->rootInfo.rootPageBlkno));
 	}
 	descr->rootInfo = header->rootInfo;
