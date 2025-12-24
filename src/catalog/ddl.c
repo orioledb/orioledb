@@ -2878,14 +2878,27 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 	{
 		OSnapshot	oSnapshot;
 		OXid		oxid;
+		OAutonomousTxState state;
 
 		Assert(OidIsValid(objectId));
 
-		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+		start_autonomous_transaction(&state);
+		PG_TRY();
+		{
+			fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
-		o_tables_table_meta_lock(NULL);
-		o_tables_drop_all(oxid, oSnapshot.csn, objectId);
-		o_tables_table_meta_unlock(NULL, InvalidOid);
+			o_tables_table_meta_lock(NULL);
+			o_tables_drop_all(oxid, oSnapshot.csn, objectId);
+			o_sys_caches_delete_by_datoid(objectId);
+			o_tables_table_meta_unlock(NULL, InvalidOid);
+		}
+		PG_CATCH();
+		{
+			abort_autonomous_transaction(&state);
+			PG_RE_THROW();
+		}
+		PG_END_TRY();
+		finish_autonomous_transaction(&state);
 	}
 	else if (access == OAT_DROP && classId == TypeRelationId &&
 			 ActiveSnapshotSet())
