@@ -89,11 +89,11 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
 			  PartialPageState *partial, bool loadHikeysChunk,
 			  CommitSeqNo *readCsn)
 {
-	UsageCountMap *ucm;
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	uint64		state1,
 				state2;
 	bool		hiKeysEndOK PG_USED_FOR_ASSERTS_ONLY = true;
+	PagePool   *ppool;
 
 	state1 = pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state));
 	if (O_PAGE_STATE_READ_IS_BLOCKED(state1))
@@ -136,8 +136,8 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
 
 	Assert(hiKeysEndOK);
 
-	ucm = &(get_ppool_by_blkno(blkno)->ucm);
-	page_inc_usage_count(ucm, blkno);
+	ppool = get_ppool_by_blkno(blkno);
+	(*ppool->ops->ucm_inc_usage) (ppool, blkno);
 
 	return ReadPageResultOK;
 }
@@ -355,8 +355,8 @@ init_new_btree_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint16 flags,
 	header->itemsCount = 0;
 	header->prevInsertOffset = MaxOffsetNumber;
 	header->maxKeyLen = 0;
-	page_change_usage_count(&desc->ppool->ucm, blkno,
-							(pg_atomic_read_u32(desc->ppool->ucm.epoch) + 2) % UCM_USAGE_LEVELS);
+	(*desc->ppool->ops->ucm_change_usage) (desc->ppool, blkno,
+										   ((*desc->ppool->ops->ucm_get_epoch) (desc->ppool) + 2) % UCM_USAGE_LEVELS);
 
 	memset(p + offsetof(BTreePageHeader, chunkDesc),
 		   0,
