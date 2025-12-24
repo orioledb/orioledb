@@ -1052,7 +1052,7 @@ o_sys_cache_delete_by_lsn(OSysCache *sys_cache, XLogRecPtr lsn)
 		OTuple		tup = btree_iterate_raw(it, NULL, BTreeKeyNone,
 											false, &end, &hint);
 		OSysCacheKey *sys_cache_key;
-		OTuple		key_tup;
+		bool		result PG_USED_FOR_ASSERTS_ONLY;
 
 		if (O_TUPLE_IS_NULL(tup))
 		{
@@ -1063,51 +1063,148 @@ o_sys_cache_delete_by_lsn(OSysCache *sys_cache, XLogRecPtr lsn)
 		}
 
 		if (sys_cache->is_toast)
+		{
+			sys_cache_key = (OSysCacheKey *)
+				(tup.data + offsetof(OSysCacheToastChunkKey, sys_cache_key));
+		}
+		else
+			sys_cache_key = (OSysCacheKey *) tup.data;
+
+		if (sys_cache_key->common.lsn >= lsn || !sys_cache_key->common.deleted)
+			continue;
+
+		if (!sys_cache->is_toast)
+		{
+			OTuple		key_tup;
+
+			key_tup.formatFlags = 0;
+			key_tup.data = (Pointer) sys_cache_key;
+
+			result = o_btree_autonomous_delete(td, key_tup,
+											   BTreeKeyNonLeafKey, &hint);
+		}
+		else
+		{
+			OSysCacheToastKeyBound toast_key = {0};
+			OAutonomousTxState state;
+
+			/*
+			 * For TOAST trees, skip non-first chunks. When we delete the first
+			 * chunk (chunknum=0), generic_toast_delete() deletes all subsequent
+			 * chunks.
+			 */
+			if (sys_cache->is_toast)
+			{
+				OSysCacheToastChunkKey *chunk_key = (OSysCacheToastChunkKey *) tup.data;
+
+				if (chunk_key->common.chunknum > 0)
+					continue;
+			}
+
+			toast_key.key = sys_cache_key;
+			toast_key.common.chunknum = 0;
+			toast_key.lsn_cmp = true;
+
+			start_autonomous_transaction(&state);
+			PG_TRY();
+			{
+				result = generic_toast_delete(&oSysCacheToastAPI,
+											  (Pointer) &toast_key,
+											  get_current_oxid(),
+											  COMMITSEQNO_NON_DELETED,
+											  td);
+			}
+			PG_CATCH();
+			{
+				abort_autonomous_transaction(&state);
+				PG_RE_THROW();
+			}
+			PG_END_TRY();
+			finish_autonomous_transaction(&state);
+			}
+
+		Assert(result);
+	} while (true);
+
+	btree_iterator_free(it);
+}
+
+static void
+o_sys_cache_delete_by_datoid(OSysCache *sys_cache, Oid datoid)
+{
+	BTreeIterator *it;
+	BTreeDescr *td = get_sys_tree(sys_cache->sys_tree_num);
+
+	if (!sys_cache->is_toast)
+	{
+		OSysCacheKey bound_key = {0};
+		OSysCacheBound bound;
+
+		/*
+		 * Set up bound to search only entries with matching datoid. nkeys = 0
+		 * means we only filter by datoid.
+		 */
+		bound_key.common.datoid = datoid;
+		bound_key.common.lsn = 0;
+		bound.key = &bound_key;
+		bound.nkeys = 0;
+
+		it = o_btree_iterator_create(td, (Pointer) &bound, BTreeKeyBound,
+									 &o_non_deleted_snapshot,
+									 ForwardScanDirection);
+	}
+	else
+	{
+		/*
+		 * For TOAST trees, we can't use BTreeKeyBound with datoid filtering
+		 * because the comparison function doesn't handle bound-to-bound
+		 * comparisons. So we iterate the entire tree and filter manually.
+		 */
+		it = o_btree_iterator_create(td, NULL, BTreeKeyNone,
+									 &o_non_deleted_snapshot,
+									 ForwardScanDirection);
+	}
+
+	do
+	{
+		BTreeLocationHint hint;
+		OTuple		tup = o_btree_iterator_fetch(it, NULL, NULL, BTreeKeyNone,
+												 false, &hint);
+		OSysCacheKey *sys_cache_key;
+
+		if (O_TUPLE_IS_NULL(tup))
+			break;
+
+		if (sys_cache->is_toast)
 			sys_cache_key = (OSysCacheKey *)
 				(tup.data + offsetof(OSysCacheToastChunkKey, sys_cache_key));
 		else
 			sys_cache_key = (OSysCacheKey *) tup.data;
-		key_tup.formatFlags = 0;
-		key_tup.data = (Pointer) sys_cache_key;
 
-		if (sys_cache_key->common.lsn < lsn && sys_cache_key->common.deleted)
+		/*
+		 * Since datoid is the first comparison key, all entries for a given
+		 * datoid are contiguous. We can skip entries before our target and
+		 * break early after passing it.
+		 */
+		if (sys_cache_key->common.datoid < datoid)
+			continue;
+		else if (sys_cache_key->common.datoid > datoid)
+			break;
+
+		/*
+		 * For TOAST trees, skip non-first chunks. When we delete the first
+		 * chunk (chunknum=0), generic_toast_update() called by
+		 * o_sys_cache_delete() updates all subsequent chunks.
+		 */
+		if (sys_cache->is_toast)
 		{
-			bool		result PG_USED_FOR_ASSERTS_ONLY;
+			OSysCacheToastChunkKey *chunk_key = (OSysCacheToastChunkKey *) tup.data;
 
-			if (!sys_cache->is_toast)
-			{
-				result = o_btree_autonomous_delete(td, key_tup,
-												   BTreeKeyNonLeafKey, &hint);
-			}
-			else
-			{
-				OSysCacheToastKeyBound toast_key = {0};
-				OAutonomousTxState state;
-
-				toast_key.key = sys_cache_key;
-				toast_key.common.chunknum = 0;
-				toast_key.lsn_cmp = true;
-
-				start_autonomous_transaction(&state);
-				PG_TRY();
-				{
-					result = generic_toast_delete(&oSysCacheToastAPI,
-												  (Pointer) &toast_key,
-												  get_current_oxid(),
-												  COMMITSEQNO_NON_DELETED,
-												  td);
-				}
-				PG_CATCH();
-				{
-					abort_autonomous_transaction(&state);
-					PG_RE_THROW();
-				}
-				PG_END_TRY();
-				finish_autonomous_transaction(&state);
-			}
-
-			Assert(result);
+			if (chunk_key->common.chunknum > 0)
+				continue;
 		}
+
+		o_sys_cache_delete(sys_cache, sys_cache_key);
 	} while (true);
 
 	btree_iterator_free(it);
@@ -1125,6 +1222,21 @@ o_sys_caches_delete_by_lsn(XLogRecPtr checkPointRedo)
 		OSysCache  *sys_cache = entry->sys_cache;
 
 		o_sys_cache_delete_by_lsn(sys_cache, checkPointRedo);
+	}
+}
+
+void
+o_sys_caches_delete_by_datoid(Oid datoid)
+{
+	HASH_SEQ_STATUS hash_seq;
+	OCacheIdMapEntry *entry;
+
+	hash_seq_init(&hash_seq, sys_caches);
+	while ((entry = (OCacheIdMapEntry *) hash_seq_search(&hash_seq)) != NULL)
+	{
+		OSysCache  *sys_cache = entry->sys_cache;
+
+		o_sys_cache_delete_by_datoid(sys_cache, datoid);
 	}
 }
 
@@ -1978,8 +2090,8 @@ o_sys_cache_tup_length(BTreeDescr *desc, OTuple tuple)
 /*
  * Comparison function for non-TOAST sys cache B-tree.
  *
- * If none of the arguments is BTreeKeyBound it comparses by both
- * oid and lsn. It make possible to insert values with same oid.
+ * If none of the arguments is BTreeKeyBound it compares by both
+ * oid and lsn. It makes possible to insert values with same oid.
  * Else it comparses only by oid, which is used by other operations than
  * insert, to find all rows with exact oid.
  * If key kind is not BTreeKeyBound it expects that OTuple passed.

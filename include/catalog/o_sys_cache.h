@@ -264,6 +264,7 @@ extern void custom_type_add_if_needed(Oid datoid, Oid typoid,
 									  XLogRecPtr insert_lsn);
 
 extern void o_sys_caches_delete_by_lsn(XLogRecPtr checkPointRedo);
+extern void o_sys_caches_delete_by_datoid(Oid datoid);
 
 extern void orioledb_setup_syscache_hooks(void);
 
