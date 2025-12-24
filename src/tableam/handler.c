@@ -1777,7 +1777,8 @@ orioledb_vacuum_rel(Relation onerel, VacuumParams *params,
 static TransactionId
 orioledb_index_delete_tuples(Relation rel, TM_IndexDeleteOp *delstate)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	delstate->ndeltids = 0;
+	return InvalidTransactionId;
 }
 
 void
