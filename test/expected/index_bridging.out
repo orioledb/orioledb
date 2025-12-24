@@ -945,9 +945,12 @@ EXPLAIN (COSTS OFF)
 (1 row)
 
 SELECT * FROM o_test_ix_ams ORDER BY j;
- i | j | p | pk1 | pk2 | k 
----+---+---+-----+-----+---
-(0 rows)
+  i  |  j   |     p      | pk1 | pk2 | k 
+-----+------+------------+-----+-----+---
+ 100 | 1000 | (4001,500) | 600 | 700 |  
+  10 | 1090 | (401,50)   |  60 |  70 |  
+   1 | 1099 | (41,5)     |   6 |   7 |  
+(3 rows)
 
 COMMIT;
 -- After reindex new rows should be visible
@@ -4312,9 +4315,96 @@ SELECT COUNT(*) FROM brin_test_multi WHERE a < 37;
    124
 (1 row)
 
+CREATE TEMP TABLE hash_i4_heap (
+    seqno   int4,
+    random  int4
+) USING orioledb;
+INSERT INTO hash_i4_heap VALUES (20000, 1492795354);
+CREATE INDEX hash_i4_index ON hash_i4_heap USING hash (random int4_ops);
+NOTICE:  index bridging is enabled for orioledb table 'hash_i4_heap'
+DETAIL:  index access method 'hash' is supported only via index bridging for OrioleDB table
+SELECT * FROM hash_index_content('hash_i4_index');
+ ctid  
+-------
+ (0,1)
+(1 row)
+
+UPDATE hash_i4_heap
+   SET seqno = 20000
+ WHERE random = 1492795354;
+SELECT * FROM hash_index_content('hash_i4_index');
+ ctid  
+-------
+ (0,1)
+(1 row)
+
+BEGIN;
+SET LOCAL enable_seqscan = OFF;
+SET LOCAL enable_bitmapscan = OFF;
+EXPLAIN (COSTS OFF) SELECT h.seqno AS i20000
+  FROM hash_i4_heap h
+ WHERE h.random = 1492795354;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Index Scan using hash_i4_index on hash_i4_heap h
+   Index Cond: (random = 1492795354)
+(2 rows)
+
+SELECT h.seqno AS i20000
+  FROM hash_i4_heap h
+ WHERE h.random = 1492795354;
+ i20000 
+--------
+  20000
+(1 row)
+
+COMMIT;
+SELECT * FROM hash_i4_heap ORDER BY seqno;
+ seqno |   random   
+-------+------------
+ 20000 | 1492795354
+(1 row)
+
+CREATE TEMP TABLE gin_test_table (
+    id   serial PRIMARY KEY,
+    tags int4[]
+) USING orioledb;
+INSERT INTO gin_test_table (id, tags) VALUES
+(411, '{802, 654}'::int[]),
+(412, '{814, 738}'::int[]);  -- This row will be updated
+CREATE INDEX idx_gin_tags ON gin_test_table USING gin (tags);
+NOTICE:  index bridging is enabled for orioledb table 'gin_test_table'
+DETAIL:  index access method 'gin' is supported only via index bridging for OrioleDB table
+UPDATE gin_test_table
+SET id = 20000
+WHERE tags @> '{814}';
+BEGIN;
+SET LOCAL enable_seqscan = OFF;
+-- SET LOCAL enable_bitmapscan = OFF;
+EXPLAIN (COSTS OFF) SELECT id, tags
+FROM gin_test_table
+WHERE tags @> '{814}';
+                    QUERY PLAN                    
+--------------------------------------------------
+ Custom Scan (o_scan) on gin_test_table
+   Bitmap heap scan
+   Recheck Cond: (tags @> '{814}'::integer[])
+   ->  Bitmap Index Scan on idx_gin_tags
+         Index Cond: (tags @> '{814}'::integer[])
+(5 rows)
+
+SELECT id, tags
+FROM gin_test_table
+WHERE tags @> '{814}';
+  id   |   tags    
+-------+-----------
+ 20000 | {814,738}
+(1 row)
+
+COMMIT;
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 15 other objects
+NOTICE:  drop cascades to 17 other objects
 DETAIL:  drop cascades to table o_test_ix_ams
 drop cascades to table o_test_bridging_with_regular_no_pkey
 drop cascades to table o_test_bridging_with_regular_pkey
@@ -4330,6 +4420,8 @@ drop cascades to table tbl_with_pkey_bridged_toast
 drop cascades to table bitmap_test
 drop cascades to table test_no_bmscan_on_text_pkey
 drop cascades to table brin_test_multi
+drop cascades to table hash_i4_heap
+drop cascades to table gin_test_table
 DROP SCHEMA index_bridging CASCADE;
 NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to function btree_index_content(name)

@@ -259,8 +259,10 @@ CREATE TABLE o_test_ib_ioc1
 (
 	id1 int8 NOT NULL,
 	id2 int8 NOT NULL PRIMARY KEY,
-	UNIQUE (id1) WITH (orioledb_index=false)
+	UNIQUE (id1) WITH (orioledb_index=false, deduplicate_items=false)
 ) USING orioledb;
+
+\d+ o_test_ib_ioc1
 
 INSERT INTO o_test_ib_ioc1 VALUES (7, 20);
 SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
@@ -305,6 +307,7 @@ SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
 INSERT INTO o_test_ib_ioc1 VALUES (2, 11);
 SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
 
+\q
 CREATE TABLE ib_ranges0 (
   t1 char(1),
   c1 int4,
