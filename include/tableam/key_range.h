@@ -22,6 +22,7 @@
 #define O_VALUE_BOUND_LOWER 0x08
 #define O_VALUE_BOUND_UPPER 0x10
 #define O_VALUE_BOUND_COERCIBLE 0x20
+#define O_VALUE_BOUND_NON_COERCIBLE 0x40
 #define O_VALUE_BOUND_DIRECTIONS (O_VALUE_BOUND_LOWER | O_VALUE_BOUND_UPPER)
 #define O_VALUE_BOUND_NO_VALUE (O_VALUE_BOUND_NULL | O_VALUE_BOUND_UNBOUNDED)
 #define O_VALUE_BOUND_MINUS_INFINITY (O_VALUE_BOUND_LOWER | O_VALUE_BOUND_UNBOUNDED)
@@ -67,9 +68,11 @@ typedef struct
 extern bool o_key_data_to_key_range(OBTreeKeyRange *res,
 									ScanKeyData *keyData,
 									int numberOfKeys,
+									int numberOfArrayKeys,
 									BTArrayKeyInfo *arrayKeys,
 									int numPrefixExactKeys,
 									int resultNKeys,
-									OIndexField *fields);
+									OIndexField *fields,
+									bool *use_lockstep);
 
 #endif

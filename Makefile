@@ -130,7 +130,8 @@ REGRESSCHECKS = btree_sys_check \
 				toast \
 				trigger \
 				types \
-				rewind
+				rewind \
+				lockstep
 ISOLATIONCHECKS = bitmap_hist_scan \
 				  btree_iterate \
 				  btree_print_backend_id \
