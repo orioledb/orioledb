@@ -599,7 +599,7 @@ btree_check_compression_recursive(BTreeDescr *desc, BTreeCompressStats *stats, O
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	size_t		compressed_size;
 
-	page_inc_usage_count(&desc->ppool->ucm, blkno);
+	(*desc->ppool->ops->ucm_inc_usage) (desc->ppool, blkno);
 
 	context->index++;
 	context->items[context->index].blkno = blkno;
