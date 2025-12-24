@@ -37,8 +37,51 @@
 #define PPOOL_RESERVE_MASK_ALL (PPOOL_RESERVE_META_MASK | PPOOL_RESERVE_INSERT_MASK \
 								| PPOOL_RESERVE_FIND_MASK | PPOOL_RESERVE_SHARED_INFO_INSERT_MASK)
 
-struct OPagePool
+typedef struct PagePool PagePool;
+
+typedef struct PagePoolConfig PagePoolConfig;
+
+/*
+ * Page pool operations - implemented by each pool type
+ */
+typedef struct PagePoolOps
 {
+	/* Page allocation/deallocation */
+	OInMemoryBlkno (*alloc_page) (PagePool *pool, int pageReserveKind);
+	OInMemoryBlkno (*alloc_metapage) (PagePool *pool);
+	void		(*free_page) (PagePool *pool, OInMemoryBlkno blkno, bool haveLock);
+
+	/* Page reservation system */
+	void		(*reserve_pages) (PagePool *pool, int pageReserveKind, int count);
+	void		(*release_reserved) (PagePool *pool, uint32 kind_mask);
+
+	OInMemoryBlkno (*free_pages_count) (PagePool *pool);
+	OInMemoryBlkno (*dirty_pages_count) (PagePool *pool);
+	void		(*run_clock) (PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
+	OInMemoryBlkno (*size) (PagePool *pool);
+
+	/* Usage tracking */
+	void		(*ucm_inc_usage) (PagePool *pool, OInMemoryBlkno blkno);
+	void		(*ucm_change_usage) (PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount);
+	uint32		(*ucm_get_epoch) (PagePool *pool);
+	bool		(*ucm_epoch_needs_shift) (PagePool *pool);
+	void		(*ucm_epoch_shift) (PagePool *pool);
+	uint64		(*ucm_update_state) (PagePool *pool, OInMemoryBlkno blkno, uint64 state);
+	void		(*ucm_after_update_state) (PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState);
+
+	Pointer		(*get_pagedesc_array) (PagePool *pool);
+} PagePoolOps;
+
+typedef struct PagePool
+{
+	const PagePoolOps *ops;
+} PagePool;
+
+extern void ppool_release_all_pages(void);
+
+typedef struct OPagePool
+{
+	PagePool	base;
 	/* count of available to reserve pages in the pool */
 	pg_atomic_uint64 *availablePagesCount;
 	/* count of dirty pages in the pool */
@@ -56,20 +99,32 @@ struct OPagePool
 	Size		ucmShmemSize;
 	/* seed for random values */
 	pg_prng_state prngSeed;
-};
+} OPagePool;
 
-extern Size ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug);
-extern void ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found);
-extern OInMemoryBlkno ppool_free_pages_count(OPagePool *pool);
-extern OInMemoryBlkno ppool_dirty_pages_count(OPagePool *pool);
-extern void ppool_run_clock(OPagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
+/* Shared memory based page pool operations */
 
-extern void ppool_reserve_pages(OPagePool *pool, int kind, int count);
-extern void ppool_release_reserved(OPagePool *pool, uint32 mask);
-extern void ppool_release_all_pages(void);
-extern OInMemoryBlkno ppool_get_metapage(OPagePool *pool);
-extern OInMemoryBlkno ppool_get_page(OPagePool *pool, int kind);
-extern void ppool_free_page(OPagePool *pool, OInMemoryBlkno blkno, bool haveLock);
+extern Size o_ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug);
+extern void o_ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found);
+
+extern OInMemoryBlkno o_ppool_get_page(PagePool *pool, int kind);
+extern OInMemoryBlkno o_ppool_get_metapage(PagePool *pool);
+extern void o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock);
+
+extern void o_ppool_reserve_pages(PagePool *pool, int kind, int count);
+extern void o_ppool_release_reserved(PagePool *pool, uint32 mask);
+
+extern OInMemoryBlkno o_ppool_free_pages_count(PagePool *pool);
+extern OInMemoryBlkno o_ppool_dirty_pages_count(PagePool *pool);
+extern void o_ppool_run_clock(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
+extern OInMemoryBlkno o_ppool_size(PagePool *pool);
+
+extern void o_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno);
+extern void o_ucm_change_usage(PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount);
+extern uint32 o_ucm_get_epoch(PagePool *pool);
+extern bool o_ucm_epoch_needs_shift(PagePool *pool);
+extern void o_ucm_epoch_shift(PagePool *pool);
+extern uint64 o_ucm_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 state);
+extern void o_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState);
 
 #define PAGE_DESC_FLAG_DIRTY			1	/* Modified since the the last
 											 * time being written out */
@@ -81,9 +136,11 @@ extern void ppool_free_page(OPagePool *pool, OInMemoryBlkno blkno, bool haveLock
 #define IS_DIRTY_CONCURRENT(blkno) (O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_CONCURRENT_DIRTY)
 #define CLEAN_DIRTY_CONCURRENT(blkno) (O_GET_IN_MEMORY_PAGEDESC(blkno)->flags &= ~PAGE_DESC_FLAG_CONCURRENT_DIRTY)
 
+/*  Local page can never be dirty as it's never synced with disk */
 #define MARK_DIRTY_EXTENDED(desc, blkno, skipMeta) \
 	do \
 	{ \
+	    if (O_PAGE_IS_LOCAL(blkno)) break; \
 		if (!(skipMeta)) \
 		{ \
 			BTREE_GET_META(desc)->dirtyFlag1 = true; \
@@ -91,7 +148,7 @@ extern void ppool_free_page(OPagePool *pool, OInMemoryBlkno blkno, bool haveLock
 		} \
 		if (!IS_DIRTY(blkno)) { \
 			O_GET_IN_MEMORY_PAGEDESC(blkno)->flags |= PAGE_DESC_FLAG_BOTH_DIRTY; \
-			pg_atomic_fetch_add_u32((desc)->ppool->dirtyPagesCount, 1); \
+			pg_atomic_fetch_add_u32(((OPagePool*)(desc)->ppool)->dirtyPagesCount, 1); \
 		} \
 		else if (!IS_DIRTY_CONCURRENT(blkno)) \
 		{ \
@@ -103,18 +160,20 @@ extern void ppool_free_page(OPagePool *pool, OInMemoryBlkno blkno, bool haveLock
 #define MARK_DIRTY(desc, blkno) \
 	MARK_DIRTY_EXTENDED(desc, blkno, false)
 
+/*  Local page can never be dirty as it's never synced with disk */
 #define CLEAN_DIRTY(pool, blkno) \
 	if (IS_DIRTY(blkno)) { \
 		O_GET_IN_MEMORY_PAGEDESC(blkno)->flags &= ~PAGE_DESC_FLAG_BOTH_DIRTY; \
-		pg_atomic_fetch_sub_u32((pool)->dirtyPagesCount, 1); \
+		pg_atomic_fetch_sub_u32(((OPagePool*)(pool))->dirtyPagesCount, 1); \
 	}
 
 #define FREE_PAGE_IF_VALID(pool, blkno) \
 	if (OInMemoryBlknoIsValid((blkno))) \
 	{ \
-		CLEAN_DIRTY((pool), (blkno)); \
-		ppool_free_page((pool), (blkno), false); \
+        CLEAN_DIRTY((pool), (blkno)); \
+		(*(pool)->ops->free_page)((pool), (blkno), false); \
 		(blkno) = OInvalidInMemoryBlkno; \
 	} \
+
 
 #endif							/* __PAGE_POOL_H__ */
