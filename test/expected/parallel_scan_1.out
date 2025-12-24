@@ -425,15 +425,12 @@ SELECT orioledb_parallel_debug_start();
 
 EXPLAIN (COSTS OFF)
 	SELECT count(*) FROM o_test_parallel_bitmap_scan WHERE val_1 < 5;
-                        QUERY PLAN                         
------------------------------------------------------------
+                            QUERY PLAN                            
+------------------------------------------------------------------
  Aggregate
-   ->  Custom Scan (o_scan) on o_test_parallel_bitmap_scan
-         Bitmap heap scan
-         Recheck Cond: (val_1 < 5)
-         ->  Bitmap Index Scan on ind_1
-               Index Cond: (val_1 < 5)
-(6 rows)
+   ->  Index Only Scan using ind_1 on o_test_parallel_bitmap_scan
+         Index Cond: (val_1 < 5)
+(3 rows)
 
 SELECT count(*) FROM o_test_parallel_bitmap_scan WHERE val_1 < 5;
  count 

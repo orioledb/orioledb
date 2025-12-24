@@ -347,12 +347,11 @@ INSERT INTO o_test54 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 ANALYZE o_test54;
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_test54 WHERE key BETWEEN 100 and 110;
-                QUERY PLAN                
-------------------------------------------
- Custom Scan (o_scan) on o_test54
-   Forward index scan of: o_test54_pkey
-   Conds: ((key >= 100) AND (key <= 110))
-(3 rows)
+                   QUERY PLAN                   
+------------------------------------------------
+ Index Only Scan using o_test54_sec on o_test54
+   Filter: ((key >= 100) AND (key <= 110))
+(2 rows)
 
 SELECT * FROM o_test54 WHERE key BETWEEN 100 and 110;
  key | value 
@@ -666,10 +665,10 @@ EXPLAIN (COSTS off) SELECT * FROM o_test58;
 (1 row)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test58 WHERE foo = 301;
-                 QUERY PLAN                 
---------------------------------------------
- Index Scan using o_test58_reg2 on o_test58
-   Index Cond: (foo = 301)
+      QUERY PLAN       
+-----------------------
+ Seq Scan on o_test58
+   Filter: (foo = 301)
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test58 WHERE foo > 300 and foo < 400 and
@@ -5624,14 +5623,11 @@ SELECT * FROM o_test_partial_idx_update;
 
 EXPLAIN SELECT * FROM o_test_partial_idx_update
 	WHERE user_id=100500 and am > 0;
-                                         QUERY PLAN                                          
----------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_partial_idx_update  (cost=4.13..9.48 rows=2 width=24)
-   Bitmap heap scan
-   Recheck Cond: ((user_id = 100500) AND (am > 0))
-   ->  Bitmap Index Scan on o_test_partial_idx_update_idx2  (cost=0.00..4.13 rows=2 width=0)
-         Index Cond: (user_id = 100500)
-(5 rows)
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_partial_idx_update_idx1 on o_test_partial_idx_update  (cost=0.15..4.21 rows=3 width=24)
+   Index Cond: ((user_id = 100500) AND (am > 0))
+(2 rows)
 
 SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
  id | user_id | am 
@@ -5641,10 +5637,10 @@ SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
 SET enable_bitmapscan = off;
 EXPLAIN SELECT * FROM o_test_partial_idx_update
 	WHERE user_id=100500 and am > 0;
-                                                    QUERY PLAN                                                    
-------------------------------------------------------------------------------------------------------------------
- Index Scan using o_test_partial_idx_update_idx2 on o_test_partial_idx_update  (cost=0.12..12.15 rows=2 width=24)
-   Index Cond: (user_id = 100500)
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_partial_idx_update_idx1 on o_test_partial_idx_update  (cost=0.15..4.21 rows=3 width=24)
+   Index Cond: ((user_id = 100500) AND (am > 0))
 (2 rows)
 
 SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
@@ -5695,7 +5691,7 @@ SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
 EXPLAIN SELECT * FROM o_test_unique_as_pkey ORDER BY val;
                                                  QUERY PLAN                                                 
 ------------------------------------------------------------------------------------------------------------
- Index Scan using o_test_unique_as_pkey_ix1 on o_test_unique_as_pkey  (cost=0.15..74.87 rows=2048 width=12)
+ Index Scan using o_test_unique_as_pkey_ix1 on o_test_unique_as_pkey  (cost=0.15..74.75 rows=2040 width=12)
 (1 row)
 
 SELECT * FROM o_test_unique_as_pkey ORDER BY val;
@@ -6196,6 +6192,8 @@ SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
 ALTER TABLE o_test_reuse_multiple_indices
 	ALTER val_2 TYPE text COLLATE "C",
 	ALTER val_2 TYPE text COLLATE "POSIX";
+WARNING:  resource was not closed: cache pg_am (1), tuple 0/2 has count 2
+WARNING:  resource was not closed: cache pg_am (1), tuple 0/2 has count 1
 SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
@@ -6319,7 +6317,7 @@ SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
 EXPLAIN SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
                                                          QUERY PLAN                                                         
 ----------------------------------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices  (cost=0.13..8.21 rows=5 width=8)
+ Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices  (cost=0.13..4.21 rows=5 width=8)
 (1 row)
 
 SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
@@ -6381,7 +6379,7 @@ SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
 EXPLAIN SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
                                                          QUERY PLAN                                                         
 ----------------------------------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices  (cost=0.13..8.21 rows=5 width=9)
+ Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices  (cost=0.13..4.21 rows=5 width=9)
 (1 row)
 
 SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;

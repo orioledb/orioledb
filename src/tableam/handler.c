@@ -1291,6 +1291,11 @@ orioledb_relation_toast_am(Relation rel)
  * ------------------------------------------------------------------------
  */
 
+#define HEAP_OVERHEAD_BYTES_PER_TUPLE \
+	(MAXALIGN(SizeofHeapTupleHeader) + sizeof(ItemIdData))
+#define HEAP_USABLE_BYTES_PER_PAGE \
+	(BLCKSZ - SizeOfPageHeaderData)
+
 static void
 orioledb_estimate_rel_size(Relation rel, int32 *attr_widths,
 						   BlockNumber *pages, double *tuples,
@@ -1299,16 +1304,14 @@ orioledb_estimate_rel_size(Relation rel, int32 *attr_widths,
 	BlockNumber curpages;
 	BlockNumber relpages;
 	double		reltuples;
-	BlockNumber relallvisible;
 	double		density;
 
-	/* it has storage, ok to call the smgr */
+	/* it should have storage, so we can call the smgr */
 	curpages = RelationGetNumberOfBlocks(rel);
 
 	/* coerce values in pg_class to more desirable types */
 	relpages = (BlockNumber) rel->rd_rel->relpages;
 	reltuples = (double) rel->rd_rel->reltuples;
-	relallvisible = (BlockNumber) rel->rd_rel->relallvisible;
 
 	/*
 	 * HACK: if the relation has never yet been vacuumed, use a minimum size
@@ -1326,18 +1329,14 @@ orioledb_estimate_rel_size(Relation rel, int32 *attr_widths,
 	 * doesn't happen instantaneously, and it won't happen at all for cases
 	 * such as temporary tables.)
 	 *
-	 * We approximate "never vacuumed" by "has relpages = 0", which means this
-	 * will also fire on genuinely empty relations.  Not great, but
-	 * fortunately that's a seldom-seen case in the real world, and it
-	 * shouldn't degrade the quality of the plan too much anyway to err in
-	 * this direction.
+	 * We test "never vacuumed" by seeing whether reltuples < 0.
 	 *
 	 * If the table has inheritance children, we don't apply this heuristic.
 	 * Totally empty parent tables are quite common, so we should be willing
 	 * to believe that they are empty.
 	 */
 	if (curpages < 10 &&
-		relpages == 0 &&
+		reltuples < 0 &&
 		!rel->rd_rel->relhassubclass)
 		curpages = 10;
 
@@ -1359,39 +1358,50 @@ orioledb_estimate_rel_size(Relation rel, int32 *attr_widths,
 	else
 	{
 		/*
-		 * When we have no data because the relation was truncated, estimate
-		 * tuple width from attribute datatypes.  We assume here that the
-		 * pages are completely full, which is OK for tables (since they've
-		 * presumably not been VACUUMed yet) but is probably an overestimate
-		 * for indexes.  Fortunately get_relation_info() can clamp the
-		 * overestimate to the parent table's size.
+		 * When we have no data because the relation was never yet vacuumed,
+		 * estimate tuple width from attribute datatypes.  We assume here that
+		 * the pages are completely full, which is OK for tables but is
+		 * probably an overestimate for indexes.  Fortunately
+		 * get_relation_info() can clamp the overestimate to the parent
+		 * table's size.
 		 *
 		 * Note: this code intentionally disregards alignment considerations,
 		 * because (a) that would be gilding the lily considering how crude
-		 * the estimate is, and (b) it creates platform dependencies in the
-		 * default plans which are kind of a headache for regression testing.
+		 * the estimate is, (b) it creates platform dependencies in the
+		 * default plans which are kind of a headache for regression testing,
+		 * and (c) different table AMs might use different padding schemes.
 		 */
 		int32		tuple_width;
+		int			fillfactor;
+		
+		/*
+		 * Without reltuples/relpages, we also need to consider fillfactor.
+		 * The other branch considers it implicitly by calculating density
+		 * from actual relpages/reltuples statistics.
+		 */
+		fillfactor = RelationGetFillFactor(rel, HEAP_DEFAULT_FILLFACTOR);
 
 		tuple_width = get_rel_data_width(rel, attr_widths);
-		tuple_width += MAXALIGN(SizeOfOTupleHeader);
+		tuple_width += HEAP_OVERHEAD_BYTES_PER_TUPLE;
 		/* note: integer division is intentional here */
-		density = ((double) (ORIOLEDB_BLCKSZ / 2)) / tuple_width;
+		density = (HEAP_USABLE_BYTES_PER_PAGE * fillfactor / 100) / tuple_width;
+		/* There's at least one row on the page, even with low fillfactor. */
+		density = clamp_row_est(density);
 	}
 	*tuples = rint(density * (double) curpages);
 
 	/*
-	 * We use relallvisible as-is, rather than scaling it up like we do for
-	 * the pages and tuples counts, on the theory that any pages added since
-	 * the last VACUUM are most likely not marked all-visible.  But costsize.c
-	 * wants it converted to a fraction.
+	 * The allvisfrac value is used only when estimating index-only scan costs —
+	 * it represents the fraction of heap pages that are all-visible so the
+	 * planner can avoid fetching heap tuples. OrioleDB indexes are MVCC-aware
+	 * and do not require heap visibility checks, so treat the relation as
+	 * fully all-visible when it contains any pages (allvisfrac = 1.0). For an
+	 * empty relation, set allvisfrac = 0.0.
 	 */
-	if (relallvisible == 0 || curpages <= 0)
-		*allvisfrac = 0;
-	else if ((double) relallvisible >= curpages)
-		*allvisfrac = 1;
+	if (curpages > 0)
+		*allvisfrac = 1.0;
 	else
-		*allvisfrac = (double) relallvisible / curpages;
+		*allvisfrac = 0;
 }
 
 
