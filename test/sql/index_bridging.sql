@@ -306,21 +306,21 @@ EXPLAIN (COSTS OFF)
 SELECT p FROM o_test_ix_ams WHERE p <@ box(point(0,0), point(4000, 5000));
 COMMIT;
 
-CREATE TABLE o_briging_vacuum_test (id serial primary key, val float, p point) USING orioledb;
-INSERT INTO o_briging_vacuum_test (p) (SELECT point(0.01 * i, 0.02 * i) FROM generate_series(1,5) i);
-SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
-CREATE INDEX o_briging_vacuum_test_p_idx on o_briging_vacuum_test using gist(p);
-SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
-SELECT * FROM gist_index_content('o_briging_vacuum_test_p_idx');
-DELETE FROM o_briging_vacuum_test;
-SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
-SELECT * FROM gist_index_content('o_briging_vacuum_test_p_idx');
+CREATE TABLE o_bridging_vacuum_test (id serial primary key, val float, p point) USING orioledb;
+INSERT INTO o_bridging_vacuum_test (p) (SELECT point(0.01 * i, 0.02 * i) FROM generate_series(1,5) i);
+SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
+CREATE INDEX o_bridging_vacuum_test_p_idx on o_bridging_vacuum_test using gist(p);
+SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
+SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
+DELETE FROM o_bridging_vacuum_test;
+SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
+SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
 SELECT orioledb_rewind_sync();
-VACUUM o_briging_vacuum_test;
-SELECT * FROM o_briging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
-SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
-SELECT * FROM gist_index_content('o_briging_vacuum_test_p_idx');
-DROP TABLE o_briging_vacuum_test;
+VACUUM o_bridging_vacuum_test;
+SELECT * FROM o_bridging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
+SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
+SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
+DROP TABLE o_bridging_vacuum_test;
 
 
 CREATE TABLE o_test_bridging_with_regular_no_pkey (

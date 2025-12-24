@@ -1481,12 +1481,12 @@ SELECT p FROM o_test_ix_ams WHERE p <@ box(point(0,0), point(4000, 5000));
 (3 rows)
 
 COMMIT;
-CREATE TABLE o_briging_vacuum_test (id serial primary key, val float, p point) USING orioledb;
-INSERT INTO o_briging_vacuum_test (p) (SELECT point(0.01 * i, 0.02 * i) FROM generate_series(1,5) i);
-SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
+CREATE TABLE o_bridging_vacuum_test (id serial primary key, val float, p point) USING orioledb;
+INSERT INTO o_bridging_vacuum_test (p) (SELECT point(0.01 * i, 0.02 * i) FROM generate_series(1,5) i);
+SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
                        orioledb_tbl_structure                        
 ---------------------------------------------------------------------
- Index o_briging_vacuum_test_pkey contents                          +
+ Index o_bridging_vacuum_test_pkey contents                         +
  Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
@@ -1501,13 +1501,13 @@ SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
  
 (1 row)
 
-CREATE INDEX o_briging_vacuum_test_p_idx on o_briging_vacuum_test using gist(p);
-NOTICE:  index bridging is enabled for orioledb table 'o_briging_vacuum_test'
+CREATE INDEX o_bridging_vacuum_test_p_idx on o_bridging_vacuum_test using gist(p);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridging_vacuum_test'
 DETAIL:  index access method 'gist' is supported only via index bridging for OrioleDB table
-SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
+SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
                            orioledb_tbl_structure                           
 ----------------------------------------------------------------------------
- Index o_briging_vacuum_test_pkey contents                                 +
+ Index o_bridging_vacuum_test_pkey contents                                +
  Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 0                       +
  state = free, datoid equal, relnode equal, ix_type = primary, clean       +
      Leftmost, Rightmost                                                   +
@@ -1527,16 +1527,16 @@ SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
  
 (1 row)
 
-SELECT * FROM gist_index_content('o_briging_vacuum_test_p_idx');
+SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
 ERROR:  function gist_index_content(unknown) does not exist
-LINE 1: SELECT * FROM gist_index_content('o_briging_vacuum_test_p_id...
+LINE 1: SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_id...
                       ^
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-DELETE FROM o_briging_vacuum_test;
-SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
+DELETE FROM o_bridging_vacuum_test;
+SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
                              orioledb_tbl_structure                             
 --------------------------------------------------------------------------------
- Index o_briging_vacuum_test_pkey contents                                     +
+ Index o_bridging_vacuum_test_pkey contents                                    +
  Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 320                         +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty           +
      Leftmost, Rightmost                                                       +
@@ -1570,9 +1570,9 @@ SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
  
 (1 row)
 
-SELECT * FROM gist_index_content('o_briging_vacuum_test_p_idx');
+SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
 ERROR:  function gist_index_content(unknown) does not exist
-LINE 1: SELECT * FROM gist_index_content('o_briging_vacuum_test_p_id...
+LINE 1: SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_id...
                       ^
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 SELECT orioledb_rewind_sync();
@@ -1581,16 +1581,16 @@ SELECT orioledb_rewind_sync();
  
 (1 row)
 
-VACUUM o_briging_vacuum_test;
-SELECT * FROM o_briging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
+VACUUM o_bridging_vacuum_test;
+SELECT * FROM o_bridging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
  id | val | p 
 ----+-----+---
 (0 rows)
 
-SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
+SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
                              orioledb_tbl_structure                             
 --------------------------------------------------------------------------------
- Index o_briging_vacuum_test_pkey contents                                     +
+ Index o_bridging_vacuum_test_pkey contents                                    +
  Page 0: level = 0, maxKeyLen = 4, nVacatedBytes = 320                         +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty           +
      Leftmost, Rightmost                                                       +
@@ -1615,12 +1615,12 @@ SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
  
 (1 row)
 
-SELECT * FROM gist_index_content('o_briging_vacuum_test_p_idx');
+SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
 ERROR:  function gist_index_content(unknown) does not exist
-LINE 1: SELECT * FROM gist_index_content('o_briging_vacuum_test_p_id...
+LINE 1: SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_id...
                       ^
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-DROP TABLE o_briging_vacuum_test;
+DROP TABLE o_bridging_vacuum_test;
 CREATE TABLE o_test_bridging_with_regular_no_pkey (
 	i int NOT NULL,
 	j int

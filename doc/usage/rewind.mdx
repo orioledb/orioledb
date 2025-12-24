@@ -5,7 +5,7 @@ sidebar_label: Undo-based rewind
 
 # Undo-based rewind
 
-OrioleDB provides the ability to rewind database state to a some point in the past. This is achieved by using the undo log that records modifications for all ```orioledb``` tables. For heap tables this is used by delaying vaccuum, so that while the transaction is not past the rewind boundary, the past versions of tuples are retained in the heap table, being invisible to the user.
+OrioleDB provides the ability to rewind database state to a some point in the past. This is achieved by using the undo log that records modifications for all ```orioledb``` tables. For heap tables this is used by delaying vacuum, so that while the transaction is not past the rewind boundary, the past versions of tuples are retained in the heap table, being invisible to the user.
 
 Undo-based rewind is faster than PITR based on applying WAL or logical backup. But it doesn't prohibit the latter.
 

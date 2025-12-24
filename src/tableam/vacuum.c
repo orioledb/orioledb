@@ -732,7 +732,7 @@ lazy_vacuum_all_indexes(LVRelState *vacrel)
  * index entry removal in batches as large as possible.
  */
 static void
-lazy_vacuum_brige_index(LVRelState *vacrel)
+lazy_vacuum_bridge_index(LVRelState *vacrel)
 {
 	OBTreeFindPageContext context;
 	OTableDescr *descr = vacrel->descr;
@@ -1029,7 +1029,7 @@ lazy_vacuum(LVRelState *vacrel)
 	{
 		if (vacrel->nindexes > 0)
 			lazy_vacuum_all_indexes(vacrel);
-		lazy_vacuum_brige_index(vacrel);
+		lazy_vacuum_bridge_index(vacrel);
 	}
 
 	/*
