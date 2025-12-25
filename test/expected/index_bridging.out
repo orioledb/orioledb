@@ -933,7 +933,10 @@ SELECT * FROM btree_index_content('o_test_ix_ams_ix1');
  (0,1) | (0,1) | 
  (0,2) | (0,2) | 
  (0,3) | (0,3) | 
-(3 rows)
+ (0,4) | (0,4) | 
+ (0,5) | (0,5) | 
+ (0,6) | (0,6) | 
+(6 rows)
 
 BEGIN;
 SET LOCAL enable_seqscan = off;

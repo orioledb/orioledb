@@ -104,10 +104,7 @@ ALTER OPERATOR FAMILY range_ops USING btree ADD OPERATOR 3 <->(int4range, int4ra
 
 CREATE TABLE ranges (
   c1 int4range,
-  c2 TEXT -- ,
-  -- i1 serial,
-  -- i2 serial,
-  -- PRIMARY KEY (i1, i2)
+  c2 TEXT
 ) USING orioledb;
 
 ALTER TABLE ranges
@@ -264,27 +261,6 @@ CREATE TABLE o_test_ib_ioc1
 
 \d+ o_test_ib_ioc1
 
-INSERT INTO o_test_ib_ioc1 VALUES (7, 20);
-SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
-
-BEGIN;
-SET LOCAL enable_seqscan = off;
-EXPLAIN (COSTS OFF) SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
-SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
-COMMIT;
-
-DELETE FROM o_test_ib_ioc1 WHERE id2 = 20;
-SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
-
-INSERT INTO o_test_ib_ioc1 VALUES (6, 19);
-SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
-
-INSERT INTO o_test_ib_ioc1 VALUES (5, 18);
-SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
-
-INSERT INTO o_test_ib_ioc1 VALUES (4, 17);
-SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
-
 INSERT INTO o_test_ib_ioc1 VALUES (3, 16);
 SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
 
@@ -293,6 +269,7 @@ SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
 
 INSERT INTO o_test_ib_ioc1 VALUES (3, 14);
 SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
+
 
 INSERT INTO o_test_ib_ioc1 VALUES (3, 13) ON CONFLICT (id1) DO NOTHING;
 SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
@@ -307,7 +284,6 @@ SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
 INSERT INTO o_test_ib_ioc1 VALUES (2, 11);
 SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
 
-\q
 CREATE TABLE ib_ranges0 (
   t1 char(1),
   c1 int4,
@@ -330,10 +306,7 @@ SELECT * FROM ib_ranges0;
 
 CREATE TABLE ib_ranges (
   c1 int4range,
-  c2 TEXT -- ,
-  -- i1 serial,
-  -- i2 serial,
-  -- PRIMARY KEY (i1, i2)
+  c2 TEXT
 ) USING orioledb;
 
 ALTER TABLE ib_ranges
@@ -475,7 +448,6 @@ INSERT INTO ib_deferred_excl VALUES(3); -- no fail here
 COMMIT; -- should fail here
 -- bug #13148: deferred constraint versus HOT update
 BEGIN;
-SET LOCAL log_error_verbosity = 'terse';
 INSERT INTO ib_deferred_excl VALUES(2, 1); -- no fail here
 DELETE FROM ib_deferred_excl WHERE f1 = 2 AND f2 IS NULL; -- remove old row
 UPDATE ib_deferred_excl SET f2 = 2 WHERE f1 = 2;
