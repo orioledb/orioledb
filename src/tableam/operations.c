@@ -1095,8 +1095,160 @@ o_tbl_insert_with_arbiter(Relation rel,
 
 		if (descr->bridge)
 		{
-			OExecCheckIndexConstraints(resultRelInfo, slot, estate, &conflictTid,
-									   arbiterIndexes);
+			if (!OExecCheckIndexConstraints(resultRelInfo, slot, estate, &conflictTid,
+											arbiterIndexes))
+			{
+				if (lockedSlot)
+				{
+					TM_Result	test;
+					TM_FailureData tmfd;
+					Datum		xminDatum;
+					TransactionId xmin;
+					bool		isnull;
+
+					/* Determine lock mode to use */
+					lockmode = ExecUpdateLockMode(estate, resultRelInfo);
+
+					/*
+					 * Lock tuple for update.  Don't follow updates when tuple
+					 * cannot be locked without doing so.  A row locking
+					 * conflict here means our previous conclusion that the
+					 * tuple is conclusively committed is not true anymore.
+					 */
+					test = table_tuple_lock(rel, conflictTid,
+											estate->es_snapshot,
+											lockedSlot, estate->es_output_cid,
+											lockmode, LockWaitBlock, 0,
+											&tmfd);
+					switch (test)
+					{
+						case TM_Ok:
+							/* success! */
+							break;
+
+						case TM_Invisible:
+
+							/*
+							 * This can occur when a just inserted tuple is
+							 * updated again in the same command. E.g. because
+							 * multiple rows with the same conflicting key
+							 * values are inserted.
+							 *
+							 * This is somewhat similar to the ExecUpdate()
+							 * TM_SelfModified case.  We do not want to
+							 * proceed because it would lead to the same row
+							 * being updated a second time in some unspecified
+							 * order, and in contrast to plain UPDATEs there's
+							 * no historical behavior to break.
+							 *
+							 * It is the user's responsibility to prevent this
+							 * situation from occurring.  These problems are
+							 * why the SQL standard similarly specifies that
+							 * for SQL MERGE, an exception must be raised in
+							 * the event of an attempt to update the same row
+							 * twice.
+							 */
+							xminDatum = slot_getsysattr(lockedSlot,
+														MinTransactionIdAttributeNumber,
+														&isnull);
+							Assert(!isnull);
+							xmin = DatumGetTransactionId(xminDatum);
+
+							if (TransactionIdIsCurrentTransactionId(xmin))
+								ereport(ERROR,
+										(errcode(ERRCODE_CARDINALITY_VIOLATION),
+								/* translator: %s is a SQL command name */
+										 errmsg("%s command cannot affect row a second time",
+												"ON CONFLICT DO UPDATE"),
+										 errhint("Ensure that no rows proposed for insertion within the same command have duplicate constrained values.")));
+
+							/* This shouldn't happen */
+							elog(ERROR, "attempted to lock invisible tuple");
+							break;
+
+						case TM_SelfModified:
+
+							/*
+							 * This state should never be reached. As a dirty
+							 * snapshot is used to find conflicting tuples,
+							 * speculative insertion wouldn't have seen this
+							 * row to conflict with.
+							 */
+							elog(ERROR, "unexpected self-updated tuple");
+							break;
+
+						case TM_Updated:
+							if (IsolationUsesXactSnapshot())
+								ereport(ERROR,
+										(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+										 errmsg("could not serialize access due to concurrent update")));
+
+							/*
+							 * As long as we don't support an UPDATE of INSERT
+							 * ON CONFLICT for a partitioned table we
+							 * shouldn't reach to a case where tuple to be
+							 * lock is moved to another partition due to
+							 * concurrent update of the partition key.
+							 */
+							Assert(!ItemPointerIndicatesMovedPartitions(&tmfd.ctid));
+
+							/*
+							 * Tell caller to try again from the very start.
+							 *
+							 * It does not make sense to use the usual
+							 * EvalPlanQual() style loop here, as the new
+							 * version of the row might not conflict anymore,
+							 * or the conflicting tuple has actually been
+							 * deleted.
+							 */
+							ExecClearTuple(lockedSlot);
+							return NULL;
+
+						case TM_Deleted:
+							if (IsolationUsesXactSnapshot())
+								ereport(ERROR,
+										(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+										 errmsg("could not serialize access due to concurrent delete")));
+
+							/* see TM_Updated case */
+							Assert(!ItemPointerIndicatesMovedPartitions(&tmfd.ctid));
+							ExecClearTuple(lockedSlot);
+							return NULL;
+
+						default:
+							elog(ERROR, "unrecognized table_tuple_lock status: %u", test);
+					}
+
+					/* Success, the tuple is locked. */
+
+					/*
+					 * Verify that the tuple is visible to our MVCC snapshot
+					 * if the current isolation level mandates that.
+					 *
+					 * It's not sufficient to rely on the check within
+					 * ExecUpdate() as e.g. CONFLICT ... WHERE clause may
+					 * prevent us from reaching that.
+					 *
+					 * This means we only ever continue when a new command in
+					 * the current transaction could see the row, even though
+					 * in READ COMMITTED mode the tuple will not be visible
+					 * according to the current statement's snapshot.  This is
+					 * in line with the way UPDATE deals with newer tuple
+					 * versions.
+					 */
+					/* ExecCheckTupleVisible(estate, rel, lockedSlot); */
+					return NULL;
+				}
+				else
+				{
+					/*
+					 * ExecCheckTIDVisible(estate, rel, &conflictTid,
+					 * tempSlot);
+					 */
+					return NULL;
+				}
+			}
+
 			OExecInsertIndexTuples(resultRelInfo, slot,
 								   estate, &specConflict,
 								   arbiterIndexes);
