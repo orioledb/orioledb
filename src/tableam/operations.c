@@ -566,12 +566,10 @@ OExecCheckIndexConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
 	ExprContext *econtext;
 	Datum		values[INDEX_MAX_KEYS];
 	bool		isnull[INDEX_MAX_KEYS];
-	ItemPointerData invalidItemPtr;
 	Datum		invalidItemPtrDatum;
 	bool		checkedIndex = false;
 
-	ItemPointerSetInvalid(&invalidItemPtr);
-	invalidItemPtrDatum = ItemPointerGetDatum(&invalidItemPtr);
+	invalidItemPtrDatum = ItemPointerGetDatum(NULL);
 
 	/*
 	 * Get information from the result relation info structure.
