@@ -254,6 +254,18 @@ SELECT regexp_replace(regexp_replace(
 		': NNN',
 		'g');
 
+-- SYS_TREES_XID_UNDO_LOCATION
+SELECT orioledb_insert_sys_xid_undo_location(1000, 2000);
+SELECT orioledb_insert_sys_xid_undo_location(1001, 2001);
+SELECT orioledb_insert_sys_xid_undo_location(1002, 2002);
+SELECT orioledb_insert_sys_xid_undo_location(1003, 2003);
+SELECT orioledb_insert_sys_xid_undo_location(1005, 2005);
+SELECT orioledb_insert_sys_xid_undo_location(1006, 2006);
+
+SELECT orioledb_sys_tree_structure(24, 'ne');
+SELECT orioledb_read_sys_xid_undo_location(1004);
+SELECT orioledb_sys_tree_structure(24, 'ne');
+
 -- fail
 SELECT orioledb_sys_tree_structure(9999);
 SELECT orioledb_sys_tree_check(-1111);

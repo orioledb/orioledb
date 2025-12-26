@@ -120,6 +120,17 @@ wal_parse_rec_xid(Pointer ptr, OXid *oxid, TransactionId *logicalXid, Transactio
 	return ptr;
 }
 
+/* Parser for WAL_CONTAINER_XACT_INFO */
+Pointer wal_parse_container_xact_info(Pointer ptr, TimestampTz *xactTime, TransactionId *xid)
+{
+	Assert(ptr);
+
+	PARSE(ptr, xactTime);
+	PARSE(ptr, xid);
+
+	return (ptr);
+}
+
 /* Parser for WAL_REC_COMMIT and WAL_REC_ROLLBACK */
 Pointer
 wal_parse_rec_finish(Pointer ptr, OXid *xmin, CommitSeqNo *csn)

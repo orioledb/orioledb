@@ -250,6 +250,9 @@ extern Pointer wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *topX
 extern Pointer wal_parse_rec_modify(Pointer ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1, bool read_two_tuples);
 
 extern void add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version);
+/* Parser for WAL_CONTAINER_XACT_INFO */
+extern Pointer wal_parse_container_xact_info(Pointer ptr, TimestampTz *xactTime, TransactionId *xid);
+
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, OffsetNumber length, char relreplident, uint32 version);
 extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr);

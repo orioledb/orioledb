@@ -20,6 +20,8 @@
 
 #include "btree/scan.h"
 #include "btree/undo.h"
+#include "btree/find.h"
+#include "btree/page_chunks.h"
 #include "catalog/storage.h"
 #include "catalog/o_sys_cache.h"
 #include "checkpoint/checkpoint.h"
@@ -47,6 +49,9 @@
 #include "utils/memutils.h"
 #include "btree/iterator.h"
 #include "replication/slot.h"
+
+PG_FUNCTION_INFO_V1(orioledb_read_sys_xid_undo_location);
+PG_FUNCTION_INFO_V1(orioledb_insert_sys_xid_undo_location);
 
 #define GET_UNDO_REC(undoType, loc) (o_undo_buffers[(int) (undoType)] + \
 	(loc) % o_undo_circular_sizes[(int) (undoType)])
@@ -571,41 +576,114 @@ wait_for_even_write_in_progress_changecount(UndoMeta *meta)
 }
 
 /*
- * Get undoLocation from SYS_TREES_XID_UNDO_LOCATION system tree by a xid
- * provided or closest following.
+ * Get undoLocation from SYS_TREES_XID_UNDO_LOCATION mapping with
+ * xid greater or equal than xmin provided. Delete items with xid
+ * less than xmin from the mapping.
  */
-static UndoLocation *
-read_replication_retain_undo_location(TransactionId xid, bool delete)
+static UndoLocation
+read_replication_retain_undo_location(TransactionId xmin, int *ndeleted, bool nocheck)
 {
-	TransactionId	key = xid;
-	OTuple          keyTuple;
-	OTuple          result;
+	BTreeDescr *td = get_sys_tree(SYS_TREES_XID_UNDO_LOCATION);
+	OTuple		keyTuple;
+	OTuple		tuple;
+	OBTreeFindPageContext context;
+	bool		have_page = false;
+	UndoLocation result;
+
+	if (!nocheck)
+		Assert(wal_level >= WAL_LEVEL_LOGICAL);
 
 	keyTuple.formatFlags = 0;
-	keyTuple.data = (Pointer) &key;
+	keyTuple.data = (Pointer) &xmin;
+	*ndeleted = 0;
 
-	result = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION),
-			&keyTuple, BTreeKeyUniqueLowerBound,
-			&o_in_progress_snapshot, NULL,
-			CurrentMemoryContext, NULL);
+	init_page_find_context(&context, td, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY);
 
-	if (O_TUPLE_IS_NULL(result))
-		return NULL;
+	while (true)
+	{
+		OBtreePageFindItem *item;
+		Page		p;
 
-	/* TODO: delete older ones */
-	return &((ReplicationRetainUndoTuple *) result.data)->undoLocation;
+		if (!have_page)
+		{
+			OFindPageResult findResult;
+
+			findResult = find_page(&context, NULL, BTreeKeyNone, 0);
+			if (findResult != OFindPageResultSuccess)
+			{
+				/* Empty mapping */
+				result = InvalidUndoLocation;
+				break;
+			}
+			have_page = true;
+		}
+
+		item = &context.items[context.index];
+		p = O_GET_IN_MEMORY_PAGE(item->blkno);
+
+		if (!BTREE_PAGE_LOCATOR_IS_VALID(p, &item->locator))
+		{
+			if (O_PAGE_IS(p, RIGHTMOST))
+			{
+				/*
+				 * End of mapping but still haven't got a xid >= xmin
+				 * condition
+				 */
+				result = InvalidUndoLocation;
+				break;
+			}
+			else
+			{
+				/* Next page */
+				unlock_page(context.items[context.index].blkno);
+				have_page = false;
+				continue;
+			}
+		}
+
+		BTREE_PAGE_READ_TUPLE(tuple, p, &item->locator);
+		if (o_btree_cmp(td,
+						&tuple, BTreeKeyLeafTuple,
+						&keyTuple, BTreeKeyNonLeafKey) >= 0)
+		{
+			/* First occurence of xid >= xmin condition */
+			result = ((ReplicationRetainUndoTuple *) tuple.data)->undoLocation;
+			break;
+		}
+
+		/* Delete tuple with xid < xmin */
+		START_CRIT_SECTION();
+		page_block_reads(item->blkno);
+		page_locator_delete_item(p, &item->locator);
+		MARK_DIRTY(td, item->blkno);
+		END_CRIT_SECTION();
+		(*ndeleted)++;
+	}
+
+	if (have_page)
+		unlock_page(context.items[context.index].blkno);
+
+	return result;
 }
 
-UndoLocation * 
+UndoLocation
 get_current_replication_retain_undo_location(void)
 {
-	TransactionId   xmin;
-	TransactionId	catalog_xmin;
+	TransactionId xmin;
+	TransactionId catalog_xmin;
+	int			ndeleted;
+	UndoLocation result;
+
+	if (wal_level < WAL_LEVEL_LOGICAL)
+		return InvalidUndoLocation;
 
 	ReplicationSlotsComputeRequiredXmin(false);
 	ProcArrayGetReplicationSlotXmin(&xmin, &catalog_xmin);
 
-	return read_replication_retain_undo_location(xmin, true);
+	result = read_replication_retain_undo_location(xmin, &ndeleted, false);
+	elog(DEBUG4, "Current undoLocation from SYS_TREES_XID_UNDO_LOCATION is %lu for xmin %u. Deleted %d old items", result, xmin, ndeleted);
+
+	return result;
 }
 
 /*
@@ -613,35 +691,42 @@ get_current_replication_retain_undo_location(void)
  * update it only if this update decreases undoLocation. Skip otherwise.
  */
 static void
-insert_replication_retain_undo_location(TransactionId xid, UndoLocation undoLocation)
+insert_replication_retain_undo_location(TransactionId xid, UndoLocation undoLocation, bool nocheck)
 {
-	TransactionId   key = xid;
-	OTuple          keyTuple;
-	OTuple          tuple;
+	TransactionId key = xid;
+	OTuple		keyTuple;
+	OTuple		tuple;
 	OTuple		existing_tuple;
-	bool            success PG_USED_FOR_ASSERTS_ONLY;
-	ReplicationRetainUndoTuple	data;
+	bool		success PG_USED_FOR_ASSERTS_ONLY;
+	ReplicationRetainUndoTuple data;
+
+	if (!nocheck)
+		Assert(wal_level >= WAL_LEVEL_LOGICAL);
 
 	keyTuple.formatFlags = 0;
 	keyTuple.data = (Pointer) &key;
+	o_btree_load_shmem(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION));
 	existing_tuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION),
-			&keyTuple, BTreeKeyNonLeafKey,
-			&o_in_progress_snapshot, NULL,
-			CurrentMemoryContext, NULL);
+											   &keyTuple, BTreeKeyNonLeafKey,
+											   &o_in_progress_snapshot, NULL,
+											   CurrentMemoryContext, NULL);
 
 	if (!O_TUPLE_IS_NULL(existing_tuple))
 	{
-		if(((ReplicationRetainUndoTuple *) existing_tuple.data)->undoLocation > undoLocation)
+		if (((ReplicationRetainUndoTuple *) existing_tuple.data)->undoLocation > undoLocation)
 		{
 			/* Update item if this moves undoLocation backwards */
 			success = o_btree_autonomous_delete(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION),
-					keyTuple, BTreeKeyNonLeafKey, NULL);
+												keyTuple, BTreeKeyNonLeafKey, NULL);
 			Assert(success);
 			/* fall through */
 		}
 		else
 		{
-			/* Don't update item if this leaves undoLocation unchanged or moves forward */
+			/*
+			 * Don't update item if this leaves undoLocation unchanged or
+			 * moves forward
+			 */
 			return;
 		}
 	}
@@ -652,10 +737,47 @@ insert_replication_retain_undo_location(TransactionId xid, UndoLocation undoLoca
 	tuple.data = (Pointer) &data;
 
 	success = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION),
-			tuple);
+										tuple);
 
 	Assert(success);
 }
+
+/* Test functions */
+Datum
+orioledb_read_sys_xid_undo_location(PG_FUNCTION_ARGS)
+{
+	TransactionId xid;
+	UndoLocation undoLocation;
+	int			ndeleted;
+
+	if (PG_ARGISNULL(0))
+		return (Datum) NULL;
+
+	xid = PG_GETARG_INT32(0);
+
+	undoLocation = read_replication_retain_undo_location(xid, &ndeleted, true);
+	elog(INFO, "orioledb_read_sys_xid_undo_location: deleted %d items", ndeleted);
+
+	PG_RETURN_INT64(undoLocation);
+}
+
+Datum
+orioledb_insert_sys_xid_undo_location(PG_FUNCTION_ARGS)
+{
+	TransactionId xid;
+	UndoLocation undoLocation;
+
+	if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
+		return (Datum) NULL;
+
+	xid = PG_GETARG_INT32(0);
+	undoLocation = PG_GETARG_INT64(1);
+
+	insert_replication_retain_undo_location(xid, undoLocation, true);
+
+	PG_RETURN_VOID();
+}
+
 
 static void
 set_my_reserved_location(UndoLogType undoType)
@@ -684,11 +806,31 @@ set_my_reserved_location(UndoLogType undoType)
 		if (overwriteTransactionRetainUndoLoc)
 		{
 			pg_atomic_write_u64(&shared->transactionUndoRetainLocation, lastUsedLocation);
-			if(undoType == UndoLogSystem)
+			if (undoType == UndoLogSystem && wal_level >= WAL_LEVEL_LOGICAL)
 			{
-				TransactionId xid = GetCurrentTransactionId();
+				/*
+				 * Add element to mapping (xid ->
+				 * transactionUndoRetainLocation) for system tree modification
+				 * in logical decoding.
+				 */
+				TransactionId xid;
 
-				insert_replication_retain_undo_location(xid, lastUsedLocation);
+				if (!is_recovery_in_progress())
+					xid = GetCurrentTransactionIdIfAny();
+				else
+					xid = logicalDecodeRecoverySystemTransactionId;
+
+				if (TransactionIdIsValid(xid) && UndoLocationIsValid(lastUsedLocation) && lastUsedLocation != 0)
+				{
+					/*
+					 * Fails at Assert(!waitForUndoLocation ||
+					 * !have_locked_pages())
+					 */
+					/*
+					 * insert_replication_retain_undo_location(xid,
+					 * lastUsedLocation, false);
+					 */
+				}
 			}
 		}
 
