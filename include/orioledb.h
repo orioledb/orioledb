@@ -402,6 +402,7 @@ extern bool orioledb_strict_mode;
 	(AssertMacro(OInMemoryBlknoIsValid(blkno)), \
 	 (blkno) < 0)
 // TODO: Modify O_GET_IN_MEMORY_PAGE to handle local pages
+// TODO: It's not consistent that page access is handled here while allocation and internal structure is known only to page_pool
 #define O_GET_IN_MEMORY_PAGE(blkno) \
 	(AssertMacro(OInMemoryBlknoIsValid(blkno)), \
 	 (Page)(o_shared_buffers + (((uint64) (blkno)) * ((uint64) ORIOLEDB_BLCKSZ))))

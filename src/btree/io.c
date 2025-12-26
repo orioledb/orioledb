@@ -1451,18 +1451,18 @@ load_page(OBTreeFindPageContext *context)
 		clear_fixed_key(&target_hikey);
 	target_level = PAGE_GET_LEVEL(parent_page) - 1;
 
-	(*desc->ppool->ops->unlock_page)(parent_ptr);
+	unlock_page(parent_blkno);
 
 	/* Prepare new page metaPage-data */
 	(*desc->ppool->ops->reserve_pages)(desc->ppool, PPOOL_RESERVE_FIND, 1);
-	page_ptr = (*desc->ppool->ops->alloc_page)(desc->ppool, PPOOL_RESERVE_FIND);
-	(*desc->ppool->ops->lock_page)(page_ptr);
-	(*desc->ppool->ops->block_reads)(page_ptr);
+	blkno = (*desc->ppool->ops->alloc_page)(desc->ppool, PPOOL_RESERVE_FIND);
+	lock_page(blkno);
+	page_block_reads(blkno);
 
-	Assert(OInMemoryBlknoIsValid(page_ptr));
-	page = pptr_get_page(page_ptr);
+	Assert(OInMemoryBlknoIsValid(blkno));
+	page = O_GET_IN_MEMORY_PAGE(blkno);
 	parent_page_desc = O_GET_IN_MEMORY_PAGEDESC(parent_blkno);
-	page_desc = O_GET_IN_MEMORY_PAGEDESC(page_ptr);
+	page_desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
 
 	page_desc->flags = 0;
 
@@ -1481,8 +1481,8 @@ load_page(OBTreeFindPageContext *context)
 							   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(downlink), chkpNum))));
 	}
 
-	put_page_image(page_ptr, buf);
-	//(*desc->ppool->ops->inc_usage)(desc->ppool, page_ptr);
+	put_page_image(blkno, buf);
+	//TODO: (*desc->ppool->ops->inc_usage)(desc->ppool, page_ptr);
 	page_change_usage_count(&desc->ppool->ucm, blkno,
 							(pg_atomic_read_u32(desc->ppool->ucm.epoch) + 2) % UCM_USAGE_LEVELS);
 	page_desc->type = parent_page_desc->type;
@@ -1508,7 +1508,7 @@ load_page(OBTreeFindPageContext *context)
 		}
 	}
 
-	(*desc->ppool->ops->unlock_page)(page_ptr);
+	unlock_page(blkno);
 
 	EA_LOAD_INC(blkno);
 
@@ -2265,7 +2265,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 		unlock_page(parent_blkno);
 
 	if (evict)
-		ppool_free_page(desc->ppool, blkno, NULL);
+		(*desc->ppool->ops->free_page)(desc->ppool, blkno, NULL);
 
 	perform_writeback(&io_writeback);
 }

@@ -16,6 +16,7 @@
 
 #include "c.h"
 #include "common/pg_prng.h"
+#include "orioledb.h"
 #include "storage/bufpage.h"
 #include "utils/ucm.h"
 
@@ -50,7 +51,7 @@ typedef struct PagePoolOps
 {
 	/* Page allocation/deallocation */
 	OInMemoryBlkno (*alloc_page)(PagePool *pool, int pageReserveKind);
-	void (*free_page)(PagePool *pool, OInMemoryBlkno blkno);
+	void (*free_page)(PagePool *pool, OInMemoryBlkno blkno, bool haveLock);
 	
 	/* Page reservation system */
 	bool (*reserve_pages)(PagePool *pool, int pageReserveKind, uint32 count);
@@ -58,14 +59,18 @@ typedef struct PagePoolOps
 	uint32 (*get_reserved_count)(PagePool *pool, int pageReserveKind);
 	
 	/* Page state management */
-	void (*mark_dirty)(PagePool *pool, OInMemoryBlkno blkno);
+	void (*mark_dirty_extended)(PagePool *pool, OInMemoryBlkno blkno, bool skipMeta);
 	void (*mark_clean)(PagePool *pool, OInMemoryBlkno blkno);
+	void (*mark_clean_concurrent)(PagePool *pool, OInMemoryBlkno blkno);
 	bool (*is_dirty)(PagePool *pool, OInMemoryBlkno blkno);
+	bool (*is_dirty_concurrent)(PagePool *pool, OInMemoryBlkno blkno);
 	
 	/* Usage tracking */
 	void (*inc_usage)(PagePool *pool, OInMemoryBlkno blkno);
 	void (*dec_usage)(PagePool *pool, OInMemoryBlkno blkno);
 	uint32 (*get_usage)(PagePool *pool, OInMemoryBlkno blkno);
+	
+	Pointer (*get_pagedesc_array)(PagePool *pool);
     
         /* ... */
 } PagePoolOps;
@@ -109,13 +114,18 @@ extern OInMemoryBlkno o_ppool_get_metapage(PagePool *pool);
 extern OInMemoryBlkno o_ppool_get_page(PagePool *pool, int kind);
 extern void o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock);
 
+extern bool o_ppool_mark_dirty_extended(PagePool *pool, OInMemoryBlkno blkno, bool skipMeta);
+extern bool o_ppool_is_dirty(PagePool *pool, OInMemoryBlkno blkno);
+extern bool o_ppool_is_dirty_concurrent(PagePool *pool, OInMemoryBlkno blkno);
+extern bool o_ppool_mark_clean(PagePool *pool, OInMemoryBlkno blkno);
+extern bool o_ppool_mark_clean_concurrent(PagePool *pool, OInMemoryBlkno blkno);
+
 #define PAGE_DESC_FLAG_DIRTY			1	/* Modified since the the last
 											 * time being written out */
 #define PAGE_DESC_FLAG_CONCURRENT_DIRTY	2	/* Second "dirty" flag used to
 											 * detect changes concurrent to
 											 * write operatorions */
 #define PAGE_DESC_FLAG_BOTH_DIRTY		(PAGE_DESC_FLAG_DIRTY | PAGE_DESC_FLAG_CONCURRENT_DIRTY)
-#define IS_DIRTY(blkno) (O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_DIRTY)
 #define IS_DIRTY_CONCURRENT(blkno) (O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_CONCURRENT_DIRTY)
 #define CLEAN_DIRTY_CONCURRENT(blkno) (O_GET_IN_MEMORY_PAGEDESC(blkno)->flags &= ~PAGE_DESC_FLAG_CONCURRENT_DIRTY)
 
@@ -147,16 +157,20 @@ extern void o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLoc
 		pg_atomic_fetch_sub_u32((pool)->dirtyPagesCount, 1); \
 	}
 
+// Before this point all macros should become functions	
+	
 #define FREE_PAGE_IF_VALID(pool, blkno) \
 	if (OInMemoryBlknoIsValid((blkno))) \
 	{ \
-		CLEAN_DIRTY((pool), (blkno)); \
-		ppool_free_page((pool), (blkno), false); \
+		(*(pool)->ops->mark_clean)((pool), (blkno)); \
+		(*(pool)->ops->free_page)((pool), (blkno), false); \
 		(blkno) = OInvalidInMemoryBlkno; \
 	} \
 	
 const PagePoolOps o_page_pool_ops = {
     .alloc_page = o_ppool_get_page,
+    
+    .is_dirty = o_ppool_is_dirty,
 };
 
 #endif							/* __PAGE_POOL_H__ */
