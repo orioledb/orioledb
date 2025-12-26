@@ -16,6 +16,7 @@
 
 #include "transam/oxid.h"
 #include "transam/undo.h"
+#include "utils/page_pool.h"
 #include "utils/seq_buf.h"
 
 #include "access/sdir.h"
@@ -62,9 +63,9 @@ typedef int (*OBTreeKeyCmp) (BTreeDescr *descr,
 
 typedef struct
 {
-	OInMemoryBlkno rootPageBlkno;
+	PagePointer rootPagePtr;
 	uint32		rootPageChangeCount;
-	OInMemoryBlkno metaPageBlkno;
+	PagePointer metaPagePtr;
 } BTreeRootInfo;
 
 typedef enum
@@ -176,7 +177,7 @@ struct BTreeDescr
 	OSmgr		smgr;
 	ORelOids	oids;
 	OIndexType	type;
-	OPagePool  *ppool;
+	PagePool   *ppool;
 	OCompress	compress;
 	uint8		fillfactor;
 	UndoLogType undoType;
