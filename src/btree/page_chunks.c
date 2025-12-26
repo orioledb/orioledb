@@ -168,7 +168,7 @@ page_locator_fits_item(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 {
 	int			freeSpace = BTREE_PAGE_FREE_SPACE(p);
 	int			spaceNeeded = size;
-	LocationIndex oldItemSize = 0;
+	int			vacatedSpaceInReplaced = 0;
 
 	Assert(spaceNeeded == MAXALIGN(spaceNeeded));
 
@@ -184,13 +184,22 @@ page_locator_fits_item(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 	}
 	else
 	{
-		oldItemSize = BTREE_PAGE_GET_ITEM_SIZE(p, locator);
+		OTuple		tuple;
+		LocationIndex oldItemSize = 0;
+		LocationIndex oldTupleSize = 0;
 
 		/* We can replace tuple only on leafs */
 		Assert(O_PAGE_IS(p, LEAF));
 
+		BTREE_PAGE_READ_LEAF_TUPLE(tuple, p, locator);
+		oldTupleSize = (BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tuple, OTupleLength)));
+		oldItemSize = BTREE_PAGE_GET_ITEM_SIZE(p, locator);
+
 		spaceNeeded -= oldItemSize;
 		Assert(spaceNeeded == MAXALIGN(spaceNeeded));
+
+		Assert(oldItemSize >= oldTupleSize);
+		vacatedSpaceInReplaced = oldItemSize - oldTupleSize;
 	}
 
 	if (freeSpace >= spaceNeeded)
@@ -201,26 +210,7 @@ page_locator_fits_item(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 	else if (O_PAGE_IS(p, LEAF) && desc->type != oIndexBridge)
 	{
 		/* Start with optimistic estimate of free space after compaction */
-		int			compactedFreeSpace = freeSpace + PAGE_GET_N_VACATED(p);
-
-		if (replace)
-		{
-			BTreeLeafTuphdr *tupHdr;
-
-			tupHdr = (BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, locator);
-			if (tupHdr->deleted &&
-				XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo))
-			{
-				Assert(COMMITSEQNO_IS_INPROGRESS(csn) ||
-					   XACT_INFO_MAP_CSN(tupHdr->xactInfo) < csn);
-
-				/*
-				 * Evade double calculation of space occupied by item to be
-				 * replace, which will go away after compaction.
-				 */
-				compactedFreeSpace -= oldItemSize;
-			}
-		}
+		int			compactedFreeSpace = freeSpace + PAGE_GET_N_VACATED(p) - vacatedSpaceInReplaced;
 
 		/*
 		 * We have a chance to do a compation on leaf.  Check if at least

@@ -177,7 +177,8 @@ TESTGRESCHECKS_PART_1 = test/t/checkpointer_test.py \
 						test/t/types_test.py \
 						test/t/undo_eviction_test.py \
 						test/t/rewind_xid_test.py \
-						test/t/rewind_xid_evict_large_test.py
+						test/t/rewind_xid_evict_large_test.py \
+						test/t/page_fit_items_test.py
 TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/checkpoint_eviction_test.py \
 						test/t/checkpoint_same_trx_test.py \

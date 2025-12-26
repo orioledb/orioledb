@@ -1149,7 +1149,6 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 	{
 		BTreeSplitItems items;
 		OffsetNumber offset;
-		LocationIndex newItemLen;
 		CommitSeqNo csn;
 		bool		needsUndo;
 
@@ -1158,13 +1157,6 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 		 * entries for VACUUM.
 		 */
 		Assert(desc->type != oIndexBridge);
-
-		/*
-		 * Compact page might insert new item or resize existing item for us.
-		 */
-		newItemLen = BTreeLeafTuphdrSize + MAXALIGN(insert_item->tuplen);
-		if (insert_item->replace)
-			newItemLen = Max(newItemLen, BTREE_PAGE_GET_ITEM_SIZE(p, &loc));
 
 		offset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
 
