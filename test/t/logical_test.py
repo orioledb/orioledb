@@ -319,6 +319,74 @@ class LogicalTest(BaseTest):
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
+	def test_systrees_versions_o_table_from_pagelevel_undo_on_compaction(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres',
+		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"  # initial version of experimental relation
+		)
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		# First transaction generates a challenging WAL sequence for logical decoder (ldec).
+		# This transaction uses an experimental relation in multi-version manner and finally does a logical deletion.
+		#
+		# Logical decoding for this WAL sequence needs two versions of relation:
+		#     - initial version (for first INSERT)
+		#     - next version after modifications (for second INSERT)
+		# but in the final state of this txn - relation tuple is logically deleted.
+		#
+		# After COMMIT of this transaction, experimental relation is logically deleted
+		# but physically stored in actual page of systree O_TABLE, as a dead tuple with tuple-level undo chain.
+		node.safe_psql(
+		    'postgres',
+		    "BEGIN;\n"
+		    "INSERT INTO o_data(data) VALUES(100);\n"  # ldec needs initial version of relation
+		    "ALTER TABLE o_data RENAME COLUMN data TO data_2;\n"  # add relation version to tuple-level undo chain
+		    "ALTER TABLE o_data ADD COLUMN data_3 text;\n"  # add relation version to tuple-level undo chain
+		    "INSERT INTO o_data(data_2,data_3) VALUES(300,400);\n"  # ldec needs next version of relation
+		    "DROP TABLE o_data;\n"  # finally relation tuple is logically deleted: marked as deleted
+		    "COMMIT;\n")
+
+		# Second transaction performs GC on compaction and then splits a page in systree O_TABLE.
+		# GC is taking place on a write path - while INSERT.
+		# Both versions of experimental relation becomes stored in page-level undo chain - within previous page images.
+		node.safe_psql(
+		    'postgres', '''
+				DO $$
+				DECLARE
+					i int;
+					sql text;
+					n int := 6;
+				BEGIN
+					FOR i IN 1..n LOOP
+						sql := format(
+							'CREATE TABLE o_test_%s (
+								id   serial PRIMARY KEY,
+								data text
+							) USING orioledb;', i);
+						EXECUTE sql;
+					END LOOP;
+				END$$;
+			''')
+
+		# Logical decoder uses page-level undo to obtain old image of systree page where deleted tuple is located,
+		# and uses tuple-level undo to retrieve a proper tuple version.
+		result = self.retrieve_logical_changes()
+		print(result)
+		self.assertEqual(
+		    result, "BEGIN\n"
+		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
+		    "table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
+		    "COMMIT\n")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
 	def test_systrees_versions_index(self):
 		node = self.node
 		node.start()
