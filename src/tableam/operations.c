@@ -553,340 +553,6 @@ bridged_index_fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *primary, OBTree
 	}
 }
 
-static bool
-OExecCheckIndexConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot,
-						   EState *estate, Datum *conflictTid,
-						   List *arbiterIndexes)
-{
-	int			i;
-	int			numIndices;
-	RelationPtr relationDescs;
-	Relation	heapRelation;
-	IndexInfo **indexInfoArray;
-	ExprContext *econtext;
-	Datum		values[INDEX_MAX_KEYS];
-	bool		isnull[INDEX_MAX_KEYS];
-	Datum		invalidItemPtrDatum;
-	bool		checkedIndex = false;
-
-	invalidItemPtrDatum = ItemPointerGetDatum(NULL);
-
-	/*
-	 * Get information from the result relation info structure.
-	 */
-	numIndices = resultRelInfo->ri_NumIndices;
-	relationDescs = resultRelInfo->ri_IndexRelationDescs;
-	indexInfoArray = resultRelInfo->ri_IndexRelationInfo;
-	heapRelation = resultRelInfo->ri_RelationDesc;
-
-	/*
-	 * We will use the EState's per-tuple context for evaluating predicates
-	 * and index expressions (creating it if it's not already there).
-	 */
-	econtext = GetPerTupleExprContext(estate);
-
-	/* Arrange for econtext's scan tuple to be the tuple under test */
-	econtext->ecxt_scantuple = slot;
-
-	/*
-	 * For each index, form index tuple and check if it satisfies the
-	 * constraint.
-	 */
-	Assert(numIndices > 0);		/* for clang-analyzer */
-	for (i = 0; i < numIndices; i++)
-	{
-		Relation	indexRelation = relationDescs[i];
-		IndexInfo  *indexInfo;
-		bool		satisfiesConstraint;
-		OBTOptions *options;
-
-		if (indexRelation == NULL)
-			continue;
-
-		options = (OBTOptions *) indexRelation->rd_options;
-
-		if (indexRelation->rd_rel->relam == BTREE_AM_OID && !(options && !options->orioledb_index))
-			continue;
-
-		indexInfo = indexInfoArray[i];
-
-		if (!indexInfo->ii_Unique && !indexInfo->ii_ExclusionOps)
-			continue;
-
-		/* If the index is marked as read-only, ignore it */
-		if (!indexInfo->ii_ReadyForInserts)
-			continue;
-
-		/* When specific arbiter indexes requested, only examine them */
-		if (arbiterIndexes != NIL &&
-			!list_member_oid(arbiterIndexes,
-							 indexRelation->rd_index->indexrelid))
-			continue;
-
-		if (!indexRelation->rd_index->indimmediate)
-			ereport(ERROR,
-					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-					 errmsg("ON CONFLICT does not support deferrable unique constraints/exclusion constraints as arbiters"),
-					 errtableconstraint(heapRelation,
-										RelationGetRelationName(indexRelation))));
-
-		checkedIndex = true;
-
-		/* Check for partial index */
-		if (indexInfo->ii_Predicate != NIL)
-		{
-			ExprState  *predicate;
-
-			/*
-			 * If predicate state not set up yet, create it (in the estate's
-			 * per-query context)
-			 */
-			predicate = indexInfo->ii_PredicateState;
-			if (predicate == NULL)
-			{
-				predicate = ExecPrepareQual(indexInfo->ii_Predicate, estate);
-				indexInfo->ii_PredicateState = predicate;
-			}
-
-			/* Skip this index-update if the predicate isn't satisfied */
-			if (!ExecQual(predicate, econtext))
-				continue;
-		}
-
-		/*
-		 * FormIndexDatum fills in its values and isnull parameters with the
-		 * appropriate values for the column(s) of the index.
-		 */
-		FormIndexDatum(indexInfo,
-					   slot,
-					   estate,
-					   values,
-					   isnull);
-
-		satisfiesConstraint =
-			check_exclusion_or_unique_constraint(heapRelation, indexRelation,
-												 indexInfo, invalidItemPtrDatum,
-												 values, isnull, estate, false,
-												 CEOUC_WAIT, true,
-												 conflictTid);
-		if (!satisfiesConstraint)
-			return false;
-	}
-
-	if (arbiterIndexes != NIL && !checkedIndex)
-		elog(ERROR, "unexpected failure to find arbiter index");
-
-	return true;
-}
-
-static List *
-OExecInsertIndexTuples(ResultRelInfo *resultRelInfo,
-					   TupleTableSlot *slot,
-					   EState *estate,
-					   bool *specConflict,
-					   List *arbiterIndexes)
-{
-	List	   *result = NIL;
-	int			i;
-	int			numIndices;
-	RelationPtr relationDescs;
-	Relation	heapRelation;
-	IndexInfo **indexInfoArray;
-	ExprContext *econtext;
-	Datum		values[INDEX_MAX_KEYS];
-	bool		isnull[INDEX_MAX_KEYS];
-	Datum		tupleidDatum;
-
-	/*
-	 * Get information from the result relation info structure.
-	 */
-	numIndices = resultRelInfo->ri_NumIndices;
-	relationDescs = resultRelInfo->ri_IndexRelationDescs;
-	indexInfoArray = resultRelInfo->ri_IndexRelationInfo;
-	heapRelation = resultRelInfo->ri_RelationDesc;
-
-	/* Sanity check: slot must belong to the same rel as the resultRelInfo. */
-	Assert(slot->tts_tableOid == RelationGetRelid(heapRelation));
-
-	if (table_get_row_ref_type(heapRelation) == ROW_REF_ROWID)
-	{
-		bool		isnull;
-
-		tupleidDatum = slot_getsysattr(slot, RowIdAttributeNumber, &isnull);
-		Assert(!isnull);
-	}
-	else
-	{
-		Assert(ItemPointerIsValid(&slot->tts_tid));
-		tupleidDatum = ItemPointerGetDatum(&slot->tts_tid);
-	}
-
-	/*
-	 * We will use the EState's per-tuple context for evaluating predicates
-	 * and index expressions (creating it if it's not already there).
-	 */
-	econtext = GetPerTupleExprContext(estate);
-
-	/* Arrange for econtext's scan tuple to be the tuple under test */
-	econtext->ecxt_scantuple = slot;
-
-	/*
-	 * for each index, form and insert the index tuple
-	 */
-	for (i = 0; i < numIndices; i++)
-	{
-		Relation	indexRelation = relationDescs[i];
-		IndexInfo  *indexInfo;
-		bool		applyNoDupErr;
-		IndexUniqueCheck checkUnique;
-		bool		satisfiesConstraint;
-		OBTOptions *options;
-
-		if (indexRelation == NULL)
-			continue;
-
-		options = (OBTOptions *) indexRelation->rd_options;
-
-		if (indexRelation->rd_rel->relam == BTREE_AM_OID && !(options && !options->orioledb_index))
-			continue;
-
-		indexInfo = indexInfoArray[i];
-
-		/* If the index is marked as read-only, ignore it */
-		if (!indexInfo->ii_ReadyForInserts)
-			continue;
-
-		/* Check for partial index */
-		if (indexInfo->ii_Predicate != NIL)
-		{
-			ExprState  *predicate;
-
-			/*
-			 * If predicate state not set up yet, create it (in the estate's
-			 * per-query context)
-			 */
-			predicate = indexInfo->ii_PredicateState;
-			if (predicate == NULL)
-			{
-				predicate = ExecPrepareQual(indexInfo->ii_Predicate, estate);
-				indexInfo->ii_PredicateState = predicate;
-			}
-
-			/* Skip this index-update if the predicate isn't satisfied */
-			if (!ExecQual(predicate, econtext))
-				continue;
-		}
-
-		/*
-		 * FormIndexDatum fills in its values and isnull parameters with the
-		 * appropriate values for the column(s) of the index.
-		 */
-		FormIndexDatum(indexInfo,
-					   slot,
-					   estate,
-					   values,
-					   isnull);
-
-		/* Check whether to apply noDupErr to this index */
-		applyNoDupErr =
-			(arbiterIndexes == NIL ||
-			 list_member_oid(arbiterIndexes,
-							 indexRelation->rd_index->indexrelid));
-
-		/*
-		 * The index AM does the actual insertion, plus uniqueness checking.
-		 *
-		 * For an immediate-mode unique index, we just tell the index AM to
-		 * throw error if not unique.
-		 *
-		 * For a deferrable unique index, we tell the index AM to just detect
-		 * possible non-uniqueness, and we add the index OID to the result
-		 * list if further checking is needed.
-		 *
-		 * For a speculative insertion (used by INSERT ... ON CONFLICT), do
-		 * the same as for a deferrable unique index.
-		 */
-		if (!indexRelation->rd_index->indisunique)
-			checkUnique = UNIQUE_CHECK_NO;
-		else if (applyNoDupErr)
-			checkUnique = UNIQUE_CHECK_PARTIAL;
-		else if (indexRelation->rd_index->indimmediate)
-			checkUnique = UNIQUE_CHECK_YES;
-		else
-			checkUnique = UNIQUE_CHECK_PARTIAL;
-
-		satisfiesConstraint =
-			index_insert(indexRelation, /* index relation */
-						 values,	/* array of index Datums */
-						 isnull,	/* null flags */
-						 tupleidDatum,	/* tid of heap tuple */
-						 heapRelation,	/* heap relation */
-						 checkUnique,	/* type of uniqueness check to do */
-						 false, /* UPDATE without logical change? */
-						 indexInfo);	/* index AM may need this */
-
-		/*
-		 * If the index has an associated exclusion constraint, check that.
-		 * This is simpler than the process for uniqueness checks since we
-		 * always insert first and then check.  If the constraint is deferred,
-		 * we check now anyway, but don't throw error on violation or wait for
-		 * a conclusive outcome from a concurrent insertion; instead we'll
-		 * queue a recheck event.  Similarly, noDupErr callers (speculative
-		 * inserters) will recheck later, and wait for a conclusive outcome
-		 * then.
-		 *
-		 * An index for an exclusion constraint can't also be UNIQUE (not an
-		 * essential property, we just don't allow it in the grammar), so no
-		 * need to preserve the prior state of satisfiesConstraint.
-		 */
-		if (indexInfo->ii_ExclusionOps != NULL)
-		{
-			bool		violationOK;
-			CEOUC_WAIT_MODE waitMode;
-
-			if (applyNoDupErr)
-			{
-				violationOK = true;
-				waitMode = CEOUC_LIVELOCK_PREVENTING_WAIT;
-			}
-			else if (!indexRelation->rd_index->indimmediate)
-			{
-				violationOK = true;
-				waitMode = CEOUC_NOWAIT;
-			}
-			else
-			{
-				violationOK = false;
-				waitMode = CEOUC_WAIT;
-			}
-
-			satisfiesConstraint =
-				check_exclusion_or_unique_constraint(heapRelation,
-													 indexRelation, indexInfo,
-													 tupleidDatum, values, isnull,
-													 estate, false,
-													 waitMode, violationOK, NULL);
-		}
-
-		if ((checkUnique == UNIQUE_CHECK_PARTIAL ||
-			 indexInfo->ii_ExclusionOps != NULL) &&
-			!satisfiesConstraint)
-		{
-			/*
-			 * The tuple potentially violates the uniqueness or exclusion
-			 * constraint, so make a note of the index so that we can re-check
-			 * it later.  Speculative inserters are told if there was a
-			 * speculative conflict, since that always requires a restart.
-			 */
-			result = lappend_oid(result, RelationGetRelid(indexRelation));
-			if (indexRelation->rd_index->indimmediate && specConflict)
-				*specConflict = true;
-		}
-	}
-
-	return result;
-}
-
 int
 o_exclusion_cmp(OIndexDescr *id, OBTreeKeyBound *key1, OTuple *tuple2)
 {
@@ -1019,7 +685,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 	OSnapshot	oSnapshot = {0};
 	CommitSeqNo csn;
 	OXid		oxid;
-	Datum		conflictTid;
+	Datum		conflictRowid = PointerGetDatum((void *) 0xB0B);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 	csn = oSnapshot.csn;
@@ -1093,8 +759,11 @@ o_tbl_insert_with_arbiter(Relation rel,
 
 		if (descr->bridge)
 		{
-			if (!OExecCheckIndexConstraints(resultRelInfo, slot, estate, &conflictTid,
-											arbiterIndexes))
+			Datum	   *conflictRowidPtr = &conflictRowid;
+			Datum		conflictRowidPtrDatum = PointerGetDatum(conflictRowidPtr);
+
+			if (!ExecCheckIndexConstraints(resultRelInfo, slot, estate, conflictRowidPtrDatum,
+										   arbiterIndexes))
 			{
 				if (lockedSlot)
 				{
@@ -1113,7 +782,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 					 * conflict here means our previous conclusion that the
 					 * tuple is conclusively committed is not true anymore.
 					 */
-					test = table_tuple_lock(rel, conflictTid,
+					test = table_tuple_lock(rel, conflictRowid,
 											estate->es_snapshot,
 											lockedSlot, estate->es_output_cid,
 											lockmode, LockWaitBlock, 0,
@@ -1247,9 +916,9 @@ o_tbl_insert_with_arbiter(Relation rel,
 				}
 			}
 
-			OExecInsertIndexTuples(resultRelInfo, slot,
-								   estate, &specConflict,
-								   arbiterIndexes);
+			ExecInsertIndexTuples(resultRelInfo, slot, estate,
+								  false, true, &specConflict,
+								  arbiterIndexes, false);
 
 			if (specConflict)
 			{
@@ -1261,7 +930,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 
 					ExecCopySlot(lockedSlot, slot);
 
-					rowid = DatumGetByteaP(conflictTid);
+					rowid = DatumGetByteaP(conflictRowid);
 					p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 
 					if (!primary->primaryIsCtid)
