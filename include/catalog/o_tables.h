@@ -67,6 +67,7 @@ typedef struct
 	ORelOids	oids;
 	OIndexType	type;
 	OCompress	compress;
+	uint32		version;
 	bool		nulls_not_distinct;
 	uint8		nfields;
 	/* number of index fields */
@@ -89,6 +90,9 @@ typedef struct
 {
 	ORelOids	oids;
 	ORelOids	toast_oids;
+	uint32		toast_ixversion;
+	uint32		primary_ixversion;
+	uint32		bridge_ixversion;
 	ORelOids	bridge_oids;
 	OCompress	default_compress;
 	OCompress	primary_compress;
@@ -155,8 +159,8 @@ extern bool o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn);
 /* Returns OTable by its oids */
 extern OTable *o_tables_get(ORelOids oids);
 
-/* Returns OTable by its oids and version */
-extern OTable *o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version);
+/* Returns OTable by its oids, version and snapshot */
+extern OTable *o_tables_get_extended(ORelOids oids, uint32 version, OSnapshot snapshot);
 
 /* Returns OTable by its index oids */
 extern OTable *o_tables_get_by_tree(ORelOids oids, OIndexType type);

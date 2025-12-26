@@ -281,6 +281,216 @@ class LogicalTest(BaseTest):
 		    "table public.o_data: INSERT: id[integer]:4 data[text]:'20'\n"
 		    "COMMIT\n")
 
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_systrees_versions_simple(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
+		)
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		node.safe_psql(
+		    'postgres', '''
+				BEGIN;
+				INSERT INTO o_data(data) VALUES(100);
+				ALTER TABLE o_data RENAME COLUMN data TO data_2;
+				ALTER TABLE o_data ADD COLUMN data_3 text;
+				INSERT INTO o_data(data_2,data_3) VALUES(300,400);
+				COMMIT;
+			''')
+		# Final version of relation descr from systree o_tables after this COMMIT will be with three attrs (id,data_2,data_3),
+		# which does not match with the first version (id,data).
+		# But it is necessary to observe both these versions in logical decoder to properly decode INSERT'ed tuples.
+
+		result = self.retrieve_logical_changes()
+		print(result)
+		self.assertEqual(
+		    result, "BEGIN\n"
+		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
+		    "table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
+		    "COMMIT\n")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_systrees_versions_o_table_from_pagelevel_undo_on_compaction(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres',
+		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"  # initial version of experimental relation
+		)
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		# First transaction generates a challenging WAL sequence for logical decoder (ldec).
+		# This transaction uses an experimental relation in multi-version manner and finally does a logical deletion.
+		#
+		# Logical decoding for this WAL sequence needs two versions of relation:
+		#     - initial version (for first INSERT)
+		#     - next version after modifications (for second INSERT)
+		# but in the final state of this txn - relation tuple is logically deleted.
+		#
+		# After COMMIT of this transaction, experimental relation is logically deleted
+		# but physically stored in actual page of systree O_TABLE, as a dead tuple with tuple-level undo chain.
+		node.safe_psql(
+		    'postgres',
+		    "BEGIN;\n"
+		    "INSERT INTO o_data(data) VALUES(100);\n"  # ldec needs initial version of relation
+		    "ALTER TABLE o_data RENAME COLUMN data TO data_2;\n"  # add relation version to tuple-level undo chain
+		    "ALTER TABLE o_data ADD COLUMN data_3 text;\n"  # add relation version to tuple-level undo chain
+		    "INSERT INTO o_data(data_2,data_3) VALUES(300,400);\n"  # ldec needs next version of relation
+		    "DROP TABLE o_data;\n"  # finally relation tuple is logically deleted: marked as deleted
+		    "COMMIT;\n")
+
+		# Second transaction performs GC on compaction and then splits a page in systree O_TABLE.
+		# GC is taking place on a write path - while INSERT.
+		# Both versions of experimental relation becomes stored in page-level undo chain - within previous page images.
+		node.safe_psql(
+		    'postgres', '''
+				DO $$
+				DECLARE
+					i int;
+					sql text;
+					n int := 6;
+				BEGIN
+					FOR i IN 1..n LOOP
+						sql := format(
+							'CREATE TABLE o_test_%s (
+								id   serial PRIMARY KEY,
+								data text
+							) USING orioledb;', i);
+						EXECUTE sql;
+					END LOOP;
+				END$$;
+			''')
+
+		# Logical decoder uses page-level undo to obtain old image of systree page where deleted tuple is located,
+		# and uses tuple-level undo to retrieve a proper tuple version.
+		result = self.retrieve_logical_changes()
+		print(result)
+		self.assertEqual(
+		    result, "BEGIN\n"
+		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
+		    "table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
+		    "COMMIT\n"
+		    "BEGIN\n"
+		    "COMMIT\n")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_systrees_versions_index(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
+		    "CREATE INDEX data_idx ON o_data(data);")
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		node.safe_psql(
+		    'postgres', '''
+				BEGIN;
+				INSERT INTO o_data(data) VALUES(100);
+				ALTER TABLE o_data RENAME COLUMN data TO data_2;
+				ALTER TABLE o_data ADD COLUMN data_3 text;
+				INSERT INTO o_data(data_2,data_3) VALUES(300,400);
+				COMMIT;
+			''')
+		# Final version of relation tupedescr from systree o_indices after this COMMIT will be with three attrs (id,data_2,data_3),
+		# which does not match with the first version (id,data).
+		# But it is necessary to observe both these versions in logical decoder to properly decode INSERT'ed tuples.
+
+		result = self.retrieve_logical_changes()
+		print(result)
+		self.assertEqual(
+		    result, "BEGIN\n"
+		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
+		    "table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
+		    "COMMIT\n")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_systrees_versions_index_bridge_01(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
+		    "CREATE INDEX data_idx ON o_data USING btree(data) WITH (orioledb_index = off);"
+		)
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		node.safe_psql(
+		    'postgres', '''
+				BEGIN;
+				INSERT INTO o_data(data) VALUES(100);
+				ALTER TABLE o_data RENAME COLUMN data TO data_2;
+				ALTER TABLE o_data ADD COLUMN data_3 text;
+				INSERT INTO o_data(data_2,data_3) VALUES(300,400);
+				COMMIT;
+			''')
+
+		result = self.retrieve_logical_changes()
+		print(result)
+		self.assertEqual(
+		    result, "BEGIN\n"
+		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
+		    "table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
+		    "COMMIT\n")
+
+	def test_switch_logical_xid_subtxn__REPRO(self):
+		o_relname = self.o_relname
+
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+			with subscriber.start() as subscriber:
+				create_sql = f"""
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+				"""
+				publisher.safe_psql(create_sql)
+				subscriber.safe_psql(create_sql)
+
+				pub = publisher.publish('test_pub', tables=[f'{o_relname}'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+
+				with publisher.connect() as con1:
+					con1.begin()
+					con1.execute(f"""
+						INSERT INTO {o_relname}(data) VALUES(100);
+						ALTER TABLE {o_relname} ADD COLUMN data_2 text;
+						INSERT INTO {o_relname}(data,data_2) VALUES(100,200);
+					""")
+					con1.commit()
+
+				# wait until changes apply on subscriber and check them
+				sub.catchup()
+
+				with subscriber.connect() as con:
+					output = con.execute(f"""SELECT * FROM {o_relname};""")
+					self.assertEqual(output, [(2, '200')])
+
 	def test_switch_logical_xid_subtxn__mixed_ROLLBACK(self):
 		o_relname = self.o_relname
 

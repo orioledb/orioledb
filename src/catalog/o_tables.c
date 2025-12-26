@@ -216,18 +216,30 @@ oTablesGetTupleDataSize(OTuple tuple, void *arg)
 	return chunk->dataLength;
 }
 
+static uint32
+oTablesGetTupleKeyVersion(OTuple tuple, void *arg)
+{
+	OTableChunk *chunk = (OTableChunk *) tuple.data;
+
+	return chunk->key.version;
+}
+
 static TupleFetchCallbackResult
-oTablesVersionCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
-					   void *arg, TupleFetchCallbackCheckType check_type)
+oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
+					 void *arg, TupleFetchCallbackCheckType check_type)
 {
 	OTableChunkKey *tupleKey = (OTableChunkKey *) tuple.data;
 	OTableChunkKey *boundKey = (OTableChunkKey *) arg;
+	bool		tupIsCurrentOxid = tupOxid == get_current_oxid_if_any();
+	bool		inProgress = COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn);
+
+	if (boundKey->version != O_TABLE_INVALID_VERSION)
+		check_type = OTupleFetchCallbackVersionCheck;
 
 	if (check_type != OTupleFetchCallbackVersionCheck)
 		return OTupleFetchNext;
 
-	if (!(COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn) &&
-		  tupOxid == get_current_oxid_if_any()))
+	if (inProgress && !tupIsCurrentOxid)
 		return OTupleFetchNext;
 
 	if (boundKey->version == O_TABLE_INVALID_VERSION)
@@ -252,8 +264,9 @@ ToastAPI	oTablesToastAPI = {
 	.getTupleData = oTablesGetTupleData,
 	.getTupleChunknum = oTablesGetTupleChunknum,
 	.getTupleDataSize = oTablesGetTupleDataSize,
+	.getTupleKeyVersion = oTablesGetTupleKeyVersion,
 	.deleteLogFullTuple = false,
-	.versionCallback = oTablesVersionCallback
+	.fetchCallback = oTablesFetchCallback
 };
 
 void
@@ -678,6 +691,9 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 	o_table->fillfactor = fillfactor;
 	o_table->persistence = relpersistence;
 	o_table->data_version = ORIOLEDB_DATA_VERSION;
+	o_table->toast_ixversion = UINT32_MAX;
+	o_table->primary_ixversion = UINT32_MAX;
+	o_table->bridge_ixversion = UINT32_MAX;
 
 	for (i = 0; i < tupdesc->natts; i++)
 	{
@@ -1104,8 +1120,6 @@ o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
 	int			len;
 	BTreeDescr *sys_tree;
 
-	data = serialize_o_table(table, &len);
-
 	key.oids = table->oids;
 	key.chunknum = 0;
 	key.version = 0;
@@ -1113,6 +1127,7 @@ o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
 	systrees_modify_start();
 	o_tables_oids_indexes(NULL, table, oxid, csn);
 	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
+	data = serialize_o_table(table, &len);
 	result = generic_toast_insert_optional_wal(&oTablesToastAPI,
 											   (Pointer) &key, data, len, oxid,
 											   csn, sys_tree, table->persistence != RELPERSISTENCE_TEMP);
@@ -1126,7 +1141,7 @@ o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
  * Same as o_tables_get, if version not NULL find o_tables with passed version
  */
 OTable *
-o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version)
+o_tables_get_extended(ORelOids oids, uint32 version, OSnapshot snapshot)
 {
 	OTableChunkKey key,
 			   *found_key = NULL;
@@ -1136,15 +1151,12 @@ o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version)
 
 	key.oids = oids;
 	key.chunknum = 0;
-	if (version)
-		key.version = *version;
-	else
-		key.version = O_TABLE_INVALID_VERSION;
+	key.version = version;
 
 	found_key = &key;
 	result = generic_toast_get_any_with_key(&oTablesToastAPI, (Pointer) &key,
 											&dataLength,
-											&o_non_deleted_snapshot,
+											&snapshot,
 											get_sys_tree(SYS_TREES_O_TABLES),
 											(Pointer *) &found_key);
 
@@ -1165,7 +1177,7 @@ o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version)
 OTable *
 o_tables_get(ORelOids oids)
 {
-	return o_tables_get_by_oids_and_version(oids, NULL);
+	return o_tables_get_extended(oids, O_TABLE_INVALID_VERSION, o_non_deleted_snapshot);
 }
 
 /*
@@ -1227,8 +1239,6 @@ o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
 	int			len;
 	BTreeDescr *sys_tree;
 
-	data = serialize_o_table(table, &len);
-
 	key.oids = table->oids;
 	key.chunknum = 0;
 	key.version = table->version + 1;
@@ -1237,6 +1247,7 @@ o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
 	old_table = o_tables_get(table->oids);
 	o_tables_oids_indexes(old_table, table, oxid, csn);
 	sys_tree = get_sys_tree(SYS_TREES_O_TABLES);
+	data = serialize_o_table(table, &len);
 	result = generic_toast_update_optional_wal(&oTablesToastAPI,
 											   (Pointer) &key, data, len, oxid,
 											   csn, sys_tree, table->persistence != RELPERSISTENCE_TEMP);
@@ -1252,7 +1263,11 @@ void
 o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn)
 {
 	o_opclass_cache_add_table(o_table);
-	o_indices_update(o_table, PrimaryIndexNumber, oxid, csn);
+
+	/*
+	 * o_indices_update(o_table, PrimaryIndexNumber, oxid, csn); // @NOTE
+	 * moved out from here
+	 */
 	if (o_table->has_primary)
 	{
 		o_add_invalidate_undo_item(o_table->indices[PrimaryIndexNumber].oids,

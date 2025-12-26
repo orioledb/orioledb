@@ -1839,11 +1839,18 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 			o_tablespace_cache_add_relnode(o_table->bridge_oids.datoid, o_table->bridge_oids.relnode, o_table->tablespace);
 		}
 	}
+
 	o_table->fillfactor = fillfactor;
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
 	o_tables_rel_meta_lock(rel);
+	o_indices_update(o_table, PrimaryIndexNumber, oxid, oSnapshot.csn);
+
+	/*
+	 * elog(LOG, "[%s] %d o_indices_update version %u", __func__, __LINE__,
+	 * version_out);
+	 */
 	o_tables_update(o_table, oxid, oSnapshot.csn);
 	o_tables_after_update(o_table, oxid, oSnapshot.csn);
 
@@ -2245,6 +2252,12 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_table
 			table_close(toast_rel, AccessExclusiveLock);
 			fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 			o_tables_table_meta_lock(updated_o_table);
+			o_indices_update(updated_o_table, PrimaryIndexNumber, oxid, oSnapshot.csn);
+
+			/*
+			 * elog(LOG, "[%s] %d o_indices_update version %u", __func__,
+			 * __LINE__, version_out);
+			 */
 			o_tables_update(updated_o_table, oxid, oSnapshot.csn);
 			o_tables_after_update(updated_o_table, oxid, oSnapshot.csn);
 			o_tables_table_meta_unlock(updated_o_table, InvalidOid);
@@ -2400,6 +2413,12 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 		index = &o_table->indices[ix_num];
 
 		o_indices_update(o_table, ix_num + ctid_idx_off, oxid, oSnapshot.csn);
+		/* index->version = version_out; */
+
+		/*
+		 * elog(LOG, "[%s] %d o_indices_update ix_num %u version %u",
+		 * __func__, __LINE__, ix_num, version_out);
+		 */
 		o_invalidate_oids(index->oids);
 		o_add_invalidate_undo_item(index->oids, O_INVALIDATE_OIDS_ON_ABORT);
 	}
@@ -2429,9 +2448,7 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 	old_o_table = o_table;
 	o_table = o_tables_get(o_table->oids);
 	o_table->index_bridging = false;
-	o_table->bridge_oids.datoid = InvalidOid;
-	o_table->bridge_oids.reloid = InvalidOid;
-	o_table->bridge_oids.relnode = InvalidOid;
+	ORelOidsSetInvalid(o_table->bridge_oids);
 	assign_new_oids(o_table, tbl, false);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
@@ -2456,6 +2473,12 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 		index = &o_table->indices[ix_num];
 
 		o_indices_update(o_table, ix_num + ctid_idx_off, oxid, oSnapshot.csn);
+		/* index->version = version_out; */
+
+		/*
+		 * elog(LOG, "[%s] %d o_indices_update ix_num %u version %u",
+		 * __func__, __LINE__, ix_num, version_out);
+		 */
 		o_invalidate_oids(index->oids);
 		o_add_invalidate_undo_item(index->oids, O_INVALIDATE_OIDS_ON_ABORT);
 	}
@@ -2678,6 +2701,12 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 						fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 						o_tables_rel_meta_lock(rel);
+						o_indices_update(o_table, PrimaryIndexNumber, oxid, oSnapshot.csn);
+
+						/*
+						 * elog(LOG, "[%s] %d o_indices_update version %u",
+						 * __func__, __LINE__, version_out);
+						 */
 						o_tables_update(o_table, oxid, oSnapshot.csn);
 						o_tables_after_update(o_table, oxid, oSnapshot.csn);
 						o_tables_rel_meta_unlock(rel, InvalidOid);
@@ -2969,6 +2998,12 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					o_table_resize_constr(o_table);
 
 					o_tables_rel_meta_lock(rel);
+					o_indices_update(o_table, PrimaryIndexNumber, oxid, oSnapshot.csn);
+
+					/*
+					 * elog(LOG, "[%s] %d o_indices_update version %u",
+					 * __func__, __LINE__, version_out);
+					 */
 					o_tables_update(o_table, oxid, oSnapshot.csn);
 					o_tables_after_update(o_table, oxid, oSnapshot.csn);
 					o_tables_rel_meta_unlock(rel, InvalidOid);
@@ -3168,6 +3203,12 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 					o_tables_rel_meta_lock(rel);
+					o_indices_update(o_table, PrimaryIndexNumber, oxid, oSnapshot.csn);
+
+					/*
+					 * elog(LOG, "[%s] %d o_indices_update version %u",
+					 * __func__, __LINE__, version_out);
+					 */
 					o_tables_update(o_table, oxid, oSnapshot.csn);
 					o_tables_after_update(o_table, oxid, oSnapshot.csn);
 					o_tables_rel_meta_unlock(rel, InvalidOid);
@@ -3241,8 +3282,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						orioledb_save_collation(field->collation);
 						fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 						o_tables_rel_meta_lock(rel);
-						o_tables_update(o_table, oxid, oSnapshot.csn);
-						o_tables_after_update(o_table, oxid, oSnapshot.csn);
 						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 						{
 							bool		compatible = false;
@@ -3288,6 +3327,13 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 									o_indices_update(o_table,
 													 ix_num + ctid_idx_off,
 													 oxid, oSnapshot.csn);
+									/* o_table_index->version = version_out; */
+
+									/*
+									 * elog(LOG, "[%s] %d o_indices_update
+									 * ix_num %u version %u", __func__,
+									 * __LINE__, ix_num, version_out);
+									 */
 									o_invalidate_oids(o_table_index->oids);
 									o_add_invalidate_undo_item(o_table_index->oids,
 															   O_INVALIDATE_OIDS_ON_ABORT);
@@ -3304,6 +3350,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								}
 							}
 						}
+						o_indices_update(o_table, PrimaryIndexNumber, oxid, oSnapshot.csn);
+						o_tables_update(o_table, oxid, oSnapshot.csn);
+						o_tables_after_update(o_table, oxid, oSnapshot.csn);
 						o_tables_rel_meta_unlock(rel, InvalidOid);
 					}
 					o_table->fields[subId - 1] = old_field;
@@ -3361,8 +3410,15 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						{
 							fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 							o_tables_rel_meta_lock(tbl);
-							o_tables_update(o_table, oxid, oSnapshot.csn);
 							o_indices_update(o_table, ix_num, oxid, oSnapshot.csn);
+							/* o_table->indices[ix_num].version = version_out; */
+
+							/*
+							 * elog(LOG, "[%s] %d o_indices_update ix_num %u
+							 * version %u", __func__, __LINE__, ix_num,
+							 * version_out);
+							 */
+							o_tables_update(o_table, oxid, oSnapshot.csn);
 							o_tables_rel_meta_unlock(tbl, InvalidOid);
 							o_invalidate_oids(idx_oids);
 							o_add_invalidate_undo_item(idx_oids,

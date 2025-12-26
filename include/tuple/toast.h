@@ -79,8 +79,9 @@ typedef struct
 	Pointer		(*getTupleData) (OTuple tuple, void *arg);
 	uint32		(*getTupleChunknum) (OTuple tuple, void *arg);
 	uint32		(*getTupleDataSize) (OTuple tuple, void *arg);
+	uint32		(*getTupleKeyVersion) (OTuple tuple, void *arg);
 	bool		deleteLogFullTuple;
-	TupleFetchCallback versionCallback;
+	TupleFetchCallback fetchCallback;
 } ToastAPI;
 
 extern ToastAPI tableToastAPI;

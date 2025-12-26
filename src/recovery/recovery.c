@@ -660,9 +660,7 @@ o_recovery_start_hook(void)
 			state = &workers_pool[i];
 			shm_mq_set_sender(GET_WORKER_QUEUE(i), MyProc);
 			state->type = oIndexInvalid;
-			state->oids.datoid = InvalidOid;
-			state->oids.reloid = InvalidOid;
-			state->oids.relnode = InvalidOid;
+			ORelOidsSetInvalid(state->oids);
 			state->oxid = InvalidOXid;
 
 			workers_pool[i].handle = recovery_worker_register(i);
@@ -1038,9 +1036,7 @@ recovery_init(int worker_id)
 			state = &workers_pool[i];
 			shm_mq_set_sender(GET_WORKER_QUEUE(i), MyProc);
 			state->type = oIndexInvalid;
-			state->oids.datoid = InvalidOid;
-			state->oids.reloid = InvalidOid;
-			state->oids.relnode = InvalidOid;
+			ORelOidsSetInvalid(state->oids);
 			state->oxid = InvalidOXid;
 
 			workers_pool[i].handle = recovery_worker_register(i);
@@ -2676,9 +2672,7 @@ clean_workers_oids(void)
 	{
 		RecoveryWorkerState *state = &workers_pool[i];
 
-		state->oids.datoid = InvalidOid;
-		state->oids.reloid = InvalidOid;
-		state->oids.relnode = InvalidOid;
+		ORelOidsSetInvalid(state->oids);
 		state->type = oIndexInvalid;
 	}
 }
@@ -2704,7 +2698,7 @@ recovery_send_leader_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_ver
 	msg.o_table_version = o_table_version;
 	msg.old_o_table_version = old_o_table_version;
 
-	Assert(o_tables_get_by_oids_and_version(oids, &o_table_version) != NULL);
+	Assert(o_tables_get_extended(oids, o_table_version, o_non_deleted_snapshot) != NULL);
 
 	/* Remember oids of index build added to a queue in a hash table */
 	state = (RecoveryIdxBuildQueueState *) hash_search(idxbuild_oids_hash,
@@ -2781,10 +2775,10 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 
 		if (!OidIsValid(oldRelnode))
 		{
-			uint32		version = new_o_table->version - 1;
+			uint32		version = (new_o_table->version == O_TABLE_INVALID_VERSION) ? O_TABLE_INVALID_VERSION : new_o_table->version - 1;
 
-			old_o_table = o_tables_get_by_oids_and_version(oids,
-														   &version);
+			old_o_table = o_tables_get_extended(oids,
+												version, o_non_deleted_snapshot);
 		}
 		else
 		{
@@ -3067,7 +3061,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			uint8		treeType;
 			OIndexType	ix_type;
 
-			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids);
+			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids, NULL, NULL, NULL, NULL, wal_version);
 
 			ix_type = treeType;
 
