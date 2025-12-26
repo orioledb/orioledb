@@ -480,9 +480,9 @@ page_cut_first_key(Page node)
 }
 
 void
-put_page_image(PagePointer ptr, Page img)
+put_page_image(OInMemoryBlkno blkno, Page img)
 {
-	Page		page = pptr_get_page(ptr);
+	Page		page = O_GET_IN_MEMORY_PAGE(blkno);
 	int			skipSize = offsetof(OrioleDBPageHeader, checkpointNum);
 
 	pg_write_barrier();

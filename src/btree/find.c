@@ -33,8 +33,7 @@ typedef struct
 	BTreeKeyType keyType;
 	Page		pagePtr;
 	int			targetLevel;
-	// FIXME: looks confusing with pagePtr
-	PagePointer ptr;
+	OInMemoryBlkno blkno;
 	uint32		pageChangeCount;
 	PartialPageState *partial;
 	bool		haveLock;
@@ -104,7 +103,7 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 	{
 		OBTreeFastPathFindResult result;
 
-		result = fastpath_find_downlink(intCxt->pagePtr, intCxt->ptr,
+		result = fastpath_find_downlink(intCxt->pagePtr, intCxt->blkno,
 										meta, loc, tuphdr);
 
 		if (result != OBTreeFastPathFindSlowpath)
@@ -217,7 +216,7 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 		Assert(!BTREE_PAGE_FIND_IS(context, MODIFY));
 
 		result = fastpath_find_chunk(intCxt->pagePtr,
-									 intCxt->ptr,
+									 intCxt->blkno,
 									 meta,
 									 &chunkIndex);
 
@@ -423,7 +422,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	context->index = 0;
 
 	/* starts from the rootPageBlkno */
-	intCxt.ptr = desc->rootInfo.rootPagePtr;
+	intCxt.blkno = desc->rootInfo.rootPageBlkno;
 	intCxt.pageChangeCount = desc->rootInfo.rootPageChangeCount;
 	while (true)
 	{
@@ -464,14 +463,14 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				OLockPageWithTupleResult result;
 
 				result = lock_page_with_tuple(desc,
-											  &intCxt.ptr,
+											  &intCxt.blkno,
 											  &intCxt.pageChangeCount,
 											  context->insertXactInfo,
 											  context->insertTuple);
 
 				if (result == OLockPageWithTupleResultLocked)
 				{
-					p = pptr_get_page(intCxt.ptr);
+					p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 					intCxt.pagePtr = p;
 					intCxt.haveLock = true;
 					needLock = false;
@@ -535,7 +534,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			{
 				ReadPageResult result;
 
-				result = btree_find_try_read_page(context, intCxt.ptr,
+				result = btree_find_try_read_page(context, intCxt.blkno,
 												  intCxt.pageChangeCount,
 												  useParentImg,
 												  key, keyType,
@@ -555,7 +554,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			{
 				bool		result;
 
-				result = btree_find_read_page(context, intCxt.ptr,
+				result = btree_find_read_page(context, intCxt.blkno,
 											  intCxt.pageChangeCount,
 											  useParentImg, key, keyType,
 											  intCxt.partial,
@@ -612,8 +611,8 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				return OFindPageResultFailure;
 
 			/* Reload root information from the shared memory */
-			desc->rootInfo.rootPagePtr = PPTR_INVALID;
-			desc->rootInfo.metaPagePtr = PPTR_INVALID;
+			desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
+			desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 			desc->rootInfo.rootPageChangeCount = 0;
 			if (tryFlag)
 			{
@@ -627,9 +626,9 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			shmemIsReloaded = true;
 
 			/* Initiate another attempt */
-			intCxt.ptr = desc->rootInfo.rootPagePtr;
+			intCxt.blkno = desc->rootInfo.rootPageBlkno;
 			intCxt.pageChangeCount = desc->rootInfo.rootPageChangeCount;
-			p = pptr_get_page(intCxt.ptr);
+			p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 			continue;
 		}
 
@@ -656,7 +655,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				return OFindPageResultFailure;
 			else if (result == OBTreeFastPathFindRetry)
 				continue;
-			p = pptr_get_page(intCxt.ptr);
+			p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		}
 		else
 		{
@@ -673,14 +672,14 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 					return OFindPageResultInserted;
 				continue;
 			}
-			p = pptr_get_page(intCxt.ptr);
+			p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		}
 
 		/* Place new item to the context */
 		Assert(context->index < ORIOLEDB_MAX_DEPTH);
 
 		context->items[context->index].locator = loc;
-		context->items[context->index].ptr = intCxt.ptr;
+		context->items[context->index].blkno = intCxt.blkno;
 		context->items[context->index].pageChangeCount = O_PAGE_GET_CHANGE_COUNT(intCxt.pagePtr);
 
 		/* Save the lokey if needed */
@@ -728,7 +727,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 
 					if (O_PAGE_IS(p, BROKEN_SPLIT))
 					{
-						o_btree_split_fix_for_right_page_and_unlock(desc, intCxt.ptr);
+						o_btree_split_fix_for_right_page_and_unlock(desc, intCxt.blkno);
 						intCxt.haveLock = false;
 						step_upward_level(&intCxt);
 						continue;
@@ -832,7 +831,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			intCxt.haveLock = false;
 		}
 
-		p = pptr_get_page(intCxt.ptr);
+		p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		STOPEVENT(STOPEVENT_STEP_DOWN, params);
 	}
 }
@@ -977,7 +976,7 @@ step_upward_level(OBTreeFindPageInternalContext *intCxt)
  */
 OFindPageResult
 refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
-			uint16 level, PagePointer _page_ptr, uint32 _pageChangeCount)
+			uint16 level, OInMemoryBlkno _blkno, uint32 _pageChangeCount)
 {
 	BTreeDescr *desc = context->desc;
 	OBTreeFindPageInternalContext intCxt;
@@ -988,7 +987,7 @@ refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	intCxt.context = context;
 	intCxt.key = key;
 	intCxt.keyType = keyType;
-	intCxt.ptr = _page_ptr;
+	intCxt.blkno = _blkno;
 	intCxt.targetLevel = level;
 	intCxt.pageChangeCount = _pageChangeCount;
 	intCxt.partial = NULL;

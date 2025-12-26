@@ -398,6 +398,10 @@ extern bool orioledb_strict_mode;
 	(AssertMacro(MYPROCNUMBER >= 0 && \
 				 MYPROCNUMBER < max_procs), \
 	 &oProcData[MYPROCNUMBER])
+#define O_PAGE_IS_LOCAL(blkno) \
+	(AssertMacro(OInMemoryBlknoIsValid(blkno)), \
+	 (blkno) < 0)
+// TODO: Modify O_GET_IN_MEMORY_PAGE to handle local pages
 #define O_GET_IN_MEMORY_PAGE(blkno) \
 	(AssertMacro(OInMemoryBlknoIsValid(blkno)), \
 	 (Page)(o_shared_buffers + (((uint64) (blkno)) * ((uint64) ORIOLEDB_BLCKSZ))))

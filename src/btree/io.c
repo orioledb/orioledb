@@ -1402,7 +1402,7 @@ load_page(OBTreeFindPageContext *context)
 	OrioleDBPageDesc *parent_page_desc,
 			   *page_desc;
 	BTreeDescr *desc = context->desc;
-	PagePointer parent_ptr;
+	OInMemoryBlkno parent_blkno;
 	Page		parent_page;
 	BTreePageItemLocator *parent_loc;
 	CommitSeqNo csn;
@@ -1411,7 +1411,7 @@ load_page(OBTreeFindPageContext *context)
 				ionum;
 	uint32		parent_change_count;
 	BTreeNonLeafTuphdr *int_hdr;
-	PagePointer page_ptr;
+	OInMemoryBlkno blkno;
 	OFixedKey	target_hikey;
 	int			target_level;
 	Page		page;
@@ -1424,15 +1424,15 @@ load_page(OBTreeFindPageContext *context)
 	uint32		chkpNum = 0;
 
 	context_index = context->index;
-	parent_ptr = context->items[context_index].ptr;
+	parent_blkno = context->items[context_index].blkno;
 	parent_loc = &context->items[context_index].locator;
 	parent_change_count = context->items[context_index].pageChangeCount;
-	parent_page = pptr_get_page(parent_ptr);
+	parent_page = O_GET_IN_MEMORY_PAGE(parent_blkno);
 
-	ionum = assign_io_num(parent_ptr, BTREE_PAGE_LOCATOR_GET_OFFSET(parent_page, parent_loc));
+	ionum = assign_io_num(parent_blkno, BTREE_PAGE_LOCATOR_GET_OFFSET(parent_page, parent_loc));
 
 	/* Modify parent downlink: indicate that IO is in-progress */
-	(*desc->ppool->ops->block_reads)(parent_ptr);
+	page_block_reads(parent_blkno);
 	int_hdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(parent_page, parent_loc);
 	Assert(DOWNLINK_IS_ON_DISK(int_hdr->downlink));
 
@@ -1559,7 +1559,7 @@ load_page(OBTreeFindPageContext *context)
 							errdetail("Hikeys don't match.")));
 		result = refind_page(context, NULL, BTreeKeyRightmost,
 							 PAGE_GET_LEVEL(page) + 1,
-							 parent_ptr, parent_change_count);
+							 parent_blkno, parent_change_count);
 		Assert(result == OFindPageResultSuccess);
 	}
 	else

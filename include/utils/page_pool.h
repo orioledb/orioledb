@@ -41,48 +41,7 @@
 
 typedef struct PagePool PagePool;
 
-typedef char * SmallPagePointer;
-
 typedef struct PagePoolConfig PagePoolConfig;
-
-typedef enum PagePointerType {
-	PPTR_TYPE_PTR,
-	PPTR_TYPE_BLKNO,
-	PPTR_TYPE_INVALID
-} PagePointerType;
-
-typedef struct PagePointer {
-    PagePointerType type;
-    union {
-    	SmallPagePointer ptr;
-    	OInMemoryBlkno blkno;
-    } ptr;
-} PagePointer;
-
-static inline bool pptr_eq(PagePointer pptr1, PagePointer pptr2)
-{
-    if (pptr1.type != pptr2.type)
-        return false;
-    switch (pptr1.type) {
-        case PPTR_TYPE_PTR:
-            return pptr1.ptr.ptr == pptr2.ptr.ptr;
-        case PPTR_TYPE_BLKNO:
-            return pptr1.ptr.blkno == pptr2.ptr.blkno;
-        case PPTR_TYPE_INVALID:
-            return true;
-    }
-}
-
-static inline Page pptr_get_page(PagePointer pptr)
-{
-    Assert(pptr.type != PPTR_TYPE_INVALID);
-    if (pptr.type == PPTR_TYPE_BLKNO)
-        return O_GET_IN_MEMORY_PAGE(pptr.ptr.blkno);
-    else
-        return (Page) pptr.ptr.ptr;
-}
-
-const PagePointer PPTR_INVALID = { PPTR_TYPE_INVALID, { .ptr = NULL } };
 
 /*
  * Page pool operations - implemented by each pool type
@@ -90,8 +49,8 @@ const PagePointer PPTR_INVALID = { PPTR_TYPE_INVALID, { .ptr = NULL } };
 typedef struct PagePoolOps
 {
 	/* Page allocation/deallocation */
-	PagePointer (*alloc_page)(PagePool *pool, int pageReserveKind);
-	void (*free_page)(PagePool *pool, PagePointer ptr);
+	OInMemoryBlkno (*alloc_page)(PagePool *pool, int pageReserveKind);
+	void (*free_page)(PagePool *pool, OInMemoryBlkno blkno);
 	
 	/* Page reservation system */
 	bool (*reserve_pages)(PagePool *pool, int pageReserveKind, uint32 count);
@@ -99,19 +58,15 @@ typedef struct PagePoolOps
 	uint32 (*get_reserved_count)(PagePool *pool, int pageReserveKind);
 	
 	/* Page state management */
-	void (*mark_dirty)(PagePool *pool, PagePointer ptr);
-	void (*mark_clean)(PagePool *pool, PagePointer ptr);
-	bool (*is_dirty)(PagePool *pool, PagePointer ptr);
+	void (*mark_dirty)(PagePool *pool, OInMemoryBlkno blkno);
+	void (*mark_clean)(PagePool *pool, OInMemoryBlkno blkno);
+	bool (*is_dirty)(PagePool *pool, OInMemoryBlkno blkno);
 	
 	/* Usage tracking */
-	void (*inc_usage)(PagePool *pool, PagePointer ptr);
-	void (*dec_usage)(PagePool *pool, PagePointer ptr);
-	uint32 (*get_usage)(PagePool *pool, PagePointer ptr);
+	void (*inc_usage)(PagePool *pool, OInMemoryBlkno blkno);
+	void (*dec_usage)(PagePool *pool, OInMemoryBlkno blkno);
+	uint32 (*get_usage)(PagePool *pool, OInMemoryBlkno blkno);
     
-	void (*lock_page)(PagePointer ptr);
-	bool (*try_lock_page)(PagePointer ptr);
-	void (*unlock_page)(PagePointer ptr);
-	void (*block_reads)(PagePointer ptr);
         /* ... */
 } PagePoolOps;
 
@@ -151,7 +106,7 @@ extern void o_ppool_reserve_pages(PagePool *pool, int kind, int count);
 extern void o_ppool_release_reserved(PagePool *pool, uint32 mask);
 extern void o_ppool_release_all_pages(void);
 extern OInMemoryBlkno o_ppool_get_metapage(PagePool *pool);
-extern PagePointer o_ppool_get_page(PagePool *pool, int kind);
+extern OInMemoryBlkno o_ppool_get_page(PagePool *pool, int kind);
 extern void o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock);
 
 #define PAGE_DESC_FLAG_DIRTY			1	/* Modified since the the last

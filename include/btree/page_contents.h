@@ -364,7 +364,7 @@ extern void init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum);
 extern LocationIndex page_get_vacated_space(BTreeDescr *desc, Page p,
 											CommitSeqNo csn);
 extern void null_unused_bytes(Page img);
-extern void put_page_image(PagePointer ptr, Page img);
+extern void put_page_image(OInMemoryBlkno blkno, Page img);
 extern void page_cut_first_key(Page node);
 
 typedef struct ItemPointerData ItemPointerData;
