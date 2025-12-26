@@ -106,7 +106,7 @@ extern OFindPageResult find_page(OBTreeFindPageContext *context, void *key,
 								 BTreeKeyType keyType, uint16 targetLevel);
 extern OFindPageResult refind_page(OBTreeFindPageContext *context, void *key,
 								   BTreeKeyType keyType, uint16 level,
-								   OInMemoryBlkno blkno, uint32 pageChangeCount);
+								   PagePointer page_ptr, uint32 pageChangeCount);
 
 extern bool find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey);
 extern bool find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey);

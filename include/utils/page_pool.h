@@ -14,6 +14,7 @@
 #ifndef __PAGE_POOL_H__
 #define __PAGE_POOL_H__
 
+#include "c.h"
 #include "common/pg_prng.h"
 #include "storage/bufpage.h"
 #include "utils/ucm.h"
@@ -46,7 +47,8 @@ typedef struct PagePoolConfig PagePoolConfig;
 
 typedef enum PagePointerType {
 	PPTR_TYPE_PTR,
-	PPTR_TYPE_BLKNO
+	PPTR_TYPE_BLKNO,
+	PPTR_TYPE_INVALID
 } PagePointerType;
 
 typedef struct PagePointer {
@@ -59,17 +61,28 @@ typedef struct PagePointer {
 
 static inline bool pptr_eq(PagePointer pptr1, PagePointer pptr2)
 {
-	return pptr1.type == pptr2.type &&
-		(pptr1.type == PPTR_TYPE_PTR ? pptr1.ptr.ptr  == pptr2.ptr.ptr : pptr1.ptr.blkno == pptr2.ptr.blkno);
+    if (pptr1.type != pptr2.type)
+        return false;
+    switch (pptr1.type) {
+        case PPTR_TYPE_PTR:
+            return pptr1.ptr.ptr == pptr2.ptr.ptr;
+        case PPTR_TYPE_BLKNO:
+            return pptr1.ptr.blkno == pptr2.ptr.blkno;
+        case PPTR_TYPE_INVALID:
+            return true;
+    }
 }
 
 static inline Page pptr_get_page(PagePointer pptr)
 {
+    Assert(pptr.type != PPTR_TYPE_INVALID);
     if (pptr.type == PPTR_TYPE_BLKNO)
         return O_GET_IN_MEMORY_PAGE(pptr.ptr.blkno);
     else
         return (Page) pptr.ptr.ptr;
 }
+
+const PagePointer PPTR_INVALID = { PPTR_TYPE_INVALID, { .ptr = NULL } };
 
 /*
  * Page pool operations - implemented by each pool type
@@ -96,7 +109,9 @@ typedef struct PagePoolOps
 	uint32 (*get_usage)(PagePool *pool, PagePointer ptr);
     
 	void (*lock_page)(PagePointer ptr);
+	bool (*try_lock_page)(PagePointer ptr);
 	void (*unlock_page)(PagePointer ptr);
+	void (*block_reads)(PagePointer ptr);
         /* ... */
 } PagePoolOps;
 

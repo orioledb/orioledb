@@ -1402,7 +1402,7 @@ load_page(OBTreeFindPageContext *context)
 	OrioleDBPageDesc *parent_page_desc,
 			   *page_desc;
 	BTreeDescr *desc = context->desc;
-	OInMemoryBlkno parent_blkno;
+	PagePointer parent_ptr;
 	Page		parent_page;
 	BTreePageItemLocator *parent_loc;
 	CommitSeqNo csn;
@@ -1411,7 +1411,7 @@ load_page(OBTreeFindPageContext *context)
 				ionum;
 	uint32		parent_change_count;
 	BTreeNonLeafTuphdr *int_hdr;
-	OInMemoryBlkno blkno;
+	PagePointer page_ptr;
 	OFixedKey	target_hikey;
 	int			target_level;
 	Page		page;
@@ -1424,15 +1424,15 @@ load_page(OBTreeFindPageContext *context)
 	uint32		chkpNum = 0;
 
 	context_index = context->index;
-	parent_blkno = context->items[context_index].blkno;
+	parent_ptr = context->items[context_index].ptr;
 	parent_loc = &context->items[context_index].locator;
 	parent_change_count = context->items[context_index].pageChangeCount;
-	parent_page = O_GET_IN_MEMORY_PAGE(parent_blkno);
+	parent_page = pptr_get_page(parent_ptr);
 
-	ionum = assign_io_num(parent_blkno, BTREE_PAGE_LOCATOR_GET_OFFSET(parent_page, parent_loc));
+	ionum = assign_io_num(parent_ptr, BTREE_PAGE_LOCATOR_GET_OFFSET(parent_page, parent_loc));
 
 	/* Modify parent downlink: indicate that IO is in-progress */
-	page_block_reads(parent_blkno);
+	(*desc->ppool->ops->block_reads)(parent_ptr);
 	int_hdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(parent_page, parent_loc);
 	Assert(DOWNLINK_IS_ON_DISK(int_hdr->downlink));
 
@@ -1451,18 +1451,18 @@ load_page(OBTreeFindPageContext *context)
 		clear_fixed_key(&target_hikey);
 	target_level = PAGE_GET_LEVEL(parent_page) - 1;
 
-	unlock_page(parent_blkno);
+	(*desc->ppool->ops->unlock_page)(parent_ptr);
 
 	/* Prepare new page metaPage-data */
-	ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_FIND, 1);
-	blkno = ppool_get_page(desc->ppool, PPOOL_RESERVE_FIND);
-	lock_page(blkno);
-	page_block_reads(blkno);
+	(*desc->ppool->ops->reserve_pages)(desc->ppool, PPOOL_RESERVE_FIND, 1);
+	page_ptr = (*desc->ppool->ops->alloc_page)(desc->ppool, PPOOL_RESERVE_FIND);
+	(*desc->ppool->ops->lock_page)(page_ptr);
+	(*desc->ppool->ops->block_reads)(page_ptr);
 
-	Assert(OInMemoryBlknoIsValid(blkno));
-	page = O_GET_IN_MEMORY_PAGE(blkno);
+	Assert(OInMemoryBlknoIsValid(page_ptr));
+	page = pptr_get_page(page_ptr);
 	parent_page_desc = O_GET_IN_MEMORY_PAGEDESC(parent_blkno);
-	page_desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
+	page_desc = O_GET_IN_MEMORY_PAGEDESC(page_ptr);
 
 	page_desc->flags = 0;
 
@@ -1481,7 +1481,8 @@ load_page(OBTreeFindPageContext *context)
 							   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(downlink), chkpNum))));
 	}
 
-	put_page_image(blkno, buf);
+	put_page_image(page_ptr, buf);
+	//(*desc->ppool->ops->inc_usage)(desc->ppool, page_ptr);
 	page_change_usage_count(&desc->ppool->ucm, blkno,
 							(pg_atomic_read_u32(desc->ppool->ucm.epoch) + 2) % UCM_USAGE_LEVELS);
 	page_desc->type = parent_page_desc->type;
@@ -1507,7 +1508,7 @@ load_page(OBTreeFindPageContext *context)
 		}
 	}
 
-	unlock_page(blkno);
+	(*desc->ppool->ops->unlock_page)(page_ptr);
 
 	EA_LOAD_INC(blkno);
 
@@ -1558,7 +1559,7 @@ load_page(OBTreeFindPageContext *context)
 							errdetail("Hikeys don't match.")));
 		result = refind_page(context, NULL, BTreeKeyRightmost,
 							 PAGE_GET_LEVEL(page) + 1,
-							 parent_blkno, parent_change_count);
+							 parent_ptr, parent_change_count);
 		Assert(result == OFindPageResultSuccess);
 	}
 	else
