@@ -428,8 +428,8 @@ static SysTreeMeta sysTreesMeta[] =
 		.tupPrint = o_sys_xid_undo_location_tuple_print,
 		.keyToJsonb = o_sys_xid_undo_location_key_to_jsonb,
 		.poolType = OPagePoolCatalog,
-		.undoLogType = UndoLogNone,
-		.storageType = BTreeStorageTemporary,
+		.undoLogType = UndoLogSystem,			// ?
+		.storageType = BTreeStoragePersistence,		// ?
 		.needs_undo = NULL
 	},
 };
