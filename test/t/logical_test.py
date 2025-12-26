@@ -383,6 +383,8 @@ class LogicalTest(BaseTest):
 		    result, "BEGIN\n"
 		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
 		    "table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
+		    "COMMIT\n"
+		    "BEGIN\n"
 		    "COMMIT\n")
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
