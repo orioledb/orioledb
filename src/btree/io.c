@@ -3228,7 +3228,7 @@ unlink_callback(const char *filename, uint32 segno, char *ext, void *arg)
 {
 	/*
 	 * Recovery determines relation data presence by presence of the first
-	 * data file.  So, we durably delete the first data file to evade
+	 * data file.  So, we durably delete the first data file to avoid
 	 * situation when partially deleted file data is visible.
 	 */
 	bool		fsync = *(bool *) arg;

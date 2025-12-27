@@ -215,7 +215,7 @@ page_locator_fits_item(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 					   XACT_INFO_MAP_CSN(tupHdr->xactInfo) < csn);
 
 				/*
-				 * Evade double calculation of space occupied by item to be
+				 * Avoid double calculation of space occupied by item to be
 				 * replace, which will go away after compaction.
 				 */
 				compactedFreeSpace -= oldItemSize;
@@ -231,7 +231,7 @@ page_locator_fits_item(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 
 		/*
 		 * Switch to real estimate.  Real estimate is much slower, but there
-		 * is a good chance to evade a page split.
+		 * is a good chance to avoid a page split.
 		 */
 		compactedFreeSpace -= PAGE_GET_N_VACATED(p) - page_get_vacated_space(desc, p, csn);
 		if (compactedFreeSpace >= spaceNeeded)
