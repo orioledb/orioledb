@@ -1,4 +1,7 @@
 # contrib/orioledb/Makefile
+# Import make flags if make.flags file is present
+-include make.flags
+export
 
 MODULE_big = orioledb
 EXTENSION = orioledb

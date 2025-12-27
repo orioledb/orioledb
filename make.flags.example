@@ -1,0 +1,8 @@
+# Makefile checks if the variable is defined, the value is ignored
+# Remove/comment out the flag to deactivate it
+
+USE_PGXS=1
+
+IS_DEV=1
+
+#VALGRIND=1

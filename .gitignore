@@ -34,6 +34,7 @@ win32ver.rc
 *.exe
 lib*dll.def
 lib*.pc
+make.flags
 
 # Local excludes in root directory
 /test/t/__pycache__/
