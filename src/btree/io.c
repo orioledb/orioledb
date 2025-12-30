@@ -1454,8 +1454,8 @@ load_page(OBTreeFindPageContext *context)
 	unlock_page(parent_blkno);
 
 	/* Prepare new page metaPage-data */
-	ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_FIND, 1);
-	blkno = ppool_get_page(desc->ppool, PPOOL_RESERVE_FIND);
+	(*desc->ppool->ops->reserve_pages)(desc->ppool, PPOOL_RESERVE_FIND, 1);
+	blkno = (*desc->ppool->ops->alloc_page)(desc->ppool, PPOOL_RESERVE_FIND);
 	lock_page(blkno);
 	page_block_reads(blkno);
 
@@ -1482,6 +1482,7 @@ load_page(OBTreeFindPageContext *context)
 	}
 
 	put_page_image(blkno, buf);
+	//TODO: (*desc->ppool->ops->inc_usage)(desc->ppool, page_ptr);
 	page_change_usage_count(&desc->ppool->ucm, blkno,
 							(pg_atomic_read_u32(desc->ppool->ucm.epoch) + 2) % UCM_USAGE_LEVELS);
 	page_desc->type = parent_page_desc->type;
@@ -2264,7 +2265,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 		unlock_page(parent_blkno);
 
 	if (evict)
-		ppool_free_page(desc->ppool, blkno, NULL);
+		(*desc->ppool->ops->free_page)(desc->ppool, blkno, NULL);
 
 	perform_writeback(&io_writeback);
 }
