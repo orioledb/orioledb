@@ -257,6 +257,41 @@ orioledb_amreuse(Relation index)
 	}
 }
 
+#include <stdlib.h>
+
+#define UNW_LOCAL_ONLY
+#include <libunwind.h>
+
+void my_backtrace()
+{
+	unw_cursor_t cursor;
+	unw_context_t context;
+
+	// grab the machine context and initialize the cursor
+	if (unw_getcontext(&context) < 0)
+		fprintf(stderr, "ERROR: cannot get local machine state\n");
+	if (unw_init_local(&cursor, &context) < 0)
+		fprintf(stderr, "ERROR: cannot initialize cursor for local unwinding\n");
+
+
+	StringInfo bktrc = makeStringInfo();
+	while (unw_step(&cursor) > 0) {
+		unw_word_t offset, pc;
+		char sym[4096];
+		if (unw_get_reg(&cursor, UNW_REG_IP, &pc))
+			fprintf(stderr, "ERROR: cannot read program counter\n");
+
+		appendStringInfo(bktrc, "0x%lx: ", pc);
+
+		if (unw_get_proc_name(&cursor, sym, sizeof(sym), &offset) == 0)
+			appendStringInfo(bktrc, "(%s+0x%lx)\n", sym, offset);
+		else
+			appendStringInfo(bktrc, "-- no symbol name found\n");
+	}
+	elog(WARNING, "BACKTRACE: %s", bktrc->data);
+	pfree(bktrc->data);
+	pfree(bktrc);
+}
 
 IndexBuildResult *
 orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo, bool isreindex)
@@ -265,6 +300,8 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo, bool isrei
 	String	   *relname;
 	OBTOptions *options = (OBTOptions *) index->rd_options;
 
+	ereport(WARNING, errmsg("orioledb_ambuild"));
+	my_backtrace();
 	if (options && !options->orioledb_index)
 	{
 		OTableDescr *descr;

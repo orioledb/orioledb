@@ -2280,6 +2280,57 @@ orioledb_tuple_is_current(Relation rel, TupleTableSlot *slot)
 	return COMMITSEQNO_IS_INPROGRESS(oslot->csn);
 }
 
+static void
+orioledb_reindex_all(Relation rel, const ReindexStmt *stmt,
+					 int flags, const ReindexParams *params,
+					 List *indexIds)
+{
+	int			i;
+	ListCell   *indexId;
+	char		persistence;
+
+	/*
+	 * Compute persistence of indexes: same as that of owning rel, unless
+	 * caller specified otherwise.
+	 */
+	if (flags & REINDEX_REL_FORCE_INDEXES_UNLOGGED)
+		persistence = RELPERSISTENCE_UNLOGGED;
+	else if (flags & REINDEX_REL_FORCE_INDEXES_PERMANENT)
+		persistence = RELPERSISTENCE_PERMANENT;
+	else
+		persistence = rel->rd_rel->relpersistence;
+
+	drop_indices_for_rel(rel, false);
+	/* Fix: do we need reindex of primary key here? it probably doesn't make sense for our tables */
+	redefine_indices(rel, true, false);
+	i = 1;
+	foreach(indexId, indexIds)
+	{
+		bool		closed = false;
+		Oid			indexOid = lfirst_oid(indexId);
+		Relation	ind = relation_open(indexOid, AccessShareLock);
+
+		if (!ind->rd_index->indisprimary)
+		{
+			relation_close(ind, AccessShareLock);
+			reindex_index(stmt, indexOid, !(flags & REINDEX_REL_CHECK_CONSTRAINTS),
+						  persistence, params);
+			closed = true;
+		}
+		if (!closed)
+			relation_close(ind, AccessShareLock);
+
+		CommandCounterIncrement();
+
+		/* Index should no longer be in the pending list */
+		Assert(!ReindexIsProcessingIndex(indexOid));
+
+		/* Set index rebuild count */
+		pgstat_progress_update_param(PROGRESS_CLUSTER_INDEX_REBUILD_COUNT,
+									 i);
+		i++;
+	}
+}
 
 /* ------------------------------------------------------------------------
  * Definition of the orioledb table access method.
@@ -2343,7 +2394,8 @@ static const TableAmRoutine orioledb_am_methods = {
 	.scan_sample_next_tuple = orioledb_scan_sample_next_tuple,
 	.tuple_is_current = orioledb_tuple_is_current,
 	.analyze_table = orioledb_analyze_table,
-	.reloptions = orioledb_reloptions
+	.reloptions = orioledb_reloptions,
+	.reindex_all = orioledb_reindex_all
 };
 
 bool

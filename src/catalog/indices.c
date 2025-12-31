@@ -1508,6 +1508,9 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	double	   *index_tuples;
 	OIndexDescr *idx;
 
+	ereport(WARNING, errmsg("build_secondary_index"));
+	void my_backtrace(void);
+	my_backtrace();
 	index_tuples = palloc0(sizeof(double));
 	ctid = 1;
 	idx = descr->indices[o_table->has_primary ? ix_num : ix_num + 1];
@@ -1866,6 +1869,9 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	int			nallindices = descr->nIndices + 1;
 	int			leader_sortmem;
 
+	ereport(WARNING, errmsg("rebuild_indices"));
+	void my_backtrace(void);
+	my_backtrace();
 	if (descr->bridge)
 		nallindices += 1;
 
@@ -2153,6 +2159,9 @@ o_index_drop(Relation tbl, OIndexNumber ix_num)
 	ORelOidsSetFromRel(oids, tbl);
 	o_table = o_tables_get(oids);
 
+	ereport(WARNING, errmsg("o_index_drop"));
+	void my_backtrace(void);
+	my_backtrace();
 	if (o_table == NULL)
 	{
 		elog(FATAL, "orioledb table does not exists for oids = %u, %u, %u",

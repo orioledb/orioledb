@@ -131,7 +131,6 @@ static void orioledb_object_access_hook(ObjectAccessType access, Oid classId,
 static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
 								Relation rel);
 static void o_find_collation_dependencies(Oid colloid);
-static void redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_tablespace);
 
 static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
 static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
@@ -2133,8 +2132,8 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	o_drop_table(old_o_table->oids);
 }
 
-static void
-redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_tablespace)
+void
+redefine_indices(Relation rel, bool primary, bool set_tablespace)
 {
 	ListCell   *index;
 
@@ -2146,27 +2145,15 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_table
 
 		if ((primary && ind->rd_index->indisprimary) || (!primary && !ind->rd_index->indisprimary))
 		{
-			OBTOptions *options = (OBTOptions *) ind->rd_options;
+			ReindexParams reindex_params = {0};
 
-			if (ind->rd_rel->relam != BTREE_AM_OID || (options && !options->orioledb_index))
-			{
-				ReindexParams reindex_params = {0};
-
-				relation_close(ind, AccessShareLock);
-				reindex_index(
+			relation_close(ind, AccessShareLock);
+			reindex_index(
 #if PG_VERSION_NUM >= 170000
-							  NULL,
+						  NULL,
 #endif
-							  indexOid, 0, ind->rd_rel->relpersistence, &reindex_params);
-				closed = true;
-			}
-			else
-			{
-				o_define_index_validate(new_o_table->oids, ind, NULL, NULL, false);
-				relation_close(ind, AccessShareLock);
-				o_define_index(rel, NULL, ind->rd_rel->oid, false, InvalidIndexNumber, set_tablespace, NULL);
-				closed = true;
-			}
+						  indexOid, 0, ind->rd_rel->relpersistence, &reindex_params);
+			closed = true;
 		}
 		if (!closed)
 			relation_close(ind, AccessShareLock);
@@ -2212,21 +2199,6 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_table
 		o_table_free(updated_o_table);
 	}
 
-}
-
-void
-redefine_pkey_for_rel(Relation rel)
-{
-	ORelOids	oids;
-	OTable	   *o_table;
-
-	ORelOidsSetFromRel(oids, rel);
-	o_table = o_tables_get(oids);
-	Assert(o_table != NULL);
-
-	redefine_indices(rel, o_table, true, false);
-
-	o_table_free(o_table);
 }
 
 static void
@@ -3423,7 +3395,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					 * Redefinig primary key here to not do rebuild after
 					 * rewrite_table
 					 */
-					redefine_indices(tbl, new_o_table, true, false);
+					redefine_indices(tbl, true, false);
 
 					o_table_free(new_o_table);
 					new_o_table = o_tables_get(new_oids);
@@ -3445,7 +3417,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							break;
 					}
 
-					redefine_indices(tbl, new_o_table, false, false);
+					redefine_indices(tbl, false, false);
 
 					o_table_free(old_o_table);
 					o_table_free(new_o_table);
@@ -3503,7 +3475,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						 * Redefinig primary key here to not do rebuild after
 						 * rewrite_table
 						 */
-						redefine_indices(tbl, new_o_table, true, true);
+						redefine_indices(tbl, true, true);
 
 						o_table_free(new_o_table);
 						new_o_table = o_tables_get(oids);
@@ -3526,7 +3498,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								break;
 						}
 
-						redefine_indices(tbl, new_o_table, false, true);
+						redefine_indices(tbl, false, true);
 
 						o_table_free(old_o_table);
 						o_table_free(new_o_table);

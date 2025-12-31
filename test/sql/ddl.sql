@@ -2,6 +2,19 @@ CREATE SCHEMA ddl;
 SET SESSION search_path = 'ddl';
 CREATE EXTENSION orioledb;
 
+create table t (i SERIAL, t text) USING orioledb;
+insert into t (t) (select repeat('x', 25)  FROM generate_series(1,100000,1) x);
+create index on t(t);
+create index on t(t);
+create index on t(t);
+create index on t(t);
+create index on t(t);
+ALTER TABLE t ADD PRIMARY KEY (i);
+set max_parallel_maintenance_workers to 0;
+\d+ t
+reindex table t;
+\q
+
 CREATE TABLE o_ddl_check
 (
 	f1 text,
