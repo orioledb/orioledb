@@ -5,7 +5,7 @@ sidebar_label: Undo-based rewind
 
 # Undo-based Rewind
 
-OrioleDB provides an undo-based rewind capability that allows a database cluster to be reverted to a consistent previous state. Unlike Point-in-Time Recovery (PITR) which relies on Write-Ahead Log (WAL) replay, OrioleDB rewind utilizes undo logs to roll back changes. This mechanism is generally faster than WAL-based recovery because it directly reverses effects using the undo chain.
+OrioleDB provides an undo-based rewind capability that allows a database cluster to be reverted to a consistent previous state. Unlike Point-in-Time Recovery (PITR), which relies on Write-Ahead Log (WAL) replay, OrioleDB rewind utilizes undo logs to roll back changes. This mechanism is generally faster than WAL-based recovery for reverting to recent database states, because it directly reverses recent changes using the undo chain.
 
 For `orioledb` tables, rewind uses the engine's native undo logs. For standard PostgreSQL `heap` tables, rewind functionality is supported by delaying vacuuming; older tuple versions are retained in the heap until they fall outside the configured rewind retention window.
 
