@@ -328,7 +328,6 @@ o_tables_table_meta_unlock(OTable *o_table, Oid oldRelnode)
 		o_tables_meta_unlock_no_wal();
 }
 
-extern Oid	o_saved_relrewrite;
 extern List *o_reuse_indices;
 
 extern void redefine_indices(Relation rel, bool primary, bool set_tablespace);

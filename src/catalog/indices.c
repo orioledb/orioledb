@@ -175,6 +175,7 @@ assign_new_oids(OTable *oTable, Relation rel, bool drop_pkey)
 
 	/* If toast relation exists, set new filenode for it */
 	toast_relid = rel->rd_rel->reltoastrelid;
+	elog(WARNING, "assign_new_oids: toast_relid: %u", toast_relid);
 	if (OidIsValid(toast_relid))
 	{
 		Relation	toastrel = relation_open(toast_relid,
@@ -211,6 +212,7 @@ assign_new_oids(OTable *oTable, Relation rel, bool drop_pkey)
 		foreach(indexId, indexIds)
 		{
 			Oid			indexOid = lfirst_oid(indexId);
+			elog(WARNING, "assign_new_oids: indexOid: %u", indexOid);
 			Relation	iRel = index_open(indexOid, AccessExclusiveLock);
 			OBTOptions *options = (OBTOptions *) iRel->rd_options;
 
@@ -400,6 +402,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		index = index_open(indoid, AccessShareLock);
 
 	ORelOidsSetFromRel(oids, heap);
+	elog(WARNING, "o_define_index: oids: %u", oids.reloid);
 
 	Assert(index != NULL);
 
@@ -427,8 +430,20 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 
 	if (OidIsValid(indoid))
 		index_close(index, AccessShareLock);
-
+	{
+	  extern Datum orioledb_sys_tree_structure(PG_FUNCTION_ARGS);
+	  Datum res;
+	  text  *options = cstring_to_text("");
+	  res = DirectFunctionCall3(orioledb_sys_tree_structure, 
+	                ObjectIdGetDatum(2),
+	                PointerGetDatum(options),
+	                Int32GetDatum(32));
+	
+	  elog(WARNING, "TREE: %s", text_to_cstring(DatumGetTextP(res)));
+	}
+	elog(WARNING, "o_tables_get with oids: (%u, %u, %u)", oids.datoid, oids.reloid, oids.relnode);
 	old_o_table = o_tables_get(oids);
+	elog(WARNING, "o_define_index: old_o_table->oids: (%u, %u, %u)", old_o_table->oids.datoid, old_o_table->oids.reloid, old_o_table->oids.relnode);
 	if (old_o_table == NULL)
 	{
 		elog(FATAL, "orioledb table does not exists for oids = %u, %u, %u",
@@ -488,7 +503,12 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			{
 				new_o_table = o_tables_get(oids);
 				o_table = new_o_table;
+				// if (Log_error_verbosity == PGERROR_TERSE)
+					elog(WARNING, "BEFORE assign_new_oids: %u", o_table->oids.reloid);
+				elog(WARNING, "assign_new_oids: heap: %u", heap->rd_rel->oid);
 				assign_new_oids(new_o_table, heap, false);
+				// if (Log_error_verbosity == PGERROR_TERSE)
+					elog(WARNING, "AFTER assign_new_oids: %u", o_table->oids.reloid);
 				oids = new_o_table->oids;
 				o_table->has_primary = true;
 				o_table->primary_init_nfields = o_table->nfields;

@@ -1031,6 +1031,8 @@ add_undo_truncate_relnode(ORelOids oldOids, ORelOids *oldTreeOids,
 {
 	Assert(ORelOidsIsValid(oldOids) && ORelOidsIsValid(newOids));
 	Assert(oldOids.datoid == newOids.datoid);
+	if (Log_error_verbosity == PGERROR_TERSE)
+		elog(WARNING, "oldOids.reloid(%u) == newOids.reloid(%u)", oldOids.reloid, newOids.reloid);
 	Assert(oldOids.reloid == newOids.reloid);
 
 	add_undo_relnode(oldOids, oldTreeOids, oldNumTreeOids,

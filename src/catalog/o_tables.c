@@ -150,6 +150,8 @@ oTablesGetNextKey(void *key, void *arg)
 
 	nextKey = *ckey;
 	nextKey.oids.relnode++;
+	if (Log_error_verbosity == PGERROR_TERSE)
+		elog(WARNING, "oTablesGetNextKey: next relnode: %u", nextKey.oids.relnode);
 	nextKey.chunknum = 0;
 
 	return (Pointer) &nextKey;
@@ -213,6 +215,8 @@ oTablesGetTupleDataSize(OTuple tuple, void *arg)
 {
 	OTableChunk *chunk = (OTableChunk *) tuple.data;
 
+	if (Log_error_verbosity == PGERROR_TERSE)
+		elog(WARNING, "OTableChunk: (%u, %u, %u)", chunk->key.oids.datoid, chunk->key.oids.reloid, chunk->key.oids.relnode); 
 	return chunk->dataLength;
 }
 
@@ -998,7 +1002,8 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 			Assert(old_table);
 			if (!reuse_relnode)
 			{
-				elog(DEBUG2, "o_indices del (%u, %u, %u, %u) - (%u, %u, %u)",
+				if (Log_error_verbosity == PGERROR_TERSE)
+				elog(WARNING, "o_indices del (%u, %u, %u, %u) - (%u, %u, %u)",
 					 old_keys[i].type,
 					 old_keys[i].oids.datoid,
 					 old_keys[i].oids.reloid,
@@ -1022,7 +1027,8 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 			Assert(new_table);
 			if (!reuse_relnode)
 			{
-				elog(DEBUG2, "o_indices add (%u, %u, %u, %u) - (%u, %u, %u)",
+				if (Log_error_verbosity == PGERROR_TERSE)
+				elog(WARNING, "o_indices add (%u, %u, %u, %u) - (%u, %u, %u)",
 					 new_keys[j].type,
 					 new_keys[j].oids.datoid,
 					 new_keys[j].oids.reloid,
@@ -1123,6 +1129,13 @@ o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
 	int			len;
 	BTreeDescr *sys_tree;
 
+	if (Log_error_verbosity == PGERROR_TERSE)
+	{
+		elog(WARNING, "o_tables_add: (%u, %u, %u)", table->oids.datoid, table->oids.reloid, table->oids.relnode);
+		void my_backtrace(void);
+		my_backtrace();
+	}
+
 	data = serialize_o_table(table, &len);
 
 	key.oids = table->oids;
@@ -1168,6 +1181,15 @@ o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version)
 											(Pointer *) &found_key);
 
 	if (result == NULL)
+		return NULL;
+
+	if (Log_error_verbosity == PGERROR_TERSE)
+	{
+		elog(WARNING, "key: (%u, %u, %u)", key.oids.datoid, key.oids.reloid, key.oids.relnode);
+		if (found_key)
+			elog(WARNING, "found_key: (%u, %u, %u)", found_key->oids.datoid, found_key->oids.reloid, found_key->oids.relnode);
+	}
+	if (found_key && !ORelOidsIsEqual(key.oids, found_key->oids))
 		return NULL;
 
 	oTable = deserialize_o_table(result, dataLength);
@@ -1957,6 +1979,7 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, boo
 		 */
 		if (!drop_pkey || oTable->indices[i].type != oIndexPrimary)
 		{
+			elog(WARNING, "o_table_fill_oids: indices[%d]: %u", i, oTable->indices[i].oids.reloid);
 			indexRel = relation_open(oTable->indices[i].oids.reloid, AccessShareLock);
 			ORelOidsSetFromRel(oTable->indices[i].oids, indexRel);
 			o_tablespace_cache_add_relnode(oTable->indices[i].oids.datoid,

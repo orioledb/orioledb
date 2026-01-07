@@ -1144,6 +1144,9 @@ o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	int			len;
 	BTreeDescr *sys_tree;
 
+	if (Log_error_verbosity == PGERROR_TERSE)
+		elog(WARNING, "o_indices_add: %u %d", table->oids.reloid, ixNum);
+
 	oIndex = make_o_index(table, ixNum);
 
 	oIndex->createOxid = oxid;
@@ -1175,6 +1178,8 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	key.chunknum = 0;
 	free_o_index(oIndex);
 
+	if (Log_error_verbosity == PGERROR_TERSE)
+		elog(WARNING, "o_indices_del: %u %d", table->oids.reloid, ixNum);
 	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
 	result = generic_toast_delete_optional_wal(&oIndicesToastAPI,
 											   (Pointer) &key, oxid, csn,

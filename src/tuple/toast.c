@@ -853,6 +853,8 @@ generic_toast_get_any_with_key(ToastAPI *api, void *key, Size *data_size,
 
 	it = o_btree_iterator_create(desc, key, BTreeKeyBound,
 								 o_snapshot, ForwardScanDirection);
+	if (Log_error_verbosity == PGERROR_TERSE)
+		elog(WARNING, "CREATED it");
 	if (api->versionCallback && found_key && *found_key)
 		o_btree_iterator_set_callback(it, api->versionCallback,
 									  (void *) *found_key);

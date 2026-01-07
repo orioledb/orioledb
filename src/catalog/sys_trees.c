@@ -922,6 +922,11 @@ o_table_chunk_cmp(BTreeDescr *desc,
 	else if (key1->oids.relnode > key2->oids.relnode)
 		return 1;
 
+	if (key1->oids.reloid < key2->oids.reloid)
+		return -1;
+	else if (key1->oids.reloid > key2->oids.reloid)
+		return 1;
+
 	if (key1->chunknum < key2->chunknum)
 		return -1;
 	else if (key1->chunknum > key2->chunknum)

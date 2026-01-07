@@ -442,13 +442,12 @@ orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 
-	if (OidIsValid(relation->rd_rel->relrewrite))
-		return slot;
-
 	o_set_current_command(cid);
 
 	descr = relation_get_descr(relation);
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+	if (Log_error_verbosity == PGERROR_TERSE)
+		elog(WARNING, "orioledb_tuple_insert INTO %s: %u %u", relation->rd_rel->relname.data, relation->rd_rel->oid, relation->rd_rel->relfilenode);
 	return o_tbl_insert(descr, relation, slot, oxid, oSnapshot.csn);
 }
 
@@ -1702,9 +1701,6 @@ orioledb_getnextslot(TableScanDesc sscan, ScanDirection direction,
 	OScanDesc	scan;
 	OTableDescr *descr;
 	bool		result;
-
-	if (OidIsValid(o_saved_relrewrite))
-		return false;
 
 	do
 	{

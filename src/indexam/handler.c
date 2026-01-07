@@ -288,7 +288,8 @@ void my_backtrace()
 		else
 			appendStringInfo(bktrc, "-- no symbol name found\n");
 	}
-	elog(WARNING, "BACKTRACE: %s", bktrc->data);
+	if (false && Log_error_verbosity == PGERROR_TERSE)
+		elog(WARNING, "BACKTRACE: %s", bktrc->data);
 	pfree(bktrc->data);
 	pfree(bktrc);
 }
@@ -300,7 +301,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo, bool isrei
 	String	   *relname;
 	OBTOptions *options = (OBTOptions *) index->rd_options;
 
-	ereport(WARNING, errmsg("orioledb_ambuild"));
+	elog(WARNING, "orioledb_ambuild: %s for %s(%u, %u) with relrewrite: %u", index->rd_rel->relname.data, heap->rd_rel->relname.data, heap->rd_rel->oid, heap->rd_rel->relfilenode, heap->rd_rel->relrewrite);
 	my_backtrace();
 	if (options && !options->orioledb_index)
 	{
@@ -336,20 +337,18 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo, bool isrei
 	result->heap_tuples = 0.0;
 	result->index_tuples = 0.0;
 
-	if (in_nontransactional_truncate || !OidIsValid(o_saved_relrewrite))
-	{
-		ORelOids	tbl_oids;
-		OTable	   *o_table;
+	ORelOids	tbl_oids;
+	OTable	   *o_table;
 
-		ORelOidsSetFromRel(tbl_oids, heap);
-		o_table = o_tables_get(tbl_oids);
+	ORelOidsSetFromRel(tbl_oids, heap);
+	o_table = o_tables_get(tbl_oids);
+	Assert(o_table);
 
-		if (index->rd_index->indisprimary)
-			isreindex = o_table->has_primary;
-		if (!in_nontransactional_truncate)
-			o_define_index_validate(tbl_oids, index, indexInfo, NULL, isreindex);
-		o_define_index(heap, index, InvalidOid, isreindex, InvalidIndexNumber, false, result);
-	}
+	if (index->rd_index->indisprimary)
+		isreindex = o_table->has_primary;
+	if (!in_nontransactional_truncate)
+		o_define_index_validate(tbl_oids, index, indexInfo, NULL, isreindex);
+	o_define_index(heap, index, InvalidOid, isreindex, InvalidIndexNumber, false, result);
 
 	return result;
 }
@@ -558,6 +557,9 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	CommitSeqNo csn;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
+	if (Log_error_verbosity == PGERROR_TERSE)
+		elog(WARNING, "orioledb_aminsert");
+
 	if (options && !options->orioledb_index)
 	{
 		bytea	   *rowid;
@@ -594,9 +596,6 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 
 		return result;
 	}
-
-	if (OidIsValid(rel->rd_rel->relrewrite))
-		return true;
 
 	if (rel->rd_index->indisprimary)
 		return true;

@@ -1797,6 +1797,8 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 						continue;
 					}
 
+					if (Log_error_verbosity == PGERROR_TERSE)
+						elog(WARNING, "index: %s", index->rd_rel->relname.data);
 					index_close(index, AccessShareLock);
 
 					for (ix_num = 0; ix_num < descr->nIndices; ix_num++)

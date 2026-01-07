@@ -13,7 +13,6 @@ ALTER TABLE t ADD PRIMARY KEY (i);
 set max_parallel_maintenance_workers to 0;
 \d+ t
 reindex table t;
-\q
 
 CREATE TABLE o_ddl_check
 (

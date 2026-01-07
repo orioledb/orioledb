@@ -104,15 +104,13 @@
 
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
+static swap_relation_files_hook_type old_swap_relation_files_hook = NULL;
 
-List	   *drop_index_list = NIL;
 List	   *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
-Oid			o_saved_relrewrite = InvalidOid;
 Oid			o_saved_reltablespace = InvalidOid;
 List	   *o_reuse_indices = NIL;
 static ORelOids saved_oids;
-static bool in_rewrite = false;
 Query	   *savedDataQuery = NULL;
 IndexBuildResult o_pkey_result = {0};
 bool		o_in_add_column = false;
@@ -127,6 +125,7 @@ static void orioledb_utility_command(PlannedStmt *pstmt,
 									 struct QueryCompletion *qc);
 static void orioledb_object_access_hook(ObjectAccessType access, Oid classId,
 										Oid objectId, int subId, void *arg);
+static void orioledb_swap_relation_files_hook(Relation oldRel, Relation newRel);
 
 static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
 								Relation rel);
@@ -143,6 +142,8 @@ orioledb_setup_ddl_hooks(void)
 	ProcessUtility_hook = orioledb_utility_command;
 	old_objectaccess_hook = object_access_hook;
 	object_access_hook = orioledb_object_access_hook;
+	old_swap_relation_files_hook = swap_relation_files_hook;
+	swap_relation_files_hook = orioledb_swap_relation_files_hook;
 }
 
 
@@ -867,8 +868,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	if (readOnlyTree)
 		pstmt = copyObject(pstmt);
 
-	in_rewrite = false;
-	o_saved_relrewrite = InvalidOid;
 	o_saved_reltablespace = InvalidOid;
 	savedDataQuery = NULL;
 	in_nontransactional_truncate = false;
@@ -1613,85 +1612,6 @@ o_find_composite_type_dependencies(Oid typeOid, Relation origRelation)
 	relation_close(depRel, AccessShareLock);
 }
 
-static bool
-ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
-							  int subId)
-{
-	ParseState *pstate = make_parsestate(NULL);
-	Node	   *expr = NULL;
-	bool		rewrite = false;
-	ListCell   *lc;
-	bool		append_transform = false;
-
-	foreach(lc, alter_type_exprs)
-	{
-		AttrNumber	attnum = intVal(linitial((List *) lfirst(lc)));
-
-		if (attnum == subId)
-		{
-			expr = (Node *) lsecond((List *) lfirst(lc));
-			break;
-		}
-	}
-
-	/* code from ATPrepAlterColumnType */
-	if (!expr)
-	{
-		expr = (Node *) makeVar(1, subId, old_field->typid, old_field->typmod,
-								old_field->collation, 0);
-		append_transform = true;
-	}
-	expr = coerce_to_target_type(pstate, expr, exprType(expr), field->typid,
-								 field->typmod, COERCION_EXPLICIT,
-								 COERCE_IMPLICIT_CAST, -1);
-	if (expr != NULL)
-	{
-		if (append_transform)
-			/* cppcheck-suppress unknownEvaluationOrder */
-			alter_type_exprs = lappend(alter_type_exprs, list_make2(makeInteger(subId), expr));
-		assign_expr_collations(pstate, expr);
-		expr = (Node *) expression_planner((Expr *) expr);
-
-		while (!rewrite)
-		{
-			/* only one varno, so no need to check that */
-			if (IsA(expr, Var) && ((Var *) expr)->varattno == subId)
-				break;
-			else if (IsA(expr, RelabelType))
-				expr = (Node *) ((RelabelType *) expr)->arg;
-			else if (IsA(expr, CoerceToDomain))
-			{
-				CoerceToDomain *d = (CoerceToDomain *) expr;
-
-				if (DomainHasConstraints(d->resulttype))
-					rewrite = true;
-				expr = (Node *) d->arg;
-			}
-			else if (IsA(expr, FuncExpr))
-			{
-				FuncExpr   *f = (FuncExpr *) expr;
-
-				switch (f->funcid)
-				{
-					case F_TIMESTAMPTZ_TIMESTAMP:
-					case F_TIMESTAMP_TIMESTAMPTZ:
-						if (TimestampTimestampTzRequiresRewrite())
-							rewrite = true;
-						else
-							expr = linitial(f->args);
-						break;
-					default:
-						rewrite = true;
-				}
-			}
-			else
-				rewrite = true;
-		}
-	}
-
-	return rewrite;
-}
-
 static void
 set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfactor, bool index_bridging)
 {
@@ -1828,6 +1748,9 @@ create_o_table_for_rel(Relation rel)
 	ORelOidsSetFromRel(oids, rel);
 	tupdesc = RelationGetDescr(rel);
 
+	if (Log_error_verbosity == PGERROR_TERSE)
+		elog(WARNING, "create_o_table_for_rel");
+
 	o_tables_rel_meta_lock(rel);
 	o_table = o_table_tableam_create(oids, tupdesc,
 									 rel->rd_rel->relpersistence,
@@ -1933,203 +1856,6 @@ o_drop_table(ORelOids oids)
 	add_undo_drop_relnode(oids, treeOids, numTreeOids);
 	pfree(treeOids);
 	o_table_free(table);
-}
-
-static void
-rewrite_matview(Relation rel, OTable *old_o_table, OTable *new_o_table)
-{
-	DestReceiver *dest = CreateOrioledbDestReceiver(rel);
-	List	   *rewritten;
-	PlannedStmt *plan;
-	QueryDesc  *queryDesc;
-	Query	   *copied_query;
-	Query	   *query;
-
-	/* Lock and rewrite, using a copy to preserve the original query. */
-	copied_query = copyObject(savedDataQuery);
-	AcquireRewriteLocks(copied_query, true, false);
-	rewritten = QueryRewrite(copied_query);
-
-	/* SELECT should never rewrite to more or less than one SELECT query */
-	if (list_length(rewritten) != 1)
-		elog(ERROR, "unexpected rewrite result for REFRESH MATERIALIZED VIEW");
-	query = (Query *) linitial(rewritten);
-
-	/* Check for user-requested abort. */
-	CHECK_FOR_INTERRUPTS();
-
-	/* Plan the query which will generate data for the refresh. */
-	plan = pg_plan_query(query, "ORIOLEDB rewrite_matview", CURSOR_OPT_PARALLEL_OK, NULL);
-
-	/*
-	 * Use a snapshot with an updated command ID to ensure this query sees
-	 * results of any previously executed queries.  (This could only matter if
-	 * the planner executed an allegedly-stable function that changed the
-	 * database contents, but let's do it anyway to be safe.)
-	 */
-	PushCopiedSnapshot(GetActiveSnapshot());
-	UpdateActiveSnapshotCommandId();
-
-	/* Create a QueryDesc, redirecting output to our tuple receiver */
-	queryDesc = CreateQueryDesc(plan, "ORIOLEDB rewrite_matview",
-								GetActiveSnapshot(), InvalidSnapshot,
-								dest, NULL, NULL, 0);
-
-	/* call ExecutorStart to prepare the plan for execution */
-	ExecutorStart(queryDesc, 0);
-
-	/* run the plan */
-	ExecutorRun(queryDesc, ForwardScanDirection, 0, true);
-
-	pgstat_count_heap_insert(rel, queryDesc->estate->es_processed);
-
-	/* and clean up */
-	ExecutorFinish(queryDesc);
-	ExecutorEnd(queryDesc);
-
-	FreeQueryDesc(queryDesc);
-
-	PopActiveSnapshot();
-
-	SetMatViewPopulatedState(rel, true);
-}
-
-static void
-rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
-{
-	OTableDescr *old_descr = NULL;
-	void	   *sscan;
-	TupleTableSlot *old_slot;
-	TupleTableSlot *new_slot;
-	OTuple		tup;
-	CommitSeqNo tupleCsn;
-	BTreeLocationHint hint;
-	OTableDescr *descr;
-	OSnapshot	oSnapshot;
-	OXid		oxid;
-	int			primary_init_nfields = old_o_table->primary_init_nfields;
-
-	if (!old_o_table->has_primary)
-		primary_init_nfields--;
-
-	old_descr = o_fetch_table_descr(old_o_table->oids);
-	descr = relation_get_descr(rel);
-	old_slot = MakeSingleTupleTableSlot(old_descr->tupdesc, &TTSOpsOrioleDB);
-	new_slot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
-	sscan = make_btree_seq_scan(&GET_PRIMARY(old_descr)->desc, &o_in_progress_snapshot, NULL);
-
-	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-
-	while (!O_TUPLE_IS_NULL(tup = btree_seq_scan_getnext(sscan, old_slot->tts_mcxt, &tupleCsn, &hint)))
-	{
-		tts_orioledb_store_tuple(old_slot, tup, old_descr,
-								 COMMITSEQNO_INPROGRESS, PrimaryIndexNumber,
-								 true, &hint);
-		slot_getallattrs(old_slot);
-		tts_orioledb_detoast(old_slot);
-
-		for (int i = 0; i < old_slot->tts_tupleDescriptor->natts; i++)
-		{
-			Node	   *expr = NULL;
-			Form_pg_attribute attr = &old_slot->tts_tupleDescriptor->attrs[i];
-
-			ListCell   *lc;
-
-			foreach(lc, alter_type_exprs)
-			{
-				AttrNumber	attnum = intVal(linitial((List *) lfirst(lc)));
-
-				if (attnum == i + 1)
-				{
-					expr = (Node *) lsecond((List *) lfirst(lc));
-					break;
-				}
-			}
-
-			if (!expr && attr->atthasdef && !attr->atthasmissing &&
-				i >= primary_init_nfields &&
-				old_slot->tts_isnull[i])
-			{
-				Node	   *defaultexpr = build_column_default(rel, i + 1);
-
-				expr = defaultexpr;
-			}
-
-			if (!expr && attr->attgenerated && old_slot->tts_isnull[i])
-			{
-				Node	   *defaultexpr = build_column_default(rel, i + 1);
-
-				expr = defaultexpr;
-			}
-
-			if (!expr && DomainHasConstraints(attr->atttypid) &&
-				old_slot->tts_isnull[i])
-			{
-				Oid			baseTypeId;
-				int32		baseTypeMod;
-				Oid			baseTypeColl;
-				Node	   *defval;
-
-				defval = build_column_default(rel, i + 1);
-
-				if (!defval)
-				{
-					baseTypeMod = attr->atttypmod;
-					baseTypeId = getBaseTypeAndTypmod(attr->atttypid, &baseTypeMod);
-					baseTypeColl = get_typcollation(baseTypeId);
-					defval = (Node *) makeNullConst(baseTypeId, baseTypeMod, baseTypeColl);
-				}
-				else
-				{
-					baseTypeId = exprType(defval);
-				}
-				defval = (Node *) coerce_to_target_type(NULL,
-														defval,
-														baseTypeId,
-														attr->atttypid,
-														attr->atttypmod,
-														COERCION_ASSIGNMENT,
-														COERCE_IMPLICIT_CAST,
-														-1);
-				if (defval == NULL) /* should not happen */
-					elog(ERROR, "failed to coerce base type to domain");
-				expr = defval;
-			}
-
-			attr = &new_slot->tts_tupleDescriptor->attrs[i];
-			if (expr)
-			{
-				new_slot->tts_values[i] = o_eval_default(new_o_table, rel, expr, old_slot,
-														 attr->attbyval, attr->attlen,
-														 &new_slot->tts_isnull[i]);
-			}
-			else
-			{
-				if (!old_slot->tts_isnull[i])
-				{
-					new_slot->tts_values[i] = datumCopy(old_slot->tts_values[i], attr->attbyval, attr->attlen);
-					new_slot->tts_isnull[i] = old_slot->tts_isnull[i];
-				}
-				else
-				{
-					new_slot->tts_values[i] = 0;
-					new_slot->tts_isnull[i] = true;
-				}
-			}
-		}
-		new_slot->tts_nvalid = new_slot->tts_tupleDescriptor->natts;
-
-		o_tbl_insert(descr, rel, new_slot, oxid, oSnapshot.csn);
-
-		ExecClearTuple(old_slot);
-		ExecClearTuple(new_slot);
-	}
-
-	ExecDropSingleTupleTableSlot(old_slot);
-	ExecDropSingleTupleTableSlot(new_slot);
-	free_btree_seq_scan(sscan);
-
-	o_drop_table(old_o_table->oids);
 }
 
 void
@@ -2525,6 +2251,16 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 {
 	Relation	rel;
 
+
+	if (Log_error_verbosity == PGERROR_TERSE)
+		if (access != OAT_FUNCTION_EXECUTE && access != OAT_NAMESPACE_SEARCH)
+			elog(WARNING, "OAT: %s %u %u %d",
+				 access == OAT_POST_CREATE ? "OAT_POST_CREATE" :
+				 access == OAT_DROP ? "OAT_DROP" :
+				 access == OAT_POST_ALTER ? "OAT_POST_ALTER" :
+				 access == OAT_TRUNCATE ? "OAT_TRUNCATE" :
+				 "OTHER", classId, objectId, subId);
+
 	if (access == OAT_POST_CREATE && classId == ExtensionRelationId)
 	{
 #if PG_VERSION_NUM >= 170000
@@ -2562,8 +2298,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 			if ((rel->rd_rel->relkind == RELKIND_RELATION ||
 				 rel->rd_rel->relkind == RELKIND_MATVIEW) &&
-				(subId == 0) && is_orioledb_rel(rel) &&
-				!OidIsValid(rel->rd_rel->relrewrite))
+				(subId == 0) && is_orioledb_rel(rel))
 			{
 				ListCell   *lc;
 				ORelOids	oids;
@@ -2650,14 +2385,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							/* Do not drop index if it is set for reuse */
 							elog(DEBUG1, "object_access_hook: skipping index %d drop as it is set for reuse", objectId);
 						}
-						else if (!(drop_arg->dropflags &
-								   PERFORM_DELETION_INTERNAL) ||
-								 list_member(drop_index_list, relname))
-						{
-							drop_index_list = list_delete(drop_index_list,
-														  relname);
+						else
 							o_index_drop(tbl, ix_num);
-						}
 					}
 				}
 				relation_close(tbl, AccessShareLock);
@@ -2912,21 +2641,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
 					 (subId == 0) && is_orioledb_rel(rel))
 			{
-				if (!OidIsValid(rel->rd_rel->relrewrite))
-				{
-					create_o_table_for_rel(rel);
-				}
-				else
-				{
-					Relation	old_rel = relation_open(rel->rd_rel->relrewrite, AccessShareLock);
-
-					o_saved_relrewrite = rel->rd_rel->relrewrite;
-					ORelOidsSetFromRel(saved_oids, old_rel);
-					relation_close(old_rel, AccessShareLock);
-				}
+				create_o_table_for_rel(rel);
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_TOASTVALUE) &&
-					 (subId == 0) && !OidIsValid(rel->rd_rel->relrewrite))
+					 (subId == 0))
 			{
 				Oid			tbl_oid;
 				Relation	tbl = NULL;
@@ -3020,7 +2738,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						}
 						else if (rel->rd_rel->relam == BTREE_AM_OID)
 						{
-							if (!in_rewrite && !rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
+							if (!rel->rd_index->indisprimary && ix_num == InvalidIndexNumber)
 							{
 								OBTOptions *options = (OBTOptions *) rel->rd_options;
 
@@ -3049,70 +2767,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				relation_close(rel, AccessShareLock);
 		}
 	}
-	else if (access == OAT_POST_CREATE && classId == AttrDefaultRelationId)
-	{
-		rel = relation_open(objectId, AccessShareLock);
-
-		if (rel != NULL && (rel->rd_rel->relkind == RELKIND_RELATION) &&
-			(subId != 0) && is_orioledb_rel(rel))
-		{
-			Form_pg_attribute attr;
-			OTable	   *o_table;
-			ORelOids	oids;
-			OSnapshot	oSnapshot;
-			OXid		oxid;
-
-			ORelOidsSetFromRel(oids, rel);
-			o_table = o_tables_get(oids);
-			if (o_table == NULL)
-			{
-				/* table does not exist */
-				elog(NOTICE, "orioledb table \"%s\" not found",
-					 RelationGetRelationName(rel));
-			}
-			else
-			{
-				OTableField old_field;
-				OTableField *field;
-				bool		changed;
-
-				old_field = o_table->fields[subId - 1];
-				CommandCounterIncrement();
-				field = &o_table->fields[subId - 1];
-				attr = &rel->rd_att->attrs[subId - 1];
-				orioledb_attr_to_field(field, attr);
-
-				/* TODO: Probably use CheckIndexCompatible here */
-				changed = old_field.typid != field->typid ||
-					old_field.typmod != field->typmod ||
-					old_field.collation != field->collation;
-
-				if (changed)
-				{
-					if (ATColumnChangeRequiresRewrite(&old_field, field,
-													  subId))
-						in_rewrite = true;
-				}
-
-				if (!in_rewrite)
-				{
-					o_table_fill_constr(o_table, rel, subId - 1,
-										&old_field, field);
-
-					fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-					o_tables_rel_meta_lock(rel);
-					o_tables_update(o_table, oxid, oSnapshot.csn);
-					o_tables_after_update(o_table, oxid, oSnapshot.csn);
-					o_tables_rel_meta_unlock(rel, InvalidOid);
-
-					/* This has no effect? */
-					o_table->fields[subId - 1] = old_field;
-					o_table_free(o_table);
-				}
-			}
-		}
-		relation_close(rel, AccessShareLock);
-	}
 	else if (access == OAT_POST_ALTER && classId == RelationRelationId)
 	{
 		rel = relation_open(objectId, AccessShareLock);
@@ -3125,123 +2779,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				CommandCounterIncrement();
 				o_class_cache_update_if_needed(MyDatabaseId, rel->rd_rel->oid,
 											   NULL);
-			}
-			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
-					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
-					 (subId != 0) && is_orioledb_rel(rel))
-			{
-				OTable	   *o_table;
-				ORelOids	oids;
-
-				ORelOidsSetFromRel(oids, rel);
-				o_table = o_tables_get(oids);
-				if (o_table == NULL)
-				{
-					/* table does not exist */
-					elog(NOTICE, "orioledb table \"%s\" not found",
-						 RelationGetRelationName(rel));
-				}
-				else
-				{
-					OTableField old_field;
-					OTableField *field;
-					Form_pg_attribute attr;
-					OSnapshot	oSnapshot;
-					OXid		oxid;
-					int			ix_num;
-					bool		changed_ty;
-
-					old_field = o_table->fields[subId - 1];
-					CommandCounterIncrement();
-					field = &o_table->fields[subId - 1];
-					attr = &rel->rd_att->attrs[subId - 1];
-					orioledb_attr_to_field(field, attr);
-
-					/* TODO: Probably use CheckIndexCompatible here */
-					changed_ty = old_field.typid != field->typid ||
-						old_field.typmod != field->typmod ||
-						old_field.collation != field->collation;
-
-					if (changed_ty)
-					{
-						if (ATColumnChangeRequiresRewrite(&old_field, field,
-														  subId))
-							in_rewrite = true;
-					}
-
-					if (!in_rewrite)
-					{
-						orioledb_save_collation(field->collation);
-						fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-						o_tables_rel_meta_lock(rel);
-						o_tables_update(o_table, oxid, oSnapshot.csn);
-						o_tables_after_update(o_table, oxid, oSnapshot.csn);
-						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
-						{
-							bool		compatible = false;
-							int			field_num;
-							int			ctid_idx_off;
-							OTableIndex *o_table_index;
-							List	   *attributeList = NIL;
-
-							ctid_idx_off = o_table->has_primary ? 0 : 1;
-							o_table_index = &o_table->indices[ix_num];
-
-							for (field_num = 0; field_num < o_table_index->nkeyfields; field_num++)
-							{
-								IndexElem  *iparam;
-								OTableIndexField *iField = &o_table_index->fields[field_num];
-								int			attnum = iField->attnum;
-								OTableField *table_field;
-
-								table_field = &o_table->fields[attnum];
-								iparam = makeNode(IndexElem);
-
-								iparam->name = table_field->name.data;
-								iparam->expr = NULL;
-								iparam->collation = get_collation(table_field->collation, table_field->typid);
-								iparam->opclass = get_opclass(iField->opclass, table_field->typid);
-								iparam->ordering = iField->ordering;
-								iparam->nulls_ordering = iField->nullsOrdering;
-
-								attributeList = lappend(attributeList, iparam);
-							}
-
-							compatible = CheckIndexCompatible(o_table_index->oids.reloid, "btree", attributeList, NIL);
-
-							for (field_num = 0; field_num < o_table_index->nkeyfields;
-								 field_num++)
-							{
-								bool		has_field;
-
-								has_field = o_table_index->fields[field_num].attnum ==
-									subId - 1;
-								if (o_table_index->type == oIndexPrimary || has_field)
-								{
-									o_indices_update(o_table,
-													 ix_num + ctid_idx_off,
-													 oxid, oSnapshot.csn);
-									o_invalidate_oids(o_table_index->oids);
-									o_add_invalidate_undo_item(o_table_index->oids,
-															   O_INVALIDATE_OIDS_ON_ABORT);
-								}
-								if (changed_ty && has_field && (o_table_index->type == oIndexPrimary || !compatible))
-								{
-									String	   *ix_name;
-
-									ix_name =
-										makeString(pstrdup(o_table_index->name.data));
-									drop_index_list =
-										list_append_unique(drop_index_list,
-														   ix_name);
-								}
-							}
-						}
-						o_tables_rel_meta_unlock(rel, InvalidOid);
-					}
-					o_table->fields[subId - 1] = old_field;
-					o_table_free(o_table);
-				}
 			}
 			else if (rel->rd_rel->relkind == RELKIND_INDEX)
 			{
@@ -3361,71 +2898,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				}
 			}
 			else if (rel->rd_rel->relkind == RELKIND_TOASTVALUE &&
-					 OidIsValid(o_saved_relrewrite) &&
-					 OidIsValid(rel->rd_rel->relrewrite) &&
-					 (subId == 0))
-			{
-				Relation	tbl = NULL;
-
-				tbl = table_open(o_saved_relrewrite, AccessShareLock);
-				if (is_orioledb_rel(tbl))
-				{
-					ORelOids	new_oids;
-					OTable	   *old_o_table,
-							   *new_o_table;
-
-					CommandCounterIncrement();
-
-					old_o_table = o_tables_get(saved_oids);
-					Assert(old_o_table != NULL);
-
-					create_o_table_for_rel(tbl);
-
-					set_toast_oids_and_options(tbl, rel, false, old_o_table->index_bridging);
-
-					ORelOidsSetFromRel(new_oids, tbl);
-					new_o_table = o_tables_get(new_oids);
-					Assert(new_o_table != NULL);
-
-					relation_close(tbl, AccessShareLock);
-					CommandCounterIncrement();
-					tbl = relation_open(o_saved_relrewrite, AccessShareLock);
-
-					/*
-					 * Redefinig primary key here to not do rebuild after
-					 * rewrite_table
-					 */
-					redefine_indices(tbl, true, false);
-
-					o_table_free(new_o_table);
-					new_o_table = o_tables_get(new_oids);
-					Assert(new_o_table != NULL);
-
-					switch (tbl->rd_rel->relkind)
-					{
-						case RELKIND_RELATION:
-							rewrite_table(tbl, old_o_table, new_o_table);
-							break;
-						case RELKIND_MATVIEW:
-							o_saved_relrewrite = InvalidOid;
-							if (savedDataQuery != NULL)
-								rewrite_matview(tbl, old_o_table, new_o_table);
-							o_drop_table(old_o_table->oids);
-							break;
-						default:
-							Assert(false);
-							break;
-					}
-
-					redefine_indices(tbl, false, false);
-
-					o_table_free(old_o_table);
-					o_table_free(new_o_table);
-					o_saved_relrewrite = InvalidOid;
-				}
-				table_close(tbl, AccessShareLock);
-			}
-			else if (rel->rd_rel->relkind == RELKIND_TOASTVALUE &&
 					 (subId == 0))
 			{
 				Oid			tbl_oid;
@@ -3471,32 +2943,11 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						CommandCounterIncrement();
 						tbl = relation_open(tbl_oid, AccessShareLock);
 
-						/*
-						 * Redefinig primary key here to not do rebuild after
-						 * rewrite_table
-						 */
 						redefine_indices(tbl, true, true);
 
 						o_table_free(new_o_table);
 						new_o_table = o_tables_get(oids);
 						Assert(new_o_table != NULL);
-
-						switch (tbl->rd_rel->relkind)
-						{
-							case RELKIND_RELATION:
-							case RELKIND_MATVIEW:
-
-								/*
-								 * for matview we just copy data to not
-								 * recalculate expressions
-								 */
-								Assert(alter_type_exprs == NIL);
-								rewrite_table(tbl, old_o_table, new_o_table);
-								break;
-							default:
-								Assert(false);
-								break;
-						}
 
 						redefine_indices(tbl, false, true);
 
@@ -3713,6 +3164,48 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 	if (old_objectaccess_hook)
 		old_objectaccess_hook(access, classId, objectId, subId, arg);
+}
+
+void
+orioledb_swap_relation_files_hook(Relation oldRel, Relation newRel)
+{
+	if (Log_error_verbosity == PGERROR_TERSE)
+	{
+		elog(WARNING, "oldRel: %s: %u %u", oldRel->rd_rel->relname.data, oldRel->rd_rel->oid, oldRel->rd_rel->relfilenode);
+		elog(WARNING, "newRel: %s: %u %u", newRel->rd_rel->relname.data, newRel->rd_rel->oid, newRel->rd_rel->relfilenode);
+	}
+	ORelOids	old_oids,
+				new_oids;
+	OTable	   *old_o_table,
+			   *new_o_table;
+	OSnapshot	oSnapshot;
+	OXid		oxid;
+
+	ORelOidsSetFromRel(old_oids, oldRel);
+	ORelOidsSetFromRel(new_oids, newRel);
+
+	old_o_table = o_tables_get(old_oids);
+	Assert(old_o_table);
+	new_o_table = o_tables_get(new_oids);
+	Assert(new_o_table);
+	new_o_table->oids.reloid = old_o_table->oids.reloid;
+	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+	if (Log_error_verbosity == PGERROR_TERSE)
+	{
+	  extern Datum orioledb_sys_tree_structure(PG_FUNCTION_ARGS);
+	  Datum res;
+	  text  *options = cstring_to_text("");
+	  res = DirectFunctionCall3(orioledb_sys_tree_structure, 
+	                ObjectIdGetDatum(3),
+	                PointerGetDatum(options),
+	                Int32GetDatum(32));
+	
+	  elog(WARNING, "TREE: %s", text_to_cstring(DatumGetTextP(res)));
+	}
+	o_tables_update(new_o_table, oxid, oSnapshot.csn);
+
+	if (old_swap_relation_files_hook)
+		old_swap_relation_files_hook(oldRel, newRel);
 }
 
 /*
@@ -3957,18 +3450,11 @@ o_parse_compress(const char *value)
 void
 o_ddl_cleanup(void)
 {
-	if (drop_index_list)
-	{
-		list_free_deep(drop_index_list);
-		drop_index_list = NIL;
-	}
 	if (partition_drop_index_list)
 	{
 		list_free(partition_drop_index_list);
 		partition_drop_index_list = NIL;
 	}
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
-	o_saved_relrewrite = InvalidOid;
-	in_rewrite = false;
 	o_in_add_column = false;
 }
