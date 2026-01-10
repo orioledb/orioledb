@@ -361,6 +361,10 @@ extern UndoLocation read_page_from_undo(BTreeDescr *desc, Page img,
 extern void init_new_btree_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 								uint16 flags, uint16 level, bool noLock);
 extern void init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum);
+extern LocationIndex page_get_vacated_skip_item(BTreeDescr *desc,
+												Page p,
+												CommitSeqNo csn,
+												LocationIndex skipOffset);
 extern LocationIndex page_get_vacated_space(BTreeDescr *desc, Page p,
 											CommitSeqNo csn);
 extern void null_unused_bytes(Page img);

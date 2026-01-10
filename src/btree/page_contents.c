@@ -415,12 +415,13 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 }
 
 /*
- * Estimate vacated space in the page.
+ * Estimate vacated space in the page after item replace on the given offset.
  */
 LocationIndex
-page_get_vacated_space(BTreeDescr *desc, Page p, CommitSeqNo csn)
+page_get_vacated_skip_item(BTreeDescr *desc, Page p, CommitSeqNo csn,
+						   LocationIndex offset)
 {
-	LocationIndex vacated_bytes = 0;
+	LocationIndex vacatedBytes = 0;
 	BTreePageItemLocator loc;
 
 	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
@@ -428,23 +429,37 @@ page_get_vacated_space(BTreeDescr *desc, Page p, CommitSeqNo csn)
 		BTreeLeafTuphdr *header;
 		OTuple		tuple;
 
+		if (BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc) == offset)
+			continue;
+
 		BTREE_PAGE_READ_LEAF_ITEM(header, tuple, p, &loc);
 		if (XACT_INFO_FINISHED_FOR_EVERYBODY(header->xactInfo))
 		{
 			if (header->deleted)
 			{
 				if (COMMITSEQNO_IS_INPROGRESS(csn) || XACT_INFO_MAP_CSN(header->xactInfo) < csn)
-					vacated_bytes += BTREE_PAGE_GET_ITEM_SIZE(p, &loc);
+					vacatedBytes += BTREE_PAGE_GET_ITEM_SIZE(p, &loc);
 			}
 			else
 			{
-				vacated_bytes += BTREE_PAGE_GET_ITEM_SIZE(p, &loc) -
-					(BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tuple, OTupleLength)));
+				LocationIndex itemCompactedSize;
+
+				itemCompactedSize = BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tuple, OTupleLength));
+				vacatedBytes += BTREE_PAGE_GET_ITEM_SIZE(p, &loc) - itemCompactedSize;
 			}
 		}
 	}
 
-	return vacated_bytes;
+	return vacatedBytes;
+}
+
+/*
+ * Estimate vacated space in the page.
+ */
+LocationIndex
+page_get_vacated_space(BTreeDescr *desc, Page p, CommitSeqNo csn)
+{
+	return page_get_vacated_skip_item(desc, p, csn, -1);
 }
 
 /*
