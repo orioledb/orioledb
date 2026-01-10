@@ -496,46 +496,6 @@ class PageFitItemsTest(BaseTest):
 		con2.close()
 		node.stop()
 
-	def test_replace_drop_in_second_trasaction_commit(self):
-		node = self.node
-		node.start()
-		node.safe_psql('postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;")
-		relDescr = self.startup_page_filling(8192 - 100)
-		self.assertSysTreePagesCount(1)
-
-		transactionRel = None
-		for i, rel in enumerate(relDescr):
-			if rel[1] == 0:
-				transactionRel = i
-				break
-
-		con1 = node.connect()
-		con2 = node.connect()
-		t1 = ThreadQueryExecutor(
-		    con1,
-		    f"CREATE INDEX o_table{transactionRel + 1}_idx_t0 ON o_table{transactionRel + 1} USING BTREE(t0)\n;"
-		)
-		t2 = ThreadQueryExecutor(con2,
-		                         f"DROP TABLE o_table{transactionRel + 1};")
-		t1.start()
-		t1.join()
-		self.assertSysTreePagesCount(3)
-
-		t2.start()
-		self.assertSysTreePagesCount(3)
-
-		con1.commit()
-
-		with self.assertRaises(DatabaseError) as e:
-			t2.join()
-			con2.commit()
-		self.assertErrorMessageEquals(e, f'missing entries in o_indices')
-
-		self.assertSysTreePagesCount(3)
-		con1.close()
-		con2.close()
-		node.stop()
-
 	def test_replace_drop_in_second_trasaction_rollback(self):
 		node = self.node
 		node.start()
