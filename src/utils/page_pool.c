@@ -165,14 +165,15 @@ ppool_get_metapage(OPagePool *pool)
  * Free page should be previously reserved by o_pool_reserve_pages().
  */
 OInMemoryBlkno
-ppool_get_page(OPagePool *pool, int kind)
+o_ppool_get_page(PagePool *pool, int kind)
 {
+    OPagePool *o_pool = (OPagePool *) pool;
 	OInMemoryBlkno result;
 
-	Assert(pool->numPagesReserved[kind] > 0);
-	pool->numPagesReserved[kind]--;
+	Assert(o_pool->numPagesReserved[kind] > 0);
+	o_pool->numPagesReserved[kind]--;
 
-	result = ucm_occupy_free_page(&pool->ucm);
+	result = ucm_occupy_free_page(&o_pool->ucm);
 	Assert(pool->offset <= result && result < pool->offset + pool->size);
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(O_GET_IN_MEMORY_PAGE(result), ORIOLEDB_BLCKSZ);
@@ -307,4 +308,13 @@ ppool_run_clock(OPagePool *pool, bool evict,
 		free_retained_undo_location(UndoLogRegularPageLevel);
 	if (!haveRetainSystemLoc)
 		free_retained_undo_location(UndoLogSystem);
+}
+
+// TODO: need to decide what to do with pagedesc array and its access macro
+bool o_ppool_is_dirty(OInMemoryBlkno blkno){
+    return O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_DIRTY;
+}
+
+bool o_ppool_is_dirty_concurrent(OInMemoryBlkno blkno){
+    return O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_CONCURRENT_DIRTY;
 }

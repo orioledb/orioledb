@@ -21,6 +21,7 @@
 #include "btree/io.h"
 #include "btree/page_chunks.h"
 #include "tableam/descr.h"
+#include "utils/page_pool.h"
 #include "utils/stopevent.h"
 
 #include "access/transam.h"
@@ -432,7 +433,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		Pointer		p;
 		bool		fastpath;
 
-		p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
+		p = pptr_get_page(intCxt.ptr);
 		level = PAGE_GET_LEVEL(p);
 
 		fastpath = fastpathMeta.enabled && !needLock;
@@ -451,7 +452,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		{
 			if (tryFlag)
 			{
-				if (!try_lock_page(intCxt.blkno))
+				if (!(*desc->ppool->ops->try_lock_page)(intCxt.ptr))
 					return OFindPageResultFailure;
 				intCxt.pagePtr = p;
 				intCxt.haveLock = true;
@@ -486,7 +487,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			}
 			else
 			{
-				lock_page(intCxt.blkno);
+				(*desc->ppool->ops->lock_page)(intCxt.ptr);
 				intCxt.pagePtr = p;
 				intCxt.haveLock = true;
 				needLock = false;
@@ -598,7 +599,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			/* Release lock if needed */
 			if (intCxt.haveLock)
 			{
-				unlock_page(intCxt.blkno);
+				(*desc->ppool->ops->unlock_page)(intCxt.ptr);
 				intCxt.haveLock = false;
 			}
 
@@ -701,7 +702,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			Assert(tryFlag);
 			if (intCxt.haveLock)
 			{
-				unlock_page(intCxt.blkno);
+				(*desc->ppool->ops->unlock_page)(intCxt.ptr);
 				intCxt.haveLock = false;
 			}
 			return OFindPageResultFailure;
@@ -713,7 +714,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			{
 				if (!modifyFlag)
 				{
-					unlock_page(intCxt.blkno);
+					(*desc->ppool->ops->unlock_page)(intCxt.ptr);
 				}
 				else if (level == 0 && fixLeafFlag)
 				{
@@ -754,21 +755,21 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				 * Don't try to load page from write_page()
 				 */
 				if (intCxt.haveLock)
-					unlock_page(intCxt.blkno);
+    				(*desc->ppool->ops->unlock_page)(intCxt.ptr);
 				return OFindPageResultFailure;
 			}
 
 			if (intCxt.haveLock)
 			{
 				load_page(context);
-				intCxt.blkno = context->items[context->index].blkno;
+				intCxt.ptr = context->items[context->index].ptr;
 				loc = context->items[context->index].locator;
-				intCxt.pagePtr = p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
+				intCxt.pagePtr = p = pptr_get_page(intCxt.ptr);
 				nonLeafHdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt.pagePtr, &loc);
 
 				if (level != PAGE_GET_LEVEL(p))
 				{
-					unlock_page(intCxt.blkno);
+    				(*desc->ppool->ops->unlock_page)(intCxt.ptr);
 					intCxt.haveLock = false;
 					continue;
 				}
@@ -807,16 +808,16 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 
 			if (intCxt.haveLock)
 			{
-				unlock_page(intCxt.blkno);
+    			(*desc->ppool->ops->unlock_page)(intCxt.ptr);
 				intCxt.haveLock = false;
 			}
 			wait_for_io_completion(ionum);
 			continue;
 		}
 
-		parentBlkno = intCxt.blkno;
+		parentPtr = intCxt.ptr;
 		context->index++;
-		intCxt.blkno = DOWNLINK_GET_IN_MEMORY_BLKNO(nonLeafHdr->downlink);
+		intCxt.ptr = DOWNLINK_GET_IN_MEMORY_BLKNO(nonLeafHdr->downlink);
 		intCxt.pageChangeCount = DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(nonLeafHdr->downlink);
 
 		if (STOPEVENTS_ENABLED())
