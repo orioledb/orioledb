@@ -76,7 +76,6 @@ Dockerfile.ubuntu
 
 # Exclude OrioleDB Docker test definitions and code
 # as they are not needed inside the Docker image.
-test/
 ci/local_docker_matrix.sh
 ci/docker_matrix.sh
 
