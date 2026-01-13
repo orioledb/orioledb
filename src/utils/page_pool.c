@@ -90,24 +90,25 @@ ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found)
  * lock, and then allocate them using ucm_occupy_free_page().
  */
 void
-ppool_reserve_pages(OPagePool *pool, int kind, int count)
+o_ppool_reserve_pages(PagePool *pool, int kind, int count)
 {
 	uint64		val;
+	OPagePool *o_pool = (OPagePool *) pool;
 
 	Assert(!have_locked_pages());
 
-	count -= pool->numPagesReserved[kind];
+	count -= o_pool->numPagesReserved[kind];
 	if (count <= 0)
 		return;
 
-	val = pg_atomic_sub_fetch_u64(pool->availablePagesCount, count);
+	val = pg_atomic_sub_fetch_u64(o_pool->availablePagesCount, count);
 	while (val & (UINT64CONST(1) << 63))
 	{
-		ppool_run_clock(pool, true, NULL);
-		val = pg_atomic_read_u64(pool->availablePagesCount);
+		(*pool->ops->run_clock)(pool, true, NULL);
+		val = pg_atomic_read_u64(o_pool->availablePagesCount);
 	}
 
-	pool->numPagesReserved[kind] += count;
+	o_pool->numPagesReserved[kind] += count;
 }
 
 /*
@@ -115,21 +116,22 @@ ppool_reserve_pages(OPagePool *pool, int kind, int count)
  * released in one call).
  */
 void
-ppool_release_reserved(OPagePool *pool, uint32 mask)
+o_ppool_release_reserved(PagePool *pool, uint32 mask)
 {
 	int			sum = 0,
 				kind;
+	OPagePool *o_pool = (OPagePool *) pool;
 
 	for (kind = 0; kind < PPOOL_RESERVE_COUNT; kind++)
 	{
 		if (mask & (1 << kind))
 		{
-			sum += pool->numPagesReserved[kind];
-			pool->numPagesReserved[kind] = 0;
+			sum += o_pool->numPagesReserved[kind];
+			o_pool->numPagesReserved[kind] = 0;
 		}
 	}
 	if (sum != 0)
-		pg_atomic_add_fetch_u64(pool->availablePagesCount, sum);
+		pg_atomic_add_fetch_u64(o_pool->availablePagesCount, sum);
 }
 
 /*
@@ -152,11 +154,12 @@ ppool_release_all_pages(void)
  * Reserves and allocate page for metadata. Metadata pages are typically
  * allocated without holding any page locks.
  */
+// THOUGHT: can be shared for both ppool impls
 OInMemoryBlkno
-ppool_get_metapage(OPagePool *pool)
+o_ppool_get_metapage(PagePool *pool)
 {
-	ppool_reserve_pages(pool, PPOOL_RESERVE_META, 1);
-	return ppool_get_page(pool, PPOOL_RESERVE_META);
+	(*pool->ops->reserve_pages)(pool, PPOOL_RESERVE_META, 1);
+	return (*pool->ops->alloc_page)(pool, PPOOL_RESERVE_META);
 }
 
 /*
@@ -185,12 +188,13 @@ o_ppool_get_page(PagePool *pool, int kind)
  * Return free page to the pool.
  */
 void
-ppool_free_page(OPagePool *pool, OInMemoryBlkno blkno, bool haveLock)
+o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	OrioleDBPageDesc *page_desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
+	OPagePool *o_pool = (OPagePool *) pool;
 
-	Assert(pool->offset <= blkno && blkno < pool->offset + pool->size);
+	Assert(o_pool->offset <= blkno && blkno < o_pool->offset + o_pool->size);
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
 	Assert(!IS_DIRTY(blkno));
@@ -210,9 +214,9 @@ ppool_free_page(OPagePool *pool, OInMemoryBlkno blkno, bool haveLock)
 	page_desc->fileExtent.len = InvalidFileExtentLen;
 	unlock_page(blkno);
 
-	page_change_usage_count(&pool->ucm, blkno, UCM_FREE_PAGES_LEVEL);
+	page_change_usage_count(&o_pool->ucm, blkno, UCM_FREE_PAGES_LEVEL);
 
-	pg_atomic_add_fetch_u64(pool->availablePagesCount, 1);
+	pg_atomic_add_fetch_u64(o_pool->availablePagesCount, 1);
 }
 
 /*
@@ -242,7 +246,7 @@ ppool_dirty_pages_count(OPagePool *pool)
  * Run clock replacement algorithm until we evict at least one page.
  */
 void
-ppool_run_clock(OPagePool *pool, bool evict,
+o_ppool_run_clock(PagePool *pool, bool evict,
 				volatile sig_atomic_t *shutdown_requested)
 {
 	uint64		blkno;
@@ -250,10 +254,11 @@ ppool_run_clock(OPagePool *pool, bool evict,
 	Size		undoSystemSize = get_reserved_undo_size(UndoLogSystem);
 	bool		haveRetainRegularLoc = undo_type_has_retained_location(UndoLogRegularPageLevel);
 	bool		haveRetainSystemLoc = undo_type_has_retained_location(UndoLogSystem);
+	OPagePool *o_pool = (OPagePool *) pool;
 
-	blkno = pg_prng_uint64_range(&pool->prngSeed,
-								 pool->offset,
-								 pool->offset + pool->size - 1);
+	blkno = pg_prng_uint64_range(&o_pool->prngSeed,
+								 o_pool->offset,
+								 o_pool->offset + o_pool->size - 1);
 
 	/*
 	 * Shouldn't be called while holding a page lock: one should reserve the
@@ -265,7 +270,7 @@ ppool_run_clock(OPagePool *pool, bool evict,
 	reserve_undo_size(UndoLogRegularPageLevel, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 	reserve_undo_size(UndoLogSystem, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 
-	Assert(blkno >= pool->offset && blkno < pool->offset + pool->size);
+	Assert(blkno >= o_pool->offset && blkno < o_pool->offset + o_pool->size);
 	/* Our attempts to evict pages shouldn't themselves affect UCM */
 	set_skip_ucm();
 
@@ -274,9 +279,9 @@ ppool_run_clock(OPagePool *pool, bool evict,
 		if (shutdown_requested != NULL && *shutdown_requested)
 			break;
 
-		blkno = ucm_next_blkno(&pool->ucm, blkno, 1);
+		blkno = ucm_next_blkno(&o_pool->ucm, blkno, 1);
 
-		Assert(blkno >= pool->offset && blkno < pool->offset + pool->size);
+		Assert(blkno >= o_pool->offset && blkno < o_pool->offset + o_pool->size);
 		if (walk_page(blkno, evict) != OWalkPageSkipped)
 		{
 			Assert(!have_locked_pages());
@@ -284,8 +289,8 @@ ppool_run_clock(OPagePool *pool, bool evict,
 		}
 		Assert(!have_locked_pages());
 		blkno++;
-		if (blkno >= pool->offset + pool->size)
-			blkno = pool->offset;
+		if (blkno >= o_pool->offset + o_pool->size)
+			blkno = o_pool->offset;
 	}
 
 	unset_skip_ucm();
@@ -308,13 +313,4 @@ ppool_run_clock(OPagePool *pool, bool evict,
 		free_retained_undo_location(UndoLogRegularPageLevel);
 	if (!haveRetainSystemLoc)
 		free_retained_undo_location(UndoLogSystem);
-}
-
-// TODO: need to decide what to do with pagedesc array and its access macro
-bool o_ppool_is_dirty(OInMemoryBlkno blkno){
-    return O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_DIRTY;
-}
-
-bool o_ppool_is_dirty_concurrent(OInMemoryBlkno blkno){
-    return O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_CONCURRENT_DIRTY;
 }
