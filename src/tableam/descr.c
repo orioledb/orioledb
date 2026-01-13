@@ -780,6 +780,7 @@ o_fetch_table_descr_extended(ORelOids oids, OSnapshot snapshot, uint32 version)
 	OTableDescr *table_descr = NULL;
 	bool		found = false;
 
+	/* @TODO !!! need to enable cache */
 	if (version == O_TABLE_INVALID_VERSION)
 		table_descr = hash_search(oTableDescrHash, &oids, HASH_FIND, &found);
 
@@ -796,19 +797,18 @@ o_fetch_table_descr_extended(ORelOids oids, OSnapshot snapshot, uint32 version)
 OIndexDescr *
 o_fetch_index_descr(ORelOids oids, OIndexType type, bool lock, bool *nested)
 {
-	return o_fetch_index_descr_extended(oids, type, lock, nested, o_non_deleted_snapshot);
+	return o_fetch_index_descr_extended(oids, type, lock, nested, o_non_deleted_snapshot, O_TABLE_INVALID_VERSION);
 }
 
 OIndexDescr *
-o_fetch_index_descr_extended(ORelOids oids, OIndexType type, bool lock, bool *nested, OSnapshot snapshot)
+o_fetch_index_descr_extended(ORelOids oids, OIndexType type, bool lock, bool *nested, OSnapshot snapshot, uint32 version)
 {
 	OIndexDescr *index_descr = NULL;
 
 	if (lock)
 		o_tables_rel_lock_extended(&oids, AccessShareLock, true);
 
-	/* @TODO !!! Add version */
-	index_descr = get_index_descr(oids, type, true, snapshot, O_TABLE_INVALID_VERSION);
+	index_descr = get_index_descr(oids, type, true, snapshot, version);
 
 	if (!index_descr && lock)
 	{
@@ -995,6 +995,7 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OSnapshot snap
 	OIndex	   *oIndex;
 	MemoryContext mcxt;
 
+	/* @TODO !!! temporary commented, need to enable cache */
 	result = hash_search(oIndexDescrHash, &ixOids, HASH_ENTER, &found);
 	/* if (found) */
 	/* return result; */

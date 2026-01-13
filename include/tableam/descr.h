@@ -88,6 +88,7 @@ struct OIndexDescr
 {
 	ORelOids	oids;
 	ORelOids	tableOids;
+	uint32		version;
 
 	/* reference count */
 	int			refcnt;
@@ -270,7 +271,7 @@ typedef struct
  */
 extern OTableDescr *o_fetch_table_descr_extended(ORelOids oids, OSnapshot snapshot, uint32 version);
 extern OIndexDescr *o_fetch_index_descr_extended(ORelOids oids, OIndexType type,
-												 bool lock, bool *nested, OSnapshot snapshot);
+												 bool lock, bool *nested, OSnapshot snapshot, uint32 version);
 extern OTableDescr *o_fetch_table_descr(ORelOids oids);
 extern OIndexDescr *o_fetch_index_descr(ORelOids oids, OIndexType type,
 										bool lock, bool *nested);

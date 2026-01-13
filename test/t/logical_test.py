@@ -395,7 +395,8 @@ class LogicalTest(BaseTest):
 		node.safe_psql(
 		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
 		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
-		    "CREATE INDEX data_idx ON o_data(data);")
+		    "CREATE INDEX data_idx ON o_data(data);"
+		)  # regular secondary btree index
 
 		node.safe_psql(
 		    'postgres',
@@ -422,6 +423,62 @@ class LogicalTest(BaseTest):
 		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
 		    "table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
 		    "COMMIT\n")
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_systrees_versions_index_toast_rewrite_rel(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
+		    "ALTER TABLE o_data ALTER COLUMN data SET STORAGE EXTERNAL;\n"
+		)  # force external
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		# txn operates with two	iterationns of TOAST index descr & with two versions of relation
+		check = node.execute('''
+			BEGIN;
+			INSERT INTO o_data(data) VALUES (repeat('A', 50000));
+
+			SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='o_data';
+
+			ALTER TABLE o_data ADD COLUMN data_3 text;
+
+			ALTER TABLE o_data
+			ALTER COLUMN data_3 TYPE bigint
+			USING 0::bigint;
+
+			SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='o_data';
+
+			INSERT INTO o_data(data,data_3) VALUES (repeat('B', 50000),1);
+
+			SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='o_data';
+			COMMIT;
+		''')
+		print(check)
+		v1 = check[0]
+		v2 = check[1]
+		v3 = check[2]
+		relfilenode_id = 1
+		reltoastrelid_id = 2
+		self.assertTrue(
+		    v1[relfilenode_id]
+		    != v2[relfilenode_id])  # relfilenode changed after ALTER
+		self.assertTrue(
+		    v1[reltoastrelid_id]
+		    != v2[reltoastrelid_id])  # reltoastrelid changed after ALTER
+		self.assertTrue(v2[relfilenode_id] == v3[relfilenode_id])
+		self.assertTrue(v2[reltoastrelid_id] == v3[reltoastrelid_id])
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+
+		# @TODO !!! check large output !!!
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")

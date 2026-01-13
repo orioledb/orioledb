@@ -1529,7 +1529,7 @@ tts_orioledb_insert_toast_values(TupleTableSlot *slot,
 			p = DatumGetPointer(value);
 
 			o_btree_load_shmem(&descr->toast->desc);
-			result = o_toast_insert(GET_PRIMARY(descr), descr->toast,
+			result = o_toast_insert(descr,
 									idx_tup, i + 1 + ctid_off, p,
 									toast_datum_size(value), oxid, csn);
 			if (free)
@@ -1825,8 +1825,7 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 			p = DatumGetPointer(value);
 
 			o_btree_load_shmem(&descr->toast->desc);
-			result = o_toast_insert(GET_PRIMARY(descr),
-									descr->toast,
+			result = o_toast_insert(descr,
 									idx_tup,
 									toast_attn + 1 + ctid_off,
 									p,

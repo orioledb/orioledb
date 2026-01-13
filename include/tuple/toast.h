@@ -148,7 +148,7 @@ extern void o_toast_init_tupdescs(OIndexDescr *toast, TupleDesc ix_primary);
 /*
  * Functions dealing with tableam TOAST trees.
  */
-extern bool o_toast_insert(OIndexDescr *primary, OIndexDescr *toast,
+extern bool o_toast_insert(OTableDescr *descr,
 						   OTuple pk, uint16 attn,
 						   Pointer data, Size data_size,
 						   OXid oxid, CommitSeqNo csn);

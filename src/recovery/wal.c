@@ -37,7 +37,6 @@ static void add_finish_wal_record(uint8 rec_type, OXid xmin);
 static void add_joint_commit_wal_record(TransactionId xid, OXid xmin);
 static void add_xid_wal_record(OXid oxid, TransactionId logicalXid);
 static void add_xid_wal_record_if_needed(void);
-static void add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version);
 static void flush_local_wal_if_needed(int required_length);
 static inline void add_local_modify(uint8 record_type, OTuple record, OffsetNumber length, OTuple record2, OffsetNumber length2);
 static void add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
@@ -719,12 +718,13 @@ add_relreplident_wal_record(char relreplident)
 	local_wal_buffer_offset += sizeof(*rec);
 }
 
-static void
+void
 add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version)
 {
 	OXid		runXmin;
 	CommitSeqNo csn;
 	CommandId	cid;
+
 	WALRecRelation *rec = (WALRecRelation *) (&local_wal_buffer[local_wal_buffer_offset]);
 
 	Assert(!is_recovery_process());
@@ -748,7 +748,9 @@ add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version)
 
 	memcpy(rec->version, &version, sizeof(version));
 
-	elog(DEBUG4, "[%s] WAL_REC_RELATION xmin/csn/cid %lu/%lu/%u version %u", __func__, runXmin, csn, cid, version);
+	elog(DEBUG4, "[%s] WAL_REC_RELATION [ %u %u %u ] xmin/csn/cid %lu/%lu/%u version %u", __func__,
+		oids.datoid, oids.reloid, oids.relnode,
+		runXmin, csn, cid, version);
 
 	local_wal_buffer_offset += sizeof(*rec);
 

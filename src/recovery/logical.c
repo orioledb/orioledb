@@ -307,7 +307,7 @@ o_convert_non_toast_tuple(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexD
 
 /* Convert chunk in a TOAST relation from OrioleDB format to reorder buffer (heap) format */
 static REORDER_BUFFER_TUPLE_TYPE
-o_convert_toast_chunk(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexDescr *indexDescr, OTuple tuple, TupleDescData *o_toast_tupDesc, TupleDescData *heap_toast_tupDesc, OffsetNumber debug_length)
+o_convert_toast_chunk(ReorderBuffer *reorderbuf, OIndexDescr *indexDescr, OTuple tuple, TupleDescData *o_toast_tupDesc, TupleDescData *heap_toast_tupDesc, OffsetNumber debug_length)
 {
 	uint16		attnum;
 	uint32		chunk_seq;
@@ -403,7 +403,7 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, uint8 rec_type, OIndexType ix_
 		if (ix_type == oIndexToast)
 		{
 			elog(DEBUG4, "WAL_REC_INSERT TOAST");
-			change->data.tp.newtuple = o_convert_toast_chunk(reorderbuf, descr, indexDescr, tuple1, o_toast_tupDesc, heap_toast_tupDesc, debug_length);
+			change->data.tp.newtuple = o_convert_toast_chunk(reorderbuf, indexDescr, tuple1, o_toast_tupDesc, heap_toast_tupDesc, debug_length);
 			change->data.tp.clear_toast_afterwards = false;
 		}
 		else
@@ -505,6 +505,9 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, uint8 rec_type, OIndexType ix_
 	}
 }
 
+static 	ORelOids	cur_oids = {0, 0, 0};
+static uint32		cur_version = O_TABLE_INVALID_VERSION;
+
 /*
  * Handle OrioleDB records for LogicalDecodingProcessRecord().
  */
@@ -519,9 +522,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	Pointer		ptr = startPtr;
 	OTableDescr *descr = NULL;
 	OIndexDescr *indexDescr = NULL;
-	ORelOids	cur_oids = {0, 0, 0};
+	ORelOids	latest_oids = {0, 0, 0};
+	uint32		latest_version = O_TABLE_INVALID_VERSION;
 	char		relreplident = REPLICA_IDENTITY_DEFAULT;
-	uint32		cur_version = O_TABLE_INVALID_VERSION;
 	OXid		oxid = InvalidOXid;
 	TransactionId logicalXid = InvalidTransactionId,
 				heapXid = InvalidTransactionId;
@@ -786,8 +789,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			OXid		xmin;
 
 			OSnapshot	snapshot;
+			ORelOids	cur_ixoids = {0, 0, 0};
+			uint32		cur_ixversion = O_TABLE_INVALID_VERSION;
 
-			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids, &xmin, &snapshot.csn, &snapshot.cid, &cur_version, wal_version);
+			ptr = wal_parse_rec_relation(ptr, &treeType, &latest_oids, &xmin, &snapshot.csn, &snapshot.cid, &latest_version, wal_version);
 
 			snapshot.xmin = xmin;
 			snapshot.xlogptr = changeXLogPtr;
@@ -796,12 +801,23 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			{
 				/* Override undefined values from WAL */
 				snapshot = o_non_deleted_snapshot;
-				cur_version = O_TABLE_INVALID_VERSION;
+				latest_version = O_TABLE_INVALID_VERSION;
 			}
 
 			ix_type = treeType;
 			relreplident = REPLICA_IDENTITY_DEFAULT;
 			descr = NULL;
+
+			if (ix_type == oIndexInvalid)
+			{
+				cur_oids = latest_oids;
+				cur_version = latest_version;
+			}
+			else if (ix_type == oIndexToast)
+			{
+				cur_ixoids = latest_oids;
+				cur_ixversion = latest_version;
+			}
 
 			elog(DEBUG4, "WAL_REC_RELATION");
 
@@ -822,8 +838,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				continue;
 			}
 
-			if (IS_SYS_TREE_OIDS(cur_oids))
-				sys_tree_num = cur_oids.relnode;
+			if (IS_SYS_TREE_OIDS(latest_oids))
+				sys_tree_num = latest_oids.relnode;
 			else
 				sys_tree_num = -1;
 
@@ -835,7 +851,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else if (ix_type == oIndexInvalid)
 			{
-				descr = o_fetch_table_descr_extended(cur_oids, snapshot, cur_version);
+				descr = o_fetch_table_descr_extended(latest_oids, snapshot, latest_version);
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
 				elog(DEBUG4, "WAL_REC_RELATION oIndexInvalid");
 			}
@@ -843,7 +859,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			{
 				elog(DEBUG4, "WAL_REC_RELATION oIndexToast");
 
-				indexDescr = o_fetch_index_descr_extended(cur_oids, ix_type, false, NULL, snapshot);
+				indexDescr = o_fetch_index_descr_extended(cur_ixoids, ix_type, false, NULL, snapshot, cur_ixversion);
 				descr = o_fetch_table_descr_extended(indexDescr->tableOids, snapshot, cur_version);
 				o_toast_tupDesc = descr->toast->leafTupdesc;
 				/* Init heap tupledesc for toast table */
@@ -871,7 +887,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 
 			if (descr && descr->toast)
-				elog(DEBUG4, "reloid: %d natts: %u toast natts: %u", cur_oids.reloid, descr->tupdesc->natts, descr->toast->leafTupdesc->natts);
+				elog(DEBUG4, "reloid: %d natts: %u toast natts: %u", latest_oids.reloid, descr->tupdesc->natts, descr->toast->leafTupdesc->natts);
 
 		}
 		else if (rec_type == WAL_REC_RELREPLIDENT)
@@ -1001,8 +1017,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			read_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
 			ptr = wal_parse_rec_modify(ptr, &tuple1, &tuple2, &debug_length, read_two_tuples);
 
-			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
-				 rec_type, rec_type_str, oxid, logicalXid, heapXid);
+			elog(DEBUG4, "RECEIVE record type %d (%s) oids [ %u %u %u ] oxid %lu logicalXId %u heapXid %u",
+				 rec_type, rec_type_str,
+				 latest_oids.datoid, latest_oids.reloid, latest_oids.relnode,
+				 oxid, logicalXid, heapXid);
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
@@ -1029,7 +1047,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				continue;
 
 			if ((ix_type == oIndexInvalid || ix_type == oIndexToast) &&
-				cur_oids.datoid == ctx->slot->data.database)
+				latest_oids.datoid == ctx->slot->data.database)
 			{
 				ReorderBufferChange *change;
 
@@ -1037,9 +1055,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				Assert(!O_TUPLE_IS_NULL(tuple1.tuple));
 				change = ReorderBufferGetChange(ctx->reorder);
 				change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
-				change->data.tp.rlocator.dbOid = cur_oids.datoid;
-				change->data.tp.rlocator.relNumber = cur_oids.relnode;
-				elog(DEBUG4, "reloid: %u", cur_oids.reloid);
+				change->data.tp.rlocator.dbOid = latest_oids.datoid;
+				change->data.tp.rlocator.relNumber = latest_oids.relnode;
+				elog(DEBUG4, "reloid: %u", latest_oids.reloid);
 
 				o_decode_modify_tuples(ctx->reorder, rec_type, ix_type, change, descr, indexDescr, o_toast_tupDesc, heap_toast_tupDesc, tuple1.tuple, tuple2.tuple, debug_length, relreplident);
 

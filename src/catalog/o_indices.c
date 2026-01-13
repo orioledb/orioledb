@@ -163,6 +163,14 @@ oIndicesGetTupleDataSize(OTuple tuple, void *arg)
 	return chunk->dataLength;
 }
 
+static uint32
+oIndicesGetTupleKeyVersion(OTuple tuple, void *arg)
+{
+	OIndexChunk *chunk = (OIndexChunk *) tuple.data;
+
+	return chunk->key.version;
+}
+
 static TupleFetchCallbackResult
 oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 					  void *arg, TupleFetchCallbackCheckType check_type)
@@ -220,7 +228,7 @@ ToastAPI	oIndicesToastAPI = {
 	.getTupleData = oIndicesGetTupleData,
 	.getTupleChunknum = oIndicesGetTupleChunknum,
 	.getTupleDataSize = oIndicesGetTupleDataSize,
-	.getTupleKeyVersion = NULL, /* @TODO */
+	.getTupleKeyVersion = oIndicesGetTupleKeyVersion,
 	.deleteLogFullTuple = true,
 	.fetchCallback = oIndicesFetchCallback
 };
@@ -981,6 +989,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	memset(descr, 0, sizeof(*descr));
 	descr->oids = oIndex->indexOids;
 	descr->tableOids = oIndex->tableOids;
+	descr->version = oIndex->indexVersion;
 	descr->refcnt = 0;
 	descr->valid = true;
 	namestrcpy(&descr->name, oIndex->name.data);
