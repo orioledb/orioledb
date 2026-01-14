@@ -1620,8 +1620,7 @@ tts_orioledb_remove_toast_values(TupleTableSlot *slot,
 				   ote.data_size);
 			o_btree_load_shmem(&descr->toast->desc);
 
-			result = o_toast_delete(GET_PRIMARY(descr),
-									descr->toast,
+			result = o_toast_delete(descr,
 									key.tuple,
 									toast_attn + 1 + ctid_off,
 									oxid,
@@ -1805,8 +1804,7 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 				   VARDATA_EXTERNAL(DatumGetPointer(oldValue)) + O_TOAST_EXTERNAL_SZ,
 				   ote.data_size);
 			o_btree_load_shmem(&descr->toast->desc);
-			result = o_toast_delete(GET_PRIMARY(descr),
-									descr->toast,
+			result = o_toast_delete(descr,
 									key.tuple,
 									toast_attn + 1 + ctid_off,
 									oxid,

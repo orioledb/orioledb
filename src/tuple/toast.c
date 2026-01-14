@@ -922,6 +922,7 @@ o_toast_insert(OTableDescr *descr, OTuple pk, uint16 attn,
 	result = generic_toast_insert(api, &tkey, data,
 								  data_size, oxid, csn, &arg);
 
+
 	return result;
 }
 
@@ -946,13 +947,17 @@ o_toast_sort_add(OIndexDescr *primary, OIndexDescr *toast,
 }
 
 bool
-o_toast_delete(OIndexDescr *primary, OIndexDescr *toast,
+o_toast_delete(OTableDescr *descr,
 			   OTuple pk, uint16 attn,
 			   OXid oxid, CommitSeqNo csn)
 {
 	OToastKey	tkey;
 	bool		result;
+	OIndexDescr *primary = GET_PRIMARY(descr);
+	OIndexDescr *toast = descr->toast;
 	OTableToastArg arg = {primary, toast};
+	ToastAPI   *api = &tableToastAPI;
+	BTreeDescr *desc = api->getBTreeDesc(&arg);
 
 	tkey.pk_tuple = pk;
 	tkey.attnum = attn;
@@ -960,7 +965,14 @@ o_toast_delete(OIndexDescr *primary, OIndexDescr *toast,
 
 	Assert(toast->desc.type == oIndexToast);
 
-	result = generic_toast_delete(&tableToastAPI, (Pointer) &tkey,
+	if (desc->storageType == BTreeStoragePersistence)
+		/* @TODO @ CHECK && wal == true */
+	{
+		add_rel_wal_record(descr->oids, oIndexInvalid, descr->version);
+		/* @TODO @ CHECK ! !!type ! !! */
+	}
+
+	result = generic_toast_delete(api, (Pointer) &tkey,
 								  oxid, csn, &arg);
 
 	return result;

@@ -156,7 +156,7 @@ extern void o_toast_sort_add(OIndexDescr *primary, OIndexDescr *toast,
 							 OTuple pk, uint16 attn,
 							 Pointer data, Size data_size,
 							 Tuplesortstate *sortstate);
-extern bool o_toast_delete(OIndexDescr *primary, OIndexDescr *toast,
+extern bool o_toast_delete(OTableDescr *descr,
 						   OTuple pk, uint16 attn,
 						   OXid oxid, CommitSeqNo csn);
 extern Pointer o_toast_get(OIndexDescr *primary, OIndexDescr *toast,

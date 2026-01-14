@@ -505,8 +505,8 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, uint8 rec_type, OIndexType ix_
 	}
 }
 
-static 	ORelOids	cur_oids = {0, 0, 0};
-static uint32		cur_version = O_TABLE_INVALID_VERSION;
+static ORelOids cur_oids = {0, 0, 0};
+static uint32 cur_version = O_TABLE_INVALID_VERSION;
 
 /*
  * Handle OrioleDB records for LogicalDecodingProcessRecord().
@@ -851,15 +851,32 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else if (ix_type == oIndexInvalid)
 			{
+				elog(DEBUG4, "WAL_REC_RELATION oIndexInvalid :: FETCH RELATION [ %u %u %u ] version %u",
+					 latest_oids.datoid, latest_oids.reloid, latest_oids.relnode,
+					 latest_version);
+
 				descr = o_fetch_table_descr_extended(latest_oids, snapshot, latest_version);
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
-				elog(DEBUG4, "WAL_REC_RELATION oIndexInvalid");
 			}
 			else if (ix_type == oIndexToast)
 			{
-				elog(DEBUG4, "WAL_REC_RELATION oIndexToast");
+				elog(DEBUG4, "WAL_REC_RELATION [1] oIndexToast :: FETCH INDEX oids [ %u %u %u ] version %u :: for RELATION [ %u %u %u ] version %u",
+					 cur_ixoids.datoid, cur_ixoids.reloid, cur_ixoids.relnode,
+					 cur_ixversion,
+					 cur_oids.datoid, cur_oids.reloid, cur_oids.relnode,
+					 cur_version);
 
 				indexDescr = o_fetch_index_descr_extended(cur_ixoids, ix_type, false, NULL, snapshot, cur_ixversion);
+
+				elog(DEBUG4, "WAL_REC_RELATION [2] oIndexToast :: FETCH RELATION [ %u %u %u ] version %u -> retrieved [ %u %u %u ]",
+					 cur_oids.datoid, cur_oids.reloid, cur_oids.relnode,
+					 cur_version,
+					 indexDescr->tableOids.datoid, indexDescr->tableOids.reloid, indexDescr->tableOids.relnode);
+
+				Assert(indexDescr->tableOids.datoid == cur_oids.datoid);
+				Assert(indexDescr->tableOids.reloid == cur_oids.reloid);
+				Assert(indexDescr->tableOids.relnode == cur_oids.relnode);
+
 				descr = o_fetch_table_descr_extended(indexDescr->tableOids, snapshot, cur_version);
 				o_toast_tupDesc = descr->toast->leafTupdesc;
 				/* Init heap tupledesc for toast table */
