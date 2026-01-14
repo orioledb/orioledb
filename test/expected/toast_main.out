@@ -1,0 +1,242 @@
+-----
+-- Test TOAST with STORAGE MAIN
+-- This tests the fix for handling large values with STORAGE MAIN
+-- which should keep data inline but compress when needed
+-----
+CREATE SCHEMA toast_main;
+SET SESSION search_path = 'toast_main';
+CREATE EXTENSION orioledb;
+-- generate pseudo-random string function in deterministic way
+CREATE FUNCTION generate_string(seed integer, length integer) RETURNS text
+	AS $$
+		SELECT substr(string_agg(
+						substr(encode(sha256(seed::text::bytea || '_' || i::text::bytea), 'hex'), 1, 21),
+				''), 1, length)
+		FROM generate_series(1, (length + 20) / 21) i; $$
+LANGUAGE SQL;
+-----
+-- Basic STORAGE MAIN test with text column
+-----
+CREATE TABLE o_test_main (
+	id integer PRIMARY KEY,
+	content text STORAGE MAIN
+) USING orioledb;
+-- Insert data that would normally be TOASTed but should stay inline with MAIN
+INSERT INTO o_test_main SELECT 1, generate_string(1, 3200);
+INSERT INTO o_test_main SELECT 2, generate_string(2, 5000);
+INSERT INTO o_test_main SELECT 3, generate_string(3, 8000);
+SELECT id, length(content), substr(content, 1, 20) FROM o_test_main ORDER BY id;
+ id | length |        substr
+----+--------+----------------------
+  1 |   3200 | 551e8b15be547418fbf5
+  2 |   5000 | 420cf95170c6ba2f9564
+  3 |   8000 | a9a8d7170b9ee2c655e4
+(3 rows)
+
+-- Verify structure
+SELECT orioledb_tbl_structure('o_test_main'::regclass, 'nue');
+                                          orioledb_tbl_structure
+----------------------------------------------------------------------------------------------------------
+ Index o_test_main_pkey contents                                                                         +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                     +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                     +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                              +
+     Item 0: offset = 264, tuple = ('1', TOASTed)                                                        +
+     Item 1: offset = 304, tuple = ('2', TOASTed)                                                        +
+     Item 2: offset = 344, tuple = ('3', TOASTed)                                                        +
+                                                                                                         +
+ Index toast contents                                                                                    +
+ Page 0: level = 1, maxKeyLen = 16                                                                       +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                       +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 512, hikey location = 64                                              +
+     Item 0: offset = 520, downlink = 1                                                                  +
+     Item 1: offset = 528, downlink = 2, key = (PK: ('2'), attnum 2, chunknum 1)                         +
+     Item 2: offset = 552, downlink = 3, key = (PK: ('3'), attnum 2, chunknum 2)                         +
+                                                                                                         +
+ Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                       +
+     Leftmost, Rightlink is invalid                                                                      +
+     Hikey: offset = 80, key = (PK: ('2'), attnum 2, chunknum 1)                                         +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (PK: ('1'), attnum 2, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 2, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 80, hikey = (PK: ('2'), attnum 2, chunknum 1)  +
+     Item 1: offset = 2976, tuple = (PK: ('1'), attnum 2, chunknum 1, data_length 547)                   +
+     Item 2: offset = 3568, tuple = (PK: ('2'), attnum 2, chunknum 0, data_length 2657)                  +
+                                                                                                         +
+ Page 2: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                       +
+     Rightlink is invalid                                                                                +
+     Hikey: offset = 104, key = (PK: ('3'), attnum 2, chunknum 2)                                        +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('3'), attnum 2, chunknum 0)   +
+     Item 0: offset = 264, tuple = (PK: ('2'), attnum 2, chunknum 1, data_length 2347)                   +
+   Chunk 1: offset = 1, location = 2656, hikey location = 88, hikey = (PK: ('3'), attnum 2, chunknum 1)  +
+     Item 1: offset = 2664, tuple = (PK: ('3'), attnum 2, chunknum 0, data_length 2657)                  +
+   Chunk 2: offset = 2, location = 5368, hikey location = 104, hikey = (PK: ('3'), attnum 2, chunknum 2) +
+     Item 2: offset = 5376, tuple = (PK: ('3'), attnum 2, chunknum 1, data_length 2657)                  +
+                                                                                                         +
+ Page 3: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                       +
+     Rightmost                                                                                           +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (PK: ('3'), attnum 2, chunknum 3)   +
+     Item 0: offset = 264, tuple = (PK: ('3'), attnum 2, chunknum 2, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 80                                             +
+     Item 1: offset = 2976, tuple = (PK: ('3'), attnum 2, chunknum 3, data_length 33)                    +
+                                                                                                         +
+
+(1 row)
+
+-----
+-- Update test with STORAGE MAIN
+-----
+UPDATE o_test_main SET content = generate_string(10, 6000) WHERE id = 1;
+SELECT id, length(content), substr(content, 1, 20) FROM o_test_main WHERE id = 1;
+ id | length |        substr
+----+--------+----------------------
+  1 |   6000 | f933fdd5a341a3947872
+(1 row)
+
+UPDATE o_test_main SET content = generate_string(20, 100) WHERE id = 2;
+SELECT id, length(content), substr(content, 1, 20) FROM o_test_main WHERE id = 2;
+ id | length |        substr
+----+--------+----------------------
+  2 |    100 | 67f9dae8c12744c1d8dd
+(1 row)
+
+-----
+-- Delete and re-insert with STORAGE MAIN
+-----
+DELETE FROM o_test_main WHERE id = 3;
+INSERT INTO o_test_main SELECT 3, generate_string(30, 7000);
+SELECT id, length(content), substr(content, 1, 20) FROM o_test_main WHERE id = 3;
+ id | length |        substr
+----+--------+----------------------
+  3 |   7000 | dd3ee01ee931c4d291c0
+(1 row)
+
+-----
+-- Multiple columns with different STORAGE options
+-----
+DROP TABLE o_test_main;
+CREATE TABLE o_test_main (
+	id integer PRIMARY KEY,
+	col_main text STORAGE MAIN,
+	col_extended text STORAGE EXTENDED,
+	col_plain text STORAGE PLAIN
+) USING orioledb;
+INSERT INTO o_test_main VALUES (
+	1,
+	generate_string(100, 3000),
+	generate_string(101, 3000),
+	generate_string(102, 500)
+);
+SELECT id,
+	length(col_main), substr(col_main, 1, 20),
+	length(col_extended), substr(col_extended, 1, 20),
+	length(col_plain), substr(col_plain, 1, 20)
+FROM o_test_main;
+ id | length |        substr        | length |        substr        | length |        substr
+----+--------+----------------------+--------+----------------------+--------+----------------------
+  1 |   3000 | 7abdece73763437c7aca |   3000 | c521cba48c2869743ab4 |    500 | bf87f7695aedb2da76cd
+(1 row)
+
+SELECT orioledb_tbl_structure('o_test_main'::regclass, 'nue');
+                                                                                                                                                                                                                                                                              orioledb_tbl_structure
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Index o_test_main_pkey contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              +
+     Leftmost, Rightmost                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       +
+     Item 0: offset = 264, tuple = ('1', TOASTed, TOASTed, 'bf87f7695aedb2da76cdd6bbd3c6fcbe882b2f507f92ea4a9e09b0ffb5c52d1cc9d58c0ac5148dc5f73a48fd9c5cdd8cabfd3a74a48a5325c1f19d57c432405fc747191cf1fd9a3ed68772004d715fc1a2c555858db37d863a498e570210cd84f0f83927f94a3479ba5ded439f663013e69a43bab5382b3050e28324eb24516d7880fcb437b775e1ac8a854ac35bd3d2cac36090ec91dedfb333c145fa07ba8e0e412a416ccf34487cd7c5b5d58cb6d2b0d07d541cc0b5fec81e8505e6c824d2332849cd8ae09d20c5970d7fb3011992b1669569cd31003c70a206e64933675eba819027a73f7126d3318cba8933276a17c1d5e2824eeaf5c35c')+
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  +
+ Index toast contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                +
+     Leftmost, Rightmost                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('1'), attnum 2, chunknum 1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                            +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 2, chunknum 0, data_length 2657)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('1'), attnum 3, chunknum 0)                                                                                                                                                                                                                                                                                                                                                                                                                                                                           +
+     Item 1: offset = 2976, tuple = (PK: ('1'), attnum 2, chunknum 1, data_length 347)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            +
+   Chunk 2: offset = 2, location = 3368, hikey location = 104, hikey = (PK: ('1'), attnum 3, chunknum 1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                          +
+     Item 2: offset = 3376, tuple = (PK: ('1'), attnum 3, chunknum 0, data_length 2657)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           +
+   Chunk 3: offset = 3, location = 6080, hikey location = 120                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     +
+     Item 3: offset = 6088, tuple = (PK: ('1'), attnum 3, chunknum 1, data_length 347)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            +
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  +
+
+(1 row)
+
+-----
+-- bytea with STORAGE MAIN
+-----
+DROP TABLE o_test_main;
+CREATE TABLE o_test_main (
+	id integer PRIMARY KEY,
+	data bytea STORAGE MAIN
+) USING orioledb;
+INSERT INTO o_test_main SELECT 1, decode(generate_string(200, 6000), 'hex');
+INSERT INTO o_test_main SELECT 2, decode(generate_string(201, 8000), 'hex');
+SELECT id, length(data) FROM o_test_main ORDER BY id;
+ id | length
+----+--------
+  1 |   3000
+  2 |   4000
+(2 rows)
+
+SELECT orioledb_tbl_structure('o_test_main'::regclass, 'nue');
+                                          orioledb_tbl_structure
+----------------------------------------------------------------------------------------------------------
+ Index o_test_main_pkey contents                                                                         +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                     +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                     +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                              +
+     Item 0: offset = 264, tuple = ('1', TOASTed)                                                        +
+     Item 1: offset = 304, tuple = ('2', TOASTed)                                                        +
+                                                                                                         +
+ Index toast contents                                                                                    +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                       +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('1'), attnum 2, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 2, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('2'), attnum 2, chunknum 0)  +
+     Item 1: offset = 2976, tuple = (PK: ('1'), attnum 2, chunknum 1, data_length 347)                   +
+   Chunk 2: offset = 2, location = 3368, hikey location = 104, hikey = (PK: ('2'), attnum 2, chunknum 1) +
+     Item 2: offset = 3376, tuple = (PK: ('2'), attnum 2, chunknum 0, data_length 2657)                  +
+   Chunk 3: offset = 3, location = 6080, hikey location = 120                                            +
+     Item 3: offset = 6088, tuple = (PK: ('2'), attnum 2, chunknum 1, data_length 1347)                  +
+                                                                                                         +
+
+(1 row)
+
+-----
+-- Index on column with STORAGE MAIN (should work but index values stay inline)
+-----
+DROP TABLE o_test_main;
+CREATE TABLE o_test_main (
+	id integer PRIMARY KEY,
+	val text STORAGE MAIN
+) USING orioledb;
+CREATE INDEX o_test_main_idx ON o_test_main(val);
+-- Small values that fit in index
+INSERT INTO o_test_main SELECT id, generate_string(id, 100) FROM generate_series(1, 10) id;
+SELECT id, length(val) FROM o_test_main ORDER BY val LIMIT 5;
+ id | length
+----+--------
+  8 |    100
+  2 |    100
+  1 |    100
+  4 |    100
+  6 |    100
+(5 rows)
+
+-----
+-- Cleanup
+-----
+DROP TABLE o_test_main;
+DROP FUNCTION generate_string;
+DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA toast_main CASCADE;
+RESET search_path;
