@@ -1600,28 +1600,28 @@ orioledb_commit_hash(PG_FUNCTION_ARGS)
 /*
  * Returns a page pool by the type.
  */
-OPagePool *
+PagePool *
 get_ppool(OPagePoolType type)
 {
 	Assert((int) type < OPagePoolTypesCount);
-	return &page_pools[type];
+	return (PagePool*) &page_pools[type];
 }
 
 /*
  * Returns a page pool for the page number.
  */
-OPagePool *
+PagePool *
 get_ppool_by_blkno(OInMemoryBlkno blkno)
 {
 	Assert(blkno < orioledb_buffers_count);
 
 	if (blkno >= main_buffers_offset)
-		return &page_pools[OPagePoolMain];
+		return (PagePool*) &page_pools[OPagePoolMain];
 
 	if (blkno < free_tree_buffers_count)
-		return &page_pools[OPagePoolFreeTree];
+		return (PagePool*) &page_pools[OPagePoolFreeTree];
 
-	return &page_pools[OPagePoolCatalog];
+	return (PagePool*) &page_pools[OPagePoolCatalog];
 }
 
 /*
@@ -1634,7 +1634,7 @@ get_dirty_pages_count_sum(void)
 	int			i;
 
 	for (i = 0; i < OPagePoolTypesCount; i++)
-		result += ppool_dirty_pages_count(&page_pools[i]);
+		result += o_ppool_dirty_pages_count((PagePool*) &page_pools[i]);
 
 	return result;
 }

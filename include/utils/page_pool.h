@@ -58,6 +58,8 @@ typedef struct PagePoolOps
 	void (*reserve_pages)(PagePool *pool, int pageReserveKind, int count);
 	void (*release_reserved)(PagePool *pool, uint32 kind_mask);
 	
+	OInMemoryBlkno (*free_pages_count)(PagePool *pool);
+	OInMemoryBlkno (*dirty_pages_count)(PagePool *pool);
 	void (*run_clock)(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
 	
 	// THOUGHT: Do we even need to include usage tracking in this interface
@@ -67,7 +69,7 @@ typedef struct PagePoolOps
 	void (*ucm_change_usage)(PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount);
 	uint32 (*ucm_get_epoch)(PagePool *pool);
 	bool (*ucm_epoch_needs_shift)(PagePool *pool);
-	bool (*ucm_epoch_shift)(PagePool *pool);
+	void (*ucm_epoch_shift)(PagePool *pool);
 	
 	Pointer (*get_pagedesc_array)(PagePool *pool);
 } PagePoolOps;
@@ -102,6 +104,9 @@ typedef struct OPagePool
 
 /* Shared memory based page pool operations */
 
+extern Size o_ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug);
+extern void o_ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found);
+
 extern OInMemoryBlkno o_ppool_get_page(PagePool *pool, int kind);
 extern OInMemoryBlkno o_ppool_get_metapage(PagePool *pool);
 extern void o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock);
@@ -109,11 +114,15 @@ extern void o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLoc
 extern void o_ppool_reserve_pages(PagePool *pool, int kind, int count);
 extern void o_ppool_release_reserved(PagePool *pool, uint32 mask);
 
-extern Size o_ppool_estimate_space(PagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug);
-extern void o_ppool_shmem_init(PagePool *pool, Pointer ptr, bool found);
 extern OInMemoryBlkno o_ppool_free_pages_count(PagePool *pool);
 extern OInMemoryBlkno o_ppool_dirty_pages_count(PagePool *pool);
 extern void o_ppool_run_clock(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
+
+extern void o_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno); 
+extern void o_ucm_change_usage(PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount); 
+extern uint32 o_ucm_get_epoch(PagePool *pool); 
+extern bool o_ucm_epoch_needs_shift(PagePool *pool); 
+extern void o_ucm_epoch_shift(PagePool *pool); 
 
 #define PAGE_DESC_FLAG_DIRTY			1	/* Modified since the the last
 											 * time being written out */
@@ -162,7 +171,8 @@ extern void o_ppool_run_clock(PagePool *pool, bool evict, volatile sig_atomic_t 
 		(*(pool)->ops->free_page)((pool), (blkno), false); \
 		(blkno) = OInvalidInMemoryBlkno; \
 	} \
-	
+
+/* PagePoolOps for a shared memory based page pool */	
 const PagePoolOps o_page_pool_ops = {
     .alloc_page = o_ppool_get_page,
     .alloc_metapage = o_ppool_get_metapage,
@@ -170,6 +180,16 @@ const PagePoolOps o_page_pool_ops = {
     
     .reserve_pages = o_ppool_reserve_pages,
     .release_reserved = o_ppool_release_reserved,
+    
+    .free_pages_count = o_ppool_free_pages_count,
+    .dirty_pages_count = o_ppool_dirty_pages_count,
+    .run_clock = o_ppool_run_clock,
+    
+    .ucm_inc_usage = o_ucm_inc_usage,
+    .ucm_change_usage = o_ucm_change_usage,
+    .ucm_get_epoch = o_ucm_get_epoch,
+    .ucm_epoch_needs_shift = o_ucm_epoch_needs_shift,
+    .ucm_epoch_shift = o_ucm_epoch_shift,
 };
 
 #endif							/* __PAGE_POOL_H__ */

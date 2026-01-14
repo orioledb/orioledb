@@ -30,7 +30,7 @@
  * it prepares local memory structures to initialize.
  */
 Size
-ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug)
+o_ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug)
 {
 	Size		result = 0;
 
@@ -54,7 +54,7 @@ ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size
  * must be already called for the pool.
  */
 void
-ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found)
+o_ppool_shmem_init(PagePool *pool, Pointer ptr, bool found)
 {
 	pool->availablePagesCount = (pg_atomic_uint64 *) ptr;
 	ptr += CACHELINEALIGN(sizeof(pg_atomic_uint64));
@@ -135,7 +135,7 @@ o_ppool_release_reserved(PagePool *pool, uint32 mask)
 }
 
 /*
- * Release all reserved pages in all the pools.
+ * Release all reserved pages in all the shared memory pools.
  */
 void
 ppool_release_all_pages(void)
@@ -144,9 +144,9 @@ ppool_release_all_pages(void)
 
 	for (i = 0; i < (int) OPagePoolTypesCount; i++)
 	{
-		OPagePool  *pool = get_ppool((OPagePoolType) i);
+		PagePool  *pool = get_ppool((OPagePoolType) i);
 
-		ppool_release_reserved(pool, PPOOL_RESERVE_MASK_ALL);
+		(*pool->ops->release_reserved)(pool, PPOOL_RESERVE_MASK_ALL);
 	}
 }
 
@@ -223,9 +223,10 @@ o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock)
  * Return count of free pages in the pool.
  */
 OInMemoryBlkno
-ppool_free_pages_count(OPagePool *pool)
+o_ppool_free_pages_count(PagePool *pool)
 {
-	uint64		count = pg_atomic_read_u64(pool->availablePagesCount);
+    OPagePool *o_pool = (OPagePool *) pool;
+	uint64		count = pg_atomic_read_u64(o_pool->availablePagesCount);
 
 	if (count & (UINT64CONST(1) << 63))
 		return 0;
@@ -237,9 +238,10 @@ ppool_free_pages_count(OPagePool *pool)
  * Return count of dirty pages in the pool.
  */
 OInMemoryBlkno
-ppool_dirty_pages_count(OPagePool *pool)
+o_ppool_dirty_pages_count(PagePool *pool)
 {
-	return pg_atomic_read_u32(pool->dirtyPagesCount);
+    OPagePool *o_pool = (OPagePool *) pool;
+	return pg_atomic_read_u32(o_pool->dirtyPagesCount);
 }
 
 /*
@@ -313,4 +315,29 @@ o_ppool_run_clock(PagePool *pool, bool evict,
 		free_retained_undo_location(UndoLogRegularPageLevel);
 	if (!haveRetainSystemLoc)
 		free_retained_undo_location(UndoLogSystem);
+}
+
+void o_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno) {
+    OPagePool *o_pool = (OPagePool *) pool;
+    page_inc_usage_count(&o_pool->ucm, blkno);
+}
+
+void o_ucm_change_usage(PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount) {
+    OPagePool *o_pool = (OPagePool *) pool;
+    page_change_usage_count(&o_pool->ucm, blkno, usageCount);
+}
+
+uint32 o_ucm_get_epoch(PagePool *pool) {
+    OPagePool *o_pool = (OPagePool *) pool;
+    return pg_atomic_read_u32(o_pool->ucm.epoch);
+}
+
+bool o_ucm_epoch_needs_shift(PagePool *pool) {
+    OPagePool *o_pool = (OPagePool *) pool;
+    return ucm_epoch_needs_shift(&o_pool->ucm);
+}
+
+void o_ucm_epoch_shift(PagePool *pool) {
+    OPagePool *o_pool = (OPagePool *) pool;
+    ucm_epoch_shift(&o_pool->ucm);
 }
