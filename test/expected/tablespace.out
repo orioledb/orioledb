@@ -143,6 +143,18 @@ SELECT * FROM atable ORDER BY column1;
 
 COMMIT;
 ALTER TABLE atable SET TABLESPACE pg_default;
+SELECT 
+    CASE 
+        WHEN reltablespace = 0 THEN 'pg_default'
+        ELSE 'custom tablespace'
+    END AS tablespace_name
+FROM pg_class
+WHERE relname = 'atable' AND relnamespace = 'tablespace'::regnamespace;
+ tablespace_name 
+-----------------
+ pg_default
+(1 row)
+
 \d+ atable
                                  Table "tablespace.atable"
  Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
@@ -197,6 +209,18 @@ SELECT orioledb_tbl_indices('atable'::regclass);
 (1 row)
 
 ALTER TABLE atable SET TABLESPACE regress_tblspace;
+SELECT 
+    CASE 
+        WHEN reltablespace = 0 THEN 'pg_default'
+        ELSE 'custom tablespace'
+    END AS tablespace_name
+FROM pg_class
+WHERE relname = 'atable' AND relnamespace = 'tablespace'::regnamespace;
+  tablespace_name  
+-------------------
+ custom tablespace
+(1 row)
+
 \d+ atable
                                  Table "tablespace.atable"
  Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
@@ -235,6 +259,18 @@ SELECT * FROM atable ORDER BY column1;
 (5 rows)
 
 ROLLBACK;
+SELECT 
+    CASE 
+        WHEN reltablespace = 0 THEN 'pg_default'
+        ELSE 'custom tablespace'
+    END AS tablespace_name
+FROM pg_class
+WHERE relname = 'atable' AND relnamespace = 'tablespace'::regnamespace;
+ tablespace_name 
+-----------------
+ pg_default
+(1 row)
+
 \d+ atable
                                  Table "tablespace.atable"
  Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
@@ -245,6 +281,18 @@ Indexes:
 
 BEGIN;
 ALTER TABLE atable SET TABLESPACE regress_tblspace;
+SELECT 
+    CASE 
+        WHEN reltablespace = 0 THEN 'pg_default'
+        ELSE 'custom tablespace'
+    END AS tablespace_name
+FROM pg_class
+WHERE relname = 'atable' AND relnamespace = 'tablespace'::regnamespace;
+  tablespace_name  
+-------------------
+ custom tablespace
+(1 row)
+
 \d+ atable
                                  Table "tablespace.atable"
  Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
@@ -283,6 +331,18 @@ SELECT * FROM atable ORDER BY column1;
 (5 rows)
 
 COMMIT;
+SELECT 
+    CASE 
+        WHEN reltablespace = 0 THEN 'pg_default'
+        ELSE 'custom tablespace'
+    END AS tablespace_name
+FROM pg_class
+WHERE relname = 'atable' AND relnamespace = 'tablespace'::regnamespace;
+  tablespace_name  
+-------------------
+ custom tablespace
+(1 row)
+
 \d+ atable
                                  Table "tablespace.atable"
  Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
