@@ -173,6 +173,135 @@ TABLE document;
  101 |  44 |      1 | regress_rls_dave  | testing sorting of policies
 (12 rows)
 
+-- Test AT_ForceRowSecurity and AT_NoForceRowSecurity
+-- These commands control whether table owners are subject to RLS policies
+-- Create a new table owned by carol with mixed security levels
+SET SESSION AUTHORIZATION regress_rls_carol;
+CREATE TABLE classified_docs (
+    did         int primary key,
+    dlevel      int not null,
+    dauthor     name,
+    dtitle      text
+) USING orioledb;
+GRANT ALL ON classified_docs TO public;
+-- Insert documents with varying security levels
+-- carol has seclv=2, so she can normally see dlevel <= 2
+INSERT INTO classified_docs VALUES
+    (1, 1, 'regress_rls_bob', 'public document'),
+    (2, 2, 'regress_rls_carol', 'internal document'),
+    (3, 3, 'regress_rls_alice', 'confidential document'),
+    (4, 4, 'regress_rls_alice', 'secret document'),
+    (5, 5, 'regress_rls_alice', 'top secret document');
+-- Enable RLS and create policy
+ALTER TABLE classified_docs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY classified_policy ON classified_docs AS PERMISSIVE
+    USING (dlevel <= (SELECT seclv FROM uaccount WHERE pguser = current_user));
+-- Check current settings (RLS enabled, not forced)
+SELECT relname, relrowsecurity, relforcerowsecurity
+FROM pg_class
+WHERE relname = 'classified_docs';
+     relname     | relrowsecurity | relforcerowsecurity 
+-----------------+----------------+---------------------
+ classified_docs | t              | f
+(1 row)
+
+-- As owner, carol can see ALL rows (bypassing RLS) even though her seclv=2
+SELECT COUNT(*) as carol_sees_without_force FROM classified_docs;
+ carol_sees_without_force 
+--------------------------
+                        5
+(1 row)
+
+SELECT did, dlevel, dtitle FROM classified_docs ORDER BY did;
+ did | dlevel |        dtitle         
+-----+--------+-----------------------
+   1 |      1 | public document
+   2 |      2 | internal document
+   3 |      3 | confidential document
+   4 |      4 | secret document
+   5 |      5 | top secret document
+(5 rows)
+
+-- Test AT_ForceRowSecurity - force RLS policies to apply even to table owner
+ALTER TABLE classified_docs FORCE ROW LEVEL SECURITY;
+-- Verify setting changed (relforcerowsecurity = true)
+SELECT relname, relrowsecurity, relforcerowsecurity
+FROM pg_class
+WHERE relname = 'classified_docs';
+     relname     | relrowsecurity | relforcerowsecurity 
+-----------------+----------------+---------------------
+ classified_docs | t              | t
+(1 row)
+
+-- Now carol is subject to the policy and can only see dlevel <= 2
+SELECT COUNT(*) as carol_sees_with_force FROM classified_docs;
+ carol_sees_with_force 
+-----------------------
+                     2
+(1 row)
+
+SELECT did, dlevel, dtitle FROM classified_docs ORDER BY did;
+ did | dlevel |      dtitle       
+-----+--------+-------------------
+   1 |      1 | public document
+   2 |      2 | internal document
+(2 rows)
+
+-- Verify bob (seclv=1) sees even fewer documents
+SET SESSION AUTHORIZATION regress_rls_bob;
+SELECT COUNT(*) as bob_sees_with_force FROM classified_docs;
+ bob_sees_with_force 
+---------------------
+                   1
+(1 row)
+
+SELECT did, dlevel, dtitle FROM classified_docs ORDER BY did;
+ did | dlevel |     dtitle      
+-----+--------+-----------------
+   1 |      1 | public document
+(1 row)
+
+-- Test AT_NoForceRowSecurity - allow owner to bypass RLS again
+SET SESSION AUTHORIZATION regress_rls_carol;
+ALTER TABLE classified_docs NO FORCE ROW LEVEL SECURITY;
+-- Verify setting changed back (relforcerowsecurity = false)
+SELECT relname, relrowsecurity, relforcerowsecurity
+FROM pg_class
+WHERE relname = 'classified_docs';
+     relname     | relrowsecurity | relforcerowsecurity 
+-----------------+----------------+---------------------
+ classified_docs | t              | f
+(1 row)
+
+-- Carol should now see ALL rows again (bypassing RLS as owner)
+SELECT COUNT(*) as carol_sees_after_unforce FROM classified_docs;
+ carol_sees_after_unforce 
+--------------------------
+                        5
+(1 row)
+
+SELECT did, dlevel, dtitle FROM classified_docs ORDER BY did;
+ did | dlevel |        dtitle         
+-----+--------+-----------------------
+   1 |      1 | public document
+   2 |      2 | internal document
+   3 |      3 | confidential document
+   4 |      4 | secret document
+   5 |      5 | top secret document
+(5 rows)
+
+-- Regular users still subject to policies
+SET SESSION AUTHORIZATION regress_rls_bob;
+SELECT COUNT(*) as bob_sees_after_unforce FROM classified_docs;
+ bob_sees_after_unforce 
+------------------------
+                      1
+(1 row)
+
+-- Cleanup
+SET SESSION AUTHORIZATION regress_rls_carol;
+DROP TABLE classified_docs CASCADE;
+SET SESSION AUTHORIZATION DEFAULT;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table uaccount
