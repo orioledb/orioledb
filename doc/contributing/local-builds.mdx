@@ -118,7 +118,7 @@ Follow [the instruction to disable System Integrity Protection](http://osxdaily.
 ```bash
 brew install python zstd pkg-config icu4c openssl wget gnu-sed
 sudo cpan IPC::Run
-echo "export PKG_CONFIG_PATH=\"\$PKG_CONFIG_PATH:/usr/local/opt/icu4c/lib/pkgconfig\"" >> ~/.zshrc
+echo "export PKG_CONFIG_PATH=\"\$PKG_CONFIG_PATH:$(brew --prefix icu4c)/lib/pkgconfig\"" >> ~/.zshrc
 echo "export CFLAGS=\"$CFLAGS -I/usr/local/include\"" >> ~/.zshrc
 echo "export LDFLAGS=\"$LDFLAGS -L/usr/local/lib\"" >> ~/.zshrc
 
