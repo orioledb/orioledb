@@ -108,6 +108,85 @@ TABLE document;
 SET SESSION AUTHORIZATION DEFAULT;
 TABLE document;
 
+-- Test AT_ForceRowSecurity and AT_NoForceRowSecurity
+-- These commands control whether table owners are subject to RLS policies
+
+-- Create a new table owned by carol with mixed security levels
+SET SESSION AUTHORIZATION regress_rls_carol;
+
+CREATE TABLE classified_docs (
+    did         int primary key,
+    dlevel      int not null,
+    dauthor     name,
+    dtitle      text
+) USING orioledb;
+
+GRANT ALL ON classified_docs TO public;
+
+-- Insert documents with varying security levels
+-- carol has seclv=2, so she can normally see dlevel <= 2
+INSERT INTO classified_docs VALUES
+    (1, 1, 'regress_rls_bob', 'public document'),
+    (2, 2, 'regress_rls_carol', 'internal document'),
+    (3, 3, 'regress_rls_alice', 'confidential document'),
+    (4, 4, 'regress_rls_alice', 'secret document'),
+    (5, 5, 'regress_rls_alice', 'top secret document');
+
+-- Enable RLS and create policy
+ALTER TABLE classified_docs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY classified_policy ON classified_docs AS PERMISSIVE
+    USING (dlevel <= (SELECT seclv FROM uaccount WHERE pguser = current_user));
+
+-- Check current settings (RLS enabled, not forced)
+SELECT relname, relrowsecurity, relforcerowsecurity
+FROM pg_class
+WHERE relname = 'classified_docs';
+
+-- As owner, carol can see ALL rows (bypassing RLS) even though her seclv=2
+SELECT COUNT(*) as carol_sees_without_force FROM classified_docs;
+SELECT did, dlevel, dtitle FROM classified_docs ORDER BY did;
+
+-- Test AT_ForceRowSecurity - force RLS policies to apply even to table owner
+ALTER TABLE classified_docs FORCE ROW LEVEL SECURITY;
+
+-- Verify setting changed (relforcerowsecurity = true)
+SELECT relname, relrowsecurity, relforcerowsecurity
+FROM pg_class
+WHERE relname = 'classified_docs';
+
+-- Now carol is subject to the policy and can only see dlevel <= 2
+SELECT COUNT(*) as carol_sees_with_force FROM classified_docs;
+SELECT did, dlevel, dtitle FROM classified_docs ORDER BY did;
+
+-- Verify bob (seclv=1) sees even fewer documents
+SET SESSION AUTHORIZATION regress_rls_bob;
+SELECT COUNT(*) as bob_sees_with_force FROM classified_docs;
+SELECT did, dlevel, dtitle FROM classified_docs ORDER BY did;
+
+-- Test AT_NoForceRowSecurity - allow owner to bypass RLS again
+SET SESSION AUTHORIZATION regress_rls_carol;
+ALTER TABLE classified_docs NO FORCE ROW LEVEL SECURITY;
+
+-- Verify setting changed back (relforcerowsecurity = false)
+SELECT relname, relrowsecurity, relforcerowsecurity
+FROM pg_class
+WHERE relname = 'classified_docs';
+
+-- Carol should now see ALL rows again (bypassing RLS as owner)
+SELECT COUNT(*) as carol_sees_after_unforce FROM classified_docs;
+SELECT did, dlevel, dtitle FROM classified_docs ORDER BY did;
+
+-- Regular users still subject to policies
+SET SESSION AUTHORIZATION regress_rls_bob;
+SELECT COUNT(*) as bob_sees_after_unforce FROM classified_docs;
+
+-- Cleanup
+SET SESSION AUTHORIZATION regress_rls_carol;
+DROP TABLE classified_docs CASCADE;
+
+SET SESSION AUTHORIZATION DEFAULT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA row_security_schema CASCADE;
 RESET search_path;

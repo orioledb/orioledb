@@ -1988,6 +1988,62 @@ CREATE INDEX concur_reindex_ind ON concur_reindex_tab(c1, c1, c2, c2, c3);
 INSERT INTO concur_reindex_tab VALUES (1, 1, 'a');
 DROP TABLE concur_reindex_tab;
 
+-- Test AT_AddIndexConstraint
+-- Tests adding constraint using existing index with USING INDEX clause
+
+CREATE TABLE o_test_add_index_constraint (
+	id int,
+	val text
+) USING orioledb;
+
+INSERT INTO o_test_add_index_constraint VALUES (1, 'one'), (2, 'two'), (3, 'three');
+
+-- Create a unique index first
+CREATE UNIQUE INDEX o_test_idx_id ON o_test_add_index_constraint(id);
+
+-- Check initial state (index exists but no constraint)
+SELECT conname, contype, conindid::regclass
+FROM pg_constraint
+WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+
+-- Test AT_AddIndexConstraint: Add PRIMARY KEY using existing index
+ALTER TABLE o_test_add_index_constraint
+	ADD CONSTRAINT o_test_pk PRIMARY KEY USING INDEX o_test_idx_id;
+
+-- Verify constraint was added
+SELECT conname, contype, conindid::regclass
+FROM pg_constraint
+WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+
+-- Test constraint enforcement
+INSERT INTO o_test_add_index_constraint VALUES (4, 'four');  -- Should succeed
+-- FIXME: Now it does not fail as expected
+INSERT INTO o_test_add_index_constraint VALUES (1, 'duplicate');  -- Should fail (PK violation)
+
+-- Create a unique index on val column
+CREATE UNIQUE INDEX o_test_idx_val ON o_test_add_index_constraint(val);
+
+-- Check state before adding UNIQUE constraint
+SELECT conname, contype, conindid::regclass
+FROM pg_constraint
+WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+
+-- Test AT_AddIndexConstraint: Add UNIQUE constraint using existing index
+ALTER TABLE o_test_add_index_constraint
+	ADD CONSTRAINT o_test_uq UNIQUE USING INDEX o_test_idx_val;
+
+-- Verify both constraints exist
+SELECT conname, contype, conindid::regclass
+FROM pg_constraint
+WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+
+-- Test UNIQUE constraint enforcement
+INSERT INTO o_test_add_index_constraint VALUES (5, 'five');  -- Should succeed
+INSERT INTO o_test_add_index_constraint VALUES (6, 'one');  -- Should fail (UNIQUE violation)
+
+-- Cleanup
+DROP TABLE o_test_add_index_constraint CASCADE;
+
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices CASCADE;

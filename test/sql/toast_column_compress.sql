@@ -51,6 +51,32 @@ SELECT orioledb_table_description('o_test_matview'::regclass);
 SET orioledb.table_description_compress = false;
 \set HIDE_TOAST_COMPRESSION true
 
+-- Test AT_SetCompression (column compression method)
+-- PostgreSQL supports compression methods: pglz (default), lz4
+CREATE TABLE o_test_set_compression (
+	i int PRIMARY KEY,
+	data1 text
+) USING orioledb;
+
+-- Check initial compression settings (should be DEFAULT or empty)
+SELECT attname, attcompression
+FROM pg_attribute
+WHERE attrelid = 'o_test_set_compression'::regclass
+  AND attname = 'data1'
+ORDER BY attname;
+
+-- Set compression method for data1 column
+-- FIXME: Currently unsupported in orioledb, so this command will fail. Orioledb always uses pglz.
+ALTER TABLE o_test_set_compression ALTER COLUMN data1 SET COMPRESSION pglz;
+
+SELECT attname, attcompression
+FROM pg_attribute
+WHERE attrelid = 'o_test_set_compression'::regclass
+  AND attname = 'data1'
+ORDER BY attname;
+
+DROP TABLE o_test_set_compression CASCADE;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA toast_column_compress CASCADE;
 RESET search_path;
