@@ -227,10 +227,7 @@ class LogicalTest(BaseTest):
 		    "CREATE TABLE h_data(id serial primary key, data text);\n"  # heap relation
 		)
 
-		node.safe_psql(
-		    'postgres',
-		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
-		)
+		create_slot(node)
 
 		# part 1
 
@@ -291,25 +288,24 @@ class LogicalTest(BaseTest):
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_systrees_versions_simple(self):
+		o_relname = self.o_relname
 		node = self.node
 		node.start()
 		node.safe_psql(
-		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
-		)
+		    'postgres', f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		    CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+		""")
+
+		create_slot(node)
 
 		node.safe_psql(
-		    'postgres',
-		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
-		)
-
-		node.safe_psql(
-		    'postgres', '''
+		    'postgres', f'''
 				BEGIN;
-				INSERT INTO o_data(data) VALUES(100);
-				ALTER TABLE o_data RENAME COLUMN data TO data_2;
-				ALTER TABLE o_data ADD COLUMN data_3 text;
-				INSERT INTO o_data(data_2,data_3) VALUES(300,400);
+				INSERT INTO {o_relname}(data) VALUES(100);
+				ALTER TABLE {o_relname} RENAME COLUMN data TO data_2;
+				ALTER TABLE {o_relname} ADD COLUMN data_3 text;
+				INSERT INTO {o_relname}(data_2,data_3) VALUES(300,400);
 				COMMIT;
 			''')
 		# Final version of relation descr from systree o_tables after this COMMIT will be with three attrs (id,data_2,data_3),
@@ -319,26 +315,63 @@ class LogicalTest(BaseTest):
 		result = self.retrieve_logical_changes()
 		print(result)
 		self.assertEqual(
-		    result, "BEGIN\n"
-		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
-		    "table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
+		    result,
+		    "BEGIN\n"
+		    f"""table public.{o_relname}: INSERT: id[integer]:1 data[text]:'100'\n"""  # initial schema
+		    f"""table public.{o_relname}: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"""  # new schema
 		    "COMMIT\n")
+
+	def test_systrees_versions_simple__subscriber(self):
+		o_relname = self.o_relname
+
+		setup_sql = f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		    CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+		"""
+
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+			with subscriber.start() as subscriber:
+
+				publisher.safe_psql(setup_sql)
+				subscriber.safe_psql(setup_sql)
+
+				pub = publisher.publish('test_pub', tables=[f'{o_relname}'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+
+				with publisher.connect() as con1:
+					con1.begin()
+					con1.execute(f"""
+						INSERT INTO {o_relname}(data) VALUES(100);
+						ALTER TABLE {o_relname} RENAME COLUMN data TO data_2;
+					""")
+					con1.commit()
+
+				# wait until changes apply on subscriber and check them
+				sub.catchup()
+
+				with subscriber.connect() as con:
+					output = con.execute(f"""SELECT * FROM {o_relname};""")
+					tup = output[0]
+					print(tup)
+					self.assertEqual(len(tup), 2)
+					self.assertEqual(tup, (1, '100'))
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_systrees_versions_o_table_from_pagelevel_undo_on_compaction(self):
+		o_relname = self.o_relname
 		node = self.node
 		node.start()
 		node.safe_psql(
-		    'postgres',
-		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"  # initial version of experimental relation
-		)
+		    'postgres', f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		    CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+		""")
 
-		node.safe_psql(
-		    'postgres',
-		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
-		)
+		create_slot(node)
 
 		# First transaction generates a challenging WAL sequence for logical decoder (ldec).
 		# This transaction uses an experimental relation in multi-version manner and finally does a logical deletion.
@@ -353,11 +386,11 @@ class LogicalTest(BaseTest):
 		node.safe_psql(
 		    'postgres',
 		    "BEGIN;\n"
-		    "INSERT INTO o_data(data) VALUES(100);\n"  # ldec needs initial version of relation
-		    "ALTER TABLE o_data RENAME COLUMN data TO data_2;\n"  # add relation version to tuple-level undo chain
-		    "ALTER TABLE o_data ADD COLUMN data_3 text;\n"  # add relation version to tuple-level undo chain
-		    "INSERT INTO o_data(data_2,data_3) VALUES(300,400);\n"  # ldec needs next version of relation
-		    "DROP TABLE o_data;\n"  # finally relation tuple is logically deleted: marked as deleted
+		    f"""INSERT INTO {o_relname}(data) VALUES(100);\n"""  # ldec needs initial version of relation
+		    f"""ALTER TABLE {o_relname} RENAME COLUMN data TO data_2;\n"""  # add relation version to tuple-level undo chain
+		    f"""ALTER TABLE {o_relname} ADD COLUMN data_3 text;\n"""  # add relation version to tuple-level undo chain
+		    f"""INSERT INTO {o_relname}(data_2,data_3) VALUES(300,400);\n"""  # ldec needs next version of relation
+		    f"""DROP TABLE {o_relname};\n"""  # finally relation tuple is logically deleted: marked as deleted
 		    "COMMIT;\n")
 
 		# Second transaction performs GC on compaction and then splits a page in systree O_TABLE.
@@ -388,8 +421,8 @@ class LogicalTest(BaseTest):
 		print(result)
 		self.assertEqual(
 		    result, "BEGIN\n"
-		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
-		    "table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
+		    f"""table public.{o_relname}: INSERT: id[integer]:1 data[text]:'100'\n"""
+		    f"""table public.{o_relname}: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"""
 		    "COMMIT\n"
 		    "BEGIN\n"
 		    "COMMIT\n")
@@ -397,26 +430,24 @@ class LogicalTest(BaseTest):
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_systrees_versions_index(self):
+		o_relname = self.o_relname
 		node = self.node
 		node.start()
-		node.safe_psql(
-		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
-		    "CREATE INDEX data_idx ON o_data(data);"
-		)  # regular secondary btree index
+		node.safe_psql('postgres', f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		    CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+		    CREATE INDEX data_idx ON {o_relname}(data);
+		""")  # regular secondary btree index
+
+		create_slot(node)
 
 		node.safe_psql(
-		    'postgres',
-		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
-		)
-
-		node.safe_psql(
-		    'postgres', '''
+		    'postgres', f'''
 				BEGIN;
-				INSERT INTO o_data(data) VALUES(100);
-				ALTER TABLE o_data RENAME COLUMN data TO data_2;
-				ALTER TABLE o_data ADD COLUMN data_3 text;
-				INSERT INTO o_data(data_2,data_3) VALUES(300,400);
+				INSERT INTO {o_relname}(data) VALUES(100);
+				ALTER TABLE {o_relname} RENAME COLUMN data TO data_2;
+				ALTER TABLE {o_relname} ADD COLUMN data_3 text;
+				INSERT INTO {o_relname}(data_2,data_3) VALUES(300,400);
 				COMMIT;
 			''')
 		# Final version of relation tupedescr from systree o_indices after this COMMIT will be with three attrs (id,data_2,data_3),
@@ -427,21 +458,22 @@ class LogicalTest(BaseTest):
 		print(result)
 		self.assertEqual(
 		    result, "BEGIN\n"
-		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
-		    "table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
+		    f"""table public.{o_relname}: INSERT: id[integer]:1 data[text]:'100'\n"""
+		    f"""table public.{o_relname}: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"""
 		    "COMMIT\n")
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_systrees_versions_index_TOAST_INSERT(self):
+		o_relname = self.o_relname
 		node = self.node
 		node.start()
 		node.safe_psql(
-		    'postgres',
-		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
-		    "ALTER TABLE o_data ALTER COLUMN data SET STORAGE EXTERNAL;\n"  # force external
-		)
+		    'postgres', f"""
+		    CREATE EXTENSION IF NOT EXISTS orioledb;
+		    CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+		    ALTER TABLE {o_relname} ALTER COLUMN data SET STORAGE EXTERNAL;
+		""")
 
 		create_slot(node)
 
@@ -449,13 +481,15 @@ class LogicalTest(BaseTest):
 		symbol = 'A'
 
 		node.safe_psql(
-		    'postgres', "BEGIN;\n"
-		    f'INSERT INTO o_data(data) VALUES (repeat(\'{symbol}\', {toast_len}));\n'
-		    "COMMIT;\n")
+		    'postgres', f"""
+			BEGIN;
+			INSERT INTO {o_relname}(data) VALUES (repeat(\'{symbol}\', {toast_len}));
+			COMMIT;
+		""")
 
 		result = self.retrieve_logical_changes()
 
-		expected = "BEGIN\ntable public.o_data: INSERT: id[integer]:1 data[text]:'"
+		expected = f"""BEGIN\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:'"""
 		b = len(expected)  # border index for checking large output
 
 		self.assertEqual(result[0:b], expected)
@@ -466,14 +500,15 @@ class LogicalTest(BaseTest):
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_systrees_versions_index_TOAST_INSERT_ALTER_ADD_COLUMN(self):
+		o_relname = self.o_relname
 		node = self.node
 		node.start()
 		node.safe_psql(
-		    'postgres',
-		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
-		    "ALTER TABLE o_data ALTER COLUMN data SET STORAGE EXTERNAL;\n"  # force external
-		)
+		    'postgres', f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		    CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+		    ALTER TABLE {o_relname} ALTER COLUMN data SET STORAGE EXTERNAL;
+		""")
 
 		create_slot(node)
 
@@ -482,14 +517,16 @@ class LogicalTest(BaseTest):
 
 		# txn creates second version of relation but uses only the initial one
 		node.safe_psql(
-		    'postgres', "BEGIN;\n"
-		    f'INSERT INTO o_data(data) VALUES (repeat(\'{symbol}\', {toast_len}));\n'
-		    "ALTER TABLE o_data ADD COLUMN data_3 text;\n"
-		    "COMMIT;\n")
+		    'postgres', f"""
+			BEGIN;
+			INSERT INTO {o_relname}(data) VALUES (repeat(\'{symbol}\', {toast_len}));
+			COMMIT;
+		""")
 
 		result = self.retrieve_logical_changes()
+		#print(result)
 
-		expected = "BEGIN\ntable public.o_data: INSERT: id[integer]:1 data[text]:'"
+		expected = f"""BEGIN\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:'"""
 		b = len(expected)  # border index for checking large output
 
 		self.assertEqual(result[0:b], expected)
@@ -497,25 +534,68 @@ class LogicalTest(BaseTest):
 			self.assertEqual(result[i], symbol)
 
 		tail = result[b + toast_len:]
-		print(tail)  # @TODO @CHECK may be an incorrect behavior !!!
-		# We have an extra attr printed by test_decoding plugin:
-		# ' data_3[text]:null
-		# This occurs because of PG native RelationIdGetRelation which we call on replay
-		# Change action INSERT on a toasted relation `o_data` comes after action INVALIDATION
-		self.assertEqual(tail,
-		                 "'\nCOMMIT\n")  # this check will fail for now !!!
+		self.assertEqual(tail, "'\nCOMMIT\n")
+
+	def test_systrees_versions_index_TOAST_INSERT_ALTER_ADD_COLUMN__subscriber(
+	        self):
+		o_relname = self.o_relname
+
+		setup_sql = f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		    CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+		    ALTER TABLE {o_relname} ALTER COLUMN data SET STORAGE EXTERNAL;
+		"""
+
+		toast_len = 500000  # len of TOASTed value
+		symbol = 'A'
+
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+			with subscriber.start() as subscriber:
+
+				publisher.safe_psql(setup_sql)
+				subscriber.safe_psql(setup_sql)
+
+				pub = publisher.publish('test_pub', tables=[f'{o_relname}'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+
+				with publisher.connect() as con1:
+					con1.begin()
+					con1.execute(f"""
+						INSERT INTO {o_relname}(data) VALUES (repeat('{symbol}', {toast_len}));
+						ALTER TABLE {o_relname} ADD COLUMN data_3 text;
+					""")
+					con1.commit()
+
+				# wait until changes apply on subscriber and check them
+				sub.catchup()
+
+				with subscriber.connect() as con:
+					output = con.execute(f"""SELECT * FROM {o_relname};""")
+					tup = output[0]
+					#print(tup)
+					self.assertEqual(len(tup),
+					                 2)  # check correct number of attrs
+					self.assertEqual(tup[0], 1)
+					toasted = tup[1]
+					self.assertEqual(len(toasted), toast_len)
+					for i in range(0, toast_len):
+						self.assertEqual(toasted[i], symbol)
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_systrees_versions_index_TOAST_INSERT_ALTER_DROP_COLUMN(self):
+		o_relname = self.o_relname
 		node = self.node
 		node.start()
 		node.safe_psql(
-		    'postgres',
-		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
-		    "ALTER TABLE o_data ALTER COLUMN data SET STORAGE EXTERNAL;\n"  # force external
-		)
+		    'postgres', f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		    CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+		    ALTER TABLE {o_relname} ALTER COLUMN data SET STORAGE EXTERNAL;
+		""")
 
 		create_slot(node)
 
@@ -524,34 +604,84 @@ class LogicalTest(BaseTest):
 
 		# txn creates second version of relation but uses only the initial one
 		node.safe_psql(
-		    'postgres', "BEGIN;\n"
-		    f'INSERT INTO o_data(data) VALUES (repeat(\'{symbol}\', {toast_len}));\n'
-		    "ALTER TABLE o_data DROP COLUMN data;\n"
-		    "COMMIT;\n")
+		    'postgres', f"""
+			BEGIN;
+			INSERT INTO {o_relname}(data) VALUES (repeat(\'{symbol}\', {toast_len}));
+			ALTER TABLE {o_relname} DROP COLUMN data;
+			COMMIT;
+		""")
 
 		result = self.retrieve_logical_changes()
 		#print(result)
 
-		expected = "BEGIN\ntable public.o_data: INSERT: id[integer]:1 data[text]:'"
+		expected = f"""BEGIN\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:'"""
 		b = len(expected)  # border index for checking large output
 
 		self.assertEqual(result[0:b], expected)
 		for i in range(b, b + toast_len):
 			self.assertEqual(result[i], symbol)
-		self.assertEqual(result[b + toast_len:],
-		                 "'\nCOMMIT\n")  # this check will succeed
+		self.assertEqual(result[b + toast_len:], "'\nCOMMIT\n")
+
+	def test_systrees_versions_index_TOAST_INSERT_ALTER_DROP_COLUMN__subscriber(
+	        self):
+		o_relname = self.o_relname
+
+		setup_sql = f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		    CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+		    ALTER TABLE {o_relname} ALTER COLUMN data SET STORAGE EXTERNAL;
+		"""
+
+		toast_len = 500000  # len of TOASTed value
+		symbol = 'A'
+
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+			with subscriber.start() as subscriber:
+
+				publisher.safe_psql(setup_sql)
+				subscriber.safe_psql(setup_sql)
+
+				pub = publisher.publish('test_pub', tables=[f'{o_relname}'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+
+				with publisher.connect() as con1:
+					con1.begin()
+					con1.execute(f"""
+						INSERT INTO {o_relname}(data) VALUES (repeat('{symbol}', {toast_len}));
+						ALTER TABLE {o_relname} DROP COLUMN data;
+					""")
+					con1.commit()
+
+				# wait until changes apply on subscriber and check them
+				sub.catchup()
+
+				with subscriber.connect() as con:
+					output = con.execute(f"""SELECT * FROM {o_relname};""")
+					tup = output[0]
+					#print(tup)
+					self.assertEqual(len(tup),
+					                 2)  # check correct number of attrs
+					self.assertEqual(tup[0], 1)
+					toasted = tup[1]
+					self.assertEqual(len(toasted), toast_len)
+					for i in range(0, toast_len):
+						self.assertEqual(toasted[i], symbol)
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_systrees_versions_index_TOAST_2INSERT_ALTER_ADD_COLUMN(self):
+		o_relname = self.o_relname
 		node = self.node
 		node.start()
 		node.safe_psql(
-		    'postgres',
-		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
-		    "ALTER TABLE o_data ALTER COLUMN data SET STORAGE EXTERNAL;\n"  # force external
-		)
+		    'postgres', f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		    CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+		    ALTER TABLE {o_relname} ALTER COLUMN data SET STORAGE EXTERNAL;
+		""")
 
 		create_slot(node)
 
@@ -561,54 +691,58 @@ class LogicalTest(BaseTest):
 
 		# txn creates second version of relation but uses only the initial one
 		node.safe_psql(
-		    'postgres', "BEGIN;\n"
-		    f'INSERT INTO o_data(data) VALUES (repeat(\'{symbol1}\', {toast_len}));\n'
-		    f'INSERT INTO o_data(data) VALUES (repeat(\'{symbol2}\', {toast_len}));\n'
-		    "ALTER TABLE o_data ADD COLUMN data_3 text;\n"
-		    "COMMIT;\n")
+		    'postgres', f"""
+				BEGIN;
+				INSERT INTO {o_relname}(data) VALUES (repeat(\'{symbol1}\', {toast_len}));
+				INSERT INTO {o_relname}(data) VALUES (repeat(\'{symbol2}\', {toast_len}));
+				ALTER TABLE {o_relname} ADD COLUMN data_3 text;
+				COMMIT;
+			""")
 
 		result = self.retrieve_logical_changes()
 		#print(result)
 
-		expected1 = "BEGIN\ntable public.o_data: INSERT: id[integer]:1 data[text]:'"
-		expected2 = "'\ntable public.o_data: INSERT: id[integer]:2 data[text]:'"
-
-		def check(start, b, expected, symbol):
-			self.assertEqual(result[start:b], expected)
-			for i in range(b, b + toast_len):
-				self.assertEqual(result[i], symbol)
+		expected1 = f"""BEGIN\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:'"""
+		expected2 = f"""'\ntable public.{o_relname}: INSERT: id[integer]:2 data[text]:'"""
+		expected_tail = "'\nCOMMIT\n"
 
 		start = 0  # start index
-		b = len(expected1)  # border index for checking large output
+		b = 0  # border index for checking large output
 
-		check(start, b, expected1, symbol1)
+		def check(expected):
+			nonlocal start
+			nonlocal b
+			nonlocal result
+			b = start + len(expected)
+			self.assertEqual(result[start:b], expected)
+			start = b
 
-		start = b + toast_len
-		b = start + len(expected2)
+		def check_toast(expected, symbol):
+			nonlocal start
+			nonlocal b
+			nonlocal toast_len
+			nonlocal result
+			check(expected)
+			for i in range(b, b + toast_len):
+				self.assertEqual(result[i], symbol)
+			start += toast_len
 
-		# First INSERT has correct attrs
-
-		check(start, b, expected2, symbol2)
-
-		tail = result[b + toast_len:]
-		print(tail)  # @TODO @CHECK may be an incorrect behavior !!!
-		# We have an extra attr printed by test_decoding plugin:
-		# ' data_3[text]:null
-		# This occurs because of PG native RelationIdGetRelation which we call on replay
-		# Change action INSERT on a toasted relation `o_data` comes after action INVALIDATION
-		self.assertEqual(tail,
-		                 "'\nCOMMIT\n")  # this check will fail for now !!!
+		check_toast(expected1, symbol1)
+		check_toast(expected2, symbol2)
+		check(expected_tail)
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_systrees_versions_index_TOAST_INSERT_rewrite_rel(self):
+		o_relname = self.o_relname
 		node = self.node
 		node.start()
 		node.safe_psql(
-		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
-		    "ALTER TABLE o_data ALTER COLUMN data SET STORAGE EXTERNAL;\n"
-		)  # force external
+		    'postgres', f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		    CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+		    ALTER TABLE {o_relname} ALTER COLUMN data SET STORAGE EXTERNAL;
+		""")
 
 		create_slot(node)
 
@@ -617,16 +751,17 @@ class LogicalTest(BaseTest):
 		symbol2 = 'B'
 
 		# txn operates with two	iterationns of TOAST index descr & with two versions of relation
-		check = node.execute(
-		    "BEGIN;\n"
-		    f'INSERT INTO o_data(data) VALUES (repeat(\'{symbol1}\', {toast_len}));\n'
-		    "SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='o_data';\n"
-		    "ALTER TABLE o_data ADD COLUMN data_3 text;\n"
-		    "ALTER TABLE o_data ALTER COLUMN data_3 TYPE bigint USING 0::bigint;\n"
-		    "SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='o_data';\n"
-		    f'INSERT INTO o_data(data,data_3) VALUES (repeat(\'{symbol2}\', {toast_len}),1);\n'
-		    "SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='o_data';\n"
-		    "COMMIT;")
+		check = node.execute(f"""
+		    BEGIN;
+		    INSERT INTO {o_relname}(data) VALUES (repeat(\'{symbol1}\', {toast_len}));
+		    SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';
+		    ALTER TABLE {o_relname} ADD COLUMN data_3 text;
+		    ALTER TABLE {o_relname} ALTER COLUMN data_3 TYPE bigint USING 0::bigint;
+		    SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';
+		    INSERT INTO {o_relname}(data,data_3) VALUES (repeat(\'{symbol2}\', {toast_len}),1);
+		    SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';
+		    COMMIT;
+		""")
 
 		print(check)
 		v1 = check[0]
@@ -646,10 +781,9 @@ class LogicalTest(BaseTest):
 		result = self.retrieve_logical_changes()
 		#print(result)
 
-		expected1 = "BEGIN\ntable public.o_data: INSERT: id[integer]:1 data[text]:'"
-		tail = "' data_3[text]:null\n"  # @TODO @CHECK may be an incorrect behavior !!!
-		expected2 = "table public.o_data: INSERT: id[integer]:1 data[text]:unchanged-toast-datum data_3[bigint]:0\n"  # ???
-		expected3 = "table public.o_data: INSERT: id[integer]:2 data[text]:'"
+		expected1 = f"""BEGIN\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:'"""
+		expected2 = f"""'\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:unchanged-toast-datum data_3[bigint]:0\n"""
+		expected3 = f"""table public.{o_relname}: INSERT: id[integer]:2 data[text]:'"""
 		expected_tail = "' data_3[bigint]:1\nCOMMIT\n"
 
 		start = 0  # start index
@@ -674,7 +808,6 @@ class LogicalTest(BaseTest):
 			start += toast_len
 
 		check_toast(expected1, symbol1)
-		check(tail)
 		check(expected2)
 		check_toast(expected3, symbol2)
 		check(expected_tail)  # this check is OK
@@ -682,14 +815,15 @@ class LogicalTest(BaseTest):
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_systrees_versions_index_TOAST_INSERT_UPDATE_rewrite_rel(self):
+		o_relname = self.o_relname
 		node = self.node
 		node.start()
 		node.safe_psql(
-		    'postgres',
-		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
-		    "ALTER TABLE o_data ALTER COLUMN data SET STORAGE EXTERNAL;\n"  # force external
-		)
+		    'postgres', f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		    CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+		    ALTER TABLE {o_relname} ALTER COLUMN data SET STORAGE EXTERNAL;
+		""")
 
 		create_slot(node)
 
@@ -700,18 +834,19 @@ class LogicalTest(BaseTest):
 
 		# txn operates with two	iterationns of TOAST index descr & with two versions of relation
 		# update TOAST-relation is organized as INSERT+DELETE
-		check = node.execute(
-		    "BEGIN;\n"
-		    f'INSERT INTO o_data(data) VALUES (repeat(\'{symbol1}\', {toast_len}));\n'
-		    "SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='o_data';\n"
-		    "ALTER TABLE o_data ADD COLUMN data_3 text;\n"
-		    "ALTER TABLE o_data ALTER COLUMN data_3 TYPE bigint USING 0::bigint;\n"
-		    "SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='o_data';\n"
-		    "ALTER TABLE o_data ALTER COLUMN data SET STORAGE EXTERNAL;\n"
-		    f'UPDATE o_data SET data   = repeat(\'{symbol2}\', {toast_len}), data_3 = 1 WHERE id = (SELECT max(id) FROM o_data);\n'
-		    "SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='o_data';\n"
-		    f'UPDATE o_data SET data   = repeat(\'{symbol3}\', {toast_len}), data_3 = 1 WHERE id = (SELECT max(id) FROM o_data);\n'
-		    "COMMIT;\n")
+		check = node.execute(f"""
+		    BEGIN;
+		    INSERT INTO {o_relname}(data) VALUES (repeat(\'{symbol1}\', {toast_len}));
+		    SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';
+		    ALTER TABLE {o_relname} ADD COLUMN data_3 text;
+		    ALTER TABLE {o_relname} ALTER COLUMN data_3 TYPE bigint USING 0::bigint;
+		    SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';
+		    ALTER TABLE {o_relname} ALTER COLUMN data SET STORAGE EXTERNAL;
+		    UPDATE {o_relname} SET data   = repeat(\'{symbol2}\', {toast_len}), data_3 = 1 WHERE id = (SELECT max(id) FROM {o_relname});
+		    SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';
+		    UPDATE {o_relname} SET data   = repeat(\'{symbol3}\', {toast_len}), data_3 = 1 WHERE id = (SELECT max(id) FROM {o_relname});
+		    COMMIT;
+		""")
 
 		print(check)
 		v1 = check[0]
@@ -731,12 +866,11 @@ class LogicalTest(BaseTest):
 		result = self.retrieve_logical_changes()
 		#print(result)
 
-		expected_begin = "BEGIN\ntable public.o_data: INSERT: id[integer]:1 data[text]:'"
-		tail = "' data_3[text]:null\n"  # @TODO @CHECK may be an incorrect behavior !!!
-		expected_added = "table public.o_data: INSERT: id[integer]:1 data[text]:unchanged-toast-datum data_3[bigint]:0\n"
-		expected_update1 = "table public.o_data: UPDATE: old-key: id[integer]:1 new-tuple: id[integer]:1 data[text]:'"
+		expected_begin = f"""BEGIN\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:'"""
+		expected_added = f"""'\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:unchanged-toast-datum data_3[bigint]:0\n"""
+		expected_update1 = f"""table public.{o_relname}: UPDATE: old-key: id[integer]:1 new-tuple: id[integer]:1 data[text]:'"""
 		expected_tail1 = "' data_3[bigint]:1\n"
-		expected_update2 = "table public.o_data: UPDATE: old-key: id[integer]:1 new-tuple: id[integer]:1 data[text]:'"
+		expected_update2 = f"""table public.{o_relname}: UPDATE: old-key: id[integer]:1 new-tuple: id[integer]:1 data[text]:'"""
 		expected_tail2 = "' data_3[bigint]:1\nCOMMIT\n"
 
 		start = 0  # start index
@@ -761,7 +895,6 @@ class LogicalTest(BaseTest):
 			start += toast_len
 
 		check_toast(expected_begin, symbol1)
-		check(tail)
 		check(expected_added)
 		check_toast(expected_update1, symbol2)
 		check(expected_tail1)
@@ -771,26 +904,25 @@ class LogicalTest(BaseTest):
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
 	def test_systrees_versions_index_bridge_01(self):
+		o_relname = self.o_relname
 		node = self.node
 		node.start()
 		node.safe_psql(
-		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"
-		    "CREATE INDEX data_idx ON o_data USING btree(data) WITH (orioledb_index = off);"
-		)
+		    'postgres', f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		    CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+		    CREATE INDEX data_idx ON {o_relname} USING btree(data) WITH (orioledb_index = off);
+		""")
+
+		create_slot(node)
 
 		node.safe_psql(
-		    'postgres',
-		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
-		)
-
-		node.safe_psql(
-		    'postgres', '''
+		    'postgres', f'''
 				BEGIN;
-				INSERT INTO o_data(data) VALUES(100);
-				ALTER TABLE o_data RENAME COLUMN data TO data_2;
-				ALTER TABLE o_data ADD COLUMN data_3 text;
-				INSERT INTO o_data(data_2,data_3) VALUES(300,400);
+				INSERT INTO {o_relname}(data) VALUES(100);
+				ALTER TABLE {o_relname} RENAME COLUMN data TO data_2;
+				ALTER TABLE {o_relname} ADD COLUMN data_3 text;
+				INSERT INTO {o_relname}(data_2,data_3) VALUES(300,400);
 				COMMIT;
 			''')
 
@@ -798,43 +930,9 @@ class LogicalTest(BaseTest):
 		print(result)
 		self.assertEqual(
 		    result, "BEGIN\n"
-		    "table public.o_data: INSERT: id[integer]:1 data_2[text]:'100'\n"
-		    "table public.o_data: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"
+		    f"""table public.{o_relname}: INSERT: id[integer]:1 data[text]:'100'\n"""
+		    f"""table public.{o_relname}: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"""
 		    "COMMIT\n")
-
-	def test_switch_logical_xid_subtxn__REPRO(self):
-		o_relname = self.o_relname
-
-		with self.node as publisher:
-			publisher.start()
-
-			subscriber = self.getSubsriber()
-			with subscriber.start() as subscriber:
-				create_sql = f"""
-					CREATE EXTENSION IF NOT EXISTS orioledb;
-					CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
-				"""
-				publisher.safe_psql(create_sql)
-				subscriber.safe_psql(create_sql)
-
-				pub = publisher.publish('test_pub', tables=[f'{o_relname}'])
-				sub = subscriber.subscribe(pub, 'test_sub')
-
-				with publisher.connect() as con1:
-					con1.begin()
-					con1.execute(f"""
-						INSERT INTO {o_relname}(data) VALUES(100);
-						ALTER TABLE {o_relname} ADD COLUMN data_2 text;
-						INSERT INTO {o_relname}(data,data_2) VALUES(100,200);
-					""")
-					con1.commit()
-
-				# wait until changes apply on subscriber and check them
-				sub.catchup()
-
-				with subscriber.connect() as con:
-					output = con.execute(f"""SELECT * FROM {o_relname};""")
-					self.assertEqual(output, [(2, '200')])
 
 	def test_switch_logical_xid_subtxn__mixed_ROLLBACK(self):
 		o_relname = self.o_relname

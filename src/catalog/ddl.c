@@ -889,6 +889,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	pstate->p_sourcetext = queryString;
 	pstate->p_queryEnv = env;
 
+	if (!is_recovery_process() && !local_wal_is_empty())
+		flush_local_wal(false, false);
+
 	if (IsA(pstmt->utilityStmt, AlterTableStmt) &&
 		!is_alter_table_partition(pstmt))
 	{
