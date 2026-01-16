@@ -108,6 +108,7 @@ static object_access_hook_type old_objectaccess_hook = NULL;
 List	   *drop_index_list = NIL;
 List	   *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
+static List *dropped_attrs = NIL;
 Oid			o_saved_relrewrite = InvalidOid;
 Oid			o_saved_reltablespace = InvalidOid;
 List	   *o_reuse_indices = NIL;
@@ -943,6 +944,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		 * isn't freed by us and pointer may be invalid there
 		 */
 		alter_type_exprs = NIL;
+		dropped_attrs = NIL;
 
 		/*
 		 * Figure out lock mode, and acquire lock.  This also does basic
@@ -1471,6 +1473,11 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			list_free(partition_drop_index_list);
 			partition_drop_index_list = NIL;
 		}
+		if (dropped_attrs)
+		{
+			list_free(dropped_attrs);
+			dropped_attrs = NIL;
+		}
 	}
 	else if (IsA(pstmt->utilityStmt, AlterTableStmt))
 	{
@@ -1478,6 +1485,11 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		{
 			list_free(alter_type_exprs);
 			alter_type_exprs = NIL;
+		}
+		if (dropped_attrs)
+		{
+			list_free(dropped_attrs);
+			dropped_attrs = NIL;
 		}
 	}
 
@@ -1530,7 +1542,7 @@ o_alter_column_type(AlterTableCmd *cmd, const char *queryString, Relation rel)
 		alter_type_exprs =
 			lappend(alter_type_exprs,
 		/* cppcheck-suppress unknownEvaluationOrder */
-					list_make2(makeInteger(attnum), cooked_default));
+					list_make4(makeInteger(attnum), makeInteger(rel->rd_rel->oid), cooked_default, makeString(cmd->name)));
 	}
 }
 
@@ -1738,7 +1750,7 @@ o_find_composite_type_dependencies(Oid typeOid, Relation origRelation)
 }
 
 static bool
-ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
+ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field, Oid objectId,
 							  int subId)
 {
 	ParseState *pstate = make_parsestate(NULL);
@@ -1750,10 +1762,12 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
 	foreach(lc, alter_type_exprs)
 	{
 		AttrNumber	attnum = intVal(linitial((List *) lfirst(lc)));
+		const char* attname = ((String*)(lfourth((List *) lfirst(lc))))->sval;
 
 		if (attnum == subId)
 		{
-			expr = (Node *) lsecond((List *) lfirst(lc));
+			expr = (Node *) lthird((List *) lfirst(lc));
+			append_transform = strcmp(attname, field->name.data) == 0;
 			break;
 		}
 	}
@@ -1772,7 +1786,7 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field,
 	{
 		if (append_transform)
 			/* cppcheck-suppress unknownEvaluationOrder */
-			alter_type_exprs = lappend(alter_type_exprs, list_make2(makeInteger(subId), expr));
+			alter_type_exprs = lappend(alter_type_exprs, list_make4(makeInteger(subId), makeInteger(objectId), expr, makeString(field->name.data)));
 		assign_expr_collations(pstate, expr);
 		expr = (Node *) expression_planner((Expr *) expr);
 
@@ -2144,6 +2158,33 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	new_slot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
 	sscan = make_btree_seq_scan(&GET_PRIMARY(old_descr)->desc, &o_in_progress_snapshot, NULL);
 
+	/*
+	 * OrioleDB engine change execution order when relation is rewrited. So
+	 * real data transfer from old relation ti the new one executed after dropping.
+	 * So in statments with moving data from one column to another via ALTER COLUMN and DROP
+	 * we gather an error that collumn already dropped. To avoid this behavior
+	 * mark column dropped in current statement as not dropped.
+	 * This is ugly solution actually need refactor handling of ALTER TABLE to avoid
+	 * global vars and lists that brings alot of bugs.
+	 */
+	if (OidIsValid(o_saved_relrewrite))
+	{
+		for (int i = 0; i < old_slot->tts_tupleDescriptor->natts; i++)
+		{
+			ListCell   *lc;
+			foreach(lc, dropped_attrs)
+			{
+				Oid relOid = intVal(linitial((List *) lfirst(lc)));
+				AttrNumber attnum = intVal(lsecond((List *) lfirst(lc)));
+				if (relOid == rel->rd_rel->oid && attnum == i + 1)
+				{
+					old_slot->tts_tupleDescriptor->attrs[i].attisdropped = false;
+					break;
+				}
+			}
+		}
+	}
+
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
 	while (!O_TUPLE_IS_NULL(tup = btree_seq_scan_getnext(sscan, old_slot->tts_mcxt, &tupleCsn, &hint)))
@@ -2164,10 +2205,16 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			foreach(lc, alter_type_exprs)
 			{
 				AttrNumber	attnum = intVal(linitial((List *) lfirst(lc)));
+				Oid			relOid = intVal(lsecond((List *) lfirst(lc)));
 
-				if (attnum == i + 1)
+				/*
+				 * To get correct expresion we need check both relation and attribute
+				 * number. Because of postgres inheritence allows different attribute
+				 * number for the same column in parent and child relations.
+				 */
+				if (relOid == rel->rd_rel->oid && attnum == i + 1)
 				{
-					expr = (Node *) lsecond((List *) lfirst(lc));
+					expr = (Node *) lthird((List *) lfirst(lc));
 					break;
 				}
 			}
@@ -2188,7 +2235,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				expr = defaultexpr;
 			}
 
-			if (!expr && DomainHasConstraints(attr->atttypid) &&
+			if (!attr->attisdropped && !expr  && DomainHasConstraints(attr->atttypid) &&
 				old_slot->tts_isnull[i])
 			{
 				Oid			baseTypeId;
@@ -2764,6 +2811,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						o_tables_update(o_table, oxid, oSnapshot.csn);
 						o_tables_after_update(o_table, oxid, oSnapshot.csn);
 						o_tables_rel_meta_unlock(rel, InvalidOid);
+						dropped_attrs = lappend(dropped_attrs, list_make2(makeInteger(objectId), makeInteger(subId)));
 					}
 					o_table_free(o_table);
 				}
@@ -3153,6 +3201,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							o_tables_rel_meta_unlock(tbl, InvalidOid);
 							o_invalidate_oids(o_table->oids);
 							o_reuse_indices = list_delete_oid(o_reuse_indices, old_oid);
+							drop_index_list = list_delete(drop_index_list, makeString(rel->rd_rel->relname.data));
 						}
 
 						if (!o_table->index_bridging)
@@ -3243,7 +3292,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 				if (changed)
 				{
-					if (ATColumnChangeRequiresRewrite(&old_field, field,
+					if (ATColumnChangeRequiresRewrite(&old_field, field, objectId,
 													  subId))
 						in_rewrite = true;
 				}
@@ -3319,7 +3368,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					if (changed_ty)
 					{
-						if (ATColumnChangeRequiresRewrite(&old_field, field,
+						if (ATColumnChangeRequiresRewrite(&old_field, field, objectId,
 														  subId))
 							in_rewrite = true;
 					}
@@ -4127,6 +4176,16 @@ o_ddl_cleanup(void)
 	{
 		list_free_deep(reindex_list);
 		reindex_list = NIL;
+	}
+	if (dropped_attrs)
+	{
+		list_free(dropped_attrs);
+		dropped_attrs = NIL;
+	}
+	if (alter_type_exprs)
+	{
+		list_free(alter_type_exprs);
+		alter_type_exprs = NIL;
 	}
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
 	o_saved_relrewrite = InvalidOid;
