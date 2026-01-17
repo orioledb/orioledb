@@ -834,7 +834,7 @@ SELECT i/5 + mod(911 * i + 483, 25),
   FROM generate_series(1,1000) s(i);
 
 set enable_seqscan = off;
-EXPLAIN SELECT COUNT(*) FROM brin_test_multi WHERE a < 37;
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM brin_test_multi WHERE a < 37;
 SELECT COUNT(*) FROM brin_test_multi WHERE a < 37;
 
 CREATE TEMP TABLE hash_i4_heap (
