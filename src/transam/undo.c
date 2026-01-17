@@ -27,6 +27,7 @@
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
+#include "storage/procarray.h"
 #include "tableam/descr.h"
 #include "tableam/handler.h"
 #include "transam/oxid.h"
@@ -369,6 +370,14 @@ update_min_undo_locations(UndoLogType undoType,
 		minRetainLocation = Min(minRetainLocation, tmp);
 	}
 
+	if (undoType == UndoLogSystem)
+	{
+		UndoLocation	replicationUndoRetainLocation = get_current_replication_retain_undo_location();
+
+		if (UndoLocationIsValid(replicationUndoRetainLocation))
+			minRetainLocation = Min(minRetainLocation, replicationUndoRetainLocation);
+	}
+
 	/*
 	 * Make sure none of calculated variables goes backwards.
 	 */
@@ -677,7 +686,8 @@ get_current_replication_retain_undo_location(void)
 	if (wal_level < WAL_LEVEL_LOGICAL)
 		return InvalidUndoLocation;
 
-	ReplicationSlotsComputeRequiredXmin(false);
+	if (!LWLockHeldByMe(ProcArrayLock))
+		ReplicationSlotsComputeRequiredXmin(false);
 	ProcArrayGetReplicationSlotXmin(&xmin, &catalog_xmin);
 
 	result = read_replication_retain_undo_location(xmin, &ndeleted, false);
@@ -804,35 +814,7 @@ set_my_reserved_location(UndoLogType undoType)
 		pg_atomic_write_u64(&shared->reservedUndoLocation, lastUsedLocation);
 
 		if (overwriteTransactionRetainUndoLoc)
-		{
 			pg_atomic_write_u64(&shared->transactionUndoRetainLocation, lastUsedLocation);
-			if (undoType == UndoLogSystem && wal_level >= WAL_LEVEL_LOGICAL)
-			{
-				/*
-				 * Add element to mapping (xid ->
-				 * transactionUndoRetainLocation) for system tree modification
-				 * in logical decoding.
-				 */
-				TransactionId xid;
-
-				if (!is_recovery_in_progress())
-					xid = GetCurrentTransactionIdIfAny();
-				else
-					xid = logicalDecodeRecoverySystemTransactionId;
-
-				if (TransactionIdIsValid(xid) && UndoLocationIsValid(lastUsedLocation) && lastUsedLocation != 0)
-				{
-					/*
-					 * Fails at Assert(!waitForUndoLocation ||
-					 * !have_locked_pages())
-					 */
-					/*
-					 * insert_replication_retain_undo_location(xid,
-					 * lastUsedLocation, false);
-					 */
-				}
-			}
-		}
 
 		wait_for_even_min_undo_locations_changecount(meta);
 
@@ -1404,6 +1386,34 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 	Assert(undoType != UndoLogNone);
 	Assert(size > 0);
 	Assert(pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].reservedUndoLocation) == InvalidUndoLocation);
+
+	if (undoType == UndoLogSystem && wal_level >= WAL_LEVEL_LOGICAL)
+	{
+		/*
+		 * Add element to mapping (xid ->
+		 * transactionUndoRetainLocation) for system tree modification
+		 * in logical decoding.
+		 */
+		TransactionId xid;
+		static TransactionId insertedXid = InvalidTransactionId;
+
+		if (!is_recovery_in_progress())
+			xid = GetCurrentTransactionIdIfAny();
+		else
+			xid = logicalDecodeRecoverySystemTransactionId;
+
+		if (TransactionIdIsValid(xid) && xid != insertedXid)
+		{
+			UndoLocation lastUsedLocation = pg_atomic_read_u64(&meta->lastUsedLocation);
+
+			if (UndoLocationIsValid(lastUsedLocation))
+			{
+				insertedXid = xid;
+				insert_replication_retain_undo_location(xid, lastUsedLocation, false);
+			}
+		}
+	}
+
 
 	if (reserved_undo_sizes[(int) undoType] >= size)
 		return true;
