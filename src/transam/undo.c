@@ -989,12 +989,6 @@ free_retained_undo_location(UndoLogType undoType)
 {
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 
-	if (UndoLogSystem == undoType)
-	{
-		return;
-		/* @NOTE @ INFO ignore systrees */
-	}
-
 	Assert(pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].reservedUndoLocation) == InvalidUndoLocation);
 	pg_atomic_write_u64(&curProcData->undoRetainLocations[(int) undoType].transactionUndoRetainLocation, InvalidUndoLocation);
 	curRetainUndoLocations[undoType] = InvalidUndoLocation;
@@ -1486,10 +1480,7 @@ reset_cur_undo_locations(void)
 	int			i;
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
-	{
-		if ((UndoLogType) i != UndoLogSystem)
-			set_cur_undo_locations((UndoLogType) i, location);
-	}
+		set_cur_undo_locations((UndoLogType) i, location);
 }
 
 #define RetainUndoLocationPHNodeGetSnapshot(location, undoType) \
@@ -1570,9 +1561,6 @@ undo_xact_callback(XactEvent event, void *arg)
 	TransactionId heapXid;
 	XLogRecPtr	flushPos;
 	LogicalXidCtx logicalXidContext;
-	UndoStackLocations undoStackLocations;
-
-	get_cur_undo_locations(&undoStackLocations, UndoLogSystem);
 
 	/* elog(LOG, "UNDO XACT CALLBACK"); */
 	isParallelWorker = (MyProc->lockGroupLeader != NULL &&
@@ -1757,10 +1745,7 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 				{
-					if ((UndoLogType) i != UndoLogSystem)
-					{
-						on_commit_undo_stack((UndoLogType) i, oxid, true);
-					}
+					on_commit_undo_stack((UndoLogType) i, oxid, true);
 				}
 
 				wal_after_commit();
@@ -1777,15 +1762,11 @@ undo_xact_callback(XactEvent event, void *arg)
 					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
 
-				elog(WARNING, "before apply_undo_stack: %s", text_to_cstring(retrieve_orioledb_sys_tree_structure(SYS_TREES_O_TABLES, 32)));
-
 				if (!RecoveryInProgress())
 					wal_rollback(oxid, logicalXidContext.xid, false);
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
-					apply_undo_stack((UndoLogType) i, oxid, (UndoLogType) i == UndoLogSystem ? &undoStackLocations : NULL, true);
-
-				elog(WARNING, "after apply_undo_stack: %s", text_to_cstring(retrieve_orioledb_sys_tree_structure(SYS_TREES_O_TABLES, 32)));
+					apply_undo_stack((UndoLogType) i, oxid, NULL, true);
 
 				reset_cur_undo_locations();
 				reset_command_undo_locations();
@@ -1798,21 +1779,11 @@ undo_xact_callback(XactEvent event, void *arg)
 				 * double removing in undo_snapshot_deregister_hook().
 				 */
 				for (i = 0; i < (int) UndoLogsCount; i++)
-				{
-					if ((UndoLogType) i != UndoLogSystem)
-					{
-						while (!pairingheap_is_empty(&retainUndoLocHeaps[i]))
-							pairingheap_remove_first(&retainUndoLocHeaps[i]);
-					}
-				}
+					while (!pairingheap_is_empty(&retainUndoLocHeaps[i]))
+						pairingheap_remove_first(&retainUndoLocHeaps[i]);
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
-				{
-					if ((UndoLogType) i != UndoLogSystem)
-					{
-						pg_atomic_write_u64(&curProcData->undoRetainLocations[i].snapshotRetainUndoLocation, InvalidUndoLocation);
-					}
-				}
+					pg_atomic_write_u64(&curProcData->undoRetainLocations[i].snapshotRetainUndoLocation, InvalidUndoLocation);
 
 				minParentSubId = InvalidSubTransactionId;
 
