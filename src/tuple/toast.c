@@ -968,7 +968,7 @@ o_toast_delete(OTableDescr *descr,
 	if (desc->storageType == BTreeStoragePersistence)
 		/* @TODO @ CHECK && wal == true */
 	{
-		add_rel_wal_record(descr->oids, oIndexInvalid, descr->version);
+		// add_rel_wal_record(descr->oids, oIndexInvalid, descr->version);
 		/* @TODO @ CHECK ! !!type ! !! */
 	}
 
