@@ -38,16 +38,88 @@ typedef uint64 OTupleXactInfo;
 #define TOASTIndexNumber (0xFFFE)
 #define InvalidIndexNumber (0xFFFF)
 
+/*
+ * BTreeKeyType
+ *
+ * Defines the type of key used in B-tree operations.  The type affects how
+ * keys are compared, hashed, and interpreted during tree traversal and
+ * modification operations.
+ */
 typedef enum BTreeKeyType
 {
+	/*
+	 * BTreeKeyLeafTuple: Represents a complete tuple stored in a leaf page.
+	 * Used when comparing or hashing full tuples that contain all columns
+	 * defined in the index, including non-key columns in the case of covering
+	 * indexes.  This is the most common key type for insert, update, and
+	 * delete operations at the leaf level.
+	 */
 	BTreeKeyLeafTuple,
+
+	/*
+	 * BTreeKeyNonLeafKey: Represents a key in non-leaf (internal) pages used
+	 * for navigation.  These keys contain only the indexed columns and are
+	 * used to guide searches down the tree. Non-leaf keys are created from
+	 * leaf tuples via the tuple_make_key operation, which extracts just the
+	 * key columns (and optionally the version).
+	 */
 	BTreeKeyNonLeafKey,
+
+	/*
+	 * BTreeKeyBound: Represents a search boundary key used for range scans
+	 * and lookups.  This type is used with OBTreeKeyBound structures that
+	 * specify per-column boundary conditions (inclusive/exclusive, NULL,
+	 * unbounded, etc.).  Bound keys enable flexible range queries with
+	 * precise control over boundary inclusion/exclusion.
+	 */
 	BTreeKeyBound,
+
+	/*
+	 * BTreeKeyUniqueLowerBound: lower bound for unique constraint checking.
+	 * Used during unique index insertions to find the starting point for
+	 * scanning tuples that might violate uniqueness . The scan continues
+	 * until BTreeKeyUniqueUpperBound is reached, checking all potentially
+	 * conflicting tuples within the unique key range.
+	 */
 	BTreeKeyUniqueLowerBound,
+
+	/*
+	 * BTreeKeyUniqueUpperBound: upper bound for unique constraint checking.
+	 * Marks the end of the range to scan when checking for unique constraint
+	 * violations. Together with BTreeKeyUniqueLowerBound, this defines the
+	 * exact range of tuples that must be checked to ensure uniqueness of the
+	 * indexed columns.
+	 */
 	BTreeKeyUniqueUpperBound,
-	/* following values are never passed to comparison function */
+
+	/*
+	 * The following values are never passed to comparison functions and are
+	 * used for special tree traversal operations:
+	 */
+
+	/*
+	 * BTreeKeyNone: Requests the leftmost item/page in the tree.  When used
+	 * during tree traversal, it directs the search to always take the
+	 * leftmost path, without performing any key comparisons.  This is used
+	 * for full forward scans starting from the beginning of the index.
+	 */
 	BTreeKeyNone,
+
+	/*
+	 * BTreeKeyPageHiKey: Represents the high key boundary of a B-tree page.
+	 * The high key is the upper bound of all keys that can be stored on a
+	 * page. This is used internally for page split operations and to
+	 * determine if a search needs to follow the right-link to a sibling page.
+	 */
 	BTreeKeyPageHiKey,
+
+	/*
+	 * BTreeKeyRightmost: Requests the rightmost item/page in the tree. During
+	 * tree traversal, this directs the search to always take the rightmost
+	 * path without performing key comparisons.  This is used for full
+	 * backward scans starting from the end of the index or for finding the
+	 * maximum key.
+	 */
 	BTreeKeyRightmost
 } BTreeKeyType;
 
