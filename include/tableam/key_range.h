@@ -16,12 +16,15 @@
 
 #include "tableam/descr.h"
 
+#include "parser/parse_coerce.h"
+
 #define O_VALUE_BOUND_INCLUSIVE 0x01
 #define O_VALUE_BOUND_NULL 0x02
 #define O_VALUE_BOUND_UNBOUNDED 0x04
 #define O_VALUE_BOUND_LOWER 0x08
 #define O_VALUE_BOUND_UPPER 0x10
 #define O_VALUE_BOUND_COERCIBLE 0x20
+#define O_VALUE_BOUND_NON_COERCIBLE 0x40
 #define O_VALUE_BOUND_DIRECTIONS (O_VALUE_BOUND_LOWER | O_VALUE_BOUND_UPPER)
 #define O_VALUE_BOUND_NO_VALUE (O_VALUE_BOUND_NULL | O_VALUE_BOUND_UNBOUNDED)
 #define O_VALUE_BOUND_MINUS_INFINITY (O_VALUE_BOUND_LOWER | O_VALUE_BOUND_UNBOUNDED)
@@ -64,6 +67,21 @@ typedef struct
 	OBTreeKeyBound low;
 	OBTreeKeyBound high;
 } OBTreeKeyRange;
+
+static inline bool
+o_bound_is_coercible(OBTreeValueBound *bound, OIndexField *field)
+{
+	bool		result;
+
+	if (bound->flags & O_VALUE_BOUND_COERCIBLE)
+		return true;
+	if (bound->flags & O_VALUE_BOUND_NON_COERCIBLE)
+		return false;
+	/* Neither flag is set, compute and cache the result */
+	result = IsBinaryCoercible(bound->type, field->inputtype);
+	bound->flags |= result ? O_VALUE_BOUND_COERCIBLE : O_VALUE_BOUND_NON_COERCIBLE;
+	return result;
+}
 
 extern bool o_key_data_to_key_range(OBTreeKeyRange *res,
 									ScanKeyData *keyData,

@@ -318,8 +318,7 @@ o_fill_key_bounds(Datum v, Oid type,
 		low->type = type;
 		low->comparator = comparator;
 		low->exclusion_fn = NULL;
-		if (coercible)
-			low->flags |= O_VALUE_BOUND_COERCIBLE;
+		low->flags |= coercible ? O_VALUE_BOUND_COERCIBLE : O_VALUE_BOUND_NON_COERCIBLE;
 	}
 	if (high != NULL)
 	{
@@ -327,8 +326,7 @@ o_fill_key_bounds(Datum v, Oid type,
 		high->type = type;
 		high->comparator = comparator;
 		high->exclusion_fn = NULL;
-		if (coercible)
-			high->flags |= O_VALUE_BOUND_COERCIBLE;
+		high->flags |= coercible ? O_VALUE_BOUND_COERCIBLE : O_VALUE_BOUND_NON_COERCIBLE;
 	}
 }
 
