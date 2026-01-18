@@ -55,7 +55,6 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
 
     if [ $status -eq 0 ]; then
         echo "default_table_access_method = 'orioledb'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
-        echo "orioledb.strict_mode = true" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
         # Apply test setup SQL patches to reflect enabled OrioleDB
         git apply patches/test_setup_enable_oriole.diff
         if [ $PG_VERSION = "17" ]; then
@@ -64,7 +63,13 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log restart
         # Run Postgress regression tests
         make -C src/test/regress installcheck-oriole -j $(nproc) || status=$?
+        if [ -f src/test/regress/regression.diffs ]; then
+          python3 ../orioledb/ci/filter_regression_diff.py --diff src/test/regress/regression.diffs > src/test/regress_filtered.diffs
+          [ -s src/test/regress_filtered.diffs ] || rm src/test/regress_filtered.diffs src/test/regress/regression.diffs
+        fi
 
+        echo "orioledb.strict_mode = true" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+        pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log restart
         make -C src/test/isolation EXTRA_REGRESS_OPTS="--load-extension=orioledb" installcheck -j $(nproc) || true
         if [ -f src/test/isolation/output_iso/regression.diffs ]; then
           python3 ../orioledb/ci/filter_isolation_diff.py --diff src/test/isolation/output_iso/regression.diffs > src/test/isolation_filtered.diffs

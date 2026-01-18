@@ -246,6 +246,7 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 void
 orioledb_amreuse(Relation index)
 {
+	elog(WARNING, "orioledb_amreuse: %s", index->rd_rel->relname.data);
 	if (o_reuse_indices)
 	{
 		o_reuse_indices = lappend_oid(o_reuse_indices, index->rd_id);
@@ -265,6 +266,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	String	   *relname;
 	OBTOptions *options = (OBTOptions *) index->rd_options;
 
+	elog(WARNING, "orioledb_ambuild: %s", index->rd_rel->relname.data);
 	if (options && !options->orioledb_index)
 	{
 		OTableDescr *descr;

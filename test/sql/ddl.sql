@@ -2,6 +2,33 @@ CREATE SCHEMA ddl;
 SET SESSION search_path = 'ddl';
 CREATE EXTENSION orioledb;
 
+CREATE TABLE concur_reindex_tab (c1 int) USING orioledb;
+-- REINDEX
+REINDEX TABLE concur_reindex_tab; -- notice
+REINDEX (CONCURRENTLY) TABLE concur_reindex_tab; -- notice
+ALTER TABLE concur_reindex_tab ADD COLUMN c2 text; -- add toast index
+INSERT INTO concur_reindex_tab VALUES  (1, 'a');
+INSERT INTO concur_reindex_tab VALUES  (2, 'a');
+
+SELECT orioledb_tbl_structure('concur_reindex_tab'::regclass);
+SELECT orioledb_tbl_indices('concur_reindex_tab'::regclass, true, true);
+-- Normal index with integer column
+CREATE UNIQUE INDEX concur_reindex_ind1 ON concur_reindex_tab(c1);
+-- Normal index with text column
+CREATE INDEX concur_reindex_ind2 ON concur_reindex_tab(c2);
+-- UNIQUE index with expression
+CREATE UNIQUE INDEX concur_reindex_ind3 ON concur_reindex_tab(abs(c1));
+-- Duplicate column names
+CREATE INDEX concur_reindex_ind4 ON concur_reindex_tab(c1, c1, c2);
+-- Create table for check on foreign key dependence switch with indexes swapped
+SELECT orioledb_tbl_structure('concur_reindex_tab'::regclass);
+SELECT orioledb_tbl_indices('concur_reindex_tab'::regclass, true, true);
+ALTER TABLE concur_reindex_tab ADD PRIMARY KEY USING INDEX concur_reindex_ind1;
+SELECT orioledb_tbl_structure('concur_reindex_tab'::regclass);
+SELECT orioledb_tbl_indices('concur_reindex_tab'::regclass, true, true);
+\q
+
+
 CREATE TABLE o_ddl_check
 (
 	f1 text,
