@@ -668,9 +668,9 @@ o_btree_insert_split(BTreeInsertStackItem *insert_item,
 	OffsetNumber left_count;
 	OBTreeFindPageContext *curContext = insert_item->context;
 	BTreeDescr *desc = curContext->desc;
-	OInMemoryBlkno blkno,
-				right_blkno = OInvalidInMemoryBlkno,
-				root_split_left_blkno = OInvalidInMemoryBlkno;
+	PagePointer page_ptr;
+	PagePointer right_page_ptr,
+				root_split_left_page_ptr;
 	Page		p;
 	OTuple		split_key;
 	LocationIndex split_key_len;
@@ -679,8 +679,8 @@ o_btree_insert_split(BTreeInsertStackItem *insert_item,
 	bool		next;
 	Jsonb	   *params = NULL;
 
-	blkno = curContext->items[curContext->index].blkno;
-	p = O_GET_IN_MEMORY_PAGE(blkno);
+	page_ptr = curContext->items[curContext->index].ptr;
+	p = pptr_get_page(page_ptr);
 
 	if (STOPEVENTS_ENABLED())
 		params = btree_page_stopevent_params(desc, p);
@@ -701,38 +701,41 @@ o_btree_insert_split(BTreeInsertStackItem *insert_item,
 
 	START_CRIT_SECTION();
 
-	if (blkno == desc->rootInfo.rootPageBlkno)
-		root_split_left_blkno = ppool_get_page(desc->ppool, reserve_kind);
-	right_blkno = ppool_get_page(desc->ppool, reserve_kind);
+	if (pptr_eq(page_ptr, desc->rootInfo.rootPagePtr))
+		root_split_left_page_ptr = (*desc->ppool->ops->alloc_page)(desc->ppool, reserve_kind);
+	right_page_ptr = (*desc->ppool->ops->alloc_page)(desc->ppool, reserve_kind);
 
 	/*
 	 * Move hikeyBlkno of split.  This change is atomic, no need to bother
 	 * about change count.
 	 */
-	if (checkpoint_state->stack[insert_item->level].hikeyBlkno == blkno)
-		checkpoint_state->stack[insert_item->level].hikeyBlkno = right_blkno;
+	if (desc->storageType != BTreeStorageInMemory) {
+    	/* If it's not in-memory storage then we are sure that page_ptr is of PPTR_TYPE_BLKNO */
+    	if (checkpoint_state->stack[insert_item->level].hikeyBlkno == page_ptr.ptr.blkno)
+    		checkpoint_state->stack[insert_item->level].hikeyBlkno = right_page_ptr.ptr.blkno;
+	}
 
-	perform_page_split(desc, blkno, right_blkno, items,
+	perform_page_split(desc, page_ptr, right_page_ptr, items,
 					   left_count, split_key, split_key_len,
 					   csn, undoLocation);
 
 	o_btree_insert_mark_split_finished_if_needed(insert_item);
 
-	unlock_page(right_blkno);
+	(*desc->ppool->ops->unlock_page)(right_page_ptr);
 
 	if (waitersWakeupCount > 0)
 		mark_waiter_tuples_inserted(waitersWakeupProcnums,
 									waitersWakeupCount);
 
-	o_btree_split_fill_downlink_item_with_key(insert_item, blkno, false,
+	o_btree_split_fill_downlink_item_with_key(insert_item, page_ptr, false,
 											  split_key, split_key_len,
 											  internal_header);
 
-	if (blkno == desc->rootInfo.rootPageBlkno)
+	if (pptr_eq(page_ptr, desc->rootInfo.root_page_ptr))
 	{
 		Assert(curContext->index == 0);
 
-		insert_item->rightBlkno = right_blkno;
+		insert_item->right_page_ptr = right_page_ptr;
 
 		blkno = o_btree_finish_root_split_internal(desc,
 												   root_split_left_blkno,
@@ -744,17 +747,17 @@ o_btree_insert_split(BTreeInsertStackItem *insert_item,
 	else
 	{
 		/* node and leafs split */
-		btree_register_inprogress_split(right_blkno);
+		btree_register_inprogress_split(right_page_ptr);
 		if (insert_item->level == 0)
 			pg_atomic_fetch_add_u32(&BTREE_GET_META(desc)->leafPagesNum, 1);
 
-		unlock_page_after_split(blkno);
+		(*desc->ppool->ops->unlock_page_after_split)(page_ptr);
 
 		curContext->index--;
 		insert_item->refind = true;
 		next = false;
 		END_CRIT_SECTION();
-		insert_item->rightBlkno = right_blkno;
+		insert_item->right_page_ptr = right_page_ptr;
 
 	}
 

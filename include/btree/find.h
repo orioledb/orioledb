@@ -16,10 +16,11 @@
 
 #include "btree.h"
 #include "btree/page_contents.h"
+#include "utils/page_pool.h"
 
 typedef struct
 {
-	OInMemoryBlkno blkno;
+	PagePointer ptr;
 	uint32		pageChangeCount;
 	BTreePageItemLocator locator;
 } OBtreePageFindItem;

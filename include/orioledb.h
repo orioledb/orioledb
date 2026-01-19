@@ -375,6 +375,7 @@ extern Pointer o_shared_buffers;
 extern ODBProcData *oProcData;
 extern int	max_procs;
 extern OrioleDBPageDesc *page_descs;
+extern OrioleDBPageDesc *local_page_descs;
 extern bool remove_old_checkpoint_files;
 extern bool skip_unmodified_trees;
 extern bool debug_disable_bgwriter;
@@ -415,11 +416,20 @@ extern bool orioledb_strict_mode;
 	(AssertMacro(MYPROCNUMBER >= 0 && \
 				 MYPROCNUMBER < max_procs), \
 	 &oProcData[MYPROCNUMBER])
+#define O_PAGE_IS_LOCAL(blkno) \
+	(AssertMacro(OInMemoryBlknoIsValid(blkno)), \
+	 (blkno) < 0)
+// TODO: It's not consistent that page access is handled here while allocation and internal structure is known only to page_pool
 #define O_GET_IN_MEMORY_PAGE(blkno) \
 	(AssertMacro(OInMemoryBlknoIsValid(blkno)), \
-	 (Page)(o_shared_buffers + (((uint64) (blkno)) * ((uint64) ORIOLEDB_BLCKSZ))))
+     (Page)(O_PAGE_IS_LOCAL(blkno) ? (uint64) (-(blkno)) : \
+	 (o_shared_buffers + (((uint64) (blkno)) * ((uint64) ORIOLEDB_BLCKSZ)))))
+// TODO: How to calculate pagedesc location for local pages?
+// Can we still use blkno?
 #define O_GET_IN_MEMORY_PAGEDESC(blkno) \
-	(AssertMacro(OInMemoryBlknoIsValid(blkno)), page_descs + (blkno))
+	(AssertMacro(OInMemoryBlknoIsValid(blkno)), \
+     (O_PAGE_IS_LOCAL(blkno) ? local_page_descs + (uint64) (-(blkno)) : \
+         page_descs + blkno))
 #define O_GET_IN_MEMORY_PAGE_CHANGE_COUNT(blkno) \
 	(O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(blkno)))
 
@@ -460,13 +470,13 @@ typedef enum OPagePoolType
 } OPagePoolType;
 #define OPagePoolTypesCount 3
 
-typedef struct OPagePool OPagePool;
+typedef struct PagePool PagePool;
 struct BTreeDescr;
 
 extern void o_verify_dir_exists_or_create(char *dirname, bool *created, bool *found);
 extern uint64 orioledb_device_alloc(struct BTreeDescr *descr, uint32 size);
-extern OPagePool *get_ppool(OPagePoolType type);
-extern OPagePool *get_ppool_by_blkno(OInMemoryBlkno blkno);
+extern PagePool *get_ppool(OPagePoolType type);
+extern PagePool *get_ppool_by_blkno(OInMemoryBlkno blkno);
 extern OInMemoryBlkno get_dirty_pages_count_sum(void);
 extern void jsonb_push_key(JsonbParseState **state, char *key);
 extern void jsonb_push_null_key(JsonbParseState **state, char *key);
