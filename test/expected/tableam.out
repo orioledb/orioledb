@@ -4892,8 +4892,55 @@ INSERT INTO o_test_2 VALUES (1, 't');
 INSERT INTO o_test_1 (SELECT * FROM o_test_2);
 DROP TABLE o_test_1;
 DROP TABLE o_test_2;
+CREATE TABLE o_test_lockstep
+(
+	a int8 NOT NULL,
+	b int8 NOT NULL,
+	PRIMARY KEY(a,b)
+) USING orioledb;
+INSERT INTO o_test_lockstep SELECT t, t FROM generate_series(1, 1000) t;
+SELECT COUNT(*) FROM o_test_lockstep WHERE a in (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16);
+ count 
+-------
+    16
+(1 row)
+
+SELECT COUNT(*) FROM o_test_lockstep WHERE a in (1,2,3,4,5,6,7,8,9,10,12,13,14,15,16,17);
+ count 
+-------
+    16
+(1 row)
+
+SELECT COUNT(*) FROM o_test_lockstep WHERE a in (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16) AND
+										   b in (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16);
+ count 
+-------
+    16
+(1 row)
+
+SELECT COUNT(*) FROM o_test_lockstep WHERE a in (1,2,3,4,5,6,7,8,9,10,12,13,14,15,16,17) AND
+										   b in (1,2,3,4,5,6,7,8,9,10,12,13,14,15,16,17);
+ count 
+-------
+    16
+(1 row)
+
+SELECT * FROM o_test_lockstep WHERE a in (1000, 1);
+  a   |  b   
+------+------
+    1 |    1
+ 1000 | 1000
+(2 rows)
+
+SELECT * FROM o_test_lockstep WHERE a in (1, 1000) ORDER BY a DESC, b DESC;
+  a   |  b   
+------+------
+ 1000 | 1000
+    1 |    1
+(2 rows)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 17 other objects
+NOTICE:  drop cascades to 18 other objects
 DETAIL:  drop cascades to table o_tableam6
 drop cascades to table o_tableam_join1
 drop cascades to table o_tableam_cte_base
@@ -4909,6 +4956,7 @@ drop cascades to table o_ctid_test
 drop cascades to table o_test_split_rightmost
 drop cascades to table o_test_cursor_snapshot
 drop cascades to table size_test
+drop cascades to table o_test_lockstep
 drop cascades to view db_o_tables
 drop cascades to view db_o_indices
 DROP SCHEMA tableam CASCADE;

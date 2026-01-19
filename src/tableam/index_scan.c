@@ -309,11 +309,6 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	if (!result)
 		return false;
 
-	if (ostate->iterator != NULL)
-	{
-		btree_iterator_free(ostate->iterator);
-		ostate->iterator = NULL;
-	}
 
 	oldcontext = MemoryContextSwitchTo(ostate->cxt);
 	ostate->exact = o_key_data_to_key_range(&ostate->curKeyRange,
@@ -329,10 +324,27 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 		bound = (ostate->scanDir == ForwardScanDirection
 				 ? &ostate->curKeyRange.low
 				 : &ostate->curKeyRange.high);
-		ostate->iterator = o_btree_iterator_create(&indexDescr->desc, (Pointer) bound,
-												   BTreeKeyBound, &ostate->oSnapshot,
-												   ostate->scanDir);
+
+		/* Re-use the existing iterator when possible */
+		if (!ostate->iterator)
+			ostate->iterator = o_btree_iterator_create(&indexDescr->desc,
+													   (Pointer) bound,
+													   BTreeKeyBound,
+													   &ostate->oSnapshot,
+													   ostate->scanDir);
+		else
+			o_btree_iterator_advance(ostate->iterator,
+									 (Pointer) bound,
+									 BTreeKeyBound);
 		o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
+	}
+	else
+	{
+		if (ostate->iterator != NULL)
+		{
+			btree_iterator_free(ostate->iterator);
+			ostate->iterator = NULL;
+		}
 	}
 
 	MemoryContextSwitchTo(oldcontext);

@@ -71,12 +71,27 @@ struct BTreeIterator
 #endif
 };
 
+/*
+ * Specifies key to end the iteration.  A handy struct to pass as a function
+ * argument.
+ */
+typedef struct
+{
+	void	   *key;
+	BTreeKeyType keyKind;
+	bool		isIncluded;
+} BtreeIterationEnd;
+
 static void get_next_combined_location(BTreeIterator *it);
 static void load_page_from_undo(BTreeIterator *it, void *key, BTreeKeyType kind);
-static bool btree_iterator_check_load_next_page(BTreeIterator *it);
+static bool btree_iterator_check_load_next_page(BTreeIterator *it,
+												BtreeIterationEnd *end);
 static OTuple o_btree_iterator_fetch_internal(BTreeIterator *it,
-											  CommitSeqNo *tupleCsn);
-static bool o_btree_interator_can_fetch_from_undo(BTreeDescr *desc, BTreeIterator *it);
+											  CommitSeqNo *tupleCsn,
+											  BtreeIterationEnd *end);
+static bool o_btree_interator_can_fetch_from_undo(BTreeDescr *desc,
+												  BTreeIterator *it,
+												  BtreeIterationEnd *end);
 static bool can_fetch_from_undo(BTreeIterator *it);
 static void undo_it_create(UndoIterator *undoIt, BTreeIterator *it);
 static void undo_it_init(UndoIterator *undoIt, UndoLocation location, void *key, BTreeKeyType kind);
@@ -420,6 +435,46 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	return result;
 }
 
+/*
+ * Adcance page location after finding an appropriate key to prepare for the
+ * iteration.  btree_page_search() prepares a location perfectly for the
+ * forward interation.  The backward iteration might need to advance the
+ * position.
+ */
+static void
+advance_page_location_if_needed(BTreeIterator *it, void *key,
+								BTreeKeyType kind, Page p,
+								BTreePageItemLocator *loc)
+{
+	if (key != NULL && IT_IS_BACKWARD(it))
+	{
+		bool		make_dec = false;
+
+		/*
+		 * From btree_page_search(): "When nextkey is false (this case), we
+		 * are looking for the first item >= scankey."
+		 *
+		 * If it's next item than decrement item offset. In case item ==
+		 * search key no need to do this.
+		 */
+		Assert(BTREE_PAGE_LOCATOR_GET_OFFSET(p, loc) <= BTREE_PAGE_ITEMS_COUNT(p));
+
+		if (BTREE_PAGE_LOCATOR_GET_OFFSET(p, loc) == BTREE_PAGE_ITEMS_COUNT(p))
+			make_dec = true;
+		else
+		{
+			OTuple		tup;
+
+			BTREE_PAGE_READ_TUPLE(tup, p, loc);
+			if (o_btree_cmp(it->context.desc, key, kind, &tup, BTreeKeyLeafTuple) < 0)
+				make_dec = true;
+		}
+
+		if (make_dec)
+			BTREE_PAGE_LOCATOR_PREV(p, loc);
+	}
+}
+
 BTreeIterator *
 o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 						OSnapshot *o_snapshot, ScanDirection scanDir)
@@ -459,39 +514,128 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	findResult = find_page(&it->context, key, kind, 0);
 	Assert(findResult == OFindPageResultSuccess);
 
-	if (key != NULL && IT_IS_BACKWARD(it))
-	{
-		BTreePageItemLocator *loc = &it->context.items[it->context.index].locator;
-		bool		make_dec = false;
-
-		/*
-		 * From btree_page_binary_search(): "When nextkey is false (this
-		 * case), we are looking for the first item >= scankey."
-		 *
-		 * If it's next item than decrement item offset. In case item ==
-		 * search key no need to do this.
-		 */
-		Assert(BTREE_PAGE_LOCATOR_GET_OFFSET(it->context.img, loc) <= BTREE_PAGE_ITEMS_COUNT(it->context.img));
-
-		if (BTREE_PAGE_LOCATOR_GET_OFFSET(it->context.img, loc) == BTREE_PAGE_ITEMS_COUNT(it->context.img))
-			make_dec = true;
-		else
-		{
-			OTuple		tup;
-
-			BTREE_PAGE_READ_TUPLE(tup, it->context.img, loc);
-			if (o_btree_cmp(desc, key, kind, &tup, BTreeKeyLeafTuple) < 0)
-				make_dec = true;
-		}
-
-		if (make_dec)
-			BTREE_PAGE_LOCATOR_PREV(it->context.img, loc);
-	}
+	advance_page_location_if_needed(it, key, kind, it->context.img,
+									&it->context.items[it->context.index].locator);
 
 	load_page_from_undo(it, key,
 						kind != BTreeKeyRightmost ? kind : BTreeKeyNone);
 
 	return it;
+}
+
+/*
+ * Check if the page still contains the given key.  It's assumed that we're
+ * continuing the scan in its direction.  This function checks with the page
+ * hikey for forward direction and with the given lokey for backward
+ * direction.
+ */
+static bool
+page_contains_key(BTreeIterator *it, void *key, BTreeKeyType kind,
+				  Page p, OTuple lokey)
+{
+	/* Check if the new value fits the same leaf page */
+	if (IT_IS_FORWARD(it))
+	{
+		OTuple		hikey;
+		int			cmp;
+
+		if (O_PAGE_IS(p, RIGHTMOST))
+			return true;
+
+		BTREE_PAGE_GET_HIKEY(hikey, p);
+		cmp = o_btree_cmp(it->context.desc,
+						  key, kind,
+						  &hikey, BTreeKeyNonLeafKey);
+		return (cmp < 0);
+	}
+	else
+	{
+		int			cmp;
+
+		if (O_PAGE_IS(p, LEFTMOST))
+			return true;
+
+		cmp = o_btree_cmp(it->context.desc,
+						  key, kind,
+						  &lokey, BTreeKeyNonLeafKey);
+		return (cmp >= 0);
+	}
+}
+
+/*
+ * Fetches low key for the current page if appropriate.  Returns NULL tuple
+ * otherwise.
+ */
+static OTuple
+get_lokey_if_exists(BTreeIterator *it)
+{
+	OTuple		result;
+
+	if (IT_IS_BACKWARD(it) && !O_PAGE_IS(it->context.img, LEFTMOST))
+		result = btree_find_context_lokey(&it->context);
+	else
+		O_TUPLE_SET_NULL(result);
+
+
+	return result;
+}
+
+/*
+ * Advance the iterator position to the given key.  The key must be taken in
+ * the direction of the scan.  That means, a new key must be >= to the end key
+ * last time used during the fetching.
+ */
+void
+o_btree_iterator_advance(BTreeIterator *it, void *key, BTreeKeyType kind)
+{
+	Assert(key != NULL && kind != BTreeKeyNone);
+
+	if (page_contains_key(it, key, kind,
+						  it->context.img, get_lokey_if_exists(it)))
+	{
+		/* Search within the loaded page */
+		BTreePageItemLocator *loc = &it->context.items[it->context.index].locator;
+
+		btree_page_search(it->context.desc, it->context.img, key, kind, NULL, loc);
+		page_locator_find_real_item(it->context.img, NULL, loc);
+		advance_page_location_if_needed(it, key, kind, it->context.img,
+										&it->context.items[it->context.index].locator);
+
+		if (it->combinedPage)
+		{
+			if (page_contains_key(it, key, kind,
+								  it->undoIt.image, it->undoIt.lokey.tuple))
+			{
+				btree_page_search(it->context.desc,
+								  it->undoIt.image,
+								  key, kind, NULL,
+								  &it->undoLoc);
+				page_locator_find_real_item(it->undoIt.image, NULL,
+											&it->undoLoc);
+
+				advance_page_location_if_needed(it, key, kind,
+												it->undoIt.image, &it->undoLoc);
+			}
+			else
+			{
+				load_page_from_undo(it, key,
+									kind != BTreeKeyRightmost ? kind : BTreeKeyNone);
+			}
+		}
+	}
+	else
+	{
+		/* Otherwise, re-find the leaf page if needed */
+		OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
+
+		findResult = find_page(&it->context, key, kind, 0);
+		Assert(findResult == OFindPageResultSuccess);
+
+		advance_page_location_if_needed(it, key, kind, it->context.img,
+										&it->context.items[it->context.index].locator);
+		load_page_from_undo(it, key,
+							kind != BTreeKeyRightmost ? kind : BTreeKeyNone);
+	}
 }
 
 void
@@ -511,19 +655,33 @@ o_btree_iterator_set_callback(BTreeIterator *it,
 
 OTuple
 o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
-					   void *end, BTreeKeyType endType,
+					   void *endKey, BTreeKeyType endKind,
 					   bool endIsIncluded, BTreeLocationHint *hint)
 {
 	BTreeDescr *desc = it->context.desc;
 	OTuple		result;
+	BtreeIterationEnd end;
+	BtreeIterationEnd *endPtr;
+
+	if (endKey != NULL && endKind != BTreeKeyNone)
+	{
+		end.key = endKey;
+		end.keyKind = endKind;
+		end.isIncluded = endIsIncluded;
+		endPtr = &end;
+	}
+	else
+	{
+		endPtr = NULL;
+	}
 
 	ASAN_UNPOISON_MEMORY_REGION(&result, sizeof(result));
 
-	result = o_btree_iterator_fetch_internal(it, tupleCsn);
+	result = o_btree_iterator_fetch_internal(it, tupleCsn, endPtr);
 
-	if (!O_TUPLE_IS_NULL(result) && end != NULL)
+	if (!O_TUPLE_IS_NULL(result) && endKey != NULL)
 	{
-		int			cmp = o_btree_cmp(desc, &result, BTreeKeyLeafTuple, end, endType);
+		int			cmp = o_btree_cmp(desc, &result, BTreeKeyLeafTuple, endKey, endKind);
 
 		if (IT_IS_BACKWARD(it))
 			cmp *= -1;
@@ -593,27 +751,8 @@ load_page_from_undo(BTreeIterator *it, void *key, BTreeKeyType kind)
 			page_locator_find_real_item(it->undoIt.image, NULL,
 										&it->undoLoc);
 
-			if (IT_IS_BACKWARD(it))
-			{
-				OTuple		founded;
-				OffsetNumber undoOffset;
-
-				BTREE_PAGE_READ_TUPLE(founded, it->undoIt.image, &it->undoLoc);
-
-				/*
-				 * From btree_page_binary_search(): "When nextkey is false
-				 * (this case), we are looking for the first item >= scankey."
-				 *
-				 * If it's next item than decrement item offset. In case item
-				 * == key bound no need to do this.
-				 */
-				undoOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(it->undoIt.image, &it->undoLoc);
-				Assert(undoOffset <= BTREE_PAGE_ITEMS_COUNT(it->undoIt.image));
-				if (undoOffset == BTREE_PAGE_ITEMS_COUNT(it->undoIt.image) ||
-					o_btree_cmp(desc, key, kind, &founded, BTreeKeyLeafTuple))
-					BTREE_PAGE_LOCATOR_PREV(it->undoIt.image, &it->undoLoc);
-			}
-
+			advance_page_location_if_needed(it, key, kind,
+											it->undoIt.image, &it->undoLoc);
 		}
 		else if (IT_IS_FORWARD(it))
 		{
@@ -665,7 +804,8 @@ get_next_combined_location(BTreeIterator *it)
  * Fetch next tuple without checking for end condition.
  */
 static OTuple
-o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn)
+o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
+								BtreeIterationEnd *end)
 {
 	BTreeDescr *desc = it->context.desc;
 	OBTreeFindPageContext *context = &it->context;
@@ -679,7 +819,7 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn)
 
 	while (true)
 	{
-		if (!btree_iterator_check_load_next_page(it))
+		if (!btree_iterator_check_load_next_page(it, end))
 		{
 			O_TUPLE_SET_NULL(result);
 			return result;
@@ -757,11 +897,51 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn)
 }
 
 /*
+ * Checks if the page contains the given iteration end key.  More practically,
+ * it checks if we can finish the iteration without switching this page.
+ */
+static bool
+page_contains_end(BTreeIterator *it, Page p,
+				  OTuple lokey, BtreeIterationEnd *end)
+{
+	if (IT_IS_FORWARD(it))
+	{
+		OTuple		hikey;
+		int			cmp;
+
+		if (O_PAGE_IS(p, RIGHTMOST))
+			return true;
+
+		BTREE_PAGE_GET_HIKEY(hikey, p);
+		cmp = o_btree_cmp(it->context.desc,
+						  end->key, end->keyKind,
+						  &hikey, BTreeKeyNonLeafKey);
+		if (cmp < 0 || (cmp == 0 && !end->isIncluded))
+			return true;
+	}
+	else
+	{
+		int			cmp;
+
+		if (O_PAGE_IS(p, LEFTMOST))
+			return true;
+
+		cmp = o_btree_cmp(it->context.desc,
+						  end->key, end->keyKind,
+						  &lokey, BTreeKeyNonLeafKey);
+		if (cmp >= 0)
+			return true;
+	}
+	return false;
+}
+
+
+/*
  * Check and load the next tree page if needed.  Works with both normal and undo
  * pages.  Return true on success.  False means there is nothing more to read.
  */
 static bool
-btree_iterator_check_load_next_page(BTreeIterator *it)
+btree_iterator_check_load_next_page(BTreeIterator *it, BtreeIterationEnd *end)
 {
 	OBTreeFindPageContext *context = &it->context;
 	Page		img = context->img,
@@ -769,7 +949,7 @@ btree_iterator_check_load_next_page(BTreeIterator *it)
 	BTreeDescr *desc = context->desc;
 	OFixedKey	key_buf;
 
-	if (o_btree_interator_can_fetch_from_undo(context->desc, it))
+	if (o_btree_interator_can_fetch_from_undo(context->desc, it, end))
 		return true;
 
 	while (!BTREE_PAGE_LOCATOR_IS_VALID(img, &context->items[context->index].locator))
@@ -778,6 +958,9 @@ btree_iterator_check_load_next_page(BTreeIterator *it)
 		BTreePageHeader *header;
 
 		if (IS_LAST_PAGE(img, it))
+			return false;
+
+		if (end && page_contains_end(it, img, get_lokey_if_exists(it), end))
 			return false;
 
 		if (IT_IS_FORWARD(it))
@@ -795,7 +978,7 @@ btree_iterator_check_load_next_page(BTreeIterator *it)
 			bool		reload = true;
 
 			if (it->combinedPage)
-				reload = !o_btree_interator_can_fetch_from_undo(context->desc, it);
+				reload = !o_btree_interator_can_fetch_from_undo(context->desc, it, NULL);
 
 			if (reload)
 			{
@@ -837,11 +1020,16 @@ btree_iterator_check_load_next_page(BTreeIterator *it)
  * Can we fetch more pages form undo page image?
  */
 static bool
-o_btree_interator_can_fetch_from_undo(BTreeDescr *desc, BTreeIterator *it)
+o_btree_interator_can_fetch_from_undo(BTreeDescr *desc, BTreeIterator *it,
+									  BtreeIterationEnd *end)
 {
 	Page		hImg = it->undoIt.image,
 				img = it->context.img;
 	BTreePageHeader *header = (BTreePageHeader *) img;
+
+	if (it->combinedPage && end && page_contains_end(it, it->undoIt.image,
+													 it->undoIt.lokey.tuple, end))
+		return can_fetch_from_undo(it);
 
 	if (!BTREE_PAGE_LOCATOR_IS_VALID(hImg, &it->undoLoc))
 	{

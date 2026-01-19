@@ -47,6 +47,8 @@ extern BTreeIterator *o_btree_iterator_create(BTreeDescr *desc, void *key,
 											  BTreeKeyType kind,
 											  OSnapshot *o_snapshot,
 											  ScanDirection scanDir);
+extern void o_btree_iterator_advance(BTreeIterator *it,
+									 void *key, BTreeKeyType kind);
 extern void o_btree_iterator_set_tuple_ctx(BTreeIterator *it,
 										   MemoryContext tupleCxt);
 extern void o_btree_iterator_set_callback(BTreeIterator *it,
@@ -54,7 +56,7 @@ extern void o_btree_iterator_set_callback(BTreeIterator *it,
 										  void *arg);
 extern OTuple o_btree_iterator_fetch(BTreeIterator *it,
 									 CommitSeqNo *tuple_csn,
-									 void *end, BTreeKeyType endType,
+									 void *endKey, BTreeKeyType endKind,
 									 bool endIsIncluded,
 									 BTreeLocationHint *hint);
 extern OTuple btree_iterate_raw(BTreeIterator *it, void *end,
