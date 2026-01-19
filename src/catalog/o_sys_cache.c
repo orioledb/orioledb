@@ -101,6 +101,7 @@ static HeapTuple o_auth_cache_search_htup(TupleDesc tupdesc, Oid authoid);
 
 ToastAPI	oSysCacheToastAPI = {
 	.getBTreeDesc = oSysCacheToastGetBTreeDesc,
+	.getBTreeVersion = NULL,
 	.getMaxChunkSize = oSysCacheToastGetMaxChunkSize,
 	.updateKey = oSysCacheToastUpdateKey,
 	.getNextKey = oSysCacheToastGetNextKey,
@@ -109,7 +110,6 @@ ToastAPI	oSysCacheToastAPI = {
 	.getTupleData = oSysCacheToastGetTupleData,
 	.getTupleChunknum = oSysCacheToastGetTupleChunknum,
 	.getTupleDataSize = oSysCacheToastGetTupleDataSize,
-	.getTupleKeyVersion = NULL, /* @TODO */
 	.deleteLogFullTuple = false,
 	.fetchCallback = NULL
 };

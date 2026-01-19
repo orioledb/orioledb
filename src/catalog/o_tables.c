@@ -216,14 +216,6 @@ oTablesGetTupleDataSize(OTuple tuple, void *arg)
 	return chunk->dataLength;
 }
 
-static uint32
-oTablesGetTupleKeyVersion(OTuple tuple, void *arg)
-{
-	OTableChunk *chunk = (OTableChunk *) tuple.data;
-
-	return chunk->key.version;
-}
-
 static TupleFetchCallbackResult
 oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 					 void *arg, TupleFetchCallbackCheckType check_type)
@@ -255,6 +247,7 @@ oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 
 ToastAPI	oTablesToastAPI = {
 	.getBTreeDesc = oTablesGetBTreeDesc,
+	.getBTreeVersion = NULL,
 	.getKeySize = oTablesGetKeySize,
 	.getMaxChunkSize = oTablesGetMaxChunkSize,
 	.updateKey = oTablesUpdateKey,
@@ -264,7 +257,6 @@ ToastAPI	oTablesToastAPI = {
 	.getTupleData = oTablesGetTupleData,
 	.getTupleChunknum = oTablesGetTupleChunknum,
 	.getTupleDataSize = oTablesGetTupleDataSize,
-	.getTupleKeyVersion = oTablesGetTupleKeyVersion,
 	.deleteLogFullTuple = false,
 	.fetchCallback = oTablesFetchCallback
 };

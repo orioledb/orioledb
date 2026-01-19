@@ -163,14 +163,6 @@ oIndicesGetTupleDataSize(OTuple tuple, void *arg)
 	return chunk->dataLength;
 }
 
-static uint32
-oIndicesGetTupleKeyVersion(OTuple tuple, void *arg)
-{
-	OIndexChunk *chunk = (OIndexChunk *) tuple.data;
-
-	return chunk->key.version;
-}
-
 static TupleFetchCallbackResult
 oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 					  void *arg, TupleFetchCallbackCheckType check_type)
@@ -219,6 +211,7 @@ oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 
 ToastAPI	oIndicesToastAPI = {
 	.getBTreeDesc = oIndicesGetBTreeDesc,
+	.getBTreeVersion = NULL,
 	.getKeySize = oIndicesGetKeySize,
 	.getMaxChunkSize = oIndicesGetMaxChunkSize,
 	.updateKey = oIndicesUpdateKey,
@@ -228,7 +221,6 @@ ToastAPI	oIndicesToastAPI = {
 	.getTupleData = oIndicesGetTupleData,
 	.getTupleChunknum = oIndicesGetTupleChunknum,
 	.getTupleDataSize = oIndicesGetTupleDataSize,
-	.getTupleKeyVersion = oIndicesGetTupleKeyVersion,
 	.deleteLogFullTuple = true,
 	.fetchCallback = oIndicesFetchCallback
 };

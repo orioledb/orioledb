@@ -69,6 +69,7 @@ typedef struct OToastValue
 typedef struct
 {
 	BTreeDescr *(*getBTreeDesc) (void *arg);
+	uint32		(*getBTreeVersion) (void *arg);
 	uint32		(*getKeySize) (void *arg);
 	uint32		(*getMaxChunkSize) (void *key, void *arg);
 	void		(*updateKey) (void *key, uint32 chunknum, void *arg);
@@ -79,7 +80,6 @@ typedef struct
 	Pointer		(*getTupleData) (OTuple tuple, void *arg);
 	uint32		(*getTupleChunknum) (OTuple tuple, void *arg);
 	uint32		(*getTupleDataSize) (OTuple tuple, void *arg);
-	uint32		(*getTupleKeyVersion) (OTuple tuple, void *arg);
 	bool		deleteLogFullTuple;
 	TupleFetchCallback fetchCallback;
 } ToastAPI;
