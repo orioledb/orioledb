@@ -780,9 +780,9 @@ o_fetch_table_descr_extended(ORelOids oids, OSnapshot snapshot, uint32 version)
 	OTableDescr *table_descr = NULL;
 	bool		found = false;
 
-	/* @TODO !!! need to enable cache */
-	if (version == O_TABLE_INVALID_VERSION)
-		table_descr = hash_search(oTableDescrHash, &oids, HASH_FIND, &found);
+	table_descr = hash_search(oTableDescrHash, &oids, HASH_FIND, &found);
+	Assert((found && table_descr) || !found);
+	found = found && (version == O_TABLE_INVALID_VERSION || table_descr->version == version);
 
 	if (!found)
 		table_descr = create_table_descr(oids, snapshot, version);
@@ -990,15 +990,16 @@ o_drop_shared_root_info(Oid datoid, Oid relnode)
 static OIndexDescr *
 get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OSnapshot snapshot, uint32 version)
 {
-	bool		found;
 	OIndexDescr *result;
 	OIndex	   *oIndex;
 	MemoryContext mcxt;
+	bool		found = false;
 
-	/* @TODO !!! temporary commented, need to enable cache */
 	result = hash_search(oIndexDescrHash, &ixOids, HASH_ENTER, &found);
-	/* if (found) */
-	/* return result; */
+	Assert((found && result) || !found);
+	found = found && (version == O_TABLE_INVALID_VERSION || result->version == version);
+	if (found)
+		return result;
 
 	oIndex = o_indices_get_extended(ixOids, ixType, snapshot, version);
 	Assert(oIndex || miss_ok);

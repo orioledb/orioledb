@@ -733,6 +733,73 @@ class LogicalTest(BaseTest):
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
+	def test_systrees_versions_index_TOAST_3INSERT_ALTER_ADD_COLUMN(self):
+		o_relname = self.o_relname
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+		    CREATE TABLE {o_relname}(id serial primary key, data text) USING orioledb;
+		    ALTER TABLE {o_relname} ALTER COLUMN data SET STORAGE EXTERNAL;
+		""")
+
+		create_slot(node)
+
+		toast_len = 500000  # len of TOASTed value
+		symbol1 = 'A'
+		symbol2 = 'B'
+		symbol3 = 'C'
+
+		# txn creates second version of relation but uses only the initial one
+		node.safe_psql(
+		    'postgres', f"""
+				BEGIN;
+				INSERT INTO {o_relname}(data) VALUES (repeat(\'{symbol1}\', {toast_len}));
+				INSERT INTO {o_relname}(data) VALUES (repeat(\'{symbol2}\', {toast_len}));
+				ALTER TABLE {o_relname} ADD COLUMN data_3 text;
+				INSERT INTO {o_relname}(data,data_3) VALUES (repeat(\'{symbol3}\', {toast_len}),repeat(\'{symbol3}\', {toast_len}));
+				COMMIT;
+			""")
+
+		result = self.retrieve_logical_changes()
+		#print(result)
+
+		expected1 = f"""BEGIN\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:'"""
+		expected2 = f"""'\ntable public.{o_relname}: INSERT: id[integer]:2 data[text]:'"""
+		expected3 = f"""'\ntable public.{o_relname}: INSERT: id[integer]:3 data[text]:'"""
+		expected3_data3 = f"""' data_3[text]:'"""
+		expected_tail = "'\nCOMMIT\n"
+
+		start = 0  # start index
+		b = 0  # border index for checking large output
+
+		def check(expected):
+			nonlocal start
+			nonlocal b
+			nonlocal result
+			b = start + len(expected)
+			self.assertEqual(result[start:b], expected)
+			start = b
+
+		def check_toast(expected, symbol):
+			nonlocal start
+			nonlocal b
+			nonlocal toast_len
+			nonlocal result
+			check(expected)
+			for i in range(b, b + toast_len):
+				self.assertEqual(result[i], symbol)
+			start += toast_len
+
+		check_toast(expected1, symbol1)
+		check_toast(expected2, symbol2)
+		check_toast(expected3, symbol3)
+		check_toast(expected3_data3, symbol3)
+		check(expected_tail)
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
 	def test_systrees_versions_index_TOAST_INSERT_rewrite_rel(self):
 		o_relname = self.o_relname
 		node = self.node
