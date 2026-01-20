@@ -22,6 +22,7 @@
 
 #include "catalog/pg_collation_d.h"
 #include "catalog/pg_opclass_d.h"
+#include "utils/lsyscache.h"
 #include "utils/tuplesort.h"
 
 typedef struct
@@ -136,13 +137,51 @@ comparetup_orioledb_index(const SortTuple *a, const SortTuple *b, Tuplesortstate
 	 * sort algorithm wouldn't have checked whether one must appear before the
 	 * other.
 	 */
-	if (arg->enforceUnique && !equal_hasnull)
+	if (arg->enforceUnique && !(!arg->id->nulls_not_distinct && equal_hasnull))
 	{
+		StringInfo	str = makeStringInfo();
+		int			i;
+
+		appendStringInfo(str, "(");
+		for (i = 0; i < arg->id->nKeyFields; i++)
+		{
+			if (i != 0)
+				appendStringInfo(str, ", ");
+			appendStringInfo(str, "%s",
+							 arg->id->nonLeafTupdesc->attrs[i].attname.data);
+		}
+		appendStringInfo(str, ")=(");
+		sortKey = base->sortKeys;
+		for (i = 0; i < arg->id->nUniqueFields; i++, sortKey++)
+		{
+			bool		isnull;
+			Datum		value;
+
+			attno = sortKey->ssup_attno;
+			value = o_fastgetattr(ltup, attno, tupDesc, spec, &isnull);
+			if (i != 0)
+				appendStringInfo(str, ", ");
+			if (isnull)
+				appendStringInfo(str, "null");
+			else
+			{
+				Oid			typoutput;
+				bool		typisvarlena;
+				char	   *res;
+
+				getTypeOutputInfo(arg->id->nonLeafTupdesc->attrs[i].atttypid,
+								  &typoutput, &typisvarlena);
+				res = OidOutputFunctionCall(typoutput, value);
+				appendStringInfo(str, "'%s'", res);
+			}
+		}
+		appendStringInfo(str, ")");
+
 		ereport(ERROR,
 				(errcode(ERRCODE_UNIQUE_VIOLATION),
 				 errmsg("could not create unique index \"%s\"",
 						arg->id->name.data),
-				 errdetail("Duplicate keys exist.")));
+				 errdetail("Key %s is duplicated.", str->data)));
 	}
 
 	return 0;

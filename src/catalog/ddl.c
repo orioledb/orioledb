@@ -1112,11 +1112,33 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 				orioledb = is_orioledb_rel(rel);
 				if (orioledb)
-					ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("orioledb table \"%s\" does not support VACUUM FULL",
-									RelationGetRelationName(rel))),
-							errdetail("VACUUM FULL is not supported for OrioleDB tables yet."));
+				{
+					if (orioledb_strict_mode)
+					{
+						ereport(ERROR,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("orioledb table \"%s\" does not support VACUUM FULL",
+										RelationGetRelationName(rel))),
+								errdetail("VACUUM FULL is not supported for OrioleDB tables yet."));
+					}
+					else
+					{
+						ListCell   *lc2;
+
+						ereport(WARNING,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("orioledb table \"%s\" does not support VACUUM FULL, using a plain VACUUM instead",
+										RelationGetRelationName(rel))));
+
+						foreach(lc2, vacstmt->options)
+						{
+							DefElem    *opt = (DefElem *) lfirst(lc2);
+
+							if (strcmp(opt->defname, "full") == 0)
+								opt->arg = (Node *) makeInteger(0);
+						}
+					}
+				}
 				relation_close(rel, AccessShareLock);
 			}
 		}
@@ -1137,7 +1159,18 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				concurrently = defGetBoolean(opt);
 			else if (strcmp(opt->defname, "tablespace") == 0)
 				tablespacename = defGetString(opt);
+			else if (strcmp(opt->defname, "verbose") != 0)
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("unrecognized REINDEX option \"%s\"",
+								opt->defname),
+						 parser_errposition(pstate, opt->location)));
 		}
+
+		/* Show same error as in ExecReindex */
+		if (concurrently)
+			PreventInTransactionBlock(isTopLevel,
+									  "REINDEX CONCURRENTLY");
 
 		if (tablespacename != NULL)
 		{
@@ -1386,8 +1419,16 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 			if (is_orioledb_rel(rel))
 			{
-				table_close(rel, lockmode);
-				elog(ERROR, "concurrent index creation is not supported for orioledb tables yet");
+				if (orioledb_strict_mode)
+				{
+					table_close(rel, lockmode);
+					elog(ERROR, "concurrent index creation is not supported for orioledb tables yet");
+				}
+				else
+				{
+					stmt->concurrent = false;
+					elog(WARNING, "concurrent index creation is not supported for orioledb tables yet, using a plain CREATE INDEX instead");
+				}
 			}
 			table_close(rel, lockmode);
 		}
@@ -3342,9 +3383,12 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							int			ctid_idx_off;
 							OTableIndex *o_table_index;
 							List	   *attributeList = NIL;
+							int			expr_field = 0;
+							ListCell   *indexpr;
 
 							ctid_idx_off = o_table->has_primary ? 0 : 1;
 							o_table_index = &o_table->indices[ix_num];
+							indexpr = list_head(o_table_index->expressions);
 
 							for (field_num = 0; field_num < o_table_index->nkeyfields; field_num++)
 							{
@@ -3353,11 +3397,21 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								int			attnum = iField->attnum;
 								OTableField *table_field;
 
-								table_field = &o_table->fields[attnum];
 								iparam = makeNode(IndexElem);
+								if (attnum != EXPR_ATTNUM)
+								{
+									table_field = &o_table->fields[attnum];
+									iparam->name = table_field->name.data;
+									iparam->expr = NULL;
+								}
+								else
+								{
+									table_field = &o_table_index->exprfields[expr_field++];
+									iparam->name = NULL; 
+									iparam->expr = lfirst(indexpr);
+									indexpr = lnext(o_table_index->expressions, indexpr);
+								}
 
-								iparam->name = table_field->name.data;
-								iparam->expr = NULL;
 								iparam->collation = get_collation(table_field->collation, table_field->typid);
 								iparam->opclass = get_opclass(iField->opclass, table_field->typid);
 								iparam->ordering = iField->ordering;
@@ -3801,6 +3855,51 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					errdetail("OrioleDB now only supports single encoding for all databases. "
 							  "It is easier to use single one during checkpoint."));
 		ReleaseSysCache(dbTuple);
+	}
+	else if (access == OAT_POST_ALTER && classId == IndexRelationId)
+	{
+		bool old_indisprimary; 
+		rel = relation_open(objectId, AccessShareLock);
+		old_indisprimary = rel->rd_index->indisprimary;
+		CommandCounterIncrement();
+		if (!old_indisprimary && rel->rd_index->indisprimary)
+		{
+			/* Executed during ADD PRIMARY KEY USING INDEX */
+			Relation	tbl;
+			tbl = relation_open(rel->rd_index->indrelid, AccessShareLock);
+			if ((tbl->rd_rel->relkind == RELKIND_RELATION ||
+				 tbl->rd_rel->relkind == RELKIND_MATVIEW) &&
+				is_orioledb_rel(tbl)) {
+				int			i;
+				int			ix_num = InvalidIndexNumber;
+				OTableDescr *descr = relation_get_descr(tbl);
+
+				Assert(RelIsInMyDatabase(tbl));
+				Assert(descr != NULL);
+
+				for (i = 0; i < descr->nIndices; i++)
+				{
+					if (descr->indices[i]->oids.reloid == rel->rd_rel->oid)
+					{
+						ix_num = i;
+						break;
+					}
+				}
+
+				elog(WARNING, "We cannot just reuse index for primary key in orioledb, because secondary indices contain primary index fields, rebuilding all indices");
+				if (!in_rewrite)
+				{
+					Assert(ix_num != InvalidIndexNumber);
+
+					if (descr->indices[ix_num]->primaryIsCtid)
+						ix_num--;
+					o_index_drop(tbl, ix_num);
+					o_define_index(tbl, NULL, rel->rd_rel->oid, false, InvalidIndexNumber, false, NULL);
+				}
+}
+			relation_close(tbl, AccessShareLock);
+		}
+		relation_close(rel, AccessShareLock);
 	}
 	else if (access == OAT_DROP && classId == OperatorClassRelationId)
 	{
