@@ -2153,6 +2153,7 @@ o_index_drop(Relation tbl, OIndexNumber ix_num)
 	}
 
 	Assert(ix_num != InvalidIndexNumber && ix_num < o_table->nindices);
+
 	if (o_table->indices[ix_num].type == oIndexPrimary)
 		drop_primary_index(tbl, o_table);
 	else

@@ -457,7 +457,7 @@ class LogicalTest(BaseTest):
 		#print(result)
 		self.assertEqual(
 		    result, "BEGIN\n"
-		    f"""table public.{o_relname}: INSERT: id[integer]:1 data[text]:'100'\n"""
+		    f"""table {o_relname}: INSERT: id[integer]:1 data[text]:'100'\n"""
 		    f"""table public.{o_relname}: INSERT: id[integer]:2 data_2[text]:'300' data_3[text]:'400'\n"""
 		    "COMMIT\n"
 		    "BEGIN\n"

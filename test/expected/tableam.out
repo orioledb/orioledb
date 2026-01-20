@@ -31,7 +31,7 @@ CREATE TABLE o_tableam1
 ) USING orioledb;
 -- not supported
 CREATE INDEX CONCURRENTLY o_tableam1_ix_concurrently ON o_tableam1 (key);
-ERROR:  concurrent index creation is not supported for orioledb tables yet
+WARNING:  concurrent index creation is not supported for orioledb tables yet, using a plain CREATE INDEX instead
 CREATE INDEX o_tableam1_ix_options ON o_tableam1 (value) WITH (compression = on);
 ERROR:  unrecognized parameter "compression"
 ALTER TABLE o_tableam1 ADD EXCLUDE USING btree (value WITH =);
@@ -53,6 +53,11 @@ SELECT orioledb_tbl_indices('o_tableam1'::regclass);
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: ctid               +
      Leaf tuple fields: ctid, key, value       +
+ Index o_tableam1_ix_concurrently              +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: key, ctid          +
+     Leaf tuple fields: key, ctid              +
  Index o_tableam1_value_excl                   +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+
@@ -73,6 +78,11 @@ SELECT orioledb_tbl_indices('o_tableam1'::regclass);
      Leaf tuple size: 3, non-leaf tuple size: 1+
      Non-leaf tuple fields: ctid               +
      Leaf tuple fields: ctid, key, value       +
+ Index o_tableam1_ix_concurrently              +
+     Index type: secondary                     +
+     Leaf tuple size: 2, non-leaf tuple size: 2+
+     Non-leaf tuple fields: key, ctid          +
+     Leaf tuple fields: key, ctid              +
  Index o_tableam1_value_excl                   +
      Index type: secondary                     +
      Leaf tuple size: 2, non-leaf tuple size: 2+

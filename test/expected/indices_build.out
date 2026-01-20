@@ -19630,7 +19630,7 @@ CREATE TABLE o_indices6
 INSERT INTO o_indices6 SELECT 1000 + i, 3000 + i % 100, 4000 + i FROM generate_series(1, 500) AS i;
 CREATE UNIQUE INDEX o_indices6_idx1 ON o_indices6 (val); -- fail
 ERROR:  could not create unique index "o_indices6_idx1"
-DETAIL:  Duplicate keys exist.
+DETAIL:  Key (val)=('3038') is duplicated.
 CREATE UNIQUE INDEX o_indices6_idx2 ON o_indices6 (val2); -- success
 INSERT INTO o_indices6 VALUES (1501, 3000, 4001); -- fail
 ERROR:  duplicate key value violates unique constraint "o_indices6_idx2"
@@ -21315,7 +21315,7 @@ CREATE TABLE o_indices6_ctid
 INSERT INTO o_indices6_ctid SELECT 1000 + i, 3000 + i % 100, 4000 + i FROM generate_series(1, 500) AS i;
 CREATE UNIQUE INDEX o_indices6_ctid_idx1 ON o_indices6_ctid (val); -- fail
 ERROR:  could not create unique index "o_indices6_ctid_idx1"
-DETAIL:  Duplicate keys exist.
+DETAIL:  Key (val)=('3038') is duplicated.
 CREATE UNIQUE INDEX o_indices6_ctid_idx2 ON o_indices6_ctid (val2); -- success
 SELECT orioledb_tbl_indices('o_indices6_ctid'::regclass);
               orioledb_tbl_indices              

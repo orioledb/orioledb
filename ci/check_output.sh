@@ -15,7 +15,7 @@ if [ $oomcount != $oomsbefore ]; then
 fi
 
 # show diff if it exists
-for f in ` find ./orioledb/test ./postgresql/src/test -type f \( -name 'regression.diffs' -o -name 'isolation_filtered.diffs' \) ` ; do
+for f in ` find ./orioledb/test ./postgresql/src/test -type f \( -name 'regression.diffs' -o -name 'regress_filtered.diffs' -o -name 'isolation_filtered.diffs' \) ` ; do
 	echo "========= Contents of $f (first 500 lines)"
 	head -n 500 $f
 	line_count=$(wc -l < $f)
