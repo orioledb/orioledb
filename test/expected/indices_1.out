@@ -7110,7 +7110,7 @@ SELECT orioledb_tbl_structure('o_test_partial_unique'::regclass, 'nue');
 CREATE UNIQUE INDEX o_test_partial_unique_ix ON o_test_partial_unique(val_1)
 	WHERE val_2 LIKE '%c';
 ERROR:  could not create unique index "o_test_partial_unique_ix"
-DETAIL:  Duplicate keys exist.
+DETAIL:  Key (val_1)=('25') is duplicated.
 DELETE FROM o_test_partial_unique WHERE val_2 = 'dc';
 CREATE UNIQUE INDEX o_test_partial_unique_ix ON o_test_partial_unique(val_1)
 	WHERE val_2 LIKE '%c';
@@ -8250,7 +8250,7 @@ INSERT INTO o_test_unique_ix_duplicate VALUES (1, 2, 5, 6);
 CREATE UNIQUE INDEX o_test_unique_ix_duplicate_uniq1
 	ON o_test_unique_ix_duplicate USING btree (c1, c2) INCLUDE (c3, c4);
 ERROR:  could not create unique index "o_test_unique_ix_duplicate_uniq1"
-DETAIL:  Duplicate keys exist.
+DETAIL:  Key (c1, c2)=('1', '2') is duplicated.
 CREATE TABLE o_test_expr_index_on_conflict(
 	val_1 text NOT NULL,
 	val_2 text
@@ -8692,6 +8692,7 @@ WHERE conrelid = 'o_test_add_index_constraint'::regclass;
 ALTER TABLE o_test_add_index_constraint
 	ADD CONSTRAINT o_test_pk PRIMARY KEY USING INDEX o_test_idx_id;
 NOTICE:  ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index "o_test_idx_id" to "o_test_pk"
+WARNING:  We cannot just reuse index for primary key in orioledb, because secondary indices contain primary index fields, rebuilding all indices
 -- Verify constraint was added
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
@@ -8703,8 +8704,9 @@ WHERE conrelid = 'o_test_add_index_constraint'::regclass;
 
 -- Test constraint enforcement
 INSERT INTO o_test_add_index_constraint VALUES (4, 'four');  -- Should succeed
--- FIXME: Now it does not fail as expected
 INSERT INTO o_test_add_index_constraint VALUES (1, 'duplicate');  -- Should fail (PK violation)
+ERROR:  duplicate key value violates unique constraint "o_test_pk"
+DETAIL:  Key (id)=('1') already exists.
 -- Create a unique index on val column
 CREATE UNIQUE INDEX o_test_idx_val ON o_test_add_index_constraint(val);
 -- Check state before adding UNIQUE constraint
@@ -8733,7 +8735,7 @@ WHERE conrelid = 'o_test_add_index_constraint'::regclass;
 -- Test UNIQUE constraint enforcement
 INSERT INTO o_test_add_index_constraint VALUES (5, 'five');  -- Should succeed
 INSERT INTO o_test_add_index_constraint VALUES (6, 'one');  -- Should fail (UNIQUE violation)
-ERROR:  duplicate key value violates unique constraint "o_test_idx_val"
+ERROR:  duplicate key value violates unique constraint "o_test_uq"
 DETAIL:  Key (val)=('one') already exists.
 -- Cleanup
 DROP TABLE o_test_add_index_constraint CASCADE;
