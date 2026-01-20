@@ -136,7 +136,7 @@ comparetup_orioledb_index(const SortTuple *a, const SortTuple *b, Tuplesortstate
 	 * sort algorithm wouldn't have checked whether one must appear before the
 	 * other.
 	 */
-	if (arg->enforceUnique && !equal_hasnull)
+	if (arg->enforceUnique && !(!arg->id->nulls_not_distinct && equal_hasnull))
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_UNIQUE_VIOLATION),
