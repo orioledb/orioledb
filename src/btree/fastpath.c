@@ -22,8 +22,11 @@
 
 #include "orioledb.h"
 
+#include "catalog/sys_trees.h"
 #include "btree/btree.h"
+#include "tableam/descr.h"
 #include "btree/fastpath.h"
+#include "tuple/format.h"
 #include "btree/find.h"
 #include "postgres_ext.h"
 #include "storage/itemptr.h"

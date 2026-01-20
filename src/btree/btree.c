@@ -15,6 +15,7 @@
 
 #include "orioledb.h"
 
+#include "catalog/pg_index.h"
 #include "btree/find.h"
 #include "btree/insert.h"
 #include "btree/io.h"
@@ -35,6 +36,15 @@
 #include "miscadmin.h"
 #include "utils/fmgrprotos.h"
 #include "utils/numeric.h"
+#include "utils/syscache.h"
+#include "utils/hsearch.h"
+
+/* Shared memory hash table for validation boundaries */
+static HTAB *validation_boundary_htab = NULL;
+static LWLock *validation_boundary_lock = NULL;
+#define VALIDATION_BOUNDARY_NON  0x0000	/* Minimum value of the first byte of serialized PK tuple for validation boundary */
+#define VALIDATION_BOUNDARY_FULL 0xFFFF	/* Maximum value of the first byte of serialized PK tuple for validation boundary */
+
 
 LWLockPadded *unique_locks;
 int			num_unique_locks;
@@ -410,4 +420,302 @@ btree_downlink_stopevent_params(BTreeDescr *desc, Page p, BTreePageItemLocator *
 	MemoryContextSwitchTo(mctx);
 
 	return res;
+}
+
+/*
+ * Calculate shared memory needed for validation boundary hash table.
+ */
+Size
+btree_validation_shmem_needs(void)
+{
+	Size		size;
+
+	/* Size for hash table: 128 concurrent index builds should be enough */
+	size = hash_estimate_size(128, sizeof(ValidationBoundaryEntry));
+	
+	return size;
+}
+
+/*
+ * Initialize shared memory for validation boundary hash table.
+ */
+void
+btree_validation_shmem_init(Pointer ptr, bool found)
+{
+	HASHCTL		info;
+
+	if (!found)
+	{
+		/* Initialize hash table */
+		memset(&info, 0, sizeof(info));
+		info.keysize = sizeof(ORelOids);
+		info.entrysize = sizeof(ValidationBoundaryEntry);
+		
+		validation_boundary_htab = ShmemInitHash("Validation Boundary Hash",
+												 128, 128,
+												 &info,
+												 HASH_ELEM | HASH_BLOBS);
+	}
+	else
+	{
+		/* Attach to existing hash table */
+		validation_boundary_htab = (HTAB *) ptr;
+	}
+	
+	/* Get the single lock for the hash table */
+	validation_boundary_lock = &(GetNamedLWLockTranche("orioledb_validation_boundary")->lock);
+}
+
+/*
+ * Set the validation boundary for concurrent index builds.
+ * The boundary is stored as an OBTreeKeyBound in the meta page.
+ */
+void
+btree_set_validation_boundary(OIndexDescr *idx, OTuple heapTuple)
+{
+	ValidationBoundaryEntry *entry;
+	int			boundaryLen;
+	BTreeDescr *desc = &idx->desc;
+	bool allocated = false;
+	bool		found;
+
+	Assert(desc != NULL);
+	Assert(!O_TUPLE_IS_NULL(heapTuple));
+	
+	OTuple boundary = o_tuple_make_key(desc, heapTuple, NULL, false, &allocated);
+
+	boundaryLen = o_btree_len(desc, boundary, OTupleLength);
+	if (boundaryLen > O_BTREE_MAX_KEY_SIZE)
+		elog(ERROR, "validation boundary tuple too large: %d bytes (maximum: %ld bytes)",
+			 boundaryLen, O_BTREE_MAX_KEY_SIZE);
+
+	/* Acquire single global lock */
+	LWLockAcquire(validation_boundary_lock, LW_EXCLUSIVE);
+	/* Insert or update entry in hash table */
+	entry = (ValidationBoundaryEntry *) hash_search(validation_boundary_htab,
+													&desc->oids,
+													HASH_ENTER,
+													&found);
+	memcpy(entry->tupleData, boundary.data, boundaryLen);
+	entry->tupleLen = boundaryLen;
+	entry->formatFlags = boundary.formatFlags;
+	LWLockRelease(validation_boundary_lock);
+}
+
+/*
+ * Get the current validation boundary.
+ * Returns true if a boundary is set, false otherwise.
+ * The boundary OTuple will be allocated in the current memory context.
+ */
+bool
+btree_get_validation_boundary(BTreeDescr *desc, OTuple *boundary)
+{
+	char	   *data;
+	ValidationBoundaryEntry *entry;
+
+	Assert(desc != NULL);
+	Assert(boundary != NULL);
+	Assert(validation_boundary_htab != NULL);
+	
+	/* Acquire shared lock for reading */
+	LWLockAcquire(validation_boundary_lock, LW_SHARED);
+
+	/* Look up entry in hash table */
+	entry = (ValidationBoundaryEntry *) hash_search(validation_boundary_htab,
+													&desc->oids,
+													HASH_FIND,
+													NULL);
+
+	if (entry == NULL)
+	{
+		O_TUPLE_SET_NULL(*boundary);
+		LWLockRelease(validation_boundary_lock);
+		return false;
+	}
+
+	/* Allocate and copy the boundary tuple */
+	data = (char *) palloc(entry->tupleLen);
+	memcpy(data, entry->tupleData, entry->tupleLen);
+	
+	boundary->data = data;
+	boundary->formatFlags = entry->formatFlags;
+	
+	LWLockRelease(validation_boundary_lock);
+	return true;
+}
+
+uint16
+btree_is_validation_boundary_get_len(BTreeDescr *desc)
+{
+	uint16		len;
+	ValidationBoundaryEntry *entry;
+
+	Assert(desc != NULL);
+	
+	LWLockAcquire(validation_boundary_lock, LW_SHARED);
+
+	/* Look up entry in hash table */
+	entry = (ValidationBoundaryEntry *) hash_search(validation_boundary_htab,
+													&desc->oids,
+													HASH_FIND,
+													NULL);
+													
+	len = entry->tupleLen;
+	
+	LWLockRelease(validation_boundary_lock);
+
+	return len;
+}
+
+/*
+ * Set validation boundary to non visible.
+ */
+void
+btree_set_validation_boundary_non_visible(OIndexDescr *idx)
+{
+	ValidationBoundaryEntry *entry;
+	BTreeDescr *desc = &idx->desc;
+	bool found;
+
+	Assert(desc != NULL);
+	
+	LWLockAcquire(validation_boundary_lock, LW_EXCLUSIVE);
+
+	/* Insert or update entry in hash table */
+	entry = (ValidationBoundaryEntry *) hash_search(validation_boundary_htab,
+													&desc->oids,
+													HASH_ENTER,
+													&found);
+	entry->tupleLen = VALIDATION_BOUNDARY_NON;
+	
+	LWLockRelease(validation_boundary_lock);
+}
+
+/*
+ * Set validation boundary to full visible (no boundary).
+ */
+void
+btree_set_validation_boundary_full_visible(OIndexDescr *idx)
+{
+	ValidationBoundaryEntry *entry;
+	BTreeDescr *desc = &idx->desc;
+
+	Assert(desc != NULL);
+	
+	LWLockAcquire(validation_boundary_lock, LW_EXCLUSIVE);
+	/* Insert or update entry in hash table */
+	entry = (ValidationBoundaryEntry *) hash_search(validation_boundary_htab,
+													&desc->oids,
+													HASH_ENTER,
+													NULL);
+	entry->tupleLen = VALIDATION_BOUNDARY_FULL;
+	
+	LWLockRelease(validation_boundary_lock);
+}
+
+void
+btree_remove_validation_boundary(OIndexDescr *idx)
+{
+	BTreeDescr *desc = &idx->desc;
+
+	Assert(desc != NULL);
+	
+	LWLockAcquire(validation_boundary_lock, LW_EXCLUSIVE);
+
+	/* Remove entry from hash table */
+	hash_search(validation_boundary_htab, &desc->oids, HASH_REMOVE, NULL);
+	
+	LWLockRelease(validation_boundary_lock);
+}
+
+/*
+ * Check if a primary key satisfies the validation boundary.
+ * Returns true if:
+ * - No validation is in progress (boundary not set), OR
+ * - The PK is less than or equal to the boundary
+ * Returns false if PK is greater than the boundary.
+ */
+bool
+btree_pk_satisfies_validation_boundary(BTreeDescr *desc, OTuple pk)
+{
+	OTuple		boundary;
+	ValidationBoundaryEntry *entry;
+	char		boundaryData[O_BTREE_MAX_KEY_SIZE];
+	int			cmp;
+
+	Assert(desc != NULL);
+	Assert(!O_TUPLE_IS_NULL(pk));
+		
+	LWLockAcquire(validation_boundary_lock, LW_SHARED);
+	
+	/* Look up entry in hash table */
+	entry = (ValidationBoundaryEntry *) hash_search(validation_boundary_htab,
+													&desc->oids,
+													HASH_FIND,
+													NULL);
+	if (entry == NULL)
+	{
+		LWLockRelease(validation_boundary_lock);
+		/* No boundary set, so PK satisfies it */
+		return true;
+	}
+										
+	if (entry->tupleLen == VALIDATION_BOUNDARY_NON)
+	{
+		LWLockRelease(validation_boundary_lock);
+		/* Boundary is non visible, so PK does not satisfy it */
+		return false;
+	}
+	else if (entry->tupleLen == VALIDATION_BOUNDARY_FULL)
+	{
+		LWLockRelease(validation_boundary_lock);
+		/* Boundary is full visible, so PK satisfies it */
+		return true;
+	}
+	
+	memcpy(boundaryData, entry->tupleData, entry->tupleLen);
+
+	boundary.data = boundaryData;
+	boundary.formatFlags = entry->formatFlags;
+	
+	LWLockRelease(validation_boundary_lock);
+
+	/* Compare PK with boundary */
+	cmp = o_btree_cmp(desc, &pk, BTreeKeyNonLeafKey,
+					  &boundary, BTreeKeyNonLeafKey);
+	
+	/* Return true if PK <= boundary */
+	return (cmp <= 0);
+}
+
+/*
+ * Check if an index is "ready but not valid" by querying pg_index.
+ * This indicates the index is being built concurrently.
+ *
+ * Returns true if indisready=true and indisvalid=false, false otherwise.
+ */
+bool
+btree_index_is_ready_not_valid(Oid indexRelOid)
+{
+	HeapTuple	indexTuple;
+	Form_pg_index indexForm;
+	bool		result;
+	
+	/* Get the index tuple from pg_index */
+	indexTuple = SearchSysCache1(INDEXRELID, indexRelOid);
+	
+	if (!HeapTupleIsValid(indexTuple))
+	{
+		/* Index not found in pg_index */
+		return false;
+	}
+
+	indexForm = (Form_pg_index) GETSTRUCT(indexTuple);
+
+	/* Check if index is ready but not valid */
+	result = (indexForm->indisready && !indexForm->indisvalid);
+
+	ReleaseSysCache(indexTuple);
+
+	return result;
 }

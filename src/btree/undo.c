@@ -22,6 +22,7 @@
 #include "btree/undo.h"
 #include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
+#include "tableam/operations.h"
 #include "rewind/rewind.h"
 #include "tableam/descr.h"
 #include "transam/oxid.h"
@@ -30,7 +31,7 @@
 #include "utils/palloc.h"
 #include "utils/stopevent.h"
 #include "utils/page_pool.h"
-
+#include "tuple/slot.h"
 #include "access/transam.h"
 #include "miscadmin.h"
 #include "utils/inval.h"

@@ -68,7 +68,7 @@ class NotSupportedYetTest(BaseTest):
 		""")
 		self.assertEqual(
 		    err.decode("utf-8").split("\n")[0],
-		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead"
+		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb PK, using a plain REINDEX instead"
 		)
 
 		# Using simple reindex instead of concurrent for database containing orioledb tables
@@ -77,7 +77,7 @@ class NotSupportedYetTest(BaseTest):
 		""")
 		self.assertEqual(
 		    err.decode("utf-8").split("\n")[0],
-		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead"
+		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb PK, using a plain REINDEX instead"
 		)
 
 		node.stop()
@@ -297,15 +297,9 @@ class NotSupportedYetTest(BaseTest):
 			) USING orioledb;
 		""")
 
-		with self.assertRaises(QueryException) as e:
-			node.safe_psql("""
-				CREATE INDEX CONCURRENTLY ON o_test (i);
-			""")
-
-		self.assertErrorMessageEquals(
-		    e,
-		    "concurrent index creation is not supported for orioledb tables yet"
-		)
+		node.safe_psql("""
+			CREATE INDEX CONCURRENTLY ON o_test (i);
+		""")
 
 		node.safe_psql("""
 			REINDEX TABLE o_test;

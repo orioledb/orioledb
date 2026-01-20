@@ -24,9 +24,12 @@
 #include "btree/undo.h"
 #include "catalog/indices.h"
 #include "catalog/o_indices.h"
+#include "btree/page_chunks.h"
+#include "utils/page_pool.h"
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
 #include "recovery/wal.h"
+#include "tuple/sort.h"
 #include "tableam/descr.h"
 #include "tableam/handler.h"
 #include "tableam/operations.h"
@@ -71,8 +74,12 @@
 #include "utils/lsyscache.h"
 #include "utils/sampling.h"
 #include "utils/syscache.h"
+#include "access/genam.h"
+#include "storage/itemptr.h"
+#include "utils/tuplesort.h"
 
 bool		in_nontransactional_truncate = false;
+bool		debug_print_index_validate = false;
 
 typedef struct OScanDescData
 {
@@ -91,7 +98,13 @@ static void get_keys_from_rowid(OIndexDescr *primary, Datum pkDatum, OBTreeKeyBo
 								BTreeLocationHint *hint, CommitSeqNo *csn,
 								uint32 *version, ItemPointer *bridge_ctid);
 static void rowid_set_csn(OIndexDescr *id, Datum pkDatum, CommitSeqNo csn);
+static void orioledb_index_validate_scan(Relation heapRelation,
+										 Relation indexRelation,
+										 IndexInfo *indexInfo,
+										 Snapshot snapshot,
+										 OValidateIndexState *state);
 
+static bool validate_index_callback(ItemPointer itemptr, void *callback_state);
 
 /* ------------------------------------------------------------------------
  * Slot related callbacks for heap AM
@@ -1056,7 +1069,7 @@ orioledb_scan_analyze_next_tuple(TableScanDesc scan, TransactionId OldestXmin,
 
 	while (true)
 	{
-		tuple = btree_seq_scan_getnext_raw(oscan->scan, slot->tts_mcxt, &end, &hint);
+		tuple = btree_seq_scan_getnext_raw(oscan->scan, slot->tts_mcxt, &end, &hint, NULL);
 
 		if (end || ItemPointerGetOffsetNumber(&oscan->iptr) > NUM_TUPLES_PER_BLOCK)
 			return false;
@@ -1181,14 +1194,1180 @@ orioledb_index_build_range_scan(Relation heapRelation,
 	return 0.0;
 }
 
+/*
+ * orioledb_index_validate - Validate an index for orioledb tables
+ *
+ * This function implements index validation for orioledb tables, similar to
+ * PostgreSQL's validate_index but adapted for rowid-based tuple identification.
+ * It performs the following steps:
+ * 1. Calls index_bulk_delete (which invokes orioledb_ambulkdelete) with a callback
+ *    that collects all primary key tuples from the index into a tuplesort
+ * 2. Sorts the collected tuples in primary key order
+ * 3. Scans the heap and performs a merge join with sorted index tuples
+ * 4. Inserts any missing tuples into the index
+ * 
+ * As orioledb uses undo based mvcc, and indexes are mvcc-aware, procedure is
+ * quite different from PostgreSQL's validate_index, for more details see the
+ * concurrent_index_build.md
+ */
+static void
+orioledb_index_validate(Relation heapRelation,
+					   Relation indexRelation,
+					   Snapshot snapshot)
+{
+	IndexInfo  *indexInfo;
+	IndexVacuumInfo ivinfo;
+	OValidateIndexState state;
+	Oid			save_userid;
+	int			save_sec_context;
+	int			save_nestlevel;
+	OTableDescr *descr; 
+	
+	{
+		const int	progress_index[] = {
+			PROGRESS_CREATEIDX_PHASE,
+			PROGRESS_CREATEIDX_TUPLES_DONE,
+			PROGRESS_CREATEIDX_TUPLES_TOTAL,
+			PROGRESS_SCAN_BLOCKS_DONE,
+			PROGRESS_SCAN_BLOCKS_TOTAL
+		};
+		const int64 progress_vals[] = {
+			PROGRESS_CREATEIDX_PHASE_VALIDATE_IDXSCAN,
+			0, 0, 0, 0
+		};
+
+		pgstat_progress_update_multi_param(5, progress_index, progress_vals);
+	}
+
+	/*
+	 * Switch to the table owner's userid, so that any index functions are run
+	 * as that user.  Also lock down security-restricted operations and
+	 * arrange to make GUC variable changes local to this command.
+	 */
+	GetUserIdAndSecContext(&save_userid, &save_sec_context);
+	SetUserIdAndSecContext(heapRelation->rd_rel->relowner,
+						   save_sec_context | SECURITY_RESTRICTED_OPERATION);
+	save_nestlevel = NewGUCNestLevel();
+	RestrictSearchPath();
+
+	/*
+	 * Fetch info needed for index_insert.
+	 */
+	indexInfo = BuildIndexInfo(indexRelation);
+
+	/* mark build is concurrent just for consistency */
+	indexInfo->ii_Concurrent = true;
+
+	/*
+	 * Get table descriptor to access primary index descriptor
+	 */
+	descr = relation_get_descr(heapRelation);
+	Assert(descr != NULL);
+
+	ORelOids index_oids;
+	ORelOidsSetFromRel(index_oids, indexRelation);
+	OIndexType ix_type = o_index_rel_get_ix_type(indexRelation);
+	OIndexDescr * index_descr = o_fetch_index_descr(index_oids, ix_type, false, NULL);
+	
+	
+	o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+	o_btree_load_shmem(&index_descr->desc);
+	state.tuplesort = tuplesort_begin_orioledb_index_secondary_pk(index_descr,
+															GET_PRIMARY(descr),
+															maintenance_work_mem,
+															true,
+															NULL);
+	state.htups = state.itups = state.tups_inserted = state.tups_deleted = 0;
+	state.current_tuple.data = NULL; /* Initialize */
+	state.index_descr = index_descr; /* Will be set by ambulkdelete */
+	state.table_descr = descr;
+	state.index_oids.datoid = MyDatabaseId;
+	state.index_oids.reloid = indexRelation->rd_rel->oid;
+	state.index_oids.relnode = indexRelation->rd_rel->relfilenode;
+	
+	/*
+	 * Scan the index and gather up all the primary key tuples into a tuplesort object.
+	 * This is done by calling index_bulk_delete with validate_index_callback,
+	 * which collects tuples instead of deleting them.
+	 */
+	ivinfo.index = indexRelation;
+	ivinfo.heaprel = heapRelation;
+	ivinfo.analyze_only = false;
+	ivinfo.report_progress = true;
+	ivinfo.estimated_count = true;
+	ivinfo.message_level = DEBUG2;
+	ivinfo.num_heap_tuples = heapRelation->rd_rel->reltuples;
+	ivinfo.strategy = NULL;
+
+	/* ambulkdelete updates progress metrics and collects tuples via callback */
+	(void) index_bulk_delete(&ivinfo, NULL,
+							 validate_index_callback, (void *) &state);
+	
+	/* Execute the sort */
+	{
+		const int	progress_index[] = {
+			PROGRESS_CREATEIDX_PHASE,
+			PROGRESS_SCAN_BLOCKS_DONE,
+			PROGRESS_SCAN_BLOCKS_TOTAL
+		};
+		const int64 progress_vals[] = {
+			PROGRESS_CREATEIDX_PHASE_VALIDATE_SORT,
+			0, 0
+		};
+
+		pgstat_progress_update_multi_param(3, progress_index, progress_vals);
+	}
+	tuplesort_performsort(state.tuplesort);
+
+	/*
+	 * Now scan the heap and "merge" it with the index
+	 */
+	pgstat_progress_update_param(PROGRESS_CREATEIDX_PHASE,
+								 PROGRESS_CREATEIDX_PHASE_VALIDATE_TABLESCAN);
+	orioledb_index_validate_scan(heapRelation,
+								 indexRelation,
+								 indexInfo,
+								 snapshot,
+								 &state);
+
+	/* Done with tuplesort object */
+	tuplesort_end(state.tuplesort);
+
+	/* Make sure to release resources cached in indexInfo (if needed). */
+	index_insert_cleanup(indexRelation, indexInfo);
+
+	elog(DEBUG2,
+		 "orioledb_index_validate found %.0f heap tuples, %.0f index tuples; inserted %.0f missing tuples, deleted %.0f spurious tuples",
+		 state.htups, state.itups, state.tups_inserted, state.tups_deleted);
+
+	/* Roll back any GUC changes executed by index functions */
+	AtEOXact_GUC(false, save_nestlevel);
+
+	/* Restore userid and security context */
+	SetUserIdAndSecContext(save_userid, save_sec_context);
+}
+
+/*
+ * orioledb_index_validate_cleanup_old_concurrent - Cleanup old concurrent index
+ *
+ * During concurrent index creation (REINDEX CONCURRENTLY), PostgreSQL creates
+ * a new index with a temporary name suffix (_ccnew). After validation succeeds,
+ * the new index gets the original relfilenode and the old index structure should
+ * be removed. However, orioledb maintains its own index structures that need
+ * explicit cleanup.
+ *
+ * This function finds and removes the old index structure that has a different
+ * relfilenode than what's currently in pg_class. It should be called after
+ * index validation completes successfully.
+ *
+ * Parameters:
+ *   heapRelation - The table relation
+ *   indexRelation - The new (validated) index relation with updated relfilenode
+ */
+void
+orioledb_index_validate_cleanup_old_concurrent(Relation heapRelation,
+											   Relation indexRelation)
+{
+	OTableDescr *descr;
+	ORelOids	old_idx_oids;
+	OTable	   *o_table;
+	
+	elog(DEBUG2, "orioledb: starting cleanup of old concurrent index structure "
+		 "for index %s", NameStr(indexRelation->rd_rel->relname));
+
+	/* Get the table descriptor */
+	descr = relation_get_descr(heapRelation);
+	if (descr == NULL)
+		return; /* Not an orioledb table */
+		
+	ORelOidsSetFromRel(old_idx_oids, indexRelation);
+	
+	ORelOids table_oids;
+	ORelOidsSetFromRel(table_oids, heapRelation);
+	o_table = o_tables_get(table_oids);
+	
+	/*
+	 * Scan through all indices in the table descriptor to find any index
+	 * with the same reloid but different relfilenode. This would be the
+	 * old concurrent index structure that needs cleanup.
+	 */
+	for (int ix_num = 0; ix_num < o_table->nindices; ix_num++)
+	{
+		OTableIndex *index = &o_table->indices[ix_num];
+
+		if (ORelOidsIsEqual(index->oids, old_idx_oids))
+		{
+			/* Drop the old index structure */
+			o_index_drop(heapRelation, ix_num);
+			
+			elog(DEBUG2, "orioledb: cleaning up old concurrent index structure "
+				 "for index %s (old relfilenode %u)",
+				 NameStr(indexRelation->rd_rel->relname),
+				 index->oids.relnode);
+			break;
+		}
+	}
+		
+}
+
+/*
+ * orioledb_reindex_concurrent_swap
+ *
+ * Convenience wrapper for stage 2: swap relfilenodes
+ * Call this AFTER PostgreSQL has swapped the relfilenodes in pg_class
+ */
+void
+orioledb_reindex_concurrent_swap(Oid newIndex,
+								 Oid oldIndex,
+								 Relation heapRelation,
+								 const char *oldName)
+{
+	Relation	oldIndexRel;
+	Relation	newIndexRel;
+	
+	elog(DEBUG2, "orioledb_reindex_concurrent_swap: Swapping relfilenodes "
+			"between old index OID %u and new index OID %u",
+			oldIndex, newIndex);
+	
+	/* Open relations for old and new index */
+	oldIndexRel = relation_open(oldIndex, AccessShareLock);
+	newIndexRel = relation_open(newIndex, AccessShareLock);
+	
+	int			old_ix_num = InvalidIndexNumber;
+	int 		new_ix_num = InvalidIndexNumber;
+	OSnapshot	oSnapshot;
+	OXid		oxid;
+	ORelOids	old_idx_oids;
+	ORelOids	new_idx_oids;
+	OTable	   *o_table;
+
+	ORelOidsSetFromRel(old_idx_oids, oldIndexRel);
+	ORelOidsSetFromRel(new_idx_oids, newIndexRel);
+	CommandCounterIncrement();
+	
+	ORelOids table_oids;
+	ORelOidsSetFromRel(table_oids, heapRelation);
+	o_table = o_tables_get(table_oids);
+	
+	for (int ix_num = 0; ix_num < o_table->nindices; ix_num++)
+	{
+		OTableIndex *index = &o_table->indices[ix_num];
+
+		if (ORelOidsIsEqual(index->oids, old_idx_oids))
+		{
+			old_ix_num = ix_num;
+			continue;
+		}
+		
+		if (ORelOidsIsEqual(index->oids, new_idx_oids))
+		{
+			new_ix_num = ix_num;
+			continue;
+		}
+	}
+	
+	int			ctid_idx_off;
+	ctid_idx_off = o_table->has_primary ? 0 : 1;
+	
+	Assert(old_ix_num < o_table->nindices);
+	Assert(new_ix_num < o_table->nindices);
+	
+	/* swap the names */
+	namestrcpy(&o_table->indices[new_ix_num].name, NameStr(o_table->indices[old_ix_num].name));
+	namestrcpy(&o_table->indices[old_ix_num].name, oldName);	 
+	
+	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+	o_tables_rel_meta_lock(heapRelation);
+	o_tables_update(o_table, oxid, oSnapshot.csn);
+	o_indices_update(o_table, old_ix_num + ctid_idx_off, oxid, oSnapshot.csn);
+	o_indices_update(o_table, new_ix_num + ctid_idx_off, oxid, oSnapshot.csn);
+	o_tables_rel_meta_unlock(heapRelation, InvalidOid);
+	o_invalidate_oids(old_idx_oids);
+	o_invalidate_oids(new_idx_oids);
+	o_add_invalidate_undo_item(old_idx_oids,
+								O_INVALIDATE_OIDS_ON_ABORT);
+	o_add_invalidate_undo_item(new_idx_oids,
+								O_INVALIDATE_OIDS_ON_ABORT);
+	o_invalidate_oids(table_oids);
+	o_add_invalidate_undo_item(table_oids,
+									O_INVALIDATE_OIDS_ON_ABORT);
+	o_table_free(o_table);
+					  
+	/* Close relations */
+	relation_close(oldIndexRel, AccessShareLock);
+	relation_close(newIndexRel, AccessShareLock);
+}
+
+
+/*
+ * debug_print_validate_tuple - Debug helper to print tuples added to validation tuplesort
+ *
+ * Prints the secondary index tuple being added to tuplesort during validation.
+ * Shows both the secondary key fields and primary key fields.
+ */
+static void
+debug_print_validate_doubletuple(OTuple tuple, OTableDescr *table_descr, OIndexDescr *index_descr, OXid oxid)
+{
+	StringInfoData buf;
+	BTreeDescr *desc = &index_descr->desc;
+	int			nKeyFields = index_descr->nKeyFields;
+	int			i;
+
+	initStringInfo(&buf);
+	appendStringInfo(&buf, "validate tuple: index=%u.%u.%u",
+					 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode);
+
+	/* Print each field in the tuple */
+	for (i = 1; i <= index_descr->nFields; i++)
+	{
+		Datum		value;
+		bool		isnull;
+		Oid			typid;
+		Oid			typoutput;
+		bool		typisvarlena;
+		char	   *value_str;
+
+		/* Determine if this is a secondary key field or PK field */
+		if (i <= nKeyFields)
+			appendStringInfo(&buf, ", SK_field_%d: ", i);
+		else
+			appendStringInfo(&buf, ", PK_field_%d: ", i - nKeyFields);
+
+		/* Get field info */
+		typid = index_descr->leafTupdesc->attrs[i - 1].atttypid;
+		value = o_fastgetattr(tuple, i, index_descr->leafTupdesc, &index_descr->leafSpec, &isnull);
+
+		if (isnull)
+		{
+			appendStringInfo(&buf, "NULL");
+		}
+		else
+		{
+			/* Get the output function for this type */
+			getTypeOutputInfo(typid, &typoutput, &typisvarlena);
+			value_str = OidOutputFunctionCall(typoutput, value);
+			appendStringInfo(&buf, "%s (type=%u)", value_str, typid);
+			pfree(value_str);
+		}
+	}
+
+	elog(WARNING, "%s : oxid %ld", buf.data, oxid);
+	pfree(buf.data);
+}
+
+/*
+ * debug_print_validate_tuple - Debug function to print tuple before adding to tuplesort
+ *
+ * This function prints the tuple data in readable format for debugging purposes 
+ * during index validation, similar to tss_orioledb_print_idx_key.
+ */
+void
+debug_print_validate_tuple(OTuple tuple, OIndexDescr *idx, bool key, OXid oxid)
+{
+	StringInfoData buf;
+
+	TuplePrintOpaque opaque;
+	int i;
+	
+	// create a temporary memory context for this debug print to avoid bloating the main context
+	MemoryContext newctx = AllocSetContextCreate(TopMemoryContext,
+											 "DebugPrintValidateTupleContext",
+											 ALLOCSET_DEFAULT_SIZES);
+	MemoryContext oldContext = MemoryContextSwitchTo(newctx);
+
+	opaque.desc = idx->leafTupdesc;
+	opaque.spec = &idx->leafSpec;
+	opaque.keyDesc = idx->nonLeafTupdesc;
+	opaque.keySpec = &idx->nonLeafSpec;
+	opaque.values = (Datum *) palloc(sizeof(Datum) * opaque.desc->natts);
+	opaque.nulls = (bool *) palloc(sizeof(bool) * opaque.desc->natts);
+	opaque.outputFns = (FmgrInfo *) palloc(sizeof(FmgrInfo) * opaque.desc->natts);
+	opaque.keyOutputFns = (FmgrInfo *) palloc(sizeof(FmgrInfo) * opaque.keyDesc->natts);
+	opaque.printRowVersion = true;
+
+	for (i = 0; i < opaque.desc->natts; i++)
+	{
+		Oid			output;
+		bool		varlena;
+
+		getTypeOutputInfo(opaque.desc->attrs[i].atttypid, &output, &varlena);
+		fmgr_info(output, &opaque.outputFns[i]);
+	}
+
+	for (i = 0; i < opaque.keyDesc->natts; i++)
+	{
+		Oid			output;
+		bool		varlena;
+
+		getTypeOutputInfo(opaque.keyDesc->attrs[i].atttypid, &output, &varlena);
+		fmgr_info(output, &opaque.keyOutputFns[i]);
+	}
+	
+	initStringInfo(&buf);
+	if (key)
+	{
+		idx_key_print(&idx->desc, &buf, tuple, (Pointer)&opaque);
+		elog(WARNING, "key: %s : oxid %ld", buf.data, oxid);
+	}
+	else
+	{
+		idx_tup_print(&idx->desc, &buf, tuple, (Pointer)&opaque);
+		elog(WARNING, "tuple: %s : oxid %ld", buf.data, oxid);
+	}
+	
+	MemoryContextSwitchTo(oldContext);
+	MemoryContextDelete(newctx);
+}
+
+/*
+ * Convert a secondary index tuple into (secondary_key_fields, pk_fields) format
+ * for validation tuplesort.
+ * 
+ * Secondary index tuples may have:
+ * - Key fields (secondary key attributes)
+ * - Primary key fields (at the end of the key)
+ * - INCLUDE fields (non-key attributes that we don't need for validation)
+ * 
+ * This function extracts only the key fields (secondary + PK) and converts them
+ * into a tuple formatted for the specialized tuplesort that has:
+ *   [secondary_key_field_1, ..., secondary_key_field_N, pk_field_1, ..., pk_field_M]
+ * 
+ * Most of the time we can pass the secondary index tuple directly (if it has no
+ * INCLUDE fields), but when INCLUDE fields exist, we need to extract only the
+ * key portion.
+ * 
+ * Returns: A new OTuple in the format (secondary_key_fields, pk_fields).
+ *          Caller must pfree the returned tuple data.
+ */
+static OTuple
+convert_secondary_tuple_for_validation(OTuple secTuple, OIndexDescr *secIndex, BTreeLeafTuphdr header)
+{
+	BTreeDescr *secDesc = &secIndex->desc;
+	int			nKeyFields = secIndex->nKeyFields;
+	int			nFields = secIndex->nFields;
+	int			nPrimaryFields = secIndex->nPrimaryFields;
+	OTuple		result;
+	Pointer		oxidPtr;
+	OXid		oxid = XACT_INFO_GET_OXID(header.xactInfo);
+	
+	/*
+	 * If secondary index has no INCLUDE fields (nFields == nKeyFields),
+	 * we can use the tuple directly since it already has the correct format:
+	 * (secondary_key_fields, pk_fields).
+	 */
+	if (nKeyFields + nPrimaryFields == nFields)
+	{
+		/* Make a copy of the tuple */
+		Size tupleLen = o_btree_len(secDesc, secTuple, OTupleLength);
+		Size totalLen = tupleLen + sizeof(OXid);
+		result.data = (Pointer) palloc(totalLen);
+		memcpy(result.data, secTuple.data, tupleLen);
+		result.formatFlags = secTuple.formatFlags;
+		/* Append oxid at the end */
+		oxidPtr = result.data + tupleLen;
+		memcpy(oxidPtr, &oxid, sizeof(OXid));
+		return result;
+	}
+	
+	/*
+	 * Secondary index has INCLUDE fields that we need to exclude.
+	 * Extract only the key fields (secondary key + PK) and create a new tuple.
+	 */
+	{
+		Datum		values[2 * INDEX_MAX_KEYS];
+		bool		isnull[2 * INDEX_MAX_KEYS];
+		uint32		version = o_tuple_get_version(secTuple);
+		int			i;
+		Size		len;
+		TupleDesc	secnonLeafTupdesc = secIndex->nonLeafTupdesc;
+		OTupleFixedFormatSpec *secnonLeafSpec = &secIndex->nonLeafSpec;
+		
+		/* Extract all key fields (secondary key fields + PK fields) */
+		for (i = 0; i < nKeyFields + nPrimaryFields; i++)
+		{
+			values[i] = o_fastgetattr(secTuple, i + 1, secnonLeafTupdesc, secnonLeafSpec, &isnull[i]);
+		}
+
+		/*
+		 * Create a new tuple with only the key fields.
+		 * We use the secondary index's leafTupdesc/leafSpec for extraction,
+		 * but create the tuple in a format suitable for validation tuplesort.
+		 */
+		len = o_new_tuple_size(secnonLeafTupdesc, secnonLeafSpec, NULL, NULL, version, values, isnull, NULL);
+		Size totalLen = len + sizeof(OXid);
+		result.data = (Pointer) palloc0(totalLen);
+		o_tuple_fill(secnonLeafTupdesc, secnonLeafSpec, &result, len, NULL, NULL, version, values, isnull, NULL);
+		
+		/* Append oxid at the end */
+		oxidPtr = result.data + len;
+		memcpy(oxidPtr, &oxid, sizeof(OXid));
+		
+		return result;
+	}
+}
+
+/*
+ * Extract PK tuple from a validation tuplesort tuple.
+ * 
+ * Validation tuples from tuplesort are in format: (secondary_key_fields, pk_fields).
+ * This function extracts just the PK portion for comparison with primary index tuples.
+ * 
+ * Returns: A new OTuple containing only PK fields. Caller must pfree the returned tuple data.
+ */
+static OTuple
+extract_pk_from_validation_tuple(OTuple validationTuple, OIndexDescr *secIndex, OIndexDescr *pkIndex)
+{
+	Datum		pkValues[INDEX_MAX_KEYS];
+	bool		pkIsnull[INDEX_MAX_KEYS];
+	uint32		version = o_tuple_get_version(validationTuple);
+	int			i;
+	Size		len;
+	OTuple		result;
+	int			nSecKeyFields = secIndex->nKeyFields;
+	
+	/*
+	 * Extract PK fields from the validation tuple.
+	 * PK fields start at position (nSecKeyFields + 1) in the tuple.
+	 */
+	for (i = 0; i < secIndex->nPrimaryFields; i++)
+	{
+		pkValues[i] = o_fastgetattr(validationTuple, nSecKeyFields + i + 1,
+									secIndex->nonLeafTupdesc, &secIndex->nonLeafSpec,
+									&pkIsnull[i]);
+	}
+	
+	/*
+	 * Create a new tuple with PK fields using the PK descriptor.
+	 */
+	len = o_new_tuple_size(pkIndex->nonLeafTupdesc, &pkIndex->nonLeafSpec, NULL, NULL,
+						   version, pkValues, pkIsnull, NULL);
+	result.data = (Pointer) palloc0(len);
+	o_tuple_fill(pkIndex->nonLeafTupdesc, &pkIndex->nonLeafSpec, &result, len, NULL, NULL,
+				 version, pkValues, pkIsnull, NULL);
+	
+	return result;
+}
+
+/*
+ * validate_index_callback - Callback for index validation
+ *
+ * This callback is invoked by orioledb_ambulkdelete for each tuple in the index.
+ * It stores the FULL secondary index tuple into the tuplesort for later comparison
+ * with heap tuples. The tuplesort will sort by primary key for merge-join validation.
+ */
+static bool
+validate_index_callback(ItemPointer itemptr, void *callback_state)
+{
+	OValidateIndexState *state = (OValidateIndexState *) callback_state;
+	OIndexDescr *id = state->index_descr;
+
+	/*
+	 * For orioledb, the actual tuple is stored in state->current_tuple
+ 	 * by orioledb_ambulkdelete. For validation with deletion support, we need
+	 * to store the FULL secondary index tuple (not just PK) so we can later
+	 * delete entries that don't correspond to any primary tuple.
+	 *
+	 * The tuplesort will sort these tuples by PK (using a custom comparator),
+	 * enabling efficient merge-join with the primary index scan.
+	 */
+	if (!O_TUPLE_IS_NULL(state->current_tuple))
+	{
+		/* 
+		 * Put the FULL secondary index tuple into tuplesort.
+		 * The tuplesort comparator will extract and compare PK fields for sorting.
+		 */
+		OTuple fullIndexTuple;
+		/* Convert secondary tuple to (secondary_key_fields, pk_fields) format */
+		fullIndexTuple = convert_secondary_tuple_for_validation(state->current_tuple, id, state->header);
+		
+		tuplesort_putotuple(state->tuplesort, fullIndexTuple);
+
+		if(0)debug_print_validate_doubletuple(fullIndexTuple, state->table_descr, id, XACT_INFO_GET_OXID(state->header.xactInfo));
+		
+		pfree(fullIndexTuple.data);
+		state->itups++;
+		
+	}
+
+	/* Return false to indicate we don't want to delete this tuple during the scan */
+	return false;
+}
+
+
+static bool
+orioledb_validate_next_index_tid(OIndexDescr *index_descr,
+								 Tuplesortstate *tuplesort,
+								 OTuple *indexTuple,
+								 OXid *oxid)
+{
+	*indexTuple = tuplesort_getotuple(tuplesort, true);
+	
+	if (O_TUPLE_IS_NULL(*indexTuple))
+		return false;
+		
+	*oxid = *((OXid *) ((*indexTuple).data + o_btree_len(&index_descr->desc, *indexTuple, OTupleLength)));
+ 
+	return true;
+}
+
+static void
+orioledb_validate_tuple_backoff(Tuplesortstate *tuplesort)
+{
+	tuplesort_getotuple(tuplesort, false);
+}
+
+static void
+orioledb_fake_index_validate_scan(Relation tableRelation,
+						 Relation indexRelation,
+						 IndexInfo *indexInfo,
+						 Snapshot snapshot,
+						 ValidateIndexState *state)
+{
+	elog(ERROR, "fake_index_build_range_scan not implemented");
+}
+
+bool am_validate_process = false;
+OXid o_validate_process_current_oxid = InvalidOXid;
+
+static BTreeIterator *
+create_validate_iterator(BTreeDescr *desc, void *key, BTreeKeyType kind,
+						OSnapshot *o_snapshot, ScanDirection scanDir)
+{
+	return o_btree_iterator_create_with_flags(desc,
+											  key,
+											  kind,
+											  o_snapshot,
+											  scanDir,
+											  BTREE_PAGE_FIND_MODIFY);
+}
+
+static void
+wait_tuple_finished_for_everybody(BTreeLeafTuphdr *tupHdr)
+{
+	OXid		tupleOxid = XACT_INFO_GET_OXID(tupHdr->xactInfo);
+
+	while (true)
+	{
+		if (xid_is_finished(tupleOxid))
+			break;
+
+		CHECK_FOR_INTERRUPTS();
+		wait_for_oxid(tupleOxid, false);
+	}
+
+	while (!xid_is_finished_for_everybody(tupleOxid))
+	{
+		OXid		runXmin = pg_atomic_read_u64(&xid_meta->runXmin);
+		OXid		waitOxid;
+
+		CHECK_FOR_INTERRUPTS();
+		if (runXmin > tupleOxid)
+			continue;
+
+		waitOxid = runXmin;
+		while (true)
+		{
+			while (!wait_for_oxid(waitOxid, true))
+				CHECK_FOR_INTERRUPTS();
+			if (waitOxid == tupleOxid)
+				break;
+			if (waitOxid == UINT64_MAX)
+				break;
+			waitOxid++;
+		}
+	}
+}
+
+static OTuple
+validate_fetch_heap_tuple(BTreeIterator *iterator, OSnapshot *oSnapshot, OTableDescr *descr, CommitSeqNo *tupleCsn, BTreeLocationHint *hint, BTreeLeafTuphdr **tupHdr, bool *scanEnd, OTuple *PrevBoundary, OInMemoryBlkno *rightMostBlock)
+{
+	OTuple heapTuple;
+	BTreeLeafTuphdr tupHdr_old;
+retry_heap_fetch:
+	heapTuple = validate_iterator_fetch(iterator, scanEnd, hint, tupHdr, rightMostBlock);
+
+	if (*scanEnd)
+	{
+		O_TUPLE_SET_NULL(heapTuple);
+		*tupleCsn = InvalidCSN;
+		return heapTuple;
+	}
+	
+	/* If tuple is the same as the last boundary tuple, we have already validated it and can skip to the next one */
+	if (!O_TUPLE_IS_NULL(*PrevBoundary) && o_idx_cmp(&GET_PRIMARY(descr)->desc, &heapTuple, BTreeKeyNonLeafKey, PrevBoundary, BTreeKeyNonLeafKey) == 0)
+		goto retry_heap_fetch;
+
+	if (!XACT_INFO_FINISHED_FOR_EVERYBODY((*tupHdr)->xactInfo))
+	{
+		
+		/* Make a copy of tuple header to use for waiting and re-fetching */
+		tupHdr_old = **tupHdr;
+		
+		/* Unlock the page so that the transaction holding the tuple can finish */
+		unlock_page(hint->blkno);
+		
+		/* Wait for the transaction that is modifying this tuple to finish, so we can see the final state of the tuple */
+		wait_tuple_finished_for_everybody(&tupHdr_old);
+
+		 /* After waiting, we need to re-fetch the tuple to see its final state */
+		btree_iterator_free(iterator);
+		
+		if (!O_TUPLE_IS_NULL(*PrevBoundary))
+		{
+			iterator = create_validate_iterator(&GET_PRIMARY(descr)->desc,
+												PrevBoundary,
+												BTreeKeyLeafTuple,
+												oSnapshot, ForwardScanDirection);
+		}
+		else
+		{
+			iterator = create_validate_iterator(&GET_PRIMARY(descr)->desc,
+												NULL,
+												BTreeKeyNone,
+												oSnapshot, ForwardScanDirection);
+		}
+
+		goto retry_heap_fetch;
+	}
+	
+	*tupleCsn = XACT_INFO_MAP_CSN((*tupHdr)->xactInfo);
+	return heapTuple;
+}
+
 static void
 orioledb_index_validate_scan(Relation heapRelation,
 							 Relation indexRelation,
 							 IndexInfo *indexInfo,
 							 Snapshot snapshot,
-							 ValidateIndexState *state)
+							 OValidateIndexState *state)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	OTableDescr *descr;
+	BTreeIterator *iterator;
+	TupleTableSlot *primarySlot;
+	BTreeLocationHint hint;
+	CommitSeqNo tupleCsn = InvalidCSN;
+	ExprState  *predicate;
+	EState	   *estate;
+	OTuple		heapLastBoundary;
+	ExprContext *econtext;
+	Datum		values[INDEX_MAX_KEYS];
+	bool		isnull[INDEX_MAX_KEYS];
+	OTuple		indexTuple = {0};
+	OTuple		heapTuple;
+	IndexUniqueCheck checkUnique;
+	OSnapshot	oSnapshot;
+	Datum		heapRowIdDatum;
+	bool		rowIdIsNull;
+	OXid IndexTupleOxid = InvalidOXid;
+	BTreeLeafTuphdr *tupHdr = NULL;
+	bool		tupleDeleted;
+	OIndexDescr *secIndex = state->index_descr;
+	BTreeDescr *secondaryDesc = &secIndex->desc;
+	ORelOids secIndexOids = secIndex->oids;
+	bool validationHaveHeapTuple = false;
+	bool validationHaveIndexTuple = false;
+	bool validationEndedHeapScan = false;
+	bool validationEndedIndexScan = false;
+	OInMemoryBlkno rightMostBlock = OInvalidInMemoryBlkno;
+	
+	O_TUPLE_SET_NULL(heapLastBoundary);
+	
+	am_validate_process = true;
+
+	Assert(state != NULL);
+	Assert(state->tuplesort != NULL);
+
+	estate = CreateExecutorState();
+	econtext = GetPerTupleExprContext(estate);
+	predicate = ExecPrepareQual(indexInfo->ii_Predicate, estate);
+
+	descr = relation_get_descr(heapRelation);
+	Assert(descr != NULL);
+
+	/*
+	 * Use SnapshotAny to see ALL tuples including in-progress ones.
+	 * This is necessary for validation to properly handle concurrent modifications
+	 * and ensure we see all tuples that might exist in secondary indexes.
+	 */
+	oSnapshot = o_in_progress_snapshot;
+	/* 
+	 * Use iterator instead of sequential scan to ensure tuples are returned
+	 * in primary key order. This is essential for the merge join algorithm.
+	 * The validation boundary starts unset (validationBoundaryLen == 0) and
+	 * will be updated as we progress through the scan.
+	 */
+	o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+	/* Load shared memory for secondary index */
+	o_btree_load_shmem(secondaryDesc);
+	iterator = create_validate_iterator(&GET_PRIMARY(descr)->desc, NULL, BTreeKeyNone, &oSnapshot, ForwardScanDirection);
+	primarySlot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
+	econtext->ecxt_scantuple = primarySlot;
+
+	checkUnique = indexInfo->ii_Unique ? UNIQUE_CHECK_YES : UNIQUE_CHECK_NO;
+	
+	while (!validationEndedHeapScan || !validationEndedIndexScan)
+	{
+		int cmp;
+
+		if (!validationHaveHeapTuple && !validationEndedHeapScan)
+		{
+			heapTuple = validate_fetch_heap_tuple(iterator, &oSnapshot, descr, &tupleCsn, &hint, &tupHdr, &validationEndedHeapScan, &heapLastBoundary, &rightMostBlock);
+			
+			if (!validationEndedHeapScan)
+			{
+				tupleDeleted = (tupHdr->deleted != BTreeLeafTupleNonDeleted);
+				if (tupleDeleted)
+				{
+					/* tuple is deleted, just set the new boundary and continue */
+					btree_set_validation_boundary(GET_PRIMARY(descr), heapTuple);
+					continue;
+				}
+				
+				tts_orioledb_store_tuple(primarySlot, heapTuple, descr, tupleCsn, PrimaryIndexNumber, false, &hint);
+				slot_getallattrs(primarySlot);
+			
+				if (predicate != NULL)
+				{
+					if (!ExecQual(predicate, econtext))
+					{
+						/* Tuple doesn't satisfy the index predicate, skip it */
+						btree_set_validation_boundary(GET_PRIMARY(descr), heapTuple);
+						
+						/* Clean up the slot for the next tuple */
+						ExecClearTuple(primarySlot);
+						continue;
+					}
+				}
+				
+				state->htups++;
+				FormIndexDatum(indexInfo,
+							primarySlot,
+							estate,
+							values,
+							isnull);
+							
+				/* Get heap tuple's rowid for comparison and insertion */
+				heapRowIdDatum = slot_getsysattr(primarySlot, RowIdAttributeNumber, &rowIdIsNull);
+				Assert(!rowIdIsNull);
+				
+				validationHaveHeapTuple = true;
+			}
+			else
+			{
+				validationHaveHeapTuple = false;
+			}
+		}
+		
+		if (!validationHaveIndexTuple && !validationEndedIndexScan)
+		{
+			validationHaveIndexTuple = orioledb_validate_next_index_tid(secIndex,
+																		state->tuplesort,
+																		&indexTuple,
+																		&IndexTupleOxid);
+			if (!validationHaveIndexTuple)
+			{
+				validationEndedIndexScan = true;
+			}
+		}
+		
+		if (validationHaveIndexTuple && validationHaveHeapTuple)
+		{
+			OTuple pk_key;
+			/* 
+			 * Extract PK from the full secondary index tuple for comparison.
+			 * The indexTuple now contains the FULL secondary index tuple,
+			 * so we need to extract just the PK portion for comparison.
+			 */
+			pk_key = extract_pk_from_validation_tuple(indexTuple, secIndex, GET_PRIMARY(descr));
+			
+			/* 
+			 * Compare PK from secondary index tuple with PK from heap tuple.
+			 * This ensures we're comparing in the correct primary key order.
+			 */
+			cmp = o_idx_cmp(&GET_PRIMARY(descr)->desc, &pk_key, BTreeKeyNonLeafKey, &heapTuple, BTreeKeyNonLeafKey);
+			
+			/* if PKs are equal, compare the OXIDs to ensure we have the correct version of the tuple */
+			if (cmp == 0)
+			{
+				cmp = IndexTupleOxid - XACT_INFO_GET_OXID(tupHdr->xactInfo);
+			}
+			
+			if (debug_print_index_validate)
+			{
+				elog(WARNING, "Comparison result");
+				elog(WARNING, "Heap tuple for comparison:");
+				debug_print_validate_doubletuple(indexTuple, descr, secIndex, IndexTupleOxid);
+				debug_print_validate_tuple(heapTuple, GET_PRIMARY(descr), false, XACT_INFO_GET_OXID(tupHdr->xactInfo));
+				elog(WARNING, "Comparing index tuple with heap tuple: cmp = %d", cmp);
+			}
+			
+			pfree(pk_key.data);
+		}
+		else if (validationHaveIndexTuple)
+		{
+			cmp = -1; /* index tuple is "less" than heap tuple, meaning it has no matching heap tuple, and should be deleted */
+			if (debug_print_index_validate)
+			{
+				elog(WARNING, "Heap scan ended but index scan has more tuples. Next index tuple:");
+				debug_print_validate_doubletuple(indexTuple, descr, secIndex, IndexTupleOxid);
+			}
+		}
+		else if (validationHaveHeapTuple)
+		{
+			cmp = 1; /* heap tuple is "less" than index tuple, meaning it has no matching index tuple, and should be inserted */
+			if (debug_print_index_validate)
+			{
+				elog(WARNING, "Index scan ended but heap scan has more tuples. Next heap tuple:");
+				debug_print_validate_tuple(heapTuple, GET_PRIMARY(descr), false, XACT_INFO_GET_OXID(tupHdr->xactInfo));
+			}
+		}
+		else
+		{
+			break; /* both scans ended */
+		}
+		
+		if (cmp < 0)
+		{	
+			Page		p;
+			OInMemoryBlkno blkno;
+			BTreePageItemLocator *loc;
+			OBTreeFindPageContext context;
+			OFindPageResult findResult;
+			BTreeLeafTuphdr *tupHdrSecondary;
+			OTuple leafTup __attribute__((unused));
+			
+			Assert(validationHaveIndexTuple);
+
+			/*
+			 * Secondary index has a tuple that primary index doesn't have.
+			 * This means we need to DELETE this spurious entry from the secondary index.
+			 * Delete it immediately by marking the locator as invalid
+			 */
+			
+			/* we can't fetch new page while holding the lock on the current page */
+			if (!validationEndedHeapScan)
+				unlock_page(hint.blkno);
+			else
+			{
+				unlock_page(rightMostBlock);
+				rightMostBlock = OInvalidInMemoryBlkno;
+			}
+			
+			
+			/* Initialize find context to locate the secondary index entry */
+			init_page_find_context(&context, secondaryDesc,
+									COMMITSEQNO_INPROGRESS,
+									BTREE_PAGE_FIND_MODIFY);
+			
+			/* Find the page containing this secondary index entry */
+			findResult = find_page(&context, (Pointer) &indexTuple,
+									BTreeKeyNonLeafKey,
+									0);
+			if (findResult == OFindPageResultSuccess)
+			{
+				blkno = context.items[context.index].blkno;
+				p = O_GET_IN_MEMORY_PAGE(blkno);
+				loc = &context.items[context.index].locator;
+
+				/* Verify the entry exists and matches */
+				if (BTREE_PAGE_LOCATOR_IS_VALID(p, loc))
+				{
+					uint32 sz;
+					
+					BTREE_PAGE_READ_LEAF_ITEM(tupHdrSecondary, leafTup, p, loc);
+					/*
+					 * Entry found and matches. Delete it immediately by marking
+					 * the locator as invalid (non-transactional deletion).
+					 */
+					sz =  BTREE_PAGE_GET_ITEM_SIZE(p, loc);
+					/* Mark page as dirty before modification */
+					page_block_reads(blkno);
+					
+					tupHdrSecondary->deleted = BTreeLeafTupleDeleted;
+					tupHdrSecondary->xactInfo = OXID_GET_XACT_INFO(BootstrapTransactionId, RowLockUpdate, false);
+					/* Mark the locator as invalid to delete the entry */
+					BTREE_PAGE_LOCATOR_SET_INVALID(loc);
+					/* Update page statistics */
+					PAGE_ADD_N_VACATED(p, sz);
+					
+					/* Mark the page as modified */
+					MARK_DIRTY(secondaryDesc, blkno);
+					state->tups_deleted++;
+				}
+
+				/* Unlock the page */
+				unlock_page(blkno);
+			}
+			
+			/* Reset the heap scan, as we have unlocked the page and the state might have changed. */
+			btree_iterator_free(iterator);
+				
+			if (!O_TUPLE_IS_NULL(heapLastBoundary))
+			{
+				iterator = create_validate_iterator(&GET_PRIMARY(descr)->desc,
+													&heapLastBoundary,
+													BTreeKeyLeafTuple,
+													&oSnapshot, ForwardScanDirection);
+			}
+			else
+			{
+				/* This only may happen with the first tuple */
+				iterator = create_validate_iterator(&GET_PRIMARY(descr)->desc,
+													NULL,
+													BTreeKeyNone,
+													&oSnapshot, ForwardScanDirection);
+			}
+	
+			if (validationHaveHeapTuple)
+				ExecClearTuple(primarySlot);
+			
+			/* fetch again to reset the state */
+			validationHaveHeapTuple = false;
+			validationEndedHeapScan = false;
+
+			/* fetch next index tuple for the next iteration */
+			validationHaveIndexTuple = false;
+		}
+		else if (cmp > 0)
+		{
+			BTreeLeafTuphdr headerHeapOld; 
+			
+			Assert(validationHaveHeapTuple);
+				
+			/* 
+			 * Unlock the page so that we can insert the missing tuple to the 
+			 * index and to the tuplesort, and reset the same scan.
+			 * But first make a copy of tuple and header.
+			 */
+			headerHeapOld = *tupHdr;
+			unlock_page(hint.blkno);
+				
+			/*
+			 * Heap has a tuple that secondary index doesn't have.
+			 * Insert the missing tuple into secondary index.
+			 */
+			SET_VALIDATE_PROCESS_OXID(XACT_INFO_GET_OXID(headerHeapOld.xactInfo));
+			if (index_insert(indexRelation, values, isnull, heapRowIdDatum,
+							 heapRelation, checkUnique, false, indexInfo))
+			{
+				OTuple fullIndexTuple;
+				
+				state->tups_inserted++;
+				
+				/* 
+				 * We got new tuple in the index, as we can not put tuples into tuplesort, 
+				 * we make it look like it is fetched from the index scan.
+				 */
+				fullIndexTuple = tts_orioledb_make_secondary_tuple(primarySlot, secIndex, true);
+				indexTuple = convert_secondary_tuple_for_validation(fullIndexTuple, secIndex,
+																	headerHeapOld);
+				IndexTupleOxid = XACT_INFO_GET_OXID(headerHeapOld.xactInfo);
+				validationHaveIndexTuple = true;
+				
+				/* 
+				 * Backoff the tuplesort, as we have not processed the new tuple yet.
+				 * So that during next fetch from tuplesort, we would get the tuple again for processing.
+				 * If tuples in tuplesort have ended, we would get NULL next time and end the index scan.
+				 */
+				orioledb_validate_tuple_backoff(state->tuplesort);
+				validationEndedIndexScan = false;
+			}
+
+			/* Reset the heap scan, as we have unlocked the page and the state might have changed. */
+			btree_iterator_free(iterator);
+			if (!O_TUPLE_IS_NULL(heapLastBoundary))
+			{
+				iterator = create_validate_iterator(&GET_PRIMARY(descr)->desc,
+													&heapLastBoundary,
+													BTreeKeyLeafTuple,
+													&oSnapshot, ForwardScanDirection);
+			}
+			else
+			{
+				/* This only may happen with the first tuple */
+				iterator = create_validate_iterator(&GET_PRIMARY(descr)->desc,
+													NULL,
+													BTreeKeyNone,
+													&oSnapshot, ForwardScanDirection);
+			}
+			
+			validationHaveHeapTuple = false;
+			validationEndedHeapScan = false;
+
+			ExecClearTuple(primarySlot);
+		}
+		else
+		{
+			/*
+			 * Both have the same tuple (cmp == 0). 
+			 * Move to next items in both scans.
+			 */
+			Assert(validationHaveHeapTuple && validationHaveIndexTuple);
+			
+			/* make a copy of heap tuple for the next iteration before we unlock the page */
+			if (!O_TUPLE_IS_NULL(heapLastBoundary))
+				pfree(heapLastBoundary.data);
+			heapLastBoundary.formatFlags = heapTuple.formatFlags;
+			heapLastBoundary.data = palloc(o_btree_len(&GET_PRIMARY(descr)->desc, heapTuple, OTupleLength));
+			memcpy(heapLastBoundary.data, heapTuple.data,
+					o_btree_len(&GET_PRIMARY(descr)->desc, heapTuple, OTupleLength));
+
+			btree_set_validation_boundary(GET_PRIMARY(descr), heapLastBoundary);
+			ExecClearTuple(primarySlot);		
+			
+			validationHaveIndexTuple = false;
+			validationHaveHeapTuple = false;
+		}
+	}
+
+	/*
+	 * Clear the validation boundary - validation is now complete.
+	 * All concurrent transactions can now freely modify all secondary index entries.
+	 */
+	btree_set_validation_boundary_full_visible(GET_PRIMARY(descr));
+	Assert(rightMostBlock != OInvalidInMemoryBlkno);
+	unlock_page(rightMostBlock);
+	
+	if (!O_TUPLE_IS_NULL(heapLastBoundary))
+		pfree(heapLastBoundary.data);
+	
+	am_validate_process = false;
+	
+	ExecDropSingleTupleTableSlot(primarySlot);
+	FreeExecutorState(estate);
+	btree_iterator_free(iterator);
+	
+	
+	/* 
+	 * If index is unique, we also need to validate that there are no duplicate entries in the index itself. 
+	 * This can be done by a separate bulkdelete scan on the index, which will check for duplicates and delete them if found.
+	 */
+	if (indexInfo->ii_Unique)
+	{
+		ORelOids tableoids;
+		int indexNum;
+		IndexBuildResult result;
+		
+		elog(DEBUG2, "checking secondary index for duplicates");
+		
+		ORelOidsSetFromRel(tableoids, heapRelation);
+		OTable *table = o_tables_get(tableoids);
+		
+		for (indexNum = 0; indexNum < descr->nIndices; indexNum++)
+		{
+			ORelOids indexOids = descr->indices[indexNum]->oids;
+			if (indexNum == PrimaryIndexNumber)
+				continue;
+						
+			if (ORelOidsIsEqual(indexOids, secIndexOids))
+			{
+				break;
+			}
+		}
+		
+		indexNum = table->has_primary ? indexNum  : indexNum - 1;
+		check_secondary_index_unique(table, descr, indexNum, &result);
+	}	
 }
 
 
@@ -1871,7 +3050,7 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 	reservoir_init_selection_state(&rstate, targrows);
 
 	tuple = btree_seq_scan_getnext_raw(scan, CurrentMemoryContext,
-									   &scanEnd, NULL);
+									   &scanEnd, NULL, NULL);
 	while (!scanEnd)
 	{
 		if (!O_TUPLE_IS_NULL(tuple))
@@ -1928,7 +3107,7 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 			deadrows += 1;
 		}
 		tuple = btree_seq_scan_getnext_raw(scan, CurrentMemoryContext,
-										   &scanEnd, NULL);
+										   &scanEnd, NULL, NULL);
 	}
 	free_btree_seq_scan(scan);
 
@@ -2353,7 +3532,10 @@ static const TableAmRoutine orioledb_am_methods = {
 	.scan_analyze_next_block = orioledb_scan_analyze_next_block,
 	.scan_analyze_next_tuple = orioledb_scan_analyze_next_tuple,
 	.index_build_range_scan = orioledb_index_build_range_scan,
-	.index_validate_scan = orioledb_index_validate_scan,
+	.index_validate_scan = orioledb_fake_index_validate_scan,
+	.index_validate = orioledb_index_validate,
+	.index_concurrently_swap = orioledb_reindex_concurrent_swap,
+	.index_drop = orioledb_index_validate_cleanup_old_concurrent,
 
 	.relation_size = orioledb_calculate_relation_size,
 	.relation_needs_toast_table = orioledb_relation_needs_toast_table,

@@ -279,11 +279,13 @@ put_tuple_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack,
 {
 	BTreeLeafTuphdr leaf_header = {0};
 	int			tuplesize;
+	OXid 		oxid;
 
 	leaf_header.deleted = BTreeLeafTupleNonDeleted;
 	leaf_header.undoLocation = InvalidUndoLocation;
-	leaf_header.xactInfo = OXID_GET_XACT_INFO(BootstrapTransactionId, RowLockUpdate, false);
 	tuplesize = o_btree_len(desc, tuple, OTupleLength);
+	oxid = *((OXid *)(tuple.data + tuplesize));
+	leaf_header.xactInfo = OXID_GET_XACT_INFO(oxid, RowLockUpdate, false);
 	return put_item_to_stack(desc, stack, 0,
 							 tuple, tuplesize, (Pointer) &leaf_header,
 							 sizeof(leaf_header), root_level, metaPage);

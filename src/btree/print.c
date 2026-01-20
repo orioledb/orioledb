@@ -366,7 +366,7 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 				BTREE_PAGE_READ_LEAF_ITEM(pageTuphdr, tuple, p, &loc);
 				tuphdr = *pageTuphdr;
-				appendStringInfo(outbuf, "    Item %i: ", i);
+				appendStringInfo(outbuf, "    Oxid %ld  Item %i: ", XACT_INFO_GET_OXID(tuphdr.xactInfo), i);
 
 				while (true)
 				{

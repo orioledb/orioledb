@@ -380,4 +380,16 @@ extern Jsonb *btree_page_stopevent_params(BTreeDescr *desc, Page p);
 extern Jsonb *btree_downlink_stopevent_params(BTreeDescr *desc, Page p,
 											  BTreePageItemLocator *loc);
 
+extern Size btree_validation_shmem_needs(void);
+extern void btree_validation_shmem_init(Pointer ptr, bool found);
+
+/* Concurrent index build validation boundary functions */
+extern void btree_set_validation_boundary(OIndexDescr *idx, OTuple boundary);
+extern bool btree_get_validation_boundary(BTreeDescr *desc, OTuple *boundary);
+extern uint16 btree_is_validation_boundary_get_len(BTreeDescr *desc);
+extern void btree_set_validation_boundary_full_visible(OIndexDescr *idx);
+extern void btree_set_validation_boundary_non_visible(OIndexDescr *idx);
+extern bool btree_pk_satisfies_validation_boundary(BTreeDescr *desc, OTuple pk);
+extern bool btree_index_is_ready_not_valid(Oid indexRelOid);
+extern void btree_remove_validation_boundary(OIndexDescr *idx);
 #endif							/* __BTREE_H__ */

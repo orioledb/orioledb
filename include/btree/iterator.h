@@ -71,13 +71,26 @@ extern OTuple o_btree_iterator_fetch(BTreeIterator *it,
 									 BTreeLocationHint *hint);
 extern OTuple btree_iterate_raw(BTreeIterator *it, void *end,
 								BTreeKeyType endKind, bool endInclude,
-								bool *scanEnd, BTreeLocationHint *hint);
+								bool *scanEnd, BTreeLocationHint *hint, BTreeLeafTuphdr **tupHdr);
 extern OTuple btree_iterate_all(BTreeIterator *it, void *end,
 								BTreeKeyType endKind, bool endInclude,
 								bool *scanEnd, BTreeLocationHint *hint,
 								BTreeLeafTuphdr **tupHdr);
+extern void o_btree_iterator_set_undo_chain_walking(BTreeIterator *it,
+													bool enable);
+extern BTreeIterator *o_btree_iterator_create_with_flags(BTreeDescr *desc,
+														 void *key,
+														 BTreeKeyType kind,
+														 OSnapshot *o_snapshot,
+														 ScanDirection scanDir,
+														 uint16 flags);
+extern BTreeLeafTuphdr o_btree_iterator_get_current_header(BTreeIterator *it);
+extern OTuple validate_iterator_fetch(BTreeIterator *it,
+									  bool *scanEnd,
+									  BTreeLocationHint *hint,
+									  BTreeLeafTuphdr **tupHdr,
+									  OInMemoryBlkno *rightMostBlock);
 extern void btree_iterator_free(BTreeIterator *it);
-
 extern OTuple o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 										   BTreeKeyType kind,
 										   OSnapshot *read_o_snapshot,
@@ -87,7 +100,6 @@ extern OTuple o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 										   bool *deleted,
 										   TupleFetchCallback cb,
 										   void *arg);
-
 extern OTuple o_find_tuple_version(BTreeDescr *desc, Page p,
 								   BTreePageItemLocator *loc,
 								   OSnapshot *oSnapshot,

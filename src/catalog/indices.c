@@ -1329,6 +1329,36 @@ scan_getnextslot_allattrs(BTreeSeqScan *scan, OTableDescr *descr,
 	return true;
 }
 
+
+static inline
+bool
+scan_getnextslot_allattrs_ext(BTreeSeqScan *scan, OTableDescr *descr,
+						  	TupleTableSlot *slot, double *ntuples, BTreeLeafTuphdr **tupHdr)
+{
+	OTuple		tup;
+	BTreeLocationHint hint;
+	CommitSeqNo tupleCsn;
+	bool end;
+	
+	while (true)
+	{
+		tup = btree_seq_scan_getnext_raw(scan, slot->tts_mcxt, &end, &hint, tupHdr);
+		tupleCsn = InvalidCSN;
+		
+		if (end)
+			return false;
+		
+		if (!O_TUPLE_IS_NULL(tup))
+			break;
+	}
+
+	tts_orioledb_store_tuple(slot, tup, descr, tupleCsn,
+							 PrimaryIndexNumber, false , &hint);
+	slot_getallattrs(slot);
+	(*ntuples)++;
+	return true;
+}
+
 /*
  * Make a local heapscan in a worker, in a leader, or sequentially
  * for building secomndary index. Put result into provided sortstate
@@ -1342,13 +1372,18 @@ build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDescr *idx,
 {
 	void	   *sscan;
 	TupleTableSlot *primarySlot;
+	OXid oxid;
+	OSnapshot snap;
+	BTreeLeafTuphdr *tupHdr;
+	
+	fill_current_oxid_osnapshot(&oxid, &snap);
 
-	sscan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc, &o_in_progress_snapshot, poscan);
+	sscan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc, &snap, poscan);
 	primarySlot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
 
 	*heap_tuples = 0;
 	*index_tuples[0] = 0;
-	while (scan_getnextslot_allattrs(sscan, descr, primarySlot, heap_tuples))
+	while (scan_getnextslot_allattrs_ext(sscan, descr, primarySlot, heap_tuples, &tupHdr))
 	{
 		OTuple		secondaryTup;
 
@@ -1357,14 +1392,23 @@ build_secondary_index_worker_heap_scan(OTableDescr *descr, OIndexDescr *idx,
 			secondaryTup = tts_orioledb_make_secondary_tuple(primarySlot,
 															 idx, true);
 			(*index_tuples[0])++;
-
+			
 			o_btree_check_size_of_tuple(o_tuple_size(secondaryTup,
-													 &idx->leafSpec),
-										idx->name.data, true);
-			tuplesort_putotuple(sortstates[0], secondaryTup);
+											&idx->leafSpec),
+							idx->name.data, true);
+			
+			OXid tup_oxid = XACT_INFO_GET_OXID(tupHdr->xactInfo);
+			OTuple new_tuple;
+			new_tuple.formatFlags = secondaryTup.formatFlags;
+			Size len = o_btree_len(&idx->desc, secondaryTup, OTupleLength);
+			new_tuple.data = palloc0(len + sizeof(OXid));
+			memcpy(new_tuple.data, secondaryTup.data, len);
+			/* Store OXid at the end of the tuple */
+			memcpy(new_tuple.data + len, &tup_oxid, sizeof(OXid));
+			tuplesort_putotuple(sortstates[0], new_tuple);
 			pfree(secondaryTup.data);
-		}
-
+			pfree(new_tuple.data);
+		}	
 		ExecClearTuple(primarySlot);
 	}
 	ExecDropSingleTupleTableSlot(primarySlot);
@@ -1629,6 +1673,102 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 		CommandCounterIncrement();
 		table_close(tableRelation, AccessExclusiveLock);
 		index_close(indexRelation, AccessExclusiveLock);
+	}
+
+	pfree(index_tuples);
+}
+
+void
+check_secondary_index_unique(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
+							 IndexBuildResult *result)
+{
+	Tuplesortstate **sortstates;
+
+	/* Infrastructure for parallel build corresponds to _bt_spools_heapscan */
+	oIdxSpool  *btspool = NULL;
+	oIdxBuildState buildstate = {0};
+	SortCoordinate coordinate = NULL;
+	double		heap_tuples;
+	double	   *index_tuples;
+	OIndexDescr *idx;
+
+	index_tuples = palloc0(sizeof(double));
+	idx = descr->indices[o_table->has_primary ? ix_num : ix_num + 1];
+	buildstate.btleader = NULL;
+
+	/* Attempt to launch parallel worker scan when required */
+	{
+		int			parallel_workers = o_calculate_index_workers(&GET_PRIMARY(descr)->desc, false, 1);
+
+		if (parallel_workers > 0)
+		{
+			btspool = (oIdxSpool *) palloc0(sizeof(oIdxSpool));
+			btspool->o_table = o_table;
+			btspool->descr = descr;
+
+			buildstate.worker_heap_sort_fn = &build_secondary_index_worker_sort;
+			buildstate.ix_num = ix_num;
+			buildstate.spool = btspool;
+			buildstate.isrebuild = false;
+
+			elog(DEBUG4, "Parallel index build by %d workers", parallel_workers);
+			_o_index_begin_parallel(&buildstate, false, parallel_workers);
+		}
+	}
+
+	if (buildstate.btleader)
+		elog(DEBUG1, "parallel index build: table (%u, %u, %u), ix_num %u",
+			 o_table->oids.datoid, o_table->oids.reloid, o_table->oids.relnode,
+			 ix_num);
+	else
+		elog(DEBUG1, "serial index build: table (%u, %u, %u), ix_num %u",
+			 o_table->oids.datoid, o_table->oids.reloid, o_table->oids.relnode,
+			 ix_num);
+
+	/*
+	 * If parallel build requested and at least one worker process was
+	 * successfully launched, set up coordination state
+	 */
+	if (buildstate.btleader)
+	{
+		coordinate = (SortCoordinate) palloc0(sizeof(SortCoordinateData));
+		coordinate->isWorker = false;
+		coordinate->nParticipants =
+			buildstate.btleader->nparticipanttuplesorts;
+		coordinate->sharedsort = buildstate.btleader->sharedsort[0];
+	}
+
+	/* Begin serial/leader tuplesort */
+	sortstates = (Tuplesortstate **) palloc0(sizeof(Pointer));
+	sortstates[0] = tuplesort_begin_orioledb_index(idx, maintenance_work_mem, false, coordinate);
+
+	/* Fill spool using either serial or parallel heap scan */
+	if (!buildstate.btleader)
+	{
+		/* Serial build */
+		build_secondary_index_worker_heap_scan(descr, idx, NULL, sortstates,
+											   false, &heap_tuples, &index_tuples);
+	}
+	else
+	{
+		/* We are on leader. Wait until workers end their scans */
+		_o_index_parallel_heapscan(&buildstate);
+		index_tuples[0] = buildstate.btleader->btshared->indtuples[0];
+		heap_tuples = buildstate.btleader->btshared->reltuples;
+	}
+
+	o_set_syscache_hooks();
+	tuplesort_performsort(sortstates[0]);
+	o_unset_syscache_hooks();
+	
+	/* End serial/leader sort */
+	tuplesort_end(sortstates[0]);
+	pfree((void *) sortstates);
+
+	if (buildstate.btleader)
+	{
+		pfree(btspool);
+		_o_index_end_parallel(buildstate.btleader);
 	}
 
 	pfree(index_tuples);

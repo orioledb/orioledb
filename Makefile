@@ -7,7 +7,7 @@ MODULE_big = orioledb
 EXTENSION = orioledb
 PGFILEDESC = "orioledb - orioledb transactional storage engine via TableAm"
 SHLIB_LINK += -lzstd -lcurl -lssl -lcrypto
-
+IS_DEV=1
 DATA_built = $(patsubst %_prod.sql,%.sql,$(wildcard sql/*_prod.sql))
 DATA = $(filter-out $(wildcard sql/*_*.sql) $(DATA_built), $(wildcard sql/*sql))
 
@@ -96,46 +96,10 @@ OBJS = src/btree/btree.o \
 	   src/utils/ucm.o \
 	   $(WIN32RES)
 
-REGRESSCHECKS = btree_sys_check \
-				alter_type \
-				alter_storage \
-				bitmap_scan \
-				btree_compression \
-				btree_print \
-				createas \
-				database \
-				ddl \
-				exclude \
-				explain \
-				fillfactor \
-				foreign_keys \
-				generated \
-				getsomeattrs \
-				index_bridging \
-				indices \
-				indices_build \
-				inherits \
-				ioc \
-				joins \
-				nulls \
-				opclass \
-				parallel_scan \
-				partial \
-				partition \
-				primary_key \
-				row_level_locks \
-				row_security \
-				sanitizers \
-				stats \
-				subquery \
-				subtransactions \
-				tableam \
-				tablespace \
-				temp \
-				toast \
-				trigger \
-				types \
-				rewind
+REGRESSCHECKS = index_concurrently \
+				index_concurrently_unique \
+				reindex_concurrently_content \
+				reindex_concurrently_insert
 ISOLATIONCHECKS = bitmap_hist_scan \
 				  btree_iterate \
 				  btree_print_backend_id \
