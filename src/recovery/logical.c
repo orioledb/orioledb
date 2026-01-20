@@ -505,9 +505,6 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, uint8 rec_type, OIndexType ix_
 	}
 }
 
-static ORelOids cur_oids = {0, 0, 0};
-static uint32 cur_version = O_TABLE_INVALID_VERSION;
-
 /*
  * Handle OrioleDB records for LogicalDecodingProcessRecord().
  */
@@ -794,10 +791,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			OXid		xmin;
 
 			OSnapshot	snapshot;
-			ORelOids	cur_ixoids = {0, 0, 0};
-			uint32		cur_ixversion = O_TABLE_INVALID_VERSION;
 
-			ptr = wal_parse_rec_relation(ptr, &treeType, &latest_oids, &xmin, &snapshot.csn, &snapshot.cid, &latest_version, wal_version);
+			uint32		base_version = O_TABLE_INVALID_VERSION;
+
+			ptr = wal_parse_rec_relation(ptr, &treeType, &latest_oids, &xmin, &snapshot.csn, &snapshot.cid, &latest_version, &base_version, wal_version);
 
 			snapshot.xmin = xmin;
 			snapshot.xlogptr = changeXLogPtr;
@@ -813,20 +810,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			relreplident = REPLICA_IDENTITY_DEFAULT;
 			descr = NULL;
 
-			if (ix_type == oIndexInvalid)
-			{
-				cur_oids = latest_oids;
-				cur_version = latest_version;
-			}
-			else if (ix_type == oIndexToast)
-			{
-				cur_ixoids = latest_oids;
-				cur_ixversion = latest_version;
-			}
-
-			elog(DEBUG4, "oxid %lu logicalXid %u heapXid %u WAL_REC_RELATION latest_oids [ %u %u %u ] latest_version %u",
+			elog(DEBUG4, "oxid %lu logicalXid %u heapXid %u WAL_REC_RELATION latest_oids [ %u %u %u ] latest_version %u ix_type %d",
 				 oxid, logicalXid, heapXid, latest_oids.datoid, latest_oids.reloid, latest_oids.relnode,
-				 latest_version);
+				 latest_version, ix_type);
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
@@ -870,25 +856,18 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else if (ix_type == oIndexToast)
 			{
-				elog(DEBUG4, "WAL_REC_RELATION [1] oIndexToast :: FETCH INDEX oids [ %u %u %u ] version %u :: for RELATION [ %u %u %u ] version %u",
-					 cur_ixoids.datoid, cur_ixoids.reloid, cur_ixoids.relnode,
-					 cur_ixversion,
-					 cur_oids.datoid, cur_oids.reloid, cur_oids.relnode,
-					 cur_version);
+				elog(DEBUG4, "WAL_REC_RELATION [1] oIndexToast :: FETCH INDEX oids [ %u %u %u ] version %u base_version %u",
+					 latest_oids.datoid, latest_oids.reloid, latest_oids.relnode,
+					 latest_version, base_version);
 
-				indexDescr = o_fetch_index_descr_extended(cur_ixoids, ix_type, false, NULL, snapshot, cur_ixversion);
+				indexDescr = o_fetch_index_descr_extended(latest_oids, ix_type, false, NULL, snapshot, latest_version);
 				Assert(indexDescr);
 
-				elog(DEBUG4, "WAL_REC_RELATION [2] oIndexToast :: FETCH RELATION [ %u %u %u ] version %u -> retrieved [ %u %u %u ]",
-					 cur_oids.datoid, cur_oids.reloid, cur_oids.relnode,
-					 cur_version,
-					 indexDescr->tableOids.datoid, indexDescr->tableOids.reloid, indexDescr->tableOids.relnode);
+				elog(DEBUG4, "WAL_REC_RELATION [2] oIndexToast :: FETCH RELATION [ %u %u %u ] version %u",
+					 indexDescr->tableOids.datoid, indexDescr->tableOids.reloid, indexDescr->tableOids.relnode,
+					 base_version);
 
-				Assert(indexDescr->tableOids.datoid == cur_oids.datoid);
-				Assert(indexDescr->tableOids.reloid == cur_oids.reloid);
-				Assert(indexDescr->tableOids.relnode == cur_oids.relnode);
-
-				descr = o_fetch_table_descr_extended(indexDescr->tableOids, snapshot, cur_version);
+				descr = o_fetch_table_descr_extended(indexDescr->tableOids, snapshot, base_version);
 				Assert(descr);
 
 				o_toast_tupDesc = descr->toast->leafTupdesc;
@@ -905,11 +884,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				TupleDescAttr(heap_toast_tupDesc, 0)->attcompression = InvalidCompressionMethod;
 				TupleDescAttr(heap_toast_tupDesc, 1)->attcompression = InvalidCompressionMethod;
 				TupleDescAttr(heap_toast_tupDesc, 2)->attcompression = InvalidCompressionMethod;
-
-				/*
-				 * indexDescr = o_fetch_index_descr(cur_oids, ix_type, false,
-				 * NULL);
-				 */
 			}
 			else
 			{

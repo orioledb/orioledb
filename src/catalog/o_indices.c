@@ -176,20 +176,6 @@ oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 	if (boundKey->version != O_TABLE_INVALID_VERSION)
 		check_type = OTupleFetchCallbackVersionCheck;
 
-	elog(LOG, "[%s] tupleKey [ %u %u %u ]; type %u; chunknum %u; version %u", __func__,
-		 tupleKey->oids.datoid, tupleKey->oids.reloid, tupleKey->oids.relnode,
-		 tupleKey->type,
-		 tupleKey->chunknum,
-		 tupleKey->version);
-
-	elog(LOG, "[%s] boundKey [ %u %u %u ]; type %u; chunknum %u; version %u", __func__,
-		 boundKey->oids.datoid, boundKey->oids.reloid, boundKey->oids.relnode,
-		 boundKey->type,
-		 boundKey->chunknum,
-		 boundKey->version);
-
-	elog(LOG, "[%s] 1 tupleKey->version %u boundKey->version %u", __func__, tupleKey->version, boundKey->version);
-
 	if (check_type != OTupleFetchCallbackVersionCheck)
 		return OTupleFetchNext;
 
@@ -198,8 +184,6 @@ oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 
 	if (boundKey->version == O_TABLE_INVALID_VERSION)
 		boundKey->version = tupleKey->version;
-
-	elog(LOG, "[%s] 2 tupleKey->version %u boundKey->version %u", __func__, tupleKey->version, boundKey->version);
 
 	if (tupleKey->version > boundKey->version)
 		return OTupleFetchNext;
@@ -212,6 +196,7 @@ oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 ToastAPI	oIndicesToastAPI = {
 	.getBTreeDesc = oIndicesGetBTreeDesc,
 	.getBTreeVersion = NULL,
+	.getBaseBTreeVersion = NULL,
 	.getKeySize = oIndicesGetKeySize,
 	.getMaxChunkSize = oIndicesGetMaxChunkSize,
 	.updateKey = oIndicesUpdateKey,

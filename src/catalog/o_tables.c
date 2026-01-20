@@ -248,6 +248,7 @@ oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 ToastAPI	oTablesToastAPI = {
 	.getBTreeDesc = oTablesGetBTreeDesc,
 	.getBTreeVersion = NULL,
+	.getBaseBTreeVersion = NULL,
 	.getKeySize = oTablesGetKeySize,
 	.getMaxChunkSize = oTablesGetMaxChunkSize,
 	.updateKey = oTablesUpdateKey,

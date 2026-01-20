@@ -108,6 +108,7 @@ typedef struct
 	uint8		csn[sizeof(CommitSeqNo)];
 	uint8		cid[sizeof(CommandId)];
 	uint8		version[sizeof(uint32)];
+	uint8		baseVersion[sizeof(uint32)];
 } WALRecRelation;
 
 typedef struct
@@ -223,7 +224,7 @@ extern Pointer wal_parse_rec_finish(Pointer ptr, OXid *xmin, CommitSeqNo *csn);
 extern Pointer wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid *xmin, CommitSeqNo *csn);
 
 /* Parser for WAL_REC_RELATION */
-extern Pointer wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin, CommitSeqNo *csn, CommandId *cid, uint32 *version, uint16 wal_version);
+extern Pointer wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin, CommitSeqNo *csn, CommandId *cid, uint32 *version, uint32 *base_version, uint16 wal_version);
 
 /* Parser for WAL_REC_RELREPLIDENT */
 extern Pointer wal_parse_rec_relreplident(Pointer ptr, char *relreplident, Oid *relreplident_ix_oid);
@@ -249,13 +250,13 @@ extern Pointer wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *topX
 /* Parser for WAL_REC_INSERT, WAL_REC_UPDATE, WAL_REC_DELETE or WAL_REC_REINSERT */
 extern Pointer wal_parse_rec_modify(Pointer ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1, bool read_two_tuples);
 
-extern void add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version);
+extern void add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_version);
 
 /* Parser for WAL_CONTAINER_XACT_INFO */
 extern Pointer wal_parse_container_xact_info(Pointer ptr, TimestampTz *xactTime, TransactionId *xid);
 
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
-								  OTuple tuple, OffsetNumber length, char relreplident, uint32 version);
+								  OTuple tuple, OffsetNumber length, char relreplident, uint32 version, uint32 base_version);
 extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr);
 extern void add_o_tables_meta_lock_wal_record(void);
 extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);

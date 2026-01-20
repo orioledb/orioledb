@@ -37,7 +37,10 @@ typedef struct
 {
 	OIndexDescr *pk;
 	OIndexDescr *toast;
+	uint32		version;		/* base table version */
 } OTableToastArg;
+
+#define GET_VERSION(api, method, arg) (api->method ? api->method(arg) : O_TABLE_INVALID_VERSION)
 
 /*
  * Help functions.
@@ -373,6 +376,12 @@ tableGetBTreeVersion(void *arg)
 	return toast->version;
 }
 
+static uint32
+tableGetBaseBTreeVersion(void *arg)
+{
+	return ((OTableToastArg *) arg)->version;
+}
+
 static TupleFetchCallbackResult
 tableVersionCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot, void *arg,
 					 TupleFetchCallbackCheckType check_type)
@@ -396,6 +405,7 @@ tableVersionCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot, void *arg
 ToastAPI	tableToastAPI = {
 	.getBTreeDesc = tableGetBTreeDesc,
 	.getBTreeVersion = tableGetBTreeVersion,
+	.getBaseBTreeVersion = tableGetBaseBTreeVersion,
 	.getKeySize = NULL,
 	.getMaxChunkSize = tableGetMaxChunkSize,
 	.updateKey = tableUpdateKey,
@@ -455,10 +465,11 @@ generic_toast_insert_optional_wal(ToastAPI *api, void *key, Pointer data,
 
 		if (desc->storageType == BTreeStoragePersistence && wal)
 		{
-			uint32		version = api->getBTreeVersion ? api->getBTreeVersion(arg) : O_TABLE_INVALID_VERSION;
+			uint32		version = GET_VERSION(api, getBTreeVersion, arg);
+			uint32		base_version = GET_VERSION(api, getBaseBTreeVersion, arg);
 
 			add_modify_wal_record(WAL_REC_INSERT, desc, tup,
-								  o_btree_len(desc, tup, OTupleLength), REPLICA_IDENTITY_DEFAULT, version);
+								  o_btree_len(desc, tup, OTupleLength), REPLICA_IDENTITY_DEFAULT, version, base_version);
 		}
 
 		pfree(tup.data);
@@ -597,12 +608,13 @@ generic_toast_update_optional_wal(ToastAPI *api, void *key, Pointer data,
 		if (desc->storageType == BTreeStoragePersistence && wal)
 		{
 			uint8		rec_type;
-			uint32		version = api->getBTreeVersion ? api->getBTreeVersion(arg) : O_TABLE_INVALID_VERSION;
+			uint32		version = GET_VERSION(api, getBTreeVersion, arg);
+			uint32		base_version = GET_VERSION(api, getBaseBTreeVersion, arg);
 
 			rec_type = (result == OBTreeModifyResultUpdated) ? WAL_REC_UPDATE :
 				WAL_REC_INSERT;
 			add_modify_wal_record(rec_type, desc, tup,
-								  o_btree_len(desc, tup, OTupleLength), REPLICA_IDENTITY_DEFAULT, version);
+								  o_btree_len(desc, tup, OTupleLength), REPLICA_IDENTITY_DEFAULT, version, base_version);
 		}
 
 		offset += length;
@@ -682,7 +694,8 @@ generic_toast_delete_optional_wal(ToastAPI *api, void *key, OXid oxid,
 
 		if (desc->storageType == BTreeStoragePersistence && wal)
 		{
-			uint32		version;
+			uint32		version = GET_VERSION(api, getBTreeVersion, arg);
+			uint32		base_version = GET_VERSION(api, getBaseBTreeVersion, arg);
 
 			if (!api->deleteLogFullTuple)
 			{
@@ -690,19 +703,16 @@ generic_toast_delete_optional_wal(ToastAPI *api, void *key, OXid oxid,
 
 				walKey = o_btree_tuple_make_key(desc, tuple, NULL, true,
 												&key_allocated);
-				version = api->getBTreeVersion ? api->getBTreeVersion(arg) : O_TABLE_INVALID_VERSION;
 
 				add_modify_wal_record(WAL_REC_DELETE, desc, walKey,
-									  o_btree_len(desc, walKey, OKeyLength), REPLICA_IDENTITY_DEFAULT, version);
+									  o_btree_len(desc, walKey, OKeyLength), REPLICA_IDENTITY_DEFAULT, version, base_version);
 				if (key_allocated)
 					pfree(walKey.data);
 			}
 			else
 			{
-				version = api->getBTreeVersion ? api->getBTreeVersion(arg) : O_TABLE_INVALID_VERSION;
-
 				add_modify_wal_record(WAL_REC_DELETE, desc, tuple,
-									  o_btree_len(desc, tuple, OTupleLength), REPLICA_IDENTITY_DEFAULT, version);
+									  o_btree_len(desc, tuple, OTupleLength), REPLICA_IDENTITY_DEFAULT, version, base_version);
 			}
 		}
 
@@ -900,11 +910,10 @@ o_toast_insert(OTableDescr *descr, OTuple pk, uint16 attn,
 	bool		result;
 	OIndexDescr *primary = GET_PRIMARY(descr);
 	OIndexDescr *toast = descr->toast;
-	OTableToastArg arg = {primary, toast};
-	ToastAPI   *api = &tableToastAPI;
-	BTreeDescr *desc = api->getBTreeDesc(&arg);
+	uint32		version = descr->version;
+	OTableToastArg arg = {primary, toast, version};
 
-	Assert(desc);
+	Assert(ORelOidsIsEqual(toast->tableOids, descr->oids));
 
 	tkey.pk_tuple = pk;
 	tkey.attnum = attn;
@@ -912,14 +921,7 @@ o_toast_insert(OTableDescr *descr, OTuple pk, uint16 attn,
 
 	Assert(toast->desc.type == oIndexToast);
 
-	if (desc->storageType == BTreeStoragePersistence)
-		/* @TODO @ CHECK && wal == true */
-	{
-		add_rel_wal_record(descr->oids, oIndexInvalid, descr->version);
-		/* @TODO @ CHECK ! !!type ! !! */
-	}
-
-	result = generic_toast_insert(api, &tkey, data,
+	result = generic_toast_insert(&tableToastAPI, &tkey, data,
 								  data_size, oxid, csn, &arg);
 
 	return result;
@@ -932,7 +934,7 @@ o_toast_sort_add(OIndexDescr *primary, OIndexDescr *toast,
 				 Tuplesortstate *sortstate)
 {
 	OToastKey	tkey;
-	OTableToastArg arg = {primary, toast};
+	OTableToastArg arg = {primary, toast, O_TABLE_INVALID_VERSION};
 
 	tkey.pk_tuple = pk;
 	tkey.attnum = attn;
@@ -954,9 +956,10 @@ o_toast_delete(OTableDescr *descr,
 	bool		result;
 	OIndexDescr *primary = GET_PRIMARY(descr);
 	OIndexDescr *toast = descr->toast;
-	OTableToastArg arg = {primary, toast};
-	ToastAPI   *api = &tableToastAPI;
-	BTreeDescr *desc = api->getBTreeDesc(&arg);
+	uint32		version = descr->version;
+	OTableToastArg arg = {primary, toast, version};
+
+	Assert(ORelOidsIsEqual(toast->tableOids, descr->oids));
 
 	tkey.pk_tuple = pk;
 	tkey.attnum = attn;
@@ -964,14 +967,7 @@ o_toast_delete(OTableDescr *descr,
 
 	Assert(toast->desc.type == oIndexToast);
 
-	if (desc->storageType == BTreeStoragePersistence)
-		/* @TODO @ CHECK && wal == true */
-	{
-		add_rel_wal_record(descr->oids, oIndexInvalid, descr->version);
-		/* @TODO @ CHECK ! !!type ! !! */
-	}
-
-	result = generic_toast_delete(api, (Pointer) &tkey,
+	result = generic_toast_delete(&tableToastAPI, (Pointer) &tkey,
 								  oxid, csn, &arg);
 
 	return result;
@@ -984,7 +980,7 @@ o_toast_get(OIndexDescr *primary, OIndexDescr *toast,
 {
 	OToastKey	tkey;
 	Pointer		result;
-	OTableToastArg arg = {primary, toast};
+	OTableToastArg arg = {primary, toast, O_TABLE_INVALID_VERSION};
 
 	tkey.pk_tuple = pk;
 	tkey.attnum = attn;

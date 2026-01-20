@@ -70,6 +70,7 @@ typedef struct
 {
 	BTreeDescr *(*getBTreeDesc) (void *arg);
 	uint32		(*getBTreeVersion) (void *arg);
+	uint32		(*getBaseBTreeVersion) (void *arg);
 	uint32		(*getKeySize) (void *arg);
 	uint32		(*getMaxChunkSize) (void *key, void *arg);
 	void		(*updateKey) (void *key, uint32 chunknum, void *arg);

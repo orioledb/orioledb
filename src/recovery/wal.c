@@ -40,7 +40,7 @@ static void add_xid_wal_record_if_needed(void);
 static void flush_local_wal_if_needed(int required_length);
 static inline void add_local_modify(uint8 record_type, OTuple record, OffsetNumber length, OTuple record2, OffsetNumber length2);
 static void add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
-										   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2, char relreplident, uint32 version);
+										   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2, char relreplident, uint32 version, uint32 base_version);
 static void add_relreplident_wal_record(char relreplident);
 
 #define XID_RESERVED_LENGTH ((local_wal_contains_xid) ? 0 : sizeof(WALRecXid))
@@ -159,7 +159,7 @@ wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid *xmin, CommitSe
 
 /* Parser for WAL_REC_RELATION */
 Pointer
-wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin, CommitSeqNo *csn, CommandId *cid, uint32 *version, uint16 wal_version)
+wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin, CommitSeqNo *csn, CommandId *cid, uint32 *version, uint32 *base_version, uint16 wal_version)
 {
 	Assert(ptr);
 	Assert(oids);
@@ -176,6 +176,7 @@ wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin,
 		PARSE(ptr, cid);
 
 		PARSE(ptr, version);
+		PARSE(ptr, base_version);
 	}
 
 	return ptr;
@@ -346,12 +347,12 @@ wal_container_read_header(Pointer ptr, uint16 *version, uint8 *flags)
 
 void
 add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
-					  OTuple tuple, OffsetNumber length, char relreplident, uint32 version)
+					  OTuple tuple, OffsetNumber length, char relreplident, uint32 version, uint32 base_version)
 {
 	OTuple		nulltup;
 
 	O_TUPLE_SET_NULL(nulltup);
-	add_modify_wal_record_extended(rec_type, desc, tuple, length, nulltup, 0, relreplident, version);
+	add_modify_wal_record_extended(rec_type, desc, tuple, length, nulltup, 0, relreplident, version, base_version);
 }
 
 /*
@@ -360,7 +361,7 @@ add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
  */
 static void
 add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
-							   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2, char relreplident, uint32 version)
+							   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2, char relreplident, uint32 version, uint32 base_version)
 {
 	int			required_length;
 	ORelOids	oids = desc->oids;
@@ -415,7 +416,7 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 
 	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
 	{
-		add_rel_wal_record(oids, type, version);
+		add_rel_wal_record(oids, type, version, base_version);
 		if (relreplident != REPLICA_IDENTITY_DEFAULT)
 			add_relreplident_wal_record(relreplident);
 	}
@@ -457,7 +458,7 @@ add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr)
 		add_xid_wal_record_if_needed();
 
 	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
-		add_rel_wal_record(oids, type, O_TABLE_INVALID_VERSION /* @TODO !!! version */ );
+		add_rel_wal_record(oids, type, O_TABLE_INVALID_VERSION /* @TODO !!! version */ , O_TABLE_INVALID_VERSION /* @TODO !!! version */ );
 
 	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
@@ -733,7 +734,7 @@ add_relreplident_wal_record(char relreplident)
 }
 
 void
-add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version)
+add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_version)
 {
 	OXid		runXmin;
 	CommitSeqNo csn;
@@ -761,10 +762,11 @@ add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version)
 	memcpy(rec->cid, &cid, sizeof(cid));
 
 	memcpy(rec->version, &version, sizeof(version));
+	memcpy(rec->baseVersion, &base_version, sizeof(base_version));
 
-	elog(DEBUG4, "[%s] WAL_REC_RELATION ADD oids [ %u %u %u ] type %d xmin/csn/cid %lu/%lu/%u version %u", __func__,
+	elog(DEBUG4, "[%s] WAL_REC_RELATION ADD oids [ %u %u %u ] type %d xmin/csn/cid %lu/%lu/%u version %u base_version %u", __func__,
 		 oids.datoid, oids.reloid, oids.relnode,
-		 type, runXmin, csn, cid, version);
+		 type, runXmin, csn, cid, version, base_version);
 
 	local_wal_buffer_offset += sizeof(*rec);
 
@@ -996,7 +998,9 @@ o_wal_insert(BTreeDescr *desc, OTuple tuple, char relreplident, uint32 version)
 
 	Assert(!O_TUPLE_IS_NULL(tuple));
 	wal_record = recovery_rec_insert(desc, tuple, &call_pfree, &size);
-	add_modify_wal_record(WAL_REC_INSERT, desc, wal_record, size, relreplident, version);
+	Assert(desc->type != oIndexToast);
+	add_modify_wal_record(WAL_REC_INSERT, desc, wal_record, size, relreplident, version, O_TABLE_INVALID_VERSION	/* @TODO Check no base
+						    * version for non TOAST */ );
 	if (call_pfree)
 		pfree(wal_record.data);
 }
@@ -1020,6 +1024,7 @@ o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident,
 
 	Assert(!O_TUPLE_IS_NULL(tuple));
 	wal_record1 = recovery_rec_update(desc, tuple, &call_pfree1, &size1);
+	Assert(desc->type != oIndexToast);
 
 	/*
 	 * For REPLICA_IDENTITY_FULL include new and old tuples into
@@ -1027,13 +1032,15 @@ o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident,
 	 */
 	if (relreplident != REPLICA_IDENTITY_FULL)
 	{
-		add_modify_wal_record(WAL_REC_UPDATE, desc, wal_record1, size1, relreplident, version);
+		add_modify_wal_record(WAL_REC_UPDATE, desc, wal_record1, size1, relreplident, version, O_TABLE_INVALID_VERSION	/* @TODO Check no base
+							    * version for non TOAST */ );
 	}
 	else
 	{
 		Assert(!O_TUPLE_IS_NULL(oldtuple));
 		wal_record2 = recovery_rec_update(desc, oldtuple, &call_pfree2, &size2);
-		add_modify_wal_record_extended(WAL_REC_UPDATE, desc, wal_record1, size1, wal_record2, size2, relreplident, version);
+		add_modify_wal_record_extended(WAL_REC_UPDATE, desc, wal_record1, size1, wal_record2, size2, relreplident, version, O_TABLE_INVALID_VERSION /* @TODO Check no base
+									     * version for non TOAST */ );
 		if (call_pfree2)
 			pfree(wal_record2.data);
 	}
@@ -1058,7 +1065,9 @@ o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident, uint32 version)
 
 	Assert(!O_TUPLE_IS_NULL(tuple));
 	wal_record = recovery_rec_delete(desc, tuple, &call_pfree, &size, relreplident);
-	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, relreplident, version);
+	Assert(desc->type != oIndexToast);
+	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, relreplident, version, O_TABLE_INVALID_VERSION	/* @TODO Check no base
+						    * version for non TOAST */ );
 
 	if (call_pfree)
 		pfree(wal_record.data);
@@ -1082,7 +1091,9 @@ o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relrepli
 
 	oldrecord = recovery_rec_delete(desc, oldtuple, &old_call_pfree, &oldsize, relreplident);
 	newrecord = recovery_rec_insert(desc, newtuple, &new_call_pfree, &newsize);
-	add_modify_wal_record_extended(WAL_REC_REINSERT, desc, newrecord, newsize, oldrecord, oldsize, relreplident, version);
+	Assert(desc->type != oIndexToast);
+	add_modify_wal_record_extended(WAL_REC_REINSERT, desc, newrecord, newsize, oldrecord, oldsize, relreplident, version, O_TABLE_INVALID_VERSION	/* @TODO Check no base
+								     * version for non TOAST */ );
 	if (old_call_pfree)
 	{
 		pfree(oldrecord.data);
@@ -1104,7 +1115,9 @@ o_wal_delete_key(BTreeDescr *desc, OTuple key, bool is_bridge_index, uint32 vers
 	Assert(IS_SYS_TREE_OIDS(desc->oids) || is_bridge_index);
 	Assert(!O_TUPLE_IS_NULL(key));
 	wal_record = recovery_rec_delete_key(desc, key, &call_pfree, &size);
-	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, REPLICA_IDENTITY_DEFAULT, version);
+	Assert(desc->type != oIndexToast);
+	add_modify_wal_record(WAL_REC_DELETE, desc, wal_record, size, REPLICA_IDENTITY_DEFAULT, version, O_TABLE_INVALID_VERSION	/* @TODO Check no base
+						    * version for non TOAST */ );
 
 	if (call_pfree)
 		pfree(wal_record.data);
