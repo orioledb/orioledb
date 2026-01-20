@@ -104,6 +104,11 @@ do \
 	ptr += sizeof(*(valptr)); \
 } while(0)
 
+#define ASSIGN(ptr, value) \
+do { \
+	if (ptr) *ptr = value; \
+} while(0)
+
 /* Parser for WAL_REC_XID */
 Pointer
 wal_parse_rec_xid(Pointer ptr, OXid *oxid, TransactionId *logicalXid, TransactionId *heapXid, uint16 wal_version)
@@ -115,6 +120,10 @@ wal_parse_rec_xid(Pointer ptr, OXid *oxid, TransactionId *logicalXid, Transactio
 	if (wal_version >= 17)
 	{
 		PARSE(ptr, heapXid);
+	}
+	else
+	{
+		ASSIGN(heapXid, InvalidTransactionId);
 	}
 
 	return ptr;
@@ -177,6 +186,15 @@ wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin,
 
 		PARSE(ptr, version);
 		PARSE(ptr, base_version);
+	}
+	else
+	{
+		ASSIGN(xmin, InvalidOXid);
+		ASSIGN(csn, 0);
+		ASSIGN(cid, InvalidCommandId);
+
+		ASSIGN(version, O_TABLE_INVALID_VERSION);
+		ASSIGN(base_version, O_TABLE_INVALID_VERSION);
 	}
 
 	return ptr;
@@ -242,6 +260,11 @@ wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid, 
 	{
 		PARSE(ptr, xmin);
 		PARSE(ptr, csn);
+	}
+	else
+	{
+		ASSIGN(xmin, InvalidOXid);
+		ASSIGN(csn, 0);
 	}
 
 	return ptr;
