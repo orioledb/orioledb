@@ -372,7 +372,7 @@ update_min_undo_locations(UndoLogType undoType,
 
 	if (undoType == UndoLogSystem)
 	{
-		UndoLocation	replicationUndoRetainLocation = get_current_replication_retain_undo_location();
+		UndoLocation replicationUndoRetainLocation = get_current_replication_retain_undo_location();
 
 		if (UndoLocationIsValid(replicationUndoRetainLocation))
 			minRetainLocation = Min(minRetainLocation, replicationUndoRetainLocation);
@@ -1390,9 +1390,8 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 	if (undoType == UndoLogSystem && wal_level >= WAL_LEVEL_LOGICAL)
 	{
 		/*
-		 * Add element to mapping (xid ->
-		 * transactionUndoRetainLocation) for system tree modification
-		 * in logical decoding.
+		 * Add element to mapping (xid -> transactionUndoRetainLocation) for
+		 * system tree modification in logical decoding.
 		 */
 		TransactionId xid;
 		static TransactionId insertedXid = InvalidTransactionId;

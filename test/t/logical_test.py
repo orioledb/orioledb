@@ -1101,10 +1101,10 @@ COMMIT\n""")
 		#print(result)
 		self.assertEqual(
 		    result, f"""BEGIN
-table public.h_tmp: INSERT: id[integer]:1 data[text]:'100'
 table public.{o_relname}: INSERT: id[integer]:1 data[text]:'10'
 table public.{o_relname}: INSERT: id[integer]:2 data[text]:'20'
 table public.{o_relname}: INSERT: id[integer]:3 data[text]:'30'
+table public.h_tmp: INSERT: id[integer]:1 data[text]:'100'
 COMMIT\n""")
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
@@ -1319,8 +1319,8 @@ COMMIT\n""")
 		#print(result)
 		self.assertEqual(
 		    result, f"""BEGIN
-table public.h_tmp: INSERT: id[integer]:1 data[text]:'100'
 table public.{o_relname}: INSERT: id[integer]:1 data[text]:'10'
+table public.h_tmp: INSERT: id[integer]:1 data[text]:'100'
 COMMIT\n""")
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),

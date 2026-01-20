@@ -546,7 +546,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 	if (wal_flags & WAL_CONTAINER_HAS_XACT_INFO)
 	{
-		/* Store PG xid from WAL_CONTAINER_XACT_INFO to build SYS_TREES_XID_UNDO_LOCATION mapping in recovery */
+		/*
+		 * Store PG xid from WAL_CONTAINER_XACT_INFO to build
+		 * SYS_TREES_XID_UNDO_LOCATION mapping in recovery
+		 */
 		ptr = wal_parse_container_xact_info(ptr, NULL, &logicalDecodeRecoverySystemTransactionId);
 	}
 	else
@@ -821,7 +824,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				cur_ixversion = latest_version;
 			}
 
-			elog(DEBUG4, "WAL_REC_RELATION");
+			elog(DEBUG4, "oxid %lu logicalXid %u heapXid %u WAL_REC_RELATION latest_oids [ %u %u %u ] latest_version %u",
+				 oxid, logicalXid, heapXid, latest_oids.datoid, latest_oids.reloid, latest_oids.relnode,
+				 latest_version);
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
@@ -859,6 +864,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 				descr = o_fetch_table_descr_extended(latest_oids, snapshot, latest_version);
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
+
+				Assert(descr);
+				Assert(indexDescr);
 			}
 			else if (ix_type == oIndexToast)
 			{
@@ -869,6 +877,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					 cur_version);
 
 				indexDescr = o_fetch_index_descr_extended(cur_ixoids, ix_type, false, NULL, snapshot, cur_ixversion);
+				Assert(indexDescr);
 
 				elog(DEBUG4, "WAL_REC_RELATION [2] oIndexToast :: FETCH RELATION [ %u %u %u ] version %u -> retrieved [ %u %u %u ]",
 					 cur_oids.datoid, cur_oids.reloid, cur_oids.relnode,
@@ -880,6 +889,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				Assert(indexDescr->tableOids.relnode == cur_oids.relnode);
 
 				descr = o_fetch_table_descr_extended(indexDescr->tableOids, snapshot, cur_version);
+				Assert(descr);
+
 				o_toast_tupDesc = descr->toast->leafTupdesc;
 				/* Init heap tupledesc for toast table */
 				heap_toast_tupDesc = CreateTemplateTupleDesc(3);

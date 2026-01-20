@@ -121,7 +121,8 @@ wal_parse_rec_xid(Pointer ptr, OXid *oxid, TransactionId *logicalXid, Transactio
 }
 
 /* Parser for WAL_CONTAINER_XACT_INFO */
-Pointer wal_parse_container_xact_info(Pointer ptr, TimestampTz *xactTime, TransactionId *xid)
+Pointer
+wal_parse_container_xact_info(Pointer ptr, TimestampTz *xactTime, TransactionId *xid)
 {
 	Assert(ptr);
 
@@ -365,6 +366,8 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	ORelOids	oids = desc->oids;
 	OIndexType	type = desc->type;
 	bool		write_two_tuples;
+
+	elog(DEBUG4, "[%s] rec_type %d oids [ %u %u %u ]", __func__, rec_type, oids.datoid, oids.reloid, oids.relnode);
 
 	/* Do not write WAL during recovery */
 	if (OXidIsValid(recovery_oxid))
@@ -619,7 +622,7 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 	Assert(!is_recovery_process());
 	Assert(rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK);
 
-	ereport(DEBUG4, errmsg("rec_type %d (%s)", rec_type, wal_record_type_to_string(rec_type)));
+	elog(DEBUG4, "rec_type %d (%s)", rec_type, wal_record_type_to_string(rec_type));
 
 	recLength = sizeof(WALRecFinish);
 	if (rec_type == WAL_REC_COMMIT &&
@@ -759,9 +762,9 @@ add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version)
 
 	memcpy(rec->version, &version, sizeof(version));
 
-	elog(DEBUG4, "[%s] WAL_REC_RELATION [ %u %u %u ] xmin/csn/cid %lu/%lu/%u version %u", __func__,
-		oids.datoid, oids.reloid, oids.relnode,
-		runXmin, csn, cid, version);
+	elog(DEBUG4, "[%s] WAL_REC_RELATION ADD oids [ %u %u %u ] type %d xmin/csn/cid %lu/%lu/%u version %u", __func__,
+		 oids.datoid, oids.reloid, oids.relnode,
+		 type, runXmin, csn, cid, version);
 
 	local_wal_buffer_offset += sizeof(*rec);
 
@@ -930,6 +933,7 @@ flush_local_wal_if_needed(int required_length)
 	Assert(!is_recovery_process());
 	if (local_wal_buffer_offset + required_length + XID_RESERVED_LENGTH > LOCAL_WAL_BUFFER_SIZE)
 	{
+		elog(DEBUG4, "[%s] Going to FLUSH WAL on local WAL buffer overflow", __func__);
 		log_logical_wal_container(local_wal_buffer, local_wal_buffer_offset,
 								  false);
 
@@ -969,6 +973,8 @@ log_logical_wal_container(Pointer ptr, int length, bool withXactTime)
 
 		XLogRegisterData((char *) &rec, sizeof(rec));
 	}
+
+	elog(DEBUG4, "[%s] FLUSH WAL via XLogInsert", __func__);
 
 	XLogRegisterData(ptr, length);
 	return XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
