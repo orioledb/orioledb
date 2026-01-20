@@ -36,29 +36,38 @@ class NotSupportedYetTest(BaseTest):
 		""")
 
 		# We doesn't break REINDEX CONCURRENTLY for postgres tables
-		_, _, err = node.psql("""
-			SET SESSION search_path = 'ddl';
-			REINDEX (VERBOSE) TABLE CONCURRENTLY pg_test_1;
-		""")
-		self.assertTrue(err.decode("utf-8").split("\n")[0].find("pg_test_1"))
+		con1 = node.connect(autocommit=True)
+		con1.execute("SET SESSION search_path = 'ddl';")
+		con1.execute("REINDEX (VERBOSE) TABLE CONCURRENTLY pg_test_1;")
+		con1.close()
+		msg = con1.connection.notices[0]
+		if isinstance(msg, dict):  # pg8000
+			msg = f"{(msg[b'S']).decode('utf-8')}:  {(msg[b'M']).decode('utf-8')}"
+		self.assertTrue(msg.find("pg_test_1"))
 
 		# Using simple reindex instead of concurrent for orioledb tables
-		_, _, err = node.psql("""
-			SET SESSION search_path = 'ddl';
-			REINDEX (VERBOSE) TABLE CONCURRENTLY o_test_1;
-		""")
+		con2 = node.connect(autocommit=True)
+		con2.execute("SET SESSION search_path = 'ddl';")
+		con2.execute("REINDEX (VERBOSE) TABLE CONCURRENTLY o_test_1;")
+		con2.close()
+		msg = con2.connection.notices[0]
+		if isinstance(msg, dict):  # pg8000
+			msg = f"{(msg[b'S']).decode('utf-8')}:  {(msg[b'M']).decode('utf-8')}"
 		self.assertEqual(
-		    err.decode("utf-8").split("\n")[0],
+		    msg.strip(),
 		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead"
 		)
 
 		# Using simple reindex instead of concurrent for orioledb indices
-		_, _, err = node.psql("""
-			SET SESSION search_path = 'ddl';
-			REINDEX (VERBOSE) INDEX CONCURRENTLY o_ind_1;
-		""")
+		con3 = node.connect(autocommit=True)
+		con3.execute("SET SESSION search_path = 'ddl';")
+		con3.execute("REINDEX (VERBOSE) INDEX CONCURRENTLY o_ind_1;")
+		con3.close()
+		msg = con3.connection.notices[0]
+		if isinstance(msg, dict):  # pg8000
+			msg = f"{(msg[b'S']).decode('utf-8')}:  {(msg[b'M']).decode('utf-8')}"
 		self.assertEqual(
-		    err.decode("utf-8").split("\n")[0],
+		    msg.strip(),
 		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead"
 		)
 
@@ -163,8 +172,8 @@ class NotSupportedYetTest(BaseTest):
 		""")
 		self.assertEqual(
 		    err.decode("utf-8").split("\n")[0],
-		    "ERROR:  orioledb table \"o_test_1\" does " +
-		    "not support VACUUM FULL")
+		    "WARNING:  orioledb table \"o_test_1\" does " +
+		    "not support VACUUM FULL, using a plain VACUUM instead")
 
 		# Error if at least one table is orioledb
 		_, _, err = node.psql("""
@@ -172,8 +181,8 @@ class NotSupportedYetTest(BaseTest):
 		""")
 		self.assertEqual(
 		    err.decode("utf-8").split("\n")[0],
-		    "ERROR:  orioledb table \"o_test_1\" does " +
-		    "not support VACUUM FULL")
+		    "WARNING:  orioledb table \"o_test_1\" does " +
+		    "not support VACUUM FULL, using a plain VACUUM instead")
 
 		# Error if no table specified
 		_, _, err = node.psql("""
@@ -181,8 +190,8 @@ class NotSupportedYetTest(BaseTest):
 		""")
 		self.assertEqual(
 		    err.decode("utf-8").split("\n")[0],
-		    "ERROR:  orioledb table \"o_test_1\" does " +
-		    "not support VACUUM FULL")
+		    "WARNING:  orioledb table \"o_test_1\" does " +
+		    "not support VACUUM FULL, using a plain VACUUM instead")
 		node.stop()
 
 	def test_tablesample(self):
@@ -297,14 +306,13 @@ class NotSupportedYetTest(BaseTest):
 			) USING orioledb;
 		""")
 
-		with self.assertRaises(QueryException) as e:
-			node.safe_psql("""
-				CREATE INDEX CONCURRENTLY ON o_test (i);
-			""")
+		_, _, err = node.psql("""
+			CREATE INDEX CONCURRENTLY ON o_test (i);
+		""")
 
-		self.assertErrorMessageEquals(
-		    e,
-		    "concurrent index creation is not supported for orioledb tables yet"
+		self.assertEqual(
+		    err.decode("utf-8").split("\n")[0],
+		    "WARNING:  concurrent index creation is not supported for orioledb tables yet, using a plain CREATE INDEX instead"
 		)
 
 		node.safe_psql("""
