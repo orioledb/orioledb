@@ -458,7 +458,7 @@ lock_page_with_tuple(BTreeDescr *desc,
 	PageImg		img;
 
 	/* Local pages do not need locking */
-	if (O_PAGE_IS_LOCAL(blkno))
+	if (O_PAGE_IS_LOCAL(*blkno))
 		return OLockPageWithTupleResultLocked;
 
 	img.load = false;

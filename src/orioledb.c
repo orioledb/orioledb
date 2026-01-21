@@ -95,6 +95,8 @@ static Size main_buffers_offset;
 
 Pointer		o_shared_buffers = NULL;
 OrioleDBPageDesc *page_descs = NULL;
+Page	   *local_ppool_pages = NULL;
+OrioleDBPageDesc *local_ppool_page_descs = NULL;
 
 /* Custom GUC variables */
 static int	main_buffers_guc;

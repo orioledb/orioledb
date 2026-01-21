@@ -21,9 +21,21 @@
 #include "checkpoint/checkpoint.h"
 #include "transam/undo.h"
 #include "utils/page_pool.h"
+#include "utils/elog.h"
+#include "utils/memutils.h"
+#include "utils/palloc.h"
 #include "utils/ucm.h"
 
 #include "utils/memdebug.h"
+
+/* Local memory page pool handler */
+typedef struct LocalPagePool
+{
+	PagePool	base;
+	MemoryContext slab_context;
+	uint32		max_pages;
+	uint32		current_slot;
+} LocalPagePool;
 
 /* Shared memory based page pool operations */
 
@@ -70,6 +82,51 @@ static const PagePoolOps o_page_pool_ops = {
 	.ucm_after_update_state = o_ucm_after_update_state,
 };
 
+/* Shared local memory based page pool operations */
+
+OInMemoryBlkno local_ppool_alloc_page(PagePool *pool, int kind);
+OInMemoryBlkno local_ppool_alloc_metapage(PagePool *pool);
+void		local_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock);
+
+void		local_ppool_reserve_pages(PagePool *pool, int kind, int count);
+void		local_ppool_release_reserved(PagePool *pool, uint32 mask);
+
+OInMemoryBlkno local_ppool_free_pages_count(PagePool *pool);
+OInMemoryBlkno local_ppool_dirty_pages_count(PagePool *pool);
+void		local_ppool_run_clock(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
+OInMemoryBlkno local_ppool_size(PagePool *pool);
+
+void		local_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno);
+void		local_ucm_change_usage(PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount);
+uint32		local_ucm_get_epoch(PagePool *pool);
+bool		local_ucm_epoch_needs_shift(PagePool *pool);
+void		local_ucm_epoch_shift(PagePool *pool);
+uint64		local_ucm_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 state);
+void		local_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState);
+
+/* PagePoolOps for a local memory based page pool */
+static const PagePoolOps local_ppool_ops = {
+	.alloc_page = local_ppool_alloc_page,
+	.alloc_metapage = local_ppool_alloc_metapage,
+	.free_page = local_ppool_free_page,
+
+	.reserve_pages = local_ppool_reserve_pages,
+	.release_reserved = local_ppool_release_reserved,
+
+	.free_pages_count = local_ppool_free_pages_count,
+	.dirty_pages_count = local_ppool_dirty_pages_count,
+	.run_clock = local_ppool_run_clock,
+	.size = local_ppool_size,
+
+	.ucm_inc_usage = local_ucm_inc_usage,
+	.ucm_change_usage = local_ucm_change_usage,
+	.ucm_get_epoch = local_ucm_get_epoch,
+	.ucm_epoch_needs_shift = local_ucm_epoch_needs_shift,
+	.ucm_epoch_shift = local_ucm_epoch_shift,
+	.ucm_update_state = local_ucm_update_state,
+	.ucm_after_update_state = local_ucm_after_update_state,
+};
+
 /*
  * Calculates shared memory space needed for a page pool. Be careful,
  * it prepares local memory structures to initialize.
@@ -81,6 +138,7 @@ o_ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno si
 
 	if (!debug)
 		Assert(size >= PPOOL_MIN_SIZE);
+	/* TODO: check for ppool max size */
 
 	pool->offset = offset;
 	pool->size = size;
@@ -427,4 +485,137 @@ o_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, 
 	OPagePool  *o_pool = (OPagePool *) pool;
 
 	ucm_after_update_state(&o_pool->ucm, blkno, oldState, newState);
+}
+
+void
+local_ppool_init(LocalPagePool *pool, uint32 max_pages)
+{
+	/* TODO: Remove max_pages and realloc - make both arrays dynamic */
+	local_ppool_pages = calloc(max_pages, sizeof(Page));
+	local_ppool_page_descs = calloc(max_pages, sizeof(OrioleDBPageDesc));
+	pool->max_pages = max_pages;
+	pool->current_slot = 0;
+	pool->slab_context = SlabContextCreate(TopMemoryContext, "oriole local page pool", ORIOLEDB_BLCKSZ * 16, ORIOLEDB_BLCKSZ);
+	pool->base.ops = &local_ppool_ops;
+}
+
+OInMemoryBlkno
+local_ppool_alloc_page(PagePool *pool, int kind)
+{
+	LocalPagePool *local_pool = (LocalPagePool *) pool;
+
+	int			start = local_pool->current_slot;
+	int			i = start;
+
+	/* Iterate through local_pool->pages to find a free slot */
+	do
+	{
+		i++;
+		if (i >= local_pool->max_pages)
+			i = 0;
+		if (local_ppool_pages[i] == NULL)
+		{
+			local_ppool_pages[i] = (Page) MemoryContextAlloc(local_pool->slab_context, ORIOLEDB_BLCKSZ);
+			local_pool->current_slot = i;
+			/* Set the local page bit */
+			return i | 0x80000000;
+		}
+	} while (i != start);
+
+	ereport(ERROR, errmsg("Failed to allocate a page in local page pool"));
+	pg_unreachable();
+}
+
+OInMemoryBlkno
+local_ppool_alloc_metapage(PagePool *pool)
+{
+	/* Kind is not used */
+	return local_ppool_alloc_page(pool, 0);
+}
+
+void
+local_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock)
+{
+	int			i = -blkno + 1;
+
+	pfree(local_ppool_pages[i]);
+	local_ppool_pages[i] = NULL;
+}
+
+void
+local_ppool_reserve_pages(PagePool *pool, int kind, int count)
+{
+	/* Stub: do nothing */
+}
+
+void
+local_ppool_release_reserved(PagePool *pool, uint32 mask)
+{
+	/* Stub: do nothing */
+}
+
+OInMemoryBlkno
+local_ppool_free_pages_count(PagePool *pool)
+{
+	return 0;
+}
+
+OInMemoryBlkno
+local_ppool_dirty_pages_count(PagePool *pool)
+{
+	return 0;
+}
+
+void
+local_ppool_run_clock(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested)
+{
+	/* Stub: do nothing */
+}
+
+OInMemoryBlkno
+local_ppool_size(PagePool *pool)
+{
+	return 0;
+}
+
+void
+local_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno)
+{
+	/* Stub: do nothing */
+}
+
+void
+local_ucm_change_usage(PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount)
+{
+	/* Stub: do nothing */
+}
+
+uint32
+local_ucm_get_epoch(PagePool *pool)
+{
+	return 0;
+}
+
+bool
+local_ucm_epoch_needs_shift(PagePool *pool)
+{
+	return false;
+}
+
+void
+local_ucm_epoch_shift(PagePool *pool)
+{
+	/* Stub: do nothing */
+}
+
+uint64
+local_ucm_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 state)
+{
+	return 0;
+}
+
+void
+local_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState)
+{
+	/* Stub: do nothing */
 }
