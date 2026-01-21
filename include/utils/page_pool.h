@@ -79,6 +79,7 @@ typedef struct PagePool
 
 extern void ppool_release_all_pages(void);
 
+/* Shared memory based page pool handle */
 typedef struct OPagePool
 {
 	PagePool	base;
@@ -105,26 +106,6 @@ typedef struct OPagePool
 
 extern Size o_ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug);
 extern void o_ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found);
-
-extern OInMemoryBlkno o_ppool_get_page(PagePool *pool, int kind);
-extern OInMemoryBlkno o_ppool_get_metapage(PagePool *pool);
-extern void o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock);
-
-extern void o_ppool_reserve_pages(PagePool *pool, int kind, int count);
-extern void o_ppool_release_reserved(PagePool *pool, uint32 mask);
-
-extern OInMemoryBlkno o_ppool_free_pages_count(PagePool *pool);
-extern OInMemoryBlkno o_ppool_dirty_pages_count(PagePool *pool);
-extern void o_ppool_run_clock(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
-extern OInMemoryBlkno o_ppool_size(PagePool *pool);
-
-extern void o_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno);
-extern void o_ucm_change_usage(PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount);
-extern uint32 o_ucm_get_epoch(PagePool *pool);
-extern bool o_ucm_epoch_needs_shift(PagePool *pool);
-extern void o_ucm_epoch_shift(PagePool *pool);
-extern uint64 o_ucm_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 state);
-extern void o_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState);
 
 #define PAGE_DESC_FLAG_DIRTY			1	/* Modified since the the last
 											 * time being written out */
