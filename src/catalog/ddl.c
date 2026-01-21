@@ -1412,7 +1412,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	{
 		if (alter_type_exprs)
 		{
-			list_free(alter_type_exprs);
+			list_free_deep(alter_type_exprs);
 			alter_type_exprs = NIL;
 		}
 		if (dropped_attrs)
@@ -1691,12 +1691,13 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field, Oid ob
 	foreach(lc, alter_type_exprs)
 	{
 		AttrNumber	attnum = intVal(linitial((List *) lfirst(lc)));
-		const char* attname = ((String*)(lfourth((List *) lfirst(lc))))->sval;
+		Oid			oid = intVal(lsecond((List *) lfirst(lc)));
+		const char *attname = ((String *) (lfourth((List *) lfirst(lc))))->sval;
 
 		if (attnum == subId)
 		{
 			expr = (Node *) lthird((List *) lfirst(lc));
-			append_transform = strcmp(attname, field->name.data) == 0;
+			append_transform = strcmp(attname, field->name.data) == 0 && objectId != oid;
 			break;
 		}
 	}
@@ -1714,8 +1715,12 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field, Oid ob
 	if (expr != NULL)
 	{
 		if (append_transform)
+		{
+			char	   *field_name = pstrdup(field->name.data);
+
 			/* cppcheck-suppress unknownEvaluationOrder */
-			alter_type_exprs = lappend(alter_type_exprs, list_make4(makeInteger(subId), makeInteger(objectId), expr, makeString(field->name.data)));
+			alter_type_exprs = lappend(alter_type_exprs, list_make4(makeInteger(subId), makeInteger(objectId), expr, makeString(field_name)));
+		}
 		assign_expr_collations(pstate, expr);
 		expr = (Node *) expression_planner((Expr *) expr);
 
@@ -2087,22 +2092,25 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 
 	/*
 	 * OrioleDB engine change execution order when relation is rewrited. So
-	 * real data transfer from old relation ti the new one executed after dropping.
-	 * So in statments with moving data from one column to another via ALTER COLUMN and DROP
-	 * we gather an error that collumn already dropped. To avoid this behavior
-	 * mark column dropped in current statement as not dropped.
-	 * This is ugly solution actually need refactor handling of ALTER TABLE to avoid
-	 * global vars and lists that brings alot of bugs.
+	 * real data transfer from old relation ti the new one executed after
+	 * dropping. So in statments with moving data from one column to another
+	 * via ALTER COLUMN and DROP we gather an error that collumn already
+	 * dropped. To avoid this behavior mark column dropped in current
+	 * statement as not dropped. This is ugly solution actually need refactor
+	 * handling of ALTER TABLE to avoid global vars and lists that brings alot
+	 * of bugs.
 	 */
 	if (OidIsValid(o_saved_relrewrite))
 	{
 		for (int i = 0; i < old_slot->tts_tupleDescriptor->natts; i++)
 		{
 			ListCell   *lc;
+
 			foreach(lc, dropped_attrs)
 			{
-				Oid relOid = intVal(linitial((List *) lfirst(lc)));
-				AttrNumber attnum = intVal(lsecond((List *) lfirst(lc)));
+				Oid			relOid = intVal(linitial((List *) lfirst(lc)));
+				AttrNumber	attnum = intVal(lsecond((List *) lfirst(lc)));
+
 				if (relOid == rel->rd_rel->oid && attnum == i + 1)
 				{
 					old_slot->tts_tupleDescriptor->attrs[i].attisdropped = false;
@@ -2135,9 +2143,10 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				Oid			relOid = intVal(lsecond((List *) lfirst(lc)));
 
 				/*
-				 * To get correct expresion we need check both relation and attribute
-				 * number. Because of postgres inheritence allows different attribute
-				 * number for the same column in parent and child relations.
+				 * To get correct expresion we need check both relation and
+				 * attribute number. Because of postgres inheritence allows
+				 * different attribute number for the same column in parent
+				 * and child relations.
 				 */
 				if (relOid == rel->rd_rel->oid && attnum == i + 1)
 				{
@@ -2162,7 +2171,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				expr = defaultexpr;
 			}
 
-			if (!attr->attisdropped && !expr  && DomainHasConstraints(attr->atttypid) &&
+			if (!attr->attisdropped && !expr && DomainHasConstraints(attr->atttypid) &&
 				old_slot->tts_isnull[i])
 			{
 				Oid			baseTypeId;
@@ -2738,6 +2747,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						o_tables_update(o_table, oxid, oSnapshot.csn);
 						o_tables_after_update(o_table, oxid, oSnapshot.csn);
 						o_tables_rel_meta_unlock(rel, InvalidOid);
+						/* cppcheck-suppress unknownEvaluationOrder */
 						dropped_attrs = lappend(dropped_attrs, list_make2(makeInteger(objectId), makeInteger(subId)));
 					}
 					o_table_free(o_table);
@@ -4108,7 +4118,7 @@ o_ddl_cleanup(void)
 	}
 	if (alter_type_exprs)
 	{
-		list_free(alter_type_exprs);
+		list_free_deep(alter_type_exprs);
 		alter_type_exprs = NIL;
 	}
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
