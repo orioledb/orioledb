@@ -33,6 +33,7 @@
 #include "utils/compress.h"
 #include "utils/planner.h"
 #include "utils/stopevent.h"
+#include "utils/page_pool.h"
 #include "workers/interrupt.h"
 
 #include "access/genam.h"
@@ -1514,8 +1515,13 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	idx = descr->indices[o_table->has_primary ? ix_num : ix_num + 1];
 	buildstate.btleader = NULL;
 
-	/* Attempt to launch parallel worker scan when required */
-	if (in_dedicated_recovery_worker || (ActiveSnapshotSet() && max_parallel_maintenance_workers > 0))
+	/*
+	 * Attempt to launch parallel worker scan when required. Parallel workers
+	 * cannot access data in temporary tables because they use a per-backend
+	 * local page pool.
+	 */
+	if ((in_dedicated_recovery_worker || (ActiveSnapshotSet() && max_parallel_maintenance_workers > 0)) &&
+		o_table->persistence != RELPERSISTENCE_TEMP)
 	{
 		int			parallel_workers = o_calculate_index_workers(&GET_PRIMARY(descr)->desc, false, 1);
 
@@ -1878,8 +1884,13 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 	buildstate.btleader = NULL;
 
-	/* Attempt to launch parallel worker scan when required */
+	/*
+	 * Attempt to launch parallel worker scan when required. Parallel workers
+	 * cannot access data in temporary tables because they use a per-backend
+	 * local page pool.
+	 */
 	if ((in_dedicated_recovery_worker || (ActiveSnapshotSet() && max_parallel_maintenance_workers > 0)) &&
+		o_table->persistence != RELPERSISTENCE_TEMP &&
 		!descr->indices[PrimaryIndexNumber]->primaryIsCtid &&
 		!(descr->bridge && !old_descr->bridge))
 	{

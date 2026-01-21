@@ -1490,8 +1490,7 @@ load_page(OBTreeFindPageContext *context)
 	}
 
 	put_page_image(blkno, buf);
-	(*desc->ppool->ops->ucm_change_usage) (desc->ppool, blkno,
-										   ((*desc->ppool->ops->ucm_get_epoch) (desc->ppool) + 2) % UCM_USAGE_LEVELS);
+	(*desc->ppool->ops->ucm_init) (desc->ppool, blkno);
 	page_desc->type = parent_page_desc->type;
 	page_desc->oids = parent_page_desc->oids;
 
@@ -2086,7 +2085,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 	/* rootPageBlkno can not be evicted here */
 	Assert(!evict || !is_root);
 	Assert(OInMemoryBlknoIsValid(desc->rootInfo.rootPageBlkno));
-	Assert(page_is_locked(blkno));
+	Assert(page_is_locked(blkno) || O_PAGE_IS_LOCAL(blkno));
 	EA_EVICT_INC(blkno);
 
 	if (!is_root)
@@ -2370,7 +2369,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	bool		hasMetaLock = LWLockHeldByMe(&checkpoint_state->oTablesMetaLock);
 
 	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc) &&
-		   O_PAGE_STATE_IS_LOCKED(pg_atomic_read_u64(&(O_PAGE_HEADER(rootPageBlkno)->state))));
+		   (O_PAGE_STATE_IS_LOCKED(pg_atomic_read_u64(&(O_PAGE_HEADER(rootPageBlkno)->state))) || O_PAGE_IS_LOCAL(root_blkno)));
 
 	/*
 	 * Additional protection: don't evict the tree root page if the resource

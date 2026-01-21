@@ -53,6 +53,7 @@
 #include "btree/page_chunks.h"
 #include "btree/scan.h"
 #include "btree/undo.h"
+#include "tableam/descr.h"
 #include "transam/oxid.h"
 #include "tuple/slot.h"
 #include "utils/page_pool.h"
@@ -1810,7 +1811,7 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 
 		/* Complete deferred meta page free if this was the last scan. */
 		if (metaPage->toBeFreedOnSeqScanRelease && meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) == 0)
-			ppool_free_page(desc->ppool, desc->rootInfo.metaPageBlkno, false);
+			(*desc->ppool->ops->free_page) (desc->ppool, desc->rootInfo.metaPageBlkno, false);
 
 		scan->checkpointNumberSet = false;
 	}

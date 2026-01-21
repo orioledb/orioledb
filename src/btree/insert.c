@@ -221,7 +221,7 @@ o_btree_finish_root_split_internal(BTreeDescr *desc,
 	page_desc->fileExtent = root_extent;
 
 	Assert(left_blkno);
-	Assert(page_is_locked(desc->rootInfo.rootPageBlkno));
+	Assert(page_is_locked(desc->rootInfo.rootPageBlkno) || O_PAGE_IS_LOCAL(desc->rootInfo.rootPageBlkno));
 
 	BTREE_PAGE_LOCATOR_FIRST(p, &loc);
 	page_locator_insert_item(p, &loc, BTreeNonLeafTuphdrSize);

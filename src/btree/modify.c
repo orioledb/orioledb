@@ -171,7 +171,7 @@ retry:
 	blkno = pageFindContext->items[pageFindContext->index].blkno;
 	loc = pageFindContext->items[pageFindContext->index].locator;
 	page = O_GET_IN_MEMORY_PAGE(blkno);
-	Assert(page_is_locked(blkno));
+	Assert(page_is_locked(blkno) || O_PAGE_IS_LOCAL(blkno));
 
 	if (!BTREE_PAGE_LOCATOR_IS_VALID(page, &loc))
 		return o_btree_modify_handle_tuple_not_found(&context);
@@ -198,7 +198,7 @@ retry:
 			goto retry;
 	}
 
-	Assert(page_is_locked(blkno));
+	Assert(page_is_locked(blkno) || O_PAGE_IS_LOCAL(blkno));
 
 	if (context.cmp != 0)
 		return o_btree_modify_handle_tuple_not_found(&context);
@@ -231,7 +231,7 @@ retry:
 			goto retry;
 		}
 
-		Assert(page_is_locked(blkno));
+		Assert(page_is_locked(blkno) || O_PAGE_IS_LOCAL(blkno));
 
 		if (callbackInfo->modifyCallback || (action == BTreeOperationInsert ||
 											 action == BTreeOperationUpdate ||

@@ -355,8 +355,7 @@ init_new_btree_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint16 flags,
 	header->itemsCount = 0;
 	header->prevInsertOffset = MaxOffsetNumber;
 	header->maxKeyLen = 0;
-	(*desc->ppool->ops->ucm_change_usage) (desc->ppool, blkno,
-										   ((*desc->ppool->ops->ucm_get_epoch) (desc->ppool) + 2) % UCM_USAGE_LEVELS);
+	(*desc->ppool->ops->ucm_init) (desc->ppool, blkno);
 
 	memset(p + offsetof(BTreePageHeader, chunkDesc),
 		   0,

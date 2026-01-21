@@ -25,6 +25,7 @@
 #include "catalog/o_tables.h"
 #include "catalog/sys_trees.h"
 #include "recovery/recovery.h"
+#include "rewind/rewind.h"
 #include "tableam/toast.h"
 #include "tableam/tree.h"
 #include "tuple/slot.h"
@@ -968,8 +969,8 @@ init_shared_root_info(PagePool *pool, SharedRootInfo *sharedRootInfo)
 				bufnum;
 
 	sharedRootInfo->placeholder = false;
-	rootInfo->rootPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);;
-	rootInfo->metaPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);;
+	rootInfo->rootPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);
+	rootInfo->metaPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);
 	rootInfo->rootPageChangeCount = O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(rootInfo->rootPageBlkno));
 
 	Assert(OInMemoryBlknoIsValid(rootInfo->rootPageBlkno));
@@ -1184,6 +1185,10 @@ cleanup_btree(Oid datoid, Oid relnode, bool files, bool fsync)
 	if (shared)
 	{
 		bool		drop_result PG_USED_FOR_ASSERTS_ONLY;
+
+		/* Rewind worker will not see local pages */
+		if (is_rewind_worker() && O_PAGE_IS_LOCAL(shared->rootInfo.rootPageBlkno))
+			return;
 
 		drop_result = o_drop_shared_root_info(datoid, relnode);
 		Assert(drop_result);

@@ -97,15 +97,19 @@ static Size main_buffers_offset;
 
 Pointer		o_shared_buffers = NULL;
 OrioleDBPageDesc *page_descs = NULL;
+Page	   *local_ppool_pages = NULL;
+OrioleDBPageDesc *local_ppool_page_descs = NULL;
 
 /* Custom GUC variables */
 static int	main_buffers_guc;
 static int	undo_buffers_guc;
 static int	xid_buffers_guc;
 static int	rewind_buffers_guc;
+static int	temp_buffers_guc;
 int			max_procs;
 Size		orioledb_buffers_size;
 Size		orioledb_buffers_count;
+Size		orioledb_temp_buffers_count;
 Size		page_descs_size;
 Size		undo_circular_buffer_size;
 uint32		undo_buffers_count;
@@ -180,6 +184,7 @@ MemoryContext btree_insert_context = NULL;
 MemoryContext btree_seqscan_context = NULL;
 
 OPagePool	page_pools[OPagePoolTypesCount];
+LocalPagePool local_ppool;
 
 static size_t page_pools_size[OPagePoolTypesCount];
 
@@ -524,6 +529,20 @@ _PG_init(void)
 							NULL,
 							NULL,
 							NULL);
+
+	DefineCustomIntVariable("orioledb.temp_buffers",
+							"Size of orioledb engine buffers for temporary tables.",
+							NULL,
+							&temp_buffers_guc,
+							PPOOL_MIN_SIZE * 8,
+							debug_disable_pools_limit ? 1 : PPOOL_MIN_SIZE,
+							INT_MAX,
+							PGC_POSTMASTER,
+							GUC_UNIT_BLOCKS,
+							NULL,
+							NULL,
+							NULL);
+
 
 	DefineCustomRealVariable("orioledb.regular_block_undo_circular_buffer_fraction",
 							 "Fraction of cirucular buffer for block-level undo of regular tables.",
@@ -1067,6 +1086,7 @@ _PG_init(void)
 	main_buffers_count = ((Size) main_buffers_guc * (Size) BLCKSZ) / ORIOLEDB_BLCKSZ;
 	free_tree_buffers_count = ((Size) free_tree_buffers_guc * (Size) BLCKSZ) / ORIOLEDB_BLCKSZ;
 	catalog_buffers_count = ((Size) catalog_buffers_guc * (Size) BLCKSZ) / ORIOLEDB_BLCKSZ;
+	orioledb_temp_buffers_count = ((Size) temp_buffers_guc * (Size) BLCKSZ) / ORIOLEDB_BLCKSZ;
 
 	main_buffers_offset = free_tree_buffers_count + catalog_buffers_count;
 
@@ -1113,6 +1133,8 @@ _PG_init(void)
 
 	for (i = 0; i < OPagePoolTypesCount; i++)
 		page_pools_size[i] = CACHELINEALIGN(page_pools_size[i]);
+
+	local_ppool_init(&local_ppool);
 
 	if (device_filename)
 	{
@@ -1347,12 +1369,7 @@ ppools_shmem_init(Pointer ptr, bool found)
 
 		for (i = 0; i < page_descs_size / sizeof(OrioleDBPageDesc); i++)
 		{
-			page_descs[i].fileExtent.len = InvalidFileExtentLen;
-			page_descs[i].fileExtent.off = InvalidFileExtentOff;
-			ORelOidsSetInvalid(page_descs[i].oids);
-			page_descs[i].ionum = -1;
-			page_descs[i].type = 0;
-			page_descs[i].flags = 0;
+			o_page_desc_init(&page_descs[i]);
 		}
 	}
 }
@@ -1438,6 +1455,17 @@ orioledb_shmem_startup(void)
 	LWLockRelease(AddinShmemInitLock);
 
 	shared_segment_initialized = true;
+}
+
+void
+o_page_desc_init(OrioleDBPageDesc *desc)
+{
+	desc->fileExtent.len = InvalidFileExtentLen;
+	desc->fileExtent.off = InvalidFileExtentOff;
+	ORelOidsSetInvalid(desc->oids);
+	desc->ionum = -1;
+	desc->type = 0;
+	desc->flags = 0;
 }
 
 uint64
@@ -1925,6 +1953,9 @@ get_ppool(OPagePoolType type)
 PagePool *
 get_ppool_by_blkno(OInMemoryBlkno blkno)
 {
+	if (O_PAGE_IS_LOCAL(blkno))
+		return (PagePool *) &local_ppool;
+
 	Assert(blkno < orioledb_buffers_count);
 
 	if (blkno >= main_buffers_offset)

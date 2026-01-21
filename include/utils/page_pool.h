@@ -57,19 +57,12 @@ typedef struct PagePoolOps
 
 	OInMemoryBlkno (*free_pages_count) (PagePool *pool);
 	OInMemoryBlkno (*dirty_pages_count) (PagePool *pool);
-	void		(*run_clock) (PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
+	void		(*run_maintenance) (PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
 	OInMemoryBlkno (*size) (PagePool *pool);
 
 	/* Usage tracking */
 	void		(*ucm_inc_usage) (PagePool *pool, OInMemoryBlkno blkno);
-	void		(*ucm_change_usage) (PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount);
-	uint32		(*ucm_get_epoch) (PagePool *pool);
-	bool		(*ucm_epoch_needs_shift) (PagePool *pool);
-	void		(*ucm_epoch_shift) (PagePool *pool);
-	uint64		(*ucm_update_state) (PagePool *pool, OInMemoryBlkno blkno, uint64 state);
-	void		(*ucm_after_update_state) (PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState);
-
-	Pointer		(*get_pagedesc_array) (PagePool *pool);
+	void		(*ucm_init) (PagePool *pool, OInMemoryBlkno blkno);
 } PagePoolOps;
 
 typedef struct PagePool
@@ -107,6 +100,25 @@ typedef struct OPagePool
 extern Size o_ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug);
 extern void o_ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found);
 
+/* Local memory page pool handler */
+typedef struct LocalPagePool
+{
+	PagePool	base;
+	MemoryContext slab_context;
+	uint32		size;
+	uint32		alloc_current_slot;
+	uint32		evict_current_slot;
+	/* count of available to reserve pages in the pool */
+	uint32		availablePagesCount;
+	/* count of dirty pages in the pool */
+	uint32		dirtyPagesCount;
+	/* reserved pages count by type array */
+	uint32		numPagesReserved[PPOOL_RESERVE_COUNT];
+	uint32	   *usage_count;
+} LocalPagePool;
+
+extern void local_ppool_init(LocalPagePool *pool);
+
 #define PAGE_DESC_FLAG_DIRTY			1	/* Modified since the the last
 											 * time being written out */
 #define PAGE_DESC_FLAG_CONCURRENT_DIRTY	2	/* Second "dirty" flag used to
@@ -116,12 +128,12 @@ extern void o_ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found);
 #define IS_DIRTY(blkno) (O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_DIRTY)
 #define IS_DIRTY_CONCURRENT(blkno) (O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_CONCURRENT_DIRTY)
 #define CLEAN_DIRTY_CONCURRENT(blkno) (O_GET_IN_MEMORY_PAGEDESC(blkno)->flags &= ~PAGE_DESC_FLAG_CONCURRENT_DIRTY)
+#define BLKNO_LOCAL_BIT 0x80000000
 
 /*  Local page can never be dirty as it's never synced with disk */
 #define MARK_DIRTY_EXTENDED(desc, blkno, skipMeta) \
 	do \
 	{ \
-	    if (O_PAGE_IS_LOCAL(blkno)) break; \
 		if (!(skipMeta)) \
 		{ \
 			BTREE_GET_META(desc)->dirtyFlag1 = true; \
@@ -129,7 +141,11 @@ extern void o_ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found);
 		} \
 		if (!IS_DIRTY(blkno)) { \
 			O_GET_IN_MEMORY_PAGEDESC(blkno)->flags |= PAGE_DESC_FLAG_BOTH_DIRTY; \
-			pg_atomic_fetch_add_u32(((OPagePool*)(desc)->ppool)->dirtyPagesCount, 1); \
+			if(O_PAGE_IS_LOCAL(blkno)) { \
+				((LocalPagePool*)(desc)->ppool)->dirtyPagesCount++; \
+			} else { \
+				pg_atomic_fetch_add_u32(((OPagePool*)(desc)->ppool)->dirtyPagesCount, 1); \
+			} \
 		} \
 		else if (!IS_DIRTY_CONCURRENT(blkno)) \
 		{ \
@@ -145,7 +161,11 @@ extern void o_ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found);
 #define CLEAN_DIRTY(pool, blkno) \
 	if (IS_DIRTY(blkno)) { \
 		O_GET_IN_MEMORY_PAGEDESC(blkno)->flags &= ~PAGE_DESC_FLAG_BOTH_DIRTY; \
-		pg_atomic_fetch_sub_u32(((OPagePool*)(pool))->dirtyPagesCount, 1); \
+		if(O_PAGE_IS_LOCAL(blkno)) { \
+			((LocalPagePool*)(pool))->dirtyPagesCount--; \
+		} else { \
+			pg_atomic_fetch_sub_u32(((OPagePool*)(pool))->dirtyPagesCount, 1); \
+		} \
 	}
 
 #define FREE_PAGE_IF_VALID(pool, blkno) \
