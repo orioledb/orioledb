@@ -308,7 +308,7 @@ pg_atomic_uint64 *recovery_index_completed_pos;
 ConditionVariable *recovery_index_cv;
 
 /* TransactionId for system trees modification for using in recovery */
-TransactionId logicalDecodeRecoverySystemTransactionId;
+TransactionId recoveryHeapTransactionId = InvalidTransactionId;
 
 static void delay_rels_queued_for_idxbuild(ORelOids oids);
 static void delay_if_queued_for_idxbuild(void);
@@ -2973,9 +2973,15 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 	if (wal_flags & WAL_CONTAINER_HAS_XACT_INFO)
 	{
-		/* We skip WAL_CONTAINER_XACT_INFO */
-		ptr += sizeof(WALRecXactInfo);
+		/*
+		 * Store PG xid from WAL_CONTAINER_XACT_INFO to build
+		 * SYS_TREES_XID_UNDO_LOCATION mapping in recovery for following
+		 * logical decoding
+		 */
+		ptr = wal_parse_container_xact_info(ptr, NULL, &recoveryHeapTransactionId);
 	}
+	else
+		recoveryHeapTransactionId = InvalidTransactionId;
 
 	while (ptr < endPtr)
 	{

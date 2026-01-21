@@ -546,11 +546,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 	if (wal_flags & WAL_CONTAINER_HAS_XACT_INFO)
 	{
-		/* Store PG xid from WAL_CONTAINER_XACT_INFO to build SYS_TREES_XID_UNDO_LOCATION mapping in recovery */
-		ptr = wal_parse_container_xact_info(ptr, NULL, &logicalDecodeRecoverySystemTransactionId);
+		/* Skip WAL_REC_XACT_INFO */
+		ptr = wal_parse_container_xact_info(ptr, NULL, NULL);
 	}
-	else
-		logicalDecodeRecoverySystemTransactionId = InvalidTransactionId;
 
 	elog(DEBUG4, "OrioleDB decode started startXLogPtr %X/%X endXLogPtr %X/%X", LSN_FORMAT_ARGS(startXLogPtr), LSN_FORMAT_ARGS(endXLogPtr));
 

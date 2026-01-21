@@ -137,8 +137,8 @@ typedef struct
 
 typedef struct
 {
-	TransactionId   xid;
-	UndoLocation	undoLocation;
+	TransactionId xid;
+	UndoLocation undoLocation;
 } ReplicationRetainUndoTuple;
 
 extern Size sys_trees_shmem_needs(void);

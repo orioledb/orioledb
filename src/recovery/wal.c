@@ -121,7 +121,8 @@ wal_parse_rec_xid(Pointer ptr, OXid *oxid, TransactionId *logicalXid, Transactio
 }
 
 /* Parser for WAL_CONTAINER_XACT_INFO */
-Pointer wal_parse_container_xact_info(Pointer ptr, TimestampTz *xactTime, TransactionId *xid)
+Pointer
+wal_parse_container_xact_info(Pointer ptr, TimestampTz *xactTime, TransactionId *xid)
 {
 	Assert(ptr);
 
@@ -760,8 +761,8 @@ add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version)
 	memcpy(rec->version, &version, sizeof(version));
 
 	elog(DEBUG4, "[%s] WAL_REC_RELATION [ %u %u %u ] xmin/csn/cid %lu/%lu/%u version %u", __func__,
-		oids.datoid, oids.reloid, oids.relnode,
-		runXmin, csn, cid, version);
+		 oids.datoid, oids.reloid, oids.relnode,
+		 runXmin, csn, cid, version);
 
 	local_wal_buffer_offset += sizeof(*rec);
 

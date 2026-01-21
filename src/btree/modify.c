@@ -1436,7 +1436,7 @@ o_btree_autonomous_insert(BTreeDescr *desc, OTuple tuple)
 	OAutonomousTxState state;
 	OBTreeModifyResult result;
 
-	if (desc->storageType == BTreeStoragePersistence)
+	if (desc->undoType != UndoLogNone)
 	{
 		start_autonomous_transaction(&state);
 		PG_TRY();
@@ -1485,7 +1485,7 @@ o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType keyType,
 
 	Assert(keyType == BTreeKeyLeafTuple || keyType == BTreeKeyNonLeafKey);
 
-	if (desc->storageType == BTreeStoragePersistence)
+	if (desc->undoType != UndoLogNone)
 	{
 		start_autonomous_transaction(&state);
 		PG_TRY();
