@@ -1531,10 +1531,10 @@ orioledb_page_stats(PG_FUNCTION_ARGS)
 			values[0] = PointerGetDatum(cstring_to_text("free_tree"));
 		else if (i == OPagePoolCatalog)
 			values[0] = PointerGetDatum(cstring_to_text("catalog"));
-		num_free_pages = (int64) o_ppool_free_pages_count((PagePool *) &page_pools[i]);
+		num_free_pages = (int64) (*page_pools[i].base.ops->free_pages_count) ((PagePool *) &page_pools[i]);
 		values[1] = Int64GetDatum(total_num_pages - num_free_pages);
 		values[2] = Int64GetDatum(num_free_pages);
-		values[3] = Int64GetDatum((int64) o_ppool_dirty_pages_count((PagePool *) &page_pools[i]));
+		values[3] = Int64GetDatum((int64) (*page_pools[i].base.ops->dirty_pages_count) ((PagePool *) &page_pools[i]));
 		values[4] = Int64GetDatum(total_num_pages);
 		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
 	}
@@ -1632,7 +1632,7 @@ get_dirty_pages_count_sum(void)
 	int			i;
 
 	for (i = 0; i < OPagePoolTypesCount; i++)
-		result += o_ppool_dirty_pages_count((PagePool *) &page_pools[i]);
+		result += (*page_pools[i].base.ops->dirty_pages_count) ((PagePool *) &page_pools[i]);
 
 	return result;
 }

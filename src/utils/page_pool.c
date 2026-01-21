@@ -25,6 +25,28 @@
 
 #include "utils/memdebug.h"
 
+/* Shared memory based page pool operations */
+
+OInMemoryBlkno o_ppool_get_page(PagePool *pool, int kind);
+OInMemoryBlkno o_ppool_get_metapage(PagePool *pool);
+void		o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock);
+
+void		o_ppool_reserve_pages(PagePool *pool, int kind, int count);
+void		o_ppool_release_reserved(PagePool *pool, uint32 mask);
+
+OInMemoryBlkno o_ppool_free_pages_count(PagePool *pool);
+OInMemoryBlkno o_ppool_dirty_pages_count(PagePool *pool);
+void		o_ppool_run_clock(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
+OInMemoryBlkno o_ppool_size(PagePool *pool);
+
+void		o_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno);
+void		o_ucm_change_usage(PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount);
+uint32		o_ucm_get_epoch(PagePool *pool);
+bool		o_ucm_epoch_needs_shift(PagePool *pool);
+void		o_ucm_epoch_shift(PagePool *pool);
+uint64		o_ucm_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 state);
+void		o_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState);
+
 /* PagePoolOps for a shared memory based page pool */
 static const PagePoolOps o_page_pool_ops = {
 	.alloc_page = o_ppool_get_page,
