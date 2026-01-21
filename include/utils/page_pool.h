@@ -107,6 +107,11 @@ typedef struct OPagePool
 extern Size o_ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug);
 extern void o_ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found);
 
+/* Local memory based page pool handle */
+typedef struct LocalPagePool LocalPagePool;
+
+extern void local_ppool_init(LocalPagePool *pool, uint32 max_pages);
+
 #define PAGE_DESC_FLAG_DIRTY			1	/* Modified since the the last
 											 * time being written out */
 #define PAGE_DESC_FLAG_CONCURRENT_DIRTY	2	/* Second "dirty" flag used to
