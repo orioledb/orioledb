@@ -1509,7 +1509,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	{
 		if (alter_type_exprs)
 		{
-			list_free(alter_type_exprs);
+			list_free_deep(alter_type_exprs);
 			alter_type_exprs = NIL;
 		}
 		if (dropped_attrs)
@@ -1788,12 +1788,13 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field, Oid ob
 	foreach(lc, alter_type_exprs)
 	{
 		AttrNumber	attnum = intVal(linitial((List *) lfirst(lc)));
+		Oid			oid = intVal(lsecond((List *) lfirst(lc)));
 		const char *attname = ((String *) (lfourth((List *) lfirst(lc))))->sval;
 
 		if (attnum == subId)
 		{
 			expr = (Node *) lthird((List *) lfirst(lc));
-			append_transform = strcmp(attname, field->name.data) == 0;
+			append_transform = strcmp(attname, field->name.data) == 0 && objectId != oid;
 			break;
 		}
 	}
@@ -1811,8 +1812,12 @@ ATColumnChangeRequiresRewrite(OTableField *old_field, OTableField *field, Oid ob
 	if (expr != NULL)
 	{
 		if (append_transform)
+		{
+			char	   *field_name = pstrdup(field->name.data);
+
 			/* cppcheck-suppress unknownEvaluationOrder */
-			alter_type_exprs = lappend(alter_type_exprs, list_make4(makeInteger(subId), makeInteger(objectId), expr, makeString(field->name.data)));
+			alter_type_exprs = lappend(alter_type_exprs, list_make4(makeInteger(subId), makeInteger(objectId), expr, makeString(field_name)));
+		}
 		assign_expr_collations(pstate, expr);
 		expr = (Node *) expression_planner((Expr *) expr);
 
@@ -4296,7 +4301,7 @@ o_ddl_cleanup(void)
 	}
 	if (alter_type_exprs)
 	{
-		list_free(alter_type_exprs);
+		list_free_deep(alter_type_exprs);
 		alter_type_exprs = NIL;
 	}
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
