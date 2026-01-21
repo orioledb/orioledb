@@ -443,6 +443,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				MemoryContext prev_context;
 				char	   *prefix;
 				char	   *db_prefix;
+				ORelFetchContext ctx = build_fetch_context(o_non_deleted_snapshot, msg->o_table_version);
 
 				prev_context = MemoryContextSwitchTo(recovery_context);
 
@@ -451,7 +452,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				Assert(ORelOidsIsValid(msg->oids));
 				recovery_oxid = msg->oxid;
 
-				o_table = o_tables_get_extended(msg->oids, msg->o_table_version, o_non_deleted_snapshot);
+				o_table = o_tables_get_extended(msg->oids, ctx);
 				Assert(o_table);
 				Assert(o_table->version == msg->o_table_version);
 
@@ -463,9 +464,11 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 
 				if (msg->isrebuild)
 				{
+					ORelFetchContext ctx = build_fetch_context(o_non_deleted_snapshot, msg->old_o_table_version);
+
 					Assert(ORelOidsIsValid(msg->old_oids));
 
-					old_o_table = o_tables_get_extended(msg->old_oids, msg->old_o_table_version, o_non_deleted_snapshot);
+					old_o_table = o_tables_get_extended(msg->old_oids, ctx);
 					Assert(old_o_table);
 					Assert(old_o_table->version == msg->old_o_table_version);
 				}

@@ -266,12 +266,81 @@ typedef struct
 
 #define GET_PRIMARY(descr) ((descr)->indices[PrimaryIndexNumber])
 
+extern ORelFetchContext
+			default_in_progress_fetch_context(void);
+
+extern ORelFetchContext
+			default_non_deleted_fetch_context(void);
+
 /*
  * Please, read commit before o_bree_load_shmemd() definition.
  */
-extern OTableDescr *o_fetch_table_descr_extended(ORelOids oids, OSnapshot snapshot, uint32 version);
+
+/*
+ * o_fetch_table_descr_extended
+ *
+ * Fetch an OrioleDB table descriptor for the specified relation OIDs using
+ * the provided fetch context.
+ *
+ * The descriptor is resolved according to:
+ *  - ctx.snapshot : MVCC visibility rules
+ *  - ctx.version  : explicit table schema version
+ *
+ * This function may return a historical version of the table descriptor if
+ * the requested version differs from the current catalog version, as long
+ * as it is visible under the given snapshot.
+ *
+ * Parameters:
+ *  - oids : OIDs identifying the table
+ *  - ctx  : fetch context combining snapshot and schema version
+ *
+ * Returns:
+ *  - Pointer to OTableDescr if the table is visible and exists
+ *  - NULL if no visible descriptor can be found
+ *
+ * Notes:
+ *  - The returned descriptor may differ from the current in-memory descriptor
+ *    if catalog changes occurred after the snapshot.
+ *  - Callers must not assume the descriptor reflects the latest schema
+ *  - Use default fetch context with O_TABLE_INVALID_VERSION and some default snapshot
+ *    to retrieve latest descriptor
+ */
+extern OTableDescr *o_fetch_table_descr_extended(ORelOids oids, ORelFetchContext ctx);
+
+/*
+ * o_fetch_index_descr_extended
+ *
+ * Fetch an OrioleDB index descriptor for the specified OIDs and index type
+ * using snapshot-aware and version-aware catalog lookup.
+ *
+ * The function resolves the index descriptor using two fetch contexts:
+ *  - ctx       : fetch context for the index itself
+ *  - base_ctx  : fetch context for the underlying base table descriptor
+ *
+ * This separation is required because index and table schema versions may
+ * diverge temporarily during DDL operations and transactional catalog updates.
+ *
+ * Parameters:
+ *  - oids      : OIDs identifying the index
+ *  - type      : OrioleDB index type (primary, unique, regular, toast, etc.)
+ *  - lock      : whether to acquire a catalog lock while fetching
+ *  - ctx       : fetch context for the index descriptor
+ *  - base_ctx  : fetch context for the base table descriptor
+ *
+ * Returns:
+ *  - Pointer to OIndexDescr if the index is visible and exists
+ *  - NULL if no visible descriptor can be found
+ *
+ * Notes:
+ *  - The returned index descriptor may correspond to a historical schema
+ *    version and must be interpreted in conjunction with the base table
+ *    descriptor fetched using base_ctx.
+ *  - Callers must ensure consistent usage of ctx and base_ctx to avoid
+ *    descriptor mismatches during logical decoding and recovery.
+ */
 extern OIndexDescr *o_fetch_index_descr_extended(ORelOids oids, OIndexType type,
-												 bool lock, bool *nested, OSnapshot snapshot, uint32 version);
+												 bool lock, ORelFetchContext ctx, ORelFetchContext base_ctx);
+
 extern OTableDescr *o_fetch_table_descr(ORelOids oids);
 extern OIndexDescr *o_fetch_index_descr(ORelOids oids, OIndexType type,
 										bool lock, bool *nested);

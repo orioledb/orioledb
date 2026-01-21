@@ -55,7 +55,7 @@ typedef struct
 } InvalidateComparatorUndoStackItem;
 
 static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType,
-									bool miss_ok, OSnapshot snapshot, uint32 version);
+									bool miss_ok, ORelFetchContext ctx, OIndexDescrFillSource fill_source);
 static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot snapshot);
 static void init_shared_root_info(OPagePool *pool,
 								  SharedRootInfo *sharedRootInfo);
@@ -101,6 +101,21 @@ static MemoryContext descrCxt = NULL;
 
 static void o_find_toastable_attrs(OTableDescr *tableDescr);
 
+ORelFetchContext
+default_in_progress_fetch_context(void)
+{
+	ORelFetchContext ctx = {.snapshot = o_in_progress_snapshot,.version = O_TABLE_INVALID_VERSION};
+
+	return ctx;
+}
+
+ORelFetchContext
+default_non_deleted_fetch_context(void)
+{
+	ORelFetchContext ctx = {.snapshot = o_non_deleted_snapshot,.version = O_TABLE_INVALID_VERSION};
+
+	return ctx;
+}
 
 /*
  * Creates shared root info.  But insertion into shared cache is performed by
@@ -674,7 +689,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 	{
 		index = make_o_index(o_table, cur_ix);
 		indexDescr = palloc0(sizeof(OIndexDescr));
-		o_index_fill_descr(indexDescr, index, o_table);
+		o_index_fill_descr(indexDescr, index, fill_idescr_from_table(o_table));
 		index_btree_desc_init(&indexDescr->desc, indexDescr->compress, indexDescr->fillfactor,
 							  indexDescr->oids, index->indexType, index->table_persistence, index->createOxid,
 							  indexDescr);
@@ -684,7 +699,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 
 	index = make_o_index(o_table, TOASTIndexNumber);
 	indexDescr = palloc0(sizeof(OIndexDescr));
-	o_index_fill_descr(indexDescr, index, o_table);
+	o_index_fill_descr(indexDescr, index, fill_idescr_from_table(o_table));
 	index_btree_desc_init(&indexDescr->desc, indexDescr->compress, indexDescr->fillfactor,
 						  indexDescr->oids, index->indexType,
 						  index->table_persistence, index->createOxid, indexDescr);
@@ -695,7 +710,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 	{
 		index = make_o_index(o_table, BridgeIndexNumber);
 		indexDescr = palloc0(sizeof(OIndexDescr));
-		o_index_fill_descr(indexDescr, index, o_table);
+		o_index_fill_descr(indexDescr, index, fill_idescr_from_table(o_table));
 		index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
 							  indexDescr->fillfactor,
 							  indexDescr->oids, index->indexType,
@@ -709,7 +724,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 }
 
 static OTableDescr *
-create_table_descr(ORelOids oids, OSnapshot snapshot, uint32 version)
+create_table_descr(ORelOids oids, ORelFetchContext ctx)
 {
 	OTableDescr *descr;
 	bool		found;
@@ -719,7 +734,7 @@ create_table_descr(ORelOids oids, OSnapshot snapshot, uint32 version)
 	old_enable_stopevents = enable_stopevents;
 	enable_stopevents = false;
 
-	o_table = o_tables_get_extended(oids, version, snapshot);
+	o_table = o_tables_get_extended(oids, ctx);
 
 	if (o_table == NULL)
 	{
@@ -733,7 +748,7 @@ create_table_descr(ORelOids oids, OSnapshot snapshot, uint32 version)
 						&found);
 	/* Assert(!found); */
 
-	fill_table_descr(descr, o_table, snapshot);
+	fill_table_descr(descr, o_table, ctx.snapshot);
 
 	enable_stopevents = old_enable_stopevents;
 	return descr;
@@ -771,21 +786,31 @@ find_tree_in_descr(OTableDescr *descr, ORelOids oids)
 OTableDescr *
 o_fetch_table_descr(ORelOids oids)
 {
-	return o_fetch_table_descr_extended(oids, o_non_deleted_snapshot, O_TABLE_INVALID_VERSION);
+	return o_fetch_table_descr_extended(oids, default_non_deleted_fetch_context());
 }
 
 OTableDescr *
-o_fetch_table_descr_extended(ORelOids oids, OSnapshot snapshot, uint32 version)
+o_fetch_table_descr_extended(ORelOids oids, ORelFetchContext ctx)
 {
 	OTableDescr *table_descr = NULL;
 	bool		found = false;
+	int			refcnt = 0;
 
 	table_descr = hash_search(oTableDescrHash, &oids, HASH_FIND, &found);
 	Assert((found && table_descr) || !found);
-	found = found && (version == O_TABLE_INVALID_VERSION || table_descr->version == version);
+	if (found && table_descr)
+	{
+		refcnt = table_descr->refcnt;	/* store actual reference count if
+										 * descr is present */
+	}
+	found = found && (ctx.version == O_TABLE_INVALID_VERSION || table_descr->version == ctx.version);
 
 	if (!found)
-		table_descr = create_table_descr(oids, snapshot, version);
+		table_descr = create_table_descr(oids, ctx);
+
+	if (table_descr)
+		table_descr->refcnt = refcnt;	/* restore reference count after
+										 * possible reload */
 
 	return table_descr;
 }
@@ -797,18 +822,19 @@ o_fetch_table_descr_extended(ORelOids oids, OSnapshot snapshot, uint32 version)
 OIndexDescr *
 o_fetch_index_descr(ORelOids oids, OIndexType type, bool lock, bool *nested)
 {
-	return o_fetch_index_descr_extended(oids, type, lock, nested, o_non_deleted_snapshot, O_TABLE_INVALID_VERSION);
+	return o_fetch_index_descr_extended(oids, type, lock, default_non_deleted_fetch_context(), default_non_deleted_fetch_context());
 }
 
 OIndexDescr *
-o_fetch_index_descr_extended(ORelOids oids, OIndexType type, bool lock, bool *nested, OSnapshot snapshot, uint32 version)
+o_fetch_index_descr_extended(ORelOids oids, OIndexType type, bool lock,
+							 ORelFetchContext ctx, ORelFetchContext base_ctx)
 {
 	OIndexDescr *index_descr = NULL;
 
 	if (lock)
 		o_tables_rel_lock_extended(&oids, AccessShareLock, true);
 
-	index_descr = get_index_descr(oids, type, true, snapshot, version);
+	index_descr = get_index_descr(oids, type, true, ctx, fill_idescr_from_ctx(&base_ctx));
 
 	if (!index_descr && lock)
 	{
@@ -988,7 +1014,8 @@ o_drop_shared_root_info(Oid datoid, Oid relnode)
 }
 
 static OIndexDescr *
-get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OSnapshot snapshot, uint32 version)
+get_index_descr(ORelOids ixOids, OIndexType ixType,
+				bool miss_ok, ORelFetchContext ctx, OIndexDescrFillSource fill_source)
 {
 	OIndexDescr *result;
 	OIndex	   *oIndex;
@@ -997,11 +1024,13 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OSnapshot snap
 
 	result = hash_search(oIndexDescrHash, &ixOids, HASH_ENTER, &found);
 	Assert((found && result) || !found);
-	found = found && (version == O_TABLE_INVALID_VERSION || result->version == version);
+
+	found = found && (ctx.version == O_TABLE_INVALID_VERSION || result->version == ctx.version);
+
 	if (found)
 		return result;
 
-	oIndex = o_indices_get_extended(ixOids, ixType, snapshot, version);
+	oIndex = o_indices_get_extended(ixOids, ixType, ctx);
 	Assert(oIndex || miss_ok);
 	if (!oIndex && miss_ok)
 	{
@@ -1010,7 +1039,7 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OSnapshot snap
 		return NULL;
 	}
 	mcxt = MemoryContextSwitchTo(descrCxt);
-	o_index_fill_descr(result, oIndex, NULL);
+	o_index_fill_descr(result, oIndex, fill_source);
 	MemoryContextSwitchTo(mcxt);
 	index_btree_desc_init(&result->desc, result->compress, result->fillfactor, result->oids,
 						  oIndex->indexType, oIndex->table_persistence, oIndex->createOxid, result);
@@ -1025,6 +1054,7 @@ recreate_index_descr(OIndexDescr *descr)
 	OIndex	   *oIndex;
 	int			refcnt;
 	MemoryContext mcxt;
+	ORelFetchContext ctx = default_non_deleted_fetch_context();
 
 	oIndex = o_indices_get(descr->oids, descr->desc.type);
 	if (!oIndex)
@@ -1035,7 +1065,7 @@ recreate_index_descr(OIndexDescr *descr)
 	refcnt = descr->refcnt;
 	index_descr_free(descr);
 	mcxt = MemoryContextSwitchTo(descrCxt);
-	o_index_fill_descr(descr, oIndex, NULL);
+	o_index_fill_descr(descr, oIndex, fill_idescr_from_ctx(&ctx));
 	MemoryContextSwitchTo(mcxt);
 	index_btree_desc_init(&descr->desc, descr->compress, descr->fillfactor, descr->oids,
 						  oIndex->indexType, oIndex->table_persistence, oIndex->createOxid, descr);
@@ -1062,6 +1092,7 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot snapshot
 		ORelOids	ixOids;
 		OIndexType	ixType;
 		uint32		version;
+		ORelFetchContext ctx;
 
 		if (!table->has_primary && cur_ix == 0)
 		{
@@ -1076,13 +1107,16 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot snapshot
 			version = table->indices[cur_ix - ctid_idx_off].version;
 		}
 
-		descr->indices[cur_ix] = get_index_descr(ixOids, ixType, false, snapshot, version);
+		ctx = build_fetch_context(snapshot, version);
+		descr->indices[cur_ix] = get_index_descr(ixOids, ixType, false, ctx, fill_idescr_from_table(table));
 		descr->indices[cur_ix]->refcnt++;
 	}
 
 	if (ORelOidsIsValid(table->bridge_oids))
 	{
-		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false, snapshot, table->bridge_ixversion);
+		ORelFetchContext ctx = build_fetch_context(snapshot, table->bridge_ixversion);
+
+		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false, ctx, fill_idescr_from_table(table));
 		descr->bridge->refcnt++;
 	}
 	else
@@ -1090,7 +1124,9 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot snapshot
 
 	if (ORelOidsIsValid(table->toast_oids))
 	{
-		descr->toast = get_index_descr(table->toast_oids, oIndexToast, false, snapshot, table->toast_ixversion);
+		ORelFetchContext ctx = build_fetch_context(snapshot, table->toast_ixversion);
+
+		descr->toast = get_index_descr(table->toast_oids, oIndexToast, false, ctx, fill_idescr_from_table(table));
 		descr->toast->refcnt++;
 	}
 	else
@@ -1602,7 +1638,7 @@ recreate_table_descr_by_oids(ORelOids oids)
 		recreate_table_descr(descr);
 	}
 	else
-		(void) create_table_descr(oids, o_non_deleted_snapshot, O_TABLE_INVALID_VERSION);
+		(void) create_table_descr(oids, default_non_deleted_fetch_context());
 }
 
 void

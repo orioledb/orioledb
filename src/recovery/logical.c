@@ -791,7 +791,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			OXid		xmin;
 
 			OSnapshot	snapshot;
-
 			uint32		base_version = O_TABLE_INVALID_VERSION;
 
 			ptr = wal_parse_rec_relation(ptr, &treeType, &latest_oids, &xmin, &snapshot.csn, &snapshot.cid, &latest_version, &base_version, wal_version);
@@ -844,11 +843,13 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else if (ix_type == oIndexInvalid)
 			{
+				ORelFetchContext rel_fetch_ctx = build_fetch_context(snapshot, latest_version);
+
 				elog(DEBUG4, "WAL_REC_RELATION oIndexInvalid :: FETCH RELATION [ %u %u %u ] version %u",
 					 latest_oids.datoid, latest_oids.reloid, latest_oids.relnode,
 					 latest_version);
 
-				descr = o_fetch_table_descr_extended(latest_oids, snapshot, latest_version);
+				descr = o_fetch_table_descr_extended(latest_oids, rel_fetch_ctx);
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
 
 				Assert(descr);
@@ -856,18 +857,21 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else if (ix_type == oIndexToast)
 			{
+				ORelFetchContext idx_fetch_ctx = build_fetch_context(snapshot, latest_version);
+				ORelFetchContext rel_fetch_ctx = build_fetch_context(snapshot, base_version);
+
 				elog(DEBUG4, "WAL_REC_RELATION [1] oIndexToast :: FETCH INDEX oids [ %u %u %u ] version %u base_version %u",
 					 latest_oids.datoid, latest_oids.reloid, latest_oids.relnode,
 					 latest_version, base_version);
 
-				indexDescr = o_fetch_index_descr_extended(latest_oids, ix_type, false, NULL, snapshot, latest_version);
+				indexDescr = o_fetch_index_descr_extended(latest_oids, ix_type, false, idx_fetch_ctx, rel_fetch_ctx);
 				Assert(indexDescr);
 
 				elog(DEBUG4, "WAL_REC_RELATION [2] oIndexToast :: FETCH RELATION [ %u %u %u ] version %u",
 					 indexDescr->tableOids.datoid, indexDescr->tableOids.reloid, indexDescr->tableOids.relnode,
 					 base_version);
 
-				descr = o_fetch_table_descr_extended(indexDescr->tableOids, snapshot, base_version);
+				descr = o_fetch_table_descr_extended(indexDescr->tableOids, rel_fetch_ctx);
 				Assert(descr);
 
 				o_toast_tupDesc = descr->toast->leafTupdesc;
