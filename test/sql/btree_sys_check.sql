@@ -265,6 +265,16 @@ SELECT orioledb_insert_sys_xid_undo_location(1006, 2006);
 SELECT orioledb_sys_tree_structure(24, 'ne');
 SELECT orioledb_read_sys_xid_undo_location(1004);
 SELECT orioledb_sys_tree_structure(24, 'ne');
+-- entries with xid < 1004 are deleted at previous read
+SELECT orioledb_read_sys_xid_undo_location(1000);
+SELECT orioledb_sys_tree_structure(24, 'ne');
+-- cache invalidation of last value at insert
+SELECT orioledb_insert_sys_xid_undo_location(1009, 2009);
+SELECT orioledb_sys_tree_structure(24, 'ne');
+SELECT orioledb_read_sys_xid_undo_location(1007);
+SELECT orioledb_insert_sys_xid_undo_location(1008, 2008);
+SELECT orioledb_sys_tree_structure(24, 'ne');
+SELECT orioledb_read_sys_xid_undo_location(1007);
 
 -- fail
 SELECT orioledb_sys_tree_structure(9999);

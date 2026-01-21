@@ -200,6 +200,16 @@ typedef struct
 	uint32		minUndoLocationsChangeCount;
 
 	/*
+	 * sysXidUndoLocationChangeCount is a counter used for caching in
+	 * read_replication_retain_undo_location(). When trying to use cached
+	 * value read_replication_retain_undo_location() checks if this counter is
+	 * not modified since last call by a concurrent
+	 * insert_replication_retain_undo_location(), so that it will use cached
+	 * last value without reading actual system tree.
+	 */
+	uint32		sysXidUndoLocationChangeCount;
+
+	/*
 	 * writeInProgressChangeCount is used together with a
 	 * wait_for_even_write_in_progress_changecount() method to fix concurrency
 	 * between undo_write() and evict_undo_to_disk() methods (protects shared

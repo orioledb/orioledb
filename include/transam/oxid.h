@@ -39,6 +39,15 @@ typedef struct
 
 	int			xidMapTrancheId;
 	LWLock		xidMapWriteLock;
+
+	/*
+	 * sysXidUndoLocationChangeCount with locks are used for caching in
+	 * read_replication_retain_undo_location()
+	 */
+	int			sysXidUndoLocationTrancheId;
+	LWLock		sysXidUndoLocationLock;
+	uint32		sysXidUndoLocationChangeCount;
+
 } XidMeta;
 
 extern XidMeta *xid_meta;

@@ -219,6 +219,29 @@ static int	commandIndex = -1,
 			commandInfosLength = lengthof(commandInfosStatic);
 static CommandId currentCommandId;
 
+/*
+ * For better caching ReplicationRetainUndoTuple we remember
+ * both last queried xmin for strict equaltity check and last
+ * output xid that could be greater or equal to the queried xmin.
+ *
+ * At repeated query xmin we output last output xid that could
+ * be the least xid in system mapping greater or equal than xmin
+ * queried. Without remembering both values we could do only
+ * equality comparison which is less efficient.
+ */
+typedef struct
+{
+	TransactionId queried_xmin;
+	TransactionId output_xid;
+	UndoLocation undoLocation;
+	uint32		change_count;
+} CachedReplicationRetainUndoTuple;
+
+static CachedReplicationRetainUndoTuple cachedReplicationRetainUndoTuple =
+{
+	InvalidTransactionId, InvalidTransactionId, InvalidUndoLocation, 0
+};
+
 Size
 undo_shmem_needs(void)
 {
@@ -290,6 +313,7 @@ init_undo_meta(UndoMeta *meta, bool found)
 	{
 		SpinLockInit(&meta->minUndoLocationsMutex);
 		meta->minUndoLocationsChangeCount = 0;
+		meta->sysXidUndoLocationChangeCount = 0;
 		meta->undoWriteTrancheId = LWLockNewTrancheId();
 		meta->undoStackLocationsFlushLockTrancheId = LWLockNewTrancheId();
 		LWLockInitialize(&meta->undoWriteLock,
@@ -598,13 +622,51 @@ read_replication_retain_undo_location(TransactionId xmin, int *ndeleted, bool no
 	OBTreeFindPageContext context;
 	bool		have_page = false;
 	UndoLocation result;
+	TransactionId cached_output_xid;
+	TransactionId cached_queried_xmin;
+	uint32		cached_change_count;
+	uint32		change_count = 0;
+	bool		change_count_needs_update = false;
 
 	if (!nocheck)
 		Assert(wal_level >= WAL_LEVEL_LOGICAL);
 
+	*ndeleted = 0;
+
+	/*
+	 * Try fast path. Output from cache. Don't cleanup actual system tree. At
+	 * repeated query of some xmin we output the same value of undoLocation
+	 * from the element of mapping with cached_output_xid which is the least
+	 * xid in the mapping greater or equal than xmin.
+	 */
+	cached_output_xid = cachedReplicationRetainUndoTuple.output_xid;
+	cached_queried_xmin = cachedReplicationRetainUndoTuple.queried_xmin;
+	cached_change_count = cachedReplicationRetainUndoTuple.change_count;
+
+	if (TransactionIdIsValid(cached_queried_xmin) && cached_queried_xmin == xmin && TransactionIdIsValid(cached_output_xid) && cached_output_xid >= xmin)
+	{
+		LWLockAcquire(&xid_meta->sysXidUndoLocationLock, LW_SHARED);
+
+		change_count = xid_meta->sysXidUndoLocationChangeCount;
+		change_count_needs_update = true;
+
+		LWLockRelease(&xid_meta->sysXidUndoLocationLock);
+
+		/*
+		 * If counter is not modified since last call by a concurrent
+		 * insert_replication_retain_undo_location(), we output locally cached
+		 * last value without reading actual system tree.
+		 */
+		if (change_count == cached_change_count)
+		{
+			Assert(UndoLocationIsValid(cachedReplicationRetainUndoTuple.undoLocation));
+			return cachedReplicationRetainUndoTuple.undoLocation;
+		}
+	}
+
+	/* Slow path */
 	keyTuple.formatFlags = 0;
 	keyTuple.data = (Pointer) &xmin;
-	*ndeleted = 0;
 
 	init_page_find_context(&context, td, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY);
 
@@ -672,6 +734,26 @@ read_replication_retain_undo_location(TransactionId xmin, int *ndeleted, bool no
 	if (have_page)
 		unlock_page(context.items[context.index].blkno);
 
+	if (change_count_needs_update)
+		cachedReplicationRetainUndoTuple.change_count = change_count;
+
+	/*
+	 * Cache value for next calls. Invalidate last cached value if system tree
+	 * doesn't containg an element with xid greater or equal to queried).
+	 */
+	if (UndoLocationIsValid(result))
+	{
+		cachedReplicationRetainUndoTuple.output_xid = ((ReplicationRetainUndoTuple *) tuple.data)->xid;
+		cachedReplicationRetainUndoTuple.queried_xmin = xmin;
+	}
+	else
+	{
+		cachedReplicationRetainUndoTuple.output_xid = InvalidTransactionId;
+		cachedReplicationRetainUndoTuple.queried_xmin = InvalidTransactionId;
+	}
+
+	cachedReplicationRetainUndoTuple.undoLocation = result;
+
 	return result;
 }
 
@@ -726,6 +808,9 @@ insert_replication_retain_undo_location(TransactionId xid, UndoLocation undoLoca
 		if (((ReplicationRetainUndoTuple *) existing_tuple.data)->undoLocation > undoLocation)
 		{
 			/* Update item if this moves undoLocation backwards */
+			LWLockAcquire(&xid_meta->sysXidUndoLocationLock, LW_SHARED);
+			(xid_meta->sysXidUndoLocationChangeCount)++;
+			LWLockRelease(&xid_meta->sysXidUndoLocationLock);
 			success = o_btree_autonomous_delete(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION),
 												keyTuple, BTreeKeyNonLeafKey, NULL);
 			Assert(success);
@@ -745,6 +830,10 @@ insert_replication_retain_undo_location(TransactionId xid, UndoLocation undoLoca
 	data.undoLocation = undoLocation;
 	tuple.formatFlags = 0;
 	tuple.data = (Pointer) &data;
+
+	LWLockAcquire(&xid_meta->sysXidUndoLocationLock, LW_EXCLUSIVE);
+	(xid_meta->sysXidUndoLocationChangeCount)++;
+	LWLockRelease(&xid_meta->sysXidUndoLocationLock);
 
 	success = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION),
 										tuple);
@@ -1399,7 +1488,7 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 		if (!is_recovery_in_progress())
 			xid = GetCurrentTransactionIdIfAny();
 		else
-			xid = logicalDecodeRecoverySystemTransactionId;
+			xid = recoveryHeapTransactionId;
 
 		if (TransactionIdIsValid(xid) && xid != insertedXid)
 		{
