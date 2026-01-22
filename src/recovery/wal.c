@@ -568,7 +568,7 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	walPos = flush_local_wal(true, !isAutonomous);
 	local_wal_has_material_changes = false;
 
-	elog(DEBUG4, "COMMIT oxid %lu logicalXid %u", oxid, logicalXid);
+	elog(DEBUG4, "[%s] COMMIT oxid %lu logicalXid %u", __func__, oxid, logicalXid);
 
 	return walPos;
 }
@@ -909,7 +909,12 @@ add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 	csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 	memcpy(rec->csn, &csn, sizeof(csn));
 
+	elog(DEBUG4, "[%s] xmin %lu csn %u", __func__, runXmin, csn);
+
 	local_wal_buffer_offset += sizeof(*rec);
+
+	flush_local_wal(true, false);
+	local_wal_has_material_changes = false;
 
 	/*
 	 * Force adding xid record on future changes going after this rollback to
