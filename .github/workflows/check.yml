@@ -22,7 +22,7 @@ jobs:
           # Full matrix: used for main branch or pull requests
           full = dict(
               cpu        = ["amd64", "arm64"],
-              pg_version = [16, 17],
+              pg_version = [17, 18],
               compiler   = ["clang", "gcc"],
               check_type = [
                   "normal", "debug", "sanitize", "check_page",
@@ -32,18 +32,18 @@ jobs:
 
           # Reduced matrix: used for all other push events
           branch_combos = [
-              ("amd64", 16, "gcc"),
-              ("amd64", 17, "clang"),
-              ("arm64", 16, "clang"),
-              ("arm64", 17, "gcc"),
+              ("amd64", 17, "gcc"),
+              ("amd64", 18, "clang"),
+              ("arm64", 17, "clang"),
+              ("arm64", 18, "gcc"),
           ]
 
           # Reverse matrix used for pull requests
           reverse_combos = [
-              ("amd64", 16, "clang"),
-              ("amd64", 17, "gcc"),
-              ("arm64", 16, "gcc"),
-              ("arm64", 17, "clang"),
+              ("amd64", 17, "clang"),
+              ("amd64", 18, "gcc"),
+              ("arm64", 17, "gcc"),
+              ("arm64", 18, "clang"),
           ]
 
           # Make matrix for the PR
