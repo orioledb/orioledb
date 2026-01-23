@@ -42,6 +42,41 @@ def node_prepare_orel(node, table):
 	)
 
 
+def wait_ready(subscriber):
+	# Wait on subscriber until it becomes ready (r state)
+	# pg_subscription_rel.srsubstate means synchronization state on subscriber
+	#
+	# i — initializing
+	#	NO tablesync worker
+	#	NO initial copy
+	#
+	# d — data copy
+	#	tablesync worker in progress (`COPY public.table FROM STDIN`)
+	#
+	# s — sync
+	#	initial copy done
+	#	tablesync worker is applying WAL
+	#	NO apply worker
+	#
+	# r — ready
+	#	initial copy done
+	#	catch-up done
+	#	apply worker in progress
+	#
+	with subscriber.connect() as con:
+		con.execute(f"""
+			DO $$
+			BEGIN
+			WHILE EXISTS (
+				SELECT 1 FROM pg_subscription_rel WHERE srsubstate <> 'r'
+			)
+			LOOP
+				PERFORM pg_sleep(0.1);
+			END LOOP;
+			END $$;
+		""")
+
+
 class LogicalTest(BaseTest):
 
 	o_relname = "o_data"
@@ -340,6 +375,7 @@ class LogicalTest(BaseTest):
 
 				pub = publisher.publish('test_pub', tables=[f'{o_relname}'])
 				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
 
 				with publisher.connect() as con1:
 					con1.begin()
@@ -560,6 +596,7 @@ class LogicalTest(BaseTest):
 
 				pub = publisher.publish('test_pub', tables=[f'{o_relname}'])
 				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
 
 				with publisher.connect() as con1:
 					con1.begin()
@@ -646,6 +683,7 @@ class LogicalTest(BaseTest):
 
 				pub = publisher.publish('test_pub', tables=[f'{o_relname}'])
 				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
 
 				with publisher.connect() as con1:
 					con1.begin()
@@ -1018,6 +1056,7 @@ class LogicalTest(BaseTest):
 
 				pub = publisher.publish('test_pub', tables=[f'{o_relname}'])
 				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
 
 				with publisher.connect() as con1:
 					con1.begin()
@@ -1659,6 +1698,7 @@ COMMIT\n""")
 
 				pub = publisher.publish('test_pub', tables=['o_test1'])
 				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
 
 				with publisher.connect() as con1:
 					with publisher.connect() as con2:
@@ -1784,6 +1824,7 @@ COMMIT\n""")
 				                            'o_test_bridge_secondary'
 				                        ])
 				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
 
 				with publisher.connect() as con1:
 					with publisher.connect() as con2:
@@ -1941,6 +1982,7 @@ COMMIT\n""")
 				    'test_pub',
 				    tables=['o_test', 'o_test_ctid', 'o_test_secondary'])
 				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
 
 				with publisher.connect() as con1:
 					with publisher.connect() as con2:
@@ -2077,6 +2119,7 @@ COMMIT\n""")
 				        'o_test_secondary_2', 'o_test_ctid_secondary_2'
 				    ])
 				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
 
 				with publisher.connect() as con1:
 					with publisher.connect() as con2:
@@ -2326,6 +2369,7 @@ COMMIT\n""")
 				                            'o_test_toasted_update'
 				                        ])
 				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
 
 				with publisher.connect() as con1:
 					with publisher.connect() as con2:
