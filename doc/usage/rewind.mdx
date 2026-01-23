@@ -3,90 +3,117 @@ id: rewind
 sidebar_label: Undo-based rewind
 ---
 
-# Undo-based rewind
+# Undo-based Rewind
 
-OrioleDB provides the ability to rewind database state to a some point in the past. This is achieved by using the undo log that records modifications for all ```orioledb``` tables. For heap tables this is used by delaying vaccuum, so that while the transaction is not past the rewind boundary, the past versions of tuples are retained in the heap table, being invisible to the user.
+OrioleDB provides an undo-based rewind capability that allows a database cluster to be reverted to a consistent previous state. Unlike Point-in-Time Recovery (PITR), which relies on Write-Ahead Log (WAL) replay, OrioleDB rewind utilizes undo logs to roll back changes. This mechanism is generally faster than WAL-based recovery for reverting to recent database states, because it directly reverses recent changes using the undo chain.
 
-Undo-based rewind is faster than PITR based on applying WAL or logical backup. But it doesn't prohibit the latter.
+For `orioledb` tables, rewind uses the engine's native undo logs. For standard PostgreSQL `heap` tables, rewind functionality is supported by delaying vacuuming; older tuple versions are retained in the heap until they fall outside the configured rewind retention window.
 
-:::warning[Experimental feature]
-
-This feature is currently experimental and should be used with caution.
-
-Undo-based rewind is an optional feature that can be enabled by setting the appropriate configuration parameters.
-
+:::warning[Experimental Feature]
+This feature is experimental and imposes a significant performance penalty. It is disabled by default and should be used with caution.
 :::
 
-## Usage
+## Configuration
 
-To use rewind functionality, the following parameters should be set before starting a cluster:
+The following parameters control the rewind subsystem. These must be set in `postgresql.conf` or via `ALTER SYSTEM`.
 
-- `orioledb.enable_rewind = true`
+| Parameter | Type | Default | Range | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `orioledb.enable_rewind` | `boolean` | `off` | on/off | Enables the collection of rewind data and starts the Rewind Worker. |
+| `orioledb.rewind_max_time` | `integer` | `3600` | 1 - 86400 | Maximum age (in seconds) a transaction record is retained for rewind. |
+| `orioledb.rewind_max_transactions` | `integer` | `100000` | 1 - `INT_MAX` | Maximum number of transactions to retain in the rewind queue. |
+| `orioledb.rewind_buffers` | `integer` | `1024` | 6 - `INT_MAX` | Number of shared memory buffers for rewind metadata. |
 
-Set parameters to limit retaining rewind data:
+:::note
+Enabling rewind increases the number of background processes. Ensure that `max_worker_processes` is configured with sufficient overhead to accommodate the Rewind Worker.
+:::
 
-- `orioledb.rewind_max_time` -- time in seconds to hold rewind information
-- `orioledb.rewind_max_transactions` -- overall number of OrioleDB and Heap transactions (including subtransactions) to hold for rewind
-- `orioledb.rewind_buffers` -- number of in-memory buffers to store rewind data
+## The Rewind Worker
 
-[Full description of configuration parameters](configuration.mdx#options-for-undo-based-rewind-experimental)
+When `orioledb.enable_rewind` is set to `on`, OrioleDB launches a background **Rewind Worker**. This process is responsible for managing the lifecycle of transaction history and undo logs.
 
-After setting the GUC parameters above start the cluster. From this time rewind data will be stored into a temporary rewind buffer and could be used to rewind.
+### Key Responsibilities
+* The worker monitors the rewind queue. Once a transaction is older than the retention threshold, the worker marks the item as completed, allowing the system to safely delete old undo files and vacuum dead `heap` tuples.
+* It maintains the "Rewind Horizon" — the furthest point in time to which the database can be safely reverted.
+* The worker continues to process the queue at a regular interval even during periods of database inactivity to prevent storage bloat.
 
-To start rewind run one of the queries:
+:::warning[Rewind Worker]
+While the Rewind Worker manages its "to-do list" in a fixed-size circular buffer, its failure to progress has two major side effects on system health:
 
-`select orioledb_rewind_by_time(1000);`  -- rewind all transactions committed after 1000 seconds before present
+- If the worker lags, OrioleDB cannot reclaim space in the physical Undo Logs. These logs will spill from memory to the orioledb_undo directory on disk, causing it to grow indefinitely until the worker catches up.
 
-`select orioledb_rewind_to_timestamp('2024-12-18 10:59:54 GMT+4');` -- rewind all transactions committed after specified timestamp
+- The worker is responsible for advancing the global xmin horizon. If the worker is stuck on an old transaction, PostgreSQL and OrioleDB will consider all subsequent row versions as "potentially needed." This prevents VACUUM from removing dead tuples, leading to significant table bloat and degraded query performance.
+:::
 
+## Rewind Functions
+
+### `orioledb_rewind_by_time(seconds integer)`
+Rewinds the cluster state by the specified number of seconds from the current time.
+*   **Example:** `SELECT orioledb_rewind_by_time(600);`
+
+### `orioledb_rewind_to_timestamp(target_time timestamptz)`
+Rewinds the cluster to a specific point in time.
+*   **Example:** `SELECT orioledb_rewind_to_timestamp('2025-01-01 12:00:00 UTC');`
+
+### `orioledb_rewind_to_transaction(xid xid8, oxid int8)`
+Rewinds the cluster to a state **before** specific transaction pair identified by the PostgreSQL Transaction ID (`xid`) and the OrioleDB Transaction ID (`oxid`). `oxid` can be acquired by calling `orioledb_get_current_oxid()`.
+*   **Example:** `SELECT orioledb_rewind_to_transaction(1750, 555);`
+
+### Examining the Rewind Horizon
+To check the available rewind range, use:
+*   `orioledb_get_current_oxid()`: Returns the current OrioleDB transaction's ID. It will assign a new one if the current transaction does not have one already.
+*   `orioledb_get_complete_xid()`: Returns the oldest PostgreSQL `xid` available for rewind.
+*   `orioledb_get_complete_oxid()`: Returns the oldest OrioleDB `oxid` available for rewind.
+
+## Operational Workflow
+
+When a rewind function is invoked, the system executes the following steps:
+
+1. Validates that the requested target is within the retention window (`rewind_max_time`) and that `orioledb.enable_rewind` is active.
+2. Signals the Rewind Worker to stop adding new transactions to the buffer.
+3. Signals all other active backends to terminate. The process waits up to 100 seconds for backends to exit.
+4. Reverts the data pages to the requested state.
+5. Once the rewind is complete, the function attempts to restart the PostgreSQL instance to finalize the state change.
+
+:::warning[Restart Reliability]
+The automatic restart is a single, best-effort attempt. If the restart fails (e.g., due to configuration errors), manual intervention is required to bring the server back online. Ensure you have system-level access to the server to manually start the service, as the SQL connection will be terminated immediately upon completion of the rewind.
+:::
+
+## Examples
+
+To rewind the database to a specific transaction state, you must first record the transaction identifiers at your desired "recovery point."
+
+1. **Identify the recovery point:**
+```sql
+-- Record these values
+SELECT pg_current_xact_id(), orioledb_get_current_oxid();
+
+ pg_current_xact_id | orioledb_get_current_oxid 
+--------------------+---------------------------
+               1750 |                       555
 ```
-select pg_current_xact_id();
 
-pg_current_xact_id
---------------------
-                1750
-
-select orioledb_get_current_oxid();
-
- orioledb_get_current_oxid
----------------------------
-                       555
-
-// Work with database normally add/modify/delete rows, tables etc.
-
-orioledb_rewind_to_transaction(1750, 555);
+2. **Perform modifications:**
+```sql
+-- Accidental data loss or undesired changes occur here
+DROP TABLE important_data;
 ```
-This will rewind a cluster to a previously acquired transaction state specified by a pair of `(xid, oxid)`
 
-After rewind database shuts down. Start it again and you'll get it in a requested working state in the past.
-
-Trying to rewind past time or xid theshold will output an error. If xid or oxid is in the future, rewind will be based on the other one.
-
-To check if you can rewind to a transaction:
+3. **Perform the rewind:**
+```sql
+-- Revert to the IDs recorded in step 1
+SELECT orioledb_rewind_to_transaction(1750, 555);
 ```
-select orioledb_get_complete_xid();
- orioledb_get_complete_xid
----------------------------
-                       738
+*The server will log "Rewind complete" and attempt to restart.*
 
-select orioledb_get_complete_oxid();
+:::note[Data consistency]
+For applications requiring strong consistency guarantees, it is recommended to explicitly acquire locks on relevant tables within the transaction intended as the rewind target. (Step 1 in the example above)
+:::
 
- orioledb_get_complete_oxid
-----------------------------
-                          3
-```
-You can rewind to a precise transaction oxid 555 xid 1750 as if both numbers are bigger than the oldest stored in the rewind buffer (oxid 3 xid 738).
+## Limitations and Caveats
 
-After rewind transactions that are past rewind point completely disappear. **There is no way to undo rewind, other than by restoring from a backup**, so it's wise to have a backup at the latest point of time before starting rewind. Particularly, if you use backups and rewind you need to be extra careful about what points of time you get backups at and not occasionally overwrite older backups (before doing rewind) with newer ones (after doing rewind).
-
-## Limitations
-
-As mentioned above, rewind mode is currently experimental. The major limitations of this mode are the following.
-
-1. Undo-based rewind is limited to a cluster uptime. Rewind buffer is not persistent and you can not rewind past cluster start time. At cluster start time all transactions that were reserved to rewind are permanently fixed (completed).
-2. Starting database cluster after rewind could not be done by the backend that invokes rewind. So database will be shut down after rewind and then the user should start it.
-3. Undo-based rewind automatically supports `heap` tables in the cluster. Significant writes to `heap` tables will retain old versions of tuples reserved for rewind and cause bloat to heap tables. This bloat can not be removed by vacuum until the transaction is past the rewind retain boundary. It's recommended to use rewind for clusters with most of the writes in the `orioledb` tables, and only occasional writes to `heap`.
-4. There are yet no safeguards against interruption of rewind when it's already started. This interruption can leave
-database in an inconsistent partially rewound state.
-5. Rewind is not yet compatible with replication yet as rewind buffer state is not fixed into WAL, so any transactions
-that could be rewound on source, will still look as committed on replica.
+* The rewind buffer is stored in shared memory and is not persistent across restarts. You cannot rewind to a point in time prior to the current cluster start time.
+* Rewind is destructive to all data modifications occurring after the target point. It is recommended to take a backup before initiating a rewind.
+* Because rewind requires retaining old versions in `heap` tables, standard vacuuming is inhibited for data within the rewind window. High write volume to `heap` tables may lead to significant bloat.
+* Rewind is currently incompatible with physical replication. Standby servers do not reflect the rewind operation and will become inconsistent with the primary.
+* If the system crashes or is interrupted during the rewind phase, the database may be left in an inconsistent state.

@@ -473,15 +473,10 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 	{
 		Datum		values[2 * INDEX_MAX_KEYS];
 		bool		isnulls[2 * INDEX_MAX_KEYS];
-		int			result_size,
-					tuple_size;
 		bytea	   *result;
 		OTableDescr *descr = oslot->descr;
 		OIndexDescr *primary;
 		int			ctid_off;
-		OTuple		tuple;
-		ORowIdAddendumNonCtid addNonCtid;
-		Pointer		ptr;
 
 		if (oslot->rowid)
 		{
@@ -498,66 +493,13 @@ tts_orioledb_getsysattr(TupleTableSlot *slot, int attnum, bool *isnull)
 		primary = GET_PRIMARY(descr);
 		ctid_off = primary->primaryIsCtid ? 1 : 0;
 
-		if (primary->primaryIsCtid)
+		if (!primary->primaryIsCtid)
 		{
-			ORowIdAddendumCtid addCtid;
-
-			addCtid.hint = oslot->hint;
-			addCtid.csn = oslot->csn;
-			addCtid.version = oslot->version;
-
-			/* Ctid primary key: give hint + tid as rowid */
-			result_size = MAXALIGN(VARHDRSZ) +
-				MAXALIGN(sizeof(ORowIdAddendumCtid)) +
-				MAXALIGN(sizeof(ItemPointerData));
-			if (primary->bridging)
-				result_size += MAXALIGN(sizeof(ItemPointerData));
-			result = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
-			SET_VARSIZE(result, result_size);
-			ptr = (Pointer) result + MAXALIGN(VARHDRSZ);
-			memcpy(ptr, &addCtid, sizeof(ORowIdAddendumCtid));
-			ptr += MAXALIGN(sizeof(ORowIdAddendumCtid));
-			memcpy(ptr, &slot->tts_tid, sizeof(ItemPointerData));
-			if (primary->bridging)
-			{
-				ptr += MAXALIGN(sizeof(ItemPointerData));
-				memcpy(ptr, &oslot->bridge_ctid, sizeof(ItemPointerData));
-			}
-			*isnull = false;
-			oslot->rowid = result;
-			return datumCopy(PointerGetDatum(result), false, -1);
+			tts_orioledb_getsomeattrs(slot, primary->maxTableAttnum - ctid_off);
+			tts_orioledb_get_index_values(slot, primary, values, isnulls, false);
 		}
-
-		/*
-		 * General-case primary key: prepend tuple with maxaligned hint.
-		 */
-		result_size = MAXALIGN(VARHDRSZ) + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-		if (primary->bridging)
-			result_size += MAXALIGN(sizeof(ItemPointerData));
-		tts_orioledb_getsomeattrs(slot, primary->maxTableAttnum - ctid_off);
-		tts_orioledb_get_index_values(slot, primary, values, isnulls, false);
-		tuple_size = o_new_tuple_size(primary->nonLeafTupdesc,
-									  &primary->nonLeafSpec,
-									  NULL, NULL, oslot->version,
-									  values, isnulls, NULL);
-		result_size += MAXALIGN(tuple_size);
-		result = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
-		SET_VARSIZE(result, result_size);
-		ptr = (Pointer) result + MAXALIGN(VARHDRSZ);
-		if (primary->bridging)
-			memcpy(ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid)), &oslot->bridge_ctid, sizeof(ItemPointerData));
-
-		tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-		if (primary->bridging)
-			tuple.data += MAXALIGN(sizeof(ItemPointerData));
-		o_tuple_fill(primary->nonLeafTupdesc, &primary->nonLeafSpec,
-					 &tuple, tuple_size, NULL, NULL, oslot->version, values, isnulls, NULL);
-
-		addNonCtid.csn = oslot->csn;
-		addNonCtid.flags = tuple.formatFlags;
-		addNonCtid.hint = oslot->hint;
-
-		memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));
+		result = o_new_rowid(primary, slot, values, isnulls,
+							 oslot->csn, &oslot->hint);
 
 		*isnull = false;
 		oslot->rowid = result;
@@ -916,9 +858,9 @@ tts_orioledb_store_non_leaf_tuple(TupleTableSlot *slot, OTuple tuple,
 									  shouldfree, hint);
 }
 
-static Datum
-get_tbl_att(TupleTableSlot *slot, int attnum, bool primaryIsCtid,
-			bool *isnull, Oid *typid)
+Datum
+o_get_tbl_att(TupleTableSlot *slot, int attnum, bool primaryIsCtid,
+			  bool *isnull, Oid *typid)
 {
 	int			i;
 	Datum		value;
@@ -983,9 +925,9 @@ get_tbl_att(TupleTableSlot *slot, int attnum, bool primaryIsCtid,
 	return value;
 }
 
-static Datum
-get_idx_expr_att(TupleTableSlot *slot, OIndexDescr *idx,
-				 ExprState *exp_state, bool *isnull)
+Datum
+o_get_idx_expr_att(TupleTableSlot *slot, OIndexDescr *idx,
+				   ExprState *exp_state, bool *isnull)
 {
 	Datum		result;
 
@@ -1019,13 +961,13 @@ tts_orioledb_get_index_values(TupleTableSlot *slot, OIndexDescr *idx,
 		int			attnum = idx->tableAttnums[i];
 
 		if (attnum != EXPR_ATTNUM)
-			values[i] = get_tbl_att(slot, attnum, idx->primaryIsCtid,
-									&isnull[i], NULL);
+			values[i] = o_get_tbl_att(slot, attnum, idx->primaryIsCtid,
+									  &isnull[i], NULL);
 		else
 		{
-			values[i] = get_idx_expr_att(slot, idx,
-										 (ExprState *) lfirst(indexpr_item),
-										 &isnull[i]);
+			values[i] = o_get_idx_expr_att(slot, idx,
+										   (ExprState *) lfirst(indexpr_item),
+										   &isnull[i]);
 			indexpr_item = lnext(idx->expressions_state, indexpr_item);
 		}
 	}
@@ -1091,13 +1033,13 @@ tts_orioledb_fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx,
 		attnum = idx->tableAttnums[i];
 
 		if (attnum != EXPR_ATTNUM)
-			value = get_tbl_att(slot, attnum, idx->primaryIsCtid,
-								&isnull, &typid);
+			value = o_get_tbl_att(slot, attnum, idx->primaryIsCtid,
+								  &isnull, &typid);
 		else
 		{
-			value = get_idx_expr_att(slot, idx,
-									 (ExprState *) lfirst(indexpr_item),
-									 &isnull);
+			value = o_get_idx_expr_att(slot, idx,
+									   (ExprState *) lfirst(indexpr_item),
+									   &isnull);
 			typid = idx->nonLeafTupdesc->attrs[i].atttypid;
 			indexpr_item = lnext(idx->expressions_state, indexpr_item);
 		}
@@ -1108,6 +1050,7 @@ tts_orioledb_fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx,
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
 		bound->keys[i].comparator = idx->fields[i].comparator;
+		bound->keys[i].exclusion_fn = NULL;
 	}
 }
 
@@ -1130,13 +1073,13 @@ appendStringInfoIndexKey(StringInfo str, TupleTableSlot *slot, OIndexDescr *id)
 		int			attnum = id->tableAttnums[i];
 
 		if (attnum != EXPR_ATTNUM)
-			value = get_tbl_att(slot, attnum, id->primaryIsCtid,
-								&isnull, NULL);
+			value = o_get_tbl_att(slot, attnum, id->primaryIsCtid,
+								  &isnull, NULL);
 		else
 		{
-			value = get_idx_expr_att(slot, id,
-									 (ExprState *) lfirst(indexpr_item),
-									 &isnull);
+			value = o_get_idx_expr_att(slot, id,
+									   (ExprState *) lfirst(indexpr_item),
+									   &isnull);
 			indexpr_item = lnext(id->expressions_state, indexpr_item);
 		}
 

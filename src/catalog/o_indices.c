@@ -253,6 +253,7 @@ make_ctid_o_index(OTable *table)
 		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
 		 table->primary_ixversion);
 
+	result->immediate = true;
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
 
@@ -329,7 +330,8 @@ make_primary_o_index(OTable *table)
 	elog(LOG, "[%s] oids [ %u %u %u ] version %u", __func__,
 		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
 		 table->primary_ixversion);
-
+  
+	result->immediate = tableIndex->immediate;
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
 
@@ -482,6 +484,7 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
 	result->nKeyFields = tableIndex->nkeyfields;
+	result->immediate = tableIndex->immediate;
 
 	nadded = 0;
 	/* Switching context to store duplicates */
@@ -491,6 +494,11 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	if (result->predicate)
 		result->predicate_str = pstrdup(tableIndex->predicate_str);
 	result->expressions = list_copy_deep(tableIndex->expressions);
+	if (tableIndex->type == oIndexExclusion)
+	{
+		result->exclops = palloc0(tableIndex->nkeyfields * sizeof(Oid));
+		memcpy(result->exclops, tableIndex->exclops, tableIndex->nkeyfields * sizeof(Oid));
+	}
 	add_index_fields(result, table, tableIndex, &nadded, false);
 	if (tableIndex->nfields == tableIndex->nkeyfields)
 		result->nKeyFields = nadded;
@@ -547,6 +555,7 @@ make_toast_o_index(OTable *table)
 	}
 	result->nLeafFields += TOAST_LEAF_FIELDS_NUM;
 	result->nNonLeafFields += TOAST_NON_LEAF_FIELDS_NUM;
+	result->immediate = true;
 
 	elog(LOG, "[%s] oids [ %u %u %u ] version %u", __func__,
 		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
@@ -721,6 +730,9 @@ serialize_o_index(OIndex *o_index, int *size)
 	o_serialize_node((Node *) o_index->duplicates, &str);
 
 	appendBinaryStringInfo(&str, (Pointer) &o_index->tablespace, sizeof(Oid));
+	if (o_index->indexType == oIndexExclusion)
+		appendBinaryStringInfo(&str, (Pointer) o_index->exclops, sizeof(Oid) * o_index->nKeyFields);
+	appendBinaryStringInfo(&str, (Pointer) &o_index->immediate, sizeof(bool));
 
 	*size = str.len;
 	return str.data;
@@ -777,6 +789,29 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	else
 		oIndex->tablespace = DEFAULTTABLESPACE_OID;
 
+	if (oIndex->data_version >= 3 && oIndex->indexType == oIndexExclusion)
+	{
+		mcxt = OGetIndexContext(oIndex);
+		old_mcxt = MemoryContextSwitchTo(mcxt);
+		len = sizeof(Oid) * oIndex->nKeyFields;
+		Assert((ptr - data) + len <= length);
+		oIndex->exclops = (Oid *) palloc0(len);
+		memcpy(oIndex->exclops, ptr, len);
+		ptr += len;
+		MemoryContextSwitchTo(old_mcxt);
+	}
+	else
+		oIndex->exclops = NULL;
+	if (oIndex->data_version >= 3)
+	{
+		len = sizeof(bool);
+		Assert((ptr - data) + len <= length);
+		memcpy(&oIndex->immediate, ptr, len);
+		ptr += len;
+
+	}
+	else
+		oIndex->immediate = true;
 	Assert((ptr - data) == length);
 
 	return oIndex;
@@ -1061,7 +1096,8 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OIndexDescrFillSource fil
 	}
 	else if (oIndex->indexType == oIndexRegular ||
 			 oIndex->indexType == oIndexUnique ||
-			 oIndex->indexType == oIndexBridge)
+			 oIndex->indexType == oIndexBridge ||
+			 oIndex->indexType == oIndexExclusion)
 	{
 		if (oIndex->nNonLeafFields == oIndex->nLeafFields)
 			descr->nonLeafTupdesc = CreateTupleDescCopy(descr->leafTupdesc);
@@ -1086,6 +1122,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OIndexDescrFillSource fil
 	descr->bridging = oIndex->bridging;
 	descr->unique = (oIndex->indexType == oIndexUnique ||
 					 oIndex->indexType == oIndexPrimary);
+	descr->immediate = oIndex->immediate;
 	descr->nulls_not_distinct = oIndex->nulls_not_distinct;
 	descr->nUniqueFields = oIndex->nUniqueFields;
 	descr->nFields = oIndex->nNonLeafFields;
@@ -1127,6 +1164,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OIndexDescrFillSource fil
 		OIndexField *field = &descr->fields[i];
 		OTableIndexField *iField = &oIndex->leafFields[i];
 		bool		add_opclass = false;
+		bool		needs_exclop = false;
 
 		field->collation = TupleDescAttr(descr->nonLeafTupdesc, i)->attcollation;
 		if (OidIsValid(iField->collation))
@@ -1144,9 +1182,11 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OIndexDescrFillSource fil
 		}
 
 		add_opclass = !OIgnoreColumn(descr, i);
+		needs_exclop = oIndex->exclops && i < oIndex->nKeyFields;
 		if (add_opclass)
 			oFillFieldOpClassAndComparator(field, oIndex->tableOids.datoid,
-										   iField->opclass);
+										   iField->opclass,
+										   needs_exclop ? oIndex->exclops[i] : InvalidOid);
 	}
 
 	for (i = 0; i < oIndex->nPrimaryFields; i++)
@@ -1160,12 +1200,13 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OIndexDescrFillSource fil
 			temp_field.collation = iField->collation;
 
 		oFillFieldOpClassAndComparator(&temp_field, oIndex->tableOids.datoid,
-									   iField->opclass);
+									   iField->opclass, iField->exclop);
 		descr->pk_comparators[i] = temp_field.comparator;
 	}
 
 	old_mcxt = MemoryContextSwitchTo(mcxt);
 	descr->predicate = list_copy_deep(oIndex->predicate);
+	descr->duplicates = list_copy_deep(oIndex->duplicates);
 	if (descr->predicate)
 		descr->predicate_str = pstrdup(oIndex->predicate_str);
 	descr->expressions = list_copy_deep(oIndex->expressions);
@@ -1485,6 +1526,8 @@ index_type_to_str(OIndexType type)
 			return "regular";
 		case oIndexBridge:
 			return "bridge";
+		case oIndexExclusion:
+			return "exclusion";
 		default:
 			return "invalid";
 	}
@@ -1503,6 +1546,8 @@ index_type_from_str(const char *s, int len)
 		return oIndexRegular;
 	else if (!strncmp(s, "bridge", len))
 		return oIndexBridge;
+	else if (!strncmp(s, "exclusion", len))
+		return oIndexExclusion;
 	else
 		return oIndexInvalid;
 }

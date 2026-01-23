@@ -65,6 +65,9 @@ static inline OComparator *o_find_cached_comparator(OComparatorKey *key);
 static inline OComparator *o_add_comparator_to_cache(OComparator *comparator);
 static bool recreate_table_descr(OTableDescr *descr);
 static void recreate_index_descr(OIndexDescr *descr);
+static OExclusionFn *o_find_exclusion_op_fn(Oid exclusion_op);
+static inline OExclusionFn *o_find_cached_exclusion_fn(Oid exclusion_op);
+static inline OExclusionFn *o_add_exclusion_fn_to_cache(OExclusionFn *exclusion_fn);
 
 PG_FUNCTION_INFO_V1(orioledb_get_table_descrs);
 PG_FUNCTION_INFO_V1(orioledb_get_index_descrs);
@@ -95,9 +98,12 @@ struct OComparator
 static HTAB *oTableDescrHash;
 static HTAB *oIndexDescrHash;
 static HTAB *comparatorCache;
+static HTAB *exclusionFnCache;
 static OComparatorKey lastkey = {0};
 static OComparator *lastcmp = NULL;
 static MemoryContext descrCxt = NULL;
+static Oid	last_exclusion_op = InvalidOid;
+static OExclusionFn *last_exclusion_fn = NULL;
 
 static void o_find_toastable_attrs(OTableDescr *tableDescr);
 
@@ -1192,7 +1198,7 @@ o_find_toastable_attrs(OTableDescr *tableDescr)
 
 /* fills field opclass fields and finds comparator for it */
 void
-oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid)
+oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid, Oid exclusion_op)
 {
 	OOpclass   *opclass;
 
@@ -1203,6 +1209,8 @@ oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid)
 	field->inputtype = opclass->inputtype;
 	field->opfamily = opclass->opfamily;
 	field->comparator = o_find_opclass_comparator(opclass, field->collation);
+	if (OidIsValid(exclusion_op))
+		field->exclusion_fn = o_find_exclusion_op_fn(exclusion_op);
 
 	Assert(field->comparator != NULL);
 }
@@ -1594,6 +1602,15 @@ o_tableam_descr_init(void)
 	comparatorCache = hash_create("OrioleDB comparators", 8,
 								  &ctl,
 								  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
+	MemSet(&ctl, 0, sizeof(ctl));
+	ctl.keysize = sizeof(Oid);
+	ctl.entrysize = sizeof(OExclusionFn);
+	ctl.hcxt = descrCxt;
+	exclusionFnCache = hash_create("OrioleDB exclusion functions", 8,
+								   &ctl,
+								   HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+
 }
 
 /* @TODO maybe add version */
@@ -1771,4 +1788,85 @@ o_add_invalidate_undo_item(ORelOids oids, uint32 flags)
 
 	add_new_undo_stack_item(UndoLogSystem, location);
 	release_undo_size(UndoLogSystem);
+}
+
+/*
+ * Find exclusion function in cache or create new one.
+ */
+static OExclusionFn *
+o_find_exclusion_op_fn(Oid exclusion_op)
+{
+	OExclusionFn *result;
+	OExclusionFn exclusion_fn;
+	Oid			oprcode;
+
+	if ((result = o_find_cached_exclusion_fn(exclusion_op)) != NULL)
+		return result;
+
+	memset(&exclusion_fn, 0, sizeof(exclusion_fn));
+	exclusion_fn.operator = exclusion_op;
+
+	o_set_syscache_hooks();
+	oprcode = o_operator_cache_get_oprcode(exclusion_op);
+	o_proc_cache_fill_finfo(&exclusion_fn.finfo, oprcode);
+	o_unset_syscache_hooks();
+
+	return o_add_exclusion_fn_to_cache(&exclusion_fn);
+}
+
+/*
+ * Tries to find an exclusion function in the cache.
+ */
+static inline OExclusionFn *
+o_find_cached_exclusion_fn(Oid exclusion_op)
+{
+	OExclusionFn *result;
+	bool		found;
+
+	/* compares with previous search */
+	if (exclusion_op == last_exclusion_op)
+		return last_exclusion_fn;
+
+	/* try to find in the cache */
+	result = hash_search(exclusionFnCache, &exclusion_op, HASH_FIND, &found);
+	if (found)
+	{
+		last_exclusion_op = exclusion_op;
+		last_exclusion_fn = result;
+		return result;
+	}
+
+	return NULL;
+}
+
+/*
+ * Adds the exclusion function to the cache.
+ */
+static inline OExclusionFn *
+o_add_exclusion_fn_to_cache(OExclusionFn *exclusion_fn)
+{
+	OExclusionFn *cached;
+
+	cached = hash_search(exclusionFnCache, &exclusion_fn->operator, HASH_ENTER, NULL);
+	memcpy(cached, exclusion_fn, sizeof(OExclusionFn));
+
+	last_exclusion_op = exclusion_fn->operator;
+	last_exclusion_fn = cached;
+
+	return cached;
+}
+
+int
+o_call_exclusion_fn(OExclusionFn *exclusion_fn, Datum left, Datum right, Oid collation)
+{
+	int			cmp;
+	Datum		ret;
+
+	/* FIX: There should be a better way */
+	if (o_is_syscache_hooks_set() && exclusion_fn->finfo.fn_addr == fmgr_sql)
+		exclusion_fn->finfo.fn_addr = o_fmgr_sql;
+	ret = FunctionCall2Coll(&exclusion_fn->finfo, collation, left, right);
+	cmp = DatumGetBool(ret) ? 0 : 1;
+
+	return cmp;
 }

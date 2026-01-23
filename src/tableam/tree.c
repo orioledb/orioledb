@@ -139,10 +139,14 @@ o_get_key_len(BTreeDescr *desc, OTuple tuple, OIndexType type, bool keepVersion)
 	bool		isnull[INDEX_MAX_KEYS] = {false};
 	int			i,
 				len;
+	int			ctid_off = 0;
+
+	if (id->bridging && id->desc.type == oIndexPrimary && !id->primaryIsCtid)
+		ctid_off = 1;
 
 	for (i = 0; i < id->nonLeafTupdesc->natts; i++)
 	{
-		int			attnum = (type == oIndexPrimary) ? id->tableAttnums[i] : i + 1;
+		int			attnum = (type == oIndexPrimary) ? id->tableAttnums[i] + ctid_off : i + 1;
 
 		Assert(attnum > 0);
 		values[i] = o_fastgetattr(tuple, attnum, id->leafTupdesc, &id->leafSpec, &isnull[i]);
@@ -502,10 +506,14 @@ o_fill_key_bound(OIndexDescr *id, OTuple tuple,
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
 		bound->keys[i].comparator = id->fields[i].comparator;
+		if (id->desc.type == oIndexExclusion)
+			bound->keys[i].exclusion_fn = id->fields[i].exclusion_fn;
+		else
+			bound->keys[i].exclusion_fn = NULL;
 	}
 }
 
-/* fills secondary index key bound from primary index tuple */
+/* fills bridge index key bound from bridge index tuple */
 void
 o_fill_bridge_index_key_bound(BTreeDescr *secondary, OTuple tuple, OBTreeKeyBound *bound)
 {
@@ -520,6 +528,7 @@ o_fill_bridge_index_key_bound(BTreeDescr *secondary, OTuple tuple, OBTreeKeyBoun
 	if (isnull)
 		bound->keys[0].flags |= O_VALUE_BOUND_NULL;
 	bound->keys[0].comparator = td->fields[td->nFields - 1].comparator;
+	bound->keys[0].exclusion_fn = NULL;
 }
 
 /* fills primary index key bound from tuple that belongs secondary index */
@@ -549,6 +558,7 @@ o_fill_pindex_tuple_key_bound(BTreeDescr *desc,
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
 		bound->keys[i].comparator = id->pk_comparators[i];
+		bound->keys[i].exclusion_fn = NULL;
 	}
 }
 
@@ -584,9 +594,17 @@ o_idx_cmp_range_key_to_value(OBTreeValueBound *bound1, OIndexField *field,
 		if ((bound1->flags & O_VALUE_BOUND_COERCIBLE) && bound1->value == value)
 			cmp = 0;
 		else if (o_bound_is_coercible(bound1, field))
-			cmp = o_call_comparator(field->comparator, bound1->value, value);
+		{
+			if (bound1->exclusion_fn)
+				cmp = o_call_exclusion_fn(bound1->exclusion_fn, bound1->value, value, field->collation);
+			else
+				cmp = o_call_comparator(field->comparator, bound1->value, value);
+		}
 		else
+		{
+			Assert(!bound1->exclusion_fn);
 			cmp = o_call_comparator(bound1->comparator, bound1->value, value);
+		}
 
 		if (!field->ascending)
 			cmp = -cmp;

@@ -1739,6 +1739,7 @@ replay_erase_bridge_item(OIndexDescr *bridge, ItemPointer iptr)
 	bound.keys[0].type = TIDOID;
 	bound.keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 	bound.keys[0].comparator = bridge->fields[0].comparator;
+	bound.keys[0].exclusion_fn = NULL;
 	bound.keys[0].value = ItemPointerGetDatum(iptr);
 
 	init_page_find_context(&context, &bridge->desc,
@@ -3149,7 +3150,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			if (!single)
 				workers_synchronize(xlogPtr, true);
 
-			o_truncate_table(oids);
+			o_truncate_table(oids, true);
 
 			AcceptInvalidationMessages();
 			if (!single)

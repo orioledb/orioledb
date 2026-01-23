@@ -260,6 +260,16 @@ typedef struct
 	uint8		flags;
 } ORowIdAddendumNonCtid;
 
+typedef struct
+{
+	ItemPointerData bridgeCtid;
+	bool		bridgeChanged;
+} ORowIdBridgeData;
+
+bytea	   *o_new_rowid(OIndexDescr *primary, TupleTableSlot *slot,
+						Datum *rowid_values, bool *rowid_isnull,
+						CommitSeqNo tupleCsn, BTreeLocationHint *hint);
+
 /*
  * Check if given tree has assigned datoid, reloid and relnode.
  */

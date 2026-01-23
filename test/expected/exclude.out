@@ -1,0 +1,851 @@
+CREATE SCHEMA exclude;
+SET SESSION search_path = 'exclude';
+CREATE EXTENSION orioledb;
+CREATE TABLE o_test_is_null_assert (
+	key int not null,
+	val int,
+	val2 int,
+	filler char(84)
+) USING orioledb;
+ALTER TABLE o_test_is_null_assert ADD PRIMARY KEY (key);
+INSERT INTO o_test_is_null_assert (key,val,val2) VALUES (2, 0, 0);
+BEGIN;
+SELECT * FROM o_test_is_null_assert WHERE key = 2 ORDER BY key;
+ key | val | val2 | filler 
+-----+-----+------+--------
+   2 |   0 |    0 | 
+(1 row)
+
+UPDATE o_test_is_null_assert SET val2 = val2 WHERE key = 2;
+UPDATE o_test_is_null_assert SET val2 = val2 WHERE key = 2;
+COMMIT;
+CREATE TABLE o_test_ioc1
+(
+	id1 int8 NOT NULL,
+	id2 int8 NOT NULL PRIMARY KEY,
+	UNIQUE (id1) WITH (orioledb_index=true)
+) USING orioledb;
+INSERT INTO o_test_ioc1 VALUES (7, 20);
+SELECT * FROM o_test_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   7 |  20
+(1 row)
+
+BEGIN;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_ioc1 ORDER BY id1;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Index Only Scan using o_test_ioc1_id1_key on o_test_ioc1
+(1 row)
+
+SELECT * FROM o_test_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   7 |  20
+(1 row)
+
+COMMIT;
+DELETE FROM o_test_ioc1 WHERE id2 = 20;
+SELECT * FROM o_test_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+(0 rows)
+
+INSERT INTO o_test_ioc1 VALUES (6, 19);
+SELECT * FROM o_test_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   6 |  19
+(1 row)
+
+INSERT INTO o_test_ioc1 VALUES (5, 18);
+SELECT * FROM o_test_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   5 |  18
+   6 |  19
+(2 rows)
+
+INSERT INTO o_test_ioc1 VALUES (4, 17);
+SELECT * FROM o_test_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   4 |  17
+   5 |  18
+   6 |  19
+(3 rows)
+
+INSERT INTO o_test_ioc1 VALUES (3, 16);
+SELECT * FROM o_test_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   3 |  16
+   4 |  17
+   5 |  18
+   6 |  19
+(4 rows)
+
+INSERT INTO o_test_ioc1 VALUES (3, 15);
+ERROR:  duplicate key value violates unique constraint "o_test_ioc1_id1_key"
+DETAIL:  Key (id1)=('3') already exists.
+SELECT * FROM o_test_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   3 |  16
+   4 |  17
+   5 |  18
+   6 |  19
+(4 rows)
+
+INSERT INTO o_test_ioc1 VALUES (3, 14);
+ERROR:  duplicate key value violates unique constraint "o_test_ioc1_id1_key"
+DETAIL:  Key (id1)=('3') already exists.
+SELECT * FROM o_test_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   3 |  16
+   4 |  17
+   5 |  18
+   6 |  19
+(4 rows)
+
+INSERT INTO o_test_ioc1 VALUES (3, 13) ON CONFLICT (id1) DO NOTHING;
+SELECT * FROM o_test_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   3 |  16
+   4 |  17
+   5 |  18
+   6 |  19
+(4 rows)
+
+BEGIN;
+SELECT * FROM o_test_ioc1 WHERE id1 = 3 FOR UPDATE;
+ id1 | id2 
+-----+-----
+   3 |  16
+(1 row)
+
+COMMIT;
+INSERT INTO o_test_ioc1 VALUES (3, 12) ON CONFLICT (id1) DO UPDATE SET id2 = EXCLUDED.id2 * 10;
+SELECT * FROM o_test_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   3 | 120
+   4 |  17
+   5 |  18
+   6 |  19
+(4 rows)
+
+INSERT INTO o_test_ioc1 VALUES (2, 11);
+SELECT * FROM o_test_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   2 |  11
+   3 | 120
+   4 |  17
+   5 |  18
+   6 |  19
+(5 rows)
+
+CREATE TABLE ranges0 (
+  t1 char(1),
+  c1 int4,
+  c2 text PRIMARY KEY
+) USING orioledb;
+CREATE UNIQUE INDEX ranges0_ix1 ON ranges0(c1) WITH (orioledb_index=true);
+-- these should succeed because they don't match the index predicate
+INSERT INTO ranges0 VALUES('A', -1, '-3');
+INSERT INTO ranges0 VALUES('B', -6, '12');
+-- succeed
+INSERT INTO ranges0 VALUES('C', -5, '55');
+SELECT * FROM ranges0;
+ t1 | c1 | c2 
+----+----+----
+ A  | -1 | -3
+ B  | -6 | 12
+ C  | -5 | 55
+(3 rows)
+
+-- fail, overlaps
+INSERT INTO ranges0 VALUES('D', -5, '62');
+ERROR:  duplicate key value violates unique constraint "ranges0_ix1"
+DETAIL:  Key (c1)=('-5') already exists.
+SELECT * FROM ranges0;
+ t1 | c1 | c2 
+----+----+----
+ A  | -1 | -3
+ B  | -6 | 12
+ C  | -5 | 55
+(3 rows)
+
+CREATE OR REPLACE FUNCTION int4range_overlaps(a int4range, b int4range)
+  RETURNS boolean
+AS
+$$
+    select a && b;
+$$ LANGUAGE sql IMMUTABLE;
+CREATE OPERATOR <-> (
+	LEFTARG = int4range,
+	RIGHTARG = int4range,
+	PROCEDURE = int4range_overlaps,
+	COMMUTATOR = '<->'
+);
+ALTER OPERATOR FAMILY range_ops USING btree ADD OPERATOR 3 <->(int4range, int4range);
+CREATE TABLE ranges (
+  c1 int4range,
+  c2 TEXT
+) USING orioledb;
+ALTER TABLE ranges
+	ADD EXCLUDE USING btree (c1 WITH <->, (orioledb_int4range_immutable(c2)) WITH <->)
+  WITH (orioledb_index=true)
+  WHERE (NOT c1 @> 0::int4);
+\d+ ranges
+                                   Table "exclude.ranges"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ c1     | int4range |           |          |         | extended |              | 
+ c2     | text      |           |          |         | extended |              | 
+Indexes:
+    "ranges_c1_orioledb_int4range_immutable_excl" EXCLUDE USING btree (c1 WITH <->, orioledb_int4range_immutable(c2) WITH <->) WITH (orioledb_index='true') WHERE (NOT c1 @> 0)
+
+-- these should succeed because they don't match the index predicate
+INSERT INTO ranges VALUES(int4range(-1, 3), '[-2, 2]');
+INSERT INTO ranges VALUES(int4range(-6, 2), '[-21, 14]');
+-- succeed
+INSERT INTO ranges VALUES(int4range(-5, -2), '[2, 5)');
+SELECT * FROM ranges;
+   c1    |    c2     
+---------+-----------
+ [-1,3)  | [-2, 2]
+ [-6,2)  | [-21, 14]
+ [-5,-2) | [2, 5)
+(3 rows)
+
+-- fail, duplicate
+INSERT INTO ranges VALUES(int4range(-5, -2), '[2, 5)');
+ERROR:  conflicting key value violates exclusion constraint "ranges_c1_orioledb_int4range_immutable_excl"
+DETAIL:  Key (c1, orioledb_int4range_immutable(c2))=([-5,-2), [2,5)) conflicts with existing key (c1, orioledb_int4range_immutable(c2))=([-5,-2), [2,5)).
+SELECT * FROM ranges;
+   c1    |    c2     
+---------+-----------
+ [-1,3)  | [-2, 2]
+ [-6,2)  | [-21, 14]
+ [-5,-2) | [2, 5)
+(3 rows)
+
+-- fail, overlaps
+INSERT INTO ranges VALUES(int4range(-6, -3), '[2, 5)');
+ERROR:  conflicting key value violates exclusion constraint "ranges_c1_orioledb_int4range_immutable_excl"
+DETAIL:  Key (c1, orioledb_int4range_immutable(c2))=([-6,-3), [2,5)) conflicts with existing key (c1, orioledb_int4range_immutable(c2))=([-5,-2), [2,5)).
+SELECT * FROM ranges;
+   c1    |    c2     
+---------+-----------
+ [-1,3)  | [-2, 2]
+ [-6,2)  | [-21, 14]
+ [-5,-2) | [2, 5)
+(3 rows)
+
+-- succeed, because violation is ignored
+INSERT INTO ranges VALUES(int4range(-6, -3), '[2, 5)')
+  ON CONFLICT ON CONSTRAINT ranges_c1_orioledb_int4range_immutable_excl DO NOTHING RETURNING *;
+ c1 | c2 
+----+----
+(0 rows)
+
+SELECT * FROM ranges;
+   c1    |    c2     
+---------+-----------
+ [-1,3)  | [-2, 2]
+ [-6,2)  | [-21, 14]
+ [-5,-2) | [2, 5)
+(3 rows)
+
+SELECT * FROM ranges;
+   c1    |    c2     
+---------+-----------
+ [-1,3)  | [-2, 2]
+ [-6,2)  | [-21, 14]
+ [-5,-2) | [2, 5)
+(3 rows)
+
+-- fail, because DO UPDATE variant requires unique index
+INSERT INTO ranges VALUES(int4range(-6, -3), '[2, 5)')
+  ON CONFLICT ON CONSTRAINT ranges_c1_orioledb_int4range_immutable_excl DO UPDATE SET c2 = EXCLUDED.c2;
+ERROR:  ON CONFLICT DO UPDATE not supported with exclusion constraints
+SELECT * FROM ranges;
+   c1    |    c2     
+---------+-----------
+ [-1,3)  | [-2, 2]
+ [-6,2)  | [-21, 14]
+ [-5,-2) | [2, 5)
+(3 rows)
+
+-- succeed because c1 doesn't overlap
+INSERT INTO ranges VALUES(int4range(-16, -13), '[2, 5)');
+SELECT * FROM ranges;
+    c1     |    c2     
+-----------+-----------
+ [-1,3)    | [-2, 2]
+ [-6,2)    | [-21, 14]
+ [-5,-2)   | [2, 5)
+ [-16,-13) | [2, 5)
+(4 rows)
+
+-- succeed because c2 doesn't overlap
+INSERT INTO ranges VALUES(int4range(-4, -3), '[12, 15)');
+SELECT * FROM ranges;
+    c1     |    c2     
+-----------+-----------
+ [-1,3)    | [-2, 2]
+ [-6,2)    | [-21, 14]
+ [-5,-2)   | [2, 5)
+ [-16,-13) | [2, 5)
+ [-4,-3)   | [12, 15)
+(5 rows)
+
+CREATE TABLE unique_tbl (
+	i int,
+	t text,
+	UNIQUE (i) WITH (orioledb_index=true) DEFERRABLE
+) USING orioledb;
+INSERT INTO unique_tbl VALUES (0, 'one');
+INSERT INTO unique_tbl VALUES (1, 'two');
+INSERT INTO unique_tbl VALUES (2, 'tree');
+INSERT INTO unique_tbl VALUES (3, 'four');
+INSERT INTO unique_tbl VALUES (4, 'five');
+BEGIN;
+-- default is immediate so this should fail right away
+UPDATE unique_tbl SET i = 1 WHERE i = 0;
+ERROR:  duplicate key value violates unique constraint "unique_tbl_i_key"
+DETAIL:  Key (i)=('1') already exists.
+ROLLBACK;
+-- check is done at end of statement, so this should succeed
+UPDATE unique_tbl SET i = i+1;
+SELECT * FROM unique_tbl;
+ i |  t   
+---+------
+ 1 | one
+ 2 | two
+ 3 | tree
+ 4 | four
+ 5 | five
+(5 rows)
+
+-- explicitly defer the constraint
+BEGIN;
+SET CONSTRAINTS unique_tbl_i_key DEFERRED;
+INSERT INTO unique_tbl VALUES (3, 'three');
+SELECT * FROM unique_tbl;
+ i |   t   
+---+-------
+ 1 | one
+ 2 | two
+ 3 | tree
+ 4 | four
+ 5 | five
+ 3 | three
+(6 rows)
+
+DELETE FROM unique_tbl WHERE t = 'tree'; -- makes constraint valid again
+SELECT * FROM unique_tbl;
+ i |   t   
+---+-------
+ 1 | one
+ 2 | two
+ 4 | four
+ 5 | five
+ 3 | three
+(5 rows)
+
+COMMIT; -- should succeed
+SELECT * FROM unique_tbl;
+ i |   t   
+---+-------
+ 1 | one
+ 2 | two
+ 4 | four
+ 5 | five
+ 3 | three
+(5 rows)
+
+-- try adding an initially deferred constraint
+ALTER TABLE unique_tbl DROP CONSTRAINT unique_tbl_i_key;
+ALTER TABLE unique_tbl ADD CONSTRAINT unique_tbl_i_key
+	UNIQUE (i) DEFERRABLE INITIALLY DEFERRED;
+BEGIN;
+INSERT INTO unique_tbl VALUES (1, 'five');
+INSERT INTO unique_tbl VALUES (5, 'one');
+UPDATE unique_tbl SET i = 4 WHERE i = 2;
+UPDATE unique_tbl SET i = 2 WHERE i = 4 AND t = 'four';
+DELETE FROM unique_tbl WHERE i = 1 AND t = 'one';
+DELETE FROM unique_tbl WHERE i = 5 AND t = 'five';
+COMMIT;
+SELECT * FROM unique_tbl;
+ i |   t   
+---+-------
+ 4 | two
+ 2 | four
+ 3 | three
+ 1 | five
+ 5 | one
+(5 rows)
+
+-- should fail at commit-time
+BEGIN;
+INSERT INTO unique_tbl VALUES (3, 'Three'); -- should succeed for now
+COMMIT; -- should fail
+ERROR:  duplicate key value violates unique constraint "unique_tbl_i_key"
+DETAIL:  Key (i)=('3') already exists.
+-- make constraint check immediate
+BEGIN;
+SET CONSTRAINTS ALL IMMEDIATE;
+INSERT INTO unique_tbl VALUES (3, 'Three'); -- should fail
+ERROR:  duplicate key value violates unique constraint "unique_tbl_i_key"
+DETAIL:  Key (i)=('3') already exists.
+COMMIT;
+-- forced check when SET CONSTRAINTS is called
+BEGIN;
+SET CONSTRAINTS ALL DEFERRED;
+INSERT INTO unique_tbl VALUES (3, 'Three'); -- should succeed for now
+SET CONSTRAINTS ALL IMMEDIATE; -- should fail
+ERROR:  duplicate key value violates unique constraint "unique_tbl_i_key"
+DETAIL:  Key (i)=('3') already exists.
+COMMIT;
+CREATE TABLE deferred_excl (
+  f1 int,
+  f2 int,
+  CONSTRAINT deferred_excl_con EXCLUDE (f1 WITH =) WITH (orioledb_index=true) INITIALLY DEFERRED
+) USING orioledb;
+INSERT INTO deferred_excl VALUES(1);
+INSERT INTO deferred_excl VALUES(2);
+INSERT INTO deferred_excl VALUES(1); -- fail
+ERROR:  conflicting key value violates exclusion constraint "deferred_excl_con"
+DETAIL:  Key (f1)=(1) conflicts with existing key (f1)=(1).
+INSERT INTO deferred_excl VALUES(1) ON CONFLICT ON CONSTRAINT deferred_excl_con DO NOTHING; -- fail
+ERROR:  ON CONFLICT does not support deferrable unique constraints/exclusion constraints as arbiters
+BEGIN;
+INSERT INTO deferred_excl VALUES(2); -- no fail here
+COMMIT; -- should fail here
+ERROR:  conflicting key value violates exclusion constraint "deferred_excl_con"
+DETAIL:  Key (f1)=(2) conflicts with existing key (f1)=(2).
+BEGIN;
+INSERT INTO deferred_excl VALUES(3);
+INSERT INTO deferred_excl VALUES(3); -- no fail here
+COMMIT; -- should fail here
+ERROR:  conflicting key value violates exclusion constraint "deferred_excl_con"
+DETAIL:  Key (f1)=(3) conflicts with existing key (f1)=(3).
+-- bug #13148: deferred constraint versus HOT update
+BEGIN;
+INSERT INTO deferred_excl VALUES(2, 1); -- no fail here
+DELETE FROM deferred_excl WHERE f1 = 2 AND f2 IS NULL; -- remove old row
+UPDATE deferred_excl SET f2 = 2 WHERE f1 = 2;
+COMMIT; -- should not fail
+SELECT * FROM deferred_excl;
+ f1 | f2 
+----+----
+  1 |   
+  2 |  2
+(2 rows)
+
+ 
+CREATE TABLE o_test_ib_ioc1
+(
+	id1 int8 NOT NULL,
+	id2 int8 NOT NULL PRIMARY KEY,
+	UNIQUE (id1) WITH (orioledb_index=false, deduplicate_items=false)
+) USING orioledb;
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
+NOTICE:  index bridging is enabled for orioledb table 'o_test_ib_ioc1'
+DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
+\d+ o_test_ib_ioc1
+                             Table "exclude.o_test_ib_ioc1"
+ Column |  Type  | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+--------+-----------+----------+---------+---------+--------------+-------------
+ id1    | bigint |           | not null |         | plain   |              | 
+ id2    | bigint |           | not null |         | plain   |              | 
+Indexes:
+    "o_test_ib_ioc1_pkey" PRIMARY KEY, btree (id2)
+    "o_test_ib_ioc1_id1_key" UNIQUE CONSTRAINT, btree (id1) WITH (orioledb_index='false', deduplicate_items='false')
+Options: index_bridging=true
+
+INSERT INTO o_test_ib_ioc1 VALUES (3, 16);
+SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   3 |  16
+(1 row)
+
+INSERT INTO o_test_ib_ioc1 VALUES (3, 15);
+ERROR:  duplicate key value violates unique constraint "o_test_ib_ioc1_id1_key"
+DETAIL:  Key (id1)=(3) already exists.
+SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   3 |  16
+(1 row)
+
+INSERT INTO o_test_ib_ioc1 VALUES (3, 14);
+ERROR:  duplicate key value violates unique constraint "o_test_ib_ioc1_id1_key"
+DETAIL:  Key (id1)=(3) already exists.
+SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   3 |  16
+(1 row)
+
+INSERT INTO o_test_ib_ioc1 VALUES (3, 13) ON CONFLICT (id1) DO NOTHING;
+SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   3 |  16
+(1 row)
+
+BEGIN;
+SELECT * FROM o_test_ib_ioc1 WHERE id1 = 3 FOR UPDATE;
+ id1 | id2 
+-----+-----
+   3 |  16
+(1 row)
+
+COMMIT;
+INSERT INTO o_test_ib_ioc1 VALUES (3, 12) ON CONFLICT (id1) DO UPDATE SET id2 = EXCLUDED.id2 * 10;
+SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   3 | 120
+(1 row)
+
+INSERT INTO o_test_ib_ioc1 VALUES (2, 11);
+SELECT * FROM o_test_ib_ioc1 ORDER BY id1;
+ id1 | id2 
+-----+-----
+   2 |  11
+   3 | 120
+(2 rows)
+
+CREATE TABLE ib_ranges0 (
+  t1 char(1),
+  c1 int4,
+  c2 text PRIMARY KEY
+) USING orioledb;
+CREATE UNIQUE INDEX ib_ranges0_ix1 ON ib_ranges0(c1) WITH (orioledb_index=false);
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
+NOTICE:  index bridging is enabled for orioledb table 'ib_ranges0'
+DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
+-- these should succeed because they don't match the index predicate
+INSERT INTO ib_ranges0 VALUES('A', -1, '-3');
+INSERT INTO ib_ranges0 VALUES('B', -6, '12');
+-- succeed
+INSERT INTO ib_ranges0 VALUES('C', -5, '55');
+SELECT * FROM ib_ranges0;
+ t1 | c1 | c2 
+----+----+----
+ A  | -1 | -3
+ B  | -6 | 12
+ C  | -5 | 55
+(3 rows)
+
+-- fail, overlaps
+INSERT INTO ib_ranges0 VALUES('D', -5, '62');
+ERROR:  duplicate key value violates unique constraint "ib_ranges0_ix1"
+DETAIL:  Key (c1)=(-5) already exists.
+SELECT * FROM ib_ranges0;
+ t1 | c1 | c2 
+----+----+----
+ A  | -1 | -3
+ B  | -6 | 12
+ C  | -5 | 55
+(3 rows)
+
+CREATE TABLE ib_ranges (
+  c1 int4range,
+  c2 TEXT
+) USING orioledb;
+ALTER TABLE ib_ranges
+	ADD EXCLUDE USING btree (c1 WITH <->, (orioledb_int4range_immutable(c2)) WITH <->)
+  WITH (orioledb_index=false)
+  WHERE (NOT c1 @> 0::int4);
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
+NOTICE:  index bridging is enabled for orioledb table 'ib_ranges'
+DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
+\d+ ib_ranges
+                                  Table "exclude.ib_ranges"
+ Column |   Type    | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-----------+-----------+----------+---------+----------+--------------+-------------
+ c1     | int4range |           |          |         | extended |              | 
+ c2     | text      |           |          |         | extended |              | 
+Indexes:
+    "ib_ranges_c1_orioledb_int4range_immutable_excl" EXCLUDE USING btree (c1 WITH <->, orioledb_int4range_immutable(c2) WITH <->) WITH (orioledb_index='false') WHERE (NOT c1 @> 0)
+Options: index_bridging=true
+
+-- these should succeed because they don't match the index predicate
+INSERT INTO ib_ranges VALUES(int4range(-1, 3), '[-2, 2]');
+INSERT INTO ib_ranges VALUES(int4range(-6, 2), '[-21, 14]');
+-- succeed
+INSERT INTO ib_ranges VALUES(int4range(-5, -2), '[2, 5)');
+SELECT * FROM ib_ranges;
+   c1    |    c2     
+---------+-----------
+ [-1,3)  | [-2, 2]
+ [-6,2)  | [-21, 14]
+ [-5,-2) | [2, 5)
+(3 rows)
+
+-- fail, duplicate
+INSERT INTO ib_ranges VALUES(int4range(-5, -2), '[2, 5)');
+ERROR:  conflicting key value violates exclusion constraint "ib_ranges_c1_orioledb_int4range_immutable_excl"
+DETAIL:  Key (c1, orioledb_int4range_immutable(c2))=([-5,-2), [2,5)) conflicts with existing key (c1, orioledb_int4range_immutable(c2))=([-5,-2), [2,5)).
+SELECT * FROM ib_ranges;
+   c1    |    c2     
+---------+-----------
+ [-1,3)  | [-2, 2]
+ [-6,2)  | [-21, 14]
+ [-5,-2) | [2, 5)
+(3 rows)
+
+-- fail, overlaps
+INSERT INTO ib_ranges VALUES(int4range(-6, -3), '[2, 5)');
+ERROR:  conflicting key value violates exclusion constraint "ib_ranges_c1_orioledb_int4range_immutable_excl"
+DETAIL:  Key (c1, orioledb_int4range_immutable(c2))=([-6,-3), [2,5)) conflicts with existing key (c1, orioledb_int4range_immutable(c2))=([-5,-2), [2,5)).
+SELECT * FROM ib_ranges;
+   c1    |    c2     
+---------+-----------
+ [-1,3)  | [-2, 2]
+ [-6,2)  | [-21, 14]
+ [-5,-2) | [2, 5)
+(3 rows)
+
+-- succeed, because violation is ignored
+INSERT INTO ib_ranges VALUES(int4range(-6, -3), '[2, 5)')
+  ON CONFLICT ON CONSTRAINT ib_ranges_c1_orioledb_int4range_immutable_excl DO NOTHING RETURNING *;
+ c1 | c2 
+----+----
+(0 rows)
+
+SELECT * FROM ib_ranges;
+   c1    |    c2     
+---------+-----------
+ [-1,3)  | [-2, 2]
+ [-6,2)  | [-21, 14]
+ [-5,-2) | [2, 5)
+(3 rows)
+
+SELECT * FROM ib_ranges;
+   c1    |    c2     
+---------+-----------
+ [-1,3)  | [-2, 2]
+ [-6,2)  | [-21, 14]
+ [-5,-2) | [2, 5)
+(3 rows)
+
+-- fail, because DO UPDATE variant requires unique index
+INSERT INTO ib_ranges VALUES(int4range(-6, -3), '[2, 5)')
+  ON CONFLICT ON CONSTRAINT ib_ranges_c1_orioledb_int4range_immutable_excl DO UPDATE SET c2 = EXCLUDED.c2;
+ERROR:  ON CONFLICT DO UPDATE not supported with exclusion constraints
+SELECT * FROM ib_ranges;
+   c1    |    c2     
+---------+-----------
+ [-1,3)  | [-2, 2]
+ [-6,2)  | [-21, 14]
+ [-5,-2) | [2, 5)
+(3 rows)
+
+-- succeed because c1 doesn't overlap
+INSERT INTO ib_ranges VALUES(int4range(-16, -13), '[2, 5)');
+SELECT * FROM ib_ranges;
+    c1     |    c2     
+-----------+-----------
+ [-1,3)    | [-2, 2]
+ [-6,2)    | [-21, 14]
+ [-5,-2)   | [2, 5)
+ [-16,-13) | [2, 5)
+(4 rows)
+
+-- succeed because c2 doesn't overlap
+INSERT INTO ib_ranges VALUES(int4range(-4, -3), '[12, 15)');
+SELECT * FROM ib_ranges;
+    c1     |    c2     
+-----------+-----------
+ [-1,3)    | [-2, 2]
+ [-6,2)    | [-21, 14]
+ [-5,-2)   | [2, 5)
+ [-16,-13) | [2, 5)
+ [-4,-3)   | [12, 15)
+(5 rows)
+
+CREATE TABLE ib_unique_tbl (
+	i int,
+	t text,
+	UNIQUE (i) WITH (orioledb_index=false) DEFERRABLE
+) USING orioledb;
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
+NOTICE:  index bridging is enabled for orioledb table 'ib_unique_tbl'
+DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
+INSERT INTO ib_unique_tbl VALUES (0, 'one');
+INSERT INTO ib_unique_tbl VALUES (1, 'two');
+INSERT INTO ib_unique_tbl VALUES (2, 'tree');
+INSERT INTO ib_unique_tbl VALUES (3, 'four');
+INSERT INTO ib_unique_tbl VALUES (4, 'five');
+BEGIN;
+-- default is immediate so this should fail right away
+UPDATE ib_unique_tbl SET i = 1 WHERE i = 0;
+ERROR:  duplicate key value violates unique constraint "ib_unique_tbl_i_key"
+DETAIL:  Key (i)=(1) already exists.
+ROLLBACK;
+-- check is done at end of statement, so this should succeed
+UPDATE ib_unique_tbl SET i = i+1;
+SELECT * FROM ib_unique_tbl;
+ i |  t   
+---+------
+ 1 | one
+ 2 | two
+ 3 | tree
+ 4 | four
+ 5 | five
+(5 rows)
+
+-- explicitly defer the constraint
+BEGIN;
+SET CONSTRAINTS ib_unique_tbl_i_key DEFERRED;
+INSERT INTO ib_unique_tbl VALUES (3, 'three');
+SELECT * FROM ib_unique_tbl;
+ i |   t   
+---+-------
+ 1 | one
+ 2 | two
+ 3 | tree
+ 4 | four
+ 5 | five
+ 3 | three
+(6 rows)
+
+DELETE FROM ib_unique_tbl WHERE t = 'tree'; -- makes constraint valid again
+SELECT * FROM ib_unique_tbl;
+ i |   t   
+---+-------
+ 1 | one
+ 2 | two
+ 4 | four
+ 5 | five
+ 3 | three
+(5 rows)
+
+COMMIT; -- should succeed
+SELECT * FROM ib_unique_tbl;
+ i |   t   
+---+-------
+ 1 | one
+ 2 | two
+ 4 | four
+ 5 | five
+ 3 | three
+(5 rows)
+
+-- try adding an initially deferred constraint
+ALTER TABLE ib_unique_tbl DROP CONSTRAINT ib_unique_tbl_i_key;
+ALTER TABLE ib_unique_tbl ADD CONSTRAINT ib_unique_tbl_i_key
+	UNIQUE (i) DEFERRABLE INITIALLY DEFERRED;
+BEGIN;
+INSERT INTO ib_unique_tbl VALUES (1, 'five');
+INSERT INTO ib_unique_tbl VALUES (5, 'one');
+UPDATE ib_unique_tbl SET i = 4 WHERE i = 2;
+UPDATE ib_unique_tbl SET i = 2 WHERE i = 4 AND t = 'four';
+DELETE FROM ib_unique_tbl WHERE i = 1 AND t = 'one';
+DELETE FROM ib_unique_tbl WHERE i = 5 AND t = 'five';
+COMMIT;
+SELECT * FROM ib_unique_tbl;
+ i |   t   
+---+-------
+ 4 | two
+ 2 | four
+ 3 | three
+ 1 | five
+ 5 | one
+(5 rows)
+
+-- should fail at commit-time
+BEGIN;
+INSERT INTO ib_unique_tbl VALUES (3, 'Three'); -- should succeed for now
+COMMIT; -- should fail
+ERROR:  duplicate key value violates unique constraint "ib_unique_tbl_i_key"
+DETAIL:  Key (i)=('3') already exists.
+-- make constraint check immediate
+BEGIN;
+SET CONSTRAINTS ALL IMMEDIATE;
+INSERT INTO ib_unique_tbl VALUES (3, 'Three'); -- should fail
+ERROR:  duplicate key value violates unique constraint "ib_unique_tbl_i_key"
+DETAIL:  Key (i)=('3') already exists.
+COMMIT;
+-- forced check when SET CONSTRAINTS is called
+BEGIN;
+SET CONSTRAINTS ALL DEFERRED;
+INSERT INTO ib_unique_tbl VALUES (3, 'Three'); -- should succeed for now
+SET CONSTRAINTS ALL IMMEDIATE; -- should fail
+ERROR:  duplicate key value violates unique constraint "ib_unique_tbl_i_key"
+DETAIL:  Key (i)=('3') already exists.
+COMMIT;
+CREATE TABLE ib_deferred_excl (
+  f1 int,
+  f2 int,
+  CONSTRAINT ib_deferred_excl_con EXCLUDE (f1 WITH =) WITH (orioledb_index=false) INITIALLY DEFERRED
+) USING orioledb;
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
+NOTICE:  index bridging is enabled for orioledb table 'ib_deferred_excl'
+DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
+INSERT INTO ib_deferred_excl VALUES(1);
+INSERT INTO ib_deferred_excl VALUES(2);
+INSERT INTO ib_deferred_excl VALUES(1); -- fail
+ERROR:  conflicting key value violates exclusion constraint "ib_deferred_excl_con"
+DETAIL:  Key (f1)=(1) conflicts with existing key (f1)=(1).
+INSERT INTO ib_deferred_excl VALUES(1) ON CONFLICT ON CONSTRAINT ib_deferred_excl_con DO NOTHING; -- fail
+ERROR:  ON CONFLICT does not support deferrable unique constraints/exclusion constraints as arbiters
+BEGIN;
+INSERT INTO ib_deferred_excl VALUES(2); -- no fail here
+COMMIT; -- should fail here
+ERROR:  conflicting key value violates exclusion constraint "ib_deferred_excl_con"
+DETAIL:  Key (f1)=(2) conflicts with existing key (f1)=(2).
+BEGIN;
+INSERT INTO ib_deferred_excl VALUES(3);
+INSERT INTO ib_deferred_excl VALUES(3); -- no fail here
+COMMIT; -- should fail here
+ERROR:  conflicting key value violates exclusion constraint "ib_deferred_excl_con"
+DETAIL:  Key (f1)=(3) conflicts with existing key (f1)=(3).
+-- bug #13148: deferred constraint versus HOT update
+BEGIN;
+INSERT INTO ib_deferred_excl VALUES(2, 1); -- no fail here
+DELETE FROM ib_deferred_excl WHERE f1 = 2 AND f2 IS NULL; -- remove old row
+UPDATE ib_deferred_excl SET f2 = 2 WHERE f1 = 2;
+COMMIT; -- should not fail
+SELECT * FROM ib_deferred_excl;
+ f1 | f2 
+----+----
+  1 |   
+  2 |  2
+(2 rows)
+
+DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to 11 other objects
+DETAIL:  drop cascades to table o_test_is_null_assert
+drop cascades to table o_test_ioc1
+drop cascades to table ranges0
+drop cascades to table ranges
+drop cascades to table unique_tbl
+drop cascades to table deferred_excl
+drop cascades to table o_test_ib_ioc1
+drop cascades to table ib_ranges0
+drop cascades to table ib_ranges
+drop cascades to table ib_unique_tbl
+drop cascades to table ib_deferred_excl
+DROP SCHEMA exclude CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to function int4range_overlaps(int4range,int4range)
+drop cascades to operator <->(int4range,int4range)
+RESET search_path;

@@ -72,6 +72,7 @@
 #include "nodes/nodeFuncs.h"
 #include "nodes/makefuncs.h"
 #include "nodes/pg_list.h"
+#include "nodes/primnodes.h"
 #include "optimizer/optimizer.h"
 #include "optimizer/planner.h"
 #include "parser/parse_coerce.h"
@@ -482,6 +483,7 @@ get_all_vacuum_rels(int options)
 	return vacrels;
 }
 
+/* Based on postgres function ReindexMultipleTables */
 static bool
 check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool concurrently)
 {
@@ -505,7 +507,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	 */
 	Assert(objectName || objectKind != REINDEX_OBJECT_SCHEMA);
 
-	if (objectKind == REINDEX_OBJECT_SYSTEM)
+	if (objectKind == REINDEX_OBJECT_SYSTEM && concurrently)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("cannot reindex system catalogs concurrently")));
@@ -520,7 +522,11 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	{
 		objectOid = get_namespace_oid(objectName, false);
 
-		if (!object_ownercheck(NamespaceRelationId, objectOid, GetUserId()))
+		if (!object_ownercheck(NamespaceRelationId, objectOid, GetUserId())
+#if PG_VERSION_NUM >= 170000
+			&& !has_privs_of_role(GetUserId(), ROLE_PG_MAINTAIN)
+#endif
+			)
 			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_SCHEMA,
 						   objectName);
 	}
@@ -532,7 +538,11 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("can only reindex the currently open database")));
-		if (!object_ownercheck(DatabaseRelationId, objectOid, GetUserId()))
+		if (!object_ownercheck(DatabaseRelationId, objectOid, GetUserId())
+#if PG_VERSION_NUM >= 170000
+			&& !has_privs_of_role(GetUserId(), ROLE_PG_MAINTAIN)
+#endif
+			)
 			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_DATABASE,
 						   get_database_name(objectOid));
 	}
@@ -620,7 +630,7 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 		 * Skip system tables, since index_create() would reject indexing them
 		 * concurrently (and it would likely fail if we tried).
 		 */
-		if (IsCatalogRelationOid(relid))
+		if (concurrently && IsCatalogRelationOid(relid))
 		{
 			if (!concurrent_warning)
 				ereport(WARNING,
@@ -1196,8 +1206,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			case REINDEX_OBJECT_SCHEMA:
 			case REINDEX_OBJECT_SYSTEM:
 			case REINDEX_OBJECT_DATABASE:
-				if (concurrently)
-					has_orioledb = check_multiple_tables(stmt->name, stmt->kind, concurrently);
+				has_orioledb = check_multiple_tables(stmt->name, stmt->kind, concurrently);
 				break;
 			default:
 				elog(ERROR, "unrecognized object type: %d",
@@ -1886,7 +1895,8 @@ create_o_table_for_rel(Relation rel)
 	o_table = o_table_tableam_create(oids, tupdesc,
 									 rel->rd_rel->relpersistence,
 									 RelationGetFillFactor(rel, BTREE_DEFAULT_FILLFACTOR),
-									 rel->rd_rel->reltablespace);
+									 rel->rd_rel->reltablespace,
+									 false);
 	o_opclass_cache_add_table(o_table);
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
@@ -3082,6 +3092,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						int			ix_num = InvalidIndexNumber;
 						int			i;
 						bool		add_bridging = false;
+						bool		btree_bridging = false;
 
 						for (i = 0; i < o_table->nindices; i++)
 						{
@@ -3116,11 +3127,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 								if (options && !options->orioledb_index)
 								{
-									ereport(WARNING,
-											errcode(ERRCODE_WARNING),
-											errmsg("using bridged btree index for orioledb"),
-											errdetail("This feature is intended for testing purposes and is not recommended for normal usage."));
 									add_bridging = true;
+									btree_bridging = true;
 								}
 							}
 							else
@@ -3135,11 +3143,16 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 								if (options && !options->orioledb_index)
-									ereport(WARNING,
-											errcode(ERRCODE_WARNING),
-											errmsg("using bridged btree index for orioledb"),
-											errdetail("This feature is intended for testing purposes and is not recommended for normal usage."));
+									btree_bridging = true;
 							}
+						}
+
+						if (btree_bridging)
+						{
+							ereport(WARNING,
+									errcode(ERRCODE_WARNING),
+									errmsg("using bridged btree index for orioledb"),
+									errdetail("This feature is intended for testing purposes and is not recommended for normal usage."));
 						}
 
 						if (add_bridging)

@@ -104,8 +104,8 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 					setHigh = false;
 		ScanKeyData *key = &keyData[i];
 		AttrNumber	attnum = key->sk_attno - 1;
-		OBTreeValueBound low = {0, 0, O_VALUE_BOUND_MINUS_INFINITY, NULL};
-		OBTreeValueBound high = {0, 0, O_VALUE_BOUND_PLUS_INFINITY, NULL};
+		OBTreeValueBound low = {0, 0, O_VALUE_BOUND_MINUS_INFINITY, NULL, NULL};
+		OBTreeValueBound high = {0, 0, O_VALUE_BOUND_PLUS_INFINITY, NULL, NULL};
 		OIndexField *field = &fields[attnum];
 
 		switch (key->sk_strategy)
@@ -139,6 +139,12 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 					high.flags = O_VALUE_BOUND_UPPER |
 						O_VALUE_BOUND_INCLUSIVE |
 						O_VALUE_BOUND_NULL;
+				}
+				else if (field->exclusion_fn)
+				{
+					low.exclusion_fn = field->exclusion_fn;
+					low.value = key->sk_argument;
+					low.type = field->inputtype;
 				}
 				else
 				{
@@ -311,6 +317,7 @@ o_fill_key_bounds(Datum v, Oid type,
 		low->value = v;
 		low->type = type;
 		low->comparator = comparator;
+		low->exclusion_fn = NULL;
 		if (coercible)
 			low->flags |= O_VALUE_BOUND_COERCIBLE;
 	}
@@ -319,6 +326,7 @@ o_fill_key_bounds(Datum v, Oid type,
 		high->value = v;
 		high->type = type;
 		high->comparator = comparator;
+		high->exclusion_fn = NULL;
 		if (coercible)
 			high->flags |= O_VALUE_BOUND_COERCIBLE;
 	}

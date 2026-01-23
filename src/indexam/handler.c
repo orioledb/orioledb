@@ -62,6 +62,7 @@ static bool orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 							  Datum oldTupleid,
 							  Relation heapRel,
 							  IndexUniqueCheck checkUnique,
+							  bool indexUnchanged,
 							  IndexInfo *indexInfo);
 static bool orioledb_amdelete(Relation rel,
 							  Datum *values, bool *isnull,
@@ -290,7 +291,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	}
 
 	relname = makeString(index->rd_rel->relname.data);
-	if (list_member(reindex_list, relname))
+	if (!in_nontransactional_truncate && list_member(reindex_list, relname))
 	{
 		reindex = true;
 		reindex_list = list_delete(reindex_list, relname);
@@ -442,7 +443,7 @@ append_rowid_values(OIndexDescr *id,
 
 		tuple.data = p;
 		if (id->bridging)
-			tuple.data += MAXALIGN(sizeof(ItemPointerData));
+			tuple.data += MAXALIGN(sizeof(ORowIdBridgeData));
 
 		tuple.formatFlags = add->flags;
 		*version = o_tuple_get_version(tuple);
@@ -516,6 +517,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	OIndexDescr *index_descr;
 	OTableDescr *descr;
 	OIndexNumber ix_num;
+	OBTreeModifyResult iresult;
 	bool		success;
 	BTreeModifyCallbackInfo callbackInfo =
 	{
@@ -531,12 +533,13 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	OTuple		tuple;
 	CommitSeqNo csn;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
-	int			ctid_off = 0;
 
 	if (options && !options->orioledb_index)
 	{
 		bytea	   *rowid;
 		Pointer		p;
+		bool		result;
+		ORowIdBridgeData *bridgeData;
 
 		ORelOidsSetFromRel(oids, heapRel);
 
@@ -549,18 +552,23 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 		if (!GET_PRIMARY(descr)->primaryIsCtid)
 		{
 			p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-
-			tupleid = PointerGetDatum(p);
+			bridgeData = (ORowIdBridgeData *) p;
 		}
 		else
 		{
 			p += MAXALIGN(sizeof(ORowIdAddendumCtid));
 			p += MAXALIGN(sizeof(ItemPointerData));
-			tupleid = PointerGetDatum(p);
+			bridgeData = (ORowIdBridgeData *) p;
 		}
+		tupleid = PointerGetDatum(&bridgeData->bridgeCtid);
 
-		return btinsert(rel, values, isnull, tupleid, heapRel,
-						checkUnique, indexUnchanged, indexInfo);
+		if (!indexUnchanged)
+			result = btinsert(rel, values, isnull, tupleid, heapRel,
+							  checkUnique, indexUnchanged, indexInfo);
+		else
+			result = true;		/* FIXME: Wrong assumption? */
+
+		return result;
 	}
 
 	if (OidIsValid(rel->rd_rel->relrewrite))
@@ -570,12 +578,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 		return true;
 
 	ORelOidsSetFromRel(oids, rel);
-	if (rel->rd_index->indisprimary)
-		ix_type = oIndexPrimary;
-	else if (rel->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
+	ix_type = o_index_rel_get_ix_type(rel);
 	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
@@ -591,33 +594,36 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	}
 	Assert(ix_num < descr->nIndices);
 
-	if (index_descr->primaryIsCtid)
-		ctid_off++;
-	if (index_descr->bridging)
-		ctid_off++;
-
-	if (index_descr->leafTupdesc->natts - ctid_off <= rel->rd_att->natts)
+	if (index_descr->duplicates != NIL)
 	{
-		/* Remove duplicates like we do in orioledb tables */
-		int			skipped = 0;
+		ListCell   *lc = NULL;
+		List	   *duplicate = NIL;
+		int			cur_attr;
+		int			i;
 
-		for (int copy_from = 0; copy_from < rel->rd_att->natts; copy_from++)
+		/* Remove duplicate column values to store in our index */
+
+		if (index_descr->duplicates != NIL)
+			lc = list_head(index_descr->duplicates);
+		if (lc != NULL)
+			duplicate = (List *) lfirst(lc);
+
+		cur_attr = 0;
+		for (i = 0; i < rel->rd_att->natts; i++)
 		{
-			Form_pg_attribute orig_attr = &rel->rd_att->attrs[copy_from];
-			Form_pg_attribute idx_attr;
-
-			if (copy_from - skipped >= index_descr->leafTupdesc->natts)
-				break;
-
-			idx_attr = &index_descr->leafTupdesc->attrs[copy_from - skipped];
-
-			if (strncmp(orig_attr->attname.data, idx_attr->attname.data, NAMEDATALEN) == 0)
+			if (duplicate != NIL && linitial_int(duplicate) == cur_attr)
 			{
-				if (skipped > 0)
-					values[copy_from - skipped] = values[copy_from];
+				lc = lnext(index_descr->duplicates, lc);
+				if (lc != NULL)
+					duplicate = (List *) lfirst(lc);
+				else
+					duplicate = NIL;
 			}
 			else
-				skipped++;
+			{
+				values[cur_attr] = values[i];
+				cur_attr++;
+			}
 		}
 	}
 	append_rowid_values(index_descr,
@@ -633,12 +639,19 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 
 	fill_current_oxid_osnapshot(&oxid, &o_snapshot);
 
-	success = (o_tbl_index_insert(descr, descr->indices[ix_num], &tuple, slot,
-								  oxid, o_snapshot.csn, &callbackInfo) == OBTreeModifyResultInserted);
+	iresult = o_tbl_index_insert(descr, descr->indices[ix_num], &tuple, slot,
+								 oxid, o_snapshot.csn, &callbackInfo,
+								 checkUnique);
+
+	if (checkUnique != UNIQUE_CHECK_EXISTING)
+		success = (iresult == OBTreeModifyResultInserted);
+	else
+		success = (iresult == OBTreeModifyResultNotFound);
 
 	if (!success)
 	{
-		o_report_duplicate(heapRel, descr->indices[ix_num], slot);
+		if (checkUnique == UNIQUE_CHECK_YES || checkUnique == UNIQUE_CHECK_EXISTING)
+			o_report_duplicate(heapRel, descr->indices[ix_num], slot);
 	}
 
 	if (tuple.data)
@@ -653,6 +666,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 				  Datum *valuesOld, bool *isnullOld, Datum oldTupleid,
 				  Relation heapRel,
 				  IndexUniqueCheck checkUnique,
+				  bool indexUnchanged,
 				  IndexInfo *indexInfo)
 {
 	OTableModifyResult result;
@@ -674,18 +688,33 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 	if (options && !options->orioledb_index)
-		return true;
+	{
+		bool		satisfiesConstraint;
+
+		/*
+		 * Call index_insert here, to mimic non MVCC aware part of
+		 * ExecUpdateIndexTuples
+		 */
+		satisfiesConstraint = index_insert(rel, /* index relation */
+										   values,	/* array of index Datums */
+										   isnull,	/* null flags */
+										   tupleid, /* tid of heap tuple */
+										   heapRel, /* heap relation */
+										   checkUnique, /* type of uniqueness
+														 * check to do */
+										   indexUnchanged,	/* UPDATE without
+															 * logical change? */
+										   indexInfo);	/* index AM may need
+														 * this */
+
+		return satisfiesConstraint;
+	}
 
 	if (rel->rd_index->indisprimary)
 		return true;
 
 	ORelOidsSetFromRel(oids, rel);
-	if (rel->rd_index->indisprimary)
-		ix_type = oIndexPrimary;
-	else if (rel->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
+	ix_type = o_index_rel_get_ix_type(rel);
 	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
@@ -725,11 +754,11 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 	tts_orioledb_store_non_leaf_tuple(new_slot, new_tuple, descr, csn, ix_num, false, NULL);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-
 	result = o_update_secondary_index(index_descr, ix_num,
 									  new_valid, old_valid,
 									  new_slot, new_tuple,
-									  old_slot, oxid, oSnapshot.csn);
+									  old_slot, oxid, oSnapshot.csn,
+									  checkUnique);
 
 	for (i = 0; i < index_descr->leafTupdesc->natts; i++)
 	{
@@ -786,7 +815,8 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 					break;
 				}
 			case BTreeOperationInsert:
-				o_report_duplicate(heapRel, index_descr, new_slot);
+				if (checkUnique == UNIQUE_CHECK_YES || checkUnique == UNIQUE_CHECK_EXISTING)
+					o_report_duplicate(heapRel, index_descr, new_slot);
 				break;
 			default:
 				if (old_tuple.data)
@@ -834,10 +864,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 		return true;
 
 	ORelOidsSetFromRel(oids, rel);
-	if (rel->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
+	ix_type = o_index_rel_get_ix_type(rel);
 	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
@@ -1346,7 +1373,7 @@ orioledb_amoptions(Datum reloptions, bool validate)
 		add_local_bool_reloption(&relopts, "deduplicate_items",
 								 "Enables \"deduplicate items\" feature for "
 								 "this btree index",
-								 true,
+								 false,
 								 offsetof(OBTOptions, bt_options) +
 								 offsetof(BTOptions, deduplicate_items));
 
@@ -1417,9 +1444,6 @@ orioledb_amadjustmembers(Oid opfamilyoid, Oid opclassoid, List *operators,
 {
 }
 
-/* TODO: Remove this hack; probably patch table_index_fetch_begin to accept indexRelation */
-Relation	o_current_index = NULL;
-
 IndexScanDesc
 orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 {
@@ -1432,11 +1456,8 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	OIndexNumber ix_num;
 	OBTOptions *options = (OBTOptions *) rel->rd_options;
 
-	o_current_index = NULL;
-
 	if (options && !options->orioledb_index)
 	{
-		o_current_index = rel;
 		return btbeginscan(rel, nkeys, norderbys);
 	}
 
@@ -1454,12 +1475,7 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	scan->xs_want_rowid = true;
 
 	ORelOidsSetFromRel(oids, rel);
-	if (rel->rd_index->indisprimary)
-		ix_type = oIndexPrimary;
-	else if (rel->rd_index->indisunique)
-		ix_type = oIndexUnique;
-	else
-		ix_type = oIndexRegular;
+	ix_type = o_index_rel_get_ix_type(rel);
 	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
@@ -1541,70 +1557,57 @@ fill_hitup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 	scan->xs_hitup = ExecCopySlotHeapTuple(slot);
 }
 
-/* TODO: Rewrite */
-static void
-fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
-		  CommitSeqNo tupleCsn, BTreeLocationHint *hint)
+/* Search all duplicates with same original attrnum */
+static inline void
+search_next_dup_range(List *duplicates, int dup_range_lc_id, int *dup_range_start, int *dup_range_end)
 {
-	OScanState *o_scan = (OScanState *) scan;
-	TupleTableSlot *slot;
-	bytea	   *rowid;
-	OIndexDescr *index_descr = descr->indices[o_scan->ixNum];
-	TupleDesc	pk_tupdesc;
-	OTupleFixedFormatSpec *pk_spec;
-	int			result_size,
-				tuple_size = 0;
-	Pointer		ptr;
+	List	   *duplicate = NIL;
+	ListCell   *dup_range_lc = NULL;
+	int			dup_range_src_attnum = -1;
 
-	slot = index_descr->index_slot;
-	tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, o_scan->ixNum, false, hint);
-	slot_getallattrs(slot);
-
-	/*
-	 * moving values from duplicate field places that will be filled during
-	 * index_form_tuple
-	 */
-	if (index_descr->itupdesc->natts > index_descr->leafTupdesc->natts)
+	*dup_range_start = -1;
+	*dup_range_end = -1;
+	do
 	{
-		int			skipped = index_descr->itupdesc->natts - index_descr->leafTupdesc->natts;
+		if (dup_range_lc_id >= 0)
+			dup_range_lc = list_nth_cell(duplicates, dup_range_lc_id);
+		else
+			dup_range_lc = NULL;
 
-		for (int copy_to = index_descr->itupdesc->natts - 1; copy_to >= 0; copy_to--)
+		if (dup_range_lc != NULL)
 		{
-			Form_pg_attribute idx_attr = &index_descr->itupdesc->attrs[copy_to];
-			Form_pg_attribute slot_attr = &index_descr->leafTupdesc->attrs[copy_to - skipped];
-
-			if (strncmp(slot_attr->attname.data, idx_attr->attname.data, NAMEDATALEN) == 0)
+			duplicate = (List *) lfirst(dup_range_lc);
+			if (*dup_range_end < 0)
 			{
-				if (skipped == 0)
-					break;
-				slot->tts_values[copy_to] = slot->tts_values[copy_to - skipped];
-				slot->tts_isnull[copy_to] = slot->tts_isnull[copy_to - skipped];
+				*dup_range_end = dup_range_lc_id;
+				dup_range_src_attnum = linitial_int(duplicate);
 			}
-			else
+			else if (linitial_int(duplicate) != dup_range_src_attnum)
 			{
-				slot->tts_values[copy_to] = 0;
-				slot->tts_isnull[copy_to] = true;
-				skipped--;
+				*dup_range_start = dup_range_lc_id + 1;
 			}
 		}
-	}
+		else
+		{
+			*dup_range_start = dup_range_lc_id + 1;
+		}
+		dup_range_lc_id--;
+	} while (*dup_range_start < 0);
+}
 
-	if (o_scan->ixNum == PrimaryIndexNumber)
-	{
-		OIndexDescr *primary = descr->indices[o_scan->ixNum];
+bytea *
+o_new_rowid(OIndexDescr *primary, TupleTableSlot *slot,
+			Datum *rowid_values, bool *rowid_isnull,
+			CommitSeqNo tupleCsn, BTreeLocationHint *hint)
+{
+	OTableSlot *oslot = (OTableSlot *) slot;
+	Pointer		ptr;
+	int			result_size,
+				tuple_size = 0;
+	bytea	   *rowid;
 
-		pk_tupdesc = primary->nonLeafTupdesc;
-		pk_spec = &primary->nonLeafSpec;
-	}
-	else
+	if (primary->primaryIsCtid)
 	{
-		pk_tupdesc = GET_PRIMARY(descr)->nonLeafTupdesc;
-		pk_spec = &GET_PRIMARY(descr)->nonLeafSpec;
-	}
-
-	if (index_descr->primaryIsCtid)
-	{
-		OTableSlot *oslot = (OTableSlot *) slot;
 		ORowIdAddendumCtid addCtid;
 
 		addCtid.hint = *hint;
@@ -1615,29 +1618,160 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		result_size = MAXALIGN(VARHDRSZ) +
 			MAXALIGN(sizeof(ORowIdAddendumCtid)) +
 			MAXALIGN(sizeof(ItemPointerData));
-		if (index_descr->bridging)
-			result_size += MAXALIGN(sizeof(ItemPointerData));
-		rowid = (bytea *) palloc(result_size);
+		if (primary->bridging)
+			result_size += MAXALIGN(sizeof(ORowIdBridgeData));
+		rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
 		SET_VARSIZE(rowid, result_size);
 		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
 		memcpy(ptr, &addCtid, sizeof(ORowIdAddendumCtid));
 		ptr += MAXALIGN(sizeof(ORowIdAddendumCtid));
 		memcpy(ptr, &slot->tts_tid, sizeof(ItemPointerData));
-		if (index_descr->bridging)
+		ptr += MAXALIGN(sizeof(ItemPointerData));
+
+		if (primary->bridging)
 		{
-			ptr += MAXALIGN(sizeof(ItemPointerData));
-			memcpy(ptr, &oslot->bridge_ctid, sizeof(ItemPointerData));
+			ORowIdBridgeData *bridgedData = (ORowIdBridgeData *) ptr;
+
+			bridgedData->bridgeCtid = oslot->bridge_ctid;
+			bridgedData->bridgeChanged = oslot->bridgeChanged;
 		}
 	}
 	else
 	{
 		ORowIdAddendumNonCtid addNonCtid;
-		Datum	   *rowid_values;
-		bool	   *rowid_isnull;
-		Datum		temp_rowid_values[2 * INDEX_MAX_KEYS];
-		bool		temp_rowid_isnull[2 * INDEX_MAX_KEYS];
+		OTuple		temp_tuple = {0};
+		TupleDesc	pk_tupdesc = NULL;
+		OTupleFixedFormatSpec *pk_spec = NULL;
+
+		/*
+		 * General-case primary key: prepend tuple with maxaligned hint.
+		 */
+
+		result_size = MAXALIGN(VARHDRSZ) + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+		if (primary->bridging)
+			result_size += MAXALIGN(sizeof(ItemPointerData));
+
+		pk_tupdesc = primary->nonLeafTupdesc;
+		pk_spec = &primary->nonLeafSpec;
+
+		tuple_size = o_new_tuple_size(pk_tupdesc, pk_spec, NULL, NULL, oslot->version,
+									  rowid_values, rowid_isnull, NULL);
+		result_size += MAXALIGN(tuple_size);
+
+		rowid = (bytea *) MemoryContextAllocZero(slot->tts_mcxt, result_size);
+		SET_VARSIZE(rowid, result_size);
+		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
+		if (primary->bridging)
+		{
+			ORowIdBridgeData *bridgedData = (ORowIdBridgeData *) (ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid)));
+
+			bridgedData->bridgeCtid = oslot->bridge_ctid;
+			bridgedData->bridgeChanged = oslot->bridgeChanged;
+		}
+
+		temp_tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
+		if (primary->bridging)
+			temp_tuple.data += MAXALIGN(sizeof(ORowIdBridgeData));
+		o_tuple_fill(pk_tupdesc, pk_spec,
+					 &temp_tuple, tuple_size, NULL, NULL, oslot->version, rowid_values, rowid_isnull, NULL);
+
+		addNonCtid.hint = *hint;
+		addNonCtid.flags = temp_tuple.formatFlags;
+		addNonCtid.csn = tupleCsn;
+
+		memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));
+	}
+
+	return rowid;
+}
+
+
+/* TODO: Rewrite */
+static void
+fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
+		  CommitSeqNo tupleCsn, BTreeLocationHint *hint)
+{
+	OScanState *o_scan = (OScanState *) scan;
+	TupleTableSlot *slot;
+	bytea	   *rowid;
+	OIndexDescr *index_descr = descr->indices[o_scan->ixNum];
+	Datum	   *rowid_values = NULL;
+	bool	   *rowid_isnull = NULL;
+	Datum		temp_rowid_values[2 * INDEX_MAX_KEYS];
+	bool		temp_rowid_isnull[2 * INDEX_MAX_KEYS];
+
+	slot = index_descr->index_slot;
+	tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn, o_scan->ixNum, false, hint);
+	slot_getallattrs(slot);
+
+	/*
+	 * moving values from duplicate field places that will be filled during
+	 * index_form_tuple
+	 */
+	if (index_descr->duplicates != NIL)
+	{
+		int			lc_id = 0;
+		ListCell   *lc = NULL;
+		List	   *duplicate = NIL;
 		int			i;
-		OTableSlot *oslot = (OTableSlot *) slot;
+		int			cur_attr;
+		int			ctid_off = index_descr->primaryIsCtid ? 1 : 0;
+		int			dup_range_start = -1;
+		int			dup_range_end = -1;
+		int			dup_range_diff = -1;
+
+		lc_id = list_length(index_descr->duplicates) - 1;
+
+		search_next_dup_range(index_descr->duplicates, lc_id, &dup_range_start, &dup_range_end);
+		lc = list_nth_cell(index_descr->duplicates, dup_range_end);
+		Assert(lc != NULL);
+		duplicate = (List *) lfirst(lc);
+		dup_range_diff = dup_range_end - dup_range_start + 1;
+
+		lc = list_nth_cell(index_descr->duplicates, lc_id);
+		Assert(lc != NULL);
+		duplicate = (List *) lfirst(lc);
+
+		cur_attr = index_descr->leafTupdesc->natts - 1 - ctid_off;
+		for (i = index_descr->itupdesc->natts - 1; i >= 0; i--)
+		{
+			if (duplicate != NIL &&
+				i >= linitial_int(duplicate) + dup_range_start &&
+				i <= linitial_int(duplicate) + dup_range_start - 1 + dup_range_diff)
+			{
+				slot->tts_values[i] = 0;
+				slot->tts_isnull[i] = true;
+			}
+			else
+			{
+				if (duplicate != NIL && i == linitial_int(duplicate) + dup_range_start - 1)
+				{
+					lc_id = dup_range_start - 1;
+
+					if (lc_id >= 0)
+					{
+						search_next_dup_range(index_descr->duplicates, lc_id, &dup_range_start, &dup_range_end);
+						lc = list_nth_cell(index_descr->duplicates, dup_range_end);
+						Assert(lc != NULL);
+						duplicate = (List *) lfirst(lc);
+						dup_range_diff = dup_range_end - dup_range_start + 1;
+					}
+					else
+					{
+						lc = NULL;
+						duplicate = NIL;
+					}
+				}
+				slot->tts_values[i] = slot->tts_values[cur_attr];
+				slot->tts_isnull[i] = slot->tts_isnull[cur_attr];
+				cur_attr--;
+			}
+		}
+	}
+
+	if (!index_descr->primaryIsCtid)
+	{
+		int			i;
 
 		/*
 		 * Amount of index fields checked in o_define_index_validate
@@ -1660,36 +1794,10 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 			rowid_values = temp_rowid_values;
 			rowid_isnull = temp_rowid_isnull;
 		}
-
-		result_size = MAXALIGN(VARHDRSZ) + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-		if (index_descr->bridging)
-			result_size += MAXALIGN(sizeof(ItemPointerData));
-		else
-		{
-			tuple_size = o_new_tuple_size(pk_tupdesc, pk_spec, NULL, NULL, 0, rowid_values, rowid_isnull, NULL);
-			result_size += MAXALIGN(tuple_size);
-		}
-		rowid = (bytea *) palloc(result_size);
-		SET_VARSIZE(rowid, result_size);
-		ptr = (Pointer) rowid + MAXALIGN(VARHDRSZ);
-		if (index_descr->bridging)
-		{
-			memcpy(ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid)), &oslot->bridge_ctid, sizeof(ItemPointerData));
-			addNonCtid.flags = 0;
-		}
-		else
-		{
-			tuple.data = ptr + MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-			o_tuple_fill(pk_tupdesc, pk_spec, &tuple, tuple_size, NULL, NULL,
-						 0, rowid_values, rowid_isnull, NULL);
-			addNonCtid.flags = tuple.formatFlags;
-		}
-
-		addNonCtid.hint = *hint;
-		addNonCtid.csn = tupleCsn;
-
-		memcpy(ptr, &addNonCtid, sizeof(ORowIdAddendumNonCtid));
 	}
+
+	rowid = o_new_rowid(GET_PRIMARY(descr), slot,
+						rowid_values, rowid_isnull, tupleCsn, hint);
 
 	if (!scan->xs_rowid.isnull)
 	{
@@ -1712,6 +1820,7 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 	ItemPointerCopy(&slot->tts_tid, &scan->xs_itup->t_tid);
 }
 
+
 bool
 orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 {
@@ -1726,7 +1835,9 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
 
 	if (options && !options->orioledb_index)
+	{
 		return btgettuple(scan, dir);
+	}
 
 	o_scan->scanDir = dir;
 
@@ -1742,7 +1853,6 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 
 	descr = relation_get_descr(scan->heapRelation);
 	scan_primary = o_scan->ixNum == PrimaryIndexNumber || !scan->xs_want_itup;
-
 	tuple = o_index_scan_getnext(descr, o_scan, &csn, scan_primary,
 								 tupleCxt, &hint);
 
@@ -1889,6 +1999,7 @@ bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 	bytea	   *rowid;
 	Pointer		p;
 	IndexAmRoutine *amroutine = NULL;
+	ORowIdBridgeData *bridgeData;
 
 	ORelOidsSetFromRel(oids, heapRel);
 
@@ -1901,15 +2012,19 @@ bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 	if (!GET_PRIMARY(descr)->primaryIsCtid)
 	{
 		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
-
-		tupleid = PointerGetDatum(p);
+		bridgeData = (ORowIdBridgeData *) p;
 	}
 	else
 	{
 		p += MAXALIGN(sizeof(ORowIdAddendumCtid));
 		p += MAXALIGN(sizeof(ItemPointerData));
-		tupleid = PointerGetDatum(p);
+		bridgeData = (ORowIdBridgeData *) p;
 	}
+
+	if (!bridgeData->bridgeChanged)
+		return true;
+
+	tupleid = PointerGetDatum(&bridgeData->bridgeCtid);
 
 	amroutine = find_bridged_am(rel);
 
@@ -1923,8 +2038,6 @@ IndexScanDesc
 bridged_ambeginscan(Relation rel, int nkeys, int norderbys)
 {
 	IndexAmRoutine *amroutine = find_bridged_am(rel);
-
-	o_current_index = rel;
 
 	Assert(amroutine != NULL);
 

@@ -120,6 +120,20 @@ o_operator_cache_search_htup(TupleDesc tupdesc, Oid operoid)
 	return result;
 }
 
+Oid
+o_operator_cache_get_oprcode(Oid operoid)
+{
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	OOperator  *o_operator;
+
+	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_operator = o_operator_cache_search(datoid, operoid, cur_lsn,
+										 operator_cache->nkeys);
+	Assert(o_operator);
+	return o_operator->oprcode;
+}
+
 /*
  * A tuple print function for o_print_btree_pages()
  */

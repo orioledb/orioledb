@@ -2,8 +2,13 @@
 (A solution to PostgreSQL’s wicked problems)
 
 [![check status](https://github.com/orioledb/orioledb/actions/workflows/check.yml/badge.svg)](https://github.com/orioledb/orioledb/actions)
-[![Coverage Status](https://coveralls.io/repos/github/orioledb/orioledb/badge.svg?branch=main)](https://coveralls.io/github/orioledb/orioledb?branch=main) [![dockerhub](https://github.com/orioledb/orioledb/actions/workflows/docker.yml/badge.svg)](https://hub.docker.com/r/orioledb/orioledb/tags)
+[![Coverage Status](https://coveralls.io/repos/github/orioledb/orioledb/badge.svg?branch=main)](https://coveralls.io/github/orioledb/orioledb?branch=main)
+[![dockerhub](https://github.com/orioledb/orioledb/actions/workflows/docker.yml/badge.svg)](https://hub.docker.com/r/orioledb/orioledb/tags)
 
+
+OrioleDB is pronounced as _OR-ee-ohl-DEE-BEE_ (IPA _/ˈɔːr.i.oʊl diː biː/_) and
+is named after the [golden oriole](https://en.wikipedia.org/wiki/Golden_oriole),
+a bird which inhabits a range of habitats and migrates in spring symbolizing renewal.
 
 OrioleDB is a new storage engine for PostgreSQL, bringing a modern approach to
 database capacity, capabilities and performance to the world's most-loved

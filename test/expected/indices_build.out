@@ -24594,6 +24594,29 @@ INSERT INTO o_test_max_parallel_maintenance_workers_idx_build VALUES (1);
 CREATE INDEX o_test_max_parallel_maintenance_workers_idx_build_ix1
 	ON o_test_max_parallel_maintenance_workers_idx_build (val_2);
 COMMIT;
+-- Check shared memory allocation at parallel index rebuild
+SET maintenance_work_mem to "600MB";
+set max_parallel_maintenance_workers to 3;
+CREATE TABLE t (i SERIAL PRIMARY KEY, t text) using orioledb;
+INSERT INTO  t (t) (select repeat('x', 25)  FROM generate_series(1,1000,1) x);
+CREATE INDEX ON t(t);
+CREATE INDEX ON t(t);
+CREATE INDEX ON t(t);
+CREATE INDEX ON t(t);
+CREATE INDEX ON t(t);
+REINDEX TABLE t;
+CREATE TABLE t_bridge (i SERIAL PRIMARY KEY, t text) using orioledb;
+INSERT INTO  t_bridge (t) (select repeat('x', 25)  FROM generate_series(1,1000,1) x);
+CREATE INDEX ON t_bridge using brin (t);
+NOTICE:  index bridging is enabled for orioledb table 't_bridge'
+DETAIL:  index access method 'brin' is supported only via index bridging for OrioleDB table
+CREATE INDEX ON t_bridge(t);
+CREATE INDEX ON t_bridge(t);
+CREATE INDEX ON t_bridge(t);
+CREATE INDEX ON t_bridge(t);
+REINDEX TABLE t_bridge;
+RESET maintenance_work_mem;
+RESET max_parallel_maintenance_workers;
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
 ------------------------------
@@ -24601,7 +24624,7 @@ SELECT orioledb_parallel_debug_stop();
 (1 row)
 
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 21 other objects
+NOTICE:  drop cascades to 23 other objects
 DETAIL:  drop cascades to table o_indices0
 drop cascades to table o_indices1
 drop cascades to table o_indices2
@@ -24623,6 +24646,8 @@ drop cascades to table o_test_include_box_build
 drop cascades to table o_test_include_box_with_pkey_build
 drop cascades to table o_rebuild_unique_with_new_pkey_fields
 drop cascades to table o_test_max_parallel_maintenance_workers_idx_build
+drop cascades to table t
+drop cascades to table t_bridge
 DROP SCHEMA indices_build CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to function generate_string(integer,integer)

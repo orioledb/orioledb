@@ -1,4 +1,7 @@
 # contrib/orioledb/Makefile
+# Import make flags if make.flags file is present
+-include make.flags
+export
 
 MODULE_big = orioledb
 EXTENSION = orioledb
@@ -101,6 +104,7 @@ REGRESSCHECKS = btree_sys_check \
 				createas \
 				database \
 				ddl \
+				exclude \
 				explain \
 				fillfactor \
 				foreign_keys \
@@ -177,7 +181,8 @@ TESTGRESCHECKS_PART_1 = test/t/checkpointer_test.py \
 						test/t/types_test.py \
 						test/t/undo_eviction_test.py \
 						test/t/rewind_xid_test.py \
-						test/t/rewind_xid_evict_large_test.py
+						test/t/rewind_xid_evict_large_test.py \
+						test/t/page_fit_items_test.py
 TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/checkpoint_eviction_test.py \
 						test/t/checkpoint_same_trx_test.py \
@@ -311,8 +316,8 @@ override CFLAGS_SL += -DCOMMIT_HASH=$(COMMIT_HASH) -Wno-error=deprecated-declara
 ifdef VALGRIND
 override with_temp_install += PGCTLTIMEOUT=3000 PG_TEST_TIMEOUT_DEFAULT=500 \
 	valgrind --vgdb=no --leak-check=no \
-	--num-callers=20 --suppressions=valgrind.supp --time-stamp=yes \
-	--log-file=pid-%p.log --trace-children=yes \
+	--num-callers=20 --suppressions=$(CURDIR)/valgrind.supp --time-stamp=yes \
+	--log-file=$(CURDIR)/pid-%p.log --trace-children=yes \
 	--trace-children-skip=*/initdb
 else
 override with_temp_install += PGCTLTIMEOUT=900

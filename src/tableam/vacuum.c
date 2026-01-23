@@ -732,7 +732,7 @@ lazy_vacuum_all_indexes(LVRelState *vacrel)
  * index entry removal in batches as large as possible.
  */
 static void
-lazy_vacuum_brige_index(LVRelState *vacrel)
+lazy_vacuum_bridge_index(LVRelState *vacrel)
 {
 	OBTreeFindPageContext context;
 	OTableDescr *descr = vacrel->descr;
@@ -759,6 +759,7 @@ lazy_vacuum_brige_index(LVRelState *vacrel)
 	bound.keys[0].type = TIDOID;
 	bound.keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 	bound.keys[0].comparator = bridge->fields[0].comparator;
+	bound.keys[0].exclusion_fn = NULL;
 
 	Assert(vacrel->do_index_vacuuming);
 	Assert(vacrel->do_index_cleanup);
@@ -1029,7 +1030,7 @@ lazy_vacuum(LVRelState *vacrel)
 	{
 		if (vacrel->nindexes > 0)
 			lazy_vacuum_all_indexes(vacrel);
-		lazy_vacuum_brige_index(vacrel);
+		lazy_vacuum_bridge_index(vacrel);
 	}
 
 	/*

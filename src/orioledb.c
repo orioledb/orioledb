@@ -270,6 +270,32 @@ static RmgrData rmgr =
 	.rm_decode = orioledb_decode
 };
 
+/*
+ * We currently do not support restarting PG instance from within the extension
+ * on certain systems. Refuse to enable rewind on those systems.
+ */
+static bool
+orioledb_enable_rewind_check_hook(bool *newval, void **extra, GucSource source)
+{
+#if defined(WIN32)
+	if (*newval)
+	{
+		GUC_check_errcode(ERRCODE_FEATURE_NOT_SUPPORTED);
+		GUC_check_errdetail("Rewind is not supported on Windows.");
+		return false;
+	}
+#elif !defined(HAVE_SETSID)
+	if (*newval)
+	{
+		GUC_check_errcode(ERRCODE_FEATURE_NOT_SUPPORTED);
+		GUC_check_errdetail("Rewind is not supported on systems without setsid(2).");
+		return false;
+	}
+#endif
+	/* Supported system or newval == false */
+	return true;
+}
+
 void
 _PG_init(void)
 {
@@ -827,7 +853,7 @@ _PG_init(void)
 							 false,
 							 PGC_POSTMASTER,
 							 0,
-							 NULL,
+							 orioledb_enable_rewind_check_hook,
 							 NULL,
 							 NULL);
 

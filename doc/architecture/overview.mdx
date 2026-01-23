@@ -26,7 +26,7 @@ The primary index and secondary index are not tied together; they are only conne
 
 ## Dual pointers
 
-OrioleDB uses a so-called `dual pointers` scheme to evade buffer mapping and corresponding bottlenecks. The idea of `dual pointers` is that downlinks in non-leaf in-memory pages could point to either in-memory or storage pages. Therefore, one could navigate in-memory pages using direct links without any buffer table. The storage page must be loaded into the main memory if one needs to traverse downlink, which points to storage. The corresponding downlink had to be replaced with an in-memory downlink.
+OrioleDB uses a so-called `dual pointers` scheme to avoid buffer mapping and corresponding bottlenecks. The idea of `dual pointers` is that downlinks in non-leaf in-memory pages could point to either in-memory or storage pages. Therefore, one could navigate in-memory pages using direct links without any buffer table. The storage page must be loaded into the main memory if one needs to traverse downlink, which points to storage. The corresponding downlink had to be replaced with an in-memory downlink.
 
 The diagram below shows the simplified structure of the OrioleDB B-tree. This diagram does not detail the page contents: main memory pages are numbered the same as their storage prototypes. Arrows depict downlinks.
 
@@ -150,7 +150,7 @@ OrioleDB implements parallel application of WAL records. It launches `orioledb.r
 
 ![Block level undo](../images/recovery_wokers.svg)
 
-Queues might be processed at different paces. In order to evade MVCC anomalies, we assume the transaction to be committed and visible for readers only once all the workers have completed all the pieces of work associated with that transaction.
+Queues might be processed at different paces. In order to avoid MVCC anomalies, we assume the transaction to be committed and visible for readers only once all the workers have completed all the pieces of work associated with that transaction.
 
 See [the details about OrioleDB's recovery](recovery.mdx).
 

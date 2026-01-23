@@ -168,7 +168,8 @@ page_locator_fits_item(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 {
 	int			freeSpace = BTREE_PAGE_FREE_SPACE(p);
 	int			spaceNeeded = size;
-	LocationIndex oldItemSize = 0;
+	int			compactedFreeSpace;
+	int			oldItemSize;
 
 	Assert(spaceNeeded == MAXALIGN(spaceNeeded));
 
@@ -184,10 +185,13 @@ page_locator_fits_item(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 	}
 	else
 	{
-		oldItemSize = BTREE_PAGE_GET_ITEM_SIZE(p, locator);
-
-		/* We can replace tuple only on leafs */
+		/*
+		 * During tuple replacement, take into account change in the item
+		 * size. We can replace tuples only on leafs.
+		 */
 		Assert(O_PAGE_IS(p, LEAF));
+
+		oldItemSize = BTREE_PAGE_GET_ITEM_SIZE(p, locator);
 
 		spaceNeeded -= oldItemSize;
 		Assert(spaceNeeded == MAXALIGN(spaceNeeded));
@@ -198,51 +202,79 @@ page_locator_fits_item(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 		/* Already have enough of free space on the page */
 		return BTreeItemPageFitAsIs;
 	}
-	else if (O_PAGE_IS(p, LEAF) && desc->type != oIndexBridge)
-	{
-		/* Start with optimistic estimate of free space after compaction */
-		int			compactedFreeSpace = freeSpace + PAGE_GET_N_VACATED(p);
 
-		if (replace)
-		{
-			BTreeLeafTuphdr *tupHdr;
+	/*
+	 * Tuple didn't fit "as is".  Page needs compaction or split.
+	 */
+	Assert(spaceNeeded >= 0);
 
-			tupHdr = (BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, locator);
-			if (tupHdr->deleted &&
-				XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo))
-			{
-				Assert(COMMITSEQNO_IS_INPROGRESS(csn) ||
-					   XACT_INFO_MAP_CSN(tupHdr->xactInfo) < csn);
-
-				/*
-				 * Evade double calculation of space occupied by item to be
-				 * replace, which will go away after compaction.
-				 */
-				compactedFreeSpace -= oldItemSize;
-			}
-		}
-
-		/*
-		 * We have a chance to do a compation on leaf.  Check if at least
-		 * optimistic esimate will work.
-		 */
-		if (compactedFreeSpace < spaceNeeded)
-			return BTreeItemPageFitSplitRequired;
-
-		/*
-		 * Switch to real estimate.  Real estimate is much slower, but there
-		 * is a good chance to evade a page split.
-		 */
-		compactedFreeSpace -= PAGE_GET_N_VACATED(p) - page_get_vacated_space(desc, p, csn);
-		if (compactedFreeSpace >= spaceNeeded)
-			return BTreeItemPageFitCompactRequired;
-		else
-			return BTreeItemPageFitSplitRequired;
-	}
-	else
-	{
+	/*
+	 * Compaction is only possible on leafs, and not possible for bridge
+	 * indexes.
+	 */
+	if (!O_PAGE_IS(p, LEAF) || desc->type == oIndexBridge)
 		return BTreeItemPageFitSplitRequired;
+
+	/* Start with optimistic estimate of free space after compaction */
+	compactedFreeSpace = freeSpace + PAGE_GET_N_VACATED(p);
+
+	if (replace)
+	{
+		/* Correct the estimation according to our tuple replacement */
+		BTreeLeafTuphdr *tupHdr;
+
+		tupHdr = (BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, locator);
+
+		if (tupHdr->deleted)
+		{
+			/*
+			 * If the current tuple is deleted, then the item size is already
+			 * in out estimation.  However, we also took into account for
+			 * spaceNeeded.  Correct our calculation of free space after
+			 * compaction.
+			 */
+			compactedFreeSpace -= BTREE_PAGE_GET_ITEM_SIZE(p, locator);
+		}
+		else
+		{
+			OTuple		tuple;
+			int			oldItemCompactedSize;
+
+			/*
+			 * Similarly to the previous case, the possible tuple shrinking is
+			 * both in our estimation of free space after compaction and in
+			 * the spaceNeeded.
+			 */
+			BTREE_PAGE_READ_LEAF_TUPLE(tuple, p, locator);
+			oldItemCompactedSize = (BTreeLeafTuphdrSize + MAXALIGN(o_btree_len(desc, tuple, OTupleLength)));
+
+			Assert(oldItemSize >= oldItemCompactedSize);
+			compactedFreeSpace -= (oldItemSize - oldItemCompactedSize);
+		}
 	}
+
+	/*
+	 * We have a chance to do a compation on leaf.  Check if at least
+	 * optimistic esimate will work.
+	 */
+	if (compactedFreeSpace < spaceNeeded)
+		return BTreeItemPageFitSplitRequired;
+
+	/*
+	 * Switch to real estimate.  Real estimate is much slower, but there is a
+	 * good chance to avoid a page split.  For the tuple replacement case,
+	 * skip item to be replaced from the calculation, as it's already taken
+	 * into account for spaceNeeded.
+	 */
+	if (!replace)
+		compactedFreeSpace = freeSpace + page_get_vacated_space(desc, p, csn);
+	else
+		compactedFreeSpace = freeSpace + page_get_vacated_skip_item(desc, p, csn, BTREE_PAGE_LOCATOR_GET_OFFSET(p, locator));
+
+	if (compactedFreeSpace >= spaceNeeded)
+		return BTreeItemPageFitCompactRequired;
+	else
+		return BTreeItemPageFitSplitRequired;
 }
 
 void

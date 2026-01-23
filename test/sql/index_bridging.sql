@@ -306,21 +306,21 @@ EXPLAIN (COSTS OFF)
 SELECT p FROM o_test_ix_ams WHERE p <@ box(point(0,0), point(4000, 5000));
 COMMIT;
 
-CREATE TABLE o_briging_vacuum_test (id serial primary key, val float, p point) USING orioledb;
-INSERT INTO o_briging_vacuum_test (p) (SELECT point(0.01 * i, 0.02 * i) FROM generate_series(1,5) i);
-SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
-CREATE INDEX o_briging_vacuum_test_p_idx on o_briging_vacuum_test using gist(p);
-SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
-SELECT * FROM gist_index_content('o_briging_vacuum_test_p_idx');
-DELETE FROM o_briging_vacuum_test;
-SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
-SELECT * FROM gist_index_content('o_briging_vacuum_test_p_idx');
+CREATE TABLE o_bridging_vacuum_test (id serial primary key, val float, p point) USING orioledb;
+INSERT INTO o_bridging_vacuum_test (p) (SELECT point(0.01 * i, 0.02 * i) FROM generate_series(1,5) i);
+SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
+CREATE INDEX o_bridging_vacuum_test_p_idx on o_bridging_vacuum_test using gist(p);
+SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
+SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
+DELETE FROM o_bridging_vacuum_test;
+SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
+SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
 SELECT orioledb_rewind_sync();
-VACUUM o_briging_vacuum_test;
-SELECT * FROM o_briging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
-SELECT orioledb_tbl_structure('o_briging_vacuum_test'::regclass, 'ne');
-SELECT * FROM gist_index_content('o_briging_vacuum_test_p_idx');
-DROP TABLE o_briging_vacuum_test;
+VACUUM o_bridging_vacuum_test;
+SELECT * FROM o_bridging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
+SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
+SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
+DROP TABLE o_bridging_vacuum_test;
 
 
 CREATE TABLE o_test_bridging_with_regular_no_pkey (
@@ -401,17 +401,17 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35];
 SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35];
 EXPLAIN (COSTS OFF)
-	SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 20];
-SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 20];
+	SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 36, 15];
+SELECT * FROM o_test_bitmap_scans WHERE j <@ ARRAY[20, 36, 15];
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_bitmap_scans WHERE j > ARRAY[26, 42];
 SELECT * FROM o_test_bitmap_scans WHERE j > ARRAY[26, 42];
 EXPLAIN (COSTS OFF)
-	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20];
-SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20];
+	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 36, 15];
+SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 36, 15];
 EXPLAIN (COSTS OFF)
-	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20] OR j > ARRAY[26, 42];
-SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 20] OR j > ARRAY[26, 42];
+	SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 36, 15] OR j > ARRAY[26, 42];
+SELECT * FROM o_test_bitmap_scans WHERE j = ARRAY[19,35] OR j <@ ARRAY[20, 36, 15] OR j > ARRAY[26, 42];
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_bitmap_scans
@@ -808,6 +808,88 @@ SELECT data3 from test_no_bmscan_on_text_pkey where data3 = 'aaaaaa';
 SELECT orioledb_tbl_indices('test_no_bmscan_on_text_pkey'::regclass, true);
 EXPLAIN (COSTS OFF) SELECT data2 from test_no_bmscan_on_text_pkey where data2 = 'barbar';
 SELECT data2 from test_no_bmscan_on_text_pkey where data2 = 'barbar';
+
+-- Test bridge index behavior when table is truncated.
+CREATE TABLE brin_test_multi (a INT, b BIGINT) using orioledb WITH (fillfactor=10) ;
+INSERT INTO brin_test_multi
+SELECT i/5 + mod(911 * i + 483, 25),
+       i/10 + mod(751 * i + 221, 41)
+  FROM generate_series(1,1000) s(i);
+
+SELECT COUNT(*) FROM brin_test_multi WHERE a < 37;
+
+CREATE INDEX brin_test_multi_idx ON brin_test_multi USING brin (a int4_minmax_multi_ops) WITH (pages_per_range=5);
+
+SELECT orioledb_tbl_indices('brin_test_multi'::regclass, true);
+\d+ brin_test_multi
+
+TRUNCATE brin_test_multi;
+
+SELECT orioledb_tbl_indices('brin_test_multi'::regclass, true);
+\d+ brin_test_multi
+
+INSERT INTO brin_test_multi
+SELECT i/5 + mod(911 * i + 483, 25),
+       i/10 + mod(751 * i + 221, 41)
+  FROM generate_series(1,1000) s(i);
+
+set enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM brin_test_multi WHERE a < 37;
+SELECT COUNT(*) FROM brin_test_multi WHERE a < 37;
+
+CREATE TEMP TABLE hash_i4_heap (
+    seqno   int4,
+    random  int4
+) USING orioledb;
+
+INSERT INTO hash_i4_heap VALUES (20000, 1492795354);
+
+CREATE INDEX hash_i4_index ON hash_i4_heap USING hash (random int4_ops);
+
+SELECT * FROM hash_index_content('hash_i4_index');
+UPDATE hash_i4_heap
+   SET seqno = 20000
+ WHERE random = 1492795354;
+SELECT * FROM hash_index_content('hash_i4_index');
+
+BEGIN;
+SET LOCAL enable_seqscan = OFF;
+SET LOCAL enable_bitmapscan = OFF;
+EXPLAIN (COSTS OFF) SELECT h.seqno AS i20000
+  FROM hash_i4_heap h
+ WHERE h.random = 1492795354;
+SELECT h.seqno AS i20000
+  FROM hash_i4_heap h
+ WHERE h.random = 1492795354;
+COMMIT;
+
+SELECT * FROM hash_i4_heap ORDER BY seqno;
+
+CREATE TEMP TABLE gin_test_table (
+    id   serial PRIMARY KEY,
+    tags int4[]
+) USING orioledb;
+
+INSERT INTO gin_test_table (id, tags) VALUES
+(411, '{802, 654}'::int[]),
+(412, '{814, 738}'::int[]);  -- This row will be updated
+
+CREATE INDEX idx_gin_tags ON gin_test_table USING gin (tags);
+
+UPDATE gin_test_table
+SET id = 20000
+WHERE tags @> '{814}';
+
+BEGIN;
+SET LOCAL enable_seqscan = OFF;
+-- SET LOCAL enable_bitmapscan = OFF;
+EXPLAIN (COSTS OFF) SELECT id, tags
+FROM gin_test_table
+WHERE tags @> '{814}';
+SELECT id, tags
+FROM gin_test_table
+WHERE tags @> '{814}';
+COMMIT;
 
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;

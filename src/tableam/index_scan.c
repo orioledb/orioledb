@@ -182,11 +182,15 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 				int			cmp;
 
 				if (o_bound_is_coercible(bound, field))
+				{
 					cmp = o_call_comparator(field->comparator,
 											value, arrayKey->elem_values[j]);
+				}
 				else
+				{
 					cmp = o_call_comparator(bound->comparator,
 											value, arrayKey->elem_values[j]);
+				}
 				if (cmp == 0)
 				{
 					found = true;
@@ -398,6 +402,36 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 												  &ostate->curKeyRange,
 												  so,
 												  ostate->numPrefixExactKeys);
+					if (tup_is_valid && indexDescr->desc.type == oIndexExclusion)
+					{
+						TupleDesc	tupdesc;
+						OTupleFixedFormatSpec *spec;
+						int			i,
+									attnum;
+						Datum		value;
+						bool		isnull;
+
+						tupdesc = indexDescr->leafTupdesc;
+						spec = &indexDescr->leafSpec;
+
+						for (i = 0; i < indexDescr->nKeyFields; i++)
+						{
+							OBTreeKeyBound *low = &ostate->curKeyRange.low;
+							OBTreeValueBound *key = &low->keys[i];
+							int			cmp;
+
+							attnum = i + 1;
+							value = o_fastgetattr(tup, attnum, tupdesc, spec, &isnull);
+
+							cmp = o_call_exclusion_fn(key->exclusion_fn, key->value, value, indexDescr->fields[i].collation);
+
+							if (cmp != 0)
+							{
+								tup_is_valid = false;
+								break;
+							}
+						}
+					}
 					if (tup_is_valid)
 						tup_fetched = true;
 				}
@@ -454,7 +488,6 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 	{
 		tup = o_iterate_index(id, ostate, tupleCsn, tupleCxt,
 							  ostate->ixNum == PrimaryIndexNumber ? hint : NULL);
-
 		if (!scan_primary || O_TUPLE_IS_NULL(tup))
 			break;
 

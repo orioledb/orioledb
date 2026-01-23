@@ -294,6 +294,7 @@ btree_bridge_ctid_get_and_inc(BTreeDescr *desc, bool *overflow)
 	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
 	ItemPointerData result;
 	uint64		ctid = pg_atomic_fetch_add_u64(&metaPageBlkno->bridge_ctid, 1);
+
 	BlockNumber max_block_number = MaxBlockNumber;
 
 	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc));

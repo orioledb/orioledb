@@ -23,6 +23,12 @@ class RewindXidTest(BaseTest):
 	def wait_shutdown_and_start(self, node):
 		super().wait_shutdown_and_start(node)
 
+	def wait_restart(self, node, previous_start_time):
+		super().wait_restart(node, previous_start_time)
+
+	def get_pg_start_time(self, node):
+		return super().get_pg_start_time(node)
+
 	# Evict tests:
 	# test_rewind_xid_oriole_evict
 	# test_rewind_xid_heap_evict
@@ -116,11 +122,12 @@ class RewindXidTest(BaseTest):
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test;')),
 		    "[(10005,)]")
 
+		previous_start_time = self.get_pg_start_time(node)
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
 		    (invalidxid, oxid))
 
-		self.wait_shutdown_and_start(node)
+		self.wait_restart(node, previous_start_time)
 
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT * FROM o_test ORDER BY 1;')),
@@ -183,11 +190,14 @@ class RewindXidTest(BaseTest):
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
 		    "[(10005,)]")
+
+		previous_start_time = self.get_pg_start_time(node)
+
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
 		    (xid, invalidoxid))
 
-		self.wait_shutdown_and_start(node)
+		self.wait_restart(node, previous_start_time)
 
 		self.assertEqual(
 		    str(
@@ -261,11 +271,14 @@ class RewindXidTest(BaseTest):
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
 		    "[(5005,)]")
+
+		previous_start_time = self.get_pg_start_time(node)
+
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
 
-		self.wait_shutdown_and_start(node)
+		self.wait_restart(node, previous_start_time)
 
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT * FROM o_test ORDER BY 1;')),
@@ -346,11 +359,14 @@ class RewindXidTest(BaseTest):
 		self.assertEqual(
 		    str(node.execute('postgres', 'SELECT count(*) FROM o_test_heap;')),
 		    "[(20024,)]")
+
+		previous_start_time = self.get_pg_start_time(node)
+
 		node.safe_psql(
 		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
 		    (xid, invalidoxid))
 
-		self.wait_shutdown_and_start(node)
+		self.wait_restart(node, previous_start_time)
 
 		self.maxDiff = None
 		self.assertEqual(
@@ -446,11 +462,14 @@ class RewindXidTest(BaseTest):
 		#		    'postgres', 'select orioledb_get_rewind_evicted_length();\n'))[0]
 		#		ev = int(c)
 		#		print(len, ev, len - ev)
+
+		previous_start_time = self.get_pg_start_time(node)
+
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
 
-		self.wait_shutdown_and_start(node)
+		self.wait_restart(node, previous_start_time)
 
 		self.maxDiff = None
 		self.assertEqual(
@@ -547,11 +566,13 @@ class RewindXidTest(BaseTest):
 				break
 			time.sleep(0.1)
 
+		previous_start_time = self.get_pg_start_time(node)
+
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid2, oxid2))
 
-		self.wait_shutdown_and_start(node)
+		self.wait_restart(node, previous_start_time)
 
 		self.maxDiff = None
 		self.assertEqual(
@@ -734,11 +755,13 @@ class RewindXidTest(BaseTest):
 				break
 			time.sleep(0.1)
 
+		previous_start_time = self.get_pg_start_time(node)
+
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid2, oxid2))
 
-		self.wait_shutdown_and_start(node)
+		self.wait_restart(node, previous_start_time)
 
 		self.maxDiff = None
 		self.assertEqual(
@@ -928,11 +951,13 @@ class RewindXidTest(BaseTest):
 				break
 			time.sleep(0.1)
 
+		previous_start_time = self.get_pg_start_time(node)
+
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid2, oxid2))
 
-		self.wait_shutdown_and_start(node)
+		self.wait_restart(node, previous_start_time)
 
 		self.maxDiff = None
 		self.assertEqual(
@@ -1376,11 +1401,13 @@ class RewindXidTest(BaseTest):
 				break
 			time.sleep(0.1)
 
+		previous_start_time = self.get_pg_start_time(node)
+
 		node.safe_psql(
 		    'postgres',
 		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid2, oxid2))
 
-		self.wait_shutdown_and_start(node)
+		self.wait_restart(node, previous_start_time)
 
 		self.maxDiff = None
 		self.assertEqual(
