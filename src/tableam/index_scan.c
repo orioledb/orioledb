@@ -301,7 +301,9 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	}
 #else
 	if (ostate->curKeyRangeIsLoaded)
-		result = _bt_advance_array_keys(scan, ForwardScanDirection);
+		result = _bt_advance_array_keys(scan, ostate->scanDir);
+	else
+		_bt_start_array_keys(scan, ostate->scanDir);
 #endif
 	ostate->curKeyRangeIsLoaded = true;
 
@@ -479,8 +481,6 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 				/* cppcheck-suppress uninitvar */
 				return tup;
 			}
-
-			_bt_start_array_keys(&ostate->scandesc, ForwardScanDirection);
 		}
 		_bt_preprocess_keys(&ostate->scandesc);
 		ostate->curKeyRange.empty = true;
