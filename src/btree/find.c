@@ -75,9 +75,7 @@ init_page_find_context(OBTreeFindPageContext *context, BTreeDescr *desc,
 	context->flags = flags;
 	context->imgUndoLoc = InvalidUndoLocation;
 	context->img = NULL;
-	context->imgEntry = NULL;
 	context->parentImg = NULL;
-	context->parentImgEntry = NULL;
 	O_TUPLE_SET_NULL(context->insertTuple);
 	O_TUPLE_SET_NULL(context->lokey.tuple);
 }
@@ -1462,15 +1460,9 @@ set_page_ptr(OBTreeFindPageContext *context, bool parent)
 	Pointer		pagePtr;
 
 	if (!parent)
-	{
-		context->imgEntry = NULL;
 		pagePtr = context->img = context->imgData;
-	}
 	else
-	{
-		context->parentImgEntry = NULL;
 		pagePtr = context->parentImg = context->parentImgData;
-	}
 	return pagePtr;
 }
 

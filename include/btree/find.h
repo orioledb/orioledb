@@ -32,15 +32,11 @@ struct PartialPageState
 	bool		chunkIsLoaded[BTREE_PAGE_MAX_CHUNKS];
 };
 
-typedef struct OPageCacheEntry OPageCacheEntry;
-
 typedef struct
 {
 	BTreeDescr *desc;
 	Pointer		img;
 	Pointer		parentImg;
-	OPageCacheEntry *imgEntry;
-	OPageCacheEntry *parentImgEntry;
 	char		imgData[ORIOLEDB_BLCKSZ];
 	char		parentImgData[ORIOLEDB_BLCKSZ];
 	PartialPageState partial;
