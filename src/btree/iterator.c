@@ -716,6 +716,10 @@ o_btree_iterator_set_callback(BTreeIterator *it,
 	it->fetchCallbackArg = arg;
 }
 
+/* Supress strange asan complaint using clang attribute */
+#if defined(__clang__)
+__attribute__((no_sanitize("address")))
+#endif
 OTuple
 o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 					   void *endKey, BTreeKeyType endKind,
@@ -967,6 +971,8 @@ static bool
 page_contains_end(BTreeIterator *it, Page p,
 				  OTuple lokey, BtreeIterationEnd *end)
 {
+	ASAN_UNPOISON_MEMORY_REGION(end, sizeof(*end));
+
 	if (IT_IS_FORWARD(it))
 	{
 		OTuple		hikey;
