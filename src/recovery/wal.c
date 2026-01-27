@@ -909,7 +909,7 @@ add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 	csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 	memcpy(rec->csn, &csn, sizeof(csn));
 
-	elog(DEBUG4, "[%s] xmin %lu csn %u", __func__, runXmin, csn);
+	elog(DEBUG4, "[%s] xmin %lu csn %lu", __func__, runXmin, csn);
 
 	local_wal_buffer_offset += sizeof(*rec);
 

@@ -223,8 +223,6 @@ oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 	OTableChunkKey *tupleKey = (OTableChunkKey *) tuple.data;
 	OTableChunkKey *boundKey = (OTableChunkKey *) arg;
 
-	bool		inProgress = COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn);
-
 	if (ORelOidsIsEqual(tupleKey->oids, boundKey->oids))
 	{
 		if (boundKey->version == O_TABLE_INVALID_VERSION)

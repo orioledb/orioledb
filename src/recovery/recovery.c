@@ -2782,6 +2782,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 		if (!OidIsValid(oldRelnode))
 		{
 			uint32		version = (new_o_table->version == O_TABLE_INVALID_VERSION) ? O_TABLE_INVALID_VERSION : new_o_table->version - 1;
+
 			/* @TODO ! !! */
 			ORelFetchContext ctx = build_fetch_context(o_non_deleted_snapshot, version);
 

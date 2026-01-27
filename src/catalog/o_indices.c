@@ -1011,8 +1011,9 @@ provider_loaded(ORelOids tableOids, void *arg, bool *must_free)
 OIndexDescrFillSource
 fill_idescr_from_table(OTable *oTable)
 {
-	Assert(oTable);
 	OIndexDescrFillSource output = {.get_oTable = provider_external,.arg = oTable};
+
+	Assert(oTable);
 
 	return output;
 }
@@ -1020,8 +1021,9 @@ fill_idescr_from_table(OTable *oTable)
 OIndexDescrFillSource
 fill_idescr_from_ctx(ORelFetchContext *base_ctx_ptr)
 {
-	Assert(base_ctx_ptr);
 	OIndexDescrFillSource output = {.get_oTable = provider_loaded,.arg = base_ctx_ptr};
+
+	Assert(base_ctx_ptr);
 
 	return output;
 }
