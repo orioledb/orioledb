@@ -225,7 +225,7 @@ o_detoast(struct varlena *attr)
 
 	Assert(descr);
 
-	o_btree_load_shmem(&descr->toast->desc);
+	o_btree_ensure_initialized(&descr->toast->desc);
 	key.tuple.formatFlags = ote.formatFlags;
 	key.tuple.data = key.fixedData;
 	memcpy(key.fixedData,

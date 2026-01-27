@@ -1571,7 +1571,7 @@ tts_orioledb_insert_toast_values(TupleTableSlot *slot,
 			value = o_get_src_value(slot->tts_values[i], &free);
 			p = DatumGetPointer(value);
 
-			o_btree_load_shmem(&descr->toast->desc);
+			o_btree_ensure_initialized(&descr->toast->desc);
 			result = o_toast_insert(descr,
 									idx_tup, i + 1 + ctid_off, p,
 									toast_datum_size(value), oxid, csn);
@@ -1666,7 +1666,7 @@ tts_orioledb_remove_toast_values(TupleTableSlot *slot,
 			memcpy(key.fixedData,
 				   VARDATA_EXTERNAL(DatumGetPointer(value)) + O_TOAST_EXTERNAL_SZ,
 				   ote.data_size);
-			o_btree_load_shmem(&descr->toast->desc);
+			o_btree_ensure_initialized(&descr->toast->desc);
 
 			result = o_toast_delete(descr,
 									key.tuple,
@@ -1860,7 +1860,7 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 			memcpy(key.fixedData,
 				   VARDATA_EXTERNAL(DatumGetPointer(oldValue)) + O_TOAST_EXTERNAL_SZ,
 				   ote.data_size);
-			o_btree_load_shmem(&descr->toast->desc);
+			o_btree_ensure_initialized(&descr->toast->desc);
 			result = o_toast_delete(descr,
 									key.tuple,
 									toast_attn + 1 + ctid_off,
@@ -1879,7 +1879,7 @@ tts_orioledb_update_toast_values(TupleTableSlot *oldSlot,
 			value = o_get_src_value(newValue, &free);
 			p = DatumGetPointer(value);
 
-			o_btree_load_shmem(&descr->toast->desc);
+			o_btree_ensure_initialized(&descr->toast->desc);
 			result = o_toast_insert(descr,
 									idx_tup,
 									toast_attn + 1 + ctid_off,

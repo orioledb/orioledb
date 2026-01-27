@@ -582,7 +582,7 @@ orioledb_sys_tree_check(PG_FUNCTION_ARGS)
 	check_tree_num_input(num);
 
 	orioledb_check_shmem();
-	o_btree_load_shmem(get_sys_tree(num));
+	o_btree_ensure_initialized(get_sys_tree(num));
 
 	result = check_btree(get_sys_tree(num), force_map_check);
 
@@ -636,7 +636,7 @@ orioledb_sys_tree_rows(PG_FUNCTION_ARGS)
 	MemoryContextSwitchTo(oldcontext);
 
 	td = get_sys_tree(num);
-	o_btree_load_shmem(get_sys_tree(num));
+	o_btree_ensure_initialized(get_sys_tree(num));
 
 	it = o_btree_iterator_create(td, NULL, BTreeKeyNone,
 								 &o_in_progress_snapshot, ForwardScanDirection);
