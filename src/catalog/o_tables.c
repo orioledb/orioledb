@@ -1182,7 +1182,8 @@ o_tables_get_extended(ORelOids oids, ORelFetchContext ctx)
 OTable *
 o_tables_get(ORelOids oids)
 {
-	return o_tables_get_extended(oids, default_non_deleted_fetch_context());
+	ORelFetchContext ctx = {.snapshot = o_non_deleted_snapshot,.version = O_TABLE_INVALID_VERSION};
+	return o_tables_get_extended(oids, ctx);
 }
 
 /*
