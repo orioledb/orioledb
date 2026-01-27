@@ -334,7 +334,7 @@ extern void undo_shmem_init(Pointer buf, bool found);
 extern UndoMeta *get_undo_meta_by_type(UndoLogType undoType);
 
 extern void update_min_undo_locations(UndoLogType undoType,
-									  bool have_lock,
+									  bool undoEviction,
 									  bool do_cleanup);
 extern void evict_undo_to_disk(UndoLogType undoType,
 							   UndoLocation targetUndoLocation,
