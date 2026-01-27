@@ -170,9 +170,9 @@ oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 	OIndexChunkKey *tupleKey = (OIndexChunkKey *) tuple.data;
 	OIndexChunkKey *boundKey = (OIndexChunkKey *) arg;
 
-	bool		inProgress = COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn);
-
-	if (ORelOidsIsEqual(tupleKey->oids, boundKey->oids) &&
+	/* Ignore reloid because it may changes */
+	if (tupleKey->oids.datoid == boundKey->oids.datoid &&
+		tupleKey->oids.relnode == boundKey->oids.relnode &&
 		tupleKey->type && boundKey->type)
 	{
 		if (boundKey->version == O_TABLE_INVALID_VERSION)
@@ -330,7 +330,7 @@ make_primary_o_index(OTable *table)
 	elog(LOG, "[%s] oids [ %u %u %u ] version %u", __func__,
 		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
 		 table->primary_ixversion);
-  
+
 	result->immediate = tableIndex->immediate;
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
