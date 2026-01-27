@@ -302,7 +302,7 @@ is_explain_analyze(PlanState *ps)
 	return ps->state->es_instrument & INSTRUMENT_BUFFERS;
 }
 
-extern void o_btree_load_shmem(BTreeDescr *desc);
+extern void o_btree_ensure_initialized(BTreeDescr *desc);
 extern bool o_btree_load_shmem_checkpoint(BTreeDescr *desc);
 extern bool o_btree_try_use_shmem(BTreeDescr *desc);
 

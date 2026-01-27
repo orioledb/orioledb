@@ -618,7 +618,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			}
 			else
 			{
-				o_btree_load_shmem(desc);
+				o_btree_ensure_initialized(desc);
 			}
 			shmemIsReloaded = true;
 

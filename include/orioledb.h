@@ -472,7 +472,10 @@ typedef enum OPagePoolType
 #define OPagePoolTypesCount 3
 
 typedef struct PagePool PagePool;
+typedef struct LocalPagePool LocalPagePool;
 struct BTreeDescr;
+
+extern LocalPagePool local_ppool;
 
 extern void o_verify_dir_exists_or_create(char *dirname, bool *created, bool *found);
 extern uint64 orioledb_device_alloc(struct BTreeDescr *descr, uint32 size);

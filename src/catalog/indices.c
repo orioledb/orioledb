@@ -1388,7 +1388,7 @@ o_calculate_index_workers(BTreeDescr *primary, bool shmem_loaded, int nindices)
 		if (tbl_data_exists(&primary->oids))
 		{
 			if (!shmem_loaded)
-				o_btree_load_shmem(primary);
+				o_btree_ensure_initialized(primary);
 
 			table_blocks = (uint64) TREE_NUM_LEAF_PAGES(primary) * ORIOLEDB_BLCKSZ;
 			parallel_workers = o_estimate_parallel_workers(table_blocks, -1, max_parallel_maintenance_workers);
@@ -1869,7 +1869,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 	ctid = 0;
 	old_td = &GET_PRIMARY(old_descr)->desc;
-	o_btree_load_shmem(old_td);
+	o_btree_ensure_initialized(old_td);
 	meta = BTREE_GET_META(old_td);
 	if (descr->bridge && old_descr->bridge)
 		bridge_ctid = pg_atomic_read_u64(&meta->bridge_ctid);

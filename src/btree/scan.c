@@ -50,6 +50,7 @@
 #include "btree/page_chunks.h"
 #include "btree/scan.h"
 #include "btree/undo.h"
+#include "tableam/descr.h"
 #include "transam/oxid.h"
 #include "tuple/slot.h"
 #include "utils/sampling.h"
@@ -1071,7 +1072,7 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 	BlockSampler sampler = scan->sampler;
 	BTreeDescr *desc = scan->desc;
 
-	o_btree_load_shmem(desc);
+	o_btree_ensure_initialized(desc);
 
 	if (poscan)
 	{
@@ -1185,7 +1186,7 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 BTreeSeqScan *
 make_btree_seq_scan(BTreeDescr *desc, OSnapshot *oSnapshot, void *poscan)
 {
-	o_btree_load_shmem(desc);
+	o_btree_ensure_initialized(desc);
 	return make_btree_seq_scan_internal(desc, oSnapshot, NULL, NULL, NULL, poscan);
 }
 
@@ -1193,7 +1194,7 @@ BTreeSeqScan *
 make_btree_seq_scan_cb(BTreeDescr *desc, OSnapshot *oSnapshot,
 					   BTreeSeqScanCallbacks *cb, void *arg)
 {
-	o_btree_load_shmem(desc);
+	o_btree_ensure_initialized(desc);
 	return make_btree_seq_scan_internal(desc, oSnapshot, cb, arg, NULL, NULL);
 }
 

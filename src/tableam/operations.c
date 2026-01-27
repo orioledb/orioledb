@@ -184,7 +184,7 @@ o_apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
 	bool		isnull[INDEX_MAX_KEYS + 1];
 	bool		overflow = false;
 
-	o_btree_load_shmem(&primary->desc);
+	o_btree_ensure_initialized(&primary->desc);
 	if (descr->bridge->primaryIsCtid)
 	{
 		values[1] = PointerGetDatum(&slot->tts_tid);
@@ -303,7 +303,7 @@ reinsert_bridge_ctid_on_pkey_changed(OTableDescr *descr, Relation relation,
 
 	slot_getallattrs(slot);
 
-	o_btree_load_shmem(&primary->desc);
+	o_btree_ensure_initialized(&primary->desc);
 	if (descr->bridge->primaryIsCtid)
 	{
 		values[1] = PointerGetDatum(&slot->tts_tid);
@@ -383,7 +383,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 	{
 		ItemPointerData iptr;
 
-		o_btree_load_shmem(&primary->desc);
+		o_btree_ensure_initialized(&primary->desc);
 		iptr = btree_ctid_get_and_inc(&primary->desc);
 		tts_orioledb_set_ctid(slot, &iptr);
 	}
@@ -457,7 +457,7 @@ o_tbl_lock(OTableDescr *descr, OBTreeKeyBound *pkey, LockTupleMode mode,
 		.arg = larg
 	};
 
-	o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+	o_btree_ensure_initialized(&GET_PRIMARY(descr)->desc);
 
 	lock_mode = tuple_lock_mode_to_row_lock_mode(mode);
 
@@ -1087,7 +1087,7 @@ o_tbl_insert_with_arbiter(Relation rel,
 			}
 			else
 				bridged_index_fill_pkey_bound(lockedSlot, primary_td, &key);
-			o_btree_load_shmem(&primary_td->desc);
+			o_btree_ensure_initialized(&primary_td->desc);
 
 			larg.rel = rel;
 			larg.descr = descr;
@@ -1565,7 +1565,7 @@ o_update_secondary_index(OIndexDescr *id,
 	if (is_keys_eq(&id->desc, &old_key, &new_key) && (old_valid == new_valid))
 		return res;
 
-	o_btree_load_shmem(&id->desc);
+	o_btree_ensure_initialized(&id->desc);
 	O_TUPLE_SET_NULL(nullTup);
 
 	if (old_valid)
@@ -1634,7 +1634,7 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 
 	newTup = tts_orioledb_form_tuple(newSlot, descr);
 
-	o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+	o_btree_ensure_initialized(&GET_PRIMARY(descr)->desc);
 
 	modify_result = o_btree_modify(&GET_PRIMARY(descr)->desc, BTreeOperationUpdate,
 								   newTup, BTreeKeyLeafTuple,
@@ -1713,7 +1713,7 @@ o_tbl_indices_reinsert(OTableDescr *descr,
 
 	newTup = tts_orioledb_form_tuple(newSlot, descr);
 
-	o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+	o_btree_ensure_initialized(&GET_PRIMARY(descr)->desc);
 
 	modify_result = o_btree_delete_pk_changed(&GET_PRIMARY(descr)->desc,
 											  (Pointer) oldPkey, BTreeKeyBound,
@@ -1788,7 +1788,7 @@ o_tbl_index_delete(OIndexDescr *id, OIndexNumber ix_num, TupleTableSlot *slot,
 	O_TUPLE_SET_NULL(nullTup);
 
 	fill_key_bound(slot, id, &bound);
-	o_btree_load_shmem(&id->desc);
+	o_btree_ensure_initialized(&id->desc);
 	res = o_btree_modify(&id->desc, BTreeOperationDelete,
 						 nullTup, BTreeKeyNone,
 						 (Pointer) &bound, BTreeKeyBound,
@@ -1826,7 +1826,7 @@ o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key,
 	memset(&result, 0, sizeof(result));
 	result.oldTuple = NULL;
 
-	o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+	o_btree_ensure_initialized(&GET_PRIMARY(descr)->desc);
 	O_TUPLE_SET_NULL(nullTup);
 
 	if (!arg->changingPart)
@@ -1904,7 +1904,7 @@ o_tbl_index_insert(OTableDescr *descr,
 		tup = tts_orioledb_form_tuple(slot, descr);
 	}
 
-	o_btree_load_shmem(bd);
+	o_btree_ensure_initialized(bd);
 	if (primary || !id->unique ||
 		(!id->nulls_not_distinct && o_has_nulls(tup)))
 		result = o_btree_modify(bd, BTreeOperationInsert,

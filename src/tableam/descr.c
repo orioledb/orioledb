@@ -250,7 +250,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 {
 	SharedRootInfoKey key;
 	SharedRootInfo *sharedRootInfo = NULL;
-	bool		was_evicted,
+	bool		was_evicted = false,
 				is_compressed,
 				init_extents,
 				inserted PG_USED_FOR_ASSERTS_ONLY;
@@ -271,9 +271,10 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 
 	/*
 	 * evictable_tree_init() needs that.  Initialized it before we get one of
-	 * checkpoint_state->oSharedRootInfoInsertLocks.
+	 * checkpoint_state->oSharedRootInfoInsertLocks.  Skip for in-memory trees.
 	 */
-	(void) get_sys_tree(SYS_TREES_CHKP_NUM);
+	if (desc->storageType != BTreeStorageInMemory)
+		(void) get_sys_tree(SYS_TREES_CHKP_NUM);
 
 	sharedRootInfo = o_find_shared_root_info(&key);
 	if (sharedRootInfo == NULL)
@@ -281,15 +282,14 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		lockNo = tag_hash(&key, sizeof(key)) % SHARED_ROOT_INFO_INSERT_NUM_LOCKS;
 
 		/*---
-		 * Reserve 8 pages:
-		 *
-		 * - root page
-		 * - meta page
-		 * - 2 for nextChkp seq bufs
-		 * - 2 for tmp seq bufs
-		 * - 2 for free seq bufs
+		 * Reserve pages:
+		 * - In-memory trees only need 2 (root + meta)
+		 * - Others need 8 (root, meta, plus 6 for seq bufs)
 		 */
-		(*desc->ppool->ops->reserve_pages) (desc->ppool, PPOOL_RESERVE_META, 8);
+		if (desc->storageType == BTreeStorageInMemory)
+			(*desc->ppool->ops->reserve_pages) (desc->ppool, PPOOL_RESERVE_META, 2);
+		else
+			(*desc->ppool->ops->reserve_pages) (desc->ppool, PPOOL_RESERVE_META, 8);
 		LWLockAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo],
 					  LW_EXCLUSIVE);
 		hasLock = true;
@@ -314,9 +314,8 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		/* tries to create SharedRootInfo */
 		sharedRootInfo = create_shared_root_info(desc->ppool, &key);
 		desc->rootInfo = sharedRootInfo->rootInfo;
-		Assert(desc->storageType == BTreeStoragePersistence ||
-			   desc->storageType == BTreeStorageTemporary ||
-			   desc->storageType == BTreeStorageUnlogged);
+
+		/* Initialize based on storage type */
 		if (desc->storageType == BTreeStoragePersistence ||
 			desc->storageType == BTreeStorageUnlogged)
 		{
@@ -326,11 +325,17 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		{
 			evictable_tree_init(desc, true, &was_evicted);
 		}
+		else if (desc->storageType == BTreeStorageInMemory)
+		{
+			/* Simple init for local/in-memory trees - no seq bufs, no files */
+			o_btree_init(desc);
+		}
 		is_compressed = OCompressIsValid(desc->compress);
 		desc->rootInfo = sharedRootInfo->rootInfo;
 
 		init_extents = false;
-		if (is_compressed && !was_evicted)
+		if (desc->storageType != BTreeStorageInMemory &&
+			is_compressed && !was_evicted)
 		{
 			init_extents = true;
 
@@ -366,7 +371,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 	else
 	{
 		/*
-		 * o_btree_load_shmem() must be called only under relation locks, in
+		 * o_btree_ensure_initialized() must be called only under relation locks, in
 		 * this state BTree can not be evicted and removed from ShareDescr
 		 * cache because AccessExclusiveLock needed for this actions.
 		 */
@@ -383,7 +388,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		{
 			evictable_tree_init(desc, false, NULL);
 		}
-
+		/* BTreeStorageInMemory: nothing extra needed when reusing existing */
 	}
 
 	if (hasLock)
@@ -397,7 +402,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 }
 
 void
-o_btree_load_shmem(BTreeDescr *desc)
+o_btree_ensure_initialized(BTreeDescr *desc)
 {
 	bool		result PG_USED_FOR_ASSERTS_ONLY;
 
@@ -414,7 +419,7 @@ o_btree_load_shmem_checkpoint(BTreeDescr *desc)
 /*
  * Returns false if BTree does not exist in shared memory.
  *
- * Same to o_btree_load_shmem() but it does not create a BTree in shared
+ * Same to o_btree_ensure_initialized() but it does not create a BTree in shared
  * memory. Must be called under relation locks too.
  */
 bool
@@ -448,6 +453,7 @@ o_btree_try_use_shmem(BTreeDescr *desc)
 		{
 			evictable_tree_init(desc, false, NULL);
 		}
+		/* BTreeStorageInMemory: nothing extra needed when reusing existing */
 		pfree(shared);
 	}
 	return true;
