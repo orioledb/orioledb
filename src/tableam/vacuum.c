@@ -1315,7 +1315,7 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 
 	bridge = vacrel->descr->bridge;
 	Assert(bridge != NULL);
-	o_btree_load_shmem(&bridge->desc);
+	o_btree_ensure_initialized(&bridge->desc);
 	vacrel->rel_pages = orig_rel_pages = pg_atomic_read_u32(&BTREE_GET_META(&bridge->desc)->leafPagesNum);
 
 	if (verbose)

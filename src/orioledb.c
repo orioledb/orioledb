@@ -175,6 +175,7 @@ MemoryContext btree_insert_context = NULL;
 MemoryContext btree_seqscan_context = NULL;
 
 OPagePool	page_pools[OPagePoolTypesCount];
+LocalPagePool local_ppool;
 
 static size_t page_pools_size[OPagePoolTypesCount];
 
@@ -957,6 +958,8 @@ _PG_init(void)
 
 	for (i = 0; i < OPagePoolTypesCount; i++)
 		page_pools_size[i] = CACHELINEALIGN(page_pools_size[i]);
+	
+	local_ppool_init(&local_ppool);
 
 	if (device_filename)
 	{
@@ -1613,6 +1616,9 @@ get_ppool(OPagePoolType type)
 PagePool *
 get_ppool_by_blkno(OInMemoryBlkno blkno)
 {
+    if(O_PAGE_IS_LOCAL(blkno))
+        return (PagePool *) &local_ppool;
+    
 	Assert(blkno < orioledb_buffers_count);
 
 	if (blkno >= main_buffers_offset)
@@ -1807,7 +1813,7 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 					}
 					Assert(ix_num < descr->nIndices);
 					Assert(index_descr);
-					o_btree_load_shmem(&index_descr->desc);
+					o_btree_ensure_initialized(&index_descr->desc);
 					rootPageBlkno = index_descr->desc.rootInfo.rootPageBlkno;
 					root_page = O_GET_IN_MEMORY_PAGE(rootPageBlkno);
 					info->tree_height = PAGE_GET_LEVEL(root_page);

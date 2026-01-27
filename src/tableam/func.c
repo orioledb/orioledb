@@ -297,7 +297,7 @@ tree_structure(StringInfo buf,
 
 	if (sharedRootInfo != NULL && !sharedRootInfo->placeholder)
 	{
-		o_btree_load_shmem(td);
+		o_btree_ensure_initialized(td);
 
 		appendStringInfo(buf, "Index %s contents\n", treeName);
 		if (td->type != oIndexToast)
@@ -773,7 +773,7 @@ tree_bin_structure(StringInfo buf, OIndexDescr *id, bool print_bytes,
 
 	if (sharedRootInfo != NULL && !sharedRootInfo->placeholder)
 	{
-		o_btree_load_shmem(td);
+		o_btree_ensure_initialized(td);
 
 		appendStringInfo(buf, "Index %s contents\n", treeName);
 		if (td->type != oIndexToast)
@@ -1087,7 +1087,7 @@ orioledb_table_pages(PG_FUNCTION_ARGS)
 
 		if (sharedRootInfo == NULL || sharedRootInfo->placeholder)
 			continue;
-		o_btree_load_shmem(td);
+		o_btree_ensure_initialized(td);
 
 		table_pages_walk_page(td, td->rootInfo.rootPageBlkno, tupdesc, tupstore);
 	}
@@ -1138,8 +1138,8 @@ orioledb_tbl_are_indices_equal(PG_FUNCTION_ARGS)
 
 	td1 = descr1->indices[ix_num1];
 	td2 = descr2->indices[ix_num2];
-	o_btree_load_shmem(&td1->desc);
-	o_btree_load_shmem(&td2->desc);
+	o_btree_ensure_initialized(&td1->desc);
+	o_btree_ensure_initialized(&td2->desc);
 
 	are_equal = td1->leafTupdesc->natts == td2->leafTupdesc->natts;
 
@@ -1213,7 +1213,7 @@ orioledb_tbl_check(PG_FUNCTION_ARGS)
 
 	for (i = 0; i < descr->nIndices; i++)
 	{
-		o_btree_load_shmem(&descr->indices[i]->desc);
+		o_btree_ensure_initialized(&descr->indices[i]->desc);
 		result = check_btree(&descr->indices[i]->desc, force_map_check);
 
 		if (result == false)
@@ -1661,7 +1661,7 @@ orioledb_tree_stat(PG_FUNCTION_ARGS)
 	stat = (ORelationStat *) palloc(sizeof(ORelationStat));
 	memset(stat, 0, sizeof(*stat));
 
-	o_btree_load_shmem(&descr->desc);
+	o_btree_ensure_initialized(&descr->desc);
 	tree_stat_walker(&descr->desc, stat);
 
 	for (i = 0; i < ORIOLEDB_MAX_DEPTH; i++)

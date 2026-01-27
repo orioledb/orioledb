@@ -1772,7 +1772,7 @@ orioledb_index_rows(PG_FUNCTION_ARGS)
 		elog(ERROR, "Invalid index");
 
 	td = &descr->indices[ix_num]->desc;
-	o_btree_load_shmem(td);
+	o_btree_ensure_initialized(td);
 
 	/*
 	 * Build a tuple descriptor for our result type
