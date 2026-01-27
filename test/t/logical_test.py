@@ -856,66 +856,76 @@ class LogicalTest(BaseTest):
 		symbol2 = 'B'
 
 		# txn operates with two	iterationns of TOAST index descr & with two versions of relation
-		check = node.execute(f"""
-		    BEGIN;
-		    INSERT INTO {o_relname}(data) VALUES (repeat(\'{symbol1}\', {toast_len}));
-		    SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';
-		    ALTER TABLE {o_relname} ADD COLUMN data_3 text;
-		    ALTER TABLE {o_relname} ALTER COLUMN data_3 TYPE bigint USING 0::bigint;
-		    SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';
-		    INSERT INTO {o_relname}(data,data_3) VALUES (repeat(\'{symbol2}\', {toast_len}),1);
-		    SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';
-		    COMMIT;
-		""")
+		with node.connect() as con:
+			con.begin()
+			con.execute(
+			    f"""INSERT INTO {o_relname}(data) VALUES (repeat(\'{symbol1}\', {toast_len}));"""
+			)
+			check1 = con.execute(
+			    f"""SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';"""
+			)
+			con.execute(f"""ALTER TABLE {o_relname} ADD COLUMN data_3 text;""")
+			con.execute(
+			    f"""ALTER TABLE {o_relname} ALTER COLUMN data_3 TYPE bigint USING 0::bigint;"""
+			)
+			check2 = con.execute(
+			    f"""SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';"""
+			)
+			con.execute(
+			    f"""INSERT INTO {o_relname}(data,data_3) VALUES (repeat(\'{symbol2}\', {toast_len}),1);"""
+			)
+			check3 = con.execute(
+			    f"""SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';"""
+			)
+			con.commit()
 
-		print(check)
-		v1 = check[0]
-		v2 = check[1]
-		v3 = check[2]
-		relfilenode_id = 1
-		reltoastrelid_id = 2
-		self.assertTrue(
-		    v1[relfilenode_id]
-		    != v2[relfilenode_id])  # relfilenode changed after ALTER
-		self.assertTrue(
-		    v1[reltoastrelid_id]
-		    != v2[reltoastrelid_id])  # reltoastrelid changed after ALTER
-		self.assertTrue(v2[relfilenode_id] == v3[relfilenode_id])
-		self.assertTrue(v2[reltoastrelid_id] == v3[reltoastrelid_id])
+			v1 = check1[0]
+			v2 = check2[0]
+			v3 = check3[0]
+			relfilenode_id = 1
+			reltoastrelid_id = 2
+			self.assertTrue(
+			    v1[relfilenode_id]
+			    != v2[relfilenode_id])  # relfilenode changed after ALTER
+			self.assertTrue(
+			    v1[reltoastrelid_id]
+			    != v2[reltoastrelid_id])  # reltoastrelid changed after ALTER
+			self.assertTrue(v2[relfilenode_id] == v3[relfilenode_id])
+			self.assertTrue(v2[reltoastrelid_id] == v3[reltoastrelid_id])
 
-		result = self.retrieve_logical_changes()
-		#print(result)
+			result = self.retrieve_logical_changes()
+			#print(result)
 
-		expected1 = f"""BEGIN\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:'"""
-		expected2 = f"""'\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:unchanged-toast-datum data_3[bigint]:0\n"""
-		expected3 = f"""table public.{o_relname}: INSERT: id[integer]:2 data[text]:'"""
-		expected_tail = "' data_3[bigint]:1\nCOMMIT\n"
+			expected1 = f"""BEGIN\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:'"""
+			expected2 = f"""'\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:unchanged-toast-datum data_3[bigint]:0\n"""
+			expected3 = f"""table public.{o_relname}: INSERT: id[integer]:2 data[text]:'"""
+			expected_tail = "' data_3[bigint]:1\nCOMMIT\n"
 
-		start = 0  # start index
-		b = 0  # border index for checking large output
+			start = 0  # start index
+			b = 0  # border index for checking large output
 
-		def check(expected):
-			nonlocal start
-			nonlocal b
-			nonlocal result
-			b = start + len(expected)
-			self.assertEqual(result[start:b], expected)
-			start = b
+			def check(expected):
+				nonlocal start
+				nonlocal b
+				nonlocal result
+				b = start + len(expected)
+				self.assertEqual(result[start:b], expected)
+				start = b
 
-		def check_toast(expected, symbol):
-			nonlocal start
-			nonlocal b
-			nonlocal toast_len
-			nonlocal result
-			check(expected)
-			for i in range(b, b + toast_len):
-				self.assertEqual(result[i], symbol)
-			start += toast_len
+			def check_toast(expected, symbol):
+				nonlocal start
+				nonlocal b
+				nonlocal toast_len
+				nonlocal result
+				check(expected)
+				for i in range(b, b + toast_len):
+					self.assertEqual(result[i], symbol)
+				start += toast_len
 
-		check_toast(expected1, symbol1)
-		check(expected2)
-		check_toast(expected3, symbol2)
-		check(expected_tail)  # this check is OK
+			check_toast(expected1, symbol1)
+			check(expected2)
+			check_toast(expected3, symbol2)
+			check(expected_tail)  # this check is OK
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
@@ -939,72 +949,86 @@ class LogicalTest(BaseTest):
 
 		# txn operates with two	iterationns of TOAST index descr & with two versions of relation
 		# update TOAST-relation is organized as INSERT+DELETE
-		check = node.execute(f"""
-		    BEGIN;
-		    INSERT INTO {o_relname}(data) VALUES (repeat(\'{symbol1}\', {toast_len}));
-		    SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';
-		    ALTER TABLE {o_relname} ADD COLUMN data_3 text;
-		    ALTER TABLE {o_relname} ALTER COLUMN data_3 TYPE bigint USING 0::bigint;
-		    SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';
-		    ALTER TABLE {o_relname} ALTER COLUMN data SET STORAGE EXTERNAL;
-		    UPDATE {o_relname} SET data   = repeat(\'{symbol2}\', {toast_len}), data_3 = 1 WHERE id = (SELECT max(id) FROM {o_relname});
-		    SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';
-		    UPDATE {o_relname} SET data   = repeat(\'{symbol3}\', {toast_len}), data_3 = 1 WHERE id = (SELECT max(id) FROM {o_relname});
-		    COMMIT;
-		""")
+		with node.connect() as con:
+			con.begin()
+			con.execute(
+			    f"""INSERT INTO {o_relname}(data) VALUES (repeat(\'{symbol1}\', {toast_len}));"""
+			)
+			check1 = con.execute(
+			    f"""SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';"""
+			)
+			con.execute(f"""ALTER TABLE {o_relname} ADD COLUMN data_3 text;""")
+			con.execute(
+			    f"""ALTER TABLE {o_relname} ALTER COLUMN data_3 TYPE bigint USING 0::bigint;"""
+			)
+			check2 = con.execute(
+			    f"""SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';"""
+			)
+			con.execute(
+			    f"""ALTER TABLE {o_relname} ALTER COLUMN data SET STORAGE EXTERNAL;"""
+			)
+			con.execute(
+			    f"""UPDATE {o_relname} SET data   = repeat(\'{symbol2}\', {toast_len}), data_3 = 1 WHERE id = (SELECT max(id) FROM {o_relname});"""
+			)
+			check3 = con.execute(
+			    f"""SELECT oid,relfilenode,reltoastrelid FROM pg_class WHERE relname='{o_relname}';"""
+			)
+			con.execute(
+			    f"""UPDATE {o_relname} SET data   = repeat(\'{symbol3}\', {toast_len}), data_3 = 1 WHERE id = (SELECT max(id) FROM {o_relname});"""
+			)
+			con.commit()
 
-		print(check)
-		v1 = check[0]
-		v2 = check[1]
-		v3 = check[2]
-		relfilenode_id = 1
-		reltoastrelid_id = 2
-		self.assertTrue(
-		    v1[relfilenode_id]
-		    != v2[relfilenode_id])  # relfilenode changed after ALTER
-		self.assertTrue(
-		    v1[reltoastrelid_id]
-		    != v2[reltoastrelid_id])  # reltoastrelid changed after ALTER
-		self.assertTrue(v2[relfilenode_id] == v3[relfilenode_id])
-		self.assertTrue(v2[reltoastrelid_id] == v3[reltoastrelid_id])
+			v1 = check1[0]
+			v2 = check2[0]
+			v3 = check3[0]
+			relfilenode_id = 1
+			reltoastrelid_id = 2
+			self.assertTrue(
+			    v1[relfilenode_id]
+			    != v2[relfilenode_id])  # relfilenode changed after ALTER
+			self.assertTrue(
+			    v1[reltoastrelid_id]
+			    != v2[reltoastrelid_id])  # reltoastrelid changed after ALTER
+			self.assertTrue(v2[relfilenode_id] == v3[relfilenode_id])
+			self.assertTrue(v2[reltoastrelid_id] == v3[reltoastrelid_id])
 
-		result = self.retrieve_logical_changes()
-		#print(result)
+			result = self.retrieve_logical_changes()
+			#print(result)
 
-		expected_begin = f"""BEGIN\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:'"""
-		expected_added = f"""'\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:unchanged-toast-datum data_3[bigint]:0\n"""
-		expected_update1 = f"""table public.{o_relname}: UPDATE: old-key: id[integer]:1 new-tuple: id[integer]:1 data[text]:'"""
-		expected_tail1 = "' data_3[bigint]:1\n"
-		expected_update2 = f"""table public.{o_relname}: UPDATE: old-key: id[integer]:1 new-tuple: id[integer]:1 data[text]:'"""
-		expected_tail2 = "' data_3[bigint]:1\nCOMMIT\n"
+			expected_begin = f"""BEGIN\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:'"""
+			expected_added = f"""'\ntable public.{o_relname}: INSERT: id[integer]:1 data[text]:unchanged-toast-datum data_3[bigint]:0\n"""
+			expected_update1 = f"""table public.{o_relname}: UPDATE: old-key: id[integer]:1 new-tuple: id[integer]:1 data[text]:'"""
+			expected_tail1 = "' data_3[bigint]:1\n"
+			expected_update2 = f"""table public.{o_relname}: UPDATE: old-key: id[integer]:1 new-tuple: id[integer]:1 data[text]:'"""
+			expected_tail2 = "' data_3[bigint]:1\nCOMMIT\n"
 
-		start = 0  # start index
-		b = 0  # border index for checking large output
+			start = 0  # start index
+			b = 0  # border index for checking large output
 
-		def check(expected):
-			nonlocal start
-			nonlocal b
-			nonlocal result
-			b = start + len(expected)
-			self.assertEqual(result[start:b], expected)
-			start = b
+			def check(expected):
+				nonlocal start
+				nonlocal b
+				nonlocal result
+				b = start + len(expected)
+				self.assertEqual(result[start:b], expected)
+				start = b
 
-		def check_toast(expected, symbol):
-			nonlocal start
-			nonlocal b
-			nonlocal toast_len
-			nonlocal result
-			check(expected)
-			for i in range(b, b + toast_len):
-				self.assertEqual(result[i], symbol)
-			start += toast_len
+			def check_toast(expected, symbol):
+				nonlocal start
+				nonlocal b
+				nonlocal toast_len
+				nonlocal result
+				check(expected)
+				for i in range(b, b + toast_len):
+					self.assertEqual(result[i], symbol)
+				start += toast_len
 
-		check_toast(expected_begin, symbol1)
-		check(expected_added)
-		check_toast(expected_update1, symbol2)
-		check(expected_tail1)
-		check_toast(expected_update2, symbol3)
-		check(expected_tail2)
+			check_toast(expected_begin, symbol1)
+			check(expected_added)
+			check_toast(expected_update1, symbol2)
+			check(expected_tail1)
+			check_toast(expected_update2, symbol3)
+			check(expected_tail2)
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
