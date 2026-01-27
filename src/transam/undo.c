@@ -349,9 +349,14 @@ get_undo_meta_by_type(UndoLogType undoType)
 	return &undo_metas[index];
 }
 
+/*
+ * In case of undoEviction the function increments writeInProgressChangeCount,
+ * but doesn't release minUndoLocationsMutex. Releasing this mutex should be
+ * done by a caller.
+ */
 void
 update_min_undo_locations(UndoLogType undoType,
-						  bool have_lock, bool do_cleanup)
+						  bool undoEviction, bool do_cleanup)
 {
 	UndoLocation minReservedLocation,
 				minRetainLocation,
@@ -364,11 +369,23 @@ update_min_undo_locations(UndoLogType undoType,
 				newCheckpointEndLocation = InvalidUndoLocation;
 	int			i;
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
+	UndoLocation		replicationUndoRetainLocation = InvalidUndoLocation;
 
-	Assert(!have_lock || !do_cleanup);
+	Assert(!undoEviction || !do_cleanup);
 
-	if (!have_lock)
-		SpinLockAcquire(&meta->minUndoLocationsMutex);
+	if (undoType == UndoLogSystem)
+		replicationUndoRetainLocation = get_current_replication_retain_undo_location();
+
+	SpinLockAcquire(&meta->minUndoLocationsMutex);
+
+	if (undoEviction)
+	{
+		Assert((meta->writeInProgressChangeCount & 1) == 0);
+
+		meta->writeInProgressChangeCount++;
+		pg_write_barrier();
+	}
+
 	START_CRIT_SECTION();
 
 	Assert((meta->minUndoLocationsChangeCount & 1) == 0);
@@ -396,8 +413,6 @@ update_min_undo_locations(UndoLogType undoType,
 
 	if (undoType == UndoLogSystem)
 	{
-		UndoLocation replicationUndoRetainLocation = get_current_replication_retain_undo_location();
-
 		if (UndoLocationIsValid(replicationUndoRetainLocation))
 			minRetainLocation = Min(minRetainLocation, replicationUndoRetainLocation);
 	}
@@ -424,7 +439,7 @@ update_min_undo_locations(UndoLogType undoType,
 
 	Assert((meta->minUndoLocationsChangeCount & 1) == 0);
 
-	if (!have_lock)
+	if (!undoEviction)
 	{
 		UndoLocation writeInProgressLocation,
 					writtenLocation;
@@ -465,8 +480,11 @@ update_min_undo_locations(UndoLogType undoType,
 	}
 
 	END_CRIT_SECTION();
-	if (!have_lock)
+
+	if (!undoEviction)
+	{
 		SpinLockRelease(&meta->minUndoLocationsMutex);
+	}
 
 	if (do_cleanup)
 	{
@@ -1374,13 +1392,6 @@ evict_undo_to_disk(UndoLogType undoType,
 	{
 		LWLockAcquire(&meta->undoWriteLock, LW_EXCLUSIVE);
 	}
-
-	SpinLockAcquire(&meta->minUndoLocationsMutex);
-
-	Assert((meta->writeInProgressChangeCount & 1) == 0);
-	meta->writeInProgressChangeCount++;
-
-	pg_write_barrier();
 
 	update_min_undo_locations(undoType, true, false);
 
