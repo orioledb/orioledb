@@ -1343,8 +1343,7 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 OIndex *
 o_indices_get(ORelOids oids, OIndexType type)
 {
-	ORelFetchContext ctx = {.snapshot = o_non_deleted_snapshot,.version = O_TABLE_INVALID_VERSION};
-	return o_indices_get_extended(oids, type, ctx);
+	return o_indices_get_extended(oids, type, default_non_deleted_fetch_context());
 }
 
 OIndex *
@@ -1370,7 +1369,7 @@ o_indices_get_extended(ORelOids oids, OIndexType type, ORelFetchContext ctx)
 	found_key = &key;
 	result = generic_toast_get_any_with_key(&oIndicesToastAPI, (Pointer) &key,
 											&dataLength,
-											&ctx.snapshot,
+											ctx.snapshot,
 											get_sys_tree(SYS_TREES_O_INDICES),
 											(Pointer *) &found_key);
 
@@ -1394,10 +1393,9 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	Pointer		data;
 	int			len;
 	BTreeDescr *sys_tree;
-	ORelFetchContext ctx = {.snapshot = o_non_deleted_snapshot,.version = O_TABLE_INVALID_VERSION};
 
 	oIndex = make_o_index(table, ixNum);
-	oIndexOld = o_indices_get_extended(oIndex->indexOids, oIndex->indexType, ctx);
+	oIndexOld = o_indices_get_extended(oIndex->indexOids, oIndex->indexType, default_non_deleted_fetch_context());
 	if (oIndexOld)
 	{
 		oIndex->createOxid = oIndexOld->createOxid;

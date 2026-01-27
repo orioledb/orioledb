@@ -2702,7 +2702,7 @@ recovery_send_leader_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_ver
 	msg.o_table_version = o_table_version;
 	msg.old_o_table_version = old_o_table_version;
 
-	Assert(o_tables_get_extended(oids, build_fetch_context(o_non_deleted_snapshot, o_table_version)) != NULL);
+	Assert(o_tables_get_extended(oids, build_fetch_context(&o_non_deleted_snapshot, o_table_version)) != NULL);
 
 	/* Remember oids of index build added to a queue in a hash table */
 	state = (RecoveryIdxBuildQueueState *) hash_search(idxbuild_oids_hash,
@@ -2782,9 +2782,8 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 			uint32		version = (new_o_table->version == O_TABLE_INVALID_VERSION) ? O_TABLE_INVALID_VERSION : new_o_table->version - 1;
 
 			/* @TODO ! !! */
-			ORelFetchContext ctx = build_fetch_context(o_non_deleted_snapshot, version);
 
-			old_o_table = o_tables_get_extended(oids, ctx);
+			old_o_table = o_tables_get_extended(oids, build_fetch_context(&o_non_deleted_snapshot, version));
 		}
 		else
 		{

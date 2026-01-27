@@ -56,7 +56,7 @@ typedef struct
 
 static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType,
 									bool miss_ok, ORelFetchContext ctx, OIndexDescrFillSource fill_source);
-static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot snapshot);
+static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot);
 static void init_shared_root_info(OPagePool *pool,
 								  SharedRootInfo *sharedRootInfo);
 static bool o_tree_init_free_extents(BTreeDescr *desc);
@@ -110,7 +110,7 @@ static void o_find_toastable_attrs(OTableDescr *tableDescr);
 ORelFetchContext
 default_in_progress_fetch_context(void)
 {
-	ORelFetchContext ctx = {.snapshot = o_in_progress_snapshot,.version = O_TABLE_INVALID_VERSION};
+	ORelFetchContext ctx = {.snapshot = &o_in_progress_snapshot,.version = O_TABLE_INVALID_VERSION};
 
 	return ctx;
 }
@@ -118,7 +118,7 @@ default_in_progress_fetch_context(void)
 ORelFetchContext
 default_non_deleted_fetch_context(void)
 {
-	ORelFetchContext ctx = {.snapshot = o_non_deleted_snapshot,.version = O_TABLE_INVALID_VERSION};
+	ORelFetchContext ctx = {.snapshot = &o_non_deleted_snapshot,.version = O_TABLE_INVALID_VERSION};
 
 	return ctx;
 }
@@ -661,7 +661,7 @@ fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 }
 
 static void
-fill_table_descr(OTableDescr *descr, OTable *o_table, OSnapshot snapshot)
+fill_table_descr(OTableDescr *descr, OTable *o_table, OSnapshot *snapshot)
 {
 	MemoryContext old_context;
 
@@ -754,6 +754,8 @@ create_table_descr(ORelOids oids, ORelFetchContext ctx)
 						&found);
 	/* Assert(!found); */
 
+	Assert(ctx.snapshot);
+
 	fill_table_descr(descr, o_table, ctx.snapshot);
 
 	enable_stopevents = old_enable_stopevents;
@@ -792,8 +794,7 @@ find_tree_in_descr(OTableDescr *descr, ORelOids oids)
 OTableDescr *
 o_fetch_table_descr(ORelOids oids)
 {
-	ORelFetchContext ctx = {.snapshot = o_non_deleted_snapshot,.version = O_TABLE_INVALID_VERSION};
-	return o_fetch_table_descr_extended(oids, ctx);
+	return o_fetch_table_descr_extended(oids, default_non_deleted_fetch_context());
 }
 
 OTableDescr *
@@ -829,9 +830,8 @@ o_fetch_table_descr_extended(ORelOids oids, ORelFetchContext ctx)
 OIndexDescr *
 o_fetch_index_descr(ORelOids oids, OIndexType type, bool lock, bool *nested)
 {
-	ORelFetchContext ctx = {.snapshot = o_non_deleted_snapshot,.version = O_TABLE_INVALID_VERSION};
-	ORelFetchContext base_ctx = {.snapshot = o_non_deleted_snapshot,.version = O_TABLE_INVALID_VERSION};
-	return o_fetch_index_descr_extended(oids, type, lock, ctx, base_ctx);
+	return o_fetch_index_descr_extended(oids, type, lock,
+		default_non_deleted_fetch_context(), default_non_deleted_fetch_context());
 }
 
 OIndexDescr *
@@ -1063,7 +1063,7 @@ recreate_index_descr(OIndexDescr *descr)
 	OIndex	   *oIndex;
 	int			refcnt;
 	MemoryContext mcxt;
-	ORelFetchContext ctx = {.snapshot = o_non_deleted_snapshot,.version = O_TABLE_INVALID_VERSION};
+	ORelFetchContext ctx = default_non_deleted_fetch_context();
 
 	oIndex = o_indices_get(descr->oids, descr->desc.type);
 	if (!oIndex)
@@ -1083,7 +1083,7 @@ recreate_index_descr(OIndexDescr *descr)
 }
 
 static void
-o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot snapshot)
+o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot)
 {
 	OIndexNumber cur_ix,
 				ctid_idx_off = 0;
@@ -1633,7 +1633,7 @@ recreate_table_descr(OTableDescr *descr)
 
 	refcnt = descr->refcnt;
 	table_descr_free(descr);
-	fill_table_descr(descr, o_table, o_non_deleted_snapshot);	/* @TODO */
+	fill_table_descr(descr, o_table, &o_non_deleted_snapshot);	/* @TODO */
 	descr->refcnt = refcnt;
 
 	enable_stopevents = old_enable_stopevents;
@@ -1658,10 +1658,7 @@ recreate_table_descr_by_oids(ORelOids oids)
 		recreate_table_descr(descr);
 	}
 	else
-	{
-		ORelFetchContext ctx = {.snapshot = o_non_deleted_snapshot,.version = O_TABLE_INVALID_VERSION};
-		(void) create_table_descr(oids, ctx);
-	}
+		(void) create_table_descr(oids, default_non_deleted_fetch_context());
 }
 
 void

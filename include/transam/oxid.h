@@ -76,12 +76,12 @@ typedef struct OSnapshot
  */
 typedef struct
 {
-	OSnapshot	snapshot;
+	OSnapshot	*snapshot;
 	uint32		version;
 } ORelFetchContext;
 
 static inline ORelFetchContext
-build_fetch_context(OSnapshot snapshot, uint32 version)
+build_fetch_context(OSnapshot *snapshot, uint32 version)
 {
 	ORelFetchContext ctx = {.snapshot = snapshot,.version = version};
 

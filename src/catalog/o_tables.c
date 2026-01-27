@@ -1161,7 +1161,7 @@ o_tables_get_extended(ORelOids oids, ORelFetchContext ctx)
 	found_key = &key;
 	result = generic_toast_get_any_with_key(&oTablesToastAPI, (Pointer) &key,
 											&dataLength,
-											&ctx.snapshot,
+											ctx.snapshot,
 											get_sys_tree(SYS_TREES_O_TABLES),
 											(Pointer *) &found_key);
 
@@ -1182,8 +1182,7 @@ o_tables_get_extended(ORelOids oids, ORelFetchContext ctx)
 OTable *
 o_tables_get(ORelOids oids)
 {
-	ORelFetchContext ctx = {.snapshot = o_non_deleted_snapshot,.version = O_TABLE_INVALID_VERSION};
-	return o_tables_get_extended(oids, ctx);
+	return o_tables_get_extended(oids, default_non_deleted_fetch_context());
 }
 
 /*

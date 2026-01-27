@@ -900,13 +900,11 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else if (ix_type == oIndexInvalid)
 			{
-				ORelFetchContext rel_fetch_ctx = build_fetch_context(snapshot, latest_version);
-
 				elog(DEBUG4, "WAL_REC_RELATION oIndexInvalid :: FETCH RELATION [ %u %u %u ] version %u",
 					 latest_oids.datoid, latest_oids.reloid, latest_oids.relnode,
 					 latest_version);
 
-				descr = o_fetch_table_descr_extended(latest_oids, rel_fetch_ctx);
+				descr = o_fetch_table_descr_extended(latest_oids, build_fetch_context(&snapshot, latest_version));
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
 				if (descr)
 				{
@@ -915,21 +913,20 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else if (ix_type == oIndexToast)
 			{
-				ORelFetchContext idx_fetch_ctx = build_fetch_context(snapshot, latest_version);
-				ORelFetchContext rel_fetch_ctx = build_fetch_context(snapshot, base_version);
-
 				elog(DEBUG4, "WAL_REC_RELATION [1] oIndexToast :: FETCH INDEX oids [ %u %u %u ] version %u base_version %u",
 					 latest_oids.datoid, latest_oids.reloid, latest_oids.relnode,
 					 latest_version, base_version);
 
-				indexDescr = o_fetch_index_descr_extended(latest_oids, ix_type, false, idx_fetch_ctx, rel_fetch_ctx);
+				indexDescr = o_fetch_index_descr_extended(latest_oids, ix_type, false,
+					build_fetch_context(&snapshot, latest_version),
+					build_fetch_context(&snapshot, base_version));
 				if (indexDescr)
 				{
 					elog(DEBUG4, "WAL_REC_RELATION [2] oIndexToast :: FETCH RELATION [ %u %u %u ] version %u",
 						 indexDescr->tableOids.datoid, indexDescr->tableOids.reloid, indexDescr->tableOids.relnode,
 						 base_version);
 
-					descr = o_fetch_table_descr_extended(indexDescr->tableOids, rel_fetch_ctx);
+					descr = o_fetch_table_descr_extended(indexDescr->tableOids, build_fetch_context(&snapshot, base_version));
 					Assert(descr);
 
 					o_toast_tupDesc = descr->toast->leafTupdesc;
