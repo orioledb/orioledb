@@ -57,7 +57,7 @@ typedef struct
 static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType,
 									bool miss_ok);
 static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table);
-static void init_shared_root_info(OPagePool *pool,
+static void init_shared_root_info(PagePool *pool,
 								  SharedRootInfo *sharedRootInfo);
 static bool o_tree_init_free_extents(BTreeDescr *desc);
 static OComparator *o_find_opclass_comparator(OOpclass *opclass, Oid collation);
@@ -113,7 +113,7 @@ static void o_find_toastable_attrs(OTableDescr *tableDescr);
  * table_descr_init_tree function.
  */
 static SharedRootInfo *
-create_shared_root_info(OPagePool *pool, SharedRootInfoKey *key)
+create_shared_root_info(PagePool *pool, SharedRootInfoKey *key)
 {
 	SharedRootInfo *sharedRootInfo;
 
@@ -288,7 +288,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		 * - 2 for tmp seq bufs
 		 * - 2 for free seq bufs
 		 */
-		ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_META, 8);
+		(*desc->ppool->ops->reserve_pages) (desc->ppool, PPOOL_RESERVE_META, 8);
 		LWLockAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo],
 					  LW_EXCLUSIVE);
 		hasLock = true;
@@ -300,7 +300,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		if (hasLock)
 		{
 			LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo]);
-			ppool_release_reserved(desc->ppool, PPOOL_RESERVE_META);
+			(*desc->ppool->ops->release_reserved) (desc->ppool, PPOOL_RESERVE_META);
 		}
 		pfree(sharedRootInfo);
 		return false;
@@ -391,7 +391,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 	Assert(sharedRootInfo != NULL);
 	Assert(!sharedRootInfo->placeholder);
 	pfree(sharedRootInfo);
-	ppool_release_reserved(desc->ppool, PPOOL_RESERVE_META);
+	(*desc->ppool->ops->release_reserved) (desc->ppool, PPOOL_RESERVE_META);
 	return true;
 }
 
@@ -810,7 +810,7 @@ o_fetch_index_descr(ORelOids oids, OIndexType type, bool lock, bool *nested)
 }
 
 static void
-init_shared_root_info(OPagePool *pool, SharedRootInfo *sharedRootInfo)
+init_shared_root_info(PagePool *pool, SharedRootInfo *sharedRootInfo)
 {
 	BTreeMetaPage *meta_page;
 	BTreeRootInfo *rootInfo = &sharedRootInfo->rootInfo;
@@ -818,8 +818,8 @@ init_shared_root_info(OPagePool *pool, SharedRootInfo *sharedRootInfo)
 				bufnum;
 
 	sharedRootInfo->placeholder = false;
-	rootInfo->rootPageBlkno = ppool_get_page(pool, PPOOL_RESERVE_META);;
-	rootInfo->metaPageBlkno = ppool_get_page(pool, PPOOL_RESERVE_META);;
+	rootInfo->rootPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);;
+	rootInfo->metaPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);;
 	rootInfo->rootPageChangeCount = O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(rootInfo->rootPageBlkno));
 
 	Assert(OInMemoryBlknoIsValid(rootInfo->rootPageBlkno));

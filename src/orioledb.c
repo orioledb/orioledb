@@ -938,20 +938,20 @@ _PG_init(void)
 	EmitWarningsOnPlaceholders("pg_stat_statements");
 
 	memset(page_pools, 0, OPagePoolTypesCount * sizeof(OPagePool));
-	page_pools_size[OPagePoolFreeTree] = ppool_estimate_space(&page_pools[OPagePoolFreeTree],
-															  0,
-															  free_tree_buffers_count,
-															  debug_disable_pools_limit);
+	page_pools_size[OPagePoolFreeTree] = o_ppool_estimate_space(&page_pools[OPagePoolFreeTree],
+																0,
+																free_tree_buffers_count,
+																debug_disable_pools_limit);
 
-	page_pools_size[OPagePoolCatalog] = ppool_estimate_space(&page_pools[OPagePoolCatalog],
-															 free_tree_buffers_count,
-															 catalog_buffers_count,
-															 debug_disable_pools_limit);
+	page_pools_size[OPagePoolCatalog] = o_ppool_estimate_space(&page_pools[OPagePoolCatalog],
+															   free_tree_buffers_count,
+															   catalog_buffers_count,
+															   debug_disable_pools_limit);
 
-	page_pools_size[OPagePoolMain] = ppool_estimate_space(&page_pools[OPagePoolMain],
-														  main_buffers_offset,
-														  main_buffers_count,
-														  debug_disable_pools_limit);
+	page_pools_size[OPagePoolMain] = o_ppool_estimate_space(&page_pools[OPagePoolMain],
+															main_buffers_offset,
+															main_buffers_count,
+															debug_disable_pools_limit);
 
 	for (i = 0; i < OPagePoolTypesCount; i++)
 		page_pools_size[i] = CACHELINEALIGN(page_pools_size[i]);
@@ -1170,7 +1170,7 @@ ppools_shmem_init(Pointer ptr, bool found)
 	page_descs = (OrioleDBPageDesc *) ptr;
 
 	for (i = 0; i < OPagePoolTypesCount; i++)
-		ppool_shmem_init(&page_pools[i], page_pools_ptr[i], found);
+		o_ppool_shmem_init(&page_pools[i], page_pools_ptr[i], found);
 
 	if (!found)
 	{
@@ -1533,10 +1533,10 @@ orioledb_page_stats(PG_FUNCTION_ARGS)
 			values[0] = PointerGetDatum(cstring_to_text("free_tree"));
 		else if (i == OPagePoolCatalog)
 			values[0] = PointerGetDatum(cstring_to_text("catalog"));
-		num_free_pages = (int64) ppool_free_pages_count(&page_pools[i]);
+		num_free_pages = (int64) (*page_pools[i].base.ops->free_pages_count) ((PagePool *) &page_pools[i]);
 		values[1] = Int64GetDatum(total_num_pages - num_free_pages);
 		values[2] = Int64GetDatum(num_free_pages);
-		values[3] = Int64GetDatum((int64) ppool_dirty_pages_count(&page_pools[i]));
+		values[3] = Int64GetDatum((int64) (*page_pools[i].base.ops->dirty_pages_count) ((PagePool *) &page_pools[i]));
 		values[4] = Int64GetDatum(total_num_pages);
 		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
 	}
@@ -1600,28 +1600,28 @@ orioledb_commit_hash(PG_FUNCTION_ARGS)
 /*
  * Returns a page pool by the type.
  */
-OPagePool *
+PagePool *
 get_ppool(OPagePoolType type)
 {
 	Assert((int) type < OPagePoolTypesCount);
-	return &page_pools[type];
+	return (PagePool *) &page_pools[type];
 }
 
 /*
  * Returns a page pool for the page number.
  */
-OPagePool *
+PagePool *
 get_ppool_by_blkno(OInMemoryBlkno blkno)
 {
 	Assert(blkno < orioledb_buffers_count);
 
 	if (blkno >= main_buffers_offset)
-		return &page_pools[OPagePoolMain];
+		return (PagePool *) &page_pools[OPagePoolMain];
 
 	if (blkno < free_tree_buffers_count)
-		return &page_pools[OPagePoolFreeTree];
+		return (PagePool *) &page_pools[OPagePoolFreeTree];
 
-	return &page_pools[OPagePoolCatalog];
+	return (PagePool *) &page_pools[OPagePoolCatalog];
 }
 
 /*
@@ -1634,7 +1634,7 @@ get_dirty_pages_count_sum(void)
 	int			i;
 
 	for (i = 0; i < OPagePoolTypesCount; i++)
-		result += ppool_dirty_pages_count(&page_pools[i]);
+		result += (*page_pools[i].base.ops->dirty_pages_count) ((PagePool *) &page_pools[i]);
 
 	return result;
 }

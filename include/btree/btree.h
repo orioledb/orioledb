@@ -176,7 +176,7 @@ struct BTreeDescr
 	OSmgr		smgr;
 	ORelOids	oids;
 	OIndexType	type;
-	OPagePool  *ppool;
+	PagePool   *ppool;
 	OCompress	compress;
 	uint8		fillfactor;
 	UndoLogType undoType;

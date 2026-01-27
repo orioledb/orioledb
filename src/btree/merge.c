@@ -180,7 +180,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 	CLEAN_DIRTY(desc->ppool, right_blkno);
 	O_PAGE_CHANGE_COUNT_INC(right);
 
-	ppool_free_page(desc->ppool, right_blkno, true);
+	(*desc->ppool->ops->free_page) (desc->ppool, right_blkno, true);
 
 	if (O_PAGE_IS(left, LEAF))
 		pg_atomic_fetch_sub_u32(&BTREE_GET_META(desc)->leafPagesNum, 1);
