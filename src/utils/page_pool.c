@@ -52,6 +52,9 @@ void		o_ucm_epoch_shift(PagePool *pool);
 uint64		o_ucm_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 state);
 void		o_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState);
 
+uint64
+o_ppool_write_build_page(PagePool *pool, BTreeDescr *desc, Page img, FileExtent *extent, BTreeMetaPage *metaPage);
+
 /* PagePoolOps for a shared memory based page pool */
 static const PagePoolOps o_page_pool_ops = {
 	.alloc_page = o_ppool_get_page,
@@ -73,6 +76,8 @@ static const PagePoolOps o_page_pool_ops = {
 	.ucm_epoch_shift = o_ucm_epoch_shift,
 	.ucm_update_state = o_ucm_update_state,
 	.ucm_after_update_state = o_ucm_after_update_state,
+	
+	.write_build_page = o_ppool_write_build_page,
 };
 
 /* Shared local memory based page pool operations */
@@ -97,6 +102,9 @@ void		local_ucm_epoch_shift(PagePool *pool);
 uint64		local_ucm_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 state);
 void		local_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState);
 
+uint64
+local_ppool_write_build_page(PagePool *pool, BTreeDescr *desc, Page img, FileExtent *extent, BTreeMetaPage *metaPage);
+
 /* PagePoolOps for a local memory based page pool */
 static const PagePoolOps local_ppool_ops = {
 	.alloc_page = local_ppool_alloc_page,
@@ -118,6 +126,8 @@ static const PagePoolOps local_ppool_ops = {
 	.ucm_epoch_shift = local_ucm_epoch_shift,
 	.ucm_update_state = local_ucm_update_state,
 	.ucm_after_update_state = local_ucm_after_update_state,
+	
+	.write_build_page = local_ppool_write_build_page,
 };
 
 /*
@@ -480,6 +490,12 @@ o_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, 
 	ucm_after_update_state(&o_pool->ucm, blkno, oldState, newState);
 }
 
+uint64
+o_ppool_write_build_page(PagePool *pool, BTreeDescr *desc, Page img, FileExtent *extent, BTreeMetaPage *metaPage)
+{
+	return perform_page_io_build(desc, img, extent, metaPage);
+}
+
 void
 local_ppool_init(LocalPagePool *pool)
 {
@@ -494,6 +510,8 @@ local_ppool_init(LocalPagePool *pool)
 	pool->size = LOCAL_PPOOL_INIT_SIZE;
 	pool->current_slot = 0;
 	pool->slab_context = SlabContextCreate(TopMemoryContext, "oriole local page pool", ORIOLEDB_BLCKSZ * 16, ORIOLEDB_BLCKSZ);
+	/* This might lead to PANIC on allocation failure in critical section */
+	MemoryContextAllowInCriticalSection(pool->slab_context, true);
 	pool->base.ops = &local_ppool_ops;
 }
 
@@ -645,4 +663,14 @@ void
 local_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState)
 {
 	/* Stub: do nothing */
+}
+
+uint64
+local_ppool_write_build_page(PagePool *pool, BTreeDescr *desc, Page img, FileExtent *extent, BTreeMetaPage *metaPage)
+{
+    OInMemoryBlkno blkno = (*pool->ops->alloc_page)(pool, PPOOL_RESERVE_META);
+    Page p = O_GET_IN_MEMORY_PAGE(blkno);
+    
+    memcpy(p, img, ORIOLEDB_BLCKSZ);
+    return blkno;
 }

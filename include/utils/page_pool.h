@@ -68,6 +68,9 @@ typedef struct PagePoolOps
 	void		(*ucm_epoch_shift) (PagePool *pool);
 	uint64		(*ucm_update_state) (PagePool *pool, OInMemoryBlkno blkno, uint64 state);
 	void		(*ucm_after_update_state) (PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState);
+	
+	uint64      (*write_build_page)(PagePool *pool, BTreeDescr *desc, Page img, 
+                           FileExtent *extent, BTreeMetaPage *metaPage);
 } PagePoolOps;
 
 typedef struct PagePool
@@ -123,8 +126,8 @@ extern void local_ppool_init(LocalPagePool *pool);
 											 * detect changes concurrent to
 											 * write operatorions */
 #define PAGE_DESC_FLAG_BOTH_DIRTY		(PAGE_DESC_FLAG_DIRTY | PAGE_DESC_FLAG_CONCURRENT_DIRTY)
-#define IS_DIRTY(blkno) (O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_DIRTY)
-#define IS_DIRTY_CONCURRENT(blkno) (O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_CONCURRENT_DIRTY)
+#define IS_DIRTY(blkno) ((O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_DIRTY) && !O_PAGE_IS_LOCAL(blkno))
+#define IS_DIRTY_CONCURRENT(blkno) ((O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_CONCURRENT_DIRTY) && !O_PAGE_IS_LOCAL(blkno))
 #define CLEAN_DIRTY_CONCURRENT(blkno) (O_GET_IN_MEMORY_PAGEDESC(blkno)->flags &= ~PAGE_DESC_FLAG_CONCURRENT_DIRTY)
 
 /*  Local page can never be dirty as it's never synced with disk */
