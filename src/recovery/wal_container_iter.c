@@ -120,7 +120,8 @@ wal_container_iterate(WalReader *r, WalConsumer *consumer, bool allow_logging)
 			return WALPARSE_BAD_TYPE;
 
 		if (!d->parse)
-			return WALPARSE_INTERNAL;
+			continue;			/* skip NULL, it means: the WAL record has no
+								 * body */
 
 		st = d->parse(r, &ev);
 		if (st)
