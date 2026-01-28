@@ -28,6 +28,7 @@
 #include "tuple/sort.h"
 #include "transam/oxid.h"
 #include "utils/seq_buf.h"
+#include "utils/page_pool.h"
 
 #include "access/genam.h"
 #include "access/relation.h"
@@ -229,7 +230,7 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 
 		VALGRIND_CHECK_MEM_IS_DEFINED(stack[level].img, ORIOLEDB_BLCKSZ);
 
-		downlink = perform_page_io_build(desc, stack[level].img, &extent, metaPage);
+		downlink = (*desc->ppool->ops->write_build_page)(desc->ppool, desc, stack[level].img, &extent, metaPageBlkno);
 		if (level == 0)
 			pg_atomic_add_fetch_u32(&metaPage->leafPagesNum, 1);
 
@@ -309,7 +310,8 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	bool	   *isnull;
 	uint32		chkpNum;
 
-	btree_open_smgr(desc);
+	if (desc->storageType != BTreeStorageInMemory)
+    	btree_open_smgr(desc);
 
 	stack = (OIndexBuildStackItem *) palloc0(sizeof(OIndexBuildStackItem) * ORIOLEDB_MAX_DEPTH);
 	values = (Datum *) palloc(sizeof(Datum) * tupdesc->natts);
@@ -353,7 +355,7 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 		VALGRIND_CHECK_MEM_IS_DEFINED(stack[i].img, ORIOLEDB_BLCKSZ);
 
 		split_page_by_chunks(desc, stack[i].img);
-		downlink = perform_page_io_build(desc, stack[i].img, &extent, &metaPage);
+		downlink = (*desc->ppool->ops->write_build_page)(desc->ppool, desc, stack[i].img, &extent, &metaPageBlkno);
 		if (i == 0)
 			pg_atomic_add_fetch_u32(&metaPage.leafPagesNum, 1);
 
@@ -385,11 +387,12 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	VALGRIND_CHECK_MEM_IS_DEFINED(root_page, ORIOLEDB_BLCKSZ);
 
 	split_page_by_chunks(desc, root_page);
-	downlink = perform_page_io_build(desc, root_page, &extent, &metaPage);
+	downlink = (*desc->ppool->ops->write_build_page)(desc->ppool, desc, root_page, &extent, &metaPageBlkno);
 	if (root_level == 0)
 		pg_atomic_add_fetch_u32(&metaPage.leafPagesNum, 1);
 
-	btree_close_smgr(desc);
+	if (desc->storageType != BTreeStorageInMemory)
+    	btree_close_smgr(desc);
 	pfree(stack);
 
 	if (orioledb_s3_mode)
