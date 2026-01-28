@@ -287,11 +287,10 @@ FROM query_to_text('EXPLAIN (ANALYZE, COSTS OFF, BUFFERS)
          ->  Bitmap Index Scan on bitmap_test_ixx (actual time=x rows=x loops=x)
                Index Cond: (i < x)
                Secondary index (bitmap_test_ixx) pages: read=x
-               Other pages: read=x
          Primary pages: read=x
  Planning Time: x ms
  Execution Time: x ms
-(11 rows)
+(10 rows)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('EXPLAIN (ANALYZE, COSTS OFF, BUFFERS)
@@ -307,15 +306,13 @@ FROM query_to_text('EXPLAIN (ANALYZE, COSTS OFF, BUFFERS)
                ->  Bitmap Index Scan on bitmap_test_ixx (actual time=x rows=x loops=x)
                      Index Cond: (i < x)
                      Secondary index (bitmap_test_ixx) pages: read=x
-                     Other pages: read=x
                ->  Bitmap Index Scan on bitmap_test_ixx (actual time=x rows=x loops=x)
                      Index Cond: (i > x)
                      Secondary index (bitmap_test_ixx) pages: read=x
-                     Other pages: read=x
          Primary pages: read=x
  Planning Time: x ms
  Execution Time: x ms
-(16 rows)
+(14 rows)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('EXPLAIN (ANALYZE, COSTS OFF, BUFFERS)
@@ -331,15 +328,13 @@ FROM query_to_text('EXPLAIN (ANALYZE, COSTS OFF, BUFFERS)
                ->  Bitmap Index Scan on bitmap_test_ixx (actual time=x rows=x loops=x)
                      Index Cond: (i < x)
                      Secondary index (bitmap_test_ixx) pages: read=x
-                     Other pages: read=x
                ->  Bitmap Index Scan on bitmap_test_ixx (actual time=x rows=x loops=x)
                      Index Cond: (j < x)
                      Secondary index (bitmap_test_ixx) pages: read=x
-                     Other pages: read=x
          Primary pages: read=x
  Planning Time: x ms
  Execution Time: x ms
-(16 rows)
+(14 rows)
 
 -- Tests for bitmap EXPLAIN FORMAT JSON
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -409,9 +404,6 @@ FROM query_to_text('EXPLAIN (FORMAT JSON, ANALYZE, COSTS OFF, BUFFERS)
                "Temp Written Blocks": x,             +
                "Secondary Index Pages": {            +
                  "Index Name": "bitmap_test_ixx",    +
-                 "Read": x                           +
-               },                                    +
-               "Other Pages": {                      +
                  "Read": x                           +
                }                                     +
              }                                       +

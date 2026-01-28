@@ -689,16 +689,16 @@ SELECT orioledb_sys_tree_structure(24, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
      Item 0: offset = 296, tuple = (730, 0)                         +
      Item 1: offset = 328, tuple = (734, 96)                        +
-     Item 2: offset = 360, tuple = (735, 24656)                     +
-     Item 3: offset = 392, tuple = (736, 27008)                     +
-     Item 4: offset = 424, tuple = (737, 27456)                     +
-     Item 5: offset = 456, tuple = (739, 28008)                     +
-     Item 6: offset = 488, tuple = (740, 29000)                     +
-     Item 7: offset = 520, tuple = (743, 29160)                     +
-     Item 8: offset = 552, tuple = (744, 47608)                     +
-     Item 9: offset = 584, tuple = (745, 50464)                     +
-     Item 10: offset = 616, tuple = (746, 50904)                    +
-     Item 11: offset = 648, tuple = (747, 53640)                    +
+     Item 2: offset = 360, tuple = (735, 24808)                     +
+     Item 3: offset = 392, tuple = (736, 27176)                     +
+     Item 4: offset = 424, tuple = (737, 27624)                     +
+     Item 5: offset = 456, tuple = (739, 28176)                     +
+     Item 6: offset = 488, tuple = (740, 29168)                     +
+     Item 7: offset = 520, tuple = (743, 29328)                     +
+     Item 8: offset = 552, tuple = (744, 47800)                     +
+     Item 9: offset = 584, tuple = (745, 50680)                     +
+     Item 10: offset = 616, tuple = (746, 51120)                    +
+     Item 11: offset = 648, tuple = (747, 53856)                    +
      Item 12: offset = 680, tuple = (1000, 2000)                    +
      Item 13: offset = 712, tuple = (1001, 2001)                    +
      Item 14: offset = 744, tuple = (1002, 2002)                    +

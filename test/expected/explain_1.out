@@ -575,13 +575,12 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
          ->  Bitmap Index Scan on o_explain_formats_val_key  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
                Index Cond: (val > x)
                Secondary index (o_explain_formats_val_key) pages: read=x
-               Other pages: read=x
          Primary pages: read=x
  Planning:
    Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(15 rows)
+(14 rows)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 	FROM query_to_text($$ EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
@@ -662,8 +661,6 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
              Temp Written Blocks: x                   +
              Secondary Index Pages:                   +
                Index Name: "o_explain_formats_val_key"+
-               Read: x                                +
-             Other Pages:                             +
                Read: x                                +
          Primary Pages:                               +
            Read: x                                    +
@@ -775,9 +772,6 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
                "Temp Written Blocks": x,                   +
                "Secondary Index Pages": {                  +
                  "Index Name": "o_explain_formats_val_key",+
-                 "Read": x                                 +
-               },                                          +
-               "Other Pages": {                            +
                  "Read": x                                 +
                }                                           +
              }                                             +
@@ -904,9 +898,6 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
                  <Index-Name>o_explain_formats_val_key</Index-Name>        +
                  <Read>x</Read>                                            +
                </Secondary-Index-Pages>                                    +
-               <Other-Pages>                                               +
-                 <Read>x</Read>                                            +
-               </Other-Pages>                                              +
              </Plan>                                                       +
            </Plans>                                                        +
            <Primary-Pages>                                                 +
@@ -1386,14 +1377,13 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
                ->  Bitmap Index Scan on test_the_geom_brin  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
                      Index Cond: (test_explain_bridged_indexxthe_geom && '(x,x),(x,x)'::box)
                      Buffers: shared hit=x
-               Primary pages: read=x
-               Other pages: read=x, lock=x, load=x
+               Other pages: read=x
                Buffers: shared hit=x
  Planning:
    Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(22 rows)
+(21 rows)
 
 COMMIT;
 DROP EXTENSION orioledb CASCADE;
