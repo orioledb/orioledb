@@ -45,15 +45,13 @@ wr_remaining(const WalReader *r)
 #define WR_READ(r, out) \
 { \
 	WR_REQUIRE(r, sizeof(*out)); \
-	if (out) \
-        memcpy(out, r->ptr, sizeof(*out)); \
+	memcpy(out, r->ptr, sizeof(*out)); \
     r->ptr += sizeof(*out); \
 }
 #define WR_PEEK(r, out) \
 { \
 	WR_REQUIRE(r, sizeof(*out)); \
-	if (out) \
-        memcpy(out, r->ptr, sizeof(*out)); \
+	memcpy(out, r->ptr, sizeof(*out)); \
 }
 #define WR_SKIP(r, sz) \
 { \
