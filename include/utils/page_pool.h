@@ -68,8 +68,6 @@ typedef struct PagePoolOps
 	void		(*ucm_epoch_shift) (PagePool *pool);
 	uint64		(*ucm_update_state) (PagePool *pool, OInMemoryBlkno blkno, uint64 state);
 	void		(*ucm_after_update_state) (PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState);
-
-	Pointer		(*get_pagedesc_array) (PagePool *pool);
 } PagePoolOps;
 
 typedef struct PagePool

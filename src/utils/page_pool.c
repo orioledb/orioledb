@@ -487,6 +487,10 @@ local_ppool_init(LocalPagePool *pool)
 	local_ppool_page_descs = calloc(LOCAL_PPOOL_INIT_SIZE, sizeof(OrioleDBPageDesc));
 	if (!local_ppool_pages || !local_ppool_page_descs)
 		ereport(ERROR, errmsg("Failed to allocate memory for local page pool"));
+	
+	for (int i = 0; i < LOCAL_PPOOL_INIT_SIZE; i++)
+		o_page_desc_init(&local_ppool_page_descs[i]);
+	
 	pool->size = LOCAL_PPOOL_INIT_SIZE;
 	pool->current_slot = 0;
 	pool->slab_context = SlabContextCreate(TopMemoryContext, "oriole local page pool", ORIOLEDB_BLCKSZ * 16, ORIOLEDB_BLCKSZ);
@@ -536,7 +540,9 @@ local_ppool_alloc_page(PagePool *pool, int kind)
 	local_ppool_page_descs = new_page_descs;
 	local_pool->size = new_size;
 	memset(local_ppool_pages + old_size, 0, old_size * sizeof(Page));
-	memset(local_ppool_page_descs + old_size, 0, old_size * sizeof(OrioleDBPageDesc));
+	
+	for (int i = old_size; i < new_size; i++)
+		o_page_desc_init(&local_ppool_page_descs[i]);
 	
 	local_pool->current_slot = old_size;
 	local_ppool_pages[old_size] = (Page) MemoryContextAllocZero(local_pool->slab_context, ORIOLEDB_BLCKSZ);
