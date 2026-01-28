@@ -1190,12 +1190,7 @@ ppools_shmem_init(Pointer ptr, bool found)
 
 		for (i = 0; i < page_descs_size / sizeof(OrioleDBPageDesc); i++)
 		{
-			page_descs[i].fileExtent.len = InvalidFileExtentLen;
-			page_descs[i].fileExtent.off = InvalidFileExtentOff;
-			ORelOidsSetInvalid(page_descs[i].oids);
-			page_descs[i].ionum = -1;
-			page_descs[i].type = 0;
-			page_descs[i].flags = 0;
+			o_page_desc_init(&page_descs[i]);
 		}
 	}
 }
@@ -1281,6 +1276,17 @@ orioledb_shmem_startup(void)
 	LWLockRelease(AddinShmemInitLock);
 
 	shared_segment_initialized = true;
+}
+
+void
+o_page_desc_init(OrioleDBPageDesc *desc)
+{
+   	desc->fileExtent.len = InvalidFileExtentLen;
+	desc->fileExtent.off = InvalidFileExtentOff;
+	ORelOidsSetInvalid(page_descs[i].oids);
+	desc->ionum = -1;
+	desc->type = 0;
+	desc->flags = 0;
 }
 
 uint64
