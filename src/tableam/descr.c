@@ -915,8 +915,8 @@ init_shared_root_info(PagePool *pool, SharedRootInfo *sharedRootInfo)
 				bufnum;
 
 	sharedRootInfo->placeholder = false;
-	rootInfo->rootPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);;
-	rootInfo->metaPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);;
+	rootInfo->rootPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);
+	rootInfo->metaPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);
 	rootInfo->rootPageChangeCount = O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(rootInfo->rootPageBlkno));
 
 	Assert(OInMemoryBlknoIsValid(rootInfo->rootPageBlkno));
