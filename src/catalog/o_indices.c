@@ -981,47 +981,60 @@ cache_scan_tupdesc_and_slot(OIndexDescr *index_descr, OIndex *oIndex)
 	index_descr->index_slot = MakeSingleTupleTableSlot(index_descr->itupdesc, &TTSOpsOrioleDB);
 }
 
-OTable *
-provider_external(ORelOids tableOids, void *arg, bool *must_free)
+/*
+ * o_table_provider()
+ *
+ * Helper used by o_index_fill_descr() to obtain OTable according to provider args.
+ *
+ * When need_load == false:
+ * - arg is a borrowed OTable*; the returned pointer must not be freed here.
+ * - *must_free is set to false.
+ *
+ * When need_load == true:
+ * - arg is an ORelFetchContext* used to fetch OTable from catalogs.
+ * - On success, *must_free is set to true and the caller must free the table
+ *   with o_table_free().
+ * - On failure (NULL), *must_free is set to false.
+ */
+static OTable *
+o_table_provider(ORelOids tableOids, void *arg, bool need_load, bool *must_free)
 {
 	Assert(must_free);
 	Assert(arg);
+
+	if (need_load)
+	{
+		OTable	   *oTable = NULL;
+		ORelFetchContext *base_ctx_ptr = (ORelFetchContext *) arg;
+
+		oTable = o_tables_get_extended(tableOids, *base_ctx_ptr);
+		/* If we loaded it here, caller must free it. */
+		*must_free = (oTable != NULL);
+
+		return oTable;
+	}
+
+	Assert(!need_load);
 
 	*must_free = false;
 
 	return (OTable *) arg;
 }
 
-OTable *
-provider_loaded(ORelOids tableOids, void *arg, bool *must_free)
-{
-	OTable	   *oTable = NULL;
-	ORelFetchContext *base_ctx_ptr = (ORelFetchContext *) arg;
-
-	Assert(must_free);
-	Assert(base_ctx_ptr);
-
-	oTable = o_tables_get_extended(tableOids, *base_ctx_ptr);
-	/* If we loaded it here, caller must free it. */
-	*must_free = (oTable != NULL);
-
-	return oTable;
-}
-
-OIndexDescrFillSource
+OTableProviderArgs
 fill_idescr_from_table(OTable *oTable)
 {
-	OIndexDescrFillSource output = {.get_oTable = provider_external,.arg = oTable};
+	OTableProviderArgs output = {.need_load = false,.arg = oTable};
 
 	Assert(oTable);
 
 	return output;
 }
 
-OIndexDescrFillSource
+OTableProviderArgs
 fill_idescr_from_ctx(ORelFetchContext *base_ctx_ptr)
 {
-	OIndexDescrFillSource output = {.get_oTable = provider_loaded,.arg = base_ctx_ptr};
+	OTableProviderArgs output = {.need_load = true,.arg = base_ctx_ptr};
 
 	Assert(base_ctx_ptr);
 
@@ -1029,7 +1042,7 @@ fill_idescr_from_ctx(ORelFetchContext *base_ctx_ptr)
 }
 
 void
-o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OIndexDescrFillSource fill_source)
+o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTableProviderArgs oTableProviderArgs)
 {
 	int			i;
 	int			maxTableAttnum = 0;
@@ -1055,10 +1068,9 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OIndexDescrFillSource fil
 		bool		free_oTable = false;
 		OTable	   *oTable = NULL;
 
-		Assert(fill_source.arg);
-		Assert(fill_source.get_oTable);
+		Assert(oTableProviderArgs.arg);
 
-		oTable = fill_source.get_oTable(descr->tableOids, fill_source.arg, &free_oTable);
+		oTable = o_table_provider(descr->tableOids, oTableProviderArgs.arg, oTableProviderArgs.need_load, &free_oTable);
 		Assert(oTable);
 
 		if (oTable)

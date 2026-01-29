@@ -55,7 +55,7 @@ typedef struct
 } InvalidateComparatorUndoStackItem;
 
 static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType,
-									bool miss_ok, ORelFetchContext ctx, OIndexDescrFillSource fill_source);
+									bool miss_ok, ORelFetchContext ctx, OTableProviderArgs oTableProviderArgs);
 static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot);
 static void init_shared_root_info(OPagePool *pool,
 								  SharedRootInfo *sharedRootInfo);
@@ -1012,7 +1012,7 @@ o_drop_shared_root_info(Oid datoid, Oid relnode)
 
 static OIndexDescr *
 get_index_descr(ORelOids ixOids, OIndexType ixType,
-				bool miss_ok, ORelFetchContext ctx, OIndexDescrFillSource fill_source)
+				bool miss_ok, ORelFetchContext ctx, OTableProviderArgs oTableProviderArgs)
 {
 	OIndexDescr *result;
 	OIndex	   *oIndex;
@@ -1036,7 +1036,7 @@ get_index_descr(ORelOids ixOids, OIndexType ixType,
 		return NULL;
 	}
 	mcxt = MemoryContextSwitchTo(descrCxt);
-	o_index_fill_descr(result, oIndex, fill_source);
+	o_index_fill_descr(result, oIndex, oTableProviderArgs);
 	MemoryContextSwitchTo(mcxt);
 	index_btree_desc_init(&result->desc, result->compress, result->fillfactor, result->oids,
 						  oIndex->indexType, oIndex->table_persistence, oIndex->createOxid, result);

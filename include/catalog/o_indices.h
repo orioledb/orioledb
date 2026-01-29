@@ -84,104 +84,51 @@ typedef struct
 } OIndex;
 
 /*
- * OTableProviderFn
+ * OTableProviderArgs
  *
- * Callback used by index descriptor initialization code to obtain a base table
- * metadata object (OTable) for a given table OIDs.
- *
- * The provider returns either:
- * - a borrowed pointer to an existing OTable object (must_free=false), or
- * - a newly loaded OTable object (must_free=true), in which case the caller
- *   becomes responsible for freeing it with o_table_free().
- *
- * The provider must return NULL if the table definition cannot be obtained
- * under the requested catalog state.
- *
- * Arguments:
- * - tableOids: OIDs identifying the base table for which OTable is requested.
- * - arg: opaque provider-specific state.
- * - must_free: OUT parameter, set to true if the returned OTable must be freed
- *   by the caller; must be set to false on NULL return.
- */
-typedef OTable *(*OTableProviderFn) (ORelOids tableOids, void *arg, bool *must_free);
-
-/*
- * OIndexDescrFillSource
- *
- * Pluggable source of base table metadata needed to fully initialize an
+ * Describes how to supply base-table metadata (OTable) when initializing an
  * OIndexDescr.
  *
- * Some index descriptor fields (e.g. primary index constraints and
- * primary_init_nfields) depend on the base table definition (OTable) and thus
- * cannot be derived from OIndex alone.
+ * Some descriptor fields (e.g. primary constraints, primary_init_nfields) are
+ * derived from the base table definition and cannot be computed from OIndex
+ * alone.
  *
- * OIndexDescrFillSource provides a uniform way to supply this dependency:
- * either by passing an already available OTable, or by loading OTable on demand
- * using a catalog fetch context.
+ * Two modes are supported:
+ * - need_load == false: arg is a borrowed OTable* supplied by the caller.
+ * - need_load == true : arg is an ORelFetchContext* used to load OTable on demand.
  *
- * The get_oTable callback must follow OTableProviderFn ownership rules.
- *
- * Lifetime requirements:
- * - The OIndexDescrFillSource object and its arg must remain valid for the
- *   duration of o_index_fill_descr() call.
+ * Lifetime:
+ * - The OTableProviderArgs itself and the object referenced by arg must remain
+ *   valid for the duration of o_index_fill_descr().
  */
 typedef struct
 {
-	OTableProviderFn get_oTable;
+	bool need_load;
 	void	   *arg;
-} OIndexDescrFillSource;
-
-/*
- * provider_external()
- *
- * OTable provider that returns a borrowed OTable pointer passed via arg.
- * The returned object is not owned by the caller of the provider.
- *
- * Invariants:
- * - arg must be a non-NULL pointer to a valid OTable.
- * - *must_free is set to false.
- */
-extern OTable *provider_external(ORelOids tableOids, void *arg, bool *must_free);
-
-/*
- * provider_loaded()
- *
- * OTable provider that loads OTable from OrioleDB system catalogs using the
- * fetch context passed via arg (ORelFetchContext pointer).
- *
- * The returned OTable is owned by the caller of the provider and must be freed
- * with o_table_free() if must_free is set to true.
- *
- * Invariants:
- * - arg must point to a valid ORelFetchContext for base table fetch.
- * - On success, *must_free is set to true.
- * - On failure (NULL return), *must_free is set to false.
- */
-extern OTable *provider_loaded(ORelOids tableOids, void *arg, bool *must_free);
+} OTableProviderArgs;
 
 /*
  * fill_idescr_from_table()
  *
- * Constructs a fill source that uses an already available OTable object.
+ * Returns provider args for the "borrowed table" mode.
  *
- * The passed OTable is treated as borrowed; it must remain valid for the whole
- * duration of o_index_fill_descr() call. The fill code will never free it.
+ * The passed OTable remains owned by the caller and must stay valid for the
+ * whole o_index_fill_descr() call.
  */
-extern OIndexDescrFillSource fill_idescr_from_table(OTable *oTable);
+extern OTableProviderArgs fill_idescr_from_table(OTable *oTable);
 
 /*
  * fill_idescr_from_ctx()
  *
- * Constructs a fill source that loads OTable on demand using the provided base
- * relation fetch context.
+ * Returns provider args for the "load on demand" mode.
  *
- * The fetch context must describe the intended catalog view of the base table
- * (e.g. correct snapshot/version pair during WAL replay or logical decoding).
+ * base_ctx_ptr describes the catalog/snapshot view that must be used to fetch
+ * the base table (e.g. during WAL replay or logical decoding).
  *
- * NOTE: If this function stores only a pointer to base_ctx in the fill source,
- * callers must ensure that base_ctx outlives o_index_fill_descr() call.
+ * Lifetime:
+ * - base_ctx_ptr must remain valid for the whole o_index_fill_descr() call.
  */
-extern OIndexDescrFillSource fill_idescr_from_ctx(ORelFetchContext *base_ctx_ptr);
+extern OTableProviderArgs fill_idescr_from_ctx(ORelFetchContext *base_ctx_ptr);
 
 /* callback for o_indices_foreach_oids() */
 typedef void (*OIndexOidsCallback) (OIndexType type, ORelOids treeOids,
@@ -192,38 +139,27 @@ extern OIndex *make_o_index(OTable *table, OIndexNumber ixNum);
 /*
  * o_index_fill_descr()
  *
- * Initializes an OIndexDescr from a catalog OIndex object.
+ * Initialize *descr from the catalog OIndex entry.
  *
- * This function:
- * - resets all fields of *descr,
- * - copies identity information (OIDs, name, version, flags),
- * - builds leaf and non-leaf tuple descriptors according to index type,
- * - populates index field metadata (collations, ordering, null ordering,
- *   opclasses, comparators),
- * - initializes predicate/expressions state and per-descriptor execution
- *   context,
- * - fills fixed-format specs and derived fields (fillfactor, maxTableAttnum,
- *   etc.).
+ * The function resets the descriptor, copies identity fields (OIDs/name/version),
+ * builds leaf/non-leaf tuple descriptors, fills per-field metadata (collation,
+ * ordering, opclasses, comparators), and initializes predicate/expressions state.
  *
- * Some index types require access to the base table definition:
- * - For oIndexPrimary, constraints and primary_init_nfields are loaded from
- *   OTable. The OTable is obtained via fill_source.get_oTable().
- * - For other index types the fill source is currently unused.
+ * Base table dependency:
+ * - For oIndexPrimary, additional data is taken from OTable (constraints and
+ *   primary_init_nfields). The table is obtained using oTableProviderArgs.
+ * - For other index types, oTableProviderArgs is currently unused.
  *
- * Ownership and memory:
- * - The function allocates descriptor-owned memory in the index memory context
- *   returned by OGetIndexContext(descr).
- * - If the OTable provider returns must_free=true, this function will free the
- *   OTable before returning.
+ * Memory/ownership:
+ * - Descriptor-owned allocations are made in OGetIndexContext(descr).
+ * - If the provider loads an OTable internally, it is freed before return.
  *
- * Caller responsibilities / invariants:
- * - oIndex must be non-NULL and describe a valid catalog index entry.
- * - descr must be writable memory.
- * - For oIndexPrimary, fill_source.get_oTable must be non-NULL and must return
- *   an OTable consistent with descr->tableOids and the intended catalog state.
- * - The fill_source and its arg must remain valid for the duration of the call.
+ * Requirements:
+ * - oIndex != NULL, descr points to writable memory.
+ * - For oIndexPrimary, oTableProviderArgs must be produced by
+ *   fill_idescr_from_table() or fill_idescr_from_ctx().
  */
-extern void o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OIndexDescrFillSource fill_source);
+extern void o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTableProviderArgs oTableProviderArgs);
 
 extern void free_o_index(OIndex *o_index);
 extern bool o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid,
