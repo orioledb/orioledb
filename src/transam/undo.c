@@ -844,6 +844,7 @@ insert_replication_retain_undo_location(TransactionId xid, UndoLocation undoLoca
 		}
 	}
 
+	memset(&data, 0, sizeof(data));
 	data.xid = xid;
 	data.undoLocation = undoLocation;
 	tuple.formatFlags = 0;
