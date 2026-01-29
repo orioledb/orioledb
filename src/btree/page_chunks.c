@@ -945,7 +945,7 @@ page_split_chunk_if_needed(BTreeDescr *desc, Page p, BTreePageItemLocator *locat
 				hikeysEnd = BTREE_PAGE_HIKEYS_END(desc, p);
 	OFixedKey	newHikey;
 
-	VALGRIND_CHECK_MEM_IS_DEFINED(p, header->dataSize);
+	VALGRIND_CHECK_MEM_IS_DEFINED(p, sizeof(BTreePageHeader));
 	VALGRIND_MAKE_MEM_DEFINED(p, ORIOLEDB_BLCKSZ);
 
 	if (header->hikeysEnd >= hikeysEnd)
