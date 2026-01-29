@@ -913,8 +913,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					 latest_version, base_version);
 
 				indexDescr = o_fetch_index_descr_extended(latest_oids, ix_type, false,
-					build_fetch_context(&snapshot, latest_version),
-					build_fetch_context(&snapshot, base_version));
+														  build_fetch_context(&snapshot, latest_version),
+														  build_fetch_context(&snapshot, base_version));
 				if (indexDescr)
 				{
 					elog(DEBUG4, "WAL_REC_RELATION [2] oIndexToast :: FETCH RELATION [ %u %u %u ] version %u",

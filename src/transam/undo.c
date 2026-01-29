@@ -369,7 +369,7 @@ update_min_undo_locations(UndoLogType undoType,
 				newCheckpointEndLocation = InvalidUndoLocation;
 	int			i;
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
-	UndoLocation		replicationUndoRetainLocation = InvalidUndoLocation;
+	UndoLocation replicationUndoRetainLocation = InvalidUndoLocation;
 
 	Assert(!undoEviction || !do_cleanup);
 

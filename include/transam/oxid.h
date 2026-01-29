@@ -85,7 +85,7 @@ typedef struct OSnapshot
  */
 typedef struct
 {
-	OSnapshot	*snapshot;
+	OSnapshot  *snapshot;
 	uint32		version;
 } ORelFetchContext;
 

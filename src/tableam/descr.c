@@ -831,7 +831,8 @@ OIndexDescr *
 o_fetch_index_descr(ORelOids oids, OIndexType type, bool lock, bool *nested)
 {
 	return o_fetch_index_descr_extended(oids, type, lock,
-		default_non_deleted_fetch_context(), default_non_deleted_fetch_context());
+										default_non_deleted_fetch_context(),
+										default_non_deleted_fetch_context());
 }
 
 OIndexDescr *
