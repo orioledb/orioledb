@@ -1377,13 +1377,14 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
                ->  Bitmap Index Scan on test_the_geom_brin  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
                      Index Cond: (test_explain_bridged_indexxthe_geom && '(x,x),(x,x)'::box)
                      Buffers: shared hit=x
-               Other pages: read=x
+               Primary pages: read=x
+               Other pages: read=x, lock=x, load=x
                Buffers: shared hit=x
  Planning:
    Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(21 rows)
+(22 rows)
 
 COMMIT;
 DROP EXTENSION orioledb CASCADE;

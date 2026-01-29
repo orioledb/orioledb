@@ -250,6 +250,8 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	bool		curTupleAllocated = false;
 	MemoryContext prevMctx;
 
+	/* @TODO ! !! */
+
 	prevMctx = MemoryContextSwitchTo(mcxt);
 
 	BTREE_PAGE_READ_LEAF_ITEM(tupHdrPtr, curTuple, p, loc);
@@ -268,6 +270,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 		oxid_match_snapshot(XACT_INFO_GET_OXID(xactInfo), oSnapshot,
 							&tupcsn, &tupptr);
+
 		if (tupleCsn)
 		{
 			if (COMMITSEQNO_IS_NORMAL(tupcsn))
@@ -281,6 +284,11 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 		if (cb)
 		{
 			TupleFetchCallbackResult cbResult;
+
+			/*
+			 * Fetch from undo chain if txn is in progress OR historical
+			 * version
+			 */
 			bool		version_check = !txIsFinished;
 			OXid		tupOxid = version_check ? XACT_INFO_GET_OXID(xactInfo) : InvalidOXid;
 			TupleFetchCallbackCheckType check_type = version_check ?
@@ -429,6 +437,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	it = (BTreeIterator *) palloc(sizeof(BTreeIterator));
+
 	it->combinedResult = !have_current_undo(desc->undoType) && COMMITSEQNO_IS_NORMAL(o_snapshot->csn);
 	it->oSnapshot = *o_snapshot;
 	it->scanDir = scanDir;

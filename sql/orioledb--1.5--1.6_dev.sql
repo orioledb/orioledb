@@ -15,6 +15,16 @@ RETURNS int8
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
+CREATE FUNCTION orioledb_insert_sys_xid_undo_location(xid int, undoLocation bigint)
+RETURNS void
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_read_sys_xid_undo_location(xid int)
+RETURNS bigint
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
 CREATE FUNCTION orioledb_int4range_immutable(input_str text)
 RETURNS int4range
 AS 'MODULE_PATHNAME'

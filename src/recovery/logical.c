@@ -307,7 +307,7 @@ o_convert_non_toast_tuple(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexD
 
 /* Convert chunk in a TOAST relation from OrioleDB format to reorder buffer (heap) format */
 static REORDER_BUFFER_TUPLE_TYPE
-o_convert_toast_chunk(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexDescr *indexDescr, OTuple tuple, TupleDescData *o_toast_tupDesc, TupleDescData *heap_toast_tupDesc, OffsetNumber debug_length)
+o_convert_toast_chunk(ReorderBuffer *reorderbuf, OIndexDescr *indexDescr, OTuple tuple, TupleDescData *o_toast_tupDesc, TupleDescData *heap_toast_tupDesc, OffsetNumber debug_length)
 {
 	uint16		attnum;
 	uint32		chunk_seq;
@@ -403,7 +403,7 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, uint8 rec_type, OIndexType ix_
 		if (ix_type == oIndexToast)
 		{
 			elog(DEBUG4, "WAL_REC_INSERT TOAST");
-			change->data.tp.newtuple = o_convert_toast_chunk(reorderbuf, descr, indexDescr, tuple1, o_toast_tupDesc, heap_toast_tupDesc, debug_length);
+			change->data.tp.newtuple = o_convert_toast_chunk(reorderbuf, indexDescr, tuple1, o_toast_tupDesc, heap_toast_tupDesc, debug_length);
 			change->data.tp.clear_toast_afterwards = false;
 		}
 		else
@@ -505,6 +505,43 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, uint8 rec_type, OIndexType ix_
 	}
 }
 
+static void
+create_skipped_dml(HTAB **cache)
+{
+	Assert(cache);
+	if (cache && !(*cache))
+	{
+		HASHCTL		ctl;
+
+		MemSet(&ctl, 0, sizeof(ctl));
+		ctl.keysize = sizeof(uint64);
+		ctl.entrysize = sizeof(uint64);
+		ctl.hcxt = TopMemoryContext;
+		*cache = hash_create("OrioleDB logical decoder skipped DML oxids", 8,
+							 &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+		Assert(*cache);
+	}
+}
+
+static void
+register_skipped_dml(HTAB **cache, uint64 oxid)
+{
+	create_skipped_dml(cache);
+	Assert(cache && *cache);
+	hash_search(*cache, &oxid, HASH_ENTER, NULL);
+}
+
+static bool
+remove_skipped_dml(HTAB **cache, uint64 oxid)
+{
+	bool		found = false;
+
+	create_skipped_dml(cache);
+	Assert(cache && *cache);
+	hash_search(*cache, &oxid, HASH_REMOVE, &found);
+	return found;
+}
+
 /*
  * Handle OrioleDB records for LogicalDecodingProcessRecord().
  */
@@ -519,7 +556,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	Pointer		ptr = startPtr;
 	OTableDescr *descr = NULL;
 	OIndexDescr *indexDescr = NULL;
-	ORelOids	cur_oids = {0, 0, 0};
+	ORelOids	latest_oids = {0, 0, 0};
+	uint32		latest_version = O_TABLE_INVALID_VERSION;
 	char		relreplident = REPLICA_IDENTITY_DEFAULT;
 	OXid		oxid = InvalidOXid;
 	TransactionId logicalXid = InvalidTransactionId,
@@ -530,6 +568,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	TupleDescData *heap_toast_tupDesc = NULL;
 	uint16		wal_version;
 	uint8		wal_flags;
+
+	static HTAB *skippedDMLHash = NULL;
 
 	ptr = wal_container_read_header(ptr, &wal_version, &wal_flags);
 
@@ -542,8 +582,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 	if (wal_flags & WAL_CONTAINER_HAS_XACT_INFO)
 	{
-		/* We skip WAL_REC_XACT_INFO */
-		ptr += sizeof(WALRecXactInfo);
+		/* Skip WAL_REC_XACT_INFO */
+		ptr = wal_parse_container_xact_info(ptr, NULL, NULL);
 	}
 
 	elog(DEBUG4, "OrioleDB decode started startXLogPtr %X/%X endXLogPtr %X/%X", LSN_FORMAT_ARGS(startXLogPtr), LSN_FORMAT_ARGS(endXLogPtr));
@@ -650,6 +690,12 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 				if (rec_type == WAL_REC_COMMIT)
 				{
+					if (remove_skipped_dml(&skippedDMLHash, oxid))
+					{
+						elog(ERROR, "SKIPPED DML for record type %d (%s) oxid %lu logicalXId %u heapXid %u",
+							 rec_type, rec_type_str, oxid, logicalXid, heapXid);
+					}
+
 					/*
 					 * SnapBuildXactNeedsSkip() does strict comparison.  So,
 					 * subtract endXLogPtr by one to fit snapshot just taken
@@ -700,6 +746,12 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				{
 					Assert(rec_type == WAL_REC_ROLLBACK);
 
+					if (remove_skipped_dml(&skippedDMLHash, oxid))
+					{
+						elog(DEBUG4, "SKIPPED DML for record type %d (%s) oxid %lu logicalXId %u heapXid %u",
+							 rec_type, rec_type_str, oxid, logicalXid, heapXid);
+					}
+
 					dlist_foreach(cur_txn_i, &txn->subtxns)
 					{
 						ReorderBufferTXN *cur_txn;
@@ -743,6 +795,12 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				continue;
 			}
 
+			if (remove_skipped_dml(&skippedDMLHash, oxid))
+			{
+				elog(ERROR, "SKIPPED DML for record type %d (%s) oxid %lu logicalXId %u heapXid %u",
+					 rec_type, rec_type_str, oxid, logicalXid, heapXid);
+			}
+
 			csnSnapshot = SnapBuildGetCSNSnaphot(ctx->snapshot_builder);
 			csnSnapshot->snapshotcsn = csn;
 			csnSnapshot->xlogptr = endXLogPtr;
@@ -782,14 +840,30 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		{
 			int			sys_tree_num = -1;
 			uint8		treeType = 0;
+			OXid		xmin;
 
-			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids);
+			OSnapshot	snapshot;
+			uint32		base_version = O_TABLE_INVALID_VERSION;
+
+			ptr = wal_parse_rec_relation(ptr, &treeType, &latest_oids, &xmin, &snapshot.csn, &snapshot.cid, &latest_version, &base_version, wal_version);
+
+			snapshot.xmin = xmin;
+			snapshot.xlogptr = changeXLogPtr;
+
+			if (wal_version < 17)
+			{
+				/* Override undefined values from WAL */
+				snapshot = o_non_deleted_snapshot;
+				latest_version = O_TABLE_INVALID_VERSION;
+			}
 
 			ix_type = treeType;
 			relreplident = REPLICA_IDENTITY_DEFAULT;
 			descr = NULL;
 
-			elog(DEBUG4, "WAL_REC_RELATION");
+			elog(DEBUG4, "oxid %lu logicalXid %u heapXid %u WAL_REC_RELATION latest_oids [ %u %u %u ] latest_version %u ix_type %d",
+				 oxid, logicalXid, heapXid, latest_oids.datoid, latest_oids.reloid, latest_oids.relnode,
+				 latest_version, ix_type);
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
@@ -808,8 +882,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				continue;
 			}
 
-			if (IS_SYS_TREE_OIDS(cur_oids))
-				sys_tree_num = cur_oids.relnode;
+			if (IS_SYS_TREE_OIDS(latest_oids))
+				sys_tree_num = latest_oids.relnode;
 			else
 				sys_tree_num = -1;
 
@@ -821,17 +895,38 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 			else if (ix_type == oIndexInvalid)
 			{
-				descr = o_fetch_table_descr(cur_oids);
+				elog(DEBUG4, "WAL_REC_RELATION oIndexInvalid :: FETCH RELATION [ %u %u %u ] version %u",
+					 latest_oids.datoid, latest_oids.reloid, latest_oids.relnode,
+					 latest_version);
+
+				descr = o_fetch_table_descr_extended(latest_oids, build_fetch_context(&snapshot, latest_version));
 				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
-				elog(DEBUG4, "WAL_REC_RELATION oIndexInvalid");
+				if (descr)
+				{
+					Assert(indexDescr);
+				}
 			}
 			else if (ix_type == oIndexToast)
 			{
-				elog(DEBUG4, "WAL_REC_RELATION oIndexToast");
+				elog(DEBUG4, "WAL_REC_RELATION [1] oIndexToast :: FETCH INDEX oids [ %u %u %u ] version %u base_version %u",
+					 latest_oids.datoid, latest_oids.reloid, latest_oids.relnode,
+					 latest_version, base_version);
 
-				indexDescr = o_fetch_index_descr(cur_oids, ix_type, false, NULL);
-				descr = o_fetch_table_descr(indexDescr->tableOids);
-				o_toast_tupDesc = descr->toast->leafTupdesc;
+				indexDescr = o_fetch_index_descr_extended(latest_oids, ix_type, false,
+					build_fetch_context(&snapshot, latest_version),
+					build_fetch_context(&snapshot, base_version));
+				if (indexDescr)
+				{
+					elog(DEBUG4, "WAL_REC_RELATION [2] oIndexToast :: FETCH RELATION [ %u %u %u ] version %u",
+						 indexDescr->tableOids.datoid, indexDescr->tableOids.reloid, indexDescr->tableOids.relnode,
+						 base_version);
+
+					descr = o_fetch_table_descr_extended(indexDescr->tableOids, build_fetch_context(&snapshot, base_version));
+					Assert(descr);
+
+					o_toast_tupDesc = descr->toast->leafTupdesc;
+				}
+
 				/* Init heap tupledesc for toast table */
 				heap_toast_tupDesc = CreateTemplateTupleDesc(3);
 				o_tables_tupdesc_init_builtin(heap_toast_tupDesc, (AttrNumber) 1, "chunk_id", OIDOID);
@@ -845,11 +940,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				TupleDescAttr(heap_toast_tupDesc, 0)->attcompression = InvalidCompressionMethod;
 				TupleDescAttr(heap_toast_tupDesc, 1)->attcompression = InvalidCompressionMethod;
 				TupleDescAttr(heap_toast_tupDesc, 2)->attcompression = InvalidCompressionMethod;
-
-				/*
-				 * indexDescr = o_fetch_index_descr(cur_oids, ix_type, false,
-				 * NULL);
-				 */
 			}
 			else
 			{
@@ -857,7 +947,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			}
 
 			if (descr && descr->toast)
-				elog(DEBUG4, "reloid: %d natts: %u toast natts: %u", cur_oids.reloid, descr->tupdesc->natts, descr->toast->leafTupdesc->natts);
+				elog(DEBUG4, "reloid: %d natts: %u toast natts: %u", latest_oids.reloid, descr->tupdesc->natts, descr->toast->leafTupdesc->natts);
 
 		}
 		else if (rec_type == WAL_REC_RELREPLIDENT)
@@ -923,6 +1013,12 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u parentSubid %u",
 				 rec_type, rec_type_str, oxid, logicalXid, heapXid, parentSubid);
 
+			if (remove_skipped_dml(&skippedDMLHash, oxid))
+			{
+				elog(DEBUG4, "SKIPPED DML for record type %d (%s) oxid %lu logicalXId %u heapXid %u parentSubid %u",
+					 rec_type, rec_type_str, oxid, logicalXid, heapXid, parentSubid);
+			}
+
 			if (!TransactionIdIsValid(logicalXid))
 			{
 				/*
@@ -987,8 +1083,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			read_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
 			ptr = wal_parse_rec_modify(ptr, &tuple1, &tuple2, &debug_length, read_two_tuples);
 
-			elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
-				 rec_type, rec_type_str, oxid, logicalXid, heapXid);
+			elog(DEBUG4, "RECEIVE record type %d (%s) oids [ %u %u %u ] oxid %lu logicalXId %u heapXid %u",
+				 rec_type, rec_type_str,
+				 latest_oids.datoid, latest_oids.reloid, latest_oids.relnode,
+				 oxid, logicalXid, heapXid);
 
 			if (!TransactionIdIsValid(logicalXid))
 			{
@@ -1015,23 +1113,30 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 				continue;
 
 			if ((ix_type == oIndexInvalid || ix_type == oIndexToast) &&
-				cur_oids.datoid == ctx->slot->data.database)
+				latest_oids.datoid == ctx->slot->data.database)
 			{
-				ReorderBufferChange *change;
+				if (!descr || !indexDescr)
+				{
+					register_skipped_dml(&skippedDMLHash, oxid);
+				}
+				else
+				{
+					ReorderBufferChange *change;
 
-				Assert(descr != NULL);
-				Assert(!O_TUPLE_IS_NULL(tuple1.tuple));
-				change = ReorderBufferGetChange(ctx->reorder);
-				change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
-				change->data.tp.rlocator.dbOid = cur_oids.datoid;
-				change->data.tp.rlocator.relNumber = cur_oids.relnode;
-				elog(DEBUG4, "reloid: %u", cur_oids.reloid);
+					Assert(descr != NULL);
+					Assert(!O_TUPLE_IS_NULL(tuple1.tuple));
+					change = ReorderBufferGetChange(ctx->reorder);
+					change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
+					change->data.tp.rlocator.dbOid = latest_oids.datoid;
+					change->data.tp.rlocator.relNumber = latest_oids.relnode;
+					elog(DEBUG4, "reloid: %u", latest_oids.reloid);
 
-				o_decode_modify_tuples(ctx->reorder, rec_type, ix_type, change, descr, indexDescr, o_toast_tupDesc, heap_toast_tupDesc, tuple1.tuple, tuple2.tuple, debug_length, relreplident);
+					o_decode_modify_tuples(ctx->reorder, rec_type, ix_type, change, descr, indexDescr, o_toast_tupDesc, heap_toast_tupDesc, tuple1.tuple, tuple2.tuple, debug_length, relreplident);
 
-				ReorderBufferQueueChange(ctx->reorder, logicalXid,
-										 changeXLogPtr,
-										 change, (ix_type == oIndexToast));
+					ReorderBufferQueueChange(ctx->reorder, logicalXid,
+											 changeXLogPtr,
+											 change, (ix_type == oIndexToast));
+				}
 			}
 			else
 			{
