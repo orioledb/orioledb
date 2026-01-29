@@ -27,6 +27,8 @@
 #include "recovery/logical.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
+#include "recovery/wal_dispatch.h"
+#include "recovery/wal_container_iter.h"
 #include "replication/snapbuild.h"
 #include "s3/control.h"
 #include "s3/headers.h"
@@ -234,10 +236,95 @@ PG_FUNCTION_INFO_V1(orioledb_ucm_check);
 PG_FUNCTION_INFO_V1(orioledb_parallel_debug_start);
 PG_FUNCTION_INFO_V1(orioledb_parallel_debug_stop);
 
+#define ORIOLEDB_DEV
+
+typedef struct WalDescCtx
+{
+	StringInfo	buf;
+
+} WalDescCtx;
+
+static WalParseStatus
+wal_desc_on_event(void *vctx, const WalEvent *ev)
+{
+	WalDescCtx *ctx = (WalDescCtx *) vctx;
+
+	Assert(ctx);
+	Assert(ev);
+
+	appendStringInfo(ctx->buf, " %s", wal_type_name(ev->type));
+
+	switch (ev->type)
+	{
+		case WAL_REC_XID:
+			appendStringInfo(ctx->buf, " (%lu %u %u);", ev->oxid, ev->logicalXid, ev->heapXid);
+			break;
+		case WAL_REC_COMMIT:
+		case WAL_REC_ROLLBACK:
+			appendStringInfo(ctx->buf, " (%lu %u %u - xmin %lu csn %lu);",
+							 ev->oxid, ev->logicalXid, ev->heapXid,
+							 ev->u.finish.xmin, ev->u.finish.csn);
+			break;
+		case WAL_REC_RELATION:
+			appendStringInfo(ctx->buf, " ([ %u %u %u ] treeType %u);",
+							 ev->oids.datoid, ev->oids.reloid, ev->oids.relnode,
+							 ev->u.relation.treeType);
+			break;
+		case WAL_REC_INSERT:
+		case WAL_REC_UPDATE:
+		case WAL_REC_DELETE:
+		case WAL_REC_REINSERT:
+			appendStringInfo(ctx->buf, " ([ %u %u %u ]);",
+							 ev->oids.datoid, ev->oids.reloid, ev->oids.relnode);
+			break;
+		case WAL_REC_SAVEPOINT:
+			appendStringInfo(ctx->buf, " (lxid %u parent lxid %u subid %u);",
+							 ev->logicalXid, ev->u.savepoint.parentLogicalXid, ev->u.savepoint.parentSubid);
+			break;
+		case WAL_REC_ROLLBACK_TO_SAVEPOINT:
+			appendStringInfo(ctx->buf, " (lxid %u parent subid %u xmin %lu csn %lu);",
+							 ev->logicalXid, ev->u.rb_to_sp.parentSubid, ev->u.rb_to_sp.xmin, ev->u.rb_to_sp.csn);
+			break;
+		case WAL_REC_JOINT_COMMIT:
+			appendStringInfo(ctx->buf, " (xmin %lu xid %u csn %lu);",
+							 ev->u.joint_commit.xmin, ev->u.joint_commit.xid, ev->u.joint_commit.csn);
+			break;
+		case WAL_REC_TRUNCATE:
+			appendStringInfo(ctx->buf, " ([ %u %u %u ]);",
+							 ev->u.truncate.oids.datoid, ev->u.truncate.oids.reloid, ev->u.truncate.oids.relnode);
+			break;
+		case WAL_REC_SWITCH_LOGICAL_XID:
+			appendStringInfo(ctx->buf, " (%u %u);", ev->u.swxid.topXid, ev->u.swxid.subXid);
+			break;
+		default:
+			appendStringInfo(ctx->buf, ";");
+			break;
+	}
+	return WALPARSE_OK;
+}
+
 static void
 orioledb_rm_desc(StringInfo buf, XLogReaderState *record)
 {
-	appendStringInfo(buf, "OrioleDB WAL container");
+#ifdef ORIOLEDB_DEV
+	Pointer		startPtr = (Pointer) XLogRecGetData(record);
+	Pointer		endPtr = startPtr + XLogRecGetDataLen(record);
+
+	WalReader	r = {
+		.ptr = startPtr,
+		.end = endPtr,
+		.wal_version = 0,
+		.wal_flags = 0
+	};
+	WalDescCtx	dctx = {
+		.buf = buf
+	};
+	WalConsumer cons = {.ctx = &dctx,.on_event = wal_desc_on_event};
+	WalParseStatus st = wal_container_iterate(&r, &cons, false /* allow_logging */ );
+
+	if (st != WALPARSE_OK)
+		appendStringInfo(buf, " [PARSE ERROR %d]", (int) st);
+#endif
 }
 
 static const char *
