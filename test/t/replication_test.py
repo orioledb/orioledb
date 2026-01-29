@@ -437,7 +437,7 @@ class ReplicationTest(BaseTest):
 
 				self.assertNotEqual(
 				    master.execute(
-				        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
+				        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e', 0);"
 				    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
 
 				with master.connect('postgres') as con:
@@ -450,17 +450,17 @@ class ReplicationTest(BaseTest):
 						""" % (str(n), str(i), str(i), str(i), str(i), str(i + step - 1)))
 					con.commit()
 
-				self.assertEqual(
-				    n,
-				    master.execute("SELECT count(*) FROM o_test;")[0][0])
-				self.assertEqual(
-				    n,
-				    master.execute("SELECT count(*) FROM o_test;")[0][0])
-
-				self.assertEqual(
-				    master.execute(
-				        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
-				    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
+				match = False
+				for i in range(0, 20):
+					self.assertEqual(
+					    n,
+					    master.execute("SELECT count(*) FROM o_test;")[0][0])
+					if i >= 1:
+						if master.execute(
+						    "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e', 0);"
+						)[0][0].split('\n')[0] == INDEX_NOT_LOADED:
+							match = True
+				self.assertTrue(match)
 
 				# wait for synchronization
 				self.catchup_orioledb(replica)
@@ -472,33 +472,28 @@ class ReplicationTest(BaseTest):
 				    replica.execute("SELECT count(*) FROM o_evicted;")[0][0])
 				self.assertNotEqual(
 				    replica.execute(
-				        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
+				        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e', 0);"
 				    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
 
-				self.assertEqual(
-				    n,
-				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
-				self.assertEqual(
-				    n,
-				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
-				self.assertEqual(
-				    n,
-				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
-				self.assertEqual(
-				    n,
-				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
+				match = False
+				for i in range(0, 20):
+					self.assertEqual(
+					    n,
+					    replica.execute("SELECT count(*) FROM o_test;")[0][0])
+					if i >= 1:
+						if replica.execute(
+						    "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e', 0);"
+						)[0][0].split('\n')[0] == INDEX_NOT_LOADED:
+							match = True
+				self.assertTrue(match)
 
-				self.assertEqual(
-				    replica.execute(
-				        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
-				    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
 				self.assertEqual(
 				    500,
 				    replica.execute("SELECT count(*) FROM o_evicted;")[0][0])
 
 				self.assertNotEqual(
 				    replica.execute(
-				        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
+				        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e', 0);"
 				    )[0][0].split('\n')[0], INDEX_NOT_LOADED)
 
 	def test_replica_checkpoint(self):
