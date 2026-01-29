@@ -277,11 +277,8 @@ typedef struct
 
 #define GET_PRIMARY(descr) ((descr)->indices[PrimaryIndexNumber])
 
-extern ORelFetchContext
-			default_in_progress_fetch_context(void);
-
-extern ORelFetchContext
-			default_non_deleted_fetch_context(void);
+extern ORelFetchContext default_in_progress_fetch_context;
+extern ORelFetchContext default_non_deleted_fetch_context;
 
 /*
  * Please, read commit before o_bree_load_shmemd() definition.

@@ -107,21 +107,8 @@ static OExclusionFn *last_exclusion_fn = NULL;
 
 static void o_find_toastable_attrs(OTableDescr *tableDescr);
 
-ORelFetchContext
-default_in_progress_fetch_context(void)
-{
-	ORelFetchContext ctx = {.snapshot = &o_in_progress_snapshot,.version = O_TABLE_INVALID_VERSION};
-
-	return ctx;
-}
-
-ORelFetchContext
-default_non_deleted_fetch_context(void)
-{
-	ORelFetchContext ctx = {.snapshot = &o_non_deleted_snapshot,.version = O_TABLE_INVALID_VERSION};
-
-	return ctx;
-}
+ORelFetchContext default_in_progress_fetch_context = {.snapshot = &o_in_progress_snapshot,.version = O_TABLE_INVALID_VERSION};
+ORelFetchContext default_non_deleted_fetch_context = {.snapshot = &o_non_deleted_snapshot,.version = O_TABLE_INVALID_VERSION};
 
 /*
  * Creates shared root info.  But insertion into shared cache is performed by
@@ -794,7 +781,7 @@ find_tree_in_descr(OTableDescr *descr, ORelOids oids)
 OTableDescr *
 o_fetch_table_descr(ORelOids oids)
 {
-	return o_fetch_table_descr_extended(oids, default_non_deleted_fetch_context());
+	return o_fetch_table_descr_extended(oids, default_non_deleted_fetch_context);
 }
 
 OTableDescr *
@@ -831,8 +818,8 @@ OIndexDescr *
 o_fetch_index_descr(ORelOids oids, OIndexType type, bool lock, bool *nested)
 {
 	return o_fetch_index_descr_extended(oids, type, lock,
-										default_non_deleted_fetch_context(),
-										default_non_deleted_fetch_context());
+										default_non_deleted_fetch_context,
+										default_non_deleted_fetch_context);
 }
 
 OIndexDescr *
@@ -1064,7 +1051,6 @@ recreate_index_descr(OIndexDescr *descr)
 	OIndex	   *oIndex;
 	int			refcnt;
 	MemoryContext mcxt;
-	ORelFetchContext ctx = default_non_deleted_fetch_context();
 
 	oIndex = o_indices_get(descr->oids, descr->desc.type);
 	if (!oIndex)
@@ -1075,7 +1061,7 @@ recreate_index_descr(OIndexDescr *descr)
 	refcnt = descr->refcnt;
 	index_descr_free(descr);
 	mcxt = MemoryContextSwitchTo(descrCxt);
-	o_index_fill_descr(descr, oIndex, fill_idescr_from_ctx(&ctx));
+	o_index_fill_descr(descr, oIndex, fill_idescr_from_ctx(&default_non_deleted_fetch_context));
 	MemoryContextSwitchTo(mcxt);
 	index_btree_desc_init(&descr->desc, descr->compress, descr->fillfactor, descr->oids,
 						  oIndex->indexType, oIndex->table_persistence, oIndex->createOxid, descr);
@@ -1659,7 +1645,7 @@ recreate_table_descr_by_oids(ORelOids oids)
 		recreate_table_descr(descr);
 	}
 	else
-		(void) create_table_descr(oids, default_non_deleted_fetch_context());
+		(void) create_table_descr(oids, default_non_deleted_fetch_context);
 }
 
 void

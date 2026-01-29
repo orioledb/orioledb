@@ -1343,7 +1343,7 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 OIndex *
 o_indices_get(ORelOids oids, OIndexType type)
 {
-	return o_indices_get_extended(oids, type, default_non_deleted_fetch_context());
+	return o_indices_get_extended(oids, type, default_non_deleted_fetch_context);
 }
 
 OIndex *
@@ -1395,7 +1395,7 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	BTreeDescr *sys_tree;
 
 	oIndex = make_o_index(table, ixNum);
-	oIndexOld = o_indices_get_extended(oIndex->indexOids, oIndex->indexType, default_non_deleted_fetch_context());
+	oIndexOld = o_indices_get_extended(oIndex->indexOids, oIndex->indexType, default_non_deleted_fetch_context);
 	if (oIndexOld)
 	{
 		oIndex->createOxid = oIndexOld->createOxid;
