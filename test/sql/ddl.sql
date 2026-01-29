@@ -356,16 +356,16 @@ INSERT INTO o_test_null_hasdef VALUES (6, NULL, NULL);
 SELECT orioledb_tbl_structure('o_test_null_hasdef'::regclass, 'nue');
 SELECT * FROM o_test_null_hasdef;
 
-CREATE VIEW test_view_1 AS SELECT * FROM o_test_null_hasdef;
+CREATE VIEW o_test_view_1 AS SELECT * FROM o_test_null_hasdef;
 
-CREATE rule test_view_1 AS
-	ON INSERT TO test_view_1
+CREATE rule o_test_view_1 AS
+	ON INSERT TO o_test_view_1
 	  DO INSTEAD INSERT INTO o_test_null_hasdef SELECT new.*;
 
-INSERT INTO test_view_1 VALUES (7);
+INSERT INTO o_test_view_1 VALUES (7);
 
 SELECT orioledb_tbl_structure('o_test_null_hasdef'::regclass, 'nue');
-SELECT * FROM test_view_1;
+SELECT * FROM o_test_view_1;
 SELECT * FROM o_test_null_hasdef;
 
 CREATE TABLE o_test_float_default (
@@ -493,7 +493,7 @@ CREATE TABLE o_test_plpgsql_default (
     val_1 int DEFAULT LENGTH(o_test_plpgsql_default_func(6))
 ) USING orioledb;
 
-CREATE TABLE test_35_columns (
+CREATE TABLE o_test_35_columns (
   gid serial,
   col1 varchar(1),
   col2 varchar(1),
@@ -531,24 +531,547 @@ CREATE TABLE test_35_columns (
   col34 varchar(1)
 ) using orioledb;
 
-INSERT INTO test_35_columns (col27, col10) VALUES ('A', 'J');
-SELECT gid, col10, col15, col27, col33, col34 FROM test_35_columns;
+INSERT INTO o_test_35_columns (col27, col10) VALUES ('A', 'J');
+SELECT gid, col10, col15, col27, col33, col34 FROM o_test_35_columns;
 
-CREATE TABLE test_replica_identity_set (i int PRIMARY KEY, t text) USING orioledb;
-INSERT INTO test_replica_identity_set VALUES(1, 'foofoo');
-INSERT INTO test_replica_identity_set VALUES(2, 'barbar');
-ALTER TABLE test_replica_identity_set REPLICA IDENTITY FULL;
-INSERT INTO test_replica_identity_set VALUES(3, 'aaaaaa');
-SELECT * FROM test_replica_identity_set;
-\d+ test_replica_identity_set
+CREATE TABLE o_test_replica_identity_set (i int PRIMARY KEY, t text) USING orioledb;
+INSERT INTO o_test_replica_identity_set VALUES(1, 'foofoo');
+INSERT INTO o_test_replica_identity_set VALUES(2, 'barbar');
+ALTER TABLE o_test_replica_identity_set REPLICA IDENTITY FULL;
+INSERT INTO o_test_replica_identity_set VALUES(3, 'aaaaaa');
+SELECT * FROM o_test_replica_identity_set;
+\d+ o_test_replica_identity_set
 
-CREATE TABLE test_replica_identity_fail (i int PRIMARY KEY, t text) USING orioledb;
-INSERT INTO test_replica_identity_fail VALUES(1, 'foofoo');
-INSERT INTO test_replica_identity_fail VALUES(2, 'barbar');
-ALTER TABLE test_replica_identity_fail REPLICA IDENTITY NOTHING;
-INSERT INTO test_replica_identity_fail VALUES(3, 'aaaaaa');
-SELECT * FROM test_replica_identity_fail;
-\d+ test_replica_identity_fail
+CREATE TABLE o_test_replica_identity_fail (i int PRIMARY KEY, t text) USING orioledb;
+INSERT INTO o_test_replica_identity_fail VALUES(1, 'foofoo');
+INSERT INTO o_test_replica_identity_fail VALUES(2, 'barbar');
+ALTER TABLE o_test_replica_identity_fail REPLICA IDENTITY NOTHING;
+INSERT INTO o_test_replica_identity_fail VALUES(3, 'aaaaaa');
+SELECT * FROM o_test_replica_identity_fail;
+\d+ o_test_replica_identity_fail
+
+CREATE TABLE o_test_set_access_method_fail (i int PRIMARY KEY, t text) USING orioledb;
+ALTER TABLE o_test_set_access_method_fail SET ACCESS METHOD heap;
+
+-- Test AT_SetStatistics
+CREATE TABLE o_test_set_statistics (
+	i int PRIMARY KEY,
+	t text,
+	v varchar
+) USING orioledb;
+
+INSERT INTO o_test_set_statistics VALUES (1, 'test', 'data');
+
+-- Set statistics target for columns
+ALTER TABLE o_test_set_statistics ALTER COLUMN t SET STATISTICS 100;
+ALTER TABLE o_test_set_statistics ALTER COLUMN v SET STATISTICS 1000;
+
+-- Verify the changes
+SELECT
+	attname,
+	CASE
+		WHEN attstattarget is NULL THEN -1 -- as PG17 changes behaviour for default stats target
+		ELSE attstattarget
+	END AS attstattarget
+FROM pg_attribute
+WHERE attrelid = 'o_test_set_statistics'::regclass
+  AND attnum > 0
+ORDER BY attnum;
+
+-- Reset statistics to default
+ALTER TABLE o_test_set_statistics ALTER COLUMN t SET STATISTICS -1;
+
+SELECT 
+	attname,
+	CASE
+		WHEN attstattarget is NULL THEN -1 -- as PG17 changes behaviour for default stats target
+		ELSE attstattarget
+	END AS attstattarget
+FROM pg_attribute
+WHERE attrelid = 'o_test_set_statistics'::regclass
+  AND attname = 't';
+
+-- Test AT_SetLogged / AT_SetUnLogged
+CREATE UNLOGGED TABLE o_test_logged_changes (
+	i int PRIMARY KEY,
+	t text
+) USING orioledb;
+
+-- Check initial unlogged state
+SELECT relname, relpersistence
+FROM pg_class
+WHERE relname = 'o_test_logged_changes';
+
+-- Change to logged
+ALTER TABLE o_test_logged_changes SET LOGGED;
+
+SELECT relname, relpersistence
+FROM pg_class
+WHERE relname = 'o_test_logged_changes';
+
+-- Change back to unlogged
+ALTER TABLE o_test_logged_changes SET UNLOGGED;
+
+SELECT relname, relpersistence
+FROM pg_class
+WHERE relname = 'o_test_logged_changes';
+
+-- Test with data
+INSERT INTO o_test_logged_changes VALUES (1, 'test data');
+ALTER TABLE o_test_logged_changes SET LOGGED;
+
+SELECT * FROM o_test_logged_changes;
+
+-- Test AT_SetOptions / AT_ResetOptions (column-level options)
+CREATE TABLE o_test_column_options (
+	i int PRIMARY KEY,
+	t text
+) USING orioledb;
+
+-- Set column-level storage options
+ALTER TABLE o_test_column_options ALTER COLUMN t SET (n_distinct = 100, n_distinct_inherited = 50);
+
+-- Verify options are set
+SELECT attname, attoptions
+FROM pg_attribute
+WHERE attrelid = 'o_test_column_options'::regclass
+  AND attnum > 0
+  AND attoptions IS NOT NULL;
+
+-- Reset specific option
+ALTER TABLE o_test_column_options ALTER COLUMN t RESET (n_distinct);
+
+-- Verify reset
+SELECT attname, attoptions
+FROM pg_attribute
+WHERE attrelid = 'o_test_column_options'::regclass
+  AND attname = 't';
+
+-- Reset all options
+ALTER TABLE o_test_column_options ALTER COLUMN t RESET (n_distinct_inherited);
+
+SELECT attname, attoptions
+FROM pg_attribute
+WHERE attrelid = 'o_test_column_options'::regclass
+  AND attname = 't';
+
+-- Test AT_ResetRelOptions / AT_SetRelOptions (table-level options)
+CREATE TABLE o_test_table_options (
+	i int PRIMARY KEY,
+	t text
+) USING orioledb;
+
+-- Set table-level options
+ALTER TABLE o_test_table_options SET (fillfactor = 70, autovacuum_enabled = false);
+
+-- Verify table options
+SELECT relname, reloptions
+FROM pg_class
+WHERE relname = 'o_test_table_options';
+
+-- Reset specific option
+ALTER TABLE o_test_table_options RESET (autovacuum_enabled);
+
+SELECT relname, reloptions
+FROM pg_class
+WHERE relname = 'o_test_table_options';
+
+-- Reset all options
+ALTER TABLE o_test_table_options RESET (fillfactor);
+
+SELECT relname, reloptions
+FROM pg_class
+WHERE relname = 'o_test_table_options';
+
+-- Test AT_ClusterOn / AT_DropCluster
+CREATE TABLE o_test_cluster (
+	i int,
+	t text,
+	v varchar,
+	PRIMARY KEY (i)
+) USING orioledb;
+
+CREATE INDEX o_test_cluster_idx ON o_test_cluster(t);
+
+-- Set cluster index
+ALTER TABLE o_test_cluster CLUSTER ON o_test_cluster_idx;
+
+-- Verify cluster setting
+SELECT indexrelid::regclass AS index_name, indisclustered
+FROM pg_index
+WHERE indrelid = 'o_test_cluster'::regclass
+ORDER BY indexrelid::regclass::text;
+
+-- Drop cluster setting
+ALTER TABLE o_test_cluster SET WITHOUT CLUSTER;
+
+-- Verify cluster removed
+SELECT indexrelid::regclass AS index_name, indisclustered
+FROM pg_index
+WHERE indrelid = 'o_test_cluster'::regclass
+ORDER BY indexrelid::regclass::text;
+
+-- Test AT_EnableRule / AT_DisableRule (on tables)
+-- ENABLE/DISABLE RULE commands only work on tables, not views
+CREATE TABLE o_test_rule_table (
+	i int PRIMARY KEY,
+	t text
+) USING orioledb;
+
+-- Create a rule on the table that filters certain inserts
+CREATE RULE o_test_insert_rule AS
+	ON INSERT TO o_test_rule_table
+	WHERE t = 'skip'
+	DO INSTEAD NOTHING;
+
+-- Verify rule is enabled (ev_enabled = 'O' means origin)
+SELECT rulename, ev_enabled
+FROM pg_rewrite
+WHERE rulename = 'o_test_insert_rule';
+
+-- Test that rule works: insert with 'skip' should be ignored
+INSERT INTO o_test_rule_table VALUES (1, 'skip');
+INSERT INTO o_test_rule_table VALUES (2, 'normal');
+SELECT * FROM o_test_rule_table ORDER BY i;
+
+-- Disable the rule
+ALTER TABLE o_test_rule_table DISABLE RULE o_test_insert_rule;
+
+-- Verify rule is disabled (ev_enabled = 'D')
+SELECT rulename, ev_enabled
+FROM pg_rewrite
+WHERE rulename = 'o_test_insert_rule';
+
+-- Now the 'skip' insert should work since rule is disabled
+INSERT INTO o_test_rule_table VALUES (1, 'skip');
+SELECT * FROM o_test_rule_table ORDER BY i;
+
+-- Enable the rule back (origin mode)
+ALTER TABLE o_test_rule_table ENABLE RULE o_test_insert_rule;
+
+SELECT rulename, ev_enabled
+FROM pg_rewrite
+WHERE rulename = 'o_test_insert_rule';
+
+-- Enable rule for replica (ev_enabled = 'R')
+ALTER TABLE o_test_rule_table ENABLE REPLICA RULE o_test_insert_rule;
+
+SELECT rulename, ev_enabled
+FROM pg_rewrite
+WHERE rulename = 'o_test_insert_rule';
+
+-- Enable rule always (ev_enabled = 'A')
+ALTER TABLE o_test_rule_table ENABLE ALWAYS RULE o_test_insert_rule;
+
+SELECT rulename, ev_enabled
+FROM pg_rewrite
+WHERE rulename = 'o_test_insert_rule';
+
+-- Cleanup
+DROP TABLE o_test_rule_table CASCADE;
+
+-- Test AT_CheckNotNull (internally generated for partitioned tables)
+-- AT_CheckNotNull is generated when you use ALTER TABLE ONLY ... SET NOT NULL
+-- on a partitioned table. It verifies that all child partitions can satisfy NOT NULL.
+
+-- Test AT_CheckNotNull failure case: partition without NOT NULL
+CREATE TABLE o_test_check_not_null_fail (
+	i int,
+	val text  -- Note: no NOT NULL constraint
+) PARTITION BY RANGE (i);
+
+CREATE TABLE o_test_check_not_null_fail_p1 PARTITION OF o_test_check_not_null_fail
+	FOR VALUES FROM (1) TO (100) USING orioledb;
+
+-- Verify partition does not have NOT NULL
+SELECT c.relname, a.attname, a.attnotnull
+FROM pg_class c
+JOIN pg_attribute a ON a.attrelid = c.oid
+WHERE c.relname LIKE 'o_test_check_not_null_fail%'
+  AND a.attname = 'val'
+  AND c.relnamespace = 'ddl'::regnamespace
+ORDER BY c.relname;
+
+-- Try to set NOT NULL on parent ONLY (should fail because partition has NULL values)
+ALTER TABLE ONLY o_test_check_not_null_fail ALTER COLUMN val SET NOT NULL;
+
+-- Test AT_ValidateConstraint (validate a NOT VALID constraint)
+CREATE TABLE o_test_validate_constraint (
+	i int PRIMARY KEY,
+	t text
+) USING orioledb;
+
+-- Insert some data
+INSERT INTO o_test_validate_constraint VALUES (1, 'test'), (2, 'data');
+
+-- Add a check constraint without validation
+ALTER TABLE o_test_validate_constraint ADD CONSTRAINT check_t_length CHECK (length(t) > 2) NOT VALID;
+
+-- Verify constraint exists but not validated
+SELECT conname, convalidated
+FROM pg_constraint
+WHERE conrelid = 'o_test_validate_constraint'::regclass
+  AND conname = 'check_t_length';
+
+-- Now validate the constraint
+ALTER TABLE o_test_validate_constraint VALIDATE CONSTRAINT check_t_length;
+
+-- Verify constraint is now validated
+SELECT conname, convalidated
+FROM pg_constraint
+WHERE conrelid = 'o_test_validate_constraint'::regclass
+  AND conname = 'check_t_length';
+
+-- Test AT_ReplaceRelOptions (used by CREATE OR REPLACE VIEW with options)
+-- AT_ReplaceRelOptions is triggered internally when CREATE OR REPLACE VIEW
+-- changes the view's options (security_barrier, security_invoker, check_option)
+CREATE TABLE o_test_view_base (
+	i int PRIMARY KEY,
+	t text,
+	val int
+) USING orioledb;
+
+INSERT INTO o_test_view_base VALUES (1, 'alice', 100), (2, 'bob', 200), (3, 'charlie', 300);
+
+-- Create view without options
+CREATE VIEW o_test_replace_view AS SELECT * FROM o_test_view_base WHERE val > 0;
+
+-- Check initial view options (should be NULL or empty)
+SELECT relname, relkind, reloptions
+FROM pg_class
+WHERE relname = 'o_test_replace_view';
+
+-- Use CREATE OR REPLACE VIEW to add security_barrier option
+-- This triggers AT_ReplaceRelOptions internally
+CREATE OR REPLACE VIEW o_test_replace_view WITH (security_barrier=true)
+AS SELECT * FROM o_test_view_base WHERE val > 100;
+
+-- Verify security_barrier option is set
+SELECT relname, relkind, reloptions
+FROM pg_class
+WHERE relname = 'o_test_replace_view';
+
+-- Test the view still works
+SELECT * FROM o_test_replace_view ORDER BY i;
+
+-- Replace view again with different options (security_invoker)
+-- This replaces the entire options list with new one
+CREATE OR REPLACE VIEW o_test_replace_view WITH (security_invoker=true)
+AS SELECT * FROM o_test_view_base WHERE val > 50;
+
+-- Verify options replaced (should now have security_invoker, not security_barrier)
+SELECT relname, relkind, reloptions
+FROM pg_class
+WHERE relname = 'o_test_replace_view';
+
+SELECT * FROM o_test_replace_view ORDER BY i;
+
+-- Replace view with multiple options
+CREATE OR REPLACE VIEW o_test_replace_view
+WITH (security_barrier=true, security_invoker=true, check_option=local)
+AS SELECT * FROM o_test_view_base WHERE val > 0;
+
+-- Verify multiple options set
+SELECT relname, relkind, reloptions
+FROM pg_class
+WHERE relname = 'o_test_replace_view';
+
+-- Replace view with no options (clears all options)
+CREATE OR REPLACE VIEW o_test_replace_view
+AS SELECT * FROM o_test_view_base WHERE val >= 100;
+
+-- Verify options cleared
+SELECT relname, relkind, reloptions
+FROM pg_class
+WHERE relname = 'o_test_replace_view';
+
+SELECT * FROM o_test_replace_view ORDER BY i;
+
+DROP VIEW o_test_replace_view;
+DROP TABLE o_test_view_base CASCADE;
+
+-- Test AT_AddOf and AT_DropOf (typed tables)
+-- Typed tables are tables that are bound to a composite type
+-- AT_AddOf converts a regular table to a typed table
+-- AT_DropOf converts a typed table back to a regular table
+
+-- Create a composite type for employee data
+CREATE TYPE employee_type AS (
+	emp_id int,
+	emp_name text,
+	emp_salary numeric(10,2)
+);
+
+-- Create a regular table (not typed)
+CREATE TABLE o_test_regular_table (
+	emp_id int PRIMARY KEY,
+	emp_name text,
+	emp_salary numeric(10,2)
+) USING orioledb;
+
+-- Check initial state (reloftype should be 0 for regular table)
+SELECT
+	relname,
+	CASE 
+		WHEN reloftype = 0 THEN 'regular'
+		ELSE 'typed'
+	END AS reloftype,
+	relkind
+FROM pg_class
+WHERE relname = 'o_test_regular_table';
+
+-- Insert test data
+INSERT INTO o_test_regular_table VALUES (1, 'Alice', 70000);
+INSERT INTO o_test_regular_table VALUES (2, 'Bob', 65000);
+
+SELECT * FROM o_test_regular_table ORDER BY emp_id;
+
+-- Test AT_AddOf - convert regular table to typed table
+ALTER TABLE o_test_regular_table OF employee_type;
+
+-- Verify table is now typed (reloftype should be OID of employee_type)
+SELECT
+	relname,
+	CASE 
+		WHEN reloftype = 0 THEN 'regular'
+		ELSE 'typed'
+	END AS reloftype,
+	relkind
+FROM pg_class
+WHERE relname = 'o_test_regular_table';
+
+-- Verify data is preserved
+SELECT * FROM o_test_regular_table ORDER BY emp_id;
+
+-- Typed tables still work normally for DML
+INSERT INTO o_test_regular_table VALUES (3, 'Charlie', 80000);
+UPDATE o_test_regular_table SET emp_salary = 72000 WHERE emp_id = 1;
+DELETE FROM o_test_regular_table WHERE emp_id = 2;
+
+SELECT * FROM o_test_regular_table ORDER BY emp_id;
+
+-- Test that ADD COLUMN fails on typed table (must modify type instead)
+ALTER TABLE o_test_regular_table ADD COLUMN emp_department text;  -- Should fail
+
+-- Test that DROP COLUMN fails on typed table
+ALTER TABLE o_test_regular_table DROP COLUMN emp_salary;  -- Should fail
+
+-- Test AT_DropOf - convert typed table back to regular table
+ALTER TABLE o_test_regular_table NOT OF;
+
+-- Verify table is no longer typed (reloftype should be 0)
+SELECT
+	relname,
+	CASE 
+		WHEN reloftype = 0 THEN 'regular'
+		ELSE 'typed'
+	END AS reloftype,
+	relkind
+FROM pg_class
+WHERE relname = 'o_test_regular_table';
+
+-- Verify data is still preserved
+SELECT * FROM o_test_regular_table ORDER BY emp_id;
+
+-- Regular table operations still work, including ADD COLUMN
+INSERT INTO o_test_regular_table VALUES (4, 'Diana', 85000);
+
+-- Now that it's a regular table, ADD COLUMN should succeed
+ALTER TABLE o_test_regular_table ADD COLUMN emp_department text;
+
+-- Verify new column exists
+SELECT * FROM o_test_regular_table ORDER BY emp_id;
+
+-- Create a typed table directly using OF syntax
+CREATE TABLE o_test_typed_table OF employee_type (
+	PRIMARY KEY (emp_id)
+) USING orioledb;
+
+-- Verify it's typed from creation
+SELECT
+	relname,
+	CASE 
+		WHEN reloftype = 0 THEN 'regular'
+		ELSE 'typed'
+	END AS reloftype,
+	relkind
+FROM pg_class
+WHERE relname = 'o_test_typed_table';
+
+-- Insert data into typed table
+INSERT INTO o_test_typed_table VALUES (10, 'Eve', 60000);
+INSERT INTO o_test_typed_table VALUES (11, 'Frank', 62000);
+
+SELECT * FROM o_test_typed_table ORDER BY emp_id;
+
+-- Convert it to regular table using AT_DropOf
+ALTER TABLE o_test_typed_table NOT OF;
+
+-- Verify it's no longer typed
+SELECT
+	relname,
+	CASE 
+		WHEN reloftype = 0 THEN 'regular'
+		ELSE 'typed'
+	END AS reloftype,
+	relkind
+FROM pg_class
+WHERE relname = 'o_test_typed_table';
+
+-- Data still accessible
+SELECT * FROM o_test_typed_table ORDER BY emp_id;
+
+ALTER TABLE o_test_typed_table ADD COLUMN emp_department text;
+SELECT * FROM o_test_typed_table ORDER BY emp_id;
+
+-- Cleanup
+DROP TABLE o_test_typed_table CASCADE;
+DROP TABLE o_test_regular_table CASCADE;
+DROP TYPE employee_type;
+
+-- Test AT_AddColumnToView
+-- AT_AddColumnToView is triggered internally by CREATE OR REPLACE VIEW
+-- when the replacement view has additional columns compared to the original
+CREATE TABLE o_test_view_source (
+	i int PRIMARY KEY,
+	name text,
+	value int,
+	score int
+) USING orioledb;
+
+INSERT INTO o_test_view_source VALUES
+	(1, 'alice', 100, 85),
+	(2, 'bob', 200, 92),
+	(3, 'charlie', 300, 78);
+
+-- Create an initial view with 2 columns
+CREATE VIEW o_test_add_col_view AS SELECT i, name FROM o_test_view_source;
+
+-- Check initial view structure (2 columns)
+\d o_test_add_col_view
+SELECT * FROM o_test_add_col_view ORDER BY i;
+
+-- Test AT_AddColumnToView: Replace view with an additional column
+-- This internally triggers AT_AddColumnToView for the 'value' column
+CREATE OR REPLACE VIEW o_test_add_col_view AS
+	SELECT i, name, value FROM o_test_view_source;
+
+-- Check updated view structure (3 columns now)
+\d o_test_add_col_view
+SELECT * FROM o_test_add_col_view ORDER BY i;
+
+ALTER TABLE o_test_view_source ADD COLUMN extra_info text DEFAULT 'N/A';
+
+CREATE OR REPLACE VIEW o_test_add_col_view AS
+	SELECT i, name, value, extra_info FROM o_test_view_source;
+
+-- Check updated view structure (4 columns now)
+\d o_test_add_col_view
+SELECT * FROM o_test_add_col_view ORDER BY i;
+
+-- Cleanup views
+DROP VIEW o_test_add_col_view CASCADE;
+DROP TABLE o_test_view_source CASCADE;
 
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA ddl CASCADE;

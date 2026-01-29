@@ -108,6 +108,7 @@ static object_access_hook_type old_objectaccess_hook = NULL;
 List	   *drop_index_list = NIL;
 List	   *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
+static int	o_alter_generate_column_id = 0;
 Oid			o_saved_relrewrite = InvalidOid;
 Oid			o_saved_reltablespace = InvalidOid;
 List	   *o_reuse_indices = NIL;
@@ -296,7 +297,8 @@ is_alter_table_partition(PlannedStmt *pstmt)
 		AlterTableCmd *cmd = linitial(top_atstmt->cmds);
 
 		if (cmd->subtype == AT_AttachPartition ||
-			cmd->subtype == AT_DetachPartition)
+			cmd->subtype == AT_DetachPartition ||
+			cmd->subtype == AT_DetachPartitionFinalize)
 			return true;
 	}
 	return false;
@@ -924,7 +926,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		relid = AlterTableLookupRelation(atstmt, lockmode);
 
 		if (OidIsValid(relid) && objtype == OBJECT_TABLE &&
-			lockmode == AccessExclusiveLock)
+			(lockmode == AccessExclusiveLock || lockmode == ShareUpdateExclusiveLock))
 		{
 			Relation	rel = table_open(relid, lockmode);
 
@@ -968,7 +970,49 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_SetTableSpace:
 						case AT_SetStorage:
 						case AT_ReplicaIdentity:
+						case AT_AddIndexConstraint:
+						case AT_AddOf:
+						case AT_AlterColumnGenericOptions:
+						case AT_AlterConstraint:
+						case AT_DisableTrig:
+						case AT_DisableTrigAll:
+						case AT_DisableTrigUser:
+						case AT_DropOf:
+						case AT_EnableAlwaysTrig:
+						case AT_EnableReplicaTrig:
+						case AT_EnableTrig:
+						case AT_EnableTrigAll:
+						case AT_EnableTrigUser:
+						case AT_ForceRowSecurity:
+						case AT_NoForceRowSecurity:
+						case AT_ReplaceRelOptions:
+						case AT_ResetOptions:
+						case AT_SetLogged:
+						case AT_SetOptions:
+						case AT_SetStatistics:
+						case AT_SetUnLogged:
+						case AT_ValidateConstraint:
+#if PG_VERSION_NUM >= 170000
+						case AT_SetExpression:
+#endif
 							break;
+						case AT_DropOids:
+							ereport(WARNING,
+									(errmsg("alter table subcommand \"%s\" has no effect on OrioleDB tables since they do not use OIDs",
+											alter_table_type_to_string(cmd->subtype))));
+							break;
+						case AT_ClusterOn:
+						case AT_DropCluster:
+							ereport(WARNING,
+									(errmsg("alter table subcommand \"%s\" has no performance effect on OrioleDB tables with primary key",
+											alter_table_type_to_string(cmd->subtype))));
+							break;
+						case AT_SetAccessMethod:
+							ereport(ERROR,
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("changing access method is not supported for OrioleDB tables")));
+							break;
+						case AT_SetCompression:
 						default:
 							ereport(ERROR,
 									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -2108,7 +2152,11 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				expr = defaultexpr;
 			}
 
-			if (!expr && attr->attgenerated && old_slot->tts_isnull[i])
+			/*
+			 * Build new value for GENERATED column if calculating formula has been updated using
+			 * ALTER TABLE ... SET EXPRESSION ... or if value was not present in existing row
+			 */
+			if (!expr && attr->attgenerated && (old_slot->tts_isnull[i] || i == (o_alter_generate_column_id - 1)))
 			{
 				Node	   *defaultexpr = build_column_default(rel, i + 1);
 
@@ -2177,6 +2225,8 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 		ExecClearTuple(old_slot);
 		ExecClearTuple(new_slot);
 	}
+
+	o_alter_generate_column_id = 0;
 
 	ExecDropSingleTupleTableSlot(old_slot);
 	ExecDropSingleTupleTableSlot(new_slot);
@@ -3247,6 +3297,15 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						if (ATColumnChangeRequiresRewrite(&old_field, field,
 														  subId))
 							in_rewrite = true;
+					}
+
+					/*
+					 * Alter table on generated column triggers table rewrite due to need of recalculating
+					 * column value for existing rows
+					 */
+					if (old_field.generated) {
+						in_rewrite = true;
+						o_alter_generate_column_id = subId;
 					}
 
 					if (!in_rewrite)
