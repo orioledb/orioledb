@@ -103,7 +103,7 @@ typedef struct
  */
 typedef struct
 {
-	bool need_load;
+	bool		need_load;
 	void	   *arg;
 } OTableProviderArgs;
 
