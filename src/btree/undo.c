@@ -1629,11 +1629,8 @@ find_non_lock_only_undo_record(UndoLogType undoType, BTreeLeafTuphdr *tuphdr)
 	OTupleXactInfo xactInfo = tuphdr->xactInfo;
 	UndoLocation undoLocation = InvalidUndoLocation;
 
-	while (XACT_INFO_IS_LOCK_ONLY(xactInfo) || !XACT_INFO_IS_FINISHED(xactInfo))
+	while (XACT_INFO_IS_LOCK_ONLY(xactInfo))
 	{
-		if (!XACT_INFO_IS_LOCK_ONLY(xactInfo))
-			return undoLocation;
-
 		/*
 		 * We should be able to find non lock-only undo location before
 		 * running out of undo records.

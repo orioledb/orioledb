@@ -128,9 +128,19 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 	OTuple		result;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
+	/*
+	 * If we need to get the result from given snapshot in the past, and in
+	 * the same time we might have modifications in this tree, then we might
+	 * need to combine results from the data page and the page image in undo
+	 * log.
+	 */
 	if (COMMITSEQNO_IS_NORMAL(read_o_snapshot->csn))
 		combinedResult = have_current_undo(desc->undoType);
 
+	/*
+	 * If we don't need to combine results, then ask find_page() to load the
+	 * relevant page item from undo log for us by passing our snapshot csn.
+	 */
 	init_page_find_context(&context, desc,
 						   combinedResult ? COMMITSEQNO_INPROGRESS : read_o_snapshot->csn,
 						   BTREE_PAGE_FIND_FETCH);
@@ -156,42 +166,69 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 
 	if (combinedResult && header->csn >= read_o_snapshot->csn)
 	{
+		/*
+		 * Have to combine the results.  First look for a matching tuple on
+		 * the data page modified by us.
+		 */
 		if (BTREE_PAGE_LOCATOR_IS_VALID(img, &loc))
 		{
-			BTreeLeafTuphdr *tupHdr;
+			BTreeLeafTuphdr *tupHdrPtr;
 			OTuple		curTuple;
 			int			result_size;
-			OTupleXactInfo xactInfo;
 
-			BTREE_PAGE_READ_LEAF_ITEM(tupHdr, curTuple, img, &loc);
-			tupHdr = (BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(img, &loc);
-			xactInfo = tupHdr->xactInfo;
+			BTREE_PAGE_READ_LEAF_ITEM(tupHdrPtr, curTuple, img, &loc);
+			tupHdrPtr = (BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(img, &loc);
 
-			if (!XACT_INFO_IS_LOCK_ONLY(xactInfo) &&
-				XACT_INFO_OXID_IS_CURRENT(xactInfo))
+			if (o_btree_cmp(desc, key, kind, &curTuple, BTreeKeyLeafTuple) == 0)
 			{
-				if (out_csn)
-					*out_csn = COMMITSEQNO_INPROGRESS;
+				BTreeLeafTuphdr tupHdr = *tupHdrPtr;
 
-				if (deleted)
-					*deleted = (tupHdr->deleted != BTreeLeafTupleNonDeleted);
+				/*
+				 * We found the matching tuple.  Now check if it is modified
+				 * by us.  Even if tuple is modified by us, there might be FOR
+				 * KEY SHARE locks placed by concurrent transactions. Find the
+				 * first non-lock-only undo record in the chain and check if
+				 * it belongs to our transaction.
+				 */
+				(void) find_non_lock_only_undo_record(desc->undoType, &tupHdr);
 
-				if (tupHdr->deleted == BTreeLeafTupleNonDeleted)
+				if (!XACT_INFO_IS_LOCK_ONLY(tupHdr.xactInfo) &&
+					XACT_INFO_OXID_IS_CURRENT(tupHdr.xactInfo))
 				{
-					result_size = o_btree_len(desc, curTuple, OTupleLength);
-					result.data = (Pointer) MemoryContextAlloc(mcxt, result_size);
-					memcpy(result.data, curTuple.data, result_size);
-					result.formatFlags = curTuple.formatFlags;
-					return result;
-				}
-				else
-				{
-					O_TUPLE_SET_NULL(result);
-					/* cppcheck-suppress uninitvar */
-					return result;
+					/*
+					 * OK, we found the tuple modified by us.  It overrides
+					 * whatever we could have from the undo log page image.
+					 * Return it right away.
+					 */
+					if (out_csn)
+						*out_csn = COMMITSEQNO_INPROGRESS;
+
+					if (deleted)
+						*deleted = (tupHdrPtr->deleted != BTreeLeafTupleNonDeleted);
+
+					if (tupHdrPtr->deleted == BTreeLeafTupleNonDeleted)
+					{
+						result_size = o_btree_len(desc, curTuple, OTupleLength);
+						result.data = (Pointer) MemoryContextAlloc(mcxt, result_size);
+						memcpy(result.data, curTuple.data, result_size);
+						result.formatFlags = curTuple.formatFlags;
+						return result;
+					}
+					else
+					{
+						O_TUPLE_SET_NULL(result);
+						/* cppcheck-suppress uninitvar */
+						return result;
+					}
 				}
 			}
 		}
+
+		/*
+		 * There is no matching tuple modified by us.  So, we have to fetch
+		 * the page image from undo log as we didn't ask find_page() to do
+		 * this for us.
+		 */
 		read_page_from_undo(desc, img, header->undoLocation, read_o_snapshot->csn,
 							key, kind, NULL);
 		btree_page_search(desc, img, key, kind, NULL, &loc);
@@ -212,6 +249,10 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 
 		if (cmp == 0)
 		{
+			/*
+			 * The matching tuple is found.  Traverse the row-level undo chain
+			 * for the relevant version and return it.
+			 */
 			return o_find_tuple_version(desc, img, &loc, read_o_snapshot,
 										out_csn, mcxt, cb, arg);
 		}
