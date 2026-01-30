@@ -981,6 +981,27 @@ cache_scan_tupdesc_and_slot(OIndexDescr *index_descr, OIndex *oIndex)
 	index_descr->index_slot = MakeSingleTupleTableSlot(index_descr->itupdesc, &TTSOpsOrioleDB);
 }
 
+/*
+ * o_index_fill_descr()
+ *
+ * Initialize *descr from the catalog OIndex entry.
+ *
+ * The function resets the descriptor, copies identity fields (OIDs/name/version),
+ * builds leaf/non-leaf tuple descriptors, fills per-field metadata (collation,
+ * ordering, opclasses, comparators), and initializes predicate/expressions state.
+ *
+ * Base table dependency:
+ * - For oIndexPrimary, additional data is taken from OTable (constraints and
+ *   primary_init_nfields). The table is obtained using o_table_source/source_is_context).
+ * - For other index types, o_table_source/source_is_context are currently unused.
+ *
+ * Memory/ownership:
+ * - Descriptor-owned allocations are made in OGetIndexContext(descr).
+ * - If OTable loaded from ORelFetchContext (when source_is_context) it is freed before return.
+ *
+ * Requirements:
+ * - oIndex != NULL, descr points to writable memory.
+ */
 void
 o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, bool source_is_context)
 {
