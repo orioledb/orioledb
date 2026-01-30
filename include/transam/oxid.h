@@ -70,7 +70,7 @@ typedef struct OSnapshot
 } OSnapshot;
 
 /*
- * ORelFetchContext
+ * OTableFetchContext
  *
  * Encapsulates MVCC visibility context used to fetch relation and index
  * descriptors from OrioleDB system catalogs: SYS_TREES_O_TABLES & SYS_TREES_O_INDICES.
@@ -87,12 +87,12 @@ typedef struct
 {
 	OSnapshot  *snapshot;
 	uint32		version;
-} ORelFetchContext;
+} OTableFetchContext;
 
-static inline ORelFetchContext
+static inline OTableFetchContext
 build_fetch_context(OSnapshot *snapshot, uint32 version)
 {
-	ORelFetchContext ctx = {.snapshot = snapshot,.version = version};
+	OTableFetchContext ctx = {.snapshot = snapshot,.version = version};
 
 	return ctx;
 }
