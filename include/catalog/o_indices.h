@@ -97,7 +97,7 @@ extern bool o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid,
 extern bool o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid,
 						  CommitSeqNo csn);
 extern OIndex *o_indices_get(ORelOids oids, OIndexType type);
-extern OIndex *o_indices_get_extended(ORelOids oids, OIndexType type, ORelFetchContext ctx);
+extern OIndex *o_indices_get_extended(ORelOids oids, OIndexType type, OTableFetchContext ctx);
 
 extern bool o_indices_update(OTable *table, OIndexNumber ixNum,
 							 OXid oxid, CommitSeqNo csn);

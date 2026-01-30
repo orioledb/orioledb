@@ -1146,7 +1146,7 @@ o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn)
  * Same as o_tables_get, if version not NULL find o_tables with passed version
  */
 OTable *
-o_tables_get_extended(ORelOids oids, ORelFetchContext ctx)
+o_tables_get_extended(ORelOids oids, OTableFetchContext ctx)
 {
 	OTableChunkKey key,
 			   *found_key = NULL;
@@ -1182,7 +1182,7 @@ o_tables_get_extended(ORelOids oids, ORelFetchContext ctx)
 OTable *
 o_tables_get(ORelOids oids)
 {
-	return o_tables_get_extended(oids, default_non_deleted_fetch_context);
+	return o_tables_get_extended(oids, default_table_fetch_context);
 }
 
 /*

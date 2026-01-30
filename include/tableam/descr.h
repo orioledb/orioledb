@@ -277,8 +277,7 @@ typedef struct
 
 #define GET_PRIMARY(descr) ((descr)->indices[PrimaryIndexNumber])
 
-extern ORelFetchContext default_in_progress_fetch_context;
-extern ORelFetchContext default_non_deleted_fetch_context;
+extern OTableFetchContext default_table_fetch_context;
 
 /*
  * Please, read commit before o_bree_load_shmemd() definition.
@@ -313,7 +312,7 @@ extern ORelFetchContext default_non_deleted_fetch_context;
  *  - Use default fetch context with O_TABLE_INVALID_VERSION and some default snapshot
  *    to retrieve latest descriptor
  */
-extern OTableDescr *o_fetch_table_descr_extended(ORelOids oids, ORelFetchContext ctx);
+extern OTableDescr *o_fetch_table_descr_extended(ORelOids oids, OTableFetchContext ctx);
 
 /*
  * o_fetch_index_descr_extended
@@ -347,7 +346,7 @@ extern OTableDescr *o_fetch_table_descr_extended(ORelOids oids, ORelFetchContext
  *    descriptor mismatches during logical decoding and recovery.
  */
 extern OIndexDescr *o_fetch_index_descr_extended(ORelOids oids, OIndexType type,
-												 bool lock, ORelFetchContext ctx, ORelFetchContext base_ctx);
+												 bool lock, OTableFetchContext ctx, OTableFetchContext base_ctx);
 
 extern OTableDescr *o_fetch_table_descr(ORelOids oids);
 extern OIndexDescr *o_fetch_index_descr(ORelOids oids, OIndexType type,
