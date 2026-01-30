@@ -232,8 +232,7 @@ o_detoast(struct varlena *attr)
 		   VARDATA_EXTERNAL(attr) + O_TOAST_EXTERNAL_SZ,
 		   ote.data_size);
 	O_LOAD_SNAPSHOT_CSN(&oSnapshot, ote.csn);
-	return (struct varlena *) o_toast_get(GET_PRIMARY(descr), descr->toast,
-										  key.tuple, ote.attnum,
+	return (struct varlena *) o_toast_get(descr, key.tuple, ote.attnum,
 										  ote.toasted_size, &oSnapshot);
 }
 
@@ -909,18 +908,15 @@ o_toast_insert(OTableDescr *descr, OTuple pk, uint16 attn,
 {
 	OToastKey	tkey;
 	bool		result;
-	OIndexDescr *primary = GET_PRIMARY(descr);
-	OIndexDescr *toast = descr->toast;
-	uint32		version = descr->version;
-	OTableToastArg arg = {primary, toast, version};
+	OTableToastArg arg = {GET_PRIMARY(descr), descr->toast, descr->version};
 
-	Assert(ORelOidsIsEqual(toast->tableOids, descr->oids));
+	Assert(ORelOidsIsEqual(descr->toast->tableOids, descr->oids));
 
 	tkey.pk_tuple = pk;
 	tkey.attnum = attn;
 	tkey.chunknum = 0;
 
-	Assert(toast->desc.type == oIndexToast);
+	Assert(descr->toast->desc.type == oIndexToast);
 
 	result = generic_toast_insert(&tableToastAPI, &tkey, data,
 								  data_size, oxid, csn, &arg);
@@ -929,19 +925,18 @@ o_toast_insert(OTableDescr *descr, OTuple pk, uint16 attn,
 }
 
 void
-o_toast_sort_add(OIndexDescr *primary, OIndexDescr *toast,
-				 OTuple pk, uint16 attn,
+o_toast_sort_add(OTableDescr *descr, OTuple pk, uint16 attn,
 				 Pointer data, Size data_size,
 				 Tuplesortstate *sortstate)
 {
 	OToastKey	tkey;
-	OTableToastArg arg = {primary, toast, O_TABLE_INVALID_VERSION};
+	OTableToastArg arg = {GET_PRIMARY(descr), descr->toast, O_TABLE_INVALID_VERSION};
 
 	tkey.pk_tuple = pk;
 	tkey.attnum = attn;
 	tkey.chunknum = 0;
 
-	Assert(toast->desc.type == oIndexToast);
+	Assert(descr->toast->desc.type == oIndexToast);
 
 	generic_toast_sort_add(&tableToastAPI, (Pointer) &tkey, data,
 						   data_size, sortstate, &arg);
@@ -955,18 +950,15 @@ o_toast_delete(OTableDescr *descr,
 {
 	OToastKey	tkey;
 	bool		result;
-	OIndexDescr *primary = GET_PRIMARY(descr);
-	OIndexDescr *toast = descr->toast;
-	uint32		version = descr->version;
-	OTableToastArg arg = {primary, toast, version};
+	OTableToastArg arg = {GET_PRIMARY(descr), descr->toast, descr->version};
 
-	Assert(ORelOidsIsEqual(toast->tableOids, descr->oids));
+	Assert(ORelOidsIsEqual(descr->toast->tableOids, descr->oids));
 
 	tkey.pk_tuple = pk;
 	tkey.attnum = attn;
 	tkey.chunknum = 0;
 
-	Assert(toast->desc.type == oIndexToast);
+	Assert(descr->toast->desc.type == oIndexToast);
 
 	result = generic_toast_delete(&tableToastAPI, (Pointer) &tkey,
 								  oxid, csn, &arg);
@@ -975,19 +967,19 @@ o_toast_delete(OTableDescr *descr,
 }
 
 Pointer
-o_toast_get(OIndexDescr *primary, OIndexDescr *toast,
+o_toast_get(OTableDescr *descr,
 			OTuple pk, uint16 attn,
 			Size data_size, OSnapshot *o_snapshot)
 {
 	OToastKey	tkey;
 	Pointer		result;
-	OTableToastArg arg = {primary, toast, O_TABLE_INVALID_VERSION};
+	OTableToastArg arg = {GET_PRIMARY(descr), descr->toast, O_TABLE_INVALID_VERSION};
 
 	tkey.pk_tuple = pk;
 	tkey.attnum = attn;
 	tkey.chunknum = 0;
 
-	Assert(toast->desc.type == oIndexToast);
+	Assert(descr->toast->desc.type == oIndexToast);
 
 	result = generic_toast_get(&tableToastAPI, (Pointer) &tkey, data_size,
 							   o_snapshot, &arg);

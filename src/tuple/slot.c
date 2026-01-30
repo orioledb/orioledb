@@ -1515,8 +1515,7 @@ tts_orioledb_toast_sort_add(TupleTableSlot *slot,
 			value = o_get_src_value(slot->tts_values[i], &free);
 			p = DatumGetPointer(value);
 
-			o_toast_sort_add(GET_PRIMARY(descr), descr->toast,
-							 idx_tup, i + 1 + ctid_off, p,
+			o_toast_sort_add(descr, idx_tup, i + 1 + ctid_off, p,
 							 toast_datum_size(value), sortstate);
 			if (free)
 				pfree(p);
