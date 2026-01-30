@@ -302,6 +302,7 @@ FROM query_to_text('EXPLAIN (ANALYZE, COSTS OFF, BUFFERS)
    ->  Custom Scan (o_scan) on bitmap_test (actual time=x rows=x loops=x)
          Bitmap heap scan
          Recheck Cond: ((i < x) OR (i > x))
+         Rows Removed by Index Recheck: x
          ->  BitmapOr (actual time=x rows=x loops=x)
                ->  Bitmap Index Scan on bitmap_test_ixx (actual time=x rows=x loops=x)
                      Index Cond: (i < x)
@@ -312,7 +313,7 @@ FROM query_to_text('EXPLAIN (ANALYZE, COSTS OFF, BUFFERS)
          Primary pages: read=x
  Planning Time: x ms
  Execution Time: x ms
-(14 rows)
+(15 rows)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text('EXPLAIN (ANALYZE, COSTS OFF, BUFFERS)
