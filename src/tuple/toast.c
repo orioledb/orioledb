@@ -40,7 +40,8 @@ typedef struct
 	uint32		version;		/* base table version */
 } OTableToastArg;
 
-#define GET_VERSION(api, method, arg) (api->method ? api->method(arg) : O_TABLE_INVALID_VERSION)
+#define GET_BTREE_VERSION(api, arg) (api->getBTreeVersion ? api->getBTreeVersion(arg) : O_TABLE_INVALID_VERSION)
+#define GET_BASE_BTREE_VERSION(api, arg) (api->getBaseBTreeVersion ? api->getBaseBTreeVersion(arg) : O_TABLE_INVALID_VERSION)
 
 /*
  * Help functions.
@@ -465,8 +466,8 @@ generic_toast_insert_optional_wal(ToastAPI *api, void *key, Pointer data,
 
 		if (desc->storageType == BTreeStoragePersistence && wal)
 		{
-			uint32		version = GET_VERSION(api, getBTreeVersion, arg);
-			uint32		base_version = GET_VERSION(api, getBaseBTreeVersion, arg);
+			uint32		version = GET_BTREE_VERSION(api, arg);
+			uint32		base_version = GET_BASE_BTREE_VERSION(api, arg);
 
 			add_modify_wal_record(WAL_REC_INSERT, desc, tup,
 								  o_btree_len(desc, tup, OTupleLength), REPLICA_IDENTITY_DEFAULT, version, base_version);
@@ -608,8 +609,8 @@ generic_toast_update_optional_wal(ToastAPI *api, void *key, Pointer data,
 		if (desc->storageType == BTreeStoragePersistence && wal)
 		{
 			uint8		rec_type;
-			uint32		version = GET_VERSION(api, getBTreeVersion, arg);
-			uint32		base_version = GET_VERSION(api, getBaseBTreeVersion, arg);
+			uint32		version = GET_BTREE_VERSION(api, arg);
+			uint32		base_version = GET_BASE_BTREE_VERSION(api, arg);
 
 			rec_type = (result == OBTreeModifyResultUpdated) ? WAL_REC_UPDATE :
 				WAL_REC_INSERT;
@@ -694,8 +695,8 @@ generic_toast_delete_optional_wal(ToastAPI *api, void *key, OXid oxid,
 
 		if (desc->storageType == BTreeStoragePersistence && wal)
 		{
-			uint32		version = GET_VERSION(api, getBTreeVersion, arg);
-			uint32		base_version = GET_VERSION(api, getBaseBTreeVersion, arg);
+			uint32		version = GET_BTREE_VERSION(api, arg);
+			uint32		base_version = GET_BASE_BTREE_VERSION(api, arg);
 
 			if (!api->deleteLogFullTuple)
 			{
