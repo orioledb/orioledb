@@ -82,6 +82,17 @@ typedef struct
 	bool		isIncluded;
 } BtreeIterationEnd;
 
+static OTuple fetch_our_tuple_from_page(BTreeDescr *desc, Page p,
+										BTreePageItemLocator *loc, void *key,
+										BTreeKeyType kind, MemoryContext mcxt,
+										CommitSeqNo *out_csn, bool *deleted);
+static OTuple fetch_tuple_from_page(BTreeDescr *desc, Page p,
+									BTreePageItemLocator *loc,
+									void *key, BTreeKeyType kind,
+									OSnapshot *read_o_snapshot,
+									MemoryContext mcxt,
+									CommitSeqNo *out_csn, bool *deleted,
+									TupleFetchCallback cb, void *arg);
 static void get_next_combined_location(BTreeIterator *it);
 static void load_page_from_undo(BTreeIterator *it, void *key, BTreeKeyType kind);
 static bool btree_iterator_check_load_next_page(BTreeIterator *it,
@@ -185,59 +196,10 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 		 * Have to combine the results.  First look for a matching tuple on
 		 * the data page modified by us.
 		 */
-		if (BTREE_PAGE_LOCATOR_IS_VALID(img, &loc))
-		{
-			BTreeLeafTuphdr *tupHdrPtr;
-			OTuple		curTuple;
-			int			result_size;
-
-			BTREE_PAGE_READ_LEAF_ITEM(tupHdrPtr, curTuple, img, &loc);
-			tupHdrPtr = (BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(img, &loc);
-
-			if (o_btree_cmp(desc, key, kind, &curTuple, BTreeKeyLeafTuple) == 0)
-			{
-				BTreeLeafTuphdr tupHdr = *tupHdrPtr;
-
-				/*
-				 * We found the matching tuple.  Now check if it is modified
-				 * by us.  Even if tuple is modified by us, there might be FOR
-				 * KEY SHARE locks placed by concurrent transactions. Find the
-				 * first non-lock-only undo record in the chain and check if
-				 * it belongs to our transaction.
-				 */
-				(void) find_non_lock_only_undo_record(desc->undoType, &tupHdr);
-
-				if (!XACT_INFO_IS_LOCK_ONLY(tupHdr.xactInfo) &&
-					XACT_INFO_OXID_IS_CURRENT(tupHdr.xactInfo))
-				{
-					/*
-					 * OK, we found the tuple modified by us.  It overrides
-					 * whatever we could have from the undo log page image.
-					 * Return it right away.
-					 */
-					if (out_csn)
-						*out_csn = COMMITSEQNO_INPROGRESS;
-
-					if (deleted)
-						*deleted = (tupHdrPtr->deleted != BTreeLeafTupleNonDeleted);
-
-					if (tupHdrPtr->deleted == BTreeLeafTupleNonDeleted)
-					{
-						result_size = o_btree_len(desc, curTuple, OTupleLength);
-						result.data = (Pointer) MemoryContextAlloc(mcxt, result_size);
-						memcpy(result.data, curTuple.data, result_size);
-						result.formatFlags = curTuple.formatFlags;
-						return result;
-					}
-					else
-					{
-						O_TUPLE_SET_NULL(result);
-						/* cppcheck-suppress uninitvar */
-						return result;
-					}
-				}
-			}
-		}
+		result = fetch_our_tuple_from_page(desc, img, &loc, key, kind, mcxt,
+										   out_csn, deleted);
+		if (!O_TUPLE_IS_NULL(result))
+			return result;
 
 		/*
 		 * There is no matching tuple modified by us.  So, we have to fetch
@@ -250,13 +212,102 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 		page_locator_find_real_item(img, NULL, &loc);
 	}
 
-	if (BTREE_PAGE_LOCATOR_IS_VALID(img, &loc))
+	/*
+	 * Fetch the relevant tuple version for the page.
+	 */
+	return fetch_tuple_from_page(desc, img, &loc, key, kind, read_o_snapshot,
+								 mcxt, out_csn, deleted, cb, arg);
+}
+
+/*
+ * Check if there is a matching tuple modified by us on the given location on
+ * the page.  Return this tuple if so, or a null tuple otherwise.
+ */
+static OTuple
+fetch_our_tuple_from_page(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
+						  void *key, BTreeKeyType kind, MemoryContext mcxt,
+						  CommitSeqNo *out_csn, bool *deleted)
+{
+	OTuple		result;
+
+	if (BTREE_PAGE_LOCATOR_IS_VALID(p, loc))
+	{
+		BTreeLeafTuphdr *tupHdrPtr;
+		OTuple		curTuple;
+		int			result_size;
+
+		BTREE_PAGE_READ_LEAF_ITEM(tupHdrPtr, curTuple, p, loc);
+		tupHdrPtr = (BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, loc);
+
+		if (o_btree_cmp(desc, key, kind, &curTuple, BTreeKeyLeafTuple) == 0)
+		{
+			BTreeLeafTuphdr tupHdr = *tupHdrPtr;
+
+			/*
+			 * We found the matching tuple.  Now check if it is modified by
+			 * us.  Even if tuple is modified by us, there might be FOR KEY
+			 * SHARE locks placed by concurrent transactions. Find the first
+			 * non-lock-only undo record in the chain and check if it belongs
+			 * to our transaction.
+			 */
+			(void) find_non_lock_only_undo_record(desc->undoType, &tupHdr);
+
+			if (!XACT_INFO_IS_LOCK_ONLY(tupHdr.xactInfo) &&
+				XACT_INFO_OXID_IS_CURRENT(tupHdr.xactInfo))
+			{
+				/*
+				 * OK, we found the tuple modified by us.  It overrides
+				 * whatever we could have from the undo log page image. Return
+				 * it right away.
+				 */
+				if (out_csn)
+					*out_csn = COMMITSEQNO_INPROGRESS;
+
+				if (deleted)
+					*deleted = (tupHdrPtr->deleted != BTreeLeafTupleNonDeleted);
+
+				if (tupHdrPtr->deleted == BTreeLeafTupleNonDeleted)
+				{
+					result_size = o_btree_len(desc, curTuple, OTupleLength);
+					result.data = (Pointer) MemoryContextAlloc(mcxt, result_size);
+					memcpy(result.data, curTuple.data, result_size);
+					result.formatFlags = curTuple.formatFlags;
+					return result;
+				}
+				else
+				{
+					O_TUPLE_SET_NULL(result);
+					/* cppcheck-suppress uninitvar */
+					return result;
+				}
+			}
+		}
+	}
+	O_TUPLE_SET_NULL(result);
+	return result;
+}
+
+/*
+ * Check if there is a matching tuple on the given location on the page.
+ * Return the appropriate version of this tuple if so, or a null tuple
+ * otherwise.
+ */
+static OTuple
+fetch_tuple_from_page(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
+					  void *key, BTreeKeyType kind,
+					  OSnapshot *read_o_snapshot, MemoryContext mcxt,
+					  CommitSeqNo *out_csn, bool *deleted,
+					  TupleFetchCallback cb, void *arg)
+{
+	OTuple		result;
+
+	if (BTREE_PAGE_LOCATOR_IS_VALID(p, loc))
 	{
 		BTreeLeafTuphdr *tupHdr;
 		OTuple		curTuple;
 		int			cmp;
 
-		BTREE_PAGE_READ_LEAF_ITEM(tupHdr, curTuple, img, &loc);
+		BTREE_PAGE_READ_LEAF_ITEM(tupHdr, curTuple, p, loc);
 		cmp = o_btree_cmp(desc, key, kind, &curTuple, BTreeKeyLeafTuple);
 
 		if (deleted)
@@ -268,7 +319,7 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 			 * The matching tuple is found.  Traverse the row-level undo chain
 			 * for the relevant version and return it.
 			 */
-			return o_find_tuple_version(desc, img, &loc, read_o_snapshot,
+			return o_find_tuple_version(desc, p, loc, read_o_snapshot,
 										out_csn, mcxt, cb, arg);
 		}
 	}
