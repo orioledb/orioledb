@@ -2070,6 +2070,9 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 	oxid_subxact_callback(event, mySubid, parentSubid, arg);
 }
 
+/*
+ * Check if the current transaction has items in undo chain of given type.
+ */
 bool
 have_current_undo(UndoLogType undoType)
 {
@@ -2083,7 +2086,7 @@ have_current_undo(UndoLogType undoType)
 
 		get_cur_undo_locations(&locations, undoType);
 
-		return (!UndoLocationIsValid(locations.location));
+		return UndoLocationIsValid(locations.location);
 	}
 }
 
