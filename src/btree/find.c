@@ -1593,6 +1593,12 @@ btree_page_search(BTreeDescr *desc, Page p, Pointer key, BTreeKeyType keyType,
 	OffsetNumber chunkOffset;
 	bool		isLeaf = O_PAGE_IS(p, LEAF);
 
+	if (partial && partial->isPartial && !partial->hikeysChunkIsLoaded)
+	{
+		if (!partial_load_hikeys_chunk(partial, p))
+			return false;
+	}
+
 	if (keyType == BTreeKeyPageHiKey && isLeaf)
 	{
 		BTREE_PAGE_LOCATOR_LAST(p, locator);

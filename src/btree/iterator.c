@@ -93,6 +93,9 @@ static OTuple fetch_tuple_from_page(BTreeDescr *desc, Page p,
 									MemoryContext mcxt,
 									CommitSeqNo *out_csn, bool *deleted,
 									TupleFetchCallback cb, void *arg);
+static bool page_contains_key(BTreeIterator *it, void *key,
+							  BTreeKeyType kind, Page p, OTuple lokey);
+static OTuple get_lokey_if_exists(BTreeIterator *it);
 static void get_next_combined_location(BTreeIterator *it);
 static void load_page_from_undo(BTreeIterator *it, void *key, BTreeKeyType kind);
 static bool btree_iterator_check_load_next_page(BTreeIterator *it,
@@ -217,6 +220,187 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 	 */
 	return fetch_tuple_from_page(desc, img, &loc, key, kind, read_o_snapshot,
 								 mcxt, out_csn, deleted, cb, arg);
+}
+
+OTuple
+o_btree_find_tuples_start(BTreeDescr *desc, void *key,
+						  BTreeKeyType kind, OSnapshot *read_o_snapshot,
+						  ScanDirection scanDir,
+						  CommitSeqNo *out_csn, MemoryContext mcxt,
+						  BTreeLocationHint *hint,
+						  bool *deleted,
+						  TupleFetchCallback cb,
+						  void *arg,
+						  BTreeIterator **out_it)
+{
+	Pointer		img;
+	BTreePageItemLocator loc;
+	BTreeIterator *it;
+	OBTreeFindPageContext *context;
+	BTreePageHeader *header;
+	OTuple		result;
+	uint16		findFlags = BTREE_PAGE_FIND_FETCH;
+	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
+
+	it = (BTreeIterator *) palloc(sizeof(BTreeIterator));
+	*out_it = it;
+	it->combinedResult = have_current_undo(desc->undoType) && COMMITSEQNO_IS_NORMAL(read_o_snapshot->csn);
+	it->oSnapshot = *read_o_snapshot;
+	it->scanDir = scanDir;
+	it->tupleCxt = mcxt;
+	it->fetchCallback = cb;
+	it->fetchCallbackArg = arg;
+
+	undo_it_create(&it->undoIt, it);
+
+	/*
+	 * If we don't need to combine results, then ask find_page() to load the
+	 * relevant page item from undo log for us by passing our snapshot csn.
+	 */
+	context = &it->context;
+	if (IT_IS_BACKWARD(it))
+		findFlags |= BTREE_PAGE_FIND_KEEP_LOKEY;
+	init_page_find_context(context, desc,
+						   it->combinedResult ? COMMITSEQNO_INPROGRESS : read_o_snapshot->csn,
+						   findFlags);
+
+	/* Use page location hint if provided */
+	if (hint && OInMemoryBlknoIsValid(hint->blkno))
+		findResult = refind_page(context, key, kind, 0, hint->blkno, hint->pageChangeCount);
+	else
+		findResult = find_page(context, key, kind, 0);
+
+	Assert(findResult == OFindPageResultSuccess);
+
+	loc = context->items[context->index].locator;
+	img = context->img;
+	header = (BTreePageHeader *) img;
+
+	/* Adjust hint if given */
+	if (hint)
+	{
+		hint->blkno = context->items[context->index].blkno;
+		hint->pageChangeCount = context->items[context->index].pageChangeCount;
+	}
+
+	if (it->combinedResult && header->csn >= read_o_snapshot->csn)
+	{
+		/*
+		 * Have to combine the results.  First look for a matching tuple on
+		 * the data page modified by us.
+		 */
+		result = fetch_our_tuple_from_page(desc, img, &loc, key, kind, mcxt,
+										   out_csn, deleted);
+		if (!O_TUPLE_IS_NULL(result))
+			return result;
+
+		load_page_from_undo(it, key, kind);
+		Assert(it->combinedPage);
+
+		return fetch_tuple_from_page(desc, it->undoIt.image, &it->undoLoc,
+									 key, kind, read_o_snapshot,
+									 mcxt, out_csn, deleted, cb, arg);
+	}
+
+	/*
+	 * Fetch the relevant tuple version for the page.
+	 */
+	return fetch_tuple_from_page(desc, img, &loc, key, kind, read_o_snapshot,
+								 mcxt, out_csn, deleted, cb, arg);
+}
+
+OTuple
+o_btree_find_tuples_continue(BTreeIterator *it,
+							 void *key,
+							 BTreeKeyType kind,
+							 CommitSeqNo *out_csn,
+							 BTreeLocationHint *hint,
+							 bool *deleted)
+{
+	bool		needToReloadPage = true;
+	OBTreeFindPageContext *context = &it->context;
+	BTreeDescr *desc = context->desc;
+	BTreePageItemLocator *loc = &it->context.items[it->context.index].locator;
+	Pointer		img = context->img;
+	BTreePageHeader *header = (BTreePageHeader *) img;
+	OTuple		result;
+
+	if (page_contains_key(it, key, kind, img, get_lokey_if_exists(it)))
+	{
+		/* Search within the loaded page */
+		if (btree_page_search(desc, img, key, kind, &context->partial, loc))
+			needToReloadPage = false;
+	}
+
+	if (needToReloadPage)
+	{
+		OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
+
+		/* Use the page location hint if provided */
+		if (hint && OInMemoryBlknoIsValid(hint->blkno))
+			findResult = refind_page(context, key, kind, 0,
+									 hint->blkno, hint->pageChangeCount);
+		else
+			findResult = find_page(context, key, kind, 0);
+
+		Assert(findResult == OFindPageResultSuccess);
+	}
+
+	/* Adjust hint if given */
+	if (hint)
+	{
+		hint->blkno = context->items[context->index].blkno;
+		hint->pageChangeCount = context->items[context->index].pageChangeCount;
+	}
+
+	if (it->combinedResult && header->csn >= it->oSnapshot.csn)
+	{
+		/*
+		 * Have to combine the results.  First look for a matching tuple on
+		 * the data page modified by us.
+		 */
+		result = fetch_our_tuple_from_page(desc, img, loc, key, kind,
+										   it->tupleCxt, out_csn, deleted);
+		if (!O_TUPLE_IS_NULL(result))
+			return result;
+
+		if (it->combinedPage)
+		{
+			if (page_contains_key(it, key, kind,
+								  it->undoIt.image, it->undoIt.lokey.tuple))
+			{
+				btree_page_search(it->context.desc,
+								  it->undoIt.image,
+								  key, kind, NULL,
+								  &it->undoLoc);
+			}
+			else
+			{
+				load_page_from_undo(it, key,
+									kind != BTreeKeyRightmost ? kind : BTreeKeyNone);
+			}
+		}
+
+		Assert(it->combinedPage);
+
+		return fetch_tuple_from_page(desc, it->undoIt.image, &it->undoLoc,
+									 key, kind, &it->oSnapshot,
+									 it->tupleCxt, out_csn, deleted,
+									 it->fetchCallback, it->fetchCallbackArg);
+	}
+
+	/*
+	 * Fetch the relevant tuple version from the page.
+	 */
+	return fetch_tuple_from_page(desc, img, loc, key, kind, &it->oSnapshot,
+								 it->tupleCxt, out_csn, deleted,
+								 it->fetchCallback, it->fetchCallbackArg);
+}
+
+void
+o_btree_find_tuples_finish(BTreeIterator *it)
+{
+	pfree(it);
 }
 
 /*
@@ -647,6 +831,14 @@ static bool
 page_contains_key(BTreeIterator *it, void *key, BTreeKeyType kind,
 				  Page p, OTuple lokey)
 {
+	PartialPageState *partial = &it->context.partial;
+
+	if (partial && partial->isPartial && !partial->hikeysChunkIsLoaded)
+	{
+		if (!partial_load_hikeys_chunk(partial, p))
+			return false;
+	}
+
 	/* Check if the new value fits the same leaf page */
 	if (IT_IS_FORWARD(it))
 	{

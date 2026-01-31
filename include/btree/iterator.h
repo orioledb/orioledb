@@ -54,6 +54,24 @@ extern OTuple o_btree_find_tuple_by_key(BTreeDescr *desc, void *key,
 										CommitSeqNo *out_csn,
 										MemoryContext mcxt,
 										BTreeLocationHint *hint);
+extern OTuple o_btree_find_tuples_start(BTreeDescr *desc, void *key,
+										BTreeKeyType kind,
+										OSnapshot *read_o_snapshot,
+										ScanDirection scanDir,
+										CommitSeqNo *out_csn,
+										MemoryContext mcxt,
+										BTreeLocationHint *hint,
+										bool *deleted,
+										TupleFetchCallback cb,
+										void *arg,
+										BTreeIterator **out_it);
+extern OTuple o_btree_find_tuples_continue(BTreeIterator *it,
+										   void *key,
+										   BTreeKeyType kind,
+										   CommitSeqNo *out_csn,
+										   BTreeLocationHint *hint,
+										   bool *deleted);
+extern void o_btree_find_tuples_finish(BTreeIterator *it);
 
 extern BTreeIterator *o_btree_iterator_create(BTreeDescr *desc, void *key,
 											  BTreeKeyType kind,
