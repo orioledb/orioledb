@@ -129,7 +129,7 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	if (COMMITSEQNO_IS_NORMAL(read_o_snapshot->csn))
-		combinedResult = !have_current_undo(desc->undoType);
+		combinedResult = have_current_undo(desc->undoType);
 
 	init_page_find_context(&context, desc,
 						   combinedResult ? COMMITSEQNO_INPROGRESS : read_o_snapshot->csn,
@@ -429,7 +429,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	it = (BTreeIterator *) palloc(sizeof(BTreeIterator));
-	it->combinedResult = !have_current_undo(desc->undoType) && COMMITSEQNO_IS_NORMAL(o_snapshot->csn);
+	it->combinedResult = have_current_undo(desc->undoType) && COMMITSEQNO_IS_NORMAL(o_snapshot->csn);
 	it->oSnapshot = *o_snapshot;
 	it->scanDir = scanDir;
 	it->tupleCxt = CurrentMemoryContext;
