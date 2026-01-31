@@ -50,14 +50,14 @@ typedef struct OIndexBuildStackItem
 static bool put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack,
 							  int level, OTuple tuple, int tuplesize,
 							  Pointer tupleheader, LocationIndex header_size,
-							  int *root_level, BTreeMetaPage *metaPageBlkno);
+							  int *root_level, BTreeMetaPage *metaPage);
 static bool put_tuple_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack,
 							   OTuple tuple, int *root_level,
-							   BTreeMetaPage *metaPageBlkno);
+							   BTreeMetaPage *metaPage);
 static bool put_downlink_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack,
 								  int level, uint64 downlink, OTuple key,
 								  int keysize, int *root_level,
-								  BTreeMetaPage *metaPageBlkno);
+								  BTreeMetaPage *metaPage);
 
 static void
 stack_page_split(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
@@ -138,7 +138,7 @@ static bool
 put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 				  OTuple tuple, int tuplesize, Pointer tupleheader,
 				  LocationIndex header_size, int *root_level,
-				  BTreeMetaPage *metaPageBlkno)
+				  BTreeMetaPage *metaPage)
 {
 	BTreeItemPageFitType fit;
 	Pointer		tuple_ptr;
@@ -229,9 +229,9 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 
 		VALGRIND_CHECK_MEM_IS_DEFINED(stack[level].img, ORIOLEDB_BLCKSZ);
 
-		downlink = perform_page_io_build(desc, stack[level].img, &extent, metaPageBlkno);
+		downlink = perform_page_io_build(desc, stack[level].img, &extent, metaPage);
 		if (level == 0)
-			pg_atomic_add_fetch_u32(&metaPageBlkno->leafPagesNum, 1);
+			pg_atomic_add_fetch_u32(&metaPage->leafPagesNum, 1);
 
 		copy_fixed_key(desc, &key, stack[level].key.tuple);
 		keysize = stack[level].keysize;
@@ -252,7 +252,7 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 
 		put_downlink_to_stack(desc, stack, level + 1, downlink,
 							  key.tuple, keysize,
-							  root_level, metaPageBlkno);
+							  root_level, metaPage);
 	}
 	return true;
 }
@@ -260,7 +260,7 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 static bool
 put_downlink_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 					  uint64 downlink, OTuple key, int keysize,
-					  int *root_level, BTreeMetaPage *metaPageBlkno)
+					  int *root_level, BTreeMetaPage *metaPage)
 {
 	BTreeNonLeafTuphdr internal_header = {0};
 	bool		result;
@@ -269,13 +269,13 @@ put_downlink_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 	result = put_item_to_stack(desc, stack, level, key, keysize,
 							   (Pointer) &internal_header,
 							   sizeof(internal_header), root_level,
-							   metaPageBlkno);
+							   metaPage);
 	return result;
 }
 
 static bool
 put_tuple_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack,
-				   OTuple tuple, int *root_level, BTreeMetaPage *metaPageBlkno)
+				   OTuple tuple, int *root_level, BTreeMetaPage *metaPage)
 {
 	BTreeLeafTuphdr leaf_header = {0};
 	int			tuplesize;
@@ -286,7 +286,7 @@ put_tuple_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack,
 	tuplesize = o_btree_len(desc, tuple, OTupleLength);
 	return put_item_to_stack(desc, stack, 0,
 							 tuple, tuplesize, (Pointer) &leaf_header,
-							 sizeof(leaf_header), root_level, metaPageBlkno);
+							 sizeof(leaf_header), root_level, metaPage);
 }
 
 void
@@ -303,7 +303,7 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	uint64		downlink;
 	BTreePageHeader *root_page_header;
 	FileExtent	extent;
-	BTreeMetaPage metaPageBlkno = {0};
+	BTreeMetaPage metaPage = {0};
 	int			i;
 	Datum	   *values;
 	bool	   *isnull;
@@ -315,12 +315,12 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	values = (Datum *) palloc(sizeof(Datum) * tupdesc->natts);
 	isnull = (bool *) palloc(sizeof(bool) * tupdesc->natts);
 
-	pg_atomic_init_u64(&metaPageBlkno.datafileLength[0], 0);
-	pg_atomic_init_u64(&metaPageBlkno.datafileLength[1], 0);
-	pg_atomic_init_u64(&metaPageBlkno.numFreeBlocks, 0);
-	pg_atomic_init_u32(&metaPageBlkno.leafPagesNum, 0);
-	pg_atomic_init_u64(&metaPageBlkno.ctid, ctid);
-	pg_atomic_init_u64(&metaPageBlkno.bridge_ctid, bridge_ctid);
+	pg_atomic_init_u64(&metaPage.datafileLength[0], 0);
+	pg_atomic_init_u64(&metaPage.datafileLength[1], 0);
+	pg_atomic_init_u64(&metaPage.numFreeBlocks, 0);
+	pg_atomic_init_u32(&metaPage.leafPagesNum, 0);
+	pg_atomic_init_u64(&metaPage.ctid, ctid);
+	pg_atomic_init_u64(&metaPage.bridge_ctid, bridge_ctid);
 	for (i = 0; i < ORIOLEDB_MAX_DEPTH; i++)
 	{
 		/* init_page_first_chunk() needs leaf flag to be set */
@@ -334,7 +334,7 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	while (!O_TUPLE_IS_NULL(idx_tup))
 	{
 		Assert(o_tuple_size(idx_tup, &((OIndexDescr *) desc->arg)->leafSpec) <= O_BTREE_MAX_TUPLE_SIZE);
-		put_tuple_to_stack(desc, stack, idx_tup, &root_level, &metaPageBlkno);
+		put_tuple_to_stack(desc, stack, idx_tup, &root_level, &metaPage);
 		idx_tup = tuplesort_getotuple(sortstate, true);
 	}
 
@@ -353,13 +353,13 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 		VALGRIND_CHECK_MEM_IS_DEFINED(stack[i].img, ORIOLEDB_BLCKSZ);
 
 		split_page_by_chunks(desc, stack[i].img);
-		downlink = perform_page_io_build(desc, stack[i].img, &extent, &metaPageBlkno);
+		downlink = perform_page_io_build(desc, stack[i].img, &extent, &metaPage);
 		if (i == 0)
-			pg_atomic_add_fetch_u32(&metaPageBlkno.leafPagesNum, 1);
+			pg_atomic_add_fetch_u32(&metaPage.leafPagesNum, 1);
 
 		put_downlink_to_stack(desc, stack, i + 1, downlink,
 							  stack[i].key.tuple, stack[i].keysize,
-							  &root_level, &metaPageBlkno);
+							  &root_level, &metaPage);
 	}
 
 	root_page = stack[root_level].img;
@@ -385,9 +385,9 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	VALGRIND_CHECK_MEM_IS_DEFINED(root_page, ORIOLEDB_BLCKSZ);
 
 	split_page_by_chunks(desc, root_page);
-	downlink = perform_page_io_build(desc, root_page, &extent, &metaPageBlkno);
+	downlink = perform_page_io_build(desc, root_page, &extent, &metaPage);
 	if (root_level == 0)
-		pg_atomic_add_fetch_u32(&metaPageBlkno.leafPagesNum, 1);
+		pg_atomic_add_fetch_u32(&metaPage.leafPagesNum, 1);
 
 	btree_close_smgr(desc);
 	pfree(stack);
@@ -399,11 +399,11 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 
 	memset(file_header, 0, sizeof(*file_header));
 	file_header->rootDownlink = downlink;
-	file_header->datafileLength = pg_atomic_read_u64(&metaPageBlkno.datafileLength[chkpNum % 2]);
-	file_header->numFreeBlocks = pg_atomic_read_u64(&metaPageBlkno.numFreeBlocks);
-	file_header->leafPagesNum = pg_atomic_read_u32(&metaPageBlkno.leafPagesNum);
-	file_header->ctid = pg_atomic_read_u64(&metaPageBlkno.ctid);
-	file_header->bridgeCtid = pg_atomic_read_u64(&metaPageBlkno.bridge_ctid);
+	file_header->datafileLength = pg_atomic_read_u64(&metaPage.datafileLength[chkpNum % 2]);
+	file_header->numFreeBlocks = pg_atomic_read_u64(&metaPage.numFreeBlocks);
+	file_header->leafPagesNum = pg_atomic_read_u32(&metaPage.leafPagesNum);
+	file_header->ctid = pg_atomic_read_u64(&metaPage.ctid);
+	file_header->bridgeCtid = pg_atomic_read_u64(&metaPage.bridge_ctid);
 }
 
 S3TaskLocation

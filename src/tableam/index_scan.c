@@ -374,7 +374,7 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 		if (ostate->exact)
 		{
 			if (hint)
-				hint->blkno = InvalidBlockNumber;
+				hint->blkno = OInvalidInMemoryBlkno;
 
 			tup = o_btree_find_tuple_by_key(&indexDescr->desc,
 											&ostate->curKeyRange.low,
@@ -506,7 +506,7 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 
 			if (hint)
 			{
-				hint->blkno = InvalidBlockNumber;
+				hint->blkno = OInvalidInMemoryBlkno;
 				hint->pageChangeCount = 0;
 			}
 

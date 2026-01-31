@@ -3622,3 +3622,58 @@ id|t
 step s1_update10000: call update_table(10000);
 step s1_update100000: call update_table(100000);
 step s2_commit: COMMIT;
+
+starting permutation: s1_begin s1_insert50 s2_insert_before50 s2_insert_after50 s1_select49 s1_commit
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_insert50: 
+	INSERT INTO o_iso_rr
+		VALUES (50, 'abc');
+step s2_insert_before50: 
+	INSERT INTO o_iso_rr (SELECT i, repeat('x', 120) FROM generate_series(1, 20) i);
+step s2_insert_after50: 
+	INSERT INTO o_iso_rr (SELECT i, repeat('x', 120) FROM generate_series(55, 100) i);
+step s1_select49: SELECT * FROM o_iso_rr WHERE id = 49;
+id|t
+--+-
+(0 rows)
+
+step s1_commit: COMMIT;
+
+starting permutation: s2_insert50 s1_begin s1_select s2_insert_before50 s2_insert_after50 s1_update50 s2_begin_rc s2_select50_key_share s1_select50 s2_commit s1_commit
+step s2_insert50: 
+	INSERT INTO o_iso_rr
+		VALUES (50, 'abc');
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;
+step s1_select: SELECT * FROM o_iso_rr;
+id|t  
+--+---
+50|abc
+(1 row)
+
+step s2_insert_before50: 
+	INSERT INTO o_iso_rr (SELECT i, repeat('x', 120) FROM generate_series(1, 20) i);
+step s2_insert_after50: 
+	INSERT INTO o_iso_rr (SELECT i, repeat('x', 120) FROM generate_series(55, 100) i);
+step s1_update50: 
+	UPDATE o_iso_rr SET t = 'abcde' WHERE id = 50;
+step s2_begin_rc: 
+	BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+	SET enable_seqscan = off;
+step s2_select50_key_share: SELECT * FROM o_iso_rr WHERE id = 50 FOR KEY SHARE;
+id|t  
+--+---
+50|abc
+(1 row)
+
+step s1_select50: SELECT * FROM o_iso_rr WHERE id = 50;
+id|t    
+--+-----
+50|abcde
+(1 row)
+
+step s2_commit: COMMIT;
+step s1_commit: COMMIT;
