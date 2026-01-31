@@ -89,7 +89,15 @@ typedef void (*OIndexOidsCallback) (OIndexType type, ORelOids treeOids,
 
 extern OIndex *make_o_index(OTable *table, OIndexNumber ixNum);
 
-extern void o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, bool source_is_context);
+typedef enum
+{
+	oTableSourceTable = 0,
+	oTableSourceContext = 1
+} OTableSource;
+
+#define OTableSourceLoad(source) (source == oTableSourceContext)
+
+extern void o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTableSource source);
 
 extern void free_o_index(OIndex *o_index);
 extern bool o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid,
