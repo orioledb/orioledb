@@ -695,9 +695,9 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 	o_table->fillfactor = fillfactor;
 	o_table->persistence = relpersistence;
 	o_table->data_version = ORIOLEDB_DATA_VERSION;
-	o_table->toast_ixversion = UINT32_MAX;
-	o_table->primary_ixversion = UINT32_MAX;
-	o_table->bridge_ixversion = UINT32_MAX;
+	o_table->toast_ixversion = O_TABLE_INVALID_VERSION;
+	o_table->primary_ixversion = O_TABLE_INVALID_VERSION;
+	o_table->bridge_ixversion = O_TABLE_INVALID_VERSION;
 	o_table->index_bridging = bridging;
 
 	for (i = 0; i < tupdesc->natts; i++)

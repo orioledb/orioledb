@@ -78,6 +78,11 @@ typedef struct
 
 #define O_TABLE_INVALID_VERSION UINT32_MAX
 
+#define O_TABLE_VERSION_INCREASE(version) \
+do { \
+	(version) = ((version) == O_TABLE_INVALID_VERSION) ? 0 : (version) + 1; \
+} while(0)
+
 typedef struct
 {
 	ORelOids	oids;

@@ -679,7 +679,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 	descr->indices = (OIndexDescr **) palloc0(sizeof(OIndexDescr *) * descr->nIndices);
 	for (cur_ix = 0; cur_ix < descr->nIndices; cur_ix++)
 	{
-		index = make_o_index(o_table, cur_ix);
+		index = make_o_index(o_table, cur_ix, OIndexVersionPass);
 		indexDescr = palloc0(sizeof(OIndexDescr));
 		o_index_fill_descr(indexDescr, index, o_table, oTableSourceTable);
 		index_btree_desc_init(&indexDescr->desc, indexDescr->compress, indexDescr->fillfactor,
@@ -689,7 +689,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 		descr->indices[cur_ix] = indexDescr;
 	}
 
-	index = make_o_index(o_table, TOASTIndexNumber);
+	index = make_o_index(o_table, TOASTIndexNumber, OIndexVersionPass);
 	indexDescr = palloc0(sizeof(OIndexDescr));
 	o_index_fill_descr(indexDescr, index, o_table, oTableSourceTable);
 	index_btree_desc_init(&indexDescr->desc, indexDescr->compress, indexDescr->fillfactor,
@@ -700,7 +700,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 
 	if (ORelOidsIsValid(o_table->bridge_oids))
 	{
-		index = make_o_index(o_table, BridgeIndexNumber);
+		index = make_o_index(o_table, BridgeIndexNumber, OIndexVersionPass);
 		indexDescr = palloc0(sizeof(OIndexDescr));
 		o_index_fill_descr(indexDescr, index, o_table, oTableSourceTable);
 		index_btree_desc_init(&indexDescr->desc, indexDescr->compress,

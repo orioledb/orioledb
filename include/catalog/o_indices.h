@@ -87,7 +87,13 @@ typedef struct
 typedef void (*OIndexOidsCallback) (OIndexType type, ORelOids treeOids,
 									ORelOids tableOids, void *arg);
 
-extern OIndex *make_o_index(OTable *table, OIndexNumber ixNum);
+typedef enum
+{
+	OIndexVersionReset,
+	OIndexVersionPass,
+} OIndexVersionMode;
+
+extern OIndex *make_o_index(OTable *table, OIndexNumber ixNum, OIndexVersionMode ixVerMode);
 
 typedef enum
 {
