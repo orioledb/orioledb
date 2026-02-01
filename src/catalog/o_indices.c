@@ -1275,7 +1275,6 @@ o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	Pointer		data;
 	int			len;
 	BTreeDescr *sys_tree;
-	uint32	   *version_ptr;
 
 	oIndex = make_o_index(table, ixNum, OIndexVersionReset);
 
