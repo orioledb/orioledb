@@ -231,7 +231,8 @@ o_index_setup_version(OIndex *result, uint32 *version, OIndexVersionMode ixVerMo
 	Assert(result);
 	Assert(version);
 
-	switch (ixVerMode) {
+	switch (ixVerMode)
+	{
 		case OIndexVersionReset:
 			*version = 0;
 			break;
