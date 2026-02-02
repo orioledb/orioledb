@@ -326,6 +326,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 			evictable_tree_init(desc, true, &was_evicted);
 		}
 		is_compressed = OCompressIsValid(desc->compress);
+		desc->rootInfo = sharedRootInfo->rootInfo;
 
 		init_extents = false;
 		if (is_compressed && !was_evicted)
