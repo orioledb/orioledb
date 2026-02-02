@@ -145,7 +145,7 @@ extern void lock_undo_callback(UndoLogType undoType, UndoLocation location,
 extern void btree_relnode_undo_callback(UndoLogType undoType,
 										UndoLocation location,
 										UndoStackItem *baseItem, OXid oxid,
-										bool abort,
+										bool abortCommit,
 										bool changeCountsValid);
 extern void get_prev_leaf_header_from_undo(UndoLogType undoType,
 										   BTreeLeafTuphdr *tuphdr,

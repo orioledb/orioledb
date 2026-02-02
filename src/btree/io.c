@@ -3356,7 +3356,7 @@ try_to_punch_holes(BTreeDescr *desc)
 		}
 		if (file_size != len)
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not read data from checkpoint tmp file: %s %lu %lu: %m",
+							errmsg("could not read data from checkpoint tmp file: %s " UINT64_FORMAT " " UINT64_FORMAT ": %m",
 								   filename, len, file_size)));
 
 		pfree(filename);

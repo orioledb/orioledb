@@ -508,7 +508,7 @@ fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *pkey)
 			AttrNumber	attnum = idx->primaryFieldsAttnums[i];
 
 			pkey->keys[i].value = slot->tts_values[attnum - 1];
-			pkey->keys[i].type = idx->leafTupdesc->attrs[pk_from + i].atttypid;
+			pkey->keys[i].type = TupleDescAttr(idx->leafTupdesc, pk_from + i)->atttypid;
 			pkey->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
 			if (slot->tts_isnull[attnum - 1])
 				pkey->keys[i].flags |= O_VALUE_BOUND_NULL;
@@ -544,7 +544,7 @@ bridged_index_fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *primary, OBTree
 			int			attnum = primary->tableAttnums[i];
 
 			pkey->keys[i].value = slot->tts_values[attnum - 1];
-			pkey->keys[i].type = primary->leafTupdesc->attrs[attnum - 1].atttypid;
+			pkey->keys[i].type = TupleDescAttr(primary->leafTupdesc, attnum - 1)->atttypid;
 			pkey->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
 			if (slot->tts_isnull[attnum - 1])
 				pkey->keys[i].flags |= O_VALUE_BOUND_NULL;
@@ -616,7 +616,7 @@ exclusion_fill_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bou
 			value = o_get_idx_expr_att(slot, idx,
 									   (ExprState *) lfirst(indexpr_item),
 									   &isnull);
-			typid = idx->nonLeafTupdesc->attrs[i].atttypid;
+			typid = TupleDescAttr(idx->nonLeafTupdesc, i)->atttypid;
 			indexpr_item = lnext(idx->expressions_state, indexpr_item);
 		}
 
@@ -763,8 +763,26 @@ o_tbl_insert_with_arbiter(Relation rel,
 			Datum	   *conflictRowidPtr = &conflictRowid;
 			Datum		conflictRowidPtrDatum = PointerGetDatum(conflictRowidPtr);
 
-			if (!ExecCheckIndexConstraints(resultRelInfo, slot, estate, conflictRowidPtrDatum,
+#if PG_VERSION_NUM >= 180000
+			ItemPointerData invalidItemPtr;
+			Datum		invalidItemPtrDatum;
+
+			if (table_get_row_ref_type(resultRelInfo->ri_RelationDesc) == ROW_REF_ROWID)
+				invalidItemPtrDatum = PointerGetDatum(NULL);
+			else
+			{
+				ItemPointerSetInvalid(&invalidItemPtr);
+				invalidItemPtrDatum = ItemPointerGetDatum(&invalidItemPtr);
+			}
+
+			if (!ExecCheckIndexConstraints(resultRelInfo, slot, estate,
+										   conflictRowidPtrDatum,
+										   invalidItemPtrDatum, arbiterIndexes))
+#else
+			if (!ExecCheckIndexConstraints(resultRelInfo, slot, estate,
+										   conflictRowidPtrDatum,
 										   arbiterIndexes))
+#endif
 			{
 				if (lockedSlot)
 				{
@@ -1204,7 +1222,8 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 		Assert(oldSlot->tts_tupleDescriptor->natts == newSlot->tts_tupleDescriptor->natts);
 		for (attnum = 0; attnum < oldSlot->tts_nvalid; attnum++)
 		{
-			Form_pg_attribute attr = &oldSlot->tts_tupleDescriptor->attrs[attnum];
+			OTupleAttrCompact *attr = OTupleDescAttrFast(oldSlot->tts_tupleDescriptor,
+														 attnum);
 
 			if ((oldSlot->tts_isnull[attnum] != newSlot->tts_isnull[attnum]) ||
 				(!oldSlot->tts_isnull[attnum] &&
@@ -1499,7 +1518,7 @@ fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bound)
 		bool		isnull;
 		Oid			typid;
 
-		typid = idx->nonLeafTupdesc->attrs[i].atttypid;
+		typid = TupleDescAttr(idx->nonLeafTupdesc, i)->atttypid;
 
 		if (typid == TIDOID)
 		{
@@ -2511,7 +2530,7 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 			if (i != 0)
 				appendStringInfo(str, ", ");
 			appendStringInfo(str, "%s",
-							 id->nonLeafTupdesc->attrs[i].attname.data);
+							 TupleDescAttr(id->nonLeafTupdesc, i)->attname.data);
 		}
 		appendStringInfo(str, ")=");
 		appendStringInfoIndexKey(str, slot, id);

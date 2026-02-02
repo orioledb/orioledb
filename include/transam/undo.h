@@ -340,10 +340,10 @@ extern void evict_undo_to_disk(UndoLogType undoType,
 							   UndoLocation targetUndoLocation,
 							   UndoLocation minProcReservedLocation,
 							   bool attempt);
-extern bool reserve_undo_size_extended(UndoLogType type, Size size,
+extern bool reserve_undo_size_extended(UndoLogType undoType, Size size,
 									   bool waitForUndoLocation);
-extern void steal_reserved_undo_size(UndoLogType type, Size size);
-extern void giveup_reserved_undo_size(UndoLogType type);
+extern void steal_reserved_undo_size(UndoLogType undoType, Size size);
+extern void giveup_reserved_undo_size(UndoLogType undoType);
 extern void fsync_undo_range(UndoLogType undoType,
 							 UndoLocation fromLoc, UndoLocation toLoc,
 							 uint32 wait_event_info);

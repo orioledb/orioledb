@@ -5,6 +5,9 @@ CREATE EXTENSION orioledb;
 CREATE EXTENSION pageinspect;
 \set VERBOSITY default
 
+SELECT split_part(setting, '.', 1) major_version
+	FROM pg_settings WHERE name = 'server_version';
+
 CREATE FUNCTION btree_index_content(index name)
 	RETURNS TABLE (ctid tid, htid tid, tids tid[]) AS $$
 	SELECT ctid, htid, tids FROM

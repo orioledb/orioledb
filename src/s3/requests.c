@@ -539,7 +539,9 @@ s3_put_object_with_contents(char *objectname, Pointer data, uint64 dataSize,
 	pfree(tmp);
 	slist = curl_slist_append(slist, (tmp = psprintf("x-amz-content-sha256: %s", checksumstringbuf)));
 	pfree(tmp);
-	slist = curl_slist_append(slist, (tmp = psprintf("Content-Length: %lu", dataSize)));
+	slist = curl_slist_append(slist,
+							 (tmp = psprintf("Content-Length: " UINT64_FORMAT,
+											 dataSize)));
 	pfree(tmp);
 	slist = curl_slist_append(slist,
 							  (tmp = psprintf("Authorization: AWS4-HMAC-SHA256 Credential=%s/%s/%s/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=%s",

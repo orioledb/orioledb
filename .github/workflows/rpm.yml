@@ -31,12 +31,12 @@ jobs:
                               openssl-devel systemd-devel llvm-toolset-7-clang \
                               llvm5.0-devel gcc gcc-c++ libzstd-devel lz4-devel
       - name: Checkout PGRPMs into workspace directory
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: orioledb/pgrpms
           ref: orioledb
       - name: Checkout extension code into workspace directory
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: orioledb
       - name: Get the required tag name
@@ -44,7 +44,7 @@ jobs:
         run: |
           echo "PGTAG=$(grep '^${{ github.event.inputs.version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
       - name: Checkout PostgreSQL code into workspace directory
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: orioledb/postgres
           ref: ${{ env.PGTAG }}
@@ -61,7 +61,7 @@ jobs:
           cd rpm/redhat/${{ github.event.inputs.version }}/postgresql-${{ github.event.inputs.version }}/EL-7
           CC=/opt/rh/llvm-toolset-7/root/usr/bin/clang make ${{ github.event.inputs.target }}
       - name: Upload image
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v6
         with:
           name: rpms
           path: ~/rpm${{ github.event.inputs.version }}/RPMS/x86_64/*.rpm

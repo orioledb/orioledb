@@ -99,7 +99,7 @@ jobs:
       COMPILER: ${{ matrix.compiler }}
     steps:
       - name: Checkout extension code into workspace directory
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: orioledb
       - name: Get the required tag name
@@ -107,7 +107,7 @@ jobs:
         run: |
           echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
       - name: Checkout PostgreSQL code into workspace directory
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: orioledb/postgres
           ref: ${{ env.PGTAG }}
@@ -127,7 +127,7 @@ jobs:
         if: ${{ success() || failure() }}
 
       - name: Upload regression tests diffs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: ${{ failure() }}
         with:
           name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_regression.diffs
@@ -140,7 +140,7 @@ jobs:
           retention-days: 2
           if-no-files-found: ignore
       - name: Upload testgres tests logs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: ${{ failure() }}
         with:
           name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_testgres.logs
@@ -158,7 +158,7 @@ jobs:
         run: bash ./orioledb/ci/lcov.sh
       - name: Create artifact for coverage.info
         if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_coverage.info
           path: ./orioledb/coverage.info
@@ -170,11 +170,11 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout extension code into workspace directory
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: orioledb
       - name: Retrieve saved coverage.infos
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
       - name: Merge coverage files
         run: bash ./orioledb/ci/lcov_merge.sh
       - name: coveralls

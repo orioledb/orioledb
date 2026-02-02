@@ -311,7 +311,7 @@ seq_buf_finish_prev_page(SeqBufDescPrivate *seqBufPrivate)
 			{
 				SpinLockRelease(&shared->lock);
 				elog(PANIC, "Error read sequence buffer file %s at offset %u. "
-					 "Bytes read = %d is not equal than expected = %lu",
+					 "Bytes read = %d is not equal than expected = " UINT64_FORMAT,
 					 get_seq_buf_filename(&seqBufPrivate->tag), (uint32) offset,
 					 nbytes, (uint64) shared->freeBytesNum);
 				return false;

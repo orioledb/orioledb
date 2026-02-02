@@ -34,6 +34,9 @@
 #include "executor/executor.h"
 #include "executor/nodeIndexscan.h"
 #include "executor/nodeModifyTable.h"
+#if PG_VERSION_NUM >= 180000
+#include "commands/explain_format.h"
+#endif
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -618,6 +621,9 @@ o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 
 		init_index_scan_state(&ix_plan_state->o_plan_state, &ix_plan_state->ostate,
 							  index, node->ss.ps.ps_ExprContext,
+#if PG_VERSION_NUM >= 180000
+							  estate->es_snapshot,
+#endif
 							  &ix_plan_state->iss_RuntimeKeys,
 							  &ix_plan_state->iss_NumRuntimeKeys,
 							  &ix_plan_state->iss_ScanKeys,

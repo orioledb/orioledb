@@ -238,7 +238,7 @@ oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 	return OTupleFetchNext;
 }
 
-ToastAPI	oTablesToastAPI = {
+static ToastAPI oTablesToastAPI = {
 	.getBTreeDesc = oTablesGetBTreeDesc,
 	.getBTreeVersion = NULL,
 	.getBaseBTreeVersion = NULL,
@@ -703,10 +703,9 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 
 	for (i = 0; i < tupdesc->natts; i++)
 	{
-		Form_pg_attribute attr = &tupdesc->attrs[i];
 		OTableField *field = &o_table->fields[i];
 
-		orioledb_attr_to_field(field, attr);
+		orioledb_attr_to_field(field, TupleDescAttr(tupdesc, i));
 		orioledb_save_collation(field->collation);
 	}
 	o_table->nindices = 0;
@@ -1649,7 +1648,9 @@ o_table_tupdesc_init_entry(TupleDesc desc, AttrNumber att_num, char *name,
 #if PG_VERSION_NUM < 170000
 	att->attstattarget = -1;
 #endif
+#if PG_VERSION_NUM < 180000
 	att->attcacheoff = -1;
+#endif
 	att->atttypmod = field->typmod;
 
 	att->attnum = att_num;
@@ -1672,6 +1673,10 @@ o_table_tupdesc_init_entry(TupleDesc desc, AttrNumber att_num, char *name,
 	att->attstorage = field->storage;
 	att->attcompression = field->compression;
 	att->attcollation = field->collation;
+
+#if PG_VERSION_NUM >= 180000
+	populate_compact_attribute(desc, att_num - 1);
+#endif
 }
 
 static inline void

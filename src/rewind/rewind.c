@@ -44,7 +44,7 @@
 #include "pgstat.h"
 
 static volatile sig_atomic_t shutdown_requested = false;
-int			RewindHorizonCheckDelay = 1000; /* Time between checking in ms */
+static int RewindHorizonCheckDelay = 1000; /* Time between checking in ms */
 static RewindItem *rewindAddBuffer = NULL;
 static RewindItem *rewindCompleteBuffer = NULL;
 static RewindMeta *rewindMeta = NULL;
@@ -188,7 +188,8 @@ orioledb_rewind_queue_age(PG_FUNCTION_ARGS)
 Datum
 orioledb_get_complete_oxid(PG_FUNCTION_ARGS)
 {
-	elog(DEBUG3, "COMPLETE OXid %lu XID %u", rewindMeta->complete_oxid, rewindMeta->complete_xid);
+	elog(DEBUG3, "COMPLETE OXid " UINT64_FORMAT " XID %u",
+		 rewindMeta->complete_oxid, rewindMeta->complete_xid);
 	PG_RETURN_DATUM(rewindMeta->complete_oxid);
 }
 
@@ -196,7 +197,8 @@ orioledb_get_complete_oxid(PG_FUNCTION_ARGS)
 Datum
 orioledb_get_complete_xid(PG_FUNCTION_ARGS)
 {
-	elog(DEBUG3, "COMPLETE OXid %lu XID %u", rewindMeta->complete_oxid, rewindMeta->complete_xid);
+	elog(DEBUG3, "COMPLETE Oxid " UINT64_FORMAT " XID %u",
+		 rewindMeta->complete_oxid, rewindMeta->complete_xid);
 	PG_RETURN_DATUM(rewindMeta->complete_xid);
 }
 
@@ -212,7 +214,8 @@ orioledb_rewind_set_complete(PG_FUNCTION_ARGS)
 	rewindMeta->force_complete_xid = PG_GETARG_INT32(0);
 	rewindMeta->force_complete_oxid = PG_GETARG_INT64(1);
 
-	elog(WARNING, "force_complete_xid %u force_complete_oxid %lu", rewindMeta->force_complete_xid, rewindMeta->force_complete_oxid);
+	elog(WARNING, "force_complete_xid %u force_complete_oxid " UINT64_FORMAT,
+		 rewindMeta->force_complete_xid, rewindMeta->force_complete_oxid);
 
 	PG_RETURN_VOID();
 }
@@ -257,7 +260,18 @@ print_rewind_item(RewindItem *rewindItem, uint64 pos, int source_buffer)
 		minRetainLocation[i] = (rewindItem->minRetainLocation[i] == InvalidUndoLocation) ? -1 : rewindItem->minRetainLocation[i];
 	}
 
-	elog(LOG, "P %lu:%u T %u OX %ld X %u L0 %ld OCL0 %ld, MRL0 %ld, L1 %ld OCL1 %ld, MRL1 %ld L2 %ld OCL2 %ld, MRL2 %ld ORX %u NS %u", pos, source_buffer, rewindItem->tag, oxid, rewindItem->xid, undoLocation[0], onCommitUndoLocation[0], minRetainLocation[0], undoLocation[1], onCommitUndoLocation[1], minRetainLocation[1], undoLocation[2], onCommitUndoLocation[2], minRetainLocation[2], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
+	elog(LOG, "P " UINT64_FORMAT ":%u T %u OX " INT64_FORMAT " X %u "
+		 "L0 " INT64_FORMAT " OCL0 " INT64_FORMAT
+		 ", MRL0 " INT64_FORMAT ", L1 " INT64_FORMAT
+		 " OCL1 " INT64_FORMAT ", MRL1 " INT64_FORMAT
+		 " L2 " INT64_FORMAT " OCL2 " INT64_FORMAT
+		 ", MRL2 " INT64_FORMAT " ORX %u NS %u",
+		 pos, source_buffer, rewindItem->tag, oxid, rewindItem->xid,
+		 undoLocation[0], onCommitUndoLocation[0], minRetainLocation[0],
+		 undoLocation[1], onCommitUndoLocation[1], minRetainLocation[1],
+		 undoLocation[2], onCommitUndoLocation[2], minRetainLocation[2],
+		 XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid),
+		 rewindItem->nsubxids);
 }
 
 /*
@@ -285,7 +299,13 @@ log_print_rewind_queue(void)
 	curAddPosFilled = pg_atomic_read_u64(&rewindMeta->addPosFilledUpto);
 	freeAddSpace = rewind_circular_buffer_size - (curAddPosFilled - pg_atomic_read_u64(&rewindMeta->evictPos));
 
-	elog(LOG, "Print rewind queue: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%u", curAddPosFilled, pg_atomic_read_u64(&rewindMeta->addPosReserved), pg_atomic_read_u64(&rewindMeta->evictPos), rewindMeta->completePos, rewindMeta->restorePos, freeAddSpace);
+	elog(LOG, "Print rewind queue: AF=" UINT64_FORMAT
+		 " AR=" UINT64_FORMAT " E=" UINT64_FORMAT
+		 " C=" UINT64_FORMAT " R=" UINT64_FORMAT " freeAdd=%u",
+		 curAddPosFilled,
+		 pg_atomic_read_u64(&rewindMeta->addPosReserved),
+		 pg_atomic_read_u64(&rewindMeta->evictPos),
+		 rewindMeta->completePos, rewindMeta->restorePos, freeAddSpace);
 
 	/* From completeBuffer if exists */
 	for (pos = rewindMeta->completePos; pos < rewindMeta->restorePos; pos++)
@@ -414,7 +434,12 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 			source_buffer = 1;
 		}
 
-		elog(DEBUG3, "Rewind read elem: pos %lu:%u oxid %lu xid %u oldestRunXid %u, nsubxids %u", pos, source_buffer, rewindItem->oxid, rewindItem->xid, XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
+		elog(DEBUG3,
+			 "Rewind read elem: pos " UINT64_FORMAT ":%u oxid " UINT64_FORMAT
+			 " xid %u oldestRunXid %u, nsubxids %u",
+			 pos, source_buffer, rewindItem->oxid, rewindItem->xid,
+			 XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid),
+			 rewindItem->nsubxids);
 
 		Assert(rewindItem->tag != EMPTY_ITEM_TAG);
 
@@ -462,7 +487,11 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 				subxids_count--;
 				subxids[subxids_count] = subxidsItem->subxids[subxids_count % SUBXIDS_PER_ITEM];
 
-				elog(DEBUG3, "Rewinding SubXid: oxid %lu cur xid %u subxid [%u/%u] %u", oxid, xid, subxids_count + 1, nsubxids, subxids[subxids_count]);
+				elog(DEBUG3,
+					 "Rewinding SubXid: oxid " UINT64_FORMAT
+					 " cur xid %u subxid [%u/%u] %u",
+					 oxid, xid, subxids_count + 1,
+					 nsubxids, subxids[subxids_count]);
 
 				if (subxids_count == 0)
 				{
@@ -511,7 +540,20 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 				{
 					UndoLocation location PG_USED_FOR_ASSERTS_ONLY;
 
-					elog(DEBUG3, "Rewinding: oxid %lu xid %u logtype %d undoLoc %lu onCommitLoc %lu, minRetainLoc %lu, oldestRunXid %u, nsubxids %u", rewindItem->oxid, rewindItem->xid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], rewindItem->minRetainLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
+					elog(DEBUG3,
+						 "Rewinding: oxid " UINT64_FORMAT
+						 " xid %u logtype %d"
+						 " undoLoc " INT64_FORMAT
+						 " onCommitLoc " INT64_FORMAT
+						 ", minRetainLoc " INT64_FORMAT
+						 ", oldestRunXid %u, nsubxids %u",
+						 rewindItem->oxid, rewindItem->xid, i,
+						 rewindItem->undoLocation[i],
+						 rewindItem->onCommitUndoLocation[i],
+						 rewindItem->minRetainLocation[i],
+						 XidFromFullTransactionId(
+							 rewindItem->oldestConsideredRunningXid),
+						 rewindItem->nsubxids);
 
 					location = walk_undo_range_with_buf((UndoLogType) i,
 														rewindItem->undoLocation[i],
@@ -532,7 +574,13 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 			if (TransactionIdIsValid(rewindItem->xid))
 			{
 				Assert((started_subxids && got_all_subxids) || (!started_subxids && !got_all_subxids));
-				elog(DEBUG3, "Rewinding: oxid %lu xid %u oldestRunXid %u, nsubxids %u", rewindItem->oxid, rewindItem->xid, XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
+				elog(DEBUG3,
+					 "Rewinding: oxid " UINT64_FORMAT
+					 " xid %u oldestRunXid %u, nsubxids %u",
+					 rewindItem->oxid, rewindItem->xid,
+					 XidFromFullTransactionId(
+						 rewindItem->oldestConsideredRunningXid),
+					 rewindItem->nsubxids);
 
 				if (got_all_subxids)
 				{
@@ -566,7 +614,13 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 		if (pos == rewindMeta->completePos)
 		{
 			TimestampDifference(rewindItem->timestamp, rewindStartTimeStamp, &secs, &usecs);
-			ereport(LOG, errmsg("orioledb rewind completed on full rewind capacity. Last rewound transaction XID %u, OXid %lu is %ld.%d seconds back at %s", rewindItem->xid, rewindItem->oxid, secs, usecs / 1000, pstrdup(timestamptz_to_str(rewindItem->timestamp))));
+			ereport(LOG,
+					errmsg("orioledb rewind completed on full rewind capacity. "
+						   "Last rewound transaction XID %u, Oxid " UINT64_FORMAT
+						   " is %ld.%d seconds back at %s",
+						   rewindItem->xid, rewindItem->oxid,
+						   secs, usecs / 1000,
+						   pstrdup(timestamptz_to_str(rewindItem->timestamp))));
 			return;
 		}
 		pos--;
@@ -575,8 +629,12 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 rewind_complete:
 
 	TimestampDifference(rewindItem->timestamp, rewindStartTimeStamp, &secs, &usecs);
-	ereport(LOG, errmsg("orioledb rewind completed. Last remaining item XID %u, OXid %lu is %ld.%d seconds back at %s", rewindItem->xid, rewindItem->oxid, secs, usecs / 1000, pstrdup(timestamptz_to_str(rewindItem->timestamp))));
-	return;
+	ereport(LOG,
+			errmsg("orioledb rewind completed. Last remaining item XID %u, "
+				   "Oxid " UINT64_FORMAT " is %ld.%d seconds back at %s",
+				   rewindItem->xid, rewindItem->oxid,
+				   secs, usecs / 1000,
+				   pstrdup(timestamptz_to_str(rewindItem->timestamp))));
 }
 
 /*
@@ -636,7 +694,8 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 	{
 		TransactionId oldest = XidFromFullTransactionId(rewindMeta->oldestConsideredRunningXid);
 
-		elog(LOG, "Rewind requested, to XID %u, OXid %lu", rewind_xid, rewind_oxid);
+		elog(LOG, "Rewind requested, to XID %u, Oxid " UINT64_FORMAT,
+			 rewind_xid, rewind_oxid);
 
 		if (!TransactionIdIsValid(rewind_xid) && !OXidIsValid(rewind_oxid))
 		{
@@ -672,7 +731,9 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 			{
 				if (!TransactionIdIsValid(rewind_xid))
 				{
-					elog(ERROR, "Rewind OXid %lu is not in the past and XID is invalid", rewind_oxid);
+					elog(ERROR,
+						 "Rewind Oxid " UINT64_FORMAT " is not in the past and XID is invalid",
+						 rewind_oxid);
 					return;
 				}
 
@@ -682,21 +743,27 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 			{
 				ereport(ERROR,
 						(errcode(ERRCODE_INTERNAL_ERROR),
-						 errmsg("Requested rewind to OXid %lu which is in the past from the earliest retained", rewind_oxid)),
-						errdetail("request rewind to OXid more than %lu", rewindMeta->complete_oxid));
+						 errmsg("Requested rewind to Oxid " UINT64_FORMAT
+								" which is in the past from the earliest retained",
+								rewind_oxid)),
+						errdetail("request rewind to OXid more than " UINT64_FORMAT,
+								  rewindMeta->complete_oxid));
 				return;
 			}
 		}
 
 		if (OXidIsValid(rewind_oxid) && TransactionIdIsValid(rewind_xid) && !xid_is_finished(rewind_oxid) && TransactionIdFollowsOrEquals(rewind_xid, (TransactionId) GetTopTransactionId()))
 		{
-			elog(ERROR, "Both rewind OXid %lu and XID %u are not in the past", rewind_oxid, rewind_xid);
+			elog(ERROR,
+				 "Both rewind Oxid " UINT64_FORMAT " and XID %u are not in the past",
+				 rewind_oxid, rewind_xid);
 			return;
 		}
 	}
 	else if (rewind_mode == REWIND_MODE_TIMESTAMP)
 	{
-		elog(LOG, "Rewind requested, to timestamp %ld", rewind_timestamp);
+		elog(LOG, "Rewind requested, to timestamp " INT64_FORMAT,
+			 rewind_timestamp);
 
 		/*
 		 * NB: these timestamp checks are from current time so they are little
@@ -712,8 +779,10 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 		{
 			ereport(ERROR,
 					(errcode(ERRCODE_INTERNAL_ERROR),
-					 errmsg("Requested rewind to timestamp %ld exceeds rewind_max_time %d s", rewind_timestamp, rewind_max_time)),
-					errdetail("request rewind less than %d s back", rewind_max_time));
+					 errmsg("Requested rewind to timestamp " INT64_FORMAT " exceeds rewind_max_time %d s",
+							rewind_timestamp, rewind_max_time)),
+					errdetail("request rewind less than %d s back",
+							  rewind_max_time));
 			return;
 		}
 		else if (rewind_timestamp < rewindMeta->complete_timestamp)
@@ -1039,12 +1108,22 @@ try_restore_evicted_rewind_page(void)
 			   rewindMeta->restorePos - rewindMeta->completePos < rewind_circular_buffer_size &&
 			   pg_atomic_read_u64(&rewindMeta->evictPos) < pg_atomic_read_u64(&rewindMeta->addPosFilledUpto))
 		{
-			elog(DEBUG3, "FASTPATH_restore: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
+			elog(DEBUG3,
+				 "FASTPATH_restore:"
+				 " AF=" UINT64_FORMAT
+				 " AR=" UINT64_FORMAT
+				 " E=" UINT64_FORMAT
+				 " C=" UINT64_FORMAT
+				 " R=" UINT64_FORMAT
+				 " freeAdd=" UINT64_FORMAT,
 				 pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
 				 pg_atomic_read_u64(&rewindMeta->addPosReserved),
 				 pg_atomic_read_u64(&rewindMeta->evictPos),
 				 rewindMeta->completePos, rewindMeta->restorePos,
-				 rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
+				 (uint64) rewind_circular_buffer_size -
+				 (pg_atomic_read_u64(&rewindMeta->addPosReserved) -
+				  pg_atomic_read_u64(&rewindMeta->evictPos)));
+
 			Assert(rewindAddBuffer[(pg_atomic_read_u64(&rewindMeta->evictPos) % rewind_circular_buffer_size)].tag != EMPTY_ITEM_TAG);
 			Assert(rewindCompleteBuffer[(rewindMeta->restorePos % rewind_circular_buffer_size)].tag == EMPTY_ITEM_TAG);
 
@@ -1095,7 +1174,12 @@ rewind_worker_main(Datum main_arg)
 	/* show the in pg_stat_activity, used for tests */
 	InitializeSessionUserIdStandalone();
 	pgstat_beinit();
+#if PG_VERSION_NUM >= 180000
+	pgstat_bestart_initial();
+	pgstat_bestart_final();
+#else
 	pgstat_bestart();
+#endif
 
 	SetProcessingMode(NormalProcessing);
 
@@ -1161,7 +1245,17 @@ rewind_worker_main(Datum main_arg)
 				rewindItem = &rewindCompleteBuffer[rewindMeta->completePos % rewind_circular_buffer_size];
 				Assert(rewindItem->tag != EMPTY_ITEM_TAG);
 
-				elog(DEBUG3, "force_complete_check 1: AF=%lu, AR=%lu, E=%lu, R=%lu, C=%lu tag: %u oxid %lu xid %u nsubxids %u force_complete_oxid %lu force_complete_xid %u",
+				elog(DEBUG3,
+					 "force_complete_check 1:"
+					 " AF=" UINT64_FORMAT
+					 ", AR=" UINT64_FORMAT
+					 ", E=" UINT64_FORMAT
+					 ", R=" UINT64_FORMAT
+					 ", C=" UINT64_FORMAT
+					 " tag: %u oxid " UINT64_FORMAT
+					 " xid %u nsubxids %u"
+					 " force_complete_oxid " UINT64_FORMAT
+					 " force_complete_xid %u",
 					 pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
 					 pg_atomic_read_u64(&rewindMeta->addPosReserved),
 					 pg_atomic_read_u64(&rewindMeta->evictPos),
@@ -1178,15 +1272,26 @@ rewind_worker_main(Datum main_arg)
 
 					if (OXidIsValid(rewindMeta->force_complete_oxid) || TransactionIdIsValid(rewindMeta->force_complete_xid))
 					{
-						elog(DEBUG3, "force_complete_check 2: AF=%lu, AR=%lu, E=%lu, R=%lu, C=%lu",
+						elog(DEBUG3,
+							 "force_complete_check 2:"
+							 " AF=" UINT64_FORMAT
+							 ", AR=" UINT64_FORMAT
+							 ", E=" UINT64_FORMAT
+							 ", R=" UINT64_FORMAT
+							 ", C=" UINT64_FORMAT,
 							 pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
 							 pg_atomic_read_u64(&rewindMeta->addPosReserved),
 							 pg_atomic_read_u64(&rewindMeta->evictPos),
 							 rewindMeta->restorePos, rewindMeta->completePos);
 
-						if (OXidIsValid(rewindMeta->force_complete_oxid) && OXidIsValid(rewindItem->oxid) && rewindItem->oxid < rewindMeta->force_complete_oxid)
+						if (OXidIsValid(rewindMeta->force_complete_oxid) &&
+							OXidIsValid(rewindItem->oxid) &&
+							rewindItem->oxid < rewindMeta->force_complete_oxid)
 							force_complete = true;
-						else if (TransactionIdIsValid(rewindMeta->force_complete_xid) && TransactionIdIsValid(rewindItem->xid) && TransactionIdPrecedes(rewindItem->xid, rewindMeta->force_complete_xid))
+						else if (TransactionIdIsValid(rewindMeta->force_complete_xid) &&
+								 TransactionIdIsValid(rewindItem->xid) &&
+								 TransactionIdPrecedes(rewindItem->xid,
+													  rewindMeta->force_complete_xid))
 							force_complete = true;
 						else
 							force_complete = false;
@@ -1213,7 +1318,20 @@ rewind_worker_main(Datum main_arg)
 						{
 							UndoMeta   *undoMeta = get_undo_meta_by_type((UndoLogType) i);
 
-							elog(DEBUG3, "Completing: oxid %lu xid %u logtype %d undoLoc %lu onCommitLoc %lu, minRetainLoc %lu, oldestRunXid %u, nsubxids %u", rewindItem->oxid, rewindItem->xid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], rewindItem->minRetainLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
+							elog(DEBUG3,
+								 "Completing: oxid " UINT64_FORMAT
+								 " xid %u logtype %d"
+								 " undoLoc " INT64_FORMAT
+								 " onCommitLoc " INT64_FORMAT
+								 ", minRetainLoc " INT64_FORMAT
+								 ", oldestRunXid %u, nsubxids %u",
+								 rewindItem->oxid, rewindItem->xid, i,
+								 rewindItem->undoLocation[i],
+								 rewindItem->onCommitUndoLocation[i],
+								 rewindItem->minRetainLocation[i],
+								 XidFromFullTransactionId(
+									 rewindItem->oldestConsideredRunningXid),
+								 rewindItem->nsubxids);
 
 							location = walk_undo_range_with_buf((UndoLogType) i, rewindItem->onCommitUndoLocation[i], InvalidUndoLocation, rewindItem->oxid, false, NULL, true);
 							Assert(!UndoLocationIsValid(location));
@@ -1224,7 +1342,13 @@ rewind_worker_main(Datum main_arg)
 					}
 					else
 					{
-						elog(DEBUG3, "Completing: oxid %lu xid %u oldestRunXid %u, nsubxids %u", rewindItem->oxid, rewindItem->xid, XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
+						elog(DEBUG3,
+							 "Completing: oxid " UINT64_FORMAT
+							 " xid %u oldestRunXid %u, nsubxids %u",
+							 rewindItem->oxid, rewindItem->xid,
+							 XidFromFullTransactionId(
+								 rewindItem->oldestConsideredRunningXid),
+							 rewindItem->nsubxids);
 					}
 
 					pg_atomic_write_u64(&rewindMeta->oldestConsideredRunningXid,
@@ -1284,12 +1408,22 @@ evict_rewind_items(uint64 curAddPosFilled)
 			/* Fast path: move to rewindCompleteBuffer */
 			while (rewindMeta->restorePos - rewindMeta->completePos < rewind_circular_buffer_size && pg_atomic_read_u64(&rewindMeta->evictPos) < curAddPosFilled)
 			{
-				elog(DEBUG3, "FASTPATH_evict: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
+				elog(DEBUG3,
+					 "FASTPATH_evict:"
+					 " AF=" UINT64_FORMAT
+					 " AR=" UINT64_FORMAT
+					 " E=" UINT64_FORMAT
+					 " C=" UINT64_FORMAT
+					 " R=" UINT64_FORMAT
+					 " freeAdd=" UINT64_FORMAT,
 					 curAddPosFilled,
 					 pg_atomic_read_u64(&rewindMeta->addPosReserved),
 					 pg_atomic_read_u64(&rewindMeta->evictPos),
 					 rewindMeta->completePos, rewindMeta->restorePos,
-					 rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
+					 (uint64) rewind_circular_buffer_size -
+					 (pg_atomic_read_u64(&rewindMeta->addPosReserved) -
+					  pg_atomic_read_u64(&rewindMeta->evictPos)));
+
 				Assert(rewindAddBuffer[(pg_atomic_read_u64(&rewindMeta->evictPos) % rewind_circular_buffer_size)].tag != EMPTY_ITEM_TAG);
 				Assert(rewindCompleteBuffer[(rewindMeta->restorePos % rewind_circular_buffer_size)].tag == EMPTY_ITEM_TAG);
 
@@ -1310,13 +1444,22 @@ evict_rewind_items(uint64 curAddPosFilled)
 			start = (pg_atomic_read_u64(&rewindMeta->evictPos) % rewind_circular_buffer_size);
 			length_to_end = rewind_circular_buffer_size - start;
 
-			elog(DEBUG3, "DISK_evict: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
+			elog(DEBUG3,
+				 "DISK_evict:"
+				 " AF=" UINT64_FORMAT
+				 " AR=" UINT64_FORMAT
+				 " E=" UINT64_FORMAT
+				 " C=" UINT64_FORMAT
+				 " R=" UINT64_FORMAT
+				 " freeAdd=" UINT64_FORMAT,
 				 curAddPosFilled,
 				 pg_atomic_read_u64(&rewindMeta->addPosReserved),
 				 pg_atomic_read_u64(&rewindMeta->evictPos),
 				 rewindMeta->completePos,
 				 rewindMeta->restorePos,
-				 rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
+				 (uint64) rewind_circular_buffer_size -
+				 (pg_atomic_read_u64(&rewindMeta->addPosReserved) -
+				  pg_atomic_read_u64(&rewindMeta->evictPos)));
 
 			if (length_to_end < REWIND_DISK_BUFFER_LENGTH)
 			{
@@ -1357,12 +1500,21 @@ evict_rewind_items(uint64 curAddPosFilled)
 	}
 	else
 	{
-		elog(DEBUG3, "evict_CONCURRENT_SKIPPED: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
+		elog(DEBUG3,
+			 "evict_CONCURRENT_SKIPPED:"
+			 " AF=" UINT64_FORMAT
+			 " AR=" UINT64_FORMAT
+			 " E=" UINT64_FORMAT
+			 " C=" UINT64_FORMAT
+			 " R=" UINT64_FORMAT
+			 " freeAdd=" UINT64_FORMAT,
 			 curAddPosFilled,
 			 pg_atomic_read_u64(&rewindMeta->addPosReserved),
 			 pg_atomic_read_u64(&rewindMeta->evictPos),
 			 rewindMeta->completePos, rewindMeta->restorePos,
-			 rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
+			 (uint64) rewind_circular_buffer_size -
+			 (pg_atomic_read_u64(&rewindMeta->addPosReserved) -
+			  pg_atomic_read_u64(&rewindMeta->evictPos)));
 	}
 
 	LWLockRelease(&rewindMeta->rewindCheckpointLock);
@@ -1445,7 +1597,14 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 		 * but very unlikely.
 		 */
 		freeAddSpace = (int64) rewind_circular_buffer_size - (int64) (startAddPos + (uint64) nitems - pg_atomic_read_u64(&rewindMeta->evictPos));
-		elog(DEBUG3, "add_to_rewind_buffer: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
+		elog(DEBUG3,
+			 "add_to_rewind_buffer:"
+			 " AF=" UINT64_FORMAT
+			 " AR=" UINT64_FORMAT
+			 " E=" UINT64_FORMAT
+			 " C=" UINT64_FORMAT
+			 " R=" UINT64_FORMAT
+			 " freeAdd=" INT64_FORMAT,
 			 pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
 			 pg_atomic_read_u64(&rewindMeta->addPosReserved),
 			 pg_atomic_read_u64(&rewindMeta->evictPos),
@@ -1455,18 +1614,38 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 
 		if (freeAddSpace <= REWIND_DISK_BUFFER_LENGTH * 4 || (rewind_circular_buffer_size < REWIND_DISK_BUFFER_LENGTH * 8 && freeAddSpace <= REWIND_DISK_BUFFER_LENGTH))
 		{
-			elog(DEBUG3, "evict_rewind_items START: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
+			elog(DEBUG3,
+				 "evict_rewind_items START:"
+				 " AF=" UINT64_FORMAT
+				 " AR=" UINT64_FORMAT
+				 " E=" UINT64_FORMAT
+				 " C=" UINT64_FORMAT
+				 " R=" UINT64_FORMAT
+				 " freeAdd=" INT64_FORMAT,
 				 pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
 				 pg_atomic_read_u64(&rewindMeta->addPosReserved),
 				 pg_atomic_read_u64(&rewindMeta->evictPos),
 				 rewindMeta->completePos, rewindMeta->restorePos,
 				 freeAddSpace);
+
 			evict_rewind_items(pg_atomic_read_u64(&rewindMeta->addPosFilledUpto));
-			elog(DEBUG3, "evict_rewind_items STOP: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
+
+			elog(DEBUG3,
+				 "evict_rewind_items STOP:"
+				 " AF=" UINT64_FORMAT
+				 " AR=" UINT64_FORMAT
+				 " E=" UINT64_FORMAT
+				 " C=" UINT64_FORMAT
+				 " R=" UINT64_FORMAT
+				 " freeAdd=" UINT64_FORMAT,
 				 pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
 				 pg_atomic_read_u64(&rewindMeta->addPosReserved),
-				 pg_atomic_read_u64(&rewindMeta->evictPos), rewindMeta->completePos,
-				 rewindMeta->restorePos, rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
+				 pg_atomic_read_u64(&rewindMeta->evictPos),
+				 rewindMeta->completePos,
+				 rewindMeta->restorePos,
+				 (uint64) rewind_circular_buffer_size -
+				 (pg_atomic_read_u64(&rewindMeta->addPosReserved) -
+				  pg_atomic_read_u64(&rewindMeta->evictPos)));
 		}
 
 		/*
@@ -1495,7 +1674,12 @@ next_subxids_item:
 		subxidsItem->nsubxids = nsubxids;
 		while (true)
 		{
-			elog(DEBUG3, "Add SubXid to buffer: oxid %lu cur xid %u subxid [%u/%u] %u", oxid, xid, subxids_count + 1, nsubxids, subxids[subxids_count]);
+			elog(DEBUG3,
+				 "Add SubXid to buffer: oxid " UINT64_FORMAT
+				 " cur xid %u subxid [%u/%u] %u",
+				 oxid, xid, subxids_count + 1,
+				 nsubxids, subxids[subxids_count]);
+
 			subxidsItem->subxids[subxids_count % SUBXIDS_PER_ITEM] = subxids[subxids_count];
 			subxids_count++;
 			if (subxids_count == nsubxids)
@@ -1555,7 +1739,21 @@ next_subxids_item:
 				rewindItem->onCommitUndoLocation[i] = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
 				rewindItem->undoLocation[i] = pg_atomic_read_u64(&sharedLocations->location);
 				rewindItem->minRetainLocation[i] = pg_atomic_read_u64(&undoMeta->minProcRetainLocation);
-				elog(DEBUG3, "Add to buffer: oxid %lu xid %u logtype %d undoLoc %lu onCommitLoc %lu, minRetainLoc %lu, oldestRunningXid %u nsubxids %u", oxid, xid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], rewindItem->minRetainLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), nsubxids);
+
+				elog(DEBUG3,
+					 "Add to buffer: oxid " UINT64_FORMAT
+					 " xid %u logtype %d"
+					 " undoLoc " INT64_FORMAT
+					 " onCommitLoc " INT64_FORMAT
+					 ", minRetainLoc " INT64_FORMAT
+					 ", oldestRunningXid %u nsubxids %u",
+					 oxid, xid, i,
+					 rewindItem->undoLocation[i],
+					 rewindItem->onCommitUndoLocation[i],
+					 rewindItem->minRetainLocation[i],
+					 XidFromFullTransactionId(
+						 rewindItem->oldestConsideredRunningXid),
+					 nsubxids);
 			}
 
 			if (!OXidIsValid(rewindMeta->complete_oxid))
@@ -1563,7 +1761,13 @@ next_subxids_item:
 		}
 		else
 		{
-			elog(DEBUG3, "Add to buffer: oxid %lu xid %u oldestRunningXid %u nsubxids %u", oxid, xid, XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), nsubxids);
+			elog(DEBUG3,
+				 "Add to buffer: oxid " UINT64_FORMAT
+				 " xid %u oldestRunningXid %u nsubxids %u",
+				 oxid, xid,
+				 XidFromFullTransactionId(
+					 rewindItem->oldestConsideredRunningXid),
+				 nsubxids);
 		}
 
 		pg_write_barrier();
@@ -1664,13 +1868,22 @@ checkpoint_write_rewind_xids(void)
 			buffer_loaded = true;
 		}
 
-		elog(DEBUG3, "CHECKPOINT FROM DISK: AF=%lu AR=%lu E=%lu C=%lu R=%lu freeAdd=%lu",
+		elog(DEBUG3,
+			 "CHECKPOINT FROM DISK:"
+			 " AF=" UINT64_FORMAT
+			 " AR=" UINT64_FORMAT
+			 " E=" UINT64_FORMAT
+			 " C=" UINT64_FORMAT
+			 " R=" UINT64_FORMAT
+			 " freeAdd=" UINT64_FORMAT,
 			 pg_atomic_read_u64(&rewindMeta->addPosFilledUpto),
 			 pg_atomic_read_u64(&rewindMeta->addPosReserved),
 			 pg_atomic_read_u64(&rewindMeta->evictPos),
 			 rewindMeta->completePos,
 			 rewindMeta->restorePos,
-			 rewind_circular_buffer_size - (pg_atomic_read_u64(&rewindMeta->addPosReserved) - pg_atomic_read_u64(&rewindMeta->evictPos)));
+			 (uint64) rewind_circular_buffer_size -
+			 (pg_atomic_read_u64(&rewindMeta->addPosReserved) -
+			  pg_atomic_read_u64(&rewindMeta->evictPos)));
 
 		checkpoint_write_rewind_item(&buffer[rewindMeta->checkpointPos % REWIND_DISK_BUFFER_LENGTH]);
 		rewindMeta->checkpointPos++;

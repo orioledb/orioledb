@@ -60,7 +60,8 @@ static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnaps
 static void init_shared_root_info(OPagePool *pool,
 								  SharedRootInfo *sharedRootInfo);
 static bool o_tree_init_free_extents(BTreeDescr *desc);
-static OComparator *o_find_opclass_comparator(OOpclass *opclass, Oid collation);
+static OComparator *o_find_opclass_comparator(OOpclass *opclass, Oid collation,
+											  Oid exacttype);
 static inline OComparator *o_find_cached_comparator(OComparatorKey *key);
 static inline OComparator *o_add_comparator_to_cache(OComparator *comparator);
 static bool recreate_table_descr(OTableDescr *descr);
@@ -78,6 +79,7 @@ struct OComparatorKey
 	Oid			opfamily;
 	Oid			lefttype;
 	Oid			righttype;
+	Oid			exacttype;
 	Oid			collation;
 };
 
@@ -1291,17 +1293,21 @@ o_find_toastable_attrs(OTableDescr *tableDescr)
 
 /* fills field opclass fields and finds comparator for it */
 void
-oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid, Oid exclusion_op)
+oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid,
+							   Oid exacttype, Oid exclusion_op)
 {
 	OOpclass   *opclass;
 
 	o_set_sys_cache_search_datoid(datoid);
 	opclass = o_opclass_get(opclassoid);
 	Assert(opclass);
+	if (!OidIsValid(exacttype))
+		exacttype = opclass->inputtype;
 	field->opclass = opclassoid;
 	field->inputtype = opclass->inputtype;
 	field->opfamily = opclass->opfamily;
-	field->comparator = o_find_opclass_comparator(opclass, field->collation);
+	field->comparator = o_find_opclass_comparator(opclass, field->collation,
+												  exacttype);
 	if (OidIsValid(exclusion_op))
 		field->exclusion_fn = o_find_exclusion_op_fn(exclusion_op);
 
@@ -1319,6 +1325,7 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 		.opfamily = opfamily,
 		.lefttype = lefttype,
 		.righttype = righttype,
+		.exacttype = lefttype == righttype ? lefttype : InvalidOid,
 		.collation = collation
 	};
 	OComparator *result;
@@ -1364,6 +1371,8 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 	 */
 	if (!comparator.haveSortSupport)
 	{
+		MemoryContext oldcontext = MemoryContextSwitchTo(descrCxt);
+
 		procOid =
 			get_opfamily_proc(opfamily, lefttype, righttype, BTORDER_PROC);
 		if (!OidIsValid(procOid))
@@ -1383,6 +1392,7 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 							format_type_be(righttype))));
 		}
 		fmgr_info(procOid, &comparator.finfo);
+		MemoryContextSwitchTo(oldcontext);
 	}
 
 	return o_add_comparator_to_cache(&comparator);
@@ -1392,7 +1402,7 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
  * Find opclass comparator in cache or create new one.
  */
 static OComparator *
-o_find_opclass_comparator(OOpclass *opclass, Oid collation)
+o_find_opclass_comparator(OOpclass *opclass, Oid collation, Oid exacttype)
 {
 	OComparatorKey key;
 	OComparator *result;
@@ -1403,6 +1413,7 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 	key.opfamily = opclass->opfamily;
 	key.lefttype = opclass->inputtype;
 	key.righttype = opclass->inputtype;
+	key.exacttype = OidIsValid(exacttype) ? exacttype : opclass->inputtype;
 	key.collation = collation;
 
 	/*
@@ -1435,7 +1446,6 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 		o_proc_cache_fill_finfo(&finfo, opclass->ssupOid);
 
 		FunctionCall1(&finfo, PointerGetDatum(&ssup));
-
 		if (ssup.comparator != NULL)
 		{
 			comparator.haveSortSupport = true;
@@ -1449,7 +1459,12 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 	 * Finally, look for plain comparison function.
 	 */
 	if (!comparator.haveSortSupport)
+	{
+		MemoryContext oldcontext = MemoryContextSwitchTo(descrCxt);
+
 		o_proc_cache_fill_finfo(&comparator.finfo, opclass->cmpOid);
+		MemoryContextSwitchTo(oldcontext);
+	}
 	o_unset_syscache_hooks();
 
 	return o_add_comparator_to_cache(&comparator);
@@ -1524,6 +1539,7 @@ o_invalidate_comparator_cache(Oid opfamily, Oid lefttype, Oid righttype)
 
 			if (comparator->ssup_extra)
 				pfree(comparator->ssup_extra);
+			key.exacttype = comparator->key.exacttype;
 			key.collation = collation;
 			(void) hash_search(comparatorCache, &key, HASH_REMOVE, NULL);
 		}
@@ -1588,7 +1604,15 @@ o_call_comparator(OComparator *comparator, Datum left, Datum right)
 
 		/* FIX: There should be a better way */
 		if (o_is_syscache_hooks_set() && comparator->finfo.fn_addr == fmgr_sql)
+		{
 			comparator->finfo.fn_addr = o_fmgr_sql;
+			/*
+			 * We must clear fn_extra because the layout of SQLFunctionCache
+			 * from postgres's fmgr_sql might differ from o_fmgr_sql's version.
+			 */
+			comparator->finfo.fn_extra = NULL;
+		}
+
 		cmp = FunctionCall2Coll(&comparator->finfo, comparator->key.collation,
 								left, right);
 		ret = DatumGetInt32(cmp);
@@ -1900,7 +1924,12 @@ o_find_exclusion_op_fn(Oid exclusion_op)
 
 	o_set_syscache_hooks();
 	oprcode = o_operator_cache_get_oprcode(exclusion_op);
-	o_proc_cache_fill_finfo(&exclusion_fn.finfo, oprcode);
+	{
+		MemoryContext oldcontext = MemoryContextSwitchTo(descrCxt);
+
+		o_proc_cache_fill_finfo(&exclusion_fn.finfo, oprcode);
+		MemoryContextSwitchTo(oldcontext);
+	}
 	o_unset_syscache_hooks();
 
 	return o_add_exclusion_fn_to_cache(&exclusion_fn);
