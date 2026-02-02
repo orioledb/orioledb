@@ -44,7 +44,7 @@ PG_FUNCTION_INFO_V1(orioledb_index_oids);
 PG_FUNCTION_INFO_V1(orioledb_index_description);
 PG_FUNCTION_INFO_V1(orioledb_index_rows);
 
-static void o_index_setup_version(OIndex *result, uint32 *version, OIndexVersionMode ixVerMode);
+static uint32 increment_or_reset_o_index_version(uint32 version, OIndexVersionMode ixVerMode);
 
 static OIndex *make_ctid_o_index(OTable *table, OIndexVersionMode ixVerMode);
 
@@ -225,25 +225,19 @@ make_builtin_field(OTableField *leafField, OTableIndexField *internalField,
 	}
 }
 
-static void
-o_index_setup_version(OIndex *result, uint32 *version, OIndexVersionMode ixVerMode)
+/* Increment or reset version according to OIndexVersionMode provided */
+static uint32
+increment_or_reset_o_index_version(uint32 version, OIndexVersionMode ixVerMode)
 {
-	Assert(result);
-	Assert(version);
-
-	switch (ixVerMode)
+	if (ixVerMode == OIndexVersionReset)
+		return 0;
+	else if (ixVerMode == OIndexVersionPass)
+		return (version == O_TABLE_INVALID_VERSION) ? 0 : (version + 1);
+	else
 	{
-		case OIndexVersionReset:
-			*version = 0;
-			break;
-		case OIndexVersionPass:
-			O_TABLE_VERSION_INCREASE(*version);
-			break;
-		default:
-			break;
+		Assert(false);
+		return 0;
 	}
-
-	result->indexVersion = *version;
 }
 
 static OIndex *
@@ -252,7 +246,7 @@ make_ctid_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
 	int			i;
 	int			nadded = 0;
-	uint32	   *version = &(table->primary_ixversion);
+	uint32	new_version;
 
 	Assert(!table->has_primary);
 	result->indexOids = table->oids;
@@ -272,11 +266,13 @@ make_ctid_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	result->nKeyFields = 1;
 	result->nUniqueFields = 1;
 
-	o_index_setup_version(result, version, ixVerMode);
+	new_version = increment_or_reset_o_index_version(table->primary_ixversion, ixVerMode);
+	result->indexVersion = new_version;
+	table->primary_ixversion = new_version;
 
 	elog(LOG, "[%s] oids [ %u %u %u ] version %u", __func__,
 		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
-		 *version);
+		 new_version);
 
 	result->immediate = true;
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
@@ -320,10 +316,10 @@ make_primary_o_index(OTable *table, OIndexVersionMode ixVerMode)
 {
 	OTableIndex *tableIndex;
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
-	uint32	   *version = &(table->primary_ixversion);
 	int			i;
 	int			saved_nLeafFields;
 	int			nadded = 0;
+	uint32	new_version;
 	MemoryContext mcxt;
 	MemoryContext old_mcxt;
 
@@ -351,13 +347,14 @@ make_primary_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	result->nPrimaryFields = 0;
 	result->nKeyFields = tableIndex->nkeyfields;
 
-	o_index_setup_version(result, version, ixVerMode);
-
-	tableIndex->version = result->indexVersion;
+	new_version = increment_or_reset_o_index_version(table->primary_ixversion, ixVerMode);
+	result->indexVersion = new_version;
+	table->primary_ixversion = new_version;
+	tableIndex->version = new_version;
 
 	elog(LOG, "[%s] oids [ %u %u %u ] version %u", __func__,
 		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
-		 *version);
+		 new_version);
 
 	result->immediate = tableIndex->immediate;
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
@@ -479,22 +476,19 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex, OIndexVersionMode
 {
 	OTableIndex *primary = NULL;
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
-	uint32	   *version = &(tableIndex->version);
+	uint32	   new_version;
 	int			nadded;
 	MemoryContext mcxt;
 	MemoryContext old_mcxt;
 
-	if (table->has_primary)
-	{
-		primary = &table->indices[0];
-		Assert(primary->type == oIndexPrimary);
-	}
-
 	result->indexOids = tableIndex->oids;
 	result->indexType = tableIndex->type;
 
-	o_index_setup_version(result, version, ixVerMode);
-	elog(LOG, "[%s] indexVersion %u", __func__, result->indexVersion);
+	new_version = increment_or_reset_o_index_version(tableIndex->version, ixVerMode);
+	result->indexVersion = new_version;
+	tableIndex->version = new_version;
+
+	elog(LOG, "[%s] indexVersion %u", __func__, new_version);
 
 	namestrcpy(&result->name, tableIndex->name.data);
 	result->tableOids = table->oids;
@@ -507,10 +501,16 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex, OIndexVersionMode
 	result->nulls_not_distinct = tableIndex->nulls_not_distinct;
 	result->nIncludedFields = tableIndex->nfields - tableIndex->nkeyfields;
 	result->nLeafFields = tableIndex->nfields;
+
 	if (table->has_primary)
+	{
+		primary = &table->indices[0];
+		Assert(primary->type == oIndexPrimary);
 		result->nLeafFields += primary->nfields;
+	}
 	else
 		result->nLeafFields++;
+
 	result->nNonLeafFields = result->nLeafFields;
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
@@ -553,16 +553,12 @@ make_toast_o_index(OTable *table, OIndexVersionMode ixVerMode)
 {
 	OTableIndex *primary = NULL;
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
-	uint32	   *version = &(table->toast_ixversion);
+	uint32	   new_version;
 	int			nadded;
 
-	if (table->has_primary)
-	{
-		primary = &table->indices[0];
-		Assert(primary->type == oIndexPrimary);
-	}
-
-	o_index_setup_version(result, version, ixVerMode);
+	new_version = increment_or_reset_o_index_version(table->toast_ixversion, ixVerMode);
+	result->indexVersion = new_version;
+	table->toast_ixversion = new_version;
 
 	result->indexOids = table->toast_oids;
 	result->indexType = oIndexToast;
@@ -575,6 +571,8 @@ make_toast_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	result->tablespace = table->tablespace;
 	if (table->has_primary)
 	{
+		primary = &table->indices[0];
+		Assert(primary->type == oIndexPrimary);
 		result->nLeafFields = primary->nfields;
 		result->nNonLeafFields = primary->nkeyfields;
 		result->nKeyFields = primary->nkeyfields;
@@ -592,7 +590,7 @@ make_toast_o_index(OTable *table, OIndexVersionMode ixVerMode)
 
 	elog(LOG, "[%s] oids [ %u %u %u ] version %u", __func__,
 		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
-		 *version);
+		 new_version);
 
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
@@ -625,16 +623,12 @@ make_bridge_o_index(OTable *table, OIndexVersionMode ixVerMode)
 {
 	OTableIndex *primary = NULL;
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
-	uint32	   *version = &(table->bridge_ixversion);
+	uint32	   new_version;
 	int			nadded;
 
-	if (table->has_primary)
-	{
-		primary = &table->indices[0];
-		Assert(primary->type == oIndexPrimary);
-	}
-
-	o_index_setup_version(result, version, ixVerMode);
+	new_version = increment_or_reset_o_index_version(table->bridge_ixversion, ixVerMode);
+	result->indexVersion = new_version;
+	table->bridge_ixversion = new_version;
 
 	result->indexOids = table->bridge_oids;
 	result->indexType = oIndexBridge;
@@ -646,7 +640,11 @@ make_bridge_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	result->compress = table->primary_compress;
 	result->nLeafFields = 1;
 	if (table->has_primary)
+	{
+		primary = &table->indices[0];
+		Assert(primary->type == oIndexPrimary);
 		result->nLeafFields += primary->nfields;
+	}
 	else
 		result->nLeafFields++;
 	result->nNonLeafFields = 1;
@@ -660,6 +658,7 @@ make_bridge_o_index(OTable *table, OIndexVersionMode ixVerMode)
 					   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 					   table->tid_btree_ops_oid);
 	nadded++;
+
 	add_index_fields(result, table, primary, &nadded, true);
 	Assert(nadded == result->nLeafFields);
 	result->nLeafFields = nadded;
