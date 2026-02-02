@@ -61,7 +61,7 @@ static void float8_array_search(Pointer p, int stride, int *lower,
 static void tid_array_search(Pointer p, int stride, int *lower,
 							 int *upper, Datum keyDatum);
 
-ArraySearchDesc arraySearchDescs[] = {
+static ArraySearchDesc arraySearchDescs[] = {
 	{OIDOID, OID_BTREE_OPS_OID, sizeof(Oid), ALIGNOF_INT, oid_array_search},
 	{INT4OID, INT4_BTREE_OPS_OID, sizeof(int32), ALIGNOF_INT, int4_array_search},
 	{INT8OID, INT8_BTREE_OPS_OID, sizeof(int64), ALIGNOF_DOUBLE, int8_array_search},
@@ -115,7 +115,8 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 	offset = 0;
 	for (i = 0; i < meta->numKeys; i++)
 	{
-		ArraySearchDesc *searchDesc = find_array_search_desc_by_typeid(id->nonLeafTupdesc->attrs[i].atttypid);
+		ArraySearchDesc *searchDesc = find_array_search_desc_by_typeid(
+			OTupleDescAttrSlow(id->nonLeafTupdesc, i)->atttypid);
 		OIndexField *field = &id->fields[i];
 
 		if (!searchDesc || searchDesc->opcid != field->opclass)

@@ -22,6 +22,7 @@
 
 #include "catalog/pg_collation.h"
 #include "catalog/pg_database.h"
+#include "utils/memutils.h"
 #include "utils/syscache.h"
 #include "mb/pg_wchar.h"
 
@@ -163,6 +164,7 @@ o_database_cache_set_default_locale_provider()
 {
 	XLogRecPtr	cur_lsn;
 	ODatabase  *o_database;
+	pg_locale_t o_locale = pg_newlocale_from_collation(DEFAULT_COLLATION_OID);
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
 	o_database = o_database_cache_search(Template1DbOid, Template1DbOid, cur_lsn,
@@ -171,21 +173,21 @@ o_database_cache_set_default_locale_provider()
 	{
 		if (o_database->datlocprovider == COLLPROVIDER_BUILTIN)
 		{
-			default_locale.info.builtin.locale = MemoryContextStrdup(TopMemoryContext,
-																	 o_database->datlocale);
+			o_locale->info.builtin.locale = MemoryContextStrdup(TopMemoryContext,
+																o_database->datlocale);
 		}
 		else if (o_database->datlocprovider == COLLPROVIDER_ICU)
 		{
-			make_icu_collator(o_database->datlocale, o_database->daticurules, &default_locale);
+			make_icu_collator(o_database->datlocale, o_database->daticurules, &o_locale);
 		}
 
-		default_locale.provider = o_database->datlocprovider;
-		default_locale.deterministic = true;
+		o_locale->provider = o_database->datlocprovider;
+		o_locale->deterministic = true;
 	}
 	else
 	{
-		default_locale.provider = COLLPROVIDER_DEFAULT;
-		default_locale.deterministic = true;
+		o_locale->provider = COLLPROVIDER_DEFAULT;
+		o_locale->deterministic = true;
 	}
 }
 #endif

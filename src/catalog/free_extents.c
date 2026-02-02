@@ -227,7 +227,7 @@ get_extent(BTreeDescr *desc, uint16 len)
 		modify_result = o_btree_autonomous_insert(off_len_tree, tmpTup);
 		if (!modify_result)
 		{
-			elog(FATAL, "unable to insert extent (%lu, %lu) into the (off, len) B-tree",
+			elog(FATAL, "unable to insert extent (" UINT64_FORMAT ", " UINT64_FORMAT ") into the (off, len) B-tree",
 				 tup.extent.offset, tup.extent.length);
 		}
 	}
@@ -238,7 +238,7 @@ get_extent(BTreeDescr *desc, uint16 len)
 	modify_result = o_btree_autonomous_delete(off_len_tree, tmpTup, BTreeKeyLeafTuple, NULL);
 	if (!modify_result)
 	{
-		elog(FATAL, "unable to delete extent (%lu, %lu) from the (off, len) B-tree",
+		elog(FATAL, "unable to delete extent (" UINT64_FORMAT ", " UINT64_FORMAT ") from the (off, len) B-tree",
 			 deleted_tup.extent.offset, deleted_tup.extent.length);
 	}
 
@@ -253,7 +253,7 @@ get_extent(BTreeDescr *desc, uint16 len)
 		modify_result = o_btree_autonomous_insert(len_off_tree, tmpTup);
 		if (!modify_result)
 		{
-			elog(FATAL, "unable to insert extent (%lu, %lu) into the (len, off) B-tree",
+			elog(FATAL, "unable to insert extent (" UINT64_FORMAT ", " UINT64_FORMAT ") into the (len, off) B-tree",
 				 tup.extent.offset, tup.extent.length);
 		}
 	}
@@ -391,7 +391,7 @@ free_extent(BTreeDescr *desc, FileExtent extent)
 															  tmpTup);
 					if (!modify_result)
 					{
-						elog(FATAL, "unable to return extent (%lu, %lu) into the (len, off) B-tree",
+						elog(FATAL, "unable to return extent (" UINT64_FORMAT ", " UINT64_FORMAT ") into the (len, off) B-tree",
 							 right.extent.offset, right.extent.length);
 					}
 				}
@@ -410,7 +410,7 @@ free_extent(BTreeDescr *desc, FileExtent extent)
 													  tmpTup, BTreeKeyLeafTuple, NULL);
 			if (!modify_result)
 			{
-				elog(FATAL, "unable to delete extent (%lu, %lu) from the (off, len) B-tree",
+				elog(FATAL, "unable to delete extent (" UINT64_FORMAT ", " UINT64_FORMAT ") from the (off, len) B-tree",
 					 right.extent.offset, right.extent.length);
 			}
 		}
@@ -423,7 +423,7 @@ free_extent(BTreeDescr *desc, FileExtent extent)
 													  tmpTup, BTreeKeyLeafTuple, NULL);
 			if (!modify_result)
 			{
-				elog(FATAL, "unable to delete extent (%lu, %lu) from the (off, len) B-tree",
+				elog(FATAL, "unable to delete extent (" UINT64_FORMAT ", " UINT64_FORMAT ") from the (off, len) B-tree",
 					 left.extent.offset, left.extent.length);
 			}
 		}
@@ -454,7 +454,7 @@ free_extent(BTreeDescr *desc, FileExtent extent)
 		modify_result = o_btree_autonomous_insert(off_len_tree, tmpTup);
 		if (!modify_result)
 		{
-			elog(FATAL, "unable to insert extent (%lu, %lu) to the (off, len) B-tree",
+			elog(FATAL, "unable to insert extent (" UINT64_FORMAT ", " UINT64_FORMAT ") to the (off, len) B-tree",
 				 tup.extent.offset, tup.extent.length);
 		}
 
@@ -463,7 +463,7 @@ free_extent(BTreeDescr *desc, FileExtent extent)
 		modify_result = o_btree_autonomous_insert(len_off_tree, tmpTup);
 		if (!modify_result)
 		{
-			elog(FATAL, "unable to insert extent (%lu, %lu) to the (len, off) B-tree",
+			elog(FATAL, "unable to insert extent (" UINT64_FORMAT ", " UINT64_FORMAT ") to the (len, off) B-tree",
 				 tup.extent.offset, tup.extent.length);
 		}
 
@@ -620,7 +620,7 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 		}
 		if (file_size != len)
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("could not read data from checkpoint tmp file: %s %lu %lu: %m",
+							errmsg("could not read data from checkpoint tmp file: %s " UINT64_FORMAT " " UINT64_FORMAT ": %m",
 								   filename, len, file_size)));
 
 		pfree(filename);
