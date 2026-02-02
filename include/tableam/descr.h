@@ -346,7 +346,9 @@ extern void o_invalidate_comparator_cache(Oid opfamily, Oid lefttype,
 extern EvictedTreeData *read_evicted_data(Oid datoid, Oid relnode, bool delete);
 extern void insert_evicted_data(EvictedTreeData *data);
 
-extern void oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid, Oid exclusion_op, Oid hash_fn_oid);
+extern void oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid,
+										   Oid opclassoid, Oid exacttype,
+										   Oid exclusion_op, Oid hash_fn_oid);
 extern void o_finish_sort_support_function(OComparator *comparator, SortSupport ssup);
 
 extern void o_add_invalidate_undo_item(ORelOids oids, uint32 flags);

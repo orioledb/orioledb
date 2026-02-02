@@ -770,7 +770,11 @@ tts_orioledb_copy_heap_tuple(TupleTableSlot *slot)
 }
 
 static MinimalTuple
+#if PG_VERSION_NUM >= 180000
+tts_orioledb_copy_minimal_tuple(TupleTableSlot *slot, Size extra)
+#else
 tts_orioledb_copy_minimal_tuple(TupleTableSlot *slot)
+#endif
 {
 	Assert(!TTS_EMPTY(slot));
 
@@ -778,7 +782,11 @@ tts_orioledb_copy_minimal_tuple(TupleTableSlot *slot)
 
 	return heap_form_minimal_tuple(slot->tts_tupleDescriptor,
 								   slot->tts_values,
+#if PG_VERSION_NUM >= 180000
+								   slot->tts_isnull, extra);
+#else
 								   slot->tts_isnull);
+#endif
 }
 
 static void
@@ -1076,7 +1084,7 @@ tts_orioledb_fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx,
 			value = o_get_idx_expr_att(slot, idx,
 									   (ExprState *) lfirst(indexpr_item),
 									   &isnull);
-			typid = idx->nonLeafTupdesc->attrs[i].atttypid;
+			typid = TupleDescAttr(idx->nonLeafTupdesc, i)->atttypid;
 			indexpr_item = lnext(idx->expressions_state, indexpr_item);
 		}
 
@@ -1129,7 +1137,7 @@ appendStringInfoIndexKey(StringInfo str, TupleTableSlot *slot, OIndexDescr *id)
 			bool		typisvarlena;
 			char	   *res;
 
-			getTypeOutputInfo(id->nonLeafTupdesc->attrs[i].atttypid,
+			getTypeOutputInfo(TupleDescAttr(id->nonLeafTupdesc, i)->atttypid,
 							  &typoutput, &typisvarlena);
 			res = OidOutputFunctionCall(typoutput, value);
 			appendStringInfo(str, "'%s'", res);

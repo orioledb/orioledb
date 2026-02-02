@@ -781,19 +781,32 @@ lazy_vacuum_bridge_index(LVRelState *vacrel)
 		ItemPointerData iptr;
 		BlockNumber blkno;
 		OTuple		tuple;
+#if PG_VERSION_NUM >= 180000
+		int			num_offsets;
+		OffsetNumber offsets[MaxOffsetNumber];
+
+		vacuum_delay_point(false);
+#else
+		int			num_offsets = iter_result->num_offsets;
+		OffsetNumber *offsets = iter_result->offsets;
 
 		vacuum_delay_point();
+#endif
 
 		blkno = iter_result->blkno;
 		vacrel->blkno = blkno;
 
+#if PG_VERSION_NUM >= 180000
+		num_offsets = TidStoreGetBlockOffsets(iter_result, offsets, lengthof(offsets));
+#endif
+
 		ItemPointerSetBlockNumber(&iptr, blkno);
-		for (i = 0; i < iter_result->num_offsets; i++)
+		for (i = 0; i < num_offsets; i++)
 		{
 			OBtreePageFindItem *item;
 			Page		p;
 
-			ItemPointerSetOffsetNumber(&iptr, iter_result->offsets[i]);
+			ItemPointerSetOffsetNumber(&iptr, offsets[i]);
 			bound.keys[0].value = ItemPointerGetDatum(&iptr);
 #else
 	for (i = 0; i < vacrel->dead_items->num_items; i++)
@@ -1203,6 +1216,9 @@ update_relstats_all_indexes(LVRelState *vacrel)
 							istat->num_pages,
 							istat->num_index_tuples,
 							0,
+#if PG_VERSION_NUM >= 180000
+							0,
+#endif
 							false,
 							InvalidTransactionId,
 							InvalidMultiXactId,
@@ -1390,7 +1406,11 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 	pgstat_report_vacuum(RelationGetRelid(rel),
 						 rel->rd_rel->relisshared,
 						 vacrel->live_tuples,
+#if PG_VERSION_NUM >= 180000
+						 vacrel->lpdead_items, starttime);
+#else
 						 vacrel->lpdead_items);
+#endif
 
 	pgstat_progress_end_command();
 

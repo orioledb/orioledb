@@ -404,8 +404,6 @@ typedef struct
 } OrioleDBPageDesc;
 
 /* orioledb.c */
-extern Size orioledb_buffers_size;
-extern Size orioledb_buffers_count;
 extern Size undo_circular_buffer_size;
 extern uint32 undo_buffers_count;
 extern Size xid_circular_buffer_size;
@@ -424,6 +422,7 @@ extern bool debug_disable_bgwriter;
 extern MemoryContext btree_insert_context;
 extern MemoryContext btree_seqscan_context;
 extern double o_checkpoint_completion_ratio;
+extern int	bgwriter_num_workers;
 extern int	max_io_concurrency;
 extern bool use_mmap;
 extern bool use_device;
@@ -431,11 +430,13 @@ extern bool orioledb_use_sparse_files;
 extern int	device_fd;
 extern char *device_filename;
 extern Pointer mmap_data;
+extern int	device_length_guc;
 extern Size device_length;
 extern int	default_compress;
 extern int	default_primary_compress;
 extern int	default_toast_compress;
 extern bool orioledb_table_description_compress;
+extern char *max_bridge_ctid_string;
 extern BlockNumber max_bridge_ctid_blkno;
 extern bool orioledb_s3_mode;
 extern int	s3_num_workers;

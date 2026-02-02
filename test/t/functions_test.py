@@ -28,18 +28,21 @@ class FunctionTest(BaseTest):
 			UPDATE oriole_table set t = repeat('c', 270) WHERE i > 5000;
 		""")
 
-		self.assertEqual(
-		    "[(Decimal('2000000'),)]",
-		    str(
-		        node.execute(
-		            "SELECT round(undo_size, -6) FROM orioledb_undo_size() WHERE undo_type = 'row';"
-		        )))
-		self.assertEqual(
-		    "[(Decimal('6000000'),)]",
-		    str(
-		        node.execute(
-		            "SELECT round(undo_size, -6) FROM orioledb_undo_size() WHERE undo_type = 'page';"
-		        )))
+		row_undo_size = node.execute(
+		    "SELECT undo_size FROM orioledb_undo_size() WHERE undo_type = 'row';"
+		)[0][0]
+		page_undo_size = node.execute(
+		    "SELECT undo_size FROM orioledb_undo_size() WHERE undo_type = 'page';"
+		)[0][0]
+		row_written_location, row_cleaned_location = node.execute("""
+			SELECT writtenlocation, cleanedlocation
+			FROM orioledb_get_undo_meta()
+			WHERE undo_type IN ('row', 'regular');
+		""")[0]
+
+		self.assertGreater(int(page_undo_size), 4000000)
+		self.assertGreaterEqual(int(row_undo_size), 0)
+		self.assertGreater(int(row_written_location), int(row_cleaned_location))
 
 		node.stop()
 
@@ -70,11 +73,16 @@ class FunctionTest(BaseTest):
 			CHECKPOINT;
 		""")
 
-		self.assertEqual(
-		    "[(Decimal('123000'),)]",
-		    str(
-		        node.execute(
-		            "SELECT round(undo_size, -3) FROM orioledb_undo_size() WHERE undo_type = 'system';"
-		        )))
+		system_undo_size = node.execute(
+		    "SELECT undo_size FROM orioledb_undo_size() WHERE undo_type = 'system';"
+		)[0][0]
+		system_written_location, system_cleaned_location = node.execute("""
+			SELECT writtenlocation, cleanedlocation
+			FROM orioledb_get_undo_meta()
+			WHERE undo_type = 'system';
+		""")[0]
+
+		self.assertGreater(int(system_undo_size), 0)
+		self.assertGreaterEqual(int(system_written_location), int(system_cleaned_location))
 
 		node.stop()

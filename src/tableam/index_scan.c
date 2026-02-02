@@ -27,13 +27,25 @@
 #include "access/nbtree.h"
 #include "access/skey.h"
 #include "executor/nodeIndexscan.h"
+#if PG_VERSION_NUM >= 180000
+#include "commands/explain_format.h"
+#endif
 #include "parser/parse_coerce.h"
 #include "pgstat.h"
 
+#if PG_VERSION_NUM >= 180000
 void
-init_index_scan_state(OPlanState *o_plan_state, OScanState *ostate, Relation index,
-					  ExprContext *econtext, IndexRuntimeKeyInfo **runtimeKeys,
-					  int *numRuntimeKeys, ScanKeyData **scanKeys, int *numScanKeys)
+init_index_scan_state(OPlanState *o_plan_state, OScanState *ostate,
+					  Relation index, ExprContext *econtext, Snapshot snapshot,
+					  IndexRuntimeKeyInfo **runtimeKeys, int *numRuntimeKeys,
+					  ScanKeyData **scanKeys, int *numScanKeys)
+#else
+void
+init_index_scan_state(OPlanState *o_plan_state, OScanState *ostate,
+					  Relation index, ExprContext *econtext,
+					  IndexRuntimeKeyInfo **runtimeKeys, int *numRuntimeKeys,
+					  ScanKeyData **scanKeys, int *numScanKeys)
+#endif
 {
 	IndexScanDesc scan;
 
@@ -48,6 +60,9 @@ init_index_scan_state(OPlanState *o_plan_state, OScanState *ostate, Relation ind
 
 	scan->parallel_scan = NULL;
 	scan->xs_temp_snap = false;
+#if PG_VERSION_NUM >= 180000
+	scan->xs_snapshot = snapshot;
+#endif
 }
 
 static bool
@@ -164,8 +179,16 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 		ScanKey		key = so->keyData + arrayKey->scan_key;
 
 		Assert((key->sk_flags & SK_SEARCHARRAY) &&
-			   key->sk_strategy == BTEqualStrategyNumber &&
-			   arrayKey->num_elems > 0);
+			   key->sk_strategy == BTEqualStrategyNumber);
+
+#if PG_VERSION_NUM >= 180000
+		/* Skip scan bounds are dynamic and checked earlier, no need for array element matches */
+		if (key->sk_flags & SK_BT_SKIP)
+		{
+			Assert(arrayKey->num_elems == -1);
+			continue;
+		}
+#endif
 
 		if (arrayKey->scan_key >= numPrefixExactKeys)
 		{
@@ -176,6 +199,8 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 			bool		found = false;
 			OBTreeValueBound *bound = &low->keys[key->sk_attno - 1];
 			OIndexField *field = &id->fields[key->sk_attno - 1];
+
+			Assert(arrayKey->num_elems > 0);
 
 			for (j = 0; j < arrayKey->num_elems; j++)
 			{
@@ -212,6 +237,7 @@ o_bt_advance_array_keys_increment(OScanState *ostate, ScanDirection dir)
 	IndexScanDesc scan = &ostate->scandesc;
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
 	int			i;
+	bool		have_array_keys = false;
 
 	/*
 	 * We must advance the last array key most quickly, since it will
@@ -226,6 +252,13 @@ o_bt_advance_array_keys_increment(OScanState *ostate, ScanDirection dir)
 		int			num_elems = curArrayKey->num_elems;
 		bool		rolled = false;
 
+#if PG_VERSION_NUM >= 180000
+		/* Skip scan boundaries are handled by the executor, bypass manual element advancement */
+		if (skey->sk_flags & SK_BT_SKIP)
+			continue;
+#endif
+
+		have_array_keys = true;
 		if (curArrayKey->scan_key >= ostate->numPrefixExactKeys)
 			continue;
 
@@ -258,7 +291,8 @@ o_bt_advance_array_keys_increment(OScanState *ostate, ScanDirection dir)
 	 * current scan direction.  Without this, scans would overlook matching
 	 * tuples if and when the scan's direction was subsequently reversed.
 	 */
-	_bt_start_array_keys(scan, -dir);
+	if (have_array_keys)
+		_bt_start_array_keys(scan, -dir);
 
 	return false;
 }
@@ -479,6 +513,8 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 			_bt_start_array_keys(&ostate->scandesc, ForwardScanDirection);
 		}
 		_bt_preprocess_keys(&ostate->scandesc);
+		ostate->numPrefixExactKeys =
+			o_adjust_num_prefix_exact_keys(so, ostate->numPrefixExactKeys);
 		ostate->curKeyRange.empty = true;
 
 		pgstat_count_index_scan(ostate->scandesc.indexRelation);

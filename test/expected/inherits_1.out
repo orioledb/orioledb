@@ -1,6 +1,13 @@
 CREATE SCHEMA inherits;
 SET SESSION search_path = 'inherits';
 CREATE EXTENSION orioledb;
+SELECT split_part(setting, '.', 1) major_version
+	FROM pg_settings WHERE name = 'server_version';
+ major_version 
+---------------
+ 16
+(1 row)
+
 CREATE TABLE p_stock (
 	item_id int
 ) USING orioledb;
@@ -1508,8 +1515,8 @@ explain (verbose, costs off) select min(1-id) from matest0;
                                         QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
  Result
-   Output: (InitPlan 1).col1
-   InitPlan 1
+   Output: $0
+   InitPlan 1 (returns $0)
      ->  Limit
            Output: ((1 - matest0.id))
            ->  Result

@@ -508,7 +508,7 @@ o_fill_key_bound(OIndexDescr *id, OTuple tuple,
 	{
 		attnum = OIndexKeyAttnumToTupleAttnum(keyType, id, i + 1);
 		bound->keys[i].value = o_fastgetattr(tuple, attnum, tupdesc, spec, &isnull);
-		bound->keys[i].type = tupdesc->attrs[attnum - 1].atttypid;
+		bound->keys[i].type = TupleDescAttr(tupdesc, attnum - 1)->atttypid;
 		bound->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;
@@ -530,7 +530,7 @@ o_fill_bridge_index_key_bound(BTreeDescr *secondary, OTuple tuple, OBTreeKeyBoun
 	bound->nkeys = 1;
 
 	bound->keys[0].value = o_fastgetattr(tuple, td->nFields, td->leafTupdesc, &td->leafSpec, &isnull);
-	bound->keys[0].type = td->leafTupdesc->attrs[td->nFields - 1].atttypid;
+	bound->keys[0].type = TupleDescAttr(td->leafTupdesc, td->nFields - 1)->atttypid;
 	bound->keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 	if (isnull)
 		bound->keys[0].flags |= O_VALUE_BOUND_NULL;
@@ -560,7 +560,7 @@ o_fill_pindex_tuple_key_bound(BTreeDescr *desc,
 		AttrNumber	attnum = id->primaryFieldsAttnums[i];
 
 		bound->keys[i].value = o_fastgetattr(tup, attnum, id->leafTupdesc, &id->leafSpec, &isnull);
-		bound->keys[i].type = id->leafTupdesc->attrs[pk_from + i].atttypid;
+		bound->keys[i].type = TupleDescAttr(id->leafTupdesc, pk_from + i)->atttypid;
 		bound->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		if (isnull)
 			bound->keys[i].flags |= O_VALUE_BOUND_NULL;

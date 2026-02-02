@@ -30,6 +30,9 @@
 #include "storage/sinvaladt.h"
 #include "storage/procsignal.h"
 #include "storage/proc.h"
+#if PG_VERSION_NUM >= 180000
+#include "utils/memutils.h"
+#endif
 #include "utils/snapmgr.h"
 #include "recovery/wal.h"
 
@@ -124,7 +127,7 @@ static OXidMapItem *xidBuffer;
 
 XidMeta    *xid_meta;
 
-pg_atomic_uint32 *logicalXidsShmemMap;
+static pg_atomic_uint32 *logicalXidsShmemMap;
 
 OSnapshot	o_in_progress_snapshot = {COMMITSEQNO_INPROGRESS, InvalidXLogRecPtr, 0, 0};
 
@@ -508,8 +511,10 @@ oxid_subxact_callback(
 
 							if (!RecoveryInProgress())
 							{
-								elog(DEBUG4, "Add wal_joint_commit for oxid %lu logical xid %u top xid %u",
-									 get_current_oxid_if_any(), logicalXidContext.xid, GetTopTransactionIdIfAny());
+								elog(DEBUG4, "Add wal_joint_commit for oxid " UINT64_FORMAT " logical xid %u top xid %u",
+									 get_current_oxid_if_any(),
+									 logicalXidContext.xid,
+									 GetTopTransactionIdIfAny());
 
 								wal_joint_commit(get_current_oxid_if_any(),
 												 logicalXidContext.xid,
@@ -537,8 +542,10 @@ oxid_subxact_callback(
 					{
 						if (!RecoveryInProgress())
 						{
-							elog(DEBUG4, "Rollback for oxid %lu logical xid %u top xid %u",
-								 get_current_oxid_if_any(), logicalXidContext.xid, GetTopTransactionIdIfAny());
+							elog(DEBUG4, "Rollback for oxid " UINT64_FORMAT " logical xid %u top xid %u",
+								 get_current_oxid_if_any(),
+								 logicalXidContext.xid,
+								 GetTopTransactionIdIfAny());
 
 							setup_prev_logical_xid_ctx();
 						}
@@ -924,8 +931,8 @@ oxid_notify(OXid oxid)
 		 */
 		LWLockAcquire(partitionLock, LW_EXCLUSIVE);
 		RemoveFromWaitQueue(proc, hashcode);
-		proc->waitStatus = STATUS_OK;
-		SendProcSignal(proc->pid, PROCSIG_NOTIFY_INTERRUPT, proc->PROCBACKENDID);
+		proc->waitStatus = PROC_WAIT_STATUS_OK;
+		SetLatch(&proc->procLatch);
 
 		LWLockRelease(partitionLock);
 	}
@@ -1037,8 +1044,8 @@ oxid_notify_all(void)
 	{
 		proc = lfirst(lc);
 		RemoveFromWaitQueue(proc, hashcode);
-		proc->waitStatus = STATUS_OK;
-		SendProcSignal(proc->pid, PROCSIG_NOTIFY_INTERRUPT, proc->PROCBACKENDID);
+		proc->waitStatus = PROC_WAIT_STATUS_OK;
+		SetLatch(&proc->procLatch);
 	}
 
 	LWLockRelease(partitionLock);

@@ -37,27 +37,82 @@ typedef struct BitmapSeqScanArg
 {
 	OTableDescr *tbl_desc;
 	RBTree	   *bitmap;
-	TIDBitmap  *bridged_bitmap;
 } BitmapSeqScanArg;
+
+typedef struct BridgeIterator
+{
+	TIDBitmap  *tidbitmap;
+
+#if PG_VERSION_NUM >= 180000
+	TBMPrivateIterator *tbmiterator;
+	TBMIterateResult tbmres;
+
+	OffsetNumber offsets[TBM_MAX_TUPLES_PER_PAGE];
+	int			iter_ntuples;
+#else
+	TBMIterator *tbmiterator;
+	TBMIterateResult *tbmres;
+#endif
+
+	int			cur_tuple;
+	int			page_ntuples;
+} BridgeIterator;
+
+#if PG_VERSION_NUM >= 180000
+#define BRIDGE_RECHECK(iter) \
+	(BlockNumberIsValid((iter)->tbmres.blockno) && (iter)->tbmres.recheck)
+#define BRIDGE_NEXT_TUPLE(iter) \
+	do \
+	{ \
+		if (BlockNumberIsValid((iter)->tbmres.blockno)) \
+		{ \
+			(iter)->cur_tuple++; \
+			if ((iter)->cur_tuple >= (iter)->page_ntuples) \
+				(iter)->tbmres.blockno = InvalidBlockNumber; \
+		} \
+	} while (0)
+#define BRIDGE_ITER_ISLOSSY(iter) ((iter)->tbmres.lossy)
+#define BRIDGE_ITER_NTUPLES(iter) ((iter)->iter_ntuples)
+#else
+#define BRIDGE_RECHECK(iter) \
+	((iter)->tbmres && (iter)->tbmres->recheck)
+#define BRIDGE_NEXT_TUPLE(iter) \
+	do \
+	{ \
+		if ((iter)->tbmres) \
+		{ \
+			(iter)->cur_tuple++; \
+			if ((iter)->cur_tuple >= (iter)->page_ntuples) \
+				(iter)->tbmres = NULL; \
+		} \
+	} while (0)
+#define BRIDGE_ITER_ISLOSSY(iter) ((iter)->tbmres->ntuples == -1)
+#define BRIDGE_ITER_NTUPLES(iter) ((iter)->tbmres->ntuples)
+#endif
 
 typedef struct OBitmapScan
 {
 	ScanState  *ss;
 	OSnapshot	oSnapshot;
 	MemoryContext cxt;
+
 	Oid			typeoid;
-	TBMIterator *tbmiterator;
-	TBMIterateResult *tbmres;
-	int			cur_tuple;
-	int			page_ntuples;
+
 	BTreeSeqScan *seq_scan;
 	BitmapSeqScanArg arg;
+
+	BridgeIterator bridge_iter;
 } OBitmapScan;
 
 static bool o_bitmap_is_range_valid(OTuple low, OTuple high, void *arg);
 static bool o_bitmap_get_next_key(OFixedKey *key, bool inclusive, void *arg);
 
-BTreeSeqScanCallbacks bitmap_seq_scan_callbacks = {
+static void bridge_begin_iterate(BridgeIterator *iter);
+static bool bridge_iterate(BridgeIterator *iter);
+static void bridge_next_page(OBitmapScan *scan,
+							 OBitmapHeapPlanState *bitmap_state);
+
+static BTreeSeqScanCallbacks bitmap_seq_scan_callbacks = {
 	.isRangeValid = o_bitmap_is_range_valid,
 	.getNextKey = o_bitmap_get_next_key
 };
@@ -131,7 +186,7 @@ static uint64
 seconary_tuple_get_pk_data(OTuple tuple, OIndexDescr *ix_descr)
 {
 	AttrNumber	attnum;
-	FormData_pg_attribute *attr;
+	Form_pg_attribute attr;
 	Datum		val;
 	bool		is_null;
 
@@ -143,7 +198,7 @@ seconary_tuple_get_pk_data(OTuple tuple, OIndexDescr *ix_descr)
 	 * ctid type
 	 */
 	attnum = ix_descr->primaryFieldsAttnums[0];
-	attr = &ix_descr->leafTupdesc->attrs[attnum - 1];
+	attr = TupleDescAttr(ix_descr->leafTupdesc, attnum - 1);
 	val = o_toast_nocachegetattr(tuple, attnum, ix_descr->leafTupdesc,
 								 &ix_descr->leafSpec, &is_null);
 	return val_get_uint64(val, attr->atttypid);
@@ -153,7 +208,7 @@ static uint64
 primary_tuple_get_data(OTuple tuple, OIndexDescr *primary, bool onlyPkey)
 {
 	AttrNumber	attnum;
-	FormData_pg_attribute *attr;
+	Form_pg_attribute attr;
 	Datum		val;
 	bool		is_null;
 	BTreeKeyType keyType = onlyPkey ? BTreeKeyNonLeafKey : BTreeKeyLeafTuple;
@@ -165,7 +220,7 @@ primary_tuple_get_data(OTuple tuple, OIndexDescr *primary, bool onlyPkey)
 	Assert(!O_TUPLE_IS_NULL(tuple));
 
 	attnum = OIndexKeyAttnumToTupleAttnum(keyType, primary, 1);
-	attr = &tupdesc->attrs[attnum - 1];
+	attr = TupleDescAttr(tupdesc, attnum - 1);
 	val = o_toast_nocachegetattr(tuple, attnum, tupdesc, spec, &is_null);
 	return val_get_uint64(val, attr->atttypid);
 }
@@ -207,6 +262,9 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 	ostate.indexQuals = bitmap_ix_scan->indexqual;
 	ResetExprContext(econtext);
 	init_index_scan_state(&bitmap_state->o_plan_state, &ostate, index, econtext,
+#if PG_VERSION_NUM >= 180000
+						  bitmap_state->bitmapqualplanstate->state->es_snapshot,
+#endif
 						  &node->biss_RuntimeKeys,
 						  &node->biss_NumRuntimeKeys,
 						  &node->biss_ScanKeys,
@@ -254,6 +312,8 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 		_bt_preprocess_keys(&ostate.scandesc);
 		if (!so->qual_ok)
 			return nTuples;
+		ostate.numPrefixExactKeys =
+			o_adjust_num_prefix_exact_keys(so, ostate.numPrefixExactKeys);
 		if (so->numArrayKeys)
 			_bt_start_array_keys(&ostate.scandesc, ForwardScanDirection);
 		ostate.curKeyRange.empty = true;
@@ -655,7 +715,7 @@ o_make_bitmap_scan(OBitmapHeapPlanState *bitmap_state, ScanState *ss,
 	bitmap_state->scan = scan;
 	o_exec_bitmapqual(bitmap_state, bitmapqualplanstate,
 					  &scan->arg.bitmap,
-					  &scan->arg.bridged_bitmap);
+					  &scan->bridge_iter.tidbitmap);
 
 	if (scan->arg.bitmap)
 	{
@@ -665,136 +725,10 @@ o_make_bitmap_scan(OBitmapHeapPlanState *bitmap_state, ScanState *ss,
 	}
 	else
 	{
-		Assert(scan->arg.bridged_bitmap);
-		scan->tbmiterator = tbm_begin_iterate(scan->arg.bridged_bitmap);
+		bridge_begin_iterate(&scan->bridge_iter);
 	}
 
 	return scan;
-}
-
-static void
-o_tbmiterator_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
-{
-	OIndexDescr *bridge = scan->arg.tbl_desc->bridge;
-
-	scan->cur_tuple = 0;
-	scan->page_ntuples = 0;
-
-	if (scan->arg.bitmap)
-		o_keybitmap_free(scan->arg.bitmap);
-	scan->arg.bitmap = o_keybitmap_create();
-	if (scan->seq_scan)
-		free_btree_seq_scan(scan->seq_scan);
-	scan->seq_scan = make_btree_seq_scan_cb(&GET_PRIMARY(scan->arg.tbl_desc)->desc,
-											&scan->oSnapshot,
-											&bitmap_seq_scan_callbacks, &scan->arg);
-	if (scan->tbmres->ntuples >= 0)
-	{
-		/*
-		 * Bitmap is non-lossy, so we just look through the offsets listed in
-		 * tbmres; but we have to follow any HOT chain starting at each such
-		 * offset.
-		 */
-		int			curoff;
-
-		scan->page_ntuples = scan->tbmres->ntuples;
-		for (curoff = 0; curoff < scan->tbmres->ntuples; curoff++)
-		{
-			OffsetNumber offnum = scan->tbmres->offsets[curoff];
-			ItemPointerData iptr;
-			OBTreeKeyBound bridge_bound;
-			OTuple		bridge_tup;
-			uint64		data;
-			CommitSeqNo tupleCsn;
-
-			ItemPointerSet(&iptr, scan->tbmres->blockno, offnum);
-
-			bridge_bound.nkeys = 1;
-			bridge_bound.keys[0].value = ItemPointerGetDatum(&iptr);
-			bridge_bound.keys[0].type = TIDOID;
-			bridge_bound.keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
-			bridge_bound.keys[0].comparator = NULL;
-			bridge_bound.keys[0].exclusion_fn = NULL;
-			bridge_bound.n_row_keys = 0;
-			bridge_bound.row_keys = NULL;
-
-			bridge_tup = o_btree_find_tuple_by_key(&bridge->desc,
-												   (Pointer) &bridge_bound, BTreeKeyBound,
-												   &o_in_progress_snapshot, &tupleCsn,
-												   CurrentMemoryContext, NULL);
-
-			if (!O_TUPLE_IS_NULL(bridge_tup))
-			{
-				data = seconary_tuple_get_pk_data(bridge_tup, bridge);
-				o_keybitmap_insert(scan->arg.bitmap, data);
-
-				pfree(bridge_tup.data);
-			}
-		}
-	}
-	else
-	{
-		/*
-		 * Bitmap is lossy, so we must examine each line pointer on the page.
-		 */
-
-		OTableDescr *tbl_descr = scan->arg.tbl_desc;
-		BTreeIterator *it;
-		ItemPointerData start_iptr;
-		ItemPointerData end_iptr;
-		OBTreeKeyBound start_bound;
-		OBTreeKeyBound end_bound;
-		TupleTableSlot *primarySlot;
-		ExprContext *tup_econtext = bitmap_state->scan->ss->ps.ps_ExprContext;
-		CommitSeqNo tupleCsn;
-
-		ItemPointerSet(&start_iptr, scan->tbmres->blockno, 0);
-		start_bound.nkeys = 1;
-		start_bound.keys[0].value = ItemPointerGetDatum(&start_iptr);
-		start_bound.keys[0].type = TIDOID;
-		start_bound.keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
-		start_bound.keys[0].comparator = bridge->fields[0].comparator;
-		start_bound.keys[0].exclusion_fn = NULL;
-		start_bound.n_row_keys = 0;
-		start_bound.row_keys = NULL;
-
-		ItemPointerSet(&end_iptr, scan->tbmres->blockno, MaxOffsetNumber);
-		end_bound.nkeys = 1;
-		end_bound.keys[0].value = ItemPointerGetDatum(&end_iptr);
-		end_bound.keys[0].type = TIDOID;
-		end_bound.keys[0].flags = O_VALUE_BOUND_UPPER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
-		end_bound.keys[0].comparator = bridge->fields[0].comparator;
-		end_bound.keys[0].exclusion_fn = NULL;
-		end_bound.n_row_keys = 0;
-		end_bound.row_keys = NULL;
-
-		it = o_btree_iterator_create(&bridge->desc, (Pointer) &start_bound, BTreeKeyBound,
-									 &o_in_progress_snapshot, ForwardScanDirection);
-		primarySlot = MakeSingleTupleTableSlot(tbl_descr->tupdesc, &TTSOpsOrioleDB);
-
-		do
-		{
-			OTuple		tup = o_btree_iterator_fetch(it, &tupleCsn,
-													 (Pointer) &end_bound,
-													 BTreeKeyBound, true,
-													 NULL);
-			uint64		data;
-
-			if (O_TUPLE_IS_NULL(tup))
-				break;
-
-			data = seconary_tuple_get_pk_data(tup, bridge);
-			o_keybitmap_insert(scan->arg.bitmap, data);
-			scan->page_ntuples++;
-
-			pfree(tup.data);
-			ExecClearTuple(primarySlot);
-			MemoryContextReset(tup_econtext->ecxt_per_tuple_memory);
-		} while (true);
-
-		ExecDropSingleTupleTableSlot(primarySlot);
-		btree_iterator_free(it);
-	}
 }
 
 TupleTableSlot *
@@ -805,6 +739,7 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 	OCustomScanState *ocstate = (OCustomScanState *) node;
 	OBitmapHeapPlanState *bitmap_state =
 		(OBitmapHeapPlanState *) ocstate->o_plan_state;
+	BridgeIterator *bridge_iter = &scan->bridge_iter;
 
 	do
 	{
@@ -812,23 +747,29 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 		BTreeLocationHint hint;
 		MemoryContext tupleCxt = node->ss.ss_ScanTupleSlot->tts_mcxt;
 		CommitSeqNo tupleCsn;
+#if PG_VERSION_NUM >= 180000
+		bool page_exhausted = !BlockNumberIsValid(bridge_iter->tbmres.blockno);
+#else
+		bool page_exhausted = (bridge_iter->tbmres == NULL);
+#endif
 
 		fetched = false;
 
-		if (scan->tbmiterator != NULL && scan->tbmres == NULL)
+		// Path 1: Iterate using bridge bitmap
+		if (bridge_iter->tbmiterator != NULL && page_exhausted)
 		{
-			scan->tbmres = tbm_iterate(scan->tbmiterator);
-
-			if (scan->tbmres == NULL)
+			if (!bridge_iterate(bridge_iter))
 			{
+				// No more pages in the bitmap
 				slot = ExecClearTuple(node->ss.ss_ScanTupleSlot);
 				fetched = true;
 			}
 
 			if (!fetched)
-				o_tbmiterator_next_page(scan, bitmap_state);
+				bridge_next_page(scan, bitmap_state);
 		}
 
+		// Path 2: Iterate using RBTree bitmap with seq scan
 		if (!fetched)
 		{
 			Assert(scan->seq_scan);
@@ -863,7 +804,7 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 											 descr, tupleCsn,
 											 PrimaryIndexNumber,
 											 true, &hint);
-					if (scan->tbmres && scan->tbmres->recheck)
+					if (BRIDGE_RECHECK(bridge_iter))
 					{
 						ExprContext *tup_econtext = bitmap_state->scan->ss->ps.ps_ExprContext;
 						ExprState  *bitmapqualorig_state;
@@ -891,12 +832,7 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 					}
 				}
 
-				if (scan->tbmres)
-				{
-					scan->cur_tuple++;
-					if (scan->cur_tuple >= scan->page_ntuples)
-						scan->tbmres = NULL;
-				}
+				BRIDGE_NEXT_TUPLE(bridge_iter);
 			}
 		}
 
@@ -919,10 +855,14 @@ o_free_bitmap_scan(OBitmapScan *scan)
 		free_btree_seq_scan(scan->seq_scan);
 	if (scan->arg.bitmap)
 		o_keybitmap_free(scan->arg.bitmap);
-	if (scan->tbmiterator)
-		tbm_end_iterate(scan->tbmiterator);
-	if (scan->arg.bridged_bitmap)
-		tbm_free(scan->arg.bridged_bitmap);
+	if (scan->bridge_iter.tbmiterator)
+#if PG_VERSION_NUM >= 180000
+		tbm_end_private_iterate(scan->bridge_iter.tbmiterator);
+#else
+		tbm_end_iterate(scan->bridge_iter.tbmiterator);
+#endif
+	if (scan->bridge_iter.tidbitmap)
+		tbm_free(scan->bridge_iter.tidbitmap);
 	pfree(scan);
 }
 
@@ -993,4 +933,184 @@ o_bitmap_get_next_key(OFixedKey *key, bool inclusive, void *arg)
 	}
 
 	return found;
+}
+
+static void
+bridge_begin_iterate(BridgeIterator *iter)
+{
+	Assert(iter->tidbitmap);
+
+#if PG_VERSION_NUM >= 180000
+	iter->tbmiterator = tbm_begin_private_iterate(iter->tidbitmap);
+	iter->tbmres.blockno = InvalidBlockNumber;
+#else
+	iter->tbmiterator = tbm_begin_iterate(iter->tidbitmap);
+	iter->tbmres = NULL;
+#endif
+}
+
+static bool
+bridge_iterate(BridgeIterator *iter)
+{
+#if PG_VERSION_NUM >= 180000
+	if (!BlockNumberIsValid(iter->tbmres.blockno))
+	{
+		if (!tbm_private_iterate(iter->tbmiterator, &iter->tbmres))
+			return false;
+		if (!iter->tbmres.lossy)
+			iter->iter_ntuples = tbm_extract_page_tuple(&iter->tbmres,
+														  iter->offsets,
+														  TBM_MAX_TUPLES_PER_PAGE);
+	}
+	return BlockNumberIsValid(iter->tbmres.blockno);
+#else
+	if (iter->tbmres == NULL)
+		iter->tbmres = tbm_iterate(iter->tbmiterator);
+	return iter->tbmres != NULL;
+#endif
+}
+
+static void
+bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
+{
+	OIndexDescr *bridge = scan->arg.tbl_desc->bridge;
+	BridgeIterator *iter;
+
+	Assert(scan->bridge_iter.tbmiterator != NULL);
+#if PG_VERSION_NUM >= 180000
+	Assert(BlockNumberIsValid(scan->bridge_iter.tbmres.blockno));
+#else
+	Assert(scan->bridge_iter.tbmres != NULL);
+#endif
+
+	iter = &scan->bridge_iter;
+	iter->cur_tuple = 0;
+	iter->page_ntuples = 0;
+
+	if (scan->arg.bitmap)
+		o_keybitmap_free(scan->arg.bitmap);
+	scan->arg.bitmap = o_keybitmap_create();
+	if (scan->seq_scan)
+		free_btree_seq_scan(scan->seq_scan);
+	scan->seq_scan = make_btree_seq_scan_cb(&GET_PRIMARY(scan->arg.tbl_desc)->desc,
+											&scan->oSnapshot,
+											&bitmap_seq_scan_callbacks, &scan->arg);
+	if (!BRIDGE_ITER_ISLOSSY(iter))
+	{
+		/*
+		 * Bitmap is non-lossy, so we just look through the offsets listed in
+		 * tbmres; but we have to follow any HOT chain starting at each such
+		 * offset.
+		 */
+		int			curoff;
+
+		iter->page_ntuples = BRIDGE_ITER_NTUPLES(iter);
+		for (curoff = 0; curoff < BRIDGE_ITER_NTUPLES(iter); curoff++)
+		{
+#if PG_VERSION_NUM >= 180000
+			OffsetNumber offnum = iter->offsets[curoff];
+			BlockNumber	blockno = iter->tbmres.blockno;
+#else
+			OffsetNumber offnum = iter->tbmres->offsets[curoff];
+			BlockNumber	blockno = iter->tbmres->blockno;
+#endif
+			ItemPointerData iptr;
+			OBTreeKeyBound bridge_bound;
+			OTuple		bridge_tup;
+			uint64		data;
+			CommitSeqNo tupleCsn;
+
+			ItemPointerSet(&iptr, blockno, offnum);
+
+			bridge_bound.nkeys = 1;
+			bridge_bound.keys[0].value = ItemPointerGetDatum(&iptr);
+			bridge_bound.keys[0].type = TIDOID;
+			bridge_bound.keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
+			bridge_bound.keys[0].comparator = NULL;
+			bridge_bound.keys[0].exclusion_fn = NULL;
+			bridge_bound.n_row_keys = 0;
+			bridge_bound.row_keys = NULL;
+
+			bridge_tup = o_btree_find_tuple_by_key(&bridge->desc,
+												   (Pointer) &bridge_bound, BTreeKeyBound,
+												   &o_in_progress_snapshot, &tupleCsn,
+												   CurrentMemoryContext, NULL);
+
+			if (!O_TUPLE_IS_NULL(bridge_tup))
+			{
+				data = seconary_tuple_get_pk_data(bridge_tup, bridge);
+				o_keybitmap_insert(scan->arg.bitmap, data);
+
+				pfree(bridge_tup.data);
+			}
+		}
+	}
+	else
+	{
+		/*
+		 * Bitmap is lossy, so we must examine each line pointer on the page.
+		 */
+
+		OTableDescr *tbl_descr = scan->arg.tbl_desc;
+		BTreeIterator *it;
+		ItemPointerData start_iptr;
+		ItemPointerData end_iptr;
+		OBTreeKeyBound start_bound;
+		OBTreeKeyBound end_bound;
+		TupleTableSlot *primarySlot;
+		ExprContext *tup_econtext = bitmap_state->scan->ss->ps.ps_ExprContext;
+		CommitSeqNo tupleCsn;
+#if PG_VERSION_NUM >= 180000
+		BlockNumber	blockno = iter->tbmres.blockno;
+#else
+		BlockNumber	blockno = iter->tbmres->blockno;
+#endif
+
+		ItemPointerSet(&start_iptr, blockno, 0);
+		start_bound.nkeys = 1;
+		start_bound.keys[0].value = ItemPointerGetDatum(&start_iptr);
+		start_bound.keys[0].type = TIDOID;
+		start_bound.keys[0].flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
+		start_bound.keys[0].comparator = bridge->fields[0].comparator;
+		start_bound.keys[0].exclusion_fn = NULL;
+		start_bound.n_row_keys = 0;
+		start_bound.row_keys = NULL;
+
+		ItemPointerSet(&end_iptr, blockno, MaxOffsetNumber);
+		end_bound.nkeys = 1;
+		end_bound.keys[0].value = ItemPointerGetDatum(&end_iptr);
+		end_bound.keys[0].type = TIDOID;
+		end_bound.keys[0].flags = O_VALUE_BOUND_UPPER | O_VALUE_BOUND_INCLUSIVE | O_VALUE_BOUND_COERCIBLE;
+		end_bound.keys[0].comparator = bridge->fields[0].comparator;
+		end_bound.keys[0].exclusion_fn = NULL;
+		end_bound.n_row_keys = 0;
+		end_bound.row_keys = NULL;
+
+		it = o_btree_iterator_create(&bridge->desc, (Pointer) &start_bound, BTreeKeyBound,
+									 &o_in_progress_snapshot, ForwardScanDirection);
+		primarySlot = MakeSingleTupleTableSlot(tbl_descr->tupdesc, &TTSOpsOrioleDB);
+
+		do
+		{
+			OTuple		tup = o_btree_iterator_fetch(it, &tupleCsn,
+													 (Pointer) &end_bound,
+													 BTreeKeyBound, true,
+													 NULL);
+			uint64		data;
+
+			if (O_TUPLE_IS_NULL(tup))
+				break;
+
+			data = seconary_tuple_get_pk_data(tup, bridge);
+			o_keybitmap_insert(scan->arg.bitmap, data);
+			iter->page_ntuples++;
+
+			pfree(tup.data);
+			ExecClearTuple(primarySlot);
+			MemoryContextReset(tup_econtext->ecxt_per_tuple_memory);
+		} while (true);
+
+		ExecDropSingleTupleTableSlot(primarySlot);
+		btree_iterator_free(it);
+	}
 }

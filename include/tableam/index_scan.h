@@ -17,6 +17,7 @@
 #include "tableam/key_range.h"
 #include "tableam/scan.h"
 
+#include "access/nbtree.h"
 #include "access/sdir.h"
 
 typedef struct OScanState
@@ -67,9 +68,20 @@ typedef struct OIndexPlanState
 /*
  * iteration code.
  */
-extern void init_index_scan_state(OPlanState *o_plan_state, OScanState *ostate, Relation index,
-								  ExprContext *econtext, IndexRuntimeKeyInfo **runtimeKeys,
-								  int *numRuntimeKeys, ScanKeyData **scanKeys, int *numScanKeys);
+#if PG_VERSION_NUM >= 180000
+extern void init_index_scan_state(OPlanState *o_plan_state, OScanState *ostate,
+								  Relation index, ExprContext *econtext,
+								  Snapshot snapshot,
+								  IndexRuntimeKeyInfo **runtimeKeys,
+								  int *numRuntimeKeys,
+								  ScanKeyData **scanKeys, int *numScanKeys);
+#else
+extern void init_index_scan_state(OPlanState *o_plan_state, OScanState *ostate,
+								  Relation index, ExprContext *econtext,
+								  IndexRuntimeKeyInfo **runtimeKeys,
+								  int *numRuntimeKeys,
+								  ScanKeyData **scanKeys, int *numScanKeys);
+#endif
 extern OTuple o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 							  CommitSeqNo *tupleCsn, MemoryContext tupleCxt,
 							  BTreeLocationHint *hint);
@@ -84,6 +96,8 @@ extern TupleTableSlot *o_exec_project(ProjectionInfo *projInfo,
 									  ExprContext *econtext,
 									  TupleTableSlot *scanTuple,
 									  TupleTableSlot *innerTuple);
+
+extern int o_adjust_num_prefix_exact_keys(BTScanOpaque so, int numPrefixExactKeys);
 
 /* explain analyze */
 extern void eanalyze_counters_init(OEACallsCounters *eacc, OTableDescr *descr);

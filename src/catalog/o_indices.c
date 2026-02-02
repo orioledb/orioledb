@@ -207,7 +207,7 @@ oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 	return OTupleFetchMatch;
 }
 
-ToastAPI	oIndicesToastAPI = {
+static ToastAPI oIndicesToastAPI = {
 	.getBTreeDesc = oIndicesGetBTreeDesc,
 	.getBTreeVersion = NULL,
 	.getBaseBTreeVersion = NULL,
@@ -1350,6 +1350,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 		if (add_opclass)
 			oFillFieldOpClassAndComparator(field, oIndex->tableOids.datoid,
 										   iField->opclass,
+										   oIndex->leafTableFields[i].typid,
 										   needs_exclop ? oIndex->exclops[i] : InvalidOid,
 										   iField->hash_fn_oid);
 	}
@@ -1365,7 +1366,9 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 			temp_field.collation = iField->collation;
 
 		oFillFieldOpClassAndComparator(&temp_field, oIndex->tableOids.datoid,
-									   iField->opclass, InvalidOid,
+									   iField->opclass,
+									   oIndex->leafTableFields[attnum].typid,
+									   InvalidOid,
 									   iField->hash_fn_oid);
 		descr->pk_comparators[i] = temp_field.comparator;
 	}

@@ -116,7 +116,7 @@ typedef struct
 	RelFileNode rels[FLEXIBLE_ARRAY_MEMBER];
 } RewindRelFileNodeUndoStackItem;
 
-UndoItemTypeDescr undoItemTypeDescrs[] = {
+static UndoItemTypeDescr undoItemTypeDescrs[] = {
 	{
 		.type = ModifyUndoItemType,
 		.callback = modify_undo_callback,
@@ -857,7 +857,9 @@ get_current_replication_catalog_retain_undo_location(void)
 		return InvalidUndoLocation;
 
 	result = read_replication_catalog_retain_undo_location(catalog_xmin, &ndeleted, false);
-	elog(DEBUG4, "Current undoLocation from SYS_TREES_CATALOG_XID_UNDO_LOCATION is %lu for catalog_xmin %u. Deleted %d old items", result, catalog_xmin, ndeleted);
+	elog(DEBUG4, "Current undoLocation from SYS_TREES_CATALOG_XID_UNDO_LOCATION is "
+		 UINT64_FORMAT " for catalog_xmin %u. Deleted %d old items",
+		 result, catalog_xmin, ndeleted);
 
 	return result;
 }
@@ -2161,7 +2163,7 @@ undo_xact_callback(XactEvent event, void *arg)
 			{
 				if (!logicalXidContext.useHeap)
 				{
-					elog(DEBUG4, "event %d oxid %lu SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u",
+					elog(DEBUG4, "event %d oxid " UINT64_FORMAT " SWITCH_LOGICAL_XID O2H heap xid %u -> oriole xid %u",
 						 event, oxid, heapXid, logicalXidContext.xid);
 
 					add_switch_logical_xid_wal_record(heapXid, logicalXidContext.xid);
@@ -2172,12 +2174,12 @@ undo_xact_callback(XactEvent event, void *arg)
 		{
 			if (TransactionIdIsValid(heapXid))
 			{
-				elog(DEBUG4, "event %d oxid %lu top heapXid %u independent heap transaction",
+				elog(DEBUG4, "event %d oxid " UINT64_FORMAT " top heapXid %u independent heap transaction",
 					 event, oxid, heapXid);
 			}
 			else if (TransactionIdIsValid(logicalXidContext.xid))
 			{
-				elog(DEBUG4, "event %d oxid %lu logicalXid %u independent Oriole transaction",
+				elog(DEBUG4, "event %d oxid " UINT64_FORMAT " logicalXid %u independent Oriole transaction",
 					 event, oxid, logicalXidContext.xid);
 			}
 		}
@@ -2209,8 +2211,9 @@ undo_xact_callback(XactEvent event, void *arg)
 				 * SWITCH_LOGICAL_XID.
 				 */
 
-				elog(DEBUG4, "XACT_EVENT_PRE_COMMIT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
-					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
+				elog(DEBUG4, "XACT_EVENT_PRE_COMMIT oxid " UINT64_FORMAT " logicalXid %u top heapXid %u current heapXid %u useHeap %d",
+					 oxid, logicalXidContext.xid, heapXid,
+					 GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					precommit_undo_stack((UndoLogType) i, oxid, true);
@@ -2222,8 +2225,11 @@ undo_xact_callback(XactEvent event, void *arg)
 				{
 					Assert(logicalXidContext.xid != heapXid);
 
-					elog(DEBUG4, "XACT_EVENT_PRE_COMMIT wal_joint_commit for SWITCH_LOGICAL_XID %s oxid %lu logicalXid %u top heapXid %u current heapXid %u",
-						 logicalXidContext.useHeap ? "H2O" : "O2H", oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny());
+					elog(DEBUG4, "XACT_EVENT_PRE_COMMIT wal_joint_commit for SWITCH_LOGICAL_XID %s oxid "
+						 UINT64_FORMAT " logicalXid %u top heapXid %u current heapXid %u",
+						 logicalXidContext.useHeap ? "H2O" : "O2H", oxid,
+						 logicalXidContext.xid, heapXid,
+						 GetCurrentTransactionIdIfAny());
 
 					wal_joint_commit(oxid,
 									 get_current_logical_xid(),
@@ -2234,8 +2240,10 @@ undo_xact_callback(XactEvent event, void *arg)
 
 			case XACT_EVENT_COMMIT:
 
-				elog(DEBUG4, "XACT_EVENT_COMMIT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
-					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
+				elog(DEBUG4, "XACT_EVENT_COMMIT oxid " UINT64_FORMAT
+					 " logicalXid %u top heapXid %u current heapXid %u useHeap %d",
+					 oxid, logicalXidContext.xid, heapXid,
+					 GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
 				if (!TransactionIdIsValid(heapXid))
 				{
@@ -2245,8 +2253,11 @@ undo_xact_callback(XactEvent event, void *arg)
 
 					flushPos = assign_xidless_commit_lsn(oxid, &wrote_xlog);
 
-					elog(DEBUG4, "XACT_EVENT_COMMIT [independent Oriole transaction] oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d flushPos %X/%X",
-						 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap, LSN_FORMAT_ARGS(flushPos));
+					elog(DEBUG4, "XACT_EVENT_COMMIT [independent Oriole transaction] oxid "
+						 UINT64_FORMAT " logicalXid %u top heapXid %u current heapXid %u useHeap %d flushPos %X/%X",
+						 oxid, logicalXidContext.xid, heapXid,
+						 GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap,
+						 LSN_FORMAT_ARGS(flushPos));
 
 					flushPos = Max(flushPos, XactLastCommitEnd);
 
@@ -2310,8 +2321,10 @@ undo_xact_callback(XactEvent event, void *arg)
 
 			case XACT_EVENT_ABORT:
 
-				elog(DEBUG4, "XACT_EVENT_ABORT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
-					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
+				elog(DEBUG4, "XACT_EVENT_ABORT oxid " UINT64_FORMAT
+					 " logicalXid %u top heapXid %u current heapXid %u useHeap %d",
+					 oxid, logicalXidContext.xid, heapXid,
+					 GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
 
 				if (!RecoveryInProgress())

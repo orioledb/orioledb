@@ -93,7 +93,10 @@ static void orioledb_amrescan(IndexScanDesc scan, ScanKey scankey,
 static bool orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir);
 static int64 orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm);
 static void orioledb_amendscan(IndexScanDesc scan);
-#if PG_VERSION_NUM >= 170000
+#if PG_VERSION_NUM >= 180000
+static Size orioledb_amestimateparallelscan(Relation indexRelation, int nkeys,
+											int norderbys);
+#elif PG_VERSION_NUM >= 170000
 static Size orioledb_amestimateparallelscan(int nkeys, int norderbys);
 #else
 static Size orioledb_amestimateparallelscan(void);
@@ -116,7 +119,7 @@ typedef struct BrigedIndexAmRoutine
 	Oid			amhandler;
 } BrigedIndexAmRoutine;
 
-List	   *bridged_ams = NIL;
+static List	   *bridged_ams = NIL;
 
 static IndexAmRoutine *
 orioledb_btree_handler(void)
@@ -159,7 +162,9 @@ orioledb_btree_handler(void)
 	amroutine->amvacuumcleanup = orioledb_amvacuumcleanup;
 	amroutine->amcanreturn = orioledb_amcanreturn;
 	amroutine->amcostestimate = orioledb_amcostestimate;
+#if PG_VERSION_NUM >= 180000
 	amroutine->amgettreeheight = NULL;
+#endif
 	amroutine->amoptions = orioledb_amoptions;
 	amroutine->amproperty = orioledb_amproperty;
 	amroutine->ambuildphasename = orioledb_ambuildphasename;
@@ -381,7 +386,7 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 			if (i != 0)
 				appendStringInfo(str, ", ");
 			appendStringInfo(str, "%s",
-							 id->nonLeafTupdesc->attrs[i].attname.data);
+							 TupleDescAttr(id->nonLeafTupdesc, i)->attname.data);
 		}
 		appendStringInfo(str, ")=");
 
@@ -403,7 +408,7 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 				bool		typisvarlena;
 				char	   *res;
 
-				getTypeOutputInfo(id->nonLeafTupdesc->attrs[i].atttypid,
+				getTypeOutputInfo(TupleDescAttr(id->nonLeafTupdesc, i)->atttypid,
 								  &typoutput, &typisvarlena);
 				res = OidOutputFunctionCall(typoutput, value);
 				appendStringInfo(str, "'%s'", res);
@@ -793,7 +798,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 							bool		typisvarlena;
 							char	   *res;
 
-							getTypeOutputInfo(index_descr->leafTupdesc->attrs[i].atttypid,
+							getTypeOutputInfo(TupleDescAttr(index_descr->leafTupdesc, i)->atttypid,
 											  &typoutput, &typisvarlena);
 							res = OidOutputFunctionCall(typoutput, valuesOld[i]);
 							appendStringInfo(str, "'%s'", res);
@@ -929,7 +934,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 							bool		typisvarlena;
 							char	   *res;
 
-							getTypeOutputInfo(index_descr->nonLeafTupdesc->attrs[i].atttypid,
+							getTypeOutputInfo(TupleDescAttr(index_descr->nonLeafTupdesc, i)->atttypid,
 											  &typoutput, &typisvarlena);
 							res = OidOutputFunctionCall(typoutput, values[i]);
 							appendStringInfo(str, "'%s'", res);
@@ -1467,6 +1472,7 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 
 	/* get the scan */
 	scan = btbeginscan(rel, nkeys, norderbys);
+	scan->xs_snapshot = NULL;
 	o_scan->scandesc = *scan;
 	pfree(scan);
 
@@ -1515,6 +1521,24 @@ o_get_num_prefix_exact_keys(ScanKey scankey, int nscankeys)
 		prevAttr = scankey[i].sk_attno;
 	}
 	return i;
+}
+
+int
+o_adjust_num_prefix_exact_keys(BTScanOpaque so, int numPrefixExactKeys)
+{
+	int			adjusted = numPrefixExactKeys;
+
+#if PG_VERSION_NUM >= 180000
+	for (int i = 0; i < so->numArrayKeys; i++)
+	{
+		BTArrayKeyInfo *arrayKey = &so->arrayKeys[i];
+
+		if (arrayKey->num_elems <= 0 && arrayKey->scan_key < adjusted)
+			adjusted = arrayKey->scan_key;
+	}
+#endif
+
+	return adjusted;
 }
 
 void
@@ -1921,7 +1945,9 @@ orioledb_amendscan(IndexScanDesc scan)
 }
 
 Size
-#if PG_VERSION_NUM >= 170000
+#if PG_VERSION_NUM >= 180000
+orioledb_amestimateparallelscan(Relation indexRelation, int nkeys, int norderbys)
+#elif PG_VERSION_NUM >= 170000
 orioledb_amestimateparallelscan(int nkeys, int norderbys)
 #else
 orioledb_amestimateparallelscan(void)

@@ -2,6 +2,9 @@ CREATE SCHEMA inherits;
 SET SESSION search_path = 'inherits';
 CREATE EXTENSION orioledb;
 
+SELECT split_part(setting, '.', 1) major_version
+	FROM pg_settings WHERE name = 'server_version';
+
 CREATE TABLE p_stock (
 	item_id int
 ) USING orioledb;
