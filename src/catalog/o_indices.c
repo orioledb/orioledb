@@ -86,21 +86,9 @@ oIndicesGetNextKey(void *key, void *arg)
 	OIndexChunkKey *ckey = (OIndexChunkKey *) key;
 	static OIndexChunkKey nextKey;
 
-	elog(LOG, "[%s] GET NEXT FOR ckey [ %u %u %u ]; type %u; chunknum %u; version %u", __func__,
-		 ckey->oids.datoid, ckey->oids.reloid, ckey->oids.relnode,
-		 ckey->type,
-		 ckey->chunknum,
-		 ckey->version);
-
 	nextKey = *ckey;
 	nextKey.oids.relnode++;
 	nextKey.chunknum = 0;
-
-	elog(LOG, "[%s] NEXT IS [ %u %u %u ]; type %u; chunknum %u; version %u", __func__,
-		 nextKey.oids.datoid, nextKey.oids.reloid, nextKey.oids.relnode,
-		 nextKey.type,
-		 nextKey.chunknum,
-		 nextKey.version);
 
 	return &nextKey;
 }
@@ -270,7 +258,7 @@ make_ctid_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	result->indexVersion = new_version;
 	table->primary_ixversion = new_version;
 
-	elog(LOG, "[%s] oids [ %u %u %u ] version %u", __func__,
+	elog(DEBUG2, "[%s] oids [ %u %u %u ] version %u", __func__,
 		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
 		 new_version);
 
@@ -352,7 +340,7 @@ make_primary_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	table->primary_ixversion = new_version;
 	tableIndex->version = new_version;
 
-	elog(LOG, "[%s] oids [ %u %u %u ] version %u", __func__,
+	elog(DEBUG2, "[%s] oids [ %u %u %u ] version %u", __func__,
 		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
 		 new_version);
 
@@ -488,7 +476,9 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex, OIndexVersionMode
 	result->indexVersion = new_version;
 	tableIndex->version = new_version;
 
-	elog(LOG, "[%s] indexVersion %u", __func__, new_version);
+	elog(DEBUG2, "[%s] oids [ %u %u %u ] version %u", __func__,
+		 tableIndex->oids.datoid, tableIndex->oids.reloid, tableIndex->oids.relnode,
+		 new_version);
 
 	namestrcpy(&result->name, tableIndex->name.data);
 	result->tableOids = table->oids;
@@ -588,7 +578,7 @@ make_toast_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	result->nNonLeafFields += TOAST_NON_LEAF_FIELDS_NUM;
 	result->immediate = true;
 
-	elog(LOG, "[%s] oids [ %u %u %u ] version %u", __func__,
+	elog(DEBUG2, "[%s] oids [ %u %u %u ] version %u", __func__,
 		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
 		 new_version);
 
@@ -1283,9 +1273,8 @@ o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	key.type = oIndex->indexType;
 	key.chunknum = 0;
 	key.version = 0;
-	/* oIndex->indexVersion; */
 
-	elog(LOG, "[%s] key oids [ %u %u %u ]; ixNum %u type %u; chunknum %u; version %u", __func__,
+	elog(DEBUG2, "[%s] key oids [ %u %u %u ] ixNum %u type %u chunknum %u version %u", __func__,
 		 key.oids.datoid, key.oids.reloid, key.oids.relnode,
 		 ixNum,
 		 key.type,
@@ -1317,7 +1306,7 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	key.chunknum = 0;
 	key.version = oIndex->indexVersion;
 
-	elog(LOG, "[%s] key oids [ %u %u %u ]; type %u; chunknum %u; version %u", __func__,
+	elog(DEBUG2, "[%s] key oids [ %u %u %u ] type %u chunknum %u version %u", __func__,
 		 key.oids.datoid, key.oids.reloid, key.oids.relnode,
 		 key.type,
 		 key.chunknum,
@@ -1352,7 +1341,7 @@ o_indices_get_extended(ORelOids oids, OIndexType type, OTableFetchContext ctx)
 	key.chunknum = 0;
 	key.version = ctx.version;
 
-	elog(LOG, "[%s] key oids [ %u %u %u ]; type %u; chunknum %u; version %u", __func__,
+	elog(DEBUG2, "[%s] key oids [ %u %u %u ] type %u chunknum %u version %u", __func__,
 		 key.oids.datoid, key.oids.reloid, key.oids.relnode,
 		 key.type,
 		 key.chunknum,
@@ -1399,7 +1388,7 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	key.chunknum = 0;
 	key.version = oIndex->indexVersion;
 
-	elog(LOG, "[%s] key oids [ %u %u %u ]; type %u; chunknum %u; version %u", __func__,
+	elog(DEBUG2, "[%s] key oids [ %u %u %u ] type %u chunknum %u version %u", __func__,
 		 key.oids.datoid, key.oids.reloid, key.oids.relnode,
 		 key.type,
 		 key.chunknum,
