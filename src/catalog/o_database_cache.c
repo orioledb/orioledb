@@ -22,6 +22,9 @@
 
 #include "catalog/pg_collation.h"
 #include "catalog/pg_database.h"
+#if PG_VERSION_NUM >= 180000
+#include "utils/memutils.h"
+#endif
 #include "utils/syscache.h"
 #include "mb/pg_wchar.h"
 
@@ -163,12 +166,34 @@ o_database_cache_set_default_locale_provider()
 {
 	XLogRecPtr	cur_lsn;
 	ODatabase  *o_database;
+#if PG_VERSION_NUM >= 180000
+	pg_locale_t	loc = pg_newlocale_from_collation(DEFAULT_COLLATION_OID);
+#else
+	pg_locale_t	loc = &default_locale;
+#endif
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
 	o_database = o_database_cache_search(Template1DbOid, Template1DbOid, cur_lsn,
 										 database_cache->nkeys);
 	if (o_database)
 	{
+#if PG_VERSION_NUM >= 180000
+		pg_locale_t	new_loc;
+
+		if (o_database->datlocprovider == COLLPROVIDER_BUILTIN)
+			new_loc = create_pg_locale_builtin(DEFAULT_COLLATION_OID,
+											  TopMemoryContext);
+		else if (o_database->datlocprovider == COLLPROVIDER_ICU)
+			new_loc = create_pg_locale_icu(DEFAULT_COLLATION_OID,
+										  TopMemoryContext);
+		else
+			/* We don't support libc provider */
+			Assert(false);
+
+		memcpy(loc, new_loc, sizeof(*loc));
+
+		loc->is_default = true;
+#else
 		if (o_database->datlocprovider == COLLPROVIDER_BUILTIN)
 		{
 			default_locale.info.builtin.locale = MemoryContextStrdup(TopMemoryContext,
@@ -178,14 +203,20 @@ o_database_cache_set_default_locale_provider()
 		{
 			make_icu_collator(o_database->datlocale, o_database->daticurules, &default_locale);
 		}
+		else
+		{
+			/* We don't support libc provider */
+			Assert(false);
+		}
 
-		default_locale.provider = o_database->datlocprovider;
-		default_locale.deterministic = true;
+		loc->provider = o_database->datlocprovider;
+		loc->deterministic = true;
+#endif
 	}
 	else
 	{
-		default_locale.provider = COLLPROVIDER_DEFAULT;
-		default_locale.deterministic = true;
+		loc->provider = COLLPROVIDER_DEFAULT;
+		loc->deterministic = true;
 	}
 }
 #endif

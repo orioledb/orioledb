@@ -88,11 +88,17 @@ o_collation_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 		elog(ERROR, "cache lookup failed for collation (%u)", colloid);
 	collform = (Form_pg_collation) GETSTRUCT(collationtup);
 
+#if PG_VERSION_NUM < 180000
 	valid = collform->collprovider == COLLPROVIDER_ICU ||
 		lc_collate_is_c(colloid);
+#else
+	valid = collform->collprovider == COLLPROVIDER_ICU ||
+		pg_newlocale_from_collation(colloid)->collate_is_c;
+#endif
 
 	valid = valid || (colloid == DEFAULT_COLLATION_OID &&
-					  default_locale.provider == COLLPROVIDER_ICU);
+					  pg_newlocale_from_collation(DEFAULT_COLLATION_OID) != NULL &&
+					  pg_newlocale_from_collation(DEFAULT_COLLATION_OID)->provider == COLLPROVIDER_ICU);
 	if (!valid)
 		elog(ERROR,
 			 "Only C, POSIX and ICU collations supported for orioledb tables");

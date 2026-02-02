@@ -158,7 +158,7 @@ typedef struct NewColumnValue
 	bool		is_generated;	/* is it a GENERATED expression? */
 }			NewColumnValue;
 
-bool		in_indexes_rebuild = false;
+static bool		in_indexes_rebuild = false;
 
 bool
 is_in_indexes_rebuild(void)

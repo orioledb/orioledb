@@ -99,7 +99,7 @@ static uint32 oSysCacheToastGetTupleDataSize(OTuple tuple, void *arg);
 static HeapTuple o_auth_cache_search_htup(TupleDesc tupdesc, Oid authoid);
 
 
-ToastAPI	oSysCacheToastAPI = {
+static ToastAPI	oSysCacheToastAPI = {
 	.getBTreeDesc = oSysCacheToastGetBTreeDesc,
 	.getBTreeVersion = NULL,
 	.getBaseBTreeVersion = NULL,

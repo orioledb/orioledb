@@ -55,6 +55,20 @@ typedef struct BrigeData
 	AttrNumber	attnum;
 } BrigeData;
 
+#if PG_VERSION_NUM < 180000
+#define OTupleAttrCompact		FormData_pg_attribute
+#define OTupleAttrFull			FormData_pg_attribute
+
+#define OTupleDescAttrFast(tupdesc, i) (TupleDescAttr((tupdesc), (i)))
+#define OTupleDescAttrSlow(tupdesc, i) (TupleDescAttr((tupdesc), (i)))
+#else
+#define OTupleAttrCompact		CompactAttribute
+#define OTupleAttrFull			FormData_pg_attribute
+
+#define OTupleDescAttrFast(tupdesc, i) (TupleDescCompactAttr((tupdesc), (i)))
+#define OTupleDescAttrSlow(tupdesc, i) (TupleDescAttr((tupdesc), (i)))
+#endif
+
 /*
  * Works with orioledb table tuples in primary index. It can fetch
  * TOAST pointers from table tuple.
@@ -67,11 +81,11 @@ typedef struct BrigeData
 	(																\
 		((attnum) - 1 < (spec)->natts) ?							\
 		(															\
-			TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
+			OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
 			(														\
-				fetchatt(TupleDescAttr((tupleDesc), (attnum) - 1),	\
+				fetchatt(OTupleDescAttrFast((tupleDesc), (attnum) - 1), \
 					(char *) (tup).data +							\
-					TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff) \
+					OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff) \
 			)														\
 			:														\
 				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec), (isnull)) \
@@ -86,11 +100,11 @@ typedef struct BrigeData
 	(																\
 		(!(((OTupleHeader) (tup).data)->hasnulls)) ?				\
 		(															\
-			TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
+			OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
 			(														\
-				fetchatt(TupleDescAttr((tupleDesc), (attnum)-1),	\
+				fetchatt(OTupleDescAttrFast((tupleDesc), (attnum)-1), \
 					(char *) (tup).data + SizeOfOTupleHeader +		\
-					TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff) \
+					OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff) \
 			)														\
 			:														\
 				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec), (isnull)) \
@@ -117,10 +131,10 @@ typedef struct BrigeData
 	(																\
 		((attnum) - 1 < (spec)->natts) ?							\
 		(															\
-			TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
+			OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
 			(														\
 				(char *) (tup).data +									\
-				TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff \
+				OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff \
 			)														\
 			:														\
 				o_toast_nocachegetattr_ptr((tup), (attnum), (tupleDesc), (spec)) \
@@ -134,10 +148,10 @@ typedef struct BrigeData
 	(																\
 		(!(((OTupleHeader) (tup).data)->hasnulls)) ?				\
 		(															\
-			TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
+			OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
 			(														\
 				(char *) (tup).data + SizeOfOTupleHeader +				\
-				TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff \
+				OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff \
 			)														\
 			:														\
 				o_toast_nocachegetattr_ptr((tup), (attnum), (tupleDesc), (spec)) \

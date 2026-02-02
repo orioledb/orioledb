@@ -500,7 +500,7 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 					appendStringInfo(outbuf, ", in-progress (%u)",
 									 DOWNLINK_GET_IO_LOCKNUM(tuphdr->downlink));
 				else
-					appendStringInfo(outbuf, ", downlink = on-disk (%lu, %u)",
+					appendStringInfo(outbuf, ", downlink = on-disk (" UINT64_FORMAT ", %u)",
 									 DOWNLINK_GET_DISK_OFF(tuphdr->downlink),
 									 DOWNLINK_GET_DISK_LEN(tuphdr->downlink));
 				if (i != 0)
