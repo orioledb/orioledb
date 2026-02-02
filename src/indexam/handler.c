@@ -158,6 +158,7 @@ orioledb_btree_handler(void)
 	amroutine->amvacuumcleanup = orioledb_amvacuumcleanup;
 	amroutine->amcanreturn = orioledb_amcanreturn;
 	amroutine->amcostestimate = orioledb_amcostestimate;
+	amroutine->amgettreeheight = NULL;
 	amroutine->amoptions = orioledb_amoptions;
 	amroutine->amproperty = orioledb_amproperty;
 	amroutine->ambuildphasename = orioledb_ambuildphasename;
