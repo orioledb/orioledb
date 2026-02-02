@@ -115,21 +115,21 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 	offset = 0;
 	for (i = 0; i < meta->numKeys; i++)
 	{
-		ArraySearchDesc *desc = find_array_search_desc_by_typeid(id->nonLeafTupdesc->attrs[0].atttypid);
+		ArraySearchDesc *searchDesc = find_array_search_desc_by_typeid(id->nonLeafTupdesc->attrs[i].atttypid);
 		OIndexField *field = &id->fields[i];
 
-		if (!desc || desc->opcid != field->opclass)
+		if (!searchDesc || searchDesc->opcid != field->opclass)
 		{
 			meta->enabled = false;
 			return;
 		}
 
-		offset = TYPEALIGN(desc->align, offset);
-		meta->funcs[i] = desc->func;
+		offset = TYPEALIGN(searchDesc->align, offset);
+		meta->funcs[i] = searchDesc->func;
 		meta->offsets[i] = offset;
-		types[i] = desc->typeid;
+		types[i] = searchDesc->typeid;
 
-		offset += desc->typlen;
+		offset += searchDesc->typlen;
 	}
 
 	if (!find_downlink_get_keys(context->desc, key, keyType,
