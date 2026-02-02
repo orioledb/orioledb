@@ -27,6 +27,9 @@
 #include "access/nbtree.h"
 #include "access/skey.h"
 #include "executor/nodeIndexscan.h"
+#if PG_VERSION_NUM >= 180000
+#include "commands/explain_format.h"
+#endif
 #include "parser/parse_coerce.h"
 #include "pgstat.h"
 

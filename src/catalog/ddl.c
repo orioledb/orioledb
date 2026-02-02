@@ -105,17 +105,17 @@
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
 
-List	   *drop_index_list = NIL;
-List	   *partition_drop_index_list = NIL;
+static List	   *drop_index_list = NIL;
+static List	   *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
 static List *o_alter_generated_column_id = NIL;
 Oid			o_saved_relrewrite = InvalidOid;
-Oid			o_saved_reltablespace = InvalidOid;
+static Oid			o_saved_reltablespace = InvalidOid;
 List	   *o_reuse_indices = NIL;
 static ORelOids saved_oids;
 static bool in_rewrite = false;
 List	   *reindex_list = NIL;
-Query	   *savedDataQuery = NULL;
+static Query	   *savedDataQuery = NULL;
 IndexBuildResult o_pkey_result = {0};
 bool		o_in_add_column = false;
 
@@ -166,8 +166,10 @@ alter_table_type_to_string(AlterTableType cmdtype)
 			return "ALTER COLUMN ... SET NOT NULL";
 		case AT_DropExpression:
 			return "ALTER COLUMN ... DROP EXPRESSION";
+#if PG_VERSION_NUM < 180000
 		case AT_CheckNotNull:
 			return NULL;		/* not real grammar */
+#endif
 		case AT_SetStatistics:
 			return "ALTER COLUMN ... SET STATISTICS";
 		case AT_SetOptions:
@@ -689,7 +691,11 @@ create_ctas_internal(List *attrList, IntoClause *into)
 	bool		is_matview;
 	char		relkind;
 	Datum		toast_options;
+#if PG_VERSION_NUM < 180000
 	static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+#else
+	const char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+#endif
 	ObjectAddress intoRelationAddr;
 
 	/* This code supports both CREATE TABLE AS and CREATE MATERIALIZED VIEW */
@@ -2106,7 +2112,11 @@ rewrite_matview(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	ExecutorStart(queryDesc, 0);
 
 	/* run the plan */
+#if PG_VERSION_NUM < 180000
 	ExecutorRun(queryDesc, ForwardScanDirection, 0, true);
+#else
+	ExecutorRun(queryDesc, ForwardScanDirection, 0);
+#endif
 
 	pgstat_count_heap_insert(rel, queryDesc->estate->es_processed);
 
@@ -2158,7 +2168,8 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 		for (int i = 0; i < old_slot->tts_tupleDescriptor->natts; i++)
 		{
 			Node	   *expr = NULL;
-			Form_pg_attribute attr = &old_slot->tts_tupleDescriptor->attrs[i];
+			OTupleAttrFull *old_attr = OTupleDescAttrSlow(old_slot->tts_tupleDescriptor, i);
+			OTupleAttrCompact *new_attr = OTupleDescAttrFast(new_slot->tts_tupleDescriptor, i);
 
 			ListCell   *lc;
 
@@ -2173,7 +2184,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				}
 			}
 
-			if (!expr && attr->atthasdef && !attr->atthasmissing &&
+			if (!expr && old_attr->atthasdef && !old_attr->atthasmissing &&
 				i >= primary_init_nfields &&
 				old_slot->tts_isnull[i])
 			{
@@ -2187,15 +2198,16 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			 * been updated using ALTER TABLE ... SET EXPRESSION ... or if
 			 * value was not present in existing row
 			 */
-			if (!expr && attr->attgenerated && (old_slot->tts_isnull[i] ||
-												(o_alter_generated_column_id != NIL && list_member_int(o_alter_generated_column_id, i + 1))))
+			if (!expr && old_attr->attgenerated && (old_slot->tts_isnull[i] ||
+				(o_alter_generated_column_id != NIL &&
+				list_member_int(o_alter_generated_column_id, i + 1))))
 			{
 				Node	   *defaultexpr = build_column_default(rel, i + 1);
 
 				expr = defaultexpr;
 			}
 
-			if (!expr && DomainHasConstraints(attr->atttypid) &&
+			if (!expr && DomainHasConstraints(old_attr->atttypid) &&
 				old_slot->tts_isnull[i])
 			{
 				Oid			baseTypeId;
@@ -2207,8 +2219,8 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 
 				if (!defval)
 				{
-					baseTypeMod = attr->atttypmod;
-					baseTypeId = getBaseTypeAndTypmod(attr->atttypid, &baseTypeMod);
+					baseTypeMod = old_attr->atttypmod;
+					baseTypeId = getBaseTypeAndTypmod(old_attr->atttypid, &baseTypeMod);
 					baseTypeColl = get_typcollation(baseTypeId);
 					defval = (Node *) makeNullConst(baseTypeId, baseTypeMod, baseTypeColl);
 				}
@@ -2219,8 +2231,8 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				defval = (Node *) coerce_to_target_type(NULL,
 														defval,
 														baseTypeId,
-														attr->atttypid,
-														attr->atttypmod,
+														old_attr->atttypid,
+														old_attr->atttypmod,
 														COERCION_ASSIGNMENT,
 														COERCE_IMPLICIT_CAST,
 														-1);
@@ -2229,18 +2241,20 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				expr = defval;
 			}
 
-			attr = &new_slot->tts_tupleDescriptor->attrs[i];
 			if (expr)
 			{
 				new_slot->tts_values[i] = o_eval_default(new_o_table, rel, expr, old_slot,
-														 attr->attbyval, attr->attlen,
+														 new_attr->attbyval,
+														 new_attr->attlen,
 														 &new_slot->tts_isnull[i]);
 			}
 			else
 			{
 				if (!old_slot->tts_isnull[i])
 				{
-					new_slot->tts_values[i] = datumCopy(old_slot->tts_values[i], attr->attbyval, attr->attlen);
+					new_slot->tts_values[i] = datumCopy(old_slot->tts_values[i],
+														new_attr->attbyval,
+														new_attr->attlen);
 					new_slot->tts_isnull[i] = old_slot->tts_isnull[i];
 				}
 				else
@@ -2378,7 +2392,11 @@ change_bridging_option(Relation rel, bool value, bool isReset)
 	Datum		repl_val[Natts_pg_class];
 	bool		repl_null[Natts_pg_class];
 	bool		repl_repl[Natts_pg_class];
+#if PG_VERSION_NUM < 180000
 	static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+#else
+	const char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+#endif
 	DefElem    *bridging_def;
 
 	pgclass = table_open(RelationRelationId, RowExclusiveLock);
@@ -3002,6 +3020,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			case TYPTYPE_ENUM:
 				o_enum_cache_delete_all(MyDatabaseId, typeform->oid);
 				break;
+			default:
+				break;
 		}
 		if (typeform->typtype != TYPTYPE_BASE &&
 			typeform->typtype != TYPTYPE_PSEUDO)
@@ -3029,7 +3049,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					 (subId != 0) && is_orioledb_rel(rel))
 			{
 				OTableField *field;
-				Form_pg_attribute attr;
 				OTable	   *o_table;
 				ORelOids	oids;
 				OSnapshot	oSnapshot;
@@ -3056,8 +3075,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					CommandCounterIncrement();
 					field = &o_table->fields[o_table->nfields - 1];
-					attr = &rel->rd_att->attrs[rel->rd_att->natts - 1];
-					orioledb_attr_to_field(field, attr);
+					orioledb_attr_to_field(field,
+										   TupleDescAttr(rel->rd_att,
+														 rel->rd_att->natts - 1));
 
 					o_table_resize_constr(o_table);
 
@@ -3220,7 +3240,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		if (rel != NULL && (rel->rd_rel->relkind == RELKIND_RELATION) &&
 			(subId != 0) && is_orioledb_rel(rel))
 		{
-			Form_pg_attribute attr;
 			OTable	   *o_table;
 			ORelOids	oids;
 			OSnapshot	oSnapshot;
@@ -3243,8 +3262,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				old_field = o_table->fields[subId - 1];
 				CommandCounterIncrement();
 				field = &o_table->fields[subId - 1];
-				attr = &rel->rd_att->attrs[subId - 1];
-				orioledb_attr_to_field(field, attr);
+				orioledb_attr_to_field(field,
+									   TupleDescAttr(rel->rd_att, subId - 1));
 
 				/* TODO: Probably use CheckIndexCompatible here */
 				changed = old_field.typid != field->typid ||
@@ -3310,7 +3329,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				{
 					OTableField old_field;
 					OTableField *field;
-					Form_pg_attribute attr;
 					OSnapshot	oSnapshot;
 					OXid		oxid;
 					int			ix_num;
@@ -3319,8 +3337,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					old_field = o_table->fields[subId - 1];
 					CommandCounterIncrement();
 					field = &o_table->fields[subId - 1];
-					attr = &rel->rd_att->attrs[subId - 1];
-					orioledb_attr_to_field(field, attr);
+					orioledb_attr_to_field(field,
+										   TupleDescAttr(rel->rd_att,
+														 subId - 1));
 
 					/* TODO: Probably use CheckIndexCompatible here */
 					changed_ty = old_field.typid != field->typid ||
@@ -3381,7 +3400,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								attributeList = lappend(attributeList, iparam);
 							}
 
-							compatible = CheckIndexCompatible(o_table_index->oids.reloid, "btree", attributeList, NIL);
+							compatible = CheckIndexCompatible(o_table_index->oids.reloid,
+															  "btree",
+															  attributeList,
+#if PG_VERSION_NUM >= 180000
+															  NIL, false);
+#else
+															  NIL);
+#endif
 
 							for (field_num = 0; field_num < o_table_index->nkeyfields;
 								 field_num++)

@@ -836,7 +836,7 @@ check_pending_truncates(void)
 void
 btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 							UndoStackItem *baseItem,
-							OXid oxid, bool abort, bool changeCountsValid)
+							OXid oxid, bool abortCommit, bool changeCountsValid)
 {
 	RelnodeUndoStackItem *relnode_item = (RelnodeUndoStackItem *) baseItem;
 	Oid			datoid,
@@ -848,7 +848,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 	bool		doCleanup;
 	bool		cleanupFiles = true;
 
-	if (!enable_rewind || abort)
+	if (!enable_rewind || abortCommit)
 		doCleanup = true;
 	else
 		doCleanup = is_rewind_worker();
@@ -856,7 +856,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 	datoid = relnode_item->datoid;
 	reloid = relnode_item->relid;
 
-	if (!abort)
+	if (!abortCommit)
 	{
 		remainRelnode = relnode_item->newRelnode;
 		dropRelnode = relnode_item->oldRelnode;
@@ -882,7 +882,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 	}
 
 	/* Fsync new files if required */
-	if (!abort &&
+	if (!abortCommit &&
 		OidIsValid(relnode_item->newRelnode) &&
 		relnode_item->fsync)
 	{

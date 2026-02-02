@@ -34,6 +34,9 @@
 #include "executor/executor.h"
 #include "executor/nodeIndexscan.h"
 #include "executor/nodeModifyTable.h"
+#if PG_VERSION_NUM >= 180000
+#include "commands/explain_format.h"
+#endif
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"

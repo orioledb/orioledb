@@ -83,8 +83,6 @@
 
 PG_MODULE_MAGIC;
 
-void		_PG_init(void);
-
 static bool debug_disable_pools_limit = false;
 static Pointer shared_segment = NULL;
 static bool shared_segment_initialized = false;
@@ -103,9 +101,9 @@ static int	undo_buffers_guc;
 static int	xid_buffers_guc;
 static int	rewind_buffers_guc;
 int			max_procs;
-Size		orioledb_buffers_size;
-Size		orioledb_buffers_count;
-Size		page_descs_size;
+static Size orioledb_buffers_size;
+static Size orioledb_buffers_count;
+static Size page_descs_size;
 Size		undo_circular_buffer_size;
 uint32		undo_buffers_count;
 double		regular_block_undo_circular_buffer_fraction;
@@ -177,7 +175,7 @@ MemoryContext btree_insert_context = NULL;
  */
 MemoryContext btree_seqscan_context = NULL;
 
-OPagePool	page_pools[OPagePoolTypesCount];
+static OPagePool page_pools[OPagePoolTypesCount];
 
 static size_t page_pools_size[OPagePoolTypesCount];
 

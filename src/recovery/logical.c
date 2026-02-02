@@ -82,7 +82,11 @@ record_buffer_tuple(ReorderBuffer *reorder, HeapTuple htup, bool freeHtup)
 	HeapTuple	changeTup;
 	REORDER_BUFFER_TUPLE_TYPE result;
 
+#if PG_VERSION_NUM >= 180000
+	result = ReorderBufferAllocTupleBuf(reorder, htup->t_len);
+#else
 	result = ReorderBufferGetTupleBuf(reorder, htup->t_len);
+#endif
 
 #if PG_VERSION_NUM >= 170000
 	changeTup = result;
@@ -693,7 +697,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 				{
 					CSNSnapshotData *csnSnapshot;
 
-					elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
+					elog(DEBUG4, "RECEIVE record type %d (%s) oxid " UINT64_FORMAT " logicalXId %u heapXid %u",
 						 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
 					csnSnapshot = SnapBuildGetCSNSnaphot(ctx->dctx->snapshot_builder);
@@ -706,7 +710,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 					 * transactions (internal Oriole's mechanism intended for
 					 * independed commit of Oriole system catalog changes)
 					 */
-					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu",
+					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid " UINT64_FORMAT,
 						 rec->type, recname, rec->oxid);
 				}
 				break;
@@ -718,7 +722,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 				TransactionId topXid = rec->u.swxid.topXid;
 				TransactionId subXid = rec->u.swxid.subXid;
 
-				elog(DEBUG4, "RECEIVE record type %d (%s) %u=>%u oxid %lu logicalXId %u heapXid %u xlogPtr %X/%X",
+				elog(DEBUG4, "RECEIVE record type %d (%s) %u=>%u oxid " UINT64_FORMAT " logicalXId %u heapXid %u xlogPtr %X/%X",
 					 rec->type, recname, topXid, subXid,
 					 rec->oxid, rec->logicalXid, rec->heapXid, LSN_FORMAT_ARGS(xlogPtr));
 
@@ -738,7 +742,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 				CSNSnapshotData *csnSnapshot = NULL;
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
 
-				elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
+				elog(DEBUG4, "RECEIVE record type %d (%s) oxid " UINT64_FORMAT " logicalXId %u heapXid %u",
 					 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
 				if (!TransactionIdIsValid(rec->logicalXid))
@@ -747,7 +751,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 					 * Oriole logical xid stays invalid for an autonomous
 					 * transactions
 					 */
-					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu",
+					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid " UINT64_FORMAT,
 						 rec->type, recname, rec->oxid);
 
 					UpdateDecodingStats(ctx->dctx);
@@ -767,7 +771,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 
 				if (txn == NULL)
 				{
-					elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u :: unknown transaction, nothing to replay",
+					elog(DEBUG4, "RECEIVE record type %d (%s) oxid " UINT64_FORMAT " logicalXId %u :: unknown transaction, nothing to replay",
 						 rec->type, recname, rec->oxid, rec->logicalXid);
 				}
 
@@ -789,7 +793,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 							 * it means we are about to finalize a transaction
 							 * without having emitted some of its changes.
 							 */
-							elog(ERROR, "SKIPPED DML for record type %d (%s) oxid %lu logicalXId %u heapXid %u",
+							elog(ERROR, "SKIPPED DML for record type %d (%s) oxid " UINT64_FORMAT " logicalXId %u heapXid %u",
 								 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 						}
 
@@ -800,7 +804,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 						 */
 						if (SnapBuildXactNeedsSkip(ctx->dctx->snapshot_builder, ctx->xlogRecEndPtr - 1) || ctx->dctx->fast_forward)
 						{
-							elog(DEBUG4, "FORGET record type %d (%s) oxid %lu logicalXid %u heapXid %u",
+							elog(DEBUG4, "FORGET record type %d (%s) oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
 								 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
 							dlist_foreach(cur_txn_i, &txn->subtxns)
@@ -833,7 +837,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 							ReorderBufferCommitChild(ctx->dctx->reorder, txn->xid, cur_txn->xid,
 													 ctx->xlogRecPtr, ctx->xlogRecEndPtr);
 						}
-						elog(DEBUG4, "COMMIT record type %d (%s) oxid %lu logicalXid %u heapXid %u, origin_id %u, origin_lsn %X/%X",
+						elog(DEBUG4, "COMMIT record type %d (%s) oxid " UINT64_FORMAT " logicalXid %u heapXid %u, origin_id %u, origin_lsn %X/%X",
 							 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid,
 							 rec->origin_id, LSN_FORMAT_ARGS(rec->origin_lsn));
 
@@ -855,7 +859,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 							 * nothing to emit to the output plugin. We still
 							 * must clear the cache to avoid leaking state.
 							 */
-							elog(DEBUG4, "SKIPPED DML for record type %d (%s) oxid %lu logicalXId %u heapXid %u",
+							elog(DEBUG4, "SKIPPED DML for record type %d (%s) oxid " UINT64_FORMAT " logicalXId %u heapXid %u",
 								 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 						}
 
@@ -866,7 +870,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 							cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
 							ReorderBufferAbort(ctx->dctx->reorder, cur_txn->xid, ctx->xlogRecPtr, 0);
 						}
-						elog(DEBUG4, "ABORT record type %d (%s) oxid %lu logicalXid %u heapXid %u",
+						elog(DEBUG4, "ABORT record type %d (%s) oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
 							 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
 						ReorderBufferAbort(ctx->dctx->reorder, rec->logicalXid, ctx->xlogRecPtr, 0);
@@ -886,7 +890,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 				CSNSnapshotData *csnSnapshot = NULL;
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
 
-				elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
+				elog(DEBUG4, "RECEIVE record type %d (%s) oxid " UINT64_FORMAT " logicalXId %u heapXid %u",
 					 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
 				if (!TransactionIdIsValid(rec->logicalXid))
@@ -895,7 +899,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 					 * Oriole logical xid stays invalid for an autonomous
 					 * transactions
 					 */
-					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu",
+					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid " UINT64_FORMAT,
 						 rec->type, recname, rec->oxid);
 
 					UpdateDecodingStats(ctx->dctx);
@@ -913,7 +917,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 					 * finalize a transaction without having emitted some of
 					 * its changes.
 					 */
-					elog(ERROR, "SKIPPED DML for record type %d (%s) oxid %lu logicalXId %u heapXid %u",
+					elog(ERROR, "SKIPPED DML for record type %d (%s) oxid " UINT64_FORMAT " logicalXId %u heapXid %u",
 						 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 				}
 
@@ -928,7 +932,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 				/* Skip actual commit processing */
 				if (SnapBuildXactNeedsSkip(ctx->dctx->snapshot_builder, ctx->xlogRecEndPtr - 1) || ctx->dctx->fast_forward)
 				{
-					elog(DEBUG4, "FORGET record type %d (%s) oxid %lu logicalXid %u heapXid %u",
+					elog(DEBUG4, "FORGET record type %d (%s) oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
 						 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
 					ReorderBufferForget(ctx->dctx->reorder, rec->logicalXid, ctx->xlogRecPtr);
@@ -941,7 +945,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 						 * Oriole txn acts as a sub-txn to heap txn, needs
 						 * ReorderBufferCommitChild
 						 */
-						elog(DEBUG4, "ReorderBufferCommitChild on record type %d (%s) oxid %lu logicalXid %u heapXid %u",
+						elog(DEBUG4, "ReorderBufferCommitChild on record type %d (%s) oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
 							 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
 						ReorderBufferCommitChild(ctx->dctx->reorder, rec->heapXid, rec->logicalXid, ctx->dbuf->origptr, ctx->dbuf->endptr);
@@ -970,7 +974,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 				rec->relreplident = REPLICA_IDENTITY_DEFAULT;
 				ctx->descr = NULL;
 
-				elog(DEBUG4, "oxid %lu logicalXid %u heapXid %u WAL_REC_RELATION latest_oids [ %u %u %u ] latest_version %u ix_type %d",
+				elog(DEBUG4, "oxid " UINT64_FORMAT " logicalXid %u heapXid %u WAL_REC_RELATION latest_oids [ %u %u %u ] latest_version %u ix_type %d",
 					 rec->oxid, rec->logicalXid, rec->heapXid, rec->oids.datoid, rec->oids.reloid, rec->oids.relnode,
 					 rec->u.relation.version, ctx->ix_type);
 
@@ -980,14 +984,16 @@ decode_wal_record(void *vctx, WalRecord *rec)
 					 * Oriole logical xid stays invalid for an autonomous
 					 * transactions
 					 */
-					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec->type, recname, rec->oxid);
+					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid " UINT64_FORMAT,
+						 rec->type, recname, rec->oxid);
 					return WALPARSE_OK;
 				}
 
 				/* Skip actual relation processing in fast_forward mode */
 				if (ctx->dctx->fast_forward)
 				{
-					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec->type, recname, rec->oxid);
+					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid " UINT64_FORMAT,
+						 rec->type, recname, rec->oxid);
 					return WALPARSE_OK;
 				}
 
@@ -1071,7 +1077,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 			break;
 
 		case WAL_REC_SAVEPOINT:
-			elog(DEBUG4, "APPLY record type %d (%s) oxid %lu logicalXid %u parentLogicalXid %u",
+			elog(DEBUG4, "APPLY record type %d (%s) oxid " UINT64_FORMAT " logicalXid %u parentLogicalXid %u",
 				 rec->type, recname, rec->oxid, rec->logicalXid, rec->u.savepoint.parentLogicalXid);
 
 			if (!ctx->dctx->fast_forward)
@@ -1092,7 +1098,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 					return WALPARSE_OK;
 				}
 
-				elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u parentSubid %u",
+				elog(DEBUG4, "RECEIVE record type %d (%s) oxid " UINT64_FORMAT " logicalXId %u heapXid %u parentSubid %u",
 					 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid, rec->u.rb_to_sp.parentSubid);
 
 				if (remove_skipped_dml(&skippedDMLHash, rec->oxid))
@@ -1103,7 +1109,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 					 * (rolled back).  Clear the cache to keep per-OXID state
 					 * consistent.
 					 */
-					elog(DEBUG4, "SKIPPED DML for record type %d (%s) oxid %lu logicalXId %u heapXid %u parentSubid %u",
+					elog(DEBUG4, "SKIPPED DML for record type %d (%s) oxid " UINT64_FORMAT " logicalXId %u heapXid %u parentSubid %u",
 						 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid, rec->u.rb_to_sp.parentSubid);
 				}
 
@@ -1113,7 +1119,8 @@ decode_wal_record(void *vctx, WalRecord *rec)
 					 * Oriole logical xid stays invalid for an autonomous
 					 * transactions
 					 */
-					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec->type, recname, rec->oxid);
+					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid " UINT64_FORMAT,
+						 rec->type, recname, rec->oxid);
 
 					UpdateDecodingStats(ctx->dctx);
 					return WALPARSE_OK;
@@ -1131,7 +1138,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 
 				if (txn == NULL)
 				{
-					elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u :: unknown transaction, nothing to replay",
+					elog(DEBUG4, "RECEIVE record type %d (%s) oxid " UINT64_FORMAT " logicalXId %u heapXid %u :: unknown transaction, nothing to replay",
 						 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 				}
 
@@ -1147,7 +1154,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 						cur_txn = dlist_container(ReorderBufferTXN, node, cur_txn_i.cur);
 						ReorderBufferAbort(ctx->dctx->reorder, cur_txn->xid, ctx->xlogRecPtr, 0);
 					}
-					elog(DEBUG4, "ABORT record type %d (%s) oxid %lu logicalXid %u heapXid %u",
+					elog(DEBUG4, "ABORT record type %d (%s) oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
 						 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
 					ReorderBufferAbort(ctx->dctx->reorder, rec->logicalXid, ctx->xlogRecPtr, 0);
@@ -1173,7 +1180,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 
 				build_fixed_tuples(rec, &tuple1, &tuple2);
 
-				elog(DEBUG4, "RECEIVE record type %d (%s) oids [ %u %u %u ] oxid %lu logicalXId %u heapXid %u",
+				elog(DEBUG4, "RECEIVE record type %d (%s) oids [ %u %u %u ] oxid " UINT64_FORMAT " logicalXId %u heapXid %u",
 					 rec->type, recname,
 					 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode,
 					 rec->oxid, rec->logicalXid, rec->heapXid);
@@ -1184,7 +1191,8 @@ decode_wal_record(void *vctx, WalRecord *rec)
 					 * Oriole logical xid stays invalid for an autonomous
 					 * transactions
 					 */
-					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec->type, recname, rec->oxid);
+					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid " UINT64_FORMAT,
+						 rec->type, recname, rec->oxid);
 					return WALPARSE_OK;
 				}
 
@@ -1193,7 +1201,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 				/* If the origin is defined and filtering is enabled, Skip */
 				if (ctx->has_origin && FilterByOrigin(ctx->dctx, rec->origin_id))
 				{
-					elog(DEBUG4, "IGNORED record type %d (%s) for oxid %lu due to origin filtering (origin_id=%u)",
+					elog(DEBUG4, "IGNORED record type %d (%s) for oxid " UINT64_FORMAT " due to origin filtering (origin_id=%u)",
 						 rec->type, recname, rec->oxid, rec->origin_id);
 					return WALPARSE_OK;
 				}
@@ -1235,7 +1243,11 @@ decode_wal_record(void *vctx, WalRecord *rec)
 
 						Assert(ctx->descr != NULL);
 						Assert(!O_TUPLE_IS_NULL(tuple1.tuple));
+#if PG_VERSION_NUM >= 180000
+						change = ReorderBufferAllocChange(ctx->dctx->reorder);
+#else
 						change = ReorderBufferGetChange(ctx->dctx->reorder);
+#endif
 						change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
 						change->data.tp.rlocator.dbOid = rec->oids.datoid;
 						change->data.tp.rlocator.relNumber = rec->oids.relnode;

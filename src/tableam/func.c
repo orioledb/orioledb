@@ -290,7 +290,8 @@ tree_structure(StringInfo buf,
 		Oid			output;
 		bool		varlena;
 
-		getTypeOutputInfo(opaque.desc->attrs[i].atttypid, &output, &varlena);
+		getTypeOutputInfo(TupleDescAttr(opaque.desc, i)->atttypid,
+						  &output, &varlena);
 		fmgr_info(output, &opaque.outputFns[i]);
 	}
 
@@ -299,7 +300,8 @@ tree_structure(StringInfo buf,
 		Oid			output;
 		bool		varlena;
 
-		getTypeOutputInfo(opaque.keyDesc->attrs[i].atttypid, &output, &varlena);
+		getTypeOutputInfo(TupleDescAttr(opaque.keyDesc, i)->atttypid,
+						  &output, &varlena);
 		fmgr_info(output, &opaque.keyOutputFns[i]);
 	}
 
@@ -657,10 +659,10 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 					uint32		next_off;
 
 					off = o_tuple_next_field_offset(&reader,
-													TupleDescAttr(tupdesc, 0));
+													OTupleDescAttrFast(tupdesc, 0));
 					next_off =
 						o_tuple_next_field_offset(&reader,
-												  TupleDescAttr(tupdesc, 1));
+												  OTupleDescAttrFast(tupdesc, 1));
 
 					appendStringInfoSpaces(outbuf, level * 4);
 					appendStringInfo(outbuf,
@@ -706,7 +708,8 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 						}
 						len += next_off - off;
 						off = next_off;
-						next_off = o_tuple_next_field_offset(&reader, atti);
+						next_off = o_tuple_next_field_offset(&reader,
+															 OTupleDescAttrFast(opaque->keyDesc, k));
 					}
 					level--;	/* Tuple data END */
 					align = MAXALIGN(len) - len;
@@ -930,13 +933,14 @@ log_btree(BTreeDescr *desc)
 		{
 			Oid			output = InvalidOid;
 			bool		varlena;
+			Form_pg_attribute attr = TupleDescAttr(opaque.desc, i);
 
 			for (j = 0; j < sizeof(typeoids) / sizeof(typeoids[0]); j++)
-				if (typeoids[j] == opaque.desc->attrs[i].atttypid)
+				if (typeoids[j] == attr->atttypid)
 					output = outoids[j];
 
 			if (output == InvalidOid)
-				getTypeOutputInfo(opaque.desc->attrs[i].atttypid, &output, &varlena);
+				getTypeOutputInfo(attr->atttypid, &output, &varlena);
 
 			fmgr_info(output, &opaque.outputFns[i]);
 		}
@@ -945,13 +949,14 @@ log_btree(BTreeDescr *desc)
 		{
 			Oid			output = InvalidOid;
 			bool		varlena;
+			Form_pg_attribute attr = TupleDescAttr(opaque.keyDesc, i);
 
 			for (j = 0; j < sizeof(typeoids) / sizeof(typeoids[0]); j++)
-				if (typeoids[j] == opaque.keyDesc->attrs[i].atttypid)
+				if (typeoids[j] == attr->atttypid)
 					output = outoids[j];
 
 			if (output == InvalidOid)
-				getTypeOutputInfo(opaque.keyDesc->attrs[i].atttypid, &output, &varlena);
+				getTypeOutputInfo(attr->atttypid, &output, &varlena);
 
 			fmgr_info(output, &opaque.keyOutputFns[i]);
 		}
@@ -1161,8 +1166,8 @@ orioledb_tbl_are_indices_equal(PG_FUNCTION_ARGS)
 
 	for (i = 0; are_equal && i < td1->leafTupdesc->natts; i++)
 	{
-		are_equal = td1->leafTupdesc->attrs[i].atttypid ==
-			td2->leafTupdesc->attrs[i].atttypid;
+		are_equal = TupleDescAttr(td1->leafTupdesc, i)->atttypid ==
+			TupleDescAttr(td2->leafTupdesc, i)->atttypid;
 	}
 
 	if (are_equal)

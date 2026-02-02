@@ -22,6 +22,9 @@
 
 #include "catalog/pg_collation.h"
 #include "catalog/pg_database.h"
+#if PG_VERSION_NUM >= 180000
+#include "utils/memutils.h"
+#endif
 #include "utils/syscache.h"
 #include "mb/pg_wchar.h"
 
@@ -38,6 +41,9 @@ typedef struct ODatabase
 	char	   *daticurules;
 #endif
 	char	   *datcollate;
+#if PG_VERSION_NUM >= 180000
+	char	   *datctype;
+#endif
 } ODatabase;
 
 static void o_database_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
@@ -127,6 +133,15 @@ o_database_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 		o_database->daticurules = NULL;
 #endif
 
+#if PG_VERSION_NUM >= 180000
+	datum = SysCacheGetAttr(DATABASEOID, databasetup,
+							Anum_pg_database_datctype, &isNull);
+	if (!isNull)
+		o_database->datctype = TextDatumGetCString(datum);
+	else
+		o_database->datctype = NULL;
+#endif
+
 	MemoryContextSwitchTo(prev_context);
 	ReleaseSysCache(databasetup);
 }
@@ -169,6 +184,28 @@ o_database_cache_set_default_locale_provider()
 										 database_cache->nkeys);
 	if (o_database)
 	{
+#if PG_VERSION_NUM >= 180000
+		if (default_locale == NULL)
+			default_locale = MemoryContextAllocZero(TopMemoryContext,
+													sizeof(struct pg_locale_struct));
+
+		if (o_database->datlocprovider == COLLPROVIDER_BUILTIN)
+		{
+			init_pg_locale_builtin(default_locale, o_database->datlocale,
+								   TopMemoryContext);
+		}
+		else if (o_database->datlocprovider == COLLPROVIDER_ICU)
+		{
+			init_pg_locale_icu(default_locale, o_database->datlocale,
+							   o_database->daticurules, true,
+							   TopMemoryContext);
+		}
+		else if (o_database->datlocprovider == COLLPROVIDER_LIBC)
+		{
+			init_pg_locale_libc(default_locale, o_database->datcollate,
+								o_database->datctype);
+		}
+#else
 		if (o_database->datlocprovider == COLLPROVIDER_BUILTIN)
 		{
 			default_locale.info.builtin.locale = MemoryContextStrdup(TopMemoryContext,
@@ -176,16 +213,25 @@ o_database_cache_set_default_locale_provider()
 		}
 		else if (o_database->datlocprovider == COLLPROVIDER_ICU)
 		{
-			make_icu_collator(o_database->datlocale, o_database->daticurules, &default_locale);
+			make_icu_collator(o_database->datlocale, o_database->daticurules,
+							  &default_locale);
 		}
-
 		default_locale.provider = o_database->datlocprovider;
 		default_locale.deterministic = true;
+#endif
 	}
 	else
 	{
-		default_locale.provider = COLLPROVIDER_DEFAULT;
-		default_locale.deterministic = true;
+#if PG_VERSION_NUM >= 180000
+		pg_locale_t	loc = default_locale;
+#else
+		pg_locale_t	loc = &default_locale;
+#endif
+		if (loc != NULL)
+		{
+			loc->provider = COLLPROVIDER_DEFAULT;
+			loc->deterministic = true;
+		}
 	}
 }
 #endif
@@ -236,6 +282,10 @@ o_database_cache_serialize_entry(Pointer entry, int *len)
 #endif
 	o_serialize_string(o_database->datcollate, &str);
 
+#if PG_VERSION_NUM >= 180000
+	o_serialize_string(o_database->datctype, &str);
+#endif
+
 	*len = str.len;
 	return str.data;
 }
@@ -274,6 +324,11 @@ o_database_cache_deserialize_entry(MemoryContext mcxt, Pointer data,
 
 	if ((ptr - data) != length)
 		o_database->datcollate = o_deserialize_string(&ptr);
+
+#if PG_VERSION_NUM >= 180000
+	if ((ptr - data) != length)
+		o_database->datctype = o_deserialize_string(&ptr);
+#endif
 
 	return (Pointer) o_database;
 }
