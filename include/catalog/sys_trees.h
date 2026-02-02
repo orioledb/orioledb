@@ -157,6 +157,8 @@ extern PrintFunc sys_tree_key_print(BTreeDescr *desc);
 extern PrintFunc sys_tree_tup_print(BTreeDescr *desc);
 extern void sys_tree_set_extra(int tree_num, Pointer extra);
 extern Pointer sys_tree_get_extra(int tree_num);
-extern const text *retrieve_orioledb_sys_tree_structure(int systree, int depth);
+#ifdef IS_DEV
+extern const text *inspect_sys_tree_structure(int systree, int depth);
+#endif
 
 #endif							/* __SYS_TREES_H__ */

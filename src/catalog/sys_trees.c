@@ -556,8 +556,9 @@ orioledb_sys_tree_structure(PG_FUNCTION_ARGS)
 	PG_RETURN_POINTER(cstring_to_text(buf.data));
 }
 
+#ifdef IS_DEV
 const text *
-retrieve_orioledb_sys_tree_structure(int systree, int depth)
+inspect_sys_tree_structure(int systree, int depth)
 {
 	Datum		res;
 	text	   *options = cstring_to_text("");
@@ -569,6 +570,7 @@ retrieve_orioledb_sys_tree_structure(int systree, int depth)
 
 	return DatumGetTextP(res);
 }
+#endif
 
 Datum
 orioledb_sys_tree_check(PG_FUNCTION_ARGS)
