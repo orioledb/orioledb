@@ -101,8 +101,6 @@ typedef enum
 	oTableSourceContext = 1
 } OTableSource;
 
-#define OTableSourceLoad(source) (source == oTableSourceContext)
-
 extern void o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTableSource source);
 
 extern void free_o_index(OIndex *o_index);

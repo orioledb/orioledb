@@ -874,6 +874,12 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	return oIndex;
 }
 
+/*
+ * Make OIndex structure for provided OTable. OIndexVersionPass is used
+ * to specify if OIndex is created by a DDL operation that may need old
+ * OIndex to be used later in logical decoding. Otherwise
+ * OIndexVersionReset should be passed.
+ */
 OIndex *
 make_o_index(OTable *table, OIndexNumber ixNum, OIndexVersionMode ixVerMode)
 {
@@ -1068,7 +1074,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 
 		Assert(o_table_source);
 
-		if (OTableSourceLoad(source))
+		if (source == oTableSourceContext)
 		{
 			oTable = o_tables_get_extended(descr->tableOids, *((OTableFetchContext *) o_table_source));
 			free_oTable = (oTable != NULL);
