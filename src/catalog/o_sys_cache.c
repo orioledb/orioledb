@@ -840,7 +840,6 @@ o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 				 * OTable
 				 */
 				o_wal_update(desc, tup, nulltup, REPLICA_IDENTITY_DEFAULT, O_TABLE_INVALID_VERSION);
-				/* @TODO ! !!VERSION */
 			}
 		}
 		PG_CATCH();

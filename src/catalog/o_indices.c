@@ -213,7 +213,16 @@ make_builtin_field(OTableField *leafField, OTableIndexField *internalField,
 	}
 }
 
-/* Increment or reset version according to OIndexVersionMode provided */
+/*
+ * Increment or reset index version according to OIndexVersionMode provided.
+ *
+ * Version is used as part of the sys-tree key for OIndex records.
+ * Incrementing it guarantees that a newly created/recreated index metadata record
+ * will not collide with an older incarnation that might still be visible under some
+ * snapshot during recovery / logical decoding.
+ *
+ * If the previous version is invalid / uninitialized, start from 0.
+ */
 static uint32
 increment_or_reset_o_index_version(uint32 version, OIndexVersionMode ixVerMode)
 {
@@ -256,6 +265,12 @@ make_ctid_o_index(OTable *table, OIndexVersionMode ixVerMode)
 
 	new_version = increment_or_reset_o_index_version(table->primary_ixversion, ixVerMode);
 	result->indexVersion = new_version;
+
+	/*
+	 * Persist the current index incarnation version in OTable so that
+	 * subsequent reads (recovery / decoding) can fetch the matching OIndex
+	 * record by version.
+	 */
 	table->primary_ixversion = new_version;
 
 	elog(DEBUG2, "[%s] oids [ %u %u %u ] version %u", __func__,
@@ -337,6 +352,12 @@ make_primary_o_index(OTable *table, OIndexVersionMode ixVerMode)
 
 	new_version = increment_or_reset_o_index_version(table->primary_ixversion, ixVerMode);
 	result->indexVersion = new_version;
+
+	/*
+	 * Persist the current index incarnation version in OTable so that
+	 * subsequent reads (recovery / decoding) can fetch the matching OIndex
+	 * record by version.
+	 */
 	table->primary_ixversion = new_version;
 	tableIndex->version = new_version;
 
@@ -548,6 +569,12 @@ make_toast_o_index(OTable *table, OIndexVersionMode ixVerMode)
 
 	new_version = increment_or_reset_o_index_version(table->toast_ixversion, ixVerMode);
 	result->indexVersion = new_version;
+
+	/*
+	 * Persist the current index incarnation version in OTable so that
+	 * subsequent reads (recovery / decoding) can fetch the matching OIndex
+	 * record by version.
+	 */
 	table->toast_ixversion = new_version;
 
 	result->indexOids = table->toast_oids;
@@ -618,6 +645,12 @@ make_bridge_o_index(OTable *table, OIndexVersionMode ixVerMode)
 
 	new_version = increment_or_reset_o_index_version(table->bridge_ixversion, ixVerMode);
 	result->indexVersion = new_version;
+
+	/*
+	 * Persist the current index incarnation version in OTable so that
+	 * subsequent reads (recovery / decoding) can fetch the matching OIndex
+	 * record by version.
+	 */
 	table->bridge_ixversion = new_version;
 
 	result->indexOids = table->bridge_oids;

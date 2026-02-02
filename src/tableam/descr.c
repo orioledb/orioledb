@@ -1128,6 +1128,21 @@ recreate_index_descr(OIndexDescr *descr)
 	free_o_index(oIndex);
 }
 
+/*
+ * o_table_descr_fill_indices()
+ *
+ * Populate OTableDescr with index descriptors visible under the given snapshot.
+ *
+ * Important: index descriptors are fetched from OrioleDB system trees using an
+ * OTableFetchContext that includes both:
+ *  - snapshot: MVCC visibility for sys-tree tuples,
+ *  - version: an "incarnation id" for the index metadata record.
+ *
+ * The version disambiguates multiple incarnations of the same logical index
+ * (primary/toast/bridge) that can appear across CREATE/DROP/TRUNCATE/rollback
+ * sequences and may be concurrently visible to different readers during
+ * recovery and logical decoding.
+ */
 static void
 o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot)
 {
@@ -1149,6 +1164,27 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapsho
 		uint32		version;
 		OTableFetchContext ctx;
 
+		/*
+		 * NOTE: version here is *not* the Postgres relcache/catversion. It's
+		 * an OrioleDB per-index incarnation number used in sys-tree keys.
+		 */
+
+		/*
+		 * Choose the correct index incarnation version to build a fetch
+		 * context.
+		 *
+		 * For regular indexes the version is stored in
+		 * table->indices[].version.
+		 *
+		 * For the synthetic "primary" descriptor (ctid-based) used when the
+		 * base table has no declared primary index, the incarnation is
+		 * tracked in table->primary_ixversion.
+		 *
+		 * In both cases the version becomes part of the sys-tree key-space
+		 * for OIndex records, ensuring get_index_descr() reads the intended
+		 * incarnation under the supplied snapshot.
+		 */
+
 		if (!table->has_primary && cur_ix == 0)
 		{
 			ixOids = table->oids;
@@ -1169,6 +1205,10 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapsho
 
 	if (ORelOidsIsValid(table->bridge_oids))
 	{
+		/*
+		 * Bridge index is not part of table->indices[]: it has its own OIDs
+		 * and its own incarnation counter in OTable.
+		 */
 		OTableFetchContext ctx = build_fetch_context(snapshot, table->bridge_ixversion);
 
 		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false, ctx, table, oTableSourceTable);
@@ -1179,6 +1219,10 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapsho
 
 	if (ORelOidsIsValid(table->toast_oids))
 	{
+		/*
+		 * Toast index metadata may be recreated independently of user
+		 * indexes. toast_ixversion tracks the current incarnation.
+		 */
 		OTableFetchContext ctx = build_fetch_context(snapshot, table->toast_ixversion);
 
 		descr->toast = get_index_descr(table->toast_oids, oIndexToast, false, ctx, table, oTableSourceTable);

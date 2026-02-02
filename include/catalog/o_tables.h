@@ -93,9 +93,28 @@ typedef struct
 {
 	ORelOids	oids;
 	ORelOids	toast_oids;
-	uint32		toast_ixversion;
-	uint32		primary_ixversion;
-	uint32		bridge_ixversion;
+
+	/*
+	 * Per-table index version counters used for sys-tree visibility (MVCC)
+	 * during recovery and logical decoding.
+	 *
+	 * OrioleDB stores catalog-like metadata in system trees. For some
+	 * operations the "same" logical index (e.g. the table's primary index)
+	 * may be replaced by a new metadata record while keeping stable identity
+	 * attributes (relation OIDs, names, etc.).
+	 *
+	 * To make each incarnation unambiguous, OIndex records are keyed not only
+	 * by (table oids, index type) but also by a monotonically changing
+	 * version. These fields keep the current version for the corresponding
+	 * index kind and are copied into ORelFetchContext.version when we need to
+	 * read the matching OIndex from SYS_TREES.
+	 *
+	 * O_TABLE_INVALID_VERSION means "index does not exist / version is
+	 * unknown".
+	 */
+	uint32		toast_ixversion;	/* TOAST-index version for current table */
+	uint32		primary_ixversion;	/* Primary-index version for current table */
+	uint32		bridge_ixversion;	/* Bridge-index version for current table */
 	ORelOids	bridge_oids;
 	OCompress	default_compress;
 	OCompress	primary_compress;

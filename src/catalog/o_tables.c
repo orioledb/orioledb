@@ -695,9 +695,10 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 	o_table->fillfactor = fillfactor;
 	o_table->persistence = relpersistence;
 	o_table->data_version = ORIOLEDB_DATA_VERSION;
-	o_table->toast_ixversion = O_TABLE_INVALID_VERSION;
-	o_table->primary_ixversion = O_TABLE_INVALID_VERSION;
-	o_table->bridge_ixversion = O_TABLE_INVALID_VERSION;
+	/* No index incarnations yet for a freshly created table. */
+	o_table->toast_ixversion = O_TABLE_INVALID_VERSION; /* uninitialized */
+	o_table->primary_ixversion = O_TABLE_INVALID_VERSION;	/* uninitialized */
+	o_table->bridge_ixversion = O_TABLE_INVALID_VERSION;	/* uninitialized */
 	o_table->index_bridging = bridging;
 
 	for (i = 0; i < tupdesc->natts; i++)
@@ -1270,9 +1271,10 @@ o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn)
 	o_opclass_cache_add_table(o_table);
 
 	/*
-	 * o_indices_update(o_table, PrimaryIndexNumber, oxid, csn); // @NOTE
-	 * moved out from here
+	 * @NOTE o_indices_update(o_table, PrimaryIndexNumber, oxid, csn); moved
+	 * out from here
 	 */
+
 	if (o_table->has_primary)
 	{
 		o_add_invalidate_undo_item(o_table->indices[PrimaryIndexNumber].oids,
