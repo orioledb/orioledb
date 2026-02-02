@@ -296,7 +296,8 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	walPos = flush_local_wal(true, !isAutonomous);
 	local_wal_has_material_changes = false;
 
-	elog(DEBUG4, "[%s] COMMIT oxid %lu logicalXid %u %X/%X", __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
+	elog(DEBUG4, "[%s] COMMIT oxid " UINT64_FORMAT " logicalXid %u %X/%X",
+		 __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
 
 	return walPos;
 }
@@ -359,7 +360,8 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	wait_pos = flush_local_wal(false, !isAutonomous);
 	local_wal_has_material_changes = false;
 
-	elog(DEBUG4, "ROLLBACK oxid %lu logicalXid %u", oxid, logicalXid);
+	elog(DEBUG4, "ROLLBACK oxid " UINT64_FORMAT " logicalXid %u",
+		 oxid, logicalXid);
 
 	if (synchronous_commit > SYNCHRONOUS_COMMIT_OFF)
 		XLogFlush(wait_pos);
@@ -446,7 +448,8 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 
 	heapXid = GetTopTransactionIdIfAny();
 
-	elog(DEBUG4, "WAL_REC_XID oxid %lu logicalXid %u heapXid %u", oxid, logicalXid, heapXid);
+	elog(DEBUG4, "WAL_REC_XID oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
+		 oxid, logicalXid, heapXid);
 
 	rec = (WALRecXid *) (&local_wal_buffer[local_wal_buffer_offset]);
 	rec->recType = WAL_REC_XID;
@@ -517,7 +520,7 @@ add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_v
 	memcpy(rec->version, &version, sizeof(version));
 	memcpy(rec->baseVersion, &base_version, sizeof(base_version));
 
-	elog(DEBUG4, "[%s] WAL_REC_RELATION ADD oids [ %u %u %u ] type %d xmin/csn/cid %lu/%lu/%u version %u base_version %u", __func__,
+	elog(DEBUG4, "[%s] WAL_REC_RELATION ADD oids [ %u %u %u ] type %d xmin/csn/cid " UINT64_FORMAT "/" UINT64_FORMAT "/%u version %u base_version %u", __func__,
 		 oids.datoid, oids.reloid, oids.relnode,
 		 type, runXmin, csn, cid, version, base_version);
 
@@ -639,7 +642,8 @@ add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 	csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 	memcpy(rec->csn, &csn, sizeof(csn));
 
-	elog(DEBUG4, "[%s] xmin %lu csn %lu", __func__, runXmin, csn);
+	elog(DEBUG4, "[%s] xmin " UINT64_FORMAT " csn " UINT64_FORMAT,
+		 __func__, runXmin, csn);
 
 	local_wal_buffer_offset += sizeof(*rec);
 

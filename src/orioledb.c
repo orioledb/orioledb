@@ -84,8 +84,6 @@
 
 PG_MODULE_MAGIC;
 
-void		_PG_init(void);
-
 static bool debug_disable_pools_limit = false;
 static Pointer shared_segment = NULL;
 static bool shared_segment_initialized = false;
@@ -110,7 +108,7 @@ int			max_procs;
 Size		orioledb_buffers_size;
 Size		orioledb_buffers_count;
 Size		orioledb_temp_buffers_count;
-Size		page_descs_size;
+static Size	page_descs_size;
 Size		undo_circular_buffer_size;
 uint32		undo_buffers_count;
 double		regular_block_undo_circular_buffer_fraction;
@@ -157,7 +155,7 @@ int			rewind_max_transactions = 0;
 int			logical_xid_buffers_guc = 64;
 bool		orioledb_strict_mode = false;
 XLogRecPtr	replay_until_lsn = InvalidXLogRecPtr;
-char	   *replay_until_lsn_string;
+static char *replay_until_lsn_string;
 
 /* For page eviction/read checkpoint test only */
 uint32		min_read_page_checkpoint = UINT32_MAX;
@@ -168,9 +166,12 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 static void (*prev_shmem_request_hook) (void) = NULL;
 static base_init_startup_hook_type prev_base_init_startup_hook = NULL;
 static get_relation_info_hook_type prev_get_relation_info_hook = NULL;
-static skip_tree_height_hook_type prev_skip_tree_height_hook = NULL;
 database_size_hook_type prev_database_size_hook = NULL;
 static AcceptInvalidationMessagesHookType prev_AcceptInvalidationMessagesHook = NULL;
+
+#if PG_VERSION_NUM < 180000
+static skip_tree_height_hook_type prev_skip_tree_height_hook = NULL;
+#endif
 
 CheckPoint_hook_type next_CheckPoint_hook = NULL;
 static bool o_newlocale_from_collation(void);
@@ -187,7 +188,7 @@ MemoryContext btree_insert_context = NULL;
  */
 MemoryContext btree_seqscan_context = NULL;
 
-OPagePool	page_pools[OPagePoolTypesCount];
+static OPagePool page_pools[OPagePoolTypesCount];
 LocalPagePool local_ppool;
 
 static size_t page_pools_size[OPagePoolTypesCount];
@@ -237,7 +238,9 @@ static void orioledb_get_relation_info_hook(PlannerInfo *root,
 											Oid relationObjectId,
 											bool inhparent,
 											RelOptInfo *rel);
+#if PG_VERSION_NUM < 180000
 static bool orioledb_skip_tree_height_hook(Relation indexRelation);
+#endif
 static void orioledb_get_running_transactions_extension(RunningTransactionsExtension *extension);
 static void orioledb_wait_snapshot(RunningTransactionsExtension *extension);
 
@@ -1245,8 +1248,10 @@ _PG_init(void)
 	reset_xmin_hook = orioledb_reset_xmin_hook;
 	prev_get_relation_info_hook = get_relation_info_hook;
 	get_relation_info_hook = orioledb_get_relation_info_hook;
+#if PG_VERSION_NUM < 180000
 	prev_skip_tree_height_hook = skip_tree_height_hook;
 	skip_tree_height_hook = orioledb_skip_tree_height_hook;
+#endif
 	xact_redo_hook = o_xact_redo_hook;
 	pg_newlocale_from_collation_hook = o_newlocale_from_collation;
 	prev_base_init_startup_hook = base_init_startup_hook;
@@ -2173,6 +2178,7 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 	table_close(relation, NoLock);
 }
 
+#if PG_VERSION_NUM < 180000
 static bool
 orioledb_skip_tree_height_hook(Relation indexRelation)
 {
@@ -2187,6 +2193,7 @@ orioledb_skip_tree_height_hook(Relation indexRelation)
 	table_close(tbl, NoLock);
 	return result;
 }
+#endif
 
 static void
 orioledb_get_running_transactions_extension(RunningTransactionsExtension *extension)

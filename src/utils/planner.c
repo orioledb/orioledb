@@ -62,7 +62,7 @@ static bool validate_function(Node *node, void *context);
 static Node *o_wrap_top_funcexpr(Node *node);
 static void o_collect_function_walker(Oid functionId, Oid inputcollid,
 									  List *args, void *context);
-static bool plan_tree_walker(Plan *plan, WalkerFunc, void *context);
+static bool plan_tree_walker(Plan *plan, WalkerFunc walker, void *context);
 
 #define pg_analyze_and_rewrite_params pg_analyze_and_rewrite_withcb
 
@@ -215,7 +215,9 @@ o_process_sql_function(HeapTuple procedureTuple, WalkerFunc walker,
 		Oid			rettype;
 		TupleDesc	rettupdesc;
 		ListCell   *lc;
+#if PG_VERSION_NUM < 180000
 		List	   *resulttlist;
+#endif
 
 		foreach(lc, querytree_list)
 		{
@@ -269,7 +271,10 @@ o_process_sql_function(HeapTuple procedureTuple, WalkerFunc walker,
 		(void) get_func_result_type(procedureStruct->oid, &rettype,
 									&rettupdesc);
 
-#if PG_VERSION_NUM >= 170000
+#if PG_VERSION_NUM >= 180000
+		(void) check_sql_fn_retval(querytree_list, rettype, rettupdesc,
+								   procedureStruct->prokind, false);
+#elif PG_VERSION_NUM >= 170000
 		(void) check_sql_fn_retval(querytree_list, rettype, rettupdesc, procedureStruct->prokind, false,
 								   &resulttlist);
 #else
