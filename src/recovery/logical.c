@@ -531,6 +531,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	uint16		wal_version;
 	uint8		wal_flags;
 
+	/* do our best to disable streaming */
+	ctx->streaming = false;
 	ptr = wal_container_read_header(ptr, &wal_version, &wal_flags);
 
 	if (wal_version > ORIOLEDB_WAL_VERSION)
@@ -692,7 +694,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 					}
 					elog(DEBUG4, "COMMIT record type %d (%s) oxid %lu logicalXid %u heapXid %u", rec_type, rec_type_str, oxid, logicalXid, heapXid);
 					ReorderBufferCommit(ctx->reorder, logicalXid,
-										startXLogPtr, endXLogPtr,
+										changeXLogPtr, endXLogPtr,
 										0, XLogRecGetOrigin(buf->record),
 										buf->origptr);
 				}
