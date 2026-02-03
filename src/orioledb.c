@@ -152,6 +152,7 @@ int			rewind_max_time = 0;
 int			rewind_max_transactions = 0;
 int			logical_xid_buffers_guc = 64;
 bool		orioledb_strict_mode = false;
+bool        enable_local_page_pool_guc = false;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -895,6 +896,17 @@ _PG_init(void)
 							 NULL,
 							 NULL,
 							 NULL);
+	
+	DefineCustomBoolVariable("orioledb.enable_local_page_pool",
+								"Enables creation of temporary tables in an optimized local page pool.",
+								NULL,
+								&enable_local_page_pool_guc,
+								false,
+								PGC_USERSET,
+								0,
+								NULL,
+								NULL,
+								NULL);
 
 	if (orioledb_s3_mode)
 	{
@@ -959,7 +971,7 @@ _PG_init(void)
 	for (i = 0; i < OPagePoolTypesCount; i++)
 		page_pools_size[i] = CACHELINEALIGN(page_pools_size[i]);
 	
-	local_ppool_init(&local_ppool);
+   	local_ppool_init(&local_ppool);
 
 	if (device_filename)
 	{
