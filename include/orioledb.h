@@ -55,7 +55,7 @@
  * In this case convesrion of WAL records is still allowed and should be implemented
  * ( see check_wal_container_version() )
  */
-#define ORIOLEDB_BINARY_VERSION 7
+#define ORIOLEDB_BINARY_VERSION 8
 #define ORIOLEDB_DATA_DIR "orioledb_data"
 #define ORIOLEDB_UNDO_DIR "orioledb_undo"
 #define ORIOLEDB_RMGR_ID (129)
@@ -71,7 +71,7 @@
  * For different ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION
  * conversion is done at first reading of disk page on the fly.
  */
-#define ORIOLEDB_DATA_VERSION	3	/* Version of system catalog */
+#define ORIOLEDB_DATA_VERSION	1	/* Version of system catalog */
 #define ORIOLEDB_PAGE_VERSION	1	/* Version of binary page format */
 #define ORIOLEDB_COMPRESS_VERSION 1 /* Version of page compression (only for
 									 * compressed pages) */

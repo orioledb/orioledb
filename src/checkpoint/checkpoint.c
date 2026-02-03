@@ -1346,6 +1346,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	control.checkpointRetainXmax = checkpoint_xmax;
 	control.binaryVersion = ORIOLEDB_BINARY_VERSION;
 	control.s3Mode = orioledb_s3_mode;
+	control.controlFileVersion = ORIOLEDB_CHECKPOINT_CONTROL_VERSION;
 
 	write_checkpoint_control(&control);
 

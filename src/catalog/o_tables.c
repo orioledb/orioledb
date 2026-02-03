@@ -1774,23 +1774,18 @@ deserialize_o_table_index(OTableIndex *o_table_index, Pointer *ptr, uint16 data_
 	memcpy(&o_table_index->tablespace, *ptr, len);
 	*ptr += len;
 
-	if (data_version >= 3 && o_table_index->type == oIndexExclusion)
+	if (o_table_index->type == oIndexExclusion)
 	{
 		len = sizeof(Oid) * o_table_index->nkeyfields;
 		o_table_index->exclops = (Oid *) palloc0(len);
 		memcpy(o_table_index->exclops, *ptr, len);
 		*ptr += len;
 	}
-	else
-		o_table_index->exclops = NULL;
-	if (data_version >= 3)
-	{
-		len = sizeof(bool);
-		memcpy(&o_table_index->immediate, *ptr, len);
-		*ptr += len;
-	}
-	else
-		o_table_index->immediate = true;
+
+	len = sizeof(bool);
+	memcpy(&o_table_index->immediate, *ptr, len);
+	*ptr += len;
+
 	MemoryContextSwitchTo(old_mcxt);
 }
 
@@ -1842,15 +1837,10 @@ deserialize_o_table(Pointer data, Size length)
 	}
 	MemoryContextSwitchTo(oldcxt);
 
-	if (o_table->data_version >= 2)
-	{
-		len = sizeof(Oid);
-		Assert((ptr - data) + len <= length);
-		memcpy(&o_table->tablespace, ptr, len);
-		ptr += len;
-	}
-	else
-		o_table->tablespace = DEFAULTTABLESPACE_OID;
+	len = sizeof(Oid);
+	Assert((ptr - data) + len <= length);
+	memcpy(&o_table->tablespace, ptr, len);
+	ptr += len;
 
 	Assert(ptr - data == length);
 	return o_table;

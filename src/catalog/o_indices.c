@@ -713,17 +713,12 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	oIndex->duplicates = (List *) o_deserialize_node(&ptr);
 	MemoryContextSwitchTo(old_mcxt);
 
-	if (oIndex->data_version >= 2)
-	{
-		len = sizeof(Oid);
-		Assert((ptr - data) + len <= length);
-		memcpy(&oIndex->tablespace, ptr, len);
-		ptr += len;
-	}
-	else
-		oIndex->tablespace = DEFAULTTABLESPACE_OID;
+	len = sizeof(Oid);
+	Assert((ptr - data) + len <= length);
+	memcpy(&oIndex->tablespace, ptr, len);
+	ptr += len;
 
-	if (oIndex->data_version >= 3 && oIndex->indexType == oIndexExclusion)
+	if (oIndex->indexType == oIndexExclusion)
 	{
 		mcxt = OGetIndexContext(oIndex);
 		old_mcxt = MemoryContextSwitchTo(mcxt);
@@ -734,18 +729,12 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 		ptr += len;
 		MemoryContextSwitchTo(old_mcxt);
 	}
-	else
-		oIndex->exclops = NULL;
-	if (oIndex->data_version >= 3)
-	{
-		len = sizeof(bool);
-		Assert((ptr - data) + len <= length);
-		memcpy(&oIndex->immediate, ptr, len);
-		ptr += len;
 
-	}
-	else
-		oIndex->immediate = true;
+	len = sizeof(bool);
+	Assert((ptr - data) + len <= length);
+	memcpy(&oIndex->immediate, ptr, len);
+	ptr += len;
+
 	Assert((ptr - data) == length);
 
 	return oIndex;
