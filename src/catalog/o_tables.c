@@ -1707,7 +1707,10 @@ serialize_o_table(OTable *o_table, int *size)
 	StringInfoData str;
 	int			i;
 
-	Assert(o_table != NULL && o_table->data_version == ORIOLEDB_DATA_VERSION);
+	Assert(o_table != NULL);
+	if (o_table->data_version != ORIOLEDB_DATA_VERSION)
+		elog(FATAL, "ORIOLEDB_DATA_VERSION %u of OrioleDB cluster is not among supported for conversion from %u", o_table->data_version, ORIOLEDB_DATA_VERSION);
+
 	initStringInfo(&str);
 	appendBinaryStringInfo(&str, (Pointer) o_table,
 						   offsetof(OTable, indices));

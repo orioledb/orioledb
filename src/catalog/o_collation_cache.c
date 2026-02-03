@@ -168,7 +168,9 @@ o_collation_cache_serialize_entry(Pointer entry, int *len)
 	StringInfoData str;
 	OCollation *o_collation = (OCollation *) entry;
 
-	Assert(o_collation->data_version == ORIOLEDB_DATA_VERSION);
+	if (o_collation->data_version != ORIOLEDB_DATA_VERSION)
+		elog(FATAL, "ORIOLEDB_DATA_VERSION %u of OrioleDB cluster is not among supported for conversion from %u", o_collation->data_version, ORIOLEDB_DATA_VERSION);
+
 	initStringInfo(&str);
 	appendBinaryStringInfo(&str, (Pointer) o_collation,
 						   offsetof(OCollation, collcollate));
@@ -196,7 +198,8 @@ o_collation_cache_deserialize_entry(MemoryContext mcxt, Pointer data,
 	Assert((ptr - data) + len <= length);
 	memcpy(o_collation, ptr, len);
 	ptr += len;
-	Assert(o_collation->data_version == ORIOLEDB_DATA_VERSION);
+	if (o_collation->data_version != ORIOLEDB_DATA_VERSION)
+		elog(FATAL, "ORIOLEDB_DATA_VERSION %u of OrioleDB cluster is not among supported for conversion to %u", o_collation->data_version, ORIOLEDB_DATA_VERSION);
 
 	o_collation->collcollate = o_deserialize_string(&ptr);
 	o_collation->collctype = o_deserialize_string(&ptr);

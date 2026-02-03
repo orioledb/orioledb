@@ -216,7 +216,9 @@ o_database_cache_serialize_entry(Pointer entry, int *len)
 	StringInfoData str;
 	ODatabase  *o_database = (ODatabase *) entry;
 
-	Assert(o_database->data_version == ORIOLEDB_DATA_VERSION);
+	if (o_database->data_version != ORIOLEDB_DATA_VERSION)
+		elog(FATAL, "ORIOLEDB_DATA_VERSION %u of OrioleDB cluster is not among supported for conversion from %u", o_database->data_version, ORIOLEDB_DATA_VERSION);
+
 	initStringInfo(&str);
 	appendBinaryStringInfo(&str, (Pointer) o_database,
 						   offsetof(ODatabase, datlocprovider));
@@ -249,7 +251,8 @@ o_database_cache_deserialize_entry(MemoryContext mcxt, Pointer data,
 	Assert((ptr - data) + len <= length);
 	memcpy(o_database, ptr, len);
 	ptr += len;
-	Assert(o_database->data_version == ORIOLEDB_DATA_VERSION);
+	if (o_database->data_version != ORIOLEDB_DATA_VERSION)
+		elog(FATAL, "ORIOLEDB_DATA_VERSION %u of OrioleDB cluster is not among supported for conversion to %u", o_database->data_version, ORIOLEDB_DATA_VERSION);
 
 #if PG_VERSION_NUM >= 170000
 	len = offsetof(ODatabase, datlocale) - offsetof(ODatabase, datlocprovider);
