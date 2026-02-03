@@ -171,7 +171,9 @@ o_class_cache_serialize_entry(Pointer entry, int *len)
 	StringInfoData str;
 	OClass	   *o_class = (OClass *) entry;
 
-	Assert(o_class->data_version == ORIOLEDB_DATA_VERSION);
+	if (o_class->data_version != ORIOLEDB_DATA_VERSION)
+		elog(FATAL, "ORIOLEDB_DATA_VERSION %u of OrioleDB cluster is not among supported for conversion from %u", o_class->data_version, ORIOLEDB_DATA_VERSION);
+
 	initStringInfo(&str);
 	appendBinaryStringInfo(&str, (Pointer) o_class,
 						   offsetof(OClass, attrs));
@@ -195,7 +197,8 @@ o_class_cache_deserialize_entry(MemoryContext mcxt, Pointer data, Size length)
 	Assert((ptr - data) + len <= length);
 	memcpy(o_class, ptr, len);
 	ptr += len;
-	Assert(o_class->data_version == ORIOLEDB_DATA_VERSION);
+	if (o_class->data_version != ORIOLEDB_DATA_VERSION)
+		elog(FATAL, "ORIOLEDB_DATA_VERSION %u of OrioleDB cluster is not among supported for conversion to %u", o_class->data_version, ORIOLEDB_DATA_VERSION);
 
 	len = o_class->natts * sizeof(FormData_pg_attribute);
 	o_class->attrs = MemoryContextAlloc(mcxt, len);
