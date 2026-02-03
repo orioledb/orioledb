@@ -27,10 +27,22 @@ typedef struct
 
 #define NUM_CHECKPOINTABLE_UNDO_LOGS	2
 
+/*
+ * Bump every time CheckpointControl structure changes its format.
+ * Also on-the-flight conversion routine should be added to
+ * check_checkpoint_control()
+ */
+#define ORIOLEDB_CHECKPOINT_CONTROL_VERSION	1
+
+/*
+ * To ensure correct reading of controlFileVersion, changes in
+ * struct layout are permitted only after it.
+ */
 typedef struct
 {
 	uint64		controlIdentifier;
 	uint32		lastCheckpointNumber;
+	uint32		controlFileVersion;
 	CommitSeqNo lastCSN;
 	OXid		lastXid;
 	UndoLocation lastUndoLocation;
