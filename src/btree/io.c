@@ -1454,8 +1454,8 @@ load_page(OBTreeFindPageContext *context)
 	unlock_page(parent_blkno);
 
 	/* Prepare new page metaPage-data */
-	ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_FIND, 1);
-	blkno = ppool_get_page(desc->ppool, PPOOL_RESERVE_FIND);
+	(*desc->ppool->ops->reserve_pages) (desc->ppool, PPOOL_RESERVE_FIND, 1);
+	blkno = (*desc->ppool->ops->alloc_page) (desc->ppool, PPOOL_RESERVE_FIND);
 	lock_page(blkno);
 	page_block_reads(blkno);
 
@@ -1482,8 +1482,8 @@ load_page(OBTreeFindPageContext *context)
 	}
 
 	put_page_image(blkno, buf);
-	page_change_usage_count(&desc->ppool->ucm, blkno,
-							(pg_atomic_read_u32(desc->ppool->ucm.epoch) + 2) % UCM_USAGE_LEVELS);
+	(*desc->ppool->ops->ucm_change_usage) (desc->ppool, blkno,
+										   ((*desc->ppool->ops->ucm_get_epoch) (desc->ppool) + 2) % UCM_USAGE_LEVELS);
 	page_desc->type = parent_page_desc->type;
 	page_desc->oids = parent_page_desc->oids;
 
@@ -2264,7 +2264,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 		unlock_page(parent_blkno);
 
 	if (evict)
-		ppool_free_page(desc->ppool, blkno, NULL);
+		(*desc->ppool->ops->free_page) (desc->ppool, blkno, NULL);
 
 	perform_writeback(&io_writeback);
 }
@@ -2416,7 +2416,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 
 	file_header.rootDownlink = new_downlink;
 
-	ppool_free_page(desc->ppool, root_blkno, NULL);
+	(*desc->ppool->ops->free_page) (desc->ppool, root_blkno, NULL);
 
 	if (orioledb_s3_mode)
 		chkpNum = S3_GET_CHKP_NUM(DOWNLINK_GET_DISK_OFF(new_downlink));
@@ -2448,7 +2448,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	if (!orioledb_s3_mode || desc->storageType == BTreeStorageTemporary)
 		btree_finalize_private_seq_bufs(desc, &evicted_tree_data, notModified);
 
-	ppool_free_page(desc->ppool, desc->rootInfo.metaPageBlkno, NULL);
+	(*desc->ppool->ops->free_page) (desc->ppool, desc->rootInfo.metaPageBlkno, NULL);
 
 	desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 	desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;

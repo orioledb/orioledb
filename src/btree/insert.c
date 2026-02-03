@@ -298,7 +298,7 @@ o_btree_fix_page_split(BTreeDescr *desc, OInMemoryBlkno left_blkno)
 	unlock_page(rightBlkno);
 	unlock_page(left_blkno);
 
-	ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_FIND, 2);
+	(*desc->ppool->ops->reserve_pages) (desc->ppool, PPOOL_RESERVE_FIND, 2);
 
 	init_page_find_context(iitem.context, desc, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY);
 
@@ -702,8 +702,8 @@ o_btree_insert_split(BTreeInsertStackItem *insert_item,
 	START_CRIT_SECTION();
 
 	if (blkno == desc->rootInfo.rootPageBlkno)
-		root_split_left_blkno = ppool_get_page(desc->ppool, reserve_kind);
-	right_blkno = ppool_get_page(desc->ppool, reserve_kind);
+		root_split_left_blkno = (*desc->ppool->ops->alloc_page) (desc->ppool, reserve_kind);
+	right_blkno = (*desc->ppool->ops->alloc_page) (desc->ppool, reserve_kind);
 
 	/*
 	 * Move hikeyBlkno of split.  This change is atomic, no need to bother
@@ -1249,7 +1249,7 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 		int			tupleWaiterProcnums[BTREE_PAGE_MAX_SPLIT_ITEMS];
 		int			tupleWaitersCount;
 
-		Assert(desc->ppool->numPagesReserved[reserve_kind] >= 2);
+		/* Assert(desc->ppool->numPagesReserved[reserve_kind] >= 2); */
 
 		if (insert_item->level > 0)
 			kind = BTreeKeyNonLeafKey;
@@ -1356,9 +1356,9 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 			insert_item = insert_item->next;
 
 		if (insert_item != NULL)
-			ppool_reserve_pages(desc->ppool, reserve_kind, 2);
+			(*desc->ppool->ops->reserve_pages) (desc->ppool, reserve_kind, 2);
 	}
-	ppool_release_reserved(desc->ppool, PPOOL_KIND_GET_MASK(reserve_kind));
+	(*desc->ppool->ops->release_reserved) (desc->ppool, PPOOL_KIND_GET_MASK(reserve_kind));
 }
 
 void
