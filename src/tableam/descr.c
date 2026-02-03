@@ -246,7 +246,7 @@ orioledb_get_evicted_trees(PG_FUNCTION_ARGS)
  * under AccessShareLock (See o_tables.h/o_tables_rel_lock()).
  */
 static bool
-o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
+o_btree_ensure_initialized_internal(BTreeDescr *desc, bool checkpoint)
 {
 	SharedRootInfoKey key;
 	SharedRootInfo *sharedRootInfo = NULL;
@@ -406,14 +406,14 @@ o_btree_ensure_initialized(BTreeDescr *desc)
 {
 	bool		result PG_USED_FOR_ASSERTS_ONLY;
 
-	result = o_btree_load_shmem_internal(desc, false);
+	result = o_btree_ensure_initialized_internal(desc, false);
 	Assert(result == true);
 }
 
 bool
 o_btree_load_shmem_checkpoint(BTreeDescr *desc)
 {
-	return o_btree_load_shmem_internal(desc, true);
+	return o_btree_ensure_initialized_internal(desc, true);
 }
 
 /*

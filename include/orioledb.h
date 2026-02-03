@@ -415,6 +415,7 @@ extern int	rewind_max_time;
 extern int	rewind_max_transactions;
 extern int	logical_xid_buffers_guc;
 extern bool orioledb_strict_mode;
+extern bool enable_local_page_pool_guc;
 
 #define GET_CUR_PROCDATA() \
 	(AssertMacro(MYPROCNUMBER >= 0 && \
