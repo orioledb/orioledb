@@ -4200,24 +4200,21 @@ rebuild_o_table_according_to_pindex(Relation rel, ORelOids tbl_oids, Oid ind_oid
 	descr = o_fetch_table_descr(o_table->oids);
 	o_tablespace_cache_add_table(o_table);
 	rebuild_indices_insert_placeholders(descr);
-	o_tables_table_meta_unlock(NULL, InvalidOid);
+	o_tables_table_meta_unlock(NULL, old_o_table->oids.relnode);
 
 	rebuild_indices(old_o_table, old_descr, o_table, descr, false, NULL);
 	o_tables_rel_meta_lock(rel);
 	for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 	{
-		int			ctid_idx_off;
 		OTableIndex *index;
-
-		ctid_idx_off = o_table->has_primary ? 0 : 1;
 		index = &o_table->indices[ix_num];
 
-		o_indices_update(o_table, ix_num + ctid_idx_off, oxid, oSnapshot.csn);
+		o_indices_update(o_table, ix_num, oxid, oSnapshot.csn);
 		o_invalidate_oids(index->oids);
 		o_add_invalidate_undo_item(index->oids, O_INVALIDATE_OIDS_ON_ABORT);
 	}
 	o_tables_update(o_table, oxid, oSnapshot.csn);
-	o_tables_rel_meta_unlock(rel, InvalidOid);
+	o_tables_rel_meta_unlock(rel, old_o_table->oids.relnode);
 	o_invalidate_oids(o_table->oids);
 	o_add_invalidate_undo_item(o_table->oids, O_INVALIDATE_OIDS_ON_ABORT);
 
