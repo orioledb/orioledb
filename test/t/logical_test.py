@@ -348,7 +348,7 @@ class LogicalTest(BaseTest):
 		# But it is necessary to observe both these versions in logical decoder to properly decode INSERT'ed tuples.
 
 		result = self.retrieve_logical_changes()
-		print(result)
+		#print(result)
 		self.assertEqual(
 		    result,
 		    "BEGIN\n"
@@ -391,7 +391,7 @@ class LogicalTest(BaseTest):
 				with subscriber.connect() as con:
 					output = con.execute(f"""SELECT * FROM {o_relname};""")
 					tup = output[0]
-					print(tup)
+					# print(tup)
 					self.assertEqual(len(tup), 2)
 					self.assertEqual(tup, (1, '100'))
 
@@ -454,7 +454,7 @@ class LogicalTest(BaseTest):
 		# Logical decoder uses page-level undo to obtain old image of systree page where deleted tuple is located,
 		# and uses tuple-level undo to retrieve a proper tuple version.
 		result = self.retrieve_logical_changes()
-		print(result)
+		#print(result)
 		self.assertEqual(
 		    result, "BEGIN\n"
 		    f"""table public.{o_relname}: INSERT: id[integer]:1 data[text]:'100'\n"""
@@ -491,7 +491,7 @@ class LogicalTest(BaseTest):
 		# But it is necessary to observe both these versions in logical decoder to properly decode INSERT'ed tuples.
 
 		result = self.retrieve_logical_changes()
-		print(result)
+		#print(result)
 		self.assertEqual(
 		    result, "BEGIN\n"
 		    f"""table public.{o_relname}: INSERT: id[integer]:1 data[text]:'100'\n"""
@@ -1056,7 +1056,7 @@ class LogicalTest(BaseTest):
 			''')
 
 		result = self.retrieve_logical_changes()
-		print(result)
+		#print(result)
 		self.assertEqual(
 		    result, "BEGIN\n"
 		    f"""table public.{o_relname}: INSERT: id[integer]:1 data[text]:'100'\n"""
