@@ -3771,8 +3771,12 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 		/* In case of ALTER TABLE ... ADD CONSTRAINT PRIMARY KEY... USING INDEX
 		 * need to save relid for future rebuilding primary index for table
+		 *
+		 * NB. For CREATE TABLE (... PRIMARY KEY) that branch is also reachable,
+		 * so need to take care about it in rebuild_o_table_according_to_pindex()
 		 */
-		o_saved_relrewrite_pindex = conForm->conrelid;
+		if (conForm->contype == CONSTRAINT_PRIMARY)
+			o_saved_relrewrite_pindex = conForm->conrelid;
 
 		ReleaseSysCache(conTuple);
 	}
