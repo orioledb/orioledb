@@ -694,7 +694,7 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 	o_table->toast_compress = InvalidOCompress;
 	o_table->fillfactor = fillfactor;
 	o_table->persistence = relpersistence;
-	o_table->data_version = ORIOLEDB_DATA_VERSION;
+	o_table->data_version = ORIOLEDB_SYS_TREE_VERSION;
 	/* No index incarnations yet for a freshly created table. */
 	o_table->toast_ixversion = O_TABLE_INVALID_VERSION; /* uninitialized */
 	o_table->primary_ixversion = O_TABLE_INVALID_VERSION;	/* uninitialized */
@@ -1711,8 +1711,10 @@ serialize_o_table(OTable *o_table, int *size)
 	int			i;
 
 	Assert(o_table != NULL);
-	if (o_table->data_version != ORIOLEDB_DATA_VERSION)
-		elog(FATAL, "ORIOLEDB_DATA_VERSION %u of OrioleDB cluster is not among supported for conversion from %u", o_table->data_version, ORIOLEDB_DATA_VERSION);
+	if (o_table->data_version != ORIOLEDB_SYS_TREE_VERSION)
+		elog(FATAL,
+			 "ORIOLEDB_SYS_TREE_VERSION %u of OrioleDB cluster is not among supported for conversion from %u",
+			 o_table->data_version, ORIOLEDB_SYS_TREE_VERSION);
 
 	initStringInfo(&str);
 	appendBinaryStringInfo(&str, (Pointer) o_table,

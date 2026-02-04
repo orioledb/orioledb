@@ -48,7 +48,7 @@
 /*
  * Clusters with different ORIOLEDB_BINARY_VERSION are completely incompatible.
  * Within the same ORIOLEDB_BINARY_VERSION clusters either fully compatible
- * or could be converted on the fly. See comment for ORIOLEDB_DATA_VERSION,
+ * or could be converted on the fly. See comment for ORIOLEDB_SYS_TREE_VERSION,
  * ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION below.
  *
  * ORIOLEDB_WAL_VERSION works even between different ORIOLEDB_BINARY_VERSION's
@@ -63,18 +63,18 @@
 /*
  * Sub-versions in the same ORIOLEDB_BINARY_VERSION.
  *
- * Same ORIOLEDB_DATA_VERSION, ORIOLEDB_PAGE_VERSION and
+ * Same ORIOLEDB_SYS_TREE_VERSION, ORIOLEDB_PAGE_VERSION and
  * ORIOLEDB_COMPRESS_VERSION clusters are compatible without conversion.
- * For different ORIOLEDB_DATA_VERSION conversion is done at the
+ * For different ORIOLEDB_SYS_TREE_VERSION conversion is done at the
  * reading/deserialization of system tables structures without using
  * any conversion tools.
  * For different ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION
  * conversion is done at first reading of disk page on the fly.
  */
-#define ORIOLEDB_DATA_VERSION	1	/* Version of system catalog */
-#define ORIOLEDB_PAGE_VERSION	1	/* Version of binary page format */
-#define ORIOLEDB_COMPRESS_VERSION 1 /* Version of page compression (only for
-									 * compressed pages) */
+#define ORIOLEDB_SYS_TREE_VERSION	1	/* Version of system catalog */
+#define ORIOLEDB_PAGE_VERSION		1	/* Version of binary page format */
+#define ORIOLEDB_COMPRESS_VERSION	1	/* Version of page compression (only
+										 * for compressed pages) */
 
 /*
  * perform_page_split() removes a key data from first right page downlink.

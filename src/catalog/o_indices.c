@@ -772,8 +772,10 @@ serialize_o_index(OIndex *o_index, int *size)
 
 	initStringInfo(&str);
 
-	if (o_index->data_version != ORIOLEDB_DATA_VERSION)
-		elog(FATAL, "ORIOLEDB_DATA_VERSION %u of OrioleDB cluster is not among supported for conversion from %u", o_index->data_version, ORIOLEDB_DATA_VERSION);
+	if (o_index->data_version != ORIOLEDB_SYS_TREE_VERSION)
+		elog(FATAL,
+			 "ORIOLEDB_SYS_TREE_VERSION %u of OrioleDB cluster is not among supported for conversion from %u",
+			 o_index->data_version, ORIOLEDB_SYS_TREE_VERSION);
 
 	appendBinaryStringInfo(&str,
 						   (Pointer) o_index + offsetof(OIndex, tableOids),
@@ -815,8 +817,10 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	Assert((ptr - data) + len <= length);
 	memcpy((Pointer) oIndex + offsetof(OIndex, tableOids), ptr, len);
 	ptr += len;
-	if (oIndex->data_version != ORIOLEDB_DATA_VERSION)
-		elog(FATAL, "ORIOLEDB_DATA_VERSION %u of OrioleDB cluster is not among supported for conversion to %u", oIndex->data_version, ORIOLEDB_DATA_VERSION);
+	if (oIndex->data_version != ORIOLEDB_SYS_TREE_VERSION)
+		elog(FATAL,
+			 "ORIOLEDB_SYS_TREE_VERSION %u of OrioleDB cluster is not among supported for conversion to %u",
+			 oIndex->data_version, ORIOLEDB_SYS_TREE_VERSION);
 
 	len = oIndex->nLeafFields * sizeof(OTableField);
 	oIndex->leafTableFields = (OTableField *) palloc(len);
@@ -907,7 +911,7 @@ make_o_index(OTable *table, OIndexNumber ixNum, OIndexVersionMode ixVerMode)
 		index = make_secondary_o_index(table, tableIndex, ixVerMode);
 	}
 
-	index->data_version = ORIOLEDB_DATA_VERSION;
+	index->data_version = ORIOLEDB_SYS_TREE_VERSION;
 	return index;
 }
 
