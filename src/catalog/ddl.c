@@ -110,7 +110,7 @@ List	   *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
 Oid			o_saved_relrewrite = InvalidOid;
 Oid			o_saved_reltablespace = InvalidOid;
-Oid			o_saved_relrewrite_pindex = InvalidOid;
+static Oid	o_saved_relrewrite_pindex = InvalidOid;
 List	   *o_reuse_indices = NIL;
 static ORelOids saved_oids;
 static bool in_rewrite = false;
