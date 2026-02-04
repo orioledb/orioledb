@@ -107,7 +107,7 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 		*entry_ptr = (Pointer) o_class;
 		o_class->attrs = (FormData_pg_attribute *) palloc0(len);
 	}
-	o_class->data_version = ORIOLEDB_DATA_VERSION;
+	o_class->data_version = ORIOLEDB_SYS_TREE_VERSION;
 	o_class->reltype = rel->rd_rel->reltype;
 	o_class->natts = rel->rd_att->natts;
 	for (i = 0; i < o_class->natts; i++)
@@ -171,8 +171,10 @@ o_class_cache_serialize_entry(Pointer entry, int *len)
 	StringInfoData str;
 	OClass	   *o_class = (OClass *) entry;
 
-	if (o_class->data_version != ORIOLEDB_DATA_VERSION)
-		elog(FATAL, "ORIOLEDB_DATA_VERSION %u of OrioleDB cluster is not among supported for conversion from %u", o_class->data_version, ORIOLEDB_DATA_VERSION);
+	if (o_class->data_version != ORIOLEDB_SYS_TREE_VERSION)
+		elog(FATAL,
+			 "ORIOLEDB_SYS_TREE_VERSION %u of OrioleDB cluster is not among supported for conversion from %u",
+			 o_class->data_version, ORIOLEDB_SYS_TREE_VERSION);
 
 	initStringInfo(&str);
 	appendBinaryStringInfo(&str, (Pointer) o_class,
@@ -197,8 +199,10 @@ o_class_cache_deserialize_entry(MemoryContext mcxt, Pointer data, Size length)
 	Assert((ptr - data) + len <= length);
 	memcpy(o_class, ptr, len);
 	ptr += len;
-	if (o_class->data_version != ORIOLEDB_DATA_VERSION)
-		elog(FATAL, "ORIOLEDB_DATA_VERSION %u of OrioleDB cluster is not among supported for conversion to %u", o_class->data_version, ORIOLEDB_DATA_VERSION);
+	if (o_class->data_version != ORIOLEDB_SYS_TREE_VERSION)
+		elog(FATAL,
+			 "ORIOLEDB_SYS_TREE_VERSION %u of OrioleDB cluster is not among supported for conversion to %u",
+			 o_class->data_version, ORIOLEDB_SYS_TREE_VERSION);
 
 	len = o_class->natts * sizeof(FormData_pg_attribute);
 	o_class->attrs = MemoryContextAlloc(mcxt, len);

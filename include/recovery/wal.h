@@ -59,9 +59,11 @@
 
 /*
  * Bump it when WAL format changes compared to previous release.
- * ORIOLEDB_WAL_VERSION makes sense and should be converted even between different ORIOLEDB_BINARY_VERSION's.
- * This is unlike ORIOLEDB_DATA_VERSION, ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION,
- * that make sense only inside one ORIOLEDB_BINARY_VERSION.
+ * ORIOLEDB_WAL_VERSION makes sense and should be converted even between
+ * different ORIOLEDB_BINARY_VERSION's. This is unlike
+ * ORIOLEDB_SYS_TREE_VERSION, ORIOLEDB_PAGE_VERSION and
+ * ORIOLEDB_COMPRESS_VERSION, that make sense only inside one
+ * ORIOLEDB_BINARY_VERSION.
  */
 #define ORIOLEDB_WAL_VERSION (17)
 
