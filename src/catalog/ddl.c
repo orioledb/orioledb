@@ -3734,8 +3734,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		ReleaseSysCache(typeTuple);
 	}
 	else if (access == OAT_POST_ALTER && classId == IndexRelationId && OidIsValid(o_saved_relrewrite_pindex)) {
-		/* Branch for ALTER TABLE ... ADD CONSTRAINT ... USING INDEX */
-		/* Need to rebuild table itself according to the new primary index */
+		/* Branch for CREATE/ALTER table with primary key.
+		 * If existing secondary index is used as a primary -> need to rebuild table, 
+		 * else table already build according to the primary index -> do nothing
+		*/
 		Relation 	rel;
 		ORelOids	tbl_oids;
 
@@ -3746,7 +3748,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 		ORelOidsSetFromRel(tbl_oids, rel);
 
-		/* Index already marked primary, just need to place it on [0] pos in indices arr*/	
+		/* For ALTER TABLE ... ADD CONSTRAINT PRIMARY KEY... USING INDEX
+		 * Mark index as a primary and place in [0] pos in indices array
+		 */
 		rebuild_o_table_according_to_pindex(rel, tbl_oids, objectId);
 
 		o_saved_relrewrite_pindex = InvalidOid;
@@ -3760,7 +3764,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		CommandCounterIncrement();
 		
 		conTuple = SearchSysCache1(CONSTROID, ObjectIdGetDatum(objectId));
-
 
 		if (!HeapTupleIsValid(conTuple)) /* should not happen */
 			elog(ERROR, "cache lookup failed for constraint %u", objectId);
@@ -4152,9 +4155,16 @@ rebuild_o_table_according_to_pindex(Relation rel, ORelOids tbl_oids, Oid ind_oid
 	OTableDescr *descr;
 	OTableDescr *old_descr;
 	OTable 		*old_o_table = o_tables_get(tbl_oids);
+	OTable 		*o_table;
 	int			ix_num = InvalidIndexNumber;
+
+	/* No need to rebuild if table already has primary */
+	if (old_o_table->has_primary) {
+		o_table_free(old_o_table);
+		return;
+	}
 	
-	OTable 		*o_table = o_tables_get(tbl_oids);
+	o_table = o_tables_get(tbl_oids);
 	assign_new_oids(o_table, rel, false);
 	
 	Assert(!o_table->has_primary);
