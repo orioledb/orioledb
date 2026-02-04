@@ -1507,7 +1507,7 @@ o_btree_autonomous_insert(BTreeDescr *desc, OTuple tuple)
 	OAutonomousTxState state;
 	OBTreeModifyResult result;
 
-	if (desc->storageType == BTreeStoragePersistence)
+	if (desc->undoType != UndoLogNone)
 	{
 		start_autonomous_transaction(&state);
 		PG_TRY();
@@ -1520,7 +1520,8 @@ o_btree_autonomous_insert(BTreeDescr *desc, OTuple tuple)
 										   RowLockUpdate,
 										   NULL, BTreeLeafTupleNonDeleted,
 										   &nullCallbackInfo);
-			o_wal_insert(desc, tuple, REPLICA_IDENTITY_DEFAULT);
+			/* no version is necessary here for system trees other than OTable */
+			o_wal_insert(desc, tuple, REPLICA_IDENTITY_DEFAULT, O_TABLE_INVALID_VERSION);
 		}
 		PG_CATCH();
 		{
@@ -1554,7 +1555,7 @@ o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType keyType,
 
 	Assert(keyType == BTreeKeyLeafTuple || keyType == BTreeKeyNonLeafKey);
 
-	if (desc->storageType == BTreeStoragePersistence)
+	if (desc->undoType != UndoLogNone)
 	{
 		start_autonomous_transaction(&state);
 		PG_TRY();
@@ -1567,10 +1568,11 @@ o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType keyType,
 										   hint, BTreeLeafTupleNonDeleted,
 										   &nullCallbackInfo);
 			Assert(IS_SYS_TREE_OIDS(desc->oids));
+			/* no version is necessary here for system trees other than OTable */
 			if (keyType == BTreeKeyLeafTuple)
-				o_wal_delete(desc, key, REPLICA_IDENTITY_DEFAULT);
+				o_wal_delete(desc, key, REPLICA_IDENTITY_DEFAULT, O_TABLE_INVALID_VERSION);
 			else if (keyType == BTreeKeyNonLeafKey)
-				o_wal_delete_key(desc, key, false);
+				o_wal_delete_key(desc, key, false, O_TABLE_INVALID_VERSION);
 		}
 		PG_CATCH();
 		{

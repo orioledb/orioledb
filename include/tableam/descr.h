@@ -96,6 +96,7 @@ struct OIndexDescr
 {
 	ORelOids	oids;
 	ORelOids	tableOids;
+	uint32		version;
 
 	/* reference count */
 	int			refcnt;
@@ -221,6 +222,7 @@ OIndexKeyAttnumToTupleAttnum(BTreeKeyType keyType, OIndexDescr *idx, int attnum)
 struct OTableDescr
 {
 	ORelOids	oids;
+	uint32		version;
 
 	/* reference count */
 	int			refcnt;
@@ -275,9 +277,17 @@ typedef struct
 
 #define GET_PRIMARY(descr) ((descr)->indices[PrimaryIndexNumber])
 
+extern OTableFetchContext default_table_fetch_context;
+
 /*
  * Please, read commit before o_bree_load_shmemd() definition.
  */
+
+extern OTableDescr *o_fetch_table_descr_extended(ORelOids oids, OTableFetchContext ctx);
+
+extern OIndexDescr *o_fetch_index_descr_extended(ORelOids oids, OIndexType type,
+												 bool lock, OTableFetchContext ctx, OTableFetchContext base_ctx);
+
 extern OTableDescr *o_fetch_table_descr(ORelOids oids);
 extern OIndexDescr *o_fetch_index_descr(ORelOids oids, OIndexType type,
 										bool lock, bool *nested);

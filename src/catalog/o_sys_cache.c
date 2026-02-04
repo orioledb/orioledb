@@ -101,6 +101,8 @@ static HeapTuple o_auth_cache_search_htup(TupleDesc tupdesc, Oid authoid);
 
 ToastAPI	oSysCacheToastAPI = {
 	.getBTreeDesc = oSysCacheToastGetBTreeDesc,
+	.getBTreeVersion = NULL,
+	.getBaseBTreeVersion = NULL,
 	.getMaxChunkSize = oSysCacheToastGetMaxChunkSize,
 	.updateKey = oSysCacheToastUpdateKey,
 	.getNextKey = oSysCacheToastGetNextKey,
@@ -110,7 +112,7 @@ ToastAPI	oSysCacheToastAPI = {
 	.getTupleChunknum = oSysCacheToastGetTupleChunknum,
 	.getTupleDataSize = oSysCacheToastGetTupleDataSize,
 	.deleteLogFullTuple = false,
-	.versionCallback = NULL
+	.fetchCallback = NULL
 };
 
 Oid			o_sys_cache_search_datoid = InvalidOid;
@@ -832,7 +834,12 @@ o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 
 				O_TUPLE_SET_NULL(nulltup);
 				Assert(IS_SYS_TREE_OIDS(desc->oids));
-				o_wal_update(desc, tup, nulltup, REPLICA_IDENTITY_DEFAULT);
+
+				/*
+				 * no version is necessary here for system trees other than
+				 * OTable
+				 */
+				o_wal_update(desc, tup, nulltup, REPLICA_IDENTITY_DEFAULT, O_TABLE_INVALID_VERSION);
 			}
 		}
 		PG_CATCH();

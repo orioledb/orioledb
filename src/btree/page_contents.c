@@ -207,6 +207,7 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 *    increasing page change count and reusing the page during page unlock.
 	 */
 	headerCsn = header->csn;
+
 	if (read_undo && COMMITSEQNO_IS_NORMAL(csn) && headerCsn >= csn)
 	{
 		UndoLocation pageUndoLoc;
@@ -389,9 +390,7 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 					 checkpoint_state->punchHolesTrancheId);
 
 	page_desc->type = oIndexInvalid;
-	page_desc->oids.datoid = InvalidOid;
-	page_desc->oids.reloid = InvalidOid;
-	page_desc->oids.relnode = InvalidOid;
+	ORelOidsSetInvalid(page_desc->oids);
 	page_desc->fileExtent.len = InvalidFileExtentLen;
 	page_desc->fileExtent.off = InvalidFileExtentOff;
 

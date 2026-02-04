@@ -69,6 +69,8 @@ typedef struct OToastValue
 typedef struct
 {
 	BTreeDescr *(*getBTreeDesc) (void *arg);
+	uint32		(*getBTreeVersion) (void *arg);
+	uint32		(*getBaseBTreeVersion) (void *arg);
 	uint32		(*getKeySize) (void *arg);
 	uint32		(*getMaxChunkSize) (void *key, void *arg);
 	void		(*updateKey) (void *key, uint32 chunknum, void *arg);
@@ -80,7 +82,7 @@ typedef struct
 	uint32		(*getTupleChunknum) (OTuple tuple, void *arg);
 	uint32		(*getTupleDataSize) (OTuple tuple, void *arg);
 	bool		deleteLogFullTuple;
-	TupleFetchCallback versionCallback;
+	TupleFetchCallback fetchCallback;
 } ToastAPI;
 
 extern ToastAPI tableToastAPI;
@@ -147,18 +149,18 @@ extern void o_toast_init_tupdescs(OIndexDescr *toast, TupleDesc ix_primary);
 /*
  * Functions dealing with tableam TOAST trees.
  */
-extern bool o_toast_insert(OIndexDescr *primary, OIndexDescr *toast,
+extern bool o_toast_insert(OTableDescr *descr,
 						   OTuple pk, uint16 attn,
 						   Pointer data, Size data_size,
 						   OXid oxid, CommitSeqNo csn);
-extern void o_toast_sort_add(OIndexDescr *primary, OIndexDescr *toast,
+extern void o_toast_sort_add(OTableDescr *descr,
 							 OTuple pk, uint16 attn,
 							 Pointer data, Size data_size,
 							 Tuplesortstate *sortstate);
-extern bool o_toast_delete(OIndexDescr *primary, OIndexDescr *toast,
+extern bool o_toast_delete(OTableDescr *descr,
 						   OTuple pk, uint16 attn,
 						   OXid oxid, CommitSeqNo csn);
-extern Pointer o_toast_get(OIndexDescr *primary, OIndexDescr *toast,
+extern Pointer o_toast_get(OTableDescr *descr,
 						   OTuple pk, uint16 attn, Size data_size,
 						   OSnapshot *snapshot);
 
