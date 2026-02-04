@@ -23,6 +23,7 @@ typedef struct
 {
 	ORelOids	indexOids;
 	OIndexType	indexType;
+	uint32		indexVersion;
 	ORelOids	tableOids;
 	char		table_persistence;
 	uint8		fillfactor;
@@ -86,14 +87,30 @@ typedef struct
 typedef void (*OIndexOidsCallback) (OIndexType type, ORelOids treeOids,
 									ORelOids tableOids, void *arg);
 
-extern OIndex *make_o_index(OTable *table, OIndexNumber ixNum);
-extern void o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable);
+typedef enum
+{
+	OIndexVersionReset,
+	OIndexVersionPass,
+} OIndexVersionMode;
+
+extern OIndex *make_o_index(OTable *table, OIndexNumber ixNum, OIndexVersionMode ixVerMode);
+
+typedef enum
+{
+	oTableSourceTable = 0,
+	oTableSourceContext = 1
+} OTableSource;
+
+extern void o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTableSource source);
+
 extern void free_o_index(OIndex *o_index);
 extern bool o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid,
 						  CommitSeqNo csn);
 extern bool o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid,
 						  CommitSeqNo csn);
 extern OIndex *o_indices_get(ORelOids oids, OIndexType type);
+extern OIndex *o_indices_get_extended(ORelOids oids, OIndexType type, OTableFetchContext ctx);
+
 extern bool o_indices_update(OTable *table, OIndexNumber ixNum,
 							 OXid oxid, CommitSeqNo csn);
 extern bool o_indices_find_table_oids(ORelOids indexOids, OIndexType type,

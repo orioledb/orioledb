@@ -104,25 +104,25 @@ SELECT regexp_replace(
 		'\(\d+, \d+, \d+\)',
 		'(NNN, NNN, NNN)',
 		'g');
-                                        regexp_replace                                         
------------------------------------------------------------------------------------------------
- Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 6336                                      +
- state = free, datoid equal, relnode equal, ix_type = primary, clean                          +
-     Leftmost, Rightmost                                                                      +
-   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ((NNN, NNN, NNN), 0, 1)  +
-     Item 0: deleted, offset = 264, tuple = (((NNN, NNN, NNN), 0, 1), 270)                    +
-   Chunk 1: offset = 1, location = 576, hikey location = 104, hikey = ((NNN, NNN, NNN), 0, 0) +
-     Item 1: deleted, offset = 584, tuple = (((NNN, NNN, NNN), 0, 1), 2052)                   +
-   Chunk 2: offset = 2, location = 2680, hikey location = 128, hikey = ((NNN, NNN, NNN), 0, 0)+
-     Item 2: deleted, offset = 2688, tuple = (((NNN, NNN, NNN), 0, 1), 270)                   +
-     Item 3: deleted, offset = 3000, tuple = (((NNN, NNN, NNN), 0, 0), 1161)                  +
-   Chunk 3: offset = 4, location = 4208, hikey location = 152, hikey = ((NNN, NNN, NNN), 0, 0)+
-     Item 4: deleted, offset = 4216, tuple = (((NNN, NNN, NNN), 0, 1), 464)                   +
-   Chunk 4: offset = 5, location = 4720, hikey location = 176, hikey = ((NNN, NNN, NNN), 0, 0)+
-     Item 5: deleted, offset = 4728, tuple = (((NNN, NNN, NNN), 0, 0), 1355)                  +
-   Chunk 5: offset = 6, location = 6128, hikey location = 200                                 +
-     Item 6: deleted, offset = 6136, tuple = (((NNN, NNN, NNN), 0, 1), 464)                   +
-                                                                                              +
+                                             regexp_replace                                              
+---------------------------------------------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 6392                                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, clean                                    +
+     Leftmost, Rightmost                                                                                +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ((NNN, NNN, NNN), 0, 1)            +
+     Item 0: deleted, offset = 264, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 278)  +
+   Chunk 1: offset = 1, location = 584, hikey location = 104, hikey = ((NNN, NNN, NNN), 0, 0)           +
+     Item 1: deleted, offset = 592, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 2060) +
+   Chunk 2: offset = 2, location = 2696, hikey location = 128, hikey = ((NNN, NNN, NNN), 0, 0)          +
+     Item 2: deleted, offset = 2704, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 278) +
+     Item 3: deleted, offset = 3024, tuple = (((NNN, NNN, NNN), chunknum 0, version 0), dataLength 1169)+
+   Chunk 3: offset = 4, location = 4240, hikey location = 152, hikey = ((NNN, NNN, NNN), 0, 0)          +
+     Item 4: deleted, offset = 4248, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 472) +
+   Chunk 4: offset = 5, location = 4760, hikey location = 176, hikey = ((NNN, NNN, NNN), 0, 0)          +
+     Item 5: deleted, offset = 4768, tuple = (((NNN, NNN, NNN), chunknum 0, version 0), dataLength 1363)+
+   Chunk 5: offset = 6, location = 6176, hikey location = 200                                           +
+     Item 6: deleted, offset = 6184, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 472) +
+                                                                                                        +
  
 (1 row)
 
@@ -134,19 +134,19 @@ SELECT regexp_replace(
 		'g');
                                         regexp_replace                                         
 -----------------------------------------------------------------------------------------------
- Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 4912                                      +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 4960                                      +
  state = free, datoid equal, relnode equal, ix_type = primary, clean                          +
      Leftmost, Rightmost                                                                      +
    Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (1, (NNN, NNN, NNN), 0)  +
-     Item 0: deleted, offset = 264, tuple = ((1, (NNN, NNN, NNN), 0), 678)                    +
-   Chunk 1: offset = 1, location = 984, hikey location = 96, hikey = (3, (NNN, NNN, NNN), 0)  +
-     Item 1: deleted, offset = 992, tuple = ((1, (NNN, NNN, NNN), 0), 1026)                   +
-     Item 2: deleted, offset = 2064, tuple = ((1, (NNN, NNN, NNN), 0), 678)                   +
-   Chunk 2: offset = 3, location = 2784, hikey location = 120, hikey = (3, (NNN, NNN, NNN), 0)+
-     Item 3: deleted, offset = 2792, tuple = ((3, (NNN, NNN, NNN), 0), 794)                   +
-   Chunk 3: offset = 4, location = 3632, hikey location = 144                                 +
-     Item 4: deleted, offset = 3640, tuple = ((3, (NNN, NNN, NNN), 0), 678)                   +
-     Item 5: deleted, offset = 4360, tuple = ((3, (NNN, NNN, NNN), 0), 794)                   +
+     Item 0: deleted, offset = 264, tuple = ((1, (NNN, NNN, NNN), 0), 682)                    +
+   Chunk 1: offset = 1, location = 992, hikey location = 96, hikey = (3, (NNN, NNN, NNN), 0)  +
+     Item 1: deleted, offset = 1000, tuple = ((1, (NNN, NNN, NNN), 0), 1030)                  +
+     Item 2: deleted, offset = 2080, tuple = ((1, (NNN, NNN, NNN), 0), 682)                   +
+   Chunk 2: offset = 3, location = 2808, hikey location = 120, hikey = (3, (NNN, NNN, NNN), 0)+
+     Item 3: deleted, offset = 2816, tuple = ((3, (NNN, NNN, NNN), 0), 798)                   +
+   Chunk 3: offset = 4, location = 3664, hikey location = 144                                 +
+     Item 4: deleted, offset = 3672, tuple = ((3, (NNN, NNN, NNN), 0), 682)                   +
+     Item 5: deleted, offset = 4400, tuple = ((3, (NNN, NNN, NNN), 0), 798)                   +
                                                                                               +
  
 (1 row)
@@ -643,11 +643,172 @@ SELECT regexp_replace(regexp_replace(
  
 (1 row)
 
+-- SYS_TREES_XID_UNDO_LOCATION
+SELECT orioledb_insert_sys_xid_undo_location(1000, 2000);
+ orioledb_insert_sys_xid_undo_location 
+---------------------------------------
+ 
+(1 row)
+
+SELECT orioledb_insert_sys_xid_undo_location(1001, 2001);
+ orioledb_insert_sys_xid_undo_location 
+---------------------------------------
+ 
+(1 row)
+
+SELECT orioledb_insert_sys_xid_undo_location(1002, 2002);
+ orioledb_insert_sys_xid_undo_location 
+---------------------------------------
+ 
+(1 row)
+
+SELECT orioledb_insert_sys_xid_undo_location(1003, 2003);
+ orioledb_insert_sys_xid_undo_location 
+---------------------------------------
+ 
+(1 row)
+
+SELECT orioledb_insert_sys_xid_undo_location(1005, 2005);
+ orioledb_insert_sys_xid_undo_location 
+---------------------------------------
+ 
+(1 row)
+
+SELECT orioledb_insert_sys_xid_undo_location(1006, 2006);
+ orioledb_insert_sys_xid_undo_location 
+---------------------------------------
+ 
+(1 row)
+
+SELECT orioledb_sys_tree_structure(24, 'ne');
+                     orioledb_sys_tree_structure                     
+---------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 296, tuple = (730, 0)                         +
+     Item 1: offset = 328, tuple = (734, 96)                        +
+     Item 2: offset = 360, tuple = (735, 24808)                     +
+     Item 3: offset = 392, tuple = (736, 27176)                     +
+     Item 4: offset = 424, tuple = (737, 27624)                     +
+     Item 5: offset = 456, tuple = (739, 28176)                     +
+     Item 6: offset = 488, tuple = (740, 29168)                     +
+     Item 7: offset = 520, tuple = (743, 29328)                     +
+     Item 8: offset = 552, tuple = (744, 47800)                     +
+     Item 9: offset = 584, tuple = (745, 50680)                     +
+     Item 10: offset = 616, tuple = (746, 51120)                    +
+     Item 11: offset = 648, tuple = (747, 53856)                    +
+     Item 12: offset = 680, tuple = (1000, 2000)                    +
+     Item 13: offset = 712, tuple = (1001, 2001)                    +
+     Item 14: offset = 744, tuple = (1002, 2002)                    +
+     Item 15: offset = 776, tuple = (1003, 2003)                    +
+     Item 16: offset = 808, tuple = (1005, 2005)                    +
+     Item 17: offset = 840, tuple = (1006, 2006)                    +
+                                                                    +
+ 
+(1 row)
+
+SELECT orioledb_read_sys_xid_undo_location(1004);
+INFO:  orioledb_read_sys_xid_undo_location: deleted 16 items
+ orioledb_read_sys_xid_undo_location 
+-------------------------------------
+                                2005
+(1 row)
+
+SELECT orioledb_sys_tree_structure(24, 'ne');
+                     orioledb_sys_tree_structure                     
+---------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = (1005, 2005)                     +
+     Item 1: offset = 296, tuple = (1006, 2006)                     +
+                                                                    +
+ 
+(1 row)
+
+-- entries with xid < 1004 are deleted at previous read
+SELECT orioledb_read_sys_xid_undo_location(1000);
+INFO:  orioledb_read_sys_xid_undo_location: deleted 0 items
+ orioledb_read_sys_xid_undo_location 
+-------------------------------------
+                                2005
+(1 row)
+
+SELECT orioledb_sys_tree_structure(24, 'ne');
+                     orioledb_sys_tree_structure                     
+---------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = (1005, 2005)                     +
+     Item 1: offset = 296, tuple = (1006, 2006)                     +
+                                                                    +
+ 
+(1 row)
+
+-- cache invalidation of last value at insert
+SELECT orioledb_insert_sys_xid_undo_location(1009, 2009);
+ orioledb_insert_sys_xid_undo_location 
+---------------------------------------
+ 
+(1 row)
+
+SELECT orioledb_sys_tree_structure(24, 'ne');
+                     orioledb_sys_tree_structure                     
+---------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = (1005, 2005)                     +
+     Item 1: offset = 296, tuple = (1006, 2006)                     +
+     Item 2: offset = 328, tuple = (1009, 2009)                     +
+                                                                    +
+ 
+(1 row)
+
+SELECT orioledb_read_sys_xid_undo_location(1007);
+INFO:  orioledb_read_sys_xid_undo_location: deleted 2 items
+ orioledb_read_sys_xid_undo_location 
+-------------------------------------
+                                2009
+(1 row)
+
+SELECT orioledb_insert_sys_xid_undo_location(1008, 2008);
+ orioledb_insert_sys_xid_undo_location 
+---------------------------------------
+ 
+(1 row)
+
+SELECT orioledb_sys_tree_structure(24, 'ne');
+                     orioledb_sys_tree_structure                     
+---------------------------------------------------------------------
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty+
+     Leftmost, Rightmost                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64         +
+     Item 0: offset = 264, tuple = (1008, 2008)                     +
+     Item 1: offset = 296, tuple = (1009, 2009)                     +
+                                                                    +
+ 
+(1 row)
+
+SELECT orioledb_read_sys_xid_undo_location(1007);
+INFO:  orioledb_read_sys_xid_undo_location: deleted 0 items
+ orioledb_read_sys_xid_undo_location 
+-------------------------------------
+                                2008
+(1 row)
+
 -- fail
 SELECT orioledb_sys_tree_structure(9999);
-ERROR:  Value num must be in the range from 1 to 23
+ERROR:  Value num must be in the range from 1 to 24
 SELECT orioledb_sys_tree_check(-1111);
-ERROR:  Value num must be in the range from 1 to 23
+ERROR:  Value num must be in the range from 1 to 24
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA btree_sys_check CASCADE;
 RESET search_path;

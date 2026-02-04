@@ -68,6 +68,7 @@ typedef struct
 	ORelOids	oids;
 	OIndexType	type;
 	OCompress	compress;
+	uint32		version;
 	bool		nulls_not_distinct;
 	uint8		nfields;
 	/* number of index fields */
@@ -92,6 +93,28 @@ typedef struct
 {
 	ORelOids	oids;
 	ORelOids	toast_oids;
+
+	/*
+	 * Per-table index version counters used for sys-tree visibility (MVCC)
+	 * during recovery and logical decoding.
+	 *
+	 * OrioleDB stores catalog-like metadata in system trees. For some
+	 * operations the "same" logical index (e.g. the table's primary index)
+	 * may be replaced by a new metadata record while keeping stable identity
+	 * attributes (relation OIDs, names, etc.).
+	 *
+	 * To make each incarnation unambiguous, OIndex records are keyed not only
+	 * by (table oids, index type) but also by a monotonically changing
+	 * version. These fields keep the current version for the corresponding
+	 * index kind and are copied into ORelFetchContext.version when we need to
+	 * read the matching OIndex from SYS_TREES.
+	 *
+	 * O_TABLE_INVALID_VERSION means "index does not exist / version is
+	 * unknown".
+	 */
+	uint32		toast_ixversion;	/* TOAST-index version for current table */
+	uint32		primary_ixversion;	/* Primary-index version for current table */
+	uint32		bridge_ixversion;	/* Bridge-index version for current table */
 	ORelOids	bridge_oids;
 	OCompress	default_compress;
 	OCompress	primary_compress;
@@ -158,8 +181,8 @@ extern bool o_tables_add(OTable *table, OXid oxid, CommitSeqNo csn);
 /* Returns OTable by its oids */
 extern OTable *o_tables_get(ORelOids oids);
 
-/* Returns OTable by its oids and version */
-extern OTable *o_tables_get_by_oids_and_version(ORelOids oids, uint32 *version);
+/* Returns OTable by its oids, version and snapshot */
+extern OTable *o_tables_get_extended(ORelOids oids, OTableFetchContext ctx);
 
 /* Returns OTable by its index oids */
 extern OTable *o_tables_get_by_tree(ORelOids oids, OIndexType type);

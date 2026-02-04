@@ -309,6 +309,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 		oxid_match_snapshot(XACT_INFO_GET_OXID(xactInfo), oSnapshot,
 							&tupcsn, &tupptr);
+
 		if (tupleCsn)
 		{
 			if (COMMITSEQNO_IS_NORMAL(tupcsn))
@@ -322,6 +323,11 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 		if (cb)
 		{
 			TupleFetchCallbackResult cbResult;
+
+			/*
+			 * Fetch from undo chain if txn is in progress OR historical
+			 * version
+			 */
 			bool		version_check = !txIsFinished;
 			OXid		tupOxid = version_check ? XACT_INFO_GET_OXID(xactInfo) : InvalidOXid;
 			TupleFetchCallbackCheckType check_type = version_check ?
