@@ -238,6 +238,7 @@ PG_FUNCTION_INFO_V1(orioledb_parallel_debug_stop);
 
 //#define ORIOLEDB_DEV
 
+#ifdef ORIOLEDB_DEV
 typedef struct WalDescCtx
 {
 	StringInfo	buf;
@@ -316,6 +317,7 @@ wal_desc_on_event(void *vctx, WalEvent *ev)
 	}
 	return WALPARSE_OK;
 }
+#endif
 
 static void
 orioledb_rm_desc(StringInfo buf, XLogReaderState *record)
