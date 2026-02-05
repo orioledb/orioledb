@@ -109,7 +109,38 @@ do { \
 	if (ptr) *ptr = value; \
 } while(0)
 
+WalParseStatus
+wal_flag_parse_container_xact_info(WalReader *r, WalEvent *ev)
+{
+	Assert(r);
+	Assert(ev);
+
+	WR_READ(r, &ev->u.xact_info.xactTime);
+	WR_READ(r, &ev->u.xact_info.xid);
+
+	return WALPARSE_OK;
+}
+
 /* Parser for WAL_REC_XID */
+WalParseStatus
+wal_parse_xid(WalReader *r, WalEvent *ev)
+{
+	Assert(r);
+	Assert(ev);
+
+	WR_READ(r, &ev->oxid);
+	WR_READ(r, &ev->logicalXid);
+	if (r->wal_version >= 17)
+	{
+		WR_READ(r, &ev->heapXid);
+	}
+	else
+	{
+		ev->heapXid = InvalidTransactionId;
+	}
+	return WALPARSE_OK;
+}
+
 Pointer
 wal_parse_rec_xid(Pointer ptr, OXid *oxid, TransactionId *logicalXid, TransactionId *heapXid, uint16 wal_version)
 {
@@ -142,6 +173,18 @@ wal_parse_container_xact_info(Pointer ptr, TimestampTz *xactTime, TransactionId 
 }
 
 /* Parser for WAL_REC_COMMIT and WAL_REC_ROLLBACK */
+WalParseStatus
+wal_parse_finish(WalReader *r, WalEvent *ev)
+{
+	Assert(r);
+	Assert(ev);
+
+	WR_READ(r, &ev->u.finish.xmin);
+	WR_READ(r, &ev->u.finish.csn);
+
+	return WALPARSE_OK;
+}
+
 Pointer
 wal_parse_rec_finish(Pointer ptr, OXid *xmin, CommitSeqNo *csn)
 {
@@ -154,6 +197,19 @@ wal_parse_rec_finish(Pointer ptr, OXid *xmin, CommitSeqNo *csn)
 }
 
 /* Parser for WAL_REC_JOINT_COMMIT */
+WalParseStatus
+wal_parse_joint_commit(WalReader *r, WalEvent *ev)
+{
+	Assert(r);
+	Assert(ev);
+
+	WR_READ(r, &ev->u.joint_commit.xid);
+	WR_READ(r, &ev->u.joint_commit.xmin);
+	WR_READ(r, &ev->u.joint_commit.csn);
+
+	return WALPARSE_OK;
+}
+
 Pointer
 wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid *xmin, CommitSeqNo *csn)
 {
@@ -167,6 +223,39 @@ wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid *xmin, CommitSe
 }
 
 /* Parser for WAL_REC_RELATION */
+WalParseStatus
+wal_parse_relation(WalReader *r, WalEvent *ev)
+{
+	Assert(r);
+	Assert(ev);
+
+	WR_READ(r, &ev->u.relation.treeType);
+	WR_READ(r, &ev->oids.datoid);
+	WR_READ(r, &ev->oids.reloid);
+	WR_READ(r, &ev->oids.relnode);
+
+	if (r->wal_version >= 17)
+	{
+		WR_READ(r, &ev->u.relation.xmin);
+		WR_READ(r, &ev->u.relation.csn);
+		WR_READ(r, &ev->u.relation.cid);
+
+		WR_READ(r, &ev->u.relation.version);
+		WR_READ(r, &ev->u.relation.base_version);
+	}
+	else
+	{
+		ASSIGN(&ev->u.relation.xmin, InvalidOXid);
+		ASSIGN(&ev->u.relation.csn, 0);
+		ASSIGN(&ev->u.relation.cid, InvalidCommandId);
+
+		ASSIGN(&ev->u.relation.version, O_TABLE_INVALID_VERSION);
+		ASSIGN(&ev->u.relation.base_version, O_TABLE_INVALID_VERSION);
+	}
+
+	return WALPARSE_OK;
+}
+
 Pointer
 wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin, CommitSeqNo *csn, CommandId *cid, uint32 *version, uint32 *base_version, uint16 wal_version)
 {
@@ -201,6 +290,27 @@ wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin,
 }
 
 /* Parser for WAL_REC_RELREPLIDENT */
+WalParseStatus
+wal_parse_relreplident(WalReader *r, WalEvent *ev)
+{
+	Assert(r);
+	Assert(ev);
+
+	/* Should be set only once and only from default */
+	Assert(ev->relreplident == REPLICA_IDENTITY_DEFAULT);
+
+	WR_READ(r, &ev->relreplident);
+
+	/*
+	 * relreplident_ix_oid is reserved in the WAL_REC_RELREPLIDENT for the
+	 * future implementation of REPLICA IDENTITY USING INDEX and not used now
+	 */
+	WR_READ(r, &ev->u.relreplident.relreplident_ix_oid);
+	Assert(ev->u.relreplident.relreplident_ix_oid == InvalidOid);
+
+	return WALPARSE_OK;
+}
+
 Pointer
 wal_parse_rec_relreplident(Pointer ptr, char *relreplident, Oid *relreplident_ix_oid)
 {
@@ -222,6 +332,20 @@ wal_parse_rec_relreplident(Pointer ptr, char *relreplident, Oid *relreplident_ix
 }
 
 /* Parser for WAL_REC_O_TABLES_META_UNLOCK */
+WalParseStatus
+wal_parse_o_tables_meta_unlock(WalReader *r, WalEvent *ev)
+{
+	Assert(r);
+	Assert(ev);
+
+	WR_READ(r, &ev->u.unlock.oids.datoid);
+	WR_READ(r, &ev->u.unlock.oids.reloid);
+	WR_READ(r, &ev->u.unlock.oldRelnode);
+	WR_READ(r, &ev->u.unlock.oids.relnode);
+
+	return WALPARSE_OK;
+}
+
 Pointer
 wal_parse_rec_o_tables_meta_unlock(Pointer ptr, ORelOids *oids, Oid *old_relnode)
 {
@@ -237,6 +361,19 @@ wal_parse_rec_o_tables_meta_unlock(Pointer ptr, ORelOids *oids, Oid *old_relnode
 }
 
 /* Parser for WAL_REC_SAVEPOINT */
+WalParseStatus
+wal_parse_savepoint(WalReader *r, WalEvent *ev)
+{
+	Assert(r);
+	Assert(ev);
+
+	WR_READ(r, &ev->u.savepoint.parentSubid);
+	WR_READ(r, &ev->logicalXid);
+	WR_READ(r, &ev->u.savepoint.parentLogicalXid);
+
+	return WALPARSE_OK;
+}
+
 Pointer
 wal_parse_rec_savepoint(Pointer ptr, SubTransactionId *parentSubid, TransactionId *logicalXid, TransactionId *parentLogicalXid)
 {
@@ -250,6 +387,26 @@ wal_parse_rec_savepoint(Pointer ptr, SubTransactionId *parentSubid, TransactionI
 }
 
 /* Parser for WAL_REC_ROLLBACK_TO_SAVEPOINT */
+WalParseStatus
+wal_parse_rollback_to_savepoint(WalReader *r, WalEvent *ev)
+{
+	Assert(r);
+	Assert(ev);
+
+	WR_READ(r, &ev->u.rb_to_sp.parentSubid);
+	if (r->wal_version >= 17)
+	{
+		WR_READ(r, &ev->u.rb_to_sp.xmin);
+		WR_READ(r, &ev->u.rb_to_sp.csn);
+	}
+	else
+	{
+		ASSIGN(&ev->u.rb_to_sp.xmin, InvalidOXid);
+		ASSIGN(&ev->u.rb_to_sp.csn, 0);
+	}
+	return WALPARSE_OK;
+}
+
 Pointer
 wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid, OXid *xmin, CommitSeqNo *csn, uint16 wal_version)
 {
@@ -271,6 +428,19 @@ wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid, 
 }
 
 /* Parser for WAL_REC_TRUNCATE */
+WalParseStatus
+wal_parse_truncate(WalReader *r, WalEvent *ev)
+{
+	Assert(r);
+	Assert(ev);
+
+	WR_READ(r, &ev->u.truncate.oids.datoid);
+	WR_READ(r, &ev->u.truncate.oids.reloid);
+	WR_READ(r, &ev->u.truncate.oids.relnode);
+
+	return WALPARSE_OK;
+}
+
 Pointer
 wal_parse_rec_truncate(Pointer ptr, ORelOids *oids)
 {
@@ -285,6 +455,17 @@ wal_parse_rec_truncate(Pointer ptr, ORelOids *oids)
 }
 
 /* Parser for WAL_REC_BRIDGE_ERASE */
+WalParseStatus
+wal_parse_bridge_erase(WalReader *r, WalEvent *ev)
+{
+	Assert(r);
+	Assert(ev);
+
+	WR_READ(r, &ev->u.bridge_erase.iptr);
+
+	return WALPARSE_OK;
+}
+
 Pointer
 wal_parse_rec_bridge_erase(Pointer ptr, ItemPointerData *iptr)
 {
@@ -296,6 +477,18 @@ wal_parse_rec_bridge_erase(Pointer ptr, ItemPointerData *iptr)
 }
 
 /* Parser for WAL_REC_SWITCH_LOGICAL_XID */
+WalParseStatus
+wal_parse_switch_logical_xid(WalReader *r, WalEvent *ev)
+{
+	Assert(r);
+	Assert(ev);
+
+	WR_READ(r, &ev->u.swxid.topXid);
+	WR_READ(r, &ev->u.swxid.subXid);
+
+	return WALPARSE_OK;
+}
+
 Pointer
 wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *topXid, TransactionId *subXid)
 {
@@ -1199,6 +1392,46 @@ set_local_wal_has_material_changes(bool value)
  * Read one or two tuples from modify WAL record.
  * Two tuples in certain cases: (1) WAL_REC_REINSERT, (2) WAL_REC_UPDATE with REPLICA_IDENTITY_FULL
  */
+WalParseStatus
+wal_parse_modify(WalReader *r, WalEvent *ev)
+{
+	Assert(r);
+	Assert(ev);
+
+	ev->u.modify.read_two_tuples = (ev->type == WAL_REC_REINSERT || (ev->type == WAL_REC_UPDATE && ev->relreplident == REPLICA_IDENTITY_FULL));
+
+	if (!ev->u.modify.read_two_tuples)
+	{
+		WR_READ(r, &ev->u.modify.t1.formatFlags);
+		WR_READ(r, &ev->u.modify.t1.len);
+		Assert(ev->u.modify.t1.len > 0);
+
+		ev->u.modify.t1.data = r->ptr;
+		WR_SKIP(r, ev->u.modify.t1.len);
+
+		WAL_TUPLE_VIEW_SET_NULL(ev->u.modify.t2);
+	}
+	else
+	{
+		WR_READ(r, &ev->u.modify.t1.formatFlags);
+		WR_READ(r, &ev->u.modify.t2.formatFlags);
+
+		WR_READ(r, &ev->u.modify.t1.len);
+		WR_READ(r, &ev->u.modify.t2.len);
+
+		Assert(ev->u.modify.t1.len > 0);
+		Assert(ev->u.modify.t2.len > 0);
+
+		ev->u.modify.t1.data = r->ptr;
+		WR_SKIP(r, ev->u.modify.t1.len);
+
+		ev->u.modify.t2.data = r->ptr;
+		WR_SKIP(r, ev->u.modify.t2.len);
+	}
+
+	return WALPARSE_OK;
+}
+
 Pointer
 wal_parse_rec_modify(Pointer ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1_out, bool read_two_tuples)
 {
