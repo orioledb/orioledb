@@ -917,7 +917,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 			o_tables_rel_lock_extended_no_inval(&dropTreeOids[i], AccessExclusiveLock, true);
 			if (doCleanup)
 			{
-				cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode, cleanupFiles, true);
+				cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode, cleanupFiles, true, !is_rewind_worker());
 				o_delete_chkp_num(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
 				o_tablespace_cache_delete(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
 			}
