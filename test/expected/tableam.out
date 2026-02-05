@@ -4161,11 +4161,10 @@ FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
    Conflict Arbiter Indexes: o_tableam_explain_x_pkey
    Tuples Inserted: x
    Conflicting Tuples: x
-   Buffers: shared hit=x
    ->  Result  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
  Planning Time: x ms
  Execution Time: x ms
-(9 rows)
+(8 rows)
 
 SELECT * FROM o_tableam_explain_2;
  id | val | val2 | val3 
