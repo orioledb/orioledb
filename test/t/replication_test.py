@@ -1178,3 +1178,106 @@ class ReplicationTest(BaseTest):
 
 	def all_tables_dropped(self, node):
 		return len(self.get_orioledb_files(node)) == 0
+
+	def test_cascading_replication(self):
+		import shutil
+		import inspect
+
+		with self.node as primary:
+			primary.start()
+
+			# Create first replica from primary
+			with self.getReplica().start() as replica1:
+				# Create extension and test table on primary
+				primary.execute("CREATE EXTENSION orioledb;")
+				primary.execute("""
+					CREATE TABLE o_cascade_test (
+						id integer NOT NULL,
+						val text,
+						PRIMARY KEY (id)
+					) USING orioledb;
+				""")
+
+				# Insert initial data
+				primary.execute("""
+					INSERT INTO o_cascade_test (id, val)
+					SELECT i, 'value_' || i
+					FROM generate_series(1, 100) i;
+				""")
+
+				# Wait for replica1 to catch up
+				self.catchup_orioledb(replica1)
+
+				# Verify data on replica1
+				count1 = replica1.execute(
+				    "SELECT COUNT(*) FROM o_cascade_test;")[0][0]
+				self.assertEqual(100, count1)
+
+				# Create cascading replica (replica2) from replica1
+				(test_path, t) = os.path.split(
+				    os.path.dirname(inspect.getfile(self.__class__)))
+				cascade_base_dir = os.path.join(test_path, 'tmp_check_t',
+				                                self.myName + '_tgsc')
+				if os.path.exists(cascade_base_dir):
+					shutil.rmtree(cascade_base_dir)
+
+				replica2 = replica1.backup(
+				    base_dir=cascade_base_dir).spawn_replica('replica2')
+				replica2.append_conf(port=replica2.port)
+
+				with replica2.start() as cascade_replica:
+					# Perform more operations on primary
+					primary.execute("""
+						INSERT INTO o_cascade_test (id, val)
+						SELECT i, 'cascade_' || i
+						FROM generate_series(101, 200) i;
+					""")
+
+					primary.execute("""
+						UPDATE o_cascade_test
+						SET val = 'updated_' || id
+						WHERE id <= 50;
+					""")
+
+					primary.execute("""
+						DELETE FROM o_cascade_test
+						WHERE id BETWEEN 75 AND 85;
+					""")
+
+					# Wait for replica1 to catch up
+					self.catchup_orioledb(replica1)
+
+					# Wait for cascading replica to catch up
+					self.catchup_cascading(cascade_replica, primary, replica1)
+
+					# Verify final counts on all nodes
+					primary_count = primary.execute(
+					    "SELECT COUNT(*) FROM o_cascade_test;")[0][0]
+					replica1_count = replica1.execute(
+					    "SELECT COUNT(*) FROM o_cascade_test;")[0][0]
+					replica2_count = cascade_replica.execute(
+					    "SELECT COUNT(*) FROM o_cascade_test;")[0][0]
+
+					# Should have 200 - 11 (deleted) = 189 rows
+					expected_count = 189
+					self.assertEqual(expected_count, primary_count)
+					self.assertEqual(expected_count, replica1_count)
+					self.assertEqual(expected_count, replica2_count)
+
+					# Test transaction boundaries with cascading
+					primary.execute("BEGIN;")
+					primary.execute("""
+						INSERT INTO o_cascade_test (id, val)
+						VALUES (1001, 'txn_test_1'), (1002, 'txn_test_2');
+					""")
+					primary.execute("COMMIT;")
+
+					# Wait for propagation
+					self.catchup_cascading(cascade_replica, primary, replica1)
+
+					# Verify transaction committed on cascade replica
+					txn_count = cascade_replica.execute("""
+						SELECT COUNT(*) FROM o_cascade_test
+						WHERE id >= 1001;
+					""")[0][0]
+					self.assertEqual(2, txn_count)

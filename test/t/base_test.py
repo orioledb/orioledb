@@ -31,7 +31,7 @@ class TestPortManager(PortManager__Generic):
 	def __init__(self, os_ops: OsOperations, base_port: int):
 		super().__init__(os_ops)
 		self._available_ports: typing.Set[int] = set(
-		    [base_port, base_port + 1])
+		    [base_port, base_port + 1, base_port + 2])
 
 	def is_port_free(self, port: int):
 		port_free = port in self._available_ports
@@ -342,6 +342,33 @@ class BaseTest(unittest.TestCase):
 	def catchup_orioledb(self, replica):
 		# wait for synchronization
 		replica.catchup()
+
+	def catchup_cascading(self,
+	                      cascade_replica,
+	                      primary,
+	                      intermediate_replica=None):
+		"""
+		Wait for a cascading replica to catch up with the primary.
+
+		This handles the case where cascade_replica replicates from an intermediate
+		replica (which itself replicates from primary), so we can't use the standard
+		catchup() method which would try to call WAL functions on the intermediate replica.
+		"""
+		import time
+
+		# First, ensure intermediate replica catches up with primary if provided
+		if intermediate_replica is not None:
+			self.catchup_orioledb(intermediate_replica)
+
+		# Get LSN from primary (which is not in recovery)
+		lsn = primary.execute(
+		    "SELECT pg_catalog.pg_current_wal_lsn()::text;")[0][0]
+
+		# Wait for cascade replica to replay up to that LSN
+		cascade_replica.poll_query_until(
+		    f"SELECT pg_catalog.pg_last_wal_replay_lsn() >= '{lsn}'::pg_lsn;",
+		    expected=True,
+		    max_attempts=300)
 
 	@staticmethod
 	def sparse_files_supported():
