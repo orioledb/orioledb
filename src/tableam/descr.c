@@ -1040,8 +1040,12 @@ o_insert_shared_root_placeholder(Oid datoid, Oid relnode)
 	Assert(inserted);
 }
 
+/*
+ * Cleanup BTree
+ * clean_local - cleanup btree even if it is local
+ */
 void
-cleanup_btree(Oid datoid, Oid relnode, bool files, bool fsync)
+cleanup_btree(Oid datoid, Oid relnode, bool files, bool fsync, bool clean_local)
 {
 	SharedRootInfoKey key;
 	SharedRootInfo *shared = NULL;
@@ -1050,10 +1054,13 @@ cleanup_btree(Oid datoid, Oid relnode, bool files, bool fsync)
 	key.relnode = relnode;
 
 	shared = o_find_shared_root_info(&key);
-
+	
 	if (shared)
 	{
 		bool		drop_result PG_USED_FOR_ASSERTS_ONLY;
+
+		if(!clean_local && O_PAGE_IS_LOCAL(shared->rootInfo.rootPageBlkno))
+            return;	
 
 		drop_result = o_drop_shared_root_info(datoid, relnode);
 		Assert(drop_result);
