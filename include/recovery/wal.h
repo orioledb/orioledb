@@ -246,7 +246,18 @@ typedef struct
  * WAL_CONTAINER_HAS_* flags.
  */
 
-#define WAL_CONTAINER_HAS_XACT_INFO	(1U << 0)
+#define ORIOLE_WAL_FLAGS(X) \
+	X(WAL_CONTAINER_HAS_XACT_INFO, (1U << 0), "XACT_INFO", wal_flag_parse_container_xact_info)
+
+/* Flag Parsers */
+extern WalParseStatus wal_flag_parse_container_xact_info(WalReader *r, WalEvent *ev);
+
+enum OrioleWalFlagType
+{
+#define X(sym, val, name, fn)	sym = (val),
+	ORIOLE_WAL_FLAGS(X)
+#undef  X
+};
 
 typedef struct
 {

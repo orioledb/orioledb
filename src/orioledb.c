@@ -245,7 +245,21 @@ typedef struct WalDescCtx
 } WalDescCtx;
 
 static WalParseStatus
-wal_desc_on_event(void *vctx, const WalEvent *ev)
+wal_desc_check_version(const WalReader *r)
+{
+	Assert(r);
+
+	if (r->wal_version > ORIOLEDB_WAL_VERSION)
+	{
+		/* WAL from future version */
+		return WALPARSE_BAD_VERSION;
+	}
+
+	return WALPARSE_OK;
+}
+
+static WalParseStatus
+wal_desc_on_event(void *vctx, WalEvent *ev)
 {
 	WalDescCtx *ctx = (WalDescCtx *) vctx;
 
@@ -311,15 +325,21 @@ orioledb_rm_desc(StringInfo buf, XLogReaderState *record)
 	Pointer		endPtr = startPtr + XLogRecGetDataLen(record);
 
 	WalReader	r = {
-		.ptr = startPtr,
+		.start = startPtr,
 		.end = endPtr,
+		.ptr = startPtr,
 		.wal_version = 0,
 		.wal_flags = 0
 	};
 	WalDescCtx	dctx = {
 		.buf = buf
 	};
-	WalConsumer cons = {.ctx = &dctx,.on_event = wal_desc_on_event};
+	WalConsumer cons = {
+		.ctx = &dctx,
+		.check_version = wal_desc_check_version,
+		.on_flag = NULL,
+		.on_event = wal_desc_on_event
+	};
 	WalParseStatus st = wal_container_iterate(&r, &cons, false /* allow_logging */ );
 
 	if (st != WALPARSE_OK)

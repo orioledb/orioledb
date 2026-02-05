@@ -577,6 +577,38 @@ remove_skipped_dml(HTAB **cache, uint64 oxid)
 	return found;
 }
 
+static WalParseStatus
+decode_wal_check_version(const WalReader *r)
+{
+	Assert(r);
+
+	if (r->wal_version > ORIOLEDB_WAL_VERSION)
+	{
+		/* WAL from future version */
+		elog(ERROR, "Can't logically decode WAL version %u that is newer than supported %u", r->wal_version, ORIOLEDB_WAL_VERSION);
+		return WALPARSE_BAD_VERSION;
+	}
+
+	return WALPARSE_OK;
+}
+
+static WalParseStatus
+decode_wal_on_flag(void *ctx, const WalEvent *ev)
+{
+	Assert(ev);
+
+	switch (ev->type)
+	{
+		case WAL_CONTAINER_HAS_XACT_INFO:
+			/* Skip WAL_REC_XACT_INFO */
+			break;
+		default:
+			break;
+	}
+
+	return WALPARSE_OK;
+}
+
 /*
  * Handle OrioleDB records for LogicalDecodingProcessRecord().
  */

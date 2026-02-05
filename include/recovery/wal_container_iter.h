@@ -17,18 +17,19 @@
 #include "recovery/wal_reader.h"
 #include "recovery/wal_event.h"
 
-typedef WalParseStatus (*WalOnEventFn) (void *ctx, const WalEvent *ev);
+typedef WalParseStatus (*WalCheckVersionFn) (const WalReader *r);
+typedef WalParseStatus (*WalOnFlagFn) (void *ctx, const WalEvent *ev);
+typedef WalParseStatus (*WalOnEventFn) (void *ctx, WalEvent *ev);
 
 typedef struct WalConsumer
 {
 	void	   *ctx;
+	WalCheckVersionFn check_version;
+	WalOnFlagFn on_flag;
 	WalOnEventFn on_event;
 
 } WalConsumer;
 
 WalParseStatus wal_container_iterate(WalReader *r, WalConsumer *consumer, bool allow_logging);
-
-/* @TODO rename after migration! */
-WalParseStatus wr_wal_container_read_header(WalReader *r, bool allow_logging);
 
 #endif							/* __WAL_CONTAINER_ITER_H__ */

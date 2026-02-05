@@ -16,8 +16,11 @@
 
 typedef struct WalReader
 {
-	Pointer		ptr;
+	Pointer		start;
 	Pointer		end;
+
+	Pointer		ptr;
+
 	uint16		wal_version;
 	uint8		wal_flags;
 

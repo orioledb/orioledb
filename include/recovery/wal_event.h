@@ -14,6 +14,8 @@
 #ifndef __WAL_EVENT_H__
 #define __WAL_EVENT_H__
 
+typedef unsigned int wal_type_t;
+
 typedef struct WalTupleView
 {
 	Pointer		data;
@@ -21,6 +23,8 @@ typedef struct WalTupleView
 	uint8		formatFlags;
 
 } WalTupleView;
+
+extern void build_fixed_tuple_from_tuple_view(const WalTupleView *view, OFixedTuple *tuple);
 
 #define WAL_TUPLE_VIEW_SET_NULL(tv) \
 do { \
@@ -31,7 +35,10 @@ do { \
 
 typedef struct WalEvent
 {
-	uint8		type;
+	wal_type_t	type;
+
+	uint32		delta;
+	Pointer		value_ptr;
 
 	ORelOids	oids;
 	OXid		oxid;
@@ -60,6 +67,11 @@ typedef struct WalEvent
 		struct
 		{
 			uint8		treeType;
+			OXid		xmin;
+			CommitSeqNo csn;
+			CommandId	cid;
+			uint32		version;
+			uint32		base_version;
 		}			relation;
 		struct
 		{
@@ -96,6 +108,12 @@ typedef struct WalEvent
 			WalTupleView t2;
 			bool		read_two_tuples;
 		}			modify;
+
+		struct
+		{
+			TimestampTz xactTime;
+			TransactionId xid;
+		}			xact_info;
 
 	}			u;
 

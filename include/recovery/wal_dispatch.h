@@ -21,13 +21,16 @@ typedef WalParseStatus (*WalParseFn) (WalReader *r, WalEvent *ev);
 
 typedef struct WalRecordDesc
 {
-	uint8		type;
+	wal_type_t	type;
 	const char *name;
 	WalParseFn	parse;
 
 } WalRecordDesc;
 
-const WalRecordDesc *wal_get_desc(uint8 type);
-const char *wal_type_name(uint8 type);
+const WalRecordDesc *wal_get_desc(wal_type_t type);
+const char *wal_type_name(wal_type_t type);
+
+const WalRecordDesc *wal_flag_get_desc(wal_type_t type);
+const char *wal_flag_type_name(wal_type_t type);
 
 #endif							/* __WAL_DISPATCH_H__ */

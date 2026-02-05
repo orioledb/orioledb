@@ -109,6 +109,18 @@ do { \
 	if (ptr) *ptr = value; \
 } while(0)
 
+WalParseStatus
+wal_flag_parse_container_xact_info(WalReader *r, WalEvent *ev)
+{
+	Assert(r);
+	Assert(ev);
+
+	WR_READ(r, &ev->u.xact_info.xactTime);
+	WR_READ(r, &ev->u.xact_info.xid);
+
+	return WALPARSE_OK;
+}
+
 /* Parser for WAL_REC_XID */
 WalParseStatus
 wal_parse_xid(WalReader *r, WalEvent *ev)
@@ -121,6 +133,10 @@ wal_parse_xid(WalReader *r, WalEvent *ev)
 	if (r->wal_version >= 17)
 	{
 		WR_READ(r, &ev->heapXid);
+	}
+	else
+	{
+		ev->heapXid = InvalidTransactionId;
 	}
 	return WALPARSE_OK;
 }
@@ -217,6 +233,25 @@ wal_parse_relation(WalReader *r, WalEvent *ev)
 	WR_READ(r, &ev->oids.datoid);
 	WR_READ(r, &ev->oids.reloid);
 	WR_READ(r, &ev->oids.relnode);
+
+	if (r->wal_version >= 17)
+	{
+		WR_READ(r, &ev->u.relation.xmin);
+		WR_READ(r, &ev->u.relation.csn);
+		WR_READ(r, &ev->u.relation.cid);
+
+		WR_READ(r, &ev->u.relation.version);
+		WR_READ(r, &ev->u.relation.base_version);
+	}
+	else
+	{
+		ASSIGN(&ev->u.relation.xmin, InvalidOXid);
+		ASSIGN(&ev->u.relation.csn, 0);
+		ASSIGN(&ev->u.relation.cid, InvalidCommandId);
+
+		ASSIGN(&ev->u.relation.version, O_TABLE_INVALID_VERSION);
+		ASSIGN(&ev->u.relation.base_version, O_TABLE_INVALID_VERSION);
+	}
 
 	return WALPARSE_OK;
 }
@@ -363,6 +398,11 @@ wal_parse_rollback_to_savepoint(WalReader *r, WalEvent *ev)
 	{
 		WR_READ(r, &ev->u.rb_to_sp.xmin);
 		WR_READ(r, &ev->u.rb_to_sp.csn);
+	}
+	else
+	{
+		ASSIGN(&ev->u.rb_to_sp.xmin, InvalidOXid);
+		ASSIGN(&ev->u.rb_to_sp.csn, 0);
 	}
 	return WALPARSE_OK;
 }
