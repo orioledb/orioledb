@@ -236,7 +236,7 @@ PG_FUNCTION_INFO_V1(orioledb_ucm_check);
 PG_FUNCTION_INFO_V1(orioledb_parallel_debug_start);
 PG_FUNCTION_INFO_V1(orioledb_parallel_debug_stop);
 
-#define ORIOLEDB_DEV
+//#define ORIOLEDB_DEV
 
 typedef struct WalDescCtx
 {
