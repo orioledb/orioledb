@@ -273,6 +273,10 @@ oxid_init_shmem(Pointer ptr, bool found)
 		xid_meta->xidMapTrancheId = LWLockNewTrancheId();
 		LWLockInitialize(&xid_meta->xidMapWriteLock,
 						 xid_meta->xidMapTrancheId);
+		xid_meta->sysXidUndoLocationTrancheId = LWLockNewTrancheId();
+		LWLockInitialize(&xid_meta->sysXidUndoLocationLock,
+						 xid_meta->sysXidUndoLocationTrancheId);
+		xid_meta->sysXidUndoLocationChangeCount = 0;
 
 		for (i = 0; i < logical_xid_buffers_guc * (BLCKSZ / sizeof(pg_atomic_uint32)); i++)
 			pg_atomic_init_u32(&logicalXidsShmemMap[i], 0);
@@ -281,6 +285,8 @@ oxid_init_shmem(Pointer ptr, bool found)
 	}
 	LWLockRegisterTranche(xid_meta->xidMapTrancheId,
 						  "OXidMapWriteTranche");
+	LWLockRegisterTranche(xid_meta->sysXidUndoLocationTrancheId,
+						  "SysTreesUndoLocationTranche");
 
 	init_lock_hashes();
 }

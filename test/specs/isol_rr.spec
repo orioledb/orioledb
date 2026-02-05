@@ -39,6 +39,11 @@ step "s1_insert2" {
 	INSERT INTO o_iso_rr
 		SELECT i - 20, repeat('y', i)
 		FROM generate_series(1, 15) AS i; }
+step "s1_insert50" {
+	INSERT INTO o_iso_rr
+		VALUES (50, 'abc'); }
+step "s1_update50" {
+	UPDATE o_iso_rr SET t = 'abcde' WHERE id = 50; }
 step "s1_delete" {
 	DELETE FROM o_iso_rr
 	WHERE id BETWEEN 1 and 10; }
@@ -88,6 +93,8 @@ step "s1_count200_end" {
 	WHERE id BETWEEN 301 and 500;
 	SELECT count(*) FROM o_iso_rr
 	WHERE id > 300 and id < 501; }
+step "s1_select49" { SELECT * FROM o_iso_rr WHERE id = 49; }
+step "s1_select50" { SELECT * FROM o_iso_rr WHERE id = 50; }
 step "s1_count" { SELECT count(*) FROM o_iso_rr; }
 step "s1_commit" { COMMIT; }
 step "s1_rollback" { ROLLBACK; }
@@ -95,6 +102,9 @@ step "s1_rollback" { ROLLBACK; }
 session "s2"
 step "s2_begin" {
 	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET enable_seqscan = off;}
+step "s2_begin_rc" {
+	BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
 	SET enable_seqscan = off;}
 
 step "s2_delete" {
@@ -115,10 +125,18 @@ step "s2_delete_big_end" {
 step "s2_insert_big2"  {
 	INSERT INTO o_iso_rr
 	SELECT i - 200, repeat('z', i % 50) FROM generate_series(1, 150) AS i; }
+step "s2_insert50" {
+	INSERT INTO o_iso_rr
+		VALUES (50, 'abc'); }
+step "s2_insert_before50" {
+	INSERT INTO o_iso_rr (SELECT i, repeat('x', 120) FROM generate_series(1, 20) i); }
+step "s2_insert_after50" {
+	INSERT INTO o_iso_rr (SELECT i, repeat('x', 120) FROM generate_series(55, 100) i); }
 step "s2_select" { SELECT * FROM o_iso_rr; }
 step "s2_select20" {
 	SELECT * FROM o_iso_rr WHERE id BETWEEN -10 and 10;
 	SELECT * FROM o_iso_rr WHERE id > -11 and id < 11; }
+step "s2_select50_key_share" { SELECT * FROM o_iso_rr WHERE id = 50 FOR KEY SHARE; }
 step "s2_count200" {
 	SELECT count(*) FROM o_iso_rr WHERE id BETWEEN 0 and 200;
 	SELECT count(*) FROM o_iso_rr WHERE id > -1 and id < 201; }
@@ -182,3 +200,6 @@ permutation "s1_insert_big1" "s1_begin" "s1_count200_end" "s2_begin" "s2_delete_
 permutation "s1_insert_big1" "s1_begin" "s2_begin" "s2_delete_big_end" "s2_commit" "s1_count200_end" "s1_delete150" "s1_delete100" "s1_rollback"
 
 permutation "s2_insert_one" "s2_begin" "s2_select_one" "s1_update10000" "s1_update100000" "s2_commit"
+
+permutation "s1_begin" "s1_insert50" "s2_insert_before50" "s2_insert_after50" "s1_select49" "s1_commit"
+permutation "s2_insert50" "s1_begin" "s1_select" "s2_insert_before50" "s2_insert_after50" "s1_update50" "s2_begin_rc" "s2_select50_key_share" "s1_select50" "s2_commit" "s1_commit"

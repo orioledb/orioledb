@@ -307,6 +307,9 @@ pg_atomic_uint64 *recovery_index_next_pos;
 pg_atomic_uint64 *recovery_index_completed_pos;
 ConditionVariable *recovery_index_cv;
 
+/* TransactionId for system trees modification for using in recovery */
+TransactionId recoveryHeapTransactionId = InvalidTransactionId;
+
 static void delay_rels_queued_for_idxbuild(ORelOids oids);
 static void delay_if_queued_for_idxbuild(void);
 static void update_run_xmin(void);
@@ -660,9 +663,7 @@ o_recovery_start_hook(void)
 			state = &workers_pool[i];
 			shm_mq_set_sender(GET_WORKER_QUEUE(i), MyProc);
 			state->type = oIndexInvalid;
-			state->oids.datoid = InvalidOid;
-			state->oids.reloid = InvalidOid;
-			state->oids.relnode = InvalidOid;
+			ORelOidsSetInvalid(state->oids);
 			state->oxid = InvalidOXid;
 
 			workers_pool[i].handle = recovery_worker_register(i);
@@ -1038,9 +1039,7 @@ recovery_init(int worker_id)
 			state = &workers_pool[i];
 			shm_mq_set_sender(GET_WORKER_QUEUE(i), MyProc);
 			state->type = oIndexInvalid;
-			state->oids.datoid = InvalidOid;
-			state->oids.reloid = InvalidOid;
-			state->oids.relnode = InvalidOid;
+			ORelOidsSetInvalid(state->oids);
 			state->oxid = InvalidOXid;
 
 			workers_pool[i].handle = recovery_worker_register(i);
@@ -2677,9 +2676,7 @@ clean_workers_oids(void)
 	{
 		RecoveryWorkerState *state = &workers_pool[i];
 
-		state->oids.datoid = InvalidOid;
-		state->oids.reloid = InvalidOid;
-		state->oids.relnode = InvalidOid;
+		ORelOidsSetInvalid(state->oids);
 		state->type = oIndexInvalid;
 	}
 }
@@ -2705,7 +2702,7 @@ recovery_send_leader_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_ver
 	msg.o_table_version = o_table_version;
 	msg.old_o_table_version = old_o_table_version;
 
-	Assert(o_tables_get_by_oids_and_version(oids, &o_table_version) != NULL);
+	Assert(o_tables_get_extended(oids, build_fetch_context(&o_non_deleted_snapshot, o_table_version)) != NULL);
 
 	/* Remember oids of index build added to a queue in a hash table */
 	state = (RecoveryIdxBuildQueueState *) hash_search(idxbuild_oids_hash,
@@ -2782,10 +2779,19 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 
 		if (!OidIsValid(oldRelnode))
 		{
-			uint32		version = new_o_table->version - 1;
+			uint32		version;
 
-			old_o_table = o_tables_get_by_oids_and_version(oids,
-														   &version);
+			/* new_o_table->version may be 0 */
+			if (new_o_table->version == O_TABLE_INVALID_VERSION || new_o_table->version == 0)
+			{
+				version = O_TABLE_INVALID_VERSION;
+			}
+			else
+			{
+				version = new_o_table->version - 1;
+			}
+
+			old_o_table = o_tables_get_extended(oids, build_fetch_context(&o_non_deleted_snapshot, version));
 		}
 		else
 		{
@@ -2977,9 +2983,15 @@ replay_container(Pointer startPtr, Pointer endPtr,
 
 	if (wal_flags & WAL_CONTAINER_HAS_XACT_INFO)
 	{
-		/* We skip WAL_REC_XACT_INFO */
-		ptr += sizeof(WALRecXactInfo);
+		/*
+		 * Store PG xid from WAL_CONTAINER_XACT_INFO to build
+		 * SYS_TREES_XID_UNDO_LOCATION mapping in recovery for following
+		 * logical decoding
+		 */
+		ptr = wal_parse_container_xact_info(ptr, NULL, &recoveryHeapTransactionId);
 	}
+	else
+		recoveryHeapTransactionId = InvalidTransactionId;
 
 	while (ptr < endPtr)
 	{
@@ -3068,7 +3080,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 			uint8		treeType;
 			OIndexType	ix_type;
 
-			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids);
+			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids, NULL, NULL, NULL, NULL, NULL, wal_version);
 
 			ix_type = treeType;
 

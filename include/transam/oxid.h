@@ -39,6 +39,15 @@ typedef struct
 
 	int			xidMapTrancheId;
 	LWLock		xidMapWriteLock;
+
+	/*
+	 * sysXidUndoLocationChangeCount with locks are used for caching in
+	 * read_replication_retain_undo_location()
+	 */
+	int			sysXidUndoLocationTrancheId;
+	LWLock		sysXidUndoLocationLock;
+	uint32		sysXidUndoLocationChangeCount;
+
 } XidMeta;
 
 extern XidMeta *xid_meta;
@@ -59,6 +68,34 @@ typedef struct OSnapshot
 	XLogRecPtr	xmin;
 	CommandId	cid;
 } OSnapshot;
+
+/*
+ * OTableFetchContext
+ *
+ * Encapsulates MVCC visibility context used to fetch relation and index
+ * descriptors from OrioleDB system catalogs: SYS_TREES_O_TABLES & SYS_TREES_O_INDICES.
+ *
+ * The context combines:
+ *  - snapshot: defines transactional visibility rules (xmin/csn/cid/xlogptr)
+ *  - version:  explicit schema version of the relation to be fetched (possibly from tuple-level undo chain)
+ *
+ * This allows callers to retrieve a descriptor corresponding to a specific
+ * catalog version as visible at a given snapshot, which is required during
+ * logical decoding, recovery, and other multi-version catalog access paths.
+ */
+typedef struct
+{
+	OSnapshot  *snapshot;
+	uint32		version;
+} OTableFetchContext;
+
+static inline OTableFetchContext
+build_fetch_context(OSnapshot *snapshot, uint32 version)
+{
+	OTableFetchContext ctx = {.snapshot = snapshot,.version = version};
+
+	return ctx;
+}
 
 extern OSnapshot o_in_progress_snapshot;
 extern OSnapshot o_non_deleted_snapshot;

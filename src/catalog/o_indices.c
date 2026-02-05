@@ -44,7 +44,9 @@ PG_FUNCTION_INFO_V1(orioledb_index_oids);
 PG_FUNCTION_INFO_V1(orioledb_index_description);
 PG_FUNCTION_INFO_V1(orioledb_index_rows);
 
-static OIndex *make_ctid_o_index(OTable *table);
+static uint32 increment_or_reset_o_index_version(uint32 version, OIndexVersionMode ixVerMode);
+
+static OIndex *make_ctid_o_index(OTable *table, OIndexVersionMode ixVerMode);
 
 static BTreeDescr *
 oIndicesGetBTreeDesc(void *arg)
@@ -52,6 +54,12 @@ oIndicesGetBTreeDesc(void *arg)
 	BTreeDescr *desc = (BTreeDescr *) arg;
 
 	return desc;
+}
+
+static uint32
+oIndicesGetKeySize(void *arg)
+{
+	return sizeof(OIndexChunkKey);
 }
 
 static uint32
@@ -145,8 +153,36 @@ oIndicesGetTupleDataSize(OTuple tuple, void *arg)
 	return chunk->dataLength;
 }
 
+static TupleFetchCallbackResult
+oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
+					  void *arg, TupleFetchCallbackCheckType check_type)
+{
+	OIndexChunkKey *tupleKey = (OIndexChunkKey *) tuple.data;
+	OIndexChunkKey *boundKey = (OIndexChunkKey *) arg;
+
+	/* Ignore reloid because it may changes */
+	if (tupleKey->oids.datoid == boundKey->oids.datoid &&
+		tupleKey->oids.relnode == boundKey->oids.relnode &&
+		tupleKey->type && boundKey->type)
+	{
+		if (boundKey->version == O_TABLE_INVALID_VERSION)
+			boundKey->version = tupleKey->version;
+
+		if (tupleKey->version > boundKey->version)
+			return OTupleFetchNext;
+		else if (tupleKey->version == boundKey->version)
+			return OTupleFetchMatch;
+		else
+			return OTupleFetchNotMatch;
+	}
+	return OTupleFetchNext;
+}
+
 ToastAPI	oIndicesToastAPI = {
 	.getBTreeDesc = oIndicesGetBTreeDesc,
+	.getBTreeVersion = NULL,
+	.getBaseBTreeVersion = NULL,
+	.getKeySize = oIndicesGetKeySize,
 	.getMaxChunkSize = oIndicesGetMaxChunkSize,
 	.updateKey = oIndicesUpdateKey,
 	.getNextKey = oIndicesGetNextKey,
@@ -156,7 +192,7 @@ ToastAPI	oIndicesToastAPI = {
 	.getTupleChunknum = oIndicesGetTupleChunknum,
 	.getTupleDataSize = oIndicesGetTupleDataSize,
 	.deleteLogFullTuple = true,
-	.versionCallback = NULL
+	.fetchCallback = oIndicesFetchCallback
 };
 
 static void
@@ -177,12 +213,37 @@ make_builtin_field(OTableField *leafField, OTableIndexField *internalField,
 	}
 }
 
+/*
+ * Increment or reset index version according to OIndexVersionMode provided.
+ *
+ * Version is used as part of the sys-tree key for OIndex records.
+ * Incrementing it guarantees that a newly created/recreated index metadata record
+ * will not collide with an older incarnation that might still be visible under some
+ * snapshot during recovery / logical decoding.
+ *
+ * If the previous version is invalid / uninitialized, start from 0.
+ */
+static uint32
+increment_or_reset_o_index_version(uint32 version, OIndexVersionMode ixVerMode)
+{
+	if (ixVerMode == OIndexVersionReset)
+		return 0;
+	else if (ixVerMode == OIndexVersionPass)
+		return (version == O_TABLE_INVALID_VERSION) ? 0 : (version + 1);
+	else
+	{
+		Assert(false);
+		return 0;
+	}
+}
+
 static OIndex *
-make_ctid_o_index(OTable *table)
+make_ctid_o_index(OTable *table, OIndexVersionMode ixVerMode)
 {
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
 	int			i;
 	int			nadded = 0;
+	uint32		new_version;
 
 	Assert(!table->has_primary);
 	result->indexOids = table->oids;
@@ -201,8 +262,22 @@ make_ctid_o_index(OTable *table)
 	result->nPrimaryFields = 0;
 	result->nKeyFields = 1;
 	result->nUniqueFields = 1;
-	result->immediate = true;
 
+	new_version = increment_or_reset_o_index_version(table->primary_ixversion, ixVerMode);
+	result->indexVersion = new_version;
+
+	/*
+	 * Persist the current index incarnation version in OTable so that
+	 * subsequent reads (recovery / decoding) can fetch the matching OIndex
+	 * record by version.
+	 */
+	table->primary_ixversion = new_version;
+
+	elog(DEBUG2, "[%s] oids [ %u %u %u ] version %u", __func__,
+		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
+		 new_version);
+
+	result->immediate = true;
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
 
@@ -240,13 +315,14 @@ find_existing_field(OIndex *index, int maxIndex, OTableIndexField *field)
 }
 
 static OIndex *
-make_primary_o_index(OTable *table)
+make_primary_o_index(OTable *table, OIndexVersionMode ixVerMode)
 {
 	OTableIndex *tableIndex;
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
 	int			i;
 	int			saved_nLeafFields;
 	int			nadded = 0;
+	uint32		new_version;
 	MemoryContext mcxt;
 	MemoryContext old_mcxt;
 
@@ -273,8 +349,23 @@ make_primary_o_index(OTable *table)
 	result->nIncludedFields = tableIndex->nfields - tableIndex->nkeyfields;
 	result->nPrimaryFields = 0;
 	result->nKeyFields = tableIndex->nkeyfields;
-	result->immediate = tableIndex->immediate;
 
+	new_version = increment_or_reset_o_index_version(table->primary_ixversion, ixVerMode);
+	result->indexVersion = new_version;
+
+	/*
+	 * Persist the current index incarnation version in OTable so that
+	 * subsequent reads (recovery / decoding) can fetch the matching OIndex
+	 * record by version.
+	 */
+	table->primary_ixversion = new_version;
+	tableIndex->version = new_version;
+
+	elog(DEBUG2, "[%s] oids [ %u %u %u ] version %u", __func__,
+		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
+		 new_version);
+
+	result->immediate = tableIndex->immediate;
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
 
@@ -390,22 +481,26 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *nad
 }
 
 static OIndex *
-make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
+make_secondary_o_index(OTable *table, OTableIndex *tableIndex, OIndexVersionMode ixVerMode)
 {
 	OTableIndex *primary = NULL;
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
+	uint32		new_version;
 	int			nadded;
 	MemoryContext mcxt;
 	MemoryContext old_mcxt;
 
-	if (table->has_primary)
-	{
-		primary = &table->indices[0];
-		Assert(primary->type == oIndexPrimary);
-	}
-
 	result->indexOids = tableIndex->oids;
 	result->indexType = tableIndex->type;
+
+	new_version = increment_or_reset_o_index_version(tableIndex->version, ixVerMode);
+	result->indexVersion = new_version;
+	tableIndex->version = new_version;
+
+	elog(DEBUG2, "[%s] oids [ %u %u %u ] version %u", __func__,
+		 tableIndex->oids.datoid, tableIndex->oids.reloid, tableIndex->oids.relnode,
+		 new_version);
+
 	namestrcpy(&result->name, tableIndex->name.data);
 	result->tableOids = table->oids;
 	result->table_persistence = table->persistence;
@@ -417,10 +512,16 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 	result->nulls_not_distinct = tableIndex->nulls_not_distinct;
 	result->nIncludedFields = tableIndex->nfields - tableIndex->nkeyfields;
 	result->nLeafFields = tableIndex->nfields;
+
 	if (table->has_primary)
+	{
+		primary = &table->indices[0];
+		Assert(primary->type == oIndexPrimary);
 		result->nLeafFields += primary->nfields;
+	}
 	else
 		result->nLeafFields++;
+
 	result->nNonLeafFields = result->nLeafFields;
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
@@ -459,17 +560,22 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex)
 }
 
 static OIndex *
-make_toast_o_index(OTable *table)
+make_toast_o_index(OTable *table, OIndexVersionMode ixVerMode)
 {
 	OTableIndex *primary = NULL;
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
+	uint32		new_version;
 	int			nadded;
 
-	if (table->has_primary)
-	{
-		primary = &table->indices[0];
-		Assert(primary->type == oIndexPrimary);
-	}
+	new_version = increment_or_reset_o_index_version(table->toast_ixversion, ixVerMode);
+	result->indexVersion = new_version;
+
+	/*
+	 * Persist the current index incarnation version in OTable so that
+	 * subsequent reads (recovery / decoding) can fetch the matching OIndex
+	 * record by version.
+	 */
+	table->toast_ixversion = new_version;
 
 	result->indexOids = table->toast_oids;
 	result->indexType = oIndexToast;
@@ -482,6 +588,8 @@ make_toast_o_index(OTable *table)
 	result->tablespace = table->tablespace;
 	if (table->has_primary)
 	{
+		primary = &table->indices[0];
+		Assert(primary->type == oIndexPrimary);
 		result->nLeafFields = primary->nfields;
 		result->nNonLeafFields = primary->nkeyfields;
 		result->nKeyFields = primary->nkeyfields;
@@ -496,6 +604,10 @@ make_toast_o_index(OTable *table)
 	result->nLeafFields += TOAST_LEAF_FIELDS_NUM;
 	result->nNonLeafFields += TOAST_NON_LEAF_FIELDS_NUM;
 	result->immediate = true;
+
+	elog(DEBUG2, "[%s] oids [ %u %u %u ] version %u", __func__,
+		 table->oids.datoid, table->oids.reloid, table->oids.relnode,
+		 new_version);
 
 	result->leafTableFields = (OTableField *) palloc0(sizeof(OTableField) * result->nLeafFields);
 	result->leafFields = (OTableIndexField *) palloc0(sizeof(OTableIndexField) * result->nLeafFields);
@@ -524,17 +636,22 @@ make_toast_o_index(OTable *table)
 }
 
 static OIndex *
-make_bridge_o_index(OTable *table)
+make_bridge_o_index(OTable *table, OIndexVersionMode ixVerMode)
 {
 	OTableIndex *primary = NULL;
 	OIndex	   *result = (OIndex *) palloc0(sizeof(OIndex));
+	uint32		new_version;
 	int			nadded;
 
-	if (table->has_primary)
-	{
-		primary = &table->indices[0];
-		Assert(primary->type == oIndexPrimary);
-	}
+	new_version = increment_or_reset_o_index_version(table->bridge_ixversion, ixVerMode);
+	result->indexVersion = new_version;
+
+	/*
+	 * Persist the current index incarnation version in OTable so that
+	 * subsequent reads (recovery / decoding) can fetch the matching OIndex
+	 * record by version.
+	 */
+	table->bridge_ixversion = new_version;
 
 	result->indexOids = table->bridge_oids;
 	result->indexType = oIndexBridge;
@@ -546,7 +663,11 @@ make_bridge_o_index(OTable *table)
 	result->compress = table->primary_compress;
 	result->nLeafFields = 1;
 	if (table->has_primary)
+	{
+		primary = &table->indices[0];
+		Assert(primary->type == oIndexPrimary);
 		result->nLeafFields += primary->nfields;
+	}
 	else
 		result->nLeafFields++;
 	result->nNonLeafFields = 1;
@@ -560,6 +681,7 @@ make_bridge_o_index(OTable *table)
 					   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
 					   table->tid_btree_ops_oid);
 	nadded++;
+
 	add_index_fields(result, table, primary, &nadded, true);
 	Assert(nadded == result->nLeafFields);
 	result->nLeafFields = nadded;
@@ -650,7 +772,11 @@ serialize_o_index(OIndex *o_index, int *size)
 
 	initStringInfo(&str);
 
-	Assert(o_index->data_version == ORIOLEDB_DATA_VERSION);
+	if (o_index->data_version != ORIOLEDB_SYS_TREE_VERSION)
+		elog(FATAL,
+			 "ORIOLEDB_SYS_TREE_VERSION %u of OrioleDB cluster is not among supported for conversion from %u",
+			 o_index->data_version, ORIOLEDB_SYS_TREE_VERSION);
+
 	appendBinaryStringInfo(&str,
 						   (Pointer) o_index + offsetof(OIndex, tableOids),
 						   offsetof(OIndex, leafTableFields) - offsetof(OIndex, tableOids));
@@ -685,12 +811,16 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	oIndex = (OIndex *) palloc0(sizeof(OIndex));
 	oIndex->indexOids = key->oids;
 	oIndex->indexType = key->type;
+	oIndex->indexVersion = key->version;
 
 	len = offsetof(OIndex, leafTableFields) - offsetof(OIndex, tableOids);
 	Assert((ptr - data) + len <= length);
 	memcpy((Pointer) oIndex + offsetof(OIndex, tableOids), ptr, len);
 	ptr += len;
-	Assert(oIndex->data_version == ORIOLEDB_DATA_VERSION);
+	if (oIndex->data_version != ORIOLEDB_SYS_TREE_VERSION)
+		elog(FATAL,
+			 "ORIOLEDB_SYS_TREE_VERSION %u of OrioleDB cluster is not among supported for conversion to %u",
+			 oIndex->data_version, ORIOLEDB_SYS_TREE_VERSION);
 
 	len = oIndex->nLeafFields * sizeof(OTableField);
 	oIndex->leafTableFields = (OTableField *) palloc(len);
@@ -713,17 +843,12 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	oIndex->duplicates = (List *) o_deserialize_node(&ptr);
 	MemoryContextSwitchTo(old_mcxt);
 
-	if (oIndex->data_version >= 2)
-	{
-		len = sizeof(Oid);
-		Assert((ptr - data) + len <= length);
-		memcpy(&oIndex->tablespace, ptr, len);
-		ptr += len;
-	}
-	else
-		oIndex->tablespace = DEFAULTTABLESPACE_OID;
+	len = sizeof(Oid);
+	Assert((ptr - data) + len <= length);
+	memcpy(&oIndex->tablespace, ptr, len);
+	ptr += len;
 
-	if (oIndex->data_version >= 3 && oIndex->indexType == oIndexExclusion)
+	if (oIndex->indexType == oIndexExclusion)
 	{
 		mcxt = OGetIndexContext(oIndex);
 		old_mcxt = MemoryContextSwitchTo(mcxt);
@@ -734,25 +859,25 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 		ptr += len;
 		MemoryContextSwitchTo(old_mcxt);
 	}
-	else
-		oIndex->exclops = NULL;
-	if (oIndex->data_version >= 3)
-	{
-		len = sizeof(bool);
-		Assert((ptr - data) + len <= length);
-		memcpy(&oIndex->immediate, ptr, len);
-		ptr += len;
 
-	}
-	else
-		oIndex->immediate = true;
+	len = sizeof(bool);
+	Assert((ptr - data) + len <= length);
+	memcpy(&oIndex->immediate, ptr, len);
+	ptr += len;
+
 	Assert((ptr - data) == length);
 
 	return oIndex;
 }
 
+/*
+ * Make OIndex structure for provided OTable. OIndexVersionPass is used
+ * to specify if OIndex is created by a DDL operation that may need old
+ * OIndex to be used later in logical decoding. Otherwise
+ * OIndexVersionReset should be passed.
+ */
 OIndex *
-make_o_index(OTable *table, OIndexNumber ixNum)
+make_o_index(OTable *table, OIndexNumber ixNum, OIndexVersionMode ixVerMode)
 {
 	bool		primaryIsCtid = table->nindices == 0 || table->indices[0].type != oIndexPrimary;
 	OIndex	   *index;
@@ -760,17 +885,17 @@ make_o_index(OTable *table, OIndexNumber ixNum)
 	if (ixNum == PrimaryIndexNumber)
 	{
 		if (primaryIsCtid)
-			index = make_ctid_o_index(table);
+			index = make_ctid_o_index(table, ixVerMode);
 		else
-			index = make_primary_o_index(table);
+			index = make_primary_o_index(table, ixVerMode);
 	}
 	else if (ixNum == TOASTIndexNumber)
 	{
-		index = make_toast_o_index(table);
+		index = make_toast_o_index(table, ixVerMode);
 	}
 	else if (ixNum == BridgeIndexNumber)
 	{
-		index = make_bridge_o_index(table);
+		index = make_bridge_o_index(table, ixVerMode);
 	}
 	else
 	{
@@ -783,10 +908,10 @@ make_o_index(OTable *table, OIndexNumber ixNum)
 		Assert(ixNum - ctid_idx_off >= 0);
 		tableIndex = &table->indices[ixNum - ctid_idx_off];
 
-		index = make_secondary_o_index(table, tableIndex);
+		index = make_secondary_o_index(table, tableIndex, ixVerMode);
 	}
 
-	index->data_version = ORIOLEDB_DATA_VERSION;
+	index->data_version = ORIOLEDB_SYS_TREE_VERSION;
 	return index;
 }
 
@@ -894,8 +1019,30 @@ cache_scan_tupdesc_and_slot(OIndexDescr *index_descr, OIndex *oIndex)
 	index_descr->index_slot = MakeSingleTupleTableSlot(index_descr->itupdesc, &TTSOpsOrioleDB);
 }
 
+/*
+ * o_index_fill_descr()
+ *
+ * Initialize *descr from the catalog OIndex entry.
+ *
+ * The function resets the descriptor, copies identity fields (OIDs/name/version),
+ * builds leaf/non-leaf tuple descriptors, fills per-field metadata (collation,
+ * ordering, opclasses, comparators), and initializes predicate/expressions state.
+ *
+ * Base table dependency:
+ * - For oIndexPrimary, additional data is taken from OTable (constraints and
+ *   primary_init_nfields). The table is obtained using o_table_source/source).
+ * - For other index types, o_table_source/source are currently unused.
+ *
+ * Memory/ownership:
+ * - Descriptor-owned allocations are made in OGetIndexContext(descr).
+ * - If OTable loaded from OTableFetchContext (when source == oTableSourceContext)
+ *   it is freed before return.
+ *
+ * Requirements:
+ * - oIndex != NULL, descr points to writable memory.
+ */
 void
-o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
+o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTableSource source)
 {
 	int			i;
 	int			maxTableAttnum = 0;
@@ -909,6 +1056,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	memset(descr, 0, sizeof(*descr));
 	descr->oids = oIndex->indexOids;
 	descr->tableOids = oIndex->tableOids;
+	descr->version = oIndex->indexVersion;
 	descr->refcnt = 0;
 	descr->valid = true;
 	namestrcpy(&descr->name, oIndex->name.data);
@@ -918,11 +1066,20 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, OTable *oTable)
 	if (oIndex->indexType == oIndexPrimary)
 	{
 		bool		free_oTable = false;
+		OTable	   *oTable = NULL;
 
-		if (!oTable)
+		Assert(o_table_source);
+
+		if (source == oTableSourceContext)
 		{
-			oTable = o_tables_get(descr->tableOids);
-			free_oTable = true;
+			oTable = o_tables_get_extended(descr->tableOids, *((OTableFetchContext *) o_table_source));
+			free_oTable = (oTable != NULL);
+		}
+		else
+		{
+			oTable = (OTable *) o_table_source;
+			Assert(oTable);
+			free_oTable = false;
 		}
 
 		if (oTable)
@@ -1144,12 +1301,21 @@ o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	int			len;
 	BTreeDescr *sys_tree;
 
-	oIndex = make_o_index(table, ixNum);
+	oIndex = make_o_index(table, ixNum, OIndexVersionReset);
 
 	oIndex->createOxid = oxid;
 	key.oids = oIndex->indexOids;
 	key.type = oIndex->indexType;
 	key.chunknum = 0;
+	key.version = 0;
+
+	elog(DEBUG2, "[%s] key oids [ %u %u %u ] ixNum %u type %u chunknum %u version %u", __func__,
+		 key.oids.datoid, key.oids.reloid, key.oids.relnode,
+		 ixNum,
+		 key.type,
+		 key.chunknum,
+		 key.version);
+
 	data = serialize_o_index(oIndex, &len);
 	free_o_index(oIndex);
 
@@ -1169,10 +1335,18 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	OIndex	   *oIndex;
 	BTreeDescr *sys_tree;
 
-	oIndex = make_o_index(table, ixNum);
+	oIndex = make_o_index(table, ixNum, OIndexVersionPass);
 	key.oids = oIndex->indexOids;
 	key.type = oIndex->indexType;
 	key.chunknum = 0;
+	key.version = oIndex->indexVersion;
+
+	elog(DEBUG2, "[%s] key oids [ %u %u %u ] type %u chunknum %u version %u", __func__,
+		 key.oids.datoid, key.oids.reloid, key.oids.relnode,
+		 key.type,
+		 key.chunknum,
+		 key.version);
+
 	free_o_index(oIndex);
 
 	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
@@ -1185,7 +1359,14 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 OIndex *
 o_indices_get(ORelOids oids, OIndexType type)
 {
-	OIndexChunkKey key;
+	return o_indices_get_extended(oids, type, default_table_fetch_context);
+}
+
+OIndex *
+o_indices_get_extended(ORelOids oids, OIndexType type, OTableFetchContext ctx)
+{
+	OIndexChunkKey key,
+			   *found_key = NULL;
 	Size		dataLength;
 	Pointer		result;
 	OIndex	   *oIndex;
@@ -1193,16 +1374,27 @@ o_indices_get(ORelOids oids, OIndexType type)
 	key.type = type;
 	key.oids = oids;
 	key.chunknum = 0;
+	key.version = ctx.version;
 
-	result = generic_toast_get_any(&oIndicesToastAPI, (Pointer) &key,
-								   &dataLength, &o_non_deleted_snapshot,
-								   get_sys_tree(SYS_TREES_O_INDICES));
+	elog(DEBUG2, "[%s] key oids [ %u %u %u ] type %u chunknum %u version %u", __func__,
+		 key.oids.datoid, key.oids.reloid, key.oids.relnode,
+		 key.type,
+		 key.chunknum,
+		 key.version);
+
+	found_key = &key;
+	result = generic_toast_get_any_with_key(&oIndicesToastAPI, (Pointer) &key,
+											&dataLength,
+											ctx.snapshot,
+											get_sys_tree(SYS_TREES_O_INDICES),
+											(Pointer *) &found_key);
 
 	if (result == NULL)
 		return NULL;
 
 	oIndex = deserialize_o_index(&key, result, dataLength);
 	pfree(result);
+	pfree(found_key);
 
 	return oIndex;
 }
@@ -1218,8 +1410,8 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	int			len;
 	BTreeDescr *sys_tree;
 
-	oIndex = make_o_index(table, ixNum);
-	oIndexOld = o_indices_get(oIndex->indexOids, oIndex->indexType);
+	oIndex = make_o_index(table, ixNum, OIndexVersionPass);
+	oIndexOld = o_indices_get_extended(oIndex->indexOids, oIndex->indexType, default_table_fetch_context);
 	if (oIndexOld)
 	{
 		oIndex->createOxid = oIndexOld->createOxid;
@@ -1229,6 +1421,14 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	key.oids = oIndex->indexOids;
 	key.type = oIndex->indexType;
 	key.chunknum = 0;
+	key.version = oIndex->indexVersion;
+
+	elog(DEBUG2, "[%s] key oids [ %u %u %u ] type %u chunknum %u version %u", __func__,
+		 key.oids.datoid, key.oids.reloid, key.oids.relnode,
+		 key.type,
+		 key.chunknum,
+		 key.version);
+
 	free_o_index(oIndex);
 	systrees_modify_start();
 	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
@@ -1242,6 +1442,9 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	return result;
 }
 
+/*
+ * This method is used by o_tables_get_by_tree only, which is unused
+ */
 bool
 o_indices_find_table_oids(ORelOids indexOids, OIndexType type,
 						  OSnapshot *oSnapshot, ORelOids *tableOids)
@@ -1253,6 +1456,7 @@ o_indices_find_table_oids(ORelOids indexOids, OIndexType type,
 	key.oids = indexOids;
 	key.type = type;
 	key.chunknum = 0;
+	key.version = O_TABLE_INVALID_VERSION;
 
 	data = generic_toast_get_any(&oIndicesToastAPI, (Pointer) &key, &dataSize,
 								 oSnapshot, get_sys_tree(SYS_TREES_O_INDICES));
@@ -1279,6 +1483,12 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 	chunkKey.type = type;
 	chunkKey.oids = oids;
 	chunkKey.chunknum = 0;
+	chunkKey.version = O_TABLE_INVALID_VERSION;
+
+	/*
+	 * Only actual versions are needed here, so it's fine to use
+	 * o_non_deleted_snapshot and O_TABLE_INVALID_VERSION
+	 */
 
 	it = o_btree_iterator_create(desc, (Pointer) &chunkKey, BTreeKeyBound,
 								 &o_non_deleted_snapshot, ForwardScanDirection);
@@ -1423,6 +1633,7 @@ describe_index(TupleDesc tupdesc, ORelOids oids, OIndexType type)
 	Datum		values[2];
 	bool		isnull[2] = {false};
 
+	/* Only actual versions are needed here */
 	index = o_indices_get(oids, type);
 	if (index == NULL)
 		elog(ERROR, "unable to find orioledb index description.");

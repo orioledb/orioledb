@@ -137,6 +137,9 @@ partial_load_chunk(PartialPageState *partial, Page img,
 	Assert(chunkBegin >= 0 && chunkBegin <= ORIOLEDB_BLCKSZ);
 	Assert(chunkEnd >= 0 && chunkEnd <= ORIOLEDB_BLCKSZ);
 
+	VALGRIND_CHECK_MEM_IS_DEFINED((Pointer) src + chunkBegin,
+								  chunkEnd - chunkBegin);
+
 	memcpy((Pointer) img + chunkBegin,
 		   (Pointer) src + chunkBegin,
 		   chunkEnd - chunkBegin);

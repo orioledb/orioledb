@@ -44,7 +44,8 @@
 #define SYS_TREES_CHKP_NUM				(21)
 #define SYS_TREES_MULTIRANGE_CACHE		(22)
 #define SYS_TREES_TABLESPACE_CACHE		(23)
-#define SYS_TREES_NUM					(23)
+#define SYS_TREES_XID_UNDO_LOCATION		(24)
+#define SYS_TREES_NUM					(24)
 
 #define IS_SYS_TREE_OIDS(oids) \
 	((oids).datoid == SYS_TREES_DATOID)
@@ -96,6 +97,7 @@ typedef struct
 	OIndexType	type;
 	ORelOids	oids;
 	uint32		chunknum;
+	uint32		version;
 } OIndexChunkKey;
 
 typedef struct
@@ -133,6 +135,12 @@ typedef struct
 	uint32		checkpointNumbers[2];
 } ChkpNumTuple;
 
+typedef struct
+{
+	TransactionId xid;
+	UndoLocation undoLocation;
+} ReplicationRetainUndoTuple;
+
 extern Size sys_trees_shmem_needs(void);
 extern void sys_trees_shmem_init(Pointer ptr, bool found);
 extern BTreeDescr *get_sys_tree(int tree_num);
@@ -144,5 +152,8 @@ extern PrintFunc sys_tree_key_print(BTreeDescr *desc);
 extern PrintFunc sys_tree_tup_print(BTreeDescr *desc);
 extern void sys_tree_set_extra(int tree_num, Pointer extra);
 extern Pointer sys_tree_get_extra(int tree_num);
+#ifdef IS_DEV
+extern const text *inspect_sys_tree_structure(int systree, int depth);
+#endif
 
 #endif							/* __SYS_TREES_H__ */

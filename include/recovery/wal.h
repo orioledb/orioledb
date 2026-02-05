@@ -105,9 +105,11 @@ enum OrioleWalRecType
 
 /*
  * Bump it when WAL format changes compared to previous release.
- * ORIOLEDB_WAL_VERSION makes sense and should be converted even between different ORIOLEDB_BINARY_VERSION's.
- * This is unlike ORIOLEDB_DATA_VERSION, ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION,
- * that make sense only inside one ORIOLEDB_BINARY_VERSION.
+ * ORIOLEDB_WAL_VERSION makes sense and should be converted even between
+ * different ORIOLEDB_BINARY_VERSION's. This is unlike
+ * ORIOLEDB_SYS_TREE_VERSION, ORIOLEDB_PAGE_VERSION and
+ * ORIOLEDB_COMPRESS_VERSION, that make sense only inside one
+ * ORIOLEDB_BINARY_VERSION.
  */
 #define ORIOLEDB_WAL_VERSION (17)
 
@@ -149,6 +151,12 @@ typedef struct
 	uint8		datoid[sizeof(Oid)];
 	uint8		reloid[sizeof(Oid)];
 	uint8		relnode[sizeof(Oid)];
+	/* Since ORIOLEDB_WAL_VERSION = 17 */
+	uint8		xmin[sizeof(OXid)];
+	uint8		csn[sizeof(CommitSeqNo)];
+	uint8		cid[sizeof(CommandId)];
+	uint8		version[sizeof(uint32)];
+	uint8		baseVersion[sizeof(uint32)];
 } WALRecRelation;
 
 typedef struct
@@ -264,7 +272,7 @@ extern Pointer wal_parse_rec_finish(Pointer ptr, OXid *xmin, CommitSeqNo *csn);
 extern Pointer wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid *xmin, CommitSeqNo *csn);
 
 /* Parser for WAL_REC_RELATION */
-extern Pointer wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids);
+extern Pointer wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin, CommitSeqNo *csn, CommandId *cid, uint32 *version, uint32 *base_version, uint16 wal_version);
 
 /* Parser for WAL_REC_RELREPLIDENT */
 extern Pointer wal_parse_rec_relreplident(Pointer ptr, char *relreplident, Oid *relreplident_ix_oid);
@@ -290,9 +298,14 @@ extern Pointer wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *topX
 /* Parser for WAL_REC_INSERT, WAL_REC_UPDATE, WAL_REC_DELETE or WAL_REC_REINSERT */
 extern Pointer wal_parse_rec_modify(Pointer ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1, bool read_two_tuples);
 
+extern void add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_version);
+
+/* Parser for WAL_CONTAINER_XACT_INFO */
+extern Pointer wal_parse_container_xact_info(Pointer ptr, TimestampTz *xactTime, TransactionId *xid);
+
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
-								  OTuple tuple, OffsetNumber length, char relreplident);
-extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr);
+								  OTuple tuple, OffsetNumber length, char relreplident, uint32 version, uint32 base_version);
+extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr, uint32 version, uint32 base_version);
 extern void add_o_tables_meta_lock_wal_record(void);
 extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);
 extern void add_switch_logical_xid_wal_record(TransactionId logicalXid_top, TransactionId logicalXid_sub);
@@ -310,11 +323,11 @@ extern void wal_rollback(OXid oxid, TransactionId logicalXid,
 						 bool isAutonomous);
 extern XLogRecPtr log_logical_wal_container(Pointer ptr, int length,
 											bool withXactTime);
-extern void o_wal_insert(BTreeDescr *desc, OTuple tuple, char relreplident);
-extern void o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident);
-extern void o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident);
-extern void o_wal_delete_key(BTreeDescr *desc, OTuple key, bool is_bridge_index);
-extern void o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relreplident);
+extern void o_wal_insert(BTreeDescr *desc, OTuple tuple, char relreplident, uint32 version);
+extern void o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident, uint32 version);
+extern void o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident, uint32 version);
+extern void o_wal_delete_key(BTreeDescr *desc, OTuple key, bool is_bridge_index, uint32 version);
+extern void o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relreplident, uint32 version);
 extern void add_truncate_wal_record(ORelOids oids);
 extern bool get_local_wal_has_material_changes(void);
 extern void set_local_wal_has_material_changes(bool value);

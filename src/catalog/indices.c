@@ -508,6 +508,8 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			}
 			o_table->nindices++;
 
+			elog(DEBUG2, "[%s] ADD INDEX o_table->nindices %u", __func__, o_table->nindices);
+
 			table_index = &o_table->indices[ix_num];
 
 			memset(table_index, 0, sizeof(OTableIndex));
@@ -515,6 +517,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			table_index->type = ix_type;
 			table_index->nfields = indnatts;
 			table_index->nkeyfields = indnkeyatts;
+			table_index->version = 0;
 
 			if (OCompressIsValid(compress))
 				table_index->compress = compress;

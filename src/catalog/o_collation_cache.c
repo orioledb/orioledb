@@ -108,7 +108,7 @@ o_collation_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 		*entry_ptr = (Pointer) o_collation;
 	}
 
-	o_collation->data_version = ORIOLEDB_DATA_VERSION;
+	o_collation->data_version = ORIOLEDB_SYS_TREE_VERSION;
 	o_collation->collname = collform->collname;
 	o_collation->collprovider = collform->collprovider;
 	o_collation->collisdeterministic = collform->collisdeterministic;
@@ -168,7 +168,11 @@ o_collation_cache_serialize_entry(Pointer entry, int *len)
 	StringInfoData str;
 	OCollation *o_collation = (OCollation *) entry;
 
-	Assert(o_collation->data_version == ORIOLEDB_DATA_VERSION);
+	if (o_collation->data_version != ORIOLEDB_SYS_TREE_VERSION)
+		elog(FATAL,
+			 "ORIOLEDB_SYS_TREE_VERSION %u of OrioleDB cluster is not among supported for conversion from %u",
+			 o_collation->data_version, ORIOLEDB_SYS_TREE_VERSION);
+
 	initStringInfo(&str);
 	appendBinaryStringInfo(&str, (Pointer) o_collation,
 						   offsetof(OCollation, collcollate));
@@ -196,7 +200,10 @@ o_collation_cache_deserialize_entry(MemoryContext mcxt, Pointer data,
 	Assert((ptr - data) + len <= length);
 	memcpy(o_collation, ptr, len);
 	ptr += len;
-	Assert(o_collation->data_version == ORIOLEDB_DATA_VERSION);
+	if (o_collation->data_version != ORIOLEDB_SYS_TREE_VERSION)
+		elog(FATAL,
+			 "ORIOLEDB_SYS_TREE_VERSION %u of OrioleDB cluster is not among supported for conversion to %u",
+			 o_collation->data_version, ORIOLEDB_SYS_TREE_VERSION);
 
 	o_collation->collcollate = o_deserialize_string(&ptr);
 	o_collation->collctype = o_deserialize_string(&ptr);
