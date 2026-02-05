@@ -281,7 +281,7 @@ wal_container_iterate(WalReader *r, WalConsumer *consumer, bool allow_logging)
 			 */
 			if (allow_logging)
 			{
-				elog(LOG, "[%s] UNKNOWN WAL RECORD TYPE %u(`%s`): chunk/tail len %u/%u",
+				elog(LOG, "[%s] UNKNOWN WAL RECORD TYPE %u(`%s`): chunk/tail len %ld/%ld",
 					 __func__, ev.type, wal_type_name(ev.type),
 					 r->end - r->start,
 					 r->end - r->ptr);

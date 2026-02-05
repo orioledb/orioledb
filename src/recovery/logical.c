@@ -577,6 +577,7 @@ remove_skipped_dml(HTAB **cache, uint64 oxid)
 	return found;
 }
 
+#if 0
 static WalParseStatus
 decode_wal_check_version(const WalReader *r)
 {
@@ -608,6 +609,7 @@ decode_wal_on_flag(void *ctx, const WalEvent *ev)
 
 	return WALPARSE_OK;
 }
+#endif
 
 /*
  * Handle OrioleDB records for LogicalDecodingProcessRecord().
