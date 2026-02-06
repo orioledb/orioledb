@@ -238,8 +238,9 @@ WHERE a.attrelid = 'o_test_set_expression'::regclass
 -- FIXME: Unsupported in orioledb yet. All further tests don't work yet.
 ALTER TABLE o_test_set_expression
   ALTER COLUMN total SET EXPRESSION AS (price * quantity * 1.1);
-ERROR:  unsupported alter table subcommand
-DETAIL:  Subcommand "ALTER COLUMN ... SET EXPRESSION" is not supported on OrioleDB tables yet.  This will be implemented in future.
+ERROR:  syntax error at or near "EXPRESSION"
+LINE 2:   ALTER COLUMN total SET EXPRESSION AS (price * quantity * 1...
+                                 ^
 -- Verify the expression was updated in catalog
 SELECT a.attname, a.attgenerated, pg_get_expr(d.adbin, d.adrelid) as generation_expr
 FROM pg_attribute a
