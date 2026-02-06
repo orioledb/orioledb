@@ -132,6 +132,7 @@ REGRESSCHECKS = btree_sys_check \
 				tablespace \
 				temp \
 				toast \
+				toast_main \
 				trigger \
 				types \
 				rewind
