@@ -51,22 +51,34 @@
 #define WAL_REC_RELREPLIDENT		(18)
 
 /*
- * Value has been fixed at the moment of introducing WAL versioning.
- * Now, when we have WAL version in the beginning of each container
- * we should never change this value.
- */
-#define FIRST_ORIOLEDB_WAL_VERSION (16)
-
-/*
+ * Current WAL version of OrioleDB.
  * Bump it when WAL format changes compared to previous release.
  * ORIOLEDB_WAL_VERSION makes sense and should be converted even between
  * different ORIOLEDB_BINARY_VERSION's. This is unlike
  * ORIOLEDB_SYS_TREE_VERSION, ORIOLEDB_PAGE_VERSION and
- * ORIOLEDB_COMPRESS_VERSION, that make sense only inside one
- * ORIOLEDB_BINARY_VERSION.
+ * ORIOLEDB_COMPRESS_VERSION (see big comment on versioning
+ * in include/orioledb.h)
  */
 #define ORIOLEDB_WAL_VERSION (17)
 
+/*
+ * Value has been fixed at the moment of introducing WAL versioning.
+ * WAL versions before FIRST_ORIOLEDB_WAL_VERSION are treated as zero
+ * and still supported for on-the fly conversion to the current
+ * ORIOLEDB_WAL_VERSION. (Exact value follows the fact that before
+ * WAL version was introduced in the beginning of the WAL container,
+ * WAL container started from rec_type byte with at most 4 lower bits
+ * occupied. So it's a way to distinguish pre-WAL version container
+ * from the container with WAL version.)
+ *
+ * We should never change this value.
+ */
+#define FIRST_ORIOLEDB_WAL_VERSION (16)
+
+/*
+ * Particular WAL version when XACT_INFO was added to WAL container.
+ * We should never change this value.
+ */
 #define ORIOLEDB_XACT_INFO_WAL_VERSION (17)
 
 /* Constants for commitInProgressXlogLocation */

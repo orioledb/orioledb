@@ -35,8 +35,10 @@ typedef struct
 #define ORIOLEDB_CHECKPOINT_CONTROL_VERSION	1
 
 /*
- * To ensure correct reading of controlFileVersion, changes in
- * struct layout are permitted only after it.
+ * To ensure correct reading of controlFileVersion, changes in struct layout
+ * are permitted only after .binaryVersion
+ * A good approach would be to add required values in the end of this
+ * structure.
  */
 typedef struct
 {
