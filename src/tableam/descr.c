@@ -271,7 +271,8 @@ o_btree_ensure_initialized_internal(BTreeDescr *desc, bool checkpoint)
 
 	/*
 	 * evictable_tree_init() needs that.  Initialized it before we get one of
-	 * checkpoint_state->oSharedRootInfoInsertLocks.  Skip for in-memory trees.
+	 * checkpoint_state->oSharedRootInfoInsertLocks.  Skip for in-memory
+	 * trees.
 	 */
 	if (desc->storageType != BTreeStorageInMemory)
 		(void) get_sys_tree(SYS_TREES_CHKP_NUM);
@@ -371,9 +372,10 @@ o_btree_ensure_initialized_internal(BTreeDescr *desc, bool checkpoint)
 	else
 	{
 		/*
-		 * o_btree_ensure_initialized() must be called only under relation locks, in
-		 * this state BTree can not be evicted and removed from ShareDescr
-		 * cache because AccessExclusiveLock needed for this actions.
+		 * o_btree_ensure_initialized() must be called only under relation
+		 * locks, in this state BTree can not be evicted and removed from
+		 * ShareDescr cache because AccessExclusiveLock needed for this
+		 * actions.
 		 */
 		Assert(OInMemoryBlknoIsValid(sharedRootInfo->rootInfo.rootPageBlkno));
 		Assert(OInMemoryBlknoIsValid(sharedRootInfo->rootInfo.metaPageBlkno));
@@ -1047,13 +1049,13 @@ cleanup_btree(Oid datoid, Oid relnode, bool files, bool fsync, bool clean_local)
 	key.relnode = relnode;
 
 	shared = o_find_shared_root_info(&key);
-	
+
 	if (shared)
 	{
 		bool		drop_result PG_USED_FOR_ASSERTS_ONLY;
 
-		if(!clean_local && O_PAGE_IS_LOCAL(shared->rootInfo.rootPageBlkno))
-            return;	
+		if (!clean_local && O_PAGE_IS_LOCAL(shared->rootInfo.rootPageBlkno))
+			return;
 
 		drop_result = o_drop_shared_root_info(datoid, relnode);
 		Assert(drop_result);

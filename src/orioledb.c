@@ -152,7 +152,7 @@ int			rewind_max_time = 0;
 int			rewind_max_transactions = 0;
 int			logical_xid_buffers_guc = 64;
 bool		orioledb_strict_mode = false;
-bool        enable_local_page_pool_guc = false;
+bool		enable_local_page_pool_guc = false;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -896,17 +896,17 @@ _PG_init(void)
 							 NULL,
 							 NULL,
 							 NULL);
-	
+
 	DefineCustomBoolVariable("orioledb.enable_local_page_pool",
-								"Enables creation of temporary tables in an optimized local page pool.",
-								NULL,
-								&enable_local_page_pool_guc,
-								false,
-								PGC_USERSET,
-								0,
-								NULL,
-								NULL,
-								NULL);
+							 "Enables creation of temporary tables in an optimized local page pool.",
+							 NULL,
+							 &enable_local_page_pool_guc,
+							 false,
+							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
 
 	if (orioledb_s3_mode)
 	{
@@ -970,8 +970,8 @@ _PG_init(void)
 
 	for (i = 0; i < OPagePoolTypesCount; i++)
 		page_pools_size[i] = CACHELINEALIGN(page_pools_size[i]);
-	
-   	local_ppool_init(&local_ppool);
+
+	local_ppool_init(&local_ppool);
 
 	if (device_filename)
 	{
@@ -1293,9 +1293,9 @@ orioledb_shmem_startup(void)
 void
 o_page_desc_init(OrioleDBPageDesc *desc)
 {
-   	desc->fileExtent.len = InvalidFileExtentLen;
+	desc->fileExtent.len = InvalidFileExtentLen;
 	desc->fileExtent.off = InvalidFileExtentOff;
-	ORelOidsSetInvalid(page_descs[i].oids);
+	ORelOidsSetInvalid(desc->oids);
 	desc->ionum = -1;
 	desc->type = 0;
 	desc->flags = 0;
@@ -1634,9 +1634,9 @@ get_ppool(OPagePoolType type)
 PagePool *
 get_ppool_by_blkno(OInMemoryBlkno blkno)
 {
-    if(O_PAGE_IS_LOCAL(blkno))
-        return (PagePool *) &local_ppool;
-    
+	if (O_PAGE_IS_LOCAL(blkno))
+		return (PagePool *) &local_ppool;
+
 	Assert(blkno < orioledb_buffers_count);
 
 	if (blkno >= main_buffers_offset)

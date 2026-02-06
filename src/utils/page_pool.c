@@ -53,7 +53,7 @@ uint64		o_ucm_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 state);
 void		o_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState);
 
 uint64
-o_ppool_write_build_page(PagePool *pool, BTreeDescr *desc, Page img, FileExtent *extent, BTreeMetaPage *metaPage);
+			o_ppool_write_build_page(PagePool *pool, BTreeDescr *desc, Page img, FileExtent *extent, BTreeMetaPage *metaPage);
 
 /* PagePoolOps for a shared memory based page pool */
 static const PagePoolOps o_page_pool_ops = {
@@ -76,7 +76,7 @@ static const PagePoolOps o_page_pool_ops = {
 	.ucm_epoch_shift = o_ucm_epoch_shift,
 	.ucm_update_state = o_ucm_update_state,
 	.ucm_after_update_state = o_ucm_after_update_state,
-	
+
 	.write_build_page = o_ppool_write_build_page,
 };
 
@@ -103,7 +103,7 @@ uint64		local_ucm_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 stat
 void		local_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState);
 
 uint64
-local_ppool_write_build_page(PagePool *pool, BTreeDescr *desc, Page img, FileExtent *extent, BTreeMetaPage *metaPage);
+			local_ppool_write_build_page(PagePool *pool, BTreeDescr *desc, Page img, FileExtent *extent, BTreeMetaPage *metaPage);
 
 /* PagePoolOps for a local memory based page pool */
 static const PagePoolOps local_ppool_ops = {
@@ -126,7 +126,7 @@ static const PagePoolOps local_ppool_ops = {
 	.ucm_epoch_shift = local_ucm_epoch_shift,
 	.ucm_update_state = local_ucm_update_state,
 	.ucm_after_update_state = local_ucm_after_update_state,
-	
+
 	.write_build_page = local_ppool_write_build_page,
 };
 
@@ -503,10 +503,10 @@ local_ppool_init(LocalPagePool *pool)
 	local_ppool_page_descs = calloc(LOCAL_PPOOL_INIT_SIZE, sizeof(OrioleDBPageDesc));
 	if (!local_ppool_pages || !local_ppool_page_descs)
 		ereport(ERROR, errmsg("Failed to allocate memory for local page pool"));
-	
+
 	for (int i = 0; i < LOCAL_PPOOL_INIT_SIZE; i++)
 		o_page_desc_init(&local_ppool_page_descs[i]);
-	
+
 	pool->size = LOCAL_PPOOL_INIT_SIZE;
 	pool->current_slot = 0;
 	pool->slab_context = SlabContextCreate(TopMemoryContext, "oriole local page pool", ORIOLEDB_BLCKSZ * 16, ORIOLEDB_BLCKSZ);
@@ -541,30 +541,33 @@ local_ppool_alloc_page(PagePool *pool, int kind)
 			return i | 0x80000000;
 		}
 	} while (i != start);
-	
+
 	/* Failed to find a free slot - increase pages array size */
-	
+
 	new_size = local_pool->size * 2;
 	new_pages = realloc(local_ppool_pages, new_size * sizeof(Page));
 	new_page_descs = realloc(local_ppool_page_descs, new_size * sizeof(OrioleDBPageDesc));
-	
+
 	if (!new_pages || !new_page_descs)
 	{
-		/* Original pointers remain valid if their realloc failed, keeping state consistent. */
+		/*
+		 * Original pointers remain valid if their realloc failed, keeping
+		 * state consistent.
+		 */
 		ereport(ERROR, errmsg("Failed to allocate memory for local page pool"));
 	}
-	
+
 	local_ppool_pages = new_pages;
 	local_ppool_page_descs = new_page_descs;
 	local_pool->size = new_size;
 	memset(local_ppool_pages + old_size, 0, old_size * sizeof(Page));
-	
-	for (int i = old_size; i < new_size; i++)
-		o_page_desc_init(&local_ppool_page_descs[i]);
-	
+
+	for (int j = old_size; j < new_size; j++)
+		o_page_desc_init(&local_ppool_page_descs[j]);
+
 	local_pool->current_slot = old_size;
 	local_ppool_pages[old_size] = (Page) MemoryContextAllocZero(local_pool->slab_context, ORIOLEDB_BLCKSZ);
-	
+
 	/* Set the local page bit */
 	return old_size | 0x80000000;
 }
@@ -618,8 +621,8 @@ local_ppool_run_clock(PagePool *pool, bool evict, volatile sig_atomic_t *shutdow
 OInMemoryBlkno
 local_ppool_size(PagePool *pool)
 {
-    LocalPagePool  *o_pool = (LocalPagePool *) pool;
-    
+	LocalPagePool *o_pool = (LocalPagePool *) pool;
+
 	return o_pool->size;
 }
 
@@ -668,9 +671,9 @@ local_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldSta
 uint64
 local_ppool_write_build_page(PagePool *pool, BTreeDescr *desc, Page img, FileExtent *extent, BTreeMetaPage *metaPage)
 {
-    OInMemoryBlkno blkno = (*pool->ops->alloc_page)(pool, PPOOL_RESERVE_META);
-    Page p = O_GET_IN_MEMORY_PAGE(blkno);
-    
-    memcpy(p, img, ORIOLEDB_BLCKSZ);
-    return blkno;
+	OInMemoryBlkno blkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);
+	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+
+	memcpy(p, img, ORIOLEDB_BLCKSZ);
+	return blkno;
 }
