@@ -1494,38 +1494,38 @@ o_estimate_parallel_workers(double table_pages, double index_pages,
 static void
 update_shared_root_info_from_file_header(BTreeDescr *desc, CheckpointFileHeader *fileHeader)
 {
-        SharedRootInfoKey key;
-        SharedRootInfo *sharedRootInfo;
-        BTreeMetaPage *metaPage;
-        OTuple tuple;
-        bool inserted;
+	SharedRootInfoKey key;
+	SharedRootInfo *sharedRootInfo;
+	BTreeMetaPage *metaPage;
+	OTuple		tuple;
+	bool		inserted PG_USED_FOR_ASSERTS_ONLY;
 
-        
-        key.datoid = desc->oids.datoid;
-        key.relnode = desc->oids.relnode;
-        
-        sharedRootInfo = o_find_shared_root_info(&key);
-        Assert(sharedRootInfo != NULL);
-        
-        sharedRootInfo->rootInfo.rootPageBlkno = fileHeader->rootDownlink;
-        sharedRootInfo->rootInfo.metaPageBlkno = (*desc->ppool->ops->alloc_metapage)(desc->ppool);
-        init_meta_page(sharedRootInfo->rootInfo.metaPageBlkno, fileHeader->leafPagesNum);
-        sharedRootInfo->placeholder = false;
-        
-        metaPage = (BTreeMetaPage *) O_GET_IN_MEMORY_PAGE(sharedRootInfo->rootInfo.metaPageBlkno);
-        pg_atomic_write_u64(&metaPage->numFreeBlocks, fileHeader->numFreeBlocks);
-        pg_atomic_write_u64(&metaPage->datafileLength[0], fileHeader->datafileLength);
-        pg_atomic_write_u64(&metaPage->ctid, fileHeader->ctid);
-        pg_atomic_write_u64(&metaPage->bridge_ctid, fileHeader->bridgeCtid);
-        
-        tuple.data = (Pointer) sharedRootInfo;
-        tuple.formatFlags = 0;
-        
-        o_drop_shared_root_info(key.datoid, key.relnode);
-        inserted = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO), tuple);
-        Assert(inserted);
-        
-        pfree(sharedRootInfo);
+
+	key.datoid = desc->oids.datoid;
+	key.relnode = desc->oids.relnode;
+
+	sharedRootInfo = o_find_shared_root_info(&key);
+	Assert(sharedRootInfo != NULL);
+
+	sharedRootInfo->rootInfo.rootPageBlkno = fileHeader->rootDownlink;
+	sharedRootInfo->rootInfo.metaPageBlkno = (*desc->ppool->ops->alloc_metapage) (desc->ppool);
+	init_meta_page(sharedRootInfo->rootInfo.metaPageBlkno, fileHeader->leafPagesNum);
+	sharedRootInfo->placeholder = false;
+
+	metaPage = (BTreeMetaPage *) O_GET_IN_MEMORY_PAGE(sharedRootInfo->rootInfo.metaPageBlkno);
+	pg_atomic_write_u64(&metaPage->numFreeBlocks, fileHeader->numFreeBlocks);
+	pg_atomic_write_u64(&metaPage->datafileLength[0], fileHeader->datafileLength);
+	pg_atomic_write_u64(&metaPage->ctid, fileHeader->ctid);
+	pg_atomic_write_u64(&metaPage->bridge_ctid, fileHeader->bridgeCtid);
+
+	tuple.data = (Pointer) sharedRootInfo;
+	tuple.formatFlags = 0;
+
+	o_drop_shared_root_info(key.datoid, key.relnode);
+	inserted = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO), tuple);
+	Assert(inserted);
+
+	pfree(sharedRootInfo);
 }
 
 
@@ -1633,20 +1633,26 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 
 	o_tables_table_meta_lock(o_table);
 
-	if (idx->desc.storageType == BTreeStorageInMemory) {
-        /* For in-memory btree we should not write the file header, update the shared root info instead */
-        update_shared_root_info_from_file_header(&idx->desc, &fileHeader);
-	}else{
-    	/*
-		 * Write the file header.  We need to write the correct checkpoint number,
-		 * meta lock will prevent checkpointer from walking through.  Remove
-		 * shared root info placeholder to let checkpointer process this tree when
-		 * we release the lock.
+	if (idx->desc.storageType == BTreeStorageInMemory)
+	{
+		/*
+		 * For in-memory btree we should not write the file header, update the
+		 * shared root info instead
+		 */
+		update_shared_root_info_from_file_header(&idx->desc, &fileHeader);
+	}
+	else
+	{
+		/*
+		 * Write the file header.  We need to write the correct checkpoint
+		 * number, meta lock will prevent checkpointer from walking through.
+		 * Remove shared root info placeholder to let checkpointer process
+		 * this tree when we release the lock.
 		 */
 		btree_write_file_header(&idx->desc, &fileHeader);
-    	if (!set_tablespace)
-    		o_drop_shared_root_info(idx->desc.oids.datoid,
-								idx->desc.oids.relnode);
+		if (!set_tablespace)
+			o_drop_shared_root_info(idx->desc.oids.datoid,
+									idx->desc.oids.relnode);
 	}
 
 	o_tables_table_meta_unlock(o_table, InvalidOid);
@@ -2063,34 +2069,46 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	{
 		if (i < descr->nIndices)	/* Indices sort states */
 		{
-	        if (descr->indices[i]->desc.storageType == BTreeStorageInMemory) {
-				/* For in-memory btree we should not write the file header, update the shared root info instead */
-				update_shared_root_info_from_file_header(&descr->indices[i]->desc, &fileHeaders[i]);					
-			} else  {
-    			location = btree_write_file_header(&descr->indices[i]->desc, &fileHeaders[i]);
-    			o_drop_shared_root_info(descr->indices[i]->desc.oids.datoid,
-    									descr->indices[i]->desc.oids.relnode);
+			if (descr->indices[i]->desc.storageType == BTreeStorageInMemory)
+			{
+				/*
+				 * For in-memory btree we should not write the file header,
+				 * update the shared root info instead
+				 */
+				update_shared_root_info_from_file_header(&descr->indices[i]->desc, &fileHeaders[i]);
+			}
+			else
+			{
+				location = btree_write_file_header(&descr->indices[i]->desc, &fileHeaders[i]);
+				o_drop_shared_root_info(descr->indices[i]->desc.oids.datoid,
+										descr->indices[i]->desc.oids.relnode);
 			}
 		}
 		else if (i == descr->nIndices)	/* TOAST sort state */
 		{
-		    if (descr->toast->desc.storageType == BTreeStorageInMemory) {
-				update_shared_root_info_from_file_header(&descr->toast->desc, &fileHeaders[i]);					
-			} else  {
-    			location = btree_write_file_header(&descr->toast->desc, &fileHeaders[i]);
-    			o_drop_shared_root_info(descr->toast->desc.oids.datoid,
-    									descr->toast->desc.oids.relnode);
+			if (descr->toast->desc.storageType == BTreeStorageInMemory)
+			{
+				update_shared_root_info_from_file_header(&descr->toast->desc, &fileHeaders[i]);
+			}
+			else
+			{
+				location = btree_write_file_header(&descr->toast->desc, &fileHeaders[i]);
+				o_drop_shared_root_info(descr->toast->desc.oids.datoid,
+										descr->toast->desc.oids.relnode);
 			}
 		}
 		else if (i == descr->nIndices + 1 && descr->bridge) /* index_bridge sort
 															 * state */
 		{
-            if (descr->bridge->desc.storageType == BTreeStorageInMemory) {
-				update_shared_root_info_from_file_header(&descr->bridge->desc, &fileHeaders[i]);					
-			} else  {
-    			location = btree_write_file_header(&descr->bridge->desc, &fileHeaders[i]);
-    			o_drop_shared_root_info(descr->bridge->desc.oids.datoid,
-    									descr->bridge->desc.oids.relnode);
+			if (descr->bridge->desc.storageType == BTreeStorageInMemory)
+			{
+				update_shared_root_info_from_file_header(&descr->bridge->desc, &fileHeaders[i]);
+			}
+			else
+			{
+				location = btree_write_file_header(&descr->bridge->desc, &fileHeaders[i]);
+				o_drop_shared_root_info(descr->bridge->desc.oids.datoid,
+										descr->bridge->desc.oids.relnode);
 			}
 		}
 		maxLocation = Max(maxLocation, location);
