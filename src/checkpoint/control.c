@@ -89,14 +89,6 @@ check_checkpoint_control(CheckpointControl *control)
 	if (crc != control->crc)
 		elog(ERROR, "Wrong CRC in control file");
 
-	if (control->binaryVersion != ORIOLEDB_BINARY_VERSION)
-		ereport(FATAL,
-				(errmsg("database files are incompatible with server"),
-				 errdetail("OrioleDB was initialized with binary version %d,"
-						   " but the extension is compiled with binary version %d.",
-						   control->binaryVersion, ORIOLEDB_BINARY_VERSION),
-				 errhint("It looks like you need to initdb.")));
-
 	if (control->controlFileVersion != ORIOLEDB_CHECKPOINT_CONTROL_VERSION)
 	{
 		/*
@@ -111,6 +103,14 @@ check_checkpoint_control(CheckpointControl *control)
 						   " but the currently required version is %d.",
 						   control->controlFileVersion, ORIOLEDB_CHECKPOINT_CONTROL_VERSION)));
 	}
+
+	if (control->binaryVersion != ORIOLEDB_BINARY_VERSION)
+		ereport(FATAL,
+				(errmsg("database files are incompatible with server"),
+				 errdetail("OrioleDB was initialized with binary version %d,"
+						   " but the extension is compiled with binary version %d.",
+						   control->binaryVersion, ORIOLEDB_BINARY_VERSION),
+				 errhint("It looks like you need to initdb.")));
 
 	if (control->s3Mode != orioledb_s3_mode)
 		ereport(FATAL,

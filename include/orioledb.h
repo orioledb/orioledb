@@ -44,37 +44,70 @@
   ((void)(addr), (void)(size))
 #endif
 
+/*
+ * Currently OrioleDB has the following version-related values:
+ *
+ * Reference-only value:
+ *
+ * - ORIOLEDB_VERSION - is an external text value meaning the current release.
+ *
+ * ORIOLEDB_VERSION is output by orioledb_version() SQL function and its change doesn't mean any
+ * changes in the code that can introduce incompatibilities. But if values for compatibility (below)
+ * should be bumped, it's enough to do this once before next release. I.e. compatibility is
+ * neecessary between releases, not between different commits belonging to one release.
+ *
+ * Values to reflect incompatibilities and limitations:
+ *
+ * - ORIOLEDB_WAL_VERSION - Version of OrioleDB WAL format (see include/recovery/wal.h)
+ *
+ * ORIOLEDB_WAL_VERSION is used for on-the fly conversion of WAL. As WAL can be transferred between
+ * different clusters ORIOLEDB_WAL_VERSION compatibility is not limited to the same
+ * ORIOLEDB_BINARY_VERSION (see below). Compatibility is only one-way, if read versions are lower
+ * than current, WAL will be converted seamlessly at its reading. But if read versions are greater
+ * than current there is a difference for WAL used in recovery and WAL used for logical decoding:
+ * For recovery: Cluster will shut down (recovery failed)
+ * For logical decoding: Logical decoding will fail and throw error. Cluster will continue working.
+ *
+ * - ORIOLEDB_CHECKPOINT_CONTROL_VERSION - Version of OrioleDB control file format
+ *   (seeinclude/checkpoint/control.h)
+ *
+ * ORIOLEDB_CHECKPOINT_CONTROL_VERSION is intended for on-the fly conversion of CheckpointControl
+ * structure. Compatibility is only one-way, if read versions are lower than current
+ * CheckpointControl will be converted seamlessly. Otherwise cluster will refuse to start with
+ * error. Note that CheckpointControl structure is used for reading cluster's
+ * ORIOLEDB_BINARY_VERSION(see below). (As now we have only one ORIOLEDB_CHECKPOINT_CONTROL_VERSION
+ * only check is implemented yet, no conversion)
+ *
+ * - ORIOLEDB_BINARY_VERSION - Clusters with different ORIOLEDB_BINARY_VERSION are binarily
+ *   incompatible.
+ *
+ * ORIOLEDB_BINARY_VERSION of a cluster is written to a checkpoint control file. At start OrioleDB
+ * will check if current ORIOLEDB_BINARY_VERSION is equal to what is in the control file. Otherwise
+ *  the cluster will refuse to start. (We don't go to the following versions checks in this case)
+ *
+ * - ORIOLEDB_SYS_TREE_VERSION - Version of OrioleDB system trees format
+ * - ORIOLEDB_PAGE_VERSION - Version of OrioleDB page format
+ * - ORIOLEDB_COMPRESS_VERSION - Version of OrioleDB page compression format
+ *
+ * These ORIOLEDB_SYS_TREE_VERSION, ORIOLEDB_PAGE_VERSION, ORIOLEDB_COMPRESS_VERSION reflect
+ * incompatibilities that could be converted on-the-fly. Compatibility is only one-way: if read
+ * versions are greater than current, cluster will shut down with error. If read version is lower
+ * than current - seamless conversion will occur at the first reading.
+ *
+ * As said above, these values are not checked if ORIOLEDB_BINARY_VERSION is different, so each of
+ * these values makes sense only within one ORIOLEDB_BINARY_VERSION value.
+ */
 #define ORIOLEDB_VERSION "OrioleDB public beta 14"
-/*
- * Clusters with different ORIOLEDB_BINARY_VERSION are completely incompatible.
- * Within the same ORIOLEDB_BINARY_VERSION clusters either fully compatible
- * or could be converted on the fly. See comment for ORIOLEDB_SYS_TREE_VERSION,
- * ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION below.
- *
- * ORIOLEDB_WAL_VERSION works even between different ORIOLEDB_BINARY_VERSION's
- * In this case convesrion of WAL records is still allowed and should be implemented
- * ( see check_wal_container_version() )
- */
 #define ORIOLEDB_BINARY_VERSION 8
-#define ORIOLEDB_DATA_DIR "orioledb_data"
-#define ORIOLEDB_UNDO_DIR "orioledb_undo"
-#define ORIOLEDB_RMGR_ID (129)
-#define ORIOLEDB_XLOG_CONTAINER (0x00)
-/*
- * Sub-versions in the same ORIOLEDB_BINARY_VERSION.
- *
- * Same ORIOLEDB_SYS_TREE_VERSION, ORIOLEDB_PAGE_VERSION and
- * ORIOLEDB_COMPRESS_VERSION clusters are compatible without conversion.
- * For different ORIOLEDB_SYS_TREE_VERSION conversion is done at the
- * reading/deserialization of system tables structures without using
- * any conversion tools.
- * For different ORIOLEDB_PAGE_VERSION and ORIOLEDB_COMPRESS_VERSION
- * conversion is done at first reading of disk page on the fly.
- */
 #define ORIOLEDB_SYS_TREE_VERSION	1	/* Version of system catalog */
 #define ORIOLEDB_PAGE_VERSION		1	/* Version of binary page format */
 #define ORIOLEDB_COMPRESS_VERSION	1	/* Version of page compression (only
 										 * for compressed pages) */
+
+#define ORIOLEDB_DATA_DIR "orioledb_data"
+#define ORIOLEDB_UNDO_DIR "orioledb_undo"
+#define ORIOLEDB_RMGR_ID (129)
+#define ORIOLEDB_XLOG_CONTAINER (0x00)
 
 /*
  * perform_page_split() removes a key data from first right page downlink.

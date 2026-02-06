@@ -35,8 +35,9 @@ typedef struct
 #define ORIOLEDB_CHECKPOINT_CONTROL_VERSION	1
 
 /*
- * To ensure correct reading of controlFileVersion, changes in
- * struct layout are permitted only after it.
+ * To ensure correct reading of controlFileVersion, changes in struct layout
+ * are permitted only between .controlFileVersion and .crc, that
+ * should be the last.
  */
 typedef struct
 {
@@ -57,6 +58,7 @@ typedef struct
 	OXid		checkpointRetainXmax;
 	uint32		binaryVersion;
 	bool		s3Mode;
+	/* CRC of all fields above. It should be last */
 	pg_crc32c	crc;
 } CheckpointControl;
 
