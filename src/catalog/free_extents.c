@@ -562,7 +562,7 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 	uint32		chkp_num;
 	LWLock	   *metaLock;
 
-	o_btree_load_shmem(desc);
+	o_btree_ensure_initialized(desc);
 	metaPage = BTREE_GET_META(desc);
 	metaLock = &metaPage->metaLock;
 

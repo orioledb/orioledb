@@ -649,7 +649,7 @@ apply_modify_record(OTableDescr *descr, OIndexDescr *id, uint16 type,
 	}
 	else
 	{
-		o_btree_load_shmem(&id->desc);
+		o_btree_ensure_initialized(&id->desc);
 		apply_btree_modify_record(&id->desc, type, p, oxid, COMMITSEQNO_INPROGRESS);
 	}
 }
@@ -774,7 +774,7 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 
 	if (GET_PRIMARY(descr)->primaryIsCtid)
 	{
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+		o_btree_ensure_initialized(&GET_PRIMARY(descr)->desc);
 		btree_ctid_update_if_needed(&GET_PRIMARY(descr)->desc,
 									slot->tts_tid);
 	}
@@ -783,7 +783,7 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 	{
 		OTableSlot *oslot = (OTableSlot *) slot;
 
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+		o_btree_ensure_initialized(&GET_PRIMARY(descr)->desc);
 		btree_ctid_update_if_needed(&GET_PRIMARY(descr)->desc,
 									oslot->bridge_ctid);
 	}
@@ -808,7 +808,7 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 
 		cur_tuple = isPrimary ? tuple : stuple;
 
-		o_btree_load_shmem(&id->desc);
+		o_btree_ensure_initialized(&id->desc);
 		for (attnum = 0; attnum < id->nonLeafTupdesc->natts; attnum++)
 		{
 			FormData_pg_attribute attr = id->nonLeafTupdesc->attrs[attnum];
@@ -867,7 +867,7 @@ apply_tbl_delete(OTableDescr *descr, OTuple key,
 		isPrimary = i == PrimaryIndexNumber;
 		id = descr->indices[i];
 
-		o_btree_load_shmem(&id->desc);
+		o_btree_ensure_initialized(&id->desc);
 		if (isPrimary)
 		{
 			BTreeModifyCallbackInfo callbackInfo = {
@@ -944,7 +944,7 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 		isPrimary = i == PrimaryIndexNumber;
 		tree = descr->indices[i];
 
-		o_btree_load_shmem(&tree->desc);
+		o_btree_ensure_initialized(&tree->desc);
 		if (isPrimary)
 		{
 			BTreeModifyCallbackInfo callbackInfo = {

@@ -60,7 +60,7 @@ register_bgwriter(void)
 void
 bgwriter_main(Datum main_arg)
 {
-	OPagePool  *pool;
+	PagePool   *pool;
 	int			rc,
 				wake_events = WL_LATCH_SET | WL_POSTMASTER_DEATH | WL_TIMEOUT;
 	bool		need_eviction,
@@ -130,8 +130,8 @@ bgwriter_main(Datum main_arg)
 			for (poolType = 0; poolType < OPagePoolTypesCount && !ShutdownRequestPending; poolType++)
 			{
 				pool = get_ppool(poolType);
-				need_eviction = ppool_free_pages_count(pool) < pool->size / 20;
-				need_write = ppool_dirty_pages_count(pool) > pool->size / 2;
+				need_eviction = (*pool->ops->free_pages_count) (pool) < (*pool->ops->size) (pool) / 20;
+				need_write = (*pool->ops->dirty_pages_count) (pool) > (*pool->ops->size) (pool) / 2;
 
 				if (need_eviction || need_write)
 				{
@@ -139,7 +139,7 @@ bgwriter_main(Datum main_arg)
 
 					while (need_eviction || need_write)
 					{
-						ppool_run_clock(pool, need_eviction, &ShutdownRequestPending);
+						(*pool->ops->run_clock) (pool, need_eviction, &ShutdownRequestPending);
 						i++;
 
 						if (i >= bgwriter_lru_maxpages * (BLCKSZ / ORIOLEDB_BLCKSZ))
@@ -148,18 +148,18 @@ bgwriter_main(Datum main_arg)
 						if (ShutdownRequestPending)
 							break;
 
-						need_eviction = ppool_free_pages_count(pool) < pool->size / 20;
-						need_write = ppool_dirty_pages_count(pool) > pool->size / 2;
+						need_eviction = (*pool->ops->free_pages_count) (pool) < (*pool->ops->size) (pool) / 20;
+						need_write = (*pool->ops->dirty_pages_count) (pool) > (*pool->ops->size) (pool) / 2;
 					}
 
 					MemoryContextReset(CurTransactionContext);
 					MemoryContextReset(TopTransactionContext);
 				}
 
-				if (!ShutdownRequestPending && ucm_epoch_needs_shift(&pool->ucm))
+				if (!ShutdownRequestPending && (*pool->ops->ucm_epoch_needs_shift) (pool))
 				{
-					if (ucm_epoch_needs_shift(&pool->ucm))
-						ucm_epoch_shift(&pool->ucm);
+					if ((*pool->ops->ucm_epoch_needs_shift) (pool))
+						(*pool->ops->ucm_epoch_shift) (pool);
 				}
 			}
 
