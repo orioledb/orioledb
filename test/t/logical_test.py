@@ -1723,6 +1723,18 @@ COMMIT\n""")
 				pub = publisher.publish('test_pub', tables=['o_test1'])
 				sub = subscriber.subscribe(pub, 'test_sub')
 				wait_ready(subscriber)
+				a, *b = (subscriber.execute(
+				    'postgres', 'select pg_current_xact_id();\n'))[0]
+				xids1 = int(a)
+				#print(xids1)
+				a, *b = (publisher.execute(
+				    'postgres', 'select orioledb_get_current_oxid();\n'))[0]
+				oxidp1 = int(a)
+				#print(oxidp1)
+				a, *b = (subscriber.execute(
+				    'postgres', 'select orioledb_get_current_oxid();\n'))[0]
+				oxids1 = int(a)
+				#print(oxids1)
 
 				with publisher.connect() as con1:
 					with publisher.connect() as con2:
@@ -1766,6 +1778,20 @@ COMMIT\n""")
 
 					# wait until changes apply on subscriber and check them
 					sub.catchup()
+					a, *b = (publisher.execute(
+					    'postgres',
+					    'select orioledb_get_current_oxid();\n'))[0]
+					oxidp2 = int(a)
+					#print(oxidp2)
+					a, *b = (subscriber.execute(
+					    'postgres', 'select pg_current_xact_id();\n'))[0]
+					xids2 = int(a)
+					#print(xids2)
+					a, *b = (subscriber.execute(
+					    'postgres',
+					    'select orioledb_get_current_oxid();\n'))[0]
+					oxids2 = int(a)
+					#print(oxids2)
 					self.assertListEqual(
 					    subscriber.execute(
 					        'SELECT * FROM o_test1 ORDER BY id'), [(2, '2'),
@@ -1773,6 +1799,12 @@ COMMIT\n""")
 					self.assertListEqual(
 					    subscriber.execute(
 					        'SELECT * FROM o_test2 ORDER BY id'), [])
+					# we had no PG transactions on subscriber, xid is incremented only by pg_current_xact_id()
+					self.assertEqual(xids2 - xids1, 1)
+					# we had 4 transactions on publisher, plus oxid is incremented by orioledb_get_current_oxid()
+					self.assertEqual(oxidp2 - oxidp1, 5)
+					# on subscriber one transaction from publisher that modified only o_test2 was not replicated
+					self.assertEqual(oxids2 - oxids1, 4)
 
 	def test_logical_subscription_toastable_insert(self):
 		with self.node as publisher:
