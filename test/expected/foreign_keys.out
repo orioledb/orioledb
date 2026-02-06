@@ -211,6 +211,100 @@ INSERT INTO o_test_reference_to_self_update_cascade (val_1, val_2)
 	VALUES (0, 0);
 UPDATE o_test_reference_to_self_update_cascade SET val_1 = 3 WHERE val_1 = 0;
 COMMIT;
+-- Test AT_AlterConstraint
+-- Tests changing constraint deferability attributes
+CREATE TABLE o_test_alter_constraint_ref (
+	id int PRIMARY KEY
+) USING orioledb;
+CREATE TABLE o_test_alter_constraint (
+	id int PRIMARY KEY,
+	ref_id int,
+	val text,
+	CONSTRAINT fk_alter_test FOREIGN KEY (ref_id) REFERENCES o_test_alter_constraint_ref(id)
+) USING orioledb;
+INSERT INTO o_test_alter_constraint_ref VALUES (1), (2), (3);
+-- Check initial constraint properties (NOT DEFERRABLE by default)
+SELECT conname, condeferrable, condeferred
+FROM pg_constraint
+WHERE conname = 'fk_alter_test';
+    conname    | condeferrable | condeferred 
+---------------+---------------+-------------
+ fk_alter_test | f             | f
+(1 row)
+
+-- Test AT_AlterConstraint: Make constraint DEFERRABLE INITIALLY DEFERRED
+ALTER TABLE o_test_alter_constraint
+	ALTER CONSTRAINT fk_alter_test DEFERRABLE INITIALLY DEFERRED;
+-- Verify constraint properties changed
+SELECT conname, condeferrable, condeferred
+FROM pg_constraint
+WHERE conname = 'fk_alter_test';
+    conname    | condeferrable | condeferred 
+---------------+---------------+-------------
+ fk_alter_test | t             | t
+(1 row)
+
+-- Test deferred constraint behavior
+BEGIN;
+-- This should succeed because constraint is deferred
+INSERT INTO o_test_alter_constraint VALUES (1, 99, 'test');
+-- Check that invalid reference exists temporarily
+SELECT * FROM o_test_alter_constraint WHERE ref_id = 99;
+ id | ref_id | val  
+----+--------+------
+  1 |     99 | test
+(1 row)
+
+-- This should fail on commit
+COMMIT;
+ERROR:  insert or update on table "o_test_alter_constraint" violates foreign key constraint "fk_alter_test"
+DETAIL:  Key (ref_id)=(99) is not present in table "o_test_alter_constraint_ref".
+-- Test AT_AlterConstraint: Change to DEFERRABLE INITIALLY IMMEDIATE
+ALTER TABLE o_test_alter_constraint
+	ALTER CONSTRAINT fk_alter_test DEFERRABLE INITIALLY IMMEDIATE;
+-- Verify constraint properties changed
+SELECT conname, condeferrable, condeferred
+FROM pg_constraint
+WHERE conname = 'fk_alter_test';
+    conname    | condeferrable | condeferred 
+---------------+---------------+-------------
+ fk_alter_test | t             | f
+(1 row)
+
+-- Even though constraint is INITIALLY IMMEDIATE, we can defer it in a transaction
+BEGIN;
+SET CONSTRAINTS fk_alter_test DEFERRED;
+INSERT INTO o_test_alter_constraint VALUES (2, 88, 'test2');
+SELECT * FROM o_test_alter_constraint WHERE ref_id = 88;
+ id | ref_id |  val  
+----+--------+-------
+  2 |     88 | test2
+(1 row)
+
+COMMIT;
+ERROR:  insert or update on table "o_test_alter_constraint" violates foreign key constraint "fk_alter_test"
+DETAIL:  Key (ref_id)=(88) is not present in table "o_test_alter_constraint_ref".
+-- Test AT_AlterConstraint: Make constraint NOT DEFERRABLE
+ALTER TABLE o_test_alter_constraint
+	ALTER CONSTRAINT fk_alter_test NOT DEFERRABLE;
+-- Verify constraint properties changed back
+SELECT conname, condeferrable, condeferred
+FROM pg_constraint
+WHERE conname = 'fk_alter_test';
+    conname    | condeferrable | condeferred 
+---------------+---------------+-------------
+ fk_alter_test | f             | f
+(1 row)
+
+-- Now constraint cannot be deferred
+BEGIN;
+INSERT INTO o_test_alter_constraint VALUES (3, 77, 'test3');
+ERROR:  insert or update on table "o_test_alter_constraint" violates foreign key constraint "fk_alter_test"
+DETAIL:  Key (ref_id)=(77) is not present in table "o_test_alter_constraint_ref".
+ROLLBACK;
+-- Cleanup
+DROP TABLE o_test_alter_constraint CASCADE;
+DROP TABLE o_test_alter_constraint_ref CASCADE;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 11 other objects
 DETAIL:  drop cascades to table o_test_text

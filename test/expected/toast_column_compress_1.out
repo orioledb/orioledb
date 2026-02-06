@@ -165,6 +165,39 @@ View definition:
 
 SET orioledb.table_description_compress = false;
 \set HIDE_TOAST_COMPRESSION true
+-- Test AT_SetCompression (column compression method)
+-- PostgreSQL supports compression methods: pglz (default), lz4
+CREATE TABLE o_test_set_compression (
+	i int PRIMARY KEY,
+	data1 text
+) USING orioledb;
+-- Check initial compression settings (should be DEFAULT or empty)
+SELECT attname, attcompression
+FROM pg_attribute
+WHERE attrelid = 'o_test_set_compression'::regclass
+  AND attname = 'data1'
+ORDER BY attname;
+ attname | attcompression 
+---------+----------------
+ data1   | 
+(1 row)
+
+-- Set compression method for data1 column
+-- FIXME: Currently unsupported in orioledb, so this command will fail. Orioledb always uses pglz.
+ALTER TABLE o_test_set_compression ALTER COLUMN data1 SET COMPRESSION pglz;
+ERROR:  unsupported alter table subcommand
+DETAIL:  Subcommand "ALTER COLUMN ... SET COMPRESSION" is not supported on OrioleDB tables yet.  This will be implemented in future.
+SELECT attname, attcompression
+FROM pg_attribute
+WHERE attrelid = 'o_test_set_compression'::regclass
+  AND attname = 'data1'
+ORDER BY attname;
+ attname | attcompression 
+---------+----------------
+ data1   | 
+(1 row)
+
+DROP TABLE o_test_set_compression CASCADE;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to table o_test_2
