@@ -815,7 +815,7 @@ insert_replication_retain_undo_location(TransactionId xid, UndoLocation undoLoca
 
 	keyTuple.formatFlags = 0;
 	keyTuple.data = (Pointer) &key;
-	o_btree_load_shmem(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION));
+	o_btree_ensure_initialized(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION));
 	existing_tuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION),
 											   &keyTuple, BTreeKeyNonLeafKey,
 											   &o_in_progress_snapshot, NULL,
