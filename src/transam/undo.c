@@ -1027,7 +1027,16 @@ undo_item_buf_read_item(UndoItemBuf *buf,
 {
 	LocationIndex itemSize;
 
-	Assert(UNDO_REC_EXISTS(undoType, location));
+	if (!UNDO_REC_EXISTS(undoType, location))
+	{
+		UndoMeta   *undoMeta = get_undo_meta_by_type(undoType);
+
+		elog(PANIC, "location = %llu, minProcRetainLocation = %llu, checkpointRetainStartLocation = %llu, checkpointRetainEndLocation = %llu",
+			 (unsigned long long) location,
+			 (unsigned long long) pg_atomic_read_u64(&undoMeta->minProcRetainLocation),
+			 (unsigned long long) pg_atomic_read_u64(&undoMeta->checkpointRetainStartLocation),
+			 (unsigned long long) pg_atomic_read_u64(&undoMeta->checkpointRetainEndLocation));
+	}
 
 	ASAN_UNPOISON_MEMORY_REGION(buf->data, buf->length);
 	undo_read(undoType, location, sizeof(UndoStackItem), buf->data);
