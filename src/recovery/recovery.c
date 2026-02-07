@@ -1235,6 +1235,7 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 					UndoLocationIsValid(curRetainUndoLocations[i]))
 				{
 					cur_state->retain_locs[i] = curRetainUndoLocations[i];
+					Assert(!cur_recovery_xid_state->in_retain_undo_heaps[i]);
 					cur_state->in_retain_undo_heaps[i] = true;
 					pairingheap_add(retain_undo_queues[i], &cur_state->retain_undo_ph_nodes[i]);
 				}
@@ -1892,6 +1893,11 @@ free_run_xmin(void)
 		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
 }
 
+/*
+ * Update process transactionUndoRetainLocation according to the state of
+ * retain_undo_queues[undoType].  Removes finished transactions from the top
+ * of the heap when appropriate.
+ */
 static bool
 update_retain_location_with_heap(UndoLogType undoType, int worker_id,
 								 XLogRecPtr recoveryPtr)
@@ -1909,6 +1915,7 @@ update_retain_location_with_heap(UndoLogType undoType, int worker_id,
 	if (state->csn == COMMITSEQNO_ABORTED ||
 		(COMMITSEQNO_IS_NORMAL(state->csn) && !state->in_finished_list && state->ptr <= recoveryPtr))
 	{
+		Assert(state->in_retain_undo_heaps[undoType]);
 		pairingheap_remove(retain_undo_queues[undoType], &state->retain_undo_ph_nodes[undoType]);
 		state->in_retain_undo_heaps[undoType] = false;
 		check_delete_xid_state(state, worker_id);
@@ -1936,12 +1943,17 @@ update_proc_retain_undo_location(int worker_id)
 
 	if (cur_recovery_xid_state != NULL)
 	{
+		/*
+		 * Update current recovery Xid state with retain undo locations if
+		 * needed.
+		 */
 		for (i = 0; i < (int) UndoLogsCount; i++)
 		{
 			if (!UndoLocationIsValid(cur_recovery_xid_state->retain_locs[i]) &&
 				UndoLocationIsValid(curRetainUndoLocations[i]))
 			{
 				cur_recovery_xid_state->retain_locs[i] = curRetainUndoLocations[i];
+				Assert(!cur_recovery_xid_state->in_retain_undo_heaps[i]);
 				cur_recovery_xid_state->in_retain_undo_heaps[i] = true;
 				pairingheap_add(retain_undo_queues[i],
 								&cur_recovery_xid_state->retain_undo_ph_nodes[i]);
