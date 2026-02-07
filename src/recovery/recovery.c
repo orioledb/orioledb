@@ -153,6 +153,7 @@ typedef struct WorkerUndoTempEntry
 	OXid		oxid;
 	CommitSeqNo csn;
 	UndoStackLocations undoStacks[UndoLogsCount];
+	UndoLocation undoRetainLocs[UndoLogsCount];
 	uint32		numCheckpointStacks;
 	/* How many checkpoint stacks follow */
 } WorkerUndoTempEntry;
@@ -544,14 +545,40 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 		}
 		if (worker_id < 0)
 		{
+			ODBProcData *curProcData = GET_CUR_PROCDATA();
 			CheckpointUndoStack *stack;
+			UndoLocation retainUndoLocation;
+			UndoLogType undoType = xidRec.undoType;
+			UndoMeta   *undoMeta = get_undo_meta_by_type(undoType);
 
 			stack = (CheckpointUndoStack *) MemoryContextAlloc(TopMemoryContext,
 															   sizeof(CheckpointUndoStack));
-			stack->undoType = xidRec.undoType;
+			stack->undoType = undoType;
 			stack->undoStack = xidRec.undoLocation;
 			dlist_push_tail(&state->checkpoint_undo_stacks, &stack->node);
 			set_oxid_csn(xidRec.oxid, COMMITSEQNO_INPROGRESS);
+
+			/*
+			 * We will probably need to retain this till the next checkpoint.
+			 */
+			retainUndoLocation = xidRec.retainLocation;
+			if (retainUndoLocation < state->retain_locs[undoType])
+			{
+				if (state->in_retain_undo_heaps[undoType])
+					pairingheap_remove(retain_undo_queues[undoType], &state->retain_undo_ph_nodes[undoType]);
+				state->retain_locs[undoType] = retainUndoLocation;
+				pairingheap_add(retain_undo_queues[undoType], &state->retain_undo_ph_nodes[undoType]);
+				state->in_retain_undo_heaps[undoType] = true;
+
+				if (state->retain_locs[undoType] < pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation))
+					pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation, state->retain_locs[undoType]);
+
+				if (state->retain_locs[undoType] < pg_atomic_read_u64(&undoMeta->minProcRetainLocation))
+					pg_atomic_write_u64(&undoMeta->minProcRetainLocation, state->retain_locs[undoType]);
+
+				if (state->retain_locs[undoType] < pg_atomic_read_u64(&undoMeta->minProcTransactionRetainLocation))
+					pg_atomic_write_u64(&undoMeta->minProcTransactionRetainLocation, state->retain_locs[undoType]);
+			}
 		}
 
 		offset += sizeof(xidRec);
@@ -1358,6 +1385,7 @@ flush_current_undo_stack(void)
 	{
 		rec.undoType = (UndoLogType) i;
 		get_cur_undo_locations(&rec.undoLocation, (UndoLogType) i);
+		rec.retainLocation = curRetainUndoLocations[i];
 		write_to_xids_queue(&rec);
 	}
 }
@@ -2070,9 +2098,21 @@ recovery_write_to_xids_queue(int worker_id, uint32 requestNumber)
 
 	if (cur_recovery_xid_state)
 	{
+		RecoveryXidState *cur_state = cur_recovery_xid_state;
+
 		for (i = 0; i < (int) UndoLogsCount; i++)
-			get_cur_undo_locations(&cur_recovery_xid_state->undo_stacks[i],
+		{
+			get_cur_undo_locations(&cur_state->undo_stacks[i],
 								   (UndoLogType) i);
+			if (!UndoLocationIsValid(cur_state->retain_locs[i]) &&
+				UndoLocationIsValid(curRetainUndoLocations[i]))
+			{
+				cur_state->retain_locs[i] = curRetainUndoLocations[i];
+				Assert(!cur_state->in_retain_undo_heaps[i]);
+				cur_state->in_retain_undo_heaps[i] = true;
+				pairingheap_add(retain_undo_queues[i], &cur_state->retain_undo_ph_nodes[i]);
+			}
+		}
 	}
 
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
@@ -2089,6 +2129,7 @@ recovery_write_to_xids_queue(int worker_id, uint32 requestNumber)
 		{
 			rec.undoType = (UndoLogType) i;
 			rec.undoLocation = state->undo_stacks[i];
+			rec.retainLocation = state->retain_locs[i];
 			write_to_xids_queue(&rec);
 		}
 
@@ -2100,6 +2141,7 @@ recovery_write_to_xids_queue(int worker_id, uint32 requestNumber)
 
 			rec.undoType = stack->undoType;
 			rec.undoLocation = stack->undoStack;
+			rec.retainLocation = state->retain_locs[stack->undoType];
 			write_to_xids_queue(&rec);
 		}
 	}
@@ -2192,8 +2234,13 @@ save_state_to_file(int worker_id)
 	if (cur_recovery_xid_state != NULL)
 	{
 		for (int i = 0; i < UndoLogsCount; i++)
+		{
 			get_cur_undo_locations(&cur_recovery_xid_state->undo_stacks[i],
 								   (UndoLogType) i);
+			if (!UndoLocationIsValid(cur_recovery_xid_state->retain_locs[i]) &&
+				UndoLocationIsValid(curRetainUndoLocations[i]))
+				cur_recovery_xid_state->retain_locs[i] = curRetainUndoLocations[i];
+		}
 	}
 
 	/* Write all transaction states */
@@ -2213,6 +2260,7 @@ save_state_to_file(int worker_id)
 			entry.numCheckpointStacks++;
 
 		memcpy(entry.undoStacks, state->undo_stacks, sizeof(entry.undoStacks));
+		memcpy(entry.undoRetainLocs, state->retain_locs, sizeof(entry.undoRetainLocs));
 
 		if (OFileWrite(tempFile, (char *) &entry, sizeof(entry), offset,
 					   WAIT_EVENT_DATA_FILE_WRITE) != sizeof(entry))
@@ -2313,6 +2361,7 @@ recovery_load_state_from_file(int worker_id, uint32 chkpnum, bool shutdown)
 			rec.oxid = entry.oxid;
 			rec.undoType = (UndoLogType) j;
 			rec.undoLocation = entry.undoStacks[j];
+			rec.retainLocation = entry.undoRetainLocs[j];
 			write_to_xids_queue(&rec);
 		}
 
@@ -2334,6 +2383,7 @@ recovery_load_state_from_file(int worker_id, uint32 chkpnum, bool shutdown)
 			rec.oxid = entry.oxid;
 			rec.undoType = stack.undoType;
 			rec.undoLocation = stack.undoStack;
+			rec.retainLocation = entry.undoRetainLocs[stack.undoType];
 			write_to_xids_queue(&rec);
 		}
 	}
