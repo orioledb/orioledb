@@ -544,7 +544,10 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 		}
 		if (worker_id < 0)
 		{
+			ODBProcData *curProcData = GET_CUR_PROCDATA();
 			CheckpointUndoStack *stack;
+			UndoLocation retainUndoLocation;
+			UndoLogType undoType = xidRec.undoType;
 
 			stack = (CheckpointUndoStack *) MemoryContextAlloc(TopMemoryContext,
 															   sizeof(CheckpointUndoStack));
@@ -552,6 +555,22 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			stack->undoStack = xidRec.undoLocation;
 			dlist_push_tail(&state->checkpoint_undo_stacks, &stack->node);
 			set_oxid_csn(xidRec.oxid, COMMITSEQNO_INPROGRESS);
+
+			/*
+			 * We will probably need to retain this till the next checkpoint.
+			 */
+			retainUndoLocation = pg_atomic_read_u64(&get_undo_meta_by_type(undoType)->checkpointRetainStartLocation);
+			if (retainUndoLocation < state->retain_locs[(int) undoType])
+			{
+				if (state->in_retain_undo_heaps[undoType])
+					pairingheap_remove(retain_undo_queues[undoType], &state->retain_undo_ph_nodes[undoType]);
+				state->retain_locs[undoType] = retainUndoLocation;
+				pairingheap_add(retain_undo_queues[undoType], &state->retain_undo_ph_nodes[undoType]);
+				state->in_retain_undo_heaps[undoType] = true;
+
+				if (state->retain_locs[undoType] < pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation))
+					pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation, state->retain_locs[undoType]);
+			}
 		}
 
 		offset += sizeof(xidRec);
