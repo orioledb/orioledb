@@ -248,6 +248,50 @@ class ReplicationTest(BaseTest):
 				    replica.execute("SELECT orioledb_has_retained_undo();")[0]
 				    [0])
 
+	def test_replication_multiple_checkpoints_rollback(self):
+		with self.node as master:
+			master.start()
+
+			# create a backup
+			with self.getReplica().start() as replica:
+				master.safe_psql("""CREATE EXTENSION orioledb;
+					CREATE TABLE o_test (
+						id integer NOT NULL,
+						val text
+					) USING orioledb;""")
+
+				# wait for synchronization
+				replica.catchup()
+				replica.safe_psql("SELECT * FROM o_test;")
+
+				con1 = master.connect()
+				con1.execute("""INSERT INTO o_test (
+								SELECT id, id || 'val'
+								FROM
+								generate_series(1, 10000, 1) id);""")
+
+				self.catchup_orioledb(replica)
+				master.safe_psql("CHECKPOINT;")
+				replica.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				replica.restart()
+
+				self.catchup_orioledb(replica)
+				master.safe_psql("CHECKPOINT;")
+				replica.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+				master.safe_psql("CHECKPOINT;")
+				replica.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				replica.restart()
+
+				con1.rollback()
+				self.catchup_orioledb(replica)
+
+				replica.safe_psql("SELECT * FROM o_test;")
+
 	def test_replication_non_transactional_truncate(self):
 		node = self.node
 		node.start()

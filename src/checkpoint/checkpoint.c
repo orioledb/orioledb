@@ -711,6 +711,7 @@ write_to_xids_queue(XidFileRec *rec)
 
 	target->undoType = rec->undoType;
 	target->undoLocation = rec->undoLocation;
+	target->retainLocation = rec->retainLocation;
 
 	pg_write_barrier();
 
@@ -827,6 +828,7 @@ finish_write_xids(uint32 chkpnum, bool shutdown)
 
 						read_shared_undo_locations(&xidRec.undoLocation,
 												   &oProcData[i].undoStackLocations[j][undoType]);
+						xidRec.retainLocation = pg_atomic_read_u64(&oProcData[i].undoRetainLocations[undoType].transactionUndoRetainLocation);
 
 						pg_read_barrier();
 
@@ -914,6 +916,7 @@ checkpoint_write_rewind_item(RewindItem *rewindItem)
 		xidRec.undoLocation.location = InvalidUndoLocation;
 		xidRec.undoLocation.branchLocation = InvalidUndoLocation;
 		xidRec.undoLocation.subxactLocation = InvalidUndoLocation;
+		xidRec.retainLocation = rewindItem->minRetainLocation[i];
 		write_to_xids_queue(&xidRec);
 	}
 }
