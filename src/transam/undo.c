@@ -943,7 +943,7 @@ set_my_reserved_location(UndoLogType undoType)
 }
 
 static UndoLocation
-set_my_retain_location(UndoLogType undoType)
+set_my_snapshot_retain_location(UndoLogType undoType)
 {
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	UndoLocation curSnapshotRetainUndoLocation,
@@ -2768,9 +2768,9 @@ orioledb_snapshot_hook(Snapshot snapshot)
 	}
 
 
-	snapshot->undoRegularRowLocationPhNode.undoLocation = set_my_retain_location(UndoLogRegular);
-	snapshot->undoRegularPageLocationPhNode.undoLocation = set_my_retain_location(UndoLogRegularPageLevel);
-	snapshot->undoSystemLocationPhNode.undoLocation = set_my_retain_location(UndoLogSystem);
+	snapshot->undoRegularRowLocationPhNode.undoLocation = set_my_snapshot_retain_location(UndoLogRegular);
+	snapshot->undoRegularPageLocationPhNode.undoLocation = set_my_snapshot_retain_location(UndoLogRegularPageLevel);
+	snapshot->undoSystemLocationPhNode.undoLocation = set_my_snapshot_retain_location(UndoLogSystem);
 	xmin = pg_atomic_read_u64(&xid_meta->runXmin);
 	curXmin = pg_atomic_read_u64(&curProcData->xmin);
 	if (!OXidIsValid(curXmin))
