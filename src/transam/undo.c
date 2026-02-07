@@ -1027,6 +1027,8 @@ undo_item_buf_read_item(UndoItemBuf *buf,
 {
 	LocationIndex itemSize;
 
+	Assert(UNDO_REC_EXISTS(undoType, location));
+
 	ASAN_UNPOISON_MEMORY_REGION(buf->data, buf->length);
 	undo_read(undoType, location, sizeof(UndoStackItem), buf->data);
 
