@@ -1030,9 +1030,12 @@ undo_item_buf_read_item(UndoItemBuf *buf,
 	if (!UNDO_REC_EXISTS(undoType, location))
 	{
 		UndoMeta   *undoMeta = get_undo_meta_by_type(undoType);
+		ODBProcData *curProcData = GET_CUR_PROCDATA();
 
-		elog(PANIC, "location = %llu, minProcRetainLocation = %llu, checkpointRetainStartLocation = %llu, checkpointRetainEndLocation = %llu",
+		elog(PANIC, "undoType = %d, location = %llu, transactionUndoRetainLocation = %llu, minProcRetainLocation = %llu, checkpointRetainStartLocation = %llu, checkpointRetainEndLocation = %llu",
+			 (int) undoType,
 			 (unsigned long long) location,
+			 (unsigned long long) pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation),
 			 (unsigned long long) pg_atomic_read_u64(&undoMeta->minProcRetainLocation),
 			 (unsigned long long) pg_atomic_read_u64(&undoMeta->checkpointRetainStartLocation),
 			 (unsigned long long) pg_atomic_read_u64(&undoMeta->checkpointRetainEndLocation));
