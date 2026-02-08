@@ -722,7 +722,7 @@ orioledb_redo(XLogReaderState *record)
 	Assert((XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_CONTAINER);
 	recovery_single = *recovery_single_process;
 
-	if (record->ReadRecPtr >= checkpoint_state->controlToastConsistentPtr)
+	if (record->ReadRecPtr >= checkpoint_state->controlToastConsistentPtr && !toast_consistent)
 	{
 		toast_consistent = true;
 		if (!recovery_single)
