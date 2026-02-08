@@ -569,7 +569,11 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 				state->in_retain_undo_heaps[undoType] = true;
 
 				if (state->retain_locs[undoType] < pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation))
+				{
 					pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation, state->retain_locs[undoType]);
+					elog(LOG, "read_xids() transactionUndoRetainLocation %d, %llu",
+						(int) undoType, (unsigned long long) state->retain_locs[undoType]);
+				}
 			}
 		}
 
@@ -1930,7 +1934,11 @@ update_retain_location_with_heap(UndoLogType undoType, int worker_id,
 	state = RetainUndoNodeGetRecoveryXidState(pairingheap_first(retain_undo_queues[undoType]), undoType);
 
 	if (state->retain_locs[undoType] > pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation))
+	{
 		pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation, state->retain_locs[undoType]);
+		elog(LOG, "update_retain_location_with_heap() transactionUndoRetainLocation %d, %llu",
+			(int) undoType, (unsigned long long) state->retain_locs[undoType]);
+	}
 	if (state->csn == COMMITSEQNO_ABORTED ||
 		(COMMITSEQNO_IS_NORMAL(state->csn) && !state->in_finished_list && state->ptr <= recoveryPtr))
 	{

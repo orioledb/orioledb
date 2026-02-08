@@ -922,7 +922,11 @@ set_my_reserved_location(UndoLogType undoType)
 		pg_atomic_write_u64(&shared->reservedUndoLocation, lastUsedLocation);
 
 		if (overwriteTransactionRetainUndoLoc)
+		{
 			pg_atomic_write_u64(&shared->transactionUndoRetainLocation, lastUsedLocation);
+			elog(LOG, "set_my_reserved_location() transactionUndoRetainLocation %d, %llu",
+				(int) undoType, (unsigned long long) lastUsedLocation);
+		}
 
 		wait_for_even_min_undo_locations_changecount(meta);
 
