@@ -72,8 +72,6 @@ static pairingheap retainUndoLocHeaps[(int) UndoLogsCount] =
 	}
 };
 
-static UndoLocation firstUndoRecords[(int) UndoLogsCount] = {InvalidUndoLocation};
-
 /* A minimal subtransaciton id, where OrioleDB got involved */
 static SubTransactionId minParentSubId = InvalidSubTransactionId;
 
@@ -926,8 +924,6 @@ set_my_reserved_location(UndoLogType undoType)
 		if (overwriteTransactionRetainUndoLoc)
 		{
 			pg_atomic_write_u64(&shared->transactionUndoRetainLocation, lastUsedLocation);
-			elog(LOG, "set_my_reserved_location() transactionUndoRetainLocation %d, %llu",
-				(int) undoType, (unsigned long long) lastUsedLocation);
 		}
 
 		pg_memory_barrier();
@@ -1042,14 +1038,13 @@ undo_item_buf_read_item(UndoItemBuf *buf,
 		UndoMeta   *undoMeta = get_undo_meta_by_type(undoType);
 		ODBProcData *curProcData = GET_CUR_PROCDATA();
 
-		elog(PANIC, "undoType = %d, location = %llu, transactionUndoRetainLocation = %llu, minProcRetainLocation = %llu, checkpointRetainStartLocation = %llu, checkpointRetainEndLocation = %llu, firstUndoRecord = %llu",
+		elog(PANIC, "undoType = %d, location = %llu, transactionUndoRetainLocation = %llu, minProcRetainLocation = %llu, checkpointRetainStartLocation = %llu, checkpointRetainEndLocation = %llu",
 			 (int) undoType,
 			 (unsigned long long) location,
 			 (unsigned long long) pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation),
 			 (unsigned long long) pg_atomic_read_u64(&undoMeta->minProcRetainLocation),
 			 (unsigned long long) pg_atomic_read_u64(&undoMeta->checkpointRetainStartLocation),
-			 (unsigned long long) pg_atomic_read_u64(&undoMeta->checkpointRetainEndLocation),
-			 (unsigned long long) firstUndoRecords[undoType]);
+			 (unsigned long long) pg_atomic_read_u64(&undoMeta->checkpointRetainEndLocation));
 	}
 
 	ASAN_UNPOISON_MEMORY_REGION(buf->data, buf->length);
@@ -1708,8 +1703,6 @@ get_undo_record(UndoLogType undoType, UndoLocation *undoLocation, Size size)
 		if ((location + size) % circularBufferSize >
 			location % circularBufferSize)
 		{
-			if (!UndoLocationIsValid(firstUndoRecords[undoType]))
-				firstUndoRecords[undoType] = location;
 			*undoLocation = location;
 			return GET_UNDO_REC(undoType, location);
 		}
