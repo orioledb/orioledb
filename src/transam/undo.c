@@ -1702,6 +1702,8 @@ get_undo_record(UndoLogType undoType, UndoLocation *undoLocation, Size size)
 			location % circularBufferSize)
 		{
 			*undoLocation = location;
+			elog(LOG, "get_undo_record() %d, %llu",
+				(int) undoType, (unsigned long long) location);
 			return GET_UNDO_REC(undoType, location);
 		}
 	}

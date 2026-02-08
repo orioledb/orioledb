@@ -99,7 +99,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_regression.diffs
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_${{ matrix.run_number }}_regression.diffs
           path: |
             ./orioledb/test/**/regression.diffs
             ./orioledb/test/**/isolation_filtered.diffs
@@ -112,7 +112,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_testgres.logs
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_${{ matrix.run_number }}_testgres.logs
           path: |
             ./orioledb/test/tmp_check_t/*/logs/*log
           retention-days: 2
@@ -121,18 +121,6 @@ jobs:
       - name: Show stuck processes
         run: bash ./orioledb/ci/list_stuck.sh
         if: ${{ always() }}
-
-      - name: Run lcov
-        if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
-        run: bash ./orioledb/ci/lcov.sh
-      - name: Create artifact for coverage.info
-        if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_coverage.info
-          path: ./orioledb/coverage.info
-          retention-days: 1
-          overwrite: true
 
   finish:
     needs: check
