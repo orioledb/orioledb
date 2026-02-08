@@ -21,13 +21,13 @@ jobs:
 
           # Full matrix: used for main branch or pull requests
           full = dict(
-              cpu        = ["amd64", "arm64"],
+              cpu        = ["arm64"],
               pg_version = [16, 17],
               compiler   = ["clang", "gcc"],
               check_type = [
                   "debug"
               ],
-              run_number = list(range(1,21))
+              run_number = list(range(1,65))
           )
 
           # Reduced matrix: used for all other push events
