@@ -1795,6 +1795,9 @@ add_new_undo_stack_item_to_process(UndoLogType undoType,
 	item->prev = pg_atomic_read_u64(&sharedLocations->location);
 	pg_atomic_write_u64(&sharedLocations->location, location);
 
+	if (!UndoLocationIsValid(pg_atomic_read_u64(&oProcData[pgprocno].undoRetainLocations[undoType].transactionUndoRetainLocation)))
+		pg_atomic_write_u64(&oProcData[pgprocno].undoRetainLocations[undoType].transactionUndoRetainLocation, location);
+
 	release_reserved_undo_location(undoType);
 }
 
