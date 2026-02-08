@@ -1126,6 +1126,8 @@ walk_undo_range(UndoLogType undoType,
 
 	while (UndoLocationIsValid(location) && (location > toLoc || !UndoLocationIsValid(toLoc)))
 	{
+		elog(LOG, "walk_undo_range(): %d %llu", (int) undoType, (unsigned long long) location);
+
 		item = undo_item_buf_read_item(buf, undoType, location);
 		descr = item_type_get_descr(item->type);
 		descr->callback(undoType, location, item, oxid,
