@@ -923,6 +923,11 @@ set_my_reserved_location(UndoLogType undoType)
 
 		if (overwriteTransactionRetainUndoLoc)
 		{
+			/*
+			 * We're going to setup our retain undo location.  Our transaction
+			 * undo chain must be empty at the moment.
+			 */
+			Assert(!UndoLocationIsValid(pg_atomic_read_u64(&GET_CUR_UNDO_STACK_LOCATIONS(undoType)->location)));
 			pg_atomic_write_u64(&shared->transactionUndoRetainLocation, lastUsedLocation);
 		}
 
