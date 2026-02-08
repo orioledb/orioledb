@@ -410,6 +410,7 @@ make_waiter_undo_record(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno,
 	item->tuphdr.formatFlags = key.formatFlags;
 	Assert(!key_palloc);
 
+	lockerState->undoLocation = undoLocation;
 	add_new_undo_stack_item_to_process(desc->undoType, undoLocation, pgprocno,
 									   lockerState->localXid);
 }
