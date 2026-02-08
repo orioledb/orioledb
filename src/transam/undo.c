@@ -924,7 +924,11 @@ set_my_reserved_location(UndoLogType undoType)
 		if (overwriteTransactionRetainUndoLoc)
 			pg_atomic_write_u64(&shared->transactionUndoRetainLocation, lastUsedLocation);
 
+		pg_memory_barrier();
+
 		wait_for_even_min_undo_locations_changecount(meta);
+
+		pg_read_barrier();
 
 		/*
 		 * Retry if minimal positions run higher due to concurrent
@@ -1677,8 +1681,6 @@ get_undo_record(UndoLogType undoType, UndoLocation *undoLocation, Size size)
 	Assert(undoType != UndoLogNone);
 
 	set_my_reserved_location(undoType);
-
-	pg_write_barrier();
 
 	while (true)
 	{
