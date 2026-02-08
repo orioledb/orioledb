@@ -928,7 +928,11 @@ set_my_reserved_location(UndoLogType undoType)
 				(int) undoType, (unsigned long long) lastUsedLocation);
 		}
 
+		pg_memory_barrier();
+
 		wait_for_even_min_undo_locations_changecount(meta);
+
+		pg_read_barrier();
 
 		/*
 		 * Retry if minimal positions run higher due to concurrent
@@ -1676,8 +1680,6 @@ get_undo_record(UndoLogType undoType, UndoLocation *undoLocation, Size size)
 
 	set_my_reserved_location(undoType);
 
-	pg_write_barrier();
-
 	while (true)
 	{
 		UndoLocation location;
@@ -1702,8 +1704,6 @@ get_undo_record(UndoLogType undoType, UndoLocation *undoLocation, Size size)
 			location % circularBufferSize)
 		{
 			*undoLocation = location;
-			elog(LOG, "get_undo_record() %d, %llu",
-				(int) undoType, (unsigned long long) location);
 			return GET_UNDO_REC(undoType, location);
 		}
 	}
