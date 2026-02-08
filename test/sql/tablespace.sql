@@ -58,6 +58,13 @@ SELECT * FROM atable ORDER BY column1;
 COMMIT;
 
 ALTER TABLE atable SET TABLESPACE pg_default;
+SELECT 
+    CASE 
+        WHEN reltablespace = 0 THEN 'pg_default'
+        ELSE 'custom tablespace'
+    END AS tablespace_name
+FROM pg_class
+WHERE relname = 'atable' AND relnamespace = 'tablespace'::regnamespace;
 \d+ atable
 INSERT INTO atable VALUES(4);
 TABLE atable;
@@ -70,6 +77,13 @@ COMMIT;
 BEGIN;
 SELECT orioledb_tbl_indices('atable'::regclass);
 ALTER TABLE atable SET TABLESPACE regress_tblspace;
+SELECT 
+    CASE 
+        WHEN reltablespace = 0 THEN 'pg_default'
+        ELSE 'custom tablespace'
+    END AS tablespace_name
+FROM pg_class
+WHERE relname = 'atable' AND relnamespace = 'tablespace'::regnamespace;
 \d+ atable
 INSERT INTO atable VALUES(5);
 TABLE atable;
@@ -77,10 +91,24 @@ SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
 SELECT * FROM atable ORDER BY column1;
 ROLLBACK;
+SELECT 
+    CASE 
+        WHEN reltablespace = 0 THEN 'pg_default'
+        ELSE 'custom tablespace'
+    END AS tablespace_name
+FROM pg_class
+WHERE relname = 'atable' AND relnamespace = 'tablespace'::regnamespace;
 \d+ atable
 
 BEGIN;
 ALTER TABLE atable SET TABLESPACE regress_tblspace;
+SELECT 
+    CASE 
+        WHEN reltablespace = 0 THEN 'pg_default'
+        ELSE 'custom tablespace'
+    END AS tablespace_name
+FROM pg_class
+WHERE relname = 'atable' AND relnamespace = 'tablespace'::regnamespace;
 \d+ atable
 INSERT INTO atable VALUES(6);
 TABLE atable;
@@ -88,6 +116,13 @@ SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
 SELECT * FROM atable ORDER BY column1;
 COMMIT;
+SELECT 
+    CASE 
+        WHEN reltablespace = 0 THEN 'pg_default'
+        ELSE 'custom tablespace'
+    END AS tablespace_name
+FROM pg_class
+WHERE relname = 'atable' AND relnamespace = 'tablespace'::regnamespace;
 \d+ atable
 
 SELECT orioledb_tbl_indices('atable'::regclass);

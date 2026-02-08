@@ -110,6 +110,7 @@ List	   *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
 Oid			o_saved_relrewrite = InvalidOid;
 Oid			o_saved_reltablespace = InvalidOid;
+static Oid	o_saved_relrewrite_pindex = InvalidOid;
 List	   *o_reuse_indices = NIL;
 static ORelOids saved_oids;
 static bool in_rewrite = false;
@@ -137,6 +138,8 @@ static void redefine_indices(Relation rel, OTable *new_o_table, bool primary, bo
 static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
 static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
 static void o_validate_replica_identity(Relation rel, ReplicaIdentityStmt *stmt);
+
+static void rebuild_o_table_according_to_pindex(Relation rel, ORelOids tbl_oids, Oid ind_oid);
 
 void
 orioledb_setup_ddl_hooks(void)
@@ -296,7 +299,8 @@ is_alter_table_partition(PlannedStmt *pstmt)
 		AlterTableCmd *cmd = linitial(top_atstmt->cmds);
 
 		if (cmd->subtype == AT_AttachPartition ||
-			cmd->subtype == AT_DetachPartition)
+			cmd->subtype == AT_DetachPartition ||
+			cmd->subtype == AT_DetachPartitionFinalize)
 			return true;
 	}
 	return false;
@@ -952,7 +956,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		relid = AlterTableLookupRelation(atstmt, lockmode);
 
 		if (OidIsValid(relid) && objtype == OBJECT_TABLE &&
-			lockmode == AccessExclusiveLock)
+			(lockmode == AccessExclusiveLock || lockmode == ShareUpdateExclusiveLock))
 		{
 			Relation	rel = table_open(relid, lockmode);
 
@@ -996,7 +1000,49 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_SetTableSpace:
 						case AT_SetStorage:
 						case AT_ReplicaIdentity:
+						case AT_AddIndexConstraint:
+						case AT_AddOf:
+						case AT_AlterColumnGenericOptions:
+						case AT_AlterConstraint:
+						case AT_DisableTrig:
+						case AT_DisableTrigAll:
+						case AT_DisableTrigUser:
+						case AT_DropOf:
+						case AT_EnableAlwaysTrig:
+						case AT_EnableReplicaTrig:
+						case AT_EnableTrig:
+						case AT_EnableTrigAll:
+						case AT_EnableTrigUser:
+						case AT_ForceRowSecurity:
+						case AT_NoForceRowSecurity:
+						case AT_ReplaceRelOptions:
+						case AT_ResetOptions:
+						case AT_SetLogged:
+						case AT_SetOptions:
+						case AT_SetStatistics:
+						case AT_SetUnLogged:
+						case AT_ValidateConstraint:
 							break;
+						case AT_DropOids:
+							ereport(WARNING,
+									(errmsg("alter table subcommand \"%s\" has no effect on OrioleDB tables since they do not use OIDs",
+											alter_table_type_to_string(cmd->subtype))));
+							break;
+						case AT_ClusterOn:
+						case AT_DropCluster:
+							ereport(WARNING,
+									(errmsg("alter table subcommand \"%s\" has no performance effect on OrioleDB tables with primary key",
+											alter_table_type_to_string(cmd->subtype))));
+							break;
+						case AT_SetAccessMethod:
+							ereport(ERROR,
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("changing access method is not supported for OrioleDB tables")));
+							break;
+#if PG_VERSION_NUM >= 170000
+						case AT_SetExpression:
+#endif
+						case AT_SetCompression:
 						default:
 							ereport(ERROR,
 									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -2380,7 +2426,7 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 {
 	OSnapshot	oSnapshot;
 	OXid		oxid;
-	OTable	   *old_o_table;
+	OTable	  	*old_o_table;
 	OTableDescr *descr;
 	OTableDescr *old_descr;
 	int			ix_num = InvalidIndexNumber;
@@ -3720,6 +3766,53 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		}
 		ReleaseSysCache(typeTuple);
 	}
+	else if (access == OAT_POST_ALTER && classId == IndexRelationId && OidIsValid(o_saved_relrewrite_pindex)) {
+		/* Branch for CREATE/ALTER table with primary key.
+		 * If existing secondary index is used as a primary -> need to rebuild table, 
+		 * else table already build according to the primary index -> do nothing
+		*/
+		Relation 	rel;
+		ORelOids	tbl_oids;
+
+		/* Make changes in indices visible */
+		CommandCounterIncrement();
+
+		rel = relation_open(o_saved_relrewrite_pindex, ExclusiveLock);
+
+		ORelOidsSetFromRel(tbl_oids, rel);
+
+		/* For ALTER TABLE ... ADD CONSTRAINT PRIMARY KEY... USING INDEX
+		 * Mark index as a primary and place in [0] pos in indices array
+		 */
+		rebuild_o_table_according_to_pindex(rel, tbl_oids, objectId);
+
+		o_saved_relrewrite_pindex = InvalidOid;
+		relation_close(rel, ExclusiveLock);
+	}
+	else if (access == OAT_POST_CREATE && classId == ConstraintRelationId) {
+		HeapTuple   conTuple;
+		Form_pg_constraint conForm;
+
+		/* Make constraint tuple visible for cache lookup*/
+		CommandCounterIncrement();
+		
+		conTuple = SearchSysCache1(CONSTROID, ObjectIdGetDatum(objectId));
+
+		if (!HeapTupleIsValid(conTuple)) /* should not happen */
+			elog(ERROR, "cache lookup failed for constraint %u", objectId);
+		conForm = (Form_pg_constraint) GETSTRUCT(conTuple);
+
+		/* In case of ALTER TABLE ... ADD CONSTRAINT PRIMARY KEY... USING INDEX
+		 * need to save relid for future rebuilding primary index for table
+		 *
+		 * NB. For CREATE TABLE (... PRIMARY KEY) that branch is also reachable,
+		 * so need to take care about it in rebuild_o_table_according_to_pindex()
+		 */
+		if (conForm->contype == CONSTRAINT_PRIMARY)
+			o_saved_relrewrite_pindex = conForm->conrelid;
+
+		ReleaseSysCache(conTuple);
+	}
 	else if (access == OAT_POST_CREATE && classId == DatabaseRelationId)
 	{
 		HeapTuple	dbTuple;
@@ -4089,4 +4182,75 @@ o_ddl_cleanup(void)
 	o_saved_relrewrite = InvalidOid;
 	in_rewrite = false;
 	o_in_add_column = false;
+}
+
+
+static void
+rebuild_o_table_according_to_pindex(Relation rel, ORelOids tbl_oids, Oid ind_oid) {
+	OSnapshot	oSnapshot;
+	OXid		oxid;
+	OTableDescr *descr;
+	OTableDescr *old_descr;
+	OTable 		*old_o_table = o_tables_get(tbl_oids);
+	OTable 		*o_table;
+	int			ix_num = InvalidIndexNumber;
+
+	/* No need to rebuild if table already has primary */
+	if (old_o_table->has_primary) {
+		o_table_free(old_o_table);
+		return;
+	}
+	
+	o_table = o_tables_get(tbl_oids);
+	assign_new_oids(o_table, rel, false);
+	
+	Assert(!o_table->has_primary);
+
+	for (ix_num = 0; ix_num < o_table->nindices; ++ix_num) {
+		if (o_table->indices[ix_num].oids.reloid == ind_oid) {
+			break;
+		}
+	}
+	Assert(ix_num < o_table->nindices);
+
+	o_table->has_primary = true;
+	o_table->primary_init_nfields = o_table->nfields;
+	o_table->indices[ix_num].type = oIndexPrimary;
+
+	/* Place index on primary index position */
+	if (ix_num != 0) {
+		OTableIndex tmp;
+		memcpy(&tmp, &o_table->indices[ix_num], sizeof(OTableIndex));
+		memcpy(&o_table->indices[ix_num], &o_table->indices[0], sizeof(OTableIndex));
+		memcpy(&o_table->indices[0], &tmp, sizeof(OTableIndex));
+	}
+
+	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+
+	o_tables_table_meta_lock(NULL);
+	old_descr = o_fetch_table_descr(old_o_table->oids);
+	recreate_o_table(old_o_table, o_table);
+	descr = o_fetch_table_descr(o_table->oids);
+	o_tablespace_cache_add_table(o_table);
+	rebuild_indices_insert_placeholders(descr);
+	o_tables_table_meta_unlock(NULL, old_o_table->oids.relnode);
+
+	rebuild_indices(old_o_table, old_descr, o_table, descr, false, NULL);
+	o_tables_rel_meta_lock(rel);
+	for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
+	{
+		OTableIndex *index;
+		index = &o_table->indices[ix_num];
+
+		o_indices_update(o_table, ix_num, oxid, oSnapshot.csn);
+		o_invalidate_oids(index->oids);
+		o_add_invalidate_undo_item(index->oids, O_INVALIDATE_OIDS_ON_ABORT);
+	}
+	o_tables_update(o_table, oxid, oSnapshot.csn);
+	o_tables_rel_meta_unlock(rel, old_o_table->oids.relnode);
+	o_invalidate_oids(o_table->oids);
+	o_add_invalidate_undo_item(o_table->oids, O_INVALIDATE_OIDS_ON_ABORT);
+
+	o_table_free(old_o_table);
+	o_table_free(o_table);
 }
