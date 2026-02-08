@@ -281,6 +281,7 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 
 			Assert((state & PAGE_STATE_LIST_TAIL_MASK) != pgprocnum);
 			lockerState->status = OPageWaitInsert;
+			lockerState->undoLocation = InvalidUndoLocation;
 			lockerState->pageChangeCount = *pageChangeCount;
 			Assert(!lockerState->inserted);
 			lockerState->next = (state & PAGE_STATE_LIST_TAIL_MASK);
@@ -496,10 +497,17 @@ lock_page_with_tuple(BTreeDescr *desc,
 
 		if (lockerState->inserted)
 		{
+			UndoLogType undoType = desc->undoType;
+
 			Assert(keySerialized);
 			lockerState->inserted = false;
-			if (desc->undoType != UndoLogNone)
-				giveup_reserved_undo_size(desc->undoType);
+			if (undoType != UndoLogNone)
+			{
+				giveup_reserved_undo_size(undoType);
+				if (UndoLocationIsValid(lockerState->undoLocation) &&
+					!UndoLocationIsValid(curRetainUndoLocations[undoType]))
+					curRetainUndoLocations[undoType] = lockerState->undoLocation;
+			}
 
 			return OLockPageWithTupleResultInserted;
 		}
