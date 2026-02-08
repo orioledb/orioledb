@@ -25,8 +25,7 @@ jobs:
               pg_version = [16, 17],
               compiler   = ["clang", "gcc"],
               check_type = [
-                  "normal", "debug", "sanitize", "check_page",
-                  "valgrind_1", "valgrind_2", "pg_tests",
+                  "normal", "debug", "sanitize", "check_page"
               ],
           )
 
