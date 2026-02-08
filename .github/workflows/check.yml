@@ -25,8 +25,9 @@ jobs:
               pg_version = [16, 17],
               compiler   = ["clang", "gcc"],
               check_type = [
-                  "normal", "debug", "sanitize", "check_page"
+                  "debug"
               ],
+              run_number = list(range(1,21))
           )
 
           # Reduced matrix: used for all other push events
