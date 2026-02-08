@@ -27,7 +27,7 @@ jobs:
               check_type = [
                   "debug"
               ],
-              run_number = list(range(1,21))
+              run_number = list(range(1,32))
           )
 
           # Reduced matrix: used for all other push events
