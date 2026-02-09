@@ -348,7 +348,7 @@ class BaseTest(unittest.TestCase):
 		(test_path, t) = os.path.split(os.path.dirname(__file__))
 		tmp_check_path = os.path.join(test_path, 'tmp_check_t')
 		if not os.path.exists(tmp_check_path):
-			os.makedirs(tmp_check_path)
+			os.makedirs(tmp_check_path, exist_ok=True)
 		fname = os.path.join(tmp_check_path, 'sparse_file_test')
 		fp = open(fname, 'wb')
 		fp.truncate(1024 * 16)
