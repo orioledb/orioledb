@@ -3150,7 +3150,7 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 	}
 
 	if (btree_try_merge_pages(descr, parentBlkno, NULL, &mergeParent,
-							  blkno, loc, rightBlkno, true))
+							  blkno, &loc, rightBlkno, true))
 	{
 		checkpoint_reserve_undo(descr->undoType, true);
 		return true;
