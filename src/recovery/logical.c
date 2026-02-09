@@ -955,6 +955,8 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 
 				if (ctx->r->wal_version >= 17)
 				{
+					snapshot.csn = ev->u.relation.csn;
+					snapshot.cid = ev->u.relation.cid;
 					snapshot.xmin = ev->u.relation.xmin;
 					snapshot.xlogptr = xlogPtr;
 				}
