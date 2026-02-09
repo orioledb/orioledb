@@ -707,7 +707,8 @@ o_btree_modify_insert_update(BTreeModifyInternalContext *context)
 		if (desc->undoType == UndoLogRegular)
 		{
 			leafTuphdr->undoLocation = InvalidUndoLocation;
-			leafTuphdr->undoLocation |= current_command_get_undo_location();
+			if (!is_recovery_process())
+				leafTuphdr->undoLocation |= current_command_get_undo_location();
 		}
 	}
 

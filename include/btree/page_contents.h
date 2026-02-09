@@ -418,6 +418,7 @@ typedef struct
 	uint8		tupleFlags;
 	bool		inserted;
 	Size		reservedUndoSize;
+	UndoLocation undoLocation;
 	uint32		next;
 	union
 	{

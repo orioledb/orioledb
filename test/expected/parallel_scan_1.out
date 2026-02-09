@@ -953,6 +953,71 @@ SELECT * FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);
 (40 rows)
 
 COMMIT;
+BEGIN;
+CREATE TABLE o_test1(i int, t text) USING orioledb;
+CREATE TABLE o_test2(i int, t text) USING orioledb;
+INSERT INTO o_test1 SELECT x, repeat('a', 500) FROM generate_series(1,10) as x;
+INSERT INTO o_test2 SELECT x, repeat('b', 500) FROM generate_series(1,20) as x;
+ALTER TABLE o_test1 SET (parallel_workers = 0);
+ALTER TABLE o_test2 SET (parallel_workers = 1);
+SET LOCAL enable_material = off;
+SET LOCAL parallel_setup_cost = 1.0;
+SET LOCAL min_parallel_table_scan_size =0;
+EXPLAIN (COSTS OFF)
+	SELECT o_test1.i, substring(o_test1.t, 1,2) FROM o_test1
+		LEFT JOIN (SELECT o_test2.i FROM o_test2 ORDER BY 1 LIMIT 5) ss
+		ON o_test1.i < ss.i WHERE o_test1.i < 3;
+WARNING:  Rel parallel workers = 1
+                      QUERY PLAN                      
+------------------------------------------------------
+ Nested Loop Left Join
+   Join Filter: (o_test1.i < o_test2.i)
+   ->  Seq Scan on o_test1
+         Filter: (i < 3)
+   ->  Limit
+         ->  Gather Merge
+               Workers Planned: 1
+               ->  Sort
+                     Sort Key: o_test2.i
+                     ->  Parallel Seq Scan on o_test2
+(10 rows)
+
+SELECT COUNT(*) FROM orioledb_table_pages('o_test2'::regclass::oid);
+ count 
+-------
+     3
+(1 row)
+
+SELECT orioledb_evict_pages('o_test2'::regclass::oid, 1);
+ orioledb_evict_pages 
+----------------------
+ 
+(1 row)
+
+SELECT COUNT(*) FROM orioledb_table_pages('o_test2'::regclass::oid);
+ count 
+-------
+     2
+(1 row)
+
+SELECT o_test1.i, substring(o_test1.t, 1,2) FROM o_test1
+	LEFT JOIN (SELECT o_test2.i FROM o_test2 ORDER BY 1 LIMIT 5) ss
+	ON o_test1.i < ss.i WHERE o_test1.i < 3;
+WARNING:  Rel parallel workers = 1
+ i | substring 
+---+-----------
+ 1 | aa
+ 1 | aa
+ 1 | aa
+ 1 | aa
+ 2 | aa
+ 2 | aa
+ 2 | aa
+(7 rows)
+
+DROP TABLE o_test1;
+DROP TABLE o_test2;
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 19 other objects
 DETAIL:  drop cascades to table seq_scan_test

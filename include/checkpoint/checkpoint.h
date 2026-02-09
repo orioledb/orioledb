@@ -137,6 +137,7 @@ typedef struct
 	OXid		oxid;
 	UndoLogType undoType;
 	UndoStackLocations undoLocation;
+	UndoLocation retainLocation;
 } XidFileRec;
 
 /* Rewind types are shifted by UndoLogsCount compared to respective general undoTypes */
