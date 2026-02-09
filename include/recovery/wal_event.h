@@ -67,9 +67,7 @@ typedef struct WalEvent
 		struct
 		{
 			uint8		treeType;
-			OXid		xmin;
-			CommitSeqNo csn;
-			CommandId	cid;
+			OSnapshot	snapshot;
 			uint32		version;
 			uint32		base_version;
 		}			relation;

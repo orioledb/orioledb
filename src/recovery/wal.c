@@ -236,18 +236,20 @@ wal_parse_relation(WalReader *r, WalEvent *ev)
 
 	if (r->wal_version >= 17)
 	{
-		WR_READ(r, &ev->u.relation.xmin);
-		WR_READ(r, &ev->u.relation.csn);
-		WR_READ(r, &ev->u.relation.cid);
+		OXid		xmin;
+
+		WR_READ(r, &xmin);
+		WR_READ(r, &ev->u.relation.snapshot.csn);
+		WR_READ(r, &ev->u.relation.snapshot.cid);
+
+		ev->u.relation.snapshot.xmin = xmin;
 
 		WR_READ(r, &ev->u.relation.version);
 		WR_READ(r, &ev->u.relation.base_version);
 	}
 	else
 	{
-		ASSIGN(&ev->u.relation.xmin, InvalidOXid);
-		ASSIGN(&ev->u.relation.csn, 0);
-		ASSIGN(&ev->u.relation.cid, InvalidCommandId);
+		ev->u.relation.snapshot = o_non_deleted_snapshot;
 
 		ASSIGN(&ev->u.relation.version, O_TABLE_INVALID_VERSION);
 		ASSIGN(&ev->u.relation.base_version, O_TABLE_INVALID_VERSION);

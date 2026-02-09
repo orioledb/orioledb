@@ -648,18 +648,18 @@ decode_wal_on_flag(void *ctx, const WalEvent *ev)
 
 typedef struct
 {
+	/* Input params */
 	const WalReader *r;
 	XLogRecPtr	xlogRecPtr;
 	XLogRecPtr	xlogRecEndPtr;
-
 	LogicalDecodingContext *dctx;
 	XLogRecordBuffer *dbuf;
 
+	/* Decoder state params */
 	OTableDescr *descr;
 	OIndexDescr *indexDescr;
 	OIndexType	ix_type;
 	int			sys_tree_num;
-
 	TupleDescData *o_toast_tupDesc;
 	TupleDescData *heap_toast_tupDesc;
 } DecodeWalDescCtx;
@@ -950,20 +950,11 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 
 		case WAL_REC_RELATION:
 			{
-				OSnapshot	snapshot;
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + ev->delta;
 
 				if (ctx->r->wal_version >= 17)
 				{
-					snapshot.csn = ev->u.relation.csn;
-					snapshot.cid = ev->u.relation.cid;
-					snapshot.xmin = ev->u.relation.xmin;
-					snapshot.xlogptr = xlogPtr;
-				}
-				else
-				{
-					/* Override undefined values from WAL */
-					snapshot = o_non_deleted_snapshot;
+					ev->u.relation.snapshot.xlogptr = xlogPtr;
 				}
 
 				ctx->ix_type = ev->u.relation.treeType;
@@ -1007,7 +998,7 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 					elog(DEBUG4, "WAL_REC_RELATION oIndexInvalid :: FETCH RELATION [ %u %u %u ] version %u",
 						 ev->oids.datoid, ev->oids.reloid, ev->oids.relnode, ev->u.relation.version);
 
-					ctx->descr = o_fetch_table_descr_extended(ev->oids, build_fetch_context(&snapshot, ev->u.relation.version));
+					ctx->descr = o_fetch_table_descr_extended(ev->oids, build_fetch_context(&ev->u.relation.snapshot, ev->u.relation.version));
 					ctx->indexDescr = ctx->descr ? GET_PRIMARY(ctx->descr) : NULL;
 					if (ctx->descr)
 					{
@@ -1021,8 +1012,8 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 						 ev->u.relation.version, ev->u.relation.base_version);
 
 					ctx->indexDescr = o_fetch_index_descr_extended(ev->oids, ctx->ix_type, false,
-																   build_fetch_context(&snapshot, ev->u.relation.version),
-																   build_fetch_context(&snapshot, ev->u.relation.base_version));
+																   build_fetch_context(&ev->u.relation.snapshot, ev->u.relation.version),
+																   build_fetch_context(&ev->u.relation.snapshot, ev->u.relation.base_version));
 					if (ctx->indexDescr)
 					{
 						elog(DEBUG4, "WAL_REC_RELATION [2] oIndexToast :: FETCH RELATION [ %u %u %u ] version %u",
@@ -1030,7 +1021,7 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 							 ev->u.relation.base_version);
 
 						ctx->descr = o_fetch_table_descr_extended(ctx->indexDescr->tableOids,
-																  build_fetch_context(&snapshot, ev->u.relation.base_version));
+																  build_fetch_context(&ev->u.relation.snapshot, ev->u.relation.base_version));
 						Assert(ctx->descr);
 
 						ctx->o_toast_tupDesc = ctx->descr->toast->leafTupdesc;
