@@ -837,9 +837,9 @@ btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
 
 			ereport(WARNING,
 					(errcode_for_file_access(),
-					 errmsg("fail to punch sparse file hole datoid=%u relnode=%u offset=%llu length=%d (%d %s)",
-							desc->oids.datoid, desc->oids.relnode,
-							(unsigned long long) offset, length, save_errno, strerror(save_errno))));
+					 errmsg("fail to punch sparse file hole datoid=%u relnode=%u segno=%d offset=%llu length=%d (%d %s)",
+							desc->oids.datoid, desc->oids.relnode, segno,
+							(unsigned long long) segoffset, seglength, save_errno, strerror(save_errno))));
 		}
 	}
 }
