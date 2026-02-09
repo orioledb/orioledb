@@ -1516,6 +1516,7 @@ orioledb_parallelscan_initialize_internal(ParallelTableScanDesc pscan)
 	poscan->intPage[0].offset = 0;
 	poscan->intPage[1].offset = 0;
 	poscan->downlinksCount = 0;
+	pg_atomic_write_u64(&poscan->downlinkIndex, 0);
 	poscan->workersReportedCount = 0;
 	poscan->flags = 0;
 	poscan->cur_int_pageno = 0;

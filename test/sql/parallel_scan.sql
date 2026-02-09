@@ -449,6 +449,35 @@ SELECT * FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);
 
 COMMIT;
 
+BEGIN;
+
+CREATE TABLE o_test1(i int, t text) USING orioledb;
+CREATE TABLE o_test2(i int, t text) USING orioledb;
+INSERT INTO o_test1 SELECT x, repeat('a', 500) FROM generate_series(1,10) as x;
+INSERT INTO o_test2 SELECT x, repeat('b', 500) FROM generate_series(1,20) as x;
+ALTER TABLE o_test1 SET (parallel_workers = 0);
+ALTER TABLE o_test2 SET (parallel_workers = 1);
+
+SET LOCAL enable_material = off;
+SET LOCAL parallel_setup_cost = 1.0;
+SET LOCAL min_parallel_table_scan_size =0;
+EXPLAIN (COSTS OFF)
+	SELECT o_test1.i, substring(o_test1.t, 1,2) FROM o_test1
+		LEFT JOIN (SELECT o_test2.i FROM o_test2 ORDER BY 1 LIMIT 5) ss
+		ON o_test1.i < ss.i WHERE o_test1.i < 3;
+
+SELECT COUNT(*) FROM orioledb_table_pages('o_test2'::regclass::oid);
+SELECT orioledb_evict_pages('o_test2'::regclass::oid, 1);
+SELECT COUNT(*) FROM orioledb_table_pages('o_test2'::regclass::oid);
+
+SELECT o_test1.i, substring(o_test1.t, 1,2) FROM o_test1
+	LEFT JOIN (SELECT o_test2.i FROM o_test2 ORDER BY 1 LIMIT 5) ss
+	ON o_test1.i < ss.i WHERE o_test1.i < 3;
+
+DROP TABLE o_test1;
+DROP TABLE o_test2;
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA parallel_scan CASCADE;
 RESET search_path;
