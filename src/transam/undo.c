@@ -1950,7 +1950,7 @@ undo_xact_callback(XactEvent event, void *arg)
 		IsInParallelMode();
 
 	/*
-	 * Cleanup EXPLAY ANALYZE counters pointer to handle case when execution
+	 * Cleanup EXPLAIN ANALYZE counters pointer to handle case when execution
 	 * of node was interrupted by exception.
 	 */
 	ea_counters = NULL;
