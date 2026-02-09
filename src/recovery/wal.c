@@ -23,6 +23,7 @@
 #include "transam/oxid.h"
 
 #include "replication/message.h"
+#include "replication/origin.h"
 #include "storage/proc.h"
 
 static char local_wal_buffer[LOCAL_WAL_BUFFER_SIZE];
@@ -982,6 +983,8 @@ log_logical_wal_container(Pointer ptr, int length, bool withXactTime)
 	uint16		wal_version = ORIOLEDB_WAL_VERSION;
 	uint8		flags = 0;
 	WALRecXactInfo rec;
+	WALRecOriginInfo origin;
+	bool		hasOrigin = replorigin_session_origin != InvalidRepOriginId;
 
 	Assert(ORIOLEDB_WAL_VERSION >= FIRST_ORIOLEDB_WAL_VERSION);
 
@@ -990,6 +993,9 @@ log_logical_wal_container(Pointer ptr, int length, bool withXactTime)
 
 	if (withXactTime)
 		flags |= WAL_CONTAINER_HAS_XACT_INFO;
+
+	if (hasOrigin)
+		flags |= WAL_CONTAINER_HAS_ORIGIN_INFO;
 
 	XLogRegisterData((char *) (&flags), sizeof(flags));
 
@@ -1004,7 +1010,15 @@ log_logical_wal_container(Pointer ptr, int length, bool withXactTime)
 		XLogRegisterData((char *) &rec, sizeof(rec));
 	}
 
-	elog(DEBUG4, "[%s] FLUSH WAL via XLogInsert", __func__);
+	if (hasOrigin)
+	{
+		RepOriginId origin_id = replorigin_session_origin;
+		XLogRecPtr	origin_lsn = replorigin_session_origin_lsn;
+
+		memcpy(origin.origin_id, &origin_id, sizeof(origin_id));
+		memcpy(origin.origin_lsn, &origin_lsn, sizeof(origin_lsn));
+		XLogRegisterData((char *) &origin, sizeof(origin));
+	}
 
 	XLogRegisterData(ptr, length);
 	return XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
@@ -1249,6 +1263,16 @@ wal_parse_rec_modify(Pointer ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, Offs
 		tuple2->tuple.data = tuple2->fixedData;
 	}
 	*length1_out = length1;
+
+	return ptr;
+}
+
+Pointer
+wal_parse_container_origin_info(Pointer ptr, RepOriginId *origin_id, XLogRecPtr *origin_lsn)
+{
+	Assert(ptr);
+	PARSE(ptr, origin_id);
+	PARSE(ptr, origin_lsn);
 
 	return ptr;
 }

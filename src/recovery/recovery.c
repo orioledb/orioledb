@@ -3055,6 +3055,11 @@ replay_container(Pointer startPtr, Pointer endPtr,
 	else
 		recoveryHeapTransactionId = InvalidTransactionId;
 
+	if (wal_flags & WAL_CONTAINER_HAS_ORIGIN_INFO)
+	{
+		ptr = wal_parse_container_origin_info(ptr, NULL, NULL);
+	}
+
 	while (ptr < endPtr)
 	{
 		const char *rec_type_str;

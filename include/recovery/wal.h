@@ -200,13 +200,21 @@ typedef struct
  * WAL_CONTAINER_HAS_* flags.
  */
 
-#define WAL_CONTAINER_HAS_XACT_INFO	(1U << 0)
+#define WAL_CONTAINER_HAS_XACT_INFO		(1U << 0)
+#define WAL_CONTAINER_HAS_ORIGIN_INFO	(1U << 1)
 
 typedef struct
 {
 	uint8		xactTime[sizeof(TimestampTz)];
 	uint8		xid[sizeof(TransactionId)];
 } WALRecXactInfo;
+
+typedef struct
+{
+	uint8		origin_id[sizeof(RepOriginId)];
+	uint8		origin_lsn[sizeof(XLogRecPtr)];
+} WALRecOriginInfo;
+
 
 #define LOCAL_WAL_BUFFER_SIZE	(8192)
 #define ORIOLEDB_WAL_PREFIX	"o_wal"
@@ -288,5 +296,7 @@ extern void set_local_wal_has_material_changes(bool value);
 
 extern Pointer wal_container_read_header(Pointer ptr, uint16 *version,
 										 uint8 *flags);
+extern Pointer wal_parse_container_origin_info(Pointer ptr, RepOriginId *origin_id,
+											   XLogRecPtr *origin_lsn);
 
 #endif							/* __WAL_H__ */

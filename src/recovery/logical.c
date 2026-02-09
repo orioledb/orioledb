@@ -32,6 +32,8 @@
 #include "access/detoast.h"
 #include "tuple/toast.h"
 
+static inline bool FilterByOrigin(LogicalDecodingContext *ctx, RepOriginId origin_id);
+
 /*
  * Copy identity attributes from srcSlot to dstSlot.
  */
@@ -603,6 +605,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	TupleDescData *heap_toast_tupDesc = NULL;
 	uint16		wal_version;
 	uint8		wal_flags;
+	RepOriginId origin_id = InvalidRepOriginId;
+	XLogRecPtr	origin_lsn = InvalidXLogRecPtr;
+	bool		has_origin = false;
 
 	/*
 	 * Per-process cache of "skipped DML" flags for Oriole transactions
@@ -642,7 +647,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	/* do our best to disable streaming */
 	ctx->streaming = false;
 	ptr = wal_container_read_header(ptr, &wal_version, &wal_flags);
-
 	if (wal_version > ORIOLEDB_WAL_VERSION)
 	{
 		/* WAL from future version */
@@ -654,6 +658,12 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	{
 		/* Skip WAL_REC_XACT_INFO */
 		ptr = wal_parse_container_xact_info(ptr, NULL, NULL);
+	}
+
+	if (wal_flags & WAL_CONTAINER_HAS_ORIGIN_INFO)
+	{
+		ptr = wal_parse_container_origin_info(ptr, &origin_id, &origin_lsn);
+		has_origin = origin_id != InvalidRepOriginId;
 	}
 
 	elog(DEBUG4, "OrioleDB decode started startXLogPtr %X/%X endXLogPtr %X/%X", LSN_FORMAT_ARGS(startXLogPtr), LSN_FORMAT_ARGS(endXLogPtr));
@@ -815,11 +825,10 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 						ReorderBufferCommitChild(ctx->reorder, txn->xid, cur_txn->xid,
 												 startXLogPtr, endXLogPtr);
 					}
-					elog(DEBUG4, "COMMIT record type %d (%s) oxid %lu logicalXid %u heapXid %u", rec_type, rec_type_str, oxid, logicalXid, heapXid);
+					elog(DEBUG4, "COMMIT record type %d (%s) oxid %lu logicalXid %u heapXid %u, origin_id %u, origin_lsn %X/%X", rec_type, rec_type_str, oxid, logicalXid, heapXid, origin_id, LSN_FORMAT_ARGS(origin_lsn));
 					ReorderBufferCommit(ctx->reorder, logicalXid,
 										changeXLogPtr, endXLogPtr,
-										0, XLogRecGetOrigin(buf->record),
-										buf->origptr);
+										0, origin_id, origin_lsn);
 				}
 				else
 				{
@@ -1201,6 +1210,13 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 			ReorderBufferProcessXid(ctx->reorder, logicalXid, changeXLogPtr);
 
+			/* If the origin is defined and filtering is enabled, Skip */
+			if (has_origin && FilterByOrigin(ctx, origin_id))
+			{
+				elog(DEBUG4, "IGNORED record type %d (%s) for oxid %lu due to origin filtering (origin_id=%u)", rec_type, rec_type_str, oxid, origin_id);
+				continue;
+			}
+
 			if (SnapBuildCurrentState(ctx->snapshot_builder) < SNAPBUILD_FULL_SNAPSHOT)
 				continue;
 
@@ -1262,4 +1278,13 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 			elog(FATAL, "Unknown WAL record");
 		}
 	}
+}
+
+static inline bool
+FilterByOrigin(LogicalDecodingContext *ctx, RepOriginId origin_id)
+{
+	if (ctx->callbacks.filter_by_origin_cb == NULL)
+		return false;
+
+	return filter_by_origin_cb_wrapper(ctx, origin_id);
 }
