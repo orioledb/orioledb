@@ -2277,11 +2277,12 @@ btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data,
 	bool		is_compressed = OCompressIsValid(desc->compress);
 
 	Assert(desc->storageType == BTreeStorageTemporary ||
-		   desc->storageType == BTreeStoragePersistence);
+		   desc->storageType == BTreeStoragePersistence ||
+		   desc->storageType == BTreeStorageUnlogged);
 
 	/* we must not evict BTree under checkpoint */
 
-	if (desc->storageType == BTreeStoragePersistence)
+	if (desc->storageType == BTreeStoragePersistence || desc->storageType == BTreeStorageUnlogged)
 	{
 		chkp_index = SEQ_BUF_SHARED_EXIST(desc->nextChkp[0].shared) ? 0 : 1;
 
@@ -2313,7 +2314,7 @@ btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data,
 		FREE_PAGE_IF_VALID(desc->ppool, desc->freeBuf.shared->pages[1]);
 	}
 
-	if (desc->storageType == BTreeStoragePersistence)
+	if (desc->storageType == BTreeStoragePersistence || desc->storageType == BTreeStorageUnlogged)
 	{
 		evicted_data->nextChkp.tag = desc->nextChkp[chkp_index].shared->tag;
 		if (notModified)
