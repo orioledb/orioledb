@@ -504,6 +504,7 @@ class ReplicationTest(BaseTest):
 						    "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e', 0);"
 						)[0][0].split('\n')[0] == INDEX_NOT_LOADED:
 							match = True
+							break
 				self.assertTrue(match)
 
 				# wait for synchronization
@@ -529,6 +530,7 @@ class ReplicationTest(BaseTest):
 						    "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e', 0);"
 						)[0][0].split('\n')[0] == INDEX_NOT_LOADED:
 							match = True
+							break
 				self.assertTrue(match)
 
 				self.assertEqual(
