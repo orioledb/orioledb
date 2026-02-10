@@ -47,7 +47,7 @@ typedef struct WalEvent
 	char		relreplident;
 
 	RepOriginId origin_id;
-	XLogRecPtr origin_lsn;
+	XLogRecPtr	origin_lsn;
 
 	union
 	{

@@ -18,6 +18,8 @@
 #include "btree/btree.h"
 #include "btree/page_contents.h"
 
+#include "replication/origin.h"
+
 #include "recovery/wal_container_iter.h"
 #include "recovery/wal_dispatch.h"
 #include "recovery/wal.h"

@@ -651,7 +651,7 @@ typedef struct
 } DecodeWalDescCtx;
 
 static WalParseStatus
-decode_wal_on_flag(void *ctx, const WalEvent *ev)
+decode_wal_on_flag(void *vctx, const WalEvent *ev)
 {
 	DecodeWalDescCtx *ctx = (DecodeWalDescCtx *) vctx;
 
@@ -1204,7 +1204,7 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 				if (ctx->has_origin && FilterByOrigin(ctx->dctx, ev->origin_id))
 				{
 					elog(DEBUG4, "IGNORED record type %d (%s) for oxid %lu due to origin filtering (origin_id=%u)",
-						ev->type, recname, ev->oxid, ev->origin_id);
+						 ev->type, recname, ev->oxid, ev->origin_id);
 					return WALPARSE_OK;
 				}
 
