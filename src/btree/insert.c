@@ -27,6 +27,7 @@
 #include "tuple/format.h"
 #include "utils/page_pool.h"
 #include "utils/stopevent.h"
+#include "catalog/sys_trees.h"
 
 #include "miscadmin.h"
 #include "utils/memutils.h"
@@ -1021,6 +1022,8 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 	}
 }
 
+extern void libunwind_backtrace(void);
+
 static bool
 o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 							   int reserve_kind)
@@ -1056,12 +1059,15 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 								 newItemSize,
 								 insert_item->replace,
 								 pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo));
+	
+	if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+		elog(WARNING, "o_btree_insert_item_no_waiters BEGIN");
 
 	if (fit == BTreeItemPageFitAsIs)
 	{
 		Pointer		ptr;
 
-		START_CRIT_SECTION();
+		// START_CRIT_SECTION();
 		page_block_reads(blkno);
 
 		if (!insert_item->replace)
@@ -1133,15 +1139,19 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 
 		if (!(insert_item->tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
 			header->chunkDesc[loc.chunkOffset].chunkKeysFixed = 0;
-
+		if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+			elog(WARNING, "CALLING page_split_chunk_if_needed");
 		page_split_chunk_if_needed(desc, p, &loc);
 
 		MARK_DIRTY(desc, blkno);
 
+		if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+			elog(WARNING, "CALLING o_btree_insert_mark_split_finished_if_needed");
+
 		o_btree_insert_mark_split_finished_if_needed(insert_item);
 		unlock_page(blkno);
 
-		END_CRIT_SECTION();
+		// END_CRIT_SECTION();
 
 		return true;
 	}
@@ -1226,7 +1236,8 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 	OInMemoryBlkno blkno = OInvalidInMemoryBlkno;
 
 	Assert(insert_item != NULL);
-
+	if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+		elog(WARNING, "o_btree_insert_item BEGIN");
 	/*--
 	 * Guarantees that we never have recursive calls of o_btree_insert_item() such
 	 * as:
@@ -1242,12 +1253,17 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 	 */
 	Assert(!(insert_item->context->flags & BTREE_PAGE_FIND_FIX_LEAF_SPLIT));
 
+	if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+		elog(WARNING, "o_btree_insert_item LOOP BEGIN");
 	while (insert_item != NULL)
 	{
 		OBTreeFindPageContext *curContext = insert_item->context;
 		bool		next = false;
 		int			tupleWaiterProcnums[BTREE_PAGE_MAX_SPLIT_ITEMS];
 		int			tupleWaitersCount;
+		
+		if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+			elog(WARNING, "o_btree_insert_item STEP BEGIN");
 
 		Assert(desc->ppool->numPagesReserved[reserve_kind] >= 2);
 
@@ -1313,6 +1329,8 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 				/* pushes fix split item to the insert context */
 				insert_item = o_btree_insert_stack_push_split_item(insert_item,
 																   blkno);
+				if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+					elog(WARNING, "o_btree_insert_item STEP END 0");
 				continue;
 			}
 			else if (relocked)
@@ -1320,6 +1338,8 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 				/* page is changed, we should refind current tuple */
 				unlock_page(blkno);
 				insert_item->refind = true;
+				if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+					elog(WARNING, "o_btree_insert_item STEP END 1");
 				continue;
 			}
 		}
@@ -1344,21 +1364,35 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 			tupleWaitersCount = 0;
 
 		if (tupleWaitersCount > 0)
+		{
+			if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+				elog(WARNING, "CALLING o_btree_insert_item_with_waiters");
 			next = o_btree_insert_item_with_waiters(insert_item,
 													reserve_kind,
 													tupleWaiterProcnums,
 													tupleWaitersCount);
+		}
 		else
+		{
+			if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+				elog(WARNING, "CALLING o_btree_insert_item_no_waiters");
 			next = o_btree_insert_item_no_waiters(insert_item,
 												  reserve_kind);
+		}
 
 		if (next)
 			insert_item = insert_item->next;
 
 		if (insert_item != NULL)
 			ppool_reserve_pages(desc->ppool, reserve_kind, 2);
+		if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+			elog(WARNING, "o_btree_insert_item STEP END 2");
 	}
+	if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+		elog(WARNING, "o_btree_insert_item LOOP END");
 	ppool_release_reserved(desc->ppool, PPOOL_KIND_GET_MASK(reserve_kind));
+	if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+		elog(WARNING, "o_btree_insert_item END");
 }
 
 void

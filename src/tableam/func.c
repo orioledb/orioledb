@@ -397,32 +397,36 @@ append_bits(StringInfo str, Page p, OffsetNumber *offset,
 	{
 		int			j;
 		int			bit;
-		int			byte_start = *bit_offset % BITS_PER_BYTE;
-		int			byte_end;
+		int			bits[8] = {0};
+		int			cur_bit = 7;
 
 		appendStringInfoSpaces(str, level * 4);
-		if (len > BITS_PER_BYTE)
-			byte_end = BITS_PER_BYTE;
-		else
-			byte_end = len;
 		for (j = 0; j < len; j++)
 		{
-			bit = byte_start + (byte_end - (*bit_offset % BITS_PER_BYTE) - 1);
-			appendStringInfo(str, "%d", (p[*offset] & (1 << bit)) ? 1 : 0);
+			bit = *bit_offset % BITS_PER_BYTE;
+			bits[cur_bit] = (p[*offset] & (1 << bit)) ? 1 : 0;
+
 			(*bit_offset)++;
 			if (*bit_offset % 8 == 0)
-			{
 				(*offset)++;
-				byte_start = 0;
-				if (len - j - 1 > BITS_PER_BYTE)
-					byte_end = BITS_PER_BYTE;
-				else
-					byte_end = len - j - 1;
-			}
-			if ((j + 1) % 8 == 0)
+			if (cur_bit == 0)
 			{
+				while (cur_bit <= 7)
+				{
+					appendStringInfo(str, "%d", bits[cur_bit]);
+					cur_bit++;
+				}
 				appendStringInfo(str, " ");
+				cur_bit = 7;
 			}
+			else
+				cur_bit--;
+		}
+		cur_bit++;
+		while (cur_bit <= 7)
+		{
+			appendStringInfo(str, "%d", bits[cur_bit]);
+			cur_bit++;
 		}
 		appendStringInfo(str, "\n");
 	}
@@ -455,16 +459,99 @@ append_bits(StringInfo str, Page p, OffsetNumber *offset,
 		level--;                                                              \
 	} while (0)
 
+static void
+o_tuple_bin_print(TupleDesc tupDesc, OTupleFixedFormatSpec *spec,
+				  FmgrInfo *outputFns, StringInfo buf, OTuple tup,
+				  Datum *values, bool *nulls, bool printVersion)
+{
+	Form_pg_attribute atti;
+	int			attnum,
+				i;
 
+	appendStringInfo(buf, "(");
+
+	if (printVersion)
+		appendStringInfo(buf, "(%u) ", o_tuple_get_version(tup));
+
+	for (i = 0; i < tupDesc->natts; i++)
+	{
+		if (i > 0)
+			appendStringInfo(buf, ", ");
+		attnum = i + 1;
+		values[i] = o_fastgetattr(tup, attnum, tupDesc, spec, &nulls[i]);
+		if (nulls[i])
+		{
+			appendStringInfo(buf, "null");
+		}
+		else
+		{
+			atti = TupleDescAttr(tupDesc, i);
+			if (!atti->attbyval && atti->attlen && !nulls[i])
+			{
+				Pointer		p = DatumGetPointer(values[i]);
+
+				if (IS_TOAST_POINTER(p))
+				{
+					appendStringInfo(buf, "TOASTed");
+					continue;
+				}
+			}
+			appendStringInfo(buf, "'%s'",
+							 OutputFunctionCall(&outputFns[i], values[i]));
+		}
+	}
+
+	appendStringInfo(buf, ")");
+}
+
+static void
+idx_key_bin_print(BTreeDescr *desc, StringInfo buf, 
+				  OTuple tup, Pointer arg)
+{
+	TuplePrintOpaque *opaque = (TuplePrintOpaque *) arg;
+
+	o_tuple_bin_print(opaque->keyDesc, opaque->keySpec,
+					  opaque->keyOutputFns, buf, tup,
+					  opaque->values, opaque->nulls, false);
+
+}
+
+static void
+idx_tup_bin_print(BTreeDescr *desc, StringInfo buf, 
+				  OTuple tup, Pointer arg)
+{
+	TuplePrintOpaque *opaque = (TuplePrintOpaque *) arg;
+
+	o_tuple_bin_print(opaque->desc, opaque->spec, opaque->outputFns,
+					  buf, tup, opaque->values, opaque->nulls, 
+					  opaque->printRowVersion);
+}
+
+static void
+o_toast_key_bin_print(BTreeDescr *desc, StringInfo buf, 
+				  OTuple tup, Pointer arg)
+{
+}
+
+static void
+o_toast_tup_bin_print(BTreeDescr *desc, StringInfo buf, 
+				  OTuple tup, Pointer arg)
+{
+}
 
 /*
  * Print contents of give B-tree page.  If non-leaf page is given, recursively
  * print childredn.
  */
-static void
+extern void print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno, int *NLRPageNumber, PrintFunc keyBinPrintFunc, PrintFunc tupleBinPrintFunc, Pointer printArg, bool print_bytes, int depthLeft, StringInfo outbuf);
+void
 print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
-						 int *NLRPageNumber, Pointer printArg,
-						 bool print_bytes, int depthLeft, StringInfo outbuf)
+						 int *NLRPageNumber,
+						 PrintFunc keyBinPrintFunc,
+						 PrintFunc tupleBinPrintFunc,
+						 Pointer printArg,
+						 bool print_bytes, int depthLeft,
+						 StringInfo outbuf)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	BTreePageHeader *header = (BTreePageHeader *) p;
@@ -476,7 +563,7 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 				bit_offset;
 	int			level = 0;
 
-	appendStringInfo(outbuf, "Page %u: ", *NLRPageNumber);
+	appendStringInfo(outbuf, "Page %u: %u:", *NLRPageNumber, blkno);
 	offset = 0;
 	appendStringInfo(outbuf, "\n");
 	appendStringInfo(outbuf, "BTreePageHeader(%zu)\n",
@@ -489,10 +576,14 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 	level++;					/* o_header BEGIN */
 
 	APPEND_FIELD("state", pg_atomic_uint64);
-	APPEND_FIELD("usageCount", pg_atomic_uint32);
+	APPEND_FIELD("pageChangeCount", uint32);
 	APPEND_FIELD("checkpointNum", uint32);
 
 	level--;					/* o_header END */
+
+	APPEND_FIELD("undoLocation", UndoLocation);
+	APPEND_FIELD("csn", CommitSeqNo);
+	APPEND_FIELD("rightLink", uint64);
 
 	bit_offset = 0;
 	APPEND_BIT_FIELD("flags", 6);
@@ -500,9 +591,6 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 	APPEND_BIT_FIELD("field2", 15);
 	Assert(bit_offset == sizeof(uint32) * BITS_PER_BYTE);
 
-	APPEND_FIELD("undoLocation", UndoLocation);
-	APPEND_FIELD("csn", CommitSeqNo);
-	APPEND_FIELD("rightLink", uint64);
 	APPEND_FIELD("maxKeyLen", LocationIndex);
 	APPEND_FIELD("prevInsertOffset", OffsetNumber);
 	APPEND_FIELD("chunksCount", OffsetNumber);
@@ -513,7 +601,7 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 	appendStringInfo(outbuf, "dataSize VALUE: %u\n", header->dataSize);
 
 	appendStringInfoSpaces(outbuf, level * 4);
-	appendStringInfo(outbuf, "chunkDesc: ARRAY:\n");
+	appendStringInfo(outbuf, "chunkDesc: ARRAY: %d:\n", header->chunksCount);
 	level++;					/* chunkDesc BEGIN */
 
 	for (i = 0; i < header->chunksCount; i++)
@@ -525,9 +613,29 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 		bit_offset = 0;
 		APPEND_BIT_FIELD("shortLocation", 12);
+		appendStringInfoSpaces(outbuf, level * 4);
+		appendStringInfo(outbuf, "shortLocation VALUE: %u -> %u\n", 
+						 header->chunkDesc[i].shortLocation,
+						 SHORT_GET_LOCATION(header->chunkDesc[i].shortLocation));
+
 		APPEND_BIT_FIELD("offset", 10);
-		APPEND_BIT_FIELD("hikeyShortLocation", 8);
+		appendStringInfoSpaces(outbuf, level * 4);
+		appendStringInfo(outbuf, "offset VALUE: %u\n", 
+					 header->chunkDesc[i].offset);
+
+		APPEND_BIT_FIELD("hikeyShortLocation", 7);
+		appendStringInfoSpaces(outbuf, level * 4);
+		appendStringInfo(outbuf, "hikeyShortLocation VALUE: %u -> %u\n", 
+						 header->chunkDesc[i].hikeyShortLocation,
+						 SHORT_GET_LOCATION(header->chunkDesc[i].hikeyShortLocation));
+		APPEND_BIT_FIELD("chunkKeysFixed", 1);
+		appendStringInfoSpaces(outbuf, level * 4);
+		appendStringInfo(outbuf, "chunkKeysFixed VALUE: %u\n", 
+						 header->chunkDesc[i].chunkKeysFixed);
 		APPEND_BIT_FIELD("hikeyFlags", 2);
+		appendStringInfoSpaces(outbuf, level * 4);
+		appendStringInfo(outbuf, "hikeyFlags VALUE: %u\n", 
+						 header->chunkDesc[i].hikeyFlags);
 		Assert(bit_offset == sizeof(uint32) * BITS_PER_BYTE);
 		level--;				/* chunkDesc[i] END */
 	}
@@ -549,52 +657,43 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 				 sizeof(BTreePageHeader),
 				 level, print_bytes);
 
-	appendStringInfo(outbuf, "CHUNKS: ARRAY:\n");
+	appendStringInfo(outbuf, "CHUNKS: ARRAY: %d:\n", header->chunksCount);
 	level++;					/* CHUNKS BEGIN */
 	for (i = 0; i < header->chunksCount; i++)
 	{
-		OffsetNumber chunkItemsCount;
-		LocationIndex chunkSize;
-		BTreePageChunk *chunk;
+		OffsetNumber chunkOffset = offset;
+		BTreePageChunk *chunk = (BTreePageChunk *) &p[offset];
 		int			align;
 
-		if (i + 1 < header->chunksCount)
-		{
-			chunkItemsCount =
-				header->chunkDesc[i + 1].offset - header->chunkDesc[i].offset;
-			chunkSize =
-				SHORT_GET_LOCATION(header->chunkDesc[i + 1].shortLocation) -
-				SHORT_GET_LOCATION(header->chunkDesc[i].shortLocation);
-		}
-		else
-		{
-			chunkItemsCount = header->itemsCount - header->chunkDesc[i].offset;
-			chunkSize = header->dataSize -
-				SHORT_GET_LOCATION(header->chunkDesc[i].shortLocation);
-		}
-		chunk = (BTreePageChunk *) &p[offset];
+		page_chunk_fill_locator(p, i, &loc);
 
 		appendStringInfoSpaces(outbuf, level * 4);
-		appendStringInfo(outbuf, "[%d]: %d\n", i, chunkSize);
+		appendStringInfo(outbuf, "[%d]: %d\n", i, loc.chunkSize);
 		level++;				/* CHUNKS[i] BEGIN */
 
 		appendStringInfoSpaces(outbuf, level * 4);
-		appendStringInfo(outbuf, "ITEMS: ARRAY:\n");
+		appendStringInfo(outbuf, "ITEMS: ARRAY: %d\n", loc.chunkItemsCount);
 		level++;				/* ITEMS BEGIN */
-		for (j = 0; j < chunkItemsCount; j++)
+		for (j = 0; j < loc.chunkItemsCount; j++)
 		{
+			loc.itemOffset = j;
 			appendStringInfoSpaces(outbuf, level * 4);
 			appendStringInfo(outbuf, "[%d]: LocationIndex(%zu)\n", j,
 							 sizeof(LocationIndex));
 			level++;			/* ITEMS[j] BEGIN */
 			append_bytes(outbuf, p, &offset, sizeof(LocationIndex), level,
 						 print_bytes);
+			appendStringInfoSpaces(outbuf, level * 4);
+			appendStringInfo(outbuf, "VALUE: %u + %u -> %u\n",
+							 loc.chunk->items[j],
+							 chunkOffset,
+							 BTREE_PAGE_GET_ITEM_OFFSET(p, &loc));
 			level--;			/* ITEMS[j] END */
 		}
 		level--;				/* ITEMS END */
 
-		align = MAXALIGN(sizeof(LocationIndex) * chunkItemsCount) -
-			sizeof(LocationIndex) * chunkItemsCount;
+		align = MAXALIGN(sizeof(LocationIndex) * loc.chunkItemsCount) -
+			sizeof(LocationIndex) * loc.chunkItemsCount;
 		if (align > 0)
 		{
 			appendStringInfoSpaces(outbuf, level * 4);
@@ -603,18 +702,23 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 		}
 
 		appendStringInfoSpaces(outbuf, level * 4);
-		appendStringInfo(outbuf, "ITEM DATA: ARRAY\n");
+		appendStringInfo(outbuf, "ITEM DATA: ARRAY: %d\n", loc.chunkItemsCount);
 		level++;				/* ITEM DATA BEGIN */
 
-		for (j = 0; j < chunkItemsCount; j++)
+		page_chunk_fill_locator(p, i, &loc);
+		for (j = 0; j < loc.chunkItemsCount; j++)
 		{
+			loc.itemOffset = j;
 			if (O_PAGE_IS(p, LEAF))
 			{
 				OTuple		tup;
 				OTupleReaderState reader;
 				TuplePrintOpaque *opaque = (TuplePrintOpaque *) printArg;
-				TupleDesc	tupdesc = opaque->keyDesc;
+				TupleDesc	tupdesc = opaque->desc;
+				BTreeLeafTuphdr *pageTuphdr;
+				OTuple		debug_tup __attribute__((unused));
 
+				BTREE_PAGE_READ_LEAF_ITEM(pageTuphdr, debug_tup, p, &loc);
 				appendStringInfoSpaces(outbuf, level * 4);
 				appendStringInfo(outbuf, "[%d]: BTreeLeafTuphdr(%zu)\n", j,
 								 sizeof(BTreeLeafTuphdr));
@@ -622,12 +726,18 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 				bit_offset = 0;
 				APPEND_BIT_FIELD("xactInfo", 61);
+				appendStringInfoSpaces(outbuf, level * 4);
+				appendStringInfo(outbuf, "xactInfo VALUE: %lu\n",
+								 XACT_INFO_GET_OXID(pageTuphdr->xactInfo));
 				APPEND_BIT_FIELD("deleted", 2);
 				APPEND_BIT_FIELD("chainHasLocks", 1);
 				Assert(bit_offset == sizeof(OTupleXactInfo) * BITS_PER_BYTE);
 
 				bit_offset = 0;
 				APPEND_BIT_FIELD("undoLocation", 62);
+				appendStringInfoSpaces(outbuf, level * 4);
+				appendStringInfo(outbuf, "undoLocation VALUE: " UINT64_FORMAT "\n",
+								 (UndoLocation) pageTuphdr->undoLocation);
 				APPEND_BIT_FIELD("formatFlags", 2);
 				Assert(bit_offset == sizeof(UndoLocation) * BITS_PER_BYTE);
 
@@ -635,17 +745,13 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 				tup.formatFlags = ITEM_GET_FLAGS(chunk->items[j]);
 				o_tuple_init_reader(&reader, tup, tupdesc, opaque->keySpec);
 
+				elog(WARNING, "outbuf TEMP: \n%s", outbuf->data);
 				if (!(tup.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
 				{
 					uint16		len = 0;
-					uint32		off;
-					uint32		next_off;
-
-					off = o_tuple_next_field_offset(&reader,
-													TupleDescAttr(tupdesc, 0));
-					next_off =
-						o_tuple_next_field_offset(&reader,
-												  TupleDescAttr(tupdesc, 1));
+					uint32		off = 0;
+					uint32		next_off = 0;
+					OTupleHeader tuphdr = (OTupleHeader) tup.data;
 
 					appendStringInfoSpaces(outbuf, level * 4);
 					appendStringInfo(outbuf,
@@ -667,10 +773,20 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 					appendStringInfoSpaces(outbuf, level * 4);
 					appendStringInfo(outbuf, "Tuple data: %d\n", len);
 					level++;	/* Tuple data BEGIN */
-					for (k = 0; k < opaque->keyDesc->natts; k++)
+
+					off = o_tuple_next_field_offset(&reader,
+													TupleDescAttr(tupdesc, 0));
+					if (tupdesc->natts > 1)
+						next_off =
+							o_tuple_next_field_offset(&reader,
+													  TupleDescAttr(tupdesc, 1));
+					else
+						next_off = tuphdr->len;
+
+					for (k = 0; k < tupdesc->natts; k++)
 					{
 						Form_pg_attribute atti =
-							TupleDescAttr(opaque->keyDesc, k);
+							TupleDescAttr(tupdesc, k);
 
 						appendStringInfoSpaces(outbuf, level * 4);
 						appendStringInfo(outbuf, "%s: %u - %u: %c\n",
@@ -691,7 +807,8 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 						}
 						len += next_off - off;
 						off = next_off;
-						next_off = o_tuple_next_field_offset(&reader, atti);
+						if (k < tupdesc->natts - 1)
+							next_off = o_tuple_next_field_offset(&reader, atti);
 					}
 					level--;	/* Tuple data END */
 					align = MAXALIGN(len) - len;
@@ -704,11 +821,21 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 									 print_bytes);
 					}
 				}
+				else
+				{
+					Assert(false);
+				}
 
 				level--;		/* ITEM DATA[j] END */
 			}
 			else
 			{
+				appendStringInfoSpaces(outbuf, level * 4);
+				appendStringInfo(outbuf, "[%d]: BTreeNonLeafTuphdr(%zu)\n", j,
+								 sizeof(BTreeNonLeafTuphdr));
+				level++;		/* ITEM DATA[j] BEGIN */
+				APPEND_FIELD("downlink", uint64);
+				level--;		/* ITEM DATA[j] END */
 			}
 		}
 		level--;				/* ITEM DATA END */
@@ -731,7 +858,10 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 				downlink = DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink);
 				(*NLRPageNumber)++;
 				print_page_bin_structure(desc, downlink, NLRPageNumber,
-										 printArg, print_bytes, depthLeft - 1,
+										 idx_key_bin_print,
+										 idx_tup_bin_print,
+										 printArg,
+										 print_bytes, depthLeft - 1,
 										 outbuf);
 			}
 		}
@@ -741,11 +871,13 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 	if (OInMemoryBlknoIsValid(blkno))
 	{
 		(*NLRPageNumber)++;
-		print_page_bin_structure(desc, blkno, NLRPageNumber, printArg,
+		print_page_bin_structure(desc, blkno, NLRPageNumber, 
+								 o_toast_key_bin_print,
+								 o_toast_tup_bin_print, 
+								 printArg,
 								 print_bytes, depthLeft, outbuf);
 	}
 }
-
 
 static void
 tree_bin_structure(StringInfo buf, OIndexDescr *id, bool print_bytes,
@@ -781,7 +913,10 @@ tree_bin_structure(StringInfo buf, OIndexDescr *id, bool print_bytes,
 			int			NLRPageNumber = 0;
 
 			print_page_bin_structure(td, td->rootInfo.rootPageBlkno,
-									 &NLRPageNumber, (Pointer) &opaque,
+									 &NLRPageNumber, 
+									 idx_key_bin_print,
+									 idx_tup_bin_print,
+									 (Pointer) &opaque,
 									 print_bytes, depth, buf);
 		}
 	}

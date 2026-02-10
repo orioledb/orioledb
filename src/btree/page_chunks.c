@@ -25,6 +25,7 @@
 #include "tuple/format.h"
 #include "utils/page_pool.h"
 #include "utils/ucm.h"
+#include "catalog/sys_trees.h"
 
 #include "access/transam.h"
 #include "miscadmin.h"
@@ -795,7 +796,7 @@ page_locator_delete_item(Page p, BTreePageItemLocator *locator)
  * Split the given page chunk into two.
  */
 static void
-page_split_chunk(Page p, BTreePageItemLocator *locator,
+page_split_chunk(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 				 LocationIndex hikeysEnd, LocationIndex hikeySize)
 {
 	LocationIndex tmpItems[BTREE_PAGE_MAX_CHUNK_ITEMS],
@@ -818,7 +819,22 @@ page_split_chunk(Page p, BTreePageItemLocator *locator,
 				rightItemsCount;
 	BTreePageHeader *header = (BTreePageHeader *) p;
 
-
+	if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+	{
+		extern Datum orioledb_sys_tree_structure(PG_FUNCTION_ARGS);
+		Datum res;
+		text  *options;
+		uint32 saved_CritSectionCount = CritSectionCount;
+		CritSectionCount = 0;
+		options = cstring_to_text("");
+		res = DirectFunctionCall3(orioledb_sys_tree_structure, 
+		              ObjectIdGetDatum(3),
+		              PointerGetDatum(options),
+		              Int32GetDatum(PAGE_GET_LEVEL(p) == 0 ? 2 : 1));
+		elog(WARNING, "TREE BEFORE CHUNK SPLIT: %s", text_to_cstring(DatumGetTextP(res)));
+    	// libunwind_backtrace();
+		CritSectionCount = saved_CritSectionCount;
+	}
 	Assert(hikeySize == MAXALIGN(hikeySize));
 
 	leftItemsCount = locator->itemOffset;
@@ -904,9 +920,17 @@ page_split_chunk(Page p, BTreePageItemLocator *locator,
 	for (i = 0; i <= locator->chunkOffset; i++)
 		header->chunkDesc[i].hikeyShortLocation += LOCATION_GET_SHORT(chunkDescShift);
 
+	if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+	{
+		OInMemoryBlkno blockNumber = (uint64)(p - o_shared_buffers)/((uint64) ORIOLEDB_BLCKSZ);
+		elog(WARNING, "blockNumber: %u; level: %d", blockNumber, PAGE_GET_LEVEL(p));
+	}
+
 	for (i = header->chunksCount; i > locator->chunkOffset; i--)
 	{
 		header->chunkDesc[i].hikeyShortLocation = header->chunkDesc[i - 1].hikeyShortLocation + LOCATION_GET_SHORT(hikeyShift);
+		if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+			elog(WARNING, "hikeyShortLocation[%d]: %u", i, SHORT_GET_LOCATION(header->chunkDesc[i].hikeyShortLocation));
 		header->chunkDesc[i].hikeyFlags = header->chunkDesc[i - 1].hikeyFlags;
 		header->chunkDesc[i].offset = header->chunkDesc[i - 1].offset;
 		header->chunkDesc[i].chunkKeysFixed = header->chunkDesc[i - 1].chunkKeysFixed;
@@ -916,6 +940,8 @@ page_split_chunk(Page p, BTreePageItemLocator *locator,
 	i = locator->chunkOffset + 1;
 	header->chunkDesc[i].hikeyShortLocation = header->chunkDesc[i - 1].hikeyShortLocation +
 		LOCATION_GET_SHORT(hikeySize);
+	if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+		elog(WARNING, "hikeyShortLocation[%d]: %u", i, SHORT_GET_LOCATION(header->chunkDesc[i].hikeyShortLocation));
 	header->chunkDesc[i].offset = header->chunkDesc[i - 1].offset + leftItemsCount;
 	header->chunkDesc[i].shortLocation = LOCATION_GET_SHORT(rightChunkPtr - (Pointer) p);
 	header->chunkDesc[i].hikeyFlags = header->chunkDesc[i - 1].hikeyFlags;
@@ -932,6 +958,18 @@ page_split_chunk(Page p, BTreePageItemLocator *locator,
 
 #define MAXALIGN_WASTE(s) \
 	((MAXIMUM_ALIGNOF - 1) - ((s) + (MAXIMUM_ALIGNOF - 1)) % (MAXIMUM_ALIGNOF))
+
+static void
+o_index_chunk_key_bin_print(BTreeDescr *desc, StringInfo buf, 
+							OTuple tup, Pointer arg)
+{
+}
+
+static void
+o_index_chunk_tup_bin_print(BTreeDescr *desc, StringInfo buf, 
+							OTuple tup, Pointer arg)
+{
+}
 
 void
 page_split_chunk_if_needed(BTreeDescr *desc, Page p, BTreePageItemLocator *locator)
@@ -1048,8 +1086,24 @@ page_split_chunk_if_needed(BTreeDescr *desc, Page p, BTreePageItemLocator *locat
 	}
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
-
-	page_split_chunk(p, locator, hikeysEnd, bestHiKeySize);
+	if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+	{
+		extern Datum orioledb_sys_tree_structure(PG_FUNCTION_ARGS);
+		Datum res;
+		text  *options;
+		uint32 saved_CritSectionCount = CritSectionCount;
+		elog(WARNING, "CALLING page_split_chunk");
+		CritSectionCount = 0;
+		options = cstring_to_text("");
+		res = DirectFunctionCall3(orioledb_sys_tree_structure, 
+		              ObjectIdGetDatum(3),
+		              PointerGetDatum(options),
+		              Int32GetDatum(1));
+		elog(WARNING, "TREE: %s", text_to_cstring(DatumGetTextP(res)));
+    	// libunwind_backtrace();
+		CritSectionCount = saved_CritSectionCount;
+	}
+	page_split_chunk(desc, p, locator, hikeysEnd, bestHiKeySize);
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
 
@@ -1061,6 +1115,40 @@ page_split_chunk_if_needed(BTreeDescr *desc, Page p, BTreePageItemLocator *locat
 		header->flags &= ~O_BTREE_FLAG_HIKEYS_FIXED;
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
+	if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+	{
+		extern Datum orioledb_sys_tree_structure(PG_FUNCTION_ARGS);
+		extern void print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno, int *NLRPageNumber, PrintFunc keyBinPrintFunc, PrintFunc tupleBinPrintFunc, Pointer printArg, bool print_bytes, int depthLeft, StringInfo outbuf);
+		Datum res;
+		text  *options;
+		uint32 saved_CritSectionCount = CritSectionCount;
+		StringInfo str = makeStringInfo();
+		int			NLRPageNumber = 0;
+
+		CritSectionCount = 0;
+		options = cstring_to_text("");
+		res = DirectFunctionCall3(orioledb_sys_tree_structure, 
+		              ObjectIdGetDatum(3),
+		              PointerGetDatum(options),
+		              Int32GetDatum(PAGE_GET_LEVEL(p) == 0 ? 2 : 1));
+		elog(WARNING, "TREE AFTER CHUNK SPLIT: %s", text_to_cstring(DatumGetTextP(res)));
+
+		print_page_bin_structure(get_sys_tree(3), 
+								 get_sys_tree(3)->rootInfo.rootPageBlkno, 
+								 &NLRPageNumber,
+								 o_index_chunk_key_bin_print,
+								 o_index_chunk_tup_bin_print,
+								 NULL,
+								 true,
+								 1,
+								 str);
+		elog(WARNING, "BINARY TREE AFTER CHUNK SPLIT: %s", str->data);
+		pfree(str->data);
+		pfree(str);
+    	// libunwind_backtrace();
+		CritSectionCount = saved_CritSectionCount;
+
+	}
 }
 
 #ifdef NOT_USED

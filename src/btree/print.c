@@ -93,7 +93,7 @@ static void btree_calculate_min_values(UndoLogType undoType,
 									   BTreePrintData *printData);
 static bool btree_print_csn(CommitSeqNo csn, StringInfo outbuf,
 							BTreePrintData *printData, bool addComma);
-static void btree_print_backend_id(OXid oxid, StringInfo outbuf,
+void btree_print_backend_id(OXid oxid, StringInfo outbuf,
 								   BTreePrintData *printData);
 static uint64 lundo_location(List *list, UndoLocation location);
 static bool btree_print_undo_location(UndoLogType undoType,
@@ -101,11 +101,11 @@ static bool btree_print_undo_location(UndoLogType undoType,
 									  StringInfo outbuf,
 									  BTreePrintData *printData,
 									  bool addComma);
-static bool btree_print_format_flags(int formatFlags, StringInfo outbuf,
+bool btree_print_format_flags(int formatFlags, StringInfo outbuf,
 									 BTreePrintData *printData, bool addComma);
 static void btree_print_page_number(OInMemoryBlkno blkno, StringInfo outbuf,
 									BTreePrintData *printData);
-static void btree_print_orioledb_downlink(uint64 downlink, StringInfo outbuf,
+void btree_print_orioledb_downlink(uint64 downlink, StringInfo outbuf,
 										  BTreePrintData *printData);
 static void btree_print_rightlink(OInMemoryBlkno rightlink, StringInfo outbuf,
 								  BTreePrintData *printData);
@@ -224,18 +224,15 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	appendStringInfo(outbuf, "\n");
 
-	if (printData->options->printStateValue)
-		appendStringInfo(outbuf, "state = " UINT64_FORMAT, pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state)));
-	else
 	{
 		uint64		state = pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state));
-
 		if (O_PAGE_STATE_READ_IS_BLOCKED(state))
 			appendStringInfo(outbuf, "state = modify");
 		else if (O_PAGE_STATE_IS_LOCKED(state))
 			appendStringInfo(outbuf, "state = locked");
 		else
 			appendStringInfo(outbuf, "state = free");
+		appendStringInfo(outbuf, "(" UINT64_FORMAT ")", pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state)));
 	}
 
 	if (printData->options->changeCountPrintType == BTreePrintAbsolute)
@@ -385,7 +382,7 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 						if (XACT_INFO_IS_LOCK_ONLY(tuphdr.xactInfo))
 						{
-							appendStringInfo(outbuf, "lock only, ");
+							appendStringInfo(outbuf, "lock only(%lu), ", XACT_INFO_GET_OXID(tuphdr.xactInfo));
 						}
 						switch (lockMode)
 						{
@@ -405,6 +402,7 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 								elog(ERROR, "Invalid lock mode: %u", lockMode);
 								break;
 						}
+						appendStringInfo(outbuf, "(%lu)", XACT_INFO_GET_OXID(tuphdr.xactInfo));
 						needsComma = true;
 						btree_print_backend_id(XACT_INFO_GET_OXID(tuphdr.xactInfo), outbuf, printData);
 					}
@@ -674,7 +672,7 @@ btree_print_csn(CommitSeqNo csn, StringInfo outbuf, BTreePrintData *printData, b
 /*
  * Print node backend id
  */
-static void
+void
 btree_print_backend_id(OXid oxid, StringInfo outbuf, BTreePrintData *printData)
 {
 #if PG_VERSION_NUM >= 170000
@@ -721,7 +719,7 @@ btree_print_undo_location(UndoLogType undoType, UndoLocation undoLocation,
 	if (printType != BTreeNotPrint && undoType != UndoLogNone)
 	{
 		/* print undo location only if it is valid */
-		if (UndoLocationIsValid(undoLocation) &&
+		if (
 			(((UNDO_REC_EXISTS(undoType, undoLocation) && printType == BTreePrintAbsolute)) ||
 			 ((UNDO_REC_XACT_RETAIN(undoType, undoLocation) && printType == BTreePrintRelative))))
 		{
@@ -745,7 +743,7 @@ btree_print_undo_location(UndoLogType undoType, UndoLocation undoLocation,
 	return false;
 }
 
-static bool
+bool
 btree_print_format_flags(int formatFlags, StringInfo outbuf,
 						 BTreePrintData *printData, bool addComma)
 {
@@ -785,7 +783,7 @@ btree_print_page_number(OInMemoryBlkno blkno, StringInfo outbuf, BTreePrintData 
 /*
  * Print in memory downlink for child node
  */
-static void
+void
 btree_print_orioledb_downlink(uint64 downlink, StringInfo outbuf, BTreePrintData *printData)
 {
 	PageHashEntry *hentry;

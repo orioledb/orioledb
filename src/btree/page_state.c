@@ -1059,7 +1059,7 @@ btree_unregister_inprogress_split(OInMemoryBlkno rightBlkno)
 {
 	int			i;
 
-	Assert(CritSectionCount > 0);
+    // Assert(CritSectionCount > 0);
 	Assert(numberOfMyInProgressSplitPages > 0);
 	for (i = 0; i < numberOfMyInProgressSplitPages; i++)
 	{
@@ -1163,6 +1163,43 @@ btree_split_mark_finished(OInMemoryBlkno rightBlkno, bool use_lock, bool success
 
 extern void log_btree(BTreeDescr *desc);
 
+#define UNW_LOCAL_ONLY
+#include <libunwind.h>
+
+extern void libunwind_backtrace(void);
+void libunwind_backtrace()
+{
+	unw_cursor_t cursor;
+	unw_context_t context;
+    StringInfo str = makeStringInfo();
+
+	// grab the machine context and initialize the cursor
+	if (unw_getcontext(&context) < 0)
+		elog(ERROR, "cannot get local machine state\n");
+	if (unw_init_local(&cursor, &context) < 0)
+		elog(ERROR, "cannot initialize cursor for local unwinding\n");
+
+
+	// currently the IP is within backtrace() itself so this loop
+	// deliberately skips the first frame.
+	while (unw_step(&cursor) > 0) {
+		unw_word_t offset, pc;
+		char sym[4096];
+		if (unw_get_reg(&cursor, UNW_REG_IP, &pc))
+			elog(ERROR, "cannot read program counter\n");
+
+        appendStringInfo(str, "0x%lx: ", pc);
+
+		if (unw_get_proc_name(&cursor, sym, sizeof(sym), &offset) == 0)
+            appendStringInfo(str, "(%s+0x%lx)\n", sym, offset);
+		else
+            appendStringInfo(str, "-- no symbol name found\n");
+	}
+    elog(WARNING, "STACK: %s", str->data);
+    pfree(str->data);
+    pfree(str);
+}
+
 /*
  * Check if page has a consistent structure.
  */
@@ -1176,6 +1213,23 @@ o_check_page_struct(BTreeDescr *desc, Page p)
 	LocationIndex endLocation,
 				chunkSize;
 	OTuple		prevChunkHikey;
+
+	// if (Log_error_verbosity == PGERROR_TERSE && desc->oids.reloid == SYS_TREES_O_INDICES)
+	// {
+	//   extern Datum orioledb_sys_tree_structure(PG_FUNCTION_ARGS);
+	//   Datum res;
+	//   text  *options;
+	//   uint32 saved_CritSectionCount = CritSectionCount;
+	//   CritSectionCount = 0;
+	//   options = cstring_to_text("");
+	//   res = DirectFunctionCall3(orioledb_sys_tree_structure, 
+	//                 ObjectIdGetDatum(3),
+	//                 PointerGetDatum(options),
+	//                 Int32GetDatum(1));
+	//   elog(WARNING, "TREE: %s", text_to_cstring(DatumGetTextP(res)));
+    //   libunwind_backtrace();
+	//   CritSectionCount = saved_CritSectionCount;
+	// }
 
 	Assert(header->dataSize <= ORIOLEDB_BLCKSZ);
 	Assert(header->hikeysEnd <= header->dataSize);
