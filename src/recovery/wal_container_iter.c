@@ -135,6 +135,8 @@ wal_container_iterate(WalReader *r, WalConsumer *consumer, bool allow_logging)
 	memset(&ev, 0, sizeof(ev));
 
 	ev.relreplident = REPLICA_IDENTITY_DEFAULT;
+	ev.origin_id = InvalidRepOriginId;
+	ev.origin_lsn = InvalidXLogRecPtr;
 
 	/*
 	 * Read and validate container header framing.

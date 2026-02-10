@@ -3048,6 +3048,11 @@ replay_wal_on_flag(void *ctx, const WalEvent *ev)
 			 */
 			recoveryHeapTransactionId = ev->u.xact_info.xid;
 			break;
+
+		case WAL_CONTAINER_HAS_ORIGIN_INFO:
+			/* Skip */
+			break;
+
 		default:
 			break;
 	}

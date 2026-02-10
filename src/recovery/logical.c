@@ -34,6 +34,8 @@
 #include "access/detoast.h"
 #include "tuple/toast.h"
 
+static inline bool FilterByOrigin(LogicalDecodingContext *ctx, RepOriginId origin_id);
+
 /*
  * Copy identity attributes from srcSlot to dstSlot.
  */
@@ -629,23 +631,6 @@ decode_wal_check_version(const WalReader *r)
 	return WALPARSE_OK;
 }
 
-static WalParseStatus
-decode_wal_on_flag(void *ctx, const WalEvent *ev)
-{
-	Assert(ev);
-
-	switch (ev->type)
-	{
-		case WAL_CONTAINER_HAS_XACT_INFO:
-			/* Skip WAL_REC_XACT_INFO */
-			break;
-		default:
-			break;
-	}
-
-	return WALPARSE_OK;
-}
-
 typedef struct
 {
 	/* Input params */
@@ -662,7 +647,33 @@ typedef struct
 	int			sys_tree_num;
 	TupleDescData *o_toast_tupDesc;
 	TupleDescData *heap_toast_tupDesc;
+	bool		has_origin;
 } DecodeWalDescCtx;
+
+static WalParseStatus
+decode_wal_on_flag(void *ctx, const WalEvent *ev)
+{
+	DecodeWalDescCtx *ctx = (DecodeWalDescCtx *) vctx;
+
+	Assert(ctx);
+	Assert(ev);
+
+	switch (ev->type)
+	{
+		case WAL_CONTAINER_HAS_XACT_INFO:
+			/* Skip WAL_REC_XACT_INFO */
+			break;
+
+		case WAL_CONTAINER_HAS_ORIGIN_INFO:
+			ctx->has_origin = ev->origin_id != InvalidRepOriginId;
+			break;
+
+		default:
+			break;
+	}
+
+	return WALPARSE_OK;
+}
 
 static WalParseStatus
 decode_wal_on_event(void *vctx, WalEvent *ev)
@@ -825,13 +836,13 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 							ReorderBufferCommitChild(ctx->dctx->reorder, txn->xid, cur_txn->xid,
 													 ctx->xlogRecPtr, ctx->xlogRecEndPtr);
 						}
-						elog(DEBUG4, "COMMIT record type %d (%s) oxid %lu logicalXid %u heapXid %u",
-							 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid);
+						elog(DEBUG4, "COMMIT record type %d (%s) oxid %lu logicalXid %u heapXid %u, origin_id %u, origin_lsn %X/%X",
+							 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid,
+							 ev->origin_id, LSN_FORMAT_ARGS(ev->origin_lsn));
 
 						ReorderBufferCommit(ctx->dctx->reorder, ev->logicalXid,
 											xlogPtr, ctx->xlogRecEndPtr,
-											0, XLogRecGetOrigin(ctx->dbuf->record),
-											ctx->dbuf->origptr);
+											0, ev->origin_id, ev->origin_lsn);
 					}
 					else
 					{
@@ -1189,6 +1200,14 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 
 				ReorderBufferProcessXid(ctx->dctx->reorder, ev->logicalXid, xlogPtr);
 
+				/* If the origin is defined and filtering is enabled, Skip */
+				if (ctx->has_origin && FilterByOrigin(ctx->dctx, ev->origin_id))
+				{
+					elog(DEBUG4, "IGNORED record type %d (%s) for oxid %lu due to origin filtering (origin_id=%u)",
+						ev->type, recname, ev->oxid, ev->origin_id);
+					return WALPARSE_OK;
+				}
+
 				if (SnapBuildCurrentState(ctx->dctx->snapshot_builder) < SNAPBUILD_FULL_SNAPSHOT)
 					return WALPARSE_OK;
 
@@ -1290,7 +1309,9 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		.sys_tree_num = -1,
 
 		.o_toast_tupDesc = NULL,
-		.heap_toast_tupDesc = NULL
+		.heap_toast_tupDesc = NULL,
+
+		.has_origin = false
 	};
 
 	WalConsumer cons = {
@@ -1312,4 +1333,13 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 
 	if (st)
 		elog(FATAL, "[WAL PARSE ERROR %d]", st);
+}
+
+static inline bool
+FilterByOrigin(LogicalDecodingContext *ctx, RepOriginId origin_id)
+{
+	if (ctx->callbacks.filter_by_origin_cb == NULL)
+		return false;
+
+	return filter_by_origin_cb_wrapper(ctx, origin_id);
 }

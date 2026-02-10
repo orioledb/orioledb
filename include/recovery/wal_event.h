@@ -46,6 +46,9 @@ typedef struct WalEvent
 	TransactionId heapXid;
 	char		relreplident;
 
+	RepOriginId origin_id;
+	XLogRecPtr origin_lsn;
+
 	union
 	{
 		struct
@@ -107,6 +110,7 @@ typedef struct WalEvent
 			bool		read_two_tuples;
 		}			modify;
 
+		/* Flags */
 		struct
 		{
 			TimestampTz xactTime;
