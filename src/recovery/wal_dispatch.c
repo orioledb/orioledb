@@ -68,7 +68,7 @@ wal_flag_type_name(wal_type_t type)
 	return d ? d->name : "UNKNOWN";
 }
 
-void
+static void
 build_fixed_tuple_from_tuple_view(const WalTupleView *view, OFixedTuple *tuple)
 {
 	Assert(view);
@@ -80,4 +80,24 @@ build_fixed_tuple_from_tuple_view(const WalTupleView *view, OFixedTuple *tuple)
 	if (view->len != MAXALIGN(view->len))
 		memset(&tuple->fixedData[view->len], 0, MAXALIGN(view->len) - view->len);
 	tuple->tuple.data = tuple->fixedData;
+}
+
+void
+build_fixed_tuples(const WalEvent *ev, OFixedTuple *tuple1, OFixedTuple *tuple2)
+{
+	Assert(ev);
+	Assert(tuple1);
+	Assert(tuple2);
+	Assert(ORIOLE_WAL_RECORD_IS_MODIFY(ev->type));
+
+	if (!ev->u.modify.read_two_tuples)
+	{
+		build_fixed_tuple_from_tuple_view(&ev->u.modify.t1, tuple1);
+		O_TUPLE_SET_NULL(tuple2->tuple);
+	}
+	else
+	{
+		build_fixed_tuple_from_tuple_view(&ev->u.modify.t1, tuple1);
+		build_fixed_tuple_from_tuple_view(&ev->u.modify.t2, tuple2);
+	}
 }

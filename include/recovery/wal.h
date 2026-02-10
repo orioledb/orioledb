@@ -75,6 +75,9 @@
 	X(WAL_REC_SWITCH_LOGICAL_XID,   17, "SWITCH_LOGICAL_XID", wal_parse_switch_logical_xid) \
 	X(WAL_REC_RELREPLIDENT,         18, "RELREPLIDENT",       wal_parse_relreplident)
 
+#define ORIOLE_WAL_RECORD_IS_MODIFY(rec) \
+	(rec == WAL_REC_INSERT || rec == WAL_REC_UPDATE || rec == WAL_REC_DELETE || rec == WAL_REC_REINSERT)
+
 /* Parsers */
 extern WalParseStatus wal_parse_xid(WalReader *r, WalEvent *ev);
 extern WalParseStatus wal_parse_finish(WalReader *r, WalEvent *ev);

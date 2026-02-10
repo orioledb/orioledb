@@ -644,7 +644,6 @@ typedef struct
 	OTableDescr *descr;
 	OIndexDescr *indexDescr;
 	OIndexType	ix_type;
-	int			sys_tree_num;
 	TupleDescData *o_toast_tupDesc;
 	TupleDescData *heap_toast_tupDesc;
 	bool		has_origin;
@@ -961,6 +960,7 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 
 		case WAL_REC_RELATION:
 			{
+				int			sys_tree_num = -1;
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + ev->delta;
 
 				if (ctx->r->wal_version >= 17)
@@ -994,15 +994,15 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 				}
 
 				if (IS_SYS_TREE_OIDS(ev->oids))
-					ctx->sys_tree_num = ev->oids.relnode;
+					sys_tree_num = ev->oids.relnode;
 				else
-					ctx->sys_tree_num = -1;
+					sys_tree_num = -1;
 
-				if (ctx->sys_tree_num > 0)
+				if (sys_tree_num > 0)
 				{
 					ctx->descr = NULL;
 					/* indexDescr = NULL; */
-					Assert(sys_tree_get_storage_type(ctx->sys_tree_num) == BTreeStoragePersistence);
+					Assert(sys_tree_get_storage_type(sys_tree_num) == BTreeStoragePersistence);
 				}
 				else if (ctx->ix_type == oIndexInvalid)
 				{
@@ -1130,6 +1130,7 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 					return WALPARSE_OK;
 
 				txn = get_reorder_buffer_txn(ctx->dctx->reorder, ev->logicalXid);
+
 				if (txn == NULL)
 				{
 					elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u :: unknown transaction, nothing to replay",
@@ -1172,16 +1173,7 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + ev->delta;
 				ReorderBufferTXN *txn = NULL;
 
-				if (!ev->u.modify.read_two_tuples)
-				{
-					build_fixed_tuple_from_tuple_view(&ev->u.modify.t1, &tuple1);
-					O_TUPLE_SET_NULL(tuple2.tuple);
-				}
-				else
-				{
-					build_fixed_tuple_from_tuple_view(&ev->u.modify.t1, &tuple1);
-					build_fixed_tuple_from_tuple_view(&ev->u.modify.t2, &tuple2);
-				}
+				build_fixed_tuples(ev, &tuple1, &tuple2);
 
 				elog(DEBUG4, "RECEIVE record type %d (%s) oids [ %u %u %u ] oxid %lu logicalXId %u heapXid %u",
 					 ev->type, recname,
@@ -1306,7 +1298,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		.descr = NULL,
 		.indexDescr = NULL,
 		.ix_type = oIndexInvalid,
-		.sys_tree_num = -1,
 
 		.o_toast_tupDesc = NULL,
 		.heap_toast_tupDesc = NULL,

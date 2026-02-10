@@ -3302,16 +3302,7 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 
 				Assert(ev->oxid != InvalidOXid);
 
-				if (!ev->u.modify.read_two_tuples)
-				{
-					build_fixed_tuple_from_tuple_view(&ev->u.modify.t1, &tuple1);
-					O_TUPLE_SET_NULL(tuple2.tuple);
-				}
-				else
-				{
-					build_fixed_tuple_from_tuple_view(&ev->u.modify.t1, &tuple1);
-					build_fixed_tuple_from_tuple_view(&ev->u.modify.t2, &tuple2);
-				}
+				build_fixed_tuples(ev, &tuple1, &tuple2);
 
 				if (ctx->sys_tree_num > 0 && ctx->xlogRecPtr >= checkpoint_state->sysTreesStartPtr)
 				{

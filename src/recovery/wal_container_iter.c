@@ -124,6 +124,28 @@ wal_container_flag_check(WalReader *r, WalConsumer *consumer, wal_type_t type)
 	return st;
 }
 
+static WalParseStatus
+wal_container_flags_iterate(WalReader *r, WalConsumer *consumer)
+{
+	WalParseStatus st = WALPARSE_OK;
+
+	Assert(r);
+	Assert(consumer);
+
+#define X(sym, val, name, fn) \
+do { \
+	st = wal_container_flag_check(r, consumer, sym); \
+	if (st) \
+		return st; \
+} while(0);
+
+	ORIOLE_WAL_FLAGS(X)
+
+#undef X
+
+		return st;
+}
+
 WalParseStatus
 wal_container_iterate(WalReader *r, WalConsumer *consumer, bool allow_logging)
 {
@@ -181,7 +203,7 @@ wal_container_iterate(WalReader *r, WalConsumer *consumer, bool allow_logging)
 	 * The flag handling also gives the consumer a chance to capture
 	 * header-wide context (e.g. xact-info) before any records are delivered.
 	 */
-	st = wal_container_flag_check(r, consumer, WAL_CONTAINER_HAS_XACT_INFO);
+	st = wal_container_flags_iterate(r, consumer);
 	if (st)
 		return st;
 

@@ -24,8 +24,6 @@ typedef struct WalTupleView
 
 } WalTupleView;
 
-extern void build_fixed_tuple_from_tuple_view(const WalTupleView *view, OFixedTuple *tuple);
-
 #define WAL_TUPLE_VIEW_SET_NULL(tv) \
 do { \
     tv.data = NULL; \
@@ -120,5 +118,7 @@ typedef struct WalEvent
 	}			u;
 
 } WalEvent;
+
+extern void build_fixed_tuples(const WalEvent *ev, OFixedTuple *tuple1, OFixedTuple *tuple2);
 
 #endif							/* __WAL_EVENT_H__ */
