@@ -1209,7 +1209,7 @@ o_check_page_struct(BTreeDescr *desc, Page p)
 
 			Assert(chunk->shortLocation >= prevChunk->shortLocation);
 			Assert(chunk->offset >= prevChunk->offset);
-			Assert(chunk->hikeyShortLocation > prevChunk->hikeyShortLocation);
+			Assert(O_PAGE_IS(p, RIGHTMOST) || chunk->hikeyShortLocation > prevChunk->hikeyShortLocation);
 			Assert(SHORT_GET_LOCATION(chunk->hikeyShortLocation) <= header->hikeysEnd);
 			Assert(SHORT_GET_LOCATION(chunk->shortLocation) <= header->dataSize);
 			Assert(chunk->offset <= header->itemsCount);
@@ -1270,18 +1270,21 @@ o_check_page_struct(BTreeDescr *desc, Page p)
 				}
 				else
 				{
+#ifdef ORIOLEDB_CUT_FIRST_KEY
 					if (i == 0 && j == 0)
 					{
 						len = BTreeNonLeafTuphdrSize;
+						O_TUPLE_SET_NULL(tuple);
 					}
 					else
+#endif
 					{
 						tuple.data = (Pointer) chunkData + ITEM_GET_OFFSET(chunkData->items[j]) + BTreeNonLeafTuphdrSize;
 						len = BTreeNonLeafTuphdrSize + o_btree_len(desc, tuple, OKeyLength);
 					}
-					if (!O_TUPLE_IS_NULL(chunkHikey))
+					if (!O_TUPLE_IS_NULL(chunkHikey) && !O_TUPLE_IS_NULL(tuple))
 						Assert(o_btree_cmp(desc, &tuple, BTreeKeyNonLeafKey, &chunkHikey, BTreeKeyNonLeafKey) < 0);
-					if (!O_TUPLE_IS_NULL(prevChunkHikey))
+					if (!O_TUPLE_IS_NULL(prevChunkHikey) && !O_TUPLE_IS_NULL(tuple))
 						Assert(o_btree_cmp(desc, &tuple, BTreeKeyNonLeafKey, &prevChunkHikey, BTreeKeyNonLeafKey) >= 0);
 				}
 
