@@ -1161,8 +1161,6 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + ev->delta;
 				ReorderBufferTXN *txn = NULL;
 
-				ReorderBufferProcessXid(ctx->dctx->reorder, ev->logicalXid, xlogPtr);
-
 				if (!ev->u.modify.read_two_tuples)
 				{
 					build_fixed_tuple_from_tuple_view(&ev->u.modify.t1, &tuple1);
