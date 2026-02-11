@@ -36,29 +36,26 @@ typedef enum WalParseResult
 
 } WalParseResult;
 
-static inline size_t
-wr_remaining(const WalReaderState *r)
-{
-	return (size_t) (r->end - r->ptr);
-}
-
-#define WR_REQUIRE(r, nbytes) \
-	do { if (wr_remaining((r)) < (size_t)(nbytes)) return WALPARSE_EOF; } while (0)
+#define WR_REQUIRE_SIZE(r, nbytes) \
+do { \
+	if (((size_t) ((r)->end - (r)->ptr)) < (size_t)(nbytes)) \
+		return WALPARSE_EOF; \
+} while (0)
 
 #define WR_READ(r, out) \
 { \
-	WR_REQUIRE(r, sizeof(*out)); \
+	WR_REQUIRE_SIZE(r, sizeof(*out)); \
 	memcpy(out, r->ptr, sizeof(*out)); \
     r->ptr += sizeof(*out); \
 }
 #define WR_PEEK(r, out) \
 { \
-	WR_REQUIRE(r, sizeof(*out)); \
+	WR_REQUIRE_SIZE(r, sizeof(*out)); \
 	memcpy(out, r->ptr, sizeof(*out)); \
 }
 #define WR_SKIP(r, sz) \
 { \
-	WR_REQUIRE(r, sz); \
+	WR_REQUIRE_SIZE(r, sz); \
     r->ptr += sz; \
 }
 
