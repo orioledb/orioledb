@@ -55,28 +55,31 @@ wr_wal_container_read_header(WalReader *r, bool allow_logging)
 
 	if (wal_version > ORIOLEDB_WAL_VERSION)
 	{
-		if (allow_logging)
-		{
 #ifdef IS_DEV
-			/* Always fail tests on difference */
+		/* Always fail tests on difference */
+		if (allow_logging)
 			elog(FATAL, "Can't apply WAL container version %u that is newer than supported %u. Intentionally fail tests", wal_version, ORIOLEDB_WAL_VERSION);
+
+		return WALPARSE_BAD_VERSION;
 #else
+		if (allow_logging)
 			elog(WARNING, "Can't apply WAL container version %u that is newer than supported %u", wal_version, ORIOLEDB_WAL_VERSION);
-			/* Further fail and output is caller-specific */
+
+		/* Further fail and output is caller-specific */
 #endif
-		}
 	}
 	else if (wal_version < ORIOLEDB_WAL_VERSION)
 	{
-		if (allow_logging)
-		{
 #ifdef IS_DEV
-			/* Always fail tests on difference */
+		/* Always fail tests on difference */
+		if (allow_logging)
 			elog(FATAL, "WAL container version %u is older than current %u. Intentionally fail tests", wal_version, ORIOLEDB_WAL_VERSION);
+
+		return WALPARSE_BAD_VERSION;
 #else
+		if (allow_logging)
 			elog(LOG, "WAL container version %u is older than current %u. Applying with conversion.", wal_version, ORIOLEDB_WAL_VERSION);
 #endif
-		}
 	}
 
 	if (wal_version >= ORIOLEDB_XACT_INFO_WAL_VERSION)
