@@ -42,7 +42,7 @@ do { \
 		return WALPARSE_EOF; \
 } while (0)
 
-#define WR_READ(r, out) \
+#define WR_PARSE(r, out) \
 { \
 	WR_REQUIRE_SIZE(r, sizeof(*out)); \
 	memcpy(out, r->ptr, sizeof(*out)); \

@@ -40,7 +40,7 @@ wr_wal_container_read_header(WalReaderState *r, bool allow_logging)
 		 * Container starts with a valid WAL version. First WAL record is just
 		 * after it.
 		 */
-		WR_READ(r, &wal_version);
+		WR_PARSE(r, &wal_version);
 	}
 	else
 	{
@@ -87,7 +87,7 @@ wr_wal_container_read_header(WalReaderState *r, bool allow_logging)
 		/*
 		 * WAL container flags were added by ORIOLEDB_XACT_INFO_WAL_VERSION.
 		 */
-		WR_READ(r, &wal_flags);
+		WR_PARSE(r, &wal_flags);
 	}
 
 	r->wal_version = wal_version;
@@ -241,7 +241,7 @@ parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging
 		 * Read record tag byte. After this, r->ptr points to payload (if
 		 * any).
 		 */
-		WR_READ(r, &rec_type);
+		WR_PARSE(r, &rec_type);
 		ev.type = rec_type;
 
 		/*
