@@ -2183,8 +2183,9 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			}
 
 			/*
-			 * Build new value for GENERATED column if calculating formula has been updated using
-			 * ALTER TABLE ... SET EXPRESSION ... or if value was not present in existing row
+			 * Build new value for GENERATED column if calculating formula has
+			 * been updated using ALTER TABLE ... SET EXPRESSION ... or if
+			 * value was not present in existing row
 			 */
 			if (!expr && attr->attgenerated && (old_slot->tts_isnull[i] || i == (o_alter_generated_column_id - 1)))
 			{
@@ -3332,10 +3333,12 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					}
 
 					/*
-					 * Alter table on generated column triggers table rewrite due to need of recalculating
-					 * column value for existing rows
+					 * Alter table on generated column triggers table rewrite
+					 * due to need of recalculating column value for existing
+					 * rows
 					 */
-					if (old_field.generated) {
+					if (old_field.generated)
+					{
 						in_rewrite = true;
 						o_alter_generated_column_id = subId;
 					}
