@@ -135,7 +135,7 @@ static void o_find_collation_dependencies(Oid colloid);
 static void redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_tablespace);
 
 static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
-static void o_check_createdb_template(ParseState *pstate, const CreatedbStmt *stmt);
+static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
 static void o_validate_replica_identity(Relation rel, ReplicaIdentityStmt *stmt);
 
 void
@@ -673,6 +673,151 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 	return has_orioledb;
 }
 
+#if PG_VERSION_NUM >= 170000
+/*
+ * create_ctas_internal
+ *
+ * Internal utility used for the creation of the definition of a relation
+ * created via CREATE TABLE AS or a materialized view.  Caller needs to
+ * provide a list of attributes (ColumnDef nodes).
+ */
+static ObjectAddress
+create_ctas_internal(List *attrList, IntoClause *into)
+{
+	CreateStmt *create = makeNode(CreateStmt);
+	bool		is_matview;
+	char		relkind;
+	Datum		toast_options;
+	static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+	ObjectAddress intoRelationAddr;
+
+	/* This code supports both CREATE TABLE AS and CREATE MATERIALIZED VIEW */
+	is_matview = (into->viewQuery != NULL);
+	relkind = is_matview ? RELKIND_MATVIEW : RELKIND_RELATION;
+
+	/*
+	 * Create the target relation by faking up a CREATE TABLE parsetree and
+	 * passing it to DefineRelation.
+	 */
+	create->relation = into->rel;
+	create->tableElts = attrList;
+	create->inhRelations = NIL;
+	create->ofTypename = NULL;
+	create->constraints = NIL;
+	create->options = into->options;
+	create->oncommit = into->onCommit;
+	create->tablespacename = into->tableSpaceName;
+	create->if_not_exists = false;
+	create->accessMethod = into->accessMethod;
+
+	/*
+	 * Create the relation.  (This will error out if there's an existing view,
+	 * so we don't need more code to complain if "replace" is false.)
+	 */
+	intoRelationAddr = DefineRelation(create, relkind, InvalidOid, NULL, NULL);
+
+	/*
+	 * If necessary, create a TOAST table for the target table.  Note that
+	 * NewRelationCreateToastTable ends with CommandCounterIncrement(), so
+	 * that the TOAST table will be visible for insertion.
+	 */
+	CommandCounterIncrement();
+
+	/* parse and validate reloptions for the toast table */
+	toast_options = transformRelOptions((Datum) 0,
+										create->options,
+										"toast",
+										validnsps,
+										true, false);
+
+	(void) heap_reloptions(RELKIND_TOASTVALUE, toast_options, true);
+
+	NewRelationCreateToastTable(intoRelationAddr.objectId, toast_options);
+
+	/* Create the "view" part of a materialized view. */
+	if (is_matview)
+	{
+		/* StoreViewQuery scribbles on tree, so make a copy */
+		Query	   *query = (Query *) copyObject(into->viewQuery);
+
+		StoreViewQuery(intoRelationAddr.objectId, query, false);
+		CommandCounterIncrement();
+	}
+
+	return intoRelationAddr;
+}
+
+/*
+ * create_ctas_nodata
+ *
+ * Create CTAS or materialized view when WITH NO DATA is used, starting from
+ * the targetlist of the SELECT or view definition.
+ */
+static ObjectAddress
+create_ctas_nodata(List *tlist, IntoClause *into)
+{
+	List	   *attrList;
+	ListCell   *t,
+			   *lc;
+
+	/*
+	 * Build list of ColumnDefs from non-junk elements of the tlist.  If a
+	 * column name list was specified in CREATE TABLE AS, override the column
+	 * names in the query.  (Too few column names are OK, too many are not.)
+	 */
+	attrList = NIL;
+	lc = list_head(into->colNames);
+	foreach(t, tlist)
+	{
+		TargetEntry *tle = (TargetEntry *) lfirst(t);
+
+		if (!tle->resjunk)
+		{
+			ColumnDef  *col;
+			char	   *colname;
+
+			if (lc)
+			{
+				colname = strVal(lfirst(lc));
+				lc = lnext(into->colNames, lc);
+			}
+			else
+				colname = tle->resname;
+
+			col = makeColumnDef(colname,
+								exprType((Node *) tle->expr),
+								exprTypmod((Node *) tle->expr),
+								exprCollation((Node *) tle->expr));
+
+			/*
+			 * It's possible that the column is of a collatable type but the
+			 * collation could not be resolved, so double-check.  (We must
+			 * check this here because DefineRelation would adopt the type's
+			 * default collation rather than complaining.)
+			 */
+			if (!OidIsValid(col->collOid) &&
+				type_is_collatable(col->typeName->typeOid))
+				ereport(ERROR,
+						(errcode(ERRCODE_INDETERMINATE_COLLATION),
+						 errmsg("no collation was derived for column \"%s\" with collatable type %s",
+								col->colname,
+								format_type_be(col->typeName->typeOid)),
+						 errhint("Use the COLLATE clause to set the collation explicitly.")));
+
+			attrList = lappend(attrList, col);
+		}
+	}
+
+	if (lc != NULL)
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("too many column names were specified")));
+
+	/* Create the relation definition using the ColumnDef list */
+	return create_ctas_internal(attrList, into);
+}
+#endif
+
 static bool
 ReindexPartitions(Oid relid, bool concurrently)
 {
@@ -739,6 +884,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 {
 	bool		isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
 	ParseState *pstate;
+	bool		call_next = true;
 
 	/* copied from standard_ProcessUtility */
 	if (readOnlyTree)
@@ -1196,13 +1342,27 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				((into->accessMethod && strcmp(into->accessMethod, "orioledb") == 0) ||
 				 (!into->accessMethod && strcmp(default_table_access_method, "orioledb") == 0)))
 			{
+				Query	   *query = castNode(Query, stmt->query);
+				ObjectAddress address;
+
+				Assert(query->commandType == CMD_SELECT);
+
+				address = create_ctas_nodata(query->targetList, into);
+
 				/*
 				 * We cannot just use rel->rd_rules in access hook, because it
 				 * recalculates expression two times if it executes postgreses
 				 * code, even if it skips insertion to table
 				 */
 				savedDataQuery = (Query *) copyObject(into->viewQuery);
-				into->skipData = true;
+				RefreshMatViewByOid(address.objectId, true, false,
+									queryString, NULL, qc);
+				savedDataQuery = NULL;
+
+				if (qc)
+					qc->commandTag = CMDTAG_SELECT;
+
+				call_next = false;
 			}
 		}
 	}
@@ -1277,19 +1437,24 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	{
 		/* no event triggers for global objects */
 		PreventInTransactionBlock(isTopLevel, "CREATE DATABASE");
-		o_check_createdb_template(pstate, (CreatedbStmt *) pstmt->utilityStmt);
+		o_createdb(pstate, (CreatedbStmt *) pstmt->utilityStmt);
+
+		call_next = false;
 	}
 
-	if (next_ProcessUtility_hook)
-		(*next_ProcessUtility_hook) (pstmt, queryString,
-									 readOnlyTree,
-									 context, params, env,
-									 dest, qc);
-	else
-		standard_ProcessUtility(pstmt, queryString,
-								readOnlyTree,
-								context, params, env,
-								dest, qc);
+	if (call_next)
+	{
+		if (next_ProcessUtility_hook)
+			(*next_ProcessUtility_hook) (pstmt, queryString,
+										 readOnlyTree,
+										 context, params, env,
+										 dest, qc);
+		else
+			standard_ProcessUtility(pstmt, queryString,
+									readOnlyTree,
+									context, params, env,
+									dest, qc);
+	}
 
 	if (IsA(pstmt->utilityStmt, ReindexStmt))
 	{
@@ -1299,18 +1464,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			reindex_list = NIL;
 		}
 	}
-#if PG_VERSION_NUM >= 170000
-	else if (IsA(pstmt->utilityStmt, CreateTableAsStmt))
-	{
-		if (savedDataQuery)
-		{
-			CreateTableAsStmt *stmt = (CreateTableAsStmt *) pstmt->utilityStmt;
-			Oid			matviewOid = RangeVarGetRelid(stmt->into->rel, RowExclusiveLock, false);
-
-			RefreshMatViewByOid(matviewOid, true, false, queryString, NULL, qc);
-		}
-	}
-#endif
 	else if (IsA(pstmt->utilityStmt, DropStmt))
 	{
 		if (partition_drop_index_list)
@@ -3812,15 +3965,16 @@ get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP)
 }
 
 /*
- * Raise error if template database contains orioledb objects.
+ * OrioleDB implementation of CREATE DATABASE.
  */
-static void
-o_check_createdb_template(ParseState *pstate, const CreatedbStmt *stmt)
+static Oid
+o_createdb(ParseState *pstate, const CreatedbStmt *stmt)
 {
 	Oid			src_dboid;
 	ListCell   *option;
 	DefElem    *dtemplate = NULL;
 	const char *dbtemplate = NULL;
+	Oid			result;
 
 	/*
 	 * Currently we don't support a template database which has OrioleDB
@@ -3856,6 +4010,21 @@ o_check_createdb_template(ParseState *pstate, const CreatedbStmt *stmt)
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("template database \"%s\" has OrioleDB tables",
 						dbtemplate)));
+
+	/*
+	 * Call standard PostgreSQL createdb().  It will create and copy
+	 * PostgreSQL catalog and user objects.
+	 *
+	 * createdb() will leave source pg_database entry in ShareLock mode and
+	 * therefore no new connections will be allowed until end of transaction.
+	 */
+	result = createdb(pstate, stmt);
+
+	/*
+	 * Now we need to copy OrioleDB objects.
+	 */
+
+	return result;
 }
 
 int16
