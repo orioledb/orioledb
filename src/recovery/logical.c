@@ -617,7 +617,7 @@ remove_skipped_dml(HTAB **cache, uint64 oxid)
 static HTAB *skippedDMLHash = NULL;
 
 static WalParseStatus
-decode_wal_check_version(const WalReader *r)
+decode_wal_check_version(const WalReaderState *r)
 {
 	Assert(r);
 
@@ -634,7 +634,7 @@ decode_wal_check_version(const WalReader *r)
 typedef struct
 {
 	/* Input params */
-	const WalReader *r;
+	const WalReaderState *r;
 	XLogRecPtr	xlogRecPtr;
 	XLogRecPtr	xlogRecEndPtr;
 	LogicalDecodingContext *dctx;
@@ -1279,7 +1279,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	Pointer		startPtr = (Pointer) XLogRecGetData(record);
 	Pointer		endPtr = startPtr + XLogRecGetDataLen(record);
 
-	WalReader	r = {
+	WalReaderState r = {
 		.start = startPtr,
 		.end = endPtr,
 		.ptr = startPtr,

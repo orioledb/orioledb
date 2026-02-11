@@ -26,7 +26,7 @@
 
 /* @TODO rename after migration! */
 static WalParseStatus
-wr_wal_container_read_header(WalReader *r, bool allow_logging)
+wr_wal_container_read_header(WalReaderState *r, bool allow_logging)
 {
 	uint16		wal_version = 0;
 	uint8		wal_flags = 0;
@@ -97,7 +97,7 @@ wr_wal_container_read_header(WalReader *r, bool allow_logging)
 }
 
 static WalParseStatus
-wal_container_flag_check(WalReader *r, WalConsumer *consumer, wal_type_t type)
+wal_container_flag_check(WalReaderState *r, WalConsumer *consumer, wal_type_t type)
 {
 	WalParseStatus st = WALPARSE_OK;
 
@@ -128,7 +128,7 @@ wal_container_flag_check(WalReader *r, WalConsumer *consumer, wal_type_t type)
 }
 
 static WalParseStatus
-wal_container_flags_iterate(WalReader *r, WalConsumer *consumer)
+wal_container_flags_iterate(WalReaderState *r, WalConsumer *consumer)
 {
 	WalParseStatus st = WALPARSE_OK;
 
@@ -150,7 +150,7 @@ do { \
 }
 
 WalParseStatus
-parse_wal_container(WalReader *r, WalConsumer *consumer, bool allow_logging)
+parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging)
 {
 	WalParseStatus st;
 	WalEvent	ev;

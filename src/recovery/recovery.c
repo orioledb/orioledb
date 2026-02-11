@@ -3017,7 +3017,7 @@ invalidate_typcache(void)
 }
 
 static WalParseStatus
-replay_wal_check_version(const WalReader *r)
+replay_wal_check_version(const WalReaderState *r)
 {
 	Assert(r);
 
@@ -3460,7 +3460,7 @@ static bool
 replay_container(Pointer startPtr, Pointer endPtr,
 				 bool single, XLogRecPtr xlogRecPtr, XLogRecPtr xlogRecEndPtr)
 {
-	WalReader	r = {
+	WalReaderState r = {
 		.start = startPtr,
 		.end = endPtr,
 		.ptr = startPtr,

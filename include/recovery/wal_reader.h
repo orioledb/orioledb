@@ -14,7 +14,7 @@
 #ifndef __WAL_READER_H__
 #define __WAL_READER_H__
 
-typedef struct WalReader
+typedef struct WalReaderState
 {
 	Pointer		start;
 	Pointer		end;
@@ -24,7 +24,7 @@ typedef struct WalReader
 	uint16		wal_version;
 	uint8		wal_flags;
 
-} WalReader;
+} WalReaderState;
 
 typedef enum WalParseStatus
 {
@@ -37,7 +37,7 @@ typedef enum WalParseStatus
 } WalParseStatus;
 
 static inline size_t
-wr_remaining(const WalReader *r)
+wr_remaining(const WalReaderState *r)
 {
 	return (size_t) (r->end - r->ptr);
 }

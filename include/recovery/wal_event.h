@@ -22,7 +22,7 @@ typedef unsigned int wal_type_t;
  * A lightweight, non-owning view over tuple data stored inside the WAL buffer.
  *
  * This structure does NOT own the memory it points to. Instead, "data" points
- * directly into the WalReader buffer and remains valid only while that buffer
+ * directly into the WalReaderState buffer and remains valid only while that buffer
  * is alive and unchanged.
  *
  * The parser intentionally avoids copying tuple payload in order to keep WAL

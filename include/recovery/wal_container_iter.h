@@ -17,7 +17,7 @@
 #include "recovery/wal_reader.h"
 #include "recovery/wal_event.h"
 
-typedef WalParseStatus (*WalCheckVersionFn) (const WalReader *r);
+typedef WalParseStatus (*WalCheckVersionFn) (const WalReaderState *r);
 typedef WalParseStatus (*WalOnFlagFn) (void *ctx, const WalEvent *ev);
 typedef WalParseStatus (*WalOnEventFn) (void *ctx, WalEvent *ev);
 
@@ -30,6 +30,6 @@ typedef struct WalConsumer
 
 } WalConsumer;
 
-WalParseStatus parse_wal_container(WalReader *r, WalConsumer *consumer, bool allow_logging);
+WalParseStatus parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging);
 
 #endif							/* __WAL_CONTAINER_ITER_H__ */

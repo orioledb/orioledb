@@ -246,7 +246,7 @@ typedef struct WalDescCtx
 }			WalDescCtx;
 
 static WalParseStatus
-wal_desc_check_version(const WalReader *r)
+wal_desc_check_version(const WalReaderState *r)
 {
 	Assert(r);
 
@@ -326,7 +326,7 @@ orioledb_rm_desc(StringInfo buf, XLogReaderState *record)
 	Pointer		startPtr = (Pointer) XLogRecGetData(record);
 	Pointer		endPtr = startPtr + XLogRecGetDataLen(record);
 
-	WalReader	r = {
+	WalReaderState r = {
 		.start = startPtr,
 		.end = endPtr,
 		.ptr = startPtr,

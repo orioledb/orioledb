@@ -56,18 +56,18 @@
 	(rec == WAL_REC_INSERT || rec == WAL_REC_UPDATE || rec == WAL_REC_DELETE || rec == WAL_REC_REINSERT)
 
 /* Parsers */
-extern WalParseStatus wal_parse_xid(WalReader *r, WalEvent *ev);
-extern WalParseStatus wal_parse_finish(WalReader *r, WalEvent *ev);
-extern WalParseStatus wal_parse_relation(WalReader *r, WalEvent *ev);
-extern WalParseStatus wal_parse_o_tables_meta_unlock(WalReader *r, WalEvent *ev);
-extern WalParseStatus wal_parse_savepoint(WalReader *r, WalEvent *ev);
-extern WalParseStatus wal_parse_rollback_to_savepoint(WalReader *r, WalEvent *ev);
-extern WalParseStatus wal_parse_joint_commit(WalReader *r, WalEvent *ev);
-extern WalParseStatus wal_parse_truncate(WalReader *r, WalEvent *ev);
-extern WalParseStatus wal_parse_bridge_erase(WalReader *r, WalEvent *ev);
-extern WalParseStatus wal_parse_switch_logical_xid(WalReader *r, WalEvent *ev);
-extern WalParseStatus wal_parse_relreplident(WalReader *r, WalEvent *ev);
-extern WalParseStatus wal_parse_modify(WalReader *r, WalEvent *ev);
+extern WalParseStatus wal_parse_xid(WalReaderState *r, WalEvent *ev);
+extern WalParseStatus wal_parse_finish(WalReaderState *r, WalEvent *ev);
+extern WalParseStatus wal_parse_relation(WalReaderState *r, WalEvent *ev);
+extern WalParseStatus wal_parse_o_tables_meta_unlock(WalReaderState *r, WalEvent *ev);
+extern WalParseStatus wal_parse_savepoint(WalReaderState *r, WalEvent *ev);
+extern WalParseStatus wal_parse_rollback_to_savepoint(WalReaderState *r, WalEvent *ev);
+extern WalParseStatus wal_parse_joint_commit(WalReaderState *r, WalEvent *ev);
+extern WalParseStatus wal_parse_truncate(WalReaderState *r, WalEvent *ev);
+extern WalParseStatus wal_parse_bridge_erase(WalReaderState *r, WalEvent *ev);
+extern WalParseStatus wal_parse_switch_logical_xid(WalReaderState *r, WalEvent *ev);
+extern WalParseStatus wal_parse_relreplident(WalReaderState *r, WalEvent *ev);
+extern WalParseStatus wal_parse_modify(WalReaderState *r, WalEvent *ev);
 
 enum OrioleWalRecType
 {
@@ -231,8 +231,8 @@ typedef struct
 	X(WAL_CONTAINER_HAS_ORIGIN_INFO,	(1U << 1), "HAS_ORIGIN",	wal_flag_parse_container_has_origin)
 
 /* Flag Parsers */
-extern WalParseStatus wal_flag_parse_container_xact_info(WalReader *r, WalEvent *ev);
-extern WalParseStatus wal_flag_parse_container_has_origin(WalReader *r, WalEvent *ev);
+extern WalParseStatus wal_flag_parse_container_xact_info(WalReaderState *r, WalEvent *ev);
+extern WalParseStatus wal_flag_parse_container_has_origin(WalReaderState *r, WalEvent *ev);
 
 enum OrioleWalFlagType
 {
