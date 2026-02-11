@@ -26,7 +26,7 @@ typedef struct WalReaderState
 
 } WalReaderState;
 
-typedef enum WalParseStatus
+typedef enum WalParseResult
 {
 	WALPARSE_OK = 0,
 	WALPARSE_EOF,				/* not enough bytes */
@@ -34,7 +34,7 @@ typedef enum WalParseStatus
 	WALPARSE_BAD_VERSION,
 	WALPARSE_INTERNAL
 
-} WalParseStatus;
+} WalParseResult;
 
 static inline size_t
 wr_remaining(const WalReaderState *r)

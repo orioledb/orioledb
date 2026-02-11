@@ -95,7 +95,7 @@ wal_record_type_to_string(int wal_record)
 	return "UNKNOWN";
 }
 
-WalParseStatus
+WalParseResult
 wal_flag_parse_container_xact_info(WalReaderState *r, WalEvent *ev)
 {
 	Assert(r);
@@ -107,7 +107,7 @@ wal_flag_parse_container_xact_info(WalReaderState *r, WalEvent *ev)
 	return WALPARSE_OK;
 }
 
-WalParseStatus
+WalParseResult
 wal_flag_parse_container_has_origin(WalReaderState *r, WalEvent *ev)
 {
 	Assert(r);
@@ -120,7 +120,7 @@ wal_flag_parse_container_has_origin(WalReaderState *r, WalEvent *ev)
 }
 
 /* Parser for WAL_REC_XID */
-WalParseStatus
+WalParseResult
 wal_parse_xid(WalReaderState *r, WalEvent *ev)
 {
 	Assert(r);
@@ -140,7 +140,7 @@ wal_parse_xid(WalReaderState *r, WalEvent *ev)
 }
 
 /* Parser for WAL_REC_COMMIT and WAL_REC_ROLLBACK */
-WalParseStatus
+WalParseResult
 wal_parse_finish(WalReaderState *r, WalEvent *ev)
 {
 	Assert(r);
@@ -153,7 +153,7 @@ wal_parse_finish(WalReaderState *r, WalEvent *ev)
 }
 
 /* Parser for WAL_REC_JOINT_COMMIT */
-WalParseStatus
+WalParseResult
 wal_parse_joint_commit(WalReaderState *r, WalEvent *ev)
 {
 	Assert(r);
@@ -167,7 +167,7 @@ wal_parse_joint_commit(WalReaderState *r, WalEvent *ev)
 }
 
 /* Parser for WAL_REC_RELATION */
-WalParseStatus
+WalParseResult
 wal_parse_relation(WalReaderState *r, WalEvent *ev)
 {
 	Assert(r);
@@ -202,7 +202,7 @@ wal_parse_relation(WalReaderState *r, WalEvent *ev)
 }
 
 /* Parser for WAL_REC_RELREPLIDENT */
-WalParseStatus
+WalParseResult
 wal_parse_relreplident(WalReaderState *r, WalEvent *ev)
 {
 	Assert(r);
@@ -224,7 +224,7 @@ wal_parse_relreplident(WalReaderState *r, WalEvent *ev)
 }
 
 /* Parser for WAL_REC_O_TABLES_META_UNLOCK */
-WalParseStatus
+WalParseResult
 wal_parse_o_tables_meta_unlock(WalReaderState *r, WalEvent *ev)
 {
 	Assert(r);
@@ -239,7 +239,7 @@ wal_parse_o_tables_meta_unlock(WalReaderState *r, WalEvent *ev)
 }
 
 /* Parser for WAL_REC_SAVEPOINT */
-WalParseStatus
+WalParseResult
 wal_parse_savepoint(WalReaderState *r, WalEvent *ev)
 {
 	Assert(r);
@@ -253,7 +253,7 @@ wal_parse_savepoint(WalReaderState *r, WalEvent *ev)
 }
 
 /* Parser for WAL_REC_ROLLBACK_TO_SAVEPOINT */
-WalParseStatus
+WalParseResult
 wal_parse_rollback_to_savepoint(WalReaderState *r, WalEvent *ev)
 {
 	Assert(r);
@@ -274,7 +274,7 @@ wal_parse_rollback_to_savepoint(WalReaderState *r, WalEvent *ev)
 }
 
 /* Parser for WAL_REC_TRUNCATE */
-WalParseStatus
+WalParseResult
 wal_parse_truncate(WalReaderState *r, WalEvent *ev)
 {
 	Assert(r);
@@ -288,7 +288,7 @@ wal_parse_truncate(WalReaderState *r, WalEvent *ev)
 }
 
 /* Parser for WAL_REC_BRIDGE_ERASE */
-WalParseStatus
+WalParseResult
 wal_parse_bridge_erase(WalReaderState *r, WalEvent *ev)
 {
 	Assert(r);
@@ -300,7 +300,7 @@ wal_parse_bridge_erase(WalReaderState *r, WalEvent *ev)
 }
 
 /* Parser for WAL_REC_SWITCH_LOGICAL_XID */
-WalParseStatus
+WalParseResult
 wal_parse_switch_logical_xid(WalReaderState *r, WalEvent *ev)
 {
 	Assert(r);
@@ -1217,7 +1217,7 @@ set_local_wal_has_material_changes(bool value)
  * Read one or two tuples from modify WAL record.
  * Two tuples in certain cases: (1) WAL_REC_REINSERT, (2) WAL_REC_UPDATE with REPLICA_IDENTITY_FULL
  */
-WalParseStatus
+WalParseResult
 wal_parse_modify(WalReaderState *r, WalEvent *ev)
 {
 	Assert(r);

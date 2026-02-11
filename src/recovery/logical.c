@@ -616,7 +616,7 @@ remove_skipped_dml(HTAB **cache, uint64 oxid)
  */
 static HTAB *skippedDMLHash = NULL;
 
-static WalParseStatus
+static WalParseResult
 decode_wal_check_version(const WalReaderState *r)
 {
 	Assert(r);
@@ -649,7 +649,7 @@ typedef struct
 	bool		has_origin;
 } DecodeWalDescCtx;
 
-static WalParseStatus
+static WalParseResult
 decode_wal_on_flag(void *vctx, const WalEvent *ev)
 {
 	DecodeWalDescCtx *ctx = (DecodeWalDescCtx *) vctx;
@@ -674,7 +674,7 @@ decode_wal_on_flag(void *vctx, const WalEvent *ev)
 	return WALPARSE_OK;
 }
 
-static WalParseStatus
+static WalParseResult
 decode_wal_on_event(void *vctx, WalEvent *ev)
 {
 	DecodeWalDescCtx *ctx = (DecodeWalDescCtx *) vctx;
@@ -1312,7 +1312,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		.on_event = decode_wal_on_event
 	};
 
-	WalParseStatus st;
+	WalParseResult st;
 
 	/* do our best to disable streaming */
 	ctx->streaming = false;

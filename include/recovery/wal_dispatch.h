@@ -17,7 +17,7 @@
 #include "recovery/wal_reader.h"
 #include "recovery/wal_event.h"
 
-typedef WalParseStatus (*WalParseFn) (WalReaderState *r, WalEvent *ev);
+typedef WalParseResult (*WalParseFn) (WalReaderState *r, WalEvent *ev);
 
 typedef struct WalRecordDesc
 {

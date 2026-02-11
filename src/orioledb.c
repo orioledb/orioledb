@@ -245,7 +245,7 @@ typedef struct WalDescCtx
 
 }			WalDescCtx;
 
-static WalParseStatus
+static WalParseResult
 wal_desc_check_version(const WalReaderState *r)
 {
 	Assert(r);
@@ -259,7 +259,7 @@ wal_desc_check_version(const WalReaderState *r)
 	return WALPARSE_OK;
 }
 
-static WalParseStatus
+static WalParseResult
 wal_desc_on_event(void *vctx, WalEvent *ev)
 {
 	WalDescCtx *ctx = (WalDescCtx *) vctx;
@@ -342,7 +342,7 @@ orioledb_rm_desc(StringInfo buf, XLogReaderState *record)
 		.on_flag = NULL,
 		.on_event = wal_desc_on_event
 	};
-	WalParseStatus st = parse_wal_container(&r, &cons, false /* allow_logging */ );
+	WalParseResult st = parse_wal_container(&r, &cons, false /* allow_logging */ );
 
 	if (st != WALPARSE_OK)
 		appendStringInfo(buf, " [PARSE ERROR %d]", (int) st);

@@ -25,7 +25,7 @@
 #include "recovery/wal.h"
 
 /* @TODO rename after migration! */
-static WalParseStatus
+static WalParseResult
 wr_wal_container_read_header(WalReaderState *r, bool allow_logging)
 {
 	uint16		wal_version = 0;
@@ -96,10 +96,10 @@ wr_wal_container_read_header(WalReaderState *r, bool allow_logging)
 	return WALPARSE_OK;
 }
 
-static WalParseStatus
+static WalParseResult
 wal_container_flag_check(WalReaderState *r, WalConsumer *consumer, wal_type_t type)
 {
-	WalParseStatus st = WALPARSE_OK;
+	WalParseResult st = WALPARSE_OK;
 
 	Assert(r);
 	Assert(consumer);
@@ -127,10 +127,10 @@ wal_container_flag_check(WalReaderState *r, WalConsumer *consumer, wal_type_t ty
 	return st;
 }
 
-static WalParseStatus
+static WalParseResult
 wal_container_flags_iterate(WalReaderState *r, WalConsumer *consumer)
 {
-	WalParseStatus st = WALPARSE_OK;
+	WalParseResult st = WALPARSE_OK;
 
 	Assert(r);
 	Assert(consumer);
@@ -149,10 +149,10 @@ do { \
 		return st;
 }
 
-WalParseStatus
+WalParseResult
 parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging)
 {
-	WalParseStatus st;
+	WalParseResult st;
 	WalEvent	ev;
 
 	Assert(r);

@@ -3016,7 +3016,7 @@ invalidate_typcache(void)
 	SendSharedInvalidMessages(&msg, 1);
 }
 
-static WalParseStatus
+static WalParseResult
 replay_wal_check_version(const WalReaderState *r)
 {
 	Assert(r);
@@ -3032,7 +3032,7 @@ replay_wal_check_version(const WalReaderState *r)
 	return WALPARSE_OK;
 }
 
-static WalParseStatus
+static WalParseResult
 replay_wal_on_flag(void *ctx, const WalEvent *ev)
 {
 	Assert(ev);
@@ -3074,7 +3074,7 @@ typedef struct
 
 } ReplayWalDescCtx;
 
-static WalParseStatus
+static WalParseResult
 replay_wal_on_event(void *vctx, WalEvent *ev)
 {
 	ReplayWalDescCtx *ctx = (ReplayWalDescCtx *) vctx;
@@ -3484,7 +3484,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		.on_event = replay_wal_on_event
 	};
 
-	WalParseStatus st = parse_wal_container(&r, &cons, true /* allow_logging */ );
+	WalParseResult st = parse_wal_container(&r, &cons, true /* allow_logging */ );
 
 	if (st)
 		return false;
