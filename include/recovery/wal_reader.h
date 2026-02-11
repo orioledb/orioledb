@@ -48,11 +48,7 @@ do { \
 	memcpy(out, r->ptr, sizeof(*out)); \
     r->ptr += sizeof(*out); \
 }
-#define WR_PEEK(r, out) \
-{ \
-	WR_REQUIRE_SIZE(r, sizeof(*out)); \
-	memcpy(out, r->ptr, sizeof(*out)); \
-}
+
 #define WR_SKIP(r, sz) \
 { \
 	WR_REQUIRE_SIZE(r, sz); \

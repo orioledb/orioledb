@@ -32,7 +32,7 @@ wr_wal_container_read_header(WalReaderState *r, bool allow_logging)
 	uint8		wal_flags = 0;
 	uint8		firstByte = 0;
 
-	WR_PEEK(r, &firstByte);
+	firstByte = *(uint8 *) r->ptr;
 
 	if (firstByte >= FIRST_ORIOLEDB_WAL_VERSION)
 	{
