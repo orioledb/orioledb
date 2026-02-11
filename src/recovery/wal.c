@@ -154,37 +154,6 @@ wal_parse_xid(WalReader *r, WalEvent *ev)
 	return WALPARSE_OK;
 }
 
-Pointer
-wal_parse_rec_xid(Pointer ptr, OXid *oxid, TransactionId *logicalXid, TransactionId *heapXid, uint16 wal_version)
-{
-	Assert(ptr);
-
-	PARSE(ptr, oxid);
-	PARSE(ptr, logicalXid);
-	if (wal_version >= 17)
-	{
-		PARSE(ptr, heapXid);
-	}
-	else
-	{
-		ASSIGN(heapXid, InvalidTransactionId);
-	}
-
-	return ptr;
-}
-
-/* Parser for WAL_CONTAINER_XACT_INFO */
-Pointer
-wal_parse_container_xact_info(Pointer ptr, TimestampTz *xactTime, TransactionId *xid)
-{
-	Assert(ptr);
-
-	PARSE(ptr, xactTime);
-	PARSE(ptr, xid);
-
-	return (ptr);
-}
-
 /* Parser for WAL_REC_COMMIT and WAL_REC_ROLLBACK */
 WalParseStatus
 wal_parse_finish(WalReader *r, WalEvent *ev)
@@ -196,17 +165,6 @@ wal_parse_finish(WalReader *r, WalEvent *ev)
 	WR_READ(r, &ev->u.finish.csn);
 
 	return WALPARSE_OK;
-}
-
-Pointer
-wal_parse_rec_finish(Pointer ptr, OXid *xmin, CommitSeqNo *csn)
-{
-	Assert(ptr);
-
-	PARSE(ptr, xmin);
-	PARSE(ptr, csn);
-
-	return ptr;
 }
 
 /* Parser for WAL_REC_JOINT_COMMIT */
@@ -221,18 +179,6 @@ wal_parse_joint_commit(WalReader *r, WalEvent *ev)
 	WR_READ(r, &ev->u.joint_commit.csn);
 
 	return WALPARSE_OK;
-}
-
-Pointer
-wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid *xmin, CommitSeqNo *csn)
-{
-	Assert(ptr);
-
-	PARSE(ptr, xid);
-	PARSE(ptr, xmin);
-	PARSE(ptr, csn);
-
-	return ptr;
 }
 
 /* Parser for WAL_REC_RELATION */
@@ -271,39 +217,6 @@ wal_parse_relation(WalReader *r, WalEvent *ev)
 	return WALPARSE_OK;
 }
 
-Pointer
-wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin, CommitSeqNo *csn, CommandId *cid, uint32 *version, uint32 *base_version, uint16 wal_version)
-{
-	Assert(ptr);
-	Assert(oids);
-
-	PARSE(ptr, treeType);
-	PARSE(ptr, &oids->datoid);
-	PARSE(ptr, &oids->reloid);
-	PARSE(ptr, &oids->relnode);
-
-	if (wal_version >= 17)
-	{
-		PARSE(ptr, xmin);
-		PARSE(ptr, csn);
-		PARSE(ptr, cid);
-
-		PARSE(ptr, version);
-		PARSE(ptr, base_version);
-	}
-	else
-	{
-		ASSIGN(xmin, InvalidOXid);
-		ASSIGN(csn, 0);
-		ASSIGN(cid, InvalidCommandId);
-
-		ASSIGN(version, O_TABLE_INVALID_VERSION);
-		ASSIGN(base_version, O_TABLE_INVALID_VERSION);
-	}
-
-	return ptr;
-}
-
 /* Parser for WAL_REC_RELREPLIDENT */
 WalParseStatus
 wal_parse_relreplident(WalReader *r, WalEvent *ev)
@@ -326,26 +239,6 @@ wal_parse_relreplident(WalReader *r, WalEvent *ev)
 	return WALPARSE_OK;
 }
 
-Pointer
-wal_parse_rec_relreplident(Pointer ptr, char *relreplident, Oid *relreplident_ix_oid)
-{
-	Assert(ptr);
-	Assert(relreplident);
-	/* Should be set only once and only from default */
-	Assert(*relreplident == REPLICA_IDENTITY_DEFAULT);
-
-	PARSE(ptr, relreplident);
-
-	/*
-	 * relreplident_ix_oid is reserved in the WAL_REC_RELREPLIDENT for the
-	 * future implementation of REPLICA IDENTITY USING INDEX and not used now
-	 */
-	PARSE(ptr, relreplident_ix_oid);
-	Assert(*relreplident_ix_oid == InvalidOid);
-
-	return ptr;
-}
-
 /* Parser for WAL_REC_O_TABLES_META_UNLOCK */
 WalParseStatus
 wal_parse_o_tables_meta_unlock(WalReader *r, WalEvent *ev)
@@ -361,20 +254,6 @@ wal_parse_o_tables_meta_unlock(WalReader *r, WalEvent *ev)
 	return WALPARSE_OK;
 }
 
-Pointer
-wal_parse_rec_o_tables_meta_unlock(Pointer ptr, ORelOids *oids, Oid *old_relnode)
-{
-	Assert(ptr);
-	Assert(oids);
-
-	PARSE(ptr, &oids->datoid);
-	PARSE(ptr, &oids->reloid);
-	PARSE(ptr, old_relnode);
-	PARSE(ptr, &oids->relnode);
-
-	return ptr;
-}
-
 /* Parser for WAL_REC_SAVEPOINT */
 WalParseStatus
 wal_parse_savepoint(WalReader *r, WalEvent *ev)
@@ -387,18 +266,6 @@ wal_parse_savepoint(WalReader *r, WalEvent *ev)
 	WR_READ(r, &ev->u.savepoint.parentLogicalXid);
 
 	return WALPARSE_OK;
-}
-
-Pointer
-wal_parse_rec_savepoint(Pointer ptr, SubTransactionId *parentSubid, TransactionId *logicalXid, TransactionId *parentLogicalXid)
-{
-	Assert(ptr);
-
-	PARSE(ptr, parentSubid);
-	PARSE(ptr, logicalXid);
-	PARSE(ptr, parentLogicalXid);
-
-	return ptr;
 }
 
 /* Parser for WAL_REC_ROLLBACK_TO_SAVEPOINT */
@@ -422,26 +289,6 @@ wal_parse_rollback_to_savepoint(WalReader *r, WalEvent *ev)
 	return WALPARSE_OK;
 }
 
-Pointer
-wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid, OXid *xmin, CommitSeqNo *csn, uint16 wal_version)
-{
-	Assert(ptr);
-
-	PARSE(ptr, parentSubid);
-	if (wal_version >= 17)
-	{
-		PARSE(ptr, xmin);
-		PARSE(ptr, csn);
-	}
-	else
-	{
-		ASSIGN(xmin, InvalidOXid);
-		ASSIGN(csn, 0);
-	}
-
-	return ptr;
-}
-
 /* Parser for WAL_REC_TRUNCATE */
 WalParseStatus
 wal_parse_truncate(WalReader *r, WalEvent *ev)
@@ -456,19 +303,6 @@ wal_parse_truncate(WalReader *r, WalEvent *ev)
 	return WALPARSE_OK;
 }
 
-Pointer
-wal_parse_rec_truncate(Pointer ptr, ORelOids *oids)
-{
-	Assert(ptr);
-	Assert(oids);
-
-	PARSE(ptr, &oids->datoid);
-	PARSE(ptr, &oids->reloid);
-	PARSE(ptr, &oids->relnode);
-
-	return ptr;
-}
-
 /* Parser for WAL_REC_BRIDGE_ERASE */
 WalParseStatus
 wal_parse_bridge_erase(WalReader *r, WalEvent *ev)
@@ -479,16 +313,6 @@ wal_parse_bridge_erase(WalReader *r, WalEvent *ev)
 	WR_READ(r, &ev->u.bridge_erase.iptr);
 
 	return WALPARSE_OK;
-}
-
-Pointer
-wal_parse_rec_bridge_erase(Pointer ptr, ItemPointerData *iptr)
-{
-	Assert(ptr);
-
-	PARSE(ptr, iptr);
-
-	return ptr;
 }
 
 /* Parser for WAL_REC_SWITCH_LOGICAL_XID */
@@ -502,17 +326,6 @@ wal_parse_switch_logical_xid(WalReader *r, WalEvent *ev)
 	WR_READ(r, &ev->u.swxid.subXid);
 
 	return WALPARSE_OK;
-}
-
-Pointer
-wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *topXid, TransactionId *subXid)
-{
-	Assert(ptr);
-
-	PARSE(ptr, topXid);
-	PARSE(ptr, subXid);
-
-	return ptr;
 }
 
 Pointer
@@ -1458,60 +1271,6 @@ wal_parse_modify(WalReader *r, WalEvent *ev)
 	}
 
 	return WALPARSE_OK;
-}
-
-Pointer
-wal_parse_rec_modify(Pointer ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1_out, bool read_two_tuples)
-{
-	OffsetNumber length1;
-	OffsetNumber length2;
-
-	if (!read_two_tuples)
-	{
-		PARSE(ptr, &tuple1->tuple.formatFlags);
-		memcpy(&length1, ptr, sizeof(OffsetNumber));
-		ptr += sizeof(OffsetNumber);
-		Assert(length1 > 0);
-
-		Assert(tuple1->fixedData);
-		memcpy(tuple1->fixedData, ptr, length1);
-		if (length1 != MAXALIGN(length1))
-			memset(&tuple1->fixedData[length1], 0, MAXALIGN(length1) - length1);
-
-		ptr += length1;
-		tuple1->tuple.data = tuple1->fixedData;
-		O_TUPLE_SET_NULL(tuple2->tuple);
-	}
-	else
-	{
-		PARSE(ptr, &tuple1->tuple.formatFlags);
-		PARSE(ptr, &tuple2->tuple.formatFlags);
-		memcpy(&length1, ptr, sizeof(OffsetNumber));
-		ptr += sizeof(OffsetNumber);
-		memcpy(&length2, ptr, sizeof(OffsetNumber));
-		ptr += sizeof(OffsetNumber);
-
-		Assert(length1 > 0 && length2 > 0);
-
-		Assert(tuple1->fixedData);
-		memcpy(tuple1->fixedData, ptr, length1);
-		if (length1 != MAXALIGN(length1))
-			memset(&tuple1->fixedData[length1], 0, MAXALIGN(length1) - length1);
-
-		ptr += length1;
-		tuple1->tuple.data = tuple1->fixedData;
-
-		Assert(tuple2->fixedData);
-		memcpy(tuple2->fixedData, ptr, length2);
-		if (length2 != MAXALIGN(length2))
-			memset(&tuple2->fixedData[length2], 0, MAXALIGN(length2) - length2);
-
-		ptr += length2;
-		tuple2->tuple.data = tuple2->fixedData;
-	}
-	*length1_out = length1;
-
-	return ptr;
 }
 
 Pointer

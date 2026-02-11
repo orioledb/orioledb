@@ -16,6 +16,32 @@
 
 typedef unsigned int wal_type_t;
 
+/*
+ * WalTupleView
+ *
+ * A lightweight, non-owning view over tuple data stored inside the WAL buffer.
+ *
+ * This structure does NOT own the memory it points to. Instead, "data" points
+ * directly into the WalReader buffer and remains valid only while that buffer
+ * is alive and unchanged.
+ *
+ * The parser intentionally avoids copying tuple payload in order to keep WAL
+ * iteration zero-copy and cache-friendly. Consumers that need to keep the tuple
+ * beyond the current parsing step MUST copy the data.
+ *
+ * In other words:
+ *
+ *   WalTupleView = borrowed pointer + length + format metadata
+ *
+ * Lifetime rules:
+ *
+ *   - Valid only during the current wal_container_iterate() cycle.
+ *   - Invalid once the reader advances to another WAL chunk or the buffer
+ *     is reused.
+ *
+ * The name "View" is intentional: this is not a materialized tuple but merely
+ * a view into the WAL stream.
+ */
 typedef struct WalTupleView
 {
 	Pointer		data;
