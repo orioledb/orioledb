@@ -127,7 +127,6 @@ WHERE a.attrelid = 'o_test_set_expression'::regclass
 
 -- Use AT_SetExpression to change the generation formula
 -- Change from (price * quantity) to (price * quantity * 1.1) to add 10% markup
--- FIXME: Unsupported in orioledb yet. All further tests don't work yet.
 ALTER TABLE o_test_set_expression
   ALTER COLUMN total SET EXPRESSION AS (price * quantity * 1.1);
 
