@@ -58,10 +58,14 @@ PG_FUNCTION_INFO_V1(orioledb_tree_stat);
 
 extern void log_btree(BTreeDescr *desc);
 
+/* Maximum length for truncated values (when 't' option is used) */
+#define TRUNCATE_VALUE_LEN 40
+
 static void
 o_tuple_print(TupleDesc tupDesc, OTupleFixedFormatSpec *spec,
 			  FmgrInfo *outputFns, StringInfo buf, OTuple tup,
-			  Datum *values, bool *nulls, bool printVersion)
+			  Datum *values, bool *nulls, bool printVersion,
+			  bool truncateValues)
 {
 	Form_pg_attribute atti;
 	int			attnum,
@@ -84,6 +88,8 @@ o_tuple_print(TupleDesc tupDesc, OTupleFixedFormatSpec *spec,
 		}
 		else
 		{
+			char	   *output;
+
 			atti = TupleDescAttr(tupDesc, i);
 			if (!atti->attbyval && atti->attlen && !nulls[i])
 			{
@@ -95,8 +101,11 @@ o_tuple_print(TupleDesc tupDesc, OTupleFixedFormatSpec *spec,
 					continue;
 				}
 			}
-			appendStringInfo(buf, "'%s'",
-							 OutputFunctionCall(&outputFns[i], values[i]));
+			output = OutputFunctionCall(&outputFns[i], values[i]);
+			if (truncateValues && strlen(output) > TRUNCATE_VALUE_LEN)
+				appendStringInfo(buf, "'%.*s'...(truncated)", TRUNCATE_VALUE_LEN, output);
+			else
+				appendStringInfo(buf, "'%s'", output);
 		}
 	}
 
@@ -109,7 +118,8 @@ idx_key_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg)
 	TuplePrintOpaque *opaque = (TuplePrintOpaque *) arg;
 
 	o_tuple_print(opaque->keyDesc, opaque->keySpec, opaque->keyOutputFns, buf,
-				  tup, opaque->values, opaque->nulls, false);
+				  tup, opaque->values, opaque->nulls, false,
+				  opaque->truncateValues);
 }
 
 static void
@@ -118,7 +128,8 @@ idx_tup_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg)
 	TuplePrintOpaque *opaque = (TuplePrintOpaque *) arg;
 
 	o_tuple_print(opaque->desc, opaque->spec, opaque->outputFns, buf,
-				  tup, opaque->values, opaque->nulls, opaque->printRowVersion);
+				  tup, opaque->values, opaque->nulls, opaque->printRowVersion,
+				  opaque->truncateValues);
 }
 
 void
@@ -177,6 +188,9 @@ init_print_options(BTreePrintOptions *printOptions, VarChar *optionsArg)
 				break;
 			case 'F':
 				printOptions->printFixedFlags = true;
+				break;
+			case 't':
+				printOptions->truncateValues = true;
 				break;
 			default:
 				ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -269,6 +283,7 @@ tree_structure(StringInfo buf,
 	opaque.outputFns = (FmgrInfo *) palloc(sizeof(FmgrInfo) * opaque.desc->natts);
 	opaque.keyOutputFns = (FmgrInfo *) palloc(sizeof(FmgrInfo) * opaque.keyDesc->natts);
 	opaque.printRowVersion = printOptions.printRowVersion;
+	opaque.truncateValues = printOptions.truncateValues;
 
 	for (i = 0; i < opaque.desc->natts; i++)
 	{
@@ -910,6 +925,7 @@ log_btree(BTreeDescr *desc)
 		opaque.outputFns = (FmgrInfo *) palloc(sizeof(FmgrInfo) * opaque.desc->natts);
 		opaque.keyOutputFns = (FmgrInfo *) palloc(sizeof(FmgrInfo) * opaque.keyDesc->natts);
 		opaque.printRowVersion = printOptions.printRowVersion;
+		opaque.truncateValues = printOptions.truncateValues;
 		for (i = 0; i < opaque.desc->natts; i++)
 		{
 			Oid			output = InvalidOid;
