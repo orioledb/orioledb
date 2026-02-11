@@ -263,6 +263,7 @@ typedef struct
 	OTupleFixedFormatSpec *keySpec;
 	FmgrInfo   *keyOutputFns;
 	bool		printRowVersion;
+	bool		truncateValues;
 } TuplePrintOpaque;
 
 #define O_INVALIDATE_OIDS_ON_COMMIT	1
