@@ -95,21 +95,6 @@ wal_record_type_to_string(int wal_record)
 	return "UNKNOWN";
 }
 
-#define PARSE(ptr, valptr) \
-do \
-{ \
-	if (valptr) \
-	{ \
-		memcpy(valptr, ptr, sizeof(*(valptr))); \
-	} \
-	ptr += sizeof(*(valptr)); \
-} while(0)
-
-#define ASSIGN(ptr, value) \
-do { \
-	if (ptr) *ptr = value; \
-} while(0)
-
 WalParseStatus
 wal_flag_parse_container_xact_info(WalReader *r, WalEvent *ev)
 {
@@ -209,9 +194,8 @@ wal_parse_relation(WalReader *r, WalEvent *ev)
 	else
 	{
 		ev->u.relation.snapshot = o_non_deleted_snapshot;
-
-		ASSIGN(&ev->u.relation.version, O_TABLE_INVALID_VERSION);
-		ASSIGN(&ev->u.relation.base_version, O_TABLE_INVALID_VERSION);
+		ev->u.relation.version = O_TABLE_INVALID_VERSION;
+		ev->u.relation.base_version = O_TABLE_INVALID_VERSION;
 	}
 
 	return WALPARSE_OK;
@@ -283,8 +267,8 @@ wal_parse_rollback_to_savepoint(WalReader *r, WalEvent *ev)
 	}
 	else
 	{
-		ASSIGN(&ev->u.rb_to_sp.xmin, InvalidOXid);
-		ASSIGN(&ev->u.rb_to_sp.csn, 0);
+		ev->u.rb_to_sp.xmin = InvalidOXid;
+		ev->u.rb_to_sp.csn = 0;
 	}
 	return WALPARSE_OK;
 }
@@ -1271,14 +1255,4 @@ wal_parse_modify(WalReader *r, WalEvent *ev)
 	}
 
 	return WALPARSE_OK;
-}
-
-Pointer
-wal_parse_container_origin_info(Pointer ptr, RepOriginId *origin_id, XLogRecPtr *origin_lsn)
-{
-	Assert(ptr);
-	PARSE(ptr, origin_id);
-	PARSE(ptr, origin_lsn);
-
-	return ptr;
 }

@@ -293,7 +293,5 @@ extern void set_local_wal_has_material_changes(bool value);
 
 extern Pointer wal_container_read_header(Pointer ptr, uint16 *version,
 										 uint8 *flags);
-extern Pointer wal_parse_container_origin_info(Pointer ptr, RepOriginId *origin_id,
-											   XLogRecPtr *origin_lsn);
 
 #endif							/* __WAL_H__ */
