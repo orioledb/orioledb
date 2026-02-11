@@ -30,6 +30,6 @@ typedef struct WalConsumer
 
 } WalConsumer;
 
-WalParseStatus wal_container_iterate(WalReader *r, WalConsumer *consumer, bool allow_logging);
+WalParseStatus parse_wal_container(WalReader *r, WalConsumer *consumer, bool allow_logging);
 
 #endif							/* __WAL_CONTAINER_ITER_H__ */

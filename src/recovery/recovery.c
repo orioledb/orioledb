@@ -3484,7 +3484,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		.on_event = replay_wal_on_event
 	};
 
-	WalParseStatus st = wal_container_iterate(&r, &cons, true /* allow_logging */ );
+	WalParseStatus st = parse_wal_container(&r, &cons, true /* allow_logging */ );
 
 	if (st)
 		return false;

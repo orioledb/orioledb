@@ -342,7 +342,7 @@ orioledb_rm_desc(StringInfo buf, XLogReaderState *record)
 		.on_flag = NULL,
 		.on_event = wal_desc_on_event
 	};
-	WalParseStatus st = wal_container_iterate(&r, &cons, false /* allow_logging */ );
+	WalParseStatus st = parse_wal_container(&r, &cons, false /* allow_logging */ );
 
 	if (st != WALPARSE_OK)
 		appendStringInfo(buf, " [PARSE ERROR %d]", (int) st);

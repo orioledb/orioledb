@@ -1320,7 +1320,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	elog(DEBUG4, "OrioleDB decode started startXLogPtr %X/%X endXLogPtr %X/%X",
 		 LSN_FORMAT_ARGS(startXLogPtr), LSN_FORMAT_ARGS(endXLogPtr));
 
-	st = wal_container_iterate(&r, &cons, true /* allow_logging */ );
+	st = parse_wal_container(&r, &cons, true /* allow_logging */ );
 
 	if (st)
 		elog(FATAL, "[WAL PARSE ERROR %d]", st);

@@ -150,7 +150,7 @@ do { \
 }
 
 WalParseStatus
-wal_container_iterate(WalReader *r, WalConsumer *consumer, bool allow_logging)
+parse_wal_container(WalReader *r, WalConsumer *consumer, bool allow_logging)
 {
 	WalParseStatus st;
 	WalEvent	ev;
@@ -171,7 +171,7 @@ wal_container_iterate(WalReader *r, WalConsumer *consumer, bool allow_logging)
 	 * The header establishes wal_version, wal_flags and positions r->ptr at
 	 * the first byte after the header area.
 	 *
-	 * From this point on, wal_container_iterate() is the sole authority that
+	 * From this point on, parse_wal_container() is the sole authority that
 	 * drives the reader forward: each iteration consumes a record tag byte
 	 * and (optionally) a record payload according to the descriptor.
 	 */
@@ -182,7 +182,7 @@ wal_container_iterate(WalReader *r, WalConsumer *consumer, bool allow_logging)
 	/*
 	 * Version compatibility check.
 	 *
-	 * We keep wal_container_iterate() largely version-agnostic and delegate
+	 * We keep parse_wal_container() largely version-agnostic and delegate
 	 * version policy to the consumer (recovery / logical decoding / etc.).
 	 * Parsing WAL from a newer OrioleDB version can be unsafe even if the
 	 * container framing is understood, because record encodings may differ.
@@ -262,10 +262,9 @@ wal_container_iterate(WalReader *r, WalConsumer *consumer, bool allow_logging)
 			 *
 			 * No descriptor registered for the record type we have just read.
 			 *
-			 * wal_container_iterate() is the single authority for OrioleDB
-			 * WAL container binary format: it reads a record type byte and
-			 * then advances the reader by calling the corresponding parse
-			 * routine.
+			 * parse_wal_container() is the single authority for OrioleDB WAL
+			 * container binary format: it reads a record type byte and then
+			 * advances the reader by calling the corresponding parse routine.
 			 *
 			 * If wal_get_desc() returns NULL, we cannot safely continue
 			 * because we don't know how many bytes belong to this record

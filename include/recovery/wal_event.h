@@ -35,7 +35,7 @@ typedef unsigned int wal_type_t;
  *
  * Lifetime rules:
  *
- *   - Valid only during the current wal_container_iterate() cycle.
+ *   - Valid only during the current parse_wal_container() cycle.
  *   - Invalid once the reader advances to another WAL chunk or the buffer
  *     is reused.
  *
