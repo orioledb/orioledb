@@ -222,6 +222,17 @@ SELECT i, price, quantity, total FROM o_test_set_expression ORDER BY i;
  3 |  7.99 |       10 | 79.90
 (3 rows)
 
+-- Snapshot the table before changing the expression
+CREATE MATERIALIZED VIEW o_test_set_expr_mv USING orioledb AS
+	SELECT * FROM o_test_set_expression ORDER BY i;
+SELECT * FROM o_test_set_expr_mv ORDER BY i;
+ i | price | quantity | total 
+---+-------+----------+-------
+ 1 | 10.50 |        5 | 52.50
+ 2 | 25.00 |        3 | 75.00
+ 3 |  7.99 |       10 | 79.90
+(3 rows)
+
 -- Check the initial generated column expression in catalog
 SELECT a.attname, a.attgenerated, pg_get_expr(d.adbin, d.adrelid) as generation_expr
 FROM pg_attribute a
@@ -260,6 +271,25 @@ ORDER BY i;
  3 |  7.99 |       10 | 87.89 |         87.890
 (3 rows)
 
+-- Matview should still have the old snapshot
+SELECT * FROM o_test_set_expr_mv ORDER BY i;
+ i | price | quantity | total 
+---+-------+----------+-------
+ 1 | 10.50 |        5 | 52.50
+ 2 | 25.00 |        3 | 75.00
+ 3 |  7.99 |       10 | 79.90
+(3 rows)
+
+-- Refresh picks up the new expression
+REFRESH MATERIALIZED VIEW o_test_set_expr_mv;
+SELECT * FROM o_test_set_expr_mv ORDER BY i;
+ i | price | quantity | total 
+---+-------+----------+-------
+ 1 | 10.50 |        5 | 57.75
+ 2 | 25.00 |        3 | 82.50
+ 3 |  7.99 |       10 | 87.89
+(3 rows)
+
 UPDATE o_test_set_expression SET price = 15.00 WHERE i = 1;
 -- Verify recalculation after update
 SELECT i, price, quantity, total,
@@ -288,6 +318,7 @@ ORDER BY i;
 (4 rows)
 
 DROP TABLE o_test_set_expression CASCADE;
+NOTICE:  drop cascades to materialized view o_test_set_expr_mv
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 8 other objects
 DETAIL:  drop cascades to table o_test_generated
