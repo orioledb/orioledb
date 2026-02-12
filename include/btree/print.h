@@ -3,8 +3,8 @@
  * print.h
  *		Declarations of OrioleDB B-tree printing routines.
  *
- * Copyright (c) 2021-2025, Oriole DB Inc.
- * Copyright (c) 2025, Supabase Inc.
+ * Copyright (c) 2021-2026, Oriole DB Inc.
+ * Copyright (c) 2025-2026, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/btree/print.h

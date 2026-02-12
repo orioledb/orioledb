@@ -5,8 +5,8 @@
  *
  * amproc_cache is tree that contains cached metadata from pg_amproc.
  *
- * Copyright (c) 2021-2025, Oriole DB Inc.
- * Copyright (c) 2025, Supabase Inc.
+ * Copyright (c) 2021-2026, Oriole DB Inc.
+ * Copyright (c) 2025-2026, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/catalog/o_amproc_cache.c

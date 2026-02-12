@@ -3,8 +3,8 @@
  * toast.h
  * 		Table-level declarations for orioledb TOAST implementation
  *
- * Copyright (c) 2021-2025, Oriole DB Inc.
- * Copyright (c) 2025, Supabase Inc.
+ * Copyright (c) 2021-2026, Oriole DB Inc.
+ * Copyright (c) 2025-2026, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/tableam/toast.h
