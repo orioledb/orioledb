@@ -3032,7 +3032,7 @@ replay_wal_check_version(const WalReaderState *r)
 }
 
 static WalParseResult
-replay_wal_on_flag(void *ctx, const WalRecord *rec)
+replay_wal_containter_info(void *ctx, const WalRecord *rec)
 {
 	Assert(rec);
 
@@ -3074,7 +3074,7 @@ typedef struct
 } ReplayWalDescCtx;
 
 static WalParseResult
-replay_wal_on_record(void *vctx, WalRecord *rec)
+replay_wal_record(void *vctx, WalRecord *rec)
 {
 	ReplayWalDescCtx *ctx = (ReplayWalDescCtx *) vctx;
 
@@ -3477,8 +3477,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		/* Consumer */
 		.ctx = &dctx,
 		.check_version = replay_wal_check_version,
-		.on_flag = replay_wal_on_flag,
-		.on_record = replay_wal_on_record
+		.on_flag = replay_wal_containter_info,
+		.on_record = replay_wal_record
 	};
 
 	WalParseResult st = parse_wal_container(&r, true /* allow_logging */ );

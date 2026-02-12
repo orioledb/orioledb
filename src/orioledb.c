@@ -257,7 +257,7 @@ wal_desc_check_version(const WalReaderState *r)
 }
 
 static WalParseResult
-wal_desc_on_record(void *vctx, WalRecord *rec)
+wal_desc_record(void *vctx, WalRecord *rec)
 {
 	WalDescCtx *ctx = (WalDescCtx *) vctx;
 
@@ -337,7 +337,7 @@ orioledb_rm_desc(StringInfo buf, XLogReaderState *record)
 		.ctx = &dctx,
 		.check_version = wal_desc_check_version,
 		.on_flag = NULL,
-		.on_record = wal_desc_on_record
+		.on_record = wal_desc_record
 	};
 
 	WalParseResult st = parse_wal_container(&r, false /* allow_logging */ );
