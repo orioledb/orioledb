@@ -2,8 +2,9 @@
 -- do not init TOAST table if table does not consists non-index keys varlens
 -----
 CREATE SCHEMA toast;
-SET SESSION search_path = 'toast';
-CREATE EXTENSION orioledb;
+SET SESSION search_path = 'toast', 'public';
+CREATE EXTENSION IF NOT EXISTS orioledb;
+CREATE EXTENSION IF NOT EXISTS hstore;
 SELECT orioledb_parallel_debug_start();
  orioledb_parallel_debug_start 
 -------------------------------
@@ -1643,6 +1644,774 @@ SELECT * FROM o_test_ctid_toast_truncate_check_toast_oids;
  toast      | f
 (1 row)
 
+-----
+-- STORAGE MAIN regression tests
+-- oversized MAIN handling, index bridging, hstore
+-----
+-- use existing schema and helper function from the first part
+-- keep this part single-process to avoid flaky parallel-worker crashes
+SET max_parallel_workers_per_gather = 0;
+-----
+-- basic STORAGE MAIN check
+-----
+CREATE TABLE o_sm_text (
+	id integer PRIMARY KEY,
+	v  text STORAGE MAIN COMPRESSION pglz
+) USING orioledb;
+INSERT INTO o_sm_text VALUES (1, generate_string(1, 120));
+INSERT INTO o_sm_text VALUES (2, generate_string(2, 3200));
+INSERT INTO o_sm_text VALUES (3, generate_string(3, 7000));
+SELECT id, length(v) FROM o_sm_text ORDER BY id;
+ id | length 
+----+--------
+  1 |    120
+  2 |   3200
+  3 |   7000
+(3 rows)
+
+UPDATE o_sm_text SET v = generate_string(10, 6000) WHERE id = 1;
+UPDATE o_sm_text SET v = generate_string(20, 100) WHERE id = 2;
+SELECT id, length(v) FROM o_sm_text ORDER BY id;
+ id | length 
+----+--------
+  1 |   6000
+  2 |    100
+  3 |   7000
+(3 rows)
+
+SELECT orioledb_tbl_structure('o_sm_text'::regclass, 'nuet');
+                                          orioledb_tbl_structure                                          
+----------------------------------------------------------------------------------------------------------
+ Index o_sm_text_pkey contents                                                                           +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 112                                                   +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                     +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                              +
+     Item 0: offset = 264, tuple = ('1', TOASTed)                                                        +
+     Item 1: offset = 416, tuple = ('2', '67f9dae8c12744c1d8dd455e061e4a0a01d3d442'...(truncated))       +
+     Item 2: offset = 552, tuple = ('3', TOASTed)                                                        +
+                                                                                                         +
+ Index toast contents                                                                                    +
+ Page 0: level = 1, maxKeyLen = 16                                                                       +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                       +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 512, hikey location = 64                                              +
+     Item 0: offset = 520, downlink = 1                                                                  +
+     Item 1: offset = 528, downlink = 2, key = (PK: ('2'), attnum 2, chunknum 0)                         +
+     Item 2: offset = 552, downlink = 3, key = (PK: ('3'), attnum 2, chunknum 0)                         +
+     Item 3: offset = 576, downlink = 4, key = (PK: ('3'), attnum 2, chunknum 1)                         +
+                                                                                                         +
+ Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                       +
+     Leftmost, Rightlink is invalid                                                                      +
+     Hikey: offset = 104, key = (PK: ('2'), attnum 2, chunknum 0)                                        +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('1'), attnum 2, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 2, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('1'), attnum 2, chunknum 2)  +
+     Item 1: offset = 2976, tuple = (PK: ('1'), attnum 2, chunknum 1, data_length 2657)                  +
+   Chunk 2: offset = 2, location = 5680, hikey location = 104, hikey = (PK: ('2'), attnum 2, chunknum 0) +
+     Item 2: offset = 5688, tuple = (PK: ('1'), attnum 2, chunknum 2, data_length 690)                   +
+                                                                                                         +
+ Page 2: level = 0, maxKeyLen = 16, nVacatedBytes = 3296                                                 +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                       +
+     Rightlink is invalid                                                                                +
+     Hikey: offset = 80, key = (PK: ('3'), attnum 2, chunknum 0)                                         +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (PK: ('2'), attnum 2, chunknum 1)   +
+     Item 0: deleted, offset = 264, tuple = (PK: ('2'), attnum 2, chunknum 0, data_length 2657)          +
+   Chunk 1: offset = 1, location = 2968, hikey location = 80, hikey = (PK: ('3'), attnum 2, chunknum 0)  +
+     Item 1: deleted, offset = 2976, tuple = (PK: ('2'), attnum 2, chunknum 1, data_length 547)          +
+                                                                                                         +
+ Page 3: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                       +
+     Rightlink is invalid                                                                                +
+     Hikey: offset = 64, key = (PK: ('3'), attnum 2, chunknum 1)                                         +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (PK: ('3'), attnum 2, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('3'), attnum 2, chunknum 0, data_length 2657)                   +
+                                                                                                         +
+ Page 4: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                       +
+     Rightmost                                                                                           +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (PK: ('3'), attnum 2, chunknum 2)   +
+     Item 0: offset = 264, tuple = (PK: ('3'), attnum 2, chunknum 1, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 80                                             +
+     Item 1: offset = 2976, tuple = (PK: ('3'), attnum 2, chunknum 2, data_length 1690)                  +
+                                                                                                         +
+ 
+(1 row)
+
+-- delete and reinsert with STORAGE MAIN value
+DELETE FROM o_sm_text WHERE id = 3;
+INSERT INTO o_sm_text VALUES (3, generate_string(30, 7000));
+SELECT id, length(v) FROM o_sm_text WHERE id = 3;
+ id | length 
+----+--------
+  3 |   7000
+(1 row)
+
+-----
+-- mixed STORAGE MAIN, EXTENDED, PLAIN check
+-----
+CREATE TABLE o_sm_mix (
+	id      integer PRIMARY KEY,
+	m_main  text STORAGE MAIN COMPRESSION pglz,
+	e_ext   text STORAGE EXTENDED COMPRESSION pglz,
+	p_plain text STORAGE PLAIN
+) USING orioledb;
+INSERT INTO o_sm_mix
+VALUES (1, generate_string(91, 3000), generate_string(92, 3000), generate_string(93, 500));
+SELECT id, length(m_main), length(e_ext), length(p_plain) FROM o_sm_mix;
+ id | length | length | length 
+----+--------+--------+--------
+  1 |   3000 |   3000 |    500
+(1 row)
+
+SELECT orioledb_tbl_structure('o_sm_mix'::regclass, 'nuet');
+                                               orioledb_tbl_structure                                                
+---------------------------------------------------------------------------------------------------------------------
+ Index o_sm_mix_pkey contents                                                                                       +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                +
+     Leftmost, Rightmost                                                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                         +
+     Item 0: offset = 264, tuple = ('1', TOASTed, TOASTed, 'b9e073d41c784e0a2c417a50afa299410938fe7d'...(truncated))+
+                                                                                                                    +
+ Index toast contents                                                                                               +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                               +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                                  +
+     Leftmost, Rightmost                                                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('1'), attnum 2, chunknum 1)              +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 2, chunknum 0, data_length 2657)                              +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('1'), attnum 3, chunknum 0)             +
+     Item 1: offset = 2976, tuple = (PK: ('1'), attnum 2, chunknum 1, data_length 347)                              +
+   Chunk 2: offset = 2, location = 3368, hikey location = 104, hikey = (PK: ('1'), attnum 3, chunknum 1)            +
+     Item 2: offset = 3376, tuple = (PK: ('1'), attnum 3, chunknum 0, data_length 2657)                             +
+   Chunk 3: offset = 3, location = 6080, hikey location = 120                                                       +
+     Item 3: offset = 6088, tuple = (PK: ('1'), attnum 3, chunknum 1, data_length 347)                              +
+                                                                                                                    +
+ 
+(1 row)
+
+-----
+-- bytea STORAGE MAIN check
+-----
+CREATE TABLE o_sm_bytea (
+	id integer PRIMARY KEY,
+	b  bytea STORAGE MAIN COMPRESSION pglz
+) USING orioledb;
+INSERT INTO o_sm_bytea VALUES (1, decode(generate_string(95, 6000), 'hex'));
+INSERT INTO o_sm_bytea VALUES (2, decode(generate_string(96, 8000), 'hex'));
+SELECT id, length(b) FROM o_sm_bytea ORDER BY id;
+ id | length 
+----+--------
+  1 |   3000
+  2 |   4000
+(2 rows)
+
+SELECT orioledb_tbl_structure('o_sm_bytea'::regclass, 'nuet');
+                                          orioledb_tbl_structure                                          
+----------------------------------------------------------------------------------------------------------
+ Index o_sm_bytea_pkey contents                                                                          +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                     +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                     +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                              +
+     Item 0: offset = 264, tuple = ('1', TOASTed)                                                        +
+     Item 1: offset = 304, tuple = ('2', TOASTed)                                                        +
+                                                                                                         +
+ Index toast contents                                                                                    +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                       +
+     Leftmost, Rightmost                                                                                 +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('1'), attnum 2, chunknum 1)   +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 2, chunknum 0, data_length 2657)                   +
+   Chunk 1: offset = 1, location = 2968, hikey location = 88, hikey = (PK: ('2'), attnum 2, chunknum 0)  +
+     Item 1: offset = 2976, tuple = (PK: ('1'), attnum 2, chunknum 1, data_length 347)                   +
+   Chunk 2: offset = 2, location = 3368, hikey location = 104, hikey = (PK: ('2'), attnum 2, chunknum 1) +
+     Item 2: offset = 3376, tuple = (PK: ('2'), attnum 2, chunknum 0, data_length 2657)                  +
+   Chunk 3: offset = 3, location = 6080, hikey location = 120                                            +
+     Item 3: offset = 6088, tuple = (PK: ('2'), attnum 2, chunknum 1, data_length 1347)                  +
+                                                                                                         +
+ 
+(1 row)
+
+-----
+-- MAIN + EXTENDED last-resort check
+-----
+CREATE TABLE o_sm_main_ext (
+	id bigint PRIMARY KEY,
+	m  text STORAGE MAIN COMPRESSION pglz,
+	e  text STORAGE EXTENDED COMPRESSION pglz
+) USING orioledb;
+INSERT INTO o_sm_main_ext VALUES (1, generate_string(101, 2000), generate_string(102, 9000));
+INSERT INTO o_sm_main_ext VALUES (2, generate_string(103, 9000), generate_string(104, 9000));
+SELECT id, length(m), length(e) FROM o_sm_main_ext ORDER BY id;
+ id | length | length 
+----+--------+--------
+  1 |   2000 |   9000
+  2 |   9000 |   9000
+(2 rows)
+
+SELECT orioledb_tbl_structure('o_sm_main_ext'::regclass, 'nuet');
+                                           orioledb_tbl_structure                                           
+------------------------------------------------------------------------------------------------------------
+ Index o_sm_main_ext_pkey contents                                                                         +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                       +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                       +
+     Leftmost, Rightmost                                                                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ('2')                                 +
+     Item 0: offset = 264, tuple = ('1', 'c521cba48c2869743ab4423a4077890e9cbb6c21'...(truncated), TOASTed)+
+   Chunk 1: offset = 1, location = 2312, hikey location = 72                                               +
+     Item 1: offset = 2320, tuple = ('2', TOASTed, TOASTed)                                                +
+                                                                                                           +
+ Index toast contents                                                                                      +
+ Page 0: level = 1, maxKeyLen = 16                                                                         +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                         +
+     Leftmost, Rightmost                                                                                   +
+   Chunk 0: offset = 0, location = 512, hikey location = 64                                                +
+     Item 0: offset = 528, downlink = 1                                                                    +
+     Item 1: offset = 536, downlink = 2, key = (PK: ('1'), attnum 3, chunknum 2)                           +
+     Item 2: offset = 560, downlink = 3, key = (PK: ('2'), attnum 2, chunknum 1)                           +
+     Item 3: offset = 584, downlink = 4, key = (PK: ('2'), attnum 3, chunknum 0)                           +
+     Item 4: offset = 608, downlink = 5, key = (PK: ('2'), attnum 3, chunknum 2)                           +
+                                                                                                           +
+ Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                      +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                         +
+     Leftmost, Rightlink is invalid                                                                        +
+     Hikey: offset = 80, key = (PK: ('1'), attnum 3, chunknum 2)                                           +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (PK: ('1'), attnum 3, chunknum 1)     +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 3, chunknum 0, data_length 2650)                     +
+   Chunk 1: offset = 1, location = 2960, hikey location = 80, hikey = (PK: ('1'), attnum 3, chunknum 2)    +
+     Item 1: offset = 2968, tuple = (PK: ('1'), attnum 3, chunknum 1, data_length 2650)                    +
+                                                                                                           +
+ Page 2: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                      +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                         +
+     Rightlink is invalid                                                                                  +
+     Hikey: offset = 104, key = (PK: ('2'), attnum 2, chunknum 1)                                          +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('1'), attnum 3, chunknum 3)     +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 3, chunknum 2, data_length 2650)                     +
+   Chunk 1: offset = 1, location = 2960, hikey location = 88, hikey = (PK: ('2'), attnum 2, chunknum 0)    +
+     Item 1: offset = 2968, tuple = (PK: ('1'), attnum 3, chunknum 3, data_length 1054)                    +
+   Chunk 2: offset = 2, location = 4072, hikey location = 104, hikey = (PK: ('2'), attnum 2, chunknum 1)   +
+     Item 2: offset = 4080, tuple = (PK: ('2'), attnum 2, chunknum 0, data_length 2650)                    +
+                                                                                                           +
+ Page 3: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                      +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                         +
+     Rightlink is invalid                                                                                  +
+     Hikey: offset = 104, key = (PK: ('2'), attnum 3, chunknum 0)                                          +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('2'), attnum 2, chunknum 2)     +
+     Item 0: offset = 264, tuple = (PK: ('2'), attnum 2, chunknum 1, data_length 2650)                     +
+   Chunk 1: offset = 1, location = 2960, hikey location = 88, hikey = (PK: ('2'), attnum 2, chunknum 3)    +
+     Item 1: offset = 2968, tuple = (PK: ('2'), attnum 2, chunknum 2, data_length 2650)                    +
+   Chunk 2: offset = 2, location = 5664, hikey location = 104, hikey = (PK: ('2'), attnum 3, chunknum 0)   +
+     Item 2: offset = 5672, tuple = (PK: ('2'), attnum 2, chunknum 3, data_length 1054)                    +
+                                                                                                           +
+ Page 4: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                      +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                         +
+     Rightlink is invalid                                                                                  +
+     Hikey: offset = 80, key = (PK: ('2'), attnum 3, chunknum 2)                                           +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (PK: ('2'), attnum 3, chunknum 1)     +
+     Item 0: offset = 264, tuple = (PK: ('2'), attnum 3, chunknum 0, data_length 2650)                     +
+   Chunk 1: offset = 1, location = 2960, hikey location = 80, hikey = (PK: ('2'), attnum 3, chunknum 2)    +
+     Item 1: offset = 2968, tuple = (PK: ('2'), attnum 3, chunknum 1, data_length 2650)                    +
+                                                                                                           +
+ Page 5: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                      +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                         +
+     Rightmost                                                                                             +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (PK: ('2'), attnum 3, chunknum 3)     +
+     Item 0: offset = 264, tuple = (PK: ('2'), attnum 3, chunknum 2, data_length 2650)                     +
+   Chunk 1: offset = 1, location = 2960, hikey location = 80                                               +
+     Item 1: offset = 2968, tuple = (PK: ('2'), attnum 3, chunknum 3, data_length 1054)                    +
+                                                                                                           +
+ 
+(1 row)
+
+DO $$
+DECLARE
+	s text;
+BEGIN
+	s := orioledb_tbl_structure('o_sm_main_ext'::regclass, 'nuet');
+
+	IF position('PK: (''1''), attnum 2' IN s) > 0 THEN
+		RAISE EXCEPTION 'unexpected MAIN toast for o_sm_main_ext id=1';
+	END IF;
+	IF position('PK: (''1''), attnum 3' IN s) = 0 THEN
+		RAISE EXCEPTION 'expected EXTENDED toast for o_sm_main_ext id=1';
+	END IF;
+	IF position('PK: (''2''), attnum 2' IN s) = 0 THEN
+		RAISE EXCEPTION 'expected MAIN toast for o_sm_main_ext id=2';
+	END IF;
+	IF position('PK: (''2''), attnum 3' IN s) = 0 THEN
+		RAISE EXCEPTION 'expected EXTENDED toast for o_sm_main_ext id=2';
+	END IF;
+END $$;
+-----
+-- two MAIN columns, force out-of-line for larger first
+-----
+CREATE TABLE o_sm_two_main (
+	id      bigint PRIMARY KEY,
+	m_big   text STORAGE MAIN COMPRESSION pglz,
+	m_small text STORAGE MAIN COMPRESSION pglz,
+	e       text STORAGE EXTENDED COMPRESSION pglz
+) USING orioledb;
+INSERT INTO o_sm_two_main
+VALUES (1, generate_string(201, 9000), generate_string(202, 900), generate_string(203, 9000));
+SELECT id, length(m_big), length(m_small), length(e) FROM o_sm_two_main;
+ id | length | length | length 
+----+--------+--------+--------
+  1 |   9000 |    900 |   9000
+(1 row)
+
+SELECT orioledb_tbl_structure('o_sm_two_main'::regclass, 'nuet');
+                                               orioledb_tbl_structure                                                
+---------------------------------------------------------------------------------------------------------------------
+ Index o_sm_two_main_pkey contents                                                                                  +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                                +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                                +
+     Leftmost, Rightmost                                                                                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                         +
+     Item 0: offset = 264, tuple = ('1', TOASTed, '2e88da2eb9aed2459564fc1865f4d7038a64f412'...(truncated), TOASTed)+
+                                                                                                                    +
+ Index toast contents                                                                                               +
+ Page 0: level = 1, maxKeyLen = 16                                                                                  +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                                  +
+     Leftmost, Rightmost                                                                                            +
+   Chunk 0: offset = 0, location = 512, hikey location = 64                                                         +
+     Item 0: offset = 520, downlink = 1                                                                             +
+     Item 1: offset = 528, downlink = 2, key = (PK: ('1'), attnum 2, chunknum 2)                                    +
+     Item 2: offset = 552, downlink = 3, key = (PK: ('1'), attnum 4, chunknum 1)                                    +
+                                                                                                                    +
+ Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                               +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                                  +
+     Leftmost, Rightlink is invalid                                                                                 +
+     Hikey: offset = 80, key = (PK: ('1'), attnum 2, chunknum 2)                                                    +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (PK: ('1'), attnum 2, chunknum 1)              +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 2, chunknum 0, data_length 2650)                              +
+   Chunk 1: offset = 1, location = 2960, hikey location = 80, hikey = (PK: ('1'), attnum 2, chunknum 2)             +
+     Item 1: offset = 2968, tuple = (PK: ('1'), attnum 2, chunknum 1, data_length 2650)                             +
+                                                                                                                    +
+ Page 2: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                               +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                                  +
+     Rightlink is invalid                                                                                           +
+     Hikey: offset = 104, key = (PK: ('1'), attnum 4, chunknum 1)                                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('1'), attnum 2, chunknum 3)              +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 2, chunknum 2, data_length 2650)                              +
+   Chunk 1: offset = 1, location = 2960, hikey location = 88, hikey = (PK: ('1'), attnum 4, chunknum 0)             +
+     Item 1: offset = 2968, tuple = (PK: ('1'), attnum 2, chunknum 3, data_length 1054)                             +
+   Chunk 2: offset = 2, location = 4072, hikey location = 104, hikey = (PK: ('1'), attnum 4, chunknum 1)            +
+     Item 2: offset = 4080, tuple = (PK: ('1'), attnum 4, chunknum 0, data_length 2650)                             +
+                                                                                                                    +
+ Page 3: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                               +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                                  +
+     Rightmost                                                                                                      +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('1'), attnum 4, chunknum 2)              +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 4, chunknum 1, data_length 2650)                              +
+   Chunk 1: offset = 1, location = 2960, hikey location = 88, hikey = (PK: ('1'), attnum 4, chunknum 3)             +
+     Item 1: offset = 2968, tuple = (PK: ('1'), attnum 4, chunknum 2, data_length 2650)                             +
+   Chunk 2: offset = 2, location = 5664, hikey location = 104                                                       +
+     Item 2: offset = 5672, tuple = (PK: ('1'), attnum 4, chunknum 3, data_length 1054)                             +
+                                                                                                                    +
+ 
+(1 row)
+
+DO $$
+DECLARE
+	s text;
+BEGIN
+	s := orioledb_tbl_structure('o_sm_two_main'::regclass, 'nuet');
+
+	IF position('PK: (''1''), attnum 2' IN s) = 0 THEN
+		RAISE EXCEPTION 'expected m_big to be toasted for o_sm_two_main id=1';
+	END IF;
+	IF position('PK: (''1''), attnum 3' IN s) > 0 THEN
+		RAISE EXCEPTION 'unexpected m_small toast for o_sm_two_main id=1';
+	END IF;
+	IF position('PK: (''1''), attnum 4' IN s) = 0 THEN
+		RAISE EXCEPTION 'expected EXTENDED column e to be toasted for o_sm_two_main id=1';
+	END IF;
+END $$;
+-----
+-- update path with toasted MAIN values
+-----
+CREATE TABLE o_sm_update (
+	id bigint PRIMARY KEY,
+	m  text STORAGE MAIN COMPRESSION pglz,
+	e  text STORAGE EXTENDED COMPRESSION pglz
+) USING orioledb;
+INSERT INTO o_sm_update VALUES (1, generate_string(11, 800), repeat('b', 2000));
+UPDATE o_sm_update
+	SET m = generate_string(12, 2500),
+		e = generate_string(13, 5000)
+	WHERE id = 1;
+UPDATE o_sm_update
+	SET m = generate_string(14, 600),
+		e = repeat('c', 1200)
+	WHERE id = 1;
+UPDATE o_sm_update SET m = m WHERE id = 1;
+SELECT id, length(m), length(e) FROM o_sm_update;
+ id | length | length 
+----+--------+--------
+  1 |    600 |   1200
+(1 row)
+
+-----
+-- rebuild path check (toast_sort_add)
+-----
+CREATE TABLE o_sm_rebuild (
+	id bigint PRIMARY KEY,
+	h  text STORAGE MAIN COMPRESSION pglz,
+	e  text STORAGE EXTENDED COMPRESSION pglz
+) USING orioledb;
+INSERT INTO o_sm_rebuild VALUES (1, 'h_small', repeat('e', 1200));
+INSERT INTO o_sm_rebuild VALUES (2, generate_string(301, 7000), generate_string(302, 9000));
+INSERT INTO o_sm_rebuild VALUES (3, generate_string(303, 4500), generate_string(304, 7000));
+-- hash index enables index bridging and rebuilds existing rows
+CREATE INDEX o_sm_rebuild_hash_idx ON o_sm_rebuild USING hash (h);
+NOTICE:  index bridging is enabled for orioledb table 'o_sm_rebuild'
+DETAIL:  index access method 'hash' is supported only via index bridging for OrioleDB table
+SELECT id FROM o_sm_rebuild WHERE h = 'h_small';
+ id 
+----
+  1
+(1 row)
+
+SELECT id FROM o_sm_rebuild WHERE h = (SELECT h FROM o_sm_rebuild WHERE id = 2);
+ id 
+----
+  2
+(1 row)
+
+REINDEX INDEX o_sm_rebuild_hash_idx;
+-----
+-- non-btree secondary index checks with STORAGE MAIN
+-- include a non-btree secondary index case
+-----
+CREATE TABLE o_sm_bridge (
+	id   bigint PRIMARY KEY,
+	h    text STORAGE MAIN COMPRESSION pglz,
+	bt   text STORAGE MAIN COMPRESSION pglz,
+	tags text[] STORAGE MAIN COMPRESSION pglz,
+	vec  tsvector STORAGE MAIN COMPRESSION pglz,
+	br   text STORAGE MAIN COMPRESSION pglz
+) USING orioledb;
+CREATE INDEX o_sm_bridge_hash_idx ON o_sm_bridge USING hash (h);
+NOTICE:  index bridging is enabled for orioledb table 'o_sm_bridge'
+DETAIL:  index access method 'hash' is supported only via index bridging for OrioleDB table
+CREATE INDEX o_sm_bridge_btree_idx ON o_sm_bridge (bt);
+CREATE INDEX o_sm_bridge_gin_idx ON o_sm_bridge USING gin (tags);
+CREATE INDEX o_sm_bridge_gist_idx ON o_sm_bridge USING gist (vec);
+CREATE INDEX o_sm_bridge_brin_idx ON o_sm_bridge USING brin (br);
+INSERT INTO o_sm_bridge VALUES (
+	1,
+	'h_small',
+	'bt_small',
+	ARRAY['a','b'],
+	to_tsvector('simple', 'alpha beta'),
+	'b_small'
+);
+INSERT INTO o_sm_bridge VALUES (
+	2,
+	repeat('h', 7000),
+	'bt_mid',
+	array_fill('x'::text, ARRAY[300]),
+	to_tsvector('simple', repeat('tok ', 700)),
+	repeat('b', 7000)
+);
+INSERT INTO o_sm_bridge VALUES (
+	3,
+	generate_string(23, 3500),
+	'bt_rand',
+	ARRAY(SELECT substr(md5(i::text), 1, 8) FROM generate_series(1, 250) AS i),
+	to_tsvector('simple', (SELECT string_agg('term' || i, ' ') FROM generate_series(1, 300) AS i)),
+	generate_string(24, 4000)
+);
+SELECT id FROM o_sm_bridge WHERE h = (SELECT h FROM o_sm_bridge WHERE id = 2);
+ id 
+----
+  2
+(1 row)
+
+SELECT id FROM o_sm_bridge WHERE bt = 'bt_mid';
+ id 
+----
+  2
+(1 row)
+
+SELECT id FROM o_sm_bridge WHERE tags @> ARRAY['x'];
+ id 
+----
+  2
+(1 row)
+
+SELECT id FROM o_sm_bridge WHERE vec @@ to_tsquery('simple', 'tok');
+ id 
+----
+  2
+(1 row)
+
+SELECT id FROM o_sm_bridge WHERE br LIKE 'b%';
+ id 
+----
+  1
+  2
+(2 rows)
+
+UPDATE o_sm_bridge
+	SET h = repeat('H', 6500),
+		tags = array_fill('y'::text, ARRAY[200]),
+		vec = to_tsvector('simple', repeat('upd ', 500)),
+		br = repeat('c', 6500)
+	WHERE id = 2;
+SELECT id FROM o_sm_bridge WHERE h = repeat('H', 6500);
+ id 
+----
+  2
+(1 row)
+
+SELECT id FROM o_sm_bridge WHERE tags @> ARRAY['y'];
+ id 
+----
+  2
+(1 row)
+
+SELECT id FROM o_sm_bridge WHERE vec @@ to_tsquery('simple', 'upd');
+ id 
+----
+  2
+(1 row)
+
+REINDEX INDEX o_sm_bridge_hash_idx;
+REINDEX INDEX o_sm_bridge_gin_idx;
+-----
+-- hstore STORAGE MAIN check
+-----
+CREATE TABLE o_sm_hstore (
+	id   integer PRIMARY KEY,
+	hs   hstore STORAGE MAIN COMPRESSION pglz,
+	note text COMPRESSION pglz
+) USING orioledb;
+INSERT INTO o_sm_hstore VALUES (1, 'k1=>v1,k2=>v2'::hstore, 'small');
+INSERT INTO o_sm_hstore
+SELECT
+	2,
+	hstore(array_agg('k' || i), array_agg(md5((1000 + i)::text))),
+	'large'
+FROM generate_series(1, 500) AS i;
+SELECT id, length(hs::text), hs ? 'k1' AS has_k1 FROM o_sm_hstore ORDER BY id;
+ id | length | has_k1 
+----+--------+--------
+  1 |     22 | t
+  2 |  21890 | t
+(2 rows)
+
+UPDATE o_sm_hstore
+SET hs = (
+	SELECT hstore(array_agg('u' || i), array_agg(md5((2000 + i)::text)))
+	FROM generate_series(1, 450) AS i
+)
+WHERE id = 2;
+SELECT id, length(hs::text), hs ? 'u1' AS has_u1 FROM o_sm_hstore WHERE id = 2;
+ id | length | has_u1 
+----+--------+--------
+  2 |  19690 | t
+(1 row)
+
+CREATE TABLE o_sm_hstore_src (
+	id integer PRIMARY KEY,
+	hs hstore STORAGE EXTENDED COMPRESSION pglz
+) USING orioledb;
+INSERT INTO o_sm_hstore_src
+SELECT
+	3,
+	hstore(array_agg('s' || i), array_agg(md5((3000 + i)::text)))
+FROM generate_series(1, 400) AS i;
+INSERT INTO o_sm_hstore
+SELECT id, hs, 'from_src'
+FROM o_sm_hstore_src
+ON CONFLICT (id) DO UPDATE SET hs = EXCLUDED.hs, note = EXCLUDED.note;
+SELECT id, length(hs::text), note FROM o_sm_hstore ORDER BY id;
+ id | length |   note   
+----+--------+----------
+  1 |     22 | small
+  2 |  19690 | large
+  3 |  17490 | from_src
+(3 rows)
+
+-----
+-- EXTENDED to MAIN cross-table transfer check
+-----
+CREATE TABLE o_sm_src (
+	id bigint PRIMARY KEY,
+	v  text STORAGE EXTENDED COMPRESSION pglz
+) USING orioledb;
+CREATE TABLE o_sm_dst (
+	id bigint PRIMARY KEY,
+	v  text STORAGE MAIN COMPRESSION pglz
+) USING orioledb;
+INSERT INTO o_sm_src VALUES (1, generate_string(401, 8000));
+INSERT INTO o_sm_dst SELECT * FROM o_sm_src;
+SELECT id, length(v) FROM o_sm_dst;
+ id | length 
+----+--------
+  1 |   8000
+(1 row)
+
+SELECT orioledb_tbl_structure('o_sm_dst'::regclass, 'nuet');
+                                         orioledb_tbl_structure                                          
+---------------------------------------------------------------------------------------------------------
+ Index o_sm_dst_pkey contents                                                                           +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                    +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                    +
+     Leftmost, Rightmost                                                                                +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                             +
+     Item 0: offset = 264, tuple = ('1', TOASTed)                                                       +
+                                                                                                        +
+ Index toast contents                                                                                   +
+ Page 0: level = 1, maxKeyLen = 16                                                                      +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                      +
+     Leftmost, Rightmost                                                                                +
+   Chunk 0: offset = 0, location = 512, hikey location = 64                                             +
+     Item 0: offset = 520, downlink = 1                                                                 +
+     Item 1: offset = 528, downlink = 2, key = (PK: ('1'), attnum 2, chunknum 2)                        +
+                                                                                                        +
+ Page 1: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                   +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                      +
+     Leftmost, Rightlink is invalid                                                                     +
+     Hikey: offset = 80, key = (PK: ('1'), attnum 2, chunknum 2)                                        +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (PK: ('1'), attnum 2, chunknum 1)  +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 2, chunknum 0, data_length 2650)                  +
+   Chunk 1: offset = 1, location = 2960, hikey location = 80, hikey = (PK: ('1'), attnum 2, chunknum 2) +
+     Item 1: offset = 2968, tuple = (PK: ('1'), attnum 2, chunknum 1, data_length 2650)                 +
+                                                                                                        +
+ Page 2: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                   +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                      +
+     Rightmost                                                                                          +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (PK: ('1'), attnum 2, chunknum 3)  +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 2, chunknum 2, data_length 2650)                  +
+   Chunk 1: offset = 1, location = 2960, hikey location = 80                                            +
+     Item 1: offset = 2968, tuple = (PK: ('1'), attnum 2, chunknum 3, data_length 54)                   +
+                                                                                                        +
+ 
+(1 row)
+
+-----
+-- MAIN + EXTERNAL mix check
+-----
+CREATE TABLE o_sm_external (
+	id bigint PRIMARY KEY,
+	m  text STORAGE MAIN COMPRESSION pglz,
+	x  text STORAGE EXTERNAL
+) USING orioledb;
+INSERT INTO o_sm_external
+VALUES (1, generate_string(411, 2400), generate_string(412, 6000));
+SELECT id, length(m), length(x) FROM o_sm_external;
+ id | length | length 
+----+--------+--------
+  1 |   2400 |   6000
+(1 row)
+
+SELECT orioledb_tbl_structure('o_sm_external'::regclass, 'nuet');
+                                           orioledb_tbl_structure                                           
+------------------------------------------------------------------------------------------------------------
+ Index o_sm_external_pkey contents                                                                         +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                       +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                       +
+     Leftmost, Rightmost                                                                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                +
+     Item 0: offset = 264, tuple = ('1', '1eb1bfc56b2aee017e43c8bf878494c82d99bb4e'...(truncated), TOASTed)+
+                                                                                                           +
+ Index toast contents                                                                                      +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                      +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                         +
+     Leftmost, Rightmost                                                                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (PK: ('1'), attnum 3, chunknum 1)     +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 3, chunknum 0, data_length 2650)                     +
+   Chunk 1: offset = 1, location = 2960, hikey location = 88, hikey = (PK: ('1'), attnum 3, chunknum 2)    +
+     Item 1: offset = 2968, tuple = (PK: ('1'), attnum 3, chunknum 1, data_length 2650)                    +
+   Chunk 2: offset = 2, location = 5664, hikey location = 104                                              +
+     Item 2: offset = 5672, tuple = (PK: ('1'), attnum 3, chunknum 2, data_length 704)                     +
+                                                                                                           +
+ 
+(1 row)
+
+-----
+-- NULL and empty string handling check
+-----
+CREATE TABLE o_sm_nulls (
+	id bigint PRIMARY KEY,
+	m  text STORAGE MAIN COMPRESSION pglz
+) USING orioledb;
+INSERT INTO o_sm_nulls VALUES (1, NULL);
+INSERT INTO o_sm_nulls VALUES (2, '');
+INSERT INTO o_sm_nulls VALUES (3, generate_string(421, 2500));
+UPDATE o_sm_nulls SET m = generate_string(422, 2600) WHERE id = 1;
+UPDATE o_sm_nulls SET m = NULL WHERE id = 3;
+SELECT id, length(m), m = '' AS is_empty FROM o_sm_nulls ORDER BY id;
+ id | length | is_empty 
+----+--------+----------
+  1 |   2600 | f
+  2 |      0 | t
+  3 |        | 
+(3 rows)
+
+-----
+-- upsert check with MAIN + EXTENDED text columns
+-----
+CREATE TABLE o_sm_upsert (
+	id bigint PRIMARY KEY,
+	m  text STORAGE MAIN COMPRESSION pglz,
+	e  text STORAGE EXTENDED COMPRESSION pglz
+) USING orioledb;
+INSERT INTO o_sm_upsert VALUES (1, generate_string(431, 800), repeat('d', 2000));
+INSERT INTO o_sm_upsert VALUES (1, generate_string(432, 2500), generate_string(433, 5000))
+ON CONFLICT (id) DO UPDATE SET m = EXCLUDED.m, e = EXCLUDED.e;
+SELECT id, length(m), length(e) FROM o_sm_upsert;
+ id | length | length 
+----+--------+--------
+  1 |   2500 |   5000
+(1 row)
+
+SELECT orioledb_tbl_structure('o_sm_upsert'::regclass, 'nuet');
+                                           orioledb_tbl_structure                                           
+------------------------------------------------------------------------------------------------------------
+ Index o_sm_upsert_pkey contents                                                                           +
+ Page 0: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                                       +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                                       +
+     Leftmost, Rightmost                                                                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 64                                                +
+     Item 0: offset = 264, tuple = ('1', 'd1b1a34e908af71bfc97d409b10f23898557c5c5'...(truncated), TOASTed)+
+                                                                                                           +
+ Index toast contents                                                                                      +
+ Page 0: level = 0, maxKeyLen = 16, nVacatedBytes = 0                                                      +
+ state = free, datoid equal, relnode equal, ix_type = toast, dirty                                         +
+     Leftmost, Rightmost                                                                                   +
+   Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = (PK: ('1'), attnum 3, chunknum 1)     +
+     Item 0: offset = 264, tuple = (PK: ('1'), attnum 3, chunknum 0, data_length 2650)                     +
+   Chunk 1: offset = 1, location = 2960, hikey location = 80                                               +
+     Item 1: offset = 2968, tuple = (PK: ('1'), attnum 3, chunknum 1, data_length 2354)                    +
+                                                                                                           +
+ 
+(1 row)
+
+-----
+-- Cleanup
+-----
+DROP TABLE o_sm_text;
+DROP TABLE o_sm_mix;
+DROP TABLE o_sm_bytea;
+DROP TABLE o_sm_main_ext;
+DROP TABLE o_sm_two_main;
+DROP TABLE o_sm_update;
+DROP TABLE o_sm_rebuild;
+DROP TABLE o_sm_bridge;
+DROP TABLE o_sm_hstore;
+DROP TABLE o_sm_hstore_src;
+DROP TABLE o_sm_src;
+DROP TABLE o_sm_dst;
+DROP TABLE o_sm_external;
+DROP TABLE o_sm_nulls;
+DROP TABLE o_sm_upsert;
+DROP FUNCTION generate_string(integer, integer);
+RESET max_parallel_workers_per_gather;
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
 ------------------------------
@@ -1659,6 +2428,6 @@ drop cascades to view o_test_ctid_toast_truncate_toast_oids
 drop cascades to view o_test_ctid_toast_truncate_check_toast_oids
 DROP SCHEMA toast CASCADE;
 NOTICE:  drop cascades to 2 other objects
-DETAIL:  drop cascades to function generate_string(integer,integer)
+DETAIL:  drop cascades to extension hstore
 drop cascades to function query_to_text_filtered(text)
 RESET search_path;

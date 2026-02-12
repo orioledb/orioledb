@@ -2,8 +2,9 @@
 -- do not init TOAST table if table does not consists non-index keys varlens
 -----
 CREATE SCHEMA toast;
-SET SESSION search_path = 'toast';
-CREATE EXTENSION orioledb;
+SET SESSION search_path = 'toast', 'public';
+CREATE EXTENSION IF NOT EXISTS orioledb;
+CREATE EXTENSION IF NOT EXISTS hstore;
 SELECT orioledb_parallel_debug_start();
 CREATE TABLE o_test1 (
        id integer NOT NULL,
@@ -667,6 +668,378 @@ SELECT * FROM o_test_ctid_toast_truncate_check_toast_oids;
 INSERT INTO o_test_ctid_toast_truncate VALUES (1, (SELECT generate_string(1, 10000)));
 COMMIT;
 SELECT * FROM o_test_ctid_toast_truncate_check_toast_oids;
+
+-----
+-- STORAGE MAIN regression tests
+-- oversized MAIN handling, index bridging, hstore
+-----
+
+-- use existing schema and helper function from the first part
+-- keep this part single-process to avoid flaky parallel-worker crashes
+SET max_parallel_workers_per_gather = 0;
+
+-----
+-- basic STORAGE MAIN check
+-----
+CREATE TABLE o_sm_text (
+	id integer PRIMARY KEY,
+	v  text STORAGE MAIN COMPRESSION pglz
+) USING orioledb;
+
+INSERT INTO o_sm_text VALUES (1, generate_string(1, 120));
+INSERT INTO o_sm_text VALUES (2, generate_string(2, 3200));
+INSERT INTO o_sm_text VALUES (3, generate_string(3, 7000));
+
+SELECT id, length(v) FROM o_sm_text ORDER BY id;
+
+UPDATE o_sm_text SET v = generate_string(10, 6000) WHERE id = 1;
+UPDATE o_sm_text SET v = generate_string(20, 100) WHERE id = 2;
+SELECT id, length(v) FROM o_sm_text ORDER BY id;
+
+SELECT orioledb_tbl_structure('o_sm_text'::regclass, 'nuet');
+
+-- delete and reinsert with STORAGE MAIN value
+DELETE FROM o_sm_text WHERE id = 3;
+INSERT INTO o_sm_text VALUES (3, generate_string(30, 7000));
+SELECT id, length(v) FROM o_sm_text WHERE id = 3;
+
+-----
+-- mixed STORAGE MAIN, EXTENDED, PLAIN check
+-----
+CREATE TABLE o_sm_mix (
+	id      integer PRIMARY KEY,
+	m_main  text STORAGE MAIN COMPRESSION pglz,
+	e_ext   text STORAGE EXTENDED COMPRESSION pglz,
+	p_plain text STORAGE PLAIN
+) USING orioledb;
+
+INSERT INTO o_sm_mix
+VALUES (1, generate_string(91, 3000), generate_string(92, 3000), generate_string(93, 500));
+
+SELECT id, length(m_main), length(e_ext), length(p_plain) FROM o_sm_mix;
+SELECT orioledb_tbl_structure('o_sm_mix'::regclass, 'nuet');
+
+-----
+-- bytea STORAGE MAIN check
+-----
+CREATE TABLE o_sm_bytea (
+	id integer PRIMARY KEY,
+	b  bytea STORAGE MAIN COMPRESSION pglz
+) USING orioledb;
+
+INSERT INTO o_sm_bytea VALUES (1, decode(generate_string(95, 6000), 'hex'));
+INSERT INTO o_sm_bytea VALUES (2, decode(generate_string(96, 8000), 'hex'));
+SELECT id, length(b) FROM o_sm_bytea ORDER BY id;
+SELECT orioledb_tbl_structure('o_sm_bytea'::regclass, 'nuet');
+
+-----
+-- MAIN + EXTENDED last-resort check
+-----
+CREATE TABLE o_sm_main_ext (
+	id bigint PRIMARY KEY,
+	m  text STORAGE MAIN COMPRESSION pglz,
+	e  text STORAGE EXTENDED COMPRESSION pglz
+) USING orioledb;
+
+INSERT INTO o_sm_main_ext VALUES (1, generate_string(101, 2000), generate_string(102, 9000));
+INSERT INTO o_sm_main_ext VALUES (2, generate_string(103, 9000), generate_string(104, 9000));
+
+SELECT id, length(m), length(e) FROM o_sm_main_ext ORDER BY id;
+SELECT orioledb_tbl_structure('o_sm_main_ext'::regclass, 'nuet');
+
+DO $$
+DECLARE
+	s text;
+BEGIN
+	s := orioledb_tbl_structure('o_sm_main_ext'::regclass, 'nuet');
+
+	IF position('PK: (''1''), attnum 2' IN s) > 0 THEN
+		RAISE EXCEPTION 'unexpected MAIN toast for o_sm_main_ext id=1';
+	END IF;
+	IF position('PK: (''1''), attnum 3' IN s) = 0 THEN
+		RAISE EXCEPTION 'expected EXTENDED toast for o_sm_main_ext id=1';
+	END IF;
+	IF position('PK: (''2''), attnum 2' IN s) = 0 THEN
+		RAISE EXCEPTION 'expected MAIN toast for o_sm_main_ext id=2';
+	END IF;
+	IF position('PK: (''2''), attnum 3' IN s) = 0 THEN
+		RAISE EXCEPTION 'expected EXTENDED toast for o_sm_main_ext id=2';
+	END IF;
+END $$;
+
+-----
+-- two MAIN columns, force out-of-line for larger first
+-----
+CREATE TABLE o_sm_two_main (
+	id      bigint PRIMARY KEY,
+	m_big   text STORAGE MAIN COMPRESSION pglz,
+	m_small text STORAGE MAIN COMPRESSION pglz,
+	e       text STORAGE EXTENDED COMPRESSION pglz
+) USING orioledb;
+
+INSERT INTO o_sm_two_main
+VALUES (1, generate_string(201, 9000), generate_string(202, 900), generate_string(203, 9000));
+
+SELECT id, length(m_big), length(m_small), length(e) FROM o_sm_two_main;
+SELECT orioledb_tbl_structure('o_sm_two_main'::regclass, 'nuet');
+
+DO $$
+DECLARE
+	s text;
+BEGIN
+	s := orioledb_tbl_structure('o_sm_two_main'::regclass, 'nuet');
+
+	IF position('PK: (''1''), attnum 2' IN s) = 0 THEN
+		RAISE EXCEPTION 'expected m_big to be toasted for o_sm_two_main id=1';
+	END IF;
+	IF position('PK: (''1''), attnum 3' IN s) > 0 THEN
+		RAISE EXCEPTION 'unexpected m_small toast for o_sm_two_main id=1';
+	END IF;
+	IF position('PK: (''1''), attnum 4' IN s) = 0 THEN
+		RAISE EXCEPTION 'expected EXTENDED column e to be toasted for o_sm_two_main id=1';
+	END IF;
+END $$;
+
+-----
+-- update path with toasted MAIN values
+-----
+CREATE TABLE o_sm_update (
+	id bigint PRIMARY KEY,
+	m  text STORAGE MAIN COMPRESSION pglz,
+	e  text STORAGE EXTENDED COMPRESSION pglz
+) USING orioledb;
+
+INSERT INTO o_sm_update VALUES (1, generate_string(11, 800), repeat('b', 2000));
+UPDATE o_sm_update
+	SET m = generate_string(12, 2500),
+		e = generate_string(13, 5000)
+	WHERE id = 1;
+UPDATE o_sm_update
+	SET m = generate_string(14, 600),
+		e = repeat('c', 1200)
+	WHERE id = 1;
+UPDATE o_sm_update SET m = m WHERE id = 1;
+SELECT id, length(m), length(e) FROM o_sm_update;
+
+-----
+-- rebuild path check (toast_sort_add)
+-----
+CREATE TABLE o_sm_rebuild (
+	id bigint PRIMARY KEY,
+	h  text STORAGE MAIN COMPRESSION pglz,
+	e  text STORAGE EXTENDED COMPRESSION pglz
+) USING orioledb;
+
+INSERT INTO o_sm_rebuild VALUES (1, 'h_small', repeat('e', 1200));
+INSERT INTO o_sm_rebuild VALUES (2, generate_string(301, 7000), generate_string(302, 9000));
+INSERT INTO o_sm_rebuild VALUES (3, generate_string(303, 4500), generate_string(304, 7000));
+
+-- hash index enables index bridging and rebuilds existing rows
+CREATE INDEX o_sm_rebuild_hash_idx ON o_sm_rebuild USING hash (h);
+
+SELECT id FROM o_sm_rebuild WHERE h = 'h_small';
+SELECT id FROM o_sm_rebuild WHERE h = (SELECT h FROM o_sm_rebuild WHERE id = 2);
+REINDEX INDEX o_sm_rebuild_hash_idx;
+
+-----
+-- non-btree secondary index checks with STORAGE MAIN
+-- include a non-btree secondary index case
+-----
+CREATE TABLE o_sm_bridge (
+	id   bigint PRIMARY KEY,
+	h    text STORAGE MAIN COMPRESSION pglz,
+	bt   text STORAGE MAIN COMPRESSION pglz,
+	tags text[] STORAGE MAIN COMPRESSION pglz,
+	vec  tsvector STORAGE MAIN COMPRESSION pglz,
+	br   text STORAGE MAIN COMPRESSION pglz
+) USING orioledb;
+
+CREATE INDEX o_sm_bridge_hash_idx ON o_sm_bridge USING hash (h);
+CREATE INDEX o_sm_bridge_btree_idx ON o_sm_bridge (bt);
+CREATE INDEX o_sm_bridge_gin_idx ON o_sm_bridge USING gin (tags);
+CREATE INDEX o_sm_bridge_gist_idx ON o_sm_bridge USING gist (vec);
+CREATE INDEX o_sm_bridge_brin_idx ON o_sm_bridge USING brin (br);
+
+INSERT INTO o_sm_bridge VALUES (
+	1,
+	'h_small',
+	'bt_small',
+	ARRAY['a','b'],
+	to_tsvector('simple', 'alpha beta'),
+	'b_small'
+);
+
+INSERT INTO o_sm_bridge VALUES (
+	2,
+	repeat('h', 7000),
+	'bt_mid',
+	array_fill('x'::text, ARRAY[300]),
+	to_tsvector('simple', repeat('tok ', 700)),
+	repeat('b', 7000)
+);
+
+INSERT INTO o_sm_bridge VALUES (
+	3,
+	generate_string(23, 3500),
+	'bt_rand',
+	ARRAY(SELECT substr(md5(i::text), 1, 8) FROM generate_series(1, 250) AS i),
+	to_tsvector('simple', (SELECT string_agg('term' || i, ' ') FROM generate_series(1, 300) AS i)),
+	generate_string(24, 4000)
+);
+
+SELECT id FROM o_sm_bridge WHERE h = (SELECT h FROM o_sm_bridge WHERE id = 2);
+SELECT id FROM o_sm_bridge WHERE bt = 'bt_mid';
+SELECT id FROM o_sm_bridge WHERE tags @> ARRAY['x'];
+SELECT id FROM o_sm_bridge WHERE vec @@ to_tsquery('simple', 'tok');
+SELECT id FROM o_sm_bridge WHERE br LIKE 'b%';
+
+UPDATE o_sm_bridge
+	SET h = repeat('H', 6500),
+		tags = array_fill('y'::text, ARRAY[200]),
+		vec = to_tsvector('simple', repeat('upd ', 500)),
+		br = repeat('c', 6500)
+	WHERE id = 2;
+
+SELECT id FROM o_sm_bridge WHERE h = repeat('H', 6500);
+SELECT id FROM o_sm_bridge WHERE tags @> ARRAY['y'];
+SELECT id FROM o_sm_bridge WHERE vec @@ to_tsquery('simple', 'upd');
+
+REINDEX INDEX o_sm_bridge_hash_idx;
+REINDEX INDEX o_sm_bridge_gin_idx;
+
+-----
+-- hstore STORAGE MAIN check
+-----
+CREATE TABLE o_sm_hstore (
+	id   integer PRIMARY KEY,
+	hs   hstore STORAGE MAIN COMPRESSION pglz,
+	note text COMPRESSION pglz
+) USING orioledb;
+
+INSERT INTO o_sm_hstore VALUES (1, 'k1=>v1,k2=>v2'::hstore, 'small');
+INSERT INTO o_sm_hstore
+SELECT
+	2,
+	hstore(array_agg('k' || i), array_agg(md5((1000 + i)::text))),
+	'large'
+FROM generate_series(1, 500) AS i;
+
+SELECT id, length(hs::text), hs ? 'k1' AS has_k1 FROM o_sm_hstore ORDER BY id;
+
+UPDATE o_sm_hstore
+SET hs = (
+	SELECT hstore(array_agg('u' || i), array_agg(md5((2000 + i)::text)))
+	FROM generate_series(1, 450) AS i
+)
+WHERE id = 2;
+
+SELECT id, length(hs::text), hs ? 'u1' AS has_u1 FROM o_sm_hstore WHERE id = 2;
+
+CREATE TABLE o_sm_hstore_src (
+	id integer PRIMARY KEY,
+	hs hstore STORAGE EXTENDED COMPRESSION pglz
+) USING orioledb;
+
+INSERT INTO o_sm_hstore_src
+SELECT
+	3,
+	hstore(array_agg('s' || i), array_agg(md5((3000 + i)::text)))
+FROM generate_series(1, 400) AS i;
+
+INSERT INTO o_sm_hstore
+SELECT id, hs, 'from_src'
+FROM o_sm_hstore_src
+ON CONFLICT (id) DO UPDATE SET hs = EXCLUDED.hs, note = EXCLUDED.note;
+
+SELECT id, length(hs::text), note FROM o_sm_hstore ORDER BY id;
+
+-----
+-- EXTENDED to MAIN cross-table transfer check
+-----
+CREATE TABLE o_sm_src (
+	id bigint PRIMARY KEY,
+	v  text STORAGE EXTENDED COMPRESSION pglz
+) USING orioledb;
+
+CREATE TABLE o_sm_dst (
+	id bigint PRIMARY KEY,
+	v  text STORAGE MAIN COMPRESSION pglz
+) USING orioledb;
+
+INSERT INTO o_sm_src VALUES (1, generate_string(401, 8000));
+INSERT INTO o_sm_dst SELECT * FROM o_sm_src;
+
+SELECT id, length(v) FROM o_sm_dst;
+SELECT orioledb_tbl_structure('o_sm_dst'::regclass, 'nuet');
+
+-----
+-- MAIN + EXTERNAL mix check
+-----
+CREATE TABLE o_sm_external (
+	id bigint PRIMARY KEY,
+	m  text STORAGE MAIN COMPRESSION pglz,
+	x  text STORAGE EXTERNAL
+) USING orioledb;
+
+INSERT INTO o_sm_external
+VALUES (1, generate_string(411, 2400), generate_string(412, 6000));
+
+SELECT id, length(m), length(x) FROM o_sm_external;
+SELECT orioledb_tbl_structure('o_sm_external'::regclass, 'nuet');
+
+-----
+-- NULL and empty string handling check
+-----
+CREATE TABLE o_sm_nulls (
+	id bigint PRIMARY KEY,
+	m  text STORAGE MAIN COMPRESSION pglz
+) USING orioledb;
+
+INSERT INTO o_sm_nulls VALUES (1, NULL);
+INSERT INTO o_sm_nulls VALUES (2, '');
+INSERT INTO o_sm_nulls VALUES (3, generate_string(421, 2500));
+
+UPDATE o_sm_nulls SET m = generate_string(422, 2600) WHERE id = 1;
+UPDATE o_sm_nulls SET m = NULL WHERE id = 3;
+
+SELECT id, length(m), m = '' AS is_empty FROM o_sm_nulls ORDER BY id;
+
+-----
+-- upsert check with MAIN + EXTENDED text columns
+-----
+CREATE TABLE o_sm_upsert (
+	id bigint PRIMARY KEY,
+	m  text STORAGE MAIN COMPRESSION pglz,
+	e  text STORAGE EXTENDED COMPRESSION pglz
+) USING orioledb;
+
+INSERT INTO o_sm_upsert VALUES (1, generate_string(431, 800), repeat('d', 2000));
+INSERT INTO o_sm_upsert VALUES (1, generate_string(432, 2500), generate_string(433, 5000))
+ON CONFLICT (id) DO UPDATE SET m = EXCLUDED.m, e = EXCLUDED.e;
+
+SELECT id, length(m), length(e) FROM o_sm_upsert;
+SELECT orioledb_tbl_structure('o_sm_upsert'::regclass, 'nuet');
+
+-----
+-- Cleanup
+-----
+DROP TABLE o_sm_text;
+DROP TABLE o_sm_mix;
+DROP TABLE o_sm_bytea;
+DROP TABLE o_sm_main_ext;
+DROP TABLE o_sm_two_main;
+DROP TABLE o_sm_update;
+DROP TABLE o_sm_rebuild;
+DROP TABLE o_sm_bridge;
+DROP TABLE o_sm_hstore;
+DROP TABLE o_sm_hstore_src;
+DROP TABLE o_sm_src;
+DROP TABLE o_sm_dst;
+DROP TABLE o_sm_external;
+DROP TABLE o_sm_nulls;
+DROP TABLE o_sm_upsert;
+DROP FUNCTION generate_string(integer, integer);
+RESET max_parallel_workers_per_gather;
 
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
