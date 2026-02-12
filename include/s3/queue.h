@@ -3,8 +3,8 @@
  * queue.h
  * 		A declarations for queue of tasks for S3 workers.
  *
- * Copyright (c) 2024-2025, Oriole DB Inc.
- * Copyright (c) 2025, Supabase Inc.
+ * Copyright (c) 2024-2026, Oriole DB Inc.
+ * Copyright (c) 2025-2026, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/s3/queue.h

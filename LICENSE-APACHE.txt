@@ -1,4 +1,4 @@
-Copyright 2025 Supabase
+Copyright 2025-2026 Supabase
 
                                  Apache License
                            Version 2.0, January 2004

@@ -4,8 +4,8 @@
  *		Declarations for implementation of BTree interface for OrioleDB
  *		tables.
  *
- * Copyright (c) 2025, Oriole DB Inc.
- * Copyright (c) 2025, Supabase Inc.
+ * Copyright (c) 2025-2026, Oriole DB Inc.
+ * Copyright (c) 2025-2026, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/include/tableam/vacuum.h
