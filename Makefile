@@ -57,8 +57,7 @@ OBJS = src/btree/btree.o \
 	   src/recovery/logical.o \
 	   src/recovery/recovery.o \
 	   src/recovery/wal.o \
-	   src/recovery/wal_dispatch.o \
-	   src/recovery/wal_container_iter.o \
+	   src/recovery/wal_reader.o \
 	   src/recovery/worker.o \
 	   src/rewind/rewind.o \
 	   src/s3/archive.o \

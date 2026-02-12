@@ -21,8 +21,7 @@
 #include "recovery/recovery.h"
 #include "recovery/internal.h"
 #include "recovery/wal.h"
-#include "recovery/wal_dispatch.h"
-#include "recovery/wal_container_iter.h"
+#include "recovery/wal_reader.h"
 #include "tableam/descr.h"
 #include "tuple/slot.h"
 

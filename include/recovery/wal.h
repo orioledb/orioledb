@@ -15,7 +15,6 @@
 #define __WAL_H__
 
 #include "recovery/wal_reader.h"
-#include "recovery/wal_event.h"
 
 /*
  * WAL record types
