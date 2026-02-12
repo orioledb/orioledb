@@ -673,7 +673,7 @@ decode_wal_on_flag(void *vctx, const WalRecord *rec)
 }
 
 static WalParseResult
-decode_wal_on_event(void *vctx, WalRecord *rec)
+decode_wal_on_record(void *vctx, WalRecord *rec)
 {
 	DecodeWalDescCtx *ctx = (DecodeWalDescCtx *) vctx;
 	const char *recname = NULL;
@@ -1304,7 +1304,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		.ctx = &dctx,
 		.check_version = decode_wal_check_version,
 		.on_flag = decode_wal_on_flag,
-		.on_event = decode_wal_on_event
+		.on_record = decode_wal_on_record
 	};
 
 	WalParseResult st;

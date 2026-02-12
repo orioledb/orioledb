@@ -16,6 +16,12 @@
 
 typedef unsigned int wal_type_t;
 
+/*
+ * WalRecord instances are transient and reused across iterations.
+ *
+ * Callers must not retain pointers to the record itself.
+ * Any data that must outlive the callback must be copied.
+ */
 typedef struct WalRecord
 {
 	wal_type_t	type;
@@ -109,6 +115,29 @@ typedef struct WalRecord
 
 } WalRecord;
 
+/*
+ * WalParseResult
+ *
+ * Status codes returned by the WAL container parser and callbacks.
+ *
+ * WALPARSE_OK
+ *     Success.
+ *
+ * WALPARSE_EOF
+ *     Not enough bytes in the input buffer to parse the requested element.
+ *     This is a "need more data" / framing error depending on the caller.
+ *
+ * WALPARSE_BAD_TYPE
+ *     Unknown record/flag type, missing descriptor, or otherwise
+ *     unparseable tag. Treated as a hard protocol error.
+ *
+ * WALPARSE_BAD_VERSION
+ *     Container version policy rejected by the consumer (typically WAL from
+ *     a newer or unsupported OrioleDB version).
+ *
+ * WALPARSE_INTERNAL
+ *     Internal invariant violation or unexpected condition.
+ */
 typedef enum WalParseResult
 {
 	WALPARSE_OK = 0,
@@ -123,8 +152,19 @@ struct WalReaderState;
 
 typedef WalParseResult (*WalCheckVersionFn) (const struct WalReaderState *r);
 typedef WalParseResult (*WalOnFlagFn) (void *ctx, const WalRecord *rec);
-typedef WalParseResult (*WalOnEventFn) (void *ctx, WalRecord *rec);
+typedef WalParseResult (*WalOnRecordFn) (void *ctx, WalRecord *rec);
 
+/*
+ * Cursor advancement invariant:
+ *
+ * r->ptr must only be advanced by:
+ *
+ *   - WR_PARSE / WR_SKIP,
+ *   - record parse routines,
+ *   - container flag parsers.
+ *
+ * Consumers must never modify ptr.
+ */
 typedef struct WalReaderState
 {
 	Pointer		start;
@@ -137,12 +177,35 @@ typedef struct WalReaderState
 	void	   *ctx;
 	WalCheckVersionFn check_version;
 	WalOnFlagFn on_flag;
-	WalOnEventFn on_event;
+	WalOnRecordFn on_record;
 
 } WalReaderState;
 
+/*
+ * WalParseFn
+ *
+ * Parser routine for a single record type.
+ *
+ * The parser must:
+ *   - read exactly this record's payload from r->ptr,
+ *   - populate rec->u.* fields as needed,
+ *   - leave r->ptr positioned at the next record tag.
+ *
+ * It must not read beyond r->end; use WR_REQUIRE_SIZE / WR_PARSE / WR_SKIP.
+ *
+ * For payload-less records, descriptor->parse is NULL (record is tag-only).
+ */
 typedef WalParseResult (*WalParseFn) (WalReaderState *r, WalRecord *rec);
 
+/*
+ * WalRecordDesc
+ *
+ * Static descriptor for a record (or flag) type.
+ *
+ * The descriptor table is the single source of truth for:
+ *   - mapping type -> name (debug),
+ *   - mapping type -> payload parser.
+ */
 typedef struct WalRecordDesc
 {
 	wal_type_t	type;
@@ -150,6 +213,22 @@ typedef struct WalRecordDesc
 	WalParseFn	parse;
 
 } WalRecordDesc;
+
+/*
+ * Reader helpers.
+ *
+ * WR_REQUIRE_SIZE()
+ *     Ensures that at least nbytes remain in the input buffer.
+ *
+ * WR_PARSE()
+ *     Copies sizeof(*out) bytes from r->ptr into *out and advances r->ptr.
+ *
+ * WR_SKIP()
+ *     Advances r->ptr by sz bytes after bounds check.
+ *
+ * These macros are the preferred way to move the cursor. Direct arithmetic
+ * on r->ptr should be avoided outside of low-level parsing code.
+ */
 
 #define WR_REQUIRE_SIZE(r, nbytes) \
 do { \
@@ -173,9 +252,9 @@ do { \
 extern void build_fixed_tuples(const WalRecord *rec, OFixedTuple *tuple1, OFixedTuple *tuple2);
 
 extern const WalRecordDesc *wal_get_desc(wal_type_t type);
-extern const char *wal_type_name(wal_type_t type);
-
 extern const WalRecordDesc *wal_flag_get_desc(wal_type_t type);
+
+extern const char *wal_type_name(wal_type_t type);
 extern const char *wal_flag_type_name(wal_type_t type);
 
 extern WalParseResult parse_wal_container(WalReaderState *r, bool allow_logging);

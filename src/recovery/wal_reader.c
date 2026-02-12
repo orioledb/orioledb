@@ -23,6 +23,39 @@
 #include "recovery/wal_reader.h"
 #include "recovery/wal.h"
 
+/*
+ * This file implements the generic OrioleDB WAL container parser.
+ *
+ * The parser is responsible only for:
+ *   - container framing (header, flags prefix, record tag/payload scanning),
+ *   - descriptor-driven payload decoding,
+ *   - safe cursor advancement with bounds checking.
+ *
+ * Parsing is strictly single-pass and forward-only.
+ *
+ * The reader never rewinds and never performs lookahead beyond what is
+ * required for the current record. This guarantees predictable cursor
+ * movement and avoids quadratic behavior on large containers.
+ *
+ * All semantic decisions (version policy, applying changes, decoding, etc.)
+ * are delegated to the WalReaderState's consumer callbacks.
+ *
+ * Descriptor tables are generated from ORIOLE_WAL_RECORDS / ORIOLE_WAL_FLAGS,
+ * making the type->parser mapping a single source of truth and preventing
+ * protocol-breaking omissions when new types/flags are introduced.
+ */
+
+/*
+ * g_wal_descs / g_wal_flag_descs
+ *
+ * Static descriptor tables generated from the X-macro lists.
+ *
+ * Keeping these tables centralized ensures that adding a new WAL record or
+ * container flag is a single-point change: the parser automatically learns
+ * about new types via the descriptor list, and cannot "forget" to handle a
+ * flag payload (which would desynchronize the stream).
+ */
+
 static const WalRecordDesc g_wal_descs[] =
 {
 #define X(sym, val, name, fn) { (wal_type_t)(val), name, (fn) },
@@ -37,6 +70,19 @@ static const WalRecordDesc g_wal_flag_descs[] =
 #undef X
 };
 
+/*
+ * wal_get_desc() / wal_flag_get_desc()
+ *
+ * Lookup descriptor for a record/flag type.
+ *
+ * Returns NULL if the type is not registered in the static descriptor
+ * tables generated from ORIOLE_WAL_RECORDS / ORIOLE_WAL_FLAGS.
+ *
+ * Note: unknown type is a hard protocol error for parse_wal_container(),
+ * because without a descriptor we cannot determine payload length and cannot
+ * safely advance the cursor.
+ */
+
 const WalRecordDesc *
 wal_get_desc(wal_type_t type)
 {
@@ -46,14 +92,6 @@ wal_get_desc(wal_type_t type)
 	return NULL;
 }
 
-const char *
-wal_type_name(wal_type_t type)
-{
-	const WalRecordDesc *d = wal_get_desc(type);
-
-	return d ? d->name : "UNKNOWN";
-}
-
 const WalRecordDesc *
 wal_flag_get_desc(wal_type_t type)
 {
@@ -61,6 +99,14 @@ wal_flag_get_desc(wal_type_t type)
 		if (g_wal_flag_descs[i].type == type)
 			return &g_wal_flag_descs[i];
 	return NULL;
+}
+
+const char *
+wal_type_name(wal_type_t type)
+{
+	const WalRecordDesc *d = wal_get_desc(type);
+
+	return d ? d->name : "UNKNOWN";
 }
 
 const char *
@@ -85,6 +131,25 @@ build_fixed_tuple_from_tuple_view(const OTuple *view, const OffsetNumber len, OF
 	tuple->tuple.data = tuple->fixedData;
 }
 
+/*
+ * build_fixed_tuples()
+ *
+ * Helper for consumers that need stable tuple bytes for modify records.
+ *
+ * Modify records (INSERT/UPDATE/DELETE/REINSERT) expose tuple payload as
+ * pointers into the WAL container buffer. This is intentional: the parser
+ * does not allocate or copy data.
+ *
+ * This function exists to make the ownership boundary explicit:
+ * the WAL parser never allocates.
+ *
+ * build_fixed_tuples() copies the tuple bytes into OFixedTuple buffers
+ * provided by the caller (including MAXALIGN padding), producing OTuple
+ * instances safe to use after the current callback returns.
+ *
+ * The function expects tuple->fixedData to be allocated by the caller and
+ * sized to hold MAXALIGN(len).
+ */
 void
 build_fixed_tuples(const WalRecord *rec, OFixedTuple *tuple1, OFixedTuple *tuple2)
 {
@@ -105,7 +170,12 @@ build_fixed_tuples(const WalRecord *rec, OFixedTuple *tuple1, OFixedTuple *tuple
 	}
 }
 
-/* @TODO rename after migration! */
+/*
+ * On success, r->ptr is positioned at the first byte after the
+ * container header.
+ *
+ * @TODO rename after migration!
+ */
 static WalParseResult
 wr_wal_container_read_header(WalReaderState *r, bool allow_logging)
 {
@@ -177,8 +247,40 @@ wr_wal_container_read_header(WalReaderState *r, bool allow_logging)
 	return WALPARSE_OK;
 }
 
-static WalParseResult
-wal_container_flag_check(WalReaderState *r, wal_type_t type)
+/*
+ * wal_container_parse_flag()
+ *
+ * Consume a single container flag payload if the flag is present.
+ *
+ * Container flags are advertised as a bitmask (r->wal_flags) but some flags
+ * carry additional bytes in the stream. Such payload is part of the container
+ * header prefix and MUST be consumed before reading the first record tag.
+ *
+ * Semantics:
+ *
+ *   - If the flag bit is not set, the function is a no-op and does not advance
+ *     r->ptr.
+ *
+ *   - If the flag bit is set, the flag descriptor is mandatory. We must know
+ *     the exact payload format and length in order to advance r->ptr safely.
+ *     A missing descriptor or parser is treated as WALPARSE_BAD_TYPE: without
+ *     it, we cannot maintain record boundary alignment.
+ *
+ *   - If the flag has a payload parser, it must consume exactly this flag's
+ *     payload bytes and leave r->ptr positioned at the next element
+ *     (either another flag payload or the first record tag).
+ *
+ *   - After successful parsing, the flag is optionally delivered to the
+ *     consumer via r->on_flag(). The callback may capture header-wide context
+ *     (e.g. PG xid/origin) needed for interpreting subsequent records, but must
+ *     not attempt to move r->ptr.
+ *
+ * Note: flags with payload are protocol-critical. Forgetting to consume a flag
+ * payload would desynchronize the stream and cause the next record tag to be
+ * misread.
+ */
+static inline WalParseResult
+wal_container_parse_flag(WalReaderState *r, wal_type_t type)
 {
 	WalParseResult st = WALPARSE_OK;
 
@@ -186,6 +288,10 @@ wal_container_flag_check(WalReaderState *r, wal_type_t type)
 
 	if (r->wal_flags & type)
 	{
+		/*
+		 * Descriptor is required to know payload length and keep cursor
+		 * aligned.
+		 */
 		const WalRecordDesc *d = wal_flag_get_desc(type);
 
 		Assert(d && d->parse);
@@ -207,8 +313,30 @@ wal_container_flag_check(WalReaderState *r, wal_type_t type)
 	return st;
 }
 
-static WalParseResult
-wal_container_flags_iterate(WalReaderState *r)
+/*
+ * wal_container_parse_flags()
+ *
+ * Consume all known container flags (header prefix).
+ *
+ * Flags are parsed in a deterministic order defined by ORIOLE_WAL_FLAGS.
+ *
+ * Although flags are represented on-wire as a bitmask, their payloads (if any)
+ * are serialized as a byte stream in the container header area. Therefore,
+ * the parser must consume payloads in a deterministic, protocol-defined order.
+ *
+ * We define that order by expanding ORIOLE_WAL_FLAGS(X) and calling
+ * wal_container_parse_flag() once per declared flag. This provides a single
+ * source of truth: introducing a new container flag requires updating only
+ * ORIOLE_WAL_FLAGS, and the parser automatically starts consuming its payload.
+ *
+ * This is intentionally not a runtime loop: the expansion is compile-time and
+ * avoids maintaining a separate hand-written list of flags in the parser,
+ * which is otherwise easy to forget and would silently break protocol framing.
+ *
+ * On success, r->ptr is positioned at the first record tag byte.
+ */
+static inline WalParseResult
+wal_container_parse_flags(WalReaderState *r)
 {
 	WalParseResult st = WALPARSE_OK;
 
@@ -216,7 +344,7 @@ wal_container_flags_iterate(WalReaderState *r)
 
 #define X(sym, val, name, fn) \
 do { \
-	st = wal_container_flag_check(r, sym); \
+	st = wal_container_parse_flag(r, sym); \
 	if (st) \
 		return st; \
 } while(0);
@@ -228,6 +356,31 @@ do { \
 		return st;
 }
 
+/*
+ * parse_wal_container()
+ *
+ * Parse a single OrioleDB WAL container payload and deliver records to a
+ * consumer.
+ *
+ * The function is responsible for:
+ *   - reading the container header (version + flags),
+ *   - invoking consumer's check_version() (if provided),
+ *   - consuming and delivering all container flags (header prefix),
+ *   - scanning the record stream and invoking consumer's on_record() per record.
+ *
+ * It is intentionally minimal:
+ *   - no allocations,
+ *   - no buffering,
+ *   - no policy beyond protocol safety.
+ *
+ * Error handling:
+ *   - returns WALPARSE_EOF if the input buffer ends mid-element,
+ *   - returns WALPARSE_BAD_TYPE for unknown types / missing descriptors,
+ *   - returns consumer-provided status for version policy decisions.
+ *
+ * The caller owns the input buffer; record-local pointers are valid only
+ * while the input buffer remains valid.
+ */
 WalParseResult
 parse_wal_container(WalReaderState *r, bool allow_logging)
 {
@@ -235,7 +388,7 @@ parse_wal_container(WalReaderState *r, bool allow_logging)
 	WalRecord	rec;
 
 	Assert(r);
-	Assert(r->on_event);		/* consumer must handle every record */
+	Assert(r->on_record);		/* consumer must handle every record */
 
 	memset(&rec, 0, sizeof(rec));
 
@@ -286,7 +439,7 @@ parse_wal_container(WalReaderState *r, bool allow_logging)
 	 * The flag handling also gives the consumer a chance to capture
 	 * header-wide context (e.g. xact-info) before any records are delivered.
 	 */
-	st = wal_container_flags_iterate(r);
+	st = wal_container_parse_flags(r);
 	if (st)
 		return st;
 
@@ -435,7 +588,7 @@ parse_wal_container(WalReaderState *r, bool allow_logging)
 		 * selectively ignore records. Any non-OK status is treated as fatal
 		 * for this container iteration.
 		 */
-		st = r->on_event(r->ctx, &rec);
+		st = r->on_record(r->ctx, &rec);
 		if (st)
 			return st;
 	}

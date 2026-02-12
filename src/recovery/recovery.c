@@ -3074,7 +3074,7 @@ typedef struct
 } ReplayWalDescCtx;
 
 static WalParseResult
-replay_wal_on_event(void *vctx, WalRecord *rec)
+replay_wal_on_record(void *vctx, WalRecord *rec)
 {
 	ReplayWalDescCtx *ctx = (ReplayWalDescCtx *) vctx;
 
@@ -3478,7 +3478,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		.ctx = &dctx,
 		.check_version = replay_wal_check_version,
 		.on_flag = replay_wal_on_flag,
-		.on_event = replay_wal_on_event
+		.on_record = replay_wal_on_record
 	};
 
 	WalParseResult st = parse_wal_container(&r, true /* allow_logging */ );
