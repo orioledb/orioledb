@@ -325,23 +325,24 @@ orioledb_rm_desc(StringInfo buf, XLogReaderState *record)
 	Pointer		startPtr = (Pointer) XLogRecGetData(record);
 	Pointer		endPtr = startPtr + XLogRecGetDataLen(record);
 
+	WalDescCtx	dctx = {
+		.buf = buf
+	};
+
 	WalReaderState r = {
 		.start = startPtr,
 		.end = endPtr,
 		.ptr = startPtr,
 		.wal_version = 0,
-		.wal_flags = 0
-	};
-	WalDescCtx	dctx = {
-		.buf = buf
-	};
-	WalConsumer cons = {
+		.wal_flags = 0,
+		/* Consumer */
 		.ctx = &dctx,
 		.check_version = wal_desc_check_version,
 		.on_flag = NULL,
 		.on_event = wal_desc_on_event
 	};
-	WalParseResult st = parse_wal_container(&r, &cons, false /* allow_logging */ );
+
+	WalParseResult st = parse_wal_container(&r, false /* allow_logging */ );
 
 	if (st != WALPARSE_OK)
 		appendStringInfo(buf, " [PARSE ERROR %d]", (int) st);

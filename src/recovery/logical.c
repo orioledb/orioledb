@@ -633,7 +633,6 @@ decode_wal_check_version(const WalReaderState *r)
 typedef struct
 {
 	/* Input params */
-	const WalReaderState *r;
 	XLogRecPtr	xlogRecPtr;
 	XLogRecPtr	xlogRecEndPtr;
 	LogicalDecodingContext *dctx;
@@ -962,7 +961,7 @@ decode_wal_on_event(void *vctx, WalRecord *rec)
 				int			sys_tree_num = -1;
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
 
-				if (ctx->r->wal_version >= 17)
+				if (rec->wal_version >= 17)
 				{
 					rec->u.relation.snapshot.xlogptr = xlogPtr;
 				}
@@ -1087,7 +1086,7 @@ decode_wal_on_event(void *vctx, WalRecord *rec)
 				CSNSnapshotData *csnSnapshot = NULL;
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
 
-				if (ctx->r->wal_version < 17)
+				if (rec->wal_version < 17)
 				{
 					/* Skip */
 					return WALPARSE_OK;
@@ -1278,16 +1277,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	Pointer		startPtr = (Pointer) XLogRecGetData(record);
 	Pointer		endPtr = startPtr + XLogRecGetDataLen(record);
 
-	WalReaderState r = {
-		.start = startPtr,
-		.end = endPtr,
-		.ptr = startPtr,
-		.wal_version = 0,
-		.wal_flags = 0
-	};
-
 	DecodeWalDescCtx dctx = {
-		.r = &r,
 		.xlogRecPtr = startXLogPtr,
 		.xlogRecEndPtr = endXLogPtr,
 
@@ -1304,7 +1294,13 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		.has_origin = false
 	};
 
-	WalConsumer cons = {
+	WalReaderState r = {
+		.start = startPtr,
+		.end = endPtr,
+		.ptr = startPtr,
+		.wal_version = 0,
+		.wal_flags = 0,
+		/* Consumer */
 		.ctx = &dctx,
 		.check_version = decode_wal_check_version,
 		.on_flag = decode_wal_on_flag,
@@ -1319,7 +1315,7 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	elog(DEBUG4, "OrioleDB decode started startXLogPtr %X/%X endXLogPtr %X/%X",
 		 LSN_FORMAT_ARGS(startXLogPtr), LSN_FORMAT_ARGS(endXLogPtr));
 
-	st = parse_wal_container(&r, &cons, true /* allow_logging */ );
+	st = parse_wal_container(&r, true /* allow_logging */ );
 
 	if (st)
 		elog(FATAL, "[WAL PARSE ERROR %d]", st);

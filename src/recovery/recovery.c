@@ -3459,14 +3459,6 @@ static bool
 replay_container(Pointer startPtr, Pointer endPtr,
 				 bool single, XLogRecPtr xlogRecPtr, XLogRecPtr xlogRecEndPtr)
 {
-	WalReaderState r = {
-		.start = startPtr,
-		.end = endPtr,
-		.ptr = startPtr,
-		.wal_version = 0,
-		.wal_flags = 0
-	};
-
 	ReplayWalDescCtx dctx = {
 		.single = single,
 		.xlogRecPtr = xlogRecPtr,
@@ -3476,14 +3468,20 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		.indexDescr = NULL
 	};
 
-	WalConsumer cons = {
+	WalReaderState r = {
+		.start = startPtr,
+		.end = endPtr,
+		.ptr = startPtr,
+		.wal_version = 0,
+		.wal_flags = 0,
+		/* Consumer */
 		.ctx = &dctx,
 		.check_version = replay_wal_check_version,
 		.on_flag = replay_wal_on_flag,
 		.on_event = replay_wal_on_event
 	};
 
-	WalParseResult st = parse_wal_container(&r, &cons, true /* allow_logging */ );
+	WalParseResult st = parse_wal_container(&r, true /* allow_logging */ );
 
 	if (st)
 		return false;

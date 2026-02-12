@@ -22,6 +22,7 @@ typedef struct WalRecord
 
 	uint32		delta;
 	Pointer		value_ptr;
+	uint16		wal_version;
 
 	ORelOids	oids;
 	OXid		oxid;
@@ -108,18 +109,6 @@ typedef struct WalRecord
 
 } WalRecord;
 
-typedef struct WalReaderState
-{
-	Pointer		start;
-	Pointer		end;
-
-	Pointer		ptr;
-
-	uint16		wal_version;
-	uint8		wal_flags;
-
-} WalReaderState;
-
 typedef enum WalParseResult
 {
 	WALPARSE_OK = 0,
@@ -130,6 +119,28 @@ typedef enum WalParseResult
 
 } WalParseResult;
 
+struct WalReaderState;
+
+typedef WalParseResult (*WalCheckVersionFn) (const struct WalReaderState *r);
+typedef WalParseResult (*WalOnFlagFn) (void *ctx, const WalRecord *rec);
+typedef WalParseResult (*WalOnEventFn) (void *ctx, WalRecord *rec);
+
+typedef struct WalReaderState
+{
+	Pointer		start;
+	Pointer		end;
+	Pointer		ptr;
+	uint16		wal_version;
+	uint8		wal_flags;
+
+	/* Consumer */
+	void	   *ctx;
+	WalCheckVersionFn check_version;
+	WalOnFlagFn on_flag;
+	WalOnEventFn on_event;
+
+} WalReaderState;
+
 typedef WalParseResult (*WalParseFn) (WalReaderState *r, WalRecord *rec);
 
 typedef struct WalRecordDesc
@@ -139,19 +150,6 @@ typedef struct WalRecordDesc
 	WalParseFn	parse;
 
 } WalRecordDesc;
-
-typedef WalParseResult (*WalCheckVersionFn) (const WalReaderState *r);
-typedef WalParseResult (*WalOnFlagFn) (void *ctx, const WalRecord *rec);
-typedef WalParseResult (*WalOnEventFn) (void *ctx, WalRecord *rec);
-
-typedef struct WalConsumer
-{
-	void	   *ctx;
-	WalCheckVersionFn check_version;
-	WalOnFlagFn on_flag;
-	WalOnEventFn on_event;
-
-} WalConsumer;
 
 #define WR_REQUIRE_SIZE(r, nbytes) \
 do { \
@@ -180,6 +178,6 @@ extern const char *wal_type_name(wal_type_t type);
 extern const WalRecordDesc *wal_flag_get_desc(wal_type_t type);
 extern const char *wal_flag_type_name(wal_type_t type);
 
-extern WalParseResult parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging);
+extern WalParseResult parse_wal_container(WalReaderState *r, bool allow_logging);
 
 #endif							/* __WAL_READER_H__ */

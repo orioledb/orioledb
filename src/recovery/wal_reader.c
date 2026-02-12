@@ -178,12 +178,11 @@ wr_wal_container_read_header(WalReaderState *r, bool allow_logging)
 }
 
 static WalParseResult
-wal_container_flag_check(WalReaderState *r, WalConsumer *consumer, wal_type_t type)
+wal_container_flag_check(WalReaderState *r, wal_type_t type)
 {
 	WalParseResult st = WALPARSE_OK;
 
 	Assert(r);
-	Assert(consumer);
 
 	if (r->wal_flags & type)
 	{
@@ -198,8 +197,8 @@ wal_container_flag_check(WalReaderState *r, WalConsumer *consumer, wal_type_t ty
 
 			rec.type = type;
 			st = d->parse(r, &rec);
-			if (st == WALPARSE_OK && consumer->on_flag)
-				st = consumer->on_flag(consumer->ctx, &rec);
+			if (st == WALPARSE_OK && r->on_flag)
+				st = r->on_flag(r->ctx, &rec);
 		}
 		else
 			st = WALPARSE_BAD_TYPE;
@@ -209,16 +208,15 @@ wal_container_flag_check(WalReaderState *r, WalConsumer *consumer, wal_type_t ty
 }
 
 static WalParseResult
-wal_container_flags_iterate(WalReaderState *r, WalConsumer *consumer)
+wal_container_flags_iterate(WalReaderState *r)
 {
 	WalParseResult st = WALPARSE_OK;
 
 	Assert(r);
-	Assert(consumer);
 
 #define X(sym, val, name, fn) \
 do { \
-	st = wal_container_flag_check(r, consumer, sym); \
+	st = wal_container_flag_check(r, sym); \
 	if (st) \
 		return st; \
 } while(0);
@@ -231,14 +229,13 @@ do { \
 }
 
 WalParseResult
-parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging)
+parse_wal_container(WalReaderState *r, bool allow_logging)
 {
 	WalParseResult st;
 	WalRecord	rec;
 
 	Assert(r);
-	Assert(consumer);
-	Assert(consumer->on_event); /* consumer must handle every record */
+	Assert(r->on_event);		/* consumer must handle every record */
 
 	memset(&rec, 0, sizeof(rec));
 
@@ -268,12 +265,14 @@ parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging
 	 * Parsing WAL from a newer OrioleDB version can be unsafe even if the
 	 * container framing is understood, because record encodings may differ.
 	 */
-	if (consumer->check_version)
+	if (r->check_version)
 	{
-		st = consumer->check_version(r);
+		st = r->check_version(r);
 		if (st)
 			return st;
 	}
+
+	rec.wal_version = r->wal_version;
 
 	/*
 	 * Process container-level flags (a header prefix).
@@ -287,7 +286,7 @@ parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging
 	 * The flag handling also gives the consumer a chance to capture
 	 * header-wide context (e.g. xact-info) before any records are delivered.
 	 */
-	st = wal_container_flags_iterate(r, consumer);
+	st = wal_container_flags_iterate(r);
 	if (st)
 		return st;
 
@@ -359,8 +358,8 @@ parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging
 			 * OrioleDB version than the current build understands. The
 			 * version check above is expected to prevent this; hitting this
 			 * path may indicate that the container version/flags are
-			 * inconsistent, or that the version gate in
-			 * consumer->check_version is incomplete.
+			 * inconsistent, or that the version gate in r->check_version is
+			 * incomplete.
 			 *
 			 * 2) Registration mistake for a new record type: A new WAL_REC_*
 			 * constant was added, but the corresponding WalRecordDesc entry
@@ -436,7 +435,7 @@ parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging
 		 * selectively ignore records. Any non-OK status is treated as fatal
 		 * for this container iteration.
 		 */
-		st = consumer->on_event(consumer->ctx, &rec);
+		st = r->on_event(r->ctx, &rec);
 		if (st)
 			return st;
 	}
