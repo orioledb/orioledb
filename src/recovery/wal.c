@@ -1228,30 +1228,30 @@ wal_parse_modify(WalReaderState *r, WalEvent *ev)
 	if (!ev->u.modify.read_two_tuples)
 	{
 		WR_PARSE(r, &ev->u.modify.t1.formatFlags);
-		WR_PARSE(r, &ev->u.modify.t1.len);
-		Assert(ev->u.modify.t1.len > 0);
+		WR_PARSE(r, &ev->u.modify.len1);
+		Assert(ev->u.modify.len1 > 0);
 
 		ev->u.modify.t1.data = r->ptr;
-		WR_SKIP(r, ev->u.modify.t1.len);
+		WR_SKIP(r, ev->u.modify.len1);
 
-		WAL_TUPLE_VIEW_SET_NULL(ev->u.modify.t2);
+		O_TUPLE_SET_NULL(ev->u.modify.t2);
 	}
 	else
 	{
 		WR_PARSE(r, &ev->u.modify.t1.formatFlags);
 		WR_PARSE(r, &ev->u.modify.t2.formatFlags);
 
-		WR_PARSE(r, &ev->u.modify.t1.len);
-		WR_PARSE(r, &ev->u.modify.t2.len);
+		WR_PARSE(r, &ev->u.modify.len1);
+		WR_PARSE(r, &ev->u.modify.len2);
 
-		Assert(ev->u.modify.t1.len > 0);
-		Assert(ev->u.modify.t2.len > 0);
+		Assert(ev->u.modify.len1 > 0);
+		Assert(ev->u.modify.len2 > 0);
 
 		ev->u.modify.t1.data = r->ptr;
-		WR_SKIP(r, ev->u.modify.t1.len);
+		WR_SKIP(r, ev->u.modify.len1);
 
 		ev->u.modify.t2.data = r->ptr;
-		WR_SKIP(r, ev->u.modify.t2.len);
+		WR_SKIP(r, ev->u.modify.len2);
 	}
 
 	return WALPARSE_OK;

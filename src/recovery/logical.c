@@ -1245,7 +1245,7 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 
 						o_decode_modify_tuples(ctx->dctx->reorder, ev->type, ctx->ix_type, change,
 											   ctx->descr, ctx->indexDescr, ctx->o_toast_tupDesc, ctx->heap_toast_tupDesc,
-											   tuple1.tuple, tuple2.tuple, ev->u.modify.t1.len, ev->relreplident);
+											   tuple1.tuple, tuple2.tuple, ev->u.modify.len1, ev->relreplident);
 
 						ReorderBufferQueueChange(ctx->dctx->reorder, ev->logicalXid,
 												 xlogPtr, change, (ctx->ix_type == oIndexToast));

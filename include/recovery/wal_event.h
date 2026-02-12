@@ -16,47 +16,6 @@
 
 typedef unsigned int wal_type_t;
 
-/*
- * WalTupleView
- *
- * A lightweight, non-owning view over tuple data stored inside the WAL buffer.
- *
- * This structure does NOT own the memory it points to. Instead, "data" points
- * directly into the WalReaderState buffer and remains valid only while that buffer
- * is alive and unchanged.
- *
- * The parser intentionally avoids copying tuple payload in order to keep WAL
- * iteration zero-copy and cache-friendly. Consumers that need to keep the tuple
- * beyond the current parsing step MUST copy the data.
- *
- * In other words:
- *
- *   WalTupleView = borrowed pointer + length + format metadata
- *
- * Lifetime rules:
- *
- *   - Valid only during the current parse_wal_container() cycle.
- *   - Invalid once the reader advances to another WAL chunk or the buffer
- *     is reused.
- *
- * The name "View" is intentional: this is not a materialized tuple but merely
- * a view into the WAL stream.
- */
-typedef struct WalTupleView
-{
-	Pointer		data;
-	OffsetNumber len;
-	uint8		formatFlags;
-
-} WalTupleView;
-
-#define WAL_TUPLE_VIEW_SET_NULL(tv) \
-do { \
-    tv.data = NULL; \
-    tv.len = 0; \
-    tv.formatFlags = 0; \
-} while(0);
-
 typedef struct WalEvent
 {
 	wal_type_t	type;
@@ -129,8 +88,12 @@ typedef struct WalEvent
 
 		struct
 		{
-			WalTupleView t1;
-			WalTupleView t2;
+			OTuple		t1;
+			OffsetNumber len1;
+
+			OTuple		t2;
+			OffsetNumber len2;
+
 			bool		read_two_tuples;
 		}			modify;
 
