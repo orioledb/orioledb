@@ -83,21 +83,21 @@ build_fixed_tuple_from_tuple_view(const OTuple *view, const OffsetNumber len, OF
 }
 
 void
-build_fixed_tuples(const WalEvent *ev, OFixedTuple *tuple1, OFixedTuple *tuple2)
+build_fixed_tuples(const WalRecord *rec, OFixedTuple *tuple1, OFixedTuple *tuple2)
 {
-	Assert(ev);
+	Assert(rec);
 	Assert(tuple1);
 	Assert(tuple2);
-	Assert(ORIOLE_WAL_RECORD_IS_MODIFY(ev->type));
+	Assert(ORIOLE_WAL_RECORD_IS_MODIFY(rec->type));
 
-	if (!ev->u.modify.read_two_tuples)
+	if (!rec->u.modify.read_two_tuples)
 	{
-		build_fixed_tuple_from_tuple_view(&ev->u.modify.t1, ev->u.modify.len1, tuple1);
+		build_fixed_tuple_from_tuple_view(&rec->u.modify.t1, rec->u.modify.len1, tuple1);
 		O_TUPLE_SET_NULL(tuple2->tuple);
 	}
 	else
 	{
-		build_fixed_tuple_from_tuple_view(&ev->u.modify.t1, ev->u.modify.len1, tuple1);
-		build_fixed_tuple_from_tuple_view(&ev->u.modify.t2, ev->u.modify.len2, tuple2);
+		build_fixed_tuple_from_tuple_view(&rec->u.modify.t1, rec->u.modify.len1, tuple1);
+		build_fixed_tuple_from_tuple_view(&rec->u.modify.t2, rec->u.modify.len2, tuple2);
 	}
 }

@@ -18,8 +18,8 @@
 #include "recovery/wal_event.h"
 
 typedef WalParseResult (*WalCheckVersionFn) (const WalReaderState *r);
-typedef WalParseResult (*WalOnFlagFn) (void *ctx, const WalEvent *ev);
-typedef WalParseResult (*WalOnEventFn) (void *ctx, WalEvent *ev);
+typedef WalParseResult (*WalOnFlagFn) (void *ctx, const WalRecord *rec);
+typedef WalParseResult (*WalOnEventFn) (void *ctx, WalRecord *rec);
 
 typedef struct WalConsumer
 {

@@ -96,106 +96,106 @@ wal_record_type_to_string(int wal_record)
 }
 
 WalParseResult
-wal_flag_parse_container_xact_info(WalReaderState *r, WalEvent *ev)
+wal_flag_parse_container_xact_info(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
-	Assert(ev);
+	Assert(rec);
 
-	WR_PARSE(r, &ev->u.xact_info.xactTime);
-	WR_PARSE(r, &ev->u.xact_info.xid);
+	WR_PARSE(r, &rec->u.xact_info.xactTime);
+	WR_PARSE(r, &rec->u.xact_info.xid);
 
 	return WALPARSE_OK;
 }
 
 WalParseResult
-wal_flag_parse_container_has_origin(WalReaderState *r, WalEvent *ev)
+wal_flag_parse_container_has_origin(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
-	Assert(ev);
+	Assert(rec);
 
-	WR_PARSE(r, &ev->origin_id);
-	WR_PARSE(r, &ev->origin_lsn);
+	WR_PARSE(r, &rec->origin_id);
+	WR_PARSE(r, &rec->origin_lsn);
 
 	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_XID */
 WalParseResult
-wal_parse_xid(WalReaderState *r, WalEvent *ev)
+wal_parse_xid(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
-	Assert(ev);
+	Assert(rec);
 
-	WR_PARSE(r, &ev->oxid);
-	WR_PARSE(r, &ev->logicalXid);
+	WR_PARSE(r, &rec->oxid);
+	WR_PARSE(r, &rec->logicalXid);
 	if (r->wal_version >= 17)
 	{
-		WR_PARSE(r, &ev->heapXid);
+		WR_PARSE(r, &rec->heapXid);
 	}
 	else
 	{
-		ev->heapXid = InvalidTransactionId;
+		rec->heapXid = InvalidTransactionId;
 	}
 	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_COMMIT and WAL_REC_ROLLBACK */
 WalParseResult
-wal_parse_finish(WalReaderState *r, WalEvent *ev)
+wal_parse_finish(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
-	Assert(ev);
+	Assert(rec);
 
-	WR_PARSE(r, &ev->u.finish.xmin);
-	WR_PARSE(r, &ev->u.finish.csn);
+	WR_PARSE(r, &rec->u.finish.xmin);
+	WR_PARSE(r, &rec->u.finish.csn);
 
 	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_JOINT_COMMIT */
 WalParseResult
-wal_parse_joint_commit(WalReaderState *r, WalEvent *ev)
+wal_parse_joint_commit(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
-	Assert(ev);
+	Assert(rec);
 
-	WR_PARSE(r, &ev->u.joint_commit.xid);
-	WR_PARSE(r, &ev->u.joint_commit.xmin);
-	WR_PARSE(r, &ev->u.joint_commit.csn);
+	WR_PARSE(r, &rec->u.joint_commit.xid);
+	WR_PARSE(r, &rec->u.joint_commit.xmin);
+	WR_PARSE(r, &rec->u.joint_commit.csn);
 
 	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_RELATION */
 WalParseResult
-wal_parse_relation(WalReaderState *r, WalEvent *ev)
+wal_parse_relation(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
-	Assert(ev);
+	Assert(rec);
 
-	WR_PARSE(r, &ev->u.relation.treeType);
-	WR_PARSE(r, &ev->oids.datoid);
-	WR_PARSE(r, &ev->oids.reloid);
-	WR_PARSE(r, &ev->oids.relnode);
+	WR_PARSE(r, &rec->u.relation.treeType);
+	WR_PARSE(r, &rec->oids.datoid);
+	WR_PARSE(r, &rec->oids.reloid);
+	WR_PARSE(r, &rec->oids.relnode);
 
 	if (r->wal_version >= 17)
 	{
 		OXid		xmin;
 
 		WR_PARSE(r, &xmin);
-		WR_PARSE(r, &ev->u.relation.snapshot.csn);
-		WR_PARSE(r, &ev->u.relation.snapshot.cid);
+		WR_PARSE(r, &rec->u.relation.snapshot.csn);
+		WR_PARSE(r, &rec->u.relation.snapshot.cid);
 
-		ev->u.relation.snapshot.xmin = xmin;
+		rec->u.relation.snapshot.xmin = xmin;
 
-		WR_PARSE(r, &ev->u.relation.version);
-		WR_PARSE(r, &ev->u.relation.base_version);
+		WR_PARSE(r, &rec->u.relation.version);
+		WR_PARSE(r, &rec->u.relation.base_version);
 	}
 	else
 	{
-		ev->u.relation.snapshot = o_non_deleted_snapshot;
-		ev->u.relation.version = O_TABLE_INVALID_VERSION;
-		ev->u.relation.base_version = O_TABLE_INVALID_VERSION;
+		rec->u.relation.snapshot = o_non_deleted_snapshot;
+		rec->u.relation.version = O_TABLE_INVALID_VERSION;
+		rec->u.relation.base_version = O_TABLE_INVALID_VERSION;
 	}
 
 	return WALPARSE_OK;
@@ -203,111 +203,111 @@ wal_parse_relation(WalReaderState *r, WalEvent *ev)
 
 /* Parser for WAL_REC_RELREPLIDENT */
 WalParseResult
-wal_parse_relreplident(WalReaderState *r, WalEvent *ev)
+wal_parse_relreplident(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
-	Assert(ev);
+	Assert(rec);
 
 	/* Should be set only once and only from default */
-	Assert(ev->relreplident == REPLICA_IDENTITY_DEFAULT);
+	Assert(rec->relreplident == REPLICA_IDENTITY_DEFAULT);
 
-	WR_PARSE(r, &ev->relreplident);
+	WR_PARSE(r, &rec->relreplident);
 
 	/*
 	 * relreplident_ix_oid is reserved in the WAL_REC_RELREPLIDENT for the
 	 * future implementation of REPLICA IDENTITY USING INDEX and not used now
 	 */
-	WR_PARSE(r, &ev->u.relreplident.relreplident_ix_oid);
-	Assert(ev->u.relreplident.relreplident_ix_oid == InvalidOid);
+	WR_PARSE(r, &rec->u.relreplident.relreplident_ix_oid);
+	Assert(rec->u.relreplident.relreplident_ix_oid == InvalidOid);
 
 	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_O_TABLES_META_UNLOCK */
 WalParseResult
-wal_parse_o_tables_meta_unlock(WalReaderState *r, WalEvent *ev)
+wal_parse_o_tables_meta_unlock(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
-	Assert(ev);
+	Assert(rec);
 
-	WR_PARSE(r, &ev->u.unlock.oids.datoid);
-	WR_PARSE(r, &ev->u.unlock.oids.reloid);
-	WR_PARSE(r, &ev->u.unlock.oldRelnode);
-	WR_PARSE(r, &ev->u.unlock.oids.relnode);
+	WR_PARSE(r, &rec->u.unlock.oids.datoid);
+	WR_PARSE(r, &rec->u.unlock.oids.reloid);
+	WR_PARSE(r, &rec->u.unlock.oldRelnode);
+	WR_PARSE(r, &rec->u.unlock.oids.relnode);
 
 	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_SAVEPOINT */
 WalParseResult
-wal_parse_savepoint(WalReaderState *r, WalEvent *ev)
+wal_parse_savepoint(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
-	Assert(ev);
+	Assert(rec);
 
-	WR_PARSE(r, &ev->u.savepoint.parentSubid);
-	WR_PARSE(r, &ev->logicalXid);
-	WR_PARSE(r, &ev->u.savepoint.parentLogicalXid);
+	WR_PARSE(r, &rec->u.savepoint.parentSubid);
+	WR_PARSE(r, &rec->logicalXid);
+	WR_PARSE(r, &rec->u.savepoint.parentLogicalXid);
 
 	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_ROLLBACK_TO_SAVEPOINT */
 WalParseResult
-wal_parse_rollback_to_savepoint(WalReaderState *r, WalEvent *ev)
+wal_parse_rollback_to_savepoint(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
-	Assert(ev);
+	Assert(rec);
 
-	WR_PARSE(r, &ev->u.rb_to_sp.parentSubid);
+	WR_PARSE(r, &rec->u.rb_to_sp.parentSubid);
 	if (r->wal_version >= 17)
 	{
-		WR_PARSE(r, &ev->u.rb_to_sp.xmin);
-		WR_PARSE(r, &ev->u.rb_to_sp.csn);
+		WR_PARSE(r, &rec->u.rb_to_sp.xmin);
+		WR_PARSE(r, &rec->u.rb_to_sp.csn);
 	}
 	else
 	{
-		ev->u.rb_to_sp.xmin = InvalidOXid;
-		ev->u.rb_to_sp.csn = 0;
+		rec->u.rb_to_sp.xmin = InvalidOXid;
+		rec->u.rb_to_sp.csn = 0;
 	}
 	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_TRUNCATE */
 WalParseResult
-wal_parse_truncate(WalReaderState *r, WalEvent *ev)
+wal_parse_truncate(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
-	Assert(ev);
+	Assert(rec);
 
-	WR_PARSE(r, &ev->u.truncate.oids.datoid);
-	WR_PARSE(r, &ev->u.truncate.oids.reloid);
-	WR_PARSE(r, &ev->u.truncate.oids.relnode);
+	WR_PARSE(r, &rec->u.truncate.oids.datoid);
+	WR_PARSE(r, &rec->u.truncate.oids.reloid);
+	WR_PARSE(r, &rec->u.truncate.oids.relnode);
 
 	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_BRIDGE_ERASE */
 WalParseResult
-wal_parse_bridge_erase(WalReaderState *r, WalEvent *ev)
+wal_parse_bridge_erase(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
-	Assert(ev);
+	Assert(rec);
 
-	WR_PARSE(r, &ev->u.bridge_erase.iptr);
+	WR_PARSE(r, &rec->u.bridge_erase.iptr);
 
 	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_SWITCH_LOGICAL_XID */
 WalParseResult
-wal_parse_switch_logical_xid(WalReaderState *r, WalEvent *ev)
+wal_parse_switch_logical_xid(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
-	Assert(ev);
+	Assert(rec);
 
-	WR_PARSE(r, &ev->u.swxid.topXid);
-	WR_PARSE(r, &ev->u.swxid.subXid);
+	WR_PARSE(r, &rec->u.swxid.topXid);
+	WR_PARSE(r, &rec->u.swxid.subXid);
 
 	return WALPARSE_OK;
 }
@@ -1218,40 +1218,40 @@ set_local_wal_has_material_changes(bool value)
  * Two tuples in certain cases: (1) WAL_REC_REINSERT, (2) WAL_REC_UPDATE with REPLICA_IDENTITY_FULL
  */
 WalParseResult
-wal_parse_modify(WalReaderState *r, WalEvent *ev)
+wal_parse_modify(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
-	Assert(ev);
+	Assert(rec);
 
-	ev->u.modify.read_two_tuples = (ev->type == WAL_REC_REINSERT || (ev->type == WAL_REC_UPDATE && ev->relreplident == REPLICA_IDENTITY_FULL));
+	rec->u.modify.read_two_tuples = (rec->type == WAL_REC_REINSERT || (rec->type == WAL_REC_UPDATE && rec->relreplident == REPLICA_IDENTITY_FULL));
 
-	if (!ev->u.modify.read_two_tuples)
+	if (!rec->u.modify.read_two_tuples)
 	{
-		WR_PARSE(r, &ev->u.modify.t1.formatFlags);
-		WR_PARSE(r, &ev->u.modify.len1);
-		Assert(ev->u.modify.len1 > 0);
+		WR_PARSE(r, &rec->u.modify.t1.formatFlags);
+		WR_PARSE(r, &rec->u.modify.len1);
+		Assert(rec->u.modify.len1 > 0);
 
-		ev->u.modify.t1.data = r->ptr;
-		WR_SKIP(r, ev->u.modify.len1);
+		rec->u.modify.t1.data = r->ptr;
+		WR_SKIP(r, rec->u.modify.len1);
 
-		O_TUPLE_SET_NULL(ev->u.modify.t2);
+		O_TUPLE_SET_NULL(rec->u.modify.t2);
 	}
 	else
 	{
-		WR_PARSE(r, &ev->u.modify.t1.formatFlags);
-		WR_PARSE(r, &ev->u.modify.t2.formatFlags);
+		WR_PARSE(r, &rec->u.modify.t1.formatFlags);
+		WR_PARSE(r, &rec->u.modify.t2.formatFlags);
 
-		WR_PARSE(r, &ev->u.modify.len1);
-		WR_PARSE(r, &ev->u.modify.len2);
+		WR_PARSE(r, &rec->u.modify.len1);
+		WR_PARSE(r, &rec->u.modify.len2);
 
-		Assert(ev->u.modify.len1 > 0);
-		Assert(ev->u.modify.len2 > 0);
+		Assert(rec->u.modify.len1 > 0);
+		Assert(rec->u.modify.len2 > 0);
 
-		ev->u.modify.t1.data = r->ptr;
-		WR_SKIP(r, ev->u.modify.len1);
+		rec->u.modify.t1.data = r->ptr;
+		WR_SKIP(r, rec->u.modify.len1);
 
-		ev->u.modify.t2.data = r->ptr;
-		WR_SKIP(r, ev->u.modify.len2);
+		rec->u.modify.t2.data = r->ptr;
+		WR_SKIP(r, rec->u.modify.len2);
 	}
 
 	return WALPARSE_OK;

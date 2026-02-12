@@ -16,7 +16,7 @@
 
 typedef unsigned int wal_type_t;
 
-typedef struct WalEvent
+typedef struct WalRecord
 {
 	wal_type_t	type;
 
@@ -106,8 +106,8 @@ typedef struct WalEvent
 
 	}			u;
 
-} WalEvent;
+} WalRecord;
 
-extern void build_fixed_tuples(const WalEvent *ev, OFixedTuple *tuple1, OFixedTuple *tuple2);
+extern void build_fixed_tuples(const WalRecord *rec, OFixedTuple *tuple1, OFixedTuple *tuple2);
 
 #endif							/* __WAL_EVENT_H__ */

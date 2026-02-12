@@ -650,21 +650,21 @@ typedef struct
 } DecodeWalDescCtx;
 
 static WalParseResult
-decode_wal_on_flag(void *vctx, const WalEvent *ev)
+decode_wal_on_flag(void *vctx, const WalRecord *rec)
 {
 	DecodeWalDescCtx *ctx = (DecodeWalDescCtx *) vctx;
 
 	Assert(ctx);
-	Assert(ev);
+	Assert(rec);
 
-	switch (ev->type)
+	switch (rec->type)
 	{
 		case WAL_CONTAINER_HAS_XACT_INFO:
 			/* Skip WAL_REC_XACT_INFO */
 			break;
 
 		case WAL_CONTAINER_HAS_ORIGIN_INFO:
-			ctx->has_origin = ev->origin_id != InvalidRepOriginId;
+			ctx->has_origin = rec->origin_id != InvalidRepOriginId;
 			break;
 
 		default:
@@ -675,31 +675,31 @@ decode_wal_on_flag(void *vctx, const WalEvent *ev)
 }
 
 static WalParseResult
-decode_wal_on_event(void *vctx, WalEvent *ev)
+decode_wal_on_event(void *vctx, WalRecord *rec)
 {
 	DecodeWalDescCtx *ctx = (DecodeWalDescCtx *) vctx;
 	const char *recname = NULL;
 
 	Assert(ctx);
-	Assert(ev);
+	Assert(rec);
 
-	recname = wal_type_name(ev->type);
+	recname = wal_type_name(rec->type);
 
-	elog(LOG, "[%s] GET ETYPE %d `%s`", __func__, ev->type, recname);
+	elog(LOG, "[%s] GET ETYPE %d `%s`", __func__, rec->type, recname);
 
-	switch (ev->type)
+	switch (rec->type)
 	{
 		case WAL_REC_XID:
 			{
-				if (TransactionIdIsValid(ev->logicalXid))
+				if (TransactionIdIsValid(rec->logicalXid))
 				{
 					CSNSnapshotData *csnSnapshot;
 
 					elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
-						 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid);
+						 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
 					csnSnapshot = SnapBuildGetCSNSnaphot(ctx->dctx->snapshot_builder);
-					csnSnapshot->nextXid = Max(csnSnapshot->nextXid, ev->oxid);
+					csnSnapshot->nextXid = Max(csnSnapshot->nextXid, rec->oxid);
 				}
 				else
 				{
@@ -709,20 +709,20 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 					 * independed commit of Oriole system catalog changes)
 					 */
 					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu",
-						 ev->type, recname, ev->oxid);
+						 rec->type, recname, rec->oxid);
 				}
 				break;
 			}
 
 		case WAL_REC_SWITCH_LOGICAL_XID:
 			{
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + ev->delta;
-				TransactionId topXid = ev->u.swxid.topXid;
-				TransactionId subXid = ev->u.swxid.subXid;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
+				TransactionId topXid = rec->u.swxid.topXid;
+				TransactionId subXid = rec->u.swxid.subXid;
 
 				elog(DEBUG4, "RECEIVE record type %d (%s) %u=>%u oxid %lu logicalXId %u heapXid %u xlogPtr %X/%X",
-					 ev->type, recname, topXid, subXid,
-					 ev->oxid, ev->logicalXid, ev->heapXid, LSN_FORMAT_ARGS(xlogPtr));
+					 rec->type, recname, topXid, subXid,
+					 rec->oxid, rec->logicalXid, rec->heapXid, LSN_FORMAT_ARGS(xlogPtr));
 
 				Assert(TransactionIdIsValid(topXid));
 				Assert(TransactionIdIsValid(subXid));
@@ -738,19 +738,19 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 				dlist_iter	cur_txn_i;
 				ReorderBufferTXN *txn = NULL;
 				CSNSnapshotData *csnSnapshot = NULL;
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + ev->delta;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
 
 				elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
-					 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid);
+					 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
-				if (!TransactionIdIsValid(ev->logicalXid))
+				if (!TransactionIdIsValid(rec->logicalXid))
 				{
 					/*
 					 * Oriole logical xid stays invalid for an autonomous
 					 * transactions
 					 */
 					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu",
-						 ev->type, recname, ev->oxid);
+						 rec->type, recname, rec->oxid);
 
 					UpdateDecodingStats(ctx->dctx);
 
@@ -758,29 +758,29 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 				}
 
 				csnSnapshot = SnapBuildGetCSNSnaphot(ctx->dctx->snapshot_builder);
-				csnSnapshot->snapshotcsn = ev->u.finish.csn;
+				csnSnapshot->snapshotcsn = rec->u.finish.csn;
 				csnSnapshot->xlogptr = ctx->xlogRecEndPtr;
-				csnSnapshot->xmin = ev->u.finish.xmin;
+				csnSnapshot->xmin = rec->u.finish.xmin;
 
-				if (!set_snapshot(ctx->dctx, ev->logicalXid, xlogPtr))
+				if (!set_snapshot(ctx->dctx, rec->logicalXid, xlogPtr))
 					return WALPARSE_OK;
 
-				txn = get_reorder_buffer_txn(ctx->dctx->reorder, ev->logicalXid);
+				txn = get_reorder_buffer_txn(ctx->dctx->reorder, rec->logicalXid);
 
 				if (txn == NULL)
 				{
 					elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u :: unknown transaction, nothing to replay",
-						 ev->type, recname, ev->oxid, ev->logicalXid);
+						 rec->type, recname, rec->oxid, rec->logicalXid);
 				}
 
 				/* unknown transaction, nothing to replay */
 				if (txn != NULL)
 				{
-					Assert(TransactionIdIsValid(ev->logicalXid));
+					Assert(TransactionIdIsValid(rec->logicalXid));
 
-					if (ev->type == WAL_REC_COMMIT)
+					if (rec->type == WAL_REC_COMMIT)
 					{
-						if (remove_skipped_dml(&skippedDMLHash, ev->oxid))
+						if (remove_skipped_dml(&skippedDMLHash, rec->oxid))
 						{
 							/*
 							 * We have skipped at least one DML record for
@@ -792,7 +792,7 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 							 * without having emitted some of its changes.
 							 */
 							elog(ERROR, "SKIPPED DML for record type %d (%s) oxid %lu logicalXId %u heapXid %u",
-								 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid);
+								 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 						}
 
 						/*
@@ -803,7 +803,7 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 						if (SnapBuildXactNeedsSkip(ctx->dctx->snapshot_builder, ctx->xlogRecEndPtr - 1) || ctx->dctx->fast_forward)
 						{
 							elog(DEBUG4, "FORGET record type %d (%s) oxid %lu logicalXid %u heapXid %u",
-								 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid);
+								 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
 							dlist_foreach(cur_txn_i, &txn->subtxns)
 							{
@@ -816,8 +816,8 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 							ReorderBufferForget(ctx->dctx->reorder, txn->xid,
 												ctx->xlogRecPtr);
 
-							ev->oxid = InvalidOXid;
-							ev->logicalXid = InvalidTransactionId;
+							rec->oxid = InvalidOXid;
+							rec->logicalXid = InvalidTransactionId;
 
 							/* Skip processing of this transaction */
 							return WALPARSE_OK;
@@ -836,18 +836,18 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 													 ctx->xlogRecPtr, ctx->xlogRecEndPtr);
 						}
 						elog(DEBUG4, "COMMIT record type %d (%s) oxid %lu logicalXid %u heapXid %u, origin_id %u, origin_lsn %X/%X",
-							 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid,
-							 ev->origin_id, LSN_FORMAT_ARGS(ev->origin_lsn));
+							 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid,
+							 rec->origin_id, LSN_FORMAT_ARGS(rec->origin_lsn));
 
-						ReorderBufferCommit(ctx->dctx->reorder, ev->logicalXid,
+						ReorderBufferCommit(ctx->dctx->reorder, rec->logicalXid,
 											xlogPtr, ctx->xlogRecEndPtr,
-											0, ev->origin_id, ev->origin_lsn);
+											0, rec->origin_id, rec->origin_lsn);
 					}
 					else
 					{
-						Assert(ev->type == WAL_REC_ROLLBACK);
+						Assert(rec->type == WAL_REC_ROLLBACK);
 
-						if (remove_skipped_dml(&skippedDMLHash, ev->oxid))
+						if (remove_skipped_dml(&skippedDMLHash, rec->oxid))
 						{
 							/*
 							 * Skipped DML is expected on abort paths: if we
@@ -858,7 +858,7 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 							 * must clear the cache to avoid leaking state.
 							 */
 							elog(DEBUG4, "SKIPPED DML for record type %d (%s) oxid %lu logicalXId %u heapXid %u",
-								 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid);
+								 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 						}
 
 						dlist_foreach(cur_txn_i, &txn->subtxns)
@@ -869,16 +869,16 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 							ReorderBufferAbort(ctx->dctx->reorder, cur_txn->xid, ctx->xlogRecPtr, 0);
 						}
 						elog(DEBUG4, "ABORT record type %d (%s) oxid %lu logicalXid %u heapXid %u",
-							 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid);
+							 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
-						ReorderBufferAbort(ctx->dctx->reorder, ev->logicalXid, ctx->xlogRecPtr, 0);
+						ReorderBufferAbort(ctx->dctx->reorder, rec->logicalXid, ctx->xlogRecPtr, 0);
 					}
 				}
 
 				UpdateDecodingStats(ctx->dctx);
 
-				ev->oxid = InvalidOXid;
-				ev->logicalXid = InvalidTransactionId;
+				rec->oxid = InvalidOXid;
+				rec->logicalXid = InvalidTransactionId;
 
 				break;
 			}
@@ -886,25 +886,25 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 		case WAL_REC_JOINT_COMMIT:
 			{
 				CSNSnapshotData *csnSnapshot = NULL;
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + ev->delta;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
 
 				elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u",
-					 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid);
+					 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
-				if (!TransactionIdIsValid(ev->logicalXid))
+				if (!TransactionIdIsValid(rec->logicalXid))
 				{
 					/*
 					 * Oriole logical xid stays invalid for an autonomous
 					 * transactions
 					 */
 					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu",
-						 ev->type, recname, ev->oxid);
+						 rec->type, recname, rec->oxid);
 
 					UpdateDecodingStats(ctx->dctx);
 					return WALPARSE_OK;
 				}
 
-				if (remove_skipped_dml(&skippedDMLHash, ev->oxid))
+				if (remove_skipped_dml(&skippedDMLHash, rec->oxid))
 				{
 					/*
 					 * We have skipped at least one DML record for this
@@ -916,44 +916,44 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 					 * its changes.
 					 */
 					elog(ERROR, "SKIPPED DML for record type %d (%s) oxid %lu logicalXId %u heapXid %u",
-						 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid);
+						 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 				}
 
 				csnSnapshot = SnapBuildGetCSNSnaphot(ctx->dctx->snapshot_builder);
-				csnSnapshot->snapshotcsn = ev->u.joint_commit.csn;
+				csnSnapshot->snapshotcsn = rec->u.joint_commit.csn;
 				csnSnapshot->xlogptr = ctx->xlogRecEndPtr;
-				csnSnapshot->xmin = ev->u.joint_commit.xmin;
+				csnSnapshot->xmin = rec->u.joint_commit.xmin;
 
-				if (!set_snapshot(ctx->dctx, ev->logicalXid, xlogPtr))
+				if (!set_snapshot(ctx->dctx, rec->logicalXid, xlogPtr))
 					return WALPARSE_OK;
 
 				/* Skip actual commit processing */
 				if (SnapBuildXactNeedsSkip(ctx->dctx->snapshot_builder, ctx->xlogRecEndPtr - 1) || ctx->dctx->fast_forward)
 				{
 					elog(DEBUG4, "FORGET record type %d (%s) oxid %lu logicalXid %u heapXid %u",
-						 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid);
+						 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
-					ReorderBufferForget(ctx->dctx->reorder, ev->logicalXid, ctx->xlogRecPtr);
+					ReorderBufferForget(ctx->dctx->reorder, rec->logicalXid, ctx->xlogRecPtr);
 				}
 				else
 				{
-					if (TransactionIdIsValid(ev->heapXid) && TransactionIdIsValid(ev->logicalXid))
+					if (TransactionIdIsValid(rec->heapXid) && TransactionIdIsValid(rec->logicalXid))
 					{
 						/*
 						 * Oriole txn acts as a sub-txn to heap txn, needs
 						 * ReorderBufferCommitChild
 						 */
 						elog(DEBUG4, "ReorderBufferCommitChild on record type %d (%s) oxid %lu logicalXid %u heapXid %u",
-							 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid);
+							 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
-						ReorderBufferCommitChild(ctx->dctx->reorder, ev->heapXid, ev->logicalXid, ctx->dbuf->origptr, ctx->dbuf->endptr);
+						ReorderBufferCommitChild(ctx->dctx->reorder, rec->heapXid, rec->logicalXid, ctx->dbuf->origptr, ctx->dbuf->endptr);
 					}
 
 					UpdateDecodingStats(ctx->dctx);
 				}
 
-				ev->oxid = InvalidOXid;
-				ev->logicalXid = InvalidTransactionId;
+				rec->oxid = InvalidOXid;
+				rec->logicalXid = InvalidTransactionId;
 
 				break;
 			}
@@ -961,40 +961,40 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 		case WAL_REC_RELATION:
 			{
 				int			sys_tree_num = -1;
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + ev->delta;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
 
 				if (ctx->r->wal_version >= 17)
 				{
-					ev->u.relation.snapshot.xlogptr = xlogPtr;
+					rec->u.relation.snapshot.xlogptr = xlogPtr;
 				}
 
-				ctx->ix_type = ev->u.relation.treeType;
-				ev->relreplident = REPLICA_IDENTITY_DEFAULT;
+				ctx->ix_type = rec->u.relation.treeType;
+				rec->relreplident = REPLICA_IDENTITY_DEFAULT;
 				ctx->descr = NULL;
 
 				elog(DEBUG4, "oxid %lu logicalXid %u heapXid %u WAL_REC_RELATION latest_oids [ %u %u %u ] latest_version %u ix_type %d",
-					 ev->oxid, ev->logicalXid, ev->heapXid, ev->oids.datoid, ev->oids.reloid, ev->oids.relnode,
-					 ev->u.relation.version, ctx->ix_type);
+					 rec->oxid, rec->logicalXid, rec->heapXid, rec->oids.datoid, rec->oids.reloid, rec->oids.relnode,
+					 rec->u.relation.version, ctx->ix_type);
 
-				if (!TransactionIdIsValid(ev->logicalXid))
+				if (!TransactionIdIsValid(rec->logicalXid))
 				{
 					/*
 					 * Oriole logical xid stays invalid for an autonomous
 					 * transactions
 					 */
-					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", ev->type, recname, ev->oxid);
+					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec->type, recname, rec->oxid);
 					return WALPARSE_OK;
 				}
 
 				/* Skip actual relation processing in fast_forward mode */
 				if (ctx->dctx->fast_forward)
 				{
-					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", ev->type, recname, ev->oxid);
+					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec->type, recname, rec->oxid);
 					return WALPARSE_OK;
 				}
 
-				if (IS_SYS_TREE_OIDS(ev->oids))
-					sys_tree_num = ev->oids.relnode;
+				if (IS_SYS_TREE_OIDS(rec->oids))
+					sys_tree_num = rec->oids.relnode;
 				else
 					sys_tree_num = -1;
 
@@ -1007,9 +1007,9 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 				else if (ctx->ix_type == oIndexInvalid)
 				{
 					elog(DEBUG4, "WAL_REC_RELATION oIndexInvalid :: FETCH RELATION [ %u %u %u ] version %u",
-						 ev->oids.datoid, ev->oids.reloid, ev->oids.relnode, ev->u.relation.version);
+						 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode, rec->u.relation.version);
 
-					ctx->descr = o_fetch_table_descr_extended(ev->oids, build_fetch_context(&ev->u.relation.snapshot, ev->u.relation.version));
+					ctx->descr = o_fetch_table_descr_extended(rec->oids, build_fetch_context(&rec->u.relation.snapshot, rec->u.relation.version));
 					ctx->indexDescr = ctx->descr ? GET_PRIMARY(ctx->descr) : NULL;
 					if (ctx->descr)
 					{
@@ -1019,20 +1019,20 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 				else if (ctx->ix_type == oIndexToast)
 				{
 					elog(DEBUG4, "WAL_REC_RELATION [1] oIndexToast :: FETCH INDEX oids [ %u %u %u ] version %u base_version %u",
-						 ev->oids.datoid, ev->oids.reloid, ev->oids.relnode,
-						 ev->u.relation.version, ev->u.relation.base_version);
+						 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode,
+						 rec->u.relation.version, rec->u.relation.base_version);
 
-					ctx->indexDescr = o_fetch_index_descr_extended(ev->oids, ctx->ix_type, false,
-																   build_fetch_context(&ev->u.relation.snapshot, ev->u.relation.version),
-																   build_fetch_context(&ev->u.relation.snapshot, ev->u.relation.base_version));
+					ctx->indexDescr = o_fetch_index_descr_extended(rec->oids, ctx->ix_type, false,
+																   build_fetch_context(&rec->u.relation.snapshot, rec->u.relation.version),
+																   build_fetch_context(&rec->u.relation.snapshot, rec->u.relation.base_version));
 					if (ctx->indexDescr)
 					{
 						elog(DEBUG4, "WAL_REC_RELATION [2] oIndexToast :: FETCH RELATION [ %u %u %u ] version %u",
 							 ctx->indexDescr->tableOids.datoid, ctx->indexDescr->tableOids.reloid, ctx->indexDescr->tableOids.relnode,
-							 ev->u.relation.base_version);
+							 rec->u.relation.base_version);
 
 						ctx->descr = o_fetch_table_descr_extended(ctx->indexDescr->tableOids,
-																  build_fetch_context(&ev->u.relation.snapshot, ev->u.relation.base_version));
+																  build_fetch_context(&rec->u.relation.snapshot, rec->u.relation.base_version));
 						Assert(ctx->descr);
 
 						ctx->o_toast_tupDesc = ctx->descr->toast->leafTupdesc;
@@ -1058,7 +1058,7 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 				}
 
 				if (ctx->descr && ctx->descr->toast)
-					elog(DEBUG4, "reloid: %d natts: %u toast natts: %u", ev->oids.reloid, ctx->descr->tupdesc->natts, ctx->descr->toast->leafTupdesc->natts);
+					elog(DEBUG4, "reloid: %d natts: %u toast natts: %u", rec->oids.reloid, ctx->descr->tupdesc->natts, ctx->descr->toast->leafTupdesc->natts);
 
 				break;
 			}
@@ -1074,10 +1074,10 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 
 		case WAL_REC_SAVEPOINT:
 			elog(DEBUG4, "APPLY record type %d (%s) oxid %lu logicalXid %u parentLogicalXid %u",
-				 ev->type, recname, ev->oxid, ev->logicalXid, ev->u.savepoint.parentLogicalXid);
+				 rec->type, recname, rec->oxid, rec->logicalXid, rec->u.savepoint.parentLogicalXid);
 
 			if (!ctx->dctx->fast_forward)
-				ReorderBufferAssignChild(ctx->dctx->reorder, ev->u.savepoint.parentLogicalXid, ev->logicalXid, ctx->dbuf->origptr);
+				ReorderBufferAssignChild(ctx->dctx->reorder, rec->u.savepoint.parentLogicalXid, rec->logicalXid, ctx->dbuf->origptr);
 
 			break;
 
@@ -1086,7 +1086,7 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 				dlist_iter	cur_txn_i;
 				ReorderBufferTXN *txn = NULL;
 				CSNSnapshotData *csnSnapshot = NULL;
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + ev->delta;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
 
 				if (ctx->r->wal_version < 17)
 				{
@@ -1095,9 +1095,9 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 				}
 
 				elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u parentSubid %u",
-					 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid, ev->u.rb_to_sp.parentSubid);
+					 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid, rec->u.rb_to_sp.parentSubid);
 
-				if (remove_skipped_dml(&skippedDMLHash, ev->oxid))
+				if (remove_skipped_dml(&skippedDMLHash, rec->oxid))
 				{
 					/*
 					 * This transaction performed a rollback-to-savepoint, so
@@ -1106,41 +1106,41 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 					 * consistent.
 					 */
 					elog(DEBUG4, "SKIPPED DML for record type %d (%s) oxid %lu logicalXId %u heapXid %u parentSubid %u",
-						 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid, ev->u.rb_to_sp.parentSubid);
+						 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid, rec->u.rb_to_sp.parentSubid);
 				}
 
-				if (!TransactionIdIsValid(ev->logicalXid))
+				if (!TransactionIdIsValid(rec->logicalXid))
 				{
 					/*
 					 * Oriole logical xid stays invalid for an autonomous
 					 * transactions
 					 */
-					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", ev->type, recname, ev->oxid);
+					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec->type, recname, rec->oxid);
 
 					UpdateDecodingStats(ctx->dctx);
 					return WALPARSE_OK;
 				}
 
 				csnSnapshot = SnapBuildGetCSNSnaphot(ctx->dctx->snapshot_builder);
-				csnSnapshot->snapshotcsn = ev->u.rb_to_sp.csn;
+				csnSnapshot->snapshotcsn = rec->u.rb_to_sp.csn;
 				csnSnapshot->xlogptr = ctx->xlogRecEndPtr;
-				csnSnapshot->xmin = ev->u.rb_to_sp.xmin;
+				csnSnapshot->xmin = rec->u.rb_to_sp.xmin;
 
-				if (!set_snapshot(ctx->dctx, ev->logicalXid, xlogPtr))
+				if (!set_snapshot(ctx->dctx, rec->logicalXid, xlogPtr))
 					return WALPARSE_OK;
 
-				txn = get_reorder_buffer_txn(ctx->dctx->reorder, ev->logicalXid);
+				txn = get_reorder_buffer_txn(ctx->dctx->reorder, rec->logicalXid);
 
 				if (txn == NULL)
 				{
 					elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u :: unknown transaction, nothing to replay",
-						 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid);
+						 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 				}
 
 				/* unknown transaction, nothing to replay */
 				if (txn != NULL)
 				{
-					Assert(TransactionIdIsValid(ev->logicalXid));
+					Assert(TransactionIdIsValid(rec->logicalXid));
 
 					dlist_foreach(cur_txn_i, &txn->subtxns)
 					{
@@ -1150,15 +1150,15 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 						ReorderBufferAbort(ctx->dctx->reorder, cur_txn->xid, ctx->xlogRecPtr, 0);
 					}
 					elog(DEBUG4, "ABORT record type %d (%s) oxid %lu logicalXid %u heapXid %u",
-						 ev->type, recname, ev->oxid, ev->logicalXid, ev->heapXid);
+						 rec->type, recname, rec->oxid, rec->logicalXid, rec->heapXid);
 
-					ReorderBufferAbort(ctx->dctx->reorder, ev->logicalXid, ctx->xlogRecPtr, 0);
+					ReorderBufferAbort(ctx->dctx->reorder, rec->logicalXid, ctx->xlogRecPtr, 0);
 				}
 
 				UpdateDecodingStats(ctx->dctx);
 
-				ev->oxid = InvalidOXid;
-				ev->logicalXid = InvalidTransactionId;
+				rec->oxid = InvalidOXid;
+				rec->logicalXid = InvalidTransactionId;
 
 				break;
 			}
@@ -1170,42 +1170,42 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 			{
 				OFixedTuple tuple1,
 							tuple2;
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + ev->delta;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
 				ReorderBufferTXN *txn = NULL;
 
-				build_fixed_tuples(ev, &tuple1, &tuple2);
+				build_fixed_tuples(rec, &tuple1, &tuple2);
 
 				elog(DEBUG4, "RECEIVE record type %d (%s) oids [ %u %u %u ] oxid %lu logicalXId %u heapXid %u",
-					 ev->type, recname,
-					 ev->oids.datoid, ev->oids.reloid, ev->oids.relnode,
-					 ev->oxid, ev->logicalXid, ev->heapXid);
+					 rec->type, recname,
+					 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode,
+					 rec->oxid, rec->logicalXid, rec->heapXid);
 
-				if (!TransactionIdIsValid(ev->logicalXid))
+				if (!TransactionIdIsValid(rec->logicalXid))
 				{
 					/*
 					 * Oriole logical xid stays invalid for an autonomous
 					 * transactions
 					 */
-					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", ev->type, recname, ev->oxid);
+					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec->type, recname, rec->oxid);
 					return WALPARSE_OK;
 				}
 
-				ReorderBufferProcessXid(ctx->dctx->reorder, ev->logicalXid, xlogPtr);
+				ReorderBufferProcessXid(ctx->dctx->reorder, rec->logicalXid, xlogPtr);
 
 				/* If the origin is defined and filtering is enabled, Skip */
-				if (ctx->has_origin && FilterByOrigin(ctx->dctx, ev->origin_id))
+				if (ctx->has_origin && FilterByOrigin(ctx->dctx, rec->origin_id))
 				{
 					elog(DEBUG4, "IGNORED record type %d (%s) for oxid %lu due to origin filtering (origin_id=%u)",
-						 ev->type, recname, ev->oxid, ev->origin_id);
+						 rec->type, recname, rec->oxid, rec->origin_id);
 					return WALPARSE_OK;
 				}
 
 				if (SnapBuildCurrentState(ctx->dctx->snapshot_builder) < SNAPBUILD_FULL_SNAPSHOT)
 					return WALPARSE_OK;
 
-				(void) set_snapshot(ctx->dctx, ev->logicalXid, xlogPtr);
+				(void) set_snapshot(ctx->dctx, rec->logicalXid, xlogPtr);
 
-				txn = get_reorder_buffer_txn(ctx->dctx->reorder, ev->logicalXid);
+				txn = get_reorder_buffer_txn(ctx->dctx->reorder, rec->logicalXid);
 				txn->txn_flags |= RBTXN_DISTR_SKIP_CLEANUP;
 
 				/* Skip actual record processing in fast_forward mode */
@@ -1213,7 +1213,7 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 					return WALPARSE_OK;
 
 				if ((ctx->ix_type == oIndexInvalid || ctx->ix_type == oIndexToast) &&
-					ev->oids.datoid == ctx->dctx->slot->data.database)
+					rec->oids.datoid == ctx->dctx->slot->data.database)
 				{
 					if (!ctx->descr || !ctx->indexDescr)
 					{
@@ -1229,7 +1229,7 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 						 * for this OXID so that the finish record handler can
 						 * report it and clear the flag.
 						 */
-						register_skipped_dml(&skippedDMLHash, ev->oxid);
+						register_skipped_dml(&skippedDMLHash, rec->oxid);
 					}
 					else
 					{
@@ -1239,15 +1239,15 @@ decode_wal_on_event(void *vctx, WalEvent *ev)
 						Assert(!O_TUPLE_IS_NULL(tuple1.tuple));
 						change = ReorderBufferGetChange(ctx->dctx->reorder);
 						change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
-						change->data.tp.rlocator.dbOid = ev->oids.datoid;
-						change->data.tp.rlocator.relNumber = ev->oids.relnode;
-						elog(DEBUG4, "reloid: %u", ev->oids.reloid);
+						change->data.tp.rlocator.dbOid = rec->oids.datoid;
+						change->data.tp.rlocator.relNumber = rec->oids.relnode;
+						elog(DEBUG4, "reloid: %u", rec->oids.reloid);
 
-						o_decode_modify_tuples(ctx->dctx->reorder, ev->type, ctx->ix_type, change,
+						o_decode_modify_tuples(ctx->dctx->reorder, rec->type, ctx->ix_type, change,
 											   ctx->descr, ctx->indexDescr, ctx->o_toast_tupDesc, ctx->heap_toast_tupDesc,
-											   tuple1.tuple, tuple2.tuple, ev->u.modify.len1, ev->relreplident);
+											   tuple1.tuple, tuple2.tuple, rec->u.modify.len1, rec->relreplident);
 
-						ReorderBufferQueueChange(ctx->dctx->reorder, ev->logicalXid,
+						ReorderBufferQueueChange(ctx->dctx->reorder, rec->logicalXid,
 												 xlogPtr, change, (ctx->ix_type == oIndexToast));
 					}
 				}

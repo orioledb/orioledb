@@ -260,56 +260,56 @@ wal_desc_check_version(const WalReaderState *r)
 }
 
 static WalParseResult
-wal_desc_on_event(void *vctx, WalEvent *ev)
+wal_desc_on_event(void *vctx, WalRecord *rec)
 {
 	WalDescCtx *ctx = (WalDescCtx *) vctx;
 
 	Assert(ctx);
-	Assert(ev);
+	Assert(rec);
 
-	appendStringInfo(ctx->buf, " %s", wal_type_name(ev->type));
+	appendStringInfo(ctx->buf, " %s", wal_type_name(rec->type));
 
-	switch (ev->type)
+	switch (rec->type)
 	{
 		case WAL_REC_XID:
-			appendStringInfo(ctx->buf, " (%lu %u %u);", ev->oxid, ev->logicalXid, ev->heapXid);
+			appendStringInfo(ctx->buf, " (%lu %u %u);", rec->oxid, rec->logicalXid, rec->heapXid);
 			break;
 		case WAL_REC_COMMIT:
 		case WAL_REC_ROLLBACK:
 			appendStringInfo(ctx->buf, " (%lu %u %u - xmin %lu csn %lu);",
-							 ev->oxid, ev->logicalXid, ev->heapXid,
-							 ev->u.finish.xmin, ev->u.finish.csn);
+							 rec->oxid, rec->logicalXid, rec->heapXid,
+							 rec->u.finish.xmin, rec->u.finish.csn);
 			break;
 		case WAL_REC_RELATION:
 			appendStringInfo(ctx->buf, " ([ %u %u %u ] treeType %u);",
-							 ev->oids.datoid, ev->oids.reloid, ev->oids.relnode,
-							 ev->u.relation.treeType);
+							 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode,
+							 rec->u.relation.treeType);
 			break;
 		case WAL_REC_INSERT:
 		case WAL_REC_UPDATE:
 		case WAL_REC_DELETE:
 		case WAL_REC_REINSERT:
 			appendStringInfo(ctx->buf, " ([ %u %u %u ]);",
-							 ev->oids.datoid, ev->oids.reloid, ev->oids.relnode);
+							 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode);
 			break;
 		case WAL_REC_SAVEPOINT:
 			appendStringInfo(ctx->buf, " (lxid %u parent lxid %u subid %u);",
-							 ev->logicalXid, ev->u.savepoint.parentLogicalXid, ev->u.savepoint.parentSubid);
+							 rec->logicalXid, rec->u.savepoint.parentLogicalXid, rec->u.savepoint.parentSubid);
 			break;
 		case WAL_REC_ROLLBACK_TO_SAVEPOINT:
 			appendStringInfo(ctx->buf, " (lxid %u parent subid %u xmin %lu csn %lu);",
-							 ev->logicalXid, ev->u.rb_to_sp.parentSubid, ev->u.rb_to_sp.xmin, ev->u.rb_to_sp.csn);
+							 rec->logicalXid, rec->u.rb_to_sp.parentSubid, rec->u.rb_to_sp.xmin, rec->u.rb_to_sp.csn);
 			break;
 		case WAL_REC_JOINT_COMMIT:
 			appendStringInfo(ctx->buf, " (xmin %lu xid %u csn %lu);",
-							 ev->u.joint_commit.xmin, ev->u.joint_commit.xid, ev->u.joint_commit.csn);
+							 rec->u.joint_commit.xmin, rec->u.joint_commit.xid, rec->u.joint_commit.csn);
 			break;
 		case WAL_REC_TRUNCATE:
 			appendStringInfo(ctx->buf, " ([ %u %u %u ]);",
-							 ev->u.truncate.oids.datoid, ev->u.truncate.oids.reloid, ev->u.truncate.oids.relnode);
+							 rec->u.truncate.oids.datoid, rec->u.truncate.oids.reloid, rec->u.truncate.oids.relnode);
 			break;
 		case WAL_REC_SWITCH_LOGICAL_XID:
-			appendStringInfo(ctx->buf, " (%u %u);", ev->u.swxid.topXid, ev->u.swxid.subXid);
+			appendStringInfo(ctx->buf, " (%u %u);", rec->u.swxid.topXid, rec->u.swxid.subXid);
 			break;
 		default:
 			appendStringInfo(ctx->buf, ";");

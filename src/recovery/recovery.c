@@ -3033,11 +3033,11 @@ replay_wal_check_version(const WalReaderState *r)
 }
 
 static WalParseResult
-replay_wal_on_flag(void *ctx, const WalEvent *ev)
+replay_wal_on_flag(void *ctx, const WalRecord *rec)
 {
-	Assert(ev);
+	Assert(rec);
 
-	switch (ev->type)
+	switch (rec->type)
 	{
 		case WAL_CONTAINER_HAS_XACT_INFO:
 
@@ -3046,7 +3046,7 @@ replay_wal_on_flag(void *ctx, const WalEvent *ev)
 			 * SYS_TREES_XID_UNDO_LOCATION mapping in recovery for following
 			 * logical decoding
 			 */
-			recoveryHeapTransactionId = ev->u.xact_info.xid;
+			recoveryHeapTransactionId = rec->u.xact_info.xid;
 			break;
 
 		case WAL_CONTAINER_HAS_ORIGIN_INFO:
@@ -3075,20 +3075,20 @@ typedef struct
 } ReplayWalDescCtx;
 
 static WalParseResult
-replay_wal_on_event(void *vctx, WalEvent *ev)
+replay_wal_on_event(void *vctx, WalRecord *rec)
 {
 	ReplayWalDescCtx *ctx = (ReplayWalDescCtx *) vctx;
 
 	Assert(ctx);
-	Assert(ev);
+	Assert(rec);
 
-	elog(LOG, "[%s] GET ETYPE %d `%s`", __func__, ev->type, wal_type_name(ev->type));
+	elog(LOG, "[%s] GET ETYPE %d `%s`", __func__, rec->type, wal_type_name(rec->type));
 
-	switch (ev->type)
+	switch (rec->type)
 	{
 		case WAL_REC_XID:
-			advance_oxids(ev->oxid);
-			recovery_switch_to_oxid(ev->oxid, -1);
+			advance_oxids(rec->oxid);
+			recovery_switch_to_oxid(rec->oxid, -1);
 			break;
 
 		case WAL_REC_SWITCH_LOGICAL_XID:
@@ -3102,15 +3102,15 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 							sync = false;
 
 				/* xlogPtr = xlogRecPtr + (ptr - startPtr); */
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + ev->delta;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
 
-				recovery_xmin = Max(recovery_xmin, ev->u.finish.xmin);
+				recovery_xmin = Max(recovery_xmin, rec->u.finish.xmin);
 
 				Assert(ctx->sys_tree_num <= 0 || sys_tree_supports_transactions(ctx->sys_tree_num));
 
-				commit = (ev->type == WAL_REC_COMMIT);
+				commit = (rec->type == WAL_REC_COMMIT);
 
-				Assert(ev->oxid != InvalidOXid);
+				Assert(rec->oxid != InvalidOXid);
 				Assert(cur_recovery_xid_state != NULL);
 
 				if (!ctx->single)
@@ -3135,14 +3135,14 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 
 				recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
 											 xlogPtr, -1, sync);
-				ev->oxid = InvalidOXid;
+				rec->oxid = InvalidOXid;
 
 				break;
 			}
 
 		case WAL_REC_JOINT_COMMIT:
-			cur_recovery_xid_state->xid = ev->u.joint_commit.xid;
-			recovery_xmin = Max(recovery_xmin, ev->u.joint_commit.xmin);
+			cur_recovery_xid_state->xid = rec->u.joint_commit.xid;
+			recovery_xmin = Max(recovery_xmin, rec->u.joint_commit.xmin);
 			dlist_push_tail(&joint_commit_list,
 							&cur_recovery_xid_state->joint_commit_list_node);
 			break;
@@ -3153,12 +3153,12 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 
 		case WAL_REC_RELATION:
 			{
-				OIndexType	ix_type = ev->u.relation.treeType;
+				OIndexType	ix_type = rec->u.relation.treeType;
 
-				ev->relreplident = REPLICA_IDENTITY_DEFAULT;
+				rec->relreplident = REPLICA_IDENTITY_DEFAULT;
 
-				if (IS_SYS_TREE_OIDS(ev->oids))
-					ctx->sys_tree_num = ev->oids.relnode;
+				if (IS_SYS_TREE_OIDS(rec->oids))
+					ctx->sys_tree_num = rec->oids.relnode;
 				else
 					ctx->sys_tree_num = -1;
 
@@ -3170,14 +3170,14 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 				}
 				else if (ix_type == oIndexInvalid)
 				{
-					ctx->descr = o_fetch_table_descr(ev->oids);
+					ctx->descr = o_fetch_table_descr(rec->oids);
 					ctx->indexDescr = ctx->descr ? GET_PRIMARY(ctx->descr) : NULL;
 				}
 				else
 				{
 					Assert(ix_type == oIndexToast || ix_type == oIndexBridge);
 					ctx->descr = NULL;
-					ctx->indexDescr = o_fetch_index_descr(ev->oids, ix_type, false, NULL);
+					ctx->indexDescr = o_fetch_index_descr(rec->oids, ix_type, false, NULL);
 				}
 
 				if (ctx->sys_tree_num == -1)
@@ -3185,7 +3185,7 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 					char	   *prefix;
 					char	   *db_prefix;
 
-					o_get_prefixes_for_relnode(ev->oids.datoid, ev->oids.relnode,
+					o_get_prefixes_for_relnode(rec->oids.datoid, rec->oids.relnode,
 											   &prefix, &db_prefix);
 					o_verify_dir_exists_or_create(prefix, NULL, NULL);
 					o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
@@ -3204,21 +3204,21 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 			o_tables_meta_lock_no_wal();
 			cur_recovery_xid_state->o_tables_meta_locked = true;
 			elog(LOG, "[%s] META_LOCK for [ %u %u %u ] ctx->sys_tree_num %d", __func__,
-				 ev->oids.datoid, ev->oids.reloid, ev->oids.relnode, ctx->sys_tree_num);
+				 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode, ctx->sys_tree_num);
 			break;
 
 		case WAL_REC_O_TABLES_META_UNLOCK:
 			{
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + ev->delta;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
 
 				elog(LOG, "[%s] META_UNLOCK for [ %u %u %u ] ctx->sys_tree_num %d", __func__,
-					 ev->oids.datoid, ev->oids.reloid, ev->oids.relnode, ctx->sys_tree_num);
+					 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode, ctx->sys_tree_num);
 
 				if (!ctx->single)
 					workers_synchronize(xlogPtr, true);
 
 				Assert(cur_recovery_xid_state->o_tables_meta_locked);
-				handle_o_tables_meta_unlock(ev->u.unlock.oids, ev->u.unlock.oldRelnode);
+				handle_o_tables_meta_unlock(rec->u.unlock.oids, rec->u.unlock.oldRelnode);
 
 				if (!ctx->single)
 					workers_synchronize(xlogPtr + 1, true);
@@ -3231,12 +3231,12 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 
 		case WAL_REC_TRUNCATE:
 			{
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + ev->delta;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
 
 				if (!ctx->single)
 					workers_synchronize(xlogPtr, true);
 
-				o_truncate_table(ev->u.truncate.oids, true);
+				o_truncate_table(rec->u.truncate.oids, true);
 
 				AcceptInvalidationMessages();
 				if (!ctx->single)
@@ -3246,21 +3246,21 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 			}
 
 		case WAL_REC_SAVEPOINT:
-			recovery_savepoint(ev->u.savepoint.parentSubid, -1);
+			recovery_savepoint(rec->u.savepoint.parentSubid, -1);
 			if (!ctx->single)
-				workers_send_savepoint(ev->u.savepoint.parentSubid);
+				workers_send_savepoint(rec->u.savepoint.parentSubid);
 			break;
 
 		case WAL_REC_ROLLBACK_TO_SAVEPOINT:
 			{
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + ev->delta;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
 
 				if (!ctx->single)
 				{
-					workers_send_rollback_to_savepoint(xlogPtr, ev->u.rb_to_sp.parentSubid);
+					workers_send_rollback_to_savepoint(xlogPtr, rec->u.rb_to_sp.parentSubid);
 					workers_synchronize(xlogPtr, false);
 				}
-				recovery_rollback_to_savepoint(ev->u.rb_to_sp.parentSubid, -1);
+				recovery_rollback_to_savepoint(rec->u.rb_to_sp.parentSubid, -1);
 				break;
 			}
 
@@ -3270,17 +3270,17 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 
 				if (ctx->single)
 				{
-					recovery_switch_to_oxid(ev->oxid, -1);
-					replay_erase_bridge_item(ctx->indexDescr, &ev->u.bridge_erase.iptr);
+					recovery_switch_to_oxid(rec->oxid, -1);
+					replay_erase_bridge_item(ctx->indexDescr, &rec->u.bridge_erase.iptr);
 				}
 				else
 				{
 					uint32		hash;
 					OTuple		tuple;
 
-					hash = o_hash_iptr(ctx->indexDescr, &ev->u.bridge_erase.iptr);
+					hash = o_hash_iptr(ctx->indexDescr, &rec->u.bridge_erase.iptr);
 					tuple.formatFlags = 0;
-					tuple.data = (Pointer) &ev->u.bridge_erase.iptr;
+					tuple.data = (Pointer) &rec->u.bridge_erase.iptr;
 					worker_send_modify(GET_WORKER_ID(hash), &ctx->indexDescr->desc,
 									   RecoveryMsgTypeBridgeErase, tuple, 0);
 				}
@@ -3296,18 +3296,18 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 				OFixedTuple tuple1,
 							tuple2;
 				ORelOids   *treeOids = NULL;
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + ev->delta;
-				uint16		type = recovery_msg_from_wal_record(ev->type);
-				Pointer		sys_tree_oids_ptr = ev->value_ptr + sizeof(uint8) + sizeof(OffsetNumber);
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
+				uint16		type = recovery_msg_from_wal_record(rec->type);
+				Pointer		sys_tree_oids_ptr = rec->value_ptr + sizeof(uint8) + sizeof(OffsetNumber);
 
-				Assert(ev->oxid != InvalidOXid);
+				Assert(rec->oxid != InvalidOXid);
 
-				build_fixed_tuples(ev, &tuple1, &tuple2);
+				build_fixed_tuples(rec, &tuple1, &tuple2);
 
 				if (ctx->sys_tree_num > 0 && ctx->xlogRecPtr >= checkpoint_state->sysTreesStartPtr)
 				{
 					Assert(sys_tree_supports_transactions(ctx->sys_tree_num));
-					recovery_switch_to_oxid(ev->oxid, -1);
+					recovery_switch_to_oxid(rec->oxid, -1);
 
 					cur_recovery_xid_state->systree_modified = true;
 					if (IS_TYPCACHE_SYSTREE(ctx->sys_tree_num))
@@ -3319,7 +3319,7 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 						workers_synchronize(xlogPtr, true);
 
 					success = apply_sys_tree_modify_record(ctx->sys_tree_num, type,
-														   tuple1.tuple, ev->oxid,
+														   tuple1.tuple, rec->oxid,
 														   COMMITSEQNO_INPROGRESS);
 
 					if (ctx->sys_tree_num == SYS_TREES_O_INDICES && success)
@@ -3368,12 +3368,12 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 				Assert(!O_TUPLE_IS_NULL(tuple1.tuple));
 
 				/* Reinsert is processed as DELETE + INSERT */
-				if (ev->type == WAL_REC_REINSERT)
+				if (rec->type == WAL_REC_REINSERT)
 				{
 					Assert(type == RecoveryMsgTypeReinsert);
 					Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
 
-					if (ev->relreplident == REPLICA_IDENTITY_FULL)
+					if (rec->relreplident == REPLICA_IDENTITY_FULL)
 					{
 						bool		allocated;
 
@@ -3387,7 +3387,7 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 
 					if (ctx->single)
 					{
-						recovery_switch_to_oxid(ev->oxid, -1);
+						recovery_switch_to_oxid(rec->oxid, -1);
 						apply_modify_record(ctx->descr, ctx->indexDescr, RecoveryMsgTypeDelete, tuple2.tuple);
 						apply_modify_record(ctx->descr, ctx->indexDescr, RecoveryMsgTypeInsert, tuple1.tuple);
 					}
@@ -3400,9 +3400,9 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 				else			/* WAL_REC_INSERT, WAL_REC_UPDATE or
 								 * WAL_REC_DELETE */
 				{
-					if (ev->relreplident == REPLICA_IDENTITY_FULL)
+					if (rec->relreplident == REPLICA_IDENTITY_FULL)
 					{
-						if (ev->type == WAL_REC_DELETE)
+						if (rec->type == WAL_REC_DELETE)
 						{
 							bool		allocated;
 
@@ -3414,7 +3414,7 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 							Assert(!allocated);
 							Assert(O_TUPLE_IS_NULL(tuple2.tuple));
 						}
-						else if (ev->type == WAL_REC_UPDATE)
+						else if (rec->type == WAL_REC_UPDATE)
 						{
 							/*
 							 * tuple2 from WAL record could be safely ignored
@@ -3434,7 +3434,7 @@ replay_wal_on_event(void *vctx, WalEvent *ev)
 
 					if (ctx->single)
 					{
-						recovery_switch_to_oxid(ev->oxid, -1);
+						recovery_switch_to_oxid(rec->oxid, -1);
 						apply_modify_record(ctx->descr, ctx->indexDescr, type, tuple1.tuple);
 					}
 					else

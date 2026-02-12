@@ -111,14 +111,14 @@ wal_container_flag_check(WalReaderState *r, WalConsumer *consumer, wal_type_t ty
 		Assert(d && d->parse);
 		if (d && d->parse)
 		{
-			WalEvent	ev;
+			WalRecord	rec;
 
-			memset(&ev, 0, sizeof(ev));
+			memset(&rec, 0, sizeof(rec));
 
-			ev.type = type;
-			st = d->parse(r, &ev);
+			rec.type = type;
+			st = d->parse(r, &rec);
 			if (st == WALPARSE_OK && consumer->on_flag)
-				st = consumer->on_flag(consumer->ctx, &ev);
+				st = consumer->on_flag(consumer->ctx, &rec);
 		}
 		else
 			st = WALPARSE_BAD_TYPE;
@@ -153,17 +153,17 @@ WalParseResult
 parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging)
 {
 	WalParseResult st;
-	WalEvent	ev;
+	WalRecord	rec;
 
 	Assert(r);
 	Assert(consumer);
 	Assert(consumer->on_event); /* consumer must handle every record */
 
-	memset(&ev, 0, sizeof(ev));
+	memset(&rec, 0, sizeof(rec));
 
-	ev.relreplident = REPLICA_IDENTITY_DEFAULT;
-	ev.origin_id = InvalidRepOriginId;
-	ev.origin_lsn = InvalidXLogRecPtr;
+	rec.relreplident = REPLICA_IDENTITY_DEFAULT;
+	rec.origin_id = InvalidRepOriginId;
+	rec.origin_lsn = InvalidXLogRecPtr;
 
 	/*
 	 * Read and validate container header framing.
@@ -217,7 +217,7 @@ parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging
 	 *
 	 * For each record:
 	 *
-	 * - read the tag (rec_type = ev.type),
+	 * - read the tag (rec_type = rec.type),
 	 *
 	 * - look up its descriptor,
 	 *
@@ -235,14 +235,14 @@ parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging
 		 * Useful for consumers that need stable relative addressing, debug
 		 * logging, or for building LSN-relative positions.
 		 */
-		ev.delta = r->ptr - r->start;
+		rec.delta = r->ptr - r->start;
 
 		/*
 		 * Read record tag byte. After this, r->ptr points to payload (if
 		 * any).
 		 */
 		WR_PARSE(r, &rec_type);
-		ev.type = rec_type;
+		rec.type = rec_type;
 
 		/*
 		 * value_ptr points to the first byte after the tag, i.e. to the
@@ -252,9 +252,9 @@ parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging
 		 * Consumers must treat value_ptr as "record-local" pointer only; it
 		 * is valid only while the reader buffer remains intact.
 		 */
-		ev.value_ptr = r->ptr;
+		rec.value_ptr = r->ptr;
 
-		d = wal_get_desc(ev.type);
+		d = wal_get_desc(rec.type);
 		if (!d)
 		{
 			/*
@@ -310,7 +310,7 @@ parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging
 			if (allow_logging)
 			{
 				elog(LOG, "[%s] UNKNOWN WAL RECORD TYPE %u(`%s`): chunk/tail len %ld/%ld",
-					 __func__, ev.type, wal_type_name(ev.type),
+					 __func__, rec.type, wal_type_name(rec.type),
 					 r->end - r->start,
 					 r->end - r->ptr);
 			}
@@ -319,7 +319,7 @@ parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging
 
 		if (allow_logging)
 		{
-			elog(DEBUG4, "[%s] WAL RECORD TYPE %u(`%s`)", __func__, ev.type, wal_type_name(ev.type));
+			elog(DEBUG4, "[%s] WAL RECORD TYPE %u(`%s`)", __func__, rec.type, wal_type_name(rec.type));
 		}
 
 		/*
@@ -343,7 +343,7 @@ parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging
 		 */
 		if (d->parse)
 		{
-			st = d->parse(r, &ev);
+			st = d->parse(r, &rec);
 			if (st)
 				return st;
 		}
@@ -355,7 +355,7 @@ parse_wal_container(WalReaderState *r, WalConsumer *consumer, bool allow_logging
 		 * selectively ignore records. Any non-OK status is treated as fatal
 		 * for this container iteration.
 		 */
-		st = consumer->on_event(consumer->ctx, &ev);
+		st = consumer->on_event(consumer->ctx, &rec);
 		if (st)
 			return st;
 	}
