@@ -118,6 +118,12 @@ INSERT INTO o_test_set_expression (i, price, quantity) VALUES (3, 7.99, 10);
 -- Verify initial generated column values (price * quantity)
 SELECT i, price, quantity, total FROM o_test_set_expression ORDER BY i;
 
+-- Snapshot the table before changing the expression
+CREATE MATERIALIZED VIEW o_test_set_expr_mv USING orioledb AS
+	SELECT * FROM o_test_set_expression ORDER BY i;
+
+SELECT * FROM o_test_set_expr_mv ORDER BY i;
+
 -- Check the initial generated column expression in catalog
 SELECT a.attname, a.attgenerated, pg_get_expr(d.adbin, d.adrelid) as generation_expr
 FROM pg_attribute a
@@ -142,6 +148,13 @@ SELECT i, price, quantity, total,
 	(price * quantity * 1.1) as expected_total
 FROM o_test_set_expression
 ORDER BY i;
+
+-- Matview should still have the old snapshot
+SELECT * FROM o_test_set_expr_mv ORDER BY i;
+
+-- Refresh picks up the new expression
+REFRESH MATERIALIZED VIEW o_test_set_expr_mv;
+SELECT * FROM o_test_set_expr_mv ORDER BY i;
 
 UPDATE o_test_set_expression SET price = 15.00 WHERE i = 1;
 
