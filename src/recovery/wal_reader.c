@@ -156,7 +156,7 @@ build_fixed_tuples(const WalRecord *rec, OFixedTuple *tuple1, OFixedTuple *tuple
 	Assert(rec);
 	Assert(tuple1);
 	Assert(tuple2);
-	Assert(ORIOLE_WAL_RECORD_IS_MODIFY(rec->type));
+	Assert(rec->type == WAL_REC_INSERT || rec->type == WAL_REC_UPDATE || rec->type == WAL_REC_DELETE || rec->type == WAL_REC_REINSERT);
 
 	if (!rec->u.modify.read_two_tuples)
 	{
