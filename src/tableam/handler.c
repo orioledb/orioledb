@@ -859,6 +859,11 @@ orioledb_relation_set_new_filenode(Relation rel,
 											 old_o_table->index_bridging);
 		o_opclass_cache_add_table(new_o_table);
 
+		/* Copy compression settings from old table */
+		new_o_table->default_compress = old_o_table->default_compress;
+		new_o_table->primary_compress = old_o_table->primary_compress;
+		new_o_table->toast_compress = old_o_table->toast_compress;
+
 		/* Setup bridging if it was set on old table */
 		if (old_o_table->index_bridging)
 		{
