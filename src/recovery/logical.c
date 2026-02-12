@@ -648,7 +648,7 @@ typedef struct
 } DecodeWalDescCtx;
 
 static WalParseResult
-decode_wal_on_flag(void *vctx, const WalRecord *rec)
+decode_wal_containter_info(void *vctx, const WalRecord *rec)
 {
 	DecodeWalDescCtx *ctx = (DecodeWalDescCtx *) vctx;
 
@@ -673,7 +673,7 @@ decode_wal_on_flag(void *vctx, const WalRecord *rec)
 }
 
 static WalParseResult
-decode_wal_on_record(void *vctx, WalRecord *rec)
+decode_wal_record(void *vctx, WalRecord *rec)
 {
 	DecodeWalDescCtx *ctx = (DecodeWalDescCtx *) vctx;
 	const char *recname = NULL;
@@ -1303,8 +1303,8 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 		/* Consumer */
 		.ctx = &dctx,
 		.check_version = decode_wal_check_version,
-		.on_flag = decode_wal_on_flag,
-		.on_record = decode_wal_on_record
+		.on_flag = decode_wal_containter_info,
+		.on_record = decode_wal_record
 	};
 
 	WalParseResult st;
