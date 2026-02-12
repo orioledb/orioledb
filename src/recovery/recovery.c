@@ -898,6 +898,70 @@ recovery_get_effective_replay_ptr(void)
 		return finishedPtr;
 }
 
+static WalParseResult
+recovery_wal_check_version(const WalReaderState *r)
+{
+	Assert(r);
+
+	if (r->wal_version > ORIOLEDB_WAL_VERSION)
+	{
+		/* Unexpected new WAL record which we cannot read */
+		elog(PANIC, "cannot read WAL record of version %u newer than supported %u",
+			 r->wal_version, ORIOLEDB_WAL_VERSION);
+
+		return WALPARSE_BAD_VERSION;
+	}
+
+	/*
+	 * If the WAL record is too old just return false and decide not to stop
+	 * applying WAL records further.
+	 */
+	else if (r->wal_version < ORIOLEDB_CONTAINER_FLAGS_WAL_VERSION)
+		return WALPARSE_BAD_VERSION;
+
+	return WALPARSE_OK;
+}
+
+typedef struct
+{
+	TimestampTz xactTime;
+	TransactionId xid;
+
+} RecoveryWalDescCtx;
+
+static WalParseResult
+recovery_wal_containter_info(void *vctx, const WalRecord *rec)
+{
+	RecoveryWalDescCtx *ctx = (RecoveryWalDescCtx *) vctx;
+
+	Assert(ctx);
+	Assert(rec);
+
+	switch (rec->type)
+	{
+		case WAL_CONTAINER_HAS_XACT_INFO:
+			ctx->xactTime = rec->u.xact_info.xactTime;
+			ctx->xid = rec->u.xact_info.xid;
+
+			return WALPARSE_STOP;	/* Stop parser after flags */
+
+		case WAL_CONTAINER_HAS_ORIGIN_INFO:
+			/* Skip */
+			break;
+
+		default:
+			break;
+	}
+
+	return WALPARSE_EOF;		/* Stop parser */
+}
+
+static WalParseResult
+recovery_wal_record(void *vctx, WalRecord *rec)
+{
+	return WALPARSE_EOF;		/* Stop parser */
+}
+
 /*
  * This function is called by the RecoveryStopsHook. It decides whether we want
  * to stop applying WAL records.
@@ -909,12 +973,24 @@ orioledb_recovery_stops_before_hook(XLogReaderState *record,
 									TransactionId *recordXid,
 									TimestampTz *recordXtime)
 {
-	Pointer		startPtr = XLogRecGetData(record);
-	Pointer		ptr = startPtr;
-	uint16		wal_version;
-	uint8		wal_flags;
-	TimestampTz xactTime;
-	TransactionId xid;
+	Pointer		startPtr = (Pointer) XLogRecGetData(record);
+	Pointer		endPtr = startPtr + XLogRecGetDataLen(record);
+
+	WalParseResult st;
+	RecoveryWalDescCtx dctx;
+
+	WalReaderState r = {
+		.start = startPtr,
+		.end = endPtr,
+		.ptr = startPtr,
+		.wal_version = 0,
+		.wal_flags = 0,
+		/* Consumer */
+		.ctx = &dctx,
+		.check_version = recovery_wal_check_version,
+		.on_flag = recovery_wal_containter_info,
+		.on_record = recovery_wal_record
+	};
 
 	/* Currently we consider ony recovery_target_time */
 	if (recoveryTarget != RECOVERY_TARGET_TIME)
@@ -924,33 +1000,20 @@ orioledb_recovery_stops_before_hook(XLogReaderState *record,
 	if (XLogRecGetDataLen(record) == 0)
 		return false;
 
-	ptr = wal_container_read_header(ptr, &wal_version, &wal_flags);
-	/* Unexpected new WAL record which we cannot read */
-	if (wal_version > ORIOLEDB_WAL_VERSION)
-		elog(PANIC, "cannot read WAL record of version %u newer than supported %u",
-			 wal_version, ORIOLEDB_WAL_VERSION);
+	st = parse_wal_container(&r, true /* allow_logging */ );
 
-	/*
-	 * If the WAL record is too old just return false and decide not to stop
-	 * applying WAL records further.
-	 */
-	else if (wal_version < ORIOLEDB_CONTAINER_FLAGS_WAL_VERSION)
-		return false;
+	if (st == WALPARSE_STOP)	/* WAL_CONTAINER_HAS_XACT_INFO is present */
+	{
+		*recordXid = dctx.xid;
+		*recordXtime = dctx.xactTime;
 
-	if ((wal_flags & WAL_CONTAINER_HAS_XACT_INFO) == 0)
-		return false;
+		if (recoveryTargetInclusive)
+			return dctx.xactTime > recoveryTargetTime;
+		else
+			return dctx.xactTime >= recoveryTargetTime;
+	}
 
-	memcpy(&xactTime, ptr, sizeof(xactTime));
-	ptr += sizeof(xactTime);
-	memcpy(&xid, ptr, sizeof(xid));
-
-	*recordXid = xid;
-	*recordXtime = xactTime;
-
-	if (recoveryTargetInclusive)
-		return xactTime > recoveryTargetTime;
-	else
-		return xactTime >= recoveryTargetTime;
+	return false;
 }
 
 static XLogRecPtr

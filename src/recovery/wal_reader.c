@@ -177,7 +177,7 @@ build_fixed_tuples(const WalRecord *rec, OFixedTuple *tuple1, OFixedTuple *tuple
  * @TODO rename after migration!
  */
 static WalParseResult
-wr_wal_container_read_header(WalReaderState *r, bool allow_logging)
+wal_container_read_header(WalReaderState *r, bool allow_logging)
 {
 	uint16		wal_version = 0;
 	uint8		wal_flags = 0;
@@ -407,7 +407,7 @@ parse_wal_container(WalReaderState *r, bool allow_logging)
 	 * drives the reader forward: each iteration consumes a record tag byte
 	 * and (optionally) a record payload according to the descriptor.
 	 */
-	st = wr_wal_container_read_header(r, allow_logging);
+	st = wal_container_read_header(r, allow_logging);
 	if (st)
 		return st;
 

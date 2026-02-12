@@ -287,7 +287,4 @@ extern void add_truncate_wal_record(ORelOids oids);
 extern bool get_local_wal_has_material_changes(void);
 extern void set_local_wal_has_material_changes(bool value);
 
-extern Pointer wal_container_read_header(Pointer ptr, uint16 *version,
-										 uint8 *flags);
-
 #endif							/* __WAL_H__ */

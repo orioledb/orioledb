@@ -312,68 +312,6 @@ wal_parse_rec_switch_logical_xid(WalReaderState *r, WalRecord *rec)
 	return WALPARSE_OK;
 }
 
-Pointer
-wal_container_read_header(Pointer ptr, uint16 *version, uint8 *flags)
-{
-	uint16		wal_version = 0;
-	uint8		wal_flags = 0;
-
-	if (*ptr >= FIRST_ORIOLEDB_WAL_VERSION)
-	{
-		/*
-		 * Container starts with a valid WAL version. First WAL record is just
-		 * after it.
-		 */
-		memcpy(&wal_version, ptr, sizeof(wal_version));
-		ptr += sizeof(wal_version);
-	}
-	else
-	{
-		/*
-		 * Container starts with rec_type of first WAL record (its maximum
-		 * value was under FIRST_ORIOLEDB_WAL_VERSION at the time of
-		 * introducing WAL versioning. Consider this as version 0 and don't
-		 * increase pointer
-		 */
-		wal_version = 0;
-	}
-
-	if (wal_version > ORIOLEDB_WAL_VERSION)
-	{
-#ifdef IS_DEV
-		/* Always fail tests on difference */
-		elog(FATAL, "Can't apply WAL container version %u that is newer than supported %u. Intentionally fail tests", wal_version, ORIOLEDB_WAL_VERSION);
-#else
-		elog(WARNING, "Can't apply WAL container version %u that is newer than supported %u", wal_version, ORIOLEDB_WAL_VERSION);
-		/* Further fail and output is caller-specific */
-#endif
-	}
-	else if (wal_version < ORIOLEDB_WAL_VERSION)
-	{
-#ifdef IS_DEV
-		/* Always fail tests on difference */
-		elog(FATAL, "WAL container version %u is older than current %u. Intentionally fail tests", wal_version, ORIOLEDB_WAL_VERSION);
-#else
-		elog(LOG, "WAL container version %u is older than current %u. Applying with conversion.", wal_version, ORIOLEDB_WAL_VERSION);
-#endif
-	}
-
-	if (wal_version >= ORIOLEDB_CONTAINER_FLAGS_WAL_VERSION)
-	{
-		/*
-		 * WAL container flags were added by
-		 * ORIOLEDB_CONTAINER_FLAGS_WAL_VERSION.
-		 */
-		memcpy(&wal_flags, ptr, sizeof(wal_flags));
-		ptr += sizeof(wal_flags);
-	}
-
-	*version = wal_version;
-	*flags = wal_flags;
-
-	return ptr;
-}
-
 void
 add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 					  OTuple tuple, OffsetNumber length, char relreplident, uint32 version, uint32 base_version)

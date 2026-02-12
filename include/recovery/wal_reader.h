@@ -123,6 +123,9 @@ typedef struct WalRecord
  * WALPARSE_OK
  *     Success.
  *
+ * WALPARSE_STOP
+ *     Terminate parser.
+ *
  * WALPARSE_EOF
  *     Not enough bytes in the input buffer to parse the requested element.
  *     This is a "need more data" / framing error depending on the caller.
@@ -141,6 +144,7 @@ typedef struct WalRecord
 typedef enum WalParseResult
 {
 	WALPARSE_OK = 0,
+	WALPARSE_STOP,
 	WALPARSE_EOF,				/* not enough bytes */
 	WALPARSE_BAD_TYPE,
 	WALPARSE_BAD_VERSION,
