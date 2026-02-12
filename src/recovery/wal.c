@@ -108,7 +108,7 @@ wal_flag_parse_container_xact_info(WalReaderState *r, WalRecord *rec)
 }
 
 WalParseResult
-wal_flag_parse_container_has_origin(WalReaderState *r, WalRecord *rec)
+wal_flag_parse_container_origin_info(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
 	Assert(rec);

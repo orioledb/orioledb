@@ -227,11 +227,11 @@ typedef struct
 
 #define ORIOLE_WAL_FLAGS(X) \
 	X(WAL_CONTAINER_HAS_XACT_INFO,		(1U << 0), "XACT_INFO",		wal_flag_parse_container_xact_info) \
-	X(WAL_CONTAINER_HAS_ORIGIN_INFO,	(1U << 1), "HAS_ORIGIN",	wal_flag_parse_container_has_origin)
+	X(WAL_CONTAINER_HAS_ORIGIN_INFO,	(1U << 1), "HAS_ORIGIN",	wal_flag_parse_container_origin_info)
 
 /* Flag Parsers */
 extern WalParseResult wal_flag_parse_container_xact_info(WalReaderState *r, WalRecord *rec);
-extern WalParseResult wal_flag_parse_container_has_origin(WalReaderState *r, WalRecord *rec);
+extern WalParseResult wal_flag_parse_container_origin_info(WalReaderState *r, WalRecord *rec);
 
 enum OrioleWalFlagType
 {
