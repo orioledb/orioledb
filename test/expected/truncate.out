@@ -101,12 +101,35 @@ SELECT * FROM o_relnames WHERE relname LIKE 'o_transactional_truncate_pkey%';
 (3 rows)
 
 COMMIT;
+CREATE TABLE o_compress_truncate (
+  id int
+) USING orioledb WITH (compress = 2);
+SELECT orioledb_table_description('o_compress_truncate'::regclass);
+               orioledb_table_description               
+--------------------------------------------------------
+ Compress = 2, Primary compress = 2, TOAST compress = 2+
+  Column |    Type | Collation | Nullable | Droped     +
+      id | integer |    (null) |     true |  false     +
+ 
+(1 row)
+
+TRUNCATE o_compress_truncate;
+SELECT orioledb_table_description('o_compress_truncate'::regclass);
+               orioledb_table_description               
+--------------------------------------------------------
+ Compress = 2, Primary compress = 2, TOAST compress = 2+
+  Column |    Type | Collation | Nullable | Droped     +
+      id | integer |    (null) |     true |  false     +
+ 
+(1 row)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 5 other objects
+NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to table o_non_transactional_truncate
 drop cascades to table o_transactional_truncate
 drop cascades to table o_non_transactional_truncate_pkey
 drop cascades to table o_transactional_truncate_pkey
+drop cascades to table o_compress_truncate
 drop cascades to view o_relnames
 DROP SCHEMA truncate CASCADE;
 RESET search_path;
