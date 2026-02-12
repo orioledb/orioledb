@@ -32,41 +32,41 @@
 #define WAL_REC_NONE           (0)
 
 #define ORIOLE_WAL_RECORDS(X) \
-	X(WAL_REC_XID,                   1, "XID",                wal_parse_xid) \
-	X(WAL_REC_COMMIT,                2, "COMMIT",             wal_parse_finish) \
-	X(WAL_REC_ROLLBACK,              3, "ROLLBACK",           wal_parse_finish) \
-	X(WAL_REC_RELATION,              4, "RELATION",           wal_parse_relation) \
-	X(WAL_REC_INSERT,                5, "INSERT",             wal_parse_modify) \
-	X(WAL_REC_UPDATE,                6, "UPDATE",             wal_parse_modify) \
-	X(WAL_REC_DELETE,                7, "DELETE",             wal_parse_modify) \
+	X(WAL_REC_XID,                   1, "XID",                wal_parse_rec_xid) \
+	X(WAL_REC_COMMIT,                2, "COMMIT",             wal_parse_rec_finish) \
+	X(WAL_REC_ROLLBACK,              3, "ROLLBACK",           wal_parse_rec_finish) \
+	X(WAL_REC_RELATION,              4, "RELATION",           wal_parse_rec_relation) \
+	X(WAL_REC_INSERT,                5, "INSERT",             wal_parse_rec_modify) \
+	X(WAL_REC_UPDATE,                6, "UPDATE",             wal_parse_rec_modify) \
+	X(WAL_REC_DELETE,                7, "DELETE",             wal_parse_rec_modify) \
 	X(WAL_REC_O_TABLES_META_LOCK,    8, "META_LOCK",          NULL) \
-	X(WAL_REC_O_TABLES_META_UNLOCK,  9, "META_UNLOCK",        wal_parse_o_tables_meta_unlock) \
-	X(WAL_REC_SAVEPOINT,            10, "SAVEPOINT",          wal_parse_savepoint) \
-	X(WAL_REC_ROLLBACK_TO_SAVEPOINT,11, "RB_TO_SP",           wal_parse_rollback_to_savepoint) \
-	X(WAL_REC_JOINT_COMMIT,         12, "JOINT_COMMIT",       wal_parse_joint_commit) \
-	X(WAL_REC_TRUNCATE,             13, "TRUNCATE",           wal_parse_truncate) \
-	X(WAL_REC_BRIDGE_ERASE,         14, "BRIDGE_ERASE",       wal_parse_bridge_erase) \
-	X(WAL_REC_REINSERT,             15, "REINSERT",           wal_parse_modify) \
+	X(WAL_REC_O_TABLES_META_UNLOCK,  9, "META_UNLOCK",        wal_parse_rec_o_tables_meta_unlock) \
+	X(WAL_REC_SAVEPOINT,            10, "SAVEPOINT",          wal_parse_rec_savepoint) \
+	X(WAL_REC_ROLLBACK_TO_SAVEPOINT,11, "RB_TO_SP",           wal_parse_rec_rollback_to_savepoint) \
+	X(WAL_REC_JOINT_COMMIT,         12, "JOINT_COMMIT",       wal_parse_rec_joint_commit) \
+	X(WAL_REC_TRUNCATE,             13, "TRUNCATE",           wal_parse_rec_truncate) \
+	X(WAL_REC_BRIDGE_ERASE,         14, "BRIDGE_ERASE",       wal_parse_rec_bridge_erase) \
+	X(WAL_REC_REINSERT,             15, "REINSERT",           wal_parse_rec_modify) \
 	X(WAL_REC_REPLAY_FEEDBACK,      16, "REPLAY_FEEDBACK",    NULL) \
-	X(WAL_REC_SWITCH_LOGICAL_XID,   17, "SWITCH_LOGICAL_XID", wal_parse_switch_logical_xid) \
-	X(WAL_REC_RELREPLIDENT,         18, "RELREPLIDENT",       wal_parse_relreplident)
+	X(WAL_REC_SWITCH_LOGICAL_XID,   17, "SWITCH_LOGICAL_XID", wal_parse_rec_switch_logical_xid) \
+	X(WAL_REC_RELREPLIDENT,         18, "RELREPLIDENT",       wal_parse_rec_relreplident)
 
 #define ORIOLE_WAL_RECORD_IS_MODIFY(rec) \
 	(rec == WAL_REC_INSERT || rec == WAL_REC_UPDATE || rec == WAL_REC_DELETE || rec == WAL_REC_REINSERT)
 
 /* Parsers */
-extern WalParseResult wal_parse_xid(WalReaderState *r, WalRecord *rec);
-extern WalParseResult wal_parse_finish(WalReaderState *r, WalRecord *rec);
-extern WalParseResult wal_parse_relation(WalReaderState *r, WalRecord *rec);
-extern WalParseResult wal_parse_o_tables_meta_unlock(WalReaderState *r, WalRecord *rec);
-extern WalParseResult wal_parse_savepoint(WalReaderState *r, WalRecord *rec);
-extern WalParseResult wal_parse_rollback_to_savepoint(WalReaderState *r, WalRecord *rec);
-extern WalParseResult wal_parse_joint_commit(WalReaderState *r, WalRecord *rec);
-extern WalParseResult wal_parse_truncate(WalReaderState *r, WalRecord *rec);
-extern WalParseResult wal_parse_bridge_erase(WalReaderState *r, WalRecord *rec);
-extern WalParseResult wal_parse_switch_logical_xid(WalReaderState *r, WalRecord *rec);
-extern WalParseResult wal_parse_relreplident(WalReaderState *r, WalRecord *rec);
-extern WalParseResult wal_parse_modify(WalReaderState *r, WalRecord *rec);
+extern WalParseResult wal_parse_rec_xid(WalReaderState *r, WalRecord *rec);
+extern WalParseResult wal_parse_rec_finish(WalReaderState *r, WalRecord *rec);
+extern WalParseResult wal_parse_rec_relation(WalReaderState *r, WalRecord *rec);
+extern WalParseResult wal_parse_rec_o_tables_meta_unlock(WalReaderState *r, WalRecord *rec);
+extern WalParseResult wal_parse_rec_savepoint(WalReaderState *r, WalRecord *rec);
+extern WalParseResult wal_parse_rec_rollback_to_savepoint(WalReaderState *r, WalRecord *rec);
+extern WalParseResult wal_parse_rec_joint_commit(WalReaderState *r, WalRecord *rec);
+extern WalParseResult wal_parse_rec_truncate(WalReaderState *r, WalRecord *rec);
+extern WalParseResult wal_parse_rec_bridge_erase(WalReaderState *r, WalRecord *rec);
+extern WalParseResult wal_parse_rec_switch_logical_xid(WalReaderState *r, WalRecord *rec);
+extern WalParseResult wal_parse_rec_relreplident(WalReaderState *r, WalRecord *rec);
+extern WalParseResult wal_parse_rec_modify(WalReaderState *r, WalRecord *rec);
 
 enum OrioleWalRecType
 {
@@ -226,12 +226,12 @@ typedef struct
  */
 
 #define ORIOLE_WAL_FLAGS(X) \
-	X(WAL_CONTAINER_HAS_XACT_INFO,		(1U << 0), "XACT_INFO",		wal_flag_parse_container_xact_info) \
-	X(WAL_CONTAINER_HAS_ORIGIN_INFO,	(1U << 1), "HAS_ORIGIN",	wal_flag_parse_container_origin_info)
+	X(WAL_CONTAINER_HAS_XACT_INFO,		(1U << 0), "XACT_INFO",		wal_parse_container_xact_info) \
+	X(WAL_CONTAINER_HAS_ORIGIN_INFO,	(1U << 1), "HAS_ORIGIN",	wal_parse_container_origin_info)
 
 /* Flag Parsers */
-extern WalParseResult wal_flag_parse_container_xact_info(WalReaderState *r, WalRecord *rec);
-extern WalParseResult wal_flag_parse_container_origin_info(WalReaderState *r, WalRecord *rec);
+extern WalParseResult wal_parse_container_xact_info(WalReaderState *r, WalRecord *rec);
+extern WalParseResult wal_parse_container_origin_info(WalReaderState *r, WalRecord *rec);
 
 enum OrioleWalFlagType
 {

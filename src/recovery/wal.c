@@ -96,7 +96,7 @@ wal_record_type_to_string(int wal_record)
 }
 
 WalParseResult
-wal_flag_parse_container_xact_info(WalReaderState *r, WalRecord *rec)
+wal_parse_container_xact_info(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
 	Assert(rec);
@@ -108,7 +108,7 @@ wal_flag_parse_container_xact_info(WalReaderState *r, WalRecord *rec)
 }
 
 WalParseResult
-wal_flag_parse_container_origin_info(WalReaderState *r, WalRecord *rec)
+wal_parse_container_origin_info(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
 	Assert(rec);
@@ -121,7 +121,7 @@ wal_flag_parse_container_origin_info(WalReaderState *r, WalRecord *rec)
 
 /* Parser for WAL_REC_XID */
 WalParseResult
-wal_parse_xid(WalReaderState *r, WalRecord *rec)
+wal_parse_rec_xid(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
 	Assert(rec);
@@ -141,7 +141,7 @@ wal_parse_xid(WalReaderState *r, WalRecord *rec)
 
 /* Parser for WAL_REC_COMMIT and WAL_REC_ROLLBACK */
 WalParseResult
-wal_parse_finish(WalReaderState *r, WalRecord *rec)
+wal_parse_rec_finish(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
 	Assert(rec);
@@ -154,7 +154,7 @@ wal_parse_finish(WalReaderState *r, WalRecord *rec)
 
 /* Parser for WAL_REC_JOINT_COMMIT */
 WalParseResult
-wal_parse_joint_commit(WalReaderState *r, WalRecord *rec)
+wal_parse_rec_joint_commit(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
 	Assert(rec);
@@ -168,7 +168,7 @@ wal_parse_joint_commit(WalReaderState *r, WalRecord *rec)
 
 /* Parser for WAL_REC_RELATION */
 WalParseResult
-wal_parse_relation(WalReaderState *r, WalRecord *rec)
+wal_parse_rec_relation(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
 	Assert(rec);
@@ -203,7 +203,7 @@ wal_parse_relation(WalReaderState *r, WalRecord *rec)
 
 /* Parser for WAL_REC_RELREPLIDENT */
 WalParseResult
-wal_parse_relreplident(WalReaderState *r, WalRecord *rec)
+wal_parse_rec_relreplident(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
 	Assert(rec);
@@ -225,7 +225,7 @@ wal_parse_relreplident(WalReaderState *r, WalRecord *rec)
 
 /* Parser for WAL_REC_O_TABLES_META_UNLOCK */
 WalParseResult
-wal_parse_o_tables_meta_unlock(WalReaderState *r, WalRecord *rec)
+wal_parse_rec_o_tables_meta_unlock(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
 	Assert(rec);
@@ -240,7 +240,7 @@ wal_parse_o_tables_meta_unlock(WalReaderState *r, WalRecord *rec)
 
 /* Parser for WAL_REC_SAVEPOINT */
 WalParseResult
-wal_parse_savepoint(WalReaderState *r, WalRecord *rec)
+wal_parse_rec_savepoint(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
 	Assert(rec);
@@ -254,7 +254,7 @@ wal_parse_savepoint(WalReaderState *r, WalRecord *rec)
 
 /* Parser for WAL_REC_ROLLBACK_TO_SAVEPOINT */
 WalParseResult
-wal_parse_rollback_to_savepoint(WalReaderState *r, WalRecord *rec)
+wal_parse_rec_rollback_to_savepoint(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
 	Assert(rec);
@@ -275,7 +275,7 @@ wal_parse_rollback_to_savepoint(WalReaderState *r, WalRecord *rec)
 
 /* Parser for WAL_REC_TRUNCATE */
 WalParseResult
-wal_parse_truncate(WalReaderState *r, WalRecord *rec)
+wal_parse_rec_truncate(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
 	Assert(rec);
@@ -289,7 +289,7 @@ wal_parse_truncate(WalReaderState *r, WalRecord *rec)
 
 /* Parser for WAL_REC_BRIDGE_ERASE */
 WalParseResult
-wal_parse_bridge_erase(WalReaderState *r, WalRecord *rec)
+wal_parse_rec_bridge_erase(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
 	Assert(rec);
@@ -301,7 +301,7 @@ wal_parse_bridge_erase(WalReaderState *r, WalRecord *rec)
 
 /* Parser for WAL_REC_SWITCH_LOGICAL_XID */
 WalParseResult
-wal_parse_switch_logical_xid(WalReaderState *r, WalRecord *rec)
+wal_parse_rec_switch_logical_xid(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
 	Assert(rec);
@@ -1218,7 +1218,7 @@ set_local_wal_has_material_changes(bool value)
  * Two tuples in certain cases: (1) WAL_REC_REINSERT, (2) WAL_REC_UPDATE with REPLICA_IDENTITY_FULL
  */
 WalParseResult
-wal_parse_modify(WalReaderState *r, WalRecord *rec)
+wal_parse_rec_modify(WalReaderState *r, WalRecord *rec)
 {
 	Assert(r);
 	Assert(rec);
