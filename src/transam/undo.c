@@ -1538,8 +1538,14 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 		{
 			UndoLocation lastUsedLocation = pg_atomic_read_u64(&meta->lastUsedLocation);
 
-			if (UndoLocationIsValid(lastUsedLocation))
+			/*
+			 * Don't need to do insert_replication_retain_undo_location() for
+			 * page merges.  Only when we're preparing to do a material change
+			 * in system trees.
+			 */
+			if (UndoLocationIsValid(lastUsedLocation) && waitForUndoLocation)
 			{
+				Assert(!have_locked_pages());
 				insertedXid = xid;
 				insert_replication_retain_undo_location(xid, lastUsedLocation, false);
 			}
