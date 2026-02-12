@@ -45,6 +45,17 @@ extern TupleTableSlot *o_exec_bitmap_fetch(OBitmapScan *scan,
 										   CustomScanState *node);
 extern void o_free_bitmap_scan(OBitmapScan *scan);
 
+typedef struct
+{
+	RBTNode		rbtnode;
+	uint64		key;
+	uint8	   *bitmap;
+} OKeyBitmapRBTNode;
+
+#define HIGH_PART_MASK	(0xFFFFFFFFFFFFFC00)
+#define LOW_PART_MASK	(0x00000000000003FF)
+#define BITMAP_SIZE		0x80
+
 extern RBTree *o_keybitmap_create(void);
 extern void o_keybitmap_insert(RBTree *rbtree, uint64 value);
 extern void o_keybitmap_intersect(RBTree *a, RBTree *b);
