@@ -358,10 +358,11 @@ wal_container_read_header(Pointer ptr, uint16 *version, uint8 *flags)
 #endif
 	}
 
-	if (wal_version >= ORIOLEDB_XACT_INFO_WAL_VERSION)
+	if (wal_version >= ORIOLEDB_CONTAINER_FLAGS_WAL_VERSION)
 	{
 		/*
-		 * WAL container flags were added by ORIOLEDB_XACT_INFO_WAL_VERSION.
+		 * WAL container flags were added by
+		 * ORIOLEDB_CONTAINER_FLAGS_WAL_VERSION.
 		 */
 		memcpy(&wal_flags, ptr, sizeof(wal_flags));
 		ptr += sizeof(wal_flags);

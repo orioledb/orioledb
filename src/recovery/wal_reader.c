@@ -233,10 +233,11 @@ wr_wal_container_read_header(WalReaderState *r, bool allow_logging)
 #endif
 	}
 
-	if (wal_version >= ORIOLEDB_XACT_INFO_WAL_VERSION)
+	if (wal_version >= ORIOLEDB_CONTAINER_FLAGS_WAL_VERSION)
 	{
 		/*
-		 * WAL container flags were added by ORIOLEDB_XACT_INFO_WAL_VERSION.
+		 * WAL container flags were added by
+		 * ORIOLEDB_CONTAINER_FLAGS_WAL_VERSION.
 		 */
 		WR_PARSE(r, &wal_flags);
 	}

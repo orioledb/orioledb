@@ -934,7 +934,7 @@ orioledb_recovery_stops_before_hook(XLogReaderState *record,
 	 * If the WAL record is too old just return false and decide not to stop
 	 * applying WAL records further.
 	 */
-	else if (wal_version < ORIOLEDB_XACT_INFO_WAL_VERSION)
+	else if (wal_version < ORIOLEDB_CONTAINER_FLAGS_WAL_VERSION)
 		return false;
 
 	if ((wal_flags & WAL_CONTAINER_HAS_XACT_INFO) == 0)

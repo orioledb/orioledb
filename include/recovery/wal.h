@@ -89,7 +89,7 @@ enum OrioleWalRecType
  */
 #define ORIOLEDB_WAL_VERSION (17)
 
-#define ORIOLEDB_XACT_INFO_WAL_VERSION (17)
+#define ORIOLEDB_CONTAINER_FLAGS_WAL_VERSION (17)
 
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
