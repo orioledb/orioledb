@@ -173,8 +173,6 @@ build_fixed_tuples(const WalRecord *rec, OFixedTuple *tuple1, OFixedTuple *tuple
 /*
  * On success, r->ptr is positioned at the first byte after the
  * container header.
- *
- * @TODO rename after migration!
  */
 static WalParseResult
 wal_container_read_header(WalReaderState *r, bool allow_logging)
