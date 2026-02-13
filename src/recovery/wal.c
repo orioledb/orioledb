@@ -95,278 +95,221 @@ wal_record_type_to_string(int wal_record)
 	return "UNKNOWN";
 }
 
-#define PARSE(ptr, valptr) \
-do \
-{ \
-	if (valptr) \
-	{ \
-		memcpy(valptr, ptr, sizeof(*(valptr))); \
-	} \
-	ptr += sizeof(*(valptr)); \
-} while(0)
+WalParseResult
+wal_parse_container_xact_info(WalReaderState *r, WalRecord *rec)
+{
+	Assert(r);
+	Assert(rec);
 
-#define ASSIGN(ptr, value) \
-do { \
-	if (ptr) *ptr = value; \
-} while(0)
+	WR_PARSE(r, &rec->u.xact_info.xactTime);
+	WR_PARSE(r, &rec->u.xact_info.xid);
+
+	return WALPARSE_OK;
+}
+
+WalParseResult
+wal_parse_container_origin_info(WalReaderState *r, WalRecord *rec)
+{
+	Assert(r);
+	Assert(rec);
+
+	WR_PARSE(r, &rec->origin_id);
+	WR_PARSE(r, &rec->origin_lsn);
+
+	return WALPARSE_OK;
+}
 
 /* Parser for WAL_REC_XID */
-Pointer
-wal_parse_rec_xid(Pointer ptr, OXid *oxid, TransactionId *logicalXid, TransactionId *heapXid, uint16 wal_version)
+WalParseResult
+wal_parse_rec_xid(WalReaderState *r, WalRecord *rec)
 {
-	Assert(ptr);
+	Assert(r);
+	Assert(rec);
 
-	PARSE(ptr, oxid);
-	PARSE(ptr, logicalXid);
-	if (wal_version >= 17)
+	WR_PARSE(r, &rec->oxid);
+	WR_PARSE(r, &rec->logicalXid);
+	if (r->wal_version >= 17)
 	{
-		PARSE(ptr, heapXid);
+		WR_PARSE(r, &rec->heapXid);
 	}
 	else
 	{
-		ASSIGN(heapXid, InvalidTransactionId);
+		rec->heapXid = InvalidTransactionId;
 	}
-
-	return ptr;
-}
-
-/* Parser for WAL_CONTAINER_XACT_INFO */
-Pointer
-wal_parse_container_xact_info(Pointer ptr, TimestampTz *xactTime, TransactionId *xid)
-{
-	Assert(ptr);
-
-	PARSE(ptr, xactTime);
-	PARSE(ptr, xid);
-
-	return (ptr);
+	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_COMMIT and WAL_REC_ROLLBACK */
-Pointer
-wal_parse_rec_finish(Pointer ptr, OXid *xmin, CommitSeqNo *csn)
+WalParseResult
+wal_parse_rec_finish(WalReaderState *r, WalRecord *rec)
 {
-	Assert(ptr);
+	Assert(r);
+	Assert(rec);
 
-	PARSE(ptr, xmin);
-	PARSE(ptr, csn);
+	WR_PARSE(r, &rec->u.finish.xmin);
+	WR_PARSE(r, &rec->u.finish.csn);
 
-	return ptr;
+	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_JOINT_COMMIT */
-Pointer
-wal_parse_rec_joint_commit(Pointer ptr, TransactionId *xid, OXid *xmin, CommitSeqNo *csn)
+WalParseResult
+wal_parse_rec_joint_commit(WalReaderState *r, WalRecord *rec)
 {
-	Assert(ptr);
+	Assert(r);
+	Assert(rec);
 
-	PARSE(ptr, xid);
-	PARSE(ptr, xmin);
-	PARSE(ptr, csn);
+	WR_PARSE(r, &rec->u.joint_commit.xid);
+	WR_PARSE(r, &rec->u.joint_commit.xmin);
+	WR_PARSE(r, &rec->u.joint_commit.csn);
 
-	return ptr;
+	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_RELATION */
-Pointer
-wal_parse_rec_relation(Pointer ptr, uint8 *treeType, ORelOids *oids, OXid *xmin, CommitSeqNo *csn, CommandId *cid, uint32 *version, uint32 *base_version, uint16 wal_version)
+WalParseResult
+wal_parse_rec_relation(WalReaderState *r, WalRecord *rec)
 {
-	Assert(ptr);
-	Assert(oids);
+	Assert(r);
+	Assert(rec);
 
-	PARSE(ptr, treeType);
-	PARSE(ptr, &oids->datoid);
-	PARSE(ptr, &oids->reloid);
-	PARSE(ptr, &oids->relnode);
+	WR_PARSE(r, &rec->u.relation.treeType);
+	WR_PARSE(r, &rec->oids.datoid);
+	WR_PARSE(r, &rec->oids.reloid);
+	WR_PARSE(r, &rec->oids.relnode);
 
-	if (wal_version >= 17)
+	if (r->wal_version >= 17)
 	{
-		PARSE(ptr, xmin);
-		PARSE(ptr, csn);
-		PARSE(ptr, cid);
+		OXid		xmin;
 
-		PARSE(ptr, version);
-		PARSE(ptr, base_version);
+		WR_PARSE(r, &xmin);
+		WR_PARSE(r, &rec->u.relation.snapshot.csn);
+		WR_PARSE(r, &rec->u.relation.snapshot.cid);
+
+		rec->u.relation.snapshot.xmin = xmin;
+
+		WR_PARSE(r, &rec->u.relation.version);
+		WR_PARSE(r, &rec->u.relation.base_version);
 	}
 	else
 	{
-		ASSIGN(xmin, InvalidOXid);
-		ASSIGN(csn, 0);
-		ASSIGN(cid, InvalidCommandId);
-
-		ASSIGN(version, O_TABLE_INVALID_VERSION);
-		ASSIGN(base_version, O_TABLE_INVALID_VERSION);
+		rec->u.relation.snapshot = o_non_deleted_snapshot;
+		rec->u.relation.version = O_TABLE_INVALID_VERSION;
+		rec->u.relation.base_version = O_TABLE_INVALID_VERSION;
 	}
 
-	return ptr;
+	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_RELREPLIDENT */
-Pointer
-wal_parse_rec_relreplident(Pointer ptr, char *relreplident, Oid *relreplident_ix_oid)
+WalParseResult
+wal_parse_rec_relreplident(WalReaderState *r, WalRecord *rec)
 {
-	Assert(ptr);
-	Assert(relreplident);
-	/* Should be set only once and only from default */
-	Assert(*relreplident == REPLICA_IDENTITY_DEFAULT);
+	Assert(r);
+	Assert(rec);
 
-	PARSE(ptr, relreplident);
+	/* Should be set only once and only from default */
+	Assert(rec->relreplident == REPLICA_IDENTITY_DEFAULT);
+
+	WR_PARSE(r, &rec->relreplident);
 
 	/*
 	 * relreplident_ix_oid is reserved in the WAL_REC_RELREPLIDENT for the
 	 * future implementation of REPLICA IDENTITY USING INDEX and not used now
 	 */
-	PARSE(ptr, relreplident_ix_oid);
-	Assert(*relreplident_ix_oid == InvalidOid);
+	WR_PARSE(r, &rec->u.relreplident.relreplident_ix_oid);
+	Assert(rec->u.relreplident.relreplident_ix_oid == InvalidOid);
 
-	return ptr;
+	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_O_TABLES_META_UNLOCK */
-Pointer
-wal_parse_rec_o_tables_meta_unlock(Pointer ptr, ORelOids *oids, Oid *old_relnode)
+WalParseResult
+wal_parse_rec_o_tables_meta_unlock(WalReaderState *r, WalRecord *rec)
 {
-	Assert(ptr);
-	Assert(oids);
+	Assert(r);
+	Assert(rec);
 
-	PARSE(ptr, &oids->datoid);
-	PARSE(ptr, &oids->reloid);
-	PARSE(ptr, old_relnode);
-	PARSE(ptr, &oids->relnode);
+	WR_PARSE(r, &rec->u.unlock.oids.datoid);
+	WR_PARSE(r, &rec->u.unlock.oids.reloid);
+	WR_PARSE(r, &rec->u.unlock.oldRelnode);
+	WR_PARSE(r, &rec->u.unlock.oids.relnode);
 
-	return ptr;
+	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_SAVEPOINT */
-Pointer
-wal_parse_rec_savepoint(Pointer ptr, SubTransactionId *parentSubid, TransactionId *logicalXid, TransactionId *parentLogicalXid)
+WalParseResult
+wal_parse_rec_savepoint(WalReaderState *r, WalRecord *rec)
 {
-	Assert(ptr);
+	Assert(r);
+	Assert(rec);
 
-	PARSE(ptr, parentSubid);
-	PARSE(ptr, logicalXid);
-	PARSE(ptr, parentLogicalXid);
+	WR_PARSE(r, &rec->u.savepoint.parentSubid);
+	WR_PARSE(r, &rec->logicalXid);
+	WR_PARSE(r, &rec->u.savepoint.parentLogicalXid);
 
-	return ptr;
+	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_ROLLBACK_TO_SAVEPOINT */
-Pointer
-wal_parse_rec_rollback_to_savepoint(Pointer ptr, SubTransactionId *parentSubid, OXid *xmin, CommitSeqNo *csn, uint16 wal_version)
+WalParseResult
+wal_parse_rec_rollback_to_savepoint(WalReaderState *r, WalRecord *rec)
 {
-	Assert(ptr);
+	Assert(r);
+	Assert(rec);
 
-	PARSE(ptr, parentSubid);
-	if (wal_version >= 17)
+	WR_PARSE(r, &rec->u.rb_to_sp.parentSubid);
+	if (r->wal_version >= 17)
 	{
-		PARSE(ptr, xmin);
-		PARSE(ptr, csn);
+		WR_PARSE(r, &rec->u.rb_to_sp.xmin);
+		WR_PARSE(r, &rec->u.rb_to_sp.csn);
 	}
 	else
 	{
-		ASSIGN(xmin, InvalidOXid);
-		ASSIGN(csn, 0);
+		rec->u.rb_to_sp.xmin = InvalidOXid;
+		rec->u.rb_to_sp.csn = 0;
 	}
-
-	return ptr;
+	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_TRUNCATE */
-Pointer
-wal_parse_rec_truncate(Pointer ptr, ORelOids *oids)
+WalParseResult
+wal_parse_rec_truncate(WalReaderState *r, WalRecord *rec)
 {
-	Assert(ptr);
-	Assert(oids);
+	Assert(r);
+	Assert(rec);
 
-	PARSE(ptr, &oids->datoid);
-	PARSE(ptr, &oids->reloid);
-	PARSE(ptr, &oids->relnode);
+	WR_PARSE(r, &rec->u.truncate.oids.datoid);
+	WR_PARSE(r, &rec->u.truncate.oids.reloid);
+	WR_PARSE(r, &rec->u.truncate.oids.relnode);
 
-	return ptr;
+	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_BRIDGE_ERASE */
-Pointer
-wal_parse_rec_bridge_erase(Pointer ptr, ItemPointerData *iptr)
+WalParseResult
+wal_parse_rec_bridge_erase(WalReaderState *r, WalRecord *rec)
 {
-	Assert(ptr);
+	Assert(r);
+	Assert(rec);
 
-	PARSE(ptr, iptr);
+	WR_PARSE(r, &rec->u.bridge_erase.iptr);
 
-	return ptr;
+	return WALPARSE_OK;
 }
 
 /* Parser for WAL_REC_SWITCH_LOGICAL_XID */
-Pointer
-wal_parse_rec_switch_logical_xid(Pointer ptr, TransactionId *topXid, TransactionId *subXid)
+WalParseResult
+wal_parse_rec_switch_logical_xid(WalReaderState *r, WalRecord *rec)
 {
-	Assert(ptr);
+	Assert(r);
+	Assert(rec);
 
-	PARSE(ptr, topXid);
-	PARSE(ptr, subXid);
+	WR_PARSE(r, &rec->u.swxid.topXid);
+	WR_PARSE(r, &rec->u.swxid.subXid);
 
-	return ptr;
-}
-
-Pointer
-wal_container_read_header(Pointer ptr, uint16 *version, uint8 *flags)
-{
-	uint16		wal_version = 0;
-	uint8		wal_flags = 0;
-
-	if (*ptr >= FIRST_ORIOLEDB_WAL_VERSION)
-	{
-		/*
-		 * Container starts with a valid WAL version. First WAL record is just
-		 * after it.
-		 */
-		memcpy(&wal_version, ptr, sizeof(wal_version));
-		ptr += sizeof(wal_version);
-	}
-	else
-	{
-		/*
-		 * Container starts with rec_type of first WAL record (its maximum
-		 * value was under FIRST_ORIOLEDB_WAL_VERSION at the time of
-		 * introducing WAL versioning. Consider this as version 0 and don't
-		 * increase pointer
-		 */
-		wal_version = 0;
-	}
-
-	if (wal_version > ORIOLEDB_WAL_VERSION)
-	{
-#ifdef IS_DEV
-		/* Always fail tests on difference */
-		elog(FATAL, "Can't apply WAL container version %u that is newer than supported %u. Intentionally fail tests", wal_version, ORIOLEDB_WAL_VERSION);
-#else
-		elog(WARNING, "Can't apply WAL container version %u that is newer than supported %u", wal_version, ORIOLEDB_WAL_VERSION);
-		/* Further fail and output is caller-specific */
-#endif
-	}
-	else if (wal_version < ORIOLEDB_WAL_VERSION)
-	{
-#ifdef IS_DEV
-		/* Always fail tests on difference */
-		elog(FATAL, "WAL container version %u is older than current %u. Intentionally fail tests", wal_version, ORIOLEDB_WAL_VERSION);
-#else
-		elog(LOG, "WAL container version %u is older than current %u. Applying with conversion.", wal_version, ORIOLEDB_WAL_VERSION);
-#endif
-	}
-
-	if (wal_version >= ORIOLEDB_XACT_INFO_WAL_VERSION)
-	{
-		/*
-		 * WAL container flags were added by ORIOLEDB_XACT_INFO_WAL_VERSION.
-		 */
-		memcpy(&wal_flags, ptr, sizeof(wal_flags));
-		ptr += sizeof(wal_flags);
-	}
-
-	*version = wal_version;
-	*flags = wal_flags;
-
-	return ptr;
+	return WALPARSE_OK;
 }
 
 void
@@ -1213,66 +1156,42 @@ set_local_wal_has_material_changes(bool value)
  * Read one or two tuples from modify WAL record.
  * Two tuples in certain cases: (1) WAL_REC_REINSERT, (2) WAL_REC_UPDATE with REPLICA_IDENTITY_FULL
  */
-Pointer
-wal_parse_rec_modify(Pointer ptr, OFixedTuple *tuple1, OFixedTuple *tuple2, OffsetNumber *length1_out, bool read_two_tuples)
+WalParseResult
+wal_parse_rec_modify(WalReaderState *r, WalRecord *rec)
 {
-	OffsetNumber length1;
-	OffsetNumber length2;
+	Assert(r);
+	Assert(rec);
 
-	if (!read_two_tuples)
+	rec->u.modify.read_two_tuples = (rec->type == WAL_REC_REINSERT || (rec->type == WAL_REC_UPDATE && rec->relreplident == REPLICA_IDENTITY_FULL));
+
+	if (!rec->u.modify.read_two_tuples)
 	{
-		PARSE(ptr, &tuple1->tuple.formatFlags);
-		memcpy(&length1, ptr, sizeof(OffsetNumber));
-		ptr += sizeof(OffsetNumber);
-		Assert(length1 > 0);
+		WR_PARSE(r, &rec->u.modify.t1.formatFlags);
+		WR_PARSE(r, &rec->u.modify.len1);
+		Assert(rec->u.modify.len1 > 0);
 
-		Assert(tuple1->fixedData);
-		memcpy(tuple1->fixedData, ptr, length1);
-		if (length1 != MAXALIGN(length1))
-			memset(&tuple1->fixedData[length1], 0, MAXALIGN(length1) - length1);
+		rec->u.modify.t1.data = r->ptr;
+		WR_SKIP(r, rec->u.modify.len1);
 
-		ptr += length1;
-		tuple1->tuple.data = tuple1->fixedData;
-		O_TUPLE_SET_NULL(tuple2->tuple);
+		O_TUPLE_SET_NULL(rec->u.modify.t2);
 	}
 	else
 	{
-		PARSE(ptr, &tuple1->tuple.formatFlags);
-		PARSE(ptr, &tuple2->tuple.formatFlags);
-		memcpy(&length1, ptr, sizeof(OffsetNumber));
-		ptr += sizeof(OffsetNumber);
-		memcpy(&length2, ptr, sizeof(OffsetNumber));
-		ptr += sizeof(OffsetNumber);
+		WR_PARSE(r, &rec->u.modify.t1.formatFlags);
+		WR_PARSE(r, &rec->u.modify.t2.formatFlags);
 
-		Assert(length1 > 0 && length2 > 0);
+		WR_PARSE(r, &rec->u.modify.len1);
+		WR_PARSE(r, &rec->u.modify.len2);
 
-		Assert(tuple1->fixedData);
-		memcpy(tuple1->fixedData, ptr, length1);
-		if (length1 != MAXALIGN(length1))
-			memset(&tuple1->fixedData[length1], 0, MAXALIGN(length1) - length1);
+		Assert(rec->u.modify.len1 > 0);
+		Assert(rec->u.modify.len2 > 0);
 
-		ptr += length1;
-		tuple1->tuple.data = tuple1->fixedData;
+		rec->u.modify.t1.data = r->ptr;
+		WR_SKIP(r, rec->u.modify.len1);
 
-		Assert(tuple2->fixedData);
-		memcpy(tuple2->fixedData, ptr, length2);
-		if (length2 != MAXALIGN(length2))
-			memset(&tuple2->fixedData[length2], 0, MAXALIGN(length2) - length2);
-
-		ptr += length2;
-		tuple2->tuple.data = tuple2->fixedData;
+		rec->u.modify.t2.data = r->ptr;
+		WR_SKIP(r, rec->u.modify.len2);
 	}
-	*length1_out = length1;
 
-	return ptr;
-}
-
-Pointer
-wal_parse_container_origin_info(Pointer ptr, RepOriginId *origin_id, XLogRecPtr *origin_lsn)
-{
-	Assert(ptr);
-	PARSE(ptr, origin_id);
-	PARSE(ptr, origin_lsn);
-
-	return ptr;
+	return WALPARSE_OK;
 }
