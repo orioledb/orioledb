@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * sys_trees.c
- *		Defitions for system trees.
+ *		Definitions for system trees.
  *
  * Copyright (c) 2021-2026, Oriole DB Inc.
  * Copyright (c) 2025-2026, Supabase Inc.

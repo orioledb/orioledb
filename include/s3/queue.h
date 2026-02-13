@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * queue.h
- * 		A declarations for queue of tasks for S3 workers.
+ * 		Declarations for queue of tasks for S3 workers.
  *
  * Copyright (c) 2024-2026, Oriole DB Inc.
  * Copyright (c) 2025-2026, Supabase Inc.

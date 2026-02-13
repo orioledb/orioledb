@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * ucm.h
- *		Declarations of OrioleDB usage count map (USM).
+ *		Declarations of OrioleDB usage count map (UCM).
  *
  * Copyright (c) 2021-2026, Oriole DB Inc.
  * Copyright (c) 2025-2026, Supabase Inc.

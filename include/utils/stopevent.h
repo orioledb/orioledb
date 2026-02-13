@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * stopevent.h
- *		Decalarations forstop events.
+ *		Declarations for stop events.
  *
  * Copyright (c) 2021-2026, Oriole DB Inc.
  * Copyright (c) 2025-2026, Supabase Inc.
