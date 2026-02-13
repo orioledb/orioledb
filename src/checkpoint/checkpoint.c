@@ -1518,7 +1518,7 @@ checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 		return;
 	}
 
-	ppool_reserve_pages(descr->ppool, PPOOL_RESERVE_META, 4);
+	(*descr->ppool->ops->reserve_pages) (descr->ppool, PPOOL_RESERVE_META, 4);
 
 	init_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]);
 
@@ -3150,7 +3150,7 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 	}
 
 	if (btree_try_merge_pages(descr, parentBlkno, NULL, &mergeParent,
-							  blkno, loc, rightBlkno, true))
+							  blkno, &loc, rightBlkno, true))
 	{
 		checkpoint_reserve_undo(descr->undoType, true);
 		return true;
@@ -5037,8 +5037,8 @@ init_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared)
 	Assert(!OInMemoryBlknoIsValid(shared->pages[0]));
 	Assert(!OInMemoryBlknoIsValid(shared->pages[1]));
 
-	shared->pages[0] = ppool_get_page(desc->ppool, PPOOL_RESERVE_META);;
-	shared->pages[1] = ppool_get_page(desc->ppool, PPOOL_RESERVE_META);;
+	shared->pages[0] = (*desc->ppool->ops->alloc_page) (desc->ppool, PPOOL_RESERVE_META);
+	shared->pages[1] = (*desc->ppool->ops->alloc_page) (desc->ppool, PPOOL_RESERVE_META);
 
 	Assert(OInMemoryBlknoIsValid(shared->pages[0]));
 	Assert(OInMemoryBlknoIsValid(shared->pages[1]));

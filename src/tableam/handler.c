@@ -180,7 +180,7 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 	Assert(descr != NULL);
 
 	if (GET_PRIMARY(descr)->primaryIsCtid)
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+		o_btree_ensure_initialized(&GET_PRIMARY(descr)->desc);
 
 	if (o_scan->bridged_tuple)
 	{
@@ -219,7 +219,7 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 		bridge_bound.keys[0].exclusion_fn = NULL;
 		csn = COMMITSEQNO_INPROGRESS;
 
-		o_btree_load_shmem(&descr->bridge->desc);
+		o_btree_ensure_initialized(&descr->bridge->desc);
 
 		bridge_tup = o_btree_find_tuple_by_key(&descr->bridge->desc,
 											   (Pointer) &bridge_bound, BTreeKeyBound,
@@ -305,7 +305,7 @@ orioledb_fetch_row_version(Relation relation,
 
 	Assert(descr != NULL);
 	if (GET_PRIMARY(descr)->primaryIsCtid)
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+		o_btree_ensure_initialized(&GET_PRIMARY(descr)->desc);
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint,
 						&csn, &version, NULL);
@@ -358,7 +358,7 @@ orioledb_tuple_satisfies_snapshot(Relation rel, TupleTableSlot *slot,
 
 	Assert(descr != NULL);
 	if (GET_PRIMARY(descr)->primaryIsCtid)
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+		o_btree_ensure_initialized(&GET_PRIMARY(descr)->desc);
 
 	tts_orioledb_fill_key_bound(slot, GET_PRIMARY(descr), &pkey);
 
@@ -482,7 +482,7 @@ orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
 
 	if (id->primaryIsCtid)
 	{
-		o_btree_load_shmem(&id->desc);
+		o_btree_ensure_initialized(&id->desc);
 		slot->tts_tid = btree_ctid_get_and_inc(&id->desc);
 	}
 
@@ -536,7 +536,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 
 	Assert(descr != NULL);
 	if (GET_PRIMARY(descr)->primaryIsCtid)
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+		o_btree_ensure_initialized(&GET_PRIMARY(descr)->desc);
 
 	oxid = get_current_oxid();
 
@@ -633,7 +633,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 
 	Assert(descr != NULL);
 	if (GET_PRIMARY(descr)->primaryIsCtid)
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+		o_btree_ensure_initialized(&GET_PRIMARY(descr)->desc);
 
 	*update_indexes = TU_All;
 	oxid = get_current_oxid();
@@ -1223,7 +1223,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 			for (i = 0; i < descr->nIndices + 1; i++)
 			{
 				td = i != descr->nIndices ? &descr->indices[i]->desc : &descr->toast->desc;
-				o_btree_load_shmem(td);
+				o_btree_ensure_initialized(td);
 				result += (uint64) TREE_NUM_LEAF_PAGES(td) * (uint64) ORIOLEDB_BLCKSZ;
 			}
 		}
@@ -1243,7 +1243,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 
 				td = &descr->indices[i]->desc;
 
-				o_btree_load_shmem(td);
+				o_btree_ensure_initialized(td);
 				result += (uint64) TREE_NUM_LEAF_PAGES(td) * (uint64) ORIOLEDB_BLCKSZ;
 			}
 		}
@@ -1251,11 +1251,11 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		{
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
-				o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+				o_btree_ensure_initialized(&GET_PRIMARY(descr)->desc);
 				result += (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
 					ORIOLEDB_BLCKSZ;
 
-				o_btree_load_shmem(&descr->toast->desc);
+				o_btree_ensure_initialized(&descr->toast->desc);
 				result += (uint64) TREE_NUM_LEAF_PAGES(&descr->toast->desc) *
 					ORIOLEDB_BLCKSZ;
 			}
@@ -1264,7 +1264,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		{
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
-				o_btree_load_shmem(&descr->toast->desc);
+				o_btree_ensure_initialized(&descr->toast->desc);
 				result = (uint64) TREE_NUM_LEAF_PAGES(&descr->toast->desc) *
 					ORIOLEDB_BLCKSZ;
 			}
@@ -1273,7 +1273,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		{
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
-				o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+				o_btree_ensure_initialized(&GET_PRIMARY(descr)->desc);
 				result = (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
 					ORIOLEDB_BLCKSZ;
 			}
@@ -1323,7 +1323,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 			return -1;
 		}
 		td = &table_desc->indices[ixnum]->desc;
-		o_btree_load_shmem(td);
+		o_btree_ensure_initialized(td);
 		result = (uint64) TREE_NUM_LEAF_PAGES(td) * (uint64) ORIOLEDB_BLCKSZ;
 		relation_close(tbl, AccessShareLock);
 	}
@@ -1837,7 +1837,7 @@ orioledb_acquire_sample_rows(Relation relation, int elevel,
 	BlockNumber totalblocks;
 	ItemPointerData fake_iptr = {0};
 
-	o_btree_load_shmem(&pk->desc);
+	o_btree_ensure_initialized(&pk->desc);
 	totalblocks = TREE_NUM_LEAF_PAGES(&pk->desc);
 
 	ItemPointerSetBlockNumber(&fake_iptr, 0);
@@ -1971,7 +1971,7 @@ orioledb_analyze_table(Relation relation,
 	OTableDescr *descr = relation_get_descr(relation);
 	OIndexDescr *pk = GET_PRIMARY(descr);
 
-	o_btree_load_shmem(&pk->desc);
+	o_btree_ensure_initialized(&pk->desc);
 
 	*func = orioledb_acquire_sample_rows;
 	*totalpages = TREE_NUM_LEAF_PAGES(&pk->desc);

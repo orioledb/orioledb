@@ -57,7 +57,7 @@ typedef struct
 static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType,
 									bool miss_ok, OTableFetchContext ctx, void *o_table_source, OTableSource source);
 static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot);
-static void init_shared_root_info(OPagePool *pool,
+static void init_shared_root_info(PagePool *pool,
 								  SharedRootInfo *sharedRootInfo);
 static bool o_tree_init_free_extents(BTreeDescr *desc);
 static OComparator *o_find_opclass_comparator(OOpclass *opclass, Oid collation);
@@ -114,7 +114,7 @@ OTableFetchContext default_table_fetch_context = {.snapshot = &o_non_deleted_sna
  * table_descr_init_tree function.
  */
 static SharedRootInfo *
-create_shared_root_info(OPagePool *pool, SharedRootInfoKey *key)
+create_shared_root_info(PagePool *pool, SharedRootInfoKey *key)
 {
 	SharedRootInfo *sharedRootInfo;
 
@@ -246,11 +246,11 @@ orioledb_get_evicted_trees(PG_FUNCTION_ARGS)
  * under AccessShareLock (See o_tables.h/o_tables_rel_lock()).
  */
 static bool
-o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
+o_btree_ensure_initialized_internal(BTreeDescr *desc, bool checkpoint)
 {
 	SharedRootInfoKey key;
 	SharedRootInfo *sharedRootInfo = NULL;
-	bool		was_evicted,
+	bool		was_evicted = false,
 				is_compressed,
 				init_extents,
 				inserted PG_USED_FOR_ASSERTS_ONLY;
@@ -271,9 +271,11 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 
 	/*
 	 * evictable_tree_init() needs that.  Initialized it before we get one of
-	 * checkpoint_state->oSharedRootInfoInsertLocks.
+	 * checkpoint_state->oSharedRootInfoInsertLocks.  Skip for in-memory
+	 * trees.
 	 */
-	(void) get_sys_tree(SYS_TREES_CHKP_NUM);
+	if (desc->storageType != BTreeStorageInMemory)
+		(void) get_sys_tree(SYS_TREES_CHKP_NUM);
 
 	sharedRootInfo = o_find_shared_root_info(&key);
 	if (sharedRootInfo == NULL)
@@ -281,15 +283,14 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		lockNo = tag_hash(&key, sizeof(key)) % SHARED_ROOT_INFO_INSERT_NUM_LOCKS;
 
 		/*---
-		 * Reserve 8 pages:
-		 *
-		 * - root page
-		 * - meta page
-		 * - 2 for nextChkp seq bufs
-		 * - 2 for tmp seq bufs
-		 * - 2 for free seq bufs
+		 * Reserve pages:
+		 * - In-memory trees only need 2 (root + meta)
+		 * - Others need 8 (root, meta, plus 6 for seq bufs)
 		 */
-		ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_META, 8);
+		if (desc->storageType == BTreeStorageInMemory)
+			(*desc->ppool->ops->reserve_pages) (desc->ppool, PPOOL_RESERVE_META, 2);
+		else
+			(*desc->ppool->ops->reserve_pages) (desc->ppool, PPOOL_RESERVE_META, 8);
 		LWLockAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo],
 					  LW_EXCLUSIVE);
 		hasLock = true;
@@ -301,7 +302,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		if (hasLock)
 		{
 			LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo]);
-			ppool_release_reserved(desc->ppool, PPOOL_RESERVE_META);
+			(*desc->ppool->ops->release_reserved) (desc->ppool, PPOOL_RESERVE_META);
 		}
 		pfree(sharedRootInfo);
 		return false;
@@ -314,9 +315,8 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		/* tries to create SharedRootInfo */
 		sharedRootInfo = create_shared_root_info(desc->ppool, &key);
 		desc->rootInfo = sharedRootInfo->rootInfo;
-		Assert(desc->storageType == BTreeStoragePersistence ||
-			   desc->storageType == BTreeStorageTemporary ||
-			   desc->storageType == BTreeStorageUnlogged);
+
+		/* Initialize based on storage type */
 		if (desc->storageType == BTreeStoragePersistence ||
 			desc->storageType == BTreeStorageUnlogged)
 		{
@@ -326,11 +326,17 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		{
 			evictable_tree_init(desc, true, &was_evicted);
 		}
+		else if (desc->storageType == BTreeStorageInMemory)
+		{
+			/* Simple init for local/in-memory trees - no seq bufs, no files */
+			o_btree_init(desc);
+		}
 		is_compressed = OCompressIsValid(desc->compress);
 		desc->rootInfo = sharedRootInfo->rootInfo;
 
 		init_extents = false;
-		if (is_compressed && !was_evicted)
+		if (desc->storageType != BTreeStorageInMemory &&
+			is_compressed && !was_evicted)
 		{
 			init_extents = true;
 
@@ -366,9 +372,10 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 	else
 	{
 		/*
-		 * o_btree_load_shmem() must be called only under relation locks, in
-		 * this state BTree can not be evicted and removed from ShareDescr
-		 * cache because AccessExclusiveLock needed for this actions.
+		 * o_btree_ensure_initialized() must be called only under relation
+		 * locks, in this state BTree can not be evicted and removed from
+		 * ShareDescr cache because AccessExclusiveLock needed for this
+		 * actions.
 		 */
 		Assert(OInMemoryBlknoIsValid(sharedRootInfo->rootInfo.rootPageBlkno));
 		Assert(OInMemoryBlknoIsValid(sharedRootInfo->rootInfo.metaPageBlkno));
@@ -383,7 +390,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		{
 			evictable_tree_init(desc, false, NULL);
 		}
-
+		/* BTreeStorageInMemory: nothing extra needed when reusing existing */
 	}
 
 	if (hasLock)
@@ -392,29 +399,29 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 	Assert(sharedRootInfo != NULL);
 	Assert(!sharedRootInfo->placeholder);
 	pfree(sharedRootInfo);
-	ppool_release_reserved(desc->ppool, PPOOL_RESERVE_META);
+	(*desc->ppool->ops->release_reserved) (desc->ppool, PPOOL_RESERVE_META);
 	return true;
 }
 
 void
-o_btree_load_shmem(BTreeDescr *desc)
+o_btree_ensure_initialized(BTreeDescr *desc)
 {
 	bool		result PG_USED_FOR_ASSERTS_ONLY;
 
-	result = o_btree_load_shmem_internal(desc, false);
+	result = o_btree_ensure_initialized_internal(desc, false);
 	Assert(result == true);
 }
 
 bool
 o_btree_load_shmem_checkpoint(BTreeDescr *desc)
 {
-	return o_btree_load_shmem_internal(desc, true);
+	return o_btree_ensure_initialized_internal(desc, true);
 }
 
 /*
  * Returns false if BTree does not exist in shared memory.
  *
- * Same to o_btree_load_shmem() but it does not create a BTree in shared
+ * Same to o_btree_ensure_initialized() but it does not create a BTree in shared
  * memory. Must be called under relation locks too.
  */
 bool
@@ -448,6 +455,7 @@ o_btree_try_use_shmem(BTreeDescr *desc)
 		{
 			evictable_tree_init(desc, false, NULL);
 		}
+		/* BTreeStorageInMemory: nothing extra needed when reusing existing */
 		pfree(shared);
 	}
 	return true;
@@ -901,7 +909,7 @@ o_fetch_index_descr_extended(ORelOids oids, OIndexType type, bool lock,
 }
 
 static void
-init_shared_root_info(OPagePool *pool, SharedRootInfo *sharedRootInfo)
+init_shared_root_info(PagePool *pool, SharedRootInfo *sharedRootInfo)
 {
 	BTreeMetaPage *meta_page;
 	BTreeRootInfo *rootInfo = &sharedRootInfo->rootInfo;
@@ -909,8 +917,8 @@ init_shared_root_info(OPagePool *pool, SharedRootInfo *sharedRootInfo)
 				bufnum;
 
 	sharedRootInfo->placeholder = false;
-	rootInfo->rootPageBlkno = ppool_get_page(pool, PPOOL_RESERVE_META);;
-	rootInfo->metaPageBlkno = ppool_get_page(pool, PPOOL_RESERVE_META);;
+	rootInfo->rootPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);
+	rootInfo->metaPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);
 	rootInfo->rootPageChangeCount = O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(rootInfo->rootPageBlkno));
 
 	Assert(OInMemoryBlknoIsValid(rootInfo->rootPageBlkno));
@@ -1027,8 +1035,12 @@ o_insert_shared_root_placeholder(Oid datoid, Oid relnode)
 	Assert(inserted);
 }
 
+/*
+ * Cleanup BTree
+ * clean_local - cleanup btree even if it is local
+ */
 void
-cleanup_btree(Oid datoid, Oid relnode, bool files, bool fsync)
+cleanup_btree(Oid datoid, Oid relnode, bool files, bool fsync, bool clean_local)
 {
 	SharedRootInfoKey key;
 	SharedRootInfo *shared = NULL;
@@ -1041,6 +1053,9 @@ cleanup_btree(Oid datoid, Oid relnode, bool files, bool fsync)
 	if (shared)
 	{
 		bool		drop_result PG_USED_FOR_ASSERTS_ONLY;
+
+		if (!clean_local && O_PAGE_IS_LOCAL(shared->rootInfo.rootPageBlkno))
+			return;
 
 		drop_result = o_drop_shared_root_info(datoid, relnode);
 		Assert(drop_result);

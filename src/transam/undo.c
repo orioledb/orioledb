@@ -815,7 +815,7 @@ insert_replication_retain_undo_location(TransactionId xid, UndoLocation undoLoca
 
 	keyTuple.formatFlags = 0;
 	keyTuple.data = (Pointer) &key;
-	o_btree_load_shmem(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION));
+	o_btree_ensure_initialized(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION));
 	existing_tuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION),
 											   &keyTuple, BTreeKeyNonLeafKey,
 											   &o_in_progress_snapshot, NULL,
@@ -2201,9 +2201,9 @@ undo_xact_callback(XactEvent event, void *arg)
 
 		for (i = 0; i < OPagePoolTypesCount; i++)
 		{
-			OPagePool  *pool = get_ppool((OPagePoolType) i);
+			PagePool   *pool = get_ppool((OPagePoolType) i);
 
-			ppool_release_reserved(pool, PPOOL_RESERVE_MASK_ALL);
+			(*pool->ops->release_reserved) (pool, PPOOL_RESERVE_MASK_ALL);
 		}
 
 		for (i = 0; i < (int) UndoLogsCount; i++)
