@@ -3,8 +3,8 @@
  * checksum.c
  * 		Declarations for calculating checksums of S3-specific data.
  *
- * Copyright (c) 2024-2025, Oriole DB Inc.
- * Copyright (c) 2025, Supabase Inc.
+ * Copyright (c) 2024-2026, Oriole DB Inc.
+ * Copyright (c) 2025-2026, Supabase Inc.
  *
  * IDENTIFICATION
  *	  contrib/orioledb/src/s3/checksum.c

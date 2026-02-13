@@ -1,4 +1,4 @@
-Copyright (c) 2025, Supabase Inc.
+Copyright (c) 2025-2026, Supabase Inc.
 
 Permission to use, copy, modify, and distribute this software and its
 documentation for any purpose, without fee, and without a written agreement
