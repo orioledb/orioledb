@@ -108,7 +108,7 @@ static object_access_hook_type old_objectaccess_hook = NULL;
 List	   *drop_index_list = NIL;
 List	   *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
-static List	*o_alter_generated_column_id = NIL;
+static List *o_alter_generated_column_id = NIL;
 Oid			o_saved_relrewrite = InvalidOid;
 Oid			o_saved_reltablespace = InvalidOid;
 List	   *o_reuse_indices = NIL;
@@ -2035,7 +2035,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			 * value was not present in existing row
 			 */
 			if (!expr && attr->attgenerated && (old_slot->tts_isnull[i] ||
-				(o_alter_generated_column_id != NIL && list_member_int(o_alter_generated_column_id, i + 1))))
+												(o_alter_generated_column_id != NIL && list_member_int(o_alter_generated_column_id, i + 1))))
 			{
 				Node	   *defaultexpr = build_column_default(rel, i + 1);
 
