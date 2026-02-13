@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * descr.h
- *		Declarations of descriptors used for table access method definiton.
+ *		Declarations of descriptors used for table access method definition.
  *
  * Copyright (c) 2021-2026, Oriole DB Inc.
  * Copyright (c) 2025-2026, Supabase Inc.

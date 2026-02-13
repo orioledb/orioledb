@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * btree.c
- *		Routines for OrioleDB B-tree initilization and cleanup.
+ *		Routines for OrioleDB B-tree initialization and cleanup.
  *
  * Copyright (c) 2021-2026, Oriole DB Inc.
  * Copyright (c) 2025-2026, Supabase Inc.

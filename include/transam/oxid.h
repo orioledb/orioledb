@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * oxid.h
- *		Decalarations for transaction management routines.
+ *		Declarations for transaction management routines.
  *
  * Copyright (c) 2021-2026, Oriole DB Inc.
  * Copyright (c) 2025-2026, Supabase Inc.
