@@ -108,7 +108,7 @@ static object_access_hook_type old_objectaccess_hook = NULL;
 List	   *drop_index_list = NIL;
 List	   *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
-static int	o_alter_generated_column_id = 0;
+static List	*o_alter_generated_column_id = NIL;
 Oid			o_saved_relrewrite = InvalidOid;
 Oid			o_saved_reltablespace = InvalidOid;
 List	   *o_reuse_indices = NIL;
@@ -2187,7 +2187,8 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			 * been updated using ALTER TABLE ... SET EXPRESSION ... or if
 			 * value was not present in existing row
 			 */
-			if (!expr && attr->attgenerated && (old_slot->tts_isnull[i] || i == (o_alter_generated_column_id - 1)))
+			if (!expr && attr->attgenerated && (old_slot->tts_isnull[i] ||
+				(o_alter_generated_column_id != NIL && list_member_int(o_alter_generated_column_id, i + 1))))
 			{
 				Node	   *defaultexpr = build_column_default(rel, i + 1);
 
@@ -2257,7 +2258,8 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 		ExecClearTuple(new_slot);
 	}
 
-	o_alter_generated_column_id = 0;
+	list_free(o_alter_generated_column_id);
+	o_alter_generated_column_id = NIL;
 
 	ExecDropSingleTupleTableSlot(old_slot);
 	ExecDropSingleTupleTableSlot(new_slot);
@@ -3340,7 +3342,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					if (old_field.generated)
 					{
 						in_rewrite = true;
-						o_alter_generated_column_id = subId;
+						o_alter_generated_column_id = lappend_int(o_alter_generated_column_id, subId);
 					}
 
 					if (!in_rewrite)
@@ -4150,5 +4152,6 @@ o_ddl_cleanup(void)
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
 	o_saved_relrewrite = InvalidOid;
 	in_rewrite = false;
+	o_alter_generated_column_id = NIL;
 	o_in_add_column = false;
 }
