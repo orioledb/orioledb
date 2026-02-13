@@ -201,120 +201,123 @@ SELECT * FROM o_test_generated_alter_type;
 (2 rows)
 
 -- Test AT_SetExpression (ALTER TABLE ... ALTER COLUMN ... SET EXPRESSION)
--- AT_SetExpression allows changing the generation expression for a STORED generated column
--- This feature is available in PostgreSQL 17+
+-- Two generated columns altered in a single ALTER TABLE statement
 CREATE TABLE o_test_set_expression (
 	i int PRIMARY KEY,
 	price numeric(10,2),
 	quantity int,
-	total numeric(10,2) GENERATED ALWAYS AS (price * quantity) STORED
+	total numeric(10,2) GENERATED ALWAYS AS (price * quantity) STORED,
+	discounted numeric(10,2) GENERATED ALWAYS AS (price * 0.9) STORED
 ) USING orioledb;
--- Insert test data
 INSERT INTO o_test_set_expression (i, price, quantity) VALUES (1, 10.50, 5);
 INSERT INTO o_test_set_expression (i, price, quantity) VALUES (2, 25.00, 3);
 INSERT INTO o_test_set_expression (i, price, quantity) VALUES (3, 7.99, 10);
--- Verify initial generated column values (price * quantity)
-SELECT i, price, quantity, total FROM o_test_set_expression ORDER BY i;
- i | price | quantity | total 
----+-------+----------+-------
- 1 | 10.50 |        5 | 52.50
- 2 | 25.00 |        3 | 75.00
- 3 |  7.99 |       10 | 79.90
+-- Verify initial generated column values
+SELECT i, price, quantity, total, discounted FROM o_test_set_expression ORDER BY i;
+ i | price | quantity | total | discounted 
+---+-------+----------+-------+------------
+ 1 | 10.50 |        5 | 52.50 |       9.45
+ 2 | 25.00 |        3 | 75.00 |      22.50
+ 3 |  7.99 |       10 | 79.90 |       7.19
 (3 rows)
 
--- Snapshot the table before changing the expression
+-- Snapshot the table before changing the expressions
 CREATE MATERIALIZED VIEW o_test_set_expr_mv USING orioledb AS
 	SELECT * FROM o_test_set_expression ORDER BY i;
 SELECT * FROM o_test_set_expr_mv ORDER BY i;
- i | price | quantity | total 
----+-------+----------+-------
- 1 | 10.50 |        5 | 52.50
- 2 | 25.00 |        3 | 75.00
- 3 |  7.99 |       10 | 79.90
+ i | price | quantity | total | discounted 
+---+-------+----------+-------+------------
+ 1 | 10.50 |        5 | 52.50 |       9.45
+ 2 | 25.00 |        3 | 75.00 |      22.50
+ 3 |  7.99 |       10 | 79.90 |       7.19
 (3 rows)
 
--- Check the initial generated column expression in catalog
-SELECT a.attname, a.attgenerated, pg_get_expr(d.adbin, d.adrelid) as generation_expr
+-- Check the initial generated column expressions in catalog
+SELECT a.attname, pg_get_expr(d.adbin, d.adrelid) as generation_expr
 FROM pg_attribute a
 JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
 WHERE a.attrelid = 'o_test_set_expression'::regclass
-  AND a.attname = 'total';
- attname | attgenerated |        generation_expr        
----------+--------------+-------------------------------
- total   | s            | (price * (quantity)::numeric)
-(1 row)
+  AND a.attname IN ('total', 'discounted')
+ORDER BY a.attnum;
+  attname   |        generation_expr        
+------------+-------------------------------
+ total      | (price * (quantity)::numeric)
+ discounted | (price * 0.9)
+(2 rows)
 
--- Use AT_SetExpression to change the generation formula
--- Change from (price * quantity) to (price * quantity * 1.1) to add 10% markup
+-- Change both generated columns in a single ALTER TABLE
 ALTER TABLE o_test_set_expression
-  ALTER COLUMN total SET EXPRESSION AS (price * quantity * 1.1);
--- Verify the expression was updated in catalog
-SELECT a.attname, a.attgenerated, pg_get_expr(d.adbin, d.adrelid) as generation_expr
+  ALTER COLUMN total SET EXPRESSION AS (price * quantity * 1.1),
+  ALTER COLUMN discounted SET EXPRESSION AS (price * 0.75);
+-- Verify both expressions were updated in catalog
+SELECT a.attname, pg_get_expr(d.adbin, d.adrelid) as generation_expr
 FROM pg_attribute a
 JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
 WHERE a.attrelid = 'o_test_set_expression'::regclass
-  AND a.attname = 'total';
- attname | attgenerated |            generation_expr            
----------+--------------+---------------------------------------
- total   | s            | ((price * (quantity)::numeric) * 1.1)
-(1 row)
+  AND a.attname IN ('total', 'discounted')
+ORDER BY a.attnum;
+  attname   |            generation_expr            
+------------+---------------------------------------
+ total      | ((price * (quantity)::numeric) * 1.1)
+ discounted | (price * 0.75)
+(2 rows)
 
--- Verify all existing values were recalculated with new expression
-SELECT i, price, quantity, total,
-	(price * quantity * 1.1) as expected_total
-FROM o_test_set_expression
-ORDER BY i;
- i | price | quantity | total | expected_total 
----+-------+----------+-------+----------------
- 1 | 10.50 |        5 | 57.75 |         57.750
- 2 | 25.00 |        3 | 82.50 |         82.500
- 3 |  7.99 |       10 | 87.89 |         87.890
+-- Verify all existing values were recalculated with new expressions
+SELECT i, price, quantity, total, discounted,
+	(price * quantity * 1.1) as expected_total,
+	(price * 0.75) as expected_discounted
+FROM o_test_set_expression ORDER BY i;
+ i | price | quantity | total | discounted | expected_total | expected_discounted 
+---+-------+----------+-------+------------+----------------+---------------------
+ 1 | 10.50 |        5 | 57.75 |       7.88 |         57.750 |              7.8750
+ 2 | 25.00 |        3 | 82.50 |      18.75 |         82.500 |             18.7500
+ 3 |  7.99 |       10 | 87.89 |       5.99 |         87.890 |              5.9925
 (3 rows)
 
 -- Matview should still have the old snapshot
 SELECT * FROM o_test_set_expr_mv ORDER BY i;
- i | price | quantity | total 
----+-------+----------+-------
- 1 | 10.50 |        5 | 52.50
- 2 | 25.00 |        3 | 75.00
- 3 |  7.99 |       10 | 79.90
+ i | price | quantity | total | discounted 
+---+-------+----------+-------+------------
+ 1 | 10.50 |        5 | 52.50 |       9.45
+ 2 | 25.00 |        3 | 75.00 |      22.50
+ 3 |  7.99 |       10 | 79.90 |       7.19
 (3 rows)
 
--- Refresh picks up the new expression
+-- Refresh picks up the new expressions
 REFRESH MATERIALIZED VIEW o_test_set_expr_mv;
 SELECT * FROM o_test_set_expr_mv ORDER BY i;
- i | price | quantity | total 
----+-------+----------+-------
- 1 | 10.50 |        5 | 57.75
- 2 | 25.00 |        3 | 82.50
- 3 |  7.99 |       10 | 87.89
+ i | price | quantity | total | discounted 
+---+-------+----------+-------+------------
+ 1 | 10.50 |        5 | 57.75 |       7.88
+ 2 | 25.00 |        3 | 82.50 |      18.75
+ 3 |  7.99 |       10 | 87.89 |       5.99
 (3 rows)
 
+-- Update and verify recalculation
 UPDATE o_test_set_expression SET price = 15.00 WHERE i = 1;
--- Verify recalculation after update
-SELECT i, price, quantity, total,
-	(price * quantity * 1.1) as expected_total
-FROM o_test_set_expression
-ORDER BY i;
- i | price | quantity | total | expected_total 
----+-------+----------+-------+----------------
- 1 | 15.00 |        5 | 82.50 |         82.500
- 2 | 25.00 |        3 | 82.50 |         82.500
- 3 |  7.99 |       10 | 87.89 |         87.890
+SELECT i, price, quantity, total, discounted,
+	(price * quantity * 1.1) as expected_total,
+	(price * 0.75) as expected_discounted
+FROM o_test_set_expression ORDER BY i;
+ i | price | quantity | total | discounted | expected_total | expected_discounted 
+---+-------+----------+-------+------------+----------------+---------------------
+ 1 | 15.00 |        5 | 82.50 |      11.25 |         82.500 |             11.2500
+ 2 | 25.00 |        3 | 82.50 |      18.75 |         82.500 |             18.7500
+ 3 |  7.99 |       10 | 87.89 |       5.99 |         87.890 |              5.9925
 (3 rows)
 
--- Insert new row to verify new expression is used for new data
+-- Insert new row to verify new expressions are used for new data
 INSERT INTO o_test_set_expression (i, price, quantity) VALUES (4, 20.00, 2);
-SELECT i, price, quantity, total,
-	(price * quantity * 1.1) as expected_total
-FROM o_test_set_expression
-ORDER BY i;
- i | price | quantity | total | expected_total 
----+-------+----------+-------+----------------
- 1 | 15.00 |        5 | 82.50 |         82.500
- 2 | 25.00 |        3 | 82.50 |         82.500
- 3 |  7.99 |       10 | 87.89 |         87.890
- 4 | 20.00 |        2 | 44.00 |         44.000
+SELECT i, price, quantity, total, discounted,
+	(price * quantity * 1.1) as expected_total,
+	(price * 0.75) as expected_discounted
+FROM o_test_set_expression ORDER BY i;
+ i | price | quantity | total | discounted | expected_total | expected_discounted 
+---+-------+----------+-------+------------+----------------+---------------------
+ 1 | 15.00 |        5 | 82.50 |      11.25 |         82.500 |             11.2500
+ 2 | 25.00 |        3 | 82.50 |      18.75 |         82.500 |             18.7500
+ 3 |  7.99 |       10 | 87.89 |       5.99 |         87.890 |              5.9925
+ 4 | 20.00 |        2 | 44.00 |      15.00 |         44.000 |             15.0000
 (4 rows)
 
 DROP TABLE o_test_set_expression CASCADE;

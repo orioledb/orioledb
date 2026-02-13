@@ -101,76 +101,77 @@ ALTER TABLE o_test_generated_alter_type ALTER COLUMN val_3 TYPE numeric;
 SELECT * FROM o_test_generated_alter_type;
 
 -- Test AT_SetExpression (ALTER TABLE ... ALTER COLUMN ... SET EXPRESSION)
--- AT_SetExpression allows changing the generation expression for a STORED generated column
--- This feature is available in PostgreSQL 17+
+-- Two generated columns altered in a single ALTER TABLE statement
 CREATE TABLE o_test_set_expression (
 	i int PRIMARY KEY,
 	price numeric(10,2),
 	quantity int,
-	total numeric(10,2) GENERATED ALWAYS AS (price * quantity) STORED
+	total numeric(10,2) GENERATED ALWAYS AS (price * quantity) STORED,
+	discounted numeric(10,2) GENERATED ALWAYS AS (price * 0.9) STORED
 ) USING orioledb;
 
--- Insert test data
 INSERT INTO o_test_set_expression (i, price, quantity) VALUES (1, 10.50, 5);
 INSERT INTO o_test_set_expression (i, price, quantity) VALUES (2, 25.00, 3);
 INSERT INTO o_test_set_expression (i, price, quantity) VALUES (3, 7.99, 10);
 
--- Verify initial generated column values (price * quantity)
-SELECT i, price, quantity, total FROM o_test_set_expression ORDER BY i;
+-- Verify initial generated column values
+SELECT i, price, quantity, total, discounted FROM o_test_set_expression ORDER BY i;
 
--- Snapshot the table before changing the expression
+-- Snapshot the table before changing the expressions
 CREATE MATERIALIZED VIEW o_test_set_expr_mv USING orioledb AS
 	SELECT * FROM o_test_set_expression ORDER BY i;
 
 SELECT * FROM o_test_set_expr_mv ORDER BY i;
 
--- Check the initial generated column expression in catalog
-SELECT a.attname, a.attgenerated, pg_get_expr(d.adbin, d.adrelid) as generation_expr
+-- Check the initial generated column expressions in catalog
+SELECT a.attname, pg_get_expr(d.adbin, d.adrelid) as generation_expr
 FROM pg_attribute a
 JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
 WHERE a.attrelid = 'o_test_set_expression'::regclass
-  AND a.attname = 'total';
+  AND a.attname IN ('total', 'discounted')
+ORDER BY a.attnum;
 
--- Use AT_SetExpression to change the generation formula
--- Change from (price * quantity) to (price * quantity * 1.1) to add 10% markup
+-- Change both generated columns in a single ALTER TABLE
 ALTER TABLE o_test_set_expression
-  ALTER COLUMN total SET EXPRESSION AS (price * quantity * 1.1);
+  ALTER COLUMN total SET EXPRESSION AS (price * quantity * 1.1),
+  ALTER COLUMN discounted SET EXPRESSION AS (price * 0.75);
 
--- Verify the expression was updated in catalog
-SELECT a.attname, a.attgenerated, pg_get_expr(d.adbin, d.adrelid) as generation_expr
+-- Verify both expressions were updated in catalog
+SELECT a.attname, pg_get_expr(d.adbin, d.adrelid) as generation_expr
 FROM pg_attribute a
 JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
 WHERE a.attrelid = 'o_test_set_expression'::regclass
-  AND a.attname = 'total';
+  AND a.attname IN ('total', 'discounted')
+ORDER BY a.attnum;
 
--- Verify all existing values were recalculated with new expression
-SELECT i, price, quantity, total,
-	(price * quantity * 1.1) as expected_total
-FROM o_test_set_expression
-ORDER BY i;
+-- Verify all existing values were recalculated with new expressions
+SELECT i, price, quantity, total, discounted,
+	(price * quantity * 1.1) as expected_total,
+	(price * 0.75) as expected_discounted
+FROM o_test_set_expression ORDER BY i;
 
 -- Matview should still have the old snapshot
 SELECT * FROM o_test_set_expr_mv ORDER BY i;
 
--- Refresh picks up the new expression
+-- Refresh picks up the new expressions
 REFRESH MATERIALIZED VIEW o_test_set_expr_mv;
 SELECT * FROM o_test_set_expr_mv ORDER BY i;
 
+-- Update and verify recalculation
 UPDATE o_test_set_expression SET price = 15.00 WHERE i = 1;
 
--- Verify recalculation after update
-SELECT i, price, quantity, total,
-	(price * quantity * 1.1) as expected_total
-FROM o_test_set_expression
-ORDER BY i;
+SELECT i, price, quantity, total, discounted,
+	(price * quantity * 1.1) as expected_total,
+	(price * 0.75) as expected_discounted
+FROM o_test_set_expression ORDER BY i;
 
--- Insert new row to verify new expression is used for new data
+-- Insert new row to verify new expressions are used for new data
 INSERT INTO o_test_set_expression (i, price, quantity) VALUES (4, 20.00, 2);
 
-SELECT i, price, quantity, total,
-	(price * quantity * 1.1) as expected_total
-FROM o_test_set_expression
-ORDER BY i;
+SELECT i, price, quantity, total, discounted,
+	(price * quantity * 1.1) as expected_total,
+	(price * 0.75) as expected_discounted
+FROM o_test_set_expression ORDER BY i;
 
 DROP TABLE o_test_set_expression CASCADE;
 
