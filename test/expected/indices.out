@@ -8757,8 +8757,9 @@ WHERE conrelid = 'o_test_add_index_constraint'::regclass;
 
 -- Test constraint enforcement
 INSERT INTO o_test_add_index_constraint VALUES (4, 'four');  -- Should succeed
--- FIXME: Now it does not fail as expected
 INSERT INTO o_test_add_index_constraint VALUES (1, 'duplicate');  -- Should fail (PK violation)
+ERROR:  duplicate key value violates unique constraint "o_test_pk"
+DETAIL:  Key (id)=('1') already exists.
 -- Create a unique index on val column
 CREATE UNIQUE INDEX o_test_idx_val ON o_test_add_index_constraint(val);
 -- Check state before adding UNIQUE constraint
@@ -8787,7 +8788,7 @@ WHERE conrelid = 'o_test_add_index_constraint'::regclass;
 -- Test UNIQUE constraint enforcement
 INSERT INTO o_test_add_index_constraint VALUES (5, 'five');  -- Should succeed
 INSERT INTO o_test_add_index_constraint VALUES (6, 'one');  -- Should fail (UNIQUE violation)
-ERROR:  duplicate key value violates unique constraint "o_test_idx_val"
+ERROR:  duplicate key value violates unique constraint "o_test_uq"
 DETAIL:  Key (val)=('one') already exists.
 -- Cleanup
 DROP TABLE o_test_add_index_constraint CASCADE;

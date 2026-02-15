@@ -2017,7 +2017,6 @@ WHERE conrelid = 'o_test_add_index_constraint'::regclass;
 
 -- Test constraint enforcement
 INSERT INTO o_test_add_index_constraint VALUES (4, 'four');  -- Should succeed
--- FIXME: Now it does not fail as expected
 INSERT INTO o_test_add_index_constraint VALUES (1, 'duplicate');  -- Should fail (PK violation)
 
 -- Create a unique index on val column

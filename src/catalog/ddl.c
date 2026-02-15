@@ -139,6 +139,8 @@ static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
 static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
 static void o_validate_replica_identity(Relation rel, ReplicaIdentityStmt *stmt);
 
+static void rebuild_o_table_according_to_pindex(Relation rel, ORelOids tbl_oids, Oid ind_oid);
+
 void
 orioledb_setup_ddl_hooks(void)
 {
@@ -2433,7 +2435,7 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 {
 	OSnapshot	oSnapshot;
 	OXid		oxid;
-	OTable	   *old_o_table;
+	OTable	  	*old_o_table;
 	OTableDescr *descr;
 	OTableDescr *old_descr;
 	int			ix_num = InvalidIndexNumber;
@@ -3784,6 +3786,41 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		}
 		ReleaseSysCache(typeTuple);
 	}
+	else if (access == OAT_POST_ALTER && classId == IndexRelationId)
+	{
+		/* Branch for makeing existing secondary index into primary
+		 * If table already has pindex (come here not from AT_AddIndexConstraint)
+		 * -> do nothing
+		 * else
+		 * -> rebuild table according to the secondary index
+		*/
+
+		HeapTuple	  indexTuple;
+		Form_pg_index indexForm;
+
+		/* Make changes in indices visible */
+		CommandCounterIncrement();
+		
+		indexTuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(objectId));
+		indexForm = (Form_pg_index) GETSTRUCT(indexTuple);
+
+		if (indexForm->indisprimary) {
+			rel = relation_open(indexForm->indrelid, ExclusiveLock);
+			if (is_orioledb_rel(rel))
+			{
+				ORelOids	tbl_oids;
+				ORelOidsSetFromRel(tbl_oids, rel);
+
+				/* For ALTER TABLE ... ADD CONSTRAINT PRIMARY KEY... USING INDEX
+				* Mark index as a primary and place in [0] pos in indices array
+				*/
+				rebuild_o_table_according_to_pindex(rel, tbl_oids, objectId);
+			}
+			relation_close(rel, ExclusiveLock);
+		}
+
+		ReleaseSysCache(indexTuple);
+	}
 	else if (access == OAT_POST_CREATE && classId == DatabaseRelationId)
 	{
 		HeapTuple	dbTuple;
@@ -4154,4 +4191,75 @@ o_ddl_cleanup(void)
 	in_rewrite = false;
 	o_alter_generated_column_id = NIL;
 	o_in_add_column = false;
+}
+
+
+static void
+rebuild_o_table_according_to_pindex(Relation rel, ORelOids tbl_oids, Oid ind_oid) {
+	OSnapshot	oSnapshot;
+	OXid		oxid;
+	OTableDescr *descr;
+	OTableDescr *old_descr;
+	OTable 		*old_o_table = o_tables_get(tbl_oids);
+	OTable 		*o_table;
+	int			ix_num = InvalidIndexNumber;
+
+	/* No need to rebuild if table already has primary */
+	if (old_o_table->has_primary) {
+		o_table_free(old_o_table);
+		return;
+	}
+	
+	o_table = o_tables_get(tbl_oids);
+	assign_new_oids(o_table, rel, false);
+	
+	Assert(!o_table->has_primary);
+
+	for (ix_num = 0; ix_num < o_table->nindices; ++ix_num) {
+		if (o_table->indices[ix_num].oids.reloid == ind_oid) {
+			break;
+		}
+	}
+	Assert(ix_num < o_table->nindices);
+
+	o_table->has_primary = true;
+	o_table->primary_init_nfields = o_table->nfields;
+	o_table->indices[ix_num].type = oIndexPrimary;
+
+	/* Place index on primary index position */
+	if (ix_num != 0) {
+		OTableIndex tmp;
+		memcpy(&tmp, &o_table->indices[ix_num], sizeof(OTableIndex));
+		memcpy(&o_table->indices[ix_num], &o_table->indices[0], sizeof(OTableIndex));
+		memcpy(&o_table->indices[0], &tmp, sizeof(OTableIndex));
+	}
+
+	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+
+	o_tables_table_meta_lock(NULL);
+	old_descr = o_fetch_table_descr(old_o_table->oids);
+	recreate_o_table(old_o_table, o_table);
+	descr = o_fetch_table_descr(o_table->oids);
+	o_tablespace_cache_add_table(o_table);
+	rebuild_indices_insert_placeholders(descr);
+	o_tables_table_meta_unlock(NULL, old_o_table->oids.relnode);
+
+	rebuild_indices(old_o_table, old_descr, o_table, descr, false, NULL);
+	o_tables_rel_meta_lock(rel);
+	for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
+	{
+		OTableIndex *index;
+		index = &o_table->indices[ix_num];
+
+		o_indices_update(o_table, ix_num, oxid, oSnapshot.csn);
+		o_invalidate_oids(index->oids);
+		o_add_invalidate_undo_item(index->oids, O_INVALIDATE_OIDS_ON_ABORT);
+	}
+	o_tables_update(o_table, oxid, oSnapshot.csn);
+	o_tables_rel_meta_unlock(rel, old_o_table->oids.relnode);
+	o_invalidate_oids(o_table->oids);
+	o_add_invalidate_undo_item(o_table->oids, O_INVALIDATE_OIDS_ON_ABORT);
+
+	o_table_free(old_o_table);
+	o_table_free(o_table);
 }
