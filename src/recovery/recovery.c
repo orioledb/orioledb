@@ -27,6 +27,7 @@
 #include "recovery/recovery.h"
 #include "recovery/internal.h"
 #include "recovery/wal.h"
+#include "recovery/wal_reader.h"
 #include "storage/itemptr.h"
 #include "tableam/descr.h"
 #include "tableam/operations.h"
@@ -897,6 +898,70 @@ recovery_get_effective_replay_ptr(void)
 		return finishedPtr;
 }
 
+static WalParseResult
+recovery_wal_check_version(const WalReaderState *r)
+{
+	Assert(r);
+
+	if (r->wal_version > ORIOLEDB_WAL_VERSION)
+	{
+		/* Unexpected new WAL record which we cannot read */
+		elog(PANIC, "cannot read WAL record of version %u newer than supported %u",
+			 r->wal_version, ORIOLEDB_WAL_VERSION);
+
+		return WALPARSE_BAD_VERSION;
+	}
+
+	/*
+	 * If the WAL record is too old just return false and decide not to stop
+	 * applying WAL records further.
+	 */
+	else if (r->wal_version < ORIOLEDB_CONTAINER_FLAGS_WAL_VERSION)
+		return WALPARSE_BAD_VERSION;
+
+	return WALPARSE_OK;
+}
+
+typedef struct
+{
+	TimestampTz xactTime;
+	TransactionId xid;
+
+} RecoveryWalDescCtx;
+
+static WalParseResult
+recovery_wal_containter_info(void *vctx, const WalRecord *rec)
+{
+	RecoveryWalDescCtx *ctx = (RecoveryWalDescCtx *) vctx;
+
+	Assert(ctx);
+	Assert(rec);
+
+	switch (rec->type)
+	{
+		case WAL_CONTAINER_HAS_XACT_INFO:
+			ctx->xactTime = rec->u.xact_info.xactTime;
+			ctx->xid = rec->u.xact_info.xid;
+
+			return WALPARSE_STOP;	/* Stop parser after flags */
+
+		case WAL_CONTAINER_HAS_ORIGIN_INFO:
+			/* Skip */
+			break;
+
+		default:
+			break;
+	}
+
+	return WALPARSE_EOF;		/* Stop parser */
+}
+
+static WalParseResult
+recovery_wal_record(void *vctx, WalRecord *rec)
+{
+	return WALPARSE_EOF;		/* Stop parser */
+}
+
 /*
  * This function is called by the RecoveryStopsHook. It decides whether we want
  * to stop applying WAL records.
@@ -908,12 +973,24 @@ orioledb_recovery_stops_before_hook(XLogReaderState *record,
 									TransactionId *recordXid,
 									TimestampTz *recordXtime)
 {
-	Pointer		startPtr = XLogRecGetData(record);
-	Pointer		ptr = startPtr;
-	uint16		wal_version;
-	uint8		wal_flags;
-	TimestampTz xactTime;
-	TransactionId xid;
+	Pointer		startPtr = (Pointer) XLogRecGetData(record);
+	Pointer		endPtr = startPtr + XLogRecGetDataLen(record);
+
+	WalParseResult st;
+	RecoveryWalDescCtx dctx;
+
+	WalReaderState r = {
+		.start = startPtr,
+		.end = endPtr,
+		.ptr = startPtr,
+		.wal_version = 0,
+		.wal_flags = 0,
+		/* Consumer */
+		.ctx = &dctx,
+		.check_version = recovery_wal_check_version,
+		.on_flag = recovery_wal_containter_info,
+		.on_record = recovery_wal_record
+	};
 
 	/* Currently we consider ony recovery_target_time */
 	if (recoveryTarget != RECOVERY_TARGET_TIME)
@@ -923,33 +1000,20 @@ orioledb_recovery_stops_before_hook(XLogReaderState *record,
 	if (XLogRecGetDataLen(record) == 0)
 		return false;
 
-	ptr = wal_container_read_header(ptr, &wal_version, &wal_flags);
-	/* Unexpected new WAL record which we cannot read */
-	if (wal_version > ORIOLEDB_WAL_VERSION)
-		elog(PANIC, "cannot read WAL record of version %u newer than supported %u",
-			 wal_version, ORIOLEDB_WAL_VERSION);
+	st = parse_wal_container(&r, true /* allow_logging */ );
 
-	/*
-	 * If the WAL record is too old just return false and decide not to stop
-	 * applying WAL records further.
-	 */
-	else if (wal_version < ORIOLEDB_XACT_INFO_WAL_VERSION)
-		return false;
+	if (st == WALPARSE_STOP)	/* WAL_CONTAINER_HAS_XACT_INFO is present */
+	{
+		*recordXid = dctx.xid;
+		*recordXtime = dctx.xactTime;
 
-	if ((wal_flags & WAL_CONTAINER_HAS_XACT_INFO) == 0)
-		return false;
+		if (recoveryTargetInclusive)
+			return dctx.xactTime > recoveryTargetTime;
+		else
+			return dctx.xactTime >= recoveryTargetTime;
+	}
 
-	memcpy(&xactTime, ptr, sizeof(xactTime));
-	ptr += sizeof(xactTime);
-	memcpy(&xid, ptr, sizeof(xid));
-
-	*recordXid = xid;
-	*recordXtime = xactTime;
-
-	if (recoveryTargetInclusive)
-		return xactTime > recoveryTargetTime;
-	else
-		return xactTime >= recoveryTargetTime;
+	return false;
 }
 
 static XLogRecPtr
@@ -3014,6 +3078,443 @@ invalidate_typcache(void)
 	SendSharedInvalidMessages(&msg, 1);
 }
 
+static WalParseResult
+replay_wal_check_version(const WalReaderState *r)
+{
+	Assert(r);
+
+	if (r->wal_version > ORIOLEDB_WAL_VERSION)
+	{
+		/* WAL from future version */
+		return WALPARSE_BAD_VERSION;
+	}
+
+	recoveryHeapTransactionId = InvalidTransactionId;
+
+	return WALPARSE_OK;
+}
+
+static WalParseResult
+replay_wal_containter_info(void *ctx, const WalRecord *rec)
+{
+	Assert(rec);
+
+	switch (rec->type)
+	{
+		case WAL_CONTAINER_HAS_XACT_INFO:
+
+			/*
+			 * Store PG xid from WAL_CONTAINER_XACT_INFO to build
+			 * SYS_TREES_XID_UNDO_LOCATION mapping in recovery for following
+			 * logical decoding
+			 */
+			recoveryHeapTransactionId = rec->u.xact_info.xid;
+			break;
+
+		case WAL_CONTAINER_HAS_ORIGIN_INFO:
+			/* Skip */
+			break;
+
+		default:
+			break;
+	}
+
+	return WALPARSE_OK;
+}
+
+typedef struct
+{
+	/* Input params */
+	bool		single;
+	XLogRecPtr	xlogRecPtr;
+	XLogRecPtr	xlogRecEndPtr;
+
+	/* Replay state params */
+	int			sys_tree_num;
+	OTableDescr *descr;
+	OIndexDescr *indexDescr;
+
+} ReplayWalDescCtx;
+
+static WalParseResult
+replay_wal_record(void *vctx, WalRecord *rec)
+{
+	ReplayWalDescCtx *ctx = (ReplayWalDescCtx *) vctx;
+
+	Assert(ctx);
+	Assert(rec);
+
+	elog(DEBUG4, "[%s] GET RTYPE %d `%s`", __func__, rec->type, wal_type_name(rec->type));
+
+	switch (rec->type)
+	{
+		case WAL_REC_XID:
+			advance_oxids(rec->oxid);
+			recovery_switch_to_oxid(rec->oxid, -1);
+			break;
+
+		case WAL_REC_SWITCH_LOGICAL_XID:
+			/* Ignore */
+			break;
+
+		case WAL_REC_COMMIT:
+		case WAL_REC_ROLLBACK:
+			{
+				bool		commit,
+							sync = false;
+
+				/* xlogPtr = xlogRecPtr + (ptr - startPtr); */
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
+
+				recovery_xmin = Max(recovery_xmin, rec->u.finish.xmin);
+
+				Assert(ctx->sys_tree_num <= 0 || sys_tree_supports_transactions(ctx->sys_tree_num));
+
+				commit = (rec->type == WAL_REC_COMMIT);
+
+				Assert(rec->oxid != InvalidOXid);
+				Assert(cur_recovery_xid_state != NULL);
+
+				if (!ctx->single)
+				{
+					workers_send_oxid_finish(ctx->xlogRecEndPtr, commit);
+					if (cur_recovery_xid_state->systree_modified || cur_recovery_xid_state->checkpoint_xid)
+					{
+						sync = true;
+						workers_synchronize(xlogPtr, false);
+						if (cur_recovery_xid_state->invalidate_typcache)
+							invalidate_typcache();
+					}
+				}
+				else
+				{
+					sync = true;
+					pg_atomic_write_u64(recovery_ptr, xlogPtr);
+					if (cur_recovery_xid_state->invalidate_typcache)
+						invalidate_typcache();
+
+				}
+
+				recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
+											 xlogPtr, -1, sync);
+				rec->oxid = InvalidOXid;
+
+				break;
+			}
+
+		case WAL_REC_JOINT_COMMIT:
+			cur_recovery_xid_state->xid = rec->u.joint_commit.xid;
+			recovery_xmin = Max(recovery_xmin, rec->u.joint_commit.xmin);
+			dlist_push_tail(&joint_commit_list,
+							&cur_recovery_xid_state->joint_commit_list_node);
+			break;
+
+		case WAL_REC_REPLAY_FEEDBACK:
+			XLogRequestWalReceiverReply();
+			break;
+
+		case WAL_REC_RELATION:
+			{
+				OIndexType	ix_type = rec->u.relation.treeType;
+
+				rec->relreplident = REPLICA_IDENTITY_DEFAULT;
+
+				if (IS_SYS_TREE_OIDS(rec->oids))
+					ctx->sys_tree_num = rec->oids.relnode;
+				else
+					ctx->sys_tree_num = -1;
+
+				if (ctx->sys_tree_num > 0)
+				{
+					ctx->descr = NULL;
+					ctx->indexDescr = NULL;
+					Assert(sys_tree_get_storage_type(ctx->sys_tree_num) == BTreeStoragePersistence);
+				}
+				else if (ix_type == oIndexInvalid)
+				{
+					ctx->descr = o_fetch_table_descr(rec->oids);
+					ctx->indexDescr = ctx->descr ? GET_PRIMARY(ctx->descr) : NULL;
+				}
+				else
+				{
+					Assert(ix_type == oIndexToast || ix_type == oIndexBridge);
+					ctx->descr = NULL;
+					ctx->indexDescr = o_fetch_index_descr(rec->oids, ix_type, false, NULL);
+				}
+
+				if (ctx->sys_tree_num == -1)
+				{
+					char	   *prefix;
+					char	   *db_prefix;
+
+					o_get_prefixes_for_relnode(rec->oids.datoid, rec->oids.relnode,
+											   &prefix, &db_prefix);
+					o_verify_dir_exists_or_create(prefix, NULL, NULL);
+					o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+					pfree(db_prefix);
+				}
+
+				break;
+			}
+
+		case WAL_REC_RELREPLIDENT:
+			/* Unused yet */
+			break;
+
+		case WAL_REC_O_TABLES_META_LOCK:
+			Assert(!cur_recovery_xid_state->o_tables_meta_locked);
+			o_tables_meta_lock_no_wal();
+			cur_recovery_xid_state->o_tables_meta_locked = true;
+			elog(LOG, "[%s] META_LOCK for [ %u %u %u ] ctx->sys_tree_num %d", __func__,
+				 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode, ctx->sys_tree_num);
+			break;
+
+		case WAL_REC_O_TABLES_META_UNLOCK:
+			{
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
+
+				elog(LOG, "[%s] META_UNLOCK for [ %u %u %u ] ctx->sys_tree_num %d", __func__,
+					 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode, ctx->sys_tree_num);
+
+				if (!ctx->single)
+					workers_synchronize(xlogPtr, true);
+
+				Assert(cur_recovery_xid_state->o_tables_meta_locked);
+				handle_o_tables_meta_unlock(rec->u.unlock.oids, rec->u.unlock.oldRelnode);
+
+				if (!ctx->single)
+					workers_synchronize(xlogPtr + 1, true);
+
+				if (!ctx->single)
+					clean_workers_oids();
+
+				break;
+			}
+
+		case WAL_REC_TRUNCATE:
+			{
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
+
+				if (!ctx->single)
+					workers_synchronize(xlogPtr, true);
+
+				o_truncate_table(rec->u.truncate.oids, true);
+
+				AcceptInvalidationMessages();
+				if (!ctx->single)
+					clean_workers_oids();
+
+				break;
+			}
+
+		case WAL_REC_SAVEPOINT:
+			recovery_savepoint(rec->u.savepoint.parentSubid, -1);
+			if (!ctx->single)
+				workers_send_savepoint(rec->u.savepoint.parentSubid);
+			break;
+
+		case WAL_REC_ROLLBACK_TO_SAVEPOINT:
+			{
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
+
+				if (!ctx->single)
+				{
+					workers_send_rollback_to_savepoint(xlogPtr, rec->u.rb_to_sp.parentSubid);
+					workers_synchronize(xlogPtr, false);
+				}
+				recovery_rollback_to_savepoint(rec->u.rb_to_sp.parentSubid, -1);
+				break;
+			}
+
+		case WAL_REC_BRIDGE_ERASE:
+			{
+				Assert(ctx->indexDescr);
+
+				if (ctx->single)
+				{
+					recovery_switch_to_oxid(rec->oxid, -1);
+					replay_erase_bridge_item(ctx->indexDescr, &rec->u.bridge_erase.iptr);
+				}
+				else
+				{
+					uint32		hash;
+					OTuple		tuple;
+
+					hash = o_hash_iptr(ctx->indexDescr, &rec->u.bridge_erase.iptr);
+					tuple.formatFlags = 0;
+					tuple.data = (Pointer) &rec->u.bridge_erase.iptr;
+					worker_send_modify(GET_WORKER_ID(hash), &ctx->indexDescr->desc,
+									   RecoveryMsgTypeBridgeErase, tuple, 0);
+				}
+				break;
+			}
+
+		case WAL_REC_INSERT:
+		case WAL_REC_UPDATE:
+		case WAL_REC_DELETE:
+		case WAL_REC_REINSERT:
+			{
+				bool		success;
+				OFixedTuple tuple1,
+							tuple2;
+				ORelOids   *treeOids = NULL;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
+				uint16		type = recovery_msg_from_wal_record(rec->type);
+				Pointer		sys_tree_oids_ptr = rec->value_ptr + sizeof(uint8) + sizeof(OffsetNumber);
+
+				Assert(rec->oxid != InvalidOXid);
+
+				build_fixed_tuples(rec, &tuple1, &tuple2);
+
+				if (ctx->sys_tree_num > 0 && ctx->xlogRecPtr >= checkpoint_state->sysTreesStartPtr)
+				{
+					Assert(sys_tree_supports_transactions(ctx->sys_tree_num));
+					recovery_switch_to_oxid(rec->oxid, -1);
+
+					cur_recovery_xid_state->systree_modified = true;
+					if (IS_TYPCACHE_SYSTREE(ctx->sys_tree_num))
+						cur_recovery_xid_state->invalidate_typcache = true;
+					if (ctx->sys_tree_num == SYS_TREES_O_TABLES)
+						Assert(cur_recovery_xid_state->o_tables_meta_locked);
+
+					if (!ctx->single)
+						workers_synchronize(xlogPtr, true);
+
+					success = apply_sys_tree_modify_record(ctx->sys_tree_num, type,
+														   tuple1.tuple, rec->oxid,
+														   COMMITSEQNO_INPROGRESS);
+
+					if (ctx->sys_tree_num == SYS_TREES_O_INDICES && success)
+					{
+						ORelOids	tmp_oids;
+
+						if (type == RecoveryMsgTypeDelete)
+						{
+							treeOids = o_indices_get_oids(sys_tree_oids_ptr, &tmp_oids);
+							if (treeOids)
+								add_undo_drop_relnode(tmp_oids, treeOids, 1);
+						}
+						else if (type == RecoveryMsgTypeInsert)
+						{
+							treeOids = o_indices_get_oids(sys_tree_oids_ptr, &tmp_oids);
+							if (treeOids)
+								add_undo_create_relnode(tmp_oids, treeOids, 1, true);
+						}
+					}
+					else if (ctx->sys_tree_num == SYS_TREES_TABLESPACE_CACHE && success)
+					{
+						OSysCacheKey1 key;
+						char	   *prefix;
+						char	   *db_prefix;
+
+						memcpy(&key, sys_tree_oids_ptr, sizeof(OSysCacheKey1));
+						o_get_prefixes_for_relnode(key.common.datoid, DatumGetObjectId(key.keys[0]),
+												   &prefix, &db_prefix);
+						o_verify_dir_exists_or_create(prefix, NULL, NULL);
+						o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+						pfree(db_prefix);
+					}
+				}
+
+				if (ctx->sys_tree_num > 0 || ctx->indexDescr == NULL)
+				{
+					/* nothing to do here */
+					return WALPARSE_OK;
+				}
+
+				if (ctx->indexDescr->desc.type == oIndexBridge)
+				{
+					elog(LOG, "WAL change for bridge index");
+				}
+
+				Assert(!O_TUPLE_IS_NULL(tuple1.tuple));
+
+				/* Reinsert is processed as DELETE + INSERT */
+				if (rec->type == WAL_REC_REINSERT)
+				{
+					Assert(type == RecoveryMsgTypeReinsert);
+					Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
+
+					if (rec->relreplident == REPLICA_IDENTITY_FULL)
+					{
+						bool		allocated;
+
+						/*
+						 * tuple2 (old tuple) representation is full tuple,
+						 * not a key. We need to rewrite it with a key.
+						 */
+						tuple2.tuple = o_btree_tuple_make_key(&(GET_PRIMARY(ctx->descr))->desc, tuple2.tuple, tuple2.tuple.data, true, &allocated);
+						Assert(!allocated);
+					}
+
+					if (ctx->single)
+					{
+						recovery_switch_to_oxid(rec->oxid, -1);
+						apply_modify_record(ctx->descr, ctx->indexDescr, RecoveryMsgTypeDelete, tuple2.tuple);
+						apply_modify_record(ctx->descr, ctx->indexDescr, RecoveryMsgTypeInsert, tuple1.tuple);
+					}
+					else
+					{
+						spread_idx_modify(&ctx->indexDescr->desc, RecoveryMsgTypeDelete, tuple2.tuple);
+						spread_idx_modify(&ctx->indexDescr->desc, RecoveryMsgTypeInsert, tuple1.tuple);
+					}
+				}
+				else			/* WAL_REC_INSERT, WAL_REC_UPDATE or
+								 * WAL_REC_DELETE */
+				{
+					if (rec->relreplident == REPLICA_IDENTITY_FULL)
+					{
+						if (rec->type == WAL_REC_DELETE)
+						{
+							bool		allocated;
+
+							/*
+							 * tuple1 representation is full tuple, not a key.
+							 * We need to rewrite it with a key.
+							 */
+							tuple1.tuple = o_btree_tuple_make_key(&(GET_PRIMARY(ctx->descr))->desc, tuple1.tuple, tuple1.tuple.data, true, &allocated);
+							Assert(!allocated);
+							Assert(O_TUPLE_IS_NULL(tuple2.tuple));
+						}
+						else if (rec->type == WAL_REC_UPDATE)
+						{
+							/*
+							 * tuple2 from WAL record could be safely ignored
+							 * (it's needed only for logical decoding).
+							 */
+							Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
+						}
+						else
+						{
+							Assert(O_TUPLE_IS_NULL(tuple2.tuple));
+						}
+					}
+					else
+					{
+						Assert(O_TUPLE_IS_NULL(tuple2.tuple));
+					}
+
+					if (ctx->single)
+					{
+						recovery_switch_to_oxid(rec->oxid, -1);
+						apply_modify_record(ctx->descr, ctx->indexDescr, type, tuple1.tuple);
+					}
+					else
+					{
+						spread_idx_modify(&ctx->indexDescr->desc, type, tuple1.tuple);
+					}
+				}
+
+				break;
+			}
+
+		default:
+			break;
+	}
+
+	return WALPARSE_OK;
+}
+
 /*
  * Replays a single orioledb WAL container.
  */
@@ -3021,430 +3522,33 @@ static bool
 replay_container(Pointer startPtr, Pointer endPtr,
 				 bool single, XLogRecPtr xlogRecPtr, XLogRecPtr xlogRecEndPtr)
 {
-	OTableDescr *descr = NULL;
-	OIndexDescr *indexDescr = NULL;
-	OXid		oxid = InvalidOXid;
-	ORelOids	cur_oids = {0, 0, 0},
-			   *treeOids;
-	bool		success;
-	uint16		type;
-	uint8		rec_type;
-	int			sys_tree_num = -1;
-	Pointer		ptr = startPtr;
-	XLogRecPtr	xlogPtr;
-	uint16		wal_version;
-	uint8		wal_flags;
-	char		relreplident = REPLICA_IDENTITY_DEFAULT;
+	ReplayWalDescCtx dctx = {
+		.single = single,
+		.xlogRecPtr = xlogRecPtr,
+		.xlogRecEndPtr = xlogRecEndPtr,
+		.sys_tree_num = -1,
+		.descr = NULL,
+		.indexDescr = NULL
+	};
 
-	ptr = wal_container_read_header(ptr, &wal_version, &wal_flags);
-	if (wal_version > ORIOLEDB_WAL_VERSION)
-	{
-		/* WAL from future version */
+	WalReaderState r = {
+		.start = startPtr,
+		.end = endPtr,
+		.ptr = startPtr,
+		.wal_version = 0,
+		.wal_flags = 0,
+		/* Consumer */
+		.ctx = &dctx,
+		.check_version = replay_wal_check_version,
+		.on_flag = replay_wal_containter_info,
+		.on_record = replay_wal_record
+	};
+
+	WalParseResult st = parse_wal_container(&r, true /* allow_logging */ );
+
+	if (st != WALPARSE_OK)
 		return false;
-	}
 
-	if (wal_flags & WAL_CONTAINER_HAS_XACT_INFO)
-	{
-		/*
-		 * Store PG xid from WAL_CONTAINER_XACT_INFO to build
-		 * SYS_TREES_XID_UNDO_LOCATION mapping in recovery for following
-		 * logical decoding
-		 */
-		ptr = wal_parse_container_xact_info(ptr, NULL, &recoveryHeapTransactionId);
-	}
-	else
-		recoveryHeapTransactionId = InvalidTransactionId;
-
-	if (wal_flags & WAL_CONTAINER_HAS_ORIGIN_INFO)
-	{
-		ptr = wal_parse_container_origin_info(ptr, NULL, NULL);
-	}
-
-	while (ptr < endPtr)
-	{
-		const char *rec_type_str;
-
-		xlogPtr = xlogRecPtr + (ptr - startPtr);
-		rec_type = *ptr;
-		ptr++;
-
-		rec_type_str = wal_record_type_to_string(rec_type);
-
-		elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu", rec_type, rec_type_str, oxid);
-
-		if (rec_type == WAL_REC_XID)
-		{
-			/* don't need logicalXid & heapXid here */
-			ptr = wal_parse_rec_xid(ptr, &oxid, NULL, NULL, wal_version);
-
-			advance_oxids(oxid);
-			recovery_switch_to_oxid(oxid, -1);
-		}
-		else if (rec_type == WAL_REC_SWITCH_LOGICAL_XID)
-		{
-			/* Ignore */
-			ptr = wal_parse_rec_switch_logical_xid(ptr, NULL, NULL);
-		}
-		else if (rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK)
-		{
-			bool		commit,
-						sync = false;
-			OXid		xmin;
-
-			ptr = wal_parse_rec_finish(ptr, &xmin, NULL /* skip csn field */ );
-
-			recovery_xmin = Max(recovery_xmin, xmin);
-
-			Assert(sys_tree_num <= 0 || sys_tree_supports_transactions(sys_tree_num));
-
-			commit = (rec_type == WAL_REC_COMMIT);
-
-			Assert(oxid != InvalidOXid);
-			Assert(cur_recovery_xid_state != NULL);
-
-			if (!single)
-			{
-				workers_send_oxid_finish(xlogRecEndPtr, commit);
-				if (cur_recovery_xid_state->systree_modified || cur_recovery_xid_state->checkpoint_xid)
-				{
-					sync = true;
-					workers_synchronize(xlogPtr, false);
-					if (cur_recovery_xid_state->invalidate_typcache)
-						invalidate_typcache();
-				}
-			}
-			else
-			{
-				sync = true;
-				pg_atomic_write_u64(recovery_ptr, xlogPtr);
-				if (cur_recovery_xid_state->invalidate_typcache)
-					invalidate_typcache();
-
-			}
-
-			recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
-										 xlogPtr, -1, sync);
-			oxid = InvalidOXid;
-		}
-		else if (rec_type == WAL_REC_JOINT_COMMIT)
-		{
-			TransactionId xid;
-			OXid		xmin;
-
-			ptr = wal_parse_rec_joint_commit(ptr, &xid, &xmin, NULL /* skip csn field */ );
-
-			cur_recovery_xid_state->xid = xid;
-			recovery_xmin = Max(recovery_xmin, xmin);
-			dlist_push_tail(&joint_commit_list,
-							&cur_recovery_xid_state->joint_commit_list_node);
-		}
-		else if (rec_type == WAL_REC_REPLAY_FEEDBACK)
-		{
-			XLogRequestWalReceiverReply();
-		}
-		else if (rec_type == WAL_REC_RELATION)
-		{
-			uint8		treeType;
-			OIndexType	ix_type;
-
-			ptr = wal_parse_rec_relation(ptr, &treeType, &cur_oids, NULL, NULL, NULL, NULL, NULL, wal_version);
-
-			ix_type = treeType;
-
-			relreplident = REPLICA_IDENTITY_DEFAULT;
-
-			if (IS_SYS_TREE_OIDS(cur_oids))
-				sys_tree_num = cur_oids.relnode;
-			else
-				sys_tree_num = -1;
-
-			if (sys_tree_num > 0)
-			{
-				descr = NULL;
-				indexDescr = NULL;
-				Assert(sys_tree_get_storage_type(sys_tree_num) == BTreeStoragePersistence);
-			}
-			else if (ix_type == oIndexInvalid)
-			{
-				descr = o_fetch_table_descr(cur_oids);
-				indexDescr = descr ? GET_PRIMARY(descr) : NULL;
-			}
-			else
-			{
-				Assert(ix_type == oIndexToast || ix_type == oIndexBridge);
-				descr = NULL;
-				indexDescr = o_fetch_index_descr(cur_oids, ix_type,
-												 false, NULL);
-			}
-
-			if (sys_tree_num == -1)
-			{
-				char	   *prefix;
-				char	   *db_prefix;
-
-				o_get_prefixes_for_relnode(cur_oids.datoid, cur_oids.relnode,
-										   &prefix, &db_prefix);
-				o_verify_dir_exists_or_create(prefix, NULL, NULL);
-				o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
-				pfree(db_prefix);
-			}
-		}
-		else if (rec_type == WAL_REC_RELREPLIDENT)
-		{
-			Oid			relreplident_ix_oid;	/* Unused yet */
-
-			ptr = wal_parse_rec_relreplident(ptr, &relreplident, &relreplident_ix_oid);
-		}
-		else if (rec_type == WAL_REC_O_TABLES_META_LOCK)
-		{
-			Assert(!cur_recovery_xid_state->o_tables_meta_locked);
-			o_tables_meta_lock_no_wal();
-			cur_recovery_xid_state->o_tables_meta_locked = true;
-		}
-		else if (rec_type == WAL_REC_O_TABLES_META_UNLOCK)
-		{
-			ORelOids	oids;
-			Oid			oldRelnode;
-
-			ptr = wal_parse_rec_o_tables_meta_unlock(ptr, &oids, &oldRelnode);
-
-			if (!single)
-				workers_synchronize(xlogPtr, true);
-
-			Assert(cur_recovery_xid_state->o_tables_meta_locked);
-			handle_o_tables_meta_unlock(oids, oldRelnode);
-
-			if (!single)
-				workers_synchronize(xlogPtr + 1, true);
-
-			if (!single)
-				clean_workers_oids();
-		}
-		else if (rec_type == WAL_REC_TRUNCATE)
-		{
-			ORelOids	oids;
-
-			ptr = wal_parse_rec_truncate(ptr, &oids);
-
-			if (!single)
-				workers_synchronize(xlogPtr, true);
-
-			o_truncate_table(oids, true);
-
-			AcceptInvalidationMessages();
-			if (!single)
-				clean_workers_oids();
-		}
-		else if (rec_type == WAL_REC_SAVEPOINT)
-		{
-			SubTransactionId parentSubid;
-
-			ptr = wal_parse_rec_savepoint(ptr, &parentSubid, NULL, NULL);
-
-			recovery_savepoint(parentSubid, -1);
-
-			if (!single)
-				workers_send_savepoint(parentSubid);
-		}
-		else if (rec_type == WAL_REC_ROLLBACK_TO_SAVEPOINT)
-		{
-			SubTransactionId parentSubid;
-
-			ptr = wal_parse_rec_rollback_to_savepoint(ptr, &parentSubid, NULL, NULL, wal_version);
-
-			if (!single)
-			{
-				workers_send_rollback_to_savepoint(xlogPtr, parentSubid);
-				workers_synchronize(xlogPtr, false);
-			}
-			recovery_rollback_to_savepoint(parentSubid, -1);
-		}
-		else if (rec_type == WAL_REC_BRIDGE_ERASE)
-		{
-			ItemPointerData iptr;
-
-			ptr = wal_parse_rec_bridge_erase(ptr, &iptr);
-
-			Assert(indexDescr);
-
-			if (single)
-			{
-				recovery_switch_to_oxid(oxid, -1);
-				replay_erase_bridge_item(indexDescr, &iptr);
-			}
-			else
-			{
-				uint32		hash;
-				OTuple		tuple;
-
-				hash = o_hash_iptr(indexDescr, &iptr);
-				tuple.formatFlags = 0;
-				tuple.data = (Pointer) &iptr;
-				worker_send_modify(GET_WORKER_ID(hash), &indexDescr->desc,
-								   RecoveryMsgTypeBridgeErase, tuple, 0);
-			}
-		}
-		else if (rec_type == WAL_REC_INSERT || rec_type == WAL_REC_UPDATE || rec_type == WAL_REC_DELETE || rec_type == WAL_REC_REINSERT)
-		{
-			OFixedTuple tuple1;
-			OFixedTuple tuple2;
-			OffsetNumber unused;
-			Pointer		sys_tree_oids_ptr;
-			bool		read_two_tuples;
-
-			sys_tree_oids_ptr = ptr + sizeof(uint8) + sizeof(OffsetNumber);
-
-			read_two_tuples = (rec_type == WAL_REC_REINSERT || (rec_type == WAL_REC_UPDATE && relreplident == REPLICA_IDENTITY_FULL));
-			ptr = wal_parse_rec_modify(ptr, &tuple1, &tuple2, &unused, read_two_tuples);
-
-			type = recovery_msg_from_wal_record(rec_type);
-
-			Assert(oxid != InvalidOXid);
-
-			if (sys_tree_num > 0 && xlogRecPtr >= checkpoint_state->sysTreesStartPtr)
-			{
-				Assert(sys_tree_supports_transactions(sys_tree_num));
-				recovery_switch_to_oxid(oxid, -1);
-
-				cur_recovery_xid_state->systree_modified = true;
-				if (IS_TYPCACHE_SYSTREE(sys_tree_num))
-					cur_recovery_xid_state->invalidate_typcache = true;
-				if (sys_tree_num == SYS_TREES_O_TABLES)
-					Assert(cur_recovery_xid_state->o_tables_meta_locked);
-
-				if (!single)
-					workers_synchronize(xlogPtr, true);
-
-				success = apply_sys_tree_modify_record(sys_tree_num, type,
-													   tuple1.tuple, oxid,
-													   COMMITSEQNO_INPROGRESS);
-
-				if (sys_tree_num == SYS_TREES_O_INDICES && success)
-				{
-					ORelOids	tmp_oids;
-
-					if (type == RecoveryMsgTypeDelete)
-					{
-						treeOids = o_indices_get_oids(sys_tree_oids_ptr, &tmp_oids);
-						if (treeOids)
-							add_undo_drop_relnode(tmp_oids, treeOids, 1);
-					}
-					else if (type == RecoveryMsgTypeInsert)
-					{
-						treeOids = o_indices_get_oids(sys_tree_oids_ptr, &tmp_oids);
-						if (treeOids)
-							add_undo_create_relnode(tmp_oids, treeOids, 1, true);
-					}
-				}
-				else if (sys_tree_num == SYS_TREES_TABLESPACE_CACHE && success)
-				{
-					OSysCacheKey1 key;
-					char	   *prefix;
-					char	   *db_prefix;
-
-					memcpy(&key, sys_tree_oids_ptr, sizeof(OSysCacheKey1));
-					o_get_prefixes_for_relnode(key.common.datoid, DatumGetObjectId(key.keys[0]),
-											   &prefix, &db_prefix);
-					o_verify_dir_exists_or_create(prefix, NULL, NULL);
-					o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
-					pfree(db_prefix);
-				}
-			}
-
-			if (sys_tree_num > 0 || indexDescr == NULL)
-			{
-				/* nothing to do here */
-				continue;
-			}
-
-			if (indexDescr->desc.type == oIndexBridge)
-			{
-				elog(LOG, "WAL change for bridge index");
-			}
-
-			Assert(!O_TUPLE_IS_NULL(tuple1.tuple));
-
-			/* Reinsert is processed as DELETE + INSERT */
-			if (rec_type == WAL_REC_REINSERT)
-			{
-				Assert(type == RecoveryMsgTypeReinsert);
-				Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
-
-				if (relreplident == REPLICA_IDENTITY_FULL)
-				{
-					bool		allocated;
-
-					/*
-					 * tuple2 (old tuple) representation is full tuple, not a
-					 * key. We need to rewrite it with a key.
-					 */
-					tuple2.tuple = o_btree_tuple_make_key(&(GET_PRIMARY(descr))->desc, tuple2.tuple, tuple2.tuple.data, true, &allocated);
-					Assert(!allocated);
-				}
-
-				if (single)
-				{
-					recovery_switch_to_oxid(oxid, -1);
-					apply_modify_record(descr, indexDescr, RecoveryMsgTypeDelete, tuple2.tuple);
-					apply_modify_record(descr, indexDescr, RecoveryMsgTypeInsert, tuple1.tuple);
-				}
-				else
-				{
-					spread_idx_modify(&indexDescr->desc, RecoveryMsgTypeDelete, tuple2.tuple);
-					spread_idx_modify(&indexDescr->desc, RecoveryMsgTypeInsert, tuple1.tuple);
-				}
-			}
-			else				/* WAL_REC_INSERT, WAL_REC_UPDATE or
-								 * WAL_REC_DELETE */
-			{
-				if (relreplident == REPLICA_IDENTITY_FULL)
-				{
-					if (rec_type == WAL_REC_DELETE)
-					{
-						bool		allocated;
-
-						/*
-						 * tuple1 representation is full tuple, not a key. We
-						 * need to rewrite it with a key.
-						 */
-						tuple1.tuple = o_btree_tuple_make_key(&(GET_PRIMARY(descr))->desc, tuple1.tuple, tuple1.tuple.data, true, &allocated);
-						Assert(!allocated);
-						Assert(O_TUPLE_IS_NULL(tuple2.tuple));
-					}
-					else if (rec_type == WAL_REC_UPDATE)
-					{
-						/*
-						 * tuple2 from WAL record could be safely ignored
-						 * (it's needed only for logical decoding).
-						 */
-						Assert(!O_TUPLE_IS_NULL(tuple2.tuple));
-					}
-					else
-					{
-						Assert(O_TUPLE_IS_NULL(tuple2.tuple));
-					}
-				}
-				else
-				{
-					Assert(O_TUPLE_IS_NULL(tuple2.tuple));
-				}
-
-				if (single)
-				{
-					recovery_switch_to_oxid(oxid, -1);
-					apply_modify_record(descr, indexDescr, type, tuple1.tuple);
-				}
-				else
-				{
-					spread_idx_modify(&indexDescr->desc, type, tuple1.tuple);
-				}
-			}
-		}
-		else
-		{
-			elog(FATAL, "Unknown modify WAL record %d (%s)", rec_type, rec_type_str);
-		}
-	}
 	update_recovery_undo_loc_flush(single, -1);
 	return true;
 }
