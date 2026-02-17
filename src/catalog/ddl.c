@@ -118,6 +118,7 @@ List	   *reindex_list = NIL;
 Query	   *savedDataQuery = NULL;
 IndexBuildResult o_pkey_result = {0};
 bool		o_in_add_column = false;
+static CreateStmt *create_stmt = NULL;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -1329,6 +1330,10 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 		o_find_collation_dependencies(collOid);
 	}
+	else if (IsA(pstmt->utilityStmt, CreateStmt))
+	{
+		create_stmt = (CreateStmt *) pstmt->utilityStmt;
+	}
 #if PG_VERSION_NUM >= 170000
 	else if (IsA(pstmt->utilityStmt, CreateTableAsStmt))
 	{
@@ -1485,6 +1490,10 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			list_free(o_alter_generated_column_id);
 			o_alter_generated_column_id = NIL;
 		}
+	}
+	else if (IsA(pstmt->utilityStmt, CreateStmt))
+	{
+		create_stmt = NULL;
 	}
 
 	free_parsestate(pstate);
@@ -2503,7 +2512,7 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 		o_add_invalidate_undo_item(index->oids, O_INVALIDATE_OIDS_ON_ABORT);
 	}
 	o_tables_update(o_table, oxid, oSnapshot.csn);
-	o_tables_rel_meta_unlock(tbl, InvalidOid);
+	o_tables_rel_meta_unlock(tbl, old_o_table->oids.relnode);
 	o_invalidate_oids(o_table->bridge_oids);
 	o_add_invalidate_undo_item(o_table->bridge_oids, O_INVALIDATE_OIDS_ON_ABORT);
 	o_invalidate_oids(o_table->oids);
@@ -2557,7 +2566,7 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 		o_add_invalidate_undo_item(index->oids, O_INVALIDATE_OIDS_ON_ABORT);
 	}
 	o_tables_update(o_table, oxid, oSnapshot.csn);
-	o_tables_rel_meta_unlock(tbl, InvalidOid);
+	o_tables_rel_meta_unlock(tbl, old_o_table->oids.relnode);
 	o_invalidate_oids(old_o_table->bridge_oids);
 	o_add_invalidate_undo_item(old_o_table->bridge_oids, O_INVALIDATE_OIDS_ON_ABORT);
 	o_invalidate_oids(o_table->oids);
@@ -3207,7 +3216,50 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						}
 
 						if (add_bridging)
+						{
+							/*
+							 * Ensure the table has a toast relation before
+							 * adding the bridge index.  The bridge rebuild
+							 * path recreates all indices including the toast
+							 * tree, so the toast OIDs must already be set.
+							 * During CREATE TABLE the toast table may not
+							 * exist yet if table inherits indices from parent
+							 * table.
+							 */
+							if (!ORelOidsIsValid(o_table->toast_oids))
+							{
+								Datum		toast_options;
+								static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+
+								Assert(create_stmt != NULL);
+
+								toast_options = transformRelOptions((Datum) 0,
+																	create_stmt->options,
+																	"toast",
+																	validnsps,
+																	true, false);
+								(void) heap_reloptions(RELKIND_TOASTVALUE,
+													   toast_options,
+													   true);
+
+								relation_close(tbl, AccessShareLock);
+
+								/*
+								 * NewRelationCreateToastTable ends with
+								 * CommandCounterIncrement(), so that the
+								 * TOAST table will be visible for
+								 * add_bridge_index().
+								 */
+								NewRelationCreateToastTable(rel->rd_index->indrelid, toast_options);
+
+								tbl = relation_open(rel->rd_index->indrelid, AccessShareLock);
+
+								ORelOidsSetFromRel(table_oids, tbl);
+								o_table_free(o_table);
+								o_table = o_tables_get(table_oids);
+							}
 							add_bridge_index(tbl, o_table, false, rel->rd_rel->relam);
+						}
 						else
 							o_table_free(o_table);
 					}
@@ -4163,4 +4215,5 @@ o_ddl_cleanup(void)
 		o_alter_generated_column_id = NIL;
 	}
 	o_in_add_column = false;
+	create_stmt = NULL;
 }

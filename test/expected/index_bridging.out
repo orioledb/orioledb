@@ -4405,6 +4405,29 @@ WHERE tags @> '{814}';
 (1 row)
 
 COMMIT;
+-- Test partitioned with bridge index (brin). Test checks that bridge index can
+-- be safely added before full building the concrete partition
+CREATE TABLE tab1 (
+	c text,
+	a int PRIMARY KEY,
+	b text
+) PARTITION BY LIST (a);
+CREATE INDEX tab1_c_brin_idx ON tab1 USING brin (c);
+CREATE TABLE tab1_2_2 PARTITION OF tab1
+	FOR VALUES IN (4, 6) USING orioledb;
+NOTICE:  index bridging is enabled for orioledb table 'tab1_2_2'
+DETAIL:  index access method 'brin' is supported only via index bridging for OrioleDB table
+INSERT INTO tab1 (c, a, b) VALUES
+	('c1', 4, 'b1'),
+	('c2', 6, 'b2');
+SELECT * FROM tab1 ORDER BY a, b;
+ c  | a | b  
+----+---+----
+ c1 | 4 | b1
+ c2 | 6 | b2
+(2 rows)
+
+DROP TABLE tab1;
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 17 other objects
