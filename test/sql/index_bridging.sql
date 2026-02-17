@@ -891,6 +891,25 @@ FROM gin_test_table
 WHERE tags @> '{814}';
 COMMIT;
 
+-- Test partitioned with bridge index (brin). Test checks that bridge index can
+-- be safely added before full building the concrete partition
+CREATE TABLE tab1 (
+	c text,
+	a int PRIMARY KEY,
+	b text
+) PARTITION BY LIST (a);
+CREATE INDEX tab1_c_brin_idx ON tab1 USING brin (c);
+CREATE TABLE tab1_2_2 PARTITION OF tab1
+	FOR VALUES IN (4, 6) USING orioledb;
+
+INSERT INTO tab1 (c, a, b) VALUES
+	('c1', 4, 'b1'),
+	('c2', 6, 'b2');
+
+SELECT * FROM tab1 ORDER BY a, b;
+
+DROP TABLE tab1;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;
