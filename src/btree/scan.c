@@ -301,6 +301,7 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 	bool		has_next = false;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
+	CHECK_FOR_INTERRUPTS();
 	elog(DEBUG3, "load_next_internal_page");
 	scan->context.flags |= BTREE_PAGE_FIND_DOWNLINK_LOCATION;
 
