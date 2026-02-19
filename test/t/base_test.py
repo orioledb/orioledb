@@ -134,6 +134,40 @@ class BaseTest(unittest.TestCase):
 			self.subscriber = subscriber
 		return self.subscriber
 
+	def wait_ready(self, node):
+		# Wait on subscriber until it becomes ready (r state)
+		# pg_subscription_rel.srsubstate means synchronization state on subscriber
+		#
+		# i — initializing
+		#	NO tablesync worker
+		#	NO initial copy
+		#
+		# d — data copy
+		#	tablesync worker in progress (`COPY public.table FROM STDIN`)
+		#
+		# s — sync
+		#	initial copy done
+		#	tablesync worker is applying WAL
+		#	NO apply worker
+		#
+		# r — ready
+		#	initial copy done
+		#	catch-up done
+		#	apply worker in progress
+		#
+		with node.connect() as con:
+			con.execute(f"""
+				DO $$
+				BEGIN
+				WHILE EXISTS (
+					SELECT 1 FROM pg_subscription_rel WHERE srsubstate <> 'r'
+				)
+				LOOP
+					PERFORM pg_sleep(0.1);
+				END LOOP;
+				END $$;
+			""")
+
 	def restoreNode(self, port: int, filename: str) -> testgres.PostgresNode:
 		self.assertIsNone(self.restoredNode)
 
