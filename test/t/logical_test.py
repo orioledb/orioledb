@@ -367,7 +367,7 @@ class LogicalTest(BaseTest):
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 
 				publisher.safe_psql(setup_sql)
@@ -588,7 +588,7 @@ class LogicalTest(BaseTest):
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 
 				publisher.safe_psql(setup_sql)
@@ -675,7 +675,7 @@ class LogicalTest(BaseTest):
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 
 				publisher.safe_psql(setup_sql)
@@ -1069,7 +1069,7 @@ class LogicalTest(BaseTest):
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 				create_sql = f"""
 					CREATE EXTENSION IF NOT EXISTS orioledb;
@@ -1704,7 +1704,7 @@ COMMIT\n""")
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 			with subscriber.start() as subscriber:
 				create_sql = """
 					CREATE EXTENSION IF NOT EXISTS orioledb;
@@ -1810,7 +1810,7 @@ COMMIT\n""")
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 
 			with subscriber.start() as subscriber:
 				create_sql = """
@@ -2017,7 +2017,7 @@ COMMIT\n""")
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 
 			with subscriber.start() as subscriber:
 				create_sql = """
@@ -2101,7 +2101,7 @@ COMMIT\n""")
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 
 			with subscriber.start() as subscriber:
 				create_sql = """
@@ -2376,7 +2376,7 @@ COMMIT\n""")
 		with self.node as publisher:
 			publisher.start()
 
-			subscriber = self.getSubsriber()
+			subscriber = self.getSubscriber()
 
 			with subscriber.start() as subscriber:
 				create_sql = """
