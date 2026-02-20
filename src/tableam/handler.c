@@ -341,6 +341,21 @@ orioledb_tuple_tid_valid(TableScanDesc scan, ItemPointer tid)
 	return false;
 }
 
+static void
+orioledb_set_tidrange(TableScanDesc sscan, ItemPointer mintid, ItemPointer maxtid)
+{
+	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+}
+
+/* Just to be safe. Normally this function should not be called before orioledb_set_tidrange. */
+static bool
+orioledb_getnextslot_tidrange(TableScanDesc sscan, ScanDirection direction,
+							  TupleTableSlot *slot)
+{
+	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	return false;
+}
+
 static bool
 orioledb_tuple_satisfies_snapshot(Relation rel, TupleTableSlot *slot,
 								  Snapshot snapshot)
@@ -2303,6 +2318,9 @@ static const TableAmRoutine orioledb_am_methods = {
 	.scan_end = orioledb_endscan,
 	.scan_rescan = orioledb_rescan,
 	.scan_getnextslot = orioledb_getnextslot,
+
+	.scan_set_tidrange = orioledb_set_tidrange,
+	.scan_getnextslot_tidrange = orioledb_getnextslot_tidrange,
 
 	.parallelscan_estimate = orioledb_parallelscan_estimate,
 	.parallelscan_initialize = orioledb_parallelscan_initialize,
