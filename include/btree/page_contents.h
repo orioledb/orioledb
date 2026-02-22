@@ -408,12 +408,25 @@ typedef enum
 	OPageWaitWakeUp
 } OPageWaiterStatus;
 
-/* This should be in page_state.h but depends on O_BTREE_MAX_KEY_SIZE */
+/*
+ * Shared-memory state for a process waiting to insert a tuple into a page
+ * (or lock it).  When the lock holder performs a group insert optimization,
+ * it creates undo records on behalf of the waiter using this state.
+ *
+ * This should be in page_state.h but depends on O_BTREE_MAX_KEY_SIZE.
+ */
 typedef struct
 {
 	ORelOids	reloids;
 	OPageWaiterStatus status;
 	uint32		pageChangeCount;
+
+	/*
+	 * Waiter's autonomous nesting level at the time it queued.  Used by the
+	 * inserter in add_new_undo_stack_item_to_process() to index into the
+	 * correct undoStackLocations slot.  Must match the slot that
+	 * GET_CUR_UNDO_STACK_LOCATIONS() would return for the waiter.
+	 */
 	int			autonomousNestingLevel;
 	uint8		tupleFlags;
 	bool		inserted;

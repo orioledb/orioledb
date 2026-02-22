@@ -237,6 +237,22 @@ ppool_dirty_pages_count(OPagePool *pool)
 
 /*
  * Run clock replacement algorithm until we evict at least one page.
+ *
+ * This can be called from any backend that needs pages (via
+ * ppool_reserve_pages) or from the bgwriter.  Because the caller may
+ * already have undo space reserved for its own operation, we save and
+ * restore the undo reservation state around the eviction work.
+ *
+ * We save both the reserved undo sizes and whether
+ * transactionUndoRetainLocation was set for UndoLogRegularPageLevel and
+ * UndoLogSystem.  Page merges during walk_page() may set these via
+ * get_undo_record() → set_my_reserved_location().  After we're done, we
+ * restore the caller's original reservation and free any retain locations
+ * that we introduced (i.e., that weren't set before we entered).
+ *
+ * Note: we only manage UndoLogRegularPageLevel and UndoLogSystem here
+ * because page-level merges only write undo to these types (via
+ * GET_PAGE_LEVEL_UNDO_TYPE).  UndoLogRegular is not touched by merges.
  */
 void
 ppool_run_clock(OPagePool *pool, bool evict,
