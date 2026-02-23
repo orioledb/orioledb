@@ -939,7 +939,8 @@ page_split_chunk_if_needed(BTreeDescr *desc, Page p, BTreePageItemLocator *locat
 	OffsetNumber i,
 				chunkOffset;
 	LocationIndex hikeysFreeSpace,
-				dataFreeSpace;
+				dataFreeSpace,
+				newChunkDescSize;
 	BTreePageHeader *header = (BTreePageHeader *) p;
 	int			bestOffset = -1;
 	float4		bestScore = 0.0f;
@@ -961,9 +962,25 @@ page_split_chunk_if_needed(BTreeDescr *desc, Page p, BTreePageItemLocator *locat
 		return;
 
 	hikeysFreeSpace = hikeysEnd - header->hikeysEnd;
-	hikeysFreeSpace -=
-		(MAXALIGN(offsetof(BTreePageHeader, chunkDesc) + sizeof(BTreePageChunkDesc) * (header->chunksCount + 1)) -
-		 MAXALIGN(offsetof(BTreePageHeader, chunkDesc) + sizeof(BTreePageChunkDesc) * header->chunksCount));
+
+	/*
+	 * Make sure that we don't split rightmost chunk if there could be
+	 * overflow of hikeyLocation
+	 */
+	if (O_PAGE_IS(p, RIGHTMOST) && hikeysEnd == 512 && hikeysFreeSpace >= 4)
+		hikeysFreeSpace -= 4;
+	newChunkDescSize = MAXALIGN(offsetof(BTreePageHeader, chunkDesc) +
+								sizeof(BTreePageChunkDesc) *
+								(header->chunksCount + 1)) -
+		MAXALIGN(offsetof(BTreePageHeader, chunkDesc) +
+				 sizeof(BTreePageChunkDesc) *
+				 header->chunksCount);
+	/* Also don't split if there is no space for new chunkDesc */
+	if (hikeysFreeSpace > newChunkDescSize)
+		hikeysFreeSpace -= newChunkDescSize;
+	else
+		hikeysFreeSpace = 0;	/* Just to be more explicit about not having
+								 * enough space */
 	dataFreeSpace = ORIOLEDB_BLCKSZ - header->dataSize;
 
 	for (i = 1; i < locator->chunkItemsCount; i++)
@@ -1162,6 +1179,9 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 		totalDataSize += items[i].size;
 
 	hikeysFreeSpaceLeft = hikeysFreeSpace = hikeysEnd - (MAXALIGN(sizeof(BTreePageHeader)) + MAXALIGN(hikeySize));
+
+	if (isRightmost && hikeysEnd == 512 && hikeysFreeSpaceLeft >= 4)
+		hikeysFreeSpaceLeft -= 4;
 	dataFreeSpaceLeft = dataFreeSpace = (ORIOLEDB_BLCKSZ - hikeysEnd) - totalDataSize - MAXALIGN(sizeof(LocationIndex) * count);
 
 	/*
