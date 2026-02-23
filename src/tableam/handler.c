@@ -908,9 +908,14 @@ orioledb_relation_set_new_filenode(Relation rel,
 
 		/*
 		 * Pass NULL and InvalidOid as we don't want recovery to trigger an
-		 * index (re)build.
+		 * index (re)build.  But take care we don't issue a WAL-record if
+		 * o_tables_table_meta_lock() didn't
 		 */
-		o_tables_table_meta_unlock(NULL, InvalidOid);
+		if (new_o_table->persistence != RELPERSISTENCE_TEMP)
+			o_tables_table_meta_unlock(NULL, InvalidOid);
+		else
+			o_tables_meta_unlock_no_wal();
+
 		o_table_free(new_o_table);
 
 		orioledb_free_rd_amcache(rel);
