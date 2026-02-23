@@ -23,10 +23,16 @@ if [ $CHECK_TYPE = "valgrind_1" ]; then
 elif [ $CHECK_TYPE = "valgrind_2" ]; then
 	make USE_PGXS=1 IS_DEV=1 VALGRIND=1 testgrescheck_part_2 -j $(nproc) || status=$?
 elif [ $CHECK_TYPE = "sanitize" ]; then
+	if [ $COMPILER = "clang" ]; then
+		FAKE_STACK=1
+	else
+		FAKE_STACK=0 # it is really slow for gcc
+	fi
+
 	UBSAN_OPTIONS="log_path=$PWD/ubsan.log" \
 	ASAN_OPTIONS=$(cat <<-END
 		verify_asan_link_order=0:
-		detect_stack_use_after_return=0:
+		detect_stack_use_after_return=$FAKE_STACK:
 		detect_leaks=0:
 		abort_on_error=1:
 		disable_coredump=0:
