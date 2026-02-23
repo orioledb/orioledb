@@ -70,10 +70,13 @@ typedef struct
 				hikeyFlags:2;
 } BTreePageChunkDesc;
 
+#define SHORT_LOCATION_MULTIPLIER (4)
+#define HIKEY_SHORT_LOCATION_LIMIT ((1<<7) * SHORT_LOCATION_MULTIPLIER)
 #define LOCATION_GET_SHORT(l) \
 	(AssertMacro(((l) & 3) == 0), (l) / 4)
 #define SHORT_GET_LOCATION(s) \
 	((s) * 4)
+
 
 typedef struct
 {
