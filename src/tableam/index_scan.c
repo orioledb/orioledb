@@ -206,7 +206,6 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 	return valid;
 }
 
-#if PG_VERSION_NUM >= 170000
 static bool
 o_bt_advance_array_keys_increment(OScanState *ostate, ScanDirection dir)
 {
@@ -263,7 +262,6 @@ o_bt_advance_array_keys_increment(OScanState *ostate, ScanDirection dir)
 
 	return false;
 }
-#endif
 
 static bool
 switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
@@ -308,7 +306,7 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	}
 #else
 	if (ostate->curKeyRangeIsLoaded)
-		result = _bt_advance_array_keys(scan, ForwardScanDirection);
+		result = o_bt_advance_array_keys_increment(ostate, ostate->scanDir);
 #endif
 	ostate->curKeyRangeIsLoaded = true;
 
