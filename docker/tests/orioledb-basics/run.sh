@@ -58,3 +58,34 @@ EOSQL
 
 echo "SELECT version();" | psql
 echo "\dx" | psql
+
+# Helper: assert two values are equal; print PASS/FAIL and exit on failure
+assert_eq() {
+    local description="$1"
+    local expected="$2"
+    local actual="$3"
+    if [ "$expected" = "$actual" ]; then
+        echo "PASS: $description"
+    else
+        echo "FAIL: $description"
+        echo "  expected: $(printf '%q' "$expected")"
+        echo "  actual:   $(printf '%q' "$actual")"
+        exit 1
+    fi
+}
+
+echo ""
+echo "=== Test: Dev functions available (required for regression tests) ==="
+# Verify that IS_DEV=1 build produced all dev-only functions.
+# If any are missing, .dockerignore likely leaks a stale generated SQL file.
+result=$(echo "SELECT count(*) FROM pg_proc WHERE proname = 'orioledb_parallel_debug_start';" | psql)
+assert_eq "dev functions: orioledb_parallel_debug_start (orioledb--1.0_dev.sql)" "1" "$result"
+
+result=$(echo "SELECT count(*) FROM pg_proc WHERE proname = 'orioledb_rewind_set_complete';" | psql)
+assert_eq "dev functions: orioledb_rewind_set_complete (orioledb--1.4--1.5_dev.sql)" "1" "$result"
+
+result=$(echo "SELECT count(*) FROM pg_proc WHERE proname = 'orioledb_insert_sys_xid_undo_location';" | psql)
+assert_eq "dev functions: orioledb_insert_sys_xid_undo_location (orioledb--1.5--1.6_dev.sql)" "1" "$result"
+
+echo ""
+echo "All smoke tests passed."
