@@ -2362,7 +2362,7 @@ void
 o_set_syscache_hooks(void)
 {
 	o_sys_cache_hooks_depth++;
-	if (!IsTransactionState())
+	if (!IsTransactionState() && SearchCatCacheInternal_hook == NULL)
 	{
 		if (!CurrentResourceOwner)
 		{
