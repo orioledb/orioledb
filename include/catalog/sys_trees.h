@@ -88,6 +88,12 @@ typedef struct
 typedef struct
 {
 	OTableChunkKey key;
+	OXid		oxid;
+} OTableChunkBoundKey;
+
+typedef struct
+{
+	OTableChunkKey key;
 	uint32		dataLength;
 	char		data[FLEXIBLE_ARRAY_MEMBER];
 } OTableChunk;
@@ -99,6 +105,12 @@ typedef struct
 	uint32		chunknum;
 	uint32		version;
 } OIndexChunkKey;
+
+typedef struct
+{
+	OIndexChunkKey key;
+	OXid		oxid;
+} OIndexChunkBoundKey;
 
 typedef struct
 {

@@ -221,16 +221,30 @@ oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 					 void *arg, bool oxidIsFinished)
 {
 	OTableChunkKey *tupleKey = (OTableChunkKey *) tuple.data;
-	OTableChunkKey *boundKey = (OTableChunkKey *) arg;
+	OTableChunkBoundKey *boundKey = (OTableChunkBoundKey *) arg;
 
-	if (ORelOidsIsEqual(tupleKey->oids, boundKey->oids))
+	if (ORelOidsIsEqual(tupleKey->oids, boundKey->key.oids))
 	{
-		if (boundKey->version == O_TABLE_INVALID_VERSION)
-			boundKey->version = tupleKey->version;
+		if (COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn) &&
+			(boundKey->key.version == O_TABLE_INVALID_VERSION ||
+			 OXidIsValid(boundKey->oxid)))
+		{
+			if (!OXidIsValid(boundKey->oxid))
+				boundKey->oxid = tupOxid;
+			else if (boundKey->oxid != tupOxid)
+				return OTupleFetchNotMatch;
 
-		if (tupleKey->version > boundKey->version)
+			if (boundKey->key.version == O_TABLE_INVALID_VERSION)
+				boundKey->key.version = tupleKey->version;
+			return (boundKey->key.version == tupleKey->version) ? OTupleFetchMatch : OTupleFetchNotMatch;
+		}
+
+		if (boundKey->key.version == O_TABLE_INVALID_VERSION)
+			boundKey->key.version = tupleKey->version;
+
+		if (tupleKey->version > boundKey->key.version)
 			return OTupleFetchNext;
-		else if (tupleKey->version == boundKey->version)
+		else if (tupleKey->version == boundKey->key.version)
 			return OTupleFetchMatch;
 		else
 			return OTupleFetchNotMatch;
@@ -1162,12 +1176,15 @@ o_tables_get_extended(ORelOids oids, OTableFetchContext ctx)
 
 	for (retry = 0;; retry++)
 	{
-		OTableChunkKey *found_key = NULL;
+		OTableChunkBoundKey boundKey;
+		OTableChunkBoundKey *found_key = NULL;
 		Pointer		result;
 		Size		dataLength;
 		OTable	   *oTable;
 
-		found_key = &key;
+		boundKey.key = key;
+		boundKey.oxid = InvalidOXid;
+		found_key = &boundKey;
 		result = generic_toast_get_any_with_key(&oTablesToastAPI,
 												(Pointer) &key,
 												&dataLength,
@@ -1183,7 +1200,7 @@ o_tables_get_extended(ORelOids oids, OTableFetchContext ctx)
 
 		if (oTable != NULL)
 		{
-			oTable->version = found_key->version;
+			oTable->version = found_key->key.version;
 			pfree(found_key);
 			return oTable;
 		}
