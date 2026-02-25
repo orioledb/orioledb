@@ -79,6 +79,33 @@ o_fill_row_key_bound(OBTreeKeyBound *bound,
 	return result;
 }
 
+void
+o_key_data_update_array_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
+								  int numberOfKeys, BTArrayKeyInfo *arrayKeys,
+								  int numPrefixExactKeys,
+								  int resultNKeys, OIndexField *fields)
+{
+	int			i;
+
+	for (i = 0; i < numberOfKeys; i++)
+	{
+		ScanKeyData *key = &keyData[i];
+		AttrNumber	attnum = key->sk_attno - 1;
+
+		if ((key->sk_flags & SK_SEARCHARRAY) &&
+			key->sk_strategy == BTEqualStrategyNumber)
+		{
+			Assert(arrayKeys && arrayKeys->num_elems > 0);
+			if (i < numPrefixExactKeys)
+			{
+				res->low.keys[attnum].value = arrayKeys->elem_values[arrayKeys->cur_elem];
+				res->high.keys[attnum].value = arrayKeys->elem_values[arrayKeys->cur_elem];
+			}
+			arrayKeys++;
+		}
+	}
+}
+
 bool
 o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 						int numberOfKeys, BTArrayKeyInfo *arrayKeys,

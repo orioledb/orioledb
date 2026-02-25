@@ -305,21 +305,32 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	else
 		_bt_start_array_keys(scan, ostate->scanDir);
 #endif
-	ostate->curKeyRangeIsLoaded = true;
 
-	ostate->exact = result;
 	if (!result)
+	{
+		ostate->curKeyRangeIsLoaded = true;
 		return false;
-
+	}
 
 	oldcontext = MemoryContextSwitchTo(ostate->cxt);
-	ostate->exact = o_key_data_to_key_range(&ostate->curKeyRange,
-											so->keyData,
-											so->numberOfKeys,
-											(so->numArrayKeys > 0) ? so->arrayKeys : NULL,
-											ostate->numPrefixExactKeys,
-											indexDescr->nonLeafTupdesc->natts,
-											indexDescr->fields);
+
+	if (!ostate->curKeyRangeIsLoaded)
+		ostate->exact = o_key_data_to_key_range(&ostate->curKeyRange,
+												so->keyData,
+												so->numberOfKeys,
+												(so->numArrayKeys > 0) ? so->arrayKeys : NULL,
+												ostate->numPrefixExactKeys,
+												indexDescr->nonLeafTupdesc->natts,
+												indexDescr->fields);
+	else
+		o_key_data_update_array_key_range(&ostate->curKeyRange,
+										  so->keyData,
+										  so->numberOfKeys,
+										  (so->numArrayKeys > 0) ? so->arrayKeys : NULL,
+										  ostate->numPrefixExactKeys,
+										  indexDescr->nonLeafTupdesc->natts,
+										  indexDescr->fields);
+	ostate->curKeyRangeIsLoaded = true;
 
 	if (!ostate->exact)
 	{
