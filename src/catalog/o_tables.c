@@ -1868,6 +1868,65 @@ deserialize_o_table_index(OTableIndex *o_table_index, Pointer *ptr,
 }
 
 /*
+ * A truncation-tolerant version of datumRestore().  Returns false if there
+ * isn't enough data remaining in the buffer to read the full datum, so the
+ * caller can bail out gracefully instead of crashing.
+ */
+static bool
+datumRestoreSafe(char **start_address, bool *isnull, Datum *result,
+				 Pointer data, Size length)
+{
+	int			header;
+	void	   *d;
+	char	   *ptr = *start_address;
+
+	/* Need at least sizeof(int) for the header word. */
+	if ((ptr - data) + (int) sizeof(int) > length)
+		return false;
+
+	memcpy(&header, ptr, sizeof(int));
+	ptr += sizeof(int);
+
+	/* NULL datum. */
+	if (header == -2)
+	{
+		*isnull = true;
+		*result = (Datum) 0;
+		*start_address = ptr;
+		return true;
+	}
+
+	*isnull = false;
+
+	/* Pass-by-value datum. */
+	if (header == -1)
+	{
+		Datum		val;
+
+		if ((ptr - data) + (int) sizeof(Datum) > length)
+			return false;
+
+		memcpy(&val, ptr, sizeof(Datum));
+		ptr += sizeof(Datum);
+		*result = val;
+		*start_address = ptr;
+		return true;
+	}
+
+	/* Pass-by-reference: header is the byte count. */
+	Assert(header > 0);
+	if ((ptr - data) + header > length)
+		return false;
+
+	d = palloc(header);
+	memcpy(d, ptr, header);
+	ptr += header;
+	*result = PointerGetDatum(d);
+	*start_address = ptr;
+	return true;
+}
+
+/*
  * Deserialize OTable from toast data.  Returns NULL if the data is truncated
  * (e.g. due to missing toast chunks from a concurrent write race condition).
  */
@@ -1940,8 +1999,7 @@ deserialize_o_table(Pointer data, Size length)
 		}
 		memcpy(&miss->am_present, ptr, sizeof(bool));
 		ptr += sizeof(bool);
-		miss->am_value = datumRestore(&ptr, &isnull);
-		if ((ptr - data) > length)
+		if (!datumRestoreSafe(&ptr, &isnull, &miss->am_value, data, length))
 		{
 			MemoryContextSwitchTo(oldcxt);
 			o_table_free(o_table);
