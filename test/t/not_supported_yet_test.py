@@ -157,32 +157,21 @@ class NotSupportedYetTest(BaseTest):
 		""")
 		self.assertEqual(err.decode("utf-8"), "")
 
-		# Error for orioledb tables
-		_, _, err = node.psql("""
-			VACUUM (FULL, VERBOSE) o_test_1;
+		# VACUUM FULL works for orioledb tables
+		node.safe_psql("""
+			VACUUM FULL o_test_1;
 		""")
-		self.assertEqual(
-		    err.decode("utf-8").split("\n")[0],
-		    "ERROR:  orioledb table \"o_test_1\" does " +
-		    "not support VACUUM FULL")
 
-		# Error if at least one table is orioledb
-		_, _, err = node.psql("""
-			VACUUM (FULL, VERBOSE) pg_test_1, o_test_1;
+		# VACUUM FULL works for mixed table lists (orioledb + heap)
+		node.safe_psql("""
+			VACUUM FULL pg_test_1, o_test_1;
 		""")
-		self.assertEqual(
-		    err.decode("utf-8").split("\n")[0],
-		    "ERROR:  orioledb table \"o_test_1\" does " +
-		    "not support VACUUM FULL")
+		
+		# VACUUM FULL without specified tables works (vacuums all tables)
+		node.safe_psql("""
+			VACUUM FULL;
+		""")
 
-		# Error if no table specified
-		_, _, err = node.psql("""
-			VACUUM (FULL, VERBOSE);
-		""")
-		self.assertEqual(
-		    err.decode("utf-8").split("\n")[0],
-		    "ERROR:  orioledb table \"o_test_1\" does " +
-		    "not support VACUUM FULL")
 		node.stop()
 
 	def test_tablesample(self):

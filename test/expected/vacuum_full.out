@@ -1,0 +1,358 @@
+CREATE SCHEMA orioledb;
+CREATE EXTENSION orioledb SCHEMA orioledb;
+CREATE EXTENSION pageinspect;
+-- Test vacuum full for ctid.
+CREATE TABLE t_table (
+  id int,
+  val int,
+  val2 int NOT NULL
+) USING orioledb;
+INSERT INTO t_table SELECT i, i, i FROM generate_series(0, 10) AS s(i);
+SELECT * FROM orioledb.orioledb_idx_structure('t_table'::regclass, 'ctid_primary', '', 1);
+                         orioledb_idx_structure                          
+-------------------------------------------------------------------------
+ Index ctid_primary contents                                            +
+ Page 3051: level = 0, maxKeyLen = 8, nVacatedBytes = 0                 +
+ state = free, datoid = 16384, relnode = 26442, ix_type = primary, dirty+
+     Leftmost, Rightmost                                                +
+   Chunk 0: offset = 0, location = 256, hikey location = 64             +
+     Item 0: offset = 280, tuple = ('(0,1)', '0', '0', '0')             +
+     Item 1: offset = 320, tuple = ('(0,2)', '1', '1', '1')             +
+     Item 2: offset = 360, tuple = ('(0,3)', '2', '2', '2')             +
+     Item 3: offset = 400, tuple = ('(0,4)', '3', '3', '3')             +
+     Item 4: offset = 440, tuple = ('(0,5)', '4', '4', '4')             +
+     Item 5: offset = 480, tuple = ('(0,6)', '5', '5', '5')             +
+     Item 6: offset = 520, tuple = ('(0,7)', '6', '6', '6')             +
+     Item 7: offset = 560, tuple = ('(0,8)', '7', '7', '7')             +
+     Item 8: offset = 600, tuple = ('(0,9)', '8', '8', '8')             +
+     Item 9: offset = 640, tuple = ('(0,10)', '9', '9', '9')            +
+     Item 10: offset = 680, tuple = ('(0,11)', '10', '10', '10')        +
+                                                                        +
+ 
+(1 row)
+
+DELETE FROM t_table WHERE id < 5;
+SELECT * FROM orioledb.orioledb_idx_structure('t_table'::regclass, 'ctid_primary', '', 1);
+                         orioledb_idx_structure                          
+-------------------------------------------------------------------------
+ Index ctid_primary contents                                            +
+ Page 3051: level = 0, maxKeyLen = 8, nVacatedBytes = 200               +
+ state = free, datoid = 16384, relnode = 26442, ix_type = primary, dirty+
+     Leftmost, Rightmost                                                +
+   Chunk 0: offset = 0, location = 256, hikey location = 64             +
+     Item 0: deleted, offset = 280, tuple = ('(0,1)', '0', '0', '0')    +
+     Item 1: deleted, offset = 320, tuple = ('(0,2)', '1', '1', '1')    +
+     Item 2: deleted, offset = 360, tuple = ('(0,3)', '2', '2', '2')    +
+     Item 3: deleted, offset = 400, tuple = ('(0,4)', '3', '3', '3')    +
+     Item 4: deleted, offset = 440, tuple = ('(0,5)', '4', '4', '4')    +
+     Item 5: offset = 480, tuple = ('(0,6)', '5', '5', '5')             +
+     Item 6: offset = 520, tuple = ('(0,7)', '6', '6', '6')             +
+     Item 7: offset = 560, tuple = ('(0,8)', '7', '7', '7')             +
+     Item 8: offset = 600, tuple = ('(0,9)', '8', '8', '8')             +
+     Item 9: offset = 640, tuple = ('(0,10)', '9', '9', '9')            +
+     Item 10: offset = 680, tuple = ('(0,11)', '10', '10', '10')        +
+                                                                        +
+ 
+(1 row)
+
+VACUUM FULL t_table;
+SELECT * FROM orioledb.orioledb_idx_structure('t_table'::regclass, 'ctid_primary', '', 1);
+                             orioledb_idx_structure                             
+--------------------------------------------------------------------------------
+ Index ctid_primary contents                                                   +
+ Page 3059: level = 0, maxKeyLen = 6, nVacatedBytes = 0                        +
+ state = free, datoid = 16384, relnode = 26448, ix_type = primary, clean       +
+     Leftmost, Rightmost                                                       +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('(0,2)') +
+     Item 0: offset = 264, tuple = ('(0,1)', '5', '5', '5')                    +
+   Chunk 1: offset = 1, location = 304, hikey location = 88, hikey = ('(0,3)') +
+     Item 1: offset = 312, tuple = ('(0,2)', '6', '6', '6')                    +
+   Chunk 2: offset = 2, location = 352, hikey location = 96, hikey = ('(0,4)') +
+     Item 2: offset = 360, tuple = ('(0,3)', '7', '7', '7')                    +
+   Chunk 3: offset = 3, location = 400, hikey location = 104, hikey = ('(0,5)')+
+     Item 3: offset = 408, tuple = ('(0,4)', '8', '8', '8')                    +
+   Chunk 4: offset = 4, location = 448, hikey location = 112, hikey = ('(0,6)')+
+     Item 4: offset = 456, tuple = ('(0,5)', '9', '9', '9')                    +
+   Chunk 5: offset = 5, location = 496, hikey location = 120                   +
+     Item 5: offset = 504, tuple = ('(0,6)', '10', '10', '10')                 +
+                                                                               +
+ 
+(1 row)
+
+DROP TABLE t_table;
+-- Test vacuum full for secondary indexes, with bridge and pk.
+CREATE TABLE t_table (
+  id int PRIMARY KEY,
+  val int,
+  val2 int NOT NULL
+) USING orioledb;
+INSERT INTO t_table SELECT i, i, i FROM generate_series(0, 10) AS s(i);
+CREATE INDEX idx_val ON t_table(val);
+CREATE INDEX idx_val2 ON t_table using hash (val2);
+NOTICE:  index bridging is enabled for orioledb table 't_table'
+DETAIL:  index access method 'hash' is supported only via index bridging for OrioleDB table
+SELECT * FROM orioledb.orioledb_tbl_indices('t_table'::regclass, true, false);
+                   orioledb_tbl_indices                    
+-----------------------------------------------------------
+ Index t_table_pkey                                       +
+     Index type: primary, unique                          +
+     Leaf tuple size: 4, non-leaf tuple size: 1           +
+     Non-leaf tuple fields: id                            +
+     Leaf tuple fields: index_bridging_ctid, id, val, val2+
+ Index idx_val                                            +
+     Index type: secondary                                +
+     Leaf tuple size: 2, non-leaf tuple size: 2           +
+     Non-leaf tuple fields: val, id                       +
+     Leaf tuple fields: val, id                           +
+ Index index_bridge                                       +
+     Index type: secondary                                +
+     Leaf tuple size: 2, non-leaf tuple size: 1           +
+     Non-leaf tuple fields: index_bridging_ctid           +
+     Leaf tuple fields: index_bridging_ctid, id           +
+ Index toast                                              +
+     Index type: secondary                                +
+     Leaf tuple size: 4, non-leaf tuple size: 3           +
+     Non-leaf tuple fields: id, attnum, chunknum          +
+     Leaf tuple fields: id, attnum, chunknum, data        +
+ 
+(1 row)
+
+SELECT * FROM orioledb.orioledb_idx_structure('t_table'::regclass, 't_table_pkey', '', 1);
+                           orioledb_idx_structure                            
+-----------------------------------------------------------------------------
+ Index t_table_pkey contents                                                +
+ Page 3075: level = 0, maxKeyLen = 4, nVacatedBytes = 0                     +
+ state = free, datoid = 16384, relnode = 26463, ix_type = primary, clean    +
+     Leftmost, Rightmost                                                    +
+   Chunk 0: offset = 0, location = 256, hikey location = 104, hikey = ('1') +
+     Item 0: offset = 264, tuple = ('(0,1)', '0', '0', '0')                 +
+   Chunk 1: offset = 1, location = 304, hikey location = 112, hikey = ('2') +
+     Item 1: offset = 312, tuple = ('(0,2)', '1', '1', '1')                 +
+   Chunk 2: offset = 2, location = 352, hikey location = 120, hikey = ('3') +
+     Item 2: offset = 360, tuple = ('(0,3)', '2', '2', '2')                 +
+   Chunk 3: offset = 3, location = 400, hikey location = 128, hikey = ('4') +
+     Item 3: offset = 408, tuple = ('(0,4)', '3', '3', '3')                 +
+   Chunk 4: offset = 4, location = 448, hikey location = 136, hikey = ('5') +
+     Item 4: offset = 456, tuple = ('(0,5)', '4', '4', '4')                 +
+   Chunk 5: offset = 5, location = 496, hikey location = 144, hikey = ('6') +
+     Item 5: offset = 504, tuple = ('(0,6)', '5', '5', '5')                 +
+   Chunk 6: offset = 6, location = 544, hikey location = 152, hikey = ('7') +
+     Item 6: offset = 552, tuple = ('(0,7)', '6', '6', '6')                 +
+   Chunk 7: offset = 7, location = 592, hikey location = 160, hikey = ('8') +
+     Item 7: offset = 600, tuple = ('(0,8)', '7', '7', '7')                 +
+   Chunk 8: offset = 8, location = 640, hikey location = 168, hikey = ('9') +
+     Item 8: offset = 648, tuple = ('(0,9)', '8', '8', '8')                 +
+   Chunk 9: offset = 9, location = 688, hikey location = 176, hikey = ('10')+
+     Item 9: offset = 696, tuple = ('(0,10)', '9', '9', '9')                +
+   Chunk 10: offset = 10, location = 736, hikey location = 184              +
+     Item 10: offset = 744, tuple = ('(0,11)', '10', '10', '10')            +
+                                                                            +
+ 
+(1 row)
+
+SELECT * FROM orioledb.orioledb_idx_structure('t_table'::regclass, 'idx_val', '', 1);
+  orioledb_idx_structure   
+---------------------------
+ Index idx_val: not loaded+
+ 
+(1 row)
+
+SELECT * FROM orioledb.orioledb_idx_structure('t_table'::regclass, 'index_bridge', '', 1);
+     orioledb_idx_structure     
+--------------------------------
+ Index index_bridge: not loaded+
+ 
+(1 row)
+
+DELETE FROM t_table WHERE id < 5;
+SELECT * FROM orioledb.orioledb_idx_structure('t_table'::regclass, 't_table_pkey', '', 1);
+                           orioledb_idx_structure                            
+-----------------------------------------------------------------------------
+ Index t_table_pkey contents                                                +
+ Page 3075: level = 0, maxKeyLen = 4, nVacatedBytes = 200                   +
+ state = free, datoid = 16384, relnode = 26463, ix_type = primary, dirty    +
+     Leftmost, Rightmost                                                    +
+   Chunk 0: offset = 0, location = 256, hikey location = 104, hikey = ('1') +
+     Item 0: deleted, offset = 264, tuple = ('(0,1)', '0', '0', '0')        +
+   Chunk 1: offset = 1, location = 304, hikey location = 112, hikey = ('2') +
+     Item 1: deleted, offset = 312, tuple = ('(0,2)', '1', '1', '1')        +
+   Chunk 2: offset = 2, location = 352, hikey location = 120, hikey = ('3') +
+     Item 2: deleted, offset = 360, tuple = ('(0,3)', '2', '2', '2')        +
+   Chunk 3: offset = 3, location = 400, hikey location = 128, hikey = ('4') +
+     Item 3: deleted, offset = 408, tuple = ('(0,4)', '3', '3', '3')        +
+   Chunk 4: offset = 4, location = 448, hikey location = 136, hikey = ('5') +
+     Item 4: deleted, offset = 456, tuple = ('(0,5)', '4', '4', '4')        +
+   Chunk 5: offset = 5, location = 496, hikey location = 144, hikey = ('6') +
+     Item 5: offset = 504, tuple = ('(0,6)', '5', '5', '5')                 +
+   Chunk 6: offset = 6, location = 544, hikey location = 152, hikey = ('7') +
+     Item 6: offset = 552, tuple = ('(0,7)', '6', '6', '6')                 +
+   Chunk 7: offset = 7, location = 592, hikey location = 160, hikey = ('8') +
+     Item 7: offset = 600, tuple = ('(0,8)', '7', '7', '7')                 +
+   Chunk 8: offset = 8, location = 640, hikey location = 168, hikey = ('9') +
+     Item 8: offset = 648, tuple = ('(0,9)', '8', '8', '8')                 +
+   Chunk 9: offset = 9, location = 688, hikey location = 176, hikey = ('10')+
+     Item 9: offset = 696, tuple = ('(0,10)', '9', '9', '9')                +
+   Chunk 10: offset = 10, location = 736, hikey location = 184              +
+     Item 10: offset = 744, tuple = ('(0,11)', '10', '10', '10')            +
+                                                                            +
+ 
+(1 row)
+
+SELECT * FROM orioledb.orioledb_idx_structure('t_table'::regclass, 'idx_val', '', 1);
+                              orioledb_idx_structure                               
+-----------------------------------------------------------------------------------
+ Index idx_val contents                                                           +
+ Page 3083: level = 0, maxKeyLen = 8, nVacatedBytes = 120                         +
+ state = free, datoid = 16384, relnode = 26464, ix_type = regular, dirty          +
+     Leftmost, Rightmost                                                          +
+   Chunk 0: offset = 0, location = 256, hikey location = 104, hikey = ('1', '1')  +
+     Item 0: deleted, offset = 264, tuple = ('0', '0')                            +
+   Chunk 1: offset = 1, location = 288, hikey location = 112, hikey = ('2', '2')  +
+     Item 1: deleted, offset = 296, tuple = ('1', '1')                            +
+   Chunk 2: offset = 2, location = 320, hikey location = 120, hikey = ('3', '3')  +
+     Item 2: deleted, offset = 328, tuple = ('2', '2')                            +
+   Chunk 3: offset = 3, location = 352, hikey location = 128, hikey = ('4', '4')  +
+     Item 3: deleted, offset = 360, tuple = ('3', '3')                            +
+   Chunk 4: offset = 4, location = 384, hikey location = 136, hikey = ('5', '5')  +
+     Item 4: deleted, offset = 392, tuple = ('4', '4')                            +
+   Chunk 5: offset = 5, location = 416, hikey location = 144, hikey = ('6', '6')  +
+     Item 5: offset = 424, tuple = ('5', '5')                                     +
+   Chunk 6: offset = 6, location = 448, hikey location = 152, hikey = ('7', '7')  +
+     Item 6: offset = 456, tuple = ('6', '6')                                     +
+   Chunk 7: offset = 7, location = 480, hikey location = 160, hikey = ('8', '8')  +
+     Item 7: offset = 488, tuple = ('7', '7')                                     +
+   Chunk 8: offset = 8, location = 512, hikey location = 168, hikey = ('9', '9')  +
+     Item 8: offset = 520, tuple = ('8', '8')                                     +
+   Chunk 9: offset = 9, location = 544, hikey location = 176, hikey = ('10', '10')+
+     Item 9: offset = 552, tuple = ('9', '9')                                     +
+   Chunk 10: offset = 10, location = 576, hikey location = 184                    +
+     Item 10: offset = 584, tuple = ('10', '10')                                  +
+                                                                                  +
+ 
+(1 row)
+
+SELECT * FROM orioledb.orioledb_idx_structure('t_table'::regclass, 'index_bridge', '', 1);
+                             orioledb_idx_structure                              
+---------------------------------------------------------------------------------
+ Index index_bridge contents                                                    +
+ Page 3091: level = 0, maxKeyLen = 6, nVacatedBytes = 0                         +
+ state = free, datoid = 16384, relnode = 26466, ix_type = bridge, dirty         +
+     Leftmost, Rightmost                                                        +
+   Chunk 0: offset = 0, location = 256, hikey location = 104, hikey = ('(0,2)') +
+     Item 0: deleted, offset = 264, tuple = ('(0,1)', '0')                      +
+   Chunk 1: offset = 1, location = 296, hikey location = 112, hikey = ('(0,3)') +
+     Item 1: deleted, offset = 304, tuple = ('(0,2)', '1')                      +
+   Chunk 2: offset = 2, location = 336, hikey location = 120, hikey = ('(0,4)') +
+     Item 2: deleted, offset = 344, tuple = ('(0,3)', '2')                      +
+   Chunk 3: offset = 3, location = 376, hikey location = 128, hikey = ('(0,5)') +
+     Item 3: deleted, offset = 384, tuple = ('(0,4)', '3')                      +
+   Chunk 4: offset = 4, location = 416, hikey location = 136, hikey = ('(0,6)') +
+     Item 4: deleted, offset = 424, tuple = ('(0,5)', '4')                      +
+   Chunk 5: offset = 5, location = 456, hikey location = 144, hikey = ('(0,7)') +
+     Item 5: offset = 464, tuple = ('(0,6)', '5')                               +
+   Chunk 6: offset = 6, location = 496, hikey location = 152, hikey = ('(0,8)') +
+     Item 6: offset = 504, tuple = ('(0,7)', '6')                               +
+   Chunk 7: offset = 7, location = 536, hikey location = 160, hikey = ('(0,9)') +
+     Item 7: offset = 544, tuple = ('(0,8)', '7')                               +
+   Chunk 8: offset = 8, location = 576, hikey location = 168, hikey = ('(0,10)')+
+     Item 8: offset = 584, tuple = ('(0,9)', '8')                               +
+   Chunk 9: offset = 9, location = 616, hikey location = 176, hikey = ('(0,11)')+
+     Item 9: offset = 624, tuple = ('(0,10)', '9')                              +
+   Chunk 10: offset = 10, location = 656, hikey location = 184                  +
+     Item 10: offset = 664, tuple = ('(0,11)', '10')                            +
+                                                                                +
+ 
+(1 row)
+
+VACUUM FULL t_table;
+-- just to load pages
+set enable_seqscan = off;
+SELECT * FROM t_table WHERE val >= 5;
+ id | val | val2 
+----+-----+------
+  5 |   5 |    5
+  6 |   6 |    6
+  7 |   7 |    7
+  8 |   8 |    8
+  9 |   9 |    9
+ 10 |  10 |   10
+(6 rows)
+
+SELECT * FROM t_table WHERE val2 = 6;
+ id | val | val2 
+----+-----+------
+  6 |   6 |    6
+(1 row)
+
+reset enable_seqscan;
+SELECT * FROM orioledb.orioledb_idx_structure('t_table'::regclass, 't_table_pkey', '', 1);
+                           orioledb_idx_structure                            
+-----------------------------------------------------------------------------
+ Index t_table_pkey contents                                                +
+ Page 3099: level = 0, maxKeyLen = 4, nVacatedBytes = 0                     +
+ state = free, datoid = 16384, relnode = 26469, ix_type = primary, clean    +
+     Leftmost, Rightmost                                                    +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('6')  +
+     Item 0: offset = 264, tuple = ('(0,6)', '5', '5', '5')                 +
+   Chunk 1: offset = 1, location = 304, hikey location = 88, hikey = ('7')  +
+     Item 1: offset = 312, tuple = ('(0,7)', '6', '6', '6')                 +
+   Chunk 2: offset = 2, location = 352, hikey location = 96, hikey = ('8')  +
+     Item 2: offset = 360, tuple = ('(0,8)', '7', '7', '7')                 +
+   Chunk 3: offset = 3, location = 400, hikey location = 104, hikey = ('9') +
+     Item 3: offset = 408, tuple = ('(0,9)', '8', '8', '8')                 +
+   Chunk 4: offset = 4, location = 448, hikey location = 112, hikey = ('10')+
+     Item 4: offset = 456, tuple = ('(0,10)', '9', '9', '9')                +
+   Chunk 5: offset = 5, location = 496, hikey location = 120                +
+     Item 5: offset = 504, tuple = ('(0,11)', '10', '10', '10')             +
+                                                                            +
+ 
+(1 row)
+
+SELECT * FROM orioledb.orioledb_idx_structure('t_table'::regclass, 'idx_val', '', 1);
+                              orioledb_idx_structure                               
+-----------------------------------------------------------------------------------
+ Index idx_val contents                                                           +
+ Page 3107: level = 0, maxKeyLen = 8, nVacatedBytes = 0                           +
+ state = free, datoid = 16384, relnode = 26470, ix_type = regular, clean          +
+     Leftmost, Rightmost                                                          +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('6', '6')   +
+     Item 0: offset = 264, tuple = ('5', '5')                                     +
+   Chunk 1: offset = 1, location = 288, hikey location = 88, hikey = ('7', '7')   +
+     Item 1: offset = 296, tuple = ('6', '6')                                     +
+   Chunk 2: offset = 2, location = 320, hikey location = 96, hikey = ('8', '8')   +
+     Item 2: offset = 328, tuple = ('7', '7')                                     +
+   Chunk 3: offset = 3, location = 352, hikey location = 104, hikey = ('9', '9')  +
+     Item 3: offset = 360, tuple = ('8', '8')                                     +
+   Chunk 4: offset = 4, location = 384, hikey location = 112, hikey = ('10', '10')+
+     Item 4: offset = 392, tuple = ('9', '9')                                     +
+   Chunk 5: offset = 5, location = 416, hikey location = 120                      +
+     Item 5: offset = 424, tuple = ('10', '10')                                   +
+                                                                                  +
+ 
+(1 row)
+
+SELECT * FROM orioledb.orioledb_idx_structure('t_table'::regclass, 'index_bridge', '', 1);
+                             orioledb_idx_structure                              
+---------------------------------------------------------------------------------
+ Index index_bridge contents                                                    +
+ Page 3115: level = 0, maxKeyLen = 6, nVacatedBytes = 0                         +
+ state = free, datoid = 16384, relnode = 26472, ix_type = bridge, clean         +
+     Leftmost, Rightmost                                                        +
+   Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ('(0,7)')  +
+     Item 0: offset = 264, tuple = ('(0,6)', '5')                               +
+   Chunk 1: offset = 1, location = 296, hikey location = 88, hikey = ('(0,8)')  +
+     Item 1: offset = 304, tuple = ('(0,7)', '6')                               +
+   Chunk 2: offset = 2, location = 336, hikey location = 96, hikey = ('(0,9)')  +
+     Item 2: offset = 344, tuple = ('(0,8)', '7')                               +
+   Chunk 3: offset = 3, location = 376, hikey location = 104, hikey = ('(0,10)')+
+     Item 3: offset = 384, tuple = ('(0,9)', '8')                               +
+   Chunk 4: offset = 4, location = 416, hikey location = 112, hikey = ('(0,11)')+
+     Item 4: offset = 424, tuple = ('(0,10)', '9')                              +
+   Chunk 5: offset = 5, location = 456, hikey location = 120                    +
+     Item 5: offset = 464, tuple = ('(0,11)', '10')                             +
+                                                                                +
+ 
+(1 row)
+
+DROP TABLE t_table;
+DROP EXTENSION orioledb;

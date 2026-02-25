@@ -1022,6 +1022,79 @@ orioledb_relation_copy_for_cluster(Relation OldHeap, Relation NewHeap,
 	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 }
 
+/*
+ * orioledb_relation_cluster - Rebuild and recluster an OrioleDB-backed relation
+ *
+ * Purpose:
+ *   Rebuilds the OrioleDB internal table and its indexes for the given
+ *   PostgreSQL relation, assigning new OIDs and updating OrioleDB metadata in a
+ *   transactional-safe manner. 
+ */
+static void
+orioledb_relation_cluster(Relation tbl, bool verbose)
+{
+	ORelOids	tbl_oids;
+	OTable 		*o_table;
+	OSnapshot	oSnapshot;
+	OXid		oxid;
+	OTable	   *old_o_table;
+	OTableDescr *descr;
+	OTableDescr *old_descr;
+	int			ix_num;
+	
+	ORelOidsSetFromRel(tbl_oids, tbl);
+	
+	o_table = o_tables_get(tbl_oids);
+
+	old_o_table = o_table;
+	o_table = o_tables_get(o_table->oids);
+	assign_new_oids(o_table, tbl, false);
+
+	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+
+	o_tables_table_meta_lock(NULL);
+	old_descr = o_fetch_table_descr(old_o_table->oids);
+	recreate_o_table(old_o_table, o_table);
+	descr = o_fetch_table_descr(o_table->oids);
+	o_tablespace_cache_add_table(o_table);
+	rebuild_indices_insert_placeholders(descr);
+	o_tables_table_meta_unlock(NULL, InvalidOid);
+
+	rebuild_indices(old_o_table, old_descr, o_table, descr, false, NULL);
+
+	o_tables_rel_meta_lock(tbl);
+	for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
+	{
+		int			ctid_idx_off;
+		OTableIndex *index;
+
+		ctid_idx_off = o_table->has_primary ? 0 : 1;
+		index = &o_table->indices[ix_num];
+
+		o_indices_update(o_table, ix_num + ctid_idx_off, oxid, oSnapshot.csn);
+		o_invalidate_oids(index->oids);
+		o_add_invalidate_undo_item(index->oids, O_INVALIDATE_OIDS_ON_ABORT);
+	}
+	o_tables_update(o_table, oxid, oSnapshot.csn);
+	o_tables_rel_meta_unlock(tbl, InvalidOid);
+	if (ORelOidsIsValid(old_o_table->bridge_oids))
+	{
+		o_invalidate_oids(old_o_table->bridge_oids);
+		o_add_invalidate_undo_item(old_o_table->bridge_oids, O_INVALIDATE_OIDS_ON_ABORT);
+	}
+	if (ORelOidsIsValid(o_table->bridge_oids))
+	{
+		o_invalidate_oids(o_table->bridge_oids);
+		o_add_invalidate_undo_item(o_table->bridge_oids, O_INVALIDATE_OIDS_ON_ABORT);
+	}
+	o_invalidate_oids(o_table->oids);
+	o_add_invalidate_undo_item(o_table->oids, O_INVALIDATE_OIDS_ON_ABORT);
+
+	o_table_free(old_o_table);
+	o_table_free(o_table);
+	table_close(tbl, NoLock);
+}
+
 static bool
 #if PG_VERSION_NUM >= 170000
 orioledb_scan_analyze_next_block(TableScanDesc scan, ReadStream *stream)
@@ -2354,6 +2427,7 @@ static const TableAmRoutine orioledb_am_methods = {
 	.relation_nontransactional_truncate = orioledb_relation_nontransactional_truncate,
 	.relation_copy_data = orioledb_relation_copy_data,
 	.relation_copy_for_cluster = orioledb_relation_copy_for_cluster,
+	.relation_cluster = orioledb_relation_cluster,
 	.relation_vacuum = orioledb_vacuum_rel,
 	.scan_analyze_next_block = orioledb_scan_analyze_next_block,
 	.scan_analyze_next_tuple = orioledb_scan_analyze_next_tuple,

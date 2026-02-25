@@ -37,7 +37,6 @@ allowedRegexes = {
 	r"ERROR:  Not implemented: orioledb_set_tidrange": ["*"],
 	r"ERROR:  REINDEX CONCURRENTLY is not supported for orioledb tables yet": ["*"],
 	r"ERROR:  orioledb tables does not support CLUSTER": ["*"],
-	r"ERROR:  orioledb table \"[a-z0-9_]+\" does not support VACUUM FULL": ["*"],
 	r"ERROR:  cannot use PREPARE TRANSACTION in transaction that uses orioledb table": ["*"],
 	r"c1      |(0,1) |0|0|4": ['eval-plan-qual'],
 	r"QUERY PLAN": ['eval-plan-qual', 'merge-join', 'drop-index-concurrently-1'],
