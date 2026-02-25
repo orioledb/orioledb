@@ -1480,6 +1480,11 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			list_free(alter_type_exprs);
 			alter_type_exprs = NIL;
 		}
+		if (o_alter_generated_column_id)
+		{
+			list_free(o_alter_generated_column_id);
+			o_alter_generated_column_id = NIL;
+		}
 	}
 
 	free_parsestate(pstate);
@@ -4152,6 +4157,10 @@ o_ddl_cleanup(void)
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
 	o_saved_relrewrite = InvalidOid;
 	in_rewrite = false;
-	o_alter_generated_column_id = NIL;
+	if (o_alter_generated_column_id)
+	{
+		list_free(o_alter_generated_column_id);
+		o_alter_generated_column_id = NIL;
+	}
 	o_in_add_column = false;
 }
