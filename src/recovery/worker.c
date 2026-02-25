@@ -740,13 +740,13 @@ apply_tbl_modify_record(OTableDescr *descr, RecoveryMsgType type,
 	{
 		case RecoveryMsgTypeInsert:
 			apply_tbl_insert(descr, p, oxid, csn);
-			return;
+			break;
 		case RecoveryMsgTypeDelete:
 			apply_tbl_delete(descr, p, oxid, csn);
-			return;
+			break;
 		case RecoveryMsgTypeUpdate:
 			apply_tbl_update(descr, p, oxid, csn);
-			return;
+			break;
 		default:
 			Assert(false);
 			elog(ERROR, "Wrong primary index modify record type %d", type);
