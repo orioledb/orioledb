@@ -218,7 +218,7 @@ oTablesGetTupleDataSize(OTuple tuple, void *arg)
 
 static TupleFetchCallbackResult
 oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
-					 void *arg, TupleFetchCallbackCheckType check_type)
+					 void *arg, bool oxidIsFinished)
 {
 	OTableChunkKey *tupleKey = (OTableChunkKey *) tuple.data;
 	OTableChunkKey *boundKey = (OTableChunkKey *) arg;
