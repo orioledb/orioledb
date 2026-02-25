@@ -264,11 +264,11 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 
 static TupleFetchCallbackResult
 fetch_row_version_callback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
-						   void *arg, TupleFetchCallbackCheckType check_type)
+						   void *arg, bool oxidIsFinished)
 {
 	uint32		version = *((uint32 *) arg);
 
-	if (check_type != OTupleFetchCallbackVersionCheck)
+	if (oxidIsFinished)
 		return OTupleFetchNext;
 
 	if (!(COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn) &&

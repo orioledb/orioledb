@@ -517,12 +517,12 @@ o_sys_cache_search(OSysCache *sys_cache, int nkeys, OSysCacheKey *key)
 static TupleFetchCallbackResult
 o_sys_cache_get_by_lsn_callback(OTuple tuple, OXid tupOxid,
 								OSnapshot *oSnapshot, void *arg,
-								TupleFetchCallbackCheckType check_type)
+								bool oxidIsFinished)
 {
 	OSysCacheToastChunkKey *tuple_key = (OSysCacheToastChunkKey *) tuple.data;
 	XLogRecPtr *cur_lsn = (XLogRecPtr *) arg;
 
-	if (check_type != OTupleFetchCallbackKeyCheck)
+	if (!oxidIsFinished)
 		return OTupleFetchNext;
 
 	if (tuple_key->sys_cache_key.common.lsn < *cur_lsn)
