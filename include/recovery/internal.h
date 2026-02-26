@@ -78,6 +78,7 @@ typedef struct
 typedef struct
 {
 	RecoveryMsgHeader header;
+	bool		needsFeedback;
 	OXid		oxid;
 	XLogRecPtr	ptr;
 } RecoveryMsgOXidPtr;

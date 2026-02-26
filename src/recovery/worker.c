@@ -51,6 +51,7 @@
 static bool detached = false;
 static CommitSeqNo my_ptr;
 static bool recovery_initialized = false;
+static bool recovery_needs_feedback = false;
 
 static void recovery_queue_process(shm_mq_handle *queue, int id);
 static inline Pointer recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id);
@@ -340,7 +341,7 @@ update_worker_ptr(int worker_id, XLogRecPtr ptr)
 static void
 recovery_queue_process(shm_mq_handle *queue, int id)
 {
-	RecoveryMsgOXidPtr *oxid_csn_record;
+	RecoveryMsgOXidPtr *oxid_ptr_record;
 	RecoveryMsgPtr *csn_record;
 	RecoveryMsgHeader *recovery_header;
 	OTableDescr *descr = NULL;
@@ -568,24 +569,26 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 			}
 			else if (type == RecoveryMsgTypeCommit)
 			{
-				oxid_csn_record = (RecoveryMsgOXidPtr *) (data + data_pos);
-				recovery_switch_to_oxid(oxid_csn_record->oxid, id);
+				oxid_ptr_record = (RecoveryMsgOXidPtr *) (data + data_pos);
+				recovery_switch_to_oxid(oxid_ptr_record->oxid, id);
 				recovery_finish_current_oxid(COMMITSEQNO_MAX_NORMAL - 1,
-											 oxid_csn_record->ptr,
+											 oxid_ptr_record->ptr,
 											 id,
 											 false);
-				update_worker_ptr(id, oxid_csn_record->ptr);
+				update_worker_ptr(id, oxid_ptr_record->ptr);
+				if (oxid_ptr_record->needsFeedback)
+					recovery_needs_feedback = true;
 				data_pos += sizeof(RecoveryMsgOXidPtr);
 			}
 			else if (type == RecoveryMsgTypeRollback)
 			{
-				oxid_csn_record = (RecoveryMsgOXidPtr *) (data + data_pos);
-				recovery_switch_to_oxid(oxid_csn_record->oxid, id);
+				oxid_ptr_record = (RecoveryMsgOXidPtr *) (data + data_pos);
+				recovery_switch_to_oxid(oxid_ptr_record->oxid, id);
 				recovery_finish_current_oxid(COMMITSEQNO_ABORTED,
-											 oxid_csn_record->ptr,
+											 oxid_ptr_record->ptr,
 											 id,
 											 false);
-				update_worker_ptr(id, oxid_csn_record->ptr);
+				update_worker_ptr(id, oxid_ptr_record->ptr);
 				data_pos += sizeof(RecoveryMsgOXidPtr);
 			}
 			else if (type == RecoveryMsgTypeSynchronize)
@@ -725,6 +728,13 @@ recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id)
 		}
 
 		prev_rec_ptr = InvalidXLogRecPtr;
+
+		/*
+		 * If any of the committed transactions required the feedback, wake up
+		 * the main recovery process: it would have a chance to provide it.
+		 */
+		if (recovery_needs_feedback)
+			WakeupRecovery();
 
 		pg_usleep(usleep_time);
 		if (recovery_initialized)
