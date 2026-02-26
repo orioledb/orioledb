@@ -26,7 +26,48 @@ class RewindTest(BaseTest):
 	def get_pg_start_time(self, node):
 		return super().get_pg_start_time(node)
 
-	def test_rewind_oriole(self):
+	def test_rewind_oriole_shutdown(self):
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "orioledb.rewind_max_time = 100\n"
+		    "orioledb.enable_rewind = true\n")
+		node.start()
+
+		node.safe_psql('postgres',
+		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n")
+
+		node.safe_psql(
+		    'postgres', "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "	id integer NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n")
+
+		for i in range(1, 6):
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test\n"
+			    "	VALUES (%d, %d || 'val');\n" % (i, i))
+
+		time.sleep(10)
+
+		for i in range(6, 20):
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test\n"
+			    "	VALUES (%d, %d || 'val');\n" % (i, i))
+
+		node.safe_psql('postgres', "select orioledb_rewind_by_time(9);\n")
+		time.sleep(1)
+
+		node.is_started = False
+		node.start()
+
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT * FROM o_test;')),
+		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]"
+		)
+		node.stop()
+
+	def test_rewind_oriole_restart(self):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 100\n"
@@ -67,7 +108,7 @@ class RewindTest(BaseTest):
 
 		# Rewind to the time we stored above + 5 seconds for safety
 		node.safe_psql(
-		    'postgres', "SELECT orioledb_rewind_by_time(i-5) "
+		    'postgres', "SELECT orioledb_rewind_by_time(i-5, true) "
 		    "	FROM "
 		    "		o_rewind as r, "
 		    "		lateral (select floor(date_part('epoch', clock_timestamp()-r.ts))::int4) f(i) "
@@ -122,7 +163,7 @@ class RewindTest(BaseTest):
 
 		# Rewind to the time we stored above + 5 seconds for safety
 		node.safe_psql(
-		    'postgres', "SELECT orioledb_rewind_by_time(i-5) "
+		    'postgres', "SELECT orioledb_rewind_by_time(i-5, true) "
 		    "	FROM "
 		    "		o_rewind as r, "
 		    "		lateral (select floor(date_part('epoch', clock_timestamp()-r.ts))::int4) f(i) "
@@ -334,7 +375,7 @@ class RewindTest(BaseTest):
 
 		previous_start_time = self.get_pg_start_time(node)
 		node.safe_psql(
-		    'postgres', "SELECT orioledb_rewind_by_time(i-5) "
+		    'postgres', "SELECT orioledb_rewind_by_time(i-5, true) "
 		    "	FROM "
 		    "		o_rewind as r, "
 		    "		lateral (select floor(date_part('epoch', clock_timestamp()-r.ts))::int4) f(i) "

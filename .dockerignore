@@ -60,6 +60,7 @@ ci/antithesis
 
 # Ignore generated scripts
 sql/orioledb--1.0.sql
+sql/orioledb--1.6--1.7.sql
 
 
 #######################################################

@@ -80,7 +80,7 @@ PG_FUNCTION_INFO_V1(orioledb_rewind_set_complete);
 #define REWIND_MODE_TIMESTAMP (2)
 #define	REWIND_MODE_XID	(3)
 
-static void orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, TransactionId rewind_xid, TimestampTz rewind_timestamp);
+static void orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, TransactionId rewind_xid, TimestampTz rewind_timestamp, bool attempt_restart);
 static void try_restart_pg(void);
 static void cleanup_fds(void);
 static void bootstrap_signals(void);
@@ -98,8 +98,12 @@ Datum
 orioledb_rewind_by_time(PG_FUNCTION_ARGS)
 {
 	int			rewind_time = PG_GETARG_INT32(0);
+	bool		attempt_restart = false;
 
-	orioledb_rewind_internal(REWIND_MODE_TIME, rewind_time, InvalidOXid, InvalidTransactionId, (TimestampTz) 0);
+	if (PG_NARGS() == 2)
+		attempt_restart = PG_GETARG_BOOL(1);
+
+	orioledb_rewind_internal(REWIND_MODE_TIME, rewind_time, InvalidOXid, InvalidTransactionId, (TimestampTz) 0, attempt_restart);
 	PG_RETURN_VOID();
 }
 
@@ -108,8 +112,12 @@ orioledb_rewind_to_transaction(PG_FUNCTION_ARGS)
 {
 	TransactionId xid = PG_GETARG_INT32(0);
 	OXid		oxid = PG_GETARG_INT64(1);
+	bool		attempt_restart = false;
 
-	orioledb_rewind_internal(REWIND_MODE_XID, 0, oxid, xid, (TimestampTz) 0);
+	if (PG_NARGS() == 3)
+		attempt_restart = PG_GETARG_BOOL(2);
+
+	orioledb_rewind_internal(REWIND_MODE_XID, 0, oxid, xid, (TimestampTz) 0, attempt_restart);
 	PG_RETURN_VOID();
 }
 
@@ -117,8 +125,12 @@ Datum
 orioledb_rewind_to_timestamp(PG_FUNCTION_ARGS)
 {
 	TimestampTz rewind_timestamp = PG_GETARG_TIMESTAMPTZ(0);
+	bool		attempt_restart = false;
 
-	orioledb_rewind_internal(REWIND_MODE_TIMESTAMP, 0, InvalidOXid, InvalidTransactionId, rewind_timestamp);
+	if (PG_NARGS() == 2)
+		attempt_restart = PG_GETARG_BOOL(1);
+
+	orioledb_rewind_internal(REWIND_MODE_TIMESTAMP, 0, InvalidOXid, InvalidTransactionId, rewind_timestamp, attempt_restart);
 	PG_RETURN_VOID();
 }
 
@@ -581,11 +593,12 @@ rewind_complete:
 
 /*
  *  Check rewind conditions for sanity, disable adding new transactions to a rewind buffer,
- *  terminate all other backends, do actual rewind, then shutdown postgres.
- *  NB: starting up Postgres after rewind is not possible from backend, it needs to be done externally.
+ *  terminate all other backends, do actual rewind, then shutdown or restart postgres.
+ *  NB: after rewind, this function either shuts down Postgres or, when attempt_restart is true,
+ *  tries a best-effort restart via try_restart_pg().
  */
 static void
-orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, TransactionId rewind_xid, TimestampTz rewind_timestamp)
+orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, TransactionId rewind_xid, TimestampTz rewind_timestamp, bool attempt_restart)
 {
 	TimestampTz rewindStartTimeStamp;
 	int			retry;
@@ -791,7 +804,10 @@ orioledb_rewind_internal(int rewind_mode, int rewind_time, OXid rewind_oxid, Tra
 	LWLockRelease(&rewindMeta->rewindEvictLock);
 	elog(LOG, "Rewind complete");
 
-	try_restart_pg();
+	if (attempt_restart)
+		try_restart_pg();
+	else
+		(void) kill(PostmasterPid, SIGTERM);
 }
 
 TransactionId
