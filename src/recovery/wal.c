@@ -604,6 +604,15 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 
 	Assert(local_wal_buffer_offset + recLength + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
+	if (rec_type == WAL_REC_COMMIT &&
+		synchronous_commit >= SYNCHRONOUS_COMMIT_REMOTE_APPLY)
+	{
+		WALRec	   *feedbackRec = (WALRec *) (&local_wal_buffer[local_wal_buffer_offset]);
+
+		feedbackRec->recType = WAL_REC_REPLAY_FEEDBACK;
+		local_wal_buffer_offset += sizeof(*feedbackRec);
+	}
+
 	rec = (WALRecFinish *) (&local_wal_buffer[local_wal_buffer_offset]);
 	rec->recType = rec_type;
 	memcpy(rec->xmin, &xmin, sizeof(xmin));
@@ -613,14 +622,6 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 	local_wal_buffer_offset += sizeof(*rec);
 
 	local_wal_contains_switch_xid = false;
-	if (rec_type == WAL_REC_COMMIT &&
-		synchronous_commit >= SYNCHRONOUS_COMMIT_REMOTE_APPLY)
-	{
-		WALRec	   *feedbackRec = (WALRec *) (&local_wal_buffer[local_wal_buffer_offset]);
-
-		feedbackRec->recType = WAL_REC_REPLAY_FEEDBACK;
-		local_wal_buffer_offset += sizeof(*feedbackRec);
-	}
 }
 
 static void

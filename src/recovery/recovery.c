@@ -28,6 +28,7 @@
 #include "recovery/internal.h"
 #include "recovery/wal.h"
 #include "recovery/wal_reader.h"
+#include "replication/walreceiver.h"
 #include "storage/itemptr.h"
 #include "tableam/descr.h"
 #include "tableam/operations.h"
@@ -109,6 +110,7 @@ typedef struct
 
 	bool		in_finished_list;
 	bool		in_retain_undo_heaps[(int) UndoLogsCount];
+	bool		needs_feedback;
 
 	dlist_node	joint_commit_list_node;
 	dlist_node	finished_list_node;
@@ -328,7 +330,8 @@ static bool replay_container(Pointer ptr, Pointer endPtr,
 static void worker_send_modify(int worker_id, BTreeDescr *desc,
 							   RecoveryMsgType recType,
 							   OTuple tuple, int tuple_len);
-static void workers_send_oxid_finish(XLogRecPtr ptr, bool commit);
+static void workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback,
+									 bool commit);
 static void workers_send_savepoint(SubTransactionId parentSubId);
 static void workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 											   SubTransactionId parentSubId);
@@ -525,6 +528,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			state->csn = COMMITSEQNO_INPROGRESS;
 			state->ptr = InvalidXLogRecPtr;
 			state->in_finished_list = false;
+			state->needs_feedback = false;
 			for (j = 0; j < (int) UndoLogsCount; j++)
 				state->in_retain_undo_heaps[j] = false;
 			memset(state->undo_stacks, 0, sizeof(state->undo_stacks));
@@ -1361,6 +1365,7 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			cur_state->ptr = InvalidXLogRecPtr;
 			cur_state->needs_wal_flush = false;
 			cur_state->in_finished_list = false;
+			cur_state->needs_feedback = false;
 
 			/*
 			 * undo_stacks might be copied into a temp file, so initialize it
@@ -2032,6 +2037,7 @@ update_proc_retain_undo_location(int worker_id)
 	dlist_mutable_iter miter;
 	int			i;
 	bool		allRetainQueuesEmpty = true;
+	bool		needsFeedback = false;
 
 	if (cur_recovery_xid_state != NULL)
 	{
@@ -2078,13 +2084,24 @@ update_proc_retain_undo_location(int worker_id)
 				set_oxid_csn(state->oxid, COMMITSEQNO_ABORTED);
 				set_oxid_xlog_ptr(state->oxid, InvalidXLogRecPtr);
 			}
+			if (state->needs_feedback)
+				needsFeedback = true;
 		}
 		dlist_delete(miter.cur);
 		state->in_finished_list = false;
 		check_delete_xid_state(state, worker_id);
 	}
 	if (worker_id < 0)
+	{
 		pg_atomic_write_u64(recovery_finished_list_ptr, recoveryPtr);
+
+		/*
+		 * If at least one transaction required feedback to the primary, wake
+		 * up WAL receiver to provide it.
+		 */
+		if (needsFeedback)
+			WalRcvForceReply();
+	}
 
 	/*
 	 * Remove transactions, visible for all, from the retain queue.
@@ -3161,7 +3178,8 @@ replay_wal_record(void *vctx, WalRecord *rec)
 		case WAL_REC_ROLLBACK:
 			{
 				bool		commit,
-							sync = false;
+							sync = false,
+							needsFeedback;
 
 				/* xlogPtr = xlogRecPtr + (ptr - startPtr); */
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
@@ -3177,7 +3195,9 @@ replay_wal_record(void *vctx, WalRecord *rec)
 
 				if (!ctx->single)
 				{
-					workers_send_oxid_finish(ctx->xlogRecEndPtr, commit);
+					workers_send_oxid_finish(ctx->xlogRecEndPtr,
+											 cur_recovery_xid_state->needs_feedback,
+											 commit);
 					if (cur_recovery_xid_state->systree_modified || cur_recovery_xid_state->checkpoint_xid)
 					{
 						sync = true;
@@ -3195,9 +3215,14 @@ replay_wal_record(void *vctx, WalRecord *rec)
 
 				}
 
+				needsFeedback = ctx->single && cur_recovery_xid_state->needs_feedback;
+
 				recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
 											 xlogPtr, -1, sync);
 				rec->oxid = InvalidOXid;
+
+				if (needsFeedback)
+					WalRcvForceReply();
 
 				break;
 			}
@@ -3210,7 +3235,7 @@ replay_wal_record(void *vctx, WalRecord *rec)
 			break;
 
 		case WAL_REC_REPLAY_FEEDBACK:
-			XLogRequestWalReceiverReply();
+			cur_recovery_xid_state->needs_feedback = true;
 			break;
 
 		case WAL_REC_RELATION:
@@ -3576,7 +3601,9 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn)
 		Assert(cur_recovery_xid_state != NULL);
 		if (!single)
 		{
-			workers_send_oxid_finish(lsn, true);
+			workers_send_oxid_finish(lsn,
+									 cur_recovery_xid_state->needs_feedback,
+									 true);
 			if (cur_recovery_xid_state->systree_modified ||
 				cur_recovery_xid_state->checkpoint_xid)
 			{
@@ -3931,7 +3958,7 @@ workers_send_rollback_to_savepoint(XLogRecPtr ptr,
  * Sends commit or rollback message to workers with active the oxid in the pool.
  */
 static void
-workers_send_oxid_finish(XLogRecPtr ptr, bool commit)
+workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback, bool commit)
 {
 	RecoveryWorkerState *state;
 	RecoveryMsgOXidPtr oxid_ptr_record;
@@ -3940,6 +3967,7 @@ workers_send_oxid_finish(XLogRecPtr ptr, bool commit)
 	oxid_ptr_record.header.type = commit ? RecoveryMsgTypeCommit : RecoveryMsgTypeRollback;
 	oxid_ptr_record.oxid = cur_recovery_xid_state->oxid;
 	oxid_ptr_record.ptr = ptr;
+	oxid_ptr_record.needsFeedback = needsFeedback;
 
 	for (i = 0; i < recovery_pool_size_guc; i++)
 	{
