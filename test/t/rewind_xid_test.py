@@ -44,7 +44,55 @@ class RewindXidTest(BaseTest):
 
 	# Small scale tests
 
-	def test_rewind_xid_oriole(self):
+	def test_rewind_xid_oriole_shutdown(self):
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
+		    "orioledb.enable_rewind = true\n"
+		    "orioledb.rewind_buffers = 6\n")
+		node.start()
+
+		node.safe_psql('postgres',
+		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n")
+
+		node.safe_psql(
+		    'postgres', "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "	id integer NOT NULL,\n"
+		    "	val text,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n")
+
+		for i in range(1, 6):
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test\n"
+			    "	VALUES (%d, %d || 'val');\n" % (i, i))
+
+		a, *b = (node.execute('postgres',
+		                      'select orioledb_get_current_oxid();\n'))[0]
+		oxid = int(a)
+		#		print(oxid)
+		invalidxid = 0
+
+		for i in range(6, 20):
+			node.safe_psql(
+			    'postgres', "INSERT INTO o_test\n"
+			    "	VALUES (%d, %d || 'val');\n" % (i, i))
+
+		node.safe_psql(
+		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
+		    (invalidxid, oxid))
+		time.sleep(1)
+
+		node.is_started = False
+		node.start()
+
+		self.assertEqual(
+		    str(node.execute('postgres', 'SELECT * FROM o_test;')),
+		    "[(1, '1val'), (2, '2val'), (3, '3val'), (4, '4val'), (5, '5val')]"
+		)
+		node.stop()
+
+	def test_rewind_xid_oriole_restart(self):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "orioledb.rewind_max_time = 500\n"
@@ -91,7 +139,8 @@ class RewindXidTest(BaseTest):
 		previous_start_time = self.get_pg_start_time(node)
 
 		node.safe_psql(
-		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
+		    'postgres',
+		    "select orioledb_rewind_to_transaction(%d,%ld,true);\n" %
 		    (invalidxid, oxid))
 
 		self.wait_restart(node, previous_start_time)
@@ -148,7 +197,8 @@ class RewindXidTest(BaseTest):
 		previous_start_time = self.get_pg_start_time(node)
 
 		node.safe_psql(
-		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
+		    'postgres',
+		    "select orioledb_rewind_to_transaction(%d,%ld,true);\n" %
 		    (xid, invalidoxid))
 
 		self.wait_restart(node, previous_start_time)
@@ -223,7 +273,8 @@ class RewindXidTest(BaseTest):
 		previous_start_time = self.get_pg_start_time(node)
 
 		node.safe_psql(
-		    'postgres', "select orioledb_rewind_to_transaction(%d,%ld);\n" %
+		    'postgres',
+		    "select orioledb_rewind_to_transaction(%d,%ld,true);\n" %
 		    (xid, invalidoxid))
 
 		self.wait_restart(node, previous_start_time)
@@ -297,7 +348,8 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql(
 		    'postgres',
-		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
+		    "select orioledb_rewind_to_transaction(%d,%ld,true);\n" %
+		    (xid, oxid))
 
 		self.wait_restart(node, previous_start_time)
 
@@ -395,7 +447,8 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql(
 		    'postgres',
-		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
+		    "select orioledb_rewind_to_transaction(%d,%ld,true);\n" %
+		    (xid, oxid))
 
 		self.wait_restart(node, previous_start_time)
 
@@ -497,7 +550,8 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql(
 		    'postgres',
-		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
+		    "select orioledb_rewind_to_transaction(%d,%ld,true);\n" %
+		    (xid, oxid))
 
 		self.wait_restart(node, previous_start_time)
 
@@ -608,7 +662,8 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql(
 		    'postgres',
-		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
+		    "select orioledb_rewind_to_transaction(%d,%ld,true);\n" %
+		    (xid, oxid))
 
 		self.wait_restart(node, previous_start_time)
 
@@ -713,7 +768,8 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql(
 		    'postgres',
-		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
+		    "select orioledb_rewind_to_transaction(%d,%ld,true);\n" %
+		    (xid, oxid))
 
 		self.wait_restart(node, previous_start_time)
 
@@ -811,7 +867,8 @@ class RewindXidTest(BaseTest):
 
 		node.safe_psql(
 		    'postgres',
-		    "select orioledb_rewind_to_transaction(%d,%ld);\n" % (xid, oxid))
+		    "select orioledb_rewind_to_transaction(%d,%ld,true);\n" %
+		    (xid, oxid))
 
 		self.wait_restart(node, previous_start_time)
 
