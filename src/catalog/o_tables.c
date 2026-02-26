@@ -225,12 +225,18 @@ oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 
 	if (ORelOidsIsEqual(tupleKey->oids, boundKey->key.oids))
 	{
-		if (COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn))
+		if (COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn) &&
+			(boundKey->key.version == O_TABLE_INVALID_VERSION ||
+			 OXidIsValid(boundKey->oxid)))
 		{
 			if (!OXidIsValid(boundKey->oxid))
 				boundKey->oxid = tupOxid;
 			else if (boundKey->oxid != tupOxid)
-				return OTupleFetchNext;
+				return OTupleFetchNotMatch;
+
+			if (boundKey->key.version == O_TABLE_INVALID_VERSION)
+				boundKey->key.version = tupleKey->version;
+			return (boundKey->key.version == tupleKey->version) ? OTupleFetchMatch : OTupleFetchNotMatch;
 		}
 
 		if (boundKey->key.version == O_TABLE_INVALID_VERSION)
