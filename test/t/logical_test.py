@@ -1799,8 +1799,8 @@ COMMIT\n""")
 					self.assertListEqual(
 					    subscriber.execute(
 					        'SELECT * FROM o_test2 ORDER BY id'), [])
-					# we had no PG transactions on subscriber, xid is incremented only by pg_current_xact_id()
-					self.assertEqual(xids2 - xids1, 1)
+					# subscriber assigns heap xid on replay, if transaction does DML
+					self.assertEqual(xids2 - xids1, 4)
 					# we had 4 transactions on publisher, plus oxid is incremented by orioledb_get_current_oxid()
 					self.assertEqual(oxidp2 - oxidp1, 5)
 					# on subscriber one transaction from publisher that modified only o_test2 was not replicated
