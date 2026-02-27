@@ -184,12 +184,11 @@ o_opclass_cache_add_table(OTable *o_table)
  * Finds and returns OOpclass.
  */
 OOpclass *
-o_opclass_get(Oid opclassoid)
+o_opclass_get(Oid opclassoid, Oid datoid)
 {
 	XLogRecPtr	cur_lsn;
-	Oid			datoid;
 
-	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_sys_cache_set_datoid_lsn(&cur_lsn, datoid == InvalidOid ? &datoid : NULL);
 	return o_opclass_cache_search(datoid, opclassoid, cur_lsn,
 								  opclass_cache->nkeys);
 }

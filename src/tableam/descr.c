@@ -1303,7 +1303,7 @@ oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid, O
 	OOpclass   *opclass;
 
 	o_set_sys_cache_search_datoid(datoid);
-	opclass = o_opclass_get(opclassoid);
+	opclass = o_opclass_get(opclassoid, datoid);
 	Assert(opclass);
 	field->opclass = opclassoid;
 	field->inputtype = opclass->inputtype;
@@ -1439,7 +1439,7 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 		ssup.ssup_collation = collation;
 		ssup.abbreviate = false;
 
-		o_proc_cache_fill_finfo(&finfo, opclass->ssupOid);
+		o_proc_cache_fill_finfo(&finfo, opclass->ssupOid, opclass->key.common.datoid);
 
 		FunctionCall1(&finfo, PointerGetDatum(&ssup));
 
@@ -1456,7 +1456,7 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 	 * Finally, look for plain comparison function.
 	 */
 	if (!comparator.haveSortSupport)
-		o_proc_cache_fill_finfo(&comparator.finfo, opclass->cmpOid);
+		o_proc_cache_fill_finfo(&comparator.finfo, opclass->cmpOid, opclass->key.common.datoid);
 	o_unset_syscache_hooks();
 
 	return o_add_comparator_to_cache(&comparator);
@@ -1907,7 +1907,7 @@ o_find_exclusion_op_fn(Oid exclusion_op)
 
 	o_set_syscache_hooks();
 	oprcode = o_operator_cache_get_oprcode(exclusion_op);
-	o_proc_cache_fill_finfo(&exclusion_fn.finfo, oprcode);
+	o_proc_cache_fill_finfo(&exclusion_fn.finfo, oprcode, MyDatabaseId);
 	o_unset_syscache_hooks();
 
 	return o_add_exclusion_fn_to_cache(&exclusion_fn);
