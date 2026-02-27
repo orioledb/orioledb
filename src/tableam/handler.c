@@ -77,7 +77,7 @@
 #include "utils/syscache.h"
 
 /*
- * context_is_apply_worker
+ * is_apply_worker_with_replorigin
  *
  * This is a helper function used to determine the call context for Oriole table AM DML callbacks.
  *
@@ -96,7 +96,7 @@
  * unrelated write paths, preserving Oriole's regular oxid-based behavior.
  */
 static inline bool
-context_is_apply_worker(void)
+is_apply_worker_with_replorigin(void)
 {
 	/* Is current process a logical replication worker? */
 	if (!IsLogicalWorker())
@@ -115,7 +115,7 @@ context_is_apply_worker(void)
 }
 
 /*
- * assign_heap_xid_optionally
+ * assign_heap_xid_in_apply_worker_with_replorigin
  *
  * Ensure the current top-level transaction has a heap XID in logical apply
  * replay context.
@@ -134,9 +134,9 @@ context_is_apply_worker(void)
  * and once per multi_insert batch).
  */
 static inline void
-assign_heap_xid_optionally(void)
+assign_heap_xid_in_apply_worker_with_replorigin(void)
 {
-	if (context_is_apply_worker() && !TransactionIdIsValid(GetTopTransactionIdIfAny()))
+	if (is_apply_worker_with_replorigin() && !TransactionIdIsValid(GetTopTransactionIdIfAny()))
 	{
 		(void) GetCurrentTransactionId();
 	}
@@ -527,7 +527,7 @@ orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 
-	assign_heap_xid_optionally();
+	assign_heap_xid_in_apply_worker_with_replorigin();
 
 	if (OidIsValid(relation->rd_rel->relrewrite))
 		return slot;
@@ -555,7 +555,7 @@ orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
 	OTuple		tup;
 	OIndexDescr *id;
 
-	assign_heap_xid_optionally();
+	assign_heap_xid_in_apply_worker_with_replorigin();
 
 	descr = relation_get_descr(rel);
 	Assert(descr);
@@ -613,7 +613,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	BTreeLocationHint hint;
 	OSnapshot	oSnapshot;
 
-	assign_heap_xid_optionally();
+	assign_heap_xid_in_apply_worker_with_replorigin();
 
 	ASAN_UNPOISON_MEMORY_REGION(tmfd, sizeof(*tmfd));
 	ASAN_UNPOISON_MEMORY_REGION(&mres, sizeof(mres));
@@ -713,7 +713,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	OSnapshot	oSnapshot;
 	ItemPointer bridge_ctid = NULL;
 
-	assign_heap_xid_optionally();
+	assign_heap_xid_in_apply_worker_with_replorigin();
 
 	ASAN_UNPOISON_MEMORY_REGION(tmfd, sizeof(*tmfd));
 
@@ -1845,7 +1845,7 @@ orioledb_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
 {
 	int			i;
 
-	assign_heap_xid_optionally();
+	assign_heap_xid_in_apply_worker_with_replorigin();
 
 	for (i = 0; i < ntuples; i++)
 		orioledb_tuple_insert(relation, slots[i], cid, options, bistate);
