@@ -181,15 +181,26 @@ o_opclass_cache_add_table(OTable *o_table)
 }
 
 /*
- * Finds and returns OOpclass.
+ * o_opclass_get
+ *
+ * Look up Oriole opclass metadata by (datoid, opclassoid).
+ *
+ * Why datoid matters:
+ * Oriole sys-cache entries are database-scoped. During global page-pool
+ * eviction, a backend may inspect index pages that belong to another
+ * database. In such paths, relying on MyDatabaseId can resolve metadata in
+ * the wrong database context, causing cache misses and descriptor failures.
+ *
+ * If datoid == InvalidOid, keep legacy behavior and infer database context
+ * from o_sys_cache_set_datoid_lsn(). New call sites should pass explicit
+ * object datoid whenever available.
  */
 OOpclass *
-o_opclass_get(Oid opclassoid)
+o_opclass_get(Oid opclassoid, Oid datoid)
 {
 	XLogRecPtr	cur_lsn;
-	Oid			datoid;
 
-	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_sys_cache_set_datoid_lsn(&cur_lsn, datoid == InvalidOid ? &datoid : NULL);
 	return o_opclass_cache_search(datoid, opclassoid, cur_lsn,
 								  opclass_cache->nkeys);
 }
