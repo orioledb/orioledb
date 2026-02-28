@@ -550,7 +550,6 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			CheckpointUndoStack *stack;
 			UndoLocation retainUndoLocation;
 			UndoLogType undoType = xidRec.undoType;
-			UndoMeta   *undoMeta = get_undo_meta_by_type(undoType);
 
 			stack = (CheckpointUndoStack *) MemoryContextAlloc(TopMemoryContext,
 															   sizeof(CheckpointUndoStack));
@@ -563,8 +562,11 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			 * We will probably need to retain this till the next checkpoint.
 			 */
 			retainUndoLocation = xidRec.retainLocation;
-			if (retainUndoLocation < state->retain_locs[undoType])
+			if (undoType < UndoLogsCount &&
+				retainUndoLocation < state->retain_locs[undoType])
 			{
+				UndoMeta   *undoMeta = get_undo_meta_by_type(undoType);
+
 				if (state->in_retain_undo_heaps[undoType])
 					pairingheap_remove(retain_undo_queues[undoType], &state->retain_undo_ph_nodes[undoType]);
 				state->retain_locs[undoType] = retainUndoLocation;
