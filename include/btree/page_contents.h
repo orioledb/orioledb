@@ -46,6 +46,13 @@ typedef struct
 	/* Number of running sequential scans depending on the checkpoint number */
 	pg_atomic_uint32 numSeqScans[NUM_SEQ_SCANS_ARRAY_SIZE];
 
+	/*
+	 * Set when btree pages are freed while there are still non-released seq
+	 * scans in the same transaction (other transactions are excluded by
+	 * locks).  Defers freeing the meta page until the last scan is released.
+	 */
+	bool		toBeFreedOnSeqScanRelease;
+
 	bool		dirtyFlag1;
 	bool		dirtyFlag2;
 

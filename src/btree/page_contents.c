@@ -411,6 +411,7 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 		}
 	}
 	metaPage->punchHolesChkpNum = checkpoint_state->lastCheckpointNumber;
+	metaPage->toBeFreedOnSeqScanRelease = false;
 }
 
 /*
