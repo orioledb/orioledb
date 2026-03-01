@@ -54,5 +54,6 @@ extern OTuple btree_seq_scan_getnext_raw(BTreeSeqScan *scan, MemoryContext mctx,
 										 bool *end, BTreeLocationHint *hint);
 extern void free_btree_seq_scan(BTreeSeqScan *scan);
 extern void seq_scans_cleanup(void);
+extern int	meta_page_get_num_seq_scans(OInMemoryBlkno metaPageBlkno);
 
 #endif							/* __BTREE_SCAN_H__ */

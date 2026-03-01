@@ -25,6 +25,7 @@
 #include "btree/find.h"
 #include "btree/merge.h"
 #include "btree/page_chunks.h"
+#include "btree/scan.h"
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "catalog/free_extents.h"
@@ -2357,13 +2358,20 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	uint64		new_downlink;
 	char		img[ORIOLEDB_BLCKSZ];
 	bool		was_dirty;
-	int			i PG_USED_FOR_ASSERTS_ONLY;
 	uint32		chkpNum = 0;
 	bool		notModified;
 	bool		hasMetaLock = LWLockHeldByMe(&checkpoint_state->oTablesMetaLock);
 
 	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc) &&
 		   O_PAGE_STATE_IS_LOCKED(pg_atomic_read_u64(&(O_PAGE_HEADER(rootPageBlkno)->state))));
+
+	/*
+	 * Additional protection: don't evict the tree root page if the resource
+	 * owner hasn't released its seq scans yet.  According to the locks they
+	 * must be already finished, but not yet released from shmem.
+	 */
+	if (meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) != 0)
+		return false;
 
 	/* we check it before */
 	Assert(!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(rootPageBlkno)));
@@ -2427,10 +2435,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	file_header.ctid = pg_atomic_read_u64(&metaPage->ctid);
 	file_header.bridgeCtid = pg_atomic_read_u64(&metaPage->bridge_ctid);
 	file_header.numFreeBlocks = pg_atomic_read_u64(&metaPage->numFreeBlocks);
-#ifdef USE_ASSERT_CHECKING
-	for (i = 0; i < NUM_SEQ_SCANS_ARRAY_SIZE; i++)
-		Assert(pg_atomic_read_u32(&metaPage->numSeqScans[i]) == 0);
-#endif
+	Assert(meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) == 0);
 
 	evicted_tree_data.key.datoid = desc->oids.datoid;
 	evicted_tree_data.key.relnode = desc->oids.relnode;

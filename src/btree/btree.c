@@ -19,6 +19,7 @@
 #include "btree/insert.h"
 #include "btree/io.h"
 #include "btree/page_chunks.h"
+#include "btree/scan.h"
 #include "btree/undo.h"
 #include "catalog/o_tables.h"
 #include "recovery/recovery.h"
@@ -198,6 +199,7 @@ free_meta_page(OPagePool *pool, OInMemoryBlkno metaPageBlkno)
 				j;
 
 	meta_page = (BTreeMetaPage *) O_GET_IN_MEMORY_PAGE(metaPageBlkno);
+
 	for (i = 0; i < 2; i++)
 	{
 		FREE_PAGE_IF_VALID(pool, meta_page->freeBuf.pages[i]);
@@ -207,7 +209,16 @@ free_meta_page(OPagePool *pool, OInMemoryBlkno metaPageBlkno)
 			FREE_PAGE_IF_VALID(pool, meta_page->tmpBuf[j].pages[i]);
 		}
 	}
-	ppool_free_page(pool, metaPageBlkno, NULL);
+
+	/*
+	 * Additional protection: the resource owner might not have released its
+	 * seq scans yet (other transactions are excluded by locks).  Defer
+	 * freeing the meta page until the last scan is released.
+	 */
+	if (meta_page_get_num_seq_scans(metaPageBlkno) == 0)
+		ppool_free_page(pool, metaPageBlkno, NULL);
+	else
+		meta_page->toBeFreedOnSeqScanRelease = true;
 }
 
 /*
