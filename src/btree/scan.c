@@ -1709,12 +1709,17 @@ btree_seq_scan_getnext_raw(BTreeSeqScan *scan, MemoryContext mctx,
  * from both the normal free path and the resource owner release callback.
  */
 static void
-free_btree_seq_scan_internal(BTreeSeqScan *scan)
+free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 {
 	BTreeDescr *desc = scan->desc;
 
+	START_CRIT_SECTION();
+
 	if (scan->resowner)
+	{
 		ResourceOwnerForgetBTreeSeqScan(scan->resowner, scan);
+		scan->resowner = NULL;
+	}
 
 	if (scan->checkpointNumberSet && OInMemoryBlknoIsValid(desc->rootInfo.metaPageBlkno))
 	{
@@ -1725,6 +1730,8 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan)
 		/* Complete deferred meta page free if this was the last scan. */
 		if (metaPage->toBeFreedOnSeqScanRelease && meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) == 0)
 			ppool_free_page(desc->ppool, desc->rootInfo.metaPageBlkno, false);
+
+		scan->checkpointNumberSet = false;
 	}
 
 	if (scan->dsmSeg)
@@ -1732,19 +1739,28 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan)
 		Assert(pg_atomic_read_u32(&scan->poscan->dsmSegNumAttached) == 0);	/* All workers should
 																			 * have already detached */
 		dsm_detach(scan->dsmSeg);
+		scan->dsmSeg = NULL;
 	}
-	pfree(scan->diskDownlinks);
-	pfree(scan);
-}
 
+	if (scan->diskDownlinks)
+	{
+		pfree(scan->diskDownlinks);
+		scan->diskDownlinks = NULL;
+	}
+
+	if (!fromResowner)
+	{
+		dlist_delete(&scan->listNode);
+		pfree(scan);
+	}
+
+	END_CRIT_SECTION();
+}
 
 void
 free_btree_seq_scan(BTreeSeqScan *scan)
 {
-	START_CRIT_SECTION();
-	dlist_delete(&scan->listNode);
-	free_btree_seq_scan_internal(scan);
-	END_CRIT_SECTION();
+	free_btree_seq_scan_internal(scan, false);
 }
 
 /*
@@ -1761,7 +1777,7 @@ seq_scans_cleanup(void)
 		BTreeSeqScan *scan = dlist_head_element(BTreeSeqScan, listNode, &listOfScans);
 
 		dlist_delete(&scan->listNode);
-		free_btree_seq_scan_internal(scan);
+		free_btree_seq_scan_internal(scan, false);
 	}
 	END_CRIT_SECTION();
 }
@@ -1802,7 +1818,7 @@ ResOwnerReleaseBTreeSeqScan(Datum res)
 	BTreeSeqScan *scan = (BTreeSeqScan *) DatumGetPointer(res);
 
 	scan->resowner = NULL;
-	free_btree_seq_scan(scan);
+	free_btree_seq_scan_internal(scan, true);
 }
 
 static char *
@@ -1823,8 +1839,8 @@ ResOwnerReleaseBTreeSeqScanCallback(ResourceReleasePhase phase,
 {
 	BTreeSeqScan *scan = (BTreeSeqScan *) arg;
 
-	if (phase == RESOURCE_RELEASE_BEFORE_LOCKS && isTopLevel)
-		free_btree_seq_scan(scan);
+	if (phase == RESOURCE_RELEASE_BEFORE_LOCKS)
+		free_btree_seq_scan_internal(scan, true);
 }
 
 static void
