@@ -340,6 +340,20 @@ make_empty_params(void)
 	return res;
 }
 
+static uint32
+stop_event_wait_info(void)
+{
+#if PG_VERSION_NUM >= 170000
+	static uint32 cached_wait_info = 0;
+
+	if (cached_wait_info == 0)
+		cached_wait_info = WaitEventExtensionNew("StopEvent");
+	return cached_wait_info;
+#else
+	return PG_WAIT_EXTENSION_BLOCKED;
+#endif
+}
+
 void
 handle_stopevent(int event_id, Jsonb *params)
 {
@@ -368,7 +382,7 @@ handle_stopevent(int event_id, Jsonb *params)
 
 				if (!check_stopevent_condition(event, params))
 					break;
-				ConditionVariableTimedSleep(&event->cv, 1000, PG_WAIT_EXTENSION);
+				ConditionVariableTimedSleep(&event->cv, 1000, stop_event_wait_info());
 			}
 			ConditionVariableCancelSleep();
 		}
@@ -423,7 +437,7 @@ wait_for_stopevent_enabled(int event_id)
 	{
 		if (event->enabled)
 			break;
-		ConditionVariableSleep(&event->cv, PG_WAIT_EXTENSION);
+		ConditionVariableSleep(&event->cv, stop_event_wait_info());
 	}
 	ConditionVariableCancelSleep();
 }

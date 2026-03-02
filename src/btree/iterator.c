@@ -344,13 +344,9 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 			 * Fetch from undo chain if txn is in progress OR historical
 			 * version
 			 */
-			bool		version_check = !txIsFinished;
-			OXid		tupOxid = version_check ? XACT_INFO_GET_OXID(xactInfo) : InvalidOXid;
-			TupleFetchCallbackCheckType check_type = version_check ?
-				OTupleFetchCallbackVersionCheck :
-				OTupleFetchCallbackKeyCheck;
+			OXid		tupOxid = XACT_INFO_GET_OXID(xactInfo);
 
-			cbResult = cb(curTuple, tupOxid, oSnapshot, arg, check_type);
+			cbResult = cb(curTuple, tupOxid, oSnapshot, arg, txIsFinished);
 
 			if (cbResult == OTupleFetchMatch)
 				break;

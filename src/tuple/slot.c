@@ -232,6 +232,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	OIndexDescr *idx;
 	bool		index_order;
 	int			cur_tbl_attnum = 0;
+	bool	   *isfilled = NULL;
 
 	/*
 	 * Early return if the requested number of attributes is already valid or
@@ -301,6 +302,8 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		natts = oslot->state.desc->natts;
 	}
 
+	isfilled = MemoryContextAllocZero(slot->tts_mcxt, Max(natts, __natts));
+
 	/* Iterate over the attributes to populate values and null flags. */
 	for (attnum = slot->tts_nvalid; attnum < natts; attnum++)
 	{
@@ -325,7 +328,19 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 				}
 			}
 			else
-				res_attnum = attnum;
+			{
+				/*
+				 * Map leaf position to table column position using
+				 * tableAttnums.  For normal tables where index order matches
+				 * table order this is identity.  For attached partitions with
+				 * reordered columns, this correctly remaps to the right table
+				 * column.
+				 *
+				 * tableAttnums values are 1-based and offset by +2 for
+				 * ctid-based PKs or +1 otherwise (see o_index_fill_descr).
+				 */
+				res_attnum = (oslot->leafTuple) ? attnum : (idx->tableAttnums[attnum] - (idx->primaryIsCtid ? 2 : 1));
+			}
 		}
 		else if (index_order)
 		{
@@ -360,10 +375,11 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 			 */
 			values[res_attnum] = o_tuple_read_next_field(&oslot->state,
 														 &isnull[res_attnum]);
+			isfilled[res_attnum] = true;
 
 			/* Determine the attribute metadata based on the index and order. */
 			if (oslot->ixnum == PrimaryIndexNumber && !index_order)
-				thisatt = TupleDescAttr(slot->tts_tupleDescriptor, attnum);
+				thisatt = TupleDescAttr(slot->tts_tupleDescriptor, res_attnum);
 			else
 				thisatt = TupleDescAttr(idx->leafTupdesc, attnum);
 
@@ -444,6 +460,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 															 attnum + 1 + ctid_off,
 															 &toastValue,
 															 oslot->csn);
+					isfilled[attnum] = true;
 					oslot->vfree[attnum] = true;
 					MemoryContextSwitchTo(mcxt);
 				}
@@ -457,8 +474,26 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	/* Ensure the number of processed attributes matches the expected count. */
 	Assert(attnum == natts);
 
-	/* Update the slot's valid attribute count. */
-	slot->tts_nvalid = natts;
+	{
+		int			first_unfilled = slot->tts_nvalid;
+
+		for (attnum = slot->tts_nvalid; attnum < Max(natts, __natts); ++attnum)
+		{
+			if (isfilled[attnum])
+			{
+				slot_getmissingattrs(slot, first_unfilled, attnum);
+				first_unfilled = attnum + 1;
+			}
+		}
+
+		/* Update the slot's valid attribute count. */
+		slot->tts_nvalid = first_unfilled;
+	}
+
+	if (!is_bump_memory_context(slot->tts_mcxt))
+	{
+		pfree(isfilled);
+	}
 }
 
 static Datum

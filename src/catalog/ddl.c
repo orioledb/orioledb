@@ -1480,6 +1480,11 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			list_free(alter_type_exprs);
 			alter_type_exprs = NIL;
 		}
+		if (o_alter_generated_column_id)
+		{
+			list_free(o_alter_generated_column_id);
+			o_alter_generated_column_id = NIL;
+		}
 	}
 
 	free_parsestate(pstate);
@@ -3819,7 +3824,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 	}
 	else if (access == OAT_DROP && classId == OperatorClassRelationId)
 	{
-		OOpclass   *o_opclass = o_opclass_get(objectId);
+		OOpclass   *o_opclass = o_opclass_get(objectId, MyDatabaseId);
 
 		if (o_opclass)
 			o_add_invalidate_comparator_undo_item(o_opclass->opfamily,
@@ -4152,6 +4157,10 @@ o_ddl_cleanup(void)
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
 	o_saved_relrewrite = InvalidOid;
 	in_rewrite = false;
-	o_alter_generated_column_id = NIL;
+	if (o_alter_generated_column_id)
+	{
+		list_free(o_alter_generated_column_id);
+		o_alter_generated_column_id = NIL;
+	}
 	o_in_add_column = false;
 }

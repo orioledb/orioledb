@@ -494,7 +494,7 @@ typedef struct OOpclass
 
 O_SYS_CACHE_DECLS(opclass_cache, OOpclass, 1);
 extern void o_opclass_cache_add_table(OTable *o_table);
-extern OOpclass *o_opclass_get(Oid opclassoid);
+extern OOpclass *o_opclass_get(Oid opclassoid, Oid datoid);
 extern HeapTuple o_opclass_cache_search_htup(TupleDesc tupdesc,
 											 Oid opclassoid);
 extern void o_opclass_cache_tup_print(BTreeDescr *desc, StringInfo buf,
@@ -507,7 +507,7 @@ O_SYS_CACHE_DECLS(proc_cache, OProc, 1);
 extern Datum o_fmgr_sql(PG_FUNCTION_ARGS);
 extern void o_proc_cache_validate_add(Oid datoid, Oid procoid, Oid fncollation,
 									  char *func_type, char *used_for);
-extern void o_proc_cache_fill_finfo(FmgrInfo *finfo, Oid procoid);
+extern void o_proc_cache_fill_finfo(FmgrInfo *finfo, Oid procoid, Oid datoid);
 extern HeapTuple o_proc_cache_search_htup(TupleDesc tupdesc, Oid procoid);
 
 /* o_type_cache.c */

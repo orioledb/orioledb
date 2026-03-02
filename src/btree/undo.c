@@ -374,6 +374,20 @@ make_undo_record(BTreeDescr *desc, OTuple tuple, bool is_tuple,
 	return undoLocation;
 }
 
+/*
+ * Create an undo record for a tuple insert on behalf of a waiting process
+ * (group insert optimization).  Called by the lock holder after it decides
+ * to insert the waiter's tuple into the page.
+ *
+ * The undo record is allocated from the current process's undo space (via
+ * get_undo_record on our undoType), but then linked into the *waiter's*
+ * undo stack via add_new_undo_stack_item_to_process().  The waiter's
+ * autonomousNestingLevel (captured when it queued) is used to select the
+ * correct undo stack slot.
+ *
+ * The waiter process is blocked on a semaphore in lock_page_with_tuple()
+ * throughout this operation, so its shared state is stable.
+ */
 void
 make_waiter_undo_record(BTreeDescr *desc, OInMemoryBlkno blkno, int pgprocno,
 						OPageWaiterShmemState *lockerState)

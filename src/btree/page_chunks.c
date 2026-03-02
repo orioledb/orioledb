@@ -939,7 +939,8 @@ page_split_chunk_if_needed(BTreeDescr *desc, Page p, BTreePageItemLocator *locat
 	OffsetNumber i,
 				chunkOffset;
 	LocationIndex hikeysFreeSpace,
-				dataFreeSpace;
+				dataFreeSpace,
+				newChunkDescSize;
 	BTreePageHeader *header = (BTreePageHeader *) p;
 	int			bestOffset = -1;
 	float4		bestScore = 0.0f;
@@ -961,9 +962,28 @@ page_split_chunk_if_needed(BTreeDescr *desc, Page p, BTreePageItemLocator *locat
 		return;
 
 	hikeysFreeSpace = hikeysEnd - header->hikeysEnd;
-	hikeysFreeSpace -=
-		(MAXALIGN(offsetof(BTreePageHeader, chunkDesc) + sizeof(BTreePageChunkDesc) * (header->chunksCount + 1)) -
-		 MAXALIGN(offsetof(BTreePageHeader, chunkDesc) + sizeof(BTreePageChunkDesc) * header->chunksCount));
+
+	/*
+	 * Reserve some hikeys space on rightmost page to protect from the
+	 * overflow of hikeyLocation.
+	 */
+	if (O_PAGE_IS(p, RIGHTMOST) &&
+		hikeysEnd == HIKEY_SHORT_LOCATION_LIMIT &&
+		hikeysFreeSpace >= SHORT_LOCATION_MULTIPLIER)
+		hikeysFreeSpace -= SHORT_LOCATION_MULTIPLIER;
+
+	newChunkDescSize = MAXALIGN(offsetof(BTreePageHeader, chunkDesc) +
+								sizeof(BTreePageChunkDesc) *
+								(header->chunksCount + 1)) -
+		MAXALIGN(offsetof(BTreePageHeader, chunkDesc) +
+				 sizeof(BTreePageChunkDesc) *
+				 header->chunksCount);
+	/* Also don't split if there is no space for new chunkDesc */
+	if (hikeysFreeSpace > newChunkDescSize)
+		hikeysFreeSpace -= newChunkDescSize;
+	else
+		hikeysFreeSpace = 0;	/* Just to be more explicit about not having
+								 * enough space */
 	dataFreeSpace = ORIOLEDB_BLCKSZ - header->dataSize;
 
 	for (i = 1; i < locator->chunkItemsCount; i++)
@@ -1162,6 +1182,16 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 		totalDataSize += items[i].size;
 
 	hikeysFreeSpaceLeft = hikeysFreeSpace = hikeysEnd - (MAXALIGN(sizeof(BTreePageHeader)) + MAXALIGN(hikeySize));
+
+	/*
+	 * Reserve some hikeys space on rightmost page to protect from the
+	 * overflow of hikeyLocation.
+	 */
+	if (isRightmost &&
+		hikeysEnd == HIKEY_SHORT_LOCATION_LIMIT &&
+		hikeysFreeSpace >= SHORT_LOCATION_MULTIPLIER)
+		hikeysFreeSpace -= SHORT_LOCATION_MULTIPLIER;
+
 	dataFreeSpaceLeft = dataFreeSpace = (ORIOLEDB_BLCKSZ - hikeysEnd) - totalDataSize - MAXALIGN(sizeof(LocationIndex) * count);
 
 	/*

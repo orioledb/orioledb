@@ -47,17 +47,38 @@ While the Rewind Worker manages its "to-do list" in a fixed-size circular buffer
 
 ## Rewind Functions
 
-### `orioledb_rewind_by_time(seconds integer)`
+### `orioledb_rewind_by_time(seconds int4[, attempt_restart bool])`
 Rewinds the cluster state by the specified number of seconds from the current time.
-*   **Example:** `SELECT orioledb_rewind_by_time(600);`
 
-### `orioledb_rewind_to_timestamp(target_time timestamptz)`
+* **Parameters:**
+  * `seconds`: The number of seconds to rewind the cluster state.
+  * `attempt_restart`: If `true`, the database system will automatically restart after the rewind. If `false`, the database will only be shut down. Default is `false`.
+* **Examples:**
+  * `SELECT orioledb_rewind_by_time(600);` — Rewinds by 10 minutes and shuts down the database without restarting.
+  * `SELECT orioledb_rewind_by_time(600, true);` — Rewinds by 10 minutes and restarts the database.
+
+### `orioledb_rewind_to_timestamp(target_time timestamptz[, attempt_restart bool])`
 Rewinds the cluster to a specific point in time.
-*   **Example:** `SELECT orioledb_rewind_to_timestamp('2025-01-01 12:00:00 UTC');`
 
-### `orioledb_rewind_to_transaction(xid xid8, oxid int8)`
-Rewinds the cluster to a state **before** specific transaction pair identified by the PostgreSQL Transaction ID (`xid`) and the OrioleDB Transaction ID (`oxid`). `oxid` can be acquired by calling `orioledb_get_current_oxid()`.
-*   **Example:** `SELECT orioledb_rewind_to_transaction(1750, 555);`
+* **Parameters:**
+  * `target_time`: The exact timestamp to which the cluster state will be rewound.
+  * `attempt_restart`: If `true`, the database system will automatically restart after the rewind. If `false`, the database will only be shut down.  Default is `false`.
+* **Examples:**
+  * `SELECT orioledb_rewind_to_timestamp('2025-01-01 12:00:00 UTC', true);` — Rewinds to January 1, 2025, at 12:00:00 UTC, and restarts the database.
+  * `SELECT orioledb_rewind_to_timestamp('2025-01-01 12:00:00 UTC');` — Rewinds to the specified timestamp and shuts down the database without restarting.
+
+---
+
+### `orioledb_rewind_to_transaction(xid int4, oxid int8[, attempt_restart bool])`
+Rewinds the cluster to a state **before** a specific transaction pair identified by the PostgreSQL Transaction ID (`xid`) and the OrioleDB Transaction ID (`oxid`).
+
+* **Parameters:**
+  * `xid`: The PostgreSQL Transaction ID.
+  * `oxid`: The OrioleDB Transaction ID.
+  * `attempt_restart`: If `true`, the database system will automatically restart after the rewind. If `false`, the database will only be shut down.  Default is `false`.
+* **Examples:**
+  * `SELECT orioledb_rewind_to_transaction(1750, 555, true);` — Rewinds the cluster state to just before transaction pair `1750`/`555` and restarts the database.
+  * `SELECT orioledb_rewind_to_transaction(1750, 555);` — Rewinds the cluster state to just before the specified transaction pair and shuts down the database without restarting.
 
 ### Examining the Rewind Horizon
 To check the available rewind range, use:
@@ -73,7 +94,7 @@ When a rewind function is invoked, the system executes the following steps:
 2. Signals the Rewind Worker to stop adding new transactions to the buffer.
 3. Signals all other active backends to terminate. The process waits up to 100 seconds for backends to exit.
 4. Reverts the data pages to the requested state.
-5. Once the rewind is complete, the function attempts to restart the PostgreSQL instance to finalize the state change.
+5. Once the rewind is complete, depending on the value of `attempt_restart` argument, the function either shuts down the database or attempts to restart the PostgreSQL instance to finalize the state change.
 
 :::warning[Restart Reliability]
 The automatic restart is a single, best-effort attempt. If the restart fails (e.g., due to configuration errors), manual intervention is required to bring the server back online. Ensure you have system-level access to the server to manually start the service, as the SQL connection will be terminated immediately upon completion of the rewind.
@@ -88,7 +109,7 @@ To rewind the database to a specific transaction state, you must first record th
 -- Record these values
 SELECT pg_current_xact_id(), orioledb_get_current_oxid();
 
- pg_current_xact_id | orioledb_get_current_oxid 
+ pg_current_xact_id | orioledb_get_current_oxid
 --------------------+---------------------------
                1750 |                       555
 ```
@@ -104,7 +125,7 @@ DROP TABLE important_data;
 -- Revert to the IDs recorded in step 1
 SELECT orioledb_rewind_to_transaction(1750, 555);
 ```
-*The server will log "Rewind complete" and attempt to restart.*
+*The server will log "Rewind complete" and shut down.*
 
 :::note[Data consistency]
 For applications requiring strong consistency guarantees, it is recommended to explicitly acquire locks on relevant tables within the transaction intended as the rewind target. (Step 1 in the example above)

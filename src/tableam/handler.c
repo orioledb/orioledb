@@ -264,11 +264,11 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 
 static TupleFetchCallbackResult
 fetch_row_version_callback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
-						   void *arg, TupleFetchCallbackCheckType check_type)
+						   void *arg, bool oxidIsFinished)
 {
 	uint32		version = *((uint32 *) arg);
 
-	if (check_type != OTupleFetchCallbackVersionCheck)
+	if (oxidIsFinished)
 		return OTupleFetchNext;
 
 	if (!(COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn) &&
@@ -908,9 +908,14 @@ orioledb_relation_set_new_filenode(Relation rel,
 
 		/*
 		 * Pass NULL and InvalidOid as we don't want recovery to trigger an
-		 * index (re)build.
+		 * index (re)build.  But take care we don't issue a WAL-record if
+		 * o_tables_table_meta_lock() didn't
 		 */
-		o_tables_table_meta_unlock(NULL, InvalidOid);
+		if (new_o_table->persistence != RELPERSISTENCE_TEMP)
+			o_tables_table_meta_unlock(NULL, InvalidOid);
+		else
+			o_tables_meta_unlock_no_wal();
+
 		o_table_free(new_o_table);
 
 		orioledb_free_rd_amcache(rel);

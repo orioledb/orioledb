@@ -320,11 +320,18 @@ static uint32
 o_hash_key(OIndexDescr *idx, OTuple key)
 {
 	register uint32 hash = HASH_INITIAL;
-	int			size;
-	Pointer		data;
+	int			i;
+	int			natts;
+	TupleDesc	tupdesc = idx->nonLeafTupdesc;
+	OTupleFixedFormatSpec *spec = &idx->nonLeafSpec;
 
-	data = o_tuple_get_data(key, &size, &idx->nonLeafSpec);
-	hash = hash_combine_mix(data, size, hash);
+	if (idx->desc.type == oIndexPrimary)
+		natts = idx->nUniqueFields;
+	else
+		natts = idx->nonLeafTupdesc->natts;
+
+	for (i = 0; i < natts; i++)
+		hash = hash_combine_mix_field(tupdesc, spec, key, i + 1, hash);
 	hash = hash_final(hash);
 
 	return hash;
@@ -338,11 +345,17 @@ o_hash_key_from_tuple(OIndexDescr *idx, OTuple tuple)
 	OTupleFixedFormatSpec *spec = &idx->leafSpec;
 	int			i = 0;
 	int			ctid_off = 0;
+	int			natts;
 
 	if (idx->bridging && idx->desc.type == oIndexPrimary && !idx->primaryIsCtid)
 		ctid_off = 1;
 
-	for (i = 0; i < idx->nonLeafTupdesc->natts; i++)
+	if (idx->desc.type == oIndexPrimary)
+		natts = idx->nUniqueFields;
+	else
+		natts = idx->nonLeafTupdesc->natts;
+
+	for (i = 0; i < natts; i++)
 	{
 		int			attnum;
 

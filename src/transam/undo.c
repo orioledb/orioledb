@@ -897,6 +897,24 @@ orioledb_insert_sys_xid_undo_location(PG_FUNCTION_ARGS)
 }
 
 
+/*
+ * Reserve an undo location for the current process.  Called from
+ * get_undo_record() before actually allocating the undo record.
+ *
+ * Sets reservedUndoLocation to prevent concurrent
+ * update_min_undo_locations() from advancing past our position.
+ *
+ * If transactionUndoRetainLocation is not yet set (first undo record in
+ * this transaction for this undoType), we also set it.  In that case the
+ * undo stack must be empty — otherwise the retain location and the undo
+ * stack are out of sync, which means something wrote to our undo stack
+ * without setting the retain location (a bug).
+ *
+ * Note: transactionUndoRetainLocation is per-process (not per nesting
+ * level), while the undo stack is indexed by autonomousNestingLevel.
+ * Both can be set by another process via add_new_undo_stack_item_to_process()
+ * during the group insert optimization.
+ */
 static void
 set_my_reserved_location(UndoLogType undoType)
 {
@@ -1345,6 +1363,18 @@ get_snapshot_retained_undo_location(UndoLogType undoType)
 	return pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].snapshotRetainUndoLocation);
 }
 
+/*
+ * Clear transactionUndoRetainLocation for the given undo type.  This allows
+ * update_min_undo_locations() to advance past our previously retained
+ * position.
+ *
+ * Note: this does NOT clear the undo stack (undoStackLocations[...].location).
+ * Callers are responsible for ensuring the undo stack is already empty (e.g.,
+ * via apply_undo_stack / on_commit_undo_stack / reset_cur_undo_locations)
+ * before calling this.  If the undo stack still has items while the retain
+ * location is cleared, a subsequent set_my_reserved_location() will hit an
+ * assertion failure.
+ */
 void
 free_retained_undo_location(UndoLogType undoType)
 {
@@ -1353,7 +1383,6 @@ free_retained_undo_location(UndoLogType undoType)
 	Assert(pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].reservedUndoLocation) == InvalidUndoLocation);
 	pg_atomic_write_u64(&curProcData->undoRetainLocations[(int) undoType].transactionUndoRetainLocation, InvalidUndoLocation);
 	curRetainUndoLocations[undoType] = InvalidUndoLocation;
-
 }
 
 static bool
@@ -1789,6 +1818,25 @@ add_new_undo_stack_item(UndoLogType undoType, UndoLocation location)
 	release_reserved_undo_location(undoType);
 }
 
+/*
+ * Add an undo stack item on behalf of another process (identified by
+ * pgprocno).  Called by the group insert optimization when the lock holder
+ * inserts tuples for waiting processes.
+ *
+ * The undo record has already been written by the current process via
+ * get_undo_record(), but the stack item must be linked into the target
+ * process's undo chain, not ours.
+ *
+ * autonomousNestingLevel selects which undoStackLocations slot to use for
+ * the target process — this must be the value captured from the target
+ * process when it queued as a waiter.  GET_CUR_UNDO_STACK_LOCATIONS()
+ * indexes by autonomousNestingLevel, so we must use the same index here
+ * to keep the undo chain consistent.
+ *
+ * Also sets transactionUndoRetainLocation on the target process if it
+ * wasn't set yet, so that the undo data is retained until the target
+ * process's transaction completes.
+ */
 void
 add_new_undo_stack_item_to_process(UndoLogType undoType,
 								   UndoLocation location,

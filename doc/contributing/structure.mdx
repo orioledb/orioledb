@@ -5,7 +5,11 @@ sidebar_label: Code Structure
 
 # OrioleDB Source Code Structure
 
-The OrioleDB source code structure comprises various components including workflows for CI/CD, documentation, tests, and C-source files, structured to facilitate development, testing (including under Valgrind), and deployment of the OrioleDB extension for PostgreSQL, with a focus on concurrency testing and performance analysis through stop events and CI workflows.
+The OrioleDB source code structure comprises various components, including
+workflows for CI/CD, documentation, tests, and C-source files. It is structured
+to facilitate development, testing (including under Valgrind), and deployment of
+the OrioleDB extension for PostgreSQL. A heavy focus is placed on concurrency
+testing and performance analysis through stop events and CI workflows.
 
 ## File structure
 
@@ -54,52 +58,89 @@ orioledb
 
 ## Makefile targets
 
-All test-related targets accept `VALGRIND=1` argument, which makes the tests to
-be run under [valgrind](https://valgrind.org/). Valgrind makes tests about ~100
-times slower but catches uninitialized memory access. Another positive
-side-effect of Valgrind's super slow test runs is completely different timings,
-which can spot various types of errors.
+All test-related targets accept the `VALGRIND=1` argument, which runs the tests
+under [valgrind](https://valgrind.org/). Valgrind makes tests about ~100 times
+slower but catches uninitialized memory access. Another positive side-effect of
+Valgrind's super-slow test runs is the altered timing, which can expose various
+types of concurrency errors.
 
 - `regresscheck` -- run SQL-tests (see below).
 - `isolationcheck` -- run isolation tests (see below).
 - `testgrescheck` -- run testgres tests (see below).
 - `testgrescheck_part_1` -- first half of testgres checks. Testgres tests are
-  splitted in a two nearly equal halfs to avoid too long individual CI runs.
+  split into two nearly equal halves to avoid overly long individual CI runs.
 - `testgrescheck_part_2` -- second half of testgres checks.
-- `installcheck` -- run all types of tests when installed using PostgreSQL
+- `installcheck` -- run all types of tests when installed using the PostgreSQL
   extension system (`USE_PGXS=1`).
-- `check` -- run all types of tests when installed from `contrib` folder of
-  PostgreSQL source code.
-- `pgindent` -- automatically indents OrioleDB sources.
+- `check` -- run all types of tests when installed from the `contrib` folder of
+  the PostgreSQL source code.
+- `pgindent` -- automatically indents OrioleDB sources. The
   [pgindent](https://github.com/postgres/postgres/blob/master/src/tools/pgindent/pgindent)
-  tool should be available in `$PATH`. Note, that you need to install
+  tool should be available in `$PATH`. Note that you need to install
   [pg_bsd_indent](https://github.com/postgres/postgres/blob/master/src/tools/pg_bsd_indent/README#L17)
   first. Also, you need GNU Objdump available in `$PATH` as `objdump` or
-  `gobjdump`, or be specified in `OBJDUMP` environment variable.
+  `gobjdump`, or specified via the `OBJDUMP` environment variable.
+
+## Extension SQL scripts
+
+OrioleDB extension files are organized using a base version installation script,
+followed by upgrade scripts for respective minor versions. For instance, when
+installing version `1.7`, PostgreSQL first applies the `1.0` script and then
+sequentially runs all upgrade scripts from `1.0` up to `1.7`.
+
+To bump the extension version (for example, bumping from `1.6` to `1.7`), follow
+these steps:
+
+1. Edit the `default_version` parameter in the `orioledb.control` file to match
+   the new version.
+2. Manually create development and production upgrade scripts in the `sql`
+   directory:
+   - `./sql/orioledb--1.6--1.7_prod.sql`
+   - `./sql/orioledb--1.6--1.7_dev.sql`
+3. Add the corresponding headers to the scripts and populate the changes:
+   - Changes intended **only** for the development environment (such as test
+     functions that should not be exposed on production systems) go into
+     `_dev.sql`.
+   - All standard changes go into the `_prod.sql` file.
+
+:::note
+The build system (`make`) utilizes both files to automatically generate the
+final `./sql/orioledb--1.6--1.7.sql` script. Therefore, you do not need to
+create this final file manually. The contents of `_dev.sql` will only be
+included when the `IS_DEV` flag is specified during the build. There is no need
+to duplicate changes between the two files.
+:::
+4. Add the generated file (`./sql/orioledb--1.6--1.7.sql`) to both `.gitignore`
+   and `.dockerignore`.
 
 ## Tests
 
 OrioleDB has 3 groups of tests described below.
 
-- SQL tests are located in the `sql` folder. This is the most simple type of
-  test. The sql-file gets passed to `psql` and the result is compared to
-  the reference output in the `expected` folder. Note that there might be
-  multiple reference outputs for one input file. For instance, `collate.sql`
-  contains collation-aware tests. The result may match to `collate.out`,
-  `collate_1.out`, or `collate_2.out` depending on database encoding and the
-  presence of libicu.
+- SQL tests are located in the `test/sql` folder. These are the simplest types of
+  tests. The SQL file is passed to `psql` and the result is compared to the
+  reference output in the `test/expected` folder. Note that there might be multiple
+  reference outputs for one input file. For instance, `collate.sql` contains
+  collation-aware tests. The result may match `collate.out`, `collate_1.out`, or
+  `collate_2.out` depending on database encoding and the presence of libicu.
 
 - Isolation tests are located in the `specs` folder. These tests simulate
-  multiple connections running simultaneously. See
+  multiple connections running simultaneously. See the
   [README](https://github.com/postgres/postgres/blob/master/src/test/isolation/README)
   in the PostgreSQL source tree. These tests are especially powerful in
   conjunction with stop events.
 
-- Python [testgres](https://pypi.org/project/testgres/) tests located in `t`.
-  These are the most powerful and complex tests. Additionally to the ability
-  to simulate multiple simultaneous connections, they can perform actions with
-  the whole PostgreSQL instance such as start, stop, backup, replication, etc.
-  See the [testgres docs](https://postgrespro.github.io/testgres/) for details.
+- Python [testgres](https://pypi.org/project/testgres/) tests are located in
+  `t`. These are the most powerful and complex tests. Additionally to the
+  ability to simulate multiple simultaneous connections, they can perform
+  actions with the whole PostgreSQL instance such as start, stop, backup,
+  replication, etc. See the [testgres
+  docs](https://postgrespro.github.io/testgres/) for details.
+
+:::note
+For proper integration into the test suite, the test file names should
+end with `_test.py`.
+:::
 
 ## CI
 
@@ -111,19 +152,17 @@ This workflow runs the following tests for each of the two compilers (gcc and
 clang) and each of the supported PostgreSQL major versions (16 and 17).
 
 - `normal` -- run tests without asserts and without debug symbols.
-- `debug` -- run test with asserts and with debug symbols.
-- `sanitize` -- run test with asserts, with debug symbols, with alignment
-  and other sanitizers. This replaces running tests on strict alignment
-  architectures providing even somewhat stricter checks
-  (for instance, it traps you on accessing a properly-aligned
-  member of an unproperly aligned structure, which real hardware
-  wouldn't do).
-- `check_page` -- runs tests with asserts, with debug symbols, and with
-  `CHECK_PAGE_STRUCT` macro enabled. This macro provides
-  the page structure check on every page unlock.
-- `valgrind_1` -- runs `regresscheck`, `isolationcheck` and
-  `testgrescheck_part_1` under valgrind with asserts and
-  with debug symbols.
+- `debug` -- run tests with asserts and with debug symbols.
+- `sanitize` -- run tests with asserts, with debug symbols, with alignment, and
+  other sanitizers. This replaces running tests on strict alignment
+  architectures, providing even somewhat stricter checks (for instance, it traps
+  you on accessing a properly-aligned member of an improperly aligned structure,
+  which real hardware wouldn't do).
+- `check_page` -- runs tests with asserts, with debug symbols, and with the
+  `CHECK_PAGE_STRUCT` macro enabled. This macro provides the page structure
+  check on every page unlock.
+- `valgrind_1` -- runs `regresscheck`, `isolationcheck`, and
+  `testgrescheck_part_1` under valgrind with asserts and with debug symbols.
 - `valgrind_2` -- runs `testgrescheck_part_2` under Valgrind with asserts and
   with debug symbols.
 - `static` -- runs `clang-analyzer` or `cppcheck` over sources.
@@ -131,9 +170,9 @@ clang) and each of the supported PostgreSQL major versions (16 and 17).
 ### `docker.yml`
 
 This workflow builds docker images for amd64 and arm64v8 architectures under
-Alpine and Ubuntu Linux. This Dockerfile is slightly adjusted
-[PostgreSQL Dockerfile](https://github.com/docker-library/postgres).
-See [our dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details.
+Alpine and Ubuntu Linux. This Dockerfile is a slightly adjusted [PostgreSQL
+Dockerfile](https://github.com/docker-library/postgres). See [our
+dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details.
 
 ### `dockertest.yml`
 
@@ -141,62 +180,61 @@ This workflow tests the Docker images. It runs on every push and pull request.
 
 ### `pgindent.yml`
 
-This workflow checks the code formatting using `pgindent`. It runs on every push and pull request.
+This workflow checks the code formatting using `pgindent`. It runs on every push
+and pull request.
 
 ### `rpm.yml`
 
-This workflow build RPM packages for CentOS 7 using specification from the
-[orioledb/pgrpms](https://github.com/orioledb/pgrpms) repository, a fork
-of [pgrpms](https://git.postgresql.org/gitweb/?p=pgrpms.git;a=summary)
-repository.
+This workflow builds RPM packages for CentOS 7 using the specification from the
+[orioledb/pgrpms](https://github.com/orioledb/pgrpms) repository, a fork of the
+[pgrpms](https://git.postgresql.org/gitweb/?p=pgrpms.git;a=summary) repository.
 
 ### `static.yml`
 
-This workflow runs static analysis on the code. It runs on every push and pull request.
+This workflow runs static analysis on the code. It runs on every push and pull
+request.
 
 ## Stop events
 
-Stop events are special places in the code, where the execution could be stopped
-on some condition. Stop events are used for the reliable reproduction of
+Stop events are special places in the code where execution can be paused based
+on specific conditions. Stop events are used for the reliable reproduction of
 concurrency issues. OrioleDB isolation and testgres tests use stop events.
 
-Stop event exposes a set of parameters, encapsulated into jsonb value. The
-condition over stop event parameters is defined using jsonpath
+A stop event exposes a set of parameters, encapsulated into a jsonb value. The
+conditions on stop event parameters are defined using the SQL/JSON path
 language.
 
 The SQL-level functions and variables for stop events manipulation are listed
 below.
 
 - `orioledb.enable_stopevents` -- enables stop events checking for the process.
-  Stop events checking is expensive and significantly affects the performance.
-  This is why stop events are disabled by default.
+  Stop events checking is expensive and significantly affects performance. This
+  is why stop events are disabled by default.
 
-- `orioledb.trace_stopevents` -- enables logging of all the stop events.
-  Disabled by default.
+- `orioledb.trace_stopevents` -- enables logging of all stop events. Disabled by
+  default.
 
-- `pg_stopevent_set(eventname text, condition jsonpath) RETURNS void` --
-  set the condition for the stop event. Once the function is executed, all
-  the processes, which run a given stop event with parameters satisfying
-  the given jsonpath condition, will be stopped.
+- `pg_stopevent_set(eventname text, condition jsonpath) RETURNS void` -- set the
+  condition for the stop event. Once the function is executed, all processes
+  that run a given stop event with parameters satisfying the given jsonpath
+  condition will be stopped.
 
-- `pg_stopevent_reset(eventname text) RETURNS bool` --
-  reset the stop event. All the processes previously stopped on the given
-  stop event will continue the execution.
+- `pg_stopevent_reset(eventname text) RETURNS bool` -- reset the stop event. All
+  processes previously stopped on the given stop event will continue execution.
 
 - `pg_stopevents(OUT stopevent text, OUT condition jsonpath, OUT waiter_pids int[]) RETURNS SETOF record` --
   returns all the stop events currently set with their conditions and
-  waiter process pids.
+  waiter process PIDs.
 
-At C-level, the following macros are there for managing stop events.
+At the C level, the following macros are provided for managing stop events.
 
 - `STOPEVENTS_ENABLED()` -- checks if stop events are enabled.
-- `STOPEVENT(event_id, params)` -- raises given stop event with given jsonb
-  parameters.
-- `STOPEVENT_CONDITION(event_id, params)` -- check stop event condition without
-  stopping the execution. Used for
-  error simulation.
+- `STOPEVENT(event_id, params)` -- raises the given stop event with the given
+  jsonb parameters.
+- `STOPEVENT_CONDITION(event_id, params)` -- checks the stop event condition
+  without stopping the execution. Used for error simulation.
 
 The list of stop events is defined in `stopevents.txt` file. The
-`stopevent_gen.py` script generates `include/utils/stopevents_defs.h` (macros)
-and `include/utils/stopevents_data.h` (name strings) files with C-definitions
-of the stop events list.
+`stopevents_gen.py` script generates `include/utils/stopevents_defs.h` (macros)
+and `include/utils/stopevents_data.h` (name strings) files with C definitions of
+the stop events list.
