@@ -858,6 +858,15 @@ generic_toast_get_any_common(ToastAPI *api,
 	return str.data;
 }
 
+/*
+ * Queries TOAST chunks by `key`, assembles result and returns it.  The size
+ * of result is set to `*data_size`.  If `fetchCallback` and `callback_arg`
+ * are provided, then they are passed to the iterator and, in turn, to
+ * o_find_tuple_version().
+ *
+ * The result is allocated in the current memory context.  It's caller's
+ * responsibility to free it.
+ */
 Pointer
 generic_toast_get_any_with_callback(ToastAPI *api, Pointer key,
 									Size *data_size, OSnapshot *o_snapshot,
@@ -882,6 +891,14 @@ generic_toast_get_any_with_callback(ToastAPI *api, Pointer key,
 	return data;
 }
 
+/*
+ * Queries TOAST chunks by `key`, assembles the result, and returns it.
+ * The size of the result is set to `*data_size`.  If `found_key` is not NULL,
+ * then the copy of a key from the first chunk is returned as `*found_key`.
+ *
+ * Both result and `*found_key` are allocated in the current memory context.
+ * It's the caller's responsibility to free them.
+ */
 Pointer
 generic_toast_get_any_with_key(ToastAPI *api, void *key, Size *data_size,
 							   OSnapshot *o_snapshot, void *arg, Pointer *found_key)
@@ -903,6 +920,13 @@ generic_toast_get_any_with_key(ToastAPI *api, void *key, Size *data_size,
 	return data;
 }
 
+/*
+ * Queries TOAST chunks by `key`, assembles the result, and returns it.
+ * The size of the result is set to `*data_size`.
+ *
+ * The result is allocated in the current memory context.  It's the caller's
+ * responsibility to free it.
+ */
 Pointer
 generic_toast_get_any(ToastAPI *api, void *key, Size *data_size,
 					  OSnapshot *o_snapshot, void *arg)
