@@ -1319,7 +1319,7 @@ oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid, O
 	opclass = o_opclass_get(opclassoid, datoid);
 	if (opclass == NULL)
 		elog(ERROR, "failed to resolve opclass %u in datoid %u", opclassoid, datoid);
-	Assert(opclass);
+
 	field->opclass = opclassoid;
 	field->inputtype = opclass->inputtype;
 	field->opfamily = opclass->opfamily;
