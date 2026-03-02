@@ -1667,6 +1667,7 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 		tuple = o_btree_iterator_fetch(it, NULL, NULL,
 									   BTreeKeyNone, false, NULL);
 	}
+	btree_iterator_free(it);
 }
 
 static const char *
