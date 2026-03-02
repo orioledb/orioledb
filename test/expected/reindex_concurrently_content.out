@@ -1,0 +1,146 @@
+CREATE DATABASE reindex_concurrently_test_db;
+\c reindex_concurrently_test_db
+CREATE SCHEMA orioledb;
+CREATE EXTENSION orioledb SCHEMA orioledb;
+create table t_reindex
+(
+    id int,
+    someint int,
+    balance int
+) using orioledb;
+CREATE TABLE test_step (
+    test_step int
+);
+CREATE TABLE done_items (
+    done_items int
+);
+INSERT INTO t_reindex SELECT t, 11 - t, 0 FROM generate_series(1,1000) as t;
+SELECT oid, relname, relfilenode FROM pg_class where relname like 't_reindex%';
+  oid  |  relname  | relfilenode 
+-------+-----------+-------------
+ 16636 | t_reindex |       16636
+(1 row)
+
+CREATE INDEX CONCURRENTLY t_reindex_idx ON t_reindex (id);
+SELECT oid, relname, relfilenode FROM pg_class where relname like 't_reindex%';
+  oid  |    relname    | relfilenode 
+-------+---------------+-------------
+ 16636 | t_reindex     |       16636
+ 16647 | t_reindex_idx |       16647
+(2 rows)
+
+SELECT pg_relation_size( 't_reindex_idx'::regclass);
+ pg_relation_size 
+------------------
+            40960
+(1 row)
+
+UPDATE t_reindex SET id = id + 1000000;
+SELECT pg_relation_size( 't_reindex_idx'::regclass);
+ pg_relation_size 
+------------------
+            81920
+(1 row)
+
+\d+ t_reindex;
+                                 Table "public.t_reindex"
+ Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+---------+---------+-----------+----------+---------+---------+--------------+-------------
+ id      | integer |           |          |         | plain   |              | 
+ someint | integer |           |          |         | plain   |              | 
+ balance | integer |           |          |         | plain   |              | 
+Indexes:
+    "t_reindex_idx" btree (id)
+
+SELECT * FROM orioledb.orioledb_tbl_indices( 't_reindex'::regclass, true, true);
+                orioledb_tbl_indices                 
+-----------------------------------------------------
+ Index ctid_primary                                 +
+     reloid: 16636                                  +
+     relnode: 16636                                 +
+     Index type: primary, unique, ctid              +
+     Leaf tuple size: 4, non-leaf tuple size: 1     +
+     Non-leaf tuple fields: ctid                    +
+     Leaf tuple fields: ctid, id, someint, balance  +
+ Index t_reindex_idx                                +
+     reloid: 16647                                  +
+     relnode: 16647                                 +
+     Index type: secondary                          +
+     Leaf tuple size: 2, non-leaf tuple size: 2     +
+     Non-leaf tuple fields: id, ctid                +
+     Leaf tuple fields: id, ctid                    +
+ Index toast                                        +
+     reloid: 16639                                  +
+     relnode: 16639                                 +
+     Index type: secondary                          +
+     Leaf tuple size: 4, non-leaf tuple size: 3     +
+     Non-leaf tuple fields: ctid, attnum, chunknum  +
+     Leaf tuple fields: ctid, attnum, chunknum, data+
+ 
+(1 row)
+
+REINDEX INDEX CONCURRENTLY t_reindex_idx;
+SELECT pg_relation_size( 't_reindex_idx'::regclass);
+ pg_relation_size 
+------------------
+            40960
+(1 row)
+
+\d+ t_reindex;
+                                 Table "public.t_reindex"
+ Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+---------+---------+-----------+----------+---------+---------+--------------+-------------
+ id      | integer |           |          |         | plain   |              | 
+ someint | integer |           |          |         | plain   |              | 
+ balance | integer |           |          |         | plain   |              | 
+Indexes:
+    "t_reindex_idx" btree (id)
+
+SELECT * FROM orioledb.orioledb_tbl_indices( 't_reindex'::regclass, true, true);
+                orioledb_tbl_indices                 
+-----------------------------------------------------
+ Index ctid_primary                                 +
+     reloid: 16636                                  +
+     relnode: 16636                                 +
+     Index type: primary, unique, ctid              +
+     Leaf tuple size: 4, non-leaf tuple size: 1     +
+     Non-leaf tuple fields: ctid                    +
+     Leaf tuple fields: ctid, id, someint, balance  +
+ Index t_reindex_idx                                +
+     reloid: 16648                                  +
+     relnode: 16648                                 +
+     Index type: secondary                          +
+     Leaf tuple size: 2, non-leaf tuple size: 2     +
+     Non-leaf tuple fields: id, ctid                +
+     Leaf tuple fields: id, ctid                    +
+ Index toast                                        +
+     reloid: 16639                                  +
+     relnode: 16639                                 +
+     Index type: secondary                          +
+     Leaf tuple size: 4, non-leaf tuple size: 3     +
+     Non-leaf tuple fields: ctid, attnum, chunknum  +
+     Leaf tuple fields: ctid, attnum, chunknum, data+
+ 
+(1 row)
+
+set enable_seqscan = off;
+SELECT COUNT(*) FROM t_reindex WHERE id > 1000000;
+ count 
+-------
+  1000
+(1 row)
+
+EXPLAIN SELECT COUNT(*) FROM t_reindex WHERE id > 1000000;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Aggregate  (cost=21.85..21.86 rows=1 width=8)
+   ->  Custom Scan (o_scan) on t_reindex  (cost=10.86..21.02 rows=333 width=0)
+         Bitmap heap scan
+         Recheck Cond: (id > 1000000)
+         ->  Bitmap Index Scan on t_reindex_idx  (cost=0.00..10.77 rows=333 width=0)
+               Index Cond: (id > 1000000)
+(6 rows)
+
+RESET enable_seqscan;
+\c regression
+DROP DATABASE reindex_concurrently_test_db;

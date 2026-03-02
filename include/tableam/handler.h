@@ -130,6 +130,8 @@ extern bool o_drop_shared_root_info(Oid datoid, Oid relnode);
 extern void o_tableam_descr_init(void);
 extern void o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode);
 extern void init_print_options(BTreePrintOptions *printOptions, VarChar *optionsArg);
+extern void idx_tup_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg);
+extern void idx_key_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg);
 extern void orioledb_free_rd_amcache(Relation rel);
 extern OTableDescr *relation_get_descr(Relation rel);
 extern void table_descr_inc_refcnt(OTableDescr *descr);
@@ -220,5 +222,38 @@ typedef struct ParallelOScanDescData
 typedef ParallelOScanDescData *ParallelOScanDesc;
 
 extern bool in_nontransactional_truncate;
+
+/*
+ * Cleanup old concurrent index structure after validation
+ */
+extern void orioledb_index_validate_cleanup_old_concurrent(Relation heapRelation,
+														   Relation indexRelation);
+extern void orioledb_reindex_concurrent_swap(Oid newIndex,
+												Oid oldIndex,
+												Relation heapRelation,
+												const char *oldName);
+extern void 
+debug_print_validate_tuple(OTuple tuple, OIndexDescr *idx, bool key, OXid oxid);								 
+/*
+ * State for orioledb index validation
+ * Extends PostgreSQL's ValidateIndexState with orioledb-specific fields
+ */
+typedef struct OValidateIndexState
+{
+	/* Fields matching PostgreSQL's ValidateIndexState */
+	Tuplesortstate *tuplesort;
+	double		htups;			/* # heap tuples processed */
+	double		itups;			/* # index tuples from ambulkdelete */
+	double		tups_inserted;	/* # missing tuples inserted */
+	double		tups_deleted;	/* # spurious tuples deleted */
+	
+	/* Orioledb-specific field */
+	OTuple		current_tuple;	/* Current tuple being processed by ambulkdelete */
+	OIndexDescr *index_descr;	/* Index descriptor for extracting PK from tuples */
+	OTableDescr *table_descr;	/* Table descriptor for the table being indexed */
+	ORelOids	index_oids;		/* Index OIDs for finding index number */
+	BTreeLeafTuphdr header;			/* Header for leaf tuples, used for extracting PK */
+} OValidateIndexState;
+
 
 #endif

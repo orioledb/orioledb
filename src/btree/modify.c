@@ -23,6 +23,7 @@
 #include "btree/page_chunks.h"
 #include "btree/undo.h"
 #include "catalog/o_tables.h"
+#include "tableam/operations.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
 #include "transam/undo.h"
@@ -33,6 +34,15 @@
 #include "miscadmin.h"
 
 #define IsRelationTree(desc) (ORelOidsIsValid(desc->oids) && !IS_SYS_TREE_OIDS(desc->oids))
+
+/*
+ * Global variable to pass boundary check result from PK modification to
+ * secondary index undo record creation. Since secondary index operations
+ * always follow PK operations and only one PK can be modified at a time,
+ * this simple approach works correctly.
+ */
+static bool g_last_pk_satisfies_boundary = true;
+
 
 /*
  * Context for o_btree_modify_internal()
@@ -62,6 +72,7 @@ typedef struct
 	BTreeKeyType keyType;
 	UndoLocation savepointUndoLocation;
 	BTreeModifyCallbackInfo *callbackInfo;
+	bool pkSatisfiesBoundary;
 } BTreeModifyInternalContext;
 
 typedef enum ConflictResolution
@@ -142,6 +153,7 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 	context.savepointUndoLocation = get_subxact_undo_location(desc->undoType);
 	context.pageReserveKind = pageReserveKind;
 	context.callbackInfo = callbackInfo;
+	context.pkSatisfiesBoundary = true;
 
 	Assert(callbackInfo);
 	Assert((action != BTreeOperationInsert) || (tupleType == BTreeKeyLeafTuple));
@@ -696,6 +708,25 @@ o_btree_modify_insert_update(BTreeModifyInternalContext *context)
 	BTreeDescr *desc = pageFindContext->desc;
 	int			tuplen;
 
+	/*
+	 * For primary index modification during concurrent secondary index build,
+	 * check if the PK satisfies the validation boundary WHILE HOLDING PAGE LOCK.
+	 * Store the result in the callback arg for use by secondary index operations.
+	 */
+	if (desc->type == oIndexPrimary && !IS_SYS_TREE_OIDS(desc->oids))
+	{
+		bool		pkSatisfiesBoundary;
+		
+		/* Check validation boundary while holding the page lock on primary */
+		pkSatisfiesBoundary = btree_pk_satisfies_validation_boundary(desc, context->tuple);
+
+		/* Store result for use by secondary index operations */
+		context->pkSatisfiesBoundary = pkSatisfiesBoundary;
+		
+		/* Store in global variable for undo record creation */
+		g_last_pk_satisfies_boundary = pkSatisfiesBoundary;
+	}
+	
 	if (context->undoIsReserved && context->needsUndo)
 	{
 		o_btree_modify_add_undo_record(context);
@@ -793,6 +824,26 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 	page = O_GET_IN_MEMORY_PAGE(blkno);
 
 	BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, page, &loc);
+	
+	/*
+	 * For primary index modification during concurrent secondary index build,
+	 * check if the PK satisfies the validation boundary WHILE HOLDING PAGE LOCK.
+	 * Store the result in the callback arg for use by secondary index operations.
+	 */
+	if (desc->type == oIndexPrimary && !IS_SYS_TREE_OIDS(desc->oids))
+	{
+		// OTableDescr *tableDescr = (OTableDescr *) desc->arg;
+		bool		pkSatisfiesBoundary;
+		
+		/* Check validation boundary while holding the page lock on primary */
+		pkSatisfiesBoundary = btree_pk_satisfies_validation_boundary(desc, curTuple);
+		
+		/* Store result for use by secondary index operations */
+		context->pkSatisfiesBoundary = pkSatisfiesBoundary;
+		
+		/* Store in global variable for undo record creation */
+		g_last_pk_satisfies_boundary = pkSatisfiesBoundary;
+	}
 
 	if (!context->needsUndo)
 	{
@@ -1051,6 +1102,23 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		return OBTreeModifyResultInserted;
 	}
 	Assert(findResult == OFindPageResultSuccess);
+	
+	if (desc->type == oIndexRegular && !o_get_last_pk_satisfies_boundary() && btree_index_is_ready_not_valid(desc->oids.reloid))
+	{
+		/* For regular index, if the last inserted PK does not satisfy the validation boundary, then we know for sure that the tuple to be modified also does not satisfy the boundary. So, we can skip the modification. */
+		ppool_release_reserved(desc->ppool, pageReserveKind);
+		
+		unlock_page(pageFindContext.items[pageFindContext.index].blkno);
+		//
+		if (action == BTreeOperationInsert)
+			return OBTreeModifyResultInserted;
+		else if (action == BTreeOperationDelete)
+			return OBTreeModifyResultDeleted;
+		else if (action == BTreeOperationLock)
+			return OBTreeModifyResultLocked;
+		else
+			elog(ERROR, "unexpected action: %d", action);
+	}
 
 	return o_btree_modify_internal(&pageFindContext, action, tuple, tupleType,
 								   key, keyType, opOxid, opCsn,
@@ -1595,4 +1663,15 @@ o_btree_autonomous_delete(BTreeDescr *desc, OTuple key, BTreeKeyType keyType,
 	}
 
 	return (result == OBTreeModifyResultDeleted);
+}
+
+/*
+ * Get the last boundary check result from primary index modification.
+ * This is used when creating undo records for secondary index operations
+ * to determine if the operation should be marked as actuallyPerformed.
+ */
+bool
+o_get_last_pk_satisfies_boundary(void)
+{
+	return g_last_pk_satisfies_boundary;
 }

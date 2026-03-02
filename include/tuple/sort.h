@@ -20,6 +20,12 @@ extern Tuplesortstate *tuplesort_begin_orioledb_index(OIndexDescr *idx,
 													  int workMem,
 													  bool randomAccess,
 													  SortCoordinate coordinate);
+extern Tuplesortstate *tuplesort_begin_orioledb_index_secondary_pk(OIndexDescr *secondary,
+																   OIndexDescr *primary,
+																   int workMem,
+																   bool randomAccess,
+																   SortCoordinate coordinate);
+																   
 extern Tuplesortstate *tuplesort_begin_orioledb_toast(OIndexDescr *toast,
 													  OIndexDescr *primary,
 													  int workMem,

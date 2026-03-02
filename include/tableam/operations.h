@@ -155,5 +155,10 @@ extern bool o_is_index_predicate_satisfied(OIndexDescr *idx,
 extern void o_truncate_table(ORelOids oids, bool missingOK);
 extern void o_apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation, TupleTableSlot *slot, CommitSeqNo csn);
 extern int	o_exclusion_cmp(OIndexDescr *id, OBTreeKeyBound *key1, OTuple *tuple2);
+extern bool am_validate_process;
+extern OXid o_validate_process_current_oxid;
 
+#define IS_VALIDATE_PROCESS() (am_validate_process)
+#define SET_VALIDATE_PROCESS_OXID(oxid) (o_validate_process_current_oxid = oxid)
+#define GET_VALIDATE_PROCESS_OXID() (o_validate_process_current_oxid)
 #endif

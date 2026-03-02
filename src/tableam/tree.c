@@ -44,9 +44,6 @@ static JsonbValue *o_key_to_jsonb(BTreeDescr *desc, OTuple key,
 static OTuple o_sidx_tuple_make_key(BTreeDescr *desc, OTuple tupl,
 									Pointer data, bool keep_version,
 									bool *allocated);
-static OTuple o_tuple_make_key(BTreeDescr *desc, OTuple tuple,
-							   Pointer data, bool keep_version,
-							   bool *allocated);
 static OTuple o_create_key_tuple(BTreeDescr *desc, OTuple tuple,
 								 Pointer data, OIndexType type,
 								 bool keep_version);
@@ -462,7 +459,7 @@ o_idx_unique_hash(BTreeDescr *desc, OTuple tuple)
 }
 
 /* creates index tuple from table tuple for primary index */
-static OTuple
+OTuple
 o_tuple_make_key(BTreeDescr *desc, OTuple tuple, Pointer data,
 				 bool keep_version, bool *allocated)
 {

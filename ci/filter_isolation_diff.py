@@ -35,7 +35,7 @@ allowedRegexes = {
 	r"ERROR:  tuple to be locked has its primary key changed due to concurrent update": ["*"],
 	r"ERROR:  Not implemented: orioledb_tuple_tid_valid": ["*"],
 	r"ERROR:  Not implemented: orioledb_set_tidrange": ["*"],
-	r"ERROR:  REINDEX CONCURRENTLY is not supported for orioledb tables yet": ["*"],
+	r"ERROR:  REINDEX CONCURRENTLY is not supported for orioledb PK": ["*"],
 	r"ERROR:  orioledb tables does not support CLUSTER": ["*"],
 	r"ERROR:  orioledb table \"[a-z0-9_]+\" does not support VACUUM FULL": ["*"],
 	r"ERROR:  cannot use PREPARE TRANSACTION in transaction that uses orioledb table": ["*"],
@@ -49,7 +49,6 @@ allowedRegexes = {
 	r"setup failed: ERROR:  function \"[a-z0-9_]+\" cannot be used here": ['insert-conflict-specconflict'],
 	r"  3|setup1 updated by merge1 source not matched by merge2a": ['merge-update'],
 	r"  2|setup1 updated by merge1": ['merge-update'],
-	r"ERROR:  concurrent index creation is not supported for orioledb tables yet": ['*'],
 	r"ERROR:  REFRESH MATERIALIZED VIEW CONCURRENTLY is not supported for orioledb tables yet": ['*'],
 	r"ERROR:  could not serialize access due to concurrent delete": ['partition-key-update-3'],
 }

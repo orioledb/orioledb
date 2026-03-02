@@ -1,0 +1,169 @@
+CREATE DATABASE reindex_concurrently_test_db;
+\c reindex_concurrently_test_db
+CREATE SCHEMA orioledb;
+CREATE EXTENSION orioledb SCHEMA orioledb;
+CREATE TABLE t_concurrent_build (
+	id int PRIMARY KEY,
+	val int
+) USING orioledb;
+-- Insert enough data to make index build take time
+INSERT INTO t_concurrent_build SELECT i, i * 100 FROM generate_series(2, 5000000) i;
+-- Create a simple done table to signal when background job completes
+CREATE TABLE concurrent_build_done (step int);
+-- Start concurrent index build in background
+\! psql -d reindex_concurrently_test_db -c "CREATE INDEX CONCURRENTLY t_concurrent_build_idx ON t_concurrent_build (val);"  && psql -d reindex_concurrently_test_db -c "INSERT INTO concurrent_build_done VALUES (1);" &
+-- Wait for build phase to start (1 seconds)
+SELECT pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+-- Case 1: INSERT new tuple (key=99999) - will be deleted later
+-- Case 2: DELETE existing tuple (key=100) - will be reinserted later
+INSERT INTO t_concurrent_build VALUES (1, 100);
+DELETE FROM t_concurrent_build WHERE id = 5;
+INSERT INTO t_concurrent_build VALUES (5000001, 500000100);
+DELETE FROM t_concurrent_build WHERE id = 50000;
+DELETE FROM t_concurrent_build WHERE id = 50001;
+SELECT pg_sleep(3);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+BEGIN;
+INSERT INTO t_concurrent_build VALUES (50000, 5000000);
+SAVEPOINT sp1;
+INSERT INTO t_concurrent_build VALUES (50001, 5000100);
+SELECT pg_sleep(30);  -- Ensure this transaction overlaps with index build
+ pg_sleep 
+----------
+ 
+(1 row)
+
+ROLLBACK TO sp1;  -- Rollback second insert, but keep first one
+COMMIT;
+-- Wait for background job completion signal
+DO $$
+DECLARE
+	done_count int := 0;
+BEGIN
+	WHILE done_count = 0 LOOP
+		SELECT COUNT(*) INTO done_count FROM concurrent_build_done WHERE step = 1;
+		IF done_count = 0 THEN
+			PERFORM pg_sleep(1);
+		END IF;
+        COMMIT;
+	END LOOP;
+END $$;
+CREATE INDEX
+INSERT 0 1
+-- Verify the index was created
+\d+ t_concurrent_build
+                            Table "public.t_concurrent_build"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ id     | integer |           | not null |         | plain   |              | 
+ val    | integer |           |          |         | plain   |              | 
+Indexes:
+    "t_concurrent_build_pkey" PRIMARY KEY, btree (id)
+    "t_concurrent_build_idx" btree (val)
+
+SELECT * FROM orioledb.orioledb_tbl_indices( 't_concurrent_build'::regclass, true, true);
+               orioledb_tbl_indices                
+---------------------------------------------------
+ Index t_concurrent_build_pkey                    +
+     reloid: 16464                                +
+     relnode: 16467                               +
+     Index type: primary, unique                  +
+     Leaf tuple size: 2, non-leaf tuple size: 1   +
+     Non-leaf tuple fields: id                    +
+     Leaf tuple fields: id, val                   +
+ Index t_concurrent_build_idx                     +
+     reloid: 16472                                +
+     relnode: 16472                               +
+     Index type: secondary                        +
+     Leaf tuple size: 2, non-leaf tuple size: 2   +
+     Non-leaf tuple fields: val, id               +
+     Leaf tuple fields: val, id                   +
+ Index toast                                      +
+     reloid: 16462                                +
+     relnode: 16466                               +
+     Index type: secondary                        +
+     Leaf tuple size: 4, non-leaf tuple size: 3   +
+     Non-leaf tuple fields: id, attnum, chunknum  +
+     Leaf tuple fields: id, attnum, chunknum, data+
+ 
+(1 row)
+
+-- Verify index works correctly
+SET enable_seqscan = off;
+SET enable_bitmapscan = off;
+EXPLAIN (COSTS OFF) SELECT id FROM t_concurrent_build WHERE val = 100;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Index Only Scan using t_concurrent_build_idx on t_concurrent_build
+   Index Cond: (val = 100)
+(2 rows)
+
+SELECT id FROM t_concurrent_build WHERE val = 100;
+ id 
+----
+  1
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT id FROM t_concurrent_build WHERE val = 500;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Index Only Scan using t_concurrent_build_idx on t_concurrent_build
+   Index Cond: (val = 500)
+(2 rows)
+
+SELECT id FROM t_concurrent_build WHERE val = 500;
+ id 
+----
+(0 rows)
+
+EXPLAIN (COSTS OFF) SELECT id FROM t_concurrent_build WHERE val = 5000000;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Index Only Scan using t_concurrent_build_idx on t_concurrent_build
+   Index Cond: (val = 5000000)
+(2 rows)
+
+SELECT id FROM t_concurrent_build WHERE val = 5000000;
+  id   
+-------
+ 50000
+(1 row)
+
+EXPLAIN (COSTS OFF) SELECT id FROM t_concurrent_build WHERE val = 5000100;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Index Only Scan using t_concurrent_build_idx on t_concurrent_build
+   Index Cond: (val = 5000100)
+(2 rows)
+
+SELECT id FROM t_concurrent_build WHERE val = 5000100;
+ id 
+----
+(0 rows)
+
+EXPLAIN (COSTS OFF) SELECT id FROM t_concurrent_build WHERE val = 500000100;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Index Only Scan using t_concurrent_build_idx on t_concurrent_build
+   Index Cond: (val = 500000100)
+(2 rows)
+
+SELECT id FROM t_concurrent_build WHERE val = 500000100;
+   id    
+---------
+ 5000001
+(1 row)
+
+RESET enable_seqscan;
+RESET enable_bitmapscan;
+\c regression
+DROP DATABASE reindex_concurrently_test_db;

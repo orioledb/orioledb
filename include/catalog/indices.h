@@ -21,6 +21,8 @@
 #include "catalog/o_tables.h"
 #include "tableam/descr.h"
 
+#define InvalidCSN				 (UINT64_MAX)
+
 #define recovery_first_worker 	 (0)
 #define recovery_last_worker 	 (recovery_pool_size_guc - 1)
 #define recovery_workers		 (recovery_pool_size_guc)
@@ -133,4 +135,6 @@ extern void _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
 										  OTable *recovery_o_table, OTable *recovery_old_o_table);
 extern Size _o_index_parallel_estimate_shared(Size o_table_size);
 extern void drop_primary_index(Relation rel, OTable *o_table);
+extern void  check_secondary_index_unique(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
+							 IndexBuildResult *result);
 #endif							/* __INDICES_H__ */

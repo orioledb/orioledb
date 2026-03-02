@@ -1,0 +1,93 @@
+CREATE DATABASE reindex_concurrently_test_db;
+\c reindex_concurrently_test_db
+CREATE SCHEMA orioledb;
+CREATE EXTENSION orioledb SCHEMA orioledb;
+CREATE TABLE t_concurrent_build (
+	id int PRIMARY KEY,
+	val int
+) USING orioledb;
+-- Insert enough data to make index build take time
+INSERT INTO t_concurrent_build SELECT i, i * 100 FROM generate_series(2, 5000000) i;
+-- Create a simple done table to signal when background job completes
+CREATE TABLE concurrent_build_done (step int);
+INSERT INTO t_concurrent_build VALUES (1, 200); 
+CREATE UNIQUE INDEX CONCURRENTLY t_concurrent_build_idx ON t_concurrent_build (val);
+ERROR:  could not create unique index "t_concurrent_build_idx"
+DETAIL:  Duplicate key "(val)=('200')" violates unique constraint.
+\d+ t_concurrent_build
+                            Table "public.t_concurrent_build"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ id     | integer |           | not null |         | plain   |              | 
+ val    | integer |           |          |         | plain   |              | 
+Indexes:
+    "t_concurrent_build_pkey" PRIMARY KEY, btree (id)
+    "t_concurrent_build_idx" UNIQUE, btree (val) INVALID
+
+DROP INDEX t_concurrent_build_idx;
+SELECT * FROM orioledb.orioledb_tbl_indices( 't_concurrent_build'::regclass, true, true);
+               orioledb_tbl_indices                
+---------------------------------------------------
+ Index t_concurrent_build_pkey                    +
+     reloid: 16552                                +
+     relnode: 16555                               +
+     Index type: primary, unique                  +
+     Leaf tuple size: 2, non-leaf tuple size: 1   +
+     Non-leaf tuple fields: id                    +
+     Leaf tuple fields: id, val                   +
+ Index toast                                      +
+     reloid: 16550                                +
+     relnode: 16554                               +
+     Index type: secondary                        +
+     Leaf tuple size: 4, non-leaf tuple size: 3   +
+     Non-leaf tuple fields: id, attnum, chunknum  +
+     Leaf tuple fields: id, attnum, chunknum, data+
+ 
+(1 row)
+
+DELETE FROM t_concurrent_build WHERE id = 1;
+-- Start concurrent index build in background
+\! psql -d reindex_concurrently_test_db -c "CREATE UNIQUE INDEX CONCURRENTLY t_concurrent_build_idx ON t_concurrent_build (val);"  && psql -d reindex_concurrently_test_db -c "INSERT INTO concurrent_build_done VALUES (1);" &
+-- Wait for build phase to start (1 seconds)
+SELECT pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+DELETE FROM t_concurrent_build WHERE id = 4000000;
+INSERT INTO t_concurrent_build VALUES (1, 400000000);
+-- Wait for background job completion signal
+DO $$
+DECLARE
+	done_count int := 0;
+BEGIN
+	WHILE done_count = 0 LOOP
+		SELECT COUNT(*) INTO done_count FROM concurrent_build_done WHERE step = 1;
+		IF done_count = 0 THEN
+			PERFORM pg_sleep(1);
+		END IF;
+        COMMIT;
+	END LOOP;
+END $$;
+CREATE INDEX
+INSERT 0 1
+-- Verify the index was created
+\d+ t_concurrent_build
+                            Table "public.t_concurrent_build"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ id     | integer |           | not null |         | plain   |              | 
+ val    | integer |           |          |         | plain   |              | 
+Indexes:
+    "t_concurrent_build_pkey" PRIMARY KEY, btree (id)
+    "t_concurrent_build_idx" UNIQUE, btree (val)
+
+DELETE FROM t_concurrent_build WHERE id = 1;
+INSERT INTO t_concurrent_build VALUES (1, 200);
+ERROR:  duplicate key value violates unique constraint "t_concurrent_build_idx"
+DETAIL:  Key (val)=('200') already exists.
+DROP INDEX t_concurrent_build_idx;
+INSERT INTO t_concurrent_build VALUES (1, 200);
+\c regression
+DROP DATABASE reindex_concurrently_test_db;

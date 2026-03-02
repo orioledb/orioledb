@@ -571,7 +571,6 @@ SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid);
 (1 row)
 
 REINDEX index CONCURRENTLY stats_test_idx1;
-WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead
 -- true since REINDEX INDEX CONCURRENTLY was changed to plain REINDEX
 SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid);
  pg_stat_have_stats 

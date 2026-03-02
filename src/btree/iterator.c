@@ -65,6 +65,8 @@ struct BTreeIterator
 	/* callback for fetching tuple version */
 	TupleFetchCallback fetchCallback;
 	void	   *fetchCallbackArg;
+	
+	BTreeLeafTuphdr header;
 #ifdef USE_ASSERT_CHECKING
 	/* additional check for iteration order */
 	OFixedTuple prevTuple;
@@ -480,8 +482,9 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 }
 
 BTreeIterator *
-o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
-						OSnapshot *o_snapshot, ScanDirection scanDir)
+o_btree_iterator_create_with_flags(BTreeDescr *desc, void *key, BTreeKeyType kind,
+								   OSnapshot *o_snapshot, ScanDirection scanDir,
+								   uint16 flags)
 {
 	BTreeIterator *it;
 	uint16		findFlags = BTREE_PAGE_FIND_IMAGE;
@@ -503,7 +506,8 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 
 	if (IT_IS_BACKWARD(it))
 		findFlags |= BTREE_PAGE_FIND_KEEP_LOKEY;
-
+	
+	findFlags |= flags;
 	init_page_find_context(&it->context, desc,
 						   it->combinedResult ? COMMITSEQNO_INPROGRESS : o_snapshot->csn, findFlags);
 
@@ -551,6 +555,14 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 						kind != BTreeKeyRightmost ? kind : BTreeKeyNone);
 
 	return it;
+}
+
+BTreeIterator *
+o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
+						OSnapshot *o_snapshot, ScanDirection scanDir)
+{
+	return o_btree_iterator_create_with_flags(desc, key, kind,
+											  o_snapshot, scanDir, 0);
 }
 
 void
@@ -778,7 +790,12 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn)
 					UNDO_IT_NEXT_OFFSET(&it->undoIt, &it->undoLoc);
 
 				if (!O_TUPLE_IS_NULL(result))
+				{
+					BTreeLeafTuphdr *tupHdr;
+					tupHdr = (BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(img, &leaf_item->locator);
+					it->header = *tupHdr;
 					return result;
+				}
 			}
 			else
 			{
@@ -792,7 +809,12 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn)
 				UNDO_IT_NEXT_OFFSET(&it->undoIt, &it->undoLoc);
 
 				if (!O_TUPLE_IS_NULL(result))
+				{
+					BTreeLeafTuphdr *tupHdr;
+					tupHdr = (BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(hImg, &it->undoLoc);
+					it->header = *tupHdr;
 					return result;
+				}
 			}
 		}
 		else
@@ -807,12 +829,35 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn)
 			IT_NEXT_OFFSET(it, &leaf_item->locator);
 
 			if (!O_TUPLE_IS_NULL(result))
+			{
+				BTreeLeafTuphdr *tupHdr;
+				OBTreeFindPageContext *ctx = &it->context;
+				OBtreePageFindItem *item = &ctx->items[ctx->index];
+				
+				/* Need to get tuple header - back up locator to get it */
+				BTreePageItemLocator tempLoc = item->locator;
+				if (IT_IS_FORWARD(it))
+					BTREE_PAGE_LOCATOR_PREV(img, &tempLoc);
+				else
+					BTREE_PAGE_LOCATOR_NEXT(img, &tempLoc);
+					
+				tupHdr = (BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(img, &tempLoc);
+	
+				it->header = *tupHdr;
+				
 				return result;
+			}
 		}
 	}
 
 	O_TUPLE_SET_NULL(result);
 	return result;				/* unreachable */
+}
+
+BTreeLeafTuphdr
+o_btree_iterator_get_current_header(BTreeIterator *it)
+{
+	return it->header;
 }
 
 /*
@@ -994,6 +1039,7 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 
 		if (BTREE_PAGE_LOCATOR_IS_VALID(img, loc))
 		{
+			
 			BTREE_PAGE_READ_LEAF_ITEM(*tupHdr, result, context->img, loc);
 			IT_NEXT_OFFSET(it, loc);
 
@@ -1056,6 +1102,87 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 	return result;				/* unreachable */
 }
 
+OTuple
+validate_iterator_fetch(BTreeIterator *it, bool *scanEnd,
+						BTreeLocationHint *hint, BTreeLeafTuphdr **tupHdr, OInMemoryBlkno *rightMostBlock)
+{
+	OBTreeFindPageContext *context = &it->context;
+	BTreeDescr *desc = context->desc;
+	BTreeLeafTuphdr *localTupHdr;
+	OTuple		result;
+	OFixedKey	key_buf;
+
+	Assert(BTREE_PAGE_FIND_IS(context, MODIFY));
+	Assert(IT_IS_FORWARD(it));
+
+	if (!tupHdr)
+		tupHdr = &localTupHdr;
+
+	*scanEnd = false;
+	while (true)
+	{
+		BTreePageItemLocator *loc = &context->items[context->index].locator;
+		OInMemoryBlkno blkno = context->items[context->index].blkno;
+		Page		img = O_GET_IN_MEMORY_PAGE(blkno);
+
+		if (BTREE_PAGE_LOCATOR_IS_VALID(img, loc))
+		{
+			BTREE_PAGE_READ_LEAF_ITEM(*tupHdr, result, img, loc);
+			BTREE_PAGE_LOCATOR_NEXT(img, loc);
+
+			if (hint)
+			{
+				hint->blkno = blkno;
+				hint->pageChangeCount = context->items[context->index].pageChangeCount;
+			}
+			
+			*rightMostBlock = OInvalidInMemoryBlkno;
+			return result;
+		}
+
+		if (O_PAGE_IS(img, RIGHTMOST))
+		{
+			/* Keep the lock */
+			*rightMostBlock = blkno;
+			*scanEnd = true;
+			O_TUPLE_SET_NULL(result);
+			return result;
+		}
+
+		{
+			uint64		rightlink = BTREE_PAGE_GET_RIGHTLINK(img);
+			OInMemoryBlkno nextBlkno = RIGHTLINK_GET_BLKNO(rightlink);
+			uint32		nextChangeCount = RIGHTLINK_GET_CHANGECOUNT(rightlink);
+
+			if (OInMemoryBlknoIsValid(nextBlkno))
+			{
+				Page		nextImg;
+
+				lock_page(nextBlkno);
+				nextImg = O_GET_IN_MEMORY_PAGE(nextBlkno);
+				if (O_PAGE_GET_CHANGE_COUNT(nextImg) == nextChangeCount)
+				{
+					context->items[context->index].blkno = nextBlkno;
+					context->items[context->index].pageChangeCount = nextChangeCount;
+					BTREE_PAGE_LOCATOR_FIRST(nextImg, loc);
+					unlock_page(blkno);
+					continue;
+				}
+				unlock_page(nextBlkno);
+			}
+		}
+
+		copy_fixed_hikey(desc, &key_buf, img);
+		unlock_page(blkno);
+
+		if (O_TUPLE_IS_NULL(key_buf.tuple) ||
+			find_page(context, &key_buf, BTreeKeyNonLeafKey, 0) != OFindPageResultSuccess)
+		{
+			elog(ERROR, "failed to find next page for validate iterator");
+		}
+	}
+}
+
 /*
  * Iterate over leaf page tuples without considering undo log.  Deleted tuples
  * are reported as NULLs.  So, the separate `*end` flag indicates finish of
@@ -1063,10 +1190,10 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
  */
 OTuple
 btree_iterate_raw(BTreeIterator *it, void *end, BTreeKeyType endKind,
-				  bool endInclude, bool *scanEnd, BTreeLocationHint *hint)
+				  bool endInclude, bool *scanEnd, BTreeLocationHint *hint, BTreeLeafTuphdr **tupHdr)
 {
 	return btree_iterate_raw_internal(it, end, endKind, endInclude, scanEnd,
-									  hint, true, NULL);
+									  hint, true, tupHdr);
 }
 
 /*

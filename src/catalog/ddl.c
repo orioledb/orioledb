@@ -487,7 +487,7 @@ get_all_vacuum_rels(int options)
 
 /* Based on postgres function ReindexMultipleTables */
 static bool
-check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool concurrently)
+check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool concurrently, bool *has_pk)
 {
 	Oid			objectOid;
 	Relation	relationRelation;
@@ -656,6 +656,8 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 				if (ind->rd_rel->relam == BTREE_AM_OID && !(options && !options->orioledb_index))
 				{
 					String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
+					
+					*has_pk |= ind->rd_index->indisprimary;
 
 					reindex_list = list_append_unique(reindex_list, ix_name);
 				}
@@ -820,7 +822,7 @@ create_ctas_nodata(List *tlist, IntoClause *into)
 #endif
 
 static bool
-ReindexPartitions(Oid relid, bool concurrently)
+ReindexPartitions(Oid relid, bool concurrently, bool *has_pk)
 {
 	List	   *inhoids;
 	ListCell   *lc;
@@ -853,10 +855,28 @@ ReindexPartitions(Oid relid, bool concurrently)
 				is_orioledb_rel(part_rel))
 			{
 				has_orioledb = true;
+				
+				ListCell   *index;
+				
+				foreach(index, RelationGetIndexList(part_rel))
+				{
+					Oid			indexOid = lfirst_oid(index);
+					Relation	ind = relation_open(indexOid, AccessShareLock);
+					OBTOptions *options = (OBTOptions *) ind->rd_options;
+
+					if (ind->rd_rel->relam == BTREE_AM_OID && !(options && !options->orioledb_index))
+					{
+						*has_pk |= ind->rd_index->indisprimary;
+					}
+
+					relation_close(ind, AccessShareLock);
+				}
 			}
 			else if (part_rel->rd_rel->relkind == RELKIND_INDEX)
 			{
 				Relation	tbl;
+				
+				*has_pk |= part_rel->rd_index->indisprimary;
 
 				tbl = relation_open(part_rel->rd_index->indrelid, AccessShareLock);
 
@@ -1169,6 +1189,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		char	   *tablespacename = NULL;
 		bool		concurrently = false;
 		bool		has_orioledb = false;
+		bool		has_pk = false;
 		ListCell   *lc;
 
 		foreach(lc, stmt->params)
@@ -1212,7 +1233,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 					if (get_rel_relkind(indOid) == RELKIND_PARTITIONED_INDEX)
 					{
-						has_orioledb = ReindexPartitions(indOid, concurrently);
+						has_orioledb = ReindexPartitions(indOid, concurrently, &has_pk);
 						break;
 					}
 
@@ -1228,6 +1249,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 						ix_name = makeString(pstrdup(iRel->rd_rel->relname.data));
 						reindex_list = list_append_unique(reindex_list, ix_name);
+						has_pk |= iRel->rd_index->indisprimary;
 						if (concurrently)
 							has_orioledb = true;
 					}
@@ -1244,7 +1266,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 					if (get_rel_relkind(tblOid) == RELKIND_PARTITIONED_TABLE)
 					{
-						has_orioledb = ReindexPartitions(tblOid, concurrently);
+						has_orioledb = ReindexPartitions(tblOid, concurrently, &has_pk);
 						break;
 					}
 					tbl = relation_open(tblOid, AccessShareLock);
@@ -1262,6 +1284,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 							{
 								String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
 
+								has_pk |= ind->rd_index->indisprimary;
 								reindex_list = list_append_unique(reindex_list, ix_name);
 							}
 							relation_close(ind, AccessShareLock);
@@ -1275,7 +1298,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			case REINDEX_OBJECT_SCHEMA:
 			case REINDEX_OBJECT_SYSTEM:
 			case REINDEX_OBJECT_DATABASE:
-				has_orioledb = check_multiple_tables(stmt->name, stmt->kind, concurrently);
+				has_orioledb = check_multiple_tables(stmt->name, stmt->kind, concurrently, &has_pk);
 				break;
 			default:
 				elog(ERROR, "unrecognized object type: %d",
@@ -1296,17 +1319,19 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									get_tablespace_name(tablespaceOid))));
 			}
 
-			if (orioledb_strict_mode)
-				elog(ERROR, "REINDEX CONCURRENTLY is not supported for orioledb tables yet");
-			else
-				elog(WARNING, "REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead");
-
-			foreach(lc, stmt->params)
+			if (has_pk)
 			{
-				DefElem    *opt = (DefElem *) lfirst(lc);
+				if (orioledb_strict_mode)
+					elog(ERROR, "REINDEX CONCURRENTLY is not supported for orioledb PK");
+				else
+					elog(WARNING, "REINDEX CONCURRENTLY is not supported for orioledb PK, using a plain REINDEX instead");
 
-				if (strcmp(opt->defname, "concurrently") == 0)
-					stmt->params = foreach_delete_current(stmt->params, lc);
+				foreach(lc, stmt->params)
+				{
+					DefElem    *opt = (DefElem *) lfirst(lc);
+					if (strcmp(opt->defname, "concurrently") == 0)
+						stmt->params = foreach_delete_current(stmt->params, lc);
+				}
 			}
 		}
 	}
@@ -1411,27 +1436,16 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 		if (stmt->concurrent)
 		{
-			Oid			relid;
-			Relation	rel;
 			LOCKMODE	lockmode;
 
 			PreventInTransactionBlock(context == PROCESS_UTILITY_TOPLEVEL,
 									  "CREATE INDEX CONCURRENTLY");
 
 			lockmode = ShareUpdateExclusiveLock;
-			relid =
-				RangeVarGetRelidExtended(stmt->relation, lockmode,
+			RangeVarGetRelidExtended(stmt->relation, lockmode,
 										 0,
 										 RangeVarCallbackOwnsRelation,
 										 NULL);
-			rel = table_open(relid, lockmode);
-
-			if (is_orioledb_rel(rel))
-			{
-				table_close(rel, lockmode);
-				elog(ERROR, "concurrent index creation is not supported for orioledb tables yet");
-			}
-			table_close(rel, lockmode);
 		}
 	}
 	else if (IsA(pstmt->utilityStmt, CreatedbStmt))

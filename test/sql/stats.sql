@@ -277,7 +277,7 @@ SELECT 'stats_test_idx1'::regclass::oid AS stats_test_idx1_oid \gset
 select a from stats_test_tab1 where a = 3;
 SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid);
 REINDEX index CONCURRENTLY stats_test_idx1;
--- true since REINDEX INDEX CONCURRENTLY was changed to plain REINDEX
+
 SELECT pg_stat_have_stats('relation', :dboid, :stats_test_idx1_oid);
 -- true for new oid
 SELECT 'stats_test_idx1'::regclass::oid AS stats_test_idx1_oid \gset

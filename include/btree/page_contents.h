@@ -319,6 +319,20 @@ typedef struct
 	char		fixedData[O_BTREE_MAX_KEY_SIZE];
 } OFixedKey;
 
+
+/*
+ * Concurrent index build validation boundary hash table.
+ * Hash key: primary index OIDs
+ * Hash value: validation boundary tuple
+ */
+typedef struct
+{
+	ORelOids	key;								/* Hash key: PK index OIDs */
+	uint16		tupleLen;							/* Length of boundary tuple */
+	uint8		formatFlags;						/* Format flags of boundary tuple */
+	char		tupleData[O_BTREE_MAX_KEY_SIZE];	/* Boundary tuple data */
+} ValidationBoundaryEntry;
+
 /*
  * Fixed structure for storage of B-tree key.  Separate key length field,
  * saves us from getting length of inconsistent key.

@@ -1587,7 +1587,7 @@ o_update_secondary_index(OIndexDescr *id,
 									id->name.data,
 									true);
 
-		if (!id->unique || o_has_nulls(new_ix_tup))
+		if (!id->unique || o_has_nulls(new_ix_tup) || btree_index_is_ready_not_valid(id->oids.reloid))
 			res.success = o_btree_modify(&id->desc, BTreeOperationInsert,
 										 new_ix_tup, BTreeKeyLeafTuple,
 										 (Pointer) &new_key, BTreeKeyBound,
@@ -1786,6 +1786,18 @@ o_tbl_index_delete(OIndexDescr *id, OIndexNumber ix_num, TupleTableSlot *slot,
 	OTuple		nullTup;
 
 	O_TUPLE_SET_NULL(nullTup);
+	
+	/*
+	 * For secondary indexes during concurrent index build validation,
+	 * we create an undo record tracking the operation. The boundary check
+	 * will happen later when the page lock is held.
+	 */
+	if (id->desc.type != oIndexPrimary && !o_get_last_pk_satisfies_boundary() && btree_index_is_ready_not_valid(id->oids.reloid))
+	{
+		memset(&result, 0, sizeof(result));
+		result.success = true;
+		return result;  /* Skip boundary check for this operation */
+	}
 
 	fill_key_bound(slot, id, &bound);
 	o_btree_load_shmem(&id->desc);
@@ -1885,6 +1897,16 @@ o_tbl_index_insert(OTableDescr *descr,
 
 	if (!primary)
 	{
+		/*
+		 * Create undo record for this secondary index operation.
+		 * The undo record will track what actually happened during the operation.
+		 * The boundary check will occur later when the page lock is held.
+		 */
+		if (!IS_VALIDATE_PROCESS() && !o_get_last_pk_satisfies_boundary() && btree_index_is_ready_not_valid(id->oids.reloid))  /* Skip primary at index 0 */
+		{
+			return OBTreeModifyResultInserted;  /* Skip boundary check for this operation */ 
+		}
+		
 		if (own_tup)
 		{
 			fill_key_bound(slot, id, &knew);
@@ -1906,7 +1928,7 @@ o_tbl_index_insert(OTableDescr *descr,
 
 	o_btree_load_shmem(bd);
 	if (primary || !id->unique ||
-		(!id->nulls_not_distinct && o_has_nulls(tup)))
+		(!id->nulls_not_distinct && o_has_nulls(tup)) || btree_index_is_ready_not_valid(id->oids.reloid))
 		result = o_btree_modify(bd, BTreeOperationInsert,
 								tup, BTreeKeyLeafTuple,
 								(Pointer) &knew, BTreeKeyBound,
@@ -2389,6 +2411,9 @@ o_lock_wait_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 			elog(ERROR, "Unknown wait policy: %u", o_arg->waitPolicy);
 			break;
 	}
+	
+	pg_unreachable();
+	return OBTreeCallbackActionXidWait;
 }
 
 static OBTreeModifyCallbackAction

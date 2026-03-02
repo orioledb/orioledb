@@ -112,7 +112,7 @@ o_tuple_print(TupleDesc tupDesc, OTupleFixedFormatSpec *spec,
 	appendStringInfo(buf, ")");
 }
 
-static void
+void
 idx_key_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg)
 {
 	TuplePrintOpaque *opaque = (TuplePrintOpaque *) arg;
@@ -122,7 +122,7 @@ idx_key_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg)
 				  opaque->truncateValues);
 }
 
-static void
+void
 idx_tup_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg)
 {
 	TuplePrintOpaque *opaque = (TuplePrintOpaque *) arg;
