@@ -1296,14 +1296,29 @@ o_find_toastable_attrs(OTableDescr *tableDescr)
 	}
 }
 
-/* fills field opclass fields and finds comparator for it */
+/*
+ * oFillFieldOpClassAndComparator
+ *
+ * Resolve opclass/comparator metadata for an index field using explicit
+ * object datoid.
+ *
+ * Note: this function may be reached while processing pages selected by the
+ * global page-pool clock. Therefore, database context must come from the
+ * index/table metadata (datoid argument), not implicitly from the current
+ * backend database.
+ */
 void
 oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid, Oid exclusion_op)
 {
 	OOpclass   *opclass;
 
+	Assert(OidIsValid(datoid));
+	Assert(OidIsValid(opclassoid));
+
 	o_set_sys_cache_search_datoid(datoid);
 	opclass = o_opclass_get(opclassoid, datoid);
+	if (opclass == NULL)
+		elog(ERROR, "failed to resolve opclass %u in datoid %u", opclassoid, datoid);
 	Assert(opclass);
 	field->opclass = opclassoid;
 	field->inputtype = opclass->inputtype;
@@ -1397,6 +1412,10 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 
 /*
  * Find opclass comparator in cache or create new one.
+ *
+ * Comparator support functions are resolved in opclass-owning database.
+ * Use opclass->key.common.datoid explicitly to avoid cross-database proc
+ * cache lookup when descriptor build is triggered from global eviction path.
  */
 static OComparator *
 o_find_opclass_comparator(OOpclass *opclass, Oid collation)
