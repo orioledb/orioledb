@@ -1750,7 +1750,7 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 
 	if (!fromResowner)
 	{
-		dlist_delete(&scan->listNode);
+		dlist_delete_from_thoroughly(&listOfScans, &scan->listNode);
 		pfree(scan);
 	}
 
@@ -1776,7 +1776,6 @@ seq_scans_cleanup(void)
 	{
 		BTreeSeqScan *scan = dlist_head_element(BTreeSeqScan, listNode, &listOfScans);
 
-		dlist_delete(&scan->listNode);
 		free_btree_seq_scan_internal(scan, false);
 	}
 	END_CRIT_SECTION();
