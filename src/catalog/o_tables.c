@@ -313,6 +313,7 @@ o_tables_foreach_oids(OTablesOidsCallback callback,
 		tuple = o_btree_iterator_fetch(it, NULL, NULL,
 									   BTreeKeyNone, false, NULL);
 	}
+	btree_iterator_free(it);
 }
 
 /*

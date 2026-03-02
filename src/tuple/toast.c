@@ -728,6 +728,8 @@ generic_toast_delete_optional_wal(ToastAPI *api, void *key, OXid oxid,
 		pfree(tuple.data);
 	} while (true);
 
+	btree_iterator_free(it);
+
 	return deleted;
 }
 

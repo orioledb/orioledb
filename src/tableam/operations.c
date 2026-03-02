@@ -657,9 +657,14 @@ o_check_exclusion_constraint(OTableDescr *descr, OIndexDescr *index, TupleTableS
 							(Pointer) &bound, BTreeKeyBound,
 							(Pointer) &tuple, BTreeKeyLeafTuple);
 			if (res != 0)
+			{
+				pfree(tuple.data);
+				btree_iterator_free(iter);
 				return false;
+			}
 		}
 
+		pfree(tuple.data);
 		tuple = o_btree_iterator_fetch(iter, NULL, NULL,
 									   BTreeKeyNone, true, NULL);
 
