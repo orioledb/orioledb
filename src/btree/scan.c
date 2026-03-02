@@ -1213,6 +1213,10 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
 
 	dlist_push_tail(&listOfScans, &scan->listNode);
+	scan->resowner = NULL;
+#if PG_VERSION_NUM >= 170000
+	ResourceOwnerEnlarge(CurrentResourceOwner);
+#endif
 	ResourceOwnerRememberBTreeSeqScan(CurrentResourceOwner, scan);
 	scan->resowner = CurrentResourceOwner;
 
