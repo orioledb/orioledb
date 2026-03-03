@@ -507,7 +507,7 @@ orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
 		OXid		oxid;
 
 		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-		o_apply_new_bridge_index_ctid(descr, rel, slot, oSnapshot.csn);
+		o_apply_new_bridge_index_ctid(descr, rel, slot, oSnapshot.csn, true);
 	}
 
 	tts_orioledb_toast(slot, descr);
