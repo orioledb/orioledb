@@ -230,6 +230,16 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 							  BTREE_PAGE_ITEMS_COUNT(stack[level].img));
 
 		/*
+		 * Extract hikey info from old page BEFORE finalize, because finalize
+		 * may free the page (for disk pool).
+		 */
+		copy_fixed_key(desc, &key, stack[level].key.tuple);
+		keysize = stack[level].keysize;
+
+		stack[level].keysize = BTREE_PAGE_GET_HIKEY_SIZE(stack[level].img);
+		copy_fixed_hikey(desc, &stack[level].key, stack[level].img);
+
+		/*
 		 * finalize old page (write to disk or just return blkno for local
 		 * pool)
 		 */
@@ -242,12 +252,6 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		downlink = (*desc->ppool->ops->finalize_build_page) (desc->ppool, desc, stack[level].img, stack[level].img_handle, &extent, metaPage);
 		if (level == 0)
 			pg_atomic_add_fetch_u32(&metaPage->leafPagesNum, 1);
-
-		copy_fixed_key(desc, &key, stack[level].key.tuple);
-		keysize = stack[level].keysize;
-
-		stack[level].keysize = BTREE_PAGE_GET_HIKEY_SIZE(stack[level].img);
-		copy_fixed_hikey(desc, &stack[level].key, stack[level].img);
 
 		if (level > 0)
 		{
