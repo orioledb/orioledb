@@ -229,7 +229,10 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 			PAGE_SET_N_ONDISK(stack[level].img,
 							  BTREE_PAGE_ITEMS_COUNT(stack[level].img));
 
-		/* finalize old page (write to disk or just return blkno for local pool) */
+		/*
+		 * finalize old page (write to disk or just return blkno for local
+		 * pool)
+		 */
 
 		extent.len = InvalidFileExtentLen;
 		extent.off = InvalidFileExtentOff;

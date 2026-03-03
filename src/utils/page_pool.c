@@ -357,7 +357,7 @@ o_ppool_dirty_pages_count(PagePool *pool)
  */
 void
 o_ppool_run_maintenance(PagePool *pool, bool evict,
-				  volatile sig_atomic_t *shutdown_requested)
+						volatile sig_atomic_t *shutdown_requested)
 {
 	uint64		blkno;
 	Size		undoRegularSize = get_reserved_undo_size(UndoLogRegularPageLevel);
@@ -423,7 +423,7 @@ o_ppool_run_maintenance(PagePool *pool, bool evict,
 		free_retained_undo_location(UndoLogRegularPageLevel);
 	if (!haveRetainSystemLoc)
 		free_retained_undo_location(UndoLogSystem);
-	
+
 	if ((shutdown_requested == NULL || !*shutdown_requested) && ucm_epoch_needs_shift(&o_pool->ucm))
 	{
 		ucm_epoch_shift(&o_pool->ucm);
@@ -454,7 +454,7 @@ o_ucm_init(PagePool *pool, OInMemoryBlkno blkno)
 {
 	OPagePool  *o_pool = (OPagePool *) pool;
 
-	page_change_usage_count(&o_pool->ucm, blkno, (pg_atomic_read_u32(o_pool->ucm.epoch) + 2) %  UCM_USAGE_LEVELS);
+	page_change_usage_count(&o_pool->ucm, blkno, (pg_atomic_read_u32(o_pool->ucm.epoch) + 2) % UCM_USAGE_LEVELS);
 }
 
 /*

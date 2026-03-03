@@ -215,7 +215,7 @@ free_meta_page(PagePool *pool, OInMemoryBlkno metaPageBlkno)
 	 * freeing the meta page until the last scan is released.
 	 */
 	if (meta_page_get_num_seq_scans(metaPageBlkno) == 0)
-	    (*pool->ops->free_page) (pool, metaPageBlkno, NULL);
+		(*pool->ops->free_page) (pool, metaPageBlkno, NULL);
 	else
 		meta_page->toBeFreedOnSeqScanRelease = true;
 }
