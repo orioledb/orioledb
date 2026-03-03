@@ -246,6 +246,8 @@ OrioleDB is currently in the development stage. Therefore it has the following t
 9.  OrioleDB tables don't support `Sample Scans` yet.
 10. OrioleDB tables don't support SERIALIZABLE isolation level.
 11. Backward fetches from a cursor is supported only when the cursor is declared with `SCROLL`.
+12. OrioleDB doesn't use checksums on data pages and initializing a database
+cluster with `-k` (`--data-checksums`) doesn't have effect on OrioleDB tables.
 
 ## Links
 
