@@ -2551,3 +2551,54 @@ COMMIT\n""")
 
 		pg_recvlogical.terminate()
 		node.stop()
+
+	def test_logical_subscription_partition_reorder(self):
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+			with subscriber.start() as subscriber:
+				setup_sql = """
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE tab1 (
+						a int PRIMARY KEY,
+						b text
+					) PARTITION BY LIST (a);
+					CREATE TABLE tab1_1 (
+						b text,
+						a int NOT NULL
+					) USING orioledb;
+					ALTER TABLE tab1 ATTACH PARTITION tab1_1
+						FOR VALUES IN (1, 2, 52);
+				"""
+				publisher.safe_psql(setup_sql)
+				subscriber.safe_psql(setup_sql)
+
+				pub = publisher.publish('test_pub', tables=['tab1', 'tab1_1'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
+
+				# Scenario 1: INSERT + UPDATE that changes partition key
+				publisher.safe_psql("""
+					INSERT INTO tab1 VALUES (52, 'xxxxx');
+					UPDATE tab1 SET a = 2 WHERE a = 52;
+				""")
+
+				sub.catchup()
+
+				self.assertListEqual(
+				    subscriber.execute('SELECT a, b FROM tab1 ORDER BY a'),
+				    [(2, 'xxxxx')])
+
+				# Scenario 2: INSERT + UPDATE that changes non-key column
+				publisher.safe_psql("""
+					DELETE FROM tab1;
+					INSERT INTO tab1 VALUES (2, 'xxxxx');
+					UPDATE tab1 SET b = 'yyyyyy' WHERE a = 2;
+				""")
+
+				sub.catchup()
+
+				self.assertListEqual(
+				    subscriber.execute('SELECT a, b FROM tab1 ORDER BY a'),
+				    [(2, 'yyyyyy')])

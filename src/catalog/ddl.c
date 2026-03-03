@@ -3824,7 +3824,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 	}
 	else if (access == OAT_DROP && classId == OperatorClassRelationId)
 	{
-		OOpclass   *o_opclass = o_opclass_get(objectId);
+		OOpclass   *o_opclass = o_opclass_get(objectId, MyDatabaseId);
 
 		if (o_opclass)
 			o_add_invalidate_comparator_undo_item(o_opclass->opfamily,

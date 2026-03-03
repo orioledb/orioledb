@@ -1968,17 +1968,29 @@ o_proc_cache_validate_add(Oid datoid, Oid procoid, Oid fncollation,
 	pfree(str.data);
 }
 
+/*
+ * o_proc_cache_fill_finfo
+ *
+ * Fill FmgrInfo for procoid in the provided database context.
+ *
+ * Procedure OIDs are resolved through Oriole proc cache, which is datoid-
+ * scoped. Passing explicit datoid prevents cross-database cache lookups when
+ * the caller works with metadata that does not belong to MyDatabaseId (for
+ * example, descriptor/comparator paths reached from eviction).
+ *
+ * If datoid == InvalidOid, retain legacy behavior and derive context from
+ * o_sys_cache_set_datoid_lsn().
+ */
 void
-o_proc_cache_fill_finfo(FmgrInfo *finfo, Oid procoid)
+o_proc_cache_fill_finfo(FmgrInfo *finfo, Oid procoid, Oid datoid)
 {
 	XLogRecPtr	cur_lsn;
-	Oid			datoid;
 	OProc	   *o_proc = NULL;
 	const FmgrBuiltin *fbp;
 
 	memset(finfo, 0, sizeof(FmgrInfo));
 
-	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
+	o_sys_cache_set_datoid_lsn(&cur_lsn, datoid == InvalidOid ? &datoid : NULL);
 	o_proc = o_proc_cache_search(datoid, procoid, cur_lsn,
 								 proc_cache->nkeys);
 

@@ -36,17 +36,11 @@ typedef enum
 	OTupleFetchNotMatch
 } TupleFetchCallbackResult;
 
-typedef enum
-{
-	OTupleFetchCallbackVersionCheck,
-	OTupleFetchCallbackKeyCheck
-} TupleFetchCallbackCheckType;
-
 typedef TupleFetchCallbackResult (*TupleFetchCallback) (OTuple tuple,
 														OXid tupOxid,
 														OSnapshot *oSnapshot,
 														void *arg,
-														TupleFetchCallbackCheckType check_type);
+														bool oxidIsFinished);
 
 extern OTuple o_btree_find_tuple_by_key(BTreeDescr *desc, void *key,
 										BTreeKeyType kind,

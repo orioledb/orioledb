@@ -384,11 +384,11 @@ tableGetBaseBTreeVersion(void *arg)
 
 static TupleFetchCallbackResult
 tableVersionCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot, void *arg,
-					 TupleFetchCallbackCheckType check_type)
+					 bool oxidIsFinished)
 {
 	OToastKey  *key = (OToastKey *) arg;
 
-	if (check_type != OTupleFetchCallbackVersionCheck)
+	if (oxidIsFinished)
 		return OTupleFetchNext;
 
 	if (!(COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn) &&

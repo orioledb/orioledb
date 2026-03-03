@@ -334,11 +334,11 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 
 static TupleFetchCallbackResult
 fetch_row_version_callback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
-						   void *arg, TupleFetchCallbackCheckType check_type)
+						   void *arg, bool oxidIsFinished)
 {
 	uint32		version = *((uint32 *) arg);
 
-	if (check_type != OTupleFetchCallbackVersionCheck)
+	if (oxidIsFinished)
 		return OTupleFetchNext;
 
 	if (!(COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn) &&
@@ -951,6 +951,11 @@ orioledb_relation_set_new_filenode(Relation rel,
 											 rel->rd_rel->reltablespace,
 											 old_o_table->index_bridging);
 		o_opclass_cache_add_table(new_o_table);
+
+		/* Copy compression settings from old table */
+		new_o_table->default_compress = old_o_table->default_compress;
+		new_o_table->primary_compress = old_o_table->primary_compress;
+		new_o_table->toast_compress = old_o_table->toast_compress;
 
 		/* Setup bridging if it was set on old table */
 		if (old_o_table->index_bridging)
