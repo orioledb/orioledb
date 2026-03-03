@@ -139,7 +139,7 @@ bgwriter_main(Datum main_arg)
 
 					while (need_eviction || need_write)
 					{
-						(*pool->ops->run_clock) (pool, need_eviction, &ShutdownRequestPending);
+						(*pool->ops->run_maintenance) (pool, need_eviction, &ShutdownRequestPending);
 						i++;
 
 						if (i >= bgwriter_lru_maxpages * (BLCKSZ / ORIOLEDB_BLCKSZ))
@@ -156,11 +156,6 @@ bgwriter_main(Datum main_arg)
 					MemoryContextReset(TopTransactionContext);
 				}
 
-				if (!ShutdownRequestPending && (*pool->ops->ucm_epoch_needs_shift) (pool))
-				{
-					if ((*pool->ops->ucm_epoch_needs_shift) (pool))
-						(*pool->ops->ucm_epoch_shift) (pool);
-				}
 			}
 
 			for (j = 0; j < (int) UndoLogsCount; j++)

@@ -57,17 +57,12 @@ typedef struct PagePoolOps
 
 	OInMemoryBlkno (*free_pages_count) (PagePool *pool);
 	OInMemoryBlkno (*dirty_pages_count) (PagePool *pool);
-	void		(*run_clock) (PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
+	void		(*run_maintenance) (PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
 	OInMemoryBlkno (*size) (PagePool *pool);
 
 	/* Usage tracking */
 	void		(*ucm_inc_usage) (PagePool *pool, OInMemoryBlkno blkno);
-	void		(*ucm_change_usage) (PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount);
-	uint32		(*ucm_get_epoch) (PagePool *pool);
-	bool		(*ucm_epoch_needs_shift) (PagePool *pool);
-	void		(*ucm_epoch_shift) (PagePool *pool);
-	uint64		(*ucm_update_state) (PagePool *pool, OInMemoryBlkno blkno, uint64 state);
-	void		(*ucm_after_update_state) (PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState);
+	void		(*ucm_init) (PagePool *pool, OInMemoryBlkno blkno);
 
 	uint64		(*write_build_page) (PagePool *pool, BTreeDescr *desc, Page img,
 									 FileExtent *extent, BTreeMetaPage *metaPage);

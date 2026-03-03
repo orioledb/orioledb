@@ -1483,8 +1483,7 @@ load_page(OBTreeFindPageContext *context)
 	}
 
 	put_page_image(blkno, buf);
-	(*desc->ppool->ops->ucm_change_usage) (desc->ppool, blkno,
-										   ((*desc->ppool->ops->ucm_get_epoch) (desc->ppool) + 2) % UCM_USAGE_LEVELS);
+	(*desc->ppool->ops->ucm_init) (desc->ppool, blkno);
 	page_desc->type = parent_page_desc->type;
 	page_desc->oids = parent_page_desc->oids;
 

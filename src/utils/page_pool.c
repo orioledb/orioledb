@@ -41,16 +41,11 @@ void		o_ppool_release_reserved(PagePool *pool, uint32 mask);
 
 OInMemoryBlkno o_ppool_free_pages_count(PagePool *pool);
 OInMemoryBlkno o_ppool_dirty_pages_count(PagePool *pool);
-void		o_ppool_run_clock(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
+void		o_ppool_run_maintenance(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
 OInMemoryBlkno o_ppool_size(PagePool *pool);
 
 void		o_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno);
-void		o_ucm_change_usage(PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount);
-uint32		o_ucm_get_epoch(PagePool *pool);
-bool		o_ucm_epoch_needs_shift(PagePool *pool);
-void		o_ucm_epoch_shift(PagePool *pool);
-uint64		o_ucm_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 state);
-void		o_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState);
+void		o_ucm_init(PagePool *pool, OInMemoryBlkno blkno);
 
 uint64
 			o_ppool_write_build_page(PagePool *pool, BTreeDescr *desc, Page img, FileExtent *extent, BTreeMetaPage *metaPage);
@@ -66,16 +61,11 @@ static const PagePoolOps o_page_pool_ops = {
 
 	.free_pages_count = o_ppool_free_pages_count,
 	.dirty_pages_count = o_ppool_dirty_pages_count,
-	.run_clock = o_ppool_run_clock,
+	.run_maintenance = o_ppool_run_maintenance,
 	.size = o_ppool_size,
 
 	.ucm_inc_usage = o_ucm_inc_usage,
-	.ucm_change_usage = o_ucm_change_usage,
-	.ucm_get_epoch = o_ucm_get_epoch,
-	.ucm_epoch_needs_shift = o_ucm_epoch_needs_shift,
-	.ucm_epoch_shift = o_ucm_epoch_shift,
-	.ucm_update_state = o_ucm_update_state,
-	.ucm_after_update_state = o_ucm_after_update_state,
+	.ucm_init = o_ucm_init,
 
 	.write_build_page = o_ppool_write_build_page,
 };
@@ -91,16 +81,11 @@ void		local_ppool_release_reserved(PagePool *pool, uint32 mask);
 
 OInMemoryBlkno local_ppool_free_pages_count(PagePool *pool);
 OInMemoryBlkno local_ppool_dirty_pages_count(PagePool *pool);
-void		local_ppool_run_clock(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
+void		local_ppool_run_maintenance(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
 OInMemoryBlkno local_ppool_size(PagePool *pool);
 
 void		local_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno);
-void		local_ucm_change_usage(PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount);
-uint32		local_ucm_get_epoch(PagePool *pool);
-bool		local_ucm_epoch_needs_shift(PagePool *pool);
-void		local_ucm_epoch_shift(PagePool *pool);
-uint64		local_ucm_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 state);
-void		local_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState);
+void		local_ucm_init(PagePool *pool, OInMemoryBlkno blkno);
 
 uint64
 			local_ppool_write_build_page(PagePool *pool, BTreeDescr *desc, Page img, FileExtent *extent, BTreeMetaPage *metaPage);
@@ -116,16 +101,11 @@ static const PagePoolOps local_ppool_ops = {
 
 	.free_pages_count = local_ppool_free_pages_count,
 	.dirty_pages_count = local_ppool_dirty_pages_count,
-	.run_clock = local_ppool_run_clock,
+	.run_maintenance = local_ppool_run_maintenance,
 	.size = local_ppool_size,
 
 	.ucm_inc_usage = local_ucm_inc_usage,
-	.ucm_change_usage = local_ucm_change_usage,
-	.ucm_get_epoch = local_ucm_get_epoch,
-	.ucm_epoch_needs_shift = local_ucm_epoch_needs_shift,
-	.ucm_epoch_shift = local_ucm_epoch_shift,
-	.ucm_update_state = local_ucm_update_state,
-	.ucm_after_update_state = local_ucm_after_update_state,
+	.ucm_init = local_ucm_init,
 
 	.write_build_page = local_ppool_write_build_page,
 };
@@ -211,7 +191,7 @@ o_ppool_reserve_pages(PagePool *pool, int kind, int count)
 	val = pg_atomic_sub_fetch_u64(o_pool->availablePagesCount, count);
 	while (val & (UINT64CONST(1) << 63))
 	{
-		(*pool->ops->run_clock) (pool, true, NULL);
+		(*pool->ops->run_maintenance) (pool, true, NULL);
 		val = pg_atomic_read_u64(o_pool->availablePagesCount);
 	}
 
@@ -370,7 +350,7 @@ o_ppool_dirty_pages_count(PagePool *pool)
  * GET_PAGE_LEVEL_UNDO_TYPE).  UndoLogRegular is not touched by merges.
  */
 void
-o_ppool_run_clock(PagePool *pool, bool evict,
+o_ppool_run_maintenance(PagePool *pool, bool evict,
 				  volatile sig_atomic_t *shutdown_requested)
 {
 	uint64		blkno;
@@ -437,6 +417,11 @@ o_ppool_run_clock(PagePool *pool, bool evict,
 		free_retained_undo_location(UndoLogRegularPageLevel);
 	if (!haveRetainSystemLoc)
 		free_retained_undo_location(UndoLogSystem);
+	
+	if ((shutdown_requested == NULL || !*shutdown_requested) && ucm_epoch_needs_shift(&o_pool->ucm))
+	{
+		ucm_epoch_shift(&o_pool->ucm);
+	}
 }
 
 /*
@@ -459,51 +444,11 @@ o_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno)
 }
 
 void
-o_ucm_change_usage(PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount)
+o_ucm_init(PagePool *pool, OInMemoryBlkno blkno)
 {
 	OPagePool  *o_pool = (OPagePool *) pool;
 
-	page_change_usage_count(&o_pool->ucm, blkno, usageCount);
-}
-
-uint32
-o_ucm_get_epoch(PagePool *pool)
-{
-	OPagePool  *o_pool = (OPagePool *) pool;
-
-	return pg_atomic_read_u32(o_pool->ucm.epoch);
-}
-
-bool
-o_ucm_epoch_needs_shift(PagePool *pool)
-{
-	OPagePool  *o_pool = (OPagePool *) pool;
-
-	return ucm_epoch_needs_shift(&o_pool->ucm);
-}
-
-void
-o_ucm_epoch_shift(PagePool *pool)
-{
-	OPagePool  *o_pool = (OPagePool *) pool;
-
-	ucm_epoch_shift(&o_pool->ucm);
-}
-
-uint64
-o_ucm_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 state)
-{
-	OPagePool  *o_pool = (OPagePool *) pool;
-
-	return ucm_update_state(&o_pool->ucm, blkno, state);
-}
-
-void
-o_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState)
-{
-	OPagePool  *o_pool = (OPagePool *) pool;
-
-	ucm_after_update_state(&o_pool->ucm, blkno, oldState, newState);
+	page_change_usage_count(&o_pool->ucm, blkno, (pg_atomic_read_u32(o_pool->ucm.epoch) + 2) %  UCM_USAGE_LEVELS);
 }
 
 uint64
@@ -629,7 +574,7 @@ local_ppool_dirty_pages_count(PagePool *pool)
 }
 
 void
-local_ppool_run_clock(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested)
+local_ppool_run_maintenance(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested)
 {
 	/* Stub: do nothing */
 }
@@ -649,37 +594,7 @@ local_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno)
 }
 
 void
-local_ucm_change_usage(PagePool *pool, OInMemoryBlkno blkno, uint32 usageCount)
-{
-	/* Stub: do nothing */
-}
-
-uint32
-local_ucm_get_epoch(PagePool *pool)
-{
-	return 0;
-}
-
-bool
-local_ucm_epoch_needs_shift(PagePool *pool)
-{
-	return false;
-}
-
-void
-local_ucm_epoch_shift(PagePool *pool)
-{
-	/* Stub: do nothing */
-}
-
-uint64
-local_ucm_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 state)
-{
-	return state;
-}
-
-void
-local_ucm_after_update_state(PagePool *pool, OInMemoryBlkno blkno, uint64 oldState, uint64 newState)
+local_ucm_init(PagePool *pool, OInMemoryBlkno blkno)
 {
 	/* Stub: do nothing */
 }
