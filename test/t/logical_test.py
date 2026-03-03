@@ -2602,3 +2602,35 @@ COMMIT\n""")
 				self.assertListEqual(
 				    subscriber.execute('SELECT a, b FROM tab1 ORDER BY a'),
 				    [(2, 'yyyyyy')])
+
+	def test_logical_subscription_pkey_update_with_brin(self):
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+			with subscriber.start() as subscriber:
+				publisher.safe_psql("""
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE tab1 (a int PRIMARY KEY) USING orioledb;
+				""")
+
+				subscriber.safe_psql("""
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE tab1 (a int PRIMARY KEY) USING orioledb;
+					CREATE INDEX tab1_a_brin_idx ON tab1 USING brin (a);
+				""")
+
+				pub = publisher.publish('test_pub', tables=['tab1'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
+
+				publisher.safe_psql("""
+					INSERT INTO tab1 VALUES (1);
+					UPDATE tab1 SET a = 2 WHERE a = 1;
+				""")
+
+				sub.catchup()
+
+				self.assertListEqual(
+				    subscriber.execute('SELECT a FROM tab1 ORDER BY a'),
+				    [(2, )])
