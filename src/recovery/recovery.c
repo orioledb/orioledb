@@ -3330,7 +3330,11 @@ replay_wal_record(void *vctx, WalRecord *rec)
 
 		case WAL_REC_BRIDGE_ERASE:
 			{
-				Assert(ctx->indexDescr);
+				if (ctx->indexDescr == NULL)
+				{
+					/* nothing to do here */
+					return WALPARSE_OK;
+				}
 
 				if (ctx->single)
 				{
