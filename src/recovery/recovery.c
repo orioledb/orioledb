@@ -3421,7 +3421,7 @@ replay_wal_record(void *vctx, WalRecord *rec)
 				if (ctx->sys_tree_num > 0 || ctx->indexDescr == NULL)
 				{
 					/* nothing to do here */
-					return WALPARSE_OK;
+					break;
 				}
 
 				if (ctx->indexDescr->desc.type == oIndexBridge)
