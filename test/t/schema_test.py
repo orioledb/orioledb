@@ -5,8 +5,6 @@ from testgres.exceptions import QueryException
 
 class SchemaTest(BaseTest):
 
-	@unittest.skipIf(BaseTest.get_pg_version() < 14,
-	                 'CURRENT_ROLE option added in postgres 14')
 	def test_1(self):
 		node = self.node
 		node.start()
@@ -202,8 +200,6 @@ class SchemaTest(BaseTest):
 		node.start()
 		node.stop()
 
-	@unittest.skipIf(BaseTest.get_pg_version() < 15,
-	                 'MERGE command added in postgres 15')
 	def test_8(self):
 		node = self.node
 		node.start()
@@ -239,8 +235,6 @@ class SchemaTest(BaseTest):
 		node.start()
 		node.stop()
 
-	@unittest.skipIf(BaseTest.get_pg_version() < 15,
-	                 'MERGE command added in postgres 15')
 	def test_9(self):
 		node = self.node
 		node.start()
@@ -278,8 +272,6 @@ class SchemaTest(BaseTest):
 		node.start()
 		node.stop()
 
-	@unittest.skipIf(BaseTest.get_pg_version() < 15,
-	                 'MERGE command added in postgres 15')
 	def test_10(self):
 		node = self.node
 		node.start()

@@ -675,8 +675,6 @@ class TypesTest(BaseTest):
 		                 node.execute("SELECT * FROM o_test ORDER BY key;"))
 		node.stop()
 
-	@unittest.skipIf(BaseTest.get_pg_version() < 14,
-	                 'Multiranges added in postgres 14')
 	def test_multirange_index_recovery(self):
 		node = self.node
 		node.start()

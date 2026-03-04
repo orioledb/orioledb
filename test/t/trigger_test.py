@@ -956,8 +956,6 @@ class TriggerTest(BaseTest):
 		node.start()
 		node.stop()
 
-	@unittest.skipIf(BaseTest.get_pg_version() < 15,
-	                 'MERGE command added in postgres 15')
 	def test_trigger_lock_delete_updated(self):
 		node = self.node
 		node.start()

@@ -133,6 +133,7 @@ REGRESSCHECKS = btree_sys_check \
 				tablespace \
 				temp \
 				toast \
+				toast_column_compress \
 				trigger \
 				truncate \
 				types \
@@ -148,6 +149,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  ioc_deadlock \
 				  ioc_lost_update \
 				  isol_ddl \
+				  isol_merge \
 				  isol_rc \
 				  isol_rr \
 				  isol_rr_bscan \
@@ -199,6 +201,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/indices_build_test.py \
 						test/t/logical_test.py \
 						test/t/logical_xid_subxacts_test.py \
+						test/t/merge_into_test.py \
 						test/t/not_supported_yet_test.py \
 						test/t/pg_dump_restore_test.py \
 						test/t/parallel_test.py \
@@ -227,15 +230,6 @@ PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 override PG_CPPFLAGS += -I$(CURDIR)/include
 include $(PGXS)
-
-ifeq ($(shell expr $(MAJORVERSION) \>= 14), 1)
-  REGRESSCHECKS += toast_column_compress
-endif
-
-ifeq ($(shell expr $(MAJORVERSION) \>= 15), 1)
-  TESTGRESCHECKS_PART_2 += test/t/merge_into_test.py
-  ISOLATIONCHECKS += isol_merge
-endif
 
 # NO_INSTALL=1 skips installation steps before running tests.
 # Useful for CI environments, non-root testing, and package-managed installations.
