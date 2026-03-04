@@ -861,11 +861,14 @@ lazy_vacuum_bridge_index(LVRelState *vacrel)
 					{
 						int			j;
 
-						for (j = 0; j < walBufferIndex; j++)
-							add_bridge_erase_wal_record(&bridge->desc,
-														&walBuffer[j],
-														bridge->version,
-														descr->version);
+						if (bridge->desc.storageType == BTreeStoragePersistence)
+						{
+							for (j = 0; j < walBufferIndex; j++)
+								add_bridge_erase_wal_record(&bridge->desc,
+															&walBuffer[j],
+															bridge->version,
+															descr->version);
+						}
 						walBufferIndex = 0;
 						vacuumed_pages++;
 						unlock_page(context.items[context.index].blkno);
@@ -910,11 +913,14 @@ lazy_vacuum_bridge_index(LVRelState *vacrel)
 	{
 		int			j;
 
-		for (j = 0; j < walBufferIndex; j++)
-			add_bridge_erase_wal_record(&bridge->desc,
-										&walBuffer[j],
-										bridge->version,
-										descr->version);
+		if (bridge->desc.storageType == BTreeStoragePersistence)
+		{
+			for (j = 0; j < walBufferIndex; j++)
+				add_bridge_erase_wal_record(&bridge->desc,
+											&walBuffer[j],
+											bridge->version,
+											descr->version);
+		}
 		walBufferIndex = 0;
 		vacuumed_pages++;
 		unlock_page(context.items[context.index].blkno);
