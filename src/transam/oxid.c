@@ -821,8 +821,8 @@ fsync_xidmap_range(OXid xmin, OXid xmax, uint32 wait_event_info)
 
 	o_buffers_sync(&buffersDesc,
 				   OXID_BUFFERS_TAG,
-				   xmin * sizeof(CommitSeqNo),
-				   xmax * sizeof(CommitSeqNo),
+				   xmin * sizeof(OXidMapItem),
+				   xmax * sizeof(OXidMapItem),
 				   wait_event_info);
 }
 
