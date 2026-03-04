@@ -467,15 +467,16 @@ static bool
 is_sorted_by_len_off(ExtentsArray *array)
 {
 	uint64		i;
-	int			cmp;
 	bool		sorted = true;
 
 	if (array->size > 1)
 	{
 		for (i = 1; i < array->size && sorted; i++)
 		{
-			cmp = array->extents[i - 1].len - array->extents[i].len;
-			sorted = cmp > 0 || (cmp == 0 && array->extents[i - 1].off <= array->extents[i].off);
+			if (array->extents[i - 1].len != array->extents[i].len)
+				sorted = array->extents[i - 1].len > array->extents[i].len;
+			else
+				sorted = array->extents[i - 1].off <= array->extents[i].off;
 		}
 
 		if (!sorted)
