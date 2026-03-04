@@ -356,19 +356,12 @@ class CollateTest(BaseTest):
 		node = self.node
 		node.start()
 		with self.assertRaises(QueryException) as e:
-			if self.get_pg_version() >= 16:
-				node.safe_psql("""
-					CREATE DATABASE encoding_test
-						ENCODING SQL_ASCII
-						LOCALE_PROVIDER libc
-						TEMPLATE 'template0';
-				""")
-			else:
-				node.safe_psql("""
-					CREATE DATABASE encoding_test
-						ENCODING SQL_ASCII
-						TEMPLATE 'template0';
-				""")
+			node.safe_psql("""
+				CREATE DATABASE encoding_test
+					ENCODING SQL_ASCII
+					LOCALE_PROVIDER libc
+					TEMPLATE 'template0';
+			""")
 
 		self.assertErrorMessageEquals(
 		    e, "Cannot create database with encoding \"SQL_ASCII\" "
