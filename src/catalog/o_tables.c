@@ -249,7 +249,7 @@ oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 		else
 			return OTupleFetchNotMatch;
 	}
-	return OTupleFetchNext;
+	return OTupleFetchNotMatch;
 }
 
 ToastAPI	oTablesToastAPI = {

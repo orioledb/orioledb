@@ -163,7 +163,7 @@ oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 	/* Ignore reloid because it may changes */
 	if (tupleKey->oids.datoid == boundKey->key.oids.datoid &&
 		tupleKey->oids.relnode == boundKey->key.oids.relnode &&
-		tupleKey->type && boundKey->key.type)
+		tupleKey->type == boundKey->key.type)
 	{
 		if (COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn) &&
 			(boundKey->key.version == O_TABLE_INVALID_VERSION ||
@@ -189,7 +189,7 @@ oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 		else
 			return OTupleFetchNotMatch;
 	}
-	return OTupleFetchNext;
+	return OTupleFetchNotMatch;
 }
 
 ToastAPI	oIndicesToastAPI = {
