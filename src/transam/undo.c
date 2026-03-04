@@ -2105,10 +2105,8 @@ undo_xact_callback(XactEvent event, void *arg)
 				elog(DEBUG4, "XACT_EVENT_PRE_COMMIT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
 					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
-				if (!TransactionIdIsValid(heapXid))
-				{
+				if (TransactionIdIsValid(heapXid))
 					current_oxid_xlog_precommit();
-				}
 
 				if (TransactionIdIsValid(logicalXidContext.xid) && TransactionIdIsValid(heapXid))
 				{
