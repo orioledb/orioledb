@@ -2627,3 +2627,103 @@ rowid_set_csn(OIndexDescr *id, Datum pkDatum, CommitSeqNo csn)
 		add->csn = csn;
 	}
 }
+
+/*
+ * Return physical size of directory contents, or 0 if dir doesn't exist
+ * Private copy of Postgres db_dir_size()
+ */
+static int64
+orioledb_db_dir_size(const char *path)
+{
+	int64		dirsize = 0;
+	struct dirent *direntry;
+	DIR		   *dirdesc;
+	char		filename[MAXPGPATH * 2];
+
+	dirdesc = AllocateDir(path);
+
+	if (!dirdesc)
+		return 0;
+
+	while ((direntry = ReadDir(dirdesc, path)) != NULL)
+	{
+		struct stat fst;
+
+		CHECK_FOR_INTERRUPTS();
+
+		if (strcmp(direntry->d_name, ".") == 0 ||
+			strcmp(direntry->d_name, "..") == 0)
+			continue;
+
+		snprintf(filename, sizeof(filename), "%s/%s", path, direntry->d_name);
+
+		if (stat(filename, &fst) < 0)
+		{
+			if (errno == ENOENT)
+				continue;
+			else
+				ereport(ERROR,
+						(errcode_for_file_access(),
+						 errmsg("could not stat file \"%s\": %m", filename)));
+		}
+		dirsize += fst.st_size;
+	}
+
+	FreeDir(dirdesc);
+	return dirsize;
+}
+
+/*
+ * Calculate Orioledb-related part of database size in all tablespaces.
+ * User access privileges should be checked before calling this hook
+ * (see calculate_database_size() function)
+ */
+int64
+orioledb_calculate_database_size(Oid dbOid)
+{
+	int64		totalsize;
+	DIR		   *dirdesc;
+	struct dirent *direntry;
+	char		dirpath[MAXPGPATH];
+	char		pathname[MAXPGPATH + 21 + sizeof(TABLESPACE_VERSION_DIRECTORY) + 13];
+
+	/*
+	 * No user privileges check here. They must have been checked before
+	 * calling this hook
+	 */
+
+	/* Shared storage in pg_global is not counted */
+
+	/* Include pg_default storage */
+	snprintf(pathname, sizeof(pathname), "orioledb_data/%u", dbOid);
+	totalsize = orioledb_db_dir_size(pathname);
+
+	/* Scan the non-default tablespaces */
+	snprintf(dirpath, MAXPGPATH, "pg_tblspc");
+	dirdesc = AllocateDir(dirpath);
+
+	while ((direntry = ReadDir(dirdesc, dirpath)) != NULL)
+	{
+		CHECK_FOR_INTERRUPTS();
+
+		if (strcmp(direntry->d_name, ".") == 0 ||
+			strcmp(direntry->d_name, "..") == 0)
+			continue;
+
+		snprintf(pathname, sizeof(pathname), "pg_tblspc/%s/%s/orioledb_data/%u",
+				 direntry->d_name, TABLESPACE_VERSION_DIRECTORY, dbOid);
+		totalsize += orioledb_db_dir_size(pathname);
+	}
+
+	FreeDir(dirdesc);
+
+	/* Support database_size_hook chaining */
+	if (prev_database_size_hook != NULL)
+	{
+		elog(DEBUG4, "called prev_database_size_hook");
+		totalsize += prev_database_size_hook(dbOid);
+	}
+
+	elog(DEBUG4, "orioledb_calculate_database_size totalsize added: %ld", totalsize);
+	return totalsize;
+}

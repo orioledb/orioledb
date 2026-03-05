@@ -15,3 +15,158 @@ ERROR:  template database "orioledb_template" has OrioleDB tables
 DROP DATABASE orioledb_template;
 DROP DATABASE heapdb;
 DROP DATABASE heapdb_template;
+-- Check pg_database_size()
+CREATE EXTENSION orioledb;
+CREATE DATABASE oriole_database;
+\c oriole_database
+-- generate pseudo-random string function in deterministic way
+CREATE FUNCTION generate_string(seed integer, length integer) RETURNS text
+        AS $$
+                SELECT substr(string_agg(
+                                                substr(encode(sha256(seed::text::bytea || '_' || i::text::bytea), 'hex'), 1, 21),
+                                ''), 1, length)
+                FROM generate_series(1, (length + 20) / 21) i; $$
+LANGUAGE SQL;
+CHECKPOINT;
+select round(pg_database_size('oriole_database'), -6);
+  round  
+---------
+ 8000000
+(1 row)
+
+CREATE EXTENSION orioledb;
+CREATE TABLE oriole_table (i SERIAL PRIMARY KEY, t text STORAGE PLAIN) USING orioledb;
+INSERT INTO oriole_table(t) select generate_string(i, 270) FROM  generate_series(1, 10000) as i;
+CHECKPOINT;
+select round(pg_database_size('oriole_database'), -6);
+  round   
+----------
+ 11000000
+(1 row)
+
+SET allow_in_place_tablespaces = true;
+CREATE TABLESPACE dbsize_tblspace LOCATION '';
+CREATE TABLE oriole_table_tblspc (i SERIAL PRIMARY KEY, t text STORAGE PLAIN) USING orioledb TABLESPACE dbsize_tblspace;
+INSERT INTO oriole_table_tblspc(t) select generate_string(i, 270) FROM  generate_series(1, 10000) as i;
+CHECKPOINT;
+select round(pg_database_size('oriole_database'), -6);
+  round   
+----------
+ 15000000
+(1 row)
+
+\d+ oriole_table
+                                               Table "public.oriole_table"
+ Column |  Type   | Collation | Nullable |                 Default                 | Storage | Stats target | Description 
+--------+---------+-----------+----------+-----------------------------------------+---------+--------------+-------------
+ i      | integer |           | not null | nextval('oriole_table_i_seq'::regclass) | plain   |              | 
+ t      | text    |           |          |                                         | plain   |              | 
+Indexes:
+    "oriole_table_pkey" PRIMARY KEY, btree (i)
+
+\d+ oriole_table_tblspc
+                                               Table "public.oriole_table_tblspc"
+ Column |  Type   | Collation | Nullable |                    Default                     | Storage | Stats target | Description 
+--------+---------+-----------+----------+------------------------------------------------+---------+--------------+-------------
+ i      | integer |           | not null | nextval('oriole_table_tblspc_i_seq'::regclass) | plain   |              | 
+ t      | text    |           |          |                                                | plain   |              | 
+Indexes:
+    "oriole_table_tblspc_pkey" PRIMARY KEY, btree (i)
+Tablespace: "dbsize_tblspace"
+
+\c postgres
+DROP DATABASE oriole_database;
+SELECT orioledb_rewind_sync();
+ orioledb_rewind_sync 
+----------------------
+ 
+(1 row)
+
+DROP TABLESPACE dbsize_tblspace;
+DROP EXTENSION orioledb CASCADE;
+CREATE EXTENSION orioledb;
+CREATE DATABASE mixed_database;
+\c mixed_database
+-- generate pseudo-random string function in deterministic way
+CREATE FUNCTION generate_string(seed integer, length integer) RETURNS text
+        AS $$
+                SELECT substr(string_agg(
+                                                substr(encode(sha256(seed::text::bytea || '_' || i::text::bytea), 'hex'), 1, 21),
+                                ''), 1, length)
+                FROM generate_series(1, (length + 20) / 21) i; $$
+LANGUAGE SQL;
+CREATE EXTENSION orioledb;
+CHECKPOINT;
+select round(pg_database_size('mixed_database'), -6);
+  round  
+---------
+ 8000000
+(1 row)
+
+CREATE TABLE heap_table (i SERIAL PRIMARY KEY, t text STORAGE PLAIN) USING heap;
+INSERT INTO heap_table(t) select generate_string(i, 270) FROM  generate_series(1, 10000) as i;
+CHECKPOINT;
+select round(pg_database_size('mixed_database'), -6);
+  round   
+----------
+ 11000000
+(1 row)
+
+CREATE TABLE oriole_table (i SERIAL PRIMARY KEY, t text STORAGE PLAIN) USING orioledb;
+INSERT INTO oriole_table(t) select generate_string(i, 270) FROM  generate_series(1, 10000) as i;
+CHECKPOINT;
+select round(pg_database_size('mixed_database'), -6);
+  round   
+----------
+ 15000000
+(1 row)
+
+SET allow_in_place_tablespaces = true;
+CREATE TABLESPACE dbsize_tblspace LOCATION '';
+CREATE TABLE oriole_table_tblspc (i SERIAL PRIMARY KEY, t text STORAGE PLAIN) USING orioledb TABLESPACE dbsize_tblspace;
+INSERT INTO oriole_table_tblspc(t) select generate_string(i, 270) FROM  generate_series(1, 10000) as i;
+CHECKPOINT;
+select round(pg_database_size('mixed_database'), -6);
+  round   
+----------
+ 18000000
+(1 row)
+
+\d+ oriole_table
+                                               Table "public.oriole_table"
+ Column |  Type   | Collation | Nullable |                 Default                 | Storage | Stats target | Description 
+--------+---------+-----------+----------+-----------------------------------------+---------+--------------+-------------
+ i      | integer |           | not null | nextval('oriole_table_i_seq'::regclass) | plain   |              | 
+ t      | text    |           |          |                                         | plain   |              | 
+Indexes:
+    "oriole_table_pkey" PRIMARY KEY, btree (i)
+
+\d+ heap_table
+                                               Table "public.heap_table"
+ Column |  Type   | Collation | Nullable |                Default                | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------------------------------------+---------+--------------+-------------
+ i      | integer |           | not null | nextval('heap_table_i_seq'::regclass) | plain   |              | 
+ t      | text    |           |          |                                       | plain   |              | 
+Indexes:
+    "heap_table_pkey" PRIMARY KEY, btree (i)
+
+\d+ oriole_table_tblspc
+                                               Table "public.oriole_table_tblspc"
+ Column |  Type   | Collation | Nullable |                    Default                     | Storage | Stats target | Description 
+--------+---------+-----------+----------+------------------------------------------------+---------+--------------+-------------
+ i      | integer |           | not null | nextval('oriole_table_tblspc_i_seq'::regclass) | plain   |              | 
+ t      | text    |           |          |                                                | plain   |              | 
+Indexes:
+    "oriole_table_tblspc_pkey" PRIMARY KEY, btree (i)
+Tablespace: "dbsize_tblspace"
+
+\c postgres
+DROP DATABASE mixed_database;
+SELECT orioledb_rewind_sync();
+ orioledb_rewind_sync 
+----------------------
+ 
+(1 row)
+
+DROP TABLESPACE dbsize_tblspace;
+DROP EXTENSION orioledb CASCADE;

@@ -158,6 +158,8 @@ static void (*prev_shmem_request_hook) (void) = NULL;
 static base_init_startup_hook_type prev_base_init_startup_hook = NULL;
 static get_relation_info_hook_type prev_get_relation_info_hook = NULL;
 static skip_tree_height_hook_type prev_skip_tree_height_hook = NULL;
+database_size_hook_type prev_database_size_hook = NULL;
+
 CheckPoint_hook_type next_CheckPoint_hook = NULL;
 static bool o_newlocale_from_collation(void);
 
@@ -1173,6 +1175,8 @@ _PG_init(void)
 	waitSnapshotHook = orioledb_wait_snapshot;
 	GetReplayXlogPtrHook = recovery_get_effective_replay_ptr;
 
+	prev_database_size_hook = database_size_hook;
+	database_size_hook = orioledb_calculate_database_size;
 	RecoveryStopsBeforeHook = orioledb_recovery_stops_before_hook;
 
 	if (enable_rewind)
