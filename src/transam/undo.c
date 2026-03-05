@@ -2559,7 +2559,7 @@ start_autonomous_transaction(OAutonomousTxState *state)
 	int			i;
 
 	state->needs_wal_flush = oxid_needs_wal_flush;
-	state->oxid = get_current_oxid();
+	state->oxid = get_current_oxid_if_any();
 	get_current_logical_xid_ctx(&state->logicalXidContext);
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		state->has_retained_undo_location[i] = undo_type_has_retained_location((UndoLogType) i);
