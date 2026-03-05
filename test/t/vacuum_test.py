@@ -210,3 +210,59 @@ class VacuumTest(BaseTest):
 
 		node.start()
 		node.stop()
+	
+	def test_vacuum_full(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE o_test_1(
+				val_1 int PRIMARY KEY,
+				val_2 int
+			) USING orioledb;
+
+			CREATE INDEX o_test_1_val_2_idx ON o_test_1(val_2);
+
+			INSERT INTO o_test_1
+				(SELECT val_1, val_1 + 10 FROM generate_series(1, 100) AS val_1);
+		""")
+
+		# VACUUM FULL should work without error
+		node.safe_psql("VACUUM FULL o_test_1;")
+
+		# Data is preserved after VACUUM FULL
+		result = node.execute("SELECT COUNT(*) FROM o_test_1;")
+		self.assertEqual(result[0][0], 100)
+
+		# Index still works after VACUUM FULL
+		result = node.execute(
+		    "SELECT val_2 FROM o_test_1 WHERE val_1 = 42;")
+		self.assertEqual(result[0][0], 52)
+
+		node.stop()
+
+	def test_vacuum_full_no_pk(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE o_test_no_pk(
+				val_1 int,
+				val_2 text
+			) USING orioledb;
+
+			INSERT INTO o_test_no_pk
+				(SELECT val_1, 'text' || val_1
+					FROM generate_series(1, 50) AS val_1);
+		""")
+
+		# VACUUM FULL on a table without primary key
+		node.safe_psql("VACUUM FULL o_test_no_pk;")
+
+		# Data is preserved
+		result = node.execute("SELECT COUNT(*) FROM o_test_no_pk;")
+		self.assertEqual(result[0][0], 50)
+
+		node.stop()
