@@ -1837,6 +1837,7 @@ replay_erase_bridge_item(OIndexDescr *bridge, ItemPointer iptr)
 	bound.keys[0].exclusion_fn = NULL;
 	bound.keys[0].value = ItemPointerGetDatum(iptr);
 
+	o_btree_load_shmem(&bridge->desc);
 	init_page_find_context(&context, &bridge->desc,
 						   COMMITSEQNO_INPROGRESS,
 						   BTREE_PAGE_FIND_MODIFY);
