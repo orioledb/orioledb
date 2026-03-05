@@ -3338,7 +3338,6 @@ replay_wal_record(void *vctx, WalRecord *rec)
 
 				if (ctx->single)
 				{
-					recovery_switch_to_oxid(rec->oxid, -1);
 					replay_erase_bridge_item(ctx->indexDescr, &rec->u.bridge_erase.iptr);
 				}
 				else
