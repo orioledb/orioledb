@@ -1,0 +1,211 @@
+name: perf-test
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      pg_version:
+        description: "PostgreSQL version"
+        required: false
+        default: "17"
+      compiler:
+        description: "Compiler"
+        required: false
+        default: "gcc"
+      bench_duration:
+        description: "Duration per benchmark run"
+        required: false
+        default: "5m"
+      bench_runs:
+        description: "Number of benchmark runs"
+        required: false
+        default: "1"
+      warehouses:
+        description: "Number of warehouses / TPC-C scale factor (comma-separated for multiple, e.g. 1,10,100)"
+        required: false
+        default: "1"
+      vus_scale:
+        description: "VU scale multiplier (1 = 99 VUs, 0.5 ≈ 50, 0.1 ≈ 11)"
+        required: false
+        default: "1"
+      pool_size:
+        description: "Connection pool size (max and min connections)"
+        required: false
+        default: "100"
+      base_ref:
+        description: "Base branch/commit to compare against (default: main)"
+        required: false
+        default: "main"
+
+jobs:
+  setup:
+    name: Generate run matrix
+    runs-on: ubuntu-latest
+    outputs:
+      run-matrix: ${{ steps.gen.outputs.run-matrix }}
+    steps:
+      - id: gen
+        env:
+          RUNS: ${{ inputs.bench_runs || '1' }}
+          WAREHOUSES: ${{ inputs.warehouses || '1' }}
+        run: |
+          echo "run-matrix=$(python3 -c "
+          import json, os
+          runs = int(os.environ['RUNS'])
+          whs = [s.strip() for s in os.environ['WAREHOUSES'].split(',')]
+          print(json.dumps({'run': list(range(1, runs+1)), 'warehouses': whs}))
+          ")" >> $GITHUB_OUTPUT
+
+  bench-base:
+    name: "Bench base ${{ matrix.warehouses }}W #${{ matrix.run }}"
+    needs: setup
+    runs-on: perf-runner
+    strategy:
+      matrix: ${{ fromJson(needs.setup.outputs.run-matrix) }}
+      max-parallel: 1
+    env:
+      LLVM_VER: 18
+      CHECK_TYPE: normal
+      COMPILER: ${{ inputs.compiler || 'gcc' }}
+      PG_VERSION: ${{ inputs.pg_version || '17' }}
+      DURATION: ${{ inputs.bench_duration || '5m' }}
+      WAREHOUSES: ${{ matrix.warehouses }}
+      VUS_SCALE: ${{ inputs.vus_scale || '1' }}
+      POOL_SIZE: ${{ inputs.pool_size || '100' }}
+    steps:
+      - name: Checkout extension code (base branch)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || inputs.base_ref || 'main' }}
+          path: orioledb
+      - name: Get the required tag name
+        shell: bash
+        run: |
+          echo "PGTAG=$(grep '^${{ env.PG_VERSION }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+      - name: Checkout PostgreSQL
+        uses: actions/checkout@v4
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PGTAG }}
+          path: postgresql
+      - name: Setup prerequisites
+        run: bash ./orioledb/ci/prerequisites.sh
+      - name: Build (with local cache)
+        run: bash ./orioledb/ci/perf_build.sh
+      - name: Start PostgreSQL
+        run: bash ./orioledb/ci/perf_pg_start.sh
+      - name: Resolve current user
+        run: echo "PGUSER=$(whoami)" >> $GITHUB_ENV
+      - name: Run TPC-C benchmark
+        uses: stroppy-io/stroppy-action@main
+        with:
+          preset: tpcc
+          driver-url: postgres://${{ env.PGUSER }}@localhost:5432/postgres
+          artifact-name: perf-results-base-${{ matrix.warehouses }}W-${{ matrix.run }}
+      - name: Stop PostgreSQL
+        if: always()
+        run: bash ./orioledb/ci/perf_pg_stop.sh
+
+  bench-head:
+    name: "Bench head ${{ matrix.warehouses }}W #${{ matrix.run }}"
+    needs:
+      - setup
+      - bench-base
+    runs-on: perf-runner
+    strategy:
+      matrix: ${{ fromJson(needs.setup.outputs.run-matrix) }}
+      max-parallel: 1
+    env:
+      LLVM_VER: 18
+      CHECK_TYPE: normal
+      COMPILER: ${{ inputs.compiler || 'gcc' }}
+      PG_VERSION: ${{ inputs.pg_version || '17' }}
+      DURATION: ${{ inputs.bench_duration || '5m' }}
+      WAREHOUSES: ${{ matrix.warehouses }}
+      VUS_SCALE: ${{ inputs.vus_scale || '1' }}
+      POOL_SIZE: ${{ inputs.pool_size || '100' }}
+    steps:
+      - name: Checkout extension code (head branch)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: orioledb
+      - name: Get the required tag name
+        shell: bash
+        run: |
+          echo "PGTAG=$(grep '^${{ env.PG_VERSION }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+      - name: Checkout PostgreSQL
+        uses: actions/checkout@v4
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PGTAG }}
+          path: postgresql
+      - name: Setup prerequisites
+        run: bash ./orioledb/ci/prerequisites.sh
+      - name: Build (with local cache)
+        run: bash ./orioledb/ci/perf_build.sh
+      - name: Start PostgreSQL
+        run: bash ./orioledb/ci/perf_pg_start.sh
+      - name: Resolve current user
+        run: echo "PGUSER=$(whoami)" >> $GITHUB_ENV
+      - name: Run TPC-C benchmark
+        uses: stroppy-io/stroppy-action@main
+        with:
+          preset: tpcc
+          driver-url: postgres://${{ env.PGUSER }}@localhost:5432/postgres
+          artifact-name: perf-results-head-${{ matrix.warehouses }}W-${{ matrix.run }}
+      - name: Stop PostgreSQL
+        if: always()
+        run: bash ./orioledb/ci/perf_pg_stop.sh
+
+  compare:
+    name: Compare results
+    needs:
+      - bench-base
+      - bench-head
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout extension code
+        uses: actions/checkout@v4
+        with:
+          path: orioledb
+      - name: Download base results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: perf-results-base-*
+          path: results-base/
+      - name: Download head results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: perf-results-head-*
+          path: results-head/
+      - name: Compare results
+        run: |
+          python3 ./orioledb/ci/perf_compare.py \
+            --base-dir results-base/ \
+            --head-dir results-head/ \
+            --runs "${{ inputs.bench_runs || '1' }}" \
+            --duration "${{ inputs.bench_duration || '5m' }}" \
+            --warehouses "${{ inputs.warehouses || '1' }}" \
+            --output comment.md
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          MARKER="<!-- perf-test-results -->"
+          BODY=$(cat comment.md)
+          COMMENT="${MARKER}"$'\n'"${BODY}"
+
+          # Check if a comment with the marker already exists
+          EXISTING=$(gh api repos/${{ github.repository }}/issues/${PR_NUMBER}/comments \
+            --jq ".[] | select(.body | contains(\"${MARKER}\")) | .id" | head -1)
+
+          if [ -n "$EXISTING" ]; then
+            gh api repos/${{ github.repository }}/issues/comments/${EXISTING} \
+              -X PATCH -f body="$COMMENT"
+          else
+            gh api repos/${{ github.repository }}/issues/${PR_NUMBER}/comments \
+              -f body="$COMMENT"
+          fi
