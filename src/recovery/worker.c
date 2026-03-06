@@ -827,6 +827,23 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_overwrite_callback;
 		}
 		tts_orioledb_fill_key_bound(slot, id, &keyBound);
+
+		/*
+		 * When primary server detects secondary index tuple is too long, the
+		 * WAL record for primary index is already written.  So, during WAL
+		 * replay we may face this situation too.  Skip the secondary index
+		 * tuple if it's too long.  (Sub)transaction must be later aborted by
+		 * WAL.
+		 */
+		if (o_btree_len(&id->desc, cur_tuple, OTupleLength) > O_BTREE_MAX_TUPLE_SIZE)
+		{
+			Assert(!isPrimary);
+
+			pfree(stuple.data);
+			O_TUPLE_SET_NULL(stuple);
+			continue;
+		}
+
 		/* HACK: prevent sys cache pages from loading during o_btree_modify */
 		(void) o_btree_cmp(&id->desc, &cur_tuple, BTreeKeyLeafTuple,
 						   (Pointer) &keyBound, BTreeKeyBound);
@@ -1013,6 +1030,21 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 					callbackInfo.modifyDeletedCallback = recovery_insert_deleted_overwrite_callback;
 					callbackInfo.modifyCallback = recovery_insert_overwrite_callback;
 					new_stup = tts_orioledb_make_secondary_tuple(new_slot, tree, true);
+
+					/*
+					 * When primary server detects secondary index tuple is
+					 * too long, the WAL record for primary index is already
+					 * written.  So, during WAL replay we may face this
+					 * situation too.  Skip the secondary index tuple if it's
+					 * too long.  (Sub)transaction must be later aborted by
+					 * WAL.
+					 */
+					if (o_btree_len(&tree->desc, new_stup, OTupleLength) > O_BTREE_MAX_TUPLE_SIZE)
+					{
+						pfree(new_stup.data);
+						continue;
+					}
+
 					(void) o_btree_modify(&tree->desc, BTreeOperationInsert,
 										  new_stup, BTreeKeyLeafTuple,
 										  (Pointer) &new_key, BTreeKeyBound,
