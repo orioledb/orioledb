@@ -2193,6 +2193,10 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 	int			primary_init_nfields = old_o_table->primary_init_nfields;
+	int			num_check = rel->rd_att->constr ? rel->rd_att->constr->num_check : 0;
+	EState	   *check_estate = NULL;
+	ExprState **check_exprs = NULL;
+	ExprContext *check_econtext = NULL;
 
 	if (!old_o_table->has_primary)
 		primary_init_nfields--;
@@ -2234,6 +2238,24 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	}
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+
+	/* Prepare CHECK constraint expressions for validation during rewrite */
+	if (num_check > 0)
+	{
+		int			i;
+		ConstrCheck *check = rel->rd_att->constr->check;
+
+		check_estate = CreateExecutorState();
+		check_econtext = GetPerTupleExprContext(check_estate);
+		check_exprs = (ExprState **) palloc(num_check * sizeof(ExprState *));
+
+		for (i = 0; i < num_check; i++)
+		{
+			Expr	   *checkconstexpr = stringToNode(check[i].ccbin);
+
+			check_exprs[i] = ExecPrepareExpr(checkconstexpr, check_estate);
+		}
+	}
 
 	while (!O_TUPLE_IS_NULL(tup = btree_seq_scan_getnext(sscan, old_slot->tts_mcxt, &tupleCsn, &hint)))
 	{
@@ -2347,6 +2369,23 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 		}
 		new_slot->tts_nvalid = new_slot->tts_tupleDescriptor->natts;
 
+		/* Validate CHECK constraints on the rewritten tuple */
+		if (num_check > 0)
+		{
+			int			j;
+
+			check_econtext->ecxt_scantuple = new_slot;
+			for (j = 0; j < num_check; j++)
+			{
+				if (!ExecCheck(check_exprs[j], check_econtext))
+					ereport(ERROR,
+							(errcode(ERRCODE_CHECK_VIOLATION),
+							 errmsg("check constraint \"%s\" of relation \"%s\" is violated by some row",
+									rel->rd_att->constr->check[j].ccname,
+									RelationGetRelationName(rel))));
+			}
+		}
+
 		o_tbl_insert(descr, rel, new_slot, oxid, oSnapshot.csn);
 
 		ExecClearTuple(old_slot);
@@ -2355,6 +2394,12 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 
 	list_free(o_alter_generated_column_id);
 	o_alter_generated_column_id = NIL;
+
+	if (check_estate)
+	{
+		pfree(check_exprs);
+		FreeExecutorState(check_estate);
+	}
 
 	ExecDropSingleTupleTableSlot(old_slot);
 	ExecDropSingleTupleTableSlot(new_slot);
