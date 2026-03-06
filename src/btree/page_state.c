@@ -1210,7 +1210,7 @@ o_check_page_struct(BTreeDescr *desc, Page p)
 
 			Assert(chunk->shortLocation >= prevChunk->shortLocation);
 			Assert(chunk->offset >= prevChunk->offset);
-			Assert(O_PAGE_IS(p, RIGHTMOST) || chunk->hikeyShortLocation > prevChunk->hikeyShortLocation);
+			Assert(chunk->hikeyShortLocation > prevChunk->hikeyShortLocation);
 			Assert(SHORT_GET_LOCATION(chunk->hikeyShortLocation) <= header->hikeysEnd);
 			Assert(SHORT_GET_LOCATION(chunk->shortLocation) <= header->dataSize);
 			Assert(chunk->offset <= header->itemsCount);

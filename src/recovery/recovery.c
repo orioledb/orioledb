@@ -550,7 +550,6 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			CheckpointUndoStack *stack;
 			UndoLocation retainUndoLocation;
 			UndoLogType undoType = xidRec.undoType;
-			UndoMeta   *undoMeta = get_undo_meta_by_type(undoType);
 
 			stack = (CheckpointUndoStack *) MemoryContextAlloc(TopMemoryContext,
 															   sizeof(CheckpointUndoStack));
@@ -563,8 +562,11 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			 * We will probably need to retain this till the next checkpoint.
 			 */
 			retainUndoLocation = xidRec.retainLocation;
-			if (retainUndoLocation < state->retain_locs[undoType])
+			if (undoType < UndoLogsCount &&
+				retainUndoLocation < state->retain_locs[undoType])
 			{
+				UndoMeta   *undoMeta = get_undo_meta_by_type(undoType);
+
 				if (state->in_retain_undo_heaps[undoType])
 					pairingheap_remove(retain_undo_queues[undoType], &state->retain_undo_ph_nodes[undoType]);
 				state->retain_locs[undoType] = retainUndoLocation;
@@ -1835,6 +1837,7 @@ replay_erase_bridge_item(OIndexDescr *bridge, ItemPointer iptr)
 	bound.keys[0].exclusion_fn = NULL;
 	bound.keys[0].value = ItemPointerGetDatum(iptr);
 
+	o_btree_load_shmem(&bridge->desc);
 	init_page_find_context(&context, &bridge->desc,
 						   COMMITSEQNO_INPROGRESS,
 						   BTREE_PAGE_FIND_MODIFY);
@@ -3328,11 +3331,14 @@ replay_wal_record(void *vctx, WalRecord *rec)
 
 		case WAL_REC_BRIDGE_ERASE:
 			{
-				Assert(ctx->indexDescr);
+				if (ctx->indexDescr == NULL)
+				{
+					/* nothing to do here */
+					return WALPARSE_OK;
+				}
 
 				if (ctx->single)
 				{
-					recovery_switch_to_oxid(rec->oxid, -1);
 					replay_erase_bridge_item(ctx->indexDescr, &rec->u.bridge_erase.iptr);
 				}
 				else
@@ -3419,7 +3425,7 @@ replay_wal_record(void *vctx, WalRecord *rec)
 				if (ctx->sys_tree_num > 0 || ctx->indexDescr == NULL)
 				{
 					/* nothing to do here */
-					return WALPARSE_OK;
+					break;
 				}
 
 				if (ctx->indexDescr->desc.type == oIndexBridge)

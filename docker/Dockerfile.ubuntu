@@ -221,6 +221,9 @@ RUN set -eux; \
 	make -C contrib install; \
 	# install orioledb extension
 	cd /usr/src/postgresql/contrib/orioledb; \
+	# Remove any stale generated SQL files that may have leaked into the
+	# build context, so the Makefile regenerates them with IS_DEV=1.
+	make USE_PGXS=1 clean; \
 	make USE_PGXS=1 IS_DEV=1 -j "$(nproc)"; \
 	make USE_PGXS=1 IS_DEV=1 install; \
 	\

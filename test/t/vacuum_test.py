@@ -166,8 +166,6 @@ class VacuumTest(BaseTest):
 		node.start()
 		node.stop()
 
-	@unittest.skipIf(BaseTest.get_pg_version() < 14,
-	                 'PROCESS_TOAST option added in postgres 14')
 	def test_7(self):
 		node = self.node
 		node.start()

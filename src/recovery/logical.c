@@ -751,8 +751,8 @@ decode_wal_record(void *vctx, WalRecord *rec)
 						 rec->type, recname, rec->oxid);
 
 					UpdateDecodingStats(ctx->dctx);
-
-					return WALPARSE_OK;
+					/* Skip */
+					break;
 				}
 
 				csnSnapshot = SnapBuildGetCSNSnaphot(ctx->dctx->snapshot_builder);
@@ -761,7 +761,10 @@ decode_wal_record(void *vctx, WalRecord *rec)
 				csnSnapshot->xmin = rec->u.finish.xmin;
 
 				if (!set_snapshot(ctx->dctx, rec->logicalXid, xlogPtr))
-					return WALPARSE_OK;
+				{
+					/* Skip */
+					break;
+				}
 
 				txn = get_reorder_buffer_txn(ctx->dctx->reorder, rec->logicalXid);
 
@@ -818,7 +821,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 							rec->logicalXid = InvalidTransactionId;
 
 							/* Skip processing of this transaction */
-							return WALPARSE_OK;
+							break;
 						}
 
 						/*
@@ -899,7 +902,8 @@ decode_wal_record(void *vctx, WalRecord *rec)
 						 rec->type, recname, rec->oxid);
 
 					UpdateDecodingStats(ctx->dctx);
-					return WALPARSE_OK;
+					/* Skip */
+					break;
 				}
 
 				if (remove_skipped_dml(&skippedDMLHash, rec->oxid))
@@ -923,7 +927,10 @@ decode_wal_record(void *vctx, WalRecord *rec)
 				csnSnapshot->xmin = rec->u.joint_commit.xmin;
 
 				if (!set_snapshot(ctx->dctx, rec->logicalXid, xlogPtr))
-					return WALPARSE_OK;
+				{
+					/* Skip */
+					break;
+				}
 
 				/* Skip actual commit processing */
 				if (SnapBuildXactNeedsSkip(ctx->dctx->snapshot_builder, ctx->xlogRecEndPtr - 1) || ctx->dctx->fast_forward)
@@ -981,14 +988,14 @@ decode_wal_record(void *vctx, WalRecord *rec)
 					 * transactions
 					 */
 					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec->type, recname, rec->oxid);
-					return WALPARSE_OK;
+					break;
 				}
 
 				/* Skip actual relation processing in fast_forward mode */
 				if (ctx->dctx->fast_forward)
 				{
 					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec->type, recname, rec->oxid);
-					return WALPARSE_OK;
+					break;
 				}
 
 				if (IS_SYS_TREE_OIDS(rec->oids))
@@ -1089,7 +1096,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 				if (rec->wal_version < 17)
 				{
 					/* Skip */
-					return WALPARSE_OK;
+					break;
 				}
 
 				elog(DEBUG4, "RECEIVE record type %d (%s) oxid %lu logicalXId %u heapXid %u parentSubid %u",
@@ -1116,7 +1123,8 @@ decode_wal_record(void *vctx, WalRecord *rec)
 					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec->type, recname, rec->oxid);
 
 					UpdateDecodingStats(ctx->dctx);
-					return WALPARSE_OK;
+					/* Skip */
+					break;
 				}
 
 				csnSnapshot = SnapBuildGetCSNSnaphot(ctx->dctx->snapshot_builder);
@@ -1125,7 +1133,10 @@ decode_wal_record(void *vctx, WalRecord *rec)
 				csnSnapshot->xmin = rec->u.rb_to_sp.xmin;
 
 				if (!set_snapshot(ctx->dctx, rec->logicalXid, xlogPtr))
-					return WALPARSE_OK;
+				{
+					/* Skip */
+					break;
+				}
 
 				txn = get_reorder_buffer_txn(ctx->dctx->reorder, rec->logicalXid);
 
@@ -1185,7 +1196,8 @@ decode_wal_record(void *vctx, WalRecord *rec)
 					 * transactions
 					 */
 					elog(DEBUG4, "IGNORED record type %d (%s) invalid logicalXid for oxid %lu", rec->type, recname, rec->oxid);
-					return WALPARSE_OK;
+					/* Skip */
+					break;
 				}
 
 				ReorderBufferProcessXid(ctx->dctx->reorder, rec->logicalXid, xlogPtr);
@@ -1195,11 +1207,13 @@ decode_wal_record(void *vctx, WalRecord *rec)
 				{
 					elog(DEBUG4, "IGNORED record type %d (%s) for oxid %lu due to origin filtering (origin_id=%u)",
 						 rec->type, recname, rec->oxid, rec->origin_id);
-					return WALPARSE_OK;
+					/* Skip */
+					break;
 				}
 
 				if (SnapBuildCurrentState(ctx->dctx->snapshot_builder) < SNAPBUILD_FULL_SNAPSHOT)
-					return WALPARSE_OK;
+					/* Skip */
+					break;
 
 				(void) set_snapshot(ctx->dctx, rec->logicalXid, xlogPtr);
 
@@ -1208,7 +1222,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 
 				/* Skip actual record processing in fast_forward mode */
 				if (ctx->dctx->fast_forward)
-					return WALPARSE_OK;
+					break;
 
 				if ((ctx->ix_type == oIndexInvalid || ctx->ix_type == oIndexToast) &&
 					rec->oids.datoid == ctx->dctx->slot->data.database)

@@ -565,8 +565,6 @@ class RecoveryOpclassTest(BaseTest):
 
 			node.stop()
 
-	@unittest.skipIf(BaseTest.get_pg_version() < 14,
-	                 'SQL-standard function bodies added in postgres 14')
 	def test_sqlbody_cmp_function(self):
 		with self.node as node:
 			node.start()

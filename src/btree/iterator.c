@@ -284,6 +284,9 @@ o_btree_find_tuple_by_key(BTreeDescr *desc, void *key, BTreeKeyType kind,
  * useful when there are several uncommitted versions within a single
  * in-progress transaction.  The callback controls the iteration.
  *
+ * The result's OTuple.data is allocated in mctx and is to be freed by the
+ * caller.
+ *
  * Note on COMMITSEQNO_NON_DELETED: this CSN is treated as in-progress
  * (COMMITSEQNO_IS_INPROGRESS returns true for it), so it returns data from
  * uncommitted transactions just like COMMITSEQNO_INPROGRESS.  The difference
@@ -568,6 +571,14 @@ o_btree_iterator_set_callback(BTreeIterator *it,
 	it->fetchCallbackArg = arg;
 }
 
+/*
+ * Fetches tha next tuple from the iterator.  Returns null tuple when there
+ * are no more tuples before the end boundary (defined by `end`, `endType`,
+ * and `endIsIncluded`).
+ *
+ * The result's OTuple.data is allocated in it->tupleCxt memory context.  It's
+ * the caller's responsibility to free this memory.
+ */
 OTuple
 o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 					   void *end, BTreeKeyType endType,

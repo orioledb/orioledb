@@ -507,7 +507,7 @@ orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
 		OXid		oxid;
 
 		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-		o_apply_new_bridge_index_ctid(descr, rel, slot, oSnapshot.csn);
+		o_apply_new_bridge_index_ctid(descr, rel, slot, oSnapshot.csn, true);
 	}
 
 	tts_orioledb_toast(slot, descr);
@@ -873,6 +873,11 @@ orioledb_relation_set_new_filenode(Relation rel,
 											 rel->rd_rel->reltablespace,
 											 old_o_table->index_bridging);
 		o_opclass_cache_add_table(new_o_table);
+
+		/* Copy compression settings from old table */
+		new_o_table->default_compress = old_o_table->default_compress;
+		new_o_table->primary_compress = old_o_table->primary_compress;
+		new_o_table->toast_compress = old_o_table->toast_compress;
 
 		/* Setup bridging if it was set on old table */
 		if (old_o_table->index_bridging)

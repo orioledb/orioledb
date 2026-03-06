@@ -273,7 +273,10 @@ o_enum_cache_delete_all(Oid datoid, Oid enum_oid)
 			break;
 
 		if (o_enum->key.common.lsn > key.common.lsn)
+		{
+			pfree(tup.data);
 			break;
+		}
 
 		o_enum_data =
 			(OEnumData *) (((Pointer) o_enum) + offsetof(OEnum, data) +
@@ -281,7 +284,11 @@ o_enum_cache_delete_all(Oid datoid, Oid enum_oid)
 		o_enum_cache_delete(datoid, o_enum->key.keys[0],
 							NameGetDatum(O_KEY_GET_NAME(&o_enum->key, 1)));
 		o_enumoid_cache_delete(datoid, o_enum_data->oid);
+
+		pfree(tup.data);
 	} while (true);
+
+	btree_iterator_free(it);
 }
 
 HeapTuple
@@ -418,7 +425,10 @@ o_load_enum_cache_data_hook(TypeCacheEntry *tcache)
 			break;
 
 		if (o_enum->key.common.lsn > key.common.lsn)
+		{
+			pfree(tup.data);
 			break;
+		}
 
 		if (numitems >= maxitems)
 		{
@@ -431,7 +441,11 @@ o_load_enum_cache_data_hook(TypeCacheEntry *tcache)
 		items[numitems].enum_oid = o_enum_data->oid;
 		items[numitems].sort_order = o_enum_data->enumsortorder;
 		numitems++;
+
+		pfree(tup.data);
 	} while (true);
+
+	btree_iterator_free(it);
 
 	/* Sort the items into OID order */
 	qsort(items, numitems, sizeof(EnumItem), enum_oid_cmp);

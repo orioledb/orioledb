@@ -52,6 +52,8 @@
 #include "btree/undo.h"
 #include "transam/oxid.h"
 #include "tuple/slot.h"
+#include "utils/page_pool.h"
+#include "utils/resowner.h"
 #include "utils/sampling.h"
 #include "utils/stopevent.h"
 
@@ -138,12 +140,41 @@ struct BTreeSeqScan
 	bool		isLeader;
 	int			workerNumber;
 	dsm_segment *dsmSeg;
+
+	/* Ensures scan cleanup on transaction abort or resource owner release */
+	ResourceOwner resowner;
 };
 
 static dlist_head listOfScans = DLIST_STATIC_INIT(listOfScans);
 
 static void scan_make_iterator(BTreeSeqScan *scan, OTuple startKey, OTuple keyRangeHigh);
 static void get_next_key(BTreeSeqScan *scan, BTreePageItemLocator *intLoc, OFixedKey *nextKey, Page page);
+static void ResourceOwnerRememberBTreeSeqScan(ResourceOwner owner, BTreeSeqScan *scan);
+static void ResourceOwnerForgetBTreeSeqScan(ResourceOwner owner, BTreeSeqScan *scan);
+
+/*
+ * Resource owner integration for BTreeSeqScan.
+ *
+ * Previously seq_scans_cleanup() only ran after transaction finish, so seq
+ * scans were not released correctly on subtransaction finish, release of
+ * prepared statements, etc.  Binding seq scans to ResourceOwner solves this.
+ *
+ * PG >= 17 uses custom ResourceOwner resources.  PG 16 uses a release
+ * callback.
+ */
+#if PG_VERSION_NUM >= 170000
+static void ResOwnerReleaseBTreeSeqScan(Datum res);
+static char *ResOwnerPrintBTreeSeqScan(Datum res);
+
+static const ResourceOwnerDesc btree_seq_scan_resowner_desc =
+{
+	.name = "OrioleDB BTreeSeqScans",
+	.release_phase = RESOURCE_RELEASE_BEFORE_LOCKS,
+	.release_priority = RELEASE_PRIO_RELCACHE_REFS - 1,
+	.ReleaseResource = ResOwnerReleaseBTreeSeqScan,
+	.DebugPrint = ResOwnerPrintBTreeSeqScan
+};
+#endif
 
 BTreeScanShmem *btreeScanShmem;
 
@@ -1163,7 +1194,8 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	scan->allocatedDownlinks = 16;
 	scan->downlinksCount = 0;
 	scan->downlinkIndex = 0;
-	scan->diskDownlinks = (BTreeSeqScanDiskDownlink *) palloc(sizeof(scan->diskDownlinks[0]) * scan->allocatedDownlinks);
+	scan->diskDownlinks = (BTreeSeqScanDiskDownlink *) MemoryContextAlloc(btree_seqscan_context,
+																		  sizeof(scan->diskDownlinks[0]) * scan->allocatedDownlinks);
 	scan->mctx = CurrentMemoryContext;
 	scan->iter = NULL;
 	scan->cb = cb;
@@ -1179,6 +1211,12 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
 
 	dlist_push_tail(&listOfScans, &scan->listNode);
+	scan->resowner = NULL;
+#if PG_VERSION_NUM >= 170000
+	ResourceOwnerEnlarge(CurrentResourceOwner);
+#endif
+	ResourceOwnerRememberBTreeSeqScan(CurrentResourceOwner, scan);
+	scan->resowner = CurrentResourceOwner;
 
 	return scan;
 }
@@ -1667,29 +1705,64 @@ btree_seq_scan_getnext_raw(BTreeSeqScan *scan, MemoryContext mctx,
 	return tuple;
 }
 
-void
-free_btree_seq_scan(BTreeSeqScan *scan)
+/*
+ * Internal cleanup for a sequential scan: decrements the numSeqScans counter
+ * and completes deferred meta page free if this was the last scan.  Called
+ * from both the normal free path and the resource owner release callback.
+ */
+static void
+free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 {
 	BTreeDescr *desc = scan->desc;
 
 	START_CRIT_SECTION();
-	dlist_delete(&scan->listNode);
+
+	if (scan->resowner)
+	{
+		ResourceOwnerForgetBTreeSeqScan(scan->resowner, scan);
+		scan->resowner = NULL;
+	}
+
 	if (scan->checkpointNumberSet && OInMemoryBlknoIsValid(desc->rootInfo.metaPageBlkno))
 	{
 		BTreeMetaPage *metaPage = BTREE_GET_META(scan->desc);
 
 		(void) pg_atomic_fetch_sub_u32(&metaPage->numSeqScans[scan->checkpointNumber % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
+
+		/* Complete deferred meta page free if this was the last scan. */
+		if (metaPage->toBeFreedOnSeqScanRelease && meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) == 0)
+			ppool_free_page(desc->ppool, desc->rootInfo.metaPageBlkno, false);
+
+		scan->checkpointNumberSet = false;
 	}
-	END_CRIT_SECTION();
 
 	if (scan->dsmSeg)
 	{
 		Assert(pg_atomic_read_u32(&scan->poscan->dsmSegNumAttached) == 0);	/* All workers should
 																			 * have already detached */
 		dsm_detach(scan->dsmSeg);
+		scan->dsmSeg = NULL;
 	}
-	pfree(scan->diskDownlinks);
-	pfree(scan);
+
+	if (scan->diskDownlinks)
+	{
+		pfree(scan->diskDownlinks);
+		scan->diskDownlinks = NULL;
+	}
+
+	if (!fromResowner)
+	{
+		dlist_delete_from_thoroughly(&listOfScans, &scan->listNode);
+		pfree(scan);
+	}
+
+	END_CRIT_SECTION();
+}
+
+void
+free_btree_seq_scan(BTreeSeqScan *scan)
+{
+	free_btree_seq_scan_internal(scan, false);
 }
 
 /*
@@ -1704,21 +1777,82 @@ seq_scans_cleanup(void)
 	while (!dlist_is_empty(&listOfScans))
 	{
 		BTreeSeqScan *scan = dlist_head_element(BTreeSeqScan, listNode, &listOfScans);
-		BTreeDescr *desc = scan->desc;
-		BTreeMetaPage *metaPage;
 
-		if (scan->checkpointNumberSet && OInMemoryBlknoIsValid(desc->rootInfo.metaPageBlkno))
-		{
-			metaPage = BTREE_GET_META(desc);
-
-			(void) pg_atomic_fetch_sub_u32(&metaPage->numSeqScans[scan->checkpointNumber % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
-		}
-		dlist_delete(&scan->listNode);
-		if (scan->dsmSeg)
-			dsm_detach(scan->dsmSeg);
-
-		pfree(scan);
+		free_btree_seq_scan_internal(scan, false);
 	}
-	dlist_init(&listOfScans);
 	END_CRIT_SECTION();
 }
+
+/*
+ * Return the total number of active sequential scans across all checkpoint
+ * number slots for the given meta page.
+ */
+int
+meta_page_get_num_seq_scans(OInMemoryBlkno metaPageBlkno)
+{
+	BTreeMetaPage *metaPage = (BTreeMetaPage *) O_GET_IN_MEMORY_PAGE(metaPageBlkno);
+	int			result = 0;
+	int			i;
+
+	for (i = 0; i < NUM_SEQ_SCANS_ARRAY_SIZE; i++)
+		result += pg_atomic_read_u32(&metaPage->numSeqScans[i]);
+
+	return result;
+}
+
+#if PG_VERSION_NUM >= 170000
+
+static void
+ResourceOwnerRememberBTreeSeqScan(ResourceOwner owner, BTreeSeqScan *scan)
+{
+	ResourceOwnerRemember(owner, PointerGetDatum(scan), &btree_seq_scan_resowner_desc);
+}
+static void
+ResourceOwnerForgetBTreeSeqScan(ResourceOwner owner, BTreeSeqScan *scan)
+{
+	ResourceOwnerForget(owner, PointerGetDatum(scan), &btree_seq_scan_resowner_desc);
+}
+
+static void
+ResOwnerReleaseBTreeSeqScan(Datum res)
+{
+	BTreeSeqScan *scan = (BTreeSeqScan *) DatumGetPointer(res);
+
+	scan->resowner = NULL;
+	free_btree_seq_scan_internal(scan, true);
+}
+
+static char *
+ResOwnerPrintBTreeSeqScan(Datum res)
+{
+	BTreeSeqScan *scan = (BTreeSeqScan *) DatumGetPointer(res);
+	ORelOids	oids = scan->desc->oids;
+
+	return psprintf("OrioleDB BTreeSeqScans (%u, %u, %u)",
+					oids.datoid, oids.reloid, oids.relnode);
+}
+
+#else
+
+static void
+ResOwnerReleaseBTreeSeqScanCallback(ResourceReleasePhase phase,
+									bool isCommit, bool isTopLevel, void *arg)
+{
+	BTreeSeqScan *scan = (BTreeSeqScan *) arg;
+
+	if (phase == RESOURCE_RELEASE_BEFORE_LOCKS)
+		free_btree_seq_scan_internal(scan, true);
+}
+
+static void
+ResourceOwnerRememberBTreeSeqScan(ResourceOwner owner, BTreeSeqScan *scan)
+{
+	RegisterResourceReleaseCallback(ResOwnerReleaseBTreeSeqScanCallback, scan);
+}
+static void
+ResourceOwnerForgetBTreeSeqScan(ResourceOwner owner, BTreeSeqScan *scan)
+{
+	UnregisterResourceReleaseCallback(ResOwnerReleaseBTreeSeqScanCallback, scan);
+}
+
+#endif

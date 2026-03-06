@@ -59,6 +59,14 @@ TRUNCATE o_transactional_truncate_pkey;
 SELECT * FROM o_relnames WHERE relname LIKE 'o_transactional_truncate_pkey%';
 COMMIT;
 
+CREATE TABLE o_compress_truncate (
+  id int
+) USING orioledb WITH (compress = 2);
+
+SELECT orioledb_table_description('o_compress_truncate'::regclass);
+TRUNCATE o_compress_truncate;
+SELECT orioledb_table_description('o_compress_truncate'::regclass);
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA truncate CASCADE;
 RESET search_path;

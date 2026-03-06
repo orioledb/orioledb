@@ -2105,10 +2105,8 @@ undo_xact_callback(XactEvent event, void *arg)
 				elog(DEBUG4, "XACT_EVENT_PRE_COMMIT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
 					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
-				if (!TransactionIdIsValid(heapXid))
-				{
+				if (TransactionIdIsValid(heapXid))
 					current_oxid_xlog_precommit();
-				}
 
 				if (TransactionIdIsValid(logicalXidContext.xid) && TransactionIdIsValid(heapXid))
 				{
@@ -2561,7 +2559,7 @@ start_autonomous_transaction(OAutonomousTxState *state)
 	int			i;
 
 	state->needs_wal_flush = oxid_needs_wal_flush;
-	state->oxid = get_current_oxid();
+	state->oxid = get_current_oxid_if_any();
 	get_current_logical_xid_ctx(&state->logicalXidContext);
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		state->has_retained_undo_location[i] = undo_type_has_retained_location((UndoLogType) i);

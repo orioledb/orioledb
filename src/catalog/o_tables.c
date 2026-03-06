@@ -249,7 +249,7 @@ oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 		else
 			return OTupleFetchNotMatch;
 	}
-	return OTupleFetchNext;
+	return OTupleFetchNotMatch;
 }
 
 ToastAPI	oTablesToastAPI = {
@@ -313,6 +313,7 @@ o_tables_foreach_oids(OTablesOidsCallback callback,
 		tuple = o_btree_iterator_fetch(it, NULL, NULL,
 									   BTreeKeyNone, false, NULL);
 	}
+	btree_iterator_free(it);
 }
 
 /*
@@ -836,7 +837,8 @@ o_table_tupdesc(OTable *o_table)
 	TupleDesc	tupdesc;
 
 	tupdesc = o_table_fields_make_tupdesc(o_table->fields, o_table->nfields);
-	tupdesc->tdtypeid = o_table->oids.reloid;
+	if (IsTransactionState())
+		tupdesc->tdtypeid = get_rel_type_id(o_table->oids.reloid);
 	return tupdesc;
 }
 
