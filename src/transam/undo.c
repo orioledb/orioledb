@@ -1594,7 +1594,8 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 		pg_atomic_read_u64(&meta->writtenLocation) + circularBufferSize)
 		return true;
 
-	update_min_undo_locations(undoType, false, waitForUndoLocation);
+	if (undoType != UndoLogSystem || !have_locked_pages())
+		update_min_undo_locations(undoType, false, waitForUndoLocation);
 
 	if (!check_reserved_undo_location(undoType, location + size,
 									  &minProcReservedLocation,
