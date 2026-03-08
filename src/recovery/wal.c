@@ -863,7 +863,6 @@ add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 	local_wal_buffer_offset += sizeof(*rec);
 
 	flush_local_wal(false, false);
-	local_wal_has_material_changes = false;
 
 	/*
 	 * Force adding xid record on future changes going after this rollback to
