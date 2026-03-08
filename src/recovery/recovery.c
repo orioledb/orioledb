@@ -108,6 +108,7 @@ typedef struct
 	XLogRecPtr	ptr;
 
 	bool		in_finished_list;
+	bool		in_joint_commit_list;
 	bool		in_retain_undo_heaps[(int) UndoLogsCount];
 
 	dlist_node	joint_commit_list_node;
@@ -543,6 +544,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			state->csn = COMMITSEQNO_INPROGRESS;
 			state->ptr = InvalidXLogRecPtr;
 			state->in_finished_list = false;
+			state->in_joint_commit_list = false;
 			for (j = 0; j < (int) UndoLogsCount; j++)
 				state->in_retain_undo_heaps[j] = false;
 			memset(state->undo_stacks, 0, sizeof(state->undo_stacks));
@@ -1403,6 +1405,7 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			cur_state->ptr = InvalidXLogRecPtr;
 			cur_state->needs_wal_flush = false;
 			cur_state->in_finished_list = false;
+			cur_state->in_joint_commit_list = false;
 
 			/*
 			 * undo_stacks might be copied into a temp file, so initialize it
@@ -1448,7 +1451,8 @@ check_delete_xid_state(RecoveryXidState *state, int worker_id)
 			in_retain_heaps = true;
 
 	if (!in_retain_heaps &&
-		!state->in_finished_list)
+		!state->in_finished_list &&
+		!state->in_joint_commit_list)
 	{
 		OXid		oxid = state->oxid;
 		bool		found;
@@ -3254,8 +3258,12 @@ replay_wal_record(void *vctx, WalRecord *rec)
 		case WAL_REC_JOINT_COMMIT:
 			cur_recovery_xid_state->xid = rec->u.joint_commit.xid;
 			recovery_xmin = Max(recovery_xmin, rec->u.joint_commit.xmin);
-			dlist_push_tail(&joint_commit_list,
-							&cur_recovery_xid_state->joint_commit_list_node);
+			if (!cur_recovery_xid_state->in_joint_commit_list)
+			{
+				dlist_push_tail(&joint_commit_list,
+								&cur_recovery_xid_state->joint_commit_list_node);
+				cur_recovery_xid_state->in_joint_commit_list = true;
+			}
 			break;
 
 		case WAL_REC_REPLAY_FEEDBACK:
@@ -3620,6 +3628,8 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn)
 		bool		sync = false;
 
 		state = dlist_container(RecoveryXidState, joint_commit_list_node, miter.cur);
+		Assert(state->in_joint_commit_list);
+
 		if (state->xid != xid)
 			continue;
 
@@ -3646,7 +3656,9 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn)
 				invalidate_typcache();
 		}
 
-		dlist_delete(miter.cur);
+		dlist_delete_thoroughly(miter.cur);
+		state->in_joint_commit_list = false;
+
 		recovery_finish_current_oxid(COMMITSEQNO_MAX_NORMAL - 1,
 									 lsn, -1, sync);
 		break;
