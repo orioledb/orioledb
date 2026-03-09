@@ -145,7 +145,7 @@ static OBTreeModifyCallbackAction o_lock_deleted_callback(BTreeDescr *descr, OTu
 														  RowLockMode *lock_mode, BTreeLocationHint *hint,
 														  void *arg);
 static void fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bound);
-static inline bool is_keys_eq(BTreeDescr *desc, OBTreeKeyBound *k1, OBTreeKeyBound *k2);
+static inline bool is_keys_eq(OIndexDescr *id, OBTreeKeyBound *k1, OBTreeKeyBound *k2);
 static void o_report_duplicate(Relation rel, OIndexDescr *id,
 							   TupleTableSlot *slot);
 
@@ -1234,7 +1234,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 								RelationGetRelationName(rel),
 								false);
 
-	if (is_keys_eq(&GET_PRIMARY(descr)->desc, oldPkey, &newPkey))
+	if (is_keys_eq(GET_PRIMARY(descr), oldPkey, &newPkey))
 	{
 		mres = o_tbl_indices_overwrite(descr, &newPkey, slot, oxid, csn,
 									   hint, arg);
@@ -1496,7 +1496,7 @@ o_update_secondary_index(OIndexDescr *id,
 	fill_key_bound(oldSlot, id, &old_key);
 	fill_key_bound(newSlot, id, &new_key);
 
-	if (is_keys_eq(&id->desc, &old_key, &new_key) && (old_valid == new_valid))
+	if (is_keys_eq(id, &old_key, &new_key) && (old_valid == new_valid))
 		return res;
 
 	o_btree_load_shmem(&id->desc);
@@ -2412,12 +2412,32 @@ o_lock_deleted_callback(BTreeDescr *descr,
 	return OBTreeCallbackActionDoNothing;
 }
 
+/*
+ * Check if two keys are binary equal.
+ */
 static inline bool
-is_keys_eq(BTreeDescr *desc, OBTreeKeyBound *k1, OBTreeKeyBound *k2)
+is_keys_eq(OIndexDescr *id, OBTreeKeyBound *k1, OBTreeKeyBound *k2)
 {
-	return (o_idx_cmp(desc,
-					  (Pointer) k1, BTreeKeyBound,
-					  (Pointer) k2, BTreeKeyBound) == 0);
+	int			i;
+	int16		typlen;
+	bool		typbyval;
+
+	if (k1->nkeys != k2->nkeys)
+		return false;
+
+	for (i = 0; i < k1->nkeys; i++)
+	{
+		if (k1->keys[i].flags != k2->keys[i].flags)
+			return false;
+		if (k1->keys[i].flags & O_VALUE_BOUND_NO_VALUE)
+			continue;
+		typlen = id->nonLeafTupdesc->attrs[i].attlen;
+		typbyval = id->nonLeafTupdesc->attrs[i].attbyval;
+		if (!datum_image_eq(k1->keys[i].value, k2->keys[i].value,
+							typbyval, typlen))
+			return false;
+	}
+	return true;
 }
 
 static void

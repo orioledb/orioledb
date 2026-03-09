@@ -1027,6 +1027,18 @@ INSERT INTO o_test_1 (SELECT * FROM o_test_2);
 DROP TABLE o_test_1;
 DROP TABLE o_test_2;
 
+-- Check index updating with equal but binary different values
+CREATE TABLE o_test_1 (a float4 PRIMARY KEY, b float4) USING orioledb;
+INSERT INTO o_test_1 VALUES ('0', '1'), ('1', '0');
+CREATE INDEX o_test_1_idx ON o_test_1 (b, a);
+UPDATE o_test_1 SET b = '-0' WHERE b = '0';
+UPDATE o_test_1 SET a = '-0' WHERE a = '0';
+SET enable_seqscan = off;
+EXPLAIN SELECT * FROM o_test_1 ORDER BY b;
+SELECT * FROM o_test_1 ORDER BY b;
+RESET enable_seqscan;
+DROP TABLE o_test_1;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA tableam CASCADE;
 RESET search_path;

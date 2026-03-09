@@ -4901,6 +4901,28 @@ INSERT INTO o_test_2 VALUES (1, 't');
 INSERT INTO o_test_1 (SELECT * FROM o_test_2);
 DROP TABLE o_test_1;
 DROP TABLE o_test_2;
+-- Check index updating with equal but binary different values
+CREATE TABLE o_test_1 (a float4 PRIMARY KEY, b float4) USING orioledb;
+INSERT INTO o_test_1 VALUES ('0', '1'), ('1', '0');
+CREATE INDEX o_test_1_idx ON o_test_1 (b, a);
+UPDATE o_test_1 SET b = '-0' WHERE b = '0';
+UPDATE o_test_1 SET a = '-0' WHERE a = '0';
+SET enable_seqscan = off;
+EXPLAIN SELECT * FROM o_test_1 ORDER BY b;
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Index Only Scan using o_test_1_idx on o_test_1  (cost=0.13..8.16 rows=2 width=8)
+(1 row)
+
+SELECT * FROM o_test_1 ORDER BY b;
+ a  | b  
+----+----
+  1 | -0
+ -0 |  1
+(2 rows)
+
+RESET enable_seqscan;
+DROP TABLE o_test_1;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 17 other objects
 DETAIL:  drop cascades to table o_tableam6
