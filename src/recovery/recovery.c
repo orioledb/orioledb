@@ -3617,7 +3617,7 @@ replay_container(Pointer startPtr, Pointer endPtr,
  * Hook for replaying builtin commit record.  Performs joint commit.
  */
 void
-o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn)
+o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn, bool commit)
 {
 	dlist_mutable_iter miter;
 	bool		single = *recovery_single_process;
@@ -3638,7 +3638,7 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn)
 		Assert(cur_recovery_xid_state != NULL);
 		if (!single)
 		{
-			workers_send_oxid_finish(lsn, true);
+			workers_send_oxid_finish(lsn, commit);
 			if (cur_recovery_xid_state->systree_modified ||
 				cur_recovery_xid_state->checkpoint_xid)
 			{
@@ -3659,7 +3659,7 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn)
 		dlist_delete_thoroughly(miter.cur);
 		state->in_joint_commit_list = false;
 
-		recovery_finish_current_oxid(COMMITSEQNO_MAX_NORMAL - 1,
+		recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
 									 lsn, -1, sync);
 		break;
 	}
