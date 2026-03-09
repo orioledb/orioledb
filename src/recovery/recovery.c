@@ -3678,7 +3678,7 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn, bool commit)
 		dlist_delete_from_thoroughly(&joint_commit_list, miter.cur);
 		state->in_joint_commit_list = false;
 
-		recovery_finish_current_oxid(COMMITSEQNO_MAX_NORMAL - 1,
+		recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
 									 lsn, -1, sync);
 		break;
 	}
