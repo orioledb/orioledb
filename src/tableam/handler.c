@@ -14,6 +14,7 @@
 #include "postgres.h"
 
 #include <math.h>
+#include <sys/stat.h>
 
 #include "orioledb.h"
 
@@ -71,6 +72,7 @@
 #include "utils/lsyscache.h"
 #include "utils/sampling.h"
 #include "utils/syscache.h"
+#include "funcapi.h"
 
 bool		in_nontransactional_truncate = false;
 
@@ -92,6 +94,14 @@ static void get_keys_from_rowid(OIndexDescr *primary, Datum pkDatum, OBTreeKeyBo
 								uint32 *version, ItemPointer *bridge_ctid);
 static void rowid_set_csn(OIndexDescr *id, Datum pkDatum, CommitSeqNo csn);
 
+/* ------------------------------------------------------------------------
+ * SQL functions
+ * ------------------------------------------------------------------------
+ */
+Datum		orioledb_tableam_handler(PG_FUNCTION_ARGS);
+
+PG_FUNCTION_INFO_V1(orioledb_tableam_handler);
+PG_FUNCTION_INFO_V1(orioledb_undo_size);
 
 /* ------------------------------------------------------------------------
  * Slot related callbacks for heap AM
@@ -1368,6 +1378,96 @@ orioledb_relation_toast_am(Relation rel)
 	return HEAP_TABLE_AM_OID;
 }
 
+/*
+ * Output OrioleDB undo sizes per each undo type.
+ * There is a single undo dir for all tablespaces and databasess.
+ */
+Datum
+orioledb_undo_size(PG_FUNCTION_ARGS)
+{
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	struct dirent *direntry;
+	DIR		   *dirdesc;
+	char		filename[MAXPGPATH * 2];
+	const char	path[15] = "orioledb_undo";
+	int			totalsize[UndoLogsCount];
+
+	InitMaterializedSRF(fcinfo, 0);
+
+	memset(totalsize, 0, sizeof(totalsize));
+
+	dirdesc = AllocateDir(path);
+
+	if (!dirdesc)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not open directory \"%s\": %m", path)));
+
+	while ((direntry = ReadDir(dirdesc, path)) != NULL)
+	{
+		struct stat fst;
+		char		undo_type[7];
+
+		CHECK_FOR_INTERRUPTS();
+
+		if (strcmp(direntry->d_name, ".") == 0 ||
+			strcmp(direntry->d_name, "..") == 0)
+			continue;
+
+		snprintf(filename, sizeof(filename), "%s/%s", path, direntry->d_name);
+
+		if (stat(filename, &fst) < 0)
+		{
+			if (errno == ENOENT)
+				continue;
+			else
+				ereport(ERROR,
+						(errcode_for_file_access(),
+						 errmsg("could not stat file \"%s\": %m", filename)));
+		}
+
+		snprintf(undo_type, 7, "%s", direntry->d_name + 10);
+
+		if (strcmp(undo_type, "row") == 0)
+		{
+			totalsize[UndoLogRegular] += fst.st_size;
+		}
+		else if (strcmp(undo_type, "page") == 0)
+		{
+			totalsize[UndoLogRegularPageLevel] += fst.st_size;
+		}
+		else if (strcmp(undo_type, "system") == 0)
+		{
+			totalsize[UndoLogSystem] += fst.st_size;
+		}
+	}
+
+	FreeDir(dirdesc);
+
+	for (int i = 0; i < UndoLogsCount; i++)
+	{
+		Datum		values[2];
+		bool		nulls[2];
+
+		nulls[0] = false;
+		if (i == UndoLogRegular)
+			values[0] = PointerGetDatum(cstring_to_text("row"));
+		else if (i == UndoLogRegularPageLevel)
+			values[0] = PointerGetDatum(cstring_to_text("page"));
+		else if (i == UndoLogSystem)
+			values[0] = PointerGetDatum(cstring_to_text("system"));
+		else
+			elog(ERROR, "Unknown undo log type number: %d", i);
+
+		nulls[1] = false;
+		values[1] = totalsize[i];
+
+		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+	}
+
+	return (Datum) 0;
+}
+
 
 /* ------------------------------------------------------------------------
  * Planner related callbacks for the heap AM
@@ -2386,10 +2486,6 @@ is_orioledb_rel(Relation rel)
 
 	return (rel->rd_tableam == (TableAmRoutine *) &orioledb_am_methods);
 }
-
-Datum		orioledb_tableam_handler(PG_FUNCTION_ARGS);
-
-PG_FUNCTION_INFO_V1(orioledb_tableam_handler);
 
 Datum
 orioledb_tableam_handler(PG_FUNCTION_ARGS)
