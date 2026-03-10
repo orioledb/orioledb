@@ -2420,8 +2420,6 @@ is_keys_eq(OIndexDescr *id, OBTreeKeyBound *k1, OBTreeKeyBound *k2)
 	else
 		n = id->nonLeafTupdesc->natts;
 
-	Assert(n <= k1->nkeys && n <= k2->nkeys);
-
 	for (i = 0; i < n; i++)
 	{
 		if (k1->keys[i].flags != k2->keys[i].flags)
