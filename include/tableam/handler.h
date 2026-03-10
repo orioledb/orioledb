@@ -141,6 +141,8 @@ extern Size orioledb_parallelscan_initialize_inner(ParallelTableScanDesc pscan);
 extern void orioledb_parallelscan_reinitialize(Relation rel, ParallelTableScanDesc pscan);
 
 extern int64 orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 method);
+extern int64 orioledb_calculate_database_size(Oid dbOid);
+extern database_size_hook_type prev_database_size_hook;
 
 typedef enum
 {
