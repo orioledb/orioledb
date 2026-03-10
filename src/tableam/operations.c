@@ -2418,14 +2418,22 @@ o_lock_deleted_callback(BTreeDescr *descr,
 static inline bool
 is_keys_eq(OIndexDescr *id, OBTreeKeyBound *k1, OBTreeKeyBound *k2)
 {
-	int			i;
+	int			i,
+				n;
 	int16		typlen;
 	bool		typbyval;
 
 	if (k1->nkeys != k2->nkeys)
 		return false;
 
-	for (i = 0; i < k1->nkeys; i++)
+	if (id->desc.type == oIndexPrimary)
+		n = id->nUniqueFields;
+	else
+		n = id->nonLeafTupdesc->natts;
+
+	Assert(n <= k1->nkeys && n <= k2->nkeys);
+
+	for (i = 0; i < n; i++)
 	{
 		if (k1->keys[i].flags != k2->keys[i].flags)
 			return false;

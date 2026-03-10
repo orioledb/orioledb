@@ -681,7 +681,11 @@ o_idx_cmp_tuples(OIndexDescr *id,
 		spec2 = &id->nonLeafSpec;
 	}
 
-	n = id->nonLeafTupdesc->natts;
+	if (id->desc.type == oIndexPrimary)
+		n = id->nUniqueFields;
+	else
+		n = id->nonLeafTupdesc->natts;
+
 	for (i = 0; i < n; i++)
 	{
 		if (!OIgnoreColumn(id, i))
@@ -739,14 +743,15 @@ o_idx_cmp_key_bound_to_tuple(OIndexDescr *id,
 		tupdesc = id->nonLeafTupdesc;
 		spec = &id->nonLeafSpec;
 	}
-	if (keyType1 == BTreeKeyBound)
+	if (keyType1 == BTreeKeyBound && id->desc.type != oIndexPrimary)
 	{
 		n = id->nonLeafTupdesc->natts;
 	}
 	else
 	{
 		Assert(keyType1 == BTreeKeyUniqueLowerBound ||
-			   keyType1 == BTreeKeyUniqueUpperBound);
+			   keyType1 == BTreeKeyUniqueUpperBound ||
+			   id->desc.type == oIndexPrimary);
 		n = id->nUniqueFields;
 	}
 
@@ -921,7 +926,7 @@ o_idx_cmp(BTreeDescr *desc,
 	Assert(key1->nkeys == id->nonLeafTupdesc->natts);
 	Assert(key2->nkeys == id->nonLeafTupdesc->natts);
 
-	if (keyType1 != BTreeKeyBound || keyType2 != BTreeKeyBound)
+	if (keyType1 != BTreeKeyBound || keyType2 != BTreeKeyBound || desc->type == oIndexPrimary)
 		n = id->nUniqueFields;
 	else
 		n = key1->nkeys;
