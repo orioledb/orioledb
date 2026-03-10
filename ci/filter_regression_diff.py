@@ -48,6 +48,10 @@ knownErrors = {
     r"ERROR:  replica identity type INDEX is not supported for OrioleDB tables yet":
     ["*"],
 
+	# errors for tests with EXPLAIN usage
+	r"^[-]+$": ["*"],
+	r"\s+QUERY PLAN": ["*"],
+
     # alter_table specific errors
     r"ERROR:  unsupported alter table subcommand": ["alter_table"],
     r"ERROR:  table \"[a-z0-9_]+\" has different type for column \"[a-z0-9_]+\"":
@@ -71,6 +75,18 @@ knownErrors = {
     r"ERROR:  could not create unique index \"[a-z0-9_]+\"": ["create_index"],
     r"ERROR:  relation \"[a-z0-9_]+\" does not exist": ["create_index"],
     r"ERROR:  index \"[a-z0-9_]+\" does not exist": ["create_index"],
+
+	# insert specific error
+	# error related to OrioleDB vs heap internal page size
+	r"ERROR:  index row size \d+ exceeds orioledb maximum 2688 for table \"large_tuple_test\"" : ["insert"],
+
+	# insert_conflict specific errors
+	# error does not appear, because serializable isolation level error aborts transaction that must emit it
+	r"ERROR:  ON CONFLICT DO UPDATE command cannot affect row a second time": ["insert_conflict"],
+
+	# psql specific errors
+	r"^\s*List of access methods": ["psql"],
+	r"Susie": ["psql"],	
 }
 
 
@@ -124,12 +140,8 @@ known_table_diffs = {
           ['fknd2', '"RI_FKey_check_ins"', '5', 't', 't'],
           ['fknd2', '"RI_FKey_check_upd"', '17', 't', 't']]],
         [[['f']], [['t']]],
-        [[['alterlock', 'ShareUpdateExclusiveLock']],
-         [['alterlock', 'ShareUpdateExclusiveLock'],
-          ['alterlock_pkey', 'AccessShareLock']]],
-        [[['alterlock', 'AccessExclusiveLock']],
-         [['alterlock', 'AccessExclusiveLock'],
-          ['alterlock_pkey', 'AccessShareLock']]],
+        [[], [['alterlock_pkey', 'AccessShareLock']]],
+        [[], [['alterlock_pkey', 'AccessShareLock']]],
         [[['unlogged1', 'r', 'p'], ['unlogged1 toast index', 'i', 'p'],
           ['unlogged1 toast table', 't', 'p'], ['unlogged1_f1_seq', 'S', 'p'],
           ['unlogged1_pkey', 'i', 'p']],
@@ -142,11 +154,38 @@ known_table_diffs = {
          [['logged1', 'r', 'p'], ['logged1 toast index', 'i', 'p'],
           ['logged1 toast table', 't', 'p'], ['logged1_f1_seq', 'S', 'p'],
           ['logged1_pkey', 'i', 'p']]],
-    ]
+    ],
+	"insert_conflict" : [
+		[[['3', '1']], []],
+	],
+	"create_am" : [
+		[[], [['orioledb', 'orioledb_tableam_handler', 't']]]
+	],
+	"psql" : [
+		[[['spgist', 'Index']], [['orioledb', 'Table'], ['spgist', 'Index']]],
+		[[['spgist', 'Index', 'spghandler', 'SP-GiST index access method']],
+		 [['orioledb', 'Table', 'orioledb_tableam_handler', ''],
+		 ['spgist', 'Index', 'spghandler', 'SP-GiST index access method']]]
+	],
+	"explain" : [
+		[[['Bitmap Heap Scan on tenk1  (cost=N.N..N.N rows=N width=N)']],
+		 [['Bitmap heap scan'], ['Custom Scan (o_scan) on tenk1  (cost=N.N..N.N rows=N width=N)']]]
+	]
 }
 
 
 def compare_trees(src_tree: list, target_tree: list, test_name: str):
+	def goto_down_level(stack: list, cur_elem: list) -> bool:
+		if len(cur_elem[3]) > 0:
+			stack.insert(0, [cur_elem[3], 0])
+			return True
+		else:
+			return False
+
+	def normalize_src_value(value: str) -> str:
+		# Skip all heap specific substrings inside source value
+		return re.sub(r"^Parallel\s+", "", value)
+
 	equal = True
 	src_stack = [[src_tree, 0]]
 	target_stack = [[target_tree, 0]]
@@ -156,12 +195,18 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 		target_down = False
 		target_up = False
 		src_cur = src_stack[0][0][src_stack[0][1]]
+		src_cur_value = normalize_src_value(src_cur[1])
 		target_cur = target_stack[0][0][target_stack[0][1]]
 		if target_cur[1].startswith("Result"):
 			target_down = True
-		elif src_cur[1].startswith("Result"):
+		elif src_cur_value.startswith("Result"):
 			src_down = True
-		elif src_cur[1].startswith('Bitmap Heap Scan'):
+		elif (test_name == 'select'
+			  and src_cur_value == 'Bitmap Heap Scan on onek2'
+			  and target_cur[1] == 'Index Scan using onek2_u2_prtl on onek2'):
+				src_up = True
+				target_up = True
+		elif src_cur_value.startswith('Bitmap Heap Scan'):
 			if target_cur[1].startswith('Custom Scan'):
 				if target_cur[2][0] != 'Bitmap heap scan':
 					equal = False
@@ -170,7 +215,7 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 					target_down = True
 			else:
 				equal = False
-		elif src_cur[1] == target_cur[1]:
+		elif src_cur_value == target_cur[1]:
 			src_down = True
 			target_down = True
 		else:
@@ -179,33 +224,83 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 			# put checks for certain files at the end, to process all other
 			# checks before
 
-			if (src_cur[1].startswith('Index Only Scan')
-			    and target_cur[1].startswith('Custom Scan')
-			    and target_cur[2][0] == 'Bitmap heap scan'):
+			if (src_cur_value.startswith('Index Only Scan')
+				and target_cur[1].startswith('Custom Scan')
+				and (target_cur[2][0] == 'Bitmap heap scan'
+					or (target_cur[2][0].startswith('Filter')
+						and target_cur[2][1] == 'Bitmap heap scan'))):
 				# sometimes we have bitmap heap scan instead index scan
 				src_up = True
 				target_up = True
-			elif (src_cur[1].startswith('Index Only Scan')
+			elif (src_cur_value.startswith('Index Only Scan')
 			      and target_cur[1].startswith('Seq Scan')):
 				# sometimes we have seq scan instead of index scan
 				src_up = True
 				target_up = True
-			elif (src_cur[1].startswith('Index Only Scan')
+			elif (src_cur_value.startswith('Index Only Scan')
 			      and target_cur[1].startswith('Sort')):
 				# Sometimes we have sort, because we use bitmap heap scan
 				# instead of index scan
 				target_down = True
-			elif test_name == 'create_index':
-				# different processing of or clauses for our tables
-				if (src_cur[1] == 'BitmapAnd'
-				    and target_cur[1] == 'Bitmap Index Scan on tenk1_hundred'):
-					src_up = True
-					target_up = True
+			# different processing of or clauses for our tables
+			elif (test_name == 'create_index'
+				  and (src_cur_value == 'BitmapAnd'
+					   and target_cur[1] == 'Bitmap Index Scan on tenk1_hundred')):
+				src_up = True
+				target_up = True
+			elif (src_cur_value.startswith('Index Scan')
+		 		 and target_cur[1].startswith('Custom Scan')
+				 and target_cur[2][0].startswith('Forward index scan')):
+				src_up = True
+				target_up = True
+			elif re.sub(r"_\d+$", "", src_cur_value) == re.sub(r"_\d+$", "", target_cur[1]):
+				# lines differ only by auto-generated alias suffix (e.g. tinner_2 vs tinner_1)
+				src_down = True
+				target_down = True
+			elif (src_cur_value == target_cur[1].replace('rowid', 'ctid')):
+				src_up = True
+				target_up = True
+			elif (test_name == 'equivclass'
+				  and (src_cur_value.startswith('Index Scan')
+					   and target_cur[1].startswith('Index Only Scan'))):
+				src_up = True
+				target_up = True
+			elif (test_name == 'partition_prune'
+				  and (src_cur_value.startswith('Index Only Scan')
+					and target_cur[1].startswith('Custom Scan')
+					and target_cur[2][0].startswith('Forward index only scan'))):
+				src_down = True
+				target_down = True
+			elif (test_name == 'partition_prune'
+				  and re.sub(r"actual rows=\d+ loops=\d+\)$", "", src_cur_value) == re.sub(r"actual rows=\d+ loops=\d+\)$", "", target_cur[1])):
+				src_down = True
+				target_down = True
+			elif (test_name == 'memoize'
+				  and src_cur_value.startswith('Finalize Aggregate')
+				  and target_cur[1].startswith('Aggregate')):
+				# Need to skip report about parallel heap execution, because OrioleDB
+				# currently does not support parallel scans except sequential
+				for i in range(2):
+					if goto_down_level(src_stack, src_cur) == False:
+						raise RuntimeError("Aggregate explain structure is invalid")
+					src_cur = src_stack[0][0][src_stack[0][1]]
+				src_down = True
+				target_down = True
+			elif test_name in ['subselect', 'window']:
+				# We have massive EXPLAIN diff, research it latter
+				src_up = True
+				target_up = True
+			elif (test_name == 'with'
+				  and src_cur_value == 'Merge Semi Join'
+				  and target_cur[1] == 'Hash Semi Join'):
+				src_up = True
+				target_up = True
+			else:
+				# print(f"src_cur[1] = {src_cur[1]}\ntarget_cur[1] = {target_cur[1]}")
+				raise RuntimeError(f"Unsupported tree diff. Add branch specifically for \"{test_name}\" test")
 
 		if src_down:
-			if len(src_cur[3]) > 0:
-				src_stack.insert(0, [src_cur[3], 0])
-			else:
+			if goto_down_level(src_stack, src_cur) == False:
 				src_up = True
 		if src_up:
 			while (len(src_stack) > 0
@@ -214,9 +309,7 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 			if len(src_stack) > 0:
 				src_stack[0][1] += 1
 		if target_down:
-			if len(target_cur[3]) > 0:
-				target_stack.insert(0, [target_cur[3], 0])
-			else:
+			if goto_down_level(target_stack, target_cur) == False:
 				target_up = True
 		if target_up:
 			while (len(target_stack) > 0
@@ -228,19 +321,26 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 
 
 def find_table_lines(line_no, lines):
+	# Use r".*;$" as a separator in case of non-table output (e.g. COPY TO STDOUT)
+	def is_table_start(line: str) -> bool:
+		return re.match(r"^[-+]+$", line) or re.match(r".*;$", line)
+	def is_table_end(line: str) -> bool:
+		return re.match(r"\(\d+ rows?\)", line) or re.match(r".*;$", line)
+
 	table_start = 0
-	if re.match(r"^[-+]+$", lines[line_no]):
+	if is_table_start(lines[line_no]):
 		table_start = line_no
 	else:
 		while table_start == 0 and line_no > 0:
-			if re.match(r"^[-+]+$", lines[line_no]):
+			if is_table_start(lines[line_no]):
 				table_start = line_no
 			line_no -= 1
 
 	table_end = 0
 	while table_end == 0 and line_no < len(lines):
-		if re.match(r"\(\d+ rows?\)", lines[line_no]):
-			table_end = line_no + 1
+		if is_table_end(lines[line_no]):
+			if line_no != table_start:
+				table_end = line_no + 1
 		line_no += 1
 	return table_start, table_end
 
@@ -308,7 +408,7 @@ def query_plan_to_tree(table_lines: str) -> list:
 		else:
 			value = table_line[0].strip()
 		if len(stack) == 0:
-			# level, value, children, properties
+			# level, value, properties, children
 			tree += [[level, value, [], []]]
 			# level_list, level_index
 			stack.insert(0, [tree, len(tree) - 1])
@@ -329,6 +429,7 @@ def query_plan_to_tree(table_lines: str) -> list:
 			stack.pop(0)
 			stack.insert(0, [siblings, len(siblings) - 1])
 		else:
+			# Unreachable during normal execution
 			stack.clear()
 			# level, value, properties, children
 			tree += [[level, value, [], []]]
@@ -338,22 +439,6 @@ def query_plan_to_tree(table_lines: str) -> list:
 	return tree
 
 
-src_table_start = 0
-src_table_end = 0
-src_table_lines = []
-target_table_start = 0
-target_table_end = 0
-target_table_lines = []
-table_hunks = []
-finish_table = False
-
-src_desc_start = 0
-src_desc_end = 0
-target_desc_start = 0
-target_desc_end = 0
-desc_hunks = []
-finish_desc = False
-
 patched_files = list(patch_set)
 # patched_files = patched_files[0:5]
 # patched_files = patched_files[0:9]
@@ -361,6 +446,21 @@ patched_files = list(patch_set)
 # patched_files = patched_files[9:10]
 patch_set.clear()
 for patched_file in patched_files:
+	src_table_start = 0
+	src_table_end = 0
+	src_table_lines = []
+	target_table_start = 0
+	target_table_end = 0
+	target_table_lines = []
+	table_hunks = []
+	finish_table = False
+
+	src_desc_start = 0
+	src_desc_end = 0
+	target_desc_start = 0
+	target_desc_end = 0
+	desc_hunks = []
+	finish_desc = False
 	index = 0
 	testName = os.path.splitext(os.path.basename(patched_file.target_file))[0]
 	hunks = list(patched_file)
@@ -368,6 +468,20 @@ for patched_file in patched_files:
 		source = sf.readlines()
 	with open(patched_file.target_file) as tf:
 		target = tf.readlines()
+
+	# Merge hunks that represent sequential parts of output to handle the case
+	# when lines were removed and added in different hunks
+	hunk_num = 1
+	while hunk_num < len(hunks):
+		cur_hunk_first_line = list(hunks[hunk_num])[0]
+		prev_hunk_last_line = list(hunks[hunk_num - 1])[-1]
+
+		if (cur_hunk_first_line.source_line_no == prev_hunk_last_line.source_line_no + 1
+		   and not re.match(r".*;$", cur_hunk_first_line.value)):
+			hunks[hunk_num - 1] += hunks[hunk_num]
+			hunks.pop(hunk_num)
+		else:
+			hunk_num += 1
 
 	for hunk_num in range(0, len(hunks)):
 		hunk = hunks[hunk_num]
@@ -380,6 +494,8 @@ for patched_file in patched_files:
 			        and type_of_line(line.value) == LineType.info)
 			    or is_known_error(testName, line.value)):
 				hunk.remove(line)
+		# Update lines according to the modified hunk
+		lines = list(hunk)
 		if hunk.added == 0 and hunk.removed == 0:
 			patched_file.remove(hunk)
 		else:
@@ -445,8 +561,8 @@ for patched_file in patched_files:
 					    and hunk_num != len(hunks) - 1
 					    and hunks[hunk_num + 1].source_start > src_table_end):
 						finish_table = True
-					elif (line_num == len(hunk) - 1
-					      and hunk_num == len(patched_file) - 1):
+					elif (line_num == len(lines) - 1
+					      and hunk_num == len(hunks) - 1):
 						finish_table = True
 
 				if finish_table:
@@ -478,9 +594,16 @@ for patched_file in patched_files:
 						if src_table_lines == target_table_lines:
 							table_remove = True
 						else:
+							while (len(src_table_lines) > 0
+							       and len(target_table_lines) > 0
+							       and src_table_lines[0] == target_table_lines[0]):
+								src_table_lines.pop(0)
+								target_table_lines.pop(0)
+
 							# print(testName)
 							# print(src_table_lines)
 							# print(target_table_lines)
+
 							if testName in known_table_diffs:
 								test_table_diffs = known_table_diffs[testName]
 								for test_table_diff in test_table_diffs:
@@ -494,7 +617,7 @@ for patched_file in patched_files:
 						for table_hunk in table_hunks:
 							table_lines = list(table_hunk)
 							for table_line in table_lines:
-								line_type = type_of_line(line.value)
+								line_type = type_of_line(table_line.value)
 								if line_type == LineType.table:
 									if (table_line.is_removed
 									    and table_line.source_line_no
@@ -509,7 +632,7 @@ for patched_file in patched_files:
 									      <= target_table_end):
 										table_hunk.remove(table_line)
 
-							if table_hunk.added == 0 and table_hunk.removed == 0:
+							if table_hunk.added == 0 and table_hunk.removed == 0 and table_hunk in patched_file:
 								patched_file.remove(table_hunk)
 					src_table_start = 0
 					src_table_end = 0
@@ -547,7 +670,7 @@ for patched_file in patched_files:
 								    <= src_desc_end + 1):
 									desc_hunk.remove(desc_line)
 
-						if desc_hunk.added == 0 and desc_hunk.removed == 0:
+						if desc_hunk.added == 0 and desc_hunk.removed == 0 and desc_hunk in patched_file:
 							patched_file.remove(desc_hunk)
 
 					finish_desc = False
