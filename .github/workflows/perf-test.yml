@@ -21,9 +21,13 @@ on:
         required: false
         default: "1"
       scale_factor:
-        description: "TPC-C scale factor"
+        description: "TPC-C scale factor (comma-separated for multiple, e.g. 1,10,100)"
         required: false
         default: "1"
+      base_ref:
+        description: "Base branch/commit to compare against (default: main)"
+        required: false
+        default: "main"
 
 jobs:
   setup:
@@ -33,12 +37,19 @@ jobs:
       run-matrix: ${{ steps.gen.outputs.run-matrix }}
     steps:
       - id: gen
+        env:
+          RUNS: ${{ inputs.bench_runs || '1' }}
+          SCALE_FACTORS: ${{ inputs.scale_factor || '1' }}
         run: |
-          RUNS="${{ inputs.bench_runs || '1' }}"
-          echo "run-matrix=$(python3 -c "import json; print(json.dumps({'run': list(range(1, int('$RUNS')+1))}))")" >> $GITHUB_OUTPUT
+          echo "run-matrix=$(python3 -c "
+          import json, os
+          runs = int(os.environ['RUNS'])
+          sfs = [s.strip() for s in os.environ['SCALE_FACTORS'].split(',')]
+          print(json.dumps({'run': list(range(1, runs+1)), 'scale_factor': sfs}))
+          ")" >> $GITHUB_OUTPUT
 
   bench-base:
-    name: "Bench base #${{ matrix.run }}"
+    name: "Bench base sf${{ matrix.scale_factor }} #${{ matrix.run }}"
     needs: setup
     runs-on: perf-runner
     strategy:
@@ -50,12 +61,12 @@ jobs:
       COMPILER: ${{ inputs.compiler || 'gcc' }}
       PG_VERSION: ${{ inputs.pg_version || '17' }}
       DURATION: ${{ inputs.bench_duration || '5m' }}
-      SCALE_FACTOR: ${{ inputs.scale_factor || '1' }}
+      SCALE_FACTOR: ${{ matrix.scale_factor }}
     steps:
       - name: Checkout extension code (base branch)
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.sha || inputs.base_ref || 'main' }}
           path: orioledb
       - name: Get the required tag name
         shell: bash
@@ -80,13 +91,13 @@ jobs:
         with:
           preset: tpcc
           driver-url: postgres://${{ env.PGUSER }}@localhost:5432/postgres
-          artifact-name: perf-results-base-${{ matrix.run }}
+          artifact-name: perf-results-base-sf${{ matrix.scale_factor }}-${{ matrix.run }}
       - name: Stop PostgreSQL
         if: always()
         run: bash ./orioledb/ci/perf_pg_stop.sh
 
   bench-head:
-    name: "Bench head #${{ matrix.run }}"
+    name: "Bench head sf${{ matrix.scale_factor }} #${{ matrix.run }}"
     needs:
       - setup
       - bench-base
@@ -100,7 +111,7 @@ jobs:
       COMPILER: ${{ inputs.compiler || 'gcc' }}
       PG_VERSION: ${{ inputs.pg_version || '17' }}
       DURATION: ${{ inputs.bench_duration || '5m' }}
-      SCALE_FACTOR: ${{ inputs.scale_factor || '1' }}
+      SCALE_FACTOR: ${{ matrix.scale_factor }}
     steps:
       - name: Checkout extension code (head branch)
         uses: actions/checkout@v4
@@ -130,7 +141,7 @@ jobs:
         with:
           preset: tpcc
           driver-url: postgres://${{ env.PGUSER }}@localhost:5432/postgres
-          artifact-name: perf-results-head-${{ matrix.run }}
+          artifact-name: perf-results-head-sf${{ matrix.scale_factor }}-${{ matrix.run }}
       - name: Stop PostgreSQL
         if: always()
         run: bash ./orioledb/ci/perf_pg_stop.sh

@@ -56,21 +56,26 @@ def parse_k6_summary(filepath):
     return metrics
 
 
-def find_result_files(results_dir, num_runs):
+def find_result_files(results_dir, num_runs, scale_factor=None):
     """Find stroppy JSON result files in the download directory.
 
     stroppy-action artifacts are downloaded as:
-      results-dir/perf-results-{branch}-{N}/stroppy-results.json
+      results-dir/perf-results-{branch}-sf{SF}-{N}/stroppy-results.json
+    If scale_factor is given, only match directories containing that sf.
     """
-    files = sorted(glob.glob(os.path.join(results_dir, "**", "stroppy-results.json"), recursive=True))
+    pattern = os.path.join(results_dir, "**", "stroppy-results.json")
+    files = sorted(glob.glob(pattern, recursive=True))
     if not files:
         files = sorted(glob.glob(os.path.join(results_dir, "*.json")))
+    if scale_factor is not None:
+        sf_tag = f"-sf{scale_factor}-"
+        files = [f for f in files if sf_tag in f]
     return files[:num_runs]
 
 
-def load_run_results(results_dir, num_runs):
+def load_run_results(results_dir, num_runs, scale_factor=None):
     """Load and parse all result files from a results directory."""
-    files = find_result_files(results_dir, num_runs)
+    files = find_result_files(results_dir, num_runs, scale_factor)
     all_metrics = []
     for filepath in files:
         print(f"Parsing: {filepath}", file=sys.stderr)
@@ -188,30 +193,37 @@ def main():
     parser.add_argument("--head-dir", required=True, help="Directory with head branch results")
     parser.add_argument("--runs", type=int, default=5, help="Number of benchmark runs")
     parser.add_argument("--duration", default="10m", help="Duration per run")
-    parser.add_argument("--scale-factor", default="1", help="TPC-C scale factor")
+    parser.add_argument("--scale-factor", default="1",
+                        help="TPC-C scale factor (comma-separated for multiple)")
     parser.add_argument("--output", default="comment.md", help="Output markdown file")
     args = parser.parse_args()
 
-    base_metrics = load_run_results(args.base_dir, args.runs)
-    head_metrics = load_run_results(args.head_dir, args.runs)
+    scale_factors = [s.strip() for s in args.scale_factor.split(",")]
+    sections = []
 
-    if not base_metrics:
-        print("Error: no base branch results found", file=sys.stderr)
-        sys.exit(1)
-    if not head_metrics:
-        print("Error: no head branch results found", file=sys.stderr)
-        sys.exit(1)
+    for sf in scale_factors:
+        base_metrics = load_run_results(args.base_dir, args.runs, scale_factor=sf)
+        head_metrics = load_run_results(args.head_dir, args.runs, scale_factor=sf)
 
-    base_medians = compute_medians(base_metrics)
-    head_medians = compute_medians(head_metrics)
+        if not base_metrics:
+            print(f"Error: no base branch results found for scale_factor={sf}", file=sys.stderr)
+            sys.exit(1)
+        if not head_metrics:
+            print(f"Error: no head branch results found for scale_factor={sf}", file=sys.stderr)
+            sys.exit(1)
 
-    config = {
-        "runs": args.runs,
-        "duration": args.duration,
-        "scale_factor": args.scale_factor,
-    }
+        base_medians = compute_medians(base_metrics)
+        head_medians = compute_medians(head_metrics)
 
-    markdown = generate_markdown(base_medians, head_medians, config)
+        config = {
+            "runs": args.runs,
+            "duration": args.duration,
+            "scale_factor": sf,
+        }
+
+        sections.append(generate_markdown(base_medians, head_medians, config))
+
+    markdown = "\n---\n\n".join(sections)
     with open(args.output, "w") as f:
         f.write(markdown)
 
