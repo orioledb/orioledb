@@ -513,6 +513,7 @@ oxid_subxact_callback(
 												 logicalXidContext.xid,
 												 GetTopTransactionIdIfAny(),
 												 true);
+								wal_after_commit();
 							}
 						}
 

@@ -374,7 +374,8 @@ index_build_params(OTableIndex *index)
  */
 void
 o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
-			   OIndexNumber old_ix_num, bool set_tablespace, IndexBuildResult *result)
+			   OIndexNumber old_ix_num, bool setting_tbl_tablespace,
+			   IndexBuildResult *result)
 {
 	OTable	   *old_o_table = NULL;
 	OTable	   *new_o_table;
@@ -585,13 +586,13 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	{
 		if (table_index->type == oIndexPrimary)
 		{
-			if (!set_tablespace)
+			if (!setting_tbl_tablespace)
 			{
 				o_tablespace_cache_add_table(o_table);
 				rebuild_indices_insert_placeholders(descr);
 			}
 		}
-		else if (!set_tablespace)
+		else if (!setting_tbl_tablespace)
 		{
 			o_tablespace_cache_add_relnode(table_index->oids.datoid, table_index->oids.relnode, tablespace);
 			o_insert_shared_root_placeholder(table_index->oids.datoid,
@@ -624,7 +625,8 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		else
 		{
 			Assert(!is_recovery_in_progress());
-			build_secondary_index(o_table, descr, ix_num, false, set_tablespace, result);
+			build_secondary_index(o_table, descr, ix_num, false,
+								  setting_tbl_tablespace, result);
 		}
 	}
 	else
@@ -1492,7 +1494,7 @@ o_estimate_parallel_workers(double table_pages, double index_pages,
 
 void
 build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
-					  bool in_dedicated_recovery_worker, bool set_tablespace,
+					  bool in_dedicated_recovery_worker, bool setting_tbl_tablespace,
 					  IndexBuildResult *result)
 {
 	Tuplesortstate **sortstates;
@@ -1601,7 +1603,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	o_tables_table_meta_lock(o_table);
 
 	btree_write_file_header(&idx->desc, &fileHeader);
-	if (!set_tablespace)
+	if (!setting_tbl_tablespace)
 		o_drop_shared_root_info(idx->desc.oids.datoid,
 								idx->desc.oids.relnode);
 
