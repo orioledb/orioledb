@@ -523,7 +523,8 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 }
 
 XLogRecPtr
-wal_joint_commit(OXid oxid, TransactionId logicalXid, TransactionId xid)
+wal_joint_commit(OXid oxid, TransactionId logicalXid, TransactionId xid,
+				 bool subTransaction)
 {
 	XLogRecPtr	walPos;
 
@@ -536,7 +537,7 @@ wal_joint_commit(OXid oxid, TransactionId logicalXid, TransactionId xid)
 		add_xid_wal_record(oxid, logicalXid);
 
 	add_joint_commit_wal_record(xid, pg_atomic_read_u64(&xid_meta->runXmin));
-	walPos = flush_local_wal(true, false);
+	walPos = flush_local_wal(!subTransaction, false);
 	local_wal_has_material_changes = false;
 
 	elog(LOG, "[%s] JOINT_COMMIT oxid %lu xid %u logicalXid %u %X/%X", __func__, oxid, xid, logicalXid, LSN_FORMAT_ARGS(walPos));
@@ -893,9 +894,16 @@ flush_local_wal(bool isCommit, bool withXactTime)
 	Assert(!is_recovery_process());
 	Assert(length > 0);
 
+	/*
+	 * Put the xlog location of our commit record to the shared memory.  This
+	 * will help concurrent checkpointer to wait till we do
+	 * write_to_xids_queue().
+	 */
 	if (isCommit)
 		pg_atomic_write_u64(&GET_CUR_PROCDATA()->commitInProgressXlogLocation, OWalTmpCommitPos);
+
 	location = log_logical_wal_container(local_wal_buffer, length, withXactTime);
+
 	if (isCommit)
 		pg_atomic_write_u64(&GET_CUR_PROCDATA()->commitInProgressXlogLocation, location);
 

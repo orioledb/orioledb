@@ -285,7 +285,7 @@ extern XLogRecPtr flush_local_wal(bool isCommit, bool withXactTime);
 extern XLogRecPtr wal_commit(OXid oxid, TransactionId logicalXid,
 							 bool isAutonomous);
 extern XLogRecPtr wal_joint_commit(OXid oxid, TransactionId logicalXid,
-								   TransactionId xid);
+								   TransactionId xid, bool subTransaction);
 extern void wal_after_commit(void);
 extern void wal_rollback(OXid oxid, TransactionId logicalXid,
 						 bool isAutonomous);

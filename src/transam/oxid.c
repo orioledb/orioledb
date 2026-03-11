@@ -509,10 +509,10 @@ oxid_subxact_callback(
 								elog(DEBUG4, "Add wal_joint_commit for oxid %lu logical xid %u top xid %u",
 									 get_current_oxid_if_any(), logicalXidContext.xid, GetTopTransactionIdIfAny());
 
-								wal_joint_commit(
-												 get_current_oxid_if_any(),
+								wal_joint_commit(get_current_oxid_if_any(),
 												 logicalXidContext.xid,
-												 GetTopTransactionIdIfAny());
+												 GetTopTransactionIdIfAny(),
+												 true);
 							}
 						}
 

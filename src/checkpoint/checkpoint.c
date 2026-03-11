@@ -569,6 +569,9 @@ add_index_id_item(List *list, BTreeDescr *desc)
  * Wait all the committing transactions to finish completely.  Ensures all the
  * transactions finished afterwards will have greater WAL position than given
  * `redo_pos`.
+ *
+ * Ensures every transaction, which WAL record is written before redo_pos,
+ * passed to write_to_xids_queue(),
  */
 static inline void
 wait_finish_active_commits(XLogRecPtr redo_pos)
