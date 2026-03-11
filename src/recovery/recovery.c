@@ -2952,6 +2952,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 		OTableDescr *old_descr;
 		OIndexNumber ix_num;
 		uint16		nindices;
+		bool		changed_tablespace = true;
 
 		new_o_table = o_tables_get(oids);
 		Assert(new_o_table);
@@ -2989,6 +2990,8 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 				break;
 		}
 
+		if (new_o_table->tablespace != old_o_table->tablespace)
+			changed_tablespace = true;
 		if (new_o_table->nindices > old_o_table->nindices)
 		{
 			OTableDescr tmp_descr;
@@ -3030,9 +3033,9 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 			}
 			else
 			{
-
-				o_insert_shared_root_placeholder(new_o_table->indices[ix_num].oids.datoid,
-												 new_o_table->indices[ix_num].oids.relnode);
+				if (!changed_tablespace)
+					o_insert_shared_root_placeholder(new_o_table->indices[ix_num].oids.datoid,
+													 new_o_table->indices[ix_num].oids.relnode);
 				o_tables_meta_unlock_no_wal();
 
 				Assert(is_recovery_in_progress());
