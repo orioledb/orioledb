@@ -90,7 +90,7 @@ extern bool tts_orioledb_modified(TupleTableSlot *oldSlot,
 								  Bitmapset *attrs);
 extern void tts_orioledb_set_ctid(TupleTableSlot *slot, ItemPointer iptr);
 extern Datum o_get_tbl_att(TupleTableSlot *slot, int attnum, bool primaryIsCtid,
-						   bool *isnull, Oid *typid);
+						   bool *isnull, Oid *typid, bool decompress);
 Datum		o_get_idx_expr_att(TupleTableSlot *slot, OIndexDescr *idx,
 							   ExprState *exp_state, bool *isnull);
 

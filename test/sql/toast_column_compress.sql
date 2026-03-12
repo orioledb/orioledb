@@ -77,6 +77,80 @@ ORDER BY attname;
 
 DROP TABLE o_test_set_compression CASCADE;
 
+-- Test compression behavior with different storage options
+-- and index creation order.
+
+-- case 1: extended storage, insert before index creation
+CREATE TABLE cmdata(a int, f1 text STORAGE EXTENDED) using orioledb;
+INSERT INTO cmdata VALUES(1, repeat('1234567890', 1000));
+CREATE INDEX idx ON cmdata(f1);
+SELECT length(f1) FROM cmdata WHERE a = 1;
+DROP TABLE cmdata;
+
+-- case 1.5: extended storage, insert after index creation
+CREATE TABLE cmdata(a int, f1 text STORAGE EXTENDED) using orioledb;
+CREATE INDEX idx ON cmdata(f1);
+INSERT INTO cmdata VALUES(1, repeat('1234567890', 1000));
+SELECT length(f1) FROM cmdata WHERE a = 1;
+DROP TABLE cmdata;
+
+-- case 2: main storage, insert before index creation
+CREATE TABLE cmdata(a int, f1 text STORAGE MAIN) using orioledb;
+INSERT INTO cmdata VALUES(1, repeat('1234567890', 1000));
+CREATE INDEX idx ON cmdata(f1);
+SELECT length(f1) FROM cmdata WHERE a = 1;
+DROP TABLE cmdata;
+
+-- case 2.5: main storage, insert after index creation
+CREATE TABLE cmdata(a int, f1 text STORAGE MAIN) using orioledb;
+CREATE INDEX idx ON cmdata(f1);
+INSERT INTO cmdata VALUES(1, repeat('1234567890', 1000));
+SELECT length(f1) FROM cmdata WHERE a = 1;
+DROP TABLE cmdata;
+
+-- case 3: external storage, insert before index creation
+CREATE TABLE cmdata(a int, f1 text STORAGE EXTERNAL) using orioledb;
+INSERT INTO cmdata VALUES(1, repeat('1234567890', 1000));
+-- should error because key can only be compressed for index, but not toasted (as for heap).
+CREATE INDEX idx ON cmdata(f1);
+SELECT length(f1) FROM cmdata WHERE a = 1;
+DROP TABLE cmdata;
+
+-- case 3.5: external storage, insert after index creation
+CREATE TABLE cmdata(a int, f1 text STORAGE EXTERNAL) using orioledb;
+CREATE INDEX idx ON cmdata(f1);
+-- should error because key can only be compressed for index, but not toasted (as for heap).
+INSERT INTO cmdata VALUES(1, repeat('1234567890', 1000));
+SELECT length(f1) FROM cmdata WHERE a = 1;
+DROP TABLE cmdata;
+
+-- case 4: plain storage, insert before index creation
+CREATE TABLE cmdata(a int, f1 text STORAGE PLAIN) using orioledb;
+-- should error because key is too long to be stored in plain storage.
+INSERT INTO cmdata VALUES(1, repeat('1234567890', 1000));
+-- should error because key is too long to be stored in plain orioledb storage.
+-- note that the max tuple size for plain storage for heap is about 3 times
+-- higher than that for orioledb because of the different page layout,
+-- so we can insert a longer value for heap than for orioledb.
+INSERT INTO cmdata VALUES(1, repeat('1234567890', 267));
+-- should not error
+INSERT INTO cmdata VALUES(1, repeat('1234567890', 266));
+CREATE INDEX idx ON cmdata(f1);
+SELECT length(f1) FROM cmdata WHERE a = 1;
+DROP TABLE cmdata;
+
+-- case 4.5: plain storage, insert after index creation
+CREATE TABLE cmdata(a int, f1 text STORAGE PLAIN) using orioledb;
+CREATE INDEX idx ON cmdata(f1);
+-- should error because key is too long to be stored in plain storage.
+INSERT INTO cmdata VALUES(1, repeat('1234567890', 1000));
+-- should error because key is too long to be stored in plain orioledb storage.
+INSERT INTO cmdata VALUES(1, repeat('1234567890', 267));
+-- should not error
+INSERT INTO cmdata VALUES(1, repeat('1234567890', 266));
+SELECT length(f1) FROM cmdata WHERE a = 1;
+DROP TABLE cmdata;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA toast_column_compress CASCADE;
 RESET search_path;
