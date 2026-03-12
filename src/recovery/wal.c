@@ -517,7 +517,7 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	walPos = flush_local_wal(true, !isAutonomous);
 	local_wal_has_material_changes = false;
 
-	elog(LOG, "[%s] COMMIT oxid %lu logicalXid %u %X/%X", __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
+	elog(DEBUG4, "[%s] COMMIT oxid %lu logicalXid %u %X/%X", __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
 
 	return walPos;
 }
@@ -539,8 +539,6 @@ wal_joint_commit(OXid oxid, TransactionId logicalXid, TransactionId xid,
 	add_joint_commit_wal_record(xid, pg_atomic_read_u64(&xid_meta->runXmin));
 	walPos = flush_local_wal(!subTransaction, false);
 	local_wal_has_material_changes = false;
-
-	elog(LOG, "[%s] JOINT_COMMIT oxid %lu xid %u logicalXid %u %X/%X", __func__, oxid, xid, logicalXid, LSN_FORMAT_ARGS(walPos));
 
 	/*
 	 * Don't need to flush local WAL, because we only commit if builtin
@@ -659,8 +657,6 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 {
 	WALRecXid  *rec;
 	TransactionId heapXid;
-
-	elog(LOG, "add_xid_wal_record(%llu)", (unsigned long long) oxid);
 
 	Assert(!local_wal_contains_xid);
 	local_wal_contains_xid = true;
