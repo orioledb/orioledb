@@ -895,7 +895,7 @@ tts_orioledb_store_non_leaf_tuple(TupleTableSlot *slot, OTuple tuple,
 
 Datum
 o_get_tbl_att(TupleTableSlot *slot, int attnum, bool primaryIsCtid,
-			  bool *isnull, Oid *typid)
+			  bool *isnull, Oid *typid, bool decompress)
 {
 	int			i;
 	Datum		value;
@@ -942,7 +942,8 @@ o_get_tbl_att(TupleTableSlot *slot, int attnum, bool primaryIsCtid,
 	*isnull = slot->tts_isnull[i];
 	value = slot->tts_values[i];
 
-	if (!*isnull && att->attlen < 0 && VARATT_IS_EXTENDED(value))
+	if (!*isnull && att->attlen < 0 && 
+		(VARATT_IS_EXTENDED(value) && (decompress || !VARATT_IS_COMPRESSED(value))))
 	{
 		if (!oSlot->to_toast)
 			alloc_to_toast_vfree_detoasted(&oSlot->base);
@@ -997,7 +998,7 @@ tts_orioledb_get_index_values(TupleTableSlot *slot, OIndexDescr *idx,
 
 		if (attnum != EXPR_ATTNUM)
 			values[i] = o_get_tbl_att(slot, attnum, idx->primaryIsCtid,
-									  &isnull[i], NULL);
+									  &isnull[i], NULL, false);
 		else
 		{
 			values[i] = o_get_idx_expr_att(slot, idx,
@@ -1069,7 +1070,7 @@ tts_orioledb_fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx,
 
 		if (attnum != EXPR_ATTNUM)
 			value = o_get_tbl_att(slot, attnum, idx->primaryIsCtid,
-								  &isnull, &typid);
+								  &isnull, &typid, true);
 		else
 		{
 			value = o_get_idx_expr_att(slot, idx,
@@ -1109,7 +1110,7 @@ appendStringInfoIndexKey(StringInfo str, TupleTableSlot *slot, OIndexDescr *id)
 
 		if (attnum != EXPR_ATTNUM)
 			value = o_get_tbl_att(slot, attnum, id->primaryIsCtid,
-								  &isnull, NULL);
+								  &isnull, NULL, true);
 		else
 		{
 			value = o_get_idx_expr_att(slot, id,

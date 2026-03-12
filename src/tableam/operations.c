@@ -538,7 +538,7 @@ exclusion_fill_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bou
 
 		if (attnum != EXPR_ATTNUM)
 			value = o_get_tbl_att(slot, attnum, idx->primaryIsCtid,
-								  &isnull, &typid);
+								  &isnull, &typid, true);
 		else
 		{
 			value = o_get_idx_expr_att(slot, idx,
