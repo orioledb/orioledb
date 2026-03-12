@@ -249,7 +249,12 @@ oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 		else
 			return OTupleFetchNotMatch;
 	}
-	return OTupleFetchNotMatch;
+
+	/*
+	 * Return current tuple with unmatched key to iterator immediately to
+	 * finish the scan.
+	 */
+	return OTupleFetchMatch;
 }
 
 ToastAPI	oTablesToastAPI = {
