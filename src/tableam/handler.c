@@ -38,6 +38,7 @@
 #include "utils/rel.h"
 #include "utils/stopevent.h"
 
+#include "access/xact.h"
 #include "access/heapam.h"
 #include "access/heaptoast.h"
 #include "access/multixact.h"
@@ -62,6 +63,9 @@
 #include "parser/parse_type.h"
 #include "parser/parsetree.h"
 #include "pgstat.h"
+#include "replication/logicalworker.h"
+#include "replication/origin.h"
+#include "replication/worker_internal.h"
 #include "storage/bufmgr.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
@@ -71,6 +75,72 @@
 #include "utils/lsyscache.h"
 #include "utils/sampling.h"
 #include "utils/syscache.h"
+
+/*
+ * is_apply_worker_with_replorigin
+ *
+ * This is a helper function used to determine the call context for Oriole table AM DML callbacks.
+ *
+ * Return true when the current backend is a logical replication apply worker
+ * (leader or parallel) that is actively replaying a remote transaction.
+ *
+ * Requires all of the following:
+ * - backend is a logical replication worker;
+ * - worker role is apply (not tablesync);
+ * - replication origin is set to a valid origin id.
+ *
+ * DML operations should assign a heap XID during apply, as apply worker's replorigin_session_advance
+ * only occurs on commit with a valid top XID in RecordTransactionCommit.
+ *
+ * This check is intentionally strict to avoid assigning a heap XID for
+ * unrelated write paths, preserving Oriole's regular oxid-based behavior.
+ */
+static inline bool
+is_apply_worker_with_replorigin(void)
+{
+	/* Is current process a logical replication worker? */
+	if (!IsLogicalWorker())
+		return false;
+
+	/* Needs apply worker, not tablesync */
+	if (!(am_leader_apply_worker() || am_parallel_apply_worker()))
+		return false;
+
+	/* Is replication origin active? */
+	if (replorigin_session_origin == InvalidRepOriginId ||
+		replorigin_session_origin == DoNotReplicateId)
+		return false;
+
+	return true;
+}
+
+/*
+ * assign_heap_xid_in_apply_worker_with_replorigin
+ *
+ * Ensure the current top-level transaction has a heap XID in logical apply
+ * replay context.
+ *
+ * Logical apply advances replication-origin progress at commit via the normal
+ * commit machinery. That path requires a valid top-level heap XID; otherwise
+ * commit can proceed as "transaction without assigned xid", and origin
+ * progress is not advanced for this transaction.
+ *
+ * To prevent that, in apply replay context we lazily allocate a heap XID if
+ * none has been assigned yet.  Outside apply replay context, this function is
+ * a no-op, so regular Oriole paths remain unaffected.
+ *
+ * This function is expected to be called at the entry of Oriole table AM DML
+ * callbacks (tuple_insert/tuple_update/tuple_delete/tuple_insert_with_arbiter,
+ * and once per multi_insert batch).
+ */
+static inline void
+assign_heap_xid_in_apply_worker_with_replorigin(void)
+{
+	if (is_apply_worker_with_replorigin() && !TransactionIdIsValid(GetTopTransactionIdIfAny()))
+	{
+		(void) GetCurrentTransactionId();
+	}
+}
 
 bool		in_nontransactional_truncate = false;
 
@@ -457,6 +527,8 @@ orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 
+	assign_heap_xid_in_apply_worker_with_replorigin();
+
 	if (OidIsValid(relation->rd_rel->relrewrite))
 		return slot;
 
@@ -482,6 +554,8 @@ orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
 	OTableDescr *descr;
 	OTuple		tup;
 	OIndexDescr *id;
+
+	assign_heap_xid_in_apply_worker_with_replorigin();
 
 	descr = relation_get_descr(rel);
 	Assert(descr);
@@ -538,6 +612,8 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	OXid		oxid;
 	BTreeLocationHint hint;
 	OSnapshot	oSnapshot;
+
+	assign_heap_xid_in_apply_worker_with_replorigin();
 
 	ASAN_UNPOISON_MEMORY_REGION(tmfd, sizeof(*tmfd));
 	ASAN_UNPOISON_MEMORY_REGION(&mres, sizeof(mres));
@@ -636,6 +712,8 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	BTreeLocationHint hint;
 	OSnapshot	oSnapshot;
 	ItemPointer bridge_ctid = NULL;
+
+	assign_heap_xid_in_apply_worker_with_replorigin();
 
 	ASAN_UNPOISON_MEMORY_REGION(tmfd, sizeof(*tmfd));
 
@@ -1771,6 +1849,8 @@ orioledb_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
 					  CommandId cid, int options, BulkInsertState bistate)
 {
 	int			i;
+
+	assign_heap_xid_in_apply_worker_with_replorigin();
 
 	for (i = 0; i < ntuples; i++)
 		orioledb_tuple_insert(relation, slots[i], cid, options, bistate);
