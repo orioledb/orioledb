@@ -26,7 +26,8 @@ DROP DATABASE heapdb_template;
 
 -- Check pg_database_size()
 SET allow_in_place_tablespaces = true;
-CREATE TABLESPACE regress_tblspace LOCATION '';
+CREATE TABLESPACE dbsize_tblspace LOCATION '';
+
 CREATE DATABASE oriole_database;
 \c oriole_database
 
@@ -48,7 +49,7 @@ INSERT INTO oriole_table(t) select generate_string(i, 270) FROM  generate_series
 CHECKPOINT;
 select round(pg_database_size('oriole_database'), -6);
 
-CREATE TABLE oriole_table_tblspc (i SERIAL PRIMARY KEY, t text STORAGE PLAIN) USING orioledb TABLESPACE regress_tblspace;
+CREATE TABLE oriole_table_tblspc (i SERIAL PRIMARY KEY, t text STORAGE PLAIN) USING orioledb TABLESPACE dbsize_tblspace;
 INSERT INTO oriole_table_tblspc(t) select generate_string(i, 270) FROM  generate_series(1, 10000) as i;
 CHECKPOINT;
 select round(pg_database_size('oriole_database'), -6);
@@ -57,10 +58,7 @@ select round(pg_database_size('oriole_database'), -6);
 \d+ oriole_table_tblspc
 \c postgres
 DROP DATABASE oriole_database;
-DROP TABLESPACE regress_tblspace;
 
-SET allow_in_place_tablespaces = true;
-CREATE TABLESPACE regress_tblspace LOCATION '';
 CREATE DATABASE mixed_database;
 \c mixed_database
 
@@ -87,7 +85,7 @@ INSERT INTO oriole_table(t) select generate_string(i, 270) FROM  generate_series
 CHECKPOINT;
 select round(pg_database_size('mixed_database'), -6);
 
-CREATE TABLE oriole_table_tblspc (i SERIAL PRIMARY KEY, t text STORAGE PLAIN) USING orioledb TABLESPACE regress_tblspace;
+CREATE TABLE oriole_table_tblspc (i SERIAL PRIMARY KEY, t text STORAGE PLAIN) USING orioledb TABLESPACE dbsize_tblspace;
 INSERT INTO oriole_table_tblspc(t) select generate_string(i, 270) FROM  generate_series(1, 10000) as i;
 CHECKPOINT;
 select round(pg_database_size('mixed_database'), -6);
@@ -95,8 +93,7 @@ select round(pg_database_size('mixed_database'), -6);
 \d+ oriole_table
 \d+ heap_table
 \d+ oriole_table_tblspc
-SELECT orioledb_rewind_sync();
-DROP EXTENSION orioledb CASCADE;
 \c postgres
 DROP DATABASE mixed_database;
-DROP TABLESPACE regress_tblspace;
+
+DROP TABLESPACE dbsize_tblspace;
