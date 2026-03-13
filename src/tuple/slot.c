@@ -942,7 +942,7 @@ o_get_tbl_att(TupleTableSlot *slot, int attnum, bool primaryIsCtid,
 	*isnull = slot->tts_isnull[i];
 	value = slot->tts_values[i];
 
-	if (!*isnull && att->attlen < 0 && 
+	if (!*isnull && att->attlen < 0 &&
 		(VARATT_IS_EXTENDED(value) && (decompress || !VARATT_IS_COMPRESSED(value))))
 	{
 		if (!oSlot->to_toast)
