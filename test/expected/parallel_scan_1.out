@@ -967,7 +967,6 @@ EXPLAIN (COSTS OFF)
 	SELECT o_test1.i, substring(o_test1.t, 1,2) FROM o_test1
 		LEFT JOIN (SELECT o_test2.i FROM o_test2 ORDER BY 1 LIMIT 5) ss
 		ON o_test1.i < ss.i WHERE o_test1.i < 3;
-WARNING:  Rel parallel workers = 1
                       QUERY PLAN                      
 ------------------------------------------------------
  Nested Loop Left Join
@@ -1003,7 +1002,6 @@ SELECT COUNT(*) FROM orioledb_table_pages('o_test2'::regclass::oid);
 SELECT o_test1.i, substring(o_test1.t, 1,2) FROM o_test1
 	LEFT JOIN (SELECT o_test2.i FROM o_test2 ORDER BY 1 LIMIT 5) ss
 	ON o_test1.i < ss.i WHERE o_test1.i < 3;
-WARNING:  Rel parallel workers = 1
  i | substring 
 ---+-----------
  1 | aa
