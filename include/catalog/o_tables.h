@@ -56,7 +56,7 @@ typedef struct
 	Oid			opclass;
 	SortByDir	ordering;
 	SortByNulls nullsOrdering;
-	Oid			exclop;
+	Oid			hash_fn_oid;
 } OTableIndexField;
 
 /*
@@ -124,6 +124,9 @@ typedef struct
 	uint16		primary_init_nfields;
 	uint16		nindices;
 	Oid			tid_btree_ops_oid;	/* have to store it here */
+	Oid			tid_hash_fn_oid;	/* have to store it here */
+	Oid			int2_hash_fn_oid;	/* have to store it here */
+	Oid			int4_hash_fn_oid;	/* have to store it here */
 	bool		has_primary;
 	char		persistence;
 	uint8		fillfactor;
