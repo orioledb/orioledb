@@ -63,6 +63,18 @@ typedef struct OExclusionFn
 	FmgrInfo	finfo;
 } OExclusionFn;
 
+typedef struct OHashFnKey {
+	Oid			datoid;
+	Oid			hash_fn_oid;
+} OHashFnKey;
+
+typedef struct OHashFn
+{
+	OHashFnKey	key;
+	FmgrInfo	finfo;
+} OHashFn;
+
+
 /*
  * The index field descriptor
  */
@@ -81,6 +93,7 @@ typedef struct
 	 */
 	OComparator *comparator;
 	OExclusionFn *exclusion_fn;
+	OHashFn		 *hash_fn;
 } OIndexField;
 
 typedef struct AttrNumberMap
@@ -317,13 +330,14 @@ extern OComparator *o_find_comparator(Oid opfamily,
 extern int	o_call_comparator(OComparator *comparator, Datum left,
 							  Datum right);
 extern int	o_call_exclusion_fn(OExclusionFn *exclusion_fn, Datum left, Datum right, Oid collation);
+extern uint32	o_call_hash_fn(OHashFn *hash_fn, Oid collation, Datum val);
 extern void o_invalidate_comparator_cache(Oid opfamily, Oid lefttype,
 										  Oid righttype);
 
 extern EvictedTreeData *read_evicted_data(Oid datoid, Oid relnode, bool delete);
 extern void insert_evicted_data(EvictedTreeData *data);
 
-extern void oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid, Oid exclusion_op);
+extern void oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid, Oid exclusion_op, Oid hash_fn_oid);
 extern void o_finish_sort_support_function(OComparator *comparator, SortSupport ssup);
 
 extern void o_add_invalidate_undo_item(ORelOids oids, uint32 flags);
