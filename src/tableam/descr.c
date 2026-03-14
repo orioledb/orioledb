@@ -68,6 +68,9 @@ static void recreate_index_descr(OIndexDescr *descr);
 static OExclusionFn *o_find_exclusion_op_fn(Oid exclusion_op);
 static inline OExclusionFn *o_find_cached_exclusion_fn(Oid exclusion_op);
 static inline OExclusionFn *o_add_exclusion_fn_to_cache(OExclusionFn *exclusion_fn);
+static OHashFn *o_find_hash_fn(Oid hash_fn_oid, Oid datoid);
+static inline OHashFn *o_find_cached_hash_fn(OHashFnKey *key);
+static inline OHashFn *o_add_hash_fn_to_cache(OHashFn *hash_fn);
 
 PG_FUNCTION_INFO_V1(orioledb_get_table_descrs);
 PG_FUNCTION_INFO_V1(orioledb_get_index_descrs);
@@ -99,11 +102,14 @@ static HTAB *oTableDescrHash;
 static HTAB *oIndexDescrHash;
 static HTAB *comparatorCache;
 static HTAB *exclusionFnCache;
+static HTAB *hashFnCache;
 static OComparatorKey lastkey = {0};
 static OComparator *lastcmp = NULL;
 static MemoryContext descrCxt = NULL;
 static Oid	last_exclusion_op = InvalidOid;
 static OExclusionFn *last_exclusion_fn = NULL;
+static OHashFnKey last_hash_fn_key = {0};
+static OHashFn *last_hash_fn = NULL;
 
 static void o_find_toastable_attrs(OTableDescr *tableDescr);
 
@@ -1308,7 +1314,7 @@ o_find_toastable_attrs(OTableDescr *tableDescr)
  * backend database.
  */
 void
-oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid, Oid exclusion_op)
+oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid, Oid exclusion_op, Oid hash_fn_oid)
 {
 	OOpclass   *opclass;
 
@@ -1326,6 +1332,7 @@ oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid, O
 	field->comparator = o_find_opclass_comparator(opclass, field->collation);
 	if (OidIsValid(exclusion_op))
 		field->exclusion_fn = o_find_exclusion_op_fn(exclusion_op);
+	field->hash_fn = o_find_hash_fn(hash_fn_oid, datoid);
 
 	Assert(field->comparator != NULL);
 }
@@ -1730,6 +1737,13 @@ o_tableam_descr_init(void)
 								   &ctl,
 								   HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
+	MemSet(&ctl, 0, sizeof(ctl));
+	ctl.keysize = sizeof(OHashFnKey);
+	ctl.entrysize = sizeof(OHashFn);
+	ctl.hcxt = descrCxt;
+	hashFnCache = hash_create("OrioleDB hash functions", 8,
+							  &ctl,
+							  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 }
 
 static bool
@@ -1987,4 +2001,87 @@ o_call_exclusion_fn(OExclusionFn *exclusion_fn, Datum left, Datum right, Oid col
 	cmp = DatumGetBool(ret) ? 0 : 1;
 
 	return cmp;
+}
+
+/*
+ * Find hash function in cache or create new one.
+ */
+static OHashFn *
+o_find_hash_fn(Oid hash_fn_oid, Oid datoid)
+{
+	OHashFnKey key = {
+		.datoid = datoid,
+		.hash_fn_oid = hash_fn_oid
+	};
+	OHashFn *result;
+	OHashFn hash_fn;
+
+	if ((result = o_find_cached_hash_fn(&key)) != NULL)
+		return result;
+
+	memset(&hash_fn, 0, sizeof(hash_fn));
+	hash_fn.key = key;
+
+	o_set_syscache_hooks();
+	o_proc_cache_fill_finfo(&hash_fn.finfo, hash_fn_oid, datoid);
+	o_unset_syscache_hooks();
+
+	return o_add_hash_fn_to_cache(&hash_fn);
+}
+
+/*
+ * Tries to find an hash function in the cache.
+ */
+static inline OHashFn *
+o_find_cached_hash_fn(OHashFnKey *key)
+{
+	OHashFn *result;
+	bool		found;
+
+	/* compares with previous search */
+	if (memcmp(key, &last_hash_fn_key, sizeof(OHashFnKey)) == 0)
+		return last_hash_fn;
+
+	/* try to find in the cache */
+	result = hash_search(hashFnCache, key, HASH_FIND, &found);
+	if (found)
+	{
+		memcpy(&last_hash_fn_key, key, sizeof(OHashFnKey));
+		last_hash_fn = result;
+		return result;
+	}
+
+	return NULL;
+}
+
+/*
+ * Adds the hash function to the cache.
+ */
+static inline OHashFn *
+o_add_hash_fn_to_cache(OHashFn *hash_fn)
+{
+	OHashFn *cached;
+
+	cached = hash_search(hashFnCache, &hash_fn->key, HASH_ENTER, NULL);
+	memcpy(cached, hash_fn, sizeof(OHashFn));
+
+	memcpy(&last_hash_fn_key, &hash_fn->key, sizeof(OHashFnKey));
+	last_hash_fn = cached;
+
+	return cached;
+}
+
+uint32
+o_call_hash_fn(OHashFn *hash_fn, Oid collation, Datum val)
+{
+	uint32		result;
+	Datum		ret;
+
+	/* FIX: There should be a better way */
+	if (o_is_syscache_hooks_set() && hash_fn->finfo.fn_addr == fmgr_sql)
+		hash_fn->finfo.fn_addr = o_fmgr_sql;
+	ret = FunctionCall1Coll(&hash_fn->finfo, collation, val);
+	result = DatumGetUInt32(ret);
+
+	return result;
 }

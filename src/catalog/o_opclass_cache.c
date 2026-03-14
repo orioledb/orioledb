@@ -38,6 +38,7 @@
 #include "commands/defrem.h"
 #include "miscadmin.h"
 #include "utils/builtins.h"
+#include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/syscache.h"
@@ -142,11 +143,13 @@ o_opclass_cache_add_table(OTable *o_table)
 								  cur_lsn, NULL);
 	add_btree_opclass(datoid, GetDefaultOpClass(INT2OID, BTREE_AM_OID),
 					  cur_lsn);
+	o_collect_function_by_oid(F_HASHINT2, InvalidOid);
 	o_opclass_cache_add_if_needed(datoid,
 								  GetDefaultOpClass(INT4OID, BTREE_AM_OID),
 								  cur_lsn, NULL);
 	add_btree_opclass(datoid, GetDefaultOpClass(INT4OID, BTREE_AM_OID),
 					  cur_lsn);
+	o_collect_function_by_oid(F_HASHINT4, InvalidOid);
 
 	o_tablespace_cache_add_datoid(datoid, MyDatabaseTableSpace);
 	o_tablespace_cache_add_relnode(datoid, o_table->oids.relnode, o_table->tablespace);
@@ -161,6 +164,8 @@ o_opclass_cache_add_table(OTable *o_table)
 									  cur_lsn, NULL);
 		add_btree_opclass(datoid, GetDefaultOpClass(TIDOID, BTREE_AM_OID),
 						  cur_lsn);
+		o_collect_function_by_oid(F_HASHTID, InvalidOid);
+
 	}
 
 	for (cur_ix = 0; cur_ix < o_table->nindices; cur_ix++)

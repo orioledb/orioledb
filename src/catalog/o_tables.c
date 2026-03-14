@@ -28,6 +28,7 @@
 #include "tuple/toast.h"
 #include "utils/planner.h"
 
+#include "access/hash.h"
 #include "access/heapam.h"
 #include "access/transam.h"
 #include "catalog/heap.h"
@@ -493,7 +494,6 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 
 		if (keyno >= index->nkeyfields)
 		{
-
 			OTableIndex *primary = NULL;
 			bool		pk_member = false;
 			OTableIndexField *primary_field = NULL;
@@ -521,6 +521,7 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 				ix_field->opclass = primary_field->opclass;
 				ix_field->ordering = primary_field->ordering;
 				ix_field->nullsOrdering = primary_field->nullsOrdering;
+				ix_field->hash_fn_oid = primary_field->hash_fn_oid;
 			}
 			else
 			{
@@ -532,11 +533,16 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 				ix_field->opclass = InvalidOid;
 				ix_field->ordering = SORTBY_DEFAULT;
 				ix_field->nullsOrdering = SORTBY_NULLS_DEFAULT;
+				ix_field->hash_fn_oid = InvalidOid;
 			}
 		}
 		else
 		{
 			int16		opt = index_rel->rd_indoption[keyno];
+			Oid			atttypid = index_rel->rd_att->attrs[keyno].atttypid;
+			Oid			hash_opclass;
+			Oid			hash_input_type;
+			Oid			hash_opfamily;
 
 			ix_field->collation = index_rel->rd_indcollation[keyno];
 			ix_field->opclass = indclass->values[keyno];
@@ -553,6 +559,15 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 			{
 				ix_field->nullsOrdering = SORTBY_NULLS_FIRST;
 			}
+			hash_opclass = GetDefaultOpClass(atttypid, HASH_AM_OID);
+			hash_input_type = get_opclass_input_type(hash_opclass);
+			hash_opfamily = get_opclass_family(hash_opclass);
+			ix_field->hash_fn_oid = get_opfamily_proc(hash_opfamily, hash_input_type, hash_input_type, HASHSTANDARD_PROC);
+
+			o_validate_function_by_oid(ix_field->hash_fn_oid, 
+									   " should be used as hash function "
+									   "for type of column used in orioledb index");
+			o_collect_function_by_oid(ix_field->hash_fn_oid, InvalidOid);
 		}
 		orioledb_save_collation(ix_field->collation);
 	}
@@ -701,6 +716,8 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 {
 	OTable	   *o_table;
 	int			i;
+	Oid			hash_opclass;
+	Oid			hash_opfamily;
 
 	o_table = palloc0(sizeof(OTable));
 	o_table->nfields = tupdesc->natts;
@@ -709,6 +726,19 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 	o_table->oids = oids;
 	o_table->tablespace = tablespace;
 	o_table->tid_btree_ops_oid = GetDefaultOpClass(TIDOID, BTREE_AM_OID);
+
+	hash_opclass = GetDefaultOpClass(TIDOID, HASH_AM_OID);
+	hash_opfamily = get_opclass_family(hash_opclass);
+	o_table->tid_hash_fn_oid = get_opfamily_proc(hash_opfamily, TIDOID, TIDOID, HASHSTANDARD_PROC);
+
+	hash_opclass = GetDefaultOpClass(INT2OID, HASH_AM_OID);
+	hash_opfamily = get_opclass_family(hash_opclass);
+	o_table->int2_hash_fn_oid = get_opfamily_proc(hash_opfamily, INT2OID, INT2OID, HASHSTANDARD_PROC);
+
+	hash_opclass = GetDefaultOpClass(INT4OID, HASH_AM_OID);
+	hash_opfamily = get_opclass_family(hash_opclass);
+	o_table->int4_hash_fn_oid = get_opfamily_proc(hash_opfamily, INT4OID, INT4OID, HASHSTANDARD_PROC);
+
 	o_table->default_compress = InvalidOCompress;
 	o_table->primary_compress = InvalidOCompress;
 	o_table->toast_compress = InvalidOCompress;
