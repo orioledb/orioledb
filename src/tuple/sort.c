@@ -22,6 +22,7 @@
 
 #include "catalog/pg_collation_d.h"
 #include "catalog/pg_opclass_d.h"
+#include "utils/fmgroids.h"
 #include "utils/tuplesort.h"
 
 typedef struct
@@ -337,7 +338,8 @@ tuplesort_begin_orioledb_toast(OIndexDescr *toast,
 	sortKey->ssup_reverse = false;
 	oFillFieldOpClassAndComparator(&field, toast->oids.datoid,
 								   INT2_BTREE_OPS_OID,
-								   InvalidOid);
+								   InvalidOid,
+								   F_HASHINT2);
 	o_finish_sort_support_function(field.comparator, sortKey);
 
 	/* CHUNKN_POS */
@@ -350,7 +352,8 @@ tuplesort_begin_orioledb_toast(OIndexDescr *toast,
 	sortKey->ssup_reverse = false;
 	oFillFieldOpClassAndComparator(&field, toast->oids.datoid,
 								   INT4_BTREE_OPS_OID,
-								   InvalidOid);
+								   InvalidOid,
+								   F_HASHINT4);
 	o_finish_sort_support_function(field.comparator, sortKey);
 
 	MemoryContextSwitchTo(oldcontext);
