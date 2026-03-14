@@ -26,6 +26,7 @@
 #include "tableam/descr.h"
 #include "tuple/slot.h"
 #include "tuple/toast.h"
+#include "utils/planner.h"
 
 #include "access/genam.h"
 #include "access/relation.h"
@@ -225,7 +226,8 @@ ToastAPI	oIndicesToastAPI = {
 
 static void
 make_builtin_field(OTableField *leafField, OTableIndexField *internalField,
-				   Oid type, const char *name, int attnum, Oid opclass)
+				   Oid type, const char *name, int attnum, Oid opclass,
+				   Oid hash_fn_oid)
 {
 	if (leafField)
 	{
@@ -238,6 +240,7 @@ make_builtin_field(OTableField *leafField, OTableIndexField *internalField,
 		internalField->collation = InvalidOid;
 		internalField->opclass = opclass;
 		internalField->ordering = SORTBY_ASC;
+		internalField->hash_fn_oid = hash_fn_oid;
 	}
 }
 
@@ -311,13 +314,15 @@ make_ctid_o_index(OTable *table, OIndexVersionMode ixVerMode)
 
 	make_builtin_field(&result->leafTableFields[nadded++], &result->leafFields[0],
 					   TIDOID, "ctid", SelfItemPointerAttributeNumber,
-					   table->tid_btree_ops_oid);
+					   table->tid_btree_ops_oid,
+					   table->tid_hash_fn_oid);
 
 	result->bridging = table->index_bridging;
 	if (table->index_bridging)
 		make_builtin_field(&result->leafTableFields[nadded++], NULL,
 						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
-						   table->tid_btree_ops_oid);
+						   table->tid_btree_ops_oid,
+						   table->tid_hash_fn_oid);
 
 	for (i = 0; i < table->nfields; i++)
 		result->leafTableFields[nadded++] = table->fields[i];
@@ -401,7 +406,8 @@ make_primary_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	if (table->index_bridging)
 		make_builtin_field(&result->leafTableFields[nadded++], NULL,
 						   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
-						   table->tid_btree_ops_oid);
+						   table->tid_btree_ops_oid,
+						   table->tid_hash_fn_oid);
 
 	/*
 	 * TODO: We should probably use add_index_fields to not duplicate code,
@@ -501,7 +507,8 @@ add_index_fields(OIndex *index, OTable *table, OTableIndex *tableIndex, int *nad
 	{
 		make_builtin_field(&index->leafTableFields[*nadded], &index->leafFields[*nadded],
 						   TIDOID, "ctid", SelfItemPointerAttributeNumber,
-						   table->tid_btree_ops_oid);
+						   table->tid_btree_ops_oid,
+						   table->tid_hash_fn_oid);
 		if (fillPrimary)
 			index->primaryFieldsAttnums[index->nPrimaryFields++] = *nadded + 1;
 		(*nadded)++;
@@ -644,18 +651,20 @@ make_toast_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	add_index_fields(result, table, primary, &nadded, true);
 	make_builtin_field(&result->leafTableFields[nadded], &result->leafFields[nadded],
 					   INT2OID, "attnum", FirstLowInvalidHeapAttributeNumber,
-					   INT2_BTREE_OPS_OID);
+					   INT2_BTREE_OPS_OID,
+					   table->int2_hash_fn_oid);
 	nadded++;
 	make_builtin_field(&result->leafTableFields[nadded], &result->leafFields[nadded],
 					   INT4OID, "chunknum", FirstLowInvalidHeapAttributeNumber,
-					   INT4_BTREE_OPS_OID);
+					   INT4_BTREE_OPS_OID,
+					   table->int4_hash_fn_oid);
 	nadded++;
 	Assert(nadded <= result->nNonLeafFields);
 	result->nUniqueFields = nadded;
 	result->nNonLeafFields = nadded;
 	make_builtin_field(&result->leafTableFields[nadded], NULL,
 					   BYTEAOID, "data", FirstLowInvalidHeapAttributeNumber,
-					   InvalidOid);
+					   InvalidOid, InvalidOid);
 	nadded++;
 	Assert(nadded <= result->nLeafFields);
 	result->nLeafFields = nadded;
@@ -707,7 +716,8 @@ make_bridge_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	nadded = 0;
 	make_builtin_field(&result->leafTableFields[0], &result->leafFields[0],
 					   TIDOID, "index_bridging_ctid", FirstLowInvalidHeapAttributeNumber,
-					   table->tid_btree_ops_oid);
+					   table->tid_btree_ops_oid,
+					   table->tid_hash_fn_oid);
 	nadded++;
 
 	add_index_fields(result, table, primary, &nadded, true);
@@ -1333,7 +1343,8 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 		if (add_opclass)
 			oFillFieldOpClassAndComparator(field, oIndex->tableOids.datoid,
 										   iField->opclass,
-										   needs_exclop ? oIndex->exclops[i] : InvalidOid);
+										   needs_exclop ? oIndex->exclops[i] : InvalidOid,
+										   iField->hash_fn_oid);
 	}
 
 	for (i = 0; i < oIndex->nPrimaryFields; i++)
@@ -1347,7 +1358,8 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 			temp_field.collation = iField->collation;
 
 		oFillFieldOpClassAndComparator(&temp_field, oIndex->tableOids.datoid,
-									   iField->opclass, iField->exclop);
+									   iField->opclass, InvalidOid,
+									   iField->hash_fn_oid);
 		descr->pk_comparators[i] = temp_field.comparator;
 	}
 
