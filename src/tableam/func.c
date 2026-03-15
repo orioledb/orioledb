@@ -21,6 +21,7 @@
 #include "btree/io.h"
 #include "btree/iterator.h"
 #include "btree/page_chunks.h"
+#include "btree/page_contents.h"
 #include "catalog/indices.h"
 #include "tableam/descr.h"
 #include "tableam/handler.h"
@@ -33,6 +34,7 @@
 #include "access/relation.h"
 #include "access/table.h"
 #include "access/tupmacs.h"
+#include "catalog/pg_attribute.h"
 #include "catalog/pg_type_d.h"
 #include "commands/defrem.h"
 #include "funcapi.h"
@@ -427,16 +429,13 @@ append_bits(StringInfo str, Page p, OffsetNumber *offset,
 			(*bit_offset)++;
 			if (*bit_offset % 8 == 0)
 			{
+				appendStringInfo(str, " ");
 				(*offset)++;
 				byte_start = 0;
 				if (len - j - 1 > BITS_PER_BYTE)
 					byte_end = BITS_PER_BYTE;
 				else
 					byte_end = len - j - 1;
-			}
-			if ((j + 1) % 8 == 0)
-			{
-				appendStringInfo(str, " ");
 			}
 		}
 		appendStringInfo(str, "\n");
@@ -509,15 +508,16 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	level--;					/* o_header END */
 
+	APPEND_FIELD("undoLocation", UndoLocation);
+	APPEND_FIELD("csn", CommitSeqNo);
+	APPEND_FIELD("rightLink", uint64);
+
 	bit_offset = 0;
 	APPEND_BIT_FIELD("flags", 6);
 	APPEND_BIT_FIELD("field1", 11);
 	APPEND_BIT_FIELD("field2", 15);
 	Assert(bit_offset == sizeof(uint32) * BITS_PER_BYTE);
 
-	APPEND_FIELD("undoLocation", UndoLocation);
-	APPEND_FIELD("csn", CommitSeqNo);
-	APPEND_FIELD("rightLink", uint64);
 	APPEND_FIELD("maxKeyLen", LocationIndex);
 	APPEND_FIELD("prevInsertOffset", OffsetNumber);
 	APPEND_FIELD("chunksCount", OffsetNumber);
@@ -541,7 +541,8 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 		bit_offset = 0;
 		APPEND_BIT_FIELD("shortLocation", 12);
 		APPEND_BIT_FIELD("offset", 10);
-		APPEND_BIT_FIELD("hikeyShortLocation", 8);
+		APPEND_BIT_FIELD("hikeyShortLocation", 7);
+		APPEND_BIT_FIELD("chunkKeysFixed", 1);
 		APPEND_BIT_FIELD("hikeyFlags", 2);
 		Assert(bit_offset == sizeof(uint32) * BITS_PER_BYTE);
 		level--;				/* chunkDesc[i] END */
@@ -550,18 +551,19 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	appendStringInfoSpaces(outbuf, level * 4);
 	appendStringInfo(outbuf, "BTreePageHeader REST (%lu)\n",
-					 sizeof(BTreePageHeader) - offset);
-	append_bytes(outbuf, p, &offset, sizeof(BTreePageHeader) - offset, level,
+					 MAXALIGN(offset) - offset);
+	append_bytes(outbuf, p, &offset, MAXALIGN(offset) - offset, level,
 				 print_bytes);
+
+	Assert(MAXALIGN(offsetof(BTreePageHeader, chunkDesc) +
+					header->chunksCount * sizeof(BTreePageChunkDesc)) == offset);
 
 	level--;					/* BTreePageHeader END */
 
-	appendStringInfo(outbuf, "HIKEY DATA (%lu) \n",
-					 SHORT_GET_LOCATION(header->chunkDesc[0].shortLocation) -
-					 sizeof(BTreePageHeader));
+	appendStringInfo(outbuf, "HIKEY DATA (%u) \n",
+					 SHORT_GET_LOCATION(header->chunkDesc[0].shortLocation) - offset);
 	append_bytes(outbuf, p, &offset,
-				 SHORT_GET_LOCATION(header->chunkDesc[0].shortLocation) -
-				 sizeof(BTreePageHeader),
+				 SHORT_GET_LOCATION(header->chunkDesc[0].shortLocation) - offset,
 				 level, print_bytes);
 
 	appendStringInfo(outbuf, "CHUNKS: ARRAY:\n");
@@ -628,12 +630,27 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 				OTuple		tup;
 				OTupleReaderState reader;
 				TuplePrintOpaque *opaque = (TuplePrintOpaque *) printArg;
-				TupleDesc	tupdesc = opaque->keyDesc;
+				TupleDesc	tupdesc = opaque->desc;
+				LocationIndex len;
+
+				if (j + 1 < chunkItemsCount)
+				{
+					len = ITEM_GET_OFFSET(chunk->items[j + 1]) -
+						ITEM_GET_OFFSET(chunk->items[j]);
+				}
+				else
+				{
+					len = chunkSize - ITEM_GET_OFFSET(chunk->items[j]);
+				}
 
 				appendStringInfoSpaces(outbuf, level * 4);
-				appendStringInfo(outbuf, "[%d]: BTreeLeafTuphdr(%zu)\n", j,
-								 sizeof(BTreeLeafTuphdr));
+				appendStringInfo(outbuf, "[%d]: %d\n", j, len);
 				level++;		/* ITEM DATA[j] BEGIN */
+
+				appendStringInfoSpaces(outbuf, level * 4);
+				appendStringInfo(outbuf, "BTreeLeafTuphdr(%zu)\n",
+								 sizeof(BTreeLeafTuphdr));
+				level++;		/* Leaf tuple header BEGIN */
 
 				bit_offset = 0;
 				APPEND_BIT_FIELD("xactInfo", 61);
@@ -646,27 +663,18 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 				APPEND_BIT_FIELD("formatFlags", 2);
 				Assert(bit_offset == sizeof(UndoLocation) * BITS_PER_BYTE);
 
+				level--;		/* Leaf tuple header END */
+				len -= sizeof(BTreeLeafTuphdr);
+
 				tup.data = &p[offset];
 				tup.formatFlags = ITEM_GET_FLAGS(chunk->items[j]);
-				o_tuple_init_reader(&reader, tup, tupdesc, opaque->keySpec);
+				o_tuple_init_reader(&reader, tup, tupdesc, opaque->spec);
 
 				if (!(tup.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
 				{
-					uint16		len = 0;
-					uint32		off;
-					uint32		next_off;
-
-					off = o_tuple_next_field_offset(&reader,
-													TupleDescAttr(tupdesc, 0));
-					next_off =
-						o_tuple_next_field_offset(&reader,
-												  TupleDescAttr(tupdesc, 1));
-
 					appendStringInfoSpaces(outbuf, level * 4);
-					appendStringInfo(outbuf,
-									 "Tuple header: OTupleHeader(%lu)\n",
+					appendStringInfo(outbuf, "OTupleHeader(%zu)\n",
 									 sizeof(OTupleHeader));
-					len += sizeof(OTupleHeader);
 					level++;	/* Tuple header BEGIN */
 
 					bit_offset = 0;
@@ -678,14 +686,52 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 					APPEND_FIELD("version", uint32);
 
 					level--;	/* Tuple header END */
+					len -= sizeof(OTupleHeader);
+
+					if (reader.hasnulls)
+					{
+						uint32		bitmapSize = MAXALIGN(BITMAPLEN(reader.natts));
+
+						bit_offset = 0;
+						APPEND_BIT_FIELD("Null bitmap", bitmapSize * BITS_PER_BYTE);
+						len -= bitmapSize;
+					}
+				}
+
+				Assert(&p[offset] == reader.tp);
+
+				{
+					uint32		off;
+					uint32		next_off = 0;
 
 					appendStringInfoSpaces(outbuf, level * 4);
 					appendStringInfo(outbuf, "Tuple data: %d\n", len);
 					level++;	/* Tuple data BEGIN */
-					for (k = 0; k < opaque->keyDesc->natts; k++)
+					for (k = 0; k < opaque->desc->natts; k++)
 					{
 						Form_pg_attribute atti =
-							TupleDescAttr(opaque->keyDesc, k);
+							TupleDescAttr(opaque->desc, k);
+
+						if (reader.hasnulls && att_isnull(k, reader.bp))
+						{
+							reader.slow = true;
+							reader.attnum++;
+							continue;
+						}
+
+						off = o_tuple_next_field_offset(&reader, atti);
+
+						if (next_off < off)
+						{
+							align = off - next_off;
+							appendStringInfoSpaces(outbuf, level * 4);
+							appendStringInfo(outbuf, "ATTR ALIGN: %u - %u\n",
+											 off, next_off);
+							append_bytes(outbuf, p, &offset, align, level,
+										 print_bytes);
+						}
+
+						next_off = reader.off;
 
 						appendStringInfoSpaces(outbuf, level * 4);
 						appendStringInfo(outbuf, "%s: %u - %u: %c\n",
@@ -704,20 +750,17 @@ print_page_bin_structure(BTreeDescr *desc, OInMemoryBlkno blkno,
 							append_bytes(outbuf, p, &offset, next_off - off,
 										 level, print_bytes);
 						}
-						len += next_off - off;
-						off = next_off;
-						next_off = o_tuple_next_field_offset(&reader, atti);
 					}
-					level--;	/* Tuple data END */
-					align = MAXALIGN(len) - len;
+					align = MAXALIGN(offset) - offset;
 					if (align > 0)
 					{
 						appendStringInfoSpaces(outbuf, level * 4);
-						appendStringInfo(outbuf, "TUPLE DATA ALIGN (%d)\n",
-										 align);
+						appendStringInfo(outbuf, "TUPLE DATA ALIGN: %u - %u\n",
+										 next_off + align, next_off);
 						append_bytes(outbuf, p, &offset, align, level,
 									 print_bytes);
 					}
+					level--;	/* Tuple data END */
 				}
 
 				level--;		/* ITEM DATA[j] END */
