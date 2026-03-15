@@ -502,12 +502,22 @@ perform_writeback_and_relock(BTreeDescr *desc,
 
 		perform_writeback(desc, writeback);
 
+		LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
+
 		indexDescr = o_fetch_index_descr(treeOids, type, true, NULL);
 		if (!indexDescr)
+		{
+			LWLockRelease(&checkpoint_state->oTablesMetaLock);
 			return NULL;
+		}
 		desc = &indexDescr->desc;
 		if (!o_btree_load_shmem_checkpoint(desc))
+		{
+			LWLockRelease(&checkpoint_state->oTablesMetaLock);
 			return NULL;
+		}
+
+		LWLockRelease(&checkpoint_state->oTablesMetaLock);
 	}
 	else
 	{
