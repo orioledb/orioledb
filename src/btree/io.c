@@ -2583,6 +2583,214 @@ release_evict_btree_locks(ORelOids oids, EvictBtreeLocksState *state)
 }
 
 /*
+ * Pre-lock checks for walk_page().  Validates page state and resolves the
+ * btree descriptor before the page lock is acquired.
+ *
+ * Returns the BTreeDescr pointer on success (caller should proceed to lock),
+ * or NULL if the page should be skipped.  Sets *oids as a side effect.
+ */
+static BTreeDescr *
+walk_page_prelock_check(OInMemoryBlkno blkno, bool evict,
+						OrioleDBPageDesc *page_desc, Page p,
+						ORelOids *oids)
+{
+	BTreeDescr *desc;
+
+	if (!ORelOidsIsValid(page_desc->oids) || page_desc->type == oIndexInvalid)
+		return NULL;
+
+	if (!O_PAGE_IS(p, LEAF) && evict && PAGE_GET_N_ONDISK(p) != BTREE_PAGE_ITEMS_COUNT(p))
+		return NULL;
+
+	if (!evict && !IS_DIRTY(blkno))
+		return NULL;
+
+	/* Important to access the shared memory once */
+	*oids = *((volatile ORelOids *) &page_desc->oids);
+
+	/*
+	 * index_oids_get_btree_descr() might imply page eviction.  We shouldn't
+	 * do this while holding a page lock.  So, we need to do this before
+	 * locking the page.
+	 */
+	if (IS_SYS_TREE_OIDS(*oids))
+	{
+		if (sys_tree_get_storage_type(oids->relnode) != BTreeStorageInMemory)
+			desc = get_sys_tree(oids->relnode);
+		else
+			return NULL;
+	}
+	else
+	{
+		/* Check is this index is visible for us */
+		desc = index_oids_get_btree_descr(*oids, page_desc->type);
+
+		if (desc == NULL)
+			return NULL;
+	}
+
+	return desc;
+}
+
+typedef enum WalkPageCheckResult
+{
+	WalkPageCheckPassed,
+	WalkPageCheckFailed,
+	WalkPageCheckWaitIO
+} WalkPageCheckResult;
+
+/*
+ * Locked-page validity checks for walk_page().  Must be called with the page
+ * lock held.
+ *
+ * Returns WalkPageCheckPassed if all checks pass (page remains locked).
+ * Returns WalkPageCheckFailed if a check fails (page is unlocked).
+ * Returns WalkPageCheckWaitIO if IO is in progress (page is unlocked,
+ *         *ionum is set for the caller to wait on).
+ *
+ * When !evict, also prepares the non-leaf page image into img.
+ */
+static WalkPageCheckResult
+walk_page_check_locked(OInMemoryBlkno blkno, bool evict,
+					   OrioleDBPageDesc *page_desc, Page p,
+					   ORelOids oids, char *img, int *ionum)
+{
+	if (!ORelOidsIsValid(page_desc->oids) ||
+		page_desc->type == oIndexInvalid ||
+		!ORelOidsIsEqual(oids, page_desc->oids))
+	{
+		unlock_page(blkno);
+		return WalkPageCheckFailed;
+	}
+
+	if (!evict && !IS_DIRTY(blkno))
+	{
+		unlock_page(blkno);
+		return WalkPageCheckFailed;
+	}
+
+	if (O_PAGE_IS(p, PRE_CLEANUP))
+	{
+		unlock_page(blkno);
+		return WalkPageCheckFailed;
+	}
+
+	/* On concurrent IO, unlock and let the caller decide to wait or skip */
+	*ionum = page_desc->ionum;
+	if (*ionum >= 0)
+	{
+		unlock_page(blkno);
+		return WalkPageCheckWaitIO;
+	}
+
+	if (!O_PAGE_IS(p, LEAF) && evict && PAGE_GET_N_ONDISK(p) != BTREE_PAGE_ITEMS_COUNT(p))
+	{
+		unlock_page(blkno);
+		return WalkPageCheckFailed;
+	}
+
+	if (!O_PAGE_IS(p, LEAF) && !evict)
+	{
+		memcpy(img, p, ORIOLEDB_BLCKSZ);
+		if (!prepare_non_leaf_page(img))
+		{
+			unlock_page(blkno);
+			return WalkPageCheckFailed;
+		}
+	}
+
+	if (RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(p)))
+	{
+		unlock_page(blkno);
+		return WalkPageCheckFailed;
+	}
+
+	return WalkPageCheckPassed;
+}
+
+/*
+ * Handle root page eviction in walk_page().  Called with the page lock held.
+ * Manages all lock/unlock internally, including the two-pass protocol:
+ * release page lock, acquire evict btree locks, re-lock and re-validate.
+ * Guarantees release_evict_btree_locks() is called after get_evict_btree_locks().
+ */
+static OWalkPageResult
+walk_page_evict_root(BTreeDescr *desc, OInMemoryBlkno blkno,
+					 OrioleDBPageDesc *page_desc, Page p,
+					 ORelOids oids)
+{
+	EvictBtreeLocksState locksState;
+	uint32		checkpoint_number;
+	bool		copy_blkno;
+	bool		result = false;
+	int			ionum;
+
+	if (tree_is_under_checkpoint(desc))
+	{
+		unlock_page(blkno);
+		return OWalkPageSkipped;
+	}
+
+	/* Release page lock before acquiring evict btree locks */
+	unlock_page(blkno);
+
+	memset(&locksState, 0, sizeof(locksState));
+
+	desc = get_evict_btree_locks(blkno, oids, page_desc->type, &locksState);
+
+	if (!desc)
+	{
+		release_evict_btree_locks(oids, &locksState);
+		return OWalkPageSkipped;
+	}
+
+	/*
+	 * Re-lock the page and re-validate all checks after acquiring evict btree
+	 * locks.
+	 */
+	if (!try_lock_page(blkno))
+	{
+		release_evict_btree_locks(oids, &locksState);
+		return OWalkPageSkipped;
+	}
+
+	if (walk_page_check_locked(blkno, true, page_desc, p,
+							   oids, NULL, &ionum) != WalkPageCheckPassed)
+	{
+		release_evict_btree_locks(oids, &locksState);
+		return OWalkPageSkipped;
+	}
+
+	if (tree_is_under_checkpoint(desc))
+	{
+		unlock_page(blkno);
+		release_evict_btree_locks(oids, &locksState);
+		return OWalkPageSkipped;
+	}
+
+	if (desc->rootInfo.rootPageBlkno != blkno)
+	{
+		unlock_page(blkno);
+		release_evict_btree_locks(oids, &locksState);
+		return OWalkPageSkipped;
+	}
+
+	if (!get_checkpoint_number(desc, blkno, &checkpoint_number, &copy_blkno))
+	{
+		unlock_page(blkno);
+		release_evict_btree_locks(oids, &locksState);
+		return OWalkPageSkipped;
+	}
+
+	result = evict_btree(desc, checkpoint_number);
+	o_invalidate_oids(oids);
+
+	release_evict_btree_locks(oids, &locksState);
+
+	return result ? OWalkPageEvicted : OWalkPageSkipped;
+}
+
+/*
  * Examine single page and evict it if possible.
  */
 OWalkPageResult
@@ -2602,98 +2810,27 @@ walk_page(OInMemoryBlkno blkno, bool evict)
 	int			ionum;
 	char		img[ORIOLEDB_BLCKSZ];
 	bool		is_root;
+	WalkPageCheckResult checkResult;
 
 	p = O_GET_IN_MEMORY_PAGE(blkno);
 retry:
 
-	if (!ORelOidsIsValid(page_desc->oids) || page_desc->type == oIndexInvalid)
+	desc = walk_page_prelock_check(blkno, evict, page_desc, p, &oids);
+	if (!desc)
 		return OWalkPageSkipped;
-
-	if (!O_PAGE_IS(p, LEAF) && evict && PAGE_GET_N_ONDISK(p) != BTREE_PAGE_ITEMS_COUNT(p))
-		return OWalkPageSkipped;
-
-	if (!evict && !IS_DIRTY(blkno))
-		return OWalkPageSkipped;
-
-	/* Important to access the shared memory once */
-	oids = *((volatile ORelOids *) &page_desc->oids);
-
-	/*
-	 * index_oids_get_btree_descr() might imply page eviction.  We shouldn't
-	 * do this while holding a page lock.  So, we need to do this before
-	 * locking the page.
-	 */
-	if (IS_SYS_TREE_OIDS(oids))
-	{
-		if (sys_tree_get_storage_type(oids.relnode) != BTreeStorageInMemory)
-			desc = get_sys_tree(oids.relnode);
-		else
-			return OWalkPageSkipped;
-	}
-	else
-	{
-		/* Check is this index is visible for us */
-		desc = index_oids_get_btree_descr(oids, page_desc->type);
-
-		if (desc == NULL)
-			return OWalkPageSkipped;
-	}
 
 	if (!try_lock_page(blkno))
 		return OWalkPageSkipped;
 
-	/* page is locked once we get here */
-
-	if (!ORelOidsIsValid(page_desc->oids) ||
-		page_desc->type == oIndexInvalid ||
-		!ORelOidsIsEqual(oids, page_desc->oids))
+	checkResult = walk_page_check_locked(blkno, evict, page_desc, p,
+										 oids, img, &ionum);
+	if (checkResult == WalkPageCheckWaitIO)
 	{
-		unlock_page(blkno);
-		return OWalkPageSkipped;
-	}
-
-	if (!evict && !IS_DIRTY(blkno))
-	{
-		unlock_page(blkno);
-		return OWalkPageSkipped;
-	}
-
-	if (O_PAGE_IS(p, PRE_CLEANUP))
-	{
-		unlock_page(blkno);
-		return OWalkPageSkipped;
-	}
-
-	/* On concurrent IO, then wait for completion and retry */
-	ionum = page_desc->ionum;
-	if (ionum >= 0)
-	{
-		unlock_page(blkno);
 		wait_for_io_completion(ionum);
 		goto retry;
 	}
-
-	if (!O_PAGE_IS(p, LEAF) && evict && PAGE_GET_N_ONDISK(p) != BTREE_PAGE_ITEMS_COUNT(p))
-	{
-		unlock_page(blkno);
+	if (checkResult == WalkPageCheckFailed)
 		return OWalkPageSkipped;
-	}
-
-	if (!O_PAGE_IS(p, LEAF) && !evict)
-	{
-		memcpy(img, p, ORIOLEDB_BLCKSZ);
-		if (!prepare_non_leaf_page(img))
-		{
-			unlock_page(blkno);
-			return OWalkPageSkipped;
-		}
-	}
-
-	if (RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(p)))
-	{
-		unlock_page(blkno);
-		return OWalkPageSkipped;
-	}
 
 	/* Try to merge sparse page instead of eviction */
 	if (!merge_tried && is_page_too_sparse(desc, p))
@@ -2785,34 +2922,7 @@ retry:
 	}
 
 	if (evict && is_root)
-	{
-		EvictBtreeLocksState locksState;
-		bool		result = false;
-
-		if (tree_is_under_checkpoint(desc))
-		{
-			unlock_page(blkno);
-			return OWalkPageSkipped;
-		}
-
-		memset(&locksState, 0, sizeof(locksState));
-
-		desc = get_evict_btree_locks(blkno, oids, page_desc->type, &locksState);
-
-		if (desc)
-		{
-			result = evict_btree(desc, checkpoint_number);
-			o_invalidate_oids(oids);
-		}
-		else
-		{
-			unlock_page(blkno);
-		}
-
-		release_evict_btree_locks(oids, &locksState);
-
-		return result ? OWalkPageEvicted : OWalkPageSkipped;
-	}
+		return walk_page_evict_root(desc, blkno, page_desc, p, oids);
 
 	STOPEVENT(STOPEVENT_BEFORE_WRITE_PAGE, NULL);
 
