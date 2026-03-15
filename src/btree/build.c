@@ -28,6 +28,7 @@
 #include "tuple/sort.h"
 #include "transam/oxid.h"
 #include "utils/seq_buf.h"
+#include "utils/page_pool.h"
 
 #include "access/genam.h"
 #include "access/relation.h"
@@ -41,7 +42,8 @@
 
 typedef struct OIndexBuildStackItem
 {
-	char		img[ORIOLEDB_BLCKSZ];
+	Page		img;			/* Page allocated via alloc_build_page */
+	uint64		img_handle;		/* Handle for finalize/free_build_page */
 	BTreePageItemLocator loc;
 	OFixedKey	key;
 	int			keysize;
@@ -172,12 +174,17 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 	else
 	{
 		FileExtent	extent;
-		char		new_page[ORIOLEDB_BLCKSZ] = {0};
+		Page		new_page;
+		uint64		new_handle;
 		OFixedKey	key;
 		int			keysize;
-		BTreePageHeader *new_page_header = (BTreePageHeader *) new_page;
+		BTreePageHeader *new_page_header;
 		BTreePageHeader *header = (BTreePageHeader *) stack[level].img;
 		BTreePageHeader *parent_header = (BTreePageHeader *) stack[level + 1].img;
+
+		/* Allocate new page directly from pool */
+		new_page = (*desc->ppool->ops->alloc_build_page) (desc->ppool, &new_handle);
+		new_page_header = (BTreePageHeader *) new_page;
 
 		new_page_header->rightLink = InvalidRightLink;
 		new_page_header->csn = COMMITSEQNO_FROZEN;
@@ -222,22 +229,29 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 			PAGE_SET_N_ONDISK(stack[level].img,
 							  BTREE_PAGE_ITEMS_COUNT(stack[level].img));
 
-		/* write old page to disk */
+		/*
+		 * Extract hikey info from old page BEFORE finalize, because finalize
+		 * may free the page (for disk pool).
+		 */
+		copy_fixed_key(desc, &key, stack[level].key.tuple);
+		keysize = stack[level].keysize;
+
+		stack[level].keysize = BTREE_PAGE_GET_HIKEY_SIZE(stack[level].img);
+		copy_fixed_hikey(desc, &stack[level].key, stack[level].img);
+
+		/*
+		 * finalize old page (write to disk or just return blkno for local
+		 * pool)
+		 */
 
 		extent.len = InvalidFileExtentLen;
 		extent.off = InvalidFileExtentOff;
 
 		VALGRIND_CHECK_MEM_IS_DEFINED(stack[level].img, ORIOLEDB_BLCKSZ);
 
-		downlink = perform_page_io_build(desc, stack[level].img, &extent, metaPage);
+		downlink = (*desc->ppool->ops->finalize_build_page) (desc->ppool, desc, stack[level].img, stack[level].img_handle, &extent, metaPage);
 		if (level == 0)
 			pg_atomic_add_fetch_u32(&metaPage->leafPagesNum, 1);
-
-		copy_fixed_key(desc, &key, stack[level].key.tuple);
-		keysize = stack[level].keysize;
-
-		stack[level].keysize = BTREE_PAGE_GET_HIKEY_SIZE(stack[level].img);
-		copy_fixed_hikey(desc, &stack[level].key, stack[level].img);
 
 		if (level > 0)
 		{
@@ -246,8 +260,9 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 #endif
 		}
 
-		/* copy new page to stack */
-		memcpy(stack[level].img, new_page, ORIOLEDB_BLCKSZ);
+		/* swap new page into stack */
+		stack[level].img = new_page;
+		stack[level].img_handle = new_handle;
 		BTREE_PAGE_LOCATOR_TAIL(stack[level].img, &stack[level].loc);
 
 		put_downlink_to_stack(desc, stack, level + 1, downlink,
@@ -309,7 +324,8 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	bool	   *isnull;
 	uint32		chkpNum;
 
-	btree_open_smgr(desc);
+	if (desc->storageType != BTreeStorageInMemory)
+		btree_open_smgr(desc);
 
 	stack = (OIndexBuildStackItem *) palloc0(sizeof(OIndexBuildStackItem) * ORIOLEDB_MAX_DEPTH);
 	values = (Datum *) palloc(sizeof(Datum) * tupdesc->natts);
@@ -323,6 +339,8 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	pg_atomic_init_u64(&metaPage.bridge_ctid, bridge_ctid);
 	for (i = 0; i < ORIOLEDB_MAX_DEPTH; i++)
 	{
+		/* Allocate build pages directly from pool */
+		stack[i].img = (*desc->ppool->ops->alloc_build_page) (desc->ppool, &stack[i].img_handle);
 		/* init_page_first_chunk() needs leaf flag to be set */
 		if (i == 0)
 			((BTreePageHeader *) stack[i].img)->flags = O_BTREE_FLAG_LEAF;
@@ -353,7 +371,7 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 		VALGRIND_CHECK_MEM_IS_DEFINED(stack[i].img, ORIOLEDB_BLCKSZ);
 
 		split_page_by_chunks(desc, stack[i].img);
-		downlink = perform_page_io_build(desc, stack[i].img, &extent, &metaPage);
+		downlink = (*desc->ppool->ops->finalize_build_page) (desc->ppool, desc, stack[i].img, stack[i].img_handle, &extent, &metaPage);
 		if (i == 0)
 			pg_atomic_add_fetch_u32(&metaPage.leafPagesNum, 1);
 
@@ -385,11 +403,18 @@ btree_write_index_data(BTreeDescr *desc, TupleDesc tupdesc,
 	VALGRIND_CHECK_MEM_IS_DEFINED(root_page, ORIOLEDB_BLCKSZ);
 
 	split_page_by_chunks(desc, root_page);
-	downlink = perform_page_io_build(desc, root_page, &extent, &metaPage);
+	downlink = (*desc->ppool->ops->finalize_build_page) (desc->ppool, desc, root_page, stack[root_level].img_handle, &extent, &metaPage);
 	if (root_level == 0)
 		pg_atomic_add_fetch_u32(&metaPage.leafPagesNum, 1);
 
-	btree_close_smgr(desc);
+	/* Free unused stack pages above root level */
+	for (i = root_level + 1; i < ORIOLEDB_MAX_DEPTH; i++)
+	{
+		(*desc->ppool->ops->free_build_page) (desc->ppool, stack[i].img, stack[i].img_handle);
+	}
+
+	if (desc->storageType != BTreeStorageInMemory)
+		btree_close_smgr(desc);
 	pfree(stack);
 
 	if (orioledb_s3_mode)
