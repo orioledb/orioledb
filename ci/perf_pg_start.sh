@@ -30,3 +30,6 @@ pg_ctl -D "$PGDATA" -l "$PGDATA/postgresql.log" start
 # Wait for PostgreSQL to be ready
 pg_isready -t 30
 
+# Register the OrioleDB extension
+psql -d postgres -c "CREATE EXTENSION IF NOT EXISTS orioledb;"
+

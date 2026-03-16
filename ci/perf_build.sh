@@ -14,6 +14,8 @@ if [ -d "$CACHE_DIR/pgsql" ]; then
 	exit 0
 fi
 
+rm -rf /tmp/perf-build-cache/
+
 echo "=== Building from scratch ==="
 
 if [ $COMPILER = "clang" ]; then
