@@ -184,6 +184,18 @@ ALTER TABLE o_test_fillfactor SET (fillfactor = 20);
 ALTER INDEX o_test_fillfactor_ix1 SET (fillfactor = 50);
 ```
 
+### Undo log size calculation
+
+OrioleDB stores some of the modifications data in temporary Undo logs. While this storage separate from relation
+files is more convenient and not prone to bloating, table and database size reported by Postgres functions won't
+count Undo logs size. Use special function to count Undo-related temporary data:
+
+```sql
+SELECT * FROM orioledb_undo_size();
+```
+
+Undo data is counted in three categories: system undo, user page-level undo and user row-level undo.
+
 ### Data deletion
 
 OrioleDB automatically merges sparse pages. Therefore, when many rows are deleted, data pages are freed and available for future usage. Data files aren't currently shrunk in such a situation, but that would be implemented soon.
