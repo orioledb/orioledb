@@ -176,7 +176,16 @@ oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 
 			if (boundKey->key.version == O_TABLE_INVALID_VERSION)
 				boundKey->key.version = tupleKey->version;
-			return (boundKey->key.version == tupleKey->version) ? OTupleFetchMatch : OTupleFetchNotMatch;
+			else if (boundKey->key.version != tupleKey->version)
+				return OTupleFetchNotMatch;
+
+			if (boundKey->key.chunknum == tupleKey->chunknum)
+			{
+				boundKey->key.chunknum++;
+				return OTupleFetchMatch;
+			}
+			else
+				return OTupleFetchNotMatch;
 		}
 
 		if (boundKey->key.version == O_TABLE_INVALID_VERSION)
