@@ -130,19 +130,6 @@ typedef struct
 	bool	   *used_by;
 } RecoveryXidState;
 
-/*
- * Hash table entry containing a pointer to separately allocated
- * RecoveryXidState.  We use this indirection because RecoveryXidState
- * participates in dlist and pairingheap data structures via embedded nodes,
- * which require a stable memory address.  Without indirection, hash table
- * resizing would move entries and invalidate all such pointers.
- */
-typedef struct
-{
-	OXid		oxid;			/* hash table key */
-	RecoveryXidState *state;
-} RecoveryXidStateHashEntry;
-
 #define RetainUndoNodeGetRecoveryXidState(node, undoType) \
 	((RecoveryXidState *) ((Pointer) (node) - \
 		offsetof(RecoveryXidState, retain_undo_ph_nodes) - \
@@ -511,7 +498,6 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 
 	for (i = 0; i < count; i++)
 	{
-		RecoveryXidStateHashEntry *entry;
 		RecoveryXidState *state;
 		XidFileRec	xidRec = {0};
 		bool		found;
@@ -523,19 +509,15 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 							errmsg("could not read xid record from file %s: %m", xidFilename)));
 
 		advance_oxids(xidRec.oxid);
-		entry = (RecoveryXidStateHashEntry *) hash_search(recovery_xid_state_hash,
-														  &xidRec.oxid,
-														  HASH_ENTER,
-														  &found);
+		state = (RecoveryXidState *) hash_search(recovery_xid_state_hash,
+												 &xidRec.oxid,
+												 HASH_ENTER,
+												 &found);
 
 		if (!found)
 		{
 			int			j;
 
-			state = (RecoveryXidState *) MemoryContextAllocZero(TopMemoryContext,
-																sizeof(RecoveryXidState));
-			entry->state = state;
-			state->oxid = xidRec.oxid;
 			state->xid = InvalidTransactionId;
 			state->needs_wal_flush = false;
 			for (j = 0; j < (int) UndoLogsCount; j++)
@@ -563,10 +545,6 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 				state->used_by = palloc0((recovery_pool_size_guc + recovery_idx_pool_size_guc) * sizeof(bool));
 			else
 				state->used_by = NULL;
-		}
-		else
-		{
-			state = entry->state;
 		}
 		if (worker_id < 0)
 		{
@@ -626,13 +604,12 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 static void
 apply_xids_branches(void)
 {
-	RecoveryXidStateHashEntry *entry;
+	RecoveryXidState *state;
 	HASH_SEQ_STATUS hash_seq;
 
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
-	while ((entry = (RecoveryXidStateHashEntry *) hash_seq_search(&hash_seq)) != NULL)
+	while ((state = (RecoveryXidState *) hash_seq_search(&hash_seq)) != NULL)
 	{
-		RecoveryXidState *state = entry->state;
 		dlist_iter	iter;
 
 		oxid_needs_wal_flush = state->needs_wal_flush;
@@ -1078,14 +1055,14 @@ is_recovery_process(void)
 CommitSeqNo
 recovery_map_oxid_csn(OXid oxid, bool *found)
 {
-	RecoveryXidStateHashEntry *entry;
+	RecoveryXidState *state;
 
-	entry = hash_search(recovery_xid_state_hash, &oxid, HASH_FIND, found);
+	state = hash_search(recovery_xid_state_hash, &oxid, HASH_FIND, found);
 	if (*found)
 	{
-		if (!entry->state->wal_xid)
+		if (!state->wal_xid)
 			return COMMITSEQNO_ABORTED;
-		return entry->state->csn;
+		return state->csn;
 	}
 	return 0;
 }
@@ -1103,7 +1080,7 @@ recovery_init(int worker_id)
 
 	MemSet(&ctl, 0, sizeof(ctl));
 	ctl.keysize = sizeof(OXid);
-	ctl.entrysize = sizeof(RecoveryXidStateHashEntry);
+	ctl.entrysize = sizeof(RecoveryXidState);
 	ctl.hcxt = TopMemoryContext;
 	recovery_xid_state_hash = hash_create("orioledb recovery xid state hash",
 										  16, &ctl,
@@ -1239,7 +1216,6 @@ void
 recovery_finish(int worker_id)
 {
 	bool		flush_undo_pos = need_flush_undo_pos(worker_id);
-	RecoveryXidStateHashEntry *cur_entry;
 	RecoveryXidState *cur_state;
 	HASH_SEQ_STATUS hash_seq;
 	int			i;
@@ -1259,9 +1235,8 @@ recovery_finish(int worker_id)
 	}
 
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
-	while ((cur_entry = (RecoveryXidStateHashEntry *) hash_seq_search(&hash_seq)) != NULL)
+	while ((cur_state = (RecoveryXidState *) hash_seq_search(&hash_seq)) != NULL)
 	{
-		cur_state = cur_entry->state;
 		if (cur_state->o_tables_meta_locked)
 		{
 			o_tables_meta_unlock_no_wal();
@@ -1363,25 +1338,10 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 		}
 
 		recovery_oxid = oxid;
-		{
-			RecoveryXidStateHashEntry *entry;
-
-			entry = (RecoveryXidStateHashEntry *) hash_search(recovery_xid_state_hash,
-															  &oxid,
-															  HASH_ENTER,
-															  &found);
-			if (!found)
-			{
-				cur_state = (RecoveryXidState *) MemoryContextAllocZero(TopMemoryContext,
-																		sizeof(RecoveryXidState));
-				entry->state = cur_state;
-				cur_state->oxid = oxid;
-			}
-			else
-			{
-				cur_state = entry->state;
-			}
-		}
+		cur_state = (RecoveryXidState *) hash_search(recovery_xid_state_hash,
+													 &oxid,
+													 HASH_ENTER,
+													 &found);
 		cur_state->wal_xid = true;
 
 		if (found)
@@ -1464,7 +1424,6 @@ check_delete_xid_state(RecoveryXidState *state, int worker_id)
 			pairingheap_remove(xmin_queue, &state->xmin_ph_node);
 			update_run_xmin();
 		}
-		pfree(state);
 		hash_search(recovery_xid_state_hash, &oxid, HASH_REMOVE, &found);
 		Assert(found);
 	}
@@ -2205,7 +2164,6 @@ static void
 recovery_write_to_xids_queue(int worker_id, uint32 requestNumber)
 {
 	HASH_SEQ_STATUS hash_seq;
-	RecoveryXidStateHashEntry *entry;
 	RecoveryXidState *state;
 	int			i;
 
@@ -2229,12 +2187,11 @@ recovery_write_to_xids_queue(int worker_id, uint32 requestNumber)
 	}
 
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
-	while ((entry = (RecoveryXidStateHashEntry *) hash_seq_search(&hash_seq)) != NULL)
+	while ((state = (RecoveryXidState *) hash_seq_search(&hash_seq)) != NULL)
 	{
 		XidFileRec	rec;
 		dlist_iter	iter;
 
-		state = entry->state;
 		if (!COMMITSEQNO_IS_INPROGRESS(state->csn))
 			continue;
 
@@ -2322,7 +2279,6 @@ save_state_to_file(int worker_id)
 	File		tempFile;
 	WorkerUndoTempHeader header;
 	HASH_SEQ_STATUS hash_seq;
-	RecoveryXidStateHashEntry *hash_entry;
 	RecoveryXidState *state;
 	off_t		offset = sizeof(header);
 
@@ -2360,12 +2316,10 @@ save_state_to_file(int worker_id)
 
 	/* Write all transaction states */
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
-	while ((hash_entry = hash_seq_search(&hash_seq)) != NULL)
+	while ((state = hash_seq_search(&hash_seq)) != NULL)
 	{
 		WorkerUndoTempEntry entry;
 		dlist_iter	iter;
-
-		state = hash_entry->state;
 
 		/* Save complete transaction state */
 		memset(&entry, 0, sizeof(entry));
