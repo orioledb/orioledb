@@ -1532,7 +1532,7 @@ SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
 
 SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
 ERROR:  function gist_index_content(unknown) does not exist
-LINE 1: SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_id...
+LINE 1: SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_i...
                       ^
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 DELETE FROM o_bridging_vacuum_test;
@@ -1575,7 +1575,7 @@ SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
 
 SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
 ERROR:  function gist_index_content(unknown) does not exist
-LINE 1: SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_id...
+LINE 1: SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_i...
                       ^
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 SELECT orioledb_rewind_sync();
@@ -1620,7 +1620,7 @@ SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
 
 SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
 ERROR:  function gist_index_content(unknown) does not exist
-LINE 1: SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_id...
+LINE 1: SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_i...
                       ^
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 DROP TABLE o_bridging_vacuum_test;
