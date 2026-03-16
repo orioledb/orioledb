@@ -428,6 +428,7 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 	{
 		AttrNumber	attnum = index_rel->rd_index->indkey.values[keyno];
 		OTableIndexField *ix_field;
+		OTableField *exprField;
 
 		ix_field = &index->fields[keyno];
 		if (AttributeNumberIsValid(attnum))
@@ -441,7 +442,6 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 			Node	   *indexkey;
 			HeapTuple	tuple;
 			Form_pg_type typeTup;
-			OTableField *exprField;
 			Oid			field_typeid;
 
 			Assert(index_rel->rd_indexprs);
@@ -539,11 +539,15 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 		else
 		{
 			int16		opt = index_rel->rd_indoption[keyno];
-			Oid			atttypid = index_rel->rd_att->attrs[keyno].atttypid;
+			Oid			typid;
 			Oid			hash_opclass;
 			Oid			hash_input_type;
 			Oid			hash_opfamily;
 
+			if (AttributeNumberIsValid(attnum))
+				typid = o_table->fields[ix_field->attnum].typid;
+			else
+				typid = exprField->typid;
 			ix_field->collation = index_rel->rd_indcollation[keyno];
 			ix_field->opclass = indclass->values[keyno];
 
@@ -559,7 +563,9 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 			{
 				ix_field->nullsOrdering = SORTBY_NULLS_FIRST;
 			}
-			hash_opclass = GetDefaultOpClass(atttypid, HASH_AM_OID);
+			hash_opclass = GetDefaultOpClass(typid, HASH_AM_OID);
+			if (!OidIsValid(hash_opclass))
+				elog(ERROR, "columns of orioledb tables should have default hash access method");
 			hash_input_type = get_opclass_input_type(hash_opclass);
 			hash_opfamily = get_opclass_family(hash_opclass);
 			ix_field->hash_fn_oid = get_opfamily_proc(hash_opfamily, hash_input_type, hash_input_type, HASHSTANDARD_PROC);
