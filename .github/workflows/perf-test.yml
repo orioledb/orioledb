@@ -1,4 +1,4 @@
-name: TPC-C Performance Test
+name: TPC-C Performance Test (do not merge)
 
 on:
   pull_request:
