@@ -273,8 +273,9 @@ hash_final(uint32 hash)
  * Checked with gcc -O2
  */
 static inline uint32
-hash_combine_mix_field(OIndexDescr *idx, TupleDesc tupdesc, OTupleFixedFormatSpec *spec,
-					   OTuple tup, int attnum, uint32 hash)
+hash_combine_mix_field(OIndexDescr *idx, TupleDesc tupdesc, 
+					   OTupleFixedFormatSpec *spec,
+					   OTuple tup, int attnum, int field_num, uint32 hash)
 {
 	Datum		val;
 	bool		isnull;
@@ -283,8 +284,8 @@ hash_combine_mix_field(OIndexDescr *idx, TupleDesc tupdesc, OTupleFixedFormatSpe
 	val = o_fastgetattr(tup, attnum, tupdesc, spec, &isnull);
 	if (isnull)
 		return hash;
-	element_hash = o_call_hash_fn(idx->fields[attnum - 1].hash_fn,
-								  idx->fields[attnum - 1].collation,
+	element_hash = o_call_hash_fn(idx->fields[field_num].hash_fn,
+								  idx->fields[field_num].collation,
 								  val);
 	hash = hash_combine_mix((char *) &element_hash, sizeof(uint32), hash);
 
@@ -318,7 +319,7 @@ o_hash_key(OIndexDescr *idx, OTuple key)
 		natts = idx->nonLeafTupdesc->natts;
 
 	for (i = 0; i < natts; i++)
-		hash = hash_combine_mix_field(idx, tupdesc, spec, key, i + 1, hash);
+		hash = hash_combine_mix_field(idx, tupdesc, spec, key, i + 1, i, hash);
 	hash = hash_final(hash);
 
 	return hash;
@@ -351,7 +352,8 @@ o_hash_key_from_tuple(OIndexDescr *idx, OTuple tuple)
 		else
 			attnum = i + 1;
 
-		hash = hash_combine_mix_field(idx, tupdesc, spec, tuple, attnum, hash);
+		hash = hash_combine_mix_field(idx, tupdesc, spec, tuple,
+									  attnum, i, hash);
 	}
 
 	hash = hash_final(hash);
@@ -370,7 +372,8 @@ o_hash_key_from_toast_tuple(OIndexDescr *toast, OTuple tuple)
 
 	natts = toast->nonLeafTupdesc->natts - TOAST_NON_LEAF_FIELDS_NUM;
 	for (attnum = 1; attnum <= natts; attnum++)
-		hash = hash_combine_mix_field(toast, tupdesc, spec, tuple, attnum, hash);
+		hash = hash_combine_mix_field(toast, tupdesc, spec, tuple,
+									  attnum, attnum, hash);
 
 	hash = hash_final(hash);
 
@@ -388,7 +391,8 @@ o_hash_key_from_toast_key(OIndexDescr *toast, OTuple key)
 
 	natts = tupdesc->natts - TOAST_NON_LEAF_FIELDS_NUM;
 	for (attnum = 1; attnum <= natts; attnum++)
-		hash = hash_combine_mix_field(toast, tupdesc, spec, key, attnum, hash);
+		hash = hash_combine_mix_field(toast, tupdesc, spec, key, 
+									  attnum, attnum, hash);
 
 	hash = hash_final(hash);
 
@@ -440,7 +444,7 @@ o_idx_unique_hash(BTreeDescr *desc, OTuple tuple)
 	for (i = 0; i < idx->nUniqueFields; i++)
 	{
 		attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, idx, i + 1);
-		hash = hash_combine_mix_field(idx, tupdesc, spec, tuple, attnum, hash);
+		hash = hash_combine_mix_field(idx, tupdesc, spec, tuple, attnum, i, hash);
 	}
 
 	hash = hash_final(hash);
