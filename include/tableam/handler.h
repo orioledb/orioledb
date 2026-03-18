@@ -182,8 +182,8 @@ typedef BTreeIntPageParallelData *BTreeIntPageParallel;
 												 * internal page is in
 												 * intPage[0]. If not set -
 												 * vice versa. */
-#define O_PARALLEL_DISK_SCAN_STARTED 	(1<<4)
-#define O_PARALLEL_DOWNLINKS_SORTED 	(1<<5)
+#define O_PARALLEL_DOWNLINKS_SORTED 	(1<<4)
+#define O_PARALLEL_DSM_CREATED			(1<<5)
 
 #define CUR_PAGE(poscan)	(&(poscan)->intPage[((poscan)->flags & O_PARALLEL_CURRENT_PAGE) ? 0 : 1])
 #define NEXT_PAGE(poscan)	(&(poscan)->intPage[((poscan)->flags & O_PARALLEL_CURRENT_PAGE) ? 1 : 0])
@@ -198,11 +198,13 @@ typedef struct ParallelOScanDescData
 	LWLock		intpageLoad,	/* for sequential internal page loading */
 				downlinksPublish;	/* workers can put disk downlinks to
 									 * shared state */
-	uint64		downlinksCount; /* cumulative number of disk downlinks in all
-								 * workers */
+	pg_atomic_uint64 downlinksCount;	/* number of disk downlinks written to
+										 * shared DSM array */
 	pg_atomic_uint64 downlinkIndex;
-	int			workersReportedCount;	/* number of workers that reported
-										 * disk downlinks number */
+	pg_atomic_uint32 downlinksWritersInProgress;	/* number of workers
+													 * currently writing a
+													 * downlink to DSM */
+	uint64		dsmAllocated;	/* number of slots allocated in DSM array */
 #ifdef USE_ASSERT_CHECKING
 	pg_atomic_uint32 dsmSegNumAttached; /* number of workers currenly attached
 										 * to dsm segment during disk scan

@@ -27,15 +27,18 @@
  * PARALLEL SCAN
  *
  *		The parallel sequential scan is implemented as follows.
- *		1. Two internal page images (level == 1) are kept in shared memory.
- *		2. Workers are iterating the downlinks of these pages in parallel
- *		   one by one.
- *		3. Once the internal page is finished, one worker loads the next page in
+ *		1. The scan leader creates a shared DSM array for on-disk downlinks,
+ *		   initially sized to TREE_NUM_LEAF_PAGES.
+ *		2. Two internal page images (level == 1) are kept in shared memory.
+ *		3. Workers are iterating the downlinks of these pages in parallel
+ *		   one by one.  On-disk downlinks are written directly to the shared
+ *		   DSM array.  If the array is full, it is reallocated under lock.
+ *		4. Once the internal page is finished, one worker loads the next page in
  *		   its place.  Other workers continue to process the downlink of the
  *		   remaining page.
- *		4. Once internal page processing is finished, all workers publish
- *		   on-disk downlinks to the dsm.  The leader sorts on-disk downlinks.
- *		5. Workers process on-disk downlinks in parallel one by one.
+ *		5. Once internal page processing is finished, one worker sorts the
+ *		   shared on-disk downlinks array under lock.
+ *		6. Workers process on-disk downlinks in parallel one by one.
  *
  *-------------------------------------------------------------------------
  */
@@ -409,15 +412,80 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 static void
 add_on_disk_downlink(BTreeSeqScan *scan, uint64 downlink, CommitSeqNo csn)
 {
-	if (scan->downlinksCount >= scan->allocatedDownlinks)
+	ParallelOScanDesc poscan = scan->poscan;
+
+	if (!poscan)
 	{
-		scan->allocatedDownlinks *= 2;
-		scan->diskDownlinks = (BTreeSeqScanDiskDownlink *) repalloc_huge(scan->diskDownlinks,
-																		 sizeof(scan->diskDownlinks[0]) * scan->allocatedDownlinks);
+		/* Non-parallel: use local array */
+		if (scan->downlinksCount >= scan->allocatedDownlinks)
+		{
+			scan->allocatedDownlinks *= 2;
+			scan->diskDownlinks = (BTreeSeqScanDiskDownlink *) repalloc_huge(scan->diskDownlinks,
+																			 sizeof(scan->diskDownlinks[0]) * scan->allocatedDownlinks);
+		}
+		scan->diskDownlinks[scan->downlinksCount].downlink = downlink;
+		scan->diskDownlinks[scan->downlinksCount].csn = csn;
+		scan->downlinksCount++;
+		return;
 	}
-	scan->diskDownlinks[scan->downlinksCount].downlink = downlink;
-	scan->diskDownlinks[scan->downlinksCount].csn = csn;
-	scan->downlinksCount++;
+
+	/* Parallel: write directly to shared DSM array */
+	while (true)
+	{
+		uint64		index;
+		BTreeSeqScanDiskDownlink *shared;
+
+		LWLockAcquire(&poscan->downlinksPublish, LW_SHARED);
+
+		/* Re-attach to DSM if it was reallocated */
+		if (scan->dsmSeg == NULL ||
+			dsm_segment_handle(scan->dsmSeg) != poscan->dsmHandle)
+		{
+			if (scan->dsmSeg)
+				dsm_detach(scan->dsmSeg);
+			scan->dsmSeg = dsm_attach(poscan->dsmHandle);
+		}
+
+		index = pg_atomic_fetch_add_u64(&poscan->downlinksCount, 1);
+
+		if (index < poscan->dsmAllocated)
+		{
+			shared = (BTreeSeqScanDiskDownlink *) dsm_segment_address(scan->dsmSeg);
+			shared[index].downlink = downlink;
+			shared[index].csn = csn;
+			LWLockRelease(&poscan->downlinksPublish);
+			return;
+		}
+
+		/* Over capacity: undo increment, grow under exclusive lock */
+		pg_atomic_fetch_sub_u64(&poscan->downlinksCount, 1);
+		LWLockRelease(&poscan->downlinksPublish);
+
+		LWLockAcquire(&poscan->downlinksPublish, LW_EXCLUSIVE);
+
+		/* Re-check: another worker may have already grown it */
+		if (poscan->dsmAllocated <= (uint64) index)
+		{
+			dsm_segment *newSeg;
+			uint64		newAllocated = poscan->dsmAllocated * 2;
+			uint64		oldCount = pg_atomic_read_u64(&poscan->downlinksCount);
+
+			newSeg = dsm_create(MAXALIGN(newAllocated * sizeof(BTreeSeqScanDiskDownlink)), 0);
+			if (oldCount > 0)
+				memcpy(dsm_segment_address(newSeg),
+					   dsm_segment_address(scan->dsmSeg),
+					   oldCount * sizeof(BTreeSeqScanDiskDownlink));
+
+			if (scan->dsmSeg)
+				dsm_detach(scan->dsmSeg);
+			scan->dsmSeg = newSeg;
+			poscan->dsmHandle = dsm_segment_handle(newSeg);
+			poscan->dsmAllocated = newAllocated;
+		}
+
+		LWLockRelease(&poscan->downlinksPublish);
+		/* Retry the insert */
+	}
 }
 
 static int
@@ -438,7 +506,6 @@ static void
 switch_to_disk_scan(BTreeSeqScan *scan)
 {
 	ParallelOScanDesc poscan = scan->poscan;
-	bool		diskLeader = false;
 
 	scan->status = BTreeSeqScanDisk;
 	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
@@ -448,117 +515,61 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 			  scan->downlinksCount,
 			  sizeof(scan->diskDownlinks[0]),
 			  cmp_downlinks);
+		return;
 	}
-	else
+
+	/*
+	 * Wait for any in-flight add_on_disk_downlink() calls to complete. A
+	 * worker that already got a disk downlink from get_next_downlink() but
+	 * hasn't finished writing it yet will have incremented
+	 * downlinksWritersInProgress.
+	 */
+	while (pg_atomic_read_u32(&poscan->downlinksWritersInProgress) > 0)
 	{
-		SpinLockAcquire(&poscan->workerStart);
-		if (!(poscan->flags & O_PARALLEL_DISK_SCAN_STARTED))
-		{
-			poscan->flags |= O_PARALLEL_DISK_SCAN_STARTED;
-			diskLeader = true;
-		}
-		/* Publish the number of downlinks */
-		poscan->downlinksCount += scan->downlinksCount;
-		poscan->workersReportedCount++;
-		SpinLockRelease(&poscan->workerStart);
+		pg_usleep(10L);
+		CHECK_FOR_INTERRUPTS();
+	}
 
-		/* Wait until all workers publish their number of downlinks. */
-		while (true)
-		{
-			SpinLockAcquire(&poscan->workerStart);
-			Assert(poscan->workersReportedCount <= poscan->nworkers);
-			if ((poscan->workersReportedCount == poscan->nworkers ||
-				 poscan->flags & O_PARALLEL_IS_SINGLE_LEAF_PAGE) &&
-				(diskLeader ||
-				 poscan->dsmHandle != 0 ||
-				 poscan->downlinksCount == 0))
-			{
-				SpinLockRelease(&poscan->workerStart);
-				break;
-			}
-			SpinLockRelease(&poscan->workerStart);
+	/*
+	 * First worker to grab the exclusive lock sorts the shared downlinks
+	 * array.  Other workers wait on the lock and then see the sorted flag.
+	 */
+	LWLockAcquire(&poscan->downlinksPublish, LW_EXCLUSIVE);
 
-			pg_usleep(100L);
-			CHECK_FOR_INTERRUPTS();
+	if (!(poscan->flags & O_PARALLEL_DOWNLINKS_SORTED))
+	{
+		uint64		count = pg_atomic_read_u64(&poscan->downlinksCount);
+
+		/* Re-attach to DSM if it was reallocated */
+		if (scan->dsmSeg == NULL ||
+			dsm_segment_handle(scan->dsmSeg) != poscan->dsmHandle)
+		{
+			if (scan->dsmSeg)
+				dsm_detach(scan->dsmSeg);
+			scan->dsmSeg = dsm_attach(poscan->dsmHandle);
 		}
 
-		if (diskLeader)
+		if (count > 0)
 		{
-			if (poscan->downlinksCount > 0)
-			{
-				/* Create DSM segment and publish downlinks list first */
-				LWLockAcquire(&poscan->downlinksPublish, LW_EXCLUSIVE);
-				Assert(!poscan->dsmHandle);
-				scan->dsmSeg = dsm_create(MAXALIGN(poscan->downlinksCount * sizeof(scan->diskDownlinks[0])), 0);
-#ifdef USE_ASSERT_CHECKING
-				pg_atomic_init_u32(&poscan->dsmSegNumAttached, 0);
-#endif
-				poscan->dsmHandle = dsm_segment_handle(scan->dsmSeg);
-				memcpy((Pointer) dsm_segment_address(scan->dsmSeg), scan->diskDownlinks,
-					   scan->downlinksCount * sizeof(scan->diskDownlinks[0]));
-				pg_atomic_fetch_add_u64(&poscan->downlinkIndex, scan->downlinksCount);
-				LWLockRelease(&poscan->downlinksPublish);
-
-				/*
-				 * Wait until the other workers have published their downlinks
-				 * lists
-				 */
-				while (true)
-				{
-					Assert(pg_atomic_read_u64(&poscan->downlinkIndex) <= poscan->downlinksCount);
-					if (pg_atomic_read_u64(&poscan->downlinkIndex) == poscan->downlinksCount)
-						break;
-
-					pg_usleep(100L);
-					CHECK_FOR_INTERRUPTS();
-				}
-
-				/* Make sure all workers released this lock */
-				LWLockAcquire(&poscan->downlinksPublish, LW_EXCLUSIVE);
-				LWLockRelease(&poscan->downlinksPublish);
-
-				qsort(dsm_segment_address(scan->dsmSeg), poscan->downlinksCount,
-					  sizeof(scan->diskDownlinks[0]), cmp_downlinks);
-			}
-
-			pg_atomic_write_u64(&poscan->downlinkIndex, 0);
-			pg_write_barrier();
-			poscan->flags |= O_PARALLEL_DOWNLINKS_SORTED;
-			/* Now workers can get downlinks from shared sorted list */
+			qsort(dsm_segment_address(scan->dsmSeg), count,
+				  sizeof(BTreeSeqScanDiskDownlink), cmp_downlinks);
 		}
-		else
-		{
-			uint64		index;
 
-			LWLockAcquire(&poscan->downlinksPublish, LW_SHARED);
-			if (poscan->downlinksCount > 0)
-			{
-				Assert(poscan->dsmHandle && !scan->dsmSeg);
-				scan->dsmSeg = dsm_attach(poscan->dsmHandle);
-#ifdef USE_ASSERT_CHECKING
-				(void) pg_atomic_fetch_add_u32(&poscan->dsmSegNumAttached, 1);
-#endif
-			}
-			if (scan->downlinksCount > 0)
-			{
-				index = pg_atomic_fetch_add_u64(&poscan->downlinkIndex, scan->downlinksCount);
-				memcpy((Pointer) dsm_segment_address(scan->dsmSeg) + index * sizeof(scan->diskDownlinks[0]),
-					   scan->diskDownlinks, scan->downlinksCount * sizeof(scan->diskDownlinks[0]));
-			}
-			LWLockRelease(&poscan->downlinksPublish);
+		pg_atomic_write_u64(&poscan->downlinkIndex, 0);
+		pg_write_barrier();
+		poscan->flags |= O_PARALLEL_DOWNLINKS_SORTED;
+	}
 
-			/*
-			 * Wait until leader sorts the downlinks.
-			 */
-			while (true)
-			{
-				if (poscan->flags & O_PARALLEL_DOWNLINKS_SORTED)
-					break;
+	LWLockRelease(&poscan->downlinksPublish);
 
-				pg_usleep(100L);
-				CHECK_FOR_INTERRUPTS();
-			}
-		}
+	/* Ensure attached to current DSM for disk scan phase */
+	if (poscan->dsmHandle &&
+		(scan->dsmSeg == NULL ||
+		 dsm_segment_handle(scan->dsmSeg) != poscan->dsmHandle))
+	{
+		if (scan->dsmSeg)
+			dsm_detach(scan->dsmSeg);
+		scan->dsmSeg = dsm_attach(poscan->dsmHandle);
 	}
 }
 
@@ -834,6 +845,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				/* Push next internal item page offset into shared state */
 				curPage->offset = BTREE_PAGE_LOCATOR_GET_OFFSET(curPage->img, &loc);
 				scan->context.imgReadCsn = curPage->imgReadCsn;
+				pg_atomic_fetch_add_u32(&poscan->downlinksWritersInProgress, 1);
 				SpinLockRelease(&poscan->intpageAccess);
 				return true;
 			}
@@ -927,10 +939,15 @@ iterate_internal_page(BTreeSeqScan *scan)
 			if (DOWNLINK_IS_ON_DISK(downlink))
 			{
 				add_on_disk_downlink(scan, downlink, scan->context.imgReadCsn);
+				if (scan->poscan)
+					pg_atomic_fetch_sub_u32(&scan->poscan->downlinksWritersInProgress, 1);
 			}
 			else if (DOWNLINK_IS_IN_MEMORY(downlink))
 			{
 				ReadPageResult result;
+
+				if (scan->poscan)
+					pg_atomic_fetch_sub_u32(&scan->poscan->downlinksWritersInProgress, 1);
 
 				result = o_btree_try_read_page(scan->desc,
 											   DOWNLINK_GET_IN_MEMORY_BLKNO(downlink),
@@ -971,6 +988,9 @@ iterate_internal_page(BTreeSeqScan *scan)
 				 */
 				int			ionum = DOWNLINK_GET_IO_LOCKNUM(downlink);
 
+				if (scan->poscan)
+					pg_atomic_fetch_sub_u32(&scan->poscan->downlinksWritersInProgress, 1);
+
 				wait_for_io_completion(ionum);
 
 				elog(DEBUG3, "DOWNLINK_IS_IN_IO");
@@ -978,6 +998,10 @@ iterate_internal_page(BTreeSeqScan *scan)
 				Assert(scan->iter);
 				return true;
 			}
+		}
+		else if (scan->poscan)
+		{
+			pg_atomic_fetch_sub_u32(&scan->poscan->downlinksWritersInProgress, 1);
 		}
 	}
 
@@ -1008,7 +1032,7 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 	{
 		uint64		index = pg_atomic_fetch_add_u64(&poscan->downlinkIndex, 1);
 
-		if (index >= poscan->downlinksCount)
+		if (index >= pg_atomic_read_u64(&poscan->downlinksCount))
 		{
 			if (scan->dsmSeg)
 			{
@@ -1129,12 +1153,51 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 		/* Scan leader */
 		if (scan->workerNumber == 0)
 		{
+			uint32		numLeafPages;
+			uint64		allocSize;
+
 			Assert(!(poscan->flags & O_PARALLEL_LEADER_STARTED));
 			poscan->flags |= O_PARALLEL_LEADER_STARTED;
 			scan->isLeader = true;
 			init_checkpoit_number(scan);
+
+			/*
+			 * Create a shared DSM segment for on-disk downlinks upfront,
+			 * sized to hold as many downlinks as there are leaf pages in the
+			 * tree.
+			 */
+			numLeafPages = TREE_NUM_LEAF_PAGES(desc);
+			if (numLeafPages < 16)
+				numLeafPages = 16;
+			allocSize = MAXALIGN((uint64) numLeafPages * sizeof(BTreeSeqScanDiskDownlink));
+			scan->dsmSeg = dsm_create(allocSize, 0);
+			poscan->dsmHandle = dsm_segment_handle(scan->dsmSeg);
+			poscan->dsmAllocated = numLeafPages;
+#ifdef USE_ASSERT_CHECKING
+			pg_atomic_init_u32(&poscan->dsmSegNumAttached, 0);
+#endif
+			pg_write_barrier();
+			poscan->flags |= O_PARALLEL_DSM_CREATED;
 		}
 		SpinLockRelease(&poscan->workerStart);
+
+		/* Non-leader workers: wait for DSM creation and attach */
+		if (!scan->isLeader)
+		{
+			while (!(poscan->flags & O_PARALLEL_DSM_CREATED))
+			{
+				pg_usleep(100L);
+				CHECK_FOR_INTERRUPTS();
+			}
+			pg_read_barrier();
+			if (poscan->dsmHandle)
+			{
+				scan->dsmSeg = dsm_attach(poscan->dsmHandle);
+#ifdef USE_ASSERT_CHECKING
+				(void) pg_atomic_fetch_add_u32(&poscan->dsmSegNumAttached, 1);
+#endif
+			}
+		}
 
 		elog(DEBUG3, "init_btree_seq_scan. %s %d started", poscan ? "Parallel worker" : "Worker", scan->workerNumber);
 	}
@@ -1205,6 +1268,7 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	scan->samplingNumber = 0;
 	scan->sampler = sampler;
 	scan->dsmSeg = NULL;
+	scan->isLeader = false;
 	scan->initialized = false;
 	scan->checkpointNumberSet = false;
 	scan->haveHistImg = false;
@@ -1738,8 +1802,6 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 
 	if (scan->dsmSeg)
 	{
-		Assert(pg_atomic_read_u32(&scan->poscan->dsmSegNumAttached) == 0);	/* All workers should
-																			 * have already detached */
 		dsm_detach(scan->dsmSeg);
 		scan->dsmSeg = NULL;
 	}
