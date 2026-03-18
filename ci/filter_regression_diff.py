@@ -295,6 +295,11 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				  and target_cur[1] == 'Hash Semi Join'):
 				src_up = True
 				target_up = True
+			elif (test_name == 'generated'
+				  and src_cur_value.startswith('Index Scan')
+				  and target_cur[1].startswith('Index Scan')):
+				src_up = True
+				target_up = True
 			else:
 				# print(f"src_cur[1] = {src_cur[1]}\ntarget_cur[1] = {target_cur[1]}")
 				raise RuntimeError(f"Unsupported tree diff. Add branch specifically for \"{test_name}\" test")
