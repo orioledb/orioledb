@@ -63,7 +63,8 @@ typedef struct OExclusionFn
 	FmgrInfo	finfo;
 } OExclusionFn;
 
-typedef struct OHashFnKey {
+typedef struct OHashFnKey
+{
 	Oid			datoid;
 	Oid			hash_fn_oid;
 } OHashFnKey;
@@ -93,7 +94,7 @@ typedef struct
 	 */
 	OComparator *comparator;
 	OExclusionFn *exclusion_fn;
-	OHashFn		 *hash_fn;
+	OHashFn    *hash_fn;
 } OIndexField;
 
 typedef struct AttrNumberMap
@@ -330,7 +331,7 @@ extern OComparator *o_find_comparator(Oid opfamily,
 extern int	o_call_comparator(OComparator *comparator, Datum left,
 							  Datum right);
 extern int	o_call_exclusion_fn(OExclusionFn *exclusion_fn, Datum left, Datum right, Oid collation);
-extern uint32	o_call_hash_fn(OHashFn *hash_fn, Oid collation, Datum val);
+extern uint32 o_call_hash_fn(OHashFn *hash_fn, Oid collation, Datum val);
 extern void o_invalidate_comparator_cache(Oid opfamily, Oid lefttype,
 										  Oid righttype);
 
