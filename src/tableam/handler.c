@@ -1640,9 +1640,10 @@ orioledb_parallelscan_initialize_internal(ParallelTableScanDesc pscan)
 	poscan->intPage[1].startOffset = 0;
 	poscan->intPage[0].offset = 0;
 	poscan->intPage[1].offset = 0;
-	poscan->downlinksCount = 0;
+	pg_atomic_write_u64(&poscan->downlinksCount, 0);
 	pg_atomic_write_u64(&poscan->downlinkIndex, 0);
-	poscan->workersReportedCount = 0;
+	pg_atomic_write_u32(&poscan->downlinksWritersInProgress, 0);
+	poscan->dsmAllocated = 0;
 	poscan->flags = 0;
 	poscan->cur_int_pageno = 0;
 	poscan->dsmHandle = 0;
@@ -1676,7 +1677,9 @@ orioledb_parallelscan_initialize_inner(ParallelTableScanDesc pscan)
 	SpinLockInit(&poscan->workerStart);
 	LWLockInitialize(&poscan->intpageLoad, btreeScanShmem->pageLoadTrancheId);
 	LWLockInitialize(&poscan->downlinksPublish, btreeScanShmem->downlinksPublishTrancheId);
+	pg_atomic_init_u64(&poscan->downlinksCount, 0);
 	pg_atomic_init_u64(&poscan->downlinkIndex, 0);
+	pg_atomic_init_u32(&poscan->downlinksWritersInProgress, 0);
 
 	orioledb_parallelscan_initialize_internal(pscan);
 
