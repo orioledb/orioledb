@@ -172,11 +172,12 @@ SELECT regexp_replace(
      Item 6: offset = 672, tuple = ((NNN, (NNN), X/X, N), opfamily: 397, inputtype: 2277, cmpOid: 382, ssupOid: 0)      +
      Item 7: offset = 736, tuple = ((NNN, (NNN), X/X, N), opfamily: 1971, inputtype: 701, cmpOid: 452, ssupOid: 444)    +
      Item 8: offset = 800, tuple = ((NNN, (NNN), X/X, N), opfamily: 1977, inputtype: 23, cmpOid: 450, ssupOid: 425)     +
-     Item 9: offset = 864, tuple = ((NNN, (NNN), X/X, N), opfamily: 2994, inputtype: 2249, cmpOid: 2987, ssupOid: 0)    +
-     Item 10: offset = 928, tuple = ((NNN, (NNN), X/X, N), opfamily: 2040, inputtype: 1114, cmpOid: 2039, ssupOid: 3411)+
-     Item 11: offset = 992, tuple = ((NNN, (NNN), X/X, N), opfamily: 2789, inputtype: 27, cmpOid: 2794, ssupOid: 0)     +
-     Item 12: offset = 1056, tuple = ((NNN, (NNN), X/X, N), opfamily: 3522, inputtype: 3500, cmpOid: 3514, ssupOid: 0)  +
-     Item 13: offset = 1120, tuple = ((NNN, (NNN), X/X, N), opfamily: 3901, inputtype: 3831, cmpOid: 3870, ssupOid: 0)  +
+     Item 9: offset = 864, tuple = ((NNN, (NNN), X/X, N), opfamily: 1977, inputtype: 20, cmpOid: 949, ssupOid: 442)     +
+     Item 10: offset = 928, tuple = ((NNN, (NNN), X/X, N), opfamily: 2994, inputtype: 2249, cmpOid: 2987, ssupOid: 0)   +
+     Item 11: offset = 992, tuple = ((NNN, (NNN), X/X, N), opfamily: 2040, inputtype: 1114, cmpOid: 2039, ssupOid: 3411)+
+     Item 12: offset = 1056, tuple = ((NNN, (NNN), X/X, N), opfamily: 2789, inputtype: 27, cmpOid: 2794, ssupOid: 0)    +
+     Item 13: offset = 1120, tuple = ((NNN, (NNN), X/X, N), opfamily: 3522, inputtype: 3500, cmpOid: 3514, ssupOid: 0)  +
+     Item 14: offset = 1184, tuple = ((NNN, (NNN), X/X, N), opfamily: 3901, inputtype: 3831, cmpOid: 3870, ssupOid: 0)  +
                                                                                                                         +
  
 (1 row)
@@ -345,30 +346,32 @@ SELECT regexp_replace(regexp_replace(
      Item 4: offset = 976, tuple = (((NNN, (NNN), X/X, N), 0), 110)                           +
      Item 5: offset = 1152, tuple = (((NNN, (NNN), X/X, N), 0), 102)                          +
      Item 6: offset = 1320, tuple = (((NNN, (NNN), X/X, N), 0), 122)                          +
-     Item 7: offset = 1504, tuple = (((NNN, (NNN), X/X, N), 0), 126)                          +
-     Item 8: offset = 1696, tuple = (((NNN, (NNN), X/X, N), 0), 102)                          +
-     Item 9: offset = 1864, tuple = (((NNN, (NNN), X/X, N), 0), 102)                          +
-     Item 10: offset = 2032, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
-     Item 11: offset = 2200, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
-     Item 12: offset = 2368, tuple = (((NNN, (NNN), X/X, N), 0), 108)                         +
-     Item 13: offset = 2536, tuple = (((NNN, (NNN), X/X, N), 0), 114)                         +
-     Item 14: offset = 2712, tuple = (((NNN, (NNN), X/X, N), 0), 116)                         +
-     Item 15: offset = 2888, tuple = (((NNN, (NNN), X/X, N), 0), 100)                         +
-     Item 16: offset = 3048, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
-   Chunk 1: offset = 17, location = 3216, hikey location = 104                                +
-     Item 17: offset = 3248, tuple = (((NNN, (NNN), X/X, N), 0), 112)                         +
-     Item 18: offset = 3424, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
-     Item 19: offset = 3608, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
-     Item 20: offset = 3792, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
-     Item 21: offset = 3976, tuple = (((NNN, (NNN), X/X, N), 0), 124)                         +
-     Item 22: offset = 4160, tuple = (((NNN, (NNN), X/X, N), 0), 128)                         +
-     Item 23: offset = 4352, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
-     Item 24: offset = 4536, tuple = (((NNN, (NNN), X/X, N), 0), 136)                         +
-     Item 25: offset = 4736, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
-     Item 26: offset = 4904, tuple = (((NNN, (NNN), X/X, N), 0), 102)                         +
-     Item 27: offset = 5072, tuple = (((NNN, (NNN), X/X, N), 0), 108)                         +
-     Item 28: offset = 5240, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
-     Item 29: offset = 5408, tuple = (((NNN, (NNN), X/X, N), 0), 108)                         +
+     Item 7: offset = 1504, tuple = (((NNN, (NNN), X/X, N), 0), 122)                          +
+     Item 8: offset = 1688, tuple = (((NNN, (NNN), X/X, N), 0), 126)                          +
+     Item 9: offset = 1880, tuple = (((NNN, (NNN), X/X, N), 0), 102)                          +
+     Item 10: offset = 2048, tuple = (((NNN, (NNN), X/X, N), 0), 102)                         +
+     Item 11: offset = 2216, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
+     Item 12: offset = 2384, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
+     Item 13: offset = 2552, tuple = (((NNN, (NNN), X/X, N), 0), 108)                         +
+     Item 14: offset = 2720, tuple = (((NNN, (NNN), X/X, N), 0), 102)                         +
+     Item 15: offset = 2888, tuple = (((NNN, (NNN), X/X, N), 0), 114)                         +
+     Item 16: offset = 3064, tuple = (((NNN, (NNN), X/X, N), 0), 116)                         +
+     Item 17: offset = 3240, tuple = (((NNN, (NNN), X/X, N), 0), 100)                         +
+   Chunk 1: offset = 18, location = 3400, hikey location = 104                                +
+     Item 18: offset = 3432, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
+     Item 19: offset = 3600, tuple = (((NNN, (NNN), X/X, N), 0), 112)                         +
+     Item 20: offset = 3776, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
+     Item 21: offset = 3960, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
+     Item 22: offset = 4144, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
+     Item 23: offset = 4328, tuple = (((NNN, (NNN), X/X, N), 0), 124)                         +
+     Item 24: offset = 4512, tuple = (((NNN, (NNN), X/X, N), 0), 128)                         +
+     Item 25: offset = 4704, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
+     Item 26: offset = 4888, tuple = (((NNN, (NNN), X/X, N), 0), 136)                         +
+     Item 27: offset = 5088, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
+     Item 28: offset = 5256, tuple = (((NNN, (NNN), X/X, N), 0), 102)                         +
+     Item 29: offset = 5424, tuple = (((NNN, (NNN), X/X, N), 0), 108)                         +
+     Item 30: offset = 5592, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
+     Item 31: offset = 5760, tuple = (((NNN, (NNN), X/X, N), 0), 108)                         +
                                                                                               +
  
 (1 row)
@@ -498,6 +501,7 @@ SELECT regexp_replace(regexp_replace(
      Item 14: offset = 1416, tuple = ((NNN, (NNN), X/X, N), amproc: NNN)+
      Item 15: offset = 1496, tuple = ((NNN, (NNN), X/X, N), amproc: NNN)+
      Item 16: offset = 1576, tuple = ((NNN, (NNN), X/X, N), amproc: NNN)+
+     Item 17: offset = 1656, tuple = ((NNN, (NNN), X/X, N), amproc: NNN)+
                                                                         +
  
 (1 row)
@@ -701,10 +705,10 @@ SELECT orioledb_sys_tree_structure(24, 'ne');
      Item 5: offset = 456, tuple = (747, 28608)                     +
      Item 6: offset = 488, tuple = (748, 29600)                     +
      Item 7: offset = 520, tuple = (751, 29760)                     +
-     Item 8: offset = 552, tuple = (752, 48536)                     +
-     Item 9: offset = 584, tuple = (753, 51432)                     +
-     Item 10: offset = 616, tuple = (754, 51872)                    +
-     Item 11: offset = 648, tuple = (755, 54608)                    +
+     Item 8: offset = 552, tuple = (752, 48928)                     +
+     Item 9: offset = 584, tuple = (753, 51824)                     +
+     Item 10: offset = 616, tuple = (754, 52264)                    +
+     Item 11: offset = 648, tuple = (755, 55000)                    +
      Item 12: offset = 680, tuple = (1000, 2000)                    +
      Item 13: offset = 712, tuple = (1001, 2001)                    +
      Item 14: offset = 744, tuple = (1002, 2002)                    +
