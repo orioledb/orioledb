@@ -140,7 +140,6 @@ struct BTreeSeqScan
 
 	/* Private parallel worker info in a backend */
 	ParallelOScanDesc poscan;
-	bool		isLeader;
 	int			workerNumber;
 	dsm_segment *dsmSeg;
 
@@ -1158,7 +1157,6 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 
 			Assert(!(poscan->flags & O_PARALLEL_LEADER_STARTED));
 			poscan->flags |= O_PARALLEL_LEADER_STARTED;
-			scan->isLeader = true;
 			init_checkpoit_number(scan);
 
 			/*
@@ -1182,7 +1180,8 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 		SpinLockRelease(&poscan->workerStart);
 
 		/* Non-leader workers: wait for DSM creation and attach */
-		if (!scan->isLeader)
+		Assert(scan->workerNumber >= 0);
+		if (scan->workerNumber > 0)
 		{
 			while (!(poscan->flags & O_PARALLEL_DSM_CREATED))
 			{
@@ -1204,7 +1203,6 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 	else
 	{
 		scan->workerNumber = -1;
-		scan->isLeader = true;
 		init_checkpoit_number(scan);
 	}
 
@@ -1268,7 +1266,6 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	scan->samplingNumber = 0;
 	scan->sampler = sampler;
 	scan->dsmSeg = NULL;
-	scan->isLeader = false;
 	scan->initialized = false;
 	scan->checkpointNumberSet = false;
 	scan->haveHistImg = false;
