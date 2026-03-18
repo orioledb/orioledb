@@ -134,6 +134,10 @@ static void orioledb_object_access_hook(ObjectAccessType access, Oid classId,
 
 static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
 								Relation rel);
+static Node *o_get_alter_type_expr(Relation rel, int attidx);
+static void o_fill_new_slot(OTable *new_o_table, Relation rel, int attidx,
+							Node *expr, TupleTableSlot *old_slot,
+							TupleTableSlot *new_slot, TupleTableSlot *scan_slot);
 static void o_find_collation_dependencies(Oid colloid);
 static void redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool set_tablespace);
 
@@ -1519,7 +1523,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		}
 		if (o_alter_generated_column_id)
 		{
-			list_free(o_alter_generated_column_id);
+			list_free_deep(o_alter_generated_column_id);
 			o_alter_generated_column_id = NIL;
 		}
 		if (dropped_attrs)
@@ -2193,6 +2197,10 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 	int			primary_init_nfields = old_o_table->primary_init_nfields;
+	int			num_check = rel->rd_att->constr ? rel->rd_att->constr->num_check : 0;
+	EState	   *check_estate = NULL;
+	ExprState **check_exprs = NULL;
+	ExprContext *check_econtext = NULL;
 
 	if (!old_o_table->has_primary)
 		primary_init_nfields--;
@@ -2235,6 +2243,24 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
+	/* Prepare CHECK constraint expressions for validation during rewrite */
+	if (num_check > 0)
+	{
+		int			i;
+		ConstrCheck *check = rel->rd_att->constr->check;
+
+		check_estate = CreateExecutorState();
+		check_econtext = GetPerTupleExprContext(check_estate);
+		check_exprs = (ExprState **) palloc(num_check * sizeof(ExprState *));
+
+		for (i = 0; i < num_check; i++)
+		{
+			Expr	   *checkconstexpr = stringToNode(check[i].ccbin);
+
+			check_exprs[i] = ExecPrepareExpr(checkconstexpr, check_estate);
+		}
+	}
+
 	while (!O_TUPLE_IS_NULL(tup = btree_seq_scan_getnext(sscan, old_slot->tts_mcxt, &tupleCsn, &hint)))
 	{
 		tts_orioledb_store_tuple(old_slot, tup, old_descr,
@@ -2243,47 +2269,31 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 		slot_getallattrs(old_slot);
 		tts_orioledb_detoast(old_slot);
 
+		/*
+		 * Constraints and GENERATED expressions might reference the tableoid
+		 * column, so fill tts_tableOid with the desired value.
+		 */
+		new_slot->tts_tableOid = RelationGetRelid(rel);
+
+		/*
+		 * Process tuple in two phases: 1) Non-generated attrs 2) Generated
+		 * attrs only Rewriting tuples in such manner helps to handle
+		 * situations when a generated column depends on the value of another
+		 * changing column.
+		 */
 		for (int i = 0; i < old_slot->tts_tupleDescriptor->natts; i++)
 		{
 			Node	   *expr = NULL;
 			Form_pg_attribute attr = &old_slot->tts_tupleDescriptor->attrs[i];
 
-			ListCell   *lc;
+			if (attr->attgenerated)
+				continue;
 
-			foreach(lc, alter_type_exprs)
-			{
-				AttrNumber	attnum = intVal(linitial((List *) lfirst(lc)));
-				Oid			relOid = intVal(lsecond((List *) lfirst(lc)));
-
-				/*
-				 * To get correct expresion we need check both relation and
-				 * attribute number. Because of postgres inheritence allows
-				 * different attribute number for the same column in parent
-				 * and child relations.
-				 */
-				if (relOid == rel->rd_rel->oid && attnum == i + 1)
-				{
-					expr = (Node *) lthird((List *) lfirst(lc));
-					break;
-				}
-			}
+			expr = o_get_alter_type_expr(rel, i);
 
 			if (!expr && attr->atthasdef && !attr->atthasmissing &&
 				i >= primary_init_nfields &&
 				old_slot->tts_isnull[i])
-			{
-				Node	   *defaultexpr = build_column_default(rel, i + 1);
-
-				expr = defaultexpr;
-			}
-
-			/*
-			 * Build new value for GENERATED column if calculating formula has
-			 * been updated using ALTER TABLE ... SET EXPRESSION ... or if
-			 * value was not present in existing row
-			 */
-			if (!expr && attr->attgenerated && (old_slot->tts_isnull[i] ||
-												(o_alter_generated_column_id != NIL && list_member_int(o_alter_generated_column_id, i + 1))))
 			{
 				Node	   *defaultexpr = build_column_default(rel, i + 1);
 
@@ -2324,28 +2334,67 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				expr = defval;
 			}
 
-			attr = &new_slot->tts_tupleDescriptor->attrs[i];
-			if (expr)
+			o_fill_new_slot(new_o_table, rel, i, expr,
+							old_slot, new_slot, old_slot);
+		}
+
+		/* Make new_slot valid for using it as a scan_slot in o_fill_new_slot */
+		ExecStoreVirtualTuple(new_slot);
+
+		for (int i = 0; i < old_slot->tts_tupleDescriptor->natts; i++)
+		{
+			Node	   *expr = NULL;
+			Form_pg_attribute attr = &old_slot->tts_tupleDescriptor->attrs[i];
+
+			if (!attr->attgenerated)
+				continue;
+
+			expr = o_get_alter_type_expr(rel, i);
+
+			/*
+			 * Build new value for GENERATED column if the generation
+			 * expression has been updated using ALTER TABLE ... SET
+			 * EXPRESSION ..., if the value was not present in the existing
+			 * row, or if the column type has changed.
+			 */
+			if (expr || (old_slot->tts_isnull[i] ||
+						 (o_alter_generated_column_id != NIL
+						  && list_member(
+										 o_alter_generated_column_id,
+			/* cppcheck-suppress unknownEvaluationOrder */
+										 list_make2(makeInteger(RelationGetRelid(rel)), makeInteger(i + 1))))))
 			{
-				new_slot->tts_values[i] = o_eval_default(new_o_table, rel, expr, old_slot,
-														 attr->attbyval, attr->attlen,
-														 &new_slot->tts_isnull[i]);
+				Node	   *defaultexpr = build_column_default(rel, i + 1);
+
+				expr = defaultexpr;
 			}
-			else
+
+			/*
+			 * Use new_slot as a scan slot, because all generated attrs depend
+			 * only on new values
+			 */
+			o_fill_new_slot(new_o_table, rel, i, expr,
+							old_slot, new_slot, new_slot);
+		}
+
+		new_slot->tts_nvalid = new_slot->tts_tupleDescriptor->natts;
+
+		/* Validate CHECK constraints on the rewritten tuple */
+		if (num_check > 0)
+		{
+			int			j;
+
+			check_econtext->ecxt_scantuple = new_slot;
+			for (j = 0; j < num_check; j++)
 			{
-				if (!old_slot->tts_isnull[i])
-				{
-					new_slot->tts_values[i] = datumCopy(old_slot->tts_values[i], attr->attbyval, attr->attlen);
-					new_slot->tts_isnull[i] = old_slot->tts_isnull[i];
-				}
-				else
-				{
-					new_slot->tts_values[i] = 0;
-					new_slot->tts_isnull[i] = true;
-				}
+				if (!ExecCheck(check_exprs[j], check_econtext))
+					ereport(ERROR,
+							(errcode(ERRCODE_CHECK_VIOLATION),
+							 errmsg("check constraint \"%s\" of relation \"%s\" is violated by some row",
+									rel->rd_att->constr->check[j].ccname,
+									RelationGetRelationName(rel))));
 			}
 		}
-		new_slot->tts_nvalid = new_slot->tts_tupleDescriptor->natts;
 
 		o_tbl_insert(descr, rel, new_slot, oxid, oSnapshot.csn);
 
@@ -2353,8 +2402,11 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 		ExecClearTuple(new_slot);
 	}
 
-	list_free(o_alter_generated_column_id);
-	o_alter_generated_column_id = NIL;
+	if (check_estate)
+	{
+		pfree(check_exprs);
+		FreeExecutorState(check_estate);
+	}
 
 	ExecDropSingleTupleTableSlot(old_slot);
 	ExecDropSingleTupleTableSlot(new_slot);
@@ -3495,7 +3547,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					if (old_field.generated)
 					{
 						in_rewrite = true;
-						o_alter_generated_column_id = lappend_int(o_alter_generated_column_id, subId);
+						o_alter_generated_column_id = lappend(o_alter_generated_column_id,
+						/* cppcheck-suppress unknownEvaluationOrder */
+															  list_make2(makeInteger(objectId), makeInteger(subId)));
 					}
 
 					if (!in_rewrite)
@@ -4378,9 +4432,67 @@ o_ddl_cleanup(void)
 	in_rewrite = false;
 	if (o_alter_generated_column_id)
 	{
-		list_free(o_alter_generated_column_id);
+		list_free_deep(o_alter_generated_column_id);
 		o_alter_generated_column_id = NIL;
 	}
 	o_in_add_column = false;
 	create_stmt = NULL;
+}
+
+static Node *
+o_get_alter_type_expr(Relation rel, int attidx)
+{
+	ListCell   *lc;
+	Node	   *expr = NULL;
+
+	foreach(lc, alter_type_exprs)
+	{
+		AttrNumber	attnum = intVal(linitial((List *) lfirst(lc)));
+		Oid			relOid = intVal(lsecond((List *) lfirst(lc)));
+
+		/*
+		 * To get correct expresion we need check both relation and attribute
+		 * number. Because of postgres inheritence allows different attribute
+		 * number for the same column in parent and child relations.
+		 */
+		if (relOid == rel->rd_rel->oid && attnum == attidx + 1)
+		{
+			expr = (Node *) lthird((List *) lfirst(lc));
+			break;
+		}
+	}
+
+	return expr;
+}
+
+static void
+o_fill_new_slot(OTable *new_o_table, Relation rel, int attidx,
+				Node *expr, TupleTableSlot *old_slot,
+				TupleTableSlot *new_slot, TupleTableSlot *scan_slot)
+{
+	Form_pg_attribute attr = &new_slot->tts_tupleDescriptor->attrs[attidx];
+
+	if (expr)
+	{
+		new_slot->tts_values[attidx] = o_eval_default(new_o_table, rel, expr,
+													  scan_slot,
+													  attr->attbyval,
+													  attr->attlen,
+													  &new_slot->tts_isnull[attidx]);
+	}
+	else
+	{
+		if (!old_slot->tts_isnull[attidx])
+		{
+			new_slot->tts_values[attidx] = datumCopy(old_slot->tts_values[attidx],
+													 attr->attbyval,
+													 attr->attlen);
+			new_slot->tts_isnull[attidx] = old_slot->tts_isnull[attidx];
+		}
+		else
+		{
+			new_slot->tts_values[attidx] = 0;
+			new_slot->tts_isnull[attidx] = true;
+		}
+	}
 }
