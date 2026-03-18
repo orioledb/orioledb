@@ -2156,12 +2156,12 @@ reset_saving_inval_messages(void)
 static OHashFn *
 o_find_hash_fn(Oid hash_fn_oid, Oid datoid)
 {
-	OHashFnKey key = {
+	OHashFnKey	key = {
 		.datoid = datoid,
 		.hash_fn_oid = hash_fn_oid
 	};
-	OHashFn *result;
-	OHashFn hash_fn;
+	OHashFn    *result;
+	OHashFn		hash_fn;
 
 	if ((result = o_find_cached_hash_fn(&key)) != NULL)
 		return result;
@@ -2182,7 +2182,7 @@ o_find_hash_fn(Oid hash_fn_oid, Oid datoid)
 static inline OHashFn *
 o_find_cached_hash_fn(OHashFnKey *key)
 {
-	OHashFn *result;
+	OHashFn    *result;
 	bool		found;
 
 	/* compares with previous search */
@@ -2207,7 +2207,7 @@ o_find_cached_hash_fn(OHashFnKey *key)
 static inline OHashFn *
 o_add_hash_fn_to_cache(OHashFn *hash_fn)
 {
-	OHashFn *cached;
+	OHashFn    *cached;
 
 	cached = hash_search(hashFnCache, &hash_fn->key, HASH_ENTER, NULL);
 	memcpy(cached, hash_fn, sizeof(OHashFn));
