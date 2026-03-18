@@ -273,7 +273,7 @@ hash_final(uint32 hash)
  * Checked with gcc -O2
  */
 static inline uint32
-hash_combine_mix_field(OIndexDescr *idx, TupleDesc tupdesc, 
+hash_combine_mix_field(OIndexDescr *idx, TupleDesc tupdesc,
 					   OTupleFixedFormatSpec *spec,
 					   OTuple tup, int attnum, int field_num, uint32 hash)
 {
@@ -373,7 +373,7 @@ o_hash_key_from_toast_tuple(OIndexDescr *toast, OTuple tuple)
 	natts = toast->nonLeafTupdesc->natts - TOAST_NON_LEAF_FIELDS_NUM;
 	for (attnum = 1; attnum <= natts; attnum++)
 		hash = hash_combine_mix_field(toast, tupdesc, spec, tuple,
-									  attnum, attnum, hash);
+									  attnum, attnum - 1, hash);
 
 	hash = hash_final(hash);
 
@@ -391,8 +391,8 @@ o_hash_key_from_toast_key(OIndexDescr *toast, OTuple key)
 
 	natts = tupdesc->natts - TOAST_NON_LEAF_FIELDS_NUM;
 	for (attnum = 1; attnum <= natts; attnum++)
-		hash = hash_combine_mix_field(toast, tupdesc, spec, key, 
-									  attnum, attnum, hash);
+		hash = hash_combine_mix_field(toast, tupdesc, spec, key,
+									  attnum, attnum - 1, hash);
 
 	hash = hash_final(hash);
 

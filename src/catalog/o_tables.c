@@ -37,6 +37,7 @@
 #include "catalog/pg_collation.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_range.h"
 #include "catalog/pg_tablespace_d.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
@@ -437,7 +438,7 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 	{
 		AttrNumber	attnum = index_rel->rd_index->indkey.values[keyno];
 		OTableIndexField *ix_field;
-		OTableField *exprField;
+		OTableField *exprField = NULL;
 
 		ix_field = &index->fields[keyno];
 		if (AttributeNumberIsValid(attnum))
@@ -556,7 +557,11 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 			if (AttributeNumberIsValid(attnum))
 				typid = o_table->fields[ix_field->attnum].typid;
 			else
+			{
+				Assert(exprField != NULL);
+				Assert(OidIsValid(exprField->typid));
 				typid = exprField->typid;
+			}
 			ix_field->collation = index_rel->rd_indcollation[keyno];
 			ix_field->opclass = indclass->values[keyno];
 
@@ -579,10 +584,49 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 			hash_opfamily = get_opclass_family(hash_opclass);
 			ix_field->hash_fn_oid = get_opfamily_proc(hash_opfamily, hash_input_type, hash_input_type, HASHSTANDARD_PROC);
 
-			o_validate_function_by_oid(ix_field->hash_fn_oid, 
+			o_validate_function_by_oid(ix_field->hash_fn_oid,
 									   " should be used as hash function "
 									   "for type of column used in orioledb index");
 			o_collect_function_by_oid(ix_field->hash_fn_oid, InvalidOid);
+			/* TODO: Move this to something like custom_type_add_if_needed */
+			{
+				Form_pg_type typeform;
+				HeapTuple	tuple = NULL;
+
+				tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
+				Assert(tuple);
+				typeform = (Form_pg_type) GETSTRUCT(tuple);
+				if (typeform->typtype == TYPTYPE_RANGE)
+				{
+					HeapTuple	rangetup;
+					Form_pg_range rangeform;
+					XLogRecPtr	insert_lsn;
+					Oid			rnghashsubopc;
+					Oid			rnghashsubopf;
+					Oid			rnghashsubinput;
+
+					rangetup = SearchSysCache1(RANGETYPE, typid);
+					if (!HeapTupleIsValid(rangetup))
+						elog(ERROR, "cache lookup failed for range (%u)", typid);
+					rangeform = (Form_pg_range) GETSTRUCT(rangetup);
+
+					rnghashsubopc = GetDefaultOpClass(rangeform->rngsubtype, HASH_AM_OID);
+					rnghashsubinput = get_opclass_input_type(rnghashsubopc);
+					rnghashsubopf = get_opclass_family(rnghashsubopc);
+
+					o_sys_cache_set_datoid_lsn(&insert_lsn, NULL);
+					o_opclass_cache_add_if_needed(o_table->oids.datoid,
+												  rnghashsubopc,
+												  insert_lsn, NULL);
+					o_amproc_cache_add_if_needed(o_table->oids.datoid,
+												 rnghashsubopf, rnghashsubinput,
+												 rnghashsubinput, HASHSTANDARD_PROC, insert_lsn,
+												 NULL);
+					ReleaseSysCache(rangetup);
+
+				}
+				ReleaseSysCache(tuple);
+			}
 		}
 		orioledb_save_collation(ix_field->collation);
 	}
