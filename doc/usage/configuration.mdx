@@ -308,4 +308,24 @@ Skip reading of unmodified trees during checkpointing.
 
 Sets maximum value for bridge ctid for its overflow testing.
 
+### `orioledb.replay_until_lsn`
+
+|             |     |
+| ----------- | --- |
+| **Default** | NA  |
+
+Specifies the cutoff LSN at or after which OrioleDB will permanently stop 
+applying its WAL records during recovery. Replay stops when the WAL read 
+position reaches this LSN. `replay_until_lsn` must not be earlier than the LSN 
+of the latest completed OrioleDB checkpoint. Specifying `replay_until_lsn` 
+earlier than the LSN of the latest completed OrioleDB checkpoint will have no 
+effect (a warning will be logged at next startup).
+
+:::warning[Data consistency]
+This is a last-resort disaster recovery mechanism strictly comparable to 
+`pg_resetwal`. It intentionally induces a split-brain state: PostgreSQL core 
+catalogs and standard heap tables will continue replaying WAL, while OrioleDB 
+tables remain at the specified LSN.
+:::
+
 [Additional GUC's for experimental s3 mode](decoupled-storage.mdx)

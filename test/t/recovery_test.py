@@ -2214,6 +2214,85 @@ class RecoveryTest(BaseTest):
 
 		node.stop()
 
+	def test_recovery_replay_until_lsn(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql("CREATE TABLE IF NOT EXISTS o(b text) USING orioledb;")
+
+		# Execute initial batches of inserts (1000 rows total)
+		# Some acquire xact_id to become joint_commits
+		node.safe_psql("""
+			BEGIN;
+			SELECT pg_current_xact_id();
+			INSERT INTO o(b) SELECT md5(random()::text) FROM generate_series(1, 100);
+			COMMIT;
+
+			INSERT INTO o(b) SELECT md5(random()::text) FROM generate_series(1, 100);
+			INSERT INTO o(b) SELECT md5(random()::text) FROM generate_series(1, 100);
+
+			BEGIN;
+			SELECT pg_current_xact_id();
+			INSERT INTO o(b) SELECT md5(random()::text) FROM generate_series(1, 100);
+			COMMIT;
+
+			INSERT INTO o(b) SELECT md5(random()::text) FROM generate_series(1, 100);
+			INSERT INTO o(b) SELECT md5(random()::text) FROM generate_series(1, 100);
+			INSERT INTO o(b) SELECT md5(random()::text) FROM generate_series(1, 100);
+
+			BEGIN;
+			SELECT pg_current_xact_id();
+			INSERT INTO o(b) SELECT md5(random()::text) FROM generate_series(1, 100);
+			COMMIT;
+
+			INSERT INTO o(b) SELECT md5(random()::text) FROM generate_series(1, 100);
+			INSERT INTO o(b) SELECT md5(random()::text) FROM generate_series(1, 100);
+		""")
+
+		# Capture the exact state and LSN threshold
+		res = node.execute("SELECT count(*), pg_current_wal_lsn() FROM o;")
+		expected_count = res[0][0]
+		replay_until_lsn = res[0][1]
+
+		# Execute subsequent batches (500 rows total)
+		node.safe_psql("""
+			INSERT INTO o(b) SELECT md5(random()::text) FROM generate_series(1, 100);
+			INSERT INTO o(b) SELECT md5(random()::text) FROM generate_series(1, 100);
+
+			BEGIN;
+			SELECT pg_current_xact_id();
+			INSERT INTO o(b) SELECT md5(random()::text) FROM generate_series(1, 100);
+			COMMIT;
+
+			INSERT INTO o(b) SELECT md5(random()::text) FROM generate_series(1, 100);
+
+			BEGIN;
+			SELECT pg_current_xact_id();
+			INSERT INTO o(b) SELECT md5(random()::text) FROM generate_series(1, 100);
+			COMMIT;
+		""")
+
+		# Apply the threshold GUC. ALTER SYSTEM writes to postgresql.auto.conf,
+		# which is applied during the subsequent crash recovery startup.
+		node.safe_psql(
+		    f"ALTER SYSTEM SET orioledb.replay_until_lsn = '{replay_until_lsn}';"
+		)
+
+		# Send SIGQUIT to trigger crash recovery on next start
+		node.stop(['-m', 'immediate'])
+
+		# Start the node (Crash recovery evaluates the GUC and halts OrioleDB replay)
+		node.start()
+
+		# Verify OrioleDB correctly ignored the final 500 rows
+		actual_count = node.execute("SELECT count(*) FROM o;")[0][0]
+		self.assertEqual(expected_count, actual_count)
+
+		node.safe_psql("ALTER SYSTEM RESET orioledb.replay_until_lsn;")
+
+		node.stop()
+
 
 class RecoveryWithArchivingTest(BaseTest):
 

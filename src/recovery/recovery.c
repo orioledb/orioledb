@@ -777,6 +777,62 @@ orioledb_redo(XLogReaderState *record)
 	Assert((XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_CONTAINER);
 	recovery_single = *recovery_single_process;
 
+	if (unlikely(XLogRecPtrIsValid(replay_until_lsn)))
+	{
+		/* Scoped to the lifetime of the Startup process. */
+		static bool needs_init = true;
+		static bool is_stop_lsn_active = true;
+		static bool skip_all_future_records = false;
+
+		/* Short circuit: once the flag is set no further work is required */
+		if (skip_all_future_records)
+		{
+			elog(DEBUG4, "OrioleDB recovery skips WAL container [%X/%X-%X/%X]",
+				 LSN_FORMAT_ARGS(record->ReadRecPtr),
+				 LSN_FORMAT_ARGS(record->ReadRecPtr + msg_len));
+			return;
+		}
+
+		/* On the first pass we perform all the necessary sanity checks */
+		if (unlikely(needs_init))
+		{
+			needs_init = false;
+
+			if (replay_until_lsn <= checkpoint_state->replayStartPtr)
+			{
+				is_stop_lsn_active = false;
+				ereport(WARNING,
+						(errmsg("value for orioledb.replay_until_lsn (%X/%X) "
+								"is in the past",
+								LSN_FORMAT_ARGS(replay_until_lsn)),
+						 errdetail("The last checkpoint redo LSN is %X/%X. The "
+								   "orioledb.replay_until_lsn setting will be "
+								   "ignored.",
+								   LSN_FORMAT_ARGS(checkpoint_state->replayStartPtr)),
+						 errhint("Unset the orioledb.replay_until_lsn "
+								 "parameter to prevent this warning.")));
+			}
+		}
+
+		if (unlikely(is_stop_lsn_active &&
+					 record->ReadRecPtr >= replay_until_lsn))
+		{
+			ereport(WARNING,
+					(errmsg("OrioleDB recovery has reached LSN %X/%X. "
+							"All future OrioleDB transactions will not be "
+							"replayed",
+							LSN_FORMAT_ARGS(record->ReadRecPtr)),
+					 errdetail("orioledb.replay_until_lsn is %X/%X",
+							   LSN_FORMAT_ARGS(replay_until_lsn)),
+					 errhint("Unset the orioledb.replay_until_lsn parameter to"
+							 " prevent warnings on subsequent startups.")));
+			skip_all_future_records = true;
+			return;
+		}
+
+	}
+
+
 	if (record->ReadRecPtr >= checkpoint_state->controlToastConsistentPtr && !toast_consistent)
 	{
 		toast_consistent = true;
@@ -3250,6 +3306,10 @@ replay_wal_record(void *vctx, WalRecord *rec)
 
 				recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
 											 xlogPtr, -1, sync);
+				elog(DEBUG1, "OrioleDB recovery %s transaction with oxid=%lu. "
+					 "Next WAL record starts at LSN %X/%X",
+					 commit ? "committed" : "aborted", rec->oxid,
+					 LSN_FORMAT_ARGS(ctx->xlogRecEndPtr));
 				rec->oxid = InvalidOXid;
 
 				break;
@@ -3257,6 +3317,11 @@ replay_wal_record(void *vctx, WalRecord *rec)
 
 		case WAL_REC_JOINT_COMMIT:
 			cur_recovery_xid_state->xid = rec->u.joint_commit.xid;
+			elog(DEBUG1, "OrioleDB recovery committed transaction (xid, oxid)="
+				 "(%u, %lu). Next WAL record starts at LSN %X/%X",
+				 cur_recovery_xid_state->xid, rec->oxid,
+				 LSN_FORMAT_ARGS(ctx->xlogRecEndPtr));
+
 			recovery_xmin = Max(recovery_xmin, rec->u.joint_commit.xmin);
 			if (!cur_recovery_xid_state->in_joint_commit_list)
 			{

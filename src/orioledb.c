@@ -71,6 +71,7 @@
 #include "storage/lwlock.h"
 #include "storage/proclist.h"
 #include "utils/builtins.h"
+#include "utils/pg_lsn.h"
 #include "utils/inval.h"
 #include "utils/rangetypes.h"
 #include "utils/pg_locale.h"
@@ -151,6 +152,8 @@ int			rewind_max_time = 0;
 int			rewind_max_transactions = 0;
 int			logical_xid_buffers_guc = 64;
 bool		orioledb_strict_mode = false;
+XLogRecPtr	replay_until_lsn = InvalidXLogRecPtr;
+char	   *replay_until_lsn_string;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -403,6 +406,37 @@ orioledb_enable_rewind_check_hook(bool *newval, void **extra, GucSource source)
 #endif
 	/* Supported system or newval == false */
 	return true;
+}
+
+
+/*
+ * GUC check_hook for orioledb.replay_until_lsn
+ */
+static bool
+orioledb_replay_until_lsn_check_hook(char **newval, void **extra, GucSource source)
+{
+	if (strcmp(*newval, "") != 0)
+	{
+		XLogRecPtr	lsn;
+		XLogRecPtr *myextra;
+		bool		have_error = false;
+
+		lsn = pg_lsn_in_internal(*newval, &have_error);
+		if (have_error)
+			return false;
+
+		myextra = (XLogRecPtr *) guc_malloc(ERROR, sizeof(XLogRecPtr));
+		*myextra = lsn;
+		*extra = (void *) myextra;
+	}
+	return true;
+}
+
+static void
+orioledb_replay_until_lsn_assign_hook(const char *newval, void *extra)
+{
+	if (newval && strcmp(newval, "") != 0)
+		replay_until_lsn = *((XLogRecPtr *) extra);
 }
 
 void
@@ -1001,6 +1035,18 @@ _PG_init(void)
 							 NULL,
 							 NULL,
 							 NULL);
+
+	DefineCustomStringVariable("orioledb.replay_until_lsn",
+							   "Sets the LSN of the write-ahead log location up"
+							   " to which OrioleDB recovery will proceed.",
+							   "Danger: use only as a last resort",
+							   &replay_until_lsn_string,
+							   "",
+							   PGC_POSTMASTER,
+							   0,
+							   orioledb_replay_until_lsn_check_hook,
+							   orioledb_replay_until_lsn_assign_hook,
+							   NULL);
 
 	if (orioledb_s3_mode)
 	{
