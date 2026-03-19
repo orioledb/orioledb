@@ -82,3 +82,56 @@ This message indicates that the child page has been processed, and the parent ne
 ### WalkContinue
 
 This message has no parameters. It just indicates that checkpointer must continue processing the same page with the same `next downlink`. That happens when the checkpointer has to wait for the concurrent operation. Such as meeting IO in-process downlink and having to release the log and wait till the IO is finished.
+
+## Sequential buffers
+
+### What are sequential buffers?
+
+Sequential buffers (*seq bufs*) are lightweight, file-backed streaming I/O abstractions used by the checkpointer and by ordinary backends that write B-tree pages.  Instead of holding all checkpoint metadata in shared memory, seq bufs stream data to and from on-disk files using two in-memory OrioleDB pages as a double-buffer.  While one page is being filled (or drained) by the caller, the other can be flushed to disk or pre-fetched in the background, giving sequential throughput without occupying large amounts of shared memory.
+
+Each seq buf is identified by a `SeqBufTag` – a `(datoid, relnode, checkpointNumber, type)` tuple.  The `type` field distinguishes the two kinds of files:
+
+- **`'m'` (map file)** – the checkpoint map that records on-disk page locations.
+- **`'t'` (temporary file)** – the temporary tracking file used during the checkpoint walk.
+
+The in-memory state that must be shared between the checkpointer and writer backends lives in `SeqBufDescShared`, which is embedded directly in the B-tree meta page (`BTreeMetaPage`).  Per-backend state such as the open file descriptor lives in `SeqBufDescPrivate`, which is stored in the tree descriptor (`BTreeDescr`) and is private to each backend.
+
+### Why are sequential buffers used?
+
+Each checkpointable B-tree keeps three groups of seq bufs:
+
+1. **`freeBuf`** – On entry to a new checkpoint the checkpointer opens this buffer to *read* the list of free disk extents recorded by the *previous* checkpoint.  As the current checkpoint writes pages it can reuse those extents, avoiding unnecessary file growth.  There is exactly one `freeBuf` per tree (no dual array) because it is replaced atomically at the start of each checkpoint: the new file is put in place before the old one is removed.
+
+2. **`nextChkp[2]`** – The checkpointer opens one of these two slots to *write* the checkpoint map file for the current checkpoint.  Every time a B-tree page is flushed to disk, its location is appended to the map.  The next checkpoint will read this map via a `freeBuf` so that it knows where each page lives without having to walk the whole tree again.
+
+3. **`tmpBuf[2]`** – The checkpointer opens one of these two slots to *write* a temporary file that tracks every page written during the checkpoint walk.  After the walk finishes, this file is sorted, duplicates are removed, and it drives the hole-punching pass that reclaims unused space inside the data file.  The file is deleted once the checkpoint is complete.
+
+### Why are there two slots (the `[2]` arrays)?
+
+OrioleDB checkpoints run concurrently with normal DML.  To avoid serialising checkpoint N against the initialisation of checkpoint N+1, each of the arrays (`nextChkp`, `tmpBuf`, `datafileLength`, `partsInfo`) is indexed by `checkpointNumber % 2`.
+
+At any moment exactly one slot is "active" – the slot currently being written by the in-progress checkpoint – while the other slot either still holds data from the previous checkpoint (needed for recovery until the new checkpoint is verified) or is idle.
+
+```
+Checkpoint N   → uses slot  N % 2
+Checkpoint N+1 → uses slot (N+1) % 2   (the other slot)
+```
+
+This ping-pong scheme means checkpoint N+1 can begin allocating pages and initialising its seq buf files while checkpoint N is still finalising, without any shared state collision.
+
+The two dirty flags on the meta page (`dirtyFlag1`, `dirtyFlag2`) support the same scheme.  `dirtyFlag1` is cleared at the start of the checkpoint.  `dirtyFlag2` provides an extra generation so that a modification racing the clear of `dirtyFlag1` is never silently lost.  If both flags are false when the checkpointer is about to start processing a tree, the tree has not changed since the last checkpoint; the freshly initialised seq buf files are closed and removed immediately without writing any data.
+
+### When are sequential buffers removed?
+
+Seq buf **in-memory pages** are returned to the page pool as soon as the buffer is finalised.  This happens in one of the following situations:
+
+- **Checkpoint completes successfully** – `tmpBuf` pages are freed after post-processing; `nextChkp` pages are freed after the map file header is written and the file is renamed.
+- **Tree descriptor is evicted** – when a tree descriptor is reclaimed from the descriptor cache, `btree_finalize_private_seq_bufs()` flushes and frees all in-memory pages belonging to that descriptor's active seq bufs.
+- **Tree is dropped** – `checkpointable_tree_free()` closes all seq buf file descriptors, freeing the OS resources.
+
+Seq buf **on-disk files** have a longer lifetime than the in-memory pages:
+
+- The **tmp file** (`'t'`) is deleted once the checkpoint that created it has finished post-processing.
+- The **map file** (`'m'`) from checkpoint N is kept until checkpoint N+1 has been completed and its own map file is in place.  This ensures that point-in-time recovery can always find the latest clean checkpoint.
+- The **free-extent file** is replaced atomically: the new file is written and renamed into place before the old one is unlinked.
+- If a tree was **not modified** between two checkpoints (both dirty flags are false), the seq buf files initialised for that checkpoint are closed immediately and removed without writing any data.

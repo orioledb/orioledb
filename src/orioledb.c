@@ -234,6 +234,7 @@ static bool check_debug_max_bridge_ctid(char **newval, void **extra, GucSource s
 static void assign_debug_max_bridge_ctid(const char *newval, void *extra);
 
 PG_FUNCTION_INFO_V1(orioledb_page_stats);
+PG_FUNCTION_INFO_V1(orioledb_print_pool_pages);
 PG_FUNCTION_INFO_V1(orioledb_version);
 PG_FUNCTION_INFO_V1(orioledb_commit_hash);
 PG_FUNCTION_INFO_V1(orioledb_ucm_check);
@@ -1693,6 +1694,149 @@ orioledb_page_stats(PG_FUNCTION_ARGS)
 		values[2] = Int64GetDatum(num_free_pages);
 		values[3] = Int64GetDatum((int64) ppool_dirty_pages_count(&page_pools[i]));
 		values[4] = Int64GetDatum(total_num_pages);
+		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+	}
+
+	return (Datum) 0;
+}
+
+Datum
+orioledb_print_pool_pages(PG_FUNCTION_ARGS)
+{
+	OInMemoryBlkno blkno,
+				start_blkno,
+				end_blkno;
+	Datum		values[7];
+	bool		nulls[7];
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	TupleDesc	tupdesc;
+	Tuplestorestate *tupstore;
+	MemoryContext per_query_ctx;
+	MemoryContext oldcontext;
+	int32		ppool_arg = OPagePoolMain;
+	OPagePoolType ppool_type;
+
+	/* optional first argument: page pool type (int) */
+	if (PG_NARGS() > 0 && !PG_ARGISNULL(0))
+		ppool_arg = PG_GETARG_INT32(0);
+
+	if (ppool_arg < 0 || ppool_arg >= OPagePoolTypesCount)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("invalid page pool type: %d", ppool_arg)));
+
+	ppool_type = (OPagePoolType) ppool_arg;
+
+	orioledb_check_shmem();
+
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	/* Build a tuple descriptor for our result type */
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	MemoryContextSwitchTo(oldcontext);
+
+	/* compute start and end blkno for requested pool */
+	switch (ppool_type)
+	{
+		case OPagePoolFreeTree:
+			start_blkno = 0;
+			end_blkno = page_pools[OPagePoolFreeTree].size;
+			break;
+		case OPagePoolCatalog:
+			start_blkno = (OInMemoryBlkno) free_tree_buffers_count;
+			end_blkno = start_blkno + page_pools[OPagePoolCatalog].size;
+			break;
+		case OPagePoolMain:
+			start_blkno = (OInMemoryBlkno) main_buffers_offset;
+			end_blkno = start_blkno + page_pools[OPagePoolMain].size;
+			break;
+		default:
+			/* defensive fallback */
+			start_blkno = 0;
+			end_blkno = 0;
+			break;
+	}
+
+	for (blkno = start_blkno; blkno < end_blkno; blkno++)
+	{
+		OrioleDBPageDesc *page_desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
+		OrioleDBPageHeader *header = (OrioleDBPageHeader *) O_GET_IN_MEMORY_PAGE(blkno);
+		uint64		state;
+
+		MemSet(nulls, 0, sizeof(nulls));
+
+		values[0] = Int64GetDatum(blkno);
+		if (IS_SYS_TREE_OIDS(page_desc->oids))
+		{
+			values[1] = PointerGetDatum(cstring_to_text("sys tree"));
+		}
+		else if (ORelOidsIsValid(page_desc->oids))
+		{
+			Relation	rel = try_relation_open(page_desc->oids.reloid, AccessShareLock);
+
+			if (rel)
+			{
+				char	   *relname = RelationGetRelationName(rel);
+
+				values[1] = PointerGetDatum(cstring_to_text(relname));
+				relation_close(rel, AccessShareLock);
+			}
+			else
+			{
+				values[1] = PointerGetDatum(cstring_to_text("unknown"));
+			}
+		}
+		else if (page_desc->type == oIndexInvalid)
+		{
+			values[1] = PointerGetDatum(cstring_to_text("seq buffer"));
+		}
+		else
+		{
+			values[1] = PointerGetDatum(cstring_to_text("unknown"));
+		}
+		values[2] = Int64GetDatum(page_desc->oids.datoid);
+		values[3] = Int64GetDatum(page_desc->oids.reloid);
+		values[4] = Int64GetDatum(page_desc->oids.relnode);
+
+		switch (page_desc->type)
+		{
+			case oIndexInvalid:
+				values[5] = PointerGetDatum(cstring_to_text("invalid"));
+				break;
+			case oIndexToast:
+				values[5] = PointerGetDatum(cstring_to_text("toast"));
+				break;
+			case oIndexPrimary:
+				values[5] = PointerGetDatum(cstring_to_text("primary"));
+				break;
+			case oIndexUnique:
+				values[5] = PointerGetDatum(cstring_to_text("unique"));
+				break;
+			case oIndexRegular:
+				values[5] = PointerGetDatum(cstring_to_text("regular"));
+				break;
+			case oIndexBridge:
+				values[5] = PointerGetDatum(cstring_to_text("bridge"));
+				break;
+			case oIndexExclusion:
+				values[5] = PointerGetDatum(cstring_to_text("exclusion"));
+				break;
+			default:
+				values[5] = PointerGetDatum(cstring_to_text("unknown"));
+				break;
+		}
+
+		state = pg_atomic_read_u64(&header->state);
+		values[6] = Int64GetDatum(O_PAGE_STATE_GET_USAGE_COUNT(state));
+
 		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
 	}
 

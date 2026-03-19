@@ -304,8 +304,15 @@ btree_open_smgr_file(BTreeDescr *desc, uint32 num, uint32 chkpNum,
 		{
 			int			i = desc->smgr.array.filesAllocated;
 
+			/*
+			 * btree_open_smgr should have been called before, so
+			 * filesAllocated should be greater than 0
+			 */
+			Assert(desc->smgr.array.filesAllocated > 0);
+
 			while (num >= desc->smgr.array.filesAllocated)
 				desc->smgr.array.filesAllocated *= 2;
+
 			desc->smgr.array.files = (File *) repalloc(desc->smgr.array.files,
 													   sizeof(File) * desc->smgr.array.filesAllocated);
 			for (; i < desc->smgr.array.filesAllocated; i++)
@@ -2327,7 +2334,7 @@ btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data,
 
 		evicted_data->tmpBuf.tag = desc->tmpBuf[chkp_index].shared->tag;
 		if (notModified)
-			seq_buf_close_file(&desc->nextChkp[chkp_index]);
+			seq_buf_close_file(&desc->tmpBuf[chkp_index]);
 		else
 			evicted_data->tmpBuf.offset = seq_buf_finalize(&desc->tmpBuf[chkp_index]);
 		FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[0]);
@@ -2548,6 +2555,13 @@ get_evict_btree_locks(OInMemoryBlkno blkno, ORelOids oids, OIndexType type,
 	id = (OIndexDescr *) desc->arg;
 	state->tableOids = id->tableOids;
 
+	/*
+	 * if primary index is ctid, then we don't need to lock the table, because
+	 * ctid is the table itself
+	 */
+	if (id->primaryIsCtid)
+		return desc;
+
 	if (!recovery && !(state->tableRegularLock = o_tables_rel_try_lock_extended(&state->tableOids, AccessExclusiveLock, &nested, false)))
 		return NULL;
 
@@ -2584,6 +2598,9 @@ release_evict_btree_locks(ORelOids oids, EvictBtreeLocksState *state)
 
 /*
  * Examine single page and evict it if possible.
+ *
+ * Note that here we skip seq buf pages, as we will evict them together with the
+ * tree in evict_btree() when we evict the root page.
  */
 OWalkPageResult
 walk_page(OInMemoryBlkno blkno, bool evict)

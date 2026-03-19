@@ -181,6 +181,26 @@ struct BTreeDescr
 	uint8		fillfactor;
 	UndoLogType undoType;
 	BTreeStorageType storageType;
+
+	/*
+	 * Per-backend private seq buf descriptors.  The corresponding shared
+	 * state lives in the BTreeMetaPage (freeBuf, nextChkp[], tmpBuf[]).
+	 *
+	 * freeBuf       – reads the free-extent file produced by the previous
+	 * checkpoint so that the current checkpoint can reuse those disk
+	 * locations.
+	 *
+	 * nextChkp[2]   – writes the checkpoint map file for the current
+	 * checkpoint.  Indexed by (checkpointNumber % 2) so that two consecutive
+	 * checkpoints use different slots and can coexist without interference.
+	 * Only one slot is active at any time; the other is uninitialised or
+	 * belongs to the previous (already completed) checkpoint.
+	 *
+	 * tmpBuf[2]     – writes the temporary file used during the current
+	 * checkpoint walk to track dirty and newly placed pages. Also indexed by
+	 * (checkpointNumber % 2).  The file is consumed during post-processing
+	 * (sort + hole-punch) and removed once the checkpoint is complete.
+	 */
 	SeqBufDescPrivate freeBuf;
 	SeqBufDescPrivate nextChkp[2];
 	SeqBufDescPrivate tmpBuf[2];

@@ -22,3 +22,8 @@ CREATE FUNCTION orioledb_undo_size(OUT undo_type text, OUT undo_size int8)
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_print_pool_pages(ppool_arg integer DEFAULT NULL, OUT block_num int8, OUT name TEXT, OUT datoid int8, OUT reloid int8, OUT relnode int8, OUT type TEXT, OUT state int8)
+RETURNS SETOF record
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
