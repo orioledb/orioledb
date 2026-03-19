@@ -1540,7 +1540,7 @@ checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 				 errmsg("could not init a new sequence buffer file %s: %m",
 						get_seq_buf_filename(&next_tmp_tag))));
 
-	if (descr->storageType != BTreeStoragePersistence)
+	if (descr->storageType == BTreeStorageTemporary)
 		return;
 
 	init_seq_buf_pages(descr, &meta_page->nextChkp[next_chkp_index]);
@@ -5040,8 +5040,8 @@ init_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared)
 	Assert(!OInMemoryBlknoIsValid(shared->pages[0]));
 	Assert(!OInMemoryBlknoIsValid(shared->pages[1]));
 
-	shared->pages[0] = ppool_get_page(desc->ppool, PPOOL_RESERVE_META);;
-	shared->pages[1] = ppool_get_page(desc->ppool, PPOOL_RESERVE_META);;
+	shared->pages[0] = ppool_get_page(desc->ppool, PPOOL_RESERVE_META);
+	shared->pages[1] = ppool_get_page(desc->ppool, PPOOL_RESERVE_META);
 
 	Assert(OInMemoryBlknoIsValid(shared->pages[0]));
 	Assert(OInMemoryBlknoIsValid(shared->pages[1]));

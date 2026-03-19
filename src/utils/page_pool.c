@@ -92,19 +92,16 @@ ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found)
 void
 ppool_reserve_pages(OPagePool *pool, int kind, int count)
 {
-	uint64		val;
-
 	Assert(!have_locked_pages());
 
 	count -= pool->numPagesReserved[kind];
 	if (count <= 0)
 		return;
 
-	val = pg_atomic_sub_fetch_u64(pool->availablePagesCount, count);
-	while (val & (UINT64CONST(1) << 63))
+	while (pg_atomic_sub_fetch_u64(pool->availablePagesCount, count) & (UINT64CONST(1) << 63))
 	{
+		pg_atomic_add_fetch_u64(pool->availablePagesCount, count);
 		ppool_run_clock(pool, true, NULL);
-		val = pg_atomic_read_u64(pool->availablePagesCount);
 	}
 
 	pool->numPagesReserved[kind] += count;
