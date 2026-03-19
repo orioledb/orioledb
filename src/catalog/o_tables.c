@@ -21,11 +21,14 @@
 #include "catalog/o_indices.h"
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
+#include "catalog/pg_amop.h"
+#include "postgres_ext.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
 #include "tableam/operations.h"
 #include "transam/oxid.h"
 #include "tuple/toast.h"
+#include "utils/elog.h"
 #include "utils/planner.h"
 
 #include "access/hash.h"
@@ -359,6 +362,33 @@ o_deparse_expression(char *expr_str, Oid relid)
 	return TextDatumGetCString(expr);
 }
 
+/*
+ * Find a hash function for the type given its btree opclass.  Looks up the
+ * equality operator of the btree opclass, then searches for a hash opclass
+ * that uses the same equality operator, and returns the hash procedure from
+ * that hash opclass.  Returns InvalidOid if no matching hash procedure exists.
+ */
+static Oid
+get_hash_proc_by_btree_opclass(Oid btreeOpclass)
+{
+	Oid			btreeOpfamily;
+	Oid			inputType;
+	Oid			equalOp;
+	RegProcedure result;
+
+	btreeOpfamily = get_opclass_family(btreeOpclass);
+	inputType = get_opclass_input_type(btreeOpclass);
+	Assert(OidIsValid(btreeOpfamily));
+	equalOp = get_opfamily_member(btreeOpfamily, inputType, inputType, BTEqualStrategyNumber);
+	if (!OidIsValid(equalOp))
+		return InvalidOid;
+
+	if (get_op_hash_functions(equalOp, &result, NULL))
+		return result;
+	else
+		return InvalidOid;
+}
+
 void
 o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 {
@@ -550,9 +580,6 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 		{
 			int16		opt = index_rel->rd_indoption[keyno];
 			Oid			typid;
-			Oid			hash_opclass;
-			Oid			hash_input_type;
-			Oid			hash_opfamily;
 
 			if (AttributeNumberIsValid(attnum))
 				typid = o_table->fields[ix_field->attnum].typid;
@@ -577,13 +604,11 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 			{
 				ix_field->nullsOrdering = SORTBY_NULLS_FIRST;
 			}
-			hash_opclass = GetDefaultOpClass(typid, HASH_AM_OID);
-			if (OidIsValid(hash_opclass))
-			{
-				hash_input_type = get_opclass_input_type(hash_opclass);
-				hash_opfamily = get_opclass_family(hash_opclass);
-				ix_field->hash_fn_oid = get_opfamily_proc(hash_opfamily, hash_input_type, hash_input_type, HASHSTANDARD_PROC);
 
+			ix_field->hash_fn_oid = get_hash_proc_by_btree_opclass(ix_field->opclass);
+
+			if (OidIsValid(ix_field->hash_fn_oid))
+			{
 				o_validate_function_by_oid(ix_field->hash_fn_oid,
 										   " should be used as hash function "
 										   "for type of column used in orioledb index");
@@ -631,7 +656,9 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 			else
 			{
 				ix_field->hash_fn_oid = O_DEFAULT_HASH_FN_OID;
-				elog(WARNING, "recovery of orioledb indices on fields without default hash opclass could be slower because of using single worker");
+				ereport(WARNING,
+						(errmsg("failed to fetch the hash function for btree opclass%s", generate_opclass_name(ix_field->opclass)),
+						 errdetail("Recovery might be slow due to inability to distribute values among the workers.")));
 			}
 		}
 		orioledb_save_collation(ix_field->collation);
