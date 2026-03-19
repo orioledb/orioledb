@@ -578,54 +578,60 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 				ix_field->nullsOrdering = SORTBY_NULLS_FIRST;
 			}
 			hash_opclass = GetDefaultOpClass(typid, HASH_AM_OID);
-			if (!OidIsValid(hash_opclass))
-				elog(ERROR, "columns of orioledb tables should have default hash access method");
-			hash_input_type = get_opclass_input_type(hash_opclass);
-			hash_opfamily = get_opclass_family(hash_opclass);
-			ix_field->hash_fn_oid = get_opfamily_proc(hash_opfamily, hash_input_type, hash_input_type, HASHSTANDARD_PROC);
-
-			o_validate_function_by_oid(ix_field->hash_fn_oid,
-									   " should be used as hash function "
-									   "for type of column used in orioledb index");
-			o_collect_function_by_oid(ix_field->hash_fn_oid, InvalidOid);
-			/* TODO: Move this to something like custom_type_add_if_needed */
+			if (OidIsValid(hash_opclass))
 			{
-				Form_pg_type typeform;
-				HeapTuple	tuple = NULL;
+				hash_input_type = get_opclass_input_type(hash_opclass);
+				hash_opfamily = get_opclass_family(hash_opclass);
+				ix_field->hash_fn_oid = get_opfamily_proc(hash_opfamily, hash_input_type, hash_input_type, HASHSTANDARD_PROC);
 
-				tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
-				Assert(tuple);
-				typeform = (Form_pg_type) GETSTRUCT(tuple);
-				if (typeform->typtype == TYPTYPE_RANGE)
+				o_validate_function_by_oid(ix_field->hash_fn_oid,
+										   " should be used as hash function "
+										   "for type of column used in orioledb index");
+				o_collect_function_by_oid(ix_field->hash_fn_oid, InvalidOid);
+				/* TODO: Move this to something like custom_type_add_if_needed */
 				{
-					HeapTuple	rangetup;
-					Form_pg_range rangeform;
-					XLogRecPtr	insert_lsn;
-					Oid			rnghashsubopc;
-					Oid			rnghashsubopf;
-					Oid			rnghashsubinput;
+					Form_pg_type typeform;
+					HeapTuple	tuple = NULL;
 
-					rangetup = SearchSysCache1(RANGETYPE, typid);
-					if (!HeapTupleIsValid(rangetup))
-						elog(ERROR, "cache lookup failed for range (%u)", typid);
-					rangeform = (Form_pg_range) GETSTRUCT(rangetup);
+					tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
+					Assert(tuple);
+					typeform = (Form_pg_type) GETSTRUCT(tuple);
+					if (typeform->typtype == TYPTYPE_RANGE)
+					{
+						HeapTuple	rangetup;
+						Form_pg_range rangeform;
+						XLogRecPtr	insert_lsn;
+						Oid			rnghashsubopc;
+						Oid			rnghashsubopf;
+						Oid			rnghashsubinput;
 
-					rnghashsubopc = GetDefaultOpClass(rangeform->rngsubtype, HASH_AM_OID);
-					rnghashsubinput = get_opclass_input_type(rnghashsubopc);
-					rnghashsubopf = get_opclass_family(rnghashsubopc);
+						rangetup = SearchSysCache1(RANGETYPE, typid);
+						if (!HeapTupleIsValid(rangetup))
+							elog(ERROR, "cache lookup failed for range (%u)", typid);
+						rangeform = (Form_pg_range) GETSTRUCT(rangetup);
 
-					o_sys_cache_set_datoid_lsn(&insert_lsn, NULL);
-					o_opclass_cache_add_if_needed(o_table->oids.datoid,
-												  rnghashsubopc,
-												  insert_lsn, NULL);
-					o_amproc_cache_add_if_needed(o_table->oids.datoid,
-												 rnghashsubopf, rnghashsubinput,
-												 rnghashsubinput, HASHSTANDARD_PROC, insert_lsn,
-												 NULL);
-					ReleaseSysCache(rangetup);
+						rnghashsubopc = GetDefaultOpClass(rangeform->rngsubtype, HASH_AM_OID);
+						rnghashsubinput = get_opclass_input_type(rnghashsubopc);
+						rnghashsubopf = get_opclass_family(rnghashsubopc);
 
+						o_sys_cache_set_datoid_lsn(&insert_lsn, NULL);
+						o_opclass_cache_add_if_needed(o_table->oids.datoid,
+													  rnghashsubopc,
+													  insert_lsn, NULL);
+						o_amproc_cache_add_if_needed(o_table->oids.datoid,
+													 rnghashsubopf, rnghashsubinput,
+													 rnghashsubinput, HASHSTANDARD_PROC, insert_lsn,
+													 NULL);
+						ReleaseSysCache(rangetup);
+
+					}
+					ReleaseSysCache(tuple);
 				}
-				ReleaseSysCache(tuple);
+			}
+			else
+			{
+				ix_field->hash_fn_oid = O_DEFAULT_HASH_FN_OID;
+				elog(WARNING, "recovery of orioledb indices on fields without default hash opclass could be slower because of using single worker");
 			}
 		}
 		orioledb_save_collation(ix_field->collation);
