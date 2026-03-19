@@ -18,6 +18,7 @@
 #include "btree/io.h"
 #include "btree/iterator.h"
 #include "btree/modify.h"
+#include "btree/page_state.h"
 #include "checkpoint/checkpoint.h"
 #include "catalog/free_extents.h"
 #include "catalog/o_indices.h"
@@ -44,6 +45,7 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/syscache.h"
+#include "nodes/pg_list.h"
 #include "pgstat.h"
 
 typedef struct
@@ -68,10 +70,26 @@ static void recreate_index_descr(OIndexDescr *descr);
 static OExclusionFn *o_find_exclusion_op_fn(Oid exclusion_op);
 static inline OExclusionFn *o_find_cached_exclusion_fn(Oid exclusion_op);
 static inline OExclusionFn *o_add_exclusion_fn_to_cache(OExclusionFn *exclusion_fn);
+static void o_invalidate_descrs_internal(Oid datoid, Oid reloid, Oid relfilenode);
 
 PG_FUNCTION_INFO_V1(orioledb_get_table_descrs);
 PG_FUNCTION_INFO_V1(orioledb_get_index_descrs);
 PG_FUNCTION_INFO_V1(orioledb_get_evicted_trees);
+
+
+typedef struct DeferredDescrInvalidation
+{
+	Oid			datoid;
+	Oid			reloid;
+	Oid			relfilenode;
+} DeferredDescrInvalidation;
+
+/*
+ * Backend-local queue of deferred invalidations (single-threaded backend, so
+ * no additional synchronization is needed).
+ */
+static List *deferred_descr_invals = NIL;
+
 
 struct OComparatorKey
 {
@@ -936,7 +954,81 @@ init_shared_root_info(OPagePool *pool, SharedRootInfo *sharedRootInfo)
 }
 
 void
+orioledb_deferred_inval_message_hook(void)
+{
+	/* call prev hook if any */
+	if (prev_ReceiveCustomInvalMessage_hook)
+		prev_ReceiveCustomInvalMessage_hook();
+
+	/* Can't safely process invalidations while holding locks, so defer it. */
+	if (have_locked_pages())
+		return;
+	
+	/* Process any previously deferred invalidations first. */
+	if (deferred_descr_invals != NIL)
+	{
+		ListCell   *lc;
+
+		for (lc = list_head(deferred_descr_invals); lc != NULL; lc = lnext(deferred_descr_invals, lc))
+		{
+			DeferredDescrInvalidation *pending_inval;
+
+			pending_inval = (DeferredDescrInvalidation *) lfirst(lc);
+			o_invalidate_descrs_internal(pending_inval->datoid,
+										 pending_inval->reloid,
+										 pending_inval->relfilenode);
+			pfree(pending_inval);
+		}
+
+		list_free(deferred_descr_invals);
+		deferred_descr_invals = NIL;
+	}
+}
+
+void
 o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode)
+{
+	DeferredDescrInvalidation *deferred;
+	MemoryContext oldcontext;
+
+	/*
+	 * If we currently hold page locks, recreating descriptors may attempt to
+	 * read sys-tree pages and violate lock invariants.  Defer processing to
+	 * the next invalidation callback when locks are released.
+	 */
+	if (have_locked_pages())
+	{
+		oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+		deferred = palloc(sizeof(DeferredDescrInvalidation));
+		deferred->datoid = datoid;
+		deferred->reloid = reloid;
+		deferred->relfilenode = relfilenode;
+		deferred_descr_invals = lappend(deferred_descr_invals, deferred);
+		/*
+		 * Each entry is freed during the next lock-free processing pass; list
+		 * cells and the list container are also freed there.  All of this
+		 * lives in TopMemoryContext so it survives across callbacks and
+		 * transaction boundaries.
+		 */
+		MemoryContextSwitchTo(oldcontext);
+		return;
+	}
+	
+	/* 
+	 * Process any previously deferred invalidations first to maintain correct order. 
+	 * This queue most certainly should be empty 
+	 * (as hook is called before processing any invalidation),  
+	 * but we need to be sure that no invalidations are left unprocessed 
+	 * before we handle the current one.
+	 */
+	orioledb_deferred_inval_message_hook();
+
+	/* Handle the current invalidation. */
+	o_invalidate_descrs_internal(datoid, reloid, relfilenode);
+}
+
+static void
+o_invalidate_descrs_internal(Oid datoid, Oid reloid, Oid relfilenode)
 {
 	HASH_SEQ_STATUS scan_status;
 	OTableDescr *tableDescr;
@@ -1133,6 +1225,9 @@ recreate_index_descr(OIndexDescr *descr)
 						  oIndex->indexType, oIndex->table_persistence, oIndex->createOxid, descr);
 	descr->refcnt = refcnt;
 	free_o_index(oIndex);
+	
+	/* reload BTree meta and root block numbers to desc, if BTree is in memory */
+	o_btree_try_use_shmem(&descr->desc);
 }
 
 /*
@@ -1752,6 +1847,15 @@ recreate_table_descr(OTableDescr *descr)
 	descr->refcnt = refcnt;
 
 	enable_stopevents = old_enable_stopevents;
+	
+	/* call o_btree_try_use_shmem for all indices to ensure that shared btree roots are used when possible */
+	for (int i = 0; i < descr->nIndices; i++)
+		o_btree_try_use_shmem(&descr->indices[i]->desc);
+	if (descr->bridge)
+		o_btree_try_use_shmem(&descr->bridge->desc);
+	if (descr->toast)
+		o_btree_try_use_shmem(&descr->toast->desc);
+
 	return true;
 }
 

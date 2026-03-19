@@ -296,7 +296,7 @@ extern OIndexDescr *o_fetch_index_descr(ORelOids oids, OIndexType type,
 extern void recreate_table_descr_by_oids(ORelOids oids);
 extern void o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table);
 extern void o_free_tmp_table_descr(OTableDescr *descr);
-
+extern void orioledb_deferred_inval_message_hook(void);
 static inline bool
 is_explain_analyze(PlanState *ps)
 {

@@ -32,6 +32,7 @@
 #include "utils/typcache.h"
 #include "utils/rel.h"
 #include "utils/relcache.h"
+#include "utils/inval.h"
 
 #if defined __has_include
 #if __has_include ("sanitizer/asan_interface.h")
@@ -509,6 +510,7 @@ extern void jsonb_push_string_key(JsonbParseState **state, const char *key, cons
 extern bool is_bump_memory_context(MemoryContext mxct);
 
 extern CheckPoint_hook_type next_CheckPoint_hook;
+extern ReceiveCustomInvalMessage_hook_type prev_ReceiveCustomInvalMessage_hook;
 
 /* tableam_handler.c */
 extern bool is_orioledb_rel(Relation rel);

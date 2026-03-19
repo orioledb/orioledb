@@ -161,6 +161,7 @@ static skip_tree_height_hook_type prev_skip_tree_height_hook = NULL;
 database_size_hook_type prev_database_size_hook = NULL;
 
 CheckPoint_hook_type next_CheckPoint_hook = NULL;
+ReceiveCustomInvalMessage_hook_type prev_ReceiveCustomInvalMessage_hook = NULL;
 static bool o_newlocale_from_collation(void);
 
 /*
@@ -1147,6 +1148,8 @@ _PG_init(void)
 	shmem_startup_hook = orioledb_shmem_startup;
 	next_CheckPoint_hook = CheckPoint_hook;
 	old_set_rel_pathlist_hook = set_rel_pathlist_hook;
+	prev_ReceiveCustomInvalMessage_hook = ReceiveCustomInvalMessage_hook;
+	ReceiveCustomInvalMessage_hook = orioledb_deferred_inval_message_hook;
 	set_rel_pathlist_hook = orioledb_set_rel_pathlist_hook;
 	set_plain_rel_pathlist_hook = orioledb_set_plain_rel_pathlist_hook;
 	RegisterXactCallback(undo_xact_callback, NULL);
