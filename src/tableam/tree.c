@@ -284,6 +284,8 @@ hash_combine_mix_field(OIndexDescr *idx, TupleDesc tupdesc,
 	val = o_fastgetattr(tup, attnum, tupdesc, spec, &isnull);
 	if (isnull)
 		return hash;
+	if (idx->fields[field_num].hash_fn == &o_default_hash_fn)
+		return hash;
 	element_hash = o_call_hash_fn(idx->fields[field_num].hash_fn,
 								  idx->fields[field_num].collation,
 								  val);

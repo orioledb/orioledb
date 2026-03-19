@@ -75,6 +75,9 @@ typedef struct OHashFn
 	FmgrInfo	finfo;
 } OHashFn;
 
+#define O_DEFAULT_HASH_FN_OID 1 /* Using 1 here to distinct from uninitialized
+								 * fields */
+extern OHashFn o_default_hash_fn;
 
 /*
  * The index field descriptor

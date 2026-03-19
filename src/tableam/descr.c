@@ -131,6 +131,7 @@ static Oid	last_exclusion_op = InvalidOid;
 static OExclusionFn *last_exclusion_fn = NULL;
 static OHashFnKey last_hash_fn_key = {0};
 static OHashFn *last_hash_fn = NULL;
+OHashFn		o_default_hash_fn = {.key = {.hash_fn_oid = O_DEFAULT_HASH_FN_OID}};
 
 static void o_find_toastable_attrs(OTableDescr *tableDescr);
 
@@ -1468,7 +1469,10 @@ oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid, Oid opclassoid, O
 	field->comparator = o_find_opclass_comparator(opclass, field->collation);
 	if (OidIsValid(exclusion_op))
 		field->exclusion_fn = o_find_exclusion_op_fn(exclusion_op);
-	field->hash_fn = o_find_hash_fn(hash_fn_oid, datoid);
+	if (hash_fn_oid == O_DEFAULT_HASH_FN_OID)
+		field->hash_fn = &o_default_hash_fn;
+	else
+		field->hash_fn = o_find_hash_fn(hash_fn_oid, datoid);
 
 	Assert(field->comparator != NULL);
 }
