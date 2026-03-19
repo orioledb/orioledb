@@ -106,22 +106,22 @@ SELECT regexp_replace(
 		'g');
                                              regexp_replace                                              
 ---------------------------------------------------------------------------------------------------------
- Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 6392                                                +
+ Page 0: level = 0, maxKeyLen = 24, nVacatedBytes = 6504                                                +
  state = free, datoid equal, relnode equal, ix_type = primary, clean                                    +
      Leftmost, Rightmost                                                                                +
    Chunk 0: offset = 0, location = 256, hikey location = 80, hikey = ((NNN, NNN, NNN), 0, 1)            +
-     Item 0: deleted, offset = 264, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 278)  +
-   Chunk 1: offset = 1, location = 584, hikey location = 104, hikey = ((NNN, NNN, NNN), 0, 0)           +
-     Item 1: deleted, offset = 592, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 2060) +
-   Chunk 2: offset = 2, location = 2696, hikey location = 128, hikey = ((NNN, NNN, NNN), 0, 0)          +
-     Item 2: deleted, offset = 2704, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 278) +
-     Item 3: deleted, offset = 3024, tuple = (((NNN, NNN, NNN), chunknum 0, version 0), dataLength 1169)+
-   Chunk 3: offset = 4, location = 4240, hikey location = 152, hikey = ((NNN, NNN, NNN), 0, 0)          +
-     Item 4: deleted, offset = 4248, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 472) +
-   Chunk 4: offset = 5, location = 4760, hikey location = 176, hikey = ((NNN, NNN, NNN), 0, 0)          +
-     Item 5: deleted, offset = 4768, tuple = (((NNN, NNN, NNN), chunknum 0, version 0), dataLength 1363)+
-   Chunk 5: offset = 6, location = 6176, hikey location = 200                                           +
-     Item 6: deleted, offset = 6184, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 472) +
+     Item 0: deleted, offset = 264, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 294)  +
+   Chunk 1: offset = 1, location = 600, hikey location = 104, hikey = ((NNN, NNN, NNN), 0, 0)           +
+     Item 1: deleted, offset = 608, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 2076) +
+   Chunk 2: offset = 2, location = 2728, hikey location = 128, hikey = ((NNN, NNN, NNN), 0, 0)          +
+     Item 2: deleted, offset = 2736, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 294) +
+     Item 3: deleted, offset = 3072, tuple = (((NNN, NNN, NNN), chunknum 0, version 0), dataLength 1185)+
+   Chunk 3: offset = 4, location = 4304, hikey location = 152, hikey = ((NNN, NNN, NNN), 0, 0)          +
+     Item 4: deleted, offset = 4312, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 488) +
+   Chunk 4: offset = 5, location = 4840, hikey location = 176, hikey = ((NNN, NNN, NNN), 0, 0)          +
+     Item 5: deleted, offset = 4848, tuple = (((NNN, NNN, NNN), chunknum 0, version 0), dataLength 1379)+
+   Chunk 5: offset = 6, location = 6272, hikey location = 200                                           +
+     Item 6: deleted, offset = 6280, tuple = (((NNN, NNN, NNN), chunknum 0, version 1), dataLength 488) +
                                                                                                         +
  
 (1 row)
@@ -172,11 +172,12 @@ SELECT regexp_replace(
      Item 6: offset = 672, tuple = ((NNN, (NNN), X/X, N), opfamily: 397, inputtype: 2277, cmpOid: 382, ssupOid: 0)      +
      Item 7: offset = 736, tuple = ((NNN, (NNN), X/X, N), opfamily: 1971, inputtype: 701, cmpOid: 452, ssupOid: 444)    +
      Item 8: offset = 800, tuple = ((NNN, (NNN), X/X, N), opfamily: 1977, inputtype: 23, cmpOid: 450, ssupOid: 425)     +
-     Item 9: offset = 864, tuple = ((NNN, (NNN), X/X, N), opfamily: 2994, inputtype: 2249, cmpOid: 2987, ssupOid: 0)    +
-     Item 10: offset = 928, tuple = ((NNN, (NNN), X/X, N), opfamily: 2040, inputtype: 1114, cmpOid: 2039, ssupOid: 3411)+
-     Item 11: offset = 992, tuple = ((NNN, (NNN), X/X, N), opfamily: 2789, inputtype: 27, cmpOid: 2794, ssupOid: 0)     +
-     Item 12: offset = 1056, tuple = ((NNN, (NNN), X/X, N), opfamily: 3522, inputtype: 3500, cmpOid: 3514, ssupOid: 0)  +
-     Item 13: offset = 1120, tuple = ((NNN, (NNN), X/X, N), opfamily: 3901, inputtype: 3831, cmpOid: 3870, ssupOid: 0)  +
+     Item 9: offset = 864, tuple = ((NNN, (NNN), X/X, N), opfamily: 1977, inputtype: 20, cmpOid: 949, ssupOid: 442)     +
+     Item 10: offset = 928, tuple = ((NNN, (NNN), X/X, N), opfamily: 2994, inputtype: 2249, cmpOid: 2987, ssupOid: 0)   +
+     Item 11: offset = 992, tuple = ((NNN, (NNN), X/X, N), opfamily: 2040, inputtype: 1114, cmpOid: 2039, ssupOid: 3411)+
+     Item 12: offset = 1056, tuple = ((NNN, (NNN), X/X, N), opfamily: 2789, inputtype: 27, cmpOid: 2794, ssupOid: 0)    +
+     Item 13: offset = 1120, tuple = ((NNN, (NNN), X/X, N), opfamily: 3522, inputtype: 3500, cmpOid: 3514, ssupOid: 0)  +
+     Item 14: offset = 1184, tuple = ((NNN, (NNN), X/X, N), opfamily: 3901, inputtype: 3831, cmpOid: 3870, ssupOid: 0)  +
                                                                                                                         +
  
 (1 row)
@@ -339,30 +340,39 @@ SELECT regexp_replace(regexp_replace(
  state = free, datoid equal, relnode equal, ix_type = primary, clean                          +
      Leftmost, Rightmost                                                                      +
    Chunk 0: offset = 0, location = 256, hikey location = 64, hikey = ((NNN, (NNN), X/X, N), 0)+
-     Item 0: offset = 288, tuple = (((NNN, (NNN), X/X, N), 0), 108)                           +
-     Item 1: offset = 456, tuple = (((NNN, (NNN), X/X, N), 0), 108)                           +
-     Item 2: offset = 624, tuple = (((NNN, (NNN), X/X, N), 0), 112)                           +
-     Item 3: offset = 800, tuple = (((NNN, (NNN), X/X, N), 0), 108)                           +
-     Item 4: offset = 968, tuple = (((NNN, (NNN), X/X, N), 0), 110)                           +
-     Item 5: offset = 1144, tuple = (((NNN, (NNN), X/X, N), 0), 122)                          +
-     Item 6: offset = 1328, tuple = (((NNN, (NNN), X/X, N), 0), 126)                          +
-     Item 7: offset = 1520, tuple = (((NNN, (NNN), X/X, N), 0), 102)                          +
-     Item 8: offset = 1688, tuple = (((NNN, (NNN), X/X, N), 0), 106)                          +
-     Item 9: offset = 1856, tuple = (((NNN, (NNN), X/X, N), 0), 108)                          +
-     Item 10: offset = 2024, tuple = (((NNN, (NNN), X/X, N), 0), 114)                         +
-     Item 11: offset = 2200, tuple = (((NNN, (NNN), X/X, N), 0), 116)                         +
-     Item 12: offset = 2376, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
-     Item 13: offset = 2544, tuple = (((NNN, (NNN), X/X, N), 0), 112)                         +
-   Chunk 1: offset = 14, location = 2720, hikey location = 104                                +
-     Item 14: offset = 2744, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
-     Item 15: offset = 2928, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
-     Item 16: offset = 3112, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
-     Item 17: offset = 3296, tuple = (((NNN, (NNN), X/X, N), 0), 124)                         +
-     Item 18: offset = 3480, tuple = (((NNN, (NNN), X/X, N), 0), 128)                         +
-     Item 19: offset = 3672, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
-     Item 20: offset = 3856, tuple = (((NNN, (NNN), X/X, N), 0), 136)                         +
-     Item 21: offset = 4056, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
-     Item 22: offset = 4224, tuple = (((NNN, (NNN), X/X, N), 0), 108)                         +
+     Item 0: offset = 296, tuple = (((NNN, (NNN), X/X, N), 0), 108)                           +
+     Item 1: offset = 464, tuple = (((NNN, (NNN), X/X, N), 0), 108)                           +
+     Item 2: offset = 632, tuple = (((NNN, (NNN), X/X, N), 0), 112)                           +
+     Item 3: offset = 808, tuple = (((NNN, (NNN), X/X, N), 0), 108)                           +
+     Item 4: offset = 976, tuple = (((NNN, (NNN), X/X, N), 0), 110)                           +
+     Item 5: offset = 1152, tuple = (((NNN, (NNN), X/X, N), 0), 102)                          +
+     Item 6: offset = 1320, tuple = (((NNN, (NNN), X/X, N), 0), 122)                          +
+     Item 7: offset = 1504, tuple = (((NNN, (NNN), X/X, N), 0), 122)                          +
+     Item 8: offset = 1688, tuple = (((NNN, (NNN), X/X, N), 0), 126)                          +
+     Item 9: offset = 1880, tuple = (((NNN, (NNN), X/X, N), 0), 102)                          +
+     Item 10: offset = 2048, tuple = (((NNN, (NNN), X/X, N), 0), 102)                         +
+     Item 11: offset = 2216, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
+     Item 12: offset = 2384, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
+     Item 13: offset = 2552, tuple = (((NNN, (NNN), X/X, N), 0), 108)                         +
+     Item 14: offset = 2720, tuple = (((NNN, (NNN), X/X, N), 0), 102)                         +
+     Item 15: offset = 2888, tuple = (((NNN, (NNN), X/X, N), 0), 114)                         +
+     Item 16: offset = 3064, tuple = (((NNN, (NNN), X/X, N), 0), 116)                         +
+     Item 17: offset = 3240, tuple = (((NNN, (NNN), X/X, N), 0), 100)                         +
+   Chunk 1: offset = 18, location = 3400, hikey location = 104                                +
+     Item 18: offset = 3432, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
+     Item 19: offset = 3600, tuple = (((NNN, (NNN), X/X, N), 0), 112)                         +
+     Item 20: offset = 3776, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
+     Item 21: offset = 3960, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
+     Item 22: offset = 4144, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
+     Item 23: offset = 4328, tuple = (((NNN, (NNN), X/X, N), 0), 124)                         +
+     Item 24: offset = 4512, tuple = (((NNN, (NNN), X/X, N), 0), 128)                         +
+     Item 25: offset = 4704, tuple = (((NNN, (NNN), X/X, N), 0), 120)                         +
+     Item 26: offset = 4888, tuple = (((NNN, (NNN), X/X, N), 0), 136)                         +
+     Item 27: offset = 5088, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
+     Item 28: offset = 5256, tuple = (((NNN, (NNN), X/X, N), 0), 102)                         +
+     Item 29: offset = 5424, tuple = (((NNN, (NNN), X/X, N), 0), 108)                         +
+     Item 30: offset = 5592, tuple = (((NNN, (NNN), X/X, N), 0), 106)                         +
+     Item 31: offset = 5760, tuple = (((NNN, (NNN), X/X, N), 0), 108)                         +
                                                                                               +
  
 (1 row)
@@ -492,6 +502,7 @@ SELECT regexp_replace(regexp_replace(
      Item 14: offset = 1416, tuple = ((NNN, (NNN), X/X, N), amproc: NNN)+
      Item 15: offset = 1496, tuple = ((NNN, (NNN), X/X, N), amproc: NNN)+
      Item 16: offset = 1576, tuple = ((NNN, (NNN), X/X, N), amproc: NNN)+
+     Item 17: offset = 1656, tuple = ((NNN, (NNN), X/X, N), amproc: NNN)+
                                                                         +
  
 (1 row)
@@ -689,16 +700,16 @@ SELECT orioledb_sys_tree_structure(24, 'ne');
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
      Item 0: offset = 296, tuple = (730, 0)                         +
      Item 1: offset = 328, tuple = (734, 96)                        +
-     Item 2: offset = 360, tuple = (735, 24808)                     +
-     Item 3: offset = 392, tuple = (736, 27176)                     +
-     Item 4: offset = 424, tuple = (737, 27624)                     +
-     Item 5: offset = 456, tuple = (739, 28176)                     +
-     Item 6: offset = 488, tuple = (740, 29168)                     +
-     Item 7: offset = 520, tuple = (743, 29328)                     +
-     Item 8: offset = 552, tuple = (744, 47800)                     +
-     Item 9: offset = 584, tuple = (745, 50680)                     +
-     Item 10: offset = 616, tuple = (746, 51120)                    +
-     Item 11: offset = 648, tuple = (747, 53856)                    +
+     Item 2: offset = 360, tuple = (735, 25224)                     +
+     Item 3: offset = 392, tuple = (736, 27608)                     +
+     Item 4: offset = 424, tuple = (737, 28056)                     +
+     Item 5: offset = 456, tuple = (739, 28608)                     +
+     Item 6: offset = 488, tuple = (740, 29600)                     +
+     Item 7: offset = 520, tuple = (743, 29760)                     +
+     Item 8: offset = 552, tuple = (744, 48928)                     +
+     Item 9: offset = 584, tuple = (745, 51824)                     +
+     Item 10: offset = 616, tuple = (746, 52264)                    +
+     Item 11: offset = 648, tuple = (747, 55000)                    +
      Item 12: offset = 680, tuple = (1000, 2000)                    +
      Item 13: offset = 712, tuple = (1001, 2001)                    +
      Item 14: offset = 744, tuple = (1002, 2002)                    +
