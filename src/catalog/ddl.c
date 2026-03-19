@@ -2824,9 +2824,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			{
 				ListCell   *lc;
 				ORelOids	oids;
+				OTableDescr *descr;
 
 				ORelOidsSetFromRel(oids, rel);
-				Assert(relation_get_descr(rel) != NULL);
 				foreach(lc, partition_drop_index_list)
 				{
 					List	   *drop_oids = (List *) lfirst(lc);
@@ -2834,7 +2834,19 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					if (lsecond_oid(drop_oids) == rel->rd_rel->oid)
 						partition_drop_index_list = foreach_delete_current(partition_drop_index_list, lc);
 				}
-				o_drop_table(oids);
+
+				descr = relation_get_descr(rel);
+
+				/*
+				 * Descriptor should be there as long as it's not temporary
+				 * relation.  Descriptors of temporary relations might be
+				 * already deleted.
+				 */
+				Assert(rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP ||
+					   descr);
+
+				if (descr != NULL)
+					o_drop_table(oids);
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
 					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
