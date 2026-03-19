@@ -129,11 +129,9 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
    Sort Method: quicksort  Memory: xkB
    Buffers: shared hit=x
    ->  Seq Scan on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
- Planning:
-   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(9 rows)
+(7 rows)
 
 -- table: primary index + secondary index without TOAST
 DROP TABLE o_explain;
