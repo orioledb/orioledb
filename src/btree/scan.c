@@ -1110,6 +1110,7 @@ init_checkpoit_number(BTreeSeqScan *scan)
 	BTreeMetaPage *metaPage;
 	BTreeDescr *desc = scan->desc;
 
+	o_btree_load_shmem(scan->desc);
 	metaPage = BTREE_GET_META(scan->desc);
 
 	START_CRIT_SECTION();
@@ -1146,8 +1147,6 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 	ParallelOScanDesc poscan = scan->poscan;
 	BlockSampler sampler = scan->sampler;
 	BTreeDescr *desc = scan->desc;
-
-	o_btree_load_shmem(desc);
 
 	if (poscan)
 	{
@@ -1250,6 +1249,7 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 	clear_fixed_key(&scan->keyRangeHigh);
 	clear_fixed_key(&scan->keyRangeLow);
 	scan->isSingleLeafPage = false;
+	o_btree_load_shmem(desc);
 	if (!iterate_internal_page(scan) && !single_leaf_page_rel(scan))
 	{
 		switch_to_disk_scan(scan);
@@ -1305,7 +1305,6 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 BTreeSeqScan *
 make_btree_seq_scan(BTreeDescr *desc, OSnapshot *oSnapshot, void *poscan)
 {
-	o_btree_load_shmem(desc);
 	return make_btree_seq_scan_internal(desc, oSnapshot, NULL, NULL, NULL, poscan);
 }
 
@@ -1313,7 +1312,6 @@ BTreeSeqScan *
 make_btree_seq_scan_cb(BTreeDescr *desc, OSnapshot *oSnapshot,
 					   BTreeSeqScanCallbacks *cb, void *arg)
 {
-	o_btree_load_shmem(desc);
 	return make_btree_seq_scan_internal(desc, oSnapshot, cb, arg, NULL, NULL);
 }
 

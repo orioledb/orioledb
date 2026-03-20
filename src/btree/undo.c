@@ -485,7 +485,6 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 		STOPEVENT(STOPEVENT_APPLY_UNDO, params);
 	}
 
-	o_btree_load_shmem(desc);
 	init_page_find_context(&context, desc,
 						   COMMITSEQNO_INPROGRESS,
 						   BTREE_PAGE_FIND_MODIFY);
@@ -605,7 +604,6 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 		STOPEVENT(STOPEVENT_APPLY_UNDO, params);
 	}
 
-	o_btree_load_shmem(desc);
 	init_page_find_context(&context, desc, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY);
 	if (!changeCountsValid)
 		item->pageChangeCount = InvalidOPageChangeCount;
