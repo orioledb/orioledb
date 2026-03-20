@@ -1154,8 +1154,6 @@ orioledb_tbl_are_indices_equal(PG_FUNCTION_ARGS)
 
 	td1 = descr1->indices[ix_num1];
 	td2 = descr2->indices[ix_num2];
-	o_btree_load_shmem(&td1->desc);
-	o_btree_load_shmem(&td2->desc);
 
 	are_equal = td1->leafTupdesc->natts == td2->leafTupdesc->natts;
 

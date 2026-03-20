@@ -418,6 +418,17 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	context->partial.isPartial = false;
 	context->index = 0;
 
+	if (!tryFlag)
+	{
+		o_btree_load_shmem(desc);
+	}
+	else
+	{
+		if (!o_btree_try_use_shmem(desc))
+			return OFindPageResultFailure;
+	}
+	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc));
+
 	/* starts from the rootPageBlkno */
 	intCxt.blkno = desc->rootInfo.rootPageBlkno;
 	intCxt.pageChangeCount = desc->rootInfo.rootPageChangeCount;
@@ -989,6 +1000,16 @@ refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	intCxt.pageChangeCount = _pageChangeCount;
 	intCxt.partial = NULL;
 	intCxt.inserted = false;
+
+	if (!BTREE_PAGE_FIND_IS(context, TRY_LOCK))
+	{
+		o_btree_load_shmem(desc);
+	}
+	else
+	{
+		if (!o_btree_try_use_shmem(desc))
+			return OFindPageResultFailure;
+	}
 
 retry:
 

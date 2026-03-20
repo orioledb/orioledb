@@ -481,7 +481,6 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 		pgstat_count_index_scan(ostate->scandesc.indexRelation);
 	}
 
-	o_btree_load_shmem(&id->desc);
 	while (true)
 	{
 		tup = o_iterate_index(id, ostate, tupleCsn, tupleCxt,
@@ -508,7 +507,6 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 				hint->pageChangeCount = 0;
 			}
 
-			o_btree_load_shmem(&primary->desc);
 			ptup = o_btree_find_tuple_by_key(&primary->desc,
 											 (Pointer) &bound, BTreeKeyBound,
 											 &ostate->oSnapshot, tupleCsn,

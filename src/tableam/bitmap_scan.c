@@ -259,7 +259,6 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 		ostate.curKeyRange.empty = true;
 	}
 
-	o_btree_load_shmem(&indexDescr->desc);
 	do
 	{
 		tuple = o_iterate_index(indexDescr, &ostate, NULL, mcxt, NULL);
@@ -290,7 +289,6 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 					/* fetch primary index key from tuple and search raw tuple */
 					o_fill_pindex_tuple_key_bound(&indexDescr->desc, tuple, &bound);
 
-					o_btree_load_shmem(&primary->desc);
 					ptup = o_btree_find_tuple_by_key(&primary->desc,
 													 (Pointer) &bound, BTreeKeyBound,
 													 &ostate.oSnapshot, NULL,
@@ -720,8 +718,6 @@ o_tbmiterator_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 			bridge_bound.n_row_keys = 0;
 			bridge_bound.row_keys = NULL;
 
-			o_btree_load_shmem(&bridge->desc);
-
 			bridge_tup = o_btree_find_tuple_by_key(&bridge->desc,
 												   (Pointer) &bridge_bound, BTreeKeyBound,
 												   &o_in_progress_snapshot, &tupleCsn,
@@ -772,7 +768,6 @@ o_tbmiterator_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 		end_bound.n_row_keys = 0;
 		end_bound.row_keys = NULL;
 
-		o_btree_load_shmem(&bridge->desc);
 		it = o_btree_iterator_create(&bridge->desc, (Pointer) &start_bound, BTreeKeyBound,
 									 &o_in_progress_snapshot, ForwardScanDirection);
 		primarySlot = MakeSingleTupleTableSlot(tbl_descr->tupdesc, &TTSOpsOrioleDB);

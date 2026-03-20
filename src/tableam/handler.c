@@ -189,9 +189,6 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 	descr = relation_get_descr(scan->rel);
 	Assert(descr != NULL);
 
-	if (GET_PRIMARY(descr)->primaryIsCtid)
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
-
 	if (o_scan->bridged_tuple)
 	{
 		OBTreeKeyBound bridge_bound;
@@ -228,8 +225,6 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 		bridge_bound.keys[0].comparator = NULL;
 		bridge_bound.keys[0].exclusion_fn = NULL;
 		csn = COMMITSEQNO_INPROGRESS;
-
-		o_btree_load_shmem(&descr->bridge->desc);
 
 		bridge_tup = o_btree_find_tuple_by_key(&descr->bridge->desc,
 											   (Pointer) &bridge_bound, BTreeKeyBound,
@@ -312,10 +307,7 @@ orioledb_fetch_row_version(Relation relation,
 	bool		deleted;
 
 	descr = relation_get_descr(relation);
-
 	Assert(descr != NULL);
-	if (GET_PRIMARY(descr)->primaryIsCtid)
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint,
 						&csn, &version, NULL);
@@ -380,10 +372,7 @@ orioledb_tuple_satisfies_snapshot(Relation rel, TupleTableSlot *slot,
 		return true;
 
 	descr = relation_get_descr(rel);
-
 	Assert(descr != NULL);
-	if (GET_PRIMARY(descr)->primaryIsCtid)
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 
 	tts_orioledb_fill_key_bound(slot, GET_PRIMARY(descr), &pkey);
 
@@ -558,10 +547,7 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 		oSnapshot = o_in_progress_snapshot;
 
 	descr = relation_get_descr(relation);
-
 	Assert(descr != NULL);
-	if (GET_PRIMARY(descr)->primaryIsCtid)
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 
 	oxid = get_current_oxid();
 
@@ -655,10 +641,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 		oSnapshot = o_in_progress_snapshot;
 
 	descr = relation_get_descr(relation);
-
 	Assert(descr != NULL);
-	if (GET_PRIMARY(descr)->primaryIsCtid)
-		o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 
 	*update_indexes = TU_All;
 	oxid = get_current_oxid();
