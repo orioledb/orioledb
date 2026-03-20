@@ -469,7 +469,17 @@ add_on_disk_downlink(BTreeSeqScan *scan, uint64 downlink, CommitSeqNo csn)
 				uint64		newAllocated = poscan->dsmAllocated * 2;
 				uint64		oldCount = pg_atomic_read_u64(&poscan->downlinksCount);
 
-				newSeg = dsm_create(MAXALIGN(newAllocated * sizeof(BTreeSeqScanDiskDownlink)), 0);
+				newSeg = dsm_create(MAXALIGN(newAllocated * sizeof(BTreeSeqScanDiskDownlink)), DSM_CREATE_NULL_IF_MAXSEGMENTS);
+				if (newSeg == NULL)
+				{
+					if (scan->dsmSeg)
+						dsm_detach(scan->dsmSeg);
+					LWLockRelease(&poscan->downlinksPublish);
+					ereport(ERROR,
+							(errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+							 errmsg("parallel scan failed: too many dynamic shared memory segments")));
+				}
+
 				if (oldCount > 0)
 					memcpy(dsm_segment_address(newSeg),
 						   dsm_segment_address(scan->dsmSeg),
@@ -1176,7 +1186,14 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 			if (numLeafPages < 16)
 				numLeafPages = 16;
 			allocSize = MAXALIGN((uint64) numLeafPages * sizeof(BTreeSeqScanDiskDownlink));
-			scan->dsmSeg = dsm_create(allocSize, 0);
+			scan->dsmSeg = dsm_create(allocSize, DSM_CREATE_NULL_IF_MAXSEGMENTS);
+			if (scan->dsmSeg == NULL)
+			{
+				SpinLockRelease(&poscan->workerStart);
+				ereport(ERROR,
+						(errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+						 errmsg("parallel scan failed: too many dynamic shared memory segments")));
+			}
 			poscan->dsmHandle = dsm_segment_handle(scan->dsmSeg);
 			poscan->dsmAllocated = numLeafPages;
 			pg_write_barrier();
