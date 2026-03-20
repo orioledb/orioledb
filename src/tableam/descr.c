@@ -943,6 +943,8 @@ o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode)
 	OTableDescr *tableDescr;
 	OIndexDescr *indexDescr;
 
+	Assert(!have_locked_pages());
+
 	if (!OidIsValid(datoid) || !OidIsValid(reloid) || !OidIsValid(relfilenode))
 	{
 		Assert(!OidIsValid(datoid) && !OidIsValid(reloid) && !OidIsValid(relfilenode));
