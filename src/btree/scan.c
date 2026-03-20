@@ -106,7 +106,7 @@ struct BTreeSeqScan
 	MemoryContext mctx;
 
 	BTreeSeqScanDiskDownlink *diskDownlinks;
-	int64		downlinksCount;	/* Used only for serial scan */
+	int64		downlinksCount; /* Used only for serial scan */
 	int64		downlinkIndex;
 	int64		allocatedDownlinks;
 
@@ -533,8 +533,8 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 
 		/*
 		 * Wait for any in-flight add_on_disk_downlink() calls to complete. A
-		 * worker that already got a disk downlink from get_next_downlink() but
-		 * hasn't finished writing it yet will have incremented
+		 * worker that already got a disk downlink from get_next_downlink()
+		 * but hasn't finished writing it yet will have incremented
 		 * downlinksWritersInProgress.
 		 */
 		while (pg_atomic_read_u32(&poscan->downlinksWritersInProgress) > 0)
@@ -545,7 +545,8 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 
 		/*
 		 * First worker to grab the exclusive lock sorts the shared downlinks
-		 * array.  Other workers wait on the lock and then see the sorted flag.
+		 * array.  Other workers wait on the lock and then see the sorted
+		 * flag.
 		 */
 		LWLockAcquire(&poscan->downlinksPublish, LW_EXCLUSIVE);
 
@@ -555,7 +556,7 @@ switch_to_disk_scan(BTreeSeqScan *scan)
 
 			/* Re-attach to DSM if it was reallocated */
 			if (scan->dsmSeg == NULL ||
-			dsm_segment_handle(scan->dsmSeg) != poscan->dsmHandle)
+				dsm_segment_handle(scan->dsmSeg) != poscan->dsmHandle)
 			{
 				if (scan->dsmSeg)
 					dsm_detach(scan->dsmSeg);
@@ -780,11 +781,11 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				SpinLockRelease(&poscan->intpageAccess);
 
 				next_loaded = load_next_internal_page(scan,
-												 fixed_shmem_key_get_tuple(&curPage->prevHikey),
-												 curPage->img,
-												 &loc,
-												 &curPage->startOffset,
-												 false);
+													  fixed_shmem_key_get_tuple(&curPage->prevHikey),
+													  curPage->img,
+													  &loc,
+													  &curPage->startOffset,
+													  false);
 				if (!next_loaded)
 				{
 					SpinLockAcquire(&poscan->intpageAccess);
@@ -827,11 +828,11 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				SpinLockRelease(&poscan->intpageAccess);
 
 				next_loaded = load_next_internal_page(scan,
-												 fixed_shmem_key_get_tuple(&nextPage->prevHikey),
-												 nextPage->img,
-												 &loc,
-												 &nextPage->startOffset,
-												 false);
+													  fixed_shmem_key_get_tuple(&nextPage->prevHikey),
+													  nextPage->img,
+													  &loc,
+													  &nextPage->startOffset,
+													  false);
 				Assert(next_loaded);
 
 				SpinLockAcquire(&poscan->intpageAccess);
@@ -859,10 +860,12 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				/* Push next internal item page offset into shared state */
 				curPage->offset = BTREE_PAGE_LOCATOR_GET_OFFSET(curPage->img, &loc);
 				scan->context.imgReadCsn = curPage->imgReadCsn;
+
 				/*
-				 *  Become the shared downlink writer. This is to be cleared by the caller:
-				 *  - immediately for in-memory and in IO downlinks,
-				 *  - after disk downlink is written to shared DSM array
+				 * Become the shared downlink writer. This is to be cleared by
+				 * the caller: immediately for in-memory and in IO downlinks,
+				 * after downlink is written to shared DSM array for disk
+				 * downlinks.
 				 */
 				pg_atomic_fetch_add_u32(&poscan->downlinksWritersInProgress, 1);
 
