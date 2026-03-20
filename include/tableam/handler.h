@@ -205,11 +205,6 @@ typedef struct ParallelOScanDescData
 													 * currently writing a
 													 * downlink to DSM */
 	uint64		dsmAllocated;	/* number of slots allocated in DSM array */
-#ifdef USE_ASSERT_CHECKING
-	pg_atomic_uint32 dsmSegNumAttached; /* number of workers currenly attached
-										 * to dsm segment during disk scan
-										 * stage */
-#endif
 	bits8		flags;
 	int			nworkers;		/* number of scan workers initialized their
 								 * own seq scan */
