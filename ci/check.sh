@@ -53,6 +53,7 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
     # Initialize data directory and set OrioleDB as default AM
     initdb -N --encoding=UTF-8 --locale=C -D $GITHUB_WORKSPACE/pgsql/pgdata
 
+    echo "wal_level = logical" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
     echo "shared_preload_libraries = 'orioledb'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log start
     make -C src/test/regress installcheck -j $(nproc) || status=$?
@@ -65,6 +66,14 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
             git apply patches/subscription_enable_oriole.diff
         fi
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log restart
+
+        pg_basebackup -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -Fp -Xs -P
+        touch $GITHUB_WORKSPACE/pgsql/rep_pgdata/standby.signal
+        echo "port = 5433" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
+        echo "primary_conninfo = 'host=/tmp port=5432'" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
+        echo "allow_in_place_tablespaces = true" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
+        pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log start
+
         # Run Postgress regression tests
         make -C src/test/regress EXTRA_REGRESS_OPTS="--load-extension=orioledb" installcheck-oriole -j $(nproc) || true
         if [ -f src/test/regress/regression.diffs ]; then
@@ -81,6 +90,7 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
           [ -s src/test/isolation_filtered.diffs ] || rm src/test/isolation_filtered.diffs src/test/isolation/output_iso/regression.diffs
         fi
 
+        pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log stop
         if [ $PG_VERSION = "17" ]; then
             make -C src/test/subscription installcheck-oriole -j $(nproc) || status=$?
         fi
