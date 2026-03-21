@@ -162,6 +162,7 @@ static base_init_startup_hook_type prev_base_init_startup_hook = NULL;
 static get_relation_info_hook_type prev_get_relation_info_hook = NULL;
 static skip_tree_height_hook_type prev_skip_tree_height_hook = NULL;
 database_size_hook_type prev_database_size_hook = NULL;
+static AcceptInvalidationMessagesHookType prev_AcceptInvalidationMessagesHook = NULL;
 
 CheckPoint_hook_type next_CheckPoint_hook = NULL;
 static bool o_newlocale_from_collation(void);
@@ -220,6 +221,7 @@ static ShmemItem shmemItems[] = {
 static Size orioledb_memsize(void);
 static void orioledb_shmem_request(void);
 static void orioledb_shmem_startup(void);
+static void orioledb_AcceptInvalidationMessagesHook(void);
 static void orioledb_usercache_hook(Datum arg, Oid arg1, Oid arg2, Oid arg3);
 static void orioledb_error_cleanup_hook(void);
 static void orioledb_get_relation_info_hook(PlannerInfo *root,
@@ -1194,6 +1196,8 @@ _PG_init(void)
 	shmem_startup_hook = orioledb_shmem_startup;
 	next_CheckPoint_hook = CheckPoint_hook;
 	old_set_rel_pathlist_hook = set_rel_pathlist_hook;
+	prev_AcceptInvalidationMessagesHook = AcceptInvalidationMessagesHook;
+	AcceptInvalidationMessagesHook = orioledb_AcceptInvalidationMessagesHook;
 	set_rel_pathlist_hook = orioledb_set_rel_pathlist_hook;
 	set_plain_rel_pathlist_hook = orioledb_set_plain_rel_pathlist_hook;
 	RegisterXactCallback(undo_xact_callback, NULL);
@@ -1856,6 +1860,15 @@ orioledb_ucm_check(PG_FUNCTION_ARGS)
 }
 
 static void
+orioledb_AcceptInvalidationMessagesHook(void)
+{
+	if (prev_AcceptInvalidationMessagesHook)
+		prev_AcceptInvalidationMessagesHook();
+
+	o_replay_saved_inval_messages();
+}
+
+static void
 orioledb_usercache_hook(Datum arg, Oid arg1, Oid arg2, Oid arg3)
 {
 	o_invalidate_descrs(arg1, arg2, arg3);
@@ -2026,6 +2039,7 @@ orioledb_error_cleanup_hook(void)
 	if (orioledb_s3_mode)
 		s3_headers_error_cleanup();
 	in_nontransactional_truncate = false;
+	reset_saving_inval_messages();
 }
 
 static void
