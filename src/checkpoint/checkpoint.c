@@ -181,7 +181,7 @@ static void sort_checkpoint_map_file(BTreeDescr *descr, int cur_chkp_index);
 static void sort_checkpoint_tmp_file(BTreeDescr *descr, int cur_chkp_index);
 static inline void checkpoint_ix_init_state(CheckpointState *state, BTreeDescr *descr);
 static void checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum);
-static void checkpoint_temporary_tree(int flags, BTreeDescr *descr);
+static bool checkpoint_temporary_tree(int flags, BTreeDescr *descr);
 static bool checkpoint_ix(int flags, BTreeDescr *descr);
 static uint64 checkpoint_btree(BTreeDescr **descrPtr, CheckpointState *state,
 							   CheckpointWriteBack *writeback);
@@ -1574,13 +1574,14 @@ checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 /*
  * Make checkpoint of an temporary index.
  */
-static void
+static bool
 checkpoint_temporary_tree(int flags, BTreeDescr *descr)
 {
 	BTreeMetaPage *meta_page;
 	uint32		chkp_num = checkpoint_state->lastCheckpointNumber + 1;
 	int			cur_chkp_index = chkp_num % 2;
 	CheckpointWriteBack writeback;
+	uint64		root_downlink;
 
 	Assert(!OCompressIsValid(descr->compress));
 
@@ -1591,10 +1592,18 @@ checkpoint_temporary_tree(int flags, BTreeDescr *descr)
 
 	/* Make checkpoint of the tree itself */
 	init_writeback(&writeback, flags, false);
-	(void) checkpoint_btree(&descr, checkpoint_state, &writeback);
-	(void) perform_writeback_and_relock(descr, &writeback,
-										checkpoint_state, NULL, 0);
+	root_downlink = checkpoint_btree(&descr, checkpoint_state, &writeback);
+	if (!DiskDownlinkIsValid(root_downlink))
+	{
+		free_writeback(&writeback);
+		return false;
+	}
+
+	descr = perform_writeback_and_relock(descr, &writeback,
+										 checkpoint_state, NULL, 0);
 	free_writeback(&writeback);
+	if (!descr)
+		return false;
 
 	Assert(checkpoint_state->curKeyType == CurKeyGreatest);
 
@@ -1621,6 +1630,8 @@ checkpoint_temporary_tree(int flags, BTreeDescr *descr)
 	chkp_inc_changecount_before(checkpoint_state);
 	checkpoint_state->completed = true;
 	chkp_inc_changecount_after(checkpoint_state);
+
+	return true;
 }
 
 /*
@@ -4942,8 +4953,8 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		}
 		else
 		{
-			checkpoint_temporary_tree(tbl_arg->flags, td);
-			if (!orioledb_s3_mode)
+			success = checkpoint_temporary_tree(tbl_arg->flags, td);
+			if (success && !orioledb_s3_mode)
 				sort_checkpoint_tmp_file(td, cur_chkp_index);
 			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 		}
