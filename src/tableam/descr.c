@@ -73,6 +73,27 @@ PG_FUNCTION_INFO_V1(orioledb_get_table_descrs);
 PG_FUNCTION_INFO_V1(orioledb_get_index_descrs);
 PG_FUNCTION_INFO_V1(orioledb_get_evicted_trees);
 
+
+typedef struct DeferredDescrInvalidation
+{
+	Oid			datoid;
+	Oid			reloid;
+	Oid			relfilenode;
+} DeferredDescrInvalidation;
+
+/*
+ * When true, invalidation messages arriving via o_invalidate_descrs() are
+ * saved instead of being processed immediately.  This is set while executing
+ * a comparator function inside o_call_comparator(), because the comparator
+ * may trigger AcceptInvalidationMessages() which processes sinval messages,
+ * which in turn may call o_invalidate_descrs().  Processing those
+ * invalidations inside a comparator is unsafe (it can read catalogs while
+ * the caller holds page locks), so we save them and replay later.
+ */
+static bool saving_inval_messages = false;
+static List *saved_descr_invals = NIL;
+
+
 struct OComparatorKey
 {
 	Oid			opfamily;
@@ -936,8 +957,63 @@ init_shared_root_info(OPagePool *pool, SharedRootInfo *sharedRootInfo)
 	}
 }
 
+/*
+ * Start saving invalidation messages instead of processing them immediately.
+ * Returns the previous saving state so it can be restored by the caller.
+ */
+bool
+o_start_saving_inval_messages(void)
+{
+	bool		was_saving = saving_inval_messages;
+
+	saving_inval_messages = true;
+	return was_saving;
+}
+
+/*
+ * Stop saving invalidation messages, restoring the previous state.
+ */
 void
-o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode)
+o_stop_saving_inval_messages(bool was_saving)
+{
+	saving_inval_messages = was_saving;
+}
+
+/*
+ * Replay invalidation messages saved during o_call_comparator() or
+ * ppool_reserve_pages().  Called from AcceptInvalidationMessagesHook
+ * when we are outside a saving section, so it is safe to process them.
+ */
+void
+o_replay_saved_inval_messages(void)
+{
+	if (saving_inval_messages || saved_descr_invals == NIL)
+		return;
+
+	while (saved_descr_invals != NIL)
+	{
+		List	   *invals = saved_descr_invals;
+		ListCell   *lc;
+
+		saved_descr_invals = NIL;
+
+		foreach(lc, invals)
+		{
+			DeferredDescrInvalidation *pending_inval;
+
+			pending_inval = (DeferredDescrInvalidation *) lfirst(lc);
+			o_invalidate_descrs(pending_inval->datoid,
+								pending_inval->reloid,
+								pending_inval->relfilenode);
+			pfree(pending_inval);
+		}
+
+		list_free(invals);
+	}
+}
+
+static void
+o_invalidate_descrs_internal(Oid datoid, Oid reloid, Oid relfilenode)
 {
 	HASH_SEQ_STATUS scan_status;
 	OTableDescr *tableDescr;
@@ -995,6 +1071,33 @@ o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode)
 				recreate_index_descr(indexDescr);
 		}
 	}
+}
+
+void
+o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode)
+{
+	DeferredDescrInvalidation *deferred;
+	MemoryContext oldcontext;
+
+	/*
+	 * If we are inside o_call_comparator(), save the invalidation message for
+	 * later replay.  Processing it now could read catalogs while the caller
+	 * holds page locks or is in the middle of a comparison.
+	 */
+	if (saving_inval_messages)
+	{
+		oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+		deferred = palloc(sizeof(DeferredDescrInvalidation));
+		deferred->datoid = datoid;
+		deferred->reloid = reloid;
+		deferred->relfilenode = relfilenode;
+		saved_descr_invals = lappend(saved_descr_invals, deferred);
+		MemoryContextSwitchTo(oldcontext);
+		return;
+	}
+
+	/* Handle the current invalidation. */
+	o_invalidate_descrs_internal(datoid, reloid, relfilenode);
 }
 
 SharedRootInfo *
@@ -1597,6 +1700,9 @@ int
 o_call_comparator(OComparator *comparator, Datum left, Datum right)
 {
 	int			ret;
+	bool		was_saving;
+
+	was_saving = o_start_saving_inval_messages();
 
 	if (comparator->haveSortSupport)
 	{
@@ -1622,6 +1728,8 @@ o_call_comparator(OComparator *comparator, Datum left, Datum right)
 								left, right);
 		ret = DatumGetInt32(cmp);
 	}
+
+	o_stop_saving_inval_messages(was_saving);
 
 	return ret;
 }
@@ -1990,4 +2098,10 @@ o_call_exclusion_fn(OExclusionFn *exclusion_fn, Datum left, Datum right, Oid col
 	cmp = DatumGetBool(ret) ? 0 : 1;
 
 	return cmp;
+}
+
+void
+reset_saving_inval_messages(void)
+{
+	saving_inval_messages = false;
 }

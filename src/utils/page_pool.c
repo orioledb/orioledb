@@ -19,6 +19,7 @@
 #include "btree/page_contents.h"
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
+#include "tableam/handler.h"
 #include "transam/undo.h"
 #include "utils/page_pool.h"
 #include "utils/ucm.h"
@@ -92,11 +93,15 @@ ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found)
 void
 ppool_reserve_pages(OPagePool *pool, int kind, int count)
 {
+	bool		was_saving;
+
 	Assert(!have_locked_pages());
 
 	count -= pool->numPagesReserved[kind];
 	if (count <= 0)
 		return;
+
+	was_saving = o_start_saving_inval_messages();
 
 	while (pg_atomic_sub_fetch_u64(pool->availablePagesCount, count) & (UINT64CONST(1) << 63))
 	{
@@ -105,6 +110,8 @@ ppool_reserve_pages(OPagePool *pool, int kind, int count)
 	}
 
 	pool->numPagesReserved[kind] += count;
+
+	o_stop_saving_inval_messages(was_saving);
 }
 
 /*
