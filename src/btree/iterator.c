@@ -309,6 +309,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	UndoLocation undoLocation = InvalidUndoLocation;
 	bool		curTupleAllocated = false;
 	MemoryContext prevMctx;
+	bool		txIsFinished = false;
 
 	prevMctx = MemoryContextSwitchTo(mcxt);
 
@@ -322,12 +323,13 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	while (true)
 	{
 		OTupleXactInfo xactInfo = tupHdr.xactInfo;
-		bool		txIsFinished = XACT_INFO_IS_FINISHED(xactInfo);
 		CommitSeqNo tupcsn;
 		XLogRecPtr	tupptr;
 
 		oxid_match_snapshot(XACT_INFO_GET_OXID(xactInfo), oSnapshot,
 							&tupcsn, &tupptr);
+
+		txIsFinished = COMMITSEQNO_IS_COMMITTED(tupcsn);
 
 		if (tupleCsn)
 		{
@@ -450,7 +452,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	if (COMMITSEQNO_IS_NON_DELETED(oSnapshot->csn))
 	{
 		if (tupHdr.deleted != BTreeLeafTupleNonDeleted &&
-			XACT_INFO_IS_FINISHED(tupHdr.xactInfo))
+			txIsFinished)
 		{
 			O_TUPLE_SET_NULL(result);
 			MemoryContextSwitchTo(prevMctx);
