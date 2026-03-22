@@ -476,6 +476,22 @@ perform_writeback(BTreeDescr *desc, CheckpointWriteBack *writeback)
 	writeback->extentsNumber = 0;
 }
 
+/*
+ * Perform writeback and re-acquire the tree lock for non-system trees.
+ *
+ * The caller must hold the OrioleDB checkpointer table lock (the special
+ * LOCKTAG_USERLOCK variant of AccessShareLock used by the checkpointer).
+ * For non-system trees, this function releases the lock to allow concurrent
+ * deletions during writeback, then re-acquires it via o_fetch_index_descr().
+ *
+ * On success, the checkpointer lock is held and the returned descriptor is
+ * valid.  On failure (NULL return), the lock has been released: either
+ * because the tree was concurrently deleted (o_fetch_index_descr returned
+ * NULL) or because o_btree_load_shmem_checkpoint failed (lock explicitly
+ * released before returning).
+ *
+ * For system trees, no lock management is done — only writeback is performed.
+ */
 static BTreeDescr *
 perform_writeback_and_relock(BTreeDescr *desc,
 							 CheckpointWriteBack *writeback,
@@ -513,6 +529,7 @@ perform_writeback_and_relock(BTreeDescr *desc,
 		desc = &indexDescr->desc;
 		if (!o_btree_load_shmem_checkpoint(desc))
 		{
+			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 			LWLockRelease(&checkpoint_state->oTablesMetaLock);
 			return NULL;
 		}
@@ -1572,7 +1589,12 @@ checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 }
 
 /*
- * Make checkpoint of an temporary index.
+ * Make checkpoint of a temporary index.
+ *
+ * The caller must hold the OrioleDB checkpointer table lock.  On success
+ * (true), the lock is still held and the caller must release it.  On
+ * failure (false), the lock has already been released by
+ * perform_writeback_and_relock() inside checkpoint_btree().
  */
 static bool
 checkpoint_temporary_tree(int flags, BTreeDescr *descr)
@@ -1595,6 +1617,7 @@ checkpoint_temporary_tree(int flags, BTreeDescr *descr)
 	root_downlink = checkpoint_btree(&descr, checkpoint_state, &writeback);
 	if (!DiskDownlinkIsValid(root_downlink))
 	{
+		/* Lock already released by perform_writeback_and_relock() */
 		free_writeback(&writeback);
 		return false;
 	}
@@ -1603,7 +1626,10 @@ checkpoint_temporary_tree(int flags, BTreeDescr *descr)
 										 checkpoint_state, NULL, 0);
 	free_writeback(&writeback);
 	if (!descr)
+	{
+		/* Lock already released by perform_writeback_and_relock() */
 		return false;
+	}
 
 	Assert(checkpoint_state->curKeyType == CurKeyGreatest);
 
@@ -2497,7 +2523,12 @@ backend_set_autonomous_level(CheckpointState *state, uint32 level)
 }
 
 /*
- * Make checkpoint of an index.
+ * Make checkpoint of an index (persistent or unlogged).
+ *
+ * The caller must hold the OrioleDB checkpointer table lock.  On success
+ * (true), the lock is still held and the caller must release it.  On
+ * failure (false), the lock has already been released by
+ * perform_writeback_and_relock() inside checkpoint_btree().
  */
 static bool
 checkpoint_ix(int flags, BTreeDescr *descr)
@@ -2529,6 +2560,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 	root_downlink = checkpoint_btree(&descr, checkpoint_state, &writeback);
 	if (!DiskDownlinkIsValid(root_downlink))
 	{
+		/* Lock already released by perform_writeback_and_relock() */
 		free_writeback(&writeback);
 		return false;
 	}
@@ -2536,7 +2568,10 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 										 checkpoint_state, NULL, 0);
 	free_writeback(&writeback);
 	if (!descr)
+	{
+		/* Lock already released by perform_writeback_and_relock() */
 		return false;
+	}
 
 	Assert(checkpoint_state->curKeyType == CurKeyGreatest);
 	Assert(DiskDownlinkIsValid(root_downlink));
@@ -4954,9 +4989,12 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		else
 		{
 			success = checkpoint_temporary_tree(tbl_arg->flags, td);
-			if (success && !orioledb_s3_mode)
-				sort_checkpoint_tmp_file(td, cur_chkp_index);
-			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
+			if (success)
+			{
+				if (!orioledb_s3_mode)
+					sort_checkpoint_tmp_file(td, cur_chkp_index);
+				o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
+			}
 		}
 
 
