@@ -1584,7 +1584,7 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 
 	if (modify_result == OBTreeModifyResultUpdated)
 	{
-		((OTableSlot *) newSlot)->version = o_tuple_get_version(newTup);
+		((OTableSlot *) newSlot)->version = o_tuple_get_version(((OTableSlot *) newSlot)->tuple);
 		if (result.success)
 		{
 			result.action = BTreeOperationUpdate;
@@ -1675,7 +1675,7 @@ o_tbl_indices_reinsert(OTableDescr *descr,
 							  (Pointer) newPkey, BTreeKeyBound,
 							  oxid, csn, RowLockUpdate,
 							  NULL, &insertCallbackInfo) == OBTreeModifyResultInserted;
-	((OTableSlot *) newSlot)->version = o_tuple_get_version(newTup);
+	((OTableSlot *) newSlot)->version = o_tuple_get_version(((OTableSlot *) newSlot)->tuple);
 
 	if (inserted)
 	{
