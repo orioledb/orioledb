@@ -1039,6 +1039,15 @@ SELECT * FROM o_test_1 ORDER BY b;
 RESET enable_seqscan;
 DROP TABLE o_test_1;
 
+CREATE TABLE pktable (a float8, b float8, PRIMARY KEY (a, b)) USING orioledb;
+CREATE TABLE fktable (x float8, y float8, FOREIGN KEY (x, y) REFERENCES pktable (a, b) ON UPDATE CASCADE) USING orioledb;
+INSERT INTO pktable VALUES ('-0', '-0');
+INSERT INTO fktable VALUES ('-0', '-0');
+UPDATE pktable SET a = '0' WHERE a = '-0';
+SELECT * FROM fktable;
+DROP TABLE fktable;
+DROP TABLE pktable;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA tableam CASCADE;
 RESET search_path;
