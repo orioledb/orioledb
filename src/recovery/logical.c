@@ -1250,7 +1250,7 @@ decode_wal_record(void *vctx, WalRecord *rec)
 						Assert(ctx->descr != NULL);
 						Assert(!O_TUPLE_IS_NULL(tuple1.tuple));
 						change = ReorderBufferGetChange(ctx->dctx->reorder);
-						change->data.tp.rlocator.spcOid = DEFAULTTABLESPACE_OID;
+						change->data.tp.rlocator.spcOid = ctx->descr->tablespace;
 						change->data.tp.rlocator.dbOid = rec->oids.datoid;
 						change->data.tp.rlocator.relNumber = rec->oids.relnode;
 						elog(DEBUG4, "reloid: %u", rec->oids.reloid);
