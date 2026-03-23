@@ -184,6 +184,22 @@ ALTER TABLE o_test_fillfactor SET (fillfactor = 20);
 ALTER INDEX o_test_fillfactor_ix1 SET (fillfactor = 50);
 ```
 
+### Sequence caching
+
+OrioleDB optimizes performance by bypassing PostgreSQL's native transaction ID (XID) allocation and heap write-ahead logging (WAL) when operations are strictly confined to OrioleDB tables. However, because PostgreSQL sequences are implemented as `heap` relations, invoking `nextval()` modifies heap structures. This forces the assignment of a full PostgreSQL XID, negating OrioleDB's transaction optimizations.
+
+To prevent unnecessary XID allocations when using sequence-backed columns, configure sequences with a `CACHE` value:
+
+```sql
+CREATE SEQUENCE my_seq CACHE 100;
+```
+
+With caching enabled, only the initial `nextval()` call requires `heap` modification and XID allocation to fetch a block of values. Subsequent calls within the same session retrieve values from memory, preserving OrioleDB's optimized transaction handling.
+
+:::note
+This optimization is critical for workloads characterized by high volumes of small transactions. For large transactions, the performance penalty is negligible as the cost of XID allocation is heavily amortized.
+:::
+
 ### Undo log size calculation
 
 OrioleDB stores some of the modifications data in temporary Undo logs. While this storage separate from relation
@@ -260,6 +276,7 @@ OrioleDB is currently in the development stage. Therefore it has the following t
 11. Backward fetches from a cursor is supported only when the cursor is declared with `SCROLL`.
 12. OrioleDB doesn't use checksums on data pages and initializing a database
 cluster with `-k` (`--data-checksums`) doesn't have effect on OrioleDB tables.
+13. PostgreSQL sequences are backed by heap relations. Accessing them (e.g., via `nextval()`) forces full PostgreSQL Transaction ID (XID) allocation, bypassing OrioleDB's optimized transaction mechanics unless sequence caching is utilized.
 
 ## Links
 

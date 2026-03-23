@@ -2451,7 +2451,7 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 	LogicalXidCtx logicalXidContext;
 
 	/*
-	 * Cleanup EXPLAY ANALYZE counters pointer to handle case when execution
+	 * Cleanup EXPLAIN ANALYZE counters pointer to handle case when execution
 	 * of node was interrupted by exception.
 	 */
 	ea_counters = NULL;
