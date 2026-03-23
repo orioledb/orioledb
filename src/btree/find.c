@@ -46,12 +46,12 @@ static bool btree_find_read_page(OBTreeFindPageContext *context,
 								 bool parent, void *key, BTreeKeyType keyType,
 								 PartialPageState *partial,
 								 bool loadHikeysChunk);
-static bool btree_find_try_read_page(OBTreeFindPageContext *context,
-									 OInMemoryBlkno blkno,
-									 uint32 pageChangeCount, bool parent,
-									 void *key, BTreeKeyType keyType,
-									 PartialPageState *partial,
-									 bool loadHikeysChunk);
+static ReadPageResult btree_find_try_read_page(OBTreeFindPageContext *context,
+											   OInMemoryBlkno blkno,
+											   uint32 pageChangeCount, bool parent,
+											   void *key, BTreeKeyType keyType,
+											   PartialPageState *partial,
+											   bool loadHikeysChunk);
 
 static OffsetNumber btree_page_binary_search_chunks(BTreeDescr *desc, Page p,
 													Pointer key,
@@ -1526,7 +1526,7 @@ btree_find_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
  * Navigates and reads page image from undo log according to find context.
  * Saves lokey of the founded page to context->lokey if needed.
  */
-static bool
+static ReadPageResult
 btree_find_try_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 						 uint32 pageChangeCount, bool parent, void *key,
 						 BTreeKeyType keyType, PartialPageState *partial,
