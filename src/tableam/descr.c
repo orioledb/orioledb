@@ -306,6 +306,14 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 	sharedRootInfo = o_find_shared_root_info(&key);
 	if (sharedRootInfo == NULL)
 	{
+		/*
+		 * Deletion from SYS_TREES_SHARED_ROOT_INFO comes before applying undo
+		 * records to SYS_TREES_O_INDICES.  So, this situation is possible in
+		 * checkpointer due to concurrent deletion.  Just give up then.
+		 */
+		if (checkpoint && tree_is_under_checkpoint(desc))
+			return false;
+
 		lockNo = tag_hash(&key, sizeof(key)) % SHARED_ROOT_INFO_INSERT_NUM_LOCKS;
 
 		/*---
