@@ -70,3 +70,17 @@ UPDATE 1
 > COMMIT;
 COMMIT
 ```
+
+## Transaction ID Allocation and Heap Relations
+
+OrioleDB optimizes concurrency by utilizing virtual transaction IDs (Virtual XIDs) for operations confined exclusively to OrioleDB tables. This bypasses the overhead of allocating a full PostgreSQL Transaction ID (XID) and the associated Write-Ahead Logging (WAL) required for heap relations.
+
+Modifying any PostgreSQL `heap` relation within an OrioleDB transaction forces the allocation of a full XID. This alters the concurrency path and negates the Virtual XID optimization.
+
+### Sequence Generation Overhead
+
+PostgreSQL sequences are backed by `heap` relations. Using `nextval()` modifies the sequence relation, triggering a full XID allocation. To preserve OrioleDB's optimized transaction mechanics:
+
+*   **Enable Sequence Caching:** Configure sequences with a `CACHE` directive (e.g., `CREATE SEQUENCE my_seq CACHE 100;`).
+*   **Mechanism:** Caching restricts heap modification (and full XID allocation) to the single `nextval()` call that fetches the cache block. Subsequent calls retrieve values from session memory.
+*   **Workload Impact:** This optimization can be critical for workloads with high volumes of small transactions. In large transactions, the performance penalty of a single XID allocation is heavily amortized.
