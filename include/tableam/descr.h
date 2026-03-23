@@ -250,6 +250,8 @@ struct OTableDescr
 	int			nIndices;
 	/* number of unique trees */
 	int			nUniqueIndices;
+	/* OID of the tablespace for table */
+	Oid			tablespace;
 };
 
 typedef struct

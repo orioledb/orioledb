@@ -644,6 +644,7 @@ fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 	descr->refcnt = 0;
 	descr->oids = o_table->oids;
 	descr->version = o_table->version;
+	descr->tablespace = o_table->tablespace;
 	descr->tupdesc = o_table_tupdesc(o_table);
 	descr->oldTuple = MakeSingleTupleTableSlot(descr->tupdesc,
 											   &TTSOpsOrioleDB);
