@@ -47,6 +47,7 @@ elif [ $CHECK_TYPE = "sanitize" ]; then
 		make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?
 elif [ $CHECK_TYPE = "pg_tests" ]; then
     cd ../postgresql
+    cat src/test/regress/parallel_schedule | sed "s/indirect_toast//" >$GITHUB_WORKSPACE/parallel_schedule_no_segfaults
     # Backport float tests patch
     wget -O float-patch.patch "https://git.postgresql.org/gitweb/?p=postgresql.git;a=patch;h=da83b1ea10c2b7937d4c9e922465321749c6785b"
     git apply float-patch.patch
@@ -73,6 +74,9 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         echo "primary_conninfo = 'host=/tmp port=5432'" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         echo "allow_in_place_tablespaces = true" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log start
+
+        cd src/test/regress
+        make installcheck-tests EXTRA_REGRESS_OPTS="--load-extension=orioledb --schedule=$GITHUB_WORKSPACE/parallel_schedule_no_segfaults" TESTS="" -j $(nproc) || true
 
         # Run Postgress regression tests
         make -C src/test/regress EXTRA_REGRESS_OPTS="--load-extension=orioledb" installcheck-oriole -j $(nproc) || true
