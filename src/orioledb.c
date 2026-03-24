@@ -1185,7 +1185,7 @@ _PG_init(void)
 												 "orioledb B-tree insert context",
 												 ALLOCSET_DEFAULT_SIZES);
 
-	btree_seqscan_context = AllocSetContextCreate(TopTransactionContext,
+	btree_seqscan_context = AllocSetContextCreate(TopMemoryContext,
 												  "orioledb B-tree seqential scans context",
 												  ALLOCSET_DEFAULT_SIZES);
 
