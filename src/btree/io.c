@@ -2278,8 +2278,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 }
 
 static void
-btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data,
-								bool notModified)
+btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data)
 {
 	int			chkp_index;
 	bool		is_compressed = OCompressIsValid(desc->compress);
@@ -2322,29 +2321,30 @@ btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data,
 		FREE_PAGE_IF_VALID(desc->ppool, desc->freeBuf.shared->pages[1]);
 	}
 
+	/*
+	 * We must always finalize seq bufs (not just close them) to save the
+	 * correct offset into evicted data.  On restore, init_seq_buf() uses a
+	 * non-NULL evicted pointer to skip the skip_len reservation (e.g.
+	 * CheckpointFileHeader).  If the offset is left at 0, the header space
+	 * won't be reserved, and seq_buf_finalize() at checkpoint time will
+	 * return a size smaller than sizeof(CheckpointFileHeader).
+	 */
 	if (desc->storageType == BTreeStoragePersistence || desc->storageType == BTreeStorageUnlogged)
 	{
 		evicted_data->nextChkp.tag = desc->nextChkp[chkp_index].shared->tag;
-		if (notModified)
-			seq_buf_close_file(&desc->nextChkp[chkp_index]);
-		else
-			evicted_data->nextChkp.offset = seq_buf_finalize(&desc->nextChkp[chkp_index]);
+		evicted_data->nextChkp.offset = seq_buf_finalize(&desc->nextChkp[chkp_index]);
 		FREE_PAGE_IF_VALID(desc->ppool, desc->nextChkp[chkp_index].shared->pages[0]);
 		FREE_PAGE_IF_VALID(desc->ppool, desc->nextChkp[chkp_index].shared->pages[1]);
 
 		evicted_data->tmpBuf.tag = desc->tmpBuf[chkp_index].shared->tag;
-		if (notModified)
-			seq_buf_close_file(&desc->tmpBuf[chkp_index]);
-		else
-			evicted_data->tmpBuf.offset = seq_buf_finalize(&desc->tmpBuf[chkp_index]);
+		evicted_data->tmpBuf.offset = seq_buf_finalize(&desc->tmpBuf[chkp_index]);
 		FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[0]);
 		FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[1]);
 	}
 	else
 	{
 		evicted_data->tmpBuf.tag = desc->tmpBuf[chkp_index].shared->tag;
-		if (!notModified)
-			evicted_data->tmpBuf.offset = seq_buf_finalize(&desc->tmpBuf[chkp_index]);
+		evicted_data->tmpBuf.offset = seq_buf_finalize(&desc->tmpBuf[chkp_index]);
 		FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[0]);
 		FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[1]);
 	}
@@ -2459,7 +2459,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	 * Free all private seq buf pages and get their offsets
 	 */
 	if (!orioledb_s3_mode || desc->storageType == BTreeStorageTemporary)
-		btree_finalize_private_seq_bufs(desc, &evicted_tree_data, notModified);
+		btree_finalize_private_seq_bufs(desc, &evicted_tree_data);
 
 	ppool_free_page(desc->ppool, desc->rootInfo.metaPageBlkno, NULL);
 
