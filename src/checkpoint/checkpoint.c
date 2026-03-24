@@ -2638,6 +2638,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 
 		/* finalizes *.map file */
 		map_len = seq_buf_finalize(&descr->nextChkp[cur_chkp_index]);
+		Assert(map_len >= sizeof(CheckpointFileHeader));
 		free_seq_buf_pages(descr, descr->nextChkp[cur_chkp_index].shared);
 		filename = get_seq_buf_filename(&descr->nextChkp[cur_chkp_index].tag);
 		file = PathNameOpenFile(filename, O_RDWR | PG_BINARY);
@@ -2674,6 +2675,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 
 		Assert(free_extents != NULL);
 
+		Assert(map_len >= sizeof(CheckpointFileHeader));
 		map_extents_size = (map_len - sizeof(CheckpointFileHeader))
 			/ sizeof(FileExtent);
 		if (map_extents_size > 0)
@@ -2803,6 +2805,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 									free_buf_tag.num);
 		if (finalize_filename)
 			pfree(finalize_filename);
+		Assert(map_len >= sizeof(CheckpointFileHeader));
 		header.numFreeBlocks = (map_len - sizeof(CheckpointFileHeader)) / (use_device ? sizeof(FileExtent) : sizeof(uint32));
 	}
 	else if (orioledb_s3_mode)
@@ -2813,6 +2816,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 	{
 		/* nothing to do */
 		Assert(is_compressed && free_extents->size == 0);
+		Assert(map_len >= sizeof(CheckpointFileHeader));
 		header.numFreeBlocks = (map_len - sizeof(CheckpointFileHeader)) / sizeof(FileExtent);
 	}
 
