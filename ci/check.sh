@@ -95,7 +95,7 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
           [ -s src/test/isolation_filtered.diffs ] || rm src/test/isolation_filtered.diffs src/test/isolation/output_iso/regression.diffs
         fi
 
-        pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log stop
+        PGCTLTIMEOUT=900 pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log stop
         if [ $PG_VERSION = "17" ]; then
             make -C src/test/subscription installcheck-oriole -j $(nproc) || status=$?
         fi
