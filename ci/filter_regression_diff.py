@@ -87,7 +87,24 @@ knownErrors = {
 	# psql specific errors
 	r"^\s*List of access methods": ["psql"],
 	r"Susie": ["psql"],	
+
+	# foreign_key specific errors
+	r"ERROR:  duplicate key value violates unique constraint" : ["foreign_key"],
+	r"ERROR:  (insert or update|update or delete) on table \"[a-z]+\" violates foreign key constraint": ["foreign_key"]
 }
+
+# Regexps that allow us to completely skip comparasion of hunks containing these regexprs
+skip_hunk_errors = {
+	r"ERROR:  orioledb tuples does not have system attribute: xm(in|ax)":
+	["update"],
+}
+
+def can_drop_hunk(testName, line):
+	for regex, tests in skip_hunk_errors.items():
+		if re.match(regex, line):
+			if '*' in tests or testName in tests:
+				return True
+	return False
 
 
 def is_known_error(testName, line):
@@ -486,6 +503,19 @@ for patched_file in patched_files:
 			hunks[hunk_num - 1] += hunks[hunk_num]
 			hunks.pop(hunk_num)
 		else:
+			hunk_num += 1
+
+	# Drop all hunks that contain "bad" lines that is difficult to compare with script currently
+	hunk_num = 0
+	while hunk_num < len(hunks):
+		is_dropped = False
+		for line in hunks[hunk_num]:
+			if can_drop_hunk(testName, line.value):
+				patched_file.remove(hunks[hunk_num])
+				hunks.pop(hunk_num)
+				is_dropped = True
+				break
+		if not is_dropped:
 			hunk_num += 1
 
 	for hunk_num in range(0, len(hunks)):
