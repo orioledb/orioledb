@@ -305,6 +305,44 @@ ROLLBACK;
 -- Cleanup
 DROP TABLE o_test_alter_constraint CASCADE;
 DROP TABLE o_test_alter_constraint_ref CASCADE;
+--
+-- Test the difference between NO ACTION and RESTRICT
+--
+CREATE TEMP TABLE pp (
+	f1 int PRIMARY KEY
+) USING orioledb;
+CREATE TEMP TABLE cc (
+	f1 int REFERENCES pp ON UPDATE NO ACTION ON DELETE NO ACTION
+) USING orioledb;
+INSERT INTO pp VALUES (12);
+INSERT INTO pp VALUES (11);
+UPDATE pp SET f1 = f1 - 1;
+INSERT INTO cc VALUES (10);
+UPDATE pp SET f1 = f1 - 1;
+UPDATE pp SET f1 = f1 - 1; -- fail
+ERROR:  update or delete on table "pp" violates foreign key constraint "cc_f1_fkey" on table "cc"
+DETAIL:  Key (f1)=(10) is still referenced from table "cc".
+DELETE FROM pp WHERE f1 = 10; -- fail
+ERROR:  update or delete on table "pp" violates foreign key constraint "cc_f1_fkey" on table "cc"
+DETAIL:  Key (f1)=(10) is still referenced from table "cc".
+DROP TABLE pp, cc;
+CREATE TEMP TABLE pp (
+	f1 int PRIMARY KEY
+) USING orioledb;
+CREATE TEMP TABLE cc (
+	f1 int REFERENCES pp ON UPDATE RESTRICT ON DELETE RESTRICT
+) USING orioledb;
+INSERT INTO pp VALUES (12);
+INSERT INTO pp VALUES (11);
+UPDATE pp SET f1 = f1 - 1;
+INSERT INTO cc VALUES (10);
+UPDATE pp SET f1 = f1 - 1; -- fail
+ERROR:  update or delete on table "pp" violates foreign key constraint "cc_f1_fkey" on table "cc"
+DETAIL:  Key (f1)=(10) is still referenced from table "cc".
+DELETE FROM pp WHERE f1 = 10; -- fail
+ERROR:  update or delete on table "pp" violates foreign key constraint "cc_f1_fkey" on table "cc"
+DETAIL:  Key (f1)=(10) is still referenced from table "cc".
+DROP TABLE pp, cc;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 11 other objects
 DETAIL:  drop cascades to table o_test_text

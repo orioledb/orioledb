@@ -259,6 +259,42 @@ ROLLBACK;
 DROP TABLE o_test_alter_constraint CASCADE;
 DROP TABLE o_test_alter_constraint_ref CASCADE;
 
+--
+-- Test the difference between NO ACTION and RESTRICT
+--
+CREATE TEMP TABLE pp (
+	f1 int PRIMARY KEY
+) USING orioledb;
+
+CREATE TEMP TABLE cc (
+	f1 int REFERENCES pp ON UPDATE NO ACTION ON DELETE NO ACTION
+) USING orioledb;
+
+INSERT INTO pp VALUES (12);
+INSERT INTO pp VALUES (11);
+UPDATE pp SET f1 = f1 - 1;
+INSERT INTO cc VALUES (10);
+UPDATE pp SET f1 = f1 - 1;
+UPDATE pp SET f1 = f1 - 1; -- fail
+DELETE FROM pp WHERE f1 = 10; -- fail
+DROP TABLE pp, cc;
+
+CREATE TEMP TABLE pp (
+	f1 int PRIMARY KEY
+) USING orioledb;
+
+CREATE TEMP TABLE cc (
+	f1 int REFERENCES pp ON UPDATE RESTRICT ON DELETE RESTRICT
+) USING orioledb;
+
+INSERT INTO pp VALUES (12);
+INSERT INTO pp VALUES (11);
+UPDATE pp SET f1 = f1 - 1;
+INSERT INTO cc VALUES (10);
+UPDATE pp SET f1 = f1 - 1; -- fail
+DELETE FROM pp WHERE f1 = 10; -- fail
+DROP TABLE pp, cc;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA foreign_keys CASCADE;
 RESET search_path;
