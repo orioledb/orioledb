@@ -1827,6 +1827,8 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 		scan->diskDownlinks = NULL;
 	}
 
+	scan->status = BTreeSeqScanFinished;
+
 	if (!fromResowner)
 	{
 		dlist_delete_from_thoroughly(&listOfScans, &scan->listNode);
