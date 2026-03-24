@@ -138,13 +138,15 @@ jobs:
             ./postgresql/src/test/**/isolation_filtered.diffs
           retention-days: 2
           if-no-files-found: ignore
-      - name: Upload testgres tests logs
+      - name: Upload tests logs
         uses: actions/upload-artifact@v4
         if: ${{ failure() }}
         with:
           name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_testgres.logs
           path: |
             ./orioledb/test/tmp_check_t/*/logs/*log
+            ./postgresql/pg.log
+            ./postgresql/rep_pg.log
           retention-days: 2
           if-no-files-found: ignore
 
