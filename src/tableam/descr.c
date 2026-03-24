@@ -2227,12 +2227,17 @@ o_call_hash_fn(OHashFn *hash_fn, Oid collation, Datum val)
 {
 	uint32		result;
 	Datum		ret;
+	bool		was_saving;
+
+	was_saving = o_start_saving_inval_messages();
 
 	/* FIX: There should be a better way */
 	if (o_is_syscache_hooks_set() && hash_fn->finfo.fn_addr == fmgr_sql)
 		hash_fn->finfo.fn_addr = o_fmgr_sql;
 	ret = FunctionCall1Coll(&hash_fn->finfo, collation, val);
 	result = DatumGetUInt32(ret);
+
+	o_stop_saving_inval_messages(was_saving);
 
 	return result;
 }
