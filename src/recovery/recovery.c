@@ -180,11 +180,11 @@ retain_undo_pairingheap_cmp(const pairingheap_node *a,
 {
 	int			num = *((int *) arg);
 	const RecoveryXidState *l = RetainUndoNodeGetRecoveryXidState(a, num);
-	const RecoveryXidState *r = RetainUndoNodeGetRecoveryXidState(b, num);;
+	const RecoveryXidState *r = RetainUndoNodeGetRecoveryXidState(b, num);
 
-	if (l->retain_locs[UndoLogRegular] < r->retain_locs[UndoLogRegular])
+	if (l->retain_locs[num] < r->retain_locs[num])
 		return 1;
-	else if (l->retain_locs[UndoLogRegular] > r->retain_locs[UndoLogRegular])
+	else if (l->retain_locs[num] > r->retain_locs[num])
 		return -1;
 	else
 		return 0;
@@ -2366,7 +2366,12 @@ save_state_to_file(int worker_id)
 								   (UndoLogType) i);
 			if (!UndoLocationIsValid(cur_recovery_xid_state->retain_locs[i]) &&
 				UndoLocationIsValid(curRetainUndoLocations[i]))
+			{
+				Assert(!cur_recovery_xid_state->in_retain_undo_heaps[i]);
 				cur_recovery_xid_state->retain_locs[i] = curRetainUndoLocations[i];
+				pairingheap_add(retain_undo_queues[i], &cur_recovery_xid_state->retain_undo_ph_nodes[i]);
+				cur_recovery_xid_state->in_retain_undo_heaps[i] = true;
+			}
 		}
 	}
 
