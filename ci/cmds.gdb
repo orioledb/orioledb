@@ -1,6 +1,4 @@
 thread apply all bt full
-p myLockedPages
-p numberOfMyLockedPages
 up 99999
 set $i=0
 set $end=argc
