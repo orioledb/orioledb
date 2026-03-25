@@ -4047,9 +4047,9 @@ workers_send_oxid_finish(XLogRecPtr ptr, bool commit)
 			/*
 			 * Unconditionally reset cached oxid.  The worker will call
 			 * recovery_switch_to_oxid() when processing this message,
-			 * changing its recovery_oxid regardless of what was cached.
-			 * We must invalidate our cache to match, so that the next
-			 * modify message always sends the oxid explicitly.
+			 * changing its recovery_oxid regardless of what was cached. We
+			 * must invalidate our cache to match, so that the next modify
+			 * message always sends the oxid explicitly.
 			 */
 			state->oxid = InvalidOXid;
 
