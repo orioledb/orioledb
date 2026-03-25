@@ -420,6 +420,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 
 					memcpy(&iptr, data + data_pos, sizeof(iptr));
 					data_pos += sizeof(iptr);
+					data_pos = MAXALIGN(data_pos);
 
 					replay_erase_bridge_item(indexDescr, &iptr);
 				}
@@ -441,6 +442,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 											tuple);
 					}
 					data_pos += tuple_len;
+					data_pos = MAXALIGN(data_pos);
 				}
 			}
 			else if (type == RecoveryMsgTypeLeaderParallelIndexBuild)
