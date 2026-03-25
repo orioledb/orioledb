@@ -9,7 +9,7 @@ for process in $(pgrep postgres); do
         psout=$(echo -ne "$psout" | tail +2)
         echo ::group::Backtrace $psout
         echo -e $psout
-        sudo gdb --batch --quiet -ex "thread apply all bt full" -ex "p myLockedPages" -ex "p numberOfMyLockedPages" -ex "quit" -p $process
+        sudo gdb --batch --quiet -ex "thread apply all bt full" -ex "quit" -p $process
         echo ::endgroup::
         echo $psout
         if [[ "$psout" =~ ^.*\ -D\ /tmp/([a-z0-9_]+)/.*$ ]]; then
