@@ -1515,32 +1515,37 @@ o_indices_get_extended(ORelOids oids, OIndexType type, OTableFetchContext ctx)
 		Size		dataLength;
 		Pointer		result;
 		OIndex	   *oIndex;
+		MemoryContext tmp;
+		MemoryContext old;
 
 		boundKey.key = key;
 		boundKey.oxid = InvalidOXid;
 		found_key = &boundKey;
+		tmp = AllocSetContextCreate(CurrentMemoryContext,
+									"o_indices_get temp",
+									ALLOCSET_DEFAULT_SIZES);
+		old = MemoryContextSwitchTo(tmp);
 		result = generic_toast_get_any_with_key(&oIndicesToastAPI,
 												(Pointer) &key,
 												&dataLength,
 												ctx.snapshot,
 												get_sys_tree(SYS_TREES_O_INDICES),
 												(Pointer *) &found_key);
+		MemoryContextSwitchTo(old);
 
 		if (result == NULL)
-			return NULL;
-
-		oIndex = deserialize_o_index(&key, result, dataLength);
-		pfree(result);
-
-		if (oIndex != NULL)
 		{
-			pfree(found_key);
-			return oIndex;
+			MemoryContextDelete(tmp);
+			return NULL;
 		}
 
-		/* Truncated data — concurrent chunk write in progress, retry */
-		pfree(found_key);
+		oIndex = deserialize_o_index(&key, result, dataLength);
+		MemoryContextDelete(tmp);
 
+		if (oIndex != NULL)
+			return oIndex;
+
+		/* Truncated data — concurrent chunk write in progress, retry */
 		if (retry >= O_DESERIALIZE_MAX_RETRIES ||
 			!COMMITSEQNO_IS_INPROGRESS(ctx.snapshot->csn))
 			ereport(ERROR,
