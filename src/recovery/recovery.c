@@ -3431,7 +3431,7 @@ replay_wal_record(void *vctx, WalRecord *rec)
 					tuple.formatFlags = 0;
 					tuple.data = (Pointer) &rec->u.bridge_erase.iptr;
 					worker_send_modify(GET_WORKER_ID(hash), &ctx->indexDescr->desc,
-									   RecoveryMsgTypeBridgeErase, tuple, 0);
+									   RecoveryMsgTypeBridgeErase, tuple, sizeof(ItemPointerData));
 				}
 				break;
 			}
@@ -3845,7 +3845,7 @@ worker_send_modify(int worker_id, BTreeDescr *desc,
 
 	max_msg_size = MAXALIGN(sizeof(RecoveryMsgHeader) + sizeof(OXid)
 							+ sizeof(ORelOids) + 1
-							+ sizeof(int) + 1) + tuple_len;
+							+ sizeof(int) + 1) + MAXALIGN(tuple_len);
 
 	Assert(recType == RecoveryMsgTypeInsert ||
 		   recType == RecoveryMsgTypeUpdate ||
@@ -3905,6 +3905,7 @@ worker_send_modify(int worker_id, BTreeDescr *desc,
 		state->queue_buf_len += sizeof(ItemPointerData);
 		state->queue_buf_len = MAXALIGN(state->queue_buf_len);
 	}
+	Assert(state->queue_buf_len <= RECOVERY_QUEUE_BUF_SIZE);
 }
 
 /*
@@ -3966,8 +3967,7 @@ workers_send_savepoint(SubTransactionId parentSubId)
 		if (cur_recovery_xid_state->used_by[i])
 		{
 			state = &workers_pool[i];
-			if (state->oxid == cur_recovery_xid_state->oxid)
-				state->oxid = InvalidOXid;
+			state->oxid = InvalidOXid;
 
 			worker_send_msg(i, (Pointer) &msg, sizeof(msg));
 
@@ -4003,8 +4003,7 @@ workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 		if (cur_recovery_xid_state->used_by[i])
 		{
 			state = &workers_pool[i];
-			if (state->oxid == cur_recovery_xid_state->oxid)
-				state->oxid = InvalidOXid;
+			state->oxid = InvalidOXid;
 
 			worker_send_msg(i, (Pointer) &msg, sizeof(msg));
 
@@ -4044,8 +4043,15 @@ workers_send_oxid_finish(XLogRecPtr ptr, bool commit)
 			cur_recovery_xid_state->checkpoint_xid)
 		{
 			state = &workers_pool[i];
-			if (state->oxid == cur_recovery_xid_state->oxid)
-				state->oxid = InvalidOXid;
+
+			/*
+			 * Unconditionally reset cached oxid.  The worker will call
+			 * recovery_switch_to_oxid() when processing this message,
+			 * changing its recovery_oxid regardless of what was cached. We
+			 * must invalidate our cache to match, so that the next modify
+			 * message always sends the oxid explicitly.
+			 */
+			state->oxid = InvalidOXid;
 
 			worker_send_msg(i, (Pointer) &oxid_ptr_record, sizeof(oxid_ptr_record));
 
