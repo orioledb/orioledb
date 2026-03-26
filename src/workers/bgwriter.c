@@ -183,7 +183,10 @@ bgwriter_main(Datum main_arg)
 										   minProcReservedLocation, true);
 				}
 
-				/* Regularly update min_undo_location to avoid on-disk undo buffers piling up */
+				/*
+				 * Regularly update min_undo_location to avoid on-disk undo
+				 * buffers piling up
+				 */
 				if (TimestampDifferenceExceeds(undo_meta->lastCleanupTime, now, undo_cleanup_timeout * 1000))
 				{
 					if (pg_atomic_fetch_add_u32(&undo_meta->cleanupInProgressCount, 1) == 0)

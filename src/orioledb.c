@@ -154,7 +154,7 @@ int			logical_xid_buffers_guc = 64;
 bool		orioledb_strict_mode = false;
 XLogRecPtr	replay_until_lsn = InvalidXLogRecPtr;
 char	   *replay_until_lsn_string;
-int 		undo_cleanup_timeout = 30;
+int			undo_cleanup_timeout = 30;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
