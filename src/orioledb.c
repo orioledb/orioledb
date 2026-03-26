@@ -154,6 +154,7 @@ int			logical_xid_buffers_guc = 64;
 bool		orioledb_strict_mode = false;
 XLogRecPtr	replay_until_lsn = InvalidXLogRecPtr;
 char	   *replay_until_lsn_string;
+int 		undo_cleanup_timeout = 30;
 
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
@@ -1050,6 +1051,18 @@ _PG_init(void)
 							   orioledb_replay_until_lsn_check_hook,
 							   orioledb_replay_until_lsn_assign_hook,
 							   NULL);
+	DefineCustomIntVariable("orioledb.undo_cleanup_timeout",
+							"Sets the timeout for regular undo logs cleanup",
+							NULL,
+							&undo_cleanup_timeout,
+							30,
+							1,
+							86400,
+							PGC_POSTMASTER,
+							GUC_UNIT_S,
+							NULL,
+							NULL,
+							NULL);
 
 	if (orioledb_s3_mode)
 	{

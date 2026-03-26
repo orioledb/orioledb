@@ -112,6 +112,7 @@ bgwriter_main(Datum main_arg)
 			UndoLocation lastUsedLocation;
 			UndoLocation writeInProgressLocation;
 			int			j;
+			TimestampTz now = 0;
 
 			if (ShutdownRequestPending)
 				break;
@@ -163,6 +164,8 @@ bgwriter_main(Datum main_arg)
 				}
 			}
 
+			now = GetCurrentTimestamp();
+
 			for (j = 0; j < (int) UndoLogsCount; j++)
 			{
 				UndoMeta   *undo_meta = get_undo_meta_by_type((UndoLogType) j);
@@ -178,6 +181,19 @@ bgwriter_main(Datum main_arg)
 					if (targetLocation < minProcReservedLocation)
 						evict_undo_to_disk((UndoLogType) j, targetLocation,
 										   minProcReservedLocation, true);
+				}
+
+				/* Regularly update min_undo_location to avoid on-disk undo buffers piling up */
+				if (TimestampDifferenceExceeds(undo_meta->lastCleanupTime, now, undo_cleanup_timeout * 1000))
+				{
+					if (pg_atomic_fetch_add_u32(&undo_meta->cleanupInProgressCount, 1) == 0)
+					{
+						elog(DEBUG3, "update_min_undo_locations called by timeout");
+						undo_meta->lastCleanupTime = now;
+						update_min_undo_locations((UndoLogType) j, false, true);
+					}
+
+					pg_atomic_sub_fetch_u32(&undo_meta->cleanupInProgressCount, 1);
 				}
 			}
 

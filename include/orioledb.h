@@ -444,6 +444,7 @@ extern int	rewind_max_transactions;
 extern int	logical_xid_buffers_guc;
 extern bool orioledb_strict_mode;
 extern XLogRecPtr replay_until_lsn;
+extern int	undo_cleanup_timeout;
 
 #define GET_CUR_PROCDATA() \
 	(AssertMacro(MYPROCNUMBER >= 0 && \

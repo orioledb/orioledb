@@ -316,8 +316,10 @@ init_undo_meta(UndoMeta *meta, bool found)
 		meta->sysXidUndoLocationChangeCount = 0;
 		meta->undoWriteTrancheId = LWLockNewTrancheId();
 		meta->undoStackLocationsFlushLockTrancheId = LWLockNewTrancheId();
+		meta->lastCleanupTime = GetCurrentTimestamp();
 		LWLockInitialize(&meta->undoWriteLock,
 						 meta->undoWriteTrancheId);
+		pg_atomic_init_u32(&meta->cleanupInProgressCount, 0);
 
 		/* Undo locations are initialized in checkpoint_shmem_init() */
 	}
@@ -496,6 +498,8 @@ update_min_undo_locations(UndoLogType undoType,
 					oldCheckpointEndNum = oldCheckpointEndLocation / UNDO_FILE_SIZE,
 					newCheckpointStartNum = newCheckpointStartLocation / UNDO_FILE_SIZE,
 					newCheckpointEndNum = newCheckpointEndLocation / UNDO_FILE_SIZE;
+
+		meta->lastCleanupTime = GetCurrentTimestamp();
 
 		if (oldCheckpointEndLocation % UNDO_FILE_SIZE == 0)
 			oldCheckpointEndNum--;

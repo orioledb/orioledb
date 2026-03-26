@@ -227,6 +227,8 @@ typedef struct
 	LWLock		undoWriteLock;
 
 	int			undoStackLocationsFlushLockTrancheId;
+	TimestampTz	lastCleanupTime;
+	pg_atomic_uint32 cleanupInProgressCount;
 } UndoMeta;
 
 typedef struct
