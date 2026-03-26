@@ -62,6 +62,7 @@ static void apply_tbl_delete(OTableDescr *descr, OTuple key,
 							 OXid oxid, CommitSeqNo csn);
 static void apply_tbl_update(OTableDescr *descr, OTuple tuple,
 							 OXid oxid, CommitSeqNo csn);
+static void ReleaseWorkerResources(bool isCommit);
 
 typedef struct
 {
@@ -234,6 +235,15 @@ recovery_worker_main(Datum main_arg)
 			/* detach from queue if attached */
 			shm_mq_detach(recovery_worker_queue);
 		}
+
+		/*
+		 * Release all resources. We care mostly about temporary files which
+		 * are freed in RESOURCE_RELEASE_AFTER_LOCKS phase for conventional
+		 * temp-files and RESOURCE_RELEASE_BEFORE_LOCKS for SharedFileSet
+		 * which are tracked in dsm. But it is safer to release everything.
+		 */
+
+		ReleaseWorkerResources(false);
 
 		/*
 		 * Don't call recovery_finish().  We haven't receive the finish
@@ -1054,4 +1064,25 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 
 	ExecClearTuple(new_slot);
 	ExecClearTuple(old_slot);
+}
+
+/*
+ * Safely release all resources owned by the current background worker.
+ * Mirrors ReleaseAuxProcessResources but applies to CurrentResourceOwner.
+ */
+static void
+ReleaseWorkerResources(bool isCommit)
+{
+	if (CurrentResourceOwner == NULL)
+		return;
+
+	ResourceOwnerRelease(CurrentResourceOwner,
+						 RESOURCE_RELEASE_BEFORE_LOCKS,
+						 isCommit, true);
+	ResourceOwnerRelease(CurrentResourceOwner,
+						 RESOURCE_RELEASE_LOCKS,
+						 isCommit, true);
+	ResourceOwnerRelease(CurrentResourceOwner,
+						 RESOURCE_RELEASE_AFTER_LOCKS,
+						 isCommit, true);
 }
