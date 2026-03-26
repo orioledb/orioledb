@@ -33,9 +33,10 @@ TABLE_PREF = "calib_table"
 class PageFitItemsTest(BaseTest):
 
 	# MAGIC NUMBERS RELATIVE TO TUPLES STRUCTURES
-	RELATION_SINGLE_FIELD_TUPLE_SIZE = 173
+	RELATION_SINGLE_FIELD_TUPLE_SIZE = 197
 	RELATION_EXTRA_FIELD_TUPLE_SIZE = 97
 	INDEX_EXTRA_TUPLE_SIZE = 891
+	PER_TUPLE_EXTRA_SIZE = 52
 
 	def setUp(self):
 		super().setUp()
@@ -53,7 +54,7 @@ class PageFitItemsTest(BaseTest):
 	def extractTupleSize(self):
 		out = self.node.execute(
 		    'postgres', "select orioledb_sys_tree_structure(2, 'ne');")[0][0]
-		#print(out)
+		# print(out)
 		pattern = r"Item (\d+): offset = (\d+), tuple = \(\(\((\d+), (\d+), (\d+)\), chunknum (\d+), version (\d+)\), dataLength (\d+)\)"
 
 		match = re.findall(pattern, out)
@@ -127,11 +128,14 @@ class PageFitItemsTest(BaseTest):
 
 		tuples = self.extractTupleSize()
 		prevlen = 0
+		prevoffset = 0
 		singlefield = 0
 		perfield = 0
+		pertuple_extra = 0
 		for item in tuples:
 			relnode = int(item[FieldIndex.TUPLE_RELNODE.value])
 			datalen = int(item[FieldIndex.DATALEN.value])
+			offset = int(item[FieldIndex.OFFSET.value])
 			#print(f'Check item relnode {relnode} datalen {datalen}: prevlen {prevlen} delta {datalen - prevlen}')
 			created.append({"relnode": relnode, "datalen": datalen})
 
@@ -140,9 +144,12 @@ class PageFitItemsTest(BaseTest):
 			else:
 				if perfield == 0:
 					perfield = datalen - prevlen
+					pertuple_extra = max(pertuple_extra, offset - prevoffset - prevlen)
 				else:
 					self.assertEqual(perfield, datalen - prevlen)
+					pertuple_extra = max(pertuple_extra, offset - prevoffset - prevlen)
 			prevlen = datalen
+			prevoffset = offset
 
 		perindex = 0
 		for table_idx in range(tables_count):
@@ -168,34 +175,43 @@ class PageFitItemsTest(BaseTest):
 		self.RELATION_SINGLE_FIELD_TUPLE_SIZE = singlefield
 		self.RELATION_EXTRA_FIELD_TUPLE_SIZE = perfield
 		self.INDEX_EXTRA_TUPLE_SIZE = perindex
+		self.PER_TUPLE_EXTRA_SIZE = pertuple_extra
 
 		self.recreate_node()
 
 		return {
 		    "singlefield": singlefield,
 		    "perfield": perfield,
-		    "perindex": perindex
+		    "perindex": perindex,
+			"pertuple_extra": pertuple_extra,
 		}
 
 	def calibrate(self):
 		calib_tables_count = 8
 		opts = self.calibrate_tuple_sizes(calib_tables_count)
-		#print(opts)
+		# print(opts)
 
 	def estimateTupleSize(self, relFields, indexCount):
-		tupSize = self.RELATION_SINGLE_FIELD_TUPLE_SIZE + (
+		tupSizeTab = self.RELATION_SINGLE_FIELD_TUPLE_SIZE + (
 		    relFields - 1
-		) * self.RELATION_EXTRA_FIELD_TUPLE_SIZE + indexCount * self.INDEX_EXTRA_TUPLE_SIZE
-		tupSize = (tupSize + 7) // 8 * 8 + 40
-		return tupSize
+		) * self.RELATION_EXTRA_FIELD_TUPLE_SIZE
+		tupSizeTab = (tupSizeTab + 7) // 8 * 8
+		tupSizeTab += self.PER_TUPLE_EXTRA_SIZE
+		
+		tupSizeIdx = self.INDEX_EXTRA_TUPLE_SIZE		
+		tupSizeIdx = (tupSizeIdx + 7) // 8 * 8
+		tupSizeIdx += self.PER_TUPLE_EXTRA_SIZE
+		tupSizeIdx *= indexCount
+				
+		return tupSizeTab + tupSizeIdx
 
 	def startup_page_filling(self, estimatedPageSize):
 		fillingSize = 0
 		i = 1
 		relDesc = []
 
-		while estimatedPageSize - fillingSize > self.RELATION_EXTRA_FIELD_TUPLE_SIZE:
-			fillingSize += self.RELATION_SINGLE_FIELD_TUPLE_SIZE
+		while estimatedPageSize - fillingSize > self.RELATION_EXTRA_FIELD_TUPLE_SIZE + self.PER_TUPLE_EXTRA_SIZE:
+			fillingSize += self.RELATION_SINGLE_FIELD_TUPLE_SIZE + self.PER_TUPLE_EXTRA_SIZE
 			relFildsCount = 1
 			indexCount = 0
 
@@ -212,14 +228,14 @@ class PageFitItemsTest(BaseTest):
 
 			newTup = self.extractTupleSize()[-1]
 			fillingSize = int(newTup[FieldIndex.OFFSET.value]) + (
-			    (int(newTup[FieldIndex.DATALEN.value]) + 7) // 8) * 8 + 40
+			    (int(newTup[FieldIndex.DATALEN.value]) + 7) // 8) * 8 + self.PER_TUPLE_EXTRA_SIZE
 
-			while estimatedPageSize - fillingSize > self.INDEX_EXTRA_TUPLE_SIZE and indexCount < relFildsCount:
+			while estimatedPageSize - fillingSize > self.INDEX_EXTRA_TUPLE_SIZE + self.PER_TUPLE_EXTRA_SIZE and indexCount < relFildsCount:
 				create_index_stmt = f"CREATE INDEX o_table{i}_idx_t{indexCount} ON o_table{i} USING BTREE(t{indexCount});\n"
 				self.node.safe_psql('postgres', create_index_stmt)
 				newTup = self.extractTupleSize()[-1]
 				fillingSize = int(newTup[FieldIndex.OFFSET.value]) + (
-				    (int(newTup[FieldIndex.DATALEN.value]) + 7) // 8) * 8 + 40
+				    (int(newTup[FieldIndex.DATALEN.value]) + 7) // 8) * 8 + self.PER_TUPLE_EXTRA_SIZE
 				indexCount += 1
 			relDesc.append((relFildsCount, indexCount))
 			i = i + 1
@@ -397,7 +413,6 @@ class PageFitItemsTest(BaseTest):
 	def test_replace_decrease_size_no_free_space_fit_as_is(self):
 
 		node = self.node
-
 		relDescr = self.startup_page_filling(8192)
 		self.assertSysTreePagesCount(1)
 
