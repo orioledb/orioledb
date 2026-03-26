@@ -348,6 +348,18 @@ CREATE TABLE o_test_alter_type_typmod_changed (
 ALTER TABLE o_test_alter_type_typmod_changed ALTER COLUMN phone TYPE varchar(5);
 SELECT * FROM o_test_alter_type_typmod_changed;
 
+-- Test default value for new column during multi-action ALTER TABLE with ALTER TYPE
+CREATE TABLE o_test_alter_type_add_column_default (
+	a int PRIMARY KEY
+) USING orioledb;
+INSERT INTO o_test_alter_type_add_column_default VALUES (3), (4);
+ALTER TABLE o_test_alter_type_add_column_default ADD COLUMN d int DEFAULT 101;
+SELECT * FROM o_test_alter_type_add_column_default;
+ALTER TABLE o_test_alter_type_add_column_default
+	ALTER COLUMN d SET DATA TYPE float8,
+	ADD COLUMN y float8 DEFAULT 1.0;
+SELECT * FROM o_test_alter_type_add_column_default;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA alter_type CASCADE;
 RESET search_path;

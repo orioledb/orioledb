@@ -742,7 +742,7 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 	bool		missingIsNull = true;
 	bool		has_domain_constraints = false;
 
-	if (field->hasdef)
+	if (field->hasdef || get_typtype(field->typid) == TYPTYPE_DOMAIN)
 		defaultexpr = build_column_default(rel, fieldnum + 1);
 	else
 		defaultexpr = NULL;
@@ -758,7 +758,7 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 												&missingIsNull);
 		attrmiss_temp.am_present = true;
 
-		if (!old_field->hasmissing && !missingIsNull)
+		if (!old_field || (!old_field->hasmissing && !missingIsNull))
 		{
 			attrmiss = &attrmiss_temp;
 			field->hasmissing = true;

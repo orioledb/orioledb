@@ -2284,6 +2284,8 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 		for (int i = 0; i < old_slot->tts_tupleDescriptor->natts; i++)
 		{
 			Node	   *expr = NULL;
+			bool		has_def = false;
+			bool		should_build_def = false;
 			Form_pg_attribute attr = &old_slot->tts_tupleDescriptor->attrs[i];
 
 			if (attr->attgenerated)
@@ -2291,15 +2293,37 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 
 			expr = o_get_alter_type_expr(rel, i);
 
-			if (!expr && attr->atthasdef && !attr->atthasmissing &&
+			/*
+			 * old_slot may not contain all new properties if there are
+			 * multiple expressions within a single ALTER TABLE.
+			 */
+			has_def = attr->atthasdef || rel->rd_att->attrs[i].atthasdef;
+
+			/*
+			 * Build default for columns which have explicit DEFAULT
+			 * expressions
+			 */
+			should_build_def = !expr && has_def && !attr->atthasmissing &&
 				i >= primary_init_nfields &&
-				old_slot->tts_isnull[i])
+				old_slot->tts_isnull[i];
+
+			/* If column has domain type, try to build domain default value */
+			should_build_def |= !expr && get_typtype(attr->atttypid) == TYPTYPE_DOMAIN && old_slot->tts_isnull[i];
+
+			if (should_build_def)
 			{
 				Node	   *defaultexpr = build_column_default(rel, i + 1);
 
 				expr = defaultexpr;
 			}
 
+			/*
+			 * When the new column is of a domain type: the domain might have
+			 * a not-null constraint, or a check constraint that indirectly
+			 * rejects nulls.  If there are any domain constraints then we
+			 * construct an explicit NULL default value that will be passed
+			 * through CoerceToDomain processing.
+			 */
 			if (!attr->attisdropped && !expr && DomainHasConstraints(attr->atttypid) &&
 				old_slot->tts_isnull[i])
 			{
@@ -3191,6 +3215,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
 					 (subId != 0) && is_orioledb_rel(rel))
 			{
+				/* Branch is taken during ALTER TABLE ... ADD COLUMN */
 				OTableField *field;
 				Form_pg_attribute attr;
 				OTable	   *o_table;
@@ -3222,7 +3247,22 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					attr = &rel->rd_att->attrs[rel->rd_att->natts - 1];
 					orioledb_attr_to_field(field, attr);
 
+					o_in_add_column = true;
+
 					o_table_resize_constr(o_table);
+
+					/*
+					 * The domain expression may have already been created, so
+					 * we need to explicitly call o_table_fill_constr to
+					 * propagate the default value of the domain type to the
+					 * new column. For non-domain types this will be called by
+					 * another access_hook call only after the default value
+					 * is created in pg catalog.
+					 */
+					if (get_typtype(field->typid) == TYPTYPE_DOMAIN && !in_rewrite)
+					{
+						o_table_fill_constr(o_table, rel, subId - 1, NULL, field);
+					}
 
 					o_tables_rel_meta_lock(rel);
 					o_indices_update(o_table, PrimaryIndexNumber, oxid, oSnapshot.csn);
@@ -3231,8 +3271,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					o_tables_rel_meta_unlock(rel, InvalidOid);
 
 					o_table_free(o_table);
-
-					o_in_add_column = true;
 				}
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
