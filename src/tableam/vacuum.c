@@ -930,7 +930,7 @@ lazy_vacuum_bridge_index(LVRelState *vacrel)
 	 * Make sure all the WAL records are flushed.
 	 */
 	if (!local_wal_is_empty())
-		flush_local_wal(true, false);
+		flush_local_wal(false, false);
 
 	/*
 	 * We set all LP_DEAD items from the first heap pass to LP_UNUSED during
