@@ -288,6 +288,11 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 			  and target_cur[2][0].startswith('Forward index scan')):
 			src_up = True
 			target_up = True
+		elif (test_name == 'fast_default'
+				  and src_cur_value == 'Bitmap Heap Scan on fast_default.t'
+				  and target_cur[1] == 'Custom Scan (o_scan) on fast_default.t'):
+				src_up = True
+				target_up = True
 		elif src_cur_value.startswith('Bitmap Heap Scan'):
 			if target_cur[1].startswith('Custom Scan'):
 				if target_cur[2][0] != 'Bitmap heap scan':

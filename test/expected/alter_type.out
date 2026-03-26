@@ -1193,8 +1193,31 @@ SELECT * FROM o_test_alter_type_typmod_changed;
 ----+-------
 (0 rows)
 
+-- Test default value for new column during multi-action ALTER TABLE with ALTER TYPE
+CREATE TABLE o_test_alter_type_add_column_default (
+	a int PRIMARY KEY
+) USING orioledb;
+INSERT INTO o_test_alter_type_add_column_default VALUES (3), (4);
+ALTER TABLE o_test_alter_type_add_column_default ADD COLUMN d int DEFAULT 101;
+SELECT * FROM o_test_alter_type_add_column_default;
+ a |  d  
+---+-----
+ 3 | 101
+ 4 | 101
+(2 rows)
+
+ALTER TABLE o_test_alter_type_add_column_default
+	ALTER COLUMN d SET DATA TYPE float8,
+	ADD COLUMN y float8 DEFAULT 1.0;
+SELECT * FROM o_test_alter_type_add_column_default;
+ a |  d  | y 
+---+-----+---
+ 3 | 101 | 1
+ 4 | 101 | 1
+(2 rows)
+
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 12 other objects
+NOTICE:  drop cascades to 13 other objects
 DETAIL:  drop cascades to table o_ddl_check
 drop cascades to table o_test_alter_change_byval
 drop cascades to table o_test_pkey_alter_type
@@ -1207,5 +1230,6 @@ drop cascades to table o_test_inherits_alter_type_int8_child
 drop cascades to table o_test_alter_type_reuse_index
 drop cascades to table o_test_alter_type_not_reuse_index
 drop cascades to table o_test_alter_type_typmod_changed
+drop cascades to table o_test_alter_type_add_column_default
 DROP SCHEMA alter_type CASCADE;
 RESET search_path;
