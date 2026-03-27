@@ -25,4 +25,5 @@ fi
 echo "Saving PostgreSQL log to $LOG_DIR/$LOG_NAME"
 cp "$PGDATA/postgresql.log" "$LOG_DIR/$LOG_NAME" 2>/dev/null || echo "Warning: no postgresql.log found"
 
-rm -rf "$PGDATA"
+# Retry cleanup — orioledb_undo may linger briefly after pg_ctl stop
+rm -rf "$PGDATA" || { sleep 2; rm -rf "$PGDATA" || true; }

@@ -109,9 +109,9 @@ def format_change(base_val, head_val, lower_is_better=False):
     change = (head_val - base_val) / base_val * 100
     sign = "+" if change > 0 else ""
     if lower_is_better:
-        indicator = " :white_check_mark:" if change < -2 else (" :warning:" if change > 2 else "")
+        indicator = " :white_check_mark:" if change < -3 else (" :warning:" if change > 3 else "")
     else:
-        indicator = " :white_check_mark:" if change > 2 else (" :warning:" if change < -2 else "")
+        indicator = " :white_check_mark:" if change > 3 else (" :warning:" if change < -3 else "")
     return f"{sign}{change:.1f}%{indicator}"
 
 
