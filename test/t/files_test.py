@@ -583,7 +583,15 @@ class FilesTest(BaseTest):
 
 		node.safe_psql("UPDATE o_test SET val = repeat('y', 250);\n"
 		               "CHECKPOINT;\n")
+		node.stop()
+
+		stat2 = os.stat(fname)
+		self.assertEqual(2 * stat1.st_size, stat2.st_size)
+
+		# On XFS, freed blocks may not be reflected in st_blocks until
+		# the filesystem reclaims delayed allocations. Use truncate()
+		# to force the kernel to materialize the hole map.
+		os.truncate(fname, stat2.st_size)
 		stat2 = os.stat(fname)
 
-		self.assertEqual(2 * stat1.st_size, stat2.st_size)
 		self.assertEqual(stat1.st_blocks, stat2.st_blocks)
