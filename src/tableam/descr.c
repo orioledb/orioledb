@@ -696,7 +696,7 @@ static void
 fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 {
 	MemoryContext old_context;
-	int				refcnt;
+	int			refcnt;
 
 	refcnt = descr->refcnt;
 	memset(descr, 0, sizeof(OTableDescr));
@@ -1119,7 +1119,7 @@ o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode)
 {
 	DeferredDescrInvalidation *deferred;
 	MemoryContext oldcontext;
-	bool        was_saving;
+	bool		was_saving;
 
 	/*
 	 * If we are inside o_call_comparator(), save the invalidation message for
