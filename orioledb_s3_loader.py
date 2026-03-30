@@ -12,7 +12,7 @@ from botocore.exceptions import ClientError, ParamValidationError
 from concurrent.futures import ThreadPoolExecutor
 from boto3.s3.transfer import TransferConfig
 from threading import Event
-from typing import Callable
+from typing import Callable, Dict, Optional
 from urllib.parse import urlparse
 
 
@@ -366,7 +366,7 @@ class OrioledbS3ObjectLoader:
 
 	def download_unchanged_files(self, bucket_name: str,
 	                             file_checksums_name: str, chkp_num: int,
-	                             file_checksums: dict[str, str] | None):
+	                             file_checksums: Optional[Dict[str, str]]):
 		# We won't be able to download unchanged previous files if this is
 		# the first checkpoint
 		if chkp_num <= 1:
@@ -405,7 +405,8 @@ class OrioledbS3ObjectLoader:
 
 	def download_unchanged_small_files(self, bucket_name: str,
 	                                   file_checksums_name: str, chkp_num: int,
-	                                   file_checksums: dict[str, str] | None):
+	                                   file_checksums: Optional[Dict[str,
+	                                                                 str]]):
 		# We won't be able to download unchanged previous files if this is
 		# the first checkpoint
 		if chkp_num <= 1:
