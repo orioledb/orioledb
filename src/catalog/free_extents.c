@@ -556,9 +556,6 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 	uint64		file_size;
 	char	   *filename,
 				buf[ORIOLEDB_BLCKSZ];
-	uint64		len = 0,
-				i,
-				buf_len;
 	uint32		chkp_num;
 	LWLock	   *metaLock;
 
@@ -574,6 +571,10 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 	chkp_num = metaPage->freeBuf.tag.num + 1;
 	while (can_use_checkpoint_extents(desc, chkp_num))
 	{
+		uint64		len = 0,
+					i,
+					buf_len;
+
 		metaPage->freeBuf.tag.num = chkp_num;
 		metaPage->freeBuf.tag.type = 't';
 		if (!seq_buf_file_exist(&metaPage->freeBuf.tag))
