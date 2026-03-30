@@ -357,6 +357,8 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 				break;
 			if (cbResult == OTupleFetchNotMatch)
 			{
+				if (curTupleAllocated)
+					pfree(curTuple.data);
 				O_TUPLE_SET_NULL(result);
 				MemoryContextSwitchTo(prevMctx);
 				return result;
@@ -427,6 +429,8 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 		if (!UndoLocationIsValid(undoLocation))
 		{
+			if (curTupleAllocated)
+				pfree(curTuple.data);
 			O_TUPLE_SET_NULL(result);
 			MemoryContextSwitchTo(prevMctx);
 			return result;
@@ -454,6 +458,8 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 		if (tupHdr.deleted != BTreeLeafTupleNonDeleted &&
 			txIsFinished)
 		{
+			if (curTupleAllocated)
+				pfree(curTuple.data);
 			O_TUPLE_SET_NULL(result);
 			MemoryContextSwitchTo(prevMctx);
 			return result;
@@ -461,6 +467,8 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	}
 	else if (tupHdr.deleted != BTreeLeafTupleNonDeleted && !cb)
 	{
+		if (curTupleAllocated)
+			pfree(curTuple.data);
 		O_TUPLE_SET_NULL(result);
 		MemoryContextSwitchTo(prevMctx);
 		return result;
