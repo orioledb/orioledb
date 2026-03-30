@@ -277,12 +277,21 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 	{
 		/*
 		 * Reads free blocks as normal process for compressed index.
+		 * foreach_free_extent reads from in-memory free extent trees, which
+		 * contain extents from consumed .tmp files.  We also need to read any
+		 * unconsumed .tmp files.
 		 */
+		BTreeMetaPage *metaPage = BTREE_GET_META(desc);
+		uint32		num;
+		uint32		consumed_num = metaPage->freeBuf.tag.num;
+
 		foreach_free_extent(desc, foreach_extent_append, (void *) free_extents);
-		chkp_tag.num = chkp_num + 1;
-		chkp_tag.type = 't';
-		get_free_extents_from_file(&chkp_tag, sizeof(CheckpointFileHeader),
-								   free_extents, true, false);
+		for (num = consumed_num + 1; num <= chkp_num + 1; num++)
+		{
+			chkp_tag.num = num;
+			chkp_tag.type = 't';
+			get_free_extents_from_file(&chkp_tag, 0, free_extents, true, false);
+		}
 	}
 }
 
