@@ -1193,10 +1193,11 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 		err = btree_smgr_read(desc, img, chkpNum, read_size, byte_offset) != read_size;
 		if (!err)
 		{
-			uint8		page_version;
+			OrioleDBOndiskPageHeader ondisk_page_header = *((OrioleDBOndiskPageHeader *) img);
 
-			page_version = ((OrioleDBOndiskPageHeader *) img)->page_version;
-			if (page_version != ORIOLEDB_PAGE_VERSION)
+			((OrioleDBPageHeader *) img)->checkpointNum = ondisk_page_header.checkpointNum;
+
+			if (ondisk_page_header.page_version != ORIOLEDB_PAGE_VERSION)
 			{
 				/*
 				 * Now we have only one page version (1). When we have
@@ -1204,7 +1205,9 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 				 * and add on-the-fly conversion function from all previous
 				 * page versions in this place
 				 */
-				elog(FATAL, "Page version %u of OrioleDB cluster is not among supported for conversion %u", page_version, ORIOLEDB_PAGE_VERSION);
+				elog(FATAL, "Page version %u of OrioleDB cluster is not among supported for conversion %u",
+					 ondisk_page_header.page_version,
+					 ORIOLEDB_PAGE_VERSION);
 			}
 		}
 	}
