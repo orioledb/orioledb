@@ -696,10 +696,12 @@ static void
 fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 {
 	MemoryContext old_context;
+	int			refcnt;
 
+	refcnt = descr->refcnt;
 	memset(descr, 0, sizeof(OTableDescr));
 	old_context = MemoryContextSwitchTo(descrCxt);
-	descr->refcnt = 0;
+	descr->refcnt = refcnt;
 	descr->oids = o_table->oids;
 	descr->version = o_table->version;
 	descr->tablespace = o_table->tablespace;
@@ -734,6 +736,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 	OIndex	   *index;
 	OIndexDescr *indexDescr;
 
+	descr->refcnt = 0;
 	fill_table_descr_common_fields(descr, o_table);
 
 	old_context = MemoryContextSwitchTo(descrCxt);
@@ -808,6 +811,7 @@ create_table_descr(ORelOids oids, OTableFetchContext ctx)
 
 	Assert(ctx.snapshot);
 
+	descr->refcnt = 0;
 	fill_table_descr(descr, o_table, ctx.snapshot);
 
 	enable_stopevents = old_enable_stopevents;
@@ -1115,6 +1119,7 @@ o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode)
 {
 	DeferredDescrInvalidation *deferred;
 	MemoryContext oldcontext;
+	bool		was_saving;
 
 	/*
 	 * If we are inside o_call_comparator(), save the invalidation message for
@@ -1133,8 +1138,12 @@ o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode)
 		return;
 	}
 
+	was_saving = o_start_saving_inval_messages();
+
 	/* Handle the current invalidation. */
 	o_invalidate_descrs_internal(datoid, reloid, relfilenode);
+
+	o_stop_saving_inval_messages(was_saving);
 }
 
 SharedRootInfo *
@@ -1896,7 +1905,6 @@ recreate_table_descr(OTableDescr *descr)
 {
 	OTable	   *o_table;
 	bool		old_enable_stopevents;
-	int			refcnt;
 
 	old_enable_stopevents = enable_stopevents;
 	enable_stopevents = false;
@@ -1905,10 +1913,8 @@ recreate_table_descr(OTableDescr *descr)
 	if (!o_table)
 		return false;
 
-	refcnt = descr->refcnt;
 	table_descr_free(descr);
 	fill_table_descr(descr, o_table, &o_non_deleted_snapshot);
-	descr->refcnt = refcnt;
 
 	enable_stopevents = old_enable_stopevents;
 	return true;
