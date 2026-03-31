@@ -3487,7 +3487,7 @@ replay_wal_record(void *vctx, WalRecord *rec)
 
 				build_fixed_tuples(rec, &tuple1, &tuple2);
 
-				if (ctx->sys_tree_num > 0 && ctx->xlogRecPtr >= checkpoint_state->sysTreesStartPtr)
+				if (ctx->sys_tree_num > 0 && ctx->xlogRecPtr >= checkpoint_state->controlSysTreesStartPtr)
 				{
 					Assert(sys_tree_supports_transactions(ctx->sys_tree_num));
 					recovery_switch_to_oxid(rec->oxid, -1);
