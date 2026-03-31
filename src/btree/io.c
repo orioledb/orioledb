@@ -49,6 +49,7 @@
 #include "storage/bufmgr.h"
 #include "utils/memutils.h"
 #include "utils/syscache.h"
+#include "funcapi.h"
 
 typedef struct
 {
@@ -1153,6 +1154,84 @@ get_free_disk_extent_copy_blkno(BTreeDescr *desc, off_t page_size,
 	return FileExtentIsValid(*extent);
 }
 
+/* Functions for eviction_page_checkpoint_numbers test included under IS_DEV */
+PG_FUNCTION_INFO_V1(reset_read_page_checkpoint_stats);
+PG_FUNCTION_INFO_V1(fetch_read_page_checkpoint_stats);
+
+Datum
+reset_read_page_checkpoint_stats(PG_FUNCTION_ARGS)
+{
+	min_read_page_checkpoint = UINT32_MAX;
+	max_read_page_checkpoint = 0;
+	PG_RETURN_VOID();
+}
+
+Datum
+fetch_read_page_checkpoint_stats(PG_FUNCTION_ARGS)
+{
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	bool		nulls[2] = {false};
+	Datum		values[2];
+
+	InitMaterializedSRF(fcinfo, 0);
+
+	values[0] = UInt32GetDatum(min_read_page_checkpoint);
+	values[1] = UInt32GetDatum(max_read_page_checkpoint);
+
+	tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+
+	return (Datum) 0;
+}
+
+/* Store checkpoint statistics for page reads for eviction_page_checkpoint_numbers test */
+static void
+store_read_page_checkpoint_stats(uint32 checkpointNum)
+{
+	/* Remember for checkpoint read test only */
+	max_read_page_checkpoint = Max(max_read_page_checkpoint, checkpointNum);
+	min_read_page_checkpoint = Min(min_read_page_checkpoint, checkpointNum);
+	elog(DEBUG1, "Remember read_page_checkpoin: min %u max %u", min_read_page_checkpoint, max_read_page_checkpoint);
+}
+
+/*
+ * Now we have only one page version (1). When we have
+ * different versions we'll need to bump
+ * ORIOLEDB_PAGE_VERSION and implement on-the-fly conversion
+ * function from all previous page versions to use _after_
+ * decompression.
+ */
+static bool
+check_orioledb_page_version(OrioleDBOndiskPageHeader ondisk_page_header)
+{
+	if (ondisk_page_header.page_version != ORIOLEDB_PAGE_VERSION)
+		elog(FATAL, "Page version %u of OrioleDB cluster is not among supported for conversion %u", ondisk_page_header.page_version, ORIOLEDB_PAGE_VERSION);
+
+	return false;
+}
+
+static void
+convert_orioledb_page_version(Pointer img)
+{
+	Assert(ORIOLEDB_PAGE_VERSION == 1);
+	elog(FATAL, "Page version conversion is not implemented");
+}
+
+/*
+ * Now we have only one compresss version (1). When we have
+ * different versions we'll need to bump
+ * ORIOLEDB_COMPRESS_VERSION and add other variants of
+ * decompress function from all previous page versions in
+ * this function
+ */
+static bool
+check_orioledb_compress_version(OrioleDBOndiskPageHeader ondisk_page_header)
+{
+	if (ondisk_page_header.compress_version != ORIOLEDB_COMPRESS_VERSION)
+		elog(FATAL, "Page version %u of OrioleDB cluster is not among supported for conversion %u", ondisk_page_header.compress_version, ORIOLEDB_PAGE_VERSION);
+
+	return false;
+}
+
 /*
  * Reads a page from disk to the img from a valid downlink. It's fills an empty
  * array of offsets for the page.
@@ -1167,22 +1246,25 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 	uint32		chkpNum = 0;
 	uint16		len = DOWNLINK_GET_DISK_LEN(downlink);
 	bool		err = false;
+	OrioleDBOndiskPageHeader ondisk_page_header = {0};
+	bool		needs_page_version_convert;
 
 	Assert(FileExtentOffIsValid(offset));
 	Assert(FileExtentLenIsValid(len));
+
+	extent->off = offset;
+	extent->len = len;
+
+	if (orioledb_s3_mode)
+	{
+		chkpNum = S3_GET_CHKP_NUM(offset);
+		offset &= S3_OFFSET_MASK;
+	}
 
 	if (!OCompressIsValid(desc->compress))
 	{
 		/* easy case, read page from uncompressed index */
 		Assert(len == 1);
-		extent->off = offset;
-		extent->len = 1;
-
-		if (orioledb_s3_mode)
-		{
-			chkpNum = S3_GET_CHKP_NUM(offset);
-			offset &= S3_OFFSET_MASK;
-		}
 
 		if (use_device)
 			byte_offset = (off_t) offset * (off_t) ORIOLEDB_COMP_BLCKSZ;
@@ -1191,120 +1273,88 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 		read_size = ORIOLEDB_BLCKSZ;
 
 		err = btree_smgr_read(desc, img, chkpNum, read_size, byte_offset) != read_size;
-		if (!err)
-		{
-			OrioleDBOndiskPageHeader ondisk_page_header = *((OrioleDBOndiskPageHeader *) img);
+		if (err)
+			return false;
 
-			((OrioleDBPageHeader *) img)->checkpointNum = ondisk_page_header.checkpointNum;
+		ondisk_page_header = *((OrioleDBOndiskPageHeader *) img);
+		needs_page_version_convert = check_orioledb_page_version(ondisk_page_header);
 
-			if (ondisk_page_header.page_version != ORIOLEDB_PAGE_VERSION)
-			{
-				/*
-				 * Now we have only one page version (1). When we have
-				 * different versions we'll need to bump ORIOLEDB_PAGE_VERSION
-				 * and add on-the-fly conversion function from all previous
-				 * page versions in this place
-				 */
-				elog(FATAL, "Page version %u of OrioleDB cluster is not among supported for conversion %u",
-					 ondisk_page_header.page_version,
-					 ORIOLEDB_PAGE_VERSION);
-			}
-		}
+		elog(DEBUG1, "Read plain disk page: checkpoint %u", ondisk_page_header.checkpointNum);
 	}
 	else
 	{
 		char		buf[ORIOLEDB_BLCKSZ];
 		bool		compressed = len != (ORIOLEDB_BLCKSZ / ORIOLEDB_COMP_BLCKSZ);
 
-		extent->off = offset;
-		extent->len = len;
-
-		if (orioledb_s3_mode)
-		{
-			chkpNum = S3_GET_CHKP_NUM(offset);
-			offset &= S3_OFFSET_MASK;
-		}
-
 		if (compressed)
 		{
+			bool		needs_compress_version_convert PG_USED_FOR_ASSERTS_ONLY;
+
 			byte_offset = (off_t) offset * (off_t) ORIOLEDB_COMP_BLCKSZ;
 			read_size = len * ORIOLEDB_COMP_BLCKSZ;
 
 			err = btree_smgr_read(desc, buf, chkpNum, read_size, byte_offset) != read_size;
+			if (err)
+				return false;
 
-			if (!err)
-			{
-				OrioleDBOndiskPageHeader ondisk_page_header;
+			ondisk_page_header = *((OrioleDBOndiskPageHeader *) buf);
+			needs_page_version_convert = check_orioledb_page_version(ondisk_page_header);
 
-				memcpy(&ondisk_page_header, buf, sizeof(OrioleDBOndiskPageHeader));
+			needs_compress_version_convert = check_orioledb_compress_version(ondisk_page_header);
+			Assert(!needs_compress_version_convert);
+			o_decompress_page(buf + O_PAGE_HEADER_SIZE, ondisk_page_header.compress_page_size, img);
+			elog(DEBUG1, "Read disk page: checkpoint %u size %d", ondisk_page_header.checkpointNum, ondisk_page_header.compress_page_size);
 
-				if (ondisk_page_header.page_version != ORIOLEDB_PAGE_VERSION)
-				{
-					/*
-					 * Now we have only one page version (1). When we have
-					 * different versions we'll need to bump
-					 * ORIOLEDB_PAGE_VERSION and add on-the-fly conversion
-					 * function from all previous page versions after
-					 * decompression.
-					 */
-					elog(FATAL, "Page version %u of OrioleDB cluster is not among supported for conversion %u", ondisk_page_header.page_version, ORIOLEDB_PAGE_VERSION);
-				}
-
-				if (ondisk_page_header.compress_version != ORIOLEDB_COMPRESS_VERSION)
-				{
-					/*
-					 * Now we have only one compress version (1). When we have
-					 * different versions we'll need to bump
-					 * ORIOLEDB_COMPRESS_VERSION and add on-the-fly conversion
-					 * function from all previous compress versions
-					 * before/during decompression.
-					 */
-					elog(FATAL, "Page version %u of OrioleDB cluster is not among supported for conversion %u", ondisk_page_header.page_version, ORIOLEDB_PAGE_VERSION);
-				}
-
-				o_decompress_page(buf + sizeof(OrioleDBOndiskPageHeader), ondisk_page_header.compress_page_size, img);
-			}
+			/*
+			 * Decompressed page has its own OrioleDBPageHeader with the same
+			 * checkpointNum as is external OrioleDBOndiskPageHeader. It is
+			 * redundant and unused, just check it.
+			 */
+			Assert(((BTreePageHeader *) img)->o_header.checkpointNum == ondisk_page_header.checkpointNum);
 		}
 		else
 		{
-			OrioleDBOndiskPageHeader ondisk_page_header;
-
 			byte_offset = (off_t) offset * (off_t) ORIOLEDB_COMP_BLCKSZ;
-			read_size = sizeof(OrioleDBOndiskPageHeader);
+			read_size = O_PAGE_HEADER_SIZE;
 
-			/* details about writed image parts are in write_page_to_disk */
+			/* details about written image parts are in write_page_to_disk */
 			err = btree_smgr_read(desc, (Pointer) &ondisk_page_header, chkpNum, read_size, byte_offset) != read_size;
 			byte_offset += read_size;
 
-			if (!err)
-			{
-				size_t		skipped = offsetof(BTreePageHeader, undoLocation);
-				BTreePageHeader *btree_page_header;
+			if (err)
+				return false;
 
-				memset(img, 0, skipped);
-				read_size = ORIOLEDB_BLCKSZ - skipped;
-				err = btree_smgr_read(desc, img + skipped, chkpNum, read_size, byte_offset) != read_size;
+			read_size = ORIOLEDB_BLCKSZ - O_PAGE_HEADER_SIZE;
+			err = btree_smgr_read(desc, img + O_PAGE_HEADER_SIZE, chkpNum, read_size, byte_offset) != read_size;
+			if (err)
+				return false;
 
-				if (!err)
-				{
-					if (ondisk_page_header.page_version != ORIOLEDB_PAGE_VERSION)
-					{
-						/*
-						 * Now we have only one page version (1). When we have
-						 * different versions we'll need to bump
-						 * ORIOLEDB_PAGE_VERSION and add on-the-fly conversion
-						 * function from all previous page versions here
-						 */
-						elog(FATAL, "Page version %u of OrioleDB cluster is not among supported for conversion %u", ondisk_page_header.page_version, ORIOLEDB_PAGE_VERSION);
-					}
-				}
-				btree_page_header = (BTreePageHeader *) img;
-				btree_page_header->o_header.checkpointNum = ondisk_page_header.checkpointNum;
-			}
+			needs_page_version_convert = check_orioledb_page_version(ondisk_page_header);
+			elog(DEBUG1, "Read disk page: checkpoint %u size %d", ondisk_page_header.checkpointNum, ORIOLEDB_BLCKSZ);
 		}
 	}
 
-	return !err;
+	/*
+	 * At this point, page is fully read and decompressed. Do conversion of
+	 * needed data from OrioleDBOndiskPageHeader to OrioleDBPageHeader. Do
+	 * conversion of page version (not implemented yet);
+	 */
+	Assert(!err);
+
+	if (needs_page_version_convert)
+		convert_orioledb_page_version(img);
+
+	/*
+	 * Convert needed data from OrioleDBOndiskPageHeader to
+	 * OrioleDBPageHeader. Erase what's unused to be safe.
+	 */
+	memset(img, 0, O_PAGE_HEADER_SIZE);
+	((BTreePageHeader *) img)->o_header.checkpointNum = ondisk_page_header.checkpointNum;
+
+	/* For eviction/page checkpoint number test */
+	store_read_page_checkpoint_stats(((BTreePageHeader *) img)->o_header.checkpointNum);
+
+	return true;
 }
 
 /*
@@ -1321,23 +1371,25 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 	uint32		chkpNum = 0;
 	char		buf[ORIOLEDB_BLCKSZ];
 
-	Assert(sizeof(OrioleDBOndiskPageHeader) == O_PAGE_HEADER_SIZE);
 	Assert(FileExtentOffIsValid(extent->off));
+
+	byte_offset = (off_t) extent->off;
+
+	if (orioledb_s3_mode)
+	{
+		chkpNum = S3_GET_CHKP_NUM(byte_offset);
+		byte_offset &= S3_OFFSET_MASK;
+	}
+
 	if (!OCompressIsValid(desc->compress))
 	{
 		OrioleDBOndiskPageHeader *ondisk_page_header;
 
-		/* easy case, write page to uncompressed index */
+		/*
+		 * Easy case, write whole page to uncompressed index.
+		 */
 		Assert(extent->len == 1);
 		Assert(page_size == ORIOLEDB_BLCKSZ);
-
-		byte_offset = (off_t) extent->off;
-
-		if (orioledb_s3_mode)
-		{
-			chkpNum = S3_GET_CHKP_NUM(byte_offset);
-			byte_offset &= S3_OFFSET_MASK;
-		}
 
 		if (use_device)
 			byte_offset *= (off_t) ORIOLEDB_COMP_BLCKSZ;
@@ -1345,24 +1397,20 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 			byte_offset *= (off_t) ORIOLEDB_BLCKSZ;
 		write_size = ORIOLEDB_BLCKSZ;
 
-		memset(buf, 0, sizeof(OrioleDBOndiskPageHeader));
+		memset(buf, 0, O_PAGE_HEADER_SIZE);
 		ondisk_page_header = (OrioleDBOndiskPageHeader *) buf;
 		ondisk_page_header->checkpointNum = curChkpNum;
 		ondisk_page_header->page_version = ORIOLEDB_PAGE_VERSION;
-		memcpy(&buf[sizeof(OrioleDBOndiskPageHeader)], page + sizeof(OrioleDBOndiskPageHeader), ORIOLEDB_BLCKSZ - sizeof(OrioleDBOndiskPageHeader));
+		memcpy(&buf[O_PAGE_HEADER_SIZE], page + O_PAGE_HEADER_SIZE, ORIOLEDB_BLCKSZ - O_PAGE_HEADER_SIZE);
 
 		err = btree_smgr_write(desc, buf, chkpNum, write_size, byte_offset) != write_size;
+
+		elog(DEBUG1, "Wrote plain disk page: checkpoint %u", curChkpNum);
 	}
 	else
 	{
 		OrioleDBOndiskPageHeader ondisk_page_header = {0};
 
-		byte_offset = (off_t) extent->off;
-		if (orioledb_s3_mode)
-		{
-			chkpNum = S3_GET_CHKP_NUM(byte_offset);
-			byte_offset &= S3_OFFSET_MASK;
-		}
 		byte_offset *= (off_t) ORIOLEDB_COMP_BLCKSZ;
 
 		/*
@@ -1371,33 +1419,42 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 		Assert(sizeof(((OrioleDBOndiskPageHeader *) 0)->compress_page_size) == sizeof(uint16));
 		Assert(ORIOLEDB_BLCKSZ < UINT16_MAX);
 
-		/* we need to write header first */
+		/* Write header first */
 		ondisk_page_header.compress_page_size = page_size;
 		ondisk_page_header.checkpointNum = curChkpNum;
 		ondisk_page_header.compress_version = ORIOLEDB_COMPRESS_VERSION;
 		ondisk_page_header.page_version = ORIOLEDB_PAGE_VERSION;
 
-		write_size = sizeof(OrioleDBOndiskPageHeader);
+		write_size = O_PAGE_HEADER_SIZE;
 		err = btree_smgr_write(desc, (char *) &ondisk_page_header, chkpNum, write_size, byte_offset) != write_size;
 		byte_offset += write_size;
 
 		if (err)
 			return false;
 
+		/* Write everything left except header, which is already written */
 		if (page_size != ORIOLEDB_BLCKSZ)
 		{
-			write_size = extent->len * ORIOLEDB_COMP_BLCKSZ - sizeof(OrioleDBOndiskPageHeader);
+			/*
+			 * Compressed chunks don't have external header, just make up for
+			 * length
+			 */
+			write_size = extent->len * ORIOLEDB_COMP_BLCKSZ - O_PAGE_HEADER_SIZE;
 			err = btree_smgr_write(desc, page, chkpNum, write_size, byte_offset) != write_size;
 		}
 		else
 		{
-			size_t		skipped = offsetof(BTreePageHeader, undoLocation);
-
-			/* Skipping chkpNum because it is present in BTreePageHeader */
-			page += skipped;
-			write_size = ORIOLEDB_BLCKSZ - skipped;
+			/*
+			 * For non-compresses page cut already written header and make up
+			 * for length
+			 */
+			page += O_PAGE_HEADER_SIZE;
+			write_size = ORIOLEDB_BLCKSZ - O_PAGE_HEADER_SIZE;
 			err = btree_smgr_write(desc, page, chkpNum, write_size, byte_offset) != write_size;
 		}
+
+		elog(DEBUG1, "Wrote disk page: checkpoint %u size %ld", curChkpNum, page_size);
+
 	}
 
 	return !err;
@@ -1633,7 +1690,7 @@ get_write_img(BTreeDescr *desc, Page page, size_t *size)
 	if (OCompressIsValid(desc->compress))
 	{
 		result = o_compress_page(page, size, desc->compress);
-		if (*size > (ORIOLEDB_BLCKSZ - ORIOLEDB_COMP_BLCKSZ - sizeof(OrioleDBOndiskPageHeader)))
+		if (*size > (ORIOLEDB_BLCKSZ - ORIOLEDB_COMP_BLCKSZ - O_PAGE_HEADER_SIZE))
 		{
 			/*
 			 * No sense to write compressed page
