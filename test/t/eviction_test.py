@@ -241,6 +241,67 @@ class EvictionTest(BaseTest):
 		con1.close()
 		node.stop()
 
+	def eviction_page_checkpoint_numbers_base(self, compressed):
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
+		    "orioledb.main_buffers = 8MB\n"
+		    "log_min_messages = DEBUG1\n")
+		node.start()
+		arg1 = "WITH (primary_compress)" if compressed else ""
+		arg2 = "WITH (compress)" if compressed else ""
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE IF NOT EXISTS o_evicted (
+				key SERIAL NOT NULL,
+				val int NOT NULL,
+				PRIMARY KEY (key)
+			) USING orioledb %s;
+			CREATE TABLE IF NOT EXISTS o_test (
+				key SERIAL NOT NULL,
+				val int NOT NULL,
+				PRIMARY KEY (key)
+			) USING orioledb;
+			CREATE UNIQUE INDEX o_evicted_ix2 ON o_evicted (key) %s;
+			""" % (arg1, arg2))
+		node.safe_psql("CHECKPOINT;")
+		con1 = node.connect()
+		con1.execute(
+		    "INSERT INTO o_evicted (val) SELECT val FROM generate_series(1, 1500, 1) val;\n"
+		)
+		con1.commit()
+		node.safe_psql("CHECKPOINT;")
+		con1.execute(
+		    "INSERT INTO o_evicted (val) SELECT val FROM generate_series(1500, 3000, 1) val;\n"
+		)
+		con1.commit()
+		node.safe_psql("CHECKPOINT;")
+		node.safe_psql("CHECKPOINT;")
+		node.safe_psql("CHECKPOINT;")
+		con1.execute("SELECT * FROM o_evicted;")
+		con1.execute(
+		    "INSERT INTO o_test (val) SELECT val FROM generate_series(1, 400000, 1) val;\n"
+		)
+		con1.commit()
+		node.safe_psql("CHECKPOINT;")
+		self.assertEqual(
+		    con1.execute("SELECT * FROM fetch_read_page_checkpoint_stats();"),
+		    [(-1, 0)])
+		node.safe_psql("SELECT reset_read_page_checkpoint_stats();")
+		con1.execute("SELECT * FROM o_evicted;")
+		self.assertEqual(
+		    con1.execute("SELECT * FROM fetch_read_page_checkpoint_stats();"),
+		    [(2, 3)])
+		con1.close()
+		node.stop()
+
+	def test_eviction_page_checkpoint_number(self):
+		self.eviction_page_checkpoint_numbers_base(False)
+
+	def test_eviction_page_checkpoint_number_compress(self):
+		self.eviction_page_checkpoint_numbers_base(True)
+
 	def test_eviction_after_checkpoint(self):
 		self.eviction_after_checkpoint_base(False)
 

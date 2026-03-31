@@ -316,8 +316,17 @@ typedef struct
  * Should be used as a beginning of header in all orioledb shared in-memory pages:
  * BTree pages, Meta-pages, SeqBuf pages, etc.
  *
- * Isn't written to disk pages. See OrioleDBOndiskPageHeader. Both structs are
- * of equal size.
+ * At writing page to disk:
+ * - OrioleDBPageHeader is replaced by OrioleDBOndiskPageHeader of the same size.
+ * - Necessary information related to checkpoint moved to OrioleDBOndiskPageHeader.
+ * - All other information (related to compression and page format version) is initialized as needed.
+ *
+ * At reading page from disk:
+ * - Necessary information (related to checkpoint and compression) is extracted from OrioleDBOndiskPageHeader.
+ * - Сompression info and page format version is used for checks and decompression (if needed)
+ * - OrioleDBPageHeader from decompressed page is redundant and it is not used (but we check checkpointNum in it just in case)
+ * - Page header is replaced by empty OrioleDBPageHeader of the same size.
+ * - Necessary information related to checkpoint is restored to OrioleDBPageHeader.
  */
 typedef struct
 {
@@ -327,9 +336,8 @@ typedef struct
 } OrioleDBPageHeader;
 
 /*
- * Should be used as a beginning of header in all orioledb disk pages. At reading
- * pages from disk all these contents are overwritten by OrioleDBPageHeader. Necessary
- * information related to compression is extracted before this overwrite.
+ * Should be used as a beginning of header in all orioledb disk pages.
+ * (See extensive comment to OrioleDBPageHeader above)
  */
 typedef struct
 {
@@ -356,6 +364,8 @@ typedef struct
 	uint32		reserved2;
 } OrioleDBOndiskPageHeader;
 
+StaticAssertDecl(sizeof(OrioleDBPageHeader) == sizeof(OrioleDBOndiskPageHeader),
+				 "sizes of OrioleDBPageHeader and OrioleDBOndiskPageHeader are not equal");
 #define O_PAGE_HEADER_SIZE		sizeof(OrioleDBPageHeader)
 #define O_PAGE_HEADER(page)	((OrioleDBPageHeader *)(page))
 
@@ -444,6 +454,10 @@ extern int	rewind_max_transactions;
 extern int	logical_xid_buffers_guc;
 extern bool orioledb_strict_mode;
 extern XLogRecPtr replay_until_lsn;
+
+/* For page eviction/read checkpoint test only */
+extern uint32 min_read_page_checkpoint;
+extern uint32 max_read_page_checkpoint;
 
 #define GET_CUR_PROCDATA() \
 	(AssertMacro(MYPROCNUMBER >= 0 && \
