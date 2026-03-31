@@ -4400,7 +4400,8 @@ DECLARE a CURSOR FOR SELECT ctid, * FROM o_test_add_column;
 EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, TIMING OFF)
    UPDATE o_test_add_column SET i = -i
       WHERE CURRENT OF a RETURNING *;
-ERROR:  cursor "a" is not positioned on a row
+ERROR:  orioledb does not support TID scan
+HINT:  Use a primary key scan instead.
 COMMIT;
 DROP TABLE o_test_add_column;
 CREATE TABLE o_heap_test

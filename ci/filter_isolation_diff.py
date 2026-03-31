@@ -52,6 +52,8 @@ allowedRegexes = {
 	r"ERROR:  concurrent index creation is not supported for orioledb tables yet": ['*'],
 	r"ERROR:  REFRESH MATERIALIZED VIEW CONCURRENTLY is not supported for orioledb tables yet": ['*'],
 	r"ERROR:  could not serialize access due to concurrent delete": ['partition-key-update-3'],
+	r"ERROR:  orioledb does not support TID scan": ['*'],
+	r"ERROR:  orioledb does not support TID range scan": ['*'],
 }
 
 def is_allowed_line(testName, line):

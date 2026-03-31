@@ -339,14 +339,19 @@ orioledb_fetch_row_version(Relation relation,
 static bool
 orioledb_tuple_tid_valid(TableScanDesc scan, ItemPointer tid)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("orioledb does not support TID scan"),
+			 errhint("Use a primary key scan instead.")));
 	return false;
 }
 
 static void
 orioledb_set_tidrange(TableScanDesc sscan, ItemPointer mintid, ItemPointer maxtid)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("orioledb does not support TID range scan")));
 }
 
 /* Just to be safe. Normally this function should not be called before orioledb_set_tidrange. */
@@ -354,7 +359,9 @@ static bool
 orioledb_getnextslot_tidrange(TableScanDesc sscan, ScanDirection direction,
 							  TupleTableSlot *slot)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("orioledb does not support TID range scan")));
 	return false;
 }
 
@@ -1689,6 +1696,12 @@ orioledb_beginscan(Relation relation, Snapshot snapshot,
 	OTableDescr *descr;
 	OScanDesc	scan;
 
+	if (flags & SO_TYPE_TIDSCAN)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("orioledb does not support TID scan"),
+				 errhint("Use a primary key scan instead.")));
+
 	descr = relation_get_descr(relation);
 
 	/*
@@ -1866,7 +1879,10 @@ static void
 orioledb_get_latest_tid(TableScanDesc sscan,
 						ItemPointer tid)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("orioledb does not support WHERE CURRENT OF"),
+			 errhint("Use a primary key to identify rows instead.")));
 }
 
 static void
