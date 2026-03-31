@@ -547,102 +547,103 @@ SELECT orioledb_tbl_structure('o_indices0'::regclass, 'nue');
  Page 3: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                     +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty                     +
      Rightmost                                                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 120, hikey = ('1423')           +
+   Chunk 0: offset = 0, location = 256, hikey location = 128, hikey = ('1423')           +
      Item 0: offset = 264, tuple = ('1421', '3421', '3421')                              +
      Item 1: offset = 296, tuple = ('1422', '3422', '3422')                              +
-   Chunk 1: offset = 2, location = 328, hikey location = 128, hikey = ('1425')           +
+   Chunk 1: offset = 2, location = 328, hikey location = 136, hikey = ('1425')           +
      Item 2: offset = 336, tuple = ('1423', '3423', '3423')                              +
      Item 3: offset = 368, tuple = ('1424', '3424', '3424')                              +
-   Chunk 2: offset = 4, location = 400, hikey location = 136, hikey = ('1427')           +
+   Chunk 2: offset = 4, location = 400, hikey location = 144, hikey = ('1427')           +
      Item 4: offset = 408, tuple = ('1425', '3425', '3425')                              +
      Item 5: offset = 440, tuple = ('1426', '3426', '3426')                              +
-   Chunk 3: offset = 6, location = 472, hikey location = 144, hikey = ('1429')           +
+   Chunk 3: offset = 6, location = 472, hikey location = 152, hikey = ('1429')           +
      Item 6: offset = 480, tuple = ('1427', '3427', '3427')                              +
      Item 7: offset = 512, tuple = ('1428', '3428', '3428')                              +
-   Chunk 4: offset = 8, location = 544, hikey location = 152, hikey = ('1431')           +
+   Chunk 4: offset = 8, location = 544, hikey location = 160, hikey = ('1431')           +
      Item 8: offset = 552, tuple = ('1429', '3429', '3429')                              +
      Item 9: offset = 584, tuple = ('1430', '3430', '3430')                              +
-   Chunk 5: offset = 10, location = 616, hikey location = 160, hikey = ('1433')          +
+   Chunk 5: offset = 10, location = 616, hikey location = 168, hikey = ('1433')          +
      Item 10: offset = 624, tuple = ('1431', '3431', '3431')                             +
      Item 11: offset = 656, tuple = ('1432', '3432', '3432')                             +
-   Chunk 6: offset = 12, location = 688, hikey location = 168, hikey = ('1435')          +
+   Chunk 6: offset = 12, location = 688, hikey location = 176, hikey = ('1435')          +
      Item 12: offset = 696, tuple = ('1433', '3433', '3433')                             +
      Item 13: offset = 728, tuple = ('1434', '3434', '3434')                             +
-   Chunk 7: offset = 14, location = 760, hikey location = 176, hikey = ('1437')          +
+   Chunk 7: offset = 14, location = 760, hikey location = 184, hikey = ('1437')          +
      Item 14: offset = 768, tuple = ('1435', '3435', '3435')                             +
      Item 15: offset = 800, tuple = ('1436', '3436', '3436')                             +
-   Chunk 8: offset = 16, location = 832, hikey location = 184, hikey = ('1439')          +
+   Chunk 8: offset = 16, location = 832, hikey location = 192, hikey = ('1439')          +
      Item 16: offset = 840, tuple = ('1437', '3437', '3437')                             +
      Item 17: offset = 872, tuple = ('1438', '3438', '3438')                             +
-   Chunk 9: offset = 18, location = 904, hikey location = 192, hikey = ('1441')          +
+   Chunk 9: offset = 18, location = 904, hikey location = 200, hikey = ('1441')          +
      Item 18: offset = 912, tuple = ('1439', '3439', '3439')                             +
      Item 19: offset = 944, tuple = ('1440', '3440', '3440')                             +
-   Chunk 10: offset = 20, location = 976, hikey location = 200, hikey = ('1450')         +
-     Item 20: offset = 1000, tuple = ('1441', '3441', '3441')                            +
-     Item 21: offset = 1032, tuple = ('1442', '3442', '3442')                            +
-     Item 22: offset = 1064, tuple = ('1443', '3443', '3443')                            +
-     Item 23: offset = 1096, tuple = ('1444', '3444', '3444')                            +
-     Item 24: offset = 1128, tuple = ('1445', '3445', '3445')                            +
-     Item 25: offset = 1160, tuple = ('1446', '3446', '3446')                            +
-     Item 26: offset = 1192, tuple = ('1447', '3447', '3447')                            +
-     Item 27: offset = 1224, tuple = ('1448', '3448', '3448')                            +
-     Item 28: offset = 1256, tuple = ('1449', '3449', '3449')                            +
-   Chunk 11: offset = 29, location = 1288, hikey location = 208, hikey = ('1459')        +
-     Item 29: offset = 1312, tuple = ('1450', '3450', '3450')                            +
-     Item 30: offset = 1344, tuple = ('1451', '3451', '3451')                            +
-     Item 31: offset = 1376, tuple = ('1452', '3452', '3452')                            +
-     Item 32: offset = 1408, tuple = ('1453', '3453', '3453')                            +
-     Item 33: offset = 1440, tuple = ('1454', '3454', '3454')                            +
-     Item 34: offset = 1472, tuple = ('1455', '3455', '3455')                            +
-     Item 35: offset = 1504, tuple = ('1456', '3456', '3456')                            +
-     Item 36: offset = 1536, tuple = ('1457', '3457', '3457')                            +
-     Item 37: offset = 1568, tuple = ('1458', '3458', '3458')                            +
-   Chunk 12: offset = 38, location = 1600, hikey location = 216, hikey = ('1468')        +
-     Item 38: offset = 1624, tuple = ('1459', '3459', '3459')                            +
-     Item 39: offset = 1656, tuple = ('1460', '3460', '3460')                            +
-     Item 40: offset = 1688, tuple = ('1461', '3461', '3461')                            +
-     Item 41: offset = 1720, tuple = ('1462', '3462', '3462')                            +
-     Item 42: offset = 1752, tuple = ('1463', '3463', '3463')                            +
-     Item 43: offset = 1784, tuple = ('1464', '3464', '3464')                            +
-     Item 44: offset = 1816, tuple = ('1465', '3465', '3465')                            +
-     Item 45: offset = 1848, tuple = ('1466', '3466', '3466')                            +
-     Item 46: offset = 1880, tuple = ('1467', '3467', '3467')                            +
-   Chunk 13: offset = 47, location = 1912, hikey location = 224, hikey = ('1477')        +
-     Item 47: offset = 1936, tuple = ('1468', '3468', '3468')                            +
-     Item 48: offset = 1968, tuple = ('1469', '3469', '3469')                            +
-     Item 49: offset = 2000, tuple = ('1470', '3470', '3470')                            +
-     Item 50: offset = 2032, tuple = ('1471', '3471', '3471')                            +
-     Item 51: offset = 2064, tuple = ('1472', '3472', '3472')                            +
-     Item 52: offset = 2096, tuple = ('1473', '3473', '3473')                            +
-     Item 53: offset = 2128, tuple = ('1474', '3474', '3474')                            +
-     Item 54: offset = 2160, tuple = ('1475', '3475', '3475')                            +
-     Item 55: offset = 2192, tuple = ('1476', '3476', '3476')                            +
-   Chunk 14: offset = 56, location = 2224, hikey location = 232, hikey = ('1486')        +
-     Item 56: offset = 2248, tuple = ('1477', '3477', '3477')                            +
-     Item 57: offset = 2280, tuple = ('1478', '3478', '3478')                            +
-     Item 58: offset = 2312, tuple = ('1479', '3479', '3479')                            +
-     Item 59: offset = 2344, tuple = ('1480', '3480', '3480')                            +
-     Item 60: offset = 2376, tuple = ('1481', '3481', '3481')                            +
-     Item 61: offset = 2408, tuple = ('1482', '3482', '3482')                            +
-     Item 62: offset = 2440, tuple = ('1483', '3483', '3483')                            +
-     Item 63: offset = 2472, tuple = ('1484', '3484', '3484')                            +
-     Item 64: offset = 2504, tuple = ('1485', '3485', '3485')                            +
-   Chunk 15: offset = 65, location = 2536, hikey location = 240                          +
-     Item 65: offset = 2568, tuple = ('1486', '3486', '3486')                            +
-     Item 66: offset = 2600, tuple = ('1487', '3487', '3487')                            +
-     Item 67: offset = 2632, tuple = ('1488', '3488', '3488')                            +
-     Item 68: offset = 2664, tuple = ('1489', '3489', '3489')                            +
-     Item 69: offset = 2696, tuple = ('1490', '3490', '3490')                            +
-     Item 70: offset = 2728, tuple = ('1491', '3491', '3491')                            +
-     Item 71: offset = 2760, tuple = ('1492', '3492', '3492')                            +
-     Item 72: offset = 2792, tuple = ('1493', '3493', '3493')                            +
-     Item 73: offset = 2824, tuple = ('1494', '3494', '3494')                            +
-     Item 74: offset = 2856, tuple = ('1495', '3495', '3495')                            +
-     Item 75: offset = 2888, tuple = ('1496', '3496', '3496')                            +
-     Item 76: offset = 2920, tuple = ('1497', '3497', '3497')                            +
-     Item 77: offset = 2952, tuple = ('1498', '3498', '3498')                            +
-     Item 78: offset = 2984, tuple = ('1499', '3499', '3499')                            +
-     Item 79: offset = 3016, tuple = ('1500', '3500', '3500')                            +
+   Chunk 10: offset = 20, location = 976, hikey location = 208, hikey = ('1443')         +
+     Item 20: offset = 984, tuple = ('1441', '3441', '3441')                             +
+     Item 21: offset = 1016, tuple = ('1442', '3442', '3442')                            +
+   Chunk 11: offset = 22, location = 1048, hikey location = 216, hikey = ('1452')        +
+     Item 22: offset = 1072, tuple = ('1443', '3443', '3443')                            +
+     Item 23: offset = 1104, tuple = ('1444', '3444', '3444')                            +
+     Item 24: offset = 1136, tuple = ('1445', '3445', '3445')                            +
+     Item 25: offset = 1168, tuple = ('1446', '3446', '3446')                            +
+     Item 26: offset = 1200, tuple = ('1447', '3447', '3447')                            +
+     Item 27: offset = 1232, tuple = ('1448', '3448', '3448')                            +
+     Item 28: offset = 1264, tuple = ('1449', '3449', '3449')                            +
+     Item 29: offset = 1296, tuple = ('1450', '3450', '3450')                            +
+     Item 30: offset = 1328, tuple = ('1451', '3451', '3451')                            +
+   Chunk 12: offset = 31, location = 1360, hikey location = 224, hikey = ('1461')        +
+     Item 31: offset = 1384, tuple = ('1452', '3452', '3452')                            +
+     Item 32: offset = 1416, tuple = ('1453', '3453', '3453')                            +
+     Item 33: offset = 1448, tuple = ('1454', '3454', '3454')                            +
+     Item 34: offset = 1480, tuple = ('1455', '3455', '3455')                            +
+     Item 35: offset = 1512, tuple = ('1456', '3456', '3456')                            +
+     Item 36: offset = 1544, tuple = ('1457', '3457', '3457')                            +
+     Item 37: offset = 1576, tuple = ('1458', '3458', '3458')                            +
+     Item 38: offset = 1608, tuple = ('1459', '3459', '3459')                            +
+     Item 39: offset = 1640, tuple = ('1460', '3460', '3460')                            +
+   Chunk 13: offset = 40, location = 1672, hikey location = 232, hikey = ('1470')        +
+     Item 40: offset = 1696, tuple = ('1461', '3461', '3461')                            +
+     Item 41: offset = 1728, tuple = ('1462', '3462', '3462')                            +
+     Item 42: offset = 1760, tuple = ('1463', '3463', '3463')                            +
+     Item 43: offset = 1792, tuple = ('1464', '3464', '3464')                            +
+     Item 44: offset = 1824, tuple = ('1465', '3465', '3465')                            +
+     Item 45: offset = 1856, tuple = ('1466', '3466', '3466')                            +
+     Item 46: offset = 1888, tuple = ('1467', '3467', '3467')                            +
+     Item 47: offset = 1920, tuple = ('1468', '3468', '3468')                            +
+     Item 48: offset = 1952, tuple = ('1469', '3469', '3469')                            +
+   Chunk 14: offset = 49, location = 1984, hikey location = 240, hikey = ('1479')        +
+     Item 49: offset = 2008, tuple = ('1470', '3470', '3470')                            +
+     Item 50: offset = 2040, tuple = ('1471', '3471', '3471')                            +
+     Item 51: offset = 2072, tuple = ('1472', '3472', '3472')                            +
+     Item 52: offset = 2104, tuple = ('1473', '3473', '3473')                            +
+     Item 53: offset = 2136, tuple = ('1474', '3474', '3474')                            +
+     Item 54: offset = 2168, tuple = ('1475', '3475', '3475')                            +
+     Item 55: offset = 2200, tuple = ('1476', '3476', '3476')                            +
+     Item 56: offset = 2232, tuple = ('1477', '3477', '3477')                            +
+     Item 57: offset = 2264, tuple = ('1478', '3478', '3478')                            +
+   Chunk 15: offset = 58, location = 2296, hikey location = 248, hikey = ('1488')        +
+     Item 58: offset = 2320, tuple = ('1479', '3479', '3479')                            +
+     Item 59: offset = 2352, tuple = ('1480', '3480', '3480')                            +
+     Item 60: offset = 2384, tuple = ('1481', '3481', '3481')                            +
+     Item 61: offset = 2416, tuple = ('1482', '3482', '3482')                            +
+     Item 62: offset = 2448, tuple = ('1483', '3483', '3483')                            +
+     Item 63: offset = 2480, tuple = ('1484', '3484', '3484')                            +
+     Item 64: offset = 2512, tuple = ('1485', '3485', '3485')                            +
+     Item 65: offset = 2544, tuple = ('1486', '3486', '3486')                            +
+     Item 66: offset = 2576, tuple = ('1487', '3487', '3487')                            +
+   Chunk 16: offset = 67, location = 2608, hikey location = 256                          +
+     Item 67: offset = 2640, tuple = ('1488', '3488', '3488')                            +
+     Item 68: offset = 2672, tuple = ('1489', '3489', '3489')                            +
+     Item 69: offset = 2704, tuple = ('1490', '3490', '3490')                            +
+     Item 70: offset = 2736, tuple = ('1491', '3491', '3491')                            +
+     Item 71: offset = 2768, tuple = ('1492', '3492', '3492')                            +
+     Item 72: offset = 2800, tuple = ('1493', '3493', '3493')                            +
+     Item 73: offset = 2832, tuple = ('1494', '3494', '3494')                            +
+     Item 74: offset = 2864, tuple = ('1495', '3495', '3495')                            +
+     Item 75: offset = 2896, tuple = ('1496', '3496', '3496')                            +
+     Item 76: offset = 2928, tuple = ('1497', '3497', '3497')                            +
+     Item 77: offset = 2960, tuple = ('1498', '3498', '3498')                            +
+     Item 78: offset = 2992, tuple = ('1499', '3499', '3499')                            +
+     Item 79: offset = 3024, tuple = ('1500', '3500', '3500')                            +
                                                                                          +
  Index o_indices0_idx1 contents                                                          +
  Page 0: level = 1, maxKeyLen = 16                                                       +
@@ -2194,102 +2195,103 @@ SELECT orioledb_tbl_structure('o_indices0'::regclass, 'nue');
  Page 3: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                     +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty                     +
      Rightmost                                                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 120, hikey = ('1423')           +
+   Chunk 0: offset = 0, location = 256, hikey location = 128, hikey = ('1423')           +
      Item 0: offset = 264, tuple = ('1421', '3421', '3421')                              +
      Item 1: offset = 296, tuple = ('1422', '3422', '3422')                              +
-   Chunk 1: offset = 2, location = 328, hikey location = 128, hikey = ('1425')           +
+   Chunk 1: offset = 2, location = 328, hikey location = 136, hikey = ('1425')           +
      Item 2: offset = 336, tuple = ('1423', '3423', '3423')                              +
      Item 3: offset = 368, tuple = ('1424', '3424', '3424')                              +
-   Chunk 2: offset = 4, location = 400, hikey location = 136, hikey = ('1427')           +
+   Chunk 2: offset = 4, location = 400, hikey location = 144, hikey = ('1427')           +
      Item 4: offset = 408, tuple = ('1425', '3425', '3425')                              +
      Item 5: offset = 440, tuple = ('1426', '3426', '3426')                              +
-   Chunk 3: offset = 6, location = 472, hikey location = 144, hikey = ('1429')           +
+   Chunk 3: offset = 6, location = 472, hikey location = 152, hikey = ('1429')           +
      Item 6: offset = 480, tuple = ('1427', '3427', '3427')                              +
      Item 7: offset = 512, tuple = ('1428', '3428', '3428')                              +
-   Chunk 4: offset = 8, location = 544, hikey location = 152, hikey = ('1431')           +
+   Chunk 4: offset = 8, location = 544, hikey location = 160, hikey = ('1431')           +
      Item 8: offset = 552, tuple = ('1429', '3429', '3429')                              +
      Item 9: offset = 584, tuple = ('1430', '3430', '3430')                              +
-   Chunk 5: offset = 10, location = 616, hikey location = 160, hikey = ('1433')          +
+   Chunk 5: offset = 10, location = 616, hikey location = 168, hikey = ('1433')          +
      Item 10: offset = 624, tuple = ('1431', '3431', '3431')                             +
      Item 11: offset = 656, tuple = ('1432', '3432', '3432')                             +
-   Chunk 6: offset = 12, location = 688, hikey location = 168, hikey = ('1435')          +
+   Chunk 6: offset = 12, location = 688, hikey location = 176, hikey = ('1435')          +
      Item 12: offset = 696, tuple = ('1433', '3433', '3433')                             +
      Item 13: offset = 728, tuple = ('1434', '3434', '3434')                             +
-   Chunk 7: offset = 14, location = 760, hikey location = 176, hikey = ('1437')          +
+   Chunk 7: offset = 14, location = 760, hikey location = 184, hikey = ('1437')          +
      Item 14: offset = 768, tuple = ('1435', '3435', '3435')                             +
      Item 15: offset = 800, tuple = ('1436', '3436', '3436')                             +
-   Chunk 8: offset = 16, location = 832, hikey location = 184, hikey = ('1439')          +
+   Chunk 8: offset = 16, location = 832, hikey location = 192, hikey = ('1439')          +
      Item 16: offset = 840, tuple = ('1437', '3437', '3437')                             +
      Item 17: offset = 872, tuple = ('1438', '3438', '3438')                             +
-   Chunk 9: offset = 18, location = 904, hikey location = 192, hikey = ('1441')          +
+   Chunk 9: offset = 18, location = 904, hikey location = 200, hikey = ('1441')          +
      Item 18: offset = 912, tuple = ('1439', '3439', '3439')                             +
      Item 19: offset = 944, tuple = ('1440', '3440', '3440')                             +
-   Chunk 10: offset = 20, location = 976, hikey location = 200, hikey = ('1450')         +
-     Item 20: offset = 1000, tuple = ('1441', '3441', '3441')                            +
-     Item 21: offset = 1032, tuple = ('1442', '3442', '3442')                            +
-     Item 22: offset = 1064, tuple = ('1443', '3443', '3443')                            +
-     Item 23: offset = 1096, tuple = ('1444', '3444', '3444')                            +
-     Item 24: offset = 1128, tuple = ('1445', '3445', '3445')                            +
-     Item 25: offset = 1160, tuple = ('1446', '3446', '3446')                            +
-     Item 26: offset = 1192, tuple = ('1447', '3447', '3447')                            +
-     Item 27: offset = 1224, tuple = ('1448', '3448', '3448')                            +
-     Item 28: offset = 1256, tuple = ('1449', '3449', '3449')                            +
-   Chunk 11: offset = 29, location = 1288, hikey location = 208, hikey = ('1459')        +
-     Item 29: offset = 1312, tuple = ('1450', '3450', '3450')                            +
-     Item 30: offset = 1344, tuple = ('1451', '3451', '3451')                            +
-     Item 31: offset = 1376, tuple = ('1452', '3452', '3452')                            +
-     Item 32: offset = 1408, tuple = ('1453', '3453', '3453')                            +
-     Item 33: offset = 1440, tuple = ('1454', '3454', '3454')                            +
-     Item 34: offset = 1472, tuple = ('1455', '3455', '3455')                            +
-     Item 35: offset = 1504, tuple = ('1456', '3456', '3456')                            +
-     Item 36: offset = 1536, tuple = ('1457', '3457', '3457')                            +
-     Item 37: offset = 1568, tuple = ('1458', '3458', '3458')                            +
-   Chunk 12: offset = 38, location = 1600, hikey location = 216, hikey = ('1468')        +
-     Item 38: offset = 1624, tuple = ('1459', '3459', '3459')                            +
-     Item 39: offset = 1656, tuple = ('1460', '3460', '3460')                            +
-     Item 40: offset = 1688, tuple = ('1461', '3461', '3461')                            +
-     Item 41: offset = 1720, tuple = ('1462', '3462', '3462')                            +
-     Item 42: offset = 1752, tuple = ('1463', '3463', '3463')                            +
-     Item 43: offset = 1784, tuple = ('1464', '3464', '3464')                            +
-     Item 44: offset = 1816, tuple = ('1465', '3465', '3465')                            +
-     Item 45: offset = 1848, tuple = ('1466', '3466', '3466')                            +
-     Item 46: offset = 1880, tuple = ('1467', '3467', '3467')                            +
-   Chunk 13: offset = 47, location = 1912, hikey location = 224, hikey = ('1477')        +
-     Item 47: offset = 1936, tuple = ('1468', '3468', '3468')                            +
-     Item 48: offset = 1968, tuple = ('1469', '3469', '3469')                            +
-     Item 49: offset = 2000, tuple = ('1470', '3470', '3470')                            +
-     Item 50: offset = 2032, tuple = ('1471', '3471', '3471')                            +
-     Item 51: offset = 2064, tuple = ('1472', '3472', '3472')                            +
-     Item 52: offset = 2096, tuple = ('1473', '3473', '3473')                            +
-     Item 53: offset = 2128, tuple = ('1474', '3474', '3474')                            +
-     Item 54: offset = 2160, tuple = ('1475', '3475', '3475')                            +
-     Item 55: offset = 2192, tuple = ('1476', '3476', '3476')                            +
-   Chunk 14: offset = 56, location = 2224, hikey location = 232, hikey = ('1486')        +
-     Item 56: offset = 2248, tuple = ('1477', '3477', '3477')                            +
-     Item 57: offset = 2280, tuple = ('1478', '3478', '3478')                            +
-     Item 58: offset = 2312, tuple = ('1479', '3479', '3479')                            +
-     Item 59: offset = 2344, tuple = ('1480', '3480', '3480')                            +
-     Item 60: offset = 2376, tuple = ('1481', '3481', '3481')                            +
-     Item 61: offset = 2408, tuple = ('1482', '3482', '3482')                            +
-     Item 62: offset = 2440, tuple = ('1483', '3483', '3483')                            +
-     Item 63: offset = 2472, tuple = ('1484', '3484', '3484')                            +
-     Item 64: offset = 2504, tuple = ('1485', '3485', '3485')                            +
-   Chunk 15: offset = 65, location = 2536, hikey location = 240                          +
-     Item 65: offset = 2568, tuple = ('1486', '3486', '3486')                            +
-     Item 66: offset = 2600, tuple = ('1487', '3487', '3487')                            +
-     Item 67: offset = 2632, tuple = ('1488', '3488', '3488')                            +
-     Item 68: offset = 2664, tuple = ('1489', '3489', '3489')                            +
-     Item 69: offset = 2696, tuple = ('1490', '3490', '3490')                            +
-     Item 70: offset = 2728, tuple = ('1491', '3491', '3491')                            +
-     Item 71: offset = 2760, tuple = ('1492', '3492', '3492')                            +
-     Item 72: offset = 2792, tuple = ('1493', '3493', '3493')                            +
-     Item 73: offset = 2824, tuple = ('1494', '3494', '3494')                            +
-     Item 74: offset = 2856, tuple = ('1495', '3495', '3495')                            +
-     Item 75: offset = 2888, tuple = ('1496', '3496', '3496')                            +
-     Item 76: offset = 2920, tuple = ('1497', '3497', '3497')                            +
-     Item 77: offset = 2952, tuple = ('1498', '3498', '3498')                            +
-     Item 78: offset = 2984, tuple = ('1499', '3499', '3499')                            +
-     Item 79: offset = 3016, tuple = ('1500', '3500', '3500')                            +
+   Chunk 10: offset = 20, location = 976, hikey location = 208, hikey = ('1443')         +
+     Item 20: offset = 984, tuple = ('1441', '3441', '3441')                             +
+     Item 21: offset = 1016, tuple = ('1442', '3442', '3442')                            +
+   Chunk 11: offset = 22, location = 1048, hikey location = 216, hikey = ('1452')        +
+     Item 22: offset = 1072, tuple = ('1443', '3443', '3443')                            +
+     Item 23: offset = 1104, tuple = ('1444', '3444', '3444')                            +
+     Item 24: offset = 1136, tuple = ('1445', '3445', '3445')                            +
+     Item 25: offset = 1168, tuple = ('1446', '3446', '3446')                            +
+     Item 26: offset = 1200, tuple = ('1447', '3447', '3447')                            +
+     Item 27: offset = 1232, tuple = ('1448', '3448', '3448')                            +
+     Item 28: offset = 1264, tuple = ('1449', '3449', '3449')                            +
+     Item 29: offset = 1296, tuple = ('1450', '3450', '3450')                            +
+     Item 30: offset = 1328, tuple = ('1451', '3451', '3451')                            +
+   Chunk 12: offset = 31, location = 1360, hikey location = 224, hikey = ('1461')        +
+     Item 31: offset = 1384, tuple = ('1452', '3452', '3452')                            +
+     Item 32: offset = 1416, tuple = ('1453', '3453', '3453')                            +
+     Item 33: offset = 1448, tuple = ('1454', '3454', '3454')                            +
+     Item 34: offset = 1480, tuple = ('1455', '3455', '3455')                            +
+     Item 35: offset = 1512, tuple = ('1456', '3456', '3456')                            +
+     Item 36: offset = 1544, tuple = ('1457', '3457', '3457')                            +
+     Item 37: offset = 1576, tuple = ('1458', '3458', '3458')                            +
+     Item 38: offset = 1608, tuple = ('1459', '3459', '3459')                            +
+     Item 39: offset = 1640, tuple = ('1460', '3460', '3460')                            +
+   Chunk 13: offset = 40, location = 1672, hikey location = 232, hikey = ('1470')        +
+     Item 40: offset = 1696, tuple = ('1461', '3461', '3461')                            +
+     Item 41: offset = 1728, tuple = ('1462', '3462', '3462')                            +
+     Item 42: offset = 1760, tuple = ('1463', '3463', '3463')                            +
+     Item 43: offset = 1792, tuple = ('1464', '3464', '3464')                            +
+     Item 44: offset = 1824, tuple = ('1465', '3465', '3465')                            +
+     Item 45: offset = 1856, tuple = ('1466', '3466', '3466')                            +
+     Item 46: offset = 1888, tuple = ('1467', '3467', '3467')                            +
+     Item 47: offset = 1920, tuple = ('1468', '3468', '3468')                            +
+     Item 48: offset = 1952, tuple = ('1469', '3469', '3469')                            +
+   Chunk 14: offset = 49, location = 1984, hikey location = 240, hikey = ('1479')        +
+     Item 49: offset = 2008, tuple = ('1470', '3470', '3470')                            +
+     Item 50: offset = 2040, tuple = ('1471', '3471', '3471')                            +
+     Item 51: offset = 2072, tuple = ('1472', '3472', '3472')                            +
+     Item 52: offset = 2104, tuple = ('1473', '3473', '3473')                            +
+     Item 53: offset = 2136, tuple = ('1474', '3474', '3474')                            +
+     Item 54: offset = 2168, tuple = ('1475', '3475', '3475')                            +
+     Item 55: offset = 2200, tuple = ('1476', '3476', '3476')                            +
+     Item 56: offset = 2232, tuple = ('1477', '3477', '3477')                            +
+     Item 57: offset = 2264, tuple = ('1478', '3478', '3478')                            +
+   Chunk 15: offset = 58, location = 2296, hikey location = 248, hikey = ('1488')        +
+     Item 58: offset = 2320, tuple = ('1479', '3479', '3479')                            +
+     Item 59: offset = 2352, tuple = ('1480', '3480', '3480')                            +
+     Item 60: offset = 2384, tuple = ('1481', '3481', '3481')                            +
+     Item 61: offset = 2416, tuple = ('1482', '3482', '3482')                            +
+     Item 62: offset = 2448, tuple = ('1483', '3483', '3483')                            +
+     Item 63: offset = 2480, tuple = ('1484', '3484', '3484')                            +
+     Item 64: offset = 2512, tuple = ('1485', '3485', '3485')                            +
+     Item 65: offset = 2544, tuple = ('1486', '3486', '3486')                            +
+     Item 66: offset = 2576, tuple = ('1487', '3487', '3487')                            +
+   Chunk 16: offset = 67, location = 2608, hikey location = 256                          +
+     Item 67: offset = 2640, tuple = ('1488', '3488', '3488')                            +
+     Item 68: offset = 2672, tuple = ('1489', '3489', '3489')                            +
+     Item 69: offset = 2704, tuple = ('1490', '3490', '3490')                            +
+     Item 70: offset = 2736, tuple = ('1491', '3491', '3491')                            +
+     Item 71: offset = 2768, tuple = ('1492', '3492', '3492')                            +
+     Item 72: offset = 2800, tuple = ('1493', '3493', '3493')                            +
+     Item 73: offset = 2832, tuple = ('1494', '3494', '3494')                            +
+     Item 74: offset = 2864, tuple = ('1495', '3495', '3495')                            +
+     Item 75: offset = 2896, tuple = ('1496', '3496', '3496')                            +
+     Item 76: offset = 2928, tuple = ('1497', '3497', '3497')                            +
+     Item 77: offset = 2960, tuple = ('1498', '3498', '3498')                            +
+     Item 78: offset = 2992, tuple = ('1499', '3499', '3499')                            +
+     Item 79: offset = 3024, tuple = ('1500', '3500', '3500')                            +
                                                                                          +
  Index o_indices0_idx1 contents                                                          +
  Page 0: level = 1, maxKeyLen = 16                                                       +
@@ -3917,102 +3919,103 @@ SELECT orioledb_tbl_structure('o_indices0'::regclass, 'nue');
  Page 3: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                     +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty                     +
      Rightmost                                                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 120, hikey = ('1423')           +
+   Chunk 0: offset = 0, location = 256, hikey location = 128, hikey = ('1423')           +
      Item 0: offset = 264, tuple = ('1421', '3421', '3421')                              +
      Item 1: offset = 296, tuple = ('1422', '3422', '3422')                              +
-   Chunk 1: offset = 2, location = 328, hikey location = 128, hikey = ('1425')           +
+   Chunk 1: offset = 2, location = 328, hikey location = 136, hikey = ('1425')           +
      Item 2: offset = 336, tuple = ('1423', '3423', '3423')                              +
      Item 3: offset = 368, tuple = ('1424', '3424', '3424')                              +
-   Chunk 2: offset = 4, location = 400, hikey location = 136, hikey = ('1427')           +
+   Chunk 2: offset = 4, location = 400, hikey location = 144, hikey = ('1427')           +
      Item 4: offset = 408, tuple = ('1425', '3425', '3425')                              +
      Item 5: offset = 440, tuple = ('1426', '3426', '3426')                              +
-   Chunk 3: offset = 6, location = 472, hikey location = 144, hikey = ('1429')           +
+   Chunk 3: offset = 6, location = 472, hikey location = 152, hikey = ('1429')           +
      Item 6: offset = 480, tuple = ('1427', '3427', '3427')                              +
      Item 7: offset = 512, tuple = ('1428', '3428', '3428')                              +
-   Chunk 4: offset = 8, location = 544, hikey location = 152, hikey = ('1431')           +
+   Chunk 4: offset = 8, location = 544, hikey location = 160, hikey = ('1431')           +
      Item 8: offset = 552, tuple = ('1429', '3429', '3429')                              +
      Item 9: offset = 584, tuple = ('1430', '3430', '3430')                              +
-   Chunk 5: offset = 10, location = 616, hikey location = 160, hikey = ('1433')          +
+   Chunk 5: offset = 10, location = 616, hikey location = 168, hikey = ('1433')          +
      Item 10: offset = 624, tuple = ('1431', '3431', '3431')                             +
      Item 11: offset = 656, tuple = ('1432', '3432', '3432')                             +
-   Chunk 6: offset = 12, location = 688, hikey location = 168, hikey = ('1435')          +
+   Chunk 6: offset = 12, location = 688, hikey location = 176, hikey = ('1435')          +
      Item 12: offset = 696, tuple = ('1433', '3433', '3433')                             +
      Item 13: offset = 728, tuple = ('1434', '3434', '3434')                             +
-   Chunk 7: offset = 14, location = 760, hikey location = 176, hikey = ('1437')          +
+   Chunk 7: offset = 14, location = 760, hikey location = 184, hikey = ('1437')          +
      Item 14: offset = 768, tuple = ('1435', '3435', '3435')                             +
      Item 15: offset = 800, tuple = ('1436', '3436', '3436')                             +
-   Chunk 8: offset = 16, location = 832, hikey location = 184, hikey = ('1439')          +
+   Chunk 8: offset = 16, location = 832, hikey location = 192, hikey = ('1439')          +
      Item 16: offset = 840, tuple = ('1437', '3437', '3437')                             +
      Item 17: offset = 872, tuple = ('1438', '3438', '3438')                             +
-   Chunk 9: offset = 18, location = 904, hikey location = 192, hikey = ('1441')          +
+   Chunk 9: offset = 18, location = 904, hikey location = 200, hikey = ('1441')          +
      Item 18: offset = 912, tuple = ('1439', '3439', '3439')                             +
      Item 19: offset = 944, tuple = ('1440', '3440', '3440')                             +
-   Chunk 10: offset = 20, location = 976, hikey location = 200, hikey = ('1450')         +
-     Item 20: offset = 1000, tuple = ('1441', '3441', '3441')                            +
-     Item 21: offset = 1032, tuple = ('1442', '3442', '3442')                            +
-     Item 22: offset = 1064, tuple = ('1443', '3443', '3443')                            +
-     Item 23: offset = 1096, tuple = ('1444', '3444', '3444')                            +
-     Item 24: offset = 1128, tuple = ('1445', '3445', '3445')                            +
-     Item 25: offset = 1160, tuple = ('1446', '3446', '3446')                            +
-     Item 26: offset = 1192, tuple = ('1447', '3447', '3447')                            +
-     Item 27: offset = 1224, tuple = ('1448', '3448', '3448')                            +
-     Item 28: offset = 1256, tuple = ('1449', '3449', '3449')                            +
-   Chunk 11: offset = 29, location = 1288, hikey location = 208, hikey = ('1459')        +
-     Item 29: offset = 1312, tuple = ('1450', '3450', '3450')                            +
-     Item 30: offset = 1344, tuple = ('1451', '3451', '3451')                            +
-     Item 31: offset = 1376, tuple = ('1452', '3452', '3452')                            +
-     Item 32: offset = 1408, tuple = ('1453', '3453', '3453')                            +
-     Item 33: offset = 1440, tuple = ('1454', '3454', '3454')                            +
-     Item 34: offset = 1472, tuple = ('1455', '3455', '3455')                            +
-     Item 35: offset = 1504, tuple = ('1456', '3456', '3456')                            +
-     Item 36: offset = 1536, tuple = ('1457', '3457', '3457')                            +
-     Item 37: offset = 1568, tuple = ('1458', '3458', '3458')                            +
-   Chunk 12: offset = 38, location = 1600, hikey location = 216, hikey = ('1468')        +
-     Item 38: offset = 1624, tuple = ('1459', '3459', '3459')                            +
-     Item 39: offset = 1656, tuple = ('1460', '3460', '3460')                            +
-     Item 40: offset = 1688, tuple = ('1461', '3461', '3461')                            +
-     Item 41: offset = 1720, tuple = ('1462', '3462', '3462')                            +
-     Item 42: offset = 1752, tuple = ('1463', '3463', '3463')                            +
-     Item 43: offset = 1784, tuple = ('1464', '3464', '3464')                            +
-     Item 44: offset = 1816, tuple = ('1465', '3465', '3465')                            +
-     Item 45: offset = 1848, tuple = ('1466', '3466', '3466')                            +
-     Item 46: offset = 1880, tuple = ('1467', '3467', '3467')                            +
-   Chunk 13: offset = 47, location = 1912, hikey location = 224, hikey = ('1477')        +
-     Item 47: offset = 1936, tuple = ('1468', '3468', '3468')                            +
-     Item 48: offset = 1968, tuple = ('1469', '3469', '3469')                            +
-     Item 49: offset = 2000, tuple = ('1470', '3470', '3470')                            +
-     Item 50: offset = 2032, tuple = ('1471', '3471', '3471')                            +
-     Item 51: offset = 2064, tuple = ('1472', '3472', '3472')                            +
-     Item 52: offset = 2096, tuple = ('1473', '3473', '3473')                            +
-     Item 53: offset = 2128, tuple = ('1474', '3474', '3474')                            +
-     Item 54: offset = 2160, tuple = ('1475', '3475', '3475')                            +
-     Item 55: offset = 2192, tuple = ('1476', '3476', '3476')                            +
-   Chunk 14: offset = 56, location = 2224, hikey location = 232, hikey = ('1486')        +
-     Item 56: offset = 2248, tuple = ('1477', '3477', '3477')                            +
-     Item 57: offset = 2280, tuple = ('1478', '3478', '3478')                            +
-     Item 58: offset = 2312, tuple = ('1479', '3479', '3479')                            +
-     Item 59: offset = 2344, tuple = ('1480', '3480', '3480')                            +
-     Item 60: offset = 2376, tuple = ('1481', '3481', '3481')                            +
-     Item 61: offset = 2408, tuple = ('1482', '3482', '3482')                            +
-     Item 62: offset = 2440, tuple = ('1483', '3483', '3483')                            +
-     Item 63: offset = 2472, tuple = ('1484', '3484', '3484')                            +
-     Item 64: offset = 2504, tuple = ('1485', '3485', '3485')                            +
-   Chunk 15: offset = 65, location = 2536, hikey location = 240                          +
-     Item 65: offset = 2568, tuple = ('1486', '3486', '3486')                            +
-     Item 66: offset = 2600, tuple = ('1487', '3487', '3487')                            +
-     Item 67: offset = 2632, tuple = ('1488', '3488', '3488')                            +
-     Item 68: offset = 2664, tuple = ('1489', '3489', '3489')                            +
-     Item 69: offset = 2696, tuple = ('1490', '3490', '3490')                            +
-     Item 70: offset = 2728, tuple = ('1491', '3491', '3491')                            +
-     Item 71: offset = 2760, tuple = ('1492', '3492', '3492')                            +
-     Item 72: offset = 2792, tuple = ('1493', '3493', '3493')                            +
-     Item 73: offset = 2824, tuple = ('1494', '3494', '3494')                            +
-     Item 74: offset = 2856, tuple = ('1495', '3495', '3495')                            +
-     Item 75: offset = 2888, tuple = ('1496', '3496', '3496')                            +
-     Item 76: offset = 2920, tuple = ('1497', '3497', '3497')                            +
-     Item 77: offset = 2952, tuple = ('1498', '3498', '3498')                            +
-     Item 78: offset = 2984, tuple = ('1499', '3499', '3499')                            +
-     Item 79: offset = 3016, tuple = ('1500', '3500', '3500')                            +
+   Chunk 10: offset = 20, location = 976, hikey location = 208, hikey = ('1443')         +
+     Item 20: offset = 984, tuple = ('1441', '3441', '3441')                             +
+     Item 21: offset = 1016, tuple = ('1442', '3442', '3442')                            +
+   Chunk 11: offset = 22, location = 1048, hikey location = 216, hikey = ('1452')        +
+     Item 22: offset = 1072, tuple = ('1443', '3443', '3443')                            +
+     Item 23: offset = 1104, tuple = ('1444', '3444', '3444')                            +
+     Item 24: offset = 1136, tuple = ('1445', '3445', '3445')                            +
+     Item 25: offset = 1168, tuple = ('1446', '3446', '3446')                            +
+     Item 26: offset = 1200, tuple = ('1447', '3447', '3447')                            +
+     Item 27: offset = 1232, tuple = ('1448', '3448', '3448')                            +
+     Item 28: offset = 1264, tuple = ('1449', '3449', '3449')                            +
+     Item 29: offset = 1296, tuple = ('1450', '3450', '3450')                            +
+     Item 30: offset = 1328, tuple = ('1451', '3451', '3451')                            +
+   Chunk 12: offset = 31, location = 1360, hikey location = 224, hikey = ('1461')        +
+     Item 31: offset = 1384, tuple = ('1452', '3452', '3452')                            +
+     Item 32: offset = 1416, tuple = ('1453', '3453', '3453')                            +
+     Item 33: offset = 1448, tuple = ('1454', '3454', '3454')                            +
+     Item 34: offset = 1480, tuple = ('1455', '3455', '3455')                            +
+     Item 35: offset = 1512, tuple = ('1456', '3456', '3456')                            +
+     Item 36: offset = 1544, tuple = ('1457', '3457', '3457')                            +
+     Item 37: offset = 1576, tuple = ('1458', '3458', '3458')                            +
+     Item 38: offset = 1608, tuple = ('1459', '3459', '3459')                            +
+     Item 39: offset = 1640, tuple = ('1460', '3460', '3460')                            +
+   Chunk 13: offset = 40, location = 1672, hikey location = 232, hikey = ('1470')        +
+     Item 40: offset = 1696, tuple = ('1461', '3461', '3461')                            +
+     Item 41: offset = 1728, tuple = ('1462', '3462', '3462')                            +
+     Item 42: offset = 1760, tuple = ('1463', '3463', '3463')                            +
+     Item 43: offset = 1792, tuple = ('1464', '3464', '3464')                            +
+     Item 44: offset = 1824, tuple = ('1465', '3465', '3465')                            +
+     Item 45: offset = 1856, tuple = ('1466', '3466', '3466')                            +
+     Item 46: offset = 1888, tuple = ('1467', '3467', '3467')                            +
+     Item 47: offset = 1920, tuple = ('1468', '3468', '3468')                            +
+     Item 48: offset = 1952, tuple = ('1469', '3469', '3469')                            +
+   Chunk 14: offset = 49, location = 1984, hikey location = 240, hikey = ('1479')        +
+     Item 49: offset = 2008, tuple = ('1470', '3470', '3470')                            +
+     Item 50: offset = 2040, tuple = ('1471', '3471', '3471')                            +
+     Item 51: offset = 2072, tuple = ('1472', '3472', '3472')                            +
+     Item 52: offset = 2104, tuple = ('1473', '3473', '3473')                            +
+     Item 53: offset = 2136, tuple = ('1474', '3474', '3474')                            +
+     Item 54: offset = 2168, tuple = ('1475', '3475', '3475')                            +
+     Item 55: offset = 2200, tuple = ('1476', '3476', '3476')                            +
+     Item 56: offset = 2232, tuple = ('1477', '3477', '3477')                            +
+     Item 57: offset = 2264, tuple = ('1478', '3478', '3478')                            +
+   Chunk 15: offset = 58, location = 2296, hikey location = 248, hikey = ('1488')        +
+     Item 58: offset = 2320, tuple = ('1479', '3479', '3479')                            +
+     Item 59: offset = 2352, tuple = ('1480', '3480', '3480')                            +
+     Item 60: offset = 2384, tuple = ('1481', '3481', '3481')                            +
+     Item 61: offset = 2416, tuple = ('1482', '3482', '3482')                            +
+     Item 62: offset = 2448, tuple = ('1483', '3483', '3483')                            +
+     Item 63: offset = 2480, tuple = ('1484', '3484', '3484')                            +
+     Item 64: offset = 2512, tuple = ('1485', '3485', '3485')                            +
+     Item 65: offset = 2544, tuple = ('1486', '3486', '3486')                            +
+     Item 66: offset = 2576, tuple = ('1487', '3487', '3487')                            +
+   Chunk 16: offset = 67, location = 2608, hikey location = 256                          +
+     Item 67: offset = 2640, tuple = ('1488', '3488', '3488')                            +
+     Item 68: offset = 2672, tuple = ('1489', '3489', '3489')                            +
+     Item 69: offset = 2704, tuple = ('1490', '3490', '3490')                            +
+     Item 70: offset = 2736, tuple = ('1491', '3491', '3491')                            +
+     Item 71: offset = 2768, tuple = ('1492', '3492', '3492')                            +
+     Item 72: offset = 2800, tuple = ('1493', '3493', '3493')                            +
+     Item 73: offset = 2832, tuple = ('1494', '3494', '3494')                            +
+     Item 74: offset = 2864, tuple = ('1495', '3495', '3495')                            +
+     Item 75: offset = 2896, tuple = ('1496', '3496', '3496')                            +
+     Item 76: offset = 2928, tuple = ('1497', '3497', '3497')                            +
+     Item 77: offset = 2960, tuple = ('1498', '3498', '3498')                            +
+     Item 78: offset = 2992, tuple = ('1499', '3499', '3499')                            +
+     Item 79: offset = 3024, tuple = ('1500', '3500', '3500')                            +
                                                                                          +
  Index o_indices0_idx1 contents                                                          +
  Page 0: level = 1, maxKeyLen = 16                                                       +
@@ -15691,70 +15694,70 @@ SELECT orioledb_tbl_structure('o_indices4'::regclass, 'nue');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty                     +
      Leftmost, Rightlink is invalid                                                      +
      Hikey: offset = 240, key = ('1081')                                                 +
-   Chunk 0: offset = 0, location = 256, hikey location = 120, hikey = ('1011')           +
-     Item 0: offset = 280, tuple = ('1001', '3001', '3001')                              +
-     Item 1: offset = 312, tuple = ('1002', '3002', '3002')                              +
-     Item 2: offset = 344, tuple = ('1003', '3003', '3003')                              +
-     Item 3: offset = 376, tuple = ('1004', '3004', '3004')                              +
-     Item 4: offset = 408, tuple = ('1005', '3005', '3005')                              +
-     Item 5: offset = 440, tuple = ('1006', '3006', '3006')                              +
-     Item 6: offset = 472, tuple = ('1007', '3007', '3007')                              +
-     Item 7: offset = 504, tuple = ('1008', '3008', '3008')                              +
-     Item 8: offset = 536, tuple = ('1009', '3009', '3009')                              +
-     Item 9: offset = 568, tuple = ('1010', '3010', '3010')                              +
-   Chunk 1: offset = 10, location = 600, hikey location = 128, hikey = ('1021')          +
-     Item 10: offset = 624, tuple = ('1011', '3011', '3011')                             +
-     Item 11: offset = 656, tuple = ('1012', '3012', '3012')                             +
-     Item 12: offset = 688, tuple = ('1013', '3013', '3013')                             +
-     Item 13: offset = 720, tuple = ('1014', '3014', '3014')                             +
-     Item 14: offset = 752, tuple = ('1015', '3015', '3015')                             +
-     Item 15: offset = 784, tuple = ('1016', '3016', '3016')                             +
-     Item 16: offset = 816, tuple = ('1017', '3017', '3017')                             +
-     Item 17: offset = 848, tuple = ('1018', '3018', '3018')                             +
-     Item 18: offset = 880, tuple = ('1019', '3019', '3019')                             +
-     Item 19: offset = 912, tuple = ('1020', '3020', '3020')                             +
-   Chunk 2: offset = 20, location = 944, hikey location = 136, hikey = ('1031')          +
-     Item 20: offset = 968, tuple = ('1021', '3021', '3021')                             +
-     Item 21: offset = 1000, tuple = ('1022', '3022', '3022')                            +
-     Item 22: offset = 1032, tuple = ('1023', '3023', '3023')                            +
-     Item 23: offset = 1064, tuple = ('1024', '3024', '3024')                            +
-     Item 24: offset = 1096, tuple = ('1025', '3025', '3025')                            +
-     Item 25: offset = 1128, tuple = ('1026', '3026', '3026')                            +
-     Item 26: offset = 1160, tuple = ('1027', '3027', '3027')                            +
-     Item 27: offset = 1192, tuple = ('1028', '3028', '3028')                            +
-     Item 28: offset = 1224, tuple = ('1029', '3029', '3029')                            +
-     Item 29: offset = 1256, tuple = ('1030', '3030', '3030')                            +
-   Chunk 3: offset = 30, location = 1288, hikey location = 144, hikey = ('1041')         +
-     Item 30: offset = 1312, tuple = ('1031', '3031', '3031')                            +
-     Item 31: offset = 1344, tuple = ('1032', '3032', '3032')                            +
-     Item 32: offset = 1376, tuple = ('1033', '3033', '3033')                            +
-     Item 33: offset = 1408, tuple = ('1034', '3034', '3034')                            +
-     Item 34: offset = 1440, tuple = ('1035', '3035', '3035')                            +
-     Item 35: offset = 1472, tuple = ('1036', '3036', '3036')                            +
-     Item 36: offset = 1504, tuple = ('1037', '3037', '3037')                            +
-     Item 37: offset = 1536, tuple = ('1038', '3038', '3038')                            +
-     Item 38: offset = 1568, tuple = ('1039', '3039', '3039')                            +
-     Item 39: offset = 1600, tuple = ('1040', '3040', '3040')                            +
-   Chunk 4: offset = 40, location = 1632, hikey location = 152, hikey = ('1051')         +
-     Item 40: offset = 1656, tuple = ('1041', '3041', '3041')                            +
-     Item 41: offset = 1688, tuple = ('1042', '3042', '3042')                            +
-     Item 42: offset = 1720, tuple = ('1043', '3043', '3043')                            +
-     Item 43: offset = 1752, tuple = ('1044', '3044', '3044')                            +
-     Item 44: offset = 1784, tuple = ('1045', '3045', '3045')                            +
-     Item 45: offset = 1816, tuple = ('1046', '3046', '3046')                            +
-     Item 46: offset = 1848, tuple = ('1047', '3047', '3047')                            +
-     Item 47: offset = 1880, tuple = ('1048', '3048', '3048')                            +
-     Item 48: offset = 1912, tuple = ('1049', '3049', '3049')                            +
-     Item 49: offset = 1944, tuple = ('1050', '3050', '3050')                            +
-   Chunk 5: offset = 50, location = 1976, hikey location = 160, hikey = ('1061')         +
-     Item 50: offset = 2000, tuple = ('1051', '3051', '3051')                            +
-     Item 51: offset = 2032, tuple = ('1052', '3052', '3052')                            +
-     Item 52: offset = 2064, tuple = ('1053', '3053', '3053')                            +
-     Item 53: offset = 2096, tuple = ('1054', '3054', '3054')                            +
-     Item 54: offset = 2128, tuple = ('1055', '3055', '3055')                            +
-     Item 55: offset = 2160, tuple = ('1056', '3056', '3056')                            +
-     Item 56: offset = 2192, tuple = ('1057', '3057', '3057')                            +
-     Item 57: offset = 2224, tuple = ('1058', '3058', '3058')                            +
+   Chunk 0: offset = 0, location = 256, hikey location = 120, hikey = ('1019')           +
+     Item 0: offset = 296, tuple = ('1001', '3001', '3001')                              +
+     Item 1: offset = 328, tuple = ('1002', '3002', '3002')                              +
+     Item 2: offset = 360, tuple = ('1003', '3003', '3003')                              +
+     Item 3: offset = 392, tuple = ('1004', '3004', '3004')                              +
+     Item 4: offset = 424, tuple = ('1005', '3005', '3005')                              +
+     Item 5: offset = 456, tuple = ('1006', '3006', '3006')                              +
+     Item 6: offset = 488, tuple = ('1007', '3007', '3007')                              +
+     Item 7: offset = 520, tuple = ('1008', '3008', '3008')                              +
+     Item 8: offset = 552, tuple = ('1009', '3009', '3009')                              +
+     Item 9: offset = 584, tuple = ('1010', '3010', '3010')                              +
+     Item 10: offset = 616, tuple = ('1011', '3011', '3011')                             +
+     Item 11: offset = 648, tuple = ('1012', '3012', '3012')                             +
+     Item 12: offset = 680, tuple = ('1013', '3013', '3013')                             +
+     Item 13: offset = 712, tuple = ('1014', '3014', '3014')                             +
+     Item 14: offset = 744, tuple = ('1015', '3015', '3015')                             +
+     Item 15: offset = 776, tuple = ('1016', '3016', '3016')                             +
+     Item 16: offset = 808, tuple = ('1017', '3017', '3017')                             +
+     Item 17: offset = 840, tuple = ('1018', '3018', '3018')                             +
+   Chunk 1: offset = 18, location = 872, hikey location = 128, hikey = ('1029')          +
+     Item 18: offset = 896, tuple = ('1019', '3019', '3019')                             +
+     Item 19: offset = 928, tuple = ('1020', '3020', '3020')                             +
+     Item 20: offset = 960, tuple = ('1021', '3021', '3021')                             +
+     Item 21: offset = 992, tuple = ('1022', '3022', '3022')                             +
+     Item 22: offset = 1024, tuple = ('1023', '3023', '3023')                            +
+     Item 23: offset = 1056, tuple = ('1024', '3024', '3024')                            +
+     Item 24: offset = 1088, tuple = ('1025', '3025', '3025')                            +
+     Item 25: offset = 1120, tuple = ('1026', '3026', '3026')                            +
+     Item 26: offset = 1152, tuple = ('1027', '3027', '3027')                            +
+     Item 27: offset = 1184, tuple = ('1028', '3028', '3028')                            +
+   Chunk 2: offset = 28, location = 1216, hikey location = 136, hikey = ('1039')         +
+     Item 28: offset = 1240, tuple = ('1029', '3029', '3029')                            +
+     Item 29: offset = 1272, tuple = ('1030', '3030', '3030')                            +
+     Item 30: offset = 1304, tuple = ('1031', '3031', '3031')                            +
+     Item 31: offset = 1336, tuple = ('1032', '3032', '3032')                            +
+     Item 32: offset = 1368, tuple = ('1033', '3033', '3033')                            +
+     Item 33: offset = 1400, tuple = ('1034', '3034', '3034')                            +
+     Item 34: offset = 1432, tuple = ('1035', '3035', '3035')                            +
+     Item 35: offset = 1464, tuple = ('1036', '3036', '3036')                            +
+     Item 36: offset = 1496, tuple = ('1037', '3037', '3037')                            +
+     Item 37: offset = 1528, tuple = ('1038', '3038', '3038')                            +
+   Chunk 3: offset = 38, location = 1560, hikey location = 144, hikey = ('1049')         +
+     Item 38: offset = 1584, tuple = ('1039', '3039', '3039')                            +
+     Item 39: offset = 1616, tuple = ('1040', '3040', '3040')                            +
+     Item 40: offset = 1648, tuple = ('1041', '3041', '3041')                            +
+     Item 41: offset = 1680, tuple = ('1042', '3042', '3042')                            +
+     Item 42: offset = 1712, tuple = ('1043', '3043', '3043')                            +
+     Item 43: offset = 1744, tuple = ('1044', '3044', '3044')                            +
+     Item 44: offset = 1776, tuple = ('1045', '3045', '3045')                            +
+     Item 45: offset = 1808, tuple = ('1046', '3046', '3046')                            +
+     Item 46: offset = 1840, tuple = ('1047', '3047', '3047')                            +
+     Item 47: offset = 1872, tuple = ('1048', '3048', '3048')                            +
+   Chunk 4: offset = 48, location = 1904, hikey location = 152, hikey = ('1059')         +
+     Item 48: offset = 1928, tuple = ('1049', '3049', '3049')                            +
+     Item 49: offset = 1960, tuple = ('1050', '3050', '3050')                            +
+     Item 50: offset = 1992, tuple = ('1051', '3051', '3051')                            +
+     Item 51: offset = 2024, tuple = ('1052', '3052', '3052')                            +
+     Item 52: offset = 2056, tuple = ('1053', '3053', '3053')                            +
+     Item 53: offset = 2088, tuple = ('1054', '3054', '3054')                            +
+     Item 54: offset = 2120, tuple = ('1055', '3055', '3055')                            +
+     Item 55: offset = 2152, tuple = ('1056', '3056', '3056')                            +
+     Item 56: offset = 2184, tuple = ('1057', '3057', '3057')                            +
+     Item 57: offset = 2216, tuple = ('1058', '3058', '3058')                            +
+   Chunk 5: offset = 58, location = 2248, hikey location = 160, hikey = ('1061')         +
      Item 58: offset = 2256, tuple = ('1059', '3059', '3059')                            +
      Item 59: offset = 2288, tuple = ('1060', '3060', '3060')                            +
    Chunk 6: offset = 60, location = 2320, hikey location = 168, hikey = ('1063')         +
@@ -18517,7 +18520,7 @@ SELECT orioledb_tbl_structure('o_indices5'::regclass, 'nue');
  state = free, datoid equal, relnode equal, ix_type = regular, dirty                             +
      Leftmost, Rightlink is invalid                                                              +
      Hikey: offset = 240, key = ('3081', '4081', '1081')                                         +
-   Chunk 0: offset = 0, location = 256, hikey location = 96, hikey = ('3023', '4023', '1023')    +
+   Chunk 0: offset = 0, location = 256, hikey location = 96, hikey = ('3022', '4022', '1022')    +
      Item 0: offset = 304, tuple = ('3001', '4001', '1001')                                      +
      Item 1: offset = 336, tuple = ('3002', '4002', '1002')                                      +
      Item 2: offset = 368, tuple = ('3003', '4003', '1003')                                      +
@@ -18539,8 +18542,8 @@ SELECT orioledb_tbl_structure('o_indices5'::regclass, 'nue');
      Item 18: offset = 880, tuple = ('3019', '4019', '1019')                                     +
      Item 19: offset = 912, tuple = ('3020', '4020', '1020')                                     +
      Item 20: offset = 944, tuple = ('3021', '4021', '1021')                                     +
-     Item 21: offset = 976, tuple = ('3022', '4022', '1022')                                     +
-   Chunk 1: offset = 22, location = 1008, hikey location = 112, hikey = ('3042', '4042', '1042') +
+   Chunk 1: offset = 21, location = 976, hikey location = 112, hikey = ('3041', '4041', '1041')  +
+     Item 21: offset = 1016, tuple = ('3022', '4022', '1022')                                    +
      Item 22: offset = 1048, tuple = ('3023', '4023', '1023')                                    +
      Item 23: offset = 1080, tuple = ('3024', '4024', '1024')                                    +
      Item 24: offset = 1112, tuple = ('3025', '4025', '1025')                                    +
@@ -18559,8 +18562,8 @@ SELECT orioledb_tbl_structure('o_indices5'::regclass, 'nue');
      Item 37: offset = 1528, tuple = ('3038', '4038', '1038')                                    +
      Item 38: offset = 1560, tuple = ('3039', '4039', '1039')                                    +
      Item 39: offset = 1592, tuple = ('3040', '4040', '1040')                                    +
-     Item 40: offset = 1624, tuple = ('3041', '4041', '1041')                                    +
-   Chunk 2: offset = 41, location = 1656, hikey location = 128, hikey = ('3061', '4061', '1061') +
+   Chunk 2: offset = 40, location = 1624, hikey location = 128, hikey = ('3060', '4060', '1060') +
+     Item 40: offset = 1664, tuple = ('3041', '4041', '1041')                                    +
      Item 41: offset = 1696, tuple = ('3042', '4042', '1042')                                    +
      Item 42: offset = 1728, tuple = ('3043', '4043', '1043')                                    +
      Item 43: offset = 1760, tuple = ('3044', '4044', '1044')                                    +
@@ -18579,32 +18582,32 @@ SELECT orioledb_tbl_structure('o_indices5'::regclass, 'nue');
      Item 56: offset = 2176, tuple = ('3057', '4057', '1057')                                    +
      Item 57: offset = 2208, tuple = ('3058', '4058', '1058')                                    +
      Item 58: offset = 2240, tuple = ('3059', '4059', '1059')                                    +
-     Item 59: offset = 2272, tuple = ('3060', '4060', '1060')                                    +
-   Chunk 3: offset = 60, location = 2304, hikey location = 144, hikey = ('3064', '4064', '1064') +
+   Chunk 3: offset = 59, location = 2272, hikey location = 144, hikey = ('3063', '4063', '1063') +
+     Item 59: offset = 2280, tuple = ('3060', '4060', '1060')                                    +
      Item 60: offset = 2312, tuple = ('3061', '4061', '1061')                                    +
      Item 61: offset = 2344, tuple = ('3062', '4062', '1062')                                    +
-     Item 62: offset = 2376, tuple = ('3063', '4063', '1063')                                    +
-   Chunk 4: offset = 63, location = 2408, hikey location = 160, hikey = ('3067', '4067', '1067') +
+   Chunk 4: offset = 62, location = 2376, hikey location = 160, hikey = ('3066', '4066', '1066') +
+     Item 62: offset = 2384, tuple = ('3063', '4063', '1063')                                    +
      Item 63: offset = 2416, tuple = ('3064', '4064', '1064')                                    +
      Item 64: offset = 2448, tuple = ('3065', '4065', '1065')                                    +
-     Item 65: offset = 2480, tuple = ('3066', '4066', '1066')                                    +
-   Chunk 5: offset = 66, location = 2512, hikey location = 176, hikey = ('3070', '4070', '1070') +
+   Chunk 5: offset = 65, location = 2480, hikey location = 176, hikey = ('3069', '4069', '1069') +
+     Item 65: offset = 2488, tuple = ('3066', '4066', '1066')                                    +
      Item 66: offset = 2520, tuple = ('3067', '4067', '1067')                                    +
      Item 67: offset = 2552, tuple = ('3068', '4068', '1068')                                    +
-     Item 68: offset = 2584, tuple = ('3069', '4069', '1069')                                    +
-   Chunk 6: offset = 69, location = 2616, hikey location = 192, hikey = ('3073', '4073', '1073') +
+   Chunk 6: offset = 68, location = 2584, hikey location = 192, hikey = ('3072', '4072', '1072') +
+     Item 68: offset = 2592, tuple = ('3069', '4069', '1069')                                    +
      Item 69: offset = 2624, tuple = ('3070', '4070', '1070')                                    +
      Item 70: offset = 2656, tuple = ('3071', '4071', '1071')                                    +
-     Item 71: offset = 2688, tuple = ('3072', '4072', '1072')                                    +
-   Chunk 7: offset = 72, location = 2720, hikey location = 208, hikey = ('3076', '4076', '1076') +
+   Chunk 7: offset = 71, location = 2688, hikey location = 208, hikey = ('3075', '4075', '1075') +
+     Item 71: offset = 2696, tuple = ('3072', '4072', '1072')                                    +
      Item 72: offset = 2728, tuple = ('3073', '4073', '1073')                                    +
      Item 73: offset = 2760, tuple = ('3074', '4074', '1074')                                    +
-     Item 74: offset = 2792, tuple = ('3075', '4075', '1075')                                    +
-   Chunk 8: offset = 75, location = 2824, hikey location = 224, hikey = ('3079', '4079', '1079') +
+   Chunk 8: offset = 74, location = 2792, hikey location = 224, hikey = ('3078', '4078', '1078') +
+     Item 74: offset = 2800, tuple = ('3075', '4075', '1075')                                    +
      Item 75: offset = 2832, tuple = ('3076', '4076', '1076')                                    +
      Item 76: offset = 2864, tuple = ('3077', '4077', '1077')                                    +
-     Item 77: offset = 2896, tuple = ('3078', '4078', '1078')                                    +
-   Chunk 9: offset = 78, location = 2928, hikey location = 240, hikey = ('3081', '4081', '1081') +
+   Chunk 9: offset = 77, location = 2896, hikey location = 240, hikey = ('3081', '4081', '1081') +
+     Item 77: offset = 2904, tuple = ('3078', '4078', '1078')                                    +
      Item 78: offset = 2936, tuple = ('3079', '4079', '1079')                                    +
      Item 79: offset = 2968, tuple = ('3080', '4080', '1080')                                    +
                                                                                                  +
@@ -20651,102 +20654,103 @@ SELECT orioledb_tbl_structure('o_indices6'::regclass, 'nue');
  Page 3: level = 0, maxKeyLen = 8, nVacatedBytes = 0                                     +
  state = free, datoid equal, relnode equal, ix_type = primary, dirty                     +
      Rightmost                                                                           +
-   Chunk 0: offset = 0, location = 256, hikey location = 120, hikey = ('1423')           +
+   Chunk 0: offset = 0, location = 256, hikey location = 128, hikey = ('1423')           +
      Item 0: offset = 264, tuple = ('1421', '3021', '4421')                              +
      Item 1: offset = 296, tuple = ('1422', '3022', '4422')                              +
-   Chunk 1: offset = 2, location = 328, hikey location = 128, hikey = ('1425')           +
+   Chunk 1: offset = 2, location = 328, hikey location = 136, hikey = ('1425')           +
      Item 2: offset = 336, tuple = ('1423', '3023', '4423')                              +
      Item 3: offset = 368, tuple = ('1424', '3024', '4424')                              +
-   Chunk 2: offset = 4, location = 400, hikey location = 136, hikey = ('1427')           +
+   Chunk 2: offset = 4, location = 400, hikey location = 144, hikey = ('1427')           +
      Item 4: offset = 408, tuple = ('1425', '3025', '4425')                              +
      Item 5: offset = 440, tuple = ('1426', '3026', '4426')                              +
-   Chunk 3: offset = 6, location = 472, hikey location = 144, hikey = ('1429')           +
+   Chunk 3: offset = 6, location = 472, hikey location = 152, hikey = ('1429')           +
      Item 6: offset = 480, tuple = ('1427', '3027', '4427')                              +
      Item 7: offset = 512, tuple = ('1428', '3028', '4428')                              +
-   Chunk 4: offset = 8, location = 544, hikey location = 152, hikey = ('1431')           +
+   Chunk 4: offset = 8, location = 544, hikey location = 160, hikey = ('1431')           +
      Item 8: offset = 552, tuple = ('1429', '3029', '4429')                              +
      Item 9: offset = 584, tuple = ('1430', '3030', '4430')                              +
-   Chunk 5: offset = 10, location = 616, hikey location = 160, hikey = ('1433')          +
+   Chunk 5: offset = 10, location = 616, hikey location = 168, hikey = ('1433')          +
      Item 10: offset = 624, tuple = ('1431', '3031', '4431')                             +
      Item 11: offset = 656, tuple = ('1432', '3032', '4432')                             +
-   Chunk 6: offset = 12, location = 688, hikey location = 168, hikey = ('1435')          +
+   Chunk 6: offset = 12, location = 688, hikey location = 176, hikey = ('1435')          +
      Item 12: offset = 696, tuple = ('1433', '3033', '4433')                             +
      Item 13: offset = 728, tuple = ('1434', '3034', '4434')                             +
-   Chunk 7: offset = 14, location = 760, hikey location = 176, hikey = ('1437')          +
+   Chunk 7: offset = 14, location = 760, hikey location = 184, hikey = ('1437')          +
      Item 14: offset = 768, tuple = ('1435', '3035', '4435')                             +
      Item 15: offset = 800, tuple = ('1436', '3036', '4436')                             +
-   Chunk 8: offset = 16, location = 832, hikey location = 184, hikey = ('1439')          +
+   Chunk 8: offset = 16, location = 832, hikey location = 192, hikey = ('1439')          +
      Item 16: offset = 840, tuple = ('1437', '3037', '4437')                             +
      Item 17: offset = 872, tuple = ('1438', '3038', '4438')                             +
-   Chunk 9: offset = 18, location = 904, hikey location = 192, hikey = ('1441')          +
+   Chunk 9: offset = 18, location = 904, hikey location = 200, hikey = ('1441')          +
      Item 18: offset = 912, tuple = ('1439', '3039', '4439')                             +
      Item 19: offset = 944, tuple = ('1440', '3040', '4440')                             +
-   Chunk 10: offset = 20, location = 976, hikey location = 200, hikey = ('1450')         +
-     Item 20: offset = 1000, tuple = ('1441', '3041', '4441')                            +
-     Item 21: offset = 1032, tuple = ('1442', '3042', '4442')                            +
-     Item 22: offset = 1064, tuple = ('1443', '3043', '4443')                            +
-     Item 23: offset = 1096, tuple = ('1444', '3044', '4444')                            +
-     Item 24: offset = 1128, tuple = ('1445', '3045', '4445')                            +
-     Item 25: offset = 1160, tuple = ('1446', '3046', '4446')                            +
-     Item 26: offset = 1192, tuple = ('1447', '3047', '4447')                            +
-     Item 27: offset = 1224, tuple = ('1448', '3048', '4448')                            +
-     Item 28: offset = 1256, tuple = ('1449', '3049', '4449')                            +
-   Chunk 11: offset = 29, location = 1288, hikey location = 208, hikey = ('1459')        +
-     Item 29: offset = 1312, tuple = ('1450', '3050', '4450')                            +
-     Item 30: offset = 1344, tuple = ('1451', '3051', '4451')                            +
-     Item 31: offset = 1376, tuple = ('1452', '3052', '4452')                            +
-     Item 32: offset = 1408, tuple = ('1453', '3053', '4453')                            +
-     Item 33: offset = 1440, tuple = ('1454', '3054', '4454')                            +
-     Item 34: offset = 1472, tuple = ('1455', '3055', '4455')                            +
-     Item 35: offset = 1504, tuple = ('1456', '3056', '4456')                            +
-     Item 36: offset = 1536, tuple = ('1457', '3057', '4457')                            +
-     Item 37: offset = 1568, tuple = ('1458', '3058', '4458')                            +
-   Chunk 12: offset = 38, location = 1600, hikey location = 216, hikey = ('1468')        +
-     Item 38: offset = 1624, tuple = ('1459', '3059', '4459')                            +
-     Item 39: offset = 1656, tuple = ('1460', '3060', '4460')                            +
-     Item 40: offset = 1688, tuple = ('1461', '3061', '4461')                            +
-     Item 41: offset = 1720, tuple = ('1462', '3062', '4462')                            +
-     Item 42: offset = 1752, tuple = ('1463', '3063', '4463')                            +
-     Item 43: offset = 1784, tuple = ('1464', '3064', '4464')                            +
-     Item 44: offset = 1816, tuple = ('1465', '3065', '4465')                            +
-     Item 45: offset = 1848, tuple = ('1466', '3066', '4466')                            +
-     Item 46: offset = 1880, tuple = ('1467', '3067', '4467')                            +
-   Chunk 13: offset = 47, location = 1912, hikey location = 224, hikey = ('1477')        +
-     Item 47: offset = 1936, tuple = ('1468', '3068', '4468')                            +
-     Item 48: offset = 1968, tuple = ('1469', '3069', '4469')                            +
-     Item 49: offset = 2000, tuple = ('1470', '3070', '4470')                            +
-     Item 50: offset = 2032, tuple = ('1471', '3071', '4471')                            +
-     Item 51: offset = 2064, tuple = ('1472', '3072', '4472')                            +
-     Item 52: offset = 2096, tuple = ('1473', '3073', '4473')                            +
-     Item 53: offset = 2128, tuple = ('1474', '3074', '4474')                            +
-     Item 54: offset = 2160, tuple = ('1475', '3075', '4475')                            +
-     Item 55: offset = 2192, tuple = ('1476', '3076', '4476')                            +
-   Chunk 14: offset = 56, location = 2224, hikey location = 232, hikey = ('1486')        +
-     Item 56: offset = 2248, tuple = ('1477', '3077', '4477')                            +
-     Item 57: offset = 2280, tuple = ('1478', '3078', '4478')                            +
-     Item 58: offset = 2312, tuple = ('1479', '3079', '4479')                            +
-     Item 59: offset = 2344, tuple = ('1480', '3080', '4480')                            +
-     Item 60: offset = 2376, tuple = ('1481', '3081', '4481')                            +
-     Item 61: offset = 2408, tuple = ('1482', '3082', '4482')                            +
-     Item 62: offset = 2440, tuple = ('1483', '3083', '4483')                            +
-     Item 63: offset = 2472, tuple = ('1484', '3084', '4484')                            +
-     Item 64: offset = 2504, tuple = ('1485', '3085', '4485')                            +
-   Chunk 15: offset = 65, location = 2536, hikey location = 240                          +
-     Item 65: offset = 2568, tuple = ('1486', '3086', '4486')                            +
-     Item 66: offset = 2600, tuple = ('1487', '3087', '4487')                            +
-     Item 67: offset = 2632, tuple = ('1488', '3088', '4488')                            +
-     Item 68: offset = 2664, tuple = ('1489', '3089', '4489')                            +
-     Item 69: offset = 2696, tuple = ('1490', '3090', '4490')                            +
-     Item 70: offset = 2728, tuple = ('1491', '3091', '4491')                            +
-     Item 71: offset = 2760, tuple = ('1492', '3092', '4492')                            +
-     Item 72: offset = 2792, tuple = ('1493', '3093', '4493')                            +
-     Item 73: offset = 2824, tuple = ('1494', '3094', '4494')                            +
-     Item 74: offset = 2856, tuple = ('1495', '3095', '4495')                            +
-     Item 75: offset = 2888, tuple = ('1496', '3096', '4496')                            +
-     Item 76: offset = 2920, tuple = ('1497', '3097', '4497')                            +
-     Item 77: offset = 2952, tuple = ('1498', '3098', '4498')                            +
-     Item 78: offset = 2984, tuple = ('1499', '3099', '4499')                            +
-     Item 79: offset = 3016, tuple = ('1500', '3000', '4500')                            +
+   Chunk 10: offset = 20, location = 976, hikey location = 208, hikey = ('1443')         +
+     Item 20: offset = 984, tuple = ('1441', '3041', '4441')                             +
+     Item 21: offset = 1016, tuple = ('1442', '3042', '4442')                            +
+   Chunk 11: offset = 22, location = 1048, hikey location = 216, hikey = ('1452')        +
+     Item 22: offset = 1072, tuple = ('1443', '3043', '4443')                            +
+     Item 23: offset = 1104, tuple = ('1444', '3044', '4444')                            +
+     Item 24: offset = 1136, tuple = ('1445', '3045', '4445')                            +
+     Item 25: offset = 1168, tuple = ('1446', '3046', '4446')                            +
+     Item 26: offset = 1200, tuple = ('1447', '3047', '4447')                            +
+     Item 27: offset = 1232, tuple = ('1448', '3048', '4448')                            +
+     Item 28: offset = 1264, tuple = ('1449', '3049', '4449')                            +
+     Item 29: offset = 1296, tuple = ('1450', '3050', '4450')                            +
+     Item 30: offset = 1328, tuple = ('1451', '3051', '4451')                            +
+   Chunk 12: offset = 31, location = 1360, hikey location = 224, hikey = ('1461')        +
+     Item 31: offset = 1384, tuple = ('1452', '3052', '4452')                            +
+     Item 32: offset = 1416, tuple = ('1453', '3053', '4453')                            +
+     Item 33: offset = 1448, tuple = ('1454', '3054', '4454')                            +
+     Item 34: offset = 1480, tuple = ('1455', '3055', '4455')                            +
+     Item 35: offset = 1512, tuple = ('1456', '3056', '4456')                            +
+     Item 36: offset = 1544, tuple = ('1457', '3057', '4457')                            +
+     Item 37: offset = 1576, tuple = ('1458', '3058', '4458')                            +
+     Item 38: offset = 1608, tuple = ('1459', '3059', '4459')                            +
+     Item 39: offset = 1640, tuple = ('1460', '3060', '4460')                            +
+   Chunk 13: offset = 40, location = 1672, hikey location = 232, hikey = ('1470')        +
+     Item 40: offset = 1696, tuple = ('1461', '3061', '4461')                            +
+     Item 41: offset = 1728, tuple = ('1462', '3062', '4462')                            +
+     Item 42: offset = 1760, tuple = ('1463', '3063', '4463')                            +
+     Item 43: offset = 1792, tuple = ('1464', '3064', '4464')                            +
+     Item 44: offset = 1824, tuple = ('1465', '3065', '4465')                            +
+     Item 45: offset = 1856, tuple = ('1466', '3066', '4466')                            +
+     Item 46: offset = 1888, tuple = ('1467', '3067', '4467')                            +
+     Item 47: offset = 1920, tuple = ('1468', '3068', '4468')                            +
+     Item 48: offset = 1952, tuple = ('1469', '3069', '4469')                            +
+   Chunk 14: offset = 49, location = 1984, hikey location = 240, hikey = ('1479')        +
+     Item 49: offset = 2008, tuple = ('1470', '3070', '4470')                            +
+     Item 50: offset = 2040, tuple = ('1471', '3071', '4471')                            +
+     Item 51: offset = 2072, tuple = ('1472', '3072', '4472')                            +
+     Item 52: offset = 2104, tuple = ('1473', '3073', '4473')                            +
+     Item 53: offset = 2136, tuple = ('1474', '3074', '4474')                            +
+     Item 54: offset = 2168, tuple = ('1475', '3075', '4475')                            +
+     Item 55: offset = 2200, tuple = ('1476', '3076', '4476')                            +
+     Item 56: offset = 2232, tuple = ('1477', '3077', '4477')                            +
+     Item 57: offset = 2264, tuple = ('1478', '3078', '4478')                            +
+   Chunk 15: offset = 58, location = 2296, hikey location = 248, hikey = ('1488')        +
+     Item 58: offset = 2320, tuple = ('1479', '3079', '4479')                            +
+     Item 59: offset = 2352, tuple = ('1480', '3080', '4480')                            +
+     Item 60: offset = 2384, tuple = ('1481', '3081', '4481')                            +
+     Item 61: offset = 2416, tuple = ('1482', '3082', '4482')                            +
+     Item 62: offset = 2448, tuple = ('1483', '3083', '4483')                            +
+     Item 63: offset = 2480, tuple = ('1484', '3084', '4484')                            +
+     Item 64: offset = 2512, tuple = ('1485', '3085', '4485')                            +
+     Item 65: offset = 2544, tuple = ('1486', '3086', '4486')                            +
+     Item 66: offset = 2576, tuple = ('1487', '3087', '4487')                            +
+   Chunk 16: offset = 67, location = 2608, hikey location = 256                          +
+     Item 67: offset = 2640, tuple = ('1488', '3088', '4488')                            +
+     Item 68: offset = 2672, tuple = ('1489', '3089', '4489')                            +
+     Item 69: offset = 2704, tuple = ('1490', '3090', '4490')                            +
+     Item 70: offset = 2736, tuple = ('1491', '3091', '4491')                            +
+     Item 71: offset = 2768, tuple = ('1492', '3092', '4492')                            +
+     Item 72: offset = 2800, tuple = ('1493', '3093', '4493')                            +
+     Item 73: offset = 2832, tuple = ('1494', '3094', '4494')                            +
+     Item 74: offset = 2864, tuple = ('1495', '3095', '4495')                            +
+     Item 75: offset = 2896, tuple = ('1496', '3096', '4496')                            +
+     Item 76: offset = 2928, tuple = ('1497', '3097', '4497')                            +
+     Item 77: offset = 2960, tuple = ('1498', '3098', '4498')                            +
+     Item 78: offset = 2992, tuple = ('1499', '3099', '4499')                            +
+     Item 79: offset = 3024, tuple = ('1500', '3000', '4500')                            +
                                                                                          +
  Index o_indices6_idx2 contents                                                          +
  Page 0: level = 1, maxKeyLen = 16                                                       +

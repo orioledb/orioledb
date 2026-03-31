@@ -47,6 +47,7 @@ extern OffsetNumber btree_page_split_location(BTreeDescr *desc,
 											  OffsetNumber targetLocation,
 											  float4 spaceRatio,
 											  OTuple *split_item);
+extern bool split_items_fit_single_page(BTreeSplitItems *items);
 OffsetNumber btree_get_split_left_count(BTreeDescr *desc, Page page,
 										OffsetNumber offset, bool replace,
 										BTreeSplitItems *items,

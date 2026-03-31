@@ -339,7 +339,7 @@ class PageFitItemsTest(BaseTest):
 
 		node.safe_psql(
 		    'postgres',
-		    "CREATE TABLE o_table4(t1 text, t2 text, t3 text, t4 text) USING orioledb;\n"
+		    "CREATE TABLE o_table4(t1 text, t2 text, t3 text, t4 text, t5 text, t6 text, t7 text, t8 text) USING orioledb;\n"
 		)
 
 		self.assertSysTreePagesCount(3)

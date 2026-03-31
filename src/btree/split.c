@@ -178,6 +178,31 @@ perform_page_compaction(BTreeDescr *desc, OInMemoryBlkno blkno,
 }
 
 /*
+ * Check if all split items fit on a single page.  Used after
+ * make_split_items() reclaims deleted tuples to determine whether compaction
+ * is sufficient instead of a page split.
+ */
+bool
+split_items_fit_single_page(BTreeSplitItems *items)
+{
+	int			totalDataSize = 0;
+	int			hikeysEnd;
+	int			spaceAvailable;
+
+	for (int i = 0; i < items->itemsCount; i++)
+		totalDataSize += items->items[i].size;
+
+	hikeysEnd = Max(items->hikeysEnd,
+					MAXALIGN(sizeof(BTreePageHeader)) + items->maxKeyLen);
+
+	spaceAvailable = ORIOLEDB_BLCKSZ - hikeysEnd
+		- totalDataSize
+		- MAXALIGN(sizeof(LocationIndex) * items->itemsCount);
+
+	return spaceAvailable >= 0;
+}
+
+/*
  * Find the location for B-tree page split.  This function take into accouint
  * insertion of new tuple or replacement of existing one.  It tries to keep
  * as close as possible to `targetLocation`, or if `targetLocation == 0` close

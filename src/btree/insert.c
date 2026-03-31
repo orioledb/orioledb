@@ -1145,7 +1145,7 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 
 		return true;
 	}
-	else if (fit == BTreeItemPageFitCompactRequired)
+	else
 	{
 		BTreeSplitItems items;
 		OffsetNumber offset;
@@ -1156,7 +1156,8 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 		 * No compaction should occur for bridge index: we need to keep the
 		 * entries for VACUUM.
 		 */
-		Assert(desc->type != oIndexBridge);
+		Assert(fit == BTreeItemPageFitSplitRequired ||
+			   desc->type != oIndexBridge);
 
 		offset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
 
@@ -1174,44 +1175,28 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 						 insert_item->replace,
 						 csn);
 
-		START_CRIT_SECTION();
-
-		perform_page_compaction(desc, blkno, &items, needsUndo, csn);
-		header->prevInsertOffset = offset;
-
-		MARK_DIRTY(desc, blkno);
-		o_btree_insert_mark_split_finished_if_needed(insert_item);
-		unlock_page(blkno);
-
-		END_CRIT_SECTION();
-
-		return true;
-	}
-	else
-	{
 		/*
-		 * No way to fit into the current page.  We have to split the page.
+		 * After make_split_items() reclaims deleted tuples, the remaining
+		 * items may fit on a single page even if page_locator_fits_item()
+		 * estimated a split was needed.  Check actual total size and do
+		 * compaction instead of split when possible.
 		 */
-		OffsetNumber offset;
-		BTreeSplitItems items;
-		CommitSeqNo csn;
-		bool		needsUndo;
+		if (fit == BTreeItemPageFitCompactRequired ||
+			(O_PAGE_IS(p, LEAF) && split_items_fit_single_page(&items)))
+		{
+			START_CRIT_SECTION();
 
-		offset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
+			perform_page_compaction(desc, blkno, &items, needsUndo, csn);
+			header->prevInsertOffset = offset;
 
-		/* Get CSN for undo item if needed */
-		needsUndo = o_btree_insert_needs_page_undo(desc, p);
-		if (needsUndo)
-			csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
-		else
-			csn = COMMITSEQNO_INPROGRESS;
+			MARK_DIRTY(desc, blkno);
+			o_btree_insert_mark_split_finished_if_needed(insert_item);
+			unlock_page(blkno);
 
-		make_split_items(desc, p, &items, &offset,
-						 insert_item->tupheader,
-						 insert_item->tuple,
-						 insert_item->tuplen,
-						 insert_item->replace,
-						 csn);
+			END_CRIT_SECTION();
+
+			return true;
+		}
 
 		return o_btree_insert_split(insert_item, &items, offset, csn,
 									needsUndo, reserve_kind, NULL, 0);

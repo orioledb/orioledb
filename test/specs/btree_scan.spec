@@ -35,7 +35,7 @@ setup
 
 	INSERT INTO o_btree_scan (id,val)
 		SELECT decode(to_char(id, 'fm0000') || repeat('a', 500), 'hex'), v
-		FROM generate_series(1, 4096, 1) id, generate_random_varchar(1024) AS v
+		FROM generate_series(1, 4096, 1) id, generate_random_varchar(1200) AS v
 		ON CONFLICT (id) DO UPDATE SET val = EXCLUDED.val;
 }
 
