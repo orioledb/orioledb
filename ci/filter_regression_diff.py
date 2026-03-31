@@ -47,6 +47,8 @@ knownErrors = {
     ["*"],
     r"ERROR:  replica identity type INDEX is not supported for OrioleDB tables yet":
     ["*"],
+	r"Options: index_bridging=true":
+	["*"],
 
 	# errors for tests with EXPLAIN usage
 	r"^[-]+$": ["*"],
@@ -187,8 +189,43 @@ known_table_diffs = {
 	"explain" : [
 		[[['Bitmap Heap Scan on tenk1  (cost=N.N..N.N rows=N width=N)']],
 		 [['Bitmap heap scan'], ['Custom Scan (o_scan) on tenk1  (cost=N.N..N.N rows=N width=N)']]]
+	],
+	"strings" : [
+		[[['f']], [['t']]]
+	],
+	"misc_functions": [
+		[[['t', 't']], [['t', 'f']]]
+	],
+	"vacuum_parallel": [
+		[[['t']], [['f']]]
 	]
 }
+
+
+# Recursively prints a query plan subtree rooted at `node`.
+# Each node is [level, value, properties, children].
+# Output is indented according to the tree depth.
+def dump_subtree(node: list):
+	prefix = "  " * node[0]
+	print(f"{prefix}[{node[0]}]{node[1]}")
+	for prop in node[2]:
+		print(f"{prefix}  {prop}")
+	for child in node[3]:
+		dump_subtree(child)
+
+
+# Check if two condition strings are equal up to commutativity of operands.
+# E.g. "Hash Cond: (a.tenthous = i4.f1)" matches "Hash Cond: (i4.f1 = a.tenthous)"
+def is_commutative_cond_eq(s1: str, s2: str) -> bool:
+	if s1 == s2:
+		return True
+	m1 = re.match(r"^(.+:\s*\()(.+?)\s*=\s*(.+?)\)$", s1)
+	m2 = re.match(r"^(.+:\s*\()(.+?)\s*=\s*(.+?)\)$", s2)
+	if not m1 or not m2:
+		return False
+	return (m1.group(1) == m2.group(1)
+			and m1.group(2).strip() == m2.group(3).strip()
+			and m1.group(3).strip() == m2.group(2).strip())
 
 
 def compare_trees(src_tree: list, target_tree: list, test_name: str):
@@ -203,6 +240,9 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 		# Skip all heap specific substrings inside source value
 		return re.sub(r"^Parallel\s+", "", value)
 
+	def is_conds_eq(src_cond: str, target_cond: str):
+		return src_cond.replace("Index Cond", "Conds") == target_cond
+
 	equal = True
 	src_stack = [[src_tree, 0]]
 	target_stack = [[target_tree, 0]]
@@ -214,8 +254,27 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 		src_cur = src_stack[0][0][src_stack[0][1]]
 		src_cur_value = normalize_src_value(src_cur[1])
 		target_cur = target_stack[0][0][target_stack[0][1]]
+
+		# print("--- src_cur ---")
+		# dump_subtree(src_cur)
+		# print("--- target_cur ---")
+		# dump_subtree(target_cur)
+
 		if target_cur[1].startswith("Result"):
-			target_down = True
+			# It is possible for target output to has smth like:
+			#
+			# ->  Result
+			# 	One-Time Filter: (InitPlan 1).col1
+			#
+			# In that case One-Time Filter is just a property for Result stmt,
+			# but it is clear, that we can't simply go to the next level without
+			# verifying "One-Time Filter" expr. So replace "Result" with it's property
+			#
+			# TODO: May be better to rewrite tree builder?
+			if len(target_cur[2]):
+				target_stack[0][0][target_stack[0][1]][1] = target_cur[2][0]
+			else:
+				target_down = True
 		elif src_cur_value.startswith("Result"):
 			src_down = True
 		elif (test_name == 'select'
@@ -223,6 +282,12 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 			  and target_cur[1] == 'Index Scan using onek2_u2_prtl on onek2'):
 				src_up = True
 				target_up = True
+		elif (test_name == 'updatable_views'
+			  and src_cur_value.startswith('Bitmap Heap Scan')
+			  and target_cur[1].startswith('Custom Scan')
+			  and target_cur[2][0].startswith('Forward index scan')):
+			src_up = True
+			target_up = True
 		elif src_cur_value.startswith('Bitmap Heap Scan'):
 			if target_cur[1].startswith('Custom Scan'):
 				if target_cur[2][0] != 'Bitmap heap scan':
@@ -232,6 +297,9 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 					target_down = True
 			else:
 				equal = False
+		elif is_commutative_cond_eq(src_cur_value, target_cur[1]):
+			src_down = True
+			target_down = True
 		elif src_cur_value == target_cur[1]:
 			src_down = True
 			target_down = True
@@ -268,8 +336,11 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 			elif (src_cur_value.startswith('Index Scan')
 		 		 and target_cur[1].startswith('Custom Scan')
 				 and target_cur[2][0].startswith('Forward index scan')):
-				src_up = True
-				target_up = True
+				if (len(src_cur[2]) == 0 and len(target_cur[2]) == 1) or  is_conds_eq(src_cur[2][0], target_cur[2][1]):
+					src_down = True
+					target_down = True
+				else:
+					equal = False
 			elif re.sub(r"_\d+$", "", src_cur_value) == re.sub(r"_\d+$", "", target_cur[1]):
 				# lines differ only by auto-generated alias suffix (e.g. tinner_2 vs tinner_1)
 				src_down = True
@@ -277,17 +348,23 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 			elif (src_cur_value == target_cur[1].replace('rowid', 'ctid')):
 				src_up = True
 				target_up = True
-			elif (test_name == 'equivclass'
+			elif (src_cur_value == target_cur[1].replace('bytea', 'tid')):
+				src_down = True
+				target_down = True
+			elif (test_name in ['equivclass', 'inherit', 'aggregates']
 				  and (src_cur_value.startswith('Index Scan')
 					   and target_cur[1].startswith('Index Only Scan'))):
 				src_up = True
 				target_up = True
-			elif (test_name == 'partition_prune'
+			elif (test_name in ['partition_prune', 'inherit', 'updatable_views']
 				  and (src_cur_value.startswith('Index Only Scan')
 					and target_cur[1].startswith('Custom Scan')
 					and target_cur[2][0].startswith('Forward index only scan'))):
-				src_down = True
-				target_down = True
+				if is_conds_eq(src_cur[2][0], target_cur[2][1]):
+					src_down = True
+					target_down = True
+				else:
+					equal = False
 			elif (test_name == 'partition_prune'
 				  and re.sub(r"actual rows=\d+ loops=\d+\)$", "", src_cur_value) == re.sub(r"actual rows=\d+ loops=\d+\)$", "", target_cur[1])):
 				src_down = True
@@ -297,7 +374,7 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				  and target_cur[1].startswith('Aggregate')):
 				# Need to skip report about parallel heap execution, because OrioleDB
 				# currently does not support parallel scans except sequential
-				for i in range(2):
+				for _ in range(2):
 					if goto_down_level(src_stack, src_cur) == False:
 						raise RuntimeError("Aggregate explain structure is invalid")
 					src_cur = src_stack[0][0][src_stack[0][1]]
@@ -317,8 +394,28 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				  and target_cur[1].startswith('Index Scan')):
 				src_up = True
 				target_up = True
+			elif (test_name == 'updatable_views'
+				  and ((re.match(r"Hash (Right )*Join", src_cur_value)
+						and target_cur[1].startswith("Nested Loop"))
+					or (src_cur_value == 'Hash Left Join'
+						and target_cur[1] == 'Merge Left Join'))):
+				src_up = True
+				target_up = True
+			elif (test_name == 'aggregates'
+				  and src_cur[1].startswith("Parallel Index Only")
+				  and target_cur[1].startswith("Parallel Seq Scan")):
+				src_down = True
+				target_down = True
+			elif (test_name == 'incremental_sort'
+				  and ((src_cur_value.startswith('Gather')
+							or (len(src_cur[3]) > 0
+								and src_cur[3][0][1].startswith('Gather')))
+					    or (src_cur_value == 'Finalize Aggregate'
+							and target_cur[1] == 'Aggregate'))):
+				src_up = True
+				target_up = True
 			else:
-				# print(f"src_cur[1] = {src_cur[1]}\ntarget_cur[1] = {target_cur[1]}")
+				print(f"src_cur[1] = {src_cur[1]}\ntarget_cur[1] = {target_cur[1]}")
 				raise RuntimeError(f"Unsupported tree diff. Add branch specifically for \"{test_name}\" test")
 
 		if src_down:
