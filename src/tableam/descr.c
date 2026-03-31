@@ -718,6 +718,15 @@ static void
 fill_table_descr(OTableDescr *descr, OTable *o_table, OSnapshot *snapshot)
 {
 	MemoryContext old_context;
+	bool		was_saving;
+
+	/*
+	 * Defer invalidation messages while filling the table descriptor. Index
+	 * descriptor filling involves catalog lookups that can trigger
+	 * AcceptInvalidationMessages(), which could free descriptors while they
+	 * are still being initialized.
+	 */
+	was_saving = o_start_saving_inval_messages();
 
 	fill_table_descr_common_fields(descr, o_table);
 
@@ -726,6 +735,8 @@ fill_table_descr(OTableDescr *descr, OTable *o_table, OSnapshot *snapshot)
 	MemoryContextSwitchTo(old_context);
 
 	o_table_free(o_table);
+
+	o_stop_saving_inval_messages(was_saving);
 }
 
 void

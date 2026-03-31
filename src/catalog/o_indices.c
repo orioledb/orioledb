@@ -1184,8 +1184,17 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 	ListCell   *lc;
 	MemoryContext mcxt,
 				old_mcxt;
+	bool		was_saving;
 
 	Assert(oIndex != NULL);
+
+	/*
+	 * Defer invalidation messages while filling the index descriptor. Catalog
+	 * lookups in oFillFieldOpClassAndComparator() can trigger
+	 * AcceptInvalidationMessages(), which could free this descriptor while
+	 * it's still being initialized.
+	 */
+	was_saving = o_start_saving_inval_messages();
 
 	memset(descr, 0, sizeof(*descr));
 	descr->oids = oIndex->indexOids;
@@ -1425,6 +1434,8 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 						false, NULL);
 	if (primary_init_nfields)
 		pfree(primary_init_nfields);
+
+	o_stop_saving_inval_messages(was_saving);
 }
 
 bool
