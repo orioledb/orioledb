@@ -518,7 +518,20 @@ update_min_undo_locations(UndoLogType undoType,
 		Assert(oldCheckpointEndLocation <= newCheckpointEndLocation);
 		Assert(oldCheckpointStartLocation <= oldCheckpointEndLocation);
 		Assert(newCheckpointStartLocation <= newCheckpointEndLocation);
-		Assert(oldCleanedNum <= newCleanedNum);
+
+		/*
+		 * After recovery, transactions that were in-progress during the
+		 * previous checkpoint have their retain locations in the
+		 * [checkpointRetainStartLocation, checkpointRetainEndLocation] range.
+		 * These get loaded into minProcRetainLocation during recovery replay,
+		 * which can push minRetainLocation (and thus newCleanedNum) below the
+		 * oldCleanedLocation that was initialized from the control file's
+		 * lastUndoLocation.  This is safe because the undo files in the
+		 * checkpoint retain range were persisted during the previous
+		 * checkpoint and were never cleaned.
+		 */
+		Assert(oldCleanedNum <= newCleanedNum ||
+			   newCleanedNum >= oldCheckpointStartNum);
 
 		/*
 		 * Persist Ranges mutual arrangement:
