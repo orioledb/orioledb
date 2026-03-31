@@ -2539,6 +2539,15 @@ recovery_on_proc_exit(int code, Datum arg)
 	if (!recovery_xid_state_hash)
 		return;
 
+	/*
+	 * The startup process (worker_id < 0) is not a recovery worker and
+	 * doesn't use worker_ptrs[].  save_state_to_file() and hasTempFile are
+	 * only meaningful for actual recovery workers whose state needs to be
+	 * picked up by the checkpointer.
+	 */
+	if (worker_id < 0)
+		return;
+
 	elog(LOG, "recovery on exit: %d", worker_id);
 
 	save_state_to_file(worker_id);
