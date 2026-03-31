@@ -32,6 +32,7 @@
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
 #include "postmaster/interrupt.h"
+#include "storage/condition_variable.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/pmsignal.h"
@@ -230,6 +231,14 @@ recovery_worker_main(Datum main_arg)
 	}
 	PG_CATCH();
 	{
+		/*
+		 * If this worker was sleeping on a ConditionVariable (e.g. in a DSM
+		 * segment during parallel index build), cancel the sleep before we
+		 * detach DSM.  Otherwise ProcKill -> ConditionVariableCancelSleep
+		 * will try to access already-unmapped memory and SIGSEGV.
+		 */
+		ConditionVariableCancelSleep();
+
 		if (recovery_worker_queue != NULL)
 		{
 			/* detach from queue if attached */
