@@ -97,7 +97,7 @@ static void write_page(OBTreeFindPageContext *context,
 					   OInMemoryBlkno blkno, Page img,
 					   uint32 checkpoint_number,
 					   bool evict, bool copy_blkno);
-static int	tree_offsets_cmp(const void *a, const void *b);
+//static int	tree_offsets_cmp(const void *a, const void *b);
 static void writeback_put_extent(IOWriteBack *writeback, BTreeDescr *desc,
 								 uint64 downlink);
 static void perform_writeback(IOWriteBack *writeback);
@@ -3089,33 +3089,35 @@ orioledb_write_pages(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
-static int
-tree_offsets_cmp(const void *a, const void *b)
-{
-	TreeOffset	val1 = *(TreeOffset *) a;
-	TreeOffset	val2 = *(TreeOffset *) b;
 
-	if (val1.datoid != val2.datoid)
-		return (val1.datoid < val2.datoid) ? -1 : 1;
-	else if (val1.relnode != val2.relnode)
-		return (val1.relnode < val2.relnode) ? -1 : 1;
-	else if (val1.chkpNum != val2.chkpNum)
-		return (val1.chkpNum < val2.chkpNum) ? -1 : 1;
-	else if (val1.segno != val2.segno)
-		return (val1.segno < val2.segno) ? -1 : 1;
-	else if (val1.fileExtent.off != val2.fileExtent.off)
-		return val1.fileExtent.off < val2.fileExtent.off ? -1 : 1;
-	else if (val1.fileExtent.len != val2.fileExtent.len)
-	{
-		/*
-		 * an extent with bigger length will be placed first, it helps to
-		 * simplify process this case in perform_writeback()
-		 */
-		return val1.fileExtent.len > val2.fileExtent.len ? -1 : 1;
-	}
+//static int
+//tree_offsets_cmp(const void *a, const void *b)
+//{
+//	TreeOffset	val1 = *(TreeOffset *) a;
+//	TreeOffset	val2 = *(TreeOffset *) b;
+//
+//	if (val1.datoid != val2.datoid)
+//		return (val1.datoid < val2.datoid) ? -1 : 1;
+//	else if (val1.relnode != val2.relnode)
+//		return (val1.relnode < val2.relnode) ? -1 : 1;
+//	else if (val1.chkpNum != val2.chkpNum)
+//		return (val1.chkpNum < val2.chkpNum) ? -1 : 1;
+//	else if (val1.segno != val2.segno)
+//		return (val1.segno < val2.segno) ? -1 : 1;
+//	else if (val1.fileExtent.off != val2.fileExtent.off)
+//		return val1.fileExtent.off < val2.fileExtent.off ? -1 : 1;
+//	else if (val1.fileExtent.len != val2.fileExtent.len)
+//	{
+//		/*
+//		 * an extent with bigger length will be placed first, it helps to
+//		 * simplify process this case in perform_writeback()
+//		 */
+//		return val1.fileExtent.len > val2.fileExtent.len ? -1 : 1;
+//	}
+//
+//	return 0;
+//}
 
-	return 0;
-}
 
 static void
 writeback_put_extent(IOWriteBack *writeback, BTreeDescr *desc,
@@ -3183,6 +3185,7 @@ writeback_put_extent(IOWriteBack *writeback, BTreeDescr *desc,
 static void
 perform_writeback(IOWriteBack *writeback)
 {
+/*
 	int			i,
 				len = 0,
 				flushAfter;
@@ -3286,6 +3289,7 @@ perform_writeback(IOWriteBack *writeback)
 
 	if (!use_mmap && file >= 0)
 		FileClose(file);
+*/
 
 	writeback->extentsNumber = 0;
 }
