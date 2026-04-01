@@ -95,6 +95,8 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
           [ -s src/test/isolation_filtered.diffs ] || rm src/test/isolation_filtered.diffs src/test/isolation/output_iso/regression.diffs
         fi
 
+        psql postgres -p 5432 -c 'CREATE EXTENSION orioledb;' || true
+
         # Wait for replica to synchronize with primary after tests
         replica_synced=0
         for i in $(seq 1 60); do
@@ -113,6 +115,11 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
             echo "ERROR: Replica failed to synchronize within 30 seconds"
             exit 1
         fi
+
+        echo "=== Replica xid_meta ==="
+        psql postgres -p 5433 -x -c "SELECT * FROM orioledb_get_xid_meta();" || true
+        echo "=== Replica undo_meta ==="
+        psql postgres -p 5433 -x -c "SELECT * FROM orioledb_get_undo_meta();" || true
 
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log stop
         if [ $PG_VERSION = "17" ]; then
