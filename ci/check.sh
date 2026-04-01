@@ -95,6 +95,25 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
           [ -s src/test/isolation_filtered.diffs ] || rm src/test/isolation_filtered.diffs src/test/isolation/output_iso/regression.diffs
         fi
 
+        # Wait for replica to synchronize with primary after tests
+        replica_synced=0
+        for i in $(seq 1 60); do
+            primary_lsn=$(psql postgres -p 5432 -tA -c "SELECT pg_current_wal_lsn();" 2>/dev/null || echo "N/A")
+            replica_lsn=$(psql postgres -p 5433 -tA -c "SELECT pg_last_wal_replay_lsn();" 2>/dev/null || echo "N/A")
+            if [ "$primary_lsn" != "N/A" ] && [ "$replica_lsn" != "N/A" ] && \
+               [ "$primary_lsn" = "$replica_lsn" ]; then
+                echo "Replica synchronized (primary: $primary_lsn, replica: $replica_lsn)"
+                replica_synced=1
+                break
+            fi
+            echo "Waiting for replica to synchronize... ($i/60): primary=$primary_lsn replica=$replica_lsn"
+            sleep 1
+        done
+        if [ $replica_synced -eq 0 ]; then
+            echo "ERROR: Replica failed to synchronize within 30 seconds"
+            exit 1
+        fi
+
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log stop
         if [ $PG_VERSION = "17" ]; then
             make -C src/test/subscription installcheck-oriole -j $(nproc) || status=$?
