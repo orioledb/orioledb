@@ -23,6 +23,7 @@
 
 #include "access/transam.h"
 #include "access/twophase.h"
+#include "funcapi.h"
 #include "miscadmin.h"
 #include "rewind/rewind.h"
 #include "storage/lmgr.h"
@@ -66,6 +67,7 @@
 
 PG_FUNCTION_INFO_V1(orioledb_get_current_logical_xid);
 PG_FUNCTION_INFO_V1(orioledb_get_current_heap_xid);
+PG_FUNCTION_INFO_V1(orioledb_get_xid_meta);
 
 /*
  * OrioleDB uses three transaction id entities:
@@ -1704,6 +1706,36 @@ xid_is_finished(OXid xid)
 	csn = oxid_get_csn(xid, false);
 
 	return COMMITSEQNO_IS_COMMITTED(csn);
+}
+
+Datum
+orioledb_get_xid_meta(PG_FUNCTION_ARGS)
+{
+#define XID_META_NATTS 9
+	Datum		values[XID_META_NATTS];
+	bool		nulls[XID_META_NATTS];
+	TupleDesc	tupdesc;
+	HeapTuple	htup;
+
+	orioledb_check_shmem();
+
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	MemSet(nulls, 0, sizeof(nulls));
+
+	values[0] = Int64GetDatum(pg_atomic_read_u64(&xid_meta->nextXid));
+	values[1] = Int64GetDatum(pg_atomic_read_u64(&xid_meta->runXmin));
+	values[2] = Int64GetDatum(pg_atomic_read_u64(&xid_meta->globalXmin));
+	values[3] = Int64GetDatum(pg_atomic_read_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin));
+	values[4] = Int64GetDatum(pg_atomic_read_u64(&xid_meta->writeInProgressXmin));
+	values[5] = Int64GetDatum(pg_atomic_read_u64(&xid_meta->writtenXmin));
+	values[6] = Int64GetDatum(pg_atomic_read_u64(&xid_meta->checkpointRetainXmin));
+	values[7] = Int64GetDatum(pg_atomic_read_u64(&xid_meta->checkpointRetainXmax));
+	values[8] = Int64GetDatum(pg_atomic_read_u64(&xid_meta->cleanedXmin));
+
+	htup = heap_form_tuple(tupdesc, values, nulls);
+	PG_RETURN_DATUM(HeapTupleGetDatum(htup));
 }
 
 /*
