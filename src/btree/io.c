@@ -2531,8 +2531,15 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	/*
 	 * Check if we can skip the evicted data if tree has no modification after
 	 * writing the last *.map file.
+	 *
+	 * For compressed trees we must always store evicted data.  Otherwise, on
+	 * reload was_evicted will be false and o_tree_init_free_extents() will
+	 * try to re-insert free extents that are already present in the in-memory
+	 * system trees (they are not cleaned up on eviction), causing assertion
+	 * failures in free_extent().
 	 */
-	if (desc->storageType != BTreeStoragePersistence || !notModified)
+	if (desc->storageType != BTreeStoragePersistence || !notModified ||
+		OCompressIsValid(desc->compress))
 		insert_evicted_data(&evicted_tree_data);
 
 	/*
