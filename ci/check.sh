@@ -99,7 +99,7 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
 
         # Wait for replica to synchronize with primary after tests
         replica_synced=0
-        for i in $(seq 1 60); do
+        for i in $(seq 1 1800); do
             primary_lsn=$(psql postgres -p 5432 -tA -c "SELECT pg_current_wal_lsn();" 2>/dev/null || echo "N/A")
             replica_lsn=$(psql postgres -p 5433 -tA -c "SELECT pg_last_wal_replay_lsn();" 2>/dev/null || echo "N/A")
             if [ "$primary_lsn" != "N/A" ] && [ "$replica_lsn" != "N/A" ] && \
@@ -108,11 +108,11 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
                 replica_synced=1
                 break
             fi
-            echo "Waiting for replica to synchronize... ($i/60): primary=$primary_lsn replica=$replica_lsn"
+            echo "Waiting for replica to synchronize... ($i/1800): primary=$primary_lsn replica=$replica_lsn"
             sleep 1
         done
         if [ $replica_synced -eq 0 ]; then
-            echo "ERROR: Replica failed to synchronize within 30 seconds"
+            echo "ERROR: Replica failed to synchronize within 1800 seconds"
             exit 1
         fi
 

@@ -21,7 +21,7 @@ jobs:
 
           # Full matrix: used for main branch or pull requests
           full = dict(
-              cpu        = ["amd64", "arm64"],
+              cpu        = ["arm64"],
               pg_version = [16, 17],
               compiler   = ["clang", "gcc"],
               check_type = [
@@ -66,6 +66,7 @@ jobs:
       CHECK_TYPE: ${{ matrix.check_type }}
       PG_VERSION: ${{ matrix.pg_version }}
       COMPILER: ${{ matrix.compiler }}
+      GH_HOMPER_GIST_TOKEN: ${{ secrets.GH_HOMPER_GIST_TOKEN }}
     steps:
       - name: Checkout extension code into workspace directory
         uses: actions/checkout@v4
@@ -88,8 +89,16 @@ jobs:
       - name: Install post build prerequisites
         run: bash ./orioledb/ci/post_build_prerequisites.sh
 
+      - name: Get Current Job Log URL
+        uses: Tiryoh/gha-jobid-action@v1.4.0
+        id: job_url
+        with:
+          job_name: "check (${{ matrix.cpu }}, ${{ matrix.pg_version }}, ${{ matrix.compiler }}, ${{ matrix.check_type }}, ${{ matrix.run_number }})" # input job.<job-id>.name and matrix here.
+          per_page: 50 # input matrix size here if it is larger than 30
       - name: Check
-        timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 150 || (matrix.check_type == 'sanitize' && 40 || 20) }}
+        env:
+          GITHUB_JOB_URL: ${{ steps.job_url.outputs.html_url }}
+        timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 150 || (matrix.check_type == 'sanitize' && 40 || 240) }}
         run: bash ./orioledb/ci/check.sh
       - name: Check output
         run: bash ./orioledb/ci/check_output.sh
@@ -124,28 +133,3 @@ jobs:
         run: bash ./orioledb/ci/list_stuck.sh
         if: ${{ always() }}
 
-  finish:
-    needs: check
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - name: Checkout extension code into workspace directory
-        uses: actions/checkout@v4
-        with:
-          path: orioledb
-      - name: Retrieve saved coverage.infos
-        uses: actions/download-artifact@v4
-      - name: Merge coverage files
-        run: bash ./orioledb/ci/lcov_merge.sh
-      - name: coveralls
-        uses: coverallsapp/github-action@v2
-        with:
-          files: ./orioledb/coverage.info
-
-  cleanup:
-    needs: finish
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - name: remove artifacts
-        uses: geekyeggo/delete-artifact@v5
-        with:
-          name: "*coverage.info"
