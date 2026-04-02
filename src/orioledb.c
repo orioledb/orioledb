@@ -155,6 +155,10 @@ bool		orioledb_strict_mode = false;
 XLogRecPtr	replay_until_lsn = InvalidXLogRecPtr;
 char	   *replay_until_lsn_string;
 
+/* For page eviction/read checkpoint test only */
+uint32		min_read_page_checkpoint = UINT32_MAX;
+uint32		max_read_page_checkpoint = 0;
+
 /* Previous values of hooks to chain call them */
 static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 static void (*prev_shmem_request_hook) (void) = NULL;

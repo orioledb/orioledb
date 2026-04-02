@@ -49,6 +49,7 @@
 #include "storage/bufmgr.h"
 #include "utils/memutils.h"
 #include "utils/syscache.h"
+#include "funcapi.h"
 
 typedef struct
 {
@@ -1153,6 +1154,45 @@ get_free_disk_extent_copy_blkno(BTreeDescr *desc, off_t page_size,
 	return FileExtentIsValid(*extent);
 }
 
+/* Functions for eviction_page_checkpoint_numbers test included under IS_DEV */
+PG_FUNCTION_INFO_V1(reset_read_page_checkpoint_stats);
+PG_FUNCTION_INFO_V1(fetch_read_page_checkpoint_stats);
+
+Datum
+reset_read_page_checkpoint_stats(PG_FUNCTION_ARGS)
+{
+       min_read_page_checkpoint = UINT32_MAX;
+       max_read_page_checkpoint = 0;
+       PG_RETURN_VOID();
+}
+
+Datum
+fetch_read_page_checkpoint_stats(PG_FUNCTION_ARGS)
+{
+       ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+       bool            nulls[2] = {false};
+       Datum           values[2];
+
+       InitMaterializedSRF(fcinfo, 0);
+
+       values[0] = UInt32GetDatum(min_read_page_checkpoint);
+       values[1] = UInt32GetDatum(max_read_page_checkpoint);
+
+       tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+
+       return (Datum) 0;
+}
+
+/* Store checkpoint statistics for page reads for eviction_page_checkpoint_numbers test */
+static void
+store_read_page_checkpoint_stats(uint32 checkpointNum)
+{
+       /* Remember for checkpoint read test only */
+       max_read_page_checkpoint = Max(max_read_page_checkpoint, checkpointNum);
+       min_read_page_checkpoint = Min(min_read_page_checkpoint, checkpointNum);
+       elog(DEBUG1, "Remember read_page_checkpoin: min %u max %u", min_read_page_checkpoint, max_read_page_checkpoint);
+}
+
 /*
  * Reads a page from disk to the img from a valid downlink. It's fills an empty
  * array of offsets for the page.
@@ -1196,6 +1236,7 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 			OrioleDBOndiskPageHeader ondisk_page_header = *((OrioleDBOndiskPageHeader *) img);
 
 			((OrioleDBPageHeader *) img)->checkpointNum = ondisk_page_header.checkpointNum;
+			store_read_page_checkpoint_stats(ondisk_page_header.checkpointNum);
 
 			if (ondisk_page_header.page_version != ORIOLEDB_PAGE_VERSION)
 			{
@@ -1263,6 +1304,7 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 				}
 
 				o_decompress_page(buf + sizeof(OrioleDBOndiskPageHeader), ondisk_page_header.compress_page_size, img);
+				store_read_page_checkpoint_stats(((BTreePageHeader *) img)->o_header.checkpointNum);
 			}
 		}
 		else
@@ -1300,6 +1342,7 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 				}
 				btree_page_header = (BTreePageHeader *) img;
 				btree_page_header->o_header.checkpointNum = ondisk_page_header.checkpointNum;
+				store_read_page_checkpoint_stats(ondisk_page_header.checkpointNum);
 			}
 		}
 	}
