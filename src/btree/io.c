@@ -1453,7 +1453,7 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 			err = btree_smgr_write(desc, page, chkpNum, write_size, byte_offset) != write_size;
 		}
 
-		elog(DEBUG1, "Wrote disk page: checkpoint %u size %ld", curChkpNum, page_size);
+		elog(DEBUG1, "Wrote disk page: checkpoint %u size %d", curChkpNum, (int) page_size);
 
 	}
 
