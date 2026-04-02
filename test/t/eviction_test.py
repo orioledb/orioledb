@@ -281,7 +281,7 @@ class EvictionTest(BaseTest):
 		node.safe_psql("CHECKPOINT;")
 		con1.execute("SELECT * FROM o_evicted;")
 		con1.execute(
-		    "INSERT INTO o_test (val) SELECT val FROM generate_series(1, 400000, 1) val;\n"
+		    "INSERT INTO o_test (val) SELECT val FROM generate_series(1, 600000, 1) val;\n"
 		)
 		con1.commit()
 		node.safe_psql("CHECKPOINT;")
