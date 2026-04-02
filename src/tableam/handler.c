@@ -1219,6 +1219,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 {
 	BTreeDescr *td;
 	int64		result = 0;
+	bool        recovery = is_recovery_in_progress();
 
 	if (forkNumber != MAIN_FORKNUM)
 	{
@@ -1291,9 +1292,11 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		{
 			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
+				o_tables_rel_lock_extended(&GET_PRIMARY(descr)->oids, AccessShareLock, recovery);
 				o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 				result = (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
 					ORIOLEDB_BLCKSZ;
+				o_tables_rel_unlock_extended(&GET_PRIMARY(descr)->oids, AccessShareLock, recovery);
 			}
 		}
 		else
