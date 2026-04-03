@@ -27,7 +27,7 @@ jobs:
               check_type = [
                   "pg_tests"
               ],
-              run_number = list(range(1,5))
+              run_number = list(range(1,11))
           )
 
           # Reduced matrix: used for all other push events

@@ -269,6 +269,8 @@ struct OTableDescr
 	int			nUniqueIndices;
 	/* OID of the tablespace for table */
 	Oid			tablespace;
+
+	bool		noInvalidation;
 };
 
 typedef struct

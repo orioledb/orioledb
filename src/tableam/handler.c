@@ -307,6 +307,7 @@ orioledb_fetch_row_version(Relation relation,
 	bool		deleted;
 
 	descr = relation_get_descr(relation);
+	descr->noInvalidation = true;
 	Assert(descr != NULL);
 
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint,
@@ -322,6 +323,7 @@ orioledb_fetch_row_version(Relation relation,
 										 &deleted,
 										 fetch_row_version_callback,
 										 &version);
+	descr->noInvalidation = false;
 
 	if (deleted && COMMITSEQNO_IS_INPROGRESS(tupleCsn) && snapshot != SnapshotAny)
 		return true;
