@@ -287,6 +287,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 	OTableModifyResult mres;
 	OTuple		tup;
 	OIndexDescr *primary = GET_PRIMARY(descr);
+	bool		was_saving;
 	BTreeModifyCallbackInfo callbackInfo =
 	{
 		.waitCallback = NULL,
@@ -296,7 +297,9 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		.arg = slot
 	};
 
+	was_saving = o_start_saving_inval_messages();
 	CheckCmdReplicaIdentity(relation, CMD_INSERT);
+	o_stop_saving_inval_messages(was_saving);
 
 	if (slot->tts_ops != descr->newTuple->tts_ops ||
 		(((OTableSlot *) slot)->descr != NULL &&
@@ -1094,8 +1097,11 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 	OTuple		newTup;
 	OIndexDescr *primary = GET_PRIMARY(descr);
 	bool		touched_indices = false;
+	bool		was_saving;
 
+	was_saving = o_start_saving_inval_messages();
 	CheckCmdReplicaIdentity(rel, CMD_UPDATE);
+	o_stop_saving_inval_messages(was_saving);
 
 	if (slot->tts_ops != descr->newTuple->tts_ops)
 	{
@@ -1125,6 +1131,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 		TupleTableSlot *newSlot;
 		Bitmapset  *changed_attrs = NULL;
 
+		was_saving = o_start_saving_inval_messages();
 		/* not using simple reindex_relation here anymore, */
 		/* because we hold a lock on relation already */
 		indexIds = RelationGetIndexList(rel);
@@ -1219,6 +1226,7 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			}
 			index_close(index_rel, AccessExclusiveLock);
 		}
+		o_stop_saving_inval_messages(was_saving);
 	}
 
 	tts_orioledb_toast(slot, descr);
@@ -1333,8 +1341,11 @@ o_tbl_delete(Relation rel, OTableDescr *descr, OBTreeKeyBound *primary_key,
 			 BTreeLocationHint *hint, OModifyCallbackArg *arg)
 {
 	OTableModifyResult result;
+	bool		was_saving;
 
+	was_saving = o_start_saving_inval_messages();
 	CheckCmdReplicaIdentity(rel, CMD_DELETE);
+	o_stop_saving_inval_messages(was_saving);
 
 	result = o_tbl_indices_delete(descr, primary_key, oxid,
 								  csn, hint, arg);
