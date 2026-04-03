@@ -3149,10 +3149,6 @@ orioledb_get_proc_retain_undo_locations(PG_FUNCTION_ARGS)
 	{
 		PGPROC	   *proc = GetPGProcByNumber(i);
 
-		/* Skip unused slots */
-		if (proc->pid == 0)
-			continue;
-
 		for (j = 0; j < (int) UndoLogsCount; j++)
 		{
 			UndoLocation reserved,
