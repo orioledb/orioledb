@@ -154,7 +154,13 @@ find_array_search_desc_by_typeid(Oid typeid)
 		if (arraySearchDescs[i].typeid == typeid)
 		{
 			if (!OidIsValid(arraySearchDescs[i].opcid))
+			{
+				bool		was_saving;
+
+				was_saving = o_start_saving_inval_messages();
 				arraySearchDescs[i].opcid = GetDefaultOpClass(typeid, BTREE_AM_OID);
+				o_stop_saving_inval_messages(was_saving);
+			}
 			return &arraySearchDescs[i];
 		}
 	}

@@ -599,7 +599,10 @@ o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 	ocstate->o_plan_state->plan_state = &node->ss.ps;
 
 	if (is_explain_analyze(ocstate->o_plan_state->plan_state))
+	{
+		ResourceOwnerRememberOTableDescr(CurrentResourceOwner, descr);
 		eanalyze_counters_init(&ocstate->eaCounters, descr);
+	}
 
 	if (ocstate->o_plan_state->type == O_IndexPlan)
 	{
@@ -855,6 +858,9 @@ o_end_custom_scan(CustomScanState *node)
 		MemoryContextDelete(bitmap_state->cxt);
 		bitmap_state->cxt = NULL;
 	}
+	if (is_explain_analyze(ocstate->o_plan_state->plan_state))
+		ResourceOwnerForgetOTableDescr(CurrentResourceOwner,
+									   ocstate->eaCounters.descr);
 	ea_counters = NULL;
 }
 

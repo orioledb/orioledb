@@ -22,6 +22,7 @@
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
 #include "storage/lockdefs.h"
+#include "tableam/descr.h"
 #include "tableam/operations.h"
 #include "catalog/pg_am.h"
 #include "tableam/toast.h"
@@ -95,6 +96,7 @@
 #include "utils/fmgroids.h"
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
+#include "utils/resowner.h"
 #include "utils/rls.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
@@ -2210,7 +2212,9 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 		primary_init_nfields--;
 
 	old_descr = o_fetch_table_descr(old_o_table->oids);
+	ResourceOwnerRememberOTableDescr(CurrentResourceOwner, old_descr);
 	descr = relation_get_descr(rel);
+	ResourceOwnerRememberOTableDescr(CurrentResourceOwner, descr);
 	old_slot = MakeSingleTupleTableSlot(old_descr->tupdesc, &TTSOpsOrioleDB);
 	new_slot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
 	sscan = make_btree_seq_scan(&GET_PRIMARY(old_descr)->desc, &o_in_progress_snapshot, NULL);
@@ -2439,6 +2443,8 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	ExecDropSingleTupleTableSlot(old_slot);
 	ExecDropSingleTupleTableSlot(new_slot);
 	free_btree_seq_scan(sscan);
+	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
+	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, old_descr);
 
 	o_drop_table(old_o_table->oids);
 }
@@ -3953,6 +3959,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						 */
 						descr = o_fetch_table_descr(oids);
 						Assert(descr);
+						ResourceOwnerRememberOTableDescr(CurrentResourceOwner, descr);
 
 						if (options)
 							new_fillfactor = options->std_options.fillfactor;
@@ -4004,6 +4011,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						}
 						if (GET_PRIMARY(descr)->fillfactor != new_fillfactor)
 							set_toast_oids_and_options(tbl, rel, true, false);
+						ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
 					}
 				}
 				if (tbl)

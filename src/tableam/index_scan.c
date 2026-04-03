@@ -459,6 +459,8 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 	OIndexDescr *id = descr->indices[ostate->ixNum];
 	OTuple		tup;
 
+	descr->noInvalidation = true;
+
 	if (!ostate->curKeyRangeIsLoaded)
 	{
 		BTScanOpaque so = (BTScanOpaque) ostate->scandesc.opaque;
@@ -469,6 +471,7 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 			if (so->numArrayKeys < 0)
 			{
 				O_TUPLE_SET_NULL(tup);
+				descr->noInvalidation = false;
 				/* cppcheck-suppress uninitvar */
 				return tup;
 			}
@@ -523,6 +526,7 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 		}
 		break;
 	}
+	descr->noInvalidation = false;
 	return tup;
 }
 
