@@ -3231,6 +3231,9 @@ typedef struct
 	OTableDescr *descr;
 	OIndexDescr *indexDescr;
 
+	/* Tablespace directories to rmdir after commit.  We collect the directory
+	 * paths here so we can rmdir them right after the commit.  */
+	List *pending_tblspc_cleanup;
 } ReplayWalDescCtx;
 
 static WalParseResult
@@ -3299,6 +3302,35 @@ replay_wal_record(void *vctx, WalRecord *rec)
 
 				recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
 											 xlogPtr, -1, sync);
+
+				if (commit && ctx->pending_tblspc_cleanup != NIL)
+				{
+						ListCell *lc;
+						foreach(lc, ctx->pending_tblspc_cleanup)
+						{
+								char *path = lfirst(lc);
+								int      rc = rmdir(path);
+								if (rc != 0)
+								{
+										if (errno == ENOTEMPTY)
+												elog(LOG, "orioledb tblspc replay: directory"
+																	" %s is not empty yet", path);
+										else if (errno != ENOENT)
+												ereport(WARNING,
+																(errcode_for_file_access(),
+																errmsg("orioledb tblspc replay: could not"
+																				" remove directory \"%s\": %m",
+																				path)));
+								}
+						}
+				}
+
+				if (ctx->pending_tblspc_cleanup != NIL)
+				{
+						list_free_deep(ctx->pending_tblspc_cleanup);
+						ctx->pending_tblspc_cleanup = NIL;
+				}
+
 				elog(DEBUG1, "OrioleDB recovery %s transaction with oxid=%lu. "
 					 "Next WAL record starts at LSN %X/%X",
 					 commit ? "committed" : "aborted", rec->oxid,
@@ -3531,8 +3563,17 @@ replay_wal_record(void *vctx, WalRecord *rec)
 						memcpy(&key, sys_tree_oids_ptr, sizeof(OSysCacheKey1));
 						o_get_prefixes_for_relnode(key.common.datoid, DatumGetObjectId(key.keys[0]),
 												   &prefix, &db_prefix);
-						o_verify_dir_exists_or_create(prefix, NULL, NULL);
-						o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+						if (type == RecoveryMsgTypeInsert)
+						{
+								o_verify_dir_exists_or_create(prefix, NULL, NULL);
+								o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+						}
+						else if (type == RecoveryMsgTypeDelete)
+						{
+								/* Table is being dropped from this tablespace.  */
+								ctx->pending_tblspc_cleanup = lappend(ctx->pending_tblspc_cleanup, pstrdup(db_prefix));
+								ctx->pending_tblspc_cleanup = lappend(ctx->pending_tblspc_cleanup, pstrdup(prefix));
+						}
 						pfree(db_prefix);
 					}
 				}
@@ -3649,7 +3690,8 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		.xlogRecEndPtr = xlogRecEndPtr,
 		.sys_tree_num = -1,
 		.descr = NULL,
-		.indexDescr = NULL
+		.indexDescr = NULL,
+		.pending_tblspc_cleanup = NIL,
 	};
 
 	WalReaderState r = {
