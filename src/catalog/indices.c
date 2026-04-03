@@ -27,6 +27,7 @@
 #include "recovery/wal.h"
 #include "tableam/operations.h"
 #include "transam/oxid.h"
+#include "transam/undo.h"
 #include "tuple/slot.h"
 #include "tuple/sort.h"
 #include "tuple/toast.h"
@@ -877,6 +878,15 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 		shm_toc_insert(toc, PARALLEL_KEY_TUPLESORT, sharedsort[0]);
 	}
 
+	/*
+	 * Set snapshot retain undo locations to prevent undo cleanup during the
+	 * parallel index build.  Without this, recovery could advance
+	 * minProcRetainLocation past undo records that the scan still needs for
+	 * reading historical page versions.
+	 */
+	for (i = 0; i < (int) UndoLogsCount; i++)
+		set_my_snapshot_retain_location((UndoLogType) i);
+
 	if (!in_recovery)
 	{
 		/*
@@ -973,6 +983,10 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 static void
 _o_index_end_parallel(oIdxLeader *btleader)
 {
+	/* Clear snapshot retain undo locations set in _o_index_begin_parallel */
+	for (int i = 0; i < (int) UndoLogsCount; i++)
+		clear_my_snapshot_retain_location((UndoLogType) i);
+
 	if (!is_recovery_in_progress())
 	{
 		/* Shutdown worker processes */
