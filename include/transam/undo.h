@@ -398,6 +398,8 @@ extern void rollback_to_savepoint(UndoLogType undoType,
 extern bool undo_type_has_retained_location(UndoLogType undoType);
 extern bool have_retained_undo_location(void);
 extern UndoLocation get_snapshot_retained_undo_location(UndoLogType undoType);
+extern UndoLocation set_my_snapshot_retain_location(UndoLogType undoType);
+extern void clear_my_snapshot_retain_location(UndoLogType undoType);
 extern void orioledb_reset_xmin_hook(void);
 extern void o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit,
 											   RelFileNode *onAbort,

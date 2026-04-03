@@ -985,7 +985,7 @@ set_my_reserved_location(UndoLogType undoType)
 		curRetainUndoLocations[undoType] = lastUsedLocation;
 }
 
-static UndoLocation
+UndoLocation
 set_my_snapshot_retain_location(UndoLogType undoType)
 {
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
@@ -1016,6 +1016,15 @@ set_my_snapshot_retain_location(UndoLogType undoType)
 		break;
 	}
 	return retainUndoLocation;
+}
+
+void
+clear_my_snapshot_retain_location(UndoLogType undoType)
+{
+	ODBProcData *curProcData = GET_CUR_PROCDATA();
+
+	pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].snapshotRetainUndoLocation,
+						InvalidUndoLocation);
 }
 
 static void
