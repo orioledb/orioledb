@@ -1081,6 +1081,8 @@ o_invalidate_descrs_internal(Oid datoid, Oid reloid, Oid relfilenode)
 		{
 			bool		delete = tableDescr->refcnt == 0;
 
+			Assert(!tableDescr->noInvalidation);
+
 			if (!delete)
 				delete = !recreate_table_descr(tableDescr);
 
@@ -1106,6 +1108,8 @@ o_invalidate_descrs_internal(Oid datoid, Oid reloid, Oid relfilenode)
 		if (found)
 		{
 			bool		delete = tableDescr->refcnt == 0;
+
+			Assert(!tableDescr->noInvalidation);
 
 			if (!delete)
 				delete = !recreate_table_descr(tableDescr);
