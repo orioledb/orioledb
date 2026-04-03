@@ -35,3 +35,15 @@ CREATE FUNCTION orioledb_get_undo_meta(
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_get_proc_retain_undo_locations(
+    OUT pid int4,
+    OUT procno int4,
+    OUT undo_type text,
+    OUT reservedUndoLocation int8,
+    OUT transactionUndoRetainLocation int8,
+    OUT snapshotRetainUndoLocation int8,
+    OUT effectiveRetainLocation int8)
+RETURNS SETOF record
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;

@@ -120,6 +120,8 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         psql postgres -p 5433 -x -c "SELECT * FROM orioledb_get_xid_meta();" || true
         echo "=== Replica undo_meta ==="
         psql postgres -p 5433 -x -c "SELECT * FROM orioledb_get_undo_meta();" || true
+        echo "=== Replica proc retain undo locations ==="
+        psql postgres -p 5433 -c "SELECT * FROM orioledb_get_proc_retain_undo_locations();" || true
 
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log stop
         if [ $PG_VERSION = "17" ]; then

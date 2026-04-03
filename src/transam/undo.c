@@ -55,6 +55,7 @@
 PG_FUNCTION_INFO_V1(orioledb_read_sys_xid_undo_location);
 PG_FUNCTION_INFO_V1(orioledb_insert_sys_xid_undo_location);
 PG_FUNCTION_INFO_V1(orioledb_get_undo_meta);
+PG_FUNCTION_INFO_V1(orioledb_get_proc_retain_undo_locations);
 
 #define GET_UNDO_REC(undoType, loc) (o_undo_buffers[(int) (undoType)] + \
 	(loc) % o_undo_circular_sizes[(int) (undoType)])
@@ -3109,6 +3110,89 @@ orioledb_get_undo_meta(PG_FUNCTION_ARGS)
 		values[13] = Int64GetDatum(pg_atomic_read_u64(&meta->minRewindRetainLocation));
 
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+	}
+
+	return (Datum) 0;
+}
+
+Datum
+orioledb_get_proc_retain_undo_locations(PG_FUNCTION_ARGS)
+{
+#define PROC_RETAIN_NATTS 7
+	Datum		values[PROC_RETAIN_NATTS];
+	bool		nulls[PROC_RETAIN_NATTS];
+	TupleDesc	tupdesc;
+	Tuplestorestate *tupstore;
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	MemoryContext per_query_ctx;
+	MemoryContext oldcontext;
+	int			i,
+				j;
+	static const char *type_names[] = {"regular", "page_level", "system"};
+
+	orioledb_check_shmem();
+
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	MemoryContextSwitchTo(oldcontext);
+
+	for (i = 0; i < max_procs; i++)
+	{
+		PGPROC	   *proc = GetPGProcByNumber(i);
+
+		/* Skip unused slots */
+		if (proc->pid == 0)
+			continue;
+
+		for (j = 0; j < (int) UndoLogsCount; j++)
+		{
+			UndoLocation reserved,
+						transaction,
+						snapshot;
+
+			reserved = pg_atomic_read_u64(&oProcData[i].undoRetainLocations[j].reservedUndoLocation);
+			transaction = pg_atomic_read_u64(&oProcData[i].undoRetainLocations[j].transactionUndoRetainLocation);
+			snapshot = pg_atomic_read_u64(&oProcData[i].undoRetainLocations[j].snapshotRetainUndoLocation);
+
+			/* Skip rows where all locations are InvalidUndoLocation */
+			if (!UndoLocationIsValid(reserved) &&
+				!UndoLocationIsValid(transaction) &&
+				!UndoLocationIsValid(snapshot))
+				continue;
+
+			MemSet(nulls, 0, sizeof(nulls));
+
+			values[0] = Int32GetDatum(proc->pid);
+			values[1] = Int32GetDatum(i);
+			values[2] = PointerGetDatum(cstring_to_text(type_names[j]));
+			values[3] = Int64GetDatum(reserved);
+			values[4] = Int64GetDatum(transaction);
+			values[5] = Int64GetDatum(snapshot);
+
+			/* Show the effective minimum retain for this proc/type */
+			{
+				UndoLocation effective = InvalidUndoLocation;
+
+				if (UndoLocationIsValid(reserved))
+					effective = Min(effective, reserved);
+				if (UndoLocationIsValid(transaction))
+					effective = Min(effective, transaction);
+				if (UndoLocationIsValid(snapshot))
+					effective = Min(effective, snapshot);
+				values[6] = Int64GetDatum(effective);
+			}
+
+			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+		}
 	}
 
 	return (Datum) 0;
