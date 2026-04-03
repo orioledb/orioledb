@@ -641,6 +641,7 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	BTreeLocationHint hint;
 	OSnapshot	oSnapshot;
 	ItemPointer bridge_ctid = NULL;
+	bool		was_saving;
 
 	ASAN_UNPOISON_MEMORY_REGION(tmfd, sizeof(*tmfd));
 
@@ -672,8 +673,10 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	marg.selfModified = false;
 	marg.deleted = BTreeLeafTupleNonDeleted;
 	marg.newSlot = (OTableSlot *) slot;
+	was_saving = o_start_saving_inval_messages();
 	marg.keyAttrs = RelationGetIndexAttrBitmap(relation,
 											   INDEX_ATTR_BITMAP_KEY);
+	o_stop_saving_inval_messages(was_saving);
 	marg.modifyCid = cid;
 	marg.tupleCid = InvalidCommandId;
 	o_set_current_command(cid);
