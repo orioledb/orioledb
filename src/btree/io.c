@@ -3203,6 +3203,13 @@ perform_writeback(IOWriteBack *writeback)
 	flushAfter = IsBGWriter ? bgwriter_flush_after : backend_flush_after;
 	flushAfter *= BLCKSZ / ORIOLEDB_BLCKSZ;
 
+	/* PG defaults: flushAfter == 0 turns off writeback */
+	if (flushAfter == 0)
+	{
+		writeback->extentsNumber = 0;
+		return;
+	}
+
 	if (writeback->extentsNumber < flushAfter)
 		return;
 
