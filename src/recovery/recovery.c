@@ -2552,9 +2552,25 @@ void
 recovery_on_proc_exit(int code, Datum arg)
 {
 	int			worker_id = (int) arg;
+	ODBProcData *curProcData = GET_CUR_PROCDATA();
+	int			i;
 
 	if (!recovery_xid_state_hash)
 		return;
+
+	/*
+	 * Clear undo retain locations so that update_min_undo_locations() does
+	 * not see stale values from this exiting process.  Without this, a
+	 * low transactionUndoRetainLocation set during recovery replay can
+	 * persist in the shared oProcData slot after the worker exits,
+	 * preventing undo cleanup indefinitely.
+	 */
+	for (i = 0; i < (int) UndoLogsCount; i++)
+	{
+		pg_atomic_write_u64(&curProcData->undoRetainLocations[i].transactionUndoRetainLocation, InvalidUndoLocation);
+		pg_atomic_write_u64(&curProcData->undoRetainLocations[i].snapshotRetainUndoLocation, InvalidUndoLocation);
+		pg_atomic_write_u64(&curProcData->undoRetainLocations[i].reservedUndoLocation, InvalidUndoLocation);
+	}
 
 	/*
 	 * The startup process (worker_id < 0) is not a recovery worker and
