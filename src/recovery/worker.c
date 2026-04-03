@@ -737,6 +737,9 @@ recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id)
 			WakeupRecovery();
 
 		pg_usleep(usleep_time);
+
+		CHECK_FOR_INTERRUPTS();
+
 		if (recovery_initialized)
 		{
 			update_proc_retain_undo_location(id);
