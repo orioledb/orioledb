@@ -179,6 +179,16 @@ bgwriter_main(Datum main_arg)
 						evict_undo_to_disk((UndoLogType) j, targetLocation,
 										   minProcReservedLocation, true);
 				}
+				else
+				{
+					/*
+					 * Even when eviction is not needed, update min undo
+					 * locations to allow cleanup of undo files.  Without
+					 * this, minProcRetainLocation set during recovery may
+					 * never be advanced on a synced replica.
+					 */
+					update_min_undo_locations((UndoLogType) j, false, true);
+				}
 			}
 
 			check_pending_truncates();
