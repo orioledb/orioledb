@@ -24,7 +24,9 @@
 #include "catalog/o_sys_cache.h"
 #include "catalog/o_tables.h"
 #include "catalog/sys_trees.h"
+#include "postgres_ext.h"
 #include "recovery/recovery.h"
+#include "tableam/handler.h"
 #include "tableam/toast.h"
 #include "tableam/tree.h"
 #include "tuple/slot.h"
@@ -43,6 +45,7 @@
 #include "utils/fmgrtab.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
+#include "utils/resowner.h"
 #include "utils/syscache.h"
 #include "pgstat.h"
 
@@ -59,6 +62,7 @@ static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType,
 static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot);
 static void init_shared_root_info(OPagePool *pool,
 								  SharedRootInfo *sharedRootInfo);
+static void o_invalidate_descrs_internal(Oid datoid, Oid reloid, Oid relfilenode);
 static bool o_tree_init_free_extents(BTreeDescr *desc);
 static OComparator *o_find_opclass_comparator(OOpclass *opclass, Oid collation);
 static inline OComparator *o_find_cached_comparator(OComparatorKey *key);
@@ -626,7 +630,7 @@ table_descr_free(OTableDescr *descr)
 	if (descr->toast)
 	{
 		descr->toast->refcnt--;
-		if (!descr->toast->valid)
+		if (!descr->toast->valid && descr->toast->refcnt == 0)
 			index_descr_delete_from_hash(descr->toast);
 	}
 
@@ -636,7 +640,7 @@ table_descr_free(OTableDescr *descr)
 			if (descr->indices[i])
 			{
 				descr->indices[i]->refcnt--;
-				if (!descr->indices[i]->valid)
+				if (!descr->indices[i]->valid && descr->indices[i]->refcnt == 0)
 					index_descr_delete_from_hash(descr->indices[i]);
 			}
 		pfree(descr->indices);
@@ -1031,6 +1035,8 @@ o_stop_saving_inval_messages(bool was_saving)
 	saving_inval_messages = was_saving;
 }
 
+#define ALWAYS_DISCARD_CACHES
+
 /*
  * Replay invalidation messages saved during o_call_comparator() or
  * ppool_reserve_pages().  Called from AcceptInvalidationMessagesHook
@@ -1039,6 +1045,15 @@ o_stop_saving_inval_messages(bool was_saving)
 void
 o_replay_saved_inval_messages(void)
 {
+#ifdef ALWAYS_DISCARD_CACHES
+	if (saving_inval_messages)
+		return;
+
+	o_invalidate_descrs_internal(InvalidOid, InvalidOid, InvalidOid);
+
+	list_free_deep(saved_descr_invals);
+	saved_descr_invals = NIL;
+#else
 	if (saving_inval_messages || saved_descr_invals == NIL)
 		return;
 
@@ -1062,6 +1077,7 @@ o_replay_saved_inval_messages(void)
 
 		list_free(invals);
 	}
+#endif
 }
 
 static void
@@ -1300,6 +1316,7 @@ recreate_index_descr(OIndexDescr *descr)
 						  oIndex->indexType, oIndex->table_persistence, oIndex->createOxid, descr);
 	descr->refcnt = refcnt;
 	free_o_index(oIndex);
+	o_btree_load_shmem(&descr->desc);
 }
 
 /*
@@ -1920,6 +1937,7 @@ recreate_table_descr(OTableDescr *descr)
 {
 	OTable	   *o_table;
 	bool		old_enable_stopevents;
+	OEACallsCounters *saved_ea_counters;
 
 	old_enable_stopevents = enable_stopevents;
 	enable_stopevents = false;
@@ -1928,8 +1946,11 @@ recreate_table_descr(OTableDescr *descr)
 	if (!o_table)
 		return false;
 
+	saved_ea_counters = ea_counters;
+	ea_counters = NULL;
 	table_descr_free(descr);
 	fill_table_descr(descr, o_table, &o_non_deleted_snapshot);
+	ea_counters = saved_ea_counters;
 
 	enable_stopevents = old_enable_stopevents;
 	return true;
@@ -2262,3 +2283,77 @@ o_call_hash_fn(OHashFn *hash_fn, Oid collation, Datum val)
 
 	return result;
 }
+
+#if PG_VERSION_NUM >= 170000
+
+static void ResOwnerReleaseOTableDescr(Datum res);
+static char *ResOwnerPrintOTableDescr(Datum res);
+
+static const ResourceOwnerDesc o_table_descr_resowner_desc =
+{
+	.name = "OrioleDB OTableDescr",
+	.release_phase = RESOURCE_RELEASE_BEFORE_LOCKS,
+	.release_priority = RELEASE_PRIO_RELCACHE_REFS,
+	.ReleaseResource = ResOwnerReleaseOTableDescr,
+	.DebugPrint = ResOwnerPrintOTableDescr
+};
+
+void
+ResourceOwnerRememberOTableDescr(ResourceOwner owner, OTableDescr *descr)
+{
+	ResourceOwnerEnlarge(owner);
+	descr->refcnt++;
+	ResourceOwnerRemember(owner, PointerGetDatum(descr), &o_table_descr_resowner_desc);
+}
+
+void
+ResourceOwnerForgetOTableDescr(ResourceOwner owner, OTableDescr *descr)
+{
+	ResourceOwnerForget(owner, PointerGetDatum(descr), &o_table_descr_resowner_desc);
+	descr->refcnt--;
+}
+
+static void
+ResOwnerReleaseOTableDescr(Datum res)
+{
+	OTableDescr *descr = (OTableDescr *) DatumGetPointer(res);
+
+	descr->refcnt--;
+}
+
+static char *
+ResOwnerPrintOTableDescr(Datum res)
+{
+	OTableDescr *descr = (OTableDescr *) DatumGetPointer(res);
+
+	return psprintf("OrioleDB OTableDescr (%u, %u, %u)",
+					descr->oids.datoid, descr->oids.reloid, descr->oids.relnode);
+}
+
+#else
+
+static void
+ResOwnerReleaseOTableDescrCallback(ResourceReleasePhase phase,
+								   bool isCommit, bool isTopLevel, void *arg)
+{
+	OTableDescr *descr = (OTableDescr *) arg;
+
+	if (phase == RESOURCE_RELEASE_BEFORE_LOCKS)
+		descr->refcnt--;
+}
+
+void
+ResourceOwnerRememberOTableDescr(ResourceOwner owner, OTableDescr *descr)
+{
+	descr->refcnt++;
+	RegisterResourceReleaseCallback(ResOwnerReleaseOTableDescrCallback, descr);
+}
+
+void
+ResourceOwnerForgetOTableDescr(ResourceOwner owner, OTableDescr *descr)
+{
+	UnregisterResourceReleaseCallback(ResOwnerReleaseOTableDescrCallback, descr);
+	descr->refcnt--;
+}
+
+#endif
