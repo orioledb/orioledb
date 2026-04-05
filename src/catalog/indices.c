@@ -33,6 +33,7 @@
 #include "tuple/toast.h"
 #include "utils/compress.h"
 #include "utils/planner.h"
+#include "utils/resowner.h"
 #include "utils/stopevent.h"
 #include "workers/interrupt.h"
 
@@ -339,8 +340,9 @@ rebuild_indices_insert_placeholders(OTableDescr *descr)
 	for (i = 0; i < descr->nIndices; i++)
 		o_insert_shared_root_placeholder(descr->indices[i]->desc.oids.datoid,
 										 descr->indices[i]->desc.oids.relnode);
-	o_insert_shared_root_placeholder(descr->toast->desc.oids.datoid,
-									 descr->toast->desc.oids.relnode);
+	if (descr->toast)
+		o_insert_shared_root_placeholder(descr->toast->desc.oids.datoid,
+										 descr->toast->desc.oids.relnode);
 }
 
 static Jsonb *
@@ -565,6 +567,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	{
 		Assert(old_o_table);
 		old_descr = o_fetch_table_descr(old_o_table->oids);
+		ResourceOwnerRememberOTableDescr(CurrentResourceOwner, old_descr);
 
 		recreate_o_table(old_o_table, o_table);
 	}
@@ -582,6 +585,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	}
 
 	descr = o_fetch_table_descr(o_table->oids);
+	ResourceOwnerRememberOTableDescr(CurrentResourceOwner, descr);
 
 	if (!reuse_relnode && is_build)
 	{
@@ -641,6 +645,10 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		o_table_free(old_o_table);
 	if (o_table != old_o_table)
 		o_table_free(o_table);
+
+	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
+	if (old_descr)
+		ResourceOwnerForgetOTableDescr(CurrentResourceOwner, old_descr);
 }
 
 /*

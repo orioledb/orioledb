@@ -23,6 +23,7 @@
 #include "tuple/format.h"
 
 #include "access/htup_details.h"
+#include "utils/resowner.h"
 #include "access/nbtree.h"
 #include "access/skey.h"
 #include "commands/explain.h"
@@ -360,5 +361,8 @@ extern void o_invalidate_comparator_callback(UndoLogType undoType, UndoLocation 
 											 UndoStackItem *baseItem,
 											 OXid oxid, bool abort, bool changeCountsValid);
 extern void reset_saving_inval_messages(void);
+
+extern void ResourceOwnerRememberOTableDescr(ResourceOwner owner, OTableDescr *descr);
+extern void ResourceOwnerForgetOTableDescr(ResourceOwner owner, OTableDescr *descr);
 
 #endif

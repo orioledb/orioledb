@@ -54,6 +54,7 @@
 #include "btree/scan.h"
 #include "btree/undo.h"
 #include "transam/oxid.h"
+#include "tableam/descr.h"
 #include "tuple/slot.h"
 #include "utils/page_pool.h"
 #include "utils/resowner.h"
@@ -1270,6 +1271,8 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 
 	scan->poscan = poscan;
 	scan->desc = desc;
+	if (!IS_SYS_TREE_OIDS(desc->oids))
+		((OIndexDescr *) desc->arg)->refcnt++;
 	scan->oSnapshot = *oSnapshot;
 	scan->status = BTreeSeqScanInMemory;
 	scan->allocatedDownlinks = 16;
@@ -1827,6 +1830,8 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 		scan->diskDownlinks = NULL;
 	}
 
+	if (!IS_SYS_TREE_OIDS(desc->oids))
+		((OIndexDescr *) desc->arg)->refcnt--;
 	scan->status = BTreeSeqScanFinished;
 
 	if (!fromResowner)
