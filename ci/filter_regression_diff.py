@@ -92,7 +92,12 @@ knownErrors = {
 
 	# foreign_key specific errors
 	r"ERROR:  duplicate key value violates unique constraint" : ["foreign_key"],
-	r"ERROR:  (insert or update|update or delete) on table \"[a-z]+\" violates foreign key constraint": ["foreign_key"]
+	r"ERROR:  (insert or update|update or delete) on table \"[a-z]+\" violates foreign key constraint": ["foreign_key"],
+
+    # privileges specific errors
+    r"ERROR:  function \"sro_ifun\" cannot be used here": ["privileges"],
+    r"ERROR:  (index|relation) \"(sro_idx|sro_cluster_idx|sro_pidx)\" does not exist": ["privileges"],
+    r"ERROR:  permission denied for (table|materialized view) (maintain_test|refresh_test)": ["privileges"],
 }
 
 # Regexps that allow us to completely skip comparasion of hunks containing these regexprs
