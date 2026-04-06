@@ -1037,7 +1037,7 @@ o_stop_saving_inval_messages(bool was_saving)
 	saving_inval_messages = was_saving;
 }
 
-#define ALWAYS_DISCARD_CACHES
+/* #define ALWAYS_DISCARD_CACHES */
 
 /*
  * Replay invalidation messages saved during o_call_comparator() or
