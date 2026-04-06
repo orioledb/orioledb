@@ -3315,9 +3315,9 @@ replay_wal_record(void *vctx, WalRecord *rec)
 
 				recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
 											 xlogPtr, -1, sync);
-				elog(DEBUG1, "OrioleDB recovery %s transaction with oxid=%lu. "
+				elog(LOG, "OrioleDB recovery %s transaction with oxid=%lu. "
 					 "Next WAL record starts at LSN %X/%X",
-					 commit ? "committed" : "aborted", rec->oxid,
+					 commit ? "committed" : "aborted", (unsigned long) rec->oxid,
 					 LSN_FORMAT_ARGS(ctx->xlogRecEndPtr));
 				rec->oxid = InvalidOXid;
 
@@ -3329,9 +3329,9 @@ replay_wal_record(void *vctx, WalRecord *rec)
 
 		case WAL_REC_JOINT_COMMIT:
 			cur_recovery_xid_state->xid = rec->u.joint_commit.xid;
-			elog(DEBUG1, "OrioleDB recovery committed transaction (xid, oxid)="
+			elog(LOG, "OrioleDB recovery committed transaction (xid, oxid)="
 				 "(%u, %lu). Next WAL record starts at LSN %X/%X",
-				 cur_recovery_xid_state->xid, rec->oxid,
+				 cur_recovery_xid_state->xid, (unsigned long) rec->oxid,
 				 LSN_FORMAT_ARGS(ctx->xlogRecEndPtr));
 
 			recovery_xmin = Max(recovery_xmin, rec->u.joint_commit.xmin);
@@ -3520,6 +3520,12 @@ replay_wal_record(void *vctx, WalRecord *rec)
 					success = apply_sys_tree_modify_record(ctx->sys_tree_num, type,
 														   tuple1.tuple, rec->oxid,
 														   COMMITSEQNO_INPROGRESS);
+
+					if (ctx->sys_tree_num == SYS_TREES_TABLESPACE_CACHE)
+						elog(LOG, "recovery apply sys_tree %d (tablespace_cache) "
+							 "type=%u oxid=%lu success=%d at LSN %X/%X",
+							 ctx->sys_tree_num, type, (unsigned long) rec->oxid,
+							 success, LSN_FORMAT_ARGS(xlogPtr));
 
 					if (ctx->sys_tree_num == SYS_TREES_O_INDICES && success)
 					{
