@@ -881,11 +881,15 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	if (readOnlyTree)
 		pstmt = copyObject(pstmt);
 
-	in_rewrite = false;
-	o_saved_relrewrite = InvalidOid;
-	o_saved_reltablespace = InvalidOid;
-	savedDataQuery = NULL;
-	in_nontransactional_truncate = false;
+	/* Is this enough? */
+	if (isTopLevel)
+	{
+		in_rewrite = false;
+		o_saved_relrewrite = InvalidOid;
+		o_saved_reltablespace = InvalidOid;
+		savedDataQuery = NULL;
+		in_nontransactional_truncate = false;
+	}
 
 	pstate = make_parsestate(NULL);
 	pstate->p_sourcetext = queryString;
@@ -4468,8 +4472,11 @@ o_ddl_cleanup(void)
 		alter_type_exprs = NIL;
 	}
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
-	o_saved_relrewrite = InvalidOid;
-	in_rewrite = false;
+	if (GetCurrentTransactionNestLevel() == 1)
+	{
+		o_saved_relrewrite = InvalidOid;
+		in_rewrite = false;
+	}
 	if (o_alter_generated_column_id)
 	{
 		list_free_deep(o_alter_generated_column_id);
