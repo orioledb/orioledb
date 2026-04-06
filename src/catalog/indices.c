@@ -2020,7 +2020,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 			btree_write_index_data(&descr->toast->desc, descr->toast->leafTupdesc,
 								   sortstates[i], 0, 0, &fileHeaders[i]);
 		}
-		else if (descr->bridge)	/* bridge_index sort state */
+		else if (descr->bridge) /* bridge_index sort state */
 		{
 			btree_write_index_data(&descr->bridge->desc, descr->bridge->leafTupdesc,
 								   sortstates[i], 0, 0, &fileHeaders[i]);
@@ -2068,7 +2068,7 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 			o_drop_shared_root_info(descr->toast->desc.oids.datoid,
 									descr->toast->desc.oids.relnode);
 		}
-		else if (descr->bridge)	/* bridge_index sort state */
+		else if (descr->bridge) /* bridge_index sort state */
 		{
 			location = btree_write_file_header(&descr->bridge->desc, &fileHeaders[i]);
 			o_drop_shared_root_info(descr->bridge->desc.oids.datoid,
