@@ -2560,10 +2560,10 @@ recovery_on_proc_exit(int code, Datum arg)
 
 	/*
 	 * Clear undo retain locations so that update_min_undo_locations() does
-	 * not see stale values from this exiting process.  Without this, a
-	 * low transactionUndoRetainLocation set during recovery replay can
-	 * persist in the shared oProcData slot after the worker exits,
-	 * preventing undo cleanup indefinitely.
+	 * not see stale values from this exiting process.  Without this, a low
+	 * transactionUndoRetainLocation set during recovery replay can persist in
+	 * the shared oProcData slot after the worker exits, preventing undo
+	 * cleanup indefinitely.
 	 */
 	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
