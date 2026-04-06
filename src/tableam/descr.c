@@ -481,7 +481,9 @@ o_btree_try_use_shmem(BTreeDescr *desc)
 		if (shared == NULL)
 			return false;
 
-		Assert(!shared->placeholder);
+		if (shared->placeholder)
+			return false;
+
 		Assert(OInMemoryBlknoIsValid(shared->rootInfo.rootPageBlkno));
 		Assert(OInMemoryBlknoIsValid(shared->rootInfo.metaPageBlkno));
 
@@ -1316,7 +1318,7 @@ recreate_index_descr(OIndexDescr *descr)
 						  oIndex->indexType, oIndex->table_persistence, oIndex->createOxid, descr);
 	descr->refcnt = refcnt;
 	free_o_index(oIndex);
-	o_btree_load_shmem(&descr->desc);
+	(void) o_btree_try_use_shmem(&descr->desc);
 }
 
 /*
