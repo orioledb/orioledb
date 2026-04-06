@@ -54,7 +54,7 @@ typedef enum
 /*
  * Enable this to recheck page struct on every unlock.
  */
-/* #define CHECK_PAGE_STRUCT */
+#define CHECK_PAGE_STRUCT
 
 #ifdef CHECK_PAGE_STRUCT
 extern void o_check_page_struct(BTreeDescr *desc, Page p);
