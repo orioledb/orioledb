@@ -693,6 +693,7 @@ btree_print_backend_id(OXid oxid, StringInfo outbuf, BTreePrintData *printData)
 		Assert(found);
 		appendStringInfo(outbuf, ", backend = %d", hentry->backendIdInTraversal);
 	}
+	appendStringInfo(outbuf, ", oxid = %llu", (unsigned long long) oxid);
 }
 
 static uint64

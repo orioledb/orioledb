@@ -424,6 +424,8 @@ wait_for_tuple(BTreeDescr *desc, OTuple tuple, OXid oxid,
 	wait_for_oxid(oxid, false);
 }
 
+extern void log_btree(BTreeDescr *desc);
+
 static ConflictResolution
 o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 {
@@ -498,6 +500,9 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				 */
 				return ConflictResolutionRetry;
 			}
+
+			if (is_recovery_process())
+				log_btree(desc);
 
 			if (COMMITSEQNO_IS_ABORTED(csn))
 			{
