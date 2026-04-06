@@ -3517,15 +3517,24 @@ replay_wal_record(void *vctx, WalRecord *rec)
 					if (!ctx->single)
 						workers_synchronize(xlogPtr, true);
 
+					if (ctx->sys_tree_num == SYS_TREES_TABLESPACE_CACHE)
+					{
+						OTablespace *tblspc = (OTablespace *) tuple1.tuple.data;
+
+						elog(LOG, "recovery apply sys_tree %d (tablespace_cache) "
+							 "type=%u oxid=%lu "
+							 "datoid=%u key=%u tablespace=%u "
+							 "at LSN %X/%X",
+							 ctx->sys_tree_num, type, (unsigned long) rec->oxid,
+							 tblspc->key.common.datoid,
+							 (Oid) tblspc->key.keys[0],
+							 tblspc->tablespace,
+							 LSN_FORMAT_ARGS(xlogPtr));
+					}
+
 					success = apply_sys_tree_modify_record(ctx->sys_tree_num, type,
 														   tuple1.tuple, rec->oxid,
 														   COMMITSEQNO_INPROGRESS);
-
-					if (ctx->sys_tree_num == SYS_TREES_TABLESPACE_CACHE)
-						elog(LOG, "recovery apply sys_tree %d (tablespace_cache) "
-							 "type=%u oxid=%lu success=%d at LSN %X/%X",
-							 ctx->sys_tree_num, type, (unsigned long) rec->oxid,
-							 success, LSN_FORMAT_ARGS(xlogPtr));
 
 					if (ctx->sys_tree_num == SYS_TREES_O_INDICES && success)
 					{
