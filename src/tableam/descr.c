@@ -2341,7 +2341,7 @@ ResOwnerReleaseOTableDescrCallback(ResourceReleasePhase phase,
 	OTableDescr *descr = (OTableDescr *) arg;
 
 	if (phase == RESOURCE_RELEASE_BEFORE_LOCKS)
-		descr->refcnt--;
+		ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
 }
 
 void
