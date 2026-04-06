@@ -123,6 +123,22 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         echo "=== Replica proc retain undo locations ==="
         psql postgres -p 5433 -c "SELECT * FROM orioledb_get_proc_retain_undo_locations();" || true
 
+        echo "=== Checking xid_meta: nextXid == runXmin + 1 ==="
+        xid_check=$(psql postgres -p 5433 -tA -c "SELECT nextxid = runxmin + 1 FROM orioledb_get_xid_meta();" 2>/dev/null || echo "error")
+        if [ "$xid_check" != "t" ]; then
+            echo "ERROR: nextXid != runXmin + 1"
+            psql postgres -p 5433 -x -c "SELECT * FROM orioledb_get_xid_meta();" || true
+            status=1
+        fi
+
+        echo "=== Checking undo_meta: lastUsedLocation == minProcRetainLocation ==="
+        undo_check=$(psql postgres -p 5433 -tA -c "SELECT bool_and(lastusedlocation = minprocretainlocation) FROM orioledb_get_undo_meta();" 2>/dev/null || echo "error")
+        if [ "$undo_check" != "t" ]; then
+            echo "ERROR: lastUsedLocation != minProcRetainLocation for some undo type"
+            psql postgres -p 5433 -x -c "SELECT * FROM orioledb_get_undo_meta();" || true
+            status=1
+        fi
+
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log stop
         if [ $PG_VERSION = "17" ]; then
             make -C src/test/subscription installcheck-oriole -j $(nproc) || status=$?
