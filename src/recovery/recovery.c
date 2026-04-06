@@ -3249,6 +3249,8 @@ typedef struct
 
 } ReplayWalDescCtx;
 
+extern void log_btree(BTreeDescr *desc);
+
 static WalParseResult
 replay_wal_record(void *vctx, WalRecord *rec)
 {
@@ -3535,6 +3537,11 @@ replay_wal_record(void *vctx, WalRecord *rec)
 					success = apply_sys_tree_modify_record(ctx->sys_tree_num, type,
 														   tuple1.tuple, rec->oxid,
 														   COMMITSEQNO_INPROGRESS);
+
+					if (ctx->sys_tree_num == SYS_TREES_TABLESPACE_CACHE)
+					{
+						log_btree(get_sys_tree(SYS_TREES_TABLESPACE_CACHE));
+					}
 
 					if (ctx->sys_tree_num == SYS_TREES_O_INDICES && success)
 					{
