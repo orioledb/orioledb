@@ -461,7 +461,11 @@ print_page_contents_recursive(BTreeDescr *desc, OInMemoryBlkno blkno,
 					if ((!XACT_INFO_IS_FINISHED(tuphdr.xactInfo) || tuphdr.chainHasLocks) &&
 						UndoLocationIsValid(tuphdr.undoLocation))
 					{
-						Assert(UNDO_REC_EXISTS(desc->undoType, tuphdr.undoLocation));
+						if (!UNDO_REC_EXISTS(desc->undoType, tuphdr.undoLocation))
+						{
+							appendStringInfo(outbuf, "INVALID UNDO LOCATION: %llu\n", (unsigned long long) tuphdr.undoLocation);
+							break;
+						}
 						if (inUndo && !O_TUPLE_IS_NULL(tuple))
 							pfree(tuple.data);
 						if (!tuphdr.deleted && !XACT_INFO_IS_LOCK_ONLY(tuphdr.xactInfo))
