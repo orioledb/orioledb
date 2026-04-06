@@ -704,6 +704,12 @@ o_eval_default(OTable *o_table, Relation rel, Node *expr, TupleTableSlot *scantu
 	ExprState  *exprState;
 	Datum		result = 0;
 
+	if (!expr)
+	{
+		*isNull = true;
+		return result;
+	}
+
 	pstate = make_parsestate(NULL);
 	pstate->p_sourcetext = NULL;
 	nsitem = addRangeTableEntryForRelation(pstate, rel, AccessShareLock,
