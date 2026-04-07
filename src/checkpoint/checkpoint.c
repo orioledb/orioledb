@@ -1316,6 +1316,11 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	{
 		UndoLogType undoType = GetCheckpointableUndoLog(i);
 
+		elog(LOG, "checkpoint undo %s: startLocation = %lu, endLocation = %lu",
+			 undoType == UndoLogRegular ? "regular" : "system",
+			 (unsigned long) checkpoint_start_loc[i],
+			 (unsigned long) checkpoint_end_loc[i]);
+
 		fsync_undo_range(undoType,
 						 checkpoint_start_loc[i],
 						 checkpoint_end_loc[i],
