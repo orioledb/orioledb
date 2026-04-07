@@ -385,8 +385,12 @@ extern void abort_autonomous_transaction(OAutonomousTxState *state);
 extern void finish_autonomous_transaction(OAutonomousTxState *state);
 extern void undo_read(UndoLogType undoType, UndoLocation location,
 					  Size size, Pointer buf);
+extern bool undo_read_if_exists(UndoLogType undoType, UndoLocation location,
+								Size size, Pointer buf);
 extern void undo_write(UndoLogType undoType, UndoLocation location,
 					   Size size, Pointer buf);
+extern bool undo_write_if_exists(UndoLogType undoType, UndoLocation location,
+								 Size size, Pointer buf);
 extern void undo_snapshot_register_hook(Snapshot snapshot);
 extern void undo_snapshot_deregister_hook(Snapshot snapshot);
 extern void orioledb_snapshot_hook(Snapshot snapshot);

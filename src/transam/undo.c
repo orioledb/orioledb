@@ -83,6 +83,8 @@ typedef void (*UndoCallback) (UndoLogType undoType, UndoLocation location,
 							  bool changeCountsValid);
 
 static void init_undo_meta(UndoMeta *meta, bool found);
+static bool undo_write_internal(UndoLogType undoType, UndoLocation location,
+								Size size, Pointer buf, bool must_exist);
 static void o_stub_item_callback(UndoLogType undoType, UndoLocation location,
 								 UndoStackItem *baseItem,
 								 OXid oxid, bool abort,
@@ -1454,6 +1456,23 @@ read_undo_range(OBuffersDesc *desc, Pointer buf, UndoLogType undoType,
 	o_buffers_read(desc, buf, (uint32) undoType, minLoc, maxLoc - minLoc);
 }
 
+static bool
+write_undo_range_if_exists(OBuffersDesc *desc, Pointer buf, UndoLogType undoType,
+						   UndoLocation minLoc, UndoLocation maxLoc)
+{
+	if (maxLoc > minLoc)
+		return o_buffers_write_if_exists(desc, buf, (uint32) undoType, minLoc, maxLoc - minLoc);
+	return true;
+}
+
+static bool
+read_undo_range_if_exists(OBuffersDesc *desc, Pointer buf, UndoLogType undoType,
+						  UndoLocation minLoc, UndoLocation maxLoc)
+{
+	Assert(maxLoc > minLoc);
+	return o_buffers_read_if_exists(desc, buf, (uint32) undoType, minLoc, maxLoc - minLoc);
+}
+
 /*
  * Evict some part of undo to the disk.
  */
@@ -2711,10 +2730,83 @@ undo_read(UndoLogType undoType, UndoLocation location, Size size, Pointer buf)
 }
 
 /*
+ * Like undo_read(), but tolerates a concurrently cleaned undo record.
+ * Does not create files that don't exist.  Returns false if the undo
+ * record was cleaned (the buffer contents are unreliable).
+ */
+bool
+undo_read_if_exists(UndoLogType undoType, UndoLocation location, Size size, Pointer buf)
+{
+	UndoLocation writtenLocation;
+	UndoMeta   *meta = get_undo_meta_by_type(undoType);
+
+	if (!UNDO_REC_EXISTS(undoType, location))
+		return false;
+
+	writtenLocation = pg_atomic_read_u64(&meta->writtenLocation);
+
+	if (location + size > writtenLocation)
+	{
+		UndoLocation maxLoc,
+					minLoc;
+
+		pg_read_barrier();
+
+		maxLoc = location + size;
+		minLoc = Max(writtenLocation, location);
+		memcpy(buf + (minLoc - location), GET_UNDO_REC(undoType, minLoc), maxLoc - minLoc);
+
+		pg_read_barrier();
+
+		writtenLocation = pg_atomic_read_u64(&meta->writtenLocation);
+		if (writtenLocation > location)
+		{
+			if (!read_undo_range_if_exists(&undoBuffersDesc, buf, undoType,
+										   location,
+										   Min(location + size, writtenLocation)))
+				return false;
+		}
+	}
+	else
+	{
+		if (!read_undo_range_if_exists(&undoBuffersDesc, buf, undoType,
+									   location, location + size))
+			return false;
+	}
+
+	/*
+	 * Re-check after read: if the undo was cleaned concurrently, the data we
+	 * just read may be garbage from a reused circular buffer.
+	 */
+	if (!UNDO_REC_EXISTS(undoType, location))
+		return false;
+
+	return true;
+}
+
+/*
  * Write buffer to the given undo location.
  */
 void
 undo_write(UndoLogType undoType, UndoLocation location, Size size, Pointer buf)
+{
+	undo_write_internal(undoType, location, size, buf, true);
+}
+
+/*
+ * Like undo_write(), but tolerates a concurrently cleaned undo record.
+ * Returns false without writing if the location is no longer retained.
+ */
+bool
+undo_write_if_exists(UndoLogType undoType, UndoLocation location,
+					 Size size, Pointer buf)
+{
+	return undo_write_internal(undoType, location, size, buf, false);
+}
+
+static bool
+undo_write_internal(UndoLogType undoType, UndoLocation location,
+					Size size, Pointer buf, bool must_exist)
 {
 	UndoLocation writeInProgressLocation,
 				memoryUndoLocation;
@@ -2722,10 +2814,13 @@ undo_write(UndoLogType undoType, UndoLocation location, Size size, Pointer buf)
 	UndoRetainSharedLocations *sharedLocations = &curProcData->undoRetainLocations[(int) undoType];
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
 
-	Assert(location >= pg_atomic_read_u64(&sharedLocations->snapshotRetainUndoLocation) ||
-		   location >= pg_atomic_read_u64(&sharedLocations->transactionUndoRetainLocation) ||
-		   (location >= pg_atomic_read_u64(&meta->checkpointRetainStartLocation) &&
-			location < pg_atomic_read_u64(&meta->checkpointRetainEndLocation)));
+#ifdef USE_ASSERT_CHECKING
+	if (must_exist)
+		Assert(location >= pg_atomic_read_u64(&sharedLocations->snapshotRetainUndoLocation) ||
+			   location >= pg_atomic_read_u64(&sharedLocations->transactionUndoRetainLocation) ||
+			   (location >= pg_atomic_read_u64(&meta->checkpointRetainStartLocation) &&
+				location < pg_atomic_read_u64(&meta->checkpointRetainEndLocation)));
+#endif
 
 	while (true)
 	{
@@ -2776,7 +2871,7 @@ undo_write(UndoLogType undoType, UndoLocation location, Size size, Pointer buf)
 	if (memoryUndoLocation == location)
 	{
 		/* Everything is written to the in-memory buffer */
-		return;
+		return true;
 	}
 
 	/* Wait for in-progress write if needed */
@@ -2788,8 +2883,19 @@ undo_write(UndoLogType undoType, UndoLocation location, Size size, Pointer buf)
 	}
 
 	/* Finally perform writing to the file */
-	write_undo_range(&undoBuffersDesc, buf, undoType,
-					 location, memoryUndoLocation);
+	if (must_exist)
+	{
+		write_undo_range(&undoBuffersDesc, buf, undoType,
+						 location, memoryUndoLocation);
+	}
+	else
+	{
+		if (!write_undo_range_if_exists(&undoBuffersDesc, buf, undoType,
+										location, memoryUndoLocation))
+			return false;
+	}
+
+	return true;
 }
 
 /*

@@ -150,6 +150,8 @@ extern void btree_relnode_undo_callback(UndoLogType undoType,
 extern void get_prev_leaf_header_from_undo(UndoLogType undoType,
 										   BTreeLeafTuphdr *tuphdr,
 										   bool inPage);
+extern bool get_prev_leaf_header_from_undo_if_exists(UndoLogType undoType,
+													 BTreeLeafTuphdr *tuphdr);
 extern void get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 													 BTreeLeafTuphdr *tuphdr,
 													 OTuple *tuple,
