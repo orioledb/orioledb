@@ -246,7 +246,8 @@ class EvictionTest(BaseTest):
 		node.append_conf(
 		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
 		    "orioledb.main_buffers = 8MB\n"
-		    "log_min_messages = DEBUG1\n")
+		    "log_min_messages = DEBUG1\n"
+		    "checkpoint_timeout = 86400\n")
 		node.start()
 		arg1 = "WITH (primary_compress)" if compressed else ""
 		arg2 = "WITH (compress)" if compressed else ""
