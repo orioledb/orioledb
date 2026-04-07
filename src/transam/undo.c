@@ -519,7 +519,7 @@ update_min_undo_locations(UndoLogType undoType,
 		 * - [newCleanedNum, *)
 		 */
 
-		Assert(oldCheckpointStartLocation <= newCheckpointStartLocation);
+		Assert(oldCheckpointStartLocation <= newCheckpointStartLocation || undoType == UndoLogSystem);
 		Assert(oldCheckpointEndLocation <= newCheckpointEndLocation);
 		Assert(oldCheckpointStartLocation <= oldCheckpointEndLocation);
 		Assert(newCheckpointStartLocation <= newCheckpointEndLocation);
