@@ -20,6 +20,7 @@
 
 #include "catalog/pg_tablespace_d.h"
 #include "common/relpath.h"
+#include "recovery/recovery.h"
 #include "utils/syscache.h"
 
 /* Silent cppcheck */
@@ -157,6 +158,9 @@ o_tablespace_cache_add_relnode(Oid datoid, Oid relnode, Oid tablespace)
 {
 	OTablespaceArg arg = {.tablespace = tablespace};
 	XLogRecPtr	cur_lsn;
+
+	if (is_recovery_process())
+		return;
 
 	if ((!OidIsValid(tablespace) && MyDatabaseTableSpace == DEFAULTTABLESPACE_OID) ||
 		tablespace == DEFAULTTABLESPACE_OID)
