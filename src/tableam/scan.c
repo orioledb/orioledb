@@ -792,13 +792,14 @@ o_rescan_custom_scan(CustomScanState *node)
 		btrescan(&ix_plan_state->ostate.scandesc, ix_plan_state->iss_ScanKeys,
 				 ix_plan_state->iss_NumScanKeys, NULL, 0);
 
+		if (ix_plan_state->ostate.iterator != NULL)
+		{
+			btree_iterator_free(ix_plan_state->ostate.iterator);
+			ix_plan_state->ostate.iterator = NULL;
+		}
 		if (node->ss.ps.chgParam != NULL)
 		{
 			MemoryContextReset(ix_plan_state->ostate.cxt);
-		}
-		else if (ix_plan_state->ostate.iterator != NULL)
-		{
-			btree_iterator_free(ix_plan_state->ostate.iterator);
 		}
 
 		ix_plan_state->ostate.curKeyRangeIsLoaded = false;
