@@ -19,6 +19,7 @@
 #include "btree/modify.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
+#include "recovery/wal_record.h"
 #include "tableam/descr.h"
 #include "tableam/toast.h"
 #include "transam/oxid.h"

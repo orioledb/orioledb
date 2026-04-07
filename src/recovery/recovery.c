@@ -348,7 +348,7 @@ static inline void spread_idx_modify(BTreeDescr *desc,
 									 RecoveryMsgType recType,
 									 OTuple rec);
 
-static inline RecoveryMsgType recovery_msg_from_wal_record(uint8 wal_record);
+static inline RecoveryMsgType recovery_msg_from_wal_record(WalRecordType rec_type);
 static void recovery_send_init(int worker_num);
 
 /*
@@ -965,15 +965,15 @@ recovery_get_effective_replay_ptr(void)
 }
 
 static WalParseResult
-recovery_wal_check_version(const WalReaderState *r)
+recovery_check_version(const WalReaderState *r)
 {
 	Assert(r);
 
-	if (r->wal_version > ORIOLEDB_WAL_VERSION)
+	if (r->container.version > ORIOLEDB_WAL_VERSION)
 	{
 		/* Unexpected new WAL record which we cannot read */
 		elog(PANIC, "cannot read WAL record of version %u newer than supported %u",
-			 r->wal_version, ORIOLEDB_WAL_VERSION);
+			 r->container.version, ORIOLEDB_WAL_VERSION);
 
 		return WALPARSE_BAD_VERSION;
 	}
@@ -982,48 +982,23 @@ recovery_wal_check_version(const WalReaderState *r)
 	 * If the WAL record is too old just return false and decide not to stop
 	 * applying WAL records further.
 	 */
-	else if (r->wal_version < ORIOLEDB_CONTAINER_FLAGS_WAL_VERSION)
+	else if (r->container.version < ORIOLEDB_CONTAINER_FLAGS_WAL_VERSION)
 		return WALPARSE_BAD_VERSION;
 
 	return WALPARSE_OK;
 }
 
-typedef struct
-{
-	TimestampTz xactTime;
-	TransactionId xid;
-
-} RecoveryWalDescCtx;
-
 static WalParseResult
-recovery_wal_containter_info(void *vctx, const WalRecord *rec)
+recovery_on_container(WalReaderState *r)
 {
-	RecoveryWalDescCtx *ctx = (RecoveryWalDescCtx *) vctx;
-
-	Assert(ctx);
-	Assert(rec);
-
-	switch (rec->type)
-	{
-		case WAL_CONTAINER_HAS_XACT_INFO:
-			ctx->xactTime = rec->u.xact_info.xactTime;
-			ctx->xid = rec->u.xact_info.xid;
-
-			return WALPARSE_STOP;	/* Stop parser after flags */
-
-		case WAL_CONTAINER_HAS_ORIGIN_INFO:
-			/* Skip */
-			break;
-
-		default:
-			break;
-	}
+	if (r->container.flags & WAL_CONTAINER_HAS_XACT_INFO)
+		return WALPARSE_STOP;
 
 	return WALPARSE_EOF;		/* Stop parser */
 }
 
 static WalParseResult
-recovery_wal_record(void *vctx, WalRecord *rec)
+recovery_on_record(WalReaderState *r, WalRecord *rec)
 {
 	return WALPARSE_EOF;		/* Stop parser */
 }
@@ -1043,19 +1018,16 @@ orioledb_recovery_stops_before_hook(XLogReaderState *record,
 	Pointer		endPtr = startPtr + XLogRecGetDataLen(record);
 
 	WalParseResult st;
-	RecoveryWalDescCtx dctx;
 
 	WalReaderState r = {
 		.start = startPtr,
 		.end = endPtr,
 		.ptr = startPtr,
-		.wal_version = 0,
-		.wal_flags = 0,
-		/* Consumer */
-		.ctx = &dctx,
-		.check_version = recovery_wal_check_version,
-		.on_flag = recovery_wal_containter_info,
-		.on_record = recovery_wal_record
+		.container = {0},
+		.ctx = NULL,
+		.check_version = recovery_check_version,
+		.on_container = recovery_on_container,
+		.on_record = recovery_on_record
 	};
 
 	/* Currently we consider ony recovery_target_time */
@@ -1066,17 +1038,19 @@ orioledb_recovery_stops_before_hook(XLogReaderState *record,
 	if (XLogRecGetDataLen(record) == 0)
 		return false;
 
-	st = parse_wal_container(&r, true /* allow_logging */ );
+	st = wal_parse_container(&r, true);
 
 	if (st == WALPARSE_STOP)	/* WAL_CONTAINER_HAS_XACT_INFO is present */
 	{
-		*recordXid = dctx.xid;
-		*recordXtime = dctx.xactTime;
+		Assert(r.container.flags & WAL_CONTAINER_HAS_XACT_INFO);
+
+		*recordXid = r.container.xact_info.xid;
+		*recordXtime = r.container.xact_info.xactTime;
 
 		if (recoveryTargetInclusive)
-			return dctx.xactTime > recoveryTargetTime;
+			return r.container.xact_info.xactTime > recoveryTargetTime;
 		else
-			return dctx.xactTime >= recoveryTargetTime;
+			return r.container.xact_info.xactTime >= recoveryTargetTime;
 	}
 
 	return false;
@@ -3245,11 +3219,11 @@ invalidate_typcache(void)
 }
 
 static WalParseResult
-replay_wal_check_version(const WalReaderState *r)
+replay_check_version(const WalReaderState *r)
 {
 	Assert(r);
 
-	if (r->wal_version > ORIOLEDB_WAL_VERSION)
+	if (r->container.version > ORIOLEDB_WAL_VERSION)
 	{
 		/* WAL from future version */
 		return WALPARSE_BAD_VERSION;
@@ -3261,28 +3235,16 @@ replay_wal_check_version(const WalReaderState *r)
 }
 
 static WalParseResult
-replay_wal_containter_info(void *ctx, const WalRecord *rec)
+replay_on_container(WalReaderState *r)
 {
-	Assert(rec);
-
-	switch (rec->type)
+	if (r->container.flags & WAL_CONTAINER_HAS_XACT_INFO)
 	{
-		case WAL_CONTAINER_HAS_XACT_INFO:
-
-			/*
-			 * Store PG xid from WAL_CONTAINER_XACT_INFO to build
-			 * SYS_TREES_CATALOG_XID_UNDO_LOCATION mapping in recovery for
-			 * following logical decoding
-			 */
-			recoveryHeapTransactionId = rec->u.xact_info.xid;
-			break;
-
-		case WAL_CONTAINER_HAS_ORIGIN_INFO:
-			/* Skip */
-			break;
-
-		default:
-			break;
+		/*
+		 * Store PG xid from WAL_CONTAINER_XACT_INFO to build
+		 * SYS_TREES_CATALOG_XID_UNDO_LOCATION mapping in recovery for
+		 * following logical decoding
+		 */
+		recoveryHeapTransactionId = r->container.xact_info.xid;
 	}
 
 	return WALPARSE_OK;
@@ -3303,11 +3265,10 @@ typedef struct
 } ReplayWalDescCtx;
 
 static WalParseResult
-replay_wal_record(void *vctx, WalRecord *rec)
+replay_on_record(WalReaderState *r, WalRecord *rec)
 {
-	ReplayWalDescCtx *ctx = (ReplayWalDescCtx *) vctx;
+	ReplayWalDescCtx *ctx = (ReplayWalDescCtx *) r->ctx;
 
-	Assert(ctx);
 	Assert(rec);
 
 	elog(DEBUG4, "[%s] GET RTYPE %d `%s`", __func__, rec->type, wal_type_name(rec->type));
@@ -3330,8 +3291,7 @@ replay_wal_record(void *vctx, WalRecord *rec)
 							sync = false,
 							needsFeedback;
 
-				/* xlogPtr = xlogRecPtr + (ptr - startPtr); */
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 
 				recovery_xmin = Max(recovery_xmin, rec->u.finish.xmin);
 
@@ -3471,7 +3431,7 @@ replay_wal_record(void *vctx, WalRecord *rec)
 
 		case WAL_REC_O_TABLES_META_UNLOCK:
 			{
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 
 				elog(DEBUG3, "[%s] META_UNLOCK for [ %u %u %u ] ctx->sys_tree_num %d", __func__,
 					 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode, ctx->sys_tree_num);
@@ -3493,7 +3453,7 @@ replay_wal_record(void *vctx, WalRecord *rec)
 
 		case WAL_REC_TRUNCATE:
 			{
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 
 				if (!ctx->single)
 					workers_synchronize(xlogPtr, true);
@@ -3515,7 +3475,7 @@ replay_wal_record(void *vctx, WalRecord *rec)
 
 		case WAL_REC_ROLLBACK_TO_SAVEPOINT:
 			{
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 
 				if (!ctx->single)
 				{
@@ -3560,9 +3520,9 @@ replay_wal_record(void *vctx, WalRecord *rec)
 				bool		success;
 				OFixedTuple tuple1,
 							tuple2;
-				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 				uint16		type = recovery_msg_from_wal_record(rec->type);
-				Pointer		sys_tree_oids_ptr = rec->value_ptr + sizeof(uint8) + sizeof(OffsetNumber);
+				Pointer		sys_tree_oids_ptr = rec->data + sizeof(uint8) + sizeof(OffsetNumber);
 
 				Assert(rec->oxid != InvalidOXid);
 
@@ -3746,16 +3706,14 @@ replay_container(Pointer startPtr, Pointer endPtr,
 		.start = startPtr,
 		.end = endPtr,
 		.ptr = startPtr,
-		.wal_version = 0,
-		.wal_flags = 0,
-		/* Consumer */
+		.container = {0},
 		.ctx = &dctx,
-		.check_version = replay_wal_check_version,
-		.on_flag = replay_wal_containter_info,
-		.on_record = replay_wal_record
+		.check_version = replay_check_version,
+		.on_container = replay_on_container,
+		.on_record = replay_on_record
 	};
 
-	WalParseResult st = parse_wal_container(&r, true /* allow_logging */ );
+	WalParseResult st = wal_parse_container(&r, true);
 
 	if (st != WALPARSE_OK)
 		return false;
@@ -4348,9 +4306,9 @@ spread_idx_modify(BTreeDescr *desc, RecoveryMsgType recType, OTuple rec)
  * Converts wal record type to recovery message type.
  */
 static inline RecoveryMsgType
-recovery_msg_from_wal_record(uint8 wal_record)
+recovery_msg_from_wal_record(WalRecordType rec_type)
 {
-	switch (wal_record)
+	switch (rec_type)
 	{
 		case WAL_REC_INSERT:
 			return RecoveryMsgTypeInsert;
@@ -4369,7 +4327,7 @@ recovery_msg_from_wal_record(uint8 wal_record)
 			return RecoveryMsgTypeReinsert;
 		default:
 			Assert(false);
-			elog(ERROR, "Wrong WAL record modify type %d", wal_record);
+			elog(ERROR, "Wrong WAL record modify type %d", rec_type);
 	}
 	return (uint16) 0;			/* keep compiler quiet */
 }
