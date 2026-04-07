@@ -21,6 +21,7 @@
 #include "btree/page_chunks.h"
 #include "btree/undo.h"
 #include "catalog/sys_trees.h"
+#include "tableam/descr.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "utils/page_pool.h"
@@ -28,6 +29,7 @@
 #include "access/transam.h"
 #include "miscadmin.h"
 #include "utils/memutils.h"
+#include "utils/resowner.h"
 
 /* Iterates through undo images */
 typedef struct
@@ -50,6 +52,7 @@ typedef struct
 struct BTreeIterator
 {
 	OBTreeFindPageContext context;
+	OIndexDescr *oidescr;
 	OSnapshot	oSnapshot;
 	UndoIterator undoIt;
 	/* scan direction of current iterator: forward or backward */
@@ -501,6 +504,15 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	it = (BTreeIterator *) palloc(sizeof(BTreeIterator));
+
+	if (!IS_SYS_TREE_OIDS(desc->oids))
+	{
+		it->oidescr = (OIndexDescr *) desc->arg;
+		ResourceOwnerRememberOIndexDescr(CurrentResourceOwner, it->oidescr);
+	}
+	else
+		it->oidescr = NULL;
+
 	it->combinedResult = have_current_undo(desc->undoType) && COMMITSEQNO_IS_NORMAL(o_snapshot->csn);
 	it->oSnapshot = *o_snapshot;
 	it->scanDir = scanDir;
@@ -647,6 +659,8 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 void
 btree_iterator_free(BTreeIterator *it)
 {
+	if (it->oidescr)
+		ResourceOwnerForgetOIndexDescr(CurrentResourceOwner, it->oidescr);
 	pfree(it);
 }
 

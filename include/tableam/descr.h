@@ -364,5 +364,7 @@ extern void reset_saving_inval_messages(void);
 
 extern void ResourceOwnerRememberOTableDescr(ResourceOwner owner, OTableDescr *descr);
 extern void ResourceOwnerForgetOTableDescr(ResourceOwner owner, OTableDescr *descr);
+extern void ResourceOwnerRememberOIndexDescr(ResourceOwner owner, OIndexDescr *descr);
+extern void ResourceOwnerForgetOIndexDescr(ResourceOwner owner, OIndexDescr *descr);
 
 #endif
