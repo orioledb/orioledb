@@ -259,7 +259,7 @@ wal_desc_check_version(const WalReaderState *r)
 {
 	Assert(r);
 
-	if (r->wal_version > ORIOLEDB_WAL_VERSION)
+	if (r->container.version > ORIOLEDB_WAL_VERSION)
 	{
 		/* WAL from future version */
 		return WALPARSE_BAD_VERSION;
@@ -269,9 +269,9 @@ wal_desc_check_version(const WalReaderState *r)
 }
 
 static WalParseResult
-wal_desc_record(void *vctx, WalRecord *rec)
+wal_desc_on_record(WalReaderState *r, WalRecord *rec)
 {
-	WalDescCtx *ctx = (WalDescCtx *) vctx;
+	WalDescCtx *ctx = (WalDescCtx *) r->ctx;
 
 	Assert(ctx);
 	Assert(rec);
@@ -343,16 +343,14 @@ orioledb_rm_desc(StringInfo buf, XLogReaderState *record)
 		.start = startPtr,
 		.end = endPtr,
 		.ptr = startPtr,
-		.wal_version = 0,
-		.wal_flags = 0,
 		/* Consumer */
 		.ctx = &dctx,
 		.check_version = wal_desc_check_version,
-		.on_flag = NULL,
-		.on_record = wal_desc_record
+		.on_container = NULL,
+		.on_record = wal_desc_on_record
 	};
 
-	WalParseResult st = parse_wal_container(&r, false /* allow_logging */ );
+	WalParseResult st = wal_parse_container(&r, false);
 
 	if (st != WALPARSE_OK)
 		appendStringInfo(buf, " [PARSE ERROR %d]", (int) st);

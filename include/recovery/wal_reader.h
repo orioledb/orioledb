@@ -14,7 +14,7 @@
 #ifndef __WAL_READER_H__
 #define __WAL_READER_H__
 
-typedef unsigned int wal_type_t;
+#include "recovery/wal_record.h"
 
 /*
  * WalRecord instances are transient and reused across iterations.
@@ -24,20 +24,16 @@ typedef unsigned int wal_type_t;
  */
 typedef struct WalRecord
 {
-	wal_type_t	type;
+	WalRecordType type;
 
-	uint32		delta;
-	Pointer		value_ptr;
-	uint16		wal_version;
+	uint32		offset;
+	Pointer		data;
 
 	ORelOids	oids;
 	OXid		oxid;
 	TransactionId logicalXid;
 	TransactionId heapXid;
 	char		relreplident;
-
-	RepOriginId origin_id;
-	XLogRecPtr	origin_lsn;
 
 	union
 	{
@@ -103,17 +99,27 @@ typedef struct WalRecord
 
 			bool		read_two_tuples;
 		}			modify;
-
-		/* Flags */
-		struct
-		{
-			TimestampTz xactTime;
-			TransactionId xid;
-		}			xact_info;
-
 	}			u;
 
 } WalRecord;
+
+typedef struct WalContainer
+{
+	uint16		version;
+	uint8		flags;
+
+	struct
+	{
+		TimestampTz xactTime;
+		TransactionId xid;
+	}			xact_info;
+
+	struct
+	{
+		RepOriginId id;
+		XLogRecPtr	lsn;
+	}			origin_info;
+} WalContainer;
 
 /*
  * WalParseResult
@@ -137,9 +143,6 @@ typedef struct WalRecord
  * WALPARSE_BAD_VERSION
  *     Container version policy rejected by the consumer (typically WAL from
  *     a newer or unsupported OrioleDB version).
- *
- * WALPARSE_INTERNAL
- *     Internal invariant violation or unexpected condition.
  */
 typedef enum WalParseResult
 {
@@ -147,9 +150,7 @@ typedef enum WalParseResult
 	WALPARSE_STOP,
 	WALPARSE_EOF,				/* not enough bytes */
 	WALPARSE_BAD_TYPE,
-	WALPARSE_BAD_VERSION,
-	WALPARSE_INTERNAL
-
+	WALPARSE_BAD_VERSION
 } WalParseResult;
 
 struct WalReaderState;
@@ -164,8 +165,8 @@ struct WalReaderState;
  * based on semantic compatibility rules.
  */
 typedef WalParseResult (*WalCheckVersionFn) (const struct WalReaderState *r);
-typedef WalParseResult (*WalOnFlagFn) (void *ctx, const WalRecord *rec);
-typedef WalParseResult (*WalOnRecordFn) (void *ctx, WalRecord *rec);
+typedef WalParseResult (*WalOnContainerFn) (struct WalReaderState *r);
+typedef WalParseResult (*WalOnRecordFn) (struct WalReaderState *r, WalRecord *rec);
 
 /*
  * Cursor advancement invariant:
@@ -183,15 +184,13 @@ typedef struct WalReaderState
 	Pointer		start;
 	Pointer		end;
 	Pointer		ptr;
-	uint16		wal_version;
-	uint8		wal_flags;
+	WalContainer container;
 
 	/* Consumer */
 	void	   *ctx;
 	WalCheckVersionFn check_version;
-	WalOnFlagFn on_flag;
+	WalOnContainerFn on_container;
 	WalOnRecordFn on_record;
-
 } WalReaderState;
 
 /*
@@ -209,23 +208,6 @@ typedef struct WalReaderState
  * For payload-less records, descriptor->parse is NULL (record is tag-only).
  */
 typedef WalParseResult (*WalParseFn) (WalReaderState *r, WalRecord *rec);
-
-/*
- * WalRecordDesc
- *
- * Static descriptor for a record (or flag) type.
- *
- * The descriptor table is the single source of truth for:
- *   - mapping type -> name (debug),
- *   - mapping type -> payload parser.
- */
-typedef struct WalRecordDesc
-{
-	wal_type_t	type;
-	const char *name;
-	WalParseFn	parse;
-
-} WalRecordDesc;
 
 /*
  * Reader helpers.
@@ -264,12 +246,7 @@ do { \
 
 extern void build_fixed_tuples(const WalRecord *rec, OFixedTuple *tuple1, OFixedTuple *tuple2);
 
-extern const WalRecordDesc *wal_get_desc(wal_type_t type);
-extern const WalRecordDesc *wal_flag_get_desc(wal_type_t type);
-
-extern const char *wal_type_name(wal_type_t type);
-extern const char *wal_flag_type_name(wal_type_t type);
-
-extern WalParseResult parse_wal_container(WalReaderState *r, bool allow_logging);
+extern const char *wal_type_name(WalRecordType type);
+extern WalParseResult wal_parse_container(WalReaderState *r, bool allow_logging);
 
 #endif							/* __WAL_READER_H__ */
