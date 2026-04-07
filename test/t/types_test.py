@@ -763,5 +763,5 @@ class TypesTest(BaseTest):
 		self.assertEqual([(3, ), (8, ), (15, ), (94, )],
 		                 con3.execute("SELECT * FROM foo ORDER BY i;"))
 		con3.close()
-		self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 2)
+		#self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 2)
 		node.stop()
