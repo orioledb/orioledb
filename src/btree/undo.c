@@ -1722,7 +1722,29 @@ get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 	UndoLocation undoLocation = tuphdr->undoLocation;
 
 	Assert(UndoLocationIsValid(undoLocation));
-	Assert(UNDO_REC_EXISTS(undoType, undoLocation));
+	if (!UNDO_REC_EXISTS(undoType, undoLocation))
+	{
+		UndoLocation retainUndoLocation;
+		TransactionId xmin = InvalidTransactionId;
+		TransactionId catalog_xmin;
+		UndoLocation retainLocation;
+
+		retainUndoLocation = get_current_replication_retain_undo_location();
+
+		ProcArrayGetReplicationSlotXmin(&xmin, &catalog_xmin);
+
+		retainLocation = pg_atomic_read_u64(enable_rewind
+											? &get_undo_meta_by_type(undoType)->minRewindRetainLocation
+											: &get_undo_meta_by_type(undoType)->minProcRetainLocation);
+
+		elog(PANIC, "undo record does not exist: "
+			 "undoLocation = %lu, retainLocation = %lu, "
+			 "replicationRetainUndoLocation = %lu, replicationXmin = %u",
+			 (unsigned long) undoLocation,
+			 (unsigned long) retainLocation,
+			 (unsigned long) retainUndoLocation,
+			 xmin);
+	}
 
 	undo_read(undoType,
 			  tuphdr->undoLocation - offsetof(BTreeModifyUndoStackItem, tuphdr),
