@@ -36,6 +36,7 @@
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/pmsignal.h"
+#include "storage/procsignal.h"
 #include "storage/proc.h"
 #include "storage/shm_mq.h"
 #include "storage/sinvaladt.h"
@@ -199,6 +200,7 @@ recovery_worker_main(Datum main_arg)
 		ResetLatch(MyLatch);
 
 		pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
+		pqsignal(SIGUSR1, procsignal_sigusr1_handler);
 		BackgroundWorkerUnblockSignals();
 
 		shm_mq_set_receiver(GET_WORKER_QUEUE(id), MyProc);
