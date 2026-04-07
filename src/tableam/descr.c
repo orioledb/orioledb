@@ -2359,3 +2359,77 @@ ResourceOwnerForgetOTableDescr(ResourceOwner owner, OTableDescr *descr)
 }
 
 #endif
+
+#if PG_VERSION_NUM >= 170000
+
+static void ResOwnerReleaseOIndexDescr(Datum res);
+static char *ResOwnerPrintOIndexDescr(Datum res);
+
+static const ResourceOwnerDesc o_index_descr_resowner_desc =
+{
+	.name = "OrioleDB OIndexDescr",
+	.release_phase = RESOURCE_RELEASE_BEFORE_LOCKS,
+	.release_priority = RELEASE_PRIO_RELCACHE_REFS,
+	.ReleaseResource = ResOwnerReleaseOIndexDescr,
+	.DebugPrint = ResOwnerPrintOIndexDescr
+};
+
+void
+ResourceOwnerRememberOIndexDescr(ResourceOwner owner, OIndexDescr *descr)
+{
+	ResourceOwnerEnlarge(owner);
+	descr->refcnt++;
+	ResourceOwnerRemember(owner, PointerGetDatum(descr), &o_index_descr_resowner_desc);
+}
+
+void
+ResourceOwnerForgetOIndexDescr(ResourceOwner owner, OIndexDescr *descr)
+{
+	ResourceOwnerForget(owner, PointerGetDatum(descr), &o_index_descr_resowner_desc);
+	descr->refcnt--;
+}
+
+static void
+ResOwnerReleaseOIndexDescr(Datum res)
+{
+	OIndexDescr *descr = (OIndexDescr *) DatumGetPointer(res);
+
+	descr->refcnt--;
+}
+
+static char *
+ResOwnerPrintOIndexDescr(Datum res)
+{
+	OIndexDescr *descr = (OIndexDescr *) DatumGetPointer(res);
+
+	return psprintf("OrioleDB OIndexDescr (%u, %u, %u)",
+					descr->oids.datoid, descr->oids.reloid, descr->oids.relnode);
+}
+
+#else
+
+static void
+ResOwnerReleaseOIndexDescrCallback(ResourceReleasePhase phase,
+								   bool isCommit, bool isTopLevel, void *arg)
+{
+	OIndexDescr *descr = (OIndexDescr *) arg;
+
+	if (phase == RESOURCE_RELEASE_BEFORE_LOCKS)
+		ResourceOwnerForgetOIndexDescr(CurrentResourceOwner, descr);
+}
+
+void
+ResourceOwnerRememberOIndexDescr(ResourceOwner owner, OIndexDescr *descr)
+{
+	descr->refcnt++;
+	RegisterResourceReleaseCallback(ResOwnerReleaseOIndexDescrCallback, descr);
+}
+
+void
+ResourceOwnerForgetOIndexDescr(ResourceOwner owner, OIndexDescr *descr)
+{
+	UnregisterResourceReleaseCallback(ResOwnerReleaseOIndexDescrCallback, descr);
+	descr->refcnt--;
+}
+
+#endif
