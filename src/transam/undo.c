@@ -808,11 +808,11 @@ get_current_replication_retain_undo_location(void)
 		ReplicationSlotsComputeRequiredXmin(false);
 	ProcArrayGetReplicationSlotXmin(&xmin, &catalog_xmin);
 
-	if (!TransactionIdIsValid(xmin))
+	if (!TransactionIdIsValid(catalog_xmin))
 		return InvalidUndoLocation;
 
-	result = read_replication_retain_undo_location(xmin, &ndeleted, false);
-	elog(DEBUG4, "Current undoLocation from SYS_TREES_XID_UNDO_LOCATION is %lu for xmin %u. Deleted %d old items", result, xmin, ndeleted);
+	result = read_replication_retain_undo_location(catalog_xmin, &ndeleted, false);
+	elog(DEBUG4, "Current undoLocation from SYS_TREES_XID_UNDO_LOCATION is %lu for catalog_xmin %u. Deleted %d old items", result, catalog_xmin, ndeleted);
 
 	return result;
 }
