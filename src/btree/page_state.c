@@ -803,6 +803,8 @@ unlock_check_page(OInMemoryBlkno blkno)
 	VALGRIND_CHECK_MEM_IS_DEFINED(O_GET_IN_MEMORY_PAGE(blkno), ORIOLEDB_BLCKSZ);
 }
 
+extern void log_btree(BTreeDescr *desc);
+
 /*
  * unlock_page_internal -- release a previously locked in‑memory page and wake
  *						   any backends that can now proceed.
@@ -829,6 +831,7 @@ static void
 unlock_page_internal(OInMemoryBlkno blkno, bool split)
 {
 	Page		page = O_GET_IN_MEMORY_PAGE(blkno);
+	OrioleDBPageDesc *pageDesc = O_GET_IN_MEMORY_PAGEDESC(blkno);
 	OrioleDBPageHeader *hdr = (OrioleDBPageHeader *) page;
 
 	/* Head of our private stack of waiters to wake once the page is unlocked */
@@ -1000,6 +1003,12 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 		PGSemaphoreUnlock(proc->sem);
 
 		procno = next;
+	}
+
+	if (is_recovery_process() && IS_SYS_TREE_OIDS(pageDesc->oids) &&
+		pageDesc->oids.relnode == SYS_TREES_TABLESPACE_CACHE)
+	{
+		elog(LOG, "unlock_page_internal(%u)", blkno);
 	}
 }
 

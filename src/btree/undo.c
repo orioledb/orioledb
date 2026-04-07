@@ -451,7 +451,7 @@ get_tree_descr(ORelOids oids, OIndexType type)
  */
 void
 modify_undo_callback(UndoLogType undoType, UndoLocation location,
-					 UndoStackItem *baseItem, OXid oxid, bool abort,
+					 UndoStackItem *baseItem, OXid oxid, bool isAbort,
 					 bool changeCountsValid)
 {
 	BTreeModifyUndoStackItem *item = (BTreeModifyUndoStackItem *) baseItem;
@@ -468,7 +468,18 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	BTreeKeyType keyType = item->action == BTreeOperationUpdate ? BTreeKeyLeafTuple : BTreeKeyNonLeafKey;
 	OFindPageResult findResult;
 
-	Assert(abort);
+	Assert(isAbort);
+
+	if (is_recovery_in_progress() &&
+		IS_SYS_TREE_OIDS(item->oids) &&
+		item->oids.relnode == SYS_TREES_TABLESPACE_CACHE)
+	{
+		elog(LOG, "modify_undo_callback: oxid=%lu action=%d "
+			 "oids=(%u,%u,%u) undoLocation=%llu",
+			 (unsigned long) oxid, item->action,
+			 item->oids.datoid, item->oids.reloid, item->oids.relnode,
+			 (unsigned long long) location);
+	}
 
 	if (!desc)
 		return;
@@ -572,7 +583,7 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 void
 lock_undo_callback(UndoLogType undoType, UndoLocation location,
 				   UndoStackItem *baseItem, OXid oxid,
-				   bool abort, bool changeCountsValid)
+				   bool isAbort, bool changeCountsValid)
 {
 	BTreeModifyUndoStackItem *item = (BTreeModifyUndoStackItem *) baseItem;
 	BTreeDescr *desc = get_tree_descr(item->oids, item->header.indexType);
@@ -588,7 +599,15 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 				lastLockOnlyUndoLocation = InvalidUndoLocation;
 	OFindPageResult findResult;
 
-	Assert(abort);
+	Assert(isAbort);
+	if (is_recovery_in_progress() &&
+		IS_SYS_TREE_OIDS(item->oids) &&
+		item->oids.relnode == SYS_TREES_TABLESPACE_CACHE)
+		elog(LOG, "lock_undo_callback: oxid=%lu "
+			 "oids=(%u,%u,%u) undoLocation=%lu",
+			 (unsigned long) oxid,
+			 item->oids.datoid, item->oids.reloid, item->oids.relnode,
+			 (unsigned long) location);
 
 	if (!desc)
 		return;
