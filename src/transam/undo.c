@@ -2592,6 +2592,8 @@ start_autonomous_transaction(OAutonomousTxState *state)
 {
 	int			i;
 
+	Assert(!is_recovery_process());
+
 	state->needs_wal_flush = oxid_needs_wal_flush;
 	state->oxid = get_current_oxid_if_any();
 	get_current_logical_xid_ctx(&state->logicalXidContext);
