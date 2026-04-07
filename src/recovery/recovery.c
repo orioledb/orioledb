@@ -3533,6 +3533,14 @@ replay_wal_record(void *vctx, WalRecord *rec)
 							 tblspc->tablespace,
 							 LSN_FORMAT_ARGS(xlogPtr));
 					}
+					else
+					{
+						elog(LOG, "recovery apply sys_tree %d "
+							 "type=%u oxid=%lu "
+							 "at LSN %X/%X",
+							 ctx->sys_tree_num, type, (unsigned long) rec->oxid,
+							 LSN_FORMAT_ARGS(xlogPtr));
+					}
 
 					success = apply_sys_tree_modify_record(ctx->sys_tree_num, type,
 														   tuple1.tuple, rec->oxid,
