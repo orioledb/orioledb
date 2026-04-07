@@ -40,6 +40,9 @@ static void clean_chain_has_locks_flag(UndoLogType undoType,
 									   UndoLocation location,
 									   BTreeLeafTuphdr *pageTuphdr,
 									   OInMemoryBlkno blkno);
+static bool update_leaf_header_in_undo_if_exists(UndoLogType undoType,
+												 BTreeLeafTuphdr *tuphdr,
+												 UndoLocation location);
 
 /*
  * Add page image to the undo log.
@@ -653,9 +656,13 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 		UndoLocation undoLocation = tuphdr.undoLocation;
 		BTreeLeafTuphdr prev_tuphdr = tuphdr;
 
-		Assert(UndoLocationIsValid(undoLocation));
-		Assert(UNDO_REC_EXISTS(desc->undoType, undoLocation));
-		get_prev_leaf_header_from_undo(desc->undoType, &prev_tuphdr, false);
+		/*
+		 * A concurrent transaction may have committed and released its undo
+		 * while we are walking the chain.  Treat this the same as reaching a
+		 * committed record — stop walking.
+		 */
+		if (!get_prev_leaf_header_from_undo_if_exists(desc->undoType, &prev_tuphdr))
+			break;
 
 		if (XACT_INFO_IS_LOCK_ONLY(tuphdr.xactInfo) && XACT_INFO_GET_OXID(tuphdr.xactInfo) == oxid)
 		{
@@ -685,16 +692,10 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 				tuphdr.xactInfo = prev_tuphdr.xactInfo;
 				tuphdr.undoLocation = prev_tuphdr.undoLocation;
 				tuphdr.chainHasLocks = prev_tuphdr.chainHasLocks;
-				update_leaf_header_in_undo(desc->undoType, &tuphdr,
-										   tuphdrUndoLocation);
+				update_leaf_header_in_undo_if_exists(desc->undoType, &tuphdr,
+													 tuphdrUndoLocation);
 			}
 		}
-
-		/*
-		 * We should be able to find at CSN-record or invalid undo location
-		 * before running out of undo records.
-		 */
-		Assert(UNDO_REC_EXISTS(desc->undoType, undoLocation));
 
 		if (XACT_INFO_IS_LOCK_ONLY(tuphdr.xactInfo))
 			lastLockOnlyUndoLocation = tuphdrUndoLocation;
@@ -1268,15 +1269,15 @@ clean_chain_has_locks_flag(UndoLogType undoType, UndoLocation location,
 	 */
 	while (UndoLocationIsValid(location) && location >= retainedUndoLocation)
 	{
-		Assert(UNDO_REC_EXISTS(undoType, location));
-
-		undo_read(undoType, location, sizeof(tuphdr), (Pointer) &tuphdr);
+		if (!undo_read_if_exists(undoType, location, sizeof(tuphdr), (Pointer) &tuphdr))
+			break;
 
 		if (!tuphdr.chainHasLocks)
 			break;
 
 		tuphdr.chainHasLocks = false;
-		undo_write(undoType, location, sizeof(tuphdr), (Pointer) &tuphdr);
+		if (!undo_write_if_exists(undoType, location, sizeof(tuphdr), (Pointer) &tuphdr))
+			break;
 
 		location = tuphdr.undoLocation;
 	}
@@ -1410,10 +1411,12 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 		{
 			BTreeLeafTuphdr prev_tuphdr;
 
-			Assert(UNDO_REC_EXISTS(undoType, undoLocation));
-
 			prev_tuphdr = curTuphdr;
-			get_prev_leaf_header_from_undo(undoType, &prev_tuphdr, false);
+			if (!get_prev_leaf_header_from_undo_if_exists(undoType, &prev_tuphdr))
+			{
+				/* Undo gone — skip deletion, treat as end of chain */
+				goto next_record;
+			}
 			if (!UndoLocationIsValid(curUndoLocation))
 			{
 				page_block_reads(blkno);
@@ -1440,13 +1443,14 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 				curTuphdr.xactInfo = prev_tuphdr.xactInfo;
 				curTuphdr.undoLocation = prev_tuphdr.undoLocation;
 				curTuphdr.chainHasLocks = prev_tuphdr.chainHasLocks;
-				update_leaf_header_in_undo(undoType,
-										   &curTuphdr,
-										   curUndoLocation);
+				update_leaf_header_in_undo_if_exists(undoType,
+													 &curTuphdr,
+													 curUndoLocation);
 
 			}
 		}
 
+next_record:
 		if (!UndoLocationIsValid(undoLocation) ||
 			undoLocation < retainedUndoLocation)
 		{
@@ -1474,19 +1478,26 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 		if (!delete_record)
 		{
 			/*
-			 * We should be able to find a CSN-record or invalid undo location
-			 * before running out of undo records.
-			 */
-			Assert(UNDO_REC_EXISTS(undoType, undoLocation));
-
-			/*
 			 * Update previous location of lock-only record.
 			 */
 			if (XACT_INFO_IS_LOCK_ONLY(xactInfo))
 				lastLockOnlyUndoLocation = undoLocation;
 
 			prevChainHasLocks = curTuphdr.chainHasLocks;
-			get_prev_leaf_header_from_undo(undoType, &curTuphdr, false);
+
+			/*
+			 * A concurrent commit may have released the undo.  Treat as end
+			 * of chain.
+			 */
+			if (!get_prev_leaf_header_from_undo_if_exists(undoType, &curTuphdr))
+			{
+				if (!result)
+				{
+					*conflictTuphdr = finalTuphdr;
+					*conflictUndoLocation = finalUndoLocation;
+				}
+				return result;
+			}
 		}
 
 		curUndoLocation = undoLocation;
@@ -1563,18 +1574,18 @@ remove_redundant_row_locks(BTreeLeafTuphdr *pageTuphdr,
 		   UndoLocationIsValid(undoLocation))
 	{
 		/*
-		 * We should be able to find at CSN-record or invalid undo location
-		 * before running out of undo records.
+		 * A concurrent commit may have released the undo.  Treat as end of
+		 * chain.
 		 */
-		Assert(UNDO_REC_EXISTS(undoType, undoLocation));
-
-		get_prev_leaf_header_from_undo(undoType, &tuphdr, false);
+		if (!get_prev_leaf_header_from_undo_if_exists(undoType, &tuphdr))
+			break;
 
 		if (XACT_INFO_IS_LOCK_ONLY(xactInfo) && XACT_INFO_GET_OXID(xactInfo) == my_oxid)
 		{
 			bool		delete_record = false;
 
-			Assert(UndoLocationIsValid(undoLocation) && UNDO_REC_EXISTS(undoType, undoLocation));
+			if (!UndoLocationIsValid(undoLocation) || !UNDO_REC_EXISTS(undoType, undoLocation))
+				break;
 
 			if (XACT_INFO_GET_LOCK_MODE(xactInfo) <= mode &&
 				(!UndoLocationIsValid(savepointUndoLocation) ||
@@ -1609,7 +1620,7 @@ remove_redundant_row_locks(BTreeLeafTuphdr *pageTuphdr,
 												   blkno);
 					}
 					tuphdr.formatFlags = prevFormatFlags;
-					update_leaf_header_in_undo(undoType, &tuphdr, prevUndoLoc);
+					update_leaf_header_in_undo_if_exists(undoType, &tuphdr, prevUndoLoc);
 				}
 			}
 		}
@@ -1641,14 +1652,11 @@ find_non_lock_only_undo_record(UndoLogType undoType, BTreeLeafTuphdr *tuphdr)
 
 	while (XACT_INFO_IS_LOCK_ONLY(xactInfo))
 	{
-		/*
-		 * We should be able to find non lock-only undo location before
-		 * running out of undo records.
-		 */
 		undoLocation = tuphdr->undoLocation;
-		if (!UndoLocationIsValid(undoLocation) || !UNDO_REC_EXISTS(undoType, undoLocation))
+		if (!UndoLocationIsValid(undoLocation))
 			return InvalidUndoLocation;
-		get_prev_leaf_header_from_undo(undoType, tuphdr, false);
+		if (!get_prev_leaf_header_from_undo_if_exists(undoType, tuphdr))
+			return InvalidUndoLocation;
 		xactInfo = tuphdr->xactInfo;
 	}
 
@@ -1677,6 +1685,28 @@ get_prev_leaf_header_from_undo(UndoLogType undoType,
 		tuphdr->undoLocation = prevTuphdr.undoLocation;
 		tuphdr->chainHasLocks = prevTuphdr.chainHasLocks;
 	}
+}
+
+/*
+ * Like get_prev_leaf_header_from_undo(), but tolerates a concurrently
+ * cleaned undo record.  Returns false if the undo record no longer exists
+ * (treat the chain end as if the transaction committed).
+ */
+bool
+get_prev_leaf_header_from_undo_if_exists(UndoLogType undoType,
+										 BTreeLeafTuphdr *tuphdr)
+{
+	BTreeLeafTuphdr prevTuphdr = {0, 0};
+
+	if (!UndoLocationIsValid(tuphdr->undoLocation))
+		return false;
+
+	if (!undo_read_if_exists(undoType, tuphdr->undoLocation,
+							 sizeof(prevTuphdr), (Pointer) &prevTuphdr))
+		return false;
+
+	*tuphdr = prevTuphdr;
+	return true;
 }
 
 void
@@ -1745,4 +1775,22 @@ update_leaf_header_in_undo(UndoLogType undoType,
 			   location,
 			   sizeof(*tuphdr),
 			   (Pointer) tuphdr);
+}
+
+/*
+ * Like update_leaf_header_in_undo(), but tolerates a concurrently cleaned
+ * undo record.  Returns false without writing if the undo is gone.
+ */
+static bool
+update_leaf_header_in_undo_if_exists(UndoLogType undoType,
+									 BTreeLeafTuphdr *tuphdr,
+									 UndoLocation location)
+{
+	if (!UndoLocationIsValid(location))
+		return false;
+
+	return undo_write_if_exists(undoType,
+								location,
+								sizeof(*tuphdr),
+								(Pointer) tuphdr);
 }

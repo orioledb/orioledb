@@ -105,15 +105,22 @@ o_buffers_shmem_init(OBuffersDesc *desc, void *buf, bool found)
 						  desc->bufferCtlTrancheName);
 }
 
-static void
-open_file(OBuffersDesc *desc, uint32 tag, uint64 fileNum)
+/*
+ * Open a buffer file.  When create is true, the file is created if it
+ * doesn't exist (O_CREAT) and failure is always PANIC.  When create is
+ * false, a missing file (ENOENT) returns false instead of panicking.
+ */
+static bool
+open_file(OBuffersDesc *desc, uint32 tag, uint64 fileNum, bool create)
 {
+	int			flags;
+
 	Assert(OBuffersMaxTagIsValid(tag));
 
 	if (desc->curFile >= 0 &&
 		desc->curFileNum == fileNum &&
 		desc->curFileTag == tag)
-		return;
+		return true;
 
 	if (desc->curFile >= 0)
 		FileClose(desc->curFile);
@@ -122,13 +129,18 @@ open_file(OBuffersDesc *desc, uint32 tag, uint64 fileNum)
 				desc->filenameTemplate[tag],
 				(uint32) (fileNum >> 32),
 				(uint32) fileNum);
-	desc->curFile = PathNameOpenFile(desc->curFileName,
-									 O_RDWR | O_CREAT | PG_BINARY);
+	flags = O_RDWR | PG_BINARY | (create ? O_CREAT : 0);
+	desc->curFile = PathNameOpenFile(desc->curFileName, flags);
 	desc->curFileNum = fileNum;
 	desc->curFileTag = tag;
 	if (desc->curFile < 0)
+	{
+		if (!create && errno == ENOENT)
+			return false;
 		ereport(PANIC, (errcode_for_file_access(),
-						errmsg("could not open undo log file %s: %m", desc->curFileName)));
+						errmsg("could not open file %s: %m", desc->curFileName)));
+	}
+	return true;
 }
 
 static void
@@ -153,7 +165,7 @@ write_buffer_data(OBuffersDesc *desc, char *data, uint32 tag, uint64 blockNum)
 
 	Assert(OBuffersMaxTagIsValid(tag));
 
-	open_file(desc, tag, blockNum / (desc->singleFileSize / ORIOLEDB_BLCKSZ));
+	open_file(desc, tag, blockNum / (desc->singleFileSize / ORIOLEDB_BLCKSZ), true);
 	result = OFileWrite(desc->curFile, data, ORIOLEDB_BLCKSZ,
 						(blockNum * ORIOLEDB_BLCKSZ) % desc->singleFileSize,
 						WAIT_EVENT_SLRU_WRITE);
@@ -168,28 +180,53 @@ write_buffer(OBuffersDesc *desc, OBuffer *buffer)
 	write_buffer_data(desc, buffer->data, buffer->tag, buffer->blockNum);
 }
 
-static void
-read_buffer(OBuffersDesc *desc, OBuffer *buffer)
+/*
+ * Read a buffer from disk.  When missing_ok is true, a missing file
+ * returns false (buffer zeroed) instead of panicking.
+ */
+static bool
+read_buffer(OBuffersDesc *desc, OBuffer *buffer, bool missing_ok)
 {
 	int			result;
 
-	open_file(desc, buffer->tag,
-			  buffer->blockNum / (desc->singleFileSize / ORIOLEDB_BLCKSZ));
+	if (!open_file(desc, buffer->tag,
+				   buffer->blockNum / (desc->singleFileSize / ORIOLEDB_BLCKSZ),
+				   !missing_ok))
+	{
+		memset(buffer->data, 0, ORIOLEDB_BLCKSZ);
+		return false;
+	}
+
 	result = OFileRead(desc->curFile, buffer->data, ORIOLEDB_BLCKSZ,
 					   (buffer->blockNum * ORIOLEDB_BLCKSZ) % desc->singleFileSize,
 					   WAIT_EVENT_SLRU_READ);
 
-	/* we may not read all the bytes due to read past EOF */
 	if (result < 0)
+	{
+		if (missing_ok)
+		{
+			memset(buffer->data, 0, ORIOLEDB_BLCKSZ);
+			return false;
+		}
 		ereport(PANIC, (errcode_for_file_access(),
 						errmsg("could not read buffer from file %s: %m", desc->curFileName)));
+	}
 
 	if (result < ORIOLEDB_BLCKSZ)
 		memset(&buffer->data[result], 0, ORIOLEDB_BLCKSZ - result);
+
+	return true;
 }
 
+/*
+ * Get (or load) a buffer for the given block.  When missing_ok is true and
+ * the underlying file does not exist, the buffer is invalidated and NULL is
+ * returned (no lock held).  The write flag controls the lock mode for
+ * already-cached buffers.
+ */
 static OBuffer *
-get_buffer(OBuffersDesc *desc, uint32 tag, int64 blockNum, bool write)
+get_buffer(OBuffersDesc *desc, uint32 tag, int64 blockNum, bool write,
+		   bool missing_ok)
 {
 	OBuffersGroup *group = &desc->groups[blockNum % desc->groupsCount];
 	OBuffer    *buffer = NULL;
@@ -199,6 +236,7 @@ get_buffer(OBuffersDesc *desc, uint32 tag, int64 blockNum, bool write)
 	bool		prevDirty;
 	int64		prevBlockNum;
 	uint32		prevTag;
+	LWLockMode	lockMode = write ? LW_EXCLUSIVE : LW_SHARED;
 
 	/* First check if required buffer is already loaded */
 	LWLockAcquire(&group->groupCtlLock, LW_SHARED);
@@ -208,7 +246,7 @@ get_buffer(OBuffersDesc *desc, uint32 tag, int64 blockNum, bool write)
 		if (buffer->blockNum == blockNum &&
 			buffer->tag == tag)
 		{
-			LWLockAcquire(&buffer->bufferCtlLock, write ? LW_EXCLUSIVE : LW_SHARED);
+			LWLockAcquire(&buffer->bufferCtlLock, lockMode);
 			buffer->usageCount++;
 			LWLockRelease(&group->groupCtlLock);
 
@@ -229,7 +267,7 @@ get_buffer(OBuffersDesc *desc, uint32 tag, int64 blockNum, bool write)
 		if (buffer->blockNum == blockNum &&
 			buffer->tag == tag)
 		{
-			LWLockAcquire(&buffer->bufferCtlLock, write ? LW_EXCLUSIVE : LW_SHARED);
+			LWLockAcquire(&buffer->bufferCtlLock, lockMode);
 			buffer->usageCount++;
 			LWLockRelease(&group->groupCtlLock);
 
@@ -273,17 +311,30 @@ get_buffer(OBuffersDesc *desc, uint32 tag, int64 blockNum, bool write)
 	if (prevDirty)
 		write_buffer_data(desc, buffer->data, prevTag, prevBlockNum);
 
-	read_buffer(desc, buffer);
+	if (!read_buffer(desc, buffer, missing_ok))
+	{
+		/* File doesn't exist — invalidate buffer */
+		Assert(missing_ok);
+		buffer->blockNum = -1;
+		buffer->shadowBlockNum = -1;
+		LWLockRelease(&buffer->bufferCtlLock);
+		return NULL;
+	}
 
 	buffer->shadowBlockNum = -1;
 
 	return buffer;
 }
 
-static void
+/*
+ * Read or write a range of data from/to buffers.  When missing_ok is true
+ * and the underlying file does not exist (read path only), returns false
+ * with buf zeroed.
+ */
+static bool
 o_buffers_rw(OBuffersDesc *desc, Pointer buf,
 			 uint32 tag, int64 offset, int64 size,
-			 bool write)
+			 bool write, bool missing_ok)
 {
 	int64		firstBlockNum = offset / ORIOLEDB_BLCKSZ,
 				lastBlockNum = (offset + size - 1) / ORIOLEDB_BLCKSZ,
@@ -292,9 +343,16 @@ o_buffers_rw(OBuffersDesc *desc, Pointer buf,
 
 	for (blockNum = firstBlockNum; blockNum <= lastBlockNum; blockNum++)
 	{
-		OBuffer    *buffer = get_buffer(desc, tag, blockNum, write);
+		OBuffer    *buffer = get_buffer(desc, tag, blockNum, write, missing_ok);
 		uint32		copySize,
 					copyOffset;
+
+		if (!buffer)
+		{
+			Assert(missing_ok);
+			memset(buf, 0, size);
+			return false;
+		}
 
 		if (firstBlockNum == lastBlockNum)
 		{
@@ -329,20 +387,37 @@ o_buffers_rw(OBuffersDesc *desc, Pointer buf,
 		ptr += copySize;
 		LWLockRelease(&buffer->bufferCtlLock);
 	}
+	return true;
 }
 
 void
 o_buffers_read(OBuffersDesc *desc, Pointer buf, uint32 tag, int64 offset, int64 size)
 {
 	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
-	o_buffers_rw(desc, buf, tag, offset, size, false);
+	o_buffers_rw(desc, buf, tag, offset, size, false, false);
+}
+
+bool
+o_buffers_read_if_exists(OBuffersDesc *desc, Pointer buf, uint32 tag,
+						 int64 offset, int64 size)
+{
+	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
+	return o_buffers_rw(desc, buf, tag, offset, size, false, true);
 }
 
 void
 o_buffers_write(OBuffersDesc *desc, Pointer buf, uint32 tag, int64 offset, int64 size)
 {
 	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
-	o_buffers_rw(desc, buf, tag, offset, size, true);
+	o_buffers_rw(desc, buf, tag, offset, size, true, false);
+}
+
+bool
+o_buffers_write_if_exists(OBuffersDesc *desc, Pointer buf, uint32 tag,
+						  int64 offset, int64 size)
+{
+	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
+	return o_buffers_rw(desc, buf, tag, offset, size, true, true);
 }
 
 static void
@@ -435,7 +510,7 @@ o_buffers_sync(OBuffersDesc *desc, uint32 tag,
 
 	for (fileNumber = firstFileNumber; fileNumber <= lastFileNumber; fileNumber++)
 	{
-		open_file(desc, tag, fileNumber);
+		open_file(desc, tag, fileNumber, true);
 		FileSync(desc->curFile, wait_event_info);
 	}
 }
