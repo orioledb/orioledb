@@ -1824,6 +1824,12 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 		scan->dsmSeg = NULL;
 	}
 
+	if (scan->iter)
+	{
+		btree_iterator_free(scan->iter);
+		scan->iter = NULL;
+	}
+
 	if (scan->diskDownlinks)
 	{
 		pfree(scan->diskDownlinks);

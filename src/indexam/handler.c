@@ -17,6 +17,7 @@
 
 #include "orioledb.h"
 
+#include "btree/iterator.h"
 #include "btree/modify.h"
 #include "catalog/indices.h"
 #include "catalog/o_tables.h"
@@ -1525,6 +1526,8 @@ orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 	if (options && !options->orioledb_index)
 		return btrescan(scan, scankey, nscankeys, orderbys, norderbys);
 
+	if (o_scan->iterator != NULL)
+		btree_iterator_free(o_scan->iterator);
 	MemoryContextReset(o_scan->cxt);
 	o_scan->iterator = NULL;
 	o_scan->curKeyRangeIsLoaded = false;
@@ -1911,6 +1914,8 @@ orioledb_amendscan(IndexScanDesc scan)
 
 	STOPEVENT(STOPEVENT_SCAN_END, NULL);
 
+	if (o_scan->iterator != NULL)
+		btree_iterator_free(o_scan->iterator);
 	MemoryContextDelete(o_scan->cxt);
 }
 
