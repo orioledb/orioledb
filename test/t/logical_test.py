@@ -266,6 +266,7 @@ class LogicalTest(BaseTest):
 			with subscriber.start() as subscriber:
 				setup_sql = """
 					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE dummmy_table(id serial primary key, data text) USING orioledb;
 				"""
 				publisher.safe_psql(setup_sql)
 				subscriber.safe_psql(setup_sql)
