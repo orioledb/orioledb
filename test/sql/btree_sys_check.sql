@@ -254,7 +254,7 @@ SELECT regexp_replace(regexp_replace(
 		': NNN',
 		'g');
 
--- SYS_TREES_CATALOG_XID_UNDO_LOCATION
+-- SYS_TREES_XID_UNDO_LOCATION
 SELECT orioledb_insert_sys_xid_undo_location(1000, 2000);
 SELECT orioledb_insert_sys_xid_undo_location(1001, 2001);
 SELECT orioledb_insert_sys_xid_undo_location(1002, 2002);

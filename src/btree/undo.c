@@ -1724,12 +1724,12 @@ get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 	Assert(UndoLocationIsValid(undoLocation));
 	if (!UNDO_REC_EXISTS(undoType, undoLocation))
 	{
-		UndoLocation catalogRetainUndoLocation;
+		UndoLocation retainUndoLocation;
 		TransactionId xmin = InvalidTransactionId;
 		TransactionId catalog_xmin;
 		UndoLocation retainLocation;
 
-		catalogRetainUndoLocation = get_current_replication_catalog_retain_undo_location();
+		retainUndoLocation = get_current_replication_retain_undo_location();
 
 		ProcArrayGetReplicationSlotXmin(&xmin, &catalog_xmin);
 
@@ -1742,7 +1742,7 @@ get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 			 "replicationRetainUndoLocation = %lu, replicationXmin = %u",
 			 (unsigned long) undoLocation,
 			 (unsigned long) retainLocation,
-			 (unsigned long) catalogRetainUndoLocation,
+			 (unsigned long) retainUndoLocation,
 			 xmin);
 	}
 

@@ -420,7 +420,7 @@ static SysTreeMeta sysTreesMeta[] =
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
-	{							/* SYS_TREES_CATALOG_XID_UNDO_LOCATION */
+	{							/* SYS_TREES_XID_UNDO_LOCATION */
 		.keyLength = sizeof(TransactionId),
 		.tupleLength = sizeof(ReplicationRetainUndoTuple),
 		.cmpFunc = o_sys_xid_undo_location_key_cmp,
