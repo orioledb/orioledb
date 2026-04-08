@@ -653,7 +653,7 @@ SELECT regexp_replace(regexp_replace(
  
 (1 row)
 
--- SYS_TREES_XID_UNDO_LOCATION
+-- SYS_TREES_CATALOG_XID_UNDO_LOCATION
 SELECT orioledb_insert_sys_xid_undo_location(1000, 2000);
  orioledb_insert_sys_xid_undo_location 
 ---------------------------------------

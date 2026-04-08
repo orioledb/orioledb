@@ -369,12 +369,12 @@ update_min_undo_locations(UndoLogType undoType,
 				newCheckpointEndLocation = InvalidUndoLocation;
 	int			i;
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
-	UndoLocation replicationUndoRetainLocation = InvalidUndoLocation;
+	UndoLocation replicationCatalogUndoRetainLocation = InvalidUndoLocation;
 
 	Assert(!undoEviction || !do_cleanup);
 
 	if (undoType == UndoLogSystem)
-		replicationUndoRetainLocation = get_current_replication_retain_undo_location();
+		replicationCatalogUndoRetainLocation = get_current_replication_catalog_retain_undo_location();
 
 	SpinLockAcquire(&meta->minUndoLocationsMutex);
 
@@ -413,8 +413,8 @@ update_min_undo_locations(UndoLogType undoType,
 
 	if (undoType == UndoLogSystem)
 	{
-		if (UndoLocationIsValid(replicationUndoRetainLocation))
-			minRetainLocation = Min(minRetainLocation, replicationUndoRetainLocation);
+		if (UndoLocationIsValid(replicationCatalogUndoRetainLocation))
+			minRetainLocation = Min(minRetainLocation, replicationCatalogUndoRetainLocation);
 	}
 
 	/*
@@ -640,14 +640,14 @@ wait_for_even_write_in_progress_changecount(UndoMeta *meta)
 }
 
 /*
- * Get undoLocation from SYS_TREES_XID_UNDO_LOCATION mapping with
+ * Get undoLocation from SYS_TREES_CATALOG_XID_UNDO_LOCATION mapping with
  * xid greater or equal than xmin provided. Delete items with xid
  * less than xmin from the mapping.
  */
 static UndoLocation
-read_replication_retain_undo_location(TransactionId xmin, int *ndeleted, bool nocheck)
+read_replication_catalog_retain_undo_location(TransactionId xmin, int *ndeleted, bool nocheck)
 {
-	BTreeDescr *td = get_sys_tree(SYS_TREES_XID_UNDO_LOCATION);
+	BTreeDescr *td = get_sys_tree(SYS_TREES_CATALOG_XID_UNDO_LOCATION);
 	OTuple		keyTuple;
 	OTuple		tuple;
 	OBTreeFindPageContext context;
@@ -685,8 +685,8 @@ read_replication_retain_undo_location(TransactionId xmin, int *ndeleted, bool no
 
 		/*
 		 * If counter is not modified since last call by a concurrent
-		 * insert_replication_retain_undo_location(), we output locally cached
-		 * last value without reading actual system tree.
+		 * insert_replication_catalog_retain_undo_location(), we output
+		 * locally cached last value without reading actual system tree.
 		 */
 		if (change_count == cached_change_count)
 		{
@@ -789,7 +789,7 @@ read_replication_retain_undo_location(TransactionId xmin, int *ndeleted, bool no
 }
 
 UndoLocation
-get_current_replication_retain_undo_location(void)
+get_current_replication_catalog_retain_undo_location(void)
 {
 	TransactionId xmin;
 	TransactionId catalog_xmin;
@@ -806,18 +806,18 @@ get_current_replication_retain_undo_location(void)
 	if (!TransactionIdIsValid(catalog_xmin))
 		return InvalidUndoLocation;
 
-	result = read_replication_retain_undo_location(catalog_xmin, &ndeleted, false);
-	elog(DEBUG4, "Current undoLocation from SYS_TREES_XID_UNDO_LOCATION is %lu for catalog_xmin %u. Deleted %d old items", result, catalog_xmin, ndeleted);
+	result = read_replication_catalog_retain_undo_location(catalog_xmin, &ndeleted, false);
+	elog(DEBUG4, "Current undoLocation from SYS_TREES_CATALOG_XID_UNDO_LOCATION is %lu for catalog_xmin %u. Deleted %d old items", result, catalog_xmin, ndeleted);
 
 	return result;
 }
 
 /*
- * Insert the item into SYS_TREES_XID_UNDO_LOCATION. If item with this xid exists
+ * Insert the item into SYS_TREES_CATALOG_XID_UNDO_LOCATION. If item with this xid exists
  * update it only if this update decreases undoLocation. Skip otherwise.
  */
 static void
-insert_replication_retain_undo_location(TransactionId xid, UndoLocation undoLocation, bool nocheck)
+insert_replication_catalog_retain_undo_location(TransactionId xid, UndoLocation undoLocation, bool nocheck)
 {
 	TransactionId key = xid;
 	OTuple		keyTuple;
@@ -831,7 +831,7 @@ insert_replication_retain_undo_location(TransactionId xid, UndoLocation undoLoca
 
 	keyTuple.formatFlags = 0;
 	keyTuple.data = (Pointer) &key;
-	existing_tuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION),
+	existing_tuple = o_btree_find_tuple_by_key(get_sys_tree(SYS_TREES_CATALOG_XID_UNDO_LOCATION),
 											   &keyTuple, BTreeKeyNonLeafKey,
 											   &o_in_progress_snapshot, NULL,
 											   CurrentMemoryContext, NULL);
@@ -844,7 +844,7 @@ insert_replication_retain_undo_location(TransactionId xid, UndoLocation undoLoca
 			LWLockAcquire(&xid_meta->sysXidUndoLocationLock, LW_SHARED);
 			(xid_meta->sysXidUndoLocationChangeCount)++;
 			LWLockRelease(&xid_meta->sysXidUndoLocationLock);
-			success = o_btree_autonomous_delete(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION),
+			success = o_btree_autonomous_delete(get_sys_tree(SYS_TREES_CATALOG_XID_UNDO_LOCATION),
 												keyTuple, BTreeKeyNonLeafKey, NULL);
 			Assert(success);
 			/* fall through */
@@ -869,7 +869,7 @@ insert_replication_retain_undo_location(TransactionId xid, UndoLocation undoLoca
 	(xid_meta->sysXidUndoLocationChangeCount)++;
 	LWLockRelease(&xid_meta->sysXidUndoLocationLock);
 
-	success = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_XID_UNDO_LOCATION),
+	success = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_CATALOG_XID_UNDO_LOCATION),
 										tuple);
 
 	Assert(success);
@@ -888,7 +888,7 @@ orioledb_read_sys_xid_undo_location(PG_FUNCTION_ARGS)
 
 	xid = PG_GETARG_INT32(0);
 
-	undoLocation = read_replication_retain_undo_location(xid, &ndeleted, true);
+	undoLocation = read_replication_catalog_retain_undo_location(xid, &ndeleted, true);
 	elog(INFO, "orioledb_read_sys_xid_undo_location: deleted %d items", ndeleted);
 
 	PG_RETURN_INT64(undoLocation);
@@ -906,7 +906,7 @@ orioledb_insert_sys_xid_undo_location(PG_FUNCTION_ARGS)
 	xid = PG_GETARG_INT32(0);
 	undoLocation = PG_GETARG_INT64(1);
 
-	insert_replication_retain_undo_location(xid, undoLocation, true);
+	insert_replication_catalog_retain_undo_location(xid, undoLocation, true);
 
 	PG_RETURN_VOID();
 }
@@ -1592,15 +1592,16 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 			UndoLocation lastUsedLocation = pg_atomic_read_u64(&meta->lastUsedLocation);
 
 			/*
-			 * Don't need to do insert_replication_retain_undo_location() for
-			 * page merges.  Only when we're preparing to do a material change
-			 * in system trees.
+			 * Don't need to do
+			 * insert_replication_catalog_retain_undo_location() for page
+			 * merges.  Only when we're preparing to do a material change in
+			 * system trees.
 			 */
 			if (UndoLocationIsValid(lastUsedLocation) && waitForUndoLocation)
 			{
 				Assert(!have_locked_pages());
 				insertedXid = xid;
-				insert_replication_retain_undo_location(xid, lastUsedLocation, false);
+				insert_replication_catalog_retain_undo_location(xid, lastUsedLocation, false);
 			}
 		}
 	}

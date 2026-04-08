@@ -3202,8 +3202,8 @@ replay_wal_containter_info(void *ctx, const WalRecord *rec)
 
 			/*
 			 * Store PG xid from WAL_CONTAINER_XACT_INFO to build
-			 * SYS_TREES_XID_UNDO_LOCATION mapping in recovery for following
-			 * logical decoding
+			 * SYS_TREES_CATALOG_XID_UNDO_LOCATION mapping in recovery for
+			 * following logical decoding
 			 */
 			recoveryHeapTransactionId = rec->u.xact_info.xid;
 			break;
