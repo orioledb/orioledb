@@ -53,7 +53,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 					  OInMemoryBlkno parent_blkno, OFixedKey *parent_hikey,
 					  bool *merge_parent,
 					  OInMemoryBlkno left_blkno,
-					  BTreePageItemLocator right_loc,
+					  BTreePageItemLocator *right_loc,
 					  OInMemoryBlkno right_blkno,
 					  bool checkpoint)
 {
@@ -106,7 +106,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 	/* deletes downlink to right page from the parent node */
 	page_block_reads(parent_blkno);
 
-	page_locator_delete_item(parent, &right_loc);
+	page_locator_delete_item(parent, right_loc);
 	MARK_DIRTY_EXTENDED(desc, parent_blkno, checkpoint);
 
 	/* unlocks the parent page */
@@ -180,7 +180,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 	CLEAN_DIRTY(desc->ppool, right_blkno);
 	O_PAGE_CHANGE_COUNT_INC(right);
 
-	ppool_free_page(desc->ppool, right_blkno, true);
+	(*desc->ppool->ops->free_page) (desc->ppool, right_blkno, true);
 
 	if (O_PAGE_IS(left, LEAF))
 		pg_atomic_fetch_sub_u32(&BTREE_GET_META(desc)->leafPagesNum, 1);
@@ -239,7 +239,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 	/* Step 1: get all the information from the parent page */
 	level = PAGE_GET_LEVEL(target);
 
-	Assert(page_is_locked(blkno));
+	Assert(page_is_locked(blkno) || O_PAGE_IS_LOCAL(blkno));
 	Assert(desc->rootInfo.rootPageBlkno != blkno);
 	Assert(is_page_too_sparse(desc, target));
 	Assert(!O_PAGE_IS(target, LEFTMOST) || !O_PAGE_IS(target, RIGHTMOST));
@@ -301,7 +301,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 		/* Step 3: do all the checks with parent and target */
 		parent_change_count = find_context.items[find_context.index].pageChangeCount;
 		parent_blkno = find_context.items[find_context.index].blkno;
-		Assert(page_is_locked(parent_blkno));
+		Assert(page_is_locked(parent_blkno) || O_PAGE_IS_LOCAL(parent_blkno));
 		parent = O_GET_IN_MEMORY_PAGE(parent_blkno);
 
 		target_loc = find_context.items[find_context.index].locator;
@@ -395,7 +395,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 				{
 					merged = btree_try_merge_pages(desc, parent_blkno, &key,
 												   &merge_parent, target_blkno,
-												   right_loc, right_blkno,
+												   &right_loc, right_blkno,
 												   false);
 					if (!merged)
 						unlock_page(right_blkno);
@@ -469,7 +469,7 @@ btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,
 					merged = btree_try_merge_pages(desc, parent_blkno,
 												   &key, &merge_parent,
 												   left_blkno,
-												   target_loc, target_blkno,
+												   &target_loc, target_blkno,
 												   false);
 					if (!merged)
 						unlock_page(left_blkno);

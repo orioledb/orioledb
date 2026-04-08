@@ -129,7 +129,10 @@
 
 #define GetMaxBackends() MaxBackends
 
-/* Number of orioledb page */
+/*
+ * Number of orioledb page.
+ * If high bit is set, it means the page is in the local memory.
+ */
 typedef uint32 OInMemoryBlkno;
 #define OInvalidInMemoryBlkno		((OInMemoryBlkno) 0xFFFFFFFF)
 #define OInMemoryBlknoIsValid(blockNumber) \
@@ -406,6 +409,7 @@ typedef struct
 /* orioledb.c */
 extern Size orioledb_buffers_size;
 extern Size orioledb_buffers_count;
+extern Size orioledb_temp_buffers_count;
 extern Size undo_circular_buffer_size;
 extern uint32 undo_buffers_count;
 extern Size xid_circular_buffer_size;
@@ -417,7 +421,9 @@ extern uint32 rewind_buffers_count;
 extern Pointer o_shared_buffers;
 extern ODBProcData *oProcData;
 extern int	max_procs;
+extern Page *local_ppool_pages;
 extern OrioleDBPageDesc *page_descs;
+extern OrioleDBPageDesc *local_ppool_page_descs;
 extern bool remove_old_checkpoint_files;
 extern bool skip_unmodified_trees;
 extern bool debug_disable_bgwriter;
@@ -463,11 +469,17 @@ extern uint32 max_read_page_checkpoint;
 	(AssertMacro(MYPROCNUMBER >= 0 && \
 				 MYPROCNUMBER < max_procs), \
 	 &oProcData[MYPROCNUMBER])
+/* Needed to get blkno without high bit that defines if page is local or not */
+#define O_BLKNO_MASK ((OInMemoryBlkno) 0x7FFFFFFF)
+#define O_PAGE_IS_LOCAL(blkno) ((blkno) >> 31 != 0)
 #define O_GET_IN_MEMORY_PAGE(blkno) \
 	(AssertMacro(OInMemoryBlknoIsValid(blkno)), \
-	 (Page)(o_shared_buffers + (((uint64) (blkno)) * ((uint64) ORIOLEDB_BLCKSZ))))
+	 (O_PAGE_IS_LOCAL(blkno) ? local_ppool_pages[(blkno) & O_BLKNO_MASK] : \
+	  (Page)(o_shared_buffers + (((uint64) ((blkno) & O_BLKNO_MASK)) * ((uint64) ORIOLEDB_BLCKSZ)))))
 #define O_GET_IN_MEMORY_PAGEDESC(blkno) \
-	(AssertMacro(OInMemoryBlknoIsValid(blkno)), page_descs + (blkno))
+	(AssertMacro(OInMemoryBlknoIsValid(blkno)), \
+     (O_PAGE_IS_LOCAL(blkno) ? local_ppool_page_descs + ((blkno) & O_BLKNO_MASK) : \
+      page_descs + ((blkno) & O_BLKNO_MASK)))
 #define O_GET_IN_MEMORY_PAGE_CHANGE_COUNT(blkno) \
 	(O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(blkno)))
 
@@ -508,13 +520,16 @@ typedef enum OPagePoolType
 } OPagePoolType;
 #define OPagePoolTypesCount 3
 
-typedef struct OPagePool OPagePool;
+typedef struct PagePool PagePool;
+typedef struct LocalPagePool LocalPagePool;
 struct BTreeDescr;
+
+extern LocalPagePool local_ppool;
 
 extern void o_verify_dir_exists_or_create(char *dirname, bool *created, bool *found);
 extern uint64 orioledb_device_alloc(struct BTreeDescr *descr, uint32 size);
-extern OPagePool *get_ppool(OPagePoolType type);
-extern OPagePool *get_ppool_by_blkno(OInMemoryBlkno blkno);
+extern PagePool *get_ppool(OPagePoolType type);
+extern PagePool *get_ppool_by_blkno(OInMemoryBlkno blkno);
 extern OInMemoryBlkno get_dirty_pages_count_sum(void);
 extern void jsonb_push_key(JsonbParseState **state, char *key);
 extern void jsonb_push_null_key(JsonbParseState **state, char *key);
@@ -522,6 +537,7 @@ extern void jsonb_push_bool_key(JsonbParseState **state, char *key, bool value);
 extern void jsonb_push_int8_key(JsonbParseState **state, char *key, int64 value);
 extern void jsonb_push_string_key(JsonbParseState **state, const char *key, const char *value);
 extern bool is_bump_memory_context(MemoryContext mxct);
+extern void o_page_desc_init(OrioleDBPageDesc *desc);
 
 extern CheckPoint_hook_type next_CheckPoint_hook;
 

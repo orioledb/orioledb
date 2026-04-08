@@ -171,7 +171,7 @@ retry:
 	blkno = pageFindContext->items[pageFindContext->index].blkno;
 	loc = pageFindContext->items[pageFindContext->index].locator;
 	page = O_GET_IN_MEMORY_PAGE(blkno);
-	Assert(page_is_locked(blkno));
+	Assert(page_is_locked(blkno) || O_PAGE_IS_LOCAL(blkno));
 
 	if (!BTREE_PAGE_LOCATOR_IS_VALID(page, &loc))
 		return o_btree_modify_handle_tuple_not_found(&context);
@@ -198,7 +198,7 @@ retry:
 			goto retry;
 	}
 
-	Assert(page_is_locked(blkno));
+	Assert(page_is_locked(blkno) || O_PAGE_IS_LOCAL(blkno));
 
 	if (context.cmp != 0)
 		return o_btree_modify_handle_tuple_not_found(&context);
@@ -231,7 +231,7 @@ retry:
 			goto retry;
 		}
 
-		Assert(page_is_locked(blkno));
+		Assert(page_is_locked(blkno) || O_PAGE_IS_LOCAL(blkno));
 
 		if (callbackInfo->modifyCallback || (action == BTreeOperationInsert ||
 											 action == BTreeOperationUpdate ||
@@ -390,8 +390,8 @@ unlock_release(BTreeModifyInternalContext *context, bool unlock)
 			release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
 	}
 	if (context->pagesAreReserved)
-		ppool_release_reserved(desc->ppool,
-							   PPOOL_KIND_GET_MASK(context->pageReserveKind));
+		(*desc->ppool->ops->release_reserved) (desc->ppool,
+											   PPOOL_KIND_GET_MASK(context->pageReserveKind));
 	if (context->hwLockMode != NoLock)
 		LockRelease(&context->hwLockTag, context->hwLockMode, false);
 }
@@ -1016,7 +1016,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		pageReserveKind = PPOOL_RESERVE_INSERT;
 
 	if (action != BTreeOperationDelete)
-		ppool_reserve_pages(desc->ppool, pageReserveKind, 2);
+		(*desc->ppool->ops->reserve_pages) (desc->ppool, pageReserveKind, 2);
 
 	init_page_find_context(&pageFindContext, desc, COMMITSEQNO_INPROGRESS,
 						   BTREE_PAGE_FIND_MODIFY | BTREE_PAGE_FIND_FIX_LEAF_SPLIT);
@@ -1046,7 +1046,7 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 			if (GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType) != desc->undoType)
 				release_undo_size(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
 		}
-		ppool_release_reserved(desc->ppool, PPOOL_RESERVE_INSERT);
+		(*desc->ppool->ops->release_reserved) (desc->ppool, PPOOL_RESERVE_INSERT);
 		Assert(!have_locked_pages());
 		return OBTreeModifyResultInserted;
 	}
@@ -1193,7 +1193,7 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 	else
 		pageReserveKind = PPOOL_RESERVE_INSERT;
 
-	ppool_reserve_pages(desc->ppool, pageReserveKind, 2);
+	(*desc->ppool->ops->reserve_pages) (desc->ppool, pageReserveKind, 2);
 
 	init_page_find_context(&pageFindContext, desc, COMMITSEQNO_INPROGRESS,
 						   BTREE_PAGE_FIND_MODIFY |

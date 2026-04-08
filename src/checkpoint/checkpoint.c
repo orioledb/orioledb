@@ -1548,7 +1548,7 @@ checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 		return;
 	}
 
-	ppool_reserve_pages(descr->ppool, PPOOL_RESERVE_META, 4);
+	(*descr->ppool->ops->reserve_pages) (descr->ppool, PPOOL_RESERVE_META, 4);
 
 	init_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]);
 
@@ -3213,7 +3213,7 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 	}
 
 	if (btree_try_merge_pages(descr, parentBlkno, NULL, &mergeParent,
-							  blkno, loc, rightBlkno, true))
+							  blkno, &loc, rightBlkno, true))
 	{
 		checkpoint_reserve_undo(descr->undoType, true);
 		return true;
@@ -4910,7 +4910,20 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 
 	descr = o_fetch_index_descr(treeOids, type, true, NULL);
 	if (descr != NULL)
+	{
+		/*
+		 * Skip temporary tables - they use a per-backend local page pool
+		 * which is not accessible from the checkpointer process.
+		 */
+		if (descr->desc.storageType == BTreeStorageTemporary)
+		{
+			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
+			MemoryContextSwitchTo(prev_context);
+			MemoryContextResetOnly(chkp_tree_context);
+			return;
+		}
 		loaded = o_btree_load_shmem_checkpoint(&descr->desc);
+	}
 	if (loaded)
 	{
 		BTreeDescr *td = &descr->desc;
@@ -5103,8 +5116,8 @@ init_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared)
 	Assert(!OInMemoryBlknoIsValid(shared->pages[0]));
 	Assert(!OInMemoryBlknoIsValid(shared->pages[1]));
 
-	shared->pages[0] = ppool_get_page(desc->ppool, PPOOL_RESERVE_META);
-	shared->pages[1] = ppool_get_page(desc->ppool, PPOOL_RESERVE_META);
+	shared->pages[0] = (*desc->ppool->ops->alloc_page) (desc->ppool, PPOOL_RESERVE_META);
+	shared->pages[1] = (*desc->ppool->ops->alloc_page) (desc->ppool, PPOOL_RESERVE_META);
 
 	Assert(OInMemoryBlknoIsValid(shared->pages[0]));
 	Assert(OInMemoryBlknoIsValid(shared->pages[1]));
