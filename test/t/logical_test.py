@@ -8,6 +8,7 @@ import unittest
 
 from tempfile import mkdtemp
 from testgres.utils import get_bin_path
+from testgres.exceptions import StartNodeException, QueryException
 
 from .base_test import BaseTest
 
@@ -43,26 +44,8 @@ def node_prepare_orel(node, table):
 
 
 def wait_ready(subscriber):
-	# Wait on subscriber until it becomes ready (r state)
-	# pg_subscription_rel.srsubstate means synchronization state on subscriber
-	#
-	# i — initializing
-	#	NO tablesync worker
-	#	NO initial copy
-	#
-	# d — data copy
-	#	tablesync worker in progress (`COPY public.table FROM STDIN`)
-	#
-	# s — sync
-	#	initial copy done
-	#	tablesync worker is applying WAL
-	#	NO apply worker
-	#
-	# r — ready
-	#	initial copy done
-	#	catch-up done
-	#	apply worker in progress
-	#
+	# Wait on subscriber until it becomes ready
+	# (See manual for pg_subscription_rel)
 	with subscriber.connect() as con:
 		con.execute(f"""
 			DO $$
@@ -175,80 +158,144 @@ class LogicalTest(BaseTest):
 		    "table public.data: UPDATE: old-key: i[integer]:2 data1[text]:'mmm' data2[text]:'nnn' data3[text]:'ooo' new-tuple: i[integer]:2 data1[text]:'mmm' data2[text]:'ppp' data3[text]:'ooo'\n"
 		    "COMMIT\n")
 
-#
-# The next two tests reproduce an existing issue: incorrect state of OrioleDB system catalogs during logical decoding.
-#
-# TRAP: failed Assert("descr != NULL"), File: "src/recovery/logical.c", Line: 975
-#
-# This problem arises because changes to Oriole system trees are not included in MVCC-historical snapshot and
-# are not applied on replaying changes from the reorder buffer.
-#
-# During logical decoding, when processing each command, we observe a final state of the Oriole system catalogs
-# rather than some intermediate state that was relevant at the time when the current command has been executed within transaction.
-#
-# These tests should be enabled but only after this issue has been resolved.
-#
-#@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
-#                 "'test_decoding' is not installed")
-#def test_switch_logical_xid_BUG_COMMIT(self):
-#	# System catalogs Oriole changes visibility during logical decoding
-#	node = self.node
-#	node.start()  # start PostgreSQL
-#	node.safe_psql(
-#	    'postgres',
-#	    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-#		"CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"  # oriole relation
-#	)
-#
-#	node.safe_psql(
-#	    'postgres',
-#	    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
-#	)
-#
-#	node.safe_psql(
-#	    'postgres', '''
-#			BEGIN;
-#			INSERT INTO o_data(data) VALUES('20');
-#			INSERT INTO o_data(data) VALUES('40');
-#			DROP TABLE IF EXISTS o_data;
-#			COMMIT;
-#		''')
-#
-#	result = self.squashLogicalChanges(
-#	    node.execute( # TRAP: failed Assert("descr != NULL") because there is no relation `o_data` in orioledb_table
-#	        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
-#	    ))
-#	#print(result)
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_BUG_COMMIT(self):
+		# System catalogs Oriole changes visibility during logical decoding
+		node = self.node
+		node.start()  # start PostgreSQL
+		node.safe_psql(
+		    'postgres',
+		    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_data(id serial primary key, data text) USING orioledb;\n"  # oriole relation
+		)
 
-#@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
-#                 "'test_decoding' is not installed")
-#def test_switch_logical_xid_BUG_ABORT(self):
-#	# System catalogs Oriole changes visibility during logical decoding
-#	node = self.node
-#	node.start()  # start PostgreSQL
-#	node.safe_psql(
-#	    'postgres',
-#	    "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
-#	)
-#
-#	node.safe_psql(
-#	    'postgres',
-#	    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
-#	)
-#
-#	node.safe_psql(
-#	    'postgres', '''
-#			BEGIN;
-#			CREATE TABLE o_data(id serial primary key, data text) USING orioledb;
-#			INSERT INTO o_data(data) VALUES('10');
-#			ABORT;
-#		''')
-#
-#	result = self.squashLogicalChanges(
-#	    node.execute( # TRAP: failed Assert("descr != NULL") because there is no relation `o_data` in orioledb_table
-#	        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
-#	    ))
-#	#print(result)
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		node.safe_psql(
+		    'postgres', '''
+				BEGIN;
+				INSERT INTO o_data(data) VALUES('20');
+				INSERT INTO o_data(data) VALUES('40');
+				DROP TABLE IF EXISTS o_data;
+				COMMIT;
+			''')
+
+		result = self.squashLogicalChanges(
+		    node.execute(
+		        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
+		    ))
+		#print(result)
+
+	def test_logical_subscription_drop_table(self):
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+			with subscriber.start() as subscriber:
+				setup_sql = """
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE h_data(id serial primary key, data text) USING heap;
+					CREATE TABLE o_data(id serial primary key, data text) USING orioledb;
+				"""
+				publisher.safe_psql(setup_sql)
+				subscriber.safe_psql(setup_sql)
+
+				pub = publisher.publish('test_pub',
+				                        tables=['o_data', 'h_data'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
+
+				publisher.safe_psql("""
+					BEGIN;
+					INSERT INTO h_data(data) VALUES('20');
+					INSERT INTO h_data(data) VALUES('40');
+					INSERT INTO o_data(data) VALUES('20');
+					INSERT INTO o_data(data) VALUES('40');
+					DROP TABLE IF EXISTS o_data;
+					DROP TABLE IF EXISTS h_data;
+					COMMIT;
+				""")
+
+				sub.catchup()
+
+				# DDL is not logically replicated both in heap and OrioleDB
+				self.assertListEqual(
+				    subscriber.execute('SELECT * FROM h_data'), [(1, '20'),
+				                                                 (2, '40')])
+				self.assertListEqual(
+				    subscriber.execute('SELECT * FROM o_data'), [(1, '20'),
+				                                                 (2, '40')])
+
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_switch_logical_xid_BUG_ABORT(self):
+		# System catalogs Oriole changes visibility during logical decoding
+		node = self.node
+		node.start()
+		node.safe_psql('postgres',
+		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n")
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		node.safe_psql(
+		    'postgres', '''
+				BEGIN;
+				CREATE TABLE o_data(id serial primary key, data text) USING orioledb;
+				INSERT INTO o_data(data) VALUES('10');
+				ABORT;
+			''')
+
+		result = self.squashLogicalChanges(
+		    node.execute(
+		        "SELECT * FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);"
+		    ))
+		#print(result)
+
+	def test_logical_subscription_create_table(self):
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+			with subscriber.start() as subscriber:
+				setup_sql = """
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+				"""
+				publisher.safe_psql(setup_sql)
+				subscriber.safe_psql(setup_sql)
+
+				pub = publisher.publish('test_pub')
+				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
+
+				publisher.safe_psql("""
+					BEGIN;
+					CREATE TABLE h_data(id serial primary key, data text) USING heap;
+					CREATE TABLE o_data(id serial primary key, data text) USING orioledb;
+					INSERT INTO h_data(data) VALUES('10');
+					INSERT INTO o_data(data) VALUES('10');
+					ABORT;
+				""")
+
+				sub.catchup()
+
+				# DDL is not logically replicated both in heap and OrioleDB
+				with self.assertRaises(QueryException) as e:
+					subscriber.safe_psql('SELECT * FROM h_data')
+				self.assertIn(
+				    'ERROR:  relation "h_data" does not exist',
+				    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
+				with self.assertRaises(QueryException) as e:
+					subscriber.safe_psql('SELECT * FROM o_data')
+				self.assertIn(
+				    'ERROR:  relation "o_data" does not exist',
+				    self.stripErrorMsg(e.exception.message).rstrip("\r\n"))
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")
