@@ -59,7 +59,7 @@ typedef struct
 
 static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType,
 									bool miss_ok, OTableFetchContext ctx, void *o_table_source, OTableSource source);
-static void o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot);
+static bool o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot);
 static void init_shared_root_info(OPagePool *pool,
 								  SharedRootInfo *sharedRootInfo);
 static void o_invalidate_descrs_internal(Oid datoid, Oid reloid, Oid relfilenode);
@@ -720,11 +720,12 @@ fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 	MemoryContextSwitchTo(old_context);
 }
 
-static void
+static bool
 fill_table_descr(OTableDescr *descr, OTable *o_table, OSnapshot *snapshot)
 {
 	MemoryContext old_context;
 	bool		was_saving;
+	bool		success;
 
 	/*
 	 * Defer invalidation messages while filling the table descriptor. Index
@@ -737,12 +738,13 @@ fill_table_descr(OTableDescr *descr, OTable *o_table, OSnapshot *snapshot)
 	fill_table_descr_common_fields(descr, o_table);
 
 	old_context = MemoryContextSwitchTo(descrCxt);
-	o_table_descr_fill_indices(descr, o_table, snapshot);
+	success = o_table_descr_fill_indices(descr, o_table, snapshot);
 	MemoryContextSwitchTo(old_context);
 
 	o_table_free(o_table);
 
 	o_stop_saving_inval_messages(was_saving);
+	return success;
 }
 
 void
@@ -829,7 +831,14 @@ create_table_descr(ORelOids oids, OTableFetchContext ctx)
 	Assert(ctx.snapshot);
 
 	descr->refcnt = 0;
-	fill_table_descr(descr, o_table, ctx.snapshot);
+	if (!fill_table_descr(descr, o_table, ctx.snapshot))
+	{
+		table_descr_free(descr);
+		(void) hash_search(oTableDescrHash, &oids,
+						   HASH_REMOVE, &found);
+		enable_stopevents = old_enable_stopevents;
+		return NULL;
+	}
 
 	enable_stopevents = old_enable_stopevents;
 	return descr;
@@ -1336,7 +1345,7 @@ recreate_index_descr(OIndexDescr *descr)
  * sequences and may be concurrently visible to different readers during
  * recovery and logical decoding.
  */
-static void
+static bool
 o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot)
 {
 	OIndexNumber cur_ix,
@@ -1392,7 +1401,9 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapsho
 		}
 
 		ctx = build_fetch_context(snapshot, version);
-		descr->indices[cur_ix] = get_index_descr(ixOids, ixType, false, ctx, table, oTableSourceTable);
+		descr->indices[cur_ix] = get_index_descr(ixOids, ixType, true, ctx, table, oTableSourceTable);
+		if (descr->indices[cur_ix] == NULL)
+			return false;
 		descr->indices[cur_ix]->refcnt++;
 	}
 
@@ -1404,7 +1415,9 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapsho
 		 */
 		OTableFetchContext ctx = build_fetch_context(snapshot, table->bridge_ixversion);
 
-		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, false, ctx, table, oTableSourceTable);
+		descr->bridge = get_index_descr(table->bridge_oids, oIndexBridge, true, ctx, table, oTableSourceTable);
+		if (descr->bridge == NULL)
+			return false;
 		descr->bridge->refcnt++;
 	}
 	else
@@ -1418,13 +1431,16 @@ o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapsho
 		 */
 		OTableFetchContext ctx = build_fetch_context(snapshot, table->toast_ixversion);
 
-		descr->toast = get_index_descr(table->toast_oids, oIndexToast, false, ctx, table, oTableSourceTable);
+		descr->toast = get_index_descr(table->toast_oids, oIndexToast, true, ctx, table, oTableSourceTable);
+		if (descr->toast == NULL)
+			return false;
 		descr->toast->refcnt++;
 	}
 	else
 		descr->toast = NULL;
 
 	o_find_toastable_attrs(descr);
+	return true;
 }
 
 static bool
@@ -1951,7 +1967,12 @@ recreate_table_descr(OTableDescr *descr)
 	saved_ea_counters = ea_counters;
 	ea_counters = NULL;
 	table_descr_free(descr);
-	fill_table_descr(descr, o_table, &o_non_deleted_snapshot);
+	if (!fill_table_descr(descr, o_table, &o_non_deleted_snapshot))
+	{
+		ea_counters = saved_ea_counters;
+		enable_stopevents = old_enable_stopevents;
+		return false;
+	}
 	ea_counters = saved_ea_counters;
 
 	enable_stopevents = old_enable_stopevents;
