@@ -842,12 +842,12 @@ orioledb_relation_set_new_filenode(Relation rel,
 		TupleDesc	tupdesc;
 		OSnapshot	oSnapshot;
 		OXid		oxid;
-		int			oldTreeOidsNum,
-					newTreeOidsNum;
-		ORelOids	old_oids,
-				   *oldTreeOids,
-					new_oids,
-				   *newTreeOids;
+		int			oldTreesNum,
+					newTreesNum;
+		ORelOids	old_oids;
+		OIndexKey  *oldTrees;
+		ORelOids	new_oids;
+		OIndexKey  *newTrees;
 		bool		is_temp;
 		Oid			toast_relid;
 
@@ -866,7 +866,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 		ORelOidsSetFromRel(old_oids, rel);
 		old_o_table = o_tables_get(old_oids);
 		Assert(old_o_table != NULL);
-		oldTreeOids = o_table_make_index_oids(old_o_table, &oldTreeOidsNum);
+		oldTrees = o_table_make_index_keys(old_o_table, &oldTreesNum);
 
 		tupdesc = RelationGetDescr(rel);
 		ORelOidsSetFromRel(new_oids, rel);
@@ -900,7 +900,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 
 		o_table_fill_oids(new_o_table, rel, newrnode, false);
 
-		newTreeOids = o_table_make_index_oids(new_o_table, &newTreeOidsNum);
+		newTrees = o_table_make_index_keys(new_o_table, &newTreesNum);
 
 		o_tables_table_meta_lock(new_o_table);
 
@@ -932,10 +932,10 @@ orioledb_relation_set_new_filenode(Relation rel,
 
 		Assert(o_fetch_table_descr(new_oids) != NULL);
 		is_temp = rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP;
-		add_undo_truncate_relnode(old_oids, oldTreeOids, oldTreeOidsNum,
-								  new_oids, newTreeOids, newTreeOidsNum, !is_temp);
-		pfree(oldTreeOids);
-		pfree(newTreeOids);
+		add_undo_truncate_relnode(old_oids, oldTrees, oldTreesNum,
+								  new_oids, newTrees, newTreesNum, !is_temp);
+		pfree(oldTrees);
+		pfree(newTrees);
 	}
 
 	ASAN_UNPOISON_MEMORY_REGION(freezeXid, sizeof(*freezeXid));
@@ -1279,7 +1279,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method == TABLE_SIZE)
 		{
-			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
+			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids, GET_PRIMARY(descr)->desc.tablespace))
 			{
 				o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 				result += (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
@@ -1292,7 +1292,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method == TOAST_TABLE_SIZE)
 		{
-			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
+			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids, GET_PRIMARY(descr)->desc.tablespace))
 			{
 				o_btree_load_shmem(&descr->toast->desc);
 				result = (uint64) TREE_NUM_LEAF_PAGES(&descr->toast->desc) *
@@ -1301,7 +1301,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method == RELATION_SIZE || method == DEFAULT_SIZE)
 		{
-			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
+			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids, GET_PRIMARY(descr)->desc.tablespace))
 			{
 				o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 				result = (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *

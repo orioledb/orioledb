@@ -427,8 +427,8 @@ btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 		SeqBufTag	prev_chkp_tag;
 
 		memset(&prev_chkp_tag, 0, sizeof(prev_chkp_tag));
-		prev_chkp_tag.datoid = desc->oids.datoid;
-		prev_chkp_tag.relnode = desc->oids.relnode;
+		prev_chkp_tag.key.oids = desc->oids;
+		prev_chkp_tag.key.tablespace = desc->tablespace;
 		prev_chkp_tag.num = checkpoint_number;
 		prev_chkp_tag.type = 'm';
 
@@ -466,11 +466,9 @@ btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 
 		if (orioledb_s3_mode)
 		{
-			result = s3_schedule_file_part_write(checkpoint_number,
-												 desc->oids.datoid,
-												 desc->oids.relnode,
-												 -1,
-												 -1);
+			OIndexKey	key = {.oids = desc->oids,.tablespace = desc->tablespace};
+
+			result = s3_schedule_file_part_write(checkpoint_number, key, -1, -1);
 		}
 	}
 	else

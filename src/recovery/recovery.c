@@ -22,6 +22,7 @@
 #include "btree/undo.h"
 #include "catalog/free_extents.h"
 #include "catalog/indices.h"
+#include "catalog/o_indices.h"
 #include "catalog/o_sys_cache.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
@@ -2874,23 +2875,32 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 #undef PG_TBLSPC
 }
 
-static ORelOids *
-o_indices_get_oids(Pointer tuple, ORelOids *tableOids)
+static OIndexKey *
+o_indices_get_trees(Pointer tuple, ORelOids *tableOids)
 {
 	OIndexChunk chunk;
-	ORelOids   *treeOids;
+	OIndexKey  *trees;
 
 	memcpy(&chunk, tuple, offsetof(OIndexChunk, data));
 
 	if (chunk.key.chunknum != 0)
 		return NULL;
 
+	/*
+	 * The serialized OIndex blob starts at OIndex.tableOids (the key fields
+	 * indexOids/indexType/indexVersion are stored in OIndexChunkKey).
+	 * tablespace must lie after tableOids in the struct so the subtraction
+	 * below is positive and the field lands in the first chunk.
+	 */
+	StaticAssertStmt(offsetof(OIndex, tablespace) > offsetof(OIndex, tableOids),
+					 "OIndex.tablespace must follow OIndex.tableOids");
 	Assert(chunk.dataLength >= sizeof(*tableOids));
 	memcpy(tableOids, tuple + offsetof(OIndexChunk, data), sizeof(*tableOids));
-	treeOids = (ORelOids *) MemoryContextAlloc(CurTransactionContext, sizeof(ORelOids));
-	*treeOids = chunk.key.oids;
+	trees = (OIndexKey *) MemoryContextAlloc(CurTransactionContext, sizeof(OIndexKey));
+	trees->oids = chunk.key.oids;
+	memcpy(&trees->tablespace, tuple + offsetof(OIndexChunk, data) + (offsetof(OIndex, tablespace) - offsetof(OIndex, tableOids)), sizeof(Oid));
 
-	return treeOids;
+	return trees;
 }
 
 static void
@@ -2908,7 +2918,8 @@ clean_workers_oids(void)
 }
 
 void
-recovery_send_leader_oids(ORelOids oids, OIndexNumber ix_num, uint32 o_table_version,
+recovery_send_leader_oids(ORelOids oids, OIndexNumber ix_num,
+						  uint32 o_table_version,
 						  ORelOids old_oids, uint32 old_o_table_version,	/* Non-zero only for
 																			 * rebuild */
 						  bool isrebuild)
@@ -3046,7 +3057,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 			o_fill_tmp_table_descr(&tmp_descr, new_o_table);
 			if (new_o_table->indices[ix_num].type == oIndexPrimary)
 			{
-				if (tbl_data_exists(&old_o_table->oids))
+				if (tbl_data_exists(&old_o_table->oids, old_o_table->tablespace))
 				{
 					old_descr = o_fetch_table_descr(old_o_table->oids);
 					rebuild_indices_insert_placeholders(&tmp_descr);
@@ -3113,7 +3124,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 				OTableDescr tmp_descr;
 
 				o_fill_tmp_table_descr(&tmp_descr, new_o_table);
-				if (tbl_data_exists(&old_o_table->indices[ix_num].oids))
+				if (tbl_data_exists(&old_o_table->indices[ix_num].oids, old_o_table->indices[ix_num].tablespace))
 				{
 					old_descr = o_fetch_table_descr(old_o_table->oids);
 					rebuild_indices_insert_placeholders(&tmp_descr);
@@ -3162,10 +3173,14 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 			 */
 			OTableDescr tmp_descr;
 			ORelOids	srcOids;
+			Oid			srcTablespace;
 
 			srcOids = old_o_table->has_primary ?
 				old_o_table->indices[PrimaryIndexNumber].oids :
 				old_o_table->oids;
+			srcTablespace = old_o_table->has_primary ?
+				old_o_table->indices[PrimaryIndexNumber].tablespace :
+				old_o_table->tablespace;
 
 			/*
 			 * o_fill_tmp_table_descr() already initializes shared root info
@@ -3173,7 +3188,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 			 * call rebuild_indices_insert_placeholders() afterwards.
 			 */
 			o_fill_tmp_table_descr(&tmp_descr, new_o_table);
-			if (tbl_data_exists(&srcOids))
+			if (tbl_data_exists(&srcOids, srcTablespace))
 			{
 				old_descr = o_fetch_table_descr(old_o_table->oids);
 				o_tables_meta_unlock_no_wal();
@@ -3414,13 +3429,26 @@ replay_wal_record(void *vctx, WalRecord *rec)
 					ctx->indexDescr = o_fetch_index_descr(rec->oids, ix_type, false, NULL);
 				}
 
-				if (ctx->sys_tree_num == -1)
+				if (ctx->sys_tree_num == -1 && (ctx->descr || ctx->indexDescr))
 				{
 					char	   *prefix;
 					char	   *db_prefix;
+					ORelOids	oids;
+					Oid			tablespace;
 
-					o_get_prefixes_for_relnode(rec->oids.datoid, rec->oids.relnode,
-											   &prefix, &db_prefix);
+					if (ctx->descr)
+					{
+						oids = GET_PRIMARY(ctx->descr)->desc.oids;
+						tablespace = GET_PRIMARY(ctx->descr)->desc.tablespace;
+					}
+					else
+					{
+						Assert(ctx->indexDescr);
+						oids = ctx->indexDescr->oids;
+						tablespace = ctx->indexDescr->desc.tablespace;
+					}
+					o_get_prefixes_for_tablespace(oids.datoid, tablespace,
+												  &prefix, &db_prefix);
 					o_verify_dir_exists_or_create(prefix, NULL, NULL);
 					o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
 					pfree(db_prefix);
@@ -3532,7 +3560,6 @@ replay_wal_record(void *vctx, WalRecord *rec)
 				bool		success;
 				OFixedTuple tuple1,
 							tuple2;
-				ORelOids   *treeOids = NULL;
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->delta;
 				uint16		type = recovery_msg_from_wal_record(rec->type);
 				Pointer		sys_tree_oids_ptr = rec->value_ptr + sizeof(uint8) + sizeof(OffsetNumber);
@@ -3561,33 +3588,42 @@ replay_wal_record(void *vctx, WalRecord *rec)
 
 					if (ctx->sys_tree_num == SYS_TREES_O_INDICES && success)
 					{
+						OIndexKey  *trees = NULL;
 						ORelOids	tmp_oids;
 
 						if (type == RecoveryMsgTypeDelete)
 						{
-							treeOids = o_indices_get_oids(sys_tree_oids_ptr, &tmp_oids);
-							if (treeOids)
-								add_undo_drop_relnode(tmp_oids, treeOids, 1);
+							trees = o_indices_get_trees(sys_tree_oids_ptr, &tmp_oids);
+							if (trees)
+								add_undo_drop_relnode(tmp_oids, trees, 1);
 						}
 						else if (type == RecoveryMsgTypeInsert)
 						{
-							treeOids = o_indices_get_oids(sys_tree_oids_ptr, &tmp_oids);
-							if (treeOids)
-								add_undo_create_relnode(tmp_oids, treeOids, 1, true);
-						}
-					}
-					else if (ctx->sys_tree_num == SYS_TREES_TABLESPACE_CACHE && success)
-					{
-						OSysCacheKey1 key;
-						char	   *prefix;
-						char	   *db_prefix;
+							trees = o_indices_get_trees(sys_tree_oids_ptr, &tmp_oids);
+							if (trees)
+							{
+								char	   *prefix;
+								char	   *db_prefix;
 
-						memcpy(&key, sys_tree_oids_ptr, sizeof(OSysCacheKey1));
-						o_get_prefixes_for_relnode(key.common.datoid, DatumGetObjectId(key.keys[0]),
-												   &prefix, &db_prefix);
-						o_verify_dir_exists_or_create(prefix, NULL, NULL);
-						o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
-						pfree(db_prefix);
+								/*
+								 * Ensure the per-tablespace and per-database
+								 * orioledb data directories exist.  On the
+								 * primary these are created in indices.c
+								 * before the first btree file is opened.  On
+								 * the replica we must do it here when
+								 * replaying the SYS_TREES_O_INDICES INSERT
+								 * that accompanies CREATE TABLE / CREATE
+								 * INDEX.
+								 */
+								o_get_prefixes_for_tablespace(trees->oids.datoid,
+															  trees->tablespace,
+															  &prefix, &db_prefix);
+								o_verify_dir_exists_or_create(prefix, NULL, NULL);
+								o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+								pfree(db_prefix);
+								add_undo_create_relnode(tmp_oids, trees, 1, true);
+							}
+						}
 					}
 				}
 

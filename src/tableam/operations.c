@@ -2492,9 +2492,9 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 void
 o_truncate_table(ORelOids oids, bool missingOK)
 {
-	ORelOids   *treeOids;
+	OIndexKey  *trees;
 	OTable	   *o_table;
-	int			treeOidsNum;
+	int			treesNum;
 	int			i;
 	bool		invalidatedTable = false;
 	bool		is_temp;
@@ -2517,26 +2517,28 @@ o_truncate_table(ORelOids oids, bool missingOK)
 	}
 	is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
 
-	treeOids = o_table_make_index_oids(o_table, &treeOidsNum);
+	trees = o_table_make_index_keys(o_table, &treesNum);
 
-	for (i = 0; i < treeOidsNum; i++)
+	for (i = 0; i < treesNum; i++)
 	{
-		o_tables_rel_lock_extended(&treeOids[i], AccessExclusiveLock, false);
-		o_tables_rel_lock_extended(&treeOids[i], AccessExclusiveLock, true);
-		cleanup_btree(treeOids[i].datoid, treeOids[i].relnode, true, !is_temp);
-		o_invalidate_oids(treeOids[i]);
+		o_tables_rel_lock_extended(&trees[i].oids, AccessExclusiveLock, false);
+		o_tables_rel_lock_extended(&trees[i].oids, AccessExclusiveLock, true);
+		cleanup_btree(trees[i], true, !is_temp);
+		o_invalidate_oids(trees[i].oids);
 /*		if (is_recovery_process())
-			o_invalidate_descrs(treeOids[i].datoid, treeOids[i].reloid,
-								treeOids[i].relnode);*/
-		if (ORelOidsIsEqual(oids, treeOids[i]))
+			o_invalidate_descrs(trees[i].datoid, trees[i].reloid,
+								trees[i].relnode);*/
+		if (ORelOidsIsEqual(oids, trees[i].oids))
 			invalidatedTable = true;
-		o_tables_rel_unlock_extended(&treeOids[i], AccessExclusiveLock, false);
-		o_tables_rel_unlock_extended(&treeOids[i], AccessExclusiveLock, true);
+		o_tables_rel_unlock_extended(&trees[i].oids, AccessExclusiveLock, false);
+		o_tables_rel_unlock_extended(&trees[i].oids, AccessExclusiveLock, true);
 	}
 
 	if (!invalidatedTable)
 	{
-		cleanup_btree(oids.datoid, oids.relnode, true, !is_temp);
+		OIndexKey	key = {.oids = oids,.tablespace = o_table->tablespace};
+
+		cleanup_btree(key, true, !is_temp);
 		o_invalidate_oids(oids);
 /*		if (is_recovery_process())
 			o_invalidate_descrs(oids.datoid, oids.reloid, oids.relnode);*/
@@ -2544,7 +2546,7 @@ o_truncate_table(ORelOids oids, bool missingOK)
 
 	o_tables_rel_unlock(&oids, AccessExclusiveLock);
 
-	pfree(treeOids);
+	pfree(trees);
 }
 
 Datum

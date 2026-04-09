@@ -286,6 +286,7 @@ make_ctid_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	result->compress = table->primary_compress;
 	result->fillfactor = table->fillfactor;
 	result->tablespace = table->tablespace;
+	Assert(result->tablespace);
 	result->nLeafFields = table->nfields + 1;
 	if (table->index_bridging)
 		result->nLeafFields++;
@@ -374,6 +375,7 @@ make_primary_o_index(OTable *table, OIndexVersionMode ixVerMode)
 		result->compress = table->primary_compress;
 	result->fillfactor = table->fillfactor;
 	result->tablespace = tableIndex->tablespace;
+	Assert(result->tablespace);
 	saved_nLeafFields = table->nfields;
 	result->nLeafFields = table->nfields;
 	if (table->index_bridging)
@@ -544,6 +546,7 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex, OIndexVersionMode
 	result->compress = tableIndex->compress;
 	result->fillfactor = tableIndex->fillfactor;
 	result->tablespace = tableIndex->tablespace;
+	Assert(result->tablespace);
 	result->nulls_not_distinct = tableIndex->nulls_not_distinct;
 	result->nIncludedFields = tableIndex->nfields - tableIndex->nkeyfields;
 	result->nLeafFields = tableIndex->nfields;
@@ -621,6 +624,7 @@ make_toast_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	result->compress = table->toast_compress;
 	result->fillfactor = HEAP_DEFAULT_FILLFACTOR;
 	result->tablespace = table->tablespace;
+	Assert(result->tablespace);
 	if (table->has_primary)
 	{
 		primary = &table->indices[0];
@@ -699,6 +703,7 @@ make_bridge_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = table->primary_compress;
 	result->nLeafFields = 1;
+	result->tablespace = table->tablespace;
 	if (table->has_primary)
 	{
 		primary = &table->indices[0];
@@ -877,7 +882,6 @@ serialize_o_index(OIndex *o_index, int *size)
 	o_serialize_node((Node *) o_index->expressions, &str);
 	o_serialize_node((Node *) o_index->duplicates, &str);
 
-	appendBinaryStringInfo(&str, (Pointer) &o_index->tablespace, sizeof(Oid));
 	if (o_index->indexType == oIndexExclusion)
 		appendBinaryStringInfo(&str, (Pointer) o_index->exclops, sizeof(Oid) * o_index->nKeyFields);
 	appendBinaryStringInfo(&str, (Pointer) &o_index->immediate, sizeof(bool));
@@ -959,12 +963,6 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 		goto truncated;
 	}
 	MemoryContextSwitchTo(old_mcxt);
-
-	len = sizeof(Oid);
-	if ((ptr - data) + len > length)
-		goto truncated;
-	memcpy(&oIndex->tablespace, ptr, len);
-	ptr += len;
 
 	if (oIndex->indexType == oIndexExclusion)
 	{
@@ -1678,18 +1676,20 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 		OIndexChunk *chunk = (OIndexChunk *) tuple.data;
 		ORelOids	tableOids;
 		bool		temp_table;
+		Oid			tablespace;
 
 		type = chunk->key.type;
 		oids = chunk->key.oids;
 		Assert(chunk->dataLength >= sizeof(tableOids));
 		memcpy(&tableOids, chunk->data, sizeof(tableOids));
 		memcpy(&temp_table, chunk->data + sizeof(tableOids), sizeof(bool));
+		memcpy(&tablespace, chunk->data + (offsetof(OIndex, tablespace) - offsetof(OIndex, tableOids)), sizeof(Oid));
 		Assert(chunk->key.chunknum == 0);
 		Assert(ORelOidsIsValid(oids));
 		Assert(!ORelOidsIsEqual(old_oids, oids));
 		old_oids = oids;
 
-		callback(type, oids, tableOids, arg);
+		callback(type, oids, tableOids, tablespace, arg);
 
 		pfree(tuple.data);
 		btree_iterator_free(it);
@@ -1750,7 +1750,7 @@ index_type_from_str(const char *s, int len)
 
 static void
 o_index_oids_array_callback(OIndexType type, ORelOids treeOids,
-							ORelOids tableOids, void *arg)
+							ORelOids tableOids, Oid tablespace, void *arg)
 {
 	ReturnSetInfo *rsinfo = (ReturnSetInfo *) arg;
 	Datum		values[6];

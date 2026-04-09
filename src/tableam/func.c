@@ -213,9 +213,8 @@ print_unloaded_tree(StringInfoData *buf, BTreeDescr *td, const char *treeName,
 	EvictedTreeData *evicted_data;
 
 	memset(&prev_chkp_tag, 0, sizeof(prev_chkp_tag));
-	prev_chkp_tag.type = td->type;
-	prev_chkp_tag.datoid = td->oids.datoid;
-	prev_chkp_tag.relnode = td->oids.relnode;
+	prev_chkp_tag.key.oids = td->oids;
+	prev_chkp_tag.key.tablespace = td->tablespace;
 	prev_chkp_tag.num = checkpoint_state->lastCheckpointNumber;
 	prev_chkp_tag.type = 'm';
 

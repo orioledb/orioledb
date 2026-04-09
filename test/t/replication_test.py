@@ -1484,3 +1484,39 @@ class ReplicationTest(BaseTest):
 				expected = [(w, d, o) for w in range(1, W + 1)
 				            for d in range(1, D + 1) for o in range(1, O + 1)]
 				self.assertEqual(expected, rows)
+
+	def test_tablespace_pk_replication(self):
+		with self.node as master:
+			master.append_conf('postgresql.conf',
+			                   "allow_in_place_tablespaces = true\n")
+			master.start()
+
+			master.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+
+			con1 = master.connect(autocommit=True)
+			con1.execute("CREATE TABLESPACE regress_tblspace LOCATION '';")
+			con1.close()
+
+			# Table in default tablespace, no explicit PK.
+			master.safe_psql("""
+				CREATE TABLE foo (d int) USING orioledb;
+				INSERT INTO foo SELECT g FROM generate_series(1, 100) g;
+				CHECKPOINT;
+			""")
+
+			with self.getReplica().start() as replica:
+				# Add a PK placed in a different tablespace.  On the replica the
+				# WAL_REC_O_TABLES_META_UNLOCK record is replayed with
+				# reachedConsistency=true, so handle_o_tables_meta_unlock() runs
+				# the rebuild path.  tbl_data_exists() must check the *old*
+				# table's tablespace (pg_default) – the bug passes the *new* PK's
+				# tablespace (regress_tblspace) instead, so the old data is not
+				# found and the rebuild is silently skipped, leaving the table
+				# empty on the replica.
+				master.safe_psql("ALTER TABLE foo ADD PRIMARY KEY (d) "
+				                 "USING INDEX TABLESPACE regress_tblspace;")
+
+				self.catchup_orioledb(replica)
+
+				count = replica.execute("SELECT COUNT(*) FROM foo;")[0][0]
+				self.assertEqual(100, count)

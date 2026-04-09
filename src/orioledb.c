@@ -1497,6 +1497,7 @@ o_check_dir(const char *dir)
 /*
  * Verify that the given directory exists. If it does not exist, it is created.
  */
+/* TODO: Add some kind of caching for calling mkdir */
 void
 o_verify_dir_exists_or_create(char *dirname, bool *created, bool *found)
 {

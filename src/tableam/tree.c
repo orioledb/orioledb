@@ -88,7 +88,7 @@ static BTreeOps primaryOps = {
 void
 index_btree_desc_init(BTreeDescr *desc, OCompress compress, int fillfactor,
 					  ORelOids oids, OIndexType type, char persistence,
-					  OXid createOxid, void *arg)
+					  Oid tablespace, OXid createOxid, void *arg)
 {
 	if (type == oIndexPrimary)
 		desc->ops = &primaryOps;
@@ -98,6 +98,7 @@ index_btree_desc_init(BTreeDescr *desc, OCompress compress, int fillfactor,
 		desc->ops = &secondaryOps;
 
 	desc->oids = oids;
+	desc->tablespace = tablespace;
 	desc->arg = arg;
 	desc->compress = compress;
 	if (fillfactor >= BTREE_MIN_FILLFACTOR && fillfactor <= 100)

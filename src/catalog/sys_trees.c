@@ -27,6 +27,7 @@
 #include "transam/undo.h"
 #include "utils/page_pool.h"
 
+#include "catalog/pg_tablespace.h"
 #include "common/hashfn.h"
 #include "funcapi.h"
 #include "utils/builtins.h"
@@ -408,18 +409,6 @@ static SysTreeMeta sysTreesMeta[] =
 		.storageType = BTreeStoragePersistence,
 		.needs_undo = NULL
 	},
-	{							/* SYS_TREES_TABLESPACE_CACHE */
-		.keyLength = sizeof(OSysCacheKey1),
-		.tupleLength = sizeof(OTablespace),
-		.cmpFunc = o_sys_cache_cmp,
-		.keyPrint = o_sys_cache_key_print,
-		.tupPrint = o_tablespace_cache_tup_print,
-		.keyToJsonb = o_sys_cache_key_to_jsonb,
-		.poolType = OPagePoolCatalog,
-		.undoLogType = UndoLogSystem,
-		.storageType = BTreeStoragePersistence,
-		.needs_undo = NULL
-	},
 	{							/* SYS_TREES_CATALOG_XID_UNDO_LOCATION */
 		.keyLength = sizeof(TransactionId),
 		.tupleLength = sizeof(ReplicationRetainUndoTuple),
@@ -791,6 +780,7 @@ sys_tree_init(int i, bool init_shmem)
 	descr->oids.datoid = SYS_TREES_DATOID;
 	descr->oids.reloid = i + 1;
 	descr->oids.relnode = i + 1;
+	descr->tablespace = DEFAULTTABLESPACE_OID;
 
 	descr->arg = meta;
 	ops->key_to_jsonb = meta->keyToJsonb;

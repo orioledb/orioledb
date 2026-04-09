@@ -152,6 +152,7 @@ typedef struct
 	Oid			datoid;
 	Oid			reloid;
 	Oid			relnode;
+	Oid			tablespace;
 	bool		completed;
 	CurKeyType	curKeyType;
 	OFixedShmemKey curKeyValue;
@@ -243,7 +244,7 @@ extern uint32 get_cur_checkpoint_number(ORelOids *oids, OIndexType type, bool *c
 extern bool can_use_checkpoint_extents(BTreeDescr *desc, uint32 chkp_num);
 extern void free_extent_for_checkpoint(BTreeDescr *desc, FileExtent *extent, uint32 chkp_num);
 extern void backend_set_autonomous_level(CheckpointState *state, uint32 level);
-extern bool tbl_data_exists(ORelOids *oids);
+extern bool tbl_data_exists(ORelOids *oids, Oid tablespace);
 extern void evictable_tree_init(BTreeDescr *desc, bool init_shmem,
 								bool *was_evicted);
 extern void checkpointable_tree_init(BTreeDescr *desc, bool init_shmem,

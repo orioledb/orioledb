@@ -138,7 +138,8 @@ get_seq_buf_filename(SeqBufTag *tag)
 	char	   *typename;
 	char	   *db_prefix;
 
-	o_get_prefixes_for_relnode(tag->datoid, tag->relnode, NULL, &db_prefix);
+	o_get_prefixes_for_tablespace(tag->key.oids.datoid, tag->key.tablespace,
+								  NULL, &db_prefix);
 	if (tag->type == 't')
 		typename = "tmp";
 	else if (tag->type == 'm')
@@ -149,7 +150,8 @@ get_seq_buf_filename(SeqBufTag *tag)
 		return NULL;
 	}
 	/* this format is used by recovery_cleanup_old_files() */
-	result = psprintf("%s/%u-%u.%s", db_prefix, tag->relnode, tag->num, typename);
+	result = psprintf("%s/%u-%u.%s", db_prefix, tag->key.oids.relnode,
+					  tag->num, typename);
 	pfree(db_prefix);
 	return result;
 }
@@ -157,8 +159,12 @@ get_seq_buf_filename(SeqBufTag *tag)
 static bool
 seq_buf_tag_eq(SeqBufTag *t1, SeqBufTag *t2)
 {
-	if (t1->datoid == t2->datoid &&
-		t1->relnode == t2->relnode &&
+	/*
+	 * Tablespace is intentionally omitted: (datoid, relnode) already uniquely
+	 * identifies a btree regardless of which tablespace it lives in.
+	 */
+	if (t1->key.oids.datoid == t2->key.oids.datoid &&
+		t1->key.oids.relnode == t2->key.oids.relnode &&
 		t1->num == t2->num &&
 		t1->type == t2->type)
 		return true;
@@ -200,8 +206,8 @@ seq_buf_check_open_file(SeqBufDescPrivate *seqBufPrivate)
 
 		if (seqBufPrivate->write && !file_exists)
 			elog(DEBUG1, "seq_buf_open_file: create (%u, %u) type=%c num=%u",
-				 seqBufPrivate->tag.datoid,
-				 seqBufPrivate->tag.relnode,
+				 seqBufPrivate->tag.key.oids.datoid,
+				 seqBufPrivate->tag.key.oids.relnode,
 				 seqBufPrivate->tag.type,
 				 seqBufPrivate->tag.num);
 
@@ -569,7 +575,8 @@ seq_buf_try_replace(SeqBufDescPrivate *seqBufPrivate, SeqBufTag *tag,
 	Assert((SEQBUF_CHUNK_SIZE % data_size) == 0);
 
 	SpinLockAcquire(&shared->lock);
-	Assert(shared->tag.datoid == tag->datoid && shared->tag.relnode == tag->relnode);
+	Assert(shared->tag.key.oids.datoid == tag->key.oids.datoid &&
+		   shared->tag.key.oids.relnode == tag->key.oids.relnode);
 
 	seq_buf_wait_prev_page(shared);
 	if (shared->prevPageState == SeqBufPrevPageError)
