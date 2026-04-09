@@ -139,6 +139,45 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
             status=1
         fi
 
+        echo "=== Comparing primary and replica data ==="
+        for db in regression isolation_regression; do
+            if ! psql -p 5432 -tA -c "SELECT 1" "$db" >/dev/null 2>&1; then
+                echo "Skipping $db: database does not exist"
+                continue
+            fi
+
+            echo "--- Comparing $db schema ---"
+            pg_dump -s -p 5432 "$db" | grep -v '^\\\(un\)\{0,1\}restrict' > "/tmp/primary_${db}_schema.sql"
+            pg_dump -s -p 5433 "$db" | grep -v '^\\\(un\)\{0,1\}restrict' > "/tmp/replica_${db}_schema.sql"
+            if ! diff -u "/tmp/primary_${db}_schema.sql" "/tmp/replica_${db}_schema.sql" > "dump_diff_${db}_schema.txt"; then
+                echo "ERROR: $db schema differs between primary and replica"
+                head -200 "dump_diff_${db}_schema.txt"
+                status=1
+            else
+                echo "$db schema matches"
+                rm -f "dump_diff_${db}_schema.txt"
+            fi
+
+            echo "--- Comparing $db data ---"
+            # Build --exclude-table flags for unlogged tables
+            exclude_flags=""
+            for tbl in $(psql -p 5432 -tA -c "SELECT schemaname || '.' || tablename FROM pg_tables WHERE tableowner = current_user AND tablename IN (SELECT relname FROM pg_class WHERE relpersistence = 'u')" "$db" 2>/dev/null); do
+                exclude_flags="$exclude_flags --exclude-table=$tbl"
+            done
+            pg_dump -a -Fd --compress=0 -p 5432 $exclude_flags -f "/tmp/primary_${db}_data" "$db"
+            pg_dump -a -Fd --compress=0 -p 5433 $exclude_flags -f "/tmp/replica_${db}_data" "$db"
+            python3 ../orioledb/ci/sort_dump.py "/tmp/primary_${db}_data" "/tmp/primary_${db}_sorted"
+            python3 ../orioledb/ci/sort_dump.py "/tmp/replica_${db}_data" "/tmp/replica_${db}_sorted"
+            if ! diff -ru "/tmp/primary_${db}_sorted" "/tmp/replica_${db}_sorted" > "dump_diff_${db}_data.txt"; then
+                echo "ERROR: $db data differs between primary and replica"
+                head -200 "dump_diff_${db}_data.txt"
+                status=1
+            else
+                echo "$db data matches"
+                rm -f "dump_diff_${db}_data.txt"
+            fi
+        done
+
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log stop
         if [ $PG_VERSION = "17" ]; then
             make -C src/test/subscription installcheck-oriole -j $(nproc) || status=$?
