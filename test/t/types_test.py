@@ -748,12 +748,10 @@ class TypesTest(BaseTest):
 		self.assertEqual([(3, ), (8, ), (15, ), (94, )],
 		                 con2.execute("SELECT * FROM foo ORDER BY i;"))
 		con2.close()
-		self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 0)
 		node.safe_psql("""
 			DROP INDEX foo_ix2;
 			DROP INDEX foo_ix3;
 		""")
-		self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 0)
 		node.stop(['-m', 'immediate'])
 
 		node.start()
@@ -763,5 +761,4 @@ class TypesTest(BaseTest):
 		self.assertEqual([(3, ), (8, ), (15, ), (94, )],
 		                 con3.execute("SELECT * FROM foo ORDER BY i;"))
 		con3.close()
-		#self.check_total_deleted(node, 'TABLESPACE_CACHE', 5, 2)
 		node.stop()

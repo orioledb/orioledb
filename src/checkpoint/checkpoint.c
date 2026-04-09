@@ -117,6 +117,7 @@ typedef struct CheckpointWriteBack
 typedef struct
 {
 	ORelOids	oids;
+	Oid			tablespace;
 	OIndexType	type;
 	bool		freeExtents;
 	bool		cleanupMap;
@@ -200,7 +201,7 @@ static void checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 								 OInMemoryBlkno *blkno, uint32 page_chage_count,
 								 int level);
 static void checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
-									   ORelOids tableOids, void *arg);
+									   ORelOids tableOids, Oid tablespace, void *arg);
 static inline void init_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared);
 static inline void free_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared);
 static FileExtentsArray *file_extents_array_init(void);
@@ -561,6 +562,7 @@ add_index_id_item(List *list, BTreeDescr *desc)
 	old_context = MemoryContextSwitchTo(chkp_main_context);
 	item = palloc(sizeof(IndexIdItem));
 	item->oids = desc->oids;
+	item->tablespace = desc->tablespace;
 	item->type = desc->type;
 	item->chkpNum = checkpoint_state->lastCheckpointNumber;
 	item->freeExtents = OCompressIsValid(desc->compress);
@@ -1403,6 +1405,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	checkpoint_state->datoid = InvalidOid;
 	checkpoint_state->reloid = InvalidOid;
 	checkpoint_state->relnode = InvalidOid;
+	checkpoint_state->tablespace = InvalidOid;
 	checkpoint_state->completed = false;
 	chkp_inc_changecount_after(checkpoint_state);
 
@@ -1478,8 +1481,8 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 				cleanup_tag.type = 'm';
 				cleanup_tag.num = item->lastMapChkpNum;
-				cleanup_tag.datoid = item->oids.datoid;
-				cleanup_tag.relnode = item->oids.relnode;
+				cleanup_tag.key.oids = item->oids;
+				cleanup_tag.key.tablespace = item->tablespace;
 				seq_buf_remove_file(&cleanup_tag);
 			}
 
@@ -1538,8 +1541,6 @@ static void
 checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 {
 	BTreeMetaPage *meta_page = BTREE_GET_META(descr);
-	Oid			datoid = descr->oids.datoid;
-	Oid			relnode = descr->oids.relnode;
 	int			next_chkp_index = (chkpNum + 1) % 2;
 	SeqBufTag	next_chkp_tag = {0},
 				next_tmp_tag = {0};
@@ -1556,8 +1557,8 @@ checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 	init_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]);
 
 	memset(&next_tmp_tag, 0, sizeof(next_tmp_tag));
-	next_tmp_tag.datoid = datoid;
-	next_tmp_tag.relnode = relnode;
+	next_tmp_tag.key.oids = descr->oids;
+	next_tmp_tag.key.tablespace = descr->tablespace;
 	next_tmp_tag.num = chkpNum + 1;
 	next_tmp_tag.type = 't';
 
@@ -1576,8 +1577,8 @@ checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 	init_seq_buf_pages(descr, &meta_page->nextChkp[next_chkp_index]);
 
 	memset(&next_chkp_tag, 0, sizeof(next_chkp_tag));
-	next_chkp_tag.datoid = datoid;
-	next_chkp_tag.relnode = relnode;
+	next_chkp_tag.key.oids = descr->oids;
+	next_chkp_tag.key.tablespace = descr->tablespace;
 	next_chkp_tag.num = chkpNum + 1;
 	next_chkp_tag.type = 'm';
 
@@ -1832,8 +1833,9 @@ finalize_chkp_map(File chkp_file, uint64 len, char *input_filename,
 	{
 		char	   *tmp_filename;
 
-		tmp_tag.datoid = checkpoint_state->datoid;
-		tmp_tag.relnode = checkpoint_state->relnode;
+		tmp_tag.key.oids.datoid = checkpoint_state->datoid;
+		tmp_tag.key.oids.relnode = checkpoint_state->relnode;
+		tmp_tag.key.tablespace = checkpoint_state->tablespace;
 		tmp_tag.num = input_num;
 		tmp_tag.type = 't';
 		if (seq_buf_file_exist(&tmp_tag))
@@ -2068,6 +2070,7 @@ checkpoint_ix_init_state(CheckpointState *state, BTreeDescr *descr)
 	checkpoint_state->datoid = descr->oids.datoid;
 	checkpoint_state->reloid = descr->oids.reloid;
 	checkpoint_state->relnode = descr->oids.relnode;
+	checkpoint_state->tablespace = descr->tablespace;
 	checkpoint_state->completed = false;
 	checkpoint_state->curKeyType = CurKeyLeast;
 	chkp_inc_changecount_after(checkpoint_state);
@@ -2546,8 +2549,6 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 	CheckpointFileHeader header = {0};
 	File		file = -1;
 	SeqBufTag	free_buf_tag;
-	Oid			datoid = descr->oids.datoid;
-	Oid			relnode = descr->oids.relnode;
 	bool		is_compressed = OCompressIsValid(descr->compress);
 	CheckpointWriteBack writeback;
 	off_t		file_length;
@@ -2651,8 +2652,8 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 		SeqBufTag	next_chkp_tag;
 
 		memset(&next_chkp_tag, 0, sizeof(next_chkp_tag));
-		next_chkp_tag.datoid = datoid;
-		next_chkp_tag.relnode = relnode;
+		next_chkp_tag.key.oids = descr->oids;
+		next_chkp_tag.key.tablespace = descr->tablespace;
 		next_chkp_tag.num = chkpNum;
 		next_chkp_tag.type = 'm';
 
@@ -2829,7 +2830,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 	elog(DEBUG1, "checkpoint_map_write_header: (%u, %u) chkp=%u "
 		 "rootDownlink=%lu datafileLength=%lu numFreeBlocks=%lu "
 		 "leafPagesNum=%u",
-		 datoid, relnode, chkpNum,
+		 descr->oids.datoid, descr->oids.relnode, chkpNum,
 		 (unsigned long) header.rootDownlink,
 		 (unsigned long) header.datafileLength,
 		 (unsigned long) header.numFreeBlocks,
@@ -2848,13 +2849,10 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 
 	if (orioledb_s3_mode)
 	{
+		OIndexKey	key = {.oids = descr->oids,.tablespace = descr->tablespace};
 		S3TaskLocation location;
 
-		location = s3_schedule_file_part_write(chkpNum,
-											   datoid,
-											   relnode,
-											   -1,
-											   -1);
+		location = s3_schedule_file_part_write(chkpNum, key, -1, -1);
 		maxLocation = Max(maxLocation, location);
 	}
 
@@ -4843,7 +4841,7 @@ prepare_leaf_page(BTreeDescr *descr, CheckpointState *state)
  * checkpoint_state.
  */
 static bool
-check_tree_needs_checkpointing(OIndexType type, ORelOids treeOids)
+check_tree_needs_checkpointing(OIndexType type, ORelOids treeOids, Oid tablespace)
 {
 	SharedRootInfoKey key;
 	OTuple		keyTuple;
@@ -4888,6 +4886,7 @@ check_tree_needs_checkpointing(OIndexType type, ORelOids treeOids)
 			checkpoint_state->datoid = treeOids.datoid;
 			checkpoint_state->reloid = treeOids.reloid;
 			checkpoint_state->relnode = treeOids.relnode;
+			checkpoint_state->tablespace = tablespace;
 			checkpoint_state->completed = true;
 			checkpoint_state->curKeyType = CurKeyFinished;
 			chkp_inc_changecount_after(checkpoint_state);
@@ -4907,7 +4906,7 @@ check_tree_needs_checkpointing(OIndexType type, ORelOids treeOids)
 
 static void
 checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
-						   ORelOids tableOids, void *arg)
+						   ORelOids tableOids, Oid tablespace, void *arg)
 {
 	CheckpointTablesArg *tbl_arg = (CheckpointTablesArg *) arg;
 	OIndexDescr *descr;
@@ -4918,7 +4917,7 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 
 	prev_context = MemoryContextSwitchTo(chkp_tree_context);
 
-	if (!check_tree_needs_checkpointing(type, treeOids))
+	if (!check_tree_needs_checkpointing(type, treeOids, tablespace))
 	{
 		MemoryContextSwitchTo(prev_context);
 		MemoryContextResetOnly(chkp_tree_context);
@@ -4976,6 +4975,7 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 				checkpoint_state->datoid = td->oids.datoid;
 				checkpoint_state->reloid = td->oids.reloid;
 				checkpoint_state->relnode = td->oids.relnode;
+				checkpoint_state->tablespace = td->tablespace;
 				checkpoint_state->completed = true;
 				checkpoint_state->curKeyType = CurKeyFinished;
 				skip = true;
@@ -5171,8 +5171,8 @@ checkpointable_tree_fill_seq_buffers(BTreeDescr *td, bool init,
 	}
 	else if (init)
 	{
-		prev_chkp_tag.datoid = td->oids.datoid;
-		prev_chkp_tag.relnode = td->oids.relnode;
+		prev_chkp_tag.key.oids = td->oids;
+		prev_chkp_tag.key.tablespace = td->tablespace;
 		prev_chkp_tag.num = map_chkp_num;
 		prev_chkp_tag.type = map_file_exists ? 'm' : 't';
 	}
@@ -5181,8 +5181,8 @@ checkpointable_tree_fill_seq_buffers(BTreeDescr *td, bool init,
 		prev_chkp_tag = meta_page->freeBuf.tag;
 	}
 
-	cur_chkp_tag.datoid = td->oids.datoid;
-	cur_chkp_tag.relnode = td->oids.relnode;
+	cur_chkp_tag.key.oids = td->oids;
+	cur_chkp_tag.key.tablespace = td->tablespace;
 	cur_chkp_tag.num = chkp_num + 1;
 	cur_chkp_tag.type = 'm';
 	Assert(evicted_next == NULL || SeqBufTagEqual(&cur_chkp_tag, &evicted_next->tag));
@@ -5291,8 +5291,8 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 					found;
 
 		memset(&prev_chkp_tag, 0, sizeof(prev_chkp_tag));
-		prev_chkp_tag.datoid = desc->oids.datoid;
-		prev_chkp_tag.relnode = desc->oids.relnode;
+		prev_chkp_tag.key.oids = desc->oids;
+		prev_chkp_tag.key.tablespace = desc->tablespace;
 		prev_chkp_tag.num = o_get_latest_chkp_num(desc->oids.datoid,
 												  desc->oids.relnode,
 												  chkp_num,
@@ -5306,7 +5306,7 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 			!prev_chkp_file_exist &&
 			prev_chkp_tag.num < chkp_num)
 		{
-			s3_load_map_file(prev_chkp_tag.num, desc->oids.datoid, desc->oids.relnode);
+			s3_load_map_file(prev_chkp_tag.num, prev_chkp_tag.key);
 
 			prev_chkp_file = PathNameOpenFile(prev_chkp_fname, O_RDONLY | PG_BINARY);
 			prev_chkp_file_exist = prev_chkp_file >= 0;
@@ -5430,8 +5430,9 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 			unlock_page(desc->rootInfo.rootPageBlkno);
 			ereport(ERROR, (errcode_for_file_access(),
 							errmsg("could not read rootPageBlkno page from %s: %m",
-								   btree_smgr_filename(desc, chkp_num,
-													   DOWNLINK_GET_DISK_OFF(file_header.rootDownlink)))));
+								   btree_smgr_filename(desc,
+													   DOWNLINK_GET_DISK_OFF(file_header.rootDownlink),
+													   chkp_num))));
 		}
 
 		put_page_image(desc->rootInfo.rootPageBlkno, buf);
@@ -5451,7 +5452,7 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 
 /* TODO: move this method ? */
 bool
-tbl_data_exists(ORelOids *oids)
+tbl_data_exists(ORelOids *oids, Oid tablespace)
 {
 	char	   *filename;
 	File		file;
@@ -5459,6 +5460,7 @@ tbl_data_exists(ORelOids *oids)
 	OTuple		keyTuple;
 	OTuple		resultTuple;
 	char	   *db_prefix;
+	OIndexKey	ix_key = {.oids = *oids,.tablespace = tablespace};
 
 	key.datoid = oids->datoid;
 	key.relnode = oids->relnode;
@@ -5475,7 +5477,8 @@ tbl_data_exists(ORelOids *oids)
 		return true;
 	}
 
-	o_get_prefixes_for_relnode(oids->datoid, oids->relnode, NULL, &db_prefix);
+	o_get_prefixes_for_tablespace(ix_key.oids.datoid, ix_key.tablespace,
+								  NULL, &db_prefix);
 
 	/* TODO: more smart check */
 	filename = psprintf("%s/%u", db_prefix, oids->relnode);
@@ -5517,8 +5520,8 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 										&map_chkp_num, true);
 
 	chkp_index = (chkp_num + 1) % 2;
-	tmp_tag.datoid = desc->oids.datoid;
-	tmp_tag.relnode = desc->oids.relnode;
+	tmp_tag.key.oids = desc->oids;
+	tmp_tag.key.tablespace = desc->tablespace;
 	tmp_tag.num = chkp_num + 1;
 	tmp_tag.type = 't';
 	meta_page = BTREE_GET_META(desc);

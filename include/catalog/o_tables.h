@@ -212,7 +212,7 @@ void		o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn);
 /* Free memory of OTable struct */
 extern void o_table_free(OTable *table);
 
-extern ORelOids *o_table_make_index_oids(OTable *table, int *num);
+extern OIndexKey *o_table_make_index_keys(OTable *table, int *num);
 
 /* callback for o_tables_foreach() */
 typedef void (*OTablesCallback) (OTable *descr, void *arg);

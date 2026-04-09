@@ -710,7 +710,7 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 #define PENDING_TRUNCATES_FILENAME (ORIOLEDB_DATA_DIR "/pending_truncates")
 
 static void
-add_pending_truncate(ORelOids relOids, int numTrees, ORelOids *treeOids)
+add_pending_truncate(ORelOids relOids, int numTrees, OIndexKey *trees)
 {
 	File		pendingTruncatesFile;
 	uint64		offset;
@@ -744,9 +744,9 @@ add_pending_truncate(ORelOids relOids, int numTrees, ORelOids *treeOids)
 							   PENDING_TRUNCATES_FILENAME)));
 
 	offset += length;
-	length = sizeof(*treeOids) * numTrees;
+	length = sizeof(*trees) * numTrees;
 
-	if (FileWrite(pendingTruncatesFile, (Pointer) &treeOids, length, 0,
+	if (FileWrite(pendingTruncatesFile, (Pointer) &trees, length, 0,
 				  WAIT_EVENT_BUFFILE_WRITE) != length)
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not write pending truncates file %s: %m",
@@ -765,8 +765,8 @@ check_pending_truncates(void)
 {
 	uint64		offset;
 	uint64		maxOffset;
-	ORelOids   *relNodes = NULL;
-	int			relNodesAllocated = 0;
+	OIndexKey  *trees = NULL;
+	int			treesAllocated = 0;
 	File		pendingTruncatesFile;
 
 	if (have_backup_in_progress() || pending_truncates_meta->pendingTruncatesLocation == 0)
@@ -813,34 +813,34 @@ check_pending_truncates(void)
 							errmsg("could not read pending truncates file %s: %m",
 								   PENDING_TRUNCATES_FILENAME)));
 
-		if (numTrees > relNodesAllocated)
+		if (numTrees > treesAllocated)
 		{
-			if (!relNodes)
-				relNodes = palloc(sizeof(ORelOids) * numTrees);
+			if (!trees)
+				trees = palloc(sizeof(OIndexKey) * numTrees);
 			else
-				relNodes = repalloc(relNodes, sizeof(ORelOids) * numTrees);
-			relNodesAllocated = numTrees;
+				trees = repalloc(trees, sizeof(OIndexKey) * numTrees);
+			treesAllocated = numTrees;
 		}
 
 		offset += length;
-		length = sizeof(ORelOids) * numTrees;
+		length = sizeof(OIndexKey) * numTrees;
 
-		if (FileRead(pendingTruncatesFile, (Pointer) relNodes, length, offset,
+		if (FileRead(pendingTruncatesFile, (Pointer) trees, length, offset,
 					 WAIT_EVENT_BUFFILE_READ) != length)
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("could not read pending truncates file %s: %m",
 								   PENDING_TRUNCATES_FILENAME)));
 
 		for (int i = 0; i < numTrees; i++)
-			cleanup_btree_files(relNodes[i].datoid, relNodes[i].relnode, true);
+			cleanup_btree_files(trees[i], true);
 	}
 
 	pending_truncates_meta->pendingTruncatesLocation = 0;
 
 	LWLockRelease(&pending_truncates_meta->pendingTruncatesLock);
 
-	if (relNodes)
-		pfree(relNodes);
+	if (trees)
+		pfree(trees);
 }
 
 void
@@ -853,8 +853,8 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 				reloid,
 				dropRelnode,
 				remainRelnode;
-	int			dropNumTreeOids;
-	ORelOids   *dropTreeOids;
+	int			dropNumTrees;
+	OIndexKey  *dropTrees;
 	bool		doCleanup;
 	bool		cleanupFiles = true;
 
@@ -870,16 +870,16 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 	{
 		remainRelnode = relnode_item->newRelnode;
 		dropRelnode = relnode_item->oldRelnode;
-		dropTreeOids = &relnode_item->oids[0];
-		dropNumTreeOids = relnode_item->oldNumTreeOids;
+		dropTrees = &relnode_item->trees[0];
+		dropNumTrees = relnode_item->oldNumTrees;
 
 		if (have_backup_in_progress() && doCleanup)
 		{
 			ORelOids	oids = {datoid, reloid, relnode_item->oldRelnode};
 
 			dropRelnode = InvalidOid;
-			add_pending_truncate(oids, relnode_item->oldNumTreeOids,
-								 &relnode_item->oids[0]);
+			add_pending_truncate(oids, relnode_item->oldNumTrees,
+								 &relnode_item->trees[0]);
 			cleanupFiles = false;
 		}
 	}
@@ -887,8 +887,8 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 	{
 		remainRelnode = relnode_item->oldRelnode;
 		dropRelnode = relnode_item->newRelnode;
-		dropTreeOids = &relnode_item->oids[relnode_item->oldNumTreeOids];
-		dropNumTreeOids = relnode_item->newNumTreeOids;
+		dropTrees = &relnode_item->trees[relnode_item->oldNumTrees];
+		dropNumTrees = relnode_item->newNumTrees;
 	}
 
 	/* Fsync new files if required */
@@ -896,13 +896,12 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 		OidIsValid(relnode_item->newRelnode) &&
 		relnode_item->fsync)
 	{
-		int			numTreeOids = relnode_item->newNumTreeOids;
-		ORelOids   *treeOids = &relnode_item->oids[relnode_item->oldNumTreeOids];
+		int			numTrees = relnode_item->newNumTrees;
+		OIndexKey  *trees = &relnode_item->trees[relnode_item->oldNumTrees];
 		int			i;
 
-		for (i = 0; i < numTreeOids; i++)
-			fsync_btree_files(treeOids[i].datoid,
-							  treeOids[i].relnode);
+		for (i = 0; i < numTrees; i++)
+			fsync_btree_files(trees[i]);
 	}
 
 	if (OidIsValid(dropRelnode))
@@ -920,54 +919,45 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 			o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, false);
 		o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, true);
 
-		for (i = 0; i < dropNumTreeOids; i++)
+		for (i = 0; i < dropNumTrees; i++)
 		{
 			if (!recovery)
-				o_tables_rel_lock_exclusive_no_inval_no_log(&dropTreeOids[i]);
-			o_tables_rel_lock_extended_no_inval(&dropTreeOids[i], AccessExclusiveLock, true);
+				o_tables_rel_lock_exclusive_no_inval_no_log(&dropTrees[i].oids);
+			o_tables_rel_lock_extended_no_inval(&dropTrees[i].oids,
+												AccessExclusiveLock, true);
 			if (doCleanup)
 			{
-				cleanup_btree(dropTreeOids[i].datoid, dropTreeOids[i].relnode, cleanupFiles, true);
-				o_delete_chkp_num(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
-
-				if (!is_recovery_process())
-					o_tablespace_cache_delete(dropTreeOids[i].datoid, dropTreeOids[i].relnode);
+				cleanup_btree(dropTrees[i], cleanupFiles, true);
+				o_delete_chkp_num(dropTrees[i].oids.datoid,
+								  dropTrees[i].oids.relnode);
 			}
-			o_invalidate_oids(dropTreeOids[i]);
+			o_invalidate_oids(dropTrees[i].oids);
 			if (!recovery)
-				o_tables_rel_unlock_extended(&dropTreeOids[i], AccessExclusiveLock, false);
-			o_tables_rel_unlock_extended(&dropTreeOids[i], AccessExclusiveLock, true);
+				o_tables_rel_unlock_extended(&dropTrees[i].oids, AccessExclusiveLock, false);
+			o_tables_rel_unlock_extended(&dropTrees[i].oids, AccessExclusiveLock, true);
 		}
 	}
 
 	if (OidIsValid(remainRelnode))
 	{
 		ORelOids	oids = {datoid, reloid, remainRelnode};
-		char	   *prefix;
-		char	   *db_prefix;
-
-		o_get_prefixes_for_relnode(datoid, remainRelnode,
-								   &prefix, &db_prefix);
-		o_verify_dir_exists_or_create(prefix, NULL, NULL);
-		o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
-		pfree(db_prefix);
 
 		o_invalidate_oids(oids);
 	}
 }
 
 /*
- * oldTreeOids and newTreeOids should be allocated in CurTransactionContext.
+ * oldTrees and newTrees should be allocated in CurTransactionContext.
  */
 static inline void
-add_undo_relnode(ORelOids oldOids, ORelOids *oldTreeOids, int oldNumTreeOids,
-				 ORelOids newOids, ORelOids *newTreeOids, int newNumTreeOids,
+add_undo_relnode(ORelOids oldOids, OIndexKey *oldTrees, int oldNumTrees,
+				 ORelOids newOids, OIndexKey *newTrees, int newNumTrees,
 				 bool fsync)
 {
 	LocationIndex size;
 	UndoLocation location;
 	RelnodeUndoStackItem *item;
-	int			stepItemsCapacity = (O_MAX_UNDO_RECORD_SIZE - offsetof(RelnodeUndoStackItem, oids)) / sizeof(ORelOids);
+	int			stepItemsCapacity = (O_MAX_UNDO_RECORD_SIZE - offsetof(RelnodeUndoStackItem, trees)) / sizeof(OIndexKey);
 
 	/*
 	 * This might happend before we accessed oxid.  So, ensure we've assigned
@@ -977,17 +967,17 @@ add_undo_relnode(ORelOids oldOids, ORelOids *oldTreeOids, int oldNumTreeOids,
 
 	oxid_needs_wal_flush = true;
 
-	Assert(oldNumTreeOids >= 0 && newNumTreeOids >= 0);
+	Assert(oldNumTrees >= 0 && newNumTrees >= 0);
 
-	while (oldNumTreeOids + newNumTreeOids > 0)
+	while (oldNumTrees + newNumTrees > 0)
 	{
-		int			stepOldTreeOids;
-		int			stepNewTreeOids;
+		int			stepOldTrees;
+		int			stepNewTrees;
 
-		stepOldTreeOids = Min(oldNumTreeOids, stepItemsCapacity);
-		stepNewTreeOids = Min(newNumTreeOids, stepItemsCapacity - stepOldTreeOids);
+		stepOldTrees = Min(oldNumTrees, stepItemsCapacity);
+		stepNewTrees = Min(newNumTrees, stepItemsCapacity - stepOldTrees);
 
-		size = offsetof(RelnodeUndoStackItem, oids) + sizeof(ORelOids) * (stepOldTreeOids + stepNewTreeOids);
+		size = offsetof(RelnodeUndoStackItem, trees) + sizeof(OIndexKey) * (stepOldTrees + stepNewTrees);
 		item = (RelnodeUndoStackItem *) get_undo_record_unreserved(UndoLogSystem, &location, MAXALIGN(size));
 
 		item->header.base.type = RelnodeUndoItemType;
@@ -1005,67 +995,67 @@ add_undo_relnode(ORelOids oldOids, ORelOids *oldTreeOids, int oldNumTreeOids,
 			item->relid = newOids.reloid;
 		}
 		item->oldRelnode = oldOids.relnode;
-		item->oldNumTreeOids = stepOldTreeOids;
+		item->oldNumTrees = stepOldTrees;
 		item->newRelnode = newOids.relnode;
-		item->newNumTreeOids = stepNewTreeOids;
+		item->newNumTrees = stepNewTrees;
 		item->fsync = fsync;
 
-		if (oldNumTreeOids > 0)
+		if (oldNumTrees > 0)
 		{
-			Assert(oldTreeOids);
-			memcpy(item->oids,
-				   oldTreeOids,
-				   sizeof(ORelOids) * stepOldTreeOids);
+			Assert(oldTrees);
+			memcpy(item->trees,
+				   oldTrees,
+				   sizeof(OIndexKey) * stepOldTrees);
 		}
-		if (newNumTreeOids > 0)
+		if (newNumTrees > 0)
 		{
-			Assert(newTreeOids);
-			memcpy(&item->oids[oldNumTreeOids],
-				   newTreeOids,
-				   sizeof(ORelOids) * stepNewTreeOids);
+			Assert(newTrees);
+			memcpy(&item->trees[oldNumTrees],
+				   newTrees,
+				   sizeof(OIndexKey) * stepNewTrees);
 		}
 
 		add_new_undo_stack_item(UndoLogSystem, location);
 
 		release_undo_size(UndoLogSystem);
 
-		oldTreeOids += stepOldTreeOids;
-		oldNumTreeOids -= stepOldTreeOids;
-		newTreeOids += stepNewTreeOids;
-		newNumTreeOids -= stepNewTreeOids;
+		oldTrees += stepOldTrees;
+		oldNumTrees -= stepOldTrees;
+		newTrees += stepNewTrees;
+		newNumTrees -= stepNewTrees;
 	}
 }
 
 void
-add_undo_truncate_relnode(ORelOids oldOids, ORelOids *oldTreeOids,
-						  int oldNumTreeOids,
-						  ORelOids newOids, ORelOids *newTreeOids,
-						  int newNumTreeOids, bool fsync)
+add_undo_truncate_relnode(ORelOids oldOids, OIndexKey *oldTrees,
+						  int oldNumTrees,
+						  ORelOids newOids, OIndexKey *newTrees,
+						  int newNumTrees, bool fsync)
 {
 	Assert(ORelOidsIsValid(oldOids) && ORelOidsIsValid(newOids));
 	Assert(oldOids.datoid == newOids.datoid);
 	Assert(oldOids.reloid == newOids.reloid);
 
-	add_undo_relnode(oldOids, oldTreeOids, oldNumTreeOids,
-					 newOids, newTreeOids, newNumTreeOids, fsync);
+	add_undo_relnode(oldOids, oldTrees, oldNumTrees,
+					 newOids, newTrees, newNumTrees, fsync);
 }
 
 void
-add_undo_drop_relnode(ORelOids oids, ORelOids *treeOids, int numTreeOids)
+add_undo_drop_relnode(ORelOids oids, OIndexKey *trees, int numTrees)
 {
 	ORelOids	invalid = {InvalidOid, InvalidOid, InvalidOid};
 
 	Assert(ORelOidsIsValid(oids));
-	add_undo_relnode(oids, treeOids, numTreeOids, invalid, NULL, 0, false);
+	add_undo_relnode(oids, trees, numTrees, invalid, NULL, 0, false);
 }
 
 void
-add_undo_create_relnode(ORelOids oids, ORelOids *treeOids, int numTreeOids, bool fsync)
+add_undo_create_relnode(ORelOids oids, OIndexKey *trees, int numTrees, bool fsync)
 {
 	ORelOids	invalid = {InvalidOid, InvalidOid, InvalidOid};
 
 	Assert(ORelOidsIsValid(oids));
-	add_undo_relnode(invalid, NULL, 0, oids, treeOids, numTreeOids, fsync);
+	add_undo_relnode(invalid, NULL, 0, oids, trees, numTrees, fsync);
 }
 
 static void

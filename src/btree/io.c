@@ -60,8 +60,7 @@ typedef struct
 
 typedef struct TreeOffset
 {
-	Oid			datoid;
-	Oid			relnode;
+	OIndexKey	key;
 	int			segno;
 	uint32		chkpNum;
 	FileExtent	fileExtent;
@@ -214,24 +213,25 @@ typedef struct
 #include "lib/simplehash.h"
 
 char *
-btree_filename(Oid datoid, Oid relnode, int segno, uint32 chkpNum)
+btree_filename(OIndexKey key, int segno, uint32 chkpNum)
 {
 	char	   *result;
 	char	   *db_prefix;
 
-	o_get_prefixes_for_relnode(datoid, relnode, NULL, &db_prefix);
+	o_get_prefixes_for_tablespace(key.oids.datoid, key.tablespace,
+								  NULL, &db_prefix);
 
 	if (orioledb_s3_mode)
 	{
 		if (segno == 0)
 			result = psprintf("%s/%u-%u",
 							  db_prefix,
-							  relnode,
+							  key.oids.relnode,
 							  chkpNum);
 		else
 			result = psprintf("%s/%u.%u-%u",
 							  db_prefix,
-							  relnode,
+							  key.oids.relnode,
 							  segno,
 							  chkpNum);
 	}
@@ -240,11 +240,11 @@ btree_filename(Oid datoid, Oid relnode, int segno, uint32 chkpNum)
 		if (segno == 0)
 			result = psprintf("%s/%u",
 							  db_prefix,
-							  relnode);
+							  key.oids.relnode);
 		else
 			result = psprintf("%s/%u.%u",
 							  db_prefix,
-							  relnode,
+							  key.oids.relnode,
 							  segno);
 	}
 
@@ -256,11 +256,9 @@ char *
 btree_smgr_filename(BTreeDescr *desc, off_t offset, uint32 chkpNum)
 {
 	int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
+	OIndexKey	key = {.oids = desc->oids,.tablespace = desc->tablespace};
 
-	return btree_filename(desc->oids.datoid,
-						  desc->oids.relnode,
-						  segno,
-						  chkpNum);
+	return btree_filename(key, segno, chkpNum);
 }
 
 static File
@@ -410,10 +408,10 @@ btree_close_smgr(BTreeDescr *descr)
 				partNum = descr->buildPartsInfo[j].dirtyParts[i].partNum;
 				if (segNum >= 0 && partNum >= 0)
 				{
-					location = s3_schedule_file_part_write(chkpNum,
-														   descr->oids.datoid,
-														   descr->oids.relnode,
-														   segNum,
+					OIndexKey	key = {.oids = descr->oids,
+					.tablespace = descr->tablespace};
+
+					location = s3_schedule_file_part_write(chkpNum, key, segNum,
 														   partNum);
 					descr->buildPartsInfo[j].writeMaxLocation =
 						Max(descr->buildPartsInfo[j].writeMaxLocation, location);
@@ -465,12 +463,10 @@ btree_s3_flush(BTreeDescr *desc, uint32 chkpNum)
 		partNum = meta->partsInfo[chkpNum % 2].dirtyParts[i].partNum;
 		if (segNum >= 0 && partNum >= 0)
 		{
+			OIndexKey	key = {.oids = desc->oids,.tablespace = desc->tablespace};
+
 			Assert(chkpNum == meta->partsInfo[chkpNum % 2].dirtyParts[i].chkpNum);
-			location = s3_schedule_file_part_write(chkpNum,
-												   desc->oids.datoid,
-												   desc->oids.relnode,
-												   segNum,
-												   partNum);
+			location = s3_schedule_file_part_write(chkpNum, key, segNum, partNum);
 			meta->partsInfo[chkpNum % 2].writeMaxLocation =
 				Max(meta->partsInfo[chkpNum % 2].writeMaxLocation, location);
 		}
@@ -527,11 +523,9 @@ btree_smgr_schedule_s3_write(BTreeDescr *desc, uint32 chkpNum,
 		if (i == MAX_NUM_DIRTY_PARTS - 1)
 		{
 			S3TaskLocation location;
+			OIndexKey	key = {.oids = desc->oids,.tablespace = desc->tablespace};
 
-			location = s3_schedule_file_part_write(curChkpNum,
-												   desc->oids.datoid,
-												   desc->oids.relnode,
-												   curSegNum,
+			location = s3_schedule_file_part_write(curChkpNum, key, curSegNum,
 												   curPartNum);
 			partsInfo[chkpNum % 2].writeMaxLocation =
 				Max(partsInfo[chkpNum % 2].writeMaxLocation, location);
@@ -566,8 +560,8 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 	if (orioledb_s3_mode)
 	{
 		granularity = ORIOLEDB_S3_PART_SIZE;
-		tag.datoid = desc->oids.datoid;
-		tag.relnode = desc->oids.relnode;
+		tag.key.oids = desc->oids;
+		tag.key.tablespace = desc->tablespace;
 		tag.checkpointNum = chkpNum;
 	}
 	else
@@ -658,8 +652,8 @@ btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 	if (orioledb_s3_mode)
 	{
 		granularity = ORIOLEDB_S3_PART_SIZE;
-		tag.datoid = desc->oids.datoid;
-		tag.relnode = desc->oids.relnode;
+		tag.key.oids = desc->oids;
+		tag.key.tablespace = desc->tablespace;
 		tag.checkpointNum = chkpNum;
 	}
 	else
@@ -734,8 +728,8 @@ btree_smgr_writeback(BTreeDescr *desc, uint32 chkpNum,
 
 		if (orioledb_s3_mode)
 		{
-			S3HeaderTag tag = {.datoid = desc->oids.datoid,
-				.relnode = desc->oids.relnode,
+			S3HeaderTag tag = {
+				.key = {.oids = desc->oids,.tablespace = desc->tablespace},
 				.checkpointNum = chkpNum,
 			.segNum = segno};
 
@@ -782,8 +776,8 @@ btree_smgr_sync(BTreeDescr *desc, uint32 chkpNum, off_t length)
 
 		if (orioledb_s3_mode)
 		{
-			S3HeaderTag tag = {.datoid = desc->oids.datoid,
-				.relnode = desc->oids.relnode,
+			S3HeaderTag tag = {
+				.key = {.oids = desc->oids,.tablespace = desc->tablespace},
 				.checkpointNum = chkpNum,
 			.segNum = num};
 
@@ -955,8 +949,8 @@ get_free_disk_offset(BTreeDescr *desc)
 			Assert(free_buf_num + 1 <= metaPage->punchHolesChkpNum);
 		}
 
-		tag.datoid = desc->oids.datoid;
-		tag.relnode = desc->oids.relnode;
+		tag.key.oids = desc->oids;
+		tag.key.tablespace = desc->tablespace;
 		tag.num = free_buf_num + 1;
 		tag.type = 't';
 
@@ -969,8 +963,8 @@ get_free_disk_offset(BTreeDescr *desc)
 		{
 			if (old_tag.type == 'm')
 			{
-				uint32		chkpNum = o_get_latest_chkp_num(tag.datoid,
-															tag.relnode,
+				uint32		chkpNum = o_get_latest_chkp_num(tag.key.oids.datoid,
+															tag.key.oids.relnode,
 															checkpoint_state->lastCheckpointNumber,
 															NULL);
 
@@ -2050,8 +2044,8 @@ perform_page_io_build(BTreeDescr *desc, Page img,
 			Assert((extent->off + threshold - 1) / threshold + 1 ==
 				   (extent->off + threshold - 1 + extent->len) / threshold);
 
-			tag.datoid = desc->oids.datoid;
-			tag.relnode = desc->oids.relnode;
+			tag.key.oids = desc->oids;
+			tag.key.tablespace = desc->tablespace;
 			tag.checkpointNum = chkpNum;
 			tag.segNum = offset / ORIOLEDB_SEGMENT_SIZE;
 			index = (offset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
@@ -3188,10 +3182,10 @@ tree_offsets_cmp(const void *a, const void *b)
 	TreeOffset	val1 = *(TreeOffset *) a;
 	TreeOffset	val2 = *(TreeOffset *) b;
 
-	if (val1.datoid != val2.datoid)
-		return (val1.datoid < val2.datoid) ? -1 : 1;
-	else if (val1.relnode != val2.relnode)
-		return (val1.relnode < val2.relnode) ? -1 : 1;
+	if (val1.key.oids.datoid != val2.key.oids.datoid)
+		return (val1.key.oids.datoid < val2.key.oids.datoid) ? -1 : 1;
+	else if (val1.key.oids.relnode != val2.key.oids.relnode)
+		return (val1.key.oids.relnode < val2.key.oids.relnode) ? -1 : 1;
 	else if (val1.chkpNum != val2.chkpNum)
 		return (val1.chkpNum < val2.chkpNum) ? -1 : 1;
 	else if (val1.segno != val2.segno)
@@ -3239,8 +3233,8 @@ writeback_put_extent(IOWriteBack *writeback, BTreeDescr *desc,
 	Assert(extent.len > 0);
 	Assert(extent.len <= (ORIOLEDB_BLCKSZ / ORIOLEDB_COMP_BLCKSZ));
 
-	offset.datoid = desc->oids.datoid;
-	offset.relnode = desc->oids.relnode;
+	offset.key.oids = desc->oids;
+	offset.key.tablespace = desc->tablespace;
 	offset.compressed = OCompressIsValid(desc->compress);
 	blcksz = offset.compressed ? ORIOLEDB_COMP_BLCKSZ : ORIOLEDB_BLCKSZ;
 	offset.segno = blcksz * extent.off / ORIOLEDB_SEGMENT_SIZE;
@@ -3281,8 +3275,7 @@ perform_writeback(IOWriteBack *writeback)
 				flushAfter;
 	uint64		offset = InvalidFileExtentOff - 1;
 	off_t		blcksz = 0;
-	Oid			datoid = InvalidOid,
-				relnode = InvalidOid;
+	ORelOids	oids = {0};
 	File		file = -1;
 	int			segno = 0;
 	int			chkpNum = 0;
@@ -3313,7 +3306,8 @@ perform_writeback(IOWriteBack *writeback)
 	{
 		TreeOffset	cur = writeback->extents[i];
 
-		if (datoid != cur.datoid || relnode != cur.relnode ||
+		if (oids.datoid != cur.key.oids.datoid ||
+			oids.relnode != cur.key.oids.relnode ||
 			segno != cur.segno || chkpNum != cur.chkpNum)
 		{
 			if (use_mmap)
@@ -3334,15 +3328,14 @@ perform_writeback(IOWriteBack *writeback)
 			}
 
 			blcksz = cur.compressed ? ORIOLEDB_COMP_BLCKSZ : ORIOLEDB_BLCKSZ;
-			datoid = cur.datoid;
-			relnode = cur.relnode;
+			oids = cur.key.oids;
 			segno = cur.segno;
 			chkpNum = cur.chkpNum;
 			if (!use_mmap)
 			{
 				char	   *filename;
 
-				filename = btree_filename(datoid, relnode, segno, chkpNum);
+				filename = btree_filename(cur.key, segno, chkpNum);
 				file = PathNameOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
 				pfree(filename);
 				offset = cur.fileExtent.off;
@@ -3400,8 +3393,7 @@ typedef void (*RelnodeFileCallback) (const char *filename, uint32 segno,
  * Guarantees that at first we process the first data file.
  */
 static bool
-iterate_relnode_files(Oid datoid, Oid relnode, RelnodeFileCallback callback,
-					  void *arg)
+iterate_relnode_files(OIndexKey key, RelnodeFileCallback callback, void *arg)
 {
 	struct dirent *file;
 	DIR		   *dir;
@@ -3409,7 +3401,8 @@ iterate_relnode_files(Oid datoid, Oid relnode, RelnodeFileCallback callback,
 	bool		first_file_deleted = false;
 	char	   *db_prefix;
 
-	o_get_prefixes_for_relnode(datoid, relnode, NULL, &db_prefix);
+	o_get_prefixes_for_tablespace(key.oids.datoid, key.tablespace,
+								  NULL, &db_prefix);
 
 	dir = opendir(db_prefix);
 
@@ -3429,16 +3422,14 @@ iterate_relnode_files(Oid datoid, Oid relnode, RelnodeFileCallback callback,
 			 (!strcmp(file_ext, "tmp") || !strcmp(file_ext, "map") ||
 			  !strcmp(file_ext, "evt")) &&
 			 (file_ext_p = file_ext)) ||
-			sscanf(file->d_name, "%10u.%10u",
-				   &file_relnode, &file_segno) == 2 ||
-			sscanf(file->d_name, "%10u",
-				   &file_relnode) == 1)
+			sscanf(file->d_name, "%10u.%10u", &file_relnode, &file_segno) == 2 ||
+			sscanf(file->d_name, "%10u", &file_relnode) == 1)
 		{
-			if (relnode == file_relnode)
+			if (key.oids.relnode == file_relnode)
 			{
 				if (!orioledb_s3_mode && !first_file_deleted)
 				{
-					filename = psprintf("%s/%u", db_prefix, relnode);
+					filename = psprintf("%s/%u", db_prefix, key.oids.relnode);
 					callback(filename, 0, NULL, arg);
 					pfree(filename);
 					first_file_deleted = true;
@@ -3476,9 +3467,9 @@ unlink_callback(const char *filename, uint32 segno, char *ext, void *arg)
 }
 
 bool
-cleanup_btree_files(Oid datoid, Oid relnode, bool fsync)
+cleanup_btree_files(OIndexKey key, bool fsync)
 {
-	return iterate_relnode_files(datoid, relnode, unlink_callback, (void *) &fsync);
+	return iterate_relnode_files(key, unlink_callback, (void *) &fsync);
 }
 
 static void
@@ -3489,18 +3480,9 @@ fsync_callback(const char *filename, uint32 segno, char *ext, void *arg)
 }
 
 bool
-fsync_btree_files(Oid datoid, Oid relnode)
+fsync_btree_files(OIndexKey key)
 {
-	char	   *prefix;
-	char	   *db_prefix;
-
-	o_get_prefixes_for_relnode(datoid, relnode,
-							   &prefix, &db_prefix);
-	o_verify_dir_exists_or_create(prefix, NULL, NULL);
-	o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
-	pfree(db_prefix);
-
-	return iterate_relnode_files(datoid, relnode, fsync_callback, NULL);
+	return iterate_relnode_files(key, fsync_callback, NULL);
 }
 
 void
@@ -3547,8 +3529,8 @@ try_to_punch_holes(BTreeDescr *desc)
 			continue;
 		}
 
-		tag.datoid = desc->oids.datoid;
-		tag.relnode = desc->oids.relnode;
+		tag.key.oids = desc->oids;
+		tag.key.tablespace = desc->tablespace;
 		tag.type = 't';
 		tag.num = chkp_num;
 		if (!seq_buf_file_exist(&tag))

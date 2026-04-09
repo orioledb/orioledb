@@ -816,6 +816,17 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 	int			i;
 	Oid			hash_opclass;
 	Oid			hash_opfamily;
+	char	   *prefix;
+	char	   *db_prefix;
+
+	if (tablespace == 0)
+		tablespace = MyDatabaseTableSpace;
+	Assert(tablespace);
+
+	o_get_prefixes_for_tablespace(oids.datoid, tablespace, &prefix, &db_prefix);
+	o_verify_dir_exists_or_create(prefix, NULL, NULL);
+	o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+	pfree(db_prefix);
 
 	o_table = palloc0(sizeof(OTable));
 	o_table->nfields = tupdesc->natts;
@@ -823,6 +834,7 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 	o_table->fields = palloc0(o_table->nfields * sizeof(OTableField));
 	o_table->oids = oids;
 	o_table->tablespace = tablespace;
+	Assert(o_table->tablespace);
 	o_table->tid_btree_ops_oid = GetDefaultOpClass(TIDOID, BTREE_AM_OID);
 
 	hash_opclass = GetDefaultOpClass(TIDOID, HASH_AM_OID);
@@ -1021,7 +1033,7 @@ index_keys_cmp(const void *p1, const void *p2)
 }
 
 static OTableIndexOidsKey *
-o_table_make_index_keys(OTable *table, int *num)
+o_table_make_index_oids_keys(OTable *table, int *num)
 {
 	OTableIndexOidsKey *keys;
 	int			keys_num = 0;
@@ -1073,41 +1085,52 @@ o_table_make_index_keys(OTable *table, int *num)
 }
 
 /*
- * Returns array of ORelOids for each table index (including TOAST).
+ * Returns array of OIndexKey for each table index (including TOAST).
  *
  * Array is allocated in CurTransactionContext.
  */
-ORelOids *
-o_table_make_index_oids(OTable *table, int *num)
+OIndexKey *
+o_table_make_index_keys(OTable *table, int *num)
 {
-	ORelOids   *oids;
-	int			oids_num;
+	OIndexKey  *trees;
+	int			trees_num;
 	int			i;
 
 	Assert(table && num);
 
-	oids_num = table->nindices;
-	oids = (ORelOids *) palloc(sizeof(ORelOids) * (oids_num + 3));
-	for (i = 0; i < oids_num; i++)
-		oids[i] = table->indices[i].oids;
+	trees_num = table->nindices;
+	trees = (OIndexKey *) palloc(sizeof(OIndexKey) * (trees_num + 3));
+	for (i = 0; i < trees_num; i++)
+	{
+		trees[i].oids = table->indices[i].oids;
+		trees[i].tablespace = table->indices[i].tablespace;
+	}
 
 	if (ORelOidsIsValid(table->bridge_oids))
 	{
-		oids[oids_num++] = table->bridge_oids;
+		trees[trees_num].oids = table->bridge_oids;
+		trees[trees_num].tablespace = table->tablespace;
+		trees_num++;
 	}
 
 	if (ORelOidsIsValid(table->toast_oids))
 	{
-		oids[oids_num++] = table->toast_oids;
+		trees[trees_num].oids = table->toast_oids;
+		trees[trees_num].tablespace = table->tablespace;
+		trees_num++;
 	}
 
 	/* ctid primary index if needed */
 	if (table->nindices == 0 ||
 		table->indices[PrimaryIndexNumber].type != oIndexPrimary)
-		oids[oids_num++] = table->oids;
+	{
+		trees[trees_num].oids = table->oids;
+		trees[trees_num].tablespace = table->tablespace;
+		trees_num++;
+	}
 
-	*num = oids_num;
-	return oids;
+	*num = trees_num;
+	return trees;
 }
 
 /*
@@ -1125,8 +1148,8 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 				j = 0;
 	bool		reuse_relnode = false;
 
-	old_keys = o_table_make_index_keys(old_table, &old_keys_num);
-	new_keys = o_table_make_index_keys(new_table, &new_keys_num);
+	old_keys = o_table_make_index_oids_keys(old_table, &old_keys_num);
+	new_keys = o_table_make_index_oids_keys(new_table, &new_keys_num);
 
 	while (i < old_keys_num || j < new_keys_num)
 	{
@@ -1747,12 +1770,12 @@ o_tables_drop_all_callback(ORelOids oids, void *arg)
 
 		if (table)
 		{
-			ORelOids   *treeOids;
-			int			numTreeOids;
+			OIndexKey  *trees;
+			int			numTrees;
 
-			treeOids = o_table_make_index_oids(table, &numTreeOids);
-			add_undo_drop_relnode(oids, treeOids, numTreeOids);
-			pfree(treeOids);
+			trees = o_table_make_index_keys(table, &numTrees);
+			add_undo_drop_relnode(oids, trees, numTrees);
+			pfree(trees);
 			o_table_free(table);
 		}
 	}
@@ -2266,10 +2289,6 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, boo
 	{
 		toastRel = table_open(rel->rd_rel->reltoastrelid, AccessShareLock);
 		ORelOidsSetFromRel(oTable->toast_oids, toastRel);
-
-		o_tablespace_cache_add_relnode(oTable->toast_oids.datoid,
-									   oTable->toast_oids.relnode,
-									   oTable->tablespace);
 		table_close(toastRel, AccessShareLock);
 	}
 	else
@@ -2296,9 +2315,6 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, boo
 		{
 			indexRel = relation_open(oTable->indices[i].oids.reloid, AccessShareLock);
 			ORelOidsSetFromRel(oTable->indices[i].oids, indexRel);
-			o_tablespace_cache_add_relnode(oTable->indices[i].oids.datoid,
-										   oTable->indices[i].oids.relnode,
-										   oTable->indices[i].tablespace);
 			relation_close(indexRel, AccessShareLock);
 		}
 	}

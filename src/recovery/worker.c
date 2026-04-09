@@ -419,8 +419,9 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 														 false,
 														 NULL);
 					}
-					o_get_prefixes_for_relnode(indexDescr->oids.datoid,
-											   indexDescr->oids.relnode, &prefix, &db_prefix);
+					o_get_prefixes_for_tablespace(oids.datoid,
+												  indexDescr->desc.tablespace,
+												  &prefix, &db_prefix);
 					o_verify_dir_exists_or_create(prefix, NULL, NULL);
 					o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
 					pfree(db_prefix);
@@ -465,8 +466,6 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				OTableDescr *o_descr;
 				OTableDescr *old_o_descr = NULL;
 				MemoryContext prev_context;
-				char	   *prefix;
-				char	   *db_prefix;
 
 				prev_context = MemoryContextSwitchTo(recovery_context);
 
@@ -478,12 +477,6 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				o_table = o_tables_get_extended(msg->oids, build_fetch_context(&o_non_deleted_snapshot, msg->o_table_version));
 				Assert(o_table);
 				Assert(o_table->version == msg->o_table_version);
-
-				o_get_prefixes_for_relnode(msg->oids.datoid, msg->oids.relnode,
-										   &prefix, &db_prefix);
-				o_verify_dir_exists_or_create(prefix, NULL, NULL);
-				o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
-				pfree(db_prefix);
 
 				if (msg->isrebuild)
 				{

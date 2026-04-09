@@ -29,6 +29,7 @@
 
 #include "orioledb.h"
 
+#include "btree/undo.h"
 #include "catalog/o_tables.h"
 #include "catalog/sys_trees.h"
 #include "miscadmin.h"
@@ -647,20 +648,7 @@ o_set_sys_cache_search_datoid(Oid datoid)
 	}
 }
 
-/* o_tablespace_cache.c */
-
-typedef struct OTablespace
-{
-	OSysCacheKey1 key;
-	Oid			tablespace;
-} OTablespace;
-
-O_SYS_CACHE_DECLS(tablespace_cache, OTablespace, 1);
-extern void o_tablespace_cache_add_relnode(Oid datoid, Oid relnode, Oid tablespace);
-extern void o_tablespace_cache_add_datoid(Oid datoid, Oid tablespace);
-extern void o_tablespace_cache_add_table(OTable *o_table);
-extern void o_tablespace_cache_tup_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg);
-extern void o_get_prefixes_for_relnode(Oid datoid, Oid relnode, char **prefix, char **db_prefix);
-extern void o_get_prefixes_for_tablespace(Oid datoid, Oid tablespace, char **prefix, char **db_prefix);
+extern void o_get_prefixes_for_tablespace(Oid datoid, Oid tablespace,
+										  char **prefix, char **db_prefix);
 
 #endif							/* __O_SYS_CACHE_H__ */

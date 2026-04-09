@@ -18,6 +18,7 @@
 #include "btree/io.h"
 #include "btree/iterator.h"
 #include "btree/modify.h"
+#include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "catalog/free_extents.h"
 #include "catalog/o_indices.h"
@@ -770,8 +771,10 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 		index = make_o_index(o_table, cur_ix, OIndexVersionPass);
 		indexDescr = palloc0(sizeof(OIndexDescr));
 		o_index_fill_descr(indexDescr, index, o_table, oTableSourceTable);
-		index_btree_desc_init(&indexDescr->desc, indexDescr->compress, indexDescr->fillfactor,
-							  indexDescr->oids, index->indexType, index->table_persistence, index->createOxid,
+		index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
+							  indexDescr->fillfactor, indexDescr->oids,
+							  index->indexType, index->table_persistence,
+							  index->tablespace, index->createOxid,
 							  indexDescr);
 		free_o_index(index);
 		descr->indices[cur_ix] = indexDescr;
@@ -780,9 +783,10 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 	index = make_o_index(o_table, TOASTIndexNumber, OIndexVersionPass);
 	indexDescr = palloc0(sizeof(OIndexDescr));
 	o_index_fill_descr(indexDescr, index, o_table, oTableSourceTable);
-	index_btree_desc_init(&indexDescr->desc, indexDescr->compress, indexDescr->fillfactor,
-						  indexDescr->oids, index->indexType,
-						  index->table_persistence, index->createOxid, indexDescr);
+	index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
+						  indexDescr->fillfactor, indexDescr->oids,
+						  index->indexType, index->table_persistence,
+						  index->tablespace, index->createOxid, indexDescr);
 	free_o_index(index);
 	descr->toast = indexDescr;
 
@@ -794,7 +798,8 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 		index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
 							  indexDescr->fillfactor,
 							  indexDescr->oids, index->indexType,
-							  index->table_persistence, index->createOxid, indexDescr);
+							  index->table_persistence, index->tablespace,
+							  index->createOxid, indexDescr);
 		free_o_index(index);
 		descr->bridge = indexDescr;
 	}
@@ -1229,13 +1234,13 @@ o_insert_shared_root_placeholder(Oid datoid, Oid relnode)
 }
 
 void
-cleanup_btree(Oid datoid, Oid relnode, bool files, bool fsync)
+cleanup_btree(OIndexKey ix_key, bool files, bool fsync)
 {
 	SharedRootInfoKey key;
 	SharedRootInfo *shared = NULL;
 
-	key.datoid = datoid;
-	key.relnode = relnode;
+	key.datoid = ix_key.oids.datoid;
+	key.relnode = ix_key.oids.relnode;
 
 	shared = o_find_shared_root_info(&key);
 
@@ -1243,7 +1248,7 @@ cleanup_btree(Oid datoid, Oid relnode, bool files, bool fsync)
 	{
 		bool		drop_result PG_USED_FOR_ASSERTS_ONLY;
 
-		drop_result = o_drop_shared_root_info(datoid, relnode);
+		drop_result = o_drop_shared_root_info(key.datoid, key.relnode);
 		Assert(drop_result);
 		if (!shared->placeholder)
 			o_btree_cleanup_pages(shared->rootInfo.rootPageBlkno,
@@ -1252,7 +1257,7 @@ cleanup_btree(Oid datoid, Oid relnode, bool files, bool fsync)
 		pfree(shared);
 	}
 	if (files)
-		cleanup_btree_files(key.datoid, key.relnode, fsync);
+		cleanup_btree_files(ix_key, fsync);
 }
 
 bool
@@ -1298,8 +1303,10 @@ get_index_descr(ORelOids ixOids, OIndexType ixType,
 	mcxt = MemoryContextSwitchTo(descrCxt);
 	o_index_fill_descr(result, oIndex, o_table_source, source);
 	MemoryContextSwitchTo(mcxt);
-	index_btree_desc_init(&result->desc, result->compress, result->fillfactor, result->oids,
-						  oIndex->indexType, oIndex->table_persistence, oIndex->createOxid, result);
+	index_btree_desc_init(&result->desc, result->compress, result->fillfactor,
+						  result->oids, oIndex->indexType,
+						  oIndex->table_persistence, oIndex->tablespace,
+						  oIndex->createOxid, result);
 	free_o_index(oIndex);
 
 	return result;
@@ -1323,8 +1330,10 @@ recreate_index_descr(OIndexDescr *descr)
 	mcxt = MemoryContextSwitchTo(descrCxt);
 	o_index_fill_descr(descr, oIndex, &default_table_fetch_context, oTableSourceContext);
 	MemoryContextSwitchTo(mcxt);
-	index_btree_desc_init(&descr->desc, descr->compress, descr->fillfactor, descr->oids,
-						  oIndex->indexType, oIndex->table_persistence, oIndex->createOxid, descr);
+	index_btree_desc_init(&descr->desc, descr->compress, descr->fillfactor,
+						  descr->oids, oIndex->indexType,
+						  oIndex->table_persistence, oIndex->tablespace,
+						  oIndex->createOxid, descr);
 	descr->refcnt = refcnt;
 	free_o_index(oIndex);
 	(void) o_btree_try_use_shmem(&descr->desc);

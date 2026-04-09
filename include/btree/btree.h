@@ -175,6 +175,7 @@ struct BTreeDescr
 	void	   *arg;
 	OSmgr		smgr;
 	ORelOids	oids;
+	Oid			tablespace;
 	OIndexType	type;
 	OPagePool  *ppool;
 	OCompress	compress;

@@ -23,6 +23,7 @@
 #include "s3/headers.h"
 #include "s3/worker.h"
 
+#include "catalog/pg_tablespace.h"
 #include "common/file_perm.h"
 #include "common/file_utils.h"
 #include "common/hashfn.h"
@@ -32,6 +33,33 @@
 #define S3_HEADER_BUFFERS_PER_GROUP 4
 #define S3_HEADER_BUFFERS_PER_GROUP_NUM_BITS 2
 #define S3_HEADER_NUM_VALUES (ORIOLEDB_SEGMENT_SIZE / ORIOLEDB_S3_PART_SIZE)
+
+/*
+ * Hash an S3HeaderTag using only the fields that participate in
+ * S3HeaderTagsIsEqual: datoid, relnode, tablespace, checkpointNum, segNum.
+ * reloid and ixType must be excluded so that every code path that
+ * constructs a tag (including iterate_tablespace_files, which cannot know
+ * reloid/ixType from the filename) always lands in the same hash group.
+ */
+static inline uint32
+s3_header_tag_hash(S3HeaderTag tag)
+{
+	struct
+	{
+		Oid			datoid;
+		Oid			relnode;
+		Oid			tablespace;
+		uint32		checkpointNum;
+		int			segNum;
+	}			hashKey;
+
+	hashKey.datoid = tag.key.oids.datoid;
+	hashKey.relnode = tag.key.oids.relnode;
+	hashKey.tablespace = tag.key.tablespace;
+	hashKey.checkpointNum = tag.checkpointNum;
+	hashKey.segNum = tag.segNum;
+	return hash_any((unsigned char *) &hashKey, sizeof(hashKey));
+}
 
 typedef struct
 {
@@ -139,8 +167,8 @@ s3_headers_shmem_init(Pointer buf, bool found)
 
 				LWLockInitialize(&buffer->bufferCtlLock,
 								 meta->bufferCtlTrancheId);
-				buffer->tag.datoid = InvalidOid;
-				buffer->tag.relnode = InvalidOid;
+				buffer->tag.key.oids.datoid = InvalidOid;
+				buffer->tag.key.oids.relnode = InvalidOid;
 				buffer->tag.checkpointNum = 0;
 				buffer->tag.segNum = 0;
 				buffer->usageCount = 0;
@@ -178,8 +206,7 @@ read_from_file(S3HeaderTag tag, uint32 values[S3_HEADER_NUM_VALUES],
 
 	Assert(headerSize <= BLCKSZ);
 
-	filename = btree_filename(tag.datoid, tag.relnode, tag.segNum,
-							  tag.checkpointNum);
+	filename = btree_filename(tag.key, tag.segNum, tag.checkpointNum);
 	fd = BasicOpenFilePerm(filename, O_RDWR | O_CREAT | PG_BINARY, pg_file_create_mode);
 	if (fd <= 0)
 		ereport(FATAL,
@@ -223,8 +250,7 @@ write_to_file(S3HeaderTag tag, uint32 values[S3_HEADER_NUM_VALUES])
 
 	Assert(headerSize <= BLCKSZ);
 
-	filename = btree_filename(tag.datoid, tag.relnode, tag.segNum,
-							  tag.checkpointNum);
+	filename = btree_filename(tag.key, tag.segNum, tag.checkpointNum);
 	fd = BasicOpenFilePerm(filename, O_RDWR | O_CREAT | PG_BINARY, pg_file_create_mode);
 	if (fd <= 0)
 		ereport(FATAL,
@@ -283,7 +309,7 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 	LWLockRelease(&group->groupCtlLock);
 
 
-	if (OidIsValid(tag.datoid) && OidIsValid(tag.relnode))
+	if (OidIsValid(tag.key.oids.datoid) && OidIsValid(tag.key.oids.relnode))
 	{
 		read_from_file(tag, newValues, &newDirty);
 	}
@@ -318,8 +344,8 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 		char	   *filename;
 		int			fd;
 
-		filename = btree_filename(prevTag.datoid, prevTag.relnode,
-								  prevTag.segNum, prevTag.checkpointNum);
+		filename = btree_filename(prevTag.key, prevTag.segNum,
+								  prevTag.checkpointNum);
 		fd = BasicOpenFilePerm(filename, O_RDWR | PG_BINARY, pg_file_create_mode);
 		pfree(filename);
 		if (fd > 0)
@@ -336,20 +362,20 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 	{
 		char	   *filename;
 
-		filename = btree_filename(prevTag.datoid, prevTag.relnode,
-								  prevTag.segNum, prevTag.checkpointNum);
+		filename = btree_filename(prevTag.key, prevTag.segNum,
+								  prevTag.checkpointNum);
 		unlink(filename);
 		pfree(filename);
 	}
-	else if (OidIsValid(prevTag.datoid) && OidIsValid(prevTag.relnode) && dirty)
+	else if (OidIsValid(prevTag.key.oids.datoid) && OidIsValid(prevTag.key.oids.relnode) && dirty)
 	{
 		write_to_file(prevTag, oldValues);
 	}
 
 	pg_write_barrier();
 
-	buffer->shadowTag.datoid = InvalidOid;
-	buffer->shadowTag.relnode = InvalidOid;
+	buffer->shadowTag.key.oids.datoid = InvalidOid;
+	buffer->shadowTag.key.oids.relnode = InvalidOid;
 	buffer->shadowTag.segNum = 0;
 	buffer->shadowTag.checkpointNum = 0;
 
@@ -359,7 +385,7 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 static void
 load_header_buffer(S3HeaderTag tag)
 {
-	uint32		hash = hash_any((unsigned char *) &tag, sizeof(tag));
+	uint32		hash = s3_header_tag_hash(tag);
 	S3HeadersBuffersGroup *group = &groups[hash % groupsCount];
 	int			i,
 				victim = 0;
@@ -409,7 +435,7 @@ load_header_buffer(S3HeaderTag tag)
 static void
 check_unlink_file(S3HeaderTag tag)
 {
-	uint32		hash = hash_any((unsigned char *) &tag, sizeof(tag));
+	uint32		hash = s3_header_tag_hash(tag);
 	S3HeadersBuffersGroup *group = &groups[hash % groupsCount];
 	int			victim = 0;
 	S3HeaderTag newTag;
@@ -441,8 +467,8 @@ check_unlink_file(S3HeaderTag tag)
 	if (victim < S3_HEADER_BUFFERS_PER_GROUP)
 	{
 		LWLockAcquire(&group->buffers[victim].bufferCtlLock, LW_EXCLUSIVE);
-		newTag.datoid = InvalidOid;
-		newTag.relnode = InvalidOid;
+		newTag.key.oids.datoid = InvalidOid;
+		newTag.key.oids.relnode = InvalidOid;
 		newTag.checkpointNum = 0;
 		newTag.segNum = 0;
 		change_buffer(group, victim, newTag);
@@ -453,7 +479,7 @@ check_unlink_file(S3HeaderTag tag)
 static uint32
 s3_header_read_value(S3HeaderTag tag, int index)
 {
-	uint32		hash = hash_any((unsigned char *) &tag, sizeof(tag));
+	uint32		hash = s3_header_tag_hash(tag);
 	S3HeadersBuffersGroup *group = &groups[hash % groupsCount];
 	int			i;
 
@@ -508,7 +534,7 @@ s3_header_read_value(S3HeaderTag tag, int index)
 uint32
 s3_header_get_load_id(S3HeaderTag tag)
 {
-	uint32		hash = hash_any((unsigned char *) &tag, sizeof(tag));
+	uint32		hash = s3_header_tag_hash(tag);
 	S3HeadersBuffersGroup *group = &groups[hash % groupsCount];
 	int			i;
 
@@ -546,7 +572,7 @@ s3_header_compare_and_swap_extended(S3HeaderTag tag, int index,
 									uint32 *oldValue, uint32 newValue,
 									uint32 *bufferLoadId)
 {
-	uint32		hash = hash_any((unsigned char *) &tag, sizeof(tag));
+	uint32		hash = s3_header_tag_hash(tag);
 	S3HeadersBuffersGroup *group = &groups[hash % groupsCount];
 	int			i;
 
@@ -633,7 +659,8 @@ s3_header_compare_and_swap(S3HeaderTag tag, int index,
 /*
  * We allow only one part to be locked simultaneosly.
  */
-static S3HeaderTag curLockedTag = {InvalidOid, InvalidOid, 0, 0};
+static S3HeaderTag curLockedTag = {{{InvalidOid, InvalidOid, InvalidOid},
+InvalidIndexNumber}, 0, 0};
 static int	curLockedIndex = 0;
 
 /*
@@ -645,7 +672,8 @@ s3_header_lock_part(S3HeaderTag tag, int index, uint32 *loadId)
 {
 	uint32		value;
 
-	Assert(!OidIsValid(curLockedTag.datoid) && !OidIsValid(curLockedTag.relnode));
+	Assert(!OidIsValid(curLockedTag.key.oids.datoid) &&
+		   !OidIsValid(curLockedTag.key.oids.relnode));
 
 	value = s3_header_read_value(tag, index);
 
@@ -659,8 +687,7 @@ s3_header_lock_part(S3HeaderTag tag, int index, uint32 *loadId)
 
 		if (status == S3PartStatusNotLoaded)
 		{
-			s3_load_file_part(tag.checkpointNum, tag.datoid,
-							  tag.relnode, tag.segNum, index);
+			s3_load_file_part(tag.checkpointNum, tag.key, tag.segNum, index);
 			value = s3_header_read_value(tag, index);
 			continue;
 		}
@@ -733,7 +760,8 @@ s3_header_mark_part_loading(S3HeaderTag tag, int index)
 
 				result = pg_atomic_fetch_add_u64(&meta->numberOfLoadedParts, 1);
 				elog(DEBUG1, "s3_header_mark_part_loading(%u %u %u %d %d) - %llu",
-					 tag.datoid, tag.relnode, tag.checkpointNum, tag.segNum, index,
+					 tag.key.oids.datoid, tag.key.oids.relnode,
+					 tag.checkpointNum, tag.segNum, index,
 					 (unsigned long long) result);
 			}
 			return status;
@@ -784,8 +812,8 @@ s3_header_unlock_part(S3HeaderTag tag, int index, bool setDirty)
 
 		if (s3_header_compare_and_swap(tag, index, &value, newValue))
 		{
-			curLockedTag.datoid = InvalidOid;
-			curLockedTag.relnode = InvalidOid;
+			curLockedTag.key.oids.datoid = InvalidOid;
+			curLockedTag.key.oids.relnode = InvalidOid;
 			curLockedTag.checkpointNum = 0;
 			curLockedTag.segNum = 0;
 			curLockedIndex = 0;
@@ -931,7 +959,7 @@ sync_buffer(S3HeaderBuffer *buffer)
 	}
 
 	tag = buffer->tag;
-	if (OidIsValid(tag.datoid) && OidIsValid(tag.relnode) && dirty)
+	if (OidIsValid(tag.key.oids.datoid) && OidIsValid(tag.key.oids.relnode) && dirty)
 		write_to_file(tag, oldValues);
 
 	LWLockRelease(&buffer->bufferCtlLock);
@@ -953,7 +981,8 @@ s3_headers_sync(void)
 void
 s3_headers_error_cleanup(void)
 {
-	if (!OidIsValid(curLockedTag.datoid) || !OidIsValid(curLockedTag.relnode))
+	if (!OidIsValid(curLockedTag.key.oids.datoid) ||
+		!OidIsValid(curLockedTag.key.oids.relnode))
 		return;
 
 	s3_header_unlock_part(curLockedTag, curLockedIndex, false);
@@ -962,17 +991,18 @@ s3_headers_error_cleanup(void)
 typedef void (*IterateFilesCallback) (S3HeaderTag tag);
 
 static void
-iterate_files(IterateFilesCallback callback)
+iterate_tablespace_files(Oid tablespace, char *path, IterateFilesCallback callback)
 {
 	DIR		   *dir,
 			   *dbDir;
 	struct dirent *file,
 			   *dbFile;
 
-	dir = opendir(ORIOLEDB_DATA_DIR);
+	dir = opendir(path);
 	if (dir == NULL)
 		ereport(PANIC, (errcode_for_file_access(),
-						errmsg("could not open the orioledb data directory: %m")));
+						errmsg("could not open orioledb data directory: %s: %m",
+							   path)));
 
 	while (errno = 0, (file = readdir(dir)) != NULL)
 	{
@@ -990,30 +1020,32 @@ iterate_files(IterateFilesCallback callback)
 
 		while (errno = 0, (dbFile = readdir(dbDir)) != NULL)
 		{
-			uint32		file_reloid,
+			uint32		file_relnode,
 						file_chkp,
 						file_segno;
-			S3HeaderTag tag;
+			S3HeaderTag tag = {0};
 			int			pos,
 						len = strlen(dbFile->d_name);
 
 			if (sscanf(dbFile->d_name, "%10u-%10u%n",
-					   &file_reloid, &file_chkp, &pos) == 2 &&
+					   &file_relnode, &file_chkp, &pos) == 2 &&
 				pos == len)
 			{
+				tag.key.oids.datoid = dbOid;
+				tag.key.oids.relnode = file_relnode;
+				tag.key.tablespace = tablespace;
 				tag.checkpointNum = file_chkp;
-				tag.datoid = dbOid;
-				tag.relnode = file_reloid;
 				tag.segNum = 0;
 				callback(tag);
 			}
 			else if (sscanf(dbFile->d_name, "%10u.%10u-%10u%n",
-							&file_reloid, &file_segno, &file_chkp, &pos) == 3 &&
+							&file_relnode, &file_segno, &file_chkp, &pos) == 3 &&
 					 pos == len)
 			{
+				tag.key.oids.datoid = dbOid;
+				tag.key.oids.relnode = file_relnode;
+				tag.key.tablespace = tablespace;
 				tag.checkpointNum = file_chkp;
-				tag.datoid = dbOid;
-				tag.relnode = file_reloid;
 				tag.segNum = file_segno;
 				callback(tag);
 			}
@@ -1022,6 +1054,77 @@ iterate_files(IterateFilesCallback callback)
 	}
 
 	closedir(dir);
+
+}
+
+static void
+iterate_files(IterateFilesCallback callback)
+{
+	DIR		   *dir;
+	char		path[MAXPGPATH];
+	char		targetpath[MAXPGPATH];
+	struct dirent *file;
+
+#define PG_TBLSPC "pg_tblspc"
+
+	path[0] = '\0';
+	strlcat(path, ORIOLEDB_DATA_DIR, MAXPGPATH);
+	iterate_tablespace_files(DEFAULTTABLESPACE_OID, path, callback);
+
+	dir = opendir(PG_TBLSPC);
+	while (errno = 0, (file = readdir(dir)) != NULL)
+	{
+		struct stat st;
+		int			rllen;
+		Oid			tablespace;
+
+		/* Skip special stuff */
+		if (strcmp(file->d_name, ".") == 0 || strcmp(file->d_name, "..") == 0)
+			continue;
+
+		tablespace = pg_strtoint64(file->d_name);
+		Assert(OidIsValid(tablespace));
+		path[0] = '\0';
+		pg_snprintf(path, MAXPGPATH,
+					PG_TBLSPC "/%s/" TABLESPACE_VERSION_DIRECTORY,
+					file->d_name);
+		if (lstat(path, &st) < 0)
+		{
+			ereport(PANIC,
+					(errcode_for_file_access(),
+					 errmsg("could not stat file \"%s\": %m",
+							file->d_name)));
+		}
+
+		if (!S_ISLNK(st.st_mode))
+		{
+			strlcat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
+			iterate_tablespace_files(tablespace, path, callback);
+		}
+		else
+		{
+			rllen = readlink(path, targetpath, sizeof(targetpath));
+			if (rllen < 0)
+				ereport(ERROR,
+						(errcode_for_file_access(),
+						 errmsg("could not read symbolic link \"%s\": %m",
+								path)));
+			if (rllen >= sizeof(targetpath))
+				ereport(ERROR,
+						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+						 errmsg("symbolic link \"%s\" target is too long",
+								path)));
+			targetpath[rllen] = '\0';
+
+			path[0] = '\0';
+			pg_snprintf(path, MAXPGPATH,
+						"%s/" ORIOLEDB_DATA_DIR,
+						targetpath);
+			iterate_tablespace_files(tablespace, path, callback);
+		}
+	}
+	closedir(dir);
+#undef PG_TBLSPC
 }
 
 static off_t totalFilesSize;
@@ -1040,8 +1143,7 @@ initial_parts_counting_callback(S3HeaderTag tag)
 
 	read_from_file(tag, values, &dirty);
 
-	filename = btree_filename(tag.datoid, tag.relnode, tag.segNum,
-							  tag.checkpointNum);
+	filename = btree_filename(tag.key, tag.segNum, tag.checkpointNum);
 	fd = BasicOpenFilePerm(filename, O_RDWR | PG_BINARY, pg_file_create_mode);
 	if (fd <= 0)
 		ereport(FATAL,
@@ -1081,7 +1183,8 @@ initial_parts_counting_callback(S3HeaderTag tag)
 
 				result = pg_atomic_fetch_add_u64(&meta->numberOfLoadedParts, 1);
 				elog(DEBUG1, "initial_parts_counting_callback(%u %u %u %d %d) - %llu",
-					 tag.datoid, tag.relnode, tag.checkpointNum, tag.segNum, i,
+					 tag.key.oids.datoid, tag.key.oids.relnode,
+					 tag.checkpointNum, tag.segNum, i,
 					 (unsigned long long) result);
 				totalOccupiedSize += Min(ORIOLEDB_S3_PART_SIZE, fileSize - offset);
 			}
@@ -1119,8 +1222,7 @@ eviction_callback(S3HeaderTag tag)
 	int			numParts;
 	bool		haveLoadedParts = false;
 
-	filename = btree_filename(tag.datoid, tag.relnode, tag.segNum,
-							  tag.checkpointNum);
+	filename = btree_filename(tag.key, tag.segNum, tag.checkpointNum);
 	fd = BasicOpenFilePerm(filename, O_RDWR | PG_BINARY, pg_file_create_mode);
 	pfree(filename);
 
@@ -1178,7 +1280,9 @@ eviction_callback(S3HeaderTag tag)
 					off_t		offset = (off_t) i * (off_t) ORIOLEDB_S3_PART_SIZE + (off_t) ORIOLEDB_BLCKSZ;
 					uint64		result;
 
-					elog(DEBUG1, "S3 evict %u %u %u %d %d", tag.datoid, tag.relnode, tag.checkpointNum, tag.segNum, i);
+					elog(DEBUG1, "S3 evict %u %u %u %d %d",
+						 tag.key.oids.datoid, tag.key.oids.relnode,
+						 tag.checkpointNum, tag.segNum, i);
 					pg_pwrite_zeros(fd, Min(offset + ORIOLEDB_S3_PART_SIZE, fileSize) - offset, offset);
 
 					result = pg_atomic_fetch_sub_u64(&meta->numberOfLoadedParts, 1);

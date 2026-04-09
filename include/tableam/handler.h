@@ -15,6 +15,7 @@
 #define __TABLEAM_HANDLER_H__
 
 #include "btree/btree.h"
+#include "btree/undo.h"
 #include "catalog/o_tables.h"
 
 #include "access/tableam.h"
@@ -125,7 +126,7 @@ get_ea_counters(OrioleDBPageDesc *desc)
 			ix_counter->evict++; \
 	}
 
-extern void cleanup_btree(Oid datoid, Oid relnode, bool files, bool fsync);
+extern void cleanup_btree(OIndexKey ix_key, bool files, bool fsync);
 extern bool o_drop_shared_root_info(Oid datoid, Oid relnode);
 extern void o_tableam_descr_init(void);
 extern void o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode);

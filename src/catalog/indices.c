@@ -239,12 +239,12 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 {
 	OSnapshot	oSnapshot;
 	OXid		oxid;
-	int			oldTreeOidsNum,
-				newTreeOidsNum;
-	ORelOids	oldOids,
-			   *oldTreeOids,
-				newOids,
-			   *newTreeOids;
+	int			oldTreesNum,
+				newTreesNum;
+	ORelOids	oldOids;
+	OIndexKey  *oldTrees;
+	ORelOids	newOids;
+	OIndexKey  *newTrees;
 	bool		is_temp;
 
 	Assert(old_o_table != NULL && o_table != NULL);
@@ -254,17 +254,17 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
-	oldTreeOids = o_table_make_index_oids(old_o_table, &oldTreeOidsNum);
-	newTreeOids = o_table_make_index_oids(o_table, &newTreeOidsNum);
+	oldTrees = o_table_make_index_keys(old_o_table, &oldTreesNum);
+	newTrees = o_table_make_index_keys(o_table, &newTreesNum);
 
 	o_tables_drop_by_oids(old_o_table->oids, oxid, oSnapshot.csn);
 	o_tables_add(o_table, oxid, oSnapshot.csn);
 
 	is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
-	add_undo_truncate_relnode(oldOids, oldTreeOids, oldTreeOidsNum,
-							  newOids, newTreeOids, newTreeOidsNum, !is_temp);
-	pfree(oldTreeOids);
-	pfree(newTreeOids);
+	add_undo_truncate_relnode(oldOids, oldTrees, oldTreesNum,
+							  newOids, newTrees, newTreesNum, !is_temp);
+	pfree(oldTrees);
+	pfree(newTrees);
 }
 
 static void
@@ -478,12 +478,17 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		else
 		{
 			ORelOids	primary_oids;
+			Oid			primary_tablespace;
 
 			primary_oids = ix_type == oIndexPrimary ||
 				!old_o_table->has_primary ?
 				old_o_table->oids :
 				old_o_table->indices[PrimaryIndexNumber].oids;
-			is_build = tbl_data_exists(&primary_oids);
+			primary_tablespace = ix_type == oIndexPrimary ||
+				!old_o_table->has_primary ?
+				old_o_table->tablespace :
+				old_o_table->indices[PrimaryIndexNumber].tablespace;
+			is_build = tbl_data_exists(&primary_oids, primary_tablespace);
 
 			/* Rebuild, assign new oids */
 			if (ix_type == oIndexPrimary)
@@ -553,7 +558,10 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 
 	table_index->oids.datoid = MyDatabaseId;
 	table_index->oids.reloid = index->rd_rel->oid;
+	if (tablespace == 0)
+		tablespace = MyDatabaseTableSpace;
 	table_index->tablespace = tablespace;
+	Assert(table_index->tablespace);
 	table_index->immediate = index->rd_index->indimmediate;
 
 	if (!reuse_relnode && is_build)
@@ -580,7 +588,12 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 		o_tables_update(o_table, oxid, oSnapshot.csn);
 		if (!reuse_relnode)
-			add_undo_create_relnode(o_table->oids, &table_index->oids, 1, !is_temp);
+		{
+			OIndexKey	key = {.oids = table_index->oids,
+			.tablespace = table_index->tablespace};
+
+			add_undo_create_relnode(o_table->oids, &key, 1, !is_temp);
+		}
 		recreate_table_descr_by_oids(oids);
 	}
 
@@ -593,13 +606,27 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		{
 			if (!setting_tbl_tablespace)
 			{
-				o_tablespace_cache_add_table(o_table);
+				char	   *prefix;
+				char	   *db_prefix;
+
+				o_get_prefixes_for_tablespace(MyDatabaseId, tablespace,
+											  &prefix, &db_prefix);
+				o_verify_dir_exists_or_create(prefix, NULL, NULL);
+				o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+				pfree(db_prefix);
 				rebuild_indices_insert_placeholders(descr);
 			}
 		}
 		else if (!setting_tbl_tablespace)
 		{
-			o_tablespace_cache_add_relnode(table_index->oids.datoid, table_index->oids.relnode, tablespace);
+			char	   *prefix;
+			char	   *db_prefix;
+
+			o_get_prefixes_for_tablespace(MyDatabaseId, tablespace,
+										  &prefix, &db_prefix);
+			o_verify_dir_exists_or_create(prefix, NULL, NULL);
+			o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+			pfree(db_prefix);
 			o_insert_shared_root_placeholder(table_index->oids.datoid,
 											 table_index->oids.relnode);
 		}
@@ -1409,7 +1436,7 @@ o_calculate_index_workers(BTreeDescr *primary, bool shmem_loaded, int nindices)
 	{
 		Assert(primary);
 
-		if (tbl_data_exists(&primary->oids))
+		if (tbl_data_exists(&primary->oids, primary->tablespace))
 		{
 			if (!shmem_loaded)
 				o_btree_load_shmem(primary);
@@ -2140,7 +2167,6 @@ drop_primary_index(Relation rel, OTable *o_table)
 	old_descr = o_fetch_table_descr(old_o_table->oids);
 	recreate_o_table(old_o_table, o_table);
 	descr = o_fetch_table_descr(o_table->oids);
-	o_tablespace_cache_add_table(o_table);
 	rebuild_indices_insert_placeholders(descr);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
 
@@ -2153,11 +2179,12 @@ drop_secondary_index(OTable *o_table, OIndexNumber ix_num)
 {
 	OSnapshot	oSnapshot;
 	OXid		oxid;
-	ORelOids	deletedOids;
+	OIndexKey	deletedTrees;
 
 	Assert(o_table->indices[ix_num].type != oIndexInvalid);
 
-	deletedOids = o_table->indices[ix_num].oids;
+	deletedTrees.oids = o_table->indices[ix_num].oids;
+	deletedTrees.tablespace = o_table->indices[ix_num].tablespace;
 	o_table->nindices--;
 	if (o_table->nindices > 0)
 	{
@@ -2171,7 +2198,7 @@ drop_secondary_index(OTable *o_table, OIndexNumber ix_num)
 	o_tables_table_meta_lock(o_table);
 	o_tables_update(o_table, oxid, oSnapshot.csn);
 	o_tables_table_meta_unlock(o_table, InvalidOid);
-	add_undo_drop_relnode(o_table->oids, &deletedOids, 1);
+	add_undo_drop_relnode(o_table->oids, &deletedTrees, 1);
 	recreate_table_descr_by_oids(o_table->oids);
 }
 

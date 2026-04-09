@@ -68,11 +68,11 @@ typedef struct
 	Oid			datoid;
 	Oid			relid;
 	Oid			oldRelnode;
-	int			oldNumTreeOids;
+	int			oldNumTrees;
 	Oid			newRelnode;
-	int			newNumTreeOids;
+	int			newNumTrees;
 	bool		fsync;
-	ORelOids	oids[FLEXIBLE_ARRAY_MEMBER];
+	OIndexKey	trees[FLEXIBLE_ARRAY_MEMBER];
 } RelnodeUndoStackItem;
 
 /* size of image in undo log produced by page compaction  */
@@ -159,15 +159,15 @@ extern void get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 extern void update_leaf_header_in_undo(UndoLogType undoType,
 									   BTreeLeafTuphdr *tuphdr,
 									   UndoLocation location);
-extern void add_undo_truncate_relnode(ORelOids oldOids, ORelOids *oldTreeOids,
-									  int oldNumTreeOids,
-									  ORelOids newOids, ORelOids *newTreeOids,
-									  int newNumTreeOids,
+extern void add_undo_truncate_relnode(ORelOids oldOids, OIndexKey *oldTrees,
+									  int oldNumTrees,
+									  ORelOids newOids, OIndexKey *newTrees,
+									  int newNumTrees,
 									  bool fsync);
-extern void add_undo_drop_relnode(ORelOids oids, ORelOids *treeOids,
-								  int numTreeOids);
-extern void add_undo_create_relnode(ORelOids oids, ORelOids *treeOids,
-									int numTreeOids, bool fsync);
+extern void add_undo_drop_relnode(ORelOids oids, OIndexKey *trees,
+								  int numTrees);
+extern void add_undo_create_relnode(ORelOids oids, OIndexKey *trees,
+									int numTrees, bool fsync);
 extern void check_pending_truncates(void);
 extern UndoLocation walk_undo_range_with_buf(UndoLogType undoType, UndoLocation location,
 											 UndoLocation toLoc,

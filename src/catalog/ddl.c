@@ -1889,9 +1889,9 @@ static void
 set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfactor, bool index_bridging)
 {
 	ORelOids	oids,
-				toastOids,
-			   *treeOids;
-	int			numTreeOids;
+				toastOids;
+	OIndexKey  *trees;
+	int			numTrees;
 	OTable	   *o_table;
 	ORelOptions *options = (ORelOptions *) rel->rd_options;
 	OCompress	compress = default_compress,
@@ -1909,12 +1909,7 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 	o_table = o_tables_get(oids);
 
 	if (!only_fillfactor)
-	{
 		o_table->toast_oids = toastOids;
-		o_tablespace_cache_add_relnode(o_table->toast_oids.datoid,
-									   o_table->toast_oids.relnode,
-									   o_table->tablespace);
-	}
 
 	if (options)
 	{
@@ -1985,7 +1980,6 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 			o_table->bridge_oids.relnode = GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
 															   rel->rd_rel->relpersistence);
 			o_table->bridge_oids.reloid = o_table->bridge_oids.relnode;
-			o_tablespace_cache_add_relnode(o_table->bridge_oids.datoid, o_table->bridge_oids.relnode, o_table->tablespace);
 		}
 	}
 
@@ -1998,11 +1992,11 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 	o_tables_update(o_table, oxid, oSnapshot.csn);
 	o_tables_after_update(o_table, oxid, oSnapshot.csn);
 
-	treeOids = o_table_make_index_oids(o_table, &numTreeOids);
+	trees = o_table_make_index_keys(o_table, &numTrees);
 	is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
-	add_undo_create_relnode(oids, treeOids, numTreeOids, !is_temp);
+	add_undo_create_relnode(oids, trees, numTrees, !is_temp);
 	o_tables_rel_meta_unlock(rel, InvalidOid);
-	pfree(treeOids);
+	pfree(trees);
 	o_table_free(o_table);
 }
 
@@ -2116,17 +2110,17 @@ o_drop_table(ORelOids oids)
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 	OTable	   *table;
-	ORelOids   *treeOids;
-	int			numTreeOids;
+	OIndexKey  *trees;
+	int			numTrees;
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
 	o_tables_table_meta_lock(NULL);
 	table = o_tables_drop_by_oids(oids, oxid, oSnapshot.csn);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
-	treeOids = o_table_make_index_oids(table, &numTreeOids);
-	add_undo_drop_relnode(oids, treeOids, numTreeOids);
-	pfree(treeOids);
+	trees = o_table_make_index_keys(table, &numTrees);
+	add_undo_drop_relnode(oids, trees, numTrees);
+	pfree(trees);
 	o_table_free(table);
 }
 
@@ -2515,9 +2509,6 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary,
 			toast_rel = table_open(toast_relid, AccessExclusiveLock);
 			RelationSetNewRelfilenode(toast_rel, toast_rel->rd_rel->relpersistence);
 			ORelOidsSetFromRel(updated_o_table->toast_oids, toast_rel);
-			o_tablespace_cache_add_relnode(updated_o_table->toast_oids.datoid,
-										   updated_o_table->toast_oids.relnode,
-										   updated_o_table->tablespace);
 			table_close(toast_rel, AccessExclusiveLock);
 			fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 			o_tables_table_meta_lock(updated_o_table);
@@ -2662,7 +2653,6 @@ add_bridge_index(Relation tbl, OTable *o_table, bool manually, Oid amoid)
 	old_descr = o_fetch_table_descr(old_o_table->oids);
 	recreate_o_table(old_o_table, o_table);
 	descr = o_fetch_table_descr(o_table->oids);
-	o_tablespace_cache_add_table(o_table);
 	rebuild_indices_insert_placeholders(descr);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
 
@@ -2716,7 +2706,6 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 	old_descr = o_fetch_table_descr(old_o_table->oids);
 	recreate_o_table(old_o_table, o_table);
 	descr = o_fetch_table_descr(o_table->oids);
-	o_tablespace_cache_add_table(o_table);
 	rebuild_indices_insert_placeholders(descr);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
 
@@ -3718,11 +3707,13 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						OXid		oxid;
 						ORelOids	idx_oids;
 						OBTOptions *options = (OBTOptions *) rel->rd_options;
+						Oid			reltablespace;
 
 						ORelOidsSetFromRel(idx_oids, rel);
 						CommandCounterIncrement();
 						if (rel->rd_options && !((OBTOptions *) rel->rd_options)->orioledb_index)
 							elog(ERROR, "Cannot change 'orioledb_index' option for existing indices");
+						reltablespace = rel->rd_rel->reltablespace;
 						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 						{
 							OTableIndex *index = &o_table->indices[ix_num];
@@ -3737,7 +3728,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							}
 						}
 						Assert(ix_num < o_table->nindices);
-						if (o_table->indices[ix_num].tablespace == rel->rd_rel->reltablespace)
+						if (reltablespace == 0)
+							reltablespace = MyDatabaseTableSpace;
+						if (o_table->indices[ix_num].tablespace == reltablespace)
 						{
 							fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 							o_tables_rel_meta_lock(tbl);

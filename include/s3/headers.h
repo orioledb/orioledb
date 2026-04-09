@@ -16,8 +16,7 @@
 
 typedef struct
 {
-	Oid			datoid;
-	Oid			relnode;
+	OIndexKey	key;
 	uint32		checkpointNum;
 	int			segNum;
 } S3HeaderTag;
@@ -30,9 +29,16 @@ typedef enum
 	S3PartStatusEvicting = 3
 } S3PartStatus;
 
+/*
+ * Two S3HeaderTags identify the same on-disk file when they share the same
+ * datoid, relnode, tablespace, checkpointNum and segNum.  reloid and ixType
+ * are tree-level metadata that do not affect the file path and must not
+ * participate in the hash/equality check.
+ */
 #define S3HeaderTagsIsEqual(t1, t2) \
-	((t1).datoid == (t2).datoid && \
-	 (t1).relnode == (t2).relnode && \
+	((t1).key.oids.datoid == (t2).key.oids.datoid && \
+	 (t1).key.oids.relnode == (t2).key.oids.relnode && \
+	 (t1).key.tablespace == (t2).key.tablespace && \
 	 (t1).checkpointNum == (t2).checkpointNum && \
 	 (t1).segNum == (t2).segNum)
 

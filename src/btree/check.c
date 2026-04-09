@@ -156,8 +156,8 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 		memset(&map_extents, 0, sizeof(ExtentsArray));
 		memset(&tmp_extents, 0, sizeof(ExtentsArray));
 
-		tag.datoid = desc->oids.datoid;
-		tag.relnode = desc->oids.relnode;
+		tag.key.oids = desc->oids;
+		tag.key.tablespace = desc->tablespace;
 		tag.num = o_get_latest_chkp_num(desc->oids.datoid,
 										desc->oids.relnode,
 										checkpoint_number - 1,
@@ -235,8 +235,8 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 	SeqBufTag	chkp_tag;
 	bool		is_compressed = OCompressIsValid(desc->compress);
 
-	chkp_tag.datoid = desc->oids.datoid;
-	chkp_tag.relnode = desc->oids.relnode;
+	chkp_tag.key.oids = desc->oids;
+	chkp_tag.key.tablespace = desc->tablespace;
 
 	if (force_file_check)
 	{

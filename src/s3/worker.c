@@ -326,8 +326,7 @@ s3process_task(uint64 taskLocation)
 		SeqBufTag	chkp_tag;
 
 		memset(&chkp_tag, 0, sizeof(chkp_tag));
-		chkp_tag.datoid = task->typeSpecific.filePart.datoid;
-		chkp_tag.relnode = task->typeSpecific.filePart.relnode;
+		chkp_tag.key = task->typeSpecific.filePart.key;
 		chkp_tag.num = task->typeSpecific.filePart.chkpNum;
 		chkp_tag.type = 'm';
 
@@ -335,8 +334,8 @@ s3process_task(uint64 taskLocation)
 
 		objectname = psprintf("orioledb_data/%u/%u/%u.map",
 							  task->typeSpecific.filePart.chkpNum,
-							  task->typeSpecific.filePart.datoid,
-							  task->typeSpecific.filePart.relnode);
+							  task->typeSpecific.filePart.key.oids.datoid,
+							  task->typeSpecific.filePart.key.oids.relnode);
 
 		elog(DEBUG1, "S3 map get %s %s", objectname, filename);
 
@@ -350,15 +349,14 @@ s3process_task(uint64 taskLocation)
 		char	   *filename;
 		S3HeaderTag tag;
 
-		filename = btree_filename(task->typeSpecific.filePart.datoid,
-								  task->typeSpecific.filePart.relnode,
+		filename = btree_filename(task->typeSpecific.filePart.key,
 								  task->typeSpecific.filePart.segNum,
 								  task->typeSpecific.filePart.chkpNum);
 
 		objectname = psprintf("orioledb_data/%u/%u/%u.%u.%u",
 							  task->typeSpecific.filePart.chkpNum,
-							  task->typeSpecific.filePart.datoid,
-							  task->typeSpecific.filePart.relnode,
+							  task->typeSpecific.filePart.key.oids.datoid,
+							  task->typeSpecific.filePart.key.oids.relnode,
 							  task->typeSpecific.filePart.segNum,
 							  task->typeSpecific.filePart.partNum);
 
@@ -366,8 +364,7 @@ s3process_task(uint64 taskLocation)
 
 		s3_get_file_part(objectname, filename, task->typeSpecific.filePart.partNum);
 
-		tag.datoid = task->typeSpecific.filePart.datoid;
-		tag.relnode = task->typeSpecific.filePart.relnode;
+		tag.key = task->typeSpecific.filePart.key;
 		tag.checkpointNum = task->typeSpecific.filePart.chkpNum;
 		tag.segNum = task->typeSpecific.filePart.segNum;
 
@@ -382,22 +379,20 @@ s3process_task(uint64 taskLocation)
 		char	   *filename;
 		S3HeaderTag tag;
 
-		filename = btree_filename(task->typeSpecific.filePart.datoid,
-								  task->typeSpecific.filePart.relnode,
+		filename = btree_filename(task->typeSpecific.filePart.key,
 								  task->typeSpecific.filePart.segNum,
 								  task->typeSpecific.filePart.chkpNum);
 
 		objectname = psprintf("orioledb_data/%u/%u/%u.%u.%u",
 							  task->typeSpecific.filePart.chkpNum,
-							  task->typeSpecific.filePart.datoid,
-							  task->typeSpecific.filePart.relnode,
+							  task->typeSpecific.filePart.key.oids.datoid,
+							  task->typeSpecific.filePart.key.oids.relnode,
 							  task->typeSpecific.filePart.segNum,
 							  task->typeSpecific.filePart.partNum);
 
 		elog(DEBUG1, "S3 part put %s %s", objectname, filename);
 
-		tag.datoid = task->typeSpecific.filePart.datoid;
-		tag.relnode = task->typeSpecific.filePart.relnode;
+		tag.key = task->typeSpecific.filePart.key;
 		tag.checkpointNum = task->typeSpecific.filePart.chkpNum;
 		tag.segNum = task->typeSpecific.filePart.segNum;
 
@@ -425,8 +420,7 @@ s3process_task(uint64 taskLocation)
 		SeqBufTag	chkp_tag;
 
 		memset(&chkp_tag, 0, sizeof(chkp_tag));
-		chkp_tag.datoid = task->typeSpecific.filePart.datoid;
-		chkp_tag.relnode = task->typeSpecific.filePart.relnode;
+		chkp_tag.key = task->typeSpecific.filePart.key;
 		chkp_tag.num = task->typeSpecific.filePart.chkpNum;
 		chkp_tag.type = 'm';
 
@@ -434,8 +428,8 @@ s3process_task(uint64 taskLocation)
 
 		objectname = psprintf("orioledb_data/%u/%u/%u.map",
 							  task->typeSpecific.filePart.chkpNum,
-							  task->typeSpecific.filePart.datoid,
-							  task->typeSpecific.filePart.relnode);
+							  task->typeSpecific.filePart.key.oids.datoid,
+							  task->typeSpecific.filePart.key.oids.relnode);
 
 		elog(DEBUG1, "S3 map put %s %s", objectname, filename);
 
@@ -634,12 +628,12 @@ s3_schedule_empty_dir_write(uint32 chkpNum, char *dirname)
  * Schedule a synchronization of given data file part to S3.
  */
 S3TaskLocation
-s3_schedule_file_part_write(uint32 chkpNum, Oid datoid, Oid relnode,
+s3_schedule_file_part_write(uint32 chkpNum, OIndexKey key,
 							int32 segNum, int32 partNum)
 {
 	S3Task	   *task;
 	S3TaskLocation location;
-	S3HeaderTag tag = {.datoid = datoid,.relnode = relnode,.checkpointNum = chkpNum,.segNum = segNum};
+	S3HeaderTag tag = {.key = key,.checkpointNum = chkpNum,.segNum = segNum};
 
 	if (partNum >= 0 && !s3_header_mark_part_scheduled_for_write(tag, partNum))
 		return (S3TaskLocation) 0;
@@ -647,15 +641,15 @@ s3_schedule_file_part_write(uint32 chkpNum, Oid datoid, Oid relnode,
 	task = (S3Task *) palloc0(sizeof(S3Task));
 	task->type = S3TaskTypeWriteFilePart;
 	task->typeSpecific.filePart.chkpNum = chkpNum;
-	task->typeSpecific.filePart.datoid = datoid;
-	task->typeSpecific.filePart.relnode = relnode;
+	task->typeSpecific.filePart.key = key;
 	task->typeSpecific.filePart.segNum = segNum;
 	task->typeSpecific.filePart.partNum = partNum;
 
 	location = s3_queue_put_task((Pointer) task, sizeof(S3Task));
 
 	elog(DEBUG1, "S3 schedule file part write: %u %u %u %d %d (%llu)",
-		 datoid, relnode, chkpNum, segNum, partNum, (unsigned long long) location);
+		 key.oids.datoid, key.oids.relnode, chkpNum, segNum, partNum,
+		 (unsigned long long) location);
 
 	pfree(task);
 
@@ -666,18 +660,22 @@ s3_schedule_file_part_write(uint32 chkpNum, Oid datoid, Oid relnode,
  * Schedule the read of given data file part from S3.
  */
 S3TaskLocation
-s3_schedule_file_part_read(uint32 chkpNum, Oid datoid, Oid relnode,
-						   int32 segNum, int32 partNum)
+s3_schedule_file_part_read(uint32 chkpNum, OIndexKey key, int32 segNum,
+						   int32 partNum)
 {
 	S3Task	   *task;
 	S3TaskLocation location;
 	S3PartStatus status;
-	S3HeaderTag tag = {.datoid = datoid,.relnode = relnode,.checkpointNum = chkpNum,.segNum = segNum};
+	S3HeaderTag tag = {
+		.key = key,
+		.checkpointNum = chkpNum,
+		.segNum = segNum
+	};
 	char	   *prefix;
 	char	   *db_prefix;
 
-	o_get_prefixes_for_relnode(datoid, relnode,
-							   &prefix, &db_prefix);
+	o_get_prefixes_for_tablespace(key.oids.datoid, key.tablespace,
+								  &prefix, &db_prefix);
 	o_verify_dir_exists_or_create(prefix, NULL, NULL);
 	o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
 	pfree(db_prefix);
@@ -700,15 +698,15 @@ s3_schedule_file_part_read(uint32 chkpNum, Oid datoid, Oid relnode,
 	task = (S3Task *) palloc0(sizeof(S3Task));
 	task->type = S3TaskTypeReadFilePart;
 	task->typeSpecific.filePart.chkpNum = chkpNum;
-	task->typeSpecific.filePart.datoid = datoid;
-	task->typeSpecific.filePart.relnode = relnode;
+	task->typeSpecific.filePart.key = key;
 	task->typeSpecific.filePart.segNum = segNum;
 	task->typeSpecific.filePart.partNum = partNum;
 
 	location = s3_queue_put_task((Pointer) task, sizeof(S3Task));
 
 	elog(DEBUG1, "S3 schedule file part read: %u %u %u %d %d (%llu)",
-		 datoid, relnode, chkpNum, segNum, partNum, (unsigned long long) location);
+		 key.oids.datoid, key.oids.relnode, chkpNum, segNum, partNum,
+		 (unsigned long long) location);
 
 	pfree(task);
 
@@ -798,13 +796,12 @@ s3_schedule_downlink_load(BTreeDescr *desc, uint64 downlink)
 
 	while (true)
 	{
+		OIndexKey	key = {.oids = desc->oids,.tablespace = desc->tablespace};
 		S3TaskLocation location;
 
 		segNum = byte_offset / ORIOLEDB_SEGMENT_SIZE;
 		partNum = (byte_offset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
-		location = s3_schedule_file_part_read(chkpNum,
-											  desc->oids.datoid, desc->oids.relnode,
-											  segNum, partNum);
+		location = s3_schedule_file_part_read(chkpNum, key, segNum, partNum);
 		result = Max(result, location);
 		if (byte_offset % ORIOLEDB_S3_PART_SIZE + read_size > ORIOLEDB_S3_PART_SIZE)
 		{
@@ -883,26 +880,25 @@ s3_schedule_pg_file_write(uint32 chkpNum, char *filename)
 }
 
 void
-s3_load_file_part(uint32 chkpNum, Oid datoid, Oid relnode,
-				  int32 segNum, int32 partNum)
+s3_load_file_part(uint32 chkpNum, OIndexKey key, int32 segNum, int32 partNum)
 {
 	S3TaskLocation location;
 
-	location = s3_schedule_file_part_read(chkpNum, datoid, relnode,
-										  segNum, partNum);
+	location = s3_schedule_file_part_read(chkpNum, key, segNum, partNum);
 
-	s3_queue_wait_for_location(location);
+	if (location > 0)
+		s3_queue_wait_for_location(location);
 }
 
 void
-s3_load_map_file(uint32 chkpNum, Oid datoid, Oid relnode)
+s3_load_map_file(uint32 chkpNum, OIndexKey key)
 {
 	S3TaskLocation location;
 
-	location = s3_schedule_file_part_read(chkpNum, datoid, relnode,
-										  -1, 0);
+	location = s3_schedule_file_part_read(chkpNum, key, -1, 0);
 
-	s3_queue_wait_for_location(location);
+	if (location > 0)
+		s3_queue_wait_for_location(location);
 }
 
 void

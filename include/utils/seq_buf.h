@@ -23,14 +23,19 @@ typedef enum
 
 typedef struct
 {
-	Oid			datoid;
-	Oid			relnode;
+	ORelOids	oids;
+	Oid			tablespace;
+} OIndexKey;
+
+typedef struct
+{
+	OIndexKey	key;
 	uint32		num;
 	char		type;
 } SeqBufTag;
 
-#define SeqBufTagEqual(l, r) ((l)->datoid == (r)->datoid && \
-							  (l)->relnode == (r)->relnode && \
+#define SeqBufTagEqual(l, r) ((l)->key.oids.datoid == (r)->key.oids.datoid && \
+							  (l)->key.oids.relnode == (r)->key.oids.relnode && \
 							  (l)->num == (r)->num && \
 							  (l)->type == (r)->type)
 

@@ -28,6 +28,7 @@ typedef struct
 	char		table_persistence;
 	uint8		fillfactor;
 	uint16		data_version;
+	Oid			tablespace;
 	OXid		createOxid;
 	NameData	name;
 	bool		primaryIsCtid;
@@ -77,7 +78,6 @@ typedef struct
 	 * postgres
 	 */
 	List	   *duplicates;
-	Oid			tablespace;
 	Oid		   *exclops;
 	bool		immediate;
 	MemoryContext index_mctx;
@@ -85,7 +85,7 @@ typedef struct
 
 /* callback for o_indices_foreach_oids() */
 typedef void (*OIndexOidsCallback) (OIndexType type, ORelOids treeOids,
-									ORelOids tableOids, void *arg);
+									ORelOids tableOids, Oid tablespace, void *arg);
 
 typedef enum
 {

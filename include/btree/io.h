@@ -16,6 +16,7 @@
 
 #include "btree.h"
 #include "btree/find.h"
+#include "btree/undo.h"
 
 typedef enum OWalkPageResult
 {
@@ -33,8 +34,8 @@ extern int	assign_io_num(OInMemoryBlkno blkno, OffsetNumber offnum);
 extern OWalkPageResult walk_page(OInMemoryBlkno blkno, bool evict);
 extern void unlock_io(int ionum);
 extern void wait_for_io_completion(int ionum);
-extern bool cleanup_btree_files(Oid datoid, Oid relnode, bool fsync);
-extern bool fsync_btree_files(Oid datoid, Oid relnode);
+extern bool cleanup_btree_files(OIndexKey key, bool fsync);
+extern bool fsync_btree_files(OIndexKey key);
 extern int	OFileRead(File file, char *buffer, int amount, off_t offset,
 					  uint32 wait_event_info);
 extern int	OFileWrite(File file, char *buffer, int amount, off_t offset,
@@ -42,7 +43,7 @@ extern int	OFileWrite(File file, char *buffer, int amount, off_t offset,
 extern void btree_init_smgr(BTreeDescr *descr);
 extern void btree_open_smgr(BTreeDescr *descr);
 extern void btree_close_smgr(BTreeDescr *descr);
-extern char *btree_filename(Oid datoid, Oid relnode, int segno, uint32 chkpNum);
+extern char *btree_filename(OIndexKey key, int segno, uint32 chkpNum);
 extern char *btree_smgr_filename(BTreeDescr *desc, off_t offset,
 								 uint32 chkpNum);
 extern int	btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
