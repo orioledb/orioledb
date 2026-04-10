@@ -1086,6 +1086,9 @@ o_update_latest_chkp_num(Oid datoid, Oid relnode, uint32 chkp_num)
 	BTreeDescr *desc = get_sys_tree(SYS_TREES_CHKP_NUM);
 	OBTreeModifyResult result PG_USED_FOR_ASSERTS_ONLY;
 
+	elog(LOG, "o_update_latest_chkp_num: (%u, %u) chkp_num=%u",
+		 datoid, relnode, chkp_num);
+
 	key.datoid = datoid;
 	key.relnode = relnode;
 	key_tuple.data = (Pointer) &key;
@@ -2819,6 +2822,18 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 		Assert(map_len >= sizeof(CheckpointFileHeader));
 		header.numFreeBlocks = (map_len - sizeof(CheckpointFileHeader)) / sizeof(FileExtent);
 	}
+
+	Assert(!DiskDownlinkIsValid(header.rootDownlink) ||
+		   FileExtentLenIsValid(DOWNLINK_GET_DISK_LEN(header.rootDownlink)));
+
+	elog(LOG, "checkpoint_map_write_header: (%u, %u) chkp=%u "
+		 "rootDownlink=%lu datafileLength=%lu numFreeBlocks=%lu "
+		 "leafPagesNum=%u",
+		 datoid, relnode, chkpNum,
+		 (unsigned long) header.rootDownlink,
+		 (unsigned long) header.datafileLength,
+		 (unsigned long) header.numFreeBlocks,
+		 header.leafPagesNum);
 
 	if (OFileWrite(file, (Pointer) &header, sizeof(header), 0,
 				   WAIT_EVENT_SLRU_WRITE) != sizeof(header) ||
@@ -4864,6 +4879,10 @@ check_tree_needs_checkpointing(OIndexType type, ORelOids treeOids)
 												CurrentMemoryContext, NULL);
 		if (O_TUPLE_IS_NULL(resultTuple))
 		{
+			elog(LOG, "check_tree_needs_checkpointing: skip (%u, %u) "
+				 "no shared_root_info, no evicted_data",
+				 treeOids.datoid, treeOids.relnode);
+
 			chkp_inc_changecount_before(checkpoint_state);
 			checkpoint_state->treeType = type;
 			checkpoint_state->datoid = treeOids.datoid;
@@ -4877,6 +4896,11 @@ check_tree_needs_checkpointing(OIndexType type, ORelOids treeOids)
 		}
 	}
 	LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo]);
+
+	elog(LOG, "check_tree_needs_checkpointing: checkpoint (%u, %u) "
+		 "has_evicted=%d",
+		 treeOids.datoid, treeOids.relnode,
+		 !O_TUPLE_IS_NULL(resultTuple));
 
 	return true;
 }
@@ -5200,6 +5224,8 @@ checkpointable_tree_fill_seq_buffers(BTreeDescr *td, bool init,
 					  &cur_chkp_tag, true, init, sizeof(CheckpointFileHeader), evicted_next))
 		return false;
 
+
+
 	if (!init_seq_buf(&td->nextChkp[1 - chkp_index],
 					  &meta_page->nextChkp[1 - chkp_index],
 					  NULL, true, false, sizeof(CheckpointFileHeader), NULL))
@@ -5314,6 +5340,51 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 									   prev_chkp_fname)));
 			}
 			FileClose(prev_chkp_file);
+
+			elog(LOG, "evictable_tree_init_meta: read header from %s: "
+				 "rootDownlink=%lu datafileLength=%lu leafPagesNum=%u",
+				 prev_chkp_fname,
+				 (unsigned long) file_header.rootDownlink,
+				 (unsigned long) file_header.datafileLength,
+				 file_header.leafPagesNum);
+
+			/*
+			 * The .map file may exist but have an unwritten header when a
+			 * tree was created, evicted, and the checkpoint skipped it (no
+			 * dirty pages).  Detect this and fall back to the default
+			 * empty-tree header.
+			 */
+			if (DiskDownlinkIsValid(file_header.rootDownlink) &&
+				!FileExtentLenIsValid(DOWNLINK_GET_DISK_LEN(file_header.rootDownlink)))
+			{
+				elog(LOG, "evictable_tree_init_meta: corrupt header "
+					 "in %s, using default",
+					 prev_chkp_fname);
+				file_header.rootDownlink = InvalidDiskDownlink;
+				file_header.datafileLength = 0;
+				file_header.numFreeBlocks = 0;
+				file_header.leafPagesNum = 1;
+				file_header.ctid = 0;
+				file_header.bridgeCtid = 0;
+			}
+			else if (!DiskDownlinkIsValid(file_header.rootDownlink) &&
+					 file_header.datafileLength == 0 &&
+					 file_header.leafPagesNum != 1)
+			{
+				/*
+				 * Header with all zeros but wrong leafPagesNum is also a sign
+				 * of unwritten header.
+				 */
+				elog(LOG, "evictable_tree_init_meta: uninitialized header "
+					 "in %s, using default",
+					 prev_chkp_fname);
+				file_header.rootDownlink = InvalidDiskDownlink;
+				file_header.datafileLength = 0;
+				file_header.numFreeBlocks = 0;
+				file_header.leafPagesNum = 1;
+				file_header.ctid = 0;
+				file_header.bridgeCtid = 0;
+			}
 		}
 		pfree(prev_chkp_fname);
 		result = prev_chkp_file_exist;
@@ -5522,6 +5593,10 @@ checkpointable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 	chkp_num = get_cur_checkpoint_number(&desc->oids, desc->type,
 										 &checkpoint_concurrent);
 	map_chkp_num = chkp_num;
+
+	elog(LOG, "checkpointable_tree_init: (%u, %u) chkp_num=%u concurrent=%d",
+		 desc->oids.datoid, desc->oids.relnode,
+		 chkp_num, checkpoint_concurrent);
 
 	/*
 	 * We shouldn't initialize shared memory concurrently to checkpoint.

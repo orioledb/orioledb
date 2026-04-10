@@ -569,7 +569,7 @@ SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
                                                                           +
  Index o_test_partial_ix7 contents                                        +
  Page 0: level = 0, maxKeyLen = 0, nVacatedBytes = 0                      +
- state = free, datoid equal, relnode equal, ix_type = regular, clean      +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty      +
      Leftmost, Rightmost                                                  +
    Chunk 0: offset = 0, location = 256, hikey location = 64               +
                                                                           +
@@ -805,7 +805,7 @@ SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
                                                                              +
  Index o_test_partial_ix7 contents                                           +
  Page 0: level = 0, maxKeyLen = 0, nVacatedBytes = 0                         +
- state = free, datoid equal, relnode equal, ix_type = regular, clean         +
+ state = free, datoid equal, relnode equal, ix_type = regular, dirty         +
      Leftmost, Rightmost                                                     +
    Chunk 0: offset = 0, location = 256, hikey location = 64                  +
                                                                              +
