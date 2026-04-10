@@ -1229,3 +1229,51 @@ class ReplicationTest(BaseTest):
 
 	def all_tables_dropped(self, node):
 		return len(self.get_orioledb_files(node)) == 0
+
+	def test_replication_add_bridge_index(self):
+		with self.node as master:
+			master.append_conf('postgresql.conf',
+			                   "orioledb.recovery_pool_size = 1\n")
+			master.start()
+
+			with self.getReplica().start() as replica:
+				master.safe_psql("""
+					CREATE EXTENSION orioledb;
+
+					CREATE TABLE o_test (
+						id int primary key,
+						val text,
+						p point
+					) USING orioledb;
+
+					INSERT INTO o_test
+						SELECT id, 'val' || id, point(id, id)
+						FROM generate_series(1, 100) id;
+				""")
+				self.catchup_orioledb(replica)
+				self.assertEqual(
+				    100,
+				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
+
+				# Adding a GiST index triggers add_bridge_index()
+				# and table rewrite via rebuild_indices()
+				master.safe_psql("""
+					CREATE INDEX o_test_gist ON o_test USING gist (p);
+				""")
+				self.catchup_orioledb(replica)
+
+				# Verify all data is present on replica after rewrite
+				self.assertEqual(
+				    100,
+				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
+				self.assertEqual(
+				    'val1',
+				    replica.execute("SELECT val FROM o_test WHERE id = 1;")[0]
+				    [0])
+
+				# Verify data accessible via bridge index on replica
+				result = replica.execute(
+				    "SET enable_indexonlyscan = off; "
+				    "SELECT count(*) FROM o_test "
+				    "WHERE p <@ '((0,0),(100,100))'::box;")
+				self.assertEqual(100, result[0][0])

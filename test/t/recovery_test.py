@@ -2214,6 +2214,58 @@ class RecoveryTest(BaseTest):
 
 		node.stop()
 
+	def test_recovery_add_bridge_index(self):
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf',
+		    "checkpoint_timeout = 1d\norioledb.recovery_pool_size = 1\n")
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE o_test (
+				id int primary key,
+				val text,
+				p point
+			) USING orioledb;
+
+			INSERT INTO o_test
+				SELECT id, 'val' || id, point(id, id)
+				FROM generate_series(1, 100) id;
+
+			CHECKPOINT;
+		""")
+
+		# Adding a GiST index triggers add_bridge_index() and table rewrite
+		node.safe_psql("""
+			CREATE INDEX o_test_gist ON o_test USING gist (p);
+		""")
+
+		# Verify data is accessible via both seqscan and index
+		self.assertEqual(100,
+		                 node.execute("SELECT count(*) FROM o_test;")[0][0])
+		self.assertEqual(
+		    'val1',
+		    node.execute("SELECT val FROM o_test WHERE id = 1;")[0][0])
+
+		node.stop(['-m', 'immediate'])
+
+		node.start()
+
+		# After recovery, all data must be present
+		self.assertEqual(100,
+		                 node.execute("SELECT count(*) FROM o_test;")[0][0])
+		self.assertEqual(
+		    'val1',
+		    node.execute("SELECT val FROM o_test WHERE id = 1;")[0][0])
+		result = node.execute(
+		    "SET enable_indexonlyscan = off; "
+		    "SELECT count(*) FROM o_test WHERE p <@ '((0,0),(100,100))'::box;")
+		self.assertEqual(100, result[0][0])
+
+		node.stop()
+
 	def test_recovery_replay_until_lsn(self):
 		node = self.node
 		node.start()
