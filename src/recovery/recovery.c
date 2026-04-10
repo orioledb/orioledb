@@ -3142,6 +3142,54 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 				o_tables_meta_unlock_no_wal();
 			}
 		}
+		else if (ORelOidsIsValid(new_o_table->bridge_oids) !=
+				 ORelOidsIsValid(old_o_table->bridge_oids))
+		{
+			/*
+			 * Bridge index was added or dropped.  The table data is stored
+			 * under new OIDs, so we need a full rebuild.
+			 *
+			 * On a replica, the intermediate table created by
+			 * recreate_o_table() has no data because rebuild_indices() writes
+			 * directly without WAL.  Check primary index oids first, then
+			 * fall back to table oids.
+			 */
+			OTableDescr tmp_descr;
+			ORelOids	srcOids;
+
+			srcOids = old_o_table->has_primary ?
+				old_o_table->indices[PrimaryIndexNumber].oids :
+				old_o_table->oids;
+
+			/*
+			 * o_fill_tmp_table_descr() already initializes shared root info
+			 * for the new trees via o_btree_try_use_shmem(), so we must not
+			 * call rebuild_indices_insert_placeholders() afterwards.
+			 */
+			o_fill_tmp_table_descr(&tmp_descr, new_o_table);
+			if (tbl_data_exists(&srcOids))
+			{
+				old_descr = o_fetch_table_descr(old_o_table->oids);
+				o_tables_meta_unlock_no_wal();
+
+				if (!*recovery_single_process)
+				{
+					recovery_send_leader_oids(oids, InvalidIndexNumber,
+											  new_o_table->version,
+											  old_o_table->oids,
+											  old_o_table->version,
+											  true);
+				}
+				else
+					rebuild_indices(old_o_table, old_descr,
+									new_o_table, &tmp_descr, false, NULL);
+			}
+			else
+			{
+				o_tables_meta_unlock_no_wal();
+			}
+			o_free_tmp_table_descr(&tmp_descr);
+		}
 		else
 		{
 			o_tables_meta_unlock_no_wal();
