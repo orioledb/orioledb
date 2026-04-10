@@ -1277,3 +1277,133 @@ class ReplicationTest(BaseTest):
 				    "SELECT count(*) FROM o_test "
 				    "WHERE p <@ '((0,0),(100,100))'::box;")
 				self.assertEqual(100, result[0][0])
+
+	def test_replication_rebuild_pk_after_checkpoint(self):
+		"""
+		Test that index rebuild on replica preserves all data when
+		the replica restarts from a checkpoint that predates the
+		rebuild.
+
+		Scenario:
+		1. Insert batch 1, CHECKPOINT on both master and replica
+		2. Insert batch 2 (after checkpoint)
+		3. ALTER TABLE DROP/ADD primary key (triggers rebuild_indices)
+		4. Replica catches up, then crashes (immediate stop)
+		5. Replica restarts from checkpoint (step 1), replays:
+		   - batch 2 inserts (re-populates old tree)
+		   - index rebuild (must see batch 1 + batch 2)
+		6. Verify all data present and old tree files removed
+		"""
+		with self.node as master:
+			master.append_conf('postgresql.conf',
+			                   "orioledb.recovery_pool_size = 1\n")
+			master.start()
+
+			with self.getReplica().start() as replica:
+				master.safe_psql("""
+					CREATE EXTENSION orioledb;
+
+					CREATE TABLE o_test (
+						id int primary key,
+						val text
+					) USING orioledb;
+
+					INSERT INTO o_test
+						SELECT id, 'batch1_' || id
+						FROM generate_series(1, 50) id;
+				""")
+
+				# Step 1: checkpoint on both sides
+				self.catchup_orioledb(replica)
+				master.safe_psql("CHECKPOINT;")
+				replica.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				self.assertEqual(
+				    50,
+				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
+
+				# Remember old PK index relnode before rebuild
+				old_pk_relnode = master.execute(
+				    "SELECT relfilenode FROM pg_class "
+				    "WHERE relname = 'o_test_pkey';")[0][0]
+				old_datoid = master.execute(
+				    "SELECT oid FROM pg_database "
+				    "WHERE datname = current_database();")[0][0]
+
+				# Verify old PK data file exists on master
+				old_tree_path = os.path.join(master.data_dir, "orioledb_data",
+				                             str(old_datoid),
+				                             str(old_pk_relnode))
+				self.assertTrue(
+				    os.path.exists(old_tree_path),
+				    f"Old PK data file {old_tree_path} should exist on master before rebuild"
+				)
+
+				# Step 2: insert batch 2 after checkpoint
+				master.safe_psql("""
+					INSERT INTO o_test
+						SELECT id, 'batch2_' || id
+						FROM generate_series(51, 100) id;
+				""")
+
+				# Step 3: rebuild primary key
+				master.safe_psql("""
+					ALTER TABLE o_test DROP CONSTRAINT o_test_pkey;
+					ALTER TABLE o_test ADD PRIMARY KEY (id);
+				""")
+
+				new_pk_relnode = master.execute(
+				    "SELECT relfilenode FROM pg_class "
+				    "WHERE relname = 'o_test_pkey';")[0][0]
+				self.assertNotEqual(old_pk_relnode, new_pk_relnode)
+
+				# Step 4: replica catches up, then crash
+				self.catchup_orioledb(replica)
+				master.safe_psql("CHECKPOINT;")
+				replica.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				self.assertEqual(
+				    100,
+				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
+
+				# Verify old PK data files are removed on master
+				self.assertFalse(
+				    os.path.exists(old_tree_path),
+				    f"Old PK data file {old_tree_path} should not exist on master"
+				)
+
+				# Verify old PK data files are removed on replica
+				old_tree_path_replica = os.path.join(replica.data_dir,
+				                                     "orioledb_data",
+				                                     str(old_datoid),
+				                                     str(old_pk_relnode))
+				self.assertFalse(
+				    os.path.exists(old_tree_path_replica),
+				    f"Old PK data file {old_tree_path_replica} should not exist on replica"
+				)
+
+				# Step 5: crash replica without checkpoint
+				replica.stop(['-m', 'immediate'])
+				replica.start()
+				self.catchup_orioledb(replica)
+
+				# Step 6: verify all data after recovery
+				self.assertEqual(
+				    100,
+				    replica.execute("SELECT count(*) FROM o_test;")[0][0])
+				self.assertEqual(
+				    'batch1_1',
+				    replica.execute("SELECT val FROM o_test WHERE id = 1;")[0]
+				    [0])
+				self.assertEqual(
+				    'batch2_51',
+				    replica.execute("SELECT val FROM o_test WHERE id = 51;")[0]
+				    [0])
+
+				# Verify old PK data files still removed after recovery
+				self.assertFalse(
+				    os.path.exists(old_tree_path_replica),
+				    f"Old PK data file {old_tree_path_replica} should not exist on replica after recovery"
+				)
