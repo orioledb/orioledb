@@ -198,6 +198,13 @@ seq_buf_check_open_file(SeqBufDescPrivate *seqBufPrivate)
 		if (file_exists)
 			FileClose(seqBufPrivate->file);
 
+		if (seqBufPrivate->write && !file_exists)
+			elog(LOG, "seq_buf_open_file: create (%u, %u) type=%c num=%u",
+				 seqBufPrivate->tag.datoid,
+				 seqBufPrivate->tag.relnode,
+				 seqBufPrivate->tag.type,
+				 seqBufPrivate->tag.num);
+
 		seqBufPrivate->file = PathNameOpenFile(filename, flags);
 		pfree(filename);
 

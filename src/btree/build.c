@@ -434,6 +434,16 @@ btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 
 		filename = get_seq_buf_filename(&prev_chkp_tag);
 
+		Assert(!DiskDownlinkIsValid(file_header->rootDownlink) ||
+			   FileExtentLenIsValid(DOWNLINK_GET_DISK_LEN(file_header->rootDownlink)));
+
+		elog(LOG, "btree_write_file_header: (%u, %u) chkp=%u "
+			 "rootDownlink=%lu datafileLength=%lu leafPagesNum=%u",
+			 desc->oids.datoid, desc->oids.relnode, checkpoint_number,
+			 (unsigned long) file_header->rootDownlink,
+			 (unsigned long) file_header->datafileLength,
+			 file_header->leafPagesNum);
+
 		file = PathNameOpenFile(filename, O_WRONLY | O_CREAT | PG_BINARY);
 
 		if (OFileWrite(file, (Pointer) file_header,
