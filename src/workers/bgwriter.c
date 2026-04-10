@@ -30,6 +30,7 @@
 #include "storage/bufmgr.h"
 #include "storage/latch.h"
 #include "storage/proc.h"
+#include "storage/procsignal.h"
 #include "storage/sinvaladt.h"
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
@@ -83,6 +84,7 @@ bgwriter_main(Datum main_arg)
 
 	/* catch SIGTERM signal for reason to not interupt background writing */
 	pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
+	pqsignal(SIGUSR1, procsignal_sigusr1_handler);
 	BackgroundWorkerUnblockSignals();
 
 	elog(LOG, "orioledb background writer started");
@@ -123,9 +125,12 @@ bgwriter_main(Datum main_arg)
 			rc = WaitLatch(MyLatch, wake_events,
 						   BgWriterDelay,
 						   WAIT_EVENT_BGWRITER_MAIN);
+			ResetLatch(MyLatch);
 
 			if (rc & WL_POSTMASTER_DEATH)
 				ShutdownRequestPending = true;
+
+			CHECK_FOR_INTERRUPTS();
 
 			for (poolType = 0; poolType < OPagePoolTypesCount && !ShutdownRequestPending; poolType++)
 			{
