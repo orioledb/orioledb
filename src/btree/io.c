@@ -2428,9 +2428,25 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	uint32		chkpNum = 0;
 	bool		notModified;
 	bool		hasMetaLock = LWLockHeldByMe(&checkpoint_state->oTablesMetaLock);
+	SharedRootInfoKey evict_key;
+	int			evict_lockNo;
 
 	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc) &&
 		   O_PAGE_STATE_IS_LOCKED(pg_atomic_read_u64(&(O_PAGE_HEADER(rootPageBlkno)->state))));
+
+	/*
+	 * Try to acquire oSharedRootInfoInsertLocks early to avoid deadlocks. If
+	 * we can't get it, bail out — the page will be evicted later.
+	 */
+	evict_key.datoid = desc->oids.datoid;
+	evict_key.relnode = desc->oids.relnode;
+	evict_lockNo = tag_hash(&evict_key, sizeof(evict_key)) % SHARED_ROOT_INFO_INSERT_NUM_LOCKS;
+	if (!LWLockConditionalAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[evict_lockNo],
+								  LW_EXCLUSIVE))
+	{
+		unlock_page(root_blkno);
+		return false;
+	}
 
 	/*
 	 * Additional protection: don't evict the tree root page if the resource
@@ -2438,7 +2454,11 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	 * must be already finished, but not yet released from shmem.
 	 */
 	if (meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) != 0)
+	{
+		LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[evict_lockNo]);
+		unlock_page(root_blkno);
 		return false;
+	}
 
 	/* we check it before */
 	Assert(!RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(rootPageBlkno)));
@@ -2487,7 +2507,10 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	{
 		if (!LWLockConditionalAcquire(&checkpoint_state->oTablesMetaLock,
 									  LW_SHARED))
+		{
+			LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[evict_lockNo]);
 			return false;
+		}
 	}
 
 	file_header.rootDownlink = new_downlink;
@@ -2542,11 +2565,17 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 		OCompressIsValid(desc->compress))
 		insert_evicted_data(&evicted_tree_data);
 
+	elog(LOG, "evict_btree: (%u, %u) chkpNum=%u notModified=%d",
+		 desc->oids.datoid, desc->oids.relnode,
+		 chkpNum, notModified);
+
 	/*
 	 * Shared descr drops to signalize other backends that tree is evicted.
 	 * Backends and workers can create a new SharedRootInfo* after this.
 	 */
 	o_drop_shared_root_info(desc->oids.datoid, desc->oids.relnode);
+
+	LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[evict_lockNo]);
 
 	if (!hasMetaLock)
 		LWLockRelease(&checkpoint_state->oTablesMetaLock);

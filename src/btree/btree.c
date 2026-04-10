@@ -57,12 +57,11 @@ o_btree_init(BTreeDescr *desc)
 	init_meta_page(desc->rootInfo.metaPageBlkno, 1);
 
 	/*
-	 * Don't mark the root page dirty by default to skip checkpointing of the
-	 * empty trees.  Except for the system trees, which are checkpointed every
-	 * time.
+	 * Always mark root page dirty so that the first checkpoint writes the
+	 * .map file header.  Without this, a tree that gets evicted before
+	 * checkpoint would leave a .map file with an unwritten header.
 	 */
-	if (IS_SYS_TREE_OIDS(desc->oids))
-		MARK_DIRTY(desc, desc->rootInfo.rootPageBlkno);
+	MARK_DIRTY(desc, desc->rootInfo.rootPageBlkno);
 }
 
 static bool
