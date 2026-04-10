@@ -1426,6 +1426,7 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 
 	/* unreachable */
 	Assert(false);
+	return false;
 }
 
 /*
