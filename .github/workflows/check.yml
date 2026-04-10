@@ -147,6 +147,8 @@ jobs:
           name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_testgres.logs
           path: |
             ./orioledb/test/tmp_check_t/*/logs/*log
+            ./orioledb/test/tmp_check/log/*log
+            ./orioledb/test/tmp_check_iso/log/*log
             ./postgresql/pg.log
             ./postgresql/rep_pg.log
           retention-days: 2
