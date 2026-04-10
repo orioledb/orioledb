@@ -662,13 +662,10 @@ generic_toast_delete_optional_wal(ToastAPI *api, void *key, OXid oxid,
 		.needsUndoForSelfCreated = false,
 		.arg = NULL
 	};
-	OSnapshot	oSnapshot;
-
-	O_LOAD_SNAPSHOT_CSN(&oSnapshot, csn);
 
 	nextKey = api->getNextKey(key, arg);
 	it = o_btree_iterator_create(desc, key, BTreeKeyBound,
-								 &oSnapshot, ForwardScanDirection);
+								 &o_in_progress_snapshot, ForwardScanDirection);
 
 	do
 	{
