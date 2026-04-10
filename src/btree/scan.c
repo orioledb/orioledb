@@ -1820,7 +1820,14 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 
 	if (scan->dsmSeg)
 	{
-		dsm_detach(scan->dsmSeg);
+		/*
+		 * Skip dsm_detach when called from ResourceOwner release: the DSM
+		 * segment is also registered as a resource and will be detached by
+		 * ResourceOwner independently.  Calling dsm_detach here would attempt
+		 * ResourceOwnerForget on a DSM that may have already been released.
+		 */
+		if (!fromResowner)
+			dsm_detach(scan->dsmSeg);
 		scan->dsmSeg = NULL;
 	}
 
