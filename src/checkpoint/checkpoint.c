@@ -1086,7 +1086,7 @@ o_update_latest_chkp_num(Oid datoid, Oid relnode, uint32 chkp_num)
 	BTreeDescr *desc = get_sys_tree(SYS_TREES_CHKP_NUM);
 	OBTreeModifyResult result PG_USED_FOR_ASSERTS_ONLY;
 
-	elog(LOG, "o_update_latest_chkp_num: (%u, %u) chkp_num=%u",
+	elog(DEBUG1, "o_update_latest_chkp_num: (%u, %u) chkp_num=%u",
 		 datoid, relnode, chkp_num);
 
 	key.datoid = datoid;
@@ -2826,7 +2826,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 	Assert(!DiskDownlinkIsValid(header.rootDownlink) ||
 		   FileExtentLenIsValid(DOWNLINK_GET_DISK_LEN(header.rootDownlink)));
 
-	elog(LOG, "checkpoint_map_write_header: (%u, %u) chkp=%u "
+	elog(DEBUG1, "checkpoint_map_write_header: (%u, %u) chkp=%u "
 		 "rootDownlink=%lu datafileLength=%lu numFreeBlocks=%lu "
 		 "leafPagesNum=%u",
 		 datoid, relnode, chkpNum,
@@ -4879,7 +4879,7 @@ check_tree_needs_checkpointing(OIndexType type, ORelOids treeOids)
 												CurrentMemoryContext, NULL);
 		if (O_TUPLE_IS_NULL(resultTuple))
 		{
-			elog(LOG, "check_tree_needs_checkpointing: skip (%u, %u) "
+			elog(DEBUG1, "check_tree_needs_checkpointing: skip (%u, %u) "
 				 "no shared_root_info, no evicted_data",
 				 treeOids.datoid, treeOids.relnode);
 
@@ -4897,7 +4897,7 @@ check_tree_needs_checkpointing(OIndexType type, ORelOids treeOids)
 	}
 	LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo]);
 
-	elog(LOG, "check_tree_needs_checkpointing: checkpoint (%u, %u) "
+	elog(DEBUG1, "check_tree_needs_checkpointing: checkpoint (%u, %u) "
 		 "has_evicted=%d",
 		 treeOids.datoid, treeOids.relnode,
 		 !O_TUPLE_IS_NULL(resultTuple));
@@ -5341,7 +5341,7 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 			}
 			FileClose(prev_chkp_file);
 
-			elog(LOG, "evictable_tree_init_meta: read header from %s: "
+			elog(DEBUG1, "evictable_tree_init_meta: read header from %s: "
 				 "rootDownlink=%lu datafileLength=%lu leafPagesNum=%u",
 				 prev_chkp_fname,
 				 (unsigned long) file_header.rootDownlink,
@@ -5357,7 +5357,7 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 			if (DiskDownlinkIsValid(file_header.rootDownlink) &&
 				!FileExtentLenIsValid(DOWNLINK_GET_DISK_LEN(file_header.rootDownlink)))
 			{
-				elog(LOG, "evictable_tree_init_meta: corrupt header "
+				elog(DEBUG1, "evictable_tree_init_meta: corrupt header "
 					 "in %s, using default",
 					 prev_chkp_fname);
 				file_header.rootDownlink = InvalidDiskDownlink;
@@ -5375,7 +5375,7 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 				 * Header with all zeros but wrong leafPagesNum is also a sign
 				 * of unwritten header.
 				 */
-				elog(LOG, "evictable_tree_init_meta: uninitialized header "
+				elog(DEBUG1, "evictable_tree_init_meta: uninitialized header "
 					 "in %s, using default",
 					 prev_chkp_fname);
 				file_header.rootDownlink = InvalidDiskDownlink;
@@ -5594,7 +5594,7 @@ checkpointable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 										 &checkpoint_concurrent);
 	map_chkp_num = chkp_num;
 
-	elog(LOG, "checkpointable_tree_init: (%u, %u) chkp_num=%u concurrent=%d",
+	elog(DEBUG1, "checkpointable_tree_init: (%u, %u) chkp_num=%u concurrent=%d",
 		 desc->oids.datoid, desc->oids.relnode,
 		 chkp_num, checkpoint_concurrent);
 

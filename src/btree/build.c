@@ -437,7 +437,7 @@ btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 		Assert(!DiskDownlinkIsValid(file_header->rootDownlink) ||
 			   FileExtentLenIsValid(DOWNLINK_GET_DISK_LEN(file_header->rootDownlink)));
 
-		elog(LOG, "btree_write_file_header: (%u, %u) chkp=%u "
+		elog(DEBUG1, "btree_write_file_header: (%u, %u) chkp=%u "
 			 "rootDownlink=%lu datafileLength=%lu leafPagesNum=%u",
 			 desc->oids.datoid, desc->oids.relnode, checkpoint_number,
 			 (unsigned long) file_header->rootDownlink,

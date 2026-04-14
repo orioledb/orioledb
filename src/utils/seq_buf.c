@@ -199,7 +199,7 @@ seq_buf_check_open_file(SeqBufDescPrivate *seqBufPrivate)
 			FileClose(seqBufPrivate->file);
 
 		if (seqBufPrivate->write && !file_exists)
-			elog(LOG, "seq_buf_open_file: create (%u, %u) type=%c num=%u",
+			elog(DEBUG1, "seq_buf_open_file: create (%u, %u) type=%c num=%u",
 				 seqBufPrivate->tag.datoid,
 				 seqBufPrivate->tag.relnode,
 				 seqBufPrivate->tag.type,

@@ -2565,7 +2565,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 		OCompressIsValid(desc->compress))
 		insert_evicted_data(&evicted_tree_data);
 
-	elog(LOG, "evict_btree: (%u, %u) chkpNum=%u notModified=%d",
+	elog(DEBUG1, "evict_btree: (%u, %u) chkpNum=%u notModified=%d",
 		 desc->oids.datoid, desc->oids.relnode,
 		 chkpNum, notModified);
 
