@@ -98,6 +98,12 @@ knownErrors = {
     r"ERROR:  function \"sro_ifun\" cannot be used here": ["privileges"],
     r"ERROR:  (index|relation) \"(sro_idx|sro_cluster_idx|sro_pidx)\" does not exist": ["privileges"],
     r"ERROR:  permission denied for (table|materialized view) (maintain_test|refresh_test)": ["privileges"],
+
+	# union specific error
+	r"ERROR:  function \"expensivefunc\" cannot be used here": ["union"],
+
+	# collate.icu.utf8 specific error
+	r"ERROR:  cannot refresh collation \"en-x-icu\" because orioledb table \"collate_test(\d)*\" uses it": ["collate.icu.utf8"]
 }
 
 # Regexps that allow us to completely skip comparasion of hunks containing these regexprs
@@ -203,6 +209,30 @@ known_table_diffs = {
 	],
 	"vacuum_parallel": [
 		[[['t']], [['f']]]
+	],
+	"brin_bloom" : [
+		[[['0']], [['97']]]
+	],
+	"brin_multi" : [
+		[[['0']], [['97']]]
+	],
+	"reloptions": [
+		[[['t']], [['f']]]
+	]
+}
+
+known_stmt_diff = {
+	"limit" : [
+		[['declare c1 cursor for select * from int8_tbl limit 10;'],
+		 ['declare c1 scroll cursor for select * from int8_tbl limit 10;']],
+		[['declare c2 cursor for select * from int8_tbl limit 3;'],
+		 ['declare c2 scroll cursor for select * from int8_tbl limit 3;']],
+		[['declare c3 cursor for select * from int8_tbl offset 3;'],
+		 ['declare c3 scroll cursor for select * from int8_tbl offset 3;']],
+		[['declare c4 cursor for select * from int8_tbl offset 10;'],
+		 ['declare c4 scroll cursor for select * from int8_tbl offset 10;']],
+		[['declare c5 cursor for select * from int8_tbl order by q1 fetch first 2 rows with ties;'],
+		 ['declare c5 scroll cursor for select * from int8_tbl order by q1 fetch first 2 rows with ties;']]
 	]
 }
 
@@ -310,6 +340,23 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 		elif is_commutative_cond_eq(src_cur_value, target_cur[1]):
 			src_down = True
 			target_down = True
+		elif (src_cur_value == 'Unique'
+			  and target_cur[1] == 'HashAggregate'):
+			# As source output uses Unique, it may need to sort values after scan,
+			# but target output use HashAggregate directly on scanned value, so
+			# need to skip "Sort" level for source
+			if (len(src_cur[3]) > 0
+				   and src_cur[3][0][1] == 'Sort'):
+				if goto_down_level(src_stack, src_cur) == False:
+					raise RuntimeError("Failed to skip 'Sort' level in source query plan")
+				src_cur = src_stack[0][0][src_stack[0][1]]
+
+			src_down = True
+			target_down = True
+		elif (src_cur_value == 'Merge Append'
+			  and target_cur[1] == 'Append'):
+			src_down = True
+			target_down = True
 		elif src_cur_value == target_cur[1]:
 			src_down = True
 			target_down = True
@@ -323,7 +370,8 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				and target_cur[1].startswith('Custom Scan')
 				and (target_cur[2][0] == 'Bitmap heap scan'
 					or (target_cur[2][0].startswith('Filter')
-						and target_cur[2][1] == 'Bitmap heap scan'))):
+						and target_cur[2][1] == 'Bitmap heap scan')
+					or (target_cur[2][0].startswith("Forward index only scan")))):
 				# sometimes we have bitmap heap scan instead index scan
 				src_up = True
 				target_up = True
@@ -424,6 +472,15 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 							and target_cur[1] == 'Aggregate'))):
 				src_up = True
 				target_up = True
+			elif (test_name == 'union'
+				  and src_cur_value == 'Nested Loop'
+				  and target_cur[1] == 'Merge Join'):
+				src_up = True
+				target_up = True
+			elif (test_name == 'join_hash'
+				  and src_cur_value == 'Seq Scan on tenk1 t1'):
+				src_up = True
+				target_up = True
 			else:
 				print(f"src_cur[1] = {src_cur[1]}\ntarget_cur[1] = {target_cur[1]}")
 				raise RuntimeError(f"Unsupported tree diff. Add branch specifically for \"{test_name}\" test")
@@ -503,6 +560,7 @@ class LineType(Enum):
 	description = 2
 	table = 3
 	info = 4
+	stmt = 5
 
 
 def type_of_line(line: str):
@@ -515,6 +573,9 @@ def type_of_line(line: str):
 	      or re.match(r"Indexes:", line)
 	      or re.match(r".*[,\"] btree \(", line)):
 		return LineType.description
+	# TODO: Need to add support for multi-line stmts and other stmt types
+	elif re.match(r"^(declare).*;$", line):
+		return LineType.stmt
 	else:
 		return LineType.table
 
@@ -590,6 +651,12 @@ for patched_file in patched_files:
 	target_desc_end = 0
 	desc_hunks = []
 	finish_desc = False
+
+	src_stmts = []
+	target_stmts = []
+	stmts_hunks = []
+	finish_stmts = False
+
 	index = 0
 	testName = os.path.splitext(os.path.basename(patched_file.target_file))[0]
 	hunks = list(patched_file)
@@ -670,6 +737,10 @@ for patched_file in patched_files:
 						    and line.source_line_no > src_desc_start + 1):
 							if hunk not in desc_hunks:
 								desc_hunks += [hunk]
+					elif line_type == LineType.stmt:
+						src_stmts += [line.value.strip()]
+						if hunk not in stmts_hunks:
+							stmts_hunks += [hunk]
 
 				elif line.is_added:
 					# print(f"{line.line_type}:{patched_file.target_file}:{line.target_line_no}:{line_type}: {target[line.target_line_no - 1]}", end="")
@@ -692,12 +763,19 @@ for patched_file in patched_files:
 						    and line.target_line_no > target_desc_start + 1):
 							if hunk not in desc_hunks:
 								desc_hunks += [hunk]
+					elif line_type == LineType.stmt:
+						target_stmts += [line.value.strip()]
+						if hunk not in stmts_hunks:
+							stmts_hunks += [hunk]
 				else:
 					if src_table_end != 0 and target_table_end != 0 and line.source_line_no > src_table_end and line.target_line_no > target_table_end:
 						finish_table = True
 					elif src_desc_end != 0 and line.source_line_no > src_desc_end:
 						finish_desc = True
-				# import ipdb; ipdb.set_trace()
+					elif (line.source_line_no == hunk.source_start + hunk.source_length - 1
+					  and line.target_line_no == hunk.target_start + hunk.target_length - 1):
+						if len(src_stmts) > 0 and len(target_stmts) > 0:
+							finish_stmts = True
 				if src_table_end != 0 and target_table_end != 0:
 					if (not finish_table and line_num == len(lines) - 1
 					    and hunk_num != len(hunks) - 1
@@ -706,6 +784,48 @@ for patched_file in patched_files:
 					elif (line_num == len(lines) - 1
 					      and hunk_num == len(hunks) - 1):
 						finish_table = True
+
+
+				if finish_stmts:
+					# print("FINISH STMTS?")
+
+					finish_stmts = False
+					stmts_remove = False
+
+					# print(testName)
+					# print(src_stmts)
+					# print(target_stmts)
+
+					if testName in known_stmt_diff:
+						test_stmts_diffs = known_stmt_diff[testName]
+						for test_stmts_diff in test_stmts_diffs:
+							# import ipdb; ipdb.set_trace()
+							if (test_stmts_diff[0] == src_stmts
+								and test_stmts_diff[1]
+								== target_stmts):
+								stmts_remove = True
+
+					if stmts_remove:
+						for stmts_hunk in stmts_hunks:
+							stmts_lines = list(stmts_hunk)
+							for stmts_line in stmts_lines:
+								line_type = type_of_line(stmts_line.value)
+								if line_type == LineType.stmt:
+									if (stmts_line.is_removed
+										and stmts_line.value.strip() in src_stmts):
+										stmts_hunk.remove(stmts_line)
+										src_stmts.remove(stmts_line.value.strip())
+									elif (stmts_line.is_added
+										  and stmts_line.value.strip() in target_stmts):
+										stmts_hunk.remove(stmts_line)
+										target_stmts.remove(stmts_line.value.strip())
+
+							if stmts_hunk.added == 0 and stmts_hunk.removed == 0 and stmts_hunk in patched_file:
+								patched_file.remove(stmts_hunk)
+
+						src_stmts = []
+						target_stmts = []
+						stmts_hunks = []
 
 				if finish_table:
 					# print("FINISH TABLE?")
@@ -730,10 +850,13 @@ for patched_file in patched_files:
 						target_table_lines = sorted(
 						    [cell.strip() for cell in line]
 						    for line in target_table_lines)
-						# print(src_table_lines == target_table_lines)
+
+						# print(f"src_table_lines = {src_table_lines}")
+						# print(f"target_table_lines = {target_table_lines}")
 
 						# remove diffs of tables just with different order
 						if src_table_lines == target_table_lines:
+							# print("Table lines are equal")
 							table_remove = True
 						else:
 							while (len(src_table_lines) > 0

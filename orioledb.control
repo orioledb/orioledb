@@ -1,5 +1,5 @@
 # orioledb extension
 comment = 'OrioleDB -- the next generation transactional engine'
-default_version = '1.7'
+default_version = '1.8'
 module_pathname = '$libdir/orioledb'
 relocatable = true

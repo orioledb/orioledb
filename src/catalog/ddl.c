@@ -122,6 +122,7 @@ Query	   *savedDataQuery = NULL;
 IndexBuildResult o_pkey_result = {0};
 bool		o_in_add_column = false;
 static CreateStmt *create_stmt = NULL;
+static List *o_added_columns = NIL;
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -146,6 +147,7 @@ static void redefine_indices(Relation rel, OTable *new_o_table, bool primary, bo
 static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
 static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
 static void o_validate_replica_identity(Relation rel, ReplicaIdentityStmt *stmt);
+static void o_process_added_column(AlterTableCmd *cmd);
 
 void
 orioledb_setup_ddl_hooks(void)
@@ -1055,8 +1057,30 @@ orioledb_utility_command(PlannedStmt *pstmt,
 						case AT_ReplicaIdentity:
 							o_validate_replica_identity(rel, (ReplicaIdentityStmt *) cmd->def);
 							break;
+						case AT_AddColumn:
+							o_process_added_column(cmd);
+							break;
 						default:
 							break;
+					}
+				}
+			}
+			else if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+			{
+				/*
+				 * Parent partition table is always heap-based, however child
+				 * partitions can use orioledb, so we need to process
+				 * non-oriole relations as well
+				 */
+				ListCell   *lc;
+
+				foreach(lc, atstmt->cmds)
+				{
+					AlterTableCmd *cmd = (AlterTableCmd *) lfirst(lc);
+
+					if (cmd->subtype == AT_AddColumn)
+					{
+						o_process_added_column(cmd);
 					}
 				}
 			}
@@ -1537,10 +1561,44 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			list_free(dropped_attrs);
 			dropped_attrs = NIL;
 		}
+
+		/*
+		 * Don't free memory explicitly, delegate it to the memory context
+		 * mechanism
+		 */
+		o_added_columns = NIL;
 	}
 	else if (IsA(pstmt->utilityStmt, CreateStmt))
 	{
 		create_stmt = NULL;
+	}
+	else if (IsA(pstmt->utilityStmt, CreateSeqStmt) && o_added_columns != NIL)
+	{
+		CreateSeqStmt *seqstmt = (CreateSeqStmt *) pstmt->utilityStmt;
+
+		if (seqstmt->for_identity)
+		{
+			/*
+			 * Here we enrich already existing list elements with data about
+			 * created sequences. We reuse the same list for enriched data, so
+			 * first pop the head element, enrich it with data, then push it
+			 * back to the list tail
+			 */
+			NextValueExpr *nve = makeNode(NextValueExpr);
+
+			List	   *pair = linitial(o_added_columns);
+			Oid			typeOid = intVal(linitial(pair));
+			char	   *colname = strVal(lsecond(pair));
+
+			o_added_columns = list_delete_first(o_added_columns);
+
+			nve->seqid = RangeVarGetRelid(seqstmt->sequence, NoLock, false);
+			nve->typeId = typeOid;
+
+			o_added_columns = lappend(o_added_columns,
+			/* cppcheck-suppress unknownEvaluationOrder */
+									  list_make2(expression_planner((Expr *) nve), makeString(colname)));
+		}
 	}
 
 	free_parsestate(pstate);
@@ -2358,6 +2416,24 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				if (defval == NULL) /* should not happen */
 					elog(ERROR, "failed to coerce base type to domain");
 				expr = defval;
+			}
+			else if (rel->rd_att->attrs[i].attidentity && old_slot->tts_isnull[i])
+			{
+				ListCell   *lc;
+
+				foreach(lc, o_added_columns)
+				{
+					List	   *pair = lfirst(lc);
+
+					if (!strcmp(strVal(lsecond(pair)), attr->attname.data))
+					{
+						expr = (Node *) linitial(pair);
+						break;
+					}
+				}
+
+				if (expr == NULL)	/* should not happen */
+					elog(ERROR, "failed to find sequence for brand-new column %s", attr->attname.data);
 			}
 
 			o_fill_new_slot(new_o_table, rel, i, expr,
@@ -4483,6 +4559,12 @@ o_ddl_cleanup(void)
 		list_free_deep(o_alter_generated_column_id);
 		o_alter_generated_column_id = NIL;
 	}
+
+	/*
+	 * Don't free memory explicitly, delegate it to the memory context
+	 * mechanism
+	 */
+	o_added_columns = NIL;
 	o_in_add_column = false;
 	create_stmt = NULL;
 }
@@ -4543,4 +4625,38 @@ o_fill_new_slot(OTable *new_o_table, Relation rel, int attidx,
 			new_slot->tts_isnull[attidx] = true;
 		}
 	}
+}
+
+/*
+ * Store only the column's type and name for
+ * further enrichment during sequence relation creation
+ */
+static void
+o_process_added_column(AlterTableCmd *cmd)
+{
+	ListCell   *lc;
+	ColumnDef  *def = (ColumnDef *) cmd->def;
+	Oid			typeid = def->typeName->typeOid;
+	bool		is_identity = false;
+
+	foreach(lc, def->constraints)
+	{
+		Constraint *con = lfirst_node(Constraint, lc);
+
+		if (con->contype == CONSTR_IDENTITY)
+		{
+			is_identity = true;
+			break;
+		}
+	}
+
+	if (!is_identity)
+		return;
+
+	if (!OidIsValid(typeid))
+		typeid = typenameTypeId(NULL, def->typeName);
+
+	o_added_columns = lappend(o_added_columns,
+	/* cppcheck-suppress unknownEvaluationOrder */
+							  list_make2(makeInteger(typeid), makeString(def->colname)));
 }
