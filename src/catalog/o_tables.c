@@ -972,6 +972,22 @@ o_table_tupdesc(OTable *o_table)
 	tupdesc = o_table_fields_make_tupdesc(o_table->fields, o_table->nfields);
 	if (IsTransactionState())
 		tupdesc->tdtypeid = get_rel_type_id(o_table->oids.reloid);
+	else if (OidIsValid(o_table->oids.reloid))
+
+		/*
+		 * During recovery there is no active transaction, so we can't call
+		 * get_rel_type_id().  Set tdtypeid to the reloid directly as a proxy
+		 * to ensure it is not left as RECORDOID.  Any non-RECORDOID value is
+		 * sufficient because the sole consumer of tdtypeid in the orioledb
+		 * slot code (tts_orioledb_getsomeattrs) only checks whether it equals
+		 * RECORDOID to decide if the tuple is stored in index column order.
+		 * Table leaf tuples are always stored in table column order, so
+		 * index_order must be false; leaving tdtypeid as RECORDOID would
+		 * incorrectly flip index_order to true for tables where all columns
+		 * happen to form the primary key, causing attribute-position
+		 * scrambling and B-tree corruption on the replica.
+		 */
+		tupdesc->tdtypeid = o_table->oids.reloid;
 	return tupdesc;
 }
 

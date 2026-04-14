@@ -1407,3 +1407,80 @@ class ReplicationTest(BaseTest):
 				    os.path.exists(old_tree_path_replica),
 				    f"Old PK data file {old_tree_path_replica} should not exist on replica after recovery"
 				)
+
+	def test_replication_pk_column_order_differs_from_table_order(self):
+		"""
+		Regression test for B-tree corruption on replica when a table's PRIMARY
+		KEY column order differs from the table's column definition order and
+		all table columns are part of the primary key.
+
+		Root cause: o_table_tupdesc() leaves tupdesc->tdtypeid = RECORDOID
+		during WAL replay (no active transaction).  tts_orioledb_getsomeattrs()
+		uses tdtypeid == RECORDOID as a signal that the tuple is stored in
+		index-column order and applies a pk_tbl_field_map remap.  For a table
+		where nfields == nNonLeafFields (all columns are key columns), this
+		accidentally fires, scrambling the slot values and making the key-bound
+		comparison use table-column order instead of key order.  Items are then
+		routed to the wrong B-tree leaf page, causing corruption.
+
+		The table below mirrors the TPC-C new_order table:
+		  column order : (no_o_id, no_d_id, no_w_id)
+		  primary key  : (no_w_id, no_d_id, no_o_id)
+		We insert rows in key order (w, d, o) so that every district group
+		starts o_id over from 1, crossing the split boundary created by the
+		previous district.  With the bug each row from district >= 2 gets a
+		wrong key bound (the scrambled slot puts o_id into the w_id slot), so
+		comparisons route it to the wrong page.
+		"""
+		W = 1  # warehouses
+		D = 3  # districts per warehouse
+		O = 50  # orders per district
+
+		with self.node as master:
+			master.start()
+
+			with self.getReplica().start() as replica:
+				master.safe_psql("""
+					CREATE EXTENSION orioledb;
+
+					CREATE TABLE new_order (
+						no_o_id  INTEGER NOT NULL,
+						no_d_id  INTEGER NOT NULL,
+						no_w_id  INTEGER NOT NULL,
+						PRIMARY KEY (no_w_id, no_d_id, no_o_id)
+					) USING orioledb;
+
+					INSERT INTO new_order
+						SELECT o, d, w
+						FROM generate_series(1, {W}) w,
+						     generate_series(1, {D}) d,
+						     generate_series(1, {O}) o;
+				""".format(W=W, D=D, O=O))
+
+				# Checkpoint on both sides to flush B-tree pages to disk
+				self.catchup_orioledb(replica)
+				master.safe_psql("CHECKPOINT;")
+				replica.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				# Restart replica to recover from checkpointed (possibly
+				# corrupted) state, then verify data integrity
+				replica.stop(['-m', 'immediate'])
+				replica.start()
+				self.catchup_orioledb(replica)
+
+				# All rows must be present
+				self.assertEqual(
+				    W * D * O,
+				    replica.execute("SELECT COUNT(*) FROM new_order;")[0][0])
+
+				# Rows returned by an index scan (ORDER BY pk) must come out
+				# in strict key order: (w, d, o) — not scrambled by the bug.
+				rows = replica.execute("""
+					SELECT no_w_id, no_d_id, no_o_id
+					FROM new_order
+					ORDER BY no_w_id, no_d_id, no_o_id;
+				""")
+				expected = [(w, d, o) for w in range(1, W + 1)
+				            for d in range(1, D + 1) for o in range(1, O + 1)]
+				self.assertEqual(expected, rows)
