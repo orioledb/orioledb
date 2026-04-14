@@ -63,6 +63,7 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
 
     if [ $status -eq 0 ]; then
         echo "default_table_access_method = 'orioledb'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+        git apply patches/limit.patch
         if [ $PG_VERSION = "17" ]; then
             git apply patches/subscription_enable_oriole.diff
         fi
