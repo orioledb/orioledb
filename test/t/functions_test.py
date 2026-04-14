@@ -13,6 +13,7 @@ class FunctionTest(BaseTest):
 	def test_undo_log_size(self):
 
 		node = self.node
+		node.append_conf('postgresql.conf', "checkpoint_timeout = 86400\n")
 		node.start()
 
 		node.safe_psql("""
@@ -27,12 +28,8 @@ class FunctionTest(BaseTest):
 			UPDATE oriole_table set t = repeat('c', 270) WHERE i > 5000;
 		""")
 
-		node.safe_psql("""
-			CHECKPOINT;
-		""")
-
 		self.assertEqual(
-		    "[(Decimal('11000000'),)]",
+		    "[(Decimal('2000000'),)]",
 		    str(
 		        node.execute(
 		            "SELECT round(undo_size, -6) FROM orioledb_undo_size() WHERE undo_type = 'row';"
@@ -43,8 +40,38 @@ class FunctionTest(BaseTest):
 		        node.execute(
 		            "SELECT round(undo_size, -6) FROM orioledb_undo_size() WHERE undo_type = 'page';"
 		        )))
+
+		node.stop()
+
+	def test_undo_log_size_system(self):
+
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+            CREATE TABLE oriole_table (i SERIAL PRIMARY KEY, t text STORAGE PLAIN) USING orioledb;
+		""")
+		node.safe_psql("""
+			INSERT INTO oriole_table(t) select repeat('a', 270) FROM  generate_series(1, 30000) as i;
+		""")
+		node.safe_psql("""
+			UPDATE oriole_table set t = repeat('c', 270) WHERE i > 5000;
+		""")
+		node.safe_psql("""
+		        CREATE INDEX on oriole_table(t);
+		        REINDEX TABLE oriole_table;
+		        REINDEX TABLE oriole_table;
+		        REINDEX TABLE oriole_table;
+		""")
+
+		node.safe_psql("""
+			CHECKPOINT;
+		""")
+
 		self.assertEqual(
-		    "[(Decimal('25000'),)]",
+		    "[(Decimal('123000'),)]",
 		    str(
 		        node.execute(
 		            "SELECT round(undo_size, -3) FROM orioledb_undo_size() WHERE undo_type = 'system';"
