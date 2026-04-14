@@ -27,9 +27,12 @@ class FunctionTest(BaseTest):
 		node.safe_psql("""
 			UPDATE oriole_table set t = repeat('c', 270) WHERE i > 5000;
 		""")
+		node.safe_psql("""
+			CHECKPOINT;
+		""")
 
 		self.assertEqual(
-		    "[(Decimal('2000000'),)]",
+		    "[(Decimal('11000000'),)]",
 		    str(
 		        node.execute(
 		            "SELECT round(undo_size, -6) FROM orioledb_undo_size() WHERE undo_type = 'row';"
