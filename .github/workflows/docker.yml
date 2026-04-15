@@ -44,7 +44,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: docker/setup-buildx-action@v3
 
@@ -92,7 +92,7 @@ jobs:
             > ${{ runner.temp }}/out/${{ matrix.cpu }}-${{ matrix.postgres }}-${{ matrix.distr }}.digest
           echo '${{ steps.meta.outputs.json }}' \
             > ${{ runner.temp }}/out/${{ matrix.cpu }}-${{ matrix.postgres }}-${{ matrix.distr }}.meta.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: digests-${{ matrix.cpu }}-${{ matrix.postgres }}-${{ matrix.distr }}
           path: ${{ runner.temp }}/out/*
@@ -104,7 +104,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: digests
           merge-multiple: true

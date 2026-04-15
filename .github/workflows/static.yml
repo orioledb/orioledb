@@ -24,7 +24,7 @@ jobs:
       COMPILER: ${{ matrix.compiler }}
     steps:
       - name: Checkout extension code into workspace directory
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: orioledb
       - name: Get the required tag name
@@ -32,7 +32,7 @@ jobs:
         run: |
           echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
       - name: Checkout PostgreSQL code into workspace directory
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: orioledb/postgres
           ref: ${{ env.PGTAG }}
@@ -44,7 +44,7 @@ jobs:
       - name: Static analysis
         run: bash ./orioledb/ci/static.sh
       - name: Upload clang reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: ${{ failure() && matrix.compiler == 'clang' }}
         with:
           name: ${{ matrix.pg_version }}_${{ matrix.compiler }}_report

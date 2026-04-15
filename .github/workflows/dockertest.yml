@@ -31,7 +31,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: docker build orioletest:${{ matrix.postgres }}-${{ matrix.compiler }}-${{ matrix.distr }}-${{ matrix.distr-version }}
         uses: docker/build-push-action@v6
