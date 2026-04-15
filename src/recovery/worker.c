@@ -738,6 +738,10 @@ recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id)
 		if (recovery_needs_feedback)
 			WakeupRecovery();
 
+		if (pg_atomic_read_u64(&worker_ptrs[id].commitPtr) ==
+		    pg_atomic_read_u64(recovery_ptr))
+			WakeupRecovery();
+
 		pg_usleep(usleep_time);
 
 		CHECK_FOR_INTERRUPTS();
