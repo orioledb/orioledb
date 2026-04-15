@@ -353,13 +353,14 @@ extern void o_add_invalidate_undo_item(ORelOids oids, uint32 flags);
 extern void o_invalidate_undo_item_callback(UndoLogType undoType,
 											UndoLocation location,
 											UndoStackItem *baseItem,
-											OXid oxid, bool abort,
+											OXid oxid, OUndoCallbackStage stage,
 											bool changeCountsValid);
 
 extern void o_add_invalidate_comparator_undo_item(Oid opfamily, Oid lefttype, Oid righttype);
 extern void o_invalidate_comparator_callback(UndoLogType undoType, UndoLocation location,
 											 UndoStackItem *baseItem,
-											 OXid oxid, bool abort, bool changeCountsValid);
+											 OXid oxid, OUndoCallbackStage stage,
+											 bool changeCountsValid);
 extern void reset_saving_inval_messages(void);
 
 extern void ResourceOwnerRememberOTableDescr(ResourceOwner owner, OTableDescr *descr);

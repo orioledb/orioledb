@@ -1019,7 +1019,7 @@ o_add_undo_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key)
 void
 o_sys_cache_delete_callback(UndoLogType undoType, UndoLocation location,
 							UndoStackItem *baseItem, OXid oxid,
-							bool abort, bool changeCountsValid)
+							OUndoCallbackStage stage, bool changeCountsValid)
 {
 	bool		res PG_USED_FOR_ASSERTS_ONLY;
 	SysCacheDeleteUndoStackItem *item = (SysCacheDeleteUndoStackItem *) baseItem;

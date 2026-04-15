@@ -79,7 +79,8 @@ static pairingheap retainUndoLocHeaps[(int) UndoLogsCount] =
 static SubTransactionId minParentSubId = InvalidSubTransactionId;
 
 typedef void (*UndoCallback) (UndoLogType undoType, UndoLocation location,
-							  UndoStackItem *item, OXid oxid, bool abort,
+							  UndoStackItem *item, OXid oxid,
+							  OUndoCallbackStage stage,
 							  bool changeCountsValid);
 
 static void init_undo_meta(UndoMeta *meta, bool found);
@@ -87,12 +88,13 @@ static bool undo_write_internal(UndoLogType undoType, UndoLocation location,
 								Size size, Pointer buf, bool must_exist);
 static void o_stub_item_callback(UndoLogType undoType, UndoLocation location,
 								 UndoStackItem *baseItem,
-								 OXid oxid, bool abort,
+								 OXid oxid, OUndoCallbackStage stage,
 								 bool changeCountsValid);
 static void o_rewind_relfilenode_item_callback(UndoLogType undoType,
 											   UndoLocation location,
 											   UndoStackItem *baseItem,
-											   OXid oxid, bool abort,
+											   OXid oxid,
+											   OUndoCallbackStage stage,
 											   bool changeCountsValid);
 
 /*
@@ -1171,7 +1173,7 @@ o_add_branch_undo_item(UndoLogType undoType, UndoLocation newLocation)
 static UndoLocation
 walk_undo_range(UndoLogType undoType,
 				UndoLocation location, UndoLocation toLoc, UndoItemBuf *buf,
-				OXid oxid, bool abort_val, UndoLocation *onCommitLocation,
+				OXid oxid, OUndoCallbackStage stage, UndoLocation *onCommitLocation,
 				bool changeCountsValid)
 {
 	UndoStackItem *item;
@@ -1182,7 +1184,7 @@ walk_undo_range(UndoLogType undoType,
 		item = undo_item_buf_read_item(buf, undoType, location);
 		descr = item_type_get_descr(item->type);
 		descr->callback(undoType, location, item, oxid,
-						abort_val, changeCountsValid);
+						stage, changeCountsValid);
 
 		/*
 		 * Update location of the last item, which needs an action on commit,
@@ -1196,10 +1198,10 @@ walk_undo_range(UndoLogType undoType,
 		}
 
 		/*
-		 * On commit, we only walk through the specific items. On abort, we
-		 * walk through all the items.
+		 * On commit/precommit, we only walk through the specific items. On
+		 * abort, we walk through all the items.
 		 */
-		if (!abort_val)
+		if (stage != OUndoCallbackStageAbort)
 		{
 			OnCommitUndoStackItem *fItem = (OnCommitUndoStackItem *) item;
 
@@ -1217,7 +1219,8 @@ walk_undo_range(UndoLogType undoType,
 UndoLocation
 walk_undo_range_with_buf(UndoLogType undoType,
 						 UndoLocation location, UndoLocation toLoc,
-						 OXid oxid, bool abort_val, UndoLocation *onCommitLocation,
+						 OXid oxid, OUndoCallbackStage stage,
+						 UndoLocation *onCommitLocation,
 						 bool changeCountsValid)
 {
 	UndoItemBuf buf;
@@ -1225,7 +1228,7 @@ walk_undo_range_with_buf(UndoLogType undoType,
 	ASAN_UNPOISON_MEMORY_REGION(&buf, sizeof(buf));
 
 	init_undo_item_buf(&buf);
-	location = walk_undo_range(undoType, location, toLoc, &buf, oxid, abort_val,
+	location = walk_undo_range(undoType, location, toLoc, &buf, oxid, stage,
 							   onCommitLocation, changeCountsValid);
 	free_undo_item_buf(&buf);
 	return location;
@@ -1254,7 +1257,7 @@ apply_undo_branches(UndoLogType undoType, OXid oxid)
 															   location);
 		location = item->prevBranchLocation;
 		walk_undo_range(undoType, item->longPathLocation, item->header.prev,
-						&buf, oxid, true, NULL, false);
+						&buf, oxid, OUndoCallbackStageAbort, NULL, false);
 	}
 	free_undo_item_buf(&buf);
 }
@@ -1297,7 +1300,7 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		location = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
 
 		location = walk_undo_range_with_buf(undoType, location, InvalidUndoLocation,
-											oxid, false, NULL,
+											oxid, OUndoCallbackStageCommit, NULL,
 											changeCountsValid);
 		Assert(!UndoLocationIsValid(location));
 		newOnCommitLocation = InvalidUndoLocation;
@@ -1312,7 +1315,7 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		newOnCommitLocation = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
 		location = walk_undo_range_with_buf(undoType, location,
 											toLocation ? toLocation->location : InvalidUndoLocation,
-											oxid, true, &newOnCommitLocation,
+											oxid, OUndoCallbackStageAbort, &newOnCommitLocation,
 											changeCountsValid);
 	}
 
@@ -1352,6 +1355,18 @@ apply_undo_stack(UndoLogType undoType, OXid oxid, UndoStackLocations *toLocation
 				 bool changeCountsValid)
 {
 	walk_undo_stack(undoType, oxid, toLocation, true, changeCountsValid);
+}
+
+void
+precommit_undo_stack(UndoLogType undoType, OXid oxid, bool changeCountsValid)
+{
+	UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS(undoType);
+	UndoLocation location;
+
+	location = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
+	walk_undo_range_with_buf(undoType, location, InvalidUndoLocation,
+							 oxid, OUndoCallbackStagePreCommit, NULL,
+							 changeCountsValid);
 }
 
 void
@@ -2153,6 +2168,9 @@ undo_xact_callback(XactEvent event, void *arg)
 				elog(DEBUG4, "XACT_EVENT_PRE_COMMIT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
 					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
+				for (i = 0; i < (int) UndoLogsCount; i++)
+					precommit_undo_stack((UndoLogType) i, oxid, true);
+
 				if (TransactionIdIsValid(heapXid))
 					current_oxid_xlog_precommit();
 
@@ -2670,6 +2688,9 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 		CommitSeqNo csn;
 		int			i;
 
+		for (i = 0; i < (int) UndoLogsCount; i++)
+			precommit_undo_stack((UndoLogType) i, oxid, true);
+
 		if (!is_recovery_process())
 			wal_commit(oxid, get_current_logical_xid(), true);
 
@@ -2999,9 +3020,9 @@ orioledb_snapshot_hook(Snapshot snapshot)
 static void
 o_stub_item_callback(UndoLogType undoType, UndoLocation location,
 					 UndoStackItem *baseItem, OXid oxid,
-					 bool abort, bool changeCountsValid)
+					 OUndoCallbackStage stage, bool changeCountsValid)
 {
-	Assert(abort);
+	Assert(stage == OUndoCallbackStageAbort);
 	return;
 }
 
@@ -3112,15 +3133,18 @@ static void
 o_rewind_relfilenode_item_callback(UndoLogType undoType,
 								   UndoLocation location,
 								   UndoStackItem *baseItem,
-								   OXid oxid, bool abort,
+								   OXid oxid, OUndoCallbackStage stage,
 								   bool changeCountsValid)
 {
 	RewindRelFileNodeUndoStackItem *item = (RewindRelFileNodeUndoStackItem *) baseItem;
 
+	if (stage == OUndoCallbackStagePreCommit)
+		return;
+
 	if (enable_rewind && !is_rewind_worker())
 		return;
 
-	if (!abort)
+	if (stage == OUndoCallbackStageCommit)
 		DropRelationFiles(item->rels, item->nCommitRels, false);
 	else
 		DropRelationFiles(&item->rels[item->nCommitRels], item->nAbortRels, false);

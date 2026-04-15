@@ -289,7 +289,7 @@ extern void o_sys_cache_toast_tup_print(BTreeDescr *desc, StringInfo buf,
 										OTuple tup, Pointer arg);
 extern void o_sys_cache_delete_callback(UndoLogType undoType, UndoLocation location,
 										UndoStackItem *baseItem, OXid oxid,
-										bool abort, bool changeCountsValid);
+										OUndoCallbackStage stage, bool changeCountsValid);
 
 #define O_SYS_CACHE_INIT_FUNC(cache_name) \
 void o_##cache_name##_init(MemoryContext mcxt, HTAB *fastcache)

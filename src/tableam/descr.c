@@ -1765,9 +1765,13 @@ o_invalidate_comparator_cache(Oid opfamily, Oid lefttype, Oid righttype)
 void
 o_invalidate_comparator_callback(UndoLogType undoType, UndoLocation location,
 								 UndoStackItem *baseItem,
-								 OXid oxid, bool abort, bool changeCountsValid)
+								 OXid oxid, OUndoCallbackStage stage,
+								 bool changeCountsValid)
 {
 	InvalidateComparatorUndoStackItem *invalidateItem = (InvalidateComparatorUndoStackItem *) baseItem;
+
+	if (stage == OUndoCallbackStagePreCommit)
+		return;
 
 	o_invalidate_comparator_cache(invalidateItem->opfamily,
 								  invalidateItem->lefttype,
@@ -2098,14 +2102,20 @@ orioledb_get_index_descrs(PG_FUNCTION_ARGS)
 void
 o_invalidate_undo_item_callback(UndoLogType undoType, UndoLocation location,
 								UndoStackItem *baseItem,
-								OXid oxid, bool abort, bool changeCountsValid)
+								OXid oxid, OUndoCallbackStage stage,
+								bool changeCountsValid)
 {
 	InvalidateUndoStackItem *invalidateItem = (InvalidateUndoStackItem *) baseItem;
 
-	if (abort && !(invalidateItem->flags & O_INVALIDATE_OIDS_ON_ABORT))
+	if (stage == OUndoCallbackStagePreCommit)
 		return;
 
-	if (!abort && !(invalidateItem->flags & O_INVALIDATE_OIDS_ON_COMMIT))
+	if (stage == OUndoCallbackStageAbort &&
+		!(invalidateItem->flags & O_INVALIDATE_OIDS_ON_ABORT))
+		return;
+
+	if (stage == OUndoCallbackStageCommit &&
+		!(invalidateItem->flags & O_INVALIDATE_OIDS_ON_COMMIT))
 		return;
 
 	o_invalidate_oids(invalidateItem->oids);

@@ -312,6 +312,33 @@ typedef enum
 	UndoStackTail
 } UndoStackKind;
 
+/*
+ * Stage argument passed to every UndoCallback invocation.
+ *
+ * OUndoCallbackStageAbort      - transaction is being rolled back; the
+ *                                 callback should undo whatever the
+ *                                 transaction did.
+ *
+ * OUndoCallbackStagePreCommit  - called for callOnCommit items before the
+ *                                 commit WAL record is written.  Use this
+ *                                 stage for durability work that must
+ *                                 precede the WAL write (e.g. fsync of new
+ *                                 data files) so that a crash between the
+ *                                 WAL write and a later fsync cannot leave
+ *                                 committed data unsynced.
+ *
+ * OUndoCallbackStageCommit     - transaction has committed and the WAL
+ *                                 record is already written; the callback
+ *                                 should perform post-commit cleanup (e.g.
+ *                                 drop obsolete files).
+ */
+typedef enum
+{
+	OUndoCallbackStageAbort,
+	OUndoCallbackStagePreCommit,
+	OUndoCallbackStageCommit,
+} OUndoCallbackStage;
+
 extern bool oxid_needs_wal_flush;
 extern UndoLocation curRetainUndoLocations[(int) UndoLogsCount];
 extern PendingTruncatesMeta *pending_truncates_meta;
@@ -377,6 +404,8 @@ extern void apply_undo_branches(UndoLogType undoType, OXid oxid);
 extern void apply_undo_stack(UndoLogType undoType, OXid oxid,
 							 UndoStackLocations *toLocation,
 							 bool changeCountsValid);
+extern void precommit_undo_stack(UndoLogType undoType, OXid oxid,
+								 bool changeCountsValid);
 extern void on_commit_undo_stack(UndoLogType undoType, OXid oxid,
 								 bool changeCountsValid);
 extern void free_retained_undo_location(UndoLogType undoType);
