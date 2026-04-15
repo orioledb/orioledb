@@ -74,7 +74,7 @@ jobs:
       POOL_SIZE: ${{ inputs.pool_size || '100' }}
     steps:
       - name: Checkout extension code (base branch)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.base.sha || inputs.base_ref || 'main' }}
           path: orioledb
@@ -83,7 +83,7 @@ jobs:
         run: |
           echo "PGTAG=$(grep '^${{ env.PG_VERSION }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
       - name: Checkout PostgreSQL
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: orioledb/postgres
           ref: ${{ env.PGTAG }}
@@ -131,7 +131,7 @@ jobs:
       POOL_SIZE: ${{ inputs.pool_size || '100' }}
     steps:
       - name: Checkout extension code (head branch)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: orioledb
@@ -140,7 +140,7 @@ jobs:
         run: |
           echo "PGTAG=$(grep '^${{ env.PG_VERSION }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
       - name: Checkout PostgreSQL
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: orioledb/postgres
           ref: ${{ env.PGTAG }}
@@ -176,16 +176,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout extension code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: orioledb
       - name: Download base results
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: perf-results-base-*
           path: results-base/
       - name: Download head results
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: perf-results-head-*
           path: results-head/
