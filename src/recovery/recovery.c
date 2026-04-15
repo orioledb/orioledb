@@ -639,7 +639,8 @@ apply_xids_branches(void)
 				Assert(!UndoLocationIsValid(stack->undoStack.subxactLocation));
 				location = walk_undo_range_with_buf((UndoLogType) ((int) (stack->undoType) - XID_REC_REWIND_TYPES_OFFSET),
 													stack->undoStack.onCommitLocation,
-													InvalidUndoLocation, recovery_oxid, false, NULL, true);
+													InvalidUndoLocation, recovery_oxid,
+													OUndoCallbackStageCommit, NULL, true);
 				/* NB rewindItem->oxid is not used in recovery */
 				Assert(!UndoLocationIsValid(location));
 			}
@@ -1261,6 +1262,7 @@ walk_checkpoint_stacks(RecoveryXidState *recovery_xid_state, CommitSeqNo csn,
 			}
 			else
 			{
+				precommit_undo_stack(stack->undoType, recovery_oxid, false);
 				on_commit_undo_stack(stack->undoType, recovery_oxid, false);
 			}
 		}
@@ -1543,6 +1545,8 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 		if (flush_undo_pos)
 			flush_current_undo_stack();
 		for (i = 0; i < (int) UndoLogsCount; i++)
+			precommit_undo_stack((UndoLogType) i, oxid, true);
+		for (i = 0; i < (int) UndoLogsCount; i++)
 			on_commit_undo_stack((UndoLogType) i, oxid, true);
 		walk_checkpoint_stacks(cur_recovery_xid_state, csn,
 							   InvalidSubTransactionId, flush_undo_pos);
@@ -1554,6 +1558,8 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 	{
 		if (flush_undo_pos)
 			flush_current_undo_stack();
+		for (i = 0; i < (int) UndoLogsCount; i++)
+			precommit_undo_stack((UndoLogType) i, oxid, true);
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			on_commit_undo_stack((UndoLogType) i, oxid, true);
 		walk_checkpoint_stacks(cur_recovery_xid_state, csn,

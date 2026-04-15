@@ -136,16 +136,16 @@ extern void modify_undo_callback(UndoLogType undoType,
 								 UndoLocation location,
 								 UndoStackItem *baseItem,
 								 OXid oxid,
-								 bool abort,
+								 OUndoCallbackStage stage,
 								 bool changeCountsValid);
 extern void lock_undo_callback(UndoLogType undoType, UndoLocation location,
 							   UndoStackItem *baseItem,
-							   OXid oxid, bool abort,
+							   OXid oxid, OUndoCallbackStage stage,
 							   bool changeCountsValid);
 extern void btree_relnode_undo_callback(UndoLogType undoType,
 										UndoLocation location,
 										UndoStackItem *baseItem, OXid oxid,
-										bool abort,
+										OUndoCallbackStage stage,
 										bool changeCountsValid);
 extern void get_prev_leaf_header_from_undo(UndoLogType undoType,
 										   BTreeLeafTuphdr *tuphdr,
@@ -171,7 +171,8 @@ extern void add_undo_create_relnode(ORelOids oids, ORelOids *treeOids,
 extern void check_pending_truncates(void);
 extern UndoLocation walk_undo_range_with_buf(UndoLogType undoType, UndoLocation location,
 											 UndoLocation toLoc,
-											 OXid oxid, bool abort_val, UndoLocation *onCommitLocation,
+											 OXid oxid, OUndoCallbackStage stage,
+											 UndoLocation *onCommitLocation,
 											 bool changeCountsValid);
 
 

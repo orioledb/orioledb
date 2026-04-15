@@ -528,7 +528,9 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 					location = walk_undo_range_with_buf((UndoLogType) i,
 														rewindItem->undoLocation[i],
 														InvalidUndoLocation,
-														rewindItem->oxid, true, &rewindItem->onCommitUndoLocation[i],
+														rewindItem->oxid,
+														OUndoCallbackStageAbort,
+														&rewindItem->onCommitUndoLocation[i],
 														true);
 					Assert(!UndoLocationIsValid(location));
 				}
@@ -1231,7 +1233,7 @@ rewind_worker_main(Datum main_arg)
 
 							elog(DEBUG3, "Completing: oxid %lu xid %u logtype %d undoLoc %lu onCommitLoc %lu, minRetainLoc %lu, oldestRunXid %u, nsubxids %u", rewindItem->oxid, rewindItem->xid, i, rewindItem->undoLocation[i], rewindItem->onCommitUndoLocation[i], rewindItem->minRetainLocation[i], XidFromFullTransactionId(rewindItem->oldestConsideredRunningXid), rewindItem->nsubxids);
 
-							location = walk_undo_range_with_buf((UndoLogType) i, rewindItem->onCommitUndoLocation[i], InvalidUndoLocation, rewindItem->oxid, false, NULL, true);
+							location = walk_undo_range_with_buf((UndoLogType) i, rewindItem->onCommitUndoLocation[i], InvalidUndoLocation, rewindItem->oxid, OUndoCallbackStageCommit, NULL, true);
 							Assert(!UndoLocationIsValid(location));
 							pg_atomic_write_u64(&undoMeta->minRewindRetainLocation, rewindItem->minRetainLocation[i]);
 						}

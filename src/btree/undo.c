@@ -454,8 +454,8 @@ get_tree_descr(ORelOids oids, OIndexType type)
  */
 void
 modify_undo_callback(UndoLogType undoType, UndoLocation location,
-					 UndoStackItem *baseItem, OXid oxid, bool abort,
-					 bool changeCountsValid)
+					 UndoStackItem *baseItem, OXid oxid,
+					 OUndoCallbackStage stage, bool changeCountsValid)
 {
 	BTreeModifyUndoStackItem *item = (BTreeModifyUndoStackItem *) baseItem;
 	BTreeDescr *desc = get_tree_descr(item->oids, item->header.indexType);
@@ -471,7 +471,7 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	BTreeKeyType keyType = item->action == BTreeOperationUpdate ? BTreeKeyLeafTuple : BTreeKeyNonLeafKey;
 	OFindPageResult findResult;
 
-	Assert(abort);
+	Assert(stage == OUndoCallbackStageAbort);
 
 	if (!desc)
 		return;
@@ -575,7 +575,7 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 void
 lock_undo_callback(UndoLogType undoType, UndoLocation location,
 				   UndoStackItem *baseItem, OXid oxid,
-				   bool abort, bool changeCountsValid)
+				   OUndoCallbackStage stage, bool changeCountsValid)
 {
 	BTreeModifyUndoStackItem *item = (BTreeModifyUndoStackItem *) baseItem;
 	BTreeDescr *desc = get_tree_descr(item->oids, item->header.indexType);
@@ -591,7 +591,7 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 				lastLockOnlyUndoLocation = InvalidUndoLocation;
 	OFindPageResult findResult;
 
-	Assert(abort);
+	Assert(stage == OUndoCallbackStageAbort);
 
 	if (!desc)
 		return;
@@ -846,7 +846,8 @@ check_pending_truncates(void)
 void
 btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 							UndoStackItem *baseItem,
-							OXid oxid, bool abort, bool changeCountsValid)
+							OXid oxid, OUndoCallbackStage stage,
+							bool changeCountsValid)
 {
 	RelnodeUndoStackItem *relnode_item = (RelnodeUndoStackItem *) baseItem;
 	Oid			datoid,
@@ -858,7 +859,26 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 	bool		doCleanup;
 	bool		cleanupFiles = true;
 
-	if (!enable_rewind || abort)
+	/*
+	 * Fsync new files on precommit, before the commit WAL record is written,
+	 * to guarantee durability in case of a crash between WAL write and fsync.
+	 */
+	if (stage == OUndoCallbackStagePreCommit)
+	{
+		if (OidIsValid(relnode_item->newRelnode) && relnode_item->fsync)
+		{
+			int			numTreeOids = relnode_item->newNumTreeOids;
+			ORelOids   *treeOids = &relnode_item->oids[relnode_item->oldNumTreeOids];
+			int			i;
+
+			for (i = 0; i < numTreeOids; i++)
+				fsync_btree_files(treeOids[i].datoid,
+								  treeOids[i].relnode);
+		}
+		return;
+	}
+
+	if (!enable_rewind || stage == OUndoCallbackStageAbort)
 		doCleanup = true;
 	else
 		doCleanup = is_rewind_worker();
@@ -866,7 +886,7 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 	datoid = relnode_item->datoid;
 	reloid = relnode_item->relid;
 
-	if (!abort)
+	if (stage == OUndoCallbackStageCommit)
 	{
 		remainRelnode = relnode_item->newRelnode;
 		dropRelnode = relnode_item->oldRelnode;
@@ -889,20 +909,6 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 		dropRelnode = relnode_item->newRelnode;
 		dropTreeOids = &relnode_item->oids[relnode_item->oldNumTreeOids];
 		dropNumTreeOids = relnode_item->newNumTreeOids;
-	}
-
-	/* Fsync new files if required */
-	if (!abort &&
-		OidIsValid(relnode_item->newRelnode) &&
-		relnode_item->fsync)
-	{
-		int			numTreeOids = relnode_item->newNumTreeOids;
-		ORelOids   *treeOids = &relnode_item->oids[relnode_item->oldNumTreeOids];
-		int			i;
-
-		for (i = 0; i < numTreeOids; i++)
-			fsync_btree_files(treeOids[i].datoid,
-							  treeOids[i].relnode);
 	}
 
 	if (OidIsValid(dropRelnode))

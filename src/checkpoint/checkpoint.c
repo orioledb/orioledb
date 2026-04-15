@@ -5716,11 +5716,11 @@ foreach_extent_append(BTreeDescr *desc, FileExtent extent, void *arg)
 void
 systrees_lock_callback(UndoLogType undoType, UndoLocation location,
 					   UndoStackItem *baseItem, OXid oxid,
-					   bool abort, bool changeCountsValid)
+					   OUndoCallbackStage stage, bool changeCountsValid)
 {
 	SysTreesLockUndoStackItem *lockItem = (SysTreesLockUndoStackItem *) baseItem;
 
-	Assert(abort);
+	Assert(stage == OUndoCallbackStageAbort);
 
 	if (lockItem->lock)
 	{
