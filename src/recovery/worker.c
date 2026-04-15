@@ -731,12 +731,26 @@ recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id)
 
 		prev_rec_ptr = InvalidXLogRecPtr;
 
-		/*
-		 * If any of the committed transactions required the feedback, wake up
-		 * the main recovery process: it would have a chance to provide it.
+		/*---
+		 * Wake the main recovery process (startup) when either:
+		 * 1. A committed transaction requested feedback (e.g. synchronous
+		 *    replication), or
+		 * 2. This worker has replayed everything up to recovery_ptr but
+		 *    recovery_finished_list_ptr has not yet caught up — meaning
+		 *    CSN assignment and finishedPtr update are pending.  Waking
+		 *    startup immediately runs update_proc_retain_undo_location()
+		 *    and eliminates the up-to-10-second replay lag visible in
+		 *    pg_stat_replication.
 		 */
-		if (recovery_needs_feedback)
-			WakeupRecovery();
+		{
+			XLogRecPtr	commit_ptr = pg_atomic_read_u64(&worker_ptrs[id].commitPtr);
+			XLogRecPtr	rec_ptr = pg_atomic_read_u64(recovery_ptr);
+
+			if (recovery_needs_feedback ||
+				(commit_ptr == rec_ptr &&
+				 commit_ptr != pg_atomic_read_u64(recovery_finished_list_ptr)))
+				WakeupRecovery();
+		}
 
 		pg_usleep(usleep_time);
 
