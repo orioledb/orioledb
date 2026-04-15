@@ -571,18 +571,13 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 			}
 			else if (type == RecoveryMsgTypeCommit)
 			{
-				XLogRecPtr prev_workers_ptr, new_workers_ptr;
 				oxid_ptr_record = (RecoveryMsgOXidPtr *) (data + data_pos);
 				recovery_switch_to_oxid(oxid_ptr_record->oxid, id);
 				recovery_finish_current_oxid(COMMITSEQNO_MAX_NORMAL - 1,
 											 oxid_ptr_record->ptr,
 											 id,
 											 false);
-				prev_workers_ptr =  = recovery_get_current_ptr();
 				update_worker_ptr(id, oxid_ptr_record->ptr);
-				new_workers_ptr = recovery_get_current_ptr();
-				if (new_workers_ptr > prev_workers_ptr)
-					WakeupRecovery();
 				if (oxid_ptr_record->needsFeedback)
 					recovery_needs_feedback = true;
 				data_pos += sizeof(RecoveryMsgOXidPtr);
@@ -723,18 +718,7 @@ recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id)
 		{
 			if (!XLogRecPtrIsInvalid(prev_rec_ptr))
 			{
-				XLogRecPtr      prev_workers_ptr, new_workers_ptr;
-
-				prev_workers_ptr = recovery_get_current_ptr();
 				update_worker_ptr(id, prev_rec_ptr);
-				new_workers_ptr = recovery_get_current_ptr();
-
-				/* Without this wake, an applied, but not finalized commit
-				   stays invisible because itx xid still carries an in-progress
-				   CSN.  Only wake provokes update_proc_retain_undo_location() call
-				   which assigns final CSNs to xids commited during recovery.  */
-				if (new_workers_ptr > prev_workers_ptr)
-						WakeupRecovery();
 			}
 
 			/*
