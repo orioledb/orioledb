@@ -159,6 +159,10 @@ get_seq_buf_filename(SeqBufTag *tag)
 static bool
 seq_buf_tag_eq(SeqBufTag *t1, SeqBufTag *t2)
 {
+	/*
+	 * Tablespace is intentionally omitted: (datoid, relnode) already uniquely
+	 * identifies a btree regardless of which tablespace it lives in.
+	 */
 	if (t1->key.oids.datoid == t2->key.oids.datoid &&
 		t1->key.oids.relnode == t2->key.oids.relnode &&
 		t1->num == t2->num &&

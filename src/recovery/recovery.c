@@ -2880,6 +2880,14 @@ o_indices_get_trees(Pointer tuple, ORelOids *tableOids)
 	if (chunk.key.chunknum != 0)
 		return NULL;
 
+	/*
+	 * The serialized OIndex blob starts at OIndex.tableOids (the key fields
+	 * indexOids/indexType/indexVersion are stored in OIndexChunkKey).
+	 * tablespace must lie after tableOids in the struct so the subtraction
+	 * below is positive and the field lands in the first chunk.
+	 */
+	StaticAssertStmt(offsetof(OIndex, tablespace) > offsetof(OIndex, tableOids),
+					 "OIndex.tablespace must follow OIndex.tableOids");
 	Assert(chunk.dataLength >= sizeof(*tableOids));
 	memcpy(tableOids, tuple + offsetof(OIndexChunk, data), sizeof(*tableOids));
 	trees = (OIndexKey *) MemoryContextAlloc(CurTransactionContext, sizeof(OIndexKey));
@@ -3043,7 +3051,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 			o_fill_tmp_table_descr(&tmp_descr, new_o_table);
 			if (new_o_table->indices[ix_num].type == oIndexPrimary)
 			{
-				if (tbl_data_exists(&old_o_table->oids, new_o_table->indices[ix_num].tablespace))
+				if (tbl_data_exists(&old_o_table->oids, old_o_table->tablespace))
 				{
 					old_descr = o_fetch_table_descr(old_o_table->oids);
 					rebuild_indices_insert_placeholders(&tmp_descr);

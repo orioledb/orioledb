@@ -660,7 +660,7 @@ s3_header_compare_and_swap(S3HeaderTag tag, int index,
  * We allow only one part to be locked simultaneosly.
  */
 static S3HeaderTag curLockedTag = {{{InvalidOid, InvalidOid, InvalidOid},
-InvalidIndexNumber}, 0, 0};
+InvalidOid}, 0, 0};
 static int	curLockedIndex = 0;
 
 /*
@@ -1072,6 +1072,10 @@ iterate_files(IterateFilesCallback callback)
 	iterate_tablespace_files(DEFAULTTABLESPACE_OID, path, callback);
 
 	dir = opendir(PG_TBLSPC);
+	if (dir == NULL)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not open directory \"%s\": %m", PG_TBLSPC)));
 	while (errno = 0, (file = readdir(dir)) != NULL)
 	{
 		struct stat st;
