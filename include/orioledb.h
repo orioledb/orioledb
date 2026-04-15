@@ -98,7 +98,7 @@
  * these values makes sense only within one ORIOLEDB_BINARY_VERSION value.
  */
 #define ORIOLEDB_VERSION "OrioleDB public beta 14"
-#define ORIOLEDB_BINARY_VERSION 8
+#define ORIOLEDB_BINARY_VERSION 9
 #define ORIOLEDB_SYS_TREE_VERSION	1	/* Version of system catalog */
 #define ORIOLEDB_PAGE_VERSION		1	/* Version of binary page format */
 #define ORIOLEDB_COMPRESS_VERSION	1	/* Version of page compression (only
