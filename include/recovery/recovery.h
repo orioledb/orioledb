@@ -56,6 +56,7 @@ extern int	recovery_pool_size_guc;
 extern int	recovery_idx_pool_size_guc;
 extern OXid recovery_oxid;
 extern TransactionId recoveryHeapTransactionId;
+extern pg_atomic_uint64 *recovery_finished_list_ptr;
 
 typedef struct BTreeDescr BTreeDescr;
 

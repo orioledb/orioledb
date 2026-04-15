@@ -735,8 +735,15 @@ recovery_queue_read(shm_mq_handle *queue, Size *data_size, int id)
 		 * If any of the committed transactions required the feedback, wake up
 		 * the main recovery process: it would have a chance to provide it.
 		 */
-		if (recovery_needs_feedback)
-			WakeupRecovery();
+		{
+			XLogRecPtr	commit_ptr = pg_atomic_read_u64(&worker_ptrs[id].commitPtr);
+			XLogRecPtr	rec_ptr = pg_atomic_read_u64(recovery_ptr);
+
+			if (recovery_needs_feedback ||
+			    (commit_ptr == rec_ptr &&
+			     commit_ptr != pg_atomic_read_u64(recovery_finished_list_ptr)))
+				WakeupRecovery();
+		}
 
 		pg_usleep(usleep_time);
 
