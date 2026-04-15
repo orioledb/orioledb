@@ -66,6 +66,7 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         git apply patches/limit.patch
         if [ $PG_VERSION = "17" ]; then
             git apply patches/subscription_enable_oriole.diff
+            git apply patches/027_stream_regress.patch
         fi
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log restart
 
@@ -182,6 +183,7 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log stop
         if [ $PG_VERSION = "17" ]; then
             make -C src/test/subscription installcheck-oriole -j $(nproc) || status=$?
+            make -C src/test/recovery installcheck-oriole -j $(nproc) || status=$?
         fi
     fi
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log stop
