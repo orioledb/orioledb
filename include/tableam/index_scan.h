@@ -53,6 +53,15 @@ typedef struct OIndexPlanState
 	int			iss_NumRuntimeKeys;
 	bool		iss_RuntimeKeysReady;
 	ExprContext *iss_RuntimeContext;
+
+	/*
+	 * Keep the index relation open for the lifetime of the scan so that
+	 * ostate.scandesc.indexRelation remains valid.  _bt_preprocess_keys and
+	 * related nbtree helpers read rd_opfamily / rd_indoption through this
+	 * pointer; if the relation were closed and the relcache entry evicted,
+	 * the pointer would dangle.
+	 */
+	Relation	indexRelation;
 } OIndexPlanState;
 
 /*
