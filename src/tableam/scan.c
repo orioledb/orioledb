@@ -625,7 +625,15 @@ o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 							  &ix_plan_state->iss_NumRuntimeKeys,
 							  &ix_plan_state->iss_ScanKeys,
 							  &ix_plan_state->iss_NumScanKeys);
-		index_close(index, AccessShareLock);
+
+		/*
+		 * Keep the index relation open until o_end_custom_scan.
+		 * ostate.scandesc.indexRelation points into it; if we closed here, a
+		 * relcache invalidation could evict the entry before
+		 * _bt_preprocess_keys reads rd_opfamily / rd_indoption through that
+		 * pointer.
+		 */
+		ix_plan_state->indexRelation = index;
 
 		ix_plan_state->iss_RuntimeContext = CreateExprContext(estate);
 
@@ -844,6 +852,8 @@ o_end_custom_scan(CustomScanState *node)
 			btree_iterator_free(ix_plan_state->ostate.iterator);
 		MemoryContextDelete(ix_plan_state->ostate.cxt);
 		ix_plan_state->ostate.cxt = NULL;
+		index_close(ix_plan_state->indexRelation, AccessShareLock);
+		ix_plan_state->indexRelation = NULL;
 	}
 	else if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
 	{
