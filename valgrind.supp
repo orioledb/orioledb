@@ -316,3 +316,14 @@
    Memcheck:Value8
    fun:wrapper_handler
 }
+
+# _bt_preprocess_array_keys_final does memcpy(p, p, n) when the array key
+# is already in the correct position and needs no reordering.  src == dst
+# is harmless here but triggers Valgrind's overlap detector.
+{
+   bt_preprocess_array_keys_final_self_copy
+   Memcheck:Overlap
+   ...
+   fun:_bt_preprocess_array_keys_final
+   fun:_bt_preprocess_keys
+}
