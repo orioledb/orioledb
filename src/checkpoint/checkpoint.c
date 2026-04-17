@@ -989,7 +989,8 @@ checkpoint_sys_trees(int flags, uint32 cur_chkp_num,
 		}
 		else
 		{
-			checkpoint_temporary_tree(flags, desc);
+			success = checkpoint_temporary_tree(flags, desc);
+			Assert(success);
 			if (!orioledb_s3_mode)
 				sort_checkpoint_tmp_file(desc, cur_chkp_num % 2);
 		}
