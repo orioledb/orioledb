@@ -2332,7 +2332,6 @@ COMMIT\n""")
 						con1.commit()
 						con2.commit()
 
-
 #					publisher.safe_psql("CHECKPOINT;")
 #					subscriber.execute("SELECT orioledb_get_current_oxid();")
 					self.assertListEqual(
@@ -2559,6 +2558,59 @@ COMMIT\n""")
 					        'SELECT data1, data2, left(data3, 20), i FROM o_test_toasted_update ORDER BY i'
 					    ), [('foofoo', 'barbar', '12312312312312312312', 1),
 					        ('mmm', 'nnn', '24624624624624624624', 2)])
+
+
+# Delete on a table with TOAST attributes
+
+	def test_logical_subscription_toast_delete(self):
+		with self.node as publisher:
+			publisher.start()
+
+			baseDir = mkdtemp(prefix=self.myName + '_tgsb_')
+			subscriber = testgres.get_new_node('subscriber',
+			                                   port=self.getBasePort() + 1,
+			                                   base_dir=baseDir)
+			subscriber.init(["--no-locale", "--encoding=UTF8"])
+			subscriber.append_conf(shared_preload_libraries='orioledb')
+			subscriber.append_conf(wal_level='logical')
+
+			with subscriber.start() as subscriber:
+				create_sql = """
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE o_test1 (id int PRIMARY KEY, bid int, junk text
+					) USING orioledb;
+                    CREATE INDEX ON o_test1 USING spgist(junk);
+				"""
+				publisher.safe_psql(create_sql)
+				subscriber.safe_psql(create_sql)
+
+				pub = publisher.publish('test_pub', tables=['o_test1'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+
+				with publisher.connect() as con1:
+					with publisher.connect() as con2:
+						con1.execute(
+						    "INSERT INTO o_test1 (id, bid, junk) VALUES (1, 1, repeat(pi()::text,20000));"
+						)
+						con2.execute(
+						    "INSERT INTO o_test1 (id, bid) VALUES (2, 2);")
+						con1.execute("DELETE FROM o_test1 WHERE id = 1;")
+
+						con1.commit()
+						con2.commit()
+
+					self.assertListEqual(
+					    publisher.execute(
+					        'SELECT id, bid FROM o_test1 ORDER BY id'),
+					    [(2, 2)])
+
+					# wait until changes apply on subscriber and check them
+					sub.catchup()
+					# sub.poll_query_until("SELECT orioledb_recovery_synchronized();", expected=True)
+					self.assertListEqual(
+					    subscriber.execute(
+					        'SELECT id, bid FROM o_test1 ORDER BY id'),
+					    [(2, 2)])
 
 	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
 	                 "'test_decoding' is not installed")

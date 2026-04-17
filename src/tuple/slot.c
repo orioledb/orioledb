@@ -809,7 +809,7 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 			value = o_tuple_read_next_field(&oslot->state, &isnull);
 			slot->tts_tid = *((ItemPointer) value);
 		}
-		else if (!(idx->bridging &&
+		else if (!(idx->bridging && oslot->leafTuple &&
 				   (oslot->ixnum == BridgeIndexNumber || oslot->ixnum == PrimaryIndexNumber)))
 		{
 			ItemPointer iptr;
@@ -827,7 +827,7 @@ tts_orioledb_init_reader(TupleTableSlot *slot)
 		}
 	}
 
-	if (idx->bridging && (oslot->ixnum == BridgeIndexNumber || oslot->ixnum == PrimaryIndexNumber))
+	if (idx->bridging && oslot->leafTuple && (oslot->ixnum == BridgeIndexNumber || oslot->ixnum == PrimaryIndexNumber))
 	{
 		Datum		value;
 		bool		isnull;
