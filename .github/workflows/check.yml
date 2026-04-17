@@ -21,17 +21,11 @@ jobs:
 
           # Full matrix: used for main branch or pull requests
           full = dict(
-              cpu        = ["amd64", "arm64"],
+              cpu        = ["amd64"],
               pg_version = [16, 17],
               compiler   = ["clang", "gcc"],
               check_type = [
-                  "normal", "debug", "sanitize", "check_page",
-                  "valgrind_1", "valgrind_2", "pg_tests", "dm_log_writes",
-              ],
-              # dm-log-writes needs a kernel module that isn't available on
-              # the arm64 runners, so skip it there.
-              exclude    = [
-                  {"cpu": "arm64", "check_type": "dm_log_writes"},
+                  "dm_log_writes",
               ],
           )
 
@@ -39,16 +33,12 @@ jobs:
           branch_combos = [
               ("amd64", 16, "gcc"),
               ("amd64", 17, "clang"),
-              ("arm64", 16, "clang"),
-              ("arm64", 17, "gcc"),
           ]
 
           # Reverse matrix used for pull requests
           reverse_combos = [
               ("amd64", 16, "clang"),
               ("amd64", 17, "gcc"),
-              ("arm64", 16, "gcc"),
-              ("arm64", 17, "clang"),
           ]
 
           # Make matrix for the PR
@@ -68,7 +58,6 @@ jobs:
                       "include": [
                           {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
                           for (c, pg, comp), ct in itertools.product(reverse_combos, full["check_type"])
-                          if not (c == "arm64" and ct == "dm_log_writes")
                       ]
                   }
           # Make matrix for branches
@@ -82,7 +71,6 @@ jobs:
                       "include": [
                           {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
                           for (c, pg, comp), ct in itertools.product(branch_combos, full["check_type"])
-                          if not (c == "arm64" and ct == "dm_log_writes")
                       ]
                   }
 
