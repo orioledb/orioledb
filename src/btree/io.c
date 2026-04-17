@@ -3430,7 +3430,19 @@ iterate_relnode_files(OIndexKey key, RelnodeFileCallback callback, void *arg)
 				if (!orioledb_s3_mode && !first_file_deleted)
 				{
 					filename = psprintf("%s/%u", db_prefix, key.oids.relnode);
-					callback(filename, 0, NULL, arg);
+
+					/*
+					 * The first-file callback exists for callers that care
+					 * about ordering the base file relative to its segments
+					 * (e.g. durable unlink, precommit fsync).  Skip it when
+					 * the base file is absent: after a crash, a secondary
+					 * file like "<relnode>.1" or "<relnode>-<chkp>.map" can
+					 * exist on disk while the base file was never durably
+					 * created, and fsync/unlink of a missing path would
+					 * ereport ERROR (PANIC during startup recovery).
+					 */
+					if (access(filename, F_OK) == 0)
+						callback(filename, 0, NULL, arg);
 					pfree(filename);
 					first_file_deleted = true;
 				}

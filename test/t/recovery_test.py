@@ -6,6 +6,7 @@ import random
 import time
 
 from .base_test import BaseTest
+from .base_test import DM_LOG_WRITES_ENABLED
 from .base_test import ThreadQueryExecutor
 from .base_test import generate_string
 from .base_test import wait_stopevent
@@ -18,7 +19,18 @@ class RecoveryTest(BaseTest):
 
 	def setUp(self):
 		super().setUp()
-		self.node.append_conf('postgresql.conf', "log_min_messages = notice\n")
+		if DM_LOG_WRITES_ENABLED:
+			# Crash recovery is only meaningful if WAL actually reaches the
+			# block device; testgres defaults fsync=off for speed.
+			self.node.append_conf('postgresql.conf',
+			                      'log_min_messages = notice\nfsync = on\n')
+			# Appends above go to the page cache — flush them to the block
+			# device so replay-to-mark after a crash still sees the config
+			# the test was running with.
+			os.sync()
+		else:
+			self.node.append_conf('postgresql.conf',
+			                      "log_min_messages = notice\n")
 
 	def checkpoint_simple_base(self, compressed):
 		node = self.node
@@ -76,7 +88,7 @@ class RecoveryTest(BaseTest):
 		node.safe_psql(
 		    'postgres',
 		    "UPDATE o_test SET value = value + 1 WHERE key % 10 = 0;")
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		node.safe_psql('postgres', "CHECKPOINT;")
@@ -87,7 +99,7 @@ class RecoveryTest(BaseTest):
 		node.safe_psql(
 		    'postgres',
 		    "UPDATE o_test SET value = value + 1 WHERE key % 10 = 0;")
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		node.safe_psql('postgres', "CHECKPOINT;")
@@ -109,7 +121,7 @@ class RecoveryTest(BaseTest):
 		    'postgres',
 		    "UPDATE o_test SET value = value + 1 WHERE key % 10 = 0;")
 		node.safe_psql('postgres', "CHECKPOINT;")
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(
@@ -146,7 +158,7 @@ class RecoveryTest(BaseTest):
 		node.safe_psql('postgres', "CHECKPOINT;")
 
 		con1.close()
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(
@@ -191,7 +203,7 @@ class RecoveryTest(BaseTest):
 		t1.join()
 		con1.close()
 		con2.close()
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 		node.start()
 		self.assertEqual(100,
 		                 node.execute("SELECT COUNT(*) FROM o_test;")[0][0])
@@ -259,7 +271,7 @@ class RecoveryTest(BaseTest):
 		t1.join()
 		con1.close()
 		con2.close()
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 		node.start()
 		self.assertEqual(80,
 		                 node.execute("SELECT COUNT(*) FROM o_test;")[0][0])
@@ -332,7 +344,7 @@ class RecoveryTest(BaseTest):
 		t1.join()
 		con1.close()
 		con2.close()
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 		node.start()
 		self.assertEqual(100,
 		                 node.execute("SELECT COUNT(*) FROM o_test;")[0][0])
@@ -400,7 +412,7 @@ class RecoveryTest(BaseTest):
 		t1.join()
 		con1.close()
 		con2.close()
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(
@@ -453,7 +465,7 @@ class RecoveryTest(BaseTest):
 		t1.join()
 		con1.close()
 		con2.close()
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(0, node.execute("SELECT COUNT(*) FROM o_test;")[0][0])
@@ -514,7 +526,7 @@ class RecoveryTest(BaseTest):
 		t1.join()
 		con1.close()
 		con2.close()
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(
@@ -562,7 +574,7 @@ class RecoveryTest(BaseTest):
 		node.safe_psql(
 		    "INSERT INTO o_test\n"
 		    "(SELECT id, id || 'val' FROM generate_series(101, 200, 1) id);\n")
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(15050,
@@ -583,7 +595,7 @@ class RecoveryTest(BaseTest):
 		node.safe_psql(
 		    "INSERT INTO o_test\n"
 		    "(SELECT id, id || 'val' FROM generate_series(1, 100, 1) id);\n")
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(
@@ -638,7 +650,7 @@ class RecoveryTest(BaseTest):
 		con2.commit()
 		con1.close()
 		con2.close()
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 
@@ -671,7 +683,7 @@ class RecoveryTest(BaseTest):
 		node.safe_psql(
 		    'postgres', "CHECKPOINT;\n"
 		    "UPDATE o_test SET id = -1 WHERE id = 1;")
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(
@@ -702,7 +714,7 @@ class RecoveryTest(BaseTest):
 		    "WHERE i.secid = o_test.secid;\n")
 		con1.commit()
 		con1.close()
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(
@@ -735,7 +747,7 @@ class RecoveryTest(BaseTest):
 		    "WHERE i.secid = o_test.secid;\n")
 		con1.commit()
 		con1.close()
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(
@@ -779,7 +791,7 @@ class RecoveryTest(BaseTest):
 		con2.rollback()
 		con1.close()
 		con2.close()
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(
@@ -848,7 +860,7 @@ class RecoveryTest(BaseTest):
 		con1.execute("INSERT INTO o_test VALUES (1002, 'xxx1002');")
 		con1.commit()
 		con1.close()
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()  # start PostgreSQL
 
@@ -904,7 +916,7 @@ class RecoveryTest(BaseTest):
 		con1.execute("INSERT INTO o_test VALUES (1002, 'xxx1002');")
 		con1.commit()
 		con1.close()
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()  # start PostgreSQL
 
@@ -959,7 +971,7 @@ class RecoveryTest(BaseTest):
 		node.safe_psql('postgres',
 		               "INSERT INTO o_test VALUES(3, '%s');" % (inserted))
 		node.safe_psql('postgres', "DELETE FROM o_test WHERE id = 3;")
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		# start PostgreSQL
@@ -1035,7 +1047,7 @@ class RecoveryTest(BaseTest):
 		con1.commit()
 		con1.close()
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()  # start PostgreSQL
 
@@ -1087,7 +1099,7 @@ class RecoveryTest(BaseTest):
 		               "INSERT INTO o_test VALUES(3, '%s');" % (inserted))
 		node.safe_psql('postgres', "DELETE FROM o_test WHERE id = 3;")
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 		node.start()
 		# start PostgreSQL
 
@@ -1159,7 +1171,7 @@ class RecoveryTest(BaseTest):
 		con1.commit()
 		con1.close()
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()  # start PostgreSQL
 
@@ -1202,7 +1214,7 @@ class RecoveryTest(BaseTest):
 		    "INSERT INTO o_test\n"
 		    "    (SELECT id, id || 'val' FROM generate_series(%d, %d, 1) id);"
 		    % (10001, 20000))
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		# insert 20001..70000 after recovery
@@ -1271,11 +1283,11 @@ class RecoveryTest(BaseTest):
 		con2.commit()
 		con1.close()
 		con2.close()
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		node.execute("CHECKPOINT;")
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		con1 = node.connect()
@@ -1289,7 +1301,7 @@ class RecoveryTest(BaseTest):
 		con2.rollback()
 		con1.close()
 		con2.close()
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		node.stop()
@@ -1328,7 +1340,7 @@ class RecoveryTest(BaseTest):
 				con1.commit()
 				con2.commit()
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 		node.start()
 
 		node.stop()
@@ -1352,7 +1364,7 @@ class RecoveryTest(BaseTest):
 
 		node.execute("INSERT INTO o_test VALUES (1, NULL, 3);")
 		node.execute("INSERT INTO o_test VALUES (2, 4, NULL);")
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(2, node.execute("SELECT COUNT(*) FROM o_test;")[0][0])
@@ -1386,7 +1398,7 @@ class RecoveryTest(BaseTest):
 						ALTER INDEX o_test_idx2 RENAME TO
 									o_test_idx2_renamed;
 						ROLLBACK;""")
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(
@@ -1433,7 +1445,7 @@ class RecoveryTest(BaseTest):
 				con1.execute("""UPDATE o_test_missingattr
 								SET val3 = 33 WHERE key BETWEEN 6 AND 8;""")
 				con1.commit()
-				node.stop(['-m', 'immediate'])
+				self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual((6, 5, 33, 'abc'),
@@ -1466,7 +1478,7 @@ class RecoveryTest(BaseTest):
 		self.assertEqual(
 		    9,
 		    node.execute("SELECT COUNT(*) FROM o_test WHERE key > 10;")[0][0])
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual((11, 2),
@@ -1530,7 +1542,7 @@ class RecoveryTest(BaseTest):
 				WHERE my_eq_sql_sql_sql_sql(val, val * 11);
 		"""), [(1, ), (3, ), (4, )])
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 
@@ -1559,7 +1571,7 @@ class RecoveryTest(BaseTest):
 
 		node.execute("""INSERT INTO o_test
 			(SELECT id, id || 'text' FROM generate_series(1, 10) as id);""")
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(
@@ -1646,7 +1658,7 @@ class RecoveryTest(BaseTest):
 			SELECT * FROM o_test WHERE my_eq(val, val * 11);
 		"""), [(1, ), (3, ), (4, )])
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 
@@ -1689,7 +1701,7 @@ class RecoveryTest(BaseTest):
 		con1.close()
 		con2.close()
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(
@@ -1731,7 +1743,7 @@ class RecoveryTest(BaseTest):
 		con1.close()
 		con2.close()
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(
@@ -1795,7 +1807,7 @@ class RecoveryTest(BaseTest):
 		con2.close()
 		con3.close()
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual(
@@ -1835,7 +1847,7 @@ class RecoveryTest(BaseTest):
 		con1.close()
 		con2.close()
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 		self.assertEqual("[(1, 'val1aaa'), (2, 'val2bbb')]",
@@ -1854,7 +1866,7 @@ class RecoveryTest(BaseTest):
 			) USING orioledb;
 		""")
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 
@@ -1874,7 +1886,7 @@ class RecoveryTest(BaseTest):
 			) USING orioledb;
 		""")
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 
@@ -1903,7 +1915,7 @@ class RecoveryTest(BaseTest):
 								ORDER BY pk
 						 """))
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 
@@ -1933,7 +1945,7 @@ class RecoveryTest(BaseTest):
 			TRUNCATE o_test_1;
 		""")
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 
@@ -1974,7 +1986,7 @@ class RecoveryTest(BaseTest):
 					VALUES ('abc', 2), ('qwe', 4);
 			""")
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 
@@ -2002,7 +2014,7 @@ class RecoveryTest(BaseTest):
 
 		""")
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 
@@ -2042,7 +2054,7 @@ class RecoveryTest(BaseTest):
 			SELECT ctid, * FROM o_test_2
 		"""), [('(0,1)', 3, 'b')])
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 		node.start()
 		self.assertEqual(
 		    node.execute("""
@@ -2066,7 +2078,7 @@ class RecoveryTest(BaseTest):
 		self.assertEqual(node.execute("""
 			SELECT * FROM o_test_1;
 		"""), [])
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 		node.start()
 		node.stop()
 
@@ -2122,7 +2134,7 @@ class RecoveryTest(BaseTest):
 								ORDER BY c.relname
 							"""), [('o_test_3', ), ('o_test_4', ), ('o_test_9', )])
 
-			node.stop(['-m', 'immediate'])
+			self.crash_with_os_buffer_loss()
 
 		file_num = 3  # PK trees
 		file_num += 1  # Indexes
@@ -2163,7 +2175,7 @@ class RecoveryTest(BaseTest):
 			CHECKPOINT;
 		""")
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 
@@ -2203,7 +2215,7 @@ class RecoveryTest(BaseTest):
 		)
 		self.assertEqual(", ".join([str(x[0]) for x in result]), "1, 2")
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 
@@ -2249,7 +2261,7 @@ class RecoveryTest(BaseTest):
 		    'val1',
 		    node.execute("SELECT val FROM o_test WHERE id = 1;")[0][0])
 
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		node.start()
 
@@ -2332,7 +2344,7 @@ class RecoveryTest(BaseTest):
 		)
 
 		# Send SIGQUIT to trigger crash recovery on next start
-		node.stop(['-m', 'immediate'])
+		self.crash_with_os_buffer_loss()
 
 		# Start the node (Crash recovery evaluates the GUC and halts OrioleDB replay)
 		node.start()

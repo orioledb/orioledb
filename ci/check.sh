@@ -187,6 +187,11 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         fi
     fi
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log stop
+elif [ $CHECK_TYPE = "dm_log_writes" ]; then
+	# Run only the recovery tests with OS buffer loss simulation enabled.
+	# Each crash point uses dm-log-writes: only writes that reached the
+	# block device before the mark survive, discarding OS-buffered data.
+	make USE_PGXS=1 IS_DEV=1 USE_DM_LOG_WRITES=1 test/t/recovery_test.py || status=$?
 else
 	make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?
 fi

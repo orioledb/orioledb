@@ -320,6 +320,10 @@ else
 override with_temp_install += PGCTLTIMEOUT=900
 endif
 
+ifdef USE_DM_LOG_WRITES
+override with_temp_install += USE_DM_LOG_WRITES=1
+endif
+
 include/utils/stopevents_data.h: include/utils/stopevents_defs.h
 
 include/utils/stopevents_defs.h: stopevents.txt stopevents_gen.py
