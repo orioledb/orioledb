@@ -259,32 +259,24 @@ class EvictionTest(BaseTest):
 				val int NOT NULL,
 				PRIMARY KEY (key)
 			) USING orioledb %s;
-			CREATE TABLE IF NOT EXISTS o_test (
-				key SERIAL NOT NULL,
-				val int NOT NULL,
-				PRIMARY KEY (key)
-			) USING orioledb;
 			CREATE UNIQUE INDEX o_evicted_ix2 ON o_evicted (key) %s;
 			""" % (arg1, arg2))
 		node.safe_psql("CHECKPOINT;")
 		con1 = node.connect()
 		con1.execute(
-		    "INSERT INTO o_evicted (val) SELECT val FROM generate_series(1, 1500, 1) val;\n"
+		    "INSERT INTO o_evicted (val) SELECT val FROM generate_series(1, 3000, 1) val;\n"
 		)
 		con1.commit()
 		node.safe_psql("CHECKPOINT;")
 		con1.execute(
-		    "INSERT INTO o_evicted (val) SELECT val FROM generate_series(1500, 3000, 1) val;\n"
+		    "INSERT INTO o_evicted (val) SELECT val FROM generate_series(3001, 6000, 1) val;\n"
 		)
 		con1.commit()
 		node.safe_psql("CHECKPOINT;")
 		node.safe_psql("CHECKPOINT;")
 		node.safe_psql("CHECKPOINT;")
 		con1.execute("SELECT * FROM o_evicted;")
-		con1.execute(
-		    "INSERT INTO o_test (val) SELECT val FROM generate_series(1, 600000, 1) val;\n"
-		)
-		con1.commit()
+		con1.execute("SELECT orioledb_evict_pages('o_evicted'::regclass, 1);")
 		node.safe_psql("CHECKPOINT;")
 		self.assertEqual(
 		    con1.execute("SELECT * FROM fetch_read_page_checkpoint_stats();"),
