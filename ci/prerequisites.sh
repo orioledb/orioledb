@@ -42,5 +42,30 @@ if [ $CHECK_TYPE = "valgrind_1" ] || [ $CHECK_TYPE = "valgrind_2" ]; then
 	apt_packages="$apt_packages valgrind"
 fi
 
+if [ $CHECK_TYPE = "dm_log_writes" ]; then
+	apt_packages="$apt_packages e2fsprogs"
+fi
+
 # install required packages
 sudo apt-get -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" -y install -qq $apt_packages
+
+if [ $CHECK_TYPE = "dm_log_writes" ]; then
+	# dm-log-writes is built into the CI runner kernels; abort early if a
+	# future kernel update drops it instead of silently skipping.
+	if ! sudo dmsetup targets 2>/dev/null | grep -q "log-writes"; then
+		echo "ERROR: dm-log-writes DM target is not available in kernel $(uname -r)."
+		exit 1
+	fi
+
+	# Fetch and build replay-log from josefbacik/log-writes pinned to a
+	# known-good revision.  The repo is tiny (3 files) so we wget them
+	# directly rather than cloning.
+	LOG_WRITES_REV=7b70d8a6863c5de30933d42a7672d35d01d2dc6c
+	LOG_WRITES_URL="https://raw.githubusercontent.com/josefbacik/log-writes/$LOG_WRITES_REV"
+	TMPLW=$(mktemp -d)
+	wget -q -O "$TMPLW/log-writes.h" "$LOG_WRITES_URL/log-writes.h"
+	wget -q -O "$TMPLW/log-writes.c" "$LOG_WRITES_URL/log-writes.c"
+	wget -q -O "$TMPLW/replay-log.c" "$LOG_WRITES_URL/replay-log.c"
+	sudo gcc -O2 -I "$TMPLW" -o /usr/local/bin/replay-log "$TMPLW/replay-log.c" "$TMPLW/log-writes.c"
+	rm -rf "$TMPLW"
+fi

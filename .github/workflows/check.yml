@@ -26,7 +26,12 @@ jobs:
               compiler   = ["clang", "gcc"],
               check_type = [
                   "normal", "debug", "sanitize", "check_page",
-                  "valgrind_1", "valgrind_2", "pg_tests",
+                  "valgrind_1", "valgrind_2", "pg_tests", "dm_log_writes",
+              ],
+              # dm-log-writes needs a kernel module that isn't available on
+              # the arm64 runners, so skip it there.
+              exclude    = [
+                  {"cpu": "arm64", "check_type": "dm_log_writes"},
               ],
           )
 
@@ -63,6 +68,7 @@ jobs:
                       "include": [
                           {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
                           for (c, pg, comp), ct in itertools.product(reverse_combos, full["check_type"])
+                          if not (c == "arm64" and ct == "dm_log_writes")
                       ]
                   }
           # Make matrix for branches
@@ -76,6 +82,7 @@ jobs:
                       "include": [
                           {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
                           for (c, pg, comp), ct in itertools.product(branch_combos, full["check_type"])
+                          if not (c == "arm64" and ct == "dm_log_writes")
                       ]
                   }
 
@@ -120,7 +127,7 @@ jobs:
         run: bash ./orioledb/ci/post_build_prerequisites.sh
 
       - name: Check
-        timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 150 || (matrix.check_type == 'sanitize' && 40 || 20) }}
+        timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 150 || (matrix.check_type == 'dm_log_writes' && 60 || (matrix.check_type == 'sanitize' && 40 || 20)) }}
         run: bash ./orioledb/ci/check.sh
       - name: Check output
         run: bash ./orioledb/ci/check_output.sh

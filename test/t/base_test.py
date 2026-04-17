@@ -8,8 +8,10 @@ import os
 import random
 import re
 import shutil
+import signal
 import socket
 import string
+import subprocess
 import sys
 import testgres
 import time
@@ -24,6 +26,185 @@ from testgres.operations.os_ops import OsOperations, ConnectionParams
 from testgres.port_manager import PortManager__Generic
 from testgres.utils import get_pg_version, get_pg_config
 from typing import Any
+
+# When USE_DM_LOG_WRITES=1 is passed (via Makefile's USE_DM_LOG_WRITES flag),
+# crash simulations use dm-log-writes to replay only the writes that actually
+# reached the block device before the mark, discarding OS-buffered writes.
+# Requires root and the dm-log-writes kernel module + replay-log tool.
+DM_LOG_WRITES_ENABLED = os.environ.get('USE_DM_LOG_WRITES', '0') == '1'
+
+
+class DmLogWritesContext:
+	"""
+	Manages a dm-log-writes device-mapper target for OS buffer loss testing.
+
+	Sets up two loopback devices (data + write log), stacks a log-writes
+	DM target on top, and formats ext4 on the result.  Named marks can be
+	inserted into the write log at any point; replaying to a mark gives a
+	crash-consistent disk image that contains only writes that reached the
+	block device before that mark — simulating a hard power failure with no
+	OS page-cache data surviving.
+
+	Typical use::
+
+	    ctx = DmLogWritesContext()
+	    pgdata_dir = os.path.join(ctx.setup(), 'pgdata')
+	    os.makedirs(pgdata_dir)
+	    # ... run postgres on pgdata_dir ...
+	    ctx.set_mark('before_crash')
+	    # ... optional additional writes that will be "lost" ...
+	    os.kill(postmaster_pid, signal.SIGKILL)
+	    ctx.replay_to_mark('before_crash')   # remounts without lost writes
+	    # ... start postgres for crash recovery ...
+	    ctx.teardown()
+	"""
+
+	DM_NAME_PREFIX = 'orioledb_log_writes'
+
+	def __init__(self, data_size_mb: int = None, log_size_mb: int = None):
+		self.data_size_mb = data_size_mb or int(
+		    os.environ.get('DM_LOG_WRITES_DATA_MB', '2048'))
+		self.log_size_mb = log_size_mb or int(
+		    os.environ.get('DM_LOG_WRITES_LOG_MB', '1024'))
+		self._tmpdir = None
+		self._data_img = None
+		self._log_img = None
+		self._data_loop = None
+		self._log_loop = None
+		self._dm_name = None
+		self._mount_point = None
+		self._mark_counter = 0
+
+	@staticmethod
+	def is_available() -> bool:
+		"""Return True when the host can run dm-log-writes tests."""
+		if not sys.platform.startswith('linux'):
+			return False
+		for cmd in ('dmsetup', 'losetup', 'replay-log'):
+			if shutil.which(cmd) is None:
+				return False
+		return True
+
+	def _run(self, cmd: list):
+		subprocess.check_call(['sudo'] + cmd)
+
+	def _run_output(self, cmd: list) -> str:
+		return subprocess.check_output(['sudo'] + cmd).decode().strip()
+
+	def setup(self) -> str:
+		"""
+		Create the loopback devices, log-writes DM target and ext4
+		filesystem.  Returns the path of the mounted filesystem root.
+		"""
+		import tempfile
+		self._tmpdir = tempfile.mkdtemp(prefix='orioledb_dmlog_')
+
+		self._data_img = os.path.join(self._tmpdir, 'data.img')
+		self._log_img = os.path.join(self._tmpdir, 'log.img')
+
+		# Sparse files — fast to create, only consume space on write.
+		self._run(['truncate', '-s', f'{self.data_size_mb}M', self._data_img])
+		self._run(['truncate', '-s', f'{self.log_size_mb}M', self._log_img])
+
+		# Attach loop devices.
+		self._data_loop = self._run_output(
+		    ['losetup', '--find', '--show', self._data_img])
+		self._log_loop = self._run_output(
+		    ['losetup', '--find', '--show', self._log_img])
+
+		# Create the log-writes DM target.
+		data_sectors = int(
+		    self._run_output(['blockdev', '--getsz', self._data_loop]))
+		import uuid
+		self._dm_name = f'{self.DM_NAME_PREFIX}_{os.getpid()}_{uuid.uuid4().hex[:8]}'
+		dm_dev = f'/dev/mapper/{self._dm_name}'
+		self._run([
+		    'dmsetup', 'create', self._dm_name, '--table',
+		    f'0 {data_sectors} log-writes {self._data_loop} {self._log_loop}'
+		])
+
+		# Format and mount.
+		self._run(['mkfs.ext4', '-F', '-q', dm_dev])
+		self._mount_point = os.path.join(self._tmpdir, 'mnt')
+		os.makedirs(self._mount_point)
+		self._run(['mount', dm_dev, self._mount_point])
+		# Give the current user ownership so unprivileged code can create
+		# files and directories on the mounted filesystem.
+		self._run(['chown', f'{os.getuid()}:{os.getgid()}', self._mount_point])
+
+		return self._mount_point
+
+	def set_mark(self, name: str = None) -> str:
+		"""
+		Insert a named mark into the write log.  Returns the mark name.
+		All writes that reach the block device before this call will be
+		visible after a replay_to_mark(name); later writes will not.
+		"""
+		if name is None:
+			self._mark_counter += 1
+			name = f'mark_{self._mark_counter}'
+		self._run(['dmsetup', 'message', self._dm_name, '0', f'mark {name}'])
+		return name
+
+	def replay_to_mark(self, mark_name: str):
+		"""
+		Unmount the filesystem, tear down the log-writes DM target, replay
+		the write log up to *mark_name* onto the data loop device, run
+		e2fsck to fix any partial journal entries, then remount.
+
+		After this call the mount-point contains an ext4 filesystem
+		consistent with the state at the named mark, with no OS-buffered
+		writes visible — exactly as if power were cut at that instant.
+		"""
+		# Unmount so all VFS state is flushed before we remove the target.
+		self._run(['umount', self._mount_point])
+
+		# Tear down the log-writes target (must precede replay-log).
+		self._run(['dmsetup', 'remove', self._dm_name])
+		self._dm_name = None
+
+		# Replay writes up to the mark onto the raw data loop device.
+		self._run([
+		    'replay-log',
+		    '--log',
+		    self._log_loop,
+		    '--replay',
+		    self._data_loop,
+		    '--end-mark',
+		    mark_name,
+		])
+
+		# Fix any incomplete journal entries left by the simulated crash.
+		# Exit code 1 means "corrections were made" — that is expected here.
+		rc = subprocess.call(['sudo', 'e2fsck', '-fp', self._data_loop],
+		                     stdout=subprocess.DEVNULL,
+		                     stderr=subprocess.DEVNULL)
+		if rc not in (0, 1):
+			raise RuntimeError(
+			    f'e2fsck returned unexpected exit code {rc} '
+			    f'after dm-log-writes replay to mark {mark_name!r}')
+
+		# Remount the data device directly (no further write logging).
+		self._run(['mount', self._data_loop, self._mount_point])
+
+	def teardown(self):
+		"""Release all resources unconditionally (safe to call multiple times)."""
+		if self._mount_point and os.path.ismount(self._mount_point):
+			subprocess.call(['sudo', 'umount', '-f', self._mount_point])
+
+		if self._dm_name:
+			subprocess.call(['sudo', 'dmsetup', 'remove', self._dm_name])
+			self._dm_name = None
+
+		for loop in (self._data_loop, self._log_loop):
+			if loop:
+				subprocess.call(['sudo', 'losetup', '-d', loop])
+		self._data_loop = None
+		self._log_loop = None
+
+		if self._tmpdir and os.path.exists(self._tmpdir):
+			shutil.rmtree(self._tmpdir, ignore_errors=True)
+		self._tmpdir = None
 
 
 class TestPortManager(PortManager__Generic):
@@ -79,6 +260,7 @@ class BaseTest(unittest.TestCase):
 	restoredNode = None
 	basePort = None
 	_myName = None
+	_dm_ctx = None
 
 	def getTestNum(self):
 		testFullName = inspect.getfile(self.__class__)
@@ -149,13 +331,17 @@ class BaseTest(unittest.TestCase):
 	             base_port: int,
 	             suffix='tgsn',
 	             has_archiving: bool = False,
-	             allows_streaming: bool = False) -> testgres.PostgresNode:
+	             allows_streaming: bool = False,
+	             override_base_dir: str = None) -> testgres.PostgresNode:
 		(test_path,
 		 t) = os.path.split(os.path.dirname(inspect.getfile(self.__class__)))
-		baseDir = os.path.join(test_path, 'tmp_check_t',
-		                       self.myName + '_' + suffix)
-		if os.path.exists(baseDir):
-			shutil.rmtree(baseDir)
+		if override_base_dir is not None:
+			baseDir = override_base_dir
+		else:
+			baseDir = os.path.join(test_path, 'tmp_check_t',
+			                       self.myName + '_' + suffix)
+			if os.path.exists(baseDir):
+				shutil.rmtree(baseDir)
 		port_manager = TestPortManager(
 		    PostgresNode._get_os_ops(ConnectionParams()), base_port)
 		node = testgres.get_new_node('test',
@@ -203,7 +389,91 @@ class BaseTest(unittest.TestCase):
 
 	def setUp(self):
 		self.startTime = time.time()
-		self.node = self.initNode(self.getBasePort())
+		self._dm_ctx = None
+		if DM_LOG_WRITES_ENABLED:
+			self._dm_ctx = DmLogWritesContext()
+			try:
+				mount_dir = self._dm_ctx.setup()
+				node_dir = os.path.join(mount_dir, 'pgdata')
+				os.makedirs(node_dir)
+				self.node = self.initNode(self.getBasePort(),
+				                          override_base_dir=node_dir)
+				# Make sure all the FS infrastructure (mount root chown,
+				# pgdata directory, initdb files) is actually on the block
+				# device before any test code runs, so a later crash can't
+				# lose it.
+				os.sync()
+			except Exception:
+				# tearDown is not called by unittest when setUp raises, so
+				# release the DM device and loop devices here to avoid leaking
+				# them into the next test.
+				self._dm_ctx.teardown()
+				self._dm_ctx = None
+				raise
+		else:
+			self.node = self.initNode(self.getBasePort())
+
+	def crash_with_os_buffer_loss(self, mark_name: str = 'crash_point'):
+		"""
+		Simulate a hard crash with OS buffer loss.
+
+		When USE_DM_LOG_WRITES=1 (and setUp placed the data directory on a
+		dm-log-writes device), this method:
+
+		1. Sets a named mark in the write log — capturing all writes that
+		   have reached the block device up to this point.
+		2. Sends SIGKILL to the postmaster, bypassing any graceful shutdown.
+		3. Replays the write log only up to the mark, so writes that were
+		   still in OS page-cache buffers at the time of the kill are
+		   discarded — exactly as after a power failure.
+
+		Without USE_DM_LOG_WRITES, falls back to ``node.stop(['-m',
+		'immediate'])`` so that existing tests continue to work unchanged.
+
+		Call ``node.start()`` after this to trigger orioledb crash recovery.
+		"""
+		if self._dm_ctx is None or self._dm_ctx._dm_name is None:
+			# No dm-log-writes device active: either disabled or already
+			# consumed by a prior replay in this test.  Fall back to a
+			# regular immediate stop so multi-crash tests still work.
+			self.node.stop(['-m', 'immediate'])
+			return
+
+		# Flush just the test-harness-written config files to the block
+		# device before the mark, so they survive replay-to-mark.  We must
+		# NOT os.sync() here — tests rely on unsync'd postgres data pages
+		# being lost on replay to exercise crash recovery (e.g. OrioleDB
+		# copy-on-write checkpoints).
+		conf_path = os.path.join(self.node.data_dir, 'postgresql.conf')
+		fd = os.open(conf_path, os.O_RDONLY)
+		try:
+			os.fsync(fd)
+		finally:
+			os.close(fd)
+
+		# 1. Mark the point we want to replay to.
+		self._dm_ctx.set_mark(mark_name)
+
+		# 2. Kill the postmaster without giving it a chance to flush anything.
+		pid_file = os.path.join(self.node.data_dir, 'postmaster.pid')
+		with open(pid_file) as f:
+			pid = int(f.readline().strip())
+		os.kill(pid, signal.SIGKILL)
+
+		# Wait for the postmaster to actually disappear (up to 30 s).
+		deadline = time.time() + 30
+		while time.time() < deadline:
+			try:
+				os.kill(pid, 0)
+				time.sleep(0.05)
+			except ProcessLookupError:
+				break
+
+		# 3. Replay the write log to the mark and remount.
+		self._dm_ctx.replay_to_mark(mark_name)
+
+		# 4. Let testgres know the node is no longer running so start() works.
+		self.node.is_started = False
 
 	def list2reason(self, exc_list):
 		if exc_list and exc_list[-1][0] is self:
@@ -226,9 +496,21 @@ class BaseTest(unittest.TestCase):
 			)  # just comment it if node should not stops on fails
 			pass
 		if ok:
+			if self._dm_ctx is not None:
+				# Teardown unmounts and deletes the tmpdir that contains
+				# base_dir, so node.cleanup() sees a missing directory and
+				# skips the rmtree — that is fine.
+				self._dm_ctx.teardown()
+				self._dm_ctx = None
 			self.node.cleanup()
 		else:
-			print("\nBase directory: " + self.node.base_dir)
+			if self._dm_ctx is not None:
+				print("\nBase directory (dm-log-writes, image files in " +
+				      str(self._dm_ctx._tmpdir) + "): " + self.node.base_dir)
+				self._dm_ctx.teardown()
+				self._dm_ctx = None
+			else:
+				print("\nBase directory: " + self.node.base_dir)
 		if self.replica:
 			if self.replica.status() == NodeStatus.Running:
 				self.replica.stop(
