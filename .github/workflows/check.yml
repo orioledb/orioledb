@@ -19,65 +19,26 @@ jobs:
           event = os.environ["GITHUB_EVENT_NAME"]
           ref   = os.environ.get("GITHUB_REF_NAME", "")
 
-          # Full matrix: used for main branch or pull requests
-          full = dict(
-              cpu        = ["amd64", "arm64"],
-              pg_version = [16, 17],
-              compiler   = ["clang", "gcc"],
-              check_type = [
-                  "normal", "debug", "sanitize", "check_page",
-                  "valgrind_1", "valgrind_2", "pg_tests",
-              ],
-          )
+          # Crazy matrix: run pg_tests across every cpu/pg/compiler combo,
+          # repeated several times to maximize chance of reproducing
+          # flaky/race bugs.
+          cpus      = ["amd64", "arm64"]
+          pgs       = [16, 17]
+          compilers = ["clang", "gcc"]
+          repeats   = list(range(1, 9))
 
-          # Reduced matrix: used for all other push events
-          branch_combos = [
-              ("amd64", 16, "gcc"),
-              ("amd64", 17, "clang"),
-              ("arm64", 16, "clang"),
-              ("arm64", 17, "gcc"),
-          ]
-
-          # Reverse matrix used for pull requests
-          reverse_combos = [
-              ("amd64", 16, "clang"),
-              ("amd64", 17, "gcc"),
-              ("arm64", 16, "gcc"),
-              ("arm64", 17, "clang"),
-          ]
-
-          # Make matrix for the PR
-          if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
-              with open(os.environ["GITHUB_EVENT_PATH"], "r") as f:
-                  event = json.load(f)
-
-              head_repo = event["pull_request"]["head"]["repo"]["full_name"]
-              base_repo = event["pull_request"]["base"]["repo"]["full_name"]
-
-              # If the PR is from a fork use full matrix
-              if head_repo != base_repo:
-                  matrix = full
-              # If the PR is from the main repository use reduced reverse matrix
-              else:
-                  matrix = {
-                      "include": [
-                          {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
-                          for (c, pg, comp), ct in itertools.product(reverse_combos, full["check_type"])
-                      ]
+          matrix = {
+              "include": [
+                  {
+                      "cpu": c,
+                      "pg_version": pg,
+                      "compiler": comp,
+                      "check_type": "pg_tests",
+                      "run": r,
                   }
-          # Make matrix for branches
-          else:
-              # Use full matrix for the main branch
-              if ref == "main":
-                  matrix = full
-              # Use reduced matrix for other branches
-              else:
-                  matrix = {
-                      "include": [
-                          {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
-                          for (c, pg, comp), ct in itertools.product(branch_combos, full["check_type"])
-                      ]
-                  }
+                  for c, pg, comp, r in itertools.product(cpus, pgs, compilers, repeats)
+              ]
+          }
 
           # Export as job output
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
@@ -130,7 +91,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_regression.diffs
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_run${{ matrix.run }}_regression.diffs
           path: |
             ./orioledb/test/**/regression.diffs
             ./orioledb/test/**/isolation_filtered.diffs
@@ -144,7 +105,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_testgres.logs
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_run${{ matrix.run }}_testgres.logs
           path: |
             ./orioledb/test/tmp_check_t/*/logs/*log
             ./orioledb/test/tmp_check/log/*log
@@ -165,7 +126,7 @@ jobs:
         if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_coverage.info
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_run${{ matrix.run }}_coverage.info
           path: ./orioledb/coverage.info
           retention-days: 1
           overwrite: true
