@@ -913,15 +913,6 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 		shm_toc_insert(toc, PARALLEL_KEY_TUPLESORT, sharedsort[0]);
 	}
 
-	/*
-	 * Set snapshot retain undo locations to prevent undo cleanup during the
-	 * parallel index build.  Without this, recovery could advance
-	 * minProcRetainLocation past undo records that the scan still needs for
-	 * reading historical page versions.
-	 */
-	for (i = 0; i < (int) UndoLogsCount; i++)
-		set_my_snapshot_retain_location((UndoLogType) i);
-
 	if (!in_recovery)
 	{
 		/*
@@ -1018,10 +1009,6 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 static void
 _o_index_end_parallel(oIdxLeader *btleader)
 {
-	/* Clear snapshot retain undo locations set in _o_index_begin_parallel */
-	for (int i = 0; i < (int) UndoLogsCount; i++)
-		clear_my_snapshot_retain_location((UndoLogType) i);
-
 	if (!is_recovery_in_progress())
 	{
 		/* Shutdown worker processes */
@@ -1559,11 +1546,22 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	double		heap_tuples;
 	double	   *index_tuples;
 	OIndexDescr *idx;
+	int			i;
 
 	index_tuples = palloc0(sizeof(double));
 	ctid = 1;
 	idx = descr->indices[o_table->has_primary ? ix_num : ix_num + 1];
 	buildstate.btleader = NULL;
+
+	/*
+	 * Set snapshot retain undo locations to prevent undo cleanup during the
+	 * heap scan.  Without this, recovery could advance minProcRetainLocation
+	 * past undo records that the scan still needs for reading historical page
+	 * versions via imgReadCsn.  Applies to both parallel and serial builds
+	 * (the latter is the only option when parallel workers fail to launch).
+	 */
+	for (i = 0; i < (int) UndoLogsCount; i++)
+		set_my_snapshot_retain_location((UndoLogType) i);
 
 	/* Attempt to launch parallel worker scan when required */
 	if (in_dedicated_recovery_worker || (ActiveSnapshotSet() && max_parallel_maintenance_workers > 0))
@@ -1642,6 +1640,10 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 		pfree(btspool);
 		_o_index_end_parallel(buildstate.btleader);
 	}
+
+	/* Scan is done; release retained undo locations. */
+	for (i = 0; i < (int) UndoLogsCount; i++)
+		clear_my_snapshot_retain_location((UndoLogType) i);
 
 	/*
 	 * Write the file header.  We need to write the correct checkpoint number,
@@ -1940,6 +1942,17 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 	buildstate.btleader = NULL;
 
+	/*
+	 * Set snapshot retain undo locations to prevent undo cleanup during the
+	 * heap scan.  Without this, recovery could advance minProcRetainLocation
+	 * past undo records that the scan still needs for reading historical page
+	 * versions via imgReadCsn.  Applies to both parallel and serial builds;
+	 * in particular, the bridge index add path (descr->bridge &&
+	 * !old_descr->bridge) always rebuilds serially in recovery.
+	 */
+	for (i = 0; i < (int) UndoLogsCount; i++)
+		set_my_snapshot_retain_location((UndoLogType) i);
+
 	/* Attempt to launch parallel worker scan when required */
 	if ((in_dedicated_recovery_worker || (ActiveSnapshotSet() && max_parallel_maintenance_workers > 0)) &&
 		!descr->indices[PrimaryIndexNumber]->primaryIsCtid &&
@@ -2029,6 +2042,10 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 		index_tuples[0] = buildstate.btleader->btshared->indtuples[0];
 		heap_tuples = buildstate.btleader->btshared->reltuples;
 	}
+
+	/* Scan is done; release retained undo locations. */
+	for (i = 0; i < (int) UndoLogsCount; i++)
+		clear_my_snapshot_retain_location((UndoLogType) i);
 
 	o_set_syscache_hooks();
 	for (i = PrimaryIndexNumber; i < nallindices; i++)
