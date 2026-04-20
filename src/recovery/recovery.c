@@ -2984,7 +2984,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 		OTableDescr *old_descr;
 		OIndexNumber ix_num;
 		uint16		nindices;
-		bool		changed_tablespace = true;
+		bool		changed_tablespace = false;
 
 		new_o_table = o_tables_get(oids);
 		Assert(new_o_table);
@@ -3034,7 +3034,8 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 				if (tbl_data_exists(&old_o_table->oids, old_o_table->tablespace))
 				{
 					old_descr = o_fetch_table_descr(old_o_table->oids);
-					rebuild_indices_insert_placeholders(&tmp_descr);
+					if (!changed_tablespace)
+						rebuild_indices_insert_placeholders(&tmp_descr);
 					o_tables_meta_unlock_no_wal();
 
 					Assert(is_recovery_in_progress());
@@ -3083,11 +3084,17 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 					Assert(new_o_table->nindices == nindices);
 					/* Send recovery message to become a leader */
 					ORelOidsSetInvalid(invalid_oids);
+					if (changed_tablespace)
+						invalid_oids.relnode = old_o_table->oids.relnode;
 					recovery_send_leader_oids(oids, ix_num, new_o_table->version,
 											  invalid_oids, 0, false);
 				}
 				else
-					build_secondary_index(new_o_table, &tmp_descr, ix_num, false, false, NULL);
+					build_secondary_index(changed_tablespace ?
+										  old_o_table->oids.relnode :
+										  InvalidOid,
+										  new_o_table, &tmp_descr, ix_num,
+										  false, NULL);
 			}
 			o_free_tmp_table_descr(&tmp_descr);
 		}
@@ -3101,7 +3108,8 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 				if (tbl_data_exists(&old_o_table->indices[ix_num].oids, old_o_table->indices[ix_num].tablespace))
 				{
 					old_descr = o_fetch_table_descr(old_o_table->oids);
-					rebuild_indices_insert_placeholders(&tmp_descr);
+					if (!changed_tablespace)
+						rebuild_indices_insert_placeholders(&tmp_descr);
 					o_tables_meta_unlock_no_wal();
 
 					/*
@@ -3433,8 +3441,8 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			{
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 
-				elog(DEBUG3, "[%s] META_UNLOCK for [ %u %u %u ] ctx->sys_tree_num %d", __func__,
-					 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode, ctx->sys_tree_num);
+				elog(DEBUG3, "[%s] META_UNLOCK for [ %u %u %u; old: %u ] ctx->sys_tree_num %d", __func__,
+					 rec->u.unlock.oids.datoid, rec->u.unlock.oids.reloid, rec->u.unlock.oids.relnode, rec->u.unlock.oldRelnode, ctx->sys_tree_num);
 
 				if (!ctx->single)
 					workers_synchronize(xlogPtr, true);

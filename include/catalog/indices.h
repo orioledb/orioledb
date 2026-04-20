@@ -109,7 +109,7 @@ typedef struct oIdxShared
 
 extern void o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTable *o_table);
 extern void o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
-						   OIndexNumber old_ix_num, bool setting_tbl_tablespace,
+						   OIndexNumber old_ix_num, Oid oldTblRelnode,
 						   IndexBuildResult *result);
 
 extern void o_index_drop(Relation tbl, OIndexNumber ix_num);
@@ -124,10 +124,9 @@ extern void rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 							IndexBuildResult *result);
 extern void assign_new_oids(OTable *oTable, Relation rel, bool drop_pkey);
 extern void recreate_o_table(OTable *old_o_table, OTable *o_table);
-extern void build_secondary_index(OTable *o_table, OTableDescr *descr,
-								  OIndexNumber ix_num,
+extern void build_secondary_index(Oid oldTblRelnode, OTable *o_table,
+								  OTableDescr *descr, OIndexNumber ix_num,
 								  bool in_dedicated_recovery_worker,
-								  bool setting_tbl_tablespace,
 								  IndexBuildResult *result);
 PGDLLEXPORT void _o_index_parallel_build_main(dsm_segment *seg, shm_toc *toc);
 extern void _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
