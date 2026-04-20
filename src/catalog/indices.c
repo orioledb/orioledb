@@ -377,7 +377,7 @@ index_build_params(OTableIndex *index)
  */
 void
 o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
-			   OIndexNumber old_ix_num, bool setting_tbl_tablespace,
+			   OIndexNumber old_ix_num, Oid oldTblRelnode,
 			   IndexBuildResult *result)
 {
 	OTable	   *old_o_table = NULL;
@@ -397,6 +397,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	OCompress	compress = InvalidOCompress;
 	uint8		fillfactor = BTREE_DEFAULT_FILLFACTOR;
 	OBTOptions *options;
+	bool		setting_tbl_tablespace = OidIsValid(oldTblRelnode);
 
 	Assert(index == NULL || !(OidIsValid(indoid)));
 
@@ -657,8 +658,8 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		else
 		{
 			Assert(!is_recovery_in_progress());
-			build_secondary_index(o_table, descr, ix_num, false,
-								  setting_tbl_tablespace, result);
+			build_secondary_index(oldTblRelnode, o_table, descr, ix_num, false,
+								  result);
 		}
 	}
 	else
@@ -1529,8 +1530,9 @@ o_estimate_parallel_workers(double table_pages, double index_pages,
 }
 
 void
-build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
-					  bool in_dedicated_recovery_worker, bool setting_tbl_tablespace,
+build_secondary_index(Oid oldTblRelnode, OTable *o_table,
+					  OTableDescr *descr, OIndexNumber ix_num,
+					  bool in_dedicated_recovery_worker,
 					  IndexBuildResult *result)
 {
 	Tuplesortstate **sortstates;
@@ -1547,6 +1549,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	double	   *index_tuples;
 	OIndexDescr *idx;
 	int			i;
+	bool		setting_tbl_tablespace = OidIsValid(oldTblRelnode);
 
 	index_tuples = palloc0(sizeof(double));
 	ctid = 1;
@@ -1658,7 +1661,7 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 		o_drop_shared_root_info(idx->desc.oids.datoid,
 								idx->desc.oids.relnode);
 
-	o_tables_table_meta_unlock(o_table, InvalidOid);
+	o_tables_table_meta_unlock(o_table, oldTblRelnode);
 
 	if (result)
 	{

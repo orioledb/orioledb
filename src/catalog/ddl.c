@@ -142,7 +142,8 @@ static void o_fill_new_slot(OTable *new_o_table, Relation rel, int attidx,
 							Node *expr, TupleTableSlot *old_slot,
 							TupleTableSlot *new_slot, TupleTableSlot *scan_slot);
 static void o_find_collation_dependencies(Oid colloid);
-static void redefine_indices(Relation rel, OTable *new_o_table, bool primary, bool setting_tbl_tablespace, Oid oldRelnode);
+static void redefine_indices(Relation rel, OTable *new_o_table, bool primary,
+							 Oid oldRelnode);
 
 static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
 static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
@@ -2520,8 +2521,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 }
 
 static void
-redefine_indices(Relation rel, OTable *new_o_table, bool primary,
-				 bool setting_tbl_tablespace, Oid oldRelnode)
+redefine_indices(Relation rel, OTable *new_o_table, bool primary, Oid oldRelnode)
 {
 	ListCell   *index;
 
@@ -2552,7 +2552,7 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary,
 				o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
 				relation_close(ind, AccessShareLock);
 				o_define_index(rel, NULL, ind->rd_rel->oid, false,
-							   InvalidIndexNumber, setting_tbl_tablespace, NULL);
+							   InvalidIndexNumber, oldRelnode, NULL);
 				closed = true;
 			}
 		}
@@ -2610,7 +2610,7 @@ redefine_pkey_for_rel(Relation rel)
 	o_table = o_tables_get(oids);
 	Assert(o_table != NULL);
 
-	redefine_indices(rel, o_table, true, false, InvalidOid);
+	redefine_indices(rel, o_table, true, InvalidOid);
 
 	o_table_free(o_table);
 }
@@ -3828,7 +3828,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						{
 							o_index_drop(tbl, ix_num);
 							o_table_free(o_table);
-							o_define_index(tbl, rel, InvalidOid, false, InvalidIndexNumber, false, NULL);
+							o_define_index(tbl, rel, InvalidOid, false,
+										   InvalidIndexNumber, InvalidOid, NULL);
 						}
 					}
 					else if (rel->rd_options)
@@ -3911,7 +3912,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					 * Redefinig primary key here to not do rebuild after
 					 * rewrite_table
 					 */
-					redefine_indices(tbl, new_o_table, true, false, InvalidOid);
+					redefine_indices(tbl, new_o_table, true, InvalidOid);
 
 					o_table_free(new_o_table);
 					new_o_table = o_tables_get(new_oids);
@@ -3933,7 +3934,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							break;
 					}
 
-					redefine_indices(tbl, new_o_table, false, false, InvalidOid);
+					redefine_indices(tbl, new_o_table, false, InvalidOid);
 
 					o_table_free(old_o_table);
 					o_table_free(new_o_table);
@@ -3991,7 +3992,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						 * Redefinig primary key here to not do rebuild after
 						 * rewrite_table
 						 */
-						redefine_indices(tbl, new_o_table, true, true, old_o_table->oids.relnode);
+						redefine_indices(tbl, new_o_table, true, old_o_table->oids.relnode);
 
 						o_table_free(new_o_table);
 						new_o_table = o_tables_get(oids);
@@ -4014,7 +4015,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								break;
 						}
 
-						redefine_indices(tbl, new_o_table, false, true, old_o_table->oids.relnode);
+						redefine_indices(tbl, new_o_table, false, old_o_table->oids.relnode);
 
 						o_table_free(old_o_table);
 						o_table_free(new_o_table);
@@ -4199,7 +4200,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					if (descr->indices[ix_num]->primaryIsCtid)
 						ix_num--;
 					o_index_drop(tbl, ix_num);
-					o_define_index(tbl, NULL, rel->rd_rel->oid, false, InvalidIndexNumber, false, NULL);
+					o_define_index(tbl, NULL, rel->rd_rel->oid, false,
+								   InvalidIndexNumber, InvalidOid, NULL);
 				}
 			}
 			relation_close(tbl, AccessShareLock);
