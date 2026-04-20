@@ -1937,6 +1937,9 @@ ResOwnerReleaseBTreeSeqScanCallback(ResourceReleasePhase phase,
 {
 	BTreeSeqScan *scan = (BTreeSeqScan *) arg;
 
+	if (CurrentResourceOwner != scan->resowner)
+		return;
+
 	if (phase == RESOURCE_RELEASE_BEFORE_LOCKS)
 		free_btree_seq_scan_internal(scan, true);
 }
