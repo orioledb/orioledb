@@ -2326,7 +2326,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 		unlock_page(parent_blkno);
 
 	if (evict)
-		ppool_free_page(desc->ppool, blkno, NULL);
+		ppool_free_page(desc->ppool, blkno, false);
 
 	perform_writeback(&io_writeback);
 }
@@ -2509,7 +2509,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 
 	file_header.rootDownlink = new_downlink;
 
-	ppool_free_page(desc->ppool, root_blkno, NULL);
+	ppool_free_page(desc->ppool, root_blkno, false);
 
 	if (orioledb_s3_mode)
 		chkpNum = S3_GET_CHKP_NUM(DOWNLINK_GET_DISK_OFF(new_downlink));
@@ -2538,7 +2538,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	if (!orioledb_s3_mode || desc->storageType == BTreeStorageTemporary)
 		btree_finalize_private_seq_bufs(desc, &evicted_tree_data);
 
-	ppool_free_page(desc->ppool, desc->rootInfo.metaPageBlkno, NULL);
+	ppool_free_page(desc->ppool, desc->rootInfo.metaPageBlkno, false);
 
 	desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 	desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
