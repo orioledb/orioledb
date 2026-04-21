@@ -86,7 +86,6 @@ PG_MODULE_MAGIC;
 
 void		_PG_init(void);
 
-static bool debug_disable_pools_limit = false;
 static Pointer shared_segment = NULL;
 static bool shared_segment_initialized = false;
 static int	free_tree_buffers_guc;
@@ -154,6 +153,7 @@ int			logical_xid_buffers_guc = 64;
 bool		orioledb_strict_mode = false;
 XLogRecPtr	replay_until_lsn = InvalidXLogRecPtr;
 char	   *replay_until_lsn_string;
+bool debug_disable_pools_limit = false;
 
 /* For page eviction/read checkpoint test only */
 uint32		min_read_page_checkpoint = UINT32_MAX;

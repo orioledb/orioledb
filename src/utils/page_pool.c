@@ -267,10 +267,13 @@ ppool_run_clock(OPagePool *pool, bool evict,
 	Size		undoSystemSize = get_reserved_undo_size(UndoLogSystem);
 	bool		haveRetainRegularLoc = undo_type_has_retained_location(UndoLogRegularPageLevel);
 	bool		haveRetainSystemLoc = undo_type_has_retained_location(UndoLogSystem);
+	uint64		startBlkno;
+	bool		wrapped = false;
 
 	blkno = pg_prng_uint64_range(&pool->prngSeed,
 								 pool->offset,
 								 pool->offset + pool->size - 1);
+	startBlkno = blkno;
 
 	/*
 	 * Shouldn't be called while holding a page lock: one should reserve the
@@ -303,6 +306,30 @@ ppool_run_clock(OPagePool *pool, bool evict,
 		blkno++;
 		if (blkno >= pool->offset + pool->size)
 			blkno = pool->offset;
+
+		/*
+		 * Detect a full sweep of the pool without any successful
+		 * eviction.  This can happen when all pages are root pages
+		 * of trees (e.g. many small tables) locked by the current
+		 * transaction. Error out instead of spinning forever.
+		 *
+		 * Don't do this check with debug_disable_pools_limit to give
+		 * tests a way to avoid this error.
+		 */
+		if (blkno == startBlkno)
+		{
+			if (wrapped && !debug_disable_pools_limit)
+			{
+				unset_skip_ucm();
+				ereport(ERROR,
+						(errcode(ERRCODE_OUT_OF_MEMORY),
+						 errmsg("orioledb page pool is exhausted"),
+						 errhint("Increase \"orioledb.main_buffers\" or reduce "
+								 "the number of tables accessed in a single "
+								 "transaction.")));
+			}
+			wrapped = true;
+		}
 	}
 
 	unset_skip_ucm();
