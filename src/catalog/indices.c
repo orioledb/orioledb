@@ -35,6 +35,7 @@
 #include "utils/planner.h"
 #include "utils/resowner.h"
 #include "utils/stopevent.h"
+#include "utils/page_pool.h"
 #include "workers/interrupt.h"
 
 #include "access/genam.h"
@@ -337,10 +338,20 @@ rebuild_indices_insert_placeholders(OTableDescr *descr)
 {
 	int			i;
 
+	/*
+	 * Placeholders guard concurrent access to shared SharedRootInfo during
+	 * index build.  Temporary trees live in a backend-local hash, so no other
+	 * backend can observe them and placeholders are unnecessary.
+	 */
 	for (i = 0; i < descr->nIndices; i++)
+	{
+		if (descr->indices[i]->desc.storageType == BTreeStorageTemporary)
+			continue;
 		o_insert_shared_root_placeholder(descr->indices[i]->desc.oids.datoid,
 										 descr->indices[i]->desc.oids.relnode);
-	if (descr->toast)
+	}
+	if (descr->toast &&
+		descr->toast->desc.storageType != BTreeStorageTemporary)
 		o_insert_shared_root_placeholder(descr->toast->desc.oids.datoid,
 										 descr->toast->desc.oids.relnode);
 }
@@ -627,8 +638,14 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			o_verify_dir_exists_or_create(prefix, NULL, NULL);
 			o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
 			pfree(db_prefix);
-			o_insert_shared_root_placeholder(table_index->oids.datoid,
-											 table_index->oids.relnode);
+
+			/*
+			 * Temporary trees are backend-local; no other backend can race
+			 * against the build, so no placeholder is needed.
+			 */
+			if (o_table->persistence != RELPERSISTENCE_TEMP)
+				o_insert_shared_root_placeholder(table_index->oids.datoid,
+												 table_index->oids.relnode);
 		}
 	}
 
@@ -1565,8 +1582,13 @@ build_secondary_index(OTable *o_table, OTableDescr *descr, OIndexNumber ix_num,
 	idx = descr->indices[o_table->has_primary ? ix_num : ix_num + 1];
 	buildstate.btleader = NULL;
 
-	/* Attempt to launch parallel worker scan when required */
-	if (in_dedicated_recovery_worker || (ActiveSnapshotSet() && max_parallel_maintenance_workers > 0))
+	/*
+	 * Attempt to launch parallel worker scan when required. Parallel workers
+	 * cannot access data in temporary tables because they use a per-backend
+	 * local page pool.
+	 */
+	if ((in_dedicated_recovery_worker || (ActiveSnapshotSet() && max_parallel_maintenance_workers > 0)) &&
+		o_table->persistence != RELPERSISTENCE_TEMP)
 	{
 		int			parallel_workers = o_calculate_index_workers(&GET_PRIMARY(descr)->desc, false, 1);
 
@@ -1940,8 +1962,13 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 	buildstate.btleader = NULL;
 
-	/* Attempt to launch parallel worker scan when required */
+	/*
+	 * Attempt to launch parallel worker scan when required. Parallel workers
+	 * cannot access data in temporary tables because they use a per-backend
+	 * local page pool.
+	 */
 	if ((in_dedicated_recovery_worker || (ActiveSnapshotSet() && max_parallel_maintenance_workers > 0)) &&
+		o_table->persistence != RELPERSISTENCE_TEMP &&
 		!descr->indices[PrimaryIndexNumber]->primaryIsCtid &&
 		!(descr->bridge && !old_descr->bridge))
 	{

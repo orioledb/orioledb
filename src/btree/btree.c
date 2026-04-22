@@ -186,7 +186,7 @@ free_page(PagePool *pool, OInMemoryBlkno blkno, uint32 pageChangeCount)
 	Assert(O_GET_IN_MEMORY_PAGEDESC(blkno)->ionum < 0);
 	page_block_reads(blkno);
 	CLEAN_DIRTY(pool, blkno);
-	(*pool->ops->free_page) (pool, blkno, true);
+	ppool_free_page(pool, blkno, true);
 }
 
 static inline void
@@ -214,7 +214,7 @@ free_meta_page(PagePool *pool, OInMemoryBlkno metaPageBlkno)
 	 * freeing the meta page until the last scan is released.
 	 */
 	if (meta_page_get_num_seq_scans(metaPageBlkno) == 0)
-		(*pool->ops->free_page) (pool, metaPageBlkno, false);
+		ppool_free_page(pool, metaPageBlkno, false);
 	else
 		meta_page->toBeFreedOnSeqScanRelease = true;
 }

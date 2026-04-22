@@ -1516,8 +1516,8 @@ load_page(OBTreeFindPageContext *context)
 	unlock_page(parent_blkno);
 
 	/* Prepare new page metaPage-data */
-	(*desc->ppool->ops->reserve_pages) (desc->ppool, PPOOL_RESERVE_FIND, 1);
-	blkno = (*desc->ppool->ops->alloc_page) (desc->ppool, PPOOL_RESERVE_FIND);
+	ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_FIND, 1);
+	blkno = ppool_alloc_page(desc->ppool, PPOOL_RESERVE_FIND);
 	lock_page(blkno);
 	page_block_reads(blkno);
 
@@ -1544,8 +1544,7 @@ load_page(OBTreeFindPageContext *context)
 	}
 
 	put_page_image(blkno, buf);
-	(*desc->ppool->ops->ucm_change_usage) (desc->ppool, blkno,
-										   ((*desc->ppool->ops->ucm_get_epoch) (desc->ppool) + 2) % UCM_USAGE_LEVELS);
+	ppool_ucm_init(desc->ppool, blkno);
 	page_desc->type = parent_page_desc->type;
 	page_desc->oids = parent_page_desc->oids;
 
@@ -2140,7 +2139,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 	/* rootPageBlkno can not be evicted here */
 	Assert(!evict || !is_root);
 	Assert(OInMemoryBlknoIsValid(desc->rootInfo.rootPageBlkno));
-	Assert(page_is_locked(blkno));
+	Assert(page_is_locked(blkno) || O_PAGE_IS_LOCAL(blkno));
 	EA_EVICT_INC(blkno);
 
 	if (!is_root)
@@ -2326,7 +2325,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 		unlock_page(parent_blkno);
 
 	if (evict)
-		(*desc->ppool->ops->free_page) (desc->ppool, blkno, false);
+		ppool_free_page(desc->ppool, blkno, false);
 
 	perform_writeback(&io_writeback);
 }
@@ -2426,7 +2425,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	int			evict_lockNo;
 
 	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc) &&
-		   O_PAGE_STATE_IS_LOCKED(pg_atomic_read_u64(&(O_PAGE_HEADER(rootPageBlkno)->state))));
+		   (O_PAGE_STATE_IS_LOCKED(pg_atomic_read_u64(&(O_PAGE_HEADER(rootPageBlkno)->state))) || O_PAGE_IS_LOCAL(root_blkno)));
 
 	/*
 	 * Try to acquire oSharedRootInfoInsertLocks early to avoid deadlocks. If
@@ -2509,7 +2508,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 
 	file_header.rootDownlink = new_downlink;
 
-	(*desc->ppool->ops->free_page) (desc->ppool, root_blkno, false);
+	ppool_free_page(desc->ppool, root_blkno, false);
 
 	if (orioledb_s3_mode)
 		chkpNum = S3_GET_CHKP_NUM(DOWNLINK_GET_DISK_OFF(new_downlink));
@@ -2538,7 +2537,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	if (!orioledb_s3_mode || desc->storageType == BTreeStorageTemporary)
 		btree_finalize_private_seq_bufs(desc, &evicted_tree_data);
 
-	(*desc->ppool->ops->free_page) (desc->ppool, desc->rootInfo.metaPageBlkno, false);
+	ppool_free_page(desc->ppool, desc->rootInfo.metaPageBlkno, false);
 
 	desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 	desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
@@ -3058,6 +3057,17 @@ write_tree_pages_recursive(UndoLogType undoType,
 
 	lock_page(blkno);
 	p = O_GET_IN_MEMORY_PAGE(blkno);
+
+	/*
+	 * For local pool pages, the slot may have been reclaimed by a reentrant
+	 * eviction triggered while we were processing a sibling downlink
+	 * collected earlier.  Treat a NULL slot as a missing page.
+	 */
+	if (O_PAGE_IS_LOCAL(blkno) && p == NULL)
+	{
+		unlock_page(blkno);
+		return false;
+	}
 	if (O_PAGE_GET_CHANGE_COUNT(p) != loadId)
 	{
 		unlock_page(blkno);

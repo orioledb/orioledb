@@ -124,7 +124,7 @@ my_locked_page_get_state(OInMemoryBlkno blkno)
 static uint64
 lock_page_or_queue(OInMemoryBlkno blkno, uint32 pgprocnum)
 {
-	PagePool   *ppool = get_ppool_by_blkno(blkno);
+	OPagePool  *ppool = (OPagePool *) get_ppool_by_blkno(blkno);
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	OrioleDBPageHeader *header = (OrioleDBPageHeader *) p;
 	uint64		state;
@@ -132,6 +132,7 @@ lock_page_or_queue(OInMemoryBlkno blkno, uint32 pgprocnum)
 	bool		ucmUpdateTried = false;
 
 	Assert(pgprocnum < max_procs);
+	Assert(!O_PAGE_IS_LOCAL(blkno));
 
 	state = pg_atomic_read_u64(&header->state);
 	while (true)
@@ -153,13 +154,13 @@ lock_page_or_queue(OInMemoryBlkno blkno, uint32 pgprocnum)
 
 		if (!ucmUpdateTried)
 		{
-			newState = (*ppool->ops->ucm_update_state) (ppool, blkno, newState);
+			newState = ucm_update_state(&ppool->ucm, blkno, newState);
 			ucmUpdateTried = true;
 		}
 
 		if (pg_atomic_compare_exchange_u64(&header->state, &state, newState))
 		{
-			(*ppool->ops->ucm_after_update_state) (ppool, blkno, state, newState);
+			ucm_after_update_state(&ppool->ucm, blkno, state, newState);
 			break;
 		}
 	}
@@ -188,7 +189,7 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 								   OTuple tuple, uint64 *prevState,
 								   bool *keySerialized)
 {
-	PagePool   *ppool = get_ppool_by_blkno(*blkno);
+	OPagePool  *ppool = (OPagePool *) get_ppool_by_blkno(*blkno);
 	Page		p = O_GET_IN_MEMORY_PAGE(*blkno);
 	OrioleDBPageHeader *header = (OrioleDBPageHeader *) p;
 	OrioleDBPageHeader *imgHeader = (OrioleDBPageHeader *) img->img;
@@ -197,6 +198,7 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 	bool		ucmUpdateTried = false;
 
 	Assert(pgprocnum < max_procs);
+	Assert(!O_PAGE_IS_LOCAL(*blkno));
 
 	state = pg_atomic_read_u64(&header->state);
 	while (true)
@@ -292,13 +294,13 @@ lock_page_or_queue_or_split_detect(BTreeDescr *desc, OInMemoryBlkno *blkno,
 
 		if (!ucmUpdateTried)
 		{
-			newState = (*ppool->ops->ucm_update_state) (ppool, *blkno, newState);
+			newState = ucm_update_state(&ppool->ucm, *blkno, newState);
 			ucmUpdateTried = true;
 		}
 
 		if (pg_atomic_compare_exchange_u64(&header->state, &state, newState))
 		{
-			(*ppool->ops->ucm_after_update_state) (ppool, *blkno, state, newState);
+			ucm_after_update_state(&ppool->ucm, *blkno, state, newState);
 			break;
 		}
 	}
@@ -352,12 +354,14 @@ static uint64
 state_changed_or_queue(OInMemoryBlkno blkno, uint32 pgprocnum,
 					   uint64 oldState)
 {
-	PagePool   *ppool = get_ppool_by_blkno(blkno);
+	OPagePool  *ppool = (OPagePool *) get_ppool_by_blkno(blkno);
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	OrioleDBPageHeader *header = (OrioleDBPageHeader *) p;
 	uint64		state;
 	OPageWaiterShmemState *lockerState = &lockerStates[pgprocnum];
 	bool		ucmUpdateTried = false;
+
+	Assert(!O_PAGE_IS_LOCAL(blkno));
 
 	state = pg_atomic_read_u64(&header->state);
 	while (true)
@@ -380,13 +384,13 @@ state_changed_or_queue(OInMemoryBlkno blkno, uint32 pgprocnum,
 
 		if (!ucmUpdateTried)
 		{
-			newState = (*ppool->ops->ucm_update_state) (ppool, blkno, newState);
+			newState = ucm_update_state(&ppool->ucm, blkno, newState);
 			ucmUpdateTried = true;
 		}
 
 		if (pg_atomic_compare_exchange_u64(&header->state, &state, newState))
 		{
-			(*ppool->ops->ucm_after_update_state) (ppool, blkno, state, newState);
+			ucm_after_update_state(&ppool->ucm, blkno, state, newState);
 			break;
 		}
 	}
@@ -459,7 +463,7 @@ lock_page_with_tuple(BTreeDescr *desc,
 	PageImg		img;
 
 	/* Local pages do not need locking */
-	if (O_PAGE_IS_LOCAL(blkno))
+	if (O_PAGE_IS_LOCAL(*blkno))
 		return OLockPageWithTupleResultLocked;
 
 	img.load = false;
@@ -665,7 +669,7 @@ try_lock_page(OInMemoryBlkno blkno)
 
 	EA_LOCK_INC(blkno);
 	my_locked_page_add(blkno, state | PAGE_STATE_LOCKED_FLAG);
-	(*ppool->ops->ucm_inc_usage) (ppool, blkno);
+	ppool_ucm_inc_usage(ppool, blkno);
 
 	return true;
 }
@@ -688,7 +692,6 @@ delare_page_as_locked(OInMemoryBlkno blkno)
 /*
  * Check if page is locked.
  */
-/*  TODO: check uses and don't call if page is local */
 bool
 page_is_locked(OInMemoryBlkno blkno)
 {

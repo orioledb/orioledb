@@ -1511,7 +1511,7 @@ orioledb_vacuum_bridged_indexes(Relation rel, OTableDescr *descr,
 	{
 		if (vacrel->indstats[i])
 			pfree(vacrel->indstats[i]);
-		if (instrument)
+		if (indnames)
 			pfree(indnames[i]);
 	}
 }

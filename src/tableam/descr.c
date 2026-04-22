@@ -129,6 +129,13 @@ static HTAB *oIndexDescrHash;
 static HTAB *comparatorCache;
 static HTAB *exclusionFnCache;
 static HTAB *hashFnCache;
+
+/*
+ * Backend-local hash of SharedRootInfo for trees backed by LocalPagePool
+ * (temp tables).  Their pages carry BLKNO_LOCAL_BIT and are meaningless to
+ * other backends, so they must not reach SYS_TREES_SHARED_ROOT_INFO.
+ */
+static HTAB *localSharedRootInfoHash = NULL;
 static OComparatorKey lastkey = {0};
 static OComparator *lastcmp = NULL;
 static MemoryContext descrCxt = NULL;
@@ -162,6 +169,68 @@ create_shared_root_info(PagePool *pool, SharedRootInfoKey *key)
 	sharedRootInfo->key = *key;
 	init_shared_root_info(pool, sharedRootInfo);
 	return sharedRootInfo;
+}
+
+static HTAB *
+get_local_shared_root_info_hash(void)
+{
+	if (localSharedRootInfoHash == NULL)
+	{
+		HASHCTL		ctl;
+
+		MemSet(&ctl, 0, sizeof(ctl));
+		ctl.keysize = sizeof(SharedRootInfoKey);
+		ctl.entrysize = sizeof(SharedRootInfo);
+		ctl.hcxt = TopMemoryContext;
+		localSharedRootInfoHash = hash_create("OrioleDB local shared root info",
+											  8, &ctl,
+											  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+	}
+	return localSharedRootInfoHash;
+}
+
+static SharedRootInfo *
+find_local_shared_root_info(SharedRootInfoKey *key)
+{
+	SharedRootInfo *entry;
+	SharedRootInfo *copy;
+	bool		found;
+
+	if (localSharedRootInfoHash == NULL)
+		return NULL;
+
+	entry = (SharedRootInfo *) hash_search(localSharedRootInfoHash, key,
+										   HASH_FIND, &found);
+	if (!found)
+		return NULL;
+
+	copy = (SharedRootInfo *) palloc(sizeof(SharedRootInfo));
+	memcpy(copy, entry, sizeof(SharedRootInfo));
+	return copy;
+}
+
+static void
+insert_local_shared_root_info(SharedRootInfo *info)
+{
+	HTAB	   *hash = get_local_shared_root_info_hash();
+	SharedRootInfo *entry;
+	bool		found;
+
+	entry = (SharedRootInfo *) hash_search(hash, &info->key, HASH_ENTER, &found);
+	Assert(!found);
+	memcpy(entry, info, sizeof(SharedRootInfo));
+}
+
+static bool
+drop_local_shared_root_info(SharedRootInfoKey *key)
+{
+	bool		found = false;
+
+	if (localSharedRootInfoHash == NULL)
+		return false;
+
+	(void) hash_search(localSharedRootInfoHash, key, HASH_REMOVE, &found);
+	return found;
 }
 
 EvictedTreeData *
@@ -296,6 +365,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 				inserted PG_USED_FOR_ASSERTS_ONLY;
 	int			lockNo;
 	bool		hasLock = false;
+	bool		is_temp;
 
 	Assert(desc != NULL);
 	if (!ORelOidsIsValid(desc->oids) || IS_SYS_TREE_OIDS(desc->oids))
@@ -304,6 +374,8 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 	/* easy case: shared memory is initialized */
 	if (ORootPageIsValid(desc) && OMetaPageIsValid(desc))
 		return true;
+
+	is_temp = (desc->storageType == BTreeStorageTemporary);
 
 	memset(&key, 0, sizeof(SharedRootInfoKey));
 	key.datoid = desc->oids.datoid;
@@ -326,8 +398,6 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		if (checkpoint && tree_is_under_checkpoint(desc))
 			return false;
 
-		lockNo = tag_hash(&key, sizeof(key)) % SHARED_ROOT_INFO_INSERT_NUM_LOCKS;
-
 		/*---
 		 * Reserve 8 pages:
 		 *
@@ -337,11 +407,20 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		 * - 2 for tmp seq bufs
 		 * - 2 for free seq bufs
 		 */
-		(*desc->ppool->ops->reserve_pages) (desc->ppool, PPOOL_RESERVE_META, 8);
-		LWLockAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo],
-					  LW_EXCLUSIVE);
-		hasLock = true;
-		sharedRootInfo = o_find_shared_root_info(&key);
+		ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_META, 8);
+
+		/*
+		 * Temporary trees live in a backend-local hash, so the shared insert
+		 * lock is unnecessary (and a no-op re-lookup would be too).
+		 */
+		if (!is_temp)
+		{
+			lockNo = tag_hash(&key, sizeof(key)) % SHARED_ROOT_INFO_INSERT_NUM_LOCKS;
+			LWLockAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo],
+						  LW_EXCLUSIVE);
+			hasLock = true;
+			sharedRootInfo = o_find_shared_root_info(&key);
+		}
 	}
 
 	if (sharedRootInfo && sharedRootInfo->placeholder)
@@ -349,7 +428,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		if (hasLock)
 		{
 			LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo]);
-			(*desc->ppool->ops->release_reserved) (desc->ppool, PPOOL_RESERVE_META);
+			ppool_release_reserved(desc->ppool, PPOOL_RESERVE_META);
 		}
 		pfree(sharedRootInfo);
 		return false;
@@ -390,11 +469,18 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 			LWLockAcquire(&BTREE_GET_META(desc)->copyBlknoLock, LW_SHARED);
 		}
 
-		sharedRootInfoTuple.data = (Pointer) sharedRootInfo;
-		sharedRootInfoTuple.formatFlags = 0;
-		inserted = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO),
-											 sharedRootInfoTuple);
-		Assert(inserted);
+		if (is_temp)
+		{
+			insert_local_shared_root_info(sharedRootInfo);
+		}
+		else
+		{
+			sharedRootInfoTuple.data = (Pointer) sharedRootInfo;
+			sharedRootInfoTuple.formatFlags = 0;
+			inserted = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO),
+												 sharedRootInfoTuple);
+			Assert(inserted);
+		}
 
 		if (init_extents)
 		{
@@ -440,7 +526,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 	Assert(sharedRootInfo != NULL);
 	Assert(!sharedRootInfo->placeholder);
 	pfree(sharedRootInfo);
-	(*desc->ppool->ops->release_reserved) (desc->ppool, PPOOL_RESERVE_META);
+	ppool_release_reserved(desc->ppool, PPOOL_RESERVE_META);
 	return true;
 }
 
@@ -1010,8 +1096,8 @@ init_shared_root_info(PagePool *pool, SharedRootInfo *sharedRootInfo)
 				bufnum;
 
 	sharedRootInfo->placeholder = false;
-	rootInfo->rootPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);;
-	rootInfo->metaPageBlkno = (*pool->ops->alloc_page) (pool, PPOOL_RESERVE_META);;
+	rootInfo->rootPageBlkno = ppool_alloc_page(pool, PPOOL_RESERVE_META);
+	rootInfo->metaPageBlkno = ppool_alloc_page(pool, PPOOL_RESERVE_META);
 	rootInfo->rootPageChangeCount = O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(rootInfo->rootPageBlkno));
 
 	Assert(OInMemoryBlknoIsValid(rootInfo->rootPageBlkno));
@@ -1198,6 +1284,11 @@ o_find_shared_root_info(SharedRootInfoKey *key)
 {
 	OTuple		key_tuple,
 				result_tuple;
+	SharedRootInfo *local;
+
+	local = find_local_shared_root_info(key);
+	if (local != NULL)
+		return local;
 
 	key_tuple.data = (Pointer) key;
 	key_tuple.formatFlags = 0;
@@ -1268,6 +1359,10 @@ o_drop_shared_root_info(Oid datoid, Oid relnode)
 
 	key.datoid = datoid;
 	key.relnode = relnode;
+
+	if (drop_local_shared_root_info(&key))
+		return true;
+
 	key_tuple.data = (Pointer) &key;
 	key_tuple.formatFlags = 0;
 
