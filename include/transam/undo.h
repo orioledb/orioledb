@@ -364,6 +364,7 @@ extern PendingTruncatesMeta *pending_truncates_meta;
 extern Size undo_shmem_needs(void);
 extern void undo_shmem_init(Pointer buf, bool found);
 extern UndoMeta *get_undo_meta_by_type(UndoLogType undoType);
+extern const char *get_undo_type_name(UndoLogType undoType);
 
 extern void update_min_undo_locations(UndoLogType undoType,
 									  bool undoEviction,
