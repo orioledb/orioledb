@@ -204,8 +204,6 @@ typedef struct WalReaderState
  *   - leave r->ptr positioned at the next record tag.
  *
  * It must not read beyond r->end; use WR_REQUIRE_SIZE / WR_PARSE / WR_SKIP.
- *
- * For payload-less records, descriptor->parse is NULL (record is tag-only).
  */
 typedef WalParseResult (*WalParseFn) (WalReaderState *r, WalRecord *rec);
 
