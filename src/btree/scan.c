@@ -53,6 +53,7 @@
 #include "btree/page_chunks.h"
 #include "btree/scan.h"
 #include "btree/undo.h"
+#include "tableam/descr.h"
 #include "transam/oxid.h"
 #include "tableam/descr.h"
 #include "tuple/slot.h"

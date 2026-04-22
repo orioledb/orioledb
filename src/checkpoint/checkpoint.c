@@ -1594,7 +1594,7 @@ checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 		return;
 	}
 
-	(*descr->ppool->ops->reserve_pages) (descr->ppool, PPOOL_RESERVE_META, 4);
+	ppool_reserve_pages(descr->ppool, PPOOL_RESERVE_META, 4);
 
 	init_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]);
 
@@ -2132,6 +2132,19 @@ free_extent_for_checkpoint(BTreeDescr *desc, FileExtent *extent, uint32 chkp_num
 
 	if (orioledb_s3_mode)
 	{
+		extent->len = InvalidFileExtentLen;
+		extent->off = InvalidFileExtentOff;
+		return;
+	}
+
+	/*
+	 * User temporary trees have no shared checkpoint state.  Stash freed
+	 * extents on a backend-local list so that subsequent allocations can
+	 * recycle them without touching the checkpoint-tagged seq bufs.
+	 */
+	if (btree_desc_is_local_temp(desc))
+	{
+		local_free_extents_push(desc, *extent);
 		extent->len = InvalidFileExtentLen;
 		extent->off = InvalidFileExtentOff;
 		return;
@@ -3268,7 +3281,7 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 	}
 
 	if (btree_try_merge_pages(descr, parentBlkno, NULL, &mergeParent,
-							  blkno, loc, rightBlkno, true))
+							  blkno, &loc, rightBlkno, true))
 	{
 		checkpoint_reserve_undo(descr->undoType, true);
 		return true;
@@ -4975,7 +4988,20 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 
 	descr = o_fetch_index_descr(treeOids, type, true, NULL);
 	if (descr != NULL)
+	{
+		/*
+		 * Skip temporary tables - they use a per-backend local page pool
+		 * which is not accessible from the checkpointer process.
+		 */
+		if (descr->desc.storageType == BTreeStorageTemporary)
+		{
+			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
+			MemoryContextSwitchTo(prev_context);
+			MemoryContextResetOnly(chkp_tree_context);
+			return;
+		}
 		loaded = o_btree_load_shmem_checkpoint(&descr->desc);
+	}
 	if (loaded)
 	{
 		BTreeDescr *td = &descr->desc;
@@ -5169,8 +5195,8 @@ init_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared)
 	Assert(!OInMemoryBlknoIsValid(shared->pages[0]));
 	Assert(!OInMemoryBlknoIsValid(shared->pages[1]));
 
-	shared->pages[0] = (*desc->ppool->ops->alloc_page) (desc->ppool, PPOOL_RESERVE_META);
-	shared->pages[1] = (*desc->ppool->ops->alloc_page) (desc->ppool, PPOOL_RESERVE_META);
+	shared->pages[0] = ppool_alloc_page(desc->ppool, PPOOL_RESERVE_META);
+	shared->pages[1] = ppool_alloc_page(desc->ppool, PPOOL_RESERVE_META);
 
 	Assert(OInMemoryBlknoIsValid(shared->pages[0]));
 	Assert(OInMemoryBlknoIsValid(shared->pages[1]));
@@ -5575,6 +5601,14 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 		&meta_page->freeBuf};
 		int			i = 0;
 
+		/*
+		 * BTreeStorageTemporary trees do not maintain a .map file, so skip
+		 * nextChkp initialization.  User temporary trees also rely on a
+		 * backend-local free space map (see free_extents.c) and do not
+		 * consult the tmpBuf / freeBuf seq bufs for allocations, but the seq
+		 * bufs are still initialized so that the regular eviction teardown in
+		 * btree_finalize_private_seq_bufs works uniformly.
+		 */
 		if (desc->storageType == BTreeStorageTemporary)
 			i = 1;
 
@@ -5682,6 +5716,7 @@ checkpointable_tree_free(BTreeDescr *desc)
 	seq_buf_close_file(&desc->nextChkp[1]);
 	seq_buf_close_file(&desc->tmpBuf[0]);
 	seq_buf_close_file(&desc->tmpBuf[1]);
+	local_free_extents_cleanup(desc);
 	desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 	desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 

@@ -135,8 +135,8 @@ bgwriter_main(Datum main_arg)
 			for (poolType = 0; poolType < OPagePoolTypesCount && !ShutdownRequestPending; poolType++)
 			{
 				pool = get_ppool(poolType);
-				need_eviction = (*pool->ops->free_pages_count) (pool) < (*pool->ops->size) (pool) / 20;
-				need_write = (*pool->ops->dirty_pages_count) (pool) > (*pool->ops->size) (pool) / 2;
+				need_eviction = ppool_free_pages_count(pool) < ppool_size(pool) / 20;
+				need_write = ppool_dirty_pages_count(pool) > ppool_size(pool) / 2;
 
 				if (need_eviction || need_write)
 				{
@@ -144,7 +144,8 @@ bgwriter_main(Datum main_arg)
 
 					while (need_eviction || need_write)
 					{
-						(*pool->ops->run_clock) (pool, need_eviction, &ShutdownRequestPending);
+						/* Should not run maintenance for local page pool */
+						ppool_run_maintenance(pool, need_eviction, &ShutdownRequestPending);
 						i++;
 
 						if (i >= bgwriter_lru_maxpages * (BLCKSZ / ORIOLEDB_BLCKSZ))
@@ -153,19 +154,14 @@ bgwriter_main(Datum main_arg)
 						if (ShutdownRequestPending)
 							break;
 
-						need_eviction = (*pool->ops->free_pages_count) (pool) < (*pool->ops->size) (pool) / 20;
-						need_write = (*pool->ops->dirty_pages_count) (pool) > (*pool->ops->size) (pool) / 2;
+						need_eviction = ppool_free_pages_count(pool) < ppool_size(pool) / 20;
+						need_write = ppool_dirty_pages_count(pool) > ppool_size(pool) / 2;
 					}
 
 					MemoryContextReset(CurTransactionContext);
 					MemoryContextReset(TopTransactionContext);
 				}
 
-				if (!ShutdownRequestPending && (*pool->ops->ucm_epoch_needs_shift) (pool))
-				{
-					if ((*pool->ops->ucm_epoch_needs_shift) (pool))
-						(*pool->ops->ucm_epoch_shift) (pool);
-				}
 			}
 
 			for (j = 0; j < (int) UndoLogsCount; j++)

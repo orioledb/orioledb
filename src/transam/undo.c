@@ -2384,7 +2384,7 @@ undo_xact_callback(XactEvent event, void *arg)
 		{
 			PagePool   *pool = get_ppool((OPagePoolType) i);
 
-			(*pool->ops->release_reserved) (pool, PPOOL_RESERVE_MASK_ALL);
+			ppool_release_reserved(pool, PPOOL_RESERVE_MASK_ALL);
 		}
 
 		for (i = 0; i < (int) UndoLogsCount; i++)

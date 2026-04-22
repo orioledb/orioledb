@@ -441,6 +441,26 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		Pointer		p;
 		bool		fastpath;
 
+		/*
+		 * Local-pool slots are NULLed on eviction, unlike shared-pool slots
+		 * whose shmem page stays readable (only pageChangeCount changes).  An
+		 * IN_MEMORY downlink we just descended through may reference a slot
+		 * the backend evicted earlier in the same call chain -- e.g. a
+		 * reserve_page triggered during a seq scan, or a find_page invoked
+		 * from an undo callback.  PAGE_GET_LEVEL below would segfault on the
+		 * NULL slot, so step back to the parent and re-resolve the downlink
+		 * (it now points to disk).  At the root there is no parent, so report
+		 * failure.
+		 */
+		if (O_PAGE_IS_LOCAL(intCxt.blkno) &&
+			local_ppool_pages[intCxt.blkno & O_BLKNO_MASK] == NULL)
+		{
+			if (context->index == 0)
+				return OFindPageResultFailure;
+			step_upward_level(&intCxt);
+			continue;
+		}
+
 		p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		level = PAGE_GET_LEVEL(p);
 
@@ -1018,6 +1038,18 @@ retry:
 		Pointer		p;
 
 		if (intCxt.pageChangeCount == InvalidOPageChangeCount)
+			return find_page(context, key, keyType, level);
+
+		/*
+		 * Local-pool slots are NULLed on eviction, unlike shared-pool slots
+		 * where pageChangeCount alone signals replacement (the shmem page
+		 * stays readable).  The slot at the caller's saved (blkno,
+		 * pageChangeCount) may have been evicted since, so PAGE_GET_LEVEL
+		 * below would segfault.  Fall back to find_page() to resolve the
+		 * downlink from scratch.
+		 */
+		if (O_PAGE_IS_LOCAL(intCxt.blkno) &&
+			local_ppool_pages[intCxt.blkno & O_BLKNO_MASK] == NULL)
 			return find_page(context, key, keyType, level);
 
 		if (!O_TUPLE_IS_NULL(context->insertTuple))

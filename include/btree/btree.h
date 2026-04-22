@@ -169,6 +169,28 @@ typedef struct
 	S3TaskLocation writeMaxLocation;
 } BTreeS3PartsInfo;
 
+/*
+ * Backend-local free-extent list used by user temporary trees.
+ *
+ * User temporary trees live entirely inside the process that created them
+ * (root, meta page and data file are all backend-private), so their free
+ * space map must not touch shared checkpoint state.  Instead of routing
+ * freed extents through the checkpoint-tagged seq bufs, we keep a plain
+ * array of free extents on the descriptor.  get_free_disk_extent() serves
+ * allocations from this array first, falling back to extending the data
+ * file.
+ *
+ * This path is taken only when `ppool` is the backend-local pool; system
+ * trees that happen to be BTreeStorageTemporary still share their pool and
+ * continue to use the shared seq-buf machinery.
+ */
+typedef struct BTreeLocalFreeExtents
+{
+	FileExtent *items;
+	int			size;
+	int			capacity;
+} BTreeLocalFreeExtents;
+
 struct BTreeDescr
 {
 	BTreeRootInfo rootInfo;
@@ -208,6 +230,12 @@ struct BTreeDescr
 	BTreeS3PartsInfo buildPartsInfo[2];
 	OXid		createOxid;
 	BTreeOps   *ops;
+
+	/*
+	 * Backend-local free space map for BTreeStorageTemporary trees.  Lazily
+	 * allocated on first free_extent_for_checkpoint() call; NULL otherwise.
+	 */
+	BTreeLocalFreeExtents *localFreeExtents;
 };
 
 static inline int
