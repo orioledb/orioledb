@@ -411,7 +411,7 @@ get_undo_type_name(UndoLogType undoType)
 		case UndoLogSystem:
 			return "system";
 		default:
-			elog(ERROR, "Unkown undo log type: %d", undoType);
+			elog(ERROR, "Unknown undo log type: %d", undoType);
 	}
 }
 
@@ -3369,7 +3369,7 @@ orioledb_get_proc_retain_undo_locations(PG_FUNCTION_ARGS)
 
 			values[0] = Int32GetDatum(proc->pid);
 			values[1] = Int32GetDatum(i);
-			values[2] = PointerGetDatum(cstring_to_text(get_undo_type_name(i)));
+			values[2] = PointerGetDatum(cstring_to_text(get_undo_type_name(j)));
 			values[3] = Int64GetDatum(reserved);
 			values[4] = Int64GetDatum(transaction);
 			values[5] = Int64GetDatum(snapshot);
