@@ -399,6 +399,22 @@ get_undo_meta_by_type(UndoLogType undoType)
 	return &undo_metas[index];
 }
 
+const char *
+get_undo_type_name(UndoLogType undoType)
+{
+	switch (undoType)
+	{
+		case UndoLogRegular:
+			return "row";
+		case UndoLogRegularPageLevel:
+			return "page";
+		case UndoLogSystem:
+			return "system";
+		default:
+			elog(ERROR, "Unkown undo log type: %d", undoType);
+	}
+}
+
 /*
  * In case of undoEviction the function increments writeInProgressChangeCount,
  * but doesn't release minUndoLocationsMutex. Releasing this mutex should be
@@ -3255,7 +3271,6 @@ orioledb_get_undo_meta(PG_FUNCTION_ARGS)
 	MemoryContext per_query_ctx;
 	MemoryContext oldcontext;
 	int			i;
-	static const char *type_names[] = {"regular", "page_level", "system"};
 
 	orioledb_check_shmem();
 
@@ -3280,7 +3295,7 @@ orioledb_get_undo_meta(PG_FUNCTION_ARGS)
 
 		MemSet(nulls, 0, sizeof(nulls));
 
-		values[0] = PointerGetDatum(cstring_to_text(type_names[i]));
+		values[0] = PointerGetDatum(cstring_to_text(get_undo_type_name(i)));
 		values[1] = Int64GetDatum(pg_atomic_read_u64(&meta->lastUsedLocation));
 		values[2] = Int64GetDatum(pg_atomic_read_u64(&meta->advanceReservedLocation));
 		values[3] = Int64GetDatum(pg_atomic_read_u64(&meta->writeInProgressLocation));
@@ -3314,7 +3329,6 @@ orioledb_get_proc_retain_undo_locations(PG_FUNCTION_ARGS)
 	MemoryContext oldcontext;
 	int			i,
 				j;
-	static const char *type_names[] = {"regular", "page_level", "system"};
 
 	orioledb_check_shmem();
 
@@ -3355,7 +3369,7 @@ orioledb_get_proc_retain_undo_locations(PG_FUNCTION_ARGS)
 
 			values[0] = Int32GetDatum(proc->pid);
 			values[1] = Int32GetDatum(i);
-			values[2] = PointerGetDatum(cstring_to_text(type_names[j]));
+			values[2] = PointerGetDatum(cstring_to_text(get_undo_type_name(i)));
 			values[3] = Int64GetDatum(reserved);
 			values[4] = Int64GetDatum(transaction);
 			values[5] = Int64GetDatum(snapshot);
