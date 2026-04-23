@@ -156,6 +156,174 @@ class TempLocalPoolTest(BaseTest):
 		con.close()
 		node.stop()
 
+	def test_page_merge_with_concurrent_seq_scan(self):
+		"""
+		Two LocalPagePool bugs exercised in one flow.
+
+		Part 1 -- find_page()/refind_page() NULL-slot crash.
+
+		A seq scan holds cached ON_DISK downlinks for every leaf it still
+		needs to visit.  When a concurrent subtransaction rollback fires
+		btree_try_merge_and_unlock on the freshly-emptied split pages and
+		the cursor subsequently drains, the reader descends through an
+		IN_MEMORY downlink whose local-pool slot has just been reclaimed
+		by a reentrant eviction -- local_ppool_pages[slot] is now NULL
+		and PAGE_GET_LEVEL on the resolved page segfaults.  The guards
+		in find_page / refind_page step back to the parent (or restart
+		from the root) when they spot the NULL slot and re-resolve the
+		downlink.
+
+		Part 2 -- io.c:1829 tmpBuf assertion for temp trees.
+
+		checkpoint_tables_callback skips user temp btrees on the
+		LocalPagePool branch, so their tmpBuf[] seq bufs are never
+		rotated past the init-time tag set in evictable_tree_init
+		(tag.num = chkp_num + 1).  Once the global checkpoint counter
+		has advanced past both slot tags, the next copy-on-write page
+		rewrite hits
+
+		    Assert(desc->tmpBuf[chkp_index].shared->tag.num ==
+		           checkpoint_number);
+
+		in perform_page_io.  Two CHECKPOINTs via a separate backend
+		(CHECKPOINT cannot run inside a transaction block) advance the
+		counter far enough; a subsequent UPDATE + orioledb_evict_pages
+		rewrites pages that already have file extents and trips the
+		assertion.
+
+		Arrangement for Part 1 (split pages must get on-disk extents
+		*before* the cursor saves its downlinks, so the extents the
+		rollback later frees are the ones the cursor is actually
+		holding):
+
+		  1. Fill a temp table with even ids so that a later insert of
+		     odd ids lands in the middle of every existing leaf and
+		     forces splits.
+		  2. Open a transaction, SAVEPOINT, and insert odd ids in the
+		     subtransaction.  Leaves split; freshly-split pages hold the
+		     (uncommitted) subtxn rows.
+		  3. orioledb_evict_pages() pushes every leaf -- including the
+		     freshly-split pages -- to disk, giving each a real file
+		     extent.
+		  4. A PK point lookup brings only the rightmost leaf back into
+		     the local pool.
+		  5. DECLARE CURSOR; FETCH saves ON_DISK downlinks for every
+		     leaf except the rightmost, including the split-off pages
+		     from step 2.
+		  6. ROLLBACK TO SAVEPOINT fires the btree undo callbacks, which
+		     physically remove the inserted tuples via
+		     page_locator_delete_item.  The freshly-emptied pages pass
+		     is_page_too_sparse, and the rollback path in btree/undo.c
+		     invokes btree_try_merge_and_unlock directly.
+		  7. FETCH ALL drains the rest of the cursor.  Without the
+		     find.c NULL-slot guards, the reader descends through a
+		     local-pool slot that reentrant eviction has just cleared
+		     and PAGE_GET_LEVEL segfaults on the NULL page pointer.
+		"""
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
+		    "orioledb.main_buffers = 8MB\n"
+		    "orioledb.temp_buffers = 8MB\n"
+		    "orioledb.debug_disable_pools_limit = true\n"
+		    "orioledb.debug_disable_bgwriter = true\n")
+		node.start()
+		node.safe_psql("CREATE EXTENSION orioledb;")
+		con = node.connect()
+		con.execute("""
+			CREATE TEMP TABLE o_temp (
+				id int PRIMARY KEY,
+				val int NOT NULL,
+				payload text
+			) USING orioledb;
+		""")
+		con.commit()
+
+		n = 500
+		con.execute("INSERT INTO o_temp SELECT g * 2, g, repeat('x', 200) "
+		            "FROM generate_series(1, %d) g;" % n)
+		con.commit()
+
+		con.begin()
+
+		# Declare the cursor at the outer transaction level, before any
+		# savepoint.  Cursors opened inside a subtransaction are closed
+		# by ROLLBACK TO SAVEPOINT; we need this one to survive.  The
+		# seq scan only initializes (and saves disk downlinks) on the
+		# first FETCH below, so we can declare now and fetch later.
+		con.execute("DECLARE c1 NO SCROLL CURSOR FOR SELECT id FROM o_temp;")
+
+		# Subtransaction runs first.  Odd-id inserts force splits; the
+		# freshly-split pages are still IN_MEMORY when the subtxn
+		# finishes inserting.
+		con.execute("SAVEPOINT sp;")
+		con.execute("INSERT INTO o_temp SELECT g * 2 + 1, g, repeat('y', 400) "
+		            "FROM generate_series(1, %d) g;" % n)
+
+		# Push every leaf, including the subtxn's freshly-split pages,
+		# to disk.  Each leaf now has a real file extent that the
+		# rollback-triggered merge can free.
+		con.execute("SELECT orioledb_evict_pages('o_temp'::regclass, 0);")
+
+		# Bring only the rightmost leaf back into the local pool so the
+		# cursor saves ON_DISK downlinks for every other leaf, including
+		# the split-off pages from the subtxn.
+		max_id = 2 * n + 1
+		self.assertEqual(
+		    con.execute("SELECT id FROM o_temp WHERE id = %d;" % max_id),
+		    [(max_id, )])
+
+		# First FETCH triggers seq scan initialization: iterate_internal_
+		# page walks the root and queues ON_DISK downlinks for every leaf
+		# except the rightmost (which is IN_MEMORY after the point
+		# lookup).
+		first_batch = con.execute("FETCH 10 FROM c1;")
+		self.assertEqual(len(first_batch), 10)
+
+		# Roll the subtransaction back.  btree undo callbacks physically
+		# remove every inserted tuple; each emptied page becomes sparse
+		# and is passed to btree_try_merge_and_unlock.
+		con.execute("ROLLBACK TO SAVEPOINT sp;")
+
+		rest = con.execute("FETCH ALL FROM c1;")
+		con.execute("CLOSE c1;")
+		con.commit()
+
+		# The subtxn was live at DECLARE time, so first_batch may contain
+		# odd ids that the subtxn inserted.  After rollback those tuples
+		# are physically gone, so rest only yields committed even ids.
+		# The union of everything returned must cover every committed
+		# even id.
+		returned = set(row[0] for row in first_batch + rest)
+		self.assertTrue(set(g * 2 for g in range(1, n + 1)).issubset(returned))
+
+		self.assertTrue(
+		    con.execute("SELECT orioledb_tbl_check('o_temp'::regclass);")[0]
+		    [0])
+
+		# Part 2.  Advance the global checkpoint counter past both of
+		# the temp tree's tmpBuf[] slot tags (the table's init-time
+		# value is chkp_num + 1; the other slot is never rotated for
+		# user temp trees).  CHECKPOINT cannot run inside a transaction
+		# block, so drive it from a separate psql backend.
+		node.safe_psql("CHECKPOINT;")
+		node.safe_psql("CHECKPOINT;")
+
+		# Dirty a leaf that already has an on-disk extent so the next
+		# perform_page_io takes the copy-on-write branch and calls
+		# free_extent_for_checkpoint, whose assertion demands
+		# desc->tmpBuf[chkp_index].shared->tag.num == checkpoint_number.
+		con.execute("UPDATE o_temp SET val = val + 1 WHERE id = 2;")
+		con.execute("SELECT orioledb_evict_pages('o_temp'::regclass, 0);")
+		con.commit()
+
+		self.assertTrue(
+		    con.execute("SELECT orioledb_tbl_check('o_temp'::regclass);")[0]
+		    [0])
+
+		con.close()
+		node.stop()
+
 	def test_evict_temp_table_secondary_index(self):
 		"""
 		Eviction from local pool with a multi-index temp table.  After the
