@@ -3079,15 +3079,15 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 				 */
 				if (!*recovery_single_process)
 				{
-					ORelOids	invalid_oids;
+					ORelOids	old_oids;
 
 					Assert(new_o_table->nindices == nindices);
 					/* Send recovery message to become a leader */
-					ORelOidsSetInvalid(invalid_oids);
+					ORelOidsSetInvalid(old_oids);
 					if (changed_tablespace)
-						invalid_oids.relnode = old_o_table->oids.relnode;
+						old_oids.relnode = old_o_table->oids.relnode;
 					recovery_send_leader_oids(oids, ix_num, new_o_table->version,
-											  invalid_oids, 0, false);
+											  old_oids, 0, false);
 				}
 				else
 					build_secondary_index(changed_tablespace ?
