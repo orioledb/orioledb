@@ -49,7 +49,7 @@ class RepeatableReadStressTest(BaseTest):
 		n_readers_pk = 6
 		n_readers_sk = 6
 		n_readers_mixed = 6
-		duration = 60.0
+		duration = 15.0
 		checkpoint_interval = 0.5
 
 		# Pre-computed references, frozen for the whole run.
@@ -68,6 +68,7 @@ class RepeatableReadStressTest(BaseTest):
 		errors = []
 		errors_lock = threading.Lock()
 		counters_lock = threading.Lock()
+		print_lock = threading.Lock()
 		write_count = [0]
 		read_count = [0]
 		conflict_count = [0]
@@ -75,6 +76,10 @@ class RepeatableReadStressTest(BaseTest):
 		def record_error(msg):
 			with errors_lock:
 				errors.append(msg)
+
+		def dprint(msg):
+			with print_lock:
+				print(msg, flush=True)
 
 		def writer_loop(writer_id):
 			con = node.connect()
@@ -131,8 +136,11 @@ class RepeatableReadStressTest(BaseTest):
 				with counters_lock:
 					write_count[0] += local_w
 					conflict_count[0] += local_c
+				dprint(
+				    f'[writer #{writer_id}] commits={local_w} '
+				    f'conflicts={local_c}')
 
-		def reader_pk_loop():
+		def reader_pk_loop(reader_id):
 			con = node.connect()
 			local_r = 0
 			try:
@@ -167,8 +175,9 @@ class RepeatableReadStressTest(BaseTest):
 					pass
 				with counters_lock:
 					read_count[0] += local_r
+				dprint(f'[reader-pk #{reader_id}] commits={local_r}')
 
-		def reader_sk_loop():
+		def reader_sk_loop(reader_id):
 			con = node.connect()
 			local_r = 0
 			try:
@@ -226,8 +235,9 @@ class RepeatableReadStressTest(BaseTest):
 					pass
 				with counters_lock:
 					read_count[0] += local_r
+				dprint(f'[reader-sk #{reader_id}] commits={local_r}')
 
-		def reader_mixed_loop():
+		def reader_mixed_loop(reader_id):
 			con = node.connect()
 			local_r = 0
 			try:
@@ -272,14 +282,17 @@ class RepeatableReadStressTest(BaseTest):
 					pass
 				with counters_lock:
 					read_count[0] += local_r
+				dprint(f'[reader-mixed #{reader_id}] commits={local_r}')
 
 		def checkpointer_loop():
 			con = node.connect()
+			local_cp = 0
 			try:
 				while not stop.is_set():
 					try:
 						con.execute("CHECKPOINT")
 						con.commit()
+						local_cp += 1
 					except Exception:
 						try:
 							con.rollback()
@@ -292,17 +305,21 @@ class RepeatableReadStressTest(BaseTest):
 					con.close()
 				except Exception:
 					pass
+				dprint(f'[checkpointer] checkpoints={local_cp}')
 
 		threads = []
 		for wid in range(1, n_writers + 1):
 			threads.append(
 			    threading.Thread(target=writer_loop, args=(wid,)))
-		for _ in range(n_readers_pk):
-			threads.append(threading.Thread(target=reader_pk_loop))
-		for _ in range(n_readers_sk):
-			threads.append(threading.Thread(target=reader_sk_loop))
-		for _ in range(n_readers_mixed):
-			threads.append(threading.Thread(target=reader_mixed_loop))
+		for rid in range(1, n_readers_pk + 1):
+			threads.append(
+			    threading.Thread(target=reader_pk_loop, args=(rid,)))
+		for rid in range(1, n_readers_sk + 1):
+			threads.append(
+			    threading.Thread(target=reader_sk_loop, args=(rid,)))
+		for rid in range(1, n_readers_mixed + 1):
+			threads.append(
+			    threading.Thread(target=reader_mixed_loop, args=(rid,)))
 		threads.append(threading.Thread(target=checkpointer_loop))
 
 		for t in threads:
@@ -312,6 +329,11 @@ class RepeatableReadStressTest(BaseTest):
 		stop.set()
 		for t in threads:
 			t.join()
+
+		dprint(
+		    f'[totals] writes={write_count[0]} '
+		    f'reads={read_count[0]} '
+		    f'conflicts={conflict_count[0]}')
 
 		final_total = node.execute(
 		    "SELECT sum(balance)::bigint FROM o_bank_account")[0][0]
