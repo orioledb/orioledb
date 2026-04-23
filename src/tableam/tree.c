@@ -127,6 +127,7 @@ index_btree_desc_init(BTreeDescr *desc, OCompress compress, int fillfactor,
 		desc->storageType = BTreeStoragePersistence;
 	desc->undoType = UndoLogRegular;
 	desc->createOxid = createOxid;
+	desc->localFreeExtents = NULL;
 }
 
 static inline OIndexDescr *

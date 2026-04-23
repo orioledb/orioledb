@@ -173,23 +173,22 @@ class TempLocalPoolTest(BaseTest):
 		from the root) when they spot the NULL slot and re-resolve the
 		downlink.
 
-		Part 2 -- io.c:1829 tmpBuf assertion for temp trees.
+		Part 2 -- copy-on-write page rewrite for temp trees across
+		global checkpoints.
 
-		checkpoint_tables_callback skips user temp btrees on the
-		LocalPagePool branch, so their tmpBuf[] seq bufs are never
-		rotated past the init-time tag set in evictable_tree_init
-		(tag.num = chkp_num + 1).  Once the global checkpoint counter
-		has advanced past both slot tags, the next copy-on-write page
-		rewrite hits
-
-		    Assert(desc->tmpBuf[chkp_index].shared->tag.num ==
-		           checkpoint_number);
-
-		in perform_page_io.  Two CHECKPOINTs via a separate backend
-		(CHECKPOINT cannot run inside a transaction block) advance the
-		counter far enough; a subsequent UPDATE + orioledb_evict_pages
-		rewrites pages that already have file extents and trips the
-		assertion.
+		User temp btrees live on the LocalPagePool branch and are
+		skipped by checkpoint_tables_callback, so their checkpoint-
+		tagged state is never rotated.  The backend-local free-extent
+		list in catalog/free_extents.c handles recycled extents for
+		such trees without consulting any checkpoint counter: a page
+		rewrite pushes the old extent onto the process-local list, and
+		the next allocation pops from it.  This part exercises the
+		branch-selection in get_free_disk_extent / free_extent_for_
+		checkpoint / perform_page_io: two CHECKPOINTs via a separate
+		backend (CHECKPOINT cannot run inside a transaction block)
+		advance the global counter; a subsequent UPDATE + orioledb_
+		evict_pages takes the copy-on-write path on a leaf that
+		already has a file extent.
 
 		Arrangement for Part 1 (split pages must get on-disk extents
 		*before* the cursor saves its downlinks, so the extents the
@@ -301,18 +300,15 @@ class TempLocalPoolTest(BaseTest):
 		    con.execute("SELECT orioledb_tbl_check('o_temp'::regclass);")[0]
 		    [0])
 
-		# Part 2.  Advance the global checkpoint counter past both of
-		# the temp tree's tmpBuf[] slot tags (the table's init-time
-		# value is chkp_num + 1; the other slot is never rotated for
-		# user temp trees).  CHECKPOINT cannot run inside a transaction
-		# block, so drive it from a separate psql backend.
+		# Part 2.  Advance the global checkpoint counter past any value
+		# the temp tree saw at init.  CHECKPOINT cannot run inside a
+		# transaction block, so drive it from a separate psql backend.
 		node.safe_psql("CHECKPOINT;")
 		node.safe_psql("CHECKPOINT;")
 
 		# Dirty a leaf that already has an on-disk extent so the next
-		# perform_page_io takes the copy-on-write branch and calls
-		# free_extent_for_checkpoint, whose assertion demands
-		# desc->tmpBuf[chkp_index].shared->tag.num == checkpoint_number.
+		# perform_page_io takes the copy-on-write branch and routes
+		# the recycled extent through the backend-local free list.
 		con.execute("UPDATE o_temp SET val = val + 1 WHERE id = 2;")
 		con.execute("SELECT orioledb_evict_pages('o_temp'::regclass, 0);")
 		con.commit()

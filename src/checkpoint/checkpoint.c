@@ -2096,6 +2096,19 @@ free_extent_for_checkpoint(BTreeDescr *desc, FileExtent *extent, uint32 chkp_num
 		return;
 	}
 
+	/*
+	 * User temporary trees have no shared checkpoint state.  Stash freed
+	 * extents on a backend-local list so that subsequent allocations can
+	 * recycle them without touching the checkpoint-tagged seq bufs.
+	 */
+	if (btree_desc_is_local_temp(desc))
+	{
+		local_free_extents_push(desc, *extent);
+		extent->len = InvalidFileExtentLen;
+		extent->off = InvalidFileExtentOff;
+		return;
+	}
+
 	for (i = 0; i < 2; i++)
 	{
 		/* Don't have *.map files for BTreeStorageTemporary */
@@ -5547,6 +5560,14 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 		&meta_page->freeBuf};
 		int			i = 0;
 
+		/*
+		 * BTreeStorageTemporary trees do not maintain a .map file, so skip
+		 * nextChkp initialization.  User temporary trees also rely on a
+		 * backend-local free space map (see free_extents.c) and do not
+		 * consult the tmpBuf / freeBuf seq bufs for allocations, but the seq
+		 * bufs are still initialized so that the regular eviction teardown in
+		 * btree_finalize_private_seq_bufs works uniformly.
+		 */
 		if (desc->storageType == BTreeStorageTemporary)
 			i = 1;
 
@@ -5654,6 +5675,7 @@ checkpointable_tree_free(BTreeDescr *desc)
 	seq_buf_close_file(&desc->nextChkp[1]);
 	seq_buf_close_file(&desc->tmpBuf[0]);
 	seq_buf_close_file(&desc->tmpBuf[1]);
+	local_free_extents_cleanup(desc);
 	desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 	desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 

@@ -1071,6 +1071,27 @@ get_free_disk_extent(BTreeDescr *desc, uint32 chkpNum,
 		return FileExtentIsValid(*extent);
 	}
 
+	/*
+	 * User temporary trees maintain a pure backend-local free space map.
+	 * Serve the allocation from that list first, falling back to extending
+	 * the data file.  This avoids any dependency on checkpoint-tagged seq
+	 * bufs.
+	 */
+	if (btree_desc_is_local_temp(desc))
+	{
+		BTreeMetaPage *metaPage = BTREE_GET_META(desc);
+		uint16		len = OCompressIsValid(desc->compress) ? FileExtentLen(page_size) : 1;
+
+		if (!local_free_extents_pop(desc, len, extent))
+		{
+			extent->len = len;
+			if (use_device)
+				extent->off = orioledb_device_alloc(desc, len * ORIOLEDB_COMP_BLCKSZ) / ORIOLEDB_COMP_BLCKSZ;
+			else
+				extent->off = pg_atomic_fetch_add_u64(&metaPage->datafileLength[0], len);
+		}
+		return FileExtentIsValid(*extent);
+	}
 
 	if (!OCompressIsValid(desc->compress))
 	{
@@ -1816,18 +1837,26 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 		if (FileExtentIsValid(page_desc->fileExtent))
 		{
 #ifdef USE_ASSERT_CHECKING
+
 			/*
-			 * Shared seq_bufs should be initialized by checkpointer.
+			 * Shared seq_bufs should be initialized by checkpointer.  User
+			 * temporary trees keep their own backend-local free space map and
+			 * do not use these shared buffers at all; system trees that
+			 * happen to be BTreeStorageTemporary still share a pool and only
+			 * skip the nextChkp assertion (no .map file).
 			 */
-			if (desc->storageType != BTreeStorageTemporary)
+			if (!btree_desc_is_local_temp(desc))
 			{
-				SpinLockAcquire(&desc->nextChkp[chkp_index].shared->lock);
-				Assert(desc->nextChkp[chkp_index].shared->tag.num == checkpoint_number);
-				SpinLockRelease(&desc->nextChkp[chkp_index].shared->lock);
+				if (desc->storageType != BTreeStorageTemporary)
+				{
+					SpinLockAcquire(&desc->nextChkp[chkp_index].shared->lock);
+					Assert(desc->nextChkp[chkp_index].shared->tag.num == checkpoint_number);
+					SpinLockRelease(&desc->nextChkp[chkp_index].shared->lock);
+				}
+				SpinLockAcquire(&desc->tmpBuf[chkp_index].shared->lock);
+				Assert(desc->tmpBuf[chkp_index].shared->tag.num == checkpoint_number);
+				SpinLockRelease(&desc->tmpBuf[chkp_index].shared->lock);
 			}
-			SpinLockAcquire(&desc->tmpBuf[chkp_index].shared->lock);
-			Assert(desc->tmpBuf[chkp_index].shared->tag.num == checkpoint_number);
-			SpinLockRelease(&desc->tmpBuf[chkp_index].shared->lock);
 #endif
 			free_extent_for_checkpoint(desc, &page_desc->fileExtent, checkpoint_number);
 		}

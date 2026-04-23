@@ -24,4 +24,21 @@ extern void foreach_free_extent(BTreeDescr *desc, ForEachExtentCallback callback
 								void *arg);
 extern void add_free_extents_from_tmp(BTreeDescr *desc, bool remove);
 
+/*
+ * Returns true if `desc` uses the backend-local page pool.  Only such trees
+ * (user temporary tables) need the backend-local free space map below;
+ * system trees that happen to be BTreeStorageTemporary still use a shared
+ * pool and continue to rely on the checkpoint-tagged seq bufs.
+ */
+extern bool btree_desc_is_local_temp(BTreeDescr *desc);
+
+/*
+ * Backend-local free extent list for user temporary trees.  These helpers
+ * are process-local and do not consult any shared checkpoint state.
+ */
+extern void local_free_extents_push(BTreeDescr *desc, FileExtent extent);
+extern bool local_free_extents_pop(BTreeDescr *desc, uint16 len,
+								   FileExtent *extent);
+extern void local_free_extents_cleanup(BTreeDescr *desc);
+
 #endif							/* __FREE_EXTENTS_H__ */
