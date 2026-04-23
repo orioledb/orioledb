@@ -1237,6 +1237,12 @@ _PG_init(void)
 	prev_database_size_hook = database_size_hook;
 	database_size_hook = orioledb_calculate_database_size;
 	RecoveryStopsBeforeHook = orioledb_recovery_stops_before_hook;
+	/*
+	 * When PostgreSQL decides that recovery has stopped at a requested target,
+	 * Oriole must still align its own replay/finalization state with that
+	 * stop boundary before pause/promote/shutdown becomes externally visible.
+	 */
+	RecoveryTargetReachedHook = orioledb_recovery_target_reached_hook;
 
 	if (enable_rewind)
 		VacuumHorizonHook = orioledb_vacuum_horizon_hook;
