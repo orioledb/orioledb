@@ -171,6 +171,8 @@ typedef struct WorkerUndoTempCheckpointStack
 
 PG_FUNCTION_INFO_V1(orioledb_recovery_synchronized);
 
+static XLogRecPtr recovery_get_retain_ptr(void);
+
 /*
  * Comparator for undo retain min-heap.
  *
@@ -1054,6 +1056,156 @@ orioledb_recovery_stops_before_hook(XLogReaderState *record,
 	}
 
 	return false;
+}
+
+/*
+ * PostgreSQL calls this hook after it has decided that recovery should stop
+ * at a requested target, but before recovery_target_action is applied.
+ *
+ * At that point Oriole must ensure that its own replay progress, retain/undo
+ * bookkeeping, and deferred finalization/publication have all caught up to
+ * the same recovery stop boundary that PostgreSQL is about to expose.
+ *
+ * The hook runs in the startup process itself, so it cannot just wait for
+ * some other startup-side path to advance recovery_finished_list_ptr; it must
+ * actively drive startup-side publication while waiting for the boundaries to
+ * converge.
+ */
+void
+orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
+{
+	XLogRecPtr	target_ptr = InvalidXLogRecPtr;
+
+	Assert(info);
+
+	/*
+	 * recordPtr is the most useful explicit stop boundary for both cases:
+	 * - for stop-before semantics it is the start of the record that must not
+	 *   become visible yet, so Oriole must at least catch up to the boundary
+	 *   immediately before it;
+	 * - for stop-after semantics it is the record that belongs to the visible
+	 *   target state, so replay/finalization must catch up through that
+	 *   boundary before PostgreSQL exposes the target-reached state.
+	 */
+	if (XLogRecPtrIsValid(info->recordPtr))
+		target_ptr = info->recordPtr;
+
+	elog(DEBUG4,
+		 "Recovery target reached: start synchronization barrier "
+		 "(target=%d action=%d stop_after=%d stop_xid=%u stop_lsn=%X/%X "
+		 "record_ptr=%X/%X record_end_ptr=%X/%X target_ptr=%X/%X)",
+		 info->recoveryTarget,
+		 info->recoveryTargetAction,
+		 info->recoveryStopAfter,
+		 info->recoveryStopXid,
+		 LSN_FORMAT_ARGS(info->recoveryStopLSN),
+		 LSN_FORMAT_ARGS(info->recordPtr),
+		 LSN_FORMAT_ARGS(info->recordEndPtr),
+		 LSN_FORMAT_ARGS(target_ptr));
+
+	while (true)
+	{
+		XLogRecPtr	current_ptr = recovery_get_current_ptr();
+		XLogRecPtr	retain_ptr = recovery_get_retain_ptr();
+		XLogRecPtr	finished_ptr;
+
+		/*
+		 * The hook runs in the startup process itself, so it must drive the
+		 * startup-side deferred finalization instead of waiting for some other
+		 * process to advance recovery_finished_list_ptr.
+		 */
+		update_proc_retain_undo_location(-1);
+		update_recovery_undo_loc_flush(*recovery_single_process, -1);
+		finished_ptr = pg_atomic_read_u64(recovery_finished_list_ptr);
+
+		/*
+		 * Wait in three stages:
+		 * 1. replay progress must reach the stop boundary itself;
+		 * 2. retain/undo bookkeeping must catch up to the same replay point;
+		 * 3. deferred finalization must be globally published up to that
+		 *    boundary.
+		 *
+		 * If target_ptr is not set, fall back to requiring the internal
+		 * Oriole boundaries to converge on the current replay progress.
+		 */
+		elog(DEBUG4,
+			 "Recovery target reached: boundary snapshot after startup-side "
+			 "publication attempt (target_ptr=%X/%X current_ptr=%X/%X "
+			 "retain_ptr=%X/%X finished_ptr=%X/%X)",
+			 LSN_FORMAT_ARGS(target_ptr),
+			 LSN_FORMAT_ARGS(current_ptr),
+			 LSN_FORMAT_ARGS(retain_ptr),
+			 LSN_FORMAT_ARGS(finished_ptr));
+
+		if (XLogRecPtrIsValid(target_ptr) && current_ptr < target_ptr)
+		{
+			elog(DEBUG4,
+					"Recovery target reached: waiting for replay progress to "
+					"reach stop boundary (target_ptr=%X/%X current_ptr=%X/%X)",
+					LSN_FORMAT_ARGS(target_ptr),
+					LSN_FORMAT_ARGS(current_ptr));
+		}
+		else if (current_ptr != retain_ptr)
+		{
+			elog(DEBUG4,
+				 "Recovery target reached: waiting for retain boundary to "
+				 "catch up with replay progress (target_ptr=%X/%X "
+				 "current_ptr=%X/%X retain_ptr=%X/%X)",
+				 LSN_FORMAT_ARGS(target_ptr),
+				 LSN_FORMAT_ARGS(current_ptr),
+				 LSN_FORMAT_ARGS(retain_ptr));
+		}
+		else if (XLogRecPtrIsValid(target_ptr) && finished_ptr < target_ptr)
+		{
+			elog(DEBUG4,
+				 "Recovery target reached: waiting for deferred finalization "
+				 "publication to reach stop boundary (target_ptr=%X/%X "
+				 "current_ptr=%X/%X finished_ptr=%X/%X)",
+				 LSN_FORMAT_ARGS(target_ptr),
+				 LSN_FORMAT_ARGS(current_ptr),
+				 LSN_FORMAT_ARGS(finished_ptr));
+		}
+		else if (current_ptr != finished_ptr)
+		{
+			elog(DEBUG4,
+				 "Recovery target reached: waiting for deferred finalization "
+				 "publication to match replay progress (target_ptr=%X/%X "
+				 "current_ptr=%X/%X finished_ptr=%X/%X)",
+				 LSN_FORMAT_ARGS(target_ptr),
+				 LSN_FORMAT_ARGS(current_ptr),
+				 LSN_FORMAT_ARGS(finished_ptr));
+		}
+		else
+		{
+			elog(DEBUG4,
+				 "Recovery target reached: synchronization barrier completed "
+				 "(target_ptr=%X/%X current_ptr=%X/%X retain_ptr=%X/%X "
+				 "finished_ptr=%X/%X)",
+				 LSN_FORMAT_ARGS(target_ptr),
+				 LSN_FORMAT_ARGS(current_ptr),
+				 LSN_FORMAT_ARGS(retain_ptr),
+				 LSN_FORMAT_ARGS(finished_ptr));
+
+			break;
+		}
+
+		if (unexpected_worker_detach)
+		{
+			elog(DEBUG4,
+				 "Recovery target reached: stop waiting due to "
+				 "unexpected_worker_detach (target_ptr=%X/%X current_ptr=%X/%X "
+				 "retain_ptr=%X/%X finished_ptr=%X/%X)",
+				 LSN_FORMAT_ARGS(target_ptr),
+				 LSN_FORMAT_ARGS(current_ptr),
+				 LSN_FORMAT_ARGS(retain_ptr),
+				 LSN_FORMAT_ARGS(finished_ptr));
+			break;
+		}
+
+		WakeupRecovery();
+		pg_usleep(200);
+		CHECK_FOR_INTERRUPTS();
+	}
 }
 
 static XLogRecPtr
