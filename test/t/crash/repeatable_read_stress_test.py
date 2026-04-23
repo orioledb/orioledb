@@ -22,6 +22,8 @@ import random
 import threading
 import time
 
+from testgres.enums import IsolationLevel
+
 from ..base_test import BaseTest
 
 SETUP_SQL = """
@@ -43,11 +45,11 @@ class RepeatableReadStressTest(BaseTest):
 	def test_bank_account_invariant(self):
 		n_accounts = 100
 		initial_balance = 1000
-		n_writers = 8
-		n_readers_pk = 3
-		n_readers_sk = 3
-		n_readers_mixed = 3
-		duration = 5.0
+		n_writers = 20
+		n_readers_pk = 6
+		n_readers_sk = 6
+		n_readers_mixed = 6
+		duration = 60.0
 		checkpoint_interval = 0.5
 
 		# Pre-computed references, frozen for the whole run.
@@ -74,15 +76,8 @@ class RepeatableReadStressTest(BaseTest):
 			with errors_lock:
 				errors.append(msg)
 
-		def make_rr_conn():
-			con = node.connect()
-			con.execute(
-			    "SET default_transaction_isolation = 'repeatable read'")
-			con.commit()
-			return con
-
 		def writer_loop(writer_id):
-			con = make_rr_conn()
+			con = node.connect()
 			# Each writer's private token starts outside {1..N}, so
 			# the temporary state (after the first UPDATE) still has
 			# unique tokens even if the constraint were IMMEDIATE.
@@ -97,7 +92,7 @@ class RepeatableReadStressTest(BaseTest):
 						continue
 					amount = random.randint(1, 10)
 					try:
-						con.begin()
+						con.begin(IsolationLevel.RepeatableRead)
 						from_bal, from_token = con.execute(
 						    "SELECT balance, token "
 						    "FROM o_bank_account "
@@ -138,12 +133,12 @@ class RepeatableReadStressTest(BaseTest):
 					conflict_count[0] += local_c
 
 		def reader_pk_loop():
-			con = make_rr_conn()
+			con = node.connect()
 			local_r = 0
 			try:
 				while not stop.is_set():
 					try:
-						con.begin()
+						con.begin(IsolationLevel.RepeatableRead)
 						total, uniq, rows = con.execute(
 						    "SELECT sum(balance)::bigint, "
 						    "       count(DISTINCT token)::int, "
@@ -174,12 +169,12 @@ class RepeatableReadStressTest(BaseTest):
 					read_count[0] += local_r
 
 		def reader_sk_loop():
-			con = make_rr_conn()
+			con = node.connect()
 			local_r = 0
 			try:
 				while not stop.is_set():
 					try:
-						con.begin()
+						con.begin(IsolationLevel.RepeatableRead)
 						# Scan ordered by token (secondary index)
 						# then a full PK scan inside the same RR
 						# snapshot: both must see the same per-row
@@ -233,13 +228,13 @@ class RepeatableReadStressTest(BaseTest):
 					read_count[0] += local_r
 
 		def reader_mixed_loop():
-			con = make_rr_conn()
+			con = node.connect()
 			local_r = 0
 			try:
 				while not stop.is_set():
 					start = random.randint(1, n_accounts)
 					try:
-						con.begin()
+						con.begin(IsolationLevel.RepeatableRead)
 						ge_sum, ge_cnt = con.execute(
 						    "SELECT coalesce(sum(balance), 0)::bigint, "
 						    "       count(*)::int "
@@ -320,41 +315,40 @@ class RepeatableReadStressTest(BaseTest):
 
 		final_total = node.execute(
 		    "SELECT sum(balance)::bigint FROM o_bank_account")[0][0]
+		unique_tokens = node.execute(
+		    "SELECT count(DISTINCT token)::int FROM o_bank_account")[0][0]
+		rows = node.execute(
+		    "SELECT count(*)::int FROM o_bank_account")[0][0]
+		retained = node.execute(
+		    "SELECT orioledb_has_retained_undo()")[0][0]
+		tbl_check_ok = node.execute(
+		    "SELECT orioledb_tbl_check('o_bank_account'::regclass)")[0][0]
+
+		with errors_lock:
+			seen = list(errors)
+		print(
+		    f'snapshot reads saw inconsistency (torn scan): {seen}')
+
 		self.assertEqual(
 		    final_total, expected_total,
 		    f'final total {final_total} != expected {expected_total} '
 		    f'(mismatch = lost update)')
-
-		unique_tokens = node.execute(
-		    "SELECT count(DISTINCT token)::int FROM o_bank_account")[0][0]
 		self.assertEqual(
 		    unique_tokens, n_accounts,
 		    f'expected {n_accounts} unique tokens, got {unique_tokens}')
-
-		rows = node.execute(
-		    "SELECT count(*)::int FROM o_bank_account")[0][0]
 		self.assertEqual(
 		    rows, n_accounts,
 		    f'expected {n_accounts} rows, got {rows}')
-
-		with errors_lock:
-			seen = list(errors)
 		self.assertEqual(
-		    seen[:20], [],
-		    f'snapshot reads saw inconsistency (torn scan): {seen[:20]}')
-
-		self.assertGreater(write_count[0], 0, 'writers must have committed')
-		self.assertGreater(read_count[0], 0, 'readers must have completed')
-
-		retained = node.execute(
-		    "SELECT orioledb_has_retained_undo()")[0][0]
+		    seen, [], 'snapshot reads saw inconsistency (torn scan)')
+		self.assertGreater(
+		    write_count[0], 0, 'writers must have committed')
+		self.assertGreater(
+		    read_count[0], 0, 'readers must have completed')
 		self.assertFalse(
 		    retained,
 		    'orioledb retained undo after stop (possible snapshot leak)')
-
 		self.assertTrue(
-		    node.execute(
-		        "SELECT orioledb_tbl_check('o_bank_account'::regclass)")
-		    [0][0], 'orioledb_tbl_check(o_bank_account) failed')
+		    tbl_check_ok, 'orioledb_tbl_check(o_bank_account) failed')
 
 		node.stop()
