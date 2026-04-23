@@ -2503,28 +2503,91 @@ ResOwnerPrintOTableDescr(Datum res)
 
 #else
 
+/*
+ * PG16 lacks the per-owner ResourceOwnerRemember API, so we rely on the
+ * global ResourceReleaseCallback mechanism.  The callback fires for every
+ * ResourceOwner release in the tree, so we maintain our own list of
+ * (owner, descr) pairs and filter by CurrentResourceOwner to only decrement
+ * refcnt when the matching owner is being released.  A single callback is
+ * registered once per backend on the first Remember call.
+ */
+typedef struct OTableDescrResOwnerItem
+{
+	struct OTableDescrResOwnerItem *next;
+	ResourceOwner owner;
+	OTableDescr *descr;
+}			OTableDescrResOwnerItem;
+
+static OTableDescrResOwnerItem * otable_descr_resowner_items = NULL;
+static bool otable_descr_resowner_registered = false;
+
 static void
 ResOwnerReleaseOTableDescrCallback(ResourceReleasePhase phase,
 								   bool isCommit, bool isTopLevel, void *arg)
 {
-	OTableDescr *descr = (OTableDescr *) arg;
+	OTableDescrResOwnerItem **prev;
+	OTableDescrResOwnerItem *item;
 
-	if (phase == RESOURCE_RELEASE_BEFORE_LOCKS)
-		ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
+	if (phase != RESOURCE_RELEASE_BEFORE_LOCKS)
+		return;
+
+	prev = &otable_descr_resowner_items;
+	item = *prev;
+	while (item)
+	{
+		if (item->owner == CurrentResourceOwner)
+		{
+			*prev = item->next;
+			item->descr->refcnt--;
+			pfree(item);
+			item = *prev;
+		}
+		else
+		{
+			prev = &item->next;
+			item = item->next;
+		}
+	}
 }
 
 void
 ResourceOwnerRememberOTableDescr(ResourceOwner owner, OTableDescr *descr)
 {
+	OTableDescrResOwnerItem *item;
+
+	if (!otable_descr_resowner_registered)
+	{
+		RegisterResourceReleaseCallback(ResOwnerReleaseOTableDescrCallback, NULL);
+		otable_descr_resowner_registered = true;
+	}
+
+	item = MemoryContextAlloc(TopMemoryContext, sizeof(*item));
+	item->owner = owner;
+	item->descr = descr;
+	item->next = otable_descr_resowner_items;
+	otable_descr_resowner_items = item;
 	descr->refcnt++;
-	RegisterResourceReleaseCallback(ResOwnerReleaseOTableDescrCallback, descr);
 }
 
 void
 ResourceOwnerForgetOTableDescr(ResourceOwner owner, OTableDescr *descr)
 {
-	UnregisterResourceReleaseCallback(ResOwnerReleaseOTableDescrCallback, descr);
-	descr->refcnt--;
+	OTableDescrResOwnerItem **prev = &otable_descr_resowner_items;
+	OTableDescrResOwnerItem *item = *prev;
+
+	while (item)
+	{
+		if (item->owner == owner && item->descr == descr)
+		{
+			*prev = item->next;
+			pfree(item);
+			descr->refcnt--;
+			return;
+		}
+		prev = &item->next;
+		item = item->next;
+	}
+	elog(ERROR, "OTableDescr not remembered by this ResourceOwner");
 }
 
 #endif
@@ -2577,28 +2640,84 @@ ResOwnerPrintOIndexDescr(Datum res)
 
 #else
 
+/* See comment on OTableDescr's PG16 implementation above. */
+typedef struct OIndexDescrResOwnerItem
+{
+	struct OIndexDescrResOwnerItem *next;
+	ResourceOwner owner;
+	OIndexDescr *descr;
+}			OIndexDescrResOwnerItem;
+
+static OIndexDescrResOwnerItem * oindex_descr_resowner_items = NULL;
+static bool oindex_descr_resowner_registered = false;
+
 static void
 ResOwnerReleaseOIndexDescrCallback(ResourceReleasePhase phase,
 								   bool isCommit, bool isTopLevel, void *arg)
 {
-	OIndexDescr *descr = (OIndexDescr *) arg;
+	OIndexDescrResOwnerItem **prev;
+	OIndexDescrResOwnerItem *item;
 
-	if (phase == RESOURCE_RELEASE_BEFORE_LOCKS)
-		ResourceOwnerForgetOIndexDescr(CurrentResourceOwner, descr);
+	if (phase != RESOURCE_RELEASE_BEFORE_LOCKS)
+		return;
+
+	prev = &oindex_descr_resowner_items;
+	item = *prev;
+	while (item)
+	{
+		if (item->owner == CurrentResourceOwner)
+		{
+			*prev = item->next;
+			item->descr->refcnt--;
+			pfree(item);
+			item = *prev;
+		}
+		else
+		{
+			prev = &item->next;
+			item = item->next;
+		}
+	}
 }
 
 void
 ResourceOwnerRememberOIndexDescr(ResourceOwner owner, OIndexDescr *descr)
 {
+	OIndexDescrResOwnerItem *item;
+
+	if (!oindex_descr_resowner_registered)
+	{
+		RegisterResourceReleaseCallback(ResOwnerReleaseOIndexDescrCallback, NULL);
+		oindex_descr_resowner_registered = true;
+	}
+
+	item = MemoryContextAlloc(TopMemoryContext, sizeof(*item));
+	item->owner = owner;
+	item->descr = descr;
+	item->next = oindex_descr_resowner_items;
+	oindex_descr_resowner_items = item;
 	descr->refcnt++;
-	RegisterResourceReleaseCallback(ResOwnerReleaseOIndexDescrCallback, descr);
 }
 
 void
 ResourceOwnerForgetOIndexDescr(ResourceOwner owner, OIndexDescr *descr)
 {
-	UnregisterResourceReleaseCallback(ResOwnerReleaseOIndexDescrCallback, descr);
-	descr->refcnt--;
+	OIndexDescrResOwnerItem **prev = &oindex_descr_resowner_items;
+	OIndexDescrResOwnerItem *item = *prev;
+
+	while (item)
+	{
+		if (item->owner == owner && item->descr == descr)
+		{
+			*prev = item->next;
+			pfree(item);
+			descr->refcnt--;
+			return;
+		}
+		prev = &item->next;
+		item = item->next;
+	}
+	elog(ERROR, "OIndexDescr not remembered by this ResourceOwner");
 }
 
 #endif

@@ -1932,14 +1932,36 @@ ResOwnerPrintBTreeSeqScan(Datum res)
 
 #else
 
+/*
+ * PG16 lacks the per-owner ResourceOwnerRemember API, so we fall back to
+ * RegisterResourceReleaseCallback.  The callback fires for every
+ * ResourceOwner release, so it filters by scan->resowner to only free the
+ * scan when its own binding owner is being released.
+ */
 static void
 ResOwnerReleaseBTreeSeqScanCallback(ResourceReleasePhase phase,
 									bool isCommit, bool isTopLevel, void *arg)
 {
 	BTreeSeqScan *scan = (BTreeSeqScan *) arg;
 
-	if (phase == RESOURCE_RELEASE_BEFORE_LOCKS)
-		free_btree_seq_scan_internal(scan, true);
+	if (phase != RESOURCE_RELEASE_BEFORE_LOCKS)
+		return;
+	if (scan->resowner != CurrentResourceOwner)
+		return;
+
+	/*
+	 * Unregister this callback before letting free_btree_seq_scan_internal
+	 * clear scan->resowner.  The scan itself is not pfreed here (fromResowner
+	 * skips dlist_delete/pfree and leaves cleanup to seq_scans_cleanup), and
+	 * that later pfree would leave a dangling arg pointer in the global
+	 * callback list if we did not drop the entry now.  Self-removal during
+	 * the release walk is safe: resowner.c captures the next pointer before
+	 * invoking each callback.
+	 */
+	UnregisterResourceReleaseCallback(ResOwnerReleaseBTreeSeqScanCallback,
+									  scan);
+	scan->resowner = NULL;
+	free_btree_seq_scan_internal(scan, true);
 }
 
 static void
@@ -1947,6 +1969,7 @@ ResourceOwnerRememberBTreeSeqScan(ResourceOwner owner, BTreeSeqScan *scan)
 {
 	RegisterResourceReleaseCallback(ResOwnerReleaseBTreeSeqScanCallback, scan);
 }
+
 static void
 ResourceOwnerForgetBTreeSeqScan(ResourceOwner owner, BTreeSeqScan *scan)
 {
