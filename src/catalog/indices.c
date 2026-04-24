@@ -263,6 +263,14 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 	is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
 	add_undo_truncate_relnode(oldOids, oldTrees, oldTreesNum,
 							  newOids, newTrees, newTreesNum, !is_temp);
+
+	/* Broadcast invalidation for old relnodes now, rather than waiting for
+	   btree_relnode_undo_callback().  Concurrent checkpoint can fetch old relnode
+	   and fail due to invalid pages otherwise.  */
+	for (i = 0; i < oldTreesNum; ++i)
+		o_invalidate_oids(oldTrees[i].oids);
+	o_invalidate_oids(oldOids);
+
 	pfree(oldTrees);
 	pfree(newTrees);
 }
