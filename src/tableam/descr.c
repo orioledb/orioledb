@@ -1601,6 +1601,18 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 	 */
 	if (!comparator.haveSortSupport)
 	{
+		/*
+		 * The cached OComparator (see o_add_comparator_to_cache) lives in
+		 * descrCxt, but fmgr_info() sets finfo->fn_mcxt to whatever
+		 * CurrentMemoryContext happens to be at miss time.  Misses from
+		 * o_call_comparator() during execution arrive with a transient
+		 * per-query context current; leaving fn_mcxt pointing there would
+		 * dangle once that context is reset, and the next FunctionCall (which
+		 * lazily allocates fn_extra in fn_mcxt) would touch freed memory.
+		 * Switch to descrCxt so fn_mcxt matches the cache's lifetime.
+		 */
+		MemoryContext oldcontext = MemoryContextSwitchTo(descrCxt);
+
 		procOid =
 			get_opfamily_proc(opfamily, lefttype, righttype, BTORDER_PROC);
 		if (!OidIsValid(procOid))
@@ -1620,6 +1632,8 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 							format_type_be(righttype))));
 		}
 		fmgr_info(procOid, &comparator.finfo);
+
+		MemoryContextSwitchTo(oldcontext);
 	}
 
 	return o_add_comparator_to_cache(&comparator);
@@ -1690,7 +1704,14 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 	 * Finally, look for plain comparison function.
 	 */
 	if (!comparator.haveSortSupport)
+	{
+		/* See o_find_comparator() for why we switch to descrCxt. */
+		MemoryContext oldcontext = MemoryContextSwitchTo(descrCxt);
+
 		o_proc_cache_fill_finfo(&comparator.finfo, opclass->cmpOid, opclass->key.common.datoid);
+
+		MemoryContextSwitchTo(oldcontext);
+	}
 	o_unset_syscache_hooks();
 
 	return o_add_comparator_to_cache(&comparator);
@@ -2160,6 +2181,7 @@ o_find_exclusion_op_fn(Oid exclusion_op)
 	OExclusionFn *result;
 	OExclusionFn exclusion_fn;
 	Oid			oprcode;
+	MemoryContext oldcontext;
 
 	if ((result = o_find_cached_exclusion_fn(exclusion_op)) != NULL)
 		return result;
@@ -2169,7 +2191,12 @@ o_find_exclusion_op_fn(Oid exclusion_op)
 
 	o_set_syscache_hooks();
 	oprcode = o_operator_cache_get_oprcode(exclusion_op);
+
+	/* See o_find_comparator() for why we switch to descrCxt. */
+	oldcontext = MemoryContextSwitchTo(descrCxt);
 	o_proc_cache_fill_finfo(&exclusion_fn.finfo, oprcode, MyDatabaseId);
+	MemoryContextSwitchTo(oldcontext);
+
 	o_unset_syscache_hooks();
 
 	return o_add_exclusion_fn_to_cache(&exclusion_fn);
@@ -2250,6 +2277,7 @@ o_find_hash_fn(Oid hash_fn_oid, Oid datoid)
 	};
 	OHashFn    *result;
 	OHashFn		hash_fn;
+	MemoryContext oldcontext;
 
 	if ((result = o_find_cached_hash_fn(&key)) != NULL)
 		return result;
@@ -2258,7 +2286,12 @@ o_find_hash_fn(Oid hash_fn_oid, Oid datoid)
 	hash_fn.key = key;
 
 	o_set_syscache_hooks();
+
+	/* See o_find_comparator() for why we switch to descrCxt. */
+	oldcontext = MemoryContextSwitchTo(descrCxt);
 	o_proc_cache_fill_finfo(&hash_fn.finfo, hash_fn_oid, datoid);
+	MemoryContextSwitchTo(oldcontext);
+
 	o_unset_syscache_hooks();
 
 	return o_add_hash_fn_to_cache(&hash_fn);
