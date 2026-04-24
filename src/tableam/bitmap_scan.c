@@ -851,42 +851,40 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 
 				if (o_keybitmap_test(scan->arg.bitmap, value))
 				{
-					TupleTableSlot *scan_slot;
-					MemoryContext oldcxt;
-
 					slot = node->ss.ss_ScanTupleSlot;
-					oldcxt = MemoryContextSwitchTo(slot->tts_mcxt);
-					scan_slot = MakeSingleTupleTableSlot(descr->tupdesc,
-														 &TTSOpsOrioleDB);
-					MemoryContextSwitchTo(oldcxt);
-					tts_orioledb_store_tuple(scan_slot, tuple,
+					tts_orioledb_store_tuple(slot, tuple,
 											 descr, tupleCsn,
 											 PrimaryIndexNumber,
 											 true, &hint);
 					if (scan->tbmres && scan->tbmres->recheck)
 					{
 						ExprContext *tup_econtext = bitmap_state->scan->ss->ps.ps_ExprContext;
-						ExprState  *bitmapqualorig_state;
 
-						bitmapqualorig_state = ExecInitQual(bitmap_state->bitmapqualorig, NULL);
+						/*
+						 * Initialize bitmapqualorig_state lazily on first
+						 * recheck.  Plans without lossy bitmap pages never
+						 * reach this branch, so we avoid building the
+						 * ExprState for them entirely.
+						 */
+						if (bitmap_state->bitmapqualorig_state == NULL)
+							bitmap_state->bitmapqualorig_state =
+								ExecInitQual(bitmap_state->bitmapqualorig,
+											 &node->ss.ps);
 
-						slot_getallattrs(scan_slot);
-						tup_econtext->ecxt_scantuple = scan_slot;
+						slot_getallattrs(slot);
+						tup_econtext->ecxt_scantuple = slot;
 
-						if (!ExecQual((ExprState *) bitmapqualorig_state, tup_econtext))
+						if (!ExecQual(bitmap_state->bitmapqualorig_state, tup_econtext))
 						{
-							pfree(tuple.data);
-							slot = ExecClearTuple(node->ss.ss_ScanTupleSlot);
+							ExecClearTuple(slot);
 						}
 						else
 						{
-							slot = scan_slot;
 							fetched = true;
 						}
 					}
 					else
 					{
-						slot = scan_slot;
 						fetched = true;
 					}
 				}
