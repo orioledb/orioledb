@@ -49,8 +49,11 @@ class RepeatableReadStressTest(BaseTest):
 		n_readers_pk = 6
 		n_readers_sk = 6
 		n_readers_mixed = 6
-		duration = 15.0
+		duration = 2 * 60.0
 		checkpoint_interval = 0.5
+		ddl_nemesis_interval = 0.2
+		wal_chaos_window = 0.5
+		wal_chaos_idle = 5.0
 
 		# Pre-computed references, frozen for the whole run.
 		expected_total = n_accounts * initial_balance
@@ -307,6 +310,125 @@ class RepeatableReadStressTest(BaseTest):
 					pass
 				dprint(f'[checkpointer] checkpoints={local_cp}')
 
+		def ddl_nemesis_loop():
+			# Concurrent DDL nemesis: repeatedly add and drop a
+			# nullable column on o_bank_account. ALTER TABLE takes
+			# a strong lock and must not tear readers/writers'
+			# RR snapshots or the bank-account invariants.
+			con = node.connect()
+			local_add = 0
+			local_drop = 0
+			try:
+				while not stop.is_set():
+					try:
+						con.execute(
+						    "ALTER TABLE o_bank_account "
+						    "ADD COLUMN IF NOT EXISTS nemesis_col int")
+						con.commit()
+						local_add += 1
+					except Exception:
+						try:
+							con.rollback()
+						except Exception:
+							pass
+					if stop.wait(ddl_nemesis_interval):
+						break
+					try:
+						con.execute(
+						    "ALTER TABLE o_bank_account "
+						    "DROP COLUMN IF EXISTS nemesis_col")
+						con.commit()
+						local_drop += 1
+					except Exception:
+						try:
+							con.rollback()
+						except Exception:
+							pass
+					if stop.wait(ddl_nemesis_interval):
+						break
+			finally:
+				try:
+					con.execute(
+					    "ALTER TABLE o_bank_account "
+					    "DROP COLUMN IF EXISTS nemesis_col")
+					con.commit()
+				except Exception:
+					try:
+						con.rollback()
+					except Exception:
+						pass
+				try:
+					con.close()
+				except Exception:
+					pass
+				dprint(
+				    f'[ddl-nemesis] adds={local_add} drops={local_drop}')
+
+		def wal_chaos_loop():
+			# WAL chaos nemesis: toggle the orioledb fault-injection
+			# flag on for `wal_chaos_window` seconds, then off for
+			# `wal_chaos_idle` seconds. While on, every call to
+			# add_modify_wal_record_extended raises ERROR and drives
+			# the aborting transaction through Postgres xact
+			# machinery (wal_rollback + undo apply + CSN=ABORTED).
+			# Analog of Tarantool's start_wal_chaos fiber.
+			con = node.connect()
+			local_on = 0
+			logged_error = [False]
+
+			def log_once(context, exc):
+				if not logged_error[0]:
+					logged_error[0] = True
+					dprint(
+					    f'[wal-chaos] {context} failed: {exc!r} '
+					    f'(subsequent errors suppressed)')
+
+			try:
+				while not stop.is_set():
+					if stop.wait(wal_chaos_idle):
+						break
+					try:
+						con.execute(
+						    "SELECT orioledb_inject_wal_error(true)")
+						con.commit()
+						local_on += 1
+					except Exception as e:
+						try:
+							con.rollback()
+						except Exception:
+							pass
+						log_once('enable', e)
+					if stop.wait(wal_chaos_window):
+						break
+					try:
+						con.execute(
+						    "SELECT orioledb_inject_wal_error(false)")
+						con.commit()
+					except Exception as e:
+						try:
+							con.rollback()
+						except Exception:
+							pass
+						log_once('disable', e)
+			finally:
+				# Always leave the flag off so post-run teardown
+				# (final aggregates, orioledb_tbl_check, node.stop)
+				# does not hit the injection.
+				try:
+					con.execute(
+					    "SELECT orioledb_inject_wal_error(false)")
+					con.commit()
+				except Exception:
+					try:
+						con.rollback()
+					except Exception:
+						pass
+				try:
+					con.close()
+				except Exception:
+					pass
+				dprint(f'[wal-chaos] windows={local_on}')
+
 		threads = []
 		for wid in range(1, n_writers + 1):
 			threads.append(
@@ -321,6 +443,8 @@ class RepeatableReadStressTest(BaseTest):
 			threads.append(
 			    threading.Thread(target=reader_mixed_loop, args=(rid,)))
 		threads.append(threading.Thread(target=checkpointer_loop))
+		threads.append(threading.Thread(target=ddl_nemesis_loop))
+		threads.append(threading.Thread(target=wal_chaos_loop))
 
 		for t in threads:
 			t.start()
