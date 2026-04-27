@@ -22,7 +22,7 @@
 #include "recovery/wal_record.h"
 #include "tableam/descr.h"
 #include "transam/oxid.h"
-#include "utils/fault_injection.h"
+#include "utils/injection_point.h"
 
 #include "replication/message.h"
 #include "replication/origin.h"
@@ -126,18 +126,16 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	if (OXidIsValid(recovery_oxid))
 		return;
 
-#ifdef IS_DEV
 	/*
-	 * Stress-test fault injection.  When enabled, abort the current
-	 * transaction via Postgres xact machinery (wal_rollback + undo
-	 * apply + CSN=ABORTED all happen through XACT_EVENT_ABORT).  Safe
-	 * here because we are not inside a critical section.
+	 * Stress-test injection point.  Attached via the contrib
+	 * `injection_points` extension; when configured with the
+	 * `error` action, fires elog(ERROR, ...) which goes through
+	 * Postgres xact machinery (wal_rollback + undo apply +
+	 * CSN=ABORTED via XACT_EVENT_ABORT).  Macro is a no-op unless
+	 * Postgres is built with --enable-injection-points.  Safe here
+	 * because we are not inside a critical section.
 	 */
-	if (unlikely(fault_injection_wal_error_enabled()))
-		ereport(ERROR,
-				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-				 errmsg("orioledb: injected WAL error (fault injection)")));
-#endif
+	INJECTION_POINT("orioledb-wal-modify");
 
 	if (!IS_SYS_TREE_OIDS(oids) && type == oIndexPrimary)
 	{

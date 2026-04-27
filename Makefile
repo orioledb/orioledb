@@ -88,7 +88,6 @@ OBJS = src/btree/btree.o \
 	   src/workers/bgwriter.o \
 	   src/workers/interrupt.o \
 	   src/utils/compress.o \
-	   src/utils/fault_injection.o \
 	   src/utils/o_buffers.o \
 	   src/utils/page_pool.o \
 	   src/utils/planner.o \

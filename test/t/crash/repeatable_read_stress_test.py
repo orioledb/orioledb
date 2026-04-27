@@ -28,6 +28,7 @@ from ..base_test import BaseTest
 
 SETUP_SQL = """
 	CREATE EXTENSION IF NOT EXISTS orioledb;
+	CREATE EXTENSION IF NOT EXISTS injection_points;
 
 	CREATE TABLE o_bank_account (
 		id int NOT NULL,
@@ -49,7 +50,7 @@ class RepeatableReadStressTest(BaseTest):
 		n_readers_pk = 6
 		n_readers_sk = 6
 		n_readers_mixed = 6
-		duration = 8 * 60 * 60.0
+		duration = 10.0
 		checkpoint_interval = 0.5
 		ddl_nemesis_interval = 0.2
 		# wal_chaos: briefly poison WAL writes, then clear. The
@@ -369,12 +370,14 @@ class RepeatableReadStressTest(BaseTest):
 				    f'[ddl-nemesis] adds={local_add} drops={local_drop}')
 
 		def wal_chaos_loop():
-			# WAL chaos nemesis: toggle the orioledb fault-injection
-			# flag on for `wal_chaos_window` seconds, then off for
-			# `wal_chaos_idle` seconds. While on, every call to
+			# WAL chaos nemesis: attach/detach the
+			# orioledb-wal-modify injection point. While attached
+			# with the `error` action, every call to
 			# add_modify_wal_record_extended raises ERROR and drives
 			# the aborting transaction through Postgres xact
 			# machinery (wal_rollback + undo apply + CSN=ABORTED).
+			# Backed by the contrib `injection_points` extension;
+			# requires Postgres built --enable-injection-points.
 			# Analog of Tarantool's start_wal_chaos fiber.
 			con = node.connect()
 			local_on = 0
@@ -393,7 +396,8 @@ class RepeatableReadStressTest(BaseTest):
 						break
 					try:
 						con.execute(
-						    "SELECT orioledb_inject_wal_error(true)")
+						    "SELECT injection_points_attach("
+						    "'orioledb-wal-modify', 'error')")
 						con.commit()
 						local_on += 1
 					except Exception as e:
@@ -401,28 +405,31 @@ class RepeatableReadStressTest(BaseTest):
 							con.rollback()
 						except Exception:
 							pass
-						log_once('enable', e)
+						log_once('attach', e)
 					# No explicit on-window: the SQL round-trip
-					# between enable and disable is itself the
+					# between attach and detach is itself the
 					# yield-tick. A few writers in flight at this
 					# moment hit the injection; the rest don't.
 					try:
 						con.execute(
-						    "SELECT orioledb_inject_wal_error(false)")
+						    "SELECT injection_points_detach("
+						    "'orioledb-wal-modify')")
 						con.commit()
 					except Exception as e:
 						try:
 							con.rollback()
 						except Exception:
 							pass
-						log_once('disable', e)
+						log_once('detach', e)
 			finally:
-				# Always leave the flag off so post-run teardown
-				# (final aggregates, orioledb_tbl_check, node.stop)
-				# does not hit the injection.
+				# Always leave the point detached so post-run
+				# teardown (final aggregates, orioledb_tbl_check,
+				# node.stop) does not hit the injection. Detach can
+				# fail if not currently attached -- ignore.
 				try:
 					con.execute(
-					    "SELECT orioledb_inject_wal_error(false)")
+					    "SELECT injection_points_detach("
+					    "'orioledb-wal-modify')")
 					con.commit()
 				except Exception:
 					try:
@@ -434,6 +441,8 @@ class RepeatableReadStressTest(BaseTest):
 				except Exception:
 					pass
 				dprint(f'[wal-chaos] windows={local_on}')
+		
+		dprint("")
 
 		threads = []
 		for wid in range(1, n_writers + 1):

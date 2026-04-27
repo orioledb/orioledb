@@ -46,7 +46,6 @@
 #include "utils/guc.h"
 #include "utils/memdebug.h"
 #include "utils/page_pool.h"
-#include "utils/fault_injection.h"
 #include "utils/stopevent.h"
 #include "utils/ucm.h"
 #include "workers/bgwriter.h"
@@ -219,10 +218,7 @@ static ShmemItem shmemItems[] = {
 	{s3_queue_shmem_needs, s3_queue_init_shmem},
 	{s3_workers_shmem_needs, s3_workers_init_shmem},
 	{s3_headers_shmem_needs, s3_headers_shmem_init},
-	{rewind_shmem_needs, rewind_init_shmem},
-#ifdef IS_DEV
-	{fault_injection_shmem_needs, fault_injection_shmem_init},
-#endif
+	{rewind_shmem_needs, rewind_init_shmem}
 };
 
 
