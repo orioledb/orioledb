@@ -1601,17 +1601,7 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 	 */
 	if (!comparator.haveSortSupport)
 	{
-		/*
-		 * The cached OComparator (see o_add_comparator_to_cache) lives in
-		 * descrCxt, but fmgr_info() sets finfo->fn_mcxt to whatever
-		 * CurrentMemoryContext happens to be at miss time.  Misses from
-		 * o_call_comparator() during execution arrive with a transient
-		 * per-query context current; leaving fn_mcxt pointing there would
-		 * dangle once that context is reset, and the next FunctionCall (which
-		 * lazily allocates fn_extra in fn_mcxt) would touch freed memory.
-		 * Switch to descrCxt so fn_mcxt matches the cache's lifetime.
-		 */
-		MemoryContext oldcontext = MemoryContextSwitchTo(descrCxt);
+		MemoryContext oldcontext;
 
 		procOid =
 			get_opfamily_proc(opfamily, lefttype, righttype, BTORDER_PROC);
@@ -1631,8 +1621,19 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 							format_type_be(lefttype),
 							format_type_be(righttype))));
 		}
-		fmgr_info(procOid, &comparator.finfo);
 
+		/*
+		 * The cached OComparator (see o_add_comparator_to_cache) lives in
+		 * descrCxt, but fmgr_info() sets finfo->fn_mcxt to whatever
+		 * CurrentMemoryContext happens to be at miss time.  Misses from
+		 * o_call_comparator() during execution arrive with a transient
+		 * per-query context current; leaving fn_mcxt pointing there would
+		 * dangle once that context is reset, and the next FunctionCall (which
+		 * lazily allocates fn_extra in fn_mcxt) would touch freed memory.
+		 * Switch to descrCxt so fn_mcxt matches the cache's lifetime.
+		 */
+		oldcontext = MemoryContextSwitchTo(descrCxt);
+		fmgr_info(procOid, &comparator.finfo);
 		MemoryContextSwitchTo(oldcontext);
 	}
 
