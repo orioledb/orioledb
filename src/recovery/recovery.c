@@ -1094,8 +1094,8 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 		 "Recovery target reached: start synchronization barrier "
 		 "(target=%d action=%d stop_after=%d stop_xid=%u stop_lsn=%X/%X "
 		 "record_ptr=%X/%X record_end_ptr=%X/%X target_ptr=%X/%X)",
-		 info->recoveryTarget,
-		 info->recoveryTargetAction,
+		 recoveryTarget,
+		 recoveryTargetAction,
 		 info->recoveryStopAfter,
 		 info->recoveryStopXid,
 		 LSN_FORMAT_ARGS(info->recoveryStopLSN),
