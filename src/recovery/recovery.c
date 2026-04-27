@@ -1074,7 +1074,7 @@ orioledb_recovery_stops_before_hook(XLogReaderState *record,
 void
 orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 {
-	XLogRecPtr	target_ptr = InvalidXLogRecPtr;
+	XLogRecPtr	target_ptr;
 
 	Assert(info);
 
@@ -1087,8 +1087,7 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 	 *   target state, so replay/finalization must catch up through that
 	 *   boundary before PostgreSQL exposes the target-reached state.
 	 */
-	if (XLogRecPtrIsValid(info->recordPtr))
-		target_ptr = info->recordPtr;
+	target_ptr = info->recordPtr;
 
 	elog(DEBUG4,
 		 "Recovery target reached: start synchronization barrier "
