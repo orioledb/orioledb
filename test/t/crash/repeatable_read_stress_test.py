@@ -49,11 +49,15 @@ class RepeatableReadStressTest(BaseTest):
 		n_readers_pk = 6
 		n_readers_sk = 6
 		n_readers_mixed = 6
-		duration = 2 * 60.0
+		duration = 8 * 60 * 60.0
 		checkpoint_interval = 0.5
 		ddl_nemesis_interval = 0.2
-		wal_chaos_window = 0.5
-		wal_chaos_idle = 5.0
+		# wal_chaos: briefly poison WAL writes, then clear. The
+		# "on" window is implicitly the SQL round-trip between
+		# enable/disable (~hundreds of μs), matching Tarantool's
+		# fiber.yield()-tick injection pattern. Idle gap controls
+		# the chaos frequency.
+		wal_chaos_idle = 0.1
 
 		# Pre-computed references, frozen for the whole run.
 		expected_total = n_accounts * initial_balance
@@ -398,8 +402,10 @@ class RepeatableReadStressTest(BaseTest):
 						except Exception:
 							pass
 						log_once('enable', e)
-					if stop.wait(wal_chaos_window):
-						break
+					# No explicit on-window: the SQL round-trip
+					# between enable and disable is itself the
+					# yield-tick. A few writers in flight at this
+					# moment hit the injection; the rest don't.
 					try:
 						con.execute(
 						    "SELECT orioledb_inject_wal_error(false)")
