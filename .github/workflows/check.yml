@@ -158,6 +158,8 @@ jobs:
             ./orioledb/test/tmp_check_iso/log/*log
             ./postgresql/pg.log
             ./postgresql/rep_pg.log
+            ./postgresql/src/test/**/tmp_check/*.dump
+            ./postgresql/src/test/**/tmp_check/log/*
           retention-days: 2
           if-no-files-found: ignore
 
