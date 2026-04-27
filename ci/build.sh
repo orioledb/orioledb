@@ -23,6 +23,12 @@ else
     CONFIG_ARGS="--enable-debug --enable-cassert --enable-tap-tests --with-icu --prefix=$GITHUB_WORKSPACE/pgsql"
 fi
 
+# pg_tests run TAP suites (recovery/041, /046, /047, …) that skip without
+# injection-point support, so opt in for that check type.
+if [ $CHECK_TYPE = "pg_tests" ]; then
+	CONFIG_ARGS="$CONFIG_ARGS --enable-injection-points"
+fi
+
 cd postgresql
 ./configure $CONFIG_ARGS
 if printf "%s\n" "$PGTAG" | grep -v -Fqe "patches$(sed -n "/PACKAGE_VERSION='\(.*\)'/ s//\1/ p" configure | cut -d'.' -f1 )_"; then \
