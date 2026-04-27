@@ -1094,6 +1094,12 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 		 LSN_FORMAT_ARGS(info->recordEndPtr),
 		 LSN_FORMAT_ARGS(target_ptr));
 
+	/*
+	 * PerformWalRecovery() invokes this hook for the WAL record that caused
+	 * recovery to stop, so recordPtr is expected to be a valid stop boundary.
+	 */
+	Assert(XLogRecPtrIsValid(target_ptr));
+
 	while (true)
 	{
 		XLogRecPtr	current_ptr = recovery_get_current_ptr();
@@ -1125,7 +1131,7 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 			 LSN_FORMAT_ARGS(retain_ptr),
 			 LSN_FORMAT_ARGS(finished_ptr));
 
-		if (XLogRecPtrIsValid(target_ptr) && current_ptr < target_ptr)
+		if (current_ptr < target_ptr)
 		{
 			elog(DEBUG4,
 					"Recovery target reached: waiting for replay progress to "
@@ -1143,7 +1149,7 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 				 LSN_FORMAT_ARGS(current_ptr),
 				 LSN_FORMAT_ARGS(retain_ptr));
 		}
-		else if (XLogRecPtrIsValid(target_ptr) && finished_ptr < target_ptr)
+		else if (finished_ptr < target_ptr)
 		{
 			elog(DEBUG4,
 				 "Recovery target reached: waiting for deferred finalization "
