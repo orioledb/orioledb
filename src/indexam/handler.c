@@ -1559,6 +1559,17 @@ fill_hitup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		scan->xs_hitup = NULL;
 	}
 	scan->xs_hitup = ExecCopySlotHeapTuple(slot);
+
+	/*
+	 * ExecCopySlotHeapTuple above produced an independent HeapTuple, and
+	 * o_new_rowid() (called via slot_getsysattr) already palloc'd its own
+	 * bytea, so neither xs_hitup nor xs_rowid retains a reference to the
+	 * source tuple buffer.  Detach the slot from tuple.data and free it,
+	 * otherwise the buffer would accumulate in es_query_cxt across scan
+	 * iterations.
+	 */
+	ExecClearTuple(slot);
+	pfree(tuple.data);
 }
 
 /* Search all duplicates with same original attrnum */
@@ -1822,6 +1833,17 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 	scan->xs_itup = index_form_tuple(index_descr->itupdesc, slot->tts_values, slot->tts_isnull);
 
 	ItemPointerCopy(&slot->tts_tid, &scan->xs_itup->t_tid);
+
+	/*
+	 * index_form_tuple above produced an independent IndexTuple by copying
+	 * each Datum from slot->tts_values (varlenas are deep-copied by
+	 * heap_compute_data_size/heap_fill_tuple), and o_new_rowid() palloc'd its
+	 * own bytea for xs_rowid.  Neither holds a reference to the source tuple
+	 * buffer anymore.  Detach the slot from tuple.data and free the buffer;
+	 * otherwise it would accumulate in es_query_cxt across scan iterations.
+	 */
+	ExecClearTuple(slot);
+	pfree(tuple.data);
 }
 
 
