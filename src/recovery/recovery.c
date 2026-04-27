@@ -1079,25 +1079,17 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 	Assert(info);
 
 	/*
-	 * recordPtr is the most useful explicit stop boundary for both cases:
-	 * - for stop-before semantics it is the start of the record that must not
-	 *   become visible yet, so Oriole must at least catch up to the boundary
-	 *   immediately before it;
-	 * - for stop-after semantics it is the record that belongs to the visible
-	 *   target state, so replay/finalization must catch up through that
-	 *   boundary before PostgreSQL exposes the target-reached state.
+	 * Use PostgreSQL's stop-record boundary directly.  This gives Oriole an
+	 * explicit replay/publication target associated with the recovery stop
+	 * decision, instead of relying only on generic replay-progress pointers.
 	 */
 	target_ptr = info->recordPtr;
 
 	elog(DEBUG4,
 		 "Recovery target reached: start synchronization barrier "
-		 "(target=%d action=%d stop_after=%d stop_xid=%u stop_lsn=%X/%X "
-		 "record_ptr=%X/%X record_end_ptr=%X/%X target_ptr=%X/%X)",
+		 "(target=%d action=%d record_ptr=%X/%X record_end_ptr=%X/%X target_ptr=%X/%X)",
 		 recoveryTarget,
 		 recoveryTargetAction,
-		 info->recoveryStopAfter,
-		 info->recoveryStopXid,
-		 LSN_FORMAT_ARGS(info->recoveryStopLSN),
 		 LSN_FORMAT_ARGS(info->recordPtr),
 		 LSN_FORMAT_ARGS(info->recordEndPtr),
 		 LSN_FORMAT_ARGS(target_ptr));
@@ -1119,13 +1111,10 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 
 		/*
 		 * Wait in three stages:
-		 * 1. replay progress must reach the stop boundary itself;
+		 * 1. replay progress must reach the explicit stop boundary itself;
 		 * 2. retain/undo bookkeeping must catch up to the same replay point;
 		 * 3. deferred finalization must be globally published up to that
 		 *    boundary.
-		 *
-		 * If target_ptr is not set, fall back to requiring the internal
-		 * Oriole boundaries to converge on the current replay progress.
 		 */
 		elog(DEBUG4,
 			 "Recovery target reached: boundary snapshot after startup-side "
