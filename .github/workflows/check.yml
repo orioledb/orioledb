@@ -15,21 +15,28 @@ jobs:
         run: |
           import os, json
 
-          # Stress matrix: 64 parallel runs of a single (amd64, 17, clang,
-          # pg_tests) configuration to chase a flaky failure in
-          # 027_stream_regress.pl.  The "run" key only exists to keep
-          # matrix entries unique; workflow steps don't read it other than
-          # for artifact names.
+          # Stress matrix: 4 (cpu, pg_version, compiler) combinations
+          # x 16 repetitions = 64 parallel pg_tests jobs, to chase a
+          # flaky failure in 027_stream_regress.pl.  The "run" key only
+          # exists to keep matrix entries unique; workflow steps don't
+          # read it other than for artifact names.
+          combos = [
+              ("amd64", 16, "gcc"),
+              ("amd64", 17, "clang"),
+              ("arm64", 16, "clang"),
+              ("arm64", 17, "gcc"),
+          ]
           matrix = {
               "include": [
                   {
-                      "cpu": "amd64",
-                      "pg_version": 17,
-                      "compiler": "clang",
+                      "cpu": c,
+                      "pg_version": pg,
+                      "compiler": comp,
                       "check_type": "pg_tests",
                       "run": i,
                   }
-                  for i in range(64)
+                  for (c, pg, comp) in combos
+                  for i in range(16)
               ]
           }
 
