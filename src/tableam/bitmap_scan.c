@@ -206,6 +206,28 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 	ostate.scanDir = ForwardScanDirection;
 	ostate.indexQuals = bitmap_ix_scan->indexqual;
 	ResetExprContext(econtext);
+
+	/*
+	 * ExecIndexBuildScanKeys() (called from init_index_scan_state below)
+	 * palloc's fresh scan-key and runtime-key arrays and assigns them via the
+	 * **scanKeys / **runtimeKeys output pointers, overwriting whatever was
+	 * there before without pfree'ing it.  Each call to this function happens
+	 * once per SubPlan execution, so leftover arrays from prior runs would
+	 * accumulate in the per-query context for the lifetime of the query. Free
+	 * the previous ones here.
+	 */
+	if (node->biss_ScanKeys)
+	{
+		pfree(node->biss_ScanKeys);
+		node->biss_ScanKeys = NULL;
+	}
+	if (node->biss_RuntimeKeys)
+	{
+		pfree(node->biss_RuntimeKeys);
+		node->biss_RuntimeKeys = NULL;
+		node->biss_NumRuntimeKeys = 0;
+	}
+
 	init_index_scan_state(&bitmap_state->o_plan_state, &ostate, index, econtext,
 						  &node->biss_RuntimeKeys,
 						  &node->biss_NumRuntimeKeys,
@@ -315,12 +337,35 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 				}
 			}
 			nTuples += 1;
+
+			/*
+			 * o_iterate_index() palloc'd tuple.data in mcxt
+			 * (ss_ScanTupleSlot->tts_mcxt = the per-query context).  We've
+			 * already extracted everything we need into the bitmap / tbm
+			 * result, so release the buffer; otherwise it would accumulate
+			 * across all tuples this index scan visits and balloon
+			 * ExecutorState on SubPlan-heavy queries that re-build the bitmap
+			 * many times.
+			 */
+			pfree(tuple.data);
 		}
 	} while (!O_TUPLE_IS_NULL(tuple));
 
 	if (ostate.iterator)
 		btree_iterator_free(ostate.iterator);
 	MemoryContextReset(ostate.cxt);
+
+	/*
+	 * init_index_scan_state() above called btbeginscan(), which palloc'd a
+	 * BTScanOpaque (and, lazily, currTuples / arrayContext / keyData) and
+	 * stashed it in ostate.scandesc.opaque.  The IndexScanDesc itself was
+	 * pfree'd inside init_index_scan_state(), but its private workspace
+	 * survives there.  Without a matching btendscan() that workspace —
+	 * including the 16KB currTuples buffer btree allocates on demand —
+	 * would accumulate in the per-query context for every call (one per
+	 * SubPlan execution that goes through bitmap heap scan).
+	 */
+	btendscan(&ostate.scandesc);
 
 	ea_counters = prev_ea_counters;
 	return nTuples;
@@ -815,6 +860,19 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 
 		fetched = false;
 
+		/*
+		 * Reset per-tuple memory before each iteration.  PG's ExecCustomScan
+		 * just delegates to the AM's callback without wrapping in ExecScan,
+		 * so the standard per-tuple reset that ExecScan performs between
+		 * fetch attempts doesn't run here.  Without this, every qual
+		 * evaluation (especially ones with SubPlans, e.g. the TPC-C
+		 * consistency-check #10 join, where each candidate row triggers
+		 * subplan executions) accumulates intermediate values in
+		 * ps_ExprContext->ecxt_per_tuple_memory and ExecutorState grows for
+		 * the whole duration of the scan node.
+		 */
+		ResetExprContext(node->ss.ps.ps_ExprContext);
+
 		if (scan->tbmiterator != NULL && scan->tbmres == NULL)
 		{
 			scan->tbmres = tbm_iterate(scan->tbmiterator);
@@ -887,6 +945,18 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 					{
 						fetched = true;
 					}
+				}
+				else
+				{
+					/*
+					 * Row's primary key is not in the bitmap, so this version
+					 * isn't part of the result.  btree_seq_scan_getnext()
+					 * palloc'd tuple.data in tupleCxt = ss_ScanTupleSlot's
+					 * tts_mcxt (the per-query context) and we are not handing
+					 * it to the slot, so it would otherwise accumulate there
+					 * for every rejected primary row until end of query.
+					 */
+					pfree(tuple.data);
 				}
 
 				if (scan->tbmres)
