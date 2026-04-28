@@ -97,7 +97,7 @@
  * As said above, these values are not checked if ORIOLEDB_BINARY_VERSION is different, so each of
  * these values makes sense only within one ORIOLEDB_BINARY_VERSION value.
  */
-#define ORIOLEDB_VERSION "OrioleDB public beta 15"
+#define ORIOLEDB_VERSION "OrioleDB pre beta 16"
 #define ORIOLEDB_BINARY_VERSION 9
 #define ORIOLEDB_SYS_TREE_VERSION	1	/* Version of system catalog */
 #define ORIOLEDB_PAGE_VERSION		1	/* Version of binary page format */
