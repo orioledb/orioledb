@@ -406,7 +406,7 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 				getTypeOutputInfo(id->nonLeafTupdesc->attrs[i].atttypid,
 								  &typoutput, &typisvarlena);
 				res = OidOutputFunctionCall(typoutput, value);
-				appendStringInfo(str, "'%s'", res);
+				appendStringInfo(str, "%s", res);
 			}
 		}
 		appendStringInfo(str, ")");

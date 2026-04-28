@@ -89,7 +89,7 @@ SELECT * FROM o_test_ioc1 ORDER BY id1;
 
 INSERT INTO o_test_ioc1 VALUES (3, 15);
 ERROR:  duplicate key value violates unique constraint "o_test_ioc1_id1_key"
-DETAIL:  Key (id1)=('3') already exists.
+DETAIL:  Key (id1)=(3) already exists.
 SELECT * FROM o_test_ioc1 ORDER BY id1;
  id1 | id2 
 -----+-----
@@ -101,7 +101,7 @@ SELECT * FROM o_test_ioc1 ORDER BY id1;
 
 INSERT INTO o_test_ioc1 VALUES (3, 14);
 ERROR:  duplicate key value violates unique constraint "o_test_ioc1_id1_key"
-DETAIL:  Key (id1)=('3') already exists.
+DETAIL:  Key (id1)=(3) already exists.
 SELECT * FROM o_test_ioc1 ORDER BY id1;
  id1 | id2 
 -----+-----
@@ -172,7 +172,7 @@ SELECT * FROM ranges0;
 -- fail, overlaps
 INSERT INTO ranges0 VALUES('D', -5, '62');
 ERROR:  duplicate key value violates unique constraint "ranges0_ix1"
-DETAIL:  Key (c1)=('-5') already exists.
+DETAIL:  Key (c1)=(-5) already exists.
 SELECT * FROM ranges0;
  t1 | c1 | c2 
 ----+----+----
@@ -320,7 +320,7 @@ BEGIN;
 -- default is immediate so this should fail right away
 UPDATE unique_tbl SET i = 1 WHERE i = 0;
 ERROR:  duplicate key value violates unique constraint "unique_tbl_i_key"
-DETAIL:  Key (i)=('1') already exists.
+DETAIL:  Key (i)=(1) already exists.
 ROLLBACK;
 -- check is done at end of statement, so this should succeed
 UPDATE unique_tbl SET i = i+1;
@@ -398,13 +398,13 @@ BEGIN;
 INSERT INTO unique_tbl VALUES (3, 'Three'); -- should succeed for now
 COMMIT; -- should fail
 ERROR:  duplicate key value violates unique constraint "unique_tbl_i_key"
-DETAIL:  Key (i)=('3') already exists.
+DETAIL:  Key (i)=(3) already exists.
 -- make constraint check immediate
 BEGIN;
 SET CONSTRAINTS ALL IMMEDIATE;
 INSERT INTO unique_tbl VALUES (3, 'Three'); -- should fail
 ERROR:  duplicate key value violates unique constraint "unique_tbl_i_key"
-DETAIL:  Key (i)=('3') already exists.
+DETAIL:  Key (i)=(3) already exists.
 COMMIT;
 -- forced check when SET CONSTRAINTS is called
 BEGIN;
@@ -412,7 +412,7 @@ SET CONSTRAINTS ALL DEFERRED;
 INSERT INTO unique_tbl VALUES (3, 'Three'); -- should succeed for now
 SET CONSTRAINTS ALL IMMEDIATE; -- should fail
 ERROR:  duplicate key value violates unique constraint "unique_tbl_i_key"
-DETAIL:  Key (i)=('3') already exists.
+DETAIL:  Key (i)=(3) already exists.
 COMMIT;
 CREATE TABLE deferred_excl (
   f1 int,
@@ -775,13 +775,13 @@ BEGIN;
 INSERT INTO ib_unique_tbl VALUES (3, 'Three'); -- should succeed for now
 COMMIT; -- should fail
 ERROR:  duplicate key value violates unique constraint "ib_unique_tbl_i_key"
-DETAIL:  Key (i)=('3') already exists.
+DETAIL:  Key (i)=(3) already exists.
 -- make constraint check immediate
 BEGIN;
 SET CONSTRAINTS ALL IMMEDIATE;
 INSERT INTO ib_unique_tbl VALUES (3, 'Three'); -- should fail
 ERROR:  duplicate key value violates unique constraint "ib_unique_tbl_i_key"
-DETAIL:  Key (i)=('3') already exists.
+DETAIL:  Key (i)=(3) already exists.
 COMMIT;
 -- forced check when SET CONSTRAINTS is called
 BEGIN;
@@ -789,7 +789,7 @@ SET CONSTRAINTS ALL DEFERRED;
 INSERT INTO ib_unique_tbl VALUES (3, 'Three'); -- should succeed for now
 SET CONSTRAINTS ALL IMMEDIATE; -- should fail
 ERROR:  duplicate key value violates unique constraint "ib_unique_tbl_i_key"
-DETAIL:  Key (i)=('3') already exists.
+DETAIL:  Key (i)=(3) already exists.
 COMMIT;
 CREATE TABLE ib_deferred_excl (
   f1 int,
