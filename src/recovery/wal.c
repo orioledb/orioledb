@@ -126,17 +126,6 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	if (OXidIsValid(recovery_oxid))
 		return;
 
-	/*
-	 * Stress-test injection point.  Attached via the contrib
-	 * `injection_points` extension; when configured with the
-	 * `error` action, fires elog(ERROR, ...) which goes through
-	 * Postgres xact machinery (wal_rollback + undo apply +
-	 * CSN=ABORTED via XACT_EVENT_ABORT).  Macro is a no-op unless
-	 * Postgres is built with --enable-injection-points.  Safe here
-	 * because we are not inside a critical section.
-	 */
-	INJECTION_POINT("orioledb-wal-modify");
-
 	if (!IS_SYS_TREE_OIDS(oids) && type == oIndexPrimary)
 	{
 		OIndexDescr *id = (OIndexDescr *) desc->arg;
@@ -683,6 +672,18 @@ flush_local_wal(bool isCommit, bool withXactTime)
 	Assert(length > 0);
 
 	/*
+	 * Stress-test injection point.  This is the OrioleDB equivalent
+	 * of XLogInsert: every flushed batch of WAL records funnels
+	 * through here on its way into Postgres XLog.  Gated by
+	 * isCommit so we do not fire inside the rollback path's own
+	 * flush -- that would re-enter the abort machinery and PANIC.
+	 * Macro is a no-op unless Postgres is built with
+	 * --enable-injection-points.
+	 */
+	if (isCommit)
+		INJECTION_POINT("orioledb-wal-flush");
+
+	/*
 	 * Put the xlog location of our commit record to the shared memory.  This
 	 * will help concurrent checkpointer to wait till we do
 	 * write_to_xids_queue().
@@ -711,6 +712,14 @@ flush_local_wal_if_needed(int required_length)
 	Assert(!is_recovery_process());
 	if (local_wal_buffer_offset + required_length + XID_RESERVED_LENGTH > LOCAL_WAL_BUFFER_SIZE)
 	{
+		/*
+		 * Buffer-overflow flush during normal DML.  Same injection
+		 * point as the commit-time flush; safe here unconditionally
+		 * because this branch runs only mid-tx, never during
+		 * rollback processing.
+		 */
+		INJECTION_POINT("orioledb-wal-flush");
+
 		elog(DEBUG4, "[%s] Going to FLUSH WAL on local WAL buffer overflow", __func__);
 		log_logical_wal_container(local_wal_buffer, local_wal_buffer_offset,
 								  false);
