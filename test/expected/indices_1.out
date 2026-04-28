@@ -468,11 +468,11 @@ SELECT * FROM o_test55 WHERE key = 1;
 -- fails, secondary unique index contains key = 1
 INSERT INTO o_test55 VALUES (1, 3);
 ERROR:  duplicate key value violates unique constraint "o_test55_uniq"
-DETAIL:  Key (key)=('1') already exists.
+DETAIL:  Key (key)=(1) already exists.
 -- fails, primary index contains value = 2;
 INSERT INTO o_test55 VALUES (3, 2);
 ERROR:  duplicate key value violates unique constraint "o_test55_pkey"
-DETAIL:  Key (value)=('2') already exists.
+DETAIL:  Key (value)=(2) already exists.
 -- success
 INSERT INTO o_test55 VALUES (3, 4);
 ANALYZE o_test55;
@@ -539,11 +539,11 @@ SELECT * FROM o_test56 WHERE value = 3;
 -- fails, primary index contains key = 3;
 UPDATE o_test56 SET key = 3 WHERE value = 1;
 ERROR:  duplicate key value violates unique constraint "o_test56_pkey"
-DETAIL:  Key (key)=('3') already exists.
+DETAIL:  Key (key)=(3) already exists.
 -- fails, secondary unique index contains value = 3;
 UPDATE o_test56 SET value = 3 WHERE value = 1;
 ERROR:  duplicate key value violates unique constraint "o_test56_uniq"
-DETAIL:  Key (value)=('3') already exists.
+DETAIL:  Key (value)=(3) already exists.
 -- success
 UPDATE o_test56 SET value = 2 WHERE value = 3;
 UPDATE o_test56 SET key = 2 WHERE key = 1;
@@ -7218,7 +7218,7 @@ SELECT * FROM o_test_unique_expr;
 
 INSERT INTO o_test_unique_expr VALUES (2, 'a', 1, 1);
 ERROR:  duplicate key value violates unique constraint "o_test_unique_expr_ix2"
-DETAIL:  Key (lower(val_2))=('a') already exists.
+DETAIL:  Key (lower(val_2))=(a) already exists.
 SELECT * FROM o_test_unique_expr;
  val_1 | val_2 | val_3 | val_4 
 -------+-------+-------+-------
@@ -7235,7 +7235,7 @@ SELECT * FROM o_test_unique_expr;
 
 INSERT INTO o_test_unique_expr VALUES (3, 'c', 2, 1);
 ERROR:  duplicate key value violates unique constraint "o_test_unique_expr_ix3"
-DETAIL:  Key (abs(val_3), val_4)=('2', '1') already exists.
+DETAIL:  Key (abs(val_3), val_4)=(2, 1) already exists.
 SELECT * FROM o_test_unique_expr;
  val_1 | val_2 | val_3 | val_4 
 -------+-------+-------+-------
@@ -8165,7 +8165,7 @@ CREATE TABLE o_test_duplicate_error (
 INSERT INTO o_test_duplicate_error VALUES (1, 2, 3, 4);
 INSERT INTO o_test_duplicate_error VALUES (1, 2, 5, 6);
 ERROR:  duplicate key value violates unique constraint "o_test_duplicate_error_pkey"
-DETAIL:  Key (val_1, val_2)=('1', '2') already exists.
+DETAIL:  Key (val_1, val_2)=(1, 2) already exists.
 CREATE TABLE o_test_drop_add_primary (
 	val_1 int,
 	val_2 int,
@@ -8706,7 +8706,7 @@ WHERE conrelid = 'o_test_add_index_constraint'::regclass;
 INSERT INTO o_test_add_index_constraint VALUES (4, 'four');  -- Should succeed
 INSERT INTO o_test_add_index_constraint VALUES (1, 'duplicate');  -- Should fail (PK violation)
 ERROR:  duplicate key value violates unique constraint "o_test_pk"
-DETAIL:  Key (id)=('1') already exists.
+DETAIL:  Key (id)=(1) already exists.
 -- Create a unique index on val column
 CREATE UNIQUE INDEX o_test_idx_val ON o_test_add_index_constraint(val);
 -- Check state before adding UNIQUE constraint
@@ -8736,7 +8736,7 @@ WHERE conrelid = 'o_test_add_index_constraint'::regclass;
 INSERT INTO o_test_add_index_constraint VALUES (5, 'five');  -- Should succeed
 INSERT INTO o_test_add_index_constraint VALUES (6, 'one');  -- Should fail (UNIQUE violation)
 ERROR:  duplicate key value violates unique constraint "o_test_uq"
-DETAIL:  Key (val)=('one') already exists.
+DETAIL:  Key (val)=(one) already exists.
 -- Cleanup
 DROP TABLE o_test_add_index_constraint CASCADE;
 SELECT orioledb_parallel_debug_stop();
