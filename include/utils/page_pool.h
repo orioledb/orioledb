@@ -58,7 +58,7 @@ struct OPagePool
 	pg_prng_state prngSeed;
 };
 
-extern bool ppool_run_clock_active;
+extern int	ppool_run_clock_depth;
 
 extern Size ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug);
 extern void ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found);
