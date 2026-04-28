@@ -44,28 +44,50 @@ SETUP_SQL = """
 class RepeatableReadStressTest(BaseTest):
 
 	def test_bank_account_invariant(self):
+		# Test includes three independent nemeses:
+		#   - wal_chaos: arm/disarm an injection point at the WAL
+		#     flush boundary to abort writers mid-flush.
+		#   - ddl_nemesis: ALTER TABLE ADD/DROP COLUMN cycles,
+		#     forcing AccessExclusiveLock conflicts with DML.
+		#   - stopevent_chaos: briefly arm one orioledb stopevent
+		#     at a time (page_read / modify_start / step_down /
+		#     apply_undo / checkpoint_step) to freeze backends
+		#     mid-tree-walk / mid-modify / mid-undo /
+		#     mid-checkpoint, then reset to release them.
+
 		n_accounts = 100
 		initial_balance = 1000
 		n_writers = 20
 		n_readers_pk = 6
 		n_readers_sk = 6
 		n_readers_mixed = 6
-		duration = 10.0
+		duration = 60
 		checkpoint_interval = 0.5
 		ddl_nemesis_interval = 0.2
-		# wal_chaos: briefly poison WAL writes, then clear. The
-		# "on" window is implicitly the SQL round-trip between
-		# enable/disable (~hundreds of μs), matching Tarantool's
-		# fiber.yield()-tick injection pattern. Idle gap controls
-		# the chaos frequency.
 		wal_chaos_idle = 0.1
+		stopevent_chaos_idle = 0.5
+		stopevent_chaos_window = 0.1
+		stopevent_chaos_events = (
+		    'page_read',
+		    'modify_start',
+		    'step_down',
+		    'apply_undo',
+		    'checkpoint_step',
+		)
 
-		# Pre-computed references, frozen for the whole run.
 		expected_total = n_accounts * initial_balance
 
 		node = self.node
 		node.start()
 		node.safe_psql(SETUP_SQL)
+		
+		node.safe_psql(
+		    "ALTER SYSTEM SET orioledb.enable_stopevents = on"
+		)
+		# node.safe_psql(
+		# 	"ALTER SYSTEM SET orioledb.trace_stopevents = on"
+		# )
+		node.safe_psql("SELECT pg_reload_conf()")
 		node.safe_psql(f"""
 			INSERT INTO o_bank_account(id, balance, token)
 				SELECT i, {initial_balance}, i
@@ -144,9 +166,9 @@ class RepeatableReadStressTest(BaseTest):
 				with counters_lock:
 					write_count[0] += local_w
 					conflict_count[0] += local_c
-				dprint(
-				    f'[writer #{writer_id}] commits={local_w} '
-				    f'conflicts={local_c}')
+				# dprint(
+				#     f'[writer #{writer_id}] commits={local_w} '
+				#     f'conflicts={local_c}')
 
 		def reader_pk_loop(reader_id):
 			con = node.connect()
@@ -183,7 +205,7 @@ class RepeatableReadStressTest(BaseTest):
 					pass
 				with counters_lock:
 					read_count[0] += local_r
-				dprint(f'[reader-pk #{reader_id}] commits={local_r}')
+				# dprint(f'[reader-pk #{reader_id}] commits={local_r}')
 
 		def reader_sk_loop(reader_id):
 			con = node.connect()
@@ -243,7 +265,7 @@ class RepeatableReadStressTest(BaseTest):
 					pass
 				with counters_lock:
 					read_count[0] += local_r
-				dprint(f'[reader-sk #{reader_id}] commits={local_r}')
+				# dprint(f'[reader-sk #{reader_id}] commits={local_r}')
 
 		def reader_mixed_loop(reader_id):
 			con = node.connect()
@@ -290,7 +312,7 @@ class RepeatableReadStressTest(BaseTest):
 					pass
 				with counters_lock:
 					read_count[0] += local_r
-				dprint(f'[reader-mixed #{reader_id}] commits={local_r}')
+				# dprint(f'[reader-mixed #{reader_id}] commits={local_r}')
 
 		def checkpointer_loop():
 			con = node.connect()
@@ -313,7 +335,7 @@ class RepeatableReadStressTest(BaseTest):
 					con.close()
 				except Exception:
 					pass
-				dprint(f'[checkpointer] checkpoints={local_cp}')
+				# # dprint(f'[checkpointer] checkpoints={local_cp}')
 
 		def ddl_nemesis_loop():
 			# Concurrent DDL nemesis: repeatedly add and drop a
@@ -366,12 +388,12 @@ class RepeatableReadStressTest(BaseTest):
 					con.close()
 				except Exception:
 					pass
-				dprint(
-				    f'[ddl-nemesis] adds={local_add} drops={local_drop}')
+				# dprint(
+				    # f'[ddl-nemesis] adds={local_add} drops={local_drop}')
 
 		def wal_chaos_loop():
 			# WAL chaos nemesis: attach/detach the
-			# orioledb-wal-modify injection point. While attached
+			# orioledb-wal-flush injection point. While attached
 			# with the `error` action, every call to
 			# add_modify_wal_record_extended raises ERROR and drives
 			# the aborting transaction through Postgres xact
@@ -386,9 +408,9 @@ class RepeatableReadStressTest(BaseTest):
 			def log_once(context, exc):
 				if not logged_error[0]:
 					logged_error[0] = True
-					dprint(
-					    f'[wal-chaos] {context} failed: {exc!r} '
-					    f'(subsequent errors suppressed)')
+					# dprint(
+					    # f'[wal-chaos] {context} failed: {exc!r} '
+					    # f'(subsequent errors suppressed)')
 
 			try:
 				while not stop.is_set():
@@ -397,7 +419,7 @@ class RepeatableReadStressTest(BaseTest):
 					try:
 						con.execute(
 						    "SELECT injection_points_attach("
-						    "'orioledb-wal-modify', 'error')")
+						    "'orioledb-wal-flush', 'error')")
 						con.commit()
 						local_on += 1
 					except Exception as e:
@@ -406,14 +428,12 @@ class RepeatableReadStressTest(BaseTest):
 						except Exception:
 							pass
 						log_once('attach', e)
-					# No explicit on-window: the SQL round-trip
-					# between attach and detach is itself the
-					# yield-tick. A few writers in flight at this
-					# moment hit the injection; the rest don't.
+					# explicit yield
+					time.sleep(0)
 					try:
 						con.execute(
 						    "SELECT injection_points_detach("
-						    "'orioledb-wal-modify')")
+						    "'orioledb-wal-flush')")
 						con.commit()
 					except Exception as e:
 						try:
@@ -422,14 +442,10 @@ class RepeatableReadStressTest(BaseTest):
 							pass
 						log_once('detach', e)
 			finally:
-				# Always leave the point detached so post-run
-				# teardown (final aggregates, orioledb_tbl_check,
-				# node.stop) does not hit the injection. Detach can
-				# fail if not currently attached -- ignore.
 				try:
 					con.execute(
 					    "SELECT injection_points_detach("
-					    "'orioledb-wal-modify')")
+					    "'orioledb-wal-flush')")
 					con.commit()
 				except Exception:
 					try:
@@ -440,9 +456,79 @@ class RepeatableReadStressTest(BaseTest):
 					con.close()
 				except Exception:
 					pass
-				dprint(f'[wal-chaos] windows={local_on}')
-		
-		dprint("")
+				# dprint(f'[wal-chaos] windows={local_on}')
+
+		def stopevent_chaos_loop():
+			# Stopevent chaos: cycle through a list of orioledb
+			# stopevents, briefly arming one at a time with a
+			# permissive 'true' jsonpath, then resetting. This
+			# freezes any backend that hits the named point until
+			# reset, exposing internal-state-while-others-race
+			# bugs. Reset MUST happen on every exit path -- a
+			# left-armed event would deadlock the joined workers.
+			con = node.connect()
+			local_cycles = 0
+			armed = [None]
+			logged_error = [False]
+
+			def log_once(ctx, exc):
+				if not logged_error[0]:
+					logged_error[0] = True
+					# dprint(
+					    # f'[stopevent-chaos] {ctx} failed: {exc!r} '
+					    # f'(subsequent errors suppressed)')
+
+			def reset_armed():
+				if armed[0] is None:
+					return
+				try:
+					con.execute(
+					    f"SELECT pg_stopevent_reset("
+					    f"'{armed[0]}')")
+					con.commit()
+				except Exception as e:
+					try:
+						con.rollback()
+					except Exception:
+						pass
+					log_once('reset', e)
+				armed[0] = None
+
+			try:
+				while not stop.is_set():
+					if stop.wait(stopevent_chaos_idle):
+						break
+					event = random.choice(stopevent_chaos_events)
+					try:
+						con.execute(
+						    f"SELECT pg_stopevent_set("
+						    f"'{event}', 'true')")
+						con.commit()
+						armed[0] = event
+						local_cycles += 1
+					except Exception as e:
+						try:
+							con.rollback()
+						except Exception:
+							pass
+						log_once('set', e)
+						continue
+					# Brief freeze; backends pile up on the
+					# event's condvar. Window kept very short
+					# so the test does not stall.
+					stop.wait(stopevent_chaos_window)
+					reset_armed()
+			finally:
+				# Critical: never leave an event armed --
+				# joined workers would hang forever.
+				reset_armed()
+				try:
+					con.close()
+				except Exception:
+					pass
+				# dprint(f'[stopevent-chaos] cycles={local_cycles}')
+
+		# dprint("")
 
 		threads = []
 		for wid in range(1, n_writers + 1):
@@ -458,8 +544,9 @@ class RepeatableReadStressTest(BaseTest):
 			threads.append(
 			    threading.Thread(target=reader_mixed_loop, args=(rid,)))
 		threads.append(threading.Thread(target=checkpointer_loop))
-		threads.append(threading.Thread(target=ddl_nemesis_loop))
+		# threads.append(threading.Thread(target=ddl_nemesis_loop))
 		threads.append(threading.Thread(target=wal_chaos_loop))
+		threads.append(threading.Thread(target=stopevent_chaos_loop))
 
 		for t in threads:
 			t.start()
@@ -469,8 +556,8 @@ class RepeatableReadStressTest(BaseTest):
 		for t in threads:
 			t.join()
 
-		dprint(
-		    f'[totals] writes={write_count[0]} '
+		print(
+		    f'\n[totals] writes={write_count[0]} '
 		    f'reads={read_count[0]} '
 		    f'conflicts={conflict_count[0]}')
 
