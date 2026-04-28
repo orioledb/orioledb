@@ -478,38 +478,38 @@ perform_writeback(BTreeDescr *desc, CheckpointWriteBack *writeback)
 }
 
 /*
- * Acquire oTablesMetaLock exclusively while keeping the sync request queue
- * draining.
+ * Acquire a checkpointer-side LWLock exclusively while keeping the sync
+ * request queue draining.
  *
- * On a hot standby the startup process can hold oTablesMetaLock SHARED while
- * replaying a WAL window between WAL_REC_O_TABLES_META_LOCK and
- * WAL_REC_O_TABLES_META_UNLOCK records.  Concurrent (i.e. unrelated)
- * transactions on the primary can sneak XACT_COMMIT records into that window;
- * during their replay startup may call DropRelationFiles ->
- * register_forget_request -> RegisterSyncRequest, which blocks on the
- * checkpointer-served sync queue when the queue is full.  If the
- * checkpointer is at the same time waiting for oTablesMetaLock EXCLUSIVE, we
- * deadlock: startup holds the lock and waits for us to drain the queue, we
- * wait for the lock.
+ * On a hot standby the startup process can hold one of OrioleDB's
+ * checkpoint-coordination LWLocks (oTablesMetaLock, oSysTreesLock, ...)
+ * SHARED while replaying a WAL window — e.g. between
+ * WAL_REC_O_TABLES_META_LOCK and WAL_REC_O_TABLES_META_UNLOCK for the meta
+ * lock.  Concurrent (i.e. unrelated) transactions on the primary can sneak
+ * XACT_COMMIT records into that window; during their replay startup may
+ * call DropRelationFiles -> register_forget_request -> RegisterSyncRequest,
+ * which blocks on the checkpointer-served sync queue when the queue is
+ * full.  If the checkpointer is at the same time waiting for the same
+ * LWLock EXCLUSIVE, we deadlock: startup holds the lock and waits for us
+ * to drain the queue, we wait for the lock.
  *
- * Break the cycle by trying ConditionalAcquire and, on failure, draining the
- * sync queue (so any RegisterSyncRequest waiter — including the startup
+ * Break the cycle by trying ConditionalAcquire and, on failure, draining
+ * the sync queue (so any RegisterSyncRequest waiter — including the startup
  * process — can make progress and eventually release the lock) before
  * retrying.  Robust against new requests arriving: every iteration drains
  * everything currently queued, so the worst case is a few extra iterations
- * while startup keeps producing requests, after which it hits
- * WAL_REC_O_TABLES_META_UNLOCK and releases the lock.
+ * while startup keeps producing requests, after which it hits the matching
+ * unlock record and releases the lock.
  *
  * Must only be used by the checkpointer; AbsorbSyncRequests() is a no-op
  * elsewhere, so the loop would spin without making progress.
  */
 static void
-acquire_o_tables_meta_lock_drain(void)
+acquire_chkp_lock_drain(LWLock *lock)
 {
 	Assert(AmCheckpointerProcess());
 
-	while (!LWLockConditionalAcquire(&checkpoint_state->oTablesMetaLock,
-									 LW_EXCLUSIVE))
+	while (!LWLockConditionalAcquire(lock, LW_EXCLUSIVE))
 	{
 		AbsorbSyncRequests();
 		/* Brief backoff so we don't pin a CPU while startup makes progress. */
@@ -560,7 +560,7 @@ perform_writeback_and_relock(BTreeDescr *desc,
 
 		perform_writeback(desc, writeback);
 
-		acquire_o_tables_meta_lock_drain();
+		acquire_chkp_lock_drain(&checkpoint_state->oTablesMetaLock);
 
 		indexDescr = o_fetch_index_descr(treeOids, type, true, NULL);
 		if (!indexDescr)
@@ -1305,8 +1305,8 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	pg_write_barrier();
 
-	acquire_o_tables_meta_lock_drain();
-	LWLockAcquire(&checkpoint_state->oSysTreesLock, LW_EXCLUSIVE);
+	acquire_chkp_lock_drain(&checkpoint_state->oTablesMetaLock);
+	acquire_chkp_lock_drain(&checkpoint_state->oSysTreesLock);
 
 	checkpoint_state->replayStartPtr = get_checkpoint_xlog_ptr();
 	wait_finish_active_commits(checkpoint_state->replayStartPtr);
@@ -1329,7 +1329,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	enable_stopevents = old_enable_stopevents;
 
-	acquire_o_tables_meta_lock_drain();
+	acquire_chkp_lock_drain(&checkpoint_state->oTablesMetaLock);
 	o_indices_foreach_oids(checkpoint_tables_callback, &chkp_tbl_arg);
 
 	LWLockRelease(&checkpoint_state->oTablesMetaLock);
@@ -1436,7 +1436,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	 * resources.
 	 */
 
-	acquire_o_tables_meta_lock_drain();
+	acquire_chkp_lock_drain(&checkpoint_state->oTablesMetaLock);
 
 	/*
 	 * This will let processes reuse data pages of previous checkpoint.
@@ -5068,7 +5068,7 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		}
 
 
-		acquire_o_tables_meta_lock_drain();
+		acquire_chkp_lock_drain(&checkpoint_state->oTablesMetaLock);
 	}
 	else if (descr != NULL)
 	{
