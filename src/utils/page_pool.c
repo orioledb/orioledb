@@ -120,16 +120,7 @@ ppool_reserve_pages(OPagePool *pool, int kind, int count)
 	{
 		pg_atomic_add_fetch_u64(pool->availablePagesCount, count);
 
-		if (debug_disable_pools_limit)
-		{
-			/* debug_disable_pools_limit turns off
-			 * checking ppool_run_clock exhaustion that
-			 * may prematurely break clock run in
-			 * test_checkpoint_compressed_indices
-			 */
-			ppool_run_clock(pool, true, NULL);
-		}
-		else if (ppool_run_clock_active || !ppool_run_clock(pool, true, NULL))
+		if (ppool_run_clock_active || !ppool_run_clock(pool, true, NULL))
 		{
 			error = true;
 			break;
