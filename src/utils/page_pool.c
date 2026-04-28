@@ -27,6 +27,18 @@
 #include "utils/memdebug.h"
 
 /*
+ * Recursion guard for ppool_run_clock().  The clock algorithm calls
+ * walk_page() → walk_page_prelock_check() → index_oids_get_btree_descr(),
+ * which may need to fetch a table descriptor from a TOAST system tree.
+ * That fetch can call o_btree_load_shmem() → ppool_reserve_pages() →
+ * ppool_run_clock() again, creating unbounded recursion.
+ *
+ * When the flag is true, ppool_reserve_pages() raises an ERROR instead of
+ * re-entering the clock algorithm.
+ */
+bool ppool_run_clock_active = false;
+
+/*
  * Calculates shared memory space needed for a page pool. Be careful,
  * it prepares local memory structures to initialize.
  */
@@ -94,6 +106,7 @@ void
 ppool_reserve_pages(OPagePool *pool, int kind, int count)
 {
 	bool		was_saving;
+	bool		error = false;
 
 	Assert(!have_locked_pages());
 
@@ -106,12 +119,35 @@ ppool_reserve_pages(OPagePool *pool, int kind, int count)
 	while (pg_atomic_sub_fetch_u64(pool->availablePagesCount, count) & (UINT64CONST(1) << 63))
 	{
 		pg_atomic_add_fetch_u64(pool->availablePagesCount, count);
-		ppool_run_clock(pool, true, NULL);
+
+		if (debug_disable_pools_limit)
+		{
+			/* debug_disable_pools_limit turns off
+			 * checking ppool_run_clock exhaustion that
+			 * may prematurely break clock run in
+			 * test_checkpoint_compressed_indices
+			 */
+			ppool_run_clock(pool, true, NULL);
+		}
+		else if (ppool_run_clock_active || !ppool_run_clock(pool, true, NULL))
+		{
+			error = true;
+			break;
+		}
 	}
 
-	pool->numPagesReserved[kind] += count;
+	if (!error)
+		pool->numPagesReserved[kind] += count;
 
 	o_stop_saving_inval_messages(was_saving);
+
+	if (error)
+		ereport(ERROR,
+				(errcode(ERRCODE_OUT_OF_MEMORY),
+				 errmsg("orioledb page pool is exhausted"),
+				 errhint("Increase \"orioledb.main_buffers\" or reduce "
+						 "the number of tables accessed in a single "
+						 "transaction.")));
 }
 
 /*
@@ -258,7 +294,7 @@ ppool_dirty_pages_count(OPagePool *pool)
  * because page-level merges only write undo to these types (via
  * GET_PAGE_LEVEL_UNDO_TYPE).  UndoLogRegular is not touched by merges.
  */
-void
+bool
 ppool_run_clock(OPagePool *pool, bool evict,
 				volatile sig_atomic_t *shutdown_requested)
 {
@@ -267,6 +303,9 @@ ppool_run_clock(OPagePool *pool, bool evict,
 	Size		undoSystemSize = get_reserved_undo_size(UndoLogSystem);
 	bool		haveRetainRegularLoc = undo_type_has_retained_location(UndoLogRegularPageLevel);
 	bool		haveRetainSystemLoc = undo_type_has_retained_location(UndoLogSystem);
+	uint64		iterations = 0;
+	uint64		maxIterations;
+	bool		exhausted = false;
 
 	blkno = pg_prng_uint64_range(&pool->prngSeed,
 								 pool->offset,
@@ -285,6 +324,16 @@ ppool_run_clock(OPagePool *pool, bool evict,
 	Assert(blkno >= pool->offset && blkno < pool->offset + pool->size);
 	/* Our attempts to evict pages shouldn't themselves affect UCM */
 	set_skip_ucm();
+	ppool_run_clock_active = true;
+
+	/*
+	 * Bound on iterations of the clock loop.  ucm_next_blkno() jumps
+	 * non-linearly across the pool, so a positional wrap check is not a
+	 * reliable termination condition.  Allow a generous number of attempts
+	 * (UCM usage levels rotate as we scan, so transient skips clear up over
+	 * several pool-sized sweeps) before declaring the pool exhausted.
+	 */
+	maxIterations = (uint64) pool->size * (UCM_USAGE_LEVELS + 1);
 
 	while (true)
 	{
@@ -294,6 +343,7 @@ ppool_run_clock(OPagePool *pool, bool evict,
 		blkno = ucm_next_blkno(&pool->ucm, blkno, 1);
 
 		Assert(blkno >= pool->offset && blkno < pool->offset + pool->size);
+
 		if (walk_page(blkno, evict) != OWalkPageSkipped)
 		{
 			Assert(!have_locked_pages());
@@ -303,8 +353,15 @@ ppool_run_clock(OPagePool *pool, bool evict,
 		blkno++;
 		if (blkno >= pool->offset + pool->size)
 			blkno = pool->offset;
+
+		if (++iterations >= maxIterations)
+		{
+			exhausted = true;
+			break;
+		}
 	}
 
+	ppool_run_clock_active = false;
 	unset_skip_ucm();
 
 	/*
@@ -325,4 +382,6 @@ ppool_run_clock(OPagePool *pool, bool evict,
 		free_retained_undo_location(UndoLogRegularPageLevel);
 	if (!haveRetainSystemLoc)
 		free_retained_undo_location(UndoLogSystem);
+
+	return !exhausted;
 }

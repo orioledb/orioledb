@@ -454,6 +454,7 @@ extern int	rewind_max_transactions;
 extern int	logical_xid_buffers_guc;
 extern bool orioledb_strict_mode;
 extern XLogRecPtr replay_until_lsn;
+extern bool debug_disable_pools_limit;
 
 /* For page eviction/read checkpoint test only */
 extern uint32 min_read_page_checkpoint;
