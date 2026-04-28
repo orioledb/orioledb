@@ -1087,9 +1087,11 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 
 	elog(DEBUG4,
 		 "Recovery target reached: start synchronization barrier "
-		 "(target=%d action=%d record_ptr=%X/%X record_end_ptr=%X/%X target_ptr=%X/%X)",
+		 "(target=%d action=%d stop_after=%d record_ptr=%X/%X "
+		 "record_end_ptr=%X/%X target_ptr=%X/%X)",
 		 recoveryTarget,
 		 recoveryTargetAction,
+		 info->recoveryStopAfter,
 		 LSN_FORMAT_ARGS(info->recordPtr),
 		 LSN_FORMAT_ARGS(info->recordEndPtr),
 		 LSN_FORMAT_ARGS(target_ptr));
@@ -1116,11 +1118,16 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 		finished_ptr = pg_atomic_read_u64(recovery_finished_list_ptr);
 
 		/*
-		 * Wait in three stages:
-		 * 1. replay progress must reach the explicit stop boundary itself;
-		 * 2. retain/undo bookkeeping must catch up to the same replay point;
-		 * 3. deferred finalization must be globally published up to that
-		 *    boundary.
+		 * For stop-after semantics, PostgreSQL stops after the stop record
+		 * becomes part of the visible recovery state, so Oriole must catch up
+		 * to the explicit stop boundary itself before checking that retain/undo
+		 * bookkeeping and deferred finalization have converged.
+		 *
+		 * For stop-before semantics, PostgreSQL stops before applying the stop
+		 * record.  In that case Oriole only needs its internal boundaries to
+		 * converge on the current replay progress; requiring them to reach the
+		 * stop record boundary would wait for a record that is not supposed to
+		 * become visible.
 		 */
 		elog(DEBUG4,
 			 "Recovery target reached: boundary snapshot after startup-side "
@@ -1131,11 +1138,11 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 			 LSN_FORMAT_ARGS(retain_ptr),
 			 LSN_FORMAT_ARGS(finished_ptr));
 
-		if (current_ptr < target_ptr)
+		if (info->recoveryStopAfter && current_ptr < target_ptr)
 		{
 			elog(DEBUG4,
 					"Recovery target reached: waiting for replay progress to "
-					"reach stop boundary (target_ptr=%X/%X current_ptr=%X/%X)",
+					"reach stop-after boundary (target_ptr=%X/%X current_ptr=%X/%X)",
 					LSN_FORMAT_ARGS(target_ptr),
 					LSN_FORMAT_ARGS(current_ptr));
 		}
@@ -1143,17 +1150,18 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 		{
 			elog(DEBUG4,
 				 "Recovery target reached: waiting for retain boundary to "
-				 "catch up with replay progress (target_ptr=%X/%X "
+				 "catch up with replay progress (stop_after=%d target_ptr=%X/%X "
 				 "current_ptr=%X/%X retain_ptr=%X/%X)",
+				 info->recoveryStopAfter,
 				 LSN_FORMAT_ARGS(target_ptr),
 				 LSN_FORMAT_ARGS(current_ptr),
 				 LSN_FORMAT_ARGS(retain_ptr));
 		}
-		else if (finished_ptr < target_ptr)
+		else if (info->recoveryStopAfter && finished_ptr < target_ptr)
 		{
 			elog(DEBUG4,
 				 "Recovery target reached: waiting for deferred finalization "
-				 "publication to reach stop boundary (target_ptr=%X/%X "
+				 "publication to reach stop-after boundary (target_ptr=%X/%X "
 				 "current_ptr=%X/%X finished_ptr=%X/%X)",
 				 LSN_FORMAT_ARGS(target_ptr),
 				 LSN_FORMAT_ARGS(current_ptr),
