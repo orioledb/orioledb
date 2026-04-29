@@ -27,17 +27,17 @@
 #include "utils/memdebug.h"
 
 /*
- * The clock algorithm calls walk_page() → walk_page_prelock_check() →
+ * The clock algorithm can be called nested (walk_page() → walk_page_prelock_check() →
  * index_oids_get_btree_descr(), which may need to fetch a table
- * descriptor from a TOAST system tree. That fetch can call
- * o_btree_load_shmem() → ppool_reserve_pages() → ppool_run_clock() again.
- * One such re-entry is normal -- the inner clock can make progress
- * and unblock the outer. We limit recursion to avoid clock to recurse
- * indefinitely if the pool stays exhausted.
+ * descriptor from a TOAST system tree: o_btree_load_shmem() →
+ * ppool_reserve_pages() → ppool_run_clock().
+ * Internal ppool_run_clock() could be called only for OPagePoolFreeTree
+ * or OPagePoolMain and never for the same pool type as external.
+ * Check this with asserts.
  */
-int			ppool_run_clock_depth = 0;
+int	ppool_run_clock_depth PG_USED_FOR_ASSERTS_ONLY = 0;
 #define PPOOL_RUN_CLOCK_MAX_DEPTH	1
-static OPagePool *outer_pool = NULL;
+static OPagePool *outer_pool PG_USED_FOR_ASSERTS_ONLY = NULL;
 
 /*
  * Calculates shared memory space needed for a page pool. Be careful,
@@ -121,6 +121,7 @@ ppool_reserve_pages(OPagePool *pool, int kind, int count)
 		pg_atomic_add_fetch_u64(pool->availablePagesCount, count);
 
 		Assert(ppool_run_clock_depth <= PPOOL_RUN_CLOCK_MAX_DEPTH);
+#ifdef USE_ASSERT_CHECKING
 		if (ppool_run_clock_depth > 0)
 		{
 			Assert(pool == get_ppool(OPagePoolFreeTree) || pool == get_ppool(OPagePoolMain));
@@ -129,6 +130,7 @@ ppool_reserve_pages(OPagePool *pool, int kind, int count)
 		}
 		else
 			outer_pool = pool;
+#endif
 
 		if (!ppool_run_clock(pool, true, NULL))
 		{
@@ -340,8 +342,7 @@ ppool_run_clock(OPagePool *pool, bool evict,
 	 * (the transaction abort also likely unlocks pages for others, so they
 	 * will likely be able to evict, but code doesn't require this and will
 	 * work even without this unlocking) Any external free resets the counter
-	 * and we may repeat spinning again. The nested calls are bounded by
-	 * ppool_run_clock_depth.
+	 * and we may repeat spinning again.
 	 */
 	skippedEvictionsLimit = (uint64) pool->size * UCM_USAGE_LEVELS;
 	lastAvailablePagesCount = pg_atomic_read_u64(pool->availablePagesCount);
