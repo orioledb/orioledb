@@ -132,6 +132,7 @@ ppool_reserve_pages(OPagePool *pool, int kind, int count)
 			outer_pool = pool;
 		}
 
+		Assert(ppool_run_clock_depth < 2);
 		if (ppool_run_clock_depth >= PPOOL_RUN_CLOCK_MAX_DEPTH ||
 			!ppool_run_clock(pool, true, NULL))
 		{
