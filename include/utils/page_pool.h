@@ -58,12 +58,13 @@ struct OPagePool
 	pg_prng_state prngSeed;
 };
 
+extern int	ppool_run_clock_depth;
+
 extern Size ppool_estimate_space(OPagePool *pool, OInMemoryBlkno offset, OInMemoryBlkno size, bool debug);
 extern void ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found);
 extern OInMemoryBlkno ppool_free_pages_count(OPagePool *pool);
 extern OInMemoryBlkno ppool_dirty_pages_count(OPagePool *pool);
-extern void ppool_run_clock(OPagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
-
+extern bool ppool_run_clock(OPagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
 extern void ppool_reserve_pages(OPagePool *pool, int kind, int count);
 extern void ppool_release_reserved(OPagePool *pool, uint32 mask);
 extern void ppool_release_all_pages(void);

@@ -27,6 +27,18 @@
 #include "utils/memdebug.h"
 
 /*
+ * The clock algorithm calls walk_page() → walk_page_prelock_check() →
+ * index_oids_get_btree_descr(), which may need to fetch a table
+ * descriptor from a TOAST system tree. That fetch can call
+ * o_btree_load_shmem() → ppool_reserve_pages() → ppool_run_clock() again.
+ * One such re-entry is normal -- the inner clock can make progress
+ * and unblock the outer. We limit recursion to avoid clock to recurse
+ * indefinitely if the pool stays exhausted.
+ */
+int			ppool_run_clock_depth = 0;
+#define PPOOL_RUN_CLOCK_MAX_DEPTH	2
+
+/*
  * Calculates shared memory space needed for a page pool. Be careful,
  * it prepares local memory structures to initialize.
  */
@@ -94,6 +106,7 @@ void
 ppool_reserve_pages(OPagePool *pool, int kind, int count)
 {
 	bool		was_saving;
+	bool		error = false;
 
 	Assert(!have_locked_pages());
 
@@ -106,12 +119,27 @@ ppool_reserve_pages(OPagePool *pool, int kind, int count)
 	while (pg_atomic_sub_fetch_u64(pool->availablePagesCount, count) & (UINT64CONST(1) << 63))
 	{
 		pg_atomic_add_fetch_u64(pool->availablePagesCount, count);
-		ppool_run_clock(pool, true, NULL);
+
+		if (ppool_run_clock_depth >= PPOOL_RUN_CLOCK_MAX_DEPTH ||
+			!ppool_run_clock(pool, true, NULL))
+		{
+			error = true;
+			break;
+		}
 	}
 
-	pool->numPagesReserved[kind] += count;
+	if (!error)
+		pool->numPagesReserved[kind] += count;
 
 	o_stop_saving_inval_messages(was_saving);
+
+	if (error)
+		ereport(ERROR,
+				(errcode(ERRCODE_OUT_OF_MEMORY),
+				 errmsg("orioledb page pool is exhausted"),
+				 errhint("Increase \"orioledb.main_buffers\" or reduce "
+						 "the number of tables accessed in a single "
+						 "transaction.")));
 }
 
 /*
@@ -258,7 +286,7 @@ ppool_dirty_pages_count(OPagePool *pool)
  * because page-level merges only write undo to these types (via
  * GET_PAGE_LEVEL_UNDO_TYPE).  UndoLogRegular is not touched by merges.
  */
-void
+bool
 ppool_run_clock(OPagePool *pool, bool evict,
 				volatile sig_atomic_t *shutdown_requested)
 {
@@ -267,6 +295,10 @@ ppool_run_clock(OPagePool *pool, bool evict,
 	Size		undoSystemSize = get_reserved_undo_size(UndoLogSystem);
 	bool		haveRetainRegularLoc = undo_type_has_retained_location(UndoLogRegularPageLevel);
 	bool		haveRetainSystemLoc = undo_type_has_retained_location(UndoLogSystem);
+	uint64		skippedEvictions = 0;
+	uint64		skippedEvictionsLimit;
+	uint64		lastAvailablePagesCount;
+	bool		exhausted = false;
 
 	blkno = pg_prng_uint64_range(&pool->prngSeed,
 								 pool->offset,
@@ -283,29 +315,70 @@ ppool_run_clock(OPagePool *pool, bool evict,
 	reserve_undo_size(UndoLogSystem, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 
 	Assert(blkno >= pool->offset && blkno < pool->offset + pool->size);
-	/* Our attempts to evict pages shouldn't themselves affect UCM */
-	set_skip_ucm();
+
+	/*
+	 * Only the outermost call manages the UCM. A nested clock invocation
+	 * inherits the outer's setting and must not flip skip_ucm.
+	 */
+	if (ppool_run_clock_depth == 0)
+		skip_ucm = true;
+	ppool_run_clock_depth++;
+
+	/*
+	 * Detect pool exhaustion without false firing on legitimate heavy memory
+	 * pressure. For many compressed indexes, small pool, or concurrent
+	 * checkpointer walk_page() can return OWalkPageSkipped for many
+	 * consecutive iterations: pages are waiting on I/O, are roots of a tree
+	 * currently under checkpoint, or are transiently locked. If we go a full
+	 * UCM cycle without changes of availablePagesCount and without finding a
+	 * local evictable page, so the pool is permanently held and error out
+	 * (the transaction abort also likely unlocks pages for others, so they
+	 * will likely be able to evict, but code doesn't require this and will
+	 * work even without this unlocking) Any external free resets the counter
+	 * and we may repeat spinning again. The nested calls are bounded by
+	 * ppool_run_clock_depth.
+	 */
+	skippedEvictionsLimit = (uint64) pool->size * UCM_USAGE_LEVELS;
+	lastAvailablePagesCount = pg_atomic_read_u64(pool->availablePagesCount);
 
 	while (true)
 	{
 		if (shutdown_requested != NULL && *shutdown_requested)
 			break;
 
+		CHECK_FOR_INTERRUPTS();
+
 		blkno = ucm_next_blkno(&pool->ucm, blkno, 1);
 
 		Assert(blkno >= pool->offset && blkno < pool->offset + pool->size);
+
 		if (walk_page(blkno, evict) != OWalkPageSkipped)
 		{
 			Assert(!have_locked_pages());
 			break;
 		}
 		Assert(!have_locked_pages());
-		blkno++;
-		if (blkno >= pool->offset + pool->size)
-			blkno = pool->offset;
+
+		if (++skippedEvictions >= skippedEvictionsLimit)
+		{
+			uint64		currentAvailablePagesCount = pg_atomic_read_u64(pool->availablePagesCount);
+
+			if (currentAvailablePagesCount != lastAvailablePagesCount)
+			{
+				lastAvailablePagesCount = currentAvailablePagesCount;
+				skippedEvictions = 0;
+			}
+			else
+			{
+				exhausted = true;
+				break;
+			}
+		}
 	}
 
-	unset_skip_ucm();
+	ppool_run_clock_depth--;
+	if (ppool_run_clock_depth == 0)
+		skip_ucm = false;
 
 	/*
 	 * The caller might have the undo location reserved.  We need to carefully
@@ -325,4 +398,6 @@ ppool_run_clock(OPagePool *pool, bool evict,
 		free_retained_undo_location(UndoLogRegularPageLevel);
 	if (!haveRetainSystemLoc)
 		free_retained_undo_location(UndoLogSystem);
+
+	return !exhausted;
 }
