@@ -35,7 +35,7 @@
  * or OPagePoolMain and never for the same pool type as external.
  * Check this with asserts.
  */
-int	ppool_run_clock_depth PG_USED_FOR_ASSERTS_ONLY = 0;
+int			ppool_run_clock_depth PG_USED_FOR_ASSERTS_ONLY = 0;
 #define PPOOL_RUN_CLOCK_MAX_DEPTH	1
 static OPagePool *outer_pool PG_USED_FOR_ASSERTS_ONLY = NULL;
 
