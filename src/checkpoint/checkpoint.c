@@ -5066,9 +5066,17 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 			}
 			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 		}
-		else if (td->storageType == BTreeStoragePersistence ||
-				 td->storageType == BTreeStorageUnlogged)
+		else
 		{
+			/*
+			 * BTreeStorageTemporary tables are skipped above.
+			 * BTreeStorageInMemory is only used by system trees, which are
+			 * checkpointed separately in checkpoint_sys_trees().  So only
+			 * persistent and unlogged trees should reach here.
+			 */
+			Assert(td->storageType == BTreeStoragePersistence ||
+				   td->storageType == BTreeStorageUnlogged);
+
 			success = checkpoint_ix(tbl_arg->flags, td);
 
 			if (success)
@@ -5079,16 +5087,6 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 					sort_checkpoint_tmp_file(td, cur_chkp_index);
 					tbl_arg->postProcessList = add_index_id_item(tbl_arg->postProcessList, td);
 				}
-				o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
-			}
-		}
-		else
-		{
-			success = checkpoint_temporary_tree(tbl_arg->flags, td);
-			if (success)
-			{
-				if (!orioledb_s3_mode)
-					sort_checkpoint_tmp_file(td, cur_chkp_index);
 				o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 			}
 		}
