@@ -1,11 +1,41 @@
-# This is modified Dockerfile from 16/bookworm in
-# https://github.com/docker-library/postgres
+# This Dockerfile is adapted from the official PostgreSQL Docker image sources
+# and extended for OrioleDB on Ubuntu and Debian bases.
+# Derived from https://github.com/docker-library/postgres (MIT-licensed)
+# Lightweight Architecture Decision Record:
+# - Dual-use image for CI/testing, local validation, benchmarking, and practical runtime use.
+# - Intended as an OrioleDB-powered drop-in replacement for the official PostgreSQL Docker image.
+# - Some choices intentionally favor compatibility, current distro behavior, and runtime usability
+#   over strict bit-for-bit reproducibility.
 
-# Set UBUNTU_VERSION = [ devel 25.04 24.10 24.04 22.04 ]
-#                   or [ devel plucky oracular noble jammy ]
+# Set BASE_IMAGE = [ ubuntu, debian ] ( according to the docker official images )
+#   For Ubuntu, BASE_VERSION = [ devel 26.04 25.10 24.04 22.04 20.04 ]
+#                           or [ devel resolute questing noble jammy focal ]
+#   For Debian, BASE_VERSION = [ trixie, trixie-backports, trixie-slim,
+#                                bookworm, bookworm-backports, bookworm-slim,
+#                                bullseye, bullseye-backports, bullseye-slim,
+#                                testing, unstable, experimental ]
 
-ARG UBUNTU_VERSION=noble
-FROM ubuntu:${UBUNTU_VERSION}
+# Base image configuration
+# New recommended way from the project's root directory:
+#   docker build --build-arg BASE_IMAGE=ubuntu --build-arg BASE_VERSION=noble  -f ./docker/Dockerfile.ubuntu -t orioletest:ubuntu-noble .
+#   docker build --build-arg BASE_IMAGE=debian --build-arg BASE_VERSION=trixie -f ./docker/Dockerfile.ubuntu -t orioletest:debian-trixie .
+ARG BASE_IMAGE=ubuntu
+ARG BASE_VERSION=noble
+#
+# Legacy support (deprecated, will be removed):
+#   docker build --build-arg UBUNTU_VERSION=noble -f ./docker/Dockerfile.ubuntu -t orioletest:ubuntu-noble .
+#
+ARG UBUNTU_VERSION
+# If UBUNTU_VERSION is set, override BASE_IMAGE/VERSION for backwards compatibility
+ARG BASE_IMAGE=${UBUNTU_VERSION:+ubuntu}
+ARG BASE_VERSION=${UBUNTU_VERSION:+${UBUNTU_VERSION}}
+ARG BASE_OS=${BASE_IMAGE:-ubuntu}:${BASE_VERSION:-noble}
+
+FROM ${BASE_OS}
+# Re-declare ARGs after FROM for use in subsequent instructions
+ARG BASE_OS
+# Record build information
+ENV BASE_OS="${BASE_OS}"
 
 ARG UBUNTU_VERSION
 
@@ -27,6 +57,11 @@ ENV DEBUG_MODE=${DEBUG_MODE}
 # Reference: https://github.com/docker-library/postgres/pull/1077
 ARG DOCKER_PG_LLVM_DEPS="llvm-dev clang"
 ENV DOCKER_PG_LLVM_DEPS=${DOCKER_PG_LLVM_DEPS}
+
+# Toggle PostgreSQL JIT/LLVM support. Disable this on platforms where the
+# distro LLVM is newer than the PostgreSQL/OrioleDB combination supports.
+ARG PG_LLVM_ENABLED=true
+ENV PG_LLVM_ENABLED=${PG_LLVM_ENABLED}
 
 # explicitly set user/group IDs
 RUN set -eux; \
@@ -59,8 +94,11 @@ RUN set -eux; \
 	rm -rf /var/lib/apt/lists/* ; \
 	apt-get clean
 
-# make the "en_US.UTF-8" locale so postgres will be utf-8 enabled by default
+# Set locale environment so postgres uses UTF-8 by default
+# (locale was already generated above via locale-gen)
 ENV LANG=en_US.utf8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
 
 # grab gosu for easy step-down from root
 # https://github.com/tianon/gosu/releases
@@ -91,10 +129,13 @@ COPY . /usr/src/postgresql/contrib/orioledb
 
 RUN mkdir /docker-entrypoint-initdb.d /docker-default-initdb.d
 
-RUN mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgresql && chmod 2777 /var/run/postgresql
+RUN mkdir -p /var/run/postgresql && chown -R postgres:postgres /var/run/postgresql && chmod 3777 /var/run/postgresql
 
-ENV PATH=$PATH:/usr/lib/postgresql/$PG_MAJOR/bin
 RUN set -eux; \
+	# Save the list of manually installed packages before installing build dependencies.
+	# This is used at cleanup time to restore the pre-build manual/auto marks,
+	# following the same pattern as the official postgres Docker image.
+	savedAptMark="$(apt-mark showmanual)"; \
 	\
 	PGTAG=$(grep "^$PG_MAJOR: " /usr/src/postgresql/contrib/orioledb/.pgtags | cut -d' ' -f2-) ; \
 	ORIOLEDB_VERSION=$(grep "^#define ORIOLEDB_VERSION" /usr/src/postgresql/contrib/orioledb/include/orioledb.h | cut -d'"' -f2) ; \
@@ -106,37 +147,38 @@ RUN set -eux; \
 	echo "ORIOLEDB_VERSION=$ORIOLEDB_VERSION" ; \
 	echo "ORIOLEDB_BUILDTIME=$ORIOLEDB_BUILDTIME" ; \
 	echo "DOCKER_PG_LLVM_DEPS=$DOCKER_PG_LLVM_DEPS" ; \
+	echo "PG_LLVM_ENABLED=$PG_LLVM_ENABLED" ; \
 	echo "DEBUG_MODE=$DEBUG_MODE" ;	\
 	\
-	LLVM_RUNTIME_DEPS=$(echo "$DOCKER_PG_LLVM_DEPS" | grep -o 'llvm[0-9]*') ; \
-	echo "LLVM_RUNTIME_DEPS=$LLVM_RUNTIME_DEPS" ; \
-	\
 	apt-get update; \
+	EXTRA_ICU_PACKAGES="$(apt-cache depends libicu-dev | grep 'Depends:.*libicu[0-9]' | awk '{print $2}')" ; \
+	EXTRA_XML2_PACKAGE="$(apt-cache depends libxml2-dev | grep -E 'Depends:.*libxml2(-[0-9]+)?$' | awk '{print $2}')" ; \
+	echo "EXTRA_ICU_PACKAGES=$EXTRA_ICU_PACKAGES | EXTRA_XML2_PACKAGE=$EXTRA_XML2_PACKAGE" ; \
 	DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
-		build-essential \
-		${LLVM_RUNTIME_DEPS} \
 		${DOCKER_PG_LLVM_DEPS} \
+		${EXTRA_ICU_PACKAGES} \
+		${EXTRA_XML2_PACKAGE} \
 		bison \
+		build-essential \
 		curl \
 		flex \
 		gdb \
 		git \
+		# needed for OrioleDB S3 support
 		libcurl4-openssl-dev \
 		libicu-dev \
 		libipc-run-perl \
 		libkrb5-dev \
 		libldap-dev \
-		liblz4-1 \
 		liblz4-dev \
+		libpam0g-dev \
 		libperl-dev \
-		libssl-dev \
 		libreadline-dev \
+		libselinux1-dev \
+		libssl-dev \
 		libuuid1 \
-		libxml2 \
 		libxml2-dev \
-		libxslt1.1 \
 		libxslt1-dev \
-		libzstd1 \
 		libzstd-dev \
 		make \
 		pkg-config \
@@ -148,12 +190,12 @@ RUN set -eux; \
 		tcl-dev \
 		uuid-dev \
 		wget \
+		zlib1g-dev \
 	; \
 	\
 	curl -o postgresql.tar.gz \
-			--header "Accept: application/vnd.github.v3.raw" \
-			--remote-name \
-			--location https://github.com/orioledb/postgres/tarball/$PGTAG; \
+		--header "Accept: application/vnd.github.v3.raw" \
+		--location https://github.com/orioledb/postgres/tarball/$PGTAG; \
 	mkdir -p /usr/src/postgresql; \
 	tar \
 		--extract \
@@ -173,52 +215,54 @@ RUN set -eux; \
 	cp /usr/src/postgresql/contrib/orioledb/docker/config.guess config/config.guess; \
 	cp /usr/src/postgresql/contrib/orioledb/docker/config.sub config/config.sub; \
 # configure options taken from:
-# https://anonscm.debian.org/cgit/pkg-postgresql/postgresql.git/tree/debian/rules?h=9.5
+# https://salsa.debian.org/postgresql-team/postgresql/-/blob/master/debian/rules
+	# Add debug-friendly configure flags when DEBUG_MODE=true
+	CFG_DEBUG_OPTS=""; if [ "$DEBUG_MODE" = "true" ]; then CFG_DEBUG_OPTS="--enable-debug --enable-cassert"; fi; \
+	CFG_LLVM_OPT="--with-llvm"; if [ "$PG_LLVM_ENABLED" != "true" ]; then CFG_LLVM_OPT="--without-llvm"; fi; \
 	( CC=${BUILD_CC_COMPILER} ./configure \
+		--enable-option-checking=fatal \
 		--build="$gnuArch" \
 # "/usr/src/postgresql/src/backend/access/common/tupconvert.c:105: undefined reference to `libintl_gettext'"
 #		--enable-nls \
 		--enable-integer-datetimes \
-		--enable-thread-safety \
+#		--enable-thread-safety \     unrecognized options
 		--enable-tap-tests \
-# skip debugging info -- we want tiny size instead
-#		--enable-debug \
+		$CFG_DEBUG_OPTS \
 		--disable-rpath \
 		--with-uuid=e2fs \
-		--with-gnu-ld \
+#		--with-gnu-ld \    unrecognized options
 		--with-pgport=5432 \
 		--with-system-tzdata=/usr/share/zoneinfo \
 		--prefix=/usr/local \
 		--with-includes=/usr/local/include \
 		--with-libraries=/usr/local/lib \
-		--with-krb5 \
+#		--with-krb5 \    unrecognized options
 		--with-gssapi \
+		--with-icu \
 		--with-ldap \
-		--with-tcl \
-		--with-perl \
-		--with-python \
-#		--with-pam \
-		--with-openssl \
 		--with-libxml \
 		--with-libxslt \
-		--with-icu \
-		--with-llvm \
+		$CFG_LLVM_OPT \
 		--with-lz4 \
+		--with-pam \
+		--with-perl \
+		--with-python \
+		--with-selinux \
+		--with-ssl=openssl \
+		--with-tcl \
 		--with-zstd \
 		# The "testgres" package expects the PostgreSQL version as the last word.
 		# Therefore, the extra ${POSTGRESQL_VERSION} is added as a workaround.
-		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} ubuntu:${UBUNTU_VERSION}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
+		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} ${BASE_OS}+${BUILD_CC_COMPILER} build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
 	|| cat config.log ); \
 	if printf "%s\n" "$PGTAG" | grep -Fqe "patches${PG_MAJOR}_"; then \
-		echo "ORIOLEDB_PATCHSET_VERSION = `echo $PGTAG | cut -d'_' -f2`" >> src/Makefile.global; \
+		echo "ORIOLEDB_PATCHSET_VERSION = $(echo $PGTAG | cut -d'_' -f2)" >> src/Makefile.global; \
 	else \
 		echo "ORIOLEDB_PATCHSET_VERSION = $PGTAG" >> src/Makefile.global; \
 	fi ; \
 	# install postgresql
-	make -j "$(nproc)"; \
-	make -C contrib -j "$(nproc)"; \
-	make install; \
-	make -C contrib install; \
+	make world-bin -j "$(nproc)"; \
+	make install-world-bin; \
 	# install orioledb extension
 	cd /usr/src/postgresql/contrib/orioledb; \
 	# Remove any stale generated SQL files that may have leaked into the
@@ -229,36 +273,41 @@ RUN set -eux; \
 	\
 	# Clean up only if not in debug mode
 	if [ "$DEBUG_MODE" != "true" ]; then \
-		apt-get -y remove \
-			${DOCKER_PG_LLVM_DEPS} \
-			bison \
-			build-essential \
-			curl \
-			flex \
-			gdb \
-			git \
-			libicu-dev \
-			libipc-run-perl \
-			liblz4-dev \
-			libreadline-dev \
-			libxml2-dev \
-			libxslt1-dev \
-			libzstd-dev \
-			make \
-			pkg-config \
-			python3-dev \
-			python3-pip \
-			uuid-dev \
-			wget \
-		; \
-		apt-get -y autoremove; \
-		rm -rf /var/cache/apt/archives /var/lib/apt/lists/*; \
+		# Reset all packages to "auto", then restore whatever was marked manual
+		# before this RUN layer started (i.e. the base image's own packages).
+		# This mirrors the pattern used by the official postgres Docker image.
+		apt-mark auto '.*' > /dev/null; \
+		[ -z "$savedAptMark" ] || apt-mark manual $savedAptMark > /dev/null; \
+		# Scan shared library dependencies of PostgreSQL executables and shared
+		# modules (.so), then mark their owning apt packages as "manual" so
+		# apt-get --auto-remove keeps the required runtime .so files.
+		# Using ldd + dpkg -S is distro-version-agnostic: no hardcoded package
+		# names or brittle llvm runtime package heuristics are needed, and it
+		# works across Ubuntu 20/22/24 and Debian bullseye/bookworm/trixie.
+		find /usr/local/bin /usr/local/lib /usr/local/lib/postgresql -maxdepth 5 -type f \
+			\( -perm /111 -o -name '*.so' -o -name '*.so.*' \) \
+			| xargs ldd 2>/dev/null \
+			| grep -oE '/[^ ]+\.so[^ ]*' \
+			| sort -u \
+			| xargs -r realpath 2>/dev/null \
+			| sort -u \
+			| xargs -r dpkg -S 2>/dev/null \
+			| grep -v '^diversion by ' \
+			| cut -d: -f1 \
+			| sort -u \
+			| xargs -r apt-mark manual; \
+		apt-get purge -y --auto-remove \
+			-o APT::AutoRemove::RecommendsImportant=false; \
 		apt-get clean; \
 		rm -rf \
-			/usr/src/postgresql \
-			/usr/local/share/doc \
-			/usr/local/share/man \
 			/tmp/* \
+			/usr/local/share/doc \
+			/usr/share/man/* \
+			/usr/src/postgresql \
+			/var/cache/apt/archives/* \
+			/var/lib/apt/lists/* \
+			/var/log/*.log \
+			/var/log/*/*.log \
 		; \
 	fi ; \
 	\
@@ -269,8 +318,8 @@ RUN set -eux; \
 	initdb --version
 
 ENV PGDATA=/var/lib/postgresql/data
-# this 777 will be replaced by 700 at runtime (allows semi-arbitrary "--user" values)
-RUN mkdir -p "$PGDATA" && chown -R postgres:postgres "$PGDATA" && chmod 777 "$PGDATA"
+# this 1777 will be replaced by 700 at runtime (allows semi-arbitrary "--user" values)
+RUN mkdir -p "$PGDATA" && chown -R postgres:postgres "$PGDATA" && chmod 1777 "$PGDATA"
 VOLUME /var/lib/postgresql/data
 
 RUN mkdir -p /etc/postgresql && chown -R postgres:postgres /etc/postgresql && chmod 700 /etc/postgresql
@@ -281,6 +330,7 @@ ENV POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=en"
 
 COPY docker/init/docker-entrypoint.sh /usr/local/bin/
 COPY docker/init/default-orioledb.sh /docker-default-initdb.d/
+# docker-entrypoint.sh uses su-exec (Alpine's gosu equivalent); replace with gosu for Debian/Ubuntu
 RUN sed -i -e 's/su-exec/gosu/g' "/usr/local/bin/docker-entrypoint.sh"
 ENTRYPOINT ["docker-entrypoint.sh"]
 
@@ -291,14 +341,14 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 # corruption.
 #
 # Users who know their applications do not keep open long-lived idle connections
-# may way to use a value of SIGTERM instead, which corresponds to "Smart
+# may want to use a value of SIGTERM instead, which corresponds to "Smart
 # Shutdown mode" in which any existing sessions are allowed to finish and the
 # server stops when all sessions are terminated.
 #
-# See https://www.postgresql.org/docs/12/server-shutdown.html for more details
+# See https://www.postgresql.org/docs/current/server-shutdown.html for more details
 # about available PostgreSQL server shutdown signals.
 #
-# See also https://www.postgresql.org/docs/12/server-start.html for further
+# See also https://www.postgresql.org/docs/current/server-start.html for further
 # justification of this as the default value, namely that the example (and
 # shipped) systemd service files use the "Fast Shutdown mode" for service
 # termination.
@@ -311,7 +361,7 @@ STOPSIGNAL SIGINT
 # STOPSIGNAL and sending SIGKILL (which is likely to cause data corruption).
 #
 # The default in most runtimes (such as Docker) is 10 seconds, and the
-# documentation at https://www.postgresql.org/docs/12/server-start.html notes
+# documentation at https://www.postgresql.org/docs/current/server-start.html notes
 # that even 90 seconds may not be long enough in many instances.
 
 EXPOSE 5432
