@@ -37,6 +37,7 @@
  */
 int			ppool_run_clock_depth = 0;
 #define PPOOL_RUN_CLOCK_MAX_DEPTH	2
+static 			OPagePool *outer_pool = NULL;
 
 /*
  * Calculates shared memory space needed for a page pool. Be careful,
@@ -119,6 +120,17 @@ ppool_reserve_pages(OPagePool *pool, int kind, int count)
 	while (pg_atomic_sub_fetch_u64(pool->availablePagesCount, count) & (UINT64CONST(1) << 63))
 	{
 		pg_atomic_add_fetch_u64(pool->availablePagesCount, count);
+
+		if (ppool_run_clock_depth > 0)
+		{
+			Assert(pool == get_ppool(OPagePoolFreeTree) || pool == get_ppool(OPagePoolMain));
+			Assert(outer_pool);
+			Assert(pool != outer_pool);
+		}
+		else
+		{
+			outer_pool = pool;
+		}
 
 		if (ppool_run_clock_depth >= PPOOL_RUN_CLOCK_MAX_DEPTH ||
 			!ppool_run_clock(pool, true, NULL))
