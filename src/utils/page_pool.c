@@ -36,8 +36,8 @@
  * indefinitely if the pool stays exhausted.
  */
 int			ppool_run_clock_depth = 0;
-#define PPOOL_RUN_CLOCK_MAX_DEPTH	2
-static 			OPagePool *outer_pool = NULL;
+#define PPOOL_RUN_CLOCK_MAX_DEPTH	1
+static OPagePool *outer_pool = NULL;
 
 /*
  * Calculates shared memory space needed for a page pool. Be careful,
@@ -107,7 +107,6 @@ void
 ppool_reserve_pages(OPagePool *pool, int kind, int count)
 {
 	bool		was_saving;
-	bool		error = false;
 
 	Assert(!have_locked_pages());
 
@@ -121,6 +120,7 @@ ppool_reserve_pages(OPagePool *pool, int kind, int count)
 	{
 		pg_atomic_add_fetch_u64(pool->availablePagesCount, count);
 
+		Assert(ppool_run_clock_depth <= PPOOL_RUN_CLOCK_MAX_DEPTH);
 		if (ppool_run_clock_depth > 0)
 		{
 			Assert(pool == get_ppool(OPagePoolFreeTree) || pool == get_ppool(OPagePoolMain));
@@ -128,31 +128,23 @@ ppool_reserve_pages(OPagePool *pool, int kind, int count)
 			Assert(pool != outer_pool);
 		}
 		else
-		{
 			outer_pool = pool;
-		}
 
-		Assert(ppool_run_clock_depth < 2);
-		if (ppool_run_clock_depth >= PPOOL_RUN_CLOCK_MAX_DEPTH ||
-			!ppool_run_clock(pool, true, NULL))
+		if (!ppool_run_clock(pool, true, NULL))
 		{
-			error = true;
-			break;
+			o_stop_saving_inval_messages(was_saving);
+			ereport(ERROR,
+					(errcode(ERRCODE_OUT_OF_MEMORY),
+					 errmsg("orioledb page pool is exhausted"),
+					 errhint("Increase \"orioledb.main_buffers\" or reduce "
+							 "the number of tables accessed in a single "
+							 "transaction.")));
 		}
 	}
 
-	if (!error)
-		pool->numPagesReserved[kind] += count;
+	pool->numPagesReserved[kind] += count;
 
 	o_stop_saving_inval_messages(was_saving);
-
-	if (error)
-		ereport(ERROR,
-				(errcode(ERRCODE_OUT_OF_MEMORY),
-				 errmsg("orioledb page pool is exhausted"),
-				 errhint("Increase \"orioledb.main_buffers\" or reduce "
-						 "the number of tables accessed in a single "
-						 "transaction.")));
 }
 
 /*

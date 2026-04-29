@@ -507,7 +507,6 @@ typedef enum OPagePoolType
 	OPagePoolCatalog = 2
 } OPagePoolType;
 #define OPagePoolTypesCount 3
-#define InvalidPoolType 4
 
 typedef struct OPagePool OPagePool;
 struct BTreeDescr;
