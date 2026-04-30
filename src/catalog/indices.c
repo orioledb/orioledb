@@ -392,7 +392,6 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			   IndexBuildResult *result)
 {
 	OTable	   *old_o_table = NULL;
-	OTable	   *new_o_table;
 	OTable	   *o_table;
 	OIndexNumber ix_num;
 	OTableIndex *table_index;
@@ -505,6 +504,8 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			/* Rebuild, assign new oids */
 			if (ix_type == oIndexPrimary)
 			{
+				OTable	   *new_o_table;
+
 				new_o_table = o_tables_get(oids);
 				o_table = new_o_table;
 				assign_new_oids(new_o_table, heap, false);
@@ -581,8 +582,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	else
 		o_tables_table_meta_lock(o_table);
 
-	o_opclass_cache_add_table(o_table);
-	custom_types_add_all(o_table, table_index);
+	o_cache_index_types(o_table, table_index);
 	if (!reuse_relnode && table_index->type == oIndexPrimary)
 	{
 		Assert(old_o_table);

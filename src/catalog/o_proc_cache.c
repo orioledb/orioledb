@@ -151,7 +151,7 @@ typedef SQLFunctionCache *SQLFunctionCachePtr;
 
 static void init_sql_fcache(FunctionCallInfo fcinfo, Oid collation,
 							bool lazyEvalOK, sql_func_data *out_sql_func,
-							MemoryContext out_sql_func_cxt);
+							MemoryContext out_sql_func_cxt, List **processed);
 static void sql_exec_error_callback(void *arg);
 
 static Pointer o_proc_cache_serialize_entry(Pointer entry, int *len);
@@ -189,12 +189,14 @@ o_proc_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	HeapTuple	proctup;
 	Form_pg_proc procform;
 	OProc	   *o_proc = (OProc *) *entry_ptr;
-	Oid		   *fncollation = (Oid *) arg;
+	OProcArg   *parg = (OProcArg *) arg;
 	bool		lazyEvalOK = false;
 	SQLFunctionCachePtr fcache;
 	MemoryContext oldcontext;
 	int			i;
 	Oid			procoid = DatumGetObjectId(key->keys[0]);
+	Oid			fncollation = parg->collation;
+	List	  **processed = parg->processed;
 
 	proctup = SearchSysCache1(PROCOID, key->keys[0]);
 	if (!HeapTupleIsValid(proctup))
@@ -228,11 +230,6 @@ o_proc_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	o_proc->argtypes = palloc0(o_proc->nargs * sizeof(Oid));
 	memcpy(o_proc->argtypes, procform->proargtypes.values,
 		   o_proc->nargs * sizeof(Oid));
-	for (i = 0; i < o_proc->nargs; i++)
-	{
-		o_type_cache_add_if_needed(key->common.datoid, o_proc->argtypes[i],
-								   key->common.lsn, NULL);
-	}
 
 	fmgr_symbol(procoid, &o_proc->probin, &o_proc->prosrc);
 
@@ -240,15 +237,12 @@ o_proc_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	{
 		FmgrInfo   *finfo;
 		FunctionCallInfo fcinfo;
-		OClassArg	arg = {.sys_table = true};
-		XLogRecPtr	cur_lsn;
-		Oid			datoid;
 
 		finfo = palloc0(sizeof(FmgrInfo));
 		fcinfo = palloc0(SizeForFunctionCallInfo(2));
 		fmgr_info(procoid, finfo);
 		InitFunctionCallInfoData(*fcinfo, finfo, 2,
-								 *fncollation, NULL, NULL);
+								 fncollation, NULL, NULL);
 
 		/* Check call context */
 		if (fcinfo->flinfo->fn_retset)
@@ -278,11 +272,8 @@ o_proc_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 
 		o_proc->sql_func = palloc0(sizeof(sql_func_data));
 		init_sql_fcache(fcinfo, fcinfo->fncollation, lazyEvalOK,
-						o_proc->sql_func, o_proc->cxt);
+						o_proc->sql_func, o_proc->cxt, processed);
 
-		o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-		o_class_cache_add_if_needed(datoid, TypeRelationId, cur_lsn,
-									(Pointer) &arg);
 		for (i = 0; i < o_proc->sql_func->nnqtlists; i++)
 		{
 			int			j;
@@ -293,7 +284,7 @@ o_proc_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 
 				pstmt = castNode(PlannedStmt, o_proc->sql_func->qtlists[i][j]);
 
-				o_collect_functions_pstmt(pstmt);
+				o_collect_functions_pstmt(pstmt, processed);
 			}
 		}
 		fcache = (SQLFunctionCachePtr) fcinfo->flinfo->fn_extra;
@@ -752,7 +743,8 @@ o_prepare_sql_fn_parse_info(OProc *o_proc, Node *call_expr, Oid inputCollation)
  */
 static void
 init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
-				sql_func_data *out_sql_func, MemoryContext out_sql_func_cxt)
+				sql_func_data *out_sql_func, MemoryContext out_sql_func_cxt,
+				List **processed)
 {
 	FmgrInfo   *finfo = fcinfo->flinfo;
 	Oid			foid = finfo->fn_oid;
@@ -1213,8 +1205,7 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 
 				att = &jf->jf_cleanTupType->attrs[cur_resno - 1];
 				out_sql_func->jf_atts[cur_resno - 1] = att->atttypid;
-				o_type_cache_add_if_needed(datoid, att->atttypid, cur_lsn,
-										   NULL);
+				o_cache_type_safe(datoid, att->atttypid, InvalidOid, cur_lsn, processed);
 				cur_resno++;
 			}
 		}
@@ -1568,7 +1559,7 @@ o_fmgr_sql(PG_FUNCTION_ARGS)
 
 	if (fcache == NULL)
 	{
-		init_sql_fcache(fcinfo, fcinfo->fncollation, lazyEvalOK, NULL, NULL);
+		init_sql_fcache(fcinfo, fcinfo->fncollation, lazyEvalOK, NULL, NULL, NULL);
 		fcache = (SQLFunctionCachePtr) fcinfo->flinfo->fn_extra;
 	}
 
@@ -1954,7 +1945,7 @@ sql_exec_error_callback(void *arg)
 
 void
 o_proc_cache_validate_add(Oid datoid, Oid procoid, Oid fncollation,
-						  char *func_type, char *used_for)
+						  char *func_type, char *used_for, List **processed)
 {
 	StringInfoData str;
 
@@ -1964,7 +1955,7 @@ o_proc_cache_validate_add(Oid datoid, Oid procoid, Oid fncollation,
 					 "of orioledb index", func_type, used_for);
 	o_validate_function_by_oid(procoid, str.data);
 
-	o_collect_function_by_oid(procoid, fncollation);
+	o_collect_function_by_oid(procoid, fncollation, processed);
 	pfree(str.data);
 }
 

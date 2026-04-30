@@ -286,11 +286,9 @@ orioledb_save_collation(Oid colloid)
 	{
 		XLogRecPtr	cur_lsn;
 		Oid			datoid;
-		OClassArg	arg = {.sys_table = true};
 
 		o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
-		o_class_cache_add_if_needed(datoid, CollationRelationId, cur_lsn,
-									(Pointer) &arg);
+		o_class_cache_add_if_needed(datoid, CollationRelationId, cur_lsn, NULL);
 		o_collation_cache_add_if_needed(datoid, colloid, cur_lsn, NULL);
 	}
 }

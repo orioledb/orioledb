@@ -148,7 +148,8 @@ CREATE TABLE o_test_cid_array
 	arr cid[] NOT NULL,
 	PRIMARY KEY(arr)
 ) USING orioledb;
-ERROR:  could not identify a comparison function for type cid
+ERROR:  could not identify a comparison function for type "cid" used in btree index field
+DETAIL:  not allowing it here, because any inserts in such index will break recovery for orioledb tables
 BEGIN;
 INSERT INTO o_test_cid_array VALUES (ARRAY['1'::cid, '2'::cid]);
 ERROR:  relation "o_test_cid_array" does not exist
@@ -173,7 +174,8 @@ CREATE TABLE o_test_cid_record
 	a o_rec,
 	PRIMARY KEY(a)
 ) USING orioledb;
-ERROR:  could not identify a comparison function for type cid
+ERROR:  could not identify a comparison function for type "cid" used in btree index field
+DETAIL:  not allowing it here, because any inserts in such index will break recovery for orioledb tables
 BEGIN;
 INSERT INTO o_test_cid_record VALUES (ROW('1'::cid));
 ERROR:  relation "o_test_cid_record" does not exist
@@ -204,7 +206,8 @@ CREATE TABLE o_test_xid_array
 	arr xid[] NOT NULL,
 	PRIMARY KEY (arr)
 ) USING orioledb;
-ERROR:  could not identify a comparison function for type xid
+ERROR:  could not identify a comparison function for type "xid" used in btree index field
+DETAIL:  not allowing it here, because any inserts in such index will break recovery for orioledb tables
 BEGIN;
 INSERT INTO o_test_xid_array VALUES (ARRAY['1'::xid, '2'::xid]);
 ERROR:  relation "o_test_xid_array" does not exist
