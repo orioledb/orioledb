@@ -67,7 +67,6 @@ class EvictionBGWriterTest(BaseTest):
 
 		node.stop()
 
-
 	def test_bgwriter_keeps_number_across_crash(self):
 		node = self.node
 		node.append_conf(
@@ -83,7 +82,7 @@ class EvictionBGWriterTest(BaseTest):
 				WHERE backend_type = 'orioledb background writer';
 			""")
 			result = {}
-			for (pid,) in rows:
+			for (pid, ) in rows:
 				try:
 					title = subprocess.check_output(
 					    ['ps', '-p', str(pid), '-o', 'command='],
@@ -95,25 +94,31 @@ class EvictionBGWriterTest(BaseTest):
 					result[int(m.group(1))] = pid
 			return result
 
-		initial = get_bgwriters()
-		self.assertEqual(set(initial.keys()), {0, 1, 2})
+		def wait_for_bgwriters(expected_nums, exclude_pids=()):
+			deadline = time.time() + 180
+			last = {}
+			while time.time() < deadline:
+				try:
+					last = get_bgwriters()
+				except Exception:
+					last = {}
+				if (set(last.keys()) == expected_nums
+				    and not any(last[n] in exclude_pids
+				                for n in expected_nums)):
+					return last
+				time.sleep(0.2)
+			return last
+
+		initial = wait_for_bgwriters({0, 1, 2})
+		self.assertEqual(set(initial.keys()), {0, 1, 2},
+		                 "bgwriters did not come up at startup")
 
 		target_num = 1
 		target_pid = initial[target_num]
 		os.kill(target_pid, signal.SIGKILL)
 
 		# Wait for postmaster crash recovery to bring all bgwriters back.
-		deadline = time.time() + 60
-		final = {}
-		while time.time() < deadline:
-			try:
-				final = get_bgwriters()
-			except Exception:
-				final = {}
-			if (set(final.keys()) == {0, 1, 2}
-			        and final.get(target_num) not in (None, target_pid)):
-				break
-			time.sleep(0.2)
+		final = wait_for_bgwriters({0, 1, 2}, exclude_pids=(target_pid, ))
 
 		self.assertEqual(set(final.keys()), {0, 1, 2},
 		                 "bgwriters did not respawn after crash")
