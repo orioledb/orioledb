@@ -131,11 +131,6 @@ o_aggregate_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	o_agg->aggmtranstype = aggform->aggmtranstype;
 	o_agg->aggtranstype = aggform->aggtranstype;
 
-	o_type_cache_add_if_needed(key->common.datoid, o_agg->aggtranstype,
-							   key->common.lsn, NULL);
-	o_type_cache_add_if_needed(key->common.datoid, o_agg->aggmtranstype,
-							   key->common.lsn, NULL);
-
 	textInitVal = SysCacheGetAttr(AGGFNOID, aggtup,
 								  Anum_pg_aggregate_agginitval,
 								  &initValueIsNull);

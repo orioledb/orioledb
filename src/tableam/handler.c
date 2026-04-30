@@ -877,7 +877,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 											 old_o_table->fillfactor,
 											 rel->rd_rel->reltablespace,
 											 old_o_table->index_bridging);
-		o_opclass_cache_add_table(new_o_table);
+		o_cache_table_types(new_o_table);
 
 		/* Copy compression settings from old table */
 		new_o_table->default_compress = old_o_table->default_compress;

@@ -2082,7 +2082,7 @@ create_o_table_for_rel(Relation rel)
 									 RelationGetFillFactor(rel, BTREE_DEFAULT_FILLFACTOR),
 									 rel->rd_rel->reltablespace,
 									 false);
-	o_opclass_cache_add_table(o_table);
+	o_cache_table_types(o_table);
 
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 	o_database_cache_add_if_needed(datoid, datoid, cur_lsn, NULL);
@@ -3279,12 +3279,10 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 		if (rel != NULL)
 		{
-			if (rel->rd_rel->relkind == RELKIND_COMPOSITE_TYPE)
+			if (rel->rd_rel->relkind == RELKIND_COMPOSITE_TYPE &&
+				(subId != 0))
 			{
 				o_find_composite_type_dependencies(rel->rd_rel->reltype, rel);
-				CommandCounterIncrement();
-				o_class_cache_update_if_needed(MyDatabaseId, rel->rd_rel->oid,
-											   NULL);
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
 					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
@@ -3606,10 +3604,20 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		{
 			if (rel->rd_rel->relkind == RELKIND_COMPOSITE_TYPE)
 			{
+				OClassArg	arg = {0};
+
 				o_find_composite_type_dependencies(rel->rd_rel->reltype, rel);
 				CommandCounterIncrement();
 				o_class_cache_update_if_needed(MyDatabaseId, rel->rd_rel->oid,
-											   NULL);
+											   (Pointer) &arg);
+				if (arg.found)
+				{
+					XLogRecPtr	cur_lsn;
+
+					o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
+					o_cache_type(MyDatabaseId, rel->rd_rel->reltype, InvalidOid,
+								 cur_lsn);
+				}
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
 					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
@@ -4113,12 +4121,24 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				break;
 
 			case TYPTYPE_COMPOSITE:
-				rel = relation_open(typeidTypeRelid(objectId), AccessShareLock);
-				o_find_composite_type_dependencies(objectId, rel);
-				relation_close(rel, AccessShareLock);
-				CommandCounterIncrement();
-				o_class_cache_update_if_needed(MyDatabaseId, rel->rd_rel->oid,
-											   NULL);
+				{
+					OClassArg	arg = {0};
+
+					rel = relation_open(typeidTypeRelid(objectId), AccessShareLock);
+					o_find_composite_type_dependencies(objectId, rel);
+					relation_close(rel, AccessShareLock);
+					CommandCounterIncrement();
+					o_class_cache_update_if_needed(MyDatabaseId, rel->rd_rel->oid,
+												   (Pointer) &arg);
+					if (arg.found)
+					{
+						XLogRecPtr	cur_lsn;
+
+						o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
+						o_cache_type(MyDatabaseId, rel->rd_rel->reltype, InvalidOid,
+									 cur_lsn);
+					}
+				}
 				break;
 
 			default:

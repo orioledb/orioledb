@@ -71,7 +71,7 @@ class FunctionTest(BaseTest):
 		""")
 
 		self.assertEqual(
-		    "[(Decimal('123000'),)]",
+		    "[(Decimal('131000'),)]",
 		    str(
 		        node.execute(
 		            "SELECT round(undo_size, -3) FROM orioledb_undo_size() WHERE undo_type = 'system';"
