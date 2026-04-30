@@ -1176,7 +1176,7 @@ _PG_init(void)
 
 	/* Register background writers */
 	for (i = 0; i < bgwriter_num_workers; i++)
-		register_bgwriter();
+		register_bgwriter(i);
 
 	if (enable_rewind)
 		register_rewind_worker();

@@ -40,9 +40,10 @@
 #include "pgstat.h"
 
 bool		IsBGWriter = false;
+int			BGWriterNum = -1;
 
 void
-register_bgwriter(void)
+register_bgwriter(int num)
 {
 	BackgroundWorker worker;
 
@@ -51,9 +52,11 @@ register_bgwriter(void)
 	worker.bgw_flags = BGWORKER_SHMEM_ACCESS;
 	worker.bgw_start_time = BgWorkerStart_PostmasterStart;
 	worker.bgw_restart_time = 0;
+	worker.bgw_main_arg = Int32GetDatum(num);
 	strcpy(worker.bgw_library_name, "orioledb");
 	strcpy(worker.bgw_function_name, "bgwriter_main");
-	strcpy(worker.bgw_name, "orioledb background writer");
+	pg_snprintf(worker.bgw_name, sizeof(worker.bgw_name),
+				"orioledb background writer %d", num);
 	strcpy(worker.bgw_type, "orioledb background writer");
 	RegisterBackgroundWorker(&worker);
 }
@@ -66,6 +69,8 @@ bgwriter_main(Datum main_arg)
 				wake_events = WL_LATCH_SET | WL_POSTMASTER_DEATH | WL_TIMEOUT;
 	bool		need_eviction,
 				need_write;
+
+	BGWriterNum = DatumGetInt32(main_arg);
 
 	/* enable timeout for relation lock */
 	RegisterTimeout(DEADLOCK_TIMEOUT, CheckDeadLockAlert);
@@ -87,12 +92,13 @@ bgwriter_main(Datum main_arg)
 	pqsignal(SIGUSR1, procsignal_sigusr1_handler);
 	BackgroundWorkerUnblockSignals();
 
-	elog(LOG, "orioledb background writer started");
+	elog(LOG, "orioledb background writer %d started", BGWriterNum);
 	IsBGWriter = true;
 
 	if (debug_disable_bgwriter)
 	{
-		elog(LOG, "orioledb background writer stopped: orioledb.debug_disable_bgwriter = True");
+		elog(LOG, "orioledb background writer %d stopped: orioledb.debug_disable_bgwriter = True",
+			 BGWriterNum);
 		return;
 	}
 
@@ -186,9 +192,13 @@ bgwriter_main(Datum main_arg)
 					 * Even when eviction is not needed, update min undo
 					 * locations to allow cleanup of undo files.  Without
 					 * this, minProcRetainLocation set during recovery may
-					 * never be advanced on a synced replica.
+					 * never be advanced on a synced replica. Only first
+					 * bgwriter does this to avoid unnecessary concurrency.
 					 */
-					update_min_undo_locations((UndoLogType) j, false, true);
+					Assert(BGWriterNum >= 0);
+
+					if (BGWriterNum == 0)
+						update_min_undo_locations((UndoLogType) j, false, true);
 				}
 			}
 
@@ -199,7 +209,7 @@ bgwriter_main(Datum main_arg)
 
 			ResetLatch(MyLatch);
 		}
-		elog(LOG, "orioledb bgwriter is shut down");
+		elog(LOG, "orioledb bgwriter %d is shut down", BGWriterNum);
 	}
 	PG_CATCH();
 	{
