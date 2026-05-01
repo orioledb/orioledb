@@ -2041,7 +2041,8 @@ orioledb_error_cleanup_hook(void)
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		release_undo_size((UndoLogType) i);
 	btree_mark_incomplete_splits();
-	unset_skip_ucm();
+	skip_ucm = false;
+	ppool_run_clock_depth = 0;
 	btree_io_error_cleanup();
 	o_reset_syscache_hooks();
 	o_ddl_cleanup();

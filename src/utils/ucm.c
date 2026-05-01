@@ -24,7 +24,7 @@
 #define UCM_LEVEL_BITS		4
 #define UCM_LEVEL_MASK		0xF
 
-static bool skip_ucm = false;
+bool		skip_ucm = false;
 
 static int	init_ucm_non_leaf_recursive(UsageCountMap *map, int i);
 static void ucm_inc_recursive(UsageCountMap *map, int i, int prev, int next);
@@ -591,16 +591,4 @@ ucm_occupy_free_page(UsageCountMap *map)
 			num_iterations++;
 		}
 	}
-}
-
-void
-set_skip_ucm(void)
-{
-	skip_ucm = true;
-}
-
-void
-unset_skip_ucm(void)
-{
-	skip_ucm = false;
 }

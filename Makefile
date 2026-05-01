@@ -212,7 +212,8 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/toast_index_test.py \
 						test/t/trigger_test.py \
 						test/t/unlogged_test.py \
-						test/t/vacuum_test.py
+						test/t/vacuum_test.py \
+						test/t/page_pool_test.py
 TESTGRESCHECKS_PART_3 = test/t/rewind_time_test.py
 
 PG_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test --temp-instance=./test/tmp_check

@@ -2886,13 +2886,13 @@ checkpoint_btree(BTreeDescr **descrPtr, CheckpointState *state,
 										ALLOCSET_DEFAULT_SIZES);
 	prev_context = MemoryContextSwitchTo(tmp_context);
 
-	set_skip_ucm();
+	skip_ucm = true;
 	/* Walk the tree recursively starting from rootPageBlkno */
 	root_downlink = checkpoint_btree_loop(descrPtr,
 										  state,
 										  writeback,
 										  tmp_context);
-	unset_skip_ucm();
+	skip_ucm = false;
 
 	checkpoint_reset_stack(state);
 
