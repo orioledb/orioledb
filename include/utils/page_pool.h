@@ -55,7 +55,7 @@ typedef struct PagePoolOps
 
 	OInMemoryBlkno (*free_pages_count) (PagePool *pool);
 	OInMemoryBlkno (*dirty_pages_count) (PagePool *pool);
-	void		(*run_maintenance) (PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
+	bool		(*run_maintenance) (PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
 	OInMemoryBlkno (*size) (PagePool *pool);
 
 	/* Usage tracking */
@@ -114,11 +114,11 @@ ppool_dirty_pages_count(PagePool *pool)
 	return pool->ops->dirty_pages_count(pool);
 }
 
-static inline void
+static inline bool
 ppool_run_maintenance(PagePool *pool, bool evict,
 					  volatile sig_atomic_t *shutdown_requested)
 {
-	pool->ops->run_maintenance(pool, evict, shutdown_requested);
+	return pool->ops->run_maintenance(pool, evict, shutdown_requested);
 }
 
 static inline OInMemoryBlkno
@@ -149,6 +149,8 @@ typedef struct OPagePool
 	pg_atomic_uint64 *availablePagesCount;
 	/* count of dirty pages in the pool */
 	pg_atomic_uint32 *dirtyPagesCount;
+	/* refcount for successful page evictions by all backends */
+	pg_atomic_uint64 *pageEvictCount;
 	/* init position for the ucm */
 	OInMemoryBlkno location;
 	/* offset of the pool in the o_shared_buffers */
@@ -183,6 +185,8 @@ typedef struct LocalPagePool
 } LocalPagePool;
 
 extern void local_ppool_init(LocalPagePool *pool);
+
+extern int	ppool_run_clock_depth;
 
 #define PAGE_DESC_FLAG_DIRTY			1	/* Modified since the the last
 											 * time being written out */
