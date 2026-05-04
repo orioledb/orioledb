@@ -61,7 +61,7 @@ class RepeatableReadStressTest(BaseTest):
 		n_readers_pk = 6
 		n_readers_sk = 6
 		n_readers_mixed = 6
-		duration = 60
+		duration = 5 * 60
 		checkpoint_interval = 0.5
 		ddl_nemesis_interval = 0.2
 		wal_chaos_idle = 0.1
@@ -391,16 +391,15 @@ class RepeatableReadStressTest(BaseTest):
 				# dprint(
 				    # f'[ddl-nemesis] adds={local_add} drops={local_drop}')
 
+		wal_chaos_points = [
+			'before-tx-commit',
+			'after-tx-commit', # cause a pg cluster termination with signal 6
+			# 'after-proc-array-end-tx',
+		    # 'orioledb-wal-flush',
+		    # 'xlog-flush',
+		]
+
 		def wal_chaos_loop():
-			# WAL chaos nemesis: attach/detach the
-			# orioledb-wal-flush injection point. While attached
-			# with the `error` action, every call to
-			# add_modify_wal_record_extended raises ERROR and drives
-			# the aborting transaction through Postgres xact
-			# machinery (wal_rollback + undo apply + CSN=ABORTED).
-			# Backed by the contrib `injection_points` extension;
-			# requires Postgres built --enable-injection-points.
-			# Analog of Tarantool's start_wal_chaos fiber.
 			con = node.connect()
 			local_on = 0
 			logged_error = [False]
@@ -417,9 +416,19 @@ class RepeatableReadStressTest(BaseTest):
 					if stop.wait(wal_chaos_idle):
 						break
 					try:
+						# Pick a random injection point
+						# No need to pick all at once, because only the first
+						# one on the execution path will be triggered
+						rating = []
+						for point in wal_chaos_points:
+							rating.append(
+							    (point,
+							     random.randint(1, len(wal_chaos_points))))
+						rating.sort(key=lambda x: x[1])
+
 						con.execute(
-						    "SELECT injection_points_attach("
-						    "'orioledb-wal-flush', 'error')")
+							"SELECT injection_points_attach("
+							f"'{rating[0][0]}', 'error')")
 						con.commit()
 						local_on += 1
 					except Exception as e:
@@ -428,12 +437,12 @@ class RepeatableReadStressTest(BaseTest):
 						except Exception:
 							pass
 						log_once('attach', e)
-					# explicit yield
 					time.sleep(0)
 					try:
-						con.execute(
-						    "SELECT injection_points_detach("
-						    "'orioledb-wal-flush')")
+						for point in wal_chaos_points:
+							con.execute(
+							    "SELECT injection_points_detach("
+							    f"'{point}')")
 						con.commit()
 					except Exception as e:
 						try:
@@ -443,9 +452,10 @@ class RepeatableReadStressTest(BaseTest):
 						log_once('detach', e)
 			finally:
 				try:
-					con.execute(
-					    "SELECT injection_points_detach("
-					    "'orioledb-wal-flush')")
+					for point in wal_chaos_points:
+						con.execute(
+						    "SELECT injection_points_detach("
+						    f"'{point}')")
 					con.commit()
 				except Exception:
 					try:
@@ -546,7 +556,7 @@ class RepeatableReadStressTest(BaseTest):
 		threads.append(threading.Thread(target=checkpointer_loop))
 		# threads.append(threading.Thread(target=ddl_nemesis_loop))
 		threads.append(threading.Thread(target=wal_chaos_loop))
-		threads.append(threading.Thread(target=stopevent_chaos_loop))
+		# threads.append(threading.Thread(target=stopevent_chaos_loop))
 
 		for t in threads:
 			t.start()

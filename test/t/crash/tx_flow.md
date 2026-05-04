@@ -183,3 +183,297 @@ oxid space:   ▒▒▒▒▒▒▒▒│░░░░░░░░│████
 | **A** | `oxid < writtenXmin`                       | Already overwritten or recyclable for newer oxids                 | Authoritative copy is **on disk** |
 | **B** | `writtenXmin ≤ oxid < writeInProgressXmin` | Being torn down right now; entries are FROZEN sentinels mid-write | Disk write in progress; transient |
 | **C** | `oxid ≥ writeInProgressXmin`               | Authoritative ring slot, owned by the regular CAS protocol        | In memory, lock-free reads/writes |
+
+## SELECT TX FLOW
+
+The bank-test reader issues e.g. `SELECT balance, token FROM o_bank_account WHERE id = X` inside an already-open RR transaction. Read-only path: no undo push, no WAL emission, no page mutation; only the snapshot-retain-undo bookkeeping is touched on the Oriole side. Note: OrioleDB's `set_rel_pathlist_hook` rewrites every PG-native scan path (`Path` / `IndexPath` / `BitmapHeapPath`) into a `CustomScan` plan node ([scan.c:343](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/scan.c#L343)), so the executor never reaches `ExecIndexScan` / `IndexNext` / `index_fetch_heap` / `orioledb_index_fetch_tuple`. The tuple comes via Oriole's own custom-scan exec methods.
+
+[exec_simple_query](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1017) -- main entry point of query execution.
+|
+[start_xact_command](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1051) -- inside an open block this is just a state toggle, no new tx is started.
+|
+parse + [analyze](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1194-L1195) + [plan](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1197-L1198) -- yields a plan tree with a `CustomScan` node (Oriole's `o_scan_methods`) wrapping the index lookup.
+|
+[CreatePortal](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1220) + [PortalStart](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1239) + [PortalRun](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1278-L1284) -- portal machinery wraps query execution.
+	|
+	[PortalRunSelect](https://github.com/orioledb/postgres/blob/0c466f5e0b34bb9ddc53a422e9872b726f5f9620/src/backend/tcop/pquery.c#L766) -- SELECT-only branch; bypasses the multi-utility loop since there's no DDL or transaction-control to dispatch.
+		|
+		[ExecutorRun](https://github.com/orioledb/postgres/blob/0c466f5e0b34bb9ddc53a422e9872b726f5f9620/src/backend/tcop/pquery.c#L922) -- generic executor entry; immediately delegates to the standard variant.
+			|
+			[standard_ExecutorRun](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/executor/execMain.c#L306) -- driver of the executor.
+				|
+				[ExecutePlan](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/executor/execMain.c#L360) -- pulls tuples from the plan tree's root node.
+					|
+					[ExecProcNode](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/executor/execMain.c#L1697) -- function-pointer dispatch via `planstate->ExecProcNode(planstate)`. For our `CustomScan` plan node the pointer was set to `ExecCustomScan` at plan init.
+						|
+						[ExecCustomScan](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/executor/nodeCustom.c#L114) -- PG's CustomScan executor; reached via function-pointer dispatch, so the link points to the function definition.
+							|
+							[methods->ExecCustomScan](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/executor/nodeCustom.c#L122) -- second function-pointer dispatch into the `CustomExecMethods` registered for this scan; for OrioleDB this resolves to `o_exec_custom_scan` via `o_scan_exec_methods`.
+								|
+								[o_exec_custom_scan](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/scan.c#L678) -- Oriole's `ExecCustomScan` callback; reached via function-pointer dispatch, so the link points to the function definition.
+									|
+									[o_exec_fetch](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/scan.c#L746) -- index-scan branch of `o_exec_custom_scan` (the `O_IndexPlan` case). Loops fetching tuples until one passes the qual.
+										|
+										[o_index_scan_getnext](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/index_scan.c#L552) -- per-call driver; advances the scan key range and pulls the next tuple.
+											|
+											[o_iterate_index](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/index_scan.c#L489) -- per-key-range driver. For an `exact` (point) lookup like `WHERE id = X` the `ostate->exact` branch is taken below.
+												|
+												[o_btree_find_tuple_by_key](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/index_scan.c#L377) -- exact-match B-tree lookup-by-key entry. Calls into the find machinery on the primary index. **good point for injection** -- before any tree work, error here is clean: nothing to undo, snapshot still in place.
+													|
+													[o_btree_find_tuple_by_key_cb](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/iterator.c#L274) -- inner workhorse. Decides whether the visible version sits on the data page or has to be reconstructed by combining the data page with the undo log image (when our snapshot is in the past *and* this backend has its own pending changes on this tree).
+														|
+														[init_page_find_context](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/iterator.c#L147-L149) -- snapshot-aware find context; the CSN is what drives "see this version, ignore newer-CSN tuples".
+														|
+														[find_page](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/iterator.c#L155) -- root-to-leaf descent of the primary index. Each level acquires a page lock, evaluates the downlink for our key, releases the parent. STOPEVENT `step_down` fires per level, `page_read` fires after each leaf is read. **good point for injection** -- can be approached via the existing `page_read` stopevent (freeze) or a fresh ereport injection (abort), both safe outside critical sections.
+														|
+														[combinedResult branch](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/iterator.c#L170) -- when our snapshot is older than the page CSN, combine on-page tuple with undo-log replay. Pure read path, no shared-state mutation.
+													|
+													visibility callback walk -- per-tuple `xactInfo.oxid` is consulted against the CSN buffer; if INPROGRESS or above-snapshot, follow the undo chain backward until visible version is found. Lock-free reads only.
+										|
+										[tts_orioledb_store_tuple](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/index_scan.c#L560) -- copies the visible tuple into the executor's scan slot. After this point the row is "delivered" to the SQL layer.
+								|
+								[o_exec_project](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/scan.c#L770) -- per-tuple projection (run only if the plan needs it). Returns the projected slot back up the dispatch chain.
+					|
+					slot returned to [ExecutePlan's loop](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/executor/execMain.c#L1697) which sends the row to `dest->receiveSlot`; on the next iteration `ExecProcNode` is called again until a NULL slot ends the loop.
+		|
+		`PortalRun` returns the rendered tuples to the client; portal teardown drops snapshots and releases per-statement memory.
+|
+[finish_xact_command](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1303) -- inside an open transaction block this just toggles state back to `IN_PROGRESS` (no commit happens here).
+|
+[finish_xact_command](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1354) -- second call at the end of `exec_simple_query` is a no-op (still in the same tx block).
+
+Notes on injection candidates that are *unsuitable* for SELECT:
+
+* Inside `find_page`'s page-lock acquisition -- wrapped in critical sections at the lowest level; ereport(ERROR) from there escalates to PANIC.
+* During visibility callback while a tuple's `xactInfo` is being followed -- can be paused via stopevents but must not raise; raising mid-walk leaves no broken state on this backend (read-only) but pollutes the page-find context's image buffer.
+
+The reader path doesn't touch undo or WAL on the producer side, so the bank-test's reader threads will not exercise the `wal_chaos` injection point at all -- only the `stopevent_chaos` ones (`page_read`, `step_down`).
+
+
+## UPDATE TX FLOW
+
+The bank-test writer issues e.g. `UPDATE o_bank_account SET balance = ?, token = ? WHERE id = X`, which mutates the PK row (balance/token columns) *and* requires updating the unique secondary index on `token`. PostgreSQL drives the two as separate operations: TableAM updates the primary index first, then the executor calls IndexAM `amupdate` for each affected secondary. The row to update is sourced from `ExecModifyTable`'s inner subplan, which in OrioleDB's case is a `CustomScan` (same path as SELECT, see [scan.c:343](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/scan.c#L343) -- `set_rel_pathlist_hook` rewrites all PG-native scan paths into Oriole's `CustomScan`). What follows traces only the modification path, not the row-fetch.
+
+[exec_simple_query](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1017) -- main entry point of query execution.
+|
+[start_xact_command](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1051) -- inside an open block this is just a state toggle.
+|
+parse + [analyze](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1194-L1195) + [plan](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1197-L1198) -- yields a plan tree with a ModifyTable node wrapping an index scan that locates the row to update.
+|
+[CreatePortal](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1220) + [PortalStart](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1239) + [PortalRun](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1278-L1284) -- portal machinery wraps query execution.
+	|
+	[PortalRunMulti](https://github.com/orioledb/postgres/blob/0c466f5e0b34bb9ddc53a422e9872b726f5f9620/src/backend/tcop/pquery.c#L789) -- UPDATE goes through Multi (its plan tree contains a non-SELECT mutation node).
+		|
+		[ProcessQuery](https://github.com/orioledb/postgres/blob/0c466f5e0b34bb9ddc53a422e9872b726f5f9620/src/backend/tcop/pquery.c#L1275) -- per-non-utility statement handler invoked by PortalRunMulti.
+			|
+			[ExecutorRun](https://github.com/orioledb/postgres/blob/0c466f5e0b34bb9ddc53a422e9872b726f5f9620/src/backend/tcop/pquery.c#L160) -- generic executor entry; immediately delegates to the standard variant.
+				|
+				[standard_ExecutorRun](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/executor/execMain.c#L306) -- driver of the executor.
+					|
+					[ExecutePlan](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/executor/execMain.c#L360) -- pulls tuples from the plan tree's root node.
+						|
+						[ExecModifyTable](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/executor/nodeModifyTable.c#L3654) -- driver of the ModifyTable plan node. Reached via function-pointer dispatch through `ExecProcNode`, so the link points to the function definition. Per-row loop body below.
+							|
+							**Phase 0 -- fetch the candidate row from the inner subplan**
+							|
+							[ExecProcNode(subplanstate)](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/executor/nodeModifyTable.c#L3760) -- per-iteration call inside ExecModifyTable that pulls the next candidate row from the inner subplan into `context.planSlot`. The slot also carries a junk attribute holding the rowid that TableAM will use to locate the on-disk tuple.
+								|
+								the inner subplan is OrioleDB's `CustomScan` (because `set_rel_pathlist_hook` rewrote the IndexScan path -- see `## SELECT TX FLOW`). The full fetch chain mirrors SELECT: `ExecCustomScan` → `o_exec_custom_scan` → [o_exec_fetch](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/scan.c#L746) → `o_index_scan_getnext` → `o_iterate_index` → `o_btree_find_tuple_by_key` → `find_page` → visibility walk → `tts_orioledb_store_tuple`. The returned slot becomes `context.planSlot`.
+							|
+							junk-attribute extraction -- `tableoid` / rowid / wholetuple junk fields are pulled out of `context.planSlot` to identify the target row and old tuple image. On NULL slot the per-row loop exits.
+							|
+							[ExecUpdate](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/executor/nodeModifyTable.c#L2479) -- per-row UPDATE handler invoked once the candidate row has been fetched. Splits into **two further phases**: PK side via TableAM, then SK side via IndexAM.
+								|
+								**Phase 1 -- PK update via TableAM**
+								|
+								[ExecUpdateAct](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/executor/nodeModifyTable.c#L2266) -- runs `BEFORE UPDATE` triggers, evaluates the new row, then dispatches to TableAM.
+									|
+									[table_tuple_update](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/executor/nodeModifyTable.c#L2024) -- TableAM dispatch via `relation->rd_tableam->tuple_update`. Falls into Oriole's hook below.
+									|
+									[orioledb_tuple_update](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/handler.c#L629) -- TableAM update hook. Receives the rowid of the row to mutate, the new tuple in `slot`, and the CommandId.
+										|
+										[get_current_oxid](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/handler.c#L657) -- ensures this backend has an oxid; allocates one lazily on first DML.
+										|
+										[get_keys_from_rowid](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/handler.c#L659-L660) -- decode old PK from rowid (same primitive as in SELECT).
+										|
+										[o_tbl_update](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/handler.c#L684-L685) -- main table-level update body.
+											|
+											[CheckCmdReplicaIdentity](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1103) -- pre-check for replication identity validity. Read-only at this point. **good point for injection** -- still no page locks held, ereport here aborts cleanly with no undo to apply.
+											|
+											[tts_orioledb_form_tuple](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1237) -- materializes the new in-memory row image.
+											|
+											pkey-equality check -- if old/new PK keys are equal, take the in-place `overwrite` branch; otherwise the more invasive `reinsert` branch (delete old + insert new). The bank workload's UPDATE never changes `id`, so it's always overwrite.
+											|
+											[o_tbl_indices_overwrite](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1244-L1245) -- PK-only update entry for the in-place case. Despite the name, this only modifies the primary index; secondary indexes are updated later by IndexAM dispatch.
+												|
+												[o_btree_modify](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1578-L1582) with action = `BTreeOperationUpdate` -- public B-tree modify entry.
+													|
+													[o_btree_modify_internal](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L1055) -- locates the leaf page, acquires the page write-lock, runs the modify-callback (`o_update_callback`) for visibility / row-lock decisions. STOPEVENT `modify_start` fires here.
+													|
+													[o_btree_modify_add_undo_record](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L701) -- pushes a `ModifyUndoItemType` undo entry capturing the pre-image. **good point for injection** -- page is locked, undo not yet attached to leaf header. Aborting here is still safe because the page mutation hasn't started; abort path's `apply_undo_stack` walks past this point with no item to revert.
+													|
+													[START_CRIT_SECTION](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L673) -- critical section begins. **NOT suitable for injection** -- ereport(ERROR) inside a critical section escalates to PANIC and brings down the cluster.
+													|
+													page mutation: `page_block_reads` + tuple replacement + `MARK_DIRTY` -- the actual in-place update of the leaf page in shared buffers.
+													|
+													[END_CRIT_SECTION](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L679) -- critical section ends. Page is now mutated, undo is attached, page-lock still held by us.
+												|
+												page lock release -- after the callback chain unwinds.
+											|
+											[o_wal_update](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1294) -- emits `WAL_REC_UPDATE` into the per-backend local WAL buffer.
+												|
+												[add_modify_wal_record](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/recovery/wal.c#L834) -- per-row WAL helper. Just packs the record into the local buffer; no flush yet. **good point for injection** between PK page mutation completion and WAL write -- abort here surfaces the "data changed but WAL not written" race that recovery has to handle. Currently injection point is placed at [flush_local_wal](https://github.com/orioledb/orioledb/blob/6f900ca6cf4b8eee3eec0634254ec21ee8c8918d/src/recovery/wal.c#L297) (`orioledb-wal-flush`), one level out.
+							|
+							control returns to ExecUpdate. **good point for injection** -- PK side is fully durable in shared memory and local WAL, but secondary indexes still hold the old token entry. A reader scanning by `token` at this instant would see the row at the *old* token key. This is precisely the inconsistency window the bank-test's `reader_sk` cross-check probes for.
+							|
+							**Phase 2 -- SK update via IndexAM** (driven by PG executor for each affected secondary index)
+							|
+							[ExecUpdateIndexTuples](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/executor/nodeModifyTable.c#L2053) -- post-table-update entry; loops over the relation's indexes. For an unchanged index it skips, for a changed one it issues an update. The bank-test's UPDATE always changes `token`, so the unique SK is processed every time.
+								|
+								[index_update](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/executor/execIndexing.c#L707) call site -- per-index loop body inside the `ExecUpdateIndexTuples`.
+									|
+									[index_update](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/access/index/indexam.c#L266) -- IndexAM dispatch via `indexRelation->rd_indam->amupdate`. Falls into Oriole's per-index hook.
+										|
+										[orioledb_amupdate](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/indexam/handler.c#L666) -- IndexAM `amupdate` hook. Called once per affected secondary index. For non-orioledb indexes (e.g. via index_bridging) it forwards to standard `index_insert`; for native orioledb indexes it goes the path below.
+											|
+											key bound construction for old + new SK keys.
+											|
+											[o_update_secondary_index](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/indexam/handler.c#L759-L763) -- the actual SK B-tree work. Two B-tree modifies in sequence: delete-by-old-key, then insert-by-new-key.
+												|
+												old/new key equality short-circuit -- if SK key values didn't change, return immediately. The bank workload always changes `token`, so this branch is never taken.
+												|
+												[o_btree_modify(BTreeOperationDelete)](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1513-L1517) -- delete the old SK entry.
+													|
+													page lock + undo push (`ModifyUndoItemType` for the SK B-tree) + `START_CRIT_SECTION` + page mutation + `END_CRIT_SECTION`.
+													|
+													**No WAL emitted for the SK delete.** The regular `o_btree_modify` path used for user-table SK updates does *not* call `add_modify_wal_record` -- the `o_wal_insert/delete` calls at [modify.c:1526](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L1526) / [modify.c:1577](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L1577) live inside `o_btree_autonomous_insert/delete`, which assert `IS_SYS_TREE_OIDS(...)` and only fire for system-catalog trees.
+												|
+												**good point for injection** between SK-delete and SK-insert -- table state has the new PK row, the SK is *missing* the entry entirely (neither old key nor new key resolves to this row). A reader doing `SELECT ... ORDER BY token` would skip the row at this instant. The bank-test's `reader_sk` invariant catches this directly: SK-scan total != PK-scan total or `len(tokens) != n_accounts`.
+												|
+												[o_btree_modify(BTreeOperationInsert)](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1532-L1536) for non-unique SK / [o_btree_insert_unique](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1538-L1542) for unique SK -- insert the new SK entry. The bank workload's token-uniqueness index uses the unique variant, which performs the deferred-uniqueness check via PG's constraint trigger queue rather than inline.
+													|
+													page lock + undo push + `START_CRIT_SECTION` + page mutation + `END_CRIT_SECTION`.
+													|
+													**No WAL emitted for the SK insert either** (same reason as the SK delete above). The SK page mutation and undo entry are sufficient for the live transaction; recovery / replication will re-derive the SK changes from the PK's `WAL_REC_UPDATE` record by replaying the new+old PK rows through `o_tbl_indices_overwrite` on the redo side.
+							|
+							ExecUpdateIndexTuples loop continues for any remaining secondary index, then returns. ExecUpdate returns to ExecModifyTable.
+						|
+						ExecModifyTable iterates the inner subplan for the next row (none for our PK-equality `WHERE id = X`); on NULL slot it ends.
+				|
+				ExecutorRun / ProcessQuery return to PortalRunMulti, which loops to the next PlannedStmt or completes.
+		|
+		`PortalRun` finishes; portal teardown drops snapshots and releases per-statement memory.
+|
+[finish_xact_command](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1303) -- inside an open transaction block this just toggles state back to `IN_PROGRESS` (no commit happens here -- the writer's `con.commit()` later issues a separate `COMMIT` statement that drives the COMMIT TX FLOW).
+|
+[finish_xact_command](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1354) -- second call at the end of `exec_simple_query` is a no-op.
+
+Per writer tx the bank workload pushes ~6 `ModifyUndoItemType` items (PK update + SK delete + SK insert per UPDATE, ×2 because the tx has two UPDATEs) but emits only ~2 `WAL_REC_UPDATE` records (one per UPDATE, both from `o_wal_update` on the primary descriptor). SK index changes are *not* WAL-logged separately -- only the PK's update is, and recovery re-derives the SK page mutations by replaying the PK update through `o_tbl_indices_overwrite`. Everything is flushed at COMMIT.
+
+
+## ABORT TX FLOW
+
+Triggered by any `ereport(ERROR)` raised during the tx -- native serialization conflict, deferred-uniqueness violation at COMMIT, `wal_chaos` injection at flush boundary, `pg_terminate_backend`, statement timeout, etc. The ereport longjmps out of whatever call stack raised it; control lands in `PostgresMain`'s top-level error handler, which drives the abort path.
+
+[ereport(ERROR, ...)](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/utils/error/elog.c#L346) -- error raised somewhere in Oriole or PG. `errstart` allocates an error data slot.
+	|
+	[errfinish](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/utils/error/elog.c#L477) -- finalizes the error record, then `siglongjmp`s out of the current call stack.
+|
+[PostgresMain sigsetjmp catch](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L4426) -- the top-level catch in the backend's main loop receives the longjmp.
+	|
+	[EmitErrorReport](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L4465) -- ships the error message to the client / log.
+	|
+	[AbortCurrentTransaction](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L4482) -- the wrapper that drives the abort regardless of which TBLOCK state we were in.
+		|
+		[AbortCurrentTransactionInternal](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/access/transam/xact.c#L3430) -- state-machine dispatch; for the in-block-tx case (`TBLOCK_INPROGRESS`) unconditionally calls `AbortTransaction`.
+			|
+			[AbortTransaction](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/access/transam/xact.c#L3464) -- the actual rollback machinery. Fires xact-event callbacks, releases resources, transitions oxid state.
+				|
+				(For an explicit `ROLLBACK` SQL statement the entry path is different: `exec_simple_query` → `PortalRun` → `PortalRunMulti` → `PortalRunUtility` → `standard_ProcessUtility` → `TRANS_STMT_ROLLBACK` → `UserAbortTransactionBlock`, which only flips state to `TBLOCK_ABORT_PENDING`. The real abort runs at the next `finish_xact_command` via `CommitTransactionCommand` → `AbortTransaction`. Rarely hit in the bank-test because writers abort via `ereport(ERROR)`, not explicit ROLLBACK -- psycopg2's `con.rollback()` only fires after the server-side abort already happened.)
+				|
+				[CallXactCallbacks](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/access/transam/xact.c#L2393-L2394) with event = XACT_EVENT_ABORT -- triggers OrioleDB's registered handler (same registration as commit, see [RegisterXactCallback](https://github.com/orioledb/orioledb/blob/bbd7c1254e4cbd23bc4cafda02289c91609111e6/src/orioledb.c#L1210)).
+					|
+					[undo_xact_callback](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2110) with event = XACT_EVENT_ABORT -- the function's body runs the steps below in order. The XACT_EVENT_ABORT switch case at [undo.c:2327](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2327) is reached only after the pre-switch setup completes.
+						|
+						**Pre-switch setup (common to COMMIT and ABORT)**
+						|
+						`oxid = get_current_oxid_if_any()` and `isParallelWorker = ...` are evaluated at the top -- determines whether this tx ever allocated an oxid and whether we're running in a parallel worker (parallel workers take a fast path).
+						|
+						`ea_counters = NULL` -- clears EXPLAIN ANALYZE counters that the executor may have left dangling if the abort happened mid-node.
+						|
+						[seq_scans_cleanup](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2136) -- releases per-backend sequential-scan state (read locks on internal pages, scan iterators). Common to COMMIT and ABORT; runs unconditionally here, before any undo / WAL work.
+						|
+						[no-oxid / parallel-worker fast path](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2144-L2154) -- if `!OXidIsValid(oxid) || isParallelWorker` (read-only tx that never allocated an oxid, or a parallel worker leader), only run trivial state resets (`reset_cur_undo_locations`, `orioledb_reset_xmin_hook`, `reset_command_undo_locations`, clear `oxid_needs_wal_flush` / `xidless_commit_lsn` / `minParentSubId`) and exit. **No undo walk, no `wal_rollback`, no CSN flip** -- there's nothing to roll back. This is the path the bank-test's reader threads take on abort.
+						|
+						**Else branch -- a real oxid abort:**
+						|
+						`heapXid = GetTopTransactionIdIfAny()` and `get_current_logical_xid_ctx(&logicalXidContext)` -- captures the heap xid (if any) and logical-xid bookkeeping. Used to decide whether this is a pure-Oriole tx, a heap-only tx, or a `SWITCH_LOGICAL_XID` cross-engine tx. For the bank-test writer (Oriole-only) `heapXid == InvalidTransactionId`.
+						|
+						[Assert(!RecoveryInProgress())](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2215) -- abort callbacks must not fire on the recovery side; recovery has its own abort handling via `recovery_finish_current_oxid(COMMITSEQNO_ABORTED, ...)` driven by `WAL_REC_ROLLBACK` records.
+						|
+						**XACT_EVENT_ABORT switch case** -- the actual abort work begins below.
+						|
+						[wal_rollback](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2334) -- emits `WAL_REC_ROLLBACK` if the tx had material changes. **No-op for read-only or no-change txs.** The early bail at `local_wal_has_material_changes == false` skips WAL emission entirely.
+							|
+							[flush_local_wal_if_needed](https://github.com/orioledb/orioledb/blob/6f900ca6cf4b8eee3eec0634254ec21ee8c8918d/src/recovery/wal.c#L351) -- ensure room for the rollback record.
+							|
+							[add_finish_wal_record(WAL_REC_ROLLBACK)](https://github.com/orioledb/orioledb/blob/6f900ca6cf4b8eee3eec0634254ec21ee8c8918d/src/recovery/wal.c#L357-L358) -- pushes the rollback marker.
+							|
+							[flush_local_wal](https://github.com/orioledb/orioledb/blob/6f900ca6cf4b8eee3eec0634254ec21ee8c8918d/src/recovery/wal.c#L359) -- flushes the local buffer to global XLog. **NOT suitable for re-injection here** -- we are already in the abort path; raising again would re-enter abort and PANIC. The `wal_chaos` injection point is gated by `isCommit` to skip exactly this call.
+						|
+						[apply_undo_stack(undoType)](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2336-L2337) per UndoLogType -- walks the per-backend undo chain backward from `sharedLocations->location` to InvalidUndoLocation, calling each item's abort callback.
+							|
+							[walk_undo_stack(abortTrx=true)](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L1416) -- the iteration framework. Sets up the buffer for reading undo items.
+								|
+								[walk_undo_range_with_buf](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L1375-L1378) -- read a contiguous range of undo items from the per-undo-type log.
+									|
+									[walk_undo_range loop](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L1241) -- for-each-undo-item loop. Per item: read the undo record, dispatch to the type-specific callback (`modify_undo_callback` for `ModifyUndoItemType`), advance to `item->prev`. **good instrumentation point between iterations** -- partial undo applied, leaf pages reverted for the items processed so far but not the rest. Exactly the "torn rollback" race that the bank invariant catches if state is observably inconsistent at this moment. Two complementary modes here: (a) **ereport-style injection** -- raises mid-abort and re-enters the abort handler, which Postgres escalates to **PANIC**. Useful to test that recovery (and the postmaster's restart-after-crash) correctly finishes the partial rollback by replaying `WAL_REC_ROLLBACK` and re-applying undo. (b) **stopevent / `injection_points_attach('...', 'wait')` -style freeze** -- pauses the aborting backend on a condvar without raising; concurrent readers race against the partial state, then the test releases. Use this mode to expose visibility races without crashing the cluster.
+									|
+									per-item callback runs INSIDE the loop body -- for `ModifyUndoItemType` this restores the pre-image on the SK/PK leaf page (in-place, in shared buffers, under page lock). Each callback that mutates a page enters its own `START_CRIT_SECTION`/`END_CRIT_SECTION`, so injection MUST be *between* callbacks, never inside.
+							|
+							`branchLocation` / `onCommitLocation` cleanup -- after the iteration the function clears or repositions the undo head pointers under `undoStackLocationsFlushLock`.
+						|
+						**good instrumentation point between `apply_undo_stack` and `current_oxid_abort`** -- in-memory pages are reverted but the oxid's CSN is still INPROGRESS in `xidBuffer`. Concurrent readers consulting the CSN see "tx is still running" while the underlying data has already disappeared. Same two modes apply as inside the loop: (a) **ereport-style injection here triggers PANIC** because we are still in the abort handler (re-entrant ereport during XACT_EVENT_ABORT). Useful for stressing the crash-restart path -- recovery sees `WAL_REC_ROLLBACK`, replays it, re-flips CSN to ABORTED. (b) **stopevent / `injection_wait`-style freeze** is the safe option for live cluster races -- pause here, let other backends consult the inconsistent CSN+page state, then release. The bank-test's invariants catch any observable anomaly.
+						|
+						[wal_after_commit](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2343) -- clears `commitInProgressXlogLocation`. Same routine used by the commit path. NOT a write to WAL.
+						|
+						[reset_cur_undo_locations + reset_command_undo_locations](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2345-L2346) -- forget local pointers into the undo log.
+						|
+						[current_oxid_abort](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2347) -- the visibility flip.
+							|
+							[set_oxid_csn(curOxid, COMMITSEQNO_ABORTED)](https://github.com/orioledb/orioledb/blob/4ca6f69408f76c58bfc37ed601000aae247538d8/src/transam/oxid.c#L1493) -- single atomic write that makes the tx invisible to all snapshots. Same lock-free CAS shape as the commit-side `set_oxid_csn`, with the same fast-path / on-disk-fallback split.
+						|
+						[set_oxid_xlog_ptr(oxid, InvalidXLogRecPtr)](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2348) -- clears the xlog-ptr buffer slot. Pairs with the CSN write so the oxid's two-tuple state is `{ABORTED, InvalidXLogRecPtr}`.
+						|
+						registered-snapshot teardown loop -- frees `retainUndoLocHeaps` so subsequent `runXmin` advances aren't blocked by this tx's snapshot.
+						|
+						`xidless_commit_lsn` / `oxid_needs_wal_flush` / `in_nontransactional_truncate` resets.
+					|
+					**End of XACT_EVENT_ABORT switch case; common COMMIT/ABORT post-switch cleanup follows.**
+					|
+					[release_undo_size per UndoLogType](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2380-L2381) -- returns this backend's reserved undo-location quota to the global pool so other txs can use it.
+					|
+					[ppool_release_reserved per OPagePoolType](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2383-L2387) -- releases reserved page-pool slots that this tx had set aside for its modifications.
+					|
+					[free_retained_undo_location per UndoLogType](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2390-L2391) -- final teardown of any per-tx retained undo locations not yet released.
+				|
+				`undo_xact_callback` returns to PG's `CallXactCallbacks` loop, which then proceeds to subsequent registered xact callbacks (if any).
+			|
+			`AbortTransaction` returns; transaction state is now `TBLOCK_ABORT` (or `TBLOCK_DEFAULT` for non-block aborts). [CleanupTransaction](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/access/transam/xact.c#L3465) is called next to free the TransactionState memory.
+		|
+		`AbortCurrentTransactionInternal` returns true (state machine is done); the [while loop in AbortCurrentTransaction](https://github.com/orioledb/postgres/blob/ac88d9a17c6eadfca2e55fc2f18b915283587271/src/backend/access/transam/xact.c#L3430) terminates.
+	|
+	control returns from `AbortCurrentTransaction` back into the `PostgresMain` `sigsetjmp` block.
+|
+[PostgresMain main loop](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L4486) resumes -- emits `ReadyForQuery` to the client (with status `'E'` for "in failed transaction"), then waits in [ReadCommand](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L4500) for the next client message. The client is expected to issue `ROLLBACK` (or `COMMIT`, which is also treated as ROLLBACK in TBLOCK_ABORT) to exit the failed-transaction state. psycopg2 issues `ROLLBACK` automatically on the next `con.rollback()` call from the bank-test's `except Exception:` branch.
+
+Two-mode reminder for the whole ABORT body:
+
+* **ereport-style injection inside the abort flow always escalates to PANIC** (because we are already inside the XACT_EVENT_ABORT handler). That is *not* useless -- it deliberately drives the postmaster's "crash of another server process" path, forcing crash recovery to replay `WAL_REC_ROLLBACK` and finish the partial undo on next startup. Use this mode when the goal is to stress crash-recovery correctness or the postmaster's restart loop.
+* **stopevent / `injection_points_attach('...', 'wait')`-style freezes are the live-cluster-safe alternative.** They pause the aborting backend on a condvar without raising, so concurrent readers/writers race against the partial state while the backend stays alive. Use this mode when the goal is to expose visibility / consistency races without taking the cluster down. The bank-test's existing `stopevent_chaos` worker is the right harness for this.
+
+Notes on places that are *unsuitable for either mode*:
+
+* Inside `walk_undo_range_with_buf`'s per-item callback when the callback is mid-`START_CRIT_SECTION` -- both modes break here. `ereport(ERROR)` inside a critical section escalates to PANIC even outside of abort context. Stopevents pause execution, but pausing while holding LWLocks / page-pin reservations inside a critical section starves other backends; the cluster won't deadlock outright but will hang until the freeze is released.
+* After `current_oxid_abort` -- Postgres comment in `CommitTransaction` (which mirrors the abort cleanup style) explicitly says "if an error is raised here, it's too late to abort the transaction. This should be just noncritical resource releasing." For the abort tail the same caveat applies: ereport here turns into PANIC, AND there is nothing left to observe (the CSN flip is done), so freeze-style injection only delays cleanup without exposing anything new. Skip this region.
+
