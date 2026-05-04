@@ -416,6 +416,65 @@ get_undo_type_name(UndoLogType undoType)
 }
 
 /*
+ * Cleanup files in the undo log byte range [oldStart, oldEnd) that are no
+ * longer kept by the new retain set [chkpStart, chkpEnd) U [activeStart, +inf).
+ *
+ * Called once per old retained range -- the old active retain (passed with
+ * oldEnd = activeStart, since [activeStart, +inf) is still kept) and the old
+ * checkpoint retain range.
+ */
+static void
+unlink_unretained_undo(UndoLogType undoType,
+					   UndoLocation oldStart, UndoLocation oldEnd,
+					   UndoLocation chkpStart, UndoLocation chkpEnd,
+					   UndoLocation activeStart)
+{
+	int64		a,
+				b;
+	int64		newChkpStartNum,
+				newChkpEndNum,
+				newCleanedNum,
+				persistStart;
+	int64		last,
+				first;
+
+	if (oldStart >= oldEnd)
+		return;
+
+	a = oldStart / UNDO_FILE_SIZE;
+	b = (oldEnd - 1) / UNDO_FILE_SIZE;
+	newCleanedNum = activeStart / UNDO_FILE_SIZE;
+	if (chkpStart < chkpEnd)
+	{
+		newChkpStartNum = chkpStart / UNDO_FILE_SIZE;
+		newChkpEndNum = (chkpEnd - 1) / UNDO_FILE_SIZE;
+	}
+	else
+	{
+		/* Empty checkpoint retain range: no chkp constraint. */
+		newChkpStartNum = newCleanedNum;
+		newChkpEndNum = -1;
+	}
+	persistStart = Min(newChkpStartNum, newCleanedNum);
+
+	/* Files in [a, b] below the new persist start. */
+	last = Min(b, persistStart - 1);
+	if (a <= last)
+		o_buffers_unlink_files_range(&undoBuffersDesc, (uint32) undoType,
+									 a, last);
+
+	/* Files in [a, b] in the gap above new chkp end and below new active. */
+	if (persistStart < newCleanedNum)
+	{
+		last = Min(b, newCleanedNum - 1);
+		first = Max(a, newChkpEndNum + 1);
+		if (first <= last)
+			o_buffers_unlink_files_range(&undoBuffersDesc, (uint32) undoType,
+										 first, last);
+	}
+}
+
+/*
  * In case of undoEviction the function increments writeInProgressChangeCount,
  * but doesn't release minUndoLocationsMutex. Releasing this mutex should be
  * done by a caller.
@@ -554,32 +613,6 @@ update_min_undo_locations(UndoLogType undoType,
 
 	if (do_cleanup)
 	{
-		int64		persistStartNum,
-					persistEndNum;
-		int64		oldCleanedNum = oldCleanedLocation / UNDO_FILE_SIZE,
-					newCleanedNum = minRetainLocation / UNDO_FILE_SIZE,
-					oldCheckpointStartNum = oldCheckpointStartLocation / UNDO_FILE_SIZE,
-					oldCheckpointEndNum = oldCheckpointEndLocation / UNDO_FILE_SIZE,
-					newCheckpointStartNum = newCheckpointStartLocation / UNDO_FILE_SIZE,
-					newCheckpointEndNum = newCheckpointEndLocation / UNDO_FILE_SIZE;
-
-		if (oldCheckpointEndLocation % UNDO_FILE_SIZE == 0)
-			oldCheckpointEndNum--;
-		if (newCheckpointEndLocation % UNDO_FILE_SIZE == 0)
-			newCheckpointEndNum--;
-
-		/*---
-		 * Ranges
-		 *
-		 * remove:
-		 * - [oldCheckpointStartNum, oldCheckpointEndNum] - old
-		 * - [oldCleanedNum, *)
-		 *
-		 * persist:
-		 * - [newCheckpointStartNum, newCheckpointEndNum] - new
-		 * - [newCleanedNum, *)
-		 */
-
 		Assert(oldCheckpointStartLocation <= newCheckpointStartLocation || undoType == UndoLogSystem);
 		Assert(oldCheckpointEndLocation <= newCheckpointEndLocation);
 		Assert(oldCheckpointStartLocation <= oldCheckpointEndLocation);
@@ -590,84 +623,26 @@ update_min_undo_locations(UndoLogType undoType,
 		 * previous checkpoint have their retain locations in the
 		 * [checkpointRetainStartLocation, checkpointRetainEndLocation] range.
 		 * These get loaded into minProcRetainLocation during recovery replay,
-		 * which can push minRetainLocation (and thus newCleanedNum) below the
-		 * oldCleanedLocation that was initialized from the control file's
-		 * lastUndoLocation.  This is safe because the undo files in the
-		 * checkpoint retain range were persisted during the previous
-		 * checkpoint and were never cleaned.
+		 * which can push minRetainLocation below oldCleanedLocation (which
+		 * was initialized from the control file's lastUndoLocation). This is
+		 * safe because the undo files in the checkpoint retain range were
+		 * persisted during the previous checkpoint and were never cleaned.
 		 */
-		Assert(oldCleanedNum <= newCleanedNum ||
-			   newCleanedNum >= oldCheckpointStartNum);
+		Assert(oldCleanedLocation / UNDO_FILE_SIZE <= minRetainLocation / UNDO_FILE_SIZE ||
+			   minRetainLocation / UNDO_FILE_SIZE >= oldCheckpointStartLocation / UNDO_FILE_SIZE);
 
 		/*
-		 * Persist Ranges mutual arrangement:
-		 *
-		 * 1) Interleaved: start      end |---------|      |--------------->
-		 * new          newCleanedNum
-		 *
-		 * 2) Overlapped: start          end |-------------| new
-		 * |---------------> newCleanedNum
-		 *
-		 * 3) Overlapped: start      end |---------| new |--------------->
-		 * newCleanedNum
+		 * Old active retain that's no longer retained. Capped at the new
+		 * active retain start, since [minRetainLocation, +inf) is still kept.
 		 */
-		persistStartNum = Min(newCheckpointStartNum, newCleanedNum);
+		unlink_unretained_undo(undoType, oldCleanedLocation, minRetainLocation,
+							   newCheckpointStartLocation, newCheckpointEndLocation,
+							   minRetainLocation);
 
-		/*
-		 * Clear start segment
-		 *
-		 * oldCleanedNum |--------------------------------->
-		 * XXXXXXXXXXXXXXX|------------------> persistStartNum
-		 */
-		if (oldCleanedNum < persistStartNum)
-		{
-			o_buffers_unlink_files_range(
-										 &undoBuffersDesc, (uint32) undoType,
-										 oldCleanedNum, persistStartNum - 1);
-		}
-
-		/*
-		 * Clear start segment
-		 *
-		 * start          end |-------------| old
-		 * XXXXXXXXXXXX|------------------> persistStartNum
-		 */
-		if (oldCheckpointStartNum < persistStartNum)
-		{
-			o_buffers_unlink_files_range(
-										 &undoBuffersDesc, (uint32) undoType,
-										 oldCheckpointStartNum, Min(persistStartNum - 1, oldCheckpointEndNum));
-		}
-
-		/*
-		 * Clear interval segment
-		 *
-		 * start            end |---------------|XXXXXXXXXXX|--------------->
-		 * new                  newCleanedNum
-		 * |-------------------------------------------> oldCleanedNum
-		 */
-		persistEndNum = Max(oldCleanedNum, newCheckpointEndNum + 1);
-		if (persistEndNum < newCleanedNum)
-		{
-			o_buffers_unlink_files_range(
-										 &undoBuffersDesc, (uint32) undoType,
-										 persistEndNum, newCleanedNum - 1);
-		}
-
-		/*
-		 * Clear interval segment
-		 *
-		 * start            end |---------------|XXXXXXXXXXX|--------------->
-		 * new                  newCleanedNum start end
-		 * |------------------------------| old
-		 */
-		persistEndNum = Max(oldCheckpointStartNum, newCheckpointEndNum + 1);
-		if (persistEndNum < newCleanedNum)
-		{
-			o_buffers_unlink_files_range(
-										 &undoBuffersDesc, (uint32) undoType,
-										 persistEndNum, Min(newCleanedNum - 1, oldCheckpointEndNum));
-		}
+		/* Old checkpoint retain range that's no longer retained. */
+		unlink_unretained_undo(undoType, oldCheckpointStartLocation, oldCheckpointEndLocation,
+							   newCheckpointStartLocation, newCheckpointEndLocation,
+							   minRetainLocation);
 	}
 }
 
