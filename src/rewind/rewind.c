@@ -1088,7 +1088,8 @@ try_restore_evicted_rewind_page(void)
 		o_buffers_unlink_files_range(&rewindBuffersDesc,
 									 REWIND_BUFFERS_TAG,
 									 rewindMeta->oldCleanedFileNum,
-									 currentCleanFileNum);
+									 currentCleanFileNum,
+									 0);
 		rewindMeta->oldCleanedFileNum = currentCleanFileNum;
 	}
 }

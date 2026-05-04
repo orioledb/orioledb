@@ -417,11 +417,16 @@ get_undo_type_name(UndoLogType undoType)
 
 /*
  * Cleanup files in the undo log byte range [oldStart, oldEnd) that are no
- * longer kept by the new retain set [chkpStart, chkpEnd) U [activeStart, +inf).
+ * longer kept by the new retain set [chkpStart, chkpEnd) U [activeStart, +inf):
+ * unlink whole unneeded files and punch the unneeded beginning of the file just
+ * above each unlinked region.
  *
  * Called once per old retained range -- the old active retain (passed with
  * oldEnd = activeStart, since [activeStart, +inf) is still kept) and the old
- * checkpoint retain range.
+ * checkpoint retain range. Suffix/middle holes are intentionally not punched;
+ * those bytes are reclaimed when the boundaries advance enough for the file
+ * itself to be unlinked.
+ *
  */
 static void
 unlink_unretained_undo(UndoLogType undoType,
@@ -457,20 +462,57 @@ unlink_unretained_undo(UndoLogType undoType,
 	}
 	persistStart = Min(newChkpStartNum, newCleanedNum);
 
-	/* Files in [a, b] below the new persist start. */
+	/*
+	 * Files in [a, b] below the new persist start. A prefix punch on file
+	 * last+1 only makes sense when last+1 is exactly persistStart, i.e. the
+	 * file that holds the first retained byte. If last+1 < persistStart, the
+	 * file is itself fully unneeded and is unlinked separately; if
+	 * last+1 > persistStart it is fully retained -- in either case pass 0 so
+	 * we never punch over retained data.
+	 */
 	last = Min(b, persistStart - 1);
 	if (a <= last)
-		o_buffers_unlink_files_range(&undoBuffersDesc, (uint32) undoType,
-									 a, last);
+	{
+		off_t		punchLen = 0;
 
-	/* Files in [a, b] in the gap above new chkp end and below new active. */
+		if (last + 1 == persistStart)
+		{
+			UndoLocation incomplete_file_start = (UndoLocation) (last + 1) * UNDO_FILE_SIZE;
+			UndoLocation retained = incomplete_file_start + UNDO_FILE_SIZE;
+
+			if (chkpStart < chkpEnd && newChkpStartNum == last + 1)
+				retained = Min(retained, chkpStart);
+			if (newCleanedNum == last + 1)
+				retained = Min(retained, activeStart);
+			Assert(retained >= incomplete_file_start && retained < incomplete_file_start + UNDO_FILE_SIZE);
+			punchLen = (off_t) (retained - incomplete_file_start);
+		}
+		o_buffers_unlink_files_range(&undoBuffersDesc, (uint32) undoType,
+									 a, last, punchLen);
+	}
+
+	/*
+	 * Files in [a, b] in the gap above new chkp end and below new active. The
+	 * boundary file here is newCleanedNum; only punch when last+1 lands on it.
+	 */
 	if (persistStart < newCleanedNum)
 	{
 		last = Min(b, newCleanedNum - 1);
 		first = Max(a, newChkpEndNum + 1);
 		if (first <= last)
+		{
+			off_t		punchLen = 0;
+
+			if (last + 1 == newCleanedNum)
+			{
+				UndoLocation incomplete_file_start = (UndoLocation) (last + 1) * UNDO_FILE_SIZE;
+
+				Assert(activeStart >= incomplete_file_start && activeStart < incomplete_file_start + UNDO_FILE_SIZE);
+				punchLen = (off_t) (activeStart - incomplete_file_start);
+			}
 			o_buffers_unlink_files_range(&undoBuffersDesc, (uint32) undoType,
-										 first, last);
+										 first, last, punchLen);
+		}
 	}
 }
 

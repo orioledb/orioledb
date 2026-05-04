@@ -515,9 +515,18 @@ o_buffers_sync(OBuffersDesc *desc, uint32 tag,
 	}
 }
 
+/*
+ * Unlink files in [firstFileNumber, lastFileNumber] and additionally punch
+ * a hole over [0, requestedPunchLen) of file lastFileNumber + 1 (rounded down
+ * to ORIOLEDB_BLCKSZ. Pass 0 to skip the punch.
+ *
+ * The following file may not yet exist (e.g. when callers cleanup ahead of
+ * the active write frontier); in that case the punch is silently skipped.
+ */
 void
 o_buffers_unlink_files_range(OBuffersDesc *desc, uint32 tag,
-							 int64 firstFileNumber, int64 lastFileNumber)
+							 int64 firstFileNumber, int64 lastFileNumber,
+							 off_t requestedPunchLen)
 {
 	int64		fileNumber;
 
@@ -531,4 +540,17 @@ o_buffers_unlink_files_range(OBuffersDesc *desc, uint32 tag,
 		 fileNumber <= lastFileNumber;
 		 fileNumber++)
 		unlink_file(desc, tag, fileNumber);
+
+	if (orioledb_use_sparse_files && requestedPunchLen >= ORIOLEDB_BLCKSZ)
+	{
+		int64		firstBlock = (lastFileNumber + 1) * (desc->singleFileSize / ORIOLEDB_BLCKSZ);
+		int64		nblocks = requestedPunchLen / ORIOLEDB_BLCKSZ;
+		off_t		punchLen = (off_t) nblocks * ORIOLEDB_BLCKSZ;
+
+		o_buffers_wipe(desc, tag, firstBlock, firstBlock + nblocks - 1);
+
+		if (open_file(desc, tag, lastFileNumber + 1, false))
+			punch_fd_hole(FileGetRawDesc(desc->curFile), 0, punchLen,
+						  desc->curFileName);
+	}
 }

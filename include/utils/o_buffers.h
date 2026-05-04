@@ -55,6 +55,7 @@ extern void o_buffers_sync(OBuffersDesc *desc, uint32 tag, int64 fromOffset,
 extern void o_buffers_unlink_files_range(OBuffersDesc *desc,
 										 uint32 tag,
 										 int64 firstFileNumber,
-										 int64 lastFileNumber);
+										 int64 lastFileNumber,
+										 off_t prefixEndInFollowingFile);
 
 #endif

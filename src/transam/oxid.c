@@ -1169,26 +1169,30 @@ advance_global_xmin(OXid newXid)
 									 oldCheckpointXminNum,
 									 Min(oldCheckpointXmaxNum,
 										 Min(newCheckpointXminNum - 1,
-											 newCleanedNum - 1)));
+											 newCleanedNum - 1)),
+									 0);
 
 		o_buffers_unlink_files_range(&buffersDesc,
 									 OXID_BUFFERS_TAG,
 									 Max(oldCheckpointXminNum,
 										 newCheckpointXmaxNum + 1),
 									 Min(oldCheckpointXmaxNum,
-										 newCleanedNum - 1));
+										 newCleanedNum - 1),
+									 0);
 
 		o_buffers_unlink_files_range(&buffersDesc,
 									 OXID_BUFFERS_TAG,
 									 oldCleanedNum,
 									 Min(newCheckpointXminNum - 1,
-										 newCleanedNum - 1));
+										 newCleanedNum - 1),
+									 0);
 
 		o_buffers_unlink_files_range(&buffersDesc,
 									 OXID_BUFFERS_TAG,
 									 Max(oldCleanedNum,
 										 newCheckpointXmaxNum + 1),
-									 newCleanedNum - 1);
+									 newCleanedNum - 1,
+									 0);
 	}
 }
 

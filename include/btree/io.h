@@ -53,6 +53,8 @@ extern void btree_smgr_writeback(BTreeDescr *desc, uint32 chkpNum,
 extern void btree_smgr_sync(BTreeDescr *desc, uint32 chkpNum, off_t length);
 extern void btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
 								  off_t offset, int length);
+extern void punch_fd_hole(int fd, off_t offset, off_t length,
+						  const char *fileName);
 extern void init_btree_io_lwlocks(void);
 extern bool read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink, FileExtent *extent);
 extern void load_page(OBTreeFindPageContext *context);
