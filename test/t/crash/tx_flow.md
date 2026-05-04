@@ -220,7 +220,7 @@ parse + [analyze](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc
 											|
 											[o_iterate_index](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/index_scan.c#L489) -- per-key-range driver. For an `exact` (point) lookup like `WHERE id = X` the `ostate->exact` branch is taken below.
 												|
-												[o_btree_find_tuple_by_key](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/index_scan.c#L377) -- exact-match B-tree lookup-by-key entry. Calls into the find machinery on the primary index. **good point for injection** -- before any tree work, error here is clean: nothing to undo, snapshot still in place.
+												[o_btree_find_tuple_by_key](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/index_scan.c#L377) -- exact-match B-tree lookup-by-key entry. Calls into the find machinery on the primary index.
 													|
 													[o_btree_find_tuple_by_key_cb](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/iterator.c#L274) -- inner workhorse. Decides whether the visible version sits on the data page or has to be reconstructed by combining the data page with the undo log image (when our snapshot is in the past *and* this backend has its own pending changes on this tree).
 														|
@@ -300,7 +300,7 @@ parse + [analyze](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc
 										|
 										[o_tbl_update](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/handler.c#L684-L685) -- main table-level update body.
 											|
-											[CheckCmdReplicaIdentity](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1103) -- pre-check for replication identity validity. Read-only at this point. **good point for injection** -- still no page locks held, ereport here aborts cleanly with no undo to apply.
+											[CheckCmdReplicaIdentity](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1103) -- pre-check for replication identity validity. Read-only at this point.
 											|
 											[tts_orioledb_form_tuple](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1237) -- materializes the new in-memory row image.
 											|
@@ -308,25 +308,39 @@ parse + [analyze](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc
 											|
 											[o_tbl_indices_overwrite](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1244-L1245) -- PK-only update entry for the in-place case. Despite the name, this only modifies the primary index; secondary indexes are updated later by IndexAM dispatch.
 												|
-												[o_btree_modify](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1578-L1582) with action = `BTreeOperationUpdate` -- public B-tree modify entry.
+												[o_btree_modify](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1578-L1582) with action = `BTreeOperationUpdate` -- public B-tree modify entry. Just dispatches to `o_btree_normal_modify`.
 													|
-													[o_btree_modify_internal](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L1055) -- locates the leaf page, acquires the page write-lock, runs the modify-callback (`o_update_callback`) for visibility / row-lock decisions. STOPEVENT `modify_start` fires here.
-													|
-													[o_btree_modify_add_undo_record](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L701) -- pushes a `ModifyUndoItemType` undo entry capturing the pre-image. **good point for injection** -- page is locked, undo not yet attached to leaf header. Aborting here is still safe because the page mutation hasn't started; abort path's `apply_undo_stack` walks past this point with no item to revert.
-													|
-													[START_CRIT_SECTION](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L673) -- critical section begins. **NOT suitable for injection** -- ereport(ERROR) inside a critical section escalates to PANIC and brings down the cluster.
-													|
-													page mutation: `page_block_reads` + tuple replacement + `MARK_DIRTY` -- the actual in-place update of the leaf page in shared buffers.
-													|
-													[END_CRIT_SECTION](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L679) -- critical section ends. Page is now mutated, undo is attached, page-lock still held by us.
-												|
-												page lock release -- after the callback chain unwinds.
+													[o_btree_normal_modify](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L987) -- reserves undo space, reserves page-pool capacity, then walks the tree. STOPEVENT `modify_start` fires at the entry. Calls [find_page](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/iterator.c#L155) (or `refind_page` when the caller passed a hint) to locate the target leaf and acquire the page write-lock; on success dispatches into `o_btree_modify_internal` with the populated page-find context.
+														|
+														[o_btree_modify_internal](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L110) -- operates on the already-found, write-locked leaf page. Reads the existing tuple via `BTREE_PAGE_READ_LEAF_ITEM`, runs the modify-callback (`o_update_callback`) for visibility / row-lock / self-modification decisions, and dispatches by action: `o_btree_modify_delete` / `o_btree_modify_lock` for those, or `o_btree_modify_insert_update` for the insert/update branch.
+															|
+															[o_btree_modify_insert_update](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L370) -- the insert/update sub-routine. Reserves an undo entry, then drives the page mutation.
+																|
+																[o_btree_modify_add_undo_record](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L701) -- pushes a `ModifyUndoItemType` undo entry capturing the pre-image and stores its location into `leafTuphdr->undoLocation`. Page is still write-locked but no mutation yet.
+																|
+																[o_btree_insert_tuple_to_leaf](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L725) -- enters the insert machinery in btree/insert.c (function definition at [insert.c#L1350](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/insert.c#L1350)).
+																	|
+																	[o_btree_insert_item](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/insert.c#L1374) -- dispatcher; contains **no** critical section. Walks the insert stack, handles split fix-ups, then dispatches to one of two leaf-mutation helpers depending on whether other backends are waiting to insert at the same leaf.
+																		|
+																		[o_btree_insert_item_no_waiters](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/insert.c#L1337) -- typical UPDATE path (uncontended). The `BTreeItemPageFitAsIs` branch handles in-place tuple replacement. (The contended sibling [o_btree_insert_item_with_waiters](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/insert.c#L1332) has the same crit-section structure at [insert.c#L1002-L1012](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/insert.c#L1002), same lock-release-before-return property.)
+																			|
+																			[START_CRIT_SECTION](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/insert.c#L1064) -- critical section begins. **NOT suitable for injection** -- ereport(ERROR) inside a critical section escalates to PANIC.
+																			|
+																			page mutation: `page_block_reads` + `memcpy` of new tuple header + body + `MARK_DIRTY`.
+																			|
+																			[unlock_page(blkno)](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/insert.c#L1142) -- called **inside** the crit-section, one statement before `END_CRIT_SECTION`. **The leaf write-lock is dropped here**, before control returns up the callback chain.
+																			|
+																			[END_CRIT_SECTION](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/insert.c#L1144) -- critical section ends.
+															|
+															control returns up: `o_btree_modify_insert_update` -> `o_btree_modify_internal`, which then calls [unlock_release(&context, false)](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L371). Note the `false` -- on this path [unlock_release](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L376) does **not** call `unlock_page` (the leaf was already unlocked by the insert machinery above); it only releases the reserved undo size and the page-pool reservation. The early-return / pre-mutation branches of `o_btree_modify_internal` ([L242](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L242), [L317](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L317), [L355](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L355)) call `unlock_release(..., true)` instead -- those paths bail before reaching the insert machinery and so still hold the leaf lock at exit.
 											|
-											[o_wal_update](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1294) -- emits `WAL_REC_UPDATE` into the per-backend local WAL buffer.
+											**good point for injection (`orioledb-pk-mutated-pre-wal`)** -- at this instant the PK leaf has been mutated in shared buffers and *already write-unlocked* (the unlock happened deep inside the insert machinery, see above), the `ModifyUndoItemType` undo entry is pushed and `leafTuphdr->undoLocation` is wired up, but **no `WAL_REC_UPDATE` has been packed into the local WAL buffer yet** -- that is what the `o_wal_update` call below does. Concurrent readers can already hit this leaf (page is unlocked) and rely entirely on the lock-free undo chain + INPROGRESS CSN to resolve to the pre-image. Two interesting failure modes here: (a) `kill -9` of the postmaster -- shared mem holds the new tuple, undo holds the pre-image, but Postgres XLog has no record of the update for this oxid; recovery just sees this oxid never committed and there is nothing to replay or roll back from WAL. Exercises the "page-mutated-but-no-WAL" recovery case. (b) `ereport(ERROR)` -- drives `apply_undo_stack` to revert the leaf via `modify_undo_callback`, then `wal_rollback` emits `WAL_REC_ROLLBACK` with no preceding modify-record for this row in the local buffer -- "rollback of changes that never made it to WAL", which the recovery side must handle gracefully.
 												|
-												[add_modify_wal_record](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/recovery/wal.c#L834) -- per-row WAL helper. Just packs the record into the local buffer; no flush yet. **good point for injection** between PK page mutation completion and WAL write -- abort here surfaces the "data changed but WAL not written" race that recovery has to handle. Currently injection point is placed at [flush_local_wal](https://github.com/orioledb/orioledb/blob/6f900ca6cf4b8eee3eec0634254ec21ee8c8918d/src/recovery/wal.c#L297) (`orioledb-wal-flush`), one level out.
+												[o_wal_update](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1294) -- emits `WAL_REC_UPDATE` into the per-backend local WAL buffer.
+												|
+												[add_modify_wal_record](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/recovery/wal.c#L834) -- per-row WAL helper. Just packs the record into the local buffer; no flush yet. The "page-mutated-but-no-WAL" race is captured by the `orioledb-pk-mutated-pre-wal` injection one frame up (right before `o_wal_update`); a separate injection at the function level here would also fire on system-tree updates and is therefore not used.
 							|
-							control returns to ExecUpdate. **good point for injection** -- PK side is fully durable in shared memory and local WAL, but secondary indexes still hold the old token entry. A reader scanning by `token` at this instant would see the row at the *old* token key. This is precisely the inconsistency window the bank-test's `reader_sk` cross-check probes for.
+							control returns to ExecUpdate. **good point for injection (`orioledb-update-pk-done-pre-sk`)** -- PK leaf is mutated and unlocked in shared buffers, the `ModifyUndoItemType` undo is pushed, and `WAL_REC_UPDATE` is packed in the per-backend *local* WAL buffer (not yet flushed -- that happens at COMMIT via `flush_local_wal`). Secondary indexes still hold the old token entry. A reader scanning by `token` at this instant would see the row at the *old* token key. This is precisely the inconsistency window the bank-test's `reader_sk` cross-check probes for.
 							|
 							**Phase 2 -- SK update via IndexAM** (driven by PG executor for each affected secondary index)
 							|
