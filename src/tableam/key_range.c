@@ -184,7 +184,49 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 		if ((key->sk_flags & SK_SEARCHARRAY) &&
 			key->sk_strategy == BTEqualStrategyNumber)
 		{
-			Assert(arrayKeys && arrayKeys->num_elems > 0);
+			Assert(arrayKeys && (arrayKeys->num_elems > 0 || arrayKeys->num_elems == -1));
+
+#if PG_VERSION_NUM >= 180000
+
+			/*
+			 * Handle skip scan keys (PG18+). They use dynamic ranges instead
+			 * of specific array elements.
+			 */
+			if (key->sk_flags & SK_BT_SKIP)
+			{
+				Assert(arrayKeys->num_elems == -1);
+
+				/* Set up the lower bound from the skip scan low_compare key */
+				if (arrayKeys->low_compare)
+				{
+					ScanKey		lk = arrayKeys->low_compare;
+
+					low.flags = O_VALUE_BOUND_LOWER |
+						(lk->sk_strategy == BTGreaterEqualStrategyNumber ?
+						 O_VALUE_BOUND_INCLUSIVE : 0);
+					o_fill_key_bounds(lk->sk_argument,
+									  OidIsValid(lk->sk_subtype) ? lk->sk_subtype : field->inputtype,
+									  &low, NULL, field);
+					res->low.keys[attnum] = low;
+				}
+
+				/* Set up the upper bound from the skip scan high_compare key */
+				if (arrayKeys->high_compare)
+				{
+					ScanKey		hk = arrayKeys->high_compare;
+
+					high.flags = O_VALUE_BOUND_UPPER |
+						(hk->sk_strategy == BTLessEqualStrategyNumber ?
+						 O_VALUE_BOUND_INCLUSIVE : 0);
+					o_fill_key_bounds(hk->sk_argument,
+									  OidIsValid(hk->sk_subtype) ? hk->sk_subtype : field->inputtype,
+									  NULL, &high, field);
+					res->high.keys[attnum] = high;
+				}
+				arrayKeys++;
+				continue;
+			}
+#endif
 			if (o_key_range_is_unbounded(res, attnum))
 			{
 				if (i < numPrefixExactKeys)

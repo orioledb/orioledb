@@ -6,6 +6,13 @@ export PATH="$GITHUB_WORKSPACE/pgsql/bin:$PATH"
 status=0
 
 cd orioledb
+
+if [ $COMPILER = "clang" ]; then
+	export CC=clang-$LLVM_VER
+else
+	export CC=gcc
+fi
+
 if [ "$COMPILER" = "clang" ]; then
 	scan-build-$LLVM_VER --status-bugs \
 		-disable-checker deadcode.DeadStores \

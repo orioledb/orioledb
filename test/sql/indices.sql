@@ -9,6 +9,10 @@
 CREATE SCHEMA indices;
 SET SESSION search_path = 'indices';
 CREATE EXTENSION orioledb;
+
+SELECT split_part(setting, '.', 1) major_version
+	FROM pg_settings WHERE name = 'server_version';
+
 SELECT orioledb_parallel_debug_start();
 
 CREATE TABLE o_test50
@@ -2042,6 +2046,35 @@ INSERT INTO o_test_add_index_constraint VALUES (6, 'one');  -- Should fail (UNIQ
 
 -- Cleanup
 DROP TABLE o_test_add_index_constraint CASCADE;
+
+-- Test skip scan bounds
+CREATE TABLE test_skip_bounds (
+	id int,
+	x int,
+	y int,
+	PRIMARY KEY (id)
+) USING orioledb;
+CREATE INDEX test_skip_xy_idx ON test_skip_bounds(x, y);
+
+-- Out of lower bound (should not be scanned)
+INSERT INTO test_skip_bounds (id, x, y) VALUES (1, 5, 42);
+-- Out of upper bound (should not be scanned)
+INSERT INTO test_skip_bounds (id, x, y) VALUES (7, 60, 99);
+-- Inside bounds, matching equality
+INSERT INTO test_skip_bounds (id, x, y) VALUES (3, 15, 42);
+-- Inside bounds, NOT matching equality
+INSERT INTO test_skip_bounds (id, x, y) VALUES (4, 20, 99);
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+SELECT x, y FROM test_skip_bounds
+WHERE x > 10 AND x < 50 AND y = 42;
+
+SELECT x, y FROM test_skip_bounds
+WHERE x > 10 AND x < 50 AND y = 42
+ORDER BY x;
+
+RESET enable_seqscan;
 
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;

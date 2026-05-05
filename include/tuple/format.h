@@ -55,6 +55,32 @@ typedef struct BrigeData
 	AttrNumber	attnum;
 } BrigeData;
 
+#if PG_VERSION_NUM < 180000
+#define OTupleAttrCompact		FormData_pg_attribute
+#define OTupleAttrFull			FormData_pg_attribute
+
+#define OTupleDescAttrFast(tupdesc, i) (TupleDescAttr((tupdesc), (i)))
+#define OTupleDescAttrSlow(tupdesc, i) (TupleDescAttr((tupdesc), (i)))
+
+#define o_att_align_nominal(att, cur_offset) \
+	(att_align_nominal(cur_offset, (att)->attalign))
+
+#define o_att_align_pointer(att, cur_offset, attlen, attptr) \
+	(att_align_pointer(cur_offset, (att)->attalign, attlen, attptr))
+#else
+#define OTupleAttrCompact		CompactAttribute
+#define OTupleAttrFull			FormData_pg_attribute
+
+#define OTupleDescAttrFast(tupdesc, i) (TupleDescCompactAttr((tupdesc), (i)))
+#define OTupleDescAttrSlow(tupdesc, i) (TupleDescAttr((tupdesc), (i)))
+
+#define o_att_align_nominal(att, cur_offset) \
+	(att_nominal_alignby(cur_offset, (att)->attalignby))
+
+#define o_att_align_pointer(att, cur_offset, attlen, attptr) \
+	(att_pointer_alignby(cur_offset, (att)->attalignby, attlen, attptr))
+#endif
+
 /*
  * Works with orioledb table tuples in primary index. It can fetch
  * TOAST pointers from table tuple.
@@ -67,11 +93,11 @@ typedef struct BrigeData
 	(																\
 		((attnum) - 1 < (spec)->natts) ?							\
 		(															\
-			TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
+			OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
 			(														\
-				fetchatt(TupleDescAttr((tupleDesc), (attnum) - 1),	\
+				fetchatt(OTupleDescAttrFast((tupleDesc), (attnum) - 1), \
 					(char *) (tup).data +							\
-					TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff) \
+					OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff) \
 			)														\
 			:														\
 				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec), (isnull)) \
@@ -86,11 +112,11 @@ typedef struct BrigeData
 	(																\
 		(!(((OTupleHeader) (tup).data)->hasnulls)) ?				\
 		(															\
-			TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
+			OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
 			(														\
-				fetchatt(TupleDescAttr((tupleDesc), (attnum)-1),	\
+				fetchatt(OTupleDescAttrFast((tupleDesc), (attnum)-1), \
 					(char *) (tup).data + SizeOfOTupleHeader +		\
-					TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff) \
+					OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff) \
 			)														\
 			:														\
 				o_toast_nocachegetattr((tup), (attnum), (tupleDesc), (spec), (isnull)) \
@@ -117,10 +143,10 @@ typedef struct BrigeData
 	(																\
 		((attnum) - 1 < (spec)->natts) ?							\
 		(															\
-			TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
+			OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
 			(														\
 				(char *) (tup).data +									\
-				TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff \
+				OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff \
 			)														\
 			:														\
 				o_toast_nocachegetattr_ptr((tup), (attnum), (tupleDesc), (spec)) \
@@ -134,10 +160,10 @@ typedef struct BrigeData
 	(																\
 		(!(((OTupleHeader) (tup).data)->hasnulls)) ?				\
 		(															\
-			TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
+			OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff >= 0 ? \
 			(														\
 				(char *) (tup).data + SizeOfOTupleHeader +				\
-				TupleDescAttr((tupleDesc), (attnum) - 1)->attcacheoff \
+				OTupleDescAttrFast((tupleDesc), (attnum) - 1)->attcacheoff \
 			)														\
 			:														\
 				o_toast_nocachegetattr_ptr((tup), (attnum), (tupleDesc), (spec)) \
@@ -184,7 +210,7 @@ extern void o_tuple_init_reader(OTupleReaderState *state, OTuple tuple,
 								TupleDesc desc, OTupleFixedFormatSpec *spec);
 extern Datum o_tuple_read_next_field(OTupleReaderState *state, bool *isnull);
 extern uint32 o_tuple_next_field_offset(OTupleReaderState *state,
-										Form_pg_attribute att);
+										OTupleAttrCompact * att);
 extern ItemPointer o_tuple_get_last_iptr(TupleDesc desc,
 										 OTupleFixedFormatSpec *spec,
 										 OTuple tuple, bool *isnull);

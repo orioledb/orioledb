@@ -1,6 +1,13 @@
 CREATE SCHEMA generated_test;
 SET SESSION search_path = 'generated_test';
 CREATE EXTENSION orioledb;
+SELECT split_part(setting, '.', 1) major_version
+	FROM pg_settings WHERE name = 'server_version';
+ major_version 
+---------------
+ 16
+(1 row)
+
 CREATE TABLE o_test_generated (
 	a int,
 	b int GENERATED ALWAYS AS (a * 2) STORED
@@ -255,6 +262,9 @@ ORDER BY a.attnum;
 ALTER TABLE o_test_set_expression
   ALTER COLUMN total SET EXPRESSION AS (price * quantity * 1.1),
   ALTER COLUMN discounted SET EXPRESSION AS (price * 0.75);
+ERROR:  syntax error at or near "EXPRESSION"
+LINE 2:   ALTER COLUMN total SET EXPRESSION AS (price * quantity * 1...
+                                 ^
 -- Verify both expressions were updated in catalog
 SELECT a.attname, pg_get_expr(d.adbin, d.adrelid) as generation_expr
 FROM pg_attribute a
@@ -262,10 +272,10 @@ JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
 WHERE a.attrelid = 'o_test_set_expression'::regclass
   AND a.attname IN ('total', 'discounted')
 ORDER BY a.attnum;
-  attname   |            generation_expr            
-------------+---------------------------------------
- total      | ((price * (quantity)::numeric) * 1.1)
- discounted | (price * 0.75)
+  attname   |        generation_expr        
+------------+-------------------------------
+ total      | (price * (quantity)::numeric)
+ discounted | (price * 0.9)
 (2 rows)
 
 -- Verify all existing values were recalculated with new expressions
@@ -275,9 +285,9 @@ SELECT i, price, quantity, total, discounted,
 FROM o_test_set_expression ORDER BY i;
  i | price | quantity | total | discounted | expected_total | expected_discounted 
 ---+-------+----------+-------+------------+----------------+---------------------
- 1 | 10.50 |        5 | 57.75 |       7.88 |         57.750 |              7.8750
- 2 | 25.00 |        3 | 82.50 |      18.75 |         82.500 |             18.7500
- 3 |  7.99 |       10 | 87.89 |       5.99 |         87.890 |              5.9925
+ 1 | 10.50 |        5 | 52.50 |       9.45 |         57.750 |              7.8750
+ 2 | 25.00 |        3 | 75.00 |      22.50 |         82.500 |             18.7500
+ 3 |  7.99 |       10 | 79.90 |       7.19 |         87.890 |              5.9925
 (3 rows)
 
 -- Matview should still have the old snapshot
@@ -294,9 +304,9 @@ REFRESH MATERIALIZED VIEW o_test_set_expr_mv;
 SELECT * FROM o_test_set_expr_mv ORDER BY i;
  i | price | quantity | total | discounted 
 ---+-------+----------+-------+------------
- 1 | 10.50 |        5 | 57.75 |       7.88
- 2 | 25.00 |        3 | 82.50 |      18.75
- 3 |  7.99 |       10 | 87.89 |       5.99
+ 1 | 10.50 |        5 | 52.50 |       9.45
+ 2 | 25.00 |        3 | 75.00 |      22.50
+ 3 |  7.99 |       10 | 79.90 |       7.19
 (3 rows)
 
 -- Update and verify recalculation
@@ -307,9 +317,9 @@ SELECT i, price, quantity, total, discounted,
 FROM o_test_set_expression ORDER BY i;
  i | price | quantity | total | discounted | expected_total | expected_discounted 
 ---+-------+----------+-------+------------+----------------+---------------------
- 1 | 15.00 |        5 | 82.50 |      11.25 |         82.500 |             11.2500
- 2 | 25.00 |        3 | 82.50 |      18.75 |         82.500 |             18.7500
- 3 |  7.99 |       10 | 87.89 |       5.99 |         87.890 |              5.9925
+ 1 | 15.00 |        5 | 75.00 |      13.50 |         82.500 |             11.2500
+ 2 | 25.00 |        3 | 75.00 |      22.50 |         82.500 |             18.7500
+ 3 |  7.99 |       10 | 79.90 |       7.19 |         87.890 |              5.9925
 (3 rows)
 
 -- Insert new row to verify new expressions are used for new data
@@ -320,10 +330,10 @@ SELECT i, price, quantity, total, discounted,
 FROM o_test_set_expression ORDER BY i;
  i | price | quantity | total | discounted | expected_total | expected_discounted 
 ---+-------+----------+-------+------------+----------------+---------------------
- 1 | 15.00 |        5 | 82.50 |      11.25 |         82.500 |             11.2500
- 2 | 25.00 |        3 | 82.50 |      18.75 |         82.500 |             18.7500
- 3 |  7.99 |       10 | 87.89 |       5.99 |         87.890 |              5.9925
- 4 | 20.00 |        2 | 44.00 |      15.00 |         44.000 |             15.0000
+ 1 | 15.00 |        5 | 75.00 |      13.50 |         82.500 |             11.2500
+ 2 | 25.00 |        3 | 75.00 |      22.50 |         82.500 |             18.7500
+ 3 |  7.99 |       10 | 79.90 |       7.19 |         87.890 |              5.9925
+ 4 | 20.00 |        2 | 40.00 |      18.00 |         44.000 |             15.0000
 (4 rows)
 
 DROP TABLE o_test_set_expression CASCADE;
