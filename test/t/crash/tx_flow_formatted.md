@@ -151,17 +151,17 @@ for
 				| 
 				<a href="https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2291-L2293">increments csn </a>
 				|
-				**good place for injection** 
+				**good place for injection (<code>orioledb-csn-incremented</code>)**  Different atomics are modified sequentially in a lock-free manner, inject fault between such modifications. <code>nextCommitSeqNo</code> has already advanced and is visible to every backend acquiring a fresh CSN, but our oxid still publishes <code>COMMITSEQNO_COMMITTING</code> in <code>xidBuffer</code> (set by <code>current_oxid_precommit</code> above) -- snapshot acquirers see a CSN past ours while our slot still says "committing". Commit-side only -- not reached on the abort path, no <code>-guarded</code> companion needed.
 				|
 				<a href="https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2295">current_oxid_commit</a> 
 					|
 					<a href="https://github.com/orioledb/orioledb/blob/4ca6f69408f76c58bfc37ed601000aae247538d8/src/transam/oxid.c#L1475-L1476">set_oxid_csn</a> -- again some lock-free stuff. **RECURSIVE with the abort-side <code>current_oxid_abort</code> -- same caveat as the precommit <code>set_oxid_csn</code> above; raise PANIC unless gated.** Re-uses the same function on the abort path; either gate the <code>INJECTION_POINT</code> at this commit call site only, or branch on <code>csn != COMMITSEQNO_ABORTED</code>.
 					|
-					<a href="https://github.com/orioledb/orioledb/blob/4ca6f69408f76c58bfc37ed601000aae247538d8/src/transam/oxid.c#L1480">advance_run_xmin</a> -- CAS loop 
+					<a href="https://github.com/orioledb/orioledb/blob/4ca6f69408f76c58bfc37ed601000aae247538d8/src/transam/oxid.c#L1480">advance_run_xmin</a> -- CAS loop (**may be good injection point, need further investigation into min xid behavior**)
 					| 
 					<a href="https://github.com/orioledb/orioledb/blob/4ca6f69408f76c58bfc37ed601000aae247538d8/src/transam/oxid.c#L1482">release_assigned_logical_xids</a> -- some atomics manipulations
 				| 
-				<a href="https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2307-L2310">on_commit_undo_stack</a> -- **good place for injection**, especially between iterations if any
+				<a href="https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2307-L2310">on_commit_undo_stack</a> -- good place for injection, especially between iterations if any (no implementation -- function-entry placement was tried and removed; correct placement would require instrumenting the loop interior).
 				| 
 				some clean-up stuff
 				| 
