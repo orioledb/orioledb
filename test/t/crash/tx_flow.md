@@ -150,17 +150,17 @@ for
 				| 
 				[increments csn ](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2291-L2293)
 				|
-				**good place for injection** 
+				**good place for injection (`orioledb-csn-incremented`)**  Different atomics are modified sequentially in a lock-free manner, inject fault between such modifications. `nextCommitSeqNo` has already advanced and is visible to every backend acquiring a fresh CSN, but our oxid still publishes `COMMITSEQNO_COMMITTING` in `xidBuffer` (set by `current_oxid_precommit` above) -- snapshot acquirers see a CSN past ours while our slot still says "committing". Commit-side only -- not reached on the abort path, no `-guarded` companion needed.
 				|
 				[current_oxid_commit](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2295) 
 					|
 					[set_oxid_csn](https://github.com/orioledb/orioledb/blob/4ca6f69408f76c58bfc37ed601000aae247538d8/src/transam/oxid.c#L1475-L1476) -- again some lock-free stuff. **RECURSIVE with the abort-side `current_oxid_abort` -- same caveat as the precommit `set_oxid_csn` above; raise PANIC unless gated.** Re-uses the same function on the abort path; either gate the `INJECTION_POINT` at this commit call site only, or branch on `csn != COMMITSEQNO_ABORTED`.
 					|
-					[advance_run_xmin](https://github.com/orioledb/orioledb/blob/4ca6f69408f76c58bfc37ed601000aae247538d8/src/transam/oxid.c#L1480) -- CAS loop 
+					[advance_run_xmin](https://github.com/orioledb/orioledb/blob/4ca6f69408f76c58bfc37ed601000aae247538d8/src/transam/oxid.c#L1480) -- CAS loop (**may be good injection point, need further investigation into min xid behavior**)
 					| 
 					[release_assigned_logical_xids](https://github.com/orioledb/orioledb/blob/4ca6f69408f76c58bfc37ed601000aae247538d8/src/transam/oxid.c#L1482) -- some atomics manipulations
 				| 
-				[on_commit_undo_stack](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2307-L2310) -- **good place for injection**, especially between iterations if any
+				[on_commit_undo_stack](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2307-L2310) -- good place for injection, especially between iterations if any (no implementation -- function-entry placement was tried and removed; correct placement would require instrumenting the loop interior).
 				| 
 				some clean-up stuff
 				| 
