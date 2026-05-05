@@ -853,9 +853,7 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 
 		for (attnum = 0; attnum < id->nonLeafTupdesc->natts; attnum++)
 		{
-			FormData_pg_attribute attr = id->nonLeafTupdesc->attrs[attnum];
-
-			o_class_cache_preload_for_column(attr.atttypid);
+			o_class_cache_preload_for_column(TupleDescAttr(id->nonLeafTupdesc, attnum)->atttypid);
 		}
 
 		if (isPrimary)

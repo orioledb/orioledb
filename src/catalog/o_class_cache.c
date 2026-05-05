@@ -30,6 +30,7 @@
 #include "catalog/pg_range.h"
 #include "commands/defrem.h"
 #include "miscadmin.h"
+#include "tuple/format.h"
 #include "utils/catcache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -113,11 +114,11 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	for (i = 0; i < o_class->natts; i++)
 	{
 		bool		process;
-		FormData_pg_attribute *class_attr,
-				   *typcache_attr;
+		FormData_pg_attribute *class_attr;
+		FormData_pg_attribute *typcache_attr;
 
 		class_attr = &o_class->attrs[i];
-		typcache_attr = &rel->rd_att->attrs[i];
+		typcache_attr = TupleDescAttr(rel->rd_att, i);
 
 		class_attr->attrelid = typcache_attr->attrelid;
 		class_attr->attname = typcache_attr->attname;
@@ -128,7 +129,9 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 		class_attr->attlen = typcache_attr->attlen;
 		class_attr->attnum = typcache_attr->attnum;
 		class_attr->attndims = typcache_attr->attndims;
+#if PG_VERSION_NUM < 180000
 		class_attr->attcacheoff = typcache_attr->attcacheoff;
+#endif
 		class_attr->atttypmod = typcache_attr->atttypmod;
 		class_attr->attbyval = typcache_attr->attbyval;
 		class_attr->attstorage = typcache_attr->attstorage;
@@ -229,11 +232,28 @@ o_class_cache_search_tupdesc(Oid cc_reloid)
 	{
 		MemoryContext oldcxt;
 
+#if PG_VERSION_NUM >= 180000
+		Form_pg_attribute *attrs;
+
+		/* Prepare the pointer array in CurrentMemoryContext */
+		attrs = (Form_pg_attribute *) palloc(o_class->natts * sizeof(Form_pg_attribute));
+		for (int i = 0; i < o_class->natts; i++)
+			attrs[i] = &o_class->attrs[i];
+
+		oldcxt = MemoryContextSwitchTo(CacheMemoryContext);
+		result = CreateTupleDesc(o_class->natts, attrs);
+		MemoryContextSwitchTo(oldcxt);
+
+		pfree(attrs);
+#else
 		oldcxt = MemoryContextSwitchTo(CacheMemoryContext);
 		result = CreateTemplateTupleDesc(o_class->natts);
 		MemoryContextSwitchTo(oldcxt);
+
 		memcpy(&result->attrs, o_class->attrs,
 			   o_class->natts * sizeof(FormData_pg_attribute));
+#endif
+
 		result->tdrefcount = 0;
 	}
 	return result;

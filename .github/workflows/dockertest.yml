@@ -1,8 +1,8 @@
 name: dockerTEST
 
-on:
-  push:
-  pull_request:
+# on:
+#   push:
+#   pull_request:
 
 defaults:
   run:
@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        postgres: [16, 17]
+        postgres: [17, 18]
         compiler: [clang]
         distr: [alpine, ubuntu]
         include:

@@ -293,7 +293,7 @@ RecoveryUndoLocFlush *recovery_undo_loc_flush;
 /*
  * The last xmin we received from primary.
  */
-OXid		recovery_xmin = InvalidOXid;
+static OXid recovery_xmin = InvalidOXid;
 
 /*
  * Number of successfully finished recovery workers.
@@ -325,7 +325,7 @@ static void flush_current_undo_stack(void);
 static void o_handle_startup_proc_interrupts_hook(void);
 static void abort_recovery(RecoveryWorkerState *workers_pool, bool send_to_idx_pool);
 
-static bool replay_container(Pointer ptr, Pointer endPtr,
+static bool replay_container(Pointer startPtr, Pointer endPtr,
 							 bool single, XLogRecPtr xlogRecPtr,
 							 XLogRecPtr xlogRecEndPtr);
 
@@ -337,7 +337,7 @@ static void workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback,
 static void workers_send_savepoint(SubTransactionId parentSubId);
 static void workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 											   SubTransactionId parentSubId);
-static void workers_synchronize(XLogRecPtr csn, bool send_synchronize);
+static void workers_synchronize(XLogRecPtr ptr, bool send_synchronize);
 static void workers_notify_toast_consistent(void);
 static void worker_wait_shutdown(RecoveryWorkerState *worker);
 
@@ -3336,7 +3336,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 
 				recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
 											 xlogPtr, -1, sync);
-				elog(DEBUG1, "OrioleDB recovery %s transaction with oxid=%lu. "
+				elog(DEBUG1, "OrioleDB recovery %s transaction with oxid=" UINT64_FORMAT ". "
 					 "Next WAL record starts at LSN %X/%X",
 					 commit ? "committed" : "aborted", rec->oxid,
 					 LSN_FORMAT_ARGS(ctx->xlogRecEndPtr));
@@ -3351,7 +3351,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 		case WAL_REC_JOINT_COMMIT:
 			cur_recovery_xid_state->xid = rec->u.joint_commit.xid;
 			elog(DEBUG1, "OrioleDB recovery committed transaction (xid, oxid)="
-				 "(%u, %lu). Next WAL record starts at LSN %X/%X",
+				 "(%u, " UINT64_FORMAT "). Next WAL record starts at LSN %X/%X",
 				 cur_recovery_xid_state->xid, rec->oxid,
 				 LSN_FORMAT_ARGS(ctx->xlogRecEndPtr));
 
@@ -3815,7 +3815,11 @@ delay_if_queued_for_idxbuild(void)
 		 * recovery worker, therefore check in which worker we are.
 		 */
 		if (AmStartupProcess())
+#if PG_VERSION_NUM >= 180000
+			ProcessStartupProcInterrupts();
+#else
 			HandleStartupProcInterrupts();
+#endif
 		else
 			o_worker_handle_interrupts();
 
@@ -3859,7 +3863,11 @@ delay_rels_queued_for_idxbuild(ORelOids oids)
 		 * recovery worker, therefore check in which worker we are.
 		 */
 		if (AmStartupProcess())
+#if PG_VERSION_NUM >= 180000
+			ProcessStartupProcInterrupts();
+#else
 			HandleStartupProcInterrupts();
+#endif
 		else
 			o_worker_handle_interrupts();
 

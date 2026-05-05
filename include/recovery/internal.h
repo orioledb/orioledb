@@ -171,6 +171,7 @@ extern pg_atomic_uint32 *worker_ptrs_changes;
 extern RecoveryWorkerPtrs *worker_ptrs;
 extern pg_atomic_uint64 *recovery_ptr;
 extern pg_atomic_uint64 *recovery_main_retain_ptr;
+extern pg_atomic_uint64 *recovery_finished_list_ptr;
 extern bool *recovery_single_process;
 extern RecoveryUndoLocFlush *recovery_undo_loc_flush;
 

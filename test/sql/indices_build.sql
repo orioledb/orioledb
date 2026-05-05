@@ -2,6 +2,7 @@ CREATE SCHEMA indices_build;
 SET SESSION search_path = 'indices_build';
 SET SESSION log_error_verbosity = 'terse';
 CREATE EXTENSION orioledb;
+
 SELECT orioledb_parallel_debug_start();
 
 -- Index build with primary key

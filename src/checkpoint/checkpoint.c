@@ -156,8 +156,8 @@ typedef struct
 } SysTreesLockUndoStackItem;
 
 CheckpointState *checkpoint_state = NULL;
-MemoryContext chkp_main_context = NULL;
-MemoryContext chkp_tree_context = NULL;
+static MemoryContext chkp_main_context = NULL;
+static MemoryContext chkp_tree_context = NULL;
 
 static char *xidFilename = NULL;
 static uint32 xidFileCheckpointnum = 0;
@@ -1864,7 +1864,7 @@ finalize_chkp_map(File chkp_file, uint64 len, char *input_filename,
 
 	if (FileSize(chkp_file) != len)
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not move to offset %lu for making finalize checkpoint map %s: %m",
+						errmsg("could not move to offset " UINT64_FORMAT " for making finalize checkpoint map %s: %m",
 							   len, FilePathName(chkp_file))));
 
 	if (input_filename != NULL)
@@ -2072,7 +2072,7 @@ sort_checkpoint_tmp_file(BTreeDescr *descr, int cur_chkp_index)
 		if (read_size != free_blocks_size)
 		{
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("Could not read data from checkpoint tmp file: %s %d %lu: %m",
+							errmsg("Could not read data from checkpoint tmp file: %s %d " UINT64_FORMAT ": %m",
 								   filename, read_size, free_blocks_size)));
 		}
 	}
@@ -3694,7 +3694,7 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 						if (orioledb_s3_mode)
 							offset &= S3_OFFSET_MASK;
 
-						elog(ERROR, "unable to perform page IO for page %d to file %s with offset %lu",
+						elog(ERROR, "unable to perform page IO for page %d to file %s with offset " UINT64_FORMAT,
 							 blkno,
 							 btree_smgr_filename(descr, chkpNum, offset),
 							 offset);
@@ -4818,7 +4818,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 					offset &= S3_OFFSET_MASK;
 
 				Assert(page_desc != NULL);
-				elog(ERROR, "Unable to perform page IO for page %d to file %s with offset %lu",
+				elog(ERROR, "Unable to perform page IO for page %d to file %s with offset " UINT64_FORMAT,
 					 blkno,
 					 btree_smgr_filename(descr, chkpNum, offset),
 					 offset);
