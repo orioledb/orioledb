@@ -392,11 +392,33 @@ class RepeatableReadStressTest(BaseTest):
 				    # f'[ddl-nemesis] adds={local_add} drops={local_drop}')
 
 		wal_chaos_points = [
+			# PG-side
 			'before-tx-commit',
 			'after-tx-commit', # cause a pg cluster termination with signal 6
+			'postgres-precommit-on-commit-actions',
 			# 'after-proc-array-end-tx',
-		    # 'orioledb-wal-flush',
-		    # 'xlog-flush',
+			# 'xlog-flush',
+
+			# OrioleDB lock-free CAS sites (recursive: unguarded fires
+			# during commit AND abort -> ereport during XACT_EVENT_ABORT
+			# -> PANIC; -guarded skips the abort-side hit)
+			'orioledb-set-csn',
+			'orioledb-set-csn-guarded',
+			'orioledb-set-xlog-ptr',
+			'orioledb-set-xlog-ptr-guarded',
+
+			# OrioleDB WAL durability boundaries (recursive, paired)
+			'orioledb-add-finish-wal',
+			'orioledb-add-finish-wal-guarded',
+			'orioledb-wal-flush',
+			'orioledb-wal-flush-guarded',
+
+			# OrioleDB single-shot invariant windows (commit-side only,
+			# no -guarded companion needed)
+			'orioledb-csn-incremented',
+			'orioledb-pk-mutated-pre-wal',
+			'orioledb-update-pk-done-pre-sk',
+			'orioledb-sk-mid-update',
 		]
 
 		def wal_chaos_loop():
