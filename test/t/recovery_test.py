@@ -2355,6 +2355,19 @@ class RecoveryWithArchivingTest(BaseTest):
 		                          has_archiving=True,
 		                          allows_streaming=True)
 
+	def _read_replica_log(self, replica):
+		with open(replica.pg_log_file) as f:
+			return f.read()
+
+	def _assert_log_contains(self, replica_log, expected_lines):
+		for expected_line in expected_lines:
+			self.assertIn(expected_line, replica_log)
+
+	def _assert_log_contains_any(self, replica_log, expected_lines):
+		self.assertTrue(any(line in replica_log for line in expected_lines),
+		                msg="none of expected log lines was found: %s" %
+		                expected_lines)
+
 	def test_recovery_target_time(self):
 		node = self.node
 		node.start()
@@ -2367,7 +2380,7 @@ class RecoveryWithArchivingTest(BaseTest):
 		with self.getReplica(has_restoring=True) as replica:
 			node.safe_psql(
 			    "INSERT INTO tab_int VALUES (generate_series(1,1000))")
-			recovery_time = node.execute("SELECT now()")[0][0]
+			recovery_time = node.execute("SELECT clock_timestamp()")[0][0]
 
 			replica.append_conf(f"recovery_target_time = '{recovery_time}'")
 
@@ -2378,3 +2391,416 @@ class RecoveryWithArchivingTest(BaseTest):
 
 			self.assertTrue(replica.execute("SELECT count(*) from tab_int"),
 			                1000)
+
+	def test_recovery_target_time_barrier_stop_before(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			node.safe_psql("SELECT pg_sleep(1)")
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+			node.safe_psql("SELECT pg_sleep(1)")
+			recovery_time = node.execute("SELECT clock_timestamp()")[0][0]
+			node.safe_psql("SELECT pg_sleep(1)")
+
+			replica.append_conf(f"recovery_target_time = '{recovery_time}'")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(3001,4000))")
+
+			replica.start()
+			replica.poll_query_until(
+			    "SELECT pg_is_wal_replay_paused()", expected=True)
+
+			self.assertEqual(replica.execute("SELECT count(*) from tab_int")[0][0],
+			                 3000)
+
+			replica_log = self._read_replica_log(replica)
+
+			self._assert_log_contains(
+			    replica_log, [
+			        "Recovery target reached: start synchronization barrier",
+			        "stop_after=0"
+			    ])
+			self._assert_log_contains(
+			    replica_log, [
+			        "Recovery target reached: stop-before synchronization "
+			        "barrier completed"
+			    ])
+			self.assertNotIn(
+			    "Recovery target reached: waiting for replay progress to "
+			    "reach stop-after boundary", replica_log)
+			self.assertNotIn(
+			    "Recovery target reached: waiting for deferred finalization "
+			    "publication to reach stop-after boundary", replica_log)
+			self._assert_log_contains_any(
+			    replica_log, [
+			        "Recovery target reached: waiting for a published visible "
+			        "boundary before stop",
+			        "Recovery target reached: waiting for startup retain "
+			        "bookkeeping to catch up with the published visible "
+			        "boundary",
+			        "Recovery target reached: stop-before synchronization "
+			        "barrier completed"
+			    ])
+
+	def test_recovery_target_time_barrier_earlier_target_time(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			node.safe_psql("SELECT pg_sleep(1)")
+			recovery_time = node.execute("SELECT clock_timestamp()")[0][0]
+			node.safe_psql("SELECT pg_sleep(1)")
+
+			replica.append_conf(f"recovery_target_time = '{recovery_time}'")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+
+			replica.start()
+			replica.poll_query_until(
+			    "SELECT pg_is_wal_replay_paused()", expected=True)
+
+			self.assertEqual(replica.execute("SELECT count(*) from tab_int")[0][0],
+			                 2000)
+
+			replica_log = self._read_replica_log(replica)
+
+			self._assert_log_contains(
+			    replica_log, [
+			        "Recovery target reached: start synchronization barrier",
+			        "stop_after=0"
+			    ])
+			self._assert_log_contains(
+			    replica_log, [
+			        "Recovery target reached: stop-before synchronization "
+			        "barrier completed"
+			    ])
+
+	def test_recovery_target_xid_barrier_stop_after(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			ret = node.safe_psql(
+			    """
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1001,2000));
+			    SELECT pg_current_wal_lsn(), pg_current_xact_id();
+			    COMMIT;
+			    """)
+			(_, recovery_txid) = ret.decode().strip().splitlines()[-1].split('|')
+
+			replica.append_conf(f"recovery_target_xid = '{recovery_txid}'")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+
+			replica.start()
+			replica.poll_query_until(
+			    "SELECT pg_is_wal_replay_paused()", expected=True)
+
+			self.assertEqual(replica.execute("SELECT count(*) from tab_int")[0][0],
+			                 2000)
+
+			replica_log = self._read_replica_log(replica)
+
+			self._assert_log_contains(
+			    replica_log, [
+			        "Recovery target reached: start synchronization barrier",
+			        "stop_after=1",
+			        "Recovery target reached: stop-after synchronization "
+			        "barrier completed"
+			    ])
+			self._assert_log_contains_any(
+			    replica_log, [
+			        "Recovery target reached: waiting for replay progress to "
+			        "reach the stop-after replay boundary",
+			        "Recovery target reached: waiting for deferred finalization "
+			        "publication to reach the stop-after visible boundary",
+			        "Recovery target reached: stop-after synchronization "
+			        "barrier completed"
+			    ])
+
+	def test_recovery_target_xid_barrier_stop_before_base_backup(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			ret = node.safe_psql(
+			    """
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1001,2000));
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			recovery_txid = ret.decode().strip().splitlines()[-1]
+
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_inclusive = false
+""")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+
+			replica.start()
+			replica.poll_query_until(
+			    "SELECT pg_is_wal_replay_paused()", expected=True)
+
+			self.assertEqual(replica.execute("SELECT count(*) from tab_int")[0][0],
+			                 1000)
+
+			replica_log = self._read_replica_log(replica)
+
+			self._assert_log_contains(
+			    replica_log, [
+			        "Recovery target reached: start synchronization barrier",
+			        "stop_after=0"
+			    ])
+			self._assert_log_contains_any(
+			    replica_log, [
+			        "Recovery target reached: stop-before synchronization "
+			        "barrier completed",
+			        "Recovery target reached: synchronization barrier "
+			        "completed at base-backup visible state before stop"
+			    ])
+
+	def test_recovery_target_xid_barrier_stop_before(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			ret = node.safe_psql(
+			    """
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(2001,3000));
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			recovery_txid = ret.decode().strip().splitlines()[-1]
+
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_inclusive = false
+""")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(3001,4000))")
+
+			replica.start()
+			replica.poll_query_until(
+			    "SELECT pg_is_wal_replay_paused()", expected=True)
+
+			self.assertEqual(replica.execute("SELECT count(*) from tab_int")[0][0],
+			                 2000)
+
+			replica_log = self._read_replica_log(replica)
+
+			self._assert_log_contains(
+			    replica_log, [
+			        "Recovery target reached: start synchronization barrier",
+			        "stop_after=0",
+			        "Recovery target reached: stop-before synchronization "
+			        "barrier completed"
+			    ])
+
+	def test_recovery_target_lsn_barrier_stop_after(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			recovery_lsn = node.safe_psql(
+			    "SELECT pg_current_wal_lsn()").decode().strip()
+
+			replica.append_conf(f"recovery_target_lsn = '{recovery_lsn}'")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			replica.start()
+			replica.poll_query_until(
+			    "SELECT pg_is_wal_replay_paused()", expected=True)
+
+			self.assertEqual(replica.execute("SELECT count(*) from tab_int")[0][0],
+			                 2000)
+
+			replica_log = self._read_replica_log(replica)
+
+			self._assert_log_contains(
+			    replica_log, [
+			        "Recovery target reached: start synchronization barrier",
+			        "stop_after=1",
+			        "Recovery target reached: stop-after synchronization "
+			        "barrier completed"
+			    ])
+			self._assert_log_contains_any(
+			    replica_log, [
+			        "Recovery target reached: waiting for replay progress to "
+			        "reach the stop-after replay boundary",
+			        "Recovery target reached: waiting for deferred finalization "
+			        "publication to reach the stop-after visible boundary",
+			        "Recovery target reached: stop-after synchronization "
+			        "barrier completed"
+			    ])
+
+	def test_recovery_target_lsn_barrier_stop_before(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			recovery_lsn = node.safe_psql(
+			    "SELECT pg_current_wal_lsn()").decode().strip()
+
+			replica.append_conf(f"""
+recovery_target_lsn = '{recovery_lsn}'
+recovery_target_inclusive = false
+""")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			replica.start()
+			replica.poll_query_until(
+			    "SELECT pg_is_wal_replay_paused()", expected=True)
+
+			self.assertEqual(replica.execute("SELECT count(*) from tab_int")[0][0],
+			                 2000)
+
+			replica_log = self._read_replica_log(replica)
+
+			self._assert_log_contains(
+			    replica_log, [
+			        "Recovery target reached: start synchronization barrier",
+			        "stop_after=0"
+			    ])
+			self._assert_log_contains(
+			    replica_log, [
+			        "Recovery target reached: stop-before synchronization "
+			        "barrier completed"
+			    ])
+
+	def test_recovery_target_lsn_barrier_stop_before_base_backup(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			recovery_lsn = node.safe_psql(
+			    "SELECT pg_current_wal_lsn()").decode().strip()
+
+			replica.append_conf(f"""
+recovery_target_lsn = '{recovery_lsn}'
+recovery_target_inclusive = false
+""")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			replica.start()
+			replica.poll_query_until(
+			    "SELECT pg_is_wal_replay_paused()", expected=True)
+
+			self.assertEqual(replica.execute("SELECT count(*) from tab_int")[0][0],
+			                 1000)
+
+			replica_log = self._read_replica_log(replica)
+
+			self._assert_log_contains(
+			    replica_log, [
+			        "Recovery target reached: start synchronization barrier",
+			        "stop_after=0"
+			    ])
+			self._assert_log_contains_any(
+			    replica_log, [
+			        "Recovery target reached: stop-before synchronization "
+			        "barrier completed",
+			        "Recovery target reached: synchronization barrier "
+			        "completed at base-backup visible state before stop"
+			    ])

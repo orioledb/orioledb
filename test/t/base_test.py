@@ -176,6 +176,7 @@ class BaseTest(unittest.TestCase):
 
 	def enableArchiving(self, node: testgres.PostgresNode):
 		path = os.path.join(node.base_dir, "archives")
+		os.makedirs(path, exist_ok=True)
 		node.append_conf(f"archive_mode = on\n"
 		                 f"archive_command = 'cp \"%p\" \"{path}/%f\"'")
 
