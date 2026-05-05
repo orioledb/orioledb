@@ -36,6 +36,7 @@
 #include "utils/page_pool.h"
 #include "utils/snapshot.h"
 #include "utils/stopevent.h"
+#include "utils/injection_point.h"
 #include "replication/syncrep.h"
 #include "rewind/rewind.h"
 #include "catalog/sys_trees.h"
@@ -2291,6 +2292,16 @@ undo_xact_callback(XactEvent event, void *arg)
 				csn = GetCurrentCSN();
 				if (csn == COMMITSEQNO_INPROGRESS)
 					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
+
+				/*
+				 * Stress-test injection point.  See test/t/crash/tx_flow.md:153.
+				 * Window between the global CSN increment and the per-oxid
+				 * CSN flip in current_oxid_commit -- nextCommitSeqNo has
+				 * advanced but our oxid still reads INPROGRESS in xidBuffer.
+				 * Concurrent readers acquiring a fresh CSN here see one
+				 * past ours.  Commit-side only -- not reached during abort.
+				 */
+				INJECTION_POINT("orioledb-csn-incremented");
 
 				current_oxid_commit(csn);
 				Assert(enable_rewind || !csn_is_retained_for_rewind(csn));

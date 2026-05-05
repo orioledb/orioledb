@@ -36,6 +36,15 @@ static bool local_wal_contains_switch_xid = false;
 static ORelOids local_oids = {InvalidOid, InvalidOid, InvalidOid};
 static OIndexType local_type = oIndexInvalid;
 
+#ifdef USE_INJECTION_POINTS
+/*
+ * Set by wal_rollback() while it is running so the -guarded variants
+ * of the wal-flush injection points can skip an abort-side reentry.
+ * See test/t/crash/tx_flow.md:137 and the recursion note there.
+ */
+static bool wal_in_rollback = false;
+#endif
+
 static void add_finish_wal_record(uint8 rec_type, OXid xmin);
 static void add_joint_commit_wal_record(TransactionId xid, OXid xmin);
 static void add_xid_wal_record(OXid oxid, TransactionId logicalXid);
@@ -349,6 +358,18 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	}
 
 	Assert(!is_recovery_process());
+
+#ifdef USE_INJECTION_POINTS
+	/*
+	 * Mark that any flush_local_wal / flush_local_wal_if_needed call
+	 * below originates from the abort path, so the -guarded variants
+	 * of the wal-flush INJECTION_POINTs skip themselves and avoid
+	 * re-entering ereport during XACT_EVENT_ABORT (-> PANIC).
+	 * See test/t/crash/tx_flow.md:137.
+	 */
+	wal_in_rollback = true;
+#endif
+
 	flush_local_wal_if_needed(sizeof(WALRecFinish));
 	Assert(local_wal_buffer_offset + sizeof(WALRecFinish) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
@@ -359,6 +380,10 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 						  pg_atomic_read_u64(&xid_meta->runXmin));
 	wait_pos = flush_local_wal(false, !isAutonomous);
 	local_wal_has_material_changes = false;
+
+#ifdef USE_INJECTION_POINTS
+	wal_in_rollback = false;
+#endif
 
 	elog(DEBUG4, "ROLLBACK oxid %lu logicalXid %u", oxid, logicalXid);
 
@@ -375,6 +400,19 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 
 	Assert(!is_recovery_process());
 	Assert(rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK);
+
+	/*
+	 * Stress-test injection points.  See test/t/crash/tx_flow.md:141.
+	 * RECURSIVE: this function is invoked for both WAL_REC_COMMIT
+	 * (wal_commit) and WAL_REC_ROLLBACK (wal_rollback).  An
+	 * error-mode injection on the unguarded entry fires on commit,
+	 * raises, drives abort, and re-fires inside wal_rollback during
+	 * XACT_EVENT_ABORT -> PANIC.  The -guarded variant skips the
+	 * rollback record so error-mode attaches stay single-shot.
+	 */
+	INJECTION_POINT("orioledb-add-finish-wal");
+	if (rec_type == WAL_REC_COMMIT)
+		INJECTION_POINT("orioledb-add-finish-wal-guarded");
 
 	elog(DEBUG4, "rec_type %d (%s)", rec_type, wal_record_type_to_string(rec_type));
 
@@ -672,16 +710,18 @@ flush_local_wal(bool isCommit, bool withXactTime)
 	Assert(length > 0);
 
 	/*
-	 * Stress-test injection point.  This is the OrioleDB equivalent
-	 * of XLogInsert: every flushed batch of WAL records funnels
-	 * through here on its way into Postgres XLog.  Gated by
-	 * isCommit so we do not fire inside the rollback path's own
-	 * flush -- that would re-enter the abort machinery and PANIC.
-	 * Macro is a no-op unless Postgres is built with
-	 * --enable-injection-points.
+	 * Stress-test injection points.  See test/t/crash/tx_flow.md:137.
+	 * Every flushed batch of OrioleDB WAL records funnels through here
+	 * on its way into Postgres XLog.  RECURSIVE: this function is also
+	 * called from wal_rollback.  The unguarded variant fires on every
+	 * flush regardless of isCommit and PANICs if it raises during a
+	 * commit hit (the resulting abort calls flush_local_wal again).
+	 * The -guarded variant fires only when isCommit -> commit side
+	 * only, so an error-mode injection is single-shot.
 	 */
+	INJECTION_POINT("orioledb-wal-flush");
 	if (isCommit)
-		INJECTION_POINT("orioledb-wal-flush");
+		INJECTION_POINT("orioledb-wal-flush-guarded");
 
 	/*
 	 * Put the xlog location of our commit record to the shared memory.  This
@@ -713,12 +753,20 @@ flush_local_wal_if_needed(int required_length)
 	if (local_wal_buffer_offset + required_length + XID_RESERVED_LENGTH > LOCAL_WAL_BUFFER_SIZE)
 	{
 		/*
-		 * Buffer-overflow flush during normal DML.  Same injection
-		 * point as the commit-time flush; safe here unconditionally
-		 * because this branch runs only mid-tx, never during
-		 * rollback processing.
+		 * Buffer-overflow flush.  See test/t/crash/tx_flow.md:137.
+		 * The unguarded "orioledb-wal-flush" name is shared with
+		 * flush_local_wal() above and fires on every overflow,
+		 * including the one driven by wal_rollback's
+		 * flush_local_wal_if_needed(sizeof(WALRecFinish)) call --
+		 * raising during that abort-side hit re-enters ereport
+		 * inside XACT_EVENT_ABORT and PANICs.  The -guarded variant
+		 * gates on the wal_in_rollback flag set by wal_rollback.
 		 */
 		INJECTION_POINT("orioledb-wal-flush");
+#ifdef USE_INJECTION_POINTS
+		if (!wal_in_rollback)
+			INJECTION_POINT("orioledb-wal-flush-guarded");
+#endif
 
 		elog(DEBUG4, "[%s] Going to FLUSH WAL on local WAL buffer overflow", __func__);
 		log_logical_wal_container(local_wal_buffer, local_wal_buffer_offset,

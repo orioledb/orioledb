@@ -31,6 +31,7 @@
 #include "storage/procsignal.h"
 #include "storage/proc.h"
 #include "utils/snapmgr.h"
+#include "utils/injection_point.h"
 #include "recovery/wal.h"
 
 #define XID_FILE_SIZE (0x1000000)
@@ -562,6 +563,20 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 	CommitSeqNo oldCsn;
 	OXid		writeInProgressXmin;
 
+	/*
+	 * Stress-test injection points.  See test/t/crash/tx_flow.md:149.
+	 * RECURSIVE: this function is called both on commit
+	 * (current_oxid_precommit / current_oxid_commit) AND on abort
+	 * (current_oxid_abort, with csn == COMMITSEQNO_ABORTED).  The
+	 * unguarded variant fires on every entry and PANICs if it raises
+	 * during a commit hit because the resulting abort re-enters here.
+	 * The -guarded variant skips the abort-side flip so an attached
+	 * error-mode injection only ever fires once per tx.
+	 */
+	INJECTION_POINT("orioledb-set-csn");
+	if (csn != COMMITSEQNO_ABORTED)
+		INJECTION_POINT("orioledb-set-csn-guarded");
+
 	oldCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn);
 	pg_read_barrier();
 	writeInProgressXmin = pg_atomic_read_u64(&xid_meta->writeInProgressXmin);
@@ -605,6 +620,20 @@ set_oxid_xlog_ptr_internal(OXid oxid, XLogRecPtr ptr)
 {
 	XLogRecPtr	oldPtr;
 	OXid		writeInProgressXmin;
+
+	/*
+	 * Stress-test injection points.  See test/t/crash/tx_flow.md:133.
+	 * RECURSIVE: set_oxid_xlog_ptr is also reached on the abort path
+	 * (set_oxid_xlog_ptr(oxid, InvalidXLogRecPtr) inside
+	 * undo_xact_callback's XACT_EVENT_ABORT case).  The unguarded
+	 * variant raises PANIC if injected with error-mode during a
+	 * commit hit because the abort handler re-enters here.  The
+	 * -guarded variant excludes that abort-side InvalidXLogRecPtr
+	 * call so an error-mode attach is single-shot.
+	 */
+	INJECTION_POINT("orioledb-set-xlog-ptr");
+	if (ptr != InvalidXLogRecPtr)
+		INJECTION_POINT("orioledb-set-xlog-ptr-guarded");
 
 	oldPtr = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr);
 	pg_read_barrier();

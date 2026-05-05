@@ -30,6 +30,7 @@
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "tuple/slot.h"
+#include "utils/injection_point.h"
 #include "utils/stopevent.h"
 
 #include "access/heapam.h"
@@ -1290,6 +1291,24 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 			{
 				OTuple		final_tup = tts_orioledb_form_tuple(slot, descr);
 
+				/*
+				 * Stress-test injection point.  See test/t/crash/tx_flow.md:337.
+				 * PK leaf has been mutated in shared buffers and is
+				 * already write-unlocked (the unlock happens inside
+				 * the insert machinery, before control returns here).
+				 * The undo record is pushed and leafTuphdr->undoLocation
+				 * is wired up.  But WAL_REC_UPDATE has NOT been packed
+				 * into the local WAL buffer yet -- that is what the
+				 * o_wal_update call below does.  Concurrent readers can
+				 * already see the leaf and rely entirely on the
+				 * lock-free undo chain + INPROGRESS CSN to resolve to
+				 * the pre-image.  ereport here drives apply_undo_stack
+				 * to revert the page with no preceding WAL record for
+				 * this row -- exercises the "page changed but no WAL"
+				 * abort/recovery path.
+				 */
+				INJECTION_POINT("orioledb-pk-mutated-pre-wal");
+
 				elog(DEBUG3, "CALL o_wal_update");
 				o_wal_update(&primary->desc, final_tup, ((OTableSlot *) oldSlot)->tuple, rel->rd_rel->relreplident, descr->version);
 			}
@@ -1524,6 +1543,17 @@ o_update_secondary_index(OIndexDescr *id,
 	}
 	else if (new_valid)
 	{
+		/*
+		 * Stress-test injection point.  See test/t/crash/tx_flow.md:367.
+		 * Window between SK old-key delete and SK new-key insert.
+		 * The PK already holds the new row image, but this SK is
+		 * missing the entry entirely (neither old key nor new key
+		 * resolves to this row).  An SK-ordered scan would skip the
+		 * row at this instant -- the bank-test reader_sk invariant
+		 * catches it directly.
+		 */
+		INJECTION_POINT("orioledb-sk-mid-update");
+
 		o_btree_check_size_of_tuple(o_tuple_size(new_ix_tup, &id->leafSpec),
 									id->name.data,
 									true);

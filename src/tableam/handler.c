@@ -36,6 +36,7 @@
 #include "transam/oxid.h"
 #include "tuple/slot.h"
 #include "utils/compress.h"
+#include "utils/injection_point.h"
 #include "utils/rel.h"
 #include "utils/stopevent.h"
 
@@ -727,6 +728,17 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 
 	bms_free(marg.keyAttrs);
 	Assert(mres.success);
+
+	/*
+	 * Stress-test injection point.  See test/t/crash/tx_flow.md:343.
+	 * Boundary between Phase 1 (PK update via TableAM, fully done by
+	 * o_tbl_update -- page mutation + WAL_REC_UPDATE in local buffer)
+	 * and Phase 2 (SK update via IndexAM dispatched by PG core's
+	 * ExecUpdateIndexTuples).  At this instant a reader scanning by
+	 * a changed SK column would still resolve to the *old* key.
+	 * Not on the abort handler call graph -- safe error-mode.
+	 */
+	INJECTION_POINT("orioledb-update-pk-done-pre-sk");
 
 	return mres.oldTuple ? TM_Ok : (marg.modified ? TM_Updated : TM_Deleted);
 }
