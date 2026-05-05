@@ -498,3 +498,43 @@ Notes on places that are *unsuitable for either mode*:
 * Inside `walk_undo_range_with_buf`'s per-item callback when the callback is mid-`START_CRIT_SECTION` -- both modes break here. `ereport(ERROR)` inside a critical section escalates to PANIC even outside of abort context. Stopevents pause execution, but pausing while holding LWLocks / page-pin reservations inside a critical section starves other backends; the cluster won't deadlock outright but will hang until the freeze is released.
 * After `current_oxid_abort` -- Postgres comment in `CommitTransaction` (which mirrors the abort cleanup style) explicitly says "if an error is raised here, it's too late to abort the transaction. This should be just noncritical resource releasing." For the abort tail the same caveat applies: ereport here turns into PANIC, AND there is nothing left to observe (the CSN flip is done), so freeze-style injection only delays cleanup without exposing anything new. Skip this region.
 
+---
+
+## Injection-point mechanism
+
+All `**good point for injection**` sites tagged above are realised in source as Postgres' [INJECTION_POINT](https://github.com/orioledb/postgres/blob/9f1630e4f273aec32888894a090ce374d73fd239/src/include/utils/injection_point.h#L18) macro:
+
+```c
+#ifdef USE_INJECTION_POINTS
+#define INJECTION_POINT(name) InjectionPointRun(name)
+#else
+#define INJECTION_POINT(name) ((void) name)
+#endif
+```
+
+Properties:
+
+* The macro is a **compile-time no-op** unless Postgres is built with `--enable-injection-points` (`USE_INJECTION_POINTS` defined). On a release build the call evaporates entirely -- zero runtime overhead, zero attack surface, no need to `#ifdef` each call site.
+* When the build is enabled, `InjectionPointRun(name)` looks the named point up in shared memory. If nothing is *attached* to that name, the call is still effectively a no-op (just a hash-lookup miss). Only when a backend has called `injection_points_attach(name, mode)` does the next `InjectionPointRun(name)` actually trigger the configured callback.
+* The contrib extension `injection_points` (PG17+) provides the SQL-level driver: `injection_points_attach('point-name', 'mode')` arms a point, `injection_points_detach('point-name')` disarms it. Modes are `error` (raise `ereport(ERROR)`), `notice` (raise `ereport(NOTICE)`), `wait` (block on a condvar until released), and a few others.
+* `INJECTION_POINT` calls are safe in any user-context code path that already tolerates an `ereport(ERROR)`. They are **NOT safe** inside `START_CRIT_SECTION` / `END_CRIT_SECTION` (raises escalate to PANIC) and **NOT safe** inside the abort handler (`XACT_EVENT_ABORT`) where a re-entered `ereport` also escalates to PANIC -- which is the entire reason for the `-guarded` paired variants used for recursive points (see the COMMIT-section preamble).
+
+### How the bank-test wires injections
+
+The bank-test's `wal_chaos` nemesis (in `repeatable_read_stress_test.py`) is the single arming harness for every injection point listed in this document. It runs in its own thread and on each tick:
+
+1. Picks one name at random from `wal_chaos_points` (the union of every `orioledb-...` / `postgres-...` point named in this doc plus the three pre-existing PG-core points `before-tx-commit` / `after-tx-commit` / `after-proc-array-end-tx`).
+2. Calls `SELECT injection_points_attach('<name>', 'error')` -- always **`error`** mode. Every active injection in the test therefore raises `ereport(ERROR)` when hit.
+3. Yields with `time.sleep(0)` to let the OS scheduler hand a slice to the writer threads.
+4. Calls `SELECT injection_points_detach('<name>')` to disarm.
+
+The window between attach and detach is the "armed" interval. Any writer that crosses the named code path during that interval takes an `ereport(ERROR)` and follows the abort flow documented in `## ABORT TX FLOW` above. Readers see a momentarily-inconsistent backend image but their RR-snapshot invariants must still hold (that is exactly what the test is checking).
+
+Consequences of using `error` mode for *all* injections:
+
+* For the **single-shot, non-recursive** points (`orioledb-csn-incremented`, `orioledb-pk-mutated-pre-wal`, `orioledb-update-pk-done-pre-sk`, `orioledb-sk-mid-update`, `postgres-precommit-on-commit-actions`) the `ereport(ERROR)` triggers a clean abort path. The bank-test's invariants must hold before, during, and after the abort.
+* For the **recursive unguarded** points (`orioledb-set-csn`, `orioledb-set-xlog-ptr`, `orioledb-add-finish-wal`, `orioledb-wal-flush`) the first hit fires on the commit path; the resulting abort handler re-enters the same function and re-fires the injection during `XACT_EVENT_ABORT` -> **PANIC**. The postmaster restarts the cluster, recovery replays `WAL_REC_ROLLBACK` and re-applies the partial undo. This deliberately stresses the crash-restart path and is *not* a test bug.
+* For the **recursive `-guarded` companions** (`...-guarded`) the gate (`isCommit`, `csn != COMMITSEQNO_ABORTED`, `rec_type == WAL_REC_COMMIT`, or `!wal_in_rollback`) skips the abort-side hit, so the `ereport(ERROR)` stays single-shot and follows the clean abort path -- equivalent in effect to a non-recursive injection.
+* For the **post-commit recursive** point (`after-tx-commit`) the cluster is *already* committed when the error fires, so PG escalates to FATAL and the postmaster terminates the backend with signal 6. The test handles this the same way as PANIC -- crash recovery on the next startup.
+
+To use a non-error mode (e.g. for a `wait`-style freeze) the test would call `injection_points_attach('<name>', 'wait')` instead and explicitly wake the waiter via `injection_points_wakeup('<name>')`. The `stopevent_chaos` worker uses an analogous pattern with OrioleDB stopevents (`pg_stopevent_set` / `pg_stopevent_reset`) for the SELECT/UPDATE-internal points where ereport would PANIC inside a critical section -- see the `Notes on injection candidates that are *unsuitable* for SELECT` block above and the `stopevent_chaos_events` list in the test.
