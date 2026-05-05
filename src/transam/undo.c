@@ -466,12 +466,12 @@ unlink_unretained_undo(UndoLogType undoType,
 	 * Partition of files in [a, b] against the new retain set
 	 * [newChkpStartNum, newChkpEndNum] U [newCleanedNum, +inf):
 	 *
-	 *   1. file < persistStart                       -- not retained, unlink
-	 *   2. file in [persistStart, newChkpEndNum]     -- retained by chkp, keep
-	 *   3. file in [newChkpEndNum+1, newCleanedNum-1] -- gap, unlink
-	 *      (only reachable when persistStart < newCleanedNum, i.e. the chkp
-	 *      range starts below the active range)
-	 *   4. file >= newCleanedNum                     -- retained by active, keep
+	 * 1. file < persistStart                       -- not retained, unlink 2.
+	 * file in [persistStart, newChkpEndNum]     -- retained by chkp, keep 3.
+	 * file in [newChkpEndNum+1, newCleanedNum-1] -- gap, unlink (only
+	 * reachable when persistStart < newCleanedNum, i.e. the chkp range starts
+	 * below the active range) 4. file >= newCleanedNum                     --
+	 * retained by active, keep
 	 *
 	 * When the new chkp range is empty, the sentinel
 	 * (newChkpStartNum=newCleanedNum, newChkpEndNum=-1) collapses cases 2-3:
@@ -483,9 +483,9 @@ unlink_unretained_undo(UndoLogType undoType,
 	 * Case 1: files in [a, b] below the new persist start. A prefix punch on
 	 * file last+1 only makes sense when last+1 is exactly persistStart, i.e.
 	 * the file that holds the first retained byte. If last+1 < persistStart,
-	 * the file is itself fully unneeded and is unlinked separately; if
-	 * last+1 > persistStart it is fully retained -- in either case pass 0 so
-	 * we never punch over retained data.
+	 * the file is itself fully unneeded and is unlinked separately; if last+1
+	 * > persistStart it is fully retained -- in either case pass 0 so we
+	 * never punch over retained data.
 	 */
 	last = Min(b, persistStart - 1);
 	if (a <= last)
