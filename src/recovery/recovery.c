@@ -3195,7 +3195,38 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 		}
 		else
 		{
+			OTableDescr tmp_descr;
+
+			o_fill_tmp_table_descr(&tmp_descr, new_o_table);
+
 			o_tables_meta_unlock_no_wal();
+			if (ix_num < nindices && old_o_table->indices[ix_num].type != oIndexPrimary &&
+				old_o_table->indices[ix_num].oids.reloid == new_o_table->indices[ix_num].oids.reloid &&
+				old_o_table->indices[ix_num].oids.relnode != new_o_table->indices[ix_num].oids.relnode)
+			{
+				Assert(is_recovery_in_progress());
+
+				/*
+				 * In main recovery worker send message to main index creation
+				 * worker in dedicated recovery workers pool and exit
+				 */
+				if (!*recovery_single_process)
+				{
+					ORelOids	invalid_oids;
+
+					/* Send recovery message to become a leader */
+					ORelOidsSetInvalid(invalid_oids);
+					recovery_send_leader_oids(oids, ix_num, new_o_table->version,
+											  invalid_oids, 0, false);
+				}
+				else
+					build_secondary_index(changed_tablespace ?
+										  old_o_table->oids.relnode :
+										  InvalidOid,
+										  new_o_table, &tmp_descr, ix_num,
+										  false, NULL);
+			}
+			o_free_tmp_table_descr(&tmp_descr);
 		}
 
 		pfree(old_o_table);
