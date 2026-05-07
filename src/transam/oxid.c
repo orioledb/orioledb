@@ -1516,16 +1516,39 @@ current_oxid_abort(void)
 {
 	ODBProcData *my_proc_info = &oProcData[MYPROCNUMBER];
 
-	if (!OXidIsValid(curOxid))
-		return;
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace current_oxid_abort enter pid=%d curOxid=%lu valid=%d",
+		 MyProcPid, (unsigned long) curOxid,
+		 OXidIsValid(curOxid) ? 1 : 0);
+#endif
 
+	if (!OXidIsValid(curOxid))
+	{
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "csn-trace current_oxid_abort early-return pid=%d (curOxid invalid)",
+			 MyProcPid);
+#endif
+		return;
+	}
+
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace current_oxid_abort set_oxid_csn(ABORTED) begin pid=%d oxid=%lu",
+		 MyProcPid, (unsigned long) curOxid);
+#endif
 	set_oxid_csn(curOxid, COMMITSEQNO_ABORTED);
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace current_oxid_abort set_oxid_csn(ABORTED) end pid=%d oxid=%lu",
+		 MyProcPid, (unsigned long) curOxid);
+#endif
 	pg_write_barrier();
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 
 	advance_run_xmin(curOxid);
 	curOxid = InvalidOXid;
 	release_assigned_logical_xids();
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace current_oxid_abort exit pid=%d", MyProcPid);
+#endif
 }
 
 /*
