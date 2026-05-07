@@ -27,3 +27,5 @@ after_ionum_set
 build_index_placeholder_inserted
 seq_scan_load_internal_page
 before_get_waiters_with_tuples
+after_csn_precommit
+before_modify_oxid_get_csn

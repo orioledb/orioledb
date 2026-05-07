@@ -2288,6 +2288,26 @@ undo_xact_callback(XactEvent event, void *arg)
 				}
 
 				current_oxid_precommit();
+
+				if (STOPEVENTS_ENABLED())
+				{
+					/*
+					 * XACT_EVENT_COMMIT runs under HOLD_INTERRUPTS, so a
+					 * normal CHECK_FOR_INTERRUPTS() is suppressed here. In
+					 * test/debug builds (orioledb.enable_stopevents) we
+					 * briefly lift the holdoff so a query cancel delivered
+					 * while parked at the stop event can fire and drive the
+					 * precommit→abort transition the test means to
+					 * exercise.  Production builds skip this entirely — the
+					 * stop event is compiled out to a no-op and the holdoff
+					 * stays intact.
+					 */
+					RESUME_INTERRUPTS();
+					STOPEVENT(STOPEVENT_AFTER_CSN_PRECOMMIT, NULL);
+					CHECK_FOR_INTERRUPTS();
+					HOLD_INTERRUPTS();
+				}
+
 				csn = GetCurrentCSN();
 				if (csn == COMMITSEQNO_INPROGRESS)
 					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
@@ -2332,6 +2352,31 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				if (!RecoveryInProgress())
 					wal_rollback(oxid, logicalXidContext.xid, false);
+
+				/*
+				 * If current_oxid_precommit() / current_oxid_xlog_precommit()
+				 * ran but we reached XACT_EVENT_ABORT before
+				 * current_oxid_commit() got a chance to write the actual CSN,
+				 * the in-buffer CSN for our oxid is still flagged with
+				 * COMMITSEQNO_STATUS_CSN_COMMITTING (and the xlog ptr with
+				 * XLOG_PTR_COMMITTING).  Every other backend that finds a
+				 * tuple modified by us busy-spins in oxid_get_csn() /
+				 * oxid_match_snapshot() / oxid_get_xlog_ptr() until that bit
+				 * clears.  apply_undo_stack() below acquires page-content
+				 * locks held by such spinners, closing the cycle: A holds
+				 * page P, spins on our COMMITTING bit; we wait for page P
+				 * inside apply_undo_stack(). A's spin runs out of NUM_DELAYS
+				 * budget and the cluster PANICs at oxid_get_csn /
+				 * oxid_match_snapshot.
+				 *
+				 * Reverting the bit back to IN_PROGRESS here releases every
+				 * spinner before we go after their page locks.  We don't jump
+				 * straight to COMMITSEQNO_ABORTED because the actual abort
+				 * sequencing (advance_run_xmin, undo cleanup) still needs to
+				 * run.  current_oxid_abort() below performs that final flip
+				 * in its proper place.
+				 */
+				current_oxid_clear_committing();
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					apply_undo_stack((UndoLogType) i, oxid, NULL, true);

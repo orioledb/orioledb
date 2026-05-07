@@ -329,8 +329,8 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 		CommitSeqNo tupcsn;
 		XLogRecPtr	tupptr;
 
-		oxid_match_snapshot(XACT_INFO_GET_OXID(xactInfo), oSnapshot,
-							&tupcsn, &tupptr);
+		oxid_match_snapshot(XACT_INFO_GET_OXID(xactInfo), oSnapshot, &tupcsn,
+							XLogRecPtrIsInvalid(oSnapshot->xlogptr) ? NULL : &tupptr);
 
 		txIsFinished = COMMITSEQNO_IS_COMMITTED(tupcsn);
 
