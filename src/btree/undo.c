@@ -473,8 +473,21 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 
 	Assert(stage == OUndoCallbackStageAbort);
 
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace modify_undo_callback enter pid=%d oxid=%lu action=%d "
+			  "indexType=%d blkno=%u",
+		 MyProcPid, (unsigned long) oxid, (int) item->action,
+		 (int) item->header.indexType, (unsigned int) item->blkno);
+#endif
+
 	if (!desc)
+	{
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "csn-trace modify_undo_callback no-desc-return pid=%d oxid=%lu",
+			 MyProcPid, (unsigned long) oxid);
+#endif
 		return;
+	}
 
 	tuple.formatFlags = item->tuphdr.formatFlags;
 	tuple.data = (Pointer) item + sizeof(BTreeModifyUndoStackItem);
@@ -495,10 +508,18 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	if (!changeCountsValid)
 		item->pageChangeCount = InvalidOPageChangeCount;
 
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace modify_undo_callback refind_page begin pid=%d oxid=%lu blkno=%u",
+		 MyProcPid, (unsigned long) oxid, (unsigned int) item->blkno);
+#endif
 	o_set_syscache_hooks();
 	findResult = refind_page(&context, (Pointer) &tuple, keyType,
 							 0, item->blkno, item->pageChangeCount);
 	o_unset_syscache_hooks();
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace modify_undo_callback refind_page end pid=%d oxid=%lu result=%d",
+		 MyProcPid, (unsigned long) oxid, (int) findResult);
+#endif
 	if (findResult == OFindPageResultFailure)
 	{
 		/*
@@ -555,18 +576,44 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	if (nonLockTupHdr.undoLocation == location + offsetof(BTreeModifyUndoStackItem, tuphdr) ||
 		(!UndoLocationIsValid(nonLockTupHdr.undoLocation) && item->action == BTreeOperationInsert))
 	{
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "csn-trace modify_undo_callback page_item_rollback begin pid=%d oxid=%lu blkno=%u",
+			 MyProcPid, (unsigned long) oxid, (unsigned int) blkno);
+#endif
 		(void) page_item_rollback(desc, p, loc, false,
 								  &nonLockTupHdr, nonLockUndoLocation);
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "csn-trace modify_undo_callback page_item_rollback end pid=%d oxid=%lu",
+			 MyProcPid, (unsigned long) oxid);
+#endif
 	}
 
 	MARK_DIRTY(desc, blkno);
 	if (blkno != desc->rootInfo.rootPageBlkno && is_page_too_sparse(desc, p))
 	{
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "csn-trace modify_undo_callback btree_try_merge_and_unlock begin pid=%d oxid=%lu blkno=%u",
+			 MyProcPid, (unsigned long) oxid, (unsigned int) blkno);
+#endif
 		/* We can try to merge this page */
 		btree_try_merge_and_unlock(context.desc, blkno, true, true);
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "csn-trace modify_undo_callback btree_try_merge_and_unlock end pid=%d oxid=%lu",
+			 MyProcPid, (unsigned long) oxid);
+#endif
 	}
 	else
+	{
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "csn-trace modify_undo_callback unlock_page pid=%d oxid=%lu blkno=%u",
+			 MyProcPid, (unsigned long) oxid, (unsigned int) blkno);
+#endif
 		unlock_page(blkno);
+	}
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace modify_undo_callback exit pid=%d oxid=%lu",
+		 MyProcPid, (unsigned long) oxid);
+#endif
 }
 
 /*
