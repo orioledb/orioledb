@@ -2383,6 +2383,7 @@ undo_xact_callback(XactEvent event, void *arg)
 					 (unsigned long) csn);
 #endif
 				INJECTION_POINT("orioledb-csn-incremented");
+				// kill(MyProcPid, 9);
 #ifdef USE_INJECTION_POINTS
 				elog(LOG,
 					 "csn-trace post-inject (no error fired) pid=%d oxid=%lu",

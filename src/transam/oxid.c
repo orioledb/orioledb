@@ -1562,15 +1562,32 @@ oxid_get_csn(OXid oxid, bool getRawCsn)
 	CommitSeqNo csn;
 	SpinDelayStatus status;
 
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace oxid_get_csn enter pid=%d oxid=%lu getRawCsn=%d",
+		 MyProcPid, (unsigned long) oxid, getRawCsn ? 1 : 0);
+#endif
+
 	if (oxid == BootstrapTransactionId)
+	{
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "csn-trace oxid_get_csn exit pid=%d oxid=%lu result=FROZEN(boot)",
+			 MyProcPid, (unsigned long) oxid);
+#endif
 		return COMMITSEQNO_FROZEN;
+	}
 
 	init_local_spin_delay(&status);
 
 	while (true)
 	{
 		if (oxid < pg_atomic_read_u64(&xid_meta->globalXmin))
+		{
+#ifdef USE_INJECTION_POINTS
+			elog(LOG, "csn-trace oxid_get_csn exit pid=%d oxid=%lu result=FROZEN(below_xmin)",
+				 MyProcPid, (unsigned long) oxid);
+#endif
 			return COMMITSEQNO_FROZEN;
+		}
 
 		map_oxid(oxid, &csn, NULL, getRawCsn);
 		if (COMMITSEQNO_IS_SPECIAL(csn) &&
@@ -1583,8 +1600,18 @@ oxid_get_csn(OXid oxid, bool getRawCsn)
 	finish_spin_delay(&status);
 
 	if (COMMITSEQNO_IS_SPECIAL(csn))
+	{
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "csn-trace oxid_get_csn exit pid=%d oxid=%lu result=INPROGRESS",
+			 MyProcPid, (unsigned long) oxid);
+#endif
 		return COMMITSEQNO_INPROGRESS;
+	}
 
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace oxid_get_csn exit pid=%d oxid=%lu result_csn=%lu",
+		 MyProcPid, (unsigned long) oxid, (unsigned long) csn);
+#endif
 	return csn;
 }
 
@@ -1634,12 +1661,21 @@ oxid_match_snapshot(OXid oxid, OSnapshot *snapshot,
 {
 	SpinDelayStatus status;
 
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace oxid_match_snapshot enter pid=%d oxid=%lu",
+		 MyProcPid, (unsigned long) oxid);
+#endif
+
 	if (oxid == BootstrapTransactionId || oxid < snapshot->xmin)
 	{
 		if (outCsn)
 			*outCsn = COMMITSEQNO_FROZEN;
 		if (outPtr)
 			*outPtr = FirstNormalUnloggedLSN;
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "csn-trace oxid_match_snapshot exit pid=%d oxid=%lu result=FROZEN(boot/xmin)",
+			 MyProcPid, (unsigned long) oxid);
+#endif
 		return;
 	}
 
@@ -1653,6 +1689,10 @@ oxid_match_snapshot(OXid oxid, OSnapshot *snapshot,
 				*outCsn = COMMITSEQNO_FROZEN;
 			if (outPtr)
 				*outPtr = FirstNormalUnloggedLSN;
+#ifdef USE_INJECTION_POINTS
+			elog(LOG, "csn-trace oxid_match_snapshot exit pid=%d oxid=%lu result=FROZEN(below_xmin)",
+				 MyProcPid, (unsigned long) oxid);
+#endif
 			return;
 		}
 
@@ -1683,6 +1723,11 @@ oxid_match_snapshot(OXid oxid, OSnapshot *snapshot,
 	}
 
 	finish_spin_delay(&status);
+
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace oxid_match_snapshot exit pid=%d oxid=%lu result=ok",
+		 MyProcPid, (unsigned long) oxid);
+#endif
 }
 
 void

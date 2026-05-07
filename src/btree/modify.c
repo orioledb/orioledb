@@ -127,6 +127,11 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 	BTreeModifyInternalContext context;
 	OXid		tupleOxid = OXidIsValid(opOxid) ? opOxid : BootstrapTransactionId;
 
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace o_btree_modify_internal enter pid=%d action=%d oxid=%lu",
+		 MyProcPid, (int) action, (unsigned long) opOxid);
+#endif
+
 	context.tuple = _tuple;
 	context.tupleType = tupleType;
 	context.pageFindContext = pageFindContext;
@@ -440,6 +445,11 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 	loc = &pageFindContext->items[pageFindContext->index].locator;
 	page = O_GET_IN_MEMORY_PAGE(blkno);
 
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace handle_conflicts enter pid=%d blkno=%u opOxid=%lu",
+		 MyProcPid, (unsigned int) blkno, (unsigned long) context->opOxid);
+#endif
+
 	BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, page, loc);
 
 	if (row_lock_conflicts(tuphdr,
@@ -484,7 +494,18 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 		}
 		else
 		{
-			CommitSeqNo csn = oxid_get_csn(oxid, false);
+			CommitSeqNo csn;
+
+#ifdef USE_INJECTION_POINTS
+			elog(LOG, "csn-trace handle_conflicts oxid_get_csn-call pid=%d blkno=%u oxid=%lu (page locked)",
+				 MyProcPid, (unsigned int) blkno, (unsigned long) oxid);
+#endif
+			csn = oxid_get_csn(oxid, false);
+#ifdef USE_INJECTION_POINTS
+			elog(LOG, "csn-trace handle_conflicts oxid_get_csn-returned pid=%d blkno=%u oxid=%lu csn=%lu",
+				 MyProcPid, (unsigned int) blkno, (unsigned long) oxid,
+				 (unsigned long) csn);
+#endif
 
 			if (XACT_INFO_IS_LOCK_ONLY(xactInfo) && (COMMITSEQNO_IS_ABORTED(csn) ||
 													 COMMITSEQNO_IS_NORMAL(csn) ||
@@ -626,6 +647,9 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 
 	if (!context->needsUndo)
 		context->leafTuphdr.undoLocation = tuphdr->undoLocation;
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace handle_conflicts exit pid=%d result=OK", MyProcPid);
+#endif
 	return ConflictResolutionOK;
 }
 
@@ -997,6 +1021,11 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	Jsonb	   *params = NULL;
 	OFindPageResult findResult;
 
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace o_btree_normal_modify enter pid=%d action=%d oxid=%lu",
+		 MyProcPid, (int) action, (unsigned long) opOxid);
+#endif
+
 	if (STOPEVENTS_ENABLED())
 		params = prepare_modify_start_params(desc);
 	STOPEVENT(STOPEVENT_MODIFY_START, params);
@@ -1048,14 +1077,30 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		}
 		ppool_release_reserved(desc->ppool, PPOOL_RESERVE_INSERT);
 		Assert(!have_locked_pages());
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "csn-trace o_btree_normal_modify exit pid=%d result=Inserted(fastpath)",
+			 MyProcPid);
+#endif
 		return OBTreeModifyResultInserted;
 	}
 	Assert(findResult == OFindPageResultSuccess);
 
-	return o_btree_modify_internal(&pageFindContext, action, tuple, tupleType,
-								   key, keyType, opOxid, opCsn,
-								   lockMode, deleted, pageReserveKind,
-								   callbackInfo);
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace o_btree_normal_modify call_internal pid=%d", MyProcPid);
+#endif
+	{
+		OBTreeModifyResult res;
+
+		res = o_btree_modify_internal(&pageFindContext, action, tuple, tupleType,
+									  key, keyType, opOxid, opCsn,
+									  lockMode, deleted, pageReserveKind,
+									  callbackInfo);
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "csn-trace o_btree_normal_modify exit pid=%d result=%d",
+			 MyProcPid, (int) res);
+#endif
+		return res;
+	}
 }
 
 #include "tableam/descr.h"
@@ -1461,9 +1506,20 @@ o_btree_modify(BTreeDescr *desc, BTreeOperationType action,
 			   OXid oxid, CommitSeqNo csn, RowLockMode lockMode,
 			   BTreeLocationHint *hint, BTreeModifyCallbackInfo *callbackInfo)
 {
-	return o_btree_normal_modify(desc, action, tuple, tupleType,
+	OBTreeModifyResult res;
+
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace o_btree_modify enter pid=%d action=%d oxid=%lu",
+		 MyProcPid, (int) action, (unsigned long) oxid);
+#endif
+	res = o_btree_normal_modify(desc, action, tuple, tupleType,
 								 key, keyType, oxid, csn, lockMode,
 								 hint, BTreeLeafTupleNonDeleted, callbackInfo);
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace o_btree_modify exit pid=%d result=%d",
+		 MyProcPid, (int) res);
+#endif
+	return res;
 }
 
 OBTreeModifyResult

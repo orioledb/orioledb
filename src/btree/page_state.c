@@ -405,10 +405,18 @@ lock_page(OInMemoryBlkno blkno)
 	OPageWaiterShmemState *lockerState = &lockerStates[MYPROCNUMBER];
 	uint64		prevState;
 	int			extraWaits = 0;
+#ifdef USE_INJECTION_POINTS
+	bool		had_to_wait = false;
+#endif
 
 	Assert(get_my_locked_page_index(blkno) < 0);
 
 	EA_LOCK_INC(blkno);
+
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace lock_page request pid=%d blkno=%u",
+		 MyProcPid, (unsigned int) blkno);
+#endif
 
 	while (true)
 	{
@@ -417,6 +425,12 @@ lock_page(OInMemoryBlkno blkno)
 		if (!O_PAGE_STATE_IS_LOCKED(prevState))
 			break;
 
+#ifdef USE_INJECTION_POINTS
+		had_to_wait = true;
+		elog(LOG, "csn-trace lock_page wait pid=%d blkno=%u tail_procno=%u",
+			 MyProcPid, (unsigned int) blkno,
+			 (unsigned int) (prevState & PAGE_STATE_LIST_TAIL_MASK));
+#endif
 		pgstat_report_wait_start(PG_WAIT_LWLOCK | LWTRANCHE_BUFFER_CONTENT);
 
 		for (;;)
@@ -429,6 +443,11 @@ lock_page(OInMemoryBlkno blkno)
 
 		pgstat_report_wait_end();
 	}
+
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace lock_page got pid=%d blkno=%u waited=%d",
+		 MyProcPid, (unsigned int) blkno, had_to_wait ? 1 : 0);
+#endif
 
 	my_locked_page_add(blkno, prevState | PAGE_STATE_LOCKED_FLAG);
 
@@ -453,10 +472,18 @@ lock_page_with_tuple(BTreeDescr *desc,
 	OPageWaiterShmemState *lockerState = &lockerStates[MYPROCNUMBER];
 	bool		keySerialized = false;
 	PageImg		img;
+#ifdef USE_INJECTION_POINTS
+	bool		had_to_wait = false;
+#endif
 
 
 	img.load = false;
 	Assert(get_my_locked_page_index(*blkno) < 0);
+
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace lock_page_with_tuple request pid=%d blkno=%u",
+		 MyProcPid, (unsigned int) *blkno);
+#endif
 
 	while (true)
 	{
@@ -479,6 +506,12 @@ lock_page_with_tuple(BTreeDescr *desc,
 		}
 		Assert(lockResult == LockPageResultQueued);
 
+#ifdef USE_INJECTION_POINTS
+		had_to_wait = true;
+		elog(LOG, "csn-trace lock_page_with_tuple wait pid=%d blkno=%u tail_procno=%u",
+			 MyProcPid, (unsigned int) *blkno,
+			 (unsigned int) (prevState & PAGE_STATE_LIST_TAIL_MASK));
+#endif
 		pgstat_report_wait_start(PG_WAIT_LWLOCK | LWTRANCHE_BUFFER_CONTENT);
 
 		for (;;)
@@ -515,6 +548,11 @@ lock_page_with_tuple(BTreeDescr *desc,
 	}
 
 	EA_LOCK_INC(*blkno);
+
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace lock_page_with_tuple got pid=%d blkno=%u waited=%d",
+		 MyProcPid, (unsigned int) *blkno, had_to_wait ? 1 : 0);
+#endif
 
 	my_locked_page_add(*blkno, prevState | PAGE_STATE_LOCKED_FLAG);
 
@@ -1006,6 +1044,10 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 void
 unlock_page(OInMemoryBlkno blkno)
 {
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace lock_page release pid=%d blkno=%u",
+		 MyProcPid, (unsigned int) blkno);
+#endif
 	unlock_page_internal(blkno, false);
 }
 
@@ -1015,6 +1057,10 @@ unlock_page(OInMemoryBlkno blkno)
 void
 unlock_page_after_split(OInMemoryBlkno blkno)
 {
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace lock_page release-after-split pid=%d blkno=%u",
+		 MyProcPid, (unsigned int) blkno);
+#endif
 	unlock_page_internal(blkno, true);
 }
 

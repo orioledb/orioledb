@@ -1,30 +1,37 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
-# REPEATABLE READ correctness stress test
+# REPEATABLE READ correctness stress test (development copy).
 #
-# Model: N accounts with a fixed total balance and unique tokens.
-# Writer transactions transfer money between random accounts and
-# swap tokens through each writer's private token so the set of
-# tokens on the table stays unique at commit. Readers verify the
-# balance sum and token uniqueness invariants under REPEATABLE
-# READ, the strongest isolation level OrioleDB currently supports
-# (see o_check_isolation_level in include/transam/oxid.h).
-#
-# Reference values used by invariants (expected total, account
-# count) are Python constants computed once at setup; readers
-# never recompute them from live state. Writer/reader bodies are
-# inline SQL over per-thread RR connections, matching the
-# threading pattern used by other tests in test/t/ (see
-# checkpoint_concurrent_test.py).
+# Standalone bank-account invariant stress test forked from
+# repeatable_read_stress_test.py. Adds env-var configuration,
+# crash watchdog, injection-point trace, post-test backend reaping.
+# Use this file for iteration / experiments without touching the
+# original test.
 
+import datetime
+import inspect
+import os
 import random
+import shutil
+import subprocess
 import threading
 import time
 
 from testgres.enums import IsolationLevel
 
 from ..base_test import BaseTest
+
+
+def _env_int(name, default):
+	v = os.getenv(name)
+	return int(v) if v else default
+
+
+def _env_float(name, default):
+	v = os.getenv(name)
+	return float(v) if v else default
+
 
 SETUP_SQL = """
 	CREATE EXTENSION IF NOT EXISTS orioledb;
@@ -41,30 +48,45 @@ SETUP_SQL = """
 """
 
 
-class RepeatableReadStressTest(BaseTest):
+class RrStressTest(BaseTest):
+
+	def setUp(self):
+		_inst = os.getenv('RR_INSTANCE')
+		if _inst:
+			self._myName = (
+			    'rr_stress-bank_account_invariant_' + _inst)
+		super().setUp()
+
+	def tearDown(self):
+		try:
+			super().tearDown()
+		finally:
+			# Reap this test's own postgres backends (matched by its
+			# unique data dir) so dangling backends from a crashed
+			# cluster don't outlive the test. The data-dir match keeps
+			# parallel test instances unaffected.
+			data_dir = os.path.join(self.node.base_dir, 'data')
+			subprocess.run(
+			    f"ps -Af | grep -F '{data_dir}' | grep -v grep "
+			    f"| awk '{{print $2}}' | xargs kill -9 2>/dev/null",
+			    shell=True, check=False)
 
 	def test_bank_account_invariant(self):
-		# Test includes three independent nemeses:
-		#   - wal_chaos: arm/disarm an injection point at the WAL
-		#     flush boundary to abort writers mid-flush.
-		#   - ddl_nemesis: ALTER TABLE ADD/DROP COLUMN cycles,
-		#     forcing AccessExclusiveLock conflicts with DML.
-		#   - stopevent_chaos: briefly arm one orioledb stopevent
-		#     at a time (page_read / modify_start / step_down /
-		#     apply_undo / checkpoint_step) to freeze backends
-		#     mid-tree-walk / mid-modify / mid-undo /
-		#     mid-checkpoint, then reset to release them.
-
-		n_accounts = 100
+		n_accounts = _env_int('RR_ACCOUNTS', 100)
 		initial_balance = 1000
-		n_writers = 20
-		n_readers_pk = 1
-		n_readers_sk = 1
-		n_readers_mixed = 1
-		duration = 7* 60 * 60
+		n_writers = _env_int('RR_WRITERS', 20)
+		n_readers_pk = _env_int('RR_READERS_PK', 6)
+		n_readers_sk = _env_int('RR_READERS_SK', 6)
+		n_readers_mixed = _env_int('RR_READERS_MIXED', 6)
+		duration = _env_int('RR_DURATION', 3 * 60)
+		# When 1: PANIC + cluster recovery is treated as a test
+		# failure. When 0: PANIC is tolerated, cluster restart is
+		# allowed, and the test only fails on data-invariant
+		# violations (the original intent).
+		panic_fatal = _env_int('RR_PANIC_FATAL', 1)
 		checkpoint_interval = 0.5
 		ddl_nemesis_interval = 0.2
-		wal_chaos_idle = 0.1
+		wal_chaos_idle = _env_float('RR_WAL_CHAOS_IDLE', 0.1)
 		stopevent_chaos_idle = 0.5
 		stopevent_chaos_window = 0.1
 		stopevent_chaos_events = (
@@ -78,15 +100,24 @@ class RepeatableReadStressTest(BaseTest):
 		expected_total = n_accounts * initial_balance
 
 		node = self.node
+		# When PANIC is fatal, disable in-place crash recovery so a
+		# PANIC takes the whole postmaster down -- crash detection
+		# becomes unambiguous (connect-refused == cluster gone).
+		# When PANIC is tolerated, keep the base default (= 'on') so
+		# the cluster recovers and the test can still validate data
+		# invariants after the crash.
+		if panic_fatal:
+			node.append_conf(
+			    'postgresql.conf', 'restart_after_crash = off\n')
+		else:
+			node.append_conf(
+			    'postgresql.conf', 'restart_after_crash = on\n')
 		node.start()
 		node.safe_psql(SETUP_SQL)
-		
+
 		node.safe_psql(
 		    "ALTER SYSTEM SET orioledb.enable_stopevents = on"
 		)
-		# node.safe_psql(
-		# 	"ALTER SYSTEM SET orioledb.trace_stopevents = on"
-		# )
 		node.safe_psql("SELECT pg_reload_conf()")
 		node.safe_psql(f"""
 			INSERT INTO o_bank_account(id, balance, token)
@@ -94,9 +125,24 @@ class RepeatableReadStressTest(BaseTest):
 				FROM generate_series(1, {n_accounts}) AS i;
 		""")
 
+		test_start = time.time()
+		first_error_time = [None]
+		first_crash_time = [None]
+		current_injection = [None]
+		crash_injection = [None]
+		injection_history = []
+		injection_history_lock = threading.Lock()
 		stop = threading.Event()
 		errors = []
 		errors_lock = threading.Lock()
+
+		def note_crash():
+			with errors_lock:
+				if first_crash_time[0] is None:
+					first_crash_time[0] = time.time() - test_start
+					crash_injection[0] = current_injection[0]
+			stop.set()
+
 		counters_lock = threading.Lock()
 		print_lock = threading.Lock()
 		write_count = [0]
@@ -105,6 +151,8 @@ class RepeatableReadStressTest(BaseTest):
 
 		def record_error(msg):
 			with errors_lock:
+				if first_error_time[0] is None:
+					first_error_time[0] = time.time() - test_start
 				errors.append(msg)
 
 		def dprint(msg):
@@ -113,9 +161,6 @@ class RepeatableReadStressTest(BaseTest):
 
 		def writer_loop(writer_id):
 			con = node.connect()
-			# Each writer's private token starts outside {1..N}, so
-			# the temporary state (after the first UPDATE) still has
-			# unique tokens even if the constraint were IMMEDIATE.
 			my_token = n_accounts + writer_id
 			local_w = 0
 			local_c = 0
@@ -147,9 +192,6 @@ class RepeatableReadStressTest(BaseTest):
 						    f"    token = {from_token} "
 						    f"WHERE id = {v_to}")
 						con.commit()
-						# Only advance my_token after a successful
-						# commit; on failure the old value is still
-						# outside the table's token set.
 						my_token = to_token
 						local_w += 1
 					except Exception:
@@ -166,9 +208,6 @@ class RepeatableReadStressTest(BaseTest):
 				with counters_lock:
 					write_count[0] += local_w
 					conflict_count[0] += local_c
-				# dprint(
-				#     f'[writer #{writer_id}] commits={local_w} '
-				#     f'conflicts={local_c}')
 
 		def reader_pk_loop(reader_id):
 			con = node.connect()
@@ -205,7 +244,6 @@ class RepeatableReadStressTest(BaseTest):
 					pass
 				with counters_lock:
 					read_count[0] += local_r
-				# dprint(f'[reader-pk #{reader_id}] commits={local_r}')
 
 		def reader_sk_loop(reader_id):
 			con = node.connect()
@@ -214,10 +252,6 @@ class RepeatableReadStressTest(BaseTest):
 				while not stop.is_set():
 					try:
 						con.begin(IsolationLevel.RepeatableRead)
-						# Scan ordered by token (secondary index)
-						# then a full PK scan inside the same RR
-						# snapshot: both must see the same per-row
-						# balances and the same totals.
 						sk_rows = con.execute(
 						    "SELECT id, balance, token "
 						    "FROM o_bank_account "
@@ -265,7 +299,6 @@ class RepeatableReadStressTest(BaseTest):
 					pass
 				with counters_lock:
 					read_count[0] += local_r
-				# dprint(f'[reader-sk #{reader_id}] commits={local_r}')
 
 		def reader_mixed_loop(reader_id):
 			con = node.connect()
@@ -312,7 +345,6 @@ class RepeatableReadStressTest(BaseTest):
 					pass
 				with counters_lock:
 					read_count[0] += local_r
-				# dprint(f'[reader-mixed #{reader_id}] commits={local_r}')
 
 		def checkpointer_loop():
 			con = node.connect()
@@ -335,13 +367,8 @@ class RepeatableReadStressTest(BaseTest):
 					con.close()
 				except Exception:
 					pass
-				# # dprint(f'[checkpointer] checkpoints={local_cp}')
 
 		def ddl_nemesis_loop():
-			# Concurrent DDL nemesis: repeatedly add and drop a
-			# nullable column on o_bank_account. ALTER TABLE takes
-			# a strong lock and must not tear readers/writers'
-			# RR snapshots or the bank-account invariants.
 			con = node.connect()
 			local_add = 0
 			local_drop = 0
@@ -388,38 +415,23 @@ class RepeatableReadStressTest(BaseTest):
 					con.close()
 				except Exception:
 					pass
-				# dprint(
-				    # f'[ddl-nemesis] adds={local_add} drops={local_drop}')
 
 		wal_chaos_points = [
-			# PG-side
 			'before-tx-commit',
-			# 'after-tx-commit', # cause a pg cluster termination with signal 6
 			'postgres-precommit-on-commit-actions',
-			# 'after-proc-array-end-tx',
-			# 'xlog-flush',
-
-			# OrioleDB lock-free CAS sites (recursive: unguarded fires
-			# during commit AND abort -> ereport during XACT_EVENT_ABORT
-			# -> PANIC; -guarded skips the abort-side hit)
-			# 'orioledb-set-csn',
 			'orioledb-set-csn-guarded',
-			# 'orioledb-set-xlog-ptr',
 			'orioledb-set-xlog-ptr-guarded',
-
-			# OrioleDB WAL durability boundaries (recursive, paired)
-			# 'orioledb-add-finish-wal',
 			'orioledb-add-finish-wal-guarded',
-			# 'orioledb-wal-flush',
 			'orioledb-wal-flush-guarded',
-
-			# OrioleDB single-shot invariant windows (commit-side only,
-			# no -guarded companion needed)
-			# 'orioledb-csn-incremented', # cluster PANIC -> lost update
+			'orioledb-csn-incremented',
 			'orioledb-pk-mutated-pre-wal',
 			'orioledb-update-pk-done-pre-sk',
 			'orioledb-sk-mid-update',
 		]
+		_env_pts = os.getenv('RR_INJECTION_POINTS')
+		if _env_pts and _env_pts != 'ALL':
+			_subset = [p.strip() for p in _env_pts.split(',') if p.strip()]
+			wal_chaos_points = [p for p in wal_chaos_points if p in _subset]
 
 		def wal_chaos_loop():
 			con = node.connect()
@@ -429,18 +441,12 @@ class RepeatableReadStressTest(BaseTest):
 			def log_once(context, exc):
 				if not logged_error[0]:
 					logged_error[0] = True
-					# dprint(
-					    # f'[wal-chaos] {context} failed: {exc!r} '
-					    # f'(subsequent errors suppressed)')
 
 			try:
 				while not stop.is_set():
 					if stop.wait(wal_chaos_idle):
 						break
 					try:
-						# Pick a random injection point
-						# No need to pick all at once, because only the first
-						# one on the execution path will be triggered
 						rating = []
 						for point in wal_chaos_points:
 							rating.append(
@@ -452,6 +458,10 @@ class RepeatableReadStressTest(BaseTest):
 							"SELECT injection_points_attach("
 							f"'{rating[0][0]}', 'error')")
 						con.commit()
+						current_injection[0] = rating[0][0]
+						with injection_history_lock:
+							injection_history.append(
+							    (time.time() - test_start, rating[0][0]))
 						local_on += 1
 					except Exception as e:
 						try:
@@ -466,6 +476,7 @@ class RepeatableReadStressTest(BaseTest):
 							    "SELECT injection_points_detach("
 							    f"'{point}')")
 						con.commit()
+						current_injection[0] = None
 					except Exception as e:
 						try:
 							con.rollback()
@@ -488,16 +499,8 @@ class RepeatableReadStressTest(BaseTest):
 					con.close()
 				except Exception:
 					pass
-				# dprint(f'[wal-chaos] windows={local_on}')
 
 		def stopevent_chaos_loop():
-			# Stopevent chaos: cycle through a list of orioledb
-			# stopevents, briefly arming one at a time with a
-			# permissive 'true' jsonpath, then resetting. This
-			# freezes any backend that hits the named point until
-			# reset, exposing internal-state-while-others-race
-			# bugs. Reset MUST happen on every exit path -- a
-			# left-armed event would deadlock the joined workers.
 			con = node.connect()
 			local_cycles = 0
 			armed = [None]
@@ -506,9 +509,6 @@ class RepeatableReadStressTest(BaseTest):
 			def log_once(ctx, exc):
 				if not logged_error[0]:
 					logged_error[0] = True
-					# dprint(
-					    # f'[stopevent-chaos] {ctx} failed: {exc!r} '
-					    # f'(subsequent errors suppressed)')
 
 			def reset_armed():
 				if armed[0] is None:
@@ -545,22 +545,41 @@ class RepeatableReadStressTest(BaseTest):
 							pass
 						log_once('set', e)
 						continue
-					# Brief freeze; backends pile up on the
-					# event's condvar. Window kept very short
-					# so the test does not stall.
 					stop.wait(stopevent_chaos_window)
 					reset_armed()
 			finally:
-				# Critical: never leave an event armed --
-				# joined workers would hang forever.
 				reset_armed()
 				try:
 					con.close()
 				except Exception:
 					pass
-				# dprint(f'[stopevent-chaos] cycles={local_cycles}')
 
-		# dprint("")
+		def crash_watchdog():
+			# Poll postgresql.log for PANIC. Authoritative signal —
+			# unlike connection probing, it isn't fooled by load.
+			log_path = os.path.join(node.logs_dir, 'postgresql.log')
+			pos = 0
+			try:
+				if os.path.exists(log_path):
+					pos = os.path.getsize(log_path)
+			except OSError:
+				pos = 0
+			while not stop.is_set():
+				if stop.wait(0.5):
+					break
+				try:
+					with open(log_path, 'r', errors='replace') as f:
+						f.seek(pos)
+						chunk = f.read()
+						pos = f.tell()
+				except Exception:
+					continue
+				if 'PANIC' in chunk:
+					for line in chunk.splitlines():
+						if 'PANIC' in line:
+							print(f'[watchdog] {line}', flush=True)
+					note_crash()
+					break
 
 		threads = []
 		for wid in range(1, n_writers + 1):
@@ -576,23 +595,96 @@ class RepeatableReadStressTest(BaseTest):
 			threads.append(
 			    threading.Thread(target=reader_mixed_loop, args=(rid,)))
 		threads.append(threading.Thread(target=checkpointer_loop))
-		# threads.append(threading.Thread(target=ddl_nemesis_loop))
-		threads.append(threading.Thread(target=wal_chaos_loop))
-		# threads.append(threading.Thread(target=stopevent_chaos_loop))
+		if wal_chaos_points:
+			threads.append(threading.Thread(target=wal_chaos_loop))
+		threads.append(threading.Thread(target=crash_watchdog))
+
+		print(
+		    f'\n[config] duration={duration} writers={n_writers} '
+		    f'readers_pk={n_readers_pk} readers_sk={n_readers_sk} '
+		    f'readers_mixed={n_readers_mixed} '
+		    f'injection_points={len(wal_chaos_points)} '
+		    f'list={wal_chaos_points}', flush=True)
 
 		for t in threads:
 			t.start()
 
-		time.sleep(duration)
+		stop.wait(duration)
 		stop.set()
 		for t in threads:
 			t.join()
 
+		# Final authoritative check against the PG log.
+		log_path = os.path.join(node.logs_dir, 'postgresql.log')
+		panic_lines = []
+		try:
+			with open(log_path, 'r', errors='replace') as f:
+				for line in f:
+					if 'PANIC' in line:
+						panic_lines.append(line.rstrip())
+		except Exception:
+			pass
+		if panic_lines and first_crash_time[0] is None:
+			first_crash_time[0] = time.time() - test_start
+			crash_injection[0] = current_injection[0]
+
+		if panic_lines:
+			results_dir = os.path.join(
+			    os.path.dirname(inspect.getfile(self.__class__)),
+			    'results')
+			os.makedirs(results_dir, exist_ok=True)
+			tag = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+			pts = (os.getenv('RR_INJECTION_POINTS') or 'ALL'
+			       ).replace(',', '+')[:60]
+			inst = os.getenv('RR_INSTANCE') or 'solo'
+			dst = os.path.join(
+			    results_dir,
+			    f'{tag}_{inst}_{pts}.log')
+			try:
+				shutil.copy(log_path, dst)
+				print(f'[saved-log] {dst}', flush=True)
+			except Exception as _ce:
+				print(f'[save-log failed] {_ce!r}', flush=True)
+
+		_fet = first_error_time[0]
+		_fct = first_crash_time[0]
+		_fet_s = f'{_fet:.2f}s' if _fet is not None else 'none'
+		_fct_s = f'{_fct:.2f}s' if _fct is not None else 'none'
 		print(
 		    f'\n[totals] writes={write_count[0]} '
 		    f'reads={read_count[0]} '
-		    f'conflicts={conflict_count[0]}')
+		    f'conflicts={conflict_count[0]} '
+		    f'first_error_at={_fet_s} '
+		    f'first_crash_at={_fct_s} '
+		    f'crash_injection={crash_injection[0]!r} '
+		    f'panic_lines={len(panic_lines)}')
+		for ln in panic_lines[:5]:
+			print(f'[PANIC] {ln}')
+		if first_crash_time[0] is not None:
+			_window = [
+			    (t, p)
+			    for t, p in injection_history
+			    if t >= first_crash_time[0] - 5.0
+			    and t <= first_crash_time[0] + 1.0
+			]
+			print(f'[wal-chaos history near crash] {_window}')
 
+		if panic_fatal and first_crash_time[0] is not None:
+			self.fail(
+			    f'cluster crashed at {first_crash_time[0]:.2f}s '
+			    f'(writes={write_count[0]} reads={read_count[0]} '
+			    f'crash_injection={crash_injection[0]!r})')
+		# When tolerating PANIC, wait briefly for recovery before
+		# running invariant queries; node.execute will keep getting
+		# 57P03 ("in recovery mode") until WAL replay completes.
+		if not panic_fatal and first_crash_time[0] is not None:
+			deadline = time.time() + 30.0
+			while time.time() < deadline:
+				try:
+					node.execute("SELECT 1")
+					break
+				except Exception:
+					time.sleep(0.5)
 		final_total = node.execute(
 		    "SELECT sum(balance)::bigint FROM o_bank_account")[0][0]
 		unique_tokens = node.execute(
@@ -609,6 +701,22 @@ class RepeatableReadStressTest(BaseTest):
 		print(
 		    f'snapshot reads saw inconsistency (torn scan): {seen}')
 
+		# Detect dangling backends: stop the node and then count any
+		# process that still references our data dir. After a clean
+		# shutdown the count must be zero. Anything else indicates a
+		# stuck backend / orphan worker.
+		try:
+			node.stop()
+		except Exception as _se:
+			print(f'[node.stop failed] {_se!r}', flush=True)
+		data_dir = os.path.join(node.base_dir, 'data')
+		_ps = subprocess.run(
+		    f"ps -Af | grep -F '{data_dir}' | grep -v grep | wc -l",
+		    shell=True, capture_output=True, text=True, check=False)
+		n_dangling = int((_ps.stdout or '0').strip() or 0)
+		print(f'[dangling-check] surviving backends: {n_dangling}',
+		      flush=True)
+
 		self.assertEqual(
 		    final_total, expected_total,
 		    f'final total {final_total} != expected {expected_total} '
@@ -621,14 +729,19 @@ class RepeatableReadStressTest(BaseTest):
 		    f'expected {n_accounts} rows, got {rows}')
 		self.assertEqual(
 		    seen, [], 'snapshot reads saw inconsistency (torn scan)')
-		self.assertGreater(
-		    write_count[0], 0, 'writers must have committed')
-		self.assertGreater(
-		    read_count[0], 0, 'readers must have completed')
+		if n_writers > 0:
+			self.assertGreater(
+			    write_count[0], 0, 'writers must have committed')
+		if (n_readers_pk + n_readers_sk + n_readers_mixed) > 0:
+			self.assertGreater(
+			    read_count[0], 0, 'readers must have completed')
 		self.assertFalse(
 		    retained,
 		    'orioledb retained undo after stop (possible snapshot leak)')
 		self.assertTrue(
 		    tbl_check_ok, 'orioledb_tbl_check(o_bank_account) failed')
+		self.assertEqual(
+		    n_dangling, 0,
+		    f'{n_dangling} postgres backends survived node.stop()')
 
 		node.stop()

@@ -991,6 +991,11 @@ refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	BTreePageItemLocator loc;
 	bool		item_found = true;
 
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace refind_page enter pid=%d blkno=%u level=%u",
+		 MyProcPid, (unsigned int) _blkno, (unsigned int) level);
+#endif
+
 	ASAN_UNPOISON_MEMORY_REGION(&intCxt, sizeof(intCxt));
 	intCxt.context = context;
 	intCxt.key = key;
@@ -1163,6 +1168,10 @@ retry:
 	context->items[context->index].locator = loc;
 	context->items[context->index].blkno = intCxt.blkno;
 	context->items[context->index].pageChangeCount = intCxt.pageChangeCount;
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "csn-trace refind_page exit pid=%d blkno=%u result=Success",
+		 MyProcPid, (unsigned int) intCxt.blkno);
+#endif
 	return OFindPageResultSuccess;
 }
 
