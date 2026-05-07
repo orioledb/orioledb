@@ -6,11 +6,13 @@ import testgres
 import re
 import shutil
 import os
+import time
 
 from enum import Enum
 
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
+from .base_test import wait_stopevent
 from testgres.connection import DatabaseError
 
 from testgres.enums import NodeStatus
@@ -696,3 +698,154 @@ class PageFitItemsTest(BaseTest):
 
 		self.assertSysTreePagesCount(3)
 		node.stop()
+
+
+class MergeWaitedTuplesTest(BaseTest):
+	"""
+	Regression test for the leftPageSpaceLeft assertion crash in
+	btree_page_split_location() that fired when merge_waited_tuples()
+	rejected a waiter because the right page would overflow.
+
+	Setup:
+	  * a leaf page is filled close to its 8192-byte capacity by 12 rows
+	    of small key + ~600-byte value (total ~7700 bytes used);
+	  * con "splitter" issues an INSERT of one more 600-byte row that
+	    will force a page split;
+	  * the splitter is paused at the new before_get_waiters_with_tuples
+	    stop event, after taking the page lock but before collecting
+	    waiters;
+	  * 12 "waiter" connections issue INSERTs on the same leaf — eleven
+	    of them with normal-size keys ('m0001'..'m0011') and one with a
+	    deliberately wider key ('m0012' + repeat('c', 600)) so that this
+	    last waiter, when included in the merge, lifts
+	    outputItems->maxKeyLen by ~600 bytes.  All 12 queue against the
+	    page lock the splitter holds and become waiters;
+	  * the control connection resets the stop event.  The splitter
+	    resumes, calls get_waiters_with_tuples(), then
+	    o_btree_insert_item_with_waiters() which calls
+	    merge_waited_tuples().
+
+	The merged set (12 existing + splitter + 12 waiters, ~640 bytes
+	each, plus ~600 bytes of extra key on one waiter) overflows the
+	16384-byte two-page budget once the wide-key waiter's contribution
+	to maxKeyLen is accounted for, so merge_waited_tuples() rebalances
+	and pushes the rejection branch (cmp = -1; finished = true) for the
+	waiter(s) that no longer fit.
+
+	Without the fix, outputItems->maxKeyLen still reflected the rejected
+	waiter's wide key, btree_page_split_location() saw a too-small
+	leftPageSpaceLeft and tripped Assert(leftPageSpaceLeft > 0).  With
+	the fix, outputItems->maxKeyLen is re-derived from waiters that were
+	actually inserted, the assertion holds, the splitter completes, and
+	the rejected waiter retries against the post-split tree.
+	"""
+
+	def test_merge_waited_tuples_reject_keeps_maxkeylen_consistent(self):
+		node = self.node
+		node.append_conf('postgresql.conf',
+		                 "orioledb.enable_stopevents = true\n")
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE t (
+				k text NOT NULL,
+				v text NOT NULL,
+				PRIMARY KEY (k)
+			) USING orioledb;
+
+			-- Fill the only leaf page near capacity.  Keys are tiny,
+			-- values are 600 bytes so each row weighs ~640 bytes; 12
+			-- of them leave just enough room for one more small row to
+			-- force a split.
+			INSERT INTO t (k, v)
+			SELECT 'k' || to_char(g, 'fm0000'), repeat('a', 600)
+			FROM generate_series(1, 12) g;
+		""")
+
+		num_waiters = 12
+
+		splitter = node.connect(autocommit=True)
+		waiters = [node.connect(autocommit=True) for _ in range(num_waiters)]
+		ctl = node.connect()
+
+		try:
+			# Pause the splitter right after it has acquired the leaf
+			# page lock but before it collects waiters.  No filter is
+			# needed: by this point the schema is set up and only the
+			# splitter's INSERT below reaches a leaf-level non-replace
+			# insert that could trigger the breakpoint.
+			ctl.execute(
+			    "SELECT pg_stopevent_set('before_get_waiters_with_tuples',\n"
+			    "                        'true');")
+
+			splitter_pid = splitter.pid
+			t_split = ThreadQueryExecutor(
+			    splitter, "INSERT INTO t (k, v) VALUES "
+			    "('k0013', repeat('a', 600));")
+			t_split.start()
+			wait_stopevent(node, splitter_pid)
+
+			# The splitter is now holding the leaf-page lock and parked
+			# on the stop event.  Launch the waiter inserts; each will
+			# queue against the locked page and become a waiter for
+			# get_waiters_with_tuples() to collect.  Keys are
+			# 'm0001'..'m0011' for the first 11 (so they all sort onto
+			# the same leaf and are distinct from existing rows and
+			# from the splitter), plus a 12th waiter whose key is
+			# 'm0012' + 600 'c' chars — that is the one that grows
+			# outputItems->maxKeyLen and tips the merge into the
+			# rejection branch.
+			waiter_threads = []
+			pids = []
+			for i, conn in enumerate(waiters):
+				pids.append(conn.pid)
+				if i != 11:
+					sql = ("INSERT INTO t (k, v) VALUES "
+					       "('m%04d', repeat('b', 600));" % (i + 1))
+				else:
+					sql = ("INSERT INTO t (k, v) VALUES "
+					       "('m%04d' || repeat('c', 600), "
+					       "repeat('b', 600));" % (i + 1))
+
+				thr = ThreadQueryExecutor(conn, sql)
+				thr.start()
+				waiter_threads.append(thr)
+
+			# Give every waiter time to enqueue against the locked
+			# page.  Poll pg_stat_activity until each backend reports a
+			# non-NULL wait_event (the OrioleDB page-wait shows up as a
+			# generic wait).
+			deadline = time.time() + 30.0
+			while time.time() < deadline:
+				blocked = node.execute(
+				    "SELECT count(*) FROM pg_stat_activity "
+				    "WHERE pid IN (%s) AND wait_event IS NOT NULL;" %
+				    (','.join([str(pid) for pid in pids])))[0][0]
+				if blocked >= num_waiters:
+					break
+				time.sleep(0.1)
+
+			# Release the splitter; merge_waited_tuples() will run with
+			# every queued waiter in scope.  Without the fix, the
+			# rejection branch leaves outputItems->maxKeyLen stale and
+			# btree_page_split_location() trips
+			# Assert(leftPageSpaceLeft > 0).
+			ctl.execute("SELECT pg_stopevent_reset("
+			            "'before_get_waiters_with_tuples');")
+
+			t_split.join()
+			for thr in waiter_threads:
+				thr.join()
+
+			# Every insert must have succeeded.  Rejected waiters
+			# retry against the post-split tree on their own.
+			count = node.execute("SELECT count(*) FROM t;")[0][0]
+			self.assertEqual(count, 12 + 1 + num_waiters)
+
+			# Tree is structurally sound.
+			self.assertTrue(
+			    node.execute("SELECT orioledb_tbl_check('t'::regclass);")[0]
+			    [0])
+		finally:
+			node.stop()

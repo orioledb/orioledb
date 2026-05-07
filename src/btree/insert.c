@@ -502,6 +502,8 @@ merge_waited_tuples(BTreeDescr *desc, Page p, BTreeSplitItems *outputItems,
 				rightItemsCount = 0,
 				rightItemsSize = 0,
 				rightSpace;
+	int			tentMaxKeyLen;
+	int			i;
 	bool		split = false,
 				finished = false;
 
@@ -509,9 +511,19 @@ merge_waited_tuples(BTreeDescr *desc, Page p, BTreeSplitItems *outputItems,
 
 	outputItems->leaf = inputItems->leaf;
 	outputItems->hikeySize = inputItems->hikeySize;
-	outputItems->maxKeyLen = inputItems->maxKeyLen;
 	outputItems->hikeysEnd = inputItems->hikeysEnd;
 	outputItems->itemsCount = 0;
+
+	/*
+	 * Track maxKeyLen locally during the merge so it can grow tentatively as
+	 * we evaluate whether each waiter fits.  outputItems->maxKeyLen is the
+	 * contract with btree_page_split_location() and must reflect only keys
+	 * that actually ended up in outputItems; we derive it after the merge
+	 * from waiters whose .inserted flag was set.  Updating it speculatively
+	 * here would leak the key length of a rejected waiter into the caller and
+	 * trip the leftPageSpaceLeft assertions in btree_page_split_location().
+	 */
+	tentMaxKeyLen = inputItems->maxKeyLen;
 
 	for (inputIndex = 0; inputIndex < inputItems->itemsCount; inputIndex++)
 	{
@@ -567,7 +579,7 @@ merge_waited_tuples(BTreeDescr *desc, Page p, BTreeSplitItems *outputItems,
 			tup.data = tupleWaiterInfos[waitersIndex].item.data + BTreeLeafTuphdrSize;
 			newKeyLen = MAXALIGN(o_btree_len(desc, tup,
 											 OTupleKeyLengthNoVersion));
-			outputItems->maxKeyLen = Max(outputItems->maxKeyLen, newKeyLen);
+			tentMaxKeyLen = Max(tentMaxKeyLen, newKeyLen);
 
 			leftItemsCount++;
 			leftItemsSize += tupleWaiterInfos[waitersIndex].item.size;
@@ -585,7 +597,7 @@ merge_waited_tuples(BTreeDescr *desc, Page p, BTreeSplitItems *outputItems,
 
 			if (split)
 			{
-				leftSpace = ORIOLEDB_BLCKSZ - Max(outputItems->hikeysEnd, MAXALIGN(sizeof(BTreePageHeader)) + outputItems->maxKeyLen);
+				leftSpace = ORIOLEDB_BLCKSZ - Max(outputItems->hikeysEnd, MAXALIGN(sizeof(BTreePageHeader)) + tentMaxKeyLen);
 				while (leftItemsSize +
 					   MAXALIGN(leftItemsCount * sizeof(LocationIndex)) >
 					   leftSpace)
@@ -635,6 +647,28 @@ merge_waited_tuples(BTreeDescr *desc, Page p, BTreeSplitItems *outputItems,
 	}
 
 	outputItems->itemsCount = outputIndex;
+
+	/*
+	 * Derive the authoritative maxKeyLen from items that actually ended up in
+	 * outputItems.  The merge loop tracked a tentative value that included
+	 * keys of rejected waiters; reading that into outputItems->maxKeyLen
+	 * would tell btree_page_split_location() about keys that aren't there and
+	 * trip its leftPageSpaceLeft assertions.
+	 */
+	outputItems->maxKeyLen = inputItems->maxKeyLen;
+	for (i = 0; i < tupleWaitersCount; i++)
+	{
+		OTuple		tup;
+		int			len;
+
+		if (!tupleWaiterInfos[i].inserted)
+			continue;
+
+		tup.formatFlags = tupleWaiterInfos[i].item.flags;
+		tup.data = tupleWaiterInfos[i].item.data + BTreeLeafTuphdrSize;
+		len = MAXALIGN(o_btree_len(desc, tup, OTupleKeyLengthNoVersion));
+		outputItems->maxKeyLen = Max(outputItems->maxKeyLen, len);
+	}
 
 	if (leftItemsSize +
 		MAXALIGN(leftItemsCount * sizeof(LocationIndex)) >
@@ -1323,6 +1357,15 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 
 		if (insert_item->level == 0 && !insert_item->replace)
 		{
+			if (STOPEVENTS_ENABLED())
+			{
+				Page		page = O_GET_IN_MEMORY_PAGE(blkno);
+				Jsonb	   *params;
+
+				params = btree_page_stopevent_params(desc, page);
+				STOPEVENT(STOPEVENT_BEFORE_GET_WAITERS_WITH_TUPLES, params);
+			}
+
 			tupleWaitersCount = get_waiters_with_tuples(desc, blkno, tupleWaiterProcnums);
 		}
 		else
