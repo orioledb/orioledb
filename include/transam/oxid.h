@@ -152,6 +152,7 @@ extern void get_current_logical_xid_ctx(LogicalXidCtx *output);
 extern void current_oxid_precommit(void);
 extern void current_oxid_xlog_precommit(void);
 extern void current_oxid_commit(CommitSeqNo csn);
+extern void current_oxid_clear_committing(void);
 extern void current_oxid_abort(void);
 extern CommitSeqNo oxid_get_csn(OXid oxid, bool getRawCsn);
 extern XLogRecPtr oxid_get_xlog_ptr(OXid oxid);

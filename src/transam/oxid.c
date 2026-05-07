@@ -87,6 +87,20 @@ PG_FUNCTION_INFO_V1(orioledb_get_xid_meta);
  */
 static OXid curOxid = InvalidOXid;	/* a 64-bit OrioleDB oxid */
 
+/*
+ * Flags that record whether current_oxid_precommit() /
+ * current_oxid_xlog_precommit() have stamped the COMMITTING bit on
+ * curOxid's CSN / xlog ptr.  current_oxid_clear_committing() consults
+ * them on the abort path to decide whether the bit must be reverted to
+ * IN_PROGRESS before apply_undo_stack() runs.  These are kept as
+ * backend-local booleans rather than being recovered from xidBuffer
+ * because the xidBuffer slot is shared by all oxids that map to it
+ * modulo xid_circular_buffer_size and, after run_xmin advances, may be
+ * reused for a different oxid.
+ */
+static bool csn_committing_set = false;
+static bool xlog_ptr_committing_set = false;
+
 static LogicalXidCtx logicalXidContext = {InvalidTransactionId, false};
 
 static inline void
@@ -1397,6 +1411,7 @@ current_oxid_precommit(void)
 	set_oxid_csn(curOxid, COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
 												   GET_CUR_PROCDATA()->autonomousNestingLevel,
 												   COMMITSEQNO_STATUS_CSN_COMMITTING));
+	csn_committing_set = true;
 
 	pg_write_barrier();
 }
@@ -1407,9 +1422,17 @@ current_oxid_xlog_precommit(void)
 	if (!OXidIsValid(curOxid))
 		return;
 
-	set_oxid_xlog_ptr(curOxid, COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
-														GET_CUR_PROCDATA()->autonomousNestingLevel,
-														XLOG_PTR_COMMITTING));
+	/*
+	 * Use XLOG_PTR_MAKE_SPECIAL (bit 0 set) so XLOG_PTR_IS_SPECIAL()
+	 * recognises the marker.  set_oxid_xlog_ptr_internal() bypasses the
+	 * wrapper's !XLOG_PTR_IS_SPECIAL() assertion, which is meant for real LSN
+	 * writes only.
+	 */
+	set_oxid_xlog_ptr_internal(curOxid,
+							   XLOG_PTR_MAKE_SPECIAL(MYPROCNUMBER,
+													 GET_CUR_PROCDATA()->autonomousNestingLevel,
+													 XLOG_PTR_COMMITTING));
+	xlog_ptr_committing_set = true;
 
 	pg_write_barrier();
 }
@@ -1475,6 +1498,8 @@ current_oxid_commit(CommitSeqNo csn)
 	set_oxid_csn(curOxid,
 				 csn | (enable_rewind ? COMMITSEQNO_RETAINED_FOR_REWIND : 0));
 	pg_write_barrier();
+	csn_committing_set = false;
+	xlog_ptr_committing_set = false;
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 
 	advance_run_xmin(curOxid);
@@ -1492,11 +1517,65 @@ current_oxid_abort(void)
 
 	set_oxid_csn(curOxid, COMMITSEQNO_ABORTED);
 	pg_write_barrier();
+	csn_committing_set = false;
+	xlog_ptr_committing_set = false;
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 
 	advance_run_xmin(curOxid);
 	curOxid = InvalidOXid;
 	release_assigned_logical_xids();
+}
+
+/*
+ * Revert the COMMITTING bit on our oxid back to IN_PROGRESS if
+ * current_oxid_precommit() (and/or current_oxid_xlog_precommit()) ran
+ * but the commit aborted before current_oxid_commit() got to write the
+ * actual CSN.  Other backends busy-spin in oxid_get_csn() /
+ * oxid_match_snapshot() / oxid_get_xlog_ptr() while the bit is set, so
+ * the abort path must drop it before doing any work that could acquire
+ * locks the spinners are holding (notably apply_undo_stack()'s page
+ * locks).  current_oxid_abort() will later overwrite the CSN with
+ * COMMITSEQNO_ABORTED at the proper moment in the abort sequence; this
+ * is intentionally a smaller, idempotent step.
+ *
+ * Whether each precommit ran is tracked through backend-local flags
+ * (csn_committing_set, xlog_ptr_committing_set) — peeking at xidBuffer
+ * is unsafe because its slots are shared by all oxids modulo the
+ * buffer size and may already hold someone else's data after run_xmin
+ * advances.
+ */
+void
+current_oxid_clear_committing(void)
+{
+	int			nestingLevel;
+
+	if (!OXidIsValid(curOxid))
+		return;
+
+	if (!csn_committing_set && !xlog_ptr_committing_set)
+		return;
+
+	nestingLevel = GET_CUR_PROCDATA()->autonomousNestingLevel;
+
+	if (csn_committing_set)
+	{
+		set_oxid_csn(curOxid,
+					 COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
+											  nestingLevel,
+											  COMMITSEQNO_STATUS_IN_PROGRESS));
+		csn_committing_set = false;
+	}
+
+	if (xlog_ptr_committing_set)
+	{
+		set_oxid_xlog_ptr_internal(curOxid,
+								   XLOG_PTR_MAKE_SPECIAL(MYPROCNUMBER,
+														 nestingLevel,
+														 XLOG_PTR_IN_PROGRESS));
+		xlog_ptr_committing_set = false;
+	}
+
+	pg_write_barrier();
 }
 
 /*

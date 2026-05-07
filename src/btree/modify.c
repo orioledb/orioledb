@@ -484,7 +484,18 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 		}
 		else
 		{
-			CommitSeqNo csn = oxid_get_csn(oxid, false);
+			CommitSeqNo csn;
+
+			/*
+			 * Test hook: parks the backend here, with the leaf-page-content
+			 * lock held, so a concurrent aborter that has stamped the
+			 * COMMITTING bit on its oxid can deadlock with our oxid_get_csn()
+			 * spin (the page-lock vs. apply_undo_stack() cycle described in
+			 * undo_xact_callback's XACT_EVENT_ABORT block).
+			 */
+			STOPEVENT(STOPEVENT_BEFORE_MODIFY_OXID_GET_CSN, NULL);
+
+			csn = oxid_get_csn(oxid, false);
 
 			if (XACT_INFO_IS_LOCK_ONLY(xactInfo) && (COMMITSEQNO_IS_ABORTED(csn) ||
 													 COMMITSEQNO_IS_NORMAL(csn) ||
