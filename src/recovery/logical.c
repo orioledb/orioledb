@@ -1064,6 +1064,12 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 					TupleDescAttr(ctx->heap_toast_tupDesc, 0)->attcompression = InvalidCompressionMethod;
 					TupleDescAttr(ctx->heap_toast_tupDesc, 1)->attcompression = InvalidCompressionMethod;
 					TupleDescAttr(ctx->heap_toast_tupDesc, 2)->attcompression = InvalidCompressionMethod;
+
+#if PG_VERSION_NUM >= 180000
+					populate_compact_attribute(ctx->heap_toast_tupDesc, 0);
+					populate_compact_attribute(ctx->heap_toast_tupDesc, 1);
+					populate_compact_attribute(ctx->heap_toast_tupDesc, 2);
+#endif
 				}
 				else
 				{

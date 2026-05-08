@@ -22,6 +22,7 @@
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "recovery/recovery.h"
+#include "tuple/format.h"
 
 #include "access/htup_details.h"
 #include "access/toast_compression.h"
@@ -668,6 +669,10 @@ jf_cleanTupType_init_entry(TupleDesc desc,
 						   &att->attalign, &att->attstorage,
 						   &att->attcollation);
 	att->attcompression = InvalidCompressionMethod;
+
+#if PG_VERSION_NUM >= 180000
+	populate_compact_attribute(desc, attributeNumber - 1);
+#endif
 }
 
 /*
@@ -1198,12 +1203,12 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 			foreach(l, out_sql_func->jf_targetList)
 			{
 				TargetEntry *tle = lfirst(l);
-				FormData_pg_attribute *att;
+				Form_pg_attribute att;
 
 				if (tle->resjunk)
 					continue;
 
-				att = &jf->jf_cleanTupType->attrs[cur_resno - 1];
+				att = TupleDescAttr(jf->jf_cleanTupType, cur_resno - 1);
 				out_sql_func->jf_atts[cur_resno - 1] = att->atttypid;
 				o_cache_type_safe(datoid, att->atttypid, InvalidOid, cur_lsn, processed);
 				cur_resno++;

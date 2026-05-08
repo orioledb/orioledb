@@ -558,7 +558,7 @@ fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *pkey)
 			AttrNumber	attnum = idx->primaryFieldsAttnums[i];
 
 			pkey->keys[i].value = slot->tts_values[attnum - 1];
-			pkey->keys[i].type = idx->leafTupdesc->attrs[pk_from + i].atttypid;
+			pkey->keys[i].type = TupleDescAttr(idx->leafTupdesc, pk_from + i)->atttypid;
 			pkey->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
 			if (slot->tts_isnull[attnum - 1])
 				pkey->keys[i].flags |= O_VALUE_BOUND_NULL;
@@ -594,7 +594,7 @@ bridged_index_fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *primary, OBTree
 			int			attnum = primary->tableAttnums[i];
 
 			pkey->keys[i].value = slot->tts_values[attnum - 1];
-			pkey->keys[i].type = primary->leafTupdesc->attrs[attnum - 1].atttypid;
+			pkey->keys[i].type = TupleDescAttr(primary->leafTupdesc, attnum - 1)->atttypid;
 			pkey->keys[i].flags = O_VALUE_BOUND_PLAIN_VALUE;
 			if (slot->tts_isnull[attnum - 1])
 				pkey->keys[i].flags |= O_VALUE_BOUND_NULL;
@@ -666,7 +666,7 @@ exclusion_fill_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bou
 			value = o_get_idx_expr_att(slot, idx,
 									   (ExprState *) lfirst(indexpr_item),
 									   &isnull);
-			typid = idx->nonLeafTupdesc->attrs[i].atttypid;
+			typid = TupleDescAttr(idx->nonLeafTupdesc, i)->atttypid;
 			indexpr_item = lnext(idx->expressions_state, indexpr_item);
 		}
 
@@ -1262,7 +1262,8 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 		Assert(oldSlot->tts_tupleDescriptor->natts == newSlot->tts_tupleDescriptor->natts);
 		for (attnum = 0; attnum < oldSlot->tts_nvalid; attnum++)
 		{
-			Form_pg_attribute attr = &oldSlot->tts_tupleDescriptor->attrs[attnum];
+			OTupleAttrCompact *attr = OTupleDescAttrFast(oldSlot->tts_tupleDescriptor,
+														 attnum);
 
 			if ((oldSlot->tts_isnull[attnum] != newSlot->tts_isnull[attnum]) ||
 				(!oldSlot->tts_isnull[attnum] &&
@@ -1562,7 +1563,7 @@ fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx, OBTreeKeyBound *bound)
 		bool		isnull;
 		Oid			typid;
 
-		typid = idx->nonLeafTupdesc->attrs[i].atttypid;
+		typid = TupleDescAttr(idx->nonLeafTupdesc, i)->atttypid;
 
 		if (typid == TIDOID)
 		{
@@ -2548,8 +2549,6 @@ is_keys_eq(OIndexDescr *id, OBTreeKeyBound *k1, OBTreeKeyBound *k2)
 {
 	int			i,
 				n;
-	int16		typlen;
-	bool		typbyval;
 
 	if (k1->nkeys != k2->nkeys)
 		return false;
@@ -2563,14 +2562,15 @@ is_keys_eq(OIndexDescr *id, OBTreeKeyBound *k1, OBTreeKeyBound *k2)
 
 	for (i = 0; i < n; i++)
 	{
+		OTupleAttrCompact *attr = OTupleDescAttrFast(id->nonLeafTupdesc, i);
+
 		if (k1->keys[i].flags != k2->keys[i].flags)
 			return false;
 		if (k1->keys[i].flags & O_VALUE_BOUND_NO_VALUE)
 			continue;
-		typlen = id->nonLeafTupdesc->attrs[i].attlen;
-		typbyval = id->nonLeafTupdesc->attrs[i].attbyval;
+
 		if (!datum_image_eq(k1->keys[i].value, k2->keys[i].value,
-							typbyval, typlen))
+							attr->attbyval, attr->attlen))
 			return false;
 	}
 	return true;
@@ -2601,7 +2601,7 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 			if (i != 0)
 				appendStringInfo(str, ", ");
 			appendStringInfo(str, "%s",
-							 id->nonLeafTupdesc->attrs[i].attname.data);
+							 TupleDescAttr(id->nonLeafTupdesc, i)->attname.data);
 		}
 		appendStringInfo(str, ")=");
 		appendStringInfoIndexKey(str, slot, id);

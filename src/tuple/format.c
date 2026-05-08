@@ -65,7 +65,7 @@ o_tuple_init_reader(OTupleReaderState *state, OTuple tuple, TupleDesc desc,
 }
 
 uint32
-o_tuple_next_field_offset(OTupleReaderState *state, Form_pg_attribute att)
+o_tuple_next_field_offset(OTupleReaderState *state, OTupleAttrCompact * att)
 {
 	uint32		off;
 
@@ -76,20 +76,20 @@ o_tuple_next_field_offset(OTupleReaderState *state, Form_pg_attribute att)
 	else if (att->attlen == -1)
 	{
 		if (!state->slow &&
-			state->off == att_align_nominal(state->off, att->attalign))
+			state->off == o_att_align_nominal(att, state->off))
 		{
 			att->attcacheoff = state->off;
 		}
 		else
 		{
-			state->off = att_align_pointer(state->off, att->attalign, -1,
-										   state->tp + state->off);
+			state->off = o_att_align_pointer(att, state->off, -1,
+											 state->tp + state->off);
 			state->slow = true;
 		}
 	}
 	else
 	{
-		state->off = att_align_nominal(state->off, att->attalign);
+		state->off = o_att_align_nominal(att, state->off);
 		if (!state->slow)
 			att->attcacheoff = state->off;
 	}
@@ -119,15 +119,13 @@ o_tuple_next_field_offset(OTupleReaderState *state, Form_pg_attribute att)
 Datum
 o_tuple_read_next_field(OTupleReaderState *state, bool *isnull)
 {
-	Form_pg_attribute att;
+	OTupleAttrCompact *att = OTupleDescAttrFast(state->desc, state->attnum);
 	Datum		result;
 	uint32		off;
 
 	if (state->attnum >= state->natts)
 	{
-		Form_pg_attribute attr = &state->desc->attrs[state->attnum];
-
-		if (attr->atthasmissing)
+		if (att->atthasmissing)
 		{
 			result = getmissingattr(state->desc,
 									state->attnum + 1,
@@ -142,8 +140,6 @@ o_tuple_read_next_field(OTupleReaderState *state, bool *isnull)
 			return (Datum) 0;
 		}
 	}
-
-	att = TupleDescAttr(state->desc, state->attnum);
 
 	if (state->hasnulls && att_isnull(state->attnum, state->bp))
 	{
@@ -162,13 +158,10 @@ o_tuple_read_next_field(OTupleReaderState *state, bool *isnull)
 static Pointer
 o_tuple_read_next_field_ptr(OTupleReaderState *state)
 {
-	Form_pg_attribute att;
 	uint32		off;
 
 	if (state->attnum >= state->natts)
 		return NULL;
-
-	att = TupleDescAttr(state->desc, state->attnum);
 
 	if (state->hasnulls && att_isnull(state->attnum, state->bp))
 	{
@@ -177,7 +170,8 @@ o_tuple_read_next_field_ptr(OTupleReaderState *state)
 		return NULL;
 	}
 
-	off = o_tuple_next_field_offset(state, att);
+	off = o_tuple_next_field_offset(state,
+									OTupleDescAttrFast(state->desc, state->attnum));
 
 	return state->tp + off;
 }
@@ -230,7 +224,6 @@ o_toast_nocachegetattr_ptr(OTuple tuple,
 	int			i;
 	OTupleReaderState reader;
 	Pointer		result = NULL;
-	Form_pg_attribute att;
 
 	/* ----------------
 	 *	 Three cases:
@@ -280,10 +273,10 @@ o_toast_nocachegetattr_ptr(OTuple tuple,
 		tp = (char *) (tuple.data + SizeOfOTupleHeader);
 	}
 
-	att = TupleDescAttr(tupleDesc, attnum);
-
 	if (!slow)
 	{
+		OTupleAttrCompact *att = OTupleDescAttrFast(tupleDesc, attnum);
+
 		/*
 		 * If we get here, there are no nulls up to and including the target
 		 * attribute.  If we have a cached offset, we can use it.
@@ -371,13 +364,13 @@ o_toast_nocachegetattr(OTuple tuple,
 
 	if (!slow)
 	{
-		Form_pg_attribute att;
+		OTupleAttrCompact *att;
 
 		/*
 		 * If we get here, there are no nulls up to and including the target
 		 * attribute.  If we have a cached offset, we can use it.
 		 */
-		att = TupleDescAttr(tupleDesc, attnum);
+		att = OTupleDescAttrFast(tupleDesc, attnum);
 		if (att->attcacheoff >= 0)
 			return fetchatt(att, tp + att->attcacheoff);
 	}

@@ -1076,7 +1076,7 @@ tts_orioledb_fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx,
 			value = o_get_idx_expr_att(slot, idx,
 									   (ExprState *) lfirst(indexpr_item),
 									   &isnull);
-			typid = idx->nonLeafTupdesc->attrs[i].atttypid;
+			typid = TupleDescAttr(idx->nonLeafTupdesc, i)->atttypid;
 			indexpr_item = lnext(idx->expressions_state, indexpr_item);
 		}
 
@@ -1129,7 +1129,7 @@ appendStringInfoIndexKey(StringInfo str, TupleTableSlot *slot, OIndexDescr *id)
 			bool		typisvarlena;
 			char	   *res;
 
-			getTypeOutputInfo(id->nonLeafTupdesc->attrs[i].atttypid,
+			getTypeOutputInfo(TupleDescAttr(id->nonLeafTupdesc, i)->atttypid,
 							  &typoutput, &typisvarlena);
 			res = OidOutputFunctionCall(typoutput, value);
 			appendStringInfo(str, "%s", res);
