@@ -849,3 +849,91 @@ class MergeWaitedTuplesTest(BaseTest):
 			    [0])
 		finally:
 			node.stop()
+
+	def test_merge_waited_tuples_rebalance_keeps_size_consistent(self):
+		"""
+		Regression test that exercises merge_waited_tuples() with a queue of
+		waiters that mixes (a) a wide-key tuple sorting BEFORE every input
+		(forcing maxKeyLen growth and a large left-side draw) and (b) several
+		larger-value tuples sorting AFTER every input.  This combination used
+		to over-accept waiters in the previous (per-side counter)
+		implementation and trip the leftPageSpaceLeft assertion in
+		btree_page_split_location().
+		"""
+
+		node = self.node
+		node.append_conf('postgresql.conf',
+		                 "orioledb.enable_stopevents = true\n")
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE t (
+				k text NOT NULL,
+				v text NOT NULL,
+				PRIMARY KEY (k)
+			) USING orioledb;
+
+			INSERT INTO t (k, v)
+			SELECT 'k' || to_char(g, 'fm0000'), repeat('a', 600)
+			FROM generate_series(10, 21) g;
+		""")
+
+		num_waiters = 20
+
+		splitter = node.connect(autocommit=True)
+		waiters = [node.connect(autocommit=True) for _ in range(num_waiters)]
+		ctl = node.connect()
+
+		try:
+			ctl.execute(
+			    "SELECT pg_stopevent_set('before_get_waiters_with_tuples',\n"
+			    "                        'true');")
+
+			splitter_pid = splitter.pid
+			t_split = ThreadQueryExecutor(
+			    splitter, "INSERT INTO t (k, v) VALUES "
+			    "('k0022', repeat('a', 600));")
+			t_split.start()
+			wait_stopevent(node, splitter_pid)
+
+			waiter_threads = []
+			pids = []
+			for i, conn in enumerate(waiters):
+				pids.append(conn.pid)
+				if i == 0:
+					sql = ("INSERT INTO t (k, v) VALUES "
+					       "('a' || repeat('c', 600), repeat('b', 600));")
+				else:
+					sql = ("INSERT INTO t (k, v) VALUES "
+					       "('k%04d', repeat('b', 660));" % (22 + i))
+
+				thr = ThreadQueryExecutor(conn, sql)
+				thr.start()
+				waiter_threads.append(thr)
+
+			deadline = time.time() + 300.0
+			while time.time() < deadline:
+				blocked = node.execute(
+				    "SELECT count(*) FROM pg_stat_activity "
+				    "WHERE pid IN (%s) AND wait_event IS NOT NULL;" %
+				    (','.join([str(pid) for pid in pids])))[0][0]
+				if blocked >= num_waiters:
+					break
+				time.sleep(0.1)
+
+			ctl.execute("SELECT pg_stopevent_reset("
+			            "'before_get_waiters_with_tuples');")
+
+			t_split.join()
+			for thr in waiter_threads:
+				thr.join()
+
+			count = node.execute("SELECT count(*) FROM t;")[0][0]
+			self.assertEqual(count, 12 + 1 + num_waiters)
+
+			self.assertTrue(
+			    node.execute("SELECT orioledb_tbl_check('t'::regclass);")[0]
+			    [0])
+		finally:
+			node.stop()
