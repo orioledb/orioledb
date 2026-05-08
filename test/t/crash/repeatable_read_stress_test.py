@@ -415,7 +415,7 @@ class RepeatableReadStressTest(BaseTest):
 
 			# OrioleDB single-shot invariant windows (commit-side only,
 			# no -guarded companion needed)
-			# 'orioledb-csn-incremented', # cluster PANIC -> lost update
+			'orioledb-csn-incremented', # cluster PANIC -> lost update -> fixed in 01419cb
 			'orioledb-pk-mutated-pre-wal',
 			'orioledb-update-pk-done-pre-sk',
 			'orioledb-sk-mid-update',
