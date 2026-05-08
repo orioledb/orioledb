@@ -2299,10 +2299,17 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 
 				if (relOid == rel->rd_rel->oid && attnum == i + 1)
 				{
-					old_slot->tts_tupleDescriptor->attrs[i].attisdropped = false;
+					OTupleDescAttrSlow(old_slot->tts_tupleDescriptor, i)->attisdropped = false;
+					attUpdated = true;
+
 					break;
 				}
 			}
+
+#if PG_VERSION_NUM >= 180000
+			if (attUpdated)
+				populate_compact_attribute(old_slot->tts_tupleDescriptor, i);
+#endif
 		}
 	}
 
@@ -2351,9 +2358,10 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			Node	   *expr = NULL;
 			bool		has_def = false;
 			bool		should_build_def = false;
-			Form_pg_attribute attr = &old_slot->tts_tupleDescriptor->attrs[i];
+			OTupleAttrFull *old_attr = OTupleDescAttrSlow(old_slot->tts_tupleDescriptor, i);
+			OTupleAttrFull *rel_attr = OTupleDescAttrSlow(rel->rd_att, i);
 
-			if (attr->attgenerated)
+			if (old_attr->attgenerated)
 				continue;
 
 			expr = o_get_alter_type_expr(rel, i);
@@ -2362,18 +2370,18 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			 * old_slot may not contain all new properties if there are
 			 * multiple expressions within a single ALTER TABLE.
 			 */
-			has_def = attr->atthasdef || rel->rd_att->attrs[i].atthasdef;
+			has_def = old_attr->atthasdef || rel_attr->atthasdef;
 
 			/*
 			 * Build default for columns which have explicit DEFAULT
 			 * expressions
 			 */
-			should_build_def = !expr && has_def && !attr->atthasmissing &&
+			should_build_def = !expr && has_def && !old_attr->atthasmissing &&
 				i >= primary_init_nfields &&
 				old_slot->tts_isnull[i];
 
 			/* If column has domain type, try to build domain default value */
-			should_build_def |= !expr && get_typtype(attr->atttypid) == TYPTYPE_DOMAIN && old_slot->tts_isnull[i];
+			should_build_def |= !expr && get_typtype(old_attr->atttypid) == TYPTYPE_DOMAIN && old_slot->tts_isnull[i];
 
 			if (should_build_def)
 			{
@@ -2389,7 +2397,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			 * construct an explicit NULL default value that will be passed
 			 * through CoerceToDomain processing.
 			 */
-			if (!attr->attisdropped && !expr && DomainHasConstraints(attr->atttypid) &&
+			if (!old_attr->attisdropped && !expr && DomainHasConstraints(old_attr->atttypid) &&
 				old_slot->tts_isnull[i])
 			{
 				Oid			baseTypeId;
@@ -2401,8 +2409,8 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 
 				if (!defval)
 				{
-					baseTypeMod = attr->atttypmod;
-					baseTypeId = getBaseTypeAndTypmod(attr->atttypid, &baseTypeMod);
+					baseTypeMod = old_attr->atttypmod;
+					baseTypeId = getBaseTypeAndTypmod(old_attr->atttypid, &baseTypeMod);
 					baseTypeColl = get_typcollation(baseTypeId);
 					defval = (Node *) makeNullConst(baseTypeId, baseTypeMod, baseTypeColl);
 				}
@@ -2413,8 +2421,8 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				defval = (Node *) coerce_to_target_type(NULL,
 														defval,
 														baseTypeId,
-														attr->atttypid,
-														attr->atttypmod,
+														old_attr->atttypid,
+														old_attr->atttypmod,
 														COERCION_ASSIGNMENT,
 														COERCE_IMPLICIT_CAST,
 														-1);
@@ -2422,7 +2430,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 					elog(ERROR, "failed to coerce base type to domain");
 				expr = defval;
 			}
-			else if (rel->rd_att->attrs[i].attidentity && old_slot->tts_isnull[i])
+			else if (rel_attr->attidentity && old_slot->tts_isnull[i])
 			{
 				ListCell   *lc;
 
@@ -2430,7 +2438,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				{
 					List	   *pair = lfirst(lc);
 
-					if (!strcmp(strVal(lsecond(pair)), attr->attname.data))
+					if (!strcmp(strVal(lsecond(pair)), old_attr->attname.data))
 					{
 						expr = (Node *) linitial(pair);
 						break;
@@ -2438,7 +2446,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				}
 
 				if (expr == NULL)	/* should not happen */
-					elog(ERROR, "failed to find sequence for brand-new column %s", attr->attname.data);
+					elog(ERROR, "failed to find sequence for brand-new column %s", old_attr->attname.data);
 			}
 
 			o_fill_new_slot(new_o_table, rel, i, expr,
@@ -2451,9 +2459,9 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 		for (int i = 0; i < old_slot->tts_tupleDescriptor->natts; i++)
 		{
 			Node	   *expr = NULL;
-			Form_pg_attribute attr = &old_slot->tts_tupleDescriptor->attrs[i];
+			OTupleAttrFull *old_attr = OTupleDescAttrSlow(old_slot->tts_tupleDescriptor, i);
 
-			if (!attr->attgenerated)
+			if (!old_attr->attgenerated)
 				continue;
 
 			expr = o_get_alter_type_expr(rel, i);
@@ -3294,7 +3302,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			{
 				/* Branch is taken during ALTER TABLE ... ADD COLUMN */
 				OTableField *field;
-				Form_pg_attribute attr;
 				OTable	   *o_table;
 				ORelOids	oids;
 				OSnapshot	oSnapshot;
@@ -3321,8 +3328,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					CommandCounterIncrement();
 					field = &o_table->fields[o_table->nfields - 1];
-					attr = &rel->rd_att->attrs[rel->rd_att->natts - 1];
-					orioledb_attr_to_field(field, attr);
+					orioledb_attr_to_field(field,
+										   TupleDescAttr(rel->rd_att,
+														 rel->rd_att->natts - 1));
 
 					o_in_add_column = true;
 
@@ -3542,7 +3550,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		if (rel != NULL && (rel->rd_rel->relkind == RELKIND_RELATION) &&
 			(subId != 0) && is_orioledb_rel(rel))
 		{
-			Form_pg_attribute attr;
 			OTable	   *o_table;
 			ORelOids	oids;
 			OSnapshot	oSnapshot;
@@ -3565,8 +3572,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				old_field = o_table->fields[subId - 1];
 				CommandCounterIncrement();
 				field = &o_table->fields[subId - 1];
-				attr = &rel->rd_att->attrs[subId - 1];
-				orioledb_attr_to_field(field, attr);
+				orioledb_attr_to_field(field,
+									   TupleDescAttr(rel->rd_att, subId - 1));
 
 				/* TODO: Probably use CheckIndexCompatible here */
 				changed = old_field.typid != field->typid ||
@@ -3642,7 +3649,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				{
 					OTableField old_field;
 					OTableField *field;
-					Form_pg_attribute attr;
 					OSnapshot	oSnapshot;
 					OXid		oxid;
 					int			ix_num;
@@ -3651,8 +3657,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					old_field = o_table->fields[subId - 1];
 					CommandCounterIncrement();
 					field = &o_table->fields[subId - 1];
-					attr = &rel->rd_att->attrs[subId - 1];
-					orioledb_attr_to_field(field, attr);
+					orioledb_attr_to_field(field,
+										   TupleDescAttr(rel->rd_att,
+														 subId - 1));
 
 					/* TODO: Probably use CheckIndexCompatible here */
 					changed_ty = old_field.typid != field->typid ||
@@ -4643,7 +4650,7 @@ o_fill_new_slot(OTable *new_o_table, Relation rel, int attidx,
 				Node *expr, TupleTableSlot *old_slot,
 				TupleTableSlot *new_slot, TupleTableSlot *scan_slot)
 {
-	Form_pg_attribute attr = &new_slot->tts_tupleDescriptor->attrs[attidx];
+	OTupleAttrCompact *attr = OTupleDescAttrFast(new_slot->tts_tupleDescriptor, attidx);
 
 	if (expr)
 	{
