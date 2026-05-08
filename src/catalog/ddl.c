@@ -177,8 +177,10 @@ alter_table_type_to_string(AlterTableType cmdtype)
 			return "ALTER COLUMN ... SET NOT NULL";
 		case AT_DropExpression:
 			return "ALTER COLUMN ... DROP EXPRESSION";
+#if PG_VERSION_NUM < 180000
 		case AT_CheckNotNull:
 			return NULL;		/* not real grammar */
+#endif
 		case AT_SetStatistics:
 			return "ALTER COLUMN ... SET STATISTICS";
 		case AT_SetOptions:
@@ -684,7 +686,11 @@ create_ctas_internal(List *attrList, IntoClause *into)
 	bool		is_matview;
 	char		relkind;
 	Datum		toast_options;
+#if PG_VERSION_NUM < 180000
 	static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+#else
+	const char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+#endif
 	ObjectAddress intoRelationAddr;
 
 	/* This code supports both CREATE TABLE AS and CREATE MATERIALIZED VIEW */
@@ -1416,8 +1422,13 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				 * code, even if it skips insertion to table
 				 */
 				savedDataQuery = (Query *) copyObject(into->viewQuery);
+#if PG_VERSION_NUM >= 180000
+				RefreshMatViewByOid(address.objectId, true, true, false,
+									queryString, qc);
+#else
 				RefreshMatViewByOid(address.objectId, true, false,
 									queryString, NULL, qc);
+#endif
 				savedDataQuery = NULL;
 
 				if (qc)
@@ -2228,7 +2239,11 @@ rewrite_matview(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	ExecutorStart(queryDesc, 0);
 
 	/* run the plan */
+#if PG_VERSION_NUM < 180000
 	ExecutorRun(queryDesc, ForwardScanDirection, 0, true);
+#else
+	ExecutorRun(queryDesc, ForwardScanDirection, 0);
+#endif
 
 	pgstat_count_heap_insert(rel, queryDesc->estate->es_processed);
 
@@ -2288,6 +2303,11 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 		for (int i = 0; i < old_slot->tts_tupleDescriptor->natts; i++)
 		{
 			ListCell   *lc;
+#if PG_VERSION_NUM >= 180000
+			bool		attUpdated = false;
+#else
+			bool		attUpdated pg_attribute_unused() = false;
+#endif
 
 			foreach(lc, dropped_attrs)
 			{
@@ -2637,7 +2657,11 @@ change_bridging_option(Relation rel, bool value, bool isReset)
 	Datum		repl_val[Natts_pg_class];
 	bool		repl_null[Natts_pg_class];
 	bool		repl_repl[Natts_pg_class];
+#if PG_VERSION_NUM < 180000
 	static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+#else
+	const char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+#endif
 	DefElem    *bridging_def;
 
 	pgclass = table_open(RelationRelationId, RowExclusiveLock);
@@ -3273,6 +3297,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			case TYPTYPE_ENUM:
 				o_enum_cache_delete_all(MyDatabaseId, typeform->oid);
 				break;
+			default:
+				break;
 		}
 		if (typeform->typtype != TYPTYPE_BASE &&
 			typeform->typtype != TYPTYPE_PSEUDO)
@@ -3499,7 +3525,11 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							if (!ORelOidsIsValid(o_table->toast_oids))
 							{
 								Datum		toast_options;
+#if PG_VERSION_NUM < 180000
 								static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+#else
+								const char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+#endif
 
 								Assert(create_stmt != NULL);
 
@@ -3733,7 +3763,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								attributeList = lappend(attributeList, iparam);
 							}
 
-							compatible = CheckIndexCompatible(o_table_index->oids.reloid, "btree", attributeList, NIL);
+							compatible = CheckIndexCompatible(o_table_index->oids.reloid,
+															  "btree",
+															  attributeList,
+#if PG_VERSION_NUM >= 180000
+															  NIL, false);
+#else
+															  NIL);
+#endif
 
 							for (field_num = 0; field_num < o_table_index->nkeyfields;
 								 field_num++)

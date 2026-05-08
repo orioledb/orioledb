@@ -770,7 +770,11 @@ tts_orioledb_copy_heap_tuple(TupleTableSlot *slot)
 }
 
 static MinimalTuple
+#if PG_VERSION_NUM >= 180000
+tts_orioledb_copy_minimal_tuple(TupleTableSlot *slot, Size extra)
+#else
 tts_orioledb_copy_minimal_tuple(TupleTableSlot *slot)
+#endif
 {
 	Assert(!TTS_EMPTY(slot));
 
@@ -778,7 +782,11 @@ tts_orioledb_copy_minimal_tuple(TupleTableSlot *slot)
 
 	return heap_form_minimal_tuple(slot->tts_tupleDescriptor,
 								   slot->tts_values,
+#if PG_VERSION_NUM >= 180000
+								   slot->tts_isnull, extra);
+#else
 								   slot->tts_isnull);
+#endif
 }
 
 static void

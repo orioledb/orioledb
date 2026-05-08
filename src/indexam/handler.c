@@ -93,7 +93,10 @@ static void orioledb_amrescan(IndexScanDesc scan, ScanKey scankey,
 static bool orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir);
 static int64 orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm);
 static void orioledb_amendscan(IndexScanDesc scan);
-#if PG_VERSION_NUM >= 170000
+#if PG_VERSION_NUM >= 180000
+static Size orioledb_amestimateparallelscan(Relation indexRelation, int nkeys,
+											int norderbys);
+#elif PG_VERSION_NUM >= 170000
 static Size orioledb_amestimateparallelscan(int nkeys, int norderbys);
 #else
 static Size orioledb_amestimateparallelscan(void);
@@ -159,6 +162,9 @@ orioledb_btree_handler(void)
 	amroutine->amvacuumcleanup = orioledb_amvacuumcleanup;
 	amroutine->amcanreturn = orioledb_amcanreturn;
 	amroutine->amcostestimate = orioledb_amcostestimate;
+#if PG_VERSION_NUM >= 180000
+	amroutine->amgettreeheight = NULL;
+#endif
 	amroutine->amoptions = orioledb_amoptions;
 	amroutine->amproperty = orioledb_amproperty;
 	amroutine->ambuildphasename = orioledb_ambuildphasename;
@@ -1472,6 +1478,7 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 
 	/* get the scan */
 	scan = btbeginscan(rel, nkeys, norderbys);
+	scan->xs_snapshot = NULL;
 	o_scan->scandesc = *scan;
 	pfree(scan);
 
@@ -1971,7 +1978,9 @@ orioledb_amendscan(IndexScanDesc scan)
 }
 
 Size
-#if PG_VERSION_NUM >= 170000
+#if PG_VERSION_NUM >= 180000
+orioledb_amestimateparallelscan(Relation indexRelation, int nkeys, int norderbys)
+#elif PG_VERSION_NUM >= 170000
 orioledb_amestimateparallelscan(int nkeys, int norderbys)
 #else
 orioledb_amestimateparallelscan(void)

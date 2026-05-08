@@ -4217,7 +4217,11 @@ delay_if_queued_for_idxbuild(void)
 		 * recovery worker, therefore check in which worker we are.
 		 */
 		if (AmStartupProcess())
+#if PG_VERSION_NUM >= 180000
+			ProcessStartupProcInterrupts();
+#else
 			HandleStartupProcInterrupts();
+#endif
 		else
 			o_worker_handle_interrupts();
 
@@ -4261,7 +4265,11 @@ delay_rels_queued_for_idxbuild(ORelOids oids)
 		 * recovery worker, therefore check in which worker we are.
 		 */
 		if (AmStartupProcess())
+#if PG_VERSION_NUM >= 180000
+			ProcessStartupProcInterrupts();
+#else
 			HandleStartupProcInterrupts();
+#endif
 		else
 			o_worker_handle_interrupts();
 

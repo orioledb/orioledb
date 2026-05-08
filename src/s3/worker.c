@@ -919,10 +919,6 @@ s3worker_main(Datum main_arg)
 
 	/* show the s3 worker in pg_stat_activity, */
 	InitializeSessionUserIdStandalone();
-	pgstat_beinit();
-	pgstat_bestart();
-
-	SetProcessingMode(NormalProcessing);
 
 	/* catch SIGTERM signal for reason to not interupt background writing */
 	pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
@@ -969,6 +965,8 @@ s3worker_main(Datum main_arg)
 
 			if (rc & WL_POSTMASTER_DEATH)
 				ShutdownRequestPending = true;
+
+			CHECK_FOR_INTERRUPTS();
 
 			/*
 			 * Task processing loop.  It might happend that error occurs and

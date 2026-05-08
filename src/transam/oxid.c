@@ -30,6 +30,9 @@
 #include "storage/sinvaladt.h"
 #include "storage/procsignal.h"
 #include "storage/proc.h"
+#if PG_VERSION_NUM >= 180000
+#include "utils/memutils.h"
+#endif
 #include "utils/snapmgr.h"
 #include "recovery/wal.h"
 
@@ -942,8 +945,8 @@ oxid_notify(OXid oxid)
 		 */
 		LWLockAcquire(partitionLock, LW_EXCLUSIVE);
 		RemoveFromWaitQueue(proc, hashcode);
-		proc->waitStatus = STATUS_OK;
-		SendProcSignal(proc->pid, PROCSIG_NOTIFY_INTERRUPT, proc->PROCBACKENDID);
+		proc->waitStatus = PROC_WAIT_STATUS_OK;
+		SetLatch(&proc->procLatch);
 
 		LWLockRelease(partitionLock);
 	}
@@ -1055,8 +1058,8 @@ oxid_notify_all(void)
 	{
 		proc = lfirst(lc);
 		RemoveFromWaitQueue(proc, hashcode);
-		proc->waitStatus = STATUS_OK;
-		SendProcSignal(proc->pid, PROCSIG_NOTIFY_INTERRUPT, proc->PROCBACKENDID);
+		proc->waitStatus = PROC_WAIT_STATUS_OK;
+		SetLatch(&proc->procLatch);
 	}
 
 	LWLockRelease(partitionLock);

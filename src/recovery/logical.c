@@ -82,7 +82,11 @@ record_buffer_tuple(ReorderBuffer *reorder, HeapTuple htup, bool freeHtup)
 	HeapTuple	changeTup;
 	REORDER_BUFFER_TUPLE_TYPE result;
 
+#if PG_VERSION_NUM >= 180000
+	result = ReorderBufferAllocTupleBuf(reorder, htup->t_len);
+#else
 	result = ReorderBufferGetTupleBuf(reorder, htup->t_len);
+#endif
 
 #if PG_VERSION_NUM >= 170000
 	changeTup = result;
@@ -310,7 +314,9 @@ o_convert_non_toast_tuple(ReorderBuffer *reorderbuf, OTableDescr *descr, OIndexD
 
 /* Convert chunk in a TOAST relation from OrioleDB format to reorder buffer (heap) format */
 static REORDER_BUFFER_TUPLE_TYPE
-o_convert_toast_chunk(ReorderBuffer *reorderbuf, OIndexDescr *indexDescr, OTuple tuple, TupleDescData *o_toast_tupDesc, TupleDescData *heap_toast_tupDesc, OffsetNumber debug_length)
+o_convert_toast_chunk(ReorderBuffer *reorderbuf, OIndexDescr *indexDescr,
+					  OTuple tuple, TupleDescData *o_toast_tupDesc,
+					  TupleDescData *heap_toast_tupDesc, OffsetNumber debug_length)
 {
 	uint16		attnum;
 	uint32		chunk_seq;
@@ -411,7 +417,8 @@ o_decode_modify_tuples(ReorderBuffer *reorderbuf, WalRecordType rec_type,
 		if (ix_type == oIndexToast)
 		{
 			elog(DEBUG4, "WAL_REC_INSERT TOAST");
-			change->data.tp.newtuple = o_convert_toast_chunk(reorderbuf, indexDescr, tuple1, o_toast_tupDesc, heap_toast_tupDesc, debug_length);
+			change->data.tp.newtuple = o_convert_toast_chunk(reorderbuf, indexDescr,
+															 tuple1, o_toast_tupDesc, heap_toast_tupDesc, debug_length);
 			change->data.tp.clear_toast_afterwards = false;
 		}
 		else
@@ -1279,7 +1286,11 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 
 						Assert(ctx->descr != NULL);
 						Assert(!O_TUPLE_IS_NULL(tuple1.tuple));
+#if PG_VERSION_NUM >= 180000
+						change = ReorderBufferAllocChange(ctx->decodeCtx->reorder);
+#else
 						change = ReorderBufferGetChange(ctx->decodeCtx->reorder);
+#endif
 						change->data.tp.rlocator.spcOid = ctx->descr->tablespace;
 						change->data.tp.rlocator.dbOid = rec->oids.datoid;
 						change->data.tp.rlocator.relNumber = rec->oids.relnode;
