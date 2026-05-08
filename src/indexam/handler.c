@@ -1522,6 +1522,24 @@ o_get_num_prefix_exact_keys(ScanKey scankey, int nscankeys)
 	return i;
 }
 
+int
+o_adjust_num_prefix_exact_keys(BTScanOpaque so, int numPrefixExactKeys)
+{
+	int			adjusted = numPrefixExactKeys;
+
+#if PG_VERSION_NUM >= 180000
+	for (int i = 0; i < so->numArrayKeys; i++)
+	{
+		BTArrayKeyInfo *arrayKey = &so->arrayKeys[i];
+
+		if (arrayKey->num_elems <= 0 && arrayKey->scan_key < adjusted)
+			adjusted = arrayKey->scan_key;
+	}
+#endif
+
+	return adjusted;
+}
+
 void
 orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 				  ScanKey orderbys, int norderbys)

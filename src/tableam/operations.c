@@ -813,8 +813,26 @@ o_tbl_insert_with_arbiter(Relation rel,
 			Datum	   *conflictRowidPtr = &conflictRowid;
 			Datum		conflictRowidPtrDatum = PointerGetDatum(conflictRowidPtr);
 
-			if (!ExecCheckIndexConstraints(resultRelInfo, slot, estate, conflictRowidPtrDatum,
+#if PG_VERSION_NUM >= 180000
+			ItemPointerData invalidItemPtr;
+			Datum		invalidItemPtrDatum;
+
+			if (table_get_row_ref_type(resultRelInfo->ri_RelationDesc) == ROW_REF_ROWID)
+				invalidItemPtrDatum = PointerGetDatum(NULL);
+			else
+			{
+				ItemPointerSetInvalid(&invalidItemPtr);
+				invalidItemPtrDatum = ItemPointerGetDatum(&invalidItemPtr);
+			}
+
+			if (!ExecCheckIndexConstraints(resultRelInfo, slot, estate,
+										   conflictRowidPtrDatum,
+										   invalidItemPtrDatum, arbiterIndexes))
+#else
+			if (!ExecCheckIndexConstraints(resultRelInfo, slot, estate,
+										   conflictRowidPtrDatum,
 										   arbiterIndexes))
+#endif
 			{
 				if (lockedSlot)
 				{
