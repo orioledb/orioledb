@@ -4324,6 +4324,144 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 #undef PG_TBLSPC
 	}
 
+#if PG_VERSION_NUM >= 180000
+
+	/*
+	 * In PostgreSQL 18, NOT NULL constraints are represented as catalog
+	 * objects in pg_constraint rather than just a flag on pg_attribute. We
+	 * intercept constraint changes to keep the OrioleDB cache in sync.
+	 *
+	 * We ignore cascade drops (using dropflags and statement type) to avoid
+	 * redundant table updates when the parent column/table is also dropping.
+	 */
+	else if ((access == OAT_POST_CREATE || access == OAT_POST_ALTER ||
+			  (access == OAT_DROP &&
+			   !(((ObjectAccessDrop *) arg)->dropflags & (PERFORM_DELETION_OF_RELATION | PERFORM_DELETION_INTERNAL))
+			   )) &&
+			 classId == ConstraintRelationId)
+	{
+		HeapTuple	conTup = NULL;
+		Relation	conRel = NULL;
+		SysScanDesc scan = NULL;
+		ScanKeyData skey;
+		bool		use_self_scan = access == OAT_POST_CREATE || access == OAT_POST_ALTER;
+		Form_pg_constraint conForm;
+
+		/*
+		 * TODO: Should we optimize the following commands and do not update
+		 * the metadata unnecessarily: - ALTER TABLE <table> DROP COLUMN
+		 * <col>; - DROP TYPE <type> CASCADE;
+		 */
+
+		/*
+		 * In case of OAT_POST_CREATE and OAT_POST_ALTER we need to scan the
+		 * catalog using SnapshotSelf because pg_constraint entry is not
+		 * visible right now.
+		 */
+		if (use_self_scan)
+		{
+			conRel = table_open(ConstraintRelationId, AccessShareLock);
+
+			ScanKeyInit(&skey,
+						Anum_pg_constraint_oid,
+						BTEqualStrategyNumber, F_OIDEQ,
+						ObjectIdGetDatum(objectId));
+
+			scan = systable_beginscan(conRel, ConstraintOidIndexId, true,
+									  SnapshotSelf, 1, &skey);
+			conTup = systable_getnext(scan);
+		}
+		else
+		{
+			conTup = SearchSysCache1(CONSTROID, ObjectIdGetDatum(objectId));
+		}
+
+		if (!HeapTupleIsValid(conTup))
+			elog(ERROR, "could not find tuple for constraint %u", objectId);
+
+		conForm = (Form_pg_constraint) GETSTRUCT(conTup);
+
+		if (conForm->contype == CONSTRAINT_NOTNULL && conForm->conrelid != InvalidOid)
+		{
+			Datum		adatum;
+			ArrayType  *arr;
+			int16	   *attnums;
+			int			numkeys;
+			Relation	conrel = relation_open(conForm->conrelid, AccessShareLock);
+
+			adatum = SysCacheGetAttrNotNull(CONSTROID, conTup, Anum_pg_constraint_conkey);
+
+			arr = DatumGetArrayTypeP(adatum);
+			numkeys = ARR_DIMS(arr)[0];
+			attnums = (int16 *) ARR_DATA_PTR(arr);
+
+			if (is_orioledb_rel(conrel))
+			{
+				ORelOids	oids;
+				OTable	   *o_table;
+
+				ORelOidsSetFromRel(oids, conrel);
+				o_table = o_tables_get(oids);
+				if (o_table != NULL)
+				{
+					OSnapshot	oSnapshot;
+					OXid		oxid;
+					bool		changed = false;
+					bool		is_add = (access == OAT_POST_CREATE || access == OAT_POST_ALTER);
+
+					fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+					o_tables_rel_meta_lock(conrel);
+
+					/*
+					 * Directly update the notnull flag on the OrioleDB table
+					 * metadata. We avoid delegating to the relation attribute
+					 * hook because rel->rd_att may not be fully updated yet
+					 * during constraint creation.
+					 */
+					for (int i = 0; i < numkeys; i++)
+					{
+						int			attnum = attnums[i];
+
+						if (attnum > 0 && attnum <= o_table->nfields && !o_table->fields[attnum - 1].droped)
+						{
+							if (o_table->fields[attnum - 1].notnull != is_add)
+							{
+								o_table->fields[attnum - 1].notnull = is_add;
+								changed = true;
+							}
+						}
+					}
+
+					if (changed)
+					{
+						/*
+						 * Persist the updated configuration to the OrioleDB
+						 * catalog tree
+						 */
+						o_indices_update(o_table, PrimaryIndexNumber, oxid, oSnapshot.csn);
+						o_tables_update(o_table, oxid, oSnapshot.csn);
+						o_tables_after_update(o_table, oxid, oSnapshot.csn);
+					}
+					o_tables_rel_meta_unlock(conrel, InvalidOid);
+					o_table_free(o_table);
+				}
+			}
+			relation_close(conrel, AccessShareLock);
+		}
+
+		/* Cleanup */
+		if (use_self_scan)
+		{
+			systable_endscan(scan);
+			table_close(conRel, AccessShareLock);
+		}
+		else if (HeapTupleIsValid(conTup))
+		{
+			ReleaseSysCache(conTup);
+		}
+	}
+#endif
+
 	if (old_objectaccess_hook)
 		old_objectaccess_hook(access, classId, objectId, subId, arg);
 }
