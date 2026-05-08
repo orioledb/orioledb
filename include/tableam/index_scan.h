@@ -85,6 +85,8 @@ extern TupleTableSlot *o_exec_project(ProjectionInfo *projInfo,
 									  TupleTableSlot *scanTuple,
 									  TupleTableSlot *innerTuple);
 
+extern int	o_adjust_num_prefix_exact_keys(BTScanOpaque so, int numPrefixExactKeys);
+
 /* explain analyze */
 extern void eanalyze_counters_init(OEACallsCounters *eacc, OTableDescr *descr);
 extern void eanalyze_counters_explain(OTableDescr *descr,

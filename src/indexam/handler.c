@@ -88,7 +88,7 @@ static bool orioledb_amvalidate(Oid opclassoid);
 static void orioledb_amadjustmembers(Oid opfamilyoid, Oid opclassoid,
 									 List *operators, List *functions);
 static IndexScanDesc orioledb_ambeginscan(Relation rel, int nkeys, int norderbys);
-static void orioledb_amrescan(IndexScanDesc scan, ScanKey scankey,
+void		orioledb_amrescan(IndexScanDesc scan, ScanKey scankey,
 							  int nscankeys, ScanKey orderbys, int norderbys);
 static bool orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir);
 static int64 orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm);
@@ -1522,7 +1522,25 @@ o_get_num_prefix_exact_keys(ScanKey scankey, int nscankeys)
 	return i;
 }
 
-static void
+int
+o_adjust_num_prefix_exact_keys(BTScanOpaque so, int numPrefixExactKeys)
+{
+	int			adjusted = numPrefixExactKeys;
+
+#if PG_VERSION_NUM >= 180000
+	for (int i = 0; i < so->numArrayKeys; i++)
+	{
+		BTArrayKeyInfo *arrayKey = &so->arrayKeys[i];
+
+		if (arrayKey->num_elems <= 0 && arrayKey->scan_key < adjusted)
+			adjusted = arrayKey->scan_key;
+	}
+#endif
+
+	return adjusted;
+}
+
+void
 orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 				  ScanKey orderbys, int norderbys)
 {
