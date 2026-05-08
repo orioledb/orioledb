@@ -289,7 +289,11 @@ o_proc_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 			}
 		}
 		fcache = (SQLFunctionCachePtr) fcinfo->flinfo->fn_extra;
-		pfree(fcache);
+		if (fcache)
+		{
+			MemoryContextDelete(fcache->fcontext);
+			/* fcache itself is deleted by MemoryContextDelete */
+		}
 		pfree(fcinfo);
 		pfree(finfo);
 	}
@@ -461,7 +465,9 @@ typedef struct
 {
 	DestReceiver pub;			/* publicly-known function pointers */
 	Tuplestorestate *tstore;	/* where to put result tuples */
+#if PG_VERSION_NUM < 180000
 	MemoryContext cxt;			/* context containing tstore */
+#endif
 	JunkFilter *filter;			/* filter to convert tuple type */
 } DR_sqlfunction;
 
@@ -648,7 +654,9 @@ jf_cleanTupType_init_entry(TupleDesc desc,
 #if PG_VERSION_NUM < 170000
 	att->attstattarget = -1;
 #endif
+#if PG_VERSION_NUM < 180000
 	att->attcacheoff = -1;
+#endif
 	att->atttypmod = typmod;
 
 	att->attnum = attributeNumber;
@@ -742,6 +750,41 @@ o_prepare_sql_fn_parse_info(OProc *o_proc, Node *call_expr, Oid inputCollation)
 
 	return pinfo;
 }
+
+#if PG_VERSION_NUM >= 180000
+/*
+ * Extract the targetlist of the last canSetTag query in the given list
+ * of parsed-and-rewritten Queries.  Returns NIL if there is none.
+ *
+ * This is the copy of get_sql_fn_result_tlist() from PostgreSQL code.
+ */
+static List *
+get_sql_fn_result_tlist(List *queryTreeList)
+{
+	Query	   *parse = NULL;
+	ListCell   *lc;
+
+	foreach(lc, queryTreeList)
+	{
+		Query	   *q = lfirst_node(Query, lc);
+
+		if (q->canSetTag)
+			parse = q;
+	}
+	if (parse &&
+		parse->commandType == CMD_SELECT)
+		return parse->targetList;
+	else if (parse &&
+			 (parse->commandType == CMD_INSERT ||
+			  parse->commandType == CMD_UPDATE ||
+			  parse->commandType == CMD_DELETE ||
+			  parse->commandType == CMD_MERGE) &&
+			 parse->returningList)
+		return parse->returningList;
+	else
+		return NIL;
+}
+#endif
 
 /*
  * Initialize the SQLFunctionCache for a SQL function
@@ -956,7 +999,13 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 		 * columns, since we have no way to notify the caller that it should
 		 * do that.)
 		 */
-#if PG_VERSION_NUM >= 170000
+#if PG_VERSION_NUM >= 180000
+		fcache->returnsTuple = check_sql_fn_retval(queryTree_list,
+												   rettype,
+												   rettupdesc,
+												   procedureStruct->prokind,
+												   false);
+#elif PG_VERSION_NUM >= 170000
 		fcache->returnsTuple = check_sql_fn_retval(queryTree_list,
 												   rettype,
 												   rettupdesc,
@@ -1061,6 +1110,11 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 		{
 			TupleTableSlot *slot = MakeSingleTupleTableSlot(NULL,
 															&TTSOpsMinimalTuple);
+
+#if PG_VERSION_NUM >= 180000
+			resulttlist = queryTree_list != NIL ?
+				get_sql_fn_result_tlist(llast_node(List, queryTree_list)) : NIL;
+#endif
 
 			/*
 			 * If the result is composite, *and* we are returning the whole
@@ -1273,7 +1327,9 @@ postquel_start(execution_state *es, SQLFunctionCachePtr fcache)
 		myState = (DR_sqlfunction *) dest;
 		Assert(myState->pub.mydest == DestSQLFunction);
 		myState->tstore = fcache->tstore;
+#if PG_VERSION_NUM < 180000
 		myState->cxt = CurrentMemoryContext;
+#endif
 		myState->filter = fcache->junkFilter;
 	}
 	else
@@ -1334,7 +1390,11 @@ postquel_getnext(execution_state *es, SQLFunctionCachePtr fcache)
 		/* Run regular commands to completion unless lazyEval */
 		uint64		count = (es->lazyEval) ? 1 : 0;
 
+#if PG_VERSION_NUM >= 180000
+		ExecutorRun(es->qd, ForwardScanDirection, count);
+#else
 		ExecutorRun(es->qd, ForwardScanDirection, count, !fcache->returnsSet || !es->lazyEval);
+#endif
 
 		/*
 		 * If we requested run to completion OR there was no tuple returned,

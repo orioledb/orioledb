@@ -22,6 +22,9 @@
 
 #include "catalog/pg_collation.h"
 #include "catalog/pg_database.h"
+#if PG_VERSION_NUM >= 180000
+#include "utils/memutils.h"
+#endif
 #include "utils/syscache.h"
 #include "mb/pg_wchar.h"
 
@@ -213,7 +216,6 @@ o_database_cache_set_default_locale_provider()
 			make_icu_collator(o_database->datlocale, o_database->daticurules,
 							  &default_locale);
 		}
-
 		default_locale.provider = o_database->datlocprovider;
 		default_locale.deterministic = true;
 #endif
