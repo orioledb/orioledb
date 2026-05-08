@@ -2,6 +2,9 @@ CREATE SCHEMA parallel_scan;
 SET SESSION search_path = 'parallel_scan';
 CREATE EXTENSION orioledb;
 
+SELECT split_part(setting, '.', 1) major_version
+	FROM pg_settings WHERE name = 'server_version';
+
 SET min_parallel_table_scan_size = 1;
 SET min_parallel_index_scan_size = 1;
 SET parallel_setup_cost = 0;
