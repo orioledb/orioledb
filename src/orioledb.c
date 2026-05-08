@@ -85,8 +85,6 @@
 
 PG_MODULE_MAGIC;
 
-void		_PG_init(void);
-
 static bool debug_disable_pools_limit = false;
 static Pointer shared_segment = NULL;
 static bool shared_segment_initialized = false;
@@ -120,7 +118,7 @@ int			max_procs;
 Size		orioledb_buffers_size;
 Size		orioledb_buffers_count;
 Size		orioledb_temp_buffers_count;
-Size		page_descs_size;
+static Size page_descs_size;
 Size		undo_circular_buffer_size;
 uint32		undo_buffers_count;
 double		regular_block_undo_circular_buffer_fraction;
@@ -167,7 +165,7 @@ int			rewind_max_transactions = 0;
 int			logical_xid_buffers_guc = 64;
 bool		orioledb_strict_mode = false;
 XLogRecPtr	replay_until_lsn = InvalidXLogRecPtr;
-char	   *replay_until_lsn_string;
+static char *replay_until_lsn_string;
 
 /* For page eviction/read checkpoint test only */
 uint32		min_read_page_checkpoint = UINT32_MAX;
@@ -197,7 +195,7 @@ MemoryContext btree_insert_context = NULL;
  */
 MemoryContext btree_seqscan_context = NULL;
 
-OPagePool	page_pools[OPagePoolTypesCount];
+static OPagePool page_pools[OPagePoolTypesCount];
 LocalPagePool local_ppool;
 
 static size_t page_pools_size[OPagePoolTypesCount];

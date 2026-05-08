@@ -271,7 +271,7 @@ oTablesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 	return OTupleFetchMatch;
 }
 
-ToastAPI	oTablesToastAPI = {
+static ToastAPI oTablesToastAPI = {
 	.getBTreeDesc = oTablesGetBTreeDesc,
 	.getBTreeVersion = NULL,
 	.getBaseBTreeVersion = NULL,

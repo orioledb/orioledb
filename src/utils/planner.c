@@ -62,7 +62,7 @@ static bool validate_function(Node *node, void *context);
 static Node *o_wrap_top_funcexpr(Node *node);
 static void o_collect_function_walker(Oid functionId, Oid inputcollid,
 									  List *args, void *context);
-static bool plan_tree_walker(Plan *plan, WalkerFunc, void *context);
+static bool plan_tree_walker(Plan *plan, WalkerFunc walker, void *context);
 
 #define pg_analyze_and_rewrite_params pg_analyze_and_rewrite_withcb
 
