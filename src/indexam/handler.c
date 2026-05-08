@@ -381,7 +381,7 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 			if (i != 0)
 				appendStringInfo(str, ", ");
 			appendStringInfo(str, "%s",
-							 id->nonLeafTupdesc->attrs[i].attname.data);
+							 TupleDescAttr(id->nonLeafTupdesc, i)->attname.data);
 		}
 		appendStringInfo(str, ")=");
 
@@ -403,7 +403,7 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 				bool		typisvarlena;
 				char	   *res;
 
-				getTypeOutputInfo(id->nonLeafTupdesc->attrs[i].atttypid,
+				getTypeOutputInfo(TupleDescAttr(id->nonLeafTupdesc, i)->atttypid,
 								  &typoutput, &typisvarlena);
 				res = OidOutputFunctionCall(typoutput, value);
 				appendStringInfo(str, "%s", res);
@@ -793,7 +793,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 							bool		typisvarlena;
 							char	   *res;
 
-							getTypeOutputInfo(index_descr->leafTupdesc->attrs[i].atttypid,
+							getTypeOutputInfo(TupleDescAttr(index_descr->leafTupdesc, i)->atttypid,
 											  &typoutput, &typisvarlena);
 							res = OidOutputFunctionCall(typoutput, valuesOld[i]);
 							appendStringInfo(str, "'%s'", res);
@@ -929,7 +929,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 							bool		typisvarlena;
 							char	   *res;
 
-							getTypeOutputInfo(index_descr->nonLeafTupdesc->attrs[i].atttypid,
+							getTypeOutputInfo(TupleDescAttr(index_descr->nonLeafTupdesc, i)->atttypid,
 											  &typoutput, &typisvarlena);
 							res = OidOutputFunctionCall(typoutput, values[i]);
 							appendStringInfo(str, "'%s'", res);

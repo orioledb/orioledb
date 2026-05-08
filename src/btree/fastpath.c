@@ -115,7 +115,8 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 	offset = 0;
 	for (i = 0; i < meta->numKeys; i++)
 	{
-		ArraySearchDesc *searchDesc = find_array_search_desc_by_typeid(id->nonLeafTupdesc->attrs[i].atttypid);
+		ArraySearchDesc *searchDesc = find_array_search_desc_by_typeid(
+																	   TupleDescAttr(id->nonLeafTupdesc, i)->atttypid);
 		OIndexField *field = &id->fields[i];
 
 		if (!searchDesc || searchDesc->opcid != field->opclass)
