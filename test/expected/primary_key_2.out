@@ -5,7 +5,7 @@ SELECT split_part(setting, '.', 1) major_version
 	FROM pg_settings WHERE name = 'server_version';
  major_version 
 ---------------
- 17
+ 18
 (1 row)
 
 -- Test for integer primary key
@@ -999,8 +999,9 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 1.0;
             QUERY PLAN            
 ----------------------------------
  Seq Scan on o_pk1
+   Disabled: true
    Filter: ((key)::numeric = 1.0)
-(2 rows)
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key = 1.0;
  key | payload 
@@ -1012,8 +1013,9 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10.0;
              QUERY PLAN             
 ------------------------------------
  Seq Scan on o_pk1
+   Disabled: true
    Filter: ((key)::numeric <= 10.0)
-(2 rows)
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key <= 10.0;
  key | payload 
@@ -2092,8 +2094,9 @@ EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91;
                                  QUERY PLAN                                  
 -----------------------------------------------------------------------------
  Seq Scan on o_pk2
+   Disabled: true
    Filter: ((id <= '71'::double precision) OR (id > '91'::double precision))
-(2 rows)
+(3 rows)
 
 SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91;
  id  |   value   
@@ -2370,8 +2373,9 @@ EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19;
                                  QUERY PLAN                                  
 -----------------------------------------------------------------------------
  Seq Scan on o_pk2
+   Disabled: true
    Filter: ((id >= '71'::double precision) OR (id < '19'::double precision))
-(2 rows)
+(3 rows)
 
 SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19;
  id  |   value   

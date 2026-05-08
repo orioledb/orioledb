@@ -2,6 +2,9 @@ CREATE SCHEMA explain;
 SET SESSION search_path = 'explain';
 CREATE EXTENSION orioledb;
 
+SELECT split_part(setting, '.', 1) major_version
+	FROM pg_settings WHERE name = 'server_version';
+
 ----
 -- EXPLAIN (ANALYZE TRUE, BUFFERS TRUE) test
 ----

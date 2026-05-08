@@ -5,7 +5,7 @@ SELECT split_part(setting, '.', 1) major_version
 	FROM pg_settings WHERE name = 'server_version';
  major_version 
 ---------------
- 17
+ 18
 (1 row)
 
 ----
@@ -68,9 +68,11 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE)
 -------------------------------------------------------------------------------------
  Aggregate  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    ->  Seq Scan on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+ Planning:
+   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(4 rows)
+(6 rows)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN ANALYZE
@@ -136,9 +138,11 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
    Sort Method: quicksort  Memory: xkB
    Buffers: shared hit=x
    ->  Seq Scan on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+ Planning:
+   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(7 rows)
+(9 rows)
 
 -- table: primary index + secondary index without TOAST
 DROP TABLE o_explain;
@@ -172,11 +176,12 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 ------------------------------------------------------------------------------------------------------------------
  Index Only Scan using o_explain_sec_non_val on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Heap Fetches: x
+   Index Searches: x
  Planning:
    Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(6 rows)
+(7 rows)
 
 -- do not use secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -229,9 +234,10 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
    ->  Index Only Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
          Index Cond: ((valx > x) AND (valx < x))
          Heap Fetches: x
+         Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(6 rows)
+(7 rows)
 
 -- TODO: Make this work again if this is important (uses scan index now)
 -- uses only secondary index - primary index is ctid index stored in secondary index
@@ -243,10 +249,11 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 --------------------------------------------------------------------------------------------------------------
  Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: ((valx > x) AND (valx < x))
+   Index Searches: x
    Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(5 rows)
+(6 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -257,9 +264,10 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 --------------------------------------------------------------------------------------------------------------
  Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: ((valx > x) AND (valx < x))
+   Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(4 rows)
+(5 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -270,9 +278,10 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 --------------------------------------------------------------------------------------------------------------
  Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: ((valx > x) AND (valx < x))
+   Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(4 rows)
+(5 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -283,9 +292,10 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 --------------------------------------------------------------------------------------------------------------
  Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: ((valx > x) AND (valx < x))
+   Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(4 rows)
+(5 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -295,9 +305,10 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 --------------------------------------------------------------------------------------------------------------
  Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: (valx > x)
+   Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(4 rows)
+(5 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -308,9 +319,10 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 --------------------------------------------------------------------------------------------------------------
  Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: ((valx > x) AND (valx < x))
+   Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(4 rows)
+(5 rows)
 
 -- uses only secondary index for fetching values from secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -322,9 +334,10 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
  Index Only Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: ((valx > x) AND (valx < x))
    Heap Fetches: x
+   Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(5 rows)
+(6 rows)
 
 SELECT * FROM o_explain WHERE val2 BETWEEN 1 AND 10;
  key | val1 | val2 
@@ -382,9 +395,10 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
    ->  Index Only Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
          Index Cond: ((valx > x) AND (valx < x))
          Heap Fetches: x
+         Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(6 rows)
+(7 rows)
 
 -- uses secondary index, primary key is stored in secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -396,9 +410,10 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
  Index Only Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: ((valx > x) AND (valx < x))
    Heap Fetches: x
+   Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(5 rows)
+(6 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -409,9 +424,10 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 --------------------------------------------------------------------------------------------------------------
  Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: ((valx > x) AND (valx < x))
+   Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(4 rows)
+(5 rows)
 
 -- uses only secondary index for fetching secondary index value and primary key
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -423,9 +439,10 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
  Index Only Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: ((valx > x) AND (valx < x))
    Heap Fetches: x
+   Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(5 rows)
+(6 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -436,9 +453,10 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 --------------------------------------------------------------------------------------------------------------
  Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: ((valx > x) AND (valx < x))
+   Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(4 rows)
+(5 rows)
 
 -- uses primary and secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -449,9 +467,10 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 --------------------------------------------------------------------------------------------------------------
  Index Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: ((valx > x) AND (valx < x))
+   Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(4 rows)
+(5 rows)
 
 -- uses only secondary index for fetching values from secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -463,9 +482,10 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
  Index Only Scan using o_explain_sec_non_valx on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: ((valx > x) AND (valx < x))
    Heap Fetches: x
+   Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(5 rows)
+(6 rows)
 
 SELECT * FROM o_explain WHERE val2 BETWEEN 1 AND 10;
  key | val1 | val2 
@@ -579,13 +599,14 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
          Recheck Cond: (val > x)
          ->  Bitmap Index Scan on o_explain_formats_val_key  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
                Index Cond: (val > x)
+               Index Searches: x
                Secondary index (o_explain_formats_val_key) pages: read=x
          Primary pages: read=x
  Planning:
    Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(14 rows)
+(15 rows)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 	FROM query_to_text($$ EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
@@ -605,6 +626,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
      Actual Total Time: x                             +
      Actual Rows: x                                   +
      Actual Loops: x                                  +
+     Disabled: false                                  +
      Sort Key:                                        +
        - "val"                                        +
      Sort Method: "quicksort"                         +
@@ -636,6 +658,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
          Actual Total Time: x                         +
          Actual Rows: x                               +
          Actual Loops: x                              +
+         Disabled: false                              +
          Custom Scan Subtype: "Bitmap Heap Scan"      +
          Recheck Cond: "(val > x)"                    +
          Rows Removed by Index Recheck: x             +
@@ -653,7 +676,9 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
              Actual Total Time: x                     +
              Actual Rows: x                           +
              Actual Loops: x                          +
+             Disabled: false                          +
              Index Cond: "(val > x)"                  +
+             Index Searches: x                        +
              Shared Hit Blocks: x                     +
              Shared Read Blocks: x                    +
              Shared Dirtied Blocks: x                 +
@@ -715,6 +740,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
        "Actual Total Time": x,                             +
        "Actual Rows": x,                                   +
        "Actual Loops": x,                                  +
+       "Disabled": false,                                  +
        "Sort Key": ["val"],                                +
        "Sort Method": "quicksort",                         +
        "Sort Space Used": x,                               +
@@ -746,6 +772,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
            "Actual Total Time": x,                         +
            "Actual Rows": x,                               +
            "Actual Loops": x,                              +
+           "Disabled": false,                              +
            "Custom Scan Subtype": "Bitmap Heap Scan",      +
            "Recheck Cond": "(val > x)",                    +
            "Rows Removed by Index Recheck": x,             +
@@ -764,7 +791,9 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
                "Actual Total Time": x,                     +
                "Actual Rows": x,                           +
                "Actual Loops": x,                          +
+               "Disabled": false,                          +
                "Index Cond": "(val > x)",                  +
+               "Index Searches": x,                        +
                "Shared Hit Blocks": x,                     +
                "Shared Read Blocks": x,                    +
                "Shared Dirtied Blocks": x,                 +
@@ -837,6 +866,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
        <Actual-Total-Time>x</Actual-Total-Time>                            +
        <Actual-Rows>x</Actual-Rows>                                        +
        <Actual-Loops>x</Actual-Loops>                                      +
+       <Disabled>false</Disabled>                                          +
        <Sort-Key>                                                          +
          <Item>val</Item>                                                  +
        </Sort-Key>                                                         +
@@ -870,6 +900,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
            <Actual-Total-Time>x</Actual-Total-Time>                        +
            <Actual-Rows>x</Actual-Rows>                                    +
            <Actual-Loops>x</Actual-Loops>                                  +
+           <Disabled>false</Disabled>                                      +
            <Custom-Scan-Subtype>Bitmap Heap Scan</Custom-Scan-Subtype>     +
            <Recheck-Cond>(val &gt; x)</Recheck-Cond>                       +
            <Rows-Removed-by-Index-Recheck>x</Rows-Removed-by-Index-Recheck>+
@@ -888,7 +919,9 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
                <Actual-Total-Time>x</Actual-Total-Time>                    +
                <Actual-Rows>x</Actual-Rows>                                +
                <Actual-Loops>x</Actual-Loops>                              +
+               <Disabled>false</Disabled>                                  +
                <Index-Cond>(val &gt; x)</Index-Cond>                       +
+               <Index-Searches>x</Index-Searches>                          +
                <Shared-Hit-Blocks>x</Shared-Hit-Blocks>                    +
                <Shared-Read-Blocks>x</Shared-Read-Blocks>                  +
                <Shared-Dirtied-Blocks>x</Shared-Dirtied-Blocks>            +
@@ -953,9 +986,10 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 -------------------------------------------------------------------------------------------------------------------------
  Index Scan using o_explain_formats_val_key on o_explain_formats  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: (val > x)
+   Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(4 rows)
+(5 rows)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 	FROM query_to_text($$ EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
@@ -979,8 +1013,10 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
      Actual Total Time: x                   +
      Actual Rows: x                         +
      Actual Loops: x                        +
+     Disabled: false                        +
      Index Cond: "(val > x)"                +
      Rows Removed by Index Recheck: x       +
+     Index Searches: x                      +
      Shared Hit Blocks: x                   +
      Shared Read Blocks: x                  +
      Shared Dirtied Blocks: x               +
@@ -1031,8 +1067,10 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
        "Actual Total Time": x,                   +
        "Actual Rows": x,                         +
        "Actual Loops": x,                        +
+       "Disabled": false,                        +
        "Index Cond": "(val > x)",                +
        "Rows Removed by Index Recheck": x,       +
+       "Index Searches": x,                      +
        "Shared Hit Blocks": x,                   +
        "Shared Read Blocks": x,                  +
        "Shared Dirtied Blocks": x,               +
@@ -1088,8 +1126,10 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
        <Actual-Total-Time>x</Actual-Total-Time>                        +
        <Actual-Rows>x</Actual-Rows>                                    +
        <Actual-Loops>x</Actual-Loops>                                  +
+       <Disabled>false</Disabled>                                      +
        <Index-Cond>(val &gt; x)</Index-Cond>                           +
        <Rows-Removed-by-Index-Recheck>x</Rows-Removed-by-Index-Recheck>+
+       <Index-Searches>x</Index-Searches>                              +
        <Shared-Hit-Blocks>x</Shared-Hit-Blocks>                        +
        <Shared-Read-Blocks>x</Shared-Read-Blocks>                      +
        <Shared-Dirtied-Blocks>x</Shared-Dirtied-Blocks>                +
@@ -1133,9 +1173,10 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
  Index Only Scan using o_explain_formats_val_key on o_explain_formats  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: (val > x)
    Heap Fetches: x
+   Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(5 rows)
+(6 rows)
 
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 	FROM query_to_text($$ EXPLAIN (FORMAT YAML, ANALYZE, BUFFERS)
@@ -1159,9 +1200,11 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
      Actual Total Time: x                   +
      Actual Rows: x                         +
      Actual Loops: x                        +
+     Disabled: false                        +
      Index Cond: "(val > x)"                +
      Rows Removed by Index Recheck: x       +
      Heap Fetches: x                        +
+     Index Searches: x                      +
      Shared Hit Blocks: x                   +
      Shared Read Blocks: x                  +
      Shared Dirtied Blocks: x               +
@@ -1212,9 +1255,11 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
        "Actual Total Time": x,                   +
        "Actual Rows": x,                         +
        "Actual Loops": x,                        +
+       "Disabled": false,                        +
        "Index Cond": "(val > x)",                +
        "Rows Removed by Index Recheck": x,       +
        "Heap Fetches": x,                        +
+       "Index Searches": x,                      +
        "Shared Hit Blocks": x,                   +
        "Shared Read Blocks": x,                  +
        "Shared Dirtied Blocks": x,               +
@@ -1270,9 +1315,11 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
        <Actual-Total-Time>x</Actual-Total-Time>                        +
        <Actual-Rows>x</Actual-Rows>                                    +
        <Actual-Loops>x</Actual-Loops>                                  +
+       <Disabled>false</Disabled>                                      +
        <Index-Cond>(val &gt; x)</Index-Cond>                           +
        <Rows-Removed-by-Index-Recheck>x</Rows-Removed-by-Index-Recheck>+
        <Heap-Fetches>x</Heap-Fetches>                                  +
+       <Index-Searches>x</Index-Searches>                              +
        <Shared-Hit-Blocks>x</Shared-Hit-Blocks>                        +
        <Shared-Read-Blocks>x</Shared-Read-Blocks>                      +
        <Shared-Dirtied-Blocks>x</Shared-Dirtied-Blocks>                +
@@ -1323,7 +1370,7 @@ SELECT explain_as_json($$
 	   $$)->0->'Plan'->'Actual Rows';
  ?column? 
 ----------
- 2
+ 2.00
 (1 row)
 
 DELETE FROM o_explain_json;
@@ -1333,7 +1380,7 @@ SELECT explain_as_json($$
 	   $$)->0->'Plan'->'Actual Rows';
  ?column? 
 ----------
- 0
+ 0.00
 (1 row)
 
 CREATE TABLE test_explain_bridged_index (
@@ -1381,6 +1428,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
                Recheck Cond: (test_explain_bridged_indexxthe_geom && '(x,x),(x,x)'::box)
                ->  Bitmap Index Scan on test_the_geom_brin  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
                      Index Cond: (test_explain_bridged_indexxthe_geom && '(x,x),(x,x)'::box)
+                     Index Searches: x
                      Buffers: shared hit=x
                Other pages: read=x
                Buffers: shared hit=x
@@ -1388,7 +1436,7 @@ SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
    Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(21 rows)
+(22 rows)
 
 COMMIT;
 DROP EXTENSION orioledb CASCADE;

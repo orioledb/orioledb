@@ -5,7 +5,7 @@ SELECT split_part(setting, '.', 1) major_version
 	FROM pg_settings WHERE name = 'server_version';
  major_version 
 ---------------
- 17
+ 18
 (1 row)
 
 CREATE TABLE o_test_generated (
@@ -45,7 +45,7 @@ SELECT * FROM o_test_drop_expression;
 (2 rows)
 
 ALTER TABLE o_test_drop_expression ALTER COLUMN a DROP EXPRESSION;
-ERROR:  column "a" of relation "o_test_drop_expression" is not a stored generated column
+ERROR:  column "a" of relation "o_test_drop_expression" is not a generated column
 ALTER TABLE o_test_drop_expression ALTER COLUMN b DROP EXPRESSION;
 INSERT INTO o_test_drop_expression VALUES (3);
 SELECT * FROM o_test_drop_expression;

@@ -11,7 +11,7 @@ SELECT split_part(setting, '.', 1) major_version
 	FROM pg_settings WHERE name = 'server_version';
  major_version 
 ---------------
- 17
+ 18
 (1 row)
 
 SELECT orioledb_parallel_debug_start();
@@ -5333,9 +5333,9 @@ SELECT orioledb_table_description('o_test81'::regclass);
                orioledb_table_description                
 ---------------------------------------------------------
  Compress = -1, Primary compress = 6, TOAST compress = 7+
-  Column |   Type | Collation | Nullable | Dropped      +
-     key | bigint |    (null) |    false |   false      +
-   value | bigint |    (null) |    false |   false      +
+  Column |   Type | Collation | Nullable | Droped       +
+     key | bigint |    (null) |    false |  false       +
+   value | bigint |    (null) |    false |  false       +
  
 (1 row)
 
@@ -5544,10 +5544,10 @@ SELECT orioledb_table_description('o_test83'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Dropped       +
-     key |  bigint |    (null) |    false |   false       +
-     val | integer |    (null) |     true |   false       +
-    val2 | integer |    (null) |    false |   false       +
+  Column |    Type | Collation | Nullable | Droped        +
+     key |  bigint |    (null) |    false |  false        +
+     val | integer |    (null) |     true |  false        +
+    val2 | integer |    (null) |    false |  false        +
  
 (1 row)
 
@@ -5573,10 +5573,10 @@ SELECT orioledb_table_description('o_test83'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Dropped       +
-     key |  bigint |    (null) |    false |   false       +
-    vala | integer |    (null) |     true |   false       +
-    val2 | integer |    (null) |    false |   false       +
+  Column |    Type | Collation | Nullable | Droped        +
+     key |  bigint |    (null) |    false |  false        +
+    vala | integer |    (null) |     true |  false        +
+    val2 | integer |    (null) |    false |  false        +
  
 (1 row)
 
@@ -5682,6 +5682,10 @@ INSERT INTO o_test_unique_as_pkey (key, val, val2)
 Indexes:
     "o_test_unique_as_pkey_pkey" PRIMARY KEY, btree (key, val)
     "o_test_unique_as_pkey_ix1" UNIQUE, btree (val, key)
+Not-null constraints:
+    "o_test_unique_as_pkey_key_not_null" NOT NULL "key"
+    "o_test_unique_as_pkey_val_not_null" NOT NULL "val"
+    "o_test_unique_as_pkey_val2_not_null" NOT NULL "val2"
 
 SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
               orioledb_tbl_indices              
@@ -5728,6 +5732,10 @@ Indexes:
     "o_test_unique_as_pkey_pkey" PRIMARY KEY, btree (key, val)
     "o_test_unique_as_pkey_ix1" UNIQUE, btree (val, key)
     "o_test_unique_as_pkey_ix2" UNIQUE, btree (val, key)
+Not-null constraints:
+    "o_test_unique_as_pkey_key_not_null" NOT NULL "key"
+    "o_test_unique_as_pkey_val_not_null" NOT NULL "val"
+    "o_test_unique_as_pkey_val2_not_null" NOT NULL "val2"
 
 SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
               orioledb_tbl_indices              
@@ -5788,9 +5796,9 @@ SELECT orioledb_table_description('o_test_renames'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Dropped       +
-     key |  bigint |    (null) |    false |   false       +
-     val | integer |    (null) |     true |   false       +
+  Column |    Type | Collation | Nullable | Droped        +
+     key |  bigint |    (null) |    false |  false        +
+     val | integer |    (null) |     true |  false        +
  
 (1 row)
 
@@ -5798,9 +5806,9 @@ SELECT description FROM orioledb_table WHERE reloid = 'o_test_renames'::regclass
                         description                        
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Dropped       +
-     key |  bigint |    (null) |    false |   false       +
-     val | integer |    (null) |     true |   false       +
+  Column |    Type | Collation | Nullable | Droped        +
+     key |  bigint |    (null) |    false |  false        +
+     val | integer |    (null) |     true |  false        +
  
 (1 row)
 
@@ -5828,13 +5836,13 @@ SELECT orioledb_tbl_indices('o_test_renames'::regclass);
 (1 row)
 
 SELECT description FROM orioledb_index WHERE index_reloid = 'o_test_renames_idx'::regclass;
-                     description                     
------------------------------------------------------
-  Column |    Type | Collation | Nullable | Dropped +
-     val | integer |    (null) |     true |   false +
-     key |  bigint |    (null) |    false |   false +
-                                                    +
- Key fields: (val, key)                             +
+                    description                     
+----------------------------------------------------
+  Column |    Type | Collation | Nullable | Droped +
+     val | integer |    (null) |     true |  false +
+     key |  bigint |    (null) |    false |  false +
+                                                   +
+ Key fields: (val, key)                            +
  
 (1 row)
 
@@ -5973,12 +5981,12 @@ SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Dropped       +
-   val_1 | integer |    (null) |    false |   false       +
-   val_2 |    text |         C |    false |   false       +
-   val_3 | integer |    (null) |     true |   false       +
-   val_4 | integer |    (null) |     true |   false       +
-   val_5 | integer |    (null) |     true |   false       +
+  Column |    Type | Collation | Nullable | Droped        +
+   val_1 | integer |    (null) |    false |  false        +
+   val_2 |    text |         C |    false |  false        +
+   val_3 | integer |    (null) |     true |  false        +
+   val_4 | integer |    (null) |     true |  false        +
+   val_5 | integer |    (null) |     true |  false        +
  
 (1 row)
 
@@ -6028,6 +6036,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 \d+ o_test_reuse_multiple_indices_ix1
       Index "indices.o_test_reuse_multiple_indices_ix1"
@@ -6207,12 +6218,12 @@ SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Dropped       +
-   val_1 | integer |    (null) |    false |   false       +
-   val_2 |    text |     POSIX |    false |   false       +
-   val_3 | integer |    (null) |     true |   false       +
-   val_4 | integer |    (null) |     true |   false       +
-   val_5 | integer |    (null) |     true |   false       +
+  Column |    Type | Collation | Nullable | Droped        +
+   val_1 | integer |    (null) |    false |  false        +
+   val_2 |    text |     POSIX |    false |  false        +
+   val_3 | integer |    (null) |     true |  false        +
+   val_4 | integer |    (null) |     true |  false        +
+   val_5 | integer |    (null) |     true |  false        +
  
 (1 row)
 
@@ -6305,6 +6316,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 EXPLAIN (COSTS OFF)
 	SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
@@ -6345,12 +6359,12 @@ SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |         Type | Collation | Nullable | Dropped  +
-   val_1 |      integer |    (null) |    false |   false  +
-   val_2 |         text |     POSIX |    false |   false  +
-   val_3 |      integer |    (null) |     true |   false  +
-   val_4 |      integer |    (null) |     true |   false  +
-   val_5 | character(1) |   default |     true |   false  +
+  Column |         Type | Collation | Nullable | Droped   +
+   val_1 |      integer |    (null) |    false |  false   +
+   val_2 |         text |     POSIX |    false |  false   +
+   val_3 |      integer |    (null) |     true |  false   +
+   val_4 |      integer |    (null) |     true |  false   +
+   val_5 | character(1) |   default |     true |  false   +
  
 (1 row)
 
@@ -6416,6 +6430,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 \d+ o_test_reuse_multiple_indices_ix1
       Index "indices.o_test_reuse_multiple_indices_ix1"
@@ -6606,12 +6623,12 @@ SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |         Type | Collation | Nullable | Dropped  +
-   val_1 |      integer |    (null) |    false |   false  +
-   val_2 |         text |     POSIX |    false |   false  +
-   val_3 |      integer |    (null) |     true |   false  +
-   val_4 |      integer |    (null) |     true |   false  +
-   val_5 | character(1) |   default |     true |   false  +
+  Column |         Type | Collation | Nullable | Droped   +
+   val_1 |      integer |    (null) |    false |  false   +
+   val_2 |         text |     POSIX |    false |  false   +
+   val_3 |      integer |    (null) |     true |  false   +
+   val_4 |      integer |    (null) |     true |  false   +
+   val_5 | character(1) |   default |     true |  false   +
  
 (1 row)
 
@@ -6814,6 +6831,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 \d+ o_test_reuse_multiple_indices_ix1
       Index "indices.o_test_reuse_multiple_indices_ix1"
@@ -6897,6 +6917,8 @@ Indexes:
     "o_test_include_like_ix1" btree (key)
     "o_test_include_like_ix2" btree (value)
     "o_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 CREATE TABLE IF NOT EXISTS o_test_include_like_like
 	(LIKE o_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
@@ -6939,6 +6961,8 @@ Indexes:
     "o_test_include_like_like_key_idx" btree (key)
     "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value)
     "o_test_include_like_like_value_idx" btree (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 DROP TABLE o_test_include_like_like;
 ALTER TABLE o_test_include_like DROP CONSTRAINT o_test_include_like_pkey;
@@ -6979,6 +7003,8 @@ Indexes:
     "o_test_include_like_ix1" btree (key)
     "o_test_include_like_ix2" btree (value)
     "o_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 CREATE TABLE IF NOT EXISTS o_test_include_like_like
 	(LIKE o_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
@@ -7020,6 +7046,8 @@ Indexes:
     "o_test_include_like_like_key_idx" btree (key)
     "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value)
     "o_test_include_like_like_value_idx" btree (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 DROP TABLE o_test_include_like_like;
 -- Test that fields also added when we create table like postgres table
@@ -7045,6 +7073,8 @@ Indexes:
     "pg_test_include_like_ix1" btree (key)
     "pg_test_include_like_ix2" btree (value)
     "pg_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value)
+Not-null constraints:
+    "pg_test_include_like_key_not_null" NOT NULL "key"
 
 CREATE TABLE IF NOT EXISTS o_test_include_like_like
 	(LIKE pg_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
@@ -7087,6 +7117,8 @@ Indexes:
     "o_test_include_like_like_key_idx" btree (key)
     "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value)
     "o_test_include_like_like_value_idx" btree (value)
+Not-null constraints:
+    "pg_test_include_like_key_not_null" NOT NULL "key"
 
 DROP TABLE o_test_include_like_like;
 CREATE TABLE o_test_partial_unique(
@@ -7285,6 +7317,11 @@ CREATE INDEX o_test_pkey_mixed_ix1
 Indexes:
     "o_test_pkey_mixed_pkey" PRIMARY KEY, btree (pk1, pk2, pk3, pk4)
     "o_test_pkey_mixed_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 SELECT orioledb_tbl_indices('o_test_pkey_mixed'::regclass);
@@ -7322,6 +7359,11 @@ Indexes:
     "o_test_pkey_mixed_pkey" PRIMARY KEY, btree (pk1, pk2, pk3, pk4)
     "o_test_pkey_mixed_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
     "o_test_pkey_mixed_uniq1" UNIQUE, btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 -- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
@@ -7366,6 +7408,11 @@ Indexes:
     "o_test_pkey_mixed_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
     "o_test_pkey_mixed_ix3" btree (f3, f2, pk4, f1, pk4) INCLUDE (pk3)
     "o_test_pkey_mixed_uniq1" UNIQUE, btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 -- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
@@ -7417,6 +7464,11 @@ Indexes:
     "o_test_pkey_mixed_ix3" btree (f3, f2, pk4, f1, pk4) INCLUDE (pk3)
     "o_test_pkey_mixed_ix4" btree (i1, f1, pk4, f2, pk4) INCLUDE (pk3, i2)
     "o_test_pkey_mixed_uniq1" UNIQUE, btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 -- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
@@ -7597,6 +7649,8 @@ CREATE TABLE o_test_pkey_include_box
  f2     | integer |           |          |         | plain   |              | 
 Indexes:
     "o_test_pkey_include_box_pkey" PRIMARY KEY, btree (pk1) INCLUDE (pk2)
+Not-null constraints:
+    "o_test_pkey_include_box_pk1_not_null" NOT NULL "pk1"
 
 SELECT orioledb_tbl_indices('o_test_pkey_include_box'::regclass);
               orioledb_tbl_indices              
@@ -7744,6 +7798,8 @@ Indexes:
     "o_test_include_box_with_pkey_pkey" PRIMARY KEY, btree (val_1)
     "o_test_include_box_with_pkey_ix1" UNIQUE, btree (val_2) INCLUDE (val_4)
     "o_test_include_box_with_pkey_ix2" UNIQUE, btree (val_3)
+Not-null constraints:
+    "o_test_include_box_with_pkey_val_1_not_null" NOT NULL "val_1"
 
 SELECT orioledb_tbl_indices('o_test_include_box_with_pkey'::regclass);
                orioledb_tbl_indices                
@@ -8393,6 +8449,8 @@ CREATE INDEX o_test_pkey_include_same_fields_ix1
 Indexes:
     "o_test_pkey_include_same_fields_pkey" PRIMARY KEY, btree (val_1) INCLUDE (val_2, val_2)
     "o_test_pkey_include_same_fields_ix1" btree (val_1) INCLUDE (val_2, val_2)
+Not-null constraints:
+    "o_test_pkey_include_same_fields_val_1_not_null" NOT NULL "val_1"
 
 SELECT orioledb_tbl_indices('o_test_pkey_include_same_fields'::regclass);
               orioledb_tbl_indices              
@@ -8704,10 +8762,11 @@ WARNING:  We cannot just reuse index for primary key in orioledb, because second
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
 WHERE conrelid = 'o_test_add_index_constraint'::regclass;
-  conname  | contype | conindid  
------------+---------+-----------
- o_test_pk | p       | o_test_pk
-(1 row)
+                 conname                 | contype | conindid  
+-----------------------------------------+---------+-----------
+ o_test_add_index_constraint_id_not_null | n       | -
+ o_test_pk                               | p       | o_test_pk
+(2 rows)
 
 -- Test constraint enforcement
 INSERT INTO o_test_add_index_constraint VALUES (4, 'four');  -- Should succeed
@@ -8720,10 +8779,11 @@ CREATE UNIQUE INDEX o_test_idx_val ON o_test_add_index_constraint(val);
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
 WHERE conrelid = 'o_test_add_index_constraint'::regclass;
-  conname  | contype | conindid  
------------+---------+-----------
- o_test_pk | p       | o_test_pk
-(1 row)
+                 conname                 | contype | conindid  
+-----------------------------------------+---------+-----------
+ o_test_add_index_constraint_id_not_null | n       | -
+ o_test_pk                               | p       | o_test_pk
+(2 rows)
 
 -- Test AT_AddIndexConstraint: Add UNIQUE constraint using existing index
 ALTER TABLE o_test_add_index_constraint
@@ -8733,11 +8793,12 @@ NOTICE:  ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index "o_test_idx_
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
 WHERE conrelid = 'o_test_add_index_constraint'::regclass;
-  conname  | contype | conindid  
------------+---------+-----------
- o_test_pk | p       | o_test_pk
- o_test_uq | u       | o_test_uq
-(2 rows)
+                 conname                 | contype | conindid  
+-----------------------------------------+---------+-----------
+ o_test_add_index_constraint_id_not_null | n       | -
+ o_test_pk                               | p       | o_test_pk
+ o_test_uq                               | u       | o_test_uq
+(3 rows)
 
 -- Test UNIQUE constraint enforcement
 INSERT INTO o_test_add_index_constraint VALUES (5, 'five');  -- Should succeed
@@ -8746,85 +8807,6 @@ ERROR:  duplicate key value violates unique constraint "o_test_uq"
 DETAIL:  Key (val)=(one) already exists.
 -- Cleanup
 DROP TABLE o_test_add_index_constraint CASCADE;
--- Contradictory scan keys (e.g. "col IS NULL AND col = N") must return
--- zero rows even when an index is forced.  _bt_preprocess_keys sets
--- so->qual_ok = false; switch_to_next_range must honor that on every
--- supported PG major.  Before the fix, PG16 returned the whole table
--- (the qual_ok check was nested inside a PG17-only #ifdef).  Both the
--- index-scan and the bitmap-scan paths are exercised because they go
--- through the same switch_to_next_range entry point.
-CREATE TABLE o_test_qual_contradiction (
-	a int,
-	b int
-) USING orioledb;
-INSERT INTO o_test_qual_contradiction
-	SELECT i, i FROM generate_series(1, 1000) i;
-INSERT INTO o_test_qual_contradiction (a, b) VALUES (NULL, -1), (NULL, NULL);
-CREATE INDEX o_test_qual_contradiction_a_idx
-	ON o_test_qual_contradiction (a);
-ANALYZE o_test_qual_contradiction;
-SET enable_seqscan = OFF;
--- IS NULL AND = N -- contradicts; expect 0
-SET enable_bitmapscan = OFF;
-SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a = 500;
- count 
--------
-     0
-(1 row)
-
-SET enable_bitmapscan = ON;
-SET enable_indexscan = OFF;
-SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a = 500;
- count 
--------
-     0
-(1 row)
-
-RESET enable_indexscan;
--- IS NULL AND > N -- contradicts; expect 0
-SET enable_bitmapscan = OFF;
-SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a > 500;
- count 
--------
-     0
-(1 row)
-
-SET enable_bitmapscan = ON;
-SET enable_indexscan = OFF;
-SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a > 500;
- count 
--------
-     0
-(1 row)
-
-RESET enable_indexscan;
--- IS NULL AND < N -- contradicts; expect 0
-SET enable_bitmapscan = OFF;
-SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a < 500;
- count 
--------
-     0
-(1 row)
-
-SET enable_bitmapscan = ON;
-SET enable_indexscan = OFF;
-SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a < 500;
- count 
--------
-     0
-(1 row)
-
-RESET enable_indexscan;
--- Negative control: just a = N (no contradiction) must still find row 500.
-SELECT count(*) FROM o_test_qual_contradiction WHERE a = 500;
- count 
--------
-     1
-(1 row)
-
-DROP TABLE o_test_qual_contradiction;
-RESET enable_seqscan;
-RESET enable_bitmapscan;
 -- Test skip scan bounds
 CREATE TABLE test_skip_bounds (
 	id int,

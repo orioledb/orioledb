@@ -3,6 +3,9 @@ SET SESSION search_path = 'opclass';
 SET enable_seqscan = off;
 CREATE EXTENSION orioledb;
 
+SELECT split_part(setting, '.', 1) major_version
+	FROM pg_settings WHERE name = 'server_version';
+
 -- autovacuum off: the test repeatedly DROP OPERATOR CLASS ... CASCADE's
 -- indexes of this table; a concurrent ANALYZE deadlocks with the cascading
 -- index drop (heap SUE + index ASL vs index AEL + heap AEL).
