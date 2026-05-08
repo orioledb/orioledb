@@ -1195,7 +1195,12 @@ rewind_worker_main(Datum main_arg)
 	/* show the in pg_stat_activity, used for tests */
 	InitializeSessionUserIdStandalone();
 	pgstat_beinit();
+#if PG_VERSION_NUM >= 180000
+	pgstat_bestart_initial();
+	pgstat_bestart_final();
+#else
 	pgstat_bestart();
+#endif
 
 	SetProcessingMode(NormalProcessing);
 
@@ -1643,6 +1648,7 @@ add_to_rewind_buffer(OXid oxid, TransactionId xid, int nsubxids, TransactionId *
 				 pg_atomic_read_u64(&rewindMeta->evictPos),
 				 rewindMeta->completePos, rewindMeta->restorePos,
 				 freeAddSpace);
+
 			evict_rewind_items(pg_atomic_read_u64(&rewindMeta->addPosFilledUpto));
 
 			elog(DEBUG3,
