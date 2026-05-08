@@ -28,7 +28,7 @@ typedef struct
 	S3TaskLocation location;
 } PreloadHashItem;
 
-HTAB	   *preloadHash = NULL;
+static HTAB *preloadHash = NULL;
 
 
 static uint32

@@ -2777,6 +2777,8 @@ orioledb_calculate_database_size(Oid dbOid)
 		totalsize += prev_database_size_hook(dbOid);
 	}
 
-	elog(DEBUG4, "orioledb_calculate_database_size totalsize added: %ld", totalsize);
+	elog(DEBUG4,
+		 "orioledb_calculate_database_size totalsize added: " UINT64_FORMAT,
+		 totalsize);
 	return totalsize;
 }
