@@ -63,6 +63,7 @@
 #include "parser/parse_type.h"
 #include "parser/parsetree.h"
 #include "pgstat.h"
+#include "replication/origin.h"
 #include "storage/bufmgr.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
@@ -405,6 +406,19 @@ orioledb_tuple_satisfies_snapshot(Relation rel, TupleTableSlot *slot,
 	return true;
 
 }
+
+#if PG_VERSION_NUM >= 180000
+/* OrioleDB doesn't store xmin in tuples, just return false */
+static bool
+orioledb_tuple_get_transaction_info(TupleTableSlot *slot, TransactionId *xmin,
+									RepOriginId *originid, TimestampTz *ts)
+{
+	*xmin = InvalidTransactionId;
+	*originid = InvalidRepOriginId;
+	*ts = 0;
+	return false;
+}
+#endif
 
 
 /* ----------------------------------------------------------------------------
@@ -2504,6 +2518,9 @@ static const TableAmRoutine orioledb_am_methods = {
 	.tuple_get_latest_tid = orioledb_get_latest_tid,
 	.tuple_tid_valid = orioledb_tuple_tid_valid,
 	.tuple_satisfies_snapshot = orioledb_tuple_satisfies_snapshot,
+#if PG_VERSION_NUM >= 180000
+	.tuple_get_transaction_info = orioledb_tuple_get_transaction_info,
+#endif
 
 	.relation_set_new_filelocator = orioledb_relation_set_new_filenode,
 	.relation_nontransactional_truncate = orioledb_relation_nontransactional_truncate,
