@@ -116,7 +116,7 @@ typedef struct BrigedIndexAmRoutine
 	Oid			amhandler;
 } BrigedIndexAmRoutine;
 
-List	   *bridged_ams = NIL;
+static List *bridged_ams = NIL;
 
 static IndexAmRoutine *
 orioledb_btree_handler(void)

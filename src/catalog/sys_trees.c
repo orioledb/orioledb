@@ -1181,7 +1181,7 @@ free_tree_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg)
 	FreeTreeTuple *f_tree_tup = (FreeTreeTuple *) tup.data;
 
 	appendStringInfo(
-					 buf, "((%u, %u, %u), %lu, %lu)",
+					 buf, "((%u, %u, %u), " UINT64_FORMAT ", " UINT64_FORMAT ")",
 					 f_tree_tup->ixType,
 					 f_tree_tup->datoid,
 					 f_tree_tup->relnode,
@@ -1256,7 +1256,8 @@ o_sys_xid_undo_location_tuple_print(BTreeDescr *desc, StringInfo buf, OTuple tup
 {
 	ReplicationRetainUndoTuple *tuple = (ReplicationRetainUndoTuple *) tup.data;
 
-	appendStringInfo(buf, "(%u, %lu)", tuple->xid, tuple->undoLocation);
+	appendStringInfo(buf, "(%u, " UINT64_FORMAT ")",
+					 tuple->xid, tuple->undoLocation);
 }
 
 static JsonbValue *

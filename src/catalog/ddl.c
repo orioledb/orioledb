@@ -107,18 +107,18 @@
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
 
-List	   *drop_index_list = NIL;
-List	   *partition_drop_index_list = NIL;
+static List *drop_index_list = NIL;
+static List *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
 static List *o_alter_generated_column_id = NIL;
 static List *dropped_attrs = NIL;
 Oid			o_saved_relrewrite = InvalidOid;
-Oid			o_saved_reltablespace = InvalidOid;
+static Oid	o_saved_reltablespace = InvalidOid;
 List	   *o_reuse_indices = NIL;
 static ORelOids saved_oids;
 static bool in_rewrite = false;
 List	   *reindex_list = NIL;
-Query	   *savedDataQuery = NULL;
+static Query *savedDataQuery = NULL;
 IndexBuildResult o_pkey_result = {0};
 bool		o_in_add_column = false;
 static CreateStmt *create_stmt = NULL;

@@ -207,7 +207,7 @@ oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 	return OTupleFetchMatch;
 }
 
-ToastAPI	oIndicesToastAPI = {
+static ToastAPI oIndicesToastAPI = {
 	.getBTreeDesc = oIndicesGetBTreeDesc,
 	.getBTreeVersion = NULL,
 	.getBaseBTreeVersion = NULL,
