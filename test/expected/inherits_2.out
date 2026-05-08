@@ -5,7 +5,7 @@ SELECT split_part(setting, '.', 1) major_version
 	FROM pg_settings WHERE name = 'server_version';
  major_version 
 ---------------
- 16
+ 18
 (1 row)
 
 CREATE TABLE p_stock (
@@ -18,8 +18,8 @@ SELECT orioledb_table_description('p_stock'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-   Column |    Type | Collation | Nullable | Dropped      +
-  item_id | integer |    (null) |     true |   false      +
+   Column |    Type | Collation | Nullable | Droped       +
+  item_id | integer |    (null) |     true |  false       +
  
 (1 row)
 
@@ -38,9 +38,9 @@ SELECT orioledb_table_description('c_stock'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-   Column |    Type | Collation | Nullable | Dropped      +
-  item_id | integer |    (null) |     true |   false      +
-       ex | integer |    (null) |     true |   false      +
+   Column |    Type | Collation | Nullable | Droped       +
+  item_id | integer |    (null) |     true |  false       +
+       ex | integer |    (null) |     true |  false       +
  
 (1 row)
 
@@ -60,9 +60,9 @@ SELECT orioledb_table_description('p_stock'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-   Column |    Type | Collation | Nullable | Dropped      +
-  item_id | integer |    (null) |     true |   false      +
-  balance | integer |    (null) |     true |   false      +
+   Column |    Type | Collation | Nullable | Droped       +
+  item_id | integer |    (null) |     true |  false       +
+  balance | integer |    (null) |     true |  false       +
  
 (1 row)
 
@@ -81,10 +81,10 @@ SELECT orioledb_table_description('c_stock'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-   Column |    Type | Collation | Nullable | Dropped      +
-  item_id | integer |    (null) |     true |   false      +
-       ex | integer |    (null) |     true |   false      +
-  balance | integer |    (null) |     true |   false      +
+   Column |    Type | Collation | Nullable | Droped       +
+  item_id | integer |    (null) |     true |  false       +
+       ex | integer |    (null) |     true |  false       +
+  balance | integer |    (null) |     true |  false       +
  
 (1 row)
 
@@ -1263,6 +1263,8 @@ Indexes:
     "test_primary_constraints_pkey" PRIMARY KEY, btree (id)
 Referenced by:
     TABLE "test_foreign_constraints" CONSTRAINT "test_foreign_constraints_id1_fkey" FOREIGN KEY (id1) REFERENCES test_primary_constraints(id)
+Not-null constraints:
+    "test_primary_constraints_id_not_null" NOT NULL "id"
 
 \d+ test_foreign_constraints
                         Table "inherits.test_foreign_constraints"
@@ -1495,10 +1497,11 @@ explain (verbose, costs off) select * from matest0 order by 1-id;
          Output: matest0_3.id, matest0_3.name, ((1 - matest0_3.id))
          Sort Key: ((1 - matest0_3.id))
          ->  Seq Scan on inherits.matest2 matest0_3
+               Disabled: true
                Output: matest0_3.id, matest0_3.name, (1 - matest0_3.id)
    ->  Index Scan using matest3i on inherits.matest3 matest0_4
          Output: matest0_4.id, matest0_4.name, (1 - matest0_4.id)
-(13 rows)
+(14 rows)
 
 select * from matest0 order by 1-id;
  id |  name  
@@ -1515,8 +1518,8 @@ explain (verbose, costs off) select min(1-id) from matest0;
                                         QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
  Result
-   Output: $0
-   InitPlan 1 (returns $0)
+   Output: (InitPlan 1).col1
+   InitPlan 1
      ->  Limit
            Output: ((1 - matest0.id))
            ->  Result
@@ -2283,9 +2286,10 @@ EXPLAIN (COSTS OFF)
          ->  Sort
                Sort Key: o_test_inherits_tableoid_1.val_2
                ->  Seq Scan on o_test_inherits_tableoid o_test_inherits_tableoid_1
+                     Disabled: true
          ->  Index Scan using o_test_inherits_tableoid_child1_ix1 on o_test_inherits_tableoid_child1 o_test_inherits_tableoid_2
          ->  Index Scan using o_test_inherits_tableoid_child2_ix1 on o_test_inherits_tableoid_child2 o_test_inherits_tableoid_3
-(8 rows)
+(9 rows)
 
 SELECT tableoid::regclass, * FROM o_test_inherits_tableoid ORDER BY val_2;
             tableoid             | val_1 | val_2 | val_3 

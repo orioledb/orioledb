@@ -6,7 +6,7 @@ SELECT split_part(setting, '.', 1) major_version
 	FROM pg_settings WHERE name = 'server_version';
  major_version 
 ---------------
- 17
+ 18
 (1 row)
 
 -- autovacuum off: the test repeatedly DROP OPERATOR CLASS ... CASCADE's
@@ -138,7 +138,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass opclass.my_op_class_p_i
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_p_i" cannot be used here
-HINT:  only C and SQL functions should be used as B-tree comparison support function in operator class used for field of orioledb index
+HINT:  only C and SQL functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
 DROP OPERATOR CLASS my_op_class_p_i USING btree CASCADE;
 SELECT cmp_is_valid('opclass.my_int_cmp_s_p_i');
  cmp_is_valid 
@@ -154,7 +154,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass opclass.my_op_class_s_p_i
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_p_i" cannot be used here
-HINT:  only C and SQL functions should be used as B-tree comparison support function in operator class used for field of orioledb index
+HINT:  only C and SQL functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_s_p_i" during body validation
 DROP OPERATOR CLASS my_op_class_s_p_i USING btree CASCADE;
 SELECT cmp_is_valid('opclass.my_int_cmp_s_s_s_p_i');
@@ -171,7 +171,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass opclass.my_op_class_s_s_s_p_i
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_p_i" cannot be used here
-HINT:  only C and SQL functions should be used as B-tree comparison support function in operator class used for field of orioledb index
+HINT:  only C and SQL functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_s_p_i" during body validation
 SQL function "my_int_cmp_s_s_p_i" during body validation
 SQL function "my_int_cmp_s_s_s_p_i" during body validation
@@ -190,7 +190,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass opclass.my_op_class_v_i
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_v_i" cannot be used here
-HINT:  only immutable functions should be used as B-tree comparison support function in operator class used for field of orioledb index
+HINT:  only immutable functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
 DROP OPERATOR CLASS my_op_class_v_i USING btree CASCADE;
 SELECT cmp_is_valid('opclass.my_int_cmp_s_v_i');
  cmp_is_valid 
@@ -206,7 +206,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass opclass.my_op_class_s_v_i
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_v_i" cannot be used here
-HINT:  only immutable functions should be used as B-tree comparison support function in operator class used for field of orioledb index
+HINT:  only immutable functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_s_v_i" during body validation
 DROP OPERATOR CLASS my_op_class_s_v_i USING btree CASCADE;
 SELECT cmp_is_valid('opclass.my_int_cmp_s_s_s_v_i');
@@ -223,7 +223,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass opclass.my_op_class_s_s_s_v_i
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_v_i" cannot be used here
-HINT:  only immutable functions should be used as B-tree comparison support function in operator class used for field of orioledb index
+HINT:  only immutable functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_s_v_i" during body validation
 SQL function "my_int_cmp_s_s_v_i" during body validation
 SQL function "my_int_cmp_s_s_s_v_i" during body validation
@@ -234,7 +234,7 @@ CREATE FUNCTION my_int_cmp_call(a int, b int) RETURNS int AS $$
 $$ LANGUAGE SQL IMMUTABLE;
 SELECT cmp_is_valid('my_int_cmp_call');
 ERROR:  CALL is not allowed in a non-volatile function
-CONTEXT:  SQL function "my_int_cmp_call" during startup
+CONTEXT:  SQL function "my_int_cmp_call" statement 1
 SQL statement "CREATE TEMP TABLE s2 ON COMMIT DROP AS SELECT DISTINCT va, vb, my_int_cmp_call(va, vb) vab, my_int_cmp_call(vb, va) vba FROM s1"
 PL/pgSQL function cmp_is_valid_prepare(regproc) line 20 at EXECUTE
 SQL statement "SELECT bool_and(valid)               FROM cmp_is_valid_prepare(test_proc)"
@@ -253,7 +253,7 @@ CREATE FUNCTION my_int_cmp_delete(a int, b int) RETURNS int AS $$
 $$ LANGUAGE SQL IMMUTABLE;
 SELECT cmp_is_valid('my_int_cmp_delete');
 ERROR:  DELETE is not allowed in a non-volatile function
-CONTEXT:  SQL function "my_int_cmp_delete" during startup
+CONTEXT:  SQL function "my_int_cmp_delete" statement 1
 SQL statement "CREATE TEMP TABLE s2 ON COMMIT DROP AS SELECT DISTINCT va, vb, my_int_cmp_delete(va, vb) vab, my_int_cmp_delete(vb, va) vba FROM s1"
 PL/pgSQL function cmp_is_valid_prepare(regproc) line 20 at EXECUTE
 SQL statement "SELECT bool_and(valid)               FROM cmp_is_valid_prepare(test_proc)"
@@ -266,7 +266,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass opclass.my_op_class_delete
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_delete" cannot be used here
-HINT:  only queries without relation references should be used as B-tree comparison support function in operator class used for field of orioledb index
+HINT:  only queries without relation references should be used as B-tree comparsion support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_delete" during body validation
 DROP OPERATOR CLASS my_op_class_delete USING btree CASCADE;
 CREATE FUNCTION my_int_cmp_update(a int, b int) RETURNS int AS $$
@@ -274,7 +274,7 @@ CREATE FUNCTION my_int_cmp_update(a int, b int) RETURNS int AS $$
 $$ LANGUAGE SQL IMMUTABLE;
 SELECT cmp_is_valid('my_int_cmp_update');
 ERROR:  UPDATE is not allowed in a non-volatile function
-CONTEXT:  SQL function "my_int_cmp_update" during startup
+CONTEXT:  SQL function "my_int_cmp_update" statement 1
 SQL statement "CREATE TEMP TABLE s2 ON COMMIT DROP AS SELECT DISTINCT va, vb, my_int_cmp_update(va, vb) vab, my_int_cmp_update(vb, va) vba FROM s1"
 PL/pgSQL function cmp_is_valid_prepare(regproc) line 20 at EXECUTE
 SQL statement "SELECT bool_and(valid)               FROM cmp_is_valid_prepare(test_proc)"
@@ -287,7 +287,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass opclass.my_op_class_update
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_update" cannot be used here
-HINT:  only queries without relation references should be used as B-tree comparison support function in operator class used for field of orioledb index
+HINT:  only queries without relation references should be used as B-tree comparsion support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_update" during body validation
 DROP OPERATOR CLASS my_op_class_update USING btree CASCADE;
 CREATE FUNCTION my_int_cmp_insert(a int, b int) RETURNS int AS $$
@@ -295,7 +295,7 @@ CREATE FUNCTION my_int_cmp_insert(a int, b int) RETURNS int AS $$
 $$ LANGUAGE SQL IMMUTABLE;
 SELECT cmp_is_valid('my_int_cmp_insert');
 ERROR:  INSERT is not allowed in a non-volatile function
-CONTEXT:  SQL function "my_int_cmp_insert" during startup
+CONTEXT:  SQL function "my_int_cmp_insert" statement 1
 SQL statement "CREATE TEMP TABLE s2 ON COMMIT DROP AS SELECT DISTINCT va, vb, my_int_cmp_insert(va, vb) vab, my_int_cmp_insert(vb, va) vba FROM s1"
 PL/pgSQL function cmp_is_valid_prepare(regproc) line 20 at EXECUTE
 SQL statement "SELECT bool_and(valid)               FROM cmp_is_valid_prepare(test_proc)"
@@ -308,7 +308,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass opclass.my_op_class_insert
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_insert" cannot be used here
-HINT:  only queries without relation references should be used as B-tree comparison support function in operator class used for field of orioledb index
+HINT:  only queries without relation references should be used as B-tree comparsion support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_insert" during body validation
 DROP OPERATOR CLASS my_op_class_insert USING btree CASCADE;
 CREATE FUNCTION my_int_cmp_select_from_table(a int, b int) RETURNS int AS $$
@@ -328,7 +328,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass opclass.my_op_class_select_from_table
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_select_from_table" cannot be used here
-HINT:  only queries without relation references should be used as B-tree comparison support function in operator class used for field of orioledb index
+HINT:  only queries without relation references should be used as B-tree comparsion support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_select_from_table" during body validation
 DROP OPERATOR CLASS my_op_class_select_from_table USING btree CASCADE;
 -- VALID OPCLASSES

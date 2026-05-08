@@ -5,7 +5,7 @@ SELECT split_part(setting, '.', 1) major_version
 	FROM pg_settings WHERE name = 'server_version';
  major_version 
 ---------------
- 16
+ 18
 (1 row)
 
 SET min_parallel_table_scan_size = 1;
@@ -609,14 +609,15 @@ EXPLAIN (COSTS OFF)
 				WHERE ot1.val_1 = 1;
                             QUERY PLAN                            
 ------------------------------------------------------------------
- Nested Loop
-   ->  Seq Scan on o_test_parallel_seq_rescan1 ot1
-         Filter: (val_1 = 1)
-   ->  Gather
-         Workers Planned: 1
+ Gather
+   Workers Planned: 1
+   ->  Nested Loop
          ->  Parallel Seq Scan on o_test_parallel_seq_rescan2 ot2
                Filter: (val_1 = 1)
-(7 rows)
+         ->  Materialize
+               ->  Seq Scan on o_test_parallel_seq_rescan1 ot1
+                     Filter: (val_1 = 1)
+(8 rows)
 
 SELECT ot1.val_1, ot1.val_2 ot1v, ot2.val_2 ot2v
 	FROM o_test_parallel_seq_rescan1 ot1
@@ -669,6 +670,7 @@ EXPLAIN (COSTS OFF)
                                          QUERY PLAN                                          
 ---------------------------------------------------------------------------------------------
  Sort
+   Disabled: true
    Sort Key: ot1.val_2, ot2.val_2, ot3.val_2
    ->  Nested Loop
          ->  Nested Loop
@@ -684,7 +686,7 @@ EXPLAIN (COSTS OFF)
                Workers Planned: 1
                ->  Parallel Seq Scan on o_test_parallel_seq_rescan_multiple_joins3 ot3
                      Filter: (val_1 = 1)
-(16 rows)
+(17 rows)
 
 SELECT ot1.val_1, ot1.val_2 ot1v, ot2.val_2 ot2v, ot3.val_2 ot3v
 	FROM o_test_parallel_seq_rescan_multiple_joins1 ot1
@@ -737,15 +739,16 @@ EXPLAIN (COSTS OFF)
 				WHERE ot1.val_1 % 1000 = 1 AND ot2.val_1 = any(array[1]);
                                QUERY PLAN                               
 ------------------------------------------------------------------------
- Nested Loop
-   Join Filter: (ot1.val_1 = ot2.val_1)
-   ->  Seq Scan on o_test_parallelscan_reinitialize1 ot1
-         Filter: ((val_1 % 1000) = 1)
-   ->  Gather
-         Workers Planned: 3
+ Gather
+   Workers Planned: 3
+   ->  Nested Loop
+         Join Filter: (ot1.val_1 = ot2.val_1)
          ->  Parallel Seq Scan on o_test_parallelscan_reinitialize2 ot2
                Filter: (val_1 = ANY ('{1}'::integer[]))
-(8 rows)
+         ->  Materialize
+               ->  Seq Scan on o_test_parallelscan_reinitialize1 ot1
+                     Filter: ((val_1 % 1000) = 1)
+(9 rows)
 
 SELECT ot1.val_1, ot1.val_2 ot1v2, ot2.val_2 ot2v2
 	FROM o_test_parallelscan_reinitialize1 ot1
@@ -755,14 +758,14 @@ SELECT ot1.val_1, ot1.val_2 ot1v2, ot2.val_2 ot2v2
  val_1 | ot1v2 | ot2v2 
 -------+-------+-------
      1 |     1 |     1
-     1 |     1 |     2
      1 |     2 |     1
-     1 |     2 |     2
      1 |     3 |     1
-     1 |     3 |     2
      1 |     4 |     1
-     1 |     4 |     2
      1 |     5 |     1
+     1 |     1 |     2
+     1 |     2 |     2
+     1 |     3 |     2
+     1 |     4 |     2
      1 |     5 |     2
 (10 rows)
 
@@ -793,18 +796,16 @@ SET LOCAL enable_bitmapscan = OFF;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_parallel_join
 		JOIN o_test_parallel_join2 USING (val_1, val_2);
-                                                                 QUERY PLAN                                                                 
---------------------------------------------------------------------------------------------------------------------------------------------
- Nested Loop
-   Join Filter: ((o_test_parallel_join.val_1 = o_test_parallel_join2.val_1) AND (o_test_parallel_join.val_2 = o_test_parallel_join2.val_2))
-   ->  Gather
-         Workers Planned: 2
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Gather
+   Workers Planned: 2
+   ->  Nested Loop
          ->  Parallel Seq Scan on o_test_parallel_join
-   ->  Materialize
-         ->  Gather
-               Workers Planned: 2
-               ->  Parallel Seq Scan on o_test_parallel_join2
-(9 rows)
+         ->  Custom Scan (o_scan) on o_test_parallel_join2
+               Forward index only scan of: o_test_parallel_join2_pkey
+               Conds: ((val_1 = o_test_parallel_join.val_1) AND (val_2 = o_test_parallel_join.val_2))
+(7 rows)
 
 SELECT * FROM o_test_parallel_join
 	JOIN o_test_parallel_join2 USING (val_1, val_2);
@@ -896,7 +897,7 @@ EXPLAIN (COSTS OFF)
 --------------------------------------------------------------------------------------------------
  Aggregate
    ->  Index Only Scan using o_test_no_parallel_bitmap_scan_ix1 on o_test_no_parallel_bitmap_scan
-         Filter: (val_1 <@ '[10,50)'::int4range)
+         Index Cond: ((val_1 >= 10) AND (val_1 < 50))
 (3 rows)
 
 SELECT count(*) FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);
@@ -911,7 +912,7 @@ EXPLAIN (COSTS OFF)
                                          QUERY PLAN                                         
 --------------------------------------------------------------------------------------------
  Index Only Scan using o_test_no_parallel_bitmap_scan_ix1 on o_test_no_parallel_bitmap_scan
-   Filter: (val_1 <@ '[10,50)'::int4range)
+   Index Cond: ((val_1 >= 10) AND (val_1 < 50))
 (2 rows)
 
 SELECT * FROM o_test_no_parallel_bitmap_scan WHERE val_1 <@ int4range(10,50);

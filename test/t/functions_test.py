@@ -22,7 +22,7 @@ class FunctionTest(BaseTest):
             CREATE TABLE oriole_table (i SERIAL PRIMARY KEY, t text STORAGE PLAIN) USING orioledb;
 		""")
 		node.safe_psql("""
-			INSERT INTO oriole_table(t) select repeat('a', 270) FROM  generate_series(1, 30000) as i;
+			INSERT INTO oriole_table(t) select repeat('a', 270) FROM  generate_series(1, 40000) as i;
 		""")
 		node.safe_psql("""
 			UPDATE oriole_table set t = repeat('c', 270) WHERE i > 5000;
