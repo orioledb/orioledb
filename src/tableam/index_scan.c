@@ -171,7 +171,10 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 		{
 			int			j;
 			bool		isnull;
-			Datum		value = o_fastgetattr(tup, key->sk_attno, id->leafTupdesc,
+			int			attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple,
+															  id,
+															  key->sk_attno);
+			Datum		value = o_fastgetattr(tup, attnum, id->leafTupdesc,
 											  &id->leafSpec, &isnull);
 			bool		found = false;
 			OBTreeValueBound *bound = &low->keys[key->sk_attno - 1];

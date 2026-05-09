@@ -2633,6 +2633,72 @@ SELECT id1, id2 FROM o_pk3;
 
 \i 'sql/composite_pk_quals'
 sql/composite_pk_quals: No such file or directory
+-- SAOP / IN regression: is_tuple_valid()'s SK_SEARCHARRAY branch must
+-- translate index attnum -> table attnum so PKs whose column order
+-- differs from the table column order still filter correctly.
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Sort Key: id1, id2
+   ->  Custom Scan (o_scan) on o_pk3
+         Forward index only scan of: o_pk3_pkey
+         Conds: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(5 rows)
+
+SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+ id1 |  id2  
+-----+-------
+   1 | xxyyy
+   1 | xyy
+   2 | xxyyy
+   2 | xyy
+   3 | xxyyy
+   3 | xyy
+   4 | xxyyy
+   4 | xyy
+(8 rows)
+
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Sort Key: id1, id2
+   ->  Custom Scan (o_scan) on o_pk3
+         Forward index only scan of: o_pk3_pkey
+         Conds: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(5 rows)
+
+SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+ id1 |  id2  
+-----+-------
+   1 | xxyyy
+   1 | xyy
+   2 | xxyyy
+   2 | xyy
+   3 | xxyyy
+   3 | xyy
+   4 | xxyyy
+   4 | xyy
+(8 rows)
+
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Sort
+   Sort Key: id2
+   ->  Custom Scan (o_scan) on o_pk3
+         Forward index only scan of: o_pk3_pkey
+         Conds: ((id1 = '2'::double precision) AND (id2 = ANY ('{xyy,xxyyy}'::text[])))
+(5 rows)
+
+SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+ id1 |  id2  
+-----+-------
+   2 | xxyyy
+   2 | xyy
+(2 rows)
+
 DROP TABLE o_pk3;
 RESET enable_seqscan;
 CREATE TABLE o_pk3
@@ -2642,29 +2708,152 @@ CREATE TABLE o_pk3
 	PRIMARY KEY(id1, id2)
 ) USING orioledb;
 SET enable_seqscan = off;
-INSERT INTO o_pk3
+INSERT INTO o_pk3 (id1, id2)
 SELECT a, repeat('x', b) || repeat ('y', c)
 FROM
 	generate_series(1, 4) as a,
 	generate_series(1, 4) as b,
 	generate_series(1, 4) as c;
-ERROR:  column "id1" is of type double precision but expression is of type text
-LINE 2: SELECT a, repeat('x', b) || repeat ('y', c)
-                  ^
-HINT:  You will need to rewrite or cast the expression.
 SELECT count(*) FROM o_pk3;
  count 
 -------
-     0
+    64
 (1 row)
 
 SELECT id1, id2 FROM o_pk3;
- id1 | id2 
------+-----
-(0 rows)
+ id1 |   id2    
+-----+----------
+   1 | xxxxy
+   1 | xxxxyy
+   1 | xxxxyyy
+   1 | xxxxyyyy
+   1 | xxxy
+   1 | xxxyy
+   1 | xxxyyy
+   1 | xxxyyyy
+   1 | xxy
+   1 | xxyy
+   1 | xxyyy
+   1 | xxyyyy
+   1 | xy
+   1 | xyy
+   1 | xyyy
+   1 | xyyyy
+   2 | xxxxy
+   2 | xxxxyy
+   2 | xxxxyyy
+   2 | xxxxyyyy
+   2 | xxxy
+   2 | xxxyy
+   2 | xxxyyy
+   2 | xxxyyyy
+   2 | xxy
+   2 | xxyy
+   2 | xxyyy
+   2 | xxyyyy
+   2 | xy
+   2 | xyy
+   2 | xyyy
+   2 | xyyyy
+   3 | xxxxy
+   3 | xxxxyy
+   3 | xxxxyyy
+   3 | xxxxyyyy
+   3 | xxxy
+   3 | xxxyy
+   3 | xxxyyy
+   3 | xxxyyyy
+   3 | xxy
+   3 | xxyy
+   3 | xxyyy
+   3 | xxyyyy
+   3 | xy
+   3 | xyy
+   3 | xyyy
+   3 | xyyyy
+   4 | xxxxy
+   4 | xxxxyy
+   4 | xxxxyyy
+   4 | xxxxyyyy
+   4 | xxxy
+   4 | xxxyy
+   4 | xxxyyy
+   4 | xxxyyyy
+   4 | xxy
+   4 | xxyy
+   4 | xxyyy
+   4 | xxyyyy
+   4 | xy
+   4 | xyy
+   4 | xyyy
+   4 | xyyyy
+(64 rows)
 
 \i 'sql/composite_pk_quals'
 sql/composite_pk_quals: No such file or directory
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Sort Key: id1, id2
+   ->  Custom Scan (o_scan) on o_pk3
+         Forward index only scan of: o_pk3_pkey
+         Conds: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(5 rows)
+
+SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+ id1 |  id2  
+-----+-------
+   1 | xxyyy
+   1 | xyy
+   2 | xxyyy
+   2 | xyy
+   3 | xxyyy
+   3 | xyy
+   4 | xxyyy
+   4 | xyy
+(8 rows)
+
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Sort Key: id1, id2
+   ->  Custom Scan (o_scan) on o_pk3
+         Forward index only scan of: o_pk3_pkey
+         Conds: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(5 rows)
+
+SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+ id1 |  id2  
+-----+-------
+   1 | xxyyy
+   1 | xyy
+   2 | xxyyy
+   2 | xyy
+   3 | xxyyy
+   3 | xyy
+   4 | xxyyy
+   4 | xyy
+(8 rows)
+
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Sort
+   Sort Key: id2
+   ->  Custom Scan (o_scan) on o_pk3
+         Forward index only scan of: o_pk3_pkey
+         Conds: ((id1 = '2'::double precision) AND (id2 = ANY ('{xyy,xxyyy}'::text[])))
+(5 rows)
+
+SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+ id1 |  id2  
+-----+-------
+   2 | xxyyy
+   2 | xyy
+(2 rows)
+
 DROP TABLE o_pk3;
 RESET enable_seqscan;
 CREATE TABLE o_pk3
@@ -2757,6 +2946,72 @@ SELECT id1, id2 FROM o_pk3;
 
 \i 'sql/composite_pk_quals'
 sql/composite_pk_quals: No such file or directory
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Sort Key: id1, id2
+   ->  Custom Scan (o_scan) on o_pk3
+         Bitmap heap scan
+         Recheck Cond: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+         ->  Bitmap Index Scan on o_pk3_idx
+               Index Cond: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(7 rows)
+
+SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+ id1 |  id2  
+-----+-------
+   1 | xxyyy
+   1 | xyy
+   2 | xxyyy
+   2 | xyy
+   3 | xxyyy
+   3 | xyy
+   4 | xxyyy
+   4 | xyy
+(8 rows)
+
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Sort Key: id1, id2
+   ->  Custom Scan (o_scan) on o_pk3
+         Bitmap heap scan
+         Recheck Cond: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+         ->  Bitmap Index Scan on o_pk3_idx
+               Index Cond: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(7 rows)
+
+SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+ id1 |  id2  
+-----+-------
+   1 | xxyyy
+   1 | xyy
+   2 | xxyyy
+   2 | xyy
+   3 | xxyyy
+   3 | xyy
+   4 | xxyyy
+   4 | xyy
+(8 rows)
+
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: id2
+   ->  Index Only Scan using o_pk3_idx on o_pk3
+         Index Cond: ((id1 = '2'::double precision) AND (id2 = ANY ('{xyy,xxyyy}'::text[])))
+(4 rows)
+
+SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+ id1 |  id2  
+-----+-------
+   2 | xxyyy
+   2 | xyy
+(2 rows)
+
 DROP TABLE o_pk3;
 RESET enable_seqscan;
 CREATE TABLE o_pk3
@@ -2766,29 +3021,155 @@ CREATE TABLE o_pk3
 ) USING orioledb;
 CREATE UNIQUE INDEX o_pk3_idx ON o_pk3 (id1 DESC, id2 DESC);
 SET enable_seqscan = off;
-INSERT INTO o_pk3
+INSERT INTO o_pk3 (id1, id2)
 SELECT a, repeat('x', b) || repeat ('y', c)
 FROM
 	generate_series(1, 4) as a,
 	generate_series(1, 4) as b,
 	generate_series(1, 4) as c;
-ERROR:  column "id1" is of type double precision but expression is of type text
-LINE 2: SELECT a, repeat('x', b) || repeat ('y', c)
-                  ^
-HINT:  You will need to rewrite or cast the expression.
 SELECT count(*) FROM o_pk3;
  count 
 -------
-     0
+    64
 (1 row)
 
 SELECT id1, id2 FROM o_pk3;
- id1 | id2 
------+-----
-(0 rows)
+ id1 |   id2    
+-----+----------
+   1 | xy
+   1 | xxy
+   1 | xxxy
+   1 | xxxxy
+   2 | xy
+   2 | xxy
+   2 | xxxy
+   2 | xxxxy
+   3 | xy
+   3 | xxy
+   3 | xxxy
+   3 | xxxxy
+   4 | xy
+   4 | xxy
+   4 | xxxy
+   4 | xxxxy
+   1 | xyy
+   1 | xxyy
+   1 | xxxyy
+   1 | xxxxyy
+   2 | xyy
+   2 | xxyy
+   2 | xxxyy
+   2 | xxxxyy
+   3 | xyy
+   3 | xxyy
+   3 | xxxyy
+   3 | xxxxyy
+   4 | xyy
+   4 | xxyy
+   4 | xxxyy
+   4 | xxxxyy
+   1 | xyyy
+   1 | xxyyy
+   1 | xxxyyy
+   1 | xxxxyyy
+   2 | xyyy
+   2 | xxyyy
+   2 | xxxyyy
+   2 | xxxxyyy
+   3 | xyyy
+   3 | xxyyy
+   3 | xxxyyy
+   3 | xxxxyyy
+   4 | xyyy
+   4 | xxyyy
+   4 | xxxyyy
+   4 | xxxxyyy
+   1 | xyyyy
+   1 | xxyyyy
+   1 | xxxyyyy
+   1 | xxxxyyyy
+   2 | xyyyy
+   2 | xxyyyy
+   2 | xxxyyyy
+   2 | xxxxyyyy
+   3 | xyyyy
+   3 | xxyyyy
+   3 | xxxyyyy
+   3 | xxxxyyyy
+   4 | xyyyy
+   4 | xxyyyy
+   4 | xxxyyyy
+   4 | xxxxyyyy
+(64 rows)
 
 \i 'sql/composite_pk_quals'
 sql/composite_pk_quals: No such file or directory
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Sort Key: id1, id2
+   ->  Custom Scan (o_scan) on o_pk3
+         Bitmap heap scan
+         Recheck Cond: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+         ->  Bitmap Index Scan on o_pk3_idx
+               Index Cond: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(7 rows)
+
+SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+ id1 |  id2  
+-----+-------
+   1 | xxyyy
+   1 | xyy
+   2 | xxyyy
+   2 | xyy
+   3 | xxyyy
+   3 | xyy
+   4 | xxyyy
+   4 | xyy
+(8 rows)
+
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Sort Key: id1, id2
+   ->  Custom Scan (o_scan) on o_pk3
+         Bitmap heap scan
+         Recheck Cond: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+         ->  Bitmap Index Scan on o_pk3_idx
+               Index Cond: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(7 rows)
+
+SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+ id1 |  id2  
+-----+-------
+   1 | xxyyy
+   1 | xyy
+   2 | xxyyy
+   2 | xyy
+   3 | xxyyy
+   3 | xyy
+   4 | xxyyy
+   4 | xyy
+(8 rows)
+
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: id2
+   ->  Index Only Scan using o_pk3_idx on o_pk3
+         Index Cond: ((id1 = '2'::double precision) AND (id2 = ANY ('{xyy,xxyyy}'::text[])))
+(4 rows)
+
+SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+ id1 |  id2  
+-----+-------
+   2 | xxyyy
+   2 | xyy
+(2 rows)
+
 DROP TABLE o_pk3;
 RESET enable_seqscan;
 -- Check for key length limits
