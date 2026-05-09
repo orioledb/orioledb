@@ -101,6 +101,15 @@ Page	   *local_ppool_pages = NULL;
 OrioleDBPageDesc *local_ppool_page_descs = NULL;
 
 /* Custom GUC variables */
+int			orioledb_serializable_mode = O_SERIALIZABLE_TABLE_LOCK;
+
+static const struct config_enum_entry serializable_mode_options[] = {
+	{"table_lock", O_SERIALIZABLE_TABLE_LOCK, false},
+	{"error", O_SERIALIZABLE_ERROR, false},
+	{"repeatable_read", O_SERIALIZABLE_REPEATABLE_READ, false},
+	{NULL, 0, false}
+};
+
 static int	main_buffers_guc;
 static int	undo_buffers_guc;
 static int	xid_buffers_guc;
@@ -480,6 +489,20 @@ _PG_init(void)
 							 &debug_disable_pools_limit,
 							 false,
 							 PGC_POSTMASTER,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomEnumVariable("orioledb.serializable",
+							 "How OrioleDB handles SERIALIZABLE isolation.",
+							 "table_lock acquires a coarse ExclusiveLock per touched relation; "
+							 "error rejects SERIALIZABLE transactions; "
+							 "repeatable_read silently downgrades them to REPEATABLE READ.",
+							 &orioledb_serializable_mode,
+							 O_SERIALIZABLE_TABLE_LOCK,
+							 serializable_mode_options,
+							 PGC_USERSET,
 							 0,
 							 NULL,
 							 NULL,

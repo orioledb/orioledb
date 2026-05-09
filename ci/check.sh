@@ -56,6 +56,9 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
 
     echo "wal_level = logical" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
     echo "shared_preload_libraries = 'orioledb'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+    # We don't support SSI.  Run regression/isolation tests with in 'error'
+    # mode to catch the explicit errors.
+    echo "orioledb.serializable = 'error'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log start
     make -C src/test/regress installcheck -j $(nproc) || status=$?
     make -C src/test/isolation installcheck -j $(nproc) || status=$?

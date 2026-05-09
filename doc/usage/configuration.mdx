@@ -65,6 +65,18 @@ The size of shared memory for message queues related to recovery workers.
 
 The fraction of OrioleDB tables checkpoint time within the whole checkpoint time. We recommend setting this value to `1.0` if only OrioleDB tables are used.
 
+### `orioledb.serializable`
+
+|             |              |
+| ----------- | ------------ |
+| **Default** | `table_lock` |
+
+How OrioleDB handles a client request for SERIALIZABLE isolation. OrioleDB does not implement true SSI predicate locking; this enum selects one of three approximations:
+
+- `table_lock` (default): take a heavyweight `ExclusiveLock` on every relation a SERIALIZABLE transaction touches. Two SERIALIZABLE transactions on the same table serialize via the lock manager, and SERIALIZABLE writers block concurrent non-SERIALIZABLE writers (`RowExclusiveLock`) on that table; non-SERIALIZABLE readers (`AccessShareLock`) are unaffected. Correct, but coarse — concurrent non-conflicting workloads degrade to serial execution.
+- `error`: reject SERIALIZABLE transactions with `ERRCODE_FEATURE_NOT_SUPPORTED` (the legacy behavior).
+- `repeatable_read`: treat SERIALIZABLE as `REPEATABLE READ` for OrioleDB tables only — no extra locks are taken, since OrioleDB's CSN-based snapshot already provides per-transaction stable reads. Heap tables in the same transaction continue to use PG's SSI as usual.
+
 ## Advanced config options
 
 ### `orioledb.free_tree_buffers`

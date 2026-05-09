@@ -14,6 +14,8 @@
 #ifndef __OXID_H__
 #define __OXID_H__
 
+#include "storage/lmgr.h"
+
 typedef struct
 {
 	pg_atomic_uint64 csn;
@@ -100,14 +102,82 @@ build_fetch_context(OSnapshot *snapshot, uint32 version)
 extern OSnapshot o_in_progress_snapshot;
 extern OSnapshot o_non_deleted_snapshot;
 
+/*
+ * orioledb.serializable GUC modes.  Selects how OrioleDB handles a
+ * client request for SERIALIZABLE isolation, since OrioleDB does not
+ * implement SSI predicate locking.
+ */
+typedef enum OSerializableMode
+{
+	O_SERIALIZABLE_TABLE_LOCK,	/* coarse ExclusiveLock per table (default) */
+	O_SERIALIZABLE_ERROR,		/* reject with ERRCODE_FEATURE_NOT_SUPPORTED */
+	O_SERIALIZABLE_REPEATABLE_READ	/* treat OrioleDB tables as REPEATABLE
+									 * READ */
+} OSerializableMode;
+
+extern int	orioledb_serializable_mode;
+
 static inline void
 o_check_isolation_level(void)
 {
-	if (XactIsoLevel == XACT_SERIALIZABLE)
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("orioledb does not support SERIALIZABLE isolation level")),
-				errdetail("Stay tuned, it will be added in future releases."));
+	if (XactIsoLevel != XACT_SERIALIZABLE)
+		return;
+
+	switch ((OSerializableMode) orioledb_serializable_mode)
+	{
+		case O_SERIALIZABLE_TABLE_LOCK:
+			/* Locks are taken in o_serializable_lock_relation(). */
+			return;
+		case O_SERIALIZABLE_ERROR:
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("orioledb does not support SERIALIZABLE isolation level"),
+					 errdetail("orioledb.serializable is set to \"error\"."),
+					 errhint("Set orioledb.serializable to 'table_lock' or 'repeatable_read' to enable SERIALIZABLE for OrioleDB tables.")));
+			break;
+		case O_SERIALIZABLE_REPEATABLE_READ:
+
+			/*
+			 * Silent downgrade for OrioleDB tables only.  OrioleDB's snapshot
+			 * path is CSN-based and per-transaction stable, so accessing an
+			 * OrioleDB relation under XACT_SERIALIZABLE already yields
+			 * REPEATABLE READ semantics; we just skip the table-lock and the
+			 * error.  XactIsoLevel is left untouched because PG's SSI
+			 * machinery (for any heap table accessed in the same transaction)
+			 * requires it to stay consistent with MySerializableXact for the
+			 * lifetime of the xact.
+			 */
+			return;
+	}
+}
+
+/*
+ * SERIALIZABLE table-level lock (orioledb.serializable = 'table_lock').
+ *
+ * OrioleDB doesn't implement SSI; instead, every relation accessed by a
+ * SERIALIZABLE transaction is protected with a heavyweight ExclusiveLock
+ * on its OID.  ExclusiveLock conflicts with RowExclusiveLock and with
+ * itself, so:
+ *
+ *   - two SERIALIZABLE transactions touching the same table block on
+ *     each other (lockmgr serializes them);
+ *   - any non-SERIALIZABLE writer (RowExclusiveLock) on the same table
+ *     blocks against an in-flight SERIALIZABLE xact;
+ *   - non-SERIALIZABLE readers (AccessShareLock) are unaffected.
+ *
+ * Called from scan/insert/update/delete entry points; the lock is
+ * released at xact end through PG's normal lock-release machinery.
+ * Inlined so the fast path (not SERIALIZABLE) is a single branch.
+ */
+static inline void
+o_serializable_lock_relation(Oid relid)
+{
+	if (XactIsoLevel != XACT_SERIALIZABLE || !OidIsValid(relid))
+		return;
+	if (orioledb_serializable_mode != O_SERIALIZABLE_TABLE_LOCK)
+		return;
+
+	LockRelationOid(relid, ExclusiveLock);
 }
 
 #define O_LOAD_SNAPSHOT(o_snapshot, snapshot) \

@@ -126,6 +126,7 @@ REGRESSCHECKS = btree_sys_check \
 				row_level_locks \
 				row_security \
 				sanitizers \
+				serializable \
 				stats \
 				subquery \
 				subtransactions \
@@ -155,6 +156,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  isol_rr_bscan \
 				  isol_rr_fk \
 				  isol_rr_seqscan \
+				  isol_serializable \
 				  load_refind_page \
 				  merge \
 				  partition_move \
