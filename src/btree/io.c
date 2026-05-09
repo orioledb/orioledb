@@ -2731,7 +2731,15 @@ walk_page_prelock_check(OInMemoryBlkno blkno, bool evict,
 	if (!ORelOidsIsValid(page_desc->oids) || page_desc->type == oIndexInvalid)
 		return NULL;
 
-	if (!O_PAGE_IS(p, LEAF) && evict && PAGE_GET_N_ONDISK(p) != BTREE_PAGE_ITEMS_COUNT(p))
+	/*
+	 * Read field2 directly rather than via PAGE_GET_N_ONDISK(): we don't hold
+	 * the page lock here, so a concurrent leaf/non-leaf transition could fire
+	 * the macro's debug assert even though the outer flag check just passed.
+	 * The result of this comparison is racy by design and gets re-validated
+	 * once the page is locked.
+	 */
+	if (!O_PAGE_IS(p, LEAF) && evict &&
+		((BTreePageHeader *) p)->field2 != BTREE_PAGE_ITEMS_COUNT(p))
 		return NULL;
 
 	if (!evict && !IS_DIRTY(blkno))
