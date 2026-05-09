@@ -1,0 +1,53 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_begin_ser s2_begin_ser s1_update s2_update s1_commit s2_commit
+step s1_begin_ser: BEGIN ISOLATION LEVEL SERIALIZABLE;
+step s2_begin_ser: BEGIN ISOLATION LEVEL SERIALIZABLE;
+step s1_update: UPDATE o_iso_ser SET val = val + 100 WHERE id = 1;
+step s2_update: UPDATE o_iso_ser SET val = val + 1000 WHERE id = 2; <waiting ...>
+step s1_commit: COMMIT;
+step s2_update: <... completed>
+step s2_commit: COMMIT;
+
+starting permutation: s1_begin_ser s2_begin_rc s1_update s2_update s1_commit s2_commit
+step s1_begin_ser: BEGIN ISOLATION LEVEL SERIALIZABLE;
+step s2_begin_rc: BEGIN ISOLATION LEVEL READ COMMITTED;
+step s1_update: UPDATE o_iso_ser SET val = val + 100 WHERE id = 1;
+step s2_update: UPDATE o_iso_ser SET val = val + 1000 WHERE id = 2; <waiting ...>
+step s1_commit: COMMIT;
+step s2_update: <... completed>
+step s2_commit: COMMIT;
+
+starting permutation: s1_begin_ser s2_begin_rc s1_update s2_select s1_commit s2_commit
+step s1_begin_ser: BEGIN ISOLATION LEVEL SERIALIZABLE;
+step s2_begin_rc: BEGIN ISOLATION LEVEL READ COMMITTED;
+step s1_update: UPDATE o_iso_ser SET val = val + 100 WHERE id = 1;
+step s2_select: SELECT id, val FROM o_iso_ser ORDER BY id;
+id|val
+--+---
+ 1|  1
+ 2|  2
+ 3|  3
+ 4|  4
+ 5|  5
+(5 rows)
+
+step s1_commit: COMMIT;
+step s2_commit: COMMIT;
+
+starting permutation: s1_begin_ser s2_begin_ser s1_update s2_update_other s1_commit s2_commit
+step s1_begin_ser: BEGIN ISOLATION LEVEL SERIALIZABLE;
+step s2_begin_ser: BEGIN ISOLATION LEVEL SERIALIZABLE;
+step s1_update: UPDATE o_iso_ser SET val = val + 100 WHERE id = 1;
+step s2_update_other: UPDATE o_iso_ser_other SET val = val + 1000 WHERE id = 2;
+step s1_commit: COMMIT;
+step s2_commit: COMMIT;
+
+starting permutation: s1_begin_ser s2_begin_ser s1_insert s2_insert s1_commit s2_commit
+step s1_begin_ser: BEGIN ISOLATION LEVEL SERIALIZABLE;
+step s2_begin_ser: BEGIN ISOLATION LEVEL SERIALIZABLE;
+step s1_insert: INSERT INTO o_iso_ser VALUES (10, 10);
+step s2_insert: INSERT INTO o_iso_ser VALUES (11, 11); <waiting ...>
+step s1_commit: COMMIT;
+step s2_insert: <... completed>
+step s2_commit: COMMIT;
