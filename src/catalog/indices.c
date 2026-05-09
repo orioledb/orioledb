@@ -1693,9 +1693,18 @@ build_secondary_index(Oid oldTblRelnode, OTable *o_table,
 	}
 	else if (!is_recovery_in_progress())
 	{
-		tableRelation = table_open(o_table->oids.reloid, AccessExclusiveLock);
+		/*
+		 * ShareUpdateExclusiveLock is the minimum level index_update_stats()
+		 * expects: heap_inplace_update()'s lock check
+		 * (heapam.c:check_inplace_rel_lock) emits a "missing lock" warning
+		 * for anything weaker.  SUE is still much weaker than the AEL we used
+		 * to take here, so the deadlock cycles with autovacuum (e.g. DROP
+		 * CASCADE vs ANALYZE) that the AEL re-acquire created stay fixed.
+		 */
+		tableRelation = table_open(o_table->oids.reloid,
+								   ShareUpdateExclusiveLock);
 		indexRelation = index_open(o_table->indices[ix_num].oids.reloid,
-								   AccessExclusiveLock);
+								   ShareUpdateExclusiveLock);
 		index_update_stats(tableRelation,
 						   true,
 						   heap_tuples);
@@ -1706,8 +1715,8 @@ build_secondary_index(Oid oldTblRelnode, OTable *o_table,
 
 		/* Make the updated catalog row versions visible */
 		CommandCounterIncrement();
-		table_close(tableRelation, AccessExclusiveLock);
-		index_close(indexRelation, AccessExclusiveLock);
+		table_close(tableRelation, ShareUpdateExclusiveLock);
+		index_close(indexRelation, ShareUpdateExclusiveLock);
 	}
 
 	pfree(index_tuples);
@@ -2162,7 +2171,9 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 	if (!is_recovery_in_progress())
 	{
-		tableRelation = table_open(o_table->oids.reloid, AccessExclusiveLock);
+		/* See note in build_secondary_index() — SUE is the minimum. */
+		tableRelation = table_open(o_table->oids.reloid,
+								   ShareUpdateExclusiveLock);
 		index_update_stats(tableRelation, true, heap_tuples);
 
 		for (i = PrimaryIndexNumber; i < o_table->nindices; i++)
@@ -2178,16 +2189,16 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 				Relation	indexRelation;
 
 				indexRelation = index_open(table_index->oids.reloid,
-										   AccessExclusiveLock);
+										   ShareUpdateExclusiveLock);
 
 				index_update_stats(indexRelation, false, index_tuples[i]);
-				index_close(indexRelation, AccessExclusiveLock);
+				index_close(indexRelation, ShareUpdateExclusiveLock);
 			}
 		}
 
 		/* Make the updated catalog row versions visible */
 		CommandCounterIncrement();
-		table_close(tableRelation, AccessExclusiveLock);
+		table_close(tableRelation, ShareUpdateExclusiveLock);
 	}
 	pfree(index_tuples);
 }
