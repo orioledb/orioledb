@@ -883,6 +883,9 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 	bool		exclusiveAlreadyWoken = false;
 	uint64		state;
 
+	int			expectedWakeCount PG_USED_FOR_ASSERTS_ONLY = 0;
+	int			actualWakeCount PG_USED_FOR_ASSERTS_ONLY = 0;
+
 	unlock_check_page(blkno);
 
 	state = pg_atomic_read_u64(&hdr->state);
@@ -927,6 +930,7 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 				/* Push waiter onto our private wake list */
 				lock->next = wakeListHead;
 				wakeListHead = cur;
+				expectedWakeCount++;
 
 				cur = next;
 				continue;		/* stay on the same `prev` */
@@ -960,6 +964,7 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 			/* push to wake list */
 			lock->next = wakeListHead;
 			wakeListHead = exclusive;
+			expectedWakeCount++;
 
 			if (prev == exclusive)
 				prev = exclusivePrev;
@@ -1039,9 +1044,12 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 		pg_memory_barrier();
 
 		PGSemaphoreUnlock(proc->sem);
+		actualWakeCount++;
 
 		procno = next;
 	}
+
+	Assert(actualWakeCount == expectedWakeCount);
 }
 
 void
