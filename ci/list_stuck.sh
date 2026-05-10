@@ -13,6 +13,7 @@ for process in $(pgrep postgres); do
             -ex "thread apply all bt full" \
             -ex 'eval "p *((LWLockHandle (*) [%u]) held_lwlocks)", num_held_lwlocks' \
             -ex 'eval "p *((MyLockedPage (*) [%u]) myLockedPages)", numberOfMyLockedPages' \
+            -ex "source $(dirname "$0")/dump_stuck_pages.py" \
             -ex "quit" \
             -p $process
         echo ::endgroup::
@@ -40,6 +41,7 @@ for process in $(pgrep memcheck); do
                 -ex "thread apply all bt full" \
                 -ex 'eval "p *((LWLockHandle (*) [%u]) held_lwlocks)", num_held_lwlocks' \
                 -ex 'eval "p *((MyLockedPage (*) [%u]) myLockedPages)", numberOfMyLockedPages' \
+                -ex "source $(dirname "$0")/dump_stuck_pages.py" \
                 -ex "handle all nostop pass" \
                 -ex "c" \
                 $(which postgres) >vgdb_$process.log 2>&1 &
