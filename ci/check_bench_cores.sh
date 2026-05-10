@@ -12,7 +12,12 @@ if [ -n "$cores" ]; then
 		if [[ $corefile != *_3.core ]]; then
 			binary=$(gdb -quiet -core $corefile -batch -ex 'info auxv' | grep AT_EXECFN | perl -pe "s/^.*\"(.*)\"\$/\$1/g")
 			echo dumping $corefile for $binary
-			gdb --batch --quiet -ex "thread apply all bt full" -ex "quit" $binary $corefile
+			gdb --batch --quiet \
+				-ex "thread apply all bt full" \
+				-ex 'eval "p *((LWLockHandle (*) [%u]) held_lwlocks)", num_held_lwlocks' \
+				-ex 'eval "p *((MyLockedPage (*) [%u]) myLockedPages)", numberOfMyLockedPages' \
+				-ex "quit" \
+				$binary $corefile
 			status=1
 		fi
 	done
