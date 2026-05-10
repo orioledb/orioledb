@@ -1034,12 +1034,20 @@ unlock_page_internal(OInMemoryBlkno blkno, bool split)
 		PGPROC	   *proc = GetPGProcByNumber(procno);
 
 		next = lockState->next;
+
+		/*
+		 * Ensure memory access ordering.  The effect of statement above must
+		 * materialize before waking up the waiter, which must see
+		 * lockState->status == OPageWaitWakeUp and can modify
+		 * lockState->next.
+		 */
+		pg_memory_barrier();
+
 		lockState->status = OPageWaitWakeUp;
 
 		/*
-		 * Ensure memory access ordering.  The effect of statements above must
-		 * materialize before waking up the waiter, which must see
-		 * lockState->pageWaiting == false and can modify lockState->next.
+		 * Also, ensure woken up waiter will see lockState->status ==
+		 * OPageWaitWakeUp.
 		 */
 		pg_memory_barrier();
 
