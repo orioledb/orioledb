@@ -112,7 +112,12 @@ DROP TABLE cmdata;
 CREATE TABLE cmdata(a int, f1 text STORAGE EXTERNAL) using orioledb;
 INSERT INTO cmdata VALUES(1, repeat('1234567890', 1000));
 -- should error because key can only be compressed for index, but not toasted (as for heap).
+-- Disable parallel maintenance workers so the error originates from the
+-- leader; otherwise psql output gets a flaky "CONTEXT: parallel worker"
+-- frame depending on which process hits the oversized key first.
+SET max_parallel_maintenance_workers = 0;
 CREATE INDEX idx ON cmdata(f1);
+RESET max_parallel_maintenance_workers;
 SELECT length(f1) FROM cmdata WHERE a = 1;
 DROP TABLE cmdata;
 
