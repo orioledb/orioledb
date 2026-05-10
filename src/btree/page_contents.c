@@ -529,9 +529,16 @@ put_page_image(OInMemoryBlkno blkno, Page img)
 
 	pg_write_barrier();
 
-	memcpy(page + skipSize,
-		   (char *) img + skipSize,
-		   ORIOLEDB_BLCKSZ - skipSize);
+	/*
+	 * Touches OrioleDBPageHeader.checkpointNum (offsets 12..15) and
+	 * everything past it, so this is a near-init write — use
+	 * PageInitMemCpy.  The atomic state and pageChangeCount in the
+	 * skipped prefix are preserved because put_page_image is only
+	 * called on a page we own exclusively.
+	 */
+	PageInitMemCpy(page, page + skipSize,
+				   (char *) img + skipSize,
+				   ORIOLEDB_BLCKSZ - skipSize);
 }
 
 /*
@@ -823,9 +830,9 @@ page_resize_hikey(Page p, LocationIndex newHikeySize)
 
 	dataShift = hikeyLocation + newHikeySize - dataLocation;
 	Assert(header->dataSize + dataShift <= ORIOLEDB_BLCKSZ);
-	memmove((Pointer) p + dataLocation + dataShift,
-			(Pointer) p + dataLocation,
-			header->dataSize - dataLocation);
+	PageMemMove(p, (Pointer) p + dataLocation + dataShift,
+				(Pointer) p + dataLocation,
+				header->dataSize - dataLocation);
 	header->chunkDesc[0].shortLocation += LOCATION_GET_SHORT(dataShift);
 	header->hikeysEnd = hikeyLocation + newHikeySize;
 	header->dataSize += dataShift;

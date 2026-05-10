@@ -249,7 +249,7 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		}
 
 		/* copy new page to stack */
-		PageMemCpy(stack[level].img, stack[level].img, new_page, ORIOLEDB_BLCKSZ);
+		PageInitMemCpy(stack[level].img, stack[level].img, new_page, ORIOLEDB_BLCKSZ);
 		BTREE_PAGE_LOCATOR_TAIL(stack[level].img, &stack[level].loc);
 
 		put_downlink_to_stack(desc, stack, level + 1, downlink,

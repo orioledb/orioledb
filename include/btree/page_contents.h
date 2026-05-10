@@ -156,22 +156,54 @@ typedef struct
 #define BTREE_PAGE_HIKEYS_END(desc, p) (O_PAGE_IS(p, LEAF) ? 256 : 512)
 
 /*
- * Bounds-checked memcpy()/memmove() into a btree page.
+ * Bounds-checked memcpy()/memmove() into a btree (or any orioledb)
+ * page.  Every memcpy/memmove that writes into a page should go through
+ * one of these wrappers so we catch out-of-bounds and
+ * overlap-with-OrioleDBPageHeader writes at the source rather than
+ * after they've silently trashed shared memory.
  *
- * Every memcpy()/memmove() that writes into a btree page should go through
- * these wrappers so we catch out-of-bounds writes (e.g. from a corrupt
- * locator) at the source rather than after they've silently trashed
- * shared memory.  The asserts compile out when assertions are disabled
- * and the underlying call inlines straight to memcpy/memmove.
+ * PageMemCpy / PageMemMove are for *in-page modifications* (data area,
+ * BTreePageHeader fields beyond o_header, hikeys, chunks).  They
+ * forbid writes that touch the OrioleDBPageHeader prefix (state,
+ * pageChangeCount, checkpointNum) at all — that's owned by the
+ * page-state machine and must only be touched via pg_atomic_*() or
+ * direct field stores under proper locking.  A bulk write that hit
+ * offset 0..15 would silently corrupt the lock state, which is the
+ * failure mode that produces the recovery hang with empty
+ * myLockedPages on every backend.
+ *
+ * PageInitMemCpy / PageInitMemMove are for *full-page initialisation*
+ * (e.g. copying a saved whole-page image back into a buffer, or
+ * preparing a private build buffer).  They allow writes from any
+ * offset >= 0 — they're appropriate only when no other backend can
+ * be observing the page concurrently.
+ *
+ * Compiles out when assertions are disabled.
  */
 #define PageMemCpy(p, dst, src, size)									\
+	do {																\
+		AssertMacro((Pointer) (dst) >=									\
+					(Pointer) (p) + sizeof(OrioleDBPageHeader));		\
+		AssertMacro((Pointer) (dst) + (size) <=							\
+					(Pointer) (p) + ORIOLEDB_BLCKSZ);					\
+		memcpy((dst), (src), (size));									\
+	} while (false)
+#define PageMemMove(p, dst, src, size)									\
+	do {																\
+		AssertMacro((Pointer) (dst) >=									\
+					(Pointer) (p) + sizeof(OrioleDBPageHeader));		\
+		AssertMacro((Pointer) (dst) + (size) <=							\
+					(Pointer) (p) + ORIOLEDB_BLCKSZ);					\
+		memmove((dst), (src), (size));									\
+	} while (false)
+#define PageInitMemCpy(p, dst, src, size)								\
 	do {																\
 		AssertMacro((Pointer) (dst) >= (Pointer) (p));					\
 		AssertMacro((Pointer) (dst) + (size) <=							\
 					(Pointer) (p) + ORIOLEDB_BLCKSZ);					\
 		memcpy((dst), (src), (size));									\
 	} while (false)
-#define PageMemMove(p, dst, src, size)									\
+#define PageInitMemMove(p, dst, src, size)								\
 	do {																\
 		AssertMacro((Pointer) (dst) >= (Pointer) (p));					\
 		AssertMacro((Pointer) (dst) + (size) <=							\
