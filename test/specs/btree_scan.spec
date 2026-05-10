@@ -58,4 +58,4 @@ step "s2_checkpoint" { CHECKPOINT; }
 step "s2_reset" { SELECT pg_stopevent_reset('seq_scan_load_internal_page'); }
 
 
-permutation "s1_setup" "s2_setup" "s2_delete1" "s2_checkpoint" "s2_delete2" "s1_delete_hang" "s2_checkpoint" "s2_reset"
+permutation "s1_setup" "s2_setup" "s2_delete1" "s2_checkpoint" "s2_delete2" "s1_delete_hang" "s2_checkpoint" "s2_reset" ("s1_delete_hang")

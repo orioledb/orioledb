@@ -24,12 +24,7 @@ pg_stopevent_set
 step s2_bselect: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id DESC; <waiting ...>
 step s1_insert1: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(10, 13, 1) id);
 step s1_insert2: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(14, 17, 1) id);
-step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
-pg_stopevent_reset
-------------------
-t                 
-(1 row)
-
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind'); <waiting ...>
 step s2_bselect: <... completed>
 substr
 ------
@@ -38,6 +33,12 @@ substr
     19
     18
 (4 rows)
+
+step s1_continue: <... completed>
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
 
 
 starting permutation: s1_setup s2_setup s1_insert2 s1_insert3 s1_evict s1_se_refind0 s2_bselect s1_insert1 s1_continue
@@ -64,12 +65,7 @@ pg_stopevent_set
 
 step s2_bselect: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id DESC; <waiting ...>
 step s1_insert1: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(10, 13, 1) id);
-step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
-pg_stopevent_reset
-------------------
-t                 
-(1 row)
-
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind'); <waiting ...>
 step s2_bselect: <... completed>
 substr
 ------
@@ -82,6 +78,12 @@ substr
     15
     14
 (8 rows)
+
+step s1_continue: <... completed>
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
 
 
 starting permutation: s1_setup s2_setup s1_insert6 s1_evict s1_se_refind1 s2_bselect s1_insert4 s1_insert5 s1_continue
@@ -108,12 +110,7 @@ pg_stopevent_set
 step s2_bselect: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id DESC; <waiting ...>
 step s1_insert4: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(10, 19, 1) id);
 step s1_insert5: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(20, 29, 1) id);
-step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
-pg_stopevent_reset
-------------------
-t                 
-(1 row)
-
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind'); <waiting ...>
 step s2_bselect: <... completed>
 substr
 ------
@@ -128,6 +125,12 @@ substr
     31
     30
 (10 rows)
+
+step s1_continue: <... completed>
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
 
 
 starting permutation: s1_setup s2_setup s1_insert5 s1_insert6 s1_evict s1_se_refind1 s2_bselect s1_insert4 s1_continue
@@ -154,12 +157,7 @@ pg_stopevent_set
 
 step s2_bselect: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id DESC; <waiting ...>
 step s1_insert4: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(10, 19, 1) id);
-step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
-pg_stopevent_reset
-------------------
-t                 
-(1 row)
-
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind'); <waiting ...>
 step s2_bselect: <... completed>
 substr
 ------
@@ -184,6 +182,12 @@ substr
     21
     20
 (20 rows)
+
+step s1_continue: <... completed>
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
 
 
 starting permutation: s1_setup s2_setup s1_insert1 s1_evict s1_se_refind0 s2_select s1_insert2 s1_insert3 s1_continue
@@ -210,12 +214,7 @@ pg_stopevent_set
 step s2_select: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id; <waiting ...>
 step s1_insert2: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(14, 17, 1) id);
 step s1_insert3: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(18, 21, 1) id);
-step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
-pg_stopevent_reset
-------------------
-t                 
-(1 row)
-
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind'); <waiting ...>
 step s2_select: <... completed>
 substr
 ------
@@ -224,6 +223,12 @@ substr
     12
     13
 (4 rows)
+
+step s1_continue: <... completed>
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
 
 
 starting permutation: s1_setup s2_setup s1_insert1 s1_insert2 s1_evict s1_se_refind0 s2_select s1_insert3 s1_continue
@@ -250,12 +255,7 @@ pg_stopevent_set
 
 step s2_select: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id; <waiting ...>
 step s1_insert3: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(18, 21, 1) id);
-step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
-pg_stopevent_reset
-------------------
-t                 
-(1 row)
-
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind'); <waiting ...>
 step s2_select: <... completed>
 substr
 ------
@@ -268,6 +268,12 @@ substr
     16
     17
 (8 rows)
+
+step s1_continue: <... completed>
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
 
 
 starting permutation: s1_setup s2_setup s1_insert4 s1_evict s1_se_refind1 s2_select s1_insert5 s1_insert6 s1_continue
@@ -294,12 +300,7 @@ pg_stopevent_set
 step s2_select: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id; <waiting ...>
 step s1_insert5: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(20, 29, 1) id);
 step s1_insert6: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(30, 39, 1) id);
-step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
-pg_stopevent_reset
-------------------
-t                 
-(1 row)
-
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind'); <waiting ...>
 step s2_select: <... completed>
 substr
 ------
@@ -314,6 +315,12 @@ substr
     18
     19
 (10 rows)
+
+step s1_continue: <... completed>
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
 
 
 starting permutation: s1_setup s2_setup s1_insert4 s1_insert5 s1_evict s1_se_refind1 s2_select s1_insert6 s1_continue
@@ -340,12 +347,7 @@ pg_stopevent_set
 
 step s2_select: SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id; <waiting ...>
 step s1_insert6: INSERT INTO o_loadpage (SELECT id || repeat('x', 2600) FROM generate_series(30, 39, 1) id);
-step s1_continue: SELECT pg_stopevent_reset('load_page_refind');
-pg_stopevent_reset
-------------------
-t                 
-(1 row)
-
+step s1_continue: SELECT pg_stopevent_reset('load_page_refind'); <waiting ...>
 step s2_select: <... completed>
 substr
 ------
@@ -370,4 +372,10 @@ substr
     28
     29
 (20 rows)
+
+step s1_continue: <... completed>
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
 

@@ -43,14 +43,14 @@ step "s2_setup" {
 step "s2_select" { SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id; }
 step "s2_bselect" { SELECT substr(id, 1, 2) FROM o_loadpage ORDER BY id DESC; }
 
-permutation "s1_setup" "s2_setup" "s1_insert3" "s1_evict" "s1_se_refind0" "s2_bselect" "s1_insert1" "s1_insert2" "s1_continue"
-permutation "s1_setup" "s2_setup" "s1_insert2" "s1_insert3" "s1_evict" "s1_se_refind0" "s2_bselect" "s1_insert1" "s1_continue"
+permutation "s1_setup" "s2_setup" "s1_insert3" "s1_evict" "s1_se_refind0" "s2_bselect" "s1_insert1" "s1_insert2" "s1_continue" ("s2_bselect")
+permutation "s1_setup" "s2_setup" "s1_insert2" "s1_insert3" "s1_evict" "s1_se_refind0" "s2_bselect" "s1_insert1" "s1_continue" ("s2_bselect")
 
-permutation "s1_setup" "s2_setup" "s1_insert6" "s1_evict" "s1_se_refind1" "s2_bselect" "s1_insert4" "s1_insert5" "s1_continue"
-permutation "s1_setup" "s2_setup" "s1_insert5" "s1_insert6" "s1_evict" "s1_se_refind1" "s2_bselect" "s1_insert4" "s1_continue"
+permutation "s1_setup" "s2_setup" "s1_insert6" "s1_evict" "s1_se_refind1" "s2_bselect" "s1_insert4" "s1_insert5" "s1_continue" ("s2_bselect")
+permutation "s1_setup" "s2_setup" "s1_insert5" "s1_insert6" "s1_evict" "s1_se_refind1" "s2_bselect" "s1_insert4" "s1_continue" ("s2_bselect")
 
-permutation "s1_setup" "s2_setup" "s1_insert1" "s1_evict" "s1_se_refind0" "s2_select" "s1_insert2" "s1_insert3" "s1_continue"
-permutation "s1_setup" "s2_setup" "s1_insert1" "s1_insert2" "s1_evict" "s1_se_refind0" "s2_select" "s1_insert3" "s1_continue"
+permutation "s1_setup" "s2_setup" "s1_insert1" "s1_evict" "s1_se_refind0" "s2_select" "s1_insert2" "s1_insert3" "s1_continue" ("s2_select")
+permutation "s1_setup" "s2_setup" "s1_insert1" "s1_insert2" "s1_evict" "s1_se_refind0" "s2_select" "s1_insert3" "s1_continue" ("s2_select")
 
-permutation "s1_setup" "s2_setup" "s1_insert4" "s1_evict" "s1_se_refind1" "s2_select" "s1_insert5" "s1_insert6" "s1_continue"
-permutation "s1_setup" "s2_setup" "s1_insert4" "s1_insert5" "s1_evict" "s1_se_refind1" "s2_select" "s1_insert6" "s1_continue"
+permutation "s1_setup" "s2_setup" "s1_insert4" "s1_evict" "s1_se_refind1" "s2_select" "s1_insert5" "s1_insert6" "s1_continue" ("s2_select")
+permutation "s1_setup" "s2_setup" "s1_insert4" "s1_insert5" "s1_evict" "s1_se_refind1" "s2_select" "s1_insert6" "s1_continue" ("s2_select")

@@ -34,16 +34,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get1: <... completed>
 id|t    
 --+-----
  1|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -87,16 +88,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get1: <... completed>
 id|t    
 --+-----
  1|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -140,16 +142,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get1: <... completed>
 id|t    
 --+-----
  1|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -187,16 +190,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get1: <... completed>
 id|t    
 --+-----
  1|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -234,16 +238,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get1: <... completed>
 id|t    
 --+-----
  1|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -281,16 +286,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget1: <... completed>
 id|t    
 --+-----
  1|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -334,16 +340,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget1: <... completed>
 id|t    
 --+-----
  1|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -387,16 +394,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget1: <... completed>
 id|t    
 --+-----
  1|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -434,16 +442,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget1: <... completed>
 id|t    
 --+-----
  1|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -481,16 +490,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget1: <... completed>
 id|t    
 --+-----
  1|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -528,16 +538,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get2: <... completed>
  id|t    
 ---+-----
 301|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -581,16 +592,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get2: <... completed>
  id|t    
 ---+-----
 301|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -634,16 +646,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get2: <... completed>
  id|t    
 ---+-----
 301|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -681,16 +694,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get2: <... completed>
  id|t    
 ---+-----
 301|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -728,16 +742,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get2: <... completed>
  id|t    
 ---+-----
 301|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -775,16 +790,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget2: <... completed>
  id|t    
 ---+-----
 301|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -828,16 +844,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget2: <... completed>
  id|t    
 ---+-----
 301|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -881,16 +898,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget2: <... completed>
  id|t    
 ---+-----
 301|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -928,16 +946,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget2: <... completed>
  id|t    
 ---+-----
 301|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -975,16 +994,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget2: <... completed>
  id|t    
 ---+-----
 301|abcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1022,16 +1042,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get3: <... completed>
  id|t                             
 ---+------------------------------
 766|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1075,16 +1096,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get3: <... completed>
  id|t                             
 ---+------------------------------
 766|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1128,16 +1150,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get3: <... completed>
  id|t                             
 ---+------------------------------
 766|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1175,16 +1198,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get3: <... completed>
  id|t                             
 ---+------------------------------
 766|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1222,16 +1246,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get3: <... completed>
  id|t                             
 ---+------------------------------
 766|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1269,16 +1294,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget3: <... completed>
  id|t                             
 ---+------------------------------
 766|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1322,16 +1348,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget3: <... completed>
  id|t                             
 ---+------------------------------
 766|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1375,16 +1402,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget3: <... completed>
  id|t                             
 ---+------------------------------
 766|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1422,16 +1450,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget3: <... completed>
  id|t                             
 ---+------------------------------
 766|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1469,16 +1498,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget3: <... completed>
  id|t                             
 ---+------------------------------
 766|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1516,16 +1546,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get4: <... completed>
   id|t                             
 ----+------------------------------
 1216|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1569,16 +1600,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get4: <... completed>
   id|t                             
 ----+------------------------------
 1216|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1622,16 +1654,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get4: <... completed>
   id|t                             
 ----+------------------------------
 1216|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1669,16 +1702,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get4: <... completed>
   id|t                             
 ----+------------------------------
 1216|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1716,16 +1750,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_get4: <... completed>
   id|t                             
 ----+------------------------------
 1216|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1763,16 +1798,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget4: <... completed>
   id|t                             
 ----+------------------------------
 1216|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1816,16 +1852,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget4: <... completed>
   id|t                             
 ----+------------------------------
 1216|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1869,16 +1906,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget4: <... completed>
   id|t                             
 ----+------------------------------
 1216|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1916,16 +1954,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget4: <... completed>
   id|t                             
 ----+------------------------------
 1216|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -1963,16 +2002,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bget4: <... completed>
   id|t                             
 ----+------------------------------
 1216|abcdeabcdeabcdeabcdeabcdeabcde
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2008,16 +2048,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
   300
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2053,16 +2094,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
   300
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2104,16 +2146,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
   600
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2155,16 +2198,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
   600
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2200,16 +2244,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
   300
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2245,16 +2290,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
   300
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2296,16 +2342,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
   600
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2347,16 +2394,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
   600
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2392,16 +2440,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
   300
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2437,16 +2486,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
   300
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2488,16 +2538,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
   600
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2539,16 +2590,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
   600
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2596,16 +2648,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
   300
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2653,16 +2706,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
   300
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2716,16 +2770,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
   600
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2779,16 +2834,17 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
   600
+(1 row)
+
+step s2_continue: <... completed>
+bool
+----
+t   
 (1 row)
 
 
@@ -2827,12 +2883,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -2840,6 +2891,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert3 s1_begin s1_delete s2_break_step_right_750 s2_bp_scan_end s1_count s2_insert2 s2_insert4 s2_insert1 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -2876,12 +2933,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -2889,6 +2941,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert1 s2_insert4 s1_begin s1_delete s2_break_step_right_300 s2_bp_scan_end s1_count s2_insert2 s2_break_step_right_750 s2_insert3 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -2931,12 +2989,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -2944,6 +2997,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert3 s2_insert2 s1_begin s1_delete s2_break_step_right_300 s2_bp_scan_end s1_count s2_insert4 s2_break_step_right_750 s2_insert1 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -2986,12 +3045,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -2999,6 +3053,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert1 s1_begin s1_delete s2_break_step_left_750 s2_bp_scan_end s1_bcount s2_insert4 s2_insert2 s2_insert3 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -3035,12 +3095,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
@@ -3048,6 +3103,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert3 s1_begin s1_delete s2_break_step_left_750 s2_bp_scan_end s1_bcount s2_insert2 s2_insert4 s2_insert1 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -3084,12 +3145,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
@@ -3097,6 +3153,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert1 s2_insert4 s1_begin s1_delete s2_break_step_left_1200 s2_bp_scan_end s1_bcount s2_insert2 s2_break_step_left_750 s2_insert3 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -3139,12 +3201,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
@@ -3152,6 +3209,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert3 s2_insert2 s1_begin s1_delete s2_break_step_left_1200 s2_bp_scan_end s1_bcount s2_insert4 s2_break_step_left_750 s2_insert1 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -3194,12 +3257,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
@@ -3207,6 +3265,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup_seq s2_insert1 s1_begin s1_delete s2_break_step_down_750 s2_bp_scan_end s1_count s2_insert4 s2_insert2 s2_insert3 s2_continue s1_commit
 step s1_setup_seq: SET orioledb.enable_stopevents = true;
@@ -3243,12 +3307,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -3256,6 +3315,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup_seq s2_insert3 s1_begin s1_delete s2_break_step_down_750 s2_bp_scan_end s1_count s2_insert2 s2_insert4 s2_insert1 s2_continue s1_commit
 step s1_setup_seq: SET orioledb.enable_stopevents = true;
@@ -3292,12 +3357,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -3305,6 +3365,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup_seq s2_insert1 s2_insert4 s1_begin s1_delete s2_break_step_down_300 s2_bp_scan_end s1_count s2_insert2 s2_break_step_down_750 s2_insert3 s2_continue s1_commit
 step s1_setup_seq: SET orioledb.enable_stopevents = true;
@@ -3347,12 +3413,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -3360,6 +3421,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup_seq s2_insert3 s2_insert2 s1_begin s1_delete s2_break_step_down_300 s2_bp_scan_end s1_count s2_insert4 s2_break_step_down_750 s2_insert1 s2_continue s1_commit
 step s1_setup_seq: SET orioledb.enable_stopevents = true;
@@ -3402,12 +3469,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -3415,6 +3477,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup_seq s2_insert1 s1_begin s1_delete s2_evict s2_break_step_down_750 s2_bp_scan_end s1_count s2_insert4 s2_insert2 s2_insert3 s2_evict s2_continue s1_commit
 step s1_setup_seq: SET orioledb.enable_stopevents = true;
@@ -3463,12 +3531,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -3476,6 +3539,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup_seq s2_insert3 s1_begin s1_delete s2_evict s2_break_step_down_750 s2_bp_scan_end s1_count s2_insert2 s2_insert4 s2_insert1 s2_evict s2_continue s1_commit
 step s1_setup_seq: SET orioledb.enable_stopevents = true;
@@ -3524,12 +3593,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -3537,6 +3601,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup_seq s2_insert1 s2_insert4 s1_begin s1_delete s2_evict s2_break_step_down_300 s2_bp_scan_end s1_count s2_insert2 s2_evict s2_break_step_down_750 s2_insert3 s2_evict s2_continue s1_commit
 step s1_setup_seq: SET orioledb.enable_stopevents = true;
@@ -3597,12 +3667,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -3610,6 +3675,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup_seq s2_insert3 s2_insert2 s1_begin s1_delete s2_evict s2_break_step_down_300 s2_bp_scan_end s1_count s2_insert4 s2_evict s2_break_step_down_750 s2_insert1 s2_evict s2_continue s1_commit
 step s1_setup_seq: SET orioledb.enable_stopevents = true;
@@ -3670,12 +3741,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -3683,6 +3749,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert1 s2_insert4 s1_begin s2_break_step_right_750 s1_count s2_delete_mass s2_insert2 s2_insert3 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -3712,12 +3784,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -3725,6 +3792,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert1 s2_insert4 s2_insert3 s1_begin s2_break_step_right_750 s1_count s2_delete_mass s2_insert2 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -3754,12 +3827,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -3767,6 +3835,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert1 s2_insert4 s2_insert2 s1_begin s2_break_step_right_750 s1_count s2_delete_mass s2_insert3 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -3796,12 +3870,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -3809,6 +3878,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert3 s2_insert4 s2_insert2 s1_begin s2_break_step_right_750 s1_count s2_delete_mass s2_insert1 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -3838,12 +3913,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -3851,6 +3921,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert1 s2_insert4 s1_begin s2_break_step_left_750 s1_bcount s2_delete_mass s2_insert2 s2_insert3 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -3880,12 +3956,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
@@ -3893,6 +3964,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert1 s2_insert4 s2_insert3 s1_begin s2_break_step_left_1200 s1_bcount s2_delete_mass s2_insert2 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -3922,12 +3999,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
@@ -3935,6 +4007,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert1 s2_insert4 s2_insert2 s1_begin s2_break_step_left_750 s1_bcount s2_delete_mass s2_insert3 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -3964,12 +4042,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
@@ -3977,6 +4050,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert3 s2_insert4 s2_insert2 s1_begin s2_break_step_left_1200 s1_bcount s2_delete_mass s2_insert1 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -4006,12 +4085,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
@@ -4019,6 +4093,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup_seq s2_insert1 s2_insert4 s1_begin s2_break_step_down_750 s1_count s2_delete_mass s2_insert2 s2_insert3 s2_continue s1_commit
 step s1_setup_seq: SET orioledb.enable_stopevents = true;
@@ -4171,12 +4251,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -4184,6 +4259,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup_seq s2_insert1 s2_insert4 s1_begin s2_evict s2_break_step_down_750 s1_count s2_delete_mass s2_insert2 s2_insert3 s2_evict s2_continue s1_commit
 step s1_setup_seq: SET orioledb.enable_stopevents = true;
@@ -4384,12 +4465,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -4397,6 +4473,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert4 s1_begin s1_insert2 s2_break_step_right_750 s1_count s2_insert3 s2_delete34 s2_insert4 s2_insert3 s2_delete34 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -4430,12 +4512,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -4443,6 +4520,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert3 s1_begin s1_insert1 s2_break_step_right_750 s1_count s2_insert4 s2_delete34 s2_insert4 s2_insert3 s2_delete34 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -4476,12 +4559,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -4489,6 +4567,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert1 s1_begin s1_insert3 s2_break_step_right_750 s1_count s2_insert2 s2_delete12 s2_insert1 s2_insert2 s2_delete12 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -4522,12 +4606,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -4535,6 +4614,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert2 s1_begin s1_insert4 s2_break_step_right_750 s1_count s2_insert1 s2_delete12 s2_insert1 s2_insert2 s2_delete12 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -4568,12 +4653,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_count: <... completed>
 count
 -----
@@ -4581,6 +4661,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert4 s1_begin s1_insert2 s2_break_step_left_750 s1_bcount s2_insert3 s2_delete34 s2_insert4 s2_insert3 s2_delete34 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -4614,12 +4700,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
@@ -4627,6 +4708,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert3 s1_begin s1_insert1 s2_break_step_left_1200 s1_bcount s2_insert4 s2_delete34 s2_insert4 s2_insert3 s2_delete34 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -4660,12 +4747,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
@@ -4673,6 +4755,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert1 s1_begin s1_insert3 s2_break_step_left_750 s1_bcount s2_insert2 s2_delete12 s2_insert1 s2_insert2 s2_delete12 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -4706,12 +4794,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
@@ -4719,6 +4802,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup s2_insert2 s1_begin s1_insert4 s2_break_step_left_1200 s1_bcount s2_insert1 s2_delete12 s2_insert1 s2_insert2 s2_delete12 s2_continue s1_commit
 step s1_setup: SET orioledb.enable_stopevents = true; SET enable_seqscan = off;
@@ -4752,12 +4841,7 @@ step s2_continue:
 		(pg_stopevent_reset('step_down')::int + 
 		 pg_stopevent_reset('step_left')::int +
 		 pg_stopevent_reset('step_right')::int +
-		 pg_stopevent_reset('scan_end')::int)::bool;
-bool
-----
-t   
-(1 row)
-
+		 pg_stopevent_reset('scan_end')::int)::bool; <waiting ...>
 step s1_bcount: <... completed>
 count
 -----
@@ -4765,6 +4849,12 @@ count
 (1 row)
 
 step s1_commit: COMMIT;
+step s2_continue: <... completed>
+bool
+----
+t   
+(1 row)
+
 
 starting permutation: s1_setup_seq s2_insert4 s1_begin s1_insert2 s2_break_step_down_750 s1_count s2_insert3 s2_delete34 s2_insert4 s2_insert3 s2_delete34 s2_continue s1_commit
 step s1_setup_seq: SET orioledb.enable_stopevents = true;

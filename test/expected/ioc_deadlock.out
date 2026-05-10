@@ -93,12 +93,7 @@ pg_stopevent_set
                 
 (1 row)
 
-step s1_release: SELECT pg_stopevent_reset('index_insert');
-pg_stopevent_reset
-------------------
-t                 
-(1 row)
-
+step s1_release: SELECT pg_stopevent_reset('index_insert'); <waiting ...>
 step s3_insert: <... completed>
 id1|id2|id3
 ---+---+---
@@ -110,6 +105,12 @@ step s4_insert: <... completed>
 id1|id2|id3
 ---+---+---
 (0 rows)
+
+step s1_release: <... completed>
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
 
 step s4_commit: COMMIT;
 
@@ -136,12 +137,7 @@ pg_stopevent_set
                 
 (1 row)
 
-step s1_release: SELECT pg_stopevent_reset('index_insert');
-pg_stopevent_reset
-------------------
-t                 
-(1 row)
-
+step s1_release: SELECT pg_stopevent_reset('index_insert'); <waiting ...>
 step s3_insert: <... completed>
 id1|id2|id3
 ---+---+---
@@ -153,5 +149,11 @@ step s4_insert: <... completed>
 id1|id2|id3
 ---+---+---
 (0 rows)
+
+step s1_release: <... completed>
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
 
 step s4_commit: COMMIT;

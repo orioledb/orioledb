@@ -296,12 +296,7 @@ id|val
 step s2_update_toast: UPDATE o_isorc_toast SET val = generate_string(2, 500) RETURNING *; <waiting ...>
 step s3_update_toast: UPDATE o_isorc_toast SET val = generate_string(3, 400) RETURNING *; <waiting ...>
 step s1_commit: COMMIT;
-step s1_se_set2: SELECT pg_stopevent_set('modify_start', '$applicationName == "s3"');
-pg_stopevent_set
-----------------
-                
-(1 row)
-
+step s1_se_set2: SELECT pg_stopevent_set('modify_start', '$applicationName == "s3"'); <waiting ...>
 step s2_update_toast: <... completed>
 id|val                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
 --+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -312,12 +307,13 @@ id|val
  5|420cf95170c6ba2f9564e48fccc7ee00b729591402c6e542833f2d3fb47e24327a0c5dc9f4e06caf214ccbe2701f7c7762728279bdb9fe95a939d34ec792105f46d0ae6fe0d74a3d5db450aef5c767817403a38e0c6a239925d383f68d5afd7b2caedc56690126055d0ae4ce45685c7fde2a2ea748398935b647e4b420a601e501791dabe8377fe5e573c1db3e4fa72b86c7f7c9dfd7e33e42cc40b5ccd4ef5d5fdcb9604af9b71eca08bce0955f4a91b12934d166df31860e6ef21babf8637938aa8cb657aa834dd606038da2c225eea2e29b02eaa3207598f05fbc36b27697b2bec56910c1241f706d3af9908d4559047fdf376d6ef865f28c
 (5 rows)
 
-step s1_reset: SELECT pg_stopevent_reset('modify_start');
-pg_stopevent_reset
-------------------
-t                 
+step s1_se_set2: <... completed>
+pg_stopevent_set
+----------------
+                
 (1 row)
 
+step s1_reset: SELECT pg_stopevent_reset('modify_start'); <waiting ...>
 step s3_update_toast: <... completed>
 id|val                                                                                                                                                                                                                                                                                                                                                                                                             
 --+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -327,6 +323,12 @@ id|val
  4|a9a8d7170b9ee2c655e43ad9a5c5fb1bc135d8cb879d41a1d48dbe9766befe3015ad051bab9daab2d0b92eddabf93b63764cd5899f9f5e9eef1389d27209dd66a207f819b23ff90dc3d15cbad3a3e8994e01761c26ec8abdd1d8449d2c90685ddd434ab20cded902a94dc877db0c695492c97571e19ffd7041c364304ee9c87032564c0aed3bee4d253460c6253e1203ca5107aa4ddd98502fc311688150ca084820e879772fc8a3b32e6e521b3b3d0878f9a2ed2d3f459c37638ff72b4b46196e4cc7be2a7eb9ef
  5|a9a8d7170b9ee2c655e43ad9a5c5fb1bc135d8cb879d41a1d48dbe9766befe3015ad051bab9daab2d0b92eddabf93b63764cd5899f9f5e9eef1389d27209dd66a207f819b23ff90dc3d15cbad3a3e8994e01761c26ec8abdd1d8449d2c90685ddd434ab20cded902a94dc877db0c695492c97571e19ffd7041c364304ee9c87032564c0aed3bee4d253460c6253e1203ca5107aa4ddd98502fc311688150ca084820e879772fc8a3b32e6e521b3b3d0878f9a2ed2d3f459c37638ff72b4b46196e4cc7be2a7eb9ef
 (5 rows)
+
+step s1_reset: <... completed>
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
 
 
 starting permutation: s2_setup s3_setup s1_se_set s1_begin s1_update_toast2 s2_update_toast2 s3_update_toast2 s1_commit s1_se_set2 s1_reset
@@ -356,12 +358,7 @@ id|val
 step s2_update_toast2: UPDATE o_isorc_toast SET val = val || generate_string(2, 500) RETURNING *; <waiting ...>
 step s3_update_toast2: UPDATE o_isorc_toast SET val = val || generate_string(3, 400) RETURNING *; <waiting ...>
 step s1_commit: COMMIT;
-step s1_se_set2: SELECT pg_stopevent_set('modify_start', '$applicationName == "s3"');
-pg_stopevent_set
-----------------
-                
-(1 row)
-
+step s1_se_set2: SELECT pg_stopevent_set('modify_start', '$applicationName == "s3"'); <waiting ...>
 step s2_update_toast2: <... completed>
 id|val                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
 --+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -372,12 +369,13 @@ id|val
  5|test551e8b15be547418fbf590c79023f435b2e9e6ceae7dd8da7c62f0a74071d4ea921eeedc8c29ecd667e57d288b89132c2623411305352849a23a56da226d4c9d21ef536a074f046f121cfc381d2397da977137de1e3462d86105158877c4975784175aeec4328db2ae8afb3f0f3bce90661377912e25ef84d0a444560eb25fb147bc381cef72def876c01d64ec146d17b87df386a61a2c9dbf0cb44dee81268195e54ae668b3b178ac059e71473c20cfe0b4c7b1023aea1573dbd6e7984399f1397f00f2715072061179fb3e62006b0dfd58814826761284aa062be32c3fd46c8100d4c9f64004d64beb67b6c6fb3692065f5aee0a956890cc7b1849c69d893b51f43151bdc541a12575c22c894133d5d47a5557de984ab04b0591d756b48403bf27fc48662612a8f22ca22a420cf95170c6ba2f9564e48fccc7ee00b729591402c6e542833f2d3fb47e24327a0c5dc9f4e06caf214ccbe2701f7c7762728279bdb9fe95a939d34ec792105f46d0ae6fe0d74a3d5db450aef5c767817403a38e0c6a239925d383f68d5afd7b2caedc56690126055d0ae4ce45685c7fde2a2ea748398935b647e4b420a601e501791dabe8377fe5e573c1db3e4fa72b86c7f7c9dfd7e33e42cc40b5ccd4ef5d5fdcb9604af9b71eca08bce0955f4a91b12934d166df31860e6ef21babf8637938aa8cb657aa834dd606038da2c225eea2e29b02eaa3207598f05fbc36b27697b2bec56910c1241f706d3af9908d4559047fdf376d6ef865f28c
 (5 rows)
 
-step s1_reset: SELECT pg_stopevent_reset('modify_start');
-pg_stopevent_reset
-------------------
-t                 
+step s1_se_set2: <... completed>
+pg_stopevent_set
+----------------
+                
 (1 row)
 
+step s1_reset: SELECT pg_stopevent_reset('modify_start'); <waiting ...>
 step s3_update_toast2: <... completed>
 id|val                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
 --+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -387,6 +385,12 @@ id|val
  4|test551e8b15be547418fbf590c79023f435b2e9e6ceae7dd8da7c62f0a74071d4ea921eeedc8c29ecd667e57d288b89132c2623411305352849a23a56da226d4c9d21ef536a074f046f121cfc381d2397da977137de1e3462d86105158877c4975784175aeec4328db2ae8afb3f0f3bce90661377912e25ef84d0a444560eb25fb147bc381cef72def876c01d64ec146d17b87df386a61a2c9dbf0cb44dee81268195e54ae668b3b178ac059e71473c20cfe0b4c7b1023aea1573dbd6e7984399f1397f00f2715072061179fb3e62006b0dfd58814826761284aa062be32c3fd46c8100d4c9f64004d64beb67b6c6fb3692065f5aee0a956890cc7b1849c69d893b51f43151bdc541a12575c22c894133d5d47a5557de984ab04b0591d756b48403bf27fc48662612a8f22ca22a420cf95170c6ba2f9564e48fccc7ee00b729591402c6e542833f2d3fb47e24327a0c5dc9f4e06caf214ccbe2701f7c7762728279bdb9fe95a939d34ec792105f46d0ae6fe0d74a3d5db450aef5c767817403a38e0c6a239925d383f68d5afd7b2caedc56690126055d0ae4ce45685c7fde2a2ea748398935b647e4b420a601e501791dabe8377fe5e573c1db3e4fa72b86c7f7c9dfd7e33e42cc40b5ccd4ef5d5fdcb9604af9b71eca08bce0955f4a91b12934d166df31860e6ef21babf8637938aa8cb657aa834dd606038da2c225eea2e29b02eaa3207598f05fbc36b27697b2bec56910c1241f706d3af9908d4559047fdf376d6ef865f28ca9a8d7170b9ee2c655e43ad9a5c5fb1bc135d8cb879d41a1d48dbe9766befe3015ad051bab9daab2d0b92eddabf93b63764cd5899f9f5e9eef1389d27209dd66a207f819b23ff90dc3d15cbad3a3e8994e01761c26ec8abdd1d8449d2c90685ddd434ab20cded902a94dc877db0c695492c97571e19ffd7041c364304ee9c87032564c0aed3bee4d253460c6253e1203ca5107aa4ddd98502fc311688150ca084820e879772fc8a3b32e6e521b3b3d0878f9a2ed2d3f459c37638ff72b4b46196e4cc7be2a7eb9ef
  5|test551e8b15be547418fbf590c79023f435b2e9e6ceae7dd8da7c62f0a74071d4ea921eeedc8c29ecd667e57d288b89132c2623411305352849a23a56da226d4c9d21ef536a074f046f121cfc381d2397da977137de1e3462d86105158877c4975784175aeec4328db2ae8afb3f0f3bce90661377912e25ef84d0a444560eb25fb147bc381cef72def876c01d64ec146d17b87df386a61a2c9dbf0cb44dee81268195e54ae668b3b178ac059e71473c20cfe0b4c7b1023aea1573dbd6e7984399f1397f00f2715072061179fb3e62006b0dfd58814826761284aa062be32c3fd46c8100d4c9f64004d64beb67b6c6fb3692065f5aee0a956890cc7b1849c69d893b51f43151bdc541a12575c22c894133d5d47a5557de984ab04b0591d756b48403bf27fc48662612a8f22ca22a420cf95170c6ba2f9564e48fccc7ee00b729591402c6e542833f2d3fb47e24327a0c5dc9f4e06caf214ccbe2701f7c7762728279bdb9fe95a939d34ec792105f46d0ae6fe0d74a3d5db450aef5c767817403a38e0c6a239925d383f68d5afd7b2caedc56690126055d0ae4ce45685c7fde2a2ea748398935b647e4b420a601e501791dabe8377fe5e573c1db3e4fa72b86c7f7c9dfd7e33e42cc40b5ccd4ef5d5fdcb9604af9b71eca08bce0955f4a91b12934d166df31860e6ef21babf8637938aa8cb657aa834dd606038da2c225eea2e29b02eaa3207598f05fbc36b27697b2bec56910c1241f706d3af9908d4559047fdf376d6ef865f28ca9a8d7170b9ee2c655e43ad9a5c5fb1bc135d8cb879d41a1d48dbe9766befe3015ad051bab9daab2d0b92eddabf93b63764cd5899f9f5e9eef1389d27209dd66a207f819b23ff90dc3d15cbad3a3e8994e01761c26ec8abdd1d8449d2c90685ddd434ab20cded902a94dc877db0c695492c97571e19ffd7041c364304ee9c87032564c0aed3bee4d253460c6253e1203ca5107aa4ddd98502fc311688150ca084820e879772fc8a3b32e6e521b3b3d0878f9a2ed2d3f459c37638ff72b4b46196e4cc7be2a7eb9ef
 (5 rows)
+
+step s1_reset: <... completed>
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
 
 
 starting permutation: s1_begin s1_update1_byid s1_select1 s2_begin s2_delete1 s1_commit s2_select1 s2_commit s1_select1 s2_select1

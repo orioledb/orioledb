@@ -25,11 +25,12 @@ step s3_insert: INSERT INTO o_split (SELECT repeat('x', 400) || 123);
 step s4_reset: 
 	SELECT
 		pg_stopevent_reset('page_split') a,
-		pg_stopevent_reset('relock_page') b;
+		pg_stopevent_reset('relock_page') b; <waiting ...>
+step s1_split: <... completed>
+step s2_insert: <... completed>
+step s4_reset: <... completed>
 a|b
 -+-
 t|f
 (1 row)
 
-step s1_split: <... completed>
-step s2_insert: <... completed>

@@ -13,10 +13,11 @@ step s2_checkpoint: CHECKPOINT;
 step s2_delete2: DELETE FROM o_btree_scan WHERE id < '4095';
 step s1_delete_hang: DELETE FROM o_btree_scan; <waiting ...>
 step s2_checkpoint: CHECKPOINT;
-step s2_reset: SELECT pg_stopevent_reset('seq_scan_load_internal_page');
+step s2_reset: SELECT pg_stopevent_reset('seq_scan_load_internal_page'); <waiting ...>
+step s1_delete_hang: <... completed>
+step s2_reset: <... completed>
 pg_stopevent_reset
 ------------------
 t                 
 (1 row)
 
-step s1_delete_hang: <... completed>

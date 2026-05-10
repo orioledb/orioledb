@@ -44,4 +44,4 @@ step "s4_reset" {
 		pg_stopevent_reset('page_split') a,
 		pg_stopevent_reset('relock_page') b; }
 
-permutation "s1_setup" "s2_setup" "s3_setup" "s1_split_prepare" "s4_bp" "s1_split" "s2_insert" "s3_insert" "s4_reset"
+permutation "s1_setup" "s2_setup" "s3_setup" "s1_split_prepare" "s4_bp" "s1_split" "s2_insert" "s3_insert" "s4_reset" ("s1_split", "s2_insert", "s3_insert")
