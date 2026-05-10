@@ -97,11 +97,22 @@ def dump_page(blkno, seen):
 	if proc == PAGE_STATE_INVALID_PROCNO:
 		print("    waiter chain: <empty>")
 		return
-	print("    waiter chain (head → tail):")
+
+	max_procs_val = safe_eval("max_procs")
+	try:
+		max_procs_int = int(max_procs_val)
+	except (TypeError, gdb.error):
+		max_procs_int = None
+	print(f"    waiter chain (head → tail), max_procs={max_procs_int}:")
 	steps = 0
 	while proc != PAGE_STATE_INVALID_PROCNO:
 		if steps > 1024:
 			print("      … chain too long, aborting")
+			break
+		if max_procs_int is not None and proc >= max_procs_int:
+			print(f"      [proc {proc}] out of range "
+			      f"(>= max_procs {max_procs_int}); chain "
+			      f"likely corrupt, aborting")
 			break
 		ws = safe_eval(f"lockerStates[{proc}]")
 		print(f"      [proc {proc}] = {ws}")
