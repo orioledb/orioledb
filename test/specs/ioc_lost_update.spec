@@ -49,8 +49,8 @@ step "s3_select" { SELECT * FROM o_ioc; }
 step "s3_struct" { SELECT orioledb_tbl_structure('o_ioc'::regclass, 'nue'); }
 
 permutation "s3_init" "s3_struct" "s1_begin" "s1_insert" "s1_commit" "s3_struct" "s2_begin" "s2_insert" "s2_commit" "s3_struct" "s3_select"
-permutation "s3_init" "s3_struct" "s1_setup" "s3_setup" "s1_begin" "s1_insert" "s2_begin" "s2_insert" "s2_commit" "s3_struct" "s3_select" "s3_reset" ("s1_insert") "s1_commit" "s3_struct" "s3_select"
-permutation "s3_init2" "s3_struct" "s1_setup" "s3_setup" "s1_begin" "s1_insert" "s2_begin" "s2_insert" "s2_commit" "s3_struct" "s3_select" "s3_reset" ("s1_insert") "s1_commit" "s3_struct" "s3_select"
-permutation "s3_init2" "s3_struct" "s1_setup" "s3_setup" "s1_begin" "s1_insert3" "s2_begin" "s2_insert" "s2_commit" "s3_struct" "s3_select" "s3_reset" ("s1_insert3") "s1_commit" "s3_struct" "s3_select"
-permutation "s3_init2" "s3_struct" "s1_setup" "s3_setup" "s1_begin" "s1_insert2" "s2_begin" "s2_insert" "s2_commit" "s3_struct" "s3_select" "s3_reset" ("s1_insert2") "s1_commit" "s3_struct" "s3_select"
-permutation "s3_init2" "s3_struct" "s1_setup" "s3_setup" "s1_begin" "s1_insert" "s2_begin" "s2_insert2" "s2_commit" "s3_struct" "s3_select" "s3_reset" ("s1_insert") "s1_commit" "s3_struct" "s3_select"
+permutation "s3_init" "s3_struct" "s1_setup" "s3_setup" "s1_begin" "s1_insert" "s2_begin" "s2_insert" "s2_commit" "s3_struct" "s3_select" "s3_reset" ("s1_insert") "s1_commit" ("s3_reset") "s3_struct" "s3_select"
+permutation "s3_init2" "s3_struct" "s1_setup" "s3_setup" "s1_begin" "s1_insert" "s2_begin" "s2_insert" "s2_commit" "s3_struct" "s3_select" "s3_reset" ("s1_insert") "s1_commit" ("s3_reset") "s3_struct" "s3_select"
+permutation "s3_init2" "s3_struct" "s1_setup" "s3_setup" "s1_begin" "s1_insert3" "s2_begin" "s2_insert" "s2_commit" "s3_struct" "s3_select" "s3_reset" ("s1_insert3") "s1_commit" ("s3_reset") "s3_struct" "s3_select"
+permutation "s3_init2" "s3_struct" "s1_setup" "s3_setup" "s1_begin" "s1_insert2" "s2_begin" "s2_insert" "s2_commit" "s3_struct" "s3_select" "s3_reset" ("s1_insert2") "s1_commit" ("s3_reset") "s3_struct" "s3_select"
+permutation "s3_init2" "s3_struct" "s1_setup" "s3_setup" "s1_begin" "s1_insert" "s2_begin" "s2_insert2" "s2_commit" "s3_struct" "s3_select" "s3_reset" ("s1_insert") "s1_commit" ("s3_reset") "s3_struct" "s3_select"

@@ -100,7 +100,7 @@ id1|id2|id3
   3|  3|  3
 (1 row)
 
-step s3_commit: COMMIT;
+step s3_commit: COMMIT; <waiting ...>
 step s4_insert: <... completed>
 id1|id2|id3
 ---+---+---
@@ -113,6 +113,7 @@ t
 (1 row)
 
 step s4_commit: COMMIT;
+step s3_commit: <... completed>
 
 starting permutation: s3_begin s3_setup s4_begin s4_setup s1_setup s3_insert s4_insert s1_release_s4 s1_release s3_commit s4_commit
 step s3_begin: BEGIN;
@@ -144,7 +145,7 @@ id1|id2|id3
   3|  3|  3
 (1 row)
 
-step s3_commit: COMMIT;
+step s3_commit: COMMIT; <waiting ...>
 step s4_insert: <... completed>
 id1|id2|id3
 ---+---+---
@@ -157,3 +158,4 @@ t
 (1 row)
 
 step s4_commit: COMMIT;
+step s3_commit: <... completed>

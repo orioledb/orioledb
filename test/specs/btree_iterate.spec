@@ -178,67 +178,67 @@ permutation "s1_setup_seq" "s2_bp_scan_end" "s2_insert1" "s2_insert4" "s2_evict"
 permutation "s1_setup_seq" "s2_bp_scan_end" "s2_insert3" "s2_insert2" "s2_evict" "s2_break_step_down_300" "s1_count" "s2_insert4" "s2_break_step_down_750" "s2_insert1" "s2_evict" "s2_continue" ("s1_count")
 
 # forward
-permutation "s1_setup" "s2_insert1" "s1_begin" "s1_delete" "s2_break_step_right_750" "s2_bp_scan_end" "s1_count" "s2_insert4" "s2_insert2" "s2_insert3" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup" "s2_insert3" "s1_begin" "s1_delete" "s2_break_step_right_750" "s2_bp_scan_end" "s1_count" "s2_insert2" "s2_insert4" "s2_insert1" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup" "s2_insert1" "s2_insert4" "s1_begin" "s1_delete" "s2_break_step_right_300" "s2_bp_scan_end" "s1_count" "s2_insert2" "s2_break_step_right_750" "s2_insert3" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup" "s2_insert3" "s2_insert2" "s1_begin" "s1_delete" "s2_break_step_right_300" "s2_bp_scan_end" "s1_count" "s2_insert4" "s2_break_step_right_750" "s2_insert1" "s2_continue" ("s1_count") "s1_commit"
+permutation "s1_setup" "s2_insert1" "s1_begin" "s1_delete" "s2_break_step_right_750" "s2_bp_scan_end" "s1_count" "s2_insert4" "s2_insert2" "s2_insert3" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert3" "s1_begin" "s1_delete" "s2_break_step_right_750" "s2_bp_scan_end" "s1_count" "s2_insert2" "s2_insert4" "s2_insert1" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert1" "s2_insert4" "s1_begin" "s1_delete" "s2_break_step_right_300" "s2_bp_scan_end" "s1_count" "s2_insert2" "s2_break_step_right_750" "s2_insert3" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert3" "s2_insert2" "s1_begin" "s1_delete" "s2_break_step_right_300" "s2_bp_scan_end" "s1_count" "s2_insert4" "s2_break_step_right_750" "s2_insert1" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
 
 # backward
-permutation "s1_setup" "s2_insert1" "s1_begin" "s1_delete" "s2_break_step_left_750" "s2_bp_scan_end" "s1_bcount" "s2_insert4" "s2_insert2" "s2_insert3" "s2_continue" ("s1_bcount") "s1_commit"
-permutation "s1_setup" "s2_insert3" "s1_begin" "s1_delete" "s2_break_step_left_750" "s2_bp_scan_end" "s1_bcount" "s2_insert2" "s2_insert4" "s2_insert1" "s2_continue" ("s1_bcount") "s1_commit"
-permutation "s1_setup" "s2_insert1" "s2_insert4" "s1_begin" "s1_delete" "s2_break_step_left_1200" "s2_bp_scan_end" "s1_bcount" "s2_insert2" "s2_break_step_left_750" "s2_insert3" "s2_continue" ("s1_bcount") "s1_commit"
-permutation "s1_setup" "s2_insert3" "s2_insert2" "s1_begin" "s1_delete" "s2_break_step_left_1200" "s2_bp_scan_end" "s1_bcount" "s2_insert4" "s2_break_step_left_750" "s2_insert1" "s2_continue" ("s1_bcount") "s1_commit"
+permutation "s1_setup" "s2_insert1" "s1_begin" "s1_delete" "s2_break_step_left_750" "s2_bp_scan_end" "s1_bcount" "s2_insert4" "s2_insert2" "s2_insert3" "s2_continue" ("s1_bcount") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert3" "s1_begin" "s1_delete" "s2_break_step_left_750" "s2_bp_scan_end" "s1_bcount" "s2_insert2" "s2_insert4" "s2_insert1" "s2_continue" ("s1_bcount") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert1" "s2_insert4" "s1_begin" "s1_delete" "s2_break_step_left_1200" "s2_bp_scan_end" "s1_bcount" "s2_insert2" "s2_break_step_left_750" "s2_insert3" "s2_continue" ("s1_bcount") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert3" "s2_insert2" "s1_begin" "s1_delete" "s2_break_step_left_1200" "s2_bp_scan_end" "s1_bcount" "s2_insert4" "s2_break_step_left_750" "s2_insert1" "s2_continue" ("s1_bcount") "s1_commit" ("s2_continue")
 
 # sequential
-permutation "s1_setup_seq" "s2_insert1" "s1_begin" "s1_delete" "s2_break_step_down_750" "s2_bp_scan_end" "s1_count" "s2_insert4" "s2_insert2" "s2_insert3" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert3" "s1_begin" "s1_delete" "s2_break_step_down_750" "s2_bp_scan_end" "s1_count" "s2_insert2" "s2_insert4" "s2_insert1" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s1_begin" "s1_delete" "s2_break_step_down_300" "s2_bp_scan_end" "s1_count" "s2_insert2" "s2_break_step_down_750" "s2_insert3" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert3" "s2_insert2" "s1_begin" "s1_delete" "s2_break_step_down_300" "s2_bp_scan_end" "s1_count" "s2_insert4" "s2_break_step_down_750" "s2_insert1" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert1" "s1_begin" "s1_delete" "s2_evict" "s2_break_step_down_750" "s2_bp_scan_end" "s1_count" "s2_insert4" "s2_insert2" "s2_insert3" "s2_evict" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert3" "s1_begin" "s1_delete" "s2_evict" "s2_break_step_down_750" "s2_bp_scan_end" "s1_count" "s2_insert2" "s2_insert4" "s2_insert1" "s2_evict" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s1_begin" "s1_delete" "s2_evict" "s2_break_step_down_300" "s2_bp_scan_end" "s1_count" "s2_insert2" "s2_evict" "s2_break_step_down_750" "s2_insert3" "s2_evict" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert3" "s2_insert2" "s1_begin" "s1_delete" "s2_evict" "s2_break_step_down_300" "s2_bp_scan_end" "s1_count" "s2_insert4" "s2_evict" "s2_break_step_down_750" "s2_insert1" "s2_evict" "s2_continue" ("s1_count") "s1_commit"
+permutation "s1_setup_seq" "s2_insert1" "s1_begin" "s1_delete" "s2_break_step_down_750" "s2_bp_scan_end" "s1_count" "s2_insert4" "s2_insert2" "s2_insert3" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert3" "s1_begin" "s1_delete" "s2_break_step_down_750" "s2_bp_scan_end" "s1_count" "s2_insert2" "s2_insert4" "s2_insert1" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s1_begin" "s1_delete" "s2_break_step_down_300" "s2_bp_scan_end" "s1_count" "s2_insert2" "s2_break_step_down_750" "s2_insert3" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert3" "s2_insert2" "s1_begin" "s1_delete" "s2_break_step_down_300" "s2_bp_scan_end" "s1_count" "s2_insert4" "s2_break_step_down_750" "s2_insert1" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert1" "s1_begin" "s1_delete" "s2_evict" "s2_break_step_down_750" "s2_bp_scan_end" "s1_count" "s2_insert4" "s2_insert2" "s2_insert3" "s2_evict" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert3" "s1_begin" "s1_delete" "s2_evict" "s2_break_step_down_750" "s2_bp_scan_end" "s1_count" "s2_insert2" "s2_insert4" "s2_insert1" "s2_evict" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s1_begin" "s1_delete" "s2_evict" "s2_break_step_down_300" "s2_bp_scan_end" "s1_count" "s2_insert2" "s2_evict" "s2_break_step_down_750" "s2_insert3" "s2_evict" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert3" "s2_insert2" "s1_begin" "s1_delete" "s2_evict" "s2_break_step_down_300" "s2_bp_scan_end" "s1_count" "s2_insert4" "s2_evict" "s2_break_step_down_750" "s2_insert1" "s2_evict" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
 
 # forward
-permutation "s1_setup" "s2_insert1" "s2_insert4" "s1_begin" "s2_break_step_right_750" "s1_count" "s2_delete_mass" "s2_insert2" "s2_insert3" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup" "s2_insert1" "s2_insert4" "s2_insert3" "s1_begin" "s2_break_step_right_750" "s1_count" "s2_delete_mass" "s2_insert2" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup" "s2_insert1" "s2_insert4" "s2_insert2" "s1_begin" "s2_break_step_right_750" "s1_count" "s2_delete_mass" "s2_insert3" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup" "s2_insert3" "s2_insert4" "s2_insert2" "s1_begin" "s2_break_step_right_750" "s1_count" "s2_delete_mass" "s2_insert1" "s2_continue" ("s1_count") "s1_commit"
+permutation "s1_setup" "s2_insert1" "s2_insert4" "s1_begin" "s2_break_step_right_750" "s1_count" "s2_delete_mass" "s2_insert2" "s2_insert3" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert1" "s2_insert4" "s2_insert3" "s1_begin" "s2_break_step_right_750" "s1_count" "s2_delete_mass" "s2_insert2" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert1" "s2_insert4" "s2_insert2" "s1_begin" "s2_break_step_right_750" "s1_count" "s2_delete_mass" "s2_insert3" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert3" "s2_insert4" "s2_insert2" "s1_begin" "s2_break_step_right_750" "s1_count" "s2_delete_mass" "s2_insert1" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
 
 # backward
-permutation "s1_setup" "s2_insert1" "s2_insert4" "s1_begin" "s2_break_step_left_750" "s1_bcount" "s2_delete_mass" "s2_insert2" "s2_insert3" "s2_continue" ("s1_bcount") "s1_commit"
-permutation "s1_setup" "s2_insert1" "s2_insert4" "s2_insert3" "s1_begin" "s2_break_step_left_1200" "s1_bcount" "s2_delete_mass" "s2_insert2" "s2_continue" ("s1_bcount") "s1_commit"
-permutation "s1_setup" "s2_insert1" "s2_insert4" "s2_insert2" "s1_begin" "s2_break_step_left_750" "s1_bcount" "s2_delete_mass" "s2_insert3" "s2_continue" ("s1_bcount") "s1_commit"
-permutation "s1_setup" "s2_insert3" "s2_insert4" "s2_insert2" "s1_begin" "s2_break_step_left_1200" "s1_bcount" "s2_delete_mass" "s2_insert1" "s2_continue" ("s1_bcount") "s1_commit"
+permutation "s1_setup" "s2_insert1" "s2_insert4" "s1_begin" "s2_break_step_left_750" "s1_bcount" "s2_delete_mass" "s2_insert2" "s2_insert3" "s2_continue" ("s1_bcount") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert1" "s2_insert4" "s2_insert3" "s1_begin" "s2_break_step_left_1200" "s1_bcount" "s2_delete_mass" "s2_insert2" "s2_continue" ("s1_bcount") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert1" "s2_insert4" "s2_insert2" "s1_begin" "s2_break_step_left_750" "s1_bcount" "s2_delete_mass" "s2_insert3" "s2_continue" ("s1_bcount") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert3" "s2_insert4" "s2_insert2" "s1_begin" "s2_break_step_left_1200" "s1_bcount" "s2_delete_mass" "s2_insert1" "s2_continue" ("s1_bcount") "s1_commit" ("s2_continue")
 
 # sequential
-permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s1_begin" "s2_break_step_down_750" "s1_count" "s2_delete_mass" "s2_insert2" "s2_insert3" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s2_insert3" "s1_begin" "s2_break_step_down_750" "s1_count" "s2_delete_mass" "s2_insert2" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s2_insert2" "s1_begin" "s2_break_step_down_750" "s1_count" "s2_delete_mass" "s2_insert3" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert3" "s2_insert4" "s2_insert2" "s1_begin" "s2_break_step_right_750" "s1_count" "s2_delete_mass" "s2_insert1" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s1_begin" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_delete_mass" "s2_insert2" "s2_insert3" "s2_evict" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s2_insert3" "s1_begin" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_delete_mass" "s2_insert2" "s2_evict" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s2_insert2" "s1_begin" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_delete_mass" "s2_insert3" "s2_evict" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert3" "s2_insert4" "s2_insert2" "s1_begin" "s2_evict" "s2_break_step_right_750" "s1_count" "s2_delete_mass" "s2_insert1" "s2_evict" "s2_continue" ("s1_count") "s1_commit"
+permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s1_begin" "s2_break_step_down_750" "s1_count" "s2_delete_mass" "s2_insert2" "s2_insert3" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s2_insert3" "s1_begin" "s2_break_step_down_750" "s1_count" "s2_delete_mass" "s2_insert2" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s2_insert2" "s1_begin" "s2_break_step_down_750" "s1_count" "s2_delete_mass" "s2_insert3" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert3" "s2_insert4" "s2_insert2" "s1_begin" "s2_break_step_right_750" "s1_count" "s2_delete_mass" "s2_insert1" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s1_begin" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_delete_mass" "s2_insert2" "s2_insert3" "s2_evict" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s2_insert3" "s1_begin" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_delete_mass" "s2_insert2" "s2_evict" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert1" "s2_insert4" "s2_insert2" "s1_begin" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_delete_mass" "s2_insert3" "s2_evict" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert3" "s2_insert4" "s2_insert2" "s1_begin" "s2_evict" "s2_break_step_right_750" "s1_count" "s2_delete_mass" "s2_insert1" "s2_evict" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
 
 # forward
-permutation "s1_setup" "s2_insert4" "s1_begin" "s1_insert2" "s2_break_step_right_750" "s1_count" "s2_insert3" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup" "s2_insert3" "s1_begin" "s1_insert1" "s2_break_step_right_750" "s1_count" "s2_insert4" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup" "s2_insert1" "s1_begin" "s1_insert3" "s2_break_step_right_750" "s1_count" "s2_insert2" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup" "s2_insert2" "s1_begin" "s1_insert4" "s2_break_step_right_750" "s1_count" "s2_insert1" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" ("s1_count") "s1_commit"
+permutation "s1_setup" "s2_insert4" "s1_begin" "s1_insert2" "s2_break_step_right_750" "s1_count" "s2_insert3" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert3" "s1_begin" "s1_insert1" "s2_break_step_right_750" "s1_count" "s2_insert4" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert1" "s1_begin" "s1_insert3" "s2_break_step_right_750" "s1_count" "s2_insert2" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert2" "s1_begin" "s1_insert4" "s2_break_step_right_750" "s1_count" "s2_insert1" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
 
 # backward
-permutation "s1_setup" "s2_insert4" "s1_begin" "s1_insert2" "s2_break_step_left_750" "s1_bcount" "s2_insert3" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" ("s1_bcount") "s1_commit"
-permutation "s1_setup" "s2_insert3" "s1_begin" "s1_insert1" "s2_break_step_left_1200" "s1_bcount" "s2_insert4" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" ("s1_bcount") "s1_commit"
-permutation "s1_setup" "s2_insert1" "s1_begin" "s1_insert3" "s2_break_step_left_750" "s1_bcount" "s2_insert2" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" ("s1_bcount") "s1_commit"
-permutation "s1_setup" "s2_insert2" "s1_begin" "s1_insert4" "s2_break_step_left_1200" "s1_bcount" "s2_insert1" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" ("s1_bcount") "s1_commit"
+permutation "s1_setup" "s2_insert4" "s1_begin" "s1_insert2" "s2_break_step_left_750" "s1_bcount" "s2_insert3" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" ("s1_bcount") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert3" "s1_begin" "s1_insert1" "s2_break_step_left_1200" "s1_bcount" "s2_insert4" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" ("s1_bcount") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert1" "s1_begin" "s1_insert3" "s2_break_step_left_750" "s1_bcount" "s2_insert2" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" ("s1_bcount") "s1_commit" ("s2_continue")
+permutation "s1_setup" "s2_insert2" "s1_begin" "s1_insert4" "s2_break_step_left_1200" "s1_bcount" "s2_insert1" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" ("s1_bcount") "s1_commit" ("s2_continue")
 
 # sequential
-permutation "s1_setup_seq" "s2_insert4" "s1_begin" "s1_insert2" "s2_break_step_down_750" "s1_count" "s2_insert3" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert3" "s1_begin" "s1_insert1" "s2_break_step_down_750" "s1_count" "s2_insert4" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert1" "s1_begin" "s1_insert3" "s2_break_step_down_750" "s1_count" "s2_insert2" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert2" "s1_begin" "s1_insert4" "s2_break_step_down_750" "s1_count" "s2_insert1" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert4" "s1_begin" "s1_insert2" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert3" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_evict" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert3" "s1_begin" "s1_insert1" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert4" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_evict" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert1" "s1_begin" "s1_insert3" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert2" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_evict" "s2_continue" ("s1_count") "s1_commit"
-permutation "s1_setup_seq" "s2_insert2" "s1_begin" "s1_insert4" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert1" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_evict" "s2_continue" ("s1_count") "s1_commit"
+permutation "s1_setup_seq" "s2_insert4" "s1_begin" "s1_insert2" "s2_break_step_down_750" "s1_count" "s2_insert3" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert3" "s1_begin" "s1_insert1" "s2_break_step_down_750" "s1_count" "s2_insert4" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert1" "s1_begin" "s1_insert3" "s2_break_step_down_750" "s1_count" "s2_insert2" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert2" "s1_begin" "s1_insert4" "s2_break_step_down_750" "s1_count" "s2_insert1" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert4" "s1_begin" "s1_insert2" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert3" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_evict" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert3" "s1_begin" "s1_insert1" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert4" "s2_delete34" "s2_insert4" "s2_insert3" "s2_delete34" "s2_evict" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert1" "s1_begin" "s1_insert3" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert2" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_evict" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")
+permutation "s1_setup_seq" "s2_insert2" "s1_begin" "s1_insert4" "s2_evict" "s2_break_step_down_750" "s1_count" "s2_insert1" "s2_delete12" "s2_insert1" "s2_insert2" "s2_delete12" "s2_evict" "s2_continue" ("s1_count") "s1_commit" ("s2_continue")

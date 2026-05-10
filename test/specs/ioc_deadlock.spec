@@ -59,5 +59,5 @@ step "s4_insert" { INSERT INTO o_ioc VALUES (3, 4, 3) ON CONFLICT (id3) DO NOTHI
 permutation "s1_begin" "s2_begin" "s3_begin" "s4_begin" "s1_insert" "s2_insert" "s3_insert" "s4_insert" "s2_rollback" "s1_rollback"  "s3_commit" "s4_commit"
 permutation "s1_begin" "s2_begin" "s3_begin" "s4_begin" "s1_insert" "s2_insert" "s3_insert" "s4_insert" "s1_rollback" "s2_rollback"  "s3_commit" "s4_commit"
 
-permutation "s3_begin" "s3_setup" "s4_begin" "s4_setup" "s1_setup" "s3_insert" "s4_insert" "s1_release_s3" "s1_release" ("s3_insert", "s4_insert") "s3_commit" "s4_commit"
-permutation "s3_begin" "s3_setup" "s4_begin" "s4_setup" "s1_setup" "s3_insert" "s4_insert" "s1_release_s4" "s1_release" ("s3_insert", "s4_insert") "s3_commit" "s4_commit"
+permutation "s3_begin" "s3_setup" "s4_begin" "s4_setup" "s1_setup" "s3_insert" "s4_insert" "s1_release_s3" "s1_release" ("s3_insert", "s4_insert") "s3_commit" ("s1_release") "s4_commit"
+permutation "s3_begin" "s3_setup" "s4_begin" "s4_setup" "s1_setup" "s3_insert" "s4_insert" "s1_release_s4" "s1_release" ("s3_insert", "s4_insert") "s3_commit" ("s1_release") "s4_commit"
