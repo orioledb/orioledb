@@ -96,9 +96,10 @@ stack_page_split(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		itemsize = BTREE_PAGE_GET_ITEM_SIZE(img, &loc);
 
 		page_locator_insert_item(new_page, &newLoc, itemsize);
-		memcpy(BTREE_PAGE_LOCATOR_GET_ITEM(new_page, &newLoc),
-			   BTREE_PAGE_LOCATOR_GET_ITEM(img, &loc),
-			   itemsize);
+		PageMemCpy(new_page,
+				   BTREE_PAGE_LOCATOR_GET_ITEM(new_page, &newLoc),
+				   BTREE_PAGE_LOCATOR_GET_ITEM(img, &loc),
+				   itemsize);
 		BTREE_PAGE_SET_ITEM_FLAGS(new_page, &newLoc, BTREE_PAGE_GET_ITEM_FLAGS(stack[level].img, &loc));
 
 		BTREE_PAGE_LOCATOR_NEXT(img, &loc);
@@ -109,9 +110,9 @@ stack_page_split(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 	page_locator_insert_item(new_page, &newLoc,
 							 MAXALIGN(tuplesize) + header_size);
 	tuple_ptr = BTREE_PAGE_LOCATOR_GET_ITEM(new_page, &newLoc);
-	memcpy(tuple_ptr, tupleheader, header_size);
+	PageMemCpy(new_page, tuple_ptr, tupleheader, header_size);
 	tuple_ptr += header_size;
-	memcpy(tuple_ptr, tuple.data, tuplesize);
+	PageMemCpy(new_page, tuple_ptr, tuple.data, tuplesize);
 	BTREE_PAGE_SET_ITEM_FLAGS(new_page, &newLoc, tuple.formatFlags);
 
 	/* Setup the new high key on the left page */
@@ -163,9 +164,9 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		page_locator_insert_item(stack[level].img, &stack[level].loc,
 								 MAXALIGN(tuplesize) + header_size);
 		tuple_ptr = BTREE_PAGE_LOCATOR_GET_ITEM(stack[level].img, &stack[level].loc);
-		memcpy(tuple_ptr, tupleheader, header_size);
+		PageMemCpy(stack[level].img, tuple_ptr, tupleheader, header_size);
 		tuple_ptr += header_size;
-		memcpy(tuple_ptr, tuple.data, tuplesize);
+		PageMemCpy(stack[level].img, tuple_ptr, tuple.data, tuplesize);
 		BTREE_PAGE_SET_ITEM_FLAGS(stack[level].img, &stack[level].loc, tuple.formatFlags);
 
 		BTREE_PAGE_LOCATOR_NEXT(stack[level].img, &stack[level].loc);
@@ -248,7 +249,7 @@ put_item_to_stack(BTreeDescr *desc, OIndexBuildStackItem *stack, int level,
 		}
 
 		/* copy new page to stack */
-		memcpy(stack[level].img, new_page, ORIOLEDB_BLCKSZ);
+		PageMemCpy(stack[level].img, stack[level].img, new_page, ORIOLEDB_BLCKSZ);
 		BTREE_PAGE_LOCATOR_TAIL(stack[level].img, &stack[level].loc);
 
 		put_downlink_to_stack(desc, stack, level + 1, downlink,

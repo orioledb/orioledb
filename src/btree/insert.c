@@ -202,9 +202,10 @@ o_btree_finish_root_split_internal(BTreeDescr *desc,
 	left_page = O_GET_IN_MEMORY_PAGE(left_blkno);
 	init_new_btree_page(desc, left_blkno, O_BTREE_FLAG_LEFTMOST, PAGE_GET_LEVEL(p), false);
 
-	memcpy(left_page + O_PAGE_HEADER_SIZE,
-		   p + O_PAGE_HEADER_SIZE,
-		   ORIOLEDB_BLCKSZ - O_PAGE_HEADER_SIZE);
+	PageMemCpy(left_page,
+			   left_page + O_PAGE_HEADER_SIZE,
+			   p + O_PAGE_HEADER_SIZE,
+			   ORIOLEDB_BLCKSZ - O_PAGE_HEADER_SIZE);
 
 	page_block_reads(desc->rootInfo.rootPageBlkno);
 
@@ -229,9 +230,9 @@ o_btree_finish_root_split_internal(BTreeDescr *desc,
 	page_locator_insert_item(p, &loc, MAXALIGN(insert_item->tuplen) + BTreeNonLeafTuphdrSize);
 
 	ptr = BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
-	memcpy(ptr, insert_item->tupheader, BTreeNonLeafTuphdrSize);
+	PageMemCpy(p, ptr, insert_item->tupheader, BTreeNonLeafTuphdrSize);
 	ptr += BTreeNonLeafTuphdrSize;
-	memcpy(ptr, insert_item->tuple.data, insert_item->tuplen);
+	PageMemCpy(p, ptr, insert_item->tuple.data, insert_item->tuplen);
 	BTREE_PAGE_SET_ITEM_FLAGS(p, &loc, insert_item->tuple.formatFlags);
 
 	if (!(insert_item->tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
@@ -241,7 +242,7 @@ o_btree_finish_root_split_internal(BTreeDescr *desc,
 													   O_PAGE_GET_CHANGE_COUNT(left_page));
 	BTREE_PAGE_LOCATOR_FIRST(p, &loc);
 	ptr = BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
-	memcpy(ptr, &internal_header, BTreeNonLeafTuphdrSize);
+	PageMemCpy(p, ptr, &internal_header, BTreeNonLeafTuphdrSize);
 
 	MARK_DIRTY(desc, left_blkno);
 	MARK_DIRTY(desc, desc->rootInfo.rootPageBlkno);
@@ -704,7 +705,23 @@ merge_waited_tuples(BTreeDescr *desc, Page p, BTreeSplitItems *outputItems,
 		pos = accepted[acceptedTop].outputPos;
 		waiterIdx = accepted[acceptedTop].waiterIdx;
 		keyLen = accepted[acceptedTop].keyLen;
+
+		/*
+		 * Bookkeeping invariants — every popped slot must point at a real
+		 * accepted-waiter entry in outputItems[].  If any of these fail we'd
+		 * be shifting / size-adjusting unrelated memory and silently
+		 * corrupting outputItems / totalSize.
+		 */
+		Assert(pos >= 0 && pos < outputIndex);
+		Assert(outputIndex == outputItems->itemsCount);
+		Assert(waiterIdx >= 0 && waiterIdx < tupleWaitersCount);
+		Assert(tupleWaiterInfos[waiterIdx].inserted);
+		Assert(keyLen > 0);
+
 		itemSize = outputItems->items[pos].size;
+		Assert(itemSize > 0);
+		Assert(totalSize >= itemSize);
+		Assert(totalCount > 0);
 
 		tupleWaiterInfos[waiterIdx].inserted = false;
 		totalSize -= itemSize;
@@ -1026,9 +1043,9 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 
 			/* Copy new tuple and header */
 			ptr = BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
-			memcpy(ptr, &tuphdr, BTreeLeafTuphdrSize);
+			PageMemCpy(p, ptr, &tuphdr, BTreeLeafTuphdrSize);
 			ptr += BTreeLeafTuphdrSize;
-			memcpy(ptr, tuple.data, tuplen);
+			PageMemCpy(p, ptr, tuple.data, tuplen);
 			BTREE_PAGE_SET_ITEM_FLAGS(p, &loc, tuple.formatFlags);
 
 			if (!(tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
@@ -1225,9 +1242,9 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 
 		/* Copy new tuple and header */
 		ptr = BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
-		memcpy(ptr, insert_item->tupheader, tupheaderlen);
+		PageMemCpy(p, ptr, insert_item->tupheader, tupheaderlen);
 		ptr += tupheaderlen;
-		memcpy(ptr, insert_item->tuple.data, insert_item->tuplen);
+		PageMemCpy(p, ptr, insert_item->tuple.data, insert_item->tuplen);
 		BTREE_PAGE_SET_ITEM_FLAGS(p, &loc, insert_item->tuple.formatFlags);
 
 		if (!(insert_item->tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))

@@ -52,9 +52,10 @@ partial_load_hikeys_chunk(PartialPageState *partial, Page img)
 	Assert(chunkBegin >= 0 && chunkBegin <= ORIOLEDB_BLCKSZ);
 	Assert(chunkEnd >= 0 && chunkEnd <= ORIOLEDB_BLCKSZ);
 
-	memcpy((Pointer) img + chunkBegin,
-		   (Pointer) src + chunkBegin,
-		   chunkEnd - chunkBegin);
+	PageMemCpy(img,
+			   (Pointer) img + chunkBegin,
+			   (Pointer) src + chunkBegin,
+			   chunkEnd - chunkBegin);
 
 	pg_read_barrier();
 
@@ -140,9 +141,10 @@ partial_load_chunk(PartialPageState *partial, Page img,
 	VALGRIND_CHECK_MEM_IS_DEFINED((Pointer) src + chunkBegin,
 								  chunkEnd - chunkBegin);
 
-	memcpy((Pointer) img + chunkBegin,
-		   (Pointer) src + chunkBegin,
-		   chunkEnd - chunkBegin);
+	PageMemCpy(img,
+			   (Pointer) img + chunkBegin,
+			   (Pointer) src + chunkBegin,
+			   chunkEnd - chunkBegin);
 
 	pg_read_barrier();
 
@@ -454,7 +456,7 @@ page_locator_insert_item(Page p, BTreePageItemLocator *locator,
 
 	/* Shift the data after insert location */
 	Assert(itemPtr <= endPtr);
-	memmove(itemPtr + dataShift, itemPtr, endPtr - itemPtr);
+	PageMemMove(p, itemPtr + dataShift, itemPtr, endPtr - itemPtr);
 
 	/* Adjust chunks parameters */
 	for (i = locator->chunkOffset + 1; i < header->chunksCount; i++)
@@ -472,7 +474,8 @@ page_locator_insert_item(Page p, BTreePageItemLocator *locator,
 		 * before insert location and adjust those locations in the items
 		 * array.
 		 */
-		memmove(firstItemPtr + itemsShift, firstItemPtr, itemPtr - firstItemPtr);
+		PageMemMove(p, firstItemPtr + itemsShift, firstItemPtr,
+					itemPtr - firstItemPtr);
 		for (i = 0; i < locator->itemOffset; i++)
 			locator->chunk->items[i] += itemsShift;
 	}
@@ -565,7 +568,7 @@ page_locator_resize_item(Page p, BTreePageItemLocator *locator,
 	Assert(endPtr + dataShift <= (Pointer) p + ORIOLEDB_BLCKSZ);
 
 	/* Shift the data after the item */
-	memmove(nextItemPtr + dataShift, nextItemPtr, endPtr - nextItemPtr);
+	PageMemMove(p, nextItemPtr + dataShift, nextItemPtr, endPtr - nextItemPtr);
 
 	/* Adjust chunk positions */
 	for (i = locator->chunkOffset + 1; i < header->chunksCount; i++)
@@ -643,22 +646,22 @@ page_merge_chunks(Page p, OffsetNumber index)
 	{
 		for (i = 0; i < count1; i++)
 			loc1.chunk->items[i] += shift1;
-		memmove(chunk1DataPtr + shift1,
-				chunk1DataPtr,
-				chunk1EndPtr - chunk1DataPtr);
+		PageMemMove(p, chunk1DataPtr + shift1,
+					chunk1DataPtr,
+					chunk1EndPtr - chunk1DataPtr);
 	}
 
 	if (shift2 != 0)
 	{
-		memmove(chunk2DataPtr - shift2,
-				chunk2DataPtr,
-				endPtr - chunk2DataPtr);
+		PageMemMove(p, chunk2DataPtr - shift2,
+					chunk2DataPtr,
+					endPtr - chunk2DataPtr);
 		header->dataSize -= shift2;
 	}
 
-	memcpy((Pointer) loc1.chunk + sizeof(LocationIndex) * count1,
-		   tmpItems,
-		   sizeof(LocationIndex) * count2);
+	PageMemCpy(p, (Pointer) loc1.chunk + sizeof(LocationIndex) * count1,
+			   tmpItems,
+			   sizeof(LocationIndex) * count2);
 
 	hikeyShift = MAXALIGN(offsetof(BTreePageHeader, chunkDesc) + sizeof(BTreePageChunkDesc) * header->chunksCount) -
 		MAXALIGN(offsetof(BTreePageHeader, chunkDesc) + sizeof(BTreePageChunkDesc) * (header->chunksCount - 1));
@@ -693,9 +696,9 @@ page_merge_chunks(Page p, OffsetNumber index)
 	}
 
 	if (hikeyShift > 0)
-		memmove(p1_1, p1_2, len1);
+		PageMemMove(p, p1_1, p1_2, len1);
 
-	memmove(p2_1, p2_2, len2);
+	PageMemMove(p, p2_1, p2_2, len2);
 
 	header->hikeysEnd -= hikeyShift2;
 	header->chunksCount--;
@@ -752,7 +755,8 @@ page_locator_delete_item(Page p, BTreePageItemLocator *locator)
 	if (itemsShift != 0)
 	{
 		/* Shift the data before deleted item when items arrays is shorten. */
-		memmove(firstItemPtr - itemsShift, firstItemPtr, itemPtr - firstItemPtr);
+		PageMemMove(p, firstItemPtr - itemsShift, firstItemPtr,
+					itemPtr - firstItemPtr);
 
 		/* Shift item pointers of those items */
 		for (i = 0; i < locator->itemOffset; i++)
@@ -760,7 +764,8 @@ page_locator_delete_item(Page p, BTreePageItemLocator *locator)
 	}
 
 	/* Move the data after deleted item */
-	memmove(itemPtr - itemsShift, itemPtr + itemsize, endPtr - itemPtr - itemsize);
+	PageMemMove(p, itemPtr - itemsShift, itemPtr + itemsize,
+				endPtr - itemPtr - itemsize);
 
 	/* Adjust position of following chunks */
 	for (i = locator->chunkOffset + 1; i < header->chunksCount; i++)
@@ -859,9 +864,9 @@ page_split_chunk(Page p, BTreePageItemLocator *locator,
 			leftChunkKeysFixed = false;
 		locator->chunk->items[i] -= leftItemsShift;
 	}
-	memmove(firstItemPtr - leftItemsShift,
-			firstItemPtr,
-			itemPtr - firstItemPtr);
+	PageMemMove(p, firstItemPtr - leftItemsShift,
+				firstItemPtr,
+				itemPtr - firstItemPtr);
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
 
@@ -869,8 +874,7 @@ page_split_chunk(Page p, BTreePageItemLocator *locator,
 	dataShift = MAXALIGN(sizeof(LocationIndex) * rightItemsCount) +
 		MAXALIGN(sizeof(LocationIndex) * leftItemsCount) -
 		MAXALIGN(sizeof(LocationIndex) * locator->chunkItemsCount);
-	Assert(itemPtr + dataShift + (endPtr - itemPtr) <= (Pointer) p + ORIOLEDB_BLCKSZ);
-	memmove(itemPtr + dataShift, itemPtr, endPtr - itemPtr);
+	PageMemMove(p, itemPtr + dataShift, itemPtr, endPtr - itemPtr);
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
 
@@ -878,7 +882,8 @@ page_split_chunk(Page p, BTreePageItemLocator *locator,
 	rightChunkPtr = itemPtr -
 		MAXALIGN(sizeof(LocationIndex) * locator->chunkItemsCount) +
 		MAXALIGN(sizeof(LocationIndex) * leftItemsCount);
-	memcpy(rightChunkPtr, tmpItems, sizeof(LocationIndex) * rightItemsCount);
+	PageMemCpy(p, rightChunkPtr, tmpItems,
+			   sizeof(LocationIndex) * rightItemsCount);
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
 
@@ -895,8 +900,9 @@ page_split_chunk(Page p, BTreePageItemLocator *locator,
 
 	/* Move hikeys */
 	Assert(hikeyEndPtr + hikeyShift <= (Pointer) p + hikeysEnd);
-	memmove(hikeyPtr + hikeyShift, hikeyPtr, hikeyEndPtr - hikeyPtr);
-	memmove(firstHikeyPtr + chunkDescShift, firstHikeyPtr, hikeyPtr - firstHikeyPtr);
+	PageMemMove(p, hikeyPtr + hikeyShift, hikeyPtr, hikeyEndPtr - hikeyPtr);
+	PageMemMove(p, firstHikeyPtr + chunkDescShift, firstHikeyPtr,
+				hikeyPtr - firstHikeyPtr);
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
 
@@ -1073,9 +1079,10 @@ page_split_chunk_if_needed(BTreeDescr *desc, Page p, BTreePageItemLocator *locat
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(p, ORIOLEDB_BLCKSZ);
 
-	memcpy(p + SHORT_GET_LOCATION(header->chunkDesc[chunkOffset].hikeyShortLocation),
-		   newHikey.fixedData,
-		   bestHiKeySize);
+	PageMemCpy(p,
+			   p + SHORT_GET_LOCATION(header->chunkDesc[chunkOffset].hikeyShortLocation),
+			   newHikey.fixedData,
+			   bestHiKeySize);
 	header->chunkDesc[chunkOffset].hikeyFlags = newHikey.tuple.formatFlags;
 	if (!(newHikey.tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
 		header->flags &= ~O_BTREE_FLAG_HIKEYS_FIXED;
@@ -1296,7 +1303,7 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 
 			if (items[i].data >= p && items[i].data < p + ORIOLEDB_BLCKSZ &&
 				ptr > items[i].data)
-				memmove(ptr, items[i].data, items[i].size);
+				PageMemMove(p, ptr, items[i].data, items[i].size);
 		}
 
 		ptr -= MAXALIGN(sizeof(LocationIndex) * chunkItemsCount);
@@ -1312,7 +1319,8 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 
 		chunkItemsCount = chunkOffsets[j + 1] - chunkOffsets[j];
 		i = chunkOffsets[j];
-		memmove(ptr, &itemsArray[i], sizeof(LocationIndex) * chunkItemsCount);
+		PageMemMove(p, ptr, &itemsArray[i],
+					sizeof(LocationIndex) * chunkItemsCount);
 		chunk = (BTreePageChunk *) ptr;
 		header->chunkDesc[j].shortLocation = LOCATION_GET_SHORT(ptr - (Pointer) p);
 		header->chunkDesc[j].offset = chunkOffsets[j];
@@ -1323,7 +1331,7 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 		{
 			if (!(items[i].data >= p && items[i].data < p + ORIOLEDB_BLCKSZ) ||
 				ptr < items[i].data)
-				memmove(ptr, items[i].data, items[i].size);
+				PageMemMove(p, ptr, items[i].data, items[i].size);
 			ptr += items[i].size;
 		}
 
@@ -1347,7 +1355,7 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 			if (!(chunkHikeyTuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
 				fixedKeys = false;
 			if (chunkHikeyTuple.data != hikeysPtr)
-				memcpy(hikeysPtr, chunkHikeyTuple.data, chunkHikeySize);
+				PageMemCpy(p, hikeysPtr, chunkHikeyTuple.data, chunkHikeySize);
 			header->chunkDesc[j - 1].hikeyFlags = chunkHikeyTuple.formatFlags;
 			header->chunkDesc[j - 1].hikeyShortLocation = LOCATION_GET_SHORT(hikeysPtr - (Pointer) p);
 			hikeysPtr += chunkHikeySize;
@@ -1360,7 +1368,7 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 	{
 		if (!(hikey.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
 			fixedKeys = false;
-		memcpy(hikeysPtr, hikey.data, hikeySize);
+		PageMemCpy(p, hikeysPtr, hikey.data, hikeySize);
 		if (hikeySize != MAXALIGN(hikeySize))
 			memset(hikeysPtr + hikeySize, 0, MAXALIGN(hikeySize) - hikeySize);
 		header->chunkDesc[j - 1].hikeyFlags = hikey.formatFlags;

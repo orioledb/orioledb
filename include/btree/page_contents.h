@@ -155,6 +155,30 @@ typedef struct
 
 #define BTREE_PAGE_HIKEYS_END(desc, p) (O_PAGE_IS(p, LEAF) ? 256 : 512)
 
+/*
+ * Bounds-checked memcpy()/memmove() into a btree page.
+ *
+ * Every memcpy()/memmove() that writes into a btree page should go through
+ * these wrappers so we catch out-of-bounds writes (e.g. from a corrupt
+ * locator) at the source rather than after they've silently trashed
+ * shared memory.  The asserts compile out when assertions are disabled
+ * and the underlying call inlines straight to memcpy/memmove.
+ */
+#define PageMemCpy(p, dst, src, size)									\
+	do {																\
+		AssertMacro((Pointer) (dst) >= (Pointer) (p));					\
+		AssertMacro((Pointer) (dst) + (size) <=							\
+					(Pointer) (p) + ORIOLEDB_BLCKSZ);					\
+		memcpy((dst), (src), (size));									\
+	} while (false)
+#define PageMemMove(p, dst, src, size)									\
+	do {																\
+		AssertMacro((Pointer) (dst) >= (Pointer) (p));					\
+		AssertMacro((Pointer) (dst) + (size) <=							\
+					(Pointer) (p) + ORIOLEDB_BLCKSZ);					\
+		memmove((dst), (src), (size));									\
+	} while (false)
+
 typedef struct PartialPageState PartialPageState;
 
 /* Macros for accessing B-tree page items */
