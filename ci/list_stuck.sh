@@ -9,7 +9,12 @@ for process in $(pgrep postgres); do
         psout=$(echo -ne "$psout" | tail +2)
         echo ::group::Backtrace $psout
         echo -e $psout
-        sudo gdb --batch --quiet -ex "thread apply all bt full" -ex "quit" -p $process
+        sudo gdb --batch --quiet \
+            -ex "thread apply all bt full" \
+            -ex 'eval "p *((LWLockHandle (*) [%u]) held_lwlocks)", num_held_lwlocks' \
+            -ex 'eval "p *((MyLockedPage (*) [%u]) myLockedPages)", numberOfMyLockedPages' \
+            -ex "quit" \
+            -p $process
         echo ::endgroup::
         echo $psout
         if [[ "$psout" =~ ^.*\ -D\ /tmp/([a-z0-9_]+)/.*$ ]]; then
@@ -30,7 +35,14 @@ for process in $(pgrep memcheck); do
         if [[ $psout == *"/postgres"* ]]; then
             echo $psout >command_$process.log
             mkfifo vgdb-$process-input
-            tail -f vgdb-$process-input | gdb --quiet -ex "target remote | vgdb --pid=$process" -ex "thread apply all bt full" -ex "handle all nostop pass" -ex "c" $(which postgres) >vgdb_$process.log 2>&1 &
+            tail -f vgdb-$process-input | gdb --quiet \
+                -ex "target remote | vgdb --pid=$process" \
+                -ex "thread apply all bt full" \
+                -ex 'eval "p *((LWLockHandle (*) [%u]) held_lwlocks)", num_held_lwlocks' \
+                -ex 'eval "p *((MyLockedPage (*) [%u]) myLockedPages)", numberOfMyLockedPages' \
+                -ex "handle all nostop pass" \
+                -ex "c" \
+                $(which postgres) >vgdb_$process.log 2>&1 &
         fi
     fi
 done
