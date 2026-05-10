@@ -54,7 +54,7 @@ jobs:
           matrix = {
               "include": [
                   {"cpu": "arm64", "pg_version": 17,
-                    "compiler": "clang", "check_type": "debug",
+                    "compiler": "clang", "check_type": "sanitize",
                     "run_id": i}
                   for i in range(1, 129)
               ]
