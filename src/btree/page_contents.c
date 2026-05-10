@@ -532,9 +532,9 @@ put_page_image(OInMemoryBlkno blkno, Page img)
 	/*
 	 * Touches OrioleDBPageHeader.checkpointNum (offsets 12..15) and
 	 * everything past it, so this is a near-init write — use
-	 * PageInitMemCpy.  The atomic state and pageChangeCount in the
-	 * skipped prefix are preserved because put_page_image is only
-	 * called on a page we own exclusively.
+	 * PageInitMemCpy.  The atomic state and pageChangeCount in the skipped
+	 * prefix are preserved because put_page_image is only called on a page we
+	 * own exclusively.
 	 */
 	PageInitMemCpy(page, page + skipSize,
 				   (char *) img + skipSize,
