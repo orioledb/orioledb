@@ -37,6 +37,7 @@ typedef struct
 	PartialPageState *partial;
 	bool		haveLock;
 	bool		inserted;
+	bool		tryLockFailed;
 } OBTreeFindPageInternalContext;
 
 static bool follow_rightlink(OBTreeFindPageInternalContext *intCxt);
@@ -123,6 +124,8 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 	{
 		if (follow_rightlink(intCxt))
 		{
+			if (intCxt->tryLockFailed)
+				return OBTreeFastPathFindFailure;
 			if (intCxt->inserted)
 				return OBTreeFastPathFindFailure;
 			Assert(context->index > 0);
@@ -290,6 +293,8 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 	{
 		if (follow_rightlink(intCxt))
 		{
+			if (intCxt->tryLockFailed)
+				return OBTreeFastPathFindFailure;
 			Assert(context->index > 0);
 			Assert(!intCxt->haveLock);
 			step_upward_level(intCxt);
@@ -919,7 +924,16 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 
 		if (intCxt->haveLock)
 		{
-			if (!O_TUPLE_IS_NULL(context->insertTuple))
+			if (BTREE_PAGE_FIND_IS(context, TRY_LOCK))
+			{
+				if (!try_lock_page(intCxt->blkno))
+				{
+					intCxt->haveLock = false;
+					intCxt->tryLockFailed = true;
+					return true;
+				}
+			}
+			else if (!O_TUPLE_IS_NULL(context->insertTuple))
 			{
 				OLockPageWithTupleResult result;
 
@@ -1020,6 +1034,7 @@ refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	intCxt.pageChangeCount = _pageChangeCount;
 	intCxt.partial = NULL;
 	intCxt.inserted = false;
+	intCxt.tryLockFailed = false;
 
 	if (!BTREE_PAGE_FIND_IS(context, TRY_LOCK))
 	{
@@ -1140,6 +1155,8 @@ retry:
 	{
 		if (follow_rightlink(&intCxt))
 		{
+			if (intCxt.tryLockFailed)
+				return OFindPageResultFailure;
 			if (intCxt.inserted)
 				return OFindPageResultInserted;
 			Assert(!intCxt.haveLock);
