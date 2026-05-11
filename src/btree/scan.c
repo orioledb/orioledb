@@ -54,8 +54,8 @@
 #include "btree/scan.h"
 #include "btree/undo.h"
 #include "tableam/descr.h"
+#include "tableam/key_range.h"
 #include "transam/oxid.h"
-#include "tableam/descr.h"
 #include "tuple/slot.h"
 #include "utils/page_pool.h"
 #include "utils/resowner.h"
@@ -139,6 +139,9 @@ struct BTreeSeqScan
 	OFixedKey	keyRangeLow,
 				keyRangeHigh;
 	bool		firstPageIsLoaded;
+
+	/* Parallel index scan range filter */
+	OBTreeKeyRange *scanRange;
 
 	/* Private parallel worker info in a backend */
 	ParallelOScanDesc poscan;
@@ -924,6 +927,87 @@ check_in_memory_leaf_page(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRang
 	}
 }
 
+/*
+ * Checks if a downlink's key range overlaps the scan's key range filter.
+ * Returns:
+ *   -1 if the downlink range is entirely before the scan range (skip it)
+ *    0 if the downlink range overlaps the scan range (process it)
+ *    1 if the downlink range is entirely after the scan range (scan is done)
+ *
+ * The downlink's key range is [keyRangeLow, keyRangeHigh).  The scan's
+ * filter range is [scanLowBound, scanHighBound] with inclusivity encoded
+ * in OBTreeValueBound.flags.
+ */
+static int
+check_downlink_in_scan_range(BTreeSeqScan *scan, OTuple keyRangeLow,
+							 OTuple keyRangeHigh)
+{
+	OBTreeKeyRange *scanRange = scan->scanRange;
+
+	if (!scanRange)
+		return 0;
+
+	/* Check if downlink range is entirely before the scan range */
+	if (!O_TUPLE_IS_NULL(keyRangeHigh))
+	{
+		int			cmp;
+
+		cmp = o_btree_cmp(scan->desc,
+						  &keyRangeHigh, BTreeKeyNonLeafKey,
+						  &scanRange->low, BTreeKeyBound);
+		if (cmp < 0)
+			return -1;
+	}
+
+	/* Check if downlink range is entirely after the scan range */
+	if (!O_TUPLE_IS_NULL(keyRangeLow))
+	{
+		int			cmp;
+
+		cmp = o_btree_cmp(scan->desc,
+						  &keyRangeLow, BTreeKeyNonLeafKey,
+						  &scanRange->high, BTreeKeyBound);
+		if (cmp > 0)
+			return 1;
+	}
+
+	return 0;
+}
+
+/*
+ * Checks if a leaf tuple is within the scan's qualification range.
+ * Returns:
+ *   -1 if the tuple is before the scan range (skip it)
+ *    0 if the tuple is within the scan range (return it)
+ *    1 if the tuple is after the scan range (scan is done)
+ *
+ * Inclusivity is encoded in OBTreeValueBound.flags, and o_btree_cmp
+ * incorporates it into the comparison result automatically.
+ */
+static int
+tuple_in_scan_range(BTreeSeqScan *scan, OTuple tuple)
+{
+	OBTreeKeyRange *scanRange = scan->scanRange;
+	int			cmp;
+
+	if (!scanRange)
+		return 0;
+
+	cmp = o_btree_cmp(scan->desc,
+					  &tuple, BTreeKeyLeafTuple,
+					  &scanRange->low, BTreeKeyBound);
+	if (cmp < 0)
+		return -1;
+
+	cmp = o_btree_cmp(scan->desc,
+					  &tuple, BTreeKeyLeafTuple,
+					  &scanRange->high, BTreeKeyBound);
+	if (cmp > 0)
+		return 1;
+
+	return 0;
+}
+
 
 /*
  * Interates the internal page till we either:
@@ -939,6 +1023,34 @@ iterate_internal_page(BTreeSeqScan *scan)
 	while (get_next_downlink(scan, &downlink, &scan->keyRangeLow, &scan->keyRangeHigh))
 	{
 		bool		valid_downlink = true;
+
+		/*
+		 * Check if this downlink's key range overlaps the scan's
+		 * qualification range.  Skip downlinks entirely before the scan
+		 * range; abort the loop when we're past it.
+		 */
+		if (scan->scanRange)
+		{
+			int			rangeCheck;
+
+			rangeCheck = check_downlink_in_scan_range(scan,
+													  scan->keyRangeLow.tuple,
+													  scan->keyRangeHigh.tuple);
+			if (rangeCheck == -1)
+			{
+				/* Downlink is entirely before scan range: skip it */
+				if (scan->poscan)
+					pg_atomic_fetch_sub_u32(&scan->poscan->downlinksWritersInProgress, 1);
+				continue;
+			}
+			else if (rangeCheck == 1)
+			{
+				/* Downlink is entirely after scan range: we're done */
+				if (scan->poscan)
+					pg_atomic_fetch_sub_u32(&scan->poscan->downlinksWritersInProgress, 1);
+				break;
+			}
+		}
 
 		if (scan->cb && scan->cb->isRangeValid)
 			valid_downlink = scan->cb->isRangeValid(scan->keyRangeLow.tuple, scan->keyRangeHigh.tuple,
@@ -1046,47 +1158,81 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 	BTreeSeqScanDiskDownlink downlink;
 	ParallelOScanDesc poscan = scan->poscan;
 
-	if (!poscan)
+	/*
+	 * Loop to skip disk pages that are entirely before the scan range. Each
+	 * iteration claims and reads one page; if the page's hikey shows it is
+	 * before the qualification bounds, we advance and try again.
+	 */
+	do
 	{
-		if (scan->downlinkIndex >= scan->downlinksCount)
-			return false;
-
-		downlink = scan->diskDownlinks[scan->downlinkIndex];
-	}
-	else
-	{
-		uint64		index = pg_atomic_fetch_add_u64(&poscan->downlinkIndex, 1);
-
-		if (index >= pg_atomic_read_u64(&poscan->downlinksCount))
+		if (!poscan)
 		{
-			if (scan->dsmSeg)
-			{
-				dsm_detach(scan->dsmSeg);
-				scan->dsmSeg = NULL;
-			}
-			return false;
+			if (scan->downlinkIndex >= scan->downlinksCount)
+				return false;
+
+			downlink = scan->diskDownlinks[scan->downlinkIndex];
 		}
-		downlink = ((BTreeSeqScanDiskDownlink *) dsm_segment_address(scan->dsmSeg))[index];
-	}
+		else
+		{
+			uint64		index = pg_atomic_fetch_add_u64(&poscan->downlinkIndex, 1);
 
-	success = read_page_from_disk(scan->desc,
-								  scan->leafImg,
-								  downlink.downlink,
-								  &extent);
-	header = (BTreePageHeader *) scan->leafImg;
-	if (header->csn >= downlink.csn)
-		read_page_from_undo(scan->desc, scan->leafImg, header->undoLocation,
-							downlink.csn, NULL, BTreeKeyNone, NULL);
+			if (index >= pg_atomic_read_u64(&poscan->downlinksCount))
+			{
+				if (scan->dsmSeg)
+				{
+					dsm_detach(scan->dsmSeg);
+					scan->dsmSeg = NULL;
+				}
+				return false;
+			}
+			downlink = ((BTreeSeqScanDiskDownlink *) dsm_segment_address(scan->dsmSeg))[index];
+		}
 
-	STOPEVENT(STOPEVENT_SCAN_DISK_PAGE,
-			  btree_page_stopevent_params(scan->desc,
-										  scan->leafImg));
+		success = read_page_from_disk(scan->desc,
+									  scan->leafImg,
+									  downlink.downlink,
+									  &extent);
+		header = (BTreePageHeader *) scan->leafImg;
+		if (header->csn >= downlink.csn)
+			read_page_from_undo(scan->desc, scan->leafImg, header->undoLocation,
+								downlink.csn, NULL, BTreeKeyNone, NULL);
 
-	if (!success)
-		elog(ERROR, "can not read leaf page from disk");
+		STOPEVENT(STOPEVENT_SCAN_DISK_PAGE,
+				  btree_page_stopevent_params(scan->desc,
+											  scan->leafImg));
+
+		if (!success)
+			elog(ERROR, "can not read leaf page from disk");
+
+		scan->downlinkIndex++;
+
+		/*
+		 * If a scan range filter is active, check whether this disk page's
+		 * key range overlaps the qualification bounds.  For a non-rightmost
+		 * page, the hikey is the upper bound of all tuples on the page.  If
+		 * hikey < scanLowKey, the page is entirely before the scan range;
+		 * skip it and try the next page.  (Rightmost pages have no hikey, so
+		 * we can't skip them here — tuple-level filtering will handle it.)
+		 */
+		if (scan->scanRange &&
+			!O_PAGE_IS(scan->leafImg, RIGHTMOST))
+		{
+			OTuple		hikey;
+			int			cmp;
+
+			BTREE_PAGE_GET_HIKEY(hikey, scan->leafImg);
+			cmp = o_btree_cmp(scan->desc,
+							  &hikey, BTreeKeyNonLeafKey,
+							  &scan->scanRange->low, BTreeKeyBound);
+			if (cmp < 0)
+				continue;		/* page entirely before scan range */
+		}
+
+		/* Page overlaps the scan range or no filter is active */
+		break;
+	} while (true);
 
 	BTREE_PAGE_LOCATOR_FIRST(scan->leafImg, &scan->leafLoc);
-	scan->downlinkIndex++;
 	scan->hint.blkno = OInvalidInMemoryBlkno;
 	scan->hint.pageChangeCount = InvalidOPageChangeCount;
 	O_TUPLE_SET_NULL(scan->nextKey.tuple);
@@ -1294,6 +1440,8 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	scan->checkpointNumberSet = false;
 	scan->haveHistImg = false;
 	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
+
+	scan->scanRange = NULL;
 
 	dlist_push_tail(&listOfScans, &scan->listNode);
 	scan->resowner = NULL;
@@ -1585,6 +1733,20 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 			BTREE_PAGE_LOCATOR_NEXT(scan->histImg, &scan->histLoc);
 			if (!O_TUPLE_IS_NULL(tuple))
 			{
+				if (scan->scanRange)
+				{
+					int			rangeCheck = tuple_in_scan_range(scan, tuple);
+
+					if (rangeCheck == -1)
+						continue;	/* tuple before scan range, skip */
+					if (rangeCheck == 1)
+					{
+						/* tuple past scan range, scan is done */
+						scan->status = BTreeSeqScanFinished;
+						O_TUPLE_SET_NULL(tuple);
+						return tuple;
+					}
+				}
 				if (hint)
 					*hint = scan->hint;
 				return tuple;
@@ -1638,6 +1800,20 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 		BTREE_PAGE_LOCATOR_NEXT(scan->leafImg, &scan->leafLoc);
 		if (!O_TUPLE_IS_NULL(tuple))
 		{
+			if (scan->scanRange)
+			{
+				int			rangeCheck = tuple_in_scan_range(scan, tuple);
+
+				if (rangeCheck == -1)
+					continue;	/* tuple before scan range, skip */
+				if (rangeCheck == 1)
+				{
+					/* tuple past scan range, scan is done */
+					scan->status = BTreeSeqScanFinished;
+					O_TUPLE_SET_NULL(tuple);
+					return tuple;
+				}
+			}
 			if (hint)
 				*hint = scan->hint;
 			return tuple;
@@ -1861,6 +2037,13 @@ void
 free_btree_seq_scan(BTreeSeqScan *scan)
 {
 	free_btree_seq_scan_internal(scan, false);
+}
+
+void
+btree_seq_scan_set_range_filter(BTreeSeqScan *scan,
+								OBTreeKeyRange *scanRange)
+{
+	scan->scanRange = scanRange;
 }
 
 /*

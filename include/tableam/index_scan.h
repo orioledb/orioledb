@@ -19,6 +19,7 @@
 
 #include "access/nbtree.h"
 #include "access/sdir.h"
+#include "btree/scan.h"
 
 typedef struct OScanState
 {
@@ -39,6 +40,9 @@ typedef struct OScanState
 	/* used only by direct modify functions */
 	CmdType		cmd;
 	OSnapshot	oSnapshot;
+	/* Parallel index scan state (NULL for serial scans) */
+	ParallelOScanDesc pidxscan;
+	BTreeSeqScan *seqScan;
 } OScanState;
 
 typedef struct OIndexPlanState
