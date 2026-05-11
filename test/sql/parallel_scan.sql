@@ -394,35 +394,6 @@ SELECT * FROM o_test_parallel_join
 COMMIT;
 
 BEGIN;
-CREATE TABLE o_test_no_parallel_index_scan (
-  val_1 INT PRIMARY KEY,
-  val_2 text
-) USING orioledb;
-
-INSERT INTO o_test_no_parallel_index_scan VALUES (1, 'a'), (2, 'b');
-
-SET LOCAL max_parallel_workers_per_gather = 1;
-SET LOCAL parallel_setup_cost = 0;
-SET LOCAL parallel_tuple_cost = 0;
-SET LOCAL min_parallel_table_scan_size = 1;
-SET LOCAL min_parallel_index_scan_size = 1;
-SET LOCAL enable_seqscan = off;
-SET LOCAL enable_bitmapscan = off;
-
--- Parallel Index Only Scan is not implemented yet, so it doesn't used here
-EXPLAIN (COSTS OFF) SELECT val_1 FROM o_test_no_parallel_index_scan;
-SELECT val_1 FROM o_test_no_parallel_index_scan;
-SET LOCAL enable_indexonlyscan = off;
--- Parallel Index Scan is not implemented yet, so it doesn't used here
-EXPLAIN (COSTS OFF)
-	SELECT array_agg(val_1), array_agg(val_2)
-		FROM o_test_no_parallel_index_scan WHERE val_1 > 0;
-SELECT array_agg(val_1), array_agg(val_2)
-	FROM o_test_no_parallel_index_scan WHERE val_1 > 0;
-
-COMMIT;
-
-BEGIN;
 
 SET LOCAL parallel_setup_cost = 0;
 SET LOCAL min_parallel_table_scan_size = 1;
@@ -452,6 +423,169 @@ COMMIT;
 
 BEGIN;
 
+-- Parallel index range scan on primary index
+CREATE TABLE o_test_parallel_index_range (
+	id SERIAL PRIMARY KEY,
+	val INT,
+	name TEXT
+) USING orioledb;
+
+INSERT INTO o_test_parallel_index_range (val, name)
+	SELECT g, 'name_' || g FROM generate_series(1, 100000) g;
+
+CREATE INDEX o_test_parallel_index_range_val_idx
+	ON o_test_parallel_index_range (val);
+
+ANALYZE o_test_parallel_index_range;
+
+SET LOCAL max_parallel_workers_per_gather = 2;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL parallel_tuple_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 1;
+SET LOCAL min_parallel_index_scan_size = 1;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_bitmapscan = off;
+
+-- Range scan on primary key
+EXPLAIN (COSTS OFF)
+	SELECT id FROM o_test_parallel_index_range
+		WHERE id BETWEEN 1000 AND 5000;
+SELECT count(*) FROM o_test_parallel_index_range
+	WHERE id BETWEEN 1000 AND 5000;
+
+-- Range scan: serial vs parallel equivalence
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT count(*) AS serial_count
+	FROM o_test_parallel_index_range WHERE id BETWEEN 1000 AND 5000;
+SET LOCAL max_parallel_workers_per_gather = 2;
+SELECT count(*) AS parallel_count
+	FROM o_test_parallel_index_range WHERE id BETWEEN 1000 AND 5000;
+
+-- Parallel index scan with aggregation on secondary index
+EXPLAIN (COSTS OFF)
+	SELECT count(*) FROM o_test_parallel_index_range WHERE val > 50000;
+SELECT count(*) FROM o_test_parallel_index_range WHERE val > 50000;
+
+-- Serial vs parallel equivalence on primary index range
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT array_agg(id ORDER BY id) AS serial_ids
+	FROM o_test_parallel_index_range WHERE id BETWEEN 990 AND 1010;
+SET LOCAL max_parallel_workers_per_gather = 2;
+SELECT array_agg(id ORDER BY id) AS parallel_ids
+	FROM o_test_parallel_index_range WHERE id BETWEEN 990 AND 1010;
+
+-- Plan shape: primary index range scan
+EXPLAIN (COSTS OFF)
+	SELECT count(*) FROM o_test_parallel_index_range WHERE id > 50000;
+
+-- Plan shape: index-only scan on secondary index
+EXPLAIN (COSTS OFF)
+	SELECT val FROM o_test_parallel_index_range
+		WHERE val BETWEEN 100 AND 200;
+
+-- Plan shape: full index scan
+EXPLAIN (COSTS OFF)
+	SELECT id FROM o_test_parallel_index_range;
+
+-- Edge case: empty result set
+SELECT count(*) FROM o_test_parallel_index_range
+	WHERE val BETWEEN 999900 AND 999999;
+
+-- Edge case: single row result
+SELECT id, val FROM o_test_parallel_index_range WHERE id = 42;
+
+-- Edge case: full table scan via index
+SELECT count(*) FROM o_test_parallel_index_range WHERE val > 0;
+
+-- Filter on non-index column: serial vs parallel equivalence
+-- Tests that generic Filter conditions (not convertible to scan keys)
+-- are correctly applied in parallel index scans
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT count(*) AS serial_filter_count
+	FROM o_test_parallel_index_range WHERE val > 0 AND id > 50000;
+SET LOCAL max_parallel_workers_per_gather = 2;
+SELECT count(*) AS parallel_filter_count
+	FROM o_test_parallel_index_range WHERE val > 0 AND id > 50000;
+
+-- Parallel index scan with ORDER BY
+SELECT count(*) FROM (
+	SELECT id FROM o_test_parallel_index_range
+		WHERE val BETWEEN 1000 AND 2000 ORDER BY id
+) sub;
+
+-- Secondary index parallel scan: index-only
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT count(*) AS serial_val_count
+	FROM o_test_parallel_index_range WHERE val BETWEEN 1000 AND 2000;
+SET LOCAL max_parallel_workers_per_gather = 2;
+SELECT count(*) AS parallel_val_count
+	FROM o_test_parallel_index_range WHERE val BETWEEN 1000 AND 2000;
+
+-- Secondary index parallel scan: full row lookup
+SET LOCAL enable_indexonlyscan = off;
+
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT count(*) AS serial_full_count
+	FROM o_test_parallel_index_range WHERE val BETWEEN 1000 AND 2000;
+SET LOCAL max_parallel_workers_per_gather = 2;
+SELECT count(*) AS parallel_full_count
+	FROM o_test_parallel_index_range WHERE val BETWEEN 1000 AND 2000;
+
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT array_agg(id ORDER BY id) AS serial_ids
+	FROM o_test_parallel_index_range WHERE val BETWEEN 990 AND 1010;
+SET LOCAL max_parallel_workers_per_gather = 2;
+SELECT array_agg(id ORDER BY id) AS parallel_ids
+	FROM o_test_parallel_index_range WHERE val BETWEEN 990 AND 1010;
+
+DROP TABLE o_test_parallel_index_range;
+
+-- Parallel index scan with SAOP (ScalarArrayOpExpr) on secondary index
+-- Uses repeating val values (low cardinality) so planner picks parallel
+CREATE TABLE o_test_parallel_saop (
+	id SERIAL PRIMARY KEY,
+	val INT,
+	name TEXT
+) USING orioledb;
+INSERT INTO o_test_parallel_saop (val, name)
+	SELECT (g % 100) + 1, 'name_' || g FROM generate_series(1, 100000) g;
+CREATE INDEX o_test_parallel_saop_val_idx
+	ON o_test_parallel_saop (val);
+ANALYZE o_test_parallel_saop;
+SET LOCAL max_parallel_workers_per_gather = 2;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL parallel_tuple_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 1;
+SET LOCAL min_parallel_index_scan_size = 1;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_bitmapscan = off;
+
+-- SAOP literal IN-list: plan shape
+EXPLAIN (COSTS OFF)
+	SELECT count(*) FROM o_test_parallel_saop
+		WHERE val IN (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20);
+-- SAOP literal IN-list: parallel result
+SELECT count(*) FROM o_test_parallel_saop
+	WHERE val IN (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20);
+-- SAOP literal IN-list: serial result
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT count(*) AS serial_saop_count FROM o_test_parallel_saop
+	WHERE val IN (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20);
+
+-- SAOP with full row lookup through secondary index
+SET LOCAL enable_indexonlyscan = off;
+SET LOCAL max_parallel_workers_per_gather = 2;
+SELECT count(*) AS parallel_saop_full FROM o_test_parallel_saop
+	WHERE val IN (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20);
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT count(*) AS serial_saop_full FROM o_test_parallel_saop
+	WHERE val IN (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20);
+
+DROP TABLE o_test_parallel_saop;
+
+COMMIT;
+
+BEGIN;
 CREATE TABLE o_test1(i int, t text) USING orioledb;
 CREATE TABLE o_test2(i int, t text) USING orioledb;
 INSERT INTO o_test1 SELECT x, repeat('a', 500) FROM generate_series(1,10) as x;

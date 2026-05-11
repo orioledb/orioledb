@@ -139,7 +139,7 @@ orioledb_btree_handler(void)
 	amroutine->amstorage = false;
 	amroutine->amclusterable = true;
 	amroutine->ampredlocks = true;
-	amroutine->amcanparallel = false;
+	amroutine->amcanparallel = true;
 	amroutine->amcaninclude = true;
 	amroutine->amusemaintenanceworkmem = false;
 	amroutine->amsummarizing = false;
