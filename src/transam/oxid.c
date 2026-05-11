@@ -1165,7 +1165,7 @@ advance_global_xmin(OXid newXid)
 
 	if (doCleanup)
 	{
-		int64		xidsPerFile = XID_FILE_SIZE / sizeof(CommitSeqNo);
+		int64		xidsPerFile = XID_FILE_SIZE / sizeof(OXidMapItem);
 		int64		oldCleanedNum = oldCleanedXmin / xidsPerFile,
 					newCleanedNum = globalXmin / xidsPerFile,
 					oldCheckpointXminNum = oldCheckpointXmin / xidsPerFile,
