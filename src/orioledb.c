@@ -2069,12 +2069,6 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 					options = (OBTOptions *) index->rd_options;
 
 					/*
-					 * TODO: Remove when parallel index scan will be
-					 * implemented
-					 */
-					info->amcanparallel = false;
-
-					/*
 					 * Only the single-field uint64 encoding is enabled in the
 					 * planner for now.  The composite (fixed-key) path is
 					 * fully implemented and unit-tested, but choosing it well
