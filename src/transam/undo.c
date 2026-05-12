@@ -2286,6 +2286,34 @@ undo_xact_callback(XactEvent event, void *arg)
 					set_oxid_xlog_ptr(oxid, XactLastCommitEnd);
 				}
 
+#ifdef USE_INJECTION_POINTS
+				/*
+				 * Stress-test fault site.  The crit-section bracket
+				 * upgrades any ereport(ERROR) raised by an attached
+				 * injection action into PANIC, which exits the backend
+				 * via abort() and triggers postmaster crash recovery
+				 * (see test/t/crash/tx_flow.md, ABORT TX FLOW).
+				 * Attach with: SELECT injection_points_attach(
+				 *     'orioledb-commit-assert', 'error');
+				 * Production builds compile this out entirely (no
+				 * USE_INJECTION_POINTS).
+				 *
+				 * Pre/post traces frame the crit section so post-test
+				 * analysis can count distinct backends that reached the
+				 * injection but did NOT come back out (i.e. were killed
+				 * by the assert).  `pre` lines without a matching `post`
+				 * line under the same pid are the writers that hit the
+				 * fault during one attach/detach cycle.
+				 */
+				elog(LOG, "commit-assert-trace pre  pid=%d oxid=%lu",
+					 MyProcPid, (unsigned long) oxid);
+				START_CRIT_SECTION();
+				INJECTION_POINT("orioledb-commit-assert");
+				END_CRIT_SECTION();
+				elog(LOG, "commit-assert-trace post pid=%d oxid=%lu",
+					 MyProcPid, (unsigned long) oxid);
+#endif
+
 				current_oxid_precommit();
 
 				if (STOPEVENTS_ENABLED())

@@ -141,6 +141,18 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	if (OXidIsValid(recovery_oxid))
 		return;
 
+#ifdef USE_INJECTION_POINTS
+	{
+		OXid		_trc_oxid = get_current_oxid_if_any();
+		elog(LOG,
+			 "wal-trace modify pid=%d oxid=%lu rec=%s idx_oids=[%u/%u/%u] idx_type=%d len=%u",
+			 MyProcPid, (unsigned long) _trc_oxid,
+			 wal_record_type_to_string(rec_type),
+			 oids.datoid, oids.reloid, oids.relnode, (int) type,
+			 (unsigned) length);
+	}
+#endif
+
 	if (!IS_SYS_TREE_OIDS(oids) && type == oIndexPrimary)
 	{
 		OIndexDescr *id = (OIndexDescr *) desc->arg;
@@ -308,6 +320,29 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	if (!local_wal.contains_xid)
 		add_xid_wal_record(oxid, logicalXid);
 
+#ifdef USE_INJECTION_POINTS
+	/*
+	 * Stress-test fault site.  Wrapping the INJECTION_POINT in
+	 * START_CRIT_SECTION upgrades an attached `error` action into PANIC
+	 * via the crit-section escalation (the surrounding CommitTransaction
+	 * uses HOLD_INTERRUPTS but no CRIT, so ereport here would otherwise
+	 * be a clean abort).  Distinct from `orioledb-commit-assert`
+	 * (undo.c:2378), which PANICs *after* the COMMIT record is flushed:
+	 * here we PANIC *before* `WAL_REC_COMMIT` is even appended to the
+	 * local buffer, so recovery sees orphan modify records (some may
+	 * already be flushed via flush_local_wal_if_needed above) with no
+	 * matching commit-or-rollback marker.  Useful for exercising the
+	 * recovery code path that has to infer "no marker -> tx was
+	 * in-flight -> discard" without any explicit WAL_REC_ROLLBACK.
+	 * Attach with:
+	 *     SELECT injection_points_attach(
+	 *         'orioledb-pre-commit-wal-finish', 'error');
+	 */
+	START_CRIT_SECTION();
+	INJECTION_POINT("orioledb-before-pre-commit-wal-finish");
+	END_CRIT_SECTION();
+#endif
+
 	add_finish_wal_record(WAL_REC_COMMIT, pg_atomic_read_u64(&xid_meta->runXmin));
 	walPos = flush_local_wal(true, !isAutonomous);
 	local_wal.has_material_changes = false;
@@ -422,6 +457,17 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 
 	elog(DEBUG4, "rec_type %d (%s)", rec_type, wal_record_type_to_string(rec_type));
 
+#ifdef USE_INJECTION_POINTS
+	{
+		OXid		_trc_oxid = get_current_oxid_if_any();
+		elog(LOG,
+			 "wal-trace finish pid=%d oxid=%lu rec=%s xmin=%lu",
+			 MyProcPid, (unsigned long) _trc_oxid,
+			 wal_record_type_to_string(rec_type),
+			 (unsigned long) xmin);
+	}
+#endif
+
 	recLength = sizeof(WALRecFinish);
 	if (rec_type == WAL_REC_COMMIT &&
 		synchronous_commit >= SYNCHRONOUS_COMMIT_REMOTE_APPLY)
@@ -492,6 +538,13 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 	heapXid = GetTopTransactionIdIfAny();
 
 	elog(DEBUG4, "WAL_REC_XID oxid %lu logicalXid %u heapXid %u", oxid, logicalXid, heapXid);
+
+#ifdef USE_INJECTION_POINTS
+	elog(LOG,
+		 "wal-trace xid pid=%d oxid=%lu rec=WAL_REC_XID logicalXid=%u heapXid=%u",
+		 MyProcPid, (unsigned long) oxid,
+		 (unsigned) logicalXid, (unsigned) heapXid);
+#endif
 
 	rec = (WALRecXid *) (&local_wal.buffer[local_wal.buffer_offset]);
 	rec->recType = WAL_REC_XID;
@@ -739,6 +792,16 @@ flush_local_wal(bool isCommit, bool withXactTime)
 	if (isCommit)
 		INJECTION_POINT("orioledb-wal-flush-guarded");
 
+#ifdef USE_INJECTION_POINTS
+	{
+		OXid		_trc_oxid = get_current_oxid_if_any();
+		elog(LOG,
+			 "wal-trace flush pid=%d oxid=%lu bytes=%d isCommit=%d withXactTime=%d",
+			 MyProcPid, (unsigned long) _trc_oxid,
+			 length, (int) isCommit, (int) withXactTime);
+	}
+#endif
+
 	/*
 	 * Put the xlog location of our commit record to the shared memory.  This
 	 * will help concurrent checkpointer to wait till we do
@@ -756,6 +819,13 @@ flush_local_wal(bool isCommit, bool withXactTime)
 	START_CRIT_SECTION();
 
 	location = log_logical_wal_container(local_wal.buffer, length, withXactTime);
+
+#ifdef USE_INJECTION_POINTS
+	elog(LOG,
+		 "wal-trace flush-done pid=%d bytes=%d isCommit=%d lsn=%X/%X",
+		 MyProcPid, length, (int) isCommit,
+		 LSN_FORMAT_ARGS(location));
+#endif
 
 	if (isCommit)
 		pg_atomic_write_u64(&GET_CUR_PROCDATA()->commitInProgressXlogLocation, location);

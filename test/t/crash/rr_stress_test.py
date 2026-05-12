@@ -132,6 +132,11 @@ class RrStressTest(BaseTest):
 		crash_injection = [None]
 		injection_history = []
 		injection_history_lock = threading.Lock()
+		# Per-point counter: how many times each injection point was
+		# attached (i.e. won the rating tournament) by `wal_chaos_loop`.
+		# Reported at the end of the test.
+		attach_counts = {}
+		attach_counts_lock = threading.Lock()
 		stop = threading.Event()
 		errors = []
 		errors_lock = threading.Lock()
@@ -147,7 +152,8 @@ class RrStressTest(BaseTest):
 		print_lock = threading.Lock()
 		write_count = [0]
 		read_count = [0]
-		conflict_count = [0]
+		conflict_count = [0]   # server-side ERRORs while con is alive
+		disconnect_count = [0]  # connection-level failures (cluster down etc.)
 
 		def record_error(msg):
 			with errors_lock:
@@ -164,8 +170,17 @@ class RrStressTest(BaseTest):
 			my_token = n_accounts + writer_id
 			local_w = 0
 			local_c = 0
+			local_disc = 0
 			try:
 				while not stop.is_set():
+					if con is None:
+						try:
+							con = node.connect()
+						except Exception:
+							local_disc += 1
+							if stop.wait(0.5):
+								break
+							continue
 					v_from = random.randint(1, n_accounts)
 					v_to = random.randint(1, n_accounts)
 					if v_from == v_to:
@@ -195,19 +210,34 @@ class RrStressTest(BaseTest):
 						my_token = to_token
 						local_w += 1
 					except Exception:
+						# Probe connection health via rollback.  If even
+						# rollback fails, the backend is gone (cluster
+						# crashed, FATAL'd, or network reset) -- count as
+						# a disconnect and force reconnect on next round.
+						con_dead = False
 						try:
 							con.rollback()
 						except Exception:
-							pass
-						local_c += 1
+							con_dead = True
+						if con_dead:
+							try:
+								con.close()
+							except Exception:
+								pass
+							con = None
+							local_disc += 1
+						else:
+							local_c += 1
 			finally:
-				try:
-					con.close()
-				except Exception:
-					pass
+				if con is not None:
+					try:
+						con.close()
+					except Exception:
+						pass
 				with counters_lock:
 					write_count[0] += local_w
 					conflict_count[0] += local_c
+					disconnect_count[0] += local_disc
 
 		def reader_pk_loop(reader_id):
 			con = node.connect()
@@ -418,7 +448,8 @@ class RrStressTest(BaseTest):
 
 		wal_chaos_points = [
 			'before-tx-commit',
-			'postgres-precommit-on-commit-actions',
+			# 'postgres-precommit-on-commit-actions', -> recursion during injection detach
+			# detaching tx wanna commit and fall into the precommit injection
 			'orioledb-set-csn-guarded',
 			'orioledb-set-xlog-ptr-guarded',
 			'orioledb-add-finish-wal-guarded',
@@ -428,6 +459,13 @@ class RrStressTest(BaseTest):
 			'orioledb-update-pk-done-pre-sk',
 			'orioledb-sk-mid-update',
 		]
+		# `orioledb-commit-assert` and `orioledb-before-pre-commit-wal-finish`
+		# are NOT in `wal_chaos_points` because attaching either always
+		# causes a PANIC (both sit inside a START_CRIT_SECTION).  They
+		# share a dedicated worker (`assert_chaos_loop` below) that arms
+		# one of them on a slow, duration-relative cadence so we get a
+		# controlled number of crash+recovery cycles per run instead of
+		# one per ~0.1s.
 		_env_pts = os.getenv('RR_INJECTION_POINTS')
 		if _env_pts and _env_pts != 'ALL':
 			_subset = [p.strip() for p in _env_pts.split(',') if p.strip()]
@@ -459,6 +497,9 @@ class RrStressTest(BaseTest):
 							f"'{rating[0][0]}', 'error')")
 						con.commit()
 						current_injection[0] = rating[0][0]
+						with attach_counts_lock:
+							attach_counts[rating[0][0]] = (
+							    attach_counts.get(rating[0][0], 0) + 1)
 						with injection_history_lock:
 							injection_history.append(
 							    (time.time() - test_start, rating[0][0]))
@@ -499,6 +540,106 @@ class RrStressTest(BaseTest):
 					con.close()
 				except Exception:
 					pass
+
+		# produce the state corruption without nay injection enabled
+		assert_chaos_points = [
+			# 'orioledb-commit-assert',
+			'orioledb-before-pre-commit-wal-finish',
+		]
+
+		def assert_chaos_loop():
+			# Periodically arm one of `assert_chaos_points`.  Each point
+			# sits inside a START_CRIT_SECTION, so an attached `error`
+			# action turns into a PANIC on the next commit -- which
+			# takes the cluster down.  Same pattern as `wal_chaos_loop`:
+			# pick one via rating tournament, attach -> `time.sleep(0)`
+			# (release GIL, let a writer slip into commit) -> detach
+			# every point in the list.  The very brief attach window
+			# means only ~1 writer hits the injection before the worker
+			# pulls it back; postmaster's quickdie fan-out kills every
+			# other backend, so we minimise the number of in-process
+			# aborts that would otherwise pile up more partial state on
+			# the way down.
+			target = max(_env_int('RR_ASSERT_FIRINGS', 0), 1)
+			interval = max(duration / (target + 1), 1.0)
+			con = None
+			local_arms = 0
+			next_arm_at = test_start + interval
+
+			try:
+				while not stop.is_set():
+					if stop.wait(0.5):
+						break
+					if con is None:
+						try:
+							con = node.connect()
+						except Exception:
+							continue
+					if time.time() < next_arm_at:
+						continue
+					try:
+						rating = []
+						for point in assert_chaos_points:
+							rating.append(
+							    (point,
+							     random.randint(
+							         1, len(assert_chaos_points))))
+						rating.sort(key=lambda x: x[1])
+						chosen = rating[0][0]
+						con.execute(
+						    "SELECT injection_points_attach("
+						    f"'{chosen}', 'error')")
+						con.commit()
+						local_arms += 1
+						next_arm_at = time.time() + interval
+						with attach_counts_lock:
+							attach_counts[chosen] = (
+							    attach_counts.get(chosen, 0) + 1)
+						with injection_history_lock:
+							injection_history.append(
+							    (time.time() - test_start,
+							     f'{chosen} (assert-armed)'))
+					except Exception:
+						try:
+							con.close()
+						except Exception:
+							pass
+						con = None
+						continue
+					time.sleep(0)
+					try:
+						for point in assert_chaos_points:
+							con.execute(
+							    "SELECT injection_points_detach("
+							    f"'{point}')")
+						con.commit()
+					except Exception:
+						# Detach failed -- cluster almost certainly
+						# PANICked while the injection was armed.
+						# Drop the now-broken connection; we'll
+						# reconnect on the next iteration.
+						try:
+							con.close()
+						except Exception:
+							pass
+						con = None
+			finally:
+				if con is not None:
+					try:
+						for point in assert_chaos_points:
+							con.execute(
+							    "SELECT injection_points_detach("
+							    f"'{point}')")
+						con.commit()
+					except Exception:
+						try:
+							con.rollback()
+						except Exception:
+							pass
+					try:
+						con.close()
+					except Exception:
+						pass
 
 		def stopevent_chaos_loop():
 			con = node.connect()
@@ -574,12 +715,29 @@ class RrStressTest(BaseTest):
 						pos = f.tell()
 				except Exception:
 					continue
-				if 'PANIC' in chunk:
+				# Match `PANIC` (ereport) and `TRAP:` (Assert/abort).
+				# Both indicate the cluster went down.  When
+				# `panic_fatal` is on, treat any crash as fatal and
+				# stop the test.  When tolerating PANIC (recovery
+				# mode), only record the first crash time and keep the
+				# watchdog running so subsequent crashes also get
+				# logged but the workload continues.
+				if 'PANIC' in chunk or 'TRAP:' in chunk:
 					for line in chunk.splitlines():
-						if 'PANIC' in line:
+						if 'PANIC' in line or 'TRAP:' in line:
 							print(f'[watchdog] {line}', flush=True)
-					note_crash()
-					break
+					if panic_fatal:
+						note_crash()
+						break
+					else:
+						# Record the first crash time without setting
+						# stop, so the test continues exercising the
+						# crash-recovery path.
+						with errors_lock:
+							if first_crash_time[0] is None:
+								first_crash_time[0] = (
+								    time.time() - test_start)
+								crash_injection[0] = current_injection[0]
 
 		threads = []
 		for wid in range(1, n_writers + 1):
@@ -597,6 +755,8 @@ class RrStressTest(BaseTest):
 		threads.append(threading.Thread(target=checkpointer_loop))
 		if wal_chaos_points:
 			threads.append(threading.Thread(target=wal_chaos_loop))
+		if _env_int('RR_ASSERT_FIRINGS', 0) > 0:
+			threads.append(threading.Thread(target=assert_chaos_loop))
 		threads.append(threading.Thread(target=crash_watchdog))
 
 		print(
@@ -614,13 +774,15 @@ class RrStressTest(BaseTest):
 		for t in threads:
 			t.join()
 
-		# Final authoritative check against the PG log.
+		# Final authoritative check against the PG log.  Match both
+		# `PANIC` (ereport-driven) and `TRAP:` (Assert-driven crashes
+		# such as the orioledb-commit-assert injection).
 		log_path = os.path.join(node.logs_dir, 'postgresql.log')
 		panic_lines = []
 		try:
 			with open(log_path, 'r', errors='replace') as f:
 				for line in f:
-					if 'PANIC' in line:
+					if 'PANIC' in line or 'TRAP:' in line:
 						panic_lines.append(line.rstrip())
 		except Exception:
 			pass
@@ -654,10 +816,18 @@ class RrStressTest(BaseTest):
 		    f'\n[totals] writes={write_count[0]} '
 		    f'reads={read_count[0]} '
 		    f'conflicts={conflict_count[0]} '
+		    f'disconnects={disconnect_count[0]} '
 		    f'first_error_at={_fet_s} '
 		    f'first_crash_at={_fct_s} '
 		    f'crash_injection={crash_injection[0]!r} '
 		    f'panic_lines={len(panic_lines)}')
+		with attach_counts_lock:
+			_counts = sorted(
+			    attach_counts.items(), key=lambda kv: -kv[1])
+		_total_attaches = sum(c for _, c in _counts)
+		print(f'[wal-chaos attach counts] total={_total_attaches}')
+		for _pt, _c in _counts:
+			print(f'  {_c:5d}  {_pt}')
 		for ln in panic_lines[:5]:
 			print(f'[PANIC] {ln}')
 		if first_crash_time[0] is not None:
