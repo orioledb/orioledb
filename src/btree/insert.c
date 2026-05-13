@@ -1292,6 +1292,7 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 	else
 		csn = COMMITSEQNO_INPROGRESS;
+	elog(WARNING, "o_btree_insert_item_with_waiters: csn: %lu", csn);
 
 	make_split_items(desc, p, &items, &offset,
 					 insert_item->tupheader,
@@ -1499,6 +1500,7 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 			csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 		else
 			csn = COMMITSEQNO_INPROGRESS;
+		elog(WARNING, "o_btree_insert_item_no_waiters: csn: %lu", csn);
 
 		make_split_items(desc, p, &items, &offset,
 						 insert_item->tupheader,
@@ -1696,6 +1698,13 @@ o_btree_insert_tuple_to_leaf(OBTreeFindPageContext *context,
 	BTreeInsertStackItem insert_item;
 	MemoryContext prev_context;
 	bool		nested_call;
+
+	elog(WARNING, "o_btree_insert_tuple_to_leaf: %u %u %u: csn: %lu", 
+		 context->desc->oids.datoid,
+		 context->desc->oids.reloid,
+		 context->desc->oids.relnode,
+		 context->csn);
+
 
 	nested_call = CurrentMemoryContext == btree_insert_context;
 	if (!nested_call)

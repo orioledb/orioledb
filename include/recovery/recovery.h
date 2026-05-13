@@ -63,5 +63,6 @@ extern void recovery_cleanup_old_files(uint32 max_chkp_num,
 
 extern void recovery_load_state_from_file(int worker_id, uint32 chkpnum, bool shutdown);
 extern bool check_recovery_workers_finished(void);
+extern XLogRecPtr recovery_get_current_ptr(void);
 
 #endif							/* __RECOVERY_H__ */

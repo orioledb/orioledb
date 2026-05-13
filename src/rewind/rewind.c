@@ -1018,6 +1018,7 @@ rewind_init_shmem(Pointer ptr, bool found)
 		rewindMeta->oldToBeCleanedBlockNum = 0;
 		pg_atomic_write_u64(&rewindMeta->oldestConsideredRunningXid,
 							InvalidTransactionId);
+		elog(WARNING, "SET runXmin 4: %lu", InvalidOXid);
 		pg_atomic_write_u64(&rewindMeta->runXmin, InvalidOXid);
 
 		/* Rewind buffers are not persistent */
@@ -1378,6 +1379,7 @@ rewind_worker_main(Datum main_arg)
 
 					pg_atomic_write_u64(&rewindMeta->oldestConsideredRunningXid,
 										rewindItem->oldestConsideredRunningXid.value);
+					elog(WARNING, "SET runXmin 5: %lu", rewindItem->runXmin);
 					pg_atomic_write_u64(&rewindMeta->runXmin,
 										rewindItem->runXmin);
 					if (TransactionIdIsValid(rewindItem->xid) &&
@@ -1743,6 +1745,7 @@ next_subxids_item:
 		{
 			uint64		curValue = InvalidOXid;
 
+			elog(WARNING, "SET runXmin 6: %lu", rewindItem->runXmin);
 			(void) pg_atomic_compare_exchange_u64(&rewindMeta->runXmin, &curValue, rewindItem->runXmin);
 		}
 

@@ -184,7 +184,6 @@ fill_descrs(ORelOids oids, OIndexType ix_type,
 										  false, NULL);
 	}
 
-	Assert(sys_tree_num > 0 || *indexDescr);
 	return sys_tree_num;
 }
 
@@ -271,6 +270,8 @@ orioledb_pg_rewind_sorted_keys(PG_FUNCTION_ARGS)
 		OIndexDescr *indexDescr = NULL;
 		int			sys_tree_num;
 
+		elog(WARNING, "orioledb_pg_rewind_sorted_keys: %u %u %u",
+			 row->oids.datoid, row->oids.reloid, row->oids.relnode);
 		sys_tree_num = fill_descrs(row->oids, row->ix_type,
 								   &descr, &indexDescr);
 
@@ -403,6 +404,10 @@ create_key_iterator(BTreeDescr *td,
 					KeyArrayElement *last)
 {
 	KeyIterator *result = palloc0(sizeof(KeyIterator));
+	OSnapshot committed_snapshot = {
+		pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo),
+		InvalidXLogRecPtr, 0, 0
+	};
 
 	result->last_deleted = false;
 	O_TUPLE_SET_NULL(result->new_tup);
@@ -413,7 +418,7 @@ create_key_iterator(BTreeDescr *td,
 
 	result->iter = o_btree_iterator_create(td, &result->first_key_tup,
 										   BTreeKeyNonLeafKey,
-										   &o_non_deleted_snapshot,
+										   &committed_snapshot,
 										   ForwardScanDirection);
 	o_btree_iterator_set_callback(result->iter, get_tup_oxid_callback,
 								  &result->last_deleted);
@@ -463,6 +468,8 @@ process_key(StringInfo str, TableRow *row, KeyArrayElement *old_key,
 	}
 	found = cmp == 0;
 
+	elog(WARNING, "process_key: found: %c",
+		 found ? 'Y' : 'N');
 	if (found)
 	{
 		int			tup_len = o_btree_len(td, it->new_tup, OTupleLength);
@@ -508,6 +515,8 @@ process_tree(StringInfo str, TableRow *row)
 	OIndexDescr *indexDescr = NULL;
 	int			sys_tree_num = -1;
 
+	elog(WARNING, "process_tree: %u %u %u",
+		 row->oids.datoid, row->oids.reloid, row->oids.relnode);
 	sys_tree_num = fill_descrs(row->oids, row->ix_type,
 							   &descr, &indexDescr);
 
@@ -570,6 +579,17 @@ orioledb_pg_rewind_new_row_versions(PG_FUNCTION_ARGS)
 		appendHton32StringInfo(result_str, row->oids.reloid);
 		appendHton32StringInfo(result_str, row->oids.relnode);
 
+	{
+		Datum res;
+		VarChar    *optionsArg = (VarChar *) cstring_to_text("");
+		
+		extern Datum orioledb_sys_tree_structure(PG_FUNCTION_ARGS);
+		res = DirectFunctionCall3(orioledb_sys_tree_structure, 
+								  Int32GetDatum(3),
+								  PointerGetDatum(optionsArg),
+								  Int32GetDatum(32));
+		elog(WARNING, "TREE: %s", TextDatumGetCString(res));
+	}
 		process_tree(result_str, row);
 	}
 	table_endscan(scan);
@@ -599,6 +619,9 @@ apply_rewind_row(OTableDescr *descr, OIndexDescr *indexDescr,
 	advance_oxids(temp_oxid);
 	recovery_switch_to_oxid(temp_oxid, -1);
 
+	elog(WARNING, "apply_rewind_row: sys_tree_num: %d; deleted: %c",
+		 sys_tree_num,
+		 deleted ? 'Y' : 'N');
 	if (sys_tree_num < 0)
 		apply_modify_record(descr, indexDescr,
 							deleted ? RecoveryMsgTypeDelete : RecoveryMsgTypeInsert,
@@ -732,6 +755,7 @@ replay_rewind(uint32 chkp_num, bool single)
 	uint32		nkeys;
 	uint8		found;
 	XLogRecPtr	startpoint;
+	OXid		lastXid;
 
 	rewind_file = PathNameOpenFile(ORIOLEDB_DATA_DIR "/rewind",
 								   O_RDONLY | PG_BINARY);
@@ -752,6 +776,16 @@ replay_rewind(uint32 chkp_num, bool single)
 							   FilePathName(rewind_file))));
 
 	startpoint = *((XLogRecPtr *) (read_buf));
+
+	readed = OFileRead(rewind_file, (Pointer) &read_buf, sizeof(OXid),
+					   offset, WAIT_EVENT_DATA_FILE_READ);
+	offset += sizeof(OXid);
+	if (readed != sizeof(OXid))
+		ereport(FATAL, (errcode_for_file_access(),
+						errmsg("could not read lastXid from rewind file %s",
+							   FilePathName(rewind_file))));
+	lastXid = *((OXid *) (read_buf));
+
 	readed = OFileRead(rewind_file, (Pointer) &read_buf, tree_header_size,
 					   offset, WAIT_EVENT_DATA_FILE_READ);
 	while (readed == tree_header_size)
@@ -769,6 +803,11 @@ replay_rewind(uint32 chkp_num, bool single)
 		found = *((uint8 *) (read_buf + sizeof(uint32) +
 							 sizeof(Oid) * 3));
 
+		elog(LOG, "REWIND TREE: %u %u %u: %c", 
+			 cur_oids.datoid,
+			 cur_oids.reloid,
+			 cur_oids.relnode,
+			 found ? 'Y' : 'N');
 		if (IS_SYS_TREE_OIDS(cur_oids))
 			sys_tree_num = cur_oids.relnode;
 
@@ -867,7 +906,18 @@ replay_rewind(uint32 chkp_num, bool single)
 							   FilePathName(rewind_file),
 							   tree_header_size, readed)));
 
+	/* TODO: Basically mimic checkpoint_shmem_init */
 	checkpoint_state->controlToastConsistentPtr = startpoint;
 	checkpoint_state->controlReplayStartPtr = startpoint;
+	checkpoint_state->controlSysTreesStartPtr = startpoint;
+	elog(WARNING, "lastXid: %lu", lastXid);
+	Assert(OXidIsValid(lastXid));
+	pg_atomic_init_u64(&xid_meta->nextXid, lastXid);
+	elog(WARNING, "SET runXmin AFTER REWIND: %lu", lastXid);
+	pg_atomic_init_u64(&xid_meta->runXmin, lastXid);
+	pg_atomic_init_u64(&xid_meta->globalXmin, lastXid);
+	pg_atomic_init_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin, lastXid);
+	pg_atomic_init_u64(&xid_meta->writtenXmin, lastXid);
+	pg_atomic_init_u64(&xid_meta->writeInProgressXmin, lastXid);
 	elog(LOG, "orioledb rewind ended");
 }

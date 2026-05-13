@@ -288,6 +288,7 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		}
 
 		pg_atomic_init_u64(&xid_meta->nextXid, FirstNormalTransactionId);
+		elog(WARNING, "SET runXmin 0: %u", FirstNormalTransactionId);
 		pg_atomic_init_u64(&xid_meta->runXmin, FirstNormalTransactionId);
 		pg_atomic_init_u64(&xid_meta->globalXmin, FirstNormalTransactionId);
 		pg_atomic_init_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin, FirstNormalTransactionId);
@@ -396,6 +397,7 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		 * existing data directories.
 		 */
 		pg_atomic_init_u64(&xid_meta->nextXid, control.checkpointRetainXmax);
+		elog(WARNING, "SET runXmin 1: %lu", control.checkpointRetainXmin);
 		pg_atomic_init_u64(&xid_meta->runXmin, control.checkpointRetainXmin);
 		pg_atomic_init_u64(&xid_meta->globalXmin, control.checkpointRetainXmin);
 		pg_atomic_init_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin, control.checkpointRetainXmin);

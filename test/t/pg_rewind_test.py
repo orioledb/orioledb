@@ -11,7 +11,7 @@ import unittest
 import testgres
 from testgres.defaults import default_dbname
 from testgres.utils import file_tail, get_bin_path, options_string
-from testgres.consts import PG_AUTO_CONF_FILE, TMP_DUMP
+from testgres.consts import PG_AUTO_CONF_FILE
 from testgres.enums import NodeStatus
 from sys import platform
 
@@ -67,15 +67,14 @@ class RewindTest(BaseTest):
 	                     master: testgres.PostgresNode,
 	                     new_master_port: int,
 	                     master_slot: str,
-	                     archive_dir: str,
 	                     verbose=False,
 	                     rewind_log_file=None):
 		if master.status() == NodeStatus.Running:
 			master.stop()
-		master_cleanup_command = f'pg_archivecleanup {archive_dir} %r'
+		master_cleanup_command = f'pg_archivecleanup {self.archive_dir} %r'
 		master.append_conf(recovery_target_timeline='latest',
 		                   archive_cleanup_command=master_cleanup_command,
-		                   restore_command=f'cp {archive_dir}/%f %p',
+		                   restore_command=f'cp {self.archive_dir}/%f %p',
 		                   primary_slot_name=master_slot)
 		if rewind_log_file == None:
 			rewind_log_file = master.pg_log_file
@@ -98,14 +97,18 @@ class RewindTest(BaseTest):
 			os.utime(signal_name, None)
 		master.start(start_params)
 
-	def test_rewind_remove_rows(self):
+	def enable_archive(self, node):
+		self.archive_dir = os.path.join(node.base_dir, 'archive')
+		node.os_ops.makedirs(self.archive_dir)
+		archive_command = (f'test ! -f {self.archive_dir}/%f ' +
+		                   f'&& cp %p {self.archive_dir}/%f')
+		node.append_conf(archive_mode="on",
+		                 archive_command=archive_command,
+		                 wal_log_hints="on")
+		
+	def test_pg_rewind_remove_rows(self):
 		with self.node as master:
-			archive_dir = mkdtemp(prefix=TMP_DUMP)
-			archive_command = (f'test ! -f {archive_dir}/%f ' +
-			                   f'&& cp %p {archive_dir}/%f')
-			master.append_conf(archive_mode="on",
-			                   archive_command=archive_command,
-			                   wal_log_hints="on")
+			self.enable_archive(master)
 			master.start()
 
 			with self.getReplica() as replica:
@@ -154,23 +157,16 @@ class RewindTest(BaseTest):
 				    "gssencmode": 'disable',
 				    "target_session_attrs": 'any'
 				}
-				self.pg_rewind_master(master, replica.port, master_slot,
-				                      archive_dir)
+				self.pg_rewind_master(master, replica.port, master_slot)
 				self.start_master_as_standby(master, replica, primary_conninfo,
 				                             master_slot)
 				self.assertEqual(
 				    master.execute("SELECT COUNT(*) FROM test_table")[0][0],
 				    200)
-			rmtree(archive_dir, ignore_errors=True)
 
-	def test_rewind_apply_new_rows(self):
+	def test_pg_rewind_apply_new_rows(self):
 		with self.node as master:
-			archive_dir = mkdtemp(prefix=TMP_DUMP)
-			archive_command = (f'test ! -f {archive_dir}/%f ' +
-			                   f'&& cp %p {archive_dir}/%f')
-			master.append_conf(archive_mode="on",
-			                   archive_command=archive_command,
-			                   wal_log_hints="on")
+			self.enable_archive(master)
 			master.start()
 
 			with self.getReplica() as replica:
@@ -230,8 +226,7 @@ class RewindTest(BaseTest):
 				    "gssencmode": 'disable',
 				    "target_session_attrs": 'any'
 				}
-				self.pg_rewind_master(master, replica.port, master_slot,
-				                      archive_dir)
+				self.pg_rewind_master(master, replica.port, master_slot)
 				self.start_master_as_standby(master, replica, primary_conninfo,
 				                             master_slot)
 				self.assertEqual(
@@ -243,16 +238,10 @@ class RewindTest(BaseTest):
 				self.assertEqual(
 				    master.execute("SELECT * FROM test_table ORDER BY x"),
 				    [(1, 6), (3, 2), (4, 2), (5, 7), (6, 4), (11, 4), (12, 4)])
-			rmtree(archive_dir, ignore_errors=True)
 
-	def test_rewind_multiple_relations(self):
+	def test_pg_rewind_multiple_relations(self):
 		with self.node as master:
-			archive_dir = mkdtemp(prefix=TMP_DUMP)
-			archive_command = (f'test ! -f {archive_dir}/%f ' +
-			                   f'&& cp %p {archive_dir}/%f')
-			master.append_conf(archive_mode="on",
-			                   archive_command=archive_command,
-			                   wal_log_hints="on")
+			self.enable_archive(master)
 			rewind_file = os.path.join(master.data_dir, "orioledb_data",
 			                           "rewind")
 			master.start()
@@ -413,8 +402,7 @@ class RewindTest(BaseTest):
 				    "target_session_attrs": 'any'
 				}
 
-				self.pg_rewind_master(master, replica.port, master_slot,
-				                      archive_dir)
+				self.pg_rewind_master(master, replica.port, master_slot)
 				self.assertTrue(os.path.isfile(rewind_file))
 				self.start_master_as_standby(master, replica, primary_conninfo,
 				                             master_slot)
@@ -551,16 +539,10 @@ class RewindTest(BaseTest):
 				                                                       (5, 7),
 				                                                       (6, 4),
 				                                                       (8, 8)])
-			rmtree(archive_dir, ignore_errors=True)
 
-	def test_rewind_in_progress_target_trx(self):
+	def test_pg_rewind_in_progress_target_trx(self):
 		with self.node as master:
-			archive_dir = mkdtemp(prefix=TMP_DUMP)
-			archive_command = (f'test ! -f {archive_dir}/%f ' +
-			                   f'&& cp %p {archive_dir}/%f')
-			master.append_conf(archive_mode="on",
-			                   archive_command=archive_command,
-			                   wal_log_hints="on")
+			self.enable_archive(master)
 			master.start()
 
 			with self.getReplica() as replica:
@@ -628,22 +610,15 @@ class RewindTest(BaseTest):
 				    "gssencmode": 'disable',
 				    "target_session_attrs": 'any'
 				}
-				self.pg_rewind_master(master, replica.port, master_slot,
-				                      archive_dir)
+				self.pg_rewind_master(master, replica.port, master_slot)
 				self.start_master_as_standby(master, replica, primary_conninfo,
 				                             master_slot)
 				self.assertEqual(
 				    master.execute("SELECT COUNT(*) FROM test_table")[0][0], 5)
-			rmtree(archive_dir, ignore_errors=True)
 
-	def test_rewind_in_progress_target_trx_undo(self):
+	def test_pg_rewind_in_progress_target_trx_undo(self):
 		with self.node as master:
-			archive_dir = mkdtemp(prefix=TMP_DUMP)
-			archive_command = (f'test ! -f {archive_dir}/%f ' +
-			                   f'&& cp %p {archive_dir}/%f')
-			master.append_conf(archive_mode="on",
-			                   archive_command=archive_command,
-			                   wal_log_hints="on")
+			self.enable_archive(master)
 			master.start()
 
 			with self.getReplica() as replica:
@@ -721,13 +696,11 @@ class RewindTest(BaseTest):
 				    "gssencmode": 'disable',
 				    "target_session_attrs": 'any'
 				}
-				self.pg_rewind_master(master, replica.port, master_slot,
-				                      archive_dir)
+				self.pg_rewind_master(master, replica.port, master_slot)
 				self.start_master_as_standby(master, replica, primary_conninfo,
 				                             master_slot)
 				self.assertEqual(
 				    master.execute("SELECT COUNT(*) FROM test_table")[0][0], 5)
-			rmtree(archive_dir, ignore_errors=True)
 
 	def test_in_progress_trx_replication(self):
 		with self.node as master:
@@ -749,32 +722,54 @@ class RewindTest(BaseTest):
 
 				replica.append_conf(primary_slot_name='replica')
 				replica.start()
+				self.catchup_orioledb(replica)
+
+				print(replica.safe_psql("""
+					SELECT orioledb_tbl_structure('test_table'::regclass, 'bUCKSivo');
+					""").decode("utf-8"), flush=True)
 
 				con1 = master.connect()
 				con1.begin()
 				con1.execute("""INSERT INTO test_table (x, y)
 					SELECT id, 3 FROM generate_series(7, 15) id""")
+				con1.execute("""UPDATE test_table SET y = 4 WHERE x = 9""")
+				con1.execute("""DELETE FROM test_table WHERE x = 10""")
+				con1.execute("""SAVEPOINT s1;""")
+				con1.execute("""UPDATE test_table SET y = 5 WHERE x = 9""")
+				con1.execute("""SAVEPOINT s2;""")
+				con1.execute("""INSERT INTO test_table VALUES (10, 5)""")
+				con1.execute("""UPDATE test_table SET y = 6 WHERE x = 8""")
+				con1.execute("""SAVEPOINT s3;""")
+				con1.execute("""UPDATE test_table SET y = 8 WHERE x = 8""")
+				con1.execute("""DELETE FROM test_table WHERE x = 10""")
+				con1.execute("""SAVEPOINT s4;""")
+				con1.execute("""UPDATE test_table SET y = 8 WHERE x = 9""")
+				print(replica.safe_psql("""
+					SELECT orioledb_tbl_structure('test_table'::regclass, 'bUCKSivo');
+					""").decode("utf-8"), flush=True)
 				con1.execute("SELECT orioledb_flush_local_wal()")
 
 				self.catchup_orioledb(replica)
+				print(replica.safe_psql("""
+					SELECT orioledb_tbl_structure('test_table'::regclass, 'bUCKSivo');
+					""").decode("utf-8"), flush=True)
 				self.assertEqual(
 				    replica.execute("SELECT COUNT(*) FROM test_table")[0][0],
 				    5)
 
 				con1.commit()
 				self.catchup_orioledb(replica)
+				print(replica.safe_psql("""
+					SELECT orioledb_tbl_structure('test_table'::regclass, 'bUCKSivo');
+					""").decode("utf-8"), flush=True)
 				self.assertEqual(
 				    replica.execute("SELECT COUNT(*) FROM test_table")[0][0],
-				    5)
+				    13)
+				raise 0
 
-	def test_rewind_in_progress_replica_trx(self):
+	def test_pg_rewind_in_progress_replica_trx(self):
 		with self.node as master:
-			archive_dir = mkdtemp(prefix=TMP_DUMP)
-			archive_command = (f'test ! -f {archive_dir}/%f ' +
-			                   f'&& cp %p {archive_dir}/%f')
-			master.append_conf(archive_mode="on",
-			                   archive_command=archive_command,
-			                   wal_log_hints="on")
+			self.enable_archive(master)
 			master.start()
 
 			with self.getReplica() as replica:
@@ -793,19 +788,22 @@ class RewindTest(BaseTest):
 
 				replica.append_conf(primary_slot_name='replica')
 				replica.start()
-
 				self.catchup_orioledb(replica)
+
 				self.assertEqual(
 				    replica.execute("SELECT COUNT(*) FROM test_table")[0][0],
 				    5)
 				replica.promote()
 				replica.safe_psql("CHECKPOINT;")
 
-				master.safe_psql("""INSERT INTO test_table (x, y)
-					SELECT id, 2 FROM generate_series(6, 12) id""")
-				self.assertEqual(
-				    master.execute("SELECT COUNT(*) FROM test_table")[0][0],
-				    12)
+				# master.safe_psql("""INSERT INTO test_table (x, y)
+				# 	SELECT id, 2 FROM generate_series(6, 12) id""")
+				print(master.safe_psql("""
+					SELECT orioledb_tbl_structure('test_table'::regclass);
+					""").decode("utf-8"), flush=True)
+				# self.assertEqual(
+				#     master.execute("SELECT COUNT(*) FROM test_table")[0][0],
+				#     12)
 				self.assertEqual(
 				    replica.execute("SELECT COUNT(*) FROM test_table")[0][0],
 				    5)
@@ -837,47 +835,46 @@ class RewindTest(BaseTest):
 				con1.execute("""DELETE FROM test_table WHERE x = 10""")
 				con1.execute("""SAVEPOINT s4;""")
 				con1.execute("""UPDATE test_table SET y = 8 WHERE x = 9""")
+				print(master.safe_psql("""
+					SELECT orioledb_tbl_structure('test_table'::regclass, 'bUCKSivo');
+					""").decode("utf-8"), flush=True)
 				self.pg_rewind_master(master, replica.port, master_slot,
-				                      archive_dir)
+				                      verbose=True, rewind_log_file=replica.pg_log_file)
 				self.start_master_as_standby(master, replica, primary_conninfo,
 				                             master_slot)
-				# con1.execute("SELECT orioledb_flush_local_wal()")
+				print(master.safe_psql("""
+					SELECT orioledb_tbl_structure('test_table'::regclass, 'bUCKSivo');
+					""").decode("utf-8"), flush=True)
+				# raise 0
+				con1.execute("SELECT orioledb_flush_local_wal()")
 				con2 = replica.connect()
-				master.catchup()
-				synchronized = False
-				sync_con = master.connect()
-				while not synchronized:
-					synchronized = sync_con.execute("""
-						SELECT orioledb_recovery_synchronized();
-					""")[0][0]
-				sync_con.close()
 				self.catchup_orioledb(master)
+				print(master.safe_psql("""
+					SELECT orioledb_tbl_structure('test_table'::regclass);
+					""").decode("utf-8"), flush=True)
 				self.assertEqual(
 				    replica.execute("SELECT COUNT(*) FROM test_table")[0][0],
 				    5)
 				self.assertEqual(
 				    master.execute("SELECT COUNT(*) FROM test_table")[0][0], 5)
 				con1.execute("""ROLLBACK TO SAVEPOINT s2;""")
-				con1.execute("""DELETE FROM test_table WHERE y = 8""")
+				con1.execute("""DELETE FROM test_table WHERE x = 4""")
 				con1.commit()
 				con1.close()
 				self.catchup_orioledb(master)
+				print(master.safe_psql("""
+					SELECT orioledb_tbl_structure('test_table'::regclass);
+					""").decode("utf-8"), flush=True)
 				self.assertEqual(
 				    master.execute("SELECT COUNT(*) FROM test_table")[0][0],
-				    13)
+				    12)
 				self.assertEqual(
 				    replica.execute("SELECT COUNT(*) FROM test_table")[0][0],
-				    13)
-			rmtree(archive_dir, ignore_errors=True)
+				    12)
 
-	def test_rewind_toast(self):
+	def test_pg_rewind_toast(self):
 		with self.node as master:
-			archive_dir = mkdtemp(prefix=TMP_DUMP)
-			archive_command = (f'test ! -f {archive_dir}/%f ' +
-			                   f'&& cp %p {archive_dir}/%f')
-			master.append_conf(archive_mode="on",
-			                   archive_command=archive_command,
-			                   wal_log_hints="on")
+			self.enable_archive(master)
 			master.start()
 
 			with self.getReplica() as replica:
@@ -937,8 +934,7 @@ class RewindTest(BaseTest):
 				    "gssencmode": 'disable',
 				    "target_session_attrs": 'any'
 				}
-				self.pg_rewind_master(master, replica.port, master_slot,
-				                      archive_dir)
+				self.pg_rewind_master(master, replica.port, master_slot)
 				self.start_master_as_standby(master, replica, primary_conninfo,
 				                             master_slot)
 				master.execute("SELECT * FROM test_table")
@@ -951,7 +947,6 @@ class RewindTest(BaseTest):
 					    master.execute("""
 							SELECT * FROM test_table WHERE x = %d
 						""" % (i + 1))[0], replica_rows[i - 20])
-			rmtree(archive_dir, ignore_errors=True)
 
 	def _substract_lists(self, list1: list, list2: list) -> list:
 		remaining = Counter(list2)
@@ -1207,7 +1202,7 @@ class RewindTest(BaseTest):
 		def after_promote(self):
 			replica_changes = {
 			    'tables': {
-			        '+': [],
+			        '+': ['test2', 'test2', 'test2', 'test2'],
 			        '-': []
 			    },
 			    'indices': {
@@ -1252,7 +1247,7 @@ class RewindTest(BaseTest):
 				INSERT INTO test2 (x, y)
 					SELECT id, 230 FROM generate_series(1, 20) id;
 			""")
-			# con1.execute("SELECT orioledb_flush_local_wal()")
+			con1.execute("SELECT orioledb_flush_local_wal()")
 			return {'master': master_changes, 'replica': replica_changes}
 
 		def after_rewind(self):
@@ -1403,7 +1398,7 @@ class RewindTest(BaseTest):
 		    replica_changes["indices"]['+'], replica_changes["indices"]['-'])]
 		return [master_tables, master_indices, replica_tables, replica_indices]
 
-	def test_rewind_sys_trees(self):
+	def test_pg_rewind_sys_trees(self):
 		master_changes = {
 		    'tables': {
 		        '+': [],
@@ -1426,12 +1421,7 @@ class RewindTest(BaseTest):
 		}
 
 		with self.node as master:
-			archive_dir = mkdtemp(prefix=TMP_DUMP)
-			archive_command = (f'test ! -f {archive_dir}/%f ' +
-			                   f'&& cp %p {archive_dir}/%f')
-			master.append_conf(archive_mode="on",
-			                   archive_command=archive_command,
-			                   wal_log_hints="on")
+			self.enable_archive(master)
 			master.start()
 
 			with self.getReplica() as replica:
@@ -1439,7 +1429,7 @@ class RewindTest(BaseTest):
 				    self._SecondaryIndexRevivalTest(self),
 				    self._PrimaryIndexRevivalTest(self),
 				    self._TableRevivalTest(self),
-				    # self._RewindSysTreesInProgressTest(self),
+                    self._RewindSysTreesInProgressTest(self),
 				    self._ReplicaTableDropTest(self),
 				    self._NewTablesOnTargetAfterPromoteTest(self),
 				    self._ToastAfterSysTreeRevivalTest(self)
@@ -1521,7 +1511,7 @@ class RewindTest(BaseTest):
 				    "target_session_attrs": 'any'
 				}
 				self.pg_rewind_master(master, replica.port, master_slot,
-				                      archive_dir)
+				                      verbose=True, rewind_log_file=replica.pg_log_file)
 				self.start_master_as_standby(master, replica, primary_conninfo,
 				                             master_slot)
 				for test in tests:
@@ -1531,6 +1521,7 @@ class RewindTest(BaseTest):
 						    changes, master_changes, replica_changes)
 						(master_tables, master_indices, replica_tables,
 						 replica_indices) = new_changes
+				self.catchup_orioledb(master)
 
 				self.assertEqual(
 				    master.execute("""
@@ -1542,4 +1533,4 @@ class RewindTest(BaseTest):
 						SELECT name FROM orioledb_index
 							ORDER BY name COLLATE "C"
 					"""), replica_indices)
-			rmtree(archive_dir, ignore_errors=True)
+

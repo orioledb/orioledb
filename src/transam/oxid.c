@@ -816,6 +816,8 @@ map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr, bool getRawCsn)
 	pg_read_barrier();
 
 	/* Did we manage to read the correct csn? */
+	elog(WARNING, "oxid(%lu) >= pg_atomic_read_u64(&xid_meta->writeInProgressXmin)(%lu)",
+		 oxid, pg_atomic_read_u64(&xid_meta->writeInProgressXmin));
 	if (oxid >= pg_atomic_read_u64(&xid_meta->writeInProgressXmin))
 		return;
 
@@ -834,6 +836,8 @@ map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr, bool getRawCsn)
 				   sizeof(OXidMapItem), false);
 
 	/* Recheck if globalXmin was advanced concurrently */
+	elog(WARNING, "oxid(%lu) < pg_atomic_read_u64(&xid_meta->globalXmin)(%lu)",
+		 oxid, pg_atomic_read_u64(&xid_meta->globalXmin));
 	if (oxid < pg_atomic_read_u64(&xid_meta->globalXmin))
 	{
 		if (outCsn)
@@ -1766,13 +1770,16 @@ advance_run_xmin(OXid oxid)
 	run_xmin = pg_atomic_read_u64(&xid_meta->runXmin);
 	if (run_xmin == oxid)
 	{
+		elog(WARNING, "SET runXmin 7: %lu", run_xmin + 1);
 		while (pg_atomic_compare_exchange_u64(&xid_meta->runXmin,
 											  &run_xmin, run_xmin + 1))
 		{
 			run_xmin++;
 			map_oxid(run_xmin, &csn, NULL, false);
+			elog(WARNING, "csn: %lu", csn);
 			if (COMMITSEQNO_IS_SPECIAL(csn) || COMMITSEQNO_IS_FROZEN(csn))
 				break;
+			elog(WARNING, "SET runXmin 8: %lu; csn: %lu", run_xmin + 1, csn);
 		}
 	}
 }
@@ -1820,6 +1827,7 @@ current_oxid_commit(CommitSeqNo csn)
 	xlog_ptr_committing_set = false;
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 
+	elog(WARNING, "current_oxid_commit: curOxid: %lu; csn: %lu", curOxid, csn);
 	advance_run_xmin(curOxid);
 	curOxid = InvalidOXid;
 	release_assigned_logical_xids();
@@ -1863,6 +1871,7 @@ current_oxid_abort(void)
 
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 
+	elog(WARNING, "current_oxid_abort: curOxid: %lu", curOxid);
 	advance_run_xmin(curOxid);
 	curOxid = InvalidOXid;
 	release_assigned_logical_xids();
@@ -2112,22 +2121,32 @@ xid_is_finished(OXid xid)
 	if (xid == BootstrapTransactionId)
 		return true;
 
+	elog(WARNING, "xid_is_finished: xid: %lu", xid);
 	if (is_recovery_process())
 	{
 		bool		found;
 
 		csn = recovery_map_oxid_csn(xid, &found);
+		elog(WARNING, "RECOVERY CSN: %lu; found: %c", csn, found ? 'Y' : 'N');
 		if (found)
+		{
+			elog(WARNING, "COMMITSEQNO_IS_COMMITTED(%lu): %c",
+				 csn, COMMITSEQNO_IS_COMMITTED(csn) ? 'Y' : 'N');
 			return COMMITSEQNO_IS_COMMITTED(csn);
+		}
 	}
 
 	xmin = pg_atomic_read_u64(&xid_meta->runXmin);
+	elog(WARNING, "xid_is_finished: xid(%lu) < xmin(%lu)", xid, xmin);
 
 	if (xid < xmin)
 		return true;
 
 	csn = oxid_get_csn(xid, false);
 
+	elog(WARNING, "ALIVE CSN: %lu", csn);
+	elog(WARNING, "COMMITSEQNO_IS_COMMITTED(%lu): %c",
+		 csn, COMMITSEQNO_IS_COMMITTED(csn) ? 'Y' : 'N');
 	return COMMITSEQNO_IS_COMMITTED(csn);
 }
 

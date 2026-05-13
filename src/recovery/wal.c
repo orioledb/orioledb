@@ -81,7 +81,7 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	OIndexType	type = desc->type;
 	bool		write_two_tuples;
 
-	elog(DEBUG4, "[%s] rec_type %d oids [ %u %u %u ]", __func__, rec_type, oids.datoid, oids.reloid, oids.relnode);
+	elog(WARNING, "[%s] rec_type %d oids [ %u %u %u ]", __func__, rec_type, oids.datoid, oids.reloid, oids.relnode);
 
 	/* Do not write WAL during recovery */
 	if (OXidIsValid(recovery_oxid))
@@ -115,7 +115,7 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	}
 
 
-	elog(DEBUG4, "add_modify_wal_record_extended length1 %d length2 %d", length, length2);
+	elog(WARNING, "add_modify_wal_record_extended length1 %d length2 %d", length, length2);
 	if (!ORelOidsIsEqual(local_wal.oids, oids) || type != local_wal.ix_type)
 		required_length += sizeof(WALRecRelation);
 
@@ -262,6 +262,9 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	local_wal.has_material_changes = false;
 	cur_trx_start = InvalidXLogRecPtr;
 
+	elog(WARNING, "[%s] COMMIT oxid " UINT64_FORMAT " logicalXid %u %X/%X",
+		 __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
+
 	return walPos;
 }
 
@@ -325,7 +328,7 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	local_wal.has_material_changes = false;
 	cur_trx_start = InvalidXLogRecPtr;
 
-	elog(DEBUG4, "ROLLBACK oxid " UINT64_FORMAT " logicalXid %u",
+	elog(WARNING, "ROLLBACK oxid " UINT64_FORMAT " logicalXid %u",
 		 oxid, logicalXid);
 
 	if (synchronous_commit > SYNCHRONOUS_COMMIT_OFF)
@@ -380,6 +383,8 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 
 	Assert(!is_recovery_process());
 	Assert(rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK);
+
+	elog(WARNING, "rec_type %d (%s)", rec_type, wal_record_type_to_string(rec_type));
 
 	recLength = sizeof(WALRecFinish);
 	if (rec_type == WAL_REC_COMMIT &&
@@ -450,12 +455,14 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 
 	heapXid = GetTopTransactionIdIfAny();
 
+	elog(WARNING, "WAL_REC_XID oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
+		 oxid, logicalXid, heapXid);
+
 	rec = (WALRecXid *) (&local_wal.buffer[local_wal.buffer_offset]);
 	rec->recType = WAL_REC_XID;
 	memcpy(rec->oxid, &oxid, sizeof(OXid));
 	memcpy(rec->logicalXid, &logicalXid, sizeof(TransactionId));
 	memcpy(rec->heapXid, &heapXid, sizeof(TransactionId));
-	memcpy(rec->trx_start, &cur_trx_start, sizeof(XLogRecPtr));
 
 	local_wal.buffer_offset += sizeof(*rec);
 }
@@ -666,7 +673,7 @@ add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 	csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 	memcpy(rec->csn, &csn, sizeof(csn));
 
-	elog(DEBUG4, "[%s] xmin " UINT64_FORMAT " csn " UINT64_FORMAT,
+	elog(WARNING, "[%s] xmin " UINT64_FORMAT " csn " UINT64_FORMAT,
 		 __func__, runXmin, csn);
 
 	local_wal.buffer_offset += sizeof(*rec);
@@ -743,6 +750,8 @@ flush_local_wal_if_needed(int required_length)
 	Assert(!is_recovery_process());
 	if (local_wal.buffer_offset + required_length + XID_RESERVED_LENGTH > LOCAL_WAL_BUFFER_SIZE)
 	{
+		elog(WARNING, "[%s] Going to FLUSH WAL on local WAL buffer overflow", __func__);
+
 		START_CRIT_SECTION();
 		log_logical_wal_container(local_wal.buffer, local_wal.buffer_offset, false);
 		reset_local_wal_buffer();
@@ -762,6 +771,7 @@ log_logical_wal_container(Pointer ptr, int length, bool withXactTime)
 
 	Assert(ORIOLEDB_WAL_VERSION >= FIRST_ORIOLEDB_WAL_VERSION);
 
+	elog(WARNING, "log_logical_wal_container: %X/%X", LSN_FORMAT_ARGS(GetInsertRecPtr()));
 	XLogBeginInsert();
 	XLogRegisterData((char *) (&wal_version), sizeof(wal_version));
 
@@ -808,7 +818,7 @@ o_wal_insert(BTreeDescr *desc, OTuple tuple, char relreplident, uint32 version)
 	bool		call_pfree;
 	int			size;
 
-	elog(DEBUG4, "[%s] [ %u %u %u ] version %u", __func__,
+	elog(WARNING, "[%s] [ %u %u %u ] version %u", __func__,
 		 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
 		 version);
 
@@ -835,7 +845,7 @@ o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident,
 	int			size1;
 	int			size2;
 
-	elog(DEBUG4, "[%s] [ %u %u %u ] version %u", __func__,
+	elog(WARNING, "[%s] [ %u %u %u ] version %u", __func__,
 		 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
 		 version);
 
@@ -878,7 +888,7 @@ o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident, uint32 version)
 	bool		call_pfree;
 	int			size;
 
-	elog(DEBUG4, "[%s] [ %u %u %u ] version %u", __func__,
+	elog(WARNING, "[%s] [ %u %u %u ] version %u", __func__,
 		 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
 		 version);
 
