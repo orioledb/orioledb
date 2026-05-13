@@ -3813,7 +3813,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							}
 						}
 						Assert(ix_num < o_table->nindices);
-						if (reltablespace == 0)
+						if (!OidIsValid(reltablespace))
 							reltablespace = MyDatabaseTableSpace;
 						if (o_table->indices[ix_num].tablespace == reltablespace)
 						{
@@ -3877,6 +3877,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					ORelOids	old_oids;
 					Oid			old_reltablespace = rel->rd_rel->reltablespace;
 
+					if (!OidIsValid(old_reltablespace))
+						old_reltablespace = MyDatabaseTableSpace;
 					ORelOidsSetFromRel(old_oids, rel);
 					CommandCounterIncrement();
 					if (old_reltablespace != rel->rd_rel->reltablespace)
@@ -3970,10 +3972,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					ORelOptions *options = (ORelOptions *) tbl->rd_options;
 					uint8		new_fillfactor;
 					bool		new_index_bridging;
+					Oid			reltablespace = rel->rd_rel->reltablespace;
 
+					if (reltablespace == 0)
+						reltablespace = MyDatabaseTableSpace;
 					CommandCounterIncrement();
 					ORelOidsSetFromRel(oids, tbl);
-					if (ORelOidsIsValid(saved_oids) && o_saved_reltablespace != rel->rd_rel->reltablespace)
+					if (OidIsValid(o_saved_reltablespace) &&
+						o_saved_reltablespace != reltablespace)
 					{
 						/*
 						 * We come here during "ALTER TABLE ... SET
