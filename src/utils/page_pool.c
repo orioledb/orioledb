@@ -679,6 +679,9 @@ local_ppool_run_maintenance(PagePool *pool, bool evict, volatile sig_atomic_t *s
 	bool		haveRetainSystemLoc = undo_type_has_retained_location(UndoLogSystem);
 	LocalPagePool *local_pool = (LocalPagePool *) pool;
 	bool		merged_or_evicted = false;
+	uint64          skippedLocalEvictions = 0;
+	uint64          skippedLocalEvictionsLimit;
+	bool            exhausted = false;
 
 	/*
 	 * Shutdown can be requested only from the bgwriter. And bgwriter should
@@ -691,6 +694,8 @@ local_ppool_run_maintenance(PagePool *pool, bool evict, volatile sig_atomic_t *s
 	/* We might need to merge pages */
 	reserve_undo_size(UndoLogRegularPageLevel, 2 * O_MERGE_UNDO_IMAGE_SIZE);
 	reserve_undo_size(UndoLogSystem, 2 * O_MERGE_UNDO_IMAGE_SIZE);
+
+	skippedLocalEvictionsLimit = (uint64) local_pool->size * UCM_USAGE_LEVELS;
 
 	while (!merged_or_evicted)
 	{
@@ -727,6 +732,13 @@ local_ppool_run_maintenance(PagePool *pool, bool evict, volatile sig_atomic_t *s
 				break;
 		}
 		local_pool->evict_current_slot++;
+
+		/* For local pool we skip concurrent eviction checks */
+		if (++skippedLocalEvictions >= skippedLocalEvictionsLimit)
+		{
+			exhausted = true;
+			break;
+		}
 	}
 
 
@@ -749,7 +761,7 @@ local_ppool_run_maintenance(PagePool *pool, bool evict, volatile sig_atomic_t *s
 	if (!haveRetainSystemLoc)
 		free_retained_undo_location(UndoLogSystem);
 
-	return true;
+	return !exhausted;
 }
 
 OInMemoryBlkno
