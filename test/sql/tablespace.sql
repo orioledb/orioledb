@@ -179,6 +179,9 @@ SELECT orioledb_tbl_indices('atable'::regclass);
 DROP INDEX atable_ix2;
 SELECT orioledb_tbl_indices('atable'::regclass);
 
+ALTER TABLE atable SET (fillfactor=80);
+\d+ atable
+
 DROP TABLE atable;
 
 DROP DATABASE tblspace_test_db;
