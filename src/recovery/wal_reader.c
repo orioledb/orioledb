@@ -106,8 +106,6 @@ wal_parse_rec_xid(WalReaderState *r, WalRecord *rec)
 	{
 		rec->heapXid = InvalidTransactionId;
 	}
-	/* TODO: Increase wal version variable */
-	WR_PARSE(r, &rec->u.xid.trx_start);
 	return WALPARSE_OK;
 }
 
@@ -193,7 +191,8 @@ wal_parse_rec_relation(WalReaderState *r, WalRecord *rec)
 	}
 	else
 	{
-		rec->u.relation.snapshot = o_non_deleted_snapshot;
+		OSnapshot	non_deleted_snapshot = {COMMITSEQNO_NON_DELETED, InvalidXLogRecPtr, 0, 0};
+		rec->u.relation.snapshot = non_deleted_snapshot;
 		rec->u.relation.version = O_TABLE_INVALID_VERSION;
 		rec->u.relation.base_version = O_TABLE_INVALID_VERSION;
 	}
