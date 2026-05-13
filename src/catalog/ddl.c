@@ -892,6 +892,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		in_rewrite = false;
 		o_saved_relrewrite = InvalidOid;
 		o_saved_reltablespace = InvalidOid;
+		ORelOidsSetInvalid(saved_oids);
 		savedDataQuery = NULL;
 		in_nontransactional_truncate = false;
 	}
@@ -3972,7 +3973,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					CommandCounterIncrement();
 					ORelOidsSetFromRel(oids, tbl);
-					if (o_saved_reltablespace != rel->rd_rel->reltablespace)
+					if (ORelOidsIsValid(saved_oids) && o_saved_reltablespace != rel->rd_rel->reltablespace)
 					{
 						/*
 						 * We come here during "ALTER TABLE ... SET
@@ -4029,6 +4030,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						o_table_free(new_o_table);
 
 						o_saved_reltablespace = InvalidOid;
+						ORelOidsSetInvalid(saved_oids);
 					}
 					else
 					{
