@@ -44,10 +44,6 @@ typedef struct WalRecord
 	{
 		struct
 		{
-			XLogRecPtr	trx_start;
-		}			xid;
-		struct
-		{
 			OXid		xmin;
 			CommitSeqNo csn;
 		}			finish;

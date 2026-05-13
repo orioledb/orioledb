@@ -104,9 +104,9 @@ build_fetch_context(OSnapshot *snapshot, uint32 version)
 }
 
 extern OSnapshot o_in_progress_snapshot;
-#endif							/* FRONTEND */
-
 extern OSnapshot o_non_deleted_snapshot;
+
+#endif							/* FRONTEND */
 
 /*
  * orioledb.serializable GUC modes.  Selects how OrioleDB handles a

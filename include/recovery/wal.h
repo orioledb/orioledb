@@ -74,7 +74,6 @@ typedef struct
 	uint8		logicalXid[sizeof(TransactionId)];
 	/* Since ORIOLEDB_WAL_VERSION = 17 */
 	uint8		heapXid[sizeof(TransactionId)];
-	uint8		trx_start[sizeof(XLogRecPtr)];
 } WALRecXid;
 
 typedef struct
@@ -199,7 +198,6 @@ typedef struct
 #define ORIOLEDB_WAL_PREFIX_SIZE (5)
 
 #ifndef FRONTEND
-extern const char *wal_record_type_to_string(int wal_record);
 
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, OffsetNumber length, char relreplident, uint32 version, uint32 base_version);

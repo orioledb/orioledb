@@ -18,9 +18,6 @@
 #include "pg_rewind_ext.h"
 #include "replication/message.h"
 
-/* Duplicated from oxid.c for wal_reader.c to use it */
-OSnapshot	o_non_deleted_snapshot = {COMMITSEQNO_NON_DELETED, InvalidXLogRecPtr, 0, 0};
-
 typedef struct OrioledbKey
 {
 	uint8		tupleFormatFlags;
@@ -48,9 +45,8 @@ typedef struct OrioledbKeyMap
 {
 	int			ntrees;
 	int			allocated;
-	OXid		first_xid;
+	OXid		lastXid;
 	OrioledbTree *trees;
-	XLogRecPtr	new_startpoint;
 	bool		fill_map;
 	OrioledbTreeKey tree_key;
 } OrioledbKeyMap;
@@ -74,8 +70,7 @@ create_orioledb_key_map(XLogRecPtr startpoint)
 
 	result->allocated = 8;
 	result->ntrees = 0;
-	result->first_xid = InvalidOXid;
-	result->new_startpoint = startpoint;
+	result->lastXid = InvalidOXid;
 	result->fill_map = false;
 	result->trees = palloc0(sizeof(OrioledbTree) * result->allocated);
 	return result;
@@ -718,7 +713,7 @@ write_binary(int fd, char *path, const void *buf, size_t nbyte)
 static void
 orioledb_process_row_map(OrioledbKeyMap *orioledb_map, const char *argv0,
 						 const char *datadir, bool debug, PGconn *conn,
-						 XLogRecPtr startpoint)
+						 XLogRecPtr startpoint, OXid lastXid)
 {
 	StringInfo	str;
 	int			fd = -1;
@@ -755,6 +750,7 @@ orioledb_process_row_map(OrioledbKeyMap *orioledb_map, const char *argv0,
 		datalen = str->len - sizeof(uint16);	/* - COPY OUT message end */
 
 		write_binary(fd, path, &startpoint, sizeof(XLogRecPtr));
+		write_binary(fd, path, &lastXid, sizeof(OXid));
 		write_binary(fd, path, str->data, datalen);
 
 		if (close(fd) != 0)
@@ -788,17 +784,6 @@ pg_rewind_on_record(WalReaderState *r, WalRecord *rec)
 
 	switch (rec->type)
 	{
-		case WAL_REC_XID:
-			{
-				if (orioledb_map->first_xid == InvalidOXid)
-					orioledb_map->first_xid = rec->oxid;
-
-				if (!XLogRecPtrIsInvalid(rec->u.xid.trx_start) &&
-					rec->u.xid.trx_start < orioledb_map->new_startpoint)
-					orioledb_map->new_startpoint = rec->u.xid.trx_start;
-			}
-			break;
-
 		case WAL_REC_RELATION:
 			{
 				if (orioledb_map->fill_map)
@@ -834,7 +819,13 @@ pg_rewind_on_record(WalReaderState *r, WalRecord *rec)
 				}
 			}
 			break;
-
+		case WAL_REC_COMMIT:
+		case WAL_REC_ROLLBACK:
+			{
+				if (!OXidIsValid(orioledb_map->lastXid))
+					orioledb_map->lastXid = rec->u.finish.xmin;
+			}
+			break;
 		default:
 			break;
 	}
@@ -880,7 +871,6 @@ _PG_rewind(const char *datadir_target, char *datadir_source,
 		   XLogRecPtr endpoint, const char *restoreCommand, const char *argv0,
 		   bool debug)
 {
-	XLogRecPtr	old_startpoint = startpoint;
 	OrioledbKeyMap *orioledb_map = create_orioledb_key_map(startpoint);
 	PGconn	   *source_conn;
 
@@ -891,20 +881,24 @@ _PG_rewind(const char *datadir_target, char *datadir_source,
 	if (PQstatus(source_conn) == CONNECTION_BAD)
 		pg_fatal("%s", PQerrorMessage(source_conn));
 
-	SimpleXLogRead(datadir_target, startpoint, tliIndex, endpoint,
-				   restoreCommand, extract_row_info, orioledb_map);
-	pg_log_debug("Old startpoint: %X/%X", LSN_FORMAT_ARGS(startpoint));
-	pg_log_debug("New startpoint: %X/%X",
-				 LSN_FORMAT_ARGS(orioledb_map->new_startpoint));
-	if (orioledb_map->new_startpoint != startpoint)
-		startpoint = orioledb_map->new_startpoint;
 	orioledb_map->fill_map = true;
 	SimpleXLogRead(datadir_target, startpoint, tliIndex, endpoint,
 				   restoreCommand, extract_row_info, orioledb_map);
+	if (!OXidIsValid(orioledb_map->lastXid))
+	{
+		/* This version is mainly LLM assumption, because it just tries to iterate page back */
+		XLogRecPtr prev_page = (startpoint - (startpoint % XLOG_BLCKSZ)) - XLOG_BLCKSZ;  
+		  
+		orioledb_map->fill_map = false;
+		SimpleXLogRead(datadir_target, prev_page, tliIndex, startpoint,
+					   restoreCommand, extract_row_info, orioledb_map);
+	}
+	Assert(OXidIsValid(orioledb_map->lastXid));
 	if (debug)
 		orioledb_key_map_print(orioledb_map);
 	orioledb_process_row_map(orioledb_map, argv0, datadir_target, debug,
-							 source_conn, old_startpoint);
+							 source_conn, startpoint,
+							 orioledb_map->lastXid);
 	free_orioledb_key_map(orioledb_map);
 	PQfinish(source_conn);
 

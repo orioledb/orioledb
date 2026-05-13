@@ -2253,6 +2253,7 @@ undo_xact_callback(XactEvent event, void *arg)
 				if (csn == COMMITSEQNO_INPROGRESS)
 					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 
+				elog(WARNING, "current_oxid_commit REGULAR COMMIT");
 				current_oxid_commit(csn);
 				Assert(enable_rewind || !csn_is_retained_for_rewind(csn));
 
@@ -2749,6 +2750,7 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 
 		current_oxid_precommit();
 		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
+		elog(WARNING, "current_oxid_commit AUTONOMOUS COMMIT");
 		current_oxid_commit(csn);
 
 		for (i = 0; i < (int) UndoLogsCount; i++)
