@@ -1,0 +1,87 @@
+name: pg_upgrade
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pg_upgrade:
+    strategy:
+      fail-fast: false
+      matrix:
+        cpu: [amd64, arm64]
+        compiler: [clang, gcc]
+
+    runs-on: ${{ matrix.cpu == 'arm64' && 'blacksmith-8vcpu-ubuntu-2404-arm' || 'blacksmith-8vcpu-ubuntu-2404' }}
+
+    env:
+      LLVM_VER: 18
+      CPU: ${{ matrix.cpu }}
+      COMPILER: ${{ matrix.compiler }}
+      # prerequisites.sh / post_build_prerequisites.sh branch on these;
+      # 'normal' selects the standard package set with no extra tooling.
+      CHECK_TYPE: normal
+      PG_OLD_VERSION: 16
+      PG_NEW_VERSION: 17
+      # Needed by prerequisites.sh; PG_VERSION is otherwise unused here.
+      PG_VERSION: 17
+
+    steps:
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@v6
+        with:
+          path: orioledb
+
+      - name: Resolve required PG tags
+        shell: bash
+        run: |
+          echo "PG_OLD_TAG=$(grep '^16: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+          echo "PG_NEW_TAG=$(grep '^17: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+
+      - name: Checkout PostgreSQL 16 source
+        uses: actions/checkout@v6
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PG_OLD_TAG }}
+          path: postgresql16
+
+      - name: Checkout PostgreSQL 17 source
+        uses: actions/checkout@v6
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PG_NEW_TAG }}
+          path: postgresql17
+
+      - name: Setup prerequisites
+        run: bash ./orioledb/ci/prerequisites.sh
+
+      - name: Install Python prerequisites
+        run: bash ./orioledb/ci/post_build_prerequisites.sh
+
+      - name: Build PostgreSQL 16 + orioledb
+        run: bash ./orioledb/ci/pg_upgrade_build.sh 16 "$GITHUB_WORKSPACE/postgresql16" "$GITHUB_WORKSPACE/pgsql16"
+
+      - name: Build PostgreSQL 17 + orioledb
+        run: bash ./orioledb/ci/pg_upgrade_build.sh 17 "$GITHUB_WORKSPACE/postgresql17" "$GITHUB_WORKSPACE/pgsql17"
+
+      - name: Run pg_upgrade test
+        timeout-minutes: 30
+        run: bash ./orioledb/ci/pg_upgrade.sh
+
+      - name: Upload pg_upgrade logs
+        uses: actions/upload-artifact@v7
+        if: ${{ failure() }}
+        with:
+          name: ${{ matrix.cpu }}_${{ matrix.compiler }}_pg_upgrade.logs
+          path: |
+            ./pg16.log
+            ./pg17.log
+            ./pgsql16/pgdata/log/*.log
+            ./pgsql17/pgdata/log/*.log
+            ./pre_upgrade*.sql
+            ./post_upgrade*.sql
+            ./schema_diff.txt
+            ./data_diff.txt
+            ./postgresql17/src/test/regress/regression.diffs
+          retention-days: 2
+          if-no-files-found: ignore
