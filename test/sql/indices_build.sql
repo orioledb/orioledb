@@ -758,6 +758,14 @@ CREATE INDEX ON t_bridge(t);
 CREATE INDEX ON t_bridge(t);
 REINDEX TABLE t_bridge;
 
+-- Parallel bridged index build must not leak BTreeSeqScans
+SET min_parallel_table_scan_size = 0;
+CREATE TABLE t_bridge_parallel (i int) USING orioledb
+	WITH (parallel_workers = 2);
+INSERT INTO t_bridge_parallel SELECT x FROM generate_series(1, 15000) x;
+CREATE INDEX ON t_bridge_parallel USING brin (i) WITH (pages_per_range = 1);
+RESET min_parallel_table_scan_size;
+
 RESET maintenance_work_mem;
 RESET max_parallel_maintenance_workers;
 
