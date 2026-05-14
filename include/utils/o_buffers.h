@@ -52,9 +52,15 @@ extern bool o_buffers_write_if_exists(OBuffersDesc *desc, Pointer buf,
 									  uint32 tag, int64 offset, int64 size);
 extern void o_buffers_sync(OBuffersDesc *desc, uint32 tag, int64 fromOffset,
 						   int64 toOffset, uint32 wait_event_info);
-extern void o_buffers_unlink_files_range(OBuffersDesc *desc,
-										 uint32 tag,
-										 int64 firstFileNumber,
-										 int64 lastFileNumber);
+extern void o_buffers_unlink_blocks_range(OBuffersDesc *desc,
+										  uint32 tag,
+										  int64 firstBlockNumber,
+										  int64 lastBlockNumber);
+extern void unlink_unretained_o_buffers(OBuffersDesc *desc, uint32 tag,
+										int64 itemsPerBlock,
+										int64 cleanupStart, int64 cleanupEnd,
+										int64 chkpRetainStart,
+										int64 chkpRetainEnd,
+										int64 transactionRetainStart);
 
 #endif

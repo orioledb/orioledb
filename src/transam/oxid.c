@@ -1165,44 +1165,16 @@ advance_global_xmin(OXid newXid)
 
 	if (doCleanup)
 	{
-		int64		xidsPerFile = XID_FILE_SIZE / sizeof(OXidMapItem);
-		int64		oldCleanedNum = oldCleanedXmin / xidsPerFile,
-					newCleanedNum = globalXmin / xidsPerFile,
-					oldCheckpointXminNum = oldCheckpointXmin / xidsPerFile,
-					oldCheckpointXmaxNum = oldCheckpointXmax / xidsPerFile,
-					newCheckpointXminNum = newCheckpointXmin / xidsPerFile,
-					newCheckpointXmaxNum = newCheckpointXmax / xidsPerFile;
-
-		if (oldCheckpointXmaxNum % xidsPerFile == 0)
-			oldCheckpointXmaxNum--;
-		if (newCheckpointXmaxNum % xidsPerFile == 0)
-			newCheckpointXmaxNum--;
-
-		o_buffers_unlink_files_range(&buffersDesc,
-									 OXID_BUFFERS_TAG,
-									 oldCheckpointXminNum,
-									 Min(oldCheckpointXmaxNum,
-										 Min(newCheckpointXminNum - 1,
-											 newCleanedNum - 1)));
-
-		o_buffers_unlink_files_range(&buffersDesc,
-									 OXID_BUFFERS_TAG,
-									 Max(oldCheckpointXminNum,
-										 newCheckpointXmaxNum + 1),
-									 Min(oldCheckpointXmaxNum,
-										 newCleanedNum - 1));
-
-		o_buffers_unlink_files_range(&buffersDesc,
-									 OXID_BUFFERS_TAG,
-									 oldCleanedNum,
-									 Min(newCheckpointXminNum - 1,
-										 newCleanedNum - 1));
-
-		o_buffers_unlink_files_range(&buffersDesc,
-									 OXID_BUFFERS_TAG,
-									 Max(oldCleanedNum,
-										 newCheckpointXmaxNum + 1),
-									 newCleanedNum - 1);
+		unlink_unretained_o_buffers(&buffersDesc, OXID_BUFFERS_TAG,
+									ORIOLEDB_BLCKSZ / sizeof(OXidMapItem),
+									oldCheckpointXmin, oldCheckpointXmax,
+									newCheckpointXmin, newCheckpointXmax,
+									globalXmin);
+		unlink_unretained_o_buffers(&buffersDesc, OXID_BUFFERS_TAG,
+									ORIOLEDB_BLCKSZ / sizeof(OXidMapItem),
+									oldCleanedXmin, globalXmin,
+									newCheckpointXmin, newCheckpointXmax,
+									globalXmin);
 	}
 }
 
