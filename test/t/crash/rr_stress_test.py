@@ -886,6 +886,22 @@ class RrStressTest(BaseTest):
 			except Exception as _e:
 				return f'ERROR: {_e!r}'
 
+		# PK-authoritative diagnostic: force seq scan so the query is
+		# answered from the PK heap, not the SK index. The previous
+		# `BEGIN; SET LOCAL ...; SELECT; COMMIT` wrap silently returned
+		# None because testgres exposes only the LAST statement's result
+		# (COMMIT, no rows). We instead open one connection, set the
+		# planner GUCs session-level, run the SELECT, return its rows.
+		def _pk_force_seq(sql):
+			try:
+				with node.connect(autocommit=True) as con:
+					con.execute("SET enable_indexonlyscan = off")
+					con.execute("SET enable_indexscan = off")
+					con.execute("SET enable_bitmapscan = off")
+					return con.execute(sql)
+			except Exception as _e:
+				return f'ERROR: {_e!r}'
+
 		def _fmt_dups(rows):
 			return ', '.join(
 			    f'token {t} appears {c} times' for t, c in rows)
@@ -895,15 +911,10 @@ class RrStressTest(BaseTest):
 
 		unique_tokens = node.execute(
 		    "SELECT count(DISTINCT token)::int FROM o_bank_account")[0][0]
-		pk_oor_tokens = _safe_exec(
-		    "BEGIN; "
-		    "SET LOCAL enable_indexonlyscan = off; "
-		    "SET LOCAL enable_indexscan = off; "
-		    "SET LOCAL enable_bitmapscan = off; "
+		pk_oor_tokens = _pk_force_seq(
 		    "SELECT token FROM o_bank_account "
 		    f"WHERE token < 1 OR token > {n_accounts} "
-		    "ORDER BY token; "
-		    "COMMIT")
+		    "ORDER BY token")
 
 		rows = node.execute(
 		    "SELECT count(*)::int FROM o_bank_account")[0][0]
@@ -911,34 +922,18 @@ class RrStressTest(BaseTest):
 		    "SELECT orioledb_has_retained_undo()")[0][0]
 		tbl_check_ok = node.execute(
 		    "SELECT orioledb_tbl_check('o_bank_account'::regclass)")[0][0]
-		# PK-authoritative: force seq scan over the PK heap.  Use a
-		# single statement so the SET LOCAL stays in scope.
-		pk_seq = _safe_exec(
-		    "BEGIN; "
-		    "SET LOCAL enable_indexonlyscan = off; "
-		    "SET LOCAL enable_indexscan = off; "
-		    "SET LOCAL enable_bitmapscan = off; "
+		# PK-authoritative: force seq scan over the PK heap.
+		pk_seq = _pk_force_seq(
 		    "SELECT count(*)::int, count(DISTINCT id)::int, "
 		    "count(DISTINCT token)::int, sum(balance)::bigint "
-		    "FROM o_bank_account; "
-		    "COMMIT")
+		    "FROM o_bank_account")
 		# Per-row PK contents (only if it would be small)
-		pk_dump = _safe_exec(
-		    "BEGIN; "
-		    "SET LOCAL enable_indexonlyscan = off; "
-		    "SET LOCAL enable_indexscan = off; "
-		    "SET LOCAL enable_bitmapscan = off; "
-		    "SELECT id, balance, token FROM o_bank_account ORDER BY id; "
-		    "COMMIT")
+		pk_dump = _pk_force_seq(
+		    "SELECT id, balance, token FROM o_bank_account ORDER BY id")
 		# Duplicate tokens visible from PK -- non-empty => PK has dups
-		pk_token_dups = _safe_exec(
-		    "BEGIN; "
-		    "SET LOCAL enable_indexonlyscan = off; "
-		    "SET LOCAL enable_indexscan = off; "
-		    "SET LOCAL enable_bitmapscan = off; "
+		pk_token_dups = _pk_force_seq(
 		    "SELECT token, count(*) FROM o_bank_account "
-		    "GROUP BY token HAVING count(*) > 1; "
-		    "COMMIT")
+		    "GROUP BY token HAVING count(*) > 1")
 		# SK-side default-planned count (likely picks the unique idx)
 		sk_default = _safe_exec(
 		    "SELECT count(DISTINCT token)::int FROM o_bank_account")
