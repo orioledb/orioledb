@@ -1196,9 +1196,21 @@ orioledb_index_build_range_scan(Relation heapRelation,
 
 			ExecClearTuple(primarySlot);
 		}
+
+		/*
+		 * TableScanDesc scan is unused in this function but could be passed
+		 * by a caller (e.g in a case of parallel bridged index build) We need
+		 * to close it here, same as in heapam_index_build_range_scan.
+		 * Otherwise BTreeSeqScan leaks until ResourceOwner release warns
+		 * "resource was not closed".
+		 */
+		if (scan)
+			table_endscan(scan);
+
 		ExecDropSingleTupleTableSlot(primarySlot);
 		FreeExecutorState(estate);
 		free_btree_seq_scan(seq_scan);
+
 
 		/* These may have been pointing to the now-gone estate */
 		indexInfo->ii_ExpressionsState = NIL;
