@@ -886,6 +886,10 @@ class RrStressTest(BaseTest):
 			except Exception as _e:
 				return f'ERROR: {_e!r}'
 
+		def _fmt_dups(rows):
+			return ', '.join(
+			    f'token {t} appears {c} times' for t, c in rows)
+
 		final_total = node.execute(
 		    "SELECT sum(balance)::bigint FROM o_bank_account")[0][0]
 
@@ -999,7 +1003,7 @@ class RrStressTest(BaseTest):
 				    f' [out-of-range tokens (outside [1,{n_accounts}]): '
 				    f'{[r[0] for r in pk_oor_tokens]}]')
 			if isinstance(pk_token_dups, list) and pk_token_dups:
-				_msg += f' [duplicate tokens: {pk_token_dups}]'
+				_msg += f' [duplicate tokens: {_fmt_dups(pk_token_dups)}]'
 			violations.append(_msg)
 		if rows != n_accounts:
 			violations.append(f'rows {rows} != {n_accounts}')
@@ -1027,7 +1031,7 @@ class RrStressTest(BaseTest):
 		if isinstance(pk_token_dups, list) and pk_token_dups:
 			violations.append(
 			    f'pk_token_dups (PK has duplicate tokens!) = '
-			    f'{pk_token_dups}')
+			    f'{_fmt_dups(pk_token_dups)}')
 		if violations and log_saved_path[0] is None:
 			_save_log('invariant')
 		# Opt-in: save the log even on a clean pass so a batch can
