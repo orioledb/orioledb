@@ -913,7 +913,7 @@ class RrStressTest(BaseTest):
 		    "SELECT count(DISTINCT token)::int FROM o_bank_account")[0][0]
 		pk_oor_tokens = _pk_force_seq(
 		    "SELECT token FROM o_bank_account "
-		    f"WHERE token < 1 OR token > {n_accounts} "
+		    f"WHERE token < 1 OR token > {n_accounts + n_writers} "
 		    "ORDER BY token")
 
 		rows = node.execute(
@@ -946,7 +946,7 @@ class RrStressTest(BaseTest):
 		      f'{pk_seq!r}')
 		print(f'[diag] sk_default count(DISTINCT token) = {sk_default!r}')
 		print(f'[diag] pk_token_dups = {pk_token_dups!r}')
-		print(f'[diag] pk_oor_tokens (outside [1,{n_accounts}]) = '
+		print(f'[diag] pk_oor_tokens (outside [1,{n_accounts + n_writers}]) = '
 		      f'{pk_oor_tokens!r}')
 		print(f'[diag] tbl_check_ok = {tbl_check_ok!r} '
 		      f'retained_undo = {retained!r}')
@@ -995,7 +995,7 @@ class RrStressTest(BaseTest):
 			_msg = f'unique_tokens {unique_tokens} != {n_accounts}'
 			if isinstance(pk_oor_tokens, list) and pk_oor_tokens:
 				_msg += (
-				    f' [out-of-range tokens (outside [1,{n_accounts}]): '
+				    f' [out-of-range tokens (outside [1,{n_accounts + n_writers}]): '
 				    f'{[r[0] for r in pk_oor_tokens]}]')
 			if isinstance(pk_token_dups, list) and pk_token_dups:
 				_msg += f' [duplicate tokens: {_fmt_dups(pk_token_dups)}]'
