@@ -2305,13 +2305,17 @@ undo_xact_callback(XactEvent event, void *arg)
 				 * line under the same pid are the writers that hit the
 				 * fault during one attach/detach cycle.
 				 */
+#if 0  /* new trace disabled per peak-rate-old-traces-only recipe */
 				elog(LOG, "commit-assert-trace pre  pid=%d oxid=%lu",
 					 MyProcPid, (unsigned long) oxid);
+#endif
 				START_CRIT_SECTION();
 				INJECTION_POINT("orioledb-commit-assert");
 				END_CRIT_SECTION();
+#if 0  /* new trace disabled per peak-rate-old-traces-only recipe */
 				elog(LOG, "commit-assert-trace post pid=%d oxid=%lu",
 					 MyProcPid, (unsigned long) oxid);
+#endif
 #endif
 
 				current_oxid_precommit();
