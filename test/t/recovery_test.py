@@ -2406,6 +2406,7 @@ class RecoveryWithArchivingTest(BaseTest):
 	                                    old_action='shutdown',
 	                                    new_action='promote'):
 		conf_path = os.path.join(node.data_dir, "postgresql.conf")
+		auto_conf_path = os.path.join(node.data_dir, "postgresql.auto.conf")
 		with open(conf_path, encoding='utf-8') as f:
 			conf = f.read()
 
@@ -2422,6 +2423,22 @@ class RecoveryWithArchivingTest(BaseTest):
 		with open(conf_path, encoding='utf-8') as f:
 			updated_conf = f.read()
 		self.assertIn(new_line, updated_conf)
+
+		with open(auto_conf_path, encoding='utf-8') as f:
+			auto_conf = f.read()
+
+		auto_lines = [
+		    line for line in auto_conf.splitlines()
+		    if not line.startswith("recovery_target_action = ")
+		]
+		auto_lines.append(new_line)
+
+		with open(auto_conf_path, 'w', encoding='utf-8') as f:
+			f.write("\n".join(auto_lines) + "\n")
+
+		with open(auto_conf_path, encoding='utf-8') as f:
+			updated_auto_conf = f.read()
+		self.assertIn(new_line, updated_auto_conf)
 
 	def _assert_stop_before_barrier_logs(self,
 	                                     replica_log,
