@@ -31,11 +31,12 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
                            QUERY PLAN                           
 ----------------------------------------------------------------
  Nested Loop
-   ->  Seq Scan on o_joins2
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
    ->  Custom Scan (o_scan) on o_joins1
          Forward index only scan of: o_joins1_pkey
          Conds: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
-(5 rows)
+(6 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
  id1 | id2 
@@ -43,10 +44,11 @@ SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
-      QUERY PLAN      
-----------------------
- Seq Scan on o_joins2
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_joins2
+   Forward index only scan of: o_joins2_pkey
+(2 rows)
 
 SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -118,10 +120,11 @@ SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
 (64 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
-      QUERY PLAN      
-----------------------
- Seq Scan on o_joins1
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_joins1
+   Forward index only scan of: o_joins1_pkey
+(2 rows)
 
 SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -193,14 +196,15 @@ SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
 (64 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_joins2 FULL JOIN o_joins1 USING(id1, id2);
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Hash Full Join
-   Hash Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
-   ->  Seq Scan on o_joins2
-   ->  Hash
-         ->  Seq Scan on o_joins1
-(5 rows)
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Merge Full Join
+   Merge Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
+   ->  Custom Scan (o_scan) on o_joins1
+         Forward index only scan of: o_joins1_pkey
+(6 rows)
 
 SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -278,10 +282,12 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
 --------------------------------------------------------------------------------
  Hash Join
    Hash Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
-   ->  Seq Scan on o_joins2
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
    ->  Hash
-         ->  Seq Scan on o_joins1
-(5 rows)
+         ->  Custom Scan (o_scan) on o_joins1
+               Forward index only scan of: o_joins1_pkey
+(7 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
  id1 | id2 
@@ -289,10 +295,11 @@ SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
-      QUERY PLAN      
-----------------------
- Seq Scan on o_joins2
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_joins2
+   Forward index only scan of: o_joins2_pkey
+(2 rows)
 
 SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -364,10 +371,11 @@ SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
 (64 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
-      QUERY PLAN      
-----------------------
- Seq Scan on o_joins1
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_joins1
+   Forward index only scan of: o_joins1_pkey
+(2 rows)
 
 SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -443,10 +451,12 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 FULL JOIN o_joins1 USING(id1, id2);
 --------------------------------------------------------------------------------
  Hash Full Join
    Hash Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
-   ->  Seq Scan on o_joins2
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
    ->  Hash
-         ->  Seq Scan on o_joins1
-(5 rows)
+         ->  Custom Scan (o_scan) on o_joins1
+               Forward index only scan of: o_joins1_pkey
+(7 rows)
 
 SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -536,10 +546,11 @@ SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
-      QUERY PLAN      
-----------------------
- Seq Scan on o_joins2
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_joins2
+   Forward index only scan of: o_joins2_pkey
+(2 rows)
 
 SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -611,10 +622,11 @@ SELECT * FROM o_joins2 LEFT JOIN o_joins1 USING(id1, id2);
 (64 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
-      QUERY PLAN      
-----------------------
- Seq Scan on o_joins1
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_joins1
+   Forward index only scan of: o_joins1_pkey
+(2 rows)
 
 SELECT * FROM o_joins2 RIGHT JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -781,11 +793,12 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
                            QUERY PLAN                           
 ----------------------------------------------------------------
  Nested Loop
-   ->  Seq Scan on o_joins2
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
    ->  Custom Scan (o_scan) on o_joins1
          Forward index only scan of: o_joins1_pkey
          Conds: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
-(5 rows)
+(6 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -863,10 +876,12 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
 --------------------------------------------------------------------------------
  Hash Join
    Hash Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
-   ->  Seq Scan on o_joins2
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
    ->  Hash
-         ->  Seq Scan on o_joins1
-(5 rows)
+         ->  Custom Scan (o_scan) on o_joins1
+               Forward index only scan of: o_joins1_pkey
+(7 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -1035,10 +1050,11 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
                              QUERY PLAN                              
 ---------------------------------------------------------------------
  Nested Loop
-   ->  Seq Scan on o_joins2
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
    ->  Index Only Scan using o_joins1_idx on o_joins1
          Index Cond: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
-(4 rows)
+(5 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -1116,10 +1132,11 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
 --------------------------------------------------------------------------------
  Hash Join
    Hash Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
-   ->  Seq Scan on o_joins2
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
    ->  Hash
-         ->  Seq Scan on o_joins1
-(5 rows)
+         ->  Index Only Scan using o_joins1_idx on o_joins1
+(6 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -1201,7 +1218,7 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
          Forward index only scan of: o_joins2_pkey
    ->  Sort
          Sort Key: o_joins1.id1, o_joins1.id2
-         ->  Seq Scan on o_joins1
+         ->  Index Only Scan using o_joins1_idx on o_joins1
 (7 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
@@ -1289,10 +1306,11 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
                              QUERY PLAN                              
 ---------------------------------------------------------------------
  Nested Loop
-   ->  Seq Scan on o_joins2
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
    ->  Index Only Scan using o_joins1_idx on o_joins1
          Index Cond: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
-(4 rows)
+(5 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -1370,10 +1388,11 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
 --------------------------------------------------------------------------------
  Hash Join
    Hash Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
-   ->  Seq Scan on o_joins2
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_pkey
    ->  Hash
-         ->  Seq Scan on o_joins1
-(5 rows)
+         ->  Index Only Scan Backward using o_joins1_idx on o_joins1
+(6 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
  id1 |   id2    

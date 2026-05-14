@@ -364,12 +364,11 @@ INSERT INTO o_test54 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 ANALYZE o_test54;
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_test54 WHERE key BETWEEN 100 and 110;
-                QUERY PLAN                
-------------------------------------------
- Custom Scan (o_scan) on o_test54
-   Forward index scan of: o_test54_pkey
-   Conds: ((key >= 100) AND (key <= 110))
-(3 rows)
+                   QUERY PLAN                   
+------------------------------------------------
+ Index Only Scan using o_test54_sec on o_test54
+   Filter: ((key >= 100) AND (key <= 110))
+(2 rows)
 
 SELECT * FROM o_test54 WHERE key BETWEEN 100 and 110;
  key | value 
@@ -966,66 +965,66 @@ SELECT count(*) FROM o_test65;
 SELECT id, val FROM o_test65;
  id | val 
 ----+-----
-  9 | 10
- 10 | 11
- 11 | 12
- 12 | 13
- 13 | 14
- 14 | 15
- 15 | 16
- 16 | 17
- 17 | 18
- 18 | 19
-  1 | 2
- 19 | 20
- 20 | 21
- 21 | 22
- 22 | 23
- 23 | 24
- 24 | 25
- 25 | 26
- 26 | 27
- 27 | 28
- 28 | 29
-  2 | 3
- 29 | 30
- 30 | 31
- 31 | 32
- 32 | 33
- 33 | 34
- 34 | 35
- 35 | 36
- 36 | 37
- 37 | 38
- 38 | 39
-  3 | 4
- 39 | 40
- 40 | 41
- 41 | 42
- 42 | 43
- 43 | 44
- 44 | 45
- 45 | 46
- 46 | 47
- 47 | 48
- 48 | 49
-  4 | 5
- 49 | 50
- 50 | 51
- 51 | 52
- 52 | 53
- 53 | 54
- 54 | 55
- 55 | 56
- 56 | 57
- 57 | 58
- 58 | 59
-  5 | 6
- 59 | 60
  60 | 61
-  6 | 7
-  7 | 8
+ 59 | 60
+ 58 | 59
+ 57 | 58
+ 56 | 57
+ 55 | 56
+ 54 | 55
+ 53 | 54
+ 52 | 53
+ 51 | 52
+ 50 | 51
+ 49 | 50
+ 48 | 49
+ 47 | 48
+ 46 | 47
+ 45 | 46
+ 44 | 45
+ 43 | 44
+ 42 | 43
+ 41 | 42
+ 40 | 41
+ 39 | 40
+ 38 | 39
+ 37 | 38
+ 36 | 37
+ 35 | 36
+ 34 | 35
+ 33 | 34
+ 32 | 33
+ 31 | 32
+ 30 | 31
+ 29 | 30
+ 28 | 29
+ 27 | 28
+ 26 | 27
+ 25 | 26
+ 24 | 25
+ 23 | 24
+ 22 | 23
+ 21 | 22
+ 20 | 21
+ 19 | 20
+ 18 | 19
+ 17 | 18
+ 16 | 17
+ 15 | 16
+ 14 | 15
+ 13 | 14
+ 12 | 13
+ 11 | 12
+ 10 | 11
+  9 | 10
   8 | 9
+  7 | 8
+  6 | 7
+  5 | 6
+  4 | 5
+  3 | 4
+  2 | 3
+  1 | 2
 (60 rows)
 
 SET enable_seqscan = off;
@@ -5681,14 +5680,11 @@ SELECT * FROM o_test_partial_idx_update;
 
 EXPLAIN SELECT * FROM o_test_partial_idx_update
 	WHERE user_id=100500 and am > 0;
-                                         QUERY PLAN                                          
----------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_partial_idx_update  (cost=4.13..9.48 rows=2 width=24)
-   Bitmap heap scan
-   Recheck Cond: ((user_id = 100500) AND (am > 0))
-   ->  Bitmap Index Scan on o_test_partial_idx_update_idx2  (cost=0.00..4.13 rows=2 width=0)
-         Index Cond: (user_id = 100500)
-(5 rows)
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_partial_idx_update_idx1 on o_test_partial_idx_update  (cost=0.15..4.19 rows=2 width=24)
+   Index Cond: ((user_id = 100500) AND (am > 0))
+(2 rows)
 
 SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
  id | user_id | am 
@@ -5698,10 +5694,10 @@ SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
 SET enable_bitmapscan = off;
 EXPLAIN SELECT * FROM o_test_partial_idx_update
 	WHERE user_id=100500 and am > 0;
-                                                    QUERY PLAN                                                    
-------------------------------------------------------------------------------------------------------------------
- Index Scan using o_test_partial_idx_update_idx2 on o_test_partial_idx_update  (cost=0.12..12.15 rows=2 width=24)
-   Index Cond: (user_id = 100500)
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_partial_idx_update_idx1 on o_test_partial_idx_update  (cost=0.15..4.19 rows=2 width=24)
+   Index Cond: ((user_id = 100500) AND (am > 0))
 (2 rows)
 
 SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
@@ -6376,7 +6372,7 @@ SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
 EXPLAIN SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
                                                          QUERY PLAN                                                         
 ----------------------------------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices  (cost=0.13..8.21 rows=5 width=8)
+ Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices  (cost=0.13..4.21 rows=5 width=8)
 (1 row)
 
 SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
@@ -6438,7 +6434,7 @@ SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
 EXPLAIN SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
                                                          QUERY PLAN                                                         
 ----------------------------------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices  (cost=0.13..8.21 rows=5 width=9)
+ Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices  (cost=0.13..4.21 rows=5 width=9)
 (1 row)
 
 SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
@@ -7560,9 +7556,9 @@ SELECT orioledb_tbl_structure('o_test_pkey_mixed'::regclass, 'nue');
 (1 row)
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed;
-          QUERY PLAN           
--------------------------------
- Seq Scan on o_test_pkey_mixed
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Index Only Scan using o_test_pkey_mixed_uniq1 on o_test_pkey_mixed
 (1 row)
 
 SELECT * FROM o_test_pkey_mixed;
