@@ -902,6 +902,19 @@ class RrStressTest(BaseTest):
 			except Exception as _e:
 				return f'ERROR: {_e!r}'
 
+		# SK-authoritative: disable seqscan/bitmapscan so the only viable
+		# plan for `SELECT token ...` is an index-(only-)scan on the
+		# unique(token) SK. Lets us enumerate what the SK actually
+		# contains and diff against the PK row set.
+		def _sk_force_idx(sql):
+			try:
+				with node.connect(autocommit=True) as con:
+					con.execute("SET enable_seqscan = off")
+					con.execute("SET enable_bitmapscan = off")
+					return con.execute(sql)
+			except Exception as _e:
+				return f'ERROR: {_e!r}'
+
 		def _fmt_dups(rows):
 			return ', '.join(
 			    f'token {t} appears {c} times' for t, c in rows)
@@ -937,6 +950,18 @@ class RrStressTest(BaseTest):
 		# SK-side default-planned count (likely picks the unique idx)
 		sk_default = _safe_exec(
 		    "SELECT count(DISTINCT token)::int FROM o_bank_account")
+		# Enumerate SK contents directly (forced index path on unique
+		# token SK). Used below to compute PK <-> SK token-set diff.
+		sk_tokens_raw = _sk_force_idx(
+		    "SELECT token FROM o_bank_account ORDER BY token")
+		sk_set = set()
+		pk_set = set()
+		if isinstance(sk_tokens_raw, list):
+			sk_set = {r[0] for r in sk_tokens_raw}
+		if isinstance(pk_dump, list):
+			pk_set = {r[2] for r in pk_dump}
+		sk_extra = sorted(sk_set - pk_set)
+		sk_missing = sorted(pk_set - sk_set)
 
 		with errors_lock:
 			seen = list(errors)
@@ -948,6 +973,8 @@ class RrStressTest(BaseTest):
 		print(f'[diag] pk_token_dups = {pk_token_dups!r}')
 		print(f'[diag] pk_oor_tokens (outside [1,{n_accounts + n_writers}]) = '
 		      f'{pk_oor_tokens!r}')
+		print(f'[diag] sk_set\\pk_set (in SK, not PK) = {sk_extra}')
+		print(f'[diag] pk_set\\sk_set (in PK, not SK) = {sk_missing}')
 		print(f'[diag] tbl_check_ok = {tbl_check_ok!r} '
 		      f'retained_undo = {retained!r}')
 		if isinstance(pk_seq, list) and pk_seq and len(pk_seq[0]) >= 3:
@@ -993,6 +1020,10 @@ class RrStressTest(BaseTest):
 			    f'{expected_total} (mismatch = lost update)')
 		if unique_tokens != n_accounts:
 			_msg = f'unique_tokens {unique_tokens} != {n_accounts}'
+			if sk_extra:
+				_msg += f' [SK extra (in SK, not PK): {sk_extra}]'
+			if sk_missing:
+				_msg += f' [SK missing (in PK, not SK): {sk_missing}]'
 			if isinstance(pk_oor_tokens, list) and pk_oor_tokens:
 				_msg += (
 				    f' [out-of-range tokens (outside [1,{n_accounts + n_writers}]): '
