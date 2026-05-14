@@ -144,12 +144,14 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 #ifdef USE_INJECTION_POINTS
 	{
 		OXid		_trc_oxid = get_current_oxid_if_any();
+#if 0  /* new trace disabled per peak-rate-old-traces-only recipe */
 		elog(LOG,
 			 "wal-trace modify pid=%d oxid=%lu rec=%s idx_oids=[%u/%u/%u] idx_type=%d len=%u",
 			 MyProcPid, (unsigned long) _trc_oxid,
 			 wal_record_type_to_string(rec_type),
 			 oids.datoid, oids.reloid, oids.relnode, (int) type,
 			 (unsigned) length);
+#endif
 	}
 #endif
 
@@ -460,11 +462,13 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 #ifdef USE_INJECTION_POINTS
 	{
 		OXid		_trc_oxid = get_current_oxid_if_any();
+#if 0  /* new trace disabled per peak-rate-old-traces-only recipe */
 		elog(LOG,
 			 "wal-trace finish pid=%d oxid=%lu rec=%s xmin=%lu",
 			 MyProcPid, (unsigned long) _trc_oxid,
 			 wal_record_type_to_string(rec_type),
 			 (unsigned long) xmin);
+#endif
 	}
 #endif
 
@@ -540,10 +544,12 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 	elog(DEBUG4, "WAL_REC_XID oxid %lu logicalXid %u heapXid %u", oxid, logicalXid, heapXid);
 
 #ifdef USE_INJECTION_POINTS
+#if 0  /* new trace disabled per peak-rate-old-traces-only recipe */
 	elog(LOG,
 		 "wal-trace xid pid=%d oxid=%lu rec=WAL_REC_XID logicalXid=%u heapXid=%u",
 		 MyProcPid, (unsigned long) oxid,
 		 (unsigned) logicalXid, (unsigned) heapXid);
+#endif
 #endif
 
 	rec = (WALRecXid *) (&local_wal.buffer[local_wal.buffer_offset]);
@@ -795,10 +801,12 @@ flush_local_wal(bool isCommit, bool withXactTime)
 #ifdef USE_INJECTION_POINTS
 	{
 		OXid		_trc_oxid = get_current_oxid_if_any();
+#if 0  /* new trace disabled per peak-rate-old-traces-only recipe */
 		elog(LOG,
 			 "wal-trace flush pid=%d oxid=%lu bytes=%d isCommit=%d withXactTime=%d",
 			 MyProcPid, (unsigned long) _trc_oxid,
 			 length, (int) isCommit, (int) withXactTime);
+#endif
 	}
 #endif
 
@@ -821,10 +829,12 @@ flush_local_wal(bool isCommit, bool withXactTime)
 	location = log_logical_wal_container(local_wal.buffer, length, withXactTime);
 
 #ifdef USE_INJECTION_POINTS
+#if 0  /* new trace disabled per peak-rate-old-traces-only recipe */
 	elog(LOG,
 		 "wal-trace flush-done pid=%d bytes=%d isCommit=%d lsn=%X/%X",
 		 MyProcPid, length, (int) isCommit,
 		 LSN_FORMAT_ARGS(location));
+#endif
 #endif
 
 	if (isCommit)

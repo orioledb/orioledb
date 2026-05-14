@@ -617,7 +617,7 @@ class RrStressTest(BaseTest):
 							pass
 						con = None
 						continue
-					time.sleep(0.5)
+					time.sleep(0)
 					try:
 						for point in assert_chaos_points:
 							con.execute(
@@ -888,8 +888,13 @@ class RrStressTest(BaseTest):
 
 		final_total = node.execute(
 		    "SELECT sum(balance)::bigint FROM o_bank_account")[0][0]
+
 		unique_tokens = node.execute(
 		    "SELECT count(DISTINCT token)::int FROM o_bank_account")[0][0]
+		if unique_tokens > n_accounts:
+			bad_tokens = node.execute(
+				f"SELECT token FROM o_bank_account where token > {n_accounts}")[0][0]
+
 		rows = node.execute(
 		    "SELECT count(*)::int FROM o_bank_account")[0][0]
 		retained = node.execute(
