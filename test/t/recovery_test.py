@@ -2722,7 +2722,7 @@ recovery_target_action = 'shutdown'
 			node.safe_psql(
 			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
 
-			replica.start()
+			replica.start(wait=False)
 			self._wait_for_node_shutdown(replica)
 
 			self.assertTrue(
@@ -2901,7 +2901,7 @@ recovery_target_action = 'shutdown'
 			node.safe_psql(
 			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
 
-			replica.start()
+			replica.start(wait=False)
 			self._wait_for_node_shutdown(replica)
 
 			self.assertTrue(
@@ -3048,7 +3048,7 @@ recovery_target_action = 'shutdown'
 			node.safe_psql(
 			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
 
-			replica.start()
+			replica.start(wait=False)
 			self._wait_for_node_shutdown(replica)
 
 			self.assertTrue(
@@ -3183,7 +3183,7 @@ recovery_target_action = 'shutdown'
 			node.safe_psql(
 			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
 
-			replica.start()
+			replica.start(wait=False)
 			self._wait_for_node_shutdown(replica)
 
 			self.assertTrue(
@@ -3439,7 +3439,7 @@ recovery_target_action = 'shutdown'
 			    "INSERT INTO tab_int VALUES (generate_series(2001,3000))")
 			node.safe_psql("SELECT pg_switch_wal()")
 
-			replica.start()
+			replica.start(wait=False)
 			self._wait_for_node_shutdown(replica)
 
 			self.assertTrue(
@@ -3559,7 +3559,7 @@ recovery_target_action = 'shutdown'
 			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
 			node.safe_psql("SELECT pg_switch_wal()")
 
-			replica.start()
+			replica.start(wait=False)
 			self._wait_for_node_shutdown(replica)
 
 			self.assertTrue(
