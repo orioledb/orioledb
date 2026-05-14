@@ -1,0 +1,48 @@
+CREATE EXTENSION orioledb;
+CREATE TABLE atable (id int, data text) USING orioledb;
+CREATE UNIQUE INDEX anindex ON atable(id DESC);
+
+ALTER INDEX anindex RENAME TO anotherindex;
+ALTER TABLE anotherindex RENAME TO anindex;
+
+SET allow_in_place_tablespaces = true;
+CREATE TABLESPACE test_tblspace LOCATION '';
+ALTER INDEX anindex SET TABLESPACE test_tblspace;
+ALTER TABLE anindex SET TABLESPACE pg_default;
+
+ALTER TABLE atable SET ( fillfactor = 99);
+ALTER INDEX anindex SET ( fillfactor = 50);
+select relname, reloptions from pg_class where relname in ('atable', 'anindex') ORDER BY oid;
+ALTER INDEX anindex RESET ( fillfactor );
+select relname, reloptions from pg_class where relname in ('atable', 'anindex') ORDER BY oid;
+ALTER TABLE anindex SET ( fillfactor = 55);
+select relname, reloptions from pg_class where relname in ('atable', 'anindex') ORDER BY oid;
+ALTER INDEX anindex RESET ( fillfactor );
+select relname, reloptions from pg_class where relname in ('atable', 'anindex') ORDER BY oid;
+
+CREATE INDEX anindex_as_expr ON atable ((id + 1));
+ALTER INDEX anindex_as_expr ALTER COLUMN 1 SET STATISTICS 100;
+ALTER TABLE anindex_as_expr ALTER COLUMN 1 SET STATISTICS 200;
+DROP TABLE atable CASCADE;
+
+CREATE TABLE sales (
+    id int,
+    sale_date date,
+    amount numeric
+) PARTITION BY RANGE (sale_date);
+
+CREATE TABLE sales_2023 PARTITION OF sales
+    FOR VALUES FROM ('2023-01-01') TO ('2024-01-01');
+
+CREATE TABLE sales_2024 PARTITION OF sales
+    FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+
+ALTER TABLE ONLY sales ADD UNIQUE (id, sale_date);
+ALTER TABLE sales_2023 ADD UNIQUE (id, sale_date);
+ALTER TABLE sales_2024 ADD UNIQUE (id, sale_date);
+ALTER INDEX sales_id_sale_date_key ATTACH PARTITION sales_2023_id_sale_date_key;
+ALTER TABLE sales_id_sale_date_key ATTACH PARTITION sales_2024_id_sale_date_key;
+\d+ sales_id_sale_date_key
+
+DROP TABLE sales CASCADE;
+DROP EXTENSION orioledb CASCADE;

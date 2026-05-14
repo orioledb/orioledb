@@ -957,7 +957,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		if (OidIsValid(relid) && objtype == OBJECT_TABLE &&
 			(lockmode == AccessExclusiveLock || lockmode == ShareUpdateExclusiveLock))
 		{
-			Relation	rel = table_open(relid, lockmode);
+			Relation	rel = relation_open(relid, lockmode);
 
 			if (is_orioledb_rel(rel))
 			{
