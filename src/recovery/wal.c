@@ -316,7 +316,7 @@ wal_joint_commit(OXid oxid, TransactionId logicalXid, TransactionId xid,
 		add_xid_wal_record(oxid, logicalXid);
 
 	add_joint_commit_wal_record(xid, pg_atomic_read_u64(&xid_meta->runXmin));
-	walPos = flush_local_wal(!subTransaction, true);
+	walPos = flush_local_wal(!subTransaction, false);
 	local_wal_has_material_changes = false;
 
 	/*
