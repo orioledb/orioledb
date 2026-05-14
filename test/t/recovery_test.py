@@ -2389,6 +2389,28 @@ class RecoveryWithArchivingTest(BaseTest):
 			time.sleep(0.1)
 		self.assertNotEqual(node.status(), NodeStatus.Running)
 
+	def _replace_recovery_target_action(self,
+	                                    node,
+	                                    old_action='shutdown',
+	                                    new_action='promote'):
+		conf_path = os.path.join(node.data_dir, "postgresql.conf")
+		with open(conf_path, encoding='utf-8') as f:
+			conf = f.read()
+
+		old_line = f"recovery_target_action = '{old_action}'"
+		new_line = f"recovery_target_action = '{new_action}'"
+		pos = conf.rfind(old_line)
+		self.assertNotEqual(pos, -1,
+		                    msg=f"{old_line} was not found in {conf_path}")
+		conf = conf[:pos] + new_line + conf[pos + len(old_line):]
+
+		with open(conf_path, 'w', encoding='utf-8') as f:
+			f.write(conf)
+
+		with open(conf_path, encoding='utf-8') as f:
+			updated_conf = f.read()
+		self.assertIn(new_line, updated_conf)
+
 	def _assert_stop_before_barrier_logs(self,
 	                                     replica_log,
 	                                     allow_base_backup=False):
@@ -2681,7 +2703,7 @@ recovery_target_action = 'shutdown'
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
 
-			replica.append_conf("recovery_target_action = 'promote'")
+			self._replace_recovery_target_action(replica)
 			replica.is_started = False
 			replica.start()
 			replica.poll_query_until(
@@ -2859,7 +2881,7 @@ recovery_target_action = 'shutdown'
 			replica_log = self._read_replica_log(replica)
 			self._assert_stop_before_barrier_logs(replica_log)
 
-			replica.append_conf("recovery_target_action = 'promote'")
+			self._replace_recovery_target_action(replica)
 			replica.is_started = False
 			replica.start()
 			replica.poll_query_until(
@@ -3006,7 +3028,7 @@ recovery_target_action = 'shutdown'
 			replica_log = self._read_replica_log(replica)
 			self._assert_stop_after_barrier_logs(replica_log)
 
-			replica.append_conf("recovery_target_action = 'promote'")
+			self._replace_recovery_target_action(replica)
 			replica.is_started = False
 			replica.start()
 			replica.poll_query_until(
@@ -3142,7 +3164,7 @@ recovery_target_action = 'shutdown'
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
 
-			replica.append_conf("recovery_target_action = 'promote'")
+			self._replace_recovery_target_action(replica)
 			replica.is_started = False
 			replica.start()
 			replica.poll_query_until(
@@ -3397,7 +3419,7 @@ recovery_target_action = 'shutdown'
 			replica_log = self._read_replica_log(replica)
 			self._assert_stop_before_barrier_logs(replica_log)
 
-			replica.append_conf("recovery_target_action = 'promote'")
+			self._replace_recovery_target_action(replica)
 			replica.is_started = False
 			replica.start()
 			replica.poll_query_until(
@@ -3518,7 +3540,7 @@ recovery_target_action = 'shutdown'
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
 
-			replica.append_conf("recovery_target_action = 'promote'")
+			self._replace_recovery_target_action(replica)
 			replica.is_started = False
 			replica.start()
 			replica.poll_query_until(
