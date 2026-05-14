@@ -854,7 +854,7 @@ btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
 			length -= seglength;
 		}
 		punch_fd_hole(FileGetRawDesc(file), segoffset, seglength,
-						  FilePathName(file));
+					  FilePathName(file));
 	}
 }
 

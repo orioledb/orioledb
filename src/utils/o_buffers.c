@@ -517,8 +517,10 @@ o_buffers_sync(OBuffersDesc *desc, uint32 tag,
 
 /*
  * Discard blocks [firstBlockNumber, lastBlockNumber]: unlink files fully
- * covered by the range.  Partially covered boundary files are left intact
- * for now; a later commit teaches this function to punch holes there.
+ * covered by the range and punch holes over the touched portion of partially
+ * covered files at either edge.  A boundary file that does not yet exist
+ * (e.g. when callers cleanup ahead of the active write frontier) is silently
+ * skipped.
  */
 void
 o_buffers_unlink_blocks_range(OBuffersDesc *desc, uint32 tag,
@@ -547,7 +549,18 @@ o_buffers_unlink_blocks_range(OBuffersDesc *desc, uint32 tag,
 		int64		to = Min(lastBlockNumber, fileLastBlock);
 
 		if (from == fileFirstBlock && to == fileLastBlock)
+		{
 			unlink_file(desc, tag, fileNumber);
+		}
+		else if (orioledb_use_sparse_files)
+		{
+			off_t		offset = (off_t) (from - fileFirstBlock) * ORIOLEDB_BLCKSZ;
+			off_t		length = (off_t) (to - from + 1) * ORIOLEDB_BLCKSZ;
+
+			if (open_file(desc, tag, fileNumber, false))
+				punch_fd_hole(FileGetRawDesc(desc->curFile), offset, length,
+							  desc->curFileName);
+		}
 	}
 }
 
