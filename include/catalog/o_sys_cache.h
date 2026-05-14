@@ -260,9 +260,22 @@ extern void o_sys_cache_update_if_needed(OSysCache *sys_cache,
 										 OSysCacheKey *key, Pointer arg);
 extern bool o_sys_cache_delete(OSysCache *sys_cache, OSysCacheKey *key);
 
-extern void custom_types_add_all(OTable *o_table, OTableIndex *o_table_index);
-extern void custom_type_add_if_needed(Oid datoid, Oid typoid,
-									  XLogRecPtr insert_lsn);
+extern void o_cache_table_types(OTable *o_table);
+extern void o_cache_index_types(OTable *o_table, OTableIndex *o_table_index);
+extern void o_cache_type(Oid datoid, Oid typoid, Oid opclass,
+						 XLogRecPtr insert_lsn);
+
+/*
+ * safe version that collect processed types to prevent recursion
+ * when collecting any functions for type
+ */
+extern void o_cache_type_safe(Oid datoid, Oid typoid, Oid opclass,
+							  XLogRecPtr insert_lsn, List **processed);
+extern bool custom_type_try_add_hash_fn_if_needed(Oid typoid,
+												  Oid opclass,
+												  List **processed);
+extern void o_validate_composite_type(Oid typoid, Oid opclass);
+extern Oid	o_get_hash_proc_by_btree_opclass(Oid btreeOpclass);
 
 extern void o_sys_caches_delete_by_lsn(XLogRecPtr checkPointRedo);
 
@@ -394,8 +407,6 @@ o_sys_cache_set_datoid_lsn(XLogRecPtr *cur_lsn, Oid *datoid)
 	}
 }
 
-extern void o_composite_type_element_save(Oid datoid, Oid oid,
-										  XLogRecPtr insert_lsn);
 extern void o_set_syscache_hooks(void);
 extern void o_unset_syscache_hooks(void);
 extern void o_reset_syscache_hooks(void);
@@ -448,8 +459,6 @@ typedef struct
 
 O_SYS_CACHE_DECLS(range_cache, ORange, 1);
 extern HeapTuple o_range_cache_search_htup(TupleDesc tupdesc, Oid rngtypid);
-extern void o_range_cache_add_rngsubopc(Oid datoid, Oid rngtypid,
-										XLogRecPtr insert_lsn);
 extern void o_range_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 									OTuple tup, Pointer arg);
 
@@ -471,8 +480,8 @@ typedef struct OClass OClass;
 typedef struct OClassArg
 {
 	bool		column_drop;
-	bool		sys_table;
 	int			dropped;
+	bool		found;
 } OClassArg;
 
 O_SYS_CACHE_DECLS(class_cache, OClass, 1);
@@ -494,7 +503,6 @@ typedef struct OOpclass
 } OOpclass;
 
 O_SYS_CACHE_DECLS(opclass_cache, OOpclass, 1);
-extern void o_opclass_cache_add_table(OTable *o_table);
 extern OOpclass *o_opclass_get(Oid opclassoid, Oid datoid);
 extern HeapTuple o_opclass_cache_search_htup(TupleDesc tupdesc,
 											 Oid opclassoid);
@@ -504,10 +512,17 @@ extern void o_opclass_cache_tup_print(BTreeDescr *desc, StringInfo buf,
 /* o_proc_cache.c */
 typedef struct OProc OProc;
 
+typedef struct OProcArg
+{
+	Oid			collation;
+	List	  **processed;
+} OProcArg;
+
 O_SYS_CACHE_DECLS(proc_cache, OProc, 1);
 extern Datum o_fmgr_sql(PG_FUNCTION_ARGS);
 extern void o_proc_cache_validate_add(Oid datoid, Oid procoid, Oid fncollation,
-									  char *func_type, char *used_for);
+									  char *func_type, char *used_for,
+									  List **processed);
 extern void o_proc_cache_fill_finfo(FmgrInfo *finfo, Oid procoid, Oid datoid);
 extern HeapTuple o_proc_cache_search_htup(TupleDesc tupdesc, Oid procoid);
 

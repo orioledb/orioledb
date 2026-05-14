@@ -837,7 +837,7 @@ o_tuple_set_version(OTupleFixedFormatSpec *spec, OTuple *tuple,
 		header->version = version;
 		if (header->version == 0 && !header->hasnulls && header->natts == spec->natts)
 		{
-			Assert(header->len = spec->len + sizeof(OTupleHeaderData));
+			Assert(header->len == spec->len + sizeof(OTupleHeaderData));
 			tuple->formatFlags |= O_TUPLE_FLAGS_FIXED_FORMAT;
 			memmove(tuple->data, tuple->data + sizeof(OTupleHeaderData), spec->len);
 		}

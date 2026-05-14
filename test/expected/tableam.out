@@ -2,9 +2,9 @@ CREATE SCHEMA tableam;
 SET SESSION search_path = 'tableam';
 CREATE EXTENSION orioledb;
 SELECT orioledb_version();
-    orioledb_version     
--------------------------
- OrioleDB public beta 15
+    orioledb_version    
+------------------------
+ OrioleDB pre-2 beta 16
 (1 row)
 
 SELECT translate(orioledb_commit_hash(), '0123456789abcdef', '################');
@@ -37,13 +37,13 @@ ERROR:  unrecognized parameter "compression"
 ALTER TABLE o_tableam1 ADD EXCLUDE USING btree (value WITH =);
 BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
 SELECT * FROM o_tableam1;
-ERROR:  orioledb does not support SERIALIZABLE isolation level
-DETAIL:  Stay tuned, it will be added in future releases.
+ key | value 
+-----+-------
+(0 rows)
+
 ROLLBACK;
 BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
 UPDATE o_tableam1 SET value = 'value';
-ERROR:  orioledb does not support SERIALIZABLE isolation level
-DETAIL:  Stay tuned, it will be added in future releases.
 ROLLBACK;
 SELECT orioledb_tbl_indices('o_tableam1'::regclass);
               orioledb_tbl_indices              
@@ -2721,7 +2721,7 @@ RESET default_table_access_method;
 INSERT INTO o_tableam7 SELECT i, 100 - i FROM generate_series(1, 100, 1) AS i;
 UPDATE o_tableam7 SET id = id - 5 WHERE value < 99;
 ERROR:  duplicate key value violates unique constraint "o_tableam7_pkey"
-DETAIL:  Key (id)=('1') already exists.
+DETAIL:  Key (id)=(1) already exists.
 SELECT * FROM o_tableam7 ORDER BY id;
  id  | value 
 -----+-------
@@ -4377,7 +4377,7 @@ WITH inserted AS (
 			GROUP BY t) returning *)
 SELECT substr(t, 6) FROM inserted;
 ERROR:  duplicate key value violates unique constraint "o_tableam_snapshot_check_pkey"
-DETAIL:  Key (t)=('abcdef36') already exists.
+DETAIL:  Key (t)=(abcdef36) already exists.
 DROP TABLE heap_table;
 CREATE TABLE o_test_add_column
 (
@@ -4468,7 +4468,7 @@ INSERT INTO o_test_1 VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e');
 CREATE UNIQUE INDEX o_test_1_val_2_idx ON o_test_1 (val_2);
 INSERT INTO o_test_1 VALUES (6, 'e');
 ERROR:  duplicate key value violates unique constraint "o_test_1_val_2_idx"
-DETAIL:  Key (val_2)=('e') already exists.
+DETAIL:  Key (val_2)=(e) already exists.
 DROP TABLE o_test_1;
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 

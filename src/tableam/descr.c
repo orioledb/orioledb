@@ -61,7 +61,7 @@ typedef struct
 static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType,
 									bool miss_ok, OTableFetchContext ctx, void *o_table_source, OTableSource source);
 static bool o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot);
-static void init_shared_root_info(OPagePool *pool,
+static void init_shared_root_info(PagePool *pool,
 								  SharedRootInfo *sharedRootInfo);
 static void o_invalidate_descrs_internal(Oid datoid, Oid reloid, Oid relfilenode);
 static bool o_tree_init_free_extents(BTreeDescr *desc);
@@ -129,6 +129,13 @@ static HTAB *oIndexDescrHash;
 static HTAB *comparatorCache;
 static HTAB *exclusionFnCache;
 static HTAB *hashFnCache;
+
+/*
+ * Backend-local hash of SharedRootInfo for trees backed by LocalPagePool
+ * (temp tables).  Their pages carry BLKNO_LOCAL_BIT and are meaningless to
+ * other backends, so they must not reach SYS_TREES_SHARED_ROOT_INFO.
+ */
+static HTAB *localSharedRootInfoHash = NULL;
 static OComparatorKey lastkey = {0};
 static OComparator *lastcmp = NULL;
 static MemoryContext descrCxt = NULL;
@@ -154,7 +161,7 @@ OTableFetchContext default_table_fetch_context = {.snapshot = &o_non_deleted_sna
  * table_descr_init_tree function.
  */
 static SharedRootInfo *
-create_shared_root_info(OPagePool *pool, SharedRootInfoKey *key)
+create_shared_root_info(PagePool *pool, SharedRootInfoKey *key)
 {
 	SharedRootInfo *sharedRootInfo;
 
@@ -162,6 +169,68 @@ create_shared_root_info(OPagePool *pool, SharedRootInfoKey *key)
 	sharedRootInfo->key = *key;
 	init_shared_root_info(pool, sharedRootInfo);
 	return sharedRootInfo;
+}
+
+static HTAB *
+get_local_shared_root_info_hash(void)
+{
+	if (localSharedRootInfoHash == NULL)
+	{
+		HASHCTL		ctl;
+
+		MemSet(&ctl, 0, sizeof(ctl));
+		ctl.keysize = sizeof(SharedRootInfoKey);
+		ctl.entrysize = sizeof(SharedRootInfo);
+		ctl.hcxt = TopMemoryContext;
+		localSharedRootInfoHash = hash_create("OrioleDB local shared root info",
+											  8, &ctl,
+											  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+	}
+	return localSharedRootInfoHash;
+}
+
+static SharedRootInfo *
+find_local_shared_root_info(SharedRootInfoKey *key)
+{
+	SharedRootInfo *entry;
+	SharedRootInfo *copy;
+	bool		found;
+
+	if (localSharedRootInfoHash == NULL)
+		return NULL;
+
+	entry = (SharedRootInfo *) hash_search(localSharedRootInfoHash, key,
+										   HASH_FIND, &found);
+	if (!found)
+		return NULL;
+
+	copy = (SharedRootInfo *) palloc(sizeof(SharedRootInfo));
+	memcpy(copy, entry, sizeof(SharedRootInfo));
+	return copy;
+}
+
+static void
+insert_local_shared_root_info(SharedRootInfo *info)
+{
+	HTAB	   *hash = get_local_shared_root_info_hash();
+	SharedRootInfo *entry;
+	bool		found;
+
+	entry = (SharedRootInfo *) hash_search(hash, &info->key, HASH_ENTER, &found);
+	Assert(!found);
+	memcpy(entry, info, sizeof(SharedRootInfo));
+}
+
+static bool
+drop_local_shared_root_info(SharedRootInfoKey *key)
+{
+	bool		found = false;
+
+	if (localSharedRootInfoHash == NULL)
+		return false;
+
+	(void) hash_search(localSharedRootInfoHash, key, HASH_REMOVE, &found);
+	return found;
 }
 
 EvictedTreeData *
@@ -296,6 +365,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 				inserted PG_USED_FOR_ASSERTS_ONLY;
 	int			lockNo;
 	bool		hasLock = false;
+	bool		is_temp;
 
 	Assert(desc != NULL);
 	if (!ORelOidsIsValid(desc->oids) || IS_SYS_TREE_OIDS(desc->oids))
@@ -304,6 +374,8 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 	/* easy case: shared memory is initialized */
 	if (ORootPageIsValid(desc) && OMetaPageIsValid(desc))
 		return true;
+
+	is_temp = (desc->storageType == BTreeStorageTemporary);
 
 	memset(&key, 0, sizeof(SharedRootInfoKey));
 	key.datoid = desc->oids.datoid;
@@ -326,8 +398,6 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		if (checkpoint && tree_is_under_checkpoint(desc))
 			return false;
 
-		lockNo = tag_hash(&key, sizeof(key)) % SHARED_ROOT_INFO_INSERT_NUM_LOCKS;
-
 		/*---
 		 * Reserve 8 pages:
 		 *
@@ -338,10 +408,19 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 		 * - 2 for free seq bufs
 		 */
 		ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_META, 8);
-		LWLockAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo],
-					  LW_EXCLUSIVE);
-		hasLock = true;
-		sharedRootInfo = o_find_shared_root_info(&key);
+
+		/*
+		 * Temporary trees live in a backend-local hash, so the shared insert
+		 * lock is unnecessary (and a no-op re-lookup would be too).
+		 */
+		if (!is_temp)
+		{
+			lockNo = tag_hash(&key, sizeof(key)) % SHARED_ROOT_INFO_INSERT_NUM_LOCKS;
+			LWLockAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[lockNo],
+						  LW_EXCLUSIVE);
+			hasLock = true;
+			sharedRootInfo = o_find_shared_root_info(&key);
+		}
 	}
 
 	if (sharedRootInfo && sharedRootInfo->placeholder)
@@ -390,11 +469,18 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 			LWLockAcquire(&BTREE_GET_META(desc)->copyBlknoLock, LW_SHARED);
 		}
 
-		sharedRootInfoTuple.data = (Pointer) sharedRootInfo;
-		sharedRootInfoTuple.formatFlags = 0;
-		inserted = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO),
-											 sharedRootInfoTuple);
-		Assert(inserted);
+		if (is_temp)
+		{
+			insert_local_shared_root_info(sharedRootInfo);
+		}
+		else
+		{
+			sharedRootInfoTuple.data = (Pointer) sharedRootInfo;
+			sharedRootInfoTuple.formatFlags = 0;
+			inserted = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO),
+												 sharedRootInfoTuple);
+			Assert(inserted);
+		}
 
 		if (init_extents)
 		{
@@ -1002,7 +1088,7 @@ o_fetch_index_descr_extended(ORelOids oids, OIndexType type, bool lock,
 }
 
 static void
-init_shared_root_info(OPagePool *pool, SharedRootInfo *sharedRootInfo)
+init_shared_root_info(PagePool *pool, SharedRootInfo *sharedRootInfo)
 {
 	BTreeMetaPage *meta_page;
 	BTreeRootInfo *rootInfo = &sharedRootInfo->rootInfo;
@@ -1010,8 +1096,8 @@ init_shared_root_info(OPagePool *pool, SharedRootInfo *sharedRootInfo)
 				bufnum;
 
 	sharedRootInfo->placeholder = false;
-	rootInfo->rootPageBlkno = ppool_get_page(pool, PPOOL_RESERVE_META);;
-	rootInfo->metaPageBlkno = ppool_get_page(pool, PPOOL_RESERVE_META);;
+	rootInfo->rootPageBlkno = ppool_alloc_page(pool, PPOOL_RESERVE_META);
+	rootInfo->metaPageBlkno = ppool_alloc_page(pool, PPOOL_RESERVE_META);
 	rootInfo->rootPageChangeCount = O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(rootInfo->rootPageBlkno));
 
 	Assert(OInMemoryBlknoIsValid(rootInfo->rootPageBlkno));
@@ -1198,6 +1284,11 @@ o_find_shared_root_info(SharedRootInfoKey *key)
 {
 	OTuple		key_tuple,
 				result_tuple;
+	SharedRootInfo *local;
+
+	local = find_local_shared_root_info(key);
+	if (local != NULL)
+		return local;
 
 	key_tuple.data = (Pointer) key;
 	key_tuple.formatFlags = 0;
@@ -1268,6 +1359,10 @@ o_drop_shared_root_info(Oid datoid, Oid relnode)
 
 	key.datoid = datoid;
 	key.relnode = relnode;
+
+	if (drop_local_shared_root_info(&key))
+		return true;
+
 	key_tuple.data = (Pointer) &key;
 	key_tuple.formatFlags = 0;
 
@@ -1601,6 +1696,8 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 	 */
 	if (!comparator.haveSortSupport)
 	{
+		MemoryContext oldcontext;
+
 		procOid =
 			get_opfamily_proc(opfamily, lefttype, righttype, BTORDER_PROC);
 		if (!OidIsValid(procOid))
@@ -1619,7 +1716,20 @@ o_find_comparator(Oid opfamily, Oid lefttype, Oid righttype, Oid collation)
 							format_type_be(lefttype),
 							format_type_be(righttype))));
 		}
+
+		/*
+		 * The cached OComparator (see o_add_comparator_to_cache) lives in
+		 * descrCxt, but fmgr_info() sets finfo->fn_mcxt to whatever
+		 * CurrentMemoryContext happens to be at miss time.  Misses from
+		 * o_call_comparator() during execution arrive with a transient
+		 * per-query context current; leaving fn_mcxt pointing there would
+		 * dangle once that context is reset, and the next FunctionCall (which
+		 * lazily allocates fn_extra in fn_mcxt) would touch freed memory.
+		 * Switch to descrCxt so fn_mcxt matches the cache's lifetime.
+		 */
+		oldcontext = MemoryContextSwitchTo(descrCxt);
 		fmgr_info(procOid, &comparator.finfo);
+		MemoryContextSwitchTo(oldcontext);
 	}
 
 	return o_add_comparator_to_cache(&comparator);
@@ -1690,7 +1800,14 @@ o_find_opclass_comparator(OOpclass *opclass, Oid collation)
 	 * Finally, look for plain comparison function.
 	 */
 	if (!comparator.haveSortSupport)
+	{
+		/* See o_find_comparator() for why we switch to descrCxt. */
+		MemoryContext oldcontext = MemoryContextSwitchTo(descrCxt);
+
 		o_proc_cache_fill_finfo(&comparator.finfo, opclass->cmpOid, opclass->key.common.datoid);
+
+		MemoryContextSwitchTo(oldcontext);
+	}
 	o_unset_syscache_hooks();
 
 	return o_add_comparator_to_cache(&comparator);
@@ -2160,6 +2277,7 @@ o_find_exclusion_op_fn(Oid exclusion_op)
 	OExclusionFn *result;
 	OExclusionFn exclusion_fn;
 	Oid			oprcode;
+	MemoryContext oldcontext;
 
 	if ((result = o_find_cached_exclusion_fn(exclusion_op)) != NULL)
 		return result;
@@ -2169,7 +2287,12 @@ o_find_exclusion_op_fn(Oid exclusion_op)
 
 	o_set_syscache_hooks();
 	oprcode = o_operator_cache_get_oprcode(exclusion_op);
+
+	/* See o_find_comparator() for why we switch to descrCxt. */
+	oldcontext = MemoryContextSwitchTo(descrCxt);
 	o_proc_cache_fill_finfo(&exclusion_fn.finfo, oprcode, MyDatabaseId);
+	MemoryContextSwitchTo(oldcontext);
+
 	o_unset_syscache_hooks();
 
 	return o_add_exclusion_fn_to_cache(&exclusion_fn);
@@ -2250,6 +2373,7 @@ o_find_hash_fn(Oid hash_fn_oid, Oid datoid)
 	};
 	OHashFn    *result;
 	OHashFn		hash_fn;
+	MemoryContext oldcontext;
 
 	if ((result = o_find_cached_hash_fn(&key)) != NULL)
 		return result;
@@ -2258,7 +2382,12 @@ o_find_hash_fn(Oid hash_fn_oid, Oid datoid)
 	hash_fn.key = key;
 
 	o_set_syscache_hooks();
+
+	/* See o_find_comparator() for why we switch to descrCxt. */
+	oldcontext = MemoryContextSwitchTo(descrCxt);
 	o_proc_cache_fill_finfo(&hash_fn.finfo, hash_fn_oid, datoid);
+	MemoryContextSwitchTo(oldcontext);
+
 	o_unset_syscache_hooks();
 
 	return o_add_hash_fn_to_cache(&hash_fn);
@@ -2374,28 +2503,91 @@ ResOwnerPrintOTableDescr(Datum res)
 
 #else
 
+/*
+ * PG16 lacks the per-owner ResourceOwnerRemember API, so we rely on the
+ * global ResourceReleaseCallback mechanism.  The callback fires for every
+ * ResourceOwner release in the tree, so we maintain our own list of
+ * (owner, descr) pairs and filter by CurrentResourceOwner to only decrement
+ * refcnt when the matching owner is being released.  A single callback is
+ * registered once per backend on the first Remember call.
+ */
+typedef struct OTableDescrResOwnerItem
+{
+	struct OTableDescrResOwnerItem *next;
+	ResourceOwner owner;
+	OTableDescr *descr;
+}			OTableDescrResOwnerItem;
+
+static OTableDescrResOwnerItem * otable_descr_resowner_items = NULL;
+static bool otable_descr_resowner_registered = false;
+
 static void
 ResOwnerReleaseOTableDescrCallback(ResourceReleasePhase phase,
 								   bool isCommit, bool isTopLevel, void *arg)
 {
-	OTableDescr *descr = (OTableDescr *) arg;
+	OTableDescrResOwnerItem **prev;
+	OTableDescrResOwnerItem *item;
 
-	if (phase == RESOURCE_RELEASE_BEFORE_LOCKS)
-		ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
+	if (phase != RESOURCE_RELEASE_BEFORE_LOCKS)
+		return;
+
+	prev = &otable_descr_resowner_items;
+	item = *prev;
+	while (item)
+	{
+		if (item->owner == CurrentResourceOwner)
+		{
+			*prev = item->next;
+			item->descr->refcnt--;
+			pfree(item);
+			item = *prev;
+		}
+		else
+		{
+			prev = &item->next;
+			item = item->next;
+		}
+	}
 }
 
 void
 ResourceOwnerRememberOTableDescr(ResourceOwner owner, OTableDescr *descr)
 {
+	OTableDescrResOwnerItem *item;
+
+	if (!otable_descr_resowner_registered)
+	{
+		RegisterResourceReleaseCallback(ResOwnerReleaseOTableDescrCallback, NULL);
+		otable_descr_resowner_registered = true;
+	}
+
+	item = MemoryContextAlloc(TopMemoryContext, sizeof(*item));
+	item->owner = owner;
+	item->descr = descr;
+	item->next = otable_descr_resowner_items;
+	otable_descr_resowner_items = item;
 	descr->refcnt++;
-	RegisterResourceReleaseCallback(ResOwnerReleaseOTableDescrCallback, descr);
 }
 
 void
 ResourceOwnerForgetOTableDescr(ResourceOwner owner, OTableDescr *descr)
 {
-	UnregisterResourceReleaseCallback(ResOwnerReleaseOTableDescrCallback, descr);
-	descr->refcnt--;
+	OTableDescrResOwnerItem **prev = &otable_descr_resowner_items;
+	OTableDescrResOwnerItem *item = *prev;
+
+	while (item)
+	{
+		if (item->owner == owner && item->descr == descr)
+		{
+			*prev = item->next;
+			pfree(item);
+			descr->refcnt--;
+			return;
+		}
+		prev = &item->next;
+		item = item->next;
+	}
+	elog(ERROR, "OTableDescr not remembered by this ResourceOwner");
 }
 
 #endif
@@ -2448,28 +2640,84 @@ ResOwnerPrintOIndexDescr(Datum res)
 
 #else
 
+/* See comment on OTableDescr's PG16 implementation above. */
+typedef struct OIndexDescrResOwnerItem
+{
+	struct OIndexDescrResOwnerItem *next;
+	ResourceOwner owner;
+	OIndexDescr *descr;
+}			OIndexDescrResOwnerItem;
+
+static OIndexDescrResOwnerItem * oindex_descr_resowner_items = NULL;
+static bool oindex_descr_resowner_registered = false;
+
 static void
 ResOwnerReleaseOIndexDescrCallback(ResourceReleasePhase phase,
 								   bool isCommit, bool isTopLevel, void *arg)
 {
-	OIndexDescr *descr = (OIndexDescr *) arg;
+	OIndexDescrResOwnerItem **prev;
+	OIndexDescrResOwnerItem *item;
 
-	if (phase == RESOURCE_RELEASE_BEFORE_LOCKS)
-		ResourceOwnerForgetOIndexDescr(CurrentResourceOwner, descr);
+	if (phase != RESOURCE_RELEASE_BEFORE_LOCKS)
+		return;
+
+	prev = &oindex_descr_resowner_items;
+	item = *prev;
+	while (item)
+	{
+		if (item->owner == CurrentResourceOwner)
+		{
+			*prev = item->next;
+			item->descr->refcnt--;
+			pfree(item);
+			item = *prev;
+		}
+		else
+		{
+			prev = &item->next;
+			item = item->next;
+		}
+	}
 }
 
 void
 ResourceOwnerRememberOIndexDescr(ResourceOwner owner, OIndexDescr *descr)
 {
+	OIndexDescrResOwnerItem *item;
+
+	if (!oindex_descr_resowner_registered)
+	{
+		RegisterResourceReleaseCallback(ResOwnerReleaseOIndexDescrCallback, NULL);
+		oindex_descr_resowner_registered = true;
+	}
+
+	item = MemoryContextAlloc(TopMemoryContext, sizeof(*item));
+	item->owner = owner;
+	item->descr = descr;
+	item->next = oindex_descr_resowner_items;
+	oindex_descr_resowner_items = item;
 	descr->refcnt++;
-	RegisterResourceReleaseCallback(ResOwnerReleaseOIndexDescrCallback, descr);
 }
 
 void
 ResourceOwnerForgetOIndexDescr(ResourceOwner owner, OIndexDescr *descr)
 {
-	UnregisterResourceReleaseCallback(ResOwnerReleaseOIndexDescrCallback, descr);
-	descr->refcnt--;
+	OIndexDescrResOwnerItem **prev = &oindex_descr_resowner_items;
+	OIndexDescrResOwnerItem *item = *prev;
+
+	while (item)
+	{
+		if (item->owner == owner && item->descr == descr)
+		{
+			*prev = item->next;
+			pfree(item);
+			descr->refcnt--;
+			return;
+		}
+		prev = &item->next;
+		item = item->next;
+	}
+	elog(ERROR, "OIndexDescr not remembered by this ResourceOwner");
 }
 
 #endif

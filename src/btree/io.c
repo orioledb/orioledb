@@ -789,6 +789,41 @@ btree_smgr_sync(BTreeDescr *desc, uint32 chkpNum, off_t length)
 	}
 }
 
+/*
+ * Punch a hole in a raw OS file descriptor. Logs a WARNING on failure and
+ * returns; callers don't need to handle the return value because the data
+ * is being discarded either way.
+ */
+void
+punch_fd_hole(int fd, off_t offset, off_t length, const char *fileName)
+{
+	int			ret;
+
+#ifdef __APPLE__
+	{
+		fpunchhole_t hole;
+
+		memset(&hole, 0, sizeof(hole));
+		hole.fp_offset = offset;
+		hole.fp_length = length;
+		ret = fcntl(fd, F_PUNCHHOLE, &hole);
+	}
+#else
+	ret = fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
+					offset, length);
+#endif
+	if (ret < 0)
+	{
+		int			save_errno = errno;
+
+		ereport(WARNING,
+				(errcode_for_file_access(),
+				 errmsg("could not punch hole in file %s offset=%lld length=%lld (%d %s)",
+						fileName, (long long) offset, (long long) length,
+						save_errno, strerror(save_errno))));
+	}
+}
+
 void
 btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
 					  off_t offset, int length)
@@ -798,14 +833,11 @@ btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
 	while (length > 0)
 	{
 		File		file;
-		int			fd;
 		int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
 		off_t		segoffset;
 		int			seglength;
-		int			ret;
 
 		file = btree_open_smgr_file(desc, segno, chkpNum, 0);
-		fd = FileGetRawDesc(file);
 
 		segoffset = offset % ORIOLEDB_SEGMENT_SIZE;
 		if ((offset + length) / ORIOLEDB_SEGMENT_SIZE == segno)
@@ -821,29 +853,8 @@ btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
 			offset += seglength;
 			length -= seglength;
 		}
-#ifdef __APPLE__
-		{
-			fpunchhole_t hole;
-
-			memset(&hole, 0, sizeof(hole));
-			hole.fp_offset = segoffset;
-			hole.fp_length = seglength;
-			ret = fcntl(fd, F_PUNCHHOLE, &hole);
-		}
-#else
-		ret = fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
-						segoffset, seglength);
-#endif
-		if (ret < 0)
-		{
-			int			save_errno = errno;
-
-			ereport(WARNING,
-					(errcode_for_file_access(),
-					 errmsg("fail to punch sparse file hole datoid=%u relnode=%u segno=%d offset=%llu length=%d (%d %s)",
-							desc->oids.datoid, desc->oids.relnode, segno,
-							(unsigned long long) segoffset, seglength, save_errno, strerror(save_errno))));
-		}
+		punch_fd_hole(FileGetRawDesc(file), segoffset, seglength,
+					  FilePathName(file));
 	}
 }
 
@@ -1071,6 +1082,27 @@ get_free_disk_extent(BTreeDescr *desc, uint32 chkpNum,
 		return FileExtentIsValid(*extent);
 	}
 
+	/*
+	 * User temporary trees maintain a pure backend-local free space map.
+	 * Serve the allocation from that list first, falling back to extending
+	 * the data file.  This avoids any dependency on checkpoint-tagged seq
+	 * bufs.
+	 */
+	if (btree_desc_is_local_temp(desc))
+	{
+		BTreeMetaPage *metaPage = BTREE_GET_META(desc);
+		uint16		len = OCompressIsValid(desc->compress) ? FileExtentLen(page_size) : 1;
+
+		if (!local_free_extents_pop(desc, len, extent))
+		{
+			extent->len = len;
+			if (use_device)
+				extent->off = orioledb_device_alloc(desc, len * ORIOLEDB_COMP_BLCKSZ) / ORIOLEDB_COMP_BLCKSZ;
+			else
+				extent->off = pg_atomic_fetch_add_u64(&metaPage->datafileLength[0], len);
+		}
+		return FileExtentIsValid(*extent);
+	}
 
 	if (!OCompressIsValid(desc->compress))
 	{
@@ -1517,7 +1549,7 @@ load_page(OBTreeFindPageContext *context)
 
 	/* Prepare new page metaPage-data */
 	ppool_reserve_pages(desc->ppool, PPOOL_RESERVE_FIND, 1);
-	blkno = ppool_get_page(desc->ppool, PPOOL_RESERVE_FIND);
+	blkno = ppool_alloc_page(desc->ppool, PPOOL_RESERVE_FIND);
 	lock_page(blkno);
 	page_block_reads(blkno);
 
@@ -1544,8 +1576,7 @@ load_page(OBTreeFindPageContext *context)
 	}
 
 	put_page_image(blkno, buf);
-	page_change_usage_count(&desc->ppool->ucm, blkno,
-							(pg_atomic_read_u32(desc->ppool->ucm.epoch) + 2) % UCM_USAGE_LEVELS);
+	ppool_ucm_init(desc->ppool, blkno);
 	page_desc->type = parent_page_desc->type;
 	page_desc->oids = parent_page_desc->oids;
 
@@ -1817,18 +1848,26 @@ perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 		if (FileExtentIsValid(page_desc->fileExtent))
 		{
 #ifdef USE_ASSERT_CHECKING
+
 			/*
-			 * Shared seq_bufs should be initialized by checkpointer.
+			 * Shared seq_bufs should be initialized by checkpointer.  User
+			 * temporary trees keep their own backend-local free space map and
+			 * do not use these shared buffers at all; system trees that
+			 * happen to be BTreeStorageTemporary still share a pool and only
+			 * skip the nextChkp assertion (no .map file).
 			 */
-			if (desc->storageType != BTreeStorageTemporary)
+			if (!btree_desc_is_local_temp(desc))
 			{
-				SpinLockAcquire(&desc->nextChkp[chkp_index].shared->lock);
-				Assert(desc->nextChkp[chkp_index].shared->tag.num == checkpoint_number);
-				SpinLockRelease(&desc->nextChkp[chkp_index].shared->lock);
+				if (desc->storageType != BTreeStorageTemporary)
+				{
+					SpinLockAcquire(&desc->nextChkp[chkp_index].shared->lock);
+					Assert(desc->nextChkp[chkp_index].shared->tag.num == checkpoint_number);
+					SpinLockRelease(&desc->nextChkp[chkp_index].shared->lock);
+				}
+				SpinLockAcquire(&desc->tmpBuf[chkp_index].shared->lock);
+				Assert(desc->tmpBuf[chkp_index].shared->tag.num == checkpoint_number);
+				SpinLockRelease(&desc->tmpBuf[chkp_index].shared->lock);
 			}
-			SpinLockAcquire(&desc->tmpBuf[chkp_index].shared->lock);
-			Assert(desc->tmpBuf[chkp_index].shared->tag.num == checkpoint_number);
-			SpinLockRelease(&desc->tmpBuf[chkp_index].shared->lock);
 #endif
 			free_extent_for_checkpoint(desc, &page_desc->fileExtent, checkpoint_number);
 		}
@@ -2140,7 +2179,7 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 	/* rootPageBlkno can not be evicted here */
 	Assert(!evict || !is_root);
 	Assert(OInMemoryBlknoIsValid(desc->rootInfo.rootPageBlkno));
-	Assert(page_is_locked(blkno));
+	Assert(page_is_locked(blkno) || O_PAGE_IS_LOCAL(blkno));
 	EA_EVICT_INC(blkno);
 
 	if (!is_root)
@@ -2426,7 +2465,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	int			evict_lockNo;
 
 	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc) &&
-		   O_PAGE_STATE_IS_LOCKED(pg_atomic_read_u64(&(O_PAGE_HEADER(rootPageBlkno)->state))));
+		   (O_PAGE_STATE_IS_LOCKED(pg_atomic_read_u64(&(O_PAGE_HEADER(rootPageBlkno)->state))) || O_PAGE_IS_LOCAL(root_blkno)));
 
 	/*
 	 * Try to acquire oSharedRootInfoInsertLocks early to avoid deadlocks. If
@@ -2703,7 +2742,15 @@ walk_page_prelock_check(OInMemoryBlkno blkno, bool evict,
 	if (!ORelOidsIsValid(page_desc->oids) || page_desc->type == oIndexInvalid)
 		return NULL;
 
-	if (!O_PAGE_IS(p, LEAF) && evict && PAGE_GET_N_ONDISK(p) != BTREE_PAGE_ITEMS_COUNT(p))
+	/*
+	 * Read field2 directly rather than via PAGE_GET_N_ONDISK(): we don't hold
+	 * the page lock here, so a concurrent leaf/non-leaf transition could fire
+	 * the macro's debug assert even though the outer flag check just passed.
+	 * The result of this comparison is racy by design and gets re-validated
+	 * once the page is locked.
+	 */
+	if (!O_PAGE_IS(p, LEAF) && evict &&
+		((BTreePageHeader *) p)->field2 != BTREE_PAGE_ITEMS_COUNT(p))
 		return NULL;
 
 	if (!evict && !IS_DIRTY(blkno))
@@ -3058,6 +3105,17 @@ write_tree_pages_recursive(UndoLogType undoType,
 
 	lock_page(blkno);
 	p = O_GET_IN_MEMORY_PAGE(blkno);
+
+	/*
+	 * For local pool pages, the slot may have been reclaimed by a reentrant
+	 * eviction triggered while we were processing a sibling downlink
+	 * collected earlier.  Treat a NULL slot as a missing page.
+	 */
+	if (O_PAGE_IS_LOCAL(blkno) && p == NULL)
+	{
+		unlock_page(blkno);
+		return false;
+	}
 	if (O_PAGE_GET_CHANGE_COUNT(p) != loadId)
 	{
 		unlock_page(blkno);
@@ -3430,7 +3488,19 @@ iterate_relnode_files(OIndexKey key, RelnodeFileCallback callback, void *arg)
 				if (!orioledb_s3_mode && !first_file_deleted)
 				{
 					filename = psprintf("%s/%u", db_prefix, key.oids.relnode);
-					callback(filename, 0, NULL, arg);
+
+					/*
+					 * The first-file callback exists for callers that care
+					 * about ordering the base file relative to its segments
+					 * (e.g. durable unlink, precommit fsync).  Skip it when
+					 * the base file is absent: after a crash, a secondary
+					 * file like "<relnode>.1" or "<relnode>-<chkp>.map" can
+					 * exist on disk while the base file was never durably
+					 * created, and fsync/unlink of a missing path would
+					 * ereport ERROR (PANIC during startup recovery).
+					 */
+					if (access(filename, F_OK) == 0)
+						callback(filename, 0, NULL, arg);
 					pfree(filename);
 					first_file_deleted = true;
 				}

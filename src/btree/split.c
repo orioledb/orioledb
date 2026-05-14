@@ -203,42 +203,55 @@ split_items_fit_single_page(BTreeSplitItems *items)
 }
 
 /*
- * Find the location for B-tree page split.  This function take into accouint
- * insertion of new tuple or replacement of existing one.  It tries to keep
- * as close as possible to `targetLocation`, or if `targetLocation == 0` close
- * to `spaceRatio`.  Also, this function takes advantage of reclaiming unused
- * space according to `csn`.  Returns number of items in new left page and
- * sets the first tuple of right page to `*split_item`.
+ * Shared core of the page-split partitioning algorithm.  Walk the items
+ * placing them onto the prospective left or right page (chosen by
+ * targetLocation / spaceRatio, with overflowed sides forced opposite),
+ * until the boundary settles at a single location.  Returns true and
+ * writes that location through *splitLocation on success; returns false
+ * if no valid two-page split exists (first/last item doesn't fit its
+ * page, or both sides exhaust simultaneously mid-loop).
+ *
+ * Both btree_page_split_location() (which expects a valid split and
+ * asserts on failure) and btree_page_split_can_succeed() (used by
+ * merge_waited_tuples() as a non-asserting dry-run) call this.
  */
-OffsetNumber
-btree_page_split_location(BTreeDescr *desc,
-						  BTreeSplitItems *items,
-						  OffsetNumber targetLocation, float4 spaceRatio,
-						  OTuple *split_item)
+static bool
+btree_page_split_find_location(BTreeSplitItems *items,
+							   OffsetNumber targetLocation,
+							   float4 spaceRatio,
+							   OffsetNumber *splitLocation)
 {
 	int			leftPageSpaceLeft,
 				rightPageSpaceLeft,
 				minLeftPageItemsCount,
 				maxLeftPageItemsCount;
 
-	Assert(spaceRatio >= 0.0f && spaceRatio <= 1.0f);
+	if (items->itemsCount < 2)
+		return false;
 
-	leftPageSpaceLeft = ORIOLEDB_BLCKSZ - Max(items->hikeysEnd, MAXALIGN(sizeof(BTreePageHeader)) + items->maxKeyLen);
-	rightPageSpaceLeft = ORIOLEDB_BLCKSZ - Max(items->hikeysEnd, MAXALIGN(sizeof(BTreePageHeader)) + items->hikeySize);
+	leftPageSpaceLeft = ORIOLEDB_BLCKSZ -
+		Max(items->hikeysEnd,
+			MAXALIGN(sizeof(BTreePageHeader)) + items->maxKeyLen);
+	rightPageSpaceLeft = ORIOLEDB_BLCKSZ -
+		Max(items->hikeysEnd,
+			MAXALIGN(sizeof(BTreePageHeader)) + items->hikeySize);
 
 	/*
-	 * Left page should contain at least one item, and leaves at lest one item
-	 * for the right page.
+	 * Left page must contain at least one item and leave at least one for the
+	 * right page.
 	 */
 	minLeftPageItemsCount = 1;
 	maxLeftPageItemsCount = items->itemsCount - 1;
 	leftPageSpaceLeft -= items->items[0].size + MAXALIGN(sizeof(LocationIndex));
-	rightPageSpaceLeft -= items->items[items->itemsCount - 1].size + MAXALIGN(sizeof(LocationIndex));
+	rightPageSpaceLeft -= items->items[items->itemsCount - 1].size +
+		MAXALIGN(sizeof(LocationIndex));
 
-	Assert(leftPageSpaceLeft >= 0 && rightPageSpaceLeft >= 0);
+	/* First / last items must individually fit their respective pages. */
+	if (leftPageSpaceLeft < 0 || rightPageSpaceLeft < 0)
+		return false;
 
 	/*
-	 * Shift minimal and maximal left page item counts till they are equal.
+	 * Shift minimal and maximal left-page item counts until they are equal.
 	 */
 	while (minLeftPageItemsCount != maxLeftPageItemsCount)
 	{
@@ -255,8 +268,9 @@ btree_page_split_location(BTreeDescr *desc,
 										 (float4) leftPageSpaceLeft * spaceRatio > (float4) rightPageSpaceLeft * (1.0f - spaceRatio) :
 										 minLeftPageItemsCount < targetLocation)))
 		{
-			/* Try place item to the left page */
-			Assert(leftPageSpaceLeft > 0);
+			/* Place item on the left page. */
+			if (leftPageSpaceLeft <= 0)
+				return false;
 			leftPageSpaceLeft -= items->items[minLeftPageItemsCount].size +
 				MAXALIGN(sizeof(LocationIndex) * (minLeftPageItemsCount + 1)) -
 				MAXALIGN(sizeof(LocationIndex) * minLeftPageItemsCount);
@@ -266,27 +280,69 @@ btree_page_split_location(BTreeDescr *desc,
 		}
 		else
 		{
-			/* Try place item to the right page */
-			Assert(rightPageSpaceLeft > 0);
+			/* Place item on the right page. */
+			if (rightPageSpaceLeft <= 0)
+				return false;
 			rightPageSpaceLeft -= items->items[maxLeftPageItemsCount - 1].size +
-				MAXALIGN(sizeof(LocationIndex) * (items->itemsCount - maxLeftPageItemsCount + 1)) -
-				MAXALIGN(sizeof(LocationIndex) * (items->itemsCount - maxLeftPageItemsCount));
+				MAXALIGN(sizeof(LocationIndex) *
+						 (items->itemsCount - maxLeftPageItemsCount + 1)) -
+				MAXALIGN(sizeof(LocationIndex) *
+						 (items->itemsCount - maxLeftPageItemsCount));
 			if (rightPageSpaceLeft < 0)
-			{
 				continue;
-			}
 			maxLeftPageItemsCount--;
 		}
 	}
 
+	if (splitLocation)
+		*splitLocation = minLeftPageItemsCount;
+	return true;
+}
+
+/*
+ * Non-asserting test for whether btree_page_split_location() would
+ * succeed on `items` — a valid two-page split exists.  Used by
+ * merge_waited_tuples() as the post-pass gate after greedy waiter
+ * acceptance: drop the most recently accepted waiter and re-check
+ * until this returns true.
+ */
+bool
+btree_page_split_can_succeed(BTreeSplitItems *items)
+{
+	return btree_page_split_find_location(items, 0, 0.5f, NULL);
+}
+
+/*
+ * Find the location for B-tree page split.  This function take into accouint
+ * insertion of new tuple or replacement of existing one.  It tries to keep
+ * as close as possible to `targetLocation`, or if `targetLocation == 0` close
+ * to `spaceRatio`.  Also, this function takes advantage of reclaiming unused
+ * space according to `csn`.  Returns number of items in new left page and
+ * sets the first tuple of right page to `*split_item`.
+ */
+OffsetNumber
+btree_page_split_location(BTreeDescr *desc,
+						  BTreeSplitItems *items,
+						  OffsetNumber targetLocation, float4 spaceRatio,
+						  OTuple *split_item)
+{
+	OffsetNumber splitLocation;
+	bool		ok PG_USED_FOR_ASSERTS_ONLY;
+
+	Assert(spaceRatio >= 0.0f && spaceRatio <= 1.0f);
+
+	ok = btree_page_split_find_location(items, targetLocation, spaceRatio,
+										&splitLocation);
+	Assert(ok);
+
 	if (split_item)
 	{
-		split_item->formatFlags = items->items[minLeftPageItemsCount].flags;
-		split_item->data = items->items[minLeftPageItemsCount].data +
+		split_item->formatFlags = items->items[splitLocation].flags;
+		split_item->data = items->items[splitLocation].data +
 			(items->leaf ? BTreeLeafTuphdrSize : BTreeNonLeafTuphdrSize);
 	}
 
-	return minLeftPageItemsCount;
+	return splitLocation;
 }
 
 OffsetNumber

@@ -221,7 +221,7 @@ o_btree_finish_root_split_internal(BTreeDescr *desc,
 	page_desc->fileExtent = root_extent;
 
 	Assert(left_blkno);
-	Assert(page_is_locked(desc->rootInfo.rootPageBlkno));
+	Assert(page_is_locked(desc->rootInfo.rootPageBlkno) || O_PAGE_IS_LOCAL(desc->rootInfo.rootPageBlkno));
 
 	BTREE_PAGE_LOCATOR_FIRST(p, &loc);
 	page_locator_insert_item(p, &loc, BTreeNonLeafTuphdrSize);
@@ -487,44 +487,98 @@ waiter_info_cmp(const void *a, const void *b, void *arg)
 
 }
 
+/*
+ * Merge inputItems (existing leaf-page items plus the inserter's new tuple)
+ * with the queued waiter tuples.  Walk both sequences in sort order and
+ * emit the merged result into outputItems.
+ *
+ * The accept/reject decision for each waiter is a single global-budget gate:
+ * the entire merged byte total (including locator overhead for both halves
+ * of an eventual split) must fit within the combined two-page budget
+ * leftSpace + rightSpace, computed under whatever maxKeyLen the candidate
+ * waiter would inflate to.  All inputItems are pre-counted into the running
+ * total — the original page already accommodated them, so as long as we
+ * never accept a waiter that pushes the total past the combined budget,
+ * inputItems are guaranteed to fit somewhere across the two output pages
+ * (no per-side bookkeeping is needed during the merge — btree_page_split_
+ * location() picks the actual split point afterwards).
+ *
+ * If a waiter's acceptance would exceed the budget, it (and every later
+ * waiter) is dropped via finished = true.  Conflicting waiters (same key
+ * as an input) are silently skipped.
+ *
+ * Returns true if the merged set doesn't fit a single page (a split is
+ * required), false otherwise.
+ */
 static bool
 merge_waited_tuples(BTreeDescr *desc, Page p, BTreeSplitItems *outputItems,
 					BTreeSplitItems *inputItems,
 					TupleWaiterInfo tupleWaiterInfos[BTREE_PAGE_MAX_SPLIT_ITEMS],
 					int tupleWaitersCount)
 {
-	int			inputIndex,
+	int			inputIndex = 0,
 				outputIndex = 0,
-				waitersIndex = 0,
-				leftItemsCount = 0,
-				leftItemsSize = 0,
-				leftSpace,
-				rightItemsCount = 0,
-				rightItemsSize = 0,
-				rightSpace;
-	bool		split = false,
-				finished = false;
+				waitersIndex = 0;
+	int			totalSize = 0,
+				totalCount = 0;
+	int			rightSpace,
+				singlePageSpace;
+	int			maxKeyLen;
+	int			i;
+	bool		finished = false;
 
-	leftSpace = ORIOLEDB_BLCKSZ - Max(inputItems->hikeysEnd, MAXALIGN(sizeof(BTreePageHeader)) + inputItems->hikeySize);
+	/*
+	 * Stack of waiters accepted so far, in acceptance (= sort) order.  Used
+	 * by the post-pass dry-run gate to drop one waiter at a time without
+	 * re-walking the merge.  Each entry records where the waiter ended up in
+	 * outputItems[], its index in tupleWaiterInfos[], and the aligned length
+	 * of its key (so we can decide whether dropping it requires a full
+	 * maxKeyLen rescan).
+	 */
+	struct
+	{
+		int			outputPos;
+		int			waiterIdx;
+		int			keyLen;
+	}			accepted[BTREE_PAGE_MAX_SPLIT_ITEMS] = {0};
+	int			acceptedTop = 0;
 
 	outputItems->leaf = inputItems->leaf;
 	outputItems->hikeySize = inputItems->hikeySize;
-	outputItems->maxKeyLen = inputItems->maxKeyLen;
 	outputItems->hikeysEnd = inputItems->hikeysEnd;
 	outputItems->itemsCount = 0;
 
-	for (inputIndex = 0; inputIndex < inputItems->itemsCount; inputIndex++)
-	{
-		leftItemsSize += inputItems->items[inputIndex].size;
-		leftItemsCount++;
-	}
+	/*
+	 * Pre-count every input.  After the merge runs, totalSize / totalCount
+	 * always include all inputs plus every accepted waiter, which makes the
+	 * input-fit invariant trivial: as long as the candidate total fits the
+	 * two-page budget, the inputs (a subset of total) fit by construction.
+	 */
+	for (i = 0; i < inputItems->itemsCount; i++)
+		totalSize += inputItems->items[i].size;
+	totalCount = inputItems->itemsCount;
 
-	inputIndex = 0;
+	maxKeyLen = inputItems->maxKeyLen;
+
+	/*
+	 * The right page inherits the original page's hikey, so its budget
+	 * doesn't change as the merge progresses.  singlePageSpace is the
+	 * "no-split" budget — same formula as rightSpace, used at the end to
+	 * decide whether the merged set fits on a single page.
+	 */
+	rightSpace = ORIOLEDB_BLCKSZ -
+		Max(inputItems->hikeysEnd,
+			MAXALIGN(sizeof(BTreePageHeader)) + inputItems->hikeySize);
+	singlePageSpace = rightSpace;
+
 	while (inputIndex < inputItems->itemsCount ||
 		   (waitersIndex < tupleWaitersCount && !finished))
 	{
 		int			cmp;
+		BTreePageItem item;
+		bool		isWaiter;
 
+		/* Pick the next item in sort order. */
 		if (inputIndex >= inputItems->itemsCount)
 		{
 			cmp = 1;
@@ -546,102 +600,147 @@ merge_waited_tuples(BTreeDescr *desc, Page p, BTreeSplitItems *outputItems,
 							  &tup1, BTreeKeyLeafTuple,
 							  &tup2, BTreeKeyLeafTuple);
 
-			/*
-			 * We don't resolve the conflicts.
-			 */
+			/* Conflicting waiter is silently dropped. */
 			if (cmp == 0)
 			{
-				cmp = -1;
 				waitersIndex++;
+				continue;
 			}
 		}
 
 		Assert(cmp != 0);
+		isWaiter = (cmp > 0);
 
-		if (cmp > 0)
+		if (isWaiter)
 		{
 			OTuple		tup;
-			int			newKeyLen;
+			int			newKeyLen,
+						newMaxKeyLen,
+						newLeftSpace,
+						candidateTotalSize;
 
-			tup.formatFlags = tupleWaiterInfos[waitersIndex].item.flags;
-			tup.data = tupleWaiterInfos[waitersIndex].item.data + BTreeLeafTuphdrSize;
+			item = tupleWaiterInfos[waitersIndex].item;
+			tup.formatFlags = item.flags;
+			tup.data = item.data + BTreeLeafTuphdrSize;
 			newKeyLen = MAXALIGN(o_btree_len(desc, tup,
 											 OTupleKeyLengthNoVersion));
-			outputItems->maxKeyLen = Max(outputItems->maxKeyLen, newKeyLen);
+			newMaxKeyLen = Max(maxKeyLen, newKeyLen);
+			newLeftSpace = ORIOLEDB_BLCKSZ -
+				Max(inputItems->hikeysEnd,
+					MAXALIGN(sizeof(BTreePageHeader)) + newMaxKeyLen);
 
-			leftItemsCount++;
-			leftItemsSize += tupleWaiterInfos[waitersIndex].item.size;
+			candidateTotalSize = totalSize + item.size;
 
-			if (!split)
+			/*
+			 * Global budget gate.  Allow per-page locator overhead twice —
+			 * once for each side of a split — as a conservative upper bound
+			 * on any actual split's locator cost.  If the candidate set
+			 * wouldn't fit, drop this waiter and every later one.
+			 */
+			if (candidateTotalSize +
+				2 * MAXALIGN((totalCount + 1) * sizeof(LocationIndex)) >
+				newLeftSpace + rightSpace)
 			{
-				if (leftItemsSize +
-					MAXALIGN(leftItemsCount * sizeof(LocationIndex)) >
-					leftSpace)
-				{
-					split = true;
-					rightSpace = ORIOLEDB_BLCKSZ - Max(outputItems->hikeysEnd, MAXALIGN(sizeof(BTreePageHeader)) + outputItems->hikeySize);
-				}
+				finished = true;
+				continue;
 			}
 
-			if (split)
-			{
-				leftSpace = ORIOLEDB_BLCKSZ - Max(outputItems->hikeysEnd, MAXALIGN(sizeof(BTreePageHeader)) + outputItems->maxKeyLen);
-				while (leftItemsSize +
-					   MAXALIGN(leftItemsCount * sizeof(LocationIndex)) >
-					   leftSpace)
-				{
-					int			itemSize;
-
-					leftItemsCount--;
-					rightItemsCount++;
-
-					if (leftItemsCount < outputIndex)
-					{
-						Assert(outputIndex > 0);
-						itemSize = outputItems->items[leftItemsCount].size;
-					}
-					else if (leftItemsCount == outputIndex)
-						itemSize = tupleWaiterInfos[waitersIndex].item.size;
-					else
-						itemSize = inputItems->items[inputIndex + (leftItemsCount - outputIndex - 1)].size;
-
-					leftItemsSize -= itemSize;
-					rightItemsSize += itemSize;
-				}
-
-				Assert(rightItemsCount > 0);
-				if (rightItemsSize +
-					MAXALIGN(rightItemsCount * sizeof(LocationIndex)) >
-					rightSpace)
-				{
-					cmp = -1;
-					finished = true;
-					if (inputIndex >= inputItems->itemsCount)
-						break;
-				}
-			}
+			tupleWaiterInfos[waitersIndex].inserted = true;
+			accepted[acceptedTop].outputPos = outputIndex;
+			accepted[acceptedTop].waiterIdx = waitersIndex;
+			accepted[acceptedTop].keyLen = newKeyLen;
+			acceptedTop++;
+			outputItems->items[outputIndex++] = item;
+			waitersIndex++;
+			totalSize = candidateTotalSize;
+			totalCount++;
+			maxKeyLen = newMaxKeyLen;
+		}
+		else
+		{
+			/*
+			 * Inputs are pre-counted into totalSize / totalCount.  Just emit
+			 * them in sort order.
+			 */
+			outputItems->items[outputIndex++] = inputItems->items[inputIndex++];
 		}
 
 		Assert(outputIndex < BTREE_PAGE_MAX_SPLIT_ITEMS);
-		if (cmp > 0)
-		{
-			tupleWaiterInfos[waitersIndex].inserted = true;
-			outputItems->items[outputIndex++] = tupleWaiterInfos[waitersIndex++].item;
-		}
-		else if (cmp < 0)
-		{
-			outputItems->items[outputIndex++] = inputItems->items[inputIndex++];
-		}
 	}
 
 	outputItems->itemsCount = outputIndex;
 
-	if (leftItemsSize +
-		MAXALIGN(leftItemsCount * sizeof(LocationIndex)) >
-		leftSpace)
-		split = true;
+	/*
+	 * Re-derive maxKeyLen from items actually inserted; rejected waiters'
+	 * wider keys must not leak into outputItems->maxKeyLen.
+	 */
+	outputItems->maxKeyLen = inputItems->maxKeyLen;
+	for (i = 0; i < acceptedTop; i++)
+		outputItems->maxKeyLen = Max(outputItems->maxKeyLen,
+									 accepted[i].keyLen);
 
-	return split;
+	/*
+	 * Post-pass: the global-budget gate above is a conservative upper bound
+	 * on what fits two pages, but it does not exactly mirror
+	 * btree_page_split_location()'s loop (which is sensitive to the specific
+	 * sequence of items at the boundary).  If the merged set still doesn't
+	 * have a valid split, drop the most recently accepted waiter (pop the
+	 * stack), shift its outputItems slot out, and re-check. Repeat until the
+	 * dry-run passes — or the stack empties, in which case the inputs alone
+	 * are guaranteed to be splittable since they came from a valid page.
+	 */
+	while (totalSize +
+		   MAXALIGN(totalCount * sizeof(LocationIndex)) > singlePageSpace &&
+		   !btree_page_split_can_succeed(outputItems) &&
+		   acceptedTop > 0)
+	{
+		int			pos;
+		int			waiterIdx;
+		int			keyLen;
+		int			itemSize;
+		int			j;
+
+		acceptedTop--;
+		pos = accepted[acceptedTop].outputPos;
+		waiterIdx = accepted[acceptedTop].waiterIdx;
+		keyLen = accepted[acceptedTop].keyLen;
+		itemSize = outputItems->items[pos].size;
+
+		tupleWaiterInfos[waiterIdx].inserted = false;
+		totalSize -= itemSize;
+		totalCount--;
+
+		for (j = pos; j < outputIndex - 1; j++)
+			outputItems->items[j] = outputItems->items[j + 1];
+		outputIndex--;
+		outputItems->itemsCount = outputIndex;
+
+		/*
+		 * The dropped waiter's key only mattered for outputItems->maxKeyLen
+		 * if it was the maximum; otherwise the existing max still bounds
+		 * everything that's left.
+		 */
+		if (outputItems->maxKeyLen == keyLen)
+		{
+			outputItems->maxKeyLen = inputItems->maxKeyLen;
+			for (j = 0; j < acceptedTop; j++)
+				outputItems->maxKeyLen = Max(outputItems->maxKeyLen,
+											 accepted[j].keyLen);
+		}
+	}
+
+	/*
+	 * Split is needed iff the merged set doesn't fit a single page.  When a
+	 * split is needed, the post-pass above must have driven the merged set
+	 * into a state that btree_page_split_location() can actually partition.
+	 */
+	{
+		bool		splitNeeded = totalSize +
+			MAXALIGN(totalCount * sizeof(LocationIndex)) > singlePageSpace;
+
+		Assert(!splitNeeded || btree_page_split_can_succeed(outputItems));
+		return splitNeeded;
+	}
 }
 
 static void
@@ -702,8 +801,8 @@ o_btree_insert_split(BTreeInsertStackItem *insert_item,
 	START_CRIT_SECTION();
 
 	if (blkno == desc->rootInfo.rootPageBlkno)
-		root_split_left_blkno = ppool_get_page(desc->ppool, reserve_kind);
-	right_blkno = ppool_get_page(desc->ppool, reserve_kind);
+		root_split_left_blkno = ppool_alloc_page(desc->ppool, reserve_kind);
+	right_blkno = ppool_alloc_page(desc->ppool, reserve_kind);
 
 	/*
 	 * Move hikeyBlkno of split.  This change is atomic, no need to bother
@@ -1323,6 +1422,15 @@ o_btree_insert_item(BTreeInsertStackItem *insert_item, int reserve_kind)
 
 		if (insert_item->level == 0 && !insert_item->replace)
 		{
+			if (STOPEVENTS_ENABLED())
+			{
+				Page		page = O_GET_IN_MEMORY_PAGE(blkno);
+				Jsonb	   *params;
+
+				params = btree_page_stopevent_params(desc, page);
+				STOPEVENT(STOPEVENT_BEFORE_GET_WAITERS_WITH_TUPLES, params);
+			}
+
 			tupleWaitersCount = get_waiters_with_tuples(desc, blkno, tupleWaiterProcnums);
 		}
 		else

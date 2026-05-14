@@ -249,10 +249,11 @@ class TypesTest(BaseTest):
 			) USING orioledb;
 		""")
 		type_amount += 3  # int2, int4, tid - types needed for all our tables
-		type_amount += 1  # int8 - hash_array_extended return type
+		type_amount += 1  # int8 - hashint4extended return type
 		type_amount += 1  # anyarray
 		type_amount += 1  # internal - argument of sort support function
 		type_amount += 1  # void - return type of sort support function
+
 		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 0)
 
 		node.execute("INSERT INTO o_test VALUES ('{1, 2}');")
@@ -389,7 +390,6 @@ class TypesTest(BaseTest):
 		class_amount += 2  # pg_proc
 		class_amount += 4  # pg_amproc, pg_opclass, pg_amop, pg_authid
 		type_amount += 3  # int2, int4, tid - types needed for all our tables
-		type_amount += 1  # int8 - hash_array_extended return type
 		type_amount += 1  # record
 		type_amount += 1  # internal - argument of sort support function
 		type_amount += 1  # void - return type of sort support function
@@ -524,11 +524,11 @@ class TypesTest(BaseTest):
 		class_amount += 2  # pg_proc
 		class_amount += 4  # pg_amproc, pg_opclass, pg_amop, pg_authid
 		type_amount += 3  # int2, int4, tid - types needed for all our tables
-		type_amount += 1  # int8
 		type_amount += 2  # record, anyarray
 		type_amount += 1  # internal - argument of sort support function
 		type_amount += 1  # void - return type of sort support function
 		type_amount += 2  # coordinates, coordinates_removed
+		type_amount += 2  # _coordinates, _coordinates_removed
 		self.check_total_deleted(node, 'CLASS_CACHE', class_amount, 0)
 		self.check_total_deleted(node, 'TYPE_CACHE', type_amount, 0)
 		node.stop(['-m', 'immediate'])
@@ -761,4 +761,143 @@ class TypesTest(BaseTest):
 		self.assertEqual([(3, ), (8, ), (15, ), (94, )],
 		                 con3.execute("SELECT * FROM foo ORDER BY i;"))
 		con3.close()
+		node.stop()
+
+	def test_json_index_recovery(self):
+		node = self.node
+		node.append_conf('postgresql.conf',
+		                 "shared_preload_libraries = orioledb\n")
+
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TYPE named_json AS (
+				name varchar(20),
+				val json
+			);
+			CREATE TYPE named_named_json AS (
+				name varchar(20),
+				val named_json
+			);
+			CREATE TABLE test_json_array
+			(
+				arr json[] NOT NULL,
+				arr2 json[] NOT NULL,
+				rec named_json NOT NULL,
+				rec2 named_named_json NOT NULL,
+				val json NOT NULL
+			) USING orioledb;
+		""")
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql("""
+				ALTER TABLE test_json_array ADD PRIMARY KEY (arr);
+			""")
+		self.assertErrorMessageEquals(
+		    e,
+		    "could not identify a comparison function for type \"json\" used in btree index field",
+		    "not allowing it here, because any inserts in such index will break recovery for orioledb tables",
+		    "DETAIL")
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql("""
+				CREATE UNIQUE INDEX test_json_array_ix1 ON test_json_array (arr2);
+			""")
+		self.assertErrorMessageEquals(
+		    e,
+		    "could not identify a comparison function for type \"json\" used in btree index field",
+		    "not allowing it here, because any inserts in such index will break recovery for orioledb tables",
+		    "DETAIL")
+		node.safe_psql("""
+			SET log_error_verbosity = 'terse';
+			CREATE UNIQUE INDEX test_json_array_ix2 ON test_json_array (((rec).val->>'x'), ((rec2).val.val->>'y'));
+		""")
+		node.safe_psql("""
+			SET log_error_verbosity = 'terse';
+			CREATE UNIQUE INDEX test_json_array_ix3 ON test_json_array ((val->>'bupf'));
+		""")
+		node.safe_psql("""
+			INSERT INTO test_json_array VALUES (
+				ARRAY['1'::json, '2'::json],
+				ARRAY['10'::json, '20'::json],
+				('firstname', '{"x": 7}'),
+				('secondname', ('subname', '{"x":  2, "y": 20}')),
+				'{"bupf":     9}'
+			);
+		""")
+		node.safe_psql("""
+			INSERT INTO test_json_array VALUES (
+				ARRAY['1'::json, '3'::json],
+				ARRAY['10'::json, '30'::json],
+				('firstname', '{"x":  3}'),
+				('secondname', ('subname', '{"x":   3, "y": 30}')),
+				'{"bupf":     7}'
+
+			);
+		""")
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql("""
+				INSERT INTO test_json_array VALUES (
+					ARRAY['1'::json, '4'::json],
+					ARRAY['10'::json, '40'::json],
+					('firstname', '{"x":  3}'),
+					('secondname', ('subname', '{"x":   4, "y": 30}')),
+					'{"bupf":     13}'
+				);
+			""")
+		self.assertErrorMessageEquals(
+		    e,
+		    "duplicate key value violates unique constraint \"test_json_array_ix2\"",
+		    "Key (((rec).val ->> 'x'::text), ((rec2).val.val ->> 'y'::text))=(3, 30) already exists.",
+		    "DETAIL")
+		with self.assertRaises(QueryException) as e:
+			node.safe_psql("""
+				INSERT INTO test_json_array VALUES (
+					ARRAY['1'::json, '5'::json],
+					ARRAY['10'::json, '50'::json],
+					('firstname', '{"x":  5}'),
+					('secondname', ('subname', '{"x":   5, "y": 50}')),
+					'{"bupf":     7}'
+				);
+			""")
+		self.assertErrorMessageEquals(
+		    e,
+		    "duplicate key value violates unique constraint \"test_json_array_ix3\"",
+		    "Key ((val ->> 'bupf'::text))=(7) already exists.", "DETAIL")
+		with node.connect() as con1:
+			con1.execute("SET enable_seqscan = off;")
+			self.assertEqual(
+			    [([1, 3], [10, 30], '(firstname,"{""x"":  3}")',
+			      '(secondname,"(subname,""{""""x"""":   3, """"y"""": 30}"")")',
+			      {
+			          'bupf': 7
+			      }),
+			     ([1, 2], [10, 20], '(firstname,"{""x"": 7}")',
+			      '(secondname,"(subname,""{""""x"""":  2, """"y"""": 20}"")")',
+			      {
+			          'bupf': 9
+			      })],
+			    con1.execute(
+			        "SELECT * FROM test_json_array ORDER BY ((rec).val->>'x'), ((rec2).val.val->>'y');"
+			    ))
+
+		self.crash_with_os_buffer_loss()
+
+		node.start()
+		with node.connect() as con1:
+			con1.execute("SET enable_seqscan = off;")
+			self.assertEqual(
+			    [([1, 3], [10, 30], '(firstname,"{""x"":  3}")',
+			      '(secondname,"(subname,""{""""x"""":   3, """"y"""": 30}"")")',
+			      {
+			          'bupf': 7
+			      }),
+			     ([1, 2], [10, 20], '(firstname,"{""x"": 7}")',
+			      '(secondname,"(subname,""{""""x"""":  2, """"y"""": 20}"")")',
+			      {
+			          'bupf': 9
+			      })],
+			    con1.execute(
+			        "SELECT * FROM test_json_array ORDER BY ((rec).val->>'x'), ((rec2).val.val->>'y');"
+			    ))
+
 		node.stop()

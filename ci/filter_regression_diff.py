@@ -102,8 +102,10 @@ knownErrors = {
 	# union specific error
 	r"ERROR:  function \"expensivefunc\" cannot be used here": ["union"],
 
-	# collate.icu.utf8 specific error
-	r"ERROR:  cannot refresh collation \"en-x-icu\" because orioledb table \"collate_test(\d)*\" uses it": ["collate.icu.utf8"]
+	# collate.icu.utf8 specific error.  o_find_collation_dependencies()
+	# stops at the first hit, so depending on pg_depend scan order the
+	# error names either the table or one of its indexes — match both.
+	r"ERROR:  cannot refresh collation \"en-x-icu\" because orioledb (table|index) \"[a-z0-9_]+\" uses it": ["collate.icu.utf8"]
 }
 
 # Regexps that allow us to completely skip comparasion of hunks containing these regexprs

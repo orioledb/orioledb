@@ -139,6 +139,8 @@ orioledb_index_fetch_begin(Relation rel, Relation indexRel)
 	OrioledbIndexFetchData *o_scan = palloc0(sizeof(OrioledbIndexFetchData));
 	OBTOptions *options = (OBTOptions *) indexRel->rd_options;
 
+	o_serializable_lock_relation(RelationGetRelid(rel));
+
 	o_scan->bridged_tuple = (indexRel->rd_rel->relam != BTREE_AM_OID) ||
 		(options && !options->orioledb_index);
 
@@ -468,6 +470,8 @@ orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 	if (OidIsValid(relation->rd_rel->relrewrite))
 		return slot;
 
+	o_serializable_lock_relation(RelationGetRelid(relation));
+
 	o_set_current_command(cid);
 
 	descr = relation_get_descr(relation);
@@ -490,6 +494,8 @@ orioledb_tuple_insert_with_arbiter(ResultRelInfo *rinfo,
 	OTableDescr *descr;
 	OTuple		tup;
 	OIndexDescr *id;
+
+	o_serializable_lock_relation(RelationGetRelid(rel));
 
 	descr = relation_get_descr(rel);
 	Assert(descr);
@@ -546,6 +552,8 @@ orioledb_tuple_delete(Relation relation, Datum tupleid, CommandId cid,
 	OXid		oxid;
 	BTreeLocationHint hint;
 	OSnapshot	oSnapshot;
+
+	o_serializable_lock_relation(RelationGetRelid(relation));
 
 	ASAN_UNPOISON_MEMORY_REGION(tmfd, sizeof(*tmfd));
 	ASAN_UNPOISON_MEMORY_REGION(&mres, sizeof(mres));
@@ -642,6 +650,8 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	OSnapshot	oSnapshot;
 	ItemPointer bridge_ctid = NULL;
 	bool		was_saving;
+
+	o_serializable_lock_relation(RelationGetRelid(relation));
 
 	ASAN_UNPOISON_MEMORY_REGION(tmfd, sizeof(*tmfd));
 
@@ -743,6 +753,8 @@ orioledb_tuple_lock(Relation rel, Datum tupleid, Snapshot snapshot,
 	OTableDescr *descr;
 	OXid		oxid;
 	BTreeLocationHint hint;
+
+	o_serializable_lock_relation(RelationGetRelid(rel));
 
 	descr = relation_get_descr(rel);
 	Assert(descr != NULL);
@@ -877,7 +889,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 											 old_o_table->fillfactor,
 											 rel->rd_rel->reltablespace,
 											 old_o_table->index_bridging);
-		o_opclass_cache_add_table(new_o_table);
+		o_cache_table_types(new_o_table);
 
 		/* Copy compression settings from old table */
 		new_o_table->default_compress = old_o_table->default_compress;
@@ -1706,6 +1718,8 @@ orioledb_beginscan(Relation relation, Snapshot snapshot,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("orioledb does not support TID scan"),
 				 errhint("Use a primary key scan instead.")));
+
+	o_serializable_lock_relation(RelationGetRelid(relation));
 
 	descr = relation_get_descr(relation);
 

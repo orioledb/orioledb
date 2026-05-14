@@ -22,7 +22,7 @@ extern bool btree_try_merge_pages(BTreeDescr *desc,
 								  OFixedKey *parent_hikey,
 								  bool *merge_parent,
 								  OInMemoryBlkno left_blkno,
-								  BTreePageItemLocator right_loc,
+								  BTreePageItemLocator *right_loc,
 								  OInMemoryBlkno right_blkno,
 								  bool checkpoint);
 extern bool btree_try_merge_and_unlock(BTreeDescr *desc, OInMemoryBlkno blkno,

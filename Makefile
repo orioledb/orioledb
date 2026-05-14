@@ -126,6 +126,7 @@ REGRESSCHECKS = btree_sys_check \
 				row_level_locks \
 				row_security \
 				sanitizers \
+				serializable \
 				stats \
 				subquery \
 				subtransactions \
@@ -155,6 +156,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  isol_rr_bscan \
 				  isol_rr_fk \
 				  isol_rr_seqscan \
+				  isol_serializable \
 				  load_refind_page \
 				  merge \
 				  partition_move \
@@ -209,10 +211,13 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/reindex_test.py \
 						test/t/s3_test.py \
 						test/t/schema_test.py \
+						test/t/temp_local_pool_test.py \
 						test/t/toast_index_test.py \
 						test/t/trigger_test.py \
 						test/t/unlogged_test.py \
-						test/t/vacuum_test.py
+						test/t/vacuum_test.py \
+						test/t/transaction_test.py \
+						test/t/page_pool_test.py
 TESTGRESCHECKS_PART_3 = test/t/rewind_time_test.py
 
 PG_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test --temp-instance=./test/tmp_check
@@ -312,12 +317,16 @@ override CFLAGS_SL += -DCOMMIT_HASH=$(COMMIT_HASH) -Wno-error=deprecated-declara
 
 ifdef VALGRIND
 override with_temp_install += PGCTLTIMEOUT=3000 PG_TEST_TIMEOUT_DEFAULT=500 \
-	valgrind --vgdb=no --leak-check=no \
+	valgrind --vgdb=yes --leak-check=no \
 	--num-callers=20 --suppressions=$(CURDIR)/valgrind.supp --time-stamp=yes \
 	--log-file=$(CURDIR)/pid-%p.log --trace-children=yes \
 	--trace-children-skip=*/initdb
 else
 override with_temp_install += PGCTLTIMEOUT=900
+endif
+
+ifdef USE_DM_LOG_WRITES
+override with_temp_install += USE_DM_LOG_WRITES=1
 endif
 
 include/utils/stopevents_data.h: include/utils/stopevents_defs.h

@@ -18,6 +18,7 @@
 #include "tableam/handler.h"
 #include "tableam/scan.h"
 
+#include "executor/executor.h"
 #include "lib/rbtree.h"
 
 typedef struct OBitmapScan OBitmapScan;
@@ -29,6 +30,8 @@ typedef struct OBitmapHeapPlanState
 	PlanState  *bitmapqualplanstate;
 	/* index quals, in standard expr form */
 	List	   *bitmapqualorig;
+	/* initialized ExprState for bitmapqualorig, reused across tuples */
+	ExprState  *bitmapqualorig_state;
 	Oid			typeoid;
 	OSnapshot	oSnapshot;
 	MemoryContext cxt;

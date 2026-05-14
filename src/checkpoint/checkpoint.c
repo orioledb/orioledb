@@ -478,6 +478,47 @@ perform_writeback(BTreeDescr *desc, CheckpointWriteBack *writeback)
 }
 
 /*
+ * Acquire a checkpointer-side LWLock exclusively while keeping the sync
+ * request queue draining.
+ *
+ * On a hot standby the startup process can hold one of OrioleDB's
+ * checkpoint-coordination LWLocks (oTablesMetaLock, oSysTreesLock, ...)
+ * SHARED while replaying a WAL window — e.g. between
+ * WAL_REC_O_TABLES_META_LOCK and WAL_REC_O_TABLES_META_UNLOCK for the meta
+ * lock.  Concurrent (i.e. unrelated) transactions on the primary can sneak
+ * XACT_COMMIT records into that window; during their replay startup may
+ * call DropRelationFiles -> register_forget_request -> RegisterSyncRequest,
+ * which blocks on the checkpointer-served sync queue when the queue is
+ * full.  If the checkpointer is at the same time waiting for the same
+ * LWLock EXCLUSIVE, we deadlock: startup holds the lock and waits for us
+ * to drain the queue, we wait for the lock.
+ *
+ * Break the cycle by trying ConditionalAcquire and, on failure, draining
+ * the sync queue (so any RegisterSyncRequest waiter — including the startup
+ * process — can make progress and eventually release the lock) before
+ * retrying.  Robust against new requests arriving: every iteration drains
+ * everything currently queued, so the worst case is a few extra iterations
+ * while startup keeps producing requests, after which it hits the matching
+ * unlock record and releases the lock.
+ *
+ * Must only be used by the checkpointer; AbsorbSyncRequests() is a no-op
+ * elsewhere, so the loop would spin without making progress.
+ */
+static void
+acquire_chkp_lock_drain(LWLock *lock)
+{
+	Assert(AmCheckpointerProcess());
+
+	while (!LWLockConditionalAcquire(lock, LW_EXCLUSIVE))
+	{
+		AbsorbSyncRequests();
+		/* Brief backoff so we don't pin a CPU while startup makes progress. */
+		pg_usleep(1000L);
+		CHECK_FOR_INTERRUPTS();
+	}
+}
+
+/*
  * Perform writeback and re-acquire the tree lock for non-system trees.
  *
  * The caller must hold the OrioleDB checkpointer table lock (the special
@@ -519,7 +560,7 @@ perform_writeback_and_relock(BTreeDescr *desc,
 
 		perform_writeback(desc, writeback);
 
-		LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
+		acquire_chkp_lock_drain(&checkpoint_state->oTablesMetaLock);
 
 		indexDescr = o_fetch_index_descr(treeOids, type, true, NULL);
 		if (!indexDescr)
@@ -1264,8 +1305,8 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	pg_write_barrier();
 
-	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
-	LWLockAcquire(&checkpoint_state->oSysTreesLock, LW_EXCLUSIVE);
+	acquire_chkp_lock_drain(&checkpoint_state->oTablesMetaLock);
+	acquire_chkp_lock_drain(&checkpoint_state->oSysTreesLock);
 
 	checkpoint_state->replayStartPtr = get_checkpoint_xlog_ptr();
 	wait_finish_active_commits(checkpoint_state->replayStartPtr);
@@ -1288,7 +1329,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	enable_stopevents = old_enable_stopevents;
 
-	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
+	acquire_chkp_lock_drain(&checkpoint_state->oTablesMetaLock);
 	o_indices_foreach_oids(checkpoint_tables_callback, &chkp_tbl_arg);
 
 	LWLockRelease(&checkpoint_state->oTablesMetaLock);
@@ -1395,7 +1436,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	 * resources.
 	 */
 
-	LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
+	acquire_chkp_lock_drain(&checkpoint_state->oTablesMetaLock);
 
 	/*
 	 * This will let processes reuse data pages of previous checkpoint.
@@ -2091,6 +2132,19 @@ free_extent_for_checkpoint(BTreeDescr *desc, FileExtent *extent, uint32 chkp_num
 
 	if (orioledb_s3_mode)
 	{
+		extent->len = InvalidFileExtentLen;
+		extent->off = InvalidFileExtentOff;
+		return;
+	}
+
+	/*
+	 * User temporary trees have no shared checkpoint state.  Stash freed
+	 * extents on a backend-local list so that subsequent allocations can
+	 * recycle them without touching the checkpoint-tagged seq bufs.
+	 */
+	if (btree_desc_is_local_temp(desc))
+	{
+		local_free_extents_push(desc, *extent);
 		extent->len = InvalidFileExtentLen;
 		extent->off = InvalidFileExtentOff;
 		return;
@@ -2886,13 +2940,13 @@ checkpoint_btree(BTreeDescr **descrPtr, CheckpointState *state,
 										ALLOCSET_DEFAULT_SIZES);
 	prev_context = MemoryContextSwitchTo(tmp_context);
 
-	set_skip_ucm();
+	skip_ucm = true;
 	/* Walk the tree recursively starting from rootPageBlkno */
 	root_downlink = checkpoint_btree_loop(descrPtr,
 										  state,
 										  writeback,
 										  tmp_context);
-	unset_skip_ucm();
+	skip_ucm = false;
 
 	checkpoint_reset_stack(state);
 
@@ -3227,7 +3281,7 @@ checkpoint_try_merge_page(BTreeDescr *descr, CheckpointState *state,
 	}
 
 	if (btree_try_merge_pages(descr, parentBlkno, NULL, &mergeParent,
-							  blkno, loc, rightBlkno, true))
+							  blkno, &loc, rightBlkno, true))
 	{
 		checkpoint_reserve_undo(descr->undoType, true);
 		return true;
@@ -4934,7 +4988,20 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 
 	descr = o_fetch_index_descr(treeOids, type, true, NULL);
 	if (descr != NULL)
+	{
+		/*
+		 * Skip temporary tables - they use a per-backend local page pool
+		 * which is not accessible from the checkpointer process.
+		 */
+		if (descr->desc.storageType == BTreeStorageTemporary)
+		{
+			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
+			MemoryContextSwitchTo(prev_context);
+			MemoryContextResetOnly(chkp_tree_context);
+			return;
+		}
 		loaded = o_btree_load_shmem_checkpoint(&descr->desc);
+	}
 	if (loaded)
 	{
 		BTreeDescr *td = &descr->desc;
@@ -4999,9 +5066,17 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 			}
 			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 		}
-		else if (td->storageType == BTreeStoragePersistence ||
-				 td->storageType == BTreeStorageUnlogged)
+		else
 		{
+			/*
+			 * BTreeStorageTemporary tables are skipped above.
+			 * BTreeStorageInMemory is only used by system trees, which are
+			 * checkpointed separately in checkpoint_sys_trees().  So only
+			 * persistent and unlogged trees should reach here.
+			 */
+			Assert(td->storageType == BTreeStoragePersistence ||
+				   td->storageType == BTreeStorageUnlogged);
+
 			success = checkpoint_ix(tbl_arg->flags, td);
 
 			if (success)
@@ -5015,19 +5090,9 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 				o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 			}
 		}
-		else
-		{
-			success = checkpoint_temporary_tree(tbl_arg->flags, td);
-			if (success)
-			{
-				if (!orioledb_s3_mode)
-					sort_checkpoint_tmp_file(td, cur_chkp_index);
-				o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
-			}
-		}
 
 
-		LWLockAcquire(&checkpoint_state->oTablesMetaLock, LW_EXCLUSIVE);
+		acquire_chkp_lock_drain(&checkpoint_state->oTablesMetaLock);
 	}
 	else if (descr != NULL)
 	{
@@ -5128,8 +5193,8 @@ init_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared)
 	Assert(!OInMemoryBlknoIsValid(shared->pages[0]));
 	Assert(!OInMemoryBlknoIsValid(shared->pages[1]));
 
-	shared->pages[0] = ppool_get_page(desc->ppool, PPOOL_RESERVE_META);
-	shared->pages[1] = ppool_get_page(desc->ppool, PPOOL_RESERVE_META);
+	shared->pages[0] = ppool_alloc_page(desc->ppool, PPOOL_RESERVE_META);
+	shared->pages[1] = ppool_alloc_page(desc->ppool, PPOOL_RESERVE_META);
 
 	Assert(OInMemoryBlknoIsValid(shared->pages[0]));
 	Assert(OInMemoryBlknoIsValid(shared->pages[1]));
@@ -5534,6 +5599,14 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 		&meta_page->freeBuf};
 		int			i = 0;
 
+		/*
+		 * BTreeStorageTemporary trees do not maintain a .map file, so skip
+		 * nextChkp initialization.  User temporary trees also rely on a
+		 * backend-local free space map (see free_extents.c) and do not
+		 * consult the tmpBuf / freeBuf seq bufs for allocations, but the seq
+		 * bufs are still initialized so that the regular eviction teardown in
+		 * btree_finalize_private_seq_bufs works uniformly.
+		 */
 		if (desc->storageType == BTreeStorageTemporary)
 			i = 1;
 
@@ -5641,6 +5714,7 @@ checkpointable_tree_free(BTreeDescr *desc)
 	seq_buf_close_file(&desc->nextChkp[1]);
 	seq_buf_close_file(&desc->tmpBuf[0]);
 	seq_buf_close_file(&desc->tmpBuf[1]);
+	local_free_extents_cleanup(desc);
 	desc->rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
 	desc->rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 

@@ -37,6 +37,7 @@ typedef struct
 	PartialPageState *partial;
 	bool		haveLock;
 	bool		inserted;
+	bool		tryLockFailed;
 } OBTreeFindPageInternalContext;
 
 static bool follow_rightlink(OBTreeFindPageInternalContext *intCxt);
@@ -123,6 +124,8 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 	{
 		if (follow_rightlink(intCxt))
 		{
+			if (intCxt->tryLockFailed)
+				return OBTreeFastPathFindFailure;
 			if (intCxt->inserted)
 				return OBTreeFastPathFindFailure;
 			Assert(context->index > 0);
@@ -290,6 +293,8 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 	{
 		if (follow_rightlink(intCxt))
 		{
+			if (intCxt->tryLockFailed)
+				return OBTreeFastPathFindFailure;
 			Assert(context->index > 0);
 			Assert(!intCxt->haveLock);
 			step_upward_level(intCxt);
@@ -440,6 +445,26 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		bool		wrongChangeCount = false;
 		Pointer		p;
 		bool		fastpath;
+
+		/*
+		 * Local-pool slots are NULLed on eviction, unlike shared-pool slots
+		 * whose shmem page stays readable (only pageChangeCount changes).  An
+		 * IN_MEMORY downlink we just descended through may reference a slot
+		 * the backend evicted earlier in the same call chain -- e.g. a
+		 * reserve_page triggered during a seq scan, or a find_page invoked
+		 * from an undo callback.  PAGE_GET_LEVEL below would segfault on the
+		 * NULL slot, so step back to the parent and re-resolve the downlink
+		 * (it now points to disk).  At the root there is no parent, so report
+		 * failure.
+		 */
+		if (O_PAGE_IS_LOCAL(intCxt.blkno) &&
+			local_ppool_pages[intCxt.blkno & O_BLKNO_MASK] == NULL)
+		{
+			if (context->index == 0)
+				return OFindPageResultFailure;
+			step_upward_level(&intCxt);
+			continue;
+		}
 
 		p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		level = PAGE_GET_LEVEL(p);
@@ -899,7 +924,16 @@ follow_rightlink(OBTreeFindPageInternalContext *intCxt)
 
 		if (intCxt->haveLock)
 		{
-			if (!O_TUPLE_IS_NULL(context->insertTuple))
+			if (BTREE_PAGE_FIND_IS(context, TRY_LOCK))
+			{
+				if (!try_lock_page(intCxt->blkno))
+				{
+					intCxt->haveLock = false;
+					intCxt->tryLockFailed = true;
+					return true;
+				}
+			}
+			else if (!O_TUPLE_IS_NULL(context->insertTuple))
 			{
 				OLockPageWithTupleResult result;
 
@@ -1000,6 +1034,7 @@ refind_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	intCxt.pageChangeCount = _pageChangeCount;
 	intCxt.partial = NULL;
 	intCxt.inserted = false;
+	intCxt.tryLockFailed = false;
 
 	if (!BTREE_PAGE_FIND_IS(context, TRY_LOCK))
 	{
@@ -1018,6 +1053,18 @@ retry:
 		Pointer		p;
 
 		if (intCxt.pageChangeCount == InvalidOPageChangeCount)
+			return find_page(context, key, keyType, level);
+
+		/*
+		 * Local-pool slots are NULLed on eviction, unlike shared-pool slots
+		 * where pageChangeCount alone signals replacement (the shmem page
+		 * stays readable).  The slot at the caller's saved (blkno,
+		 * pageChangeCount) may have been evicted since, so PAGE_GET_LEVEL
+		 * below would segfault.  Fall back to find_page() to resolve the
+		 * downlink from scratch.
+		 */
+		if (O_PAGE_IS_LOCAL(intCxt.blkno) &&
+			local_ppool_pages[intCxt.blkno & O_BLKNO_MASK] == NULL)
 			return find_page(context, key, keyType, level);
 
 		if (!O_TUPLE_IS_NULL(context->insertTuple))
@@ -1108,6 +1155,8 @@ retry:
 	{
 		if (follow_rightlink(&intCxt))
 		{
+			if (intCxt.tryLockFailed)
+				return OFindPageResultFailure;
 			if (intCxt.inserted)
 				return OFindPageResultInserted;
 			Assert(!intCxt.haveLock);

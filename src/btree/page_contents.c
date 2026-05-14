@@ -89,11 +89,11 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
 			  PartialPageState *partial, bool loadHikeysChunk,
 			  CommitSeqNo *readCsn)
 {
-	UsageCountMap *ucm;
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	uint64		state1,
 				state2;
 	bool		hiKeysEndOK PG_USED_FOR_ASSERTS_ONLY = true;
+	PagePool   *ppool;
 
 	state1 = pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state));
 	if (O_PAGE_STATE_READ_IS_BLOCKED(state1))
@@ -136,8 +136,8 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
 
 	Assert(hiKeysEndOK);
 
-	ucm = &(get_ppool_by_blkno(blkno)->ucm);
-	page_inc_usage_count(ucm, blkno);
+	ppool = get_ppool_by_blkno(blkno);
+	ppool_ucm_inc_usage(ppool, blkno);
 
 	return ReadPageResultOK;
 }
@@ -178,13 +178,27 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 				  bool loadHikeysChunk, UndoLocation *undoLocation,
 				  CommitSeqNo *readCsn)
 {
-	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
-	BTreePageHeader *header = (BTreePageHeader *) p;
+	Page		p;
+	BTreePageHeader *header;
 	CommitSeqNo headerCsn;
 	UndoLocation headerUndoLocation;
-	bool		read_undo = O_PAGE_IS(p, LEAF);
+	bool		read_undo;
 
 	Assert(pageChangeCount != InvalidOPageChangeCount);
+
+	/*
+	 * For local pool pages, the slot may have been reclaimed by a reentrant
+	 * eviction that ran between the caller capturing this downlink and now.
+	 * Treat a NULL slot as a read failure so the caller can refetch the
+	 * downlink from the parent (which now points to disk).
+	 */
+	if (O_PAGE_IS_LOCAL(blkno) &&
+		local_ppool_pages[blkno & O_BLKNO_MASK] == NULL)
+		return false;
+
+	p = O_GET_IN_MEMORY_PAGE(blkno);
+	header = (BTreePageHeader *) p;
+	read_undo = O_PAGE_IS(p, LEAF);
 
 	EA_READ_INC(blkno);
 
@@ -269,12 +283,26 @@ o_btree_try_read_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeC
 					  PartialPageState *partial, bool loadHikeysChunk,
 					  CommitSeqNo *readCsn)
 {
-	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
-	BTreePageHeader *header = (BTreePageHeader *) p;
-	bool		read_undo = O_PAGE_IS(p, LEAF);
+	Page		p;
+	BTreePageHeader *header;
+	bool		read_undo;
 	ReadPageResult result;
 
 	Assert(pageChangeCount != InvalidOPageChangeCount);
+
+	/*
+	 * For local pool pages, the slot may have been reclaimed by a reentrant
+	 * eviction that ran between the caller capturing this downlink and now.
+	 * Treat a NULL slot as a read failure so the caller can refetch the
+	 * downlink from the parent (which now points to disk).
+	 */
+	if (O_PAGE_IS_LOCAL(blkno) &&
+		local_ppool_pages[blkno & O_BLKNO_MASK] == NULL)
+		return ReadPageResultFailed;
+
+	p = O_GET_IN_MEMORY_PAGE(blkno);
+	header = (BTreePageHeader *) p;
+	read_undo = O_PAGE_IS(p, LEAF);
 
 	EA_READ_INC(blkno);
 
@@ -355,8 +383,7 @@ init_new_btree_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint16 flags,
 	header->itemsCount = 0;
 	header->prevInsertOffset = MaxOffsetNumber;
 	header->maxKeyLen = 0;
-	page_change_usage_count(&desc->ppool->ucm, blkno,
-							(pg_atomic_read_u32(desc->ppool->ucm.epoch) + 2) % UCM_USAGE_LEVELS);
+	ppool_ucm_init(desc->ppool, blkno);
 
 	memset(p + offsetof(BTreePageHeader, chunkDesc),
 		   0,

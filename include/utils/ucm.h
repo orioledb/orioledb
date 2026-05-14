@@ -33,6 +33,8 @@ typedef struct UsageCountMap
 	uint32		usageCounter;
 } UsageCountMap;
 
+extern bool skip_ucm;
+
 extern Size estimate_ucm_space(UsageCountMap *map, OInMemoryBlkno offset, OInMemoryBlkno size);
 extern void init_ucm(UsageCountMap *map, Pointer ptr, bool found);
 extern void ucm_inc(UsageCountMap *map, OInMemoryBlkno blkno, int prev, int next);
@@ -43,8 +45,6 @@ extern bool ucm_epoch_needs_shift(UsageCountMap *map);
 extern void ucm_epoch_shift(UsageCountMap *map);
 extern OInMemoryBlkno ucm_next_blkno(UsageCountMap *map, OInMemoryBlkno init_blkno, uint32 mask_src);
 extern OInMemoryBlkno ucm_occupy_free_page(UsageCountMap *map);
-extern void set_skip_ucm(void);
-extern void unset_skip_ucm(void);
 
 static inline uint64
 ucm_update_state(UsageCountMap *map, OInMemoryBlkno blkno, uint64 state)

@@ -159,7 +159,7 @@ mark_page_pre_cleanup(OInMemoryBlkno blkno, uint32 pageChangeCount)
  * Frees given page and all of its children recursively.
  */
 static void
-free_page(OPagePool *pool, OInMemoryBlkno blkno, uint32 pageChangeCount)
+free_page(PagePool *pool, OInMemoryBlkno blkno, uint32 pageChangeCount)
 {
 	OInMemoryBlkno childPageNumbers[BTREE_PAGE_MAX_CHUNK_ITEMS];
 	uint32		childPageChangeCounts[BTREE_PAGE_MAX_CHUNK_ITEMS];
@@ -187,11 +187,10 @@ free_page(OPagePool *pool, OInMemoryBlkno blkno, uint32 pageChangeCount)
 	page_block_reads(blkno);
 	CLEAN_DIRTY(pool, blkno);
 	ppool_free_page(pool, blkno, true);
-
 }
 
 static inline void
-free_meta_page(OPagePool *pool, OInMemoryBlkno metaPageBlkno)
+free_meta_page(PagePool *pool, OInMemoryBlkno metaPageBlkno)
 {
 	BTreeMetaPage *meta_page;
 	int			i,
@@ -236,7 +235,7 @@ free_meta_page(OPagePool *pool, OInMemoryBlkno metaPageBlkno)
 void
 o_btree_cleanup_pages(OInMemoryBlkno rootPageBlkno, OInMemoryBlkno metaPageBlkno, uint32 rootPageChangeCount)
 {
-	OPagePool  *pool = get_ppool_by_blkno(rootPageBlkno);
+	PagePool   *pool = get_ppool_by_blkno(rootPageBlkno);
 
 	Assert(OInMemoryBlknoIsValid(rootPageBlkno));
 	Assert(OInMemoryBlknoIsValid(metaPageBlkno));

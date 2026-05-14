@@ -515,20 +515,149 @@ o_buffers_sync(OBuffersDesc *desc, uint32 tag,
 	}
 }
 
+/*
+ * Discard blocks [firstBlockNumber, lastBlockNumber]: unlink files fully
+ * covered by the range and punch holes over the touched portion of partially
+ * covered files at either edge.  A boundary file that does not yet exist
+ * (e.g. when callers cleanup ahead of the active write frontier) is silently
+ * skipped.
+ */
 void
-o_buffers_unlink_files_range(OBuffersDesc *desc, uint32 tag,
-							 int64 firstFileNumber, int64 lastFileNumber)
+o_buffers_unlink_blocks_range(OBuffersDesc *desc, uint32 tag,
+							  int64 firstBlockNumber, int64 lastBlockNumber)
 {
-	int64		fileNumber;
+	int64		blocksPerFile = desc->singleFileSize / ORIOLEDB_BLCKSZ;
+	int64		firstFile,
+				lastFile,
+				fileNumber;
 
 	Assert(OBuffersMaxTagIsValid(tag));
 
-	o_buffers_wipe(desc, tag,
-				   firstFileNumber * (desc->singleFileSize / ORIOLEDB_BLCKSZ),
-				   (lastFileNumber + 1) * (desc->singleFileSize / ORIOLEDB_BLCKSZ) - 1);
+	if (firstBlockNumber > lastBlockNumber)
+		return;
 
-	for (fileNumber = firstFileNumber;
-		 fileNumber <= lastFileNumber;
-		 fileNumber++)
-		unlink_file(desc, tag, fileNumber);
+	o_buffers_wipe(desc, tag, firstBlockNumber, lastBlockNumber);
+
+	firstFile = firstBlockNumber / blocksPerFile;
+	lastFile = lastBlockNumber / blocksPerFile;
+
+	for (fileNumber = firstFile; fileNumber <= lastFile; fileNumber++)
+	{
+		int64		fileFirstBlock = fileNumber * blocksPerFile;
+		int64		fileLastBlock = fileFirstBlock + blocksPerFile - 1;
+		int64		from = Max(firstBlockNumber, fileFirstBlock);
+		int64		to = Min(lastBlockNumber, fileLastBlock);
+
+		if (from == fileFirstBlock && to == fileLastBlock)
+		{
+			unlink_file(desc, tag, fileNumber);
+		}
+		else if (orioledb_use_sparse_files)
+		{
+			off_t		offset = (off_t) (from - fileFirstBlock) * ORIOLEDB_BLCKSZ;
+			off_t		length = (off_t) (to - from + 1) * ORIOLEDB_BLCKSZ;
+
+			if (open_file(desc, tag, fileNumber, false))
+				punch_fd_hole(FileGetRawDesc(desc->curFile), offset, length,
+							  desc->curFileName);
+		}
+	}
+}
+
+/*
+ * Discard items in [cleanupStart, cleanupEnd) that are no longer kept by the
+ * retain set [chkpRetainStart, chkpRetainEnd) U [transactionRetainStart, +inf).
+ * Fully covered files are unlinked.  The leading file is also unlinked when
+ * it lies entirely outside the retain set, so successive concurrent calls
+ * with non-file-aligned boundaries don't leave orphan partial-coverage files.
+ * itemsPerBlock is the count of caller-defined items in one ORIOLEDB_BLCKSZ
+ * block.
+ *
+ * Partition of items in [cleanupStart, cleanupEnd) against the new retain set:
+ *
+ *   1. item < retainStart                                  -- unlink
+ *   2. item in [retainStart, chkpRetainEnd)                -- chkp, keep
+ *   3. item in [chkpRetainEnd, transactionRetainStart)      -- gap, unlink
+ *      (only reachable when chkpRetainEnd < transactionRetainStart)
+ *   4. item >= transactionRetainStart                       -- active, keep
+ *
+ * When the chkp range is empty, retainStart = transactionRetainStart, the gap
+ * branch is skipped, and everything below transactionRetainStart falls into
+ * case 1.
+ */
+void
+unlink_unretained_o_buffers(OBuffersDesc *desc, uint32 tag, int64 itemsPerBlock,
+							int64 cleanupStart, int64 cleanupEnd,
+							int64 chkpRetainStart, int64 chkpRetainEnd,
+							int64 transactionRetainStart)
+{
+	int64		blocksPerFile = desc->singleFileSize / ORIOLEDB_BLCKSZ;
+	int64		retainStart;
+	int64		finish;
+
+	/*
+	 * Block arithmetic below uses index / itemsPerBlock, which is only
+	 * correct when items align to block boundaries.  For straddling items
+	 * (e.g. RewindItem) the caller must compute block ranges itself and call
+	 * o_buffers_unlink_blocks_range directly.
+	 */
+	Assert(ORIOLEDB_BLCKSZ % itemsPerBlock == 0);
+
+	if (cleanupStart >= cleanupEnd)
+		return;
+
+	if (chkpRetainStart < chkpRetainEnd)
+		retainStart = Min(chkpRetainStart, transactionRetainStart);
+	else
+		retainStart = transactionRetainStart;
+
+	/* Case 1: items below the new persist start. */
+	finish = Min(cleanupEnd, retainStart);
+	if (cleanupStart < finish)
+	{
+		int64		firstBlock = (cleanupStart + itemsPerBlock - 1) / itemsPerBlock;
+		int64		lastBlock = finish / itemsPerBlock - 1;
+		int64		retainBlock = retainStart / itemsPerBlock;
+		int64		leadFile = firstBlock / blocksPerFile;
+
+		/*
+		 * If the file containing the leading edge is entirely below retain,
+		 * extend the range down to its first block so the file is unlinked
+		 * rather than left as a stale partial-coverage shell.  The bytes
+		 * below cleanupStart in that file are below the previous cleaned
+		 * boundary and therefore already dead.
+		 */
+		if ((leadFile + 1) * blocksPerFile <= retainBlock)
+			firstBlock = leadFile * blocksPerFile;
+
+		o_buffers_unlink_blocks_range(desc, tag, firstBlock, lastBlock);
+	}
+
+	/* Case 3: gap above chkpRetainEnd and below current retain. */
+	if (chkpRetainStart < chkpRetainEnd && chkpRetainEnd < transactionRetainStart)
+	{
+		int64		gapStart = Max(cleanupStart, chkpRetainEnd);
+		int64		gapEnd = Min(cleanupEnd, transactionRetainStart);
+
+		if (gapStart < gapEnd)
+		{
+			int64		firstBlock = (gapStart + itemsPerBlock - 1) / itemsPerBlock;
+			int64		lastBlock = gapEnd / itemsPerBlock - 1;
+			int64		retainBlock = transactionRetainStart / itemsPerBlock;
+			int64		chkpEndBlock = (chkpRetainEnd + itemsPerBlock - 1) / itemsPerBlock;
+			int64		leadFile = firstBlock / blocksPerFile;
+			int64		leadFileFirst = leadFile * blocksPerFile;
+
+			/*
+			 * Extend only when the leading file sits entirely inside the gap
+			 * (above chkpRetainEnd and below transactionRetainStart): then
+			 * every item in it is dead.
+			 */
+			if (leadFileFirst >= chkpEndBlock &&
+				leadFileFirst + blocksPerFile <= retainBlock)
+				firstBlock = leadFileFirst;
+
+			o_buffers_unlink_blocks_range(desc, tag, firstBlock, lastBlock);
+		}
+	}
 }

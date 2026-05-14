@@ -86,10 +86,7 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	Size		len;
 	OClass	   *o_class = (OClass *) *entry_ptr;
 	OClassArg  *carg = (OClassArg *) arg;
-	bool		sys_cache;
 	Oid			classoid = DatumGetObjectId(key->keys[0]);
-
-	sys_cache = carg && !carg->column_drop && carg->sys_table;
 
 	rel = relation_open(classoid, AccessShareLock);
 
@@ -100,6 +97,7 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 		o_class->attrs = (FormData_pg_attribute *) repalloc(o_class->attrs,
 															len);
 		memset(o_class->attrs, 0, len);
+		carg->found = true;
 	}
 	else
 	{
@@ -112,7 +110,6 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	o_class->natts = rel->rd_att->natts;
 	for (i = 0; i < o_class->natts; i++)
 	{
-		bool		process;
 		FormData_pg_attribute *class_attr,
 				   *typcache_attr;
 
@@ -145,12 +142,6 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 		class_attr->attisdropped = typcache_attr->attisdropped ||
 			(carg && carg->column_drop &&
 			 carg->dropped - 1 == i);
-
-		process = !class_attr->attisdropped && !sys_cache;
-		if (process)
-			o_composite_type_element_save(key->common.datoid,
-										  class_attr->atttypid,
-										  key->common.lsn);
 	}
 	MemoryContextSwitchTo(prev_context);
 	relation_close(rel, AccessShareLock);

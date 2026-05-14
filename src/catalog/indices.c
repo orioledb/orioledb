@@ -35,6 +35,7 @@
 #include "utils/planner.h"
 #include "utils/resowner.h"
 #include "utils/stopevent.h"
+#include "utils/page_pool.h"
 #include "workers/interrupt.h"
 
 #include "access/genam.h"
@@ -337,10 +338,20 @@ rebuild_indices_insert_placeholders(OTableDescr *descr)
 {
 	int			i;
 
+	/*
+	 * Placeholders guard concurrent access to shared SharedRootInfo during
+	 * index build.  Temporary trees live in a backend-local hash, so no other
+	 * backend can observe them and placeholders are unnecessary.
+	 */
 	for (i = 0; i < descr->nIndices; i++)
+	{
+		if (descr->indices[i]->desc.storageType == BTreeStorageTemporary)
+			continue;
 		o_insert_shared_root_placeholder(descr->indices[i]->desc.oids.datoid,
 										 descr->indices[i]->desc.oids.relnode);
-	if (descr->toast)
+	}
+	if (descr->toast &&
+		descr->toast->desc.storageType != BTreeStorageTemporary)
 		o_insert_shared_root_placeholder(descr->toast->desc.oids.datoid,
 										 descr->toast->desc.oids.relnode);
 }
@@ -381,7 +392,6 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			   IndexBuildResult *result)
 {
 	OTable	   *old_o_table = NULL;
-	OTable	   *new_o_table;
 	OTable	   *o_table;
 	OIndexNumber ix_num;
 	OTableIndex *table_index;
@@ -494,6 +504,8 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			/* Rebuild, assign new oids */
 			if (ix_type == oIndexPrimary)
 			{
+				OTable	   *new_o_table;
+
 				new_o_table = o_tables_get(oids);
 				o_table = new_o_table;
 				assign_new_oids(new_o_table, heap, false);
@@ -570,8 +582,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	else
 		o_tables_table_meta_lock(o_table);
 
-	o_opclass_cache_add_table(o_table);
-	custom_types_add_all(o_table, table_index);
+	o_cache_index_types(o_table, table_index);
 	if (!reuse_relnode && table_index->type == oIndexPrimary)
 	{
 		Assert(old_o_table);
@@ -628,8 +639,14 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			o_verify_dir_exists_or_create(prefix, NULL, NULL);
 			o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
 			pfree(db_prefix);
-			o_insert_shared_root_placeholder(table_index->oids.datoid,
-											 table_index->oids.relnode);
+
+			/*
+			 * Temporary trees are backend-local; no other backend can race
+			 * against the build, so no placeholder is needed.
+			 */
+			if (o_table->persistence != RELPERSISTENCE_TEMP)
+				o_insert_shared_root_placeholder(table_index->oids.datoid,
+												 table_index->oids.relnode);
 		}
 	}
 
@@ -1561,13 +1578,19 @@ build_secondary_index(Oid oldTblRelnode, OTable *o_table,
 	 * heap scan.  Without this, recovery could advance minProcRetainLocation
 	 * past undo records that the scan still needs for reading historical page
 	 * versions via imgReadCsn.  Applies to both parallel and serial builds
-	 * (the latter is the only option when parallel workers fail to launch).
+	 * (the latter is the only option when parallel workers fail to launch, or
+	 * when the table is temporary — see below).
 	 */
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		set_my_snapshot_retain_location((UndoLogType) i);
 
-	/* Attempt to launch parallel worker scan when required */
-	if (in_dedicated_recovery_worker || (ActiveSnapshotSet() && max_parallel_maintenance_workers > 0))
+	/*
+	 * Attempt to launch parallel worker scan when required.  Parallel workers
+	 * cannot access data in temporary tables because they use a per-backend
+	 * local page pool.
+	 */
+	if ((in_dedicated_recovery_worker || (ActiveSnapshotSet() && max_parallel_maintenance_workers > 0)) &&
+		o_table->persistence != RELPERSISTENCE_TEMP)
 	{
 		int			parallel_workers = o_calculate_index_workers(&GET_PRIMARY(descr)->desc, false, 1);
 
@@ -1670,9 +1693,18 @@ build_secondary_index(Oid oldTblRelnode, OTable *o_table,
 	}
 	else if (!is_recovery_in_progress())
 	{
-		tableRelation = table_open(o_table->oids.reloid, AccessExclusiveLock);
+		/*
+		 * ShareUpdateExclusiveLock is the minimum level index_update_stats()
+		 * expects: heap_inplace_update()'s lock check
+		 * (heapam.c:check_inplace_rel_lock) emits a "missing lock" warning
+		 * for anything weaker.  SUE is still much weaker than the AEL we used
+		 * to take here, so the deadlock cycles with autovacuum (e.g. DROP
+		 * CASCADE vs ANALYZE) that the AEL re-acquire created stay fixed.
+		 */
+		tableRelation = table_open(o_table->oids.reloid,
+								   ShareUpdateExclusiveLock);
 		indexRelation = index_open(o_table->indices[ix_num].oids.reloid,
-								   AccessExclusiveLock);
+								   ShareUpdateExclusiveLock);
 		index_update_stats(tableRelation,
 						   true,
 						   heap_tuples);
@@ -1683,8 +1715,8 @@ build_secondary_index(Oid oldTblRelnode, OTable *o_table,
 
 		/* Make the updated catalog row versions visible */
 		CommandCounterIncrement();
-		table_close(tableRelation, AccessExclusiveLock);
-		index_close(indexRelation, AccessExclusiveLock);
+		table_close(tableRelation, ShareUpdateExclusiveLock);
+		index_close(indexRelation, ShareUpdateExclusiveLock);
 	}
 
 	pfree(index_tuples);
@@ -1951,13 +1983,19 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 	 * past undo records that the scan still needs for reading historical page
 	 * versions via imgReadCsn.  Applies to both parallel and serial builds;
 	 * in particular, the bridge index add path (descr->bridge &&
-	 * !old_descr->bridge) always rebuilds serially in recovery.
+	 * !old_descr->bridge) and temporary tables (per-backend local page pool,
+	 * see below) always rebuild serially.
 	 */
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		set_my_snapshot_retain_location((UndoLogType) i);
 
-	/* Attempt to launch parallel worker scan when required */
+	/*
+	 * Attempt to launch parallel worker scan when required.  Parallel workers
+	 * cannot access data in temporary tables because they use a per-backend
+	 * local page pool.
+	 */
 	if ((in_dedicated_recovery_worker || (ActiveSnapshotSet() && max_parallel_maintenance_workers > 0)) &&
+		o_table->persistence != RELPERSISTENCE_TEMP &&
 		!descr->indices[PrimaryIndexNumber]->primaryIsCtid &&
 		!(descr->bridge && !old_descr->bridge))
 	{
@@ -2133,7 +2171,9 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 
 	if (!is_recovery_in_progress())
 	{
-		tableRelation = table_open(o_table->oids.reloid, AccessExclusiveLock);
+		/* See note in build_secondary_index() — SUE is the minimum. */
+		tableRelation = table_open(o_table->oids.reloid,
+								   ShareUpdateExclusiveLock);
 		index_update_stats(tableRelation, true, heap_tuples);
 
 		for (i = PrimaryIndexNumber; i < o_table->nindices; i++)
@@ -2149,16 +2189,16 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 				Relation	indexRelation;
 
 				indexRelation = index_open(table_index->oids.reloid,
-										   AccessExclusiveLock);
+										   ShareUpdateExclusiveLock);
 
 				index_update_stats(indexRelation, false, index_tuples[i]);
-				index_close(indexRelation, AccessExclusiveLock);
+				index_close(indexRelation, ShareUpdateExclusiveLock);
 			}
 		}
 
 		/* Make the updated catalog row versions visible */
 		CommandCounterIncrement();
-		table_close(tableRelation, AccessExclusiveLock);
+		table_close(tableRelation, ShareUpdateExclusiveLock);
 	}
 	pfree(index_tuples);
 }

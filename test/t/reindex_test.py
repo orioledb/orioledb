@@ -226,3 +226,60 @@ class ReindexTest(BaseTest):
 
 		node.start()
 		node.stop()
+
+	def test_replication_reindex_secondary(self):
+		node = self.node
+		node.start()
+
+		with self.node as master:
+			with self.getReplica().start() as replica:
+				with master.connect() as con1:
+					con1.begin()
+
+					con1.execute("""
+						CREATE EXTENSION IF NOT EXISTS orioledb;
+						CREATE TABLE o_test_1(
+							val_1 int PRIMARY KEY,
+							val_2 int,
+							val_3 text
+						) USING orioledb;
+
+						CREATE UNIQUE INDEX o_test_1_val2_idx ON o_test_1(val_2);
+						CREATE INDEX o_test_1_val3_idx ON o_test_1(val_3);
+						INSERT INTO o_test_1 SELECT x, 2 * x, 'test_data' || x FROM generate_series(1, 1000) x;
+					""")
+
+					con1.commit()
+
+				master.execute("DELETE FROM o_test_1 WHERE val_1 %% 2 = 1;")
+				master.execute("REINDEX TABLE o_test_1;")
+
+				self.catchup_orioledb(replica)
+
+				set_scan = "set enable_seqscan = {}; set enable_indexscan = {}; set enable_bitmapscan = {};"
+
+				self.assertEqual(
+				    replica.execute(
+				        f"{set_scan.format('on', 'off', 'off')} SELECT * FROM o_test_1 WHERE val_2 = 202;"
+				    ), [])
+				self.assertEqual(
+				    replica.execute(
+				        f"{set_scan.format('off', 'on', 'on')}  SELECT * FROM o_test_1 WHERE val_2 = 202;"
+				    ), [])
+				self.assertEqual(
+				    replica.execute(
+				        f"{set_scan.format('off', 'on', 'on')}  SELECT * FROM o_test_1 WHERE val_3 = 'test_data101';"
+				    ), [])
+
+				self.assertEqual(
+				    replica.execute(
+				        f"{set_scan.format('on', 'off', 'off')} SELECT * FROM o_test_1 WHERE val_2 = 500;"
+				    ), [(250, 500, 'test_data250')])
+				self.assertEqual(
+				    replica.execute(
+				        f"{set_scan.format('off', 'on', 'on')}  SELECT * FROM o_test_1 WHERE val_2 = 500;"
+				    ), [(250, 500, 'test_data250')])
+				self.assertEqual(
+				    replica.execute(
+				        f"{set_scan.format('off', 'on', 'on')}  SELECT * FROM o_test_1 WHERE val_3 = 'test_data250';"
+				    ), [(250, 500, 'test_data250')])

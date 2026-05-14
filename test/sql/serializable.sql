@@ -1,0 +1,58 @@
+CREATE SCHEMA serializable_test;
+SET SESSION search_path = 'serializable_test';
+CREATE EXTENSION orioledb;
+
+CREATE TABLE o_ser (
+	id int4 NOT NULL,
+	v int4 NOT NULL,
+	PRIMARY KEY (id)
+) USING orioledb;
+INSERT INTO o_ser SELECT i, i FROM generate_series(1, 3) i;
+
+-- 'error' mode rejects SERIALIZABLE access to OrioleDB tables.
+SET orioledb.serializable = 'error';
+BEGIN ISOLATION LEVEL SERIALIZABLE;
+SELECT id, v FROM o_ser ORDER BY id;
+ROLLBACK;
+
+-- 'repeatable_read' mode silently treats SERIALIZABLE as REPEATABLE READ for
+-- OrioleDB tables: no error, no extra heavyweight lock on the relation.
+SET orioledb.serializable = 'repeatable_read';
+BEGIN ISOLATION LEVEL SERIALIZABLE;
+SELECT id, v FROM o_ser ORDER BY id;
+SELECT mode, granted
+FROM pg_locks
+WHERE relation = 'o_ser'::regclass
+  AND pid = pg_backend_pid()
+  AND mode = 'ExclusiveLock';
+COMMIT;
+
+-- 'table_lock' mode (default) acquires an ExclusiveLock on every OrioleDB
+-- relation a SERIALIZABLE transaction touches.
+SET orioledb.serializable = 'table_lock';
+BEGIN ISOLATION LEVEL SERIALIZABLE;
+UPDATE o_ser SET v = v + 100 WHERE id = 1;
+SELECT mode, granted
+FROM pg_locks
+WHERE relation = 'o_ser'::regclass
+  AND pid = pg_backend_pid()
+  AND mode = 'ExclusiveLock';
+COMMIT;
+
+-- Non-SERIALIZABLE transactions are not affected by the GUC.
+SET orioledb.serializable = 'table_lock';
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+UPDATE o_ser SET v = v + 1 WHERE id = 1;
+SELECT mode, granted
+FROM pg_locks
+WHERE relation = 'o_ser'::regclass
+  AND pid = pg_backend_pid()
+  AND mode = 'ExclusiveLock';
+COMMIT;
+
+-- Reject invalid GUC values.
+SET orioledb.serializable = 'bogus';
+
+DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA serializable_test CASCADE;
+RESET search_path;

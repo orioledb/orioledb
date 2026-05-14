@@ -56,6 +56,9 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
 
     echo "wal_level = logical" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
     echo "shared_preload_libraries = 'orioledb'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+    # We don't support SSI.  Run regression/isolation tests with in 'error'
+    # mode to catch the explicit errors.
+    echo "orioledb.serializable = 'error'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log start
     make -C src/test/regress installcheck -j $(nproc) || status=$?
     make -C src/test/isolation installcheck -j $(nproc) || status=$?
@@ -66,6 +69,7 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         git apply patches/limit.patch
         if [ $PG_VERSION = "17" ]; then
             git apply patches/subscription_enable_oriole.diff
+            git apply patches/027_stream_regress.patch
         fi
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log restart
 
@@ -182,9 +186,15 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log stop
         if [ $PG_VERSION = "17" ]; then
             make -C src/test/subscription installcheck-oriole -j $(nproc) || status=$?
+            make -C src/test/recovery installcheck-oriole -j $(nproc) || status=$?
         fi
     fi
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log stop
+elif [ $CHECK_TYPE = "dm_log_writes" ]; then
+	# Run only the recovery tests with OS buffer loss simulation enabled.
+	# Each crash point uses dm-log-writes: only writes that reached the
+	# block device before the mark survive, discarding OS-buffered data.
+	make USE_PGXS=1 IS_DEV=1 USE_DM_LOG_WRITES=1 test/t/recovery_test.py || status=$?
 else
 	make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?
 fi

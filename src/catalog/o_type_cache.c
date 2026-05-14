@@ -104,17 +104,7 @@ o_type_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	o_type->typsubscript = typeform->typsubscript;
 
 	o_type->default_btree_opclass = GetDefaultOpClass(typeoid, BTREE_AM_OID);
-	if (!OidIsValid(o_type->default_btree_opclass) &&
-		typeform->typtype != TYPTYPE_PSEUDO)
-		ereport(ERROR,
-				(errcode(ERRCODE_UNDEFINED_FUNCTION),
-				 errmsg("could not identify a comparison function for type %s",
-						format_type_be(typeoid))));
 	o_type->default_hash_opclass = GetDefaultOpClass(typeoid, HASH_AM_OID);
-
-	if (OidIsValid(o_type->typelem))
-		o_type_cache_add_if_needed(key->common.datoid, o_type->typelem,
-								   key->common.lsn, NULL);
 
 	ReleaseSysCache(typetup);
 }

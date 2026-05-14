@@ -632,3 +632,111 @@ add_free_extents_from_tmp(BTreeDescr *desc, bool remove)
 	}
 	LWLockRelease(metaLock);
 }
+
+/*
+ * Returns true if `desc` is a user temporary tree that uses the backend-local
+ * page pool.  Such trees keep all of their state (root, meta page, data file
+ * and free space map) private to the owning process.
+ */
+bool
+btree_desc_is_local_temp(BTreeDescr *desc)
+{
+	return desc->ppool == (PagePool *) &local_ppool;
+}
+
+/*
+ * Appends a freed extent to the backend-local list of a user temporary tree.
+ *
+ * The list is lazily allocated in TopMemoryContext so that it survives
+ * across transaction boundaries for the lifetime of the descriptor.
+ */
+void
+local_free_extents_push(BTreeDescr *desc, FileExtent extent)
+{
+	BTreeLocalFreeExtents *list = desc->localFreeExtents;
+
+	Assert(btree_desc_is_local_temp(desc));
+	Assert(FileExtentIsValid(extent));
+
+	if (list == NULL)
+	{
+		MemoryContext oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+
+		list = palloc0(sizeof(BTreeLocalFreeExtents));
+		list->capacity = 16;
+		list->items = palloc(sizeof(FileExtent) * list->capacity);
+		desc->localFreeExtents = list;
+		MemoryContextSwitchTo(oldcxt);
+	}
+	else if (list->size == list->capacity)
+	{
+		MemoryContext oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+
+		list->capacity *= 2;
+		list->items = repalloc(list->items,
+							   sizeof(FileExtent) * list->capacity);
+		MemoryContextSwitchTo(oldcxt);
+	}
+
+	list->items[list->size++] = extent;
+}
+
+/*
+ * Tries to take an extent of exactly `len` blocks from the backend-local
+ * list.  Uses first-fit; if the matching item is longer than requested the
+ * remainder is kept in place.  Returns true and fills *extent on success.
+ */
+bool
+local_free_extents_pop(BTreeDescr *desc, uint16 len, FileExtent *extent)
+{
+	BTreeLocalFreeExtents *list = desc->localFreeExtents;
+	int			i;
+
+	Assert(btree_desc_is_local_temp(desc));
+
+	if (list == NULL || list->size == 0)
+		return false;
+
+	for (i = 0; i < list->size; i++)
+	{
+		FileExtent *item = &list->items[i];
+
+		if (item->len < len)
+			continue;
+
+		extent->off = item->off;
+		extent->len = len;
+
+		if (item->len == len)
+		{
+			/* remove item by swapping with the last */
+			list->items[i] = list->items[list->size - 1];
+			list->size--;
+		}
+		else
+		{
+			item->off += len;
+			item->len -= len;
+		}
+		return true;
+	}
+
+	return false;
+}
+
+/*
+ * Releases memory held by the backend-local free extent list.
+ */
+void
+local_free_extents_cleanup(BTreeDescr *desc)
+{
+	BTreeLocalFreeExtents *list = desc->localFreeExtents;
+
+	if (list == NULL)
+		return;
+
+	if (list->items != NULL)
+		pfree(list->items);
+	pfree(list);
+	desc->localFreeExtents = NULL;
+}

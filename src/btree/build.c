@@ -28,6 +28,7 @@
 #include "tuple/sort.h"
 #include "transam/oxid.h"
 #include "utils/seq_buf.h"
+#include "utils/page_pool.h"
 
 #include "access/genam.h"
 #include "access/relation.h"

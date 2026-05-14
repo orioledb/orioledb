@@ -272,7 +272,10 @@ OrioleDB is currently in the development stage. Therefore it has the following t
 7.  OrioleDB doesn't support `CLUSTER` and `VACUUM FULL` commands yet, because we don't implement rewrite of the tables for these commands. And also `CLUSTER` doesn't really makes much sense for index-organized tables.
 8.  `REINDEX CONCURRENTLY` now is not supported.
 9.  OrioleDB tables don't support `Sample Scans` yet.
-10. OrioleDB tables don't support SERIALIZABLE isolation level.
+10. OrioleDB does not implement true SERIALIZABLE Snapshot Isolation. The `orioledb.serializable` GUC controls how SERIALIZABLE transactions are handled:
+    - `table_lock` (default): every relation a SERIALIZABLE transaction touches is protected by a coarse heavyweight `ExclusiveLock`. Correct, but pessimistic — concurrent non-conflicting workloads degrade to serial execution.
+    - `error`: reject SERIALIZABLE transactions with `ERRCODE_FEATURE_NOT_SUPPORTED` (the legacy behavior).
+    - `repeatable_read`: treat SERIALIZABLE as `REPEATABLE READ` for OrioleDB tables only — no extra locks are taken, OrioleDB's CSN snapshot already provides per-transaction stable reads. Heap tables in the same transaction continue to use PG's SSI as usual.
 11. Backward fetches from a cursor is supported only when the cursor is declared with `SCROLL`.
 12. OrioleDB doesn't use checksums on data pages and initializing a database
 cluster with `-k` (`--data-checksums`) doesn't have effect on OrioleDB tables.

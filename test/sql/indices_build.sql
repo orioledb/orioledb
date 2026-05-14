@@ -394,7 +394,12 @@ INSERT INTO o_indices8
 	SELECT i, generate_string(i, 10), generate_string(i, 3000)
 	FROM generate_series(3, 5) i;
 CREATE INDEX o_indices8_idx1 ON o_indices8 (val);
+-- Disable parallel maintenance workers so the oversized-key error
+-- originates from the leader; otherwise psql output gets a flaky
+-- "CONTEXT: parallel worker" frame.
+SET max_parallel_maintenance_workers = 0;
 CREATE INDEX o_indices8_idx2 ON o_indices8 (val2);
+RESET max_parallel_maintenance_workers;
 SELECT * FROM o_indices8;
 SELECT val FROM o_indices8 WHERE val > 'a' ORDER BY val;
 
@@ -441,7 +446,9 @@ INSERT INTO o_indices8_ctid
 	SELECT i, generate_string(i, 10), generate_string(i, 3000)
 	FROM generate_series(3, 5) i;
 CREATE INDEX o_indices8_ctid_idx1 ON o_indices8_ctid (val);
+SET max_parallel_maintenance_workers = 0;	-- see o_indices8_idx2 above
 CREATE INDEX o_indices8_ctid_idx2 ON o_indices8_ctid (val2);
+RESET max_parallel_maintenance_workers;
 SELECT * FROM o_indices8_ctid;
 SELECT val FROM o_indices8_ctid WHERE val > 'a' ORDER BY val;
 

@@ -108,10 +108,10 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING orioledb;\n")
 
-		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp1.write("INSERT INTO o_test (val) VALUES ('oldval!');\n")
 		fp1.close()
-		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp2.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
 		fp2.close()
 
@@ -167,10 +167,10 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
 
-		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp1.write("INSERT INTO o_test_heap (val) VALUES ('oldval!');\n")
 		fp1.close()
-		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp2.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp2.close()
 
@@ -227,7 +227,7 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
 
-		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp1.write("BEGIN;\n")
 		fp1.write("INSERT INTO o_test_heap (val) VALUES ('oldval!');\n")
 		fp1.write("SAVEPOINT sp1;\n")
@@ -238,7 +238,7 @@ class RewindXidTest(BaseTest):
 		fp1.write("INSERT INTO o_test_heap (val) VALUES ('oldval!');\n")
 		fp1.write("COMMIT;\n")
 		fp1.close()
-		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp2.write("BEGIN;\n")
 		fp2.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp2.write("SAVEPOINT sp1;\n")
@@ -309,11 +309,11 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
 
-		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp1.write("INSERT INTO o_test (val) VALUES ('oldval!');\n")
 		fp1.write("INSERT INTO o_test_heap (val) VALUES ('oldval!');\n")
 		fp1.close()
-		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp2.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
 		fp2.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp2.close()
@@ -386,7 +386,7 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
 
-		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp1.write("BEGIN;\n")
 		fp1.write("INSERT INTO o_test (val) VALUES ('oldval!');\n")
 		fp1.write("INSERT INTO o_test_heap (val) VALUES ('oldval!');\n")
@@ -401,7 +401,7 @@ class RewindXidTest(BaseTest):
 		fp1.write("INSERT INTO o_test_heap (val) VALUES ('oldval!');\n")
 		fp1.write("COMMIT;\n")
 		fp1.close()
-		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp2.write("BEGIN;\n")
 		fp2.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
 		fp2.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
@@ -489,11 +489,11 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
 
-		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp1.write("INSERT INTO o_test (val) VALUES ('oldval!');\n")
 		fp1.write("INSERT INTO o_test_heap (val) VALUES ('oldval!');\n")
 		fp1.close()
-		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp2.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
 		fp2.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp2.write("INSERT INTO o_test_ddl (val) VALUES ('newval!');\n")
@@ -608,13 +608,13 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
 
-		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp1.write("INSERT INTO o_test (val) VALUES ('oldval!');\n")
 		fp1.write("INSERT INTO o_test_heap (val) VALUES ('oldval!');\n")
 		fp1.write("INSERT INTO o_test_ddl (val) VALUES ('oldval!');\n")
 		fp1.write("INSERT INTO o_test_heap_ddl (val) VALUES ('oldval!');\n")
 		fp1.close()
-		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp2.write("INSERT INTO o_test (val) VALUES ('newval!');\n")
 		fp2.write("INSERT INTO o_test_heap (val) VALUES ('newval!');\n")
 		fp2.write("INSERT INTO o_test_ddl (val) VALUES ('newval!');\n")
@@ -715,11 +715,11 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
 
-		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp1.write("INSERT INTO o_test_ddl (val) VALUES ('oldval!');\n")
 		fp1.write("INSERT INTO o_test_heap_ddl (val) VALUES ('oldval!');\n")
 		fp1.close()
-		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp2.write("INSERT INTO o_test_ddl (val) VALUES ('newval!');\n")
 		fp2.write("INSERT INTO o_test_heap_ddl (val) VALUES ('newval!');\n")
 		fp2.close()
@@ -809,11 +809,11 @@ class RewindXidTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING heap;\n")
 
-		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp1 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp1.write("INSERT INTO o_test_ddl (val) VALUES ('oldval!');\n")
 		fp1.write("INSERT INTO o_test_heap_ddl (val) VALUES ('oldval!');\n")
 		fp1.close()
-		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete_on_close=False)
+		fp2 = tempfile.NamedTemporaryFile(mode='wt', delete=False)
 		fp2.write("INSERT INTO o_test_ddl (val) VALUES ('newval!');\n")
 		fp2.write("INSERT INTO o_test_heap_ddl (val) VALUES ('newval!');\n")
 		fp2.close()

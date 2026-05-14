@@ -88,16 +88,6 @@ o_range_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	o_range->rngsubtype = rangeform->rngsubtype;
 	o_range->rngsubopc = rangeform->rngsubopc;
 	o_range->rngcollation = rangeform->rngcollation;
-	custom_type_add_if_needed(key->common.datoid, o_range->rngsubtype,
-							  key->common.lsn);
-	o_type_cache_add_if_needed(key->common.datoid, o_range->rngsubtype,
-							   key->common.lsn, NULL);
-	o_opclass_cache_add_if_needed(key->common.datoid, o_range->rngsubopc,
-								  key->common.lsn, NULL);
-	if (OidIsValid(o_range->rngcollation))
-		o_collation_cache_add_if_needed(key->common.datoid,
-										o_range->rngcollation, key->common.lsn,
-										NULL);
 
 	MemoryContextSwitchTo(prev_context);
 	ReleaseSysCache(rangetup);
@@ -155,31 +145,6 @@ o_range_cache_search_htup(TupleDesc tupdesc, Oid rngtypid)
 	return result;
 }
 
-void
-o_range_cache_add_rngsubopc(Oid datoid, Oid rngtypid, XLogRecPtr insert_lsn)
-{
-	ORange	   *o_range;
-	XLogRecPtr	sys_lsn;
-	Oid			sys_datoid;
-	OClassArg	class_arg = {.sys_table = true};
-	Oid			btree_opf;
-	Oid			btree_opintype;
-
-	o_sys_cache_set_datoid_lsn(&sys_lsn, &sys_datoid);
-	o_range =
-		o_range_cache_search(datoid, rngtypid, insert_lsn, range_cache->nkeys);
-	Assert(o_range);
-	o_class_cache_add_if_needed(sys_datoid, OperatorClassRelationId, sys_lsn,
-								(Pointer) &class_arg);
-	o_class_cache_add_if_needed(sys_datoid, AccessMethodProcedureRelationId,
-								sys_lsn, (Pointer) &class_arg);
-	btree_opf = get_opclass_family(o_range->rngsubopc);
-	btree_opintype = get_opclass_input_type(o_range->rngsubopc);
-	o_amproc_cache_add_if_needed(datoid, btree_opf, btree_opintype,
-								 btree_opintype, BTORDER_PROC, insert_lsn,
-								 NULL);
-}
-
 static OSysCache *multirange_cache = NULL;
 
 static void o_multirange_cache_free_entry(Pointer entry);
@@ -230,8 +195,6 @@ o_multirange_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	}
 
 	o_multirange->rngtypid = rangeform->rngtypid;
-	custom_type_add_if_needed(key->common.datoid, o_multirange->rngtypid,
-							  key->common.lsn);
 
 	MemoryContextSwitchTo(prev_context);
 	ReleaseSysCache(rangetup);

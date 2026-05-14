@@ -652,24 +652,20 @@ class EvictionTest(BaseTest):
 		node = self.node
 		node.append_conf(
 		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
-		    "orioledb.main_buffers = 8MB\n"
 		    "checkpoint_timeout = 86400\n"
 		    "max_wal_size = 1GB\n"
+		    "orioledb.temp_buffers = 1MB\n"
+		    "orioledb.debug_disable_pools_limit = true\n"
 		    "orioledb.debug_disable_bgwriter = true\n")
 		node.start()
 
 		node.safe_psql("""
 			CREATE EXTENSION orioledb;
-			CREATE TABLE o_test (
-				key SERIAL NOT NULL,
-				val int NOT NULL,
-				PRIMARY KEY (key)
-			) USING orioledb;
-			CREATE UNIQUE INDEX o_test_ix2 ON o_test (key);
-			CREATE UNIQUE INDEX o_test_ix3 ON o_test (key);
-			CREATE UNIQUE INDEX o_test_ix4 ON o_test (key);
 		""")
 		con1 = node.connect()
+
+		# Create o_evicted tables FIRST so their pages are older
+		# and will be evicted first by the clock sweep algorithm
 		con1.execute("""
 			CREATE TEMP TABLE o_evicted (
 				key SERIAL NOT NULL,
@@ -690,33 +686,69 @@ class EvictionTest(BaseTest):
 		)
 		con1.commit()
 
+		# Verify initial data - but note this touches o_evicted pages
 		self.assertEqual(
 		    con1.execute("SELECT count(*) FROM o_evicted;")[0][0], 500)
 		self.assertEqual(
 		    con1.execute("SELECT count(*) FROM o_evicted_empty;")[0][0], 0)
+		con1.commit()
 
-		n = 250000
+		# Create o_test AFTER o_evicted so o_evicted pages have lower usage counts
+		con1.execute("""
+			CREATE TEMP TABLE o_test (
+				key SERIAL NOT NULL,
+				val int NOT NULL,
+				PRIMARY KEY (key)
+			) USING orioledb;
+			CREATE UNIQUE INDEX o_test_ix2 ON o_test (key);
+			CREATE UNIQUE INDEX o_test_ix3 ON o_test (key);
+			CREATE UNIQUE INDEX o_test_ix4 ON o_test (key);
+		""")
+		con1.commit()
+
+		# Helper to check if a table is evicted
+		# Note: checking orioledb_tbl_structure may reload the table
+		def is_evicted(rel):
+			result = con1.execute(
+			    f"SELECT orioledb_tbl_structure('{rel}'::regclass, 'e');"
+			)[0][0]
+			# Check if "not loaded" appears anywhere in the output
+			return INDEX_NOT_LOADED_TMPLT.format(relname=rel) in result
+
+		# For local page pool, eviction happens synchronously during INSERT.
+		# Insert data until both tables are evicted. For o_evicted (which has
+		# data), the root page can only be evicted after all leaf pages are
+		# written to disk, so we need many eviction cycles.
 		step = 1000
-		for i in range(1, n, step):
+		max_iterations = 2000  # Safety limit
+		i = 0
+		evicted = False
+		while not evicted and i < max_iterations:
 			con1.execute(
 			    "INSERT INTO o_test (val)\n"
 			    " (SELECT val FROM generate_series(%d, %d, 1) val);\n" %
-			    (i, i + step - 1))
+			    (i * step + 1, (i + 1) * step))
 			con1.commit()
+			i += 1
+			# Check every 100 iterations to avoid overhead
+			if i % 100 == 0:
+				evicted = is_evicted('o_evicted') and is_evicted(
+				    'o_evicted_empty')
 
-		self.assertTrue(
-		    self.wait_eviction(
-		        con1,
-		        "SELECT COUNT(*) FROM (SELECT * FROM o_test ORDER BY key) x;",
-		        ('o_evicted', 'o_evicted_empty')))
+		# Final check
+		evicted = is_evicted('o_evicted') and is_evicted('o_evicted_empty')
+		self.assertTrue(evicted,
+		                "Tables should be evicted after filling the pool")
 
 		try:
+			# Verify data is still accessible (will reload from disk)
 			self.assertEqual(
 			    con1.execute("SELECT count(*) FROM o_evicted;")[0][0], 500)
 			self.assertEqual(
 			    con1.execute("SELECT count(*) FROM o_evicted_empty;")[0][0], 0)
 			con1.commit()
 
+			# After reloading, tables should no longer show as "not loaded"
 			self.assertNotEqual(
 			    con1.execute(
 			        "SELECT orioledb_tbl_structure('o_evicted'::regclass, 'e');"
@@ -728,17 +760,23 @@ class EvictionTest(BaseTest):
 			    )[0][0].split('\n')[0],
 			    INDEX_NOT_LOADED_TMPLT.format(relname='o_evicted_empty'))
 
-			con1.execute(
-			    "INSERT INTO o_test (val)\n"
-			    " (SELECT val FROM generate_series(%d, %d, 1) val);\n" %
-			    (1, n))
-			con1.commit()
+			# Insert more to trigger eviction again
+			i = 0
+			evicted = False
+			while not evicted and i < max_iterations:
+				con1.execute(
+				    "INSERT INTO o_test (val)\n"
+				    " (SELECT val FROM generate_series(%d, %d, 1) val);\n" %
+				    (i * step + 1, (i + 1) * step))
+				con1.commit()
+				i += 1
+				if i % 100 == 0:
+					evicted = is_evicted('o_evicted') and is_evicted(
+					    'o_evicted_empty')
 
-			self.assertTrue(
-			    self.wait_eviction(
-			        con1,
-			        "SELECT COUNT(*) FROM (SELECT * FROM o_test ORDER BY key) x;",
-			        ('o_evicted', 'o_evicted_empty')))
+			# Final check
+			evicted = is_evicted('o_evicted') and is_evicted('o_evicted_empty')
+			self.assertTrue(evicted, "Tables should be evicted again")
 		finally:
 			con1.close()
 

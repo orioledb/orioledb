@@ -16,7 +16,6 @@
 
 #include "orioledb.h"
 
-#include "access/hash.h"
 #include "btree/btree.h"
 #include "btree/modify.h"
 #include "catalog/o_sys_cache.h"
@@ -27,13 +26,16 @@
 #include "tuple/toast.h"
 #include "utils/planner.h"
 
+#include "access/hash.h"
 #include "access/heaptoast.h"
+#include "access/relation.h"
 #include "commands/defrem.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_amop.h"
 #include "catalog/pg_amproc.h"
 #include "catalog/pg_authid.h"
 #include "catalog/pg_collation.h"
+#include "catalog/pg_database.h"
 #include "catalog/pg_enum.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_operator.h"
@@ -45,6 +47,7 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "utils/builtins.h"
+#include "utils/fmgroids.h"
 #include "utils/fmgrtab.h"
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
@@ -888,14 +891,12 @@ o_sys_cache_add_if_needed(OSysCache *sys_cache, OSysCacheKey *key, Pointer arg)
 {
 	Pointer		entry = NULL;
 	bool		inserted PG_USED_FOR_ASSERTS_ONLY;
-	bool		found = false;
 
 	o_sys_cache_lock(sys_cache, key, AccessExclusiveLock);
 
 	entry = o_sys_cache_search(sys_cache, sys_cache->nkeys, key);
-	found = entry != NULL;
 
-	if (found)
+	if (entry != NULL)
 	{
 		o_sys_cache_unlock(sys_cache, key, AccessExclusiveLock);
 		return;
@@ -1308,83 +1309,230 @@ oSysCacheToastGetTupleDataSize(OTuple tuple, void *arg)
 	return common->dataLength;
 }
 
+static void
+o_cache_type_opclasses(Oid datoid, Oid typoid,
+					   Oid btree_opclass, Oid hash_opclass,
+					   XLogRecPtr insert_lsn,
+					   List **processed)
+{
+	if (!OidIsValid(btree_opclass))
+		btree_opclass = GetDefaultOpClass(typoid, BTREE_AM_OID);
+	if (OidIsValid(btree_opclass))
+	{
+		XLogRecPtr	sys_lsn;
+		Oid			sys_datoid;
+		Oid			btree_opf;
+		Oid			btree_opintype;
+		Oid			ssupOid;
+		Oid			cmpOid;
+
+		btree_opf = get_opclass_family(btree_opclass);
+		btree_opintype = get_opclass_input_type(btree_opclass);
+
+		o_sys_cache_set_datoid_lsn(&sys_lsn, &sys_datoid);
+		o_class_cache_add_if_needed(sys_datoid, OperatorClassRelationId, sys_lsn,
+									NULL);
+		ssupOid = get_opfamily_proc(btree_opf, btree_opintype, btree_opintype,
+									BTSORTSUPPORT_PROC);
+		if (OidIsValid(ssupOid))
+			o_proc_cache_validate_add(datoid, ssupOid, InvalidOid, "sort", "field",
+									  processed);
+		cmpOid = get_opfamily_proc(btree_opf, btree_opintype, btree_opintype,
+								   BTORDER_PROC);
+		o_proc_cache_validate_add(datoid, cmpOid, InvalidOid, "comparsion",
+								  "field", processed);
+		o_opclass_cache_add_if_needed(datoid, btree_opclass, insert_lsn, NULL);
+		o_class_cache_add_if_needed(sys_datoid, AccessMethodProcedureRelationId,
+									sys_lsn, NULL);
+		o_amproc_cache_add_if_needed(datoid, btree_opf, btree_opintype,
+									 btree_opintype, BTORDER_PROC, insert_lsn,
+									 NULL);
+		o_class_cache_add_if_needed(sys_datoid, AccessMethodOperatorRelationId,
+									sys_lsn, NULL);
+
+		if (get_opfamily_member(btree_opf, btree_opintype, btree_opintype,
+								BTLessStrategyNumber))
+			o_amop_strat_cache_add_if_needed(datoid, btree_opf, btree_opintype,
+											 btree_opintype, BTLessStrategyNumber,
+											 insert_lsn, NULL);
+		if (get_opfamily_member(btree_opf, btree_opintype, btree_opintype,
+								BTLessEqualStrategyNumber))
+			o_amop_strat_cache_add_if_needed(datoid, btree_opf, btree_opintype,
+											 btree_opintype,
+											 BTLessEqualStrategyNumber, insert_lsn,
+											 NULL);
+		if (get_opfamily_member(btree_opf, btree_opintype, btree_opintype,
+								BTEqualStrategyNumber))
+			o_amop_strat_cache_add_if_needed(datoid, btree_opf, btree_opintype,
+											 btree_opintype, BTEqualStrategyNumber,
+											 insert_lsn, NULL);
+	}
+	if (!OidIsValid(hash_opclass))
+		hash_opclass = GetDefaultOpClass(typoid, HASH_AM_OID);
+	if (OidIsValid(hash_opclass))
+	{
+		XLogRecPtr	sys_lsn;
+		Oid			sys_datoid;
+		Oid			hash_opf;
+		Oid			hash_opintype;
+
+		hash_opf = get_opclass_family(hash_opclass);
+		hash_opintype = get_opclass_input_type(hash_opclass);
+
+		o_sys_cache_set_datoid_lsn(&sys_lsn, &sys_datoid);
+		o_class_cache_add_if_needed(sys_datoid, OperatorClassRelationId, sys_lsn,
+									NULL);
+		o_opclass_cache_add_if_needed(datoid, hash_opclass, insert_lsn, NULL);
+		o_class_cache_add_if_needed(sys_datoid,
+									AccessMethodProcedureRelationId, sys_lsn,
+									NULL);
+		o_amproc_cache_add_if_needed(datoid, hash_opf, hash_opintype,
+									 hash_opintype, HASHSTANDARD_PROC,
+									 insert_lsn, NULL);
+		o_amproc_cache_add_if_needed(datoid, hash_opf, hash_opintype,
+									 hash_opintype, HASHEXTENDED_PROC,
+									 insert_lsn, NULL);
+
+		o_class_cache_add_if_needed(sys_datoid, AccessMethodOperatorRelationId,
+									sys_lsn, NULL);
+		o_amop_strat_cache_add_if_needed(datoid, hash_opf, hash_opintype,
+										 hash_opintype, HTEqualStrategyNumber,
+										 insert_lsn, NULL);
+	}
+}
+
 void
-custom_type_add_if_needed(Oid datoid, Oid typoid, XLogRecPtr insert_lsn)
+o_cache_type(Oid datoid, Oid typoid, Oid opclass, XLogRecPtr insert_lsn)
+{
+	List	   *processed = NIL;
+
+	o_cache_type_safe(datoid, typoid, opclass, insert_lsn, &processed);
+	list_free_deep(processed);
+}
+
+void
+o_cache_type_safe(Oid datoid, Oid typoid, Oid opclass, XLogRecPtr insert_lsn,
+				  List **processed)
 {
 	Form_pg_type typeform;
 	HeapTuple	tuple = NULL;
+	List	   *oids;
+	MemoryContext oldcxt;
+
+	if (!OidIsValid(opclass))
+		opclass = GetDefaultOpClass(typoid, BTREE_AM_OID);
+
+	oldcxt = MemoryContextSwitchTo(CurTransactionContext);
+	/* cppcheck-suppress unknownEvaluationOrder */
+	oids = list_make2_oid(typoid, opclass);
+	Assert(processed);
+	if (*processed && list_member(*processed, oids))
+		return;
+	else
+	{
+		(*processed) = lappend(*processed, oids);
+	}
+	MemoryContextSwitchTo(oldcxt);
 
 	tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typoid));
 	Assert(tuple);
 	typeform = (Form_pg_type) GETSTRUCT(tuple);
 
+	o_type_cache_add_if_needed(datoid, typoid, insert_lsn, NULL);
+	o_cache_type_opclasses(datoid, typoid, opclass, InvalidOid, insert_lsn,
+						   processed);
 	switch (typeform->typtype)
 	{
 		case TYPTYPE_COMPOSITE:
 			if (typeform->typtypmod == -1)
 			{
-				OClassArg	arg = {.sys_table = false};
+				int			i;
+				Relation	rel;
 
-				o_class_cache_add_if_needed(datoid, typeform->typrelid,
-											insert_lsn, (Pointer) &arg);
-				o_type_cache_add_if_needed(datoid, typeform->oid, insert_lsn,
-										   NULL);
+				o_class_cache_add_if_needed(datoid, typeform->typrelid, insert_lsn,
+											NULL);
+				rel = relation_open(typeform->typrelid, AccessShareLock);
+				for (i = 0; i < rel->rd_att->natts; i++)
+				{
+					FormData_pg_attribute *typcache_attr;
+
+					typcache_attr = &rel->rd_att->attrs[i];
+					if (!typcache_attr->attisdropped)
+						o_cache_type_safe(datoid, typcache_attr->atttypid,
+										  InvalidOid, insert_lsn,
+										  processed);
+				}
+				relation_close(rel, AccessShareLock);
 			}
 			break;
 		case TYPTYPE_RANGE:
 			{
+				HeapTuple	rangetup;
+				Form_pg_range rangeform;
 				XLogRecPtr	sys_lsn;
 				Oid			sys_datoid;
-				OClassArg	class_arg = {.sys_table = true};
 
 				o_sys_cache_set_datoid_lsn(&sys_lsn, &sys_datoid);
 				o_class_cache_add_if_needed(sys_datoid, RangeRelationId,
-											sys_lsn, (Pointer) &class_arg);
-				o_range_cache_add_if_needed(datoid, typeform->oid, insert_lsn,
+											sys_lsn, NULL);
+				o_range_cache_add_if_needed(datoid, typoid, insert_lsn,
 											NULL);
-				o_type_cache_add_if_needed(datoid, typeform->oid, insert_lsn,
-										   NULL);
-				o_range_cache_add_rngsubopc(datoid, typeform->oid, insert_lsn);
+				rangetup = SearchSysCache1(RANGETYPE, ObjectIdGetDatum(typoid));
+				if (!HeapTupleIsValid(rangetup))
+					elog(ERROR, "cache lookup failed for range (%u)", typoid);
+				rangeform = (Form_pg_range) GETSTRUCT(rangetup);
+				o_cache_type_safe(datoid, rangeform->rngsubtype,
+								  rangeform->rngsubopc, insert_lsn, processed);
+				if (OidIsValid(rangeform->rngcollation))
+					o_collation_cache_add_if_needed(datoid,
+													rangeform->rngcollation,
+													insert_lsn,
+													NULL);
+				ReleaseSysCache(rangetup);
 			}
 			break;
 		case TYPTYPE_MULTIRANGE:
 			{
 				XLogRecPtr	sys_lsn;
 				Oid			sys_datoid;
-				OClassArg	class_arg = {.sys_table = true};
+				HeapTuple	multirangetup;
+				Form_pg_range multirangeform;
 
+				multirangetup = SearchSysCache1(RANGEMULTIRANGE,
+												ObjectIdGetDatum(typoid));
+				if (!HeapTupleIsValid(multirangetup))
+					elog(ERROR, "cache lookup failed for multirange (%u)", typoid);
+				multirangeform = (Form_pg_range) GETSTRUCT(multirangetup);
 				o_sys_cache_set_datoid_lsn(&sys_lsn, &sys_datoid);
-				o_class_cache_add_if_needed(sys_datoid, RangeRelationId,
-											sys_lsn, (Pointer) &class_arg);
-				o_multirange_cache_add_if_needed(datoid, typeform->oid,
-												 insert_lsn, NULL);
-				o_type_cache_add_if_needed(datoid, typeform->oid, insert_lsn,
-										   NULL);
+				o_class_cache_add_if_needed(sys_datoid, RangeRelationId, sys_lsn,
+											NULL);
+				o_multirange_cache_add_if_needed(datoid, typoid, insert_lsn, NULL);
+				o_cache_type_safe(datoid, multirangeform->rngtypid,
+								  multirangeform->rngsubopc, insert_lsn,
+								  processed);
+				ReleaseSysCache(multirangetup);
 			}
 			break;
 		case TYPTYPE_ENUM:
 			{
 				XLogRecPtr	sys_lsn;
 				Oid			sys_datoid;
-				OClassArg	class_arg = {.sys_table = true};
 
 				o_sys_cache_set_datoid_lsn(&sys_lsn, &sys_datoid);
 				o_class_cache_add_if_needed(sys_datoid, EnumRelationId, sys_lsn,
-											(Pointer) &class_arg);
-				o_type_cache_add_if_needed(datoid, typeform->oid, insert_lsn,
-										   NULL);
-				o_enum_cache_add_all(datoid, typeform->oid, insert_lsn);
+											NULL);
+				o_enum_cache_add_all(datoid, typoid, insert_lsn);
 			}
 			break;
 		case TYPTYPE_DOMAIN:
-			custom_type_add_if_needed(datoid, typeform->typbasetype,
-									  insert_lsn);
+			o_cache_type_safe(datoid, typeform->typbasetype, InvalidOid,
+							  insert_lsn, processed);
 			break;
 		default:
 			if (typeform->typcategory == TYPCATEGORY_ARRAY)
 			{
-				o_composite_type_element_save(datoid, typeform->typelem,
-											  insert_lsn);
+				o_cache_type_safe(datoid, typeform->typelem, InvalidOid,
+								  insert_lsn, processed);
 			}
 			break;
 	}
@@ -1393,11 +1541,242 @@ custom_type_add_if_needed(Oid datoid, Oid typoid, XLogRecPtr insert_lsn)
 }
 
 /*
+ * Find a hash function for the type given its btree opclass.  Looks up the
+ * equality operator of the btree opclass, then searches for a hash opclass
+ * that uses the same equality operator, and returns the hash procedure from
+ * that hash opclass.  Returns InvalidOid if no matching hash procedure exists.
+ */
+Oid
+o_get_hash_proc_by_btree_opclass(Oid btreeOpclass)
+{
+	Oid			btreeOpfamily;
+	Oid			inputType;
+	Oid			equalOp;
+	RegProcedure result;
+
+	btreeOpfamily = get_opclass_family(btreeOpclass);
+	inputType = get_opclass_input_type(btreeOpclass);
+	Assert(OidIsValid(btreeOpfamily));
+	equalOp = get_opfamily_member(btreeOpfamily, inputType, inputType, BTEqualStrategyNumber);
+	if (!OidIsValid(equalOp))
+		return InvalidOid;
+
+	if (get_op_hash_functions(equalOp, &result, NULL))
+		return result;
+	else
+		return InvalidOid;
+}
+
+bool
+custom_type_try_add_hash_fn_if_needed(Oid typoid, Oid opclass, List **processed)
+{
+	bool		hashable = true;
+	Form_pg_type typeform;
+	HeapTuple	tuple = NULL;
+	Oid			hash_fn_oid;
+
+	tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typoid));
+	Assert(tuple);
+	typeform = (Form_pg_type) GETSTRUCT(tuple);
+
+	hash_fn_oid = o_get_hash_proc_by_btree_opclass(opclass);
+	hashable = OidIsValid(hash_fn_oid);
+
+	if (hashable)
+	{
+		o_validate_function_by_oid(hash_fn_oid,
+								   " should be used as hash function "
+								   "for type of column used in orioledb index");
+		o_collect_function_by_oid(hash_fn_oid, InvalidOid, processed);
+		switch (typeform->typtype)
+		{
+			case TYPTYPE_COMPOSITE:
+				if (typeform->typtypmod == -1)
+				{
+					int			i;
+					Relation	rel;
+
+					rel = relation_open(typeform->typrelid, AccessShareLock);
+					for (i = 0; i < rel->rd_att->natts; i++)
+					{
+						FormData_pg_attribute *typcache_attr;
+
+						typcache_attr = &rel->rd_att->attrs[i];
+						if (!typcache_attr->attisdropped)
+						{
+							typoid = typcache_attr->atttypid;
+							opclass = GetDefaultOpClass(typoid, BTREE_AM_OID);
+							hashable = custom_type_try_add_hash_fn_if_needed(typoid, opclass, processed);
+						}
+
+						if (!hashable)
+							break;
+					}
+					relation_close(rel, AccessShareLock);
+				}
+				break;
+			case TYPTYPE_RANGE:
+				{
+					HeapTuple	rangetup;
+					Form_pg_range rangeform;
+
+					rangetup = SearchSysCache1(RANGETYPE, ObjectIdGetDatum(typoid));
+					if (!HeapTupleIsValid(rangetup))
+						elog(ERROR, "cache lookup failed for range (%u)", typoid);
+					rangeform = (Form_pg_range) GETSTRUCT(rangetup);
+
+					typoid = rangeform->rngsubtype;
+					opclass = rangeform->rngsubopc;
+					hashable = custom_type_try_add_hash_fn_if_needed(typoid, opclass, processed);
+					ReleaseSysCache(rangetup);
+				}
+				break;
+			case TYPTYPE_MULTIRANGE:
+				{
+					HeapTuple	rangetup;
+					Form_pg_range rangeform;
+
+					rangetup = SearchSysCache1(RANGEMULTIRANGE,
+											   ObjectIdGetDatum(typoid));
+					if (!HeapTupleIsValid(rangetup))
+						elog(ERROR, "cache lookup failed for range (%u)", typoid);
+					rangeform = (Form_pg_range) GETSTRUCT(rangetup);
+
+					typoid = rangeform->rngsubtype;
+					opclass = rangeform->rngsubopc;
+					hashable = custom_type_try_add_hash_fn_if_needed(typoid, opclass, processed);
+					ReleaseSysCache(rangetup);
+				}
+				break;
+			case TYPTYPE_ENUM:
+				break;
+			case TYPTYPE_DOMAIN:
+				{
+					typoid = typeform->typbasetype;
+					opclass = GetDefaultOpClass(typoid, BTREE_AM_OID);
+					hashable = custom_type_try_add_hash_fn_if_needed(typoid, opclass, processed);
+				}
+				break;
+			default:
+				if (typeform->typcategory == TYPCATEGORY_ARRAY)
+				{
+					typoid = typeform->typelem;
+					opclass = GetDefaultOpClass(typoid, BTREE_AM_OID);
+					hashable = custom_type_try_add_hash_fn_if_needed(typoid, opclass, processed);
+				}
+				break;
+		}
+	}
+	if (tuple != NULL)
+		ReleaseSysCache(tuple);
+	return hashable;
+}
+
+void
+o_validate_composite_type(Oid typoid, Oid opclass)
+{
+	Form_pg_type typeform;
+	HeapTuple	tuple = NULL;
+
+	tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typoid));
+	Assert(tuple);
+	typeform = (Form_pg_type) GETSTRUCT(tuple);
+
+	if (OidIsValid(opclass))
+	{
+		switch (typeform->typtype)
+		{
+			case TYPTYPE_COMPOSITE:
+				if (typeform->typtypmod == -1)
+				{
+					int			i;
+					Relation	rel;
+
+					rel = relation_open(typeform->typrelid, AccessShareLock);
+					for (i = 0; i < rel->rd_att->natts; i++)
+					{
+						FormData_pg_attribute *typcache_attr;
+
+						typcache_attr = &rel->rd_att->attrs[i];
+						if (!typcache_attr->attisdropped)
+						{
+							typoid = typcache_attr->atttypid;
+							opclass = GetDefaultOpClass(typoid, BTREE_AM_OID);
+							o_validate_composite_type(typoid, opclass);
+						}
+					}
+					relation_close(rel, AccessShareLock);
+				}
+				break;
+			case TYPTYPE_RANGE:
+				{
+					HeapTuple	rangetup;
+					Form_pg_range rangeform;
+
+					rangetup = SearchSysCache1(RANGETYPE, ObjectIdGetDatum(typoid));
+					if (!HeapTupleIsValid(rangetup))
+						elog(ERROR, "cache lookup failed for range (%u)", typoid);
+					rangeform = (Form_pg_range) GETSTRUCT(rangetup);
+
+					typoid = rangeform->rngsubtype;
+					opclass = rangeform->rngsubopc;
+					o_validate_composite_type(typoid, opclass);
+					ReleaseSysCache(rangetup);
+				}
+				break;
+			case TYPTYPE_MULTIRANGE:
+				{
+					HeapTuple	rangetup;
+					Form_pg_range rangeform;
+
+					rangetup = SearchSysCache1(RANGEMULTIRANGE,
+											   ObjectIdGetDatum(typoid));
+					if (!HeapTupleIsValid(rangetup))
+						elog(ERROR, "cache lookup failed for range (%u)", typoid);
+					rangeform = (Form_pg_range) GETSTRUCT(rangetup);
+
+					typoid = rangeform->rngsubtype;
+					opclass = rangeform->rngsubopc;
+					o_validate_composite_type(typoid, opclass);
+					ReleaseSysCache(rangetup);
+				}
+				break;
+			case TYPTYPE_ENUM:
+				break;
+			case TYPTYPE_DOMAIN:
+				{
+					typoid = typeform->typbasetype;
+					opclass = GetDefaultOpClass(typoid, BTREE_AM_OID);
+					o_validate_composite_type(typoid, opclass);
+				}
+				break;
+			default:
+				if (typeform->typcategory == TYPCATEGORY_ARRAY)
+				{
+					typoid = typeform->typelem;
+					opclass = GetDefaultOpClass(typoid, BTREE_AM_OID);
+					o_validate_composite_type(typoid, opclass);
+				}
+				break;
+		}
+	}
+	if (tuple != NULL)
+		ReleaseSysCache(tuple);
+
+	if (!OidIsValid(opclass))
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_FUNCTION),
+				 errmsg("could not identify a comparison function for type \"%s\" used in btree index field",
+						format_type_be(typoid)),
+				 errdetail("not allowing it here, because any inserts in such index will break recovery for orioledb tables")));
+}
+
+/*
  * Inserts type elements for all fields of the o_table to the orioledb sys
  * cache.
  */
 void
-custom_types_add_all(OTable *o_table, OTableIndex *o_table_index)
+o_cache_index_types(OTable *o_table, OTableIndex *o_table_index)
 {
 	int			cur_field;
 	XLogRecPtr	cur_lsn;
@@ -1407,93 +1786,58 @@ custom_types_add_all(OTable *o_table, OTableIndex *o_table_index)
 	for (cur_field = 0; cur_field < o_table_index->nfields; cur_field++)
 	{
 		int			attnum = o_table_index->fields[cur_field].attnum;
+		Oid			opclass = o_table_index->fields[cur_field].opclass;
 		Oid			typid;
+		List	   *processed = NIL;
 
 		if (attnum != EXPR_ATTNUM)
 			typid = o_table->fields[attnum].typid;
 		else
 			typid = o_table_index->exprfields[expr_field++].typid;
-		custom_type_add_if_needed(o_table->oids.datoid, typid, cur_lsn);
+		o_cache_type_safe(o_table->oids.datoid, typid, opclass, cur_lsn,
+						  &processed);
+		list_free_deep(processed);
 	}
+
 }
 
+/*
+ * Inserts opclasses for all fields of the o_table to the opclass B-tree.
+ */
 void
-o_composite_type_element_save(Oid datoid, Oid typoid, XLogRecPtr insert_lsn)
+o_cache_table_types(OTable *o_table)
 {
-	Oid			default_btree_opclass;
-	Oid			default_hash_opclass;
+	XLogRecPtr	cur_lsn;
+	Oid			datoid;
+	XLogRecPtr	sys_lsn;
+	Oid			sys_datoid;
+	List	   *processed = NIL;
 
-	custom_type_add_if_needed(datoid, typoid, insert_lsn);
-	o_type_cache_add_if_needed(datoid, typoid, insert_lsn, NULL);
-	default_btree_opclass = o_type_cache_default_opclass(typoid, BTREE_AM_OID);
-	if (OidIsValid(default_btree_opclass))
-	{
-		XLogRecPtr	sys_lsn;
-		Oid			sys_datoid;
-		OClassArg	class_arg = {.sys_table = true};
-		Oid			btree_opf;
-		Oid			btree_opintype;
+	o_sys_cache_set_datoid_lsn(&sys_lsn, &sys_datoid);
+	o_class_cache_add_if_needed(sys_datoid, OperatorClassRelationId, sys_lsn,
+								NULL);
 
-		btree_opf = get_opclass_family(default_btree_opclass);
-		btree_opintype = get_opclass_input_type(default_btree_opclass);
+	o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
+	datoid = o_table->oids.datoid;
 
-		o_sys_cache_set_datoid_lsn(&sys_lsn, &sys_datoid);
-		o_class_cache_add_if_needed(sys_datoid, OperatorClassRelationId,
-									sys_lsn, (Pointer) &class_arg);
-		o_opclass_cache_add_if_needed(datoid, default_btree_opclass,
-									  insert_lsn, NULL);
-		o_class_cache_add_if_needed(sys_datoid,
-									AccessMethodProcedureRelationId, sys_lsn,
-									(Pointer) &class_arg);
-		o_amproc_cache_add_if_needed(datoid, btree_opf, btree_opintype,
-									 btree_opintype, BTORDER_PROC, insert_lsn,
-									 NULL);
-		o_class_cache_add_if_needed(sys_datoid, AccessMethodOperatorRelationId,
-									sys_lsn, (Pointer) &class_arg);
-		o_amop_strat_cache_add_if_needed(datoid, btree_opf, btree_opintype,
-										 btree_opintype, BTLessStrategyNumber,
-										 insert_lsn, NULL);
-		o_amop_strat_cache_add_if_needed(datoid, btree_opf, btree_opintype,
-										 btree_opintype,
-										 BTLessEqualStrategyNumber, insert_lsn,
-										 NULL);
-		o_amop_strat_cache_add_if_needed(datoid, btree_opf, btree_opintype,
-										 btree_opintype, BTEqualStrategyNumber,
-										 insert_lsn, NULL);
-	}
-	default_hash_opclass = o_type_cache_default_opclass(typoid, HASH_AM_OID);
-	if (OidIsValid(default_hash_opclass))
-	{
-		XLogRecPtr	sys_lsn;
-		Oid			sys_datoid;
-		OClassArg	class_arg = {.sys_table = true};
-		Oid			hash_opf;
-		Oid			hash_opintype;
+	o_database_cache_add_if_needed(Template1DbOid, Template1DbOid, cur_lsn, NULL);
 
-		hash_opf = get_opclass_family(default_hash_opclass);
-		hash_opintype = get_opclass_input_type(default_hash_opclass);
+	/*
+	 * Inserts opclasses for TOAST index.
+	 */
+	o_cache_type(datoid, INT2OID, InvalidOid, cur_lsn);
+	o_collect_function_by_oid(F_HASHINT2, InvalidOid, &processed);
 
-		o_sys_cache_set_datoid_lsn(&sys_lsn, &sys_datoid);
-		o_class_cache_add_if_needed(sys_datoid, OperatorClassRelationId,
-									sys_lsn, (Pointer) &class_arg);
-		o_opclass_cache_add_if_needed(datoid, default_hash_opclass, insert_lsn,
-									  NULL);
-		o_class_cache_add_if_needed(sys_datoid,
-									AccessMethodProcedureRelationId, sys_lsn,
-									(Pointer) &class_arg);
-		o_amproc_cache_add_if_needed(datoid, hash_opf, hash_opintype,
-									 hash_opintype, HASHSTANDARD_PROC,
-									 insert_lsn, NULL);
-		o_amproc_cache_add_if_needed(datoid, hash_opf, hash_opintype,
-									 hash_opintype, HASHEXTENDED_PROC,
-									 insert_lsn, NULL);
+	o_cache_type(datoid, INT4OID, InvalidOid, cur_lsn);
+	o_collect_function_by_oid(F_HASHINT4, InvalidOid, &processed);
 
-		o_class_cache_add_if_needed(sys_datoid, AccessMethodOperatorRelationId,
-									sys_lsn, (Pointer) &class_arg);
-		o_amop_strat_cache_add_if_needed(datoid, hash_opf, hash_opintype,
-										 hash_opintype, HTEqualStrategyNumber,
-										 insert_lsn, NULL);
-	}
+	/*
+	 * Inserts opclass for default index.
+	 */
+	Assert(o_table->nindices == 0);
+	o_cache_type(datoid, TIDOID, InvalidOid, cur_lsn);
+	o_collect_function_by_oid(F_HASHTID, InvalidOid, &processed);
+	list_free_deep(processed);
 }
 
 static CatCTup *

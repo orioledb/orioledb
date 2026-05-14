@@ -235,6 +235,16 @@ SELECT id1, id2 FROM o_pk3;
 
 \i 'sql/composite_pk_quals'
 
+-- SAOP / IN regression: is_tuple_valid()'s SK_SEARCHARRAY branch must
+-- translate index attnum -> table attnum so PKs whose column order
+-- differs from the table column order still filter correctly.
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+
 DROP TABLE o_pk3;
 RESET enable_seqscan;
 
@@ -246,7 +256,7 @@ CREATE TABLE o_pk3
 ) USING orioledb;
 SET enable_seqscan = off;
 
-INSERT INTO o_pk3
+INSERT INTO o_pk3 (id1, id2)
 SELECT a, repeat('x', b) || repeat ('y', c)
 FROM
 	generate_series(1, 4) as a,
@@ -256,6 +266,13 @@ SELECT count(*) FROM o_pk3;
 SELECT id1, id2 FROM o_pk3;
 
 \i 'sql/composite_pk_quals'
+
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
 
 DROP TABLE o_pk3;
 RESET enable_seqscan;
@@ -279,6 +296,13 @@ SELECT id1, id2 FROM o_pk3;
 
 \i 'sql/composite_pk_quals'
 
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+
 DROP TABLE o_pk3;
 RESET enable_seqscan;
 
@@ -290,7 +314,7 @@ CREATE TABLE o_pk3
 CREATE UNIQUE INDEX o_pk3_idx ON o_pk3 (id1 DESC, id2 DESC);
 SET enable_seqscan = off;
 
-INSERT INTO o_pk3
+INSERT INTO o_pk3 (id1, id2)
 SELECT a, repeat('x', b) || repeat ('y', c)
 FROM
 	generate_series(1, 4) as a,
@@ -300,6 +324,13 @@ SELECT count(*) FROM o_pk3;
 SELECT id1, id2 FROM o_pk3;
 
 \i 'sql/composite_pk_quals'
+
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
+EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
+SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
 
 DROP TABLE o_pk3;
 RESET enable_seqscan;

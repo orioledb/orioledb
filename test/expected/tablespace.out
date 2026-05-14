@@ -740,6 +740,17 @@ SELECT orioledb_tbl_indices('atable'::regclass);
  
 (1 row)
 
+ALTER TABLE atable SET (fillfactor=80);
+\d+ atable
+                                 Table "tablespace.atable"
+ Column  |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+---------+---------+-----------+----------+---------+---------+--------------+-------------
+ column1 | integer |           | not null |         | plain   |              | 
+Indexes:
+    "anindex" UNIQUE, btree (column1 DESC)
+Tablespace: "regress_tblspace"
+Options: fillfactor=80
+
 DROP TABLE atable;
 DROP DATABASE tblspace_test_db;
 ALTER TABLE ALL IN TABLESPACE regress_tblspace SET TABLESPACE pg_default;

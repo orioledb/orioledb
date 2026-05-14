@@ -97,15 +97,28 @@ static Size main_buffers_offset;
 
 Pointer		o_shared_buffers = NULL;
 OrioleDBPageDesc *page_descs = NULL;
+Page	   *local_ppool_pages = NULL;
+OrioleDBPageDesc *local_ppool_page_descs = NULL;
 
 /* Custom GUC variables */
+int			orioledb_serializable_mode = O_SERIALIZABLE_TABLE_LOCK;
+
+static const struct config_enum_entry serializable_mode_options[] = {
+	{"table_lock", O_SERIALIZABLE_TABLE_LOCK, false},
+	{"error", O_SERIALIZABLE_ERROR, false},
+	{"repeatable_read", O_SERIALIZABLE_REPEATABLE_READ, false},
+	{NULL, 0, false}
+};
+
 static int	main_buffers_guc;
 static int	undo_buffers_guc;
 static int	xid_buffers_guc;
 static int	rewind_buffers_guc;
+static int	temp_buffers_guc;
 int			max_procs;
 Size		orioledb_buffers_size;
 Size		orioledb_buffers_count;
+Size		orioledb_temp_buffers_count;
 Size		page_descs_size;
 Size		undo_circular_buffer_size;
 uint32		undo_buffers_count;
@@ -184,6 +197,7 @@ MemoryContext btree_insert_context = NULL;
 MemoryContext btree_seqscan_context = NULL;
 
 OPagePool	page_pools[OPagePoolTypesCount];
+LocalPagePool local_ppool;
 
 static size_t page_pools_size[OPagePoolTypesCount];
 
@@ -480,6 +494,20 @@ _PG_init(void)
 							 NULL,
 							 NULL);
 
+	DefineCustomEnumVariable("orioledb.serializable",
+							 "How OrioleDB handles SERIALIZABLE isolation.",
+							 "table_lock acquires a coarse ExclusiveLock per touched relation; "
+							 "error rejects SERIALIZABLE transactions; "
+							 "repeatable_read silently downgrades them to REPEATABLE READ.",
+							 &orioledb_serializable_mode,
+							 O_SERIALIZABLE_TABLE_LOCK,
+							 serializable_mode_options,
+							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
 	DefineCustomIntVariable("orioledb.main_buffers",
 							"Size of orioledb engine shared buffers for main data.",
 							NULL,
@@ -531,6 +559,20 @@ _PG_init(void)
 							NULL,
 							NULL,
 							NULL);
+
+	DefineCustomIntVariable("orioledb.temp_buffers",
+							"Size of orioledb engine buffers for temporary tables.",
+							NULL,
+							&temp_buffers_guc,
+							PPOOL_MIN_SIZE * 8,
+							debug_disable_pools_limit ? 1 : PPOOL_MIN_SIZE,
+							INT_MAX,
+							PGC_POSTMASTER,
+							GUC_UNIT_BLOCKS,
+							NULL,
+							NULL,
+							NULL);
+
 
 	DefineCustomRealVariable("orioledb.regular_block_undo_circular_buffer_fraction",
 							 "Fraction of cirucular buffer for block-level undo of regular tables.",
@@ -1074,6 +1116,7 @@ _PG_init(void)
 	main_buffers_count = ((Size) main_buffers_guc * (Size) BLCKSZ) / ORIOLEDB_BLCKSZ;
 	free_tree_buffers_count = ((Size) free_tree_buffers_guc * (Size) BLCKSZ) / ORIOLEDB_BLCKSZ;
 	catalog_buffers_count = ((Size) catalog_buffers_guc * (Size) BLCKSZ) / ORIOLEDB_BLCKSZ;
+	orioledb_temp_buffers_count = ((Size) temp_buffers_guc * (Size) BLCKSZ) / ORIOLEDB_BLCKSZ;
 
 	main_buffers_offset = free_tree_buffers_count + catalog_buffers_count;
 
@@ -1103,23 +1146,25 @@ _PG_init(void)
 	EmitWarningsOnPlaceholders("pg_stat_statements");
 
 	memset(page_pools, 0, OPagePoolTypesCount * sizeof(OPagePool));
-	page_pools_size[OPagePoolFreeTree] = ppool_estimate_space(&page_pools[OPagePoolFreeTree],
-															  0,
-															  free_tree_buffers_count,
-															  debug_disable_pools_limit);
+	page_pools_size[OPagePoolFreeTree] = o_ppool_estimate_space(&page_pools[OPagePoolFreeTree],
+																0,
+																free_tree_buffers_count,
+																debug_disable_pools_limit);
 
-	page_pools_size[OPagePoolCatalog] = ppool_estimate_space(&page_pools[OPagePoolCatalog],
-															 free_tree_buffers_count,
-															 catalog_buffers_count,
-															 debug_disable_pools_limit);
+	page_pools_size[OPagePoolCatalog] = o_ppool_estimate_space(&page_pools[OPagePoolCatalog],
+															   free_tree_buffers_count,
+															   catalog_buffers_count,
+															   debug_disable_pools_limit);
 
-	page_pools_size[OPagePoolMain] = ppool_estimate_space(&page_pools[OPagePoolMain],
-														  main_buffers_offset,
-														  main_buffers_count,
-														  debug_disable_pools_limit);
+	page_pools_size[OPagePoolMain] = o_ppool_estimate_space(&page_pools[OPagePoolMain],
+															main_buffers_offset,
+															main_buffers_count,
+															debug_disable_pools_limit);
 
 	for (i = 0; i < OPagePoolTypesCount; i++)
 		page_pools_size[i] = CACHELINEALIGN(page_pools_size[i]);
+
+	local_ppool_init(&local_ppool);
 
 	if (device_filename)
 	{
@@ -1154,7 +1199,7 @@ _PG_init(void)
 
 	/* Register background writers */
 	for (i = 0; i < bgwriter_num_workers; i++)
-		register_bgwriter();
+		register_bgwriter(i);
 
 	if (enable_rewind)
 		register_rewind_worker();
@@ -1346,7 +1391,7 @@ ppools_shmem_init(Pointer ptr, bool found)
 	page_descs = (OrioleDBPageDesc *) ptr;
 
 	for (i = 0; i < OPagePoolTypesCount; i++)
-		ppool_shmem_init(&page_pools[i], page_pools_ptr[i], found);
+		o_ppool_shmem_init(&page_pools[i], page_pools_ptr[i], found);
 
 	if (!found)
 	{
@@ -1361,12 +1406,7 @@ ppools_shmem_init(Pointer ptr, bool found)
 
 		for (i = 0; i < page_descs_size / sizeof(OrioleDBPageDesc); i++)
 		{
-			page_descs[i].fileExtent.len = InvalidFileExtentLen;
-			page_descs[i].fileExtent.off = InvalidFileExtentOff;
-			ORelOidsSetInvalid(page_descs[i].oids);
-			page_descs[i].ionum = -1;
-			page_descs[i].type = 0;
-			page_descs[i].flags = 0;
+			o_page_desc_init(&page_descs[i]);
 		}
 	}
 }
@@ -1452,6 +1492,17 @@ orioledb_shmem_startup(void)
 	LWLockRelease(AddinShmemInitLock);
 
 	shared_segment_initialized = true;
+}
+
+void
+o_page_desc_init(OrioleDBPageDesc *desc)
+{
+	desc->fileExtent.len = InvalidFileExtentLen;
+	desc->fileExtent.off = InvalidFileExtentOff;
+	ORelOidsSetInvalid(desc->oids);
+	desc->ionum = -1;
+	desc->type = 0;
+	desc->flags = 0;
 }
 
 uint64
@@ -1708,10 +1759,10 @@ orioledb_page_stats(PG_FUNCTION_ARGS)
 			values[0] = PointerGetDatum(cstring_to_text("free_tree"));
 		else if (i == OPagePoolCatalog)
 			values[0] = PointerGetDatum(cstring_to_text("catalog"));
-		num_free_pages = (int64) ppool_free_pages_count(&page_pools[i]);
+		num_free_pages = (int64) (*page_pools[i].base.ops->free_pages_count) ((PagePool *) &page_pools[i]);
 		values[1] = Int64GetDatum(total_num_pages - num_free_pages);
 		values[2] = Int64GetDatum(num_free_pages);
-		values[3] = Int64GetDatum((int64) ppool_dirty_pages_count(&page_pools[i]));
+		values[3] = Int64GetDatum((int64) (*page_pools[i].base.ops->dirty_pages_count) ((PagePool *) &page_pools[i]));
 		values[4] = Int64GetDatum(total_num_pages);
 		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
 	}
@@ -1927,28 +1978,31 @@ orioledb_commit_hash(PG_FUNCTION_ARGS)
 /*
  * Returns a page pool by the type.
  */
-OPagePool *
+PagePool *
 get_ppool(OPagePoolType type)
 {
 	Assert((int) type < OPagePoolTypesCount);
-	return &page_pools[type];
+	return (PagePool *) &page_pools[type];
 }
 
 /*
  * Returns a page pool for the page number.
  */
-OPagePool *
+PagePool *
 get_ppool_by_blkno(OInMemoryBlkno blkno)
 {
+	if (O_PAGE_IS_LOCAL(blkno))
+		return (PagePool *) &local_ppool;
+
 	Assert(blkno < orioledb_buffers_count);
 
 	if (blkno >= main_buffers_offset)
-		return &page_pools[OPagePoolMain];
+		return (PagePool *) &page_pools[OPagePoolMain];
 
 	if (blkno < free_tree_buffers_count)
-		return &page_pools[OPagePoolFreeTree];
+		return (PagePool *) &page_pools[OPagePoolFreeTree];
 
-	return &page_pools[OPagePoolCatalog];
+	return (PagePool *) &page_pools[OPagePoolCatalog];
 }
 
 /*
@@ -1961,7 +2015,7 @@ get_dirty_pages_count_sum(void)
 	int			i;
 
 	for (i = 0; i < OPagePoolTypesCount; i++)
-		result += ppool_dirty_pages_count(&page_pools[i]);
+		result += ppool_dirty_pages_count((PagePool *) &page_pools[i]);
 
 	return result;
 }
@@ -2047,7 +2101,8 @@ orioledb_error_cleanup_hook(void)
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		release_undo_size((UndoLogType) i);
 	btree_mark_incomplete_splits();
-	unset_skip_ucm();
+	skip_ucm = false;
+	ppool_run_clock_depth = 0;
 	btree_io_error_cleanup();
 	o_reset_syscache_hooks();
 	o_ddl_cleanup();

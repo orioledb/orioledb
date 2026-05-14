@@ -362,33 +362,6 @@ o_deparse_expression(char *expr_str, Oid relid)
 	return TextDatumGetCString(expr);
 }
 
-/*
- * Find a hash function for the type given its btree opclass.  Looks up the
- * equality operator of the btree opclass, then searches for a hash opclass
- * that uses the same equality operator, and returns the hash procedure from
- * that hash opclass.  Returns InvalidOid if no matching hash procedure exists.
- */
-static Oid
-get_hash_proc_by_btree_opclass(Oid btreeOpclass)
-{
-	Oid			btreeOpfamily;
-	Oid			inputType;
-	Oid			equalOp;
-	RegProcedure result;
-
-	btreeOpfamily = get_opclass_family(btreeOpclass);
-	inputType = get_opclass_input_type(btreeOpclass);
-	Assert(OidIsValid(btreeOpfamily));
-	equalOp = get_opfamily_member(btreeOpfamily, inputType, inputType, BTEqualStrategyNumber);
-	if (!OidIsValid(equalOp))
-		return InvalidOid;
-
-	if (get_op_hash_functions(equalOp, &result, NULL))
-		return result;
-	else
-		return InvalidOid;
-}
-
 void
 o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 {
@@ -580,9 +553,13 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 		{
 			int16		opt = index_rel->rd_indoption[keyno];
 			Oid			typid;
+			bool		hashable = true;
+			List	   *processed = NIL;
 
 			if (AttributeNumberIsValid(attnum))
+			{
 				typid = o_table->fields[ix_field->attnum].typid;
+			}
 			else
 			{
 				Assert(exprField != NULL);
@@ -591,6 +568,8 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 			}
 			ix_field->collation = index_rel->rd_indcollation[keyno];
 			ix_field->opclass = indclass->values[keyno];
+
+			o_validate_composite_type(typid, ix_field->opclass);
 
 			ix_field->ordering = SORTBY_DEFAULT;
 			ix_field->nullsOrdering = SORTBY_NULLS_DEFAULT;
@@ -605,59 +584,20 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 				ix_field->nullsOrdering = SORTBY_NULLS_FIRST;
 			}
 
-			ix_field->hash_fn_oid = get_hash_proc_by_btree_opclass(ix_field->opclass);
+			hashable = custom_type_try_add_hash_fn_if_needed(typid,
+															 ix_field->opclass,
+															 &processed);
+			list_free_deep(processed);
 
-			if (OidIsValid(ix_field->hash_fn_oid))
+			if (hashable)
 			{
-				o_validate_function_by_oid(ix_field->hash_fn_oid,
-										   " should be used as hash function "
-										   "for type of column used in orioledb index");
-				o_collect_function_by_oid(ix_field->hash_fn_oid, InvalidOid);
-				/* TODO: Move this to something like custom_type_add_if_needed */
-				{
-					Form_pg_type typeform;
-					HeapTuple	tuple = NULL;
-
-					tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
-					Assert(tuple);
-					typeform = (Form_pg_type) GETSTRUCT(tuple);
-					if (typeform->typtype == TYPTYPE_RANGE)
-					{
-						HeapTuple	rangetup;
-						Form_pg_range rangeform;
-						XLogRecPtr	insert_lsn;
-						Oid			rnghashsubopc;
-						Oid			rnghashsubopf;
-						Oid			rnghashsubinput;
-
-						rangetup = SearchSysCache1(RANGETYPE, typid);
-						if (!HeapTupleIsValid(rangetup))
-							elog(ERROR, "cache lookup failed for range (%u)", typid);
-						rangeform = (Form_pg_range) GETSTRUCT(rangetup);
-
-						rnghashsubopc = GetDefaultOpClass(rangeform->rngsubtype, HASH_AM_OID);
-						rnghashsubinput = get_opclass_input_type(rnghashsubopc);
-						rnghashsubopf = get_opclass_family(rnghashsubopc);
-
-						o_sys_cache_set_datoid_lsn(&insert_lsn, NULL);
-						o_opclass_cache_add_if_needed(o_table->oids.datoid,
-													  rnghashsubopc,
-													  insert_lsn, NULL);
-						o_amproc_cache_add_if_needed(o_table->oids.datoid,
-													 rnghashsubopf, rnghashsubinput,
-													 rnghashsubinput, HASHSTANDARD_PROC, insert_lsn,
-													 NULL);
-						ReleaseSysCache(rangetup);
-
-					}
-					ReleaseSysCache(tuple);
-				}
+				ix_field->hash_fn_oid = o_get_hash_proc_by_btree_opclass(ix_field->opclass);
 			}
 			else
 			{
 				ix_field->hash_fn_oid = O_DEFAULT_HASH_FN_OID;
 				ereport(WARNING,
-						(errmsg("failed to fetch the hash function for btree opclass%s", generate_opclass_name(ix_field->opclass)),
+						(errmsg("failed to fetch the hash function for btree opclass %s", generate_opclass_name(ix_field->opclass)),
 						 errdetail("Recovery might be slow due to inability to distribute values among the workers.")));
 			}
 		}
@@ -1485,8 +1425,6 @@ o_tables_update(OTable *table, OXid oxid, CommitSeqNo csn)
 void
 o_tables_after_update(OTable *o_table, OXid oxid, CommitSeqNo csn)
 {
-	o_opclass_cache_add_table(o_table);
-
 	/*
 	 * @NOTE o_indices_update(o_table, PrimaryIndexNumber, oxid, csn); moved
 	 * out from here
@@ -2248,7 +2186,6 @@ o_tables_drop_columns_with_type_callback(OTable *o_table, void *arg)
 		o_tables_table_meta_unlock(o_table, InvalidOid);
 	}
 }
-
 
 /*
  * Drops all columns of a specific type

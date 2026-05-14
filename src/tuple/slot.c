@@ -1132,7 +1132,7 @@ appendStringInfoIndexKey(StringInfo str, TupleTableSlot *slot, OIndexDescr *id)
 			getTypeOutputInfo(id->nonLeafTupdesc->attrs[i].atttypid,
 							  &typoutput, &typisvarlena);
 			res = OidOutputFunctionCall(typoutput, value);
-			appendStringInfo(str, "'%s'", res);
+			appendStringInfo(str, "%s", res);
 		}
 	}
 	appendStringInfo(str, ")");
