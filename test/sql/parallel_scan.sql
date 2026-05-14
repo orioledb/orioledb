@@ -130,6 +130,7 @@ RESET min_parallel_table_scan_size;
 RESET parallel_leader_participation;
 
 BEGIN;
+SET LOCAL enable_indexonlyscan = off;
 CREATE TABLE o_test_parallel_bitmap_scan (
 	val_1 int
 ) USING orioledb;
