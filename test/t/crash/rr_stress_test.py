@@ -201,6 +201,8 @@ class RrStressTest(BaseTest):
 						    f"SET balance = {from_bal - amount}, "
 						    f"    token = {my_token} "
 						    f"WHERE id = {v_from}")
+						if random.randint(0, 1) == 0:
+							time.sleep(0)
 						con.execute(
 						    "UPDATE o_bank_account "
 						    f"SET balance = {to_bal + amount}, "
@@ -238,6 +240,8 @@ class RrStressTest(BaseTest):
 					write_count[0] += local_w
 					conflict_count[0] += local_c
 					disconnect_count[0] += local_disc
+
+				disconnect_count[0] += local_disc
 
 		def reader_pk_loop(reader_id):
 			con = node.connect()
@@ -543,23 +547,30 @@ class RrStressTest(BaseTest):
 
 		# produce the state corruption without nay injection enabled
 		assert_chaos_points = [
-			# 'orioledb-commit-assert',
+			'orioledb-commit-assert',
 			'orioledb-before-pre-commit-wal-finish',
 		]
+		_env_assert_pts = os.getenv('RR_ASSERT_POINTS')
+		if _env_assert_pts and _env_assert_pts != 'ALL':
+			_assert_subset = [
+			    p.strip() for p in _env_assert_pts.split(',') if p.strip()]
+			assert_chaos_points = [
+			    p for p in assert_chaos_points if p in _assert_subset]
 
 		def assert_chaos_loop():
 			# Periodically arm one of `assert_chaos_points`.  Each point
 			# sits inside a START_CRIT_SECTION, so an attached `error`
 			# action turns into a PANIC on the next commit -- which
 			# takes the cluster down.  Same pattern as `wal_chaos_loop`:
-			# pick one via rating tournament, attach -> `time.sleep(0)`
-			# (release GIL, let a writer slip into commit) -> detach
-			# every point in the list.  The very brief attach window
-			# means only ~1 writer hits the injection before the worker
-			# pulls it back; postmaster's quickdie fan-out kills every
-			# other backend, so we minimise the number of in-process
-			# aborts that would otherwise pile up more partial state on
-			# the way down.
+			# pick one via rating tournament, attach -> `time.sleep(0.5)`
+			# (release GIL for 500 ms so a writer has a realistic
+			# chance to slip into commit at low writer counts) ->
+			# detach every point in the list.  The attach window is
+			# wide enough that at higher writer counts several
+			# backends may hit the injection before the worker pulls
+			# it back; postmaster's quickdie fan-out kills every
+			# other backend, so the in-process abort pileup is still
+			# bounded.
 			target = max(_env_int('RR_ASSERT_FIRINGS', 0), 1)
 			interval = max(duration / (target + 1), 1.0)
 			con = None
@@ -606,7 +617,7 @@ class RrStressTest(BaseTest):
 							pass
 						con = None
 						continue
-					time.sleep(0)
+					time.sleep(0.5)
 					try:
 						for point in assert_chaos_points:
 							con.execute(
@@ -790,7 +801,9 @@ class RrStressTest(BaseTest):
 			first_crash_time[0] = time.time() - test_start
 			crash_injection[0] = current_injection[0]
 
-		if panic_lines:
+		log_saved_path = [None]
+
+		def _save_log(reason):
 			results_dir = os.path.join(
 			    os.path.dirname(inspect.getfile(self.__class__)),
 			    'results')
@@ -801,12 +814,16 @@ class RrStressTest(BaseTest):
 			inst = os.getenv('RR_INSTANCE') or 'solo'
 			dst = os.path.join(
 			    results_dir,
-			    f'{tag}_{inst}_{pts}.log')
+			    f'{tag}_{inst}_{pts}_{reason}.log')
 			try:
 				shutil.copy(log_path, dst)
 				print(f'[saved-log] {dst}', flush=True)
+				log_saved_path[0] = dst
 			except Exception as _ce:
 				print(f'[save-log failed] {_ce!r}', flush=True)
+
+		if panic_lines:
+			_save_log('panic')
 
 		_fet = first_error_time[0]
 		_fct = first_crash_time[0]
@@ -855,6 +872,20 @@ class RrStressTest(BaseTest):
 					break
 				except Exception:
 					time.sleep(0.5)
+		# Assume the state may be corrupted -- run a PK-authoritative
+		# diagnostic before the regular invariant queries so we can tell
+		# PK-side corruption from SK-side corruption.  `count(*)` etc
+		# can be planned via the SK token unique index; forcing seq scan
+		# routes through the PK heap (orioledb is index-organized on
+		# PK).  If `pk_*_seq` disagrees with the default-plan numbers,
+		# the SK is the only thing that's off; if `pk_*_seq` itself is
+		# wrong, the PK is corrupt too.
+		def _safe_exec(sql):
+			try:
+				return node.execute(sql)
+			except Exception as _e:
+				return f'ERROR: {_e!r}'
+
 		final_total = node.execute(
 		    "SELECT sum(balance)::bigint FROM o_bank_account")[0][0]
 		unique_tokens = node.execute(
@@ -865,11 +896,63 @@ class RrStressTest(BaseTest):
 		    "SELECT orioledb_has_retained_undo()")[0][0]
 		tbl_check_ok = node.execute(
 		    "SELECT orioledb_tbl_check('o_bank_account'::regclass)")[0][0]
+		# PK-authoritative: force seq scan over the PK heap.  Use a
+		# single statement so the SET LOCAL stays in scope.
+		pk_seq = _safe_exec(
+		    "BEGIN; "
+		    "SET LOCAL enable_indexonlyscan = off; "
+		    "SET LOCAL enable_indexscan = off; "
+		    "SET LOCAL enable_bitmapscan = off; "
+		    "SELECT count(*)::int, count(DISTINCT id)::int, "
+		    "count(DISTINCT token)::int, sum(balance)::bigint "
+		    "FROM o_bank_account; "
+		    "COMMIT")
+		# Per-row PK contents (only if it would be small)
+		pk_dump = _safe_exec(
+		    "BEGIN; "
+		    "SET LOCAL enable_indexonlyscan = off; "
+		    "SET LOCAL enable_indexscan = off; "
+		    "SET LOCAL enable_bitmapscan = off; "
+		    "SELECT id, balance, token FROM o_bank_account ORDER BY id; "
+		    "COMMIT")
+		# Duplicate tokens visible from PK -- non-empty => PK has dups
+		pk_token_dups = _safe_exec(
+		    "BEGIN; "
+		    "SET LOCAL enable_indexonlyscan = off; "
+		    "SET LOCAL enable_indexscan = off; "
+		    "SET LOCAL enable_bitmapscan = off; "
+		    "SELECT token, count(*) FROM o_bank_account "
+		    "GROUP BY token HAVING count(*) > 1; "
+		    "COMMIT")
+		# SK-side default-planned count (likely picks the unique idx)
+		sk_default = _safe_exec(
+		    "SELECT count(DISTINCT token)::int FROM o_bank_account")
 
 		with errors_lock:
 			seen = list(errors)
 		print(
 		    f'snapshot reads saw inconsistency (torn scan): {seen}')
+		print(f'[diag] pk_seq (count, dist_id, dist_token, sum_bal) = '
+		      f'{pk_seq!r}')
+		print(f'[diag] sk_default count(DISTINCT token) = {sk_default!r}')
+		print(f'[diag] pk_token_dups = {pk_token_dups!r}')
+		print(f'[diag] tbl_check_ok = {tbl_check_ok!r} '
+		      f'retained_undo = {retained!r}')
+		if isinstance(pk_seq, list) and pk_seq and len(pk_seq[0]) >= 3:
+			_pk_rows, _pk_ids, _pk_toks, _pk_sum = pk_seq[0]
+			_pk_corrupt = (
+			    _pk_rows != n_accounts or
+			    _pk_ids != n_accounts or
+			    _pk_toks != n_accounts or
+			    _pk_sum != expected_total)
+			if _pk_corrupt:
+				print('[diag] PK CORRUPTION DETECTED')
+				print(f'[diag] pk_full_dump:')
+				if isinstance(pk_dump, list):
+					for _r in pk_dump:
+						print(f'  {_r}')
+				else:
+					print(f'  {pk_dump}')
 
 		# Detect dangling backends: stop the node and then count any
 		# process that still references our data dir. After a clean
@@ -887,18 +970,54 @@ class RrStressTest(BaseTest):
 		print(f'[dangling-check] surviving backends: {n_dangling}',
 		      flush=True)
 
-		self.assertEqual(
-		    final_total, expected_total,
-		    f'final total {final_total} != expected {expected_total} '
-		    f'(mismatch = lost update)')
-		self.assertEqual(
-		    unique_tokens, n_accounts,
-		    f'expected {n_accounts} unique tokens, got {unique_tokens}')
-		self.assertEqual(
-		    rows, n_accounts,
-		    f'expected {n_accounts} rows, got {rows}')
-		self.assertEqual(
-		    seen, [], 'snapshot reads saw inconsistency (torn scan)')
+		# Collect every invariant violation so a single failure does not
+		# hide the others.  All checks are evaluated first, then a
+		# single assertEqual against an empty list reports all failures
+		# together.
+		violations = []
+		if final_total != expected_total:
+			violations.append(
+			    f'final total {final_total} != expected '
+			    f'{expected_total} (mismatch = lost update)')
+		if unique_tokens != n_accounts:
+			violations.append(
+			    f'unique_tokens {unique_tokens} != {n_accounts}')
+		if rows != n_accounts:
+			violations.append(f'rows {rows} != {n_accounts}')
+		if seen:
+			violations.append(
+			    f'snapshot reads saw inconsistency: {seen}')
+		if not tbl_check_ok:
+			violations.append('orioledb_tbl_check returned false')
+		if retained:
+			violations.append('orioledb retained undo after stop')
+		# PK-authoritative invariants (PK heap forced seq scan).
+		if isinstance(pk_seq, list) and pk_seq and len(pk_seq[0]) >= 4:
+			_pk_rows, _pk_ids, _pk_toks, _pk_sum = pk_seq[0]
+			if _pk_rows != n_accounts:
+				violations.append(f'pk_rows {_pk_rows} != {n_accounts}')
+			if _pk_ids != n_accounts:
+				violations.append(
+				    f'pk_distinct_id {_pk_ids} != {n_accounts}')
+			if _pk_toks != n_accounts:
+				violations.append(
+				    f'pk_distinct_token {_pk_toks} != {n_accounts}')
+			if _pk_sum != expected_total:
+				violations.append(
+				    f'pk_sum_balance {_pk_sum} != {expected_total}')
+		if isinstance(pk_token_dups, list) and pk_token_dups:
+			violations.append(
+			    f'pk_token_dups (PK has duplicate tokens!) = '
+			    f'{pk_token_dups}')
+		if violations and log_saved_path[0] is None:
+			_save_log('invariant')
+		# Opt-in: save the log even on a clean pass so a batch can
+		# compare buggy vs normal runs side-by-side.
+		if (_env_int('RR_SAVE_ALL_LOGS', 0)
+		        and log_saved_path[0] is None):
+			_save_log('clean')
+		self.assertEqual(violations, [],
+		                 f'invariant violations: {violations}')
 		if n_writers > 0:
 			self.assertGreater(
 			    write_count[0], 0, 'writers must have committed')
