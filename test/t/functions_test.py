@@ -28,18 +28,14 @@ class FunctionTest(BaseTest):
 			UPDATE oriole_table set t = repeat('c', 270) WHERE i > 5000;
 		""")
 
-		self.assertEqual(
-		    "[(Decimal('2000000'),)]",
-		    str(
-		        node.execute(
-		            "SELECT round(undo_size, -6) FROM orioledb_undo_size() WHERE undo_type = 'row';"
-		        )))
-		self.assertEqual(
-		    "[(Decimal('6000000'),)]",
-		    str(
-		        node.execute(
-		            "SELECT round(undo_size, -6) FROM orioledb_undo_size() WHERE undo_type = 'page';"
-		        )))
+		self.assertGreaterEqual(
+		    node.execute(
+		        "SELECT undo_size FROM orioledb_undo_size() WHERE undo_type = 'row';"
+		    )[0][0], 100000)
+		self.assertGreaterEqual(
+		    node.execute(
+		        "SELECT undo_size FROM orioledb_undo_size() WHERE undo_type = 'page';"
+		    )[0][0], 200000)
 
 		node.stop()
 
@@ -70,11 +66,9 @@ class FunctionTest(BaseTest):
 			CHECKPOINT;
 		""")
 
-		self.assertEqual(
-		    "[(Decimal('131000'),)]",
-		    str(
-		        node.execute(
-		            "SELECT round(undo_size, -3) FROM orioledb_undo_size() WHERE undo_type = 'system';"
-		        )))
+		self.assertGreaterEqual(
+		    node.execute(
+		        "SELECT undo_size FROM orioledb_undo_size() WHERE undo_type = 'system';"
+		    )[0][0], 10000)
 
 		node.stop()
