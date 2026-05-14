@@ -789,6 +789,41 @@ btree_smgr_sync(BTreeDescr *desc, uint32 chkpNum, off_t length)
 	}
 }
 
+/*
+ * Punch a hole in a raw OS file descriptor. Logs a WARNING on failure and
+ * returns; callers don't need to handle the return value because the data
+ * is being discarded either way.
+ */
+void
+punch_fd_hole(int fd, off_t offset, off_t length, const char *fileName)
+{
+	int			ret;
+
+#ifdef __APPLE__
+	{
+		fpunchhole_t hole;
+
+		memset(&hole, 0, sizeof(hole));
+		hole.fp_offset = offset;
+		hole.fp_length = length;
+		ret = fcntl(fd, F_PUNCHHOLE, &hole);
+	}
+#else
+	ret = fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
+					offset, length);
+#endif
+	if (ret < 0)
+	{
+		int			save_errno = errno;
+
+		ereport(WARNING,
+				(errcode_for_file_access(),
+				 errmsg("could not punch hole in file %s offset=%lld length=%lld (%d %s)",
+						fileName, (long long) offset, (long long) length,
+						save_errno, strerror(save_errno))));
+	}
+}
+
 void
 btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
 					  off_t offset, int length)
@@ -798,14 +833,11 @@ btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
 	while (length > 0)
 	{
 		File		file;
-		int			fd;
 		int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
 		off_t		segoffset;
 		int			seglength;
-		int			ret;
 
 		file = btree_open_smgr_file(desc, segno, chkpNum, 0);
-		fd = FileGetRawDesc(file);
 
 		segoffset = offset % ORIOLEDB_SEGMENT_SIZE;
 		if ((offset + length) / ORIOLEDB_SEGMENT_SIZE == segno)
@@ -821,29 +853,8 @@ btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
 			offset += seglength;
 			length -= seglength;
 		}
-#ifdef __APPLE__
-		{
-			fpunchhole_t hole;
-
-			memset(&hole, 0, sizeof(hole));
-			hole.fp_offset = segoffset;
-			hole.fp_length = seglength;
-			ret = fcntl(fd, F_PUNCHHOLE, &hole);
-		}
-#else
-		ret = fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
-						segoffset, seglength);
-#endif
-		if (ret < 0)
-		{
-			int			save_errno = errno;
-
-			ereport(WARNING,
-					(errcode_for_file_access(),
-					 errmsg("fail to punch sparse file hole datoid=%u relnode=%u segno=%d offset=%llu length=%d (%d %s)",
-							desc->oids.datoid, desc->oids.relnode, segno,
-							(unsigned long long) segoffset, seglength, save_errno, strerror(save_errno))));
-		}
+		punch_fd_hole(FileGetRawDesc(file), segoffset, seglength,
+						  FilePathName(file));
 	}
 }
 

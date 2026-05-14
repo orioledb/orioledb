@@ -87,7 +87,9 @@ typedef struct
 	uint64		checkpointPos;	/* Already included into checkpoint. Start
 								 * point for writing rewindItem-s into
 								 * checkpoint. */
-	uint64		oldCleanedFileNum;	/* Last removed buffer file number */
+	uint64		oldToBeCleanedBlockNum; /* First disk block not yet known to
+										 * be fully cleaned; advanced past
+										 * each range punched by cleanup. */
 	bool		skipCheck;		/* Skip timestamp-based check of items to
 								 * process */
 	int			rewindEvictTrancheId;

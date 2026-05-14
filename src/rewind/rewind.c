@@ -941,7 +941,7 @@ rewind_init_shmem(Pointer ptr, bool found)
 		pg_atomic_init_u64(&rewindMeta->evictPos, 0);
 		rewindMeta->restorePos = 0;
 		rewindMeta->checkpointPos = 0;
-		rewindMeta->oldCleanedFileNum = 0;
+		rewindMeta->oldToBeCleanedBlockNum = 0;
 		pg_atomic_write_u64(&rewindMeta->oldestConsideredRunningXid,
 							InvalidTransactionId);
 		pg_atomic_write_u64(&rewindMeta->runXmin, InvalidOXid);
@@ -1001,8 +1001,7 @@ try_restore_evicted_rewind_page(void)
 {
 	int			start;
 	int			length_to_end;
-	uint64		currentCleanFileNum;
-	int			itemsPerFile;
+	int64		lastDeadBlock;
 
 	LWLockAcquire(&rewindMeta->rewindEvictLock, LW_EXCLUSIVE);
 
@@ -1079,17 +1078,19 @@ try_restore_evicted_rewind_page(void)
 	}
 	LWLockRelease(&rewindMeta->rewindEvictLock);
 
-	/* Clean old buffer files if needed. No lock. */
-	itemsPerFile = REWIND_FILE_SIZE / sizeof(RewindItem);
-	currentCleanFileNum = rewindMeta->restorePos / itemsPerFile;
+	/*
+	 * Discard fully dead blocks below restorePos. Items straddle block
+	 * boundaries (sizeof(RewindItem) does not divide ORIOLEDB_BLCKSZ), so
+	 * the block holding restorePos's byte position still has the live tail
+	 * of an in-progress item -- punch only blocks fully below it.
+	 */
+	lastDeadBlock = (int64) (rewindMeta->restorePos * sizeof(RewindItem)) / ORIOLEDB_BLCKSZ - 1;
 
-	if (currentCleanFileNum > rewindMeta->oldCleanedFileNum)
+	if (lastDeadBlock >= (int64) rewindMeta->oldToBeCleanedBlockNum)
 	{
-		o_buffers_unlink_files_range(&rewindBuffersDesc,
-									 REWIND_BUFFERS_TAG,
-									 rewindMeta->oldCleanedFileNum,
-									 currentCleanFileNum);
-		rewindMeta->oldCleanedFileNum = currentCleanFileNum;
+		o_buffers_unlink_blocks_range(&rewindBuffersDesc, REWIND_BUFFERS_TAG,
+									  (int64) rewindMeta->oldToBeCleanedBlockNum, lastDeadBlock);
+		rewindMeta->oldToBeCleanedBlockNum = (uint64) lastDeadBlock + 1;
 	}
 }
 
