@@ -886,18 +886,28 @@ class RrStressTest(BaseTest):
 			except Exception as _e:
 				return f'ERROR: {_e!r}'
 
+		# Each helper logs the EXPLAIN plan under a label so post-trial
+		# inspection can verify which scan actually answered the query.
+		# The planner picks Seq Scan over SK index-only at this row count,
+		# so without forcing GUCs the "SK" queries silently read from PK.
+		def _explain_lines(con, sql):
+			return [r[0] for r in con.execute('EXPLAIN (COSTS OFF) ' + sql)]
+
 		# PK-authoritative diagnostic: force seq scan so the query is
 		# answered from the PK heap, not the SK index. The previous
 		# `BEGIN; SET LOCAL ...; SELECT; COMMIT` wrap silently returned
 		# None because testgres exposes only the LAST statement's result
 		# (COMMIT, no rows). We instead open one connection, set the
 		# planner GUCs session-level, run the SELECT, return its rows.
-		def _pk_force_seq(sql):
+		def _pk_force_seq(sql, label=None):
 			try:
 				with node.connect(autocommit=True) as con:
 					con.execute("SET enable_indexonlyscan = off")
 					con.execute("SET enable_indexscan = off")
 					con.execute("SET enable_bitmapscan = off")
+					if label:
+						for _ln in _explain_lines(con, sql):
+							print(f'[explain pk-forced {label}] {_ln}')
 					return con.execute(sql)
 			except Exception as _e:
 				return f'ERROR: {_e!r}'
@@ -906,11 +916,26 @@ class RrStressTest(BaseTest):
 		# plan for `SELECT token ...` is an index-(only-)scan on the
 		# unique(token) SK. Lets us enumerate what the SK actually
 		# contains and diff against the PK row set.
-		def _sk_force_idx(sql):
+		def _sk_force_idx(sql, label=None):
 			try:
 				with node.connect(autocommit=True) as con:
 					con.execute("SET enable_seqscan = off")
 					con.execute("SET enable_bitmapscan = off")
+					if label:
+						for _ln in _explain_lines(con, sql):
+							print(f'[explain sk-forced {label}] {_ln}')
+					return con.execute(sql)
+			except Exception as _e:
+				return f'ERROR: {_e!r}'
+
+		# Default-plan execution with EXPLAIN logging, so we can see what
+		# the planner picked for queries that have no override.
+		def _default_exec(sql, label=None):
+			try:
+				with node.connect(autocommit=True) as con:
+					if label:
+						for _ln in _explain_lines(con, sql):
+							print(f'[explain default {label}] {_ln}')
 					return con.execute(sql)
 			except Exception as _e:
 				return f'ERROR: {_e!r}'
@@ -919,41 +944,70 @@ class RrStressTest(BaseTest):
 			return ', '.join(
 			    f'token {t} appears {c} times' for t, c in rows)
 
-		final_total = node.execute(
-		    "SELECT sum(balance)::bigint FROM o_bank_account")[0][0]
+		final_total = _default_exec(
+		    "SELECT sum(balance)::bigint FROM o_bank_account",
+		    label='sum(balance)')[0][0]
 
-		unique_tokens = node.execute(
-		    "SELECT count(DISTINCT token)::int FROM o_bank_account")[0][0]
+		# SK-forced count: this is the authoritative "what does the SK
+		# index say?" answer. Without -idx forcing, the planner picks
+		# Seq Scan at 100 rows and silently reads from PK heap instead.
+		unique_tokens = _sk_force_idx(
+		    "SELECT count(DISTINCT token)::int FROM o_bank_account",
+		    label='count(DISTINCT token)')[0][0]
+		# PK-forced mirror of the same count -- if the two disagree the
+		# indices are out of sync.
+		pk_distinct_tokens = _pk_force_seq(
+		    "SELECT count(DISTINCT token)::int FROM o_bank_account",
+		    label='count(DISTINCT token)')[0][0]
 		pk_oor_tokens = _pk_force_seq(
 		    "SELECT token FROM o_bank_account "
 		    f"WHERE token < 1 OR token > {n_accounts + n_writers} "
-		    "ORDER BY token")
+		    "ORDER BY token",
+		    label='token OOR predicate')
 
-		rows = node.execute(
-		    "SELECT count(*)::int FROM o_bank_account")[0][0]
+		# Row count via PK seq scan and via SK index-only scan. PK is
+		# the row source of truth (orioledb is index-organized on PK);
+		# SK row count must match because every PK row should have an
+		# SK entry.
+		pk_row_count = _pk_force_seq(
+		    "SELECT count(*)::int FROM o_bank_account",
+		    label='count(*)')[0][0]
+		sk_row_count = _sk_force_idx(
+		    "SELECT count(*)::int FROM o_bank_account",
+		    label='count(*)')[0][0]
+		rows = pk_row_count
 		retained = node.execute(
 		    "SELECT orioledb_has_retained_undo()")[0][0]
 		tbl_check_ok = node.execute(
 		    "SELECT orioledb_tbl_check('o_bank_account'::regclass)")[0][0]
-		# PK-authoritative: force seq scan over the PK heap.
+		# PK-authoritative aggregate (count, dist_id, dist_token, sum_bal).
 		pk_seq = _pk_force_seq(
 		    "SELECT count(*)::int, count(DISTINCT id)::int, "
 		    "count(DISTINCT token)::int, sum(balance)::bigint "
-		    "FROM o_bank_account")
-		# Per-row PK contents (only if it would be small)
+		    "FROM o_bank_account",
+		    label='aggregate')
+		# Per-row PK contents. Printed unconditionally below so a
+		# post-processor can correlate each (id, token) pair with the
+		# SK token list for per-row PK<->SK matching.
 		pk_dump = _pk_force_seq(
-		    "SELECT id, balance, token FROM o_bank_account ORDER BY id")
+		    "SELECT id, balance, token FROM o_bank_account ORDER BY id",
+		    label='per-row dump')
 		# Duplicate tokens visible from PK -- non-empty => PK has dups
 		pk_token_dups = _pk_force_seq(
 		    "SELECT token, count(*) FROM o_bank_account "
-		    "GROUP BY token HAVING count(*) > 1")
-		# SK-side default-planned count (likely picks the unique idx)
-		sk_default = _safe_exec(
-		    "SELECT count(DISTINCT token)::int FROM o_bank_account")
+		    "GROUP BY token HAVING count(*) > 1",
+		    label='duplicate tokens')
+		# Default-plan canary -- at 100 rows the planner picks Seq Scan
+		# so this actually answers from PK heap, NOT SK. Kept for the
+		# diagnostic log; not used as an invariant signal.
+		sk_default = _default_exec(
+		    "SELECT count(DISTINCT token)::int FROM o_bank_account",
+		    label='count(DISTINCT token)')
 		# Enumerate SK contents directly (forced index path on unique
 		# token SK). Used below to compute PK <-> SK token-set diff.
 		sk_tokens_raw = _sk_force_idx(
-		    "SELECT token FROM o_bank_account ORDER BY token")
+		    "SELECT token FROM o_bank_account ORDER BY token",
+		    label='token enumeration')
 		sk_set = set()
 		pk_set = set()
 		if isinstance(sk_tokens_raw, list):
@@ -969,12 +1023,20 @@ class RrStressTest(BaseTest):
 		    f'snapshot reads saw inconsistency (torn scan): {seen}')
 		print(f'[diag] pk_seq (count, dist_id, dist_token, sum_bal) = '
 		      f'{pk_seq!r}')
+		print(f'[diag] pk_distinct_tokens (forced) = {pk_distinct_tokens}')
+		print(f'[diag] sk_distinct_tokens (forced) = {unique_tokens}')
 		print(f'[diag] sk_default count(DISTINCT token) = {sk_default!r}')
+		print(f'[diag] pk_row_count (forced) = {pk_row_count} '
+		      f'sk_row_count (forced) = {sk_row_count}')
 		print(f'[diag] pk_token_dups = {pk_token_dups!r}')
 		print(f'[diag] pk_oor_tokens (outside [1,{n_accounts + n_writers}]) = '
 		      f'{pk_oor_tokens!r}')
 		print(f'[diag] sk_set\\pk_set (in SK, not PK) = {sk_extra}')
 		print(f'[diag] pk_set\\sk_set (in PK, not SK) = {sk_missing}')
+		# Full per-row PK dump and SK token list -- unconditional, so a
+		# post-processor can do per-row PK<->SK matching across trials.
+		print(f'[diag] pk_dump (id, balance, token) = {pk_dump!r}')
+		print(f'[diag] sk_tokens (raw, ordered by token) = {sk_tokens_raw!r}')
 		print(f'[diag] tbl_check_ok = {tbl_check_ok!r} '
 		      f'retained_undo = {retained!r}')
 		if isinstance(pk_seq, list) and pk_seq and len(pk_seq[0]) >= 3:
@@ -1019,7 +1081,7 @@ class RrStressTest(BaseTest):
 			    f'final total {final_total} != expected '
 			    f'{expected_total} (mismatch = lost update)')
 		if unique_tokens != n_accounts:
-			_msg = f'unique_tokens {unique_tokens} != {n_accounts}'
+			_msg = f'sk_distinct_tokens {unique_tokens} != {n_accounts}'
 			if sk_extra:
 				_msg += f' [SK extra (in SK, not PK): {sk_extra}]'
 			if sk_missing:
@@ -1031,6 +1093,19 @@ class RrStressTest(BaseTest):
 			if isinstance(pk_token_dups, list) and pk_token_dups:
 				_msg += f' [duplicate tokens: {_fmt_dups(pk_token_dups)}]'
 			violations.append(_msg)
+		# Direct PK<->SK count comparisons. These fire even if both sides
+		# are individually off by the same amount from n_accounts, so they
+		# catch a class of bugs the per-side count checks miss.
+		if pk_distinct_tokens != unique_tokens:
+			violations.append(
+			    f'pk_distinct_tokens ({pk_distinct_tokens}) != '
+			    f'sk_distinct_tokens ({unique_tokens}) '
+			    f'-- PK heap and SK index disagree on token set')
+		if pk_row_count != sk_row_count:
+			violations.append(
+			    f'pk_row_count ({pk_row_count}) != '
+			    f'sk_row_count ({sk_row_count}) '
+			    f'-- PK heap and SK index disagree on row count')
 		if rows != n_accounts:
 			violations.append(f'rows {rows} != {n_accounts}')
 		if seen:
