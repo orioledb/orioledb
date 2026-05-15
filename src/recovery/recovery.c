@@ -4173,7 +4173,6 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				 cur_recovery_xid_state->xid, rec->oxid,
 				 LSN_FORMAT_ARGS(ctx->xlogRecEndPtr));
 
-			recovery_xmin = Max(recovery_xmin, rec->u.joint_commit.xmin);
 			if (!cur_recovery_xid_state->in_joint_commit_list)
 			{
 				dlist_push_tail(&joint_commit_list,
