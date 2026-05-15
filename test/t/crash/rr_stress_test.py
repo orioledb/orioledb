@@ -1032,25 +1032,20 @@ class RrStressTest(BaseTest):
 		sk_missing = sorted(pk_set - sk_set)
 
 		# Drain summary: the writer threads' final pocketed tokens.
+		# Kept as a forensic diagnostic only — writers SIGQUIT'd in the
+		# PG commit-window (after XLogFlush of COMMIT, before the Python
+		# `my_token = to_token` assignment runs) leave `drained_set` with
+		# stale pre-tx pockets while the DB reflects the post-commit
+		# state, so any invariant that joins `drained_set` against
+		# `pk_set`/`sk_set` fires spuriously on every cascade trial.
+		# See git history (`drained ∩` checks removed 2026-05-15) and
+		# project_v4_investigation_state.md for the full race analysis.
 		with drained_lock:
 			drained_raw = list(drained_tokens)
 		drained_set = {tok for _, tok in drained_raw}
-		# Token-universe invariant: every value in [1, n_accounts+n_writers]
-		# must live either on a PK row, in the SK index, or in a writer's
-		# pocket. Gaps mean a token was *lost* — never logged anywhere.
 		expected_universe = set(range(1, n_accounts + n_writers + 1))
 		universe_union = pk_set | sk_set | drained_set
-		universe_missing = sorted(expected_universe - universe_union)
 		universe_extra = sorted(universe_union - expected_universe)
-		# Pocketed tokens that *also* appear on a PK row -- writer's drain
-		# value duplicates a row's token. Possible if a tx committed and
-		# then `my_token = to_token` raced with a crash, or if the writer's
-		# bookkeeping is inconsistent with the DB.
-		drained_in_pk = sorted(drained_set & pk_set)
-		# Pocketed tokens still present in the SK index -- the writer
-		# pulled the token off the row, but the SK didn't get the deletion.
-		# Direct evidence of an SK ghost matching a known-pocketed value.
-		drained_in_sk = sorted(drained_set & sk_set)
 
 		with errors_lock:
 			seen = list(errors)
@@ -1073,12 +1068,8 @@ class RrStressTest(BaseTest):
 		print(f'[diag] universe coverage: '
 		      f'{len(universe_union & expected_universe)}/{len(expected_universe)} '
 		      f'(pk={len(pk_set)} sk_distinct={len(sk_set)} drained_distinct={len(drained_set)})')
-		print(f'[diag] universe_missing (in [1,{n_accounts + n_writers}] but not '
-		      f'in PK/SK/drained) = {universe_missing}')
 		print(f'[diag] universe_extra (in PK/SK/drained but outside '
 		      f'[1,{n_accounts + n_writers}]) = {universe_extra}')
-		print(f'[diag] drained ∩ pk = {drained_in_pk}')
-		print(f'[diag] drained ∩ sk = {drained_in_sk}')
 		# Full per-row PK dump and SK token list -- unconditional, so a
 		# post-processor can do per-row PK<->SK matching across trials.
 		print(f'[diag] pk_dump (id, balance, token) = {pk_dump!r}')
@@ -1152,32 +1143,11 @@ class RrStressTest(BaseTest):
 			    f'pk_row_count ({pk_row_count}) != '
 			    f'sk_row_count ({sk_row_count}) '
 			    f'-- PK heap and SK index disagree on row count')
-		# Token-universe completeness: PK ∪ SK ∪ drained must equal
-		# [1, n_accounts + n_writers]. Any value missing from all three
-		# sets is a token that was lost in flight.
-		if universe_missing:
-			violations.append(
-			    f'token universe incomplete: {len(universe_missing)} '
-			    f'token(s) absent from PK, SK, and writer pockets: '
-			    f'{universe_missing}')
 		if universe_extra:
 			violations.append(
 			    f'token universe extra: {len(universe_extra)} '
 			    f'token(s) outside [1,{n_accounts + n_writers}]: '
 			    f'{universe_extra}')
-		# Drained-PK overlap: a writer's pocketed token should not be on
-		# any PK row at test end (writer pulled it off when its last tx
-		# committed). Overlap is a consistency error.
-		if drained_in_pk:
-			violations.append(
-			    f'drained ∩ PK non-empty: writer-pocketed tokens also '
-			    f'present on PK rows: {drained_in_pk}')
-		# Drained-SK overlap: writer pulled this token off a row, but
-		# the SK still has an entry for it. Direct SK ghost evidence.
-		if drained_in_sk:
-			violations.append(
-			    f'drained ∩ SK non-empty: writer-pocketed tokens still '
-			    f'in SK index (SK ghosts of pocketed values): {drained_in_sk}')
 		if rows != n_accounts:
 			violations.append(f'rows {rows} != {n_accounts}')
 		if seen:
