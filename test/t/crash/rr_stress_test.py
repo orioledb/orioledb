@@ -1018,18 +1018,55 @@ class RrStressTest(BaseTest):
 		    "SELECT count(DISTINCT token)::int FROM o_bank_account",
 		    label='count(DISTINCT token)')
 		# Enumerate SK contents directly (forced index path on unique
-		# token SK). Used below to compute PK <-> SK token-set diff.
-		sk_tokens_raw = _sk_force_idx(
-		    "SELECT token FROM o_bank_account ORDER BY token",
-		    label='token enumeration')
+		# token SK). The query returns (token, id): in orioledb, SK
+		# entries implicitly include the PK columns, so an Index Only
+		# Scan on the token-unique SK delivers both without touching
+		# the PK heap. Used below for token-set diffs AND for per-row
+		# ghost mapping (see ghost-row analysis).
+		sk_dump = _sk_force_idx(
+		    "SELECT token, id FROM o_bank_account ORDER BY token",
+		    label='token+id enumeration')
 		sk_set = set()
+		sk_pairs = set()
 		pk_set = set()
-		if isinstance(sk_tokens_raw, list):
-			sk_set = {r[0] for r in sk_tokens_raw}
+		pk_by_id = {}
+		if isinstance(sk_dump, list):
+			sk_set = {r[0] for r in sk_dump}
+			sk_pairs = {(r[0], r[1]) for r in sk_dump}
 		if isinstance(pk_dump, list):
 			pk_set = {r[2] for r in pk_dump}
+			pk_by_id = {r[0]: r[2] for r in pk_dump}
 		sk_extra = sorted(sk_set - pk_set)
 		sk_missing = sorted(pk_set - sk_set)
+		# Ghost-row mapping: SK entries (token, id) where the PK row
+		# with that id carries a *different* token. Confirms that the
+		# leak is the DELETE-side of an UPDATE not landing on the SK --
+		# the row's current token is on PK and (possibly) on SK as a
+		# second entry, while the old token still has its (token, id)
+		# SK entry pointing at the row that has since moved on.
+		# Format: (sk_token, id, pk_token_now). pk_token_now is None
+		# if the id is missing from PK entirely (orphan SK entry).
+		sk_ghost_rows = sorted(
+		    (tok, _id, pk_by_id.get(_id))
+		    for tok, _id in sk_pairs
+		    if pk_by_id.get(_id) != tok)
+		# PK rows whose (token, id) is NOT present in SK -- the
+		# INSERT-side of an UPDATE was lost (or the row's SK entry
+		# was missed at first insertion).
+		sk_missing_rows = sorted(
+		    (tok, _id)
+		    for _id, tok in pk_by_id.items()
+		    if (tok, _id) not in sk_pairs)
+		# Duplicate SK entries: (token, id) appearing more than once
+		# would not show up in sk_pairs (it dedupes), so detect via
+		# the raw dump length vs distinct pair count.
+		sk_duplicate_pairs = []
+		if isinstance(sk_dump, list) and len(sk_dump) != len(sk_pairs):
+			from collections import Counter
+			_c = Counter((r[0], r[1]) for r in sk_dump)
+			sk_duplicate_pairs = sorted(
+			    (tok, _id, n)
+			    for (tok, _id), n in _c.items() if n > 1)
 
 		# Drain summary: the writer threads' final pocketed tokens.
 		# Kept as a forensic diagnostic only — writers SIGQUIT'd in the
@@ -1063,6 +1100,23 @@ class RrStressTest(BaseTest):
 		      f'{pk_oor_tokens!r}')
 		print(f'[diag] sk_set\\pk_set (in SK, not PK) = {sk_extra}')
 		print(f'[diag] pk_set\\sk_set (in PK, not SK) = {sk_missing}')
+		# Per-row ghost mapping (the load-bearing diagnostic for the
+		# DELETE-side leak hypothesis): every SK entry (token, id)
+		# whose id's PK row carries a *different* token. Each row here
+		# is direct evidence that the SK did not delete the old entry
+		# when the PK row's token was UPDATEd. The third tuple element
+		# is the PK row's current token (None if the id is missing
+		# from PK entirely -- orphan SK entry).
+		print(f'[diag] sk_ghost_rows (sk_token, id, pk_token_now) = '
+		      f'{sk_ghost_rows}')
+		# Per-row missing mapping (the INSERT-side leak): every PK row
+		# (token, id) for which the SK has no matching entry. Format:
+		# (pk_token, id) so it can be diffed against sk_ghost_rows by
+		# id directly.
+		print(f'[diag] sk_missing_rows (pk_token, id) = '
+		      f'{sk_missing_rows}')
+		print(f'[diag] sk_duplicate_pairs (token, id, count) = '
+		      f'{sk_duplicate_pairs}')
 		print(f'[diag] drained_tokens (writer_id, my_token) = {sorted(drained_raw)}')
 		print(f'[diag] drained_set (unique) = {sorted(drained_set)}')
 		print(f'[diag] universe coverage: '
@@ -1073,7 +1127,7 @@ class RrStressTest(BaseTest):
 		# Full per-row PK dump and SK token list -- unconditional, so a
 		# post-processor can do per-row PK<->SK matching across trials.
 		print(f'[diag] pk_dump (id, balance, token) = {pk_dump!r}')
-		print(f'[diag] sk_tokens (raw, ordered by token) = {sk_tokens_raw!r}')
+		print(f'[diag] sk_dump (token, id, ordered by token) = {sk_dump!r}')
 		print(f'[diag] tbl_check_ok = {tbl_check_ok!r} '
 		      f'retained_undo = {retained!r}')
 		if isinstance(pk_seq, list) and pk_seq and len(pk_seq[0]) >= 3:
