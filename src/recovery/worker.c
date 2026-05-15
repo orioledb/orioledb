@@ -1048,19 +1048,27 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 			{
 				OTuple		nullTup;
 				BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
+				OBTreeModifyResult sk_res;
 
 				O_TUPLE_SET_NULL(nullTup);
+
+				elog(LOG, "sk-trace pid=%d oxid=%lu UPDATE-SK tree=%u.%u.%u skkey-diff",
+					 MyProcPid, (unsigned long) oxid,
+					 tree->desc.oids.datoid, tree->desc.oids.reloid,
+					 tree->desc.oids.relnode);
 
 				if (o_is_index_predicate_satisfied(tree,
 												   old_slot,
 												   tree->econtext))
 				{
 					callbackInfo.modifyCallback = recovery_delete_overwrite_callback;
-					(void) o_btree_modify(&tree->desc, BTreeOperationDelete,
-										  nullTup, BTreeKeyNone,
-										  (Pointer) &old_key, BTreeKeyBound,
-										  oxid, csn, RowLockUpdate,
-										  NULL, &callbackInfo);
+					sk_res = o_btree_modify(&tree->desc, BTreeOperationDelete,
+											nullTup, BTreeKeyNone,
+											(Pointer) &old_key, BTreeKeyBound,
+											oxid, csn, RowLockUpdate,
+											NULL, &callbackInfo);
+					elog(LOG, "sk-trace pid=%d oxid=%lu DELETE result=%d",
+						 MyProcPid, (unsigned long) oxid, (int) sk_res);
 				}
 
 				if (o_is_index_predicate_satisfied(tree,
@@ -1085,11 +1093,13 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 						continue;
 					}
 
-					(void) o_btree_modify(&tree->desc, BTreeOperationInsert,
-										  new_stup, BTreeKeyLeafTuple,
-										  (Pointer) &new_key, BTreeKeyBound,
-										  oxid, csn, RowLockUpdate,
-										  NULL, &callbackInfo);
+					sk_res = o_btree_modify(&tree->desc, BTreeOperationInsert,
+											new_stup, BTreeKeyLeafTuple,
+											(Pointer) &new_key, BTreeKeyBound,
+											oxid, csn, RowLockUpdate,
+											NULL, &callbackInfo);
+					elog(LOG, "sk-trace pid=%d oxid=%lu INSERT result=%d",
+						 MyProcPid, (unsigned long) oxid, (int) sk_res);
 					pfree(new_stup.data);
 				}
 			}
