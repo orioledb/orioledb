@@ -2357,6 +2357,160 @@ class RecoveryTest(BaseTest):
 
 		node.stop()
 
+	def test_recovery_sk_cross_row_rotation(self):
+		"""
+		Secondary key sync after crash recovery.
+
+		Drives a concurrent token-rotation workload + concurrent checkpoints
+		then a clean crash, and verifies SK matches PK after recovery.
+
+		Each rotation txn:
+		    UPDATE row_a SET token = T_new       -- removes A's old token from SK
+		    UPDATE row_b SET token = A's old      -- re-inserts A's old at B
+		The SK key "A's old" is deleted from one row and inserted at another
+		in the same txn.
+		"""
+		import threading
+		from collections import Counter
+
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "max_wal_size = 4GB\n"
+		    "orioledb.recovery_pool_size = 4\n"
+		    "max_worker_processes = 32\n")
+		node.start()
+		n_rows = 200
+		node.safe_psql(
+		    'postgres', f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_sk_rotation (
+				id int NOT NULL,
+				token bigint NOT NULL,
+				PRIMARY KEY (id),
+				UNIQUE (token)
+			) USING orioledb;
+			INSERT INTO o_sk_rotation
+				SELECT i, i FROM generate_series(1, {n_rows}) i;
+		""")
+		node.safe_psql('postgres', "CHECKPOINT;")
+
+		n_writers = 8
+		n_rotations = 2000
+		counter = [0]
+		counter_lock = threading.Lock()
+
+		def writer_loop():
+			con = node.connect()
+			try:
+				while True:
+					with counter_lock:
+						i = counter[0]
+						if i >= n_rotations:
+							return
+						counter[0] = i + 1
+					a = (i * 7) % n_rows + 1
+					b = (i * 13 + 1) % n_rows + 1
+					if a == b:
+						continue
+					t_new = 10 * n_rows + i
+					while True:
+						try:
+							con.begin()
+							old_a = con.execute(
+							    f"SELECT token FROM o_sk_rotation WHERE id = {a}"
+							)[0][0]
+							con.execute(
+							    f"UPDATE o_sk_rotation SET token = {t_new} WHERE id = {a}"
+							)
+							con.execute(
+							    f"UPDATE o_sk_rotation SET token = {old_a} WHERE id = {b}"
+							)
+							con.commit()
+							break
+						except Exception:
+							try:
+								con.rollback()
+							except Exception:
+								pass
+			finally:
+				con.close()
+
+		stop_checkpointer = threading.Event()
+
+		def checkpointer_loop():
+			con = node.connect()
+			try:
+				while not stop_checkpointer.is_set():
+					try:
+						con.execute("CHECKPOINT;")
+					except Exception:
+						break
+					time.sleep(0.05)
+			finally:
+				try:
+					con.close()
+				except Exception:
+					pass
+
+		threads = [
+		    threading.Thread(target=writer_loop) for _ in range(n_writers)
+		]
+		ckpt_thread = threading.Thread(target=checkpointer_loop)
+		ckpt_thread.start()
+		for t in threads:
+			t.start()
+		for t in threads:
+			t.join()
+		stop_checkpointer.set()
+		ckpt_thread.join()
+
+		self.crash_with_os_buffer_loss()
+		node.start()
+
+		n_pk = node.execute(
+		    'postgres', "SELECT count(*) FROM o_sk_rotation")[0][0]
+		n_sk = node.execute(
+		    'postgres',
+		    "SELECT count(DISTINCT token) FROM o_sk_rotation")[0][0]
+
+		if n_pk != n_sk:
+			# Collect tokens through PK seq-scan vs SK index scan; the
+			# asymmetric difference identifies which entries are orphaned
+			# in which tree.
+			node.execute('postgres',
+			             "SET enable_indexscan = off;"
+			             "SET enable_bitmapscan = off;")
+			pk_tokens = sorted(
+			    r[0] for r in node.execute(
+			        'postgres',
+			        "SELECT token FROM o_sk_rotation ORDER BY id"))
+			node.execute('postgres',
+			             "RESET enable_indexscan;"
+			             "RESET enable_bitmapscan;"
+			             "SET enable_seqscan = off;")
+			sk_tokens = sorted(
+			    r[0] for r in node.execute(
+			        'postgres',
+			        "SELECT token FROM o_sk_rotation ORDER BY token"))
+			node.execute('postgres', "RESET enable_seqscan;")
+			pk_set, sk_set = set(pk_tokens), set(sk_tokens)
+			print(f"\n  PK rows={n_pk} ({len(pk_tokens)} via seq), "
+			      f"SK distinct={n_sk} ({len(sk_tokens)} via index)\n"
+			      f"  in PK not SK: {sorted(pk_set - sk_set)[:10]}\n"
+			      f"  in SK not PK: {sorted(sk_set - pk_set)[:10]}\n"
+			      f"  SK duplicate tokens: "
+			      f"{[t for t,c in Counter(sk_tokens).items() if c > 1][:10]}")
+
+		self.assertEqual(
+		    n_pk, n_sk,
+		    f"PK rows ({n_pk}) != SK distinct tokens ({n_sk}) after recovery")
+		self.assertTrue(
+		    node.execute(
+		        'postgres',
+		        "SELECT orioledb_tbl_check('o_sk_rotation'::regclass)")[0][0])
+		node.stop()
+
 
 class RecoveryWithArchivingTest(BaseTest):
 
