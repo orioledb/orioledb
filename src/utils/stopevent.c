@@ -280,14 +280,24 @@ make_process_params(void)
 {
 	JsonbParseState *state = NULL;
 	Jsonb	   *res;
-	const char *beType;
+	const char *beType = NULL;
+	BackendType bt;
 
 	MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
 
-	if (MyBEEntry->st_backendType == B_BG_WORKER)
-		beType = GetBackgroundWorkerTypeByPid(MyBEEntry->st_procpid);
+	/*
+	 * MyBEEntry is only set up by pgstat, which is skipped by background
+	 * workers registered without BGWORKER_BACKEND_DATABASE_CONNECTION (such
+	 * as the orioledb recovery workers).  Fall back to the
+	 * postmaster-supplied MyBackendType global so stopevent conditions can
+	 * still filter on backendType for those workers.
+	 */
+	bt = MyBEEntry ? MyBEEntry->st_backendType : MyBackendType;
+
+	if (bt == B_BG_WORKER)
+		beType = GetBackgroundWorkerTypeByPid(MyProcPid);
 	else
-		beType = GetBackendTypeDesc(MyBEEntry->st_backendType);
+		beType = GetBackendTypeDesc(bt);
 
 	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
 	jsonb_push_int8_key(&state, "pid", MyProcPid);

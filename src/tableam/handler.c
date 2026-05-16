@@ -459,6 +459,22 @@ orioledb_row_ref_equals(Relation rel, Datum tupleidDatum1, Datum tupleidDatum2)
 	return is_keys_eq(&GET_PRIMARY(descr)->desc, &rowid1, &rowid2);
 }
 
+/*
+ * Called by the executor after every per-row INSERT/UPDATE/DELETE has had
+ * its secondary indices updated (i.e. after ExecInsertIndexTuples()).  We
+ * clear the pendingSkUndoLoc marker that was set right after the PK
+ * btree_modify in o_tbl_indices_overwrite() / o_tbl_indices_reinsert() /
+ * o_tbl_insert() / o_tbl_indices_delete().  Once cleared the row no longer
+ * has a PK-applied/SK-pending fix-up obligation for the checkpointer to
+ * emit.
+ */
+static void
+orioledb_tuple_complete_modification(Relation rel)
+{
+	(void) rel;
+	clear_pending_sk_marker();
+}
+
 static TupleTableSlot *
 orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 					  CommandId cid, int options, BulkInsertState bistate)
@@ -2481,6 +2497,7 @@ static const TableAmRoutine orioledb_am_methods = {
 	.tuple_delete = orioledb_tuple_delete,
 	.tuple_update = orioledb_tuple_update,
 	.tuple_lock = orioledb_tuple_lock,
+	.tuple_complete_modification = orioledb_tuple_complete_modification,
 	.finish_bulk_insert = orioledb_finish_bulk_insert,
 
 	.tuple_fetch_row_version = orioledb_fetch_row_version,

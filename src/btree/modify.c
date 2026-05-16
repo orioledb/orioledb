@@ -721,6 +721,15 @@ o_btree_modify_insert_update(BTreeModifyInternalContext *context)
 			if (!is_recovery_process())
 				leafTuphdr->undoLocation |= current_command_get_undo_location();
 		}
+
+		/*
+		 * Self-created shortcut: no undo record was made.  Fire the post-undo
+		 * hook with WaitingSkUndoLoc so the table AM can install a "wait for
+		 * me" marker before this page lock drops.
+		 */
+		if (context->callbackInfo && context->callbackInfo->postUndoRecorded)
+			context->callbackInfo->postUndoRecorded(WaitingSkUndoLoc,
+													context->callbackInfo->arg);
 	}
 
 	if (desc->undoType == UndoLogRegular && !is_recovery_process())
@@ -784,6 +793,15 @@ o_btree_modify_add_undo_record(BTreeModifyInternalContext *context)
 			leafTuphdr->undoLocation |= current_command_get_undo_location();
 		}
 	}
+
+	/*
+	 * Fire post-undo hook with the freshly created undo location, while the
+	 * leaf page is still locked.  Used by the table AM to install the
+	 * PK-applied/SK-pending marker before unlock.
+	 */
+	if (context->callbackInfo && context->callbackInfo->postUndoRecorded)
+		context->callbackInfo->postUndoRecorded(undoLocation,
+												context->callbackInfo->arg);
 }
 
 static OBTreeModifyResult
@@ -855,6 +873,15 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 		undoLocation = make_undo_record(desc, key, key_is_tuple,
 										BTreeOperationDelete, blkno,
 										pageChangeCount, tuphdr);
+
+		/*
+		 * Fire post-undo hook with the freshly created undo location, while
+		 * the leaf page is still locked.  Used by the table AM to install the
+		 * PK-applied/SK-pending marker before unlock.
+		 */
+		if (context->callbackInfo && context->callbackInfo->postUndoRecorded)
+			context->callbackInfo->postUndoRecorded(undoLocation,
+													context->callbackInfo->arg);
 	}
 	else
 	{

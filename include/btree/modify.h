@@ -48,6 +48,20 @@ typedef struct BTreeModifyCallbackInfo
 														 void *arg);
 	bool		needsUndoForSelfCreated;
 	void	   *arg;
+
+	/*
+	 * Optional hook fired once per successful PK-side modification, while the
+	 * affected leaf page is still locked.  Called with the freshly created
+	 * undo location (real value from make_undo_record), or with the
+	 * WaitingSkUndoLoc sentinel when the self-created shortcut skips undo
+	 * entirely.  Used by the table AM to install the PK-applied/SK-pending
+	 * marker before the page lock drops, eliminating the race window that
+	 * would exist if the marker was written by the caller after
+	 * o_btree_modify() returned.  The same `arg` is passed as the other
+	 * callbacks above receive; the hook is expected to extract the
+	 * OTableDescr from whatever arg type the caller chose.
+	 */
+	void		(*postUndoRecorded) (UndoLocation undoLoc, void *arg);
 } BTreeModifyCallbackInfo;
 
 extern BTreeModifyCallbackInfo nullCallbackInfo;

@@ -149,6 +149,13 @@ extern void o_check_tbl_update_mres(OTableModifyResult mres,
 extern void o_check_tbl_delete_mres(OTableModifyResult mres,
 									OTableDescr *descr, Relation rel);
 
+extern void set_pending_sk_marker(OTableDescr *descr, UndoLocation pkUndoLoc);
+extern void set_pending_sk_marker_from_slot(UndoLocation pkUndoLoc, void *arg);
+extern void set_pending_sk_marker_from_modify_arg(UndoLocation pkUndoLoc,
+												  void *arg);
+extern void fire_sk_modify_pending_stopevent(OTableDescr *descr);
+extern void clear_pending_sk_marker(void);
+
 extern bool o_is_index_predicate_satisfied(OIndexDescr *idx,
 										   TupleTableSlot *slot,
 										   ExprContext *econtext);

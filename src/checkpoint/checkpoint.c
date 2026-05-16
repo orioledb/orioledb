@@ -782,7 +782,7 @@ write_to_xids_queue(XidFileRec *rec)
 	while (location >= pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos) + XID_RECS_QUEUE_SIZE)
 		try_flush_xids_queue();
 
-	target->undoType = rec->undoType;
+	target->kind = rec->kind;
 	target->undoLocation = rec->undoLocation;
 	target->retainLocation = rec->retainLocation;
 
@@ -894,7 +894,7 @@ finish_write_xids(uint32 chkpnum, bool shutdown)
 					UndoLogType undoType = GetCheckpointableUndoLog(k);
 
 					xidRec.oxid = oProcData[i].vxids[j].oxid;
-					xidRec.undoType = undoType;
+					xidRec.kind = (XidRecKind) undoType;
 					if (OXidIsValid(xidRec.oxid))
 					{
 						pg_read_barrier();
@@ -963,6 +963,87 @@ finish_write_xids(uint32 chkpnum, bool shutdown)
 	pfree(temp_file_loaded);
 }
 
+/*
+ * Walk every backend's ODBProcData and emit a PendingSkFixup record for
+ * any backend that is in the PK-applied / SK-pending window at the
+ * moment we cross over from primary indices to secondary indices.
+ *
+ * Called from checkpoint_tables_callback() just before
+ * checkpoint_state->toastConsistentPtr is set so that the snapshot
+ * captured here reflects the WAL state up to that boundary.
+ */
+static void
+checkpoint_write_pending_sk_fixups(void)
+{
+	XidFileRec	xidRec;
+	int			i;
+
+	memset(&xidRec, 0, sizeof(xidRec));
+	xidRec.kind = XidRecPendingSkFixup;
+	xidRec.retainLocation = InvalidUndoLocation;
+	xidRec.undoLocation.branchLocation = InvalidUndoLocation;
+	xidRec.undoLocation.subxactLocation = InvalidUndoLocation;
+	xidRec.undoLocation.onCommitLocation = InvalidUndoLocation;
+
+	for (i = 0; i < max_procs; i++)
+	{
+		UndoLocation pendingLoc;
+		OXid		oxid;
+		int			level;
+
+		/*
+		 * If the backend is in the PK-applied/SK-pending window on a
+		 * self-created table (signalled by WaitingSkUndoLoc), there is no
+		 * undo record to point a fix-up entry at -- but the table is private
+		 * to that in-progress txn, so the SK btree_modify cannot be blocked
+		 * by anyone.  Spin until the sentinel clears.
+		 *
+		 * Spin OUTSIDE the proc's flushLock: the backend's own commit/abort
+		 * path also acquires that lock (walk_undo_stack); holding it across
+		 * the sleep would deadlock against any backend that would clear the
+		 * sentinel at commit time.
+		 */
+		for (;;)
+		{
+			pendingLoc = pg_atomic_read_u64(&oProcData[i].pendingSkUndoLoc);
+			if (pendingLoc != WaitingSkUndoLoc)
+				break;
+			pg_usleep(100L);
+		}
+
+		LWLockAcquire(&oProcData[i].undoStackLocationsFlushLock, LW_EXCLUSIVE);
+
+		/* Re-read under the lock; could have changed while we were spinning. */
+		pendingLoc = pg_atomic_read_u64(&oProcData[i].pendingSkUndoLoc);
+		if (!UndoLocationIsValid(pendingLoc) || pendingLoc == WaitingSkUndoLoc)
+		{
+			LWLockRelease(&oProcData[i].undoStackLocationsFlushLock);
+			continue;
+		}
+
+		/*
+		 * The marker is set strictly inside a single PK->SK window; the
+		 * caller cannot have nested into an autonomous transaction in the
+		 * meantime.  Pick the currently-active oxid for this proc.
+		 */
+		level = oProcData[i].autonomousNestingLevel;
+		if (level < 0 || level >= PROC_XID_ARRAY_SIZE)
+		{
+			LWLockRelease(&oProcData[i].undoStackLocationsFlushLock);
+			continue;
+		}
+		oxid = oProcData[i].vxids[level].oxid;
+		if (OXidIsValid(oxid))
+		{
+			xidRec.oxid = oxid;
+			xidRec.undoLocation.location = pendingLoc;
+			write_to_xids_queue(&xidRec);
+		}
+
+		LWLockRelease(&oProcData[i].undoStackLocationsFlushLock);
+	}
+}
+
 void
 checkpoint_write_rewind_item(RewindItem *rewindItem)
 {
@@ -984,7 +1065,7 @@ checkpoint_write_rewind_item(RewindItem *rewindItem)
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
-		xidRec.undoType = (UndoLogType) (i + XID_REC_REWIND_TYPES_OFFSET);
+		xidRec.kind = (XidRecKind) (i + XID_REC_REWIND_TYPES_OFFSET);
 		xidRec.undoLocation.onCommitLocation = rewindItem->onCommitUndoLocation[i];
 		xidRec.undoLocation.location = InvalidUndoLocation;
 		xidRec.undoLocation.branchLocation = InvalidUndoLocation;
@@ -1337,11 +1418,16 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	checkpoint_chkp_nums(flags, cur_chkp_num, &chkp_tbl_arg);
 
 	/*
-	 * It might happen there is no secondary indices, but we still need to set
-	 * toastConsistentPtr.
+	 * It might happen there is no oIndexRegular secondary indices in the
+	 * snapshot (e.g. all secondaries are oIndexUnique / oIndexExclusion), but
+	 * we still need to set toastConsistentPtr -- and emit the PendingSkFixup
+	 * snapshot before publishing the boundary.
 	 */
 	if (XLogRecPtrIsInvalid(checkpoint_state->toastConsistentPtr))
+	{
 		checkpoint_state->toastConsistentPtr = get_checkpoint_xlog_ptr();
+		checkpoint_write_pending_sk_fixups();
+	}
 
 	finish_write_xids(cur_chkp_num, (flags & CHECKPOINT_IS_SHUTDOWN) ? true : false);
 	close_xids_file();
@@ -5016,10 +5102,17 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 		Assert(!have_locked_pages());
 		Assert(!have_retained_undo_location());
 
-		if (td->type == oIndexRegular &&
+		if (td->type >= oIndexUnique &&
 			XLogRecPtrIsInvalid(checkpoint_state->toastConsistentPtr))
 		{
+			/*
+			 * Snapshot every backend's PK-applied/SK-pending marker before
+			 * publishing the toast-consistent boundary so that recovery's
+			 * later fix-up pass sees exactly the in-flight rows that this
+			 * checkpoint cut across.
+			 */
 			checkpoint_state->toastConsistentPtr = get_checkpoint_xlog_ptr();
+			checkpoint_write_pending_sk_fixups();
 		}
 
 		LWLockRelease(&checkpoint_state->oTablesMetaLock);
