@@ -45,6 +45,105 @@
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 
+/*
+ * Set ODBProcData.pendingSkUndoLoc to mark the PK-applied/SK-pending
+ * window so that any checkpointer scan in between sees this row's
+ * undo location.  Fires STOPEVENT_SK_MODIFY_PENDING immediately after,
+ * which deterministic tests use to interleave a CHECKPOINT in the
+ * window.  No-op when the PK btree does not produce a regular undo
+ * entry (toast/sys trees, in-progress reads, etc.).
+ *
+ * Used both by the normal DML path and by recovery workers replaying
+ * WAL on the replica, so a restartpoint observes the same window.
+ */
+/*
+ * Convenience postUndoRecorded callbacks that extract the OTableDescr from
+ * whatever arg shape the caller is already passing to the other callbacks
+ * in BTreeModifyCallbackInfo.  Each call site picks the variant that
+ * matches its `arg`.
+ */
+void
+set_pending_sk_marker_from_slot(UndoLocation pkUndoLoc, void *arg)
+{
+	set_pending_sk_marker(((OTableSlot *) arg)->descr, pkUndoLoc);
+}
+
+void
+set_pending_sk_marker_from_modify_arg(UndoLocation pkUndoLoc, void *arg)
+{
+	set_pending_sk_marker(((OModifyCallbackArg *) arg)->descr, pkUndoLoc);
+}
+
+void
+set_pending_sk_marker(OTableDescr *descr, UndoLocation pkUndoLoc)
+{
+	if (GET_PRIMARY(descr)->desc.undoType != UndoLogRegular)
+		return;
+
+	/*
+	 * No secondary index, no PK/SK desynchronisation risk -- skip the marker
+	 * entirely.  This also avoids leaking a WaitingSkUndoLoc sentinel from
+	 * code paths that call table_tuple_insert() without later invoking
+	 * table_tuple_complete_modification() (CREATE TABLE AS, REFRESH MAT VIEW,
+	 * COPY into a fresh table without SK, ...).
+	 */
+	if (descr->nIndices < 2)
+		return;
+
+	/*
+	 * Two acceptable inputs: a real undo location (regular path) or the
+	 * WaitingSkUndoLoc sentinel that the PK btree_modify produced for a
+	 * self-created table.  Anything else means the PK modification didn't
+	 * happen or didn't produce trackable state.
+	 */
+	if (!UndoLocationIsValid(pkUndoLoc) && pkUndoLoc != WaitingSkUndoLoc)
+		return;
+
+	pg_atomic_write_u64(&GET_CUR_PROCDATA()->pendingSkUndoLoc, pkUndoLoc);
+}
+
+/*
+ * Fire STOPEVENT_SK_MODIFY_PENDING after o_btree_modify has returned, so
+ * deterministic tests can park here OUTSIDE any page lock.  No-op when the
+ * marker was not actually installed for this proc (e.g. PK btree had no
+ * undo, table has no SK, or the modify did not happen).
+ */
+void
+fire_sk_modify_pending_stopevent(OTableDescr *descr)
+{
+	UndoLocation cur;
+
+	if (!STOPEVENTS_ENABLED())
+		return;
+	if (GET_PRIMARY(descr)->desc.undoType != UndoLogRegular)
+		return;
+	if (descr->nIndices < 2)
+		return;
+
+	cur = pg_atomic_read_u64(&GET_CUR_PROCDATA()->pendingSkUndoLoc);
+	if (!UndoLocationIsValid(cur) && cur != WaitingSkUndoLoc)
+		return;
+
+	{
+		JsonbParseState *state = NULL;
+		Jsonb	   *params;
+		MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+		pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+		btree_desc_stopevent_params_internal(&GET_PRIMARY(descr)->desc, &state);
+		params = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+		MemoryContextSwitchTo(mctx);
+		STOPEVENT(STOPEVENT_SK_MODIFY_PENDING, params);
+	}
+}
+
+void
+clear_pending_sk_marker(void)
+{
+	pg_atomic_write_u64(&GET_CUR_PROCDATA()->pendingSkUndoLoc,
+						InvalidUndoLocation);
+}
+
 static OTableModifyResult o_tbl_indices_overwrite(OTableDescr *descr,
 												  OBTreeKeyBound *oldPkey,
 												  TupleTableSlot *newSlot,
@@ -294,7 +393,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		.modifyDeletedCallback = o_insert_callback,
 		.modifyCallback = NULL,
 		.needsUndoForSelfCreated = false,
-		.arg = slot
+		.postUndoRecorded = set_pending_sk_marker_from_slot
 	};
 
 	was_saving = o_start_saving_inval_messages();
@@ -309,6 +408,13 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		ExecCopySlot(descr->newTuple, slot);
 		slot = descr->newTuple;
 	}
+
+	/*
+	 * Wire .arg only after the slot may have been swapped to descr->newTuple
+	 * above -- both o_insert_callback and the post-undo hook read
+	 * ((OTableSlot *) arg)->descr, which is only valid on an orioledb slot.
+	 */
+	callbackInfo.arg = slot;
 
 	if (GET_PRIMARY(descr)->primaryIsCtid)
 	{
@@ -331,6 +437,14 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 
 	mres.success = (o_tbl_index_insert(descr, descr->indices[0], NULL, slot,
 									   oxid, csn, &callbackInfo, UNIQUE_CHECK_YES) == OBTreeModifyResultInserted);
+
+	/*
+	 * The marker (if any) was already installed under page lock by the
+	 * postUndoRecorded hook; here we just fire the stopevent outside of any
+	 * page lock so deterministic tests can park here without blocking
+	 * concurrent backends on the same leaf.
+	 */
+	fire_sk_modify_pending_stopevent(descr);
 	if (!mres.success)
 	{
 		mres.failedIxNum = 0;
@@ -340,7 +454,9 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		o_report_duplicate(relation, descr->indices[mres.failedIxNum], slot);
 	}
 	else
+	{
 		pgstat_count_heap_insert(relation, 1);
+	}
 
 	o_toast_insert_values(relation, descr, slot, oxid, csn);
 
@@ -1566,7 +1682,8 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 		.modifyDeletedCallback = o_update_deleted_callback,
 		.modifyCallback = o_update_callback,
 		.needsUndoForSelfCreated = false,
-		.arg = arg
+		.arg = arg,
+		.postUndoRecorded = set_pending_sk_marker_from_modify_arg
 	};
 
 	memset(&result, 0, sizeof(result));
@@ -1580,6 +1697,7 @@ o_tbl_indices_overwrite(OTableDescr *descr,
 								   (Pointer) oldPkey, BTreeKeyBound,
 								   oxid, csn, RowLockNoKeyUpdate,
 								   hint, &callbackInfo);
+	fire_sk_modify_pending_stopevent(descr);
 
 	if (modify_result == OBTreeModifyResultLocked)
 	{
@@ -1643,7 +1761,8 @@ o_tbl_indices_reinsert(OTableDescr *descr,
 		.modifyDeletedCallback = o_insert_callback,
 		.modifyCallback = NULL,
 		.needsUndoForSelfCreated = false,
-		.arg = newSlot
+		.arg = newSlot,
+		.postUndoRecorded = set_pending_sk_marker_from_slot
 	};
 
 	memset(&result, 0, sizeof(result));
@@ -1686,6 +1805,7 @@ o_tbl_indices_reinsert(OTableDescr *descr,
 							  (Pointer) newPkey, BTreeKeyBound,
 							  oxid, csn, RowLockUpdate,
 							  NULL, &insertCallbackInfo) == OBTreeModifyResultInserted;
+	fire_sk_modify_pending_stopevent(descr);
 	((OTableSlot *) newSlot)->version = o_tuple_get_version(((OTableSlot *) newSlot)->tuple);
 
 	if (inserted)
@@ -1756,7 +1876,8 @@ o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key,
 		.modifyDeletedCallback = o_delete_deleted_callback,
 		.modifyCallback = o_delete_callback,
 		.needsUndoForSelfCreated = false,
-		.arg = arg
+		.arg = arg,
+		.postUndoRecorded = set_pending_sk_marker_from_modify_arg
 	};
 
 	memset(&result, 0, sizeof(result));
@@ -1775,6 +1896,7 @@ o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key,
 											  (Pointer) key, BTreeKeyBound,
 											  oxid, csn, hint,
 											  &callbackInfo);
+	fire_sk_modify_pending_stopevent(descr);
 
 	slot = update_arg_get_slot(arg);
 	csn = arg->csn;
@@ -1799,6 +1921,7 @@ o_tbl_indices_delete(OTableDescr *descr, OBTreeKeyBound *key,
 	result.success = true;
 	result.action = BTreeOperationDelete;
 	result.oldTuple = slot;
+
 	return result;
 }
 

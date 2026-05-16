@@ -148,6 +148,19 @@ typedef uint64 UndoLocation;
 #define UndoLocationIsValid(loc)	(((loc) & InvalidUndoLocation) == 0)
 #define UndoLocationGetValue(loc)	((loc) & UndoLocationValueMask)
 
+/*
+ * Sentinel for ODBProcData.pendingSkUndoLoc.  Set by the PK btree_modify
+ * when no undo record was produced because the table was created in the
+ * current transaction (see the self-created shortcut in
+ * o_btree_modify_internal()).  The checkpointer treats this as "wait
+ * until this backend leaves the PK-applied/SK-pending window" instead of
+ * recording a fix-up entry: a self-created table is private to the
+ * in-progress txn, so no other backend can stall the SK btree_modify and
+ * the wait is bounded.  Distinguishable from InvalidUndoLocation by the
+ * low bit, while still failing UndoLocationIsValid().
+ */
+#define WaitingSkUndoLoc		UINT64CONST(0x2000000000000001)
+
 /* Identifier for orioledb transaction */
 typedef uint64 OXid;
 #define	InvalidOXid					UINT64CONST(0x7FFFFFFFFFFFFFFF)
@@ -243,6 +256,15 @@ typedef struct
 	bool		flushUndoLocations;
 	bool		waitingForOxid;
 	pg_atomic_uint64 xmin;
+
+	/*
+	 * Undo location of the most recent PK modification whose secondary-index
+	 * counterparts are still pending.  Set after the PK btree_modify and
+	 * before the WAL write, cleared by tuple_complete_modification.  Always
+	 * refers to UndoLogRegular; the other undo types do not participate in
+	 * PK/SK recovery fix-up.
+	 */
+	pg_atomic_uint64 pendingSkUndoLoc;
 	UndoStackSharedLocations undoStackLocations[PROC_XID_ARRAY_SIZE][(int) UndoLogsCount];
 	XidVXidMapElement vxids[PROC_XID_ARRAY_SIZE];
 } ODBProcData;
