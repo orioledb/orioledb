@@ -2,9 +2,12 @@ CREATE SCHEMA opclass;
 SET SESSION search_path = 'opclass';
 SET enable_seqscan = off;
 CREATE EXTENSION orioledb;
+-- autovacuum off: the test repeatedly DROP OPERATOR CLASS ... CASCADE's
+-- indexes of this table; a concurrent ANALYZE deadlocks with the cascading
+-- index drop (heap SUE + index ASL vs index AEL + heap AEL).
 CREATE TABLE o_test_custom_opclass (
 	int_val int
-) USING orioledb;
+) USING orioledb WITH (autovacuum_enabled = false);
 CREATE FUNCTION cmp_is_valid_prepare(test_proc regproc)
 RETURNS TABLE (a int, b int, ab int, ba int, abn int, ban int, valid bool)
 AS $$
