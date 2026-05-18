@@ -1274,7 +1274,7 @@ orioledb_tbl_check(PG_FUNCTION_ARGS)
 	for (i = 0; i < descr->nIndices; i++)
 	{
 		o_btree_load_shmem(&descr->indices[i]->desc);
-		result = check_btree(&descr->indices[i]->desc, force_map_check);
+		result = check_btree(&descr->indices[i]->desc, force_map_check, false);
 
 		if (result == false)
 			break;
