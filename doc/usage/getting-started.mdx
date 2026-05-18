@@ -212,6 +212,28 @@ SELECT * FROM orioledb_undo_size();
 
 Undo data is counted in three categories: system undo, user page-level undo and user row-level undo.
 
+### Verifying table integrity
+
+`verify_orioledb()` checks all B-trees (primary, secondary, TOAST, bridge) of an OrioleDB relation and returns one row per index that fails the check. An empty result means the relation is healthy.
+
+```sql
+SELECT * FROM verify_orioledb('blog_post'::regclass);
+```
+
+```sql
+-- thorough_check = true also validates the on-disk free space map
+SELECT * FROM verify_orioledb('blog_post'::regclass, true);
+```
+
+The function takes only `AccessShareLock`, so concurrent reads and writes are not blocked. If a checkpoint is running, it waits for the checkpoint to finish on the affected tree rather than reporting a spurious failure.
+
+`verify_orioledb()` is also wired into PostgreSQL's `amcheck` integration, so OrioleDB relations are checked by [`pg_amcheck`](https://www.postgresql.org/docs/current/app-pgamcheck.html) alongside heap relations:
+
+```bash title="bash"
+pg_amcheck -d mydb -t public.blog_post
+pg_amcheck -d mydb                       # all checkable relations in the database
+```
+
 ### Data deletion
 
 OrioleDB automatically merges sparse pages. Therefore, when many rows are deleted, data pages are freed and available for future usage. Data files aren't currently shrunk in such a situation, but that would be implemented soon.

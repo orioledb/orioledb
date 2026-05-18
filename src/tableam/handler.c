@@ -2459,7 +2459,6 @@ orioledb_tuple_is_current(Relation rel, TupleTableSlot *slot)
 	return COMMITSEQNO_IS_INPROGRESS(oslot->csn);
 }
 
-
 /* ------------------------------------------------------------------------
  * Definition of the orioledb table access method.
  * ------------------------------------------------------------------------
