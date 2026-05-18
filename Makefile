@@ -142,6 +142,7 @@ REGRESSCHECKS = btree_sys_check \
 				rewind
 ISOLATIONCHECKS = bitmap_hist_scan \
 				  btree_iterate \
+				  btree_iterate_split \
 				  btree_print_backend_id \
 				  btree_scan \
 				  concurrent_update_delete \

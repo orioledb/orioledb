@@ -60,6 +60,7 @@ static OffsetNumber btree_page_binary_search_chunks(BTreeDescr *desc, Page p,
 static void btree_page_search_items(BTreeDescr *desc, Page p, Pointer key,
 									BTreeKeyType keyType,
 									BTreePageItemLocator *locator);
+static void refresh_parent_img_chunk(OBTreeFindPageInternalContext *intCxt);
 
 /*
  * Initialize B-tree page find context.
@@ -342,6 +343,57 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 		*tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt->pagePtr, loc);
 
 	return OBTreeFastPathFindOK;
+}
+
+/*
+ * Refresh context->parentImg from the locked shared-memory page held
+ * by `intCxt` and rebind the current locator's chunk onto parentImg.
+ * Used by find_page at level == targetLevel + 1 in IMAGE mode when
+ * intCxt->pagePtr is the real shared-memory page (not parentImg):
+ * without this rebind, the iterator's later find_right_page /
+ * find_left_page would navigate through a chunk pointer into a page
+ * the descent has already unlocked.
+ *
+ * Only the page header (with hikeys) and the chunk that the locator
+ * currently references are copied; the partial state is set up so
+ * other chunks can be loaded on demand by partial_load_chunk if
+ * find_right_page / find_left_page later visit them.  The standard
+ * consistency check in partial_load_chunk then falls through to a
+ * find_page re-descent if the source has been concurrently mutated.
+ */
+static void
+refresh_parent_img_chunk(OBTreeFindPageInternalContext *intCxt)
+{
+	OBTreeFindPageContext *context = intCxt->context;
+	Pointer		src = intCxt->pagePtr;
+	BTreePageItemLocator *locator = &context->items[context->index].locator;
+	BTreePageHeader *hdr = (BTreePageHeader *) src;
+	OffsetNumber chunkOffset = locator->chunkOffset;
+	LocationIndex chunkBegin;
+	LocationIndex chunkEnd;
+
+	chunkBegin = SHORT_GET_LOCATION(hdr->chunkDesc[chunkOffset].shortLocation);
+	if (chunkOffset + 1 < hdr->chunksCount)
+		chunkEnd = SHORT_GET_LOCATION(hdr->chunkDesc[chunkOffset + 1].shortLocation);
+	else
+		chunkEnd = hdr->dataSize;
+
+	/* Header including the hikeys chunk. */
+	memcpy(context->parentImg, src, hdr->hikeysEnd);
+	/* The single chunk that `locator` references. */
+	memcpy(context->parentImg + chunkBegin,
+		   src + chunkBegin,
+		   chunkEnd - chunkBegin);
+
+	context->partial.src = src;
+	context->partial.isPartial = true;
+	context->partial.hikeysChunkIsLoaded = true;
+	memset(context->partial.chunkIsLoaded, 0,
+		   sizeof(context->partial.chunkIsLoaded));
+	context->partial.chunkIsLoaded[chunkOffset] = true;
+
+	locator->chunk =
+		(BTreePageChunk *) (context->parentImg + chunkBegin);
 }
 
 /*--
@@ -708,6 +760,12 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		}
 
+		if (STOPEVENTS_ENABLED())
+		{
+			params = btree_page_stopevent_params(desc, intCxt.pagePtr);
+			STOPEVENT(STOPEVENT_AFTER_FIND_DOWNLINK, params);
+		}
+
 		/* Place new item to the context */
 		Assert(context->index < ORIOLEDB_MAX_DEPTH);
 
@@ -745,18 +803,25 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		{
 			if (intCxt.haveLock)
 			{
-				if (!modifyFlag)
-				{
-					unlock_page(intCxt.blkno);
-				}
-				else if (level == 0 && fixLeafFlag)
+				/*
+				 * The only way the target is reached under a page lock is the
+				 * modify path -- needLock is set only on level > targetLevel
+				 * and is cleared before we step down, and step_upward_level()
+				 * clears haveLock when it unlocks. The IMAGE/FETCH callers
+				 * expect context->img to be populated, which only happens in
+				 * the lockless else branch above; if we ever reached here
+				 * holding a lock without modifyFlag, that contract would be
+				 * silently broken.
+				 */
+				Assert(modifyFlag);
+
+				if (level == 0 && fixLeafFlag)
 				{
 					/* called from o_btree_normal_modify() */
 					/* try to fix incomplete split for leafs here */
 					bool		relocked = false;
 
 					Assert(!noFixFlag);
-					Assert(modifyFlag);
 
 					if (O_PAGE_IS(p, BROKEN_SPLIT))
 					{
@@ -810,23 +875,13 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				if (imageFlag && level == targetLevel + 1)
 				{
 					/*
-					 * Especial case, we load a leaf for image search. Now we
-					 * need to save tuples for the iterators code from the
-					 * parent.
+					 * Just loaded the target's child into shared memory and
+					 * refound the parent under MODIFY lock; the parent's
+					 * downlinks differ from the pre-load partial read still
+					 * sitting in parentImg.  Refresh parentImg and rebind the
+					 * locator before stepping down.
 					 */
-					BTreePageHeader *hdr = (BTreePageHeader *) context->parentImg;
-					OffsetNumber chunkIdx = loc.chunkOffset;
-
-					memcpy(context->parentImg, intCxt.pagePtr, ORIOLEDB_BLCKSZ);
-					context->partial.isPartial = false;
-
-					/*
-					 * We need to ensure that chunk in locator points to
-					 * context memory instead of "in memory" block
-					 */
-					context->items[context->index].locator.chunk =
-						(BTreePageChunk *) (context->parentImg + SHORT_GET_LOCATION(hdr->chunkDesc[chunkIdx].shortLocation));
-
+					refresh_parent_img_chunk(&intCxt);
 				}
 			}
 			else
@@ -846,6 +901,22 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			}
 			wait_for_io_completion(ionum);
 			continue;
+		}
+		else
+		{
+			/*
+			 * IN_MEMORY downlink at the parent of the target in IMAGE mode.
+			 * If we got here under the lock (needLock = true on an earlier
+			 * iteration) intCxt.pagePtr is the real shared-memory page, not
+			 * parentImg, and the locator that find_right_page/find_left_page
+			 * will later consult still has its chunk pointer bound to shared
+			 * memory.  Refresh parentImg from the locked page and rebind the
+			 * locator onto parentImg so subsequent reads do not race against
+			 * concurrent writers on the unlocked shared page.
+			 */
+			if (imageFlag && level == targetLevel + 1 &&
+				intCxt.haveLock && intCxt.pagePtr != context->parentImg)
+				refresh_parent_img_chunk(&intCxt);
 		}
 
 		parentBlkno = intCxt.blkno;
@@ -1006,7 +1077,10 @@ step_upward_level(OBTreeFindPageInternalContext *intCxt)
 	OBTreeFindPageContext *context = intCxt->context;
 
 	if (intCxt->haveLock)
+	{
 		unlock_page(intCxt->blkno);
+		intCxt->haveLock = false;
+	}
 	context->index--;
 	intCxt->blkno = context->items[context->index].blkno;
 	intCxt->pageChangeCount = context->items[context->index].pageChangeCount;
@@ -1260,6 +1334,10 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 	/* Try to get next item from the parent page */
 	loc = context->items[context->index - 1].locator;
 
+	Assert(loc.chunk == NULL ||
+		   ((Pointer) loc.chunk >= context->parentImg &&
+			(Pointer) loc.chunk < context->parentImg + ORIOLEDB_BLCKSZ));
+
 	if (BTREE_PAGE_LOCATOR_IS_VALID(context->parentImg, &loc))
 		BTREE_PAGE_LOCATOR_NEXT(context->parentImg, &loc);
 
@@ -1375,6 +1453,10 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 		{
 			BTreePageItemLocator loc = parentItem->locator;
 			bool		next_lokey_loaded = true;
+
+			Assert(loc.chunk == NULL ||
+				   ((Pointer) loc.chunk >= context->parentImg &&
+					(Pointer) loc.chunk < context->parentImg + ORIOLEDB_BLCKSZ));
 
 			/*
 			 * Tries to read image from parent downlink without find_page().
