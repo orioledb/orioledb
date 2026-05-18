@@ -712,9 +712,26 @@ page_block_reads(OInMemoryBlkno blkno)
 	uint64		state;
 	int			i;
 
-	/* Local pages do not need locking */
 	if (O_PAGE_IS_LOCAL(blkno))
+	{
+		/*
+		 * Local pages don't go through the lock_page / unlock_page path that
+		 * bumps the change count on modification, so a same-backend
+		 * partial_load_chunk() would otherwise miss writes to the page
+		 * between the descent and the iterator's later reads (parentImg
+		 * carries partial state across find_page calls).  No concurrency, so
+		 * a plain RMW on state is enough.
+		 */
+		OrioleDBPageHeader *hdr = (OrioleDBPageHeader *) p;
+		uint64		old = pg_atomic_read_u64(&hdr->state);
+		uint64		newChangeCount = ((old & PAGE_STATE_CHANGE_COUNT_MASK) +
+									  PAGE_STATE_CHANGE_COUNT_ONE) &
+			PAGE_STATE_CHANGE_COUNT_MASK;
+
+		pg_atomic_write_u64(&hdr->state,
+							(old & ~PAGE_STATE_CHANGE_COUNT_MASK) | newChangeCount);
 		return;
+	}
 
 	i = get_my_locked_page_index(blkno);
 
