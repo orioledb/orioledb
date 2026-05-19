@@ -99,6 +99,7 @@ OBJS = src/btree/btree.o \
 REGRESSCHECKS = btree_sys_check \
 				alter_type \
 				alter_storage \
+				alter_index \
 				bitmap_scan \
 				btree_compression \
 				btree_print \
@@ -141,6 +142,7 @@ REGRESSCHECKS = btree_sys_check \
 				rewind
 ISOLATIONCHECKS = bitmap_hist_scan \
 				  btree_iterate \
+				  btree_iterate_split \
 				  btree_print_backend_id \
 				  btree_scan \
 				  concurrent_update_delete \

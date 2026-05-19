@@ -72,7 +72,25 @@ typedef struct
 	OTuple		tuple;
 	OTuple		key;
 	CommitSeqNo csn;
+	OTableDescr *descr;			/* for set_pending_sk_marker_from_tup_copy */
 } CallbackTupleCopy;
+
+static void
+set_pending_sk_marker_from_tup_copy(UndoLocation pkUndoLoc, void *arg)
+{
+	set_pending_sk_marker(((CallbackTupleCopy *) arg)->descr, pkUndoLoc);
+}
+
+/*
+ * Used by apply_tbl_insert(), where callbackInfo.arg is unused by the
+ * modify callbacks themselves -- we repurpose it to carry the
+ * OTableDescr for the post-undo hook.
+ */
+static void
+set_pending_sk_marker_from_descr(UndoLocation pkUndoLoc, void *arg)
+{
+	set_pending_sk_marker((OTableDescr *) arg, pkUndoLoc);
+}
 
 /*
  * Callback examples which stores modified tuple as arg.
@@ -862,11 +880,20 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 		{
 			callbackInfo.modifyCallback = recovery_insert_primary_callback;
 			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_primary_callback;
+
+			/*
+			 * recovery_insert_primary_callback ignores arg, so we reuse the
+			 * slot to carry the OTableDescr the post-undo hook needs.
+			 */
+			callbackInfo.arg = descr;
+			callbackInfo.postUndoRecorded = set_pending_sk_marker_from_descr;
 		}
 		else
 		{
 			callbackInfo.modifyCallback = recovery_insert_overwrite_callback;
 			callbackInfo.modifyDeletedCallback = recovery_insert_deleted_overwrite_callback;
+			callbackInfo.arg = NULL;
+			callbackInfo.postUndoRecorded = NULL;
 		}
 		tts_orioledb_fill_key_bound(slot, id, &keyBound);
 
@@ -894,6 +921,8 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 							  (Pointer) &keyBound, BTreeKeyBound,
 							  oxid, csn, RowLockUpdate,
 							  NULL, &callbackInfo);
+		if (isPrimary)
+			fire_sk_modify_pending_stopevent(descr);
 
 		if (!isPrimary)
 		{
@@ -901,6 +930,8 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 			O_TUPLE_SET_NULL(stuple);
 		}
 	}
+
+	clear_pending_sk_marker();
 
 	if (!O_TUPLE_IS_NULL(stuple))
 		pfree(stuple.data);
@@ -933,17 +964,20 @@ apply_tbl_delete(OTableDescr *descr, OTuple key,
 				.modifyCallback = o_delete_copy_callback,
 				.modifyDeletedCallback = NULL,
 				.needsUndoForSelfCreated = false,
-				.arg = &tupCopy
+				.arg = &tupCopy,
+				.postUndoRecorded = set_pending_sk_marker_from_tup_copy
 			};
 
 			o_fill_key_bound(id, key, BTreeKeyNonLeafKey, &keyBound);
 			O_TUPLE_SET_NULL(tupCopy.tuple);
 			tupCopy.key = key;
+			tupCopy.descr = descr;
 			modify_result = o_btree_modify(&id->desc, BTreeOperationDelete,
 										   nullTup, BTreeKeyNone,
 										   (Pointer) &keyBound, BTreeKeyBound,
 										   oxid, csn, RowLockUpdate,
 										   NULL, &callbackInfo);
+			fire_sk_modify_pending_stopevent(descr);
 			if (modify_result != OBTreeModifyResultDeleted)
 				return;
 
@@ -979,6 +1013,8 @@ apply_tbl_delete(OTableDescr *descr, OTuple key,
 		}
 	}
 
+	clear_pending_sk_marker();
+
 	ExecClearTuple(slot);
 }
 
@@ -1009,15 +1045,18 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 				.modifyCallback = o_update_copy_callback,
 				.modifyDeletedCallback = NULL,
 				.needsUndoForSelfCreated = false,
-				.arg = &tupCopy
+				.arg = &tupCopy,
+				.postUndoRecorded = set_pending_sk_marker_from_tup_copy
 			};
 
+			tupCopy.descr = descr;
 			O_TUPLE_SET_NULL(tupCopy.tuple);
 			modify_result = o_btree_modify(&tree->desc, BTreeOperationUpdate,
 										   tuple, BTreeKeyLeafTuple,
 										   NULL, BTreeKeyNone, oxid, csn,
 										   RowLockNoKeyUpdate,
 										   NULL, &callbackInfo);
+			fire_sk_modify_pending_stopevent(descr);
 			if (modify_result != OBTreeModifyResultUpdated)
 				return;
 
@@ -1095,6 +1134,8 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 			}
 		}
 	}
+
+	clear_pending_sk_marker();
 
 	ExecClearTuple(new_slot);
 	ExecClearTuple(old_slot);

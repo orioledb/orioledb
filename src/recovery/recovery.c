@@ -36,6 +36,7 @@
 #include "tableam/tree.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
+#include "tuple/slot.h"
 #include "utils/dsa.h"
 #include "utils/elog.h"
 #include "utils/inval.h"
@@ -140,7 +141,7 @@ typedef struct
 
 typedef struct
 {
-	UndoLogType undoType;
+	XidRecKind	kind;
 	UndoStackLocations undoStack;
 	dlist_node	node;
 } CheckpointUndoStack;
@@ -165,7 +166,7 @@ typedef struct WorkerUndoTempEntry
 
 typedef struct WorkerUndoTempCheckpointStack
 {
-	UndoLogType undoType;
+	XidRecKind	kind;
 	UndoStackLocations undoStack;
 } WorkerUndoTempCheckpointStack;
 
@@ -286,6 +287,342 @@ int			recovery_queue_size_guc;
  * Are TOAST trees consistent with primary indices.
  */
 bool		toast_consistent = false;
+
+/*
+ * Pending PK->SK fix-ups, populated from XidRecPendingSkFixup records read
+ * out of the xid file at recovery start.  The list is drained once the
+ * recovery hits the toast-consistent boundary, at which point every entry
+ * is turned into synthesised secondary-index modify records.  See
+ * record_pending_sk_fixup() / apply_pending_sk_fixups().
+ */
+typedef struct PendingSkFixup
+{
+	OXid		oxid;
+	UndoLocation undoLocation;
+	struct PendingSkFixup *next;
+} PendingSkFixup;
+
+static PendingSkFixup *pending_sk_fixups_head = NULL;
+
+static void
+record_pending_sk_fixup(OXid oxid, UndoLocation undoLocation)
+{
+	PendingSkFixup *entry;
+
+	entry = (PendingSkFixup *) MemoryContextAlloc(TopMemoryContext,
+												  sizeof(*entry));
+	entry->oxid = oxid;
+	entry->undoLocation = undoLocation;
+	entry->next = pending_sk_fixups_head;
+	pending_sk_fixups_head = entry;
+}
+
+/*
+ * Apply one PendingSkFixup entry: read the PK undo record back, locate
+ * the current PK tuple, and for every secondary index whose key differs
+ * between the pre-image and the post-image, dispatch a synthesised
+ * DELETE old / INSERT new pair through the recovery_workers' modify
+ * path.  Mirrors apply_tbl_update()'s per-SK logic.
+ */
+static void
+apply_one_pending_sk_fixup(PendingSkFixup *entry)
+{
+	UndoLocation tuphdrLoc = entry->undoLocation;
+	UndoLocation itemLoc;
+	BTreeModifyUndoStackItem item = {0};
+	LocationIndex oldTupleSize;
+	OTableDescr *descr;
+	OIndexDescr *primary;
+	OBTreeKeyBound pkKey;
+	OTuple		oldTuple;
+	OTuple		newTuple;
+	OFindPageResult findResult;
+	OBTreeFindPageContext context;
+	BTreePageItemLocator pageLoc;
+	Page		pkPage;
+	OTuple		pkOnPage;
+	LocationIndex newTupleLen;
+	TupleTableSlot *newSlot;
+	TupleTableSlot *oldSlot;
+	int			i;
+
+	if (!UndoLocationIsValid(tuphdrLoc))
+		return;
+
+	/*
+	 * The marker we recorded is the location of the BTreeLeafTuphdr field
+	 * inside the BTreeModifyUndoStackItem (that's what make_undo_record()
+	 * returns); back up to the start of the item.
+	 */
+	itemLoc = tuphdrLoc - offsetof(BTreeModifyUndoStackItem, tuphdr);
+
+	if (!UNDO_REC_EXISTS(UndoLogRegular, itemLoc))
+	{
+		/* recycled in the meantime; nothing we can do */
+		elog(DEBUG2,
+			 "pending-SK fix-up: undo record at %X/%X recycled, skipping",
+			 (uint32) (itemLoc >> 32), (uint32) itemLoc);
+		return;
+	}
+
+	undo_read(UndoLogRegular, itemLoc, sizeof(item), (Pointer) &item);
+	if (item.header.type != ModifyUndoItemType)
+		return;
+
+	/*
+	 * Only PK modifications carry SK-side obligations; tuple inserts /
+	 * updates / deletes are the only relevant actions.
+	 */
+	if (item.action != BTreeOperationUpdate &&
+		item.action != BTreeOperationInsert &&
+		item.action != BTreeOperationDelete)
+		return;
+
+	/*
+	 * item.oids is the PK index's relation OIDs (make_undo_record stores
+	 * desc->oids).  Resolve the table descr through the index descr's
+	 * tableOids back-pointer.
+	 */
+	{
+		OIndexDescr *indexDescr;
+
+		indexDescr = o_fetch_index_descr(item.oids, oIndexPrimary,
+										 false, NULL);
+		if (indexDescr == NULL)
+			return;
+		descr = o_fetch_table_descr(indexDescr->tableOids);
+	}
+	if (descr == NULL || descr->nIndices < 2)
+		return;
+	primary = GET_PRIMARY(descr);
+
+	/* The undo entry stores the pre-image tuple right after the header. */
+	oldTupleSize = item.header.itemSize - sizeof(BTreeModifyUndoStackItem);
+	if (oldTupleSize == 0)
+		return;
+	oldTuple.formatFlags = item.tuphdr.formatFlags;
+	oldTuple.data = palloc(oldTupleSize);
+	undo_read(UndoLogRegular,
+			  itemLoc + sizeof(BTreeModifyUndoStackItem),
+			  oldTupleSize,
+			  oldTuple.data);
+
+	o_btree_load_shmem(&primary->desc);
+	O_TUPLE_SET_NULL(newTuple);
+
+	/*
+	 * The DELETE undo record stores only the PK key (make_undo_record
+	 * extracts the key portion when action == BTreeOperationDelete with
+	 * is_tuple=true), which is not enough to derive secondary-index keys.
+	 * Look the row up on the PK page: at this point in recovery the leaf
+	 * still carries the full tuple data even though tuphdr->deleted is set,
+	 * since neither vacuum nor page compaction has reclaimed it yet.
+	 *
+	 * For INSERT/UPDATE the on-page PK row is the post-image we want to feed
+	 * into the SK loop as newSlot.
+	 *
+	 * For DELETE the on-page row is the row to be removed; we copy it back
+	 * into oldTuple so the SK loop can derive the SK key from full attrs.
+	 */
+	if (item.action == BTreeOperationDelete)
+	{
+		OTuple		keyTuple;
+
+		/* oldTuple currently holds just the PK key.  Build a key bound. */
+		keyTuple = oldTuple;
+		o_fill_key_bound(primary, keyTuple, BTreeKeyNonLeafKey, &pkKey);
+	}
+	else
+	{
+		o_fill_key_bound(primary, oldTuple, BTreeKeyLeafTuple, &pkKey);
+	}
+
+	init_page_find_context(&context, &primary->desc,
+						   COMMITSEQNO_INPROGRESS,
+						   BTREE_PAGE_FIND_MODIFY);
+	findResult = find_page(&context, &pkKey, BTreeKeyBound, 0);
+	if (findResult != OFindPageResultSuccess)
+	{
+		pfree(oldTuple.data);
+		return;
+	}
+
+	pkPage = O_GET_IN_MEMORY_PAGE(context.items[context.index].blkno);
+	pageLoc = context.items[context.index].locator;
+
+	if (!BTREE_PAGE_LOCATOR_IS_VALID(pkPage, &pageLoc))
+	{
+		unlock_page(context.items[context.index].blkno);
+		pfree(oldTuple.data);
+		return;
+	}
+
+	BTREE_PAGE_READ_TUPLE(pkOnPage, pkPage, &pageLoc);
+
+	/* Materialise a private copy before releasing the page lock. */
+	newTupleLen = o_btree_len(&primary->desc, pkOnPage, OTupleLength);
+
+	if (item.action == BTreeOperationDelete)
+	{
+		/*
+		 * Swap the key-only oldTuple for the full leaf tuple read off the
+		 * page; we need full column attrs to derive the SK key.
+		 */
+		pfree(oldTuple.data);
+		oldTuple.formatFlags = pkOnPage.formatFlags;
+		oldTuple.data = palloc(newTupleLen);
+		memcpy(oldTuple.data, pkOnPage.data, newTupleLen);
+	}
+	else
+	{
+		newTuple.formatFlags = pkOnPage.formatFlags;
+		newTuple.data = palloc(newTupleLen);
+		memcpy(newTuple.data, pkOnPage.data, newTupleLen);
+	}
+
+	unlock_page(context.items[context.index].blkno);
+
+	newSlot = descr->newTuple;
+	oldSlot = descr->oldTuple;
+
+	/*
+	 * INSERT's undo record carries only the PK key (not a full leaf tuple),
+	 * so feeding it into oldSlot would expose junk to anything that reads
+	 * past the key columns.  Only populate oldSlot when the action actually
+	 * has a pre-image -- UPDATE (full tuple from undo) or DELETE (full tuple
+	 * we just read off the PK page).
+	 */
+	if (!O_TUPLE_IS_NULL(newTuple))
+		tts_orioledb_store_tuple(newSlot, newTuple, descr,
+								 COMMITSEQNO_INPROGRESS, PrimaryIndexNumber,
+								 true, NULL);
+	if (item.action != BTreeOperationInsert)
+		tts_orioledb_store_tuple(oldSlot, oldTuple, descr,
+								 COMMITSEQNO_INPROGRESS, PrimaryIndexNumber,
+								 true, NULL);
+
+	/*
+	 * For each secondary index, DELETE the pre-image entry and INSERT the
+	 * post-image entry when they differ.  Same shape as apply_tbl_update() so
+	 * workers' overwrite callbacks make these idempotent against any later
+	 * WAL records.
+	 */
+	for (i = 1; i < descr->nIndices; i++)
+	{
+		OIndexDescr *sk = descr->indices[i];
+		OBTreeKeyBound oldSkKey,
+					newSkKey;
+		BTreeModifyCallbackInfo cbInfo = nullCallbackInfo;
+		OTuple		nullTup;
+		bool		needDelete = false;
+		bool		needInsert = false;
+
+		O_TUPLE_SET_NULL(nullTup);
+
+		if (item.action == BTreeOperationInsert)
+		{
+			tts_orioledb_fill_key_bound(newSlot, sk, &newSkKey);
+			needInsert = true;
+		}
+		else if (item.action == BTreeOperationDelete)
+		{
+			tts_orioledb_fill_key_bound(oldSlot, sk, &oldSkKey);
+			needDelete = true;
+		}
+		else					/* UPDATE */
+		{
+			int			cmp;
+
+			tts_orioledb_fill_key_bound(oldSlot, sk, &oldSkKey);
+			tts_orioledb_fill_key_bound(newSlot, sk, &newSkKey);
+			cmp = o_btree_cmp(&sk->desc,
+							  (Pointer) &oldSkKey, BTreeKeyBound,
+							  (Pointer) &newSkKey, BTreeKeyBound);
+			if (cmp != 0)
+			{
+				needDelete = true;
+				needInsert = true;
+			}
+		}
+
+		o_btree_load_shmem(&sk->desc);
+
+		if (needDelete &&
+			o_is_index_predicate_satisfied(sk, oldSlot, sk->econtext))
+		{
+			cbInfo.modifyCallback = recovery_delete_overwrite_callback;
+			(void) o_btree_modify(&sk->desc, BTreeOperationDelete,
+								  nullTup, BTreeKeyNone,
+								  (Pointer) &oldSkKey, BTreeKeyBound,
+								  entry->oxid, COMMITSEQNO_INPROGRESS,
+								  RowLockUpdate, NULL, &cbInfo);
+		}
+
+		if (needInsert &&
+			o_is_index_predicate_satisfied(sk, newSlot, sk->econtext))
+		{
+			OTuple		newSkTup;
+
+			newSkTup = tts_orioledb_make_secondary_tuple(newSlot, sk, true);
+			if (o_btree_len(&sk->desc, newSkTup, OTupleLength)
+				<= O_BTREE_MAX_TUPLE_SIZE)
+			{
+				cbInfo.modifyCallback = recovery_insert_overwrite_callback;
+				cbInfo.modifyDeletedCallback = recovery_insert_deleted_overwrite_callback;
+				(void) o_btree_modify(&sk->desc, BTreeOperationInsert,
+									  newSkTup, BTreeKeyLeafTuple,
+									  (Pointer) &newSkKey, BTreeKeyBound,
+									  entry->oxid, COMMITSEQNO_INPROGRESS,
+									  RowLockUpdate, NULL, &cbInfo);
+			}
+			pfree(newSkTup.data);
+		}
+	}
+
+	/*
+	 * Both slots took ownership of their tuple data via shouldFree=true, so
+	 * ExecClearTuple is responsible for the pfree -- don't free the local
+	 * OTuple structs again.  For INSERT we never stored oldTuple in the slot,
+	 * so its undo-read buffer is still ours to release.
+	 */
+	ExecClearTuple(newSlot);
+	ExecClearTuple(oldSlot);
+	if (item.action == BTreeOperationInsert)
+		pfree(oldTuple.data);
+}
+
+/*
+ * Turn every PendingSkFixup record gathered by record_pending_sk_fixup()
+ * into synthesised secondary-index modifications.  Called once, by the
+ * master recovery process, at the moment WAL replay first crosses the
+ * toast-consistent boundary, so the SK trees catch up to PK before any
+ * post-boundary WAL records get applied.
+ */
+static void
+apply_pending_sk_fixups(void)
+{
+	PendingSkFixup *entry = pending_sk_fixups_head;
+	OXid		saved_oxid = recovery_oxid;
+
+	while (entry != NULL)
+	{
+		PendingSkFixup *next = entry->next;
+
+		recovery_switch_to_oxid(entry->oxid, -1);
+		set_oxid_csn(entry->oxid, COMMITSEQNO_INPROGRESS);
+
+		apply_one_pending_sk_fixup(entry);
+
+		pfree(entry);
+		entry = next;
+	}
+
+	pending_sk_fixups_head = NULL;
+	if (OXidIsValid(saved_oxid))
+		recovery_switch_to_oxid(saved_oxid, -1);
+	else
+		recovery_oxid = InvalidOXid;
+}
 
 /*
  * Checkpoint requests for flushing undo positions and their completion.
@@ -623,11 +960,23 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			ODBProcData *curProcData = GET_CUR_PROCDATA();
 			CheckpointUndoStack *stack;
 			UndoLocation retainUndoLocation;
-			UndoLogType undoType = xidRec.undoType;
+			XidRecKind	kind = xidRec.kind;
+
+			if (kind == XidRecPendingSkFixup)
+			{
+				/*
+				 * Stash the pending PK->SK fix-up; it will be turned into
+				 * synthesised secondary-index modify records once the
+				 * recovery hits the toast-consistent boundary.
+				 */
+				record_pending_sk_fixup(xidRec.oxid, xidRec.undoLocation.location);
+				offset += sizeof(xidRec);
+				continue;
+			}
 
 			stack = (CheckpointUndoStack *) MemoryContextAlloc(TopMemoryContext,
 															   sizeof(CheckpointUndoStack));
-			stack->undoType = undoType;
+			stack->kind = kind;
 			stack->undoStack = xidRec.undoLocation;
 			dlist_push_tail(&state->checkpoint_undo_stacks, &stack->node);
 			set_oxid_csn(xidRec.oxid, COMMITSEQNO_INPROGRESS);
@@ -636,9 +985,10 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			 * We will probably need to retain this till the next checkpoint.
 			 */
 			retainUndoLocation = xidRec.retainLocation;
-			if (undoType < UndoLogsCount &&
-				retainUndoLocation < state->retain_locs[undoType])
+			if ((int) kind < (int) UndoLogsCount &&
+				retainUndoLocation < state->retain_locs[(UndoLogType) kind])
 			{
+				UndoLogType undoType = (UndoLogType) kind;
 				UndoMeta   *undoMeta = get_undo_meta_by_type(undoType);
 
 				if (state->in_retain_undo_heaps[undoType])
@@ -693,10 +1043,12 @@ apply_xids_branches(void)
 														 node,
 														 iter.cur);
 
-			if ((int) (stack->undoType) < UndoLogsCount)
+			if ((int) stack->kind < (int) UndoLogsCount)
 			{
-				set_cur_undo_locations(stack->undoType, stack->undoStack);
-				apply_undo_branches(stack->undoType, recovery_oxid);
+				UndoLogType undoType = (UndoLogType) stack->kind;
+
+				set_cur_undo_locations(undoType, stack->undoStack);
+				apply_undo_branches(undoType, recovery_oxid);
 			}
 			else
 			{
@@ -705,7 +1057,7 @@ apply_xids_branches(void)
 				Assert(!UndoLocationIsValid(stack->undoStack.location));
 				Assert(!UndoLocationIsValid(stack->undoStack.branchLocation));
 				Assert(!UndoLocationIsValid(stack->undoStack.subxactLocation));
-				location = walk_undo_range_with_buf((UndoLogType) ((int) (stack->undoType) - XID_REC_REWIND_TYPES_OFFSET),
+				location = walk_undo_range_with_buf((UndoLogType) ((int) stack->kind - XID_REC_REWIND_TYPES_OFFSET),
 													stack->undoStack.onCommitLocation,
 													InvalidUndoLocation, recovery_oxid,
 													OUndoCallbackStageCommit, NULL, true);
@@ -885,6 +1237,19 @@ orioledb_redo(XLogReaderState *record)
 
 	if (record->ReadRecPtr >= checkpoint_state->controlToastConsistentPtr && !toast_consistent)
 	{
+		/*
+		 * Before running the PK->SK fix-up pass we need every pre-toast WAL
+		 * record to have been applied to PK by the workers, otherwise the PK
+		 * state we inspect below is stale.  Drain the worker queues up to the
+		 * current point, then process the pending fix-ups, then notify
+		 * workers to start applying records on the post-toast (whole-table)
+		 * path.
+		 */
+		if (!recovery_single)
+			workers_synchronize(record->ReadRecPtr, true);
+
+		apply_pending_sk_fixups();
+
 		toast_consistent = true;
 		if (!recovery_single)
 			workers_notify_toast_consistent();
@@ -1820,24 +2185,26 @@ walk_checkpoint_stacks(RecoveryXidState *recovery_xid_state, CommitSeqNo csn,
 													 node,
 													 miter.cur);
 
-		if ((int) (stack->undoType) < UndoLogsCount)
+		if ((int) stack->kind < (int) UndoLogsCount)
 		{
-			set_cur_undo_locations(stack->undoType, stack->undoStack);
+			UndoLogType undoType = (UndoLogType) stack->kind;
+
+			set_cur_undo_locations(undoType, stack->undoStack);
 			if (flushUndoPos)
 				flush_current_undo_stack();
 			if (COMMITSEQNO_IS_ABORTED(csn))
 			{
 				if (parentSubid == InvalidSubTransactionId)
-					apply_undo_stack(stack->undoType, recovery_oxid,
+					apply_undo_stack(undoType, recovery_oxid,
 									 NULL, false);
 				else
-					rollback_to_savepoint(stack->undoType, UndoStackHead,
+					rollback_to_savepoint(undoType, UndoStackHead,
 										  parentSubid, false);
 			}
 			else
 			{
-				precommit_undo_stack(stack->undoType, recovery_oxid, false);
-				on_commit_undo_stack(stack->undoType, recovery_oxid, false);
+				precommit_undo_stack(undoType, recovery_oxid, false);
+				on_commit_undo_stack(undoType, recovery_oxid, false);
 			}
 		}
 		dlist_delete(miter.cur);
@@ -2090,7 +2457,7 @@ flush_current_undo_stack(void)
 	rec.oxid = recovery_oxid;
 	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
-		rec.undoType = (UndoLogType) i;
+		rec.kind = (XidRecKind) i;
 		get_cur_undo_locations(&rec.undoLocation, (UndoLogType) i);
 		rec.retainLocation = curRetainUndoLocations[i];
 		write_to_xids_queue(&rec);
@@ -3028,7 +3395,7 @@ recovery_write_to_xids_queue(int worker_id, uint32 requestNumber)
 		rec.oxid = state->oxid;
 		for (i = 0; i < (int) UndoLogsCount; i++)
 		{
-			rec.undoType = (UndoLogType) i;
+			rec.kind = (XidRecKind) i;
 			rec.undoLocation = state->undo_stacks[i];
 			rec.retainLocation = state->retain_locs[i];
 			write_to_xids_queue(&rec);
@@ -3040,9 +3407,11 @@ recovery_write_to_xids_queue(int worker_id, uint32 requestNumber)
 														 node,
 														 iter.cur);
 
-			rec.undoType = stack->undoType;
+			rec.kind = stack->kind;
 			rec.undoLocation = stack->undoStack;
-			rec.retainLocation = state->retain_locs[stack->undoType];
+			rec.retainLocation = ((int) stack->kind < (int) UndoLogsCount)
+				? state->retain_locs[(UndoLogType) stack->kind]
+				: InvalidUndoLocation;
 			write_to_xids_queue(&rec);
 		}
 	}
@@ -3185,7 +3554,7 @@ save_state_to_file(int worker_id)
 			WorkerUndoTempCheckpointStack tempStack;
 
 			memset(&tempStack, 0, sizeof(tempStack));
-			tempStack.undoType = stack->undoType;
+			tempStack.kind = stack->kind;
 			tempStack.undoStack = stack->undoStack;
 
 			if (OFileWrite(tempFile, (char *) &tempStack, sizeof(tempStack),
@@ -3265,7 +3634,7 @@ recovery_load_state_from_file(int worker_id, uint32 chkpnum, bool shutdown)
 			XidFileRec	rec;
 
 			rec.oxid = entry.oxid;
-			rec.undoType = (UndoLogType) j;
+			rec.kind = (XidRecKind) j;
 			rec.undoLocation = entry.undoStacks[j];
 			rec.retainLocation = entry.undoRetainLocs[j];
 			write_to_xids_queue(&rec);
@@ -3287,9 +3656,11 @@ recovery_load_state_from_file(int worker_id, uint32 chkpnum, bool shutdown)
 
 			/* Write checkpoint stack to XID queue */
 			rec.oxid = entry.oxid;
-			rec.undoType = stack.undoType;
+			rec.kind = stack.kind;
 			rec.undoLocation = stack.undoStack;
-			rec.retainLocation = entry.undoRetainLocs[stack.undoType];
+			rec.retainLocation = ((int) stack.kind < (int) UndoLogsCount)
+				? entry.undoRetainLocs[(UndoLogType) stack.kind]
+				: InvalidUndoLocation;
 			write_to_xids_queue(&rec);
 		}
 	}

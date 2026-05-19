@@ -149,11 +149,13 @@ COMMIT;
 -- Check support of enum indices
 CREATE TYPE o_happiness AS ENUM ('happy', 'very happy', 'ecstatic');
 
+-- autovacuum off: DROP TYPE o_happiness CASCADE later in the test drops the
+-- index on this table; a concurrent ANALYZE deadlocks with that cascade.
 CREATE TABLE o_test_enum_index (
 	num_weeks integer NOT NULL,
 	happiness o_happiness NOT NULL,
 	PRIMARY KEY(happiness)
-) USING orioledb;
+) USING orioledb WITH (autovacuum_enabled = false);
 
 CREATE INDEX o_test_enum_index_ix1 ON o_test_enum_index(happiness);
 CREATE UNIQUE INDEX o_test_enum_index_ix2 ON o_test_enum_index(happiness);
@@ -192,6 +194,8 @@ CREATE DOMAIN mytime AS time CHECK (VALUE > '00:00:00');
 CREATE DOMAIN myarray AS myint[];
 CREATE DOMAIN mybool AS boolean;
 
+-- autovacuum off: DROP DOMAIN ... CASCADE later in the test drops columns
+-- (and PK) on this table; concurrent ANALYZE deadlocks with that cascade.
 CREATE TABLE o_test_domain_index
 (
 	key myint NOT NULL,
@@ -202,7 +206,7 @@ CREATE TABLE o_test_domain_index
 	val int NOT NULL,
 	net inet,
 	PRIMARY KEY(key, key2, val, t, a, b, net)
-) USING orioledb;
+) USING orioledb WITH (autovacuum_enabled = false);
 
 INSERT INTO o_test_domain_index VALUES
 	(10, 10, '00:00:10', '{10}', false, 10, '10.10.10.10'),
@@ -210,11 +214,12 @@ INSERT INTO o_test_domain_index VALUES
 
 SELECT * FROM o_test_domain_index;
 
+-- autovacuum off: same reason as o_test_domain_index above.
 CREATE TABLE o_test_domain_array_index
 (
 	key myint[] NOT NULL,
 	PRIMARY KEY(key)
-) USING orioledb;
+) USING orioledb WITH (autovacuum_enabled = false);
 
 INSERT INTO o_test_domain_array_index VALUES (ARRAY[10::myint, 20::myint]);
 

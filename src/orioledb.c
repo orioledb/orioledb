@@ -1342,6 +1342,7 @@ o_proc_shmem_init(Pointer ptr, bool found)
 			}
 			pg_atomic_init_u64(&oProcData[i].commitInProgressXlogLocation, OWalInvalidCommitPos);
 			pg_atomic_init_u64(&oProcData[i].xmin, InvalidOXid);
+			pg_atomic_init_u64(&oProcData[i].pendingSkUndoLoc, InvalidUndoLocation);
 			oProcData[i].autonomousNestingLevel = 0;
 			memset(&oProcData[i].vxids, 0, sizeof(oProcData[i].vxids));
 			LWLockInitialize(&oProcData[i].undoStackLocationsFlushLock,
@@ -2096,6 +2097,8 @@ orioledb_error_cleanup_hook(void)
 	int			i;
 
 	GET_CUR_PROCDATA()->waitingForOxid = false;
+	pg_atomic_write_u64(&GET_CUR_PROCDATA()->pendingSkUndoLoc,
+						InvalidUndoLocation);
 	release_all_page_locks();
 	ppool_release_all_pages();
 	for (i = 0; i < (int) UndoLogsCount; i++)

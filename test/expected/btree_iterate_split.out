@@ -1,0 +1,71 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_setup s2_setup s2_arm s1_scan s2_load_and_reset s2_continue
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's1';
+
+step s2_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's2';
+
+step s2_arm: 
+	SELECT pg_stopevent_set('after_find_downlink',
+		'$.treeName == "o_grow_pkey" && $.level == 1 && $applicationName == "s1"');
+
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_scan: 
+	SET enable_seqscan = off;
+	SET enable_bitmapscan = off;
+	SELECT count(*) FROM (SELECT id FROM o_grow ORDER BY id) t;
+ <waiting ...>
+step s2_load_and_reset: 
+	SET enable_seqscan = off;
+	SET enable_bitmapscan = off;
+	SELECT count(*) FROM (SELECT id FROM o_grow ORDER BY id) t;
+	SELECT pg_stopevent_set('step_right',
+		'$.treeName == "o_grow_pkey" && $applicationName == "s1"');
+	SELECT pg_stopevent_reset('after_find_downlink');
+
+count
+-----
+ 3997
+(1 row)
+
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s2_continue: 
+	INSERT INTO o_grow (id, val)
+		SELECT decode(to_char(id, 'fm0000') || repeat('a', 500), 'hex'),
+			   repeat('v', 200)
+		FROM generate_series(1, 99, 1) id;
+	SELECT pg_stopevent_reset('step_right');
+
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s1_scan: <... completed>
+count
+-----
+ 3997
+(1 row)
+

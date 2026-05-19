@@ -977,7 +977,12 @@ orioledb_ambulkdelete(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 	if (options && !options->orioledb_index)
 		return btbulkdelete(info, stats, callback, callback_state);
 
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	/*
+	 * No-op for orioledb-managed indexes: their MVCC and cleanup happen
+	 * inside the orioledb storage layer, not via the standard ambulkdelete
+	 * path.  We must not error here because parallel vacuum iterates every
+	 * index in the relation.
+	 */
 	return stats;
 }
 

@@ -67,7 +67,7 @@ static bool is_sorted_by_off(ExtentsArray *array);
 static bool is_sorted_by_len_off(ExtentsArray *array);
 
 bool
-check_btree(BTreeDescr *desc, bool force_file_check)
+check_btree(BTreeDescr *desc, bool force_file_check, bool wait_for_checkpoint)
 {
 	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
 	BTreeCheckStatus status;
@@ -75,8 +75,7 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 	uint64		data_file_len = pg_atomic_read_u64(&metaPageBlkno->datafileLength[0]);	/* Fix for S3 mode */
 	bool		is_compressed = OCompressIsValid(desc->compress);
 	uint32		checkpoint_number = 0;
-	bool		result,
-				copy_blkno;
+	bool		copy_blkno;
 
 	memset(&status, 0, sizeof(BTreeCheckStatus));
 	memset(&free_extents, 0, sizeof(ExtentsArray));
@@ -86,9 +85,21 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 	status.hasError = false;
 	init_page_find_context(&status.context, desc, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY);
 
-	result = get_checkpoint_number(desc, desc->rootInfo.rootPageBlkno,
-								   &checkpoint_number, &copy_blkno);
-	if (!result)
+	if (wait_for_checkpoint)
+	{
+		/*
+		 * Repeat until we get checkpoint number to avoid spurious failure due
+		 * to concurrent checkpoint when called by amcheck.
+		 */
+		while (!get_checkpoint_number(desc, desc->rootInfo.rootPageBlkno,
+									  &checkpoint_number, &copy_blkno))
+		{
+			CHECK_FOR_INTERRUPTS();
+			pg_usleep(1000L);
+		}
+	}
+	else if (!get_checkpoint_number(desc, desc->rootInfo.rootPageBlkno,
+									&checkpoint_number, &copy_blkno))
 	{
 		elog(NOTICE, "Tree is under checkpoint now");
 		return false;

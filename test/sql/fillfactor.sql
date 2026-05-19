@@ -105,6 +105,10 @@ INSERT INTO o_test_fillfactor SELECT to_char(v, '0000000'), 10-v, (v+5)%7, (v+15
 SELECT level, count, ROUND(avgoccupied * 100 / 8192)
     FROM orioledb_tree_stat('o_test_fillfactor_ix1'::regclass);
 
+ALTER INDEX o_test_fillfactor_ix1 RESET (fillfactor);
+\d+ o_test_fillfactor
+\d+ o_test_fillfactor_ix1
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA fillfactor CASCADE;
 RESET search_path;

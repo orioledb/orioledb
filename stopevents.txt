@@ -29,3 +29,5 @@ seq_scan_load_internal_page
 before_get_waiters_with_tuples
 after_csn_precommit
 before_modify_oxid_get_csn
+sk_modify_pending
+after_find_downlink

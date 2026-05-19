@@ -2357,6 +2357,509 @@ class RecoveryTest(BaseTest):
 
 		node.stop()
 
+	def test_recovery_sk_cross_row_rotation(self):
+		"""
+		Secondary key sync after crash recovery.
+
+		Drives a concurrent token-rotation workload + concurrent checkpoints
+		then a clean crash, and verifies SK matches PK after recovery.
+
+		Each rotation txn:
+		    UPDATE row_a SET token = T_new       -- removes A's old token from SK
+		    UPDATE row_b SET token = A's old      -- re-inserts A's old at B
+		The SK key "A's old" is deleted from one row and inserted at another
+		in the same txn.
+		"""
+		import threading
+		from collections import Counter
+
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "max_wal_size = 4GB\n"
+		    "orioledb.recovery_pool_size = 1\n"
+		    "max_worker_processes = 32\n")
+		node.start()
+		n_rows = 200
+		node.safe_psql(
+		    'postgres', f"""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_sk_rotation (
+				id int NOT NULL,
+				token bigint NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+			CREATE UNIQUE INDEX o_sk_rotation_token_idx ON o_sk_rotation (token);
+			INSERT INTO o_sk_rotation
+				SELECT i, i FROM generate_series(1, {n_rows}) i;
+		""")
+		node.safe_psql('postgres', "CHECKPOINT;")
+
+		n_writers = 8
+		n_rotations = 2000
+		counter = [0]
+		counter_lock = threading.Lock()
+
+		def writer_loop():
+			con = node.connect()
+			try:
+				while True:
+					with counter_lock:
+						i = counter[0]
+						if i >= n_rotations:
+							return
+						counter[0] = i + 1
+					a = (i * 7) % n_rows + 1
+					b = (i * 13 + 1) % n_rows + 1
+					if a == b:
+						continue
+					t_new = 10 * n_rows + i
+					while True:
+						try:
+							con.begin()
+							old_a = con.execute(
+							    f"SELECT token FROM o_sk_rotation WHERE id = {a}"
+							)[0][0]
+							con.execute(
+							    f"UPDATE o_sk_rotation SET token = {t_new} WHERE id = {a}"
+							)
+							con.execute(
+							    f"UPDATE o_sk_rotation SET token = {old_a} WHERE id = {b}"
+							)
+							con.commit()
+							break
+						except Exception:
+							try:
+								con.rollback()
+							except Exception:
+								pass
+			finally:
+				con.close()
+
+		stop_checkpointer = threading.Event()
+
+		def checkpointer_loop():
+			con = node.connect()
+			try:
+				while not stop_checkpointer.is_set():
+					try:
+						con.execute("CHECKPOINT;")
+					except Exception:
+						break
+					time.sleep(0.05)
+			finally:
+				try:
+					con.close()
+				except Exception:
+					pass
+
+		threads = [
+		    threading.Thread(target=writer_loop) for _ in range(n_writers)
+		]
+		ckpt_thread = threading.Thread(target=checkpointer_loop)
+		ckpt_thread.start()
+		for t in threads:
+			t.start()
+		for t in threads:
+			t.join()
+		stop_checkpointer.set()
+		ckpt_thread.join()
+
+		self.crash_with_os_buffer_loss()
+		node.start()
+
+		n_pk = node.execute('postgres',
+		                    "SELECT count(*) FROM o_sk_rotation")[0][0]
+		n_sk = node.execute(
+		    'postgres',
+		    "SELECT count(DISTINCT token) FROM o_sk_rotation")[0][0]
+
+		if n_pk != n_sk:
+			# Collect tokens through PK seq-scan vs SK index scan; the
+			# asymmetric difference identifies which entries are orphaned
+			# in which tree.
+			node.execute(
+			    'postgres', "SET enable_indexscan = off;"
+			    "SET enable_bitmapscan = off;")
+			pk_tokens = sorted(r[0] for r in node.execute(
+			    'postgres', "SELECT token FROM o_sk_rotation ORDER BY id"))
+			node.execute(
+			    'postgres', "RESET enable_indexscan;"
+			    "RESET enable_bitmapscan;"
+			    "SET enable_seqscan = off;")
+			sk_tokens = sorted(r[0] for r in node.execute(
+			    'postgres', "SELECT token FROM o_sk_rotation ORDER BY token"))
+			node.execute('postgres', "RESET enable_seqscan;")
+			pk_set, sk_set = set(pk_tokens), set(sk_tokens)
+			print(f"\n  PK rows={n_pk} ({len(pk_tokens)} via seq), "
+			      f"SK distinct={n_sk} ({len(sk_tokens)} via index)\n"
+			      f"  in PK not SK: {sorted(pk_set - sk_set)[:10]}\n"
+			      f"  in SK not PK: {sorted(sk_set - pk_set)[:10]}\n"
+			      f"  SK duplicate tokens: "
+			      f"{[t for t,c in Counter(sk_tokens).items() if c > 1][:10]}")
+
+		self.assertEqual(
+		    n_pk, n_sk,
+		    f"PK rows ({n_pk}) != SK distinct tokens ({n_sk}) after recovery")
+		self.assertTrue(
+		    node.execute(
+		        'postgres',
+		        "SELECT orioledb_tbl_check('o_sk_rotation'::regclass)")[0][0])
+		node.stop()
+
+	def _sk_modify_pending_setup(self):
+		"""
+		Boot a node with stopevents on, create a PK + unique SK table seeded
+		with 5 rows, and burn a clean checkpoint so the next CHECKPOINT in
+		the test definitely flushes the table.
+		"""
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "max_wal_size = 4GB\n"
+		    "orioledb.enable_stopevents = true\n")
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_sk_pending (
+				id int NOT NULL,
+				token bigint NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+			CREATE UNIQUE INDEX o_sk_pending_token_idx
+				ON o_sk_pending (token);
+			INSERT INTO o_sk_pending
+				SELECT i, i FROM generate_series(1, 5) i;
+		""")
+		node.safe_psql('postgres', "CHECKPOINT;")
+		return node
+
+	def _sk_modify_pending_assert_consistent(self, node, expected_rows):
+		n_pk = node.execute('postgres',
+		                    "SELECT count(*) FROM o_sk_pending")[0][0]
+		n_sk = node.execute(
+		    'postgres', "SELECT count(DISTINCT token) FROM o_sk_pending")[0][0]
+		self.assertEqual(
+		    n_pk, n_sk,
+		    f"PK rows ({n_pk}) != SK distinct tokens ({n_sk}) after recovery")
+		self.assertEqual(n_pk, expected_rows)
+		self.assertTrue(
+		    node.execute(
+		        'postgres',
+		        "SELECT orioledb_tbl_check('o_sk_pending'::regclass)")[0][0])
+
+	def test_recovery_sk_modify_pending_concurrent(self):
+		"""
+		Three concurrent INSERT / UPDATE / DELETE transactions all park at
+		sk_modify_pending (PK applied, SK pending) on the same table at the
+		same time; a single CHECKPOINT must capture all three pending fix-ups
+		into the xid file.  After disarm + commit + crash, recovery
+		reconciles every secondary-index entry.
+
+		Replaces the old single-operation tests with one stressed run that
+		also exercises the marker scan iterating over multiple oProcData
+		slots in a single checkpoint cycle.
+		"""
+		node = self._sk_modify_pending_setup()
+
+		con_ctl = node.connect()
+		con_ctl.execute("SET application_name = 's_ctl';")
+		dmls = [
+		    ("INSERT INTO o_sk_pending VALUES (100, 100);", "s_ins"),
+		    ("UPDATE o_sk_pending SET token = 1000 WHERE id = 1;", "s_upd"),
+		    ("DELETE FROM o_sk_pending WHERE id = 2;", "s_del"),
+		]
+		expected_rows = 5  # +1 insert, -1 delete
+
+		cons = []
+		pids = []
+		threads = []
+		for sql, app in dmls:
+			c = node.connect()
+			c.execute(f"SET application_name = '{app}';")
+			c.commit()
+			pids.append(c.execute("SELECT pg_backend_pid();")[0][0])
+			c.commit()
+			cons.append(c)
+
+		con_ctl.execute("SELECT pg_stopevent_set('sk_modify_pending', "
+		                "'$applicationName starts with \"s_\" "
+		                "&& $applicationName != \"s_ctl\"');")
+
+		for c, (sql, _) in zip(cons, dmls):
+			t = ThreadQueryExecutor(c, f"BEGIN; {sql} COMMIT;")
+			t.start()
+			threads.append(t)
+
+		for pid in pids:
+			wait_stopevent(node, pid)
+
+		# Single CHECKPOINT scans every parked backend's pendingSkUndoLoc.
+		con_ctl.execute("CHECKPOINT;")
+		con_ctl.execute("SELECT pg_stopevent_reset('sk_modify_pending');")
+		for t in threads:
+			t.join()
+
+		live_pk = node.execute('postgres',
+		                       "SELECT count(*) FROM o_sk_pending")[0][0]
+		live_sk = node.execute(
+		    'postgres', "SELECT count(DISTINCT token) FROM o_sk_pending")[0][0]
+		self.assertEqual((live_pk, live_sk), (expected_rows, expected_rows),
+		                 f"PK/SK diverged before crash: {live_pk}/{live_sk}")
+
+		con_ctl.close()
+		for c in cons:
+			c.close()
+
+		self.crash_with_os_buffer_loss()
+		node.start()
+		self._sk_modify_pending_assert_consistent(node, expected_rows)
+		node.stop()
+
+	def test_recovery_sk_modify_pending_self_created(self):
+		"""
+		The PK btree_modify for a table CREATEd in the current transaction
+		takes the self-created shortcut in o_btree_modify_internal() that
+		skips the undo record.  Without the WaitingSkUndoLoc sentinel a
+		CHECKPOINT running between PK and SK btree_modify would silently
+		snapshot the PK page with the new row while the SK page is still
+		without it, and a subsequent crash would lose the SK side because
+		the INSERT WAL sits before the new checkpoint's redo LSN.
+
+		With the sentinel the marker scan spins until the backend leaves
+		the PK-applied/SK-pending window, so the checkpoint snapshot is
+		atomic across PK and SK.  This test fails (timeouts at
+		wait_stopevent, because set_pending_sk_marker bails on the invalid
+		pkUndoLoc) before the sentinel patch and passes after.
+		"""
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "max_wal_size = 4GB\n"
+		    "orioledb.enable_stopevents = true\n")
+		node.start()
+		node.safe_psql('postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql('postgres', "CHECKPOINT;")
+
+		con_ctl = node.connect()
+		con_dml = node.connect()
+		con_chk = node.connect()
+		con_ctl.execute("SET application_name = 's_ctl';")
+		con_chk.execute("SET application_name = 's_chk';")
+		con_dml.execute("SET application_name = 's_dml';")
+		con_dml.commit()
+		dml_pid = con_dml.execute("SELECT pg_backend_pid();")[0][0]
+		con_dml.commit()
+
+		con_ctl.execute("SELECT pg_stopevent_set('sk_modify_pending', "
+		                "'$applicationName == \"s_dml\"');")
+
+		# Same txn: CREATE TABLE + CREATE INDEX + INSERT.  The PK btree's
+		# createOxid matches the txn's oxid, so o_btree_modify_internal()
+		# skips undo for the INSERT and set_pending_sk_marker() writes
+		# WaitingSkUndoLoc instead of a real undo location.
+		dml_thread = ThreadQueryExecutor(
+		    con_dml, """
+			BEGIN;
+			CREATE TABLE o_sk_self (
+				id int NOT NULL,
+				token bigint NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+			CREATE UNIQUE INDEX o_sk_self_token_idx
+				ON o_sk_self (token);
+			INSERT INTO o_sk_self VALUES (100, 100);
+			COMMIT;""")
+		dml_thread.start()
+
+		# Bounded wait with a clear failure message: without the
+		# WaitingSkUndoLoc sentinel, set_pending_sk_marker() bails on the
+		# invalid pkUndoLoc and the stopevent never fires, so an unbounded
+		# wait_stopevent() would hang.
+		deadline = time.time() + 30
+		while time.time() < deadline:
+			if node.execute(
+			    'postgres', f"SELECT EXISTS(SELECT 1 FROM pg_stopevents() "
+			    f"WHERE waiter_pids @> ARRAY[{dml_pid}])")[0][0]:
+				break
+			time.sleep(0.1)
+		else:
+			raise AssertionError(
+			    "sk_modify_pending stopevent did not fire for self-created "
+			    "table -- WaitingSkUndoLoc sentinel path is broken")
+
+		# CHECKPOINT must spin on WaitingSkUndoLoc until s_dml clears it.
+		# Run it on a separate connection so we can also issue the disarm
+		# without serialising behind CHECKPOINT.
+		chk_thread = ThreadQueryExecutor(con_chk, "CHECKPOINT;")
+		chk_thread.start()
+
+		# Briefly let CHECKPOINT enter the marker-scan wait loop, then
+		# release the parked backend.  The SK insert (and commit) happen
+		# while CHECKPOINT is still spinning on the sentinel; once
+		# pendingSkUndoLoc clears, CHECKPOINT proceeds and snapshots a
+		# consistent PK+SK state.
+		time.sleep(0.2)
+		con_ctl.execute("SELECT pg_stopevent_reset('sk_modify_pending');")
+		dml_thread.join()
+		chk_thread.join()
+
+		live_pk = node.execute('postgres',
+		                       "SELECT count(*) FROM o_sk_self")[0][0]
+		live_sk = node.execute(
+		    'postgres', "SELECT count(DISTINCT token) FROM o_sk_self")[0][0]
+		self.assertEqual((live_pk, live_sk), (1, 1))
+
+		con_ctl.close()
+		con_dml.close()
+		con_chk.close()
+
+		self.crash_with_os_buffer_loss()
+		node.start()
+
+		n_pk = node.execute('postgres', "SELECT count(*) FROM o_sk_self")[0][0]
+		n_sk = node.execute(
+		    'postgres', "SELECT count(DISTINCT token) FROM o_sk_self")[0][0]
+		self.assertEqual(n_pk, n_sk,
+		                 f"PK ({n_pk}) != SK ({n_sk}) after recovery")
+		self.assertEqual(n_pk, 1)
+		self.assertTrue(
+		    node.execute(
+		        'postgres',
+		        "SELECT orioledb_tbl_check('o_sk_self'::regclass)")[0][0])
+		node.stop()
+
+
+class RecoverySkModifyPendingReplicaTest(BaseTest):
+	"""
+	Same PK->SK fix-up mechanism but the marker is captured by a
+	*restartpoint* on a replica instead of a master checkpoint.
+
+	The master runs the DML through to commit; the replica's recovery
+	worker parks at sk_modify_pending between the PK and SK btree_modify
+	calls, a CHECKPOINT on the replica becomes a restartpoint and scans
+	the marker into the xid file, then disarm + catchup + immediate stop
+	+ restart -- the SK fix-up reconciles PK and SK on restart.
+
+	The stopevent filter matches both the recovery worker's backendType
+	and the PK tree name, so a parallel DML on the master never matches.
+	"""
+
+	def setUp(self):
+		self.startTime = time.time()
+		self.node = self.initNode(self.getBasePort(),
+		                          suffix="tgsn",
+		                          allows_streaming=True)
+
+	def _wait_recovery_worker_at_sk_modify_pending(self, replica):
+		"""
+		Poll until some recovery worker is parked at sk_modify_pending.
+		Uses poll_query_until so we don't hammer the spinlock that
+		pg_stopevents() takes while iterating events.
+		"""
+		replica.poll_query_until(
+		    "SELECT coalesce(array_length(waiter_pids, 1), 0) > 0 "
+		    "FROM pg_stopevents() "
+		    "WHERE stopevent = 'sk_modify_pending'",
+		    expected=True,
+		    sleep_time=0.2,
+		    max_attempts=300,
+		    suppress=[Exception])
+
+	def test_recovery_sk_modify_pending_replica_concurrent(self):
+		"""
+		Three concurrent DML transactions on the master replicate to a
+		replica whose recovery workers park at sk_modify_pending; a single
+		replica-side CHECKPOINT (restartpoint) captures all three pending
+		fix-ups, then disarm + catchup + immediate stop + restart verifies
+		consistency.
+		"""
+		master = self.node
+		master.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "max_wal_size = 4GB\n"
+		    "orioledb.enable_stopevents = true\n")
+		master.start()
+		master.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_sk_pending (
+				id int NOT NULL,
+				token bigint NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+			CREATE UNIQUE INDEX o_sk_pending_token_idx
+				ON o_sk_pending (token);
+			INSERT INTO o_sk_pending
+				SELECT i, i FROM generate_series(1, 5) i;
+		""")
+		master.safe_psql('postgres', "CHECKPOINT;")
+
+		with self.getReplica() as replica:
+			replica.append_conf(
+			    'postgresql.conf', "checkpoint_timeout = 1d\n"
+			    "max_wal_size = 4GB\n"
+			    "orioledb.enable_stopevents = true\n")
+			replica.start()
+			self.catchup_orioledb(replica)
+
+			replica.safe_psql("SELECT pg_stopevent_set('sk_modify_pending', "
+			                  "'$backendType == \"orioledb recovery worker\" "
+			                  "&& $.treeName == \"o_sk_pending_pkey\"');")
+
+			# Three concurrent DMLs on master.  All three commit on the
+			# master immediately (filter only matches replica's recovery
+			# workers); WAL ships and the workers park on the replica.
+			expected_rows = 5  # 5 initial + 1 insert - 1 delete
+			master_threads = [
+			    ThreadQueryExecutor(
+			        master.connect(), "BEGIN; "
+			        "INSERT INTO o_sk_pending VALUES (100, 100); COMMIT;"),
+			    ThreadQueryExecutor(
+			        master.connect(), "BEGIN; "
+			        "UPDATE o_sk_pending SET token = 1000 WHERE id = 1; "
+			        "COMMIT;"),
+			    ThreadQueryExecutor(
+			        master.connect(), "BEGIN; "
+			        "DELETE FROM o_sk_pending WHERE id = 2; COMMIT;"),
+			]
+			for t in master_threads:
+				t.start()
+			for t in master_threads:
+				t.join()
+
+			self._wait_recovery_worker_at_sk_modify_pending(replica)
+
+			# Restartpoint -- captures pendingSkUndoLoc into the xid file
+			# for every parked worker.
+			replica.safe_psql("CHECKPOINT;")
+
+			replica.safe_psql(
+			    "SELECT pg_stopevent_reset('sk_modify_pending');")
+			self.catchup_orioledb(replica)
+
+			live_pk = replica.execute(
+			    "SELECT count(*) FROM o_sk_pending")[0][0]
+			live_sk = replica.execute(
+			    "SELECT count(DISTINCT token) FROM o_sk_pending")[0][0]
+			self.assertEqual(
+			    (live_pk, live_sk), (expected_rows, expected_rows),
+			    f"PK/SK diverged on replica before crash: {live_pk}/{live_sk}")
+
+			replica.stop(['-m', 'immediate'])
+			replica.start()
+
+			n_pk = replica.execute("SELECT count(*) FROM o_sk_pending")[0][0]
+			n_sk = replica.execute(
+			    "SELECT count(DISTINCT token) FROM o_sk_pending")[0][0]
+			self.assertEqual(
+			    n_pk, n_sk, f"PK rows ({n_pk}) != SK distinct tokens ({n_sk}) "
+			    f"on replica after restart")
+			self.assertEqual(n_pk, expected_rows)
+
+		master.stop()
+
 
 class RecoveryWithArchivingTest(BaseTest):
 

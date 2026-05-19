@@ -957,7 +957,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		if (OidIsValid(relid) && objtype == OBJECT_TABLE &&
 			(lockmode == AccessExclusiveLock || lockmode == ShareUpdateExclusiveLock))
 		{
-			Relation	rel = table_open(relid, lockmode);
+			Relation	rel = relation_open(relid, lockmode);
 
 			if (is_orioledb_rel(rel))
 			{
@@ -3791,7 +3791,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						OSnapshot	oSnapshot;
 						OXid		oxid;
 						ORelOids	idx_oids;
-						OBTOptions *options = (OBTOptions *) rel->rd_options;
 						Oid			reltablespace;
 
 						ORelOidsSetFromRel(idx_oids, rel);
@@ -3802,13 +3801,13 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
 						{
 							OTableIndex *index = &o_table->indices[ix_num];
+							OBTOptions *options = (OBTOptions *) rel->rd_options;
 
 							if (ORelOidsIsEqual(index->oids, idx_oids))
 							{
 								namestrcpy(&index->name,
 										   rel->rd_rel->relname.data);
-								if (options)
-									index->fillfactor = options->bt_options.fillfactor;
+								index->fillfactor = options ? options->bt_options.fillfactor : BTREE_DEFAULT_FILLFACTOR;
 								break;
 							}
 						}
@@ -3817,9 +3816,11 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							reltablespace = MyDatabaseTableSpace;
 						if (o_table->indices[ix_num].tablespace == reltablespace)
 						{
+							int			ctid_idx_off = o_table->has_primary ? 0 : 1;
+
 							fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 							o_tables_rel_meta_lock(tbl);
-							o_indices_update(o_table, ix_num, oxid, oSnapshot.csn);
+							o_indices_update(o_table, ix_num + ctid_idx_off, oxid, oSnapshot.csn);
 							o_tables_update(o_table, oxid, oSnapshot.csn);
 							o_tables_rel_meta_unlock(tbl, InvalidOid);
 							o_invalidate_oids(idx_oids);

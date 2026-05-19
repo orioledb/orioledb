@@ -19,6 +19,7 @@
 #include "orioledb.h"
 
 #include "btree/btree.h"
+#include "btree/check.h"
 #include "btree/io.h"
 #include "btree/iterator.h"
 #include "btree/scan.h"
@@ -66,6 +67,7 @@
 #include "storage/bufmgr.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
+#include "utils/tuplestore.h"
 #include "utils/backend_progress.h"
 #include "utils/datum.h"
 #include "utils/fmgroids.h"
@@ -457,6 +459,22 @@ orioledb_row_ref_equals(Relation rel, Datum tupleidDatum1, Datum tupleidDatum2)
 	get_keys_from_rowid(GET_PRIMARY(descr), tupleidDatum2, &rowid2, NULL,
 						NULL, NULL, NULL);
 	return is_keys_eq(&GET_PRIMARY(descr)->desc, &rowid1, &rowid2);
+}
+
+/*
+ * Called by the executor after every per-row INSERT/UPDATE/DELETE has had
+ * its secondary indices updated (i.e. after ExecInsertIndexTuples()).  We
+ * clear the pendingSkUndoLoc marker that was set right after the PK
+ * btree_modify in o_tbl_indices_overwrite() / o_tbl_indices_reinsert() /
+ * o_tbl_insert() / o_tbl_indices_delete().  Once cleared the row no longer
+ * has a PK-applied/SK-pending fix-up obligation for the checkpointer to
+ * emit.
+ */
+static void
+orioledb_tuple_complete_modification(Relation rel)
+{
+	(void) rel;
+	clear_pending_sk_marker();
 }
 
 static TupleTableSlot *
@@ -1196,9 +1214,21 @@ orioledb_index_build_range_scan(Relation heapRelation,
 
 			ExecClearTuple(primarySlot);
 		}
+
+		/*
+		 * TableScanDesc scan is unused in this function but could be passed
+		 * by a caller (e.g in a case of parallel bridged index build) We need
+		 * to close it here, same as in heapam_index_build_range_scan.
+		 * Otherwise BTreeSeqScan leaks until ResourceOwner release warns
+		 * "resource was not closed".
+		 */
+		if (scan)
+			table_endscan(scan);
+
 		ExecDropSingleTupleTableSlot(primarySlot);
 		FreeExecutorState(estate);
 		free_btree_seq_scan(seq_scan);
+
 
 		/* These may have been pointing to the now-gone estate */
 		indexInfo->ii_ExpressionsState = NIL;
@@ -2431,6 +2461,57 @@ orioledb_tuple_is_current(Relation rel, TupleTableSlot *slot)
 	return COMMITSEQNO_IS_INPROGRESS(oslot->csn);
 }
 
+/*
+ * amcheck callback: verify all b-trees of the orioledb relation and emit a
+ * row per failed index.  Output tuple shape matches verify_heapam:
+ * (blkno bigint, offnum int, attnum int, msg text).  blkno/offnum/attnum
+ * are reported as NULL since errors are at index granularity.
+ * `thorough_check` enables the on-disk map check (force_file_check) of
+ * check_btree.  check_btree is always called in wait_for_checkpoint mode
+ * so amcheck doesn't spuriously fail on a tree that's transiently sitting
+ * on the checkpoint boundary.
+ */
+static void
+orioledb_verify_tableam(Relation rel,
+						Tuplestorestate *tupstore,
+						TupleDesc tupdesc,
+						bool on_error_stop,
+						bool thorough_check)
+{
+	OTableDescr *descr;
+	int			i;
+
+	orioledb_check_shmem();
+
+	descr = relation_get_descr(rel);
+	if (!descr)
+		ereport(ERROR,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("relation \"%s\" is not orioledb",
+						RelationGetRelationName(rel))));
+
+	for (i = 0; i < descr->nIndices; i++)
+	{
+		OIndexDescr *idx = descr->indices[i];
+
+		o_btree_load_shmem(&idx->desc);
+		if (!check_btree(&idx->desc, thorough_check, true))
+		{
+			Datum		values[4] = {0};
+			bool		nulls[4] = {true, true, true, false};
+			char	   *msg = psprintf("index \"%s\": check failed",
+									   NameStr(idx->name));
+
+			values[3] = CStringGetTextDatum(msg);
+			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+			pfree(msg);
+
+			if (on_error_stop)
+				break;
+		}
+	}
+}
+
 
 /* ------------------------------------------------------------------------
  * Definition of the orioledb table access method.
@@ -2469,6 +2550,7 @@ static const TableAmRoutine orioledb_am_methods = {
 	.tuple_delete = orioledb_tuple_delete,
 	.tuple_update = orioledb_tuple_update,
 	.tuple_lock = orioledb_tuple_lock,
+	.tuple_complete_modification = orioledb_tuple_complete_modification,
 	.finish_bulk_insert = orioledb_finish_bulk_insert,
 
 	.tuple_fetch_row_version = orioledb_fetch_row_version,
@@ -2497,7 +2579,8 @@ static const TableAmRoutine orioledb_am_methods = {
 	.scan_sample_next_tuple = orioledb_scan_sample_next_tuple,
 	.tuple_is_current = orioledb_tuple_is_current,
 	.analyze_table = orioledb_analyze_table,
-	.reloptions = orioledb_reloptions
+	.reloptions = orioledb_reloptions,
+	.verify_tableam = orioledb_verify_tableam
 };
 
 bool

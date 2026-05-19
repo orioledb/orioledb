@@ -132,15 +132,40 @@ typedef enum
 
 #define XID_RECS_QUEUE_SIZE			(max_procs * 4)
 
+/*
+ * Tag stored in an XidFileRec to distinguish the kinds of records the file
+ * carries.  The first UndoLogsCount values are 1:1 with UndoLogType for
+ * "active undo at checkpoint time" records.  The next UndoLogsCount values
+ * are the "rewind" variants (same UndoLogType, but the record describes a
+ * not-yet-applied rewind cleanup) and are at offset UndoLogsCount.  Values
+ * beyond that are independent kinds carried in the same file, the only one
+ * today being XidRecPendingSkFixup, written by the checkpointer to record
+ * a transaction that had applied its primary index change but had not yet
+ * updated the corresponding secondary indices at the checkpoint boundary.
+ *
+ * The numeric layout matches the pre-XidRecKind file format, so existing
+ * on-disk values keep their meaning.
+ */
+typedef enum
+{
+	XidRecUndoRegular = UndoLogRegular,
+	XidRecUndoRegularPageLevel = UndoLogRegularPageLevel,
+	XidRecUndoSystem = UndoLogSystem,
+	XidRecRewindUndoRegular = UndoLogsCount + UndoLogRegular,
+	XidRecRewindUndoRegularPageLevel = UndoLogsCount + UndoLogRegularPageLevel,
+	XidRecRewindUndoSystem = UndoLogsCount + UndoLogSystem,
+	XidRecPendingSkFixup = 2 * UndoLogsCount
+} XidRecKind;
+
 typedef struct
 {
 	OXid		oxid;
-	UndoLogType undoType;
+	XidRecKind	kind;
 	UndoStackLocations undoLocation;
 	UndoLocation retainLocation;
 } XidFileRec;
 
-/* Rewind types are shifted by UndoLogsCount compared to respective general undoTypes */
+/* Rewind kinds are shifted by UndoLogsCount compared to their UndoLogType base */
 #define XID_REC_REWIND_TYPES_OFFSET UndoLogsCount
 
 typedef struct

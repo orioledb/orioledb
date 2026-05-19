@@ -236,6 +236,29 @@ SELECT level, count, ROUND(avgoccupied * 100 / 8192)
      1 |     1 |    18
 (2 rows)
 
+ALTER INDEX o_test_fillfactor_ix1 RESET (fillfactor);
+\d+ o_test_fillfactor
+                                Table "fillfactor.o_test_fillfactor"
+ Column |       Type        | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+-------------------+-----------+----------+---------+----------+--------------+-------------
+ f1     | text              |           | not null |         | extended |              | 
+ f2     | character varying |           |          |         | extended |              | 
+ f3     | integer           |           |          |         | plain    |              | 
+ f4     | integer           |           |          |         | plain    |              | 
+ f5     | integer           |           |          |         | plain    |              | 
+ f6     | integer           |           |          |         | plain    |              | 
+Indexes:
+    "o_test_fillfactor_pkey" PRIMARY KEY, btree (f1)
+    "o_test_fillfactor_ix1" btree (f1)
+Options: fillfactor=20
+
+\d+ o_test_fillfactor_ix1
+          Index "fillfactor.o_test_fillfactor_ix1"
+ Column | Type | Key? | Definition | Storage  | Stats target 
+--------+------+------+------------+----------+--------------
+ f1     | text | yes  | f1         | extended | 
+btree, for table "fillfactor.o_test_fillfactor"
+
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to table o_test_fillfactor
 DROP SCHEMA fillfactor CASCADE;
