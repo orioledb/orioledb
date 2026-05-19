@@ -250,7 +250,16 @@ vac_open_bridged_indexes(Relation relation, LOCKMODE lockmode,
 	else
 		*Irel = NULL;
 
-	/* collect just the ready indexes */
+	/*
+	 * Collect all ready indexes, including orioledb-managed btree
+	 * indexes. Even though they have no bridged storage to vacuum:
+	 * parallel vacuum workers use the unfiltered vac_open_indexes() in
+	 * parallel_vacuum_main(), so a different index count between leader and
+	 * worker would mis-index the shared PVIndStats array.
+	 *
+	 * orioledb_ambulkdelete() / orioledb_amvacuumcleanup() are no-ops
+	 * for orioledb-managed indexes.
+	 */
 	i = 0;
 	foreach(indexoidscan, indexoidlist)
 	{
@@ -258,17 +267,6 @@ vac_open_bridged_indexes(Relation relation, LOCKMODE lockmode,
 		Relation	indrel;
 
 		indrel = index_open(indexoid, lockmode);
-
-		if (indrel->rd_amhandler == F_BTHANDLER)
-		{
-			OBTOptions *options = (OBTOptions *) indrel->rd_options;
-
-			if (!(options && !options->orioledb_index))
-			{
-				index_close(indrel, lockmode);
-				continue;
-			}
-		}
 
 		if (!indrel->rd_index->indisready)
 		{
