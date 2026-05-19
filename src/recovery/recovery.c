@@ -102,6 +102,7 @@ typedef struct
 
 	TransactionId xid;			/* builtin transaction identifier for joint
 								 * commit */
+	OXid		joint_commit_xmin;	/* xmin carried by JOINT_COMMIT */
 
 	bool		needs_wal_flush;
 	UndoLocation retain_locs[(int) UndoLogsCount];
@@ -927,6 +928,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			int			j;
 
 			state->xid = InvalidTransactionId;
+			state->joint_commit_xmin = InvalidOXid;
 			state->needs_wal_flush = false;
 			for (j = 0; j < (int) UndoLogsCount; j++)
 				state->retain_locs[j] = InvalidUndoLocation;	/* undo locations are
@@ -4539,6 +4541,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 
 		case WAL_REC_JOINT_COMMIT:
 			cur_recovery_xid_state->xid = rec->u.joint_commit.xid;
+			cur_recovery_xid_state->joint_commit_xmin = rec->u.joint_commit.xmin;
 			elog(DEBUG1, "OrioleDB recovery committed transaction (xid, oxid)="
 				 "(%u, %lu). Next WAL record starts at LSN %X/%X",
 				 cur_recovery_xid_state->xid, rec->oxid,
@@ -4964,6 +4967,9 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn, bool commit)
 
 		if (state->xid != xid)
 			continue;
+
+		if (OXidIsValid(state->joint_commit_xmin))
+			recovery_xmin = Max(recovery_xmin, state->joint_commit_xmin);
 
 		recovery_switch_to_oxid(state->oxid, -1);
 
