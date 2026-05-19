@@ -28,6 +28,46 @@ class VacuumTest(BaseTest):
 		node.start()
 		node.stop()
 
+	def test_vacuum_parallel_bridged_indexes(self):
+		"""
+		Test for parallel vacuum with many indexes and bridged index.
+		"""
+		node = self.node
+		node.append_conf("max_worker_processes = 8\n"
+		                 "max_parallel_maintenance_workers = 4\n")
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+		node.safe_psql("""
+			CREATE TABLE o_test_brin (id int, data text,
+									  col_btree text, col_hash text,
+									  col_gist tsvector,
+									  col_spgist text, col_brin text,
+									  col_brin2 text) USING orioledb;
+			INSERT INTO o_test_brin
+				SELECT s, repeat('d', 2000), 'b' || s, 'h' || s,
+					   to_tsvector('s' || s), 'p' || s, 'r' || s, 'r2' || s
+				FROM generate_series(1, 10000) s;
+			CREATE INDEX ON o_test_brin (col_btree);
+			CREATE INDEX ON o_test_brin USING hash (col_hash);
+			CREATE INDEX ON o_test_brin USING gist (col_gist);
+			CREATE INDEX ON o_test_brin USING spgist (col_spgist);
+			CREATE INDEX ON o_test_brin USING brin (col_brin);
+			CREATE INDEX ON o_test_brin USING brin (id, col_brin2);
+			UPDATE o_test_brin
+				SET col_btree = col_btree || 'x',
+					col_hash = col_hash || 'x',
+					col_spgist = col_spgist || 'x',
+					col_brin = col_brin || 'x',
+					col_brin2 = col_brin2 || 'x';
+		""")
+		con = node.connect(autocommit=True)
+		con.execute("SET min_parallel_index_scan_size = 0;")
+		con.execute("SET maintenance_work_mem = '1MB';")
+		con.execute("SET max_parallel_maintenance_workers = 4;")
+		con.execute("VACUUM (PARALLEL 4) o_test_brin;")
+		con.close()
+		node.stop()
+
 	def test_vacuum_disable_page_skipping(self):
 		node = self.node
 		node.start()
