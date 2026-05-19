@@ -88,18 +88,18 @@ check_btree(BTreeDescr *desc, bool force_file_check, bool wait_for_checkpoint)
 	if (wait_for_checkpoint)
 	{
 		/*
-		 * Repeat until we get checkpoint number to avoid spurious failure
-		 * due to concurrent checkpoint when called by amcheck.
+		 * Repeat until we get checkpoint number to avoid spurious failure due
+		 * to concurrent checkpoint when called by amcheck.
 		 */
 		while (!get_checkpoint_number(desc, desc->rootInfo.rootPageBlkno,
-										   &checkpoint_number, &copy_blkno))
+									  &checkpoint_number, &copy_blkno))
 		{
 			CHECK_FOR_INTERRUPTS();
 			pg_usleep(1000L);
 		}
 	}
 	else if (!get_checkpoint_number(desc, desc->rootInfo.rootPageBlkno,
-				&checkpoint_number, &copy_blkno))
+									&checkpoint_number, &copy_blkno))
 	{
 		elog(NOTICE, "Tree is under checkpoint now");
 		return false;

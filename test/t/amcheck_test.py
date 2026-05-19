@@ -31,15 +31,13 @@ class AmcheckTest(BaseTest):
 			CHECKPOINT;
 		""")
 
-		rows = node.execute(
-		    'postgres',
-		    "SELECT * FROM verify_heapam('o_t'::regclass);")
+		rows = node.execute('postgres',
+		                    "SELECT * FROM verify_heapam('o_t'::regclass);")
 		self.assertEqual(rows, [])
 
 		# Deep check (force_file_check via the check_toast arg) also clean.
 		rows = node.execute(
-		    'postgres',
-		    "SELECT * FROM verify_heapam('o_t'::regclass, "
+		    'postgres', "SELECT * FROM verify_heapam('o_t'::regclass, "
 		    "                            check_toast := true);")
 		self.assertEqual(rows, [])
 
@@ -59,13 +57,14 @@ class AmcheckTest(BaseTest):
 			CHECKPOINT;
 		""")
 
-		res = subprocess.run(
-		    ['pg_amcheck', '-d', 'postgres', '-t', 'public.o_t',
-		     '-p', str(node.port), '-h', node.host],
-		    capture_output=True, text=True)
+		res = subprocess.run([
+		    'pg_amcheck', '-d', 'postgres', '-t', 'public.o_t', '-p',
+		    str(node.port), '-h', node.host
+		],
+		                     capture_output=True,
+		                     text=True)
 		self.assertEqual(
-		    res.returncode, 0,
-		    f"pg_amcheck failed: stdout={res.stdout!r} "
+		    res.returncode, 0, f"pg_amcheck failed: stdout={res.stdout!r} "
 		    f"stderr={res.stderr!r}")
 		self.assertEqual(res.stdout, '')
 
@@ -100,13 +99,14 @@ class AmcheckTest(BaseTest):
 			CHECKPOINT;
 		""")
 
-		res = subprocess.run(
-		    ['pg_amcheck', '-d', 'postgres',
-		     '-p', str(node.port), '-h', node.host],
-		    capture_output=True, text=True)
+		res = subprocess.run([
+		    'pg_amcheck', '-d', 'postgres', '-p',
+		    str(node.port), '-h', node.host
+		],
+		                     capture_output=True,
+		                     text=True)
 		self.assertEqual(
-		    res.returncode, 0,
-		    f"pg_amcheck failed: stdout={res.stdout!r} "
+		    res.returncode, 0, f"pg_amcheck failed: stdout={res.stdout!r} "
 		    f"stderr={res.stderr!r}")
 		self.assertEqual(res.stdout, '')
 
@@ -147,8 +147,8 @@ class AmcheckTest(BaseTest):
 		# (offset 24 in struct CheckpointFileHeader) with a bogus value.
 		# On restart, recovery loads this wrong length into the meta page;
 		# the next check_btree finds busy+free != data_file_len.
-		pattern = os.path.join(node.data_dir, 'orioledb_data',
-		                       str(datoid), f'{pkey_relnode}-*.map')
+		pattern = os.path.join(node.data_dir, 'orioledb_data', str(datoid),
+		                       f'{pkey_relnode}-*.map')
 		map_files = sorted(glob.glob(pattern))
 		self.assertTrue(map_files, f"no .map files matched {pattern}")
 		with open(map_files[-1], 'r+b') as f:
@@ -162,9 +162,8 @@ class AmcheckTest(BaseTest):
 		self.assertTrue(
 		    rows,
 		    "verify_heapam should have reported at least one corrupt index")
-		self.assertTrue(
-		    any('check failed' in r[0] for r in rows),
-		    f"unexpected verify_heapam output: {rows!r}")
+		self.assertTrue(any('check failed' in r[0] for r in rows),
+		                f"unexpected verify_heapam output: {rows!r}")
 
 	def test_verify_heapam_during_checkpoint(self):
 		"""
@@ -196,10 +195,9 @@ class AmcheckTest(BaseTest):
 		con_set = node.connect()
 
 		# Park the next checkpointer inside o_chkp_pkey at first descent.
-		con_set.execute(
-		    "SELECT pg_stopevent_set('checkpoint_step',\n"
-		    "'$.action == \"walkDownwards\" && "
-		    "$.treeName == \"o_chkp_pkey\"');")
+		con_set.execute("SELECT pg_stopevent_set('checkpoint_step',\n"
+		                "'$.action == \"walkDownwards\" && "
+		                "$.treeName == \"o_chkp_pkey\"');")
 
 		t_chkp = ThreadQueryExecutor(con_chkp, "CHECKPOINT;")
 		t_chkp.start()
@@ -207,11 +205,14 @@ class AmcheckTest(BaseTest):
 
 		# Capture stderr from psql so any "Tree is under checkpoint now"
 		# NOTICE would be visible if the wait failed to kick in.
-		verify_proc = subprocess.Popen(
-		    ['psql', '-p', str(node.port), '-h', node.host,
-		     '-d', 'postgres', '-At', '-c',
-		     "SELECT msg FROM verify_heapam('o_chkp'::regclass);"],
-		    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+		verify_proc = subprocess.Popen([
+		    'psql', '-p',
+		    str(node.port), '-h', node.host, '-d', 'postgres', '-At', '-c',
+		    "SELECT msg FROM verify_heapam('o_chkp'::regclass);"
+		],
+		                               stdout=subprocess.PIPE,
+		                               stderr=subprocess.PIPE,
+		                               text=True)
 
 		# verify_heapam must block on the gate while the stopevent holds.
 		time.sleep(0.5)
