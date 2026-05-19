@@ -202,10 +202,24 @@ class RrStressTest(BaseTest):
 						    "SELECT balance, token "
 						    "FROM o_bank_account "
 						    f"WHERE id = {v_to}")[0]
+						# Pocket-free 2-row swap: tokens rotate directly
+						# between v_from and v_to with no writer-side
+						# pocket state. The old 3-participant variant
+						# (writer pocket + v_from + v_to) drifted under
+						# cascade conditions because a writer SIGQUIT'd
+						# between XLogFlush(commit) and the Python
+						# `my_token = to_token` assignment ended up with
+						# a stale pocket while the DB had the post-commit
+						# state -- producing thousands of spurious
+						# `duplicate key value violates unique constraint
+						# o_bank_account_token_uniq` errors that throttled
+						# the workload by ~15x without surfacing any real
+						# SK bug. With the direct swap, no inter-tx
+						# writer state exists, so no drift is possible.
 						con.execute(
 						    "UPDATE o_bank_account "
 						    f"SET balance = {from_bal - amount}, "
-						    f"    token = {my_token} "
+						    f"    token = {to_token} "
 						    f"WHERE id = {v_from}")
 						if random.randint(0, 1) == 0:
 							time.sleep(0)
@@ -215,7 +229,6 @@ class RrStressTest(BaseTest):
 						    f"    token = {from_token} "
 						    f"WHERE id = {v_to}")
 						con.commit()
-						my_token = to_token
 						local_w += 1
 					except Exception:
 						# Probe connection health via rollback.  If even
