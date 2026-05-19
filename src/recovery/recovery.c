@@ -1723,6 +1723,40 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 					break;
 				}
 
+				/*
+				 * Replay may already have advanced into post-backup WAL while the
+				 * visible state is still exactly the base-backup state: for
+				 * example, we may have entered JOINT_COMMIT processing for the
+				 * first post-backup transaction but not replayed the builtin
+				 * commit record that would publish an Oriole-visible boundary.
+				 *
+				 * For stop-before semantics such uncommitted / not-yet-visible
+				 * replay progress must be treated the same way as "no visible
+				 * progress yet": the last safe visible state is still the backup
+				 * baseline, so waiting for a published boundary would hang
+				 * forever.
+				 */
+				if (!XLogRecPtrIsValid(last_visible_ptr_snapshot) &&
+					!XLogRecPtrIsValid(stop_before_visible_ptr))
+				{
+					elog(DEBUG4,
+						"Recovery target reached: synchronization barrier "
+						"completed at base-backup visible state before stop "
+						"(target_ptr=%X/%X recovery_ptr=%X/%X "
+						"last_replay_ptr=%X/%X last_visible_ptr=%X/%X "
+						"main_retain_ptr=%X/%X current_ptr=%X/%X "
+						"retain_ptr=%X/%X finished_ptr=%X/%X)",
+						LSN_FORMAT_ARGS(target_ptr),
+						LSN_FORMAT_ARGS(recovery_ptr_snapshot),
+						LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
+						LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
+						LSN_FORMAT_ARGS(main_retain_ptr),
+						LSN_FORMAT_ARGS(current_ptr),
+						LSN_FORMAT_ARGS(retain_ptr),
+						LSN_FORMAT_ARGS(finished_ptr));
+					break;
+				}
+
 				elog(DEBUG4,
 					"Recovery target reached: waiting for a published visible "
 					"boundary before stop "
