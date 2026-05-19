@@ -516,6 +516,9 @@ class RrStressTest(BaseTest):
 					if stop.wait(wal_chaos_idle):
 						break
 					try:
+						# sleep between iterations
+						time.sleep(0.5 * random.random())
+
 						rating = []
 						for point in wal_chaos_points:
 							rating.append(
@@ -576,6 +579,8 @@ class RrStressTest(BaseTest):
 		assert_chaos_points = [
 			'orioledb-commit-assert',
 			'orioledb-before-pre-commit-wal-finish',
+			'orioledb-before-xlog-insert',
+			'orioledb-after-page-io',
 		]
 		_env_assert_pts = os.getenv('RR_ASSERT_POINTS')
 		if _env_assert_pts and _env_assert_pts != 'ALL':

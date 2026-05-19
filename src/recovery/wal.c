@@ -924,6 +924,9 @@ log_logical_wal_container(Pointer ptr, int length, bool withXactTime)
 	}
 
 	XLogRegisterData(ptr, length);
+	START_CRIT_SECTION();
+	INJECTION_POINT("orioledb-before-xlog-insert");
+	END_CRIT_SECTION();
 	return XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
 }
 

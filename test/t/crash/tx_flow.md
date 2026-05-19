@@ -148,8 +148,16 @@ for
 						|
 						[INJECTION_POINT at wal.c#L336](https://github.com/orioledb/orioledb/blob/HEAD/src/recovery/wal.c#L336) -- **good point for injection (`orioledb-before-pre-commit-wal-finish`)** PANIC-escalating, wrapped in `START_CRIT_SECTION` / `END_CRIT_SECTION` so an attached `error` action escalates to PANIC instead of a clean abort. Fires *between* the call site of `add_finish_wal_record` above and the actual append of `WAL_REC_COMMIT`, while the modify records (already buffered, possibly already flushed by the earlier `flush_local_wal_if_needed`) sit on disk *without* a matching commit-or-rollback marker. Distinct from `orioledb-add-finish-wal` (clean abort, no commit marker emitted but the abort handler emits `WAL_REC_ROLLBACK` so recovery sees a clear rollback); here the postmaster crashes between the modify-record flush and any finish marker, so recovery sees orphan modify records with NO `WAL_REC_COMMIT` and NO `WAL_REC_ROLLBACK` -- the exact scenario where recovery must infer "no marker -> tx was in-flight -> discard" purely from the absence of a finish record. Used only by `assert_chaos_loop` (not `wal_chaos_loop`) because attach is guaranteed to PANIC. Commit-side only -- not reached on the abort path, no `-guarded` companion needed.
 						|
-						[flush_local_wal](https://github.com/orioledb/orioledb/blob/6f900ca6cf4b8eee3eec0634254ec21ee8c8918d/src/recovery/wal.c#L297) -- flushes local oriole wal to single wal stream
+						`wal_commit` calls [flush_local_wal](https://github.com/orioledb/orioledb/blob/HEAD/src/recovery/wal.c#L343) -- **Layer B**. Drains the entire `local_wal_buffer` for this backend into PG's WAL:
+							|
+							`flush_local_wal` calls [log_logical_wal_container](https://github.com/orioledb/orioledb/blob/HEAD/src/recovery/wal.c#L805)
+								|
+								`log_logical_wal_container` does XLogBeginInsert -> XLogRegisterData -> [XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER)](https://github.com/orioledb/orioledb/blob/HEAD/src/recovery/wal.c#L911) -- packs the buffer into one ORIOLEDB_XLOG_CONTAINER record, returns its LSN. Bytes are inside PG's WAL buffer; **not yet fsync'd** -- durability comes with `XLogFlush(flushPos)` below.
 					|
+					[XLogFlush(flushPos)](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2272) -- **Layer C: the orioledb-commit durability barrier**. fsyncs PG WAL up to `flushPos` (the LSN returned by `flush_local_wal`). Gated by `if (synchronous_commit > SYNCHRONOUS_COMMIT_OFF || oxid_needs_wal_flush)` -- so async-commit mode skips it and durability is left to the next WAL writer cycle / checkpoint. **This is *the* sync point a writer's `con.commit()` blocks on for orioledb-only txs.** The commit-window cascade race we documented earlier sits in the interval between `XLogFlush` returning here and the Python `my_token = to_token` assignment landing in the writer's local state.
+					|
+					(possibly: [SyncRepWaitForLSN](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2276) -- block on synchronous replicas if `synchronous_standby_names` is set; off by default in the test)
+					| 
 					[set_oxid_xlog_ptr](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L221) -- covered earlier
 				| 
 				[INJECTION_POINT at undo.c#L2378](https://github.com/orioledb/orioledb/blob/HEAD/src/transam/undo.c#L2378) -- **good point for injection (`orioledb-commit-assert`)** PANIC-escalating, wrapped in `START_CRIT_SECTION` / `END_CRIT_SECTION` so an attached `error` action escalates to PANIC. Fires *after* the WAL pipeline above has appended **and flushed** `WAL_REC_COMMIT` (the commit record is durable on disk), but *before* `current_oxid_precommit` flips the in-memory CSN to `COMMITTING`. Distinct recovery scenario from `orioledb-before-pre-commit-wal-finish`: here recovery sees a fully-committed WAL stream for the crashed oxid but the cluster never observed the in-memory commit, so replay re-applies the commit through the normal `WAL_REC_COMMIT` path. Used only by `assert_chaos_loop` (not `wal_chaos_loop`) because attach is guaranteed to PANIC. Bracketed by `commit-assert-trace pre`/`post` LOG lines so post-test analysis can count per-pid catches. Commit-side only -- not reached on the abort path, no `-guarded` companion needed.
@@ -265,6 +273,26 @@ Notes on injection candidates that are *unsuitable* for SELECT:
 
 The reader path doesn't touch undo or WAL on the producer side, so the bank-test's reader threads will not exercise the `wal_chaos` injection point at all -- only the `stopevent_chaos` ones (`page_read`, `step_down`).
 
+**I/O footprint of SELECT.** Zero disk-I/O syscalls on the steady-state path. The two ways a SELECT *can* drive I/O are both reactive (page-pool pressure):
+
+* **(a) inline eviction on page-miss** -- if the page the read needs isn't in the pool and the pool is full, the loader picks a victim before installing the new page:
+	|
+	`o_btree_find_tuple_by_key_cb` calls [find_page](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/iterator.c#L155) -- B-tree descent
+		|
+		`find_page` reaches a page-pool miss and calls [load_page](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/find.c#L797)
+			|
+			when the page-pool is full, `ppool_run_maintenance` (called from the page-pool allocator) iterates [walk_page](https://github.com/orioledb/orioledb/blob/HEAD/src/utils/page_pool.c#L437)
+				|
+				when the victim is dirty, [walk_page calls write_page](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L3083)
+					|
+					**Layer B** (the actual write): `write_page` invokes [perform_page_io](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L2249) -> [write_page_to_disk](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L1957) -> [btree_smgr_write](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L1432) -> [OFileWrite](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L589) -> `FileWrite` (PG VFD)
+					|
+					**Layer A** (kernel-writeback scheduling, batched): `write_page` calls [writeback_put_extent](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L2253) into `io_writeback`; when `extentsNumber >= bgwriter_flush_after`, [perform_writeback](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L2297) flushes via direct [FileWriteback](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L3380) (or [msync(MS_ASYNC)](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L3374) for `use_mmap` storage)
+
+* **(b) bgwriter background maintenance** -- independent of the SELECT, the orioledb bgwriter [calls ppool_run_maintenance](https://github.com/orioledb/orioledb/blob/HEAD/src/workers/bgwriter.c#L161) on its own schedule, hitting the same `walk_page` -> write/writeback chain above.
+
+For the bank-test (100 accounts, ~one PK leaf + one SK leaf) the working set fits in shared buffers; neither branch fires during SELECT.
+
 
 ## UPDATE TX FLOW
 
@@ -353,6 +381,22 @@ parse + [analyze](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc
 																			[unlock_page(blkno)](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/insert.c#L1142) -- called **inside** the crit-section, one statement before `END_CRIT_SECTION`. **The leaf write-lock is dropped here**, before control returns up the callback chain.
 																			|
 																			[END_CRIT_SECTION](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/insert.c#L1144) -- critical section ends.
+
+**At this instant the PK leaf is dirty in shared buffers; no disk write has happened.** The dirty page sits in the pool until one of:
+
+* **(a) eviction under memory pressure** -- triggered either by another backend's `find_page` -> `load_page` -> `walk_page` chain (see SELECT TX FLOW above) or by the orioledb bgwriter's [ppool_run_maintenance call](https://github.com/orioledb/orioledb/blob/HEAD/src/workers/bgwriter.c#L161) which iterates [walk_page](https://github.com/orioledb/orioledb/blob/HEAD/src/utils/page_pool.c#L437). Then **Layer B** [walk_page -> write_page](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L3083) -> [perform_page_io](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L2249) -> [write_page_to_disk](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L1957) -> [btree_smgr_write](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L1432) -> [OFileWrite](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L589), plus **Layer A** [writeback_put_extent](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L2253) -> [perform_writeback](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L2297) -> direct [FileWriteback](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L3380) (or [msync(MS_ASYNC)](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L3374) for `use_mmap`).
+* **(b) the next checkpoint** -- PG calls orioledb's [CheckPoint_hook -> o_perform_checkpoint](https://github.com/orioledb/orioledb/blob/HEAD/src/orioledb.c#L1259) (registered at extension load):
+	|
+	`o_perform_checkpoint` calls [o_indices_foreach_oids](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L1414) with `checkpoint_tables_callback`
+		|
+		per table the callback reaches [checkpoint_btree](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L1749) -> [checkpoint_btree_loop](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L3031) -- depth-first post-order walk
+			|
+			on visiting the dirty leaf, [`checkpoint_btree_loop` calls perform_page_io](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L3769) -> [write_page_to_disk](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L1957) (**Layer B**, same sink as eviction)
+			|
+			then [writeback_put_extent](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L3789) into the per-subtree `CheckpointWriteBack`; when full, `checkpoint_btree_loop` calls [perform_writeback_and_relock](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L3638) -> [perform_writeback](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L561) -> [btree_smgr_writeback](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L453) -> [FileWriteback](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L742) (**Layer A**)
+			|
+			at end of checkpoint, segment-file durability via [btree_smgr_sync](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L2732) -> `FileSync` per segment file -- **Layer C** durability barrier for everything just written.
+
 															|
 															control returns up: `o_btree_modify_insert_update` -> `o_btree_modify_internal`, which then calls [unlock_release(&context, false)](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L371). Note the `false` -- on this path [unlock_release](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L376) does **not** call `unlock_page` (the leaf was already unlocked by the insert machinery above); it only releases the reserved undo size and the page-pool reservation. The early-return / pre-mutation branches of `o_btree_modify_internal` ([L242](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L242), [L317](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L317), [L355](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/btree/modify.c#L355)) call `unlock_release(..., true)` instead -- those paths bail before reaching the insert machinery and so still hold the leaf lock at exit.
 											|
@@ -361,6 +405,18 @@ parse + [analyze](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc
 												[o_wal_update](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/tableam/operations.c#L1294) -- emits `WAL_REC_UPDATE` into the per-backend local WAL buffer.
 												|
 												[add_modify_wal_record](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/recovery/wal.c#L834) -- per-row WAL helper. Just packs the record into the local buffer; no flush yet. The "page-mutated-but-no-WAL" race is captured by the `orioledb-pk-mutated-pre-wal` injection one frame up (right before `o_wal_update`); a separate injection at the function level here would also fire on system-tree updates and is therefore not used.
+
+**The WAL record is now in the per-backend `local_wal_buffer` (8 KB, in shared memory).** The buffer drains to PG's WAL only on overflow or at commit. The overflow path is:
+	|
+	`add_modify_wal_record_extended` calls [flush_local_wal_if_needed](https://github.com/orioledb/orioledb/blob/HEAD/src/recovery/wal.c#L187) at the top -- fires only when `offset + required + XID_RESERVED > LOCAL_WAL_BUFFER_SIZE`
+		|
+		`flush_local_wal_if_needed` calls [flush_local_wal](https://github.com/orioledb/orioledb/blob/HEAD/src/recovery/wal.c#L852) on overflow -- drains the entire local buffer
+			|
+			`flush_local_wal` calls [log_logical_wal_container](https://github.com/orioledb/orioledb/blob/HEAD/src/recovery/wal.c#L805)
+				|
+				`log_logical_wal_container` does XLogBeginInsert -> XLogRegisterData (version, flags, xact info, origin, payload) -> [XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER)](https://github.com/orioledb/orioledb/blob/HEAD/src/recovery/wal.c#L911) -- **Layer B** (one ORIOLEDB_XLOG_CONTAINER record per drain; bytes land in PG WAL buffer, not yet fsync'd)
+
+For a single bank-test UPDATE (~few hundred bytes of WAL) the 8 KB buffer is nowhere near full -- the drain happens later, in COMMIT.
 							|
 							control returns to ExecUpdate. **good point for injection (`orioledb-update-pk-done-pre-sk`)** -- PK leaf is mutated and unlocked in shared buffers, the `ModifyUndoItemType` undo is pushed, and `WAL_REC_UPDATE` is packed in the per-backend *local* WAL buffer (not yet flushed -- that happens at COMMIT via `flush_local_wal`). Secondary indexes still hold the old token entry. A reader scanning by `token` at this instant would see the row at the *old* token key. This is precisely the inconsistency window the bank-test's `reader_sk` cross-check probes for.
 							|
@@ -393,6 +449,8 @@ parse + [analyze](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc
 													page lock + undo push + `START_CRIT_SECTION` + page mutation + `END_CRIT_SECTION`.
 													|
 													**No WAL emitted for the SK insert either** (same reason as the SK delete above). The SK page mutation and undo entry are sufficient for the live transaction; recovery / replication will re-derive the SK changes from the PK's `WAL_REC_UPDATE` record by replaying the new+old PK rows through `o_tbl_indices_overwrite` on the redo side.
+
+**SK leaf is now dirty in shared buffers** -- same disposition as the PK leaf earlier in this flow (eviction or next checkpoint takes it via the Layer B + Layer A path). No disk syscall at this instant.
 							|
 							ExecUpdateIndexTuples loop continues for any remaining secondary index, then returns. ExecUpdate returns to ExecModifyTable.
 						|
@@ -406,7 +464,9 @@ parse + [analyze](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc
 |
 [finish_xact_command](https://github.com/orioledb/postgres/blob/e43537cdc36146f1becc0084b1acc24a46074ae6/src/backend/tcop/postgres.c#L1354) -- second call at the end of `exec_simple_query` is a no-op.
 
-Per writer tx the bank workload pushes ~6 `ModifyUndoItemType` items (PK update + SK delete + SK insert per UPDATE, ×2 because the tx has two UPDATEs) but emits only ~2 `WAL_REC_UPDATE` records (one per UPDATE, both from `o_wal_update` on the primary descriptor). SK index changes are *not* WAL-logged separately -- only the PK's update is, and recovery re-derives the SK page mutations by replaying the PK update through `o_tbl_indices_overwrite`. Everything is flushed at COMMIT.
+Per writer tx the bank workload pushes ~6 `ModifyUndoItemType` items (PK update + SK delete + SK insert per UPDATE, ×2 because the tx has two UPDATEs) but emits only ~2 `WAL_REC_UPDATE` records (one per UPDATE, both from `o_wal_update` on the primary descriptor). SK index changes are *not* WAL-logged separately -- only the PK's update is, and recovery re-derives the SK page mutations by replaying the PK update through `o_tbl_indices_overwrite`.
+
+**Disk-I/O syscalls issued by an UPDATE in steady state: zero.** The body only dirties pages and appends bytes to `local_wal_buffer`. All `OFileWrite` / `XLogInsert` / `FileWriteback` / `XLogFlush` calls are deferred to COMMIT (WAL drain + fsync), the next checkpoint (CoW page writes + per-segment `FileSync`), or page-pool eviction. See the I/O & WRITEBACK FLOW section at the end of this file for the layered model and full caller chains.
 
 
 ## ABORT TX FLOW
@@ -461,7 +521,11 @@ Triggered by any `ereport(ERROR)` raised during the tx -- native serialization c
 							|
 							[add_finish_wal_record(WAL_REC_ROLLBACK)](https://github.com/orioledb/orioledb/blob/6f900ca6cf4b8eee3eec0634254ec21ee8c8918d/src/recovery/wal.c#L357-L358) -- pushes the rollback marker.
 							|
-							[flush_local_wal](https://github.com/orioledb/orioledb/blob/6f900ca6cf4b8eee3eec0634254ec21ee8c8918d/src/recovery/wal.c#L359) -- flushes the local buffer to global XLog. **NOT suitable for re-injection here** -- we are already in the abort path; raising again would re-enter abort and PANIC. The `wal_chaos` injection point is gated by `isCommit` to skip exactly this call.
+							`wal_rollback` calls [flush_local_wal](https://github.com/orioledb/orioledb/blob/HEAD/src/recovery/wal.c#L418) -- **Layer B**. Same chain as the commit-side drain: [log_logical_wal_container at wal.c#L805](https://github.com/orioledb/orioledb/blob/HEAD/src/recovery/wal.c#L805) -> `XLogBeginInsert` + `XLogRegisterData` + [XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER)](https://github.com/orioledb/orioledb/blob/HEAD/src/recovery/wal.c#L911). Difference is the finish marker is `WAL_REC_ROLLBACK`, not `WAL_REC_COMMIT`.
+								|
+								`wal_rollback` then calls [XLogFlush(wait_pos)](https://github.com/orioledb/orioledb/blob/HEAD/src/recovery/wal.c#L428) -- **Layer C**, conditional on `synchronous_commit > SYNCHRONOUS_COMMIT_OFF`. Default async-commit setting skips it; the rollback record stays in PG's WAL buffer and becomes durable via the next WAL writer cycle.
+
+							**NOT suitable for re-injection here** -- we are already in the abort path; raising again would re-enter abort and PANIC. The `wal_chaos` injection point is gated by `isCommit` to skip exactly this call.
 						|
 						[apply_undo_stack(undoType)](https://github.com/orioledb/orioledb/blob/187f850a6ec182ce80f31c9c1594ac0dc26fe0b8/src/transam/undo.c#L2336-L2337) per UndoLogType -- walks the per-backend undo chain backward from `sharedLocations->location` to InvalidUndoLocation, calling each item's abort callback.
 							|
@@ -577,3 +641,150 @@ What each point exercises:
 
 * **`orioledb-commit-assert`** -- PANIC *after* `WAL_REC_COMMIT` is durable on disk but *before* the in-memory CSN flip. Recovery replays a fully-committed WAL stream; the question is whether the in-memory state at recovery start matches what WAL replay would produce.
 * **`orioledb-before-pre-commit-wal-finish`** -- PANIC *before* `WAL_REC_COMMIT` is appended, with the modify records already buffered (and possibly flushed). Recovery sees orphan modify records with **neither** a commit nor a rollback marker; correctness depends on the "no finish marker -> discard" path being airtight.
+
+
+## DISK-WRITE & WRITEBACK FLOW
+
+Orioledb's I/O architecture is three-layered. Most of the disk activity goes
+through a **batched writeback** layer that accumulates dirty extents and
+calls `FileWriteback` / `msync(MS_ASYNC)` to actively schedule the writes
+at the kernel. `FileWriteback` is **not** a passive hint: on Linux it
+issues [sync_file_range(SYNC_FILE_RANGE_WRITE)](https://github.com/orioledb/postgres/blob/HEAD/src/backend/storage/file/fd.c#L525)
+which tells the kernel to start writeout for the specified range
+immediately (and can even block if the kernel can't accept that much
+dirty data yet); on other Unix the `msync(MS_ASYNC)` path triggers the
+same kind of background writeback. **What it doesn't do** is wait for
+completion or sync inode metadata, so it is still not a durability
+barrier on its own. Actual durability comes from a separate set of
+explicit **fsync points** (`FileSync` / `pg_fsync` / `msync(MS_SYNC)` /
+`XLogFlush`) that fire only at specific moments: commit, rollback
+(synchronous), and at the end of checkpoint per artifact. A third path is
+**direct synchronous writes** to a file -- `OFileWrite` / `pg_pwrite` --
+which place bytes into the page cache but are still subject to the OS's
+deferred-write policy until an fsync covers them.
+
+### Layer A -- Writeback scheduling machinery (the dominant I/O during normal workload)
+
+The two batching arrays are owned by different contexts but flow through the
+same syscalls:
+
+| Array | Owner | Reset cadence |
+|---|---|---|
+| `io_writeback` (`src/btree/io.c:70-75`, global static) | eviction (bgwriter + backend) | When `extentsNumber >= bgwriter_flush_after` |
+| `CheckpointWriteBack writeback` (`src/checkpoint/checkpoint.c:108-115`, per-subtree on stack) | checkpoint walker | When `extentsNumber >= checkpoint_flush_after` or at subtree boundary |
+
+Accumulation:
+- **`writeback_put_extent`** -- appended to `io_writeback` from eviction-side `write_page` at call sites [io.c:2253](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L2253), [io.c:2278](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L2278), [io.c:2528](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L2528).
+- **`writeback_put_extent`** -- appended to `CheckpointWriteBack` from checkpoint page-write sites [checkpoint.c:3789](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L3789), [checkpoint.c:4072](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L4072), [checkpoint.c:4913](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L4913).
+
+Flush (call sites):
+- **eviction-side `perform_writeback`** -- called from `write_page` at [io.c:2297](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L2297) (post-write) and [io.c:2370](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L2370) (post-eviction). Sorts by `(datoid, relnode, segno, chkpNum)`, merges contiguous runs, then issues `FileWriteback` / `msync(MS_ASYNC)` directly (no `btree_smgr_writeback` indirection in eviction path).
+- **checkpoint-side `perform_writeback`** -- called from `perform_writeback_and_relock` at [checkpoint.c:561](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L561) and [checkpoint.c:583](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L583). Sorts by offset, merges into <=1024-block batches, calls `btree_smgr_writeback`.
+- **`perform_writeback_and_relock`** -- called from inside `checkpoint_btree_loop` at [checkpoint.c:3638](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L3638) when the batch fills; releases page lock around the flush.
+
+Syscall sink:
+- **`btree_smgr_writeback`** -- the syscall site for the *checkpoint-side* writeback path. Called from `perform_writeback` (checkpoint variant) at [checkpoint.c:453](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L453) and [checkpoint.c:473](https://github.com/orioledb/orioledb/blob/HEAD/src/checkpoint/checkpoint.c#L473). Per segment file it issues either [msync(MS_ASYNC)](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L715) if `use_mmap`, or [FileWriteback](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L742) for normal files. In `use_device` mode it's a no-op (device layer manages flushing).
+- **Eviction-side perform_writeback bypasses `btree_smgr_writeback`** and calls [FileWriteback directly](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L3380) (also [io.c:3418](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L3418), [io.c:3433](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L3433)) or [msync(MS_ASYNC)](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L3374) on mmap files.
+- **`FileWriteback` actively schedules writeback** (Linux: `sync_file_range(SYNC_FILE_RANGE_WRITE)` -- tells the kernel to start writing the specified range immediately, returns without waiting for completion and without syncing inode metadata). It is not a durability barrier; until a Layer-C fsync covers the file, durability isn't guaranteed across a crash.
+- **The `msync(MS_ASYNC)` mmap path is Linux-incomplete.** Per the PG source comment at `fd.c:pg_flush_data`: *"On several OSs msync(MS_ASYNC) on a mmap'ed file triggers writeback. On linux it only does so if MS_SYNC is specified, but then it does the writeback synchronously."* On Linux, `msync(MS_ASYNC)` is essentially a no-op for writeback purposes; PG's own `pg_flush_data` uses `sync_file_range` instead on Linux for that reason. Orioledb's `btree_smgr_writeback` mmap branch at `src/btree/io.c:715` still issues `msync(MS_ASYNC)` directly, so when an orioledb cluster runs on Linux with `use_mmap` storage the writeback-scheduling effect of Layer A is lost there (it falls back to relying entirely on the periodic Layer-C `FileSync`). The `FileWriteback` (non-mmap) branch is unaffected.
+
+Trigger thresholds:
+- `bgwriter_flush_after` (PG GUC, default 64 BLCKSZ units) gates the eviction-side flush.
+- `backend_flush_after` (PG GUC, default 0 = disabled) gates the same for non-bgwriter backends.
+- `checkpoint_flush_after` (PG GUC, default 32) gates the checkpoint-side flush inside `checkpoint_btree_loop`.
+
+### Layer B -- Direct synchronous writes (page placements, no immediate durability)
+
+Bytes go into the file (page cache) but durability is still deferred until a
+matching Layer-C fsync covers the file:
+
+- **`OFileWrite`** -- thin wrapper that calls [FileWrite at io.c:185](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L185). In PG 17 `FileWrite` is itself a static inline at `src/include/storage/fd.h:219-228` that builds a single-iovec and forwards to [FileWriteV](https://github.com/orioledb/postgres/blob/HEAD/src/backend/storage/file/fd.c#L2192), which issues `pg_pwritev` -> `pwritev(2)`. Used everywhere a single page or buffered chunk is written.
+- **`pg_pwrite`** -- called from inside `btree_smgr_write` at [io.c:555](https://github.com/orioledb/orioledb/blob/HEAD/src/btree/io.c#L555) (the `use_device` branch) -- direct `pwrite(2)` to a raw-block-device storage.
+
+Page-write call sites that reach Layer B:
+
+Call chains reaching the Layer-B sink (each line is a CALL site in the parent):
+```
+checkpoint path:
+  checkpoint_btree_loop -> perform_page_io  at checkpoint.c:3769
+    perform_page_io     -> write_page_to_disk  at io.c:1957
+      write_page_to_disk -> btree_smgr_write  at io.c:1432
+        btree_smgr_write -> OFileWrite        at io.c:589  (or pg_pwrite at io.c:555 if use_device)
+          OFileWrite     -> FileWrite          at io.c:185
+            FileWrite (inline) -> FileWriteV  at fd.h:227
+              FileWriteV   -> pg_pwritev (-> pwritev(2))
+
+eviction path:
+  walk_page -> write_page   at io.c:3083
+    write_page -> perform_page_io  at io.c:2249  (and io.c:2274 for split fixup)
+      perform_page_io -> write_page_to_disk  at io.c:1957
+        (same write_page_to_disk -> btree_smgr_write -> OFileWrite chain)
+
+autonomous-tree path:
+  checkpoint_internal_pass -> perform_page_io_autonomous  at checkpoint.c:4071
+
+index-build path:
+  btree_build -> perform_page_io_build  at btree/build.c:233 (and :357, :389)
+```
+
+Other Layer-B users:
+- **Sequence buffers** (`src/utils/seq_buf.c:273,522`) -- used by WAL and undo per-tree seqbufs; `OFileWrite` per chunk.
+- **Metadata buffers `o_buffers`** (`src/utils/o_buffers.c:169`) -- `OFileWrite` per page on eviction; this is what `write_undo_range` ends up calling for actual undo flush.
+- **Pending-truncates queue** (`src/btree/undo.c:778-800`) -- three `FileWrite` calls during truncate-record writeout.
+- **Recovery worker undo snapshot** (`src/recovery/recovery.c:2720-2784`) -- three `OFileWrite` calls during recovery finalization.
+- **S3 mode**: `pg_pwrite`/`pg_pwrite_zeros` on header files (`src/s3/headers.c:261,1177,1290`) and `FileWrite` on staged-request and checkpoint-export files (`src/s3/requests.c:451`, `src/s3/checkpoint.c:741,751`).
+
+None of these are durable on their own. They populate the page cache; the OS
+will eventually flush, but only an explicit Layer-C call guarantees a
+particular byte range is on disk.
+
+### Layer C -- Explicit durability barriers (fsync points)
+
+Where orioledb actually demands "this is on disk now":
+
+| Sink | File:line | What it forces durable | When |
+|---|---|---|---|
+| **`XLogFlush(flushPos)`** | `src/transam/undo.c:2272` | PG WAL up through this LSN | Every synchronous commit (commit-side) |
+| **`XLogFlush(wait_pos)`** | `src/recovery/wal.c:428` | PG WAL up through this LSN | Synchronous rollback (`synchronous_commit > OFF`) |
+| **`FileSync` on `control`** | `src/checkpoint/control.c:147` | checkpoint control file | End of every checkpoint, after `write_checkpoint_control` |
+| **`FileSync` on `{N}.xid`** | `src/checkpoint/checkpoint.c:840` | per-checkpoint xids + pending-SK-fixups file | `close_xids_file` at checkpoint completion |
+| **`FileSync` on `<tree>.map`** | `src/checkpoint/checkpoint.c:2117,2982` | free-extent map (sort + merged) | Per sys-tree and per user-table at checkpoint completion |
+| **`FileSync` on `<tree>.tmp`** | `src/checkpoint/checkpoint.c:2181` | temp-extent map | Same trigger |
+| **`btree_smgr_sync` -> `FileSync`** | `src/btree/io.c:788` | a full segment file's contents | Per segment file at checkpoint completion |
+| **`msync(MS_SYNC)`** | `src/checkpoint/checkpoint.c:1446` | entire mmap region | Once per checkpoint when `use_mmap` |
+| **`fsync_undo_range` -> `FileSync`** | (via `src/transam/undo.c` + `src/utils/o_buffers.c:514`) | undo extent range `[start, end]` | Per undo-log type at checkpoint, from `checkpoint.c:1452` |
+| **`pg_fsync` on `.lock`** | `src/s3/control.c:201` | S3 control lock identifier | S3 init only |
+| **`pg_fsync` on checksum** | `src/s3/worker.c:236` | S3 compaction merge | Compaction background only |
+
+Note the asymmetry: durability barriers are concentrated at **checkpoint
+completion** (most rows above) and at **commit / sync-rollback**. Steady-state
+workload pumps Layer-A hints continuously but only adds durability through
+the per-commit `XLogFlush`. Pages that have been written via Layer B may sit
+in the OS page cache for many seconds before any Layer-C barrier covers
+them; recovery relies on the `checkpointNum` in each page header + the WAL
+replay to reconstruct.
+
+### How each tx phase touches these layers
+
+- **BEGIN**: no I/O at any layer.
+- **SELECT**: no I/O if cached; if a read triggers eviction of a dirty victim, Layer A (`writeback_put_extent` from `btree_smgr_evict`) plus Layer B (`write_page` -> `OFileWrite` for the victim).
+- **UPDATE body** (per statement, before commit): only WAL buffer fills in shared memory. No layer-A/B/C action unless the local WAL buffer overflows (`flush_local_wal_if_needed`), in which case Layer B is hit indirectly via `XLogInsert` -> PG WAL infra.
+- **COMMIT path** (the canonical sequence):
+  1. `wal_commit` writes `WAL_REC_COMMIT` into local buffer -> drains to PG WAL via `XLogInsert` (Layer B inside PG).
+  2. **`XLogFlush(flushPos)`** at `undo.c:2272` -- **Layer C durability barrier** for the commit record.
+  3. Post-commit CSN flip, undo retention release (in-memory only).
+- **ABORT path**:
+  1. `wal_rollback` writes `WAL_REC_ROLLBACK` (same indirect Layer B via `XLogInsert`).
+  2. `XLogFlush` at `wal.c:428` -- **Layer C** when `synchronous_commit > OFF`.
+  3. `apply_undo_stack` reads undo (no write).
+- **Checkpoint** (the multi-layer event):
+  1. **Layer B**: `perform_page_io` -> `write_page_to_disk` -> `OFileWrite` / `pg_pwrite` for every dirty page (PK, SK, sys-trees).
+  2. **Layer A**: `perform_writeback` flushes accumulated extents via `btree_smgr_writeback` (`FileWriteback` / `msync(MS_ASYNC)`) at the configured batch threshold.
+  3. **Layer C** at checkpoint completion: `FileSync` on each segment file via `btree_smgr_sync` (the actual durability barrier for all pages written above), plus `FileSync` on `.control`, `.map`, `.tmp`, `{N}.xid`, plus `fsync_undo_range` per undo type, plus `msync(MS_SYNC)` if mmap.
+
+The relative byte volume is dominated by Layer B (page writes), the
+relative *latency* sensitivity is at Layer C (every commit waits on
+`XLogFlush`), and Layer A pre-schedules the OS-side writeback (via
+`sync_file_range(SYNC_FILE_RANGE_WRITE)` on Linux) so that the Layer-C
+`FileSync` at the end of a checkpoint finds most pages already in flight
+rather than having to start them all from scratch.
