@@ -815,6 +815,14 @@ o_collect_function(Node *node, void *context)
 								  processed);
 			}
 			break;
+		case T_RelabelType:
+			{
+				RelabelType *relabel = (RelabelType *) node;
+
+				o_cache_type_safe(datoid, relabel->resulttype,
+								  InvalidOid, cur_lsn, processed);
+			}
+			break;
 		default:
 			break;
 	}

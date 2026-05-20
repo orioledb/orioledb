@@ -3690,6 +3690,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							List	   *attributeList = NIL;
 							int			expr_field = 0;
 							ListCell   *indexpr;
+							bool		has_field = false;
 
 							ctid_idx_off = o_table->has_primary ? 0 : 1;
 							o_table_index = &o_table->indices[ix_num];
@@ -3730,30 +3731,38 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							for (field_num = 0; field_num < o_table_index->nkeyfields;
 								 field_num++)
 							{
-								bool		has_field;
-
 								has_field = o_table_index->fields[field_num].attnum ==
 									subId - 1;
-								if (o_table_index->type == oIndexPrimary || has_field)
-								{
-									o_indices_update(o_table,
-													 ix_num + ctid_idx_off,
-													 oxid, oSnapshot.csn);
-									o_invalidate_oids(o_table_index->oids);
-									o_add_invalidate_undo_item(o_table_index->oids,
-															   O_INVALIDATE_OIDS_ON_ABORT);
-								}
-								if (changed_ty && has_field && (o_table_index->type == oIndexPrimary || !compatible))
-								{
-									String	   *ix_name;
+								if (has_field)
+									break;
 
-									ix_name =
-										makeString(pstrdup(o_table_index->name.data));
-									drop_index_list =
-										list_append_unique(drop_index_list,
-														   ix_name);
-								}
 							}
+							if (!has_field &&
+								(o_table_index->predicate ||
+								 o_table_index->expressions))
+								has_field = true;
+
+							if (o_table_index->type == oIndexPrimary || has_field)
+							{
+								o_indices_update(o_table,
+												 ix_num + ctid_idx_off,
+												 oxid, oSnapshot.csn);
+								o_invalidate_oids(o_table_index->oids);
+								o_add_invalidate_undo_item(o_table_index->oids,
+														   O_INVALIDATE_OIDS_ON_ABORT);
+							}
+
+							if (changed_ty && has_field && (o_table_index->type == oIndexPrimary || !compatible))
+							{
+								String	   *ix_name;
+
+								ix_name =
+									makeString(pstrdup(o_table_index->name.data));
+								drop_index_list =
+									list_append_unique(drop_index_list,
+													   ix_name);
+							}
+
 						}
 						o_indices_update(o_table, PrimaryIndexNumber, oxid, oSnapshot.csn);
 						o_tables_update(o_table, oxid, oSnapshot.csn);
