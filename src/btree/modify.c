@@ -127,6 +127,14 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 	BTreeModifyInternalContext context;
 	OXid		tupleOxid = OXidIsValid(opOxid) ? opOxid : BootstrapTransactionId;
 
+	/*
+	 * GCC's ASan instrumentation incorrectly marks part of 'context' as a
+	 * mid-redzone due to a compiler bug in how it handles goto-across-scopes
+	 * with inlined helpers.  Clang is unaffected.  Explicitly unpoison the
+	 * whole struct so the writes below are not mis-reported as overflows.
+	 */
+	ASAN_UNPOISON_MEMORY_REGION(&context, sizeof(context));
+
 	context.tuple = _tuple;
 	context.tupleType = tupleType;
 	context.pageFindContext = pageFindContext;
