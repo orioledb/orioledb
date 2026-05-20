@@ -207,7 +207,7 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 		{
 			ListCell   *lc;
 			int			i;
-			int			nfields;
+			int			nkeyfields;
 			ORelOids	oids;
 			OTable	   *o_table;
 
@@ -222,9 +222,9 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 				 * Additional pkey fields are added to index target list so
 				 * that the index only scan is selected
 				 */
-				nfields = o_table->indices[PrimaryIndexNumber].nfields;
+				nkeyfields = o_table->indices[PrimaryIndexNumber].nkeyfields;
 
-				for (i = 0; i < nfields; i++)
+				for (i = 0; i < nkeyfields; i++)
 				{
 					OTableIndexField *pk_field;
 

@@ -1806,6 +1806,24 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 			temp_rowid_isnull[i] = slot->tts_isnull[attnum];
 		}
 
+		/*
+		 * primaryFieldsAttnums covers PK key columns only (see
+		 * add_index_fields(fillPrimary=true), nFields = nkeyfields), but
+		 * o_new_rowid() formats the rowid against primary->nonLeafTupdesc
+		 * whose natts is nkeyfields + nIncludedFields when the PK has INCLUDE
+		 * columns.  Those INCLUDE columns aren't part of the secondary's leaf
+		 * either, so we have no value to plug in -- and refind only matches
+		 * against the key columns anyway.  Fill the tail of
+		 * temp_rowid_isnull[] with `true`s so that o_new_tuple_size doesn't
+		 * read uninitialised memory while computing the rowid tuple's null
+		 * bitmap.
+		 */
+		for (; i < GET_PRIMARY(descr)->nonLeafTupdesc->natts; i++)
+		{
+			temp_rowid_values[i] = (Datum) 0;
+			temp_rowid_isnull[i] = true;
+		}
+
 		if (o_scan->ixNum == PrimaryIndexNumber)
 		{
 			rowid_values = slot->tts_values;
@@ -1836,8 +1854,33 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		pfree(scan->xs_itup);
 		scan->xs_itup = NULL;
 	}
+
+	/*--
+	 * OrioleDB's internal itupdesc already matches the planner-side
+	 * indextlist layout in both column count and column order:
+	 *
+	 *   itupdesc = [non-duplicate secondary key cols
+	 *               | non-duplicate INCLUDE cols
+	 *               | duplicate cols (refilled from their source columns)
+	 *               | extra PK key cols not already in the secondary],
+	 *
+	 *   planner indextlist = rd_att (all declared cols, including dups)
+	 *                       + (when has_primary, PK key cols not in
+	 *                          rd_att.indexkeys, added by
+	 *                          set_plain_rel_pathlist_hook()).
+	 *
+	 * Their natts agree because the duplicate slots in itupdesc account
+	 * for exactly the same columns as the duplicates inside rd_att, and
+	 * because scan.c's hook only adds PK *key* cols (matching the
+	 * !primaryIsCtid path that populates the PK tail of itupdesc).  The
+	 * duplicate-slot rearrangement done by the block right above this
+	 * comment leaves slot->tts_values in itupdesc order, so we hand the
+	 * pair directly to index_form_tuple.
+	 */
 	scan->xs_itupdesc = index_descr->itupdesc;
-	scan->xs_itup = index_form_tuple(index_descr->itupdesc, slot->tts_values, slot->tts_isnull);
+	scan->xs_itup = index_form_tuple(index_descr->itupdesc,
+									 slot->tts_values,
+									 slot->tts_isnull);
 
 	ItemPointerCopy(&slot->tts_tid, &scan->xs_itup->t_tid);
 
