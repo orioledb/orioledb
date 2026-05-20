@@ -127,6 +127,8 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 	BTreeModifyInternalContext context;
 	OXid		tupleOxid = OXidIsValid(opOxid) ? opOxid : BootstrapTransactionId;
 
+	ASAN_UNPOISON_MEMORY_REGION(&context, sizeof(context));
+
 	context.tuple = _tuple;
 	context.tupleType = tupleType;
 	context.pageFindContext = pageFindContext;
