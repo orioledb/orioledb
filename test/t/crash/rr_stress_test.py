@@ -14,6 +14,7 @@ import inspect
 import os
 import random
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -84,6 +85,15 @@ class RrStressTest(BaseTest):
 		# allowed, and the test only fails on data-invariant
 		# violations (the original intent).
 		panic_fatal = _env_int('RR_PANIC_FATAL', 1)
+		# Postmaster SIGKILL chaos: when on, a dedicated worker
+		# periodically `kill -9`s the postmaster and restarts the
+		# cluster, exercising the unclean-shutdown recovery path.
+		# Interval defaults to duration/3 so a trial sees exactly
+		# two fires (at ~1/3 and ~2/3 of the trial) plus restart
+		# slack.
+		postmaster_kill_enabled = _env_int('RR_KILL_POSTMASTER', 0)
+		postmaster_kill_interval = _env_float(
+		    'RR_KILL_POSTMASTER_INTERVAL', duration / 3.0)
 		checkpoint_interval = 0.5
 		ddl_nemesis_interval = 0.2
 		wal_chaos_idle = _env_float('RR_WAL_CHAOS_IDLE', 0.1)
@@ -112,6 +122,17 @@ class RrStressTest(BaseTest):
 		else:
 			node.append_conf(
 			    'postgresql.conf', 'restart_after_crash = on\n')
+		if postmaster_kill_enabled:
+			# SIGKILL'd postmaster -> unclean shutdown.  Recovery
+			# from this path is only safe under explicit durability
+			# guarantees: fsync so WAL really hits the platter,
+			# full_page_writes so torn-page tears are correctable
+			# from the FPI.  Pin both regardless of the base
+			# testgres conf.
+			node.append_conf(
+			    'postgresql.conf',
+			    'fsync = on\n'
+			    'full_page_writes = on\n')
 		node.start()
 		node.safe_psql(SETUP_SQL)
 
@@ -160,6 +181,7 @@ class RrStressTest(BaseTest):
 		read_count = [0]
 		conflict_count = [0]   # server-side ERRORs while con is alive
 		disconnect_count = [0]  # connection-level failures (cluster down etc.)
+		kill_count = [0]       # successful postmaster SIGKILLs by postmaster_kill_loop
 
 		def record_error(msg):
 			with errors_lock:
@@ -738,6 +760,86 @@ class RrStressTest(BaseTest):
 				except Exception:
 					pass
 
+		def postmaster_kill_loop():
+			# Periodically SIGKILL the postmaster.  Unlike a backend
+			# PANIC, SIGKILL of the postmaster bypasses
+			# restart_after_crash (that GUC controls how the postmaster
+			# reacts to a CHILD's death, not its own), so this loop
+			# both kills and restarts on every cycle, exercising the
+			# unclean-shutdown recovery path each iteration.  Existing
+			# writer/reader loops reconnect via their own except
+			# handlers; their disconnect_count will inflate by roughly
+			# kill_count * (n_writers+n_readers_*) -- see the
+			# expected-baseline figure in the [totals] line.
+			#
+			# Uses testgres's `node.kill()` rather than a raw
+			# `os.kill(pid, SIGKILL)` because testgres caches an
+			# `is_started` flag internally; a raw SIGKILL leaves
+			# that flag at True, so the next `node.start()` short-
+			# circuits and never invokes pg_ctl.  `node.kill()`
+			# SIGKILLs the postmaster AND flips `is_started=False`.
+			READY_TIMEOUT = 30.0
+			local_kills = 0
+			while not stop.is_set():
+				if stop.wait(postmaster_kill_interval):
+					break
+				try:
+					pm_pid = node.pid
+				except Exception:
+					pm_pid = 0
+				if node.is_started and pm_pid:
+					dprint(f'[killer] SIGKILL postmaster pid={pm_pid}')
+					try:
+						node.kill()
+						local_kills += 1
+					except Exception as exc:
+						dprint(f'[killer] node.kill() failed: {exc!r}')
+					# Brief grace for children to detect postmaster
+					# death and exit before pg_ctl start sees a
+					# clean data directory.
+					time.sleep(0.5)
+				else:
+					dprint(
+					    '[killer] cluster already down -- '
+					    'attempting restart')
+					node.is_started = False
+				# Restart + wait until the cluster is fully ready
+				# to accept connections.  Failure here is fatal:
+				# the test cannot validate invariants against a
+				# dead cluster.
+				try:
+					node.start()
+				except Exception as exc:
+					record_error(
+					    f'[killer] node.start failed after kill: '
+					    f'{exc!r}')
+					stop.set()
+					break
+				ready_deadline = time.time() + READY_TIMEOUT
+				ready = False
+				while (time.time() < ready_deadline
+				       and not stop.is_set()):
+					try:
+						with node.connect(autocommit=True) as con:
+							con.execute("SELECT 1")
+						ready = True
+						break
+					except Exception:
+						time.sleep(0.1)
+				if not ready:
+					if not stop.is_set():
+						record_error(
+						    f'[killer] cluster did not accept '
+						    f'connections within {READY_TIMEOUT}s '
+						    f'after restart')
+						stop.set()
+					break
+				dprint(
+				    f'[killer] cluster ready after kill '
+				    f'#{local_kills}')
+			with counters_lock:
+				kill_count[0] += local_kills
+
 		def crash_watchdog():
 			# Poll postgresql.log for PANIC. Authoritative signal —
 			# unlike connection probing, it isn't fooled by load.
@@ -800,14 +902,21 @@ class RrStressTest(BaseTest):
 			threads.append(threading.Thread(target=wal_chaos_loop))
 		if _env_int('RR_ASSERT_FIRINGS', 0) > 0:
 			threads.append(threading.Thread(target=assert_chaos_loop))
+		if postmaster_kill_enabled:
+			threads.append(
+			    threading.Thread(target=postmaster_kill_loop))
 		threads.append(threading.Thread(target=crash_watchdog))
 
+		_kill_cfg = (
+		    f' postmaster_kill=on(every {postmaster_kill_interval:.1f}s)'
+		    if postmaster_kill_enabled else '')
 		print(
 		    f'\n[config] duration={duration} writers={n_writers} '
 		    f'readers_pk={n_readers_pk} readers_sk={n_readers_sk} '
 		    f'readers_mixed={n_readers_mixed} '
 		    f'injection_points={len(wal_chaos_points)} '
-		    f'list={wal_chaos_points}', flush=True)
+		    f'list={wal_chaos_points}'
+		    f'{_kill_cfg}', flush=True)
 
 		for t in threads:
 			t.start()
@@ -861,11 +970,28 @@ class RrStressTest(BaseTest):
 		_fct = first_crash_time[0]
 		_fet_s = f'{_fet:.2f}s' if _fet is not None else 'none'
 		_fct_s = f'{_fct:.2f}s' if _fct is not None else 'none'
+		# Baseline disconnects we expect just from kill-loop restarts:
+		# every active worker that touches disconnect_count
+		# (writers + the three reader pools) sees one disconnect per
+		# kill.  Anything above this baseline is "real" connection
+		# loss (cluster instability between kills).
+		_expected_kill_disc = (
+		    kill_count[0] * (
+		        n_writers + n_readers_pk
+		        + n_readers_sk + n_readers_mixed))
+		_disc_breakdown = (
+		    f'disconnects={disconnect_count[0]}'
+		    + (f' (expected_from_kills~{_expected_kill_disc})'
+		       if postmaster_kill_enabled else ''))
+		_kill_field = (
+		    f' kills={kill_count[0]}'
+		    if postmaster_kill_enabled else '')
 		print(
 		    f'\n[totals] writes={write_count[0]} '
 		    f'reads={read_count[0]} '
 		    f'conflicts={conflict_count[0]} '
-		    f'disconnects={disconnect_count[0]} '
+		    f'{_disc_breakdown}'
+		    f'{_kill_field} '
 		    f'first_error_at={_fet_s} '
 		    f'first_crash_at={_fct_s} '
 		    f'crash_injection={crash_injection[0]!r} '
