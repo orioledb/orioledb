@@ -572,7 +572,7 @@ orioledb_sys_tree_check(PG_FUNCTION_ARGS)
 
 	orioledb_check_shmem();
 
-	result = check_btree(get_sys_tree(num), force_map_check, false);
+	result = check_btree(get_sys_tree(num), force_map_check);
 
 	PG_RETURN_BOOL(result);
 }
