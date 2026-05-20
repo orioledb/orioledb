@@ -34,9 +34,22 @@ def _env_float(name, default):
 	return float(v) if v else default
 
 
-SETUP_SQL = """
+# Storage-engine selector: 'orioledb' (default) or 'heap'.  The
+# table-creation USING clause and the post-trial structural check
+# both branch on this value.  Heap mode swaps orioledb_tbl_check for
+# amcheck's verify_heapam + bt_index_check, so the two engines run
+# the same workload under an apples-to-apples structural validator.
+STORAGE_ENGINE = os.getenv('RR_STORAGE_ENGINE', 'orioledb').lower()
+assert STORAGE_ENGINE in ('orioledb', 'heap'), (
+    f'unknown RR_STORAGE_ENGINE={STORAGE_ENGINE!r}; '
+    'expected orioledb or heap')
+
+_USING_CLAUSE = 'USING orioledb' if STORAGE_ENGINE == 'orioledb' else ''
+
+SETUP_SQL = f"""
 	CREATE EXTENSION IF NOT EXISTS orioledb;
 	CREATE EXTENSION IF NOT EXISTS injection_points;
+	CREATE EXTENSION IF NOT EXISTS amcheck;
 
 	CREATE TABLE o_bank_account (
 		id int NOT NULL,
@@ -45,7 +58,7 @@ SETUP_SQL = """
 		PRIMARY KEY (id),
 		CONSTRAINT o_bank_account_token_uniq UNIQUE (token)
 			DEFERRABLE INITIALLY DEFERRED
-	) USING orioledb;
+	) {_USING_CLAUSE};
 """
 
 
@@ -139,6 +152,13 @@ class RrStressTest(BaseTest):
 		node.safe_psql(
 		    "ALTER SYSTEM SET orioledb.enable_stopevents = on"
 		)
+		# Bump server-side log level so check_btree's NOTICE
+		# messages (`BTree has a broken split.`, `Not used file
+		# blocks ...`, `Excess file blocks ...`, etc.) end up in
+		# postgresql.log -- otherwise orioledb_tbl_check returns
+		# False without explaining what tripped it.
+		node.safe_psql(
+		    "ALTER SYSTEM SET log_min_messages = notice")
 		node.safe_psql("SELECT pg_reload_conf()")
 		node.safe_psql(f"""
 			INSERT INTO o_bank_account(id, balance, token)
@@ -804,15 +824,42 @@ class RrStressTest(BaseTest):
 					    'attempting restart')
 					node.is_started = False
 				# Restart + wait until the cluster is fully ready
-				# to accept connections.  Failure here is fatal:
-				# the test cannot validate invariants against a
-				# dead cluster.
-				try:
-					node.start()
-				except Exception as exc:
+				# to accept connections.  pg_ctl start can fail
+				# transiently right after a SIGKILL: lingering
+				# postmaster children, postmaster.pid not yet
+				# stale-cleaned, the port still in TIME_WAIT.
+				# Retry with backoff up to RESTART_TIMEOUT.
+				# Failure past that is fatal: the test cannot
+				# validate invariants against a dead cluster.
+				RESTART_TIMEOUT = 30.0
+				RESTART_BACKOFF = 1.0
+				restart_deadline = time.time() + RESTART_TIMEOUT
+				restart_attempts = 0
+				last_exc = None
+				while (time.time() < restart_deadline
+				       and not stop.is_set()):
+					restart_attempts += 1
+					try:
+						node.start()
+						last_exc = None
+						break
+					except Exception as exc:
+						last_exc = exc
+						dprint(
+						    f'[killer] node.start attempt '
+						    f'#{restart_attempts} failed: '
+						    f'{exc!r}; retrying in '
+						    f'{RESTART_BACKOFF}s')
+						# Make sure is_started stays False so
+						# the next pg_ctl call isn't short-
+						# circuited by the cached flag.
+						node.is_started = False
+						time.sleep(RESTART_BACKOFF)
+				if last_exc is not None:
 					record_error(
-					    f'[killer] node.start failed after kill: '
-					    f'{exc!r}')
+					    f'[killer] node.start failed after '
+					    f'{restart_attempts} attempts in '
+					    f'{RESTART_TIMEOUT}s: {last_exc!r}')
 					stop.set()
 					break
 				ready_deadline = time.time() + READY_TIMEOUT
@@ -911,7 +958,8 @@ class RrStressTest(BaseTest):
 		    f' postmaster_kill=on(every {postmaster_kill_interval:.1f}s)'
 		    if postmaster_kill_enabled else '')
 		print(
-		    f'\n[config] duration={duration} writers={n_writers} '
+		    f'\n[config] storage={STORAGE_ENGINE} '
+		    f'duration={duration} writers={n_writers} '
 		    f'readers_pk={n_readers_pk} readers_sk={n_readers_sk} '
 		    f'readers_mixed={n_readers_mixed} '
 		    f'injection_points={len(wal_chaos_points)} '
@@ -1134,10 +1182,40 @@ class RrStressTest(BaseTest):
 		    "SELECT count(*)::int FROM o_bank_account",
 		    label='count(*)')[0][0]
 		rows = pk_row_count
-		retained = node.execute(
-		    "SELECT orioledb_has_retained_undo()")[0][0]
-		tbl_check_ok = node.execute(
-		    "SELECT orioledb_tbl_check('o_bank_account'::regclass)")[0][0]
+		# Structural-consistency check: branches on STORAGE_ENGINE.
+		# OrioleDB: orioledb_tbl_check returns True/False.
+		# Heap: amcheck's verify_heapam returns one row per
+		# corruption (count(*)=0 means clean), and bt_index_check
+		# raises on damage; wrap so failure -> tbl_check_ok=False
+		# rather than tearing the test down with an uncaught
+		# exception.
+		if STORAGE_ENGINE == 'orioledb':
+			retained = node.execute(
+			    "SELECT orioledb_has_retained_undo()")[0][0]
+			tbl_check_ok = node.execute(
+			    "SELECT orioledb_tbl_check"
+			    "('o_bank_account'::regclass)")[0][0]
+		else:
+			retained = False
+			_heap_bad = node.execute(
+			    "SELECT count(*)::int "
+			    "FROM verify_heapam('o_bank_account')")[0][0]
+			try:
+				node.execute(
+				    "SELECT bt_index_check"
+				    "('o_bank_account_pkey'::regclass)")
+				node.execute(
+				    "SELECT bt_index_check"
+				    "('o_bank_account_token_uniq'::regclass)")
+				_idx_ok = True
+			except Exception as _e:
+				dprint(f'[diag] bt_index_check raised: {_e!r}')
+				_idx_ok = False
+			tbl_check_ok = (_heap_bad == 0) and _idx_ok
+			if not tbl_check_ok:
+				dprint(
+				    f'[diag] amcheck: heap_bad={_heap_bad} '
+				    f'idx_ok={_idx_ok}')
 		# PK-authoritative aggregate (count, dist_id, dist_token, sum_bal).
 		pk_seq = _pk_force_seq(
 		    "SELECT count(*)::int, count(DISTINCT id)::int, "
@@ -1352,7 +1430,8 @@ class RrStressTest(BaseTest):
 			violations.append(
 			    f'snapshot reads saw inconsistency: {seen}')
 		if not tbl_check_ok:
-			violations.append('orioledb_tbl_check returned false')
+			violations.append(
+			    f'{STORAGE_ENGINE} structural check returned false')
 		if retained:
 			violations.append('orioledb retained undo after stop')
 		# PK-authoritative invariants (PK heap forced seq scan).
@@ -1392,7 +1471,8 @@ class RrStressTest(BaseTest):
 		    retained,
 		    'orioledb retained undo after stop (possible snapshot leak)')
 		self.assertTrue(
-		    tbl_check_ok, 'orioledb_tbl_check(o_bank_account) failed')
+		    tbl_check_ok,
+		    f'{STORAGE_ENGINE} structural check on o_bank_account failed')
 		self.assertEqual(
 		    n_dangling, 0,
 		    f'{n_dangling} postgres backends survived node.stop()')
