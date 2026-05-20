@@ -695,6 +695,17 @@ def generate_string(size, seed=None):
 	return ''.join(random.choice(chars) for _ in range(size))
 
 
+def wait_for_wait_event(node, blocked_pid, event_name):
+	while node.execute(
+	    """SELECT EXISTS(SELECT sa.* FROM pg_stat_activity sa WHERE wait_event = '%s' AND pid = %d);"""
+	    % (
+	        event_name,
+	        blocked_pid,
+	    ))[0][0] == False:
+		time.sleep(0.1)
+		continue
+
+
 def wait_stopevent(node, blocked_pid):
 	while node.execute("""SELECT EXISTS(
 							 SELECT se.*

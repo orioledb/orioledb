@@ -9,19 +9,19 @@ lock and busy-spinning on that bit inside oxid_get_csn().
 Bug:
 
   * backend B reaches XACT_EVENT_COMMIT and calls
-    current_oxid_precommit(), which stamps
-    COMMITSEQNO_STATUS_CSN_COMMITTING on B's oxid CSN slot;
+	current_oxid_precommit(), which stamps
+	COMMITSEQNO_STATUS_CSN_COMMITTING on B's oxid CSN slot;
   * an error is raised AFTER that point but before
-    current_oxid_commit() writes the real CSN, so B falls into
-    XACT_EVENT_ABORT with the COMMITTING bit still set;
+	current_oxid_commit() writes the real CSN, so B falls into
+	XACT_EVENT_ABORT with the COMMITTING bit still set;
   * the old abort sequence ran wal_rollback() and then
-    apply_undo_stack() while the COMMITTING bit was still set;
+	apply_undo_stack() while the COMMITTING bit was still set;
   * concurrently, backend A is updating the same row, holding the
-    leaf-page-content lock, and spinning in oxid_get_csn() (with
-    perform_spin_delay) waiting for the bit to clear;
+	leaf-page-content lock, and spinning in oxid_get_csn() (with
+	perform_spin_delay) waiting for the bit to clear;
   * apply_undo_stack() in B needs that page-content lock — A has it,
-    A is spinning on B, B waits on A; once A burns NUM_DELAYS the
-    cluster PANICs at "stuck spinlock detected at oxid_get_csn".
+	A is spinning on B, B waits on A; once A burns NUM_DELAYS the
+	cluster PANICs at "stuck spinlock detected at oxid_get_csn".
 
 Fix:
 
@@ -34,29 +34,29 @@ Fix:
 Test orchestration:
 
   * before_modify_oxid_get_csn parks A inside
-    o_btree_modify_handle_conflicts() — A has already locked the leaf
-    page and is one instruction away from oxid_get_csn();
+	o_btree_modify_handle_conflicts() — A has already locked the leaf
+	page and is one instruction away from oxid_get_csn();
   * after_csn_precommit parks B between current_oxid_precommit() and
-    current_oxid_commit() (XACT_EVENT_COMMIT runs under
-    HOLD_INTERRUPTS, so the callback briefly RESUME_INTERRUPTS()s
-    around the wait when STOPEVENTS_ENABLED so a query cancel can
-    fire and drive the precommit→abort transition);
+	current_oxid_commit() (XACT_EVENT_COMMIT runs under
+	HOLD_INTERRUPTS, so the callback briefly RESUME_INTERRUPTS()s
+	around the wait when STOPEVENTS_ENABLED so a query cancel can
+	fire and drive the precommit→abort transition);
   * pg_cancel_backend() then pg_stopevent_reset(after_csn_precommit)
-    pushes B into XACT_EVENT_ABORT;
+	pushes B into XACT_EVENT_ABORT;
   * pg_stopevent_reset(before_modify_oxid_get_csn) wakes A; A calls
-    oxid_get_csn(B.oxid) and starts spinning on the COMMITTING bit
-    while still holding the leaf-page-content lock;
+	oxid_get_csn(B.oxid) and starts spinning on the COMMITTING bit
+	while still holding the leaf-page-content lock;
   * with the fix in place, B's abort handler runs
-    current_oxid_clear_committing() before apply_undo_stack(), the
-    spin breaks, A releases the page lock and B's apply_undo_stack()
-    proceeds.  Without the fix B's apply_undo_stack() blocks on A's
-    page-content lock while A keeps spinning, NUM_DELAYS is exhausted
-    and the cluster PANICs.
+	current_oxid_clear_committing() before apply_undo_stack(), the
+	spin breaks, A releases the page lock and B's apply_undo_stack()
+	proceeds.  Without the fix B's apply_undo_stack() blocks on A's
+	page-content lock while A keeps spinning, NUM_DELAYS is exhausted
+	and the cluster PANICs.
 """
 
 import time
 
-from .base_test import BaseTest, ThreadQueryExecutor, wait_stopevent
+from .base_test import BaseTest, ThreadQueryExecutor, wait_stopevent, wait_for_wait_event
 
 
 class TransactionTest(BaseTest):
@@ -147,4 +147,68 @@ class TransactionTest(BaseTest):
 			    node.execute("SELECT orioledb_tbl_check('o_t'::regclass)")[0]
 			    [0])
 		finally:
+			node.stop()
+
+	def test_waiter_select_after_self_insert(self):
+		node = self.node
+		node.append_conf('postgresql.conf',
+		                 "orioledb.enable_stopevents = true\n")
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE t (k int PRIMARY KEY, v text) USING orioledb;
+
+			-- Insert a few rows so the leaf has some content but is
+			-- far from full.
+			INSERT INTO t SELECT g, 'seed' FROM generate_series(1, 10) g;
+			CHECKPOINT;
+		""")
+
+		waiter = node.connect()
+		holder = node.connect(autocommit=True)
+		ctl = node.connect()
+
+		try:
+			# Make commandInfos[] non-empty.
+			waiter.execute("INSERT INTO t VALUES (100, 'pre');")
+
+			ctl.execute(
+			    "SELECT pg_stopevent_set('before_get_waiters_with_tuples', 'true');"
+			)
+
+			# Holder takes the leaf lock
+			holder_pid = holder.pid
+			t_holder = ThreadQueryExecutor(
+			    holder, "INSERT INTO t VALUES (200, 'holder');")
+			t_holder.start()
+			wait_stopevent(node, holder_pid)
+
+			# Now insert at the same leaf from waiter;  buggy behaviour
+			# is tuphdr.undoLocation = InvalidUndoLocation and assertion
+			waiter_pid = waiter.pid
+			t_waiter = ThreadQueryExecutor(
+			    waiter, "INSERT INTO t VALUES (300, 'waiter');")
+			t_waiter.start()
+
+			# Now wait until the waiter backend is actually blocked on the page lock.
+			wait_for_wait_event(node, waiter_pid, 'BufferContent')
+			ctl.execute(
+			    "SELECT pg_stopevent_reset('before_get_waiters_with_tuples');")
+
+			t_holder.join()
+			t_waiter.join()
+
+			# At buggy build we get the Assert(lo >= 0 && lo < commandIndex) triggered here
+			rows = waiter.execute("SELECT k, v FROM t WHERE k = 300;")
+			self.assertEqual(rows, [(300, 'waiter')])
+
+			waiter.commit()
+
+		finally:
+			for c in (waiter, holder, ctl):
+				try:
+					c.close()
+				except Exception:
+					pass
 			node.stop()
