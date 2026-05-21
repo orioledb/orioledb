@@ -220,6 +220,7 @@ btree_filename(OIndexKey key, int segno, uint32 chkpNum)
 
 	o_get_prefixes_for_tablespace(key.oids.datoid, key.tablespace,
 								  NULL, &db_prefix);
+	//o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
 
 	if (orioledb_s3_mode)
 	{

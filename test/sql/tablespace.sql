@@ -7,6 +7,10 @@ CREATE TABLESPACE regress_tblspace LOCATION '';
 
 CREATE DATABASE tblspace_test_db TABLESPACE regress_tblspace;
 
+CREATE TABLE o_tbl_pk(id int PRIMARY KEY, val text) USING orioledb TABLESPACE regress_tblspace;
+INSERT INTO o_tbl_pk VALUES (1, 'foo'), (2, 'bar');
+DROP TABLE o_tbl_pk;
+
 CREATE TABLE foo_def (i int) USING orioledb TABLESPACE pg_default;
 \d+ foo_def
 INSERT INTO foo_def VALUES (54), (12), (7);
