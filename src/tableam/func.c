@@ -1276,10 +1276,15 @@ orioledb_tbl_check(PG_FUNCTION_ARGS)
 	for (i = 0; i < descr->nIndices; i++)
 	{
 		o_btree_load_shmem(&descr->indices[i]->desc);
-		result = check_btree(&descr->indices[i]->desc, force_map_check);
-
-		if (result == false)
-			break;
+		bool curr_tree_result = check_btree(&descr->indices[i]->desc, force_map_check);
+		if (!curr_tree_result) {
+			elog(NOTICE, "Corrupted index name = %s", descr->indices[i]->name);
+		}
+		if (result) {
+			result = curr_tree_result;
+		}
+		// if (result == false)
+		// 	break;
 	}
 	relation_close(rel, AccessExclusiveLock);
 
