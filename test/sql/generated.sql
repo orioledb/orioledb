@@ -2,6 +2,9 @@ CREATE SCHEMA generated_test;
 SET SESSION search_path = 'generated_test';
 CREATE EXTENSION orioledb;
 
+SELECT split_part(setting, '.', 1) major_version
+	FROM pg_settings WHERE name = 'server_version';
+
 CREATE TABLE o_test_generated (
 	a int,
 	b int GENERATED ALWAYS AS (a * 2) STORED

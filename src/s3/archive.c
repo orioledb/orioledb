@@ -21,6 +21,10 @@
 
 #include "archive/archive_module.h"
 #include "common/hashfn.h"
+#if PG_VERSION_NUM >= 180000
+#include "utils/memutils.h"
+#endif
+
 
 typedef struct
 {
@@ -28,7 +32,7 @@ typedef struct
 	S3TaskLocation location;
 } PreloadHashItem;
 
-HTAB	   *preloadHash = NULL;
+static HTAB *preloadHash = NULL;
 
 
 static uint32

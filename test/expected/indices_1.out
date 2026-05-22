@@ -7,6 +7,13 @@
 CREATE SCHEMA indices;
 SET SESSION search_path = 'indices';
 CREATE EXTENSION orioledb;
+SELECT split_part(setting, '.', 1) major_version
+	FROM pg_settings WHERE name = 'server_version';
+ major_version 
+---------------
+ 17
+(1 row)
+
 SELECT orioledb_parallel_debug_start();
  orioledb_parallel_debug_start 
 -------------------------------
@@ -8739,6 +8746,41 @@ ERROR:  duplicate key value violates unique constraint "o_test_uq"
 DETAIL:  Key (val)=(one) already exists.
 -- Cleanup
 DROP TABLE o_test_add_index_constraint CASCADE;
+-- Test skip scan bounds
+CREATE TABLE test_skip_bounds (
+	id int,
+	x int,
+	y int,
+	PRIMARY KEY (id)
+) USING orioledb;
+CREATE INDEX test_skip_xy_idx ON test_skip_bounds(x, y);
+-- Out of lower bound (should not be scanned)
+INSERT INTO test_skip_bounds (id, x, y) VALUES (1, 5, 42);
+-- Out of upper bound (should not be scanned)
+INSERT INTO test_skip_bounds (id, x, y) VALUES (7, 60, 99);
+-- Inside bounds, matching equality
+INSERT INTO test_skip_bounds (id, x, y) VALUES (3, 15, 42);
+-- Inside bounds, NOT matching equality
+INSERT INTO test_skip_bounds (id, x, y) VALUES (4, 20, 99);
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+SELECT x, y FROM test_skip_bounds
+WHERE x > 10 AND x < 50 AND y = 42;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Index Only Scan using test_skip_xy_idx on test_skip_bounds
+   Index Cond: ((x > 10) AND (x < 50) AND (y = 42))
+(2 rows)
+
+SELECT x, y FROM test_skip_bounds
+WHERE x > 10 AND x < 50 AND y = 42
+ORDER BY x;
+ x  | y  
+----+----
+ 15 | 42
+(1 row)
+
+RESET enable_seqscan;
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
 ------------------------------
@@ -8746,7 +8788,7 @@ SELECT orioledb_parallel_debug_stop();
 (1 row)
 
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 56 other objects
+NOTICE:  drop cascades to 57 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -8803,6 +8845,7 @@ drop cascades to table o_test_include_same_as_pkey
 drop cascades to table o_test_index_already_exists_skip
 drop cascades to table o_test_unique_include
 drop cascades to table o_test_saop
+drop cascades to table test_skip_bounds
 DROP SCHEMA indices CASCADE;
 NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to function smart_explain(text)

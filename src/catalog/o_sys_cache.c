@@ -102,7 +102,7 @@ static uint32 oSysCacheToastGetTupleDataSize(OTuple tuple, void *arg);
 static HeapTuple o_auth_cache_search_htup(TupleDesc tupdesc, Oid authoid);
 
 
-ToastAPI	oSysCacheToastAPI = {
+static ToastAPI oSysCacheToastAPI = {
 	.getBTreeDesc = oSysCacheToastGetBTreeDesc,
 	.getBTreeVersion = NULL,
 	.getBaseBTreeVersion = NULL,
@@ -1454,9 +1454,9 @@ o_cache_type_safe(Oid datoid, Oid typoid, Oid opclass, XLogRecPtr insert_lsn,
 				rel = relation_open(typeform->typrelid, AccessShareLock);
 				for (i = 0; i < rel->rd_att->natts; i++)
 				{
-					FormData_pg_attribute *typcache_attr;
+					Form_pg_attribute typcache_attr;
 
-					typcache_attr = &rel->rd_att->attrs[i];
+					typcache_attr = TupleDescAttr(rel->rd_att, i);
 					if (!typcache_attr->attisdropped)
 						o_cache_type_safe(datoid, typcache_attr->atttypid,
 										  InvalidOid, insert_lsn,
@@ -1599,9 +1599,9 @@ custom_type_try_add_hash_fn_if_needed(Oid typoid, Oid opclass, List **processed)
 					rel = relation_open(typeform->typrelid, AccessShareLock);
 					for (i = 0; i < rel->rd_att->natts; i++)
 					{
-						FormData_pg_attribute *typcache_attr;
+						Form_pg_attribute typcache_attr;
 
-						typcache_attr = &rel->rd_att->attrs[i];
+						typcache_attr = TupleDescAttr(rel->rd_att, i);
 						if (!typcache_attr->attisdropped)
 						{
 							typoid = typcache_attr->atttypid;
@@ -1695,9 +1695,9 @@ o_validate_composite_type(Oid typoid, Oid opclass)
 					rel = relation_open(typeform->typrelid, AccessShareLock);
 					for (i = 0; i < rel->rd_att->natts; i++)
 					{
-						FormData_pg_attribute *typcache_attr;
+						Form_pg_attribute typcache_attr;
 
-						typcache_attr = &rel->rd_att->attrs[i];
+						typcache_attr = TupleDescAttr(rel->rd_att, i);
 						if (!typcache_attr->attisdropped)
 						{
 							typoid = typcache_attr->atttypid;

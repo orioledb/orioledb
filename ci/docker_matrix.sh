@@ -3,7 +3,7 @@ set -Eeo pipefail
 
 # Default values
 BASE_MATRIX="ubuntu:24.04"
-PG_MAJOR="17"
+PG_MAJOR="18"
 COMPILER="clang"
 DEBUG="false"
 DRY_RUN="false"
@@ -20,7 +20,7 @@ base_lists[all]="${base_lists[all-alpine]} ${base_lists[all-debian]}"
 # Valid Alpine, Ubuntu, PG and Compiler versions
 VALID_ALPINE_VERSIONS="edge 3.21 3.20 3.19 3.18 latest"
 VALID_UBUNTU_VERSIONS="devel 25.04 24.10 24.04 22.04 plucky oracular noble jammy latest rolling"
-VALID_PG_MAJOR_VERSIONS="17 16"
+VALID_PG_MAJOR_VERSIONS="18 17 16"
 VALID_COMPILERS="clang gcc"
 
 

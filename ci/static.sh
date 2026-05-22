@@ -6,12 +6,33 @@ export PATH="$GITHUB_WORKSPACE/pgsql/bin:$PATH"
 status=0
 
 cd orioledb
+
 if [ "$COMPILER" = "clang" ]; then
-	scan-build-$LLVM_VER --status-bugs \
+	scan-build-$LLVM_VER --status-bugs --use-cc=clang-$LLVM_VER \
 		-disable-checker deadcode.DeadStores \
-		make USE_PGXS=1 IS_DEV=1 USE_ASSERT_CHECKING=1 || status=$?
+		make CLANG=clang-$LLVM_VER USE_PGXS=1 IS_DEV=1 USE_ASSERT_CHECKING=1 || status=$?
 
 elif [ "$COMPILER" = "gcc" ]; then
+	ARCH="$(uname -m)"
+	CPPCHK_DEFS=()
+
+	case "$ARCH" in
+		x86_64|amd64)
+			CPPCHK_DEFS+=("-D__x86_64__=1")
+			;;
+		aarch64|arm64)
+			CPPCHK_DEFS+=("-D__aarch64__=1")
+			;;
+		armv7l|armv6l)
+			CPPCHK_DEFS+=("-D__arm__=1" "-D__arm=1")
+			;;
+		*)
+			echo "Unknown arch: $ARCH"
+			;;
+	esac
+
+	CPPCHK_DEFS+=("-DPG_MAJORVERSION=\"${PG_VERSION}\"" "-DPG_MAJORVERSION_NUM=${PG_VERSION}")
+
 	# Collect all orioledb's include paths recursively
 	ORIOLEDB_INCLUDE_DIRS=$(find include -type d)
 
@@ -26,10 +47,7 @@ elif [ "$COMPILER" = "gcc" ]; then
 		--suppressions-list=ci/cppcheck-suppress \
 		--std=c99 --inline-suppr --verbose \
 		-D__GNUC__ \
-		-D__x86_64__ \
-		-D__aarch64__ \
-		-D__arm \
-		-D__arm__ \
+		${CPPCHK_DEFS[@]} \
 		-DUSE_ASSERT_CHECKING \
 		$INCLUDE_FLAGS \
 		src/*.c src/*/*.c include/*.h include/*/*.h 2> cppcheck.log

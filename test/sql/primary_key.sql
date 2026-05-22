@@ -2,6 +2,9 @@ CREATE SCHEMA primary_key;
 SET SESSION search_path = 'primary_key';
 CREATE EXTENSION orioledb;
 
+SELECT split_part(setting, '.', 1) major_version
+	FROM pg_settings WHERE name = 'server_version';
+
 -- Test for integer primary key
 CREATE TABLE o_pk1
 (

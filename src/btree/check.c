@@ -119,14 +119,14 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 
 	if (data_file_len > status.busy.blocksCount + free_extents.blocksCount)
 	{
-		elog(NOTICE, "Not used file blocks from %lu to %lu",
+		elog(NOTICE, "Not used file blocks from " UINT64_FORMAT " to " UINT64_FORMAT,
 			 status.busy.blocksCount + free_extents.blocksCount,
 			 data_file_len);
 		status.hasError = true;
 	}
 	else if (data_file_len < status.busy.blocksCount + free_extents.blocksCount)
 	{
-		elog(NOTICE, "Excess file blocks from %lu to %lu",
+		elog(NOTICE, "Excess file blocks from " UINT64_FORMAT " to " UINT64_FORMAT,
 			 data_file_len,
 			 status.busy.blocksCount + free_extents.blocksCount);
 		status.hasError = true;
