@@ -38,10 +38,9 @@ class FilesTest(BaseTest):
 			    'postgres',
 			    "UPDATE o_test SET value = value + 1 WHERE key % 10 = 0;")
 			node.safe_psql('postgres', "CHECKPOINT;")
-			self.assertTrue(
-			    node.execute(
-			        "SELECT orioledb_tbl_check('o_test'::regclass, TRUE);")[0]
-			    [0])
+			self.assertEqual(
+			    node.execute("SELECT * FROM verify_orioledb("
+			                 "'o_test'::regclass, TRUE);"), [])
 		node.stop(['-m', 'immediate'])
 
 		node.start()
@@ -50,10 +49,9 @@ class FilesTest(BaseTest):
 			    'postgres',
 			    "UPDATE o_test SET value = value + 1 WHERE key % 10 = 0;")
 			node.safe_psql('postgres', "CHECKPOINT;")
-			self.assertTrue(
-			    node.execute(
-			        "SELECT orioledb_tbl_check('o_test'::regclass, TRUE);")[0]
-			    [0])
+			self.assertEqual(
+			    node.execute("SELECT * FROM verify_orioledb("
+			                 "'o_test'::regclass, TRUE);"), [])
 		node.stop(['-m', 'immediate'])
 
 		node.start()
@@ -62,16 +60,15 @@ class FilesTest(BaseTest):
 			    'postgres',
 			    "UPDATE o_test SET value = value + 1 WHERE key % 10 = 0;")
 			node.safe_psql('postgres', "CHECKPOINT;")
-			self.assertTrue(
-			    node.execute(
-			        "SELECT orioledb_tbl_check('o_test'::regclass, TRUE);")[0]
-			    [0])
+			self.assertEqual(
+			    node.execute("SELECT * FROM verify_orioledb("
+			                 "'o_test'::regclass, TRUE);"), [])
 		node.stop(['-m', 'immediate'])
 
 		node.start()
-		self.assertTrue(
-		    node.execute(
-		        "SELECT orioledb_tbl_check('o_test'::regclass, TRUE);")[0][0])
+		self.assertEqual(
+		    node.execute("SELECT * FROM verify_orioledb("
+		                 "'o_test'::regclass, TRUE);"), [])
 		self.assertEqual(
 		    node.execute('postgres', "SELECT count(*) FROM o_test;")[0][0],
 		    10000)
@@ -118,10 +115,9 @@ class FilesTest(BaseTest):
 		self.assertEqual(t1.join()[0][0], 10000)
 		con2.close()
 		if not compressed:
-			self.assertTrue(
-			    node.execute(
-			        "SELECT orioledb_tbl_check('o_test'::regclass, TRUE);")[0]
-			    [0])
+			self.assertEqual(
+			    node.execute("SELECT * FROM verify_orioledb("
+			                 "'o_test'::regclass, TRUE);"), [])
 
 		old_size = node.execute(
 		    "SELECT pg_total_relation_size('o_test'::regclass)")[0][0]
@@ -154,9 +150,9 @@ class FilesTest(BaseTest):
 		    'postgres', "CREATE TABLE IF NOT EXISTS empty (\n"
 		    "    id integer NOT NULL\n"
 		    ") USING orioledb;\n")
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('empty'::regclass, TRUE);")
-		    [0][0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('empty'::regclass, TRUE);"), [])
 		node.stop()
 
 	def get_file_lists(self, filter_sys_trees=False):

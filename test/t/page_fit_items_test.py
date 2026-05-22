@@ -844,9 +844,9 @@ class MergeWaitedTuplesTest(BaseTest):
 			self.assertEqual(count, 12 + 1 + num_waiters)
 
 			# Tree is structurally sound.
-			self.assertTrue(
-			    node.execute("SELECT orioledb_tbl_check('t'::regclass);")[0]
-			    [0])
+			self.assertEqual(
+			    node.execute("SELECT * FROM verify_orioledb('t'::regclass);"),
+			    [])
 		finally:
 			node.stop()
 
@@ -932,8 +932,8 @@ class MergeWaitedTuplesTest(BaseTest):
 			count = node.execute("SELECT count(*) FROM t;")[0][0]
 			self.assertEqual(count, 12 + 1 + num_waiters)
 
-			self.assertTrue(
-			    node.execute("SELECT orioledb_tbl_check('t'::regclass);")[0]
-			    [0])
+			self.assertEqual(
+			    node.execute("SELECT * FROM verify_orioledb('t'::regclass);"),
+			    [])
 		finally:
 			node.stop()

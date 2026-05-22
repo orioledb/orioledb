@@ -47,19 +47,19 @@ class RecoveryTest(BaseTest):
 				(SELECT id, id || 'val' FROM generate_series(1, 10000, 1) id);
 			""" % ("WITH (compress)" if compressed else ""))
 		node.safe_psql('postgres', "CHECKPOINT;")
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_test'::regclass);")[0]
-		    [0])
+		self.assertEqual(
+		    node.execute("SELECT * FROM verify_orioledb('o_test'::regclass);"),
+		    [])
 		node.safe_psql('postgres',
 		               "UPDATE o_test SET val = 'xxx' WHERE id % 1000 = 0;")
 		node.safe_psql('postgres', "CHECKPOINT;")
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_test'::regclass);")[0]
-		    [0])
+		self.assertEqual(
+		    node.execute("SELECT * FROM verify_orioledb('o_test'::regclass);"),
+		    [])
 		node.safe_psql('postgres', "CHECKPOINT;")
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_test'::regclass);")[0]
-		    [0])
+		self.assertEqual(
+		    node.execute("SELECT * FROM verify_orioledb('o_test'::regclass);"),
+		    [])
 		node.stop()  # stop PostgreSQL
 
 	def test_checkpoint_simple(self):
@@ -93,9 +93,9 @@ class RecoveryTest(BaseTest):
 		node.start()
 		node.safe_psql('postgres', "CHECKPOINT;")
 		self.assertEqual(
-		    node.execute(
-		        'postgres',
-		        "SELECT orioledb_tbl_check('o_test'::regclass);")[0][0], True)
+		    node.execute('postgres',
+		                 "SELECT * FROM verify_orioledb('o_test'::regclass);"),
+		    [])
 		node.safe_psql(
 		    'postgres',
 		    "UPDATE o_test SET value = value + 1 WHERE key % 10 = 0;")
@@ -104,9 +104,9 @@ class RecoveryTest(BaseTest):
 		node.start()
 		node.safe_psql('postgres', "CHECKPOINT;")
 		self.assertEqual(
-		    node.execute(
-		        'postgres',
-		        "SELECT orioledb_tbl_check('o_test'::regclass);")[0][0], True)
+		    node.execute('postgres',
+		                 "SELECT * FROM verify_orioledb('o_test'::regclass);"),
+		    [])
 		node.safe_psql(
 		    'postgres',
 		    "UPDATE o_test SET value = value + 1 WHERE key % 10 = 0;")
@@ -114,9 +114,9 @@ class RecoveryTest(BaseTest):
 		    node.execute('postgres',
 		                 "SELECT value FROM o_test WHERE key = 10;")[0][0], 14)
 		self.assertEqual(
-		    node.execute(
-		        'postgres',
-		        "SELECT orioledb_tbl_check('o_test'::regclass);")[0][0], True)
+		    node.execute('postgres',
+		                 "SELECT * FROM verify_orioledb('o_test'::regclass);"),
+		    [])
 		node.safe_psql(
 		    'postgres',
 		    "UPDATE o_test SET value = value + 1 WHERE key % 10 = 0;")
@@ -128,9 +128,9 @@ class RecoveryTest(BaseTest):
 		    node.execute('postgres',
 		                 "SELECT value FROM o_test WHERE key = 10;")[0][0], 15)
 		self.assertEqual(
-		    node.execute(
-		        'postgres',
-		        "SELECT orioledb_tbl_check('o_test'::regclass);")[0][0], True)
+		    node.execute('postgres',
+		                 "SELECT * FROM verify_orioledb('o_test'::regclass);"),
+		    [])
 		node.stop()
 
 	def test_checkpoint_multiple(self):
@@ -2501,10 +2501,11 @@ class RecoveryTest(BaseTest):
 		self.assertEqual(
 		    n_pk, n_sk,
 		    f"PK rows ({n_pk}) != SK distinct tokens ({n_sk}) after recovery")
-		self.assertTrue(
+		self.assertEqual(
 		    node.execute(
 		        'postgres',
-		        "SELECT orioledb_tbl_check('o_sk_rotation'::regclass)")[0][0])
+		        "SELECT * FROM verify_orioledb('o_sk_rotation'::regclass)"),
+		    [])
 		node.stop()
 
 	def _sk_modify_pending_setup(self):
@@ -2544,10 +2545,10 @@ class RecoveryTest(BaseTest):
 		    n_pk, n_sk,
 		    f"PK rows ({n_pk}) != SK distinct tokens ({n_sk}) after recovery")
 		self.assertEqual(n_pk, expected_rows)
-		self.assertTrue(
+		self.assertEqual(
 		    node.execute(
 		        'postgres',
-		        "SELECT orioledb_tbl_check('o_sk_pending'::regclass)")[0][0])
+		        "SELECT * FROM verify_orioledb('o_sk_pending'::regclass)"), [])
 
 	def test_recovery_sk_modify_pending_concurrent(self):
 		"""
@@ -2724,10 +2725,10 @@ class RecoveryTest(BaseTest):
 		self.assertEqual(n_pk, n_sk,
 		                 f"PK ({n_pk}) != SK ({n_sk}) after recovery")
 		self.assertEqual(n_pk, 1)
-		self.assertTrue(
+		self.assertEqual(
 		    node.execute(
 		        'postgres',
-		        "SELECT orioledb_tbl_check('o_sk_self'::regclass)")[0][0])
+		        "SELECT * FROM verify_orioledb('o_sk_self'::regclass)"), [])
 		node.stop()
 
 

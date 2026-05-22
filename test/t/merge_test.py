@@ -34,39 +34,39 @@ class MergeTest(BaseTest):
 		node = self.node
 		node.execute("INSERT INTO o_merge"
 		             "(SELECT id FROM generate_series(1, 10000, 1) id);")
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_merge'::regclass)")[0]
-		    [0])
+		self.assertEqual(
+		    node.execute("SELECT * FROM verify_orioledb('o_merge'::regclass)"),
+		    [])
 		node.execute("CHECKPOINT;")
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_merge'::regclass)")[0]
-		    [0])
+		self.assertEqual(
+		    node.execute("SELECT * FROM verify_orioledb('o_merge'::regclass)"),
+		    [])
 
 		node.execute("DELETE FROM o_merge WHERE id <= 5000;")
 		node.execute("CHECKPOINT;")
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_merge'::regclass)")[0]
-		    [0])
+		self.assertEqual(
+		    node.execute("SELECT * FROM verify_orioledb('o_merge'::regclass)"),
+		    [])
 		node.stop()
 
 		node.start()
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_merge;")[0][0], 5000)
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_merge'::regclass)")[0]
-		    [0])
+		self.assertEqual(
+		    node.execute("SELECT * FROM verify_orioledb('o_merge'::regclass)"),
+		    [])
 
 	def test_non_concurrent_merge(self):
 		node = self.node
 		node.execute("INSERT INTO o_merge"
 		             "(SELECT id FROM generate_series(1, 10000, 1) id);")
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_merge'::regclass)")[0]
-		    [0])
+		self.assertEqual(
+		    node.execute("SELECT * FROM verify_orioledb('o_merge'::regclass)"),
+		    [])
 		node.execute("CHECKPOINT;")
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_merge'::regclass)")[0]
-		    [0])
+		self.assertEqual(
+		    node.execute("SELECT * FROM verify_orioledb('o_merge'::regclass)"),
+		    [])
 
 		node.execute("DELETE FROM o_merge WHERE id <= 5000;")
 		node.stop()
@@ -74,9 +74,9 @@ class MergeTest(BaseTest):
 		node.start()
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_merge;")[0][0], 5000)
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_merge'::regclass)")[0]
-		    [0])
+		self.assertEqual(
+		    node.execute("SELECT * FROM verify_orioledb('o_merge'::regclass)"),
+		    [])
 
 	def test_concurrent_checkpoint_begin(self):
 		self.concurrent_checkpoint_base(0, 2600, 1)
@@ -121,9 +121,9 @@ class MergeTest(BaseTest):
 
 		for i in range(checkpoint_after_count):
 			node.execute("CHECKPOINT;")
-			self.assertTrue(
-			    node.execute("SELECT orioledb_tbl_check('o_merge'::regclass)")
-			    [0][0])
+			self.assertEqual(
+			    node.execute(
+			        "SELECT * FROM verify_orioledb('o_merge'::regclass)"), [])
 
 		con1.close()
 		con2.close()
@@ -133,6 +133,6 @@ class MergeTest(BaseTest):
 		node.start()
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_merge;")[0][0], 5000)
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_merge'::regclass)")[0]
-		    [0])
+		self.assertEqual(
+		    node.execute("SELECT * FROM verify_orioledb('o_merge'::regclass)"),
+		    [])

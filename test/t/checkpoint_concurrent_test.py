@@ -357,9 +357,9 @@ class CheckpointConcurrentTest(BaseTest):
 		node.execute("CHECKPOINT;")
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_evicted;")[0][0], 100001)
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_evicted'::regclass)")[0]
-		    [0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_evicted'::regclass)"), [])
 
 	def test_concurrent_compress_create_map_eviction(self):
 		node = self.node
@@ -467,12 +467,12 @@ class CheckpointConcurrentTest(BaseTest):
 		    node.execute("SELECT COUNT(*) FROM o_evicted1;")[0][0], 100001)
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_evicted2;")[0][0], 100001)
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_evicted1'::regclass)")
-		    [0][0])
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_evicted2'::regclass)")
-		    [0][0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_evicted1'::regclass)"), [])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_evicted2'::regclass)"), [])
 		node.execute("CHECKPOINT;")
 		node.execute("CHECKPOINT;")
 
@@ -560,9 +560,9 @@ class CheckpointConcurrentTest(BaseTest):
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 3736)
 		node.safe_psql('postgres', "CHECKPOINT;")
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_checkpoint'::regclass)"), [])
 		node.stop()
 
 	def test_checkpoint_concurrent_io(self):
@@ -636,9 +636,9 @@ class CheckpointConcurrentTest(BaseTest):
 		node.start()
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 50)
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_checkpoint'::regclass)"), [])
 		node.stop()
 
 	def test_checkpoint_concurrent_io_rightmost(self):
@@ -711,9 +711,9 @@ class CheckpointConcurrentTest(BaseTest):
 		node.start()
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 50)
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_checkpoint'::regclass)"), [])
 		node.stop()
 
 	def test_checkpoint_autonomous_page_hikey(self):
@@ -797,14 +797,13 @@ class CheckpointConcurrentTest(BaseTest):
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 118)
 
-		node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)"
-		             )  # no errors, can be true or false
+		node.execute("SELECT * FROM verify_orioledb('o_checkpoint'::regclass)")
 		node.safe_psql("CHECKPOINT;")
 
 		# no incomplete split
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_checkpoint'::regclass)"), [])
 
 		con1.close()
 		con2.close()

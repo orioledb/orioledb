@@ -143,9 +143,9 @@ class TransactionTest(BaseTest):
 			# structurally sound.
 			v = node.execute("SELECT v FROM o_t WHERE k = 1")[0][0]
 			self.assertEqual(v, 'a-update')
-			self.assertTrue(
-			    node.execute("SELECT orioledb_tbl_check('o_t'::regclass)")[0]
-			    [0])
+			self.assertEqual(
+			    node.execute("SELECT * FROM verify_orioledb('o_t'::regclass)"),
+			    [])
 		finally:
 			node.stop()
 

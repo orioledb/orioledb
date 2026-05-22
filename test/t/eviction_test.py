@@ -644,9 +644,9 @@ class EvictionTest(BaseTest):
 		node.start()
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_evicted;")[0][0], 26001)
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_evicted'::regclass)")[0]
-		    [0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_evicted'::regclass)"), [])
 
 	def test_evict_temp_table(self):
 		node = self.node
