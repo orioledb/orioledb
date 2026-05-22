@@ -1249,41 +1249,15 @@ orioledb_tbl_are_indices_equal(PG_FUNCTION_ARGS)
 	PG_RETURN_BOOL(are_equal);
 }
 
+/* No longer supported, use verify_orioledb instead */
 Datum
 orioledb_tbl_check(PG_FUNCTION_ARGS)
 {
-	Oid			relid = PG_GETARG_OID(0);
-	bool		force_map_check = PG_GETARG_OID(1);
-	Relation	rel;
-	OTableDescr *descr;
-	bool		result = true;
-	int			i;
-
-	orioledb_check_shmem();
-
-	/*
-	 * ExclusiveLock helps to avoid changes in map/tmp files and concurrent
-	 * eviction by bgwriter
-	 */
-	rel = relation_open(relid, AccessExclusiveLock);
-	descr = relation_get_descr(rel);
-
-	if (!descr)
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("relation oid %u is not orioledb", relid)));
-
-	for (i = 0; i < descr->nIndices; i++)
-	{
-		o_btree_load_shmem(&descr->indices[i]->desc);
-		result = check_btree(&descr->indices[i]->desc, force_map_check);
-
-		if (result == false)
-			break;
-	}
-	relation_close(rel, AccessExclusiveLock);
-
-	PG_RETURN_BOOL(result);
+	ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+			 errmsg("orioledb_tbl_check is is no longer supported"),
+			 errdetail("Use verify_orioledb instead")));
+	PG_RETURN_BOOL(false);
 }
 
 /*
@@ -1319,10 +1293,11 @@ verify_orioledb(PG_FUNCTION_ARGS)
 		OIndexDescr *idx = descr->indices[i];
 		bool		success;
 
-		o_btree_load_shmem(&idx->desc);
-
 		o_tables_rel_lock_extended(&idx->oids, AccessExclusiveLock, true);
+
+		o_btree_load_shmem(&idx->desc);
 		success = check_btree(&idx->desc, thorough_check);
+
 		o_tables_rel_unlock_extended(&idx->oids, AccessExclusiveLock, true);
 
 		if (!success)

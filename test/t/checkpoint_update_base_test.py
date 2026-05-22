@@ -83,13 +83,13 @@ class CheckpointUpdateBaseTest(BaseTest):
 		con1.close()
 		con2.close()
 
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_evicted'::regclass);")
-		    [0][0])
-		self.assertTrue(
+		self.assertEqual(
 		    node.execute(
-		        "SELECT orioledb_tbl_check('o_evicted'::regclass, True);")[0]
-		    [0])
+		        "SELECT * FROM verify_orioledb('o_evicted'::regclass);"), [])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_evicted'::regclass, True);"),
+		    [])
 
 		for i in range(loops_count):
 			if is_loop_update:
@@ -97,13 +97,13 @@ class CheckpointUpdateBaseTest(BaseTest):
 				    'postgres',
 				    "UPDATE o_evicted SET val = val + 1 WHERE id % 10 = 0;")
 			node.safe_psql('postgres', "CHECKPOINT;")
-			self.assertTrue(
+			self.assertEqual(
 			    node.execute(
-			        "SELECT orioledb_tbl_check('o_evicted'::regclass);")[0][0])
-			self.assertTrue(
-			    node.execute(
-			        "SELECT orioledb_tbl_check('o_evicted'::regclass, True);")
-			    [0][0])
+			        "SELECT * FROM verify_orioledb('o_evicted'::regclass);"),
+			    [])
+			self.assertEqual(
+			    node.execute("SELECT * FROM verify_orioledb("
+			                 "'o_evicted'::regclass, True);"), [])
 		node.stop(['-m', 'immediate'])
 
 		node.append_conf('postgresql.conf', "orioledb.main_buffers = 20MB\n")
@@ -111,10 +111,9 @@ class CheckpointUpdateBaseTest(BaseTest):
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_evicted;")[0][0], 15000)
 		if is_chkp_before_insert or is_chkp_after_insert or loops_count != 0:
-			self.assertTrue(
-			    node.execute(
-			        "SELECT orioledb_tbl_check('o_evicted'::regclass, TRUE);")
-			    [0][0])
+			self.assertEqual(
+			    node.execute("SELECT * FROM verify_orioledb("
+			                 "'o_evicted'::regclass, TRUE);"), [])
 		# else recovery happens
 
 		for i in range(2):
@@ -122,11 +121,11 @@ class CheckpointUpdateBaseTest(BaseTest):
 			    'postgres',
 			    "UPDATE o_evicted SET val = val + 1 WHERE id % 10 = 0;")
 			node.safe_psql('postgres', "CHECKPOINT;")
-			self.assertTrue(
+			self.assertEqual(
 			    node.execute(
-			        "SELECT orioledb_tbl_check('o_evicted'::regclass);")[0][0])
-			self.assertTrue(
-			    node.execute(
-			        "SELECT orioledb_tbl_check('o_evicted'::regclass, True);")
-			    [0][0])
+			        "SELECT * FROM verify_orioledb('o_evicted'::regclass);"),
+			    [])
+			self.assertEqual(
+			    node.execute("SELECT * FROM verify_orioledb("
+			                 "'o_evicted'::regclass, True);"), [])
 		node.stop()

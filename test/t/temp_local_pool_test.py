@@ -52,9 +52,9 @@ class TempLocalPoolTest(BaseTest):
 		self.assertEqual(
 		    con.execute("SELECT count(*) FROM o_temp WHERE val < 0;")[0][0],
 		    expected_neg)
-		self.assertTrue(
-		    con.execute("SELECT orioledb_tbl_check('o_temp'::regclass);")[0]
-		    [0])
+		self.assertEqual(
+		    con.execute("SELECT * FROM verify_orioledb('o_temp'::regclass);"),
+		    [])
 
 		con.close()
 		node.stop()
@@ -149,9 +149,9 @@ class TempLocalPoolTest(BaseTest):
 		all_ids = sorted(row[0] for row in first_batch + rest)
 		self.assertEqual(all_ids, list(range(1, n + 1)))
 
-		self.assertTrue(
-		    con.execute("SELECT orioledb_tbl_check('o_temp'::regclass);")[0]
-		    [0])
+		self.assertEqual(
+		    con.execute("SELECT * FROM verify_orioledb('o_temp'::regclass);"),
+		    [])
 
 		con.close()
 		node.stop()
@@ -296,9 +296,9 @@ class TempLocalPoolTest(BaseTest):
 		returned = set(row[0] for row in first_batch + rest)
 		self.assertTrue(set(g * 2 for g in range(1, n + 1)).issubset(returned))
 
-		self.assertTrue(
-		    con.execute("SELECT orioledb_tbl_check('o_temp'::regclass);")[0]
-		    [0])
+		self.assertEqual(
+		    con.execute("SELECT * FROM verify_orioledb('o_temp'::regclass);"),
+		    [])
 
 		# Part 2.  Advance the global checkpoint counter past any value
 		# the temp tree saw at init.  CHECKPOINT cannot run inside a
@@ -313,9 +313,9 @@ class TempLocalPoolTest(BaseTest):
 		con.execute("SELECT orioledb_evict_pages('o_temp'::regclass, 0);")
 		con.commit()
 
-		self.assertTrue(
-		    con.execute("SELECT orioledb_tbl_check('o_temp'::regclass);")[0]
-		    [0])
+		self.assertEqual(
+		    con.execute("SELECT * FROM verify_orioledb('o_temp'::regclass);"),
+		    [])
 
 		con.close()
 		node.stop()
@@ -360,9 +360,9 @@ class TempLocalPoolTest(BaseTest):
 		    con.execute("SELECT count(*) FROM o_temp WHERE val < 50000;")[0]
 		    [0], sum(1 for g in range(1, n + 1) if (g * 7) % 100000 < 50000))
 		con.execute("RESET enable_seqscan;")
-		self.assertTrue(
-		    con.execute("SELECT orioledb_tbl_check('o_temp'::regclass);")[0]
-		    [0])
+		self.assertEqual(
+		    con.execute("SELECT * FROM verify_orioledb('o_temp'::regclass);"),
+		    [])
 
 		con.close()
 		node.stop()
@@ -516,9 +516,9 @@ class TempLocalPoolTest(BaseTest):
 		    con.execute(
 		        "SELECT count(*) FROM o_temp_toast WHERE length(big) = %d;" %
 		        (400 * 32))[0][0], 500)
-		self.assertTrue(
-		    con.execute("SELECT orioledb_tbl_check("
-		                "'o_temp_toast'::regclass);")[0][0])
+		self.assertEqual(
+		    con.execute("SELECT * FROM verify_orioledb("
+		                "'o_temp_toast'::regclass);"), [])
 
 		con.close()
 		node.stop()
