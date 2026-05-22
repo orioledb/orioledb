@@ -363,7 +363,8 @@ extern ReadPageResult o_btree_try_read_page(BTreeDescr *desc,
 											Pointer key, BTreeKeyType keyType,
 											PartialPageState *partial,
 											bool loadHikeysChunk,
-											CommitSeqNo *readCsn);
+											CommitSeqNo *readCsn,
+											bool *readFromUndo);
 extern UndoLocation read_page_from_undo(BTreeDescr *desc, Page img,
 										UndoLocation undo_loc,
 										CommitSeqNo csn, void *key,
