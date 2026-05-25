@@ -634,7 +634,6 @@ get_current_downlink_key(BTreeSeqScan *scan,
 {
 	BTreeNonLeafTuphdr *tuphdr;
 	OTuple		tuple;
-	OffsetNumber currentOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(page, loc);
 
 	STOPEVENT(STOPEVENT_STEP_DOWN, btree_downlink_stopevent_params(scan->desc,
 																   page, loc));
@@ -666,8 +665,6 @@ get_current_downlink_key(BTreeSeqScan *scan,
 static void
 get_next_key(BTreeSeqScan *scan, BTreePageItemLocator *intLoc, OFixedKey *nextKey, Page page)
 {
-	OffsetNumber beforeOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(page, intLoc);
-
 	BTREE_PAGE_LOCATOR_NEXT(page, intLoc);
 	if (BTREE_PAGE_LOCATOR_IS_VALID(page, intLoc))
 		copy_fixed_page_key(scan->desc, nextKey, page, intLoc);
@@ -908,7 +905,6 @@ check_in_memory_leaf_page(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRang
 	OTuple		leafHikey;
 	bool		result = false;
 	int			cmp_result = 0;
-	BTreePageHeader *header = (BTreePageHeader *) scan->leafImg;
 
 	if (!O_PAGE_IS(scan->leafImg, RIGHTMOST))
 		BTREE_PAGE_GET_HIKEY(leafHikey, scan->leafImg);
@@ -1390,13 +1386,13 @@ scan_note_emitted_tuple(BTreeSeqScan *scan, OTuple tuple)
 static void
 scan_skip_covered_leaf_prefix(BTreeSeqScan *scan)
 {
-	OffsetNumber startOffset;
+	//OffsetNumber startOffset;
 
 	if (!scan->haveHistoricalCoverageHigh ||
 		!BTREE_PAGE_LOCATOR_IS_VALID(scan->leafImg, &scan->leafLoc))
 		return;
 
-	startOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(scan->leafImg, &scan->leafLoc);
+	//startOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(scan->leafImg, &scan->leafLoc);
 	while (BTREE_PAGE_LOCATOR_IS_VALID(scan->leafImg, &scan->leafLoc))
 	{
 		OTuple		key;
