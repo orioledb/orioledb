@@ -1681,7 +1681,8 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 				 "last_replay_ptr=%X/%X last_visible_ptr=%X/%X "
 				 "stop_before_visible_ptr=%X/%X "
 				 "main_retain_ptr=%X/%X current_ptr=%X/%X "
-				 "retain_ptr=%X/%X finished_ptr=%X/%X)",
+				 "retain_ptr=%X/%X finished_ptr=%X/%X "
+				 "runXmin=%lu globalXmin=%lu recovery_xmin=%lu)",
 				 LSN_FORMAT_ARGS(target_ptr),
 				 LSN_FORMAT_ARGS(recovery_ptr_snapshot),
 				 LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
@@ -1690,7 +1691,10 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 				 LSN_FORMAT_ARGS(main_retain_ptr),
 				 LSN_FORMAT_ARGS(current_ptr),
 				 LSN_FORMAT_ARGS(retain_ptr),
-				 LSN_FORMAT_ARGS(finished_ptr));
+				 LSN_FORMAT_ARGS(finished_ptr),
+				 pg_atomic_read_u64(&xid_meta->runXmin),
+				 pg_atomic_read_u64(&xid_meta->globalXmin),
+				 recovery_xmin);
 
 			if (!XLogRecPtrIsValid(finished_ptr))
 			{
@@ -1713,13 +1717,17 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 						"(target_ptr=%X/%X recovery_ptr=%X/%X "
 						"main_retain_ptr=%X/%X "
 						"current_ptr=%X/%X retain_ptr=%X/%X "
-						"finished_ptr=%X/%X)",
+						"finished_ptr=%X/%X "
+						"runXmin=%lu globalXmin=%lu recovery_xmin=%lu)",
 						LSN_FORMAT_ARGS(target_ptr),
 						LSN_FORMAT_ARGS(recovery_ptr_snapshot),
 						LSN_FORMAT_ARGS(main_retain_ptr),
 						LSN_FORMAT_ARGS(current_ptr),
 						LSN_FORMAT_ARGS(retain_ptr),
-						LSN_FORMAT_ARGS(finished_ptr));
+						LSN_FORMAT_ARGS(finished_ptr),
+						pg_atomic_read_u64(&xid_meta->runXmin),
+						pg_atomic_read_u64(&xid_meta->globalXmin),
+						recovery_xmin);
 					break;
 				}
 
@@ -1745,7 +1753,8 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 						"(target_ptr=%X/%X recovery_ptr=%X/%X "
 						"last_replay_ptr=%X/%X last_visible_ptr=%X/%X "
 						"main_retain_ptr=%X/%X current_ptr=%X/%X "
-						"retain_ptr=%X/%X finished_ptr=%X/%X)",
+						"retain_ptr=%X/%X finished_ptr=%X/%X "
+						"runXmin=%lu globalXmin=%lu recovery_xmin=%lu)",
 						LSN_FORMAT_ARGS(target_ptr),
 						LSN_FORMAT_ARGS(recovery_ptr_snapshot),
 						LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
@@ -1753,7 +1762,10 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 						LSN_FORMAT_ARGS(main_retain_ptr),
 						LSN_FORMAT_ARGS(current_ptr),
 						LSN_FORMAT_ARGS(retain_ptr),
-						LSN_FORMAT_ARGS(finished_ptr));
+						LSN_FORMAT_ARGS(finished_ptr),
+						pg_atomic_read_u64(&xid_meta->runXmin),
+						pg_atomic_read_u64(&xid_meta->globalXmin),
+						recovery_xmin);
 					break;
 				}
 
@@ -4505,11 +4517,21 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 	switch (rec->type)
 	{
 		case WAL_REC_XID:
+			elog(DEBUG2,
+				 "Recovery WAL_REC_XID: oxid=%lu logicalXid=%u heapXid=%u "
+				 "current_recovery_oxid=%lu",
+				 rec->oxid, rec->logicalXid, rec->heapXid,
+				 recovery_oxid);
 			advance_oxids(rec->oxid);
 			recovery_switch_to_oxid(rec->oxid, -1);
 			break;
 
 		case WAL_REC_SWITCH_LOGICAL_XID:
+			elog(DEBUG2,
+				 "Recovery WAL_REC_SWITCH_LOGICAL_XID: topXid=%u subXid=%u "
+				 "current_recovery_oxid=%lu logicalXid=%u heapXid=%u",
+				 rec->u.swxid.topXid, rec->u.swxid.subXid,
+				 recovery_oxid, rec->logicalXid, rec->heapXid);
 			/* Ignore */
 			break;
 
@@ -4576,11 +4598,18 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 		case WAL_REC_JOINT_COMMIT:
 			cur_recovery_xid_state->xid = rec->u.joint_commit.xid;
 			cur_recovery_xid_state->joint_commit_xmin = rec->u.joint_commit.xmin;
+			elog(DEBUG2,
+				 "Recovery WAL_REC_JOINT_COMMIT: joint_xid=%u oxid=%lu "
+				 "logicalXid=%u heapXid=%u joint_commit_xmin=%lu",
+				 rec->u.joint_commit.xid, rec->oxid,
+				 rec->logicalXid, rec->heapXid,
+				 rec->u.joint_commit.xmin);
 			elog(DEBUG1, "OrioleDB recovery committed transaction (xid, oxid)="
 				 "(%u, %lu). Next WAL record starts at LSN %X/%X",
 				 cur_recovery_xid_state->xid, rec->oxid,
 				 LSN_FORMAT_ARGS(ctx->xlogRecEndPtr));
 
+			recovery_xmin = Max(recovery_xmin, rec->u.joint_commit.xmin);
 			if (!cur_recovery_xid_state->in_joint_commit_list)
 			{
 				dlist_push_tail(&joint_commit_list,
@@ -4646,6 +4675,15 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 					o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
 					pfree(db_prefix);
 				}
+
+				elog(DEBUG2,
+					 "Recovery WAL_REC_RELATION: rec_oxid=%lu logicalXid=%u "
+					 "heapXid=%u oids=[%u,%u,%u] sys_tree_num=%d ix_type=%d "
+					 "has_descr=%d has_indexDescr=%d",
+					 rec->oxid, rec->logicalXid, rec->heapXid,
+					 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode,
+					 ctx->sys_tree_num, ix_type,
+					 ctx->descr != NULL, ctx->indexDescr != NULL);
 
 				break;
 			}
@@ -4758,6 +4796,16 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				Pointer		sys_tree_oids_ptr = rec->data + sizeof(uint8) + sizeof(OffsetNumber);
 
 				Assert(rec->oxid != InvalidOXid);
+
+				elog(DEBUG2,
+					 "Recovery WAL_REC_MODIFY: wal_type=%s rec_oxid=%lu "
+					 "logicalXid=%u heapXid=%u oids=[%u,%u,%u] "
+					 "sys_tree_num=%d xlogPtr=%X/%X single=%d",
+					 wal_type_name(rec->type), rec->oxid,
+					 rec->logicalXid, rec->heapXid,
+					 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode,
+					 ctx->sys_tree_num,
+					 LSN_FORMAT_ARGS(xlogPtr), ctx->single);
 
 				build_fixed_tuples(rec, &tuple1, &tuple2);
 
@@ -5002,8 +5050,8 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn, bool commit)
 		if (state->xid != xid)
 			continue;
 
-		if (OXidIsValid(state->joint_commit_xmin))
-			recovery_xmin = Max(recovery_xmin, state->joint_commit_xmin);
+		///if (OXidIsValid(state->joint_commit_xmin))
+		///	recovery_xmin = Max(recovery_xmin, state->joint_commit_xmin);
 
 		recovery_switch_to_oxid(state->oxid, -1);
 
