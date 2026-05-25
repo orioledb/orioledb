@@ -178,6 +178,9 @@ class RrStressTest(BaseTest):
 			# counts so reconnect after each SIGKILL has headroom.
 			# wal_keep_size keeps recent WAL around so a streaming
 			# replica can resume after primary restarts.
+			# log_connections / log_disconnections produce the
+			# walsender attach/detach LOG lines we need to confirm
+			# replica connectivity post-mortem.
 			_wal_level = (
 			    'logical' if replica_mode == 'logical' else 'replica')
 			node.append_conf(
@@ -186,7 +189,9 @@ class RrStressTest(BaseTest):
 			    'max_wal_senders = 10\n'
 			    'max_replication_slots = 10\n'
 			    'hot_standby = on\n'
-			    'wal_keep_size = 64\n')
+			    'wal_keep_size = 64\n'
+			    'log_connections = on\n'
+			    'log_disconnections = on\n')
 		node.start()
 		node.safe_psql(SETUP_SQL)
 
@@ -1079,6 +1084,22 @@ class RrStressTest(BaseTest):
 				log_saved_path[0] = dst
 			except Exception as _ce:
 				print(f'[save-log failed] {_ce!r}', flush=True)
+			# Also archive the replica's postgresql.log if a
+			# replica was spawned this trial.  testgres tears
+			# down its tmp dir on teardown, so the replica log
+			# is otherwise unrecoverable post-mortem.
+			if replica is not None:
+				try:
+					replica_log = os.path.join(
+					    replica.logs_dir, 'postgresql.log')
+					rdst = os.path.join(
+					    results_dir,
+					    f'{tag}_{inst}_{pts}_{reason}_replica.log')
+					shutil.copy(replica_log, rdst)
+					print(f'[saved-log] {rdst}', flush=True)
+				except Exception as _ce:
+					print(f'[save-log replica failed] '
+					      f'{_ce!r}', flush=True)
 
 		if panic_lines:
 			_save_log('panic')
