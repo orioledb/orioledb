@@ -114,6 +114,10 @@ verify_explain_plans() {
 
 plan_pass=0
 plan_fail=0
+n_clean=0
+n_bug=0
+n_timeout=0
+n_error=0
 
 for trial in $(seq 1 "$TRIALS"); do
 	t0=$(date +%s)
@@ -121,17 +125,60 @@ for trial in $(seq 1 "$TRIALS"); do
 		python3 -m unittest \
 		test.t.crash.rr_stress_test.RrStressTest.test_bank_account_invariant \
 		2>&1)
+	rc=$?
 	dt=$(( $(date +%s) - t0 ))
 	w=$(echo "$out" | grep -oE 'writes=[0-9]+' | head -1 | cut -d= -f2)
 	v=$(echo "$out" | grep -E 'invariant violations: \[' | head -1)
-	echo "=== trial $trial (${dt} s, writes=${w:-?}) ===" >> "$LOG"
-	if [ -n "$v" ]; then
-		echo "$out" \
-			| grep -E "\[diag\]|\[explain |invariant violations" \
-			>> "$LOG"
+
+	# Classify trial outcome based on the test process exit code AND
+	# whether an invariant-violation line was emitted:
+	#   rc=124            -> TIMEOUT (`timeout` killed the process;
+	#                       almost always means a hang in test setup
+	#                       or in replica.catchup() / sub.catchup())
+	#   rc=0              -> clean   (unittest passed every assertion,
+	#                       including replica invariants -- they all
+	#                       feed into the same violations list)
+	#   rc!=0 AND $v set  -> BUG     (test asserted on a non-empty
+	#                       violations list)
+	#   rc!=0 AND $v empty -> ERROR  (test framework reported a failure
+	#                       but emitted no recognized violation -- the
+	#                       trial died before reaching the diagnostic
+	#                       phase, e.g. primary failed to start because
+	#                       a previous trial left an orphan on the port)
+	if [ "$rc" -eq 124 ]; then
+		status=TIMEOUT
+		n_timeout=$((n_timeout + 1))
+	elif [ "$rc" -eq 0 ]; then
+		status=clean
+		n_clean=$((n_clean + 1))
+	elif [ -n "$v" ]; then
+		status=BUG
+		n_bug=$((n_bug + 1))
 	else
-		echo "clean" >> "$LOG"
+		status=ERROR
+		n_error=$((n_error + 1))
 	fi
+
+	echo "=== trial $trial (${dt}s, writes=${w:-?}, exit=$rc, status=$status) ===" >> "$LOG"
+	case "$status" in
+		clean)
+			echo "clean" >> "$LOG"
+			;;
+		BUG)
+			echo "$out" \
+				| grep -E "\[diag\]|\[explain |invariant violations" \
+				>> "$LOG"
+			;;
+		TIMEOUT)
+			echo "TIMEOUT after ${dt}s (TIMEOUT=${TIMEOUT}s) -- last 30 lines of stdout:" >> "$LOG"
+			echo "$out" | tail -30 >> "$LOG"
+			;;
+		ERROR)
+			echo "ERROR exit=$rc (no invariant violation; setup/runtime failure) -- last 30 lines of stdout:" >> "$LOG"
+			echo "$out" | tail -30 >> "$LOG"
+			;;
+	esac
+
 	if verify_explain_plans "$out" "$trial"; then
 		plan_pass=$((plan_pass + 1))
 		pc=plan-OK
@@ -139,10 +186,11 @@ for trial in $(seq 1 "$TRIALS"); do
 		plan_fail=$((plan_fail + 1))
 		pc=plan-FAIL
 	fi
-	printf 't=%02d %2ss W=%s %s %s\n' "$trial" "${dt}" "${w:-?}" \
-		"$([ -n "$v" ] && echo BUG || echo clean)" "$pc"
+	printf 't=%02d %2ss W=%s %-7s %s\n' "$trial" "${dt}" "${w:-?}" \
+		"$status" "$pc"
 done
 
 echo "HUNT-DONE" >> "$LOG"
+echo "[summary] clean=${n_clean} BUG=${n_bug} TIMEOUT=${n_timeout} ERROR=${n_error}" >> "$LOG"
 echo "[plan-check summary] ${plan_pass}/${TRIALS} trials passed" >> "$LOG"
-echo "[done] $LOG (plan-check: ${plan_pass}/${TRIALS} pass, ${plan_fail} fail)"
+echo "[done] $LOG  trials: clean=${n_clean} BUG=${n_bug} TIMEOUT=${n_timeout} ERROR=${n_error}  plan-check: ${plan_pass}/${TRIALS} pass"
