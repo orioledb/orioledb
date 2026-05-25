@@ -684,6 +684,7 @@ pg_atomic_uint64 *recovery_published_visible_ptr;
 pg_atomic_uint32 *recovery_last_pair_seq;
 pg_atomic_uint64 *recovery_last_replay_ptr;
 pg_atomic_uint64 *recovery_last_visible_ptr;
+pg_atomic_uint64 *recovery_visible_pair_history_head;
 bool	   *recovery_single_process;
 bool	   *was_in_recovery;
 pg_atomic_uint32 *after_recovery_cleaned;
@@ -731,6 +732,21 @@ static inline RecoveryMsgType recovery_msg_from_wal_record(WalRecordType rec_typ
 static void recovery_send_init(int worker_num);
 static inline void recovery_record_visible_boundary_pair(XLogRecPtr replay_ptr, XLogRecPtr visible_ptr);
 static inline void recovery_read_visible_boundary_pair(XLogRecPtr *replay_ptr, XLogRecPtr *visible_ptr);
+static bool recovery_find_visible_boundary_pair_before(XLogRecPtr target_ptr,
+													   XLogRecPtr *replay_ptr,
+													   XLogRecPtr *visible_ptr);
+
+#define RECOVERY_VISIBLE_PAIR_HISTORY_SIZE 1024
+
+typedef struct RecoveryVisibleBoundaryPairSlot
+{
+	pg_atomic_uint32 seq;
+	pg_atomic_uint64 ordinal;
+	pg_atomic_uint64 replay_ptr;
+	pg_atomic_uint64 visible_ptr;
+} RecoveryVisibleBoundaryPairSlot;
+
+static RecoveryVisibleBoundaryPairSlot *recovery_visible_pair_history;
 
 /*
  * Returns full size of the shared memory needed to recovery.
@@ -750,7 +766,9 @@ recovery_shmem_needs(void)
 	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(RecoveryWorkerPtrs),
 												  recovery_pool_size_guc + recovery_idx_pool_size_guc)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
-	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 6)));
+	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 7)));
+	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(RecoveryVisibleBoundaryPairSlot),
+												  RECOVERY_VISIBLE_PAIR_HISTORY_SIZE)));
 	size = add_size(size, CACHELINEALIGN(sizeof(bool)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint64)));
@@ -804,6 +822,7 @@ recovery_shmem_init(Pointer ptr, bool found)
 	 *   3: startup-published visible boundary
 	 *   4: last replay boundary seen for a commit-producing event
 	 *   5: matching Oriole-visible boundary for that event
+	 *   6: append position for replay/visible boundary history ring
 	 */
 	recovery_ptr = (pg_atomic_uint64 *) ptr;
 	recovery_main_retain_ptr = recovery_ptr + 1;
@@ -811,8 +830,13 @@ recovery_shmem_init(Pointer ptr, bool found)
 	recovery_published_visible_ptr = recovery_ptr + 3;
 	recovery_last_replay_ptr = recovery_ptr + 4;
 	recovery_last_visible_ptr = recovery_ptr + 5;
+	recovery_visible_pair_history_head = recovery_ptr + 6;
 
-	ptr += CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 6));
+	ptr += CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 7));
+
+	recovery_visible_pair_history = (RecoveryVisibleBoundaryPairSlot *) ptr;
+	ptr += CACHELINEALIGN(mul_size(sizeof(RecoveryVisibleBoundaryPairSlot),
+								   RECOVERY_VISIBLE_PAIR_HISTORY_SIZE));
 
 	was_in_recovery = (bool *) ptr;
 	ptr += CACHELINEALIGN(sizeof(bool));
@@ -862,6 +886,17 @@ recovery_shmem_init(Pointer ptr, bool found)
 		 */
 		pg_atomic_init_u64(recovery_last_replay_ptr, InvalidXLogRecPtr);
 		pg_atomic_init_u64(recovery_last_visible_ptr, InvalidXLogRecPtr);
+		pg_atomic_init_u64(recovery_visible_pair_history_head, 0);
+		for (i = 0; i < RECOVERY_VISIBLE_PAIR_HISTORY_SIZE; i++)
+		{
+			pg_atomic_init_u32(&recovery_visible_pair_history[i].seq, 0);
+			pg_atomic_init_u64(&recovery_visible_pair_history[i].ordinal,
+								UINT64CONST(0xffffffffffffffff));
+			pg_atomic_init_u64(&recovery_visible_pair_history[i].replay_ptr,
+								InvalidXLogRecPtr);
+			pg_atomic_init_u64(&recovery_visible_pair_history[i].visible_ptr,
+								InvalidXLogRecPtr);
+		}
 
 		*was_in_recovery = false;
 		pg_atomic_init_u32(after_recovery_cleaned, 0);
@@ -1643,11 +1678,14 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 		stop_before_visible_ptr = InvalidXLogRecPtr;
 		stop_after_visible_ptr = InvalidXLogRecPtr;
 
-		if (!info->recoveryStopAfter &&
-			XLogRecPtrIsValid(last_replay_ptr_snapshot) &&
-			last_replay_ptr_snapshot <= target_ptr &&
-			XLogRecPtrIsValid(last_visible_ptr_snapshot))
-			stop_before_visible_ptr = last_visible_ptr_snapshot;
+		if (!info->recoveryStopAfter)
+		{
+			XLogRecPtr	stop_before_replay_ptr;
+
+			(void) recovery_find_visible_boundary_pair_before(target_ptr,
+																&stop_before_replay_ptr,
+																&stop_before_visible_ptr);
+		}
 
 		if (info->recoveryStopAfter &&
 			XLogRecPtrIsValid(last_replay_ptr_snapshot) &&
@@ -2022,6 +2060,9 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 static inline void
 recovery_record_visible_boundary_pair(XLogRecPtr replay_ptr, XLogRecPtr visible_ptr)
 {
+	uint64		ordinal;
+	uint32		slot_no;
+	RecoveryVisibleBoundaryPairSlot *slot;
 	uint32		seq;
 
 	if (!XLogRecPtrIsValid(replay_ptr) || !XLogRecPtrIsValid(visible_ptr))
@@ -2035,9 +2076,23 @@ recovery_record_visible_boundary_pair(XLogRecPtr replay_ptr, XLogRecPtr visible_
 	pg_write_barrier();
 	pg_atomic_write_u32(recovery_last_pair_seq, seq + 2);
 
+	ordinal = pg_atomic_fetch_add_u64(recovery_visible_pair_history_head, 1);
+	slot_no = ordinal % RECOVERY_VISIBLE_PAIR_HISTORY_SIZE;
+	slot = &recovery_visible_pair_history[slot_no];
+
+	seq = pg_atomic_read_u32(&slot->seq);
+	pg_atomic_write_u32(&slot->seq, seq + 1);
+	pg_write_barrier();
+	pg_atomic_write_u64(&slot->ordinal, ordinal);
+	pg_atomic_write_u64(&slot->replay_ptr, replay_ptr);
+	pg_atomic_write_u64(&slot->visible_ptr, visible_ptr);
+	pg_write_barrier();
+	pg_atomic_write_u32(&slot->seq, seq + 2);
+
 	elog(DEBUG4,
 		 "Recovery visible boundary pair updated "
-		 "(replay_ptr=%X/%X visible_ptr=%X/%X)",
+		 "(ordinal=%llu replay_ptr=%X/%X visible_ptr=%X/%X)",
+		 (unsigned long long) ordinal,
 		 LSN_FORMAT_ARGS(replay_ptr),
 		 LSN_FORMAT_ARGS(visible_ptr));
 }
@@ -2066,6 +2121,71 @@ recovery_read_visible_boundary_pair(XLogRecPtr *replay_ptr, XLogRecPtr *visible_
 		if (seq1 == seq2)
 			return;
 	}
+}
+
+static bool
+recovery_find_visible_boundary_pair_before(XLogRecPtr target_ptr,
+										   XLogRecPtr *replay_ptr,
+										   XLogRecPtr *visible_ptr)
+{
+	uint64		history_end;
+	uint64		ordinal;
+	uint64		lower_bound;
+
+	Assert(replay_ptr);
+	Assert(visible_ptr);
+
+	*replay_ptr = InvalidXLogRecPtr;
+	*visible_ptr = InvalidXLogRecPtr;
+
+	history_end = pg_atomic_read_u64(recovery_visible_pair_history_head);
+	if (history_end == 0)
+		return false;
+
+	lower_bound = (history_end > RECOVERY_VISIBLE_PAIR_HISTORY_SIZE) ?
+		history_end - RECOVERY_VISIBLE_PAIR_HISTORY_SIZE : 0;
+
+	for (ordinal = history_end; ordinal > lower_bound; ordinal--)
+	{
+		uint32		slot_no = (ordinal - 1) % RECOVERY_VISIBLE_PAIR_HISTORY_SIZE;
+		RecoveryVisibleBoundaryPairSlot *slot = &recovery_visible_pair_history[slot_no];
+		uint32		seq1;
+		uint32		seq2;
+		uint64		slot_ordinal;
+		XLogRecPtr	slot_replay_ptr;
+		XLogRecPtr	slot_visible_ptr;
+
+		while (true)
+		{
+			seq1 = pg_atomic_read_u32(&slot->seq);
+			if (seq1 & 1)
+				continue;
+
+			pg_read_barrier();
+			slot_ordinal = pg_atomic_read_u64(&slot->ordinal);
+			slot_replay_ptr = pg_atomic_read_u64(&slot->replay_ptr);
+			slot_visible_ptr = pg_atomic_read_u64(&slot->visible_ptr);
+			pg_read_barrier();
+
+			seq2 = pg_atomic_read_u32(&slot->seq);
+			if (seq1 == seq2)
+				break;
+		}
+
+		if (slot_ordinal != ordinal - 1)
+			continue;
+		if (!XLogRecPtrIsValid(slot_replay_ptr) ||
+			!XLogRecPtrIsValid(slot_visible_ptr))
+			continue;
+		if (slot_replay_ptr <= target_ptr)
+		{
+			*replay_ptr = slot_replay_ptr;
+			*visible_ptr = slot_visible_ptr;
+			return true;
+		}
+	}
+
+	return false;
 }
 
 static XLogRecPtr
