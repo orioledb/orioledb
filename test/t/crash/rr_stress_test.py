@@ -108,13 +108,30 @@ class RrStressTest(BaseTest):
 		postmaster_kill_enabled = _env_int('RR_KILL_POSTMASTER', 0)
 		postmaster_kill_interval = _env_float(
 		    'RR_KILL_POSTMASTER_INTERVAL', duration / 3.0)
-		# Logical replication replica.  When on, a second PG node is
-		# spun up, subscribes to `o_bank_account` from primary, and
-		# is verified at end-of-test against the same invariants as
-		# the primary.  No reader/writer threads run on the replica
-		# -- it's a pure passive subscriber.  Requires wal_level =
-		# logical on primary (set below).
-		logical_replica_enabled = _env_int('RR_LOGICAL_REPLICA', 0)
+		# Replica mode.  When non-'none', a second PG node is spun
+		# up alongside the primary and verified at end-of-test
+		# against the same invariants as the primary.  No reader/
+		# writer threads run on the replica -- it's a pure passive
+		# subscriber.
+		#   'none'      -- no replica.
+		#   'logical'   -- second node subscribes to o_bank_account
+		#                  via testgres.publish() / .subscribe()
+		#                  (logical decoding apply path).  Primary
+		#                  gets wal_level=logical.
+		#   'streaming' -- second node is a hot-standby spawned via
+		#                  pg_basebackup + spawn_replica (binary
+		#                  WAL replay).  Primary gets wal_level=
+		#                  replica + hot_standby + wal_keep_size.
+		# Backwards compat: RR_LOGICAL_REPLICA=1 still works and
+		# resolves to 'logical' when RR_REPLICA_MODE is unset.
+		replica_mode = os.getenv('RR_REPLICA_MODE', '').lower()
+		if not replica_mode:
+			replica_mode = ('logical'
+			                if _env_int('RR_LOGICAL_REPLICA', 0)
+			                else 'none')
+		assert replica_mode in ('none', 'logical', 'streaming'), (
+		    f'unknown RR_REPLICA_MODE={replica_mode!r}; '
+		    'expected none, logical or streaming')
 		checkpoint_interval = 0.5
 		ddl_nemesis_interval = 0.2
 		wal_chaos_idle = _env_float('RR_WAL_CHAOS_IDLE', 0.1)
@@ -154,16 +171,22 @@ class RrStressTest(BaseTest):
 			    'postgresql.conf',
 			    'fsync = on\n'
 			    'full_page_writes = on\n')
-		if logical_replica_enabled:
-			# wal_level=logical is required to feed a logical
-			# replication slot; raise the slot/sender counts so
-			# the replica reconnect after each SIGKILL has
-			# headroom.
+		if replica_mode != 'none':
+			# Primary must run at a higher wal_level so the
+			# replica's slot/walsender can extract enough info.
+			# 'logical' implies 'replica'.  Raise the slot/sender
+			# counts so reconnect after each SIGKILL has headroom.
+			# wal_keep_size keeps recent WAL around so a streaming
+			# replica can resume after primary restarts.
+			_wal_level = (
+			    'logical' if replica_mode == 'logical' else 'replica')
 			node.append_conf(
 			    'postgresql.conf',
-			    'wal_level = logical\n'
+			    f'wal_level = {_wal_level}\n'
 			    'max_wal_senders = 10\n'
-			    'max_replication_slots = 10\n')
+			    'max_replication_slots = 10\n'
+			    'hot_standby = on\n'
+			    'wal_keep_size = 64\n')
 		node.start()
 		node.safe_psql(SETUP_SQL)
 
@@ -184,21 +207,33 @@ class RrStressTest(BaseTest):
 				FROM generate_series(1, {n_accounts}) AS i;
 		""")
 
-		# Logical replica setup.  Spawned only when RR_LOGICAL_REPLICA=1.
-		# BaseTest.tearDown handles subscriber.stop() + cleanup, so no
-		# explicit teardown is needed here.
-		subscriber = None
+		# Replica setup.  Spawned only when replica_mode != 'none'.
+		# BaseTest.tearDown handles subscriber/replica stop + cleanup,
+		# so no explicit teardown is needed here.
+		#   `replica`  -- the node we'll query at end-of-test
+		#                 (subscriber for logical, standby for
+		#                 streaming).
+		#   `sub_obj`  -- testgres Subscription handle (logical only;
+		#                 used for sub_obj.catchup()).
+		replica = None
 		sub_obj = None
-		if logical_replica_enabled:
-			subscriber = self.getSubsriber()
-			subscriber.start()
+		if replica_mode == 'logical':
+			replica = self.getSubsriber()
+			replica.start()
 			# Same DDL on the subscriber; rows come via the
 			# subscription's initial table sync (copy_data=true
 			# by default).
-			subscriber.safe_psql(SETUP_SQL)
+			replica.safe_psql(SETUP_SQL)
 			pub = node.publish('rr_pub', tables=['o_bank_account'])
-			sub_obj = subscriber.subscribe(pub, 'rr_sub')
-			wait_ready(subscriber)
+			sub_obj = replica.subscribe(pub, 'rr_sub')
+			wait_ready(replica)
+		elif replica_mode == 'streaming':
+			# pg_basebackup the primary at its current state, then
+			# spawn the binary copy as a hot-standby.  Replica
+			# inherits the schema and the just-loaded 100 rows
+			# from the backup -- no separate DDL run.
+			replica = self.getReplica()
+			replica.start()
 
 		test_start = time.time()
 		first_error_time = [None]
@@ -1402,27 +1437,36 @@ class RrStressTest(BaseTest):
 				else:
 					print(f'  {pk_dump}')
 
-		# Logical-replica invariants.  Run *before* node.stop() so the
-		# subscription can still catch up to primary's current LSN and
-		# the dump-vs-primary comparison can query both nodes.  Results
-		# are stashed in `_replica_violations` and merged into the main
-		# `violations` list once that list is constructed below.
+		# Replica invariants.  Run *before* node.stop() so catchup
+		# can still reach primary's current LSN and the dump-vs-
+		# primary comparison can query both nodes.  Results are
+		# stashed in `_replica_violations` and merged into the main
+		# `violations` list below.
 		_replica_violations = []
-		if logical_replica_enabled and subscriber is not None:
+		if replica_mode != 'none' and replica is not None:
+			# Wait for replica to catch up to primary's current
+			# LSN.  Mechanism differs per mode:
+			#   logical:   sub_obj.catchup() (LSN of confirmed-
+			#              flush vs primary's current_wal_insert).
+			#   streaming: replica.catchup() (apply LSN vs
+			#              primary's current_wal_insert).
 			try:
-				sub_obj.catchup()
+				if replica_mode == 'logical':
+					sub_obj.catchup()
+				else:  # streaming
+					replica.catchup()
 			except Exception as _e:
 				_replica_violations.append(
-				    f'replica: sub.catchup() failed: {_e!r}')
+				    f'replica: catchup() failed: {_e!r}')
 			# Core scalar invariants on replica.
 			try:
-				_rc, _rs, _rdt = subscriber.execute(
+				_rc, _rs, _rdt = replica.execute(
 				    "SELECT count(*)::int, sum(balance)::bigint, "
 				    "count(DISTINCT token)::int "
 				    "FROM o_bank_account")[0]
 				print(
-				    f'[replica] rows={_rc} sum={_rs} '
-				    f'distinct_tokens={_rdt}')
+				    f'[replica:{replica_mode}] rows={_rc} '
+				    f'sum={_rs} distinct_tokens={_rdt}')
 				if _rc != n_accounts:
 					_replica_violations.append(
 					    f'replica rows {_rc} != {n_accounts}')
@@ -1437,40 +1481,51 @@ class RrStressTest(BaseTest):
 			except Exception as _e:
 				_replica_violations.append(
 				    f'replica: scalar check failed: {_e!r}')
-			# Structural check on replica.  Same engine-branch as the
-			# primary-side check: orioledb_tbl_check vs amcheck.
-			try:
-				if STORAGE_ENGINE == 'orioledb':
-					_rtbl = subscriber.execute(
-					    "SELECT orioledb_tbl_check"
-					    "('o_bank_account'::regclass)")[0][0]
-					if not _rtbl:
-						_replica_violations.append(
-						    'replica: orioledb_tbl_check returned false')
-				else:
-					_rheap_bad = subscriber.execute(
-					    "SELECT count(*)::int FROM "
-					    "verify_heapam('o_bank_account')")[0][0]
-					if _rheap_bad != 0:
-						_replica_violations.append(
-						    f'replica: verify_heapam found '
-						    f'{_rheap_bad} corruption rows')
-					subscriber.execute(
-					    "SELECT bt_index_check"
-					    "('o_bank_account_pkey'::regclass)")
-					subscriber.execute(
-					    "SELECT bt_index_check"
-					    "('o_bank_account_token_uniq'::regclass)")
-			except Exception as _e:
-				_replica_violations.append(
-				    f'replica: structural check raised: {_e!r}')
-			# Row-by-row dump comparison: every (id, balance, token)
-			# triple must match between primary and replica.
+			# Structural check on replica.  Only meaningful for
+			# logical replication, where the replica's data file
+			# layout is independent of primary's.  Streaming
+			# replicas are byte-identical to primary at catch-up
+			# (and AccessExclusiveLock would fail on a hot
+			# standby anyway), so we skip the structural check
+			# in that mode.
+			if replica_mode == 'logical':
+				try:
+					if STORAGE_ENGINE == 'orioledb':
+						_rtbl = replica.execute(
+						    "SELECT orioledb_tbl_check"
+						    "('o_bank_account'::regclass)")[0][0]
+						if not _rtbl:
+							_replica_violations.append(
+							    'replica: orioledb_tbl_check '
+							    'returned false')
+					else:
+						_rheap_bad = replica.execute(
+						    "SELECT count(*)::int FROM "
+						    "verify_heapam('o_bank_account')"
+						    )[0][0]
+						if _rheap_bad != 0:
+							_replica_violations.append(
+							    f'replica: verify_heapam found '
+							    f'{_rheap_bad} corruption rows')
+						replica.execute(
+						    "SELECT bt_index_check"
+						    "('o_bank_account_pkey'::regclass)")
+						replica.execute(
+						    "SELECT bt_index_check"
+						    "('o_bank_account_token_uniq'"
+						    "::regclass)")
+				except Exception as _e:
+					_replica_violations.append(
+					    f'replica: structural check raised: '
+					    f'{_e!r}')
+			# Row-by-row dump comparison: every (id, balance,
+			# token) triple must match between primary and
+			# replica.
 			try:
 				_primary_dump = node.execute(
 				    "SELECT id, balance, token FROM o_bank_account "
 				    "ORDER BY id")
-				_replica_dump = subscriber.execute(
+				_replica_dump = replica.execute(
 				    "SELECT id, balance, token FROM o_bank_account "
 				    "ORDER BY id")
 				if _primary_dump != _replica_dump:
