@@ -22,6 +22,7 @@ import time
 from testgres.enums import IsolationLevel
 
 from ..base_test import BaseTest
+from ..logical_test import wait_ready
 
 
 def _env_int(name, default):
@@ -107,6 +108,13 @@ class RrStressTest(BaseTest):
 		postmaster_kill_enabled = _env_int('RR_KILL_POSTMASTER', 0)
 		postmaster_kill_interval = _env_float(
 		    'RR_KILL_POSTMASTER_INTERVAL', duration / 3.0)
+		# Logical replication replica.  When on, a second PG node is
+		# spun up, subscribes to `o_bank_account` from primary, and
+		# is verified at end-of-test against the same invariants as
+		# the primary.  No reader/writer threads run on the replica
+		# -- it's a pure passive subscriber.  Requires wal_level =
+		# logical on primary (set below).
+		logical_replica_enabled = _env_int('RR_LOGICAL_REPLICA', 0)
 		checkpoint_interval = 0.5
 		ddl_nemesis_interval = 0.2
 		wal_chaos_idle = _env_float('RR_WAL_CHAOS_IDLE', 0.1)
@@ -146,6 +154,16 @@ class RrStressTest(BaseTest):
 			    'postgresql.conf',
 			    'fsync = on\n'
 			    'full_page_writes = on\n')
+		if logical_replica_enabled:
+			# wal_level=logical is required to feed a logical
+			# replication slot; raise the slot/sender counts so
+			# the replica reconnect after each SIGKILL has
+			# headroom.
+			node.append_conf(
+			    'postgresql.conf',
+			    'wal_level = logical\n'
+			    'max_wal_senders = 10\n'
+			    'max_replication_slots = 10\n')
 		node.start()
 		node.safe_psql(SETUP_SQL)
 
@@ -165,6 +183,22 @@ class RrStressTest(BaseTest):
 				SELECT i, {initial_balance}, i
 				FROM generate_series(1, {n_accounts}) AS i;
 		""")
+
+		# Logical replica setup.  Spawned only when RR_LOGICAL_REPLICA=1.
+		# BaseTest.tearDown handles subscriber.stop() + cleanup, so no
+		# explicit teardown is needed here.
+		subscriber = None
+		sub_obj = None
+		if logical_replica_enabled:
+			subscriber = self.getSubsriber()
+			subscriber.start()
+			# Same DDL on the subscriber; rows come via the
+			# subscription's initial table sync (copy_data=true
+			# by default).
+			subscriber.safe_psql(SETUP_SQL)
+			pub = node.publish('rr_pub', tables=['o_bank_account'])
+			sub_obj = subscriber.subscribe(pub, 'rr_sub')
+			wait_ready(subscriber)
 
 		test_start = time.time()
 		first_error_time = [None]
@@ -1368,6 +1402,90 @@ class RrStressTest(BaseTest):
 				else:
 					print(f'  {pk_dump}')
 
+		# Logical-replica invariants.  Run *before* node.stop() so the
+		# subscription can still catch up to primary's current LSN and
+		# the dump-vs-primary comparison can query both nodes.  Results
+		# are stashed in `_replica_violations` and merged into the main
+		# `violations` list once that list is constructed below.
+		_replica_violations = []
+		if logical_replica_enabled and subscriber is not None:
+			try:
+				sub_obj.catchup()
+			except Exception as _e:
+				_replica_violations.append(
+				    f'replica: sub.catchup() failed: {_e!r}')
+			# Core scalar invariants on replica.
+			try:
+				_rc, _rs, _rdt = subscriber.execute(
+				    "SELECT count(*)::int, sum(balance)::bigint, "
+				    "count(DISTINCT token)::int "
+				    "FROM o_bank_account")[0]
+				print(
+				    f'[replica] rows={_rc} sum={_rs} '
+				    f'distinct_tokens={_rdt}')
+				if _rc != n_accounts:
+					_replica_violations.append(
+					    f'replica rows {_rc} != {n_accounts}')
+				if _rs != expected_total:
+					_replica_violations.append(
+					    f'replica sum_balance {_rs} != '
+					    f'{expected_total}')
+				if _rdt != n_accounts:
+					_replica_violations.append(
+					    f'replica distinct_tokens {_rdt} != '
+					    f'{n_accounts}')
+			except Exception as _e:
+				_replica_violations.append(
+				    f'replica: scalar check failed: {_e!r}')
+			# Structural check on replica.  Same engine-branch as the
+			# primary-side check: orioledb_tbl_check vs amcheck.
+			try:
+				if STORAGE_ENGINE == 'orioledb':
+					_rtbl = subscriber.execute(
+					    "SELECT orioledb_tbl_check"
+					    "('o_bank_account'::regclass)")[0][0]
+					if not _rtbl:
+						_replica_violations.append(
+						    'replica: orioledb_tbl_check returned false')
+				else:
+					_rheap_bad = subscriber.execute(
+					    "SELECT count(*)::int FROM "
+					    "verify_heapam('o_bank_account')")[0][0]
+					if _rheap_bad != 0:
+						_replica_violations.append(
+						    f'replica: verify_heapam found '
+						    f'{_rheap_bad} corruption rows')
+					subscriber.execute(
+					    "SELECT bt_index_check"
+					    "('o_bank_account_pkey'::regclass)")
+					subscriber.execute(
+					    "SELECT bt_index_check"
+					    "('o_bank_account_token_uniq'::regclass)")
+			except Exception as _e:
+				_replica_violations.append(
+				    f'replica: structural check raised: {_e!r}')
+			# Row-by-row dump comparison: every (id, balance, token)
+			# triple must match between primary and replica.
+			try:
+				_primary_dump = node.execute(
+				    "SELECT id, balance, token FROM o_bank_account "
+				    "ORDER BY id")
+				_replica_dump = subscriber.execute(
+				    "SELECT id, balance, token FROM o_bank_account "
+				    "ORDER BY id")
+				if _primary_dump != _replica_dump:
+					_diffs = [
+					    (p, r)
+					    for p, r in zip(_primary_dump, _replica_dump)
+					    if p != r
+					][:5]
+					_replica_violations.append(
+					    f'replica: PK dump diverges from primary '
+					    f'(first {len(_diffs)} diffs): {_diffs}')
+			except Exception as _e:
+				_replica_violations.append(
+				    f'replica: dump comparison failed: {_e!r}')
+
 		# Detect dangling backends: stop the node and then count any
 		# process that still references our data dir. After a clean
 		# shutdown the count must be zero. Anything else indicates a
@@ -1452,6 +1570,9 @@ class RrStressTest(BaseTest):
 			violations.append(
 			    f'pk_token_dups (PK has duplicate tokens!) = '
 			    f'{_fmt_dups(pk_token_dups)}')
+		# Replica-side violations were collected before node.stop()
+		# while both nodes were still alive; merge them in now.
+		violations.extend(_replica_violations)
 		if violations and log_saved_path[0] is None:
 			_save_log('invariant')
 		# Opt-in: save the log even on a clean pass so a batch can
