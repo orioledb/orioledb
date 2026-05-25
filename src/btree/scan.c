@@ -141,7 +141,6 @@ struct BTreeSeqScan
 	OFixedKey	keyRangeLow,
 				keyRangeHigh;
 	bool		firstPageIsLoaded;
-	bool		stopAfterHistoricalRightmost;
 
 	/* Private parallel worker info in a backend */
 	ParallelOScanDesc poscan;
@@ -410,7 +409,6 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 		scan->hint.pageChangeCount = scan->context.items[0].pageChangeCount;
 		BTREE_PAGE_LOCATOR_SET_INVALID(&scan->intLoc);
 		O_TUPLE_SET_NULL(scan->nextKey.tuple);
-		scan->stopAfterHistoricalRightmost = false;
 		load_first_historical_page(scan);
 		has_next = false;
 	}
@@ -618,7 +616,6 @@ scan_make_iterator(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRangeHigh)
 
 	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
 	scan->haveHistImg = false;
-	scan->stopAfterHistoricalRightmost = false;
 	scan->iterEnd = keyRangeHigh;
 }
 
@@ -999,13 +996,7 @@ iterate_internal_page(BTreeSeqScan *scan)
 
 				if (result == ReadPageResultOK)
 				{
-					bool		historicalRightmostStop;
-
-					historicalRightmostStop = readFromUndo &&
-						O_PAGE_IS(scan->leafImg, RIGHTMOST);
-
-					if (!readFromUndo || !historicalRightmostStop)
-						check_in_memory_leaf_page(scan, scan->keyRangeLow.tuple, scan->keyRangeHigh.tuple);
+					check_in_memory_leaf_page(scan, scan->keyRangeLow.tuple, scan->keyRangeHigh.tuple);
 					if (scan->iter)
 						return true;
 
@@ -1015,7 +1006,6 @@ iterate_internal_page(BTreeSeqScan *scan)
 					if (readFromUndo)
 						scan_skip_covered_leaf_prefix(scan);
 					O_TUPLE_SET_NULL(scan->nextKey.tuple);
-					scan->stopAfterHistoricalRightmost = historicalRightmostStop;
 					load_first_historical_page(scan);
 					return true;
 				}
@@ -1317,7 +1307,6 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	scan->checkpointNumberSet = false;
 	scan->haveHistImg = false;
 	scan->haveHistoricalCoverageHigh = false;
-	scan->stopAfterHistoricalRightmost = false;
 	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
 
 	dlist_push_tail(&listOfScans, &scan->listNode);
@@ -1661,12 +1650,7 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 		{
 			if (scan->status == BTreeSeqScanInMemory)
 			{
-				if (scan->stopAfterHistoricalRightmost && !scan->haveHistImg)
-				{
-					scan->stopAfterHistoricalRightmost = false;
-					switch_to_disk_scan(scan);
-				}
-				else if (iterate_internal_page(scan))
+				if (iterate_internal_page(scan))
 				{
 					if (scan->iter)
 					{
