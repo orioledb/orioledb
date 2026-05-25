@@ -519,6 +519,26 @@ lock_page_with_tuple(BTreeDescr *desc,
 				if (UndoLocationIsValid(lockerState->undoLocation) &&
 					!UndoLocationIsValid(curRetainUndoLocations[undoType]))
 					curRetainUndoLocations[undoType] = lockerState->undoLocation;
+
+				/*
+				 * The lock holder allocated the waiter's undo record on our
+				 * behalf via make_waiter_undo_record(), and stamped its
+				 * location into the tuphdr on the page.  When an INSERT
+				 * doesn't queue, o_btree_modify_insert_update() registers the
+				 * freshly allocated undo location in this backend's
+				 * commandInfos[] via current_command_get_undo_location().
+				 * Here that registration never happens, because we returned
+				 * before reaching that code.  Do it now, otherwise a
+				 * subsequent same-transaction read of the row would call
+				 * undo_location_get_command() with a location below every
+				 * commandInfos[i].undoLocation, tripping its lo >= 0
+				 * assertion (or returning a bogus cid in non-assert builds).
+				 */
+				if (undoType == UndoLogRegular &&
+					UndoLocationIsValid(lockerState->undoLocation) &&
+					!IsParallelWorker())
+					update_command_undo_location(o_get_current_command(),
+												 lockerState->undoLocation);
 			}
 
 			return OLockPageWithTupleResultInserted;
