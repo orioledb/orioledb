@@ -1015,6 +1015,7 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 					make_waiter_undo_record(desc, blkno,
 											waiterInfo->pgprocno,
 											lockerState);
+					tuphdr.undoLocation = InvalidUndoLocation | lockerState->undoLocation;
 				}
 				lockerState->inserted = true;
 			}
@@ -1085,11 +1086,15 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 
 			if (desc->undoType != UndoLogNone)
 			{
+				BTreeLeafTuphdr *tuphdr;
+
 				steal_reserved_undo_size(desc->undoType,
 										 lockerState->reservedUndoSize);
 				make_waiter_undo_record(desc, blkno,
 										tupleWaiterInfos[i].pgprocno,
 										lockerState);
+				tuphdr = (BTreeLeafTuphdr *) tupleWaiterInfos[i].item.data;
+				tuphdr->undoLocation = InvalidUndoLocation | lockerState->undoLocation;
 			}
 		}
 	}

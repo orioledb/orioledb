@@ -2,6 +2,7 @@
 # coding: utf-8
 
 import unittest
+import uuid
 import re, os
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
@@ -900,4 +901,66 @@ class TypesTest(BaseTest):
 			        "SELECT * FROM test_json_array ORDER BY ((rec).val->>'x'), ((rec2).val.val->>'y');"
 			    ))
 
+		node.stop()
+
+	def test_partial_index_recovery(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE t (
+			  id          int  PRIMARY KEY,
+			  instance_id uuid,
+			  email       varchar(255),
+			  phone       varchar(15)
+			) USING orioledb;
+		""")
+		node.safe_psql(f"""
+			CREATE INDEX t_ix2 ON t (instance_id DESC, lower((email)::text))
+				WHERE ((phone)::text !~ '^[+]');
+		""")
+		node.safe_psql(f"""
+			ALTER TABLE t ALTER COLUMN phone TYPE text;
+		""")
+		uuids = [str(uuid.uuid4()) for _ in range(10)]
+		node.safe_psql(f"""
+			INSERT INTO t VALUES (1, '{uuids[0]}', 'a@a.a', '555-000-001');
+		""")
+		node.safe_psql(f"""
+			INSERT INTO t VALUES (2, '{uuids[0]}', 'A@a.a', '555-000-001');
+		""")
+		for i in range(3, 5):
+			node.safe_psql(f"""
+				INSERT INTO t VALUES ({i}, '{uuids[1 + i - 3]}', 'C{10-i}@a.a', '555-000-001');
+			""")
+		for i in range(5, 10):
+			node.safe_psql(f"""
+				INSERT INTO t VALUES ({i}, '{uuids[3 + i - 5]}', 'C{10-i}@a.a', '555-000-001');
+			""")
+		expected = [(1, uuids[0], 'a@a.a', '555-000-001'),
+		            (2, uuids[0], 'A@a.a', '555-000-001'),
+		            (3, uuids[1], 'C7@a.a', '555-000-001'),
+		            (4, uuids[2], 'C6@a.a', '555-000-001'),
+		            (5, uuids[3], 'C5@a.a', '555-000-001'),
+		            (6, uuids[4], 'C4@a.a', '555-000-001'),
+		            (7, uuids[5], 'C3@a.a', '555-000-001'),
+		            (8, uuids[6], 'C2@a.a', '555-000-001'),
+		            (9, uuids[7], 'C1@a.a', '555-000-001')]
+		expected = sorted(expected, key=lambda row: row[1], reverse=True)
+		self.assertEqual(
+		    node.execute("""
+			SET enable_seqscan = off;
+			SET enable_bitmapscan = off;
+			SELECT * FROM t WHERE ((phone)::text !~ '^[+]') ORDER BY instance_id DESC, lower((email)::text);
+		"""), expected)
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(
+		    node.execute("""
+			SET enable_seqscan = off;
+			SET enable_bitmapscan = off;
+			SELECT * FROM t WHERE ((phone)::text !~ '^[+]') ORDER BY instance_id DESC, lower((email)::text);
+		"""), expected)
 		node.stop()

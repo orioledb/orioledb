@@ -14,14 +14,13 @@ from .base_test import BaseTest, ThreadQueryExecutor, wait_checkpointer_stopeven
 
 class AmcheckTest(BaseTest):
 
-	def test_verify_heapam_clean(self):
-		"""verify_heapam returns no rows on a healthy orioledb relation"""
+	def test_verify_orioledb(self):
+		"""verify_orioledb returns no rows on a healthy relation"""
 		node = self.node
 		node.start()
 		node.safe_psql(
 		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
-			CREATE EXTENSION IF NOT EXISTS amcheck;
 			CREATE TABLE o_t (
 				k int PRIMARY KEY,
 				v text NOT NULL
@@ -32,16 +31,31 @@ class AmcheckTest(BaseTest):
 		""")
 
 		rows = node.execute('postgres',
-		                    "SELECT * FROM verify_heapam('o_t'::regclass);")
+		                    "SELECT * FROM verify_orioledb('o_t'::regclass);")
 		self.assertEqual(rows, [])
 
-		# Deep check (force_file_check via the check_toast arg) also clean.
+		# Thorough variant (force_file_check) also clean.
 		rows = node.execute(
-		    'postgres', "SELECT * FROM verify_heapam('o_t'::regclass, "
-		    "                            check_toast := true);")
+		    'postgres',
+		    "SELECT * FROM verify_orioledb('o_t'::regclass, true);")
 		self.assertEqual(rows, [])
 
-	def test_pg_amcheck_clean(self):
+	def test_verify_heapam_rejects_orioledb(self):
+		"""verify_heapam() must error on non-heap relations"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE EXTENSION IF NOT EXISTS amcheck;
+			CREATE TABLE o_t (k int PRIMARY KEY) USING orioledb;
+		""")
+		with self.assertRaises(Exception) as cm:
+			node.execute('postgres',
+			             "SELECT * FROM verify_heapam('o_t'::regclass);")
+		self.assertIn("only heap AM is supported", str(cm.exception))
+
+	def test_pg_amcheck(self):
 		"""pg_amcheck on a healthy orioledb table exits 0 with no output"""
 		node = self.node
 		node.start()
@@ -110,12 +124,12 @@ class AmcheckTest(BaseTest):
 		    f"stderr={res.stderr!r}")
 		self.assertEqual(res.stdout, '')
 
-	def test_verify_heapam_reports_corruption(self):
+	def test_verify_orioledb_corruption(self):
 		"""
 		Corrupting the on-disk CheckpointFileHeader.datafileLength of an
 		index's .map file makes check_btree see a mismatch between the
 		in-memory busy/free extent counts and the loaded data_file_len.
-		The callback then emits one row per failed index.
+		The function then emits one row per failed index.
 		"""
 		import struct
 
@@ -124,7 +138,6 @@ class AmcheckTest(BaseTest):
 		node.safe_psql(
 		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
-			CREATE EXTENSION IF NOT EXISTS amcheck;
 			CREATE TABLE o_corrupt (
 				k int PRIMARY KEY,
 				v text NOT NULL
@@ -158,18 +171,18 @@ class AmcheckTest(BaseTest):
 		node.start()
 		rows = node.execute(
 		    'postgres',
-		    "SELECT msg FROM verify_heapam('o_corrupt'::regclass);")
+		    "SELECT * FROM verify_orioledb('o_corrupt'::regclass);")
 		self.assertTrue(
-		    rows,
-		    "verify_heapam should have reported at least one corrupt index")
-		self.assertTrue(any('check failed' in r[0] for r in rows),
-		                f"unexpected verify_heapam output: {rows!r}")
+		    rows, "verify_orioledb should have reported at least one "
+		    "corrupt index")
+		self.assertTrue(any('check failed' in r[1] for r in rows),
+		                f"unexpected verify_orioledb output: {rows!r}")
 
-	def test_verify_heapam_during_checkpoint(self):
+	def test_verify_orioledb_during_checkpoint(self):
 		"""
 		With the checkpointer parked inside our pkey tree via a stopevent,
-		verify_heapam must block on the gate (rather than spuriously emit
-		"Tree is under checkpoint now") and only complete after the
+		verify_orioledb must block on the gate (rather than spuriously
+		emit "Tree is under checkpoint now") and only complete after the
 		checkpoint releases the boundary.
 		"""
 		node = self.node
@@ -179,7 +192,6 @@ class AmcheckTest(BaseTest):
 		node.safe_psql(
 		    'postgres', """
 			CREATE EXTENSION IF NOT EXISTS orioledb;
-			CREATE EXTENSION IF NOT EXISTS amcheck;
 			CREATE TABLE o_chkp (
 				k int PRIMARY KEY,
 				v int NOT NULL
@@ -208,17 +220,17 @@ class AmcheckTest(BaseTest):
 		verify_proc = subprocess.Popen([
 		    'psql', '-p',
 		    str(node.port), '-h', node.host, '-d', 'postgres', '-At', '-c',
-		    "SELECT msg FROM verify_heapam('o_chkp'::regclass);"
+		    "SELECT * FROM verify_orioledb('o_chkp'::regclass);"
 		],
 		                               stdout=subprocess.PIPE,
 		                               stderr=subprocess.PIPE,
 		                               text=True)
 
-		# verify_heapam must block on the gate while the stopevent holds.
+		# Must block on the gate while the stopevent holds.
 		time.sleep(0.5)
 		self.assertIsNone(
 		    verify_proc.poll(),
-		    "verify_heapam returned before the checkpoint released")
+		    "verify_orioledb returned before checkpoint released")
 
 		con_set.execute("SELECT pg_stopevent_reset('checkpoint_step');")
 		t_chkp.join()
@@ -226,7 +238,7 @@ class AmcheckTest(BaseTest):
 
 		self.assertNotIn(
 		    "Tree is under checkpoint now", stderr,
-		    f"verify_heapam emitted the spurious gate notice: {stderr!r}")
+		    f"verify_orioledb emitted spurious gate notice: {stderr!r}")
 
 		con_chkp.close()
 		con_set.close()

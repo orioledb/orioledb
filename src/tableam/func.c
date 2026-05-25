@@ -23,6 +23,7 @@
 #include "btree/page_chunks.h"
 #include "btree/page_contents.h"
 #include "catalog/indices.h"
+#include "catalog/o_tables.h"
 #include "tableam/descr.h"
 #include "tableam/handler.h"
 #include "tableam/toast.h"
@@ -50,6 +51,7 @@ PG_FUNCTION_INFO_V1(orioledb_tbl_structure);
 PG_FUNCTION_INFO_V1(orioledb_idx_structure);
 PG_FUNCTION_INFO_V1(orioledb_tbl_bin_structure);
 PG_FUNCTION_INFO_V1(orioledb_tbl_check);
+PG_FUNCTION_INFO_V1(verify_orioledb);
 PG_FUNCTION_INFO_V1(orioledb_compression_max_level);
 PG_FUNCTION_INFO_V1(orioledb_tbl_compression_check);
 PG_FUNCTION_INFO_V1(orioledb_tbl_indices);
@@ -1274,7 +1276,7 @@ orioledb_tbl_check(PG_FUNCTION_ARGS)
 	for (i = 0; i < descr->nIndices; i++)
 	{
 		o_btree_load_shmem(&descr->indices[i]->desc);
-		result = check_btree(&descr->indices[i]->desc, force_map_check, false);
+		result = check_btree(&descr->indices[i]->desc, force_map_check);
 
 		if (result == false)
 			break;
@@ -1282,6 +1284,61 @@ orioledb_tbl_check(PG_FUNCTION_ARGS)
 	relation_close(rel, AccessExclusiveLock);
 
 	PG_RETURN_BOOL(result);
+}
+
+/*
+ * amcheck entry point: verify all b-trees of the orioledb relation and emit
+ * one row per failed index as (index_name, msg).  `thorough_check` forces
+ * the on-disk map check inside check_btree.  Per-index checkpoint lock
+ * blocks the checkpointer on this tree so check_btree isn't racing it.
+ */
+Datum
+verify_orioledb(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	bool		thorough_check = PG_GETARG_BOOL(1);
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	Relation	rel;
+	OTableDescr *descr;
+	int			i;
+
+	InitMaterializedSRF(fcinfo, 0);
+
+	orioledb_check_shmem();
+
+	rel = relation_open(relid, AccessShareLock);
+	descr = relation_get_descr(rel);
+	if (!descr)
+		ereport(ERROR,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("relation \"%s\" is not orioledb",
+						RelationGetRelationName(rel))));
+
+	for (i = 0; i < descr->nIndices; i++)
+	{
+		OIndexDescr *idx = descr->indices[i];
+		bool		success;
+
+		o_btree_load_shmem(&idx->desc);
+
+		o_tables_rel_lock_extended(&idx->oids, AccessExclusiveLock, true);
+		success = check_btree(&idx->desc, thorough_check);
+		o_tables_rel_unlock_extended(&idx->oids, AccessExclusiveLock, true);
+
+		if (!success)
+		{
+			Datum		values[2];
+			bool		nulls[2] = {false, false};
+
+			values[0] = CStringGetTextDatum(NameStr(idx->name));
+			values[1] = CStringGetTextDatum("check failed");
+			tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc,
+								 values, nulls);
+		}
+	}
+
+	relation_close(rel, AccessShareLock);
+	return (Datum) 0;
 }
 
 Datum
