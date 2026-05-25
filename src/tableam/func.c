@@ -23,6 +23,7 @@
 #include "btree/page_chunks.h"
 #include "btree/page_contents.h"
 #include "catalog/indices.h"
+#include "catalog/o_tables.h"
 #include "tableam/descr.h"
 #include "tableam/handler.h"
 #include "tableam/toast.h"
@@ -1275,7 +1276,7 @@ orioledb_tbl_check(PG_FUNCTION_ARGS)
 	for (i = 0; i < descr->nIndices; i++)
 	{
 		o_btree_load_shmem(&descr->indices[i]->desc);
-		result = check_btree(&descr->indices[i]->desc, force_map_check, false);
+		result = check_btree(&descr->indices[i]->desc, force_map_check);
 
 		if (result == false)
 			break;
@@ -1288,9 +1289,8 @@ orioledb_tbl_check(PG_FUNCTION_ARGS)
 /*
  * amcheck entry point: verify all b-trees of the orioledb relation and emit
  * one row per failed index as (index_name, msg).  `thorough_check` forces
- * the on-disk map check inside check_btree.  Wait-for-checkpoint mode is
- * always used so amcheck doesn't spuriously fail on a tree sitting on a
- * checkpoint boundary.
+ * the on-disk map check inside check_btree.  Per-index checkpoint lock
+ * blocks the checkpointer on this tree so check_btree isn't racing it.
  */
 Datum
 verify_orioledb(PG_FUNCTION_ARGS)
@@ -1317,9 +1317,15 @@ verify_orioledb(PG_FUNCTION_ARGS)
 	for (i = 0; i < descr->nIndices; i++)
 	{
 		OIndexDescr *idx = descr->indices[i];
+		bool		success;
 
 		o_btree_load_shmem(&idx->desc);
-		if (!check_btree(&idx->desc, thorough_check, true))
+
+		o_tables_rel_lock_extended(&idx->oids, AccessExclusiveLock, true);
+		success = check_btree(&idx->desc, thorough_check);
+		o_tables_rel_unlock_extended(&idx->oids, AccessExclusiveLock, true);
+
+		if (!success)
 		{
 			Datum		values[2];
 			bool		nulls[2] = {false, false};

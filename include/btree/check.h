@@ -34,8 +34,7 @@ typedef struct
 	BTreeCompressRange *ranges;
 } BTreeCompressStats;
 
-extern bool check_btree(BTreeDescr *desc, bool force_file_check,
-						bool wait_for_checkpoint);
+extern bool check_btree(BTreeDescr *desc, bool force_file_check);
 extern void check_btree_compression(BTreeDescr *desc,
 									BTreeCompressStats *stats,
 									OCompress lvl);
