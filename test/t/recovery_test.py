@@ -3091,12 +3091,17 @@ recovery_target_action = 'pause'
 			finally:
 				con.close()
 
-			replica.append_conf(f"recovery_target_time = '{recovery_time}'")
+			replica.append_conf(f"""
+recovery_target_time = '{recovery_time}'
+recovery_target_action = 'pause'
+""")
 
 			node.safe_psql(
 			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
 
 			replica.start()
+			replica.poll_query_until(
+			    "SELECT pg_is_wal_replay_paused()", expected=True)
 
 			self._assert_visible_series(replica, 1000, 1000)
 
