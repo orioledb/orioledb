@@ -1409,12 +1409,17 @@ current_oxid_precommit(void)
 	if (!OXidIsValid(curOxid))
 		return;
 
+	elog(LOG, "set_oxid_csn called from current_oxid_precommit pid=%d oxid=%lu\n",
+		MyProcPid, (unsigned long) curOxid);
 	set_oxid_csn(curOxid, COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
 												   GET_CUR_PROCDATA()->autonomousNestingLevel,
 												   COMMITSEQNO_STATUS_CSN_COMMITTING));
 	csn_committing_set = true;
 
 	pg_write_barrier();
+
+	elog(LOG, "set_oxid_csn finished from current_oxid_precommit pid=%d oxid=%lu\n",
+		MyProcPid, (unsigned long) curOxid);
 }
 
 void
@@ -1495,10 +1500,13 @@ current_oxid_commit(CommitSeqNo csn)
 
 	if (!OXidIsValid(curOxid))
 		return;
-
+	elog(LOG, "set_oxid_csn called from current_oxid_commit pid=%d oxid=%lu\n",
+		MyProcPid, (unsigned long) curOxid);
 	set_oxid_csn(curOxid,
 				 csn | (enable_rewind ? COMMITSEQNO_RETAINED_FOR_REWIND : 0));
 	pg_write_barrier();
+	elog(LOG, "set_oxid_csn finished from current_oxid_commit pid=%d oxid=%lu\n",
+		MyProcPid, (unsigned long) curOxid);
 	csn_committing_set = false;
 	xlog_ptr_committing_set = false;
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
