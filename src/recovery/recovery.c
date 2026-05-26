@@ -2027,7 +2027,12 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 
 		WakeupRecovery();
 		pg_usleep(200);
-		CHECK_FOR_INTERRUPTS();
+		/*
+		 * This loop runs inside PostgreSQL's startup process, so shutdown
+		 * requests are delivered through startup.c's shutdown_requested flag
+		 * rather than normal backend interrupt processing.
+		 */
+		HandleStartupProcInterrupts();
 	}
 }
 
