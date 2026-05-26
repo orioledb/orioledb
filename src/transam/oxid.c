@@ -1591,19 +1591,27 @@ current_oxid_clear_committing(void)
 
 	if (csn_committing_set)
 	{
+		elog(LOG, "set_oxid_csn called from current_oxid_clear_committing pid=%d oxid=%lu\n",
+			MyProcPid, (unsigned long) curOxid);
 		set_oxid_csn(curOxid,
 					 COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
 											  nestingLevel,
 											  COMMITSEQNO_STATUS_IN_PROGRESS));
+		elog(LOG, "set_oxid_csn finished from current_oxid_clear_committing pid=%d oxid=%lu\n",
+			MyProcPid, (unsigned long) curOxid);
 		csn_committing_set = false;
 	}
 
 	if (xlog_ptr_committing_set)
 	{
+		elog(LOG, "set_oxid_xlog_ptr_internal called from current_oxid_clear_committing pid=%d oxid=%lu\n",
+			MyProcPid, (unsigned long) curOxid);
 		set_oxid_xlog_ptr_internal(curOxid,
 								   XLOG_PTR_MAKE_SPECIAL(MYPROCNUMBER,
 														 nestingLevel,
 														 XLOG_PTR_IN_PROGRESS));
+		elog(LOG, "set_oxid_xlog_ptr_internal finished from current_oxid_clear_committing pid=%d oxid=%lu\n",
+			MyProcPid, (unsigned long) curOxid);
 		xlog_ptr_committing_set = false;
 	}
 
