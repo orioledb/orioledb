@@ -2252,6 +2252,29 @@ undo_xact_callback(XactEvent event, void *arg)
 				elog(DEBUG4, "XACT_EVENT_COMMIT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
 					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
+#ifdef USE_INJECTION_POINTS
+				/*
+				 * Diagnostic fault site for Bug #2 isolation.  This fires
+				 * BEFORE any of the o-o commit-pipeline machinery runs:
+				 *   - assign_xidless_commit_lsn / wal_commit / XLogFlush
+				 *   - set_oxid_xlog_ptr (publishes commitPtr / sets xlog_ptr_committing_set)
+				 *   - current_oxid_precommit / current_oxid_commit
+				 * If silent replica divergence still appears when this
+				 * injection fires alone, the bug is upstream of the
+				 * commit-pipeline (e.g. precommit_undo_stack from
+				 * XACT_EVENT_PRE_COMMIT, or modify-record replay timing).
+				 * If divergence does NOT appear, the bug requires at least
+				 * one of the commit-pipeline steps to have run.
+				 */
+				elog(LOG,
+					 "pre-commit-machinery-trace pre-inject pid=%d oxid=%lu",
+					 MyProcPid, (unsigned long) oxid);
+				INJECTION_POINT("orioledb-before-o-o-commit-machinery");
+				elog(LOG,
+					 "pre-commit-machinery-trace post-inject (no error fired) pid=%d oxid=%lu",
+					 MyProcPid, (unsigned long) oxid);
+#endif
+
 				if (!TransactionIdIsValid(heapXid))
 				{
 					bool		wrote_xlog;
