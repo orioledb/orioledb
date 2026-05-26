@@ -3078,9 +3078,18 @@ recovery_target_action = 'pause'
 		""")
 
 		with self.getReplica(has_restoring=True) as replica:
-			node.safe_psql(
-			    "INSERT INTO tab_int VALUES (generate_series(1,1000))")
-			recovery_time = node.execute("SELECT clock_timestamp()")[0][0]
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			con = node.connect()
+			try:
+				con.execute(
+				    "INSERT INTO tab_int VALUES (generate_series(1,1000))")
+				con.commit()
+				con.execute("SELECT pg_sleep(0.1)")
+				recovery_time = con.execute("SELECT clock_timestamp()")[0][0]
+				con.execute("SELECT pg_sleep(0.1)")
+			finally:
+				con.close()
 
 			replica.append_conf(f"recovery_target_time = '{recovery_time}'")
 
