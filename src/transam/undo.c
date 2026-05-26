@@ -218,39 +218,38 @@ assign_xidless_commit_lsn(OXid oxid, bool *wrote_xlog)
 	if (XLogRecPtrIsInvalid(xidless_commit_lsn))
 	{
 		current_oxid_xlog_precommit();
-		xidless_commit_lsn = wal_commit(oxid, get_current_logical_xid(), false);
 
 #ifdef USE_INJECTION_POINTS
 		/*
-		 * Bug #2 bisect step 1: fires AFTER wal_commit returns (so
-		 * WAL_REC_COMMIT is appended into local buffer and the container
-		 * is framed via flush_local_wal into PG's shared XLog buffer)
-		 * but BEFORE set_oxid_xlog_ptr publishes the real commit LSN to
-		 * xidBuffer.commitPtr.
+		 * Bug #2 bisect step 2: fires AFTER current_oxid_xlog_precommit
+		 * returns (so xidBuffer.commitPtr carries the COMMITTING-sentinel
+		 * and xlog_ptr_committing_set=true) but BEFORE wal_commit emits
+		 * WAL_REC_COMMIT.
 		 *
 		 * State at this point:
-		 *   - current_oxid_xlog_precommit() ran (xidBuffer.commitPtr =
-		 *     COMMITTING-sentinel; xlog_ptr_committing_set=true).
-		 *   - wal_commit returned: WAL_REC_COMMIT is in shared XLog
-		 *     buffer (walsender may already have shipped it).
-		 *   - set_oxid_xlog_ptr has NOT yet overwritten the sentinel
-		 *     with the real LSN.
+		 *   - current_oxid_xlog_precommit ran: xidBuffer.commitPtr =
+		 *     COMMITTING-sentinel; xlog_ptr_committing_set=true.
+		 *   - wal_commit has NOT yet run: no WAL_REC_COMMIT in any buffer.
+		 *   - set_oxid_xlog_ptr has NOT yet run.
 		 *
-		 * Bisect plan:
-		 *   - if this fires Bug #2: move it UP one line (before wal_commit)
-		 *   - if this does NOT fire Bug #2: move it DOWN one line (after
-		 *     set_oxid_xlog_ptr)
+		 * Step 1 (after wal_commit, before set_oxid_xlog_ptr) hit ~13%
+		 * BUG rate. Moving UP isolates whether current_oxid_xlog_precommit
+		 * alone is enough to trigger Bug #2:
+		 *   - if fires here: xlog_precommit's COMMITTING sentinel publication
+		 *     is enough; bug is in pre-commit-time visibility race.
+		 *   - if NOT fires here: wal_commit's emission of WAL_REC_COMMIT
+		 *     into shared XLog buffer is the trigger.
 		 */
 		elog(LOG,
-			 "post-wal-commit-trace pre-inject pid=%d oxid=%lu lsn=%X/%X",
-			 MyProcPid, (unsigned long) oxid,
-			 LSN_FORMAT_ARGS(xidless_commit_lsn));
-		INJECTION_POINT("orioledb-after-wal-commit");
+			 "post-xlog-precommit-trace pre-inject pid=%d oxid=%lu",
+			 MyProcPid, (unsigned long) oxid);
+		INJECTION_POINT("orioledb-after-xlog-precommit");
 		elog(LOG,
-			 "post-wal-commit-trace post-inject (no error fired) pid=%d oxid=%lu",
+			 "post-xlog-precommit-trace post-inject (no error fired) pid=%d oxid=%lu",
 			 MyProcPid, (unsigned long) oxid);
 #endif
 
+		xidless_commit_lsn = wal_commit(oxid, get_current_logical_xid(), false);
 		set_oxid_xlog_ptr(oxid, xidless_commit_lsn);
 		*wrote_xlog = true;
 	}
