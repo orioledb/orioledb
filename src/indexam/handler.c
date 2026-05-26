@@ -109,12 +109,12 @@ static bool bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 							 IndexInfo *indexInfo);
 static IndexScanDesc bridged_ambeginscan(Relation rel, int nkeys, int norderbys);
 
-typedef struct BrigedIndexAmRoutine
+typedef struct BridgedIndexAmRoutine
 {
 	IndexAmRoutine *original_routine;
 	IndexAmRoutine routine;
 	Oid			amhandler;
-} BrigedIndexAmRoutine;
+} BridgedIndexAmRoutine;
 
 List	   *bridged_ams = NIL;
 
@@ -203,7 +203,7 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 
 			foreach(lc, bridged_ams)
 			{
-				BrigedIndexAmRoutine *bridged = lfirst(lc);
+				BridgedIndexAmRoutine *bridged = lfirst(lc);
 
 				if (bridged->amhandler == amhandler)
 				{
@@ -215,12 +215,12 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 
 			if (amroutine == NULL)
 			{
-				BrigedIndexAmRoutine *bridged;
+				BridgedIndexAmRoutine *bridged;
 				MemoryContext old_mcxt;
 				Datum		datum;
 
 				old_mcxt = MemoryContextSwitchTo(TopMemoryContext);
-				bridged = palloc0(sizeof(BrigedIndexAmRoutine));
+				bridged = palloc0(sizeof(BridgedIndexAmRoutine));
 				datum = OidFunctionCall0(amhandler);
 				bridged_ams = lappend(bridged_ams, bridged);
 				bridged->amhandler = amhandler;
@@ -1980,7 +1980,7 @@ find_bridged_am(Relation index)
 
 	foreach(lc, bridged_ams)
 	{
-		BrigedIndexAmRoutine *bridged = lfirst(lc);
+		BridgedIndexAmRoutine *bridged = lfirst(lc);
 
 		if (bridged->amhandler == index->rd_amhandler)
 		{
