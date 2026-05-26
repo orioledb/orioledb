@@ -110,21 +110,49 @@ See [our dockerhub](https://hub.docker.com/r/orioledb/orioledb) for details on o
 
 Before building and installing OrioleDB, one should ensure to have the following:
 
- * [PostgreSQL with extensibility patches](https://github.com/orioledb/postgres): [16 (tag: patches16_34)](https://github.com/orioledb/postgres/tree/patches16_34) or [17 (tag: patches17_6)](https://github.com/orioledb/postgres/tree/patches17_6);
+ * [PostgreSQL with extensibility patches](https://github.com/orioledb/postgres) checked out at the exact commit/tag listed for your major version in [`.pgtags`](.pgtags) (`16: …` and `17: …`).  The build verifies this and refuses to compile against any other patchset.
  * Development package of libzstd;
  * python 3.5+ with testgres package.
 
 Typical installation procedure may look like this:
 
 ```bash
+ # 1. Clone this repo first -- .pgtags pins the exact patched-PostgreSQL
+ # commit you must build against.
  $ git clone https://github.com/orioledb/orioledb
  $ cd orioledb
- # Make sure that postgres bin directory is in PATH before running
- $ make USE_PGXS=1
- # IS_DEV=1 needed for tests to success
- $ make USE_PGXS=1 install IS_DEV=1
- $ make USE_PGXS=1 installcheck
+ $ cat .pgtags
+ 17: 7050019fd74d0d841040edc49ee1e16364a8b589
+ 16: e5ef9e6a6d21f8e69e1d4bddcd4cdb83f054ca0b
+
+ # 2. Build patched PostgreSQL at the commit listed for your major
+ # version (substitute the value from .pgtags, do not copy-paste this
+ # one -- it moves).
+ $ cd ..
+ $ git clone https://github.com/orioledb/postgres orioledb-postgres
+ $ cd orioledb-postgres
+ $ git checkout $(awk -F': ' '/^17: /{print $2}' ../orioledb/.pgtags)
+ $ ./configure --prefix=/path/to/pg --enable-debug --enable-cassert --with-icu
+ $ make -j install
+ $ make -C contrib -j install
+ $ export PATH=/path/to/pg/bin:$PATH
+
+ # 3. Build the extension.
+ $ cd ../orioledb
+ # IS_DEV=1 is required for `make installcheck` to actually run the tests
+ $ make USE_PGXS=1 IS_DEV=1
+ $ make USE_PGXS=1 IS_DEV=1 install
+ $ make USE_PGXS=1 IS_DEV=1 installcheck
 ```
+
+If the configured PostgreSQL is at the wrong commit, the build prints
+
+```
+Wrong orioledb patchset version: expected <hash>, got <hash>
+Rebuild and install patched orioledb/postgres using commit '<hash>'
+```
+
+— in that case re-check out `orioledb-postgres` at the commit from `.pgtags` and rebuild it.
 
 Before starting working with OrioleDB, adding the following line to
 `postgresql.conf` is required.  This change requires a restart of

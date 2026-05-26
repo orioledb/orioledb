@@ -23,12 +23,17 @@ git clone https://github.com/orioledb/postgres.git --branch patches17 --single-b
 cd postgres-patches17/
 ```
 
-### Checkout to required patch tag:
+### Checkout to required patchset
 
-Check required postgres patch version in [.pgtags](https://github.com/orioledb/orioledb/blob/main/.pgtags) or [README.md](https://github.com/orioledb/orioledb?tab=readme-ov-file#build-from-source) files. Because documentation can become outdated.
+Always read [`.pgtags`](https://github.com/orioledb/orioledb/blob/main/.pgtags) for the commit (or `patches17_N` tag) you must check out — pinning a specific value here would go stale.  The build verifies this and refuses to compile against any other patchset.
 
 ```bash
-git checkout patches17_6
+# Pull the value for line "17:" out of orioledb/.pgtags.  It is either
+# a commit SHA or a tag name like patches17_14.
+PATCHSET=$(curl -fsSL https://raw.githubusercontent.com/orioledb/orioledb/main/.pgtags | awk -F': ' '/^17: /{print $2}')
+# Make sure tags are fetched too, in case .pgtags points to a tag.
+git fetch --tags origin
+git checkout "$PATCHSET"
 ```
 
 ### Enable Valgrind support in PostgreSQL code (optional)
@@ -144,12 +149,17 @@ git clone https://github.com/orioledb/postgres.git --branch patches17 --single-b
 cd postgres-patches17/
 ```
 
-### Checkout to required patch tag:
+### Checkout to required patchset
 
-Check required postgres patch version in [.pgtags](https://github.com/orioledb/orioledb/blob/main/.pgtags) or [README.md](https://github.com/orioledb/orioledb?tab=readme-ov-file#build-from-source) files. Because documentation can become outdated.
+Always read [`.pgtags`](https://github.com/orioledb/orioledb/blob/main/.pgtags) for the commit (or `patches17_N` tag) you must check out — pinning a specific value here would go stale.  The build verifies this and refuses to compile against any other patchset.
 
 ```bash
-git checkout patches17_6
+# Pull the value for line "17:" out of orioledb/.pgtags.  It is either
+# a commit SHA or a tag name like patches17_14.
+PATCHSET=$(curl -fsSL https://raw.githubusercontent.com/orioledb/orioledb/main/.pgtags | awk -F': ' '/^17: /{print $2}')
+# Make sure tags are fetched too, in case .pgtags points to a tag.
+git fetch --tags origin
+git checkout "$PATCHSET"
 ```
 
 ### Configure and build
@@ -251,12 +261,17 @@ git clone https://github.com/orioledb/postgres.git --branch patches17 --single-b
 cd postgres-patches17/
 ```
 
-### Checkout to required patch tag:
+### Checkout to required patchset
 
-Check required postgres patch version in [.pgtags](https://github.com/orioledb/orioledb/blob/main/.pgtags) or [README.md](https://github.com/orioledb/orioledb?tab=readme-ov-file#build-from-source) files. Because documentation can become outdated.
+Always read [`.pgtags`](https://github.com/orioledb/orioledb/blob/main/.pgtags) for the commit (or `patches17_N` tag) you must check out — pinning a specific value here would go stale.  The build verifies this and refuses to compile against any other patchset.
 
 ```bash
-git checkout patches17_6
+# Pull the value for line "17:" out of orioledb/.pgtags.  It is either
+# a commit SHA or a tag name like patches17_14.
+PATCHSET=$(curl -fsSL https://raw.githubusercontent.com/orioledb/orioledb/main/.pgtags | awk -F': ' '/^17: /{print $2}')
+# Make sure tags are fetched too, in case .pgtags points to a tag.
+git fetch --tags origin
+git checkout "$PATCHSET"
 ```
 
 ### Enable Valgrind support in PostgreSQL code (optional)
