@@ -602,7 +602,7 @@ class RrStressTest(BaseTest):
 			'orioledb-add-finish-wal-guarded',
 			'orioledb-wal-flush-guarded',
 			'orioledb-csn-incremented',
-			'orioledb-after-finish-wal-rec',
+			'orioledb-after-flush-local-wal',
 			'orioledb-pk-mutated-pre-wal',
 			'orioledb-update-pk-done-pre-sk',
 			'orioledb-sk-mid-update',

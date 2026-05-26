@@ -346,34 +346,50 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 #endif
 
 	add_finish_wal_record(WAL_REC_COMMIT, pg_atomic_read_u64(&xid_meta->runXmin));
+	walPos = flush_local_wal(true, !isAutonomous);
 
 #ifdef USE_INJECTION_POINTS
 	/*
-	 * Bug #2 bisect inside wal_commit.  Fires after add_finish_wal_record
-	 * appended WAL_REC_COMMIT bytes into the local in-process buffer, but
-	 * BEFORE flush_local_wal frames the container and submits it to PG's
-	 * shared XLog buffer.  At this point:
-	 *   - WAL_REC_XID was added earlier in this function (if not already).
-	 *   - WAL_REC_COMMIT bytes are in the primary's local buffer.
-	 *   - The container is NOT yet in shared XLog memory.
-	 *   - The walsender CANNOT see WAL_REC_COMMIT yet (only the primary's
-	 *     own memory has it).
-	 *   - xidBuffer.commitPtr still carries COMMITTING-sentinel from
-	 *     current_oxid_xlog_precommit (not yet overwritten with real LSN).
+	 * Bug #2 bisect inside wal_commit.  Fires AFTER flush_local_wal has
+	 * framed the container with WAL_REC_COMMIT and submitted it to PG's
+	 * shared XLog buffer, but BEFORE wal_commit clears
+	 * local_wal_has_material_changes and returns.
 	 *
-	 * Decision:
-	 *   - BUGs here -> trigger is the local-buffer population (in-process,
-	 *     primary-side only).  Next bisect: split inside add_finish_wal_record.
-	 *   - 30 clean -> trigger is flush_local_wal (publishing to shared
-	 *     XLog buffer / walsender path).  Next bisect: split inside
-	 *     flush_local_wal.
+	 * State at this point:
+	 *   - WAL_REC_COMMIT is in shared XLog buffer; walsender may already
+	 *     have shipped it to the replica.
+	 *   - The local process buffer has been drained by flush_local_wal,
+	 *     so a subsequent wal_rollback in the abort path will start a
+	 *     FRESH container with its own WAL_REC_XID for the ROLLBACK.
+	 *   - local_wal_has_material_changes is still true (not yet cleared
+	 *     on line below).
+	 *   - set_oxid_xlog_ptr (outside wal_commit, in
+	 *     assign_xidless_commit_lsn) has NOT yet been called.
+	 *
+	 * If this fires Bug #2 silent divergence: the act of flushing the
+	 * COMMIT container into shared XLog buffer (where walsender can grab
+	 * it) is sufficient to trigger the bug.  This confirms the
+	 * "flush_local_wal is the watershed" hypothesis.
+	 *
+	 * Bisect interpretation:
+	 *   - BUGs here -> flush_local_wal is the trigger (publish to shared
+	 *     XLog buffer + walsender shipping).  Narrows the cause to the
+	 *     "COMMIT seen by replica, then ROLLBACK in separate container"
+	 *     pattern.
+	 *   - 30 clean -> trigger is somewhere between this site and the next
+	 *     downstream injection point (orioledb-after-wal-commit at the
+	 *     undo.c call site), which is essentially nothing -- there's no
+	 *     code between this line and wal_commit's return.  That would be
+	 *     surprising and would warrant investigation of what changes
+	 *     between this site and orioledb-after-wal-commit.
 	 */
 	elog(LOG,
-		 "post-finish-rec-trace pre-inject pid=%d oxid=%lu",
-		 MyProcPid, (unsigned long) oxid);
-	INJECTION_POINT("orioledb-after-finish-wal-rec");
+		 "post-flush-local-wal-trace pre-inject pid=%d oxid=%lu walPos=%X/%X",
+		 MyProcPid, (unsigned long) oxid,
+		 LSN_FORMAT_ARGS(walPos));
+	INJECTION_POINT("orioledb-after-flush-local-wal");
 	elog(LOG,
-		 "post-finish-rec-trace post-inject (no error fired) pid=%d oxid=%lu",
+		 "post-flush-local-wal-trace post-inject (no error fired) pid=%d oxid=%lu",
 		 MyProcPid, (unsigned long) oxid);
 #endif
 
