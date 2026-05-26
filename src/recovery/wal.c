@@ -346,6 +346,37 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 #endif
 
 	add_finish_wal_record(WAL_REC_COMMIT, pg_atomic_read_u64(&xid_meta->runXmin));
+
+#ifdef USE_INJECTION_POINTS
+	/*
+	 * Bug #2 bisect inside wal_commit.  Fires after add_finish_wal_record
+	 * appended WAL_REC_COMMIT bytes into the local in-process buffer, but
+	 * BEFORE flush_local_wal frames the container and submits it to PG's
+	 * shared XLog buffer.  At this point:
+	 *   - WAL_REC_XID was added earlier in this function (if not already).
+	 *   - WAL_REC_COMMIT bytes are in the primary's local buffer.
+	 *   - The container is NOT yet in shared XLog memory.
+	 *   - The walsender CANNOT see WAL_REC_COMMIT yet (only the primary's
+	 *     own memory has it).
+	 *   - xidBuffer.commitPtr still carries COMMITTING-sentinel from
+	 *     current_oxid_xlog_precommit (not yet overwritten with real LSN).
+	 *
+	 * Decision:
+	 *   - BUGs here -> trigger is the local-buffer population (in-process,
+	 *     primary-side only).  Next bisect: split inside add_finish_wal_record.
+	 *   - 30 clean -> trigger is flush_local_wal (publishing to shared
+	 *     XLog buffer / walsender path).  Next bisect: split inside
+	 *     flush_local_wal.
+	 */
+	elog(LOG,
+		 "post-finish-rec-trace pre-inject pid=%d oxid=%lu",
+		 MyProcPid, (unsigned long) oxid);
+	INJECTION_POINT("orioledb-after-finish-wal-rec");
+	elog(LOG,
+		 "post-finish-rec-trace post-inject (no error fired) pid=%d oxid=%lu",
+		 MyProcPid, (unsigned long) oxid);
+#endif
+
 	walPos = flush_local_wal(true, !isAutonomous);
 	local_wal.has_material_changes = false;
 
