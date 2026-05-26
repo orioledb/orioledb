@@ -876,44 +876,12 @@ flush_local_wal(bool isCommit, bool withXactTime)
 	location = log_logical_wal_container(local_wal.buffer, length, withXactTime);
 
 #ifdef USE_INJECTION_POINTS
-	/*
-	 * Bug #2/#3 bisect inside flush_local_wal.  Fires AFTER
-	 * log_logical_wal_container has submitted the WAL bytes into PG's
-	 * shared XLog buffer (so walsender may already have shipped them)
-	 * but BEFORE this function resets the local buffer state at lines
-	 * 865-870 (offset=0, contains_xid=false, type=invalid, ...).
-	 *
-	 * State at this point:
-	 *   - COMMIT container is in shared XLog buffer, walsender may
-	 *     have already shipped it.
-	 *   - local_wal_buffer_offset is STILL its pre-flush value.
-	 *   - local_wal_contains_xid is STILL true (the WAL_REC_XID was
-	 *     in the buffer that was just flushed).
-	 *   - local_wal_has_material_changes is unchanged.
-	 *
-	 * If the abort then runs wal_rollback, it will:
-	 *   - NOT short-circuit (local_wal_has_material_changes is true).
-	 *   - NOT prepend a WAL_REC_XID (local_wal_contains_xid is true
-	 *     from the pre-flush state -- but the actual buffer content
-	 *     from before flush is still physically present at offsets
-	 *     0..local_wal_buffer_offset).
-	 *   - Append a WAL_REC_ROLLBACK and call flush_local_wal again.
-	 *
-	 * Net effect on WAL stream: container A (already flushed: XID +
-	 * modifies + COMMIT) followed by container B (XID + modifies +
-	 * COMMIT + ROLLBACK -- duplicating container A's contents plus
-	 * an appended ROLLBACK).  This is a distinct fingerprint from
-	 * both Bug #1 (single malformed container) and Bug #2 (silent
-	 * divergence) and Bug #3 (replica undo PANIC).
-	 */
+#if 0  /* new trace disabled per peak-rate-old-traces-only recipe */
 	elog(LOG,
-		 "post-log-container-trace pre-inject pid=%d bytes=%d isCommit=%d lsn=%X/%X",
+		 "wal-trace flush-done pid=%d bytes=%d isCommit=%d lsn=%X/%X",
 		 MyProcPid, length, (int) isCommit,
 		 LSN_FORMAT_ARGS(location));
-	INJECTION_POINT("orioledb-post-log-container");
-	elog(LOG,
-		 "post-log-container-trace post-inject (no error fired) pid=%d lsn=%X/%X",
-		 MyProcPid, LSN_FORMAT_ARGS(location));
+#endif
 #endif
 
 	if (isCommit)
