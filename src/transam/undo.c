@@ -219,6 +219,38 @@ assign_xidless_commit_lsn(OXid oxid, bool *wrote_xlog)
 	{
 		current_oxid_xlog_precommit();
 		xidless_commit_lsn = wal_commit(oxid, get_current_logical_xid(), false);
+
+#ifdef USE_INJECTION_POINTS
+		/*
+		 * Bug #2 bisect step 1: fires AFTER wal_commit returns (so
+		 * WAL_REC_COMMIT is appended into local buffer and the container
+		 * is framed via flush_local_wal into PG's shared XLog buffer)
+		 * but BEFORE set_oxid_xlog_ptr publishes the real commit LSN to
+		 * xidBuffer.commitPtr.
+		 *
+		 * State at this point:
+		 *   - current_oxid_xlog_precommit() ran (xidBuffer.commitPtr =
+		 *     COMMITTING-sentinel; xlog_ptr_committing_set=true).
+		 *   - wal_commit returned: WAL_REC_COMMIT is in shared XLog
+		 *     buffer (walsender may already have shipped it).
+		 *   - set_oxid_xlog_ptr has NOT yet overwritten the sentinel
+		 *     with the real LSN.
+		 *
+		 * Bisect plan:
+		 *   - if this fires Bug #2: move it UP one line (before wal_commit)
+		 *   - if this does NOT fire Bug #2: move it DOWN one line (after
+		 *     set_oxid_xlog_ptr)
+		 */
+		elog(LOG,
+			 "post-wal-commit-trace pre-inject pid=%d oxid=%lu lsn=%X/%X",
+			 MyProcPid, (unsigned long) oxid,
+			 LSN_FORMAT_ARGS(xidless_commit_lsn));
+		INJECTION_POINT("orioledb-after-wal-commit");
+		elog(LOG,
+			 "post-wal-commit-trace post-inject (no error fired) pid=%d oxid=%lu",
+			 MyProcPid, (unsigned long) oxid);
+#endif
+
 		set_oxid_xlog_ptr(oxid, xidless_commit_lsn);
 		*wrote_xlog = true;
 	}
@@ -2259,36 +2291,6 @@ undo_xact_callback(XactEvent event, void *arg)
 					/* Commit o - o : independent Oriole transaction */
 
 					flushPos = assign_xidless_commit_lsn(oxid, &wrote_xlog);
-
-#ifdef USE_INJECTION_POINTS
-					/*
-					 * Diagnostic fault site for Bug #2 isolation.  Fires
-					 * AFTER assign_xidless_commit_lsn returns, which means:
-					 *   - wal_commit() has appended WAL_REC_COMMIT into the
-					 *     local buffer AND framed the container via
-					 *     flush_local_wal().
-					 *   - set_oxid_xlog_ptr(oxid, lsn) has published commitPtr
-					 *     to xidBuffer and set xlog_ptr_committing_set=true.
-					 * But:
-					 *   - XLogFlush() at line below has NOT yet run, so the
-					 *     COMMIT record is in the PG XLog buffer (shared
-					 *     memory) but not yet durably on disk.
-					 *   - current_oxid_precommit / current_oxid_commit have
-					 *     NOT yet run (xidBuffer.csn still pre-commit value).
-					 *
-					 * If silent divergence appears at this site, the bug is
-					 * triggered by the wal_commit emission and/or the commitPtr
-					 * publication -- before durability is enforced.
-					 */
-					elog(LOG,
-						 "after-assign-commit-lsn-trace pre-inject pid=%d oxid=%lu flushPos=%X/%X",
-						 MyProcPid, (unsigned long) oxid,
-						 LSN_FORMAT_ARGS(flushPos));
-					INJECTION_POINT("orioledb-after-assign-commit-lsn");
-					elog(LOG,
-						 "after-assign-commit-lsn-trace post-inject (no error fired) pid=%d oxid=%lu",
-						 MyProcPid, (unsigned long) oxid);
-#endif
 
 					elog(DEBUG4, "XACT_EVENT_COMMIT [independent Oriole transaction] oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d flushPos %X/%X",
 						 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap, LSN_FORMAT_ARGS(flushPos));
