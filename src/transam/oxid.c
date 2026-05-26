@@ -104,6 +104,8 @@ static bool xlog_ptr_committing_set = false;
 
 static LogicalXidCtx logicalXidContext = {InvalidTransactionId, false};
 
+static bool call_injection = false;
+
 static inline void
 reset_logical_xid_ctx(void)
 {
@@ -592,7 +594,12 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 											  GET_CUR_PROCDATA()->autonomousNestingLevel,
 											  COMMITSEQNO_STATUS_IN_PROGRESS)
 		&& csn != COMMITSEQNO_ABORTED)
-		INJECTION_POINT("orioledb-set-csn-guarded");
+	{
+		if (call_injection) {
+			call_injection  = false;
+			INJECTION_POINT("orioledb-set-csn-guarded");
+		}
+	}
 
 	oldCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn);
 	pg_read_barrier();
@@ -1505,6 +1512,7 @@ current_oxid_commit(CommitSeqNo csn)
 		return;
 	elog(LOG, "set_oxid_csn called from current_oxid_commit pid=%d oxid=%lu\n",
 		MyProcPid, (unsigned long) curOxid);
+	call_injection = true;
 	set_oxid_csn(curOxid,
 				 csn | (enable_rewind ? COMMITSEQNO_RETAINED_FOR_REWIND : 0));
 	pg_write_barrier();
