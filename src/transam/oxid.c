@@ -588,7 +588,10 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 	 * error-mode injection only ever fires once per tx.
 	 */
 	INJECTION_POINT("orioledb-set-csn");
-	if (csn != COMMITSEQNO_ABORTED)
+	if (csn != COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
+											  GET_CUR_PROCDATA()->autonomousNestingLevel,
+											  COMMITSEQNO_STATUS_IN_PROGRESS)
+		&& csn != COMMITSEQNO_ABORTED)
 		INJECTION_POINT("orioledb-set-csn-guarded");
 
 	oldCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn);
