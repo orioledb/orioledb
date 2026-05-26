@@ -2252,29 +2252,6 @@ undo_xact_callback(XactEvent event, void *arg)
 				elog(DEBUG4, "XACT_EVENT_COMMIT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
 					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
-#ifdef USE_INJECTION_POINTS
-				/*
-				 * Diagnostic fault site for Bug #2 isolation.  This fires
-				 * BEFORE any of the o-o commit-pipeline machinery runs:
-				 *   - assign_xidless_commit_lsn / wal_commit / XLogFlush
-				 *   - set_oxid_xlog_ptr (publishes commitPtr / sets xlog_ptr_committing_set)
-				 *   - current_oxid_precommit / current_oxid_commit
-				 * If silent replica divergence still appears when this
-				 * injection fires alone, the bug is upstream of the
-				 * commit-pipeline (e.g. precommit_undo_stack from
-				 * XACT_EVENT_PRE_COMMIT, or modify-record replay timing).
-				 * If divergence does NOT appear, the bug requires at least
-				 * one of the commit-pipeline steps to have run.
-				 */
-				elog(LOG,
-					 "pre-commit-machinery-trace pre-inject pid=%d oxid=%lu",
-					 MyProcPid, (unsigned long) oxid);
-				INJECTION_POINT("orioledb-before-o-o-commit-machinery");
-				elog(LOG,
-					 "pre-commit-machinery-trace post-inject (no error fired) pid=%d oxid=%lu",
-					 MyProcPid, (unsigned long) oxid);
-#endif
-
 				if (!TransactionIdIsValid(heapXid))
 				{
 					bool		wrote_xlog;
@@ -2282,6 +2259,36 @@ undo_xact_callback(XactEvent event, void *arg)
 					/* Commit o - o : independent Oriole transaction */
 
 					flushPos = assign_xidless_commit_lsn(oxid, &wrote_xlog);
+
+#ifdef USE_INJECTION_POINTS
+					/*
+					 * Diagnostic fault site for Bug #2 isolation.  Fires
+					 * AFTER assign_xidless_commit_lsn returns, which means:
+					 *   - wal_commit() has appended WAL_REC_COMMIT into the
+					 *     local buffer AND framed the container via
+					 *     flush_local_wal().
+					 *   - set_oxid_xlog_ptr(oxid, lsn) has published commitPtr
+					 *     to xidBuffer and set xlog_ptr_committing_set=true.
+					 * But:
+					 *   - XLogFlush() at line below has NOT yet run, so the
+					 *     COMMIT record is in the PG XLog buffer (shared
+					 *     memory) but not yet durably on disk.
+					 *   - current_oxid_precommit / current_oxid_commit have
+					 *     NOT yet run (xidBuffer.csn still pre-commit value).
+					 *
+					 * If silent divergence appears at this site, the bug is
+					 * triggered by the wal_commit emission and/or the commitPtr
+					 * publication -- before durability is enforced.
+					 */
+					elog(LOG,
+						 "after-assign-commit-lsn-trace pre-inject pid=%d oxid=%lu flushPos=%X/%X",
+						 MyProcPid, (unsigned long) oxid,
+						 LSN_FORMAT_ARGS(flushPos));
+					INJECTION_POINT("orioledb-after-assign-commit-lsn");
+					elog(LOG,
+						 "after-assign-commit-lsn-trace post-inject (no error fired) pid=%d oxid=%lu",
+						 MyProcPid, (unsigned long) oxid);
+#endif
 
 					elog(DEBUG4, "XACT_EVENT_COMMIT [independent Oriole transaction] oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d flushPos %X/%X",
 						 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap, LSN_FORMAT_ARGS(flushPos));
