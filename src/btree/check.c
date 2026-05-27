@@ -537,6 +537,7 @@ check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 	OBTreeFindPageContext *context = &status->context;
 	FileExtent	extent;
 	uint64		rightLink;
+	OInMemoryBlkno brokenRightBlkno = OInvalidInMemoryBlkno;
 
 	Assert(OInMemoryBlknoIsValid(blkno));
 
@@ -551,12 +552,25 @@ check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 	rightLink = header->rightLink;
 	if (RightLinkIsValid(rightLink))
 	{
-		Page		rightP = O_GET_IN_MEMORY_PAGE(RIGHTLINK_GET_BLKNO(rightLink));
+		OInMemoryBlkno rightBlkno = RIGHTLINK_GET_BLKNO(rightLink);
+		Page		rightP = O_GET_IN_MEMORY_PAGE(rightBlkno);
 
 		if (O_PAGE_IS(rightP, BROKEN_SPLIT))
 		{
-			elog(NOTICE, "BTree has a broken split.");
-			status->hasError = true;
+			/*
+			 * Right page is the freshly-allocated half of an in-progress
+			 * split whose parent downlink hasn't been installed yet.  It is
+			 * reachable from the tree only through this rightlink.  If we
+			 * skipped it here, its extent (and any subtree it carries, for a
+			 * non-leaf split) would be misreported by check_extents() as
+			 * "neither free or busy".  Walk it as if it were a regular
+			 * downlink child so its extent joins the busy set.  The
+			 * checkpointer normally finishes such splits via
+			 * checkpoint_fix_split_and_lock_page(), but orioledb_tbl_check()
+			 * must give a correct answer even when a phase-1 split happens to
+			 * be live at the moment of the check.
+			 */
+			brokenRightBlkno = rightBlkno;
 		}
 	}
 
@@ -595,6 +609,9 @@ check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 		extent = page_desc->fileExtent;
 		add_extent(&status->busy, extent);
 	}
+
+	if (OInMemoryBlknoIsValid(brokenRightBlkno))
+		check_walk_btree(status, brokenRightBlkno, blkno);
 
 	if (OInMemoryBlknoIsValid(parentPagenum))
 		lock_page(parentPagenum);
