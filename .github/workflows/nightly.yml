@@ -1,0 +1,87 @@
+name: nightly
+
+on:
+  # Cron disabled until the first manual workflow_dispatch from `main` is
+  # validated. Re-enable in a follow-up PR once the publish path (docker push +
+  # GitHub Release) has been confirmed end-to-end.
+  # schedule:
+  #   - cron: '0 2 * * *'  # 02:00 UTC daily
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    # Skip cron runs in forks; allow manual dispatch anywhere for testing.
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'orioledb/orioledb'
+    runs-on: ubuntu-24.04
+    outputs:
+      git_tag: ${{ steps.date.outputs.git_tag }}
+      build_id: ${{ steps.date.outputs.build_id }}
+    steps:
+      - id: date
+        run: |
+          date_iso=$(date -u +%Y-%m-%d)
+          date_compact=$(date -u +%Y%m%d)
+          sha_short=${GITHUB_SHA:0:7}
+          {
+            # build_id (compact date + 7-char SHA) makes every build uniquely
+            # taggable even if cron and a manual dispatch fire on the same UTC
+            # day from different commits.
+            echo "build_id=$date_compact-$sha_short"
+            echo "git_tag=nightly-$date_iso-$sha_short"
+          } >> "$GITHUB_OUTPUT"
+
+  build-publish:
+    needs: prepare
+    uses: ./.github/workflows/_docker-build-publish.yml
+    with:
+      mode: nightly
+      nightly_build_id: ${{ needs.prepare.outputs.build_id }}
+    secrets: inherit
+
+  # Publish the GitHub Release (and its git tag) only after Docker images are
+  # in place, so the tag never points at a build that failed to publish.
+  release:
+    needs: [prepare, build-publish]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub Release (prerelease)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.git_tag }}
+        run: |
+          set -euo pipefail
+
+          # Nightly tags are immutable ("no moving git tag"): if the day's
+          # release already exists, treat as success rather than re-tagging.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; skipping."
+            exit 0
+          fi
+
+          notes_file="$RUNNER_TEMP/release_body.md"
+          cat > "$notes_file" <<'EOF'
+          Automated nightly build of OrioleDB from `main` at commit `${{ github.sha }}`.
+
+          Docker images published to [`orioledb/orioledb`](https://hub.docker.com/r/orioledb/orioledb):
+
+          **Immutable (this build, ${{ needs.prepare.outputs.build_id }}):**
+          - `pg16-nightly-${{ needs.prepare.outputs.build_id }}` · `pg16-nightly-${{ needs.prepare.outputs.build_id }}-ubuntu`
+          - `pg17-nightly-${{ needs.prepare.outputs.build_id }}` · `pg17-nightly-${{ needs.prepare.outputs.build_id }}-ubuntu`
+
+          **Rolling (latest nightly):**
+          - `pg16-nightly` · `pg16-nightly-ubuntu`
+          - `pg17-nightly` · `pg17-nightly-ubuntu`
+          EOF
+
+          gh release create "$TAG" \
+            --prerelease \
+            --target "${{ github.sha }}" \
+            --title "$TAG" \
+            --notes-file "$notes_file"
