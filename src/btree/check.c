@@ -572,6 +572,20 @@ check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 			 */
 			brokenRightBlkno = rightBlkno;
 		}
+		else
+		{
+			/*
+			 * check_btree() holds AccessExclusiveLock on the relation, which
+			 * blocks every concurrent modifier of this tree.  Under that lock
+			 * the only legitimate reason for a leftover rightlink is a
+			 * phase-1 split, where the right page carries BROKEN_SPLIT.
+			 * Anything else (rightlink set, but BROKEN_SPLIT cleared) means
+			 * phase-2 cleared the split flag yet failed to clear the
+			 * rightlink -- the tree is structurally inconsistent.
+			 */
+			elog(NOTICE, "BTree has a rightlink to a page without BROKEN_SPLIT.");
+			status->hasError = true;
+		}
 	}
 
 	if (!O_PAGE_IS(p, LEAF))
