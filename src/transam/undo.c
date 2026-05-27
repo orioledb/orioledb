@@ -2266,9 +2266,6 @@ undo_xact_callback(XactEvent event, void *arg)
 					flushPos = assign_xidless_commit_lsn(oxid, &wrote_xlog);
 					// error-injection here leads to primary-replica devirgence
 
-					local_wal_has_material_changes = true;
-					INJECTION_POINT("orioledb-after-local_wal_has_material_changes-true");
-
 					elog(DEBUG4, "XACT_EVENT_COMMIT [independent Oriole transaction] oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d flushPos %X/%X",
 						 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap, LSN_FORMAT_ARGS(flushPos));
 
@@ -2403,6 +2400,8 @@ undo_xact_callback(XactEvent event, void *arg)
 				 * heap_truncate_one_rel
 				 */
 				in_nontransactional_truncate = false;
+
+				INJECTION_POINT("oriole-end-of-commit");
 
 				break;
 
