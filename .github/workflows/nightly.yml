@@ -1,0 +1,190 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 02:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: write  # to create the GitHub Release and its git tag
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+env:
+  REGISTRY_IMAGE: orioledb/orioledb
+
+jobs:
+  prepare:
+    # Skip cron runs in forks; allow manual dispatch anywhere for testing.
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'orioledb/orioledb'
+    runs-on: ubuntu-24.04
+    outputs:
+      date_iso: ${{ steps.date.outputs.date_iso }}
+      date_compact: ${{ steps.date.outputs.date_compact }}
+      git_tag: ${{ steps.date.outputs.git_tag }}
+    steps:
+      - id: date
+        run: |
+          date_iso=$(date -u +%Y-%m-%d)
+          date_compact=$(date -u +%Y%m%d)
+          {
+            echo "date_iso=$date_iso"
+            echo "date_compact=$date_compact"
+            echo "git_tag=nightly-$date_iso"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        cpu: [amd64, arm64]
+        postgres: [16, 17]
+        distr: [alpine, ubuntu]
+
+        # Define runner and distr_version depending on cpu and distr.
+        # Mirrors .github/workflows/docker.yml.
+        include:
+          - cpu: amd64
+            distr: alpine
+            runner: ubuntu-24.04
+            distr_version: 3.21
+          - cpu: amd64
+            distr: ubuntu
+            runner: ubuntu-24.04
+            distr_version: noble
+          - cpu: arm64
+            distr: alpine
+            runner: ubuntu-24.04-arm
+            distr_version: 3.21
+          - cpu: arm64
+            distr: ubuntu
+            runner: ubuntu-24.04-arm
+            distr_version: noble
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+          flavor: |
+            latest=false
+            suffix=${{ matrix.distr == 'ubuntu' && '-ubuntu' || '' }},onlatest=true
+          tags: |
+            type=raw,value=pg${{ matrix.postgres }}-nightly-${{ needs.prepare.outputs.date_compact }}
+            type=raw,value=pg${{ matrix.postgres }}-nightly
+
+      - name: Prepare Dockerfiles
+        run: |
+          cp docker/Dockerfile        ${{ runner.temp }}/Dockerfile
+          cp docker/Dockerfile.ubuntu ${{ runner.temp }}/Dockerfile.ubuntu
+
+      # Build for one platform and push digest only; multi-arch manifests are
+      # merged in the `manifest` job below.
+      - id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: ${{ matrix.distr == 'ubuntu' && format('{0}/Dockerfile.ubuntu', runner.temp) || format('{0}/Dockerfile', runner.temp) }}
+          platforms: linux/${{ matrix.cpu }}
+          build-args: |
+            PG_MAJOR=${{ matrix.postgres }}
+            ALPINE_VERSION=${{ matrix.distr == 'alpine' && matrix.distr_version || '' }}
+            UBUNTU_VERSION=${{ matrix.distr == 'ubuntu' && matrix.distr_version || '' }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push=true,push-by-digest=true,name-canonical=true
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          sbom: false
+
+      - name: Export digest + meta
+        run: |
+          mkdir -p ${{ runner.temp }}/out
+          echo "${{ steps.build.outputs.digest }}" \
+            > ${{ runner.temp }}/out/${{ matrix.cpu }}-${{ matrix.postgres }}-${{ matrix.distr }}.digest
+          echo '${{ steps.meta.outputs.json }}' \
+            > ${{ runner.temp }}/out/${{ matrix.cpu }}-${{ matrix.postgres }}-${{ matrix.distr }}.meta.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-digests-${{ matrix.cpu }}-${{ matrix.postgres }}-${{ matrix.distr }}
+          path: ${{ runner.temp }}/out/*
+          retention-days: 1
+
+  # Merge per-arch digests into multi-arch manifests for each tag.
+  manifest:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: digests
+          merge-multiple: true
+          pattern: nightly-digests-*
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Create & push multi-arch manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A TAGS
+          while IFS= read -r -d '' meta; do
+            digest_file="${meta%.meta.json}.digest"
+            digest=$(cat "$digest_file")
+            while IFS= read -r tag; do
+              TAGS["$tag"]="${TAGS[$tag]:-} $REGISTRY_IMAGE@$digest"
+            done < <(jq -r '.tags[]' "$meta")
+          done < <(find digests -type f -name '*.meta.json' -print0)
+
+          for tag in "${!TAGS[@]}"; do
+            echo "⮑  $tag ⇒ ${TAGS[$tag]}"
+            docker buildx imagetools create -t "$tag" ${TAGS[$tag]}
+          done
+
+  # Publish the GitHub Release (and its git tag) only after Docker images are
+  # in place, so the tag never points at a build that failed to publish.
+  release:
+    needs: [prepare, manifest]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Create GitHub Release (prerelease)
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ needs.prepare.outputs.git_tag }}
+          name: ${{ needs.prepare.outputs.git_tag }}
+          prerelease: true
+          target_commitish: ${{ github.sha }}
+          body: |
+            Automated nightly build of OrioleDB from `main` at commit `${{ github.sha }}`.
+
+            Docker images published to [`orioledb/orioledb`](https://hub.docker.com/r/orioledb/orioledb):
+
+            **Immutable (this build, ${{ needs.prepare.outputs.date_compact }}):**
+            - `pg16-nightly-${{ needs.prepare.outputs.date_compact }}` · `pg16-nightly-${{ needs.prepare.outputs.date_compact }}-ubuntu`
+            - `pg17-nightly-${{ needs.prepare.outputs.date_compact }}` · `pg17-nightly-${{ needs.prepare.outputs.date_compact }}-ubuntu`
+
+            **Rolling (latest nightly):**
+            - `pg16-nightly` · `pg16-nightly-ubuntu`
+            - `pg17-nightly` · `pg17-nightly-ubuntu`
