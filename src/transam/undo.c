@@ -2383,12 +2383,12 @@ undo_xact_callback(XactEvent event, void *arg)
 					reset_precommit_xid_subxids();
 				}
 
+				INJECTION_POINT("oriole-before-on-commit-undo-stack");
+
 				for (i = 0; i < (int) UndoLogsCount; i++)
 				{
 					on_commit_undo_stack((UndoLogType) i, oxid, true);
 				}
-
-				INJECTION_POINT("oriole-after-on-commit-undo-stack");
 
 				wal_after_commit();
 				reset_cur_undo_locations();
