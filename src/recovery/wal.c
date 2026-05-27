@@ -346,11 +346,13 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 #endif
 
 	add_finish_wal_record(WAL_REC_COMMIT, pg_atomic_read_u64(&xid_meta->runXmin));
+	// error-injection here -> Bug #1 (same-container COMMIT+ROLLBACK; replica TRAP)
+	//                                (orioledb-after-finish-wal-rec: 2/2 BUGs ~100%)
 	walPos = flush_local_wal(true, !isAutonomous);
 
 #ifdef USE_INJECTION_POINTS
-	// error-injection here
-	// replica PANICs with undo_item_buf_read_item(): read of unexisting undo record.	
+	// error-injection here -> Bug #3 (replica PANIC: undo_item_buf_read_item)
+	//                                (orioledb-after-flush-local-wal: 2/2 BUGs ~100%)
 	elog(LOG,
 		 "post-flush-local-wal-trace pre-inject pid=%d oxid=%lu walPos=%X/%X",
 		 MyProcPid, (unsigned long) oxid,
@@ -364,7 +366,8 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	walPos = flush_local_wal(true, !isAutonomous);
 	local_wal.has_material_changes = false;
 
-	// error-injection here leads to primary-replica divergence
+	// error-injection here -> Bug #2 (silent replica divergence)
+	//                                (orioledb-after-wal-commit / orioledb-after-assign-commit-lsn: 2/15-2/8 ~13-25%)
 
 	elog(DEBUG4, "[%s] COMMIT oxid %lu logicalXid %u %X/%X", __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
 

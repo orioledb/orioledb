@@ -221,9 +221,9 @@ assign_xidless_commit_lsn(OXid oxid, bool *wrote_xlog)
 	if (XLogRecPtrIsInvalid(xidless_commit_lsn))
 	{
 		current_oxid_xlog_precommit();
-		// error-injection here is safe
+		// error-injection here is safe                                   (orioledb-after-xlog-precommit:    0/59 BUGs)
 		xidless_commit_lsn = wal_commit(oxid, get_current_logical_xid(), false);
-		// error-injection here leads to primary-replica divergence
+		// error-injection here -> Bug #2 (silent replica divergence)     (orioledb-after-wal-commit:        2/15 ~13%)
 		set_oxid_xlog_ptr(oxid, xidless_commit_lsn);
 		*wrote_xlog = true;
 	}
@@ -2257,6 +2257,8 @@ undo_xact_callback(XactEvent event, void *arg)
 				elog(DEBUG4, "XACT_EVENT_COMMIT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
 					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
+				// error-injection here is safe                                (orioledb-before-o-o-commit-machinery: 0/51 BUGs)
+
 				if (!TransactionIdIsValid(heapXid))
 				{
 					bool		wrote_xlog;
@@ -2264,7 +2266,7 @@ undo_xact_callback(XactEvent event, void *arg)
 					/* Commit o - o : independent Oriole transaction */
 
 					flushPos = assign_xidless_commit_lsn(oxid, &wrote_xlog);
-					// error-injection here leads to primary-replica devirgence
+					// error-injection here -> Bug #2 (silent replica divergence)  (orioledb-after-assign-commit-lsn: 2/8 ~25%)
 
 					elog(DEBUG4, "XACT_EVENT_COMMIT [independent Oriole transaction] oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d flushPos %X/%X",
 						 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap, LSN_FORMAT_ARGS(flushPos));
@@ -2372,6 +2374,9 @@ undo_xact_callback(XactEvent event, void *arg)
 #endif
 
 				current_oxid_commit(csn);
+				// error-injection here is safe                                (oriole-before-on-commit-undo-stack: 0/30 BUGs;
+				//                                                              window already closed by curOxid=InvalidOXid in
+				//                                                              current_oxid_commit body, see oxid.c)
 				Assert(enable_rewind || !csn_is_retained_for_rewind(csn));
 
 				if (enable_rewind)
@@ -2389,6 +2394,7 @@ undo_xact_callback(XactEvent event, void *arg)
 				{
 					on_commit_undo_stack((UndoLogType) i, oxid, true);
 				}
+				// error-injection here is safe                                (oriole-after-on-commit-undo-stack: 0/30 BUGs)
 
 				wal_after_commit();
 				reset_cur_undo_locations();
@@ -2403,6 +2409,7 @@ undo_xact_callback(XactEvent event, void *arg)
 				 */
 				in_nontransactional_truncate = false;
 
+				// error-injection here is safe                                (oriole-end-of-commit: 0/22 BUGs)
 				break;
 
 			case XACT_EVENT_ABORT:

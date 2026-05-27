@@ -605,7 +605,7 @@ class RrStressTest(BaseTest):
 			'orioledb-after-flush-local-wal',
 			'orioledb-after-local_wal_has_material_changes-true',
 			'oriole-before-on-commit-undo-stack',
-			'oriole-before-curOxid-clear',
+			'oriole-before-curOxid-clear', # leads to PK/SK desync, currently does not look as a real problem. Nedd further investigation
 			'orioledb-pk-mutated-pre-wal',
 			'orioledb-update-pk-done-pre-sk',
 			'orioledb-sk-mid-update',
