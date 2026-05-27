@@ -349,40 +349,8 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	walPos = flush_local_wal(true, !isAutonomous);
 
 #ifdef USE_INJECTION_POINTS
-	/*
-	 * Bug #2 bisect inside wal_commit.  Fires AFTER flush_local_wal has
-	 * framed the container with WAL_REC_COMMIT and submitted it to PG's
-	 * shared XLog buffer, but BEFORE wal_commit clears
-	 * local_wal_has_material_changes and returns.
-	 *
-	 * State at this point:
-	 *   - WAL_REC_COMMIT is in shared XLog buffer; walsender may already
-	 *     have shipped it to the replica.
-	 *   - The local process buffer has been drained by flush_local_wal,
-	 *     so a subsequent wal_rollback in the abort path will start a
-	 *     FRESH container with its own WAL_REC_XID for the ROLLBACK.
-	 *   - local_wal_has_material_changes is still true (not yet cleared
-	 *     on line below).
-	 *   - set_oxid_xlog_ptr (outside wal_commit, in
-	 *     assign_xidless_commit_lsn) has NOT yet been called.
-	 *
-	 * If this fires Bug #2 silent divergence: the act of flushing the
-	 * COMMIT container into shared XLog buffer (where walsender can grab
-	 * it) is sufficient to trigger the bug.  This confirms the
-	 * "flush_local_wal is the watershed" hypothesis.
-	 *
-	 * Bisect interpretation:
-	 *   - BUGs here -> flush_local_wal is the trigger (publish to shared
-	 *     XLog buffer + walsender shipping).  Narrows the cause to the
-	 *     "COMMIT seen by replica, then ROLLBACK in separate container"
-	 *     pattern.
-	 *   - 30 clean -> trigger is somewhere between this site and the next
-	 *     downstream injection point (orioledb-after-wal-commit at the
-	 *     undo.c call site), which is essentially nothing -- there's no
-	 *     code between this line and wal_commit's return.  That would be
-	 *     surprising and would warrant investigation of what changes
-	 *     between this site and orioledb-after-wal-commit.
-	 */
+	// error-injection here
+	// replica PANICs with undo_item_buf_read_item(): read of unexisting undo record.	
 	elog(LOG,
 		 "post-flush-local-wal-trace pre-inject pid=%d oxid=%lu walPos=%X/%X",
 		 MyProcPid, (unsigned long) oxid,
@@ -395,6 +363,8 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 
 	walPos = flush_local_wal(true, !isAutonomous);
 	local_wal.has_material_changes = false;
+
+	// error-injection here leads to primary-replica divergence
 
 	elog(DEBUG4, "[%s] COMMIT oxid %lu logicalXid %u %X/%X", __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
 

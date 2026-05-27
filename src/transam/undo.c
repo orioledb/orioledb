@@ -63,6 +63,9 @@ PG_FUNCTION_INFO_V1(orioledb_get_proc_retain_undo_locations);
 
 static int	undoLocCmp(const pairingheap_node *a, const pairingheap_node *b, void *arg);
 
+extern 
+bool local_wal_has_material_changes;
+
 static pairingheap retainUndoLocHeaps[(int) UndoLogsCount] =
 {
 	{
@@ -218,38 +221,9 @@ assign_xidless_commit_lsn(OXid oxid, bool *wrote_xlog)
 	if (XLogRecPtrIsInvalid(xidless_commit_lsn))
 	{
 		current_oxid_xlog_precommit();
-
-#ifdef USE_INJECTION_POINTS
-		/*
-		 * Bug #2 bisect step 2: fires AFTER current_oxid_xlog_precommit
-		 * returns (so xidBuffer.commitPtr carries the COMMITTING-sentinel
-		 * and xlog_ptr_committing_set=true) but BEFORE wal_commit emits
-		 * WAL_REC_COMMIT.
-		 *
-		 * State at this point:
-		 *   - current_oxid_xlog_precommit ran: xidBuffer.commitPtr =
-		 *     COMMITTING-sentinel; xlog_ptr_committing_set=true.
-		 *   - wal_commit has NOT yet run: no WAL_REC_COMMIT in any buffer.
-		 *   - set_oxid_xlog_ptr has NOT yet run.
-		 *
-		 * Step 1 (after wal_commit, before set_oxid_xlog_ptr) hit ~13%
-		 * BUG rate. Moving UP isolates whether current_oxid_xlog_precommit
-		 * alone is enough to trigger Bug #2:
-		 *   - if fires here: xlog_precommit's COMMITTING sentinel publication
-		 *     is enough; bug is in pre-commit-time visibility race.
-		 *   - if NOT fires here: wal_commit's emission of WAL_REC_COMMIT
-		 *     into shared XLog buffer is the trigger.
-		 */
-		elog(LOG,
-			 "post-xlog-precommit-trace pre-inject pid=%d oxid=%lu",
-			 MyProcPid, (unsigned long) oxid);
-		INJECTION_POINT("orioledb-after-xlog-precommit");
-		elog(LOG,
-			 "post-xlog-precommit-trace post-inject (no error fired) pid=%d oxid=%lu",
-			 MyProcPid, (unsigned long) oxid);
-#endif
-
+		// error-injection here is safe
 		xidless_commit_lsn = wal_commit(oxid, get_current_logical_xid(), false);
+		// error-injection here leads to primary-replica divergence
 		set_oxid_xlog_ptr(oxid, xidless_commit_lsn);
 		*wrote_xlog = true;
 	}
@@ -2290,6 +2264,10 @@ undo_xact_callback(XactEvent event, void *arg)
 					/* Commit o - o : independent Oriole transaction */
 
 					flushPos = assign_xidless_commit_lsn(oxid, &wrote_xlog);
+					// error-injection here leads to primary-replica devirgence
+
+					local_wal_has_material_changes = true;
+					INJECTION_POINT("orioledb-after-local_wal_has_material_changes-true");
 
 					elog(DEBUG4, "XACT_EVENT_COMMIT [independent Oriole transaction] oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d flushPos %X/%X",
 						 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap, LSN_FORMAT_ARGS(flushPos));
