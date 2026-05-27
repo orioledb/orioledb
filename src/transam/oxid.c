@@ -1523,6 +1523,7 @@ current_oxid_commit(CommitSeqNo csn)
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 
 	advance_run_xmin(curOxid);
+	INJECTION_POINT("oriole-before-curOxid-clear");
 	curOxid = InvalidOXid;
 	release_assigned_logical_xids();
 }
