@@ -604,7 +604,7 @@ class RrStressTest(BaseTest):
 			'orioledb-csn-incremented',
 			'orioledb-after-flush-local-wal',
 			'orioledb-after-local_wal_has_material_changes-true',
-			'oriole-end-of-commit',
+			'oriole-after-on-commit-undo-stack',
 			'orioledb-pk-mutated-pre-wal',
 			'orioledb-update-pk-done-pre-sk',
 			'orioledb-sk-mid-update',

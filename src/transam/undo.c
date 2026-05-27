@@ -2388,6 +2388,8 @@ undo_xact_callback(XactEvent event, void *arg)
 					on_commit_undo_stack((UndoLogType) i, oxid, true);
 				}
 
+				INJECTION_POINT("oriole-after-on-commit-undo-stack");
+
 				wal_after_commit();
 				reset_cur_undo_locations();
 				reset_command_undo_locations();
@@ -2400,8 +2402,6 @@ undo_xact_callback(XactEvent event, void *arg)
 				 * heap_truncate_one_rel
 				 */
 				in_nontransactional_truncate = false;
-
-				INJECTION_POINT("oriole-end-of-commit");
 
 				break;
 
