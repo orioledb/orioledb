@@ -21,18 +21,20 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.repository == 'orioledb/orioledb'
     runs-on: ubuntu-24.04
     outputs:
-      date_iso: ${{ steps.date.outputs.date_iso }}
-      date_compact: ${{ steps.date.outputs.date_compact }}
       git_tag: ${{ steps.date.outputs.git_tag }}
+      build_id: ${{ steps.date.outputs.build_id }}
     steps:
       - id: date
         run: |
           date_iso=$(date -u +%Y-%m-%d)
           date_compact=$(date -u +%Y%m%d)
+          sha_short=${GITHUB_SHA:0:7}
           {
-            echo "date_iso=$date_iso"
-            echo "date_compact=$date_compact"
-            echo "git_tag=nightly-$date_iso"
+            # build_id (compact date + 7-char SHA) makes every build uniquely
+            # taggable even if cron and a manual dispatch fire on the same UTC
+            # day from different commits.
+            echo "build_id=$date_compact-$sha_short"
+            echo "git_tag=nightly-$date_iso-$sha_short"
           } >> "$GITHUB_OUTPUT"
 
   build:
@@ -84,7 +86,7 @@ jobs:
             latest=false
             suffix=${{ matrix.distr == 'ubuntu' && '-ubuntu' || '' }},onlatest=true
           tags: |
-            type=raw,value=pg${{ matrix.postgres }}-nightly-${{ needs.prepare.outputs.date_compact }}
+            type=raw,value=pg${{ matrix.postgres }}-nightly-${{ needs.prepare.outputs.build_id }}
             type=raw,value=pg${{ matrix.postgres }}-nightly
 
       - name: Prepare Dockerfiles
@@ -188,9 +190,9 @@ jobs:
 
           Docker images published to [`orioledb/orioledb`](https://hub.docker.com/r/orioledb/orioledb):
 
-          **Immutable (this build, ${{ needs.prepare.outputs.date_compact }}):**
-          - `pg16-nightly-${{ needs.prepare.outputs.date_compact }}` · `pg16-nightly-${{ needs.prepare.outputs.date_compact }}-ubuntu`
-          - `pg17-nightly-${{ needs.prepare.outputs.date_compact }}` · `pg17-nightly-${{ needs.prepare.outputs.date_compact }}-ubuntu`
+          **Immutable (this build, ${{ needs.prepare.outputs.build_id }}):**
+          - `pg16-nightly-${{ needs.prepare.outputs.build_id }}` · `pg16-nightly-${{ needs.prepare.outputs.build_id }}-ubuntu`
+          - `pg17-nightly-${{ needs.prepare.outputs.build_id }}` · `pg17-nightly-${{ needs.prepare.outputs.build_id }}-ubuntu`
 
           **Rolling (latest nightly):**
           - `pg16-nightly` · `pg16-nightly-ubuntu`
