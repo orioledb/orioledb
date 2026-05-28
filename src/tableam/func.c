@@ -937,6 +937,7 @@ orioledb_idx_structure(PG_FUNCTION_ARGS)
 	PG_RETURN_POINTER(result);
 }
 
+/* No existing callers */
 void
 log_btree(BTreeDescr *desc)
 {
