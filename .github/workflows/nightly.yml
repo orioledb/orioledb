@@ -8,9 +8,6 @@ on:
   #   - cron: '0 2 * * *'  # 02:00 UTC daily
   workflow_dispatch:
 
-permissions:
-  contents: write  # to create the GitHub Release and its git tag
-
 concurrency:
   group: nightly
   cancel-in-progress: false
