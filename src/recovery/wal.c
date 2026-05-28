@@ -363,7 +363,6 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 		 MyProcPid, (unsigned long) oxid);
 #endif
 
-	walPos = flush_local_wal(true, !isAutonomous);
 	local_wal.has_material_changes = false;
 
 	// error-injection here -> Bug #2 (silent replica divergence)
