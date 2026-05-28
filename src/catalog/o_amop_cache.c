@@ -83,7 +83,7 @@ O_SYS_CACHE_INIT_FUNC(amop_strat_cache)
 }
 
 
-void
+static void
 o_amop_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
 	HeapTuple	amoptup;
@@ -126,13 +126,13 @@ o_amop_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	ReleaseSysCache(amoptup);
 }
 
-void
+static void
 o_amop_cache_free_entry(Pointer entry)
 {
 	pfree(entry);
 }
 
-void
+static void
 o_amop_strat_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 							  Pointer arg)
 {
@@ -174,7 +174,7 @@ o_amop_strat_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	ReleaseSysCache(amoptup);
 }
 
-void
+static void
 o_amop_strat_cache_free_entry(Pointer entry)
 {
 	pfree(entry);

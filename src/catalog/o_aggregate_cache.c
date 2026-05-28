@@ -87,7 +87,7 @@ O_SYS_CACHE_INIT_FUNC(aggregate_cache)
 }
 
 
-void
+static void
 o_aggregate_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 							 Pointer arg)
 {
@@ -153,7 +153,7 @@ o_aggregate_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	ReleaseSysCache(aggtup);
 }
 
-void
+static void
 o_aggregate_cache_free_entry(Pointer entry)
 {
 	OAggregate *o_agg = (OAggregate *) entry;
@@ -165,7 +165,7 @@ o_aggregate_cache_free_entry(Pointer entry)
 	pfree(o_agg);
 }
 
-Pointer
+static Pointer
 o_aggregate_cache_serialize_entry(Pointer entry, int *len)
 {
 	StringInfoData str;
@@ -188,7 +188,7 @@ o_aggregate_cache_serialize_entry(Pointer entry, int *len)
 	return str.data;
 }
 
-Pointer
+static Pointer
 o_aggregate_cache_deserialize_entry(MemoryContext mcxt, Pointer data,
 									Size length)
 {

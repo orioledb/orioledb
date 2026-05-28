@@ -2269,7 +2269,7 @@ is_bump_memory_context(MemoryContext mcxt)
 #endif
 }
 
-bool
+static bool
 check_debug_max_bridge_ctid(char **newval, void **extra, GucSource source)
 {
 	if (strcmp(*newval, "") != 0)
@@ -2310,7 +2310,7 @@ check_debug_max_bridge_ctid(char **newval, void **extra, GucSource source)
 	return true;
 }
 
-void
+static void
 assign_debug_max_bridge_ctid(const char *newval, void *extra)
 {
 	if (newval && strcmp(newval, "") != 0)

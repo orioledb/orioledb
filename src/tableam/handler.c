@@ -74,6 +74,10 @@
 #include "utils/syscache.h"
 #include "funcapi.h"
 
+static Size orioledb_parallelscan_estimate(Relation rel);
+static Size orioledb_parallelscan_initialize(Relation rel, ParallelTableScanDesc pscan);
+static void orioledb_parallelscan_reinitialize(Relation rel, ParallelTableScanDesc pscan);
+
 bool		in_nontransactional_truncate = false;
 
 typedef struct OScanDescData
@@ -1650,7 +1654,7 @@ orioledb_scan_sample_next_tuple(TableScanDesc scan, SampleScanState *scanstate,
 	return false;
 }
 
-Size
+static Size
 orioledb_parallelscan_estimate(Relation rel)
 {
 	if (!is_orioledb_rel(rel))
@@ -1689,7 +1693,7 @@ orioledb_parallelscan_initialize_internal(ParallelTableScanDesc pscan)
 }
 
 /* Modified copy of table_block_parallelscan_initialize */
-Size
+static Size
 orioledb_parallelscan_initialize(Relation rel, ParallelTableScanDesc pscan)
 {
 	ParallelOScanDesc poscan = (ParallelOScanDesc) pscan;
@@ -1721,7 +1725,7 @@ orioledb_parallelscan_initialize_inner(ParallelTableScanDesc pscan)
 	return sizeof(ParallelOScanDescData);
 }
 
-void
+static void
 orioledb_parallelscan_reinitialize(Relation rel, ParallelTableScanDesc pscan)
 {
 	if (!is_orioledb_rel(rel))

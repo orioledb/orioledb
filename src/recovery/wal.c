@@ -27,6 +27,9 @@
 #include "replication/origin.h"
 #include "storage/proc.h"
 
+static const char *wal_record_type_to_string(int wal_record);
+static void add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_version);
+
 typedef struct
 {
 	int			buffer_offset;
@@ -53,7 +56,7 @@ static XLogRecPtr log_logical_wal_container(Pointer ptr, int length, bool withXa
 
 #define XID_RESERVED_LENGTH ((local_wal.contains_xid) ? 0 : sizeof(WALRecXid))
 
-const char *
+static const char *
 wal_record_type_to_string(int wal_record)
 {
 	switch (wal_record)
@@ -492,7 +495,7 @@ add_relreplident_wal_record(char relreplident)
 	local_wal.buffer_offset += sizeof(*rec);
 }
 
-void
+static void
 add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_version)
 {
 	OXid		runXmin;

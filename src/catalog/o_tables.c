@@ -1751,6 +1751,7 @@ o_tables_num_callback(ORelOids oids, void *arg)
 		num_arg->result++;
 }
 
+/* No existing callers */
 OTableField *
 o_table_field_by_name(OTable *table, const char *name)
 {

@@ -54,6 +54,8 @@
 #include "utils/memutils.h"
 #include "utils/syscache.h"
 
+static void orioledb_setup_syscache_hooks(void);
+
 typedef struct OSysCacheHashTreeEntry
 {
 	OSysCache  *sys_cache;		/* If NULL only link stored */
@@ -408,7 +410,7 @@ orioledb_syscache_hook(Datum arg, int cacheid, uint32 hashvalue)
 		invalidate_fastcache_entry(cacheid, hashvalue);
 }
 
-void
+static void
 orioledb_setup_syscache_hooks(void)
 {
 	HASH_SEQ_STATUS hash_seq;
@@ -533,7 +535,7 @@ o_sys_cache_get_by_lsn_callback(OTuple tuple, OXid tupOxid,
 		return OTupleFetchNext;
 }
 
-Pointer
+static Pointer
 o_sys_cache_get_from_toast_tree(OSysCache *sys_cache, OSysCacheKey *key)
 {
 	Pointer		data;
@@ -562,7 +564,7 @@ o_sys_cache_get_from_toast_tree(OSysCache *sys_cache, OSysCacheKey *key)
 	return result;
 }
 
-Pointer
+static Pointer
 o_sys_cache_get_from_tree(OSysCache *sys_cache, int nkeys, OSysCacheKey *key)
 {
 	BTreeDescr *td = get_sys_tree(sys_cache->sys_tree_num);
@@ -800,7 +802,7 @@ static BTreeModifyCallbackInfo callbackInfo =
 	.arg = NULL
 };
 
-bool
+static bool
 o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 {
 	bool		result;
@@ -2673,7 +2675,7 @@ o_sys_cache_toast_tup_print(BTreeDescr *desc, StringInfo buf,
 	appendStringInfo(buf, ", %u)", common->dataLength);
 }
 
-HeapTuple
+static HeapTuple
 o_auth_cache_search_htup(TupleDesc tupdesc, Oid authoid)
 {
 	HeapTuple	result = NULL;

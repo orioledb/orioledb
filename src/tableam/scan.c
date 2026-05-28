@@ -118,12 +118,14 @@ static CustomExecMethods o_scan_exec_methods =
 	o_explain_custom_scan
 };
 
+/* No existing callers */
 bool
 is_o_custom_scan(CustomScan *scan)
 {
 	return scan->methods == &o_scan_methods;
 }
 
+/* No existing callers */
 bool
 is_o_custom_scan_state(CustomScanState *scan)
 {
@@ -512,7 +514,7 @@ o_plan_custom_path(PlannerInfo *root, RelOptInfo *rel,
 /*
  * Creates OCustomScanState.
  */
-Node *
+static Node *
 o_create_custom_scan_state(CustomScan *cscan)
 {
 	Node	   *node = palloc0fast(sizeof(OCustomScanState));
@@ -590,7 +592,7 @@ o_create_custom_scan_state(CustomScan *cscan)
 /*
  * Initializes OCustomScanState and prepares for scan.
  */
-void
+static void
 o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 {
 	OTableDescr *descr = relation_get_descr(node->ss.ss_currentRelation);
@@ -674,7 +676,7 @@ o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 /*
  * Iterates custom scan.
  */
-TupleTableSlot *
+static TupleTableSlot *
 o_exec_custom_scan(CustomScanState *node)
 {
 	OCustomScanState *ocstate = (OCustomScanState *) node;
@@ -776,7 +778,7 @@ o_exec_custom_scan(CustomScanState *node)
 /*
  * Restarts the scan.
  */
-void
+static void
 o_rescan_custom_scan(CustomScanState *node)
 {
 	OCustomScanState *ocstate = (OCustomScanState *) node;
@@ -835,7 +837,7 @@ o_rescan_custom_scan(CustomScanState *node)
 /*
  * Ends custom scan.
  */
-void
+static void
 o_end_custom_scan(CustomScanState *node)
 {
 	OCustomScanState *ocstate = (OCustomScanState *) node;

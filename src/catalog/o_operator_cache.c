@@ -56,7 +56,7 @@ O_SYS_CACHE_INIT_FUNC(operator_cache)
 }
 
 
-void
+static void
 o_operator_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
 	HeapTuple	opertup;
@@ -87,7 +87,7 @@ o_operator_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	ReleaseSysCache(opertup);
 }
 
-void
+static void
 o_operator_cache_free_entry(Pointer entry)
 {
 	pfree(entry);

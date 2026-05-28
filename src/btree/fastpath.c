@@ -61,7 +61,7 @@ static void float8_array_search(Pointer p, int stride, int *lower,
 static void tid_array_search(Pointer p, int stride, int *lower,
 							 int *upper, Datum keyDatum);
 
-ArraySearchDesc arraySearchDescs[] = {
+static ArraySearchDesc arraySearchDescs[] = {
 	{OIDOID, OID_BTREE_OPS_OID, sizeof(Oid), ALIGNOF_INT, oid_array_search},
 	{INT4OID, INT4_BTREE_OPS_OID, sizeof(int32), ALIGNOF_INT, int4_array_search},
 	{INT8OID, INT8_BTREE_OPS_OID, sizeof(int64), ALIGNOF_DOUBLE, int8_array_search},

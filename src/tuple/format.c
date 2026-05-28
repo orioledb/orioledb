@@ -401,6 +401,7 @@ o_toast_nocachegetattr(OTuple tuple,
 	return result;
 }
 
+/* No existing callers */
 Pointer
 o_tuple_get_data(OTuple tuple, int *size, OTupleFixedFormatSpec *spec)
 {

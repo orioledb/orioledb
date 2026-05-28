@@ -52,6 +52,13 @@
 #include "btree/iterator.h"
 #include "replication/slot.h"
 
+static const char *get_undo_type_name(UndoLogType undoType);
+static void write_shared_undo_locations(UndoStackSharedLocations *to, UndoStackLocations *from);
+static void o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit,
+											   RelFileNode *onAbort,
+											   int nOnCommit, int nOnAbort);
+static void reset_command_undo_locations(void);
+
 PG_FUNCTION_INFO_V1(orioledb_read_sys_xid_undo_location);
 PG_FUNCTION_INFO_V1(orioledb_insert_sys_xid_undo_location);
 PG_FUNCTION_INFO_V1(orioledb_get_undo_meta);
@@ -116,7 +123,7 @@ typedef struct
 	RelFileNode rels[FLEXIBLE_ARRAY_MEMBER];
 } RewindRelFileNodeUndoStackItem;
 
-UndoItemTypeDescr undoItemTypeDescrs[] = {
+static UndoItemTypeDescr undoItemTypeDescrs[] = {
 	{
 		.type = ModifyUndoItemType,
 		.callback = modify_undo_callback,
@@ -399,7 +406,7 @@ get_undo_meta_by_type(UndoLogType undoType)
 	return &undo_metas[index];
 }
 
-const char *
+static const char *
 get_undo_type_name(UndoLogType undoType)
 {
 	switch (undoType)
@@ -1929,7 +1936,7 @@ read_shared_undo_locations(UndoStackLocations *to, UndoStackSharedLocations *fro
 	to->onCommitLocation = pg_atomic_read_u64(&from->onCommitLocation);
 }
 
-void
+static void
 write_shared_undo_locations(UndoStackSharedLocations *to, UndoStackLocations *from)
 {
 	ASAN_UNPOISON_MEMORY_REGION(from, sizeof(*from));
@@ -3060,7 +3067,7 @@ o_stub_item_callback(UndoLogType undoType, UndoLocation location,
 	return;
 }
 
-void
+static void
 reset_command_undo_locations(void)
 {
 	commandIndex = -1;
@@ -3184,7 +3191,7 @@ o_rewind_relfilenode_item_callback(UndoLogType undoType,
 		DropRelationFiles(&item->rels[item->nCommitRels], item->nAbortRels, false);
 }
 
-void
+static void
 o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
 								   int nOnCommit, int nOnAbort)
 {

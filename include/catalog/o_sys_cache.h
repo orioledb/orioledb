@@ -279,7 +279,6 @@ extern Oid	o_get_hash_proc_by_btree_opclass(Oid btreeOpclass);
 
 extern void o_sys_caches_delete_by_lsn(XLogRecPtr checkPointRedo);
 
-extern void orioledb_setup_syscache_hooks(void);
 
 extern int	o_sys_cache_key_length(BTreeDescr *desc, OTuple tuple);
 extern int	o_sys_cache_tup_length(BTreeDescr *desc, OTuple tuple);

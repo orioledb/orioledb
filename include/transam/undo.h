@@ -364,7 +364,6 @@ extern PendingTruncatesMeta *pending_truncates_meta;
 extern Size undo_shmem_needs(void);
 extern void undo_shmem_init(Pointer buf, bool found);
 extern UndoMeta *get_undo_meta_by_type(UndoLogType undoType);
-extern const char *get_undo_type_name(UndoLogType undoType);
 
 extern void update_min_undo_locations(UndoLogType undoType,
 									  bool undoEviction,
@@ -396,7 +395,6 @@ extern void add_new_undo_stack_item_to_process(UndoLogType undoType,
 											   int pgprocno,
 											   int autonomousNestingLevel);
 extern void read_shared_undo_locations(UndoStackLocations *to, UndoStackSharedLocations *from);
-extern void write_shared_undo_locations(UndoStackSharedLocations *to, UndoStackLocations *from);
 extern void get_cur_undo_locations(UndoStackLocations *locations,
 								   UndoLogType undoType);
 extern void set_cur_undo_locations(UndoLogType undoType,
@@ -441,9 +439,6 @@ extern UndoLocation get_snapshot_retained_undo_location(UndoLogType undoType);
 extern UndoLocation set_my_snapshot_retain_location(UndoLogType undoType);
 extern void clear_my_snapshot_retain_location(UndoLogType undoType);
 extern void orioledb_reset_xmin_hook(void);
-extern void o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit,
-											   RelFileNode *onAbort,
-											   int nOnCommit, int nOnAbort);
 
 static inline void
 reserve_undo_size(UndoLogType type, Size size)
@@ -451,7 +446,6 @@ reserve_undo_size(UndoLogType type, Size size)
 	(void) reserve_undo_size_extended(type, size, true);
 }
 
-extern void reset_command_undo_locations(void);
 extern CommandId undo_location_get_command(UndoLocation location);
 extern UndoLocation current_command_get_undo_location(void);
 extern void update_command_undo_location(CommandId commandId,

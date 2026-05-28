@@ -91,8 +91,6 @@ extern S3TaskLocation s3_schedule_empty_dir_write(uint32 chkpNum,
 												  char *dirname);
 extern S3TaskLocation s3_schedule_file_part_write(uint32 chkpNum, OIndexKey key,
 												  int32 segNum, int32 partNum);
-extern S3TaskLocation s3_schedule_file_part_read(uint32 chkpNum, OIndexKey key,
-												 int32 segNum, int32 partNum);
 extern S3TaskLocation s3_schedule_wal_file_write(char *filename);
 extern S3TaskLocation s3_schedule_undo_file_write(UndoLogType undoType,
 												  uint64 fileNum);

@@ -43,6 +43,11 @@ static void clean_chain_has_locks_flag(UndoLogType undoType,
 static bool update_leaf_header_in_undo_if_exists(UndoLogType undoType,
 												 BTreeLeafTuphdr *tuphdr,
 												 UndoLocation location);
+static bool get_prev_leaf_header_from_undo_if_exists(UndoLogType undoType,
+													 BTreeLeafTuphdr *tuphdr);
+static void update_leaf_header_in_undo(UndoLogType undoType,
+									   BTreeLeafTuphdr *tuphdr,
+									   UndoLocation location);
 
 /*
  * Add page image to the undo log.
@@ -1690,7 +1695,7 @@ get_prev_leaf_header_from_undo(UndoLogType undoType,
  * cleaned undo record.  Returns false if the undo record no longer exists
  * (treat the chain end as if the transaction committed).
  */
-bool
+static bool
 get_prev_leaf_header_from_undo_if_exists(UndoLogType undoType,
 										 BTreeLeafTuphdr *tuphdr)
 {
@@ -1762,7 +1767,7 @@ get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 	tuphdr->formatFlags = 0;
 }
 
-void
+static void
 update_leaf_header_in_undo(UndoLogType undoType,
 						   BTreeLeafTuphdr *tuphdr,
 						   UndoLocation location)

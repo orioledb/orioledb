@@ -150,9 +150,6 @@ extern void o_check_tbl_delete_mres(OTableModifyResult mres,
 									OTableDescr *descr, Relation rel);
 
 extern void set_pending_sk_marker(OTableDescr *descr, UndoLocation pkUndoLoc);
-extern void set_pending_sk_marker_from_slot(UndoLocation pkUndoLoc, void *arg);
-extern void set_pending_sk_marker_from_modify_arg(UndoLocation pkUndoLoc,
-												  void *arg);
 extern void fire_sk_modify_pending_stopevent(OTableDescr *descr);
 extern void clear_pending_sk_marker(void);
 
@@ -161,6 +158,5 @@ extern bool o_is_index_predicate_satisfied(OIndexDescr *idx,
 										   ExprContext *econtext);
 extern void o_truncate_table(ORelOids oids, bool missingOK);
 extern void o_apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation, TupleTableSlot *slot, CommitSeqNo csn, bool increment_bridge_ctid);
-extern int	o_exclusion_cmp(OIndexDescr *id, OBTreeKeyBound *key1, OTuple *tuple2);
 
 #endif

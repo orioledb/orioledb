@@ -170,14 +170,12 @@ extern pg_atomic_uint32 *idx_worker_finish_count;
 extern pg_atomic_uint32 *worker_ptrs_changes;
 extern RecoveryWorkerPtrs *worker_ptrs;
 extern pg_atomic_uint64 *recovery_ptr;
-extern pg_atomic_uint64 *recovery_main_retain_ptr;
 extern bool *recovery_single_process;
 extern RecoveryUndoLocFlush *recovery_undo_loc_flush;
 
 extern bool *was_in_recovery;
 extern pg_atomic_uint32 *after_recovery_cleaned;
 
-extern pg_atomic_uint64 *recovery_index_next_pos;
 extern pg_atomic_uint64 *recovery_index_completed_pos;
 extern ConditionVariable *recovery_index_cv;
 
@@ -210,12 +208,6 @@ extern OBTreeModifyCallbackAction recovery_insert_primary_callback(BTreeDescr *d
 																   UndoLocation location, RowLockMode *lock_mode,
 																   BTreeLocationHint *hint,
 																   void *arg);
-extern OBTreeModifyCallbackAction recovery_delete_primary_callback(BTreeDescr *descr,
-																   OTuple tup, OTuple *newtup,
-																   OXid oxid, OTupleXactInfo xactInfo,
-																   UndoLocation location, RowLockMode *lock_mode,
-																   BTreeLocationHint *hint,
-																   void *arg);
 extern OBTreeModifyCallbackAction recovery_insert_overwrite_callback(BTreeDescr *descr,
 																	 OTuple tup, OTuple *newtup,
 																	 OXid oxid, OTupleXactInfo xactInfo,
@@ -236,21 +228,7 @@ extern OBTreeModifyCallbackAction recovery_insert_deleted_primary_callback(BTree
 																		   UndoLocation location, RowLockMode *lock_mode,
 																		   BTreeLocationHint *hint,
 																		   void *arg);
-extern OBTreeModifyCallbackAction recovery_delete_deleted_primary_callback(BTreeDescr *descr,
-																		   OTuple tup, OTuple *newtup,
-																		   OXid oxid, OTupleXactInfo xactInfo,
-																		   BTreeLeafTupleDeletedStatus deleted,
-																		   UndoLocation location, RowLockMode *lock_mode,
-																		   BTreeLocationHint *hint,
-																		   void *arg);
 extern OBTreeModifyCallbackAction recovery_insert_deleted_overwrite_callback(BTreeDescr *descr,
-																			 OTuple tup, OTuple *newtup,
-																			 OXid oxid, OTupleXactInfo xactInfo,
-																			 BTreeLeafTupleDeletedStatus deleted,
-																			 UndoLocation location, RowLockMode *lock_mode,
-																			 BTreeLocationHint *hint,
-																			 void *arg);
-extern OBTreeModifyCallbackAction recovery_delete_deleted_overwrite_callback(BTreeDescr *descr,
 																			 OTuple tup, OTuple *newtup,
 																			 OXid oxid, OTupleXactInfo xactInfo,
 																			 BTreeLeafTupleDeletedStatus deleted,

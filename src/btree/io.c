@@ -51,6 +51,9 @@
 #include "utils/syscache.h"
 #include "funcapi.h"
 
+static int	btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
+							int amount, off_t offset);
+
 typedef struct
 {
 	pg_atomic_uint64 writesStarted;
@@ -626,7 +629,7 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 	return result;
 }
 
-int
+static int
 btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 				int amount, off_t offset)
 {
