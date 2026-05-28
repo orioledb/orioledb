@@ -276,10 +276,8 @@ print_rewind_item(RewindItem *rewindItem, uint64 pos, int source_buffer)
  * Debug print all rewind records from circular in-memory rewind buffer and on-disk rewind buffer
  * to log. Doesn't take any locks, so results are not warrantied with any concurrent operation
  * on the queue.
- *
- * No existing callers.
  */
-void
+static void
 log_print_rewind_queue(void)
 {
 	int			i;

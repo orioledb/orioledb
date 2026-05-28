@@ -220,13 +220,6 @@ typedef void (*OTablesCallback) (OTable *descr, void *arg);
 /* callback for o_tables_foreach_oids() */
 typedef void (*OTablesOidsCallback) (ORelOids oids, void *arg);
 
-/* Iterates through o_tables list. */
-extern void o_tables_foreach(OTablesCallback callback,
-							 OSnapshot *oSnapshot,
-							 void *arg);
-extern void o_tables_foreach_oids(OTablesOidsCallback callback,
-								  OSnapshot *oSnapshot,
-								  void *arg);
 
 Pointer		serialize_o_table(OTable *o_table, int *size);
 
