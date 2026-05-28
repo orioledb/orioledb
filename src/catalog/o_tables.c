@@ -288,7 +288,7 @@ ToastAPI	oTablesToastAPI = {
 	.fetchCallback = oTablesFetchCallback
 };
 
-void
+static void
 o_tables_foreach_oids(OTablesOidsCallback callback,
 					  OSnapshot *oSnapshot,
 					  void *arg)
@@ -338,7 +338,7 @@ o_tables_foreach_oids(OTablesOidsCallback callback,
 /*
  * It can be much more efficient.
  */
-void
+static void
 o_tables_foreach(OTablesCallback callback,
 				 OSnapshot *oSnapshot,
 				 void *arg)

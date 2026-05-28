@@ -63,6 +63,10 @@ OPageWaiterShmemState *lockerStates = NULL;
 static void o_check_btree_page_statistics(BTreeDescr *desc, Pointer p);
 #endif
 
+#ifdef CHECK_PAGE_STRUCT
+static void o_check_page_struct(BTreeDescr *desc, Page p);
+#endif
+
 Size
 page_state_shmem_needs(void)
 {
@@ -1274,10 +1278,8 @@ extern void log_btree(BTreeDescr *desc);
 
 /*
  * Check if page has a consistent structure.
- *
- * No existing callers.
  */
-void
+static void
 o_check_page_struct(BTreeDescr *desc, Page p)
 {
 	BTreePageHeader *header = (BTreePageHeader *) p;
