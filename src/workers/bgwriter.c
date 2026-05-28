@@ -94,7 +94,7 @@ bgwriter_main(Datum main_arg)
 
 	SetProcessingMode(NormalProcessing);
 
-	/* catch SIGTERM signal for reason to not interupt background writing */
+	/* catch SIGTERM signal for reason to not interrupt background writing */
 	pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
 	pqsignal(SIGUSR1, procsignal_sigusr1_handler);
 	BackgroundWorkerUnblockSignals();

@@ -859,7 +859,7 @@ o_btree_insert_split(BTreeInsertStackItem *insert_item,
 
 
 	if (STOPEVENT_CONDITION(STOPEVENT_SPLIT_FAIL, params))
-		elog(ERROR, "Debug condition: page has been splitted.");
+		elog(ERROR, "Debug condition: page has been split.");
 
 	STOPEVENT(STOPEVENT_PAGE_SPLIT, params);
 
@@ -1151,8 +1151,8 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 
 	/*
 	 * Pass the current value of nextCommitSeqNo to page_locator_fits_item().
-	 * The result coult be somewhat pessimistic: it might happend that we
-	 * could actually compact more due to advance of nextCommitSeqNo.
+	 * The result could be somewhat pessimistic: it might happen that we could
+	 * actually compact more due to advance of nextCommitSeqNo.
 	 */
 	fit = page_locator_fits_item(desc,
 								 p,

@@ -4,16 +4,16 @@
  *		Generic interface for system catalog duplicate trees.
  *
  * Generic system catalog tree interface that used to prevent syscache
- * usage during recovery. System catalog cache trees shoud use o_sys_cache_*
+ * usage during recovery. System catalog cache trees should use o_sys_cache_*
  * functions in sysTreesMeta (sys_trees.c), but if sys cache is
  * not TOAST tup_print function should be also provided.
- * Sys cache lookups are also cached in local backend mamory.
+ * Sys cache lookups are also cached in local backend memory.
  * Cache entry invalidation is performed by syscache hook.
  * Instead of physical deletion of sys cache entry we mark it as deleted.
  * Normally only not deleted entries used. During recovery we use
- * sys cache entries accroding to current WAL position.
+ * sys cache entries according to current WAL position.
  * Physical deletion of deleted values is performed during checkpoint,
- * which is also called after successed recovery.
+ * which is also called after successful recovery.
  *
  * Copyright (c) 2021-2026, Oriole DB Inc.
  * Copyright (c) 2025-2026, Supabase Inc.

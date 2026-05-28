@@ -31,7 +31,7 @@
  *   This record defines a connection between Oriole's sub-transaction xid and
  *   a xid of the top heap transaction which is needed for logical decoder.
  *   Otherwise, without this connection, main transaction suddenly becomes
- *   splitted into two independent parts.
+ *   split into two independent parts.
  *   From logical decoder's point of view this looks like two independent
  *   transactions but in fact internally related to each other. This situation
  *   outcomes in troubles for logical decoder with visibility of heap

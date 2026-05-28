@@ -82,7 +82,7 @@ static pairingheap retainUndoLocHeaps[(int) UndoLogsCount] =
 	}
 };
 
-/* A minimal subtransaciton id, where OrioleDB got involved */
+/* A minimal subtransaction id, where OrioleDB got involved */
 static SubTransactionId minParentSubId = InvalidSubTransactionId;
 static XLogRecPtr xidless_commit_lsn = InvalidXLogRecPtr;
 
@@ -744,7 +744,7 @@ read_replication_catalog_retain_undo_location(TransactionId xmin, int *ndeleted,
 						&tuple, BTreeKeyLeafTuple,
 						&keyTuple, BTreeKeyNonLeafKey) >= 0)
 		{
-			/* First occurence of xid >= xmin condition */
+			/* First occurrence of xid >= xmin condition */
 			result = ((ReplicationRetainUndoTuple *) tuple.data)->undoLocation;
 			break;
 		}
@@ -2149,7 +2149,7 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				/*
 				 * PRE_COMMIT means that Oriole transaction is going to be
-				 * commited BEFORE corresponding heap transaction. This can
+				 * committed BEFORE corresponding heap transaction. This can
 				 * only happen in a case when Oriole transaction acts as
 				 * sub-transaction of heap transaction. This is the case for
 				 * SWITCH_LOGICAL_XID.

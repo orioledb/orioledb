@@ -1837,12 +1837,12 @@ describe_index(TupleDesc tupdesc, ORelOids oids, OIndexType type)
 	}
 
 	initStringInfo(&title);
-	appendStringInfo(&title, " %%%ds | %%%ds | %%%ds | Nullable | Droped \n",
+	appendStringInfo(&title, " %%%ds | %%%ds | %%%ds | Nullable | Dropped \n",
 					 max_column_str,
 					 max_type_str,
 					 max_collation_str);
 	initStringInfo(&format);
-	appendStringInfo(&format, " %%%ds | %%%ds | %%%ds | %%8s | %%6s \n",
+	appendStringInfo(&format, " %%%ds | %%%ds | %%%ds | %%8s | %%7s \n",
 					 max_column_str,
 					 max_type_str,
 					 max_collation_str);

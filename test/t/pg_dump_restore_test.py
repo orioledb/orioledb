@@ -51,10 +51,10 @@ class PgDumpRestoreTest(BaseTest):
 				"""),
 		    textwrap.dedent("""\
 				Compress = -1, Primary compress = -1, TOAST compress = -1
-				  Column |    Type | Collation | Nullable | Droped
-				     key | integer |    (null) |    false |  false
-				 payload |    text |   default |     true |  false
-				    hash | integer |    (null) |     true |  false
+				  Column |    Type | Collation | Nullable | Dropped
+				     key | integer |    (null) |    false |   false
+				 payload |    text |   default |     true |   false
+				    hash | integer |    (null) |     true |   false
 				"""))
 
 		self.assertEqual(
@@ -109,10 +109,10 @@ class PgDumpRestoreTest(BaseTest):
 				"""),
 		    textwrap.dedent("""\
 				Compress = 11, Primary compress = 11, TOAST compress = 13
-				  Column |    Type | Collation | Nullable | Droped
-				     key | integer |    (null) |    false |  false
-				 payload |    text |   default |     true |  false
-				    hash | integer |    (null) |     true |  false
+				  Column |    Type | Collation | Nullable | Dropped
+				     key | integer |    (null) |    false |   false
+				 payload |    text |   default |     true |   false
+				    hash | integer |    (null) |     true |   false
 				"""))
 
 		self.assertEqual(
@@ -154,10 +154,10 @@ class PgDumpRestoreTest(BaseTest):
 				"""),
 		    textwrap.dedent("""\
 				Compress = -1, Primary compress = -1, TOAST compress = -1
-				  Column |    Type | Collation | Nullable | Droped
-				     key | integer |    (null) |    false |  false
-				 payload |    text |   default |     true |  false
-				    hash | integer |    (null) |     true |  false
+				  Column |    Type | Collation | Nullable | Dropped
+				     key | integer |    (null) |    false |   false
+				 payload |    text |   default |     true |   false
+				    hash | integer |    (null) |     true |   false
 				"""))
 
 		self.assertEqual(

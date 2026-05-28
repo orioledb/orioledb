@@ -134,7 +134,7 @@ orioledb_rewind_to_timestamp(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
-/* Testing/convenience functions avaliable for the user */
+/* Testing/convenience functions available for the user */
 
 /*
  * Access to a rewindMeta without a lock. This is ok when we check if it's time to fix oldest items in the queue.
@@ -1120,7 +1120,7 @@ rewind_worker_main(Datum main_arg)
 
 	SetProcessingMode(NormalProcessing);
 
-	/* catch SIGTERM signal for reason to not interupt background writing */
+	/* catch SIGTERM signal for reason to not interrupt background writing */
 	pqsignal(SIGTERM, handle_sigterm);
 	BackgroundWorkerUnblockSignals();
 

@@ -1581,7 +1581,7 @@ describe_table(ORelOids oids)
 					 table->default_compress,
 					 table->primary_compress,
 					 table->toast_compress);
-	appendStringInfo(&title, " %%%ds | %%%ds | %%%ds | Nullable | Droped ",
+	appendStringInfo(&title, " %%%ds | %%%ds | %%%ds | Nullable | Dropped ",
 					 max_column_str,
 					 max_type_str,
 					 max_collation_str);
@@ -1589,7 +1589,7 @@ describe_table(ORelOids oids)
 		appendStringInfo(&title, "| Compression ");
 	appendStringInfo(&title, "\n");
 	initStringInfo(&format);
-	appendStringInfo(&format, " %%%ds | %%%ds | %%%ds | %%8s | %%6s ",
+	appendStringInfo(&format, " %%%ds | %%%ds | %%%ds | %%8s | %%7s ",
 					 max_column_str,
 					 max_type_str,
 					 max_collation_str);
