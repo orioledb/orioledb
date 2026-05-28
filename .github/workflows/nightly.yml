@@ -7,9 +7,6 @@ on:
   # schedule:
   #   - cron: '0 2 * * *'  # 02:00 UTC daily
   workflow_dispatch:
-  # TESTING-ONLY: fires the workflow on every push to this branch. Revert before merge.
-  push:
-    branches: [ci/nightly-build-publish-pipeline]
 
 permissions:
   contents: write  # to create the GitHub Release and its git tag
