@@ -113,7 +113,7 @@ s3_archive_configured(ArchiveModuleState *state)
 
 /*
  * This callback archieves given WAL file into S3.  This function have to
- * return the result syncronously, and it works in dedicated arhiving process.
+ * return the result synchronously, and it works in dedicated archiving process.
  * So, no point to schedule this for S3 worker.  Make the S3 request right-away.
  */
 static void
@@ -141,7 +141,7 @@ s3_archive_preload_file(ArchiveModuleState *state,
 
 /*
  * This callback archieves given WAL file into S3.  This function have to
- * return the result syncronously, and it works in dedicated arhiving process.
+ * return the result synchronously, and it works in dedicated archiving process.
  * So, no point to schedule this for S3 worker.  Make the S3 request right-away.
  */
 static bool

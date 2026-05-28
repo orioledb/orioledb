@@ -5326,9 +5326,9 @@ SELECT orioledb_table_description('o_test81'::regclass);
                orioledb_table_description                
 ---------------------------------------------------------
  Compress = -1, Primary compress = 6, TOAST compress = 7+
-  Column |   Type | Collation | Nullable | Droped       +
-     key | bigint |    (null) |    false |  false       +
-   value | bigint |    (null) |    false |  false       +
+  Column |   Type | Collation | Nullable | Dropped      +
+     key | bigint |    (null) |    false |   false      +
+   value | bigint |    (null) |    false |   false      +
  
 (1 row)
 
@@ -5537,10 +5537,10 @@ SELECT orioledb_table_description('o_test83'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-     key |  bigint |    (null) |    false |  false        +
-     val | integer |    (null) |     true |  false        +
-    val2 | integer |    (null) |    false |  false        +
+  Column |    Type | Collation | Nullable | Dropped       +
+     key |  bigint |    (null) |    false |   false       +
+     val | integer |    (null) |     true |   false       +
+    val2 | integer |    (null) |    false |   false       +
  
 (1 row)
 
@@ -5566,10 +5566,10 @@ SELECT orioledb_table_description('o_test83'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-     key |  bigint |    (null) |    false |  false        +
-    vala | integer |    (null) |     true |  false        +
-    val2 | integer |    (null) |    false |  false        +
+  Column |    Type | Collation | Nullable | Dropped       +
+     key |  bigint |    (null) |    false |   false       +
+    vala | integer |    (null) |     true |   false       +
+    val2 | integer |    (null) |    false |   false       +
  
 (1 row)
 
@@ -5781,9 +5781,9 @@ SELECT orioledb_table_description('o_test_renames'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-     key |  bigint |    (null) |    false |  false        +
-     val | integer |    (null) |     true |  false        +
+  Column |    Type | Collation | Nullable | Dropped       +
+     key |  bigint |    (null) |    false |   false       +
+     val | integer |    (null) |     true |   false       +
  
 (1 row)
 
@@ -5791,9 +5791,9 @@ SELECT description FROM orioledb_table WHERE reloid = 'o_test_renames'::regclass
                         description                        
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-     key |  bigint |    (null) |    false |  false        +
-     val | integer |    (null) |     true |  false        +
+  Column |    Type | Collation | Nullable | Dropped       +
+     key |  bigint |    (null) |    false |   false       +
+     val | integer |    (null) |     true |   false       +
  
 (1 row)
 
@@ -5821,13 +5821,13 @@ SELECT orioledb_tbl_indices('o_test_renames'::regclass);
 (1 row)
 
 SELECT description FROM orioledb_index WHERE index_reloid = 'o_test_renames_idx'::regclass;
-                    description                     
-----------------------------------------------------
-  Column |    Type | Collation | Nullable | Droped +
-     val | integer |    (null) |     true |  false +
-     key |  bigint |    (null) |    false |  false +
-                                                   +
- Key fields: (val, key)                            +
+                     description                     
+-----------------------------------------------------
+  Column |    Type | Collation | Nullable | Dropped +
+     val | integer |    (null) |     true |   false +
+     key |  bigint |    (null) |    false |   false +
+                                                    +
+ Key fields: (val, key)                             +
  
 (1 row)
 
@@ -5966,12 +5966,12 @@ SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-   val_1 | integer |    (null) |    false |  false        +
-   val_2 |    text |         C |    false |  false        +
-   val_3 | integer |    (null) |     true |  false        +
-   val_4 | integer |    (null) |     true |  false        +
-   val_5 | integer |    (null) |     true |  false        +
+  Column |    Type | Collation | Nullable | Dropped       +
+   val_1 | integer |    (null) |    false |   false       +
+   val_2 |    text |         C |    false |   false       +
+   val_3 | integer |    (null) |     true |   false       +
+   val_4 | integer |    (null) |     true |   false       +
+   val_5 | integer |    (null) |     true |   false       +
  
 (1 row)
 
@@ -6200,12 +6200,12 @@ SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-   val_1 | integer |    (null) |    false |  false        +
-   val_2 |    text |     POSIX |    false |  false        +
-   val_3 | integer |    (null) |     true |  false        +
-   val_4 | integer |    (null) |     true |  false        +
-   val_5 | integer |    (null) |     true |  false        +
+  Column |    Type | Collation | Nullable | Dropped       +
+   val_1 | integer |    (null) |    false |   false       +
+   val_2 |    text |     POSIX |    false |   false       +
+   val_3 | integer |    (null) |     true |   false       +
+   val_4 | integer |    (null) |     true |   false       +
+   val_5 | integer |    (null) |     true |   false       +
  
 (1 row)
 
@@ -6338,12 +6338,12 @@ SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |         Type | Collation | Nullable | Droped   +
-   val_1 |      integer |    (null) |    false |  false   +
-   val_2 |         text |     POSIX |    false |  false   +
-   val_3 |      integer |    (null) |     true |  false   +
-   val_4 |      integer |    (null) |     true |  false   +
-   val_5 | character(1) |   default |     true |  false   +
+  Column |         Type | Collation | Nullable | Dropped  +
+   val_1 |      integer |    (null) |    false |   false  +
+   val_2 |         text |     POSIX |    false |   false  +
+   val_3 |      integer |    (null) |     true |   false  +
+   val_4 |      integer |    (null) |     true |   false  +
+   val_5 | character(1) |   default |     true |   false  +
  
 (1 row)
 
@@ -6599,12 +6599,12 @@ SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |         Type | Collation | Nullable | Droped   +
-   val_1 |      integer |    (null) |    false |  false   +
-   val_2 |         text |     POSIX |    false |  false   +
-   val_3 |      integer |    (null) |     true |  false   +
-   val_4 |      integer |    (null) |     true |  false   +
-   val_5 | character(1) |   default |     true |  false   +
+  Column |         Type | Collation | Nullable | Dropped  +
+   val_1 |      integer |    (null) |    false |   false  +
+   val_2 |         text |     POSIX |    false |   false  +
+   val_3 |      integer |    (null) |     true |   false  +
+   val_4 |      integer |    (null) |     true |   false  +
+   val_5 | character(1) |   default |     true |   false  +
  
 (1 row)
 

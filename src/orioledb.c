@@ -1463,7 +1463,7 @@ orioledb_shmem_startup(void)
 	shared_segment = NULL;
 
 	/*
-	 * We must hold AddinShmemInitLock while initilization of our shared
+	 * We must hold AddinShmemInitLock while initialization of our shared
 	 * memory.
 	 */
 	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);

@@ -56,12 +56,12 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |      Type | Collation | Nullable | Droped      +
-       i |   integer |    (null) |    false |  false      +
-       j | integer[] |    (null) |     true |  false      +
-       p |     point |    (null) |     true |  false      +
-     pk1 |   integer |    (null) |     true |  false      +
-     pk2 |   integer |    (null) |     true |  false      +
+  Column |      Type | Collation | Nullable | Dropped     +
+       i |   integer |    (null) |    false |   false     +
+       j | integer[] |    (null) |     true |   false     +
+       p |     point |    (null) |     true |   false     +
+     pk1 |   integer |    (null) |     true |   false     +
+     pk2 |   integer |    (null) |     true |   false     +
  
 (1 row)
 
@@ -626,12 +626,12 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |      Type | Collation | Nullable | Droped      +
-       i |   integer |    (null) |    false |  false      +
-       j | integer[] |    (null) |     true |  false      +
-       p |     point |    (null) |     true |  false      +
-     pk1 |   integer |    (null) |    false |  false      +
-     pk2 |   integer |    (null) |    false |  false      +
+  Column |      Type | Collation | Nullable | Dropped     +
+       i |   integer |    (null) |    false |   false     +
+       j | integer[] |    (null) |     true |   false     +
+       p |     point |    (null) |     true |   false     +
+     pk1 |   integer |    (null) |    false |   false     +
+     pk2 |   integer |    (null) |    false |   false     +
  
 (1 row)
 
@@ -661,12 +661,12 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-       i | integer |    (null) |    false |  false        +
-       j | integer |    (null) |     true |  false        +
-       p |   point |    (null) |     true |  false        +
-     pk1 | integer |    (null) |    false |  false        +
-     pk2 | integer |    (null) |    false |  false        +
+  Column |    Type | Collation | Nullable | Dropped       +
+       i | integer |    (null) |    false |   false       +
+       j | integer |    (null) |     true |   false       +
+       p |   point |    (null) |     true |   false       +
+     pk1 | integer |    (null) |    false |   false       +
+     pk2 | integer |    (null) |    false |   false       +
  
 (1 row)
 
@@ -1279,14 +1279,14 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |      Type | Collation | Nullable | Droped      +
-       i |   integer |    (null) |    false |  false      +
-       j |   integer |    (null) |     true |  false      +
-       p |     point |    (null) |     true |  false      +
-     pk1 |   integer |    (null) |    false |  false      +
-     pk2 |   integer |    (null) |    false |  false      +
-       k |   integer |    (null) |     true |  false      +
-       r | integer[] |    (null) |     true |  false      +
+  Column |      Type | Collation | Nullable | Dropped     +
+       i |   integer |    (null) |    false |   false     +
+       j |   integer |    (null) |     true |   false     +
+       p |     point |    (null) |     true |   false     +
+     pk1 |   integer |    (null) |    false |   false     +
+     pk2 |   integer |    (null) |    false |   false     +
+       k |   integer |    (null) |     true |   false     +
+       r | integer[] |    (null) |     true |   false     +
  
 (1 row)
 
@@ -1350,14 +1350,14 @@ SELECT orioledb_table_description('o_test_ix_ams'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |      Type | Collation | Nullable | Droped      +
-       i |   integer |    (null) |    false |  false      +
-       j |   integer |    (null) |     true |  false      +
-       p |     point |    (null) |     true |  false      +
-     pk1 |   integer |    (null) |    false |  false      +
-     pk2 |   integer |    (null) |    false |  false      +
-       k |   integer |    (null) |     true |  false      +
-       r | integer[] |    (null) |     true |  false      +
+  Column |      Type | Collation | Nullable | Dropped     +
+       i |   integer |    (null) |    false |   false     +
+       j |   integer |    (null) |     true |   false     +
+       p |     point |    (null) |     true |   false     +
+     pk1 |   integer |    (null) |    false |   false     +
+     pk2 |   integer |    (null) |    false |   false     +
+       k |   integer |    (null) |     true |   false     +
+       r | integer[] |    (null) |     true |   false     +
  
 (1 row)
 

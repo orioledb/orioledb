@@ -2277,14 +2277,14 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	sscan = make_btree_seq_scan(&GET_PRIMARY(old_descr)->desc, &o_in_progress_snapshot, NULL);
 
 	/*
-	 * OrioleDB engine change execution order when relation is rewrited. So
-	 * real data transfer from old relation ti the new one executed after
-	 * dropping. So in statments with moving data from one column to another
-	 * via ALTER COLUMN and DROP we gather an error that collumn already
+	 * OrioleDB engine change execution order when relation is rewritten. So
+	 * real data transfer from old relation to the new one executed after
+	 * dropping. So in statements with moving data from one column to another
+	 * via ALTER COLUMN and DROP we gather an error that column already
 	 * dropped. To avoid this behavior mark column dropped in current
 	 * statement as not dropped. This is ugly solution actually need refactor
-	 * handling of ALTER TABLE to avoid global vars and lists that brings alot
-	 * of bugs.
+	 * handling of ALTER TABLE to avoid global vars and lists that brings a
+	 * lot of bugs.
 	 */
 	if (OidIsValid(o_saved_relrewrite))
 	{
@@ -3115,7 +3115,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					 * TODO: probably better way would be to add hook to
 					 * findDependentObjects and filter partition index
 					 * dependencies there, but for now
-					 * PERFORM_DELETION_OF_RELATION passed for partiton index
+					 * PERFORM_DELETION_OF_RELATION passed for partition index
 					 * dependency and I'm not sure how to properly filter out
 					 * only this kind of dependency and do not touch behaviour
 					 * that not drops indices during table drop to not rebuild
@@ -4624,8 +4624,8 @@ o_get_alter_type_expr(Relation rel, int attidx)
 		Oid			relOid = intVal(lsecond((List *) lfirst(lc)));
 
 		/*
-		 * To get correct expresion we need check both relation and attribute
-		 * number. Because of postgres inheritence allows different attribute
+		 * To get correct expression we need check both relation and attribute
+		 * number. Because of postgres inheritance allows different attribute
 		 * number for the same column in parent and child relations.
 		 */
 		if (relOid == rel->rd_rel->oid && attnum == attidx + 1)

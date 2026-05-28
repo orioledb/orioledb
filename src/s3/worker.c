@@ -927,7 +927,7 @@ s3worker_main(Datum main_arg)
 
 	SetProcessingMode(NormalProcessing);
 
-	/* catch SIGTERM signal for reason to not interupt background writing */
+	/* catch SIGTERM signal for reason to not interrupt background writing */
 	pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
 	BackgroundWorkerUnblockSignals();
 
@@ -974,7 +974,7 @@ s3worker_main(Datum main_arg)
 				ShutdownRequestPending = true;
 
 			/*
-			 * Task processing loop.  It might happend that error occurs and
+			 * Task processing loop.  It might happen that error occurs and
 			 * worker restarts.  We save the task location to the shared
 			 * memory to be able to process it after restart.
 			 */

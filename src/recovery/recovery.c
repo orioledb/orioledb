@@ -3369,7 +3369,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 	if (!cur_recovery_xid_state->o_tables_meta_locked)
 	{
 		/*
-		 * It might happend that we didn't replay WAL_REC_O_TABLES_META_LOCK
+		 * It might happen that we didn't replay WAL_REC_O_TABLES_META_LOCK
 		 * wal record.  That means we've finished index build before
 		 * checkpoint of a tree was actually started.
 		 */

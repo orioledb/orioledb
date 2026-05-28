@@ -1865,7 +1865,7 @@ free_btree_seq_scan(BTreeSeqScan *scan)
 
 /*
  * Error cleanup for sequential scans.  No scans survives the error, but they
- * are't cleaned up individually.  Thus, we have to walk trough all the scans
+ * aren't cleaned up individually.  Thus, we have to walk through all the scans
  * and revert changes made to the metaPageBlkno->numSeqScans.
  */
 void

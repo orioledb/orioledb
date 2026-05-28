@@ -3053,7 +3053,7 @@ retry:
 		{
 			/*
 			 * We didn't find downlink pointing to this page.  This could
-			 * happend because of concurrent split.  Give up then...
+			 * happened because of concurrent split.  Give up then...
 			 */
 			unlock_page(blkno);
 			unlock_page(context.items[context.index].blkno);

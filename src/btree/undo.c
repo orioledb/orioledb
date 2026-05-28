@@ -531,8 +531,8 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	if (cmp != 0)
 	{
 		/*
-		 * We can't find the required key.  This might happend if operation
-		 * was already "undone" earlier.
+		 * We can't find the required key.  This might happen if operation was
+		 * already "undone" earlier.
 		 */
 		unlock_page(blkno);
 		return;
@@ -546,7 +546,7 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	{
 		/*
 		 * The key is found, but it doesn't belong to our transaction.  Again,
-		 * this might happend if operation was already "undone" earlier.
+		 * this might happen if operation was already "undone" earlier.
 		 */
 		unlock_page(blkno);
 		return;
@@ -971,7 +971,7 @@ add_undo_relnode(ORelOids oldOids, OIndexKey *oldTrees, int oldNumTrees,
 	int			stepItemsCapacity = (O_MAX_UNDO_RECORD_SIZE - offsetof(RelnodeUndoStackItem, trees)) / sizeof(OIndexKey);
 
 	/*
-	 * This might happend before we accessed oxid.  So, ensure we've assigned
+	 * This might happen before we accessed oxid.  So, ensure we've assigned
 	 * it.
 	 */
 	(void) get_current_oxid();

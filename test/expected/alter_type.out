@@ -19,13 +19,13 @@ SELECT * FROM o_ddl_check;
 (3 rows)
 
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |         C |    false |  false +
-      f2 | character varying |   default |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
+                  orioledb_table_description                   
+---------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1    +
+  Column |              Type | Collation | Nullable | Dropped +
+      f1 |              text |         C |    false |   false +
+      f2 | character varying |   default |    false |   false +
+      f3 |           integer |    (null) |     true |   false +
  
 (1 row)
 
@@ -34,10 +34,10 @@ SELECT orioledb_table_description('o_ddl_check'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-      f1 |    text |         C |    false |  false        +
-      f2 |    text |   default |    false |  false        +
-      f3 | integer |    (null) |     true |  false        +
+  Column |    Type | Collation | Nullable | Dropped       +
+      f1 |    text |         C |    false |   false       +
+      f2 |    text |   default |    false |   false       +
+      f3 | integer |    (null) |     true |   false       +
  
 (1 row)
 
@@ -63,13 +63,13 @@ SELECT * FROM o_ddl_check;
 -- OK, because 'f2' isn't indexed
 ALTER TABLE o_ddl_check ALTER f2 TYPE varchar COLLATE "POSIX";
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |         C |    false |  false +
-      f2 | character varying |     POSIX |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
+                  orioledb_table_description                   
+---------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1    +
+  Column |              Type | Collation | Nullable | Dropped +
+      f1 |              text |         C |    false |   false +
+      f2 | character varying |     POSIX |    false |   false +
+      f3 |           integer |    (null) |     true |   false +
  
 (1 row)
 
@@ -95,13 +95,13 @@ SELECT * FROM o_ddl_check;
 -- OK, because binary compatible and collations match
 ALTER TABLE o_ddl_check ALTER f1 TYPE text;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |   default |    false |  false +
-      f2 | character varying |     POSIX |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
+                  orioledb_table_description                   
+---------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1    +
+  Column |              Type | Collation | Nullable | Dropped +
+      f1 |              text |   default |    false |   false +
+      f2 | character varying |     POSIX |    false |   false +
+      f3 |           integer |    (null) |     true |   false +
  
 (1 row)
 
@@ -127,13 +127,13 @@ SELECT * FROM o_ddl_check;
 -- OK, because binary compatible and collations match
 ALTER TABLE o_ddl_check ALTER f1 TYPE varchar COLLATE "POSIX";
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 | character varying |     POSIX |    false |  false +
-      f2 | character varying |     POSIX |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
+                  orioledb_table_description                   
+---------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1    +
+  Column |              Type | Collation | Nullable | Dropped +
+      f1 | character varying |     POSIX |    false |   false +
+      f2 | character varying |     POSIX |    false |   false +
+      f3 |           integer |    (null) |     true |   false +
  
 (1 row)
 
@@ -159,13 +159,13 @@ SELECT * FROM o_ddl_check;
 -- OK, because binary compatible and collations match
 ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |         C |    false |  false +
-      f2 | character varying |     POSIX |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
+                  orioledb_table_description                   
+---------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1    +
+  Column |              Type | Collation | Nullable | Dropped +
+      f1 |              text |         C |    false |   false +
+      f2 | character varying |     POSIX |    false |   false +
+      f3 |           integer |    (null) |     true |   false +
  
 (1 row)
 
@@ -191,13 +191,13 @@ SELECT * FROM o_ddl_check;
 -- OK, because same type and collation
 ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "C";
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |         C |    false |  false +
-      f2 | character varying |     POSIX |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
+                  orioledb_table_description                   
+---------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1    +
+  Column |              Type | Collation | Nullable | Dropped +
+      f1 |              text |         C |    false |   false +
+      f2 | character varying |     POSIX |    false |   false +
+      f3 |           integer |    (null) |     true |   false +
  
 (1 row)
 
@@ -223,13 +223,13 @@ SELECT * FROM o_ddl_check;
 -- OK, because binary compatible and collations match
 ALTER TABLE o_ddl_check ALTER f1 TYPE text COLLATE "POSIX";
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |     POSIX |    false |  false +
-      f2 | character varying |     POSIX |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
+                  orioledb_table_description                   
+---------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1    +
+  Column |              Type | Collation | Nullable | Dropped +
+      f1 |              text |     POSIX |    false |   false +
+      f2 | character varying |     POSIX |    false |   false +
+      f3 |           integer |    (null) |     true |   false +
  
 (1 row)
 
@@ -261,13 +261,13 @@ ALTER TABLE o_ddl_check ALTER f2 TYPE timestamp
   USING f2::timestamp without time zone;
 ERROR:  invalid input syntax for type timestamp: "ABC2"
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |     POSIX |    false |  false +
-      f2 | character varying |     POSIX |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
+                  orioledb_table_description                   
+---------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1    +
+  Column |              Type | Collation | Nullable | Dropped +
+      f1 |              text |     POSIX |    false |   false +
+      f2 | character varying |     POSIX |    false |   false +
+      f3 |           integer |    (null) |     true |   false +
  
 (1 row)
 
@@ -297,10 +297,10 @@ SELECT orioledb_table_description('o_ddl_check'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |         Type | Collation | Nullable | Droped   +
-      f1 |         text |     POSIX |    false |  false   +
-      f2 | character(1) |   default |    false |  false   +
-      f3 |      integer |    (null) |     true |  false   +
+  Column |         Type | Collation | Nullable | Dropped  +
+      f1 |         text |     POSIX |    false |   false  +
+      f2 | character(1) |   default |    false |   false  +
+      f3 |      integer |    (null) |     true |   false  +
  
 (1 row)
 
@@ -330,10 +330,10 @@ SELECT orioledb_table_description('o_ddl_check'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-      f1 |    text |     POSIX |    false |  false        +
-      f2 | integer |    (null) |    false |  false        +
-      f3 | integer |    (null) |     true |  false        +
+  Column |    Type | Collation | Nullable | Dropped       +
+      f1 |    text |     POSIX |    false |   false       +
+      f2 | integer |    (null) |    false |   false       +
+      f3 | integer |    (null) |     true |   false       +
  
 (1 row)
 
@@ -361,10 +361,10 @@ SELECT orioledb_table_description('o_ddl_check'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |         Type | Collation | Nullable | Droped   +
-      f1 |         text |     POSIX |    false |  false   +
-      f2 | character(1) |   default |    false |  false   +
-      f3 |      integer |    (null) |     true |  false   +
+  Column |         Type | Collation | Nullable | Dropped  +
+      f1 |         text |     POSIX |    false |   false  +
+      f2 | character(1) |   default |    false |   false  +
+      f3 |      integer |    (null) |     true |   false  +
  
 (1 row)
 
@@ -860,23 +860,23 @@ INSERT INTO o_test_alter_coercible(val_int4, val_oid, val_regconfig,
 			   'pg_stat_scan_tables', 'abs(numeric)', '"C"',
 			   'information_schema', 'pg_type', 'simple', 'int2vector');
 SELECT orioledb_table_description('o_test_alter_coercible'::regclass);
-                     orioledb_table_description                      
----------------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1          +
-             Column |          Type | Collation | Nullable | Droped +
-           val_int4 |       integer |    (null) |    false |  false +
-            val_oid |           oid |    (null) |    false |  false +
-      val_regconfig |     regconfig |    (null) |    false |  false +
-        val_regproc |       regproc |    (null) |    false |  false +
-        val_regoper |       regoper |    (null) |    false |  false +
-    val_regoperator |   regoperator |    (null) |    false |  false +
-        val_regrole |       regrole |    (null) |    false |  false +
-   val_regprocedure |  regprocedure |    (null) |    false |  false +
-   val_regcollation |  regcollation |    (null) |    false |  false +
-   val_regnamespace |  regnamespace |    (null) |    false |  false +
-       val_regclass |      regclass |    (null) |    false |  false +
-  val_regdictionary | regdictionary |    (null) |    false |  false +
-        val_regtype |       regtype |    (null) |    false |  false +
+                      orioledb_table_description                      
+----------------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1           +
+             Column |          Type | Collation | Nullable | Dropped +
+           val_int4 |       integer |    (null) |    false |   false +
+            val_oid |           oid |    (null) |    false |   false +
+      val_regconfig |     regconfig |    (null) |    false |   false +
+        val_regproc |       regproc |    (null) |    false |   false +
+        val_regoper |       regoper |    (null) |    false |   false +
+    val_regoperator |   regoperator |    (null) |    false |   false +
+        val_regrole |       regrole |    (null) |    false |   false +
+   val_regprocedure |  regprocedure |    (null) |    false |   false +
+   val_regcollation |  regcollation |    (null) |    false |   false +
+   val_regnamespace |  regnamespace |    (null) |    false |   false +
+       val_regclass |      regclass |    (null) |    false |   false +
+  val_regdictionary | regdictionary |    (null) |    false |   false +
+        val_regtype |       regtype |    (null) |    false |   false +
  
 (1 row)
 
@@ -918,23 +918,23 @@ ALTER TABLE o_test_alter_coercible
 ALTER TABLE o_test_alter_coercible
 	ALTER COLUMN val_regtype SET DATA TYPE int4;
 SELECT orioledb_table_description('o_test_alter_coercible'::regclass);
-                  orioledb_table_description                   
----------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1    +
-             Column |    Type | Collation | Nullable | Droped +
-           val_int4 | integer |    (null) |    false |  false +
-            val_oid | integer |    (null) |    false |  false +
-      val_regconfig | integer |    (null) |    false |  false +
-        val_regproc | integer |    (null) |    false |  false +
-        val_regoper | integer |    (null) |    false |  false +
-    val_regoperator | integer |    (null) |    false |  false +
-        val_regrole | integer |    (null) |    false |  false +
-   val_regprocedure | integer |    (null) |    false |  false +
-   val_regcollation | integer |    (null) |    false |  false +
-   val_regnamespace | integer |    (null) |    false |  false +
-       val_regclass | integer |    (null) |    false |  false +
-  val_regdictionary | integer |    (null) |    false |  false +
-        val_regtype | integer |    (null) |    false |  false +
+                   orioledb_table_description                   
+----------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1     +
+             Column |    Type | Collation | Nullable | Dropped +
+           val_int4 | integer |    (null) |    false |   false +
+            val_oid | integer |    (null) |    false |   false +
+      val_regconfig | integer |    (null) |    false |   false +
+        val_regproc | integer |    (null) |    false |   false +
+        val_regoper | integer |    (null) |    false |   false +
+    val_regoperator | integer |    (null) |    false |   false +
+        val_regrole | integer |    (null) |    false |   false +
+   val_regprocedure | integer |    (null) |    false |   false +
+   val_regcollation | integer |    (null) |    false |   false +
+   val_regnamespace | integer |    (null) |    false |   false +
+       val_regclass | integer |    (null) |    false |   false +
+  val_regdictionary | integer |    (null) |    false |   false +
+        val_regtype | integer |    (null) |    false |   false +
  
 (1 row)
 

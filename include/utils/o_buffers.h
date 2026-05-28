@@ -23,14 +23,14 @@ typedef struct OBuffersGroup OBuffersGroup;
 
 typedef struct
 {
-	/* these fields are initilized by user */
+	/* these fields are initialized by user */
 	uint64		singleFileSize;
 	const char *filenameTemplate[OBuffersMaxTags];
 	const char *groupCtlTrancheName;
 	const char *bufferCtlTrancheName;
 	uint32		buffersCount;
 
-	/* these fields are initilized in o_buffers.c */
+	/* these fields are initialized in o_buffers.c */
 	uint32		groupsCount;
 	OBuffersMeta *metaPageBlkno;
 	OBuffersGroup *groups;

@@ -681,9 +681,9 @@ SELECT orioledb_table_description('o_test_unique_same_layout_as_pkey'::regclass)
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-    val1 | integer |    (null) |    false |  false        +
-    val2 |    text |   default |    false |  false        +
+  Column |    Type | Collation | Nullable | Dropped       +
+    val1 | integer |    (null) |    false |   false       +
+    val2 |    text |   default |    false |   false       +
  
 (1 row)
 
@@ -713,8 +713,8 @@ SELECT orioledb_table_description('o_test_pkey_include_same_field'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-   val_1 | integer |    (null) |    false |  false        +
+  Column |    Type | Collation | Nullable | Dropped       +
+   val_1 | integer |    (null) |    false |   false       +
  
 (1 row)
 

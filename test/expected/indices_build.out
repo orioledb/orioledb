@@ -23714,10 +23714,10 @@ SELECT orioledb_table_description('o_test_default_volatile'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-       a | integer |    (null) |     true |  false        +
-       d | integer |    (null) |     true |  false        +
-       b | integer |    (null) |     true |  false        +
+  Column |    Type | Collation | Nullable | Dropped       +
+       a | integer |    (null) |     true |   false       +
+       d | integer |    (null) |     true |   false       +
+       b | integer |    (null) |     true |   false       +
  
 (1 row)
 

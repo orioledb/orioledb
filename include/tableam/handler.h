@@ -158,7 +158,7 @@ typedef enum
  * Each backend participating in a parallel table scan has its own BTreeSeqScan
  * in its memory, that contains a pointer to ParallelOScanDescData. The
  * information here is sufficient to properly initialize each new BTreeSeqScan
- * as workers join the scan, and to coordiate their scans.
+ * as workers join the scan, and to coordinate their scans.
  */
 
 typedef struct BTreeIntPageParallelData
