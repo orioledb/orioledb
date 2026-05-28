@@ -281,7 +281,6 @@ extern void systrees_lock_callback(UndoLogType undoType,
 								   UndoLocation location,
 								   UndoStackItem *baseItem, OXid oxid,
 								   OUndoCallbackStage stage, bool changeCountsValid);
-extern void before_writing_xids_file(int chkpnum);
 extern void write_to_xids_queue(XidFileRec *rec);
 void		checkpoint_write_rewind_item(RewindItem *rewindItem);
 

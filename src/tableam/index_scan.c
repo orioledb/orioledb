@@ -30,6 +30,9 @@
 #include "parser/parse_coerce.h"
 #include "pgstat.h"
 
+static void eanalyze_counter_explain(OEACallsCounter *counter, char *label,
+									 char *ix_name, ExplainState *es);
+
 void
 init_index_scan_state(OPlanState *o_plan_state, OScanState *ostate, Relation index,
 					  ExprContext *econtext, IndexRuntimeKeyInfo **runtimeKeys,
@@ -616,7 +619,7 @@ eanalyze_counters_init(OEACallsCounters *eacc, OTableDescr *descr)
 }
 
 /* adds explain analyze info for particular index */
-void
+static void
 eanalyze_counter_explain(OEACallsCounter *counter, char *label,
 						 char *ix_name, ExplainState *es)
 {

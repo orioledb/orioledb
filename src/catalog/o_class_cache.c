@@ -77,7 +77,7 @@ O_SYS_CACHE_INIT_FUNC(class_cache)
 									 fastcache, mcxt, &class_cache_funcs);
 }
 
-void
+static void
 o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
 	Relation	rel;
@@ -147,7 +147,7 @@ o_class_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	relation_close(rel, AccessShareLock);
 }
 
-void
+static void
 o_class_cache_free_entry(Pointer entry)
 {
 	OClass	   *o_class = (OClass *) entry;
@@ -156,7 +156,7 @@ o_class_cache_free_entry(Pointer entry)
 	pfree(o_class);
 }
 
-Pointer
+static Pointer
 o_class_cache_serialize_entry(Pointer entry, int *len)
 {
 	StringInfoData str;
@@ -178,7 +178,7 @@ o_class_cache_serialize_entry(Pointer entry, int *len)
 
 }
 
-Pointer
+static Pointer
 o_class_cache_deserialize_entry(MemoryContext mcxt, Pointer data, Size length)
 {
 	Pointer		ptr = data;

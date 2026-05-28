@@ -194,9 +194,7 @@ typedef struct
 #define ORIOLEDB_WAL_PREFIX	"o_wal"
 #define ORIOLEDB_WAL_PREFIX_SIZE (5)
 
-extern const char *wal_record_type_to_string(int wal_record);
 
-extern void add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_version);
 
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, OffsetNumber length, char relreplident, uint32 version, uint32 base_version);

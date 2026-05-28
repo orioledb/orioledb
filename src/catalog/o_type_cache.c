@@ -59,7 +59,7 @@ O_SYS_CACHE_INIT_FUNC(type_cache)
 									fastcache, mcxt, &type_cache_funcs);
 }
 
-void
+static void
 o_type_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
 	HeapTuple	typetup;
@@ -109,7 +109,7 @@ o_type_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	ReleaseSysCache(typetup);
 }
 
-void
+static void
 o_type_cache_free_entry(Pointer entry)
 {
 	OType	   *o_type = (OType *) entry;

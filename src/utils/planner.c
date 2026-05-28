@@ -283,7 +283,7 @@ o_process_sql_function(HeapTuple procedureTuple, WalkerFunc walker,
 	error_context_stack = sqlerrcontext.previous;
 }
 
-Node *
+static Node *
 o_wrap_top_funcexpr(Node *node)
 {
 	static NamedArgExpr named_arg = {.xpr = {.type = T_NamedArgExpr}};
@@ -851,7 +851,7 @@ o_collect_funcexpr(Node *node)
 	list_free_deep(processed);
 }
 
-void
+static void
 o_collect_function_walker(Oid functionId, Oid inputcollid, List *args,
 						  void *context)
 {

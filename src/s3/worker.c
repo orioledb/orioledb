@@ -46,6 +46,9 @@
 #include <unistd.h>
 
 
+static S3TaskLocation s3_schedule_file_part_read(uint32 chkpNum, OIndexKey key,
+												 int32 segNum, int32 partNum);
+
 #define WORKERS_FILE_CHECKSUMS_MAX_LEN 100
 
 typedef struct S3WorkerCtl
@@ -659,7 +662,7 @@ s3_schedule_file_part_write(uint32 chkpNum, OIndexKey key,
 /*
  * Schedule the read of given data file part from S3.
  */
-S3TaskLocation
+static S3TaskLocation
 s3_schedule_file_part_read(uint32 chkpNum, OIndexKey key, int32 segNum,
 						   int32 partNum)
 {

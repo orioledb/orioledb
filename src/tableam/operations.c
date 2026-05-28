@@ -45,6 +45,11 @@
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 
+static void set_pending_sk_marker_from_slot(UndoLocation pkUndoLoc, void *arg);
+static void set_pending_sk_marker_from_modify_arg(UndoLocation pkUndoLoc,
+												  void *arg);
+static int	o_exclusion_cmp(OIndexDescr *id, OBTreeKeyBound *key1, OTuple *tuple2);
+
 /*
  * Set ODBProcData.pendingSkUndoLoc to mark the PK-applied/SK-pending
  * window so that any checkpointer scan in between sees this row's
@@ -62,13 +67,13 @@
  * in BTreeModifyCallbackInfo.  Each call site picks the variant that
  * matches its `arg`.
  */
-void
+static void
 set_pending_sk_marker_from_slot(UndoLocation pkUndoLoc, void *arg)
 {
 	set_pending_sk_marker(((OTableSlot *) arg)->descr, pkUndoLoc);
 }
 
-void
+static void
 set_pending_sk_marker_from_modify_arg(UndoLocation pkUndoLoc, void *arg)
 {
 	set_pending_sk_marker(((OModifyCallbackArg *) arg)->descr, pkUndoLoc);
@@ -599,7 +604,7 @@ bridged_index_fill_pkey_bound(TupleTableSlot *slot, OIndexDescr *primary, OBTree
 	}
 }
 
-int
+static int
 o_exclusion_cmp(OIndexDescr *id, OBTreeKeyBound *key1, OTuple *tuple2)
 {
 	TupleDesc	tupdesc;

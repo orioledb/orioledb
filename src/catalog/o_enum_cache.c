@@ -130,7 +130,7 @@ o_enum_cache_add_all(Oid datoid, Oid enum_oid, XLogRecPtr insert_lsn)
 	table_close(enum_rel, AccessShareLock);
 }
 
-void
+static void
 o_enum_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
 	HeapTuple	enumtup;
@@ -167,7 +167,7 @@ o_enum_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	ReleaseSysCache(enumtup);
 }
 
-void
+static void
 o_enumoid_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
 	HeapTuple	enumtup;
@@ -200,13 +200,13 @@ o_enumoid_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	ReleaseSysCache(enumtup);
 }
 
-void
+static void
 o_enum_cache_free_entry(Pointer entry)
 {
 	pfree(entry);
 }
 
-void
+static void
 o_enumoid_cache_free_entry(Pointer entry)
 {
 	pfree(entry);

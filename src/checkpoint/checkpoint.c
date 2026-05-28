@@ -62,6 +62,8 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 
+static void before_writing_xids_file(int chkpnum);
+
 /*
  * Single action in B-tree checkpoint loop.
  */
@@ -156,8 +158,8 @@ typedef struct
 } SysTreesLockUndoStackItem;
 
 CheckpointState *checkpoint_state = NULL;
-MemoryContext chkp_main_context = NULL;
-MemoryContext chkp_tree_context = NULL;
+static MemoryContext chkp_main_context = NULL;
+static MemoryContext chkp_tree_context = NULL;
 
 static char *xidFilename = NULL;
 static uint32 xidFileCheckpointnum = 0;
@@ -796,7 +798,7 @@ write_to_xids_queue(XidFileRec *rec)
 /*
  * Prepare xids queue for writes.
  */
-void
+static void
 before_writing_xids_file(int chkpnum)
 {
 	int			i;

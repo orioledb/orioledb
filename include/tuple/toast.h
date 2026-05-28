@@ -94,9 +94,6 @@ extern ToastAPI tableToastAPI;
 extern bool generic_toast_insert(ToastAPI *api, void *key, Pointer data,
 								 Size data_size, OXid oxid, CommitSeqNo csn,
 								 void *arg);
-extern void generic_toast_sort_add(ToastAPI *api, void *key, Pointer data,
-								   Size data_size, Tuplesortstate *sortstate,
-								   void *arg);
 extern bool generic_toast_update(ToastAPI *api, void *key, Pointer data,
 								 Size data_size, OXid oxid, CommitSeqNo csn,
 								 void *arg);
@@ -116,8 +113,6 @@ extern bool generic_toast_delete_optional_wal(ToastAPI *api, void *key,
 											  void *arg, bool wal);
 
 /* Returns tuple only if its size equals data_size, or NULL otherwise */
-extern Pointer generic_toast_get(ToastAPI *api, void *key, Size data_size,
-								 OSnapshot *snapshot, void *arg);
 
 /* Returns tuple and size of data if found, or NULL otherwise */
 extern Pointer generic_toast_get_any(ToastAPI *api, void *key,
@@ -160,9 +155,6 @@ extern void o_toast_sort_add(OTableDescr *descr,
 extern bool o_toast_delete(OTableDescr *descr,
 						   OTuple pk, uint16 attn,
 						   OXid oxid, CommitSeqNo csn);
-extern Pointer o_toast_get(OTableDescr *descr,
-						   OTuple pk, uint16 attn, Size data_size,
-						   OSnapshot *snapshot);
 
 extern int	o_toast_cmp(BTreeDescr *desc, void *p1, BTreeKeyType k1,
 						void *p2, BTreeKeyType k2);

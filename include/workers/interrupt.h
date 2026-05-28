@@ -14,7 +14,6 @@
 #ifndef __WORKERS_INTERRUPT_H__
 #define __WORKERS_INTERRUPT_H__
 
-extern void o_worker_shutdown(int elevel);
 extern void o_worker_handle_interrupts(void);
 
 #endif							/* __WORKERS_INTERRUPT_H__ */

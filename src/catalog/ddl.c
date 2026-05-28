@@ -104,6 +104,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+static IndexBuildResult o_pkey_result;
+static void o_drop_table(ORelOids oids);
+
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
 
@@ -119,7 +122,7 @@ static ORelOids saved_oids;
 static bool in_rewrite = false;
 List	   *reindex_list = NIL;
 Query	   *savedDataQuery = NULL;
-IndexBuildResult o_pkey_result = {0};
+static IndexBuildResult o_pkey_result = {0};
 bool		o_in_add_column = false;
 static CreateStmt *create_stmt = NULL;
 static List *o_added_columns = NIL;
@@ -2164,7 +2167,7 @@ CreateOrioledbDestReceiver(Relation rel)
 	return (DestReceiver *) self;
 }
 
-void
+static void
 o_drop_table(ORelOids oids)
 {
 	OSnapshot	oSnapshot;

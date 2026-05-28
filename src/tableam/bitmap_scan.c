@@ -57,7 +57,7 @@ typedef struct OBitmapScan
 static bool o_bitmap_is_range_valid(OTuple low, OTuple high, void *arg);
 static bool o_bitmap_get_next_key(OFixedKey *key, bool inclusive, void *arg);
 
-BTreeSeqScanCallbacks bitmap_seq_scan_callbacks = {
+static BTreeSeqScanCallbacks bitmap_seq_scan_callbacks = {
 	.isRangeValid = o_bitmap_is_range_valid,
 	.getNextKey = o_bitmap_get_next_key
 };

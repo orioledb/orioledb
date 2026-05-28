@@ -50,6 +50,9 @@
 #include "utils/syscache.h"
 #include "pgstat.h"
 
+static void o_invalidate_comparator_cache(Oid opfamily, Oid lefttype,
+										  Oid righttype);
+
 typedef struct
 {
 	OnCommitUndoStackItem header;
@@ -1855,7 +1858,7 @@ o_add_comparator_to_cache(OComparator *comparator)
 	return cached;
 }
 
-void
+static void
 o_invalidate_comparator_cache(Oid opfamily, Oid lefttype, Oid righttype)
 {
 	OComparator *comparator;

@@ -138,7 +138,7 @@ static OXidMapItem *xidBuffer;
 
 XidMeta    *xid_meta;
 
-pg_atomic_uint32 *logicalXidsShmemMap;
+static pg_atomic_uint32 *logicalXidsShmemMap;
 
 OSnapshot	o_in_progress_snapshot = {COMMITSEQNO_INPROGRESS, InvalidXLogRecPtr, 0, 0};
 
@@ -891,6 +891,8 @@ wait_for_oxid(OXid oxid, bool errorOk)
 
 /*
  * Notify wait_for_oxid() caller only if it is waiting for current process.
+ *
+ * No existing callers.
  */
 void
 oxid_notify(OXid oxid)

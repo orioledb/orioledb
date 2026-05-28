@@ -524,7 +524,11 @@ o_fill_key_bound(OIndexDescr *id, OTuple tuple,
 	}
 }
 
-/* fills bridge index key bound from bridge index tuple */
+/*
+ * Fills bridge index key bound from bridge index tuple.
+ *
+ * No existing callers.
+ */
 void
 o_fill_bridge_index_key_bound(BTreeDescr *secondary, OTuple tuple, OBTreeKeyBound *bound)
 {

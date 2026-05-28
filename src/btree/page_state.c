@@ -696,6 +696,8 @@ try_lock_page(OInMemoryBlkno blkno)
 
 /*
  * Declare newly created page as already locked by our process.
+ *
+ * No existing callers.
  */
 void
 delare_page_as_locked(OInMemoryBlkno blkno)
@@ -1272,6 +1274,8 @@ extern void log_btree(BTreeDescr *desc);
 
 /*
  * Check if page has a consistent structure.
+ *
+ * No existing callers.
  */
 void
 o_check_page_struct(BTreeDescr *desc, Page p)

@@ -37,6 +37,9 @@
 #include "utils/fmgrprotos.h"
 #include "utils/numeric.h"
 
+static void btree_page_stopevent_params_internal(BTreeDescr *desc, Page p,
+												 JsonbParseState **state);
+
 LWLockPadded *unique_locks;
 int			num_unique_locks;
 
@@ -340,7 +343,7 @@ btree_desc_stopevent_params_internal(BTreeDescr *desc, JsonbParseState **state)
 		jsonb_push_string_key(state, "treeName", o_get_tree_def(desc)->name.data);
 }
 
-void
+static void
 btree_page_stopevent_params_internal(BTreeDescr *desc, Page p,
 									 JsonbParseState **state)
 {
