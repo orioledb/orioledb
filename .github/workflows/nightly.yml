@@ -1,8 +1,11 @@
 name: nightly
 
 on:
-  schedule:
-    - cron: '0 2 * * *'  # 02:00 UTC daily
+  # Cron disabled until the first manual workflow_dispatch from `main` is
+  # validated. Re-enable in a follow-up PR once the publish path (docker push +
+  # GitHub Release) has been confirmed end-to-end.
+  # schedule:
+  #   - cron: '0 2 * * *'  # 02:00 UTC daily
   workflow_dispatch:
 
 permissions:
