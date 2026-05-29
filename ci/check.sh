@@ -72,9 +72,7 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
     make -C src/test/isolation installcheck -j $(nproc) || status=$?
     make -C src/test/subscription installcheck -j $(nproc) || status=$?
 
-    # For now we don't run following tests on Postgres 18 as some of the tests
-    # fail and they need to be fixed first
-    if [ $status -eq 0 ] && [ $PG_VERSION != "18" ]; then
+    if [ $status -eq 0 ]; then
         echo "default_table_access_method = 'orioledb'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
 
         git apply patches/limit.patch
