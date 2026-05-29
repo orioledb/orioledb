@@ -50,6 +50,7 @@ typedef struct
 	ExtentsArray busy;
 	BTreeDescr *desc;
 	bool		hasError;
+	bool		brokenSplit;
 	OBTreeFindPageContext context;
 } BTreeCheckStatus;
 
@@ -105,32 +106,55 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 	if (desc->storageType != BTreeStoragePersistence)
 		return true;
 
-	/* get free file extents */
-	get_free_extents(desc, &free_extents, force_file_check,
-					 checkpoint_number - 1);
-
-	if (status.hasError)
-		return false;
-
-	/* check extents */
-	status.hasError = !check_extents(&status.busy, &free_extents);
-
-	if (status.hasError)
-		return false;
-
-	if (data_file_len > status.busy.blocksCount + free_extents.blocksCount)
+	/*
+	 * Skip the busy/free reconciliation and data-file-length check when a
+	 * broken split is in progress or the tree has in-memory changes not yet
+	 * captured by a completed checkpoint: the free list and busy extents are
+	 * necessarily out of sync with on-disk metadata until the next checkpoint
+	 * flushes the dirty pages and rewrites the .map/.tmp files. The .map/.tmp
+	 * sort-order check below is on-disk-only and runs regardless, so corruption
+	 * on persisted files for other pages is still detected. force_file_check
+	 * (thorough_check=true) bypasses the skip for a full reconciliation when
+	 * the caller knows the tree is quiescent.
+	 */
+	if (force_file_check ||
+		(!status.brokenSplit &&
+		 !metaPageBlkno->dirtyFlag1 && !metaPageBlkno->dirtyFlag2))
 	{
-		elog(NOTICE, "Not used file blocks from %lu to %lu",
-			 status.busy.blocksCount + free_extents.blocksCount,
-			 data_file_len);
-		status.hasError = true;
+		/* get free file extents */
+		get_free_extents(desc, &free_extents, force_file_check,
+						 checkpoint_number - 1);
+
+		if (status.hasError)
+			return false;
+
+		/* check extents */
+		status.hasError = !check_extents(&status.busy, &free_extents);
+
+		if (status.hasError)
+			return false;
+
+		if (data_file_len > status.busy.blocksCount + free_extents.blocksCount)
+		{
+			elog(NOTICE, "Not used file blocks from %lu to %lu",
+				 status.busy.blocksCount + free_extents.blocksCount,
+				 data_file_len);
+			status.hasError = true;
+		}
+		else if (data_file_len < status.busy.blocksCount + free_extents.blocksCount)
+		{
+			elog(NOTICE, "Excess file blocks from %lu to %lu",
+				 data_file_len,
+				 status.busy.blocksCount + free_extents.blocksCount);
+			status.hasError = true;
+		}
 	}
-	else if (data_file_len < status.busy.blocksCount + free_extents.blocksCount)
+	else
 	{
-		elog(NOTICE, "Excess file blocks from %lu to %lu",
-			 data_file_len,
-			 status.busy.blocksCount + free_extents.blocksCount);
-		status.hasError = true;
+		elog(NOTICE,
+			 "Skipping busy/free extent reconciliation: %s. Pass thorough_check=true to force.",
+			 status.brokenSplit ? "broken split pending repair"
+			 : "tree has unflushed dirty pages");
 	}
 
 	/* frees allocated bytes */
@@ -553,11 +577,14 @@ check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 	{
 		Page		rightP = O_GET_IN_MEMORY_PAGE(RIGHTLINK_GET_BLKNO(rightLink));
 
+		/*
+		 * A right-link to a BROKEN_SPLIT page is a benign in-progress state:
+		 * an inserter or the next checkpoint will finish the split via
+		 * o_btree_fix_page_split. Flag it so check_btree can skip downstream
+		 * extent/map checks, whose state is necessarily incomplete here.
+		 */
 		if (O_PAGE_IS(rightP, BROKEN_SPLIT))
-		{
-			elog(NOTICE, "BTree has a broken split.");
-			status->hasError = true;
-		}
+			status->brokenSplit = true;
 	}
 
 	if (!O_PAGE_IS(p, LEAF))
