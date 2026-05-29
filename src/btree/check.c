@@ -54,7 +54,7 @@ typedef struct
 } BTreeCheckStatus;
 
 static int	file_extent_cmp(const void *p1, const void *p2);
-static void check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
+static OInMemoryBlkno check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 							 OInMemoryBlkno parentPagenum);
 static void add_extent(ExtentsArray *arr, FileExtent extent);
 static bool check_extents(ExtentsArray *busy, ExtentsArray *free);
@@ -527,7 +527,7 @@ add_extent(ExtentsArray *arr, FileExtent extent)
 	arr->blocksCount += extent.len;
 }
 
-static void
+static OInMemoryBlkno
 check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 				 OInMemoryBlkno parentPagenum)
 {
@@ -537,7 +537,7 @@ check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 	OBTreeFindPageContext *context = &status->context;
 	FileExtent	extent;
 	uint64		rightLink;
-	OInMemoryBlkno brokenRightBlkno = OInvalidInMemoryBlkno;
+	OInMemoryBlkno rightLinkBlkno = OInvalidInMemoryBlkno;
 
 	Assert(OInMemoryBlknoIsValid(blkno));
 
@@ -551,28 +551,7 @@ check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 
 	rightLink = header->rightLink;
 	if (RightLinkIsValid(rightLink))
-	{
-		OInMemoryBlkno rightBlkno = RIGHTLINK_GET_BLKNO(rightLink);
-		Page		rightP = O_GET_IN_MEMORY_PAGE(rightBlkno);
-
-		if (O_PAGE_IS(rightP, BROKEN_SPLIT))
-		{
-			/*
-			 * Right page is the freshly-allocated half of an in-progress
-			 * split whose parent downlink hasn't been installed yet.  It is
-			 * reachable from the tree only through this rightlink.  If we
-			 * skipped it here, its extent (and any subtree it carries, for a
-			 * non-leaf split) would be misreported by check_extents() as
-			 * "neither free or busy".  Walk it as if it were a regular
-			 * downlink child so its extent joins the busy set.  The
-			 * checkpointer normally finishes such splits via
-			 * checkpoint_fix_split_and_lock_page(), but orioledb_tbl_check()
-			 * must give a correct answer even when a phase-1 split happens to
-			 * be live at the moment of the check.
-			 */
-			brokenRightBlkno = rightBlkno;
-		}
-	}
+		rightLinkBlkno = RIGHTLINK_GET_BLKNO(rightLink);
 
 	if (!O_PAGE_IS(p, LEAF))
 	{
@@ -586,8 +565,33 @@ check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 
 			if (DOWNLINK_IS_IN_MEMORY(tuphdr->downlink))
 			{
-				check_walk_btree(status, DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink),
-								 blkno);
+				OInMemoryBlkno childBlkno = DOWNLINK_GET_IN_MEMORY_BLKNO(tuphdr->downlink);
+				OInMemoryBlkno pending = check_walk_btree(status, childBlkno, blkno);
+
+				/*
+				 * The child reported a rightlink target.  Resolve it under
+				 * the current page's lock: if P already carries a downlink
+				 * to it (next locator position), the loop will walk it
+				 * naturally; otherwise the right page is reachable only via
+				 * rightlink (live phase-1 split or abandoned-cleanup state),
+				 * so walk it now.  The chain continues for cascading splits.
+				 */
+				while (OInMemoryBlknoIsValid(pending))
+				{
+					BTreePageItemLocator peek = loc;
+
+					BTREE_PAGE_LOCATOR_NEXT(p, &peek);
+					if (BTREE_PAGE_LOCATOR_IS_VALID(p, &peek))
+					{
+						BTreeNonLeafTuphdr *nextHdr;
+
+						nextHdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &peek);
+						if (DOWNLINK_IS_IN_MEMORY(nextHdr->downlink) &&
+							DOWNLINK_GET_IN_MEMORY_BLKNO(nextHdr->downlink) == pending)
+							break;
+					}
+					pending = check_walk_btree(status, pending, blkno);
+				}
 			}
 			else if (DOWNLINK_IS_IN_IO(tuphdr->downlink))
 			{
@@ -610,13 +614,12 @@ check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 		add_extent(&status->busy, extent);
 	}
 
-	if (OInMemoryBlknoIsValid(brokenRightBlkno))
-		check_walk_btree(status, brokenRightBlkno, blkno);
-
 	if (OInMemoryBlknoIsValid(parentPagenum))
 		lock_page(parentPagenum);
 	unlock_page(blkno);
 	context->index--;
+
+	return rightLinkBlkno;
 }
 
 static void
