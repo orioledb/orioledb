@@ -40,6 +40,84 @@ class AmcheckTest(BaseTest):
 		    "SELECT * FROM verify_orioledb('o_t'::regclass, true);")
 		self.assertEqual(rows, [])
 
+	def _psql_verify(self, node, sql):
+		"""Run a verify_orioledb SQL via psql to capture stderr NOTICEs."""
+		res = subprocess.run([
+		    'psql', '-X', '-p',
+		    str(node.port), '-h', node.host, '-d', 'postgres', '-At', '-c', sql
+		],
+		                     capture_output=True,
+		                     text=True)
+		self.assertEqual(res.returncode, 0,
+		                 f"psql failed: {res.stderr!r}")
+		return res.stdout, res.stderr
+
+	def test_verify_orioledb_skips_reconciliation_when_dirty(self):
+		"""Default mode skips extent reconciliation on a tree with
+		uncheckpointed changes and emits a NOTICE; the next CHECKPOINT
+		clears dirtyFlag1/2 and reconciliation runs again silently."""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_t (k int PRIMARY KEY, v int) USING orioledb;
+			INSERT INTO o_t SELECT i, i FROM generate_series(1, 1000) i;
+			CHECKPOINT;
+		""")
+
+		# Clean tree: no skip NOTICE either mode.
+		stdout, stderr = self._psql_verify(
+		    node, "SELECT * FROM verify_orioledb('o_t'::regclass);")
+		self.assertEqual(stdout, '')
+		self.assertNotIn('Skipping', stderr)
+
+		# Dirty the tree without a CHECKPOINT.
+		node.safe_psql('postgres', "UPDATE o_t SET v = v + 1;")
+
+		# Default mode: returns clean with the explanatory NOTICE.
+		stdout, stderr = self._psql_verify(
+		    node, "SELECT * FROM verify_orioledb('o_t'::regclass);")
+		self.assertEqual(stdout, '',
+		                 f"unexpected verify output: {stdout!r}")
+		self.assertIn('Skipping busy/free extent reconciliation', stderr)
+		self.assertIn('tree has unflushed dirty pages', stderr)
+
+		# Settle the tree and confirm reconciliation runs silently again.
+		node.safe_psql('postgres', "CHECKPOINT;")
+		stdout, stderr = self._psql_verify(
+		    node, "SELECT * FROM verify_orioledb('o_t'::regclass);")
+		self.assertEqual(stdout, '')
+		self.assertNotIn('Skipping', stderr)
+		node.stop()
+
+	def test_verify_orioledb_thorough_check_bypasses_skip(self):
+		"""thorough_check=true forces full reconciliation even when the tree
+		has dirty pages: default mode emits the skip NOTICE, thorough mode
+		does not. Asserting both sides catches removal of the bypass and
+		removal of the skip itself."""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_t (k int PRIMARY KEY, v int) USING orioledb;
+			INSERT INTO o_t SELECT i, i FROM generate_series(1, 1000) i;
+			CHECKPOINT;
+			UPDATE o_t SET v = v + 1;
+		""")
+
+		_, stderr_default = self._psql_verify(
+		    node, "SELECT * FROM verify_orioledb('o_t'::regclass);")
+		_, stderr_thorough = self._psql_verify(
+		    node, "SELECT * FROM verify_orioledb('o_t'::regclass, true);")
+		self.assertIn('Skipping busy/free extent reconciliation',
+		              stderr_default,
+		              f"default mode missed skip NOTICE: {stderr_default!r}")
+		self.assertNotIn('Skipping', stderr_thorough,
+		                 f"thorough_check still skipped: {stderr_thorough!r}")
+		node.stop()
+
 	def test_verify_orioledb_no_false_positive_under_concurrent_load(self):
 		"""Pre-fix, a concurrent INSERT racing a CHECKPOINT could leave
 		extents written by the in-flight transaction not yet reflected in
