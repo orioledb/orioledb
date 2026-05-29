@@ -164,6 +164,7 @@ bool		enable_rewind = false;
 int			rewind_max_time = 0;
 int			rewind_max_transactions = 0;
 int			logical_xid_buffers_guc = 64;
+bool		safe_recovery_guc = false;
 bool		orioledb_strict_mode = false;
 XLogRecPtr	replay_until_lsn = InvalidXLogRecPtr;
 char	   *replay_until_lsn_string;
@@ -732,6 +733,21 @@ _PG_init(void)
 							NULL,
 							NULL,
 							NULL);
+
+	DefineCustomBoolVariable("orioledb.safe_recovery",
+							 "Defer applying OrioleDB WAL records until COMMIT is observed.",
+							 "When on, recovery buffers per-OXID records and applies them "
+							 "only after a COMMIT (or joint commit) is seen. Operations "
+							 "from transactions that never commit are skipped and LOGged. "
+							 "Use this to recover from a crash loop where the legacy "
+							 "redo path re-applies abandoned modifies.",
+							 &safe_recovery_guc,
+							 false,
+							 PGC_POSTMASTER,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
 
 	/*
 	 * This variable added because we need values less than minimum value of

@@ -196,6 +196,7 @@ extern pg_atomic_uint32 *worker_ptrs_changes;
 extern RecoveryWorkerPtrs *worker_ptrs;
 extern pg_atomic_uint64 *recovery_ptr;
 extern bool *recovery_single_process;
+extern bool *recovery_safe_process;
 extern RecoveryUndoLocFlush *recovery_undo_loc_flush;
 
 extern bool *was_in_recovery;

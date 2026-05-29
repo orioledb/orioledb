@@ -674,6 +674,7 @@ pg_atomic_uint64 *recovery_ptr;
 static pg_atomic_uint64 *recovery_main_retain_ptr;
 pg_atomic_uint64 *recovery_finished_list_ptr;
 bool	   *recovery_single_process;
+bool	   *recovery_safe_process;
 bool	   *was_in_recovery;
 pg_atomic_uint32 *after_recovery_cleaned;
 
@@ -730,6 +731,7 @@ recovery_shmem_needs(void)
 	size = add_size(size, mul_size(CACHELINEALIGN((Size) recovery_queue_size_guc * 1024),
 								   recovery_pool_size_guc + recovery_idx_pool_size_guc));
 	size = add_size(size, CACHELINEALIGN(sizeof(bool)));
+	size = add_size(size, CACHELINEALIGN(sizeof(bool)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
@@ -762,6 +764,9 @@ recovery_shmem_init(Pointer ptr, bool found)
 					recovery_pool_size_guc + recovery_idx_pool_size_guc);
 
 	recovery_single_process = (bool *) ptr;
+	ptr += CACHELINEALIGN(sizeof(bool));
+
+	recovery_safe_process = (bool *) ptr;
 	ptr += CACHELINEALIGN(sizeof(bool));
 
 	worker_finish_count = (pg_atomic_uint32 *) ptr;
@@ -827,6 +832,7 @@ recovery_shmem_init(Pointer ptr, bool found)
 		pg_atomic_init_u64(recovery_finished_list_ptr, InvalidXLogRecPtr);
 
 		*was_in_recovery = false;
+		*recovery_safe_process = false;
 		pg_atomic_init_u32(after_recovery_cleaned, 0);
 
 		pg_atomic_init_u64(recovery_index_next_pos, 0);
@@ -1060,8 +1066,13 @@ o_recovery_start_hook(void)
 	bool		recovery_single;
 
 	before_shmem_exit(recovery_on_proc_exit, (Datum) -1);
-	recovery_single = *recovery_single_process = IsFatalError();
-	if (recovery_single)
+	*recovery_safe_process = safe_recovery_guc;
+	recovery_single = *recovery_single_process = IsFatalError() || safe_recovery_guc;
+	if (*recovery_safe_process)
+	{
+		elog(LOG, "orioledb recovery started in safe_recovery mode.");
+	}
+	else if (recovery_single)
 	{
 		elog(LOG, "orioledb recovery after fatal error started.  Unable to make multiprocess recovery.");
 	}

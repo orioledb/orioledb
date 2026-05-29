@@ -480,6 +480,7 @@ extern bool enable_rewind;
 extern int	rewind_max_time;
 extern int	rewind_max_transactions;
 extern int	logical_xid_buffers_guc;
+extern bool safe_recovery_guc;
 extern bool orioledb_strict_mode;
 extern XLogRecPtr replay_until_lsn;
 
