@@ -134,6 +134,18 @@ retry:
 		 * row-level lock on this tuple.
 		 */
 		Assert(!UndoLocationIsValid(nonLockUndoLocation));
+
+		/*
+		 * Bridge index: the "revert insertion" branch below marks the tuple
+		 * deleted in place without touching tuphdr->undoLocation (which still
+		 * carries the INSERT's InvalidUndoLocation | command sentinel).  If a
+		 * later rollback re-enters here on the same tuple, there is no chain
+		 * to follow -- the rollback was already applied.
+		 */
+		if (desc->type == oIndexBridge &&
+			!UndoLocationIsValid(tuphdr->undoLocation))
+			return true;
+
 		Assert(UndoLocationIsValid(tuphdr->undoLocation));
 		Assert(UNDO_REC_EXISTS(desc->undoType, tuphdr->undoLocation));
 
