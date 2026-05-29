@@ -1041,6 +1041,26 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 		params = prepare_modify_start_params(desc);
 	STOPEVENT(STOPEVENT_MODIFY_START, params);
 
+	/*
+	 * Test hook: PANIC if recovery is replaying a modify on the reloid
+	 * named by orioledb.debug_modify_panic_reloid.  Gated on recovery
+	 * so live DML completes normally and writes WAL records; when the
+	 * postmaster is then crashed (e.g. via crash_with_os_buffer_loss)
+	 * with the in-flight transaction uncommitted, legacy recovery
+	 * re-applies those records and re-hits this gate -> crash loop.
+	 *
+	 * Used by safe_recovery_test.py to demonstrate that safe_recovery
+	 * breaks the loop by rejecting the uncommitted OXID before its
+	 * records are re-applied.
+	 */
+	if (unlikely(debug_modify_panic_reloid_guc != 0 &&
+				 is_recovery_in_progress() &&
+				 (Oid) debug_modify_panic_reloid_guc == desc->oids.reloid))
+		elog(PANIC,
+			 "debug_modify_panic_reloid: recovery PANIC on modify of "
+			 "reloid %u (relnode %u)",
+			 desc->oids.reloid, desc->oids.relnode);
+
 	/* No no key is separately given, use the tuple itself */
 	if (key == NULL)
 	{

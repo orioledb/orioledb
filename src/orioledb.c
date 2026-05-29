@@ -167,6 +167,7 @@ int			logical_xid_buffers_guc = 64;
 bool		safe_recovery_guc = false;
 int			safe_recovery_buf_size_guc = 262144;	/* 256 MB in KB */
 int			safe_recovery_log_per_xact_guc = 100;
+int			debug_modify_panic_reloid_guc = 0;
 bool		orioledb_strict_mode = false;
 XLogRecPtr	replay_until_lsn = InvalidXLogRecPtr;
 char	   *replay_until_lsn_string;
@@ -774,6 +775,25 @@ _PG_init(void)
 							0,
 							INT_MAX,
 							PGC_POSTMASTER,
+							0,
+							NULL,
+							NULL,
+							NULL);
+
+	/*
+	 * Test hook: when set to a non-zero relnode, any o_btree modify
+	 * (backend DML or recovery apply) targeting that relnode panics.
+	 * Used by test/t/safe_recovery_test.py to reproduce the crash loop
+	 * the safe_recovery feature targets.  Never enable in production.
+	 */
+	DefineCustomIntVariable("orioledb.debug_modify_panic_reloid",
+							"PANIC on every o_btree modify of this pg_class oid (testing only).",
+							"Set to 0 to disable.",
+							&debug_modify_panic_reloid_guc,
+							0,
+							0,
+							INT_MAX,
+							PGC_SIGHUP,
 							0,
 							NULL,
 							NULL,

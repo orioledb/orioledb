@@ -483,6 +483,7 @@ extern int	logical_xid_buffers_guc;
 extern bool safe_recovery_guc;
 extern int	safe_recovery_buf_size_guc;
 extern int	safe_recovery_log_per_xact_guc;
+extern int	debug_modify_panic_reloid_guc;
 extern bool orioledb_strict_mode;
 extern XLogRecPtr replay_until_lsn;
 
