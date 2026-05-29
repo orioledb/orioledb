@@ -187,6 +187,7 @@ TESTGRESCHECKS_PART_1 = test/t/checkpointer_test.py \
 						test/t/recovery_test.py \
 						test/t/recovery_opclass_test.py \
 						test/t/recovery_worker_test.py \
+						test/t/safe_recovery_test.py \
 						test/t/replication_test.py \
 						test/t/types_test.py \
 						test/t/undo_eviction_test.py \
