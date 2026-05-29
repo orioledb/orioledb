@@ -403,9 +403,9 @@ class SplitTest(BaseTest):
 		con = self.node.connect()
 		self.assertEqual(
 		    con.execute("SELECT COUNT(*) FROM o_split;")[0][0], expected_count)
-		self.assertEqual(
-		    con.execute("SELECT orioledb_tbl_check('o_split'::regclass)")[0]
-		    [0], expected_check_result)
+		rows = con.execute(
+		    "SELECT * FROM verify_orioledb('o_split'::regclass)")
+		self.assertEqual(rows == [], expected_check_result)
 		con.close()
 
 	# insert data to the split table

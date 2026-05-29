@@ -52,13 +52,12 @@ class CheckpointSplit3Test(CheckpointSplitBaseTest):
 
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 20)
-		node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)"
-		             )  # no errors, can be true or false
+		node.execute("SELECT * FROM verify_orioledb('o_checkpoint'::regclass)")
 		node.safe_psql('postgres', "CHECKPOINT;")
 		# no incomplete split
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_checkpoint'::regclass)"), [])
 
 		con1.close()
 		con2.close()
@@ -68,9 +67,9 @@ class CheckpointSplit3Test(CheckpointSplitBaseTest):
 		node.start()
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 20)
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_checkpoint'::regclass)"), [])
 		node.stop()
 
 	def test_checkpoint_split_concurrent_midle(self):
@@ -115,13 +114,12 @@ class CheckpointSplit3Test(CheckpointSplitBaseTest):
 
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 19)
-		node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)"
-		             )  # no errors, can be true or false
+		node.execute("SELECT * FROM verify_orioledb('o_checkpoint'::regclass)")
 		node.safe_psql('postgres', "CHECKPOINT;")
 		# no incomplete split
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_checkpoint'::regclass)"), [])
 
 		con1.close()
 		con2.close()
@@ -131,9 +129,9 @@ class CheckpointSplit3Test(CheckpointSplitBaseTest):
 		node.start()
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 19)
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_checkpoint'::regclass)"), [])
 		node.stop()
 
 	def test_checkpoint_split_concurrent_end(self):
@@ -184,12 +182,12 @@ class CheckpointSplit3Test(CheckpointSplitBaseTest):
 
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 41)
-		node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
+		node.execute("SELECT * FROM verify_orioledb('o_checkpoint'::regclass)")
 		node.safe_psql('postgres', "CHECKPOINT;")
 		# no incomplete split
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_checkpoint'::regclass)"), [])
 
 		con1.close()
 		con2.close()
@@ -199,9 +197,9 @@ class CheckpointSplit3Test(CheckpointSplitBaseTest):
 		node.start()
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 41)
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_checkpoint'::regclass)"), [])
 		node.stop()
 
 	def test_checkpoint_split_no_deadlock(self):
@@ -288,10 +286,12 @@ class CheckpointSplit3Test(CheckpointSplitBaseTest):
 
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 28)
-		# autonomous checkpoint write happens
-		self.assertFalse(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		node.execute("SELECT * FROM verify_orioledb('o_checkpoint'::regclass)")
+		node.safe_psql('postgres', "CHECKPOINT;")
+		# no incomplete split
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_checkpoint'::regclass)"), [])
 
 		con1.close()
 		con2.close()
@@ -300,9 +300,9 @@ class CheckpointSplit3Test(CheckpointSplitBaseTest):
 		node.start()
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 28)
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_checkpoint'::regclass)"), [])
 		node.stop()
 
 	def test_checkpoint_split_root_v2(self):
@@ -343,15 +343,13 @@ class CheckpointSplit3Test(CheckpointSplitBaseTest):
 
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 29)
-		# autonomous checkpoint page write happens
-		self.assertFalse(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		node.execute("SELECT * FROM verify_orioledb('o_checkpoint'::regclass)")
 
 		con1.execute("CHECKPOINT;")
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		# no incomplete split after the second checkpoint
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_checkpoint'::regclass)"), [])
 
 		con1.close()
 		con2.close()
@@ -360,9 +358,9 @@ class CheckpointSplit3Test(CheckpointSplitBaseTest):
 		node.start()
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 29)
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_checkpoint'::regclass)"), [])
 		node.stop()
 
 	def test_checkpoint_split_ok(self):

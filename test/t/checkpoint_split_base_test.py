@@ -110,15 +110,13 @@ class CheckpointSplitBaseTest(BaseTest):
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0],
 		    rows_amount)
-		node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)"
-		             )  # no errors, can be true or false
+		node.execute("SELECT * FROM verify_orioledb('o_checkpoint'::regclass)")
 
 		if with_second_checkpoint:
 			node.safe_psql('postgres', "CHECKPOINT;")
-			self.assertTrue(
-			    node.execute(
-			        "SELECT orioledb_tbl_check('o_checkpoint'::regclass)")[0]
-			    [0])
+			self.assertEqual(
+			    node.execute("SELECT * FROM verify_orioledb("
+			                 "'o_checkpoint'::regclass)"), [])
 
 		con1.close()
 		con2.close()
@@ -133,7 +131,7 @@ class CheckpointSplitBaseTest(BaseTest):
 
 		if not with_second_checkpoint:
 			node.safe_psql('postgres', "CHECKPOINT;")
-		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
-		    [0][0])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_checkpoint'::regclass)"), [])
 		node.stop()
