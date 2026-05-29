@@ -4815,7 +4815,7 @@ invalidate_typcache(void)
 	SendSharedInvalidMessages(&msg, 1);
 }
 
-static WalParseResult
+WalParseResult
 replay_check_version(const WalReaderState *r)
 {
 	Assert(r);
@@ -4831,7 +4831,7 @@ replay_check_version(const WalReaderState *r)
 	return WALPARSE_OK;
 }
 
-static WalParseResult
+WalParseResult
 replay_on_container(WalReaderState *r)
 {
 	if (r->container.flags & WAL_CONTAINER_HAS_XACT_INFO)
@@ -4846,20 +4846,6 @@ replay_on_container(WalReaderState *r)
 
 	return WALPARSE_OK;
 }
-
-typedef struct
-{
-	/* Input params */
-	bool		single;
-	XLogRecPtr	xlogRecPtr;
-	XLogRecPtr	xlogRecEndPtr;
-
-	/* Replay state params */
-	int			sys_tree_num;
-	OTableDescr *descr;
-	OIndexDescr *indexDescr;
-
-} ReplayWalDescCtx;
 
 /*
  * Params of the replay_on_record stop event: the record about to be replayed,
@@ -4886,7 +4872,7 @@ replay_record_stopevent_params(WalRecord *rec)
 	return res;
 }
 
-static WalParseResult
+WalParseResult
 replay_on_record(WalReaderState *r, WalRecord *rec)
 {
 	ReplayWalDescCtx *ctx = (ReplayWalDescCtx *) r->ctx;
