@@ -27,6 +27,7 @@
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
 #include "recovery/internal.h"
+#include "recovery/safe_recovery.h"
 #include "recovery/wal.h"
 #include "recovery/wal_reader.h"
 #include "replication/walreceiver.h"
@@ -694,9 +695,6 @@ static void flush_current_undo_stack(void);
 static void o_handle_startup_proc_interrupts_hook(void);
 static void abort_recovery(RecoveryWorkerState *workers_pool, bool send_to_idx_pool);
 
-static bool replay_container(Pointer ptr, Pointer endPtr,
-							 bool single, XLogRecPtr xlogRecPtr,
-							 XLogRecPtr xlogRecEndPtr);
 
 static void worker_send_modify(int worker_id, BTreeDescr *desc,
 							   RecoveryMsgType recType,
@@ -1071,6 +1069,7 @@ o_recovery_start_hook(void)
 	if (*recovery_safe_process)
 	{
 		elog(LOG, "orioledb recovery started in safe_recovery mode.");
+		safe_recovery_startup();
 	}
 	else if (recovery_single)
 	{
@@ -1232,8 +1231,16 @@ orioledb_redo(XLogReaderState *record)
 
 	if (record->ReadRecPtr >= checkpoint_state->controlReplayStartPtr)
 	{
-		if (!replay_container(msg_start, msg_start + msg_len, recovery_single,
-							  record->ReadRecPtr, record->EndRecPtr))
+		bool		ok;
+
+		if (*recovery_safe_process)
+			ok = safe_recovery_replay_container(msg_start, msg_start + msg_len,
+												record->ReadRecPtr,
+												record->EndRecPtr);
+		else
+			ok = replay_container(msg_start, msg_start + msg_len, recovery_single,
+								  record->ReadRecPtr, record->EndRecPtr);
+		if (!ok)
 		{
 			abort_recovery(workers_pool, false);
 			elog(ERROR, "orioledb recovery worker failed to replay WAL container.");
@@ -1256,6 +1263,9 @@ o_recovery_finish_hook(bool cleanup)
 	bool		recovery_single;
 
 	recovery_single = *recovery_single_process;
+
+	if (*recovery_safe_process)
+		safe_recovery_finish();
 
 	if (!recovery_single)
 	{
@@ -4127,7 +4137,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 /*
  * Replays a single orioledb WAL container.
  */
-static bool
+bool
 replay_container(Pointer startPtr, Pointer endPtr,
 				 bool single, XLogRecPtr xlogRecPtr, XLogRecPtr xlogRecEndPtr)
 {
@@ -4168,6 +4178,12 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn, bool commit)
 {
 	dlist_mutable_iter miter;
 	bool		single = *recovery_single_process;
+
+	if (*recovery_safe_process)
+	{
+		safe_recovery_xact_redo(xid, lsn, commit);
+		return;
+	}
 
 	dlist_foreach_modify(miter, &joint_commit_list)
 	{

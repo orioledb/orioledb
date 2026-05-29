@@ -56,6 +56,7 @@ OBJS = src/btree/btree.o \
 	   src/orioledb.o \
 	   src/recovery/logical.o \
 	   src/recovery/recovery.o \
+	   src/recovery/safe_recovery.o \
 	   src/recovery/wal.o \
 	   src/recovery/wal_reader.o \
 	   src/recovery/worker.o \

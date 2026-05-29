@@ -44,6 +44,9 @@ typedef struct
 extern WalParseResult replay_check_version(const WalReaderState *r);
 extern WalParseResult replay_on_container(WalReaderState *r);
 extern WalParseResult replay_on_record(WalReaderState *r, WalRecord *rec);
+extern bool replay_container(Pointer startPtr, Pointer endPtr,
+							 bool single, XLogRecPtr xlogRecPtr,
+							 XLogRecPtr xlogRecEndPtr);
 
 /*
  * Recovery transaction support functions.
