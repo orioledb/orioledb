@@ -63,11 +63,10 @@ jobs:
 
       - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
-      # TESTING-ONLY: docker hub login disabled while validating builds. Restore before merge.
-      # - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-      #   with:
-      #     username: ${{ secrets.DOCKERHUB_USERNAME }}
-      #     password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - id: meta
         uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
@@ -97,62 +96,58 @@ jobs:
             PG_MAJOR=${{ matrix.postgres }}
             ALPINE_VERSION=${{ matrix.distr == 'alpine' && matrix.distr_version || '' }}
             UBUNTU_VERSION=${{ matrix.distr == 'ubuntu' && matrix.distr_version || '' }}
-          # TESTING-ONLY: outputs disabled; build but do not push. Restore before merge.
-          # outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push=true,push-by-digest=true,name-canonical=true
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push=true,push-by-digest=true,name-canonical=true
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false # (как было)
           sbom: false
 
-      # TESTING-ONLY: no digests to export/upload when push is disabled. Restore before merge.
-      # # Export digest and meta
-      # - name: Export digest + meta
-      #   run: |
-      #     mkdir -p ${{ runner.temp }}/out
-      #     echo "${{ steps.build.outputs.digest }}" \
-      #       > ${{ runner.temp }}/out/${{ matrix.cpu }}-${{ matrix.postgres }}-${{ matrix.distr }}.digest
-      #     echo '${{ steps.meta.outputs.json }}' \
-      #       > ${{ runner.temp }}/out/${{ matrix.cpu }}-${{ matrix.postgres }}-${{ matrix.distr }}.meta.json
-      # - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-      #   with:
-      #     name: digests-${{ inputs.mode }}-${{ matrix.cpu }}-${{ matrix.postgres }}-${{ matrix.distr }}
-      #     path: ${{ runner.temp }}/out/*
-      #     retention-days: 1
+      # Export digest and meta
+      - name: Export digest + meta
+        run: |
+          mkdir -p ${{ runner.temp }}/out
+          echo "${{ steps.build.outputs.digest }}" \
+            > ${{ runner.temp }}/out/${{ matrix.cpu }}-${{ matrix.postgres }}-${{ matrix.distr }}.digest
+          echo '${{ steps.meta.outputs.json }}' \
+            > ${{ runner.temp }}/out/${{ matrix.cpu }}-${{ matrix.postgres }}-${{ matrix.distr }}.meta.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digests-${{ inputs.mode }}-${{ matrix.cpu }}-${{ matrix.postgres }}-${{ matrix.distr }}
+          path: ${{ runner.temp }}/out/*
+          retention-days: 1
 
-  # TESTING-ONLY: manifest job disabled while validating builds. Restore before merge.
-  #
-  # # Merge manifests for the digests built
-  # manifest:
-  #   needs: build
-  #   runs-on: ubuntu-24.04
-  #
-  #   steps:
-  #     - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-  #       with:
-  #         path: digests
-  #         merge-multiple: true
-  #         pattern: digests-${{ inputs.mode }}-*
-  #
-  #     - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-  #       with:
-  #         username: ${{ secrets.DOCKERHUB_USERNAME }}
-  #         password: ${{ secrets.DOCKERHUB_TOKEN }}
-  #
-  #     - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
-  #
-  #     - name: Create & push multi-arch manifests
-  #       shell: bash
-  #       run: |
-  #         set -euo pipefail
-  #         declare -A TAGS
-  #         while IFS= read -r -d '' meta; do
-  #           digest_file="${meta%.meta.json}.digest"
-  #           digest=$(cat "$digest_file")
-  #           while IFS= read -r tag; do
-  #             TAGS["$tag"]="${TAGS[$tag]:-} $REGISTRY_IMAGE@$digest"
-  #           done < <(jq -r '.tags[]' "$meta")
-  #         done < <(find digests -type f -name '*.meta.json' -print0)
-  #
-  #         for tag in "${!TAGS[@]}"; do
-  #           echo "⮑  $tag ⇒ ${TAGS[$tag]}"
-  #           docker buildx imagetools create -t "$tag" ${TAGS[$tag]}
-  #         done
+  # Merge manifests for the digests built
+  manifest:
+    needs: build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: digests
+          merge-multiple: true
+          pattern: digests-${{ inputs.mode }}-*
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Create & push multi-arch manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A TAGS
+          while IFS= read -r -d '' meta; do
+            digest_file="${meta%.meta.json}.digest"
+            digest=$(cat "$digest_file")
+            while IFS= read -r tag; do
+              TAGS["$tag"]="${TAGS[$tag]:-} $REGISTRY_IMAGE@$digest"
+            done < <(jq -r '.tags[]' "$meta")
+          done < <(find digests -type f -name '*.meta.json' -print0)
+
+          for tag in "${!TAGS[@]}"; do
+            echo "⮑  $tag ⇒ ${TAGS[$tag]}"
+            docker buildx imagetools create -t "$tag" ${TAGS[$tag]}
+          done
