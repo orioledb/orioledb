@@ -40,6 +40,73 @@ class AmcheckTest(BaseTest):
 		    "SELECT * FROM verify_orioledb('o_t'::regclass, true);")
 		self.assertEqual(rows, [])
 
+	def test_verify_orioledb_no_false_positive_under_concurrent_load(self):
+		"""Pre-fix, a concurrent INSERT racing a CHECKPOINT could leave
+		extents written by the in-flight transaction not yet reflected in
+		the on-disk free list, and verify_orioledb's default mode reported
+		a spurious ('o_t_pkey', 'check failed') row. The fix detects the
+		transient via the meta-page dirty flags and skips the extent
+		reconciliation. This test recreates the race with two ordinary
+		backends (no stopevents) and asserts the default mode stays clean
+		across many attempts; a clean CHECKPOINT must also leave both
+		modes clean afterwards."""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_t (id text PRIMARY KEY) USING orioledb;
+			INSERT INTO o_t
+				SELECT to_char(i, 'fm00000') || repeat('x', 2500)
+				FROM generate_series(1, 2000) i;
+			CHECKPOINT;
+		""")
+
+		# Repeatedly race a bulk INSERT against a concurrent CHECKPOINT.
+		# The INSERT uses a per-row pg_sleep so its total duration straddles
+		# the CHECKPOINT walk on any hardware (including slow CI / Valgrind):
+		# pages dirtied after the checkpointer has walked past their region
+		# are what produced the pre-fix false positive. Pre-fix this fails
+		# on attempt 0; post-fix default mode must stay clean every attempt.
+		attempts = 5
+		for attempt in range(attempts):
+			con_ins = node.connect()
+			con_chkp = node.connect()
+			lo = 10000 + attempt * 3000
+			hi = lo + 1999
+			t_ins = ThreadQueryExecutor(
+			    con_ins,
+			    "INSERT INTO o_t SELECT to_char(i, 'fm00000') || "
+			    "repeat('y', 2500) FROM generate_series("
+			    f"{lo}, {hi}) i, LATERAL (SELECT pg_sleep(0.0005)) s;")
+			t_chkp = ThreadQueryExecutor(con_chkp, "CHECKPOINT;")
+			t_ins.start()
+			# Fire CHECKPOINT well after INSERT has started but long before
+			# it ends (pg_sleep keeps INSERT alive ~1s, CHECKPOINT ~50ms).
+			time.sleep(0.05)
+			t_chkp.start()
+			t_ins.join()
+			t_chkp.join()
+			con_ins.close()
+			con_chkp.close()
+
+			rows = node.execute(
+			    "SELECT * FROM verify_orioledb('o_t'::regclass);")
+			self.assertEqual(
+			    rows, [],
+			    f"attempt {attempt}: default mode returned false positive: "
+			    f"{rows!r}")
+
+		# After a settling CHECKPOINT, both modes must be clean.
+		node.safe_psql('postgres', "CHECKPOINT;")
+		self.assertEqual(
+		    node.execute("SELECT * FROM verify_orioledb('o_t'::regclass);"),
+		    [])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_t'::regclass, true);"), [])
+		node.stop()
+
 	def test_verify_heapam_rejects_orioledb(self):
 		"""verify_heapam() must error on non-heap relations"""
 		node = self.node
