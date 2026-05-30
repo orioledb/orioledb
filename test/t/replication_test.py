@@ -1097,6 +1097,46 @@ class ReplicationTest(BaseTest):
 				                 con3.execute("SELECT * FROM foo ORDER BY i;"))
 				con3.close()
 
+	def test_recreate_o_table_version_replication(self):
+		# Adding a bridged secondary index to a freshly-created orioledb
+		# partition (BRIN here) drives o_define_index ->
+		# add_bridge_index -> recreate_o_table.  recreate_o_table calls
+		# o_tables_add(), which writes the sys-tree entry at version 0
+		# but leaves the in-memory o_table->version unchanged.  The
+		# subsequent o_tables_update() inside add_bridge_index then
+		# computes table->version + 1 from that stale value, so the
+		# sys-tree history of the new relnode goes 0 -> 2 with version 1
+		# missing.  On the standby, handle_o_tables_meta_unlock()
+		# replaying the trailing meta-unlock record (oldRelnode = 0)
+		# does o_tables_get_extended(oids, new_o_table->version - 1) to
+		# locate old_o_table -- with a hole in the version chain that
+		# lookup returns NULL and the startup process aborts on
+		# Assert(old_o_table).
+		with self.node as master:
+			master.start()
+
+			with self.getReplica().start() as replica:
+				master.safe_psql("CREATE EXTENSION orioledb;")
+				master.safe_psql("""
+					CREATE TABLE tab1 (
+						c text,
+						a int PRIMARY KEY,
+						b text
+					) PARTITION BY LIST (a);
+					CREATE INDEX tab1_c_brin_idx ON tab1 USING brin (c);
+					CREATE TABLE tab1_2_2 PARTITION OF tab1
+						FOR VALUES IN (4, 6) USING orioledb;
+				""")
+
+				self.catchup_orioledb(replica)
+				replica.poll_query_until(
+				    "SELECT orioledb_has_retained_undo();", expected=False)
+
+				self.assertEqual(NodeStatus.Running, replica.status())
+				self.assertEqual(
+				    0,
+				    replica.execute("SELECT count(*) FROM tab1_2_2;")[0][0])
+
 	def test_replication_hot_read(self):
 		with self.node as master:
 			master.start()
