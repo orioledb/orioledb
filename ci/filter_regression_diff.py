@@ -251,13 +251,30 @@ def dump_subtree(node: list):
 		dump_subtree(child)
 
 
-# Check if two condition strings are equal up to commutativity of operands.
-# E.g. "Hash Cond: (a.tenthous = i4.f1)" matches "Hash Cond: (i4.f1 = a.tenthous)"
+# Strip auto-generated "_N" alias suffixes (e.g. "joinme_1.f2j" -> "joinme.f2j")
+# from identifiers in a condition string.  Postgres assigns these suffixes
+# when the same base relation appears multiple times in a query, and the
+# planner can pick a different join shape on orioledb that ends up with a
+# different numbering even though the conditions are semantically equal.
+def _strip_alias_suffix(s: str) -> str:
+	return re.sub(r"(\w+?)_\d+(?=\.|\W|$)", r"\1", s)
+
+
+# Check if two condition strings are equal up to commutativity of operands
+# and auto-generated "_N" alias suffixes.  E.g. both
+# "Hash Cond: (a.tenthous = i4.f1)" and
+# "Hash Cond: (i4.f1 = a.tenthous)" match, and also
+# "Hash Cond: (foo_1.f2 = joinme.f2j)" matches
+# "Hash Cond: (joinme_1.f2j = foo_1.f2)".
 def is_commutative_cond_eq(s1: str, s2: str) -> bool:
 	if s1 == s2:
 		return True
-	m1 = re.match(r"^(.+:\s*\()(.+?)\s*=\s*(.+?)\)$", s1)
-	m2 = re.match(r"^(.+:\s*\()(.+?)\s*=\s*(.+?)\)$", s2)
+	n1 = _strip_alias_suffix(s1)
+	n2 = _strip_alias_suffix(s2)
+	if n1 == n2:
+		return True
+	m1 = re.match(r"^(.+:\s*\()(.+?)\s*=\s*(.+?)\)$", n1)
+	m2 = re.match(r"^(.+:\s*\()(.+?)\s*=\s*(.+?)\)$", n2)
 	if not m1 or not m2:
 		return False
 	return (m1.group(1) == m2.group(1)
