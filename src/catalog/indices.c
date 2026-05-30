@@ -262,6 +262,20 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 	o_tables_drop_by_oids(old_o_table->oids, oxid, oSnapshot.csn);
 	o_tables_add(o_table, oxid, oSnapshot.csn);
 
+	/*
+	 * o_tables_add() always inserts at sys-tree version 0, but it does not
+	 * touch the in-memory o_table->version field, which still carries the
+	 * pre-recreate value.  Callers (notably add_bridge_index ->
+	 * o_tables_update) compute the next version as table->version + 1, so
+	 * leaving the stale value here yields a sys-tree history with a hole (0,
+	 * <skipped>, +1).  handle_o_tables_meta_unlock() on the standby later
+	 * does o_tables_get_extended(oids, new_o_table->version - 1) to recover
+	 * old_o_table for an InvalidOid oldRelnode record, and a hole makes that
+	 * lookup return NULL.  Pin the in-memory version back to 0 to match what
+	 * we just wrote.
+	 */
+	o_table->version = 0;
+
 	is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
 	add_undo_truncate_relnode(oldOids, oldTrees, oldTreesNum,
 							  newOids, newTrees, newTreesNum, !is_temp);
