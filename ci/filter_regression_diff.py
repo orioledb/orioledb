@@ -453,9 +453,13 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				  and target_cur[1] == 'Hash Semi Join'):
 				src_up = True
 				target_up = True
-			elif (test_name == 'generated'
+			elif (test_name in ('generated', 'generated_stored', 'generated_virtual')
 				  and src_cur_value.startswith('Index Scan')
 				  and target_cur[1].startswith('Index Scan')):
+				# PG18 split generated into generated_stored / generated_virtual.
+				# Both inherit the gtest22c plan divergence: heap picks
+				# gtest22c_b_idx, orioledb picks the partial gtest22c_pred_idx
+				# after ALTER TABLE ALTER COLUMN ... SET EXPRESSION rebuild.
 				src_up = True
 				target_up = True
 			elif (test_name == 'updatable_views'
