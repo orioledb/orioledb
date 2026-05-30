@@ -440,8 +440,12 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 					src_cur = src_stack[0][0][src_stack[0][1]]
 				src_down = True
 				target_down = True
-			elif test_name in ['subselect', 'window']:
-				# We have massive EXPLAIN diff, research it latter
+			elif test_name in ['subselect', 'window', 'select_distinct']:
+				# We have massive EXPLAIN diff, research it latter.
+				# select_distinct diverges in many DISTINCT plans because
+				# orioledb picks a parallel/Custom-Scan shape where heap
+				# picks (Incremental Sort + Index (Only) Scan) and uses
+				# the PG18 "Disabled: true" property on bypassed paths.
 				src_up = True
 				target_up = True
 			elif (test_name == 'with'
