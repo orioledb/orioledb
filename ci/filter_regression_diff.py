@@ -492,8 +492,15 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				src_up = True
 				target_up = True
 			else:
-				print(f"src_cur[1] = {src_cur[1]}\ntarget_cur[1] = {target_cur[1]}")
-				raise RuntimeError(f"Unsupported tree diff. Add branch specifically for \"{test_name}\" test")
+				# Don't abort the whole filter run on an unrecognized plan
+				# divergence -- log the mismatch on stderr so it can still
+				# be eyeballed in CI logs, treat the two subtrees as
+				# non-equal, and let the caller keep the diff for review.
+				print(
+				    f"compare_trees: unsupported diff in test \"{test_name}\":"
+				    f" src=\"{src_cur[1]}\", target=\"{target_cur[1]}\"",
+				    file=sys.stderr)
+				return False
 
 		if src_down:
 			if goto_down_level(src_stack, src_cur) == False:
