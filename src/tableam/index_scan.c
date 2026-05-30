@@ -532,6 +532,17 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 		ostate->curKeyRange.empty = true;
 
 		pgstat_count_index_scan(ostate->scandesc.indexRelation);
+#if PG_VERSION_NUM >= 180000
+
+		/*
+		 * Match upstream AMs (nbtsearch.c::_bt_first et al.) and bump the
+		 * PG18 EXPLAIN ANALYZE "Index Searches" counter once per descent from
+		 * root.  This is the same point at which we account a logical index
+		 * scan for pgstat.
+		 */
+		if (ostate->scandesc.instrument)
+			ostate->scandesc.instrument->nsearches++;
+#endif
 	}
 
 	while (true)
