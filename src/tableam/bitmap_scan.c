@@ -513,6 +513,9 @@ exec_bitmap_index_state(OBitmapHeapPlanState *bitmap_state, PlanState *planstate
 	{
 		if (*tbm_result == NULL && *rbt_result == NULL)
 			*rbt_result = o_keybitmap_create();
+#if PG_VERSION_NUM >= 180000
+		node->biss_Instrument.nsearches++;
+#endif
 		nTuples = o_index_getbitmap(bitmap_state, node, *rbt_result, *tbm_result);
 	}
 	if (instrument)
