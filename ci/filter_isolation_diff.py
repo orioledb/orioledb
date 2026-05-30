@@ -54,6 +54,8 @@ allowedRegexes = {
 	r"ERROR:  could not serialize access due to concurrent delete": ['partition-key-update-3'],
 	r"ERROR:  orioledb does not support TID scan": ['*'],
 	r"ERROR:  orioledb does not support TID range scan": ['*'],
+	r"\s*->\s+Custom Scan \(o_scan\) on ios_bitmap": ['index-only-bitmapscan'],
+	r"\s+Bitmap heap scan": ['index-only-bitmapscan'],
 }
 
 def is_allowed_line(testName, line):
