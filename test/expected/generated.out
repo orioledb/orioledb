@@ -410,6 +410,7 @@ ALTER TABLE o_test_stored_drop
 	ALTER COLUMN b TYPE bigint,
 	ADD COLUMN x bigint GENERATED ALWAYS AS ((a + b) * 2) STORED;
 \d o_test_stored_drop
+SELECT * FROM o_test_stored_drop ORDER BY a NULLS LAST;
 \endif
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 8 other objects
@@ -421,6 +422,5 @@ drop cascades to table o_test_add_identity
 drop cascades to table o_test_generated_null
 drop cascades to table o_test_tableoid
 drop cascades to table o_test_generated_alter_type
-drop cascades to table o_test_stored_drop
 DROP SCHEMA generated_test CASCADE;
 RESET search_path;
