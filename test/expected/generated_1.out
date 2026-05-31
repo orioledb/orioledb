@@ -335,6 +335,60 @@ FROM o_test_set_expression ORDER BY i;
 
 DROP TABLE o_test_set_expression CASCADE;
 NOTICE:  drop cascades to materialized view o_test_set_expr_mv
+-- Virtual generated columns (PG18+).  Three regressions we hit on
+-- orioledb tables during ALTER TABLE rewrites:
+--   * CHECK constraint referencing a VIRTUAL gen col raised
+--     "unexpected virtual generated column reference" during ADD COLUMN
+--     ... DEFAULT ... CHECK (gen_col_expr) because the expression
+--     wasn't expanded before ExecCheck.
+--   * ALTER COLUMN ... TYPE ... USING <virtual_col_ref> raised the same
+--     error because the USING expression was likewise unexpanded.
+--   * A multi-action ALTER TABLE that dropped a VIRTUAL column in the
+--     same statement as ALTER COLUMN TYPE raised
+--     "cache lookup failed for type 0" because the rewrite loop touched
+--     the dropped attribute's type.
+SELECT current_setting('server_version_num')::int >= 180000 AS pg18 \gset
+\if :pg18
+-- CHECK referencing a virtual column survives an ADD COLUMN rewrite.
+CREATE TABLE o_test_virt_check (
+	a int PRIMARY KEY,
+	b int GENERATED ALWAYS AS (a * 2) VIRTUAL
+) USING orioledb;
+INSERT INTO o_test_virt_check (a) VALUES (10), (30);
+-- Adding a CHECK that holds for every row alongside a defaulted new
+-- column triggers the table rewrite without erroring.
+ALTER TABLE o_test_virt_check
+	ADD COLUMN c float8 DEFAULT 0 CHECK (b < 100);
+SELECT * FROM o_test_virt_check ORDER BY a;
+-- Same shape but the CHECK is violated by an existing row -- must raise
+-- the upstream check-constraint error, not the bare virtual reference.
+INSERT INTO o_test_virt_check (a) VALUES (50);
+ALTER TABLE o_test_virt_check
+	ADD COLUMN d float8 DEFAULT 0 CHECK (b < 50);
+-- USING expression that reads a virtual column.
+CREATE TABLE o_test_virt_using (
+	a int PRIMARY KEY,
+	b int GENERATED ALWAYS AS (a * 2) VIRTUAL,
+	e int
+) USING orioledb;
+INSERT INTO o_test_virt_using VALUES (1), (2);
+ALTER TABLE o_test_virt_using ALTER COLUMN e TYPE bigint USING b;
+SELECT * FROM o_test_virt_using ORDER BY a;
+-- Multi-action ALTER that drops a VIRTUAL column alongside an
+-- ALTER COLUMN ... TYPE rewrite.
+CREATE TABLE o_test_virt_drop (
+	a int, b int,
+	x int GENERATED ALWAYS AS ((a + b) * 2) VIRTUAL
+) USING orioledb;
+INSERT INTO o_test_virt_drop (a, b) VALUES (3, 7), (4, 11);
+ALTER TABLE o_test_virt_drop
+	DROP COLUMN x,
+	ALTER COLUMN a TYPE bigint,
+	ALTER COLUMN b TYPE bigint,
+	ADD COLUMN x bigint GENERATED ALWAYS AS ((a + b) * 2) VIRTUAL;
+\d o_test_virt_drop
+SELECT * FROM o_test_virt_drop ORDER BY a;
+\endif
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 8 other objects
 DETAIL:  drop cascades to table o_test_generated
