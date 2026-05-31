@@ -14,8 +14,59 @@ if [ $oomcount != $oomsbefore ]; then
     status=1
 fi
 
-# show diff if it exists
-for f in ` find ./orioledb/test ./postgresql/src/test -type f \( -name 'regression.diffs' -o -name 'regress_filtered.diffs' -o -name 'isolation_filtered.diffs' \) ` ; do
+# Surface filter residuals first -- these are the *actual* reasons a
+# streaming/installcheck-oriole run failed, since the full
+# regression.diffs is intentionally huge and most of it is expected
+# orioledb-vs-heap drift that gets filtered.  Run filter_*.py against
+# the source diffs the same way the test scripts do, so we always have
+# fresh residuals to print even if the test harness only kept the
+# unfiltered output around.
+declare -A residual_sources=(
+	["postgresql/src/test/recovery/tmp_check/filtered.out"]="postgresql/src/test/recovery/tmp_check/regression.diffs"
+	["postgresql/src/test/regress_filtered.diffs"]="postgresql/src/test/regress/regression.diffs"
+	["postgresql/src/test/isolation_filtered.diffs"]="postgresql/src/test/isolation/output_iso/regression.diffs"
+)
+for residual in "${!residual_sources[@]}"; do
+	source_diff="${residual_sources[$residual]}"
+	# Regenerate the residual if it's missing or stale relative to source
+	if [ -f "$source_diff" ] && [ ! -s "$residual" -o "$source_diff" -nt "$residual" ]; then
+		case "$residual" in
+			*isolation_filtered.diffs)
+				python3 ./orioledb/ci/filter_isolation_diff.py --diff "$source_diff" > "$residual" 2>/dev/null || true
+				;;
+			*)
+				python3 ./orioledb/ci/filter_regression_diff.py --diff "$source_diff" > "$residual" 2>/dev/null || true
+				;;
+		esac
+	fi
+	if [ -s "$residual" ]; then
+		echo "========= FILTER RESIDUAL: $residual (the lines below are what made the run fail; full diff is shown afterwards)"
+		# Summarize hunks per test for orientation
+		tests=$(grep -oE '/expected/[^/]+\.out' "$residual" | sort -u | tr '\n' ' ')
+		hunk_count=$(grep -c '^@@' "$residual" || true)
+		line_count=$(wc -l < "$residual")
+		echo "Tests with residual diffs: ${tests:-<none-parsed>}"
+		echo "Total residual hunks: ${hunk_count:-0}, lines: $line_count"
+		echo "----- residual contents -----"
+		head -n 500 "$residual"
+		if [ "$line_count" -gt 500 ]; then
+			echo "... (truncated $(($line_count - 500)) lines)"
+		fi
+		status=1
+	fi
+done
+
+# Then the full (unfiltered) diffs as a fallback, in case the residual
+# is empty but the source diff still exists (which means the filter
+# decided everything was OK -- shouldn't get here, but useful when
+# debugging the filter itself).
+for f in ` find ./orioledb/test ./postgresql/src/test -type f \( -name 'regression.diffs' -o -name 'regress_filtered.diffs' -o -name 'isolation_filtered.diffs' -o -name 'filtered.out' \) ` ; do
+	# Skip files we already printed as residuals above
+	case "$f" in
+		./postgresql/src/test/recovery/tmp_check/filtered.out) continue ;;
+		./postgresql/src/test/regress_filtered.diffs) continue ;;
+		./postgresql/src/test/isolation_filtered.diffs) continue ;;
+	esac
 	echo "========= Contents of $f (first 500 lines)"
 	head -n 500 $f
 	line_count=$(wc -l < $f)
