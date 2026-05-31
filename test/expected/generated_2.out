@@ -416,6 +416,34 @@ SELECT * FROM o_test_virt_drop ORDER BY a;
  4 | 11 | 30
 (2 rows)
 
+-- NOT NULL on a freshly added GENERATED column must be checked during
+-- the rewrite.  Without this we'd silently leave an x = NULL row
+-- behind; upstream PG raises
+-- "column \"x\" of relation contains null values".
+CREATE TABLE o_test_virt_notnull (
+	a int, b int,
+	x int GENERATED ALWAYS AS ((a + b) * 2) VIRTUAL
+) USING orioledb;
+INSERT INTO o_test_virt_notnull (a, b) VALUES (3, 7), (NULL, NULL);
+ALTER TABLE o_test_virt_notnull
+	DROP COLUMN x,
+	ALTER COLUMN a TYPE bigint,
+	ALTER COLUMN b TYPE bigint,
+	ADD COLUMN x bigint GENERATED ALWAYS AS ((a + b) * 2) VIRTUAL NOT NULL;
+ERROR:  column "x" of relation "o_test_virt_notnull" contains null values
+-- After deleting the offending row the rewrite succeeds.
+DELETE FROM o_test_virt_notnull WHERE a IS NULL AND b IS NULL;
+ALTER TABLE o_test_virt_notnull
+	DROP COLUMN x,
+	ALTER COLUMN a TYPE bigint,
+	ALTER COLUMN b TYPE bigint,
+	ADD COLUMN x bigint GENERATED ALWAYS AS ((a + b) * 2) VIRTUAL NOT NULL;
+SELECT * FROM o_test_virt_notnull ORDER BY a;
+ a | b | x  
+---+---+----
+ 3 | 7 | 20
+(1 row)
+
 -- Same shape but for a STORED generated column whose type was first
 -- altered to a varlena (numeric attlen=-1).  The dropped placeholder
 -- inherits attlen=-1, and the rewrite loop's "skip generated" branch
@@ -452,7 +480,7 @@ SELECT * FROM o_test_stored_drop ORDER BY a NULLS LAST;
 
 \endif
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 12 other objects
+NOTICE:  drop cascades to 13 other objects
 DETAIL:  drop cascades to table o_test_generated
 drop cascades to table o_test_generated_like
 drop cascades to table o_test_drop_expression
@@ -464,6 +492,7 @@ drop cascades to table o_test_generated_alter_type
 drop cascades to table o_test_virt_check
 drop cascades to table o_test_virt_using
 drop cascades to table o_test_virt_drop
+drop cascades to table o_test_virt_notnull
 drop cascades to table o_test_stored_drop
 DROP SCHEMA generated_test CASCADE;
 RESET search_path;
