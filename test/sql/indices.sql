@@ -2076,6 +2076,28 @@ ORDER BY x;
 
 RESET enable_seqscan;
 
+-- Combining "leading_col IS NOT NULL" with a trailing-column IS NULL
+-- qualifier against a unique btree should respect both predicates.  Heap
+-- returns 2 rows here; orioledb's btree scan currently drops the leading
+-- IS NOT NULL filter and returns all three (NULL, *) rows -- including
+-- (NULL, NULL), which the IS NOT NULL on unique2 should have excluded.
+-- See create_index "onek_with_null" regression block in upstream PG.
+CREATE TABLE o_test_null_mixed (
+	unique1 int,
+	unique2 int
+) USING orioledb;
+INSERT INTO o_test_null_mixed
+VALUES (NULL, -1), (NULL, 2147483647), (NULL, NULL),
+	   (100, NULL), (500, NULL);
+CREATE UNIQUE INDEX o_test_null_mixed_idx
+	ON o_test_null_mixed (unique2, unique1);
+SET enable_seqscan = OFF;
+-- Expected 2, orioledb currently returns 3.  Pinned to the buggy
+-- value so a future fix to btree NULL handling produces a focused diff.
+SELECT count(*) FROM o_test_null_mixed
+	WHERE unique1 IS NULL AND unique2 IS NOT NULL;
+RESET enable_seqscan;
+
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices CASCADE;

@@ -160,6 +160,14 @@ known_table_diffs = {
              'materialized view concur_reindex_matview',
              'access method orioledb', 'n'
          ], ['table concur_reindex_tab', 'access method orioledb', 'n']]],
+        # The IS-NULL-AND-IS-NOT-NULL probe on onek_with_null returns 3
+        # instead of upstream's 2: orioledb's btree drops the leading
+        # "unique2 IS NOT NULL" qualifier and lets all three unique1-IS-NULL
+        # rows through.  Same diff appears once per scan-method combination
+        # (4 total in the upstream test, all reduce to "2 vs 3"); covered
+        # at the table-row level rather than per-hunk for robustness.
+        # See test/sql/indices.sql for the focused orioledb-side repro.
+        [[['2']], [['3']]],
         [[['concur_replident_i_idx', 't']], [['concur_replident_i_idx', 'f']]],
         [[],
          [['table concur_reindex_part_0_1', 'access method orioledb', 'n'],

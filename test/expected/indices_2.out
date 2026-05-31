@@ -8842,6 +8842,32 @@ ORDER BY x;
 (1 row)
 
 RESET enable_seqscan;
+-- Combining "leading_col IS NOT NULL" with a trailing-column IS NULL
+-- qualifier against a unique btree should respect both predicates.  Heap
+-- returns 2 rows here; orioledb's btree scan currently drops the leading
+-- IS NOT NULL filter and returns all three (NULL, *) rows -- including
+-- (NULL, NULL), which the IS NOT NULL on unique2 should have excluded.
+-- See create_index "onek_with_null" regression block in upstream PG.
+CREATE TABLE o_test_null_mixed (
+	unique1 int,
+	unique2 int
+) USING orioledb;
+INSERT INTO o_test_null_mixed
+VALUES (NULL, -1), (NULL, 2147483647), (NULL, NULL),
+	   (100, NULL), (500, NULL);
+CREATE UNIQUE INDEX o_test_null_mixed_idx
+	ON o_test_null_mixed (unique2, unique1);
+SET enable_seqscan = OFF;
+-- Expected 2, orioledb currently returns 3.  Pinned to the buggy
+-- value so a future fix to btree NULL handling produces a focused diff.
+SELECT count(*) FROM o_test_null_mixed
+	WHERE unique1 IS NULL AND unique2 IS NOT NULL;
+ count 
+-------
+     3
+(1 row)
+
+RESET enable_seqscan;
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
 ------------------------------
@@ -8849,7 +8875,7 @@ SELECT orioledb_parallel_debug_stop();
 (1 row)
 
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 57 other objects
+NOTICE:  drop cascades to 58 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -8907,6 +8933,7 @@ drop cascades to table o_test_index_already_exists_skip
 drop cascades to table o_test_unique_include
 drop cascades to table o_test_saop
 drop cascades to table test_skip_bounds
+drop cascades to table o_test_null_mixed
 DROP SCHEMA indices CASCADE;
 NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to function smart_explain(text)
