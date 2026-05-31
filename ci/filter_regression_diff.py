@@ -324,8 +324,13 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 			# but it is clear, that we can't simply go to the next level without
 			# verifying "One-Time Filter" expr. So replace "Result" with it's property
 			#
+			# However, PG18 also wraps some subplans in a no-op Result whose
+			# only property is "Output: ...".  That is just a passthrough; the
+			# real comparison is between src and the Result's single child,
+			# so descend instead of pretending Output is the node value.
+			#
 			# TODO: May be better to rewrite tree builder?
-			if len(target_cur[2]):
+			if (len(target_cur[2]) and not target_cur[2][0].startswith("Output:")):
 				target_stack[0][0][target_stack[0][1]][1] = target_cur[2][0]
 			else:
 				target_down = True
@@ -349,11 +354,19 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				target_up = True
 		elif src_cur_value.startswith('Bitmap Heap Scan'):
 			if target_cur[1].startswith('Custom Scan'):
-				if target_cur[2][0] != 'Bitmap heap scan':
-					equal = False
-				else:
+				if target_cur[2][0] == 'Bitmap heap scan':
 					src_down = True
 					target_down = True
+				elif target_cur[2][0].startswith('Forward index'):
+					# heap built a Bitmap Heap Scan with a child Bitmap Index
+					# Scan; orioledb collapsed both into a single Custom Scan
+					# whose first property is "Forward index (only) scan of".
+					# Skip past both subtrees -- the Conds property already
+					# carries the index quals.
+					src_up = True
+					target_up = True
+				else:
+					equal = False
 			else:
 				equal = False
 		elif is_commutative_cond_eq(src_cur_value, target_cur[1]):
