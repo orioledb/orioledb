@@ -8782,11 +8782,12 @@ ORDER BY x;
 
 RESET enable_seqscan;
 -- Combining "leading_col IS NOT NULL" with a trailing-column IS NULL
--- qualifier against a unique btree should respect both predicates.  Heap
--- returns 2 rows here; orioledb's btree scan currently drops the leading
--- IS NOT NULL filter and returns all three (NULL, *) rows -- including
--- (NULL, NULL), which the IS NOT NULL on unique2 should have excluded.
--- See create_index "onek_with_null" regression block in upstream PG.
+-- qualifier against a unique btree must respect both predicates.  PG18's
+-- _bt_preprocess_keys rewrites a leading IS NOT NULL into a skip array
+-- with null_elem=false and no low_compare/high_compare; o_key_data_to_-
+-- key_range previously honored only low_compare/high_compare and lost
+-- the NULL exclusion entirely, so this query returned 3 (including the
+-- all-NULL row) instead of 2.  Verifies the fix in src/tableam/key_range.c.
 CREATE TABLE o_test_null_mixed (
 	unique1 int,
 	unique2 int
@@ -8797,13 +8798,11 @@ VALUES (NULL, -1), (NULL, 2147483647), (NULL, NULL),
 CREATE UNIQUE INDEX o_test_null_mixed_idx
 	ON o_test_null_mixed (unique2, unique1);
 SET enable_seqscan = OFF;
--- Expected 2, orioledb currently returns 3.  Pinned to the buggy
--- value so a future fix to btree NULL handling produces a focused diff.
 SELECT count(*) FROM o_test_null_mixed
 	WHERE unique1 IS NULL AND unique2 IS NOT NULL;
  count 
 -------
-     3
+     2
 (1 row)
 
 RESET enable_seqscan;

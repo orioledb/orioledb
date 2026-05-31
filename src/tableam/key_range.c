@@ -209,6 +209,18 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 									  &low, NULL, field);
 					res->low.keys[attnum] = low;
 				}
+				else if (!arrayKeys->null_elem && field->nullfirst)
+				{
+					/*
+					 * IS NOT NULL on the leading column gets rewritten by
+					 * _bt_preprocess_keys into a skip array with
+					 * null_elem=false and no low/high_compare; mirror the
+					 * SK_SEARCHNOTNULL handling above so we still cap the
+					 * scan boundary just past the NULL band.
+					 */
+					res->low.keys[attnum].flags =
+						O_VALUE_BOUND_LOWER | O_VALUE_BOUND_NULL;
+				}
 
 				/* Set up the upper bound from the skip scan high_compare key */
 				if (arrayKeys->high_compare)
@@ -222,6 +234,12 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 									  OidIsValid(hk->sk_subtype) ? hk->sk_subtype : field->inputtype,
 									  NULL, &high, field);
 					res->high.keys[attnum] = high;
+				}
+				else if (!arrayKeys->null_elem && !field->nullfirst)
+				{
+					/* Same NULL exclusion at the high end for nullslast. */
+					res->high.keys[attnum].flags =
+						O_VALUE_BOUND_UPPER | O_VALUE_BOUND_NULL;
 				}
 				arrayKeys++;
 				continue;
