@@ -2408,19 +2408,23 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			OTupleAttrFull *old_attr = OTupleDescAttrSlow(old_slot->tts_tupleDescriptor, i);
 			OTupleAttrFull *rel_attr = OTupleDescAttrSlow(rel->rd_att, i);
 
-			if (old_attr->attgenerated)
-				continue;
-
 			/*
 			 * Dropped columns leave a placeholder attribute with atttypid set
 			 * to InvalidOid; touching its type from get_typtype / domain /
-			 * default machinery would raise "cache lookup failed for type 0".
-			 * The workaround above can unmark old_slot's attisdropped to
-			 * allow same-statement USING expressions to read the old value,
-			 * so consult the relation's own tupdesc (which still reflects
-			 * pg_attribute) for the authoritative dropped status here.
-			 * Nothing useful to copy or default for a dropped attribute --
-			 * leave the slot null and move on.
+			 * default machinery would raise "cache lookup failed for type 0",
+			 * and a dropped-from-varlena placeholder paired with the
+			 * zero-initialized tts_values[i]/tts_isnull[i]=false produced by
+			 * the second phase's skip would later crash tts_orioledb_toast at
+			 * VARATT_IS_EXTERNAL_ONDISK(slot->tts_values[i]).  Force the slot
+			 * cell to null up front -- this check has to run before the
+			 * attgenerated short-circuit below, because a GENERATED column
+			 * that was later dropped would otherwise fall through the "skip
+			 * generated" branch and leave the slot zero-initialized.
+			 *
+			 * Consult the relation's own tupdesc (which still reflects
+			 * pg_attribute) for the authoritative dropped status here; the
+			 * workaround above can unmark old_slot's attisdropped to let
+			 * same-statement USING expressions read the old value.
 			 */
 			if (rel_attr->attisdropped)
 			{
@@ -2428,6 +2432,9 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 				new_slot->tts_isnull[i] = true;
 				continue;
 			}
+
+			if (old_attr->attgenerated)
+				continue;
 
 			expr = o_get_alter_type_expr(rel, i);
 
@@ -2527,11 +2534,11 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			OTupleAttrFull *old_attr = OTupleDescAttrSlow(old_slot->tts_tupleDescriptor, i);
 			OTupleAttrFull *rel_attr = OTupleDescAttrSlow(rel->rd_att, i);
 
-			if (!old_attr->attgenerated)
-				continue;
-
 			/* See note above: skip placeholder dropped attributes. */
 			if (rel_attr->attisdropped)
+				continue;
+
+			if (!old_attr->attgenerated)
 				continue;
 
 			expr = o_get_alter_type_expr(rel, i);

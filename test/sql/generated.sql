@@ -241,6 +241,27 @@ ALTER TABLE o_test_virt_drop
 \d o_test_virt_drop
 SELECT * FROM o_test_virt_drop ORDER BY a;
 
+-- Same shape but for a STORED generated column whose type was first
+-- altered to a varlena (numeric attlen=-1).  The dropped placeholder
+-- inherits attlen=-1, and the rewrite loop's "skip generated" branch
+-- used to fire before the dropped-skip, leaving tts_isnull[i] = false
+-- and tts_values[i] = 0; tts_orioledb_toast would then crash on
+-- VARATT_IS_EXTERNAL_ONDISK(NULL).
+CREATE TABLE o_test_stored_drop (
+	a int, b int,
+	x int GENERATED ALWAYS AS ((a + b) * 2) STORED
+) USING orioledb;
+INSERT INTO o_test_stored_drop (a, b) VALUES (3, 7), (4, 11);
+ALTER TABLE o_test_stored_drop ALTER COLUMN x TYPE numeric;
+INSERT INTO o_test_stored_drop (a, b) VALUES (NULL, NULL);
+ALTER TABLE o_test_stored_drop
+	DROP COLUMN x,
+	ALTER COLUMN a TYPE bigint,
+	ALTER COLUMN b TYPE bigint,
+	ADD COLUMN x bigint GENERATED ALWAYS AS ((a + b) * 2) STORED;
+\d o_test_stored_drop
+SELECT * FROM o_test_stored_drop ORDER BY a NULLS LAST;
+
 \endif
 
 DROP EXTENSION orioledb CASCADE;
