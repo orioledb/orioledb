@@ -105,7 +105,17 @@ knownErrors = {
 	# collate.icu.utf8 specific error.  o_find_collation_dependencies()
 	# stops at the first hit, so depending on pg_depend scan order the
 	# error names either the table or one of its indexes — match both.
-	r"ERROR:  cannot refresh collation \"en-x-icu\" because orioledb (table|index) \"[a-z0-9_]+\" uses it": ["collate.icu.utf8"]
+	r"ERROR:  cannot refresh collation \"en-x-icu\" because orioledb (table|index) \"[a-z0-9_]+\" uses it": ["collate.icu.utf8"],
+
+	# generated_stored and generated_virtual run in the same parallel
+	# group and both CREATE/DROP regress_user11.  Whichever lands first
+	# creates the role; the other test's CREATE USER errors out, and the
+	# DROP USER in generated_virtual fails on the leftover privileges from
+	# generated_stored.  Accept both shapes plus the dependent-object
+	# detail lines so the role-sharing test ordering doesn't break CI.
+	r"ERROR:  role \"regress_user11\" already exists": ["generated_stored"],
+	r"ERROR:  role \"regress_user11\" cannot be dropped because some objects depend on it": ["generated_virtual"],
+	r"privileges for (column \w+ of table|table) generated_stored_tests\.\w+": ["generated_virtual"],
 }
 
 # Regexps that allow us to completely skip comparasion of hunks containing these regexprs
