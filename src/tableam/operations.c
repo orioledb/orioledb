@@ -40,6 +40,10 @@
 #include "nodes/execnodes.h"
 #include "parser/parsetree.h"
 #include "pgstat.h"
+#if PG_VERSION_NUM >= 180000
+#include "replication/conflict.h"
+#include "replication/worker_internal.h"
+#endif
 #include "storage/bufmgr.h"
 #include "utils/datum.h"
 #include "utils/fmgroids.h"
@@ -248,6 +252,25 @@ static inline bool is_keys_eq(OIndexDescr *id, OBTreeKeyBound *k1, OBTreeKeyBoun
 static void o_report_duplicate(Relation rel, OIndexDescr *id,
 							   TupleTableSlot *slot);
 
+/*
+ * If we're inside a logical replication apply (or tablesync) worker, bump
+ * pg_stat_subscription_stats.confl_* the same way upstream's
+ * CheckAndReportConflict path does for heap tables.  Without this the
+ * counter stays at 0 because orioledb's tuple_insert raises the unique
+ * violation directly, bypassing ExecInsertIndexTuples and
+ * CheckAndReportConflict.
+ */
+#if PG_VERSION_NUM >= 180000
+static inline void
+o_report_apply_conflict(ConflictType type)
+{
+	if (MySubscription)
+		pgstat_report_subscription_conflict(MySubscription->oid, type);
+}
+#else
+#define o_report_apply_conflict(type)	((void) 0)
+#endif
+
 PG_FUNCTION_INFO_V1(orioledb_int4range_immutable);
 
 static TupleTableSlot *
@@ -451,6 +474,7 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		mres.action = BTreeOperationInsert;
 		mres.oldTuple = NULL;
 
+		o_report_apply_conflict(CT_INSERT_EXISTS);
 		o_report_duplicate(relation, descr->indices[mres.failedIxNum], slot);
 	}
 	else
