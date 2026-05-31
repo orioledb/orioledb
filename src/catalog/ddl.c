@@ -84,6 +84,9 @@
 #include "parser/parse_utilcmd.h"
 #include "partitioning/partdesc.h"
 #include "pgstat.h"
+#if PG_VERSION_NUM >= 180000
+#include "rewrite/rewriteHandler.h"
+#endif
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
 #include "storage/lwlock.h"
@@ -1659,6 +1662,18 @@ o_alter_column_type(AlterTableCmd *cmd, const char *queryString, Relation rel)
 		addNSItemToQuery(pstate, nsitem, false, true, true);
 		cooked_default = transformExpr(pstate, def->raw_default,
 									   EXPR_KIND_ALTER_COL_TRANSFORM);
+#if PG_VERSION_NUM >= 180000
+
+		/*
+		 * If the USING expression references a virtual generated column,
+		 * substitute the underlying generation expression before stashing it
+		 * away; the rewrite loop later hands this expression to
+		 * ExecPrepareExpr / o_eval_default, which would otherwise raise
+		 * "unexpected virtual generated column reference" on the bare Var.
+		 */
+		cooked_default = expand_generated_columns_in_expr(cooked_default,
+														  rel, 1);
+#endif
 		attnum = get_attnum(RelationGetRelid(rel), cmd->name);
 		alter_type_exprs =
 			lappend(alter_type_exprs,
@@ -2346,6 +2361,21 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 		{
 			Expr	   *checkconstexpr = stringToNode(check[i].ccbin);
 
+#if PG_VERSION_NUM >= 180000
+
+			/*
+			 * PG18 lets generated columns be VIRTUAL, in which case the
+			 * column has no storage and ExecCheck's expression evaluator must
+			 * see the underlying generation expression where the constraint
+			 * references such a column.  Upstream ATRewriteTable does the
+			 * same substitution before preparing the CHECK expression;
+			 * without it we'd raise "unexpected virtual generated column
+			 * reference" the moment ExecCheck reads the attribute.
+			 */
+			checkconstexpr = (Expr *) expand_generated_columns_in_expr((Node *) checkconstexpr,
+																	   rel, 1);
+#endif
+
 			check_exprs[i] = ExecPrepareExpr(checkconstexpr, check_estate);
 		}
 	}
@@ -2377,6 +2407,31 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			bool		should_build_def = false;
 			OTupleAttrFull *old_attr = OTupleDescAttrSlow(old_slot->tts_tupleDescriptor, i);
 			OTupleAttrFull *rel_attr = OTupleDescAttrSlow(rel->rd_att, i);
+
+			/*
+			 * Dropped columns leave a placeholder attribute with atttypid set
+			 * to InvalidOid; touching its type from get_typtype / domain /
+			 * default machinery would raise "cache lookup failed for type 0",
+			 * and a dropped-from-varlena placeholder paired with the
+			 * zero-initialized tts_values[i]/tts_isnull[i]=false produced by
+			 * the second phase's skip would later crash tts_orioledb_toast at
+			 * VARATT_IS_EXTERNAL_ONDISK(slot->tts_values[i]).  Force the slot
+			 * cell to null up front -- this check has to run before the
+			 * attgenerated short-circuit below, because a GENERATED column
+			 * that was later dropped would otherwise fall through the "skip
+			 * generated" branch and leave the slot zero-initialized.
+			 *
+			 * Consult the relation's own tupdesc (which still reflects
+			 * pg_attribute) for the authoritative dropped status here; the
+			 * workaround above can unmark old_slot's attisdropped to let
+			 * same-statement USING expressions read the old value.
+			 */
+			if (rel_attr->attisdropped)
+			{
+				new_slot->tts_values[i] = 0;
+				new_slot->tts_isnull[i] = true;
+				continue;
+			}
 
 			if (old_attr->attgenerated)
 				continue;
@@ -2477,6 +2532,11 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 		{
 			Node	   *expr = NULL;
 			OTupleAttrFull *old_attr = OTupleDescAttrSlow(old_slot->tts_tupleDescriptor, i);
+			OTupleAttrFull *rel_attr = OTupleDescAttrSlow(rel->rd_att, i);
+
+			/* See note above: skip placeholder dropped attributes. */
+			if (rel_attr->attisdropped)
+				continue;
 
 			if (!old_attr->attgenerated)
 				continue;
