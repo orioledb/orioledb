@@ -11,7 +11,7 @@ SELECT split_part(setting, '.', 1) major_version
 	FROM pg_settings WHERE name = 'server_version';
  major_version 
 ---------------
- 16
+ 18
 (1 row)
 
 SELECT orioledb_parallel_debug_start();
@@ -1810,13 +1810,11 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv = '22';
 
 -- Test Result node processing
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idi = 1;
-                      QUERY PLAN                       
--------------------------------------------------------
+        QUERY PLAN        
+--------------------------
  Result
    One-Time Filter: false
-   ->  Index Only Scan using o_test66_reg1 on o_test66
-         Index Cond: (idi = 2)
-(4 rows)
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idi = 1;
  idi | idv 
@@ -2052,12 +2050,11 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -2204,12 +2201,11 @@ SELECT idi, idv FROM o_test66 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -2221,12 +2217,11 @@ SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
  idi | idv 
@@ -2914,12 +2909,11 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -3060,12 +3054,11 @@ SELECT idi, idv FROM o_test67 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -3753,12 +3746,11 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -3899,12 +3891,11 @@ SELECT idi, idv FROM o_test68 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -3916,12 +3907,11 @@ SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
-                        QUERY PLAN                        
-----------------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan Backward using o_test68_reg1 on o_test68
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
  idi | idv 
@@ -4607,12 +4597,11 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                   QUERY PLAN                    
--------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: (idv = ANY ('{12,22}'::text[]))
-   Filter: (idi = ANY ('{2,4}'::integer[]))
-(3 rows)
+   Index Cond: ((idv = ANY ('{12,22}'::text[])) AND (idi = ANY ('{2,4}'::integer[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -5693,6 +5682,10 @@ INSERT INTO o_test_unique_as_pkey (key, val, val2)
 Indexes:
     "o_test_unique_as_pkey_pkey" PRIMARY KEY, btree (key, val)
     "o_test_unique_as_pkey_ix1" UNIQUE, btree (val, key)
+Not-null constraints:
+    "o_test_unique_as_pkey_key_not_null" NOT NULL "key"
+    "o_test_unique_as_pkey_val_not_null" NOT NULL "val"
+    "o_test_unique_as_pkey_val2_not_null" NOT NULL "val2"
 
 SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
               orioledb_tbl_indices              
@@ -5739,6 +5732,10 @@ Indexes:
     "o_test_unique_as_pkey_pkey" PRIMARY KEY, btree (key, val)
     "o_test_unique_as_pkey_ix1" UNIQUE, btree (val, key)
     "o_test_unique_as_pkey_ix2" UNIQUE, btree (val, key)
+Not-null constraints:
+    "o_test_unique_as_pkey_key_not_null" NOT NULL "key"
+    "o_test_unique_as_pkey_val_not_null" NOT NULL "val"
+    "o_test_unique_as_pkey_val2_not_null" NOT NULL "val2"
 
 SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
               orioledb_tbl_indices              
@@ -6039,6 +6036,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 \d+ o_test_reuse_multiple_indices_ix1
       Index "indices.o_test_reuse_multiple_indices_ix1"
@@ -6316,6 +6316,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 EXPLAIN (COSTS OFF)
 	SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
@@ -6427,6 +6430,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 \d+ o_test_reuse_multiple_indices_ix1
       Index "indices.o_test_reuse_multiple_indices_ix1"
@@ -6825,6 +6831,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 \d+ o_test_reuse_multiple_indices_ix1
       Index "indices.o_test_reuse_multiple_indices_ix1"
@@ -6908,6 +6917,8 @@ Indexes:
     "o_test_include_like_ix1" btree (key)
     "o_test_include_like_ix2" btree (value)
     "o_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 CREATE TABLE IF NOT EXISTS o_test_include_like_like
 	(LIKE o_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
@@ -6950,6 +6961,8 @@ Indexes:
     "o_test_include_like_like_key_idx" btree (key)
     "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value)
     "o_test_include_like_like_value_idx" btree (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 DROP TABLE o_test_include_like_like;
 ALTER TABLE o_test_include_like DROP CONSTRAINT o_test_include_like_pkey;
@@ -6990,6 +7003,8 @@ Indexes:
     "o_test_include_like_ix1" btree (key)
     "o_test_include_like_ix2" btree (value)
     "o_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 CREATE TABLE IF NOT EXISTS o_test_include_like_like
 	(LIKE o_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
@@ -7031,6 +7046,8 @@ Indexes:
     "o_test_include_like_like_key_idx" btree (key)
     "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value)
     "o_test_include_like_like_value_idx" btree (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 DROP TABLE o_test_include_like_like;
 -- Test that fields also added when we create table like postgres table
@@ -7056,6 +7073,8 @@ Indexes:
     "pg_test_include_like_ix1" btree (key)
     "pg_test_include_like_ix2" btree (value)
     "pg_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value)
+Not-null constraints:
+    "pg_test_include_like_key_not_null" NOT NULL "key"
 
 CREATE TABLE IF NOT EXISTS o_test_include_like_like
 	(LIKE pg_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
@@ -7098,6 +7117,8 @@ Indexes:
     "o_test_include_like_like_key_idx" btree (key)
     "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value)
     "o_test_include_like_like_value_idx" btree (value)
+Not-null constraints:
+    "pg_test_include_like_key_not_null" NOT NULL "key"
 
 DROP TABLE o_test_include_like_like;
 CREATE TABLE o_test_partial_unique(
@@ -7296,6 +7317,11 @@ CREATE INDEX o_test_pkey_mixed_ix1
 Indexes:
     "o_test_pkey_mixed_pkey" PRIMARY KEY, btree (pk1, pk2, pk3, pk4)
     "o_test_pkey_mixed_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 SELECT orioledb_tbl_indices('o_test_pkey_mixed'::regclass);
@@ -7333,6 +7359,11 @@ Indexes:
     "o_test_pkey_mixed_pkey" PRIMARY KEY, btree (pk1, pk2, pk3, pk4)
     "o_test_pkey_mixed_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
     "o_test_pkey_mixed_uniq1" UNIQUE, btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 -- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
@@ -7377,6 +7408,11 @@ Indexes:
     "o_test_pkey_mixed_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
     "o_test_pkey_mixed_ix3" btree (f3, f2, pk4, f1, pk4) INCLUDE (pk3)
     "o_test_pkey_mixed_uniq1" UNIQUE, btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 -- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
@@ -7428,6 +7464,11 @@ Indexes:
     "o_test_pkey_mixed_ix3" btree (f3, f2, pk4, f1, pk4) INCLUDE (pk3)
     "o_test_pkey_mixed_ix4" btree (i1, f1, pk4, f2, pk4) INCLUDE (pk3, i2)
     "o_test_pkey_mixed_uniq1" UNIQUE, btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 -- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
@@ -7608,6 +7649,8 @@ CREATE TABLE o_test_pkey_include_box
  f2     | integer |           |          |         | plain   |              | 
 Indexes:
     "o_test_pkey_include_box_pkey" PRIMARY KEY, btree (pk1) INCLUDE (pk2)
+Not-null constraints:
+    "o_test_pkey_include_box_pk1_not_null" NOT NULL "pk1"
 
 SELECT orioledb_tbl_indices('o_test_pkey_include_box'::regclass);
               orioledb_tbl_indices              
@@ -7755,6 +7798,8 @@ Indexes:
     "o_test_include_box_with_pkey_pkey" PRIMARY KEY, btree (val_1)
     "o_test_include_box_with_pkey_ix1" UNIQUE, btree (val_2) INCLUDE (val_4)
     "o_test_include_box_with_pkey_ix2" UNIQUE, btree (val_3)
+Not-null constraints:
+    "o_test_include_box_with_pkey_val_1_not_null" NOT NULL "val_1"
 
 SELECT orioledb_tbl_indices('o_test_include_box_with_pkey'::regclass);
                orioledb_tbl_indices                
@@ -8404,6 +8449,8 @@ CREATE INDEX o_test_pkey_include_same_fields_ix1
 Indexes:
     "o_test_pkey_include_same_fields_pkey" PRIMARY KEY, btree (val_1) INCLUDE (val_2, val_2)
     "o_test_pkey_include_same_fields_ix1" btree (val_1) INCLUDE (val_2, val_2)
+Not-null constraints:
+    "o_test_pkey_include_same_fields_val_1_not_null" NOT NULL "val_1"
 
 SELECT orioledb_tbl_indices('o_test_pkey_include_same_fields'::regclass);
               orioledb_tbl_indices              
@@ -8523,12 +8570,12 @@ INSERT INTO o_test_saop
 	(SELECT i % 10, (i / 10) % 10, i / 100 FROM generate_series(1, 1000) i);
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
-                                   QUERY PLAN                                    
----------------------------------------------------------------------------------
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_saop
-   Filter: ((k > ALL ('{7,8}'::integer[])) AND (j = ANY ('{3,4,5}'::integer[])))
+   Filter: (k > ALL ('{7,8}'::integer[]))
    Forward index only scan of: o_test_saop_pkey
-   Conds: (i < ANY ('{3,4,5}'::integer[]))
+   Conds: ((i < ANY ('{3,4,5}'::integer[])) AND (j = ANY ('{3,4,5}'::integer[])))
 (4 rows)
 
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
@@ -8553,14 +8600,12 @@ SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 
 
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) ORDER BY i, j, k;
-                                     QUERY PLAN                                     
-------------------------------------------------------------------------------------
- Sort
-   Sort Key: i, j, k
-   ->  Custom Scan (o_scan) on o_test_saop
-         Forward index only scan of: o_test_saop_pkey
-         Conds: ((i = ANY ('{1,3}'::integer[])) AND (k = ANY ('{3,5}'::integer[])))
-(5 rows)
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_saop
+   Forward index only scan of: o_test_saop_pkey
+   Conds: ((i = ANY ('{1,3}'::integer[])) AND (k = ANY ('{3,5}'::integer[])))
+(3 rows)
 
 SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) ORDER BY i, j, k;
  i | j | k 
@@ -8609,13 +8654,12 @@ SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) OR
 
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
-                   QUERY PLAN                   
-------------------------------------------------
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_saop
-   Filter: (j = ANY ('{1,3}'::integer[]))
    Forward index only scan of: o_test_saop_pkey
-   Conds: (i < ANY ('{1,2}'::integer[]))
-(4 rows)
+   Conds: ((i < ANY ('{1,2}'::integer[])) AND (j = ANY ('{1,3}'::integer[])))
+(3 rows)
 
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
  i | j | k 
@@ -8718,10 +8762,11 @@ WARNING:  We cannot just reuse index for primary key in orioledb, because second
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
 WHERE conrelid = 'o_test_add_index_constraint'::regclass;
-  conname  | contype | conindid  
------------+---------+-----------
- o_test_pk | p       | o_test_pk
-(1 row)
+                 conname                 | contype | conindid  
+-----------------------------------------+---------+-----------
+ o_test_add_index_constraint_id_not_null | n       | -
+ o_test_pk                               | p       | o_test_pk
+(2 rows)
 
 -- Test constraint enforcement
 INSERT INTO o_test_add_index_constraint VALUES (4, 'four');  -- Should succeed
@@ -8734,10 +8779,11 @@ CREATE UNIQUE INDEX o_test_idx_val ON o_test_add_index_constraint(val);
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
 WHERE conrelid = 'o_test_add_index_constraint'::regclass;
-  conname  | contype | conindid  
------------+---------+-----------
- o_test_pk | p       | o_test_pk
-(1 row)
+                 conname                 | contype | conindid  
+-----------------------------------------+---------+-----------
+ o_test_add_index_constraint_id_not_null | n       | -
+ o_test_pk                               | p       | o_test_pk
+(2 rows)
 
 -- Test AT_AddIndexConstraint: Add UNIQUE constraint using existing index
 ALTER TABLE o_test_add_index_constraint
@@ -8747,11 +8793,12 @@ NOTICE:  ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index "o_test_idx_
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
 WHERE conrelid = 'o_test_add_index_constraint'::regclass;
-  conname  | contype | conindid  
------------+---------+-----------
- o_test_pk | p       | o_test_pk
- o_test_uq | u       | o_test_uq
-(2 rows)
+                 conname                 | contype | conindid  
+-----------------------------------------+---------+-----------
+ o_test_add_index_constraint_id_not_null | n       | -
+ o_test_pk                               | p       | o_test_pk
+ o_test_uq                               | u       | o_test_uq
+(3 rows)
 
 -- Test UNIQUE constraint enforcement
 INSERT INTO o_test_add_index_constraint VALUES (5, 'five');  -- Should succeed
@@ -8795,6 +8842,31 @@ ORDER BY x;
 (1 row)
 
 RESET enable_seqscan;
+-- Combining "leading_col IS NOT NULL" with a trailing-column IS NULL
+-- qualifier against a unique btree must respect both predicates.  PG18's
+-- _bt_preprocess_keys rewrites a leading IS NOT NULL into a skip array
+-- with null_elem=false and no low_compare/high_compare; o_key_data_to_-
+-- key_range previously honored only low_compare/high_compare and lost
+-- the NULL exclusion entirely, so this query returned 3 (including the
+-- all-NULL row) instead of 2.  Verifies the fix in src/tableam/key_range.c.
+CREATE TABLE o_test_null_mixed (
+	unique1 int,
+	unique2 int
+) USING orioledb;
+INSERT INTO o_test_null_mixed
+VALUES (NULL, -1), (NULL, 2147483647), (NULL, NULL),
+	   (100, NULL), (500, NULL);
+CREATE UNIQUE INDEX o_test_null_mixed_idx
+	ON o_test_null_mixed (unique2, unique1);
+SET enable_seqscan = OFF;
+SELECT count(*) FROM o_test_null_mixed
+	WHERE unique1 IS NULL AND unique2 IS NOT NULL;
+ count 
+-------
+     2
+(1 row)
+
+RESET enable_seqscan;
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
 ------------------------------
@@ -8802,7 +8874,7 @@ SELECT orioledb_parallel_debug_stop();
 (1 row)
 
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 57 other objects
+NOTICE:  drop cascades to 58 other objects
 DETAIL:  drop cascades to table o_test50
 drop cascades to table o_test51
 drop cascades to table o_test52
@@ -8860,6 +8932,7 @@ drop cascades to table o_test_index_already_exists_skip
 drop cascades to table o_test_unique_include
 drop cascades to table o_test_saop
 drop cascades to table test_skip_bounds
+drop cascades to table o_test_null_mixed
 DROP SCHEMA indices CASCADE;
 NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to function smart_explain(text)

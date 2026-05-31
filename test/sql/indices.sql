@@ -2076,6 +2076,27 @@ ORDER BY x;
 
 RESET enable_seqscan;
 
+-- Combining "leading_col IS NOT NULL" with a trailing-column IS NULL
+-- qualifier against a unique btree must respect both predicates.  PG18's
+-- _bt_preprocess_keys rewrites a leading IS NOT NULL into a skip array
+-- with null_elem=false and no low_compare/high_compare; o_key_data_to_-
+-- key_range previously honored only low_compare/high_compare and lost
+-- the NULL exclusion entirely, so this query returned 3 (including the
+-- all-NULL row) instead of 2.  Verifies the fix in src/tableam/key_range.c.
+CREATE TABLE o_test_null_mixed (
+	unique1 int,
+	unique2 int
+) USING orioledb;
+INSERT INTO o_test_null_mixed
+VALUES (NULL, -1), (NULL, 2147483647), (NULL, NULL),
+	   (100, NULL), (500, NULL);
+CREATE UNIQUE INDEX o_test_null_mixed_idx
+	ON o_test_null_mixed (unique2, unique1);
+SET enable_seqscan = OFF;
+SELECT count(*) FROM o_test_null_mixed
+	WHERE unique1 IS NULL AND unique2 IS NOT NULL;
+RESET enable_seqscan;
+
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices CASCADE;
