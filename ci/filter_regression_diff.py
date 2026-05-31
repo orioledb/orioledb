@@ -443,7 +443,11 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				else:
 					equal = False
 			elif (test_name == 'partition_prune'
-				  and re.sub(r"actual rows=\d+ loops=\d+\)$", "", src_cur_value) == re.sub(r"actual rows=\d+ loops=\d+\)$", "", target_cur[1])):
+				  and re.sub(r"actual rows=[\d.]+ loops=\d+\)$", "", src_cur_value) == re.sub(r"actual rows=[\d.]+ loops=\d+\)$", "", target_cur[1])):
+				# PG18 EXPLAIN ANALYZE prints fractional rows as "actual rows=N.NN".
+				# Heap reports the raw index hit count on Bitmap Index Scan; orioledb
+				# reports the visibility-checked count.  Equal up to that numeric
+				# difference in partition_prune-style nested-loop appends.
 				src_down = True
 				target_down = True
 			elif (test_name == 'memoize'
@@ -869,7 +873,10 @@ for patched_file in patched_files:
 					    x.strip()
 					    for x in source[src_table_start - 1].split("|")
 					]
-					if table_columns[0].strip() == 'QUERY PLAN':
+					# partition_prune wraps EXPLAIN ANALYZE in a SQL helper that
+					# relabels the column "explain_analyze" instead of "QUERY PLAN";
+					# the body is still a plan tree, so compare it the same way.
+					if table_columns[0].strip() in ('QUERY PLAN', 'explain_analyze'):
 						src_tree = query_plan_to_tree(src_table_lines)
 						target_tree = query_plan_to_tree(target_table_lines)
 						# compare plan trees
