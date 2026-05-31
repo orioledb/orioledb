@@ -2591,6 +2591,37 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 			}
 		}
 
+		/*
+		 * Validate NOT NULL constraints on the rewritten tuple.  Upstream's
+		 * ATRewriteTable path catches this via ExecConstraints, which also
+		 * verifies notnull; we ran only ExecCheck above and would otherwise
+		 * let a freshly-added "GENERATED ... VIRTUAL NOT NULL" column past
+		 * the rewrite when its expression yields NULL for an existing row.
+		 *
+		 * Skip constraints marked NOT VALID (PG18 attnullability=INVALID).
+		 * The constraint exists but is intentionally unverified against
+		 * existing rows; ALTER TABLE ... VALIDATE CONSTRAINT is what runs the
+		 * scan that actually rejects null rows.
+		 */
+		for (int j = 0; j < rel->rd_att->natts; j++)
+		{
+			Form_pg_attribute attr = TupleDescAttr(rel->rd_att, j);
+
+			if (attr->attisdropped || !attr->attnotnull)
+				continue;
+#if PG_VERSION_NUM >= 180000
+			if (TupleDescCompactAttr(rel->rd_att, j)->attnullability ==
+				ATTNULLABLE_INVALID)
+				continue;
+#endif
+			if (new_slot->tts_isnull[j])
+				ereport(ERROR,
+						(errcode(ERRCODE_NOT_NULL_VIOLATION),
+						 errmsg("column \"%s\" of relation \"%s\" contains null values",
+								NameStr(attr->attname),
+								RelationGetRelationName(rel))));
+		}
+
 		o_tbl_insert(descr, rel, new_slot, oxid, oSnapshot.csn);
 
 		ExecClearTuple(old_slot);

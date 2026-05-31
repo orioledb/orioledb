@@ -241,6 +241,43 @@ ALTER TABLE o_test_virt_drop
 \d o_test_virt_drop
 SELECT * FROM o_test_virt_drop ORDER BY a;
 
+-- NOT NULL on a freshly added GENERATED column must be checked during
+-- the rewrite.  Without this we'd silently leave an x = NULL row
+-- behind; upstream PG raises
+-- "column \"x\" of relation contains null values".
+CREATE TABLE o_test_virt_notnull (
+	a int, b int,
+	x int GENERATED ALWAYS AS ((a + b) * 2) VIRTUAL
+) USING orioledb;
+INSERT INTO o_test_virt_notnull (a, b) VALUES (3, 7), (NULL, NULL);
+ALTER TABLE o_test_virt_notnull
+	DROP COLUMN x,
+	ALTER COLUMN a TYPE bigint,
+	ALTER COLUMN b TYPE bigint,
+	ADD COLUMN x bigint GENERATED ALWAYS AS ((a + b) * 2) VIRTUAL NOT NULL;
+
+-- After deleting the offending row the rewrite succeeds.
+DELETE FROM o_test_virt_notnull WHERE a IS NULL AND b IS NULL;
+ALTER TABLE o_test_virt_notnull
+	DROP COLUMN x,
+	ALTER COLUMN a TYPE bigint,
+	ALTER COLUMN b TYPE bigint,
+	ADD COLUMN x bigint GENERATED ALWAYS AS ((a + b) * 2) VIRTUAL NOT NULL;
+SELECT * FROM o_test_virt_notnull ORDER BY a;
+
+-- NOT NULL marked NOT VALID must be skipped by the rewrite even when
+-- existing rows violate it; ALTER TABLE ... VALIDATE CONSTRAINT is the
+-- only place that's supposed to scan and reject.  Mirrors the
+-- "table rewrite won't validate invalid constraint" block in upstream
+-- src/test/regress/sql/constraints.sql.
+CREATE TABLE o_test_notnull_invalid (a int) USING orioledb;
+INSERT INTO o_test_notnull_invalid VALUES (NULL);
+ALTER TABLE o_test_notnull_invalid ADD CONSTRAINT nn NOT NULL a NOT VALID;
+-- table rewrite must succeed despite the existing NULL row
+ALTER TABLE o_test_notnull_invalid ADD COLUMN d float8 DEFAULT 1.0;
+-- VALIDATE CONSTRAINT is what catches the bad row
+ALTER TABLE o_test_notnull_invalid VALIDATE CONSTRAINT nn;
+
 -- Same shape but for a STORED generated column whose type was first
 -- altered to a varlena (numeric attlen=-1).  The dropped placeholder
 -- inherits attlen=-1, and the rewrite loop's "skip generated" branch
