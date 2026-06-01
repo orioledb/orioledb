@@ -50,6 +50,8 @@ static LocalWal local_wal;
 static bool wal_in_rollback = false;
 #endif
 
+bool commit_wal_record_added = false;
+
 static void add_finish_wal_record(uint8 rec_type, OXid xmin);
 static void add_joint_commit_wal_record(TransactionId xid, OXid xmin);
 static void add_xid_wal_record(OXid oxid, TransactionId logicalXid);
@@ -345,6 +347,10 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	END_CRIT_SECTION();
 #endif
 
+	// Started CRIT_SECTION for replica-bug-fix
+	START_CRIT_SECTION();
+	commit_wal_record_added = true;
+
 	add_finish_wal_record(WAL_REC_COMMIT, pg_atomic_read_u64(&xid_meta->runXmin));
 	// error-injection here -> Bug #1 (same-container COMMIT+ROLLBACK; replica TRAP)
 	//                                (orioledb-after-finish-wal-rec: 2/2 BUGs ~100%)
@@ -353,14 +359,18 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 #ifdef USE_INJECTION_POINTS
 	// error-injection here -> Bug #3 (replica PANIC: undo_item_buf_read_item)
 	//                                (orioledb-after-flush-local-wal: 2/2 BUGs ~100%)
+	/* elog disabled: inside replica-bug-fix CRIT_SECTION (palloc forbidden)
 	elog(LOG,
 		 "post-flush-local-wal-trace pre-inject pid=%d oxid=%lu walPos=%X/%X",
 		 MyProcPid, (unsigned long) oxid,
 		 LSN_FORMAT_ARGS(walPos));
+	*/
 	INJECTION_POINT("orioledb-after-flush-local-wal");
+	/* elog disabled: inside replica-bug-fix CRIT_SECTION (palloc forbidden)
 	elog(LOG,
 		 "post-flush-local-wal-trace post-inject (no error fired) pid=%d oxid=%lu",
 		 MyProcPid, (unsigned long) oxid);
+	*/
 #endif
 
 	local_wal.has_material_changes = false;
@@ -368,7 +378,8 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	// error-injection here -> Bug #2 (silent replica divergence)
 	//                                (orioledb-after-wal-commit / orioledb-after-assign-commit-lsn: 2/15-2/8 ~13-25%)
 
-	elog(DEBUG4, "[%s] COMMIT oxid %lu logicalXid %u %X/%X", __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
+	/* elog disabled: inside replica-bug-fix CRIT_SECTION (palloc forbidden)
+	elog(DEBUG4, "[%s] COMMIT oxid %lu logicalXid %u %X/%X", __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos)); */
 
 	return walPos;
 }
@@ -476,7 +487,8 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 	if (rec_type == WAL_REC_COMMIT)
 		INJECTION_POINT("orioledb-add-finish-wal-guarded");
 
-	elog(DEBUG4, "rec_type %d (%s)", rec_type, wal_record_type_to_string(rec_type));
+	/* elog disabled: WAL_REC_COMMIT path runs inside replica-bug-fix CRIT_SECTION (palloc forbidden)
+	elog(DEBUG4, "rec_type %d (%s)", rec_type, wal_record_type_to_string(rec_type)); */
 
 #ifdef USE_INJECTION_POINTS
 	{
