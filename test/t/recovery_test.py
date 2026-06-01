@@ -2928,10 +2928,9 @@ class RecoveryWithArchivingTest(BaseTest):
 			if node.status() != NodeStatus.Running:
 				return
 			time.sleep(0.1)
-		self.fail(
-		    "node did not shut down within %s seconds; status=%s, "
-		    "postmaster.pid exists=%s" %
-		    (timeout_s, node.status(), os.path.exists(pidfile_path)))
+		self.fail("node did not shut down within %s seconds; status=%s, "
+		          "postmaster.pid exists=%s" %
+		          (timeout_s, node.status(), os.path.exists(pidfile_path)))
 
 	def _replace_recovery_target_action(self,
 	                                    node,
