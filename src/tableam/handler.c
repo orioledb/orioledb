@@ -1521,7 +1521,6 @@ orioledb_estimate_rel_size(Relation rel, int32 *attr_widths,
 	BlockNumber curpages;
 	BlockNumber relpages;
 	double		reltuples;
-	BlockNumber relallvisible;
 	double		density;
 
 	/* it has storage, ok to call the smgr */
@@ -1530,7 +1529,6 @@ orioledb_estimate_rel_size(Relation rel, int32 *attr_widths,
 	/* coerce values in pg_class to more desirable types */
 	relpages = (BlockNumber) rel->rd_rel->relpages;
 	reltuples = (double) rel->rd_rel->reltuples;
-	relallvisible = (BlockNumber) rel->rd_rel->relallvisible;
 
 	/*
 	 * HACK: if the relation has never yet been vacuumed, use a minimum size
@@ -1603,17 +1601,15 @@ orioledb_estimate_rel_size(Relation rel, int32 *attr_widths,
 	*tuples = rint(density * (double) curpages);
 
 	/*
-	 * We use relallvisible as-is, rather than scaling it up like we do for
-	 * the pages and tuples counts, on the theory that any pages added since
-	 * the last VACUUM are most likely not marked all-visible.  But costsize.c
-	 * wants it converted to a fraction.
+	 * OrioleDB handles MVCC visibility in the index itself, so index-only
+	 * scans never need heap fetches for visibility checks.  Setting
+	 * allvisfrac to 1 tells cost_index() that all pages are visible, reducing
+	 * the heap-fetch component of index-only scan costs to zero.
 	 */
-	if (relallvisible == 0 || curpages <= 0)
-		*allvisfrac = 0;
-	else if ((double) relallvisible >= curpages)
+	if (curpages > 0)
 		*allvisfrac = 1;
 	else
-		*allvisfrac = (double) relallvisible / curpages;
+		*allvisfrac = 0;
 }
 
 

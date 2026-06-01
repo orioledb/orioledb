@@ -18,6 +18,7 @@
 #include "tableam/scan.h"
 
 #include "access/sdir.h"
+#include "btree/scan.h"
 
 typedef struct OScanState
 {
@@ -38,6 +39,10 @@ typedef struct OScanState
 	/* used only by direct modify functions */
 	CmdType		cmd;
 	OSnapshot	oSnapshot;
+	/* Parallel index scan state (NULL for serial scans) */
+	ParallelOScanDesc pidxscan;
+	int			workerNumber;
+	BTreeSeqScan *seqScan;
 } OScanState;
 
 typedef struct OIndexPlanState

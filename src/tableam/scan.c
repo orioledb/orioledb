@@ -28,8 +28,10 @@
 #include "tuple/slot.h"
 #include "utils/stopevent.h"
 
+#include "access/nbtree.h"
 #include "access/relation.h"
 #include "access/table.h"
+#include "access/xlog.h"
 #include "common/hashfn.h"
 #include "executor/executor.h"
 #include "executor/nodeIndexscan.h"
@@ -89,6 +91,15 @@ static void o_explain_custom_scan(CustomScanState *node, List *ancestors,
 								  ExplainState *es);
 static Node *o_create_custom_scan_state(CustomScan *cscan);
 
+static Size o_idx_scan_estimate_dsm(CustomScanState *node,
+									ParallelContext *pcxt);
+static void o_idx_scan_init_dsm(CustomScanState *node,
+								ParallelContext *pcxt, void *coordinate);
+static void o_idx_scan_init_worker(CustomScanState *node,
+								   shm_toc *toc, void *coordinate);
+static void o_idx_scan_reinit_dsm(CustomScanState *node,
+								  ParallelContext *pcxt, void *coordinate);
+
 static CustomPathMethods o_path_methods =
 {
 	.CustomName = "o_path",
@@ -118,6 +129,23 @@ static CustomExecMethods o_scan_exec_methods =
 	o_explain_custom_scan
 };
 
+static CustomExecMethods o_parallel_idx_scan_exec_methods =
+{
+	"o_exec_parallel_idx_scan",
+	o_begin_custom_scan,
+	o_exec_custom_scan,
+	o_end_custom_scan,
+	o_rescan_custom_scan,
+	NULL,
+	NULL,
+	o_idx_scan_estimate_dsm,
+	o_idx_scan_init_dsm,
+	o_idx_scan_reinit_dsm,
+	o_idx_scan_init_worker,
+	NULL,
+	o_explain_custom_scan
+};
+
 /* No existing callers */
 bool
 is_o_custom_scan(CustomScan *scan)
@@ -129,7 +157,66 @@ is_o_custom_scan(CustomScan *scan)
 bool
 is_o_custom_scan_state(CustomScanState *scan)
 {
-	return scan->methods == &o_scan_exec_methods;
+	return scan->methods == &o_scan_exec_methods ||
+		scan->methods == &o_parallel_idx_scan_exec_methods;
+}
+
+/*
+ * Find the OrioleDB index number for an IndexPath's target index.
+ * Returns -1 if the index is not an OrioleDB index.
+ */
+static OIndexNumber
+o_find_ix_num(IndexPath *ix_path, OTableDescr *descr)
+{
+	OIndexNumber ix_num;
+
+	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
+	{
+		if (descr->indices[ix_num]->oids.reloid == ix_path->indexinfo->indexoid)
+			return ix_num;
+	}
+	return -1;
+}
+
+/*
+ * Estimate the number of parallel workers for a parallel index scan.
+ */
+static int
+o_estimate_parallel_workers(PlannerInfo *root, RelOptInfo *rel,
+							IndexPath *ipath, bool is_primary)
+{
+	double		index_pages;
+	double		heap_pages;
+
+	if (ipath->indexscandir != ForwardScanDirection)
+		return 0;
+
+	if (!ipath->path.parallel_safe)
+		return 0;
+
+	/* Parallel index scan not supported during recovery */
+	if (RecoveryInProgress())
+		return 0;
+
+	index_pages = (double) ipath->indexinfo->pages * ipath->indexselectivity;
+
+	/*
+	 * For secondary index scans that need a primary index lookup, each
+	 * matching tuple incurs a random I/O to the primary index.  Factor this
+	 * in via the heap_pages parameter so compute_parallel_worker() doesn't
+	 * over-parallelise when the per-tuple cost dominates.
+	 *
+	 * For primary index scans and index-only scans, the heap (primary index)
+	 * is not accessed during the scan phase, so pass -1 to indicate no heap
+	 * component.
+	 */
+	if (!is_primary && ipath->path.pathtype != T_IndexOnlyScan)
+		heap_pages = ceil(ipath->indexselectivity * Max(rel->pages, 1));
+	else
+		heap_pages = -1;
+
+	return compute_parallel_worker(rel, heap_pages, index_pages,
+								   max_parallel_workers_per_gather);
 }
 
 static Path *
@@ -209,7 +296,7 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 		{
 			ListCell   *lc;
 			int			i;
-			int			nfields;
+			int			nkeyfields;
 			ORelOids	oids;
 			OTable	   *o_table;
 
@@ -224,9 +311,9 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 				 * Additional pkey fields are added to index target list so
 				 * that the index only scan is selected
 				 */
-				nfields = o_table->indices[PrimaryIndexNumber].nfields;
+				nkeyfields = o_table->indices[PrimaryIndexNumber].nkeyfields;
 
-				for (i = 0; i < nfields; i++)
+				for (i = 0; i < nkeyfields; i++)
 				{
 					OTableIndexField *pk_field;
 
@@ -389,14 +476,75 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 			{
 				Path	   *path = list_nth(rel->partial_pathlist, i);
 
-				/*
-				 * TODO: Remove when parallel bitmap heap scan will be
-				 * implemented
-				 */
-				if (!IsA(path, Path))
-					rel->partial_pathlist = list_delete_nth_cell(rel->partial_pathlist, i);
+				if (IsA(path, IndexPath))
+				{
+					IndexPath  *ix_path = (IndexPath *) path;
+					OIndexNumber ix_num = o_find_ix_num(ix_path, descr);
+
+					/*
+					 * Transform OrioleDB IndexPath entries into CustomPath
+					 * entries so they can run as parallel-aware index scans.
+					 * Only forward scans are supported.
+					 */
+					if (ix_num >= 0 &&
+						ix_path->indexscandir == ForwardScanDirection)
+					{
+						Path	   *custom_path;
+						int			parallel_workers;
+
+						parallel_workers = o_estimate_parallel_workers(root,
+																	   rel,
+																	   ix_path,
+																	   ix_num == PrimaryIndexNumber);
+						if (parallel_workers > 0)
+						{
+							custom_path = transform_path(path, descr);
+							custom_path->parallel_aware = true;
+							custom_path->parallel_workers = parallel_workers;
+
+							/*
+							 * Parallel index scan does not guarantee
+							 * per-worker sorted output: disk-phase downlinks
+							 * are sorted by physical location (not key order)
+							 * and the boundary between in-memory and disk
+							 * phases breaks key ordering across phases. Clear
+							 * pathkeys so the planner uses Gather + Sort
+							 * instead of Gather Merge.
+							 */
+							custom_path->pathkeys = NIL;
+
+							rel->partial_pathlist =
+								list_delete_nth_cell(rel->partial_pathlist, i);
+							rel->partial_pathlist =
+								list_insert_nth(rel->partial_pathlist, i,
+												custom_path);
+							i++;
+						}
+						else
+						{
+							rel->partial_pathlist =
+								list_delete_nth_cell(rel->partial_pathlist, i);
+						}
+					}
+					else
+					{
+						rel->partial_pathlist =
+							list_delete_nth_cell(rel->partial_pathlist, i);
+					}
+				}
+				else if (!IsA(path, Path))
+				{
+					/*
+					 * TODO: Remove when parallel bitmap heap scan will be
+					 * implemented
+					 */
+					rel->partial_pathlist =
+						list_delete_nth_cell(rel->partial_pathlist, i);
+				}
 				else
+				{
 					i++;
+				}
 			}
 		}
 
@@ -523,7 +671,6 @@ o_create_custom_scan_state(CustomScan *cscan)
 	Plan	   *custom_plan;
 
 	node->type = T_CustomScanState;
-	ocstate->css.methods = &o_scan_exec_methods;
 	ocstate->css.slotOps = &TTSOpsOrioleDB;
 
 	Assert(cscan->custom_plans);
@@ -543,6 +690,11 @@ o_create_custom_scan_state(CustomScan *cscan)
 		ix_plan_state->ostate.curKeyRange.empty = true;
 		ix_plan_state->ostate.curKeyRange.low.n_row_keys = 0;
 		ix_plan_state->ostate.curKeyRange.high.n_row_keys = 0;
+
+		if (cscan->scan.plan.parallel_aware)
+			ocstate->css.methods = &o_parallel_idx_scan_exec_methods;
+		else
+			ocstate->css.methods = &o_scan_exec_methods;
 
 		if (IsA(custom_plan, IndexScan))
 		{
@@ -585,6 +737,9 @@ o_create_custom_scan_state(CustomScan *cscan)
 		Assert(false);
 	}
 	ocstate->o_plan_state->type = plan_tag;
+
+	if (ocstate->css.methods == NULL)
+		ocstate->css.methods = &o_scan_exec_methods;
 
 	return node;
 }
@@ -788,6 +943,12 @@ o_rescan_custom_scan(CustomScanState *node)
 		OIndexPlanState *ix_plan_state =
 			(OIndexPlanState *) ocstate->o_plan_state;
 
+		if (ix_plan_state->ostate.seqScan != NULL)
+		{
+			free_btree_seq_scan(ix_plan_state->ostate.seqScan);
+			ix_plan_state->ostate.seqScan = NULL;
+		}
+
 		if (ix_plan_state->iss_NumRuntimeKeys != 0)
 		{
 			ExprContext *econtext = ix_plan_state->iss_RuntimeContext;
@@ -801,6 +962,17 @@ o_rescan_custom_scan(CustomScanState *node)
 
 		btrescan(&ix_plan_state->ostate.scandesc, ix_plan_state->iss_ScanKeys,
 				 ix_plan_state->iss_NumScanKeys, NULL, 0);
+
+		/*
+		 * btrescan() copies scan keys to scan->keyData but leaves
+		 * so->numberOfKeys = 0, expecting the caller to run
+		 * _bt_preprocess_keys() to populate so->keyData/numberOfKeys/
+		 * qual_ok.  The serial scan path handles this in
+		 * o_index_scan_getnext(), but the parallel path enters
+		 * o_exec_parallel_idx_scan() directly.  Call it here so both paths
+		 * have a properly initialized BTScanOpaque.
+		 */
+		_bt_preprocess_keys(&ix_plan_state->ostate.scandesc);
 
 		if (ix_plan_state->ostate.iterator != NULL)
 		{
@@ -850,6 +1022,11 @@ o_end_custom_scan(CustomScanState *node)
 
 		ix_plan_state = (OIndexPlanState *) ocstate->o_plan_state;
 
+		if (ix_plan_state->ostate.seqScan != NULL)
+		{
+			free_btree_seq_scan(ix_plan_state->ostate.seqScan);
+			ix_plan_state->ostate.seqScan = NULL;
+		}
 		if (ix_plan_state->ostate.iterator != NULL)
 			btree_iterator_free(ix_plan_state->ostate.iterator);
 		MemoryContextDelete(ix_plan_state->ostate.cxt);
@@ -1134,4 +1311,61 @@ o_explain_custom_scan(CustomScanState *node, List *ancestors, ExplainState *es)
 	}
 	if (is_explain_analyze(ocstate->o_plan_state->plan_state))
 		eanalyze_counters_explain(descr, &ocstate->eaCounters, es);
+}
+
+/*
+ * Parallel index scan DSM callbacks.
+ */
+
+static Size
+o_idx_scan_estimate_dsm(CustomScanState *node, ParallelContext *pcxt)
+{
+	return MAXALIGN(sizeof(ParallelOScanDescData));
+}
+
+static void
+o_idx_scan_init_dsm(CustomScanState *node, ParallelContext *pcxt,
+					void *coordinate)
+{
+	OCustomScanState *ocstate = (OCustomScanState *) node;
+	OIndexPlanState *ix_plan_state =
+		(OIndexPlanState *) ocstate->o_plan_state;
+	ParallelOScanDesc poscan = (ParallelOScanDesc) coordinate;
+
+	orioledb_parallelscan_initialize_inner(&poscan->phs_base);
+
+	ix_plan_state->ostate.pidxscan = poscan;
+	ix_plan_state->ostate.workerNumber = 0;
+
+	node->pscan_len = sizeof(ParallelOScanDescData);
+}
+
+static void
+o_idx_scan_init_worker(CustomScanState *node, shm_toc *toc,
+					   void *coordinate)
+{
+	OCustomScanState *ocstate = (OCustomScanState *) node;
+	OIndexPlanState *ix_plan_state =
+		(OIndexPlanState *) ocstate->o_plan_state;
+	ParallelOScanDesc poscan = (ParallelOScanDesc) coordinate;
+
+	ix_plan_state->ostate.pidxscan = poscan;
+	SpinLockAcquire(&poscan->workerStart);
+	ix_plan_state->ostate.workerNumber = poscan->nworkers;
+	poscan->nworkers++;
+	SpinLockRelease(&poscan->workerStart);
+}
+
+static void
+o_idx_scan_reinit_dsm(CustomScanState *node, ParallelContext *pcxt,
+					  void *coordinate)
+{
+	OCustomScanState *ocstate = (OCustomScanState *) node;
+	OIndexPlanState *ix_plan_state =
+		(OIndexPlanState *) ocstate->o_plan_state;
+	ParallelOScanDesc poscan = (ParallelOScanDesc) coordinate;
+
+	orioledb_parallelscan_initialize_inner(&poscan->phs_base);
+
+	ix_plan_state->ostate.seqScan = NULL;
 }

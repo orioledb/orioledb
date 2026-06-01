@@ -378,6 +378,13 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				src_up = True
 				target_up = True
 			elif (src_cur_value.startswith('Index Only Scan')
+				and target_cur[1].startswith('Parallel Custom Scan')
+				and len(target_cur[2]) > 0
+				and target_cur[2][0].startswith('Forward index only scan')):
+				# Parallel Custom Scan replaces Parallel Index Only Scan
+				src_up = True
+				target_up = True
+			elif (src_cur_value.startswith('Index Only Scan')
 			      and target_cur[1].startswith('Seq Scan')):
 				# sometimes we have seq scan instead of index scan
 				src_up = True
@@ -401,6 +408,31 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 					target_down = True
 				else:
 					equal = False
+			elif (src_cur_value.startswith('Index Scan')
+				 and target_cur[1].startswith('Parallel Custom Scan')
+				 and len(target_cur[2]) > 0
+				 and target_cur[2][0].startswith('Forward index scan')):
+				# Parallel Custom Scan replaces Parallel Index Scan
+				if (len(src_cur[2]) == 0 and len(target_cur[2]) == 1) or is_conds_eq(src_cur[2][0], target_cur[2][1]):
+					src_down = True
+					target_down = True
+				else:
+					equal = False
+			elif (src_cur_value.startswith('Index Scan')
+				 and target_cur[1].startswith('Index Only Scan')):
+				# allvisfrac=1 makes index-only scan cheaper
+				src_up = True
+				target_up = True
+			elif (src_cur_value.startswith('Index Only Scan')
+				 and target_cur[1].startswith('Index Only Scan')):
+				# allvisfrac=1 may cause different index choice
+				src_up = True
+				target_up = True
+			elif (src_cur_value.startswith('Seq Scan')
+				 and target_cur[1].startswith('Index Only Scan')):
+				# allvisfrac=1 may make IOS cheaper than seq scan
+				src_up = True
+				target_up = True
 			elif re.sub(r"_\d+$", "", src_cur_value) == re.sub(r"_\d+$", "", target_cur[1]):
 				# lines differ only by auto-generated alias suffix (e.g. tinner_2 vs tinner_1)
 				src_down = True

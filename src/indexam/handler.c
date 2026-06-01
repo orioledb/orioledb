@@ -139,7 +139,7 @@ orioledb_btree_handler(void)
 	amroutine->amstorage = false;
 	amroutine->amclusterable = true;
 	amroutine->ampredlocks = true;
-	amroutine->amcanparallel = false;
+	amroutine->amcanparallel = true;
 	amroutine->amcaninclude = true;
 	amroutine->amusemaintenanceworkmem = false;
 	amroutine->amsummarizing = false;
@@ -1836,8 +1836,80 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		pfree(scan->xs_itup);
 		scan->xs_itup = NULL;
 	}
-	scan->xs_itupdesc = index_descr->itupdesc;
-	scan->xs_itup = index_form_tuple(index_descr->itupdesc, slot->tts_values, slot->tts_isnull);
+
+	/*
+	 * For secondary index IOS, OrioleDB's internal itupdesc includes extra PK
+	 * fields that the planner doesn't know about from pg_index, but scan.c
+	 * adds matching PK columns to indextlist so the planner can use IOS.
+	 * Build an index tuple matching the extended indextlist by concatenating
+	 * the index's own columns (from rd_att) with the extra PK field values
+	 * stored in the secondary index leaf tuple.
+	 */
+	if (o_scan->ixNum != PrimaryIndexNumber)
+	{
+		/*
+		 * The itupdesc layout:
+		 *
+		 * [key cols | INCLUDE cols | duplicate cols | PK key cols not in
+		 * index].
+		 */
+		TupleDesc	rd_att = scan->indexRelation->rd_att;
+		int			indnatts = rd_att->natts;
+		int			pk_from = index_descr->nKeyFields +
+			index_descr->nIncludedFields;
+		int			nduplicates = list_length(index_descr->duplicates);
+		int			pk_nfields = index_descr->itupdesc->natts -
+			pk_from - nduplicates;
+		int			total_natts = indnatts + pk_nfields;
+
+		if (pk_nfields > 0)
+		{
+			TupleDesc	ext_tupdesc;
+			Datum		ext_values[2 * INDEX_MAX_KEYS];
+			bool		ext_isnull[2 * INDEX_MAX_KEYS];
+			int			i;
+
+			ext_tupdesc = CreateTemplateTupleDesc(total_natts);
+			for (i = 0; i < indnatts; i++)
+				TupleDescCopyEntry(ext_tupdesc, i + 1, rd_att, i + 1);
+			for (i = 0; i < pk_nfields; i++)
+			{
+				int			pk_pos = pk_from + nduplicates + i;
+
+				TupleDescCopyEntry(ext_tupdesc, indnatts + i + 1,
+								   index_descr->itupdesc, pk_pos + 1);
+			}
+
+			memcpy(ext_values, slot->tts_values,
+				   sizeof(Datum) * indnatts);
+			memcpy(ext_isnull, slot->tts_isnull,
+				   sizeof(bool) * indnatts);
+			memcpy(ext_values + indnatts,
+				   slot->tts_values + pk_from + nduplicates,
+				   sizeof(Datum) * pk_nfields);
+			memcpy(ext_isnull + indnatts,
+				   slot->tts_isnull + pk_from + nduplicates,
+				   sizeof(bool) * pk_nfields);
+
+			scan->xs_itupdesc = ext_tupdesc;
+			scan->xs_itup = index_form_tuple(ext_tupdesc,
+											 ext_values, ext_isnull);
+		}
+		else
+		{
+			scan->xs_itupdesc = rd_att;
+			scan->xs_itup = index_form_tuple(rd_att,
+											 slot->tts_values,
+											 slot->tts_isnull);
+		}
+	}
+	else
+	{
+		scan->xs_itupdesc = index_descr->itupdesc;
+		scan->xs_itup = index_form_tuple(index_descr->itupdesc,
+										 slot->tts_values,
+										 slot->tts_isnull);
+	}
 
 	ItemPointerCopy(&slot->tts_tid, &scan->xs_itup->t_tid);
 
