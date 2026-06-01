@@ -1649,6 +1649,20 @@ recovery_finish(int worker_id)
 
 		if (COMMITSEQNO_IS_INPROGRESS(cur_state->csn))
 		{
+#ifdef USE_INJECTION_POINTS
+			/*
+			 * In-flight transactions left INPROGRESS at recovery end are
+			 * aborted here, in memory, with no WAL emitted.  On the primary's
+			 * crash recovery this runs and cleans them up; a live streaming
+			 * standby never reaches recovery_finish(), so the oxid stays
+			 * INPROGRESS forever and a later replayed modify of its row
+			 * deadlocks in conflict resolution.  Trace the oxid so a repro can
+			 * confirm the dangling oxid the standby wedges on (e.g. 480) is one
+			 * the primary aborted here.  See test/t/crash/recovery_livelock_issue.md.
+			 */
+			elog(LOG, "recovery-finish-abort-trace pid=%d worker=%d aborting in-flight oxid=%lu",
+				 MyProcPid, worker_id, (unsigned long) cur_state->oxid);
+#endif
 			oxid_needs_wal_flush = cur_state->needs_wal_flush;
 			recovery_oxid = cur_state->oxid;
 			for (i = 0; i < (int) UndoLogsCount; i++)
