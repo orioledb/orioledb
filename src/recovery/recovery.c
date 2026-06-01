@@ -133,7 +133,6 @@ typedef struct
 
 	TransactionId xid;			/* builtin transaction identifier for joint
 								 * commit */
-	OXid		joint_commit_xmin;	/* xmin carried by JOINT_COMMIT */
 
 	bool		needs_wal_flush;
 	UndoLocation retain_locs[(int) UndoLogsCount];
@@ -959,7 +958,6 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			int			j;
 
 			state->xid = InvalidTransactionId;
-			state->joint_commit_xmin = InvalidOXid;
 			state->needs_wal_flush = false;
 			for (j = 0; j < (int) UndoLogsCount; j++)
 				state->retain_locs[j] = InvalidUndoLocation;	/* undo locations are
@@ -4568,7 +4566,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 	switch (rec->type)
 	{
 		case WAL_REC_XID:
-			elog(DEBUG2,
+			elog(DEBUG4,
 				 "Recovery WAL_REC_XID: oxid=%lu logicalXid=%u heapXid=%u "
 				 "current_recovery_oxid=%lu",
 				 rec->oxid, rec->logicalXid, rec->heapXid,
@@ -4578,7 +4576,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			break;
 
 		case WAL_REC_SWITCH_LOGICAL_XID:
-			elog(DEBUG2,
+			elog(DEBUG4,
 				 "Recovery WAL_REC_SWITCH_LOGICAL_XID: topXid=%u subXid=%u "
 				 "current_recovery_oxid=%lu logicalXid=%u heapXid=%u",
 				 rec->u.swxid.topXid, rec->u.swxid.subXid,
@@ -4648,13 +4646,6 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 
 		case WAL_REC_JOINT_COMMIT:
 			cur_recovery_xid_state->xid = rec->u.joint_commit.xid;
-			cur_recovery_xid_state->joint_commit_xmin = rec->u.joint_commit.xmin;
-			elog(DEBUG2,
-				 "Recovery WAL_REC_JOINT_COMMIT: joint_xid=%u oxid=%lu "
-				 "logicalXid=%u heapXid=%u joint_commit_xmin=%lu",
-				 rec->u.joint_commit.xid, rec->oxid,
-				 rec->logicalXid, rec->heapXid,
-				 rec->u.joint_commit.xmin);
 			elog(DEBUG1, "OrioleDB recovery committed transaction (xid, oxid)="
 				 "(%u, %lu). Next WAL record starts at LSN %X/%X",
 				 cur_recovery_xid_state->xid, rec->oxid,
@@ -4727,7 +4718,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 					pfree(db_prefix);
 				}
 
-				elog(DEBUG2,
+				elog(DEBUG4,
 					 "Recovery WAL_REC_RELATION: rec_oxid=%lu logicalXid=%u "
 					 "heapXid=%u oids=[%u,%u,%u] sys_tree_num=%d ix_type=%d "
 					 "has_descr=%d has_indexDescr=%d",
@@ -4848,7 +4839,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 
 				Assert(rec->oxid != InvalidOXid);
 
-				elog(DEBUG2,
+				elog(DEBUG4,
 					 "Recovery WAL_REC_MODIFY: wal_type=%s rec_oxid=%lu "
 					 "logicalXid=%u heapXid=%u oids=[%u,%u,%u] "
 					 "sys_tree_num=%d xlogPtr=%X/%X single=%d",
@@ -5100,9 +5091,6 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn, bool commit)
 
 		if (state->xid != xid)
 			continue;
-
-		///if (OXidIsValid(state->joint_commit_xmin))
-		///	recovery_xmin = Max(recovery_xmin, state->joint_commit_xmin);
 
 		recovery_switch_to_oxid(state->oxid, -1);
 

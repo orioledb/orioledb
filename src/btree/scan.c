@@ -1375,13 +1375,10 @@ scan_note_emitted_tuple(BTreeSeqScan *scan, OTuple tuple)
 static void
 scan_skip_covered_leaf_prefix(BTreeSeqScan *scan)
 {
-	//OffsetNumber startOffset;
-
 	if (!scan->haveHistoricalCoverageHigh ||
 		!BTREE_PAGE_LOCATOR_IS_VALID(scan->leafImg, &scan->leafLoc))
 		return;
 
-	//startOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(scan->leafImg, &scan->leafLoc);
 	while (BTREE_PAGE_LOCATOR_IS_VALID(scan->leafImg, &scan->leafLoc))
 	{
 		OTuple		key;
