@@ -279,10 +279,10 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	MemoryContext oldcontext;
 	bool		result = true;
 
-#if PG_VERSION_NUM >= 170000
-
 	if (!so->qual_ok)
 		return false;
+
+#if PG_VERSION_NUM >= 170000
 
 	if (so->numArrayKeys)
 	{
