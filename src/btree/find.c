@@ -1673,7 +1673,7 @@ btree_find_try_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 	result = o_btree_try_read_page(context->desc, blkno, pageChangeCount,
 								   pagePtr, context->csn,
 								   key, keyType, partial, loadHikeysChunk,
-								   readCsn);
+								   readCsn, NULL);
 
 	return result;
 }
