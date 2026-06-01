@@ -2920,10 +2920,18 @@ class RecoveryWithArchivingTest(BaseTest):
 		    [0], 0)
 
 	def _wait_for_node_shutdown(self, node, timeout_s=60):
+		pidfile_path = os.path.join(node.data_dir, "postmaster.pid")
 		deadline = time.time() + timeout_s
-		while node.status() == NodeStatus.Running and time.time() < deadline:
+		while time.time() < deadline:
+			if not os.path.exists(pidfile_path):
+				return
+			if node.status() != NodeStatus.Running:
+				return
 			time.sleep(0.1)
-		self.assertNotEqual(node.status(), NodeStatus.Running)
+		self.fail(
+		    "node did not shut down within %s seconds; status=%s, "
+		    "postmaster.pid exists=%s" %
+		    (timeout_s, node.status(), os.path.exists(pidfile_path)))
 
 	def _replace_recovery_target_action(self,
 	                                    node,

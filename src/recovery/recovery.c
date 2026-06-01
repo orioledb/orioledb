@@ -833,7 +833,7 @@ recovery_shmem_init(Pointer ptr, bool found)
 
 	/*
 	 * Shared recovery pointers are laid out as one compact block: 0: replay
-	 * progress boundary 
+	 * progress boundary
 	 */
 	recovery_ptr = (pg_atomic_uint64 *) ptr;
 	/* 1: startup retain/undo progress boundary */
