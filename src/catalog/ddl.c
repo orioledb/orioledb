@@ -1551,21 +1551,21 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	}
 	else if (IsA(pstmt->utilityStmt, AlterTableStmt))
 	{
-		if (alter_type_exprs)
-		{
-			list_free_deep(alter_type_exprs);
-			alter_type_exprs = NIL;
-		}
-		if (o_alter_generated_column_id)
-		{
-			list_free_deep(o_alter_generated_column_id);
-			o_alter_generated_column_id = NIL;
-		}
-		if (dropped_attrs)
-		{
-			list_free(dropped_attrs);
-			dropped_attrs = NIL;
-		}
+		/*
+		 * We don't need to check the lists for NIL list_free_deep() already
+		 * does that.
+		 */
+		list_free_deep(drop_index_list);
+		drop_index_list = NIL;
+
+		list_free_deep(alter_type_exprs);
+		alter_type_exprs = NIL;
+
+		list_free_deep(o_alter_generated_column_id);
+		o_alter_generated_column_id = NIL;
+
+		list_free(dropped_attrs);
+		dropped_attrs = NIL;
 
 		/*
 		 * Don't free memory explicitly, delegate it to the memory context
