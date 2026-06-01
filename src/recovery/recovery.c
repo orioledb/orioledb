@@ -682,7 +682,7 @@ pg_atomic_uint64 *recovery_ptr;
  * Startup-process retain/undo bookkeeping progress.  This is used to ensure
  * undo retention catches up before the stop state is exposed.
  */
-pg_atomic_uint64 *recovery_main_retain_ptr;
+static pg_atomic_uint64 *recovery_main_retain_ptr;
 /*
  * Global release fence for worker-local finished_list cleanup.
  *
