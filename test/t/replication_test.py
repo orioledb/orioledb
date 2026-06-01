@@ -454,6 +454,7 @@ class ReplicationTest(BaseTest):
 			    "checkpoint_timeout = 86400\n"
 			    "max_wal_size = 1GB\n"
 			    "enable_seqscan = off\n"
+			    "max_parallel_workers_per_gather = 0\n"
 			    "orioledb.recovery_pool_size = 1\n"
 			    "orioledb.debug_disable_bgwriter = true\n")
 			master.start()
