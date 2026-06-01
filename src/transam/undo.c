@@ -2268,9 +2268,8 @@ undo_xact_callback(XactEvent event, void *arg)
 					flushPos = assign_xidless_commit_lsn(oxid, &wrote_xlog);
 					// error-injection here -> Bug #2 (silent replica divergence)  (orioledb-after-assign-commit-lsn: 2/8 ~25%)
 
-					/* elog disabled: inside replica-bug-fix CRIT_SECTION (palloc forbidden)
 					elog(DEBUG4, "XACT_EVENT_COMMIT [independent Oriole transaction] oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d flushPos %X/%X",
-						 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap, LSN_FORMAT_ARGS(flushPos)); */
+						 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap, LSN_FORMAT_ARGS(flushPos));
 
 					flushPos = Max(flushPos, XactLastCommitEnd);
 
@@ -2329,24 +2328,24 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				current_oxid_precommit();
 
-				// if (STOPEVENTS_ENABLED())
-				// {
-				// 	/*
-				// 	 * XACT_EVENT_COMMIT runs under HOLD_INTERRUPTS, so a
-				// 	 * normal CHECK_FOR_INTERRUPTS() is suppressed here. In
-				// 	 * test/debug builds (orioledb.enable_stopevents) we
-				// 	 * briefly lift the holdoff so a query cancel delivered
-				// 	 * while parked at the stop event can fire and drive the
-				// 	 * precommit→abort transition the test means to
-				// 	 * exercise.  Production builds skip this entirely — the
-				// 	 * stop event is compiled out to a no-op and the holdoff
-				// 	 * stays intact.
-				// 	 */
-				// 	RESUME_INTERRUPTS();
-				// 	STOPEVENT(STOPEVENT_AFTER_CSN_PRECOMMIT, NULL);
-				// 	CHECK_FOR_INTERRUPTS();
-				// 	HOLD_INTERRUPTS();
-				// }
+				if (STOPEVENTS_ENABLED())
+				{
+					/*
+					 * XACT_EVENT_COMMIT runs under HOLD_INTERRUPTS, so a
+					 * normal CHECK_FOR_INTERRUPTS() is suppressed here. In
+					 * test/debug builds (orioledb.enable_stopevents) we
+					 * briefly lift the holdoff so a query cancel delivered
+					 * while parked at the stop event can fire and drive the
+					 * precommit→abort transition the test means to
+					 * exercise.  Production builds skip this entirely — the
+					 * stop event is compiled out to a no-op and the holdoff
+					 * stays intact.
+					 */
+					RESUME_INTERRUPTS();
+					STOPEVENT(STOPEVENT_AFTER_CSN_PRECOMMIT, NULL);
+					CHECK_FOR_INTERRUPTS();
+					HOLD_INTERRUPTS();
+				}
 
 				csn = GetCurrentCSN();
 				if (csn == COMMITSEQNO_INPROGRESS)
@@ -2361,21 +2360,17 @@ undo_xact_callback(XactEvent event, void *arg)
 				 * past ours.  Commit-side only -- not reached during abort.
 				 */
 #ifdef USE_INJECTION_POINTS
-				/* elog disabled: inside replica-bug-fix CRIT_SECTION (palloc forbidden)
 				elog(LOG,
 					 "csn-trace pre-inject pid=%d oxid=%lu csn=%lu",
 					 MyProcPid, (unsigned long) oxid,
 					 (unsigned long) csn);
-				*/
 #endif
 				INJECTION_POINT("orioledb-csn-incremented");
 				// kill(MyProcPid, 9);
 #ifdef USE_INJECTION_POINTS
-				/* elog disabled: inside replica-bug-fix CRIT_SECTION (palloc forbidden)
 				elog(LOG,
 					 "csn-trace post-inject (no error fired) pid=%d oxid=%lu",
 					 MyProcPid, (unsigned long) oxid);
-				*/
 #endif
 
 				current_oxid_commit(csn);
