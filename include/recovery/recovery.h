@@ -43,6 +43,7 @@ extern XLogRecPtr recovery_get_effective_replay_ptr(void);
 extern bool orioledb_recovery_stops_before_hook(XLogReaderState *record,
 												TransactionId *recordXid,
 												TimestampTz *recordXtime);
+
 /*
  * Synchronize Oriole recovery state against the exact PostgreSQL recovery
  * stop boundary before recovery_target_action is applied.

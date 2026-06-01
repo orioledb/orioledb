@@ -672,16 +672,19 @@ pg_atomic_uint32 *worker_finish_count;
 pg_atomic_uint32 *idx_worker_finish_count;
 pg_atomic_uint32 *worker_ptrs_changes;
 RecoveryWorkerPtrs *worker_ptrs;
+
 /*
  * Global replay progress seen by Oriole recovery.  This is advanced when
  * replay reaches a WAL boundary, but it is not itself a visibility boundary.
  */
 pg_atomic_uint64 *recovery_ptr;
+
 /*
  * Startup-process retain/undo bookkeeping progress.  This is used to ensure
  * undo retention catches up before the stop state is exposed.
  */
 static pg_atomic_uint64 *recovery_main_retain_ptr;
+
 /*
  * Global release fence for worker-local finished_list cleanup.
  *
@@ -691,6 +694,7 @@ static pg_atomic_uint64 *recovery_main_retain_ptr;
  * and must not be repurposed as a visibility-only boundary.
  */
 pg_atomic_uint64 *recovery_finished_list_ptr;
+
 /*
  * Last Oriole visibility boundary that the startup process has already
  * published from finished_list.
@@ -700,6 +704,7 @@ pg_atomic_uint64 *recovery_finished_list_ptr;
  * fence kept in recovery_finished_list_ptr.
  */
 pg_atomic_uint64 *recovery_published_visible_ptr;
+
 /*
  * Rolling replay/visible pair used by recovery-target synchronization.
  *
@@ -827,19 +832,19 @@ recovery_shmem_init(Pointer ptr, bool found)
 	ptr += CACHELINEALIGN(sizeof(pg_atomic_uint32));
 
 	/*
-	 * Shared recovery pointers are laid out as one compact block:
-	 *   0: replay progress boundary
-	 *   1: startup retain/undo progress boundary
-	 *   2: worker-release fence for worker-local finished_list cleanup
-	 *   3: startup-published visible boundary
-	 *   4: last replay boundary seen for a commit-producing event
-	 *   5: matching Oriole-visible boundary for that event
+	 * Shared recovery pointers are laid out as one compact block: 0: replay
+	 * progress boundary 
 	 */
 	recovery_ptr = (pg_atomic_uint64 *) ptr;
+	/* 1: startup retain/undo progress boundary */
 	recovery_main_retain_ptr = recovery_ptr + 1;
+	/* 2: worker-release fence for worker-local finished_list cleanup */
 	recovery_finished_list_ptr = recovery_ptr + 2;
+	/* 3: startup-published visible boundary */
 	recovery_published_visible_ptr = recovery_ptr + 3;
+	/* 4: last replay boundary seen for a commit-producing event */
 	recovery_last_replay_ptr = recovery_ptr + 4;
+	/* 5: matching Oriole-visible boundary for that event */
 	recovery_last_visible_ptr = recovery_ptr + 5;
 
 	ptr += CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 6));
@@ -886,6 +891,7 @@ recovery_shmem_init(Pointer ptr, bool found)
 		pg_atomic_init_u64(recovery_finished_list_ptr, InvalidXLogRecPtr);
 		pg_atomic_init_u64(recovery_published_visible_ptr, InvalidXLogRecPtr);
 		pg_atomic_init_u32(recovery_last_pair_seq, 0);
+
 		/*
 		 * No stop-after replay/visible pair is known until replay reaches a
 		 * commit-producing event and records it explicitly.
@@ -1422,11 +1428,11 @@ recovery_get_effective_replay_ptr(void)
 	/*
 	 * This is only an approximate snapshot.
 	 *
-	 * recovery_ptr and recovery_finished_list_ptr (the worker-release fence) are
-	 * read here without a shared synchronization protocol, so the pair may
-	 * transiently reflect different instants in time. The returned value is
-	 * therefore suitable only as an advisory effective replay/apply position and
-	 * must not be used as a strict synchronization predicate.
+	 * recovery_ptr and recovery_finished_list_ptr (the worker-release fence)
+	 * are read here without a shared synchronization protocol, so the pair
+	 * may transiently reflect different instants in time. The returned value
+	 * is therefore suitable only as an advisory effective replay/apply
+	 * position and must not be used as a strict synchronization predicate.
 	 */
 	ptr = pg_atomic_read_u64(recovery_ptr);
 	finishedPtr = pg_atomic_read_u64(recovery_finished_list_ptr);
@@ -1611,8 +1617,8 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 	 * For stop-after semantics this is the replay-side boundary that Oriole
 	 * must reach before publication/retain convergence is checked.
 	 *
-	 * For stop-before semantics this is the upper bound that published visible
-	 * state must remain strictly below.
+	 * For stop-before semantics this is the upper bound that published
+	 * visible state must remain strictly below.
 	 */
 	target_ptr = info->recordPtr;
 	required_visible_ptr = info->recoveryStopAfter ?
@@ -1641,27 +1647,41 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 	{
 		/* Minimum replay completion boundary already reached by all workers. */
 		XLogRecPtr	current_ptr = recovery_get_current_ptr();
+
 		/* Minimum retain/undo boundary already reached by all workers. */
 		XLogRecPtr	retain_ptr = recovery_get_retain_ptr();
+
 		/* Last startup-published Oriole-visible boundary from finished_list. */
 		XLogRecPtr	finished_ptr;
+
 		/* Startup-process retain/undo bookkeeping progress boundary. */
 		XLogRecPtr	main_retain_ptr;
+
 		/* Raw global replay progress maintained by Oriole recovery. */
 		XLogRecPtr	recovery_ptr_snapshot;
+
 		/* Replay-side boundary of the latest commit-producing replay event. */
 		XLogRecPtr	last_replay_ptr_snapshot;
+
 		/* Oriole-visible boundary paired with last_replay_ptr_snapshot. */
 		XLogRecPtr	last_visible_ptr_snapshot;
-		/* Stop-before visible boundary derived from the rolling replay/visible pair. */
+
+		/*
+		 * Stop-before visible boundary derived from the rolling
+		 * replay/visible pair.
+		 */
 		XLogRecPtr	stop_before_visible_ptr;
-		/* Stop-after visible boundary derived from the rolling replay/visible pair. */
+
+		/*
+		 * Stop-after visible boundary derived from the rolling replay/visible
+		 * pair.
+		 */
 		XLogRecPtr	stop_after_visible_ptr;
 
 		/*
 		 * The hook runs in the startup process itself, so it must drive the
-		 * startup-side deferred finalization instead of waiting for some other
-		 * process to advance recovery_published_visible_ptr.
+		 * startup-side deferred finalization instead of waiting for some
+		 * other process to advance recovery_published_visible_ptr.
 		 */
 		update_proc_retain_undo_location(-1);
 		update_recovery_undo_loc_flush(*recovery_single_process, -1);
@@ -1709,12 +1729,12 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 		 * corresponding Oriole-visible stop-after boundary captured during
 		 * replay.
 		 *
-		 * For stop-before semantics, PostgreSQL stops before applying the stop
-		 * record.  In that case Oriole must converge on the latest safe
+		 * For stop-before semantics, PostgreSQL stops before applying the
+		 * stop record.  In that case Oriole must converge on the latest safe
 		 * visible boundary already replayed before stop, rather than merely
-		 * converging on an arbitrary older published boundary. Requiring it to
-		 * reach the stop record boundary itself would wait for a record that
-		 * is not supposed to become visible.
+		 * converging on an arbitrary older published boundary. Requiring it
+		 * to reach the stop record boundary itself would wait for a record
+		 * that is not supposed to become visible.
 		 */
 		if (!info->recoveryStopAfter)
 		{
@@ -1746,11 +1766,12 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 			{
 				/*
 				 * For stop-before of the first post-backup transaction, the
-				 * correct visible state is the base-backup state itself.  In that
-				 * case Oriole may have no published post-backup boundary yet, and
-				 * all recovery/publication pointers remain invalid.  Treat that
-				 * as a valid already-published boundary instead of waiting
-				 * forever for a boundary that must not appear before stop.
+				 * correct visible state is the base-backup state itself.  In
+				 * that case Oriole may have no published post-backup boundary
+				 * yet, and all recovery/publication pointers remain invalid.
+				 * Treat that as a valid already-published boundary instead of
+				 * waiting forever for a boundary that must not appear before
+				 * stop.
 				 */
 				if (!XLogRecPtrIsValid(recovery_ptr_snapshot) &&
 					!XLogRecPtrIsValid(current_ptr) &&
@@ -1758,133 +1779,134 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 					!XLogRecPtrIsValid(main_retain_ptr))
 				{
 					elog(DEBUG4,
-						"Recovery target reached: synchronization barrier "
-						"completed at base-backup visible state before stop "
-						"(target_ptr=%X/%X recovery_ptr=%X/%X "
-						"main_retain_ptr=%X/%X "
-						"current_ptr=%X/%X retain_ptr=%X/%X "
-						"finished_ptr=%X/%X "
-						"runXmin=%lu globalXmin=%lu recovery_xmin=%lu)",
-						LSN_FORMAT_ARGS(target_ptr),
-						LSN_FORMAT_ARGS(recovery_ptr_snapshot),
-						LSN_FORMAT_ARGS(main_retain_ptr),
-						LSN_FORMAT_ARGS(current_ptr),
-						LSN_FORMAT_ARGS(retain_ptr),
-						LSN_FORMAT_ARGS(finished_ptr),
-						pg_atomic_read_u64(&xid_meta->runXmin),
-						pg_atomic_read_u64(&xid_meta->globalXmin),
-						recovery_xmin);
+						 "Recovery target reached: synchronization barrier "
+						 "completed at base-backup visible state before stop "
+						 "(target_ptr=%X/%X recovery_ptr=%X/%X "
+						 "main_retain_ptr=%X/%X "
+						 "current_ptr=%X/%X retain_ptr=%X/%X "
+						 "finished_ptr=%X/%X "
+						 "runXmin=%lu globalXmin=%lu recovery_xmin=%lu)",
+						 LSN_FORMAT_ARGS(target_ptr),
+						 LSN_FORMAT_ARGS(recovery_ptr_snapshot),
+						 LSN_FORMAT_ARGS(main_retain_ptr),
+						 LSN_FORMAT_ARGS(current_ptr),
+						 LSN_FORMAT_ARGS(retain_ptr),
+						 LSN_FORMAT_ARGS(finished_ptr),
+						 pg_atomic_read_u64(&xid_meta->runXmin),
+						 pg_atomic_read_u64(&xid_meta->globalXmin),
+						 recovery_xmin);
 					break;
 				}
 
 				/*
-				 * Replay may already have advanced into post-backup WAL while the
-				 * visible state is still exactly the base-backup state: for
-				 * example, we may have entered JOINT_COMMIT processing for the
-				 * first post-backup transaction but not replayed the builtin
-				 * commit record that would publish an Oriole-visible boundary.
+				 * Replay may already have advanced into post-backup WAL while
+				 * the visible state is still exactly the base-backup state:
+				 * for example, we may have entered JOINT_COMMIT processing
+				 * for the first post-backup transaction but not replayed the
+				 * builtin commit record that would publish an Oriole-visible
+				 * boundary.
 				 *
-				 * For stop-before semantics such uncommitted / not-yet-visible
-				 * replay progress must be treated the same way as "no visible
-				 * progress yet": the last safe visible state is still the backup
-				 * baseline, so waiting for a published boundary would hang
-				 * forever.
+				 * For stop-before semantics such uncommitted /
+				 * not-yet-visible replay progress must be treated the same
+				 * way as "no visible progress yet": the last safe visible
+				 * state is still the backup baseline, so waiting for a
+				 * published boundary would hang forever.
 				 */
 				if (!XLogRecPtrIsValid(last_visible_ptr_snapshot) &&
 					!XLogRecPtrIsValid(stop_before_visible_ptr))
 				{
 					elog(DEBUG4,
-						"Recovery target reached: synchronization barrier "
-						"completed at base-backup visible state before stop "
-						"(target_ptr=%X/%X recovery_ptr=%X/%X "
-						"last_replay_ptr=%X/%X last_visible_ptr=%X/%X "
-						"main_retain_ptr=%X/%X current_ptr=%X/%X "
-						"retain_ptr=%X/%X finished_ptr=%X/%X "
-						"runXmin=%lu globalXmin=%lu recovery_xmin=%lu)",
-						LSN_FORMAT_ARGS(target_ptr),
-						LSN_FORMAT_ARGS(recovery_ptr_snapshot),
-						LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
-						LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
-						LSN_FORMAT_ARGS(main_retain_ptr),
-						LSN_FORMAT_ARGS(current_ptr),
-						LSN_FORMAT_ARGS(retain_ptr),
-						LSN_FORMAT_ARGS(finished_ptr),
-						pg_atomic_read_u64(&xid_meta->runXmin),
-						pg_atomic_read_u64(&xid_meta->globalXmin),
-						recovery_xmin);
+						 "Recovery target reached: synchronization barrier "
+						 "completed at base-backup visible state before stop "
+						 "(target_ptr=%X/%X recovery_ptr=%X/%X "
+						 "last_replay_ptr=%X/%X last_visible_ptr=%X/%X "
+						 "main_retain_ptr=%X/%X current_ptr=%X/%X "
+						 "retain_ptr=%X/%X finished_ptr=%X/%X "
+						 "runXmin=%lu globalXmin=%lu recovery_xmin=%lu)",
+						 LSN_FORMAT_ARGS(target_ptr),
+						 LSN_FORMAT_ARGS(recovery_ptr_snapshot),
+						 LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
+						 LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
+						 LSN_FORMAT_ARGS(main_retain_ptr),
+						 LSN_FORMAT_ARGS(current_ptr),
+						 LSN_FORMAT_ARGS(retain_ptr),
+						 LSN_FORMAT_ARGS(finished_ptr),
+						 pg_atomic_read_u64(&xid_meta->runXmin),
+						 pg_atomic_read_u64(&xid_meta->globalXmin),
+						 recovery_xmin);
 					break;
 				}
 
 				elog(DEBUG4,
-					"Recovery target reached: waiting for a published visible "
-					"boundary before stop "
-					"(target_ptr=%X/%X recovery_ptr=%X/%X "
-					"stop_before_visible_ptr=%X/%X finished_ptr=%X/%X)",
-					LSN_FORMAT_ARGS(target_ptr),
-					LSN_FORMAT_ARGS(recovery_ptr_snapshot),
-					LSN_FORMAT_ARGS(stop_before_visible_ptr),
-					LSN_FORMAT_ARGS(finished_ptr));
+					 "Recovery target reached: waiting for a published visible "
+					 "boundary before stop "
+					 "(target_ptr=%X/%X recovery_ptr=%X/%X "
+					 "stop_before_visible_ptr=%X/%X finished_ptr=%X/%X)",
+					 LSN_FORMAT_ARGS(target_ptr),
+					 LSN_FORMAT_ARGS(recovery_ptr_snapshot),
+					 LSN_FORMAT_ARGS(stop_before_visible_ptr),
+					 LSN_FORMAT_ARGS(finished_ptr));
 			}
 			else if (!XLogRecPtrIsValid(stop_before_visible_ptr))
 			{
 				elog(DEBUG4,
-					"Recovery target reached: waiting for replay path to expose "
-					"the last visible boundary before stop "
-					"(target_ptr=%X/%X last_replay_ptr=%X/%X "
-					"last_visible_ptr=%X/%X finished_ptr=%X/%X)",
-					LSN_FORMAT_ARGS(target_ptr),
-					LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
-					LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
-					LSN_FORMAT_ARGS(finished_ptr));
+					 "Recovery target reached: waiting for replay path to expose "
+					 "the last visible boundary before stop "
+					 "(target_ptr=%X/%X last_replay_ptr=%X/%X "
+					 "last_visible_ptr=%X/%X finished_ptr=%X/%X)",
+					 LSN_FORMAT_ARGS(target_ptr),
+					 LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
+					 LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
+					 LSN_FORMAT_ARGS(finished_ptr));
 			}
 			else if (finished_ptr < stop_before_visible_ptr)
 			{
 				elog(DEBUG4,
-					"Recovery target reached: waiting for the published "
-					"visible boundary to reach the last visible boundary "
-					"before stop "
-					"(target_ptr=%X/%X stop_before_visible_ptr=%X/%X "
-					"finished_ptr=%X/%X)",
-					LSN_FORMAT_ARGS(target_ptr),
-					LSN_FORMAT_ARGS(stop_before_visible_ptr),
-					LSN_FORMAT_ARGS(finished_ptr));
+					 "Recovery target reached: waiting for the published "
+					 "visible boundary to reach the last visible boundary "
+					 "before stop "
+					 "(target_ptr=%X/%X stop_before_visible_ptr=%X/%X "
+					 "finished_ptr=%X/%X)",
+					 LSN_FORMAT_ARGS(target_ptr),
+					 LSN_FORMAT_ARGS(stop_before_visible_ptr),
+					 LSN_FORMAT_ARGS(finished_ptr));
 			}
 			else if (finished_ptr >= target_ptr)
 			{
 				elog(DEBUG4,
-					"Recovery target reached: waiting for the published "
-					"visible boundary to stabilize strictly before the "
-					"stop record "
-					"(target_ptr=%X/%X finished_ptr=%X/%X)",
-					LSN_FORMAT_ARGS(target_ptr),
-					LSN_FORMAT_ARGS(finished_ptr));
+					 "Recovery target reached: waiting for the published "
+					 "visible boundary to stabilize strictly before the "
+					 "stop record "
+					 "(target_ptr=%X/%X finished_ptr=%X/%X)",
+					 LSN_FORMAT_ARGS(target_ptr),
+					 LSN_FORMAT_ARGS(finished_ptr));
 			}
 			else if (main_retain_ptr < finished_ptr)
 			{
 				elog(DEBUG4,
-					"Recovery target reached: waiting for startup retain "
-					"bookkeeping to catch up with the published visible "
-					"boundary "
-					"(target_ptr=%X/%X main_retain_ptr=%X/%X finished_ptr=%X/%X)",
-					LSN_FORMAT_ARGS(target_ptr),
-					LSN_FORMAT_ARGS(main_retain_ptr),
-					LSN_FORMAT_ARGS(finished_ptr));
+					 "Recovery target reached: waiting for startup retain "
+					 "bookkeeping to catch up with the published visible "
+					 "boundary "
+					 "(target_ptr=%X/%X main_retain_ptr=%X/%X finished_ptr=%X/%X)",
+					 LSN_FORMAT_ARGS(target_ptr),
+					 LSN_FORMAT_ARGS(main_retain_ptr),
+					 LSN_FORMAT_ARGS(finished_ptr));
 			}
 			else
 			{
 				elog(DEBUG4,
-					"Recovery target reached: stop-before synchronization "
-					"barrier completed "
-					"(target_ptr=%X/%X recovery_ptr=%X/%X "
-					"stop_before_visible_ptr=%X/%X main_retain_ptr=%X/%X "
-					"current_ptr=%X/%X retain_ptr=%X/%X finished_ptr=%X/%X)",
-					LSN_FORMAT_ARGS(target_ptr),
-					LSN_FORMAT_ARGS(recovery_ptr_snapshot),
-					LSN_FORMAT_ARGS(stop_before_visible_ptr),
-					LSN_FORMAT_ARGS(main_retain_ptr),
-					LSN_FORMAT_ARGS(current_ptr),
-					LSN_FORMAT_ARGS(retain_ptr),
-					LSN_FORMAT_ARGS(finished_ptr));
+					 "Recovery target reached: stop-before synchronization "
+					 "barrier completed "
+					 "(target_ptr=%X/%X recovery_ptr=%X/%X "
+					 "stop_before_visible_ptr=%X/%X main_retain_ptr=%X/%X "
+					 "current_ptr=%X/%X retain_ptr=%X/%X finished_ptr=%X/%X)",
+					 LSN_FORMAT_ARGS(target_ptr),
+					 LSN_FORMAT_ARGS(recovery_ptr_snapshot),
+					 LSN_FORMAT_ARGS(stop_before_visible_ptr),
+					 LSN_FORMAT_ARGS(main_retain_ptr),
+					 LSN_FORMAT_ARGS(current_ptr),
+					 LSN_FORMAT_ARGS(retain_ptr),
+					 LSN_FORMAT_ARGS(finished_ptr));
 
 				break;
 			}
@@ -1915,82 +1937,82 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 			if (current_ptr < required_visible_ptr)
 			{
 				elog(DEBUG4,
-						"Recovery target reached: waiting for replay progress to "
-						"reach the stop-after replay boundary "
-						"(stop_after=%d target_ptr=%X/%X required_visible_ptr=%X/%X "
-						"current_ptr=%X/%X)",
-						info->recoveryStopAfter,
-						LSN_FORMAT_ARGS(target_ptr),
-						LSN_FORMAT_ARGS(required_visible_ptr),
-						LSN_FORMAT_ARGS(current_ptr));
+					 "Recovery target reached: waiting for replay progress to "
+					 "reach the stop-after replay boundary "
+					 "(stop_after=%d target_ptr=%X/%X required_visible_ptr=%X/%X "
+					 "current_ptr=%X/%X)",
+					 info->recoveryStopAfter,
+					 LSN_FORMAT_ARGS(target_ptr),
+					 LSN_FORMAT_ARGS(required_visible_ptr),
+					 LSN_FORMAT_ARGS(current_ptr));
 			}
 			else if (current_ptr != retain_ptr)
 			{
 				elog(DEBUG4,
-					"Recovery target reached: waiting for retain boundary to "
-					"catch up with replay progress (stop_after=%d target_ptr=%X/%X "
-					"current_ptr=%X/%X retain_ptr=%X/%X)",
-					info->recoveryStopAfter,
-					LSN_FORMAT_ARGS(target_ptr),
-					LSN_FORMAT_ARGS(current_ptr),
-					LSN_FORMAT_ARGS(retain_ptr));
+					 "Recovery target reached: waiting for retain boundary to "
+					 "catch up with replay progress (stop_after=%d target_ptr=%X/%X "
+					 "current_ptr=%X/%X retain_ptr=%X/%X)",
+					 info->recoveryStopAfter,
+					 LSN_FORMAT_ARGS(target_ptr),
+					 LSN_FORMAT_ARGS(current_ptr),
+					 LSN_FORMAT_ARGS(retain_ptr));
 			}
 			else if (!XLogRecPtrIsValid(stop_after_visible_ptr))
 			{
 				elog(DEBUG4,
-					"Recovery target reached: waiting for replay path to expose "
-					"a visible boundary corresponding to the stop-after target "
-					"(target_ptr=%X/%X last_replay_ptr=%X/%X "
-					"last_visible_ptr=%X/%X current_ptr=%X/%X finished_ptr=%X/%X)",
-					LSN_FORMAT_ARGS(target_ptr),
-					LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
-					LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
-					LSN_FORMAT_ARGS(current_ptr),
-					LSN_FORMAT_ARGS(finished_ptr));
+					 "Recovery target reached: waiting for replay path to expose "
+					 "a visible boundary corresponding to the stop-after target "
+					 "(target_ptr=%X/%X last_replay_ptr=%X/%X "
+					 "last_visible_ptr=%X/%X current_ptr=%X/%X finished_ptr=%X/%X)",
+					 LSN_FORMAT_ARGS(target_ptr),
+					 LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
+					 LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
+					 LSN_FORMAT_ARGS(current_ptr),
+					 LSN_FORMAT_ARGS(finished_ptr));
 			}
 			else if (finished_ptr < stop_after_visible_ptr)
 			{
 				elog(DEBUG4,
-					"Recovery target reached: waiting for deferred finalization "
-					"publication to reach the stop-after visible boundary "
-					"(target_ptr=%X/%X target_visible_ptr=%X/%X "
-					"current_ptr=%X/%X finished_ptr=%X/%X)",
-					LSN_FORMAT_ARGS(target_ptr),
-					LSN_FORMAT_ARGS(stop_after_visible_ptr),
-					LSN_FORMAT_ARGS(current_ptr),
-					LSN_FORMAT_ARGS(finished_ptr));
+					 "Recovery target reached: waiting for deferred finalization "
+					 "publication to reach the stop-after visible boundary "
+					 "(target_ptr=%X/%X target_visible_ptr=%X/%X "
+					 "current_ptr=%X/%X finished_ptr=%X/%X)",
+					 LSN_FORMAT_ARGS(target_ptr),
+					 LSN_FORMAT_ARGS(stop_after_visible_ptr),
+					 LSN_FORMAT_ARGS(current_ptr),
+					 LSN_FORMAT_ARGS(finished_ptr));
 			}
 			else if (main_retain_ptr < stop_after_visible_ptr)
 			{
 				elog(DEBUG4,
-					"Recovery target reached: waiting for startup retain "
-					"bookkeeping to catch up with the stop-after visible "
-					"boundary (target_ptr=%X/%X target_visible_ptr=%X/%X "
-					"main_retain_ptr=%X/%X)",
-					LSN_FORMAT_ARGS(target_ptr),
-					LSN_FORMAT_ARGS(stop_after_visible_ptr),
-					LSN_FORMAT_ARGS(main_retain_ptr));
+					 "Recovery target reached: waiting for startup retain "
+					 "bookkeeping to catch up with the stop-after visible "
+					 "boundary (target_ptr=%X/%X target_visible_ptr=%X/%X "
+					 "main_retain_ptr=%X/%X)",
+					 LSN_FORMAT_ARGS(target_ptr),
+					 LSN_FORMAT_ARGS(stop_after_visible_ptr),
+					 LSN_FORMAT_ARGS(main_retain_ptr));
 			}
 			else
 			{
 				elog(DEBUG4,
-					"Recovery target reached: stop-after synchronization "
-					"barrier completed "
-					"(target_ptr=%X/%X recovery_ptr=%X/%X "
-					"required_visible_ptr=%X/%X last_replay_ptr=%X/%X "
-					"last_visible_ptr=%X/%X stop_after_visible_ptr=%X/%X "
-					"main_retain_ptr=%X/%X "
-					"current_ptr=%X/%X retain_ptr=%X/%X finished_ptr=%X/%X)",
-					LSN_FORMAT_ARGS(target_ptr),
-					LSN_FORMAT_ARGS(recovery_ptr_snapshot),
-					LSN_FORMAT_ARGS(required_visible_ptr),
-					LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
-					LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
-					LSN_FORMAT_ARGS(stop_after_visible_ptr),
-					LSN_FORMAT_ARGS(main_retain_ptr),
-					LSN_FORMAT_ARGS(current_ptr),
-					LSN_FORMAT_ARGS(retain_ptr),
-					LSN_FORMAT_ARGS(finished_ptr));
+					 "Recovery target reached: stop-after synchronization "
+					 "barrier completed "
+					 "(target_ptr=%X/%X recovery_ptr=%X/%X "
+					 "required_visible_ptr=%X/%X last_replay_ptr=%X/%X "
+					 "last_visible_ptr=%X/%X stop_after_visible_ptr=%X/%X "
+					 "main_retain_ptr=%X/%X "
+					 "current_ptr=%X/%X retain_ptr=%X/%X finished_ptr=%X/%X)",
+					 LSN_FORMAT_ARGS(target_ptr),
+					 LSN_FORMAT_ARGS(recovery_ptr_snapshot),
+					 LSN_FORMAT_ARGS(required_visible_ptr),
+					 LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
+					 LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
+					 LSN_FORMAT_ARGS(stop_after_visible_ptr),
+					 LSN_FORMAT_ARGS(main_retain_ptr),
+					 LSN_FORMAT_ARGS(current_ptr),
+					 LSN_FORMAT_ARGS(retain_ptr),
+					 LSN_FORMAT_ARGS(finished_ptr));
 
 				break;
 			}
@@ -2035,6 +2057,7 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 
 		WakeupRecovery();
 		pg_usleep(200);
+
 		/*
 		 * This loop runs inside PostgreSQL's startup process, so shutdown
 		 * requests are delivered through startup.c's shutdown_requested flag
@@ -3332,12 +3355,11 @@ update_proc_retain_undo_location(int worker_id)
 		/*
 		 * Advance two distinct startup-side boundaries:
 		 *
-		 * - recovery_finished_list_ptr:
-		 *   a global release fence for worker-local finished_list cleanup
+		 * - recovery_finished_list_ptr: a global release fence for
+		 * worker-local finished_list cleanup
 		 *
-		 * - recovery_published_visible_ptr:
-		 *   the last xid boundary that startup has actually published as
-		 *   visible state
+		 * - recovery_published_visible_ptr: the last xid boundary that
+		 * startup has actually published as visible state
 		 */
 		pg_atomic_write_u64(recovery_finished_list_ptr, recoveryPtr);
 		pg_atomic_write_u64(recovery_published_visible_ptr, publishedPtr);
