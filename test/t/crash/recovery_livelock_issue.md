@@ -110,11 +110,43 @@ ordering/atomicity defect on the **primary's** side — a transaction's dependen
 can become durable/streamable ahead of (or without a barrier against) the earlier
 conflicting transaction's commit record — even though the visible symptom is replica-only.
 
-> **Open sub-question (next diagnostic):** is 480's COMMIT (a) genuinely never written to
-> WAL, or (b) written but mis-ordered after 563's UPDATE, or (c) written but its delivery to
-> the worker is dropped by a `used_by[]` tracking gap? (a)/(b) are primary WAL-ordering bugs;
-> (c) is a recovery-dispatch bug. Distinguish by `pg_waldump` of the primary's WAL around
-> oxid 480's LSN vs. inspecting worker 1's local `recovery_xid_state_hash` for a 480 entry.
+> **Sub-question RESOLVED (2026-06-01, WAL + log forensics): it is (a) — 480's
+> commit/abort record was never written, because oxid 480 was an in-flight transaction
+> killed mid-workload by the primary's assert crash.** See "WAL + log forensics" below.
+
+### WAL + log forensics (2026-06-01): oxid 480 was killed in-flight, never resolved
+
+pg_waldump can't decode orioledb container records (custom rmgr 129 shows
+`desc: UNKNOWN`; the frontend tool can't load the extension's rmgr), so it gives only the
+LSN/size skeleton. That skeleton plus the primary log settles it:
+
+- **The WAL is complete and consistent, not torn.** Primary and replica segment 3 are
+  byte-identical and both end cleanly at `0/3020D70` — the last valid record is a
+  `RUNNING_XACTS` after a `CHECKPOINT_ONLINE` (`0/3020C38`), i.e. post-recovery steady
+  state, not a mid-record truncation. The replica's stuck `replayLSN 0/3020D70` is exactly
+  this end-of-WAL. So 480's resolution is not "just past" the replay point — it is nowhere.
+- **The primary crashed twice** (`RR_ASSERT_FIRINGS=2`): `TRAP: failed Assert("CritSectionCount
+  == 0 || (context)->allowInCritSection")` (mcxt.c:1188, the crit-section back-door PANIC)
+  at 13:28:28 (crashing backend was committing **oxid 522** @ `0/30158B0`) and 13:28:34,
+  each followed by clean local crash-recovery (redo done `0/3015CC0`, then `0/301A6E8`).
+- **oxid 480 appears in ZERO `oxid=480` traces anywhere in the primary log** — no
+  `current_oxid_precommit`, no `current_oxid_commit`, no `csn-trace`. Its neighbours are all
+  fully traced and committed: `...477, 478, 479, [480 MISSING], 481, 483...` (482, 484 also
+  missing — the cohort of writers in-flight at crash #1). The commit-path traces fire
+  continuously across oxids 471–500, so 480's absence is real: **480 never entered the
+  commit path.** Its row-modify, however, is an unconditional orioledb container record
+  written as the UPDATE happens, so it *was* streamed and applied — the leaf-2050 tuple
+  carries `xactInfo=480`.
+
+Conclusion: oxid 480 was one of the ~20 writers' in-flight transactions killed by the
+primary's assert crash. On the **primary**, crash recovery reaches end-of-WAL and aborts all
+in-flight oxids **in memory, emitting no WAL**; subsequent transactions (563/576) then
+re-modify those rows cleanly and commit. On the **streaming standby** there is no
+end-of-WAL — it applied 480's modify, will never receive a finish record for it, and never
+runs the in-flight-abort step. So 480 stays `INPROGRESS` forever and the replay of 563's
+UPDATE on 480's row deadlocks. **The defect: crash-killed in-flight transactions' rollbacks
+are not propagated to streaming standbys** (same `quickdie`/unfinished-undo family flagged in
+CLAUDE.md).
 
 ### Why parallel recovery, and not the primary
 
@@ -235,12 +267,15 @@ a real-but-secondary lock-fairness property, not the deadlock.)
    missing-finish as a hard recovery error (PANIC with the offending oxid/LSN) rather than
    livelock — turning a silent hang into a diagnosable, restartable failure. This is a
    containment fix, not a correctness fix.
-2. **Primary-side correctness fix (the real one, pending a/b/c).** If the WAL truly lacks (or
-   mis-orders) the prerequisite commit, the fix belongs on the **primary's** WAL emission:
-   ensure a transaction's commit record is durable/streamed before any later transaction's
-   dependent row-modify can be. This ties into the active commit-window crit-section work —
-   confirm whether that fix already closes this window once `pg_waldump` settles the
-   sub-cause.
+2. **Correctness fix (the real one): propagate in-flight-transaction rollback to standbys.**
+   The forensics show the WAL is complete — there is simply no finish record for oxid 480
+   because the primary aborted it *in memory* during crash recovery without emitting WAL. A
+   hot standby never runs that end-of-recovery in-flight-abort, so it pins the row to the
+   killed oxid forever. Options, roughly: (i) when a crash-recovering primary aborts
+   in-flight oxids, emit `WAL_REC_ROLLBACK` for each so the standby resolves them; or (ii)
+   give the standby an equivalent "abort oxids not finished by a known consistent point"
+   step driven by checkpoint/running-xacts boundaries. This is the proper fix; candidate #1
+   is the containment net beneath it.
 
 ---
 
