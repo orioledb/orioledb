@@ -134,7 +134,7 @@ orioledb_rewind_to_timestamp(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
-/* Testing/convenience functions avaliable for the user */
+/* Testing/convenience functions available for the user */
 
 /*
  * Access to a rewindMeta without a lock. This is ok when we check if it's time to fix oldest items in the queue.
@@ -252,6 +252,7 @@ orioledb_rewind_sync(PG_FUNCTION_ARGS)
 
 /* Testing functions end */
 
+#ifdef REWIND_DEBUG_MODE
 static inline
 void
 print_rewind_item(RewindItem *rewindItem, uint64 pos, int source_buffer)
@@ -277,7 +278,7 @@ print_rewind_item(RewindItem *rewindItem, uint64 pos, int source_buffer)
  * to log. Doesn't take any locks, so results are not warrantied with any concurrent operation
  * on the queue.
  */
-void
+static void
 log_print_rewind_queue(void)
 {
 	int			i;
@@ -326,6 +327,7 @@ log_print_rewind_queue(void)
 	for (; pos < curAddPosFilled; pos++)
 		print_rewind_item(&rewindAddBuffer[pos % rewind_circular_buffer_size], pos, 3);
 }
+#endif
 
 Size
 rewind_shmem_needs(void)
@@ -1118,7 +1120,7 @@ rewind_worker_main(Datum main_arg)
 
 	SetProcessingMode(NormalProcessing);
 
-	/* catch SIGTERM signal for reason to not interupt background writing */
+	/* catch SIGTERM signal for reason to not interrupt background writing */
 	pqsignal(SIGTERM, handle_sigterm);
 	BackgroundWorkerUnblockSignals();
 

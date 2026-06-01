@@ -240,6 +240,7 @@ pg_stopevents(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+/* No existing callers */
 bool
 pid_is_waiting_for_stopevent(int pid)
 {

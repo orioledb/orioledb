@@ -139,10 +139,7 @@ extern OTableDescr *relation_get_descr(Relation rel);
 extern void table_descr_inc_refcnt(OTableDescr *descr);
 extern void table_descr_dec_refcnt(OTableDescr *descr);
 
-extern Size orioledb_parallelscan_estimate(Relation rel);
-extern Size orioledb_parallelscan_initialize(Relation rel, ParallelTableScanDesc pscan);
 extern Size orioledb_parallelscan_initialize_inner(ParallelTableScanDesc pscan);
-extern void orioledb_parallelscan_reinitialize(Relation rel, ParallelTableScanDesc pscan);
 
 extern int64 orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 method);
 extern int64 orioledb_calculate_database_size(Oid dbOid);
@@ -161,7 +158,7 @@ typedef enum
  * Each backend participating in a parallel table scan has its own BTreeSeqScan
  * in its memory, that contains a pointer to ParallelOScanDescData. The
  * information here is sufficient to properly initialize each new BTreeSeqScan
- * as workers join the scan, and to coordiate their scans.
+ * as workers join the scan, and to coordinate their scans.
  */
 
 typedef struct BTreeIntPageParallelData

@@ -138,7 +138,7 @@ static OXidMapItem *xidBuffer;
 
 XidMeta    *xid_meta;
 
-pg_atomic_uint32 *logicalXidsShmemMap;
+static pg_atomic_uint32 *logicalXidsShmemMap;
 
 OSnapshot	o_in_progress_snapshot = {COMMITSEQNO_INPROGRESS, InvalidXLogRecPtr, 0, 0};
 
@@ -891,6 +891,8 @@ wait_for_oxid(OXid oxid, bool errorOk)
 
 /*
  * Notify wait_for_oxid() caller only if it is waiting for current process.
+ *
+ * No existing callers.
  */
 void
 oxid_notify(OXid oxid)
@@ -1230,7 +1232,7 @@ advance_oxids(OXid new_xid)
 
 
 /*
- * Get curent OrioleDB xid (oxid).  Assign new oxid it's not done yet.
+ * Get current OrioleDB xid (oxid).  Assign new oxid it's not done yet.
  */
 OXid
 get_current_oxid(void)
@@ -1246,14 +1248,14 @@ get_current_oxid(void)
 
 		/*
 		 * Advance xmin every 10th part of circular buffer.  That should
-		 * prevent unnecessry circular buffer overrun.
+		 * prevent unnecessary circular buffer overrun.
 		 */
 		if (newOxid > pg_atomic_read_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin) + xid_circular_buffer_size / 10)
 			advance_global_xmin(newOxid);
 
 		/*
 		 * Write some xids out of circular buffer if needed.  We always keep
-		 * one COMMITSEQNO_FROZEN in circular buffers as a delimited beween
+		 * one COMMITSEQNO_FROZEN in circular buffers as a delimiter between
 		 * the future and the past.  This helps protect runXmin from growing
 		 * bigger than nextXid.
 		 */

@@ -14,7 +14,7 @@ OrioleDB uses PosgreSQL's built-in Table Access Method API. When you create a ta
 The OrioleDB extension requires PostgreSQL pluggable Storage. Until the PostgreSQL community merges the [required patches](../intro.mdx#patch-set), you can use the OrioleDB docker image to start PostgreSQL on your machine:
 
 ```bash title="bash"
-docker run -d --name orioledb -p 5432:5432 orioledb/orioledb
+docker run -d --name orioledb -p 5432:5432 orioledb/orioledb:latest-pg17
 ```
 
 ### Enable the extension

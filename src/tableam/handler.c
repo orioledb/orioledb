@@ -74,6 +74,10 @@
 #include "utils/syscache.h"
 #include "funcapi.h"
 
+static Size orioledb_parallelscan_estimate(Relation rel);
+static Size orioledb_parallelscan_initialize(Relation rel, ParallelTableScanDesc pscan);
+static void orioledb_parallelscan_reinitialize(Relation rel, ParallelTableScanDesc pscan);
+
 bool		in_nontransactional_truncate = false;
 
 typedef struct OScanDescData
@@ -935,7 +939,7 @@ orioledb_relation_set_new_filenode(Relation rel,
 		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
 		/*
-		 * COMMITSEQNO_INPROGRESS because there might be already commited
+		 * COMMITSEQNO_INPROGRESS because there might be already committed
 		 * concurrent truncate before function start and old_oids will be
 		 * pointing to a not existed before this transaction table and will
 		 * not be visible otherwise. There should not be concurrent access to
@@ -1261,7 +1265,7 @@ orioledb_index_validate_scan(Relation heapRelation,
  * INDEXES_SIZE - only secondary indices
  * TABLE_SIZE - table (primary index) and TOAST
  * TOAST_TABLE_SIZE - only TOAST (implemented but unused for now)
- * DEFAULT_SIZE and RELATION_SIZE - only main table (primary index tree). There is no difference betweem DEFAULT_SIZE and RELATION_SIZE
+ * DEFAULT_SIZE and RELATION_SIZE - only main table (primary index tree). There is no difference between DEFAULT_SIZE and RELATION_SIZE
  * for OrioleDB tables. Though other table AM that don't support different methods should return -1 at any method except DEFAULT_SIZE.
  *
  * ForkNumber is disregarded for OrioleDB relations.
@@ -1650,7 +1654,7 @@ orioledb_scan_sample_next_tuple(TableScanDesc scan, SampleScanState *scanstate,
 	return false;
 }
 
-Size
+static Size
 orioledb_parallelscan_estimate(Relation rel)
 {
 	if (!is_orioledb_rel(rel))
@@ -1689,7 +1693,7 @@ orioledb_parallelscan_initialize_internal(ParallelTableScanDesc pscan)
 }
 
 /* Modified copy of table_block_parallelscan_initialize */
-Size
+static Size
 orioledb_parallelscan_initialize(Relation rel, ParallelTableScanDesc pscan)
 {
 	ParallelOScanDesc poscan = (ParallelOScanDesc) pscan;
@@ -1721,7 +1725,7 @@ orioledb_parallelscan_initialize_inner(ParallelTableScanDesc pscan)
 	return sizeof(ParallelOScanDescData);
 }
 
-void
+static void
 orioledb_parallelscan_reinitialize(Relation rel, ParallelTableScanDesc pscan)
 {
 	if (!is_orioledb_rel(rel))

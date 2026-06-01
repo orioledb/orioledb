@@ -43,6 +43,11 @@ static void clean_chain_has_locks_flag(UndoLogType undoType,
 static bool update_leaf_header_in_undo_if_exists(UndoLogType undoType,
 												 BTreeLeafTuphdr *tuphdr,
 												 UndoLocation location);
+static bool get_prev_leaf_header_from_undo_if_exists(UndoLogType undoType,
+													 BTreeLeafTuphdr *tuphdr);
+static void update_leaf_header_in_undo(UndoLogType undoType,
+									   BTreeLeafTuphdr *tuphdr,
+									   UndoLocation location);
 
 /*
  * Add page image to the undo log.
@@ -526,8 +531,8 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	if (cmp != 0)
 	{
 		/*
-		 * We can't find the required key.  This might happend if operation
-		 * was already "undone" earlier.
+		 * We can't find the required key.  This might happen if operation was
+		 * already "undone" earlier.
 		 */
 		unlock_page(blkno);
 		return;
@@ -541,7 +546,7 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	{
 		/*
 		 * The key is found, but it doesn't belong to our transaction.  Again,
-		 * this might happend if operation was already "undone" earlier.
+		 * this might happen if operation was already "undone" earlier.
 		 */
 		unlock_page(blkno);
 		return;
@@ -966,7 +971,7 @@ add_undo_relnode(ORelOids oldOids, OIndexKey *oldTrees, int oldNumTrees,
 	int			stepItemsCapacity = (O_MAX_UNDO_RECORD_SIZE - offsetof(RelnodeUndoStackItem, trees)) / sizeof(OIndexKey);
 
 	/*
-	 * This might happend before we accessed oxid.  So, ensure we've assigned
+	 * This might happen before we accessed oxid.  So, ensure we've assigned
 	 * it.
 	 */
 	(void) get_current_oxid();
@@ -1690,7 +1695,7 @@ get_prev_leaf_header_from_undo(UndoLogType undoType,
  * cleaned undo record.  Returns false if the undo record no longer exists
  * (treat the chain end as if the transaction committed).
  */
-bool
+static bool
 get_prev_leaf_header_from_undo_if_exists(UndoLogType undoType,
 										 BTreeLeafTuphdr *tuphdr)
 {
@@ -1762,7 +1767,7 @@ get_prev_leaf_header_and_tuple_from_undo(UndoLogType undoType,
 	tuphdr->formatFlags = 0;
 }
 
-void
+static void
 update_leaf_header_in_undo(UndoLogType undoType,
 						   BTreeLeafTuphdr *tuphdr,
 						   UndoLocation location)

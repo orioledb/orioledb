@@ -66,6 +66,37 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+static pg_atomic_uint64 *recovery_main_retain_ptr;
+static pg_atomic_uint64 *recovery_index_next_pos;
+static OBTreeModifyCallbackAction recovery_delete_primary_callback(BTreeDescr *descr,
+																   OTuple tup, OTuple *newtup,
+																   OXid oxid, OTupleXactInfo xactInfo,
+																   UndoLocation location, RowLockMode *lock_mode,
+																   BTreeLocationHint *hint,
+																   void *arg);
+static OBTreeModifyCallbackAction recovery_delete_deleted_primary_callback(BTreeDescr *descr,
+																		   OTuple tup, OTuple *newtup,
+																		   OXid oxid, OTupleXactInfo xactInfo,
+																		   BTreeLeafTupleDeletedStatus deleted,
+																		   UndoLocation location, RowLockMode *lock_mode,
+																		   BTreeLocationHint *hint,
+																		   void *arg);
+static OBTreeModifyCallbackAction recovery_delete_deleted_overwrite_callback(BTreeDescr *descr,
+																			 OTuple tup, OTuple *newtup,
+																			 OXid oxid, OTupleXactInfo xactInfo,
+																			 BTreeLeafTupleDeletedStatus deleted,
+																			 UndoLocation location, RowLockMode *lock_mode,
+																			 BTreeLocationHint *hint,
+																			 void *arg);
+static void worker_send_msg(int worker_id, Pointer msg, uint64 msg_size);
+static void worker_queue_flush(int worker_id);
+static void recovery_send_leader_oids(ORelOids oids, OIndexNumber ix_num,
+									  uint32 o_table_version,
+									  ORelOids old_oids, uint32 old_o_table_version,
+									  bool isrebuild);
+static void workers_send_finish(bool send_to_idx_pool);
+static XLogRecPtr recovery_get_current_ptr(void);
+
 /*
  * Recovery worker state in pool.
  */
@@ -688,7 +719,7 @@ bool	   *recovery_single_process;
 bool	   *was_in_recovery;
 pg_atomic_uint32 *after_recovery_cleaned;
 
-pg_atomic_uint64 *recovery_index_next_pos;
+static pg_atomic_uint64 *recovery_index_next_pos;
 pg_atomic_uint64 *recovery_index_completed_pos;
 ConditionVariable *recovery_index_cv;
 
@@ -1369,7 +1400,7 @@ get_workers_commit_ptr(void)
 /*
  * Returns minimum ptr which is already reached by all recovery workers.
  */
-XLogRecPtr
+static XLogRecPtr
 recovery_get_current_ptr(void)
 {
 	Assert(RecoveryInProgress());
@@ -2691,7 +2722,7 @@ recovery_insert_primary_callback(BTreeDescr *descr,
 	return OBTreeCallbackActionUpdate;
 }
 
-OBTreeModifyCallbackAction
+static OBTreeModifyCallbackAction
 recovery_delete_primary_callback(BTreeDescr *descr,
 								 OTuple tup, OTuple *newtup, OXid oxid,
 								 OTupleXactInfo xactInfo,
@@ -2760,7 +2791,7 @@ recovery_insert_deleted_primary_callback(BTreeDescr *descr,
 	return OBTreeCallbackActionUpdate;
 }
 
-OBTreeModifyCallbackAction
+static OBTreeModifyCallbackAction
 recovery_delete_deleted_primary_callback(BTreeDescr *descr,
 										 OTuple tup, OTuple *newtup, OXid oxid,
 										 OTupleXactInfo xactInfo,
@@ -2793,7 +2824,7 @@ recovery_insert_deleted_overwrite_callback(BTreeDescr *descr,
 	return OBTreeCallbackActionUpdate;
 }
 
-OBTreeModifyCallbackAction
+static OBTreeModifyCallbackAction
 recovery_delete_deleted_overwrite_callback(BTreeDescr *descr,
 										   OTuple tup, OTuple *newtup, OXid oxid,
 										   OTupleXactInfo xactInfo,
@@ -3816,7 +3847,7 @@ abort_recovery(RecoveryWorkerState *workers_pool, bool send_to_idx_pool)
  * WaitForBackgroundWorkerShutdown() does not work in this context. We need
  * an analog.
  */
-void
+static void
 worker_wait_shutdown(RecoveryWorkerState *worker)
 {
 	BgwHandleStatus status;
@@ -4106,7 +4137,7 @@ clean_workers_oids(void)
 	}
 }
 
-void
+static void
 recovery_send_leader_oids(ORelOids oids, OIndexNumber ix_num,
 						  uint32 o_table_version,
 						  ORelOids old_oids, uint32 old_o_table_version,	/* Non-zero only for
@@ -4182,7 +4213,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 	if (!cur_recovery_xid_state->o_tables_meta_locked)
 	{
 		/*
-		 * It might happend that we didn't replay WAL_REC_O_TABLES_META_LOCK
+		 * It might happen that we didn't replay WAL_REC_O_TABLES_META_LOCK
 		 * wal record.  That means we've finished index build before
 		 * checkpoint of a tree was actually started.
 		 */
@@ -5111,7 +5142,7 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn, bool commit)
 /*
  * Sends the message to a worker.
  */
-void
+static void
 worker_send_msg(int worker_id, Pointer msg, uint64 msg_size)
 {
 	RecoveryWorkerState *state = &workers_pool[worker_id];
@@ -5327,7 +5358,7 @@ worker_send_modify(int worker_id, BTreeDescr *desc,
 /*
  * Sends recovery finish message to all workers in the pool.
  */
-void
+static void
 workers_send_finish(bool send_to_idx_pool)
 {
 	RecoveryMsgEmpty finish_msg;
@@ -5556,7 +5587,7 @@ workers_notify_toast_consistent(void)
 /*
  * Flushes a queue buffer to the queue.
  */
-void
+static void
 worker_queue_flush(int worker_id)
 {
 	RecoveryWorkerState *state = &workers_pool[worker_id];

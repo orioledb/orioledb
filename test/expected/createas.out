@@ -413,11 +413,11 @@ SELECT orioledb_table_description('o_test_matview'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-     Column |    Type | Collation | Nullable | Droped     +
-   order_id | integer |    (null) |     true |  false     +
-    item_id | integer |    (null) |     true |  false     +
-  quantity2 |    text |   default |     true |  false     +
-      price |  bigint |    (null) |     true |  false     +
+     Column |    Type | Collation | Nullable | Dropped    +
+   order_id | integer |    (null) |     true |   false    +
+    item_id | integer |    (null) |     true |   false    +
+  quantity2 |    text |   default |     true |   false    +
+      price |  bigint |    (null) |     true |   false    +
  
 (1 row)
 

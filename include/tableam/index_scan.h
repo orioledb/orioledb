@@ -87,8 +87,6 @@ extern TupleTableSlot *o_exec_project(ProjectionInfo *projInfo,
 
 /* explain analyze */
 extern void eanalyze_counters_init(OEACallsCounters *eacc, OTableDescr *descr);
-extern void eanalyze_counter_explain(OEACallsCounter *counter, char *label,
-									 char *ix_name, ExplainState *es);
 extern void eanalyze_counters_explain(OTableDescr *descr,
 									  OEACallsCounters *counters,
 									  ExplainState *es);

@@ -288,7 +288,7 @@ ToastAPI	oTablesToastAPI = {
 	.fetchCallback = oTablesFetchCallback
 };
 
-void
+static void
 o_tables_foreach_oids(OTablesOidsCallback callback,
 					  OSnapshot *oSnapshot,
 					  void *arg)
@@ -338,7 +338,7 @@ o_tables_foreach_oids(OTablesOidsCallback callback,
 /*
  * It can be much more efficient.
  */
-void
+static void
 o_tables_foreach(OTablesCallback callback,
 				 OSnapshot *oSnapshot,
 				 void *arg)
@@ -1581,7 +1581,7 @@ describe_table(ORelOids oids)
 					 table->default_compress,
 					 table->primary_compress,
 					 table->toast_compress);
-	appendStringInfo(&title, " %%%ds | %%%ds | %%%ds | Nullable | Droped ",
+	appendStringInfo(&title, " %%%ds | %%%ds | %%%ds | Nullable | Dropped ",
 					 max_column_str,
 					 max_type_str,
 					 max_collation_str);
@@ -1589,7 +1589,7 @@ describe_table(ORelOids oids)
 		appendStringInfo(&title, "| Compression ");
 	appendStringInfo(&title, "\n");
 	initStringInfo(&format);
-	appendStringInfo(&format, " %%%ds | %%%ds | %%%ds | %%8s | %%6s ",
+	appendStringInfo(&format, " %%%ds | %%%ds | %%%ds | %%8s | %%7s ",
 					 max_column_str,
 					 max_type_str,
 					 max_collation_str);
@@ -1751,6 +1751,7 @@ o_tables_num_callback(ORelOids oids, void *arg)
 		num_arg->result++;
 }
 
+/* No existing callers */
 OTableField *
 o_table_field_by_name(OTable *table, const char *name)
 {

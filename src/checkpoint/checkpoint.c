@@ -62,6 +62,8 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 
+static void before_writing_xids_file(int chkpnum);
+
 /*
  * Single action in B-tree checkpoint loop.
  */
@@ -156,8 +158,8 @@ typedef struct
 } SysTreesLockUndoStackItem;
 
 CheckpointState *checkpoint_state = NULL;
-MemoryContext chkp_main_context = NULL;
-MemoryContext chkp_tree_context = NULL;
+static MemoryContext chkp_main_context = NULL;
+static MemoryContext chkp_tree_context = NULL;
 
 static char *xidFilename = NULL;
 static uint32 xidFileCheckpointnum = 0;
@@ -796,7 +798,7 @@ write_to_xids_queue(XidFileRec *rec)
 /*
  * Prepare xids queue for writes.
  */
-void
+static void
 before_writing_xids_file(int chkpnum)
 {
 	int			i;
@@ -4000,7 +4002,7 @@ checkpoint_image_add_item(CheckpointPageInfo *page_info,
 /*
  * Splits the autonomous image. Last tuple is divided into two parts:
  *
- * 1. Key will be set as hikey of splitted image.
+ * 1. Key will be set as hikey of split image.
  * 2. BTreeNonLeafTuphdr will be returned.
  */
 static BTreeNonLeafTuphdr
@@ -4128,12 +4130,12 @@ update_lowest_level_hikey(BTreeDescr *descr, CheckpointState *state, int to_leve
 
 /*
  * There is no free space left on the current autonomous image. The image
- * should be splitted and then written. Downlink to written image should be
+ * should be split and then written. Downlink to written image should be
  * inserted into parent image.
  *
  * But there are also may no left free space. All upper images should be
- * splitted until not found image in which downlink to child image
- * will be succesfully inserted.
+ * split until not found image in which downlink to child image
+ * will be successfully inserted.
  */
 static void
 checkpoint_stack_image_split_flush(BTreeDescr *descr, CheckpointState *state,
@@ -5770,7 +5772,7 @@ checkpointable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 
 	/*
 	 * We shouldn't initialize shared memory concurrently to checkpoint.
-	 * Checkpointer should have initilized that before start working on this
+	 * Checkpointer should have initialized that before start working on this
 	 * tree.
 	 */
 	Assert(!init_shmem || !checkpoint_concurrent);

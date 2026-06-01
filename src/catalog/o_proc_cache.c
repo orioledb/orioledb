@@ -183,7 +183,7 @@ O_SYS_CACHE_INIT_FUNC(proc_cache)
 									0, fastcache, mcxt, &proc_cache_funcs);
 }
 
-void
+static void
 o_proc_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
 	HeapTuple	proctup;
@@ -296,7 +296,7 @@ o_proc_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	ReleaseSysCache(proctup);
 }
 
-void
+static void
 o_proc_cache_free_entry(Pointer entry)
 {
 	OProc	   *o_proc = (OProc *) entry;
@@ -305,7 +305,7 @@ o_proc_cache_free_entry(Pointer entry)
 	pfree(o_proc);
 }
 
-Pointer
+static Pointer
 o_proc_cache_serialize_entry(Pointer entry, int *len)
 {
 	int			i,
@@ -363,7 +363,7 @@ o_proc_cache_serialize_entry(Pointer entry, int *len)
 	return str.data;
 }
 
-Pointer
+static Pointer
 o_proc_cache_deserialize_entry(MemoryContext mcxt, Pointer data, Size length)
 {
 	Pointer		ptr = data;

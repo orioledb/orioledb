@@ -70,7 +70,7 @@ O_SYS_CACHE_INIT_FUNC(database_cache)
 										&database_cache_funcs);
 }
 
-void
+static void
 o_database_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 							Pointer arg)
 {
@@ -131,7 +131,7 @@ o_database_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	ReleaseSysCache(databasetup);
 }
 
-void
+static void
 o_database_cache_free_entry(Pointer entry)
 {
 	pfree(entry);
@@ -210,7 +210,7 @@ o_database_cache_set_lc_collate()
 	}
 }
 
-Pointer
+static Pointer
 o_database_cache_serialize_entry(Pointer entry, int *len)
 {
 	StringInfoData str;
@@ -240,7 +240,7 @@ o_database_cache_serialize_entry(Pointer entry, int *len)
 	return str.data;
 }
 
-Pointer
+static Pointer
 o_database_cache_deserialize_entry(MemoryContext mcxt, Pointer data,
 								   Size length)
 {

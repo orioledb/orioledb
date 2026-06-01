@@ -31,20 +31,20 @@
 
 /* Shared memory based page pool operations */
 
-OInMemoryBlkno o_ppool_alloc_page(PagePool *pool, int kind);
-OInMemoryBlkno o_ppool_alloc_metapage(PagePool *pool);
-void		o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock);
+static OInMemoryBlkno o_ppool_alloc_page(PagePool *pool, int kind);
+static OInMemoryBlkno o_ppool_alloc_metapage(PagePool *pool);
+static void o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock);
 
-void		o_ppool_reserve_pages(PagePool *pool, int kind, int count);
-void		o_ppool_release_reserved(PagePool *pool, uint32 mask);
+static void o_ppool_reserve_pages(PagePool *pool, int kind, int count);
+static void o_ppool_release_reserved(PagePool *pool, uint32 mask);
 
-OInMemoryBlkno o_ppool_free_pages_count(PagePool *pool);
-OInMemoryBlkno o_ppool_dirty_pages_count(PagePool *pool);
-bool		o_ppool_run_maintenance(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
-OInMemoryBlkno o_ppool_size(PagePool *pool);
+static OInMemoryBlkno o_ppool_free_pages_count(PagePool *pool);
+static OInMemoryBlkno o_ppool_dirty_pages_count(PagePool *pool);
+static bool o_ppool_run_maintenance(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
+static OInMemoryBlkno o_ppool_size(PagePool *pool);
 
-void		o_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno);
-void		o_ucm_init(PagePool *pool, OInMemoryBlkno blkno);
+static void o_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno);
+static void o_ucm_init(PagePool *pool, OInMemoryBlkno blkno);
 
 /* PagePoolOps for a shared memory based page pool */
 static const PagePoolOps o_page_pool_ops = {
@@ -66,19 +66,19 @@ static const PagePoolOps o_page_pool_ops = {
 
 /* Shared local memory based page pool operations */
 
-OInMemoryBlkno local_ppool_alloc_page(PagePool *pool, int kind);
-void		local_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock);
+static OInMemoryBlkno local_ppool_alloc_page(PagePool *pool, int kind);
+static void local_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock);
 
-void		local_ppool_reserve_pages(PagePool *pool, int kind, int count);
-void		local_ppool_release_reserved(PagePool *pool, uint32 mask);
+static void local_ppool_reserve_pages(PagePool *pool, int kind, int count);
+static void local_ppool_release_reserved(PagePool *pool, uint32 mask);
 
-OInMemoryBlkno local_ppool_free_pages_count(PagePool *pool);
-OInMemoryBlkno local_ppool_dirty_pages_count(PagePool *pool);
-bool		local_ppool_run_maintenance(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
-OInMemoryBlkno local_ppool_size(PagePool *pool);
+static OInMemoryBlkno local_ppool_free_pages_count(PagePool *pool);
+static OInMemoryBlkno local_ppool_dirty_pages_count(PagePool *pool);
+static bool local_ppool_run_maintenance(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested);
+static OInMemoryBlkno local_ppool_size(PagePool *pool);
 
-void		local_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno);
-void		local_ucm_init(PagePool *pool, OInMemoryBlkno blkno);
+static void local_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno);
+static void local_ucm_init(PagePool *pool, OInMemoryBlkno blkno);
 
 /* PagePoolOps for a local memory based page pool */
 static const PagePoolOps local_ppool_ops = {
@@ -173,7 +173,7 @@ o_ppool_shmem_init(OPagePool *pool, Pointer ptr, bool found)
  * This is why one should reserve enough amount of pages _before_ taking a page
  * lock, and then allocate them using ucm_occupy_free_page().
  */
-void
+static void
 o_ppool_reserve_pages(PagePool *pool, int kind, int count)
 {
 	bool		was_saving;
@@ -233,7 +233,7 @@ o_ppool_reserve_pages(PagePool *pool, int kind, int count)
  * Release previously reserved pages according to mask (multiple kinds can be
  * released in one call).
  */
-void
+static void
 o_ppool_release_reserved(PagePool *pool, uint32 mask)
 {
 	int			sum = 0,
@@ -275,7 +275,7 @@ ppool_release_all_pages(void)
  * Shared between OPagePool and LocalPagePool via ppool_reserve_pages /
  * ppool_alloc_page dispatch.
  */
-OInMemoryBlkno
+static OInMemoryBlkno
 o_ppool_alloc_metapage(PagePool *pool)
 {
 	ppool_reserve_pages(pool, PPOOL_RESERVE_META, 1);
@@ -287,7 +287,7 @@ o_ppool_alloc_metapage(PagePool *pool)
  *
  * Free page should be previously reserved by o_ppool_reserve_pages().
  */
-OInMemoryBlkno
+static OInMemoryBlkno
 o_ppool_alloc_page(PagePool *pool, int kind)
 {
 	OPagePool  *o_pool = (OPagePool *) pool;
@@ -307,7 +307,7 @@ o_ppool_alloc_page(PagePool *pool, int kind)
 /*
  * Return free page to the pool.
  */
-void
+static void
 o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
@@ -340,7 +340,7 @@ o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock)
 /*
  * Return count of free pages in the pool.
  */
-OInMemoryBlkno
+static OInMemoryBlkno
 o_ppool_free_pages_count(PagePool *pool)
 {
 	OPagePool  *o_pool = (OPagePool *) pool;
@@ -355,7 +355,7 @@ o_ppool_free_pages_count(PagePool *pool)
 /*
  * Return count of dirty pages in the pool.
  */
-OInMemoryBlkno
+static OInMemoryBlkno
 o_ppool_dirty_pages_count(PagePool *pool)
 {
 	OPagePool  *o_pool = (OPagePool *) pool;
@@ -382,7 +382,7 @@ o_ppool_dirty_pages_count(PagePool *pool)
  * because page-level merges only write undo to these types (via
  * GET_PAGE_LEVEL_UNDO_TYPE).  UndoLogRegular is not touched by merges.
  */
-bool
+static bool
 o_ppool_run_maintenance(PagePool *pool, bool evict,
 						volatile sig_atomic_t *shutdown_requested)
 {
@@ -502,7 +502,7 @@ o_ppool_run_maintenance(PagePool *pool, bool evict,
 /*
  * Return the size of the page pool.
  */
-OInMemoryBlkno
+static OInMemoryBlkno
 o_ppool_size(PagePool *pool)
 {
 	OPagePool  *o_pool = (OPagePool *) pool;
@@ -510,7 +510,7 @@ o_ppool_size(PagePool *pool)
 	return o_pool->size;
 }
 
-void
+static void
 o_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno)
 {
 	OPagePool  *o_pool = (OPagePool *) pool;
@@ -518,7 +518,7 @@ o_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno)
 	page_inc_usage_count(&o_pool->ucm, blkno);
 }
 
-void
+static void
 o_ucm_init(PagePool *pool, OInMemoryBlkno blkno)
 {
 	OPagePool  *o_pool = (OPagePool *) pool;
@@ -551,7 +551,7 @@ local_ppool_init(LocalPagePool *pool)
 	pool->base.ops = &local_ppool_ops;
 }
 
-OInMemoryBlkno
+static OInMemoryBlkno
 local_ppool_alloc_page(PagePool *pool, int kind)
 {
 	LocalPagePool *local_pool = (LocalPagePool *) pool;
@@ -580,7 +580,7 @@ local_ppool_alloc_page(PagePool *pool, int kind)
 	pg_unreachable();
 }
 
-void
+static void
 local_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock)
 {
 	int			i = blkno & O_BLKNO_MASK;
@@ -592,7 +592,7 @@ local_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock)
 	local_pool->availablePagesCount++;
 }
 
-void
+static void
 local_ppool_reserve_pages(PagePool *pool, int kind, int count)
 {
 	LocalPagePool *local_pool = (LocalPagePool *) pool;
@@ -616,7 +616,7 @@ local_ppool_reserve_pages(PagePool *pool, int kind, int count)
 	pool->numPagesReserved[kind] += count;
 }
 
-void
+static void
 local_ppool_release_reserved(PagePool *pool, uint32 mask)
 {
 	int			sum = 0,
@@ -635,7 +635,7 @@ local_ppool_release_reserved(PagePool *pool, uint32 mask)
 	local_pool->availablePagesCount += sum;
 }
 
-OInMemoryBlkno
+static OInMemoryBlkno
 local_ppool_free_pages_count(PagePool *pool)
 {
 	LocalPagePool *local_pool = (LocalPagePool *) pool;
@@ -643,7 +643,7 @@ local_ppool_free_pages_count(PagePool *pool)
 	return local_pool->availablePagesCount;
 }
 
-OInMemoryBlkno
+static OInMemoryBlkno
 local_ppool_dirty_pages_count(PagePool *pool)
 {
 	LocalPagePool *local_pool = (LocalPagePool *) pool;
@@ -670,7 +670,7 @@ local_ppool_dirty_pages_count(PagePool *pool)
  * because page-level merges only write undo to these types (via
  * GET_PAGE_LEVEL_UNDO_TYPE).  UndoLogRegular is not touched by merges.
  */
-bool
+static bool
 local_ppool_run_maintenance(PagePool *pool, bool evict, volatile sig_atomic_t *shutdown_requested)
 {
 	Size		undoRegularSize = get_reserved_undo_size(UndoLogRegularPageLevel);
@@ -764,7 +764,7 @@ local_ppool_run_maintenance(PagePool *pool, bool evict, volatile sig_atomic_t *s
 	return !exhausted;
 }
 
-OInMemoryBlkno
+static OInMemoryBlkno
 local_ppool_size(PagePool *pool)
 {
 	LocalPagePool *local_pool = (LocalPagePool *) pool;
@@ -772,7 +772,7 @@ local_ppool_size(PagePool *pool)
 	return local_pool->size;
 }
 
-void
+static void
 local_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno)
 {
 	int			i = blkno & O_BLKNO_MASK;
@@ -781,7 +781,7 @@ local_ucm_inc_usage(PagePool *pool, OInMemoryBlkno blkno)
 	local_pool->usage_count[i]++;
 }
 
-void
+static void
 local_ucm_init(PagePool *pool, OInMemoryBlkno blkno)
 {
 	int			i = blkno & O_BLKNO_MASK;

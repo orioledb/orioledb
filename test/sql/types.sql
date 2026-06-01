@@ -77,7 +77,7 @@ INSERT INTO o_test_int_array VALUES ('{2, 3, 4}');
 SELECT * FROM o_test_int_array;
 
 ---
--- PostgreSQL has no full support for arrays comparsion with CID and XIP elements.
+-- PostgreSQL has no full support for arrays comparison with CID and XIP elements.
 -- We forbit create indices with such arrays.
 -- Behavior differs from postgres tables, which illustrated by tests below
 ---

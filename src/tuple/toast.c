@@ -34,6 +34,15 @@
 #include "utils/builtins.h"
 #include "miscadmin.h"
 
+static void generic_toast_sort_add(ToastAPI *api, void *key, Pointer data,
+								   Size data_size, Tuplesortstate *sortstate,
+								   void *arg);
+static Pointer generic_toast_get(ToastAPI *api, void *key, Size data_size,
+								 OSnapshot *snapshot, void *arg);
+static Pointer o_toast_get(OTableDescr *descr,
+						   OTuple pk, uint16 attn, Size data_size,
+						   OSnapshot *snapshot);
+
 typedef struct
 {
 	OIndexDescr *pk;
@@ -64,6 +73,7 @@ static void toast_tuple_print(TupleDesc tupDesc, OTupleFixedFormatSpec *spec,
 							  Datum *values, bool *nulls, bool is_tuple,
 							  bool printRowVersion);
 
+/* No existing callers */
 void
 o_toast_init_tupdescs(OIndexDescr *toast, TupleDesc ix_primary)
 {
@@ -500,7 +510,7 @@ generic_toast_insert(ToastAPI *api, void *key, Pointer data, Size data_size,
 											 csn, arg, true);
 }
 
-void
+static void
 generic_toast_sort_add(ToastAPI *api, void *key,
 					   Pointer data, Size data_size,
 					   Tuplesortstate *sortstate, void *arg)
@@ -737,7 +747,7 @@ generic_toast_delete(ToastAPI *api, void *key, OXid oxid, CommitSeqNo csn,
 	return generic_toast_delete_optional_wal(api, key, oxid, csn, arg, true);
 }
 
-Pointer
+static Pointer
 generic_toast_get(ToastAPI *api, void *key, Size data_size,
 				  OSnapshot *o_snapshot, void *arg)
 {
@@ -998,7 +1008,7 @@ o_toast_delete(OTableDescr *descr,
 	return result;
 }
 
-Pointer
+static Pointer
 o_toast_get(OTableDescr *descr,
 			OTuple pk, uint16 attn,
 			Size data_size, OSnapshot *o_snapshot)

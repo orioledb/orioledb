@@ -605,7 +605,7 @@ btree_calculate_min_values(UndoLogType undoType, OInMemoryBlkno blkno,
 
 					/*
 					 * if backend id wasn't in hash that means it first
-					 * appearence of backend saving id in traversal to hash
+					 * appearance of backend saving id in traversal to hash
 					 * needed
 					 */
 					if (!found)

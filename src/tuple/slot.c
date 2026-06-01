@@ -1018,8 +1018,8 @@ tts_orioledb_make_secondary_tuple(TupleTableSlot *slot, OIndexDescr *idx, bool l
 	OTupleFixedFormatSpec *spec;
 	int			ctid_off = idx->primaryIsCtid ? 1 : 0;
 	OTableSlot *oslot = (OTableSlot *) slot;
-	BrigeData	bridge_data;
-	BrigeData  *bridge_data_arg = NULL;
+	BridgeData	bridge_data;
+	BridgeData *bridge_data_arg = NULL;
 
 	slot_getsomeattrs(slot, idx->maxTableAttnum - ctid_off);
 
@@ -1163,8 +1163,8 @@ expected_tuple_len(TupleTableSlot *slot, OTableDescr *descr)
 	OTableSlot *oslot = (OTableSlot *) slot;
 	OIndexDescr *idx = GET_PRIMARY(descr);
 	int			tup_size;
-	BrigeData	bridge_data;
-	BrigeData  *bridge_data_arg = NULL;
+	BridgeData	bridge_data;
+	BridgeData *bridge_data_arg = NULL;
 
 	if (idx->bridging)
 	{
@@ -1442,8 +1442,8 @@ tts_orioledb_form_tuple(TupleTableSlot *slot,
 	OTupleFixedFormatSpec *spec = &idx->leafSpec;
 	bool		primaryIsCtid = idx->primaryIsCtid;
 	ItemPointer iptr;
-	BrigeData	bridge_data;
-	BrigeData  *bridge_data_arg = NULL;
+	BridgeData	bridge_data;
+	BridgeData *bridge_data_arg = NULL;
 
 	if (!O_TUPLE_IS_NULL(oslot->tuple) && oslot->descr == descr &&
 		oslot->ixnum == PrimaryIndexNumber && oslot->leafTuple)
@@ -1500,8 +1500,8 @@ tts_orioledb_form_orphan_tuple(TupleTableSlot *slot,
 	OTupleFixedFormatSpec *spec = &idx->leafSpec;
 	bool		primaryIsCtid = idx->primaryIsCtid;
 	ItemPointer iptr;
-	BrigeData	bridge_data;
-	BrigeData  *bridge_data_arg = NULL;
+	BridgeData	bridge_data;
+	BridgeData *bridge_data_arg = NULL;
 
 	if (idx->leafTupdesc->natts > MaxTupleAttributeNumber)
 		ereport(ERROR,

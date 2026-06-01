@@ -62,7 +62,7 @@ O_SYS_CACHE_INIT_FUNC(range_cache)
 									 0, fastcache, mcxt, &range_cache_funcs);
 }
 
-void
+static void
 o_range_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
 	HeapTuple	rangetup;
@@ -94,7 +94,7 @@ o_range_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 }
 
 
-void
+static void
 o_range_cache_free_entry(Pointer entry)
 {
 	pfree(entry);
@@ -170,7 +170,7 @@ O_SYS_CACHE_INIT_FUNC(multirange_cache)
 										  &multirange_cache_funcs);
 }
 
-void
+static void
 o_multirange_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 							  Pointer arg)
 {
@@ -200,7 +200,7 @@ o_multirange_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key,
 	ReleaseSysCache(rangetup);
 }
 
-void
+static void
 o_multirange_cache_free_entry(Pointer entry)
 {
 	pfree(entry);

@@ -137,6 +137,7 @@ typedef struct oIdxBuildState
 
 static void _o_index_end_parallel(oIdxLeader *btleader);
 static void _o_index_leader_participate_as_worker(oIdxBuildState *buildstate);
+static Size _o_index_parallel_estimate_shared(Size o_table_size);
 static void build_secondary_index_worker_sort(oIdxSpool *btspool, void *btshared,
 											  Sharedsort **sharedsort, int worker_sortmem,
 											  bool progress);
@@ -1055,7 +1056,7 @@ _o_index_end_parallel(oIdxLeader *btleader)
  * Returns size of shared memory required to store shared state for a parallel
  * OrioleDB index build.
  */
-Size
+static Size
 _o_index_parallel_estimate_shared(Size o_table_size)
 {
 	Size		size = add_size(BUFFERALIGN(sizeof(oIdxShared)), o_table_size);

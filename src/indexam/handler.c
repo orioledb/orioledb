@@ -109,12 +109,12 @@ static bool bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 							 IndexInfo *indexInfo);
 static IndexScanDesc bridged_ambeginscan(Relation rel, int nkeys, int norderbys);
 
-typedef struct BrigedIndexAmRoutine
+typedef struct BridgedIndexAmRoutine
 {
 	IndexAmRoutine *original_routine;
 	IndexAmRoutine routine;
 	Oid			amhandler;
-} BrigedIndexAmRoutine;
+} BridgedIndexAmRoutine;
 
 List	   *bridged_ams = NIL;
 
@@ -203,7 +203,7 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 
 			foreach(lc, bridged_ams)
 			{
-				BrigedIndexAmRoutine *bridged = lfirst(lc);
+				BridgedIndexAmRoutine *bridged = lfirst(lc);
 
 				if (bridged->amhandler == amhandler)
 				{
@@ -215,12 +215,12 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 
 			if (amroutine == NULL)
 			{
-				BrigedIndexAmRoutine *bridged;
+				BridgedIndexAmRoutine *bridged;
 				MemoryContext old_mcxt;
 				Datum		datum;
 
 				old_mcxt = MemoryContextSwitchTo(TopMemoryContext);
-				bridged = palloc0(sizeof(BrigedIndexAmRoutine));
+				bridged = palloc0(sizeof(BridgedIndexAmRoutine));
 				datum = OidFunctionCall0(amhandler);
 				bridged_ams = lappend(bridged_ams, bridged);
 				bridged->amhandler = amhandler;
@@ -244,7 +244,7 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 /* Check if name is used */
 
 
-void
+static void
 orioledb_amreuse(Relation index)
 {
 	if (o_reuse_indices)
@@ -258,7 +258,7 @@ orioledb_amreuse(Relation index)
 }
 
 
-IndexBuildResult *
+static IndexBuildResult *
 orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 {
 	bool		reindex = false;
@@ -332,7 +332,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	return result;
 }
 
-void
+static void
 orioledb_ambuildempty(Relation index)
 {
 	btbuildempty(index);
@@ -507,7 +507,7 @@ detoast_passed_values(OIndexDescr *index_descr, Datum *values, bool *isnull, boo
 	}
 }
 
-bool
+static bool
 orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 				  Datum tupleid, Relation heapRel,
 				  IndexUniqueCheck checkUnique,
@@ -662,7 +662,7 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 	return success;
 }
 
-bool
+static bool
 orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 				  Datum *values, bool *isnull, Datum tupleid,
 				  Datum *valuesOld, bool *isnullOld, Datum oldTupleid,
@@ -839,7 +839,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 
 	return result.success;
 }
-bool
+static bool
 orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 				  Datum tupleid, Relation heapRel, IndexInfo *indexInfo)
 {
@@ -997,7 +997,7 @@ orioledb_amvacuumcleanup(IndexVacuumInfo *info, IndexBulkDeleteResult *stats)
 	return stats;
 }
 
-bool
+static bool
 orioledb_amcanreturn(Relation index, int attno)
 {
 	OBTOptions *options = (OBTOptions *) index->rd_options;
@@ -1009,7 +1009,7 @@ orioledb_amcanreturn(Relation index, int attno)
 }
 
 /* TODO: Rewrite to be more orioledb-specific */
-void
+static void
 orioledb_amcostestimate(PlannerInfo *root, IndexPath *path, double loop_count,
 						Cost *indexStartupCost, Cost *indexTotalCost,
 						Selectivity *indexSelectivity, double *indexCorrelation,
@@ -1351,7 +1351,7 @@ validate_index_compress(const char *value)
 		validate_compress(o_parse_compress(value), "Index");
 }
 
-bytea *
+static bytea *
 orioledb_amoptions(Datum reloptions, bool validate)
 {
 	static bool relopts_set = false;
@@ -1400,7 +1400,7 @@ orioledb_amoptions(Datum reloptions, bool validate)
 	return (bytea *) build_local_reloptions(&relopts, reloptions, validate);
 }
 
-bool
+static bool
 orioledb_amproperty(Oid index_oid, int attno, IndexAMProperty prop,
 					const char *propname, bool *res, bool *isnull)
 {
@@ -1419,7 +1419,7 @@ orioledb_amproperty(Oid index_oid, int attno, IndexAMProperty prop,
 	}
 }
 
-char *
+static char *
 orioledb_ambuildphasename(int64 phasenum)
 {
 	switch (phasenum)
@@ -1439,19 +1439,19 @@ orioledb_ambuildphasename(int64 phasenum)
 	}
 }
 
-bool
+static bool
 orioledb_amvalidate(Oid opclassoid)
 {
 	return true;
 }
 
-void
+static void
 orioledb_amadjustmembers(Oid opfamilyoid, Oid opclassoid, List *operators,
 						 List *functions)
 {
 }
 
-IndexScanDesc
+static IndexScanDesc
 orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 {
 	OScanState *o_scan;
@@ -1522,7 +1522,7 @@ o_get_num_prefix_exact_keys(ScanKey scankey, int nscankeys)
 	return i;
 }
 
-void
+static void
 orioledb_amrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 				  ScanKey orderbys, int norderbys)
 {
@@ -1857,7 +1857,7 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 }
 
 
-bool
+static bool
 orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 {
 	bool		res;
@@ -1926,7 +1926,7 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	return res;
 }
 
-int64
+static int64
 orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 {
 	OBTOptions *options = (OBTOptions *) scan->indexRelation->rd_options;
@@ -1936,7 +1936,7 @@ orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm)
 	return 0;
 }
 
-void
+static void
 orioledb_amendscan(IndexScanDesc scan)
 {
 	OScanState *o_scan = (OScanState *) scan;
@@ -1952,7 +1952,7 @@ orioledb_amendscan(IndexScanDesc scan)
 	MemoryContextDelete(o_scan->cxt);
 }
 
-Size
+static Size
 #if PG_VERSION_NUM >= 170000
 orioledb_amestimateparallelscan(int nkeys, int norderbys)
 #else
@@ -1962,12 +1962,12 @@ orioledb_amestimateparallelscan(void)
 	return sizeof(uint8);
 }
 
-void
+static void
 orioledb_aminitparallelscan(void *target)
 {
 }
 
-void
+static void
 orioledb_amparallelrescan(IndexScanDesc scan)
 {
 }
@@ -1980,7 +1980,7 @@ find_bridged_am(Relation index)
 
 	foreach(lc, bridged_ams)
 	{
-		BrigedIndexAmRoutine *bridged = lfirst(lc);
+		BridgedIndexAmRoutine *bridged = lfirst(lc);
 
 		if (bridged->amhandler == index->rd_amhandler)
 		{
@@ -2025,7 +2025,7 @@ bridged_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	}
 }
 
-bool
+static bool
 bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 				 Datum tupleid, Relation heapRel,
 				 IndexUniqueCheck checkUnique,
@@ -2072,7 +2072,7 @@ bridged_aminsert(Relation rel, Datum *values, bool *isnull,
 									   checkUnique, indexUnchanged, indexInfo);
 }
 
-IndexScanDesc
+static IndexScanDesc
 bridged_ambeginscan(Relation rel, int nkeys, int norderbys)
 {
 	IndexAmRoutine *amroutine = find_bridged_am(rel);

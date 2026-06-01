@@ -401,6 +401,7 @@ o_toast_nocachegetattr(OTuple tuple,
 	return result;
 }
 
+/* No existing callers */
 Pointer
 o_tuple_get_data(OTuple tuple, int *size, OTupleFixedFormatSpec *spec)
 {
@@ -428,7 +429,7 @@ o_tuple_get_data(OTuple tuple, int *size, OTupleFixedFormatSpec *spec)
  *		Determine size of the data area of a tuple to be constructed
  */
 static Size
-o_tuple_compute_data_size(TupleDesc tupleDesc, ItemPointer iptr, BrigeData *bridge_data,
+o_tuple_compute_data_size(TupleDesc tupleDesc, ItemPointer iptr, BridgeData *bridge_data,
 						  Datum *values, bool *isnull, char *to_toast,
 						  int natts)
 {
@@ -503,7 +504,7 @@ o_tuple_compute_data_size(TupleDesc tupleDesc, ItemPointer iptr, BrigeData *brid
 
 Size
 o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
-				 ItemPointer iptr, BrigeData *bridge_data, uint32 version,
+				 ItemPointer iptr, BridgeData *bridge_data, uint32 version,
 				 Datum *values, bool *isnull, char *to_toast)
 {
 	bool		hasnull = false;
@@ -562,7 +563,7 @@ o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 void
 o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 			 OTuple *tuple, Size tuple_size,
-			 ItemPointer iptr, BrigeData *bridge_data, uint32 version,
+			 ItemPointer iptr, BridgeData *bridge_data, uint32 version,
 			 Datum *values, bool *isnull, char *to_toast)
 {
 	OTupleHeader tup = (OTupleHeader) tuple->data;
@@ -805,7 +806,7 @@ o_tuple_fill(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 OTuple
 o_form_tuple(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 			 uint32 version, Datum *values, bool *isnull,
-			 BrigeData *bridge_data)
+			 BridgeData *bridge_data)
 {
 	OTuple		result;
 	int			len;

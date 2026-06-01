@@ -97,7 +97,7 @@
  * As said above, these values are not checked if ORIOLEDB_BINARY_VERSION is different, so each of
  * these values makes sense only within one ORIOLEDB_BINARY_VERSION value.
  */
-#define ORIOLEDB_VERSION "OrioleDB pre-2 beta 16"
+#define ORIOLEDB_VERSION "OrioleDB pre-3 beta 16"
 #define ORIOLEDB_BINARY_VERSION 9
 #define ORIOLEDB_SYS_TREE_VERSION	1	/* Version of system catalog */
 #define ORIOLEDB_PAGE_VERSION		1	/* Version of binary page format */
@@ -571,12 +571,10 @@ typedef struct OIndexDescr OIndexDescr;
 
 /* ddl.c */
 extern List *reindex_list;
-extern IndexBuildResult o_pkey_result;
 extern bool o_in_add_column;
 
 extern void orioledb_setup_ddl_hooks(void);
 extern void o_ddl_cleanup(void);
-extern void o_drop_table(ORelOids oids);
 
 /* scan.c */
 extern CustomScanMethods o_scan_methods;

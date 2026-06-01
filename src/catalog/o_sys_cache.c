@@ -54,6 +54,8 @@
 #include "utils/memutils.h"
 #include "utils/syscache.h"
 
+static void orioledb_setup_syscache_hooks(void);
+
 typedef struct OSysCacheHashTreeEntry
 {
 	OSysCache  *sys_cache;		/* If NULL only link stored */
@@ -408,7 +410,7 @@ orioledb_syscache_hook(Datum arg, int cacheid, uint32 hashvalue)
 		invalidate_fastcache_entry(cacheid, hashvalue);
 }
 
-void
+static void
 orioledb_setup_syscache_hooks(void)
 {
 	HASH_SEQ_STATUS hash_seq;
@@ -533,7 +535,7 @@ o_sys_cache_get_by_lsn_callback(OTuple tuple, OXid tupOxid,
 		return OTupleFetchNext;
 }
 
-Pointer
+static Pointer
 o_sys_cache_get_from_toast_tree(OSysCache *sys_cache, OSysCacheKey *key)
 {
 	Pointer		data;
@@ -562,7 +564,7 @@ o_sys_cache_get_from_toast_tree(OSysCache *sys_cache, OSysCacheKey *key)
 	return result;
 }
 
-Pointer
+static Pointer
 o_sys_cache_get_from_tree(OSysCache *sys_cache, int nkeys, OSysCacheKey *key)
 {
 	BTreeDescr *td = get_sys_tree(sys_cache->sys_tree_num);
@@ -800,7 +802,7 @@ static BTreeModifyCallbackInfo callbackInfo =
 	.arg = NULL
 };
 
-bool
+static bool
 o_sys_cache_update(OSysCache *sys_cache, Pointer updated_entry)
 {
 	bool		result;
@@ -1339,7 +1341,7 @@ o_cache_type_opclasses(Oid datoid, Oid typoid,
 									  processed);
 		cmpOid = get_opfamily_proc(btree_opf, btree_opintype, btree_opintype,
 								   BTORDER_PROC);
-		o_proc_cache_validate_add(datoid, cmpOid, InvalidOid, "comparsion",
+		o_proc_cache_validate_add(datoid, cmpOid, InvalidOid, "comparison",
 								  "field", processed);
 		o_opclass_cache_add_if_needed(datoid, btree_opclass, insert_lsn, NULL);
 		o_class_cache_add_if_needed(sys_datoid, AccessMethodProcedureRelationId,
@@ -2328,9 +2330,9 @@ o_sys_cache_tup_length(BTreeDescr *desc, OTuple tuple)
 /*
  * Comparison function for non-TOAST sys cache B-tree.
  *
- * If none of the arguments is BTreeKeyBound it comparses by both
+ * If none of the arguments is BTreeKeyBound it compares by both
  * oid and lsn. It make possible to insert values with same oid.
- * Else it comparses only by oid, which is used by other operations than
+ * Else it compares only by oid, which is used by other operations than
  * insert, to find all rows with exact oid.
  * If key kind is not BTreeKeyBound it expects that OTuple passed.
  */
@@ -2673,7 +2675,7 @@ o_sys_cache_toast_tup_print(BTreeDescr *desc, StringInfo buf,
 	appendStringInfo(buf, ", %u)", common->dataLength);
 }
 
-HeapTuple
+static HeapTuple
 o_auth_cache_search_htup(TupleDesc tupdesc, Oid authoid)
 {
 	HeapTuple	result = NULL;

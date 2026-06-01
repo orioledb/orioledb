@@ -1469,7 +1469,7 @@ orioledb_shmem_startup(void)
 	shared_segment = NULL;
 
 	/*
-	 * We must hold AddinShmemInitLock while initilization of our shared
+	 * We must hold AddinShmemInitLock while initialization of our shared
 	 * memory.
 	 */
 	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
@@ -2275,7 +2275,7 @@ is_bump_memory_context(MemoryContext mcxt)
 #endif
 }
 
-bool
+static bool
 check_debug_max_bridge_ctid(char **newval, void **extra, GucSource source)
 {
 	if (strcmp(*newval, "") != 0)
@@ -2316,7 +2316,7 @@ check_debug_max_bridge_ctid(char **newval, void **extra, GucSource source)
 	return true;
 }
 
-void
+static void
 assign_debug_max_bridge_ctid(const char *newval, void *extra)
 {
 	if (newval && strcmp(newval, "") != 0)

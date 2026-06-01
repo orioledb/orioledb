@@ -27,13 +27,21 @@
 #include "replication/origin.h"
 #include "storage/proc.h"
 
-static char local_wal_buffer[LOCAL_WAL_BUFFER_SIZE];
-static int	local_wal_buffer_offset = 0;
-static bool local_wal_has_material_changes = false;
-static bool local_wal_contains_xid = false;
-static bool local_wal_contains_switch_xid = false;
-static ORelOids local_oids = {InvalidOid, InvalidOid, InvalidOid};
-static OIndexType local_type = oIndexInvalid;
+static const char *wal_record_type_to_string(int wal_record);
+static void add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_version);
+
+typedef struct
+{
+	int			buffer_offset;
+	bool		has_material_changes;
+	bool		contains_xid;
+	bool		contains_switch_xid;
+	ORelOids	oids;
+	OIndexType	ix_type;
+	char		buffer[LOCAL_WAL_BUFFER_SIZE];
+} LocalWal;
+
+static LocalWal local_wal;
 
 static void add_finish_wal_record(uint8 rec_type, OXid xmin);
 static void add_joint_commit_wal_record(TransactionId xid, OXid xmin);
@@ -44,10 +52,11 @@ static inline void add_local_modify(uint8 record_type, OTuple record, OffsetNumb
 static void add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 										   OTuple tuple, OffsetNumber length, OTuple tuple2, OffsetNumber length2, char relreplident, uint32 version, uint32 base_version);
 static void add_relreplident_wal_record(char relreplident);
+static XLogRecPtr log_logical_wal_container(Pointer ptr, int length, bool withXactTime);
 
-#define XID_RESERVED_LENGTH ((local_wal_contains_xid) ? 0 : sizeof(WALRecXid))
+#define XID_RESERVED_LENGTH ((local_wal.contains_xid) ? 0 : sizeof(WALRecXid))
 
-const char *
+static const char *
 wal_record_type_to_string(int wal_record)
 {
 	switch (wal_record)
@@ -154,18 +163,18 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 
 
 	elog(DEBUG4, "add_modify_wal_record_extended length1 %d length2 %d", length, length2);
-	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
+	if (!ORelOidsIsEqual(local_wal.oids, oids) || type != local_wal.ix_type)
 		required_length += sizeof(WALRecRelation);
 
 	if (relreplident != REPLICA_IDENTITY_DEFAULT)
 		required_length += sizeof(WALRecRelReplident);
 
 	flush_local_wal_if_needed(required_length);
-	Assert(local_wal_buffer_offset + required_length + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + required_length + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	add_xid_wal_record_if_needed();
 
-	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
+	if (!ORelOidsIsEqual(local_wal.oids, oids) || type != local_wal.ix_type)
 	{
 		add_rel_wal_record(oids, type, version, base_version);
 		if (relreplident != REPLICA_IDENTITY_DEFAULT)
@@ -199,28 +208,28 @@ add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr, uint32 version, 
 
 	required_length = sizeof(WALRecBridgeErase);
 
-	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
+	if (!ORelOidsIsEqual(local_wal.oids, oids) || type != local_wal.ix_type)
 		required_length += sizeof(WALRecRelation);
 
 	flush_local_wal_if_needed(required_length);
-	Assert(local_wal_buffer_offset + required_length + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + required_length + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	if (OXidIsValid(get_current_oxid_if_any()))
 		add_xid_wal_record_if_needed();
 
-	if (!ORelOidsIsEqual(local_oids, oids) || type != local_type)
+	if (!ORelOidsIsEqual(local_wal.oids, oids) || type != local_wal.ix_type)
 		add_rel_wal_record(oids, type, version, base_version);
 
-	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
-	rec = (WALRecBridgeErase *) (&local_wal_buffer[local_wal_buffer_offset]);
+	rec = (WALRecBridgeErase *) (&local_wal.buffer[local_wal.buffer_offset]);
 	rec->recType = WAL_REC_BRIDGE_ERASE;
 	memcpy(rec->iptr, iptr, sizeof(rec->iptr));
-	local_wal_buffer_offset += sizeof(*rec);
+	local_wal.buffer_offset += sizeof(*rec);
 }
 
 /*
- * Adds the record to the local_wal_buffer.
+ * Adds the record to the local_wal.buffer.
  */
 static inline void
 add_local_modify(uint8 record_type, OTuple record1, OffsetNumber length1, OTuple record2, OffsetNumber length2)
@@ -234,39 +243,39 @@ add_local_modify(uint8 record_type, OTuple record1, OffsetNumber length1, OTuple
 		WALRecModify2 *wal_rec;
 
 		Assert(length2);
-		Assert(local_wal_buffer_offset + sizeof(*wal_rec) + length1 + length2 + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
-		wal_rec = (WALRecModify2 *) (&local_wal_buffer[local_wal_buffer_offset]);
+		Assert(local_wal.buffer_offset + sizeof(*wal_rec) + length1 + length2 + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+		wal_rec = (WALRecModify2 *) (&local_wal.buffer[local_wal.buffer_offset]);
 		wal_rec->recType = record_type;
 		wal_rec->tupleFormatFlags1 = record1.formatFlags;
 		wal_rec->tupleFormatFlags2 = record2.formatFlags;
 		memcpy(wal_rec->length1, &length1, sizeof(OffsetNumber));
 		memcpy(wal_rec->length2, &length2, sizeof(OffsetNumber));
-		local_wal_buffer_offset += sizeof(*wal_rec);
+		local_wal.buffer_offset += sizeof(*wal_rec);
 
-		memcpy(&local_wal_buffer[local_wal_buffer_offset], record1.data, length1);
-		local_wal_buffer_offset += length1;
-		memcpy(&local_wal_buffer[local_wal_buffer_offset], record2.data, length2);
-		local_wal_buffer_offset += length2;
+		memcpy(&local_wal.buffer[local_wal.buffer_offset], record1.data, length1);
+		local_wal.buffer_offset += length1;
+		memcpy(&local_wal.buffer[local_wal.buffer_offset], record2.data, length2);
+		local_wal.buffer_offset += length2;
 	}
 	else
 	{
 		/* One-tuple modify record */
 		WALRecModify1 *wal_rec;
 
-		Assert(local_wal_buffer_offset + sizeof(*wal_rec) + length1 + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+		Assert(local_wal.buffer_offset + sizeof(*wal_rec) + length1 + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 		Assert(length2 == 0);
 
-		wal_rec = (WALRecModify1 *) (&local_wal_buffer[local_wal_buffer_offset]);
+		wal_rec = (WALRecModify1 *) (&local_wal.buffer[local_wal.buffer_offset]);
 		wal_rec->recType = record_type;
 		wal_rec->tupleFormatFlags = record1.formatFlags;
 		memcpy(wal_rec->length, &length1, sizeof(OffsetNumber));
-		local_wal_buffer_offset += sizeof(*wal_rec);
+		local_wal.buffer_offset += sizeof(*wal_rec);
 
-		memcpy(&local_wal_buffer[local_wal_buffer_offset], record1.data, length1);
-		local_wal_buffer_offset += length1;
+		memcpy(&local_wal.buffer[local_wal.buffer_offset], record1.data, length1);
+		local_wal.buffer_offset += length1;
 	}
 
-	local_wal_has_material_changes = true;
+	local_wal.has_material_changes = true;
 }
 
 XLogRecPtr
@@ -277,24 +286,24 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 
 	Assert(!is_recovery_process());
 
-	if (!local_wal_has_material_changes)
+	if (!local_wal.has_material_changes)
 	{
-		local_wal_buffer_offset = 0;
-		local_type = oIndexInvalid;
-		ORelOidsSetInvalid(local_oids);
+		local_wal.buffer_offset = 0;
+		local_wal.ix_type = oIndexInvalid;
+		ORelOidsSetInvalid(local_wal.oids);
 		return InvalidXLogRecPtr;
 	}
 
 	recLength = sizeof(WALRecFinish) + ((synchronous_commit >= SYNCHRONOUS_COMMIT_REMOTE_APPLY) ? sizeof(WALRec) : 0);
 	flush_local_wal_if_needed(recLength);
-	Assert(local_wal_buffer_offset + recLength + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + recLength + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
-	if (!local_wal_contains_xid)
+	if (!local_wal.contains_xid)
 		add_xid_wal_record(oxid, logicalXid);
 
 	add_finish_wal_record(WAL_REC_COMMIT, pg_atomic_read_u64(&xid_meta->runXmin));
 	walPos = flush_local_wal(true, !isAutonomous);
-	local_wal_has_material_changes = false;
+	local_wal.has_material_changes = false;
 
 	elog(DEBUG4, "[%s] COMMIT oxid %lu logicalXid %u %X/%X", __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
 
@@ -310,14 +319,14 @@ wal_joint_commit(OXid oxid, TransactionId logicalXid, TransactionId xid,
 	Assert(!is_recovery_process());
 
 	flush_local_wal_if_needed(sizeof(WALRecJointCommit));
-	Assert(local_wal_buffer_offset + sizeof(WALRecJointCommit) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + sizeof(WALRecJointCommit) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
-	if (!local_wal_contains_xid)
+	if (!local_wal.contains_xid)
 		add_xid_wal_record(oxid, logicalXid);
 
 	add_joint_commit_wal_record(xid, pg_atomic_read_u64(&xid_meta->runXmin));
 	walPos = flush_local_wal(!subTransaction, false);
-	local_wal_has_material_changes = false;
+	local_wal.has_material_changes = false;
 
 	/*
 	 * Don't need to flush local WAL, because we only commit if builtin
@@ -339,25 +348,25 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 {
 	XLogRecPtr	wait_pos;
 
-	if (!local_wal_has_material_changes)
+	if (!local_wal.has_material_changes)
 	{
-		local_wal_buffer_offset = 0;
-		local_type = oIndexInvalid;
-		ORelOidsSetInvalid(local_oids);
+		local_wal.buffer_offset = 0;
+		local_wal.ix_type = oIndexInvalid;
+		ORelOidsSetInvalid(local_wal.oids);
 		return;
 	}
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(WALRecFinish));
-	Assert(local_wal_buffer_offset + sizeof(WALRecFinish) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + sizeof(WALRecFinish) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
-	if (!local_wal_contains_xid)
+	if (!local_wal.contains_xid)
 		add_xid_wal_record(oxid, logicalXid);
 
 	add_finish_wal_record(WAL_REC_ROLLBACK,
 						  pg_atomic_read_u64(&xid_meta->runXmin));
 	wait_pos = flush_local_wal(false, !isAutonomous);
-	local_wal_has_material_changes = false;
+	local_wal.has_material_changes = false;
 
 	elog(DEBUG4, "ROLLBACK oxid %lu logicalXid %u", oxid, logicalXid);
 
@@ -382,26 +391,26 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 		synchronous_commit >= SYNCHRONOUS_COMMIT_REMOTE_APPLY)
 		recLength += sizeof(WALRec);
 
-	Assert(local_wal_buffer_offset + recLength + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + recLength + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	if (rec_type == WAL_REC_COMMIT &&
 		synchronous_commit >= SYNCHRONOUS_COMMIT_REMOTE_APPLY)
 	{
-		WALRec	   *feedbackRec = (WALRec *) (&local_wal_buffer[local_wal_buffer_offset]);
+		WALRec	   *feedbackRec = (WALRec *) (&local_wal.buffer[local_wal.buffer_offset]);
 
 		feedbackRec->recType = WAL_REC_REPLAY_FEEDBACK;
-		local_wal_buffer_offset += sizeof(*feedbackRec);
+		local_wal.buffer_offset += sizeof(*feedbackRec);
 	}
 
-	rec = (WALRecFinish *) (&local_wal_buffer[local_wal_buffer_offset]);
+	rec = (WALRecFinish *) (&local_wal.buffer[local_wal.buffer_offset]);
 	rec->recType = rec_type;
 	memcpy(rec->xmin, &xmin, sizeof(xmin));
 	csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 	memcpy(rec->csn, &csn, sizeof(csn));
 
-	local_wal_buffer_offset += sizeof(*rec);
+	local_wal.buffer_offset += sizeof(*rec);
 
-	local_wal_contains_switch_xid = false;
+	local_wal.contains_switch_xid = false;
 }
 
 static void
@@ -414,19 +423,19 @@ add_joint_commit_wal_record(TransactionId xid, OXid xmin)
 
 	flush_local_wal_if_needed(sizeof(*rec));
 
-	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	add_xid_wal_record_if_needed();
 
-	rec = (WALRecJointCommit *) (&local_wal_buffer[local_wal_buffer_offset]);
+	rec = (WALRecJointCommit *) (&local_wal.buffer[local_wal.buffer_offset]);
 	rec->recType = WAL_REC_JOINT_COMMIT;
 	memcpy(rec->xid, &xid, sizeof(xid));
 	memcpy(rec->xmin, &xmin, sizeof(xmin));
 	csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 	memcpy(rec->csn, &csn, sizeof(csn));
-	local_wal_buffer_offset += sizeof(*rec);
+	local_wal.buffer_offset += sizeof(*rec);
 
-	local_wal_contains_switch_xid = false;
+	local_wal.contains_switch_xid = false;
 }
 
 /*
@@ -438,29 +447,29 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 	WALRecXid  *rec;
 	TransactionId heapXid;
 
-	Assert(!local_wal_contains_xid);
-	local_wal_contains_xid = true;
+	Assert(!local_wal.contains_xid);
+	local_wal.contains_xid = true;
 	Assert(!is_recovery_process());
 	Assert(OXidIsValid(oxid));
-	Assert(local_wal_buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
 
 	heapXid = GetTopTransactionIdIfAny();
 
 	elog(DEBUG4, "WAL_REC_XID oxid %lu logicalXid %u heapXid %u", oxid, logicalXid, heapXid);
 
-	rec = (WALRecXid *) (&local_wal_buffer[local_wal_buffer_offset]);
+	rec = (WALRecXid *) (&local_wal.buffer[local_wal.buffer_offset]);
 	rec->recType = WAL_REC_XID;
 	memcpy(rec->oxid, &oxid, sizeof(OXid));
 	memcpy(rec->logicalXid, &logicalXid, sizeof(TransactionId));
 	memcpy(rec->heapXid, &heapXid, sizeof(TransactionId));
 
-	local_wal_buffer_offset += sizeof(*rec);
+	local_wal.buffer_offset += sizeof(*rec);
 }
 
 static void
 add_xid_wal_record_if_needed(void)
 {
-	if (!local_wal_contains_xid)
+	if (!local_wal.contains_xid)
 	{
 		OXid		oxid = get_current_oxid_if_any();
 		TransactionId logicalXid = get_current_logical_xid();
@@ -473,30 +482,30 @@ add_xid_wal_record_if_needed(void)
 static void
 add_relreplident_wal_record(char relreplident)
 {
-	WALRecRelReplident *rec = (WALRecRelReplident *) (&local_wal_buffer[local_wal_buffer_offset]);
+	WALRecRelReplident *rec = (WALRecRelReplident *) (&local_wal.buffer[local_wal.buffer_offset]);
 	Oid			ix_oid = InvalidOid;
 
 	Assert(!is_recovery_process());
-	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	rec->recType = WAL_REC_RELREPLIDENT;
 	rec->relreplident = relreplident;
 	memcpy(rec->relreplident_ix_oid, &ix_oid, sizeof(Oid));
 
-	local_wal_buffer_offset += sizeof(*rec);
+	local_wal.buffer_offset += sizeof(*rec);
 }
 
-void
+static void
 add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_version)
 {
 	OXid		runXmin;
 	CommitSeqNo csn;
 	CommandId	cid;
 
-	WALRecRelation *rec = (WALRecRelation *) (&local_wal_buffer[local_wal_buffer_offset]);
+	WALRecRelation *rec = (WALRecRelation *) (&local_wal.buffer[local_wal.buffer_offset]);
 
 	Assert(!is_recovery_process());
-	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	rec->recType = WAL_REC_RELATION;
 	rec->treeType = type;
@@ -521,10 +530,10 @@ add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_v
 		 oids.datoid, oids.reloid, oids.relnode,
 		 type, runXmin, csn, cid, version, base_version);
 
-	local_wal_buffer_offset += sizeof(*rec);
+	local_wal.buffer_offset += sizeof(*rec);
 
-	local_type = type;
-	local_oids = oids;
+	local_wal.ix_type = type;
+	local_wal.oids = oids;
 }
 
 void
@@ -534,15 +543,15 @@ add_o_tables_meta_lock_wal_record(void)
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
-	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	add_xid_wal_record_if_needed();
 
-	rec = (WALRec *) (&local_wal_buffer[local_wal_buffer_offset]);
+	rec = (WALRec *) (&local_wal.buffer[local_wal.buffer_offset]);
 
 	rec->recType = WAL_REC_O_TABLES_META_LOCK;
 
-	local_wal_buffer_offset += sizeof(*rec);
+	local_wal.buffer_offset += sizeof(*rec);
 }
 
 void
@@ -552,11 +561,11 @@ add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode)
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
-	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	add_xid_wal_record_if_needed();
 
-	rec = (WALRecOTablesUnlockMeta *) (&local_wal_buffer[local_wal_buffer_offset]);
+	rec = (WALRecOTablesUnlockMeta *) (&local_wal.buffer[local_wal.buffer_offset]);
 
 	rec->recType = WAL_REC_O_TABLES_META_UNLOCK;
 	memcpy(rec->datoid, &oids.datoid, sizeof(Oid));
@@ -564,7 +573,7 @@ add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode)
 	memcpy(rec->old_relnode, &oldRelnode, sizeof(Oid));
 	memcpy(rec->new_relnode, &oids.relnode, sizeof(Oid));
 
-	local_wal_buffer_offset += sizeof(*rec);
+	local_wal.buffer_offset += sizeof(*rec);
 }
 
 void
@@ -572,24 +581,24 @@ add_switch_logical_xid_wal_record(TransactionId logicalXid_top, TransactionId lo
 {
 	WALRecSwitchLogicalXid *rec;
 
-	if (local_wal_contains_switch_xid)
+	if (local_wal.contains_switch_xid)
 		return;
 
-	local_wal_contains_switch_xid = true;
+	local_wal.contains_switch_xid = true;
 
 	Assert(!is_recovery_process());
 	Assert(TransactionIdIsValid(logicalXid_top));
 	Assert(TransactionIdIsValid(logicalXid_sub));
 	flush_local_wal_if_needed(sizeof(*rec));
-	Assert(local_wal_buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
 
-	rec = (WALRecSwitchLogicalXid *) (&local_wal_buffer[local_wal_buffer_offset]);
+	rec = (WALRecSwitchLogicalXid *) (&local_wal.buffer[local_wal.buffer_offset]);
 
 	rec->recType = WAL_REC_SWITCH_LOGICAL_XID;
 	memcpy(rec->topXid, &logicalXid_top, sizeof(TransactionId));
 	memcpy(rec->subXid, &logicalXid_sub, sizeof(TransactionId));
 
-	local_wal_buffer_offset += sizeof(*rec);
+	local_wal.buffer_offset += sizeof(*rec);
 }
 
 void
@@ -601,18 +610,18 @@ add_savepoint_wal_record(SubTransactionId parentSubid,
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
-	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	add_xid_wal_record_if_needed();
 
-	rec = (WALRecSavepoint *) (&local_wal_buffer[local_wal_buffer_offset]);
+	rec = (WALRecSavepoint *) (&local_wal.buffer[local_wal.buffer_offset]);
 
 	rec->recType = WAL_REC_SAVEPOINT;
 	memcpy(rec->parentSubid, &parentSubid, sizeof(SubTransactionId));
 	memcpy(rec->parentLogicalXid, &prentLogicalXid, sizeof(TransactionId));
 	memcpy(rec->logicalXid, &logicalXid, sizeof(TransactionId));
 
-	local_wal_buffer_offset += sizeof(*rec);
+	local_wal.buffer_offset += sizeof(*rec);
 }
 
 void
@@ -624,12 +633,12 @@ add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
-	local_wal_contains_xid = false;
-	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	local_wal.contains_xid = false;
+	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	add_xid_wal_record_if_needed();
 
-	rec = (WALRecRollbackToSavepoint *) (&local_wal_buffer[local_wal_buffer_offset]);
+	rec = (WALRecRollbackToSavepoint *) (&local_wal.buffer[local_wal.buffer_offset]);
 
 	rec->recType = WAL_REC_ROLLBACK_TO_SAVEPOINT;
 	memcpy(rec->parentSubid, &parentSubid, sizeof(SubTransactionId));
@@ -641,7 +650,7 @@ add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 
 	elog(DEBUG4, "[%s] xmin %lu csn %lu", __func__, runXmin, csn);
 
-	local_wal_buffer_offset += sizeof(*rec);
+	local_wal.buffer_offset += sizeof(*rec);
 
 	flush_local_wal(false, false);
 
@@ -649,13 +658,23 @@ add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 	 * Force adding xid record on future changes going after this rollback to
 	 * sp, this is necessary for correct xids restoring in logical decoder
 	 */
-	local_wal_contains_xid = false;
+	local_wal.contains_xid = false;
 }
 
 bool
 local_wal_is_empty(void)
 {
-	return (local_wal_buffer_offset == 0);
+	return (local_wal.buffer_offset == 0);
+}
+
+static inline void
+reset_local_wal_buffer(void)
+{
+	local_wal.buffer_offset = 0;
+	local_wal.contains_xid = false;
+	local_wal.contains_switch_xid = false;
+	local_wal.ix_type = oIndexInvalid;
+	ORelOidsSetInvalid(local_wal.oids);
 }
 
 /*
@@ -665,7 +684,7 @@ XLogRecPtr
 flush_local_wal(bool isCommit, bool withXactTime)
 {
 	XLogRecPtr	location;
-	int			length = local_wal_buffer_offset;
+	int			length = local_wal.buffer_offset;
 
 	Assert(!is_recovery_process());
 	Assert(length > 0);
@@ -678,17 +697,23 @@ flush_local_wal(bool isCommit, bool withXactTime)
 	if (isCommit)
 		pg_atomic_write_u64(&GET_CUR_PROCDATA()->commitInProgressXlogLocation, OWalTmpCommitPos);
 
-	location = log_logical_wal_container(local_wal_buffer, length, withXactTime);
+	/*
+	 * The buffer already holds a finish record (COMMIT/ROLLBACK/JOINT_COMMIT)
+	 * at this point, it's too late to append another ROLLBACK in case of
+	 * error. Mirror RecordTransactionCommit() and escalate any failure to
+	 * PANIC.
+	 */
+	START_CRIT_SECTION();
+
+	location = log_logical_wal_container(local_wal.buffer, length, withXactTime);
 
 	if (isCommit)
 		pg_atomic_write_u64(&GET_CUR_PROCDATA()->commitInProgressXlogLocation, location);
 
-	local_wal_buffer_offset = 0;
-	local_wal_contains_xid = false;
-	local_wal_contains_switch_xid = false;
-	local_type = oIndexInvalid;
-	ORelOidsSetInvalid(local_oids);
-	local_wal_has_material_changes = true;
+	reset_local_wal_buffer();
+	local_wal.has_material_changes = true;
+
+	END_CRIT_SECTION();
 
 	return location;
 }
@@ -697,22 +722,19 @@ static void
 flush_local_wal_if_needed(int required_length)
 {
 	Assert(!is_recovery_process());
-	if (local_wal_buffer_offset + required_length + XID_RESERVED_LENGTH > LOCAL_WAL_BUFFER_SIZE)
+	if (local_wal.buffer_offset + required_length + XID_RESERVED_LENGTH > LOCAL_WAL_BUFFER_SIZE)
 	{
 		elog(DEBUG4, "[%s] Going to FLUSH WAL on local WAL buffer overflow", __func__);
-		log_logical_wal_container(local_wal_buffer, local_wal_buffer_offset,
-								  false);
 
-		local_wal_buffer_offset = 0;
-		local_wal_contains_xid = false;
-		local_wal_contains_switch_xid = false;
-		local_type = oIndexInvalid;
-		ORelOidsSetInvalid(local_oids);
-		local_wal_has_material_changes = true;
+		START_CRIT_SECTION();
+		log_logical_wal_container(local_wal.buffer, local_wal.buffer_offset, false);
+		reset_local_wal_buffer();
+		local_wal.has_material_changes = true;
+		END_CRIT_SECTION();
 	}
 }
 
-XLogRecPtr
+static XLogRecPtr
 log_logical_wal_container(Pointer ptr, int length, bool withXactTime)
 {
 	uint16		wal_version = ORIOLEDB_WAL_VERSION;
@@ -913,33 +935,31 @@ add_truncate_wal_record(ORelOids oids)
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));
-	Assert(local_wal_buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	add_xid_wal_record_if_needed();
 
-	rec = (WALRecTruncate *) (&local_wal_buffer[local_wal_buffer_offset]);
+	rec = (WALRecTruncate *) (&local_wal.buffer[local_wal.buffer_offset]);
 
 	rec->recType = WAL_REC_TRUNCATE;
 	memcpy(rec->datoid, &oids.datoid, sizeof(Oid));
 	memcpy(rec->reloid, &oids.reloid, sizeof(Oid));
 	memcpy(rec->relnode, &oids.relnode, sizeof(Oid));
 
-	local_wal_buffer_offset += sizeof(*rec);
+	local_wal.buffer_offset += sizeof(*rec);
 
-	local_type = oIndexInvalid;
-	local_oids.datoid = InvalidOid;
-	local_oids.reloid = InvalidOid;
-	local_oids.relnode = InvalidOid;
+	local_wal.ix_type = oIndexInvalid;
+	ORelOidsSetInvalid(local_wal.oids);
 }
 
 bool
 get_local_wal_has_material_changes(void)
 {
-	return local_wal_has_material_changes;
+	return local_wal.has_material_changes;
 }
 
 void
 set_local_wal_has_material_changes(bool value)
 {
-	local_wal_has_material_changes = value;
+	local_wal.has_material_changes = value;
 }

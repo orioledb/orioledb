@@ -55,7 +55,7 @@ O_SYS_CACHE_INIT_FUNC(amproc_cache)
 }
 
 
-void
+static void
 o_amproc_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
 	HeapTuple	amproctup;
@@ -96,7 +96,7 @@ o_amproc_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	ReleaseSysCache(amproctup);
 }
 
-void
+static void
 o_amproc_cache_free_entry(Pointer entry)
 {
 	pfree(entry);

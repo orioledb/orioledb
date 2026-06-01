@@ -108,8 +108,8 @@ SELECT orioledb_table_description('o_compress_truncate'::regclass);
                orioledb_table_description               
 --------------------------------------------------------
  Compress = 2, Primary compress = 2, TOAST compress = 2+
-  Column |    Type | Collation | Nullable | Droped     +
-      id | integer |    (null) |     true |  false     +
+  Column |    Type | Collation | Nullable | Dropped    +
+      id | integer |    (null) |     true |   false    +
  
 (1 row)
 
@@ -118,8 +118,8 @@ SELECT orioledb_table_description('o_compress_truncate'::regclass);
                orioledb_table_description               
 --------------------------------------------------------
  Compress = 2, Primary compress = 2, TOAST compress = 2+
-  Column |    Type | Collation | Nullable | Droped     +
-      id | integer |    (null) |     true |  false     +
+  Column |    Type | Collation | Nullable | Dropped    +
+      id | integer |    (null) |     true |   false    +
  
 (1 row)
 

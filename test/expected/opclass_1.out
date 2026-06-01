@@ -131,7 +131,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass my_op_class_p_i
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_p_i" cannot be used here
-HINT:  only C and SQL functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
+HINT:  only C and SQL functions should be used as B-tree comparison support function in operator class used for field of orioledb index
 DROP OPERATOR CLASS my_op_class_p_i USING btree CASCADE;
 SELECT cmp_is_valid('opclass.my_int_cmp_s_p_i');
  cmp_is_valid 
@@ -147,7 +147,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass my_op_class_s_p_i
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_p_i" cannot be used here
-HINT:  only C and SQL functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
+HINT:  only C and SQL functions should be used as B-tree comparison support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_s_p_i" during body validation
 DROP OPERATOR CLASS my_op_class_s_p_i USING btree CASCADE;
 SELECT cmp_is_valid('opclass.my_int_cmp_s_s_s_p_i');
@@ -164,7 +164,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass my_op_class_s_s_s_p_i
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_p_i" cannot be used here
-HINT:  only C and SQL functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
+HINT:  only C and SQL functions should be used as B-tree comparison support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_s_p_i" during body validation
 SQL function "my_int_cmp_s_s_p_i" during body validation
 SQL function "my_int_cmp_s_s_s_p_i" during body validation
@@ -183,7 +183,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass my_op_class_v_i
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_v_i" cannot be used here
-HINT:  only immutable functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
+HINT:  only immutable functions should be used as B-tree comparison support function in operator class used for field of orioledb index
 DROP OPERATOR CLASS my_op_class_v_i USING btree CASCADE;
 SELECT cmp_is_valid('opclass.my_int_cmp_s_v_i');
  cmp_is_valid 
@@ -199,7 +199,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass my_op_class_s_v_i
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_v_i" cannot be used here
-HINT:  only immutable functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
+HINT:  only immutable functions should be used as B-tree comparison support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_s_v_i" during body validation
 DROP OPERATOR CLASS my_op_class_s_v_i USING btree CASCADE;
 SELECT cmp_is_valid('opclass.my_int_cmp_s_s_s_v_i');
@@ -216,7 +216,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass my_op_class_s_s_s_v_i
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_v_i" cannot be used here
-HINT:  only immutable functions should be used as B-tree comparsion support function in operator class used for field of orioledb index
+HINT:  only immutable functions should be used as B-tree comparison support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_s_v_i" during body validation
 SQL function "my_int_cmp_s_s_v_i" during body validation
 SQL function "my_int_cmp_s_s_s_v_i" during body validation
@@ -259,7 +259,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass my_op_class_delete
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_delete" cannot be used here
-HINT:  only queries without relation references should be used as B-tree comparsion support function in operator class used for field of orioledb index
+HINT:  only queries without relation references should be used as B-tree comparison support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_delete" during body validation
 DROP OPERATOR CLASS my_op_class_delete USING btree CASCADE;
 CREATE FUNCTION my_int_cmp_update(a int, b int) RETURNS int AS $$
@@ -280,7 +280,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass my_op_class_update
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_update" cannot be used here
-HINT:  only queries without relation references should be used as B-tree comparsion support function in operator class used for field of orioledb index
+HINT:  only queries without relation references should be used as B-tree comparison support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_update" during body validation
 DROP OPERATOR CLASS my_op_class_update USING btree CASCADE;
 CREATE FUNCTION my_int_cmp_insert(a int, b int) RETURNS int AS $$
@@ -301,7 +301,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass my_op_class_insert
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_insert" cannot be used here
-HINT:  only queries without relation references should be used as B-tree comparsion support function in operator class used for field of orioledb index
+HINT:  only queries without relation references should be used as B-tree comparison support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_insert" during body validation
 DROP OPERATOR CLASS my_op_class_insert USING btree CASCADE;
 CREATE FUNCTION my_int_cmp_select_from_table(a int, b int) RETURNS int AS $$
@@ -321,7 +321,7 @@ CREATE INDEX int_val_ix ON
 WARNING:  failed to fetch the hash function for btree opclass my_op_class_select_from_table
 DETAIL:  Recovery might be slow due to inability to distribute values among the workers.
 ERROR:  function "my_int_cmp_select_from_table" cannot be used here
-HINT:  only queries without relation references should be used as B-tree comparsion support function in operator class used for field of orioledb index
+HINT:  only queries without relation references should be used as B-tree comparison support function in operator class used for field of orioledb index
 CONTEXT:  SQL function "my_int_cmp_select_from_table" during body validation
 DROP OPERATOR CLASS my_op_class_select_from_table USING btree CASCADE;
 -- VALID OPCLASSES

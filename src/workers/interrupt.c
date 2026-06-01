@@ -20,10 +20,12 @@
 
 #include "postmaster/interrupt.h"
 
+static void o_worker_shutdown(int elevel);
+
 /*
  * Exit from an orioledb worker
  */
-void
+static void
 o_worker_shutdown(int elevel)
 {
 	Assert(MyBackendType == B_BG_WORKER);

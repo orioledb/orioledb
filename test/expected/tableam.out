@@ -4,7 +4,7 @@ CREATE EXTENSION orioledb;
 SELECT orioledb_version();
     orioledb_version    
 ------------------------
- OrioleDB pre-2 beta 16
+ OrioleDB pre-3 beta 16
 (1 row)
 
 SELECT translate(orioledb_commit_hash(), '0123456789abcdef', '################');
@@ -1937,43 +1937,43 @@ SELECT * FROM db_o_tables;
   relname   |                        description                        
 ------------+-----------------------------------------------------------
  o_tableam4 | Compress = -1, Primary compress = -1, TOAST compress = -1+
-            |  Column |   Type | Collation | Nullable | Droped         +
-            |     key | bigint |    (null) |    false |  false         +
-            |   value | bigint |    (null) |     true |  false         +
-            |  value2 | bigint |    (null) |     true |  false         +
+            |  Column |   Type | Collation | Nullable | Dropped        +
+            |     key | bigint |    (null) |    false |   false        +
+            |   value | bigint |    (null) |     true |   false        +
+            |  value2 | bigint |    (null) |     true |   false        +
             | 
 (1 row)
 
 SELECT * FROM db_o_indices;
-    relname     |      name      |                      description                      
-----------------+----------------+-------------------------------------------------------
- pg_toast_NNN   | toast          |    Column |     Type | Collation | Nullable | Droped +
-                |                |      ctid |      tid |    (null) |    false |  false +
-                |                |    attnum | smallint |    (null) |    false |  false +
-                |                |  chunknum |  integer |    (null) |    false |  false +
-                |                |      data |    bytea |    (null) |    false |  false +
-                |                |                                                      +
-                |                | Key fields: (ctid, attnum, chunknum)                 +
+    relname     |      name      |                      description                       
+----------------+----------------+--------------------------------------------------------
+ pg_toast_NNN   | toast          |    Column |     Type | Collation | Nullable | Dropped +
+                |                |      ctid |      tid |    (null) |    false |   false +
+                |                |    attnum | smallint |    (null) |    false |   false +
+                |                |  chunknum |  integer |    (null) |    false |   false +
+                |                |      data |    bytea |    (null) |    false |   false +
+                |                |                                                       +
+                |                | Key fields: (ctid, attnum, chunknum)                  +
                 |                | 
- o_tableam4     | ctid_primary   |  Column |   Type | Collation | Nullable | Droped     +
-                |                |    ctid |    tid |    (null) |    false |  false     +
-                |                |     key | bigint |    (null) |    false |  false     +
-                |                |   value | bigint |    (null) |     true |  false     +
-                |                |  value2 | bigint |    (null) |     true |  false     +
-                |                |                                                      +
-                |                | Key fields: (ctid)                                   +
+ o_tableam4     | ctid_primary   |  Column |   Type | Collation | Nullable | Dropped     +
+                |                |    ctid |    tid |    (null) |    false |   false     +
+                |                |     key | bigint |    (null) |    false |   false     +
+                |                |   value | bigint |    (null) |     true |   false     +
+                |                |  value2 | bigint |    (null) |     true |   false     +
+                |                |                                                       +
+                |                | Key fields: (ctid)                                    +
                 |                | 
- o_tableam4_ix1 | o_tableam4_ix1 |  Column |   Type | Collation | Nullable | Droped     +
-                |                |     key | bigint |    (null) |    false |  false     +
-                |                |    ctid |    tid |    (null) |    false |  false     +
-                |                |                                                      +
-                |                | Key fields: (key), ctid                              +
+ o_tableam4_ix1 | o_tableam4_ix1 |  Column |   Type | Collation | Nullable | Dropped     +
+                |                |     key | bigint |    (null) |    false |   false     +
+                |                |    ctid |    tid |    (null) |    false |   false     +
+                |                |                                                       +
+                |                | Key fields: (key), ctid                               +
                 |                | 
- o_tableam4_ix2 | o_tableam4_ix2 |  Column |   Type | Collation | Nullable | Droped     +
-                |                |   value | bigint |    (null) |     true |  false     +
-                |                |    ctid |    tid |    (null) |    false |  false     +
-                |                |                                                      +
-                |                | Key fields: (value, ctid)                            +
+ o_tableam4_ix2 | o_tableam4_ix2 |  Column |   Type | Collation | Nullable | Dropped     +
+                |                |   value | bigint |    (null) |     true |   false     +
+                |                |    ctid |    tid |    (null) |    false |   false     +
+                |                |                                                       +
+                |                | Key fields: (value, ctid)                             +
                 |                | 
 (4 rows)
 
@@ -2204,36 +2204,36 @@ SELECT * FROM db_o_tables;
       relname      |                        description                        
 -------------------+-----------------------------------------------------------
  o_tableam_delete1 | Compress = -1, Primary compress = -1, TOAST compress = -1+
-                   |  Column |   Type | Collation | Nullable | Droped         +
-                   |      id | bigint |    (null) |    false |  false         +
-                   |     val |   text |   default |     true |  false         +
-                   |    val2 |   text |   default |     true |  false         +
+                   |  Column |   Type | Collation | Nullable | Dropped        +
+                   |      id | bigint |    (null) |    false |   false        +
+                   |     val |   text |   default |     true |   false        +
+                   |    val2 |   text |   default |     true |   false        +
                    | 
 (1 row)
 
 SELECT * FROM db_o_indices;
-        relname         |          name          |                      description                      
-------------------------+------------------------+-------------------------------------------------------
- pg_toast_NNN           | toast                  |    Column |     Type | Collation | Nullable | Droped +
-                        |                        |        id |   bigint |    (null) |    false |  false +
-                        |                        |    attnum | smallint |    (null) |    false |  false +
-                        |                        |  chunknum |  integer |    (null) |    false |  false +
-                        |                        |      data |    bytea |    (null) |    false |  false +
-                        |                        |                                                      +
-                        |                        | Key fields: (id, attnum, chunknum)                   +
+        relname         |          name          |                      description                       
+------------------------+------------------------+--------------------------------------------------------
+ pg_toast_NNN           | toast                  |    Column |     Type | Collation | Nullable | Dropped +
+                        |                        |        id |   bigint |    (null) |    false |   false +
+                        |                        |    attnum | smallint |    (null) |    false |   false +
+                        |                        |  chunknum |  integer |    (null) |    false |   false +
+                        |                        |      data |    bytea |    (null) |    false |   false +
+                        |                        |                                                       +
+                        |                        | Key fields: (id, attnum, chunknum)                    +
                         |                        | 
- o_tableam_delete1_pkey | o_tableam_delete1_pkey |  Column |   Type | Collation | Nullable | Droped     +
-                        |                        |      id | bigint |    (null) |    false |  false     +
-                        |                        |     val |   text |   default |     true |  false     +
-                        |                        |    val2 |   text |   default |     true |  false     +
-                        |                        |                                                      +
-                        |                        | Key fields: (id)                                     +
+ o_tableam_delete1_pkey | o_tableam_delete1_pkey |  Column |   Type | Collation | Nullable | Dropped     +
+                        |                        |      id | bigint |    (null) |    false |   false     +
+                        |                        |     val |   text |   default |     true |   false     +
+                        |                        |    val2 |   text |   default |     true |   false     +
+                        |                        |                                                       +
+                        |                        | Key fields: (id)                                      +
                         |                        | 
- o_tableam_delete1_ix   | o_tableam_delete1_ix   |  Column |   Type | Collation | Nullable | Droped     +
-                        |                        |     val |   text |   default |     true |  false     +
-                        |                        |      id | bigint |    (null) |    false |  false     +
-                        |                        |                                                      +
-                        |                        | Key fields: (val, id)                                +
+ o_tableam_delete1_ix   | o_tableam_delete1_ix   |  Column |   Type | Collation | Nullable | Dropped     +
+                        |                        |     val |   text |   default |     true |   false     +
+                        |                        |      id | bigint |    (null) |    false |   false     +
+                        |                        |                                                       +
+                        |                        | Key fields: (val, id)                                 +
                         |                        | 
 (3 rows)
 
@@ -2373,29 +2373,29 @@ SELECT * FROM db_o_tables;
   relname   |                        description                        
 ------------+-----------------------------------------------------------
  o_tableam6 | Compress = -1, Primary compress = -1, TOAST compress = -1+
-            |  Column |   Type | Collation | Nullable | Droped         +
-            |      id | bigint |    (null) |    false |  false         +
-            |     val |   text |   default |     true |  false         +
+            |  Column |   Type | Collation | Nullable | Dropped        +
+            |      id | bigint |    (null) |    false |   false        +
+            |     val |   text |   default |     true |   false        +
             | 
 (1 row)
 
 SELECT * FROM db_o_indices;
-   relname    |     name     |                      description                      
---------------+--------------+-------------------------------------------------------
- pg_toast_NNN | toast        |    Column |     Type | Collation | Nullable | Droped +
-              |              |      ctid |      tid |    (null) |    false |  false +
-              |              |    attnum | smallint |    (null) |    false |  false +
-              |              |  chunknum |  integer |    (null) |    false |  false +
-              |              |      data |    bytea |    (null) |    false |  false +
-              |              |                                                      +
-              |              | Key fields: (ctid, attnum, chunknum)                 +
+   relname    |     name     |                      description                       
+--------------+--------------+--------------------------------------------------------
+ pg_toast_NNN | toast        |    Column |     Type | Collation | Nullable | Dropped +
+              |              |      ctid |      tid |    (null) |    false |   false +
+              |              |    attnum | smallint |    (null) |    false |   false +
+              |              |  chunknum |  integer |    (null) |    false |   false +
+              |              |      data |    bytea |    (null) |    false |   false +
+              |              |                                                       +
+              |              | Key fields: (ctid, attnum, chunknum)                  +
               |              | 
- o_tableam6   | ctid_primary |  Column |   Type | Collation | Nullable | Droped     +
-              |              |    ctid |    tid |    (null) |    false |  false     +
-              |              |      id | bigint |    (null) |    false |  false     +
-              |              |     val |   text |   default |     true |  false     +
-              |              |                                                      +
-              |              | Key fields: (ctid)                                   +
+ o_tableam6   | ctid_primary |  Column |   Type | Collation | Nullable | Dropped     +
+              |              |    ctid |    tid |    (null) |    false |   false     +
+              |              |      id | bigint |    (null) |    false |   false     +
+              |              |     val |   text |   default |     true |   false     +
+              |              |                                                       +
+              |              | Key fields: (ctid)                                    +
               |              | 
 (2 rows)
 
@@ -2428,29 +2428,29 @@ SELECT * FROM db_o_tables;
   relname   |                        description                        
 ------------+-----------------------------------------------------------
  o_tableam6 | Compress = -1, Primary compress = -1, TOAST compress = -1+
-            |  Column |   Type | Collation | Nullable | Droped         +
-            |      id | bigint |    (null) |    false |  false         +
-            |     val |   text |   default |     true |  false         +
+            |  Column |   Type | Collation | Nullable | Dropped        +
+            |      id | bigint |    (null) |    false |   false        +
+            |     val |   text |   default |     true |   false        +
             | 
 (1 row)
 
 SELECT * FROM db_o_indices;
-   relname    |     name     |                      description                      
---------------+--------------+-------------------------------------------------------
- pg_toast_NNN | toast        |    Column |     Type | Collation | Nullable | Droped +
-              |              |      ctid |      tid |    (null) |    false |  false +
-              |              |    attnum | smallint |    (null) |    false |  false +
-              |              |  chunknum |  integer |    (null) |    false |  false +
-              |              |      data |    bytea |    (null) |    false |  false +
-              |              |                                                      +
-              |              | Key fields: (ctid, attnum, chunknum)                 +
+   relname    |     name     |                      description                       
+--------------+--------------+--------------------------------------------------------
+ pg_toast_NNN | toast        |    Column |     Type | Collation | Nullable | Dropped +
+              |              |      ctid |      tid |    (null) |    false |   false +
+              |              |    attnum | smallint |    (null) |    false |   false +
+              |              |  chunknum |  integer |    (null) |    false |   false +
+              |              |      data |    bytea |    (null) |    false |   false +
+              |              |                                                       +
+              |              | Key fields: (ctid, attnum, chunknum)                  +
               |              | 
- o_tableam6   | ctid_primary |  Column |   Type | Collation | Nullable | Droped     +
-              |              |    ctid |    tid |    (null) |    false |  false     +
-              |              |      id | bigint |    (null) |    false |  false     +
-              |              |     val |   text |   default |     true |  false     +
-              |              |                                                      +
-              |              | Key fields: (ctid)                                   +
+ o_tableam6   | ctid_primary |  Column |   Type | Collation | Nullable | Dropped     +
+              |              |    ctid |    tid |    (null) |    false |   false     +
+              |              |      id | bigint |    (null) |    false |   false     +
+              |              |     val |   text |   default |     true |   false     +
+              |              |                                                       +
+              |              | Key fields: (ctid)                                    +
               |              | 
 (2 rows)
 
@@ -2505,29 +2505,29 @@ SELECT * FROM db_o_tables;
   relname   |                        description                        
 ------------+-----------------------------------------------------------
  o_tableam6 | Compress = -1, Primary compress = -1, TOAST compress = -1+
-            |  Column |   Type | Collation | Nullable | Droped         +
-            |      id | bigint |    (null) |    false |  false         +
-            |     val |   text |   default |     true |  false         +
+            |  Column |   Type | Collation | Nullable | Dropped        +
+            |      id | bigint |    (null) |    false |   false        +
+            |     val |   text |   default |     true |   false        +
             | 
 (1 row)
 
 SELECT * FROM db_o_indices;
-   relname    |     name     |                      description                      
---------------+--------------+-------------------------------------------------------
- pg_toast_NNN | toast        |    Column |     Type | Collation | Nullable | Droped +
-              |              |      ctid |      tid |    (null) |    false |  false +
-              |              |    attnum | smallint |    (null) |    false |  false +
-              |              |  chunknum |  integer |    (null) |    false |  false +
-              |              |      data |    bytea |    (null) |    false |  false +
-              |              |                                                      +
-              |              | Key fields: (ctid, attnum, chunknum)                 +
+   relname    |     name     |                      description                       
+--------------+--------------+--------------------------------------------------------
+ pg_toast_NNN | toast        |    Column |     Type | Collation | Nullable | Dropped +
+              |              |      ctid |      tid |    (null) |    false |   false +
+              |              |    attnum | smallint |    (null) |    false |   false +
+              |              |  chunknum |  integer |    (null) |    false |   false +
+              |              |      data |    bytea |    (null) |    false |   false +
+              |              |                                                       +
+              |              | Key fields: (ctid, attnum, chunknum)                  +
               |              | 
- o_tableam6   | ctid_primary |  Column |   Type | Collation | Nullable | Droped     +
-              |              |    ctid |    tid |    (null) |    false |  false     +
-              |              |      id | bigint |    (null) |    false |  false     +
-              |              |     val |   text |   default |     true |  false     +
-              |              |                                                      +
-              |              | Key fields: (ctid)                                   +
+ o_tableam6   | ctid_primary |  Column |   Type | Collation | Nullable | Dropped     +
+              |              |    ctid |    tid |    (null) |    false |   false     +
+              |              |      id | bigint |    (null) |    false |   false     +
+              |              |     val |   text |   default |     true |   false     +
+              |              |                                                       +
+              |              | Key fields: (ctid)                                    +
               |              | 
 (2 rows)
 
@@ -2571,29 +2571,29 @@ SELECT * FROM db_o_tables;
   relname   |                        description                        
 ------------+-----------------------------------------------------------
  o_tableam6 | Compress = -1, Primary compress = -1, TOAST compress = -1+
-            |  Column |   Type | Collation | Nullable | Droped         +
-            |      id | bigint |    (null) |    false |  false         +
-            |     val |   text |   default |     true |  false         +
+            |  Column |   Type | Collation | Nullable | Dropped        +
+            |      id | bigint |    (null) |    false |   false        +
+            |     val |   text |   default |     true |   false        +
             | 
 (1 row)
 
 SELECT * FROM db_o_indices;
-   relname    |     name     |                      description                      
---------------+--------------+-------------------------------------------------------
- pg_toast_NNN | toast        |    Column |     Type | Collation | Nullable | Droped +
-              |              |      ctid |      tid |    (null) |    false |  false +
-              |              |    attnum | smallint |    (null) |    false |  false +
-              |              |  chunknum |  integer |    (null) |    false |  false +
-              |              |      data |    bytea |    (null) |    false |  false +
-              |              |                                                      +
-              |              | Key fields: (ctid, attnum, chunknum)                 +
+   relname    |     name     |                      description                       
+--------------+--------------+--------------------------------------------------------
+ pg_toast_NNN | toast        |    Column |     Type | Collation | Nullable | Dropped +
+              |              |      ctid |      tid |    (null) |    false |   false +
+              |              |    attnum | smallint |    (null) |    false |   false +
+              |              |  chunknum |  integer |    (null) |    false |   false +
+              |              |      data |    bytea |    (null) |    false |   false +
+              |              |                                                       +
+              |              | Key fields: (ctid, attnum, chunknum)                  +
               |              | 
- o_tableam6   | ctid_primary |  Column |   Type | Collation | Nullable | Droped     +
-              |              |    ctid |    tid |    (null) |    false |  false     +
-              |              |      id | bigint |    (null) |    false |  false     +
-              |              |     val |   text |   default |     true |  false     +
-              |              |                                                      +
-              |              | Key fields: (ctid)                                   +
+ o_tableam6   | ctid_primary |  Column |   Type | Collation | Nullable | Dropped     +
+              |              |    ctid |    tid |    (null) |    false |   false     +
+              |              |      id | bigint |    (null) |    false |   false     +
+              |              |     val |   text |   default |     true |   false     +
+              |              |                                                       +
+              |              | Key fields: (ctid)                                    +
               |              | 
 (2 rows)
 
@@ -2632,49 +2632,49 @@ SELECT * FROM db_o_tables;
    relname   |                        description                        
 -------------+-----------------------------------------------------------
  o_tableam6  | Compress = -1, Primary compress = -1, TOAST compress = -1+
-             |  Column |   Type | Collation | Nullable | Droped         +
-             |      id | bigint |    (null) |    false |  false         +
-             |     val |   text |   default |     true |  false         +
+             |  Column |   Type | Collation | Nullable | Dropped        +
+             |      id | bigint |    (null) |    false |   false        +
+             |     val |   text |   default |     true |   false        +
              | 
  o_tableam6a | Compress = -1, Primary compress = -1, TOAST compress = -1+
-             |  Column |   Type | Collation | Nullable | Droped         +
-             |      id | bigint |    (null) |    false |  false         +
-             |     val |   text |   default |     true |  false         +
+             |  Column |   Type | Collation | Nullable | Dropped        +
+             |      id | bigint |    (null) |    false |   false        +
+             |     val |   text |   default |     true |   false        +
              | 
 (2 rows)
 
 SELECT * FROM db_o_indices;
-   relname    |     name     |                      description                      
---------------+--------------+-------------------------------------------------------
- pg_toast_NNN | toast        |    Column |     Type | Collation | Nullable | Droped +
-              |              |      ctid |      tid |    (null) |    false |  false +
-              |              |    attnum | smallint |    (null) |    false |  false +
-              |              |  chunknum |  integer |    (null) |    false |  false +
-              |              |      data |    bytea |    (null) |    false |  false +
-              |              |                                                      +
-              |              | Key fields: (ctid, attnum, chunknum)                 +
+   relname    |     name     |                      description                       
+--------------+--------------+--------------------------------------------------------
+ pg_toast_NNN | toast        |    Column |     Type | Collation | Nullable | Dropped +
+              |              |      ctid |      tid |    (null) |    false |   false +
+              |              |    attnum | smallint |    (null) |    false |   false +
+              |              |  chunknum |  integer |    (null) |    false |   false +
+              |              |      data |    bytea |    (null) |    false |   false +
+              |              |                                                       +
+              |              | Key fields: (ctid, attnum, chunknum)                  +
               |              | 
- pg_toast_NNN | toast        |    Column |     Type | Collation | Nullable | Droped +
-              |              |      ctid |      tid |    (null) |    false |  false +
-              |              |    attnum | smallint |    (null) |    false |  false +
-              |              |  chunknum |  integer |    (null) |    false |  false +
-              |              |      data |    bytea |    (null) |    false |  false +
-              |              |                                                      +
-              |              | Key fields: (ctid, attnum, chunknum)                 +
+ pg_toast_NNN | toast        |    Column |     Type | Collation | Nullable | Dropped +
+              |              |      ctid |      tid |    (null) |    false |   false +
+              |              |    attnum | smallint |    (null) |    false |   false +
+              |              |  chunknum |  integer |    (null) |    false |   false +
+              |              |      data |    bytea |    (null) |    false |   false +
+              |              |                                                       +
+              |              | Key fields: (ctid, attnum, chunknum)                  +
               |              | 
- o_tableam6   | ctid_primary |  Column |   Type | Collation | Nullable | Droped     +
-              |              |    ctid |    tid |    (null) |    false |  false     +
-              |              |      id | bigint |    (null) |    false |  false     +
-              |              |     val |   text |   default |     true |  false     +
-              |              |                                                      +
-              |              | Key fields: (ctid)                                   +
+ o_tableam6   | ctid_primary |  Column |   Type | Collation | Nullable | Dropped     +
+              |              |    ctid |    tid |    (null) |    false |   false     +
+              |              |      id | bigint |    (null) |    false |   false     +
+              |              |     val |   text |   default |     true |   false     +
+              |              |                                                       +
+              |              | Key fields: (ctid)                                    +
               |              | 
- o_tableam6a  | ctid_primary |  Column |   Type | Collation | Nullable | Droped     +
-              |              |    ctid |    tid |    (null) |    false |  false     +
-              |              |      id | bigint |    (null) |    false |  false     +
-              |              |     val |   text |   default |     true |  false     +
-              |              |                                                      +
-              |              | Key fields: (ctid)                                   +
+ o_tableam6a  | ctid_primary |  Column |   Type | Collation | Nullable | Dropped     +
+              |              |    ctid |    tid |    (null) |    false |   false     +
+              |              |      id | bigint |    (null) |    false |   false     +
+              |              |     val |   text |   default |     true |   false     +
+              |              |                                                       +
+              |              | Key fields: (ctid)                                    +
               |              | 
 (4 rows)
 

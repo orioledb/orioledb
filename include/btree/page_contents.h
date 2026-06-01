@@ -392,7 +392,6 @@ extern void copy_fixed_key(BTreeDescr *desc, OFixedKey *dst, OTuple src);
 extern void copy_fixed_page_key(BTreeDescr *desc, OFixedKey *dst,
 								Page p, BTreePageItemLocator *loc);
 extern void copy_fixed_hikey(BTreeDescr *desc, OFixedKey *dst, Page p);
-extern void clear_fixed_tuple(OFixedTuple *dst);
 extern void clear_fixed_key(OFixedKey *dst);
 
 extern void copy_fixed_shmem_key(BTreeDescr *desc, OFixedShmemKey *dst,

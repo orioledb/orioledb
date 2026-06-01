@@ -1325,7 +1325,7 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 
 	level = PAGE_GET_LEVEL(context->img);
 
-	/* In this case, we shoudn't be in the rootPageBlkno... */
+	/* In this case, we shouldn't be in the rootPageBlkno... */
 	Assert(context->index > 0);
 
 	parentItem = &context->items[context->index - 1];
@@ -1387,7 +1387,7 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 
 	/*
 	 * Give up with parent downlink.  Find the page from the root in a usual
-	 * way.  Should happend rarely.
+	 * way.  Should happen rarely.
 	 */
 	(void) find_page(context, hikey, BTreeKeyNonLeafKey, level);
 	return true;
@@ -1428,7 +1428,7 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 	}
 
 	level = PAGE_GET_LEVEL(context->img);
-	/* In this case, we shoudn't be in the rootPageBlkno... */
+	/* In this case, we shouldn't be in the rootPageBlkno... */
 	Assert(level == 0);
 	Assert(context->index > 0);
 	parentItem = &context->items[context->index - 1];

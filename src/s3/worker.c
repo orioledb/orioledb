@@ -46,6 +46,9 @@
 #include <unistd.h>
 
 
+static S3TaskLocation s3_schedule_file_part_read(uint32 chkpNum, OIndexKey key,
+												 int32 segNum, int32 partNum);
+
 #define WORKERS_FILE_CHECKSUMS_MAX_LEN 100
 
 typedef struct S3WorkerCtl
@@ -659,7 +662,7 @@ s3_schedule_file_part_write(uint32 chkpNum, OIndexKey key,
 /*
  * Schedule the read of given data file part from S3.
  */
-S3TaskLocation
+static S3TaskLocation
 s3_schedule_file_part_read(uint32 chkpNum, OIndexKey key, int32 segNum,
 						   int32 partNum)
 {
@@ -924,7 +927,7 @@ s3worker_main(Datum main_arg)
 
 	SetProcessingMode(NormalProcessing);
 
-	/* catch SIGTERM signal for reason to not interupt background writing */
+	/* catch SIGTERM signal for reason to not interrupt background writing */
 	pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
 	BackgroundWorkerUnblockSignals();
 
@@ -971,7 +974,7 @@ s3worker_main(Datum main_arg)
 				ShutdownRequestPending = true;
 
 			/*
-			 * Task processing loop.  It might happend that error occurs and
+			 * Task processing loop.  It might happen that error occurs and
 			 * worker restarts.  We save the task location to the shared
 			 * memory to be able to process it after restart.
 			 */

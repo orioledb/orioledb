@@ -63,6 +63,10 @@ OPageWaiterShmemState *lockerStates = NULL;
 static void o_check_btree_page_statistics(BTreeDescr *desc, Pointer p);
 #endif
 
+#ifdef CHECK_PAGE_STRUCT
+static void o_check_page_struct(BTreeDescr *desc, Page p);
+#endif
+
 Size
 page_state_shmem_needs(void)
 {
@@ -519,6 +523,26 @@ lock_page_with_tuple(BTreeDescr *desc,
 				if (UndoLocationIsValid(lockerState->undoLocation) &&
 					!UndoLocationIsValid(curRetainUndoLocations[undoType]))
 					curRetainUndoLocations[undoType] = lockerState->undoLocation;
+
+				/*
+				 * The lock holder allocated the waiter's undo record on our
+				 * behalf via make_waiter_undo_record(), and stamped its
+				 * location into the tuphdr on the page.  When an INSERT
+				 * doesn't queue, o_btree_modify_insert_update() registers the
+				 * freshly allocated undo location in this backend's
+				 * commandInfos[] via current_command_get_undo_location().
+				 * Here that registration never happens, because we returned
+				 * before reaching that code.  Do it now, otherwise a
+				 * subsequent same-transaction read of the row would call
+				 * undo_location_get_command() with a location below every
+				 * commandInfos[i].undoLocation, tripping its lo >= 0
+				 * assertion (or returning a bogus cid in non-assert builds).
+				 */
+				if (undoType == UndoLogRegular &&
+					UndoLocationIsValid(lockerState->undoLocation) &&
+					!IsParallelWorker())
+					update_command_undo_location(o_get_current_command(),
+												 lockerState->undoLocation);
 			}
 
 			return OLockPageWithTupleResultInserted;
@@ -676,6 +700,8 @@ try_lock_page(OInMemoryBlkno blkno)
 
 /*
  * Declare newly created page as already locked by our process.
+ *
+ * No existing callers.
  */
 void
 delare_page_as_locked(OInMemoryBlkno blkno)
@@ -1253,7 +1279,7 @@ extern void log_btree(BTreeDescr *desc);
 /*
  * Check if page has a consistent structure.
  */
-void
+static void
 o_check_page_struct(BTreeDescr *desc, Page p)
 {
 	BTreePageHeader *header = (BTreePageHeader *) p;

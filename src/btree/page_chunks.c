@@ -1439,6 +1439,7 @@ page_locator_find_real_item(Page p, PartialPageState *partial,
 	return true;
 }
 
+/* No existing callers */
 OffsetNumber
 page_locator_get_offset(Page p, BTreePageItemLocator *locator)
 {

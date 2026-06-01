@@ -123,7 +123,7 @@ o_opclass_cache_search_htup(TupleDesc tupdesc, Oid opclassoid)
 	return result;
 }
 
-void
+static void
 o_opclass_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 {
 	HeapTuple	opclasstuple;
@@ -161,7 +161,7 @@ o_opclass_cache_fill_entry(Pointer *entry_ptr, OSysCacheKey *key, Pointer arg)
 	ReleaseSysCache(opclasstuple);
 }
 
-void
+static void
 o_opclass_cache_free_entry(Pointer entry)
 {
 	pfree(entry);

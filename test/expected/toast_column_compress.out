@@ -97,14 +97,14 @@ SELECT orioledb_tbl_indices('o_test_matview'::regclass);
 (1 row)
 
 SELECT orioledb_table_description('o_test_matview'::regclass);
-                     orioledb_table_description                     
---------------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1         +
-    Column |    Type | Collation | Nullable | Droped | Compression +
-  order_id | integer |    (null) |     true |  false |             +
-   item_id | integer |    (null) |     true |  false |             +
-  quantity |    text |   default |     true |  false |             +
-     price |  bigint |    (null) |     true |  false |             +
+                     orioledb_table_description                      
+---------------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1          +
+    Column |    Type | Collation | Nullable | Dropped | Compression +
+  order_id | integer |    (null) |     true |   false |             +
+   item_id | integer |    (null) |     true |   false |             +
+  quantity |    text |   default |     true |   false |             +
+     price |  bigint |    (null) |     true |   false |             +
  
 (1 row)
 
@@ -137,14 +137,14 @@ SELECT orioledb_tbl_indices('o_test_matview'::regclass);
 (1 row)
 
 SELECT orioledb_table_description('o_test_matview'::regclass);
-                     orioledb_table_description                     
---------------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1         +
-    Column |    Type | Collation | Nullable | Droped | Compression +
-  order_id | integer |    (null) |     true |  false |             +
-   item_id | integer |    (null) |     true |  false |             +
-  quantity |    text |   default |     true |  false |        pglz +
-     price |  bigint |    (null) |     true |  false |             +
+                     orioledb_table_description                      
+---------------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1          +
+    Column |    Type | Collation | Nullable | Dropped | Compression +
+  order_id | integer |    (null) |     true |   false |             +
+   item_id | integer |    (null) |     true |   false |             +
+  quantity |    text |   default |     true |   false |        pglz +
+     price |  bigint |    (null) |     true |   false |             +
  
 (1 row)
 

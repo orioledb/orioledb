@@ -33,6 +33,8 @@
 #include "storage/s_lock.h"
 #include "utils/memdebug.h"
 
+static void clear_fixed_tuple(OFixedTuple *dst);
+
 /*
  * Navigates and reads the page image from undo log according to `key` of
  * `keyType` and `csn`.  Saves lokey of the page to lokey if *lokey != NULL.
@@ -659,7 +661,7 @@ copy_fixed_hikey(BTreeDescr *desc, OFixedKey *dst, Page p)
 	copy_fixed_key(desc, dst, src);
 }
 
-void
+static void
 clear_fixed_tuple(OFixedTuple *dst)
 {
 	dst->tuple.formatFlags = 0;

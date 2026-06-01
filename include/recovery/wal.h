@@ -194,9 +194,7 @@ typedef struct
 #define ORIOLEDB_WAL_PREFIX	"o_wal"
 #define ORIOLEDB_WAL_PREFIX_SIZE (5)
 
-extern const char *wal_record_type_to_string(int wal_record);
 
-extern void add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_version);
 
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, OffsetNumber length, char relreplident, uint32 version, uint32 base_version);
@@ -216,8 +214,6 @@ extern XLogRecPtr wal_joint_commit(OXid oxid, TransactionId logicalXid,
 extern void wal_after_commit(void);
 extern void wal_rollback(OXid oxid, TransactionId logicalXid,
 						 bool isAutonomous);
-extern XLogRecPtr log_logical_wal_container(Pointer ptr, int length,
-											bool withXactTime);
 extern void o_wal_insert(BTreeDescr *desc, OTuple tuple, char relreplident, uint32 version);
 extern void o_wal_update(BTreeDescr *desc, OTuple tuple, OTuple oldtuple, char relreplident, uint32 version);
 extern void o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident, uint32 version);
