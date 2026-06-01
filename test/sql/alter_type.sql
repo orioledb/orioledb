@@ -360,6 +360,17 @@ ALTER TABLE o_test_alter_type_add_column_default
 	ADD COLUMN y float8 DEFAULT 1.0;
 SELECT * FROM o_test_alter_type_add_column_default;
 
+-- Test drop_index_list cleanup
+CREATE TABLE o_test_drop_index_list (
+	id int,
+	phone varchar(15)
+) USING orioledb;
+CREATE INDEX o_test_drop_index_list_ix1 ON o_test_drop_index_list (id) WHERE id > 0;
+CREATE INDEX o_test_drop_index_list_ix2 ON o_test_drop_index_list (phone);
+
+ALTER TABLE o_test_drop_index_list ALTER COLUMN phone TYPE text;
+ALTER TABLE o_test_drop_index_list ALTER COLUMN phone TYPE varchar(15);
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA alter_type CASCADE;
 RESET search_path;

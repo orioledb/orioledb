@@ -1216,8 +1216,17 @@ SELECT * FROM o_test_alter_type_add_column_default;
  4 | 101 | 1
 (2 rows)
 
+-- Test drop_index_list cleanup
+CREATE TABLE o_test_drop_index_list (
+	id int,
+	phone varchar(15)
+) USING orioledb;
+CREATE INDEX o_test_drop_index_list_ix1 ON o_test_drop_index_list (id) WHERE id > 0;
+CREATE INDEX o_test_drop_index_list_ix2 ON o_test_drop_index_list (phone);
+ALTER TABLE o_test_drop_index_list ALTER COLUMN phone TYPE text;
+ALTER TABLE o_test_drop_index_list ALTER COLUMN phone TYPE varchar(15);
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 13 other objects
+NOTICE:  drop cascades to 14 other objects
 DETAIL:  drop cascades to table o_ddl_check
 drop cascades to table o_test_alter_change_byval
 drop cascades to table o_test_pkey_alter_type
@@ -1231,5 +1240,6 @@ drop cascades to table o_test_alter_type_reuse_index
 drop cascades to table o_test_alter_type_not_reuse_index
 drop cascades to table o_test_alter_type_typmod_changed
 drop cascades to table o_test_alter_type_add_column_default
+drop cascades to table o_test_drop_index_list
 DROP SCHEMA alter_type CASCADE;
 RESET search_path;
