@@ -110,7 +110,15 @@ typedef struct oIdxShared
 extern void o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTable *o_table);
 extern void o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 						   OIndexNumber old_ix_num, Oid oldTblRelnode,
+						   bool skip_build,
 						   IndexBuildResult *result);
+
+/*
+ * Phase 3 of CIC: build the index from a fresh snapshot, drain the
+ * spool, flip OIndex.state to VALID.  Called from
+ * orioledb_index_validate_scan when the index is in BUILDING state.
+ */
+extern void o_define_index_concurrent_finish(Relation heap, Relation index);
 
 extern void o_index_drop(Relation tbl, OIndexNumber ix_num);
 extern OIndexNumber o_find_ix_num_by_name(OTableDescr *descr,

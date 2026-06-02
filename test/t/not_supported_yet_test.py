@@ -290,31 +290,3 @@ class NotSupportedYetTest(BaseTest):
 		self.assertErrorMessageEquals(
 		    e, "temp and unlogged orioledb tables does not "
 		    "support compression options")
-
-	def test_create_index_concurrently(self):
-		node = self.node
-		node.append_conf(max_prepared_transactions=2)
-		node.start()
-		node.safe_psql("""
-			CREATE EXTENSION orioledb;
-		""")
-
-		node.safe_psql("""
-			CREATE TABLE o_test
-			(
-				i int
-			) USING orioledb;
-		""")
-
-		_, _, err = node.psql("""
-			CREATE INDEX CONCURRENTLY ON o_test (i);
-		""")
-
-		self.assertEqual(
-		    err.decode("utf-8").split("\n")[0],
-		    "WARNING:  concurrent index creation is not supported for orioledb tables yet, using a plain CREATE INDEX instead"
-		)
-
-		node.safe_psql("""
-			REINDEX TABLE o_test;
-		""")

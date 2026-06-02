@@ -1247,7 +1247,22 @@ orioledb_index_validate_scan(Relation heapRelation,
 							 Snapshot snapshot,
 							 ValidateIndexState *state)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	/*
+	 * Phase-3 of CREATE INDEX CONCURRENTLY.  Up to this point PG has:
+	 *
+	 * - Committed the OIndex insert (in BUILDING_PHASE_2 state) done inside
+	 * our ambuild. - Set pg_index.indisready=true and committed. - Run
+	 * WaitForLockers(ShareLock) so writers that did not see the new index
+	 * have settled. - Pushed a fresh snapshot.
+	 *
+	 * We now run the orioledb phased build: build from the snapshot, drain
+	 * the spool of captured concurrent DML, flip OIndex.state to VALID, emit
+	 * WAL_REC_CIC_PHASE_FLIP, drop the spool dir.
+	 *
+	 * UNIQUE is rejected at the ddl.c gate so we never need to perform the
+	 * duplicate-detection validation PG does for unique indexes.
+	 */
+	o_define_index_concurrent_finish(heapRelation, indexRelation);
 }
 
 

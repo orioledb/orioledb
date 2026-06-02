@@ -1491,15 +1491,38 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 			if (is_orioledb_rel(rel))
 			{
-				if (orioledb_strict_mode)
+				/*
+				 * orioledb CIC: non-unique only.  Path: - PG's
+				 * DefineIndex(concurrent=true) drives the standard multi-txn
+				 * orchestration. - orioledb_ambuild installs OIndex with
+				 * state=BUILDING_PHASE_2 and skips the actual build.
+				 * Concurrent writers see BUILDING (via the in-progress
+				 * snapshot the OIndex sys-tree uses by default) and route DML
+				 * to the spool. - PG's phase-3 validate_index calls
+				 * orioledb_index_validate_scan, which runs the build from
+				 * PG's fresh snapshot, drains the spool under a brief
+				 * ShareLock, flips state to VALID, and emits
+				 * WAL_REC_CIC_PHASE_FLIP.
+				 *
+				 * UNIQUE CIC is rejected outright in strict mode and
+				 * downgraded to a plain CREATE UNIQUE INDEX with a WARNING in
+				 * compat mode.  Plain CREATE UNIQUE INDEX serializes via
+				 * ShareUpdateExclusiveLock and enforces uniqueness on the
+				 * existing rows during the build, so the only thing the
+				 * downgrade gives up is concurrent DML during the build.
+				 */
+				if (stmt->unique)
 				{
-					table_close(rel, lockmode);
-					elog(ERROR, "concurrent index creation is not supported for orioledb tables yet");
-				}
-				else
-				{
-					stmt->concurrent = false;
-					elog(WARNING, "concurrent index creation is not supported for orioledb tables yet, using a plain CREATE INDEX instead");
+					if (orioledb_strict_mode)
+					{
+						table_close(rel, lockmode);
+						elog(ERROR, "CREATE UNIQUE INDEX CONCURRENTLY is not yet supported for orioledb tables");
+					}
+					else
+					{
+						stmt->concurrent = false;
+						elog(WARNING, "CREATE UNIQUE INDEX CONCURRENTLY is not yet supported for orioledb tables, using a plain CREATE UNIQUE INDEX instead");
+					}
 				}
 			}
 			table_close(rel, lockmode);
@@ -2556,7 +2579,8 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary, Oid oldRelnode
 				o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
 				relation_close(ind, AccessShareLock);
 				o_define_index(rel, NULL, ind->rd_rel->oid, false,
-							   InvalidIndexNumber, oldRelnode, NULL);
+							   InvalidIndexNumber, oldRelnode,
+							   false, NULL);
 				closed = true;
 			}
 		}
@@ -3851,7 +3875,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							o_index_drop(tbl, ix_num);
 							o_table_free(o_table);
 							o_define_index(tbl, rel, InvalidOid, false,
-										   InvalidIndexNumber, InvalidOid, NULL);
+										   InvalidIndexNumber, InvalidOid,
+										   false, NULL);
 						}
 					}
 					else if (rel->rd_options)
@@ -4242,7 +4267,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						ix_num--;
 					o_index_drop(tbl, ix_num);
 					o_define_index(tbl, NULL, rel->rd_rel->oid, false,
-								   InvalidIndexNumber, InvalidOid, NULL);
+								   InvalidIndexNumber, InvalidOid,
+								   false, NULL);
 				}
 			}
 			relation_close(tbl, AccessShareLock);

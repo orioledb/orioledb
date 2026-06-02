@@ -19,7 +19,9 @@
 
 #include "btree/iterator.h"
 #include "btree/modify.h"
+#include "catalog/cic_spool.h"
 #include "catalog/indices.h"
+#include "catalog/o_indices.h"
 #include "catalog/o_tables.h"
 #include "indexam/handler.h"
 #include "tableam/index_scan.h"
@@ -322,10 +324,36 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 		}
 		else
 		{
+			/*
+			 * For CREATE INDEX CONCURRENTLY we install only the catalog
+			 * metadata here and defer the actual build to
+			 * orioledb_index_validate_scan (phase 3 of PG's CIC).  See
+			 * o_define_index for the skip_build branch + the post-call
+			 * o_indices_set_state(BUILDING) below.
+			 */
+			bool		is_concurrent = indexInfo->ii_Concurrent;
+
 			if (!in_nontransactional_truncate)
 				o_define_index_validate(tbl_oids, index, indexInfo, NULL);
 			o_define_index(heap, index, InvalidOid, reindex, InvalidIndexNumber,
-						   InvalidOid, result);
+						   InvalidOid, is_concurrent, result);
+
+			if (is_concurrent && !index->rd_index->indisprimary)
+			{
+				ORelOids	idx_oids;
+				OXid		oxid;
+				OSnapshot	snap;
+				char		persistence = o_table->persistence;
+
+				ORelOidsSetFromRel(idx_oids, index);
+				fill_current_oxid_osnapshot(&oxid, &snap);
+				(void) o_indices_set_state(idx_oids,
+										   o_index_rel_get_ix_type(index),
+										   persistence,
+										   OINDEX_STATE_BUILDING_PHASE_2,
+										   oxid, snap.csn);
+				cic_spool_ensure_dir(tbl_oids, oxid);
+			}
 		}
 	}
 

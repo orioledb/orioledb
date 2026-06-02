@@ -11,26 +11,25 @@ class ConcurrentIndexTest(BaseTest):
 	"""
 	Coverage for CREATE INDEX CONCURRENTLY on orioledb tables.
 
-	Current status:
+	Native btree CIC path:
+	  - PG's DefineIndex(concurrent=true) drives the standard CIC
+	    orchestration.
+	  - orioledb_ambuild installs OIndex with
+	    state=BUILDING_PHASE_2 and skips the actual build.  Other
+	    backends see BUILDING via the in-progress snapshot the
+	    OIndex sys-tree uses by default; their DML routes through
+	    the spool.
+	  - PG's phase-3 validate_index calls
+	    orioledb_index_validate_scan, which runs the real build,
+	    drains the spool under a brief ShareLock, and flips state
+	    to VALID.
 
-	  - Non-unique, no-concurrent-DML: works (test_cic_basic).
-	  - UNIQUE: rejected at the planner gate (test_cic_rejects_unique).
-	  - Concurrent DML during build: NOT YET CORRECT.  Writers during
-	    the build snapshot do not yet land in the new index because
-	    multi-transaction orchestration is incomplete -- their writes
-	    miss both the build snapshot and the spool (the OIndex
-	    sys-tree row is not yet visible to them during ambuild's
-	    transaction).  The infrastructure (state field, spool, capture
-	    hooks, REVERSE-op via undo, phase WAL records, drain helper)
-	    is in place; what is missing is the multi-txn driver that
-	    commits the OIndex with state=BUILDING before the build scan
-	    starts.  See test_cic_concurrent_writes_TODO.
-	"""
+		"""
 
 	def test_cic_basic(self):
 		"""
-		Smoke test: CREATE INDEX CONCURRENTLY on an orioledb table
-		without concurrent DML.  Should produce a valid index.
+		CIC on a small table without concurrent DML.  Should produce
+		a queryable, complete index.
 		"""
 		node = self.node
 		node.start()
@@ -59,11 +58,13 @@ class ConcurrentIndexTest(BaseTest):
 			except Exception:
 				pass
 
-	def test_cic_rejects_unique(self):
+	def test_cic_unique_strict_rejects(self):
 		"""
-		CREATE UNIQUE INDEX CONCURRENTLY must be rejected when UNIQUE CIC is not yet supported.
+		CREATE UNIQUE INDEX CONCURRENTLY is rejected for orioledb
+		when orioledb.use_orioledb_strict_mode is on.
 		"""
 		node = self.node
+		node.append_conf("orioledb.strict_mode = on")
 		node.start()
 		try:
 			node.safe_psql("""
@@ -82,16 +83,46 @@ class ConcurrentIndexTest(BaseTest):
 			except Exception:
 				pass
 
-	@unittest.skip(
-	    "CIC multi-txn driver pending; writers during build snapshot are "
-	    "not yet captured.  Skeleton kept for the follow-up that wires the "
-	    "phased OIndex.state transitions through a separate orchestrator.")
-	def test_cic_concurrent_writes_TODO(self):
+	def test_cic_unique_compat_downgrades(self):
 		"""
-		Once the multi-txn driver lands, writers during the build phase
-		should be captured to the spool and replayed at phase 4 drain.
-		The check: every row visible via PK equals one row visible via
-		the new index.
+		CREATE UNIQUE INDEX CONCURRENTLY is downgraded to a plain
+		CREATE UNIQUE INDEX with a WARNING in compat mode (default).
+		Uniqueness must still be enforced.
+		"""
+		node = self.node
+		node.start()
+		try:
+			node.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_cic_uniq_compat (
+					id int NOT NULL,
+					val text NOT NULL,
+					PRIMARY KEY (id)
+				) USING orioledb;
+				INSERT INTO o_cic_uniq_compat VALUES (1, 'a'), (2, 'b');
+			""")
+			_, _, err = node.psql(
+			    "CREATE UNIQUE INDEX CONCURRENTLY o_cic_uniq_compat_val_uidx "
+			    "ON o_cic_uniq_compat (val);")
+			self.assertIn(
+			    b"WARNING:  CREATE UNIQUE INDEX CONCURRENTLY is not yet "
+			    b"supported for orioledb tables, using a plain "
+			    b"CREATE UNIQUE INDEX instead", err)
+			# Uniqueness is enforced by the plain index that was built.
+			with self.assertRaises(Exception):
+				node.safe_psql(
+				    "INSERT INTO o_cic_uniq_compat VALUES (3, 'a');")
+		finally:
+			try:
+				node.stop()
+			except Exception:
+				pass
+
+	def test_cic_concurrent_writes(self):
+		"""
+		Writers during the build snapshot should be captured to the
+		spool and applied at validate-scan drain.  Acceptance: every
+		row visible via PK equals one row visible via the new index.
 		"""
 		node = self.node
 		node.start()
@@ -104,19 +135,29 @@ class ConcurrentIndexTest(BaseTest):
 				SELECT g, 'v' || g FROM generate_series(1, 5000) g;
 			""")
 
+			# Implicit autocommit on testgres connections is False, so
+			# wrap the INSERT in BEGIN/COMMIT to make the writes
+			# visible after the thread exits.
+			writer_conn = node.connect()
 			writer = ThreadQueryExecutor(
-			    node.connect(), "INSERT INTO o_cic_conc "
-			    "SELECT g, 'v' || g FROM generate_series(5001, 10000) g;")
+			    writer_conn, "BEGIN;"
+			    "INSERT INTO o_cic_conc "
+			    "SELECT g, 'v' || g FROM generate_series(5001, 10000) g;"
+			    "COMMIT;")
 			writer.start()
 
 			node.safe_psql("CREATE INDEX CONCURRENTLY o_cic_conc_val_idx "
 			               "ON o_cic_conc (val);")
 			writer.join()
+			writer_conn.close()
 
 			pk_cnt = node.execute("SELECT count(*) FROM o_cic_conc;")[0][0]
-			idx_cnt = node.execute("SET enable_seqscan = off; "
-			                       "SELECT count(*) FROM o_cic_conc "
-			                       "WHERE val LIKE 'v%';")[0][0]
+			with node.connect() as c:
+				c.execute("SET enable_seqscan = off")
+				# Use a range predicate (avoids psycopg2's '%' format-arg
+				# parsing, which trips on 'v%').
+				idx_cnt = c.execute("SELECT count(*) FROM o_cic_conc "
+				                    "WHERE val >= 'v' AND val < 'w';")[0][0]
 			self.assertEqual(pk_cnt, idx_cnt)
 			self.assertEqual(pk_cnt, 10000)
 		finally:
