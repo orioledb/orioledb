@@ -886,6 +886,17 @@ serialize_o_index(OIndex *o_index, int *size)
 		appendBinaryStringInfo(&str, (Pointer) o_index->exclops, sizeof(Oid) * o_index->nKeyFields);
 	appendBinaryStringInfo(&str, (Pointer) &o_index->immediate, sizeof(bool));
 
+	/*
+	 * CIC lifecycle state.  Encoded as a single trailing byte so records
+	 * written before this field was introduced read back as
+	 * OINDEX_STATE_VALID.  See deserialize_o_index().
+	 */
+	{
+		uint8		state_byte = (uint8) o_index->state;
+
+		appendBinaryStringInfo(&str, (Pointer) &state_byte, sizeof(state_byte));
+	}
+
 	*size = str.len;
 	return str.data;
 }
@@ -985,6 +996,23 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 		goto truncated;
 	memcpy(&oIndex->immediate, ptr, len);
 	ptr += len;
+
+	/*
+	 * Trailing OIndexState byte.  Records written before this field was
+	 * introduced have nothing here; default to OINDEX_STATE_VALID.
+	 */
+	if ((Size) (ptr - data) < length)
+	{
+		uint8		state_byte;
+
+		if ((ptr - data) + sizeof(state_byte) > length)
+			goto truncated;
+		memcpy(&state_byte, ptr, sizeof(state_byte));
+		ptr += sizeof(state_byte);
+		oIndex->state = (OIndexState) state_byte;
+	}
+	else
+		oIndex->state = OINDEX_STATE_VALID;
 
 	if ((ptr - data) != length)
 		goto truncated;
