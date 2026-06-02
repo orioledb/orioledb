@@ -151,4 +151,17 @@ extern void cic_spool_close_reader(CICSpoolReader *reader);
  */
 extern void cic_spool_drop_dir(ORelOids tableOids, OXid builderOxid);
 
+/*
+ * Drain the spool into a (still-being-built) index in undoPosition order
+ * using a permissive modify callback (collisions become no-ops).  Both
+ * forward and REVERSE_* entries are applied in their natural order: a
+ * REVERSE_INSERT cancels its INSERT, etc.  Returns the number of spool
+ * entries applied.  Callers run this once after the build snapshot
+ * (phase 4 drain).
+ */
+struct OIndexDescr;
+extern uint64 cic_spool_replay_into(struct OIndexDescr *idx,
+									OXid replayOxid,
+									CommitSeqNo replayCsn);
+
 #endif							/* __CIC_SPOOL_H__ */

@@ -1648,6 +1648,50 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 }
 
 /*
+ * Update only the OIndexState field of an existing OIndex sys-tree entry.
+ * Used by CREATE INDEX CONCURRENTLY to transition through phases.
+ * Reads the current record, mutates state, writes it back.  The
+ * sys-tree entry itself is identified by (indexOids, type), with its
+ * current version preserved.
+ */
+bool
+o_indices_set_state(ORelOids indexOids, OIndexType type,
+					char table_persistence,
+					OIndexState newState, OXid oxid, CommitSeqNo csn)
+{
+	OIndex	   *oIndex;
+	OIndexChunkKey key;
+	bool		result;
+	Pointer		data;
+	int			len;
+	BTreeDescr *sys_tree;
+
+	oIndex = o_indices_get_extended(indexOids, type, default_table_fetch_context);
+	if (!oIndex)
+		return false;
+
+	oIndex->state = newState;
+
+	data = serialize_o_index(oIndex, &len);
+	key.oids = oIndex->indexOids;
+	key.type = oIndex->indexType;
+	key.chunknum = 0;
+	key.version = oIndex->indexVersion;
+
+	free_o_index(oIndex);
+	systrees_modify_start();
+	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
+	result = generic_toast_update_optional_wal(&oIndicesToastAPI,
+											   (Pointer) &key, data, len, oxid,
+											   csn, sys_tree,
+											   table_persistence != RELPERSISTENCE_TEMP);
+	systrees_modify_end(table_persistence != RELPERSISTENCE_TEMP);
+
+	pfree(data);
+	return result;
+}
+
+/*
  * This method is used by o_tables_get_by_tree only, which is unused
  */
 bool
