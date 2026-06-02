@@ -1228,6 +1228,8 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 	descr->version = oIndex->indexVersion;
 	descr->refcnt = 0;
 	descr->valid = true;
+	descr->state = oIndex->state;
+	descr->builderOxid = oIndex->createOxid;
 	namestrcpy(&descr->name, oIndex->name.data);
 	descr->leafTupdesc = o_table_fields_make_tupdesc(oIndex->leafTableFields,
 													 oIndex->nLeafFields);

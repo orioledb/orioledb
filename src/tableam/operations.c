@@ -19,6 +19,7 @@
 #include "btree/iterator.h"
 #include "btree/modify.h"
 #include "btree/undo.h"
+#include "catalog/cic_spool.h"
 #include "indexam/handler.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
@@ -28,6 +29,7 @@
 #include "tableam/operations.h"
 #include "tableam/tree.h"
 #include "transam/oxid.h"
+#include "transam/undo.h"
 #include "transam/undo.h"
 #include "tuple/slot.h"
 #include "utils/stopevent.h"
@@ -1850,6 +1852,27 @@ o_tbl_index_delete(OIndexDescr *id, OIndexNumber ix_num, TupleTableSlot *slot,
 	O_TUPLE_SET_NULL(nullTup);
 
 	fill_key_bound(slot, id, &bound);
+
+	/* CIC capture for secondary index being built concurrently. */
+	if (id->desc.type != oIndexPrimary &&
+		id->state != OINDEX_STATE_VALID)
+	{
+		OTuple		sec_tup;
+		UndoStackLocations locs;
+		OTuple		nullKey = {NULL, 0};
+
+		sec_tup = tts_orioledb_make_secondary_tuple(slot, id, false);
+		get_cur_undo_locations(&locs, UndoLogRegular);
+		cic_spool_append(id->tableOids, id->builderOxid,
+						 locs.location, CIC_OP_DELETE,
+						 nullKey, 0,
+						 sec_tup, (uint16) o_tuple_size(sec_tup, &id->leafSpec));
+
+		memset(&result, 0, sizeof(result));
+		result.success = true;
+		return result;
+	}
+
 	res = o_btree_modify(&id->desc, BTreeOperationDelete,
 						 nullTup, BTreeKeyNone,
 						 (Pointer) &bound, BTreeKeyBound,
@@ -1965,6 +1988,26 @@ o_tbl_index_insert(OTableDescr *descr,
 	{
 		tts_orioledb_fill_key_bound(slot, id, &knew);
 		tup = tts_orioledb_form_tuple(slot, descr);
+	}
+
+	/*
+	 * CIC capture: while a secondary index is being built concurrently we
+	 * spool DML instead of writing to the half-built tree.  The CIC driver
+	 * creates the spool dir before flipping the index state, so we can append
+	 * unconditionally here.
+	 */
+	if (!primary && id->state != OINDEX_STATE_VALID)
+	{
+		UndoStackLocations locs;
+		OTuple		nullKey = {NULL, 0};
+
+		get_cur_undo_locations(&locs, UndoLogRegular);
+		cic_spool_append(id->tableOids, id->builderOxid,
+						 locs.location, CIC_OP_INSERT,
+						 nullKey, 0,
+						 tup, (uint16) o_tuple_size(tup, &id->leafSpec));
+		((OTableSlot *) slot)->version = o_tuple_get_version(tup);
+		return OBTreeModifyResultInserted;
 	}
 
 	if (primary || !id->unique ||
