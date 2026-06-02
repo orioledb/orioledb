@@ -242,6 +242,30 @@ wal_parse_rec_bridge_erase(WalReaderState *r, WalRecord *rec)
 	return WALPARSE_OK;
 }
 
+/*
+ * Parser for WAL_REC_CIC_PHASE_3_START / WAL_REC_CIC_PHASE_4 /
+ * WAL_REC_CIC_PHASE_FLIP -- all three share the same payload.  Index
+ * oids land in rec->oids (standard layout); the table identity and
+ * index version go into rec->u.cic_phase.
+ */
+static WalParseResult
+wal_parse_rec_cic_phase(WalReaderState *r, WalRecord *rec)
+{
+	Assert(r);
+	Assert(rec);
+
+	WR_PARSE(r, &rec->oids.datoid);
+	WR_PARSE(r, &rec->oids.reloid);
+	WR_PARSE(r, &rec->oids.relnode);
+	WR_PARSE(r, &rec->u.cic_phase.tableOids.reloid);
+	WR_PARSE(r, &rec->u.cic_phase.tableOids.relnode);
+	WR_PARSE(r, &rec->u.cic_phase.indexVersion);
+
+	rec->u.cic_phase.tableOids.datoid = rec->oids.datoid;
+
+	return WALPARSE_OK;
+}
+
 /* Parser for WAL_REC_SWITCH_LOGICAL_XID */
 static WalParseResult
 wal_parse_rec_switch_logical_xid(WalReaderState *r, WalRecord *rec)

@@ -947,6 +947,42 @@ add_truncate_wal_record(ORelOids oids)
 	memcpy(rec->relnode, &oids.relnode, sizeof(Oid));
 
 	local_wal.buffer_offset += sizeof(*rec);
+}
+
+/*
+ * Emit a CIC phase-transition record.  recType is one of
+ * WAL_REC_CIC_PHASE_3_START / WAL_REC_CIC_PHASE_4 / WAL_REC_CIC_PHASE_FLIP.
+ * The record rides along on the issuing transaction's oxid, so the
+ * usual add_xid_wal_record_if_needed() prefix applies.
+ */
+void
+add_cic_phase_wal_record(uint8 recType,
+						 ORelOids indexOids, ORelOids tableOids,
+						 uint32 indexVersion)
+{
+	WALRecCICPhase *rec;
+
+	Assert(!is_recovery_process());
+	Assert(recType == WAL_REC_CIC_PHASE_3_START ||
+		   recType == WAL_REC_CIC_PHASE_4 ||
+		   recType == WAL_REC_CIC_PHASE_FLIP);
+	Assert(indexOids.datoid == tableOids.datoid);
+
+	flush_local_wal_if_needed(sizeof(*rec));
+	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+
+	add_xid_wal_record_if_needed();
+
+	rec = (WALRecCICPhase *) (&local_wal.buffer[local_wal.buffer_offset]);
+	rec->recType = recType;
+	memcpy(rec->datoid, &indexOids.datoid, sizeof(Oid));
+	memcpy(rec->reloid, &indexOids.reloid, sizeof(Oid));
+	memcpy(rec->relnode, &indexOids.relnode, sizeof(Oid));
+	memcpy(rec->tableReloid, &tableOids.reloid, sizeof(Oid));
+	memcpy(rec->tableRelnode, &tableOids.relnode, sizeof(Oid));
+	memcpy(rec->indexVersion, &indexVersion, sizeof(uint32));
+
+	local_wal.buffer_offset += sizeof(*rec);
 
 	local_wal.ix_type = oIndexInvalid;
 	ORelOidsSetInvalid(local_wal.oids);

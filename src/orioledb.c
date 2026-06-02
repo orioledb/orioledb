@@ -331,6 +331,16 @@ wal_desc_on_record(WalReaderState *r, WalRecord *rec)
 			appendStringInfo(ctx->buf, " ([ %u %u %u ]);",
 							 rec->u.truncate.oids.datoid, rec->u.truncate.oids.reloid, rec->u.truncate.oids.relnode);
 			break;
+		case WAL_REC_CIC_PHASE_3_START:
+		case WAL_REC_CIC_PHASE_4:
+		case WAL_REC_CIC_PHASE_FLIP:
+			appendStringInfo(ctx->buf, " (idx [ %u %u %u ] tbl [ %u %u %u ] v%u);",
+							 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode,
+							 rec->u.cic_phase.tableOids.datoid,
+							 rec->u.cic_phase.tableOids.reloid,
+							 rec->u.cic_phase.tableOids.relnode,
+							 rec->u.cic_phase.indexVersion);
+			break;
 		case WAL_REC_SWITCH_LOGICAL_XID:
 			appendStringInfo(ctx->buf, " (%u %u);", rec->u.swxid.topXid, rec->u.swxid.subXid);
 			break;

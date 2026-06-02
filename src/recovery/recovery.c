@@ -3927,6 +3927,27 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				break;
 			}
 
+		case WAL_REC_CIC_PHASE_3_START:
+		case WAL_REC_CIC_PHASE_4:
+		case WAL_REC_CIC_PHASE_FLIP:
+			{
+				/*
+				 * Phase-transition record for CREATE INDEX CONCURRENTLY. Real
+				 * handling (catchup-mode switch, drain barrier, state flip)
+				 * is wired in by task #49.  For now we just log so the
+				 * records are observable in standby logs.
+				 */
+				elog(DEBUG1,
+					 "OrioleDB CIC phase record %d for index (%u,%u,%u) table (%u,%u,%u) version=%u",
+					 rec->type,
+					 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode,
+					 rec->u.cic_phase.tableOids.datoid,
+					 rec->u.cic_phase.tableOids.reloid,
+					 rec->u.cic_phase.tableOids.relnode,
+					 rec->u.cic_phase.indexVersion);
+				break;
+			}
+
 		case WAL_REC_BRIDGE_ERASE:
 			{
 				if (ctx->indexDescr == NULL)
