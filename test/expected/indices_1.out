@@ -8739,6 +8739,85 @@ ERROR:  duplicate key value violates unique constraint "o_test_uq"
 DETAIL:  Key (val)=(one) already exists.
 -- Cleanup
 DROP TABLE o_test_add_index_constraint CASCADE;
+-- Contradictory scan keys (e.g. "col IS NULL AND col = N") must return
+-- zero rows even when an index is forced.  _bt_preprocess_keys sets
+-- so->qual_ok = false; switch_to_next_range must honor that on every
+-- supported PG major.  Before the fix, PG16 returned the whole table
+-- (the qual_ok check was nested inside a PG17-only #ifdef).  Both the
+-- index-scan and the bitmap-scan paths are exercised because they go
+-- through the same switch_to_next_range entry point.
+CREATE TABLE o_test_qual_contradiction (
+	a int,
+	b int
+) USING orioledb;
+INSERT INTO o_test_qual_contradiction
+	SELECT i, i FROM generate_series(1, 1000) i;
+INSERT INTO o_test_qual_contradiction (a, b) VALUES (NULL, -1), (NULL, NULL);
+CREATE INDEX o_test_qual_contradiction_a_idx
+	ON o_test_qual_contradiction (a);
+ANALYZE o_test_qual_contradiction;
+SET enable_seqscan = OFF;
+-- IS NULL AND = N -- contradicts; expect 0
+SET enable_bitmapscan = OFF;
+SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a = 500;
+ count 
+-------
+     0
+(1 row)
+
+SET enable_bitmapscan = ON;
+SET enable_indexscan = OFF;
+SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a = 500;
+ count 
+-------
+     0
+(1 row)
+
+RESET enable_indexscan;
+-- IS NULL AND > N -- contradicts; expect 0
+SET enable_bitmapscan = OFF;
+SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a > 500;
+ count 
+-------
+     0
+(1 row)
+
+SET enable_bitmapscan = ON;
+SET enable_indexscan = OFF;
+SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a > 500;
+ count 
+-------
+     0
+(1 row)
+
+RESET enable_indexscan;
+-- IS NULL AND < N -- contradicts; expect 0
+SET enable_bitmapscan = OFF;
+SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a < 500;
+ count 
+-------
+     0
+(1 row)
+
+SET enable_bitmapscan = ON;
+SET enable_indexscan = OFF;
+SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a < 500;
+ count 
+-------
+     0
+(1 row)
+
+RESET enable_indexscan;
+-- Negative control: just a = N (no contradiction) must still find row 500.
+SELECT count(*) FROM o_test_qual_contradiction WHERE a = 500;
+ count 
+-------
+     1
+(1 row)
+
+DROP TABLE o_test_qual_contradiction;
+RESET enable_seqscan;
+RESET enable_bitmapscan;
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
 ------------------------------
