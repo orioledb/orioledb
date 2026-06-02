@@ -30,8 +30,11 @@
 #include "orioledb.h"
 #include "catalog/cic_spool.h"
 
+#include "btree/modify.h"
 #include "miscadmin.h"
 #include "storage/fd.h"
+#include "tableam/descr.h"
+#include "tableam/tree.h"
 #include "utils/memutils.h"
 #include "utils/wait_event.h"
 
@@ -619,6 +622,119 @@ cic_capture_undo_callback(UndoLogType undoType,
 					 item->undoPosition, reverseOp,
 					 key, item->keyLength,
 					 tup, item->tupleLength);
+}
+
+/* ---------------------------------------------------------------------------
+ * Spool replay into the new index.
+ * ---------------------------------------------------------------------------
+ */
+
+/*
+ * Permissive insert callback: any collision on the new index during
+ * replay is silently overridden.  We don't need to think about
+ * conflict serialization because (a) the spool entries cancel each
+ * other in pairs (forward + REVERSE), (b) at phase-4 final drain the
+ * SUExclusive barrier has stopped further writers.
+ */
+static OBTreeModifyCallbackAction
+cic_replay_insert_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
+						   OXid oxid, OTupleXactInfo xactInfo,
+						   BTreeLeafTupleDeletedStatus deleted,
+						   UndoLocation location, RowLockMode *lock_mode,
+						   BTreeLocationHint *hint, void *arg)
+{
+	return OBTreeCallbackActionUpdate;
+}
+
+static OBTreeModifyCallbackAction
+cic_replay_delete_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
+						   OXid oxid, OTupleXactInfo xactInfo,
+						   UndoLocation location, RowLockMode *lock_mode,
+						   BTreeLocationHint *hint, void *arg)
+{
+	return OBTreeCallbackActionDelete;
+}
+
+uint64
+cic_spool_replay_into(OIndexDescr *idx, OXid replayOxid, CommitSeqNo replayCsn)
+{
+	CICSpoolReader *reader;
+	CICSpoolEntry entry;
+	uint64		applied = 0;
+	BTreeModifyCallbackInfo insertCb = {
+		.waitCallback = NULL,
+		.modifyCallback = NULL,
+		.modifyDeletedCallback = cic_replay_insert_callback,
+		.needsUndoForSelfCreated = false,
+		.arg = NULL,
+	};
+	BTreeModifyCallbackInfo deleteCb = {
+		.waitCallback = NULL,
+		.modifyCallback = cic_replay_delete_callback,
+		.modifyDeletedCallback = NULL,
+		.needsUndoForSelfCreated = false,
+		.arg = NULL,
+	};
+
+	reader = cic_spool_open_reader(idx->tableOids, idx->builderOxid);
+	if (reader == NULL)
+		return 0;
+
+	while (cic_spool_read_next(reader, &entry))
+	{
+		OTuple		leafTup = {.data = entry.tupleData,.formatFlags = entry.hdr.tupleFormatFlags};
+		OBTreeKeyBound bound;
+		bool		isInsert;
+		bool		isDelete;
+
+		if (entry.hdr.tupleLength == 0 || entry.tupleData == NULL)
+			continue;			/* malformed; skip defensively */
+
+		o_fill_key_bound(idx, leafTup, BTreeKeyLeafTuple, &bound);
+
+		switch ((CICOpType) entry.hdr.opType)
+		{
+			case CIC_OP_INSERT:
+			case CIC_OP_REVERSE_DELETE:
+				isInsert = true;
+				isDelete = false;
+				break;
+			case CIC_OP_DELETE:
+			case CIC_OP_REVERSE_INSERT:
+				isInsert = false;
+				isDelete = true;
+				break;
+			default:
+				isInsert = false;
+				isDelete = false;
+				break;
+		}
+
+		if (isInsert)
+		{
+			(void) o_btree_modify(&idx->desc, BTreeOperationInsert,
+								  leafTup, BTreeKeyLeafTuple,
+								  (Pointer) &bound, BTreeKeyBound,
+								  replayOxid, replayCsn, RowLockUpdate,
+								  NULL, &insertCb);
+		}
+		else if (isDelete)
+		{
+			OTuple		nullTup;
+
+			O_TUPLE_SET_NULL(nullTup);
+			(void) o_btree_modify(&idx->desc, BTreeOperationDelete,
+								  nullTup, BTreeKeyNone,
+								  (Pointer) &bound, BTreeKeyBound,
+								  replayOxid, replayCsn, RowLockUpdate,
+								  NULL, &deleteCb);
+		}
+
+		applied++;
+	}
+
+	cic_spool_close_reader(reader);
+	return applied;
 }
 
 /* ---------------------------------------------------------------------------
