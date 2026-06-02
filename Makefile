@@ -30,6 +30,7 @@ OBJS = src/btree/btree.o \
 	   src/btree/scan.o \
 	   src/btree/split.o \
 	   src/btree/undo.o \
+	   src/catalog/cic_spool.o \
 	   src/catalog/ddl.o \
 	   src/catalog/free_extents.o \
 	   src/catalog/indices.o \
