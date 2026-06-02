@@ -256,6 +256,23 @@ static bool unexpected_worker_detach = false;
 static bool iam_recovery = false;
 
 /*
+ * In-flight oxids that recovery_finish() aborted in memory.  These were left
+ * COMMITSEQNO_INPROGRESS at end-of-redo with no COMMIT/ROLLBACK on the wire,
+ * so a streaming standby cannot resolve them on its own.  Captured here for
+ * the after-checkpoint hook to flush as WAL_REC_ROLLBACK once
+ * LocalSetXLogInsertAllowed() has run (issue #876).
+ */
+typedef struct
+{
+	OXid		oxid;
+	TransactionId xid;
+} RecoveryFinishAbortedOxid;
+
+static RecoveryFinishAbortedOxid *recovery_finish_aborted_oxids = NULL;
+static int	recovery_finish_aborted_count = 0;
+static int	recovery_finish_aborted_capacity = 0;
+
+/*
  * Current orioledb transaction recovery id
  */
 OXid		recovery_oxid = InvalidOXid;
@@ -1674,6 +1691,38 @@ recovery_finish(int worker_id)
 			walk_checkpoint_stacks(cur_state, COMMITSEQNO_ABORTED,
 								   InvalidSubTransactionId,
 								   flush_undo_pos);
+
+			/*
+			 * Remember this oxid so the after-checkpoint hook can emit a
+			 * WAL_REC_ROLLBACK for it once XLog inserts are allowed. Workers
+			 * don't write WAL: only the main recovery process does. See issue
+			 * #876.
+			 */
+			if (worker_id < 0)
+			{
+				MemoryContext oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+
+				if (recovery_finish_aborted_count == recovery_finish_aborted_capacity)
+				{
+					int			new_cap = recovery_finish_aborted_capacity == 0
+						? 16 : recovery_finish_aborted_capacity * 2;
+
+					if (recovery_finish_aborted_oxids == NULL)
+						recovery_finish_aborted_oxids =
+							palloc(new_cap * sizeof(RecoveryFinishAbortedOxid));
+					else
+						recovery_finish_aborted_oxids =
+							repalloc(recovery_finish_aborted_oxids,
+									 new_cap * sizeof(RecoveryFinishAbortedOxid));
+					recovery_finish_aborted_capacity = new_cap;
+				}
+				recovery_finish_aborted_oxids[recovery_finish_aborted_count].oxid =
+					cur_state->oxid;
+				recovery_finish_aborted_oxids[recovery_finish_aborted_count].xid =
+					cur_state->xid;
+				recovery_finish_aborted_count++;
+				MemoryContextSwitchTo(oldcxt);
+			}
 		}
 		if (cur_state->in_finished_list && worker_id < 0)
 		{
@@ -1721,6 +1770,38 @@ recovery_finish(int worker_id)
 	iam_recovery = false;
 
 	o_unset_syscache_hooks();
+}
+
+/*
+ * Emit a WAL_REC_ROLLBACK for every oxid that recovery_finish() aborted in
+ * memory.  Called from the after_checkpoint_cleanup_hook at end of recovery,
+ * once LocalSetXLogInsertAllowed() has run so XLogInsert is permitted.
+ *
+ * Without this, streaming standbys that eagerly applied the in-flight txn's
+ * modify records hold the oxid INPROGRESS forever, and any later replayed
+ * modify targeting the same row spins in o_btree_modify_handle_conflicts
+ * (issue #876).
+ */
+void
+o_emit_recovery_finish_rollbacks(void)
+{
+	int			i;
+
+	if (recovery_finish_aborted_count == 0)
+		return;
+
+	for (i = 0; i < recovery_finish_aborted_count; i++)
+	{
+		elog(LOG, "orioledb: emitting WAL_REC_ROLLBACK for in-flight oxid %lu aborted by recovery_finish",
+			 recovery_finish_aborted_oxids[i].oxid);
+		wal_emit_recovery_finish_rollback(recovery_finish_aborted_oxids[i].oxid,
+										  recovery_finish_aborted_oxids[i].xid);
+	}
+
+	pfree(recovery_finish_aborted_oxids);
+	recovery_finish_aborted_oxids = NULL;
+	recovery_finish_aborted_count = 0;
+	recovery_finish_aborted_capacity = 0;
 }
 
 /*
