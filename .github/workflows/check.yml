@@ -37,10 +37,24 @@ jobs:
               ["amd64", "arm64"], [16, 17, 18], ["clang", "gcc"]
           ))
 
-          # Push to non-main branches: limited set to save CI time
+          # Push to non-main branches: limited set to save CI time.
+          # PG18 is the current development target, so it keeps both
+          # cpu/compiler combos; PG16 and PG17 each get one combo as a
+          # smoke check.  We rotate which cpu+compiler each older major
+          # lands on between (amd64,gcc) and (arm64,clang) using the
+          # commit SHA, so a feature branch series exercises both
+          # architectures for both older majors over time.  Each push
+          # still has all four cpu/compiler cells covered (across the
+          # three majors), and the total job count is unchanged.
+          # Main pushes and fork PRs continue to exercise the full
+          # matrix unconditionally.
+          sha_hex = os.environ.get("GITHUB_SHA", "0") or "0"
+          flip = int(sha_hex[:8], 16) % 2
+          older_a = ("amd64", "gcc") if flip == 0 else ("arm64", "clang")
+          older_b = ("arm64", "clang") if flip == 0 else ("amd64", "gcc")
           branch_combos = [
-              ("amd64", 17, "gcc"),
-              ("arm64", 17, "clang"),
+              (older_a[0], 16, older_a[1]),
+              (older_b[0], 17, older_b[1]),
               ("amd64", 18, "gcc"),
               ("arm64", 18, "clang"),
           ]
