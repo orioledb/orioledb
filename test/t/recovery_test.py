@@ -2909,11 +2909,14 @@ class RecoveryWithArchivingTest(BaseTest):
 			self.assertNotIn(unexpected_line, replica_log)
 
 	def _assert_visible_series(self, replica, expected_count, expected_max):
-		count, min_value, max_value = replica.execute(
-		    "SELECT count(*), min(a), max(a) FROM tab_int")[0]
+		count, distinct_count, min_value, max_value, total_sum = replica.execute(
+		    "SELECT count(*), count(DISTINCT a), min(a), max(a), sum(a) "
+		    "FROM tab_int")[0]
 		self.assertEqual(count, expected_count)
+		self.assertEqual(distinct_count, expected_count)
 		self.assertEqual(min_value, 1)
 		self.assertEqual(max_value, expected_max)
+		self.assertEqual(total_sum, expected_max * (expected_max + 1) // 2)
 		self.assertEqual(
 		    replica.execute(
 		        f"SELECT count(*) FROM tab_int WHERE a > {expected_max}")[0]
