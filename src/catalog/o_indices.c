@@ -1036,6 +1036,8 @@ truncated:
  * OIndex to be used later in logical decoding. Otherwise
  * OIndexVersionReset should be passed.
  */
+OIndexState o_index_initial_state_override = OINDEX_STATE_VALID;
+
 OIndex *
 make_o_index(OTable *table, OIndexNumber ixNum, OIndexVersionMode ixVerMode)
 {
@@ -1072,6 +1074,17 @@ make_o_index(OTable *table, OIndexNumber ixNum, OIndexVersionMode ixVerMode)
 	}
 
 	index->data_version = ORIOLEDB_SYS_TREE_VERSION;
+
+	/*
+	 * Optional initial-state override for CREATE INDEX CONCURRENTLY. For
+	 * ix_num == InvalidIndexNumber (when the caller is reusing an existing
+	 * OIndex) and for primary/toast/bridge indexes we leave it alone; CIC
+	 * only ever overrides for the fresh secondary it just appended to
+	 * table->indices[].
+	 */
+	if (o_index_initial_state_override != OINDEX_STATE_VALID)
+		index->state = o_index_initial_state_override;
+
 	return index;
 }
 

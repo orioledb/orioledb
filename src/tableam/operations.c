@@ -20,6 +20,7 @@
 #include "btree/modify.h"
 #include "btree/undo.h"
 #include "catalog/cic_spool.h"
+#include "catalog/o_indices.h"
 #include "indexam/handler.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
@@ -1857,24 +1858,41 @@ o_tbl_index_delete(OIndexDescr *id, OIndexNumber ix_num, TupleTableSlot *slot,
 	if (id->desc.type != oIndexPrimary &&
 		id->state != OINDEX_STATE_VALID)
 	{
-		OTuple		sec_tup;
-		UndoStackLocations locs;
-		OTuple		nullKey = {NULL, 0};
-		uint16		tupLen;
+		/*
+		 * Re-read OIndex.state from the sys-tree (cheap in-progress snapshot
+		 * lookup).  Our descr cache may still say BUILDING while the CIC
+		 * driver has just flipped to VALID and dropped the spool dir;
+		 * appending in that window leaks rows into a now-orphaned spool file
+		 * inode that no drain will read.
+		 */
+		OIndex	   *fresh = o_indices_get(id->oids, id->desc.type);
+		OIndexState fresh_state = fresh ? fresh->state : OINDEX_STATE_VALID;
 
-		sec_tup = tts_orioledb_make_secondary_tuple(slot, id, false);
-		tupLen = (uint16) o_tuple_size(sec_tup, &id->leafSpec);
-		get_cur_undo_locations(&locs, UndoLogRegular);
-		cic_spool_append(id->tableOids, id->builderOxid,
-						 locs.location, CIC_OP_DELETE,
-						 nullKey, 0, sec_tup, tupLen);
-		cic_spool_track_for_abort(id->tableOids, id->builderOxid,
-								  locs.location, CIC_OP_DELETE,
-								  nullKey, 0, sec_tup, tupLen);
+		if (fresh)
+			free_o_index(fresh);
 
-		memset(&result, 0, sizeof(result));
-		result.success = true;
-		return result;
+		if (fresh_state != OINDEX_STATE_VALID)
+		{
+			OTuple		sec_tup;
+			UndoStackLocations locs;
+			OTuple		nullKey = {NULL, 0};
+			uint16		tupLen;
+
+			sec_tup = tts_orioledb_make_secondary_tuple(slot, id, false);
+			tupLen = (uint16) o_tuple_size(sec_tup, &id->leafSpec);
+			get_cur_undo_locations(&locs, UndoLogRegular);
+			cic_spool_append(id->tableOids, id->builderOxid,
+							 locs.location, CIC_OP_DELETE,
+							 nullKey, 0, sec_tup, tupLen);
+			cic_spool_track_for_abort(id->tableOids, id->builderOxid,
+									  locs.location, CIC_OP_DELETE,
+									  nullKey, 0, sec_tup, tupLen);
+
+			memset(&result, 0, sizeof(result));
+			result.success = true;
+			return result;
+		}
+		/* fall through to normal index delete */
 	}
 
 	res = o_btree_modify(&id->desc, BTreeOperationDelete,
@@ -2002,19 +2020,36 @@ o_tbl_index_insert(OTableDescr *descr,
 	 */
 	if (!primary && id->state != OINDEX_STATE_VALID)
 	{
-		UndoStackLocations locs;
-		OTuple		nullKey = {NULL, 0};
-		uint16		tupLen = (uint16) o_tuple_size(tup, &id->leafSpec);
+		/*
+		 * Re-read OIndex.state from the sys-tree (cheap in-progress snapshot
+		 * lookup).  Our descr cache may say BUILDING while the CIC driver has
+		 * just flipped to VALID and dropped the spool dir; appending in that
+		 * window would leak rows into a now-orphaned spool file inode that no
+		 * drain will read.
+		 */
+		OIndex	   *fresh = o_indices_get(id->oids, id->desc.type);
+		OIndexState fresh_state = fresh ? fresh->state : OINDEX_STATE_VALID;
 
-		get_cur_undo_locations(&locs, UndoLogRegular);
-		cic_spool_append(id->tableOids, id->builderOxid,
-						 locs.location, CIC_OP_INSERT,
-						 nullKey, 0, tup, tupLen);
-		cic_spool_track_for_abort(id->tableOids, id->builderOxid,
-								  locs.location, CIC_OP_INSERT,
-								  nullKey, 0, tup, tupLen);
-		((OTableSlot *) slot)->version = o_tuple_get_version(tup);
-		return OBTreeModifyResultInserted;
+		if (fresh)
+			free_o_index(fresh);
+
+		if (fresh_state != OINDEX_STATE_VALID)
+		{
+			UndoStackLocations locs;
+			OTuple		nullKey = {NULL, 0};
+			uint16		tupLen = (uint16) o_tuple_size(tup, &id->leafSpec);
+
+			get_cur_undo_locations(&locs, UndoLogRegular);
+			cic_spool_append(id->tableOids, id->builderOxid,
+							 locs.location, CIC_OP_INSERT,
+							 nullKey, 0, tup, tupLen);
+			cic_spool_track_for_abort(id->tableOids, id->builderOxid,
+									  locs.location, CIC_OP_INSERT,
+									  nullKey, 0, tup, tupLen);
+			((OTableSlot *) slot)->version = o_tuple_get_version(tup);
+			return OBTreeModifyResultInserted;
+		}
+		/* fall through to normal index write */
 	}
 
 	if (primary || !id->unique ||

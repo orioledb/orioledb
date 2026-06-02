@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+import os
 import time
 import unittest
 
@@ -163,5 +164,166 @@ class ConcurrentIndexTest(BaseTest):
 		finally:
 			try:
 				node.stop()
+			except Exception:
+				pass
+
+	def test_cic_writer_spans_all_phases(self):
+		"""
+		Stress test for the would-be micro-window between PG's phase-1
+		commit and our ambuild's OIndex insert.  A writer connection is
+		BEGIN'd before CIC starts and continues inserting throughout
+		CIC's life.  Expectation: every row visible via PK is also
+		visible via the new index, even if the writer commits at any
+		point during phases 1/2/3.
+		"""
+		import threading
+
+		node = self.node
+		node.start()
+		try:
+			node.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_cic_span (
+					id int NOT NULL,
+					val text NOT NULL,
+					PRIMARY KEY (id)
+				) USING orioledb;
+				INSERT INTO o_cic_span
+				SELECT g, 'v' || g FROM generate_series(1, 1000) g;
+			""")
+
+			# Writer in a separate thread that streams INSERTs in tiny
+			# transactions for 3 seconds.  Some commits will land in
+			# pre-CIC, some in phase 1, some in phase 2 (ambuild), some
+			# in phase 3 (validate_scan build+drain), some after VALID.
+			stop = threading.Event()
+			inserted = [1000]  # next id
+
+			def writer():
+				with node.connect() as c:
+					while not stop.is_set():
+						i = inserted[0]
+						inserted[0] = i + 1
+						c.begin()
+						c.execute("INSERT INTO o_cic_span(id, val) "
+						          "VALUES (" + str(i + 1) + ", 'v" +
+						          str(i + 1) + "')")
+						c.commit()
+
+			t = threading.Thread(target=writer)
+			t.start()
+			try:
+				# Let some writes accumulate then run CIC.
+				time.sleep(0.5)
+				node.safe_psql("CREATE INDEX CONCURRENTLY o_cic_span_val_idx "
+				               "ON o_cic_span (val);")
+				time.sleep(0.5)
+			finally:
+				stop.set()
+				t.join()
+
+			pk_cnt = node.execute("SELECT count(*) FROM o_cic_span;")[0][0]
+			with node.connect() as c:
+				c.execute("SET enable_seqscan = off")
+				idx_cnt = c.execute("SELECT count(*) FROM o_cic_span "
+				                    "WHERE val >= 'v' AND val < 'w';")[0][0]
+			self.assertEqual(
+			    pk_cnt, idx_cnt,
+			    f"pk={pk_cnt} idx={idx_cnt}: rows missing from "
+			    f"index built concurrently with writer")
+		finally:
+			try:
+				node.stop()
+			except Exception:
+				pass
+
+	def test_cic_crash_orphan_cleanup(self):
+		"""
+		A stale cic_<...>/spool_<...>.bin left in orioledb_data from a
+		crashed CIC must be removed by the WAL recovery cleanup hook on
+		next startup.  Simulated here by planting the dir while the node
+		is stopped, then starting it.
+		"""
+		node = self.node
+		node.start()
+		try:
+			node.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_cic_orphan (
+					id int NOT NULL,
+					val text NOT NULL,
+					PRIMARY KEY (id)
+				) USING orioledb;
+				INSERT INTO o_cic_orphan
+				SELECT g, 'v' || g FROM generate_series(1, 10) g;
+				CHECKPOINT;
+			""")
+		finally:
+			# SIGKILL: ensures actual WAL replay is needed on next start so
+			# the rmgr cleanup callback (orphan dropper) fires.
+			node.stop(['-m', 'immediate'])
+
+		data_dir = os.path.join(node.data_dir, "orioledb_data")
+		orphan_dir = os.path.join(data_dir, "cic_99999_99999_99999")
+		os.makedirs(orphan_dir, exist_ok=True)
+		spool_path = os.path.join(orphan_dir, "spool_0.bin")
+		with open(spool_path, "wb") as f:
+			f.write(b"\x00" * 64)
+		self.assertTrue(os.path.isdir(orphan_dir))
+
+		node.start()
+		try:
+			node.execute("SELECT 1")
+			self.assertFalse(os.path.exists(orphan_dir),
+			                 "orphan CIC spool dir not cleaned up at startup")
+		finally:
+			try:
+				node.stop()
+			except Exception:
+				pass
+
+	def test_cic_streaming_replica(self):
+		"""
+		CIC on master must produce a queryable index on a streaming
+		standby.  All the data-changing work goes through standard WAL
+		(o_tables_update, o_indices update, build_secondary_index's
+		bulk-load, drain's per-row modifies), so the standby converges without any phase-record-specific redo logic.
+		"""
+		master = self.node
+		master.start()
+		try:
+			with self.getReplica().start() as replica:
+				master.safe_psql("""
+					CREATE EXTENSION orioledb;
+					CREATE TABLE o_cic_repl (
+						id int NOT NULL,
+						val text NOT NULL,
+						PRIMARY KEY (id)
+					) USING orioledb;
+					INSERT INTO o_cic_repl
+					SELECT g, 'v' || g FROM generate_series(1, 2000) g;
+				""")
+				self.catchup_orioledb(replica)
+
+				master.safe_psql(
+				    "CREATE INDEX CONCURRENTLY o_cic_repl_val_idx "
+				    "ON o_cic_repl (val);")
+
+				self.catchup_orioledb(replica)
+
+				with replica.connect() as c:
+					c.execute("SET enable_seqscan = off")
+					cnt = c.execute("SELECT count(*) FROM o_cic_repl "
+					                "WHERE val >= 'v' AND val < 'w';")[0][0]
+				self.assertEqual(cnt, 2000)
+
+				with replica.connect() as c:
+					c.execute("SET enable_seqscan = off")
+					one = c.execute("SELECT id FROM o_cic_repl "
+					                "WHERE val = 'v1234';")[0][0]
+				self.assertEqual(one, 1234)
+		finally:
+			try:
+				master.stop()
 			except Exception:
 				pass

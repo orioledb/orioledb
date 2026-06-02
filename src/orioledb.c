@@ -19,6 +19,7 @@
 #include "btree/find.h"
 #include "btree/io.h"
 #include "btree/scan.h"
+#include "catalog/cic_spool.h"
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
@@ -397,6 +398,7 @@ static void
 o_recovery_cleanup(void)
 {
 	o_recovery_finish_hook(true);
+	cic_spool_cleanup_orphans();
 }
 
 static RmgrData rmgr =

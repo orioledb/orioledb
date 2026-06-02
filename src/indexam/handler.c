@@ -24,6 +24,8 @@
 #include "catalog/o_indices.h"
 #include "catalog/o_tables.h"
 #include "indexam/handler.h"
+
+#include "utils/inval.h"
 #include "tableam/index_scan.h"
 #include "tableam/operations.h"
 #include "tableam/tree.h"
@@ -327,32 +329,76 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 			/*
 			 * For CREATE INDEX CONCURRENTLY we install only the catalog
 			 * metadata here and defer the actual build to
-			 * orioledb_index_validate_scan (phase 3 of PG's CIC).  See
-			 * o_define_index for the skip_build branch + the post-call
-			 * o_indices_set_state(BUILDING) below.
+			 * orioledb_index_validate_scan (phase 3 of PG's CIC).
+			 *
+			 * Concurrency contract:
+			 *
+			 * 1. The OIndex must be inserted with state=BUILDING_PHASE_2 from
+			 * the start (using the o_index_initial_state_override
+			 * thread-local so we don't change make_secondary_o_index's
+			 * signature). Inserting as VALID and then updating would let any
+			 * reader hitting the in-progress snapshot between the two
+			 * operations see VALID for a half-built tree.
+			 *
+			 * 2. We escalate to ShareLock on the heap around the OTable
+			 * update.  ShareLock conflicts with the RowExclusive that every
+			 * DML holds, so concurrent writers' next statement blocks here.
+			 * When PG commits this phase, the lock is released and the SI
+			 * invalidation we send below has been globally visible for at
+			 * least the time writers spent waiting -- their next
+			 * AcceptInvalidationMessages drops the cached OTableDescr and
+			 * they refetch with the new BUILDING secondary in place.  Without
+			 * this serialization point, a writer in the middle of a long
+			 * INSERT could bypass the new index and miss being captured to
+			 * the spool.
 			 */
 			bool		is_concurrent = indexInfo->ii_Concurrent;
+			bool		secondary_only = is_concurrent && !index->rd_index->indisprimary;
 
 			if (!in_nontransactional_truncate)
 				o_define_index_validate(tbl_oids, index, indexInfo, NULL);
-			o_define_index(heap, index, InvalidOid, reindex, InvalidIndexNumber,
-						   InvalidOid, is_concurrent, result);
 
-			if (is_concurrent && !index->rd_index->indisprimary)
+			if (secondary_only)
 			{
-				ORelOids	idx_oids;
 				OXid		oxid;
 				OSnapshot	snap;
-				char		persistence = o_table->persistence;
+
+				/*
+				 * Create the spool dir BEFORE the OIndex insert so any
+				 * concurrent writer who picks up the new OIndex via the
+				 * in-progress snapshot finds the dir already in place when
+				 * its capture hook fires.
+				 */
+				fill_current_oxid_osnapshot(&oxid, &snap);
+				cic_spool_ensure_dir(tbl_oids, oxid);
+
+				o_index_initial_state_override = OINDEX_STATE_BUILDING_PHASE_2;
+
+				/* Block in-flight DML until ambuild's txn commits. */
+				LockRelationOid(heap->rd_id, ShareLock);
+			}
+
+			PG_TRY();
+			{
+				o_define_index(heap, index, InvalidOid, reindex,
+							   InvalidIndexNumber, InvalidOid,
+							   is_concurrent, result);
+			}
+			PG_FINALLY();
+			{
+				o_index_initial_state_override = OINDEX_STATE_VALID;
+			}
+			PG_END_TRY();
+
+			if (secondary_only)
+			{
+				ORelOids	idx_oids;
 
 				ORelOidsSetFromRel(idx_oids, index);
-				fill_current_oxid_osnapshot(&oxid, &snap);
-				(void) o_indices_set_state(idx_oids,
-										   o_index_rel_get_ix_type(index),
-										   persistence,
-										   OINDEX_STATE_BUILDING_PHASE_2,
-										   oxid, snap.csn);
-				cic_spool_ensure_dir(tbl_oids, oxid);
+				o_invalidate_oids(tbl_oids);
+				o_invalidate_oids(idx_oids);
+				/* PG-side: drop rd_amcache on next AcceptInval call. */
+				CacheInvalidateRelcacheByRelid(heap->rd_id);
 			}
 		}
 	}

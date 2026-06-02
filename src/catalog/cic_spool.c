@@ -776,3 +776,65 @@ cic_spool_drop_dir(ORelOids tableOids, OXid builderOxid)
 				 errmsg("could not remove CIC spool directory \"%s\": %m",
 						dirpath)));
 }
+
+/*
+ * Drop one orphan cic_<datoid>_<reloid>_<oxid> directory by path.  Used
+ * at recovery cleanup when we don't have parsed oids in hand; the path
+ * is the only thing we need to issue unlink/rmdir against.
+ */
+static void
+cic_drop_orphan_dir_by_path(const char *dirpath)
+{
+	DIR		   *dir;
+	struct dirent *de;
+
+	dir = AllocateDir(dirpath);
+	if (dir == NULL)
+		return;
+
+	while ((de = ReadDir(dir, dirpath)) != NULL)
+	{
+		char		filepath[MAXPGPATH];
+
+		if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+			continue;
+
+		snprintf(filepath, sizeof(filepath), "%s/%s", dirpath, de->d_name);
+		if (unlink(filepath) != 0)
+			ereport(WARNING,
+					(errcode_for_file_access(),
+					 errmsg("could not unlink orphan CIC spool file \"%s\": %m",
+							filepath)));
+	}
+	FreeDir(dir);
+
+	if (rmdir(dirpath) != 0)
+		ereport(WARNING,
+				(errcode_for_file_access(),
+				 errmsg("could not remove orphan CIC spool directory \"%s\": %m",
+						dirpath)));
+}
+
+void
+cic_spool_cleanup_orphans(void)
+{
+	DIR		   *root;
+	struct dirent *de;
+
+	root = AllocateDir(ORIOLEDB_DATA_DIR);
+	if (root == NULL)
+		return;					/* nothing to do */
+
+	while ((de = ReadDir(root, ORIOLEDB_DATA_DIR)) != NULL)
+	{
+		char		path[MAXPGPATH];
+
+		if (strncmp(de->d_name, "cic_", 4) != 0)
+			continue;
+
+		snprintf(path, sizeof(path), "%s/%s", ORIOLEDB_DATA_DIR, de->d_name);
+		cic_drop_orphan_dir_by_path(path);
+	}
+
+	FreeDir(root);
+}

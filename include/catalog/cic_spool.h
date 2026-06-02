@@ -152,6 +152,15 @@ extern void cic_spool_close_reader(CICSpoolReader *reader);
 extern void cic_spool_drop_dir(ORelOids tableOids, OXid builderOxid);
 
 /*
+ * Scan ORIOLEDB_DATA_DIR for any `cic_*` directories and remove them.
+ * Called once at the end of WAL recovery (via the rmgr cleanup hook):
+ * a CIC that crashed before flipping its OIndex to VALID left its spool
+ * dir behind, and the OIndex record itself is rolled back by the
+ * surrounding xact abort during redo, so the spool is unreachable.
+ */
+extern void cic_spool_cleanup_orphans(void);
+
+/*
  * Drain the spool into a (still-being-built) index in undoPosition order
  * using a permissive modify callback (collisions become no-ops).  Both
  * forward and REVERSE_* entries are applied in their natural order: a

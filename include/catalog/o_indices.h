@@ -121,6 +121,18 @@ typedef enum
 
 extern OIndex *make_o_index(OTable *table, OIndexNumber ixNum, OIndexVersionMode ixVerMode);
 
+/*
+ * When set to a non-VALID value before calling o_tables_update (or any
+ * other path that eventually invokes make_*_o_index), the newly
+ * fabricated OIndex is initialised with this state instead of the
+ * palloc0 default (VALID).  Reset to VALID immediately after use.
+ *
+ * Used by orioledb_ambuild for CREATE INDEX CONCURRENTLY so writers
+ * never see the new OIndex in VALID state during the brief window
+ * before our explicit state flip would otherwise run.
+ */
+extern OIndexState o_index_initial_state_override;
+
 typedef enum
 {
 	oTableSourceTable = 0,
