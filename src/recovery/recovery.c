@@ -1871,44 +1871,38 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 					 LSN_FORMAT_ARGS(stop_before_visible_ptr),
 					 LSN_FORMAT_ARGS(finished_ptr));
 			}
-			else if (finished_ptr >= target_ptr)
-			{
-				elog(DEBUG4,
-					 "Recovery target reached: waiting for the published "
-					 "visible boundary to stabilize strictly before the "
-					 "stop record "
-					 "(target_ptr=%X/%X finished_ptr=%X/%X)",
-					 LSN_FORMAT_ARGS(target_ptr),
-					 LSN_FORMAT_ARGS(finished_ptr));
-			}
-			else if (main_retain_ptr < finished_ptr)
-			{
-				elog(DEBUG4,
-					 "Recovery target reached: waiting for startup retain "
-					 "bookkeeping to catch up with the published visible "
-					 "boundary "
-					 "(target_ptr=%X/%X main_retain_ptr=%X/%X finished_ptr=%X/%X)",
-					 LSN_FORMAT_ARGS(target_ptr),
-					 LSN_FORMAT_ARGS(main_retain_ptr),
-					 LSN_FORMAT_ARGS(finished_ptr));
-			}
 			else
 			{
-				elog(DEBUG4,
-					 "Recovery target reached: stop-before synchronization "
-					 "barrier completed "
-					 "(target_ptr=%X/%X recovery_ptr=%X/%X "
-					 "stop_before_visible_ptr=%X/%X main_retain_ptr=%X/%X "
-					 "current_ptr=%X/%X retain_ptr=%X/%X finished_ptr=%X/%X)",
-					 LSN_FORMAT_ARGS(target_ptr),
-					 LSN_FORMAT_ARGS(recovery_ptr_snapshot),
-					 LSN_FORMAT_ARGS(stop_before_visible_ptr),
-					 LSN_FORMAT_ARGS(main_retain_ptr),
-					 LSN_FORMAT_ARGS(current_ptr),
-					 LSN_FORMAT_ARGS(retain_ptr),
-					 LSN_FORMAT_ARGS(finished_ptr));
+				Assert(finished_ptr < target_ptr);
+				if (main_retain_ptr < finished_ptr)
+				{
+					elog(DEBUG4,
+						 "Recovery target reached: waiting for startup retain "
+						 "bookkeeping to catch up with the published visible "
+						 "boundary "
+						 "(target_ptr=%X/%X main_retain_ptr=%X/%X finished_ptr=%X/%X)",
+						 LSN_FORMAT_ARGS(target_ptr),
+						 LSN_FORMAT_ARGS(main_retain_ptr),
+						 LSN_FORMAT_ARGS(finished_ptr));
+				}
+				else
+				{
+					elog(DEBUG4,
+						 "Recovery target reached: stop-before synchronization "
+						 "barrier completed "
+						 "(target_ptr=%X/%X recovery_ptr=%X/%X "
+						 "stop_before_visible_ptr=%X/%X main_retain_ptr=%X/%X "
+						 "current_ptr=%X/%X retain_ptr=%X/%X finished_ptr=%X/%X)",
+						 LSN_FORMAT_ARGS(target_ptr),
+						 LSN_FORMAT_ARGS(recovery_ptr_snapshot),
+						 LSN_FORMAT_ARGS(stop_before_visible_ptr),
+						 LSN_FORMAT_ARGS(main_retain_ptr),
+						 LSN_FORMAT_ARGS(current_ptr),
+						 LSN_FORMAT_ARGS(retain_ptr),
+						 LSN_FORMAT_ARGS(finished_ptr));
 
-				break;
+					break;
+				}
 			}
 		}
 		else
