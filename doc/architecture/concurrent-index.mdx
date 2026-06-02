@@ -1,0 +1,275 @@
+---
+id: concurrent-index
+sidebar_label: CREATE INDEX CONCURRENTLY
+---
+
+# CREATE INDEX CONCURRENTLY
+
+OrioleDB implements `CREATE INDEX CONCURRENTLY` (CIC) on top of PostgreSQL's
+existing multi-phase orchestration in `DefineIndex(concurrent=true)`.  This
+page describes how the two layers cooperate, what the on-disk artifacts look
+like, and what the safety properties are.
+
+This implementation supports **non-unique** secondary indexes only.
+Unique CIC is gated at `ddl.c` and falls back with an error.
+## Why CIC is different in orioledb
+
+Heap-AM CIC works because `heap_update`/`heap_insert` call `index_insert` for
+every `pg_index` entry with `indisready=true`, regardless of whether the
+build itself has finished.  Concurrent writers maintain the new index in
+parallel with the bulk-load.
+
+OrioleDB stores secondary index membership in its own sys-tree
+(`SYS_TREES_O_INDICES`), not in `pg_index`.  A writer's `o_tbl_index_insert`
+iterates the `OTableDescr`'s `OIndex` list.  Lifting PG's gate without any
+extra plumbing would mean that writers during the build snapshot see no
+secondary index, write only to the primary, and lose their secondary update
+silently when the build commits.
+
+CIC must therefore expose the in-progress index to writers **before** the
+build runs, so they route writes into a side channel the build can drain.
+That side channel is the per-backend **spool**.
+
+## Index lifecycle: `OIndexState`
+
+A new column in the `OIndex` sys-tree record carries the index's lifecycle
+state:
+
+```c
+typedef enum
+{
+    OINDEX_STATE_VALID = 0,         /* fully built, all readers/writers OK */
+    OINDEX_STATE_BUILDING_PHASE_1,  /* reserved for future catchup-mode */
+    OINDEX_STATE_BUILDING_PHASE_2,  /* build pending, writers capture to spool */
+    OINDEX_STATE_BUILDING_PHASE_3,  /* reserved for future catchup-mode catchup */
+    OINDEX_STATE_BUILDING_PHASE_4   /* reserved for future catchup-mode final-drain barrier */
+} OIndexState;
+```
+
+`OIndex.state` is persisted as a single trailing byte by `serialize_o_index`;
+records written by pre-CIC versions deserialize as `OINDEX_STATE_VALID`, so
+catalog upgrades are forward-compatible without an explicit migration.
+
+The state is also mirrored into every `OIndexDescr` at descriptor-fill time
+(`o_index_fill_descr`), alongside `OIndexDescr.builderOxid` — the
+`createOxid` of the CIC session, used by the capture hooks to locate the
+spool directory on the DML hot path.
+
+Other backends see in-flight state transitions through the **in-progress
+snapshot** that the OIndex sys-tree uses by default
+(`o_non_deleted_snapshot`, CSN class `INPROGRESS`).  No SI invalidation is
+strictly needed for cross-backend visibility — the sys-tree read picks up
+the latest committed version.
+
+## Per-backend spool
+
+Every backend that touches a row in the table under CIC appends a capture
+entry to its own file:
+
+```
+orioledb_data/cic_<datoid>_<reloid>_<builderOxid>/spool_<backendid>.bin
+```
+
+The per-CIC directory is created by `cic_spool_ensure_dir` once at phase-1
+start; each backend lazily opens its own `spool_<backendid>.bin` on first
+append and holds the file descriptor until backend exit (or
+`cic_spool_close_local`).  No cross-backend coordination is required: every
+backend writes to a private file, and the builder merges them.
+
+Each spool entry records:
+
+| Field             | Purpose                                                    |
+|-------------------|------------------------------------------------------------|
+| `undoPosition`    | Position in `UndoLogRegular` that produced the entry       |
+| `fileSeq`         | Per-file monotonic counter (tie-breaker on equal undoPos)  |
+| `opType`          | `INSERT` / `DELETE` / `REVERSE_INSERT` / `REVERSE_DELETE`  |
+| `keyFormatFlags`  | `OTuple` flags needed to reconstitute the key bytes        |
+| `tupleFormatFlags`| `OTuple` flags needed to reconstitute the tuple bytes      |
+| `keyLength`       | Length of the following key payload                        |
+| `tupleLength`     | Length of the following leaf-tuple payload                 |
+
+Entries are NOT WAL-logged and are NOT crash-recoverable: if CIC does not
+finish, the half-built `OIndex` is rolled back by the surrounding
+transaction's abort during redo, and the spool directory becomes
+unreachable — see [crash cleanup](#crash-cleanup) below.
+
+### Subxact-correct REVERSE-op emission
+
+When a writer's transaction (or subtransaction) aborts, the prior
+captured INSERT/DELETE must be compensated for: a REVERSE_INSERT cancels
+its preceding INSERT, REVERSE_DELETE cancels its preceding DELETE.
+
+This is wired through orioledb's existing `UndoLogRegular` machinery:
+`cic_spool_track_for_abort` pushes a `CICCaptureUndoItemType` item with
+the forward-op bytes embedded.  When `apply_undo_stack` walks back the
+xact (or subxact), it calls `cic_capture_undo_callback`, which appends a
+compensating REVERSE entry with the op flipped.  Subxact correctness
+comes for free because `apply_undo_stack` already segments per subxact.
+
+### K-way merge replay
+
+At drain time, `cic_spool_open_reader` opens every `spool_<n>.bin` in the
+CIC directory as one stream of a binary heap ordered by
+`(undoPosition, fileSeq)`.  `cic_spool_replay_into` walks the merged
+stream and applies each entry to the new index with a permissive callback:
+
+- Live tuple at the key → callback returns `DoNothing`, no-op.
+- Deleted tuple at the key → callback returns `Update`, replaces in place.
+- No tuple at the key → `o_btree_modify_insert_update` writes the new
+  tuple.
+
+This is invoked under `AccessExclusiveLock` so concurrent writers are
+blocked for the duration of the drain.
+
+## Phase orchestration
+
+Both PG and orioledb participate in the multi-txn flow:
+
+```
+PG phase 1: index_create (indisready=false, indislive=true), commit
+PG WaitForLockers (phase-1):
+   waits for xacts started before the new pg_index row was visible
+
+PG phase 2: ambuild  ─────────────────►  orioledb_ambuild
+                                          - cic_spool_ensure_dir
+                                          - set o_index_initial_state_override
+                                            = BUILDING_PHASE_2
+                                          - take ShareLock on heap
+                                          - o_define_index(skip_build=true)
+                                          - reset override
+                                          - o_invalidate_oids(tbl)
+                                          - o_invalidate_oids(idx)
+                                          - CacheInvalidateRelcacheByRelid
+            commit (sets indisready=true)
+
+PG WaitForLockers (phase-2):
+   waits for xacts that did not yet see indisready=true
+
+PG phase 3: validate_index ──────────► orioledb_index_validate_scan
+                                       ─► o_define_index_concurrent_finish
+                                          - recreate_table_descr_by_oids
+                                          - build_secondary_index
+                                            (uses PG's fresh phase-3 snapshot;
+                                             concurrent DML continues to spool)
+                                          - LockRelationOid(AccessExclusiveLock)
+                                          - cic_spool_replay_into (drain)
+                                          - covering scan (re-insert all
+                                            primary rows; no-op on collision)
+                                          - o_indices_set_state(VALID)
+                                          - emit WAL_REC_CIC_PHASE_FLIP
+                                          - cic_spool_drop_dir
+            commit (releases AccessExclusiveLock)
+
+PG WaitForLockers (phase-3)
+PG sets indisvalid=true
+```
+
+### Why the lock dance matters
+
+There are two cross-backend race windows the implementation must close:
+
+1. **Phase-1 ambuild boundary.**  ambuild commits the new `OIndex` with
+   `state=BUILDING_PHASE_2`.  Without the `ShareLock` we take around the
+   OTable update, a writer in the middle of a long INSERT could finish
+   before its `AcceptInvalidationMessages` runs, bypassing the new index
+   entirely.  `ShareLock` conflicts with the `RowExclusive` every DML
+   holds, so the writer's next statement blocks here; by the time the
+   ambuild txn commits and the lock is released, the SI invalidation has
+   been globally visible.
+
+2. **Phase-3 cut-over.**  We take `AccessExclusiveLock` around drain +
+   covering scan + state flip + spool drop.  Without this, writers whose
+   cached `OTableDescr` is mid-refresh after our SI invalidation could
+   race past the flip and produce spool entries that get dropped along
+   with the directory.  The lock is held only for the brief window of
+   drain + covering + flip + dir-drop, then released at commit.
+
+### Covering scan
+
+`build_secondary_index` runs **before** we take `AccessExclusiveLock`
+(intentionally — that's the whole point of "concurrent"), so a writer can
+commit a primary-only row between the bulk-load's sequential primary scan
+and the scan finishing its sort+write of the secondary tree.  Such a row
+ends up in the primary but missing from the secondary.
+
+To close this gap, after acquiring `AccessExclusiveLock` and draining the
+spool, `o_define_index_concurrent_finish` re-scans the primary under the
+lock and INSERTs every visible row into the secondary with a permissive
+callback.  Rows the bulk-load already wrote no-op via the callback;
+missed rows land in place.
+
+### Sys-tree state re-read on the capture hot path
+
+A subtle race: a writer's `o_tbl_index_insert` reads `id->state` from its
+descriptor cache.  In the brief window between our flip (`set_state` +
+commit) and the SI message reaching this backend, the cached state may
+still say BUILDING even though the on-disk state is now VALID and the
+spool directory has been removed.  Appending to the spool in that window
+leaks rows into a now-orphan inode that no drain will read.
+
+The fix: when cached state is non-VALID, re-read the OIndex state from
+the sys-tree (a cheap in-progress snapshot lookup) before falling into
+the spool branch.  If the fresh state is VALID, fall through to the
+normal index write.
+
+## Standby replay
+
+CIC emits three WAL phase records for observability
+(`WAL_REC_CIC_PHASE_3_START`, `WAL_REC_CIC_PHASE_4`,
+`WAL_REC_CIC_PHASE_FLIP`), but their redo handler is a currently a no-op.  The
+data-changing operations all use orioledb's standard WAL channel:
+
+- `o_tables_update` (catalog) replays the OTable change.
+- `o_indices` set_state replays the BUILDING → VALID flip via the
+  generic sys-tree update path.
+- `build_secondary_index`'s bulk-load writes go through normal page WAL.
+- The drain's per-row `o_btree_modify` calls go through normal page WAL.
+
+The standby therefore converges without any phase-record-specific redo
+logic.  This is verified by `test_cic_streaming_replica` in
+`test/t/concurrent_index_test.py`.
+
+## Crash cleanup {#crash-cleanup}
+
+A CIC that crashes before flipping the OIndex to VALID leaves behind:
+
+1. A half-built `OIndex` sys-tree record — rolled back by the surrounding
+   transaction's abort during WAL redo.
+2. A `cic_<datoid>_<reloid>_<oxid>/` directory full of spool files —
+   not WAL-logged, so redo has no way to roll it back.
+
+`cic_spool_cleanup_orphans()` scans `orioledb_data/` for any `cic_*`
+entries and removes them.  It runs from the OrioleDB resource manager's
+`rm_cleanup` callback at the end of WAL recovery, immediately after the
+existing recovery-finish work.
+
+## Tests
+
+`test/t/concurrent_index_test.py` covers:
+
+- `test_cic_basic`: minimal happy path, no concurrent DML.
+- `test_cic_rejects_unique`: gate against UNIQUE CIC (when not yet supported).
+- `test_cic_concurrent_writes`: writer thread runs during the build;
+  spool drain produces a complete index.
+- `test_cic_writer_spans_all_phases`: writer commits tiny transactions
+  spanning all phases; final `pk_cnt` must equal `idx_cnt`.
+- `test_cic_streaming_replica`: standby converges after CIC on master.
+- `test_cic_crash_orphan_cleanup`: planted `cic_*/spool_*.bin` is
+  removed by `rm_cleanup` on SIGKILL-induced WAL recovery.
+
+## Limitations
+
+- **UNIQUE CIC** is handled the same way other not-yet-supported
+  CONCURRENTLY statements are handled by `orioledb.strict_mode`:
+  - `orioledb.strict_mode = on`: errors out with
+    `CREATE UNIQUE INDEX CONCURRENTLY is not yet supported for orioledb tables`.
+  - `orioledb.strict_mode = off` (default): downgrades to a plain
+    `CREATE UNIQUE INDEX` with a WARNING.  The plain build still
+    enforces uniqueness — only concurrent DML during the build is
+    given up.
+
+  future revisions will add the duplicate-validation pass for UNIQUE CIC.
+- The `BUILDING_PHASE_1/3/4` states are reserved for future catchup-mode's
+  catchup-mode protocol; the implementation uses only `VALID` and `BUILDING_PHASE_2`.
+- Phase-transition WAL records are emitted for observability but have
+  no redo-side handling.  future revisions may use them to drive standby-side catchup-mode switches.
