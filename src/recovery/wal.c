@@ -374,6 +374,45 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 		XLogFlush(wait_pos);
 }
 
+/*
+ * Emit a stand-alone WAL_REC_ROLLBACK on behalf of an in-flight oxid that
+ * recovery_finish() aborted in memory after end-of-redo.
+ *
+ * Streaming standbys eagerly apply each modify record marked
+ * COMMITSEQNO_INPROGRESS and rely on a later WAL_REC_COMMIT/ROLLBACK to
+ * resolve the verdict.  The primary's normal abort path (wal_rollback) gates
+ * on local_wal.has_material_changes — but the startup process that runs
+ * recovery_finish() never wrote those records into its own local_wal buffer
+ * (the original primary did, before it crashed), so wal_rollback() would
+ * silently no-op.  Without an explicit ROLLBACK marker on the wire, the
+ * standby holds the oxid INPROGRESS forever and livelocks on the next
+ * conflicting modify (orioledb/orioledb#876).
+ *
+ * Must be called after LocalSetXLogInsertAllowed() — i.e. from the
+ * after_checkpoint_cleanup_hook with flags=0, not from inside rm_cleanup
+ * itself, which still runs with XLogInsertAllowed() == false.
+ */
+void
+wal_emit_recovery_finish_rollback(OXid oxid, TransactionId logicalXid)
+{
+	XLogRecPtr	wait_pos;
+
+	Assert(!is_recovery_process());
+	Assert(local_wal.buffer_offset == 0);
+	Assert(!local_wal.contains_xid);
+
+	add_xid_wal_record(oxid, logicalXid);
+	add_finish_wal_record(WAL_REC_ROLLBACK,
+						  pg_atomic_read_u64(&xid_meta->runXmin));
+	wait_pos = flush_local_wal(false, false);
+	local_wal.has_material_changes = false;
+
+	elog(DEBUG1, "recovery-finish ROLLBACK oxid %lu logicalXid %u %X/%X",
+		 oxid, logicalXid, LSN_FORMAT_ARGS(wait_pos));
+
+	XLogFlush(wait_pos);
+}
+
 static void
 add_finish_wal_record(uint8 rec_type, OXid xmin)
 {
