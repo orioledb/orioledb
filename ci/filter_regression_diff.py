@@ -152,6 +152,26 @@ def is_known_error(testName, line):
 	return False
 
 
+# Compare a known_table_diffs entry against actually-observed table rows
+# with a few wildcard sentinels.  The entry side may contain:
+#   '<N>'  - matches any decimal integer (e.g., row count that depends on
+#            bridge file layout, brin block count etc.)
+# Exact string match otherwise.  Returns True on full match.
+def _table_diff_matches(pattern_rows, actual_rows):
+	if len(pattern_rows) != len(actual_rows):
+		return False
+	for p_row, a_row in zip(pattern_rows, actual_rows):
+		if len(p_row) != len(a_row):
+			return False
+		for p, a in zip(p_row, a_row):
+			if p == '<N>':
+				if not re.fullmatch(r"\d+", a):
+					return False
+			elif p != a:
+				return False
+	return True
+
+
 # TODO: explain every table diff
 known_table_diffs = {
     "create_index": [
@@ -233,11 +253,17 @@ known_table_diffs = {
 	"vacuum_parallel": [
 		[[['t']], [['f']]]
 	],
+	# brin_summarize_range called with BRIN_ALL_BLOCKRANGES (4294967295)
+	# returns the number of newly-summarized page ranges, which on heap is
+	# 0 (a 3-page table is already fully summarized) but on orioledb is
+	# bounded by the bridge file's block count -- a function of how many
+	# rows the test happened to insert and orioledb's bridge ctid layout.
+	# Match any non-negative integer to avoid pinning a data-specific value.
 	"brin_bloom" : [
-		[[['0']], [['97']]]
+		[[['0']], [['<N>']]]
 	],
 	"brin_multi" : [
-		[[['0']], [['97']]]
+		[[['0']], [['<N>']]]
 	],
 	"reloptions": [
 		[[['t']], [['f']]]
@@ -967,9 +993,10 @@ for patched_file in patched_files:
 							if testName in known_table_diffs:
 								test_table_diffs = known_table_diffs[testName]
 								for test_table_diff in test_table_diffs:
-									if (test_table_diff[0] == src_table_lines
-									    and test_table_diff[1]
-									    == target_table_lines):
+									if _table_diff_matches(test_table_diff[0],
+														   src_table_lines) \
+										and _table_diff_matches(test_table_diff[1],
+																target_table_lines):
 										table_remove = True
 										break
 
