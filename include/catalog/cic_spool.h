@@ -104,6 +104,31 @@ extern void cic_spool_append(ORelOids tableOids, OXid builderOxid,
 							 OTuple tuple, uint16 tupleLen);
 
 /*
+ * Push a UndoLogRegular item that, when applied (transaction or
+ * subxact abort), will emit a compensating REVERSE_* entry to the
+ * spool.  Forward-op bytes are duplicated into the undo item so the
+ * abort callback can re-emit them verbatim with the op flipped.
+ * Subxact correctness comes for free: orioledb's apply_undo_stack
+ * already segments per subxact.
+ */
+extern void cic_spool_track_for_abort(ORelOids tableOids, OXid builderOxid,
+									  UndoLocation undoPos, CICOpType opType,
+									  OTuple key, uint16 keyLen,
+									  OTuple tuple, uint16 tupleLen);
+
+/*
+ * Public undo callback (registered in undoItemTypeDescrs).  Declared
+ * here so undo.c can grab the function pointer at module init.
+ */
+struct UndoStackItem;
+extern void cic_capture_undo_callback(UndoLogType undoType,
+									  UndoLocation location,
+									  struct UndoStackItem *baseItem,
+									  OXid oxid,
+									  OUndoCallbackStage stage,
+									  bool changeCountsValid);
+
+/*
  * Close this backend's cached fd, if any.  Called at end of CIC
  * (phase 5) and on backend exit.
  */

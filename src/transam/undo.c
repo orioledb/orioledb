@@ -22,6 +22,7 @@
 #include "btree/undo.h"
 #include "btree/find.h"
 #include "btree/page_chunks.h"
+#include "catalog/cic_spool.h"
 #include "catalog/storage.h"
 #include "catalog/o_sys_cache.h"
 #include "checkpoint/checkpoint.h"
@@ -173,6 +174,11 @@ static UndoItemTypeDescr undoItemTypeDescrs[] = {
 		.type = InvalidateComparatorUndoItemType,
 		.callback = o_invalidate_comparator_callback,
 		.callOnCommit = true
+	},
+	{
+		.type = CICCaptureUndoItemType,
+		.callback = cic_capture_undo_callback,
+		.callOnCommit = false
 	},
 };
 

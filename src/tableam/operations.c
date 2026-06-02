@@ -1860,13 +1860,17 @@ o_tbl_index_delete(OIndexDescr *id, OIndexNumber ix_num, TupleTableSlot *slot,
 		OTuple		sec_tup;
 		UndoStackLocations locs;
 		OTuple		nullKey = {NULL, 0};
+		uint16		tupLen;
 
 		sec_tup = tts_orioledb_make_secondary_tuple(slot, id, false);
+		tupLen = (uint16) o_tuple_size(sec_tup, &id->leafSpec);
 		get_cur_undo_locations(&locs, UndoLogRegular);
 		cic_spool_append(id->tableOids, id->builderOxid,
 						 locs.location, CIC_OP_DELETE,
-						 nullKey, 0,
-						 sec_tup, (uint16) o_tuple_size(sec_tup, &id->leafSpec));
+						 nullKey, 0, sec_tup, tupLen);
+		cic_spool_track_for_abort(id->tableOids, id->builderOxid,
+								  locs.location, CIC_OP_DELETE,
+								  nullKey, 0, sec_tup, tupLen);
 
 		memset(&result, 0, sizeof(result));
 		result.success = true;
@@ -2000,12 +2004,15 @@ o_tbl_index_insert(OTableDescr *descr,
 	{
 		UndoStackLocations locs;
 		OTuple		nullKey = {NULL, 0};
+		uint16		tupLen = (uint16) o_tuple_size(tup, &id->leafSpec);
 
 		get_cur_undo_locations(&locs, UndoLogRegular);
 		cic_spool_append(id->tableOids, id->builderOxid,
 						 locs.location, CIC_OP_INSERT,
-						 nullKey, 0,
-						 tup, (uint16) o_tuple_size(tup, &id->leafSpec));
+						 nullKey, 0, tup, tupLen);
+		cic_spool_track_for_abort(id->tableOids, id->builderOxid,
+								  locs.location, CIC_OP_INSERT,
+								  nullKey, 0, tup, tupLen);
 		((OTableSlot *) slot)->version = o_tuple_get_version(tup);
 		return OBTreeModifyResultInserted;
 	}
