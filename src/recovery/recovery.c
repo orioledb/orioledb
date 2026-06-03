@@ -2573,6 +2573,13 @@ update_proc_retain_undo_location(int worker_id)
 	dlist_foreach_modify(miter, &finished_list)
 	{
 		state = dlist_container(RecoveryXidState, finished_list_node, miter.cur);
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "csn-trace finished-drain pid=%d worker=%d oxid=%lu csn=%lu state_ptr=%X/%X listPtr=%X/%X %s",
+			 MyProcPid, worker_id, (unsigned long) state->oxid,
+			 (unsigned long) state->csn,
+			 LSN_FORMAT_ARGS(state->ptr), LSN_FORMAT_ARGS(listPtr),
+			 (state->ptr > listPtr) ? "STOP(beyond-listPtr)" : "drain");
+#endif
 		if (state->ptr > listPtr)
 			break;
 
