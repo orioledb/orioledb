@@ -2616,3 +2616,30 @@ o_find_ix_num_by_name(OTableDescr *descr, char *ix_name)
 	}
 	return result;
 }
+
+/*
+ * Like o_find_ix_num_by_name but matches by pg_class.oid of the index.
+ *
+ * Use this on the DROP path: REINDEX CONCURRENTLY renames the old index to
+ * "<orig>_ccold" via index_concurrently_swap before dropping it, so the OIndex
+ * stored under the original name no longer matches by name -- but the pg_class
+ * oid is stable across the swap and identifies it unambiguously.
+ */
+OIndexNumber
+o_find_ix_num_by_reloid(OTableDescr *descr, Oid reloid)
+{
+	OIndexNumber result = InvalidIndexNumber;
+	int			i;
+
+	Assert(descr != NULL);
+
+	for (i = 0; i < descr->nIndices; i++)
+	{
+		if (descr->indices[i]->oids.reloid == reloid)
+		{
+			result = i;
+			break;
+		}
+	}
+	return result;
+}

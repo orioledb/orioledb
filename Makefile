@@ -213,6 +213,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/pg_dump_restore_test.py \
 						test/t/parallel_test.py \
 						test/t/reindex_test.py \
+						test/t/reindex_concurrent_test.py \
 						test/t/s3_test.py \
 						test/t/schema_test.py \
 						test/t/temp_local_pool_test.py \

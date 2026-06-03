@@ -1345,6 +1345,28 @@ orioledb_utility_command(PlannedStmt *pstmt,
 					{
 						String	   *ix_name;
 
+						/*
+						 * REINDEX INDEX CONCURRENTLY on a primary index of an
+						 * orioledb table is not supported: PK == table here,
+						 * so rebuilding requires rewriting every row under
+						 * AccessExclusiveLock.  Refuse upfront with a clear
+						 * message rather than silently downgrading or
+						 * partially proceeding.  (REINDEX TABLE CONCURRENTLY
+						 * skips the PK via ReindexConcurrentlySkipHook.)
+						 */
+						if (concurrently && iRel->rd_index->indisprimary)
+						{
+							char	   *ixn = pstrdup(iRel->rd_rel->relname.data);
+
+							relation_close(tbl, AccessShareLock);
+							relation_close(iRel, AccessShareLock);
+							ereport(ERROR,
+									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									 errmsg("cannot REINDEX CONCURRENTLY primary index \"%s\" on an orioledb table",
+											ixn),
+									 errhint("Use REINDEX without CONCURRENTLY to rebuild the primary key.")));
+						}
+
 						ix_name = makeString(pstrdup(iRel->rd_rel->relname.data));
 						reindex_list = list_append_unique(reindex_list, ix_name);
 						if (concurrently)
@@ -1415,18 +1437,17 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									get_tablespace_name(tablespaceOid))));
 			}
 
-			if (orioledb_strict_mode)
-				elog(ERROR, "REINDEX CONCURRENTLY is not supported for orioledb tables yet");
-			else
-				elog(WARNING, "REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead");
-
-			foreach(lc, stmt->params)
-			{
-				DefElem    *opt = (DefElem *) lfirst(lc);
-
-				if (strcmp(opt->defname, "concurrently") == 0)
-					stmt->params = foreach_delete_current(stmt->params, lc);
-			}
+			/*
+			 * REINDEX CONCURRENTLY is allowed; PG's machinery creates a
+			 * `_ccnew` index and our ambuild/validate_scan hooks drive the
+			 * actual build through the same CIC plumbing CREATE INDEX
+			 * CONCURRENTLY uses.  The PK case is handled separately --
+			 * REINDEX INDEX CONCURRENTLY on a primary index errors below (PK
+			 * == table in orioledb, no concurrent path possible), and REINDEX
+			 * TABLE CONCURRENTLY skips the PK via a notice from PG's standard
+			 * list-walk (indisprimary is set on the heap relation's index
+			 * list, and we don't intercept).
+			 */
 		}
 	}
 	else if (IsA(pstmt->utilityStmt, TransactionStmt))
@@ -3143,6 +3164,19 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					Assert(descr != NULL);
 					ix_num = o_find_ix_num_by_name(descr,
 												   rel->rd_rel->relname.data);
+
+					/*
+					 * REINDEX CONCURRENTLY renames the old index to
+					 * "<orig>_ccold" before dropping it, so a name-based
+					 * lookup will miss the corresponding OIndex (still stored
+					 * under the original name).  Fall back to a pg_class.oid
+					 * match -- the oid is stable across
+					 * index_concurrently_swap.
+					 */
+					if (ix_num == InvalidIndexNumber)
+						ix_num = o_find_ix_num_by_reloid(descr,
+														 rel->rd_rel->oid);
+
 					if (ix_num != InvalidIndexNumber)
 					{
 						String	   *relname;
@@ -3160,8 +3194,19 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						}
 						else if (!(drop_arg->dropflags &
 								   PERFORM_DELETION_INTERNAL) ||
-								 list_member(drop_index_list, relname))
+								 list_member(drop_index_list, relname) ||
+								 (drop_arg->dropflags &
+								  PERFORM_DELETION_CONCURRENT_LOCK))
 						{
+							/*
+							 * PERFORM_DELETION_CONCURRENT_LOCK is set only on
+							 * REINDEX CONCURRENTLY's "_ccold" drop after
+							 * index_concurrently_swap.  Without this branch
+							 * the OIndex would leak in our sys-tree because
+							 * the post-swap name doesn't match
+							 * drop_index_list and the drop is otherwise
+							 * marked INTERNAL.
+							 */
 							drop_index_list = list_delete(drop_index_list,
 														  relname);
 							o_index_drop(tbl, ix_num);
