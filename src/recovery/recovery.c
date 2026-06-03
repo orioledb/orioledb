@@ -546,6 +546,10 @@ apply_one_pending_sk_fixup(PendingSkFixup *entry)
 		bool		needDelete = false;
 		bool		needInsert = false;
 
+		/* CIC: skip BUILDING secondaries.  See apply_tbl_insert. */
+		if (sk->state != OINDEX_STATE_VALID)
+			continue;
+
 		O_TUPLE_SET_NULL(nullTup);
 
 		if (item.action == BTreeOperationInsert)
@@ -3468,6 +3472,9 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 			}
 			else
 			{
+				OIndex	   *fresh;
+				OIndexState new_state;
+
 				if (!changed_tablespace)
 					o_insert_shared_root_placeholder(new_o_table->indices[ix_num].oids.datoid,
 													 new_o_table->indices[ix_num].oids.relnode);
@@ -3476,8 +3483,32 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 				Assert(is_recovery_in_progress());
 
 				/*
+				 * CREATE INDEX CONCURRENTLY: at phase-1 commit the new OIndex
+				 * appears in BUILDING_PHASE_2 state.  The build may
+				 * legitimately fail on individual rows (e.g. `a/b` with b=0 —
+				 * exactly the lazy-validation case CIC's phase-3 validate
+				 * handles in upstream Postgres).  On the primary that failure
+				 * aborts CIC and the OIndex stays at BUILDING; the user gets
+				 * an invalid index until they DROP it.  We must mirror that
+				 * on the replica: don't abort recovery on a build error —
+				 * leave the placeholder in place, the OIndex already says
+				 * BUILDING.  Subsequent DML capture paths and apply_tbl_* hot
+				 * paths skip BUILDING secondaries (see worker.c,
+				 * apply_tbl_insert).
+				 */
+				fresh = o_indices_get(new_o_table->indices[ix_num].oids,
+									  new_o_table->indices[ix_num].type);
+				new_state = fresh ? fresh->state : OINDEX_STATE_VALID;
+				if (fresh)
+					free_o_index(fresh);
+
+				/*
 				 * In main recovery worker send message to main index creation
-				 * worker in dedicated recovery workers pool and exit
+				 * worker in dedicated recovery workers pool and exit.  The
+				 * leader takes care of the BUILDING case (CIC phase-1) by
+				 * forcing a serial build under a PG_TRY so a primary-side
+				 * per-row error (a/b with b=0) doesn't take down the
+				 * parallel-index workers.
 				 */
 				if (!*recovery_single_process)
 				{
@@ -3490,6 +3521,39 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 						old_oids.relnode = old_o_table->oids.relnode;
 					recovery_send_leader_oids(oids, ix_num, new_o_table->version,
 											  old_oids, 0, false);
+				}
+				else if (new_state != OINDEX_STATE_VALID)
+				{
+					/*
+					 * Single-worker recovery + CIC: try to build; swallow the
+					 * per-row error so recovery doesn't stall.
+					 */
+					PG_TRY();
+					{
+						build_secondary_index(changed_tablespace ?
+											  old_o_table->oids.relnode :
+											  InvalidOid,
+											  new_o_table, &tmp_descr, ix_num,
+											  false, NULL);
+					}
+					PG_CATCH();
+					{
+						ErrorData  *edata;
+						MemoryContext oldcontext = CurrentMemoryContext;
+
+						edata = CopyErrorData();
+						FlushErrorState();
+						MemoryContextSwitchTo(oldcontext);
+						ereport(LOG,
+								(errmsg("CIC replay: build of BUILDING secondary "
+										"(%u,%u,%u) deferred: %s",
+										new_o_table->indices[ix_num].oids.datoid,
+										new_o_table->indices[ix_num].oids.reloid,
+										new_o_table->indices[ix_num].oids.relnode,
+										edata->message)));
+						FreeErrorData(edata);
+					}
+					PG_END_TRY();
 				}
 				else
 					build_secondary_index(changed_tablespace ?
