@@ -487,9 +487,20 @@ orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 	OTableDescr *descr;
 	OSnapshot	oSnapshot;
 	OXid		oxid;
+	bool		saved_mode = orioledb_bulk_insert_mode;
+	TupleTableSlot *result;
 
 	if (OidIsValid(relation->rd_rel->relrewrite))
 		return slot;
+
+	/*
+	 * Route single-row paths that come from COPY FROM (when triggers or
+	 * volatile defaults force the per-tuple AM entry point) through the
+	 * bulk insert mode too: bistate is the signal that the caller is
+	 * batching, including COPY's trigger fallback and ALTER TABLE rewrite.
+	 */
+	if (orioledb_bulk_insert && bistate != NULL)
+		orioledb_bulk_insert_mode = true;
 
 	o_serializable_lock_relation(RelationGetRelid(relation));
 
@@ -497,7 +508,10 @@ orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 
 	descr = relation_get_descr(relation);
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-	return o_tbl_insert(descr, relation, slot, oxid, oSnapshot.csn);
+	result = o_tbl_insert(descr, relation, slot, oxid, oSnapshot.csn);
+
+	orioledb_bulk_insert_mode = saved_mode;
+	return result;
 }
 
 static TupleTableSlot *
