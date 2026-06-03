@@ -270,6 +270,63 @@ class NotSupportedYetTest(BaseTest):
 		                              "transactions yet.",
 		                              second_title="DETAIL")
 
+	def test_concurrent_primary_key(self):
+		"""
+		Adding a PRIMARY KEY to an orioledb table is never truly
+		concurrent: PG syntax cannot tag CREATE INDEX CONCURRENTLY
+		as PRIMARY KEY, and the documented workaround
+		(CREATE UNIQUE INDEX CONCURRENTLY + ALTER TABLE ADD PRIMARY KEY
+		USING INDEX) takes AccessExclusiveLock on the orioledb table
+		because all secondaries embed the PK fields and must be
+		rebuilt.  This test pins the WARNING that surfaces the rebuild
+		so users aren't misled into thinking the workaround buys
+		concurrent PK creation.
+		"""
+		node = self.node
+		node.start()
+		try:
+			node.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_test_pk_cic (
+					id int NOT NULL,
+					val text NOT NULL
+				) USING orioledb;
+				INSERT INTO o_test_pk_cic
+				SELECT g, 'v' || g FROM generate_series(1, 10) g;
+			""")
+
+			# CIC builds a unique index without taking AccessExclusiveLock.
+			node.safe_psql(
+			    "CREATE UNIQUE INDEX CONCURRENTLY o_test_pk_cic_pkey "
+			    "ON o_test_pk_cic (id);")
+
+			# Promoting it to a primary key forces orioledb to rebuild
+			# all indices (secondaries embed PK fields), which runs
+			# under AccessExclusiveLock — surface the warning.
+			con = node.connect(autocommit=True)
+			con.execute(
+			    "ALTER TABLE o_test_pk_cic ADD PRIMARY KEY USING INDEX "
+			    "o_test_pk_cic_pkey;")
+			con.close()
+			msg = con.connection.notices[0]
+			if isinstance(msg, dict):  # pg8000
+				msg = f"{(msg[b'S']).decode('utf-8')}:  {(msg[b'M']).decode('utf-8')}"
+			self.assertIn(
+			    "We cannot just reuse index for primary key in orioledb", msg)
+
+			# PK is in force afterwards.
+			_, _, err = node.psql(
+			    "INSERT INTO o_test_pk_cic VALUES (1, 'dup');")
+			self.assertIn(b"duplicate key value violates unique constraint",
+			              err)
+			node.stop()
+
+		finally:
+			try:
+				node.stop()
+			except Exception:
+				pass
+
 	def test_temp_compression(self):
 		node = self.node
 		node.append_conf(max_prepared_transactions=2)

@@ -10,8 +10,20 @@ existing multi-phase orchestration in `DefineIndex(concurrent=true)`.  This
 page describes how the two layers cooperate, what the on-disk artifacts look
 like, and what the safety properties are.
 
-This implementation supports **non-unique** secondary indexes only.
-Unique CIC is gated at `ddl.c` and falls back with an error.
+Two paths coexist:
+
+- **Native btree** (`USING orioledb`, or `USING btree` on a table without
+  `index_bridging` and without `WITH(orioledb_index=false)`): the
+  BUILDING/spool plumbing described below, including UNIQUE support.
+- **Bridged** (any non-btree AM, or btree with
+  `WITH(orioledb_index=false)`, or btree on a table whose `index_bridging`
+  is enabled): the index is a stock PG index keyed by `bridge_ctid`;
+  ambuild lands in `bridged_ambuild` / `btbuild` and PG's CIC machinery
+  handles it natively, UNIQUE included.  No orioledb-specific BUILDING
+  state, no spool.  `orioledb_index_validate_scan` is a no-op for these.
+
+The rest of this page describes the native btree path.
+
 ## Why CIC is different in orioledb
 
 Heap-AM CIC works because `heap_update`/`heap_insert` call `index_insert` for
@@ -41,8 +53,8 @@ typedef enum
     OINDEX_STATE_VALID = 0,         /* fully built, all readers/writers OK */
     OINDEX_STATE_BUILDING_PHASE_1,  /* reserved for future catchup-mode */
     OINDEX_STATE_BUILDING_PHASE_2,  /* build pending, writers capture to spool */
-    OINDEX_STATE_BUILDING_PHASE_3,  /* reserved for future catchup-mode catchup */
-    OINDEX_STATE_BUILDING_PHASE_4   /* reserved for future catchup-mode final-drain barrier */
+    OINDEX_STATE_BUILDING_PHASE_3,  /* reserved for future catchup-mode */
+    OINDEX_STATE_BUILDING_PHASE_4   /* reserved for future final-drain barrier */
 } OIndexState;
 ```
 
@@ -216,8 +228,8 @@ normal index write.
 
 CIC emits three WAL phase records for observability
 (`WAL_REC_CIC_PHASE_3_START`, `WAL_REC_CIC_PHASE_4`,
-`WAL_REC_CIC_PHASE_FLIP`), but their redo handler is a currently a no-op.  The
-data-changing operations all use orioledb's standard WAL channel:
+`WAL_REC_CIC_PHASE_FLIP`), but their redo handler is currently a no-op.
+The data-changing operations all use orioledb's standard WAL channel:
 
 - `o_tables_update` (catalog) replays the OTable change.
 - `o_indices` set_state replays the BUILDING → VALID flip via the
@@ -248,28 +260,38 @@ existing recovery-finish work.
 `test/t/concurrent_index_test.py` covers:
 
 - `test_cic_basic`: minimal happy path, no concurrent DML.
-- `test_cic_rejects_unique`: gate against UNIQUE CIC (when not yet supported).
+- `test_cic_unique_native`: UNIQUE native CIC, no duplicates.
+- `test_cic_unique_native_rejects_existing_dup`: tuplesort
+  enforceUnique catches a snapshot-side duplicate.
+- `test_cic_unique_native_rejects_concurrent_dup`: two concurrent
+  writers insert different PKs with same secondary value; the
+  post-drain unique-fields walk catches the duplicate.
+- `test_cic_bridged_gin`: bridged GIN CIC through PG's machinery.
+- `test_cic_bridged_unique_btree`: bridged UNIQUE btree CIC.
 - `test_cic_concurrent_writes`: writer thread runs during the build;
   spool drain produces a complete index.
 - `test_cic_writer_spans_all_phases`: writer commits tiny transactions
   spanning all phases; final `pk_cnt` must equal `idx_cnt`.
 - `test_cic_streaming_replica`: standby converges after CIC on master.
+- `test_cic_streaming_replica_failing_expr`: CIC whose expression
+  errors on some row leaves the replica caught up rather than stalled.
 - `test_cic_crash_orphan_cleanup`: planted `cic_*/spool_*.bin` is
   removed by `rm_cleanup` on SIGKILL-induced WAL recovery.
 
 ## Limitations
 
-- **UNIQUE CIC** is handled the same way other not-yet-supported
-  CONCURRENTLY statements are handled by `orioledb.strict_mode`:
-  - `orioledb.strict_mode = on`: errors out with
-    `CREATE UNIQUE INDEX CONCURRENTLY is not yet supported for orioledb tables`.
-  - `orioledb.strict_mode = off` (default): downgrades to a plain
-    `CREATE UNIQUE INDEX` with a WARNING.  The plain build still
-    enforces uniqueness — only concurrent DML during the build is
-    given up.
-
-  future revisions will add the duplicate-validation pass for UNIQUE CIC.
-- The `BUILDING_PHASE_1/3/4` states are reserved for future catchup-mode's
-  catchup-mode protocol; the implementation uses only `VALID` and `BUILDING_PHASE_2`.
-- Phase-transition WAL records are emitted for observability but have
-  no redo-side handling.  future revisions may use them to drive standby-side catchup-mode switches.
+- **DEFERRABLE INITIALLY DEFERRED UNIQUE** within a *single*
+  transaction that creates and resolves duplicates inside the build
+  window is currently not supported: the spool replays every event
+  (`INSERT v1; INSERT v1; DELETE v1` lands as three entries), the
+  drain inserts both INSERTs on different leaf keys (val + PK
+  differ), and the post-drain unique-fields walk sees both before
+  the DELETE-equivalent has run.  Upstream PG's CIC doesn't support
+  this pattern either — it sets `indisready=true` after phase 2, so
+  the writer's own next INSERT errors immediately even for deferred.
+- The `BUILDING_PHASE_1/3/4` states are reserved for a future
+  catchup-mode protocol; only `VALID` and `BUILDING_PHASE_2` are
+  used today.
+- Phase-transition WAL records are emitted for observability but
+  have no redo-side handling.  Future revisions may use them to
+  drive standby-side catchup-mode switches.

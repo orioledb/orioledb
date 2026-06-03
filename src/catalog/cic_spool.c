@@ -35,6 +35,7 @@
 #include "storage/fd.h"
 #include "tableam/descr.h"
 #include "tableam/tree.h"
+#include "utils/datum.h"
 #include "utils/memutils.h"
 #include "utils/wait_event.h"
 
@@ -630,11 +631,13 @@ cic_capture_undo_callback(UndoLogType undoType,
  */
 
 /*
- * Permissive insert callback: any collision on the new index during
- * replay is silently overridden.  We don't need to think about
- * conflict serialization because (a) the spool entries cancel each
- * other in pairs (forward + REVERSE), (b) at phase-4 final drain the
- * SUExclusive barrier has stopped further writers.
+ * Permissive insert callback for the *deleted*-side path: when the slot
+ * we land on already holds a tombstone (deleted=true), resurrect it
+ * with the new tuple bytes (Update).  This is the right thing for
+ * non-unique drain (two distinct rows with the same secondary value
+ * end up on different leaf keys anyway, since the leaf key includes
+ * the primary key) and for unique drain (a tombstone never represents
+ * a live duplicate).
  */
 static OBTreeModifyCallbackAction
 cic_replay_insert_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
@@ -654,6 +657,7 @@ cic_replay_delete_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
 {
 	return OBTreeCallbackActionDelete;
 }
+
 
 uint64
 cic_spool_replay_into(OIndexDescr *idx, OXid replayOxid, CommitSeqNo replayCsn)

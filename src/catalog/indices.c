@@ -882,6 +882,106 @@ o_define_index_concurrent_finish(Relation heap, Relation index)
 		free_btree_seq_scan(sscan);
 	}
 
+	/*
+	 * UNIQUE validation pass.
+	 *
+	 * For an orioledb unique secondary the leaf key is the (unique-fields +
+	 * pk-extension) tuple, not just unique-fields -- two rows that share a
+	 * unique-fields value but have different PKs live on different btree
+	 * keys, so o_btree_modify above happily inserted both of them.  Unique
+	 * enforcement therefore can't piggyback on the insert callback (that's
+	 * what o_btree_insert_unique is for, but using it during drain would
+	 * break DEFERRABLE INITIALLY DEFERRED patterns where a single xact's net
+	 * effect is fine but its intermediate spool entries look like duplicates,
+	 * and would also be wrong for the recovery-worker-desync window where
+	 * transient dups are expected to settle).
+	 *
+	 * Instead, after drain + covering settle the tree we walk it in sort
+	 * order under AccessExclusiveLock and compare the unique-fields portion
+	 * of each pair of adjacent leaf tuples. Two rows with equal non-NULL
+	 * unique-fields are a real duplicate; abort CIC (the OIndex stays at
+	 * BUILDING; user must DROP).  NULLs follow the index's NULLS [NOT]
+	 * DISTINCT setting.
+	 */
+	if (idx->unique)
+	{
+		void	   *sscan;
+		OBTreeKeyBound prev_bound;
+		bool		have_prev = false;
+		MemoryContext val_mctx;
+		MemoryContext oldcxt;
+
+		val_mctx = AllocSetContextCreate(CurrentMemoryContext,
+										 "CIC unique validation",
+										 ALLOCSET_DEFAULT_SIZES);
+		oldcxt = MemoryContextSwitchTo(val_mctx);
+
+		sscan = make_btree_seq_scan(&idx->desc, &o_in_progress_snapshot, NULL);
+		while (true)
+		{
+			OTuple		tup;
+			CommitSeqNo tupleCsn;
+			BTreeLocationHint hint;
+			OBTreeKeyBound bound;
+
+			tup = btree_seq_scan_getnext(sscan, val_mctx, &tupleCsn, &hint);
+			if (O_TUPLE_IS_NULL(tup))
+				break;
+
+			o_fill_key_bound(idx, tup, BTreeKeyLeafTuple, &bound);
+
+			if (have_prev)
+			{
+				bool		all_equal = true;
+				bool		any_null = false;
+				int			i;
+
+				for (i = 0; i < idx->nUniqueFields; i++)
+				{
+					if (OIgnoreColumn(idx, i))
+						continue;
+					if ((prev_bound.keys[i].flags & O_VALUE_BOUND_NULL) ||
+						(bound.keys[i].flags & O_VALUE_BOUND_NULL))
+					{
+						any_null = true;
+						all_equal = false;
+						break;
+					}
+					if (o_idx_cmp_value_bounds(&prev_bound.keys[i],
+											   &bound.keys[i],
+											   &idx->fields[i], NULL) != 0)
+					{
+						all_equal = false;
+						break;
+					}
+				}
+
+				/*
+				 * NULLS DISTINCT (default) treats two NULL unique-keys as not
+				 * equal; NULLS NOT DISTINCT treats them as equal.
+				 */
+				if (all_equal ||
+					(any_null && idx->nulls_not_distinct))
+				{
+					MemoryContextSwitchTo(oldcxt);
+					ereport(ERROR,
+							(errcode(ERRCODE_UNIQUE_VIOLATION),
+							 errmsg("could not create unique index \"%s\"",
+									idx->name.data),
+							 errdetail("Duplicate unique-key payloads remain "
+									   "in the index after concurrent build, "
+									   "drain and covering scan.")));
+				}
+			}
+
+			prev_bound = bound;
+			have_prev = true;
+		}
+		free_btree_seq_scan(sscan);
+		MemoryContextSwitchTo(oldcxt);
+		MemoryContextDelete(val_mctx);
+	}
+
 	fill_current_oxid_osnapshot(&oxid, &snap);
 	if (!o_indices_set_state(idx_oids, ix_type, persistence,
 							 OINDEX_STATE_VALID, oxid, snap.csn))

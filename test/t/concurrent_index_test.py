@@ -22,10 +22,16 @@ class ConcurrentIndexTest(BaseTest):
 	    the spool.
 	  - PG's phase-3 validate_index calls
 	    orioledb_index_validate_scan, which runs the real build,
-	    drains the spool under a brief ShareLock, and flips state
-	    to VALID.
+	    drains the spool under AccessExclusiveLock, validates
+	    uniqueness for unique indexes via a unique-fields walk,
+	    and flips state to VALID.
 
-		"""
+	Bridged indexes (any non-btree AM, or btree with
+	WITH(orioledb_index=false), or btree on a table with
+	index_bridging enabled) are stock-PG indexes keyed by
+	bridge_ctid; CIC for those flows through PG's standard
+	machinery, no orioledb-specific BUILDING/spool plumbing.
+	"""
 
 	def test_cic_basic(self):
 		"""
@@ -59,60 +65,193 @@ class ConcurrentIndexTest(BaseTest):
 			except Exception:
 				pass
 
-	def test_cic_unique_strict_rejects(self):
+	def test_cic_unique_native(self):
 		"""
-		CREATE UNIQUE INDEX CONCURRENTLY is rejected for orioledb
-		when orioledb.use_orioledb_strict_mode is on.
+		UNIQUE CIC on a native orioledb btree: the build phase
+		(tuplesort) catches snapshot-side duplicates, the drain
+		errors on concurrent-side duplicates via
+		o_btree_insert_unique semantics, and uniqueness is enforced
+		after CIC completes.
 		"""
 		node = self.node
-		node.append_conf("orioledb.strict_mode = on")
 		node.start()
 		try:
 			node.safe_psql("""
 				CREATE EXTENSION orioledb;
-				CREATE TABLE o_cic_uniq (id int NOT NULL,
+				CREATE TABLE o_cic_uniq (
+					id int NOT NULL,
 					val text NOT NULL,
-					PRIMARY KEY (id)) USING orioledb;
+					PRIMARY KEY (id)
+				) USING orioledb;
+				INSERT INTO o_cic_uniq
+				SELECT g, 'v' || g FROM generate_series(1, 200) g;
 			""")
+			node.safe_psql(
+			    "CREATE UNIQUE INDEX CONCURRENTLY o_cic_uniq_val_uidx "
+			    "ON o_cic_uniq (val);")
+			# Index is now VALID; uniqueness is enforced.
 			with self.assertRaises(Exception):
-				node.safe_psql(
-				    "CREATE UNIQUE INDEX CONCURRENTLY o_cic_uniq_val_uidx "
-				    "ON o_cic_uniq (val);")
+				node.safe_psql("INSERT INTO o_cic_uniq VALUES (201, 'v1');")
+			# A new non-duplicate insert works.
+			node.safe_psql("INSERT INTO o_cic_uniq VALUES (201, 'v201');")
 		finally:
 			try:
 				node.stop()
 			except Exception:
 				pass
 
-	def test_cic_unique_compat_downgrades(self):
+	def test_cic_unique_native_rejects_concurrent_dup(self):
 		"""
-		CREATE UNIQUE INDEX CONCURRENTLY is downgraded to a plain
-		CREATE UNIQUE INDEX with a WARNING in compat mode (default).
-		Uniqueness must still be enforced.
+		Two concurrent xacts that each insert a different PK with the
+		same secondary-key value land as two separate spool entries
+		with different leaf keys (val, pk1) and (val, pk2), so drain
+		inserts both without conflict.  The post-drain unique walk
+		then sees adjacent leaf tuples that share unique-fields and
+		aborts CIC.
+
+		Notably it does NOT abort when a single xact's spool
+		intermediately holds duplicates that the xact itself resolves
+		(deferred-style INSERT/INSERT/DELETE), because the walk only
+		inspects the final settled image.
+		"""
+		import threading
+
+		node = self.node
+		node.start()
+		try:
+			node.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_cic_uniq_conc (
+					id int NOT NULL,
+					val text NOT NULL,
+					PRIMARY KEY (id)
+				) USING orioledb;
+			""")
+
+			ready = threading.Event()
+			done = threading.Event()
+
+			def writer():
+				with node.connect() as c:
+					ready.wait()
+					try:
+						c.begin()
+						c.execute("INSERT INTO o_cic_uniq_conc VALUES "
+						          "(2, 'dup');")
+						c.commit()
+					finally:
+						done.set()
+
+			node.safe_psql("INSERT INTO o_cic_uniq_conc VALUES (1, 'dup');")
+			t = threading.Thread(target=writer)
+			t.start()
+			try:
+				ready.set()
+				done.wait()
+				_, _, err = node.psql(
+				    "CREATE UNIQUE INDEX CONCURRENTLY o_cic_uniq_conc_val_uidx "
+				    "ON o_cic_uniq_conc (val);")
+				self.assertIn(b"could not create unique index", err)
+			finally:
+				t.join()
+		finally:
+			try:
+				node.stop()
+			except Exception:
+				pass
+
+	def test_cic_unique_native_rejects_existing_dup(self):
+		"""
+		UNIQUE CIC must fail if the snapshot data already has
+		duplicates — tuplesort detects them and the build errors
+		out.  The OIndex is left in BUILDING; user should DROP it.
 		"""
 		node = self.node
 		node.start()
 		try:
 			node.safe_psql("""
 				CREATE EXTENSION orioledb;
-				CREATE TABLE o_cic_uniq_compat (
+				CREATE TABLE o_cic_uniq_dup (
 					id int NOT NULL,
 					val text NOT NULL,
 					PRIMARY KEY (id)
 				) USING orioledb;
-				INSERT INTO o_cic_uniq_compat VALUES (1, 'a'), (2, 'b');
+				INSERT INTO o_cic_uniq_dup VALUES
+				  (1, 'a'), (2, 'a');
 			""")
 			_, _, err = node.psql(
-			    "CREATE UNIQUE INDEX CONCURRENTLY o_cic_uniq_compat_val_uidx "
-			    "ON o_cic_uniq_compat (val);")
-			self.assertIn(
-			    b"WARNING:  CREATE UNIQUE INDEX CONCURRENTLY is not yet "
-			    b"supported for orioledb tables, using a plain "
-			    b"CREATE UNIQUE INDEX instead", err)
-			# Uniqueness is enforced by the plain index that was built.
+			    "CREATE UNIQUE INDEX CONCURRENTLY o_cic_uniq_dup_val_uidx "
+			    "ON o_cic_uniq_dup (val);")
+			self.assertIn(b"could not create unique index", err)
+		finally:
+			try:
+				node.stop()
+			except Exception:
+				pass
+
+	def test_cic_bridged_gin(self):
+		"""
+		CIC on a bridged GIN index (built via PG's CIC machinery
+		through orioledb's bridge) should just work — no native
+		BUILDING state, no spool, no rejection.  The orioledb
+		AM-resolution hook turns the index into a bridged one
+		because the AM is non-btree.
+		"""
+		node = self.node
+		node.start()
+		try:
+			node.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_cic_gin (
+					id int NOT NULL,
+					tags text[] NOT NULL,
+					PRIMARY KEY (id)
+				) USING orioledb;
+				INSERT INTO o_cic_gin
+				SELECT g, ARRAY['t'||g, 't'||(g % 7)]
+				FROM generate_series(1, 500) g;
+			""")
+			node.safe_psql("CREATE INDEX CONCURRENTLY o_cic_gin_tags_idx "
+			               "ON o_cic_gin USING gin (tags);")
+			with node.connect() as c:
+				c.execute("SET enable_seqscan = off")
+				hits = c.execute("SELECT count(*) FROM o_cic_gin "
+				                 "WHERE tags @> ARRAY['t3'];")[0][0]
+			# Rows whose g%7 == 3 (i.e. g in {3,10,17,...,500}) plus
+			# the single row with tag 't3' (g=3, already in the @> ['t3'] set).
+			self.assertEqual(hits, sum(1 for g in range(1, 501) if g % 7 == 3))
+		finally:
+			try:
+				node.stop()
+			except Exception:
+				pass
+
+	def test_cic_bridged_unique_btree(self):
+		"""
+		CIC on a UNIQUE btree index over a bridged orioledb table
+		(WITH index_bridging) should also flow through PG's stock
+		CIC machinery — UNIQUE is fine when the underlying index
+		is a stock PG btree on bridge_ctid.
+		"""
+		node = self.node
+		node.start()
+		try:
+			node.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_cic_b_uniq (
+					id int NOT NULL,
+					val text NOT NULL,
+					PRIMARY KEY (id)
+				) USING orioledb WITH (index_bridging = true);
+				INSERT INTO o_cic_b_uniq
+				SELECT g, 'v' || g FROM generate_series(1, 200) g;
+			""")
+			node.safe_psql(
+			    "CREATE UNIQUE INDEX CONCURRENTLY o_cic_b_uniq_val_uidx "
+			    "ON o_cic_b_uniq (val);")
+			# Uniqueness enforced post-build.
 			with self.assertRaises(Exception):
-				node.safe_psql(
-				    "INSERT INTO o_cic_uniq_compat VALUES (3, 'a');")
+				node.safe_psql("INSERT INTO o_cic_b_uniq VALUES (201, 'v1');")
 		finally:
 			try:
 				node.stop()
@@ -287,7 +426,8 @@ class ConcurrentIndexTest(BaseTest):
 		CIC on master must produce a queryable index on a streaming
 		standby.  All the data-changing work goes through standard WAL
 		(o_tables_update, o_indices update, build_secondary_index's
-		bulk-load, drain's per-row modifies), so the standby converges without any phase-record-specific redo logic.
+		bulk-load, drain's per-row modifies), so the standby converges
+		without any phase-record-specific redo logic.
 		"""
 		master = self.node
 		master.start()

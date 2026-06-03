@@ -336,7 +336,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 			 * 1. The OIndex must be inserted with state=BUILDING_PHASE_2 from
 			 * the start (using the o_index_initial_state_override
 			 * thread-local so we don't change make_secondary_o_index's
-			 * signature). Inserting as VALID and then updating would let any
+			 * signature).  Inserting as VALID and then updating would let any
 			 * reader hitting the in-progress snapshot between the two
 			 * operations see VALID for a half-built tree.
 			 *

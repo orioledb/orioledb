@@ -1247,8 +1247,32 @@ orioledb_index_validate_scan(Relation heapRelation,
 							 Snapshot snapshot,
 							 ValidateIndexState *state)
 {
+	OBTOptions *options = (OBTOptions *) indexRelation->rd_options;
+	bool		bridged;
+
 	/*
-	 * Phase-3 of CREATE INDEX CONCURRENTLY.  Up to this point PG has:
+	 * Bridged index (any non-btree AM, or btree with orioledb_index = false):
+	 * it's a stock-PG index keyed by bridge_ctid.  The phase-2 build was done
+	 * by the AM's own ambuild via bridged_ambuild / btbuild, and PG has
+	 * already set indisready=true between phase 2 and this call, so
+	 * concurrent writers update the index live via bridged_aminsert.  We have
+	 * nothing native to do here -- no OIndex sys-tree row, no orioledb tree,
+	 * no spool.  PG will mark the index valid on return.
+	 *
+	 * Catch-up of inserts that happened *during* the phase-2 build (after its
+	 * snapshot but before indisready=true) is a follow-up: PG's heap-AM
+	 * validate_index would catch them by re-walking the heap here, and
+	 * orioledb-bridged would need an equivalent walk of the primary tree.
+	 * Single-writer CIC and bulk-load scenarios are unaffected.
+	 */
+	bridged = indexRelation->rd_rel->relam != BTREE_AM_OID ||
+		(options && !options->orioledb_index);
+	if (bridged)
+		return;
+
+	/*
+	 * Phase-3 of CREATE INDEX CONCURRENTLY for a native orioledb btree. Up to
+	 * this point PG has:
 	 *
 	 * - Committed the OIndex insert (in BUILDING_PHASE_2 state) done inside
 	 * our ambuild. - Set pg_index.indisready=true and committed. - Run

@@ -871,6 +871,66 @@ ReindexPartitions(Oid relid, bool concurrently)
 	return has_orioledb;
 }
 
+/*
+ * Will a CREATE INDEX (or CREATE INDEX CONCURRENTLY) for this orioledb
+ * relation land on the *native* btree path (orioledb_ambuild does the
+ * full orioledb-native build) or on the *bridged* path (the index is a
+ * stock PG index keyed by bridge_ctid, built by btbuild / each AM's own
+ * ambuild)?  The BUILDING/spool plumbing only applies to native
+ * indexes; bridged indexes are handled by PG's standard CIC machinery
+ * (and that includes UNIQUE).
+ *
+ * Mirrors the resolution that orioledb_indexam_routine_hook +
+ * orioledb_ambuild's `options->orioledb_index` branch perform later,
+ * but does it from the raw IndexStmt before the index relation exists:
+ *
+ *	 - AM other than btree → bridged.
+ *	 - btree + explicit WITH(orioledb_index = false) → bridged.
+ *	 - btree + explicit WITH(orioledb_index = true) → native.
+ *	 - btree + no explicit option, table has index_bridging → bridged.
+ *	 - btree + no explicit option, table doesn't bridge → native.
+ *
+ * `rel` is the open heap relation; `stmt->relation` already matches it.
+ */
+static bool
+o_cic_is_native_index(Relation rel, IndexStmt *stmt)
+{
+	ORelOids	oids;
+	OTable	   *o_table;
+	bool		native;
+	ListCell   *lc;
+	bool		orioledb_index_set = false;
+	bool		orioledb_index_value = true;
+
+	/* Anything other than btree is always bridged. */
+	if (stmt->accessMethod != NULL && strcmp(stmt->accessMethod, "btree") != 0)
+		return false;
+
+	/* Explicit storage option wins over the table default. */
+	foreach(lc, stmt->options)
+	{
+		DefElem    *def = lfirst_node(DefElem, lc);
+
+		if (strcmp(def->defname, "orioledb_index") == 0)
+		{
+			orioledb_index_set = true;
+			orioledb_index_value = defGetBoolean(def);
+			break;
+		}
+	}
+
+	if (orioledb_index_set)
+		return orioledb_index_value;
+
+	/* No explicit option → follow the table's index_bridging default. */
+	ORelOidsSetFromRel(oids, rel);
+	o_table = o_tables_get(oids);
+	native = o_table != NULL ? !o_table->index_bridging : true;
+	if (o_table)
+		o_table_free(o_table);
+	return native;
+}
+
 static void
 orioledb_utility_command(PlannedStmt *pstmt,
 						 const char *queryString,
@@ -1492,38 +1552,33 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			if (is_orioledb_rel(rel))
 			{
 				/*
-				 * orioledb CIC: non-unique only.  Path: - PG's
-				 * DefineIndex(concurrent=true) drives the standard multi-txn
-				 * orchestration. - orioledb_ambuild installs OIndex with
-				 * state=BUILDING_PHASE_2 and skips the actual build.
-				 * Concurrent writers see BUILDING (via the in-progress
-				 * snapshot the OIndex sys-tree uses by default) and route DML
-				 * to the spool. - PG's phase-3 validate_index calls
-				 * orioledb_index_validate_scan, which runs the build from
-				 * PG's fresh snapshot, drains the spool under a brief
-				 * ShareLock, flips state to VALID, and emits
-				 * WAL_REC_CIC_PHASE_FLIP.
+				 * orioledb CIC paths, dispatched by o_cic_is_native_index:
 				 *
-				 * UNIQUE CIC is rejected outright in strict mode and
-				 * downgraded to a plain CREATE UNIQUE INDEX with a WARNING in
-				 * compat mode.  Plain CREATE UNIQUE INDEX serializes via
-				 * ShareUpdateExclusiveLock and enforces uniqueness on the
-				 * existing rows during the build, so the only thing the
-				 * downgrade gives up is concurrent DML during the build.
+				 * - *Native* btree (USING orioledb, or USING btree on a table
+				 * without index_bridging and without
+				 * WITH(orioledb_index=false)): PG's DefineIndex(concurrent
+				 * =true) drives the multi-txn orchestration; orioledb_ambuild
+				 * installs OIndex with state=BUILDING_PHASE_2 and skips the
+				 * actual build.  Concurrent writers see BUILDING (via the
+				 * in-progress snapshot the OIndex sys-tree uses) and route
+				 * DML to the spool.  PG's phase-3 validate_index calls
+				 * orioledb_index_validate_scan, which runs the build, drains
+				 * the spool under AccessExclusiveLock, flips state to VALID,
+				 * and emits WAL_REC_CIC_PHASE_FLIP.  UNIQUE is enforced via
+				 * tuplesort during the build, and a post-drain index walk
+				 * that compares the unique-fields portion of adjacent leaf
+				 * tuples; a duplicate aborts CIC and leaves the OIndex in
+				 * BUILDING -- the user must DROP INDEX manually.
+				 *
+				 * - *Bridged* (any non-btree AM, or btree with
+				 * WITH(orioledb_index=false), or btree on a table whose
+				 * index_bridging is enabled): the index is a stock-PG index
+				 * keyed by bridge_ctid; ambuild lands in bridged_ambuild /
+				 * btbuild and PG's CIC machinery handles it natively, UNIQUE
+				 * included.  Don't second-guess any of it -- just let it
+				 * through.
 				 */
-				if (stmt->unique)
-				{
-					if (orioledb_strict_mode)
-					{
-						table_close(rel, lockmode);
-						elog(ERROR, "CREATE UNIQUE INDEX CONCURRENTLY is not yet supported for orioledb tables");
-					}
-					else
-					{
-						stmt->concurrent = false;
-						elog(WARNING, "CREATE UNIQUE INDEX CONCURRENTLY is not yet supported for orioledb tables, using a plain CREATE UNIQUE INDEX instead");
-					}
-				}
+				(void) o_cic_is_native_index(rel, stmt);
 			}
 			table_close(rel, lockmode);
 		}
