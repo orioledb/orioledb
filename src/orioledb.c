@@ -24,6 +24,7 @@
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "checkpoint/checkpoint.h"
+#include "commands/defrem.h"
 #include "common/file_perm.h"
 #include "indexam/handler.h"
 #include "recovery/logical.h"
@@ -181,6 +182,7 @@ static void (*prev_shmem_request_hook) (void) = NULL;
 static base_init_startup_hook_type prev_base_init_startup_hook = NULL;
 static get_relation_info_hook_type prev_get_relation_info_hook = NULL;
 database_size_hook_type prev_database_size_hook = NULL;
+static ReindexConcurrentlySkipHook_type prev_reindex_concurrently_skip_hook = NULL;
 static AcceptInvalidationMessagesHookType prev_AcceptInvalidationMessagesHook = NULL;
 
 #if PG_VERSION_NUM < 180000
@@ -1336,6 +1338,8 @@ _PG_init(void)
 
 	prev_database_size_hook = database_size_hook;
 	database_size_hook = orioledb_calculate_database_size;
+	prev_reindex_concurrently_skip_hook = ReindexConcurrentlySkipHook;
+	ReindexConcurrentlySkipHook = orioledb_reindex_concurrently_skip;
 	RecoveryStopsBeforeHook = orioledb_recovery_stops_before_hook;
 
 	if (enable_rewind)
