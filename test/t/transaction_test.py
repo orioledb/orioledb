@@ -54,6 +54,9 @@ Test orchestration:
 	and the cluster PANICs.
 """
 
+from collections import Counter
+import inspect
+import os
 import time
 
 from .base_test import BaseTest, ThreadQueryExecutor, wait_stopevent, wait_for_wait_event
@@ -298,6 +301,104 @@ class TransactionTest(BaseTest):
 			waiter.commit()
 		finally:
 			for c in (waiter, holder, ctl):
+				try:
+					c.close()
+				except Exception:
+					pass
+			node.stop()
+
+	def test_live_waiter_split_seq_scan_reads_adjacent_undo_leaves(self):
+		node = self.node
+		node.append_conf('postgresql.conf',
+		                 "orioledb.enable_stopevents = true\n"
+		                 "log_min_messages = DEBUG2\n")
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE t (
+				k text NOT NULL,
+				v text NOT NULL,
+				PRIMARY KEY (k)
+			) USING orioledb;
+
+			INSERT INTO t (k, v)
+			SELECT 'k' || to_char(g, 'fm0000'), repeat('a', 600)
+			FROM generate_series(1, 12) g;
+			CHECKPOINT;
+		""")
+
+		holder = node.connect()
+		waiter = node.connect()
+		reader = node.connect()
+		ctl = node.connect()
+
+		try:
+			ctl.execute(
+			    "SELECT pg_stopevent_set('before_get_waiters_with_tuples', "
+			    "'true');")
+
+			holder_pid = holder.pid
+			t_holder = ThreadQueryExecutor(
+			    holder, "INSERT INTO t (k, v) VALUES "
+			    "('k0013', repeat('h', 600));")
+			t_holder.start()
+			wait_stopevent(node, holder_pid)
+
+			waiter_pid = waiter.pid
+			t_waiter = ThreadQueryExecutor(
+			    waiter, "INSERT INTO t (k, v) VALUES "
+			    "('k0014', repeat('w', 600));")
+			t_waiter.start()
+			wait_for_wait_event(node, waiter_pid, 'BufferContent')
+
+			ctl.execute(
+			    "SELECT pg_stopevent_reset('before_get_waiters_with_tuples');")
+
+			t_holder.join()
+			t_waiter.join()
+
+			rows = reader.execute("SELECT k FROM t;")
+			keys = [row[0] for row in rows]
+			counts = Counter(keys)
+			duplicated_keys = sorted(k for k, count in counts.items()
+			                         if count > 1)
+
+			self.assertEqual(duplicated_keys, [],
+			                 "SELECT returned duplicate keys: %s; full result: %s" %
+			                 (duplicated_keys, keys))
+			self.assertEqual(sorted(keys), ['k%04d' % i for i in range(1, 13)])
+
+			with open(node.pg_log_file, encoding='utf-8') as f:
+				log = f.read()
+
+			(test_path, _) = os.path.split(
+			    os.path.dirname(inspect.getfile(self.__class__)))
+			log_dir = os.path.join(test_path, 'tmp_check_t',
+			                       self.myName + '_diagnostics')
+			os.makedirs(log_dir, exist_ok=True)
+			with open(os.path.join(log_dir, 'live_waiter_split_full.log'),
+			          'w',
+			          encoding='utf-8') as f:
+				f.write(log)
+			with open(os.path.join(log_dir, 'live_waiter_split_debug.log'),
+			          'w',
+			          encoding='utf-8') as f:
+				for line in log.splitlines():
+					if any(prefix in line for prefix in
+					       ("csn-debug:", "scan-debug:", "split-debug:")):
+						f.write(line + "\n")
+
+			self.assertIn("source=btree-insert-with-waiters", log)
+			self.assertGreaterEqual(
+			    log.count("scan-debug: seq scan leaf loaded from undo"), 2,
+			    log[-8000:])
+		finally:
+			for c in (holder, waiter, reader, ctl):
+				try:
+					c.execute("ROLLBACK")
+				except Exception:
+					pass
 				try:
 					c.close()
 				except Exception:
