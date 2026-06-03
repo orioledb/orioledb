@@ -193,6 +193,10 @@ extern int	ppool_run_clock_depth;
 #define PAGE_DESC_FLAG_CONCURRENT_DIRTY	2	/* Second "dirty" flag used to
 											 * detect changes concurrent to
 											 * write operatorions */
+#define PAGE_DESC_FLAG_BULK_FRESH		4	/* Page was split off by the
+											 * current backend's bulk insert
+											 * and no other reader can see it
+											 * yet; inserts onto it skip undo */
 #define PAGE_DESC_FLAG_BOTH_DIRTY		(PAGE_DESC_FLAG_DIRTY | PAGE_DESC_FLAG_CONCURRENT_DIRTY)
 #define IS_DIRTY(blkno) (O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_DIRTY)
 #define IS_DIRTY_CONCURRENT(blkno) (O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_CONCURRENT_DIRTY)

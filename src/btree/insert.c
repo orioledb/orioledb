@@ -904,17 +904,23 @@ tuple_waiters_check_hikey(BTreeDescr *desc, Page p,
 }
 
 bool
-btree_insert_skip_undo(BTreeDescr *desc, OXid opOxid)
+btree_insert_skip_undo(BTreeDescr *desc, OInMemoryBlkno blkno, OXid opOxid)
 {
-	return OXidIsValid(desc->createOxid) && desc->createOxid == opOxid;
+	if (OXidIsValid(desc->createOxid) && desc->createOxid == opOxid)
+		return true;
+	if (OInMemoryBlknoIsValid(blkno) &&
+		(O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_BULK_FRESH))
+		return true;
+	return false;
 }
 
 static bool
-o_btree_insert_needs_page_undo(BTreeDescr *desc, Page p)
+o_btree_insert_needs_page_undo(BTreeDescr *desc, OInMemoryBlkno blkno, Page p)
 {
 	bool		needsUndo = O_PAGE_IS(p, LEAF) && desc->undoType != UndoLogNone;
 
-	if (needsUndo && btree_insert_skip_undo(desc, get_current_oxid_if_any()))
+	if (needsUndo && btree_insert_skip_undo(desc, blkno,
+											get_current_oxid_if_any()))
 		needsUndo = false;
 
 	return needsUndo;
@@ -1062,7 +1068,7 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 	loc = curContext->items[curContext->index].locator;
 	offset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
 
-	needsUndo = o_btree_insert_needs_page_undo(desc, p);
+	needsUndo = o_btree_insert_needs_page_undo(desc, blkno, p);
 
 	/* Get CSN for undo item if needed */
 	if (needsUndo)
@@ -1271,7 +1277,7 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 		offset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
 
 		/* Get CSN for undo item if needed */
-		needsUndo = o_btree_insert_needs_page_undo(desc, p);
+		needsUndo = o_btree_insert_needs_page_undo(desc, blkno, p);
 		if (needsUndo)
 			csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 		else

@@ -160,7 +160,9 @@ retry:
 
 	context.needsUndo = desc->undoType != UndoLogNone;
 	if (!(callbackInfo && callbackInfo->needsUndoForSelfCreated) &&
-		btree_insert_skip_undo(desc, opOxid) &&
+		btree_insert_skip_undo(desc,
+							   pageFindContext->items[pageFindContext->index].blkno,
+							   opOxid) &&
 		!UndoLocationIsValid(context.savepointUndoLocation))
 		context.needsUndo = false;
 	context.leafTuphdr.deleted = deleted;
