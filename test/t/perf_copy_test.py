@@ -20,6 +20,18 @@ class PerfCopyTest(BaseTest):
 	# conservative 1.2x so distribution drift doesn't flake the test.
 	MIN_SPEEDUP = float(os.environ.get("PERF_COPY_MIN_SPEEDUP", "1.2"))
 
+	UNDO_META_SQL = """
+		SELECT
+		    (SELECT lastUsedLocation FROM orioledb_get_undo_meta() WHERE undo_type = 'row'),
+		    (SELECT lastUsedLocation FROM orioledb_get_undo_meta() WHERE undo_type = 'page'),
+		    (SELECT cleanedLocation FROM orioledb_get_undo_meta() WHERE undo_type = 'row'),
+		    (SELECT cleanedLocation FROM orioledb_get_undo_meta() WHERE undo_type = 'page');
+	"""
+
+	def _undo_sample(self, node):
+		row_u, page_u, row_c, page_c = node.execute(self.UNDO_META_SQL)[0]
+		return int(row_u), int(page_u), int(row_c), int(page_c)
+
 	def _run_leg(self, table, bulk_on):
 		node = self.node
 		setting = "on" if bulk_on else "off"
@@ -30,14 +42,16 @@ class PerfCopyTest(BaseTest):
 			CREATE INDEX ON {table}(v);
 			CREATE INDEX ON {table}(w);
 		""")
-		# Real undo bytes written = lastUsedLocation delta around the
-		# COPY.  Don't use orioledb_undo_size: it reports speculative
-		# undo file reservations that aren't returned to disk.
-		row_b, page_b = node.execute("""
-			SELECT
-			    (SELECT lastUsedLocation FROM orioledb_get_undo_meta() WHERE undo_type = 'row'),
-			    (SELECT lastUsedLocation FROM orioledb_get_undo_meta() WHERE undo_type = 'page');
-		""")[0]
+		# Three samples around the COPY.  Undo bytes written =
+		# lastUsedLocation delta (real per-COPY write count;
+		# orioledb_undo_size includes speculative reserves).
+		# Undo bytes still pinned = lastUsedLocation - cleanedLocation
+		# at the "after-cleanup" sample.  The COPY itself auto-commits
+		# but cleanup of its undo runs lazily, triggered by the next
+		# statement -- so the second sample shows the COPY's whole undo
+		# as still pinned, and the third sample (taken after a no-op
+		# query that nudges the cleanup pass) shows what's left.
+		ru0, pu0, _, _ = self._undo_sample(node)
 		# `seq -f %.0f` keeps the count as integers; macOS BSD seq
 		# switches to scientific notation at 1e6 and breaks awk's %d.
 		copy_sql = f"""
@@ -48,16 +62,32 @@ class PerfCopyTest(BaseTest):
 		t0 = time.monotonic()
 		node.safe_psql(copy_sql)
 		elapsed = time.monotonic() - t0
-		row_a, page_a = node.execute("""
-			SELECT
-			    (SELECT lastUsedLocation FROM orioledb_get_undo_meta() WHERE undo_type = 'row'),
-			    (SELECT lastUsedLocation FROM orioledb_get_undo_meta() WHERE undo_type = 'page');
-		""")[0]
+		ru1, pu1, rc1, pc1 = self._undo_sample(node)
+		# Poll for lazy cleanup: each node.execute opens a fresh psql
+		# connection, so the bgwriter / undo cleanup may need a few
+		# nudges before pinned drops.
+		ru2, pu2, rc2, pc2 = ru1, pu1, rc1, pc1
+		for _ in range(20):
+			node.execute(f"SELECT count(*) FROM {table};")
+			ru2, pu2, rc2, pc2 = self._undo_sample(node)
+			if (ru2 - rc2) + (pu2 - pc2) < 64 * 1024:
+				break
+			time.sleep(0.1)
 		size = node.execute(
 			f"SELECT pg_total_relation_size('{table}');")[0][0]
-		undo = (int(row_a) - int(row_b)) + (int(page_a) - int(page_b))
-		undo_per_byte = undo / max(int(size), 1)
-		return elapsed, undo, undo_per_byte
+		written = (ru1 - ru0) + (pu1 - pu0)
+		# Pinned: still-needed undo that the system has not reclaimed.
+		# Two snapshots: right after COPY commits (cleanup hasn't run
+		# yet) and after the next query.
+		pinned_post_commit = (ru1 - rc1) + (pu1 - pc1)
+		pinned_post_cleanup = (ru2 - rc2) + (pu2 - pc2)
+		return {
+			"elapsed": elapsed,
+			"undo_written": written,
+			"undo_per_byte": written / max(int(size), 1),
+			"undo_pinned_post_commit": pinned_post_commit,
+			"undo_pinned_post_cleanup": pinned_post_cleanup,
+		}
 
 	def test_copy_speedup(self):
 		node = self.node
@@ -65,20 +95,37 @@ class PerfCopyTest(BaseTest):
 		node.start()
 		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
 
-		t_off, undo_off, ratio_off = self._run_leg("t_off", bulk_on=False)
-		t_on, undo_on, ratio_on = self._run_leg("t_on", bulk_on=True)
+		off = self._run_leg("t_off", bulk_on=False)
+		on_ = self._run_leg("t_on", bulk_on=True)
 
 		# Emit numbers so CI history tracks the trend over time.
-		print(f"\nPERF_COPY off  : {t_off:.3f}s  undo={undo_off:>12d}B  "
-		      f"undo/data={ratio_off:.3f}")
-		print(f"PERF_COPY on   : {t_on:.3f}s  undo={undo_on:>12d}B  "
-		      f"undo/data={ratio_on:.3f}")
-		print(f"PERF_COPY speedup={t_off / max(t_on, 1e-6):.2f}x  "
-		      f"undo-reduction={(1 - undo_on / max(undo_off, 1)) * 100:.1f}%")
+		def fmt(label, m):
+			print(f"PERF_COPY {label:<4}: {m['elapsed']:.3f}s  "
+			      f"written={m['undo_written']:>12d}B  "
+			      f"undo/data={m['undo_per_byte']:.3f}  "
+			      f"pinned_post_commit={m['undo_pinned_post_commit']:>12d}B  "
+			      f"pinned_post_cleanup={m['undo_pinned_post_cleanup']:>10d}B")
+		print()
+		fmt("off", off)
+		fmt("on", on_)
+		print(f"PERF_COPY speedup={off['elapsed'] / max(on_['elapsed'], 1e-6):.2f}x  "
+		      f"undo-reduction={(1 - on_['undo_written'] / max(off['undo_written'], 1)) * 100:.1f}%")
 
-		self.assertLess(undo_on, undo_off,
-		                "bulk path must reduce undo")
-		self.assertLessEqual(t_on * self.MIN_SPEEDUP, t_off + 1.0,
+		self.assertLess(on_["undo_written"], off["undo_written"],
+		                "bulk path must reduce undo written")
+		self.assertLessEqual(on_["elapsed"] * self.MIN_SPEEDUP,
+		                     off["elapsed"] + 1.0,
 		                     f"bulk path slower than {self.MIN_SPEEDUP}x "
-		                     f"target: off={t_off:.3f}s on={t_on:.3f}s")
+		                     f"target: off={off['elapsed']:.3f}s "
+		                     f"on={on_['elapsed']:.3f}s")
+		# After the next query nudges the cleanup pass, the COPY's
+		# undo should be fully reclaimed in both legs.  Allow a small
+		# slack for whatever the meta query itself has written.
+		SLACK = 64 * 1024
+		self.assertLess(off["undo_pinned_post_cleanup"], SLACK,
+		                f"off leg leaked undo after cleanup: "
+		                f"{off['undo_pinned_post_cleanup']}B still pinned")
+		self.assertLess(on_["undo_pinned_post_cleanup"], SLACK,
+		                f"on leg leaked undo after cleanup: "
+		                f"{on_['undo_pinned_post_cleanup']}B still pinned")
 		node.stop()
