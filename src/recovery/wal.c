@@ -27,6 +27,8 @@
 #include "replication/origin.h"
 #include "storage/proc.h"
 
+bool		commit_wal_record_added = false;
+
 static const char *wal_record_type_to_string(int wal_record);
 static void add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_version);
 
@@ -301,11 +303,12 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	if (!local_wal.contains_xid)
 		add_xid_wal_record(oxid, logicalXid);
 
+	START_CRIT_SECTION();
+	commit_wal_record_added = true;
+
 	add_finish_wal_record(WAL_REC_COMMIT, pg_atomic_read_u64(&xid_meta->runXmin));
 	walPos = flush_local_wal(true, !isAutonomous);
 	local_wal.has_material_changes = false;
-
-	elog(DEBUG4, "[%s] COMMIT oxid %lu logicalXid %u %X/%X", __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
 
 	return walPos;
 }

@@ -69,6 +69,8 @@ PG_FUNCTION_INFO_V1(orioledb_get_current_logical_xid);
 PG_FUNCTION_INFO_V1(orioledb_get_current_heap_xid);
 PG_FUNCTION_INFO_V1(orioledb_get_xid_meta);
 
+extern bool commit_wal_record_added;
+
 /*
  * OrioleDB uses three transaction id entities:
  *     - [uint32 TransactionId] native PG heap transaction id (heap xid)
@@ -1477,6 +1479,11 @@ current_oxid_commit(CommitSeqNo csn)
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 
 	advance_run_xmin(curOxid);
+	if (commit_wal_record_added)
+	{
+		commit_wal_record_added = false;
+		END_CRIT_SECTION();
+	}
 	curOxid = InvalidOXid;
 	release_assigned_logical_xids();
 }
