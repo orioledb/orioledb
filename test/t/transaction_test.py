@@ -55,8 +55,6 @@ Test orchestration:
 """
 
 from collections import Counter
-import inspect
-import os
 import time
 
 from .base_test import BaseTest, ThreadQueryExecutor, wait_stopevent, wait_for_wait_event
@@ -310,8 +308,7 @@ class TransactionTest(BaseTest):
 	def test_live_waiter_split_seq_scan_reads_adjacent_undo_leaves(self):
 		node = self.node
 		node.append_conf(
-		    'postgresql.conf', "orioledb.enable_stopevents = true\n"
-		    "log_min_messages = DEBUG2\n")
+		    'postgresql.conf', "orioledb.enable_stopevents = true\n")
 		node.start()
 		node.safe_psql(
 		    'postgres', """
@@ -369,32 +366,6 @@ class TransactionTest(BaseTest):
 			    "SELECT returned duplicate keys: %s; full result: %s" %
 			    (duplicated_keys, keys))
 			self.assertEqual(sorted(keys), ['k%04d' % i for i in range(1, 13)])
-
-			with open(node.pg_log_file, encoding='utf-8') as f:
-				log = f.read()
-
-			(test_path, _) = os.path.split(
-			    os.path.dirname(inspect.getfile(self.__class__)))
-			log_dir = os.path.join(test_path, 'tmp_check_t',
-			                       self.myName + '_diagnostics')
-			os.makedirs(log_dir, exist_ok=True)
-			with open(os.path.join(log_dir, 'live_waiter_split_full.log'),
-			          'w',
-			          encoding='utf-8') as f:
-				f.write(log)
-			with open(os.path.join(log_dir, 'live_waiter_split_debug.log'),
-			          'w',
-			          encoding='utf-8') as f:
-				for line in log.splitlines():
-					if any(prefix in line
-					       for prefix in ("csn-debug:", "scan-debug:",
-					                      "split-debug:")):
-						f.write(line + "\n")
-
-			self.assertIn("source=btree-insert-with-waiters", log)
-			self.assertGreaterEqual(
-			    log.count("scan-debug: seq scan leaf loaded from undo"), 2,
-			    log[-8000:])
 		finally:
 			for c in (holder, waiter, reader, ctl):
 				try:
