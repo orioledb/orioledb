@@ -3354,6 +3354,93 @@ recovery_send_worker_oids(dsm_handle seg_handle)
 	}
 }
 
+/*
+ * Probe a half-open slot range [first, lastInclusive] in workers_pool and
+ * return false if any handle is missing or the worker has permanently
+ * exited.  Transient states (BGWH_NOT_YET_STARTED) are treated as alive --
+ * recovery workers are registered with BGW_NEVER_RESTART, so only
+ * BGWH_STOPPED / BGWH_POSTMASTER_DIED are permanent failures that need
+ * caller intervention.
+ *
+ * workers_pool is allocated separately in two processes:
+ *
+ *   - The startup process allocates it with slots 0..index_build_leader
+ *     in o_recovery_start_hook and registers workers 0..index_build_leader.
+ *   - The index_build_leader worker, when it starts, allocates a larger
+ *     workers_pool (0..index_build_last_worker) and registers the
+ *     remaining workers index_build_first_worker..index_build_last_worker.
+ *
+ * Each process therefore only has live BackgroundWorkerHandle's for the
+ * slots it itself registered; probing past those is undefined.  Callers
+ * must pass a range that fits their workers_pool.
+ */
+static bool
+recovery_workers_alive_range(int first, int lastInclusive)
+{
+	int			i;
+
+	if (workers_pool == NULL)
+		return true;
+
+	for (i = first; i <= lastInclusive; i++)
+	{
+		BackgroundWorkerHandle *handle = workers_pool[i].handle;
+		pid_t		pid;
+		BgwHandleStatus status;
+
+		if (handle == NULL)
+			return false;
+
+		status = GetBackgroundWorkerPid(handle, &pid);
+		if (status == BGWH_STOPPED || status == BGWH_POSTMASTER_DIED)
+			return false;
+	}
+	return true;
+}
+
+/*
+ * Check that every idx-build worker the LEADER spawned is still alive.
+ *
+ * Call from inside _o_index_begin_parallel (which runs in the
+ * index_build_leader worker process): the leader sends the DSM segment
+ * handle to each idx_build_first..idx_build_last worker via
+ * recovery_send_worker_oids and then waits for each to increment
+ * nrecoveryworkersjoined.  If any of those workers has exited
+ * (BGW_NEVER_RESTART means the postmaster won't bring them back), that
+ * increment is never going to arrive and the leader hangs forever.
+ *
+ * Returns true if every idx_build_first..idx_build_last worker has a
+ * live pid; false if any of them is missing or has stopped.
+ */
+bool
+recovery_idx_workers_all_alive(void)
+{
+	if (recovery_idx_pool_size_guc == 0 || *recovery_single_process)
+		return true;
+	return recovery_workers_alive_range(index_build_first_worker,
+										index_build_last_worker);
+}
+
+/*
+ * Check, from the startup process, that the index-build leader is still
+ * alive.
+ *
+ * The startup process queues build_secondary_index work for the leader
+ * via the recovery message queue and then waits in
+ * delay_if_queued_for_idxbuild() for recovery_index_completed_pos to
+ * catch up.  If the leader itself has exited, no one will ever advance
+ * that position and the startup loops forever.  Use this to fail the
+ * recovery instead of spinning.
+ */
+bool
+recovery_idx_leader_alive(void)
+{
+	if (recovery_idx_pool_size_guc == 0 || *recovery_single_process)
+		return true;
+	return recovery_workers_alive_range(index_build_leader,
+										index_build_leader);
+}
+
 static void
 recovery_send_init(int worker_num)
 {
@@ -4348,6 +4435,27 @@ delay_if_queued_for_idxbuild(void)
 		/* All completed ? */
 		if (hash_get_num_entries(idxbuild_oids_hash) == 0)
 			break;
+
+		/*
+		 * If the index-build leader has exited (BGW_NEVER_RESTART; the
+		 * postmaster won't bring it back), no one will ever advance
+		 * recovery_index_completed_pos for the still-queued builds and this
+		 * loop would spin forever.  Surface the failure -- ereport(FATAL)
+		 * from the startup process exits recovery, which is exactly the right
+		 * behavior here: a dead leader leaves the replica permanently broken,
+		 * and the only safe recovery is a fresh postmaster startup.
+		 *
+		 * We can only check the leader from the startup process: the
+		 * idx-build pool workers are registered (and their handles tracked in
+		 * workers_pool) by the leader's own process, not by startup, so
+		 * probing them here would read past the end of startup's smaller
+		 * workers_pool allocation.
+		 */
+		if (AmStartupProcess() && !recovery_idx_leader_alive())
+			ereport(FATAL,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("orioledb: recovery idx-build leader exited; "
+							"cannot complete queued index build")));
 
 		/*
 		 * We wait on a condition variable that will wake us as soon as the

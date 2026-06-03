@@ -1081,8 +1081,27 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	}
 	else
 	{
-		recoveryContext = CreateParallelRecoveryContext(*recovery_single_process ?
-														0 : (recovery_idx_pool_size_guc - 1));
+		int			requested;
+
+		/*
+		 * If any idx-pool recovery worker has died (BGW_NEVER_RESTART), the
+		 * leader's join-wait further down would hang forever waiting for the
+		 * missing worker to attach to the DSM.  Probe liveness up front and
+		 * fall back to a serial build if the pool isn't intact.
+		 */
+		if (!recovery_idx_workers_all_alive())
+		{
+			ereport(LOG,
+					(errmsg("orioledb: parallel index build pool is incomplete; "
+							"falling back to serial build")));
+			requested = 0;
+		}
+		else
+		{
+			requested = *recovery_single_process ? 0 :
+				(recovery_idx_pool_size_guc - 1);
+		}
+		recoveryContext = CreateParallelRecoveryContext(requested);
 		estimator = &recoveryContext->estimator;
 		nworkers = recoveryContext->nworkers;
 	}
@@ -1318,6 +1337,21 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 		while (btshared->nrecoveryworkersjoined < btleader->nparticipanttuplesorts)
 		{
 			o_worker_handle_interrupts();
+
+			/*
+			 * Mid-wait liveness probe.  An idx-pool worker exiting after the
+			 * leader started the build (e.g. SIGSEGV, OOM, FATAL during
+			 * attach) leaves nrecoveryworkersjoined permanently below
+			 * nparticipanttuplesorts, and the leader would spin here until
+			 * the test framework's 60-second timeout kills everything. Detect
+			 * that case, surface it, and ERROR -- better to fail this build
+			 * loudly than hang the replica.
+			 */
+			if (!recovery_idx_workers_all_alive())
+				ereport(ERROR,
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						 errmsg("orioledb: parallel index build worker exited; "
+								"aborting build to avoid replica hang")));
 
 			/*
 			 * We wait on a condition variable that will wake us as soon as
