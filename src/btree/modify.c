@@ -160,8 +160,7 @@ retry:
 
 	context.needsUndo = desc->undoType != UndoLogNone;
 	if (!(callbackInfo && callbackInfo->needsUndoForSelfCreated) &&
-		OXidIsValid(desc->createOxid) &&
-		desc->createOxid == opOxid &&
+		btree_insert_skip_undo(desc, opOxid) &&
 		!UndoLocationIsValid(context.savepointUndoLocation))
 		context.needsUndo = false;
 	context.leafTuphdr.deleted = deleted;

@@ -427,4 +427,12 @@ extern Jsonb *btree_page_stopevent_params(BTreeDescr *desc, Page p);
 extern Jsonb *btree_downlink_stopevent_params(BTreeDescr *desc, Page p,
 											  BTreePageItemLocator *loc);
 
+/*
+ * True if writes into this btree by opOxid can skip undo because the btree
+ * is self-created in the same transaction: no other backend can see it, so
+ * rollback by discarding the btree suffices.  Extended by the bulk-insert
+ * path with a per-page fresh marker.
+ */
+extern bool btree_insert_skip_undo(BTreeDescr *desc, OXid opOxid);
+
 #endif							/* __BTREE_H__ */

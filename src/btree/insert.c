@@ -903,13 +903,18 @@ tuple_waiters_check_hikey(BTreeDescr *desc, Page p,
 	(*tupleWaitersCount) = count;
 }
 
+bool
+btree_insert_skip_undo(BTreeDescr *desc, OXid opOxid)
+{
+	return OXidIsValid(desc->createOxid) && desc->createOxid == opOxid;
+}
+
 static bool
 o_btree_insert_needs_page_undo(BTreeDescr *desc, Page p)
 {
 	bool		needsUndo = O_PAGE_IS(p, LEAF) && desc->undoType != UndoLogNone;
 
-	if (needsUndo && OXidIsValid(desc->createOxid) &&
-		desc->createOxid == get_current_oxid_if_any())
+	if (needsUndo && btree_insert_skip_undo(desc, get_current_oxid_if_any()))
 		needsUndo = false;
 
 	return needsUndo;
