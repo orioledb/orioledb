@@ -35,6 +35,7 @@
 #include "s3/requests.h"
 #include "s3/worker.h"
 #include "storage/standby.h"
+#include "tableam/copyfrom.h"
 #include "tableam/handler.h"
 #include "tableam/scan.h"
 #include "tableam/toast.h"
@@ -665,6 +666,17 @@ _PG_init(void)
 							 &skip_unmodified_trees,
 							 true,
 							 PGC_POSTMASTER,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomBoolVariable("orioledb.bulk_insert",
+							 "Route COPY FROM through a bulk insert path that marks freshly split pages so subsequent inserts on them skip undo.",
+							 NULL,
+							 &orioledb_bulk_insert,
+							 true,
+							 PGC_USERSET,
 							 0,
 							 NULL,
 							 NULL,

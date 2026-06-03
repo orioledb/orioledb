@@ -28,6 +28,7 @@
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
 #include "recovery/wal.h"
+#include "tableam/copyfrom.h"
 #include "tableam/descr.h"
 #include "tableam/handler.h"
 #include "tableam/operations.h"
@@ -1914,16 +1915,6 @@ orioledb_getnextslot(TableScanDesc sscan, ScanDirection direction,
 	pgstat_count_heap_getnext(scan->rs_base.rs_rd);
 
 	return true;
-}
-
-static void
-orioledb_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
-					  CommandId cid, int options, BulkInsertState bistate)
-{
-	int			i;
-
-	for (i = 0; i < ntuples; i++)
-		orioledb_tuple_insert(relation, slots[i], cid, options, bistate);
 }
 
 static void

@@ -69,6 +69,7 @@ OBJS = src/btree/btree.o \
 	   src/s3/requests.o \
 	   src/s3/worker.o \
 	   src/tableam/bitmap_scan.o \
+	   src/tableam/copyfrom.o \
 	   src/tableam/descr.o \
 	   src/tableam/func.o \
 	   src/tableam/handler.o \

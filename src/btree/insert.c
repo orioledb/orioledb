@@ -23,6 +23,7 @@
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
+#include "tableam/copyfrom.h"
 #include "transam/undo.h"
 #include "tuple/format.h"
 #include "utils/page_pool.h"
@@ -815,6 +816,9 @@ o_btree_insert_split(BTreeInsertStackItem *insert_item,
 					   left_count, split_key, split_key_len,
 					   csn, undoLocation);
 
+	if (orioledb_bulk_insert_mode && O_PAGE_IS(p, LEAF))
+		orioledb_register_bulk_fresh_blkno(right_blkno);
+
 	o_btree_insert_mark_split_finished_if_needed(insert_item);
 
 	unlock_page(right_blkno);
@@ -908,8 +912,14 @@ btree_insert_skip_undo(BTreeDescr *desc, OInMemoryBlkno blkno, OXid opOxid)
 {
 	if (OXidIsValid(desc->createOxid) && desc->createOxid == opOxid)
 		return true;
+	/*
+	 * A different backend's bulk-fresh page would also have the flag
+	 * set, but only the backend that allocated it can safely skip undo;
+	 * the per-backend list check enforces that.
+	 */
 	if (OInMemoryBlknoIsValid(blkno) &&
-		(O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_BULK_FRESH))
+		(O_GET_IN_MEMORY_PAGEDESC(blkno)->flags & PAGE_DESC_FLAG_BULK_FRESH) &&
+		orioledb_is_my_bulk_fresh_blkno(blkno))
 		return true;
 	return false;
 }
