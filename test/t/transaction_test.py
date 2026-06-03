@@ -309,9 +309,9 @@ class TransactionTest(BaseTest):
 
 	def test_live_waiter_split_seq_scan_reads_adjacent_undo_leaves(self):
 		node = self.node
-		node.append_conf('postgresql.conf',
-		                 "orioledb.enable_stopevents = true\n"
-		                 "log_min_messages = DEBUG2\n")
+		node.append_conf(
+		    'postgresql.conf', "orioledb.enable_stopevents = true\n"
+		    "log_min_messages = DEBUG2\n")
 		node.start()
 		node.safe_psql(
 		    'postgres', """
@@ -364,9 +364,10 @@ class TransactionTest(BaseTest):
 			duplicated_keys = sorted(k for k, count in counts.items()
 			                         if count > 1)
 
-			self.assertEqual(duplicated_keys, [],
-			                 "SELECT returned duplicate keys: %s; full result: %s" %
-			                 (duplicated_keys, keys))
+			self.assertEqual(
+			    duplicated_keys, [],
+			    "SELECT returned duplicate keys: %s; full result: %s" %
+			    (duplicated_keys, keys))
 			self.assertEqual(sorted(keys), ['k%04d' % i for i in range(1, 13)])
 
 			with open(node.pg_log_file, encoding='utf-8') as f:
@@ -385,8 +386,9 @@ class TransactionTest(BaseTest):
 			          'w',
 			          encoding='utf-8') as f:
 				for line in log.splitlines():
-					if any(prefix in line for prefix in
-					       ("csn-debug:", "scan-debug:", "split-debug:")):
+					if any(prefix in line
+					       for prefix in ("csn-debug:", "scan-debug:",
+					                      "split-debug:")):
 						f.write(line + "\n")
 
 			self.assertIn("source=btree-insert-with-waiters", log)
