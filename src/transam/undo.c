@@ -2219,25 +2219,6 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				current_oxid_precommit();
 
-				if (STOPEVENTS_ENABLED())
-				{
-					/*
-					 * XACT_EVENT_COMMIT runs under HOLD_INTERRUPTS, so a
-					 * normal CHECK_FOR_INTERRUPTS() is suppressed here. In
-					 * test/debug builds (orioledb.enable_stopevents) we
-					 * briefly lift the holdoff so a query cancel delivered
-					 * while parked at the stop event can fire and drive the
-					 * precommit→abort transition the test means to
-					 * exercise.  Production builds skip this entirely — the
-					 * stop event is compiled out to a no-op and the holdoff
-					 * stays intact.
-					 */
-					RESUME_INTERRUPTS();
-					STOPEVENT(STOPEVENT_AFTER_CSN_PRECOMMIT, NULL);
-					CHECK_FOR_INTERRUPTS();
-					HOLD_INTERRUPTS();
-				}
-
 				csn = GetCurrentCSN();
 				if (csn == COMMITSEQNO_INPROGRESS)
 					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
