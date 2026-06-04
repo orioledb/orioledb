@@ -888,8 +888,12 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
  * Checks if loaded leaf page matches downlink of internal page.  Makes iterator
  * to read the considered key range if check failed.
  *
- * Hikey of leaf page should match to next downlink or internal page hikey if
- * we're considering the last downlink.
+ * Both ends of the key range must agree.  The hikey check catches stale undo
+ * images where the post-split right boundary moved (e.g. the left half of a
+ * split read from undo).  The LEFTMOST/first-item check catches the right
+ * half of a split: the pre-split undo image has the original lokey, which is
+ * below the new right page's keyRangeLow, so its leading items overlap the
+ * left half's range and would otherwise be emitted twice.
  */
 static void
 check_in_memory_leaf_page(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRangeHigh)
@@ -902,19 +906,41 @@ check_in_memory_leaf_page(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRang
 	else
 		O_TUPLE_SET_NULL(leafHikey);
 
-	if (O_TUPLE_IS_NULL(keyRangeHigh) && O_TUPLE_IS_NULL(leafHikey))
-		return;
-
-	if (O_TUPLE_IS_NULL(keyRangeHigh) || O_TUPLE_IS_NULL(leafHikey))
+	if (!(O_TUPLE_IS_NULL(keyRangeHigh) && O_TUPLE_IS_NULL(leafHikey)))
 	{
-		result = true;
-	}
-	else
-	{
-		if (o_btree_cmp(scan->desc,
-						&keyRangeHigh, BTreeKeyNonLeafKey,
-						&leafHikey, BTreeKeyNonLeafKey) != 0)
+		if (O_TUPLE_IS_NULL(keyRangeHigh) || O_TUPLE_IS_NULL(leafHikey))
 			result = true;
+		else if (o_btree_cmp(scan->desc,
+							 &keyRangeHigh, BTreeKeyNonLeafKey,
+							 &leafHikey, BTreeKeyNonLeafKey) != 0)
+			result = true;
+	}
+
+	if (!result)
+	{
+		bool		leafIsLeftmost = O_PAGE_IS(scan->leafImg, LEFTMOST);
+		bool		rangeIsLeftmost = O_TUPLE_IS_NULL(keyRangeLow);
+
+		if (leafIsLeftmost != rangeIsLeftmost)
+		{
+			result = true;
+		}
+		else if (!leafIsLeftmost)
+		{
+			BTreePageItemLocator firstLoc;
+
+			BTREE_PAGE_LOCATOR_FIRST(scan->leafImg, &firstLoc);
+			if (BTREE_PAGE_LOCATOR_IS_VALID(scan->leafImg, &firstLoc))
+			{
+				OTuple		firstTuple;
+
+				BTREE_PAGE_READ_LEAF_TUPLE(firstTuple, scan->leafImg, &firstLoc);
+				if (o_btree_cmp(scan->desc,
+								&firstTuple, BTreeKeyLeafTuple,
+								&keyRangeLow, BTreeKeyNonLeafKey) < 0)
+					result = true;
+			}
+		}
 	}
 
 	if (result)
