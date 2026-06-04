@@ -1051,6 +1051,7 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 {
 	FileExtent	extent;
 	bool		success;
+	bool		readFromUndo = false;
 	BTreePageHeader *header;
 	BTreeSeqScanDiskDownlink downlink;
 	ParallelOScanDesc poscan = scan->poscan;
@@ -1084,8 +1085,11 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 								  &extent);
 	header = (BTreePageHeader *) scan->leafImg;
 	if (header->csn >= downlink.csn)
+	{
 		read_page_from_undo(scan->desc, scan->leafImg, header->undoLocation,
 							downlink.csn, NULL, BTreeKeyNone, NULL);
+		readFromUndo = true;
+	}
 
 	STOPEVENT(STOPEVENT_SCAN_DISK_PAGE,
 			  btree_page_stopevent_params(scan->desc,
@@ -1095,6 +1099,8 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 		elog(ERROR, "can not read leaf page from disk");
 
 	BTREE_PAGE_LOCATOR_FIRST(scan->leafImg, &scan->leafLoc);
+	if (readFromUndo)
+		scan_skip_covered_leaf_prefix(scan);
 	scan->downlinkIndex++;
 	scan->hint.blkno = OInvalidInMemoryBlkno;
 	scan->hint.pageChangeCount = InvalidOPageChangeCount;
