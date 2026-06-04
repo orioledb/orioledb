@@ -20,6 +20,7 @@
 
 #include "catalog/o_tables.h"
 #include "tableam/descr.h"
+#include "utils/jsonb.h"
 
 #define recovery_first_worker 	 (0)
 #define recovery_last_worker 	 (recovery_pool_size_guc - 1)
@@ -124,6 +125,7 @@ extern void o_index_drop(Relation tbl, OIndexNumber ix_num);
 extern OIndexNumber o_find_ix_num_by_name(OTableDescr *descr,
 										  char *ix_name);
 extern OIndexNumber o_find_ix_num_by_reloid(OTableDescr *descr, Oid reloid);
+extern Jsonb *cic_stopevent_params(ORelOids idx_oids, const char *idx_name);
 extern bool is_in_indexes_rebuild(void);
 
 extern void rebuild_indices_insert_placeholders(OTableDescr *descr);
