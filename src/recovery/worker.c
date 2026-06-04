@@ -670,7 +670,43 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					continue;
 				}
 
-				_o_index_parallel_build_inner(seg, toc, NULL, NULL);
+				/*
+				 * Third race window: DSM was still mapped above, but the
+				 * leader can still tear down its SharedFileSet before our
+				 * tuplesort_attach_shared() inside the inner build picks it
+				 * up.  PG core then raises ERROR ("could not attach to a
+				 * SharedFileSet that is already destroyed") out of
+				 * SharedFileSetAttach.  Letting that propagate exits the
+				 * bgworker with code 1; the leader's idx_workers_alive_range
+				 * probe then permanently flags the pool as incomplete and
+				 * every subsequent CIC replay falls back to serial until the
+				 * replica is restarted.  Treat the same way as the dsm_attach
+				 * / shm_toc_attach misses above: swallow, log, drop the
+				 * message, stay alive.
+				 */
+				PG_TRY();
+				{
+					_o_index_parallel_build_inner(seg, toc, NULL, NULL);
+				}
+				PG_CATCH();
+				{
+					ErrorData  *edata;
+					MemoryContext ecxt;
+
+					ecxt = MemoryContextSwitchTo(recovery_context);
+					edata = CopyErrorData();
+					FlushErrorState();
+
+					ereport(LOG,
+							(errmsg("orioledb recovery worker %d: parallel index "
+									"build (DSM segment %u) aborted mid-flight: "
+									"%s; leader must have aborted, skipping",
+									id, msg->seg_handle, edata->message)));
+
+					FreeErrorData(edata);
+					MemoryContextSwitchTo(ecxt);
+				}
+				PG_END_TRY();
 
 				dsm_detach(seg);
 
