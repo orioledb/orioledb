@@ -2002,6 +2002,11 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 		walk_checkpoint_stacks(cur_recovery_xid_state, csn,
 							   InvalidSubTransactionId, flush_undo_pos);
 		cur_recovery_xid_state->in_finished_list = true;
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "csn-trace finished-push path=commit-defer pid=%d worker=%d oxid=%lu csn=%lu ptr=%X/%X",
+			 MyProcPid, worker_id, (unsigned long) oxid, (unsigned long) csn,
+			 LSN_FORMAT_ARGS(ptr));
+#endif
 		dlist_push_tail(&finished_list,
 						&cur_recovery_xid_state->finished_list_node);
 	}
@@ -2028,6 +2033,11 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 				 * committed due to runXmin.
 				 */
 				cur_recovery_xid_state->in_finished_list = true;
+#ifdef USE_INJECTION_POINTS
+				elog(LOG, "csn-trace finished-push path=abort-defer pid=%d worker=%d oxid=%lu csn=%lu ptr=%X/%X",
+					 MyProcPid, worker_id, (unsigned long) oxid, (unsigned long) csn,
+					 LSN_FORMAT_ARGS(ptr));
+#endif
 				dlist_push_tail(&finished_list,
 								&cur_recovery_xid_state->finished_list_node);
 			}

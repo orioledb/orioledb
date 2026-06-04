@@ -573,6 +573,27 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				OFindPageResult result PG_USED_FOR_ASSERTS_ONLY;
 
 				Assert(COMMITSEQNO_IS_INPROGRESS(csn));
+#ifdef USE_INJECTION_POINTS
+				if (is_recovery_process())
+				{
+					/* Log only when replayPtr or the conflicting oxid changes,
+					 * so a frozen spin emits ONE line (not millions) -- a frozen
+					 * replayPtr across a long spin is itself the proof. */
+					static XLogRecPtr _last_rptr = InvalidXLogRecPtr;
+					static OXid _last_oxid = InvalidOXid;
+					XLogRecPtr	_rptr = recovery_get_current_ptr();
+
+					if (_rptr != _last_rptr || oxid != _last_oxid)
+					{
+						_last_rptr = _rptr;
+						_last_oxid = oxid;
+						elog(LOG, "csn-trace conflict-inprogress pid=%d blkno=%u opOxid=%lu conflictOxid=%lu replayPtr=%X/%X",
+							 MyProcPid, (unsigned int) blkno,
+							 (unsigned long) context->opOxid, (unsigned long) oxid,
+							 (uint32) (_rptr >> 32), (uint32) _rptr);
+					}
+				}
+#endif
 
 				if (context->callbackInfo->waitCallback)
 				{
