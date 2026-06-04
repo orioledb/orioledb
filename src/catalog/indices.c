@@ -380,6 +380,28 @@ index_build_params(OTableIndex *index)
 	return res;
 }
 
+/*
+ * JSONB payload for the CIC stopevents.  Lets tests filter the gate
+ * by index oid / name so an unrelated CREATE INDEX in the same session
+ * doesn't trip the same breakpoint.
+ */
+Jsonb *
+cic_stopevent_params(ORelOids idx_oids, const char *idx_name)
+{
+	JsonbParseState *state = NULL;
+	Jsonb	   *res;
+	MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+	jsonb_push_int8_key(&state, "datoid", idx_oids.datoid);
+	jsonb_push_int8_key(&state, "reloid", idx_oids.reloid);
+	jsonb_push_int8_key(&state, "relnode", idx_oids.relnode);
+	jsonb_push_string_key(&state, "treeName", idx_name);
+	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+	MemoryContextSwitchTo(mctx);
+	return res;
+}
+
 /*--
  * We build indices in three phases.
  *
@@ -981,6 +1003,16 @@ o_define_index_concurrent_finish(Relation heap, Relation index)
 		MemoryContextSwitchTo(oldcxt);
 		MemoryContextDelete(val_mctx);
 	}
+
+	/*
+	 * Final pause before VALID.  Drain + covering + unique walk have all
+	 * settled under AccessExclusiveLock; DML can't run here, but tests can
+	 * still inspect tree state (orioledb_index_oids, sys-tree contents) from
+	 * a separate connection that doesn't need RowExclusive.
+	 */
+	if (STOPEVENTS_ENABLED())
+		STOPEVENT(STOPEVENT_CIC_BEFORE_FLIP,
+				  cic_stopevent_params(idx_oids, idx->name.data));
 
 	fill_current_oxid_osnapshot(&oxid, &snap);
 	if (!o_indices_set_state(idx_oids, ix_type, persistence,

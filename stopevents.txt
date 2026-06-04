@@ -31,3 +31,5 @@ after_csn_precommit
 before_modify_oxid_get_csn
 sk_modify_pending
 after_find_downlink
+cic_after_ambuild
+cic_before_flip

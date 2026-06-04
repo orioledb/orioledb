@@ -399,6 +399,20 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 				o_invalidate_oids(idx_oids);
 				/* PG-side: drop rd_amcache on next AcceptInval call. */
 				CacheInvalidateRelcacheByRelid(heap->rd_id);
+
+				/*
+				 * The OIndex is now installed in BUILDING_PHASE_2.  Tests can
+				 * pause here to inject DML that exercises the spool capture
+				 * path before validate_scan kicks in.
+				 */
+				if (STOPEVENTS_ENABLED())
+				{
+					Jsonb	   *params;
+
+					params = cic_stopevent_params(idx_oids,
+												  index->rd_rel->relname.data);
+					STOPEVENT(STOPEVENT_CIC_AFTER_AMBUILD, params);
+				}
 			}
 		}
 	}
