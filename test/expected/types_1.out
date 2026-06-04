@@ -260,12 +260,12 @@ SELECT * FROM o_test_enum_index WHERE happiness < 'very happy';
 
 -- check that column and index drops
 SELECT orioledb_table_description('o_test_enum_index'::regclass);
-                orioledb_table_description                 
------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1+
-     Column |        Type | Collation | Nullable | Dropped+
-  num_weeks |     integer |    (null) |    false |   false+
-  happiness | o_happiness |    (null) |    false |   false+
+                 orioledb_table_description                 
+------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1 +
+     Column |        Type | Collation | Nullable | Dropped +
+  num_weeks |     integer |    (null) |    false |   false +
+  happiness | o_happiness |    (null) |    false |   false +
  
 (1 row)
 
