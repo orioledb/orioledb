@@ -1247,7 +1247,46 @@ orioledb_index_validate_scan(Relation heapRelation,
 							 Snapshot snapshot,
 							 ValidateIndexState *state)
 {
-	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
+	OBTOptions *options = (OBTOptions *) indexRelation->rd_options;
+	bool		bridged;
+
+	/*
+	 * Bridged index (any non-btree AM, or btree with orioledb_index = false):
+	 * it's a stock-PG index keyed by bridge_ctid.  The phase-2 build was done
+	 * by the AM's own ambuild via bridged_ambuild / btbuild, and PG has
+	 * already set indisready=true between phase 2 and this call, so
+	 * concurrent writers update the index live via bridged_aminsert.  We have
+	 * nothing native to do here -- no OIndex sys-tree row, no orioledb tree,
+	 * no spool.  PG will mark the index valid on return.
+	 *
+	 * Catch-up of inserts that happened *during* the phase-2 build (after its
+	 * snapshot but before indisready=true) is a follow-up: PG's heap-AM
+	 * validate_index would catch them by re-walking the heap here, and
+	 * orioledb-bridged would need an equivalent walk of the primary tree.
+	 * Single-writer CIC and bulk-load scenarios are unaffected.
+	 */
+	bridged = indexRelation->rd_rel->relam != BTREE_AM_OID ||
+		(options && !options->orioledb_index);
+	if (bridged)
+		return;
+
+	/*
+	 * Phase-3 of CREATE INDEX CONCURRENTLY for a native orioledb btree. Up to
+	 * this point PG has:
+	 *
+	 * - Committed the OIndex insert (in BUILDING_PHASE_2 state) done inside
+	 * our ambuild. - Set pg_index.indisready=true and committed. - Run
+	 * WaitForLockers(ShareLock) so writers that did not see the new index
+	 * have settled. - Pushed a fresh snapshot.
+	 *
+	 * We now run the orioledb phased build: build from the snapshot, drain
+	 * the spool of captured concurrent DML, flip OIndex.state to VALID, emit
+	 * WAL_REC_CIC_PHASE_FLIP, drop the spool dir.
+	 *
+	 * UNIQUE is rejected at the ddl.c gate so we never need to perform the
+	 * duplicate-detection validation PG does for unique indexes.
+	 */
+	o_define_index_concurrent_finish(heapRelation, indexRelation);
 }
 
 
@@ -2779,4 +2818,26 @@ orioledb_calculate_database_size(Oid dbOid)
 
 	elog(DEBUG4, "orioledb_calculate_database_size totalsize added: %ld", totalsize);
 	return totalsize;
+}
+
+/*
+ * ReindexConcurrentlySkipHook callback.
+ *
+ * Skip the primary index of orioledb tables when REINDEX TABLE CONCURRENTLY
+ * walks the heap's index list.  OrioleDB's primary index is the table itself
+ * -- redefining it rewrites every row under AccessExclusiveLock and is
+ * therefore fundamentally non-concurrent.  Users who need to rebuild the
+ * primary key can use plain REINDEX (without CONCURRENTLY).
+ *
+ * For non-orioledb heaps and for non-primary indexes the callback returns
+ * false, leaving the standard PG behavior intact.
+ */
+bool
+orioledb_reindex_concurrently_skip(Relation heapRelation, Relation indexRelation)
+{
+	if (!is_orioledb_rel(heapRelation))
+		return false;
+	if (!indexRelation->rd_index->indisprimary)
+		return false;
+	return true;
 }

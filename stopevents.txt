@@ -30,3 +30,5 @@ before_get_waiters_with_tuples
 before_modify_oxid_get_csn
 sk_modify_pending
 after_find_downlink
+cic_after_ambuild
+cic_before_flip

@@ -20,12 +20,16 @@
 #include "btree/undo.h"
 #include "btree/scan.h"
 #include "checkpoint/checkpoint.h"
+#include "catalog/cic_spool.h"
 #include "catalog/indices.h"
+#include "catalog/o_indices.h"
 #include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
 #include "recovery/internal.h"
 #include "recovery/wal.h"
+#include "recovery/wal_record.h"
 #include "tableam/operations.h"
+#include "tableam/tree.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "tuple/slot.h"
@@ -376,6 +380,28 @@ index_build_params(OTableIndex *index)
 	return res;
 }
 
+/*
+ * JSONB payload for the CIC stopevents.  Lets tests filter the gate
+ * by index oid / name so an unrelated CREATE INDEX in the same session
+ * doesn't trip the same breakpoint.
+ */
+Jsonb *
+cic_stopevent_params(ORelOids idx_oids, const char *idx_name)
+{
+	JsonbParseState *state = NULL;
+	Jsonb	   *res;
+	MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+	jsonb_push_int8_key(&state, "datoid", idx_oids.datoid);
+	jsonb_push_int8_key(&state, "reloid", idx_oids.reloid);
+	jsonb_push_int8_key(&state, "relnode", idx_oids.relnode);
+	jsonb_push_string_key(&state, "treeName", idx_name);
+	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+	MemoryContextSwitchTo(mctx);
+	return res;
+}
+
 /*--
  * We build indices in three phases.
  *
@@ -390,6 +416,7 @@ index_build_params(OTableIndex *index)
 void
 o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			   OIndexNumber old_ix_num, Oid oldTblRelnode,
+			   bool skip_build,
 			   IndexBuildResult *result)
 {
 	OTable	   *old_o_table = NULL;
@@ -578,7 +605,12 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	Assert(table_index->tablespace);
 	table_index->immediate = index->rd_index->indimmediate;
 
-	if (!reuse_relnode && is_build)
+	/*
+	 * For CIC (skip_build), force the "non-build" meta_lock path even though
+	 * the table has data -- the actual build runs later from
+	 * orioledb_index_validate_scan.
+	 */
+	if (!reuse_relnode && is_build && !skip_build)
 		o_tables_table_meta_lock(NULL);
 	else
 		o_tables_table_meta_lock(o_table);
@@ -613,7 +645,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	descr = o_fetch_table_descr(o_table->oids);
 	ResourceOwnerRememberOTableDescr(CurrentResourceOwner, descr);
 
-	if (!reuse_relnode && is_build)
+	if (!reuse_relnode && is_build && !skip_build)
 	{
 		if (table_index->type == oIndexPrimary)
 		{
@@ -650,6 +682,26 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 												 table_index->oids.relnode);
 		}
 	}
+	else if (skip_build && table_index->type != oIndexPrimary &&
+			 !setting_tbl_tablespace &&
+			 o_table->persistence != RELPERSISTENCE_TEMP)
+	{
+		/*
+		 * CIC: create the dir + reserve the shared-root placeholder here so
+		 * the half-built tree is invisible to the checkpointer until
+		 * orioledb_index_validate_scan flips state to VALID.
+		 */
+		char	   *prefix;
+		char	   *db_prefix;
+
+		o_get_prefixes_for_tablespace(MyDatabaseId, tablespace,
+									  &prefix, &db_prefix);
+		o_verify_dir_exists_or_create(prefix, NULL, NULL);
+		o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+		pfree(db_prefix);
+		o_insert_shared_root_placeholder(table_index->oids.datoid,
+										 table_index->oids.relnode);
+	}
 
 	if (reindex)
 	{
@@ -657,7 +709,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		o_add_invalidate_undo_item(table_index->oids, O_INVALIDATE_OIDS_ON_ABORT);
 	}
 
-	if (!reuse_relnode && is_build)
+	if (!reuse_relnode && is_build && !skip_build)
 	{
 		o_tables_table_meta_unlock(NULL, InvalidOid);
 		if (STOPEVENTS_ENABLED())
@@ -695,6 +747,296 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
 	if (old_descr)
 		ResourceOwnerForgetOTableDescr(CurrentResourceOwner, old_descr);
+}
+
+/*
+ * Phase 3 of CIC.  Called from orioledb_index_validate_scan after PG has
+ * (a) committed the OIndex-in-BUILDING insert, (b) set pg_index.indisready
+ * = true, (c) executed WaitForLockers(ShareLock) so old DML writers settled.
+ *
+ * What we do here:
+ *
+ *	 1. Reload OTableDescr (fresh, with the BUILDING secondary in place).
+ *	 2. Build the index from the snapshot PG pushed before the validate
+ *	    pass.  Captures concurrent writes via the spool (their capture
+ *	    hook fires because state == BUILDING).
+ *	 3. Brief ShareLock window: WaitForLockers + drain spool + flip
+ *	    OIndex.state to VALID + emit WAL_REC_CIC_PHASE_FLIP + drop spool
+ *	    dir + drop shared-root placeholder.  ShareLock is released as
+ *	    part of the surrounding transaction commit; concurrent writers
+ *	    that hit the table after release see state == VALID and write
+ *	    directly to the new tree.
+ */
+void
+o_define_index_concurrent_finish(Relation heap, Relation index)
+{
+	ORelOids	tableOids;
+	ORelOids	idx_oids;
+	OIndexType	ix_type;
+	OXid		oxid;
+	OSnapshot	snap;
+	OTable	   *o_table;
+	OTableDescr *descr;
+	OIndexDescr *idx;
+	OIndexNumber ix_num;
+	char		persistence;
+	IndexBuildResult result_local = {0};
+
+	ORelOidsSetFromRel(tableOids, heap);
+	ORelOidsSetFromRel(idx_oids, index);
+	ix_type = o_index_rel_get_ix_type(index);
+	persistence = heap->rd_rel->relpersistence;
+
+	/*
+	 * Refresh the descriptor: the BUILDING secondary must be in it for
+	 * build_secondary_index to find it via descr->indices[ix_num].
+	 */
+	recreate_table_descr_by_oids(tableOids);
+	descr = o_fetch_table_descr(tableOids);
+	ResourceOwnerRememberOTableDescr(CurrentResourceOwner, descr);
+	o_table = o_tables_get(tableOids);
+
+	ix_num = InvalidIndexNumber;
+	for (int i = 0; i < o_table->nindices; i++)
+	{
+		if (ORelOidsIsEqual(o_table->indices[i].oids, idx_oids))
+		{
+			ix_num = i;
+			break;
+		}
+	}
+	if (ix_num == InvalidIndexNumber)
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("CIC finish: index oids (%u,%u,%u) not found in OTable",
+						idx_oids.datoid, idx_oids.reloid, idx_oids.relnode)));
+
+	idx = descr->indices[o_table->has_primary ? ix_num : ix_num + 1];
+
+	/* Phase-2 build under the BUILDING state.  Concurrent writers spool. */
+	build_secondary_index(InvalidOid, o_table, descr, ix_num, false, &result_local);
+
+	/*
+	 * Phase-3 catchup / final-drain barrier.  Promote our lock to
+	 * AccessExclusive so every DML writer waits.  Without an actual block
+	 * here, writers whose cached OTableDescr is mid-refresh after our SI
+	 * invalidation can race past the flip and produce spool entries that get
+	 * dropped along with the dir.  The lock is held for the brief duration of
+	 * drain + covering scan + flip + dir drop, then released at txn commit.
+	 */
+	LockRelationOid(heap->rd_id, AccessExclusiveLock);
+
+	{
+		OXid		drain_oxid;
+		OSnapshot	drain_snap;
+
+		fill_current_oxid_osnapshot(&drain_oxid, &drain_snap);
+		(void) cic_spool_replay_into(idx, drain_oxid, drain_snap.csn);
+	}
+
+	/*
+	 * Covering pass: writers whose cached OTableDescr did not yet have the
+	 * BUILDING secondary (e.g. those whose RowExclusive happened between PG's
+	 * phase-2 ambuild commit and the cross-backend invalidation reaching
+	 * their backend) wrote only to the primary and bypassed the capture hook.
+	 * Their rows are in the primary tree but may have been missed by
+	 * build_secondary_index's sequential scan due to physical ordering. Under
+	 * ShareLock the primary is stable; re-scan it and INSERT each row through
+	 * a permissive callback so anything missed lands in the new tree. Rows
+	 * that the build already inserted no-op via the callback.
+	 */
+	{
+		void	   *sscan;
+		TupleTableSlot *primarySlot;
+		BTreeModifyCallbackInfo permInsertCb = {
+			.waitCallback = NULL,
+			.modifyCallback = NULL,
+			.modifyDeletedCallback = NULL,
+			.needsUndoForSelfCreated = false,
+			.arg = NULL,
+		};
+		OXid		cov_oxid;
+		OSnapshot	cov_snap;
+
+		fill_current_oxid_osnapshot(&cov_oxid, &cov_snap);
+
+		sscan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc,
+									&o_in_progress_snapshot, NULL);
+		primarySlot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
+
+		while (true)
+		{
+			OTuple		tup;
+			CommitSeqNo tupleCsn;
+			BTreeLocationHint hint;
+			OTuple		secondaryTup;
+			OBTreeKeyBound bound;
+
+			tup = btree_seq_scan_getnext(sscan, primarySlot->tts_mcxt,
+										 &tupleCsn, &hint);
+			if (O_TUPLE_IS_NULL(tup))
+				break;
+
+			tts_orioledb_store_tuple(primarySlot, tup, descr, tupleCsn,
+									 PrimaryIndexNumber, true, &hint);
+			slot_getallattrs(primarySlot);
+
+			if (!o_is_index_predicate_satisfied(idx, primarySlot, idx->econtext))
+			{
+				ExecClearTuple(primarySlot);
+				continue;
+			}
+
+			secondaryTup = tts_orioledb_make_secondary_tuple(primarySlot, idx, true);
+			o_fill_key_bound(idx, secondaryTup, BTreeKeyLeafTuple, &bound);
+
+			(void) o_btree_modify(&idx->desc, BTreeOperationInsert,
+								  secondaryTup, BTreeKeyLeafTuple,
+								  (Pointer) &bound, BTreeKeyBound,
+								  cov_oxid, cov_snap.csn,
+								  RowLockUpdate,
+								  NULL, &permInsertCb);
+
+			pfree(secondaryTup.data);
+			ExecClearTuple(primarySlot);
+		}
+		ExecDropSingleTupleTableSlot(primarySlot);
+		free_btree_seq_scan(sscan);
+	}
+
+	/*
+	 * UNIQUE validation pass.
+	 *
+	 * For an orioledb unique secondary the leaf key is the (unique-fields +
+	 * pk-extension) tuple, not just unique-fields -- two rows that share a
+	 * unique-fields value but have different PKs live on different btree
+	 * keys, so o_btree_modify above happily inserted both of them.  Unique
+	 * enforcement therefore can't piggyback on the insert callback (that's
+	 * what o_btree_insert_unique is for, but using it during drain would
+	 * break DEFERRABLE INITIALLY DEFERRED patterns where a single xact's net
+	 * effect is fine but its intermediate spool entries look like duplicates,
+	 * and would also be wrong for the recovery-worker-desync window where
+	 * transient dups are expected to settle).
+	 *
+	 * Instead, after drain + covering settle the tree we walk it in sort
+	 * order under AccessExclusiveLock and compare the unique-fields portion
+	 * of each pair of adjacent leaf tuples. Two rows with equal non-NULL
+	 * unique-fields are a real duplicate; abort CIC (the OIndex stays at
+	 * BUILDING; user must DROP).  NULLs follow the index's NULLS [NOT]
+	 * DISTINCT setting.
+	 */
+	if (idx->unique)
+	{
+		void	   *sscan;
+		OBTreeKeyBound prev_bound;
+		bool		have_prev = false;
+		MemoryContext val_mctx;
+		MemoryContext oldcxt;
+
+		val_mctx = AllocSetContextCreate(CurrentMemoryContext,
+										 "CIC unique validation",
+										 ALLOCSET_DEFAULT_SIZES);
+		oldcxt = MemoryContextSwitchTo(val_mctx);
+
+		sscan = make_btree_seq_scan(&idx->desc, &o_in_progress_snapshot, NULL);
+		while (true)
+		{
+			OTuple		tup;
+			CommitSeqNo tupleCsn;
+			BTreeLocationHint hint;
+			OBTreeKeyBound bound;
+
+			tup = btree_seq_scan_getnext(sscan, val_mctx, &tupleCsn, &hint);
+			if (O_TUPLE_IS_NULL(tup))
+				break;
+
+			o_fill_key_bound(idx, tup, BTreeKeyLeafTuple, &bound);
+
+			if (have_prev)
+			{
+				bool		all_equal = true;
+				bool		any_null = false;
+				int			i;
+
+				for (i = 0; i < idx->nUniqueFields; i++)
+				{
+					if (OIgnoreColumn(idx, i))
+						continue;
+					if ((prev_bound.keys[i].flags & O_VALUE_BOUND_NULL) ||
+						(bound.keys[i].flags & O_VALUE_BOUND_NULL))
+					{
+						any_null = true;
+						all_equal = false;
+						break;
+					}
+					if (o_idx_cmp_value_bounds(&prev_bound.keys[i],
+											   &bound.keys[i],
+											   &idx->fields[i], NULL) != 0)
+					{
+						all_equal = false;
+						break;
+					}
+				}
+
+				/*
+				 * NULLS DISTINCT (default) treats two NULL unique-keys as not
+				 * equal; NULLS NOT DISTINCT treats them as equal.
+				 */
+				if (all_equal ||
+					(any_null && idx->nulls_not_distinct))
+				{
+					MemoryContextSwitchTo(oldcxt);
+					ereport(ERROR,
+							(errcode(ERRCODE_UNIQUE_VIOLATION),
+							 errmsg("could not create unique index \"%s\"",
+									idx->name.data),
+							 errdetail("Duplicate unique-key payloads remain "
+									   "in the index after concurrent build, "
+									   "drain and covering scan.")));
+				}
+			}
+
+			prev_bound = bound;
+			have_prev = true;
+		}
+		free_btree_seq_scan(sscan);
+		MemoryContextSwitchTo(oldcxt);
+		MemoryContextDelete(val_mctx);
+	}
+
+	/*
+	 * Final pause before VALID.  Drain + covering + unique walk have all
+	 * settled under AccessExclusiveLock; DML can't run here, but tests can
+	 * still inspect tree state (orioledb_index_oids, sys-tree contents) from
+	 * a separate connection that doesn't need RowExclusive.
+	 */
+	if (STOPEVENTS_ENABLED())
+		STOPEVENT(STOPEVENT_CIC_BEFORE_FLIP,
+				  cic_stopevent_params(idx_oids, idx->name.data));
+
+	fill_current_oxid_osnapshot(&oxid, &snap);
+	if (!o_indices_set_state(idx_oids, ix_type, persistence,
+							 OINDEX_STATE_VALID, oxid, snap.csn))
+		elog(ERROR, "CIC finish: failed to flip OIndex state to VALID");
+
+	add_cic_phase_wal_record(WAL_REC_CIC_PHASE_FLIP,
+							 idx_oids, tableOids, o_table->indices[ix_num].version);
+
+	/*
+	 * build_secondary_index already dropped the shared_root_info above. Do
+	 * NOT drop it again here: drain + covering scan have just inserted into
+	 * the tree, advancing the in-memory root via COW. Dropping
+	 * shared_root_info would discard that tracking and force other backends
+	 * to re-read the file header — which still points at the bulk-load
+	 * root, missing our drained/covering rows.
+	 */
+
+	cic_spool_drop_dir(tableOids, oxid);
+
+	o_invalidate_oids(idx_oids);
+
+	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
+	o_table_free(o_table);
 }
 
 /*
@@ -771,8 +1113,27 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 	}
 	else
 	{
-		recoveryContext = CreateParallelRecoveryContext(*recovery_single_process ?
-														0 : (recovery_idx_pool_size_guc - 1));
+		int			requested;
+
+		/*
+		 * If any idx-pool recovery worker has died (BGW_NEVER_RESTART), the
+		 * leader's join-wait further down would hang forever waiting for the
+		 * missing worker to attach to the DSM.  Probe liveness up front and
+		 * fall back to a serial build if the pool isn't intact.
+		 */
+		if (!recovery_idx_workers_all_alive())
+		{
+			ereport(LOG,
+					(errmsg("orioledb: parallel index build pool is incomplete; "
+							"falling back to serial build")));
+			requested = 0;
+		}
+		else
+		{
+			requested = *recovery_single_process ? 0 :
+				(recovery_idx_pool_size_guc - 1);
+		}
+		recoveryContext = CreateParallelRecoveryContext(requested);
 		estimator = &recoveryContext->estimator;
 		nworkers = recoveryContext->nworkers;
 	}
@@ -1008,6 +1369,21 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 		while (btshared->nrecoveryworkersjoined < btleader->nparticipanttuplesorts)
 		{
 			o_worker_handle_interrupts();
+
+			/*
+			 * Mid-wait liveness probe.  An idx-pool worker exiting after the
+			 * leader started the build (e.g. SIGSEGV, OOM, FATAL during
+			 * attach) leaves nrecoveryworkersjoined permanently below
+			 * nparticipanttuplesorts, and the leader would spin here until
+			 * the test framework's 60-second timeout kills everything. Detect
+			 * that case, surface it, and ERROR -- better to fail this build
+			 * loudly than hang the replica.
+			 */
+			if (!recovery_idx_workers_all_alive())
+				ereport(ERROR,
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						 errmsg("orioledb: parallel index build worker exited; "
+								"aborting build to avoid replica hang")));
 
 			/*
 			 * We wait on a condition variable that will wake us as soon as
@@ -2299,6 +2675,33 @@ o_find_ix_num_by_name(OTableDescr *descr, char *ix_name)
 	for (i = 0; i < descr->nIndices; i++)
 	{
 		if (strcmp(descr->indices[i]->name.data, ix_name) == 0)
+		{
+			result = i;
+			break;
+		}
+	}
+	return result;
+}
+
+/*
+ * Like o_find_ix_num_by_name but matches by pg_class.oid of the index.
+ *
+ * Use this on the DROP path: REINDEX CONCURRENTLY renames the old index to
+ * "<orig>_ccold" via index_concurrently_swap before dropping it, so the OIndex
+ * stored under the original name no longer matches by name -- but the pg_class
+ * oid is stable across the swap and identifies it unambiguously.
+ */
+OIndexNumber
+o_find_ix_num_by_reloid(OTableDescr *descr, Oid reloid)
+{
+	OIndexNumber result = InvalidIndexNumber;
+	int			i;
+
+	Assert(descr != NULL);
+
+	for (i = 0; i < descr->nIndices; i++)
+	{
+		if (descr->indices[i]->oids.reloid == reloid)
 		{
 			result = i;
 			break;

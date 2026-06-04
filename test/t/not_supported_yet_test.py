@@ -8,89 +8,6 @@ from .base_test import BaseTest
 
 class NotSupportedYetTest(BaseTest):
 
-	def test_reindex_concurrently(self):
-		node = self.node
-		node.start()
-		node.safe_psql("""
-			CREATE SCHEMA ddl;
-			SET SESSION search_path = 'ddl';
-			CREATE EXTENSION orioledb;
-
-			CREATE TABLE o_test_1(
-				val_1 int,
-				val_2 int
-			)USING orioledb;
-
-			CREATE TABLE pg_test_1 (
-				val_1 int,
-				val_2 int
-			) USING heap;
-
-			INSERT INTO o_test_1
-				(SELECT val_1, val_1 + 10 FROM generate_series(1, 10) AS val_1);
-			INSERT INTO pg_test_1
-				(SELECT val_1, val_1 + 10 FROM generate_series(1, 10) AS val_1);
-
-			CREATE INDEX o_ind_1 ON o_test_1 (val_1);
-			CREATE INDEX pg_ind_1 ON pg_test_1 (val_1);
-		""")
-
-		# We doesn't break REINDEX CONCURRENTLY for postgres tables
-		con1 = node.connect(autocommit=True)
-		con1.execute("SET SESSION search_path = 'ddl';")
-		con1.execute("REINDEX (VERBOSE) TABLE CONCURRENTLY pg_test_1;")
-		con1.close()
-		msg = con1.connection.notices[0]
-		if isinstance(msg, dict):  # pg8000
-			msg = f"{(msg[b'S']).decode('utf-8')}:  {(msg[b'M']).decode('utf-8')}"
-		self.assertTrue(msg.find("pg_test_1"))
-
-		# Using simple reindex instead of concurrent for orioledb tables
-		con2 = node.connect(autocommit=True)
-		con2.execute("SET SESSION search_path = 'ddl';")
-		con2.execute("REINDEX (VERBOSE) TABLE CONCURRENTLY o_test_1;")
-		con2.close()
-		msg = con2.connection.notices[0]
-		if isinstance(msg, dict):  # pg8000
-			msg = f"{(msg[b'S']).decode('utf-8')}:  {(msg[b'M']).decode('utf-8')}"
-		self.assertEqual(
-		    msg.strip(),
-		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead"
-		)
-
-		# Using simple reindex instead of concurrent for orioledb indices
-		con3 = node.connect(autocommit=True)
-		con3.execute("SET SESSION search_path = 'ddl';")
-		con3.execute("REINDEX (VERBOSE) INDEX CONCURRENTLY o_ind_1;")
-		con3.close()
-		msg = con3.connection.notices[0]
-		if isinstance(msg, dict):  # pg8000
-			msg = f"{(msg[b'S']).decode('utf-8')}:  {(msg[b'M']).decode('utf-8')}"
-		self.assertEqual(
-		    msg.strip(),
-		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead"
-		)
-
-		# Using simple reindex instead of concurrent for schema containing orioledb tables
-		_, _, err = node.psql("""
-			REINDEX (VERBOSE) SCHEMA CONCURRENTLY ddl;
-		""")
-		self.assertEqual(
-		    err.decode("utf-8").split("\n")[0],
-		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead"
-		)
-
-		# Using simple reindex instead of concurrent for database containing orioledb tables
-		_, _, err = node.psql("""
-			REINDEX (VERBOSE) DATABASE CONCURRENTLY postgres;
-		""")
-		self.assertEqual(
-		    err.decode("utf-8").split("\n")[0],
-		    "WARNING:  REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead"
-		)
-
-		node.stop()
-
 	def test_cluster(self):
 		node = self.node
 		node.start()
@@ -270,6 +187,63 @@ class NotSupportedYetTest(BaseTest):
 		                              "transactions yet.",
 		                              second_title="DETAIL")
 
+	def test_concurrent_primary_key(self):
+		"""
+		Adding a PRIMARY KEY to an orioledb table is never truly
+		concurrent: PG syntax cannot tag CREATE INDEX CONCURRENTLY
+		as PRIMARY KEY, and the documented workaround
+		(CREATE UNIQUE INDEX CONCURRENTLY + ALTER TABLE ADD PRIMARY KEY
+		USING INDEX) takes AccessExclusiveLock on the orioledb table
+		because all secondaries embed the PK fields and must be
+		rebuilt.  This test pins the WARNING that surfaces the rebuild
+		so users aren't misled into thinking the workaround buys
+		concurrent PK creation.
+		"""
+		node = self.node
+		node.start()
+		try:
+			node.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_test_pk_cic (
+					id int NOT NULL,
+					val text NOT NULL
+				) USING orioledb;
+				INSERT INTO o_test_pk_cic
+				SELECT g, 'v' || g FROM generate_series(1, 10) g;
+			""")
+
+			# CIC builds a unique index without taking AccessExclusiveLock.
+			node.safe_psql(
+			    "CREATE UNIQUE INDEX CONCURRENTLY o_test_pk_cic_pkey "
+			    "ON o_test_pk_cic (id);")
+
+			# Promoting it to a primary key forces orioledb to rebuild
+			# all indices (secondaries embed PK fields), which runs
+			# under AccessExclusiveLock — surface the warning.
+			con = node.connect(autocommit=True)
+			con.execute(
+			    "ALTER TABLE o_test_pk_cic ADD PRIMARY KEY USING INDEX "
+			    "o_test_pk_cic_pkey;")
+			con.close()
+			msg = con.connection.notices[0]
+			if isinstance(msg, dict):  # pg8000
+				msg = f"{(msg[b'S']).decode('utf-8')}:  {(msg[b'M']).decode('utf-8')}"
+			self.assertIn(
+			    "We cannot just reuse index for primary key in orioledb", msg)
+
+			# PK is in force afterwards.
+			_, _, err = node.psql(
+			    "INSERT INTO o_test_pk_cic VALUES (1, 'dup');")
+			self.assertIn(b"duplicate key value violates unique constraint",
+			              err)
+			node.stop()
+
+		finally:
+			try:
+				node.stop()
+			except Exception:
+				pass
+
 	def test_temp_compression(self):
 		node = self.node
 		node.append_conf(max_prepared_transactions=2)
@@ -290,31 +264,3 @@ class NotSupportedYetTest(BaseTest):
 		self.assertErrorMessageEquals(
 		    e, "temp and unlogged orioledb tables does not "
 		    "support compression options")
-
-	def test_create_index_concurrently(self):
-		node = self.node
-		node.append_conf(max_prepared_transactions=2)
-		node.start()
-		node.safe_psql("""
-			CREATE EXTENSION orioledb;
-		""")
-
-		node.safe_psql("""
-			CREATE TABLE o_test
-			(
-				i int
-			) USING orioledb;
-		""")
-
-		_, _, err = node.psql("""
-			CREATE INDEX CONCURRENTLY ON o_test (i);
-		""")
-
-		self.assertEqual(
-		    err.decode("utf-8").split("\n")[0],
-		    "WARNING:  concurrent index creation is not supported for orioledb tables yet, using a plain CREATE INDEX instead"
-		)
-
-		node.safe_psql("""
-			REINDEX TABLE o_test;
-		""")

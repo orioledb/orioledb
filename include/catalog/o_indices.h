@@ -19,6 +19,25 @@
 #include "catalog/o_tables.h"
 #include "tuple/format.h"
 
+/*
+ * Lifecycle state of an index.  Non-VALID states are used by
+ * CREATE INDEX CONCURRENTLY to expose the index to writers (capture
+ * phase) before it becomes available to readers.  Persisted as one
+ * trailing byte in serialize_o_index(); records written by versions
+ * predating this field are read as OINDEX_STATE_VALID.
+ */
+typedef enum
+{
+	OINDEX_STATE_VALID = 0,		/* fully built, available to all readers */
+	OINDEX_STATE_BUILDING_PHASE_1,	/* meta installed, capture started, no DML
+									 * writes to index */
+	OINDEX_STATE_BUILDING_PHASE_2,	/* phase-1 + snapshot scan/build in
+									 * progress */
+	OINDEX_STATE_BUILDING_PHASE_3,	/* build done, catchup phase: writes go to
+									 * index + spool on collisions */
+	OINDEX_STATE_BUILDING_PHASE_4	/* final spool drain under WaitForLockers */
+} OIndexState;
+
 typedef struct
 {
 	ORelOids	indexOids;
@@ -81,6 +100,13 @@ typedef struct
 	Oid		   *exclops;
 	bool		immediate;
 	MemoryContext index_mctx;
+
+	/*
+	 * Lifecycle state for CREATE INDEX CONCURRENTLY.  Stored at the trailing
+	 * end of the serialized record; old records (without the trailing byte)
+	 * deserialize to OINDEX_STATE_VALID.
+	 */
+	OIndexState state;
 } OIndex;
 
 /* callback for o_indices_foreach_oids() */
@@ -94,6 +120,18 @@ typedef enum
 } OIndexVersionMode;
 
 extern OIndex *make_o_index(OTable *table, OIndexNumber ixNum, OIndexVersionMode ixVerMode);
+
+/*
+ * When set to a non-VALID value before calling o_tables_update (or any
+ * other path that eventually invokes make_*_o_index), the newly
+ * fabricated OIndex is initialised with this state instead of the
+ * palloc0 default (VALID).  Reset to VALID immediately after use.
+ *
+ * Used by orioledb_ambuild for CREATE INDEX CONCURRENTLY so writers
+ * never see the new OIndex in VALID state during the brief window
+ * before our explicit state flip would otherwise run.
+ */
+extern OIndexState o_index_initial_state_override;
 
 typedef enum
 {
@@ -113,6 +151,10 @@ extern OIndex *o_indices_get_extended(ORelOids oids, OIndexType type, OTableFetc
 
 extern bool o_indices_update(OTable *table, OIndexNumber ixNum,
 							 OXid oxid, CommitSeqNo csn);
+extern bool o_indices_set_state(ORelOids indexOids, OIndexType type,
+								char table_persistence,
+								OIndexState newState,
+								OXid oxid, CommitSeqNo csn);
 extern bool o_indices_find_table_oids(ORelOids indexOids, OIndexType type,
 									  OSnapshot *oSnapshot,
 									  ORelOids *tableOids);

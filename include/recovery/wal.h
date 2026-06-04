@@ -171,6 +171,22 @@ typedef struct
 	uint8		relnode[sizeof(Oid)];
 } WALRecTruncate;
 
+/*
+ * Phase-transition record for CREATE INDEX CONCURRENTLY.  recType
+ * distinguishes PHASE_3_START / PHASE_4 / PHASE_FLIP; payload is the
+ * same in all three.  See spec section 7.
+ */
+typedef struct
+{
+	uint8		recType;
+	uint8		datoid[sizeof(Oid)];
+	uint8		reloid[sizeof(Oid)];	/* index reloid */
+	uint8		relnode[sizeof(Oid)];	/* index relnode */
+	uint8		tableReloid[sizeof(Oid)];
+	uint8		tableRelnode[sizeof(Oid)];
+	uint8		indexVersion[sizeof(uint32)];
+} WALRecCICPhase;
+
 typedef struct
 {
 	uint8		recType;
@@ -222,6 +238,9 @@ extern void o_wal_delete(BTreeDescr *desc, OTuple tuple, char relreplident, uint
 extern void o_wal_delete_key(BTreeDescr *desc, OTuple key, bool is_bridge_index, uint32 version);
 extern void o_wal_reinsert(BTreeDescr *desc, OTuple oldtuple, OTuple newtuple, char relreplident, uint32 version);
 extern void add_truncate_wal_record(ORelOids oids);
+extern void add_cic_phase_wal_record(uint8 recType,
+									 ORelOids indexOids, ORelOids tableOids,
+									 uint32 indexVersion);
 extern bool get_local_wal_has_material_changes(void);
 extern void set_local_wal_has_material_changes(bool value);
 

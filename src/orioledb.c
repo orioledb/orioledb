@@ -19,10 +19,12 @@
 #include "btree/find.h"
 #include "btree/io.h"
 #include "btree/scan.h"
+#include "catalog/cic_spool.h"
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "checkpoint/checkpoint.h"
+#include "commands/defrem.h"
 #include "indexam/handler.h"
 #include "recovery/logical.h"
 #include "recovery/recovery.h"
@@ -179,6 +181,7 @@ static base_init_startup_hook_type prev_base_init_startup_hook = NULL;
 static get_relation_info_hook_type prev_get_relation_info_hook = NULL;
 static skip_tree_height_hook_type prev_skip_tree_height_hook = NULL;
 database_size_hook_type prev_database_size_hook = NULL;
+static ReindexConcurrentlySkipHook_type prev_reindex_concurrently_skip_hook = NULL;
 static AcceptInvalidationMessagesHookType prev_AcceptInvalidationMessagesHook = NULL;
 
 CheckPoint_hook_type next_CheckPoint_hook = NULL;
@@ -331,6 +334,16 @@ wal_desc_on_record(WalReaderState *r, WalRecord *rec)
 			appendStringInfo(ctx->buf, " ([ %u %u %u ]);",
 							 rec->u.truncate.oids.datoid, rec->u.truncate.oids.reloid, rec->u.truncate.oids.relnode);
 			break;
+		case WAL_REC_CIC_PHASE_3_START:
+		case WAL_REC_CIC_PHASE_4:
+		case WAL_REC_CIC_PHASE_FLIP:
+			appendStringInfo(ctx->buf, " (idx [ %u %u %u ] tbl [ %u %u %u ] v%u);",
+							 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode,
+							 rec->u.cic_phase.tableOids.datoid,
+							 rec->u.cic_phase.tableOids.reloid,
+							 rec->u.cic_phase.tableOids.relnode,
+							 rec->u.cic_phase.indexVersion);
+			break;
 		case WAL_REC_SWITCH_LOGICAL_XID:
 			appendStringInfo(ctx->buf, " (%u %u);", rec->u.swxid.topXid, rec->u.swxid.subXid);
 			break;
@@ -387,6 +400,7 @@ static void
 o_recovery_cleanup(void)
 {
 	o_recovery_finish_hook(true);
+	cic_spool_cleanup_orphans();
 }
 
 static RmgrData rmgr =
@@ -1281,6 +1295,8 @@ _PG_init(void)
 
 	prev_database_size_hook = database_size_hook;
 	database_size_hook = orioledb_calculate_database_size;
+	prev_reindex_concurrently_skip_hook = ReindexConcurrentlySkipHook;
+	ReindexConcurrentlySkipHook = orioledb_reindex_concurrently_skip;
 	RecoveryStopsBeforeHook = orioledb_recovery_stops_before_hook;
 
 	if (enable_rewind)

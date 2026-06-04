@@ -30,6 +30,8 @@ extern bool is_recovery_process(void);
 extern CommitSeqNo recovery_map_oxid_csn(OXid oxid, bool *found);
 extern void idx_workers_shutdown(void);
 extern void recovery_send_worker_oids(dsm_handle seg_handle);
+extern bool recovery_idx_workers_all_alive(void);
+extern bool recovery_idx_leader_alive(void);
 extern void update_proc_retain_undo_location(int worker_id);
 
 static inline bool

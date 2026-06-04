@@ -89,6 +89,13 @@ typedef struct WalRecord
 			ItemPointerData iptr;
 		}			bridge_erase;
 
+		/* CIC phase-transition records (PHASE_3_START / PHASE_4 / PHASE_FLIP) */
+		struct
+		{
+			ORelOids	tableOids;
+			uint32		indexVersion;
+		}			cic_phase;
+
 		struct
 		{
 			OTuple		t1;

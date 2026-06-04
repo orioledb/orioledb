@@ -871,6 +871,66 @@ ReindexPartitions(Oid relid, bool concurrently)
 	return has_orioledb;
 }
 
+/*
+ * Will a CREATE INDEX (or CREATE INDEX CONCURRENTLY) for this orioledb
+ * relation land on the *native* btree path (orioledb_ambuild does the
+ * full orioledb-native build) or on the *bridged* path (the index is a
+ * stock PG index keyed by bridge_ctid, built by btbuild / each AM's own
+ * ambuild)?  The BUILDING/spool plumbing only applies to native
+ * indexes; bridged indexes are handled by PG's standard CIC machinery
+ * (and that includes UNIQUE).
+ *
+ * Mirrors the resolution that orioledb_indexam_routine_hook +
+ * orioledb_ambuild's `options->orioledb_index` branch perform later,
+ * but does it from the raw IndexStmt before the index relation exists:
+ *
+ *	 - AM other than btree → bridged.
+ *	 - btree + explicit WITH(orioledb_index = false) → bridged.
+ *	 - btree + explicit WITH(orioledb_index = true) → native.
+ *	 - btree + no explicit option, table has index_bridging → bridged.
+ *	 - btree + no explicit option, table doesn't bridge → native.
+ *
+ * `rel` is the open heap relation; `stmt->relation` already matches it.
+ */
+static bool
+o_cic_is_native_index(Relation rel, IndexStmt *stmt)
+{
+	ORelOids	oids;
+	OTable	   *o_table;
+	bool		native;
+	ListCell   *lc;
+	bool		orioledb_index_set = false;
+	bool		orioledb_index_value = true;
+
+	/* Anything other than btree is always bridged. */
+	if (stmt->accessMethod != NULL && strcmp(stmt->accessMethod, "btree") != 0)
+		return false;
+
+	/* Explicit storage option wins over the table default. */
+	foreach(lc, stmt->options)
+	{
+		DefElem    *def = lfirst_node(DefElem, lc);
+
+		if (strcmp(def->defname, "orioledb_index") == 0)
+		{
+			orioledb_index_set = true;
+			orioledb_index_value = defGetBoolean(def);
+			break;
+		}
+	}
+
+	if (orioledb_index_set)
+		return orioledb_index_value;
+
+	/* No explicit option → follow the table's index_bridging default. */
+	ORelOidsSetFromRel(oids, rel);
+	o_table = o_tables_get(oids);
+	native = o_table != NULL ? !o_table->index_bridging : true;
+	if (o_table)
+		o_table_free(o_table);
+	return native;
+}
+
 static void
 orioledb_utility_command(PlannedStmt *pstmt,
 						 const char *queryString,
@@ -1285,6 +1345,28 @@ orioledb_utility_command(PlannedStmt *pstmt,
 					{
 						String	   *ix_name;
 
+						/*
+						 * REINDEX INDEX CONCURRENTLY on a primary index of an
+						 * orioledb table is not supported: PK == table here,
+						 * so rebuilding requires rewriting every row under
+						 * AccessExclusiveLock.  Refuse upfront with a clear
+						 * message rather than silently downgrading or
+						 * partially proceeding.  (REINDEX TABLE CONCURRENTLY
+						 * skips the PK via ReindexConcurrentlySkipHook.)
+						 */
+						if (concurrently && iRel->rd_index->indisprimary)
+						{
+							char	   *ixn = pstrdup(iRel->rd_rel->relname.data);
+
+							relation_close(tbl, AccessShareLock);
+							relation_close(iRel, AccessShareLock);
+							ereport(ERROR,
+									(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									 errmsg("cannot REINDEX CONCURRENTLY primary index \"%s\" on an orioledb table",
+											ixn),
+									 errhint("Use REINDEX without CONCURRENTLY to rebuild the primary key.")));
+						}
+
 						ix_name = makeString(pstrdup(iRel->rd_rel->relname.data));
 						reindex_list = list_append_unique(reindex_list, ix_name);
 						if (concurrently)
@@ -1355,18 +1437,17 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									get_tablespace_name(tablespaceOid))));
 			}
 
-			if (orioledb_strict_mode)
-				elog(ERROR, "REINDEX CONCURRENTLY is not supported for orioledb tables yet");
-			else
-				elog(WARNING, "REINDEX CONCURRENTLY is not supported for orioledb tables yet, using a plain REINDEX instead");
-
-			foreach(lc, stmt->params)
-			{
-				DefElem    *opt = (DefElem *) lfirst(lc);
-
-				if (strcmp(opt->defname, "concurrently") == 0)
-					stmt->params = foreach_delete_current(stmt->params, lc);
-			}
+			/*
+			 * REINDEX CONCURRENTLY is allowed; PG's machinery creates a
+			 * `_ccnew` index and our ambuild/validate_scan hooks drive the
+			 * actual build through the same CIC plumbing CREATE INDEX
+			 * CONCURRENTLY uses.  The PK case is handled separately --
+			 * REINDEX INDEX CONCURRENTLY on a primary index errors below (PK
+			 * == table in orioledb, no concurrent path possible), and REINDEX
+			 * TABLE CONCURRENTLY skips the PK via a notice from PG's standard
+			 * list-walk (indisprimary is set on the heap relation's index
+			 * list, and we don't intercept).
+			 */
 		}
 	}
 	else if (IsA(pstmt->utilityStmt, TransactionStmt))
@@ -1491,16 +1572,34 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 			if (is_orioledb_rel(rel))
 			{
-				if (orioledb_strict_mode)
-				{
-					table_close(rel, lockmode);
-					elog(ERROR, "concurrent index creation is not supported for orioledb tables yet");
-				}
-				else
-				{
-					stmt->concurrent = false;
-					elog(WARNING, "concurrent index creation is not supported for orioledb tables yet, using a plain CREATE INDEX instead");
-				}
+				/*
+				 * orioledb CIC paths, dispatched by o_cic_is_native_index:
+				 *
+				 * - *Native* btree (USING orioledb, or USING btree on a table
+				 * without index_bridging and without
+				 * WITH(orioledb_index=false)): PG's DefineIndex(concurrent
+				 * =true) drives the multi-txn orchestration; orioledb_ambuild
+				 * installs OIndex with state=BUILDING_PHASE_2 and skips the
+				 * actual build.  Concurrent writers see BUILDING (via the
+				 * in-progress snapshot the OIndex sys-tree uses) and route
+				 * DML to the spool.  PG's phase-3 validate_index calls
+				 * orioledb_index_validate_scan, which runs the build, drains
+				 * the spool under AccessExclusiveLock, flips state to VALID,
+				 * and emits WAL_REC_CIC_PHASE_FLIP.  UNIQUE is enforced via
+				 * tuplesort during the build, and a post-drain index walk
+				 * that compares the unique-fields portion of adjacent leaf
+				 * tuples; a duplicate aborts CIC and leaves the OIndex in
+				 * BUILDING -- the user must DROP INDEX manually.
+				 *
+				 * - *Bridged* (any non-btree AM, or btree with
+				 * WITH(orioledb_index=false), or btree on a table whose
+				 * index_bridging is enabled): the index is a stock-PG index
+				 * keyed by bridge_ctid; ambuild lands in bridged_ambuild /
+				 * btbuild and PG's CIC machinery handles it natively, UNIQUE
+				 * included.  Don't second-guess any of it -- just let it
+				 * through.
+				 */
+				(void) o_cic_is_native_index(rel, stmt);
 			}
 			table_close(rel, lockmode);
 		}
@@ -2556,7 +2655,8 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary, Oid oldRelnode
 				o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
 				relation_close(ind, AccessShareLock);
 				o_define_index(rel, NULL, ind->rd_rel->oid, false,
-							   InvalidIndexNumber, oldRelnode, NULL);
+							   InvalidIndexNumber, oldRelnode,
+							   false, NULL);
 				closed = true;
 			}
 		}
@@ -3064,6 +3164,19 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					Assert(descr != NULL);
 					ix_num = o_find_ix_num_by_name(descr,
 												   rel->rd_rel->relname.data);
+
+					/*
+					 * REINDEX CONCURRENTLY renames the old index to
+					 * "<orig>_ccold" before dropping it, so a name-based
+					 * lookup will miss the corresponding OIndex (still stored
+					 * under the original name).  Fall back to a pg_class.oid
+					 * match -- the oid is stable across
+					 * index_concurrently_swap.
+					 */
+					if (ix_num == InvalidIndexNumber)
+						ix_num = o_find_ix_num_by_reloid(descr,
+														 rel->rd_rel->oid);
+
 					if (ix_num != InvalidIndexNumber)
 					{
 						String	   *relname;
@@ -3081,8 +3194,19 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						}
 						else if (!(drop_arg->dropflags &
 								   PERFORM_DELETION_INTERNAL) ||
-								 list_member(drop_index_list, relname))
+								 list_member(drop_index_list, relname) ||
+								 (drop_arg->dropflags &
+								  PERFORM_DELETION_CONCURRENT_LOCK))
 						{
+							/*
+							 * PERFORM_DELETION_CONCURRENT_LOCK is set only on
+							 * REINDEX CONCURRENTLY's "_ccold" drop after
+							 * index_concurrently_swap.  Without this branch
+							 * the OIndex would leak in our sys-tree because
+							 * the post-swap name doesn't match
+							 * drop_index_list and the drop is otherwise
+							 * marked INTERNAL.
+							 */
 							drop_index_list = list_delete(drop_index_list,
 														  relname);
 							o_index_drop(tbl, ix_num);
@@ -3851,7 +3975,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							o_index_drop(tbl, ix_num);
 							o_table_free(o_table);
 							o_define_index(tbl, rel, InvalidOid, false,
-										   InvalidIndexNumber, InvalidOid, NULL);
+										   InvalidIndexNumber, InvalidOid,
+										   false, NULL);
 						}
 					}
 					else if (rel->rd_options)
@@ -4242,7 +4367,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						ix_num--;
 					o_index_drop(tbl, ix_num);
 					o_define_index(tbl, NULL, rel->rd_rel->oid, false,
-								   InvalidIndexNumber, InvalidOid, NULL);
+								   InvalidIndexNumber, InvalidOid,
+								   false, NULL);
 				}
 			}
 			relation_close(tbl, AccessShareLock);

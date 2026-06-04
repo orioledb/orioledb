@@ -77,6 +77,10 @@ knownErrors = {
     r"ERROR:  could not create unique index \"[a-z0-9_]+\"": ["create_index"],
     r"ERROR:  relation \"[a-z0-9_]+\" does not exist": ["create_index"],
     r"ERROR:  index \"[a-z0-9_]+\" does not exist": ["create_index"],
+    # REINDEX INDEX CONCURRENTLY on a primary key is rejected upfront for
+    # orioledb tables (PK == table, requires a non-concurrent rewrite).
+    r"ERROR:  cannot REINDEX CONCURRENTLY primary index \"[a-z0-9_]+\" on an orioledb table":
+    ["create_index"],
 
 	# insert specific error
 	# error related to OrioleDB vs heap internal page size

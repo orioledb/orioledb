@@ -518,8 +518,80 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				}
 				else
 				{
-					build_secondary_index(msg->old_oids.relnode, o_table, o_descr,
-										  msg->ix_num, true, NULL);
+					OIndex	   *fresh;
+					OIndexState build_state;
+
+					/*
+					 * CIC: if this is a BUILDING secondary, the primary's own
+					 * build can fail at validate-scan time (e.g. on a/b with
+					 * b=0); we must not abort recovery on the replica when
+					 * that happens.  Try the build, log on error, leave the
+					 * placeholder in place.  Subsequent DML for this index is
+					 * filtered out by apply_tbl_*.
+					 */
+					fresh = o_indices_get(o_table->indices[msg->ix_num].oids,
+										  o_table->indices[msg->ix_num].type);
+					build_state = fresh ? fresh->state : OINDEX_STATE_VALID;
+					if (fresh)
+						free_o_index(fresh);
+
+					if (build_state != OINDEX_STATE_VALID)
+					{
+						MemoryContext saved_mctx = CurrentMemoryContext;
+						ResourceOwner saved_owner = CurrentResourceOwner;
+						ResourceOwner try_owner;
+						ORelOids	deferred_oids = o_table->indices[msg->ix_num].oids;
+
+						try_owner = ResourceOwnerCreate(saved_owner, "cic build try");
+						CurrentResourceOwner = try_owner;
+						PG_TRY();
+						{
+							build_secondary_index(msg->old_oids.relnode,
+												  o_table, o_descr,
+												  msg->ix_num, true, NULL);
+						}
+						PG_CATCH();
+						{
+							ErrorData  *edata;
+
+							MemoryContextSwitchTo(saved_mctx);
+							edata = CopyErrorData();
+							FlushErrorState();
+							ereport(LOG,
+									(errmsg("CIC replay: build of BUILDING "
+											"secondary (%u,%u,%u) deferred: %s",
+											deferred_oids.datoid,
+											deferred_oids.reloid,
+											deferred_oids.relnode,
+											edata->message)));
+							FreeErrorData(edata);
+						}
+						PG_END_TRY();
+
+						/*
+						 * Release whatever the build accumulated under the
+						 * temp owner (works for both success and the caught
+						 * error path), restore the outer owner, then drop the
+						 * temp.
+						 */
+						ResourceOwnerRelease(try_owner,
+											 RESOURCE_RELEASE_BEFORE_LOCKS,
+											 false, false);
+						ResourceOwnerRelease(try_owner,
+											 RESOURCE_RELEASE_LOCKS,
+											 false, false);
+						ResourceOwnerRelease(try_owner,
+											 RESOURCE_RELEASE_AFTER_LOCKS,
+											 false, false);
+						CurrentResourceOwner = saved_owner;
+						ResourceOwnerDelete(try_owner);
+					}
+					else
+					{
+						build_secondary_index(msg->old_oids.relnode,
+											  o_table, o_descr,
+											  msg->ix_num, true, NULL);
+					}
 				}
 
 				/*
@@ -557,22 +629,84 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 
 				/*
 				 * Participate as a worker in parallel index build.
+				 *
+				 * The leader may have already torn down its DSM segment (e.g.
+				 * CIC phase-1 replay caught a per-row error and returned
+				 * through PG_CATCH).  Treat a missing DSM as "leader
+				 * cancelled this build" rather than ERROR'ing out of
+				 * recovery_worker_main entirely — the latter would
+				 * terminate the worker, and PG's shm_mq doesn't clear
+				 * mq_receiver on detach, so a restart can't reclaim the
+				 * queue.  Stay alive, log, drop the message.
 				 */
 
 				seg = dsm_attach(msg->seg_handle);
 				if (seg == NULL)
-					ereport(ERROR,
-							(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-							 errmsg("could not map dynamic shared memory segment")));
+				{
+					ereport(LOG,
+							(errmsg("orioledb recovery worker %d: parallel index "
+									"build DSM segment %u no longer mapped; "
+									"leader must have aborted, skipping",
+									id, msg->seg_handle)));
+					data_pos += sizeof(RecoveryMsgWorkerIdxBuild);
+					MemoryContextReset(recovery_context);
+					MemoryContextSwitchTo(prev_context);
+					continue;
+				}
 
 				toc = shm_toc_attach(O_PARALLEL_RECOVERY_MAGIC,
 									 dsm_segment_address(seg));
 				if (toc == NULL)
-					ereport(ERROR,
-							(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-							 errmsg("invalid magic number in dynamic shared memory segment")));
+				{
+					ereport(LOG,
+							(errmsg("orioledb recovery worker %d: parallel index "
+									"build DSM segment %u has invalid magic; "
+									"leader must have aborted, skipping",
+									id, msg->seg_handle)));
+					dsm_detach(seg);
+					data_pos += sizeof(RecoveryMsgWorkerIdxBuild);
+					MemoryContextReset(recovery_context);
+					MemoryContextSwitchTo(prev_context);
+					continue;
+				}
 
-				_o_index_parallel_build_inner(seg, toc, NULL, NULL);
+				/*
+				 * Third race window: DSM was still mapped above, but the
+				 * leader can still tear down its SharedFileSet before our
+				 * tuplesort_attach_shared() inside the inner build picks it
+				 * up.  PG core then raises ERROR ("could not attach to a
+				 * SharedFileSet that is already destroyed") out of
+				 * SharedFileSetAttach.  Letting that propagate exits the
+				 * bgworker with code 1; the leader's idx_workers_alive_range
+				 * probe then permanently flags the pool as incomplete and
+				 * every subsequent CIC replay falls back to serial until the
+				 * replica is restarted.  Treat the same way as the dsm_attach
+				 * / shm_toc_attach misses above: swallow, log, drop the
+				 * message, stay alive.
+				 */
+				PG_TRY();
+				{
+					_o_index_parallel_build_inner(seg, toc, NULL, NULL);
+				}
+				PG_CATCH();
+				{
+					ErrorData  *edata;
+					MemoryContext ecxt;
+
+					ecxt = MemoryContextSwitchTo(recovery_context);
+					edata = CopyErrorData();
+					FlushErrorState();
+
+					ereport(LOG,
+							(errmsg("orioledb recovery worker %d: parallel index "
+									"build (DSM segment %u) aborted mid-flight: "
+									"%s; leader must have aborted, skipping",
+									id, msg->seg_handle, edata->message)));
+
+					FreeErrorData(edata);
+					MemoryContextSwitchTo(ecxt);
+				}
+				PG_END_TRY();
 
 				dsm_detach(seg);
 
@@ -856,6 +990,17 @@ apply_tbl_insert(OTableDescr *descr, OTuple tuple,
 		isPrimary = (i == PrimaryIndexNumber);
 		id = descr->indices[i];
 
+		/*
+		 * CIC: skip BUILDING secondaries.  On the primary they were either
+		 * spooled (drained later via standard btree WAL) or not touched at
+		 * all (depending on cache-state at the time of insert).  The replica
+		 * has no spool and the tree is still a placeholder; the eventual
+		 * phase-3 build/drain on the primary reaches us through normal btree
+		 * WAL.
+		 */
+		if (!isPrimary && id->state != OINDEX_STATE_VALID)
+			continue;
+
 		if (!isPrimary)
 		{
 			stuple = tts_orioledb_make_secondary_tuple(slot, descr->indices[i], true);
@@ -957,6 +1102,10 @@ apply_tbl_delete(OTableDescr *descr, OTuple key,
 		isPrimary = i == PrimaryIndexNumber;
 		id = descr->indices[i];
 
+		/* CIC: skip BUILDING secondaries.  See apply_tbl_insert. */
+		if (!isPrimary && id->state != OINDEX_STATE_VALID)
+			continue;
+
 		if (isPrimary)
 		{
 			BTreeModifyCallbackInfo callbackInfo = {
@@ -1037,6 +1186,10 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 	{
 		isPrimary = i == PrimaryIndexNumber;
 		tree = descr->indices[i];
+
+		/* CIC: skip BUILDING secondaries.  See apply_tbl_insert. */
+		if (!isPrimary && tree->state != OINDEX_STATE_VALID)
+			continue;
 
 		if (isPrimary)
 		{

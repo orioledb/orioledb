@@ -145,6 +145,9 @@ extern int64 orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumbe
 extern int64 orioledb_calculate_database_size(Oid dbOid);
 extern database_size_hook_type prev_database_size_hook;
 
+extern bool orioledb_reindex_concurrently_skip(Relation heapRelation,
+											   Relation indexRelation);
+
 typedef enum
 {
 	OParallelScanPageInvalid,

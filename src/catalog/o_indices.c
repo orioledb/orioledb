@@ -886,6 +886,17 @@ serialize_o_index(OIndex *o_index, int *size)
 		appendBinaryStringInfo(&str, (Pointer) o_index->exclops, sizeof(Oid) * o_index->nKeyFields);
 	appendBinaryStringInfo(&str, (Pointer) &o_index->immediate, sizeof(bool));
 
+	/*
+	 * CIC lifecycle state.  Encoded as a single trailing byte so records
+	 * written before this field was introduced read back as
+	 * OINDEX_STATE_VALID.  See deserialize_o_index().
+	 */
+	{
+		uint8		state_byte = (uint8) o_index->state;
+
+		appendBinaryStringInfo(&str, (Pointer) &state_byte, sizeof(state_byte));
+	}
+
 	*size = str.len;
 	return str.data;
 }
@@ -986,6 +997,23 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	memcpy(&oIndex->immediate, ptr, len);
 	ptr += len;
 
+	/*
+	 * Trailing OIndexState byte.  Records written before this field was
+	 * introduced have nothing here; default to OINDEX_STATE_VALID.
+	 */
+	if ((Size) (ptr - data) < length)
+	{
+		uint8		state_byte;
+
+		if ((ptr - data) + sizeof(state_byte) > length)
+			goto truncated;
+		memcpy(&state_byte, ptr, sizeof(state_byte));
+		ptr += sizeof(state_byte);
+		oIndex->state = (OIndexState) state_byte;
+	}
+	else
+		oIndex->state = OINDEX_STATE_VALID;
+
 	if ((ptr - data) != length)
 		goto truncated;
 
@@ -1008,6 +1036,8 @@ truncated:
  * OIndex to be used later in logical decoding. Otherwise
  * OIndexVersionReset should be passed.
  */
+OIndexState o_index_initial_state_override = OINDEX_STATE_VALID;
+
 OIndex *
 make_o_index(OTable *table, OIndexNumber ixNum, OIndexVersionMode ixVerMode)
 {
@@ -1044,6 +1074,17 @@ make_o_index(OTable *table, OIndexNumber ixNum, OIndexVersionMode ixVerMode)
 	}
 
 	index->data_version = ORIOLEDB_SYS_TREE_VERSION;
+
+	/*
+	 * Optional initial-state override for CREATE INDEX CONCURRENTLY. For
+	 * ix_num == InvalidIndexNumber (when the caller is reusing an existing
+	 * OIndex) and for primary/toast/bridge indexes we leave it alone; CIC
+	 * only ever overrides for the fresh secondary it just appended to
+	 * table->indices[].
+	 */
+	if (o_index_initial_state_override != OINDEX_STATE_VALID)
+		index->state = o_index_initial_state_override;
+
 	return index;
 }
 
@@ -1200,6 +1241,8 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 	descr->version = oIndex->indexVersion;
 	descr->refcnt = 0;
 	descr->valid = true;
+	descr->state = oIndex->state;
+	descr->builderOxid = oIndex->createOxid;
 	namestrcpy(&descr->name, oIndex->name.data);
 	descr->leafTupdesc = o_table_fields_make_tupdesc(oIndex->leafTableFields,
 													 oIndex->nLeafFields);
@@ -1614,6 +1657,50 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 
 	pfree(data);
 
+	return result;
+}
+
+/*
+ * Update only the OIndexState field of an existing OIndex sys-tree entry.
+ * Used by CREATE INDEX CONCURRENTLY to transition through phases.
+ * Reads the current record, mutates state, writes it back.  The
+ * sys-tree entry itself is identified by (indexOids, type), with its
+ * current version preserved.
+ */
+bool
+o_indices_set_state(ORelOids indexOids, OIndexType type,
+					char table_persistence,
+					OIndexState newState, OXid oxid, CommitSeqNo csn)
+{
+	OIndex	   *oIndex;
+	OIndexChunkKey key;
+	bool		result;
+	Pointer		data;
+	int			len;
+	BTreeDescr *sys_tree;
+
+	oIndex = o_indices_get_extended(indexOids, type, default_table_fetch_context);
+	if (!oIndex)
+		return false;
+
+	oIndex->state = newState;
+
+	data = serialize_o_index(oIndex, &len);
+	key.oids = oIndex->indexOids;
+	key.type = oIndex->indexType;
+	key.chunknum = 0;
+	key.version = oIndex->indexVersion;
+
+	free_o_index(oIndex);
+	systrees_modify_start();
+	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
+	result = generic_toast_update_optional_wal(&oIndicesToastAPI,
+											   (Pointer) &key, data, len, oxid,
+											   csn, sys_tree,
+											   table_persistence != RELPERSISTENCE_TEMP);
+	systrees_modify_end(table_persistence != RELPERSISTENCE_TEMP);
+
+	pfree(data);
 	return result;
 }
 
