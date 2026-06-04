@@ -18,8 +18,8 @@ SELECT orioledb_table_description('p_stock'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-   Column |    Type | Collation | Nullable | Droped       +
-  item_id | integer |    (null) |     true |  false       +
+   Column |    Type | Collation | Nullable | Dropped      +
+  item_id | integer |    (null) |     true |   false      +
  
 (1 row)
 
@@ -38,9 +38,9 @@ SELECT orioledb_table_description('c_stock'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-   Column |    Type | Collation | Nullable | Droped       +
-  item_id | integer |    (null) |     true |  false       +
-       ex | integer |    (null) |     true |  false       +
+   Column |    Type | Collation | Nullable | Dropped      +
+  item_id | integer |    (null) |     true |   false      +
+       ex | integer |    (null) |     true |   false      +
  
 (1 row)
 
@@ -60,9 +60,9 @@ SELECT orioledb_table_description('p_stock'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-   Column |    Type | Collation | Nullable | Droped       +
-  item_id | integer |    (null) |     true |  false       +
-  balance | integer |    (null) |     true |  false       +
+   Column |    Type | Collation | Nullable | Dropped      +
+  item_id | integer |    (null) |     true |   false      +
+  balance | integer |    (null) |     true |   false      +
  
 (1 row)
 
@@ -81,10 +81,10 @@ SELECT orioledb_table_description('c_stock'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-   Column |    Type | Collation | Nullable | Droped       +
-  item_id | integer |    (null) |     true |  false       +
-       ex | integer |    (null) |     true |  false       +
-  balance | integer |    (null) |     true |  false       +
+   Column |    Type | Collation | Nullable | Dropped      +
+  item_id | integer |    (null) |     true |   false      +
+       ex | integer |    (null) |     true |   false      +
+  balance | integer |    (null) |     true |   false      +
  
 (1 row)
 
