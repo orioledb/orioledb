@@ -305,7 +305,7 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 					MemSet(&rclauseset, 0, sizeof(rclauseset));
 					match_restriction_clauses_to_index(root, index, &rclauseset);
 
-					result = !rclauseset.nonempty;
+					result &= !rclauseset.nonempty;
 				}
 			}
 			o_table_free(o_table);
