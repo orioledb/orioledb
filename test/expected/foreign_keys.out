@@ -362,7 +362,7 @@ UPDATE pp_inc SET f1 = f1 + 1;
 ERROR:  duplicate key value violates unique constraint "pp_inc_pkey"
 DETAIL:  Key (f1)=(12) already exists.
 SELECT * FROM pp_inc ORDER BY f1;
- f1
+ f1 
 ----
  11
  12
