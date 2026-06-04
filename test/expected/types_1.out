@@ -122,7 +122,7 @@ SELECT * FROM o_test_int_array;
 (2 rows)
 
 ---
--- PostgreSQL has no full support for arrays comparsion with CID and XIP elements.
+-- PostgreSQL has no full support for arrays comparison with CID and XIP elements.
 -- We forbit create indices with such arrays.
 -- Behavior differs from postgres tables, which illustrated by tests below
 ---
@@ -263,9 +263,9 @@ SELECT orioledb_table_description('o_test_enum_index'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-     Column |        Type | Collation | Nullable | Droped +
-  num_weeks |     integer |    (null) |    false |  false +
-  happiness | o_happiness |    (null) |    false |  false +
+     Column |        Type | Collation | Nullable | Dropped+
+  num_weeks |     integer |    (null) |    false |   false+
+  happiness | o_happiness |    (null) |    false |   false+
  
 (1 row)
 
@@ -304,9 +304,9 @@ SELECT orioledb_table_description('o_test_enum_index'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-     Column |    Type | Collation | Nullable | Droped     +
-  num_weeks | integer |    (null) |    false |  false     +
-  happiness |     ??? |    (null) |     true |   true     +
+     Column |    Type | Collation | Nullable | Dropped    +
+  num_weeks | integer |    (null) |    false |   false    +
+  happiness |     ??? |    (null) |     true |    true    +
  
 (1 row)
 
@@ -376,14 +376,14 @@ SELECT orioledb_table_description('o_test_domain_index'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-     key |   myint |    (null) |    false |  false        +
-    key2 |  myint2 |    (null) |    false |  false        +
-       t |  mytime |    (null) |    false |  false        +
-       a | myarray |    (null) |    false |  false        +
-       b |  mybool |    (null) |    false |  false        +
-     val | integer |    (null) |    false |  false        +
-     net |    inet |    (null) |    false |  false        +
+  Column |    Type | Collation | Nullable | Dropped       +
+     key |   myint |    (null) |    false |   false       +
+    key2 |  myint2 |    (null) |    false |   false       +
+       t |  mytime |    (null) |    false |   false       +
+       a | myarray |    (null) |    false |   false       +
+       b |  mybool |    (null) |    false |   false       +
+     val | integer |    (null) |    false |   false       +
+     net |    inet |    (null) |    false |   false       +
  
 (1 row)
 
@@ -414,14 +414,14 @@ SELECT orioledb_table_description('o_test_domain_index'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column |    Type | Collation | Nullable | Droped        +
-     key |     ??? |    (null) |     true |   true        +
-    key2 |     ??? |    (null) |     true |   true        +
-       t |     ??? |    (null) |     true |   true        +
-       a |     ??? |    (null) |     true |   true        +
-       b |     ??? |    (null) |     true |   true        +
-     val | integer |    (null) |    false |  false        +
-     net |    inet |    (null) |    false |  false        +
+  Column |    Type | Collation | Nullable | Dropped       +
+     key |     ??? |    (null) |     true |    true       +
+    key2 |     ??? |    (null) |     true |    true       +
+       t |     ??? |    (null) |     true |    true       +
+       a |     ??? |    (null) |     true |    true       +
+       b |     ??? |    (null) |     true |    true       +
+     val | integer |    (null) |    false |   false       +
+     net |    inet |    (null) |    false |   false       +
  
 (1 row)
 

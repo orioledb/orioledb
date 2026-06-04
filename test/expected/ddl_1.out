@@ -61,13 +61,13 @@ SELECT * FROM o_ddl_check;
 (3 rows)
 
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |         C |    false |  false +
-      f2 | character varying |   default |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
+                  orioledb_table_description                   
+---------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1    +
+  Column |              Type | Collation | Nullable | Dropped +
+      f1 |              text |         C |    false |   false +
+      f2 | character varying |   default |    false |   false +
+      f3 |           integer |    (null) |     true |   false +
  
 (1 row)
 
@@ -75,13 +75,13 @@ SELECT orioledb_table_description('o_ddl_check'::regclass);
 ALTER TABLE o_ddl_check ALTER f1 DROP NOT NULL;
 ERROR:  column "f1" is in a primary key
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |         C |    false |  false +
-      f2 | character varying |   default |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
+                  orioledb_table_description                   
+---------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1    +
+  Column |              Type | Collation | Nullable | Dropped +
+      f1 |              text |         C |    false |   false +
+      f2 | character varying |   default |    false |   false +
+      f3 |           integer |    (null) |     true |   false +
  
 (1 row)
 
@@ -110,13 +110,13 @@ ERROR:  ALTER action OPTIONS cannot be performed on relation "o_ddl_check"
 DETAIL:  This operation is not supported for tables.
 ALTER TABLE o_ddl_check ALTER f2 DROP NOT NULL;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |         C |    false |  false +
-      f2 | character varying |   default |     true |  false +
-      f3 |           integer |    (null) |     true |  false +
+                  orioledb_table_description                   
+---------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1    +
+  Column |              Type | Collation | Nullable | Dropped +
+      f1 |              text |         C |    false |   false +
+      f2 | character varying |   default |     true |   false +
+      f3 |           integer |    (null) |     true |   false +
  
 (1 row)
 
@@ -141,13 +141,13 @@ SELECT * FROM o_ddl_check;
 
 ALTER TABLE o_ddl_check ALTER f2 SET NOT NULL;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |         C |    false |  false +
-      f2 | character varying |   default |    false |  false +
-      f3 |           integer |    (null) |     true |  false +
+                  orioledb_table_description                   
+---------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1    +
+  Column |              Type | Collation | Nullable | Dropped +
+      f1 |              text |         C |    false |   false +
+      f2 | character varying |   default |    false |   false +
+      f3 |           integer |    (null) |     true |   false +
  
 (1 row)
 
@@ -173,13 +173,13 @@ SELECT * FROM o_ddl_check;
 ALTER TABLE o_ddl_check DROP f2;
 ALTER TABLE o_ddl_check DROP f1;
 SELECT orioledb_table_description('o_ddl_check'::regclass);
-                  orioledb_table_description                  
---------------------------------------------------------------
- Compress = -1, Primary compress = -1, TOAST compress = -1   +
-  Column |              Type | Collation | Nullable | Droped +
-      f1 |              text |         C |     true |   true +
-      f2 | character varying |   default |     true |   true +
-      f3 |           integer |    (null) |     true |  false +
+                  orioledb_table_description                   
+---------------------------------------------------------------
+ Compress = -1, Primary compress = -1, TOAST compress = -1    +
+  Column |              Type | Collation | Nullable | Dropped +
+      f1 |              text |         C |     true |    true +
+      f2 | character varying |   default |     true |    true +
+      f3 |           integer |    (null) |     true |   false +
  
 (1 row)
 
@@ -1390,7 +1390,7 @@ SELECT orioledb_table_description('o_test_empty'::regclass);
                 orioledb_table_description                 
 -----------------------------------------------------------
  Compress = -1, Primary compress = -1, TOAST compress = -1+
-  Column | Type | Collation | Nullable | Droped           +
+  Column | Type | Collation | Nullable | Dropped          +
  
 (1 row)
 
