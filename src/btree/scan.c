@@ -1099,17 +1099,85 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 								  scan->leafImg,
 								  downlink.downlink,
 								  &extent);
+	if (!success)
+		elog(ERROR, "can not read leaf page from disk");
 	header = (BTreePageHeader *) scan->leafImg;
+
 	if (header->csn >= downlink.csn)
+	{
+		/*
+		 * Both halves of a page split share an undoLocation pointing at the
+		 * pre-split image: applying it to the right half pulls in items below
+		 * its lokey, to the left half items above its hikey.  Snapshot the
+		 * disk image's boundaries first; if undo changes any of them, fall
+		 * back to a key-range iterator (mirrors check_in_memory_leaf_page).
+		 */
+		bool		diskLeftmost = O_PAGE_IS(scan->leafImg, LEFTMOST);
+		bool		diskRightmost = O_PAGE_IS(scan->leafImg, RIGHTMOST);
+		bool		mismatch;
+		BTreePageItemLocator firstLoc;
+
+		if (!diskRightmost)
+			copy_fixed_hikey(scan->desc, &scan->keyRangeHigh, scan->leafImg);
+		else
+			clear_fixed_key(&scan->keyRangeHigh);
+
+		clear_fixed_key(&scan->keyRangeLow);
+		BTREE_PAGE_LOCATOR_FIRST(scan->leafImg, &firstLoc);
+		if (BTREE_PAGE_LOCATOR_IS_VALID(scan->leafImg, &firstLoc))
+		{
+			OTuple		firstTuple;
+
+			BTREE_PAGE_READ_LEAF_TUPLE(firstTuple, scan->leafImg, &firstLoc);
+			copy_fixed_key(scan->desc, &scan->keyRangeLow, firstTuple);
+		}
+
 		read_page_from_undo(scan->desc, scan->leafImg, header->undoLocation,
 							downlink.csn, NULL, BTreeKeyNone, NULL);
+
+		mismatch = O_PAGE_IS(scan->leafImg, LEFTMOST) != diskLeftmost ||
+			O_PAGE_IS(scan->leafImg, RIGHTMOST) != diskRightmost;
+
+		if (!mismatch && !diskRightmost)
+		{
+			OTuple		leafHikey;
+
+			BTREE_PAGE_GET_HIKEY(leafHikey, scan->leafImg);
+			if (o_btree_cmp(scan->desc,
+							&leafHikey, BTreeKeyNonLeafKey,
+							&scan->keyRangeHigh.tuple, BTreeKeyNonLeafKey) != 0)
+				mismatch = true;
+		}
+
+		if (!mismatch && !O_TUPLE_IS_NULL(scan->keyRangeLow.tuple))
+		{
+			BTreePageItemLocator undoFirstLoc;
+
+			BTREE_PAGE_LOCATOR_FIRST(scan->leafImg, &undoFirstLoc);
+			if (BTREE_PAGE_LOCATOR_IS_VALID(scan->leafImg, &undoFirstLoc))
+			{
+				OTuple		undoFirstTuple;
+
+				BTREE_PAGE_READ_LEAF_TUPLE(undoFirstTuple, scan->leafImg, &undoFirstLoc);
+				if (o_btree_cmp(scan->desc,
+								&undoFirstTuple, BTreeKeyLeafTuple,
+								&scan->keyRangeLow.tuple, BTreeKeyNonLeafKey) < 0)
+					mismatch = true;
+			}
+		}
+
+		if (mismatch)
+		{
+			scan->downlinkIndex++;
+			scan_make_iterator(scan, scan->keyRangeLow.tuple,
+							   scan->keyRangeHigh.tuple);
+			return true;
+		}
+	}
 
 	STOPEVENT(STOPEVENT_SCAN_DISK_PAGE,
 			  btree_page_stopevent_params(scan->desc,
 										  scan->leafImg));
-
-	if (!success)
-		elog(ERROR, "can not read leaf page from disk");
 
 	BTREE_PAGE_LOCATOR_FIRST(scan->leafImg, &scan->leafLoc);
 	scan->downlinkIndex++;
