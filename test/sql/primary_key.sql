@@ -18,6 +18,8 @@ SELECT i, '*' || i || repeat('*', i % 5) FROM generate_series(1, 60, 3) AS i;
 
 SELECT * FROM o_pk1;
 
+SET enable_seqscan = off;
+SET enable_bitmapscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 1;
 SELECT * FROM o_pk1 WHERE key = 1;
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 4;
@@ -138,7 +140,6 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4,5, NULL]);
 SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4,5, NULL]);
 
 -- Check for non-coersible case
-SET enable_seqscan = OFF;
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 1.0;
 SELECT * FROM o_pk1 WHERE key = 1.0;
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10.0;
@@ -216,6 +217,7 @@ EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19 ORDER 
 SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19 ORDER BY id DESC;
 
 RESET enable_seqscan;
+RESET enable_bitmapscan;
 
 -- Test for composite primary key
 

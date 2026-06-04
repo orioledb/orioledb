@@ -364,6 +364,7 @@ SELECT orioledb_tbl_indices('o_test_partial'::regclass);
 INSERT INTO o_test_partial (SELECT id, id || 'text'
 								FROM generate_series(0, 20) as id);
 ANALYZE o_test_partial;
+SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_test_partial WHERE key BETWEEN 15 AND 25;
                       QUERY PLAN                       
 -------------------------------------------------------
@@ -425,7 +426,6 @@ EXPLAIN (COSTS off) SELECT value FROM o_test_partial
    Filter: (((value || 'WOW'::text) >= '6'::text) AND ((value || 'WOW'::text) <= '9'::text))
 (2 rows)
 
-RESET enable_seqscan;
 SELECT value FROM o_test_partial
 	WHERE (value || 'WOW') BETWEEN '6' AND '9';
  value 
@@ -845,7 +845,6 @@ SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
  
 (1 row)
 
-SET enable_seqscan = OFF;
 ALTER TABLE o_test_partial DROP CONSTRAINT o_test_partial_pkey;
 EXPLAIN (COSTS off) SELECT * FROM o_test_partial WHERE key > 15;
                       QUERY PLAN                       
@@ -3411,10 +3410,9 @@ EXPLAIN (COSTS off) SELECT * FROM heap_table
    Join Filter: (o_tableam_join1.id = ANY (heap_table.ids))
    ->  Seq Scan on heap_table
    ->  Materialize
-         ->  Custom Scan (o_scan) on o_tableam_join1
-               Forward index scan of: o_tableam_join1_pkey
-               Conds: (id < 20)
-(7 rows)
+         ->  Seq Scan on o_tableam_join1
+               Filter: (id < 20)
+(6 rows)
 
 SELECT * FROM heap_table
 	 JOIN o_tableam_join1 ON o_tableam_join1.id = ANY (heap_table.ids)

@@ -123,6 +123,7 @@ INSERT INTO o_test_partial (SELECT id, id || 'text'
 								FROM generate_series(0, 20) as id);
 ANALYZE o_test_partial;
 
+SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_test_partial WHERE key BETWEEN 15 AND 25;
 SELECT * FROM o_test_partial WHERE key BETWEEN 15 AND 25;
 EXPLAIN (COSTS off) SELECT key FROM o_test_partial WHERE key BETWEEN 15 AND 25;
@@ -133,7 +134,7 @@ EXPLAIN (COSTS off) SELECT value FROM o_test_partial
 SELECT value FROM o_test_partial WHERE value BETWEEN '6' AND '9';
 EXPLAIN (COSTS off) SELECT value FROM o_test_partial
 	WHERE (value || 'WOW') BETWEEN '6' AND '9' ORDER BY value;
-RESET enable_seqscan;
+
 SELECT value FROM o_test_partial
 	WHERE (value || 'WOW') BETWEEN '6' AND '9';
 SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
@@ -143,7 +144,6 @@ UPDATE o_test_partial SET key = key + 100 WHERE key BETWEEN 5 AND 15;
 
 SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
 
-SET enable_seqscan = OFF;
 ALTER TABLE o_test_partial DROP CONSTRAINT o_test_partial_pkey;
 EXPLAIN (COSTS off) SELECT * FROM o_test_partial WHERE key > 15;
 SELECT * FROM o_test_partial WHERE key > 15;
