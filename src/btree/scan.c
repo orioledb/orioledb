@@ -76,6 +76,8 @@ typedef struct
 {
 	uint64		downlink;
 	CommitSeqNo csn;
+	OFixedShmemKey keyRangeLow;
+	OFixedShmemKey keyRangeHigh;
 } BTreeSeqScanDiskDownlink;
 
 struct BTreeSeqScan
@@ -128,9 +130,6 @@ struct BTreeSeqScan
 
 	OFixedKey	nextKey;
 
-	OFixedKey	historicalCoverageHigh;
-	bool		haveHistoricalCoverageHigh;
-
 	bool		needSampling;
 	BlockSampler sampler;
 	BlockNumber samplingNumber;
@@ -158,8 +157,10 @@ static void scan_make_iterator(BTreeSeqScan *scan, OTuple startKey, OTuple keyRa
 static void get_next_key(BTreeSeqScan *scan, BTreePageItemLocator *intLoc, OFixedKey *nextKey, Page page);
 static void ResourceOwnerRememberBTreeSeqScan(ResourceOwner owner, BTreeSeqScan *scan);
 static void ResourceOwnerForgetBTreeSeqScan(ResourceOwner owner, BTreeSeqScan *scan);
-static void scan_note_emitted_tuple(BTreeSeqScan *scan, OTuple tuple);
-static void scan_skip_covered_leaf_prefix(BTreeSeqScan *scan);
+static bool scan_trim_page_to_key_range(BTreeSeqScan *scan, Page p,
+										BTreePageItemLocator *loc,
+										OTuple keyRangeLow,
+										OTuple keyRangeHigh);
 
 /*
  * Resource owner integration for BTreeSeqScan.
@@ -416,7 +417,8 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 }
 
 static void
-add_on_disk_downlink(BTreeSeqScan *scan, uint64 downlink, CommitSeqNo csn)
+add_on_disk_downlink(BTreeSeqScan *scan, uint64 downlink, CommitSeqNo csn,
+					 OTuple keyRangeLow, OTuple keyRangeHigh)
 {
 	ParallelOScanDesc poscan = scan->poscan;
 
@@ -431,6 +433,12 @@ add_on_disk_downlink(BTreeSeqScan *scan, uint64 downlink, CommitSeqNo csn)
 		}
 		scan->diskDownlinks[scan->downlinksCount].downlink = downlink;
 		scan->diskDownlinks[scan->downlinksCount].csn = csn;
+		copy_fixed_shmem_key(scan->desc,
+							 &scan->diskDownlinks[scan->downlinksCount].keyRangeLow,
+							 keyRangeLow);
+		copy_fixed_shmem_key(scan->desc,
+							 &scan->diskDownlinks[scan->downlinksCount].keyRangeHigh,
+							 keyRangeHigh);
 		scan->downlinksCount++;
 	}
 	else
@@ -459,6 +467,10 @@ add_on_disk_downlink(BTreeSeqScan *scan, uint64 downlink, CommitSeqNo csn)
 				shared = (BTreeSeqScanDiskDownlink *) dsm_segment_address(scan->dsmSeg);
 				shared[index].downlink = downlink;
 				shared[index].csn = csn;
+				copy_fixed_shmem_key(scan->desc, &shared[index].keyRangeLow,
+									 keyRangeLow);
+				copy_fixed_shmem_key(scan->desc, &shared[index].keyRangeHigh,
+									 keyRangeHigh);
 				LWLockRelease(&poscan->downlinksPublish);
 				return;
 			}
@@ -968,7 +980,9 @@ iterate_internal_page(BTreeSeqScan *scan)
 		{
 			if (DOWNLINK_IS_ON_DISK(downlink))
 			{
-				add_on_disk_downlink(scan, downlink, scan->context.imgReadCsn);
+				add_on_disk_downlink(scan, downlink, scan->context.imgReadCsn,
+									 scan->keyRangeLow.tuple,
+									 scan->keyRangeHigh.tuple);
 				if (scan->poscan)
 					pg_atomic_fetch_sub_u32(&scan->poscan->downlinksWritersInProgress, 1);
 			}
@@ -1002,9 +1016,20 @@ iterate_internal_page(BTreeSeqScan *scan)
 					scan->hint.pageChangeCount = DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(downlink);
 					BTREE_PAGE_LOCATOR_FIRST(scan->leafImg, &scan->leafLoc);
 					if (readFromUndo)
-						scan_skip_covered_leaf_prefix(scan);
+						(void) scan_trim_page_to_key_range(scan, scan->leafImg,
+														   &scan->leafLoc,
+														   scan->keyRangeLow.tuple,
+														   scan->keyRangeHigh.tuple);
 					O_TUPLE_SET_NULL(scan->nextKey.tuple);
 					load_first_historical_page(scan);
+					if (scan->haveHistImg)
+					{
+						scan->haveHistImg =
+							scan_trim_page_to_key_range(scan, scan->histImg,
+														&scan->histLoc,
+														scan->keyRangeLow.tuple,
+														scan->keyRangeHigh.tuple);
+					}
 					return true;
 				}
 				else
@@ -1054,6 +1079,8 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 	bool		readFromUndo = false;
 	BTreePageHeader *header;
 	BTreeSeqScanDiskDownlink downlink;
+	OFixedKey	keyRangeLow;
+	OFixedKey	keyRangeHigh;
 	ParallelOScanDesc poscan = scan->poscan;
 
 	if (!poscan)
@@ -1078,6 +1105,10 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 		}
 		downlink = ((BTreeSeqScanDiskDownlink *) dsm_segment_address(scan->dsmSeg))[index];
 	}
+	copy_from_fixed_shmem_key(&keyRangeLow, &downlink.keyRangeLow);
+	copy_from_fixed_shmem_key(&keyRangeHigh, &downlink.keyRangeHigh);
+	copy_fixed_key(scan->desc, &scan->keyRangeLow, keyRangeLow.tuple);
+	copy_fixed_key(scan->desc, &scan->keyRangeHigh, keyRangeHigh.tuple);
 
 	success = read_page_from_disk(scan->desc,
 								  scan->leafImg,
@@ -1100,12 +1131,22 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 
 	BTREE_PAGE_LOCATOR_FIRST(scan->leafImg, &scan->leafLoc);
 	if (readFromUndo)
-		scan_skip_covered_leaf_prefix(scan);
+		(void) scan_trim_page_to_key_range(scan, scan->leafImg,
+										   &scan->leafLoc,
+										   keyRangeLow.tuple,
+										   keyRangeHigh.tuple);
 	scan->downlinkIndex++;
 	scan->hint.blkno = OInvalidInMemoryBlkno;
 	scan->hint.pageChangeCount = InvalidOPageChangeCount;
 	O_TUPLE_SET_NULL(scan->nextKey.tuple);
 	load_first_historical_page(scan);
+	if (scan->haveHistImg)
+	{
+		scan->haveHistImg =
+			scan_trim_page_to_key_range(scan, scan->histImg, &scan->histLoc,
+										keyRangeLow.tuple,
+										keyRangeHigh.tuple);
+	}
 	return true;
 }
 
@@ -1265,8 +1306,6 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 	clear_fixed_key(&scan->prevHikey);
 	clear_fixed_key(&scan->keyRangeHigh);
 	clear_fixed_key(&scan->keyRangeLow);
-	clear_fixed_key(&scan->historicalCoverageHigh);
-	scan->haveHistoricalCoverageHigh = false;
 	scan->isSingleLeafPage = false;
 	o_btree_load_shmem(desc);
 	if (!iterate_internal_page(scan) && !single_leaf_page_rel(scan))
@@ -1310,7 +1349,6 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	scan->initialized = false;
 	scan->checkpointNumberSet = false;
 	scan->haveHistImg = false;
-	scan->haveHistoricalCoverageHigh = false;
 	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
 
 	dlist_push_tail(&listOfScans, &scan->listNode);
@@ -1369,34 +1407,49 @@ btree_seq_scan_get_tuple_from_iterator(BTreeSeqScan *scan,
 	return result;
 }
 
-static void
-scan_note_emitted_tuple(BTreeSeqScan *scan, OTuple tuple)
+static bool
+scan_trim_page_to_key_range(BTreeSeqScan *scan, Page p,
+							BTreePageItemLocator *loc,
+							OTuple keyRangeLow,
+							OTuple keyRangeHigh)
 {
-	copy_fixed_key(scan->desc, &scan->historicalCoverageHigh, tuple);
-	scan->haveHistoricalCoverageHigh = true;
-}
+	if (!BTREE_PAGE_LOCATOR_IS_VALID(p, loc))
+		return true;
 
-static void
-scan_skip_covered_leaf_prefix(BTreeSeqScan *scan)
-{
-	if (!scan->haveHistoricalCoverageHigh ||
-		!BTREE_PAGE_LOCATOR_IS_VALID(scan->leafImg, &scan->leafLoc))
-		return;
-
-	while (BTREE_PAGE_LOCATOR_IS_VALID(scan->leafImg, &scan->leafLoc))
+	while (BTREE_PAGE_LOCATOR_IS_VALID(p, loc))
 	{
 		OTuple		key;
 		int			cmp;
 
-		BTREE_PAGE_READ_LEAF_TUPLE(key, scan->leafImg, &scan->leafLoc);
-		cmp = o_btree_cmp(scan->desc,
-						  &key, BTreeKeyLeafTuple,
-						  &scan->historicalCoverageHigh.tuple, BTreeKeyNonLeafKey);
-		if (cmp > 0)
-			break;
+		BTREE_PAGE_READ_LEAF_TUPLE(key, p, loc);
+		if (!O_TUPLE_IS_NULL(keyRangeLow))
+		{
+			cmp = o_btree_cmp(scan->desc,
+							  &key, BTreeKeyLeafTuple,
+							  &keyRangeLow, BTreeKeyNonLeafKey);
+			if (cmp < 0)
+			{
+				BTREE_PAGE_LOCATOR_NEXT(p, loc);
+				continue;
+			}
+		}
 
-		BTREE_PAGE_LOCATOR_NEXT(scan->leafImg, &scan->leafLoc);
+		if (!O_TUPLE_IS_NULL(keyRangeHigh))
+		{
+			cmp = o_btree_cmp(scan->desc,
+							  &key, BTreeKeyLeafTuple,
+							  &keyRangeHigh, BTreeKeyNonLeafKey);
+			if (cmp >= 0)
+			{
+				BTREE_PAGE_LOCATOR_SET_INVALID(loc);
+				return false;
+			}
+		}
+
+		return true;
 	}
+
+	return true;
 }
 
 static bool
@@ -1532,10 +1585,7 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 	{
 		tuple = btree_seq_scan_get_tuple_from_iterator(scan, tupleCsn, hint);
 		if (!O_TUPLE_IS_NULL(tuple))
-		{
-			scan_note_emitted_tuple(scan, tuple);
 			return tuple;
-		}
 	}
 
 	while (true)
@@ -1567,6 +1617,11 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 					}
 				}
 				load_next_historical_page(scan);
+				scan->haveHistImg =
+					scan_trim_page_to_key_range(scan, scan->histImg,
+												&scan->histLoc,
+												scan->keyRangeLow.tuple,
+												scan->keyRangeHigh.tuple);
 			}
 
 			if (!scan->haveHistImg)
@@ -1636,7 +1691,6 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 			BTREE_PAGE_LOCATOR_NEXT(scan->histImg, &scan->histLoc);
 			if (!O_TUPLE_IS_NULL(tuple))
 			{
-				scan_note_emitted_tuple(scan, tuple);
 				if (hint)
 					*hint = scan->hint;
 				return tuple;
@@ -1659,10 +1713,7 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 																	   tupleCsn,
 																	   hint);
 						if (!O_TUPLE_IS_NULL(tuple))
-						{
-							scan_note_emitted_tuple(scan, tuple);
 							return tuple;
-						}
 					}
 				}
 				else
@@ -1693,7 +1744,6 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 		BTREE_PAGE_LOCATOR_NEXT(scan->leafImg, &scan->leafLoc);
 		if (!O_TUPLE_IS_NULL(tuple))
 		{
-			scan_note_emitted_tuple(scan, tuple);
 			if (hint)
 				*hint = scan->hint;
 			return tuple;
@@ -1765,10 +1815,7 @@ btree_seq_scan_getnext_raw_internal(BTreeSeqScan *scan, MemoryContext mctx,
 
 		tuple = btree_seq_scan_get_tuple_from_iterator_raw(scan, &end, hint);
 		if (!end)
-		{
-			scan_note_emitted_tuple(scan, tuple);
 			return tuple;
-		}
 	}
 
 	while (!BTREE_PAGE_LOCATOR_IS_VALID(scan->leafImg, &scan->leafLoc))
@@ -1784,10 +1831,7 @@ btree_seq_scan_getnext_raw_internal(BTreeSeqScan *scan, MemoryContext mctx,
 
 					tuple = btree_seq_scan_get_tuple_from_iterator_raw(scan, &end, hint);
 					if (!end)
-					{
-						scan_note_emitted_tuple(scan, tuple);
 						return tuple;
-					}
 				}
 			}
 			else
@@ -1811,7 +1855,6 @@ btree_seq_scan_getnext_raw_internal(BTreeSeqScan *scan, MemoryContext mctx,
 
 	if (!tupHdr->deleted)
 	{
-		scan_note_emitted_tuple(scan, tuple);
 		if (hint)
 			*hint = scan->hint;
 
