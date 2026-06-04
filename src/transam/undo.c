@@ -2187,12 +2187,41 @@ undo_xact_callback(XactEvent event, void *arg)
 				{
 					bool		wrote_xlog;
 
-					/* Commit o - o : independent Oriole transaction */
+					/*
+					 * Commit o - o : independent Oriole transaction.
+					 *
+					 * From WAL_REC_COMMIT becoming durable until
+					 * current_oxid_commit() stamps the CSN, primary and
+					 * streaming replica can desync under ERROR: the replica
+					 * sees commit, the primary's abort handler runs
+					 * apply_undo_stack and undoes the change.  Bracket the
+					 * whole sequence -- WAL emit + flush done by wal_commit
+					 * inside assign_xidless_commit_lsn, the optional
+					 * XLogFlush / SyncRep wait, precommit/commit -- in a
+					 * single CRIT_SECTION so any in-band failure promotes to
+					 * PANIC + crash recovery, which restores consistency by
+					 * replaying WAL all the way.
+					 *
+					 * START_CRIT must come BEFORE assign_xidless_commit_lsn
+					 * because that call is what runs wal_commit() ->
+					 * flush_local_wal() on the non-replorigin path; once the
+					 * record has been flushed, the replica may already have
+					 * picked it up via the walsender.
+					 *
+					 * Caveat: when get_xidless_commit_lsn_hook fires earlier
+					 * (replorigin path) wal_commit has already emitted and
+					 * flushed WAL_REC_COMMIT from inside PG's
+					 * RecordTransactionCommit; the brief window from there
+					 * until our START_CRIT below stays unprotected.  We
+					 * accept that to keep the section a clean local block;
+					 * the previous cross-function design (commit b0488bd5)
+					 * covered that window via a global
+					 * commit_wal_record_added flag.
+					 */
+
+					START_CRIT_SECTION();
 
 					flushPos = assign_xidless_commit_lsn(oxid, &wrote_xlog);
-
-					elog(DEBUG4, "XACT_EVENT_COMMIT [independent Oriole transaction] oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d flushPos %X/%X",
-						 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap, LSN_FORMAT_ARGS(flushPos));
 
 					flushPos = Max(flushPos, XactLastCommitEnd);
 
@@ -2205,44 +2234,43 @@ undo_xact_callback(XactEvent event, void *arg)
 					/* Wait for synchronous replication if needed */
 					if (!XLogRecPtrIsInvalid(flushPos))
 						SyncRepWaitForLSN(flushPos, true);
+
+					current_oxid_precommit();
+
+					csn = GetCurrentCSN();
+					if (csn == COMMITSEQNO_INPROGRESS)
+						csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
+
+					current_oxid_commit(csn);
+
+					END_CRIT_SECTION();
+
+					elog(DEBUG4, "XACT_EVENT_COMMIT [independent Oriole transaction] oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d flushPos %X/%X",
+						 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap, LSN_FORMAT_ARGS(flushPos));
 				}
 				else
 				{
 					Assert(TransactionIdIsValid(heapXid));
 
 					/*
-					 * Case h - h : independent heap transaction
+					 * Case h - h : independent heap transaction.
+					 *
+					 * No orioledb WAL is emitted on this path -- the heap
+					 * commit record is PG's own, and replica desync isn't
+					 * possible by this codepath -- so no critical section is
+					 * needed.
 					 */
 
 					set_oxid_xlog_ptr(oxid, XactLastCommitEnd);
+
+					current_oxid_precommit();
+
+					csn = GetCurrentCSN();
+					if (csn == COMMITSEQNO_INPROGRESS)
+						csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
+
+					current_oxid_commit(csn);
 				}
-
-				current_oxid_precommit();
-
-				if (STOPEVENTS_ENABLED())
-				{
-					/*
-					 * XACT_EVENT_COMMIT runs under HOLD_INTERRUPTS, so a
-					 * normal CHECK_FOR_INTERRUPTS() is suppressed here. In
-					 * test/debug builds (orioledb.enable_stopevents) we
-					 * briefly lift the holdoff so a query cancel delivered
-					 * while parked at the stop event can fire and drive the
-					 * precommit→abort transition the test means to
-					 * exercise.  Production builds skip this entirely — the
-					 * stop event is compiled out to a no-op and the holdoff
-					 * stays intact.
-					 */
-					RESUME_INTERRUPTS();
-					STOPEVENT(STOPEVENT_AFTER_CSN_PRECOMMIT, NULL);
-					CHECK_FOR_INTERRUPTS();
-					HOLD_INTERRUPTS();
-				}
-
-				csn = GetCurrentCSN();
-				if (csn == COMMITSEQNO_INPROGRESS)
-					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
-
-				current_oxid_commit(csn);
 				Assert(enable_rewind || !csn_is_retained_for_rewind(csn));
 
 				if (enable_rewind)
@@ -2732,11 +2760,29 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 			precommit_undo_stack((UndoLogType) i, oxid, true);
 
 		if (!is_recovery_process())
+		{
+			/*
+			 * See undo_xact_callback's XACT_EVENT_COMMIT comment: the
+			 * WAL_REC_COMMIT -> CSN-stamp gap must promote ERROR to PANIC to
+			 * avoid primary/replica desync.  START_CRIT must come before
+			 * wal_commit() since the latter flushes WAL_REC_COMMIT to the
+			 * walsender's view.  In recovery wal_commit is skipped and no
+			 * replica desync is possible, so the CRIT_SECTION is only entered
+			 * on the live path.
+			 */
+			START_CRIT_SECTION();
 			wal_commit(oxid, get_current_logical_xid(), true);
-
-		current_oxid_precommit();
-		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
-		current_oxid_commit(csn);
+			current_oxid_precommit();
+			csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
+			current_oxid_commit(csn);
+			END_CRIT_SECTION();
+		}
+		else
+		{
+			current_oxid_precommit();
+			csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
+			current_oxid_commit(csn);
+		}
 
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			on_commit_undo_stack((UndoLogType) i, oxid, true);

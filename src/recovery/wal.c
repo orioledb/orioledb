@@ -305,8 +305,6 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	walPos = flush_local_wal(true, !isAutonomous);
 	local_wal.has_material_changes = false;
 
-	elog(DEBUG4, "[%s] COMMIT oxid %lu logicalXid %u %X/%X", __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
-
 	return walPos;
 }
 
@@ -493,8 +491,6 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 	Assert(local_wal.buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
 
 	heapXid = GetTopTransactionIdIfAny();
-
-	elog(DEBUG4, "WAL_REC_XID oxid %lu logicalXid %u heapXid %u", oxid, logicalXid, heapXid);
 
 	rec = (WALRecXid *) (&local_wal.buffer[local_wal.buffer_offset]);
 	rec->recType = WAL_REC_XID;
@@ -763,8 +759,6 @@ flush_local_wal_if_needed(int required_length)
 	Assert(!is_recovery_process());
 	if (local_wal.buffer_offset + required_length + XID_RESERVED_LENGTH > LOCAL_WAL_BUFFER_SIZE)
 	{
-		elog(DEBUG4, "[%s] Going to FLUSH WAL on local WAL buffer overflow", __func__);
-
 		START_CRIT_SECTION();
 		log_logical_wal_container(local_wal.buffer, local_wal.buffer_offset, false);
 		reset_local_wal_buffer();
