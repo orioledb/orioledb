@@ -5,13 +5,14 @@ from itertools import chain, groupby
 import re
 import os
 import glob
+import stat
 import unittest
 
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 from .base_test import wait_stopevent
 
-from testgres.enums import NodeStatus
+from typing import List, Optional
 
 
 class FilesTest(BaseTest):
@@ -595,3 +596,84 @@ class FilesTest(BaseTest):
 		stat2 = os.stat(fname)
 
 		self.assertEqual(stat1.st_blocks, stat2.st_blocks)
+
+
+class FilesGroupAccessTest(BaseTest):
+
+	def initNode(self,
+	             base_port: int,
+	             suffix='tgsn',
+	             has_archiving: bool = False,
+	             allows_streaming: bool = False,
+	             override_base_dir: Optional[str] = None,
+	             initdb_args: Optional[List[str]] = None):
+		args = list(initdb_args) if initdb_args is not None else [
+		    "--no-locale", "--encoding=UTF8"
+		]
+		if "--allow-group-access" not in args:
+			args.append("--allow-group-access")
+		return super().initNode(base_port,
+		                        suffix=suffix,
+		                        has_archiving=has_archiving,
+		                        allows_streaming=allows_streaming,
+		                        override_base_dir=override_base_dir,
+		                        initdb_args=args)
+
+	def setUp(self):
+		super().setUp()
+		self.node.append_conf('postgresql.conf', "log_min_messages = notice\n")
+
+	def test_group_read_access_mode(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_test (
+				id int NOT NULL,
+				val int NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+			INSERT INTO o_test
+				SELECT i, i FROM generate_series(1, 100, 1) i;
+			CHECKPOINT;
+			""")
+		node.stop()
+
+		checked_dirs = 0
+		checked_files = 0
+
+		for dir_name in ('orioledb_data', 'orioledb_undo'):
+			dir_path = os.path.join(node.data_dir, dir_name)
+
+			self.assertTrue(os.path.isdir(dir_path))
+
+			dir_mode = os.stat(dir_path).st_mode
+			self.assertEqual(dir_mode & (stat.S_IRGRP | stat.S_IXGRP),
+			                 stat.S_IRGRP | stat.S_IXGRP)
+
+			for child_name in os.listdir(dir_path):
+				child_path = os.path.join(dir_path, child_name)
+				child_mode = os.stat(child_path).st_mode
+
+				# Check data files below specific database directory
+				if os.path.isdir(child_path):
+					self.assertEqual(
+					    child_mode & (stat.S_IRGRP | stat.S_IXGRP),
+					    stat.S_IRGRP | stat.S_IXGRP)
+					checked_dirs += 1
+
+					for db_name in os.listdir(child_path):
+						db_path = os.path.join(child_path, db_name)
+
+						self.assertTrue(os.path.isfile(db_path))
+						self.assertEqual(
+						    os.stat(db_path).st_mode & stat.S_IRGRP,
+						    stat.S_IRGRP)
+
+						checked_files += 1
+				elif os.path.isfile(child_path):
+					self.assertEqual(child_mode & stat.S_IRGRP, stat.S_IRGRP)
+					checked_files += 1
+
+		self.assertGreater(checked_dirs, 0)
+		self.assertGreater(checked_files, 0)

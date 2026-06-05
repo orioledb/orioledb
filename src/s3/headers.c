@@ -13,6 +13,7 @@
  */
 #include "postgres.h"
 
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "orioledb.h"
@@ -24,7 +25,6 @@
 #include "s3/worker.h"
 
 #include "catalog/pg_tablespace.h"
-#include "common/file_perm.h"
 #include "common/file_utils.h"
 #include "common/hashfn.h"
 #include "common/pg_prng.h"
@@ -207,7 +207,7 @@ read_from_file(S3HeaderTag tag, uint32 values[S3_HEADER_NUM_VALUES],
 	Assert(headerSize <= BLCKSZ);
 
 	filename = btree_filename(tag.key, tag.segNum, tag.checkpointNum);
-	fd = BasicOpenFilePerm(filename, O_RDWR | O_CREAT | PG_BINARY, pg_file_create_mode);
+	fd = BasicOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
 	if (fd <= 0)
 		ereport(FATAL,
 				(errcode_for_file_access(),
@@ -251,7 +251,7 @@ write_to_file(S3HeaderTag tag, uint32 values[S3_HEADER_NUM_VALUES])
 	Assert(headerSize <= BLCKSZ);
 
 	filename = btree_filename(tag.key, tag.segNum, tag.checkpointNum);
-	fd = BasicOpenFilePerm(filename, O_RDWR | O_CREAT | PG_BINARY, pg_file_create_mode);
+	fd = BasicOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
 	if (fd <= 0)
 		ereport(FATAL,
 				(errcode_for_file_access(),
@@ -346,7 +346,7 @@ change_buffer(S3HeadersBuffersGroup *group, int index, S3HeaderTag tag)
 
 		filename = btree_filename(prevTag.key, prevTag.segNum,
 								  prevTag.checkpointNum);
-		fd = BasicOpenFilePerm(filename, O_RDWR | PG_BINARY, pg_file_create_mode);
+		fd = BasicOpenFile(filename, O_RDWR | PG_BINARY);
 		pfree(filename);
 		if (fd > 0)
 		{
@@ -1148,7 +1148,7 @@ initial_parts_counting_callback(S3HeaderTag tag)
 	read_from_file(tag, values, &dirty);
 
 	filename = btree_filename(tag.key, tag.segNum, tag.checkpointNum);
-	fd = BasicOpenFilePerm(filename, O_RDWR | PG_BINARY, pg_file_create_mode);
+	fd = BasicOpenFile(filename, O_RDWR | PG_BINARY);
 	if (fd <= 0)
 		ereport(FATAL,
 				(errcode_for_file_access(),
@@ -1227,7 +1227,7 @@ eviction_callback(S3HeaderTag tag)
 	bool		haveLoadedParts = false;
 
 	filename = btree_filename(tag.key, tag.segNum, tag.checkpointNum);
-	fd = BasicOpenFilePerm(filename, O_RDWR | PG_BINARY, pg_file_create_mode);
+	fd = BasicOpenFile(filename, O_RDWR | PG_BINARY);
 	pfree(filename);
 
 	if (fd <= 0)
