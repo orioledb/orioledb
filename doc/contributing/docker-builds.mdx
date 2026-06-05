@@ -216,6 +216,8 @@ Other important build args:
 - `--build-arg BUILD_CC_COMPILER="gcc"`
   - Choose the C compiler. Default is `clang`.
   - You can choose either `clang` or `gcc`.
+- `--build-arg PG_LLVM_ENABLED="false"`
+  - Disable PostgreSQL LLVM/JIT support when the distro LLVM is too new for the selected PostgreSQL/OrioleDB combination.
 
 For example, to build an image using Alpine version `3.21`, the `gcc` compiler and PostgreSQL version `16`, use the following command:
 
