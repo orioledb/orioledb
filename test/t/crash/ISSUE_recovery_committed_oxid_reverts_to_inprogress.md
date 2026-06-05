@@ -1,9 +1,11 @@
-# Recovery livelock: a committed (finalized) oxid's CSN slot reverts to `INPROGRESS`, stranding parallel-recovery workers
+# Recovery livelock: the standby regresses `globalXmin` below `writtenXmin`, so a committed-and-FROZEN oxid is mis-read as `IN_PROGRESS`, stranding parallel-recovery workers
 
-**Status:** root cause strongly evidenced, one instrumentation gap remains before it is *proven* mechanically.
+**Status: ROOT CAUSE CONFIRMED** (trial caught 2026-06-05, `CAUGHT_noinj_replica.log`, 6.4 GB). Direct replica-side instrumentation captured the cause, the effect, the 1 ms causal ordering, and the raw slot value. See §5.
 **Branch:** `add_stress_bank_account_test`
 **Mode:** streaming standby, parallel recovery. **Injection-independent** (reproduces under plain `SIGKILL` of the primary postmaster, no injection point attached).
 **Symptom:** the replica's parallel-recovery workers spin forever in `o_btree_modify_handle_conflicts()`; the replica never finishes replay and never shuts down.
+
+> **Note on naming.** The original title/§2 framing ("a committed oxid's CSN slot *reverts* to INPROGRESS") turned out to be **wrong**: the slot is **never** rewritten. It holds `COMMITSEQNO_FROZEN` the whole time. What changes is the **horizon under it** — the standby's `globalXmin` regresses below `writtenXmin`, which disables the `oxid < globalXmin ⇒ FROZEN` fast-path and forces a *slot read* that maps the FROZEN special value to `IN_PROGRESS`. The "revert/clobber" hypothesis is **refuted** (§4, §5). Earlier sections below are kept for the investigation trail but are superseded by §5.
 
 ---
 
@@ -48,13 +50,13 @@ So both conflicting oxids:
 3. were then read as **`INPROGRESS` (csn=0)** ~5 million times — which is the spin, and
 4. were *also* read as **`FROZEN`** a handful of times.
 
-This rules out the earlier "never finalized" hypothesis: the oxid **was** finalized and **then reverted** to `INPROGRESS`. This is the same finalize-then-revert pattern previously observed for oxid 483 (finalized to CSN 369, then read INPROGRESS for 5.6 s).
+This rules out the "never finalized" hypothesis: the oxid **was** finalized. The `result_csn=0` reads were originally (mis)interpreted as a "finalize-then-revert". **§5 corrects this:** the slot is never rewritten — it holds `COMMITSEQNO_FROZEN (0x3)`, and the `result_csn=0` (`IN_PROGRESS`) reads are the FROZEN slot being mis-mapped after `globalXmin` regressed below the oxid. The `result=FROZEN` reads are the *fast-path* (`oxid < globalXmin`) firing in the brief window before the regression; the `result_csn=0` reads are the slot-read path firing after it.
 
 ## 3. The deadlock topology (why a single reverted slot freezes the whole replica)
 
 ```
-worker A (pid 3997315) ──spins on──▶ oxid 610  (committed, slot now reads INPROGRESS)
-worker B (pid 3997316) ──spins on──▶ oxid 616  (committed, slot now reads INPROGRESS)
+worker A (pid 3997315) ──spins on──▶ oxid 610  (committed; FROZEN slot mis-read as IN_PROGRESS)
+worker B (pid 3997316) ──spins on──▶ oxid 616  (committed; FROZEN slot mis-read as IN_PROGRESS)
         │                                  ▲
         │ spinning workers never advance    │ finalize happens only in the
         │ their commitPtr                    │ leader drain, bounded by listPtr
@@ -79,29 +81,44 @@ worker B (pid 3997316) ──spins on──▶ oxid 616  (committed, slot now re
 | CSN-slot **collision** (two oxids share a slot) | **ruled out** | `xid_circular_buffer_size = 524288`; max oxid in trial ~3618 → `oxid % size` cannot collide. |
 | **commit-then-rollback** of the same txn | **ruled out** | the stuck oxids are on `path=commit-defer` and were finalized to a *normal* CSN (610→461); they are committed, not aborted. |
 | Injection-point artifact | **ruled out** | reproduced with `RR_INJECTION_POINTS=NONE`, plain `SIGKILL`. |
-| **`NORMAL → INPROGRESS`** slot overwrite (`set_oxid_csn` / `advance_oxids`) | **not observed** — but see §5 | dedicated CLOBBER trace gated on `is_recovery_process() && IS_NORMAL(old) && !IS_NORMAL(new)` fired **0 times**. |
+| **`NORMAL → INPROGRESS`** slot overwrite (`set_oxid_csn` / `advance_oxids`) | **ruled out** | CLOBBER trace fired 0 times; and the decisive spin-site trace shows `rawSlotCsn=3` (`FROZEN`) on every spinning worker — the slot is **never** rewritten to `INPROGRESS` (§5). |
+| **any slot rewrite / "revert"** (the original hypothesis) | **ruled out** | at the spin site the raw `xidBuffer` slot reads `COMMITSEQNO_FROZEN (0x3)`, not `INPROGRESS (0x0)`. The slot is correct; the *horizon* is wrong (§5). |
 
-## 5. The remaining gap — and why `CLOBBER=0` is *not* exoneration
+## 5. CONFIRMED mechanism — `globalXmin` regresses below `writtenXmin`; a FROZEN slot is read as `IN_PROGRESS`
 
-The CLOBBER trace was gated on `COMMITSEQNO_IS_NORMAL(old)`. The four **`FROZEN` reads** of 610/616 are the tell it missed: `result=FROZEN` is returned by `oxid_get_csn`'s top guard `oxid < globalXmin`, so `globalXmin` is **non-monotonic** around these oxids — it advances past them (stamping the slot `FROZEN` via `advance_global_xmin`, csn `0x3`) and later recedes (after the primary crash resets the horizon).
+A spin-site trace was added at the exact point a recovery worker reads `conflictOxid` as in-progress (`o_btree_modify_handle_conflicts`, `src/btree/modify.c`): it logs the **raw `xidBuffer` slot value** plus `globalXmin`/`writtenXmin` via the `oxid_debug_raw_slot()` accessor (`src/transam/oxid.c`). A trial caught on 2026-06-05 (`CAUGHT_noinj_replica.log`, 6.4 GB, 5,109,500 spins) captured the whole chain **on the replica**.
 
-That means the slot's value just before it reads `INPROGRESS` is most plausibly **`FROZEN (0x3)`, not `NORMAL`**. The transition that strands the worker is therefore:
-
+**The cause — the replica's own `update_run_xmin()` writes `globalXmin` backward, below `writtenXmin`:**
 ```
-FROZEN (0x3)  ──▶  INPROGRESS (0x0)        ← re-initialization of an already-committed, frozen slot
+17:35:48.992 [8513] runxmin-backward func=update_run_xmin
+             old_globalXmin=352 → new_globalXmin=248  writtenXmin=352  nextXid=468  recovery_xmin=468  queueEmpty=0  belowWritten=1
+```
+`queueEmpty=0` ⇒ the backward value came from the `xmin_queue`'s oldest entry (a committed/frozen oxid re-entered the in-flight set and dragged the horizon back), **not** the `nextXid` fallback.
+
+**The effect — 1 ms later, every spinning worker reads a FROZEN slot and gets `IN_PROGRESS`:**
+```
+17:35:48.993 [8516] conflict-inprogress opOxid=378 conflictOxid=320 rawSlotCsn=3 globalXmin=248 writtenXmin=352 oxidGEglobalXmin=1 belowWritten=1
+17:35:48.994 [8517] conflict-inprogress opOxid=427 conflictOxid=337 rawSlotCsn=3 globalXmin=248 writtenXmin=352 oxidGEglobalXmin=1 belowWritten=1
+17:35:48.998 [8518] conflict-inprogress opOxid=469 conflictOxid=351 rawSlotCsn=3 globalXmin=248 writtenXmin=352 oxidGEglobalXmin=1 belowWritten=1
 ```
 
-most likely via **`advance_oxids`** re-initializing the slot when the reset horizon brings the oxid back into the `[nextXid, xmax)` init range. Because `FROZEN` is **not** `NORMAL`, the CLOBBER filter's `IS_NORMAL(old)` predicate **silently skipped exactly this write**. So `CLOBBER=0` proves only "no *committed→INPROGRESS* write," not "no revert." This is the third too-narrow predicate this investigation has tripped over (after the arbitrary `1000` reset threshold and a stray `)` in a drain grep); the lesson is to **log all writes and filter in analysis**, never filter at the source.
+Every field corroborates the mechanism:
 
-### The one experiment that would close it
+- **`rawSlotCsn=3` = `COMMITSEQNO_FROZEN`** on *all* spinners. The slot is **never** rewritten to `INPROGRESS (0x0)` — it holds the legitimate `FROZEN` value `advance_global_xmin` stamped when the oxid committed. **No clobber, no revert.**
+- **`globalXmin=248`** equals the value the regression just wrote (352→248), with **1 ms causal ordering** (`.992` regress → `.993` first spin).
+- conflictOxids **320 / 337 / 351 all lie in the band `[248, 352)`** = the re-exposed frozen region:
+  - `≥ globalXmin (248)` ⇒ `oxidGEglobalXmin=1` ⇒ the `oxid < globalXmin ⇒ FROZEN` fast-path in `oxid_get_csn` is **skipped**;
+  - `< writtenXmin (352)` ⇒ `belowWritten=1` ⇒ the slot is already frozen.
 
-Broaden the recovery slot-write trace to log **every** write to a tracked oxid's slot — `func`, `seq`, `old`, `new`, with **no old-value filter** — then re-catch. The expected confirming line is literally:
+So `oxid_get_csn(320)` skips its fast-path, reads the slot (`FROZEN`, a *special* value), maps the special value to **`IN_PROGRESS`**, and the worker spins forever. It is not one oxid but the **entire `[248,352)` band** of committed-and-frozen oxids mis-resolved at once (here, 3 workers on 3 oxids).
 
-```
-csn-trace slot-write seq=… func=advance_oxids oxid=610 old=0x3(FROZEN) new=0x0(INPROGRESS)
-```
+**Why the standby can regress at all (the two opposed guards):**
+- steady-state `advance_global_xmin()` is monotonic — `if (globalXmin > prevGlobalXmin)` (`src/transam/oxid.c:1166`), never backward;
+- recovery `update_run_xmin()` / `free_run_xmin()` use the **reversed** guard `if (xmin < globalXmin) write(xmin)` (`src/recovery/recovery.c:2533`, `:2545`) with **no `writtenXmin` floor**, so they can shove `globalXmin` back into the already-frozen region.
 
-If that line appears with `globalXmin` having receded below 610 just before it, the mechanism is mechanically proven: **a primary crash makes the replica's `globalXmin`/`nextXid` horizon recede, and `advance_oxids` re-initializes the slot of an already-committed (frozen) oxid back to `INPROGRESS`, after which the recovery conflict handler spins on it forever.**
+**Correlation check:** in the same hunt, clean trials and the known-extent-leak trials all had replica `runxmin-backward = 0`; only the livelock trial had replica `runxmin-backward = 1` (352→248). **Replica `globalXmin`-below-`writtenXmin` regression ⟺ livelock.**
+
+> The earlier "the slot is re-initialized FROZEN→INPROGRESS by `advance_oxids`" guess (and the whole "revert/clobber" line) is **refuted**: the slot stays FROZEN; `advance_oxids` never touches it (it would need `nextXid` to regress, which never happens — see the parent investigation). The single moving part is `globalXmin`.
 
 ## 6. Reproduction (self-contained, no local scripts)
 
@@ -131,15 +148,16 @@ A caught trial is identified by: replica `postgresql.log` growing without bound,
 
 - `fb1a8acc` fixed the *original* recovery livelock (eager-WAL / in-memory abort not propagated to the standby) — **verified**.
 - `200073b5` wrapped the buggy commit-flow window in a crit section so the primary **PANICs instead of silently rolling back** — verified: 6/7 error injections are now harmless, the primary TRAPs, and replica/primary stay consistent.
-- **This issue is distinct from both.** It is a *liveness* defect in parallel recovery's deferred-commit finalization that survives those fixes and needs no injection: a committed oxid's CSN slot is reverted to `INPROGRESS` by horizon re-initialization after a primary crash, and the recovery conflict handler's no-wait spin turns that into an unrecoverable livelock.
+- **This issue is distinct from both.** It is a *liveness* defect in parallel recovery's horizon bookkeeping that survives those fixes and needs no injection: the standby's recovery `update_run_xmin()` regresses `globalXmin` below `writtenXmin`, so committed-and-FROZEN oxids in the re-exposed band are mis-read as `IN_PROGRESS`, and the recovery conflict handler's no-wait spin turns that into an unrecoverable livelock.
 
-## 8. Suggested fix directions (for discussion, not yet implemented)
+## 8. Fix directions
 
-1. **Don't re-initialize a committed slot.** In `advance_oxids`, refuse to overwrite a slot whose current value is `FROZEN`/`NORMAL` back to `INPROGRESS` during recovery — a committed/frozen oxid must never regress.
-2. **Make the recovery conflict handler yield.** A worker spinning on a conflicting oxid with `waitCallback == NULL` should at minimum advance/yield so it cannot pin `listPtr` against the leader's drain — breaking the circular wait even if a stale `INPROGRESS` is briefly observed.
-3. **Keep `globalXmin` monotonic across the crash boundary** on the standby, so the horizon cannot recede below already-finalized oxids.
+1. **(Primary, directly targets the confirmed cause) Floor the recovery `globalXmin` write at `writtenXmin`.** In `update_run_xmin()` / `free_run_xmin()` (`src/recovery/recovery.c:2533`, `:2545`), never let `globalXmin` drop below `writtenXmin`: slots in `[runXmin, writtenXmin)` have already been frozen/paged, so exposing them to the slot-read path mis-maps `FROZEN`→`IN_PROGRESS`. Concretely, clamp the value written to `globalXmin` to `max(xmin, writtenXmin)` (the `runXmin` write can stay as-is; it is `globalXmin` that the visibility fast-path keys on). This is the one-line root-cause fix.
+   - Open question to settle before shipping: *why* does a committed/frozen oxid re-enter the `xmin_queue` (the `queueEmpty=0` source of the backward value)? The floor stops the *symptom*; the re-entry may be a second bug worth fixing at its source.
+2. **(Defence in depth) Make the recovery conflict handler yield.** A worker spinning on a conflicting oxid with `waitCallback == NULL` should advance/yield instead of busy-waiting, so it cannot pin `listPtr` against the leader's drain — breaking the circular wait even if a stale state is briefly observed.
+3. **(Defence in depth) Treat a `FROZEN` slot read as committed-visible, not `IN_PROGRESS`.** If `oxid_get_csn` reads `COMMITSEQNO_FROZEN` from the slot itself (not just via the `oxid < globalXmin` fast-path), it should resolve to *visible/frozen*, never `IN_PROGRESS` — a frozen slot can never legitimately mean in-progress.
 
-Of these, (1) targets the proven-most-likely write; (2) is the robust liveness backstop regardless of the exact write path.
+(1) removes the cause; (2) and (3) are independent backstops that each break the livelock even if (1) is incomplete.
 
 ## 9. Newly observed *second* replica failure mode — `UNDO_REC_EXISTS` assertion crash
 
