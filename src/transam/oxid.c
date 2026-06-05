@@ -170,6 +170,23 @@ static OBuffersDesc buffersDesc = {
 static TransactionId acquire_logical_xid_wrapper(bool *isValidHeapXid);
 static void advance_global_xmin(OXid newXid);
 
+/*
+ * csn-trace debug accessor: read the raw in-memory xidBuffer slot value for an
+ * oxid plus the current globalXmin/writtenXmin watermarks, WITHOUT applying the
+ * "oxid < globalXmin => FROZEN" fast-path that oxid_get_csn() uses.  Lets a
+ * caller at a spin site see why oxid_get_csn() returned IN_PROGRESS: a literal
+ * INPROGRESS (0x0) slot, vs a stale FROZEN (0x3) slot exposed because globalXmin
+ * regressed below an already-frozen oxid.
+ */
+void
+oxid_debug_raw_slot(OXid oxid, CommitSeqNo *rawCsn, OXid *globalXmin,
+					OXid *writtenXmin)
+{
+	*rawCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn);
+	*globalXmin = pg_atomic_read_u64(&xid_meta->globalXmin);
+	*writtenXmin = pg_atomic_read_u64(&xid_meta->writtenXmin);
+}
+
 Size
 oxid_shmem_needs(void)
 {
@@ -611,6 +628,17 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 		if (pg_atomic_compare_exchange_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn,
 										   &oldCsn, csn))
 		{
+#ifdef USE_INJECTION_POINTS
+			/* csn-trace: catch a committed slot being reset to a non-committed
+			 * value (the CSN clobber). is_recovery_process() gate keeps this off
+			 * the primary commit path's crit section (where elog would TRAP). */
+			if (is_recovery_process() && COMMITSEQNO_IS_NORMAL(oldCsn) &&
+				!COMMITSEQNO_IS_NORMAL(csn))
+				elog(LOG, "csn-trace slot-write seq=%lu gen=%lu pid=%d func=set_oxid_csn oxid=%lu old=%lu new=%lu CLOBBER",
+					 (unsigned long) (recovery_trace_seq_ptr ? pg_atomic_fetch_add_u64(recovery_trace_seq_ptr, 1) : 0),
+					 (unsigned long) (recovery_trace_generation_ptr ? pg_atomic_read_u64(recovery_trace_generation_ptr) : 0),
+					 MyProcPid, (unsigned long) oxid, (unsigned long) oldCsn, (unsigned long) csn);
+#endif
 			Assert(oldCsn != COMMITSEQNO_FROZEN);
 			return;
 		}
@@ -1260,6 +1288,17 @@ advance_oxids(OXid new_xid)
 		xmax = Min(new_xid + 1, pg_atomic_read_u64(&xid_meta->writtenXmin) + xid_circular_buffer_size);
 		for (; xid < xmax; xid++)
 		{
+#ifdef USE_INJECTION_POINTS
+			{
+				CommitSeqNo _old = pg_atomic_read_u64(&xidBuffer[xid % xid_circular_buffer_size].csn);
+
+				if (is_recovery_process() && COMMITSEQNO_IS_NORMAL(_old))
+					elog(LOG, "csn-trace slot-write seq=%lu gen=%lu pid=%d func=advance_oxids oxid=%lu old=%lu new=0 CLOBBER nextXid_range",
+						 (unsigned long) (recovery_trace_seq_ptr ? pg_atomic_fetch_add_u64(recovery_trace_seq_ptr, 1) : 0),
+						 (unsigned long) (recovery_trace_generation_ptr ? pg_atomic_read_u64(recovery_trace_generation_ptr) : 0),
+						 MyProcPid, (unsigned long) xid, (unsigned long) _old);
+			}
+#endif
 			pg_atomic_write_u64(&xidBuffer[xid % xid_circular_buffer_size].csn,
 								COMMITSEQNO_INPROGRESS);
 			pg_atomic_write_u64(&xidBuffer[xid % xid_circular_buffer_size].commitPtr,
