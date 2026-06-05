@@ -171,3 +171,13 @@ So a replica backend hit `Assert(UNDO_REC_EXISTS(undoType, undo_loc))` at `src/b
 **Evidence saved:** `test/t/crash/results/CAUGHT_divergence_1_{primary,replica}.log` (replica ~169 MB, primary ~247 MB). The replica log's tail carries the `TRAP` line above; the 77 `orioledb_tbl_check` hits in the *primary* log are just the primary executing that check statement, not failures.
 
 **Detection note:** this failure currently lands in the harness's "divergence" bucket via the scalar-check `except` handler. It should be split into its own bucket (grep the replica log for `TRAP: failed Assert("UNDO_REC_EXISTS`) so undo-retention crashes are not conflated with real PK/SK divergences or with the does-not-shut-down livelock.
+
+### Important: the "divergence" bucket conflates *three* unrelated outcomes
+
+The harness's single "divergence" label has now masked three different things. Two are **not** this issue and one is **already known**:
+
+1. **`orioledb structural check returned false` → the KNOWN extent leak.** Fingerprint `NOTICE: Extent X 1 is neither free or busy` + `Corrupted index name = o_bank_account_token_uniq` (SK only; PK always clean), emitted from `check_extents()` at `src/btree/check.c:404`. This is documented in `extent_leak_issue.md` with a *different* root cause (a phase-1 split right-page invisible to the top-down downlink walk in `check_walk_btree`). It is **not** the recovery livelock and is **not** shown to be caused by the `globalXmin` regression — although `belowWritten=1` regressions have been observed co-occurring on the primary in the same trial, which is at most a lead for the *extent-leak* investigation, not evidence here.
+2. **`UNDO_REC_EXISTS` assertion crash** (above) — a replica-side undo-retention TRAP; possibly the undo sibling of this issue.
+3. **The does-not-shut-down livelock** — this issue proper.
+
+A correct harness should bucket these separately (`grep` for `Extent .* is neither free or busy`, `TRAP: failed Assert("UNDO_REC_EXISTS`, and `does not shut down` respectively) rather than collapsing all three into "divergence".
