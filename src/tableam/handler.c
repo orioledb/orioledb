@@ -1183,7 +1183,19 @@ orioledb_index_build_range_scan(Relation heapRelation,
 		descr = relation_get_descr(heapRelation);
 		Assert(descr != NULL);
 
-		seq_scan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc, &o_in_progress_snapshot, NULL);
+		/*
+		 * In a parallel index build PG hands us a TableScanDesc whose
+		 * rs_parallel was allocated by table_parallelscan_initialize and
+		 * sized by orioledb_parallelscan_estimate to fit a
+		 * ParallelOScanDescData.  Pass it down to make_btree_seq_scan so
+		 * workers coordinate on the same primary tree instead of each
+		 * scanning the whole tree independently (which would lead to
+		 * duplicate bridge_ctid emissions and trip PG's GIN parallel-merge
+		 * AssertCheckItemPointers / GinBufferStoreTuple invariants on PG18).
+		 */
+		seq_scan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc,
+									   &o_in_progress_snapshot,
+									   scan ? (ParallelOScanDesc) scan->rs_parallel : NULL);
 		primarySlot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
 
 		/* Arrange for econtext's scan tuple to be the tuple under test */
