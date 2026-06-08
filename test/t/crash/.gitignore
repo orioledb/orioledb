@@ -1,0 +1,4 @@
+# Test artifacts -- never commit (results/ holds multi-GB caught logs)
+results/
+__pycache__/
+*.pyc
