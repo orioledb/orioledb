@@ -420,6 +420,32 @@ o_buffers_write_if_exists(OBuffersDesc *desc, Pointer buf, uint32 tag,
 	return o_buffers_rw(desc, buf, tag, offset, size, true, true);
 }
 
+/*
+ * Write one ORIOLEDB_BLCKSZ-aligned page straight to the on-disk file,
+ * bypassing the o_buffers cache.
+ *
+ * Useful at checkpoint time when the caller knows the same data will
+ * stay hot in another in-memory copy (e.g. the xidmap / undo circular
+ * buffers, which keep the slot/record contents themselves and answer
+ * subsequent reads from there rather than from the o_buffers cache).
+ * Going through o_buffers_write() in that case would only pollute the
+ * cache with a copy that nobody will ever read.
+ *
+ * Caller must not call this concurrently for the same OBuffersDesc with
+ * other paths that mutate desc->curFile (the process-local open-file
+ * cache); the typical pattern is to hold the same write lock that
+ * serialises the eviction path.
+ */
+void
+o_buffers_write_page_direct(OBuffersDesc *desc, char *data, uint32 tag,
+							int64 offset)
+{
+	Assert(OBuffersMaxTagIsValid(tag));
+	Assert(offset >= 0 && offset % ORIOLEDB_BLCKSZ == 0);
+
+	write_buffer_data(desc, data, tag, offset / ORIOLEDB_BLCKSZ);
+}
+
 static void
 o_buffers_flush(OBuffersDesc *desc,
 				uint32 tag,
