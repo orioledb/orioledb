@@ -914,8 +914,12 @@ class RrStressTest(BaseTest):
 				restart_deadline = time.time() + RESTART_TIMEOUT
 				restart_attempts = 0
 				last_exc = None
-				while (time.time() < restart_deadline
-				       and not stop.is_set()):
+				# NB: do NOT gate this restart on `stop`.  A SIGKILL above may
+				# have just killed the postmaster; if `stop` was set meanwhile
+				# (duration elapsed) and we skipped the restart, the cluster
+				# would be left dead and teardown checks would fail spuriously.
+				# Always bring it back at least once.
+				while (time.time() < restart_deadline):
 					restart_attempts += 1
 					try:
 						node.start()
@@ -1051,6 +1055,25 @@ class RrStressTest(BaseTest):
 		stop.set()
 		for t in threads:
 			t.join()
+
+		# A SIGKILL can land right as `duration` elapses, leaving the primary
+		# mid-restart; the teardown checks below would then hit a refused
+		# connection (a harness race, not a product bug).  Wait up to 10s for
+		# the primary to accept connections again.  If it is STILL down after
+		# 10s that is itself a real bug, so we stop waiting and let the checks
+		# surface it rather than masking it.
+		_ready_deadline = time.monotonic() + 10.0
+		_node_ready = False
+		while time.monotonic() < _ready_deadline:
+			try:
+				node.execute("SELECT 1")
+				_node_ready = True
+				break
+			except Exception:
+				time.sleep(0.3)
+		if not _node_ready:
+			print('[teardown] primary did not accept connections within 10s '
+			      'after the final kill -- proceeding (possible real restart bug)')
 
 		# Final authoritative check against the PG log.  Match both
 		# `PANIC` (ereport-driven) and `TRAP:` (Assert-driven crashes
