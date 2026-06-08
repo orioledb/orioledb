@@ -135,38 +135,53 @@ So by construction `writtenXmin ≤ globalXmin` *always* (`writtenXmin` is *assi
 
 **Load-bearing assumption:** *once the horizon passes oxid X, no oxid `< X` ever rejoins the unfinished set.* True in normal operation (oxids are allocated monotonically; a finished oxid stays finished), so the min — and thus the watermark — only moves forward.
 
-### What violates it: a crash-aborted in-flight oxid surfacing late
+### What violates it: a *deferred* crash-rollback whose stamped xmin races ahead of its oxid
 
-The assumption is broken by OrioleDB's **eager WAL + crash-rollback** path:
+The assumption is broken by OrioleDB's **eager WAL + deferred crash-rollback** path:
 
-1. A transaction's row changes are WAL-logged *before* commit. When the primary is `SIGKILL`ed, its in-flight transactions have UPDATE records in the WAL but no terminator.
-2. The primary restarts, crash-recovers, and at recovery-finish **emits `ROLLBACK` WAL records** for every transaction that was in-flight at crash time (the `o_emit_recovery_finish_rollbacks` path). These are *new forward WAL*, streamed to the standby.
-3. The standby (here, started streaming at `0/3000000` from a base backup) replays them as a **mass `abort-defer` burst** — in the caught trial, **22 in-flight oxids aborted in 8 ms, 0 commits**: oxids 452, 362, 426, 444, 446, 360, 454, 378, 404, 439, 427, 352, 374, **248**, 401, 392, 399, …
-4. Replaying the `ROLLBACK` for oxid **248** runs `recovery_switch_to_oxid(248)` → fresh `HASH_ENTER` → **`pairingheap_add(xmin_queue, …)` at `recovery.c:1919`** — inserting the low oxid 248 into the horizon queue **below the already-advanced `writtenXmin=352`**.
-5. `update_run_xmin` then reads 248 as the new queue-min and writes `globalXmin = 248 < writtenXmin = 352` — the §5 fault.
+1. A transaction's row changes are WAL-logged *before* commit. When the primary is `SIGKILL`ed, its in-flight transactions have UPDATE records in the WAL but **no terminator** (commit/rollback record).
+2. The restarted primary's `recovery_finish()` **aborts each such in-flight oxid in memory after end-of-redo**, then emits a stand-alone `WAL_REC_ROLLBACK` for it via **`wal_emit_recovery_finish_rollback` (`wal.c:485-504`)**. (The normal abort path `wal_rollback` no-ops here because the startup process never wrote the txn's material changes into *its* `local_wal` — see that function's comment; this is the fix for **orioledb#876 / `fb1a8acc`**.) These rollbacks are *new forward WAL*, streamed to the standby.
+3. The standby replays them as a **mass `abort-defer` burst** — in the caught trial, **22 in-flight oxids aborted in 8 ms, 0 commits**, in WAL/commit order (not oxid order): 452, 362, 426, 444, 446, 360, 454, 378, 404, 439, 427, 352, 374, **248**, 401, 392, 399, …
+4. Replaying `ROLLBACK(248)` runs `recovery_switch_to_oxid(248)` → fresh `HASH_ENTER` → **`pairingheap_add(xmin_queue, …)` at `recovery.c:1919`** — inserting the low oxid 248 into the horizon queue **below the already-advanced `writtenXmin = 352`**.
+5. `update_run_xmin` reads 248 as the new queue-min and writes `globalXmin = 248 < writtenXmin = 352` — the §5 fault.
 
-Evidence: `ROLLBACK (248 0 0 - xmin 468 csn 438)` is present in **`CAUGHT_noinj_primary.log`** (the primary emitted it; `0 0` = no heap xid, an orioledb-only txn); 248 has **zero** `commit-defer` pushes in the whole log; the burst is preceded by `started streaming WAL from primary at 0/3000000` (post-crash reconnect).
+### The true root: the rollback is stamped with `runXmin`-at-emit, not the oxid's real horizon
 
-### Why `writtenXmin` = 352 = an aborted oxid is the whole story
+Both finish paths stamp the record with **`runXmin` *at emission time*** — `add_finish_wal_record(WAL_REC_ROLLBACK, pg_atomic_read_u64(&xid_meta->runXmin))` (`wal.c:452-453` normal, `wal.c:495-496` recovery-finish). For a *deferred* rollback this is wrong: by the time `recovery_finish` emits it, `runXmin` has raced far past the oxid.
 
-Both 248 and 352 are crash-aborted, and `writtenXmin` sits exactly at 352. That is the signature, not a coincidence:
+The caught trial proves it. Each burst record's carried `xmin` vs its oxid:
 
-- **352 was the oldest in-flight oxid the standby *knew about*** — so the horizon correctly stalled at 352 and froze everything below it.
-- **248 was an *older* in-flight oxid the standby *did not* know about** — it opened on the primary *before* the standby's streaming start (`0/3000000`), so it was never in this session's `xmin_queue`, and the horizon sailed past it. Its existence is revealed only by the late crash-`ROLLBACK`.
+```
+oxid=248  carried_xmin=468   ← 248 < 468  (primary had already frozen it)
+oxid=332  carried_xmin=468   ← 332 < 468
+oxid=345  carried_xmin=468   ← 345 < 468
+…all other burst members:    oxid >= carried_xmin   (genuinely live when rolled back)
+```
 
-So the watermark logic was *locally correct* (352 genuinely was the oldest *known* open oxid); it was defeated by an **old, unknown-open oxid surfacing late**. Note: **sorting the abort burst does not help** — the horizon is a *minimum*, so `min(248, …) = 248` regardless of processing order. The lever is **membership** (whether 248 enters the horizon set at all), not order.
+The carried xmins climb monotonically across the burst (`66, 121, 147, 179, 223, 326, 346, 468`) — that is `runXmin` advancing as `recovery_finish` sweeps the in-flight set, ending at `runXmin = nextXid = 468` (`free_run_xmin`). So the **low oxids swept last carry the highest xmin**; `carried_xmin = 468 ≫ oxid = 248` is the fingerprint of the deferred emission. A *normal* `wal_rollback` of 248 would have stamped `runXmin ≈ 248`.
+
+This corrects two earlier mis-statements:
+
+- **248 was *not* "unknown-open" / pre-stream-start.** It is in the *same* crash-rollback burst as 352; both were in-flight on the original primary. 248 is special only because its deferred rollback was emitted *last*, with a stale-high stamped xmin.
+- **`writtenXmin = 352` is not "the oldest known-open oxid".** It is simply the incremental freeze frontier reached by the *earlier* burst members (whose oxids/xmins climb toward 352) **before** the late, low oxid 248 is processed. The freeze happens *during* the burst, so arrival order matters: process 248 first and `writtenXmin` never passes it.
+- Consequently **sorting the burst by oxid *would* help** (contrary to an earlier claim that "the horizon is a min so order is irrelevant") — because freezing is incremental, oxid-ascending order pins `globalXmin` at 248 first. But the principled discriminator is better than sorting: **`oxid < record.carried_xmin`** uniquely flags the deferred-late rollbacks ({248, 332, 345}) using the primary's own stamped horizon, with no buffering/reordering. (`oxid < writtenXmin` is only the *symptom* site; a live rollback such as `oxid=452, carried_xmin=352` legitimately has `452 ≥ writtenXmin` and *should* move the horizon.)
+
+The original primary never froze 248 — it was genuinely fresh/in-flight there. The "frozen" status is a **recovery-side artifact**: the *restarted* primary's `runXmin` ran past 248 (its start record predates the redo/checkpoint start, so 248 isn't in the restarted primary's recovery `xmin_queue`) before `recovery_finish` emitted its rollback. The same shape that bites the standby, one level up.
 
 ### End-to-end chain
 
 ```
-SIGKILL primary
-  → primary crash-recovery finish emits ROLLBACK for in-flight oxids (incl. 248, < writtenXmin)
-  → standby replays ROLLBACK(248) → recovery_switch_to_oxid → pairingheap_add(xmin_queue) [recovery.c:1919]
-       (inserts oxid 248 below writtenXmin=352, which the standby had frozen past while 248 was unknown-open)
-  → update_run_xmin reads queue-min=248 → writes globalXmin=248 < writtenXmin=352 [recovery.c:2556]   (Layer A)
+SIGKILL primary mid-transaction (oxid 248 in-flight, no terminator in WAL)
+  → restarted primary recovery_finish() aborts 248 in memory, but runXmin has raced to 468
+  → wal_emit_recovery_finish_rollback(248) emits ROLLBACK stamped xmin=runXmin=468 (≫ 248)  [wal.c:495]
+  → standby replays ROLLBACK(248) → recovery_switch_to_oxid → pairingheap_add(xmin_queue)    [recovery.c:1919]
+       (inserts oxid 248 below the standby's writtenXmin=352)
+  → update_run_xmin reads queue-min=248 → writes globalXmin=248 < writtenXmin=352            [recovery.c:2556]   (Layer A)
   → oxid_get_csn skips the oxid<globalXmin fast-path, reads FROZEN slot, maps it to IN_PROGRESS
-  → recovery workers spin on committed-frozen oxids [248,352) → listPtr pinned → livelock
+  → recovery workers spin on committed-frozen oxids in [248,352) → listPtr pinned → livelock
 ```
+
+This is a **second-order effect of `fb1a8acc` (#876)**: that fix added the deferred ROLLBACK marker to cure "standby stuck INPROGRESS forever (no marker)", but the marker it emits carries a `runXmin`-at-recovery-finish xmin inconsistent with its low oxid — and replaying *that* marker regresses the standby horizon. The missing-marker livelock was replaced by a marker-that-regresses-the-horizon livelock.
 
 ## 7. Reproduction (self-contained, no local scripts)
 
@@ -200,15 +215,15 @@ A caught trial is identified by: replica `postgresql.log` growing without bound,
 
 ## 9. Fix directions
 
-Ordered from most-principled (deepest) to most-local. The upstream cause (§6) is now understood, so the options split between *preventing the bad `xmin_queue` insert* and *tolerating it*.
+Ordered from most-principled (deepest, at the *emission* site on the primary) to most-local (tolerate it on the replica). §6 shows the root is a **deferred recovery-finish rollback stamped with `runXmin`-at-emit**, so the cleanest fixes act where that stamp is produced or consumed.
 
-1. **(Deepest — true root) Don't advance the horizon past an unknown-open oxid.** The standby froze past oxid 248 because the base backup / checkpoint that seeded it did not account for 248 still being open on the primary. If the seed `runXmin`/`globalXmin` reflected the primary's true oldest in-flight oxid at backup time, `writtenXmin` would never have frozen `[248, …)`. Correct but the largest change (touches checkpoint/backup xmin recording).
-2. **(Targets the bad insert — matches the "handle these oxids specially" intuition) Don't add an already-frozen crash-aborted oxid to the horizon queue.** When a `ROLLBACK` is replayed for an oxid `< writtenXmin`, that oxid is already frozen/retired: it needs its **undo applied** but it must **not** participate in the MVCC horizon. Skip the `pairingheap_add(xmin_queue, …)` at `recovery.c:1919` for such oxids so `update_run_xmin` never sees a sub-`writtenXmin` min. Caveat to verify: the abort's undo must still be applied and its abort state recorded; only its `xmin` participation is suppressed.
+1. **(Deepest — fix the stamp at the source) Emit the recovery-finish rollback with an `xmin` consistent with its oxid.** In `wal_emit_recovery_finish_rollback` (`wal.c:485-504`), the record is stamped with `runXmin`-at-emit (`wal.c:496`), which for a deferred rollback races far past the oxid (oxid 248 stamped xmin 468). Stamp instead a value that cannot exceed the oxid being rolled back (e.g. `min(runXmin, oxid)`), so the standby never sees `oxid < carried_xmin` and never inserts a sub-horizon entry. Removes the defect for *all* downstream consumers (standby and any future reader), not just this one.
+2. **(Consume it safely on the standby — principled discriminator) Don't add a *deferred-late* rollback oxid to the horizon queue.** On replay, if **`oxid < the record's carried xmin`**, the primary had already retired this oxid from its own horizon: apply its undo but **skip** the `pairingheap_add(xmin_queue, …)` at `recovery.c:1919` so `update_run_xmin` never sees a regressing min. Prefer `oxid < carried_xmin` over `oxid < writtenXmin` — the former uses the primary's authoritative horizon and correctly leaves *live* rollbacks (`oxid ≥ carried_xmin`, e.g. 452) in the queue; the latter is only the symptom site. Caveat to verify: the abort's undo must still be applied; only `xmin` participation is suppressed. Add an `elog`/assert if a *commit* (not rollback) ever arrives with `oxid < carried_xmin` — that would be a strictly worse bug.
 3. **(One-line symptom floor) Clamp the recovery `globalXmin` write at `writtenXmin`.** In `update_run_xmin()` / `free_run_xmin()` (`recovery.c:2556`, `:2582`), write `max(xmin, writtenXmin)` to `globalXmin`. Safe (everything `< writtenXmin` is already frozen = globally visible, so raising the visibility horizon back to `writtenXmin` hides nothing) and provably stops the livelock, but papers over the fact that the horizon was advanced past a still-open oxid.
 4. **(Defence in depth) Make the recovery conflict handler yield.** A worker spinning on a conflicting oxid with `waitCallback == NULL` should advance/yield instead of busy-waiting, so it cannot pin `listPtr` against the leader's drain — breaking the circular wait even if a stale state is briefly observed.
 5. **(Defence in depth) Treat a `FROZEN` slot read as committed-visible, not `IN_PROGRESS`.** If `oxid_get_csn` reads `COMMITSEQNO_FROZEN` from the slot itself (not via the fast-path), it should resolve to *visible/frozen*, never `IN_PROGRESS` — a frozen slot can never legitimately mean in-progress.
 
-(1) or (2) remove the cause; (3) is the minimal floor; (4)/(5) are independent backstops that each break the livelock regardless of the exact upstream write. Recommended: ship (2) + (5), keep (3) as a cheap belt-and-suspenders, and track (1) as the long-term correctness item.
+(1) fixes the producer; (2) fixes the consumer; (3) is the minimal floor; (4)/(5) are independent backstops that each break the livelock regardless of the exact write. Recommended: ship (1) (root) — or (2) if the wire format can't change — plus (5) as a cheap invariant guard, and keep (3) as belt-and-suspenders. Note: sorting the burst by oxid would also work (freezing is incremental, §6) but needs WAL buffering, so it's strictly worse than (1)/(2).
 
 ## 10. Newly observed *second* replica failure mode — `UNDO_REC_EXISTS` assertion crash
 
