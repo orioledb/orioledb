@@ -17,69 +17,65 @@ After the primary is `SIGKILL`ed and the streaming standby resumes replay, one o
 o_btree_modify_handle_conflicts()   (src/btree/modify.c:435)
 ```
 
-In the caught trial the spin counter reached **4,972,218** iterations and the replica's log grew to **6.5 GB** while making zero forward progress; the replica would not shut down. The two spinning workers were:
+In the instrumented catch (2026-06-05, `CAUGHT_noinj_replica.log`, **6.4 GB**) the spin counter reached **5,109,500** iterations while making zero forward progress; the replica would not shut down. The three spinning workers were:
 
 ```
-pid=3997315  blkno=2050  opOxid=754  conflictOxid=610
-pid=3997316  blkno=2050  opOxid=750  conflictOxid=616
+pid=8516  blkno=2050  opOxid=378  conflictOxid=320   replayPtr=0/3012798
+pid=8517  blkno=2050  opOxid=427  conflictOxid=337
+pid=8518  blkno=2050  opOxid=469  conflictOxid=351
 ```
 
-Each worker is trying to apply a modify whose key conflicts with an in-row `conflictOxid` (610, 616). It reads that conflicting oxid's commit state, sees `INPROGRESS`, and — because the recovery conflict handler waits with `waitCallback == NULL` — re-reads in a tight loop forever instead of blocking.
+Each worker is trying to apply a modify whose key conflicts with an in-row `conflictOxid` (320, 337, 351). It reads that conflicting oxid's commit state, sees `IN_PROGRESS`, and — because the recovery conflict handler waits with `waitCallback == NULL` — re-reads in a tight loop forever instead of blocking.
 
-## 2. What the conflicting oxids actually are
+## 2. What the conflicting oxids actually are — committed, then mis-read
 
-The decisive question was the lifecycle of `conflictOxid` 610 / 616. Instrumentation (`finished-push`, leader `finished-drain`, and a per-result `oxid_get_csn` exit trace) shows:
-
-```
-oxid 610: finished-push path=commit-defer worker=-1 ptr=0/30189D0
-          leader drain=1   (FINALIZED by the leader drain)
-          oxid_get_csn →  result_csn=0   x 4,988,531   (INPROGRESS)
-                          result_csn=461  x 3          (its real, committed CSN)
-                          result=FROZEN   x 4
-
-oxid 616: finished-push path=commit-defer worker=-1 ptr=0/3019040
-          leader drain=1   (FINALIZED)
-          oxid_get_csn →  result_csn=0   x 4,956,720   (INPROGRESS)
-                          result=FROZEN   x 4
-```
-
-So both conflicting oxids:
-
-1. **committed** (they entered the deferred-commit path: `finished-push path=commit-defer`),
-2. were **finalized** by the leader drain (`drain=1`; for 610 its assigned CSN **461** was observed read 3 times),
-3. were then read as **`INPROGRESS` (csn=0)** ~5 million times — which is the spin, and
-4. were *also* read as **`FROZEN`** a handful of times.
-
-This rules out the "never finalized" hypothesis: the oxid **was** finalized. The `result_csn=0` reads were originally (mis)interpreted as a "finalize-then-revert". **§5 corrects this:** the slot is never rewritten — it holds `COMMITSEQNO_FROZEN (0x3)`, and the `result_csn=0` (`IN_PROGRESS`) reads are the FROZEN slot being mis-mapped after `globalXmin` regressed below the oxid. The `result=FROZEN` reads are the *fast-path* (`oxid < globalXmin`) firing in the brief window before the regression; the `result_csn=0` reads are the slot-read path firing after it.
-
-## 3. The deadlock topology (why a single reverted slot freezes the whole replica)
+The decisive question is the lifecycle of `conflictOxid` 320 / 337 / 351. Instrumentation (`finished-push`, leader `finished-drain`, and a per-result `oxid_get_csn` exit trace) shows each was **committed and finalized well before the spin**:
 
 ```
-worker A (pid 3997315) ──spins on──▶ oxid 610  (committed; FROZEN slot mis-read as IN_PROGRESS)
-worker B (pid 3997316) ──spins on──▶ oxid 616  (committed; FROZEN slot mis-read as IN_PROGRESS)
+oxid 320: finished-push path=commit-defer ×2,  abort-defer ×0   committed 17:35:42.246, finalized 17:35:42.251
+oxid 337: finished-push path=commit-defer ×3,  abort-defer ×0   committed 17:35:43.282, finalized 17:35:43.283
+oxid 351: finished-push path=commit-defer ×3,  abort-defer ×0   committed 17:35:42.266, finalized 17:35:42.271
+          oxid_get_csn → result_csn=287 ×13   (its real, committed CSN, read before the regression)
+                         result_csn=0   ×millions  (IN_PROGRESS, the spin, read after the regression)
+```
+
+So all three conflicting oxids:
+
+1. **committed** — they took the deferred-commit path (`finished-push path=commit-defer`) with **zero** `abort-defer`; they were never aborted;
+2. were **finalized** by the leader drain to a real CSN — directly witnessed for **oxid 351 → CSN 287**, read 13 times;
+3. then, ~6.7 s later, were read as **`IN_PROGRESS` (csn=0)** millions of times — the spin.
+
+The `result_csn=0` reads are **not** a "finalize-then-revert" — the slot is never rewritten. As §5 proves with the spin-site `rawSlotCsn` trace, the slot holds `COMMITSEQNO_FROZEN (0x3)` throughout; once `globalXmin` regresses below the oxid (§6), `oxid_get_csn` skips its `oxid < globalXmin` fast-path and mis-maps the FROZEN slot to `IN_PROGRESS`. oxid 351 is the cleanest record of the whole bug: **CSN 287 observed, then the same oxid turned into a phantom in-progress transaction.**
+
+## 3. The deadlock topology (why the mis-read slots freeze the whole replica)
+
+```
+root trigger: update_run_xmin regresses globalXmin 352 → 248 (< writtenXmin=352)  [§5/§6]
+        │  → committed-frozen oxids in [248,352) now read IN_PROGRESS
+        ▼
+worker A (pid 8516) ──spins on──▶ oxid 320  (committed; FROZEN slot mis-read as IN_PROGRESS)
+worker B (pid 8517) ──spins on──▶ oxid 337  (committed; FROZEN slot mis-read as IN_PROGRESS)
+worker C (pid 8518) ──spins on──▶ oxid 351  (committed CSN 287; FROZEN slot mis-read as IN_PROGRESS)
         │                                  ▲
         │ spinning workers never advance    │ finalize happens only in the
         │ their commitPtr                    │ leader drain, bounded by listPtr
         ▼                                    │
   get_workers_commit_ptr() = MIN(commitPtr) │
-        = listPtr  ── FROZEN ───────────────┘
-        ▲
-        │ leader drain is itself stopped on the aborted oxid 676
-        │   (csn=2 = ABORTED, state_ptr=0/301F066 > listPtr=0/301F000)
+        = listPtr  ── pinned ───────────────┘
 ```
 
 - The leader finalizes deferred oxids in `update_proc_retain_undo_location()`'s drain loop **only up to `listPtr = get_workers_commit_ptr()`**, the MIN of all workers' `commitPtr`.
 - A worker that is busy-spinning on a modify **never advances its `commitPtr`**, so `listPtr` is pinned.
-- The leader's drain is independently parked on an **aborted** oxid (676, `csn=2`) whose `state_ptr` sits *beyond* `listPtr`.
-- Net effect: a circular wait. The workers wait for a CSN that only the leader can publish; the leader's publish horizon is pinned by the very workers that are stuck. No process makes progress; the replica livelocks.
+- The workers can never make progress because the oxids they wait on read `IN_PROGRESS` permanently (the `globalXmin` regression of §5/§6 is not undone), so `commitPtr` — and thus `listPtr` — never advances.
+- Net effect: a circular wait. The workers wait for a CSN/verdict that only the leader's drain can publish; the leader's publish horizon (`listPtr`) is pinned by the very workers that are stuck. No process makes progress; the replica livelocks. *(In an earlier, less-instrumented catch the leader drain was additionally seen parked on an aborted oxid 676 with `state_ptr` beyond `listPtr`; that is one possible secondary stall, not the root trigger.)*
 
 ## 4. What we have *ruled out*
 
 | Hypothesis | Verdict | Evidence |
 |---|---|---|
-| oxid **reuse** (same number, different txn) | **ruled out** | generation counter `gen=0` throughout; max backward oxid jump = 258 ≪ a reset (~3600). No incarnation boundary crossed. |
-| CSN-slot **collision** (two oxids share a slot) | **ruled out** | `xid_circular_buffer_size = 524288`; max oxid in trial ~3618 → `oxid % size` cannot collide. |
-| **commit-then-rollback** of the same txn | **ruled out** | the stuck oxids are on `path=commit-defer` and were finalized to a *normal* CSN (610→461); they are committed, not aborted. |
+| oxid **reuse** (same number, different txn) | **ruled out** | generation counter `gen=0` throughout the trial. No incarnation boundary crossed. |
+| CSN-slot **collision** (two oxids share a slot) | **ruled out** | `xid_circular_buffer_size = 524288`; max oxid in trial ~468 (`nextXid=468`) → `oxid % size` cannot collide. |
+| **commit-then-rollback** of the same txn | **ruled out** | the stuck oxids (320/337/351) are on `path=commit-defer` with **zero** `abort-defer`, and were finalized to a *normal* CSN (351→287); they are committed, not aborted. |
 | Injection-point artifact | **ruled out** | reproduced with `RR_INJECTION_POINTS=NONE`, plain `SIGKILL`. |
 | **`NORMAL → INPROGRESS`** slot overwrite (`set_oxid_csn` / `advance_oxids`) | **ruled out** | CLOBBER trace fired 0 times; and the decisive spin-site trace shows `rawSlotCsn=3` (`FROZEN`) on every spinning worker — the slot is **never** rewritten to `INPROGRESS` (§5). |
 | **any slot rewrite / "revert"** (the original hypothesis) | **ruled out** | at the spin site the raw `xidBuffer` slot reads `COMMITSEQNO_FROZEN (0x3)`, not `INPROGRESS (0x0)`. The slot is correct; the *horizon* is wrong (§5). |
