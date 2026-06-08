@@ -120,7 +120,55 @@ So `oxid_get_csn(320)` skips its fast-path, reads the slot (`FROZEN`, a *special
 
 > The earlier "the slot is re-initialized FROZEN→INPROGRESS by `advance_oxids`" guess (and the whole "revert/clobber" line) is **refuted**: the slot stays FROZEN; `advance_oxids` never touches it (it would need `nextXid` to regress, which never happens — see the parent investigation). The single moving part is `globalXmin`.
 
-## 6. Reproduction (self-contained, no local scripts)
+## 6. The watermark-increment logic and the upstream cause (Layer B)
+
+§5 proves the *downstream* fault (`globalXmin < writtenXmin` ⇒ FROZEN slot read as `IN_PROGRESS`). This section explains **how the bad horizon write is produced** in the first place.
+
+### How the `*Xmin` watermarks normally increment
+
+The scheme is **min-based and follows-up-only**:
+
+- **`globalXmin` = the minimum still-needed oxid.** `advance_global_xmin` computes `globalXmin = min(runXmin, every backend proc xmin)` and writes it **only if it grew** — `if (globalXmin > prevGlobalXmin)` (`oxid.c:1166`). `runXmin = min(xmin_queue top, recovery_xmin)`.
+- **`writtenXmin` chases `globalXmin` upward.** When `globalXmin` advances, the page-out block (`oxid.c:1175-1199`) fills `[writtenXmin, globalXmin)` with `COMMITSEQNO_FROZEN`, pages those slots to the `.xidmap`, and sets **`writtenXmin = globalXmin`**.
+
+So by construction `writtenXmin ≤ globalXmin` *always* (`writtenXmin` is *assigned* `globalXmin`), which is why `advance_global_xmin` can `Assert(globalXmin >= writtenXmin)` (`oxid.c:1181`).
+
+**Load-bearing assumption:** *once the horizon passes oxid X, no oxid `< X` ever rejoins the unfinished set.* True in normal operation (oxids are allocated monotonically; a finished oxid stays finished), so the min — and thus the watermark — only moves forward.
+
+### What violates it: a crash-aborted in-flight oxid surfacing late
+
+The assumption is broken by OrioleDB's **eager WAL + crash-rollback** path:
+
+1. A transaction's row changes are WAL-logged *before* commit. When the primary is `SIGKILL`ed, its in-flight transactions have UPDATE records in the WAL but no terminator.
+2. The primary restarts, crash-recovers, and at recovery-finish **emits `ROLLBACK` WAL records** for every transaction that was in-flight at crash time (the `o_emit_recovery_finish_rollbacks` path). These are *new forward WAL*, streamed to the standby.
+3. The standby (here, started streaming at `0/3000000` from a base backup) replays them as a **mass `abort-defer` burst** — in the caught trial, **22 in-flight oxids aborted in 8 ms, 0 commits**: oxids 452, 362, 426, 444, 446, 360, 454, 378, 404, 439, 427, 352, 374, **248**, 401, 392, 399, …
+4. Replaying the `ROLLBACK` for oxid **248** runs `recovery_switch_to_oxid(248)` → fresh `HASH_ENTER` → **`pairingheap_add(xmin_queue, …)` at `recovery.c:1919`** — inserting the low oxid 248 into the horizon queue **below the already-advanced `writtenXmin=352`**.
+5. `update_run_xmin` then reads 248 as the new queue-min and writes `globalXmin = 248 < writtenXmin = 352` — the §5 fault.
+
+Evidence: `ROLLBACK (248 0 0 - xmin 468 csn 438)` is present in **`CAUGHT_noinj_primary.log`** (the primary emitted it; `0 0` = no heap xid, an orioledb-only txn); 248 has **zero** `commit-defer` pushes in the whole log; the burst is preceded by `started streaming WAL from primary at 0/3000000` (post-crash reconnect).
+
+### Why `writtenXmin` = 352 = an aborted oxid is the whole story
+
+Both 248 and 352 are crash-aborted, and `writtenXmin` sits exactly at 352. That is the signature, not a coincidence:
+
+- **352 was the oldest in-flight oxid the standby *knew about*** — so the horizon correctly stalled at 352 and froze everything below it.
+- **248 was an *older* in-flight oxid the standby *did not* know about** — it opened on the primary *before* the standby's streaming start (`0/3000000`), so it was never in this session's `xmin_queue`, and the horizon sailed past it. Its existence is revealed only by the late crash-`ROLLBACK`.
+
+So the watermark logic was *locally correct* (352 genuinely was the oldest *known* open oxid); it was defeated by an **old, unknown-open oxid surfacing late**. Note: **sorting the abort burst does not help** — the horizon is a *minimum*, so `min(248, …) = 248` regardless of processing order. The lever is **membership** (whether 248 enters the horizon set at all), not order.
+
+### End-to-end chain
+
+```
+SIGKILL primary
+  → primary crash-recovery finish emits ROLLBACK for in-flight oxids (incl. 248, < writtenXmin)
+  → standby replays ROLLBACK(248) → recovery_switch_to_oxid → pairingheap_add(xmin_queue) [recovery.c:1919]
+       (inserts oxid 248 below writtenXmin=352, which the standby had frozen past while 248 was unknown-open)
+  → update_run_xmin reads queue-min=248 → writes globalXmin=248 < writtenXmin=352 [recovery.c:2556]   (Layer A)
+  → oxid_get_csn skips the oxid<globalXmin fast-path, reads FROZEN slot, maps it to IN_PROGRESS
+  → recovery workers spin on committed-frozen oxids [248,352) → listPtr pinned → livelock
+```
+
+## 7. Reproduction (self-contained, no local scripts)
 
 Streaming-standby crash loop, **no injection**:
 
@@ -144,22 +192,25 @@ python3 -m unittest test.t.crash.rr_stress_test.RrStressTest.test_bank_account_i
 
 A caught trial is identified by: replica `postgresql.log` growing without bound, `handle_conflicts` spin count climbing into the millions, and `pg_ctl stop` on the replica timing out ("server does not shut down"). Saved evidence from the caught trial: `test/t/crash/results/CAUGHT_noinj_{primary,replica}.log` (replica 6.5 GB).
 
-## 7. Relationship to prior fixes on this branch
+## 8. Relationship to prior fixes on this branch
 
 - `fb1a8acc` fixed the *original* recovery livelock (eager-WAL / in-memory abort not propagated to the standby) — **verified**.
 - `200073b5` wrapped the buggy commit-flow window in a crit section so the primary **PANICs instead of silently rolling back** — verified: 6/7 error injections are now harmless, the primary TRAPs, and replica/primary stay consistent.
 - **This issue is distinct from both.** It is a *liveness* defect in parallel recovery's horizon bookkeeping that survives those fixes and needs no injection: the standby's recovery `update_run_xmin()` regresses `globalXmin` below `writtenXmin`, so committed-and-FROZEN oxids in the re-exposed band are mis-read as `IN_PROGRESS`, and the recovery conflict handler's no-wait spin turns that into an unrecoverable livelock.
 
-## 8. Fix directions
+## 9. Fix directions
 
-1. **(Primary, directly targets the confirmed cause) Floor the recovery `globalXmin` write at `writtenXmin`.** In `update_run_xmin()` / `free_run_xmin()` (`src/recovery/recovery.c:2533`, `:2545`), never let `globalXmin` drop below `writtenXmin`: slots in `[runXmin, writtenXmin)` have already been frozen/paged, so exposing them to the slot-read path mis-maps `FROZEN`→`IN_PROGRESS`. Concretely, clamp the value written to `globalXmin` to `max(xmin, writtenXmin)` (the `runXmin` write can stay as-is; it is `globalXmin` that the visibility fast-path keys on). This is the one-line root-cause fix.
-   - Open question to settle before shipping: *why* does a committed/frozen oxid re-enter the `xmin_queue` (the `queueEmpty=0` source of the backward value)? The floor stops the *symptom*; the re-entry may be a second bug worth fixing at its source.
-2. **(Defence in depth) Make the recovery conflict handler yield.** A worker spinning on a conflicting oxid with `waitCallback == NULL` should advance/yield instead of busy-waiting, so it cannot pin `listPtr` against the leader's drain — breaking the circular wait even if a stale state is briefly observed.
-3. **(Defence in depth) Treat a `FROZEN` slot read as committed-visible, not `IN_PROGRESS`.** If `oxid_get_csn` reads `COMMITSEQNO_FROZEN` from the slot itself (not just via the `oxid < globalXmin` fast-path), it should resolve to *visible/frozen*, never `IN_PROGRESS` — a frozen slot can never legitimately mean in-progress.
+Ordered from most-principled (deepest) to most-local. The upstream cause (§6) is now understood, so the options split between *preventing the bad `xmin_queue` insert* and *tolerating it*.
 
-(1) removes the cause; (2) and (3) are independent backstops that each break the livelock even if (1) is incomplete.
+1. **(Deepest — true root) Don't advance the horizon past an unknown-open oxid.** The standby froze past oxid 248 because the base backup / checkpoint that seeded it did not account for 248 still being open on the primary. If the seed `runXmin`/`globalXmin` reflected the primary's true oldest in-flight oxid at backup time, `writtenXmin` would never have frozen `[248, …)`. Correct but the largest change (touches checkpoint/backup xmin recording).
+2. **(Targets the bad insert — matches the "handle these oxids specially" intuition) Don't add an already-frozen crash-aborted oxid to the horizon queue.** When a `ROLLBACK` is replayed for an oxid `< writtenXmin`, that oxid is already frozen/retired: it needs its **undo applied** but it must **not** participate in the MVCC horizon. Skip the `pairingheap_add(xmin_queue, …)` at `recovery.c:1919` for such oxids so `update_run_xmin` never sees a sub-`writtenXmin` min. Caveat to verify: the abort's undo must still be applied and its abort state recorded; only its `xmin` participation is suppressed.
+3. **(One-line symptom floor) Clamp the recovery `globalXmin` write at `writtenXmin`.** In `update_run_xmin()` / `free_run_xmin()` (`recovery.c:2556`, `:2582`), write `max(xmin, writtenXmin)` to `globalXmin`. Safe (everything `< writtenXmin` is already frozen = globally visible, so raising the visibility horizon back to `writtenXmin` hides nothing) and provably stops the livelock, but papers over the fact that the horizon was advanced past a still-open oxid.
+4. **(Defence in depth) Make the recovery conflict handler yield.** A worker spinning on a conflicting oxid with `waitCallback == NULL` should advance/yield instead of busy-waiting, so it cannot pin `listPtr` against the leader's drain — breaking the circular wait even if a stale state is briefly observed.
+5. **(Defence in depth) Treat a `FROZEN` slot read as committed-visible, not `IN_PROGRESS`.** If `oxid_get_csn` reads `COMMITSEQNO_FROZEN` from the slot itself (not via the fast-path), it should resolve to *visible/frozen*, never `IN_PROGRESS` — a frozen slot can never legitimately mean in-progress.
 
-## 9. Newly observed *second* replica failure mode — `UNDO_REC_EXISTS` assertion crash
+(1) or (2) remove the cause; (3) is the minimal floor; (4)/(5) are independent backstops that each break the livelock regardless of the exact upstream write. Recommended: ship (2) + (5), keep (3) as a cheap belt-and-suspenders, and track (1) as the long-term correctness item.
+
+## 10. Newly observed *second* replica failure mode — `UNDO_REC_EXISTS` assertion crash
 
 Under the **same no-injection chaos** (streaming standby + `SIGKILL` of the primary postmaster every 6 s), a trial produced a *different* terminal failure than the livelock. The harness reported it as a "divergence," but that label is misleading — it was a **replica-side assertion crash**, not a data divergence.
 
