@@ -133,6 +133,11 @@ knownErrors = {
 skip_hunk_errors = {
 	r"ERROR:  orioledb tuples does not have system attribute: xm(in|ax)":
 	["update"],
+	# WHERE CURRENT OF cursor relies on TID scan; orioledb has none, so the
+	# UPDATE/DELETE fail and the rest of the cursor block aborts.  Drop the
+	# whole hunk so the cascaded "transaction is aborted" lines disappear.
+	r"ERROR:  orioledb does not support TID scan":
+	["generated_virtual"],
 }
 
 def can_drop_hunk(testName, line):
@@ -401,10 +406,18 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				target_up = True
 		elif src_cur_value.startswith('Bitmap Heap Scan'):
 			if target_cur[1].startswith('Custom Scan'):
-				if target_cur[2][0] == 'Bitmap heap scan':
+				# EXPLAIN VERBOSE inserts "Output: ..." (and an optional
+				# "Filter: ..." in subplans that reference scan-level filters)
+				# ahead of the marker we look for, pushing it down the
+				# property list.  Skip past those leading properties.
+				target_props = target_cur[2]
+				while target_props and (target_props[0].startswith("Output:")
+				                        or target_props[0].startswith("Filter:")):
+					target_props = target_props[1:]
+				if target_props and target_props[0] == 'Bitmap heap scan':
 					src_down = True
 					target_down = True
-				elif target_cur[2][0].startswith('Forward index'):
+				elif target_props and target_props[0].startswith('Forward index'):
 					# heap built a Bitmap Heap Scan with a child Bitmap Index
 					# Scan; orioledb collapsed both into a single Custom Scan
 					# whose first property is "Forward index (only) scan of".
