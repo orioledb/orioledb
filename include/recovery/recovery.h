@@ -58,6 +58,8 @@ extern int	recovery_idx_pool_size_guc;
 extern OXid recovery_oxid;
 extern TransactionId recoveryHeapTransactionId;
 extern pg_atomic_uint64 *recovery_finished_list_ptr;
+extern pg_atomic_uint64 *recovery_trace_generation_ptr;	/* csn-trace incarnation gen */
+extern pg_atomic_uint64 *recovery_trace_seq_ptr;	/* csn-trace global sequence */
 
 typedef struct BTreeDescr BTreeDescr;
 
