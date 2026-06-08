@@ -1061,7 +1061,7 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 
 	/* Get CSN for undo item if needed */
 	if (needsUndo)
-		csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
+		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 	else
 		csn = COMMITSEQNO_INPROGRESS;
 
