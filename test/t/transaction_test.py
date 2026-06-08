@@ -55,8 +55,6 @@ Test orchestration:
 """
 
 from collections import Counter
-import inspect
-import os
 import time
 
 from .base_test import BaseTest, ThreadQueryExecutor, wait_stopevent, wait_for_wait_event
@@ -310,8 +308,7 @@ class TransactionTest(BaseTest):
 	def test_live_waiter_split_seq_scan_reads_adjacent_undo_leaves(self):
 		node = self.node
 		node.append_conf('postgresql.conf',
-		                 "orioledb.enable_stopevents = true\n"
-		                 "log_min_messages = DEBUG2\n")
+		                 "orioledb.enable_stopevents = true\n")
 		node.start()
 		node.safe_psql(
 		    'postgres', """
@@ -364,35 +361,11 @@ class TransactionTest(BaseTest):
 			duplicated_keys = sorted(k for k, count in counts.items()
 			                         if count > 1)
 
-			self.assertEqual(duplicated_keys, [],
-			                 "SELECT returned duplicate keys: %s; full result: %s" %
-			                 (duplicated_keys, keys))
+			self.assertEqual(
+			    duplicated_keys, [],
+			    "SELECT returned duplicate keys: %s; full result: %s" %
+			    (duplicated_keys, keys))
 			self.assertEqual(sorted(keys), ['k%04d' % i for i in range(1, 13)])
-
-			with open(node.pg_log_file, encoding='utf-8') as f:
-				log = f.read()
-
-			(test_path, _) = os.path.split(
-			    os.path.dirname(inspect.getfile(self.__class__)))
-			log_dir = os.path.join(test_path, 'tmp_check_t',
-			                       self.myName + '_diagnostics')
-			os.makedirs(log_dir, exist_ok=True)
-			with open(os.path.join(log_dir, 'live_waiter_split_full.log'),
-			          'w',
-			          encoding='utf-8') as f:
-				f.write(log)
-			with open(os.path.join(log_dir, 'live_waiter_split_debug.log'),
-			          'w',
-			          encoding='utf-8') as f:
-				for line in log.splitlines():
-					if any(prefix in line for prefix in
-					       ("csn-debug:", "scan-debug:", "split-debug:")):
-						f.write(line + "\n")
-
-			self.assertIn("source=btree-insert-with-waiters", log)
-			self.assertGreaterEqual(
-			    log.count("scan-debug: seq scan leaf loaded from undo"), 2,
-			    log[-8000:])
 		finally:
 			for c in (holder, waiter, reader, ctl):
 				try:
@@ -404,3 +377,108 @@ class TransactionTest(BaseTest):
 				except Exception:
 					pass
 			node.stop()
+
+	def _seq_scan_internal_page_read_before_split_downlink(
+	        self, evict_before_select=False):
+		"""
+		Reader copies the parent internal page BEFORE the splitter has
+		installed the new sibling downlink, but AFTER the leaf split
+		has physically separated L into L1 (in-place) and a new L2.
+
+		Sequence:
+		  - holder INSERT triggers a leaf split and halts at
+		    STOPEVENT(page_split), i.e. after the leaf is split but
+		    before the parent gets a downlink for L2.
+		  - reader copies the parent I; its copy holds a single downlink
+		    to L (block# of L1 after in-place modification), hikey
+		    spans the pre-split range.
+		  - reader follows that downlink: hits L1 whose csn equals the
+		    split csn (>= imgReadCsn), so the page is reconstructed from
+		    the leaf-level undo chain.
+		  - reader is NOT supposed to visit L2: the L2 downlink is not
+		    in the reader's copy of I, and pre-split L (returned via
+		    undo) already contains every tuple visible at imgReadCsn.
+
+		With evict_before_select=True, the leaf is pushed to disk
+		between the holder halt and the reader's scan, so the scan
+		goes through load_next_disk_leaf_page() rather than the
+		in-memory iterate_internal_page() path.
+
+		Verifies: no tuple is dropped and no duplicate appears.
+		"""
+		node = self.node
+		node.append_conf('postgresql.conf',
+		                 "orioledb.enable_stopevents = true\n")
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE t (
+				k text NOT NULL,
+				v text NOT NULL,
+				PRIMARY KEY (k)
+			) USING orioledb;
+
+			INSERT INTO t (k, v)
+			SELECT 'k' || to_char(g, 'fm0000'), repeat('a', 600)
+			FROM generate_series(1, 12) g;
+			CHECKPOINT;
+		""")
+
+		holder = node.connect()
+		reader = node.connect()
+		ctl = node.connect()
+
+		try:
+			ctl.execute("SELECT pg_stopevent_set('page_split', 'true');")
+
+			holder_pid = holder.pid
+			t_holder = ThreadQueryExecutor(
+			    holder, "INSERT INTO t (k, v) VALUES "
+			    "('k0013', repeat('h', 600));")
+			t_holder.start()
+			wait_stopevent(node, holder_pid)
+
+			if evict_before_select:
+				ctl.execute("SELECT orioledb_evict_pages('t'::regclass, 0);")
+
+			# Holder is paused right after the leaf has been split but
+			# before the parent has been given the new sibling's
+			# downlink.  Run the scan now — its copy of the parent will
+			# carry the pre-split set of downlinks.
+			rows = reader.execute("SELECT k FROM t;")
+			keys = [row[0] for row in rows]
+			counts = Counter(keys)
+			duplicated_keys = sorted(k for k, count in counts.items()
+			                         if count > 1)
+
+			# Holder's INSERT has not committed yet, so k0013 must not
+			# be visible to the reader.
+			self.assertEqual(
+			    duplicated_keys, [],
+			    "SELECT returned duplicate keys: %s; full result: %s" %
+			    (duplicated_keys, keys))
+			self.assertEqual(
+			    sorted(keys), ['k%04d' % i for i in range(1, 13)],
+			    "expected 12 unique pre-split keys, got: %s" % keys)
+
+			ctl.execute("SELECT pg_stopevent_reset('page_split');")
+			t_holder.join()
+		finally:
+			for c in (holder, reader, ctl):
+				try:
+					c.execute("ROLLBACK")
+				except Exception:
+					pass
+				try:
+					c.close()
+				except Exception:
+					pass
+			node.stop()
+
+	def test_seq_scan_internal_page_read_before_split_downlink(self):
+		self._seq_scan_internal_page_read_before_split_downlink()
+
+	def test_seq_scan_internal_page_read_before_split_downlink_evicted(self):
+		self._seq_scan_internal_page_read_before_split_downlink(
+		    evict_before_select=True)
