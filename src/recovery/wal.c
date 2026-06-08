@@ -492,16 +492,8 @@ wal_emit_recovery_finish_rollback(OXid oxid, TransactionId logicalXid)
 	Assert(!local_wal.contains_xid);
 
 	add_xid_wal_record(oxid, logicalXid);
-
-	/*
-	 * Stamp InvalidOXid (not runXmin) as the finish xmin.  This rollback is
-	 * emitted late, after recovery_finish() already retired the oxid from the
-	 * horizon, so runXmin here has raced far past the oxid.  InvalidOXid means
-	 * "this record carries no horizon information"; the standby uses it to
-	 * exclude the oxid from its xmin horizon (orioledb#876 second-order
-	 * livelock).  The normal abort path (wal_rollback) keeps runXmin.
-	 */
-	add_finish_wal_record(WAL_REC_ROLLBACK, InvalidOXid);
+	add_finish_wal_record(WAL_REC_ROLLBACK,
+						  pg_atomic_read_u64(&xid_meta->runXmin));
 	wait_pos = flush_local_wal(false, false);
 	local_wal.has_material_changes = false;
 

@@ -113,7 +113,6 @@ typedef struct
 	bool		in_finished_list;
 	bool		in_joint_commit_list;
 	bool		in_retain_undo_heaps[(int) UndoLogsCount];
-	bool		in_xmin_queue;	/* tracked in xmin_queue (leader only) */
 	bool		needs_feedback;
 
 	dlist_node	joint_commit_list_node;
@@ -660,13 +659,6 @@ RecoveryWorkerPtrs *worker_ptrs;
 pg_atomic_uint64 *recovery_ptr;
 pg_atomic_uint64 *recovery_main_retain_ptr;
 pg_atomic_uint64 *recovery_finished_list_ptr;
-/* csn-trace: incarnation generation, bumped when the leader sees the primary's
- * oxid counter reset (a primary restart).  Lets traces disambiguate reused
- * oxid numbers across crash-recovery incarnations within one run. */
-pg_atomic_uint64 *recovery_trace_generation_ptr = NULL;
-/* csn-trace: monotonic global sequence, fetch-added per stamped trace line, to
- * give a total order across parallel workers independent of log writer / clock. */
-pg_atomic_uint64 *recovery_trace_seq_ptr = NULL;
 bool	   *recovery_single_process;
 bool	   *was_in_recovery;
 pg_atomic_uint32 *after_recovery_cleaned;
@@ -776,10 +768,8 @@ recovery_shmem_init(Pointer ptr, bool found)
 	recovery_ptr = (pg_atomic_uint64 *) ptr;
 	recovery_main_retain_ptr = recovery_ptr + 1;
 	recovery_finished_list_ptr = recovery_ptr + 2;
-	recovery_trace_generation_ptr = recovery_ptr + 3;	/* fits same cacheline */
-	recovery_trace_seq_ptr = recovery_ptr + 4;	/* fits same cacheline */
 
-	ptr += CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 5));
+	ptr += CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 3));
 
 	was_in_recovery = (bool *) ptr;
 	ptr += CACHELINEALIGN(sizeof(bool));
@@ -821,8 +811,6 @@ recovery_shmem_init(Pointer ptr, bool found)
 		pg_atomic_init_u64(recovery_ptr, InvalidXLogRecPtr);
 		pg_atomic_init_u64(recovery_main_retain_ptr, InvalidXLogRecPtr);
 		pg_atomic_init_u64(recovery_finished_list_ptr, InvalidXLogRecPtr);
-		pg_atomic_init_u64(recovery_trace_generation_ptr, 0);
-		pg_atomic_init_u64(recovery_trace_seq_ptr, 0);
 
 		*was_in_recovery = false;
 		pg_atomic_init_u32(after_recovery_cleaned, 0);
@@ -897,7 +885,6 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			state->ptr = InvalidXLogRecPtr;
 			state->in_finished_list = false;
 			state->in_joint_commit_list = false;
-			state->in_xmin_queue = false;
 			state->needs_feedback = false;
 			for (j = 0; j < (int) UndoLogsCount; j++)
 				state->in_retain_undo_heaps[j] = false;
@@ -906,10 +893,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 				undo_stack_locations_set_invalid(&state->undo_stacks[j]);
 			dlist_init(&state->checkpoint_undo_stacks);
 			if (worker_id < 0)
-			{
 				pairingheap_add(xmin_queue, &state->xmin_ph_node);
-				state->in_xmin_queue = true;
-			}
 
 			state->systree_modified = false;
 			state->invalidate_typcache = false;
@@ -1828,32 +1812,6 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 {
 	int			i;
 
-#ifdef USE_INJECTION_POINTS
-	/*
-	 * csn-trace: the leader bumps a shared "generation" when the primary's
-	 * oxid counter resets (a large backward jump = the primary restarted).
-	 * This lets traces tell apart two transactions that reuse the same oxid
-	 * number across crash-recovery incarnations within one run.
-	 */
-	if (worker_id < 0 && recovery_trace_generation_ptr != NULL &&
-		oxid != InvalidOXid)
-	{
-		static OXid trace_max_oxid = 0;
-
-		if (trace_max_oxid > 1000 && oxid + 1000 < trace_max_oxid)
-		{
-			uint64		g = pg_atomic_add_fetch_u64(recovery_trace_generation_ptr, 1);
-
-			elog(LOG, "csn-trace generation-bump gen=%lu (oxid reset: prevMax=%lu now=%lu)",
-				 (unsigned long) g, (unsigned long) trace_max_oxid,
-				 (unsigned long) oxid);
-			trace_max_oxid = oxid;
-		}
-		else if (oxid > trace_max_oxid)
-			trace_max_oxid = oxid;
-	}
-#endif
-
 	if (recovery_oxid != oxid)
 	{
 		RecoveryXidState *cur_state = cur_recovery_xid_state;
@@ -1907,7 +1865,6 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			cur_state->needs_wal_flush = false;
 			cur_state->in_finished_list = false;
 			cur_state->in_joint_commit_list = false;
-			cur_state->in_xmin_queue = false;
 			cur_state->needs_feedback = false;
 
 			/*
@@ -1922,10 +1879,7 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			for (i = 0; i < (int) UndoLogsCount; i++)
 				curRetainUndoLocations[i] = InvalidUndoLocation;
 			if (worker_id < 0)
-			{
 				pairingheap_add(xmin_queue, &cur_state->xmin_ph_node);
-				cur_state->in_xmin_queue = true;
-			}
 			cur_state->systree_modified = false;
 			cur_state->invalidate_typcache = false;
 			cur_state->o_tables_meta_locked = false;
@@ -1965,10 +1919,9 @@ check_delete_xid_state(RecoveryXidState *state, int worker_id)
 
 		if (state->used_by)
 			pfree(state->used_by);
-		if (worker_id < 0 && state->in_xmin_queue)
+		if (worker_id < 0)
 		{
 			pairingheap_remove(xmin_queue, &state->xmin_ph_node);
-			state->in_xmin_queue = false;
 			update_run_xmin();
 		}
 		hash_search(recovery_xid_state_hash, &oxid, HASH_REMOVE, &found);
@@ -2049,12 +2002,6 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 		walk_checkpoint_stacks(cur_recovery_xid_state, csn,
 							   InvalidSubTransactionId, flush_undo_pos);
 		cur_recovery_xid_state->in_finished_list = true;
-#ifdef USE_INJECTION_POINTS
-		elog(LOG, "csn-trace finished-push path=commit-defer gen=%lu pid=%d worker=%d oxid=%lu csn=%lu ptr=%X/%X",
-			 (unsigned long) (recovery_trace_generation_ptr ? pg_atomic_read_u64(recovery_trace_generation_ptr) : 0),
-			 MyProcPid, worker_id, (unsigned long) oxid, (unsigned long) csn,
-			 LSN_FORMAT_ARGS(ptr));
-#endif
 		dlist_push_tail(&finished_list,
 						&cur_recovery_xid_state->finished_list_node);
 	}
@@ -2081,12 +2028,6 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 				 * committed due to runXmin.
 				 */
 				cur_recovery_xid_state->in_finished_list = true;
-#ifdef USE_INJECTION_POINTS
-				elog(LOG, "csn-trace finished-push path=abort-defer gen=%lu pid=%d worker=%d oxid=%lu csn=%lu ptr=%X/%X",
-					 (unsigned long) (recovery_trace_generation_ptr ? pg_atomic_read_u64(recovery_trace_generation_ptr) : 0),
-					 MyProcPid, worker_id, (unsigned long) oxid, (unsigned long) csn,
-					 LSN_FORMAT_ARGS(ptr));
-#endif
 				dlist_push_tail(&finished_list,
 								&cur_recovery_xid_state->finished_list_node);
 			}
@@ -2540,32 +2481,8 @@ update_run_xmin(void)
 	}
 	xmin = Min(xmin, recovery_xmin);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
-	{
-		OXid		prevGlobalXmin = pg_atomic_read_u64(&xid_meta->globalXmin);
-
-		if (xmin < prevGlobalXmin)
-		{
-			OXid		writtenXmin = pg_atomic_read_u64(&xid_meta->writtenXmin);
-
-			/*
-			 * csn-trace: globalXmin moving BACKWARD on the standby.  The
-			 * dangerous case is xmin < writtenXmin: that re-exposes the
-			 * already-frozen region, where a slot holding COMMITSEQNO_FROZEN
-			 * is mis-resolved as IN_PROGRESS by oxid_get_csn (recovery
-			 * livelock root-cause candidate).
-			 */
-			elog(LOG, "csn-trace runxmin-backward func=update_run_xmin pid=%d old_globalXmin=%lu new_globalXmin=%lu writtenXmin=%lu nextXid=%lu recovery_xmin=%lu queueEmpty=%d belowWritten=%d",
-				 MyProcPid,
-				 (unsigned long) prevGlobalXmin,
-				 (unsigned long) xmin,
-				 (unsigned long) writtenXmin,
-				 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid),
-				 (unsigned long) recovery_xmin,
-				 pairingheap_is_empty(xmin_queue) ? 1 : 0,
-				 (xmin < writtenXmin) ? 1 : 0);
-			pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
-		}
-	}
+	if (xmin < pg_atomic_read_u64(&xid_meta->globalXmin))
+		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
 }
 
 static void
@@ -2575,23 +2492,8 @@ free_run_xmin(void)
 
 	xmin = pg_atomic_read_u64(&xid_meta->nextXid);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
-	{
-		OXid		prevGlobalXmin = pg_atomic_read_u64(&xid_meta->globalXmin);
-
-		if (xmin < prevGlobalXmin)
-		{
-			OXid		writtenXmin = pg_atomic_read_u64(&xid_meta->writtenXmin);
-
-			elog(LOG, "csn-trace runxmin-backward func=free_run_xmin pid=%d old_globalXmin=%lu new_globalXmin=%lu writtenXmin=%lu nextXid=%lu belowWritten=%d",
-				 MyProcPid,
-				 (unsigned long) prevGlobalXmin,
-				 (unsigned long) xmin,
-				 (unsigned long) writtenXmin,
-				 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid),
-				 (xmin < writtenXmin) ? 1 : 0);
-			pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
-		}
-	}
+	if (xmin < pg_atomic_read_u64(&xid_meta->globalXmin))
+		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
 }
 
 /*
@@ -2671,14 +2573,6 @@ update_proc_retain_undo_location(int worker_id)
 	dlist_foreach_modify(miter, &finished_list)
 	{
 		state = dlist_container(RecoveryXidState, finished_list_node, miter.cur);
-#ifdef USE_INJECTION_POINTS
-		elog(LOG, "csn-trace finished-drain gen=%lu pid=%d worker=%d oxid=%lu csn=%lu state_ptr=%X/%X listPtr=%X/%X %s",
-			 (unsigned long) (recovery_trace_generation_ptr ? pg_atomic_read_u64(recovery_trace_generation_ptr) : 0),
-			 MyProcPid, worker_id, (unsigned long) state->oxid,
-			 (unsigned long) state->csn,
-			 LSN_FORMAT_ARGS(state->ptr), LSN_FORMAT_ARGS(listPtr),
-			 (state->ptr > listPtr) ? "STOP(beyond-listPtr)" : "drain");
-#endif
 		if (state->ptr > listPtr)
 			break;
 
@@ -3900,28 +3794,11 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			{
 				bool		commit,
 							sync = false,
-							needsFeedback,
-							deferred_rollback;
+							needsFeedback;
 
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 
-				/*
-				 * A deferred recovery-finish rollback stamps InvalidOXid in
-				 * finish.xmin: the primary already retired this oxid from its
-				 * horizon, so the value carries no horizon info.  Don't fold it
-				 * into recovery_xmin, and (below) drop the oxid from xmin_queue
-				 * so update_run_xmin() can't regress globalXmin below
-				 * writtenXmin and mis-read FROZEN slots as IN_PROGRESS.
-				 */
-				deferred_rollback = (rec->type == WAL_REC_ROLLBACK &&
-									 !OXidIsValid(rec->u.finish.xmin));
-
-				/* a COMMIT must never carry the InvalidOXid sentinel */
-				Assert(rec->type != WAL_REC_COMMIT ||
-					   OXidIsValid(rec->u.finish.xmin));
-
-				if (!deferred_rollback)
-					recovery_xmin = Max(recovery_xmin, rec->u.finish.xmin);
+				recovery_xmin = Max(recovery_xmin, rec->u.finish.xmin);
 
 				Assert(ctx->sys_tree_num <= 0 || sys_tree_supports_transactions(ctx->sys_tree_num));
 
@@ -3929,29 +3806,6 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 
 				Assert(rec->oxid != InvalidOXid);
 				Assert(cur_recovery_xid_state != NULL);
-
-				if (deferred_rollback && cur_recovery_xid_state->in_xmin_queue)
-				{
-					/*
-					 * Drop the oxid from the xmin horizon.  No update_run_xmin()
-					 * here: removal alone stops any later update_run_xmin() from
-					 * picking this low oxid as the queue-min, and
-					 * update_run_xmin() can only *lower* globalXmin — calling it
-					 * now could regress onto another not-yet-removed
-					 * deferred-rollback oxid.  runXmin re-syncs at the next
-					 * natural update_run_xmin() (a finish/delete), over a queue
-					 * without this oxid.
-					 */
-					pairingheap_remove(xmin_queue,
-									   &cur_recovery_xid_state->xmin_ph_node);
-					cur_recovery_xid_state->in_xmin_queue = false;
-#ifdef USE_INJECTION_POINTS
-					elog(LOG, "csn-trace skip-xmin-insert deferred-rollback oxid=%lu writtenXmin=%lu globalXmin=%lu",
-						 (unsigned long) rec->oxid,
-						 (unsigned long) pg_atomic_read_u64(&xid_meta->writtenXmin),
-						 (unsigned long) pg_atomic_read_u64(&xid_meta->globalXmin));
-#endif
-				}
 
 				if (!ctx->single)
 				{

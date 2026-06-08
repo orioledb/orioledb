@@ -573,49 +573,6 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				OFindPageResult result PG_USED_FOR_ASSERTS_ONLY;
 
 				Assert(COMMITSEQNO_IS_INPROGRESS(csn));
-#ifdef USE_INJECTION_POINTS
-				if (is_recovery_process())
-				{
-					/* Log only when replayPtr or the conflicting oxid changes,
-					 * so a frozen spin emits ONE line (not millions) -- a frozen
-					 * replayPtr across a long spin is itself the proof. */
-					static XLogRecPtr _last_rptr = InvalidXLogRecPtr;
-					static OXid _last_oxid = InvalidOXid;
-					XLogRecPtr	_rptr = recovery_get_current_ptr();
-
-					if (_rptr != _last_rptr || oxid != _last_oxid)
-					{
-						CommitSeqNo rawCsn;
-						OXid		gXmin,
-									wXmin;
-
-						_last_rptr = _rptr;
-						_last_oxid = oxid;
-
-						/*
-						 * Decisive replica-side measurement: WHY did oxid_get_csn
-						 * return IN_PROGRESS for conflictOxid?  Capture the raw
-						 * xidBuffer slot value plus globalXmin/writtenXmin.
-						 *   gXmin <= conflictOxid is required (else the
-						 *     oxid<globalXmin fast-path would have returned FROZEN);
-						 *   rawCsn=0x3(FROZEN) + belowWritten => stale-frozen slot
-						 *     re-exposed by a regressed globalXmin (horizon theory);
-						 *   rawCsn=0x0(INPROGRESS) => the slot was actually reset
-						 *     (clobber theory).
-						 */
-						oxid_debug_raw_slot(oxid, &rawCsn, &gXmin, &wXmin);
-						elog(LOG, "csn-trace conflict-inprogress gen=%lu pid=%d blkno=%u opOxid=%lu conflictOxid=%lu replayPtr=%X/%X rawSlotCsn=%lu globalXmin=%lu writtenXmin=%lu oxidGEglobalXmin=%d belowWritten=%d",
-							 (unsigned long) (recovery_trace_generation_ptr ? pg_atomic_read_u64(recovery_trace_generation_ptr) : 0),
-							 MyProcPid, (unsigned int) blkno,
-							 (unsigned long) context->opOxid, (unsigned long) oxid,
-							 (uint32) (_rptr >> 32), (uint32) _rptr,
-							 (unsigned long) rawCsn,
-							 (unsigned long) gXmin, (unsigned long) wXmin,
-							 (oxid >= gXmin) ? 1 : 0,
-							 (oxid < wXmin) ? 1 : 0);
-					}
-				}
-#endif
 
 				if (context->callbackInfo->waitCallback)
 				{
