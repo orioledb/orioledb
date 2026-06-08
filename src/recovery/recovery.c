@@ -113,6 +113,7 @@ typedef struct
 	bool		in_finished_list;
 	bool		in_joint_commit_list;
 	bool		in_retain_undo_heaps[(int) UndoLogsCount];
+	bool		in_xmin_queue;	/* tracked in xmin_queue (leader only) */
 	bool		needs_feedback;
 
 	dlist_node	joint_commit_list_node;
@@ -896,6 +897,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			state->ptr = InvalidXLogRecPtr;
 			state->in_finished_list = false;
 			state->in_joint_commit_list = false;
+			state->in_xmin_queue = false;
 			state->needs_feedback = false;
 			for (j = 0; j < (int) UndoLogsCount; j++)
 				state->in_retain_undo_heaps[j] = false;
@@ -904,7 +906,10 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 				undo_stack_locations_set_invalid(&state->undo_stacks[j]);
 			dlist_init(&state->checkpoint_undo_stacks);
 			if (worker_id < 0)
+			{
 				pairingheap_add(xmin_queue, &state->xmin_ph_node);
+				state->in_xmin_queue = true;
+			}
 
 			state->systree_modified = false;
 			state->invalidate_typcache = false;
@@ -1902,6 +1907,7 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			cur_state->needs_wal_flush = false;
 			cur_state->in_finished_list = false;
 			cur_state->in_joint_commit_list = false;
+			cur_state->in_xmin_queue = false;
 			cur_state->needs_feedback = false;
 
 			/*
@@ -1916,7 +1922,10 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			for (i = 0; i < (int) UndoLogsCount; i++)
 				curRetainUndoLocations[i] = InvalidUndoLocation;
 			if (worker_id < 0)
+			{
 				pairingheap_add(xmin_queue, &cur_state->xmin_ph_node);
+				cur_state->in_xmin_queue = true;
+			}
 			cur_state->systree_modified = false;
 			cur_state->invalidate_typcache = false;
 			cur_state->o_tables_meta_locked = false;
@@ -1956,9 +1965,10 @@ check_delete_xid_state(RecoveryXidState *state, int worker_id)
 
 		if (state->used_by)
 			pfree(state->used_by);
-		if (worker_id < 0)
+		if (worker_id < 0 && state->in_xmin_queue)
 		{
 			pairingheap_remove(xmin_queue, &state->xmin_ph_node);
+			state->in_xmin_queue = false;
 			update_run_xmin();
 		}
 		hash_search(recovery_xid_state_hash, &oxid, HASH_REMOVE, &found);
@@ -3890,11 +3900,28 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			{
 				bool		commit,
 							sync = false,
-							needsFeedback;
+							needsFeedback,
+							deferred_rollback;
 
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 
-				recovery_xmin = Max(recovery_xmin, rec->u.finish.xmin);
+				/*
+				 * A deferred recovery-finish rollback stamps InvalidOXid in
+				 * finish.xmin: the primary already retired this oxid from its
+				 * horizon, so the value carries no horizon info.  Don't fold it
+				 * into recovery_xmin, and (below) drop the oxid from xmin_queue
+				 * so update_run_xmin() can't regress globalXmin below
+				 * writtenXmin and mis-read FROZEN slots as IN_PROGRESS.
+				 */
+				deferred_rollback = (rec->type == WAL_REC_ROLLBACK &&
+									 !OXidIsValid(rec->u.finish.xmin));
+
+				/* a COMMIT must never carry the InvalidOXid sentinel */
+				Assert(rec->type != WAL_REC_COMMIT ||
+					   OXidIsValid(rec->u.finish.xmin));
+
+				if (!deferred_rollback)
+					recovery_xmin = Max(recovery_xmin, rec->u.finish.xmin);
 
 				Assert(ctx->sys_tree_num <= 0 || sys_tree_supports_transactions(ctx->sys_tree_num));
 
@@ -3902,6 +3929,29 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 
 				Assert(rec->oxid != InvalidOXid);
 				Assert(cur_recovery_xid_state != NULL);
+
+				if (deferred_rollback && cur_recovery_xid_state->in_xmin_queue)
+				{
+					/*
+					 * Drop the oxid from the xmin horizon.  No update_run_xmin()
+					 * here: removal alone stops any later update_run_xmin() from
+					 * picking this low oxid as the queue-min, and
+					 * update_run_xmin() can only *lower* globalXmin — calling it
+					 * now could regress onto another not-yet-removed
+					 * deferred-rollback oxid.  runXmin re-syncs at the next
+					 * natural update_run_xmin() (a finish/delete), over a queue
+					 * without this oxid.
+					 */
+					pairingheap_remove(xmin_queue,
+									   &cur_recovery_xid_state->xmin_ph_node);
+					cur_recovery_xid_state->in_xmin_queue = false;
+#ifdef USE_INJECTION_POINTS
+					elog(LOG, "csn-trace skip-xmin-insert deferred-rollback oxid=%lu writtenXmin=%lu globalXmin=%lu",
+						 (unsigned long) rec->oxid,
+						 (unsigned long) pg_atomic_read_u64(&xid_meta->writtenXmin),
+						 (unsigned long) pg_atomic_read_u64(&xid_meta->globalXmin));
+#endif
+				}
 
 				if (!ctx->single)
 				{
