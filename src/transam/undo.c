@@ -191,6 +191,82 @@ static Size o_undo_circular_sizes[(int) UndoLogsCount] =
 {
 	0
 };
+
+/*
+ * Per-page dirty bitmap, one entry per undo log type.  A single bit covers
+ * one ORIOLEDB_BLCKSZ-sized page of the circular buffer at offset
+ * (page * ORIOLEDB_BLCKSZ); the page is at address
+ *   o_undo_buffers[type] + (loc % circular_size) where loc is page-aligned.
+ *
+ * Set with release semantics by writers AFTER they have stored data into
+ * the page.  Cleared with acquire semantics by the checkpoint-time flush
+ * (flush_dirty_undo_range), and also cleared by evict_undo_to_disk() once
+ * the page has been pushed out to o_buffers.  A late-setting writer (set
+ * bit after the checkpointer cleared it) leaves the bit set, so the next
+ * flush catches the update; worst case is one redundant page write.
+ */
+static pg_atomic_uint64 *o_undo_dirty_bitmaps[(int) UndoLogsCount] =
+{
+	NULL
+};
+static Size o_undo_dirty_words[(int) UndoLogsCount] =
+{
+	0
+};
+
+/* # of pages of size ORIOLEDB_BLCKSZ in undoType's circular buffer. */
+#define UNDO_BUFFER_NPAGES(undoType) \
+	(o_undo_circular_sizes[(int) (undoType)] / ORIOLEDB_BLCKSZ)
+
+/* Ring-relative page index for a location. */
+#define UNDO_PAGE_INDEX(undoType, location) \
+	(((location) % o_undo_circular_sizes[(int) (undoType)]) / ORIOLEDB_BLCKSZ)
+
+static inline void
+mark_undo_page_dirty(UndoLogType undoType, uint32 page)
+{
+	uint64		mask = UINT64CONST(1) << (page % 64);
+
+	/*
+	 * Release fence so the writer's preceding store in the page is visible to
+	 * a checkpointer that observes the bit set via the fetch_and.
+	 */
+	pg_atomic_fetch_or_u64(&o_undo_dirty_bitmaps[(int) undoType][page / 64],
+						   mask);
+}
+
+/*
+ * Mark every page touched by an undo record at [location, location+size)
+ * as dirty.  Most records sit within a single page; cross-page writes are
+ * rare but still possible at the boundary, so handle both.
+ */
+static inline void
+mark_undo_range_dirty(UndoLogType undoType, UndoLocation location, Size size)
+{
+	UndoLocation end = location + size;
+	UndoLocation pageLoc;
+
+	/* Walk page-aligned locations covering [location, end). */
+	for (pageLoc = location - (location % ORIOLEDB_BLCKSZ);
+		 pageLoc < end;
+		 pageLoc += ORIOLEDB_BLCKSZ)
+		mark_undo_page_dirty(undoType, UNDO_PAGE_INDEX(undoType, pageLoc));
+}
+
+/*
+ * Atomic test-and-clear of one page's dirty bit.  Returns true if the bit
+ * was set (caller must persist the page to disk).
+ */
+static inline bool
+test_clear_undo_page_dirty(UndoLogType undoType, uint32 page)
+{
+	uint64		mask = UINT64CONST(1) << (page % 64);
+	uint64		old = pg_atomic_fetch_and_u64(
+											  &o_undo_dirty_bitmaps[(int) undoType][page / 64], ~mask);
+
+	return (old & mask) != 0;
+}
+
 PendingTruncatesMeta *pending_truncates_meta;
 
 UndoLocation curRetainUndoLocations[(int) UndoLogsCount] =
@@ -311,13 +387,13 @@ undo_shmem_needs(void)
 	regular_row_undo_circular_buffer_fraction = 1.0 - regular_block_undo_circular_buffer_fraction - system_undo_circular_buffer_fraction;
 	o_undo_circular_sizes[UndoLogRegular] = regular_row_undo_circular_buffer_fraction * undo_circular_buffer_size;
 	o_undo_circular_sizes[UndoLogRegular] = Max(o_undo_circular_sizes[UndoLogRegular], max_procs * 2 * O_MAX_UNDO_RECORD_SIZE);
-	o_undo_circular_sizes[UndoLogRegular] = CACHELINEALIGN(o_undo_circular_sizes[UndoLogRegular]);
+	o_undo_circular_sizes[UndoLogRegular] = TYPEALIGN(ORIOLEDB_BLCKSZ, o_undo_circular_sizes[UndoLogRegular]);
 	o_undo_circular_sizes[UndoLogRegularPageLevel] = regular_block_undo_circular_buffer_fraction * undo_circular_buffer_size;
 	o_undo_circular_sizes[UndoLogRegularPageLevel] = Max(o_undo_circular_sizes[UndoLogRegularPageLevel], max_procs * 2 * O_MAX_UNDO_RECORD_SIZE);
-	o_undo_circular_sizes[UndoLogRegularPageLevel] = CACHELINEALIGN(o_undo_circular_sizes[UndoLogRegularPageLevel]);
+	o_undo_circular_sizes[UndoLogRegularPageLevel] = TYPEALIGN(ORIOLEDB_BLCKSZ, o_undo_circular_sizes[UndoLogRegularPageLevel]);
 	o_undo_circular_sizes[UndoLogSystem] = system_undo_circular_buffer_fraction * undo_circular_buffer_size;
 	o_undo_circular_sizes[UndoLogSystem] = Max(o_undo_circular_sizes[UndoLogSystem], max_procs * 2 * O_MAX_UNDO_RECORD_SIZE);
-	o_undo_circular_sizes[UndoLogSystem] = CACHELINEALIGN(o_undo_circular_sizes[UndoLogSystem]);
+	o_undo_circular_sizes[UndoLogSystem] = TYPEALIGN(ORIOLEDB_BLCKSZ, o_undo_circular_sizes[UndoLogSystem]);
 	undoBuffersDesc.buffersCount = undo_buffers_count;
 
 	size = CACHELINEALIGN(sizeof(UndoMeta) * (int) UndoLogsCount);
@@ -325,6 +401,23 @@ undo_shmem_needs(void)
 	size = add_size(size, o_undo_circular_sizes[UndoLogRegular]);
 	size = add_size(size, o_undo_circular_sizes[UndoLogRegularPageLevel]);
 	size = add_size(size, o_undo_circular_sizes[UndoLogSystem]);
+
+	/* Dirty bitmaps, one cacheline-aligned chunk per undo log type. */
+	{
+		int			t;
+
+		for (t = 0; t < (int) UndoLogsCount; t++)
+		{
+			Size		npages = o_undo_circular_sizes[t] / ORIOLEDB_BLCKSZ;
+			Size		nwords = (npages + 63) / 64;
+
+			o_undo_dirty_words[t] = nwords;
+			size = add_size(size,
+							CACHELINEALIGN(mul_size(nwords,
+													sizeof(pg_atomic_uint64))));
+		}
+	}
+
 	size = add_size(size, o_buffers_shmem_needs(&undoBuffersDesc));
 
 	return size;
@@ -350,7 +443,25 @@ undo_shmem_init(Pointer buf, bool found)
 	ptr += o_undo_circular_sizes[UndoLogSystem];
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
+	{
+		o_undo_dirty_bitmaps[i] = (pg_atomic_uint64 *) ptr;
+		ptr += CACHELINEALIGN(o_undo_dirty_words[i] *
+							  sizeof(pg_atomic_uint64));
+	}
+
+	for (i = 0; i < (int) UndoLogsCount; i++)
 		init_undo_meta(&undo_metas[i], found);
+
+	if (!found)
+	{
+		for (i = 0; i < (int) UndoLogsCount; i++)
+		{
+			Size		w;
+
+			for (w = 0; w < o_undo_dirty_words[i]; w++)
+				pg_atomic_init_u64(&o_undo_dirty_bitmaps[i][w], 0);
+		}
+	}
 
 	o_buffers_shmem_init(&undoBuffersDesc, ptr, found);
 	ptr += o_buffers_shmem_needs(&undoBuffersDesc);
@@ -1483,6 +1594,94 @@ read_undo_range_if_exists(OBuffersDesc *desc, Pointer buf, UndoLogType undoType,
 }
 
 /*
+ * Walk pages overlapping [fromLoc, toLoc) and write to disk any whose dirty
+ * bit is set, leaving the ring buffer untouched (slots keep their data,
+ * writtenLocation does not advance).  This is the checkpoint-time flush:
+ * it makes the on-disk copy current without forcing future undo_read() of
+ * the same locations onto the slow disk path.
+ *
+ * Pages whose bit was clear by the time we look at them are already on
+ * disk (or were never written since the last flush) and are skipped.  A
+ * writer that re-sets the bit after we cleared it leaves it set, so the
+ * next flush catches the update.
+ *
+ * The function works in short batches of UNDO_FLUSH_BATCH_PAGES under
+ * undoWriteLock in EXCLUSIVE mode, releasing the lock between batches.
+ * This keeps us serialised with the slot-pressure eviction path
+ * (evict_undo_to_disk), which mutates the same pages and writtenLocation
+ * and would otherwise produce torn snapshots; at the same time the brief
+ * release windows let backends waiting on the lock (eviction triggered by
+ * reserve_undo_size_extended, or set_my_reserved_location waiters) make
+ * progress instead of stalling for the whole flush.
+ */
+#define UNDO_FLUSH_BATCH_PAGES 128
+static void
+flush_dirty_undo_range(UndoLogType undoType,
+					   UndoLocation fromLoc, UndoLocation toLoc)
+{
+	UndoMeta   *meta = get_undo_meta_by_type(undoType);
+	Pointer		circularBuffer = o_undo_buffers[(int) undoType];
+	Size		circularBufferSize = o_undo_circular_sizes[(int) undoType];
+	UndoLocation pageLoc,
+				alignedFrom,
+				alignedTo;
+
+	if (fromLoc >= toLoc)
+		return;
+
+	alignedFrom = fromLoc - (fromLoc % ORIOLEDB_BLCKSZ);
+	alignedTo = ((toLoc + ORIOLEDB_BLCKSZ - 1) / ORIOLEDB_BLCKSZ)
+		* ORIOLEDB_BLCKSZ;
+
+	/* Cap to ring size: revisiting the same physical page is pointless. */
+	if (alignedTo - alignedFrom > circularBufferSize)
+		alignedTo = alignedFrom + circularBufferSize;
+
+	pageLoc = alignedFrom;
+	while (pageLoc < alignedTo)
+	{
+		int			processed;
+
+		LWLockAcquire(&meta->undoWriteLock, LW_EXCLUSIVE);
+
+		for (processed = 0;
+			 processed < UNDO_FLUSH_BATCH_PAGES && pageLoc < alignedTo;
+			 processed++, pageLoc += ORIOLEDB_BLCKSZ)
+		{
+			uint32		page = UNDO_PAGE_INDEX(undoType, pageLoc);
+
+			if (!test_clear_undo_page_dirty(undoType, page))
+				continue;
+
+			/*
+			 * Pages in [fromLoc, toLoc) are stable while we copy them:
+			 * fsync_undo_range() called check_reserved_undo_location() with
+			 * toLoc + ring_size before invoking us, which waits until every
+			 * backend's reserved location is >= toLoc, so no backend can be
+			 * appending into our range concurrently.  That lets us hand the
+			 * ring-buffer page straight to the write without staging.
+			 *
+			 * Bypass the o_buffers cache: future reads of these locations
+			 * answer from the ring (writtenLocation does not advance), so
+			 * populating the cache here would only duplicate the bytes.
+			 *
+			 * The acquire pairing with mark_undo_range_dirty() lives inside
+			 * test_clear_undo_page_dirty()'s fetch_and; the page we read
+			 * below reflects every store the writer made before it set the
+			 * bit.
+			 */
+			o_buffers_write_page_direct(&undoBuffersDesc,
+										circularBuffer +
+										(pageLoc % circularBufferSize),
+										(uint32) undoType,
+										pageLoc);
+		}
+
+		LWLockRelease(&meta->undoWriteLock);
+	}
+}
+
+/*
  * Evict some part of undo to the disk.
  */
 void
@@ -1579,6 +1778,32 @@ evict_undo_to_disk(UndoLogType undoType,
 		write_undo_range(&undoBuffersDesc,
 						 circularBuffer, undoType,
 						 breakUndoLocation, targetUndoLocation);
+	}
+
+	/*
+	 * The pages we just persisted match the on-disk copy.  Clear their dirty
+	 * bits for pages fully covered by this write so a later checkpoint-time
+	 * flush can skip them.  Partial boundary pages are left dirty: their tail
+	 * may still belong to undo records beyond targetUndoLocation that other
+	 * backends are actively writing, and clearing the bit could mask their
+	 * updates.
+	 */
+	{
+		UndoLocation pageStart,
+					pageEnd,
+					p;
+
+		pageStart = ((retainUndoLocation + ORIOLEDB_BLCKSZ - 1)
+					 / ORIOLEDB_BLCKSZ) * ORIOLEDB_BLCKSZ;
+		pageEnd = (targetUndoLocation / ORIOLEDB_BLCKSZ) * ORIOLEDB_BLCKSZ;
+		for (p = pageStart; p < pageEnd; p += ORIOLEDB_BLCKSZ)
+		{
+			uint32		page = UNDO_PAGE_INDEX(undoType, p);
+			uint64		mask = UINT64CONST(1) << (page % 64);
+
+			pg_atomic_fetch_and_u64(&o_undo_dirty_bitmaps[(int) undoType][page / 64],
+									~mask);
+		}
 	}
 
 	SpinLockAcquire(&meta->minUndoLocationsMutex);
@@ -1741,31 +1966,29 @@ fsync_undo_range(UndoLogType undoType,
 {
 	UndoLocation minProcReservedLocation;
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
+	UndoLocation writtenLocation;
 
 	(void) check_reserved_undo_location(undoType,
 										toLoc + o_undo_circular_sizes[(int) undoType],
 										&minProcReservedLocation,
 										true);
 
-	if (toLoc <= pg_atomic_read_u64(&meta->writeInProgressLocation))
-	{
-		/*
-		 * Current in-progress undo write should cover our required location.
-		 * It should be enough to just wait for current in-progress write to
-		 * be finished.
-		 */
-		LWLockAcquire(&meta->undoWriteLock, LW_SHARED);
-		LWLockRelease(&meta->undoWriteLock);
-
-		/* TODO: consider removing lock if assers are disabled */
-		SpinLockAcquire(&meta->minUndoLocationsMutex);
-		Assert(toLoc <= pg_atomic_read_u64(&meta->writtenLocation));
-		SpinLockRelease(&meta->minUndoLocationsMutex);
-	}
-	else
-	{
-		evict_undo_to_disk(undoType, toLoc, minProcReservedLocation, false);
-	}
+	/*
+	 * Push dirty pages overlapping [fromLoc, toLoc) out to o_buffers without
+	 * touching the ring or advancing writtenLocation.  Pages already on disk
+	 * (bit cleared by a prior eviction or flush) are skipped.
+	 *
+	 * Locations below writtenLocation are guaranteed on disk already, so we
+	 * clamp fromLoc up to writtenLocation to avoid pointless bit scans. The
+	 * flush internally acquires undoWriteLock in EXCLUSIVE mode in short
+	 * batches and releases it between them; that keeps it serialised with
+	 * evict_undo_to_disk() while letting concurrent eviction make progress
+	 * instead of waiting for the whole flush.
+	 */
+	writtenLocation = pg_atomic_read_u64(&meta->writtenLocation);
+	flush_dirty_undo_range(undoType,
+						   Max(fromLoc, writtenLocation),
+						   toLoc);
 
 	o_buffers_sync(&undoBuffersDesc, (uint32) undoType,
 				   fromLoc, toLoc, wait_event_info);
@@ -1872,6 +2095,14 @@ add_new_undo_stack_item(UndoLogType undoType, UndoLocation location)
 		pg_atomic_write_u64(&sharedLocations->onCommitLocation, location);
 	}
 
+	/*
+	 * Caller has finished writing the item's payload via the pointer returned
+	 * by get_undo_record(); publish the touched page(s) so the next
+	 * checkpoint-time flush observes the update.  Release fence is embedded
+	 * in pg_atomic_fetch_or_u64.
+	 */
+	mark_undo_range_dirty(undoType, location, item->itemSize);
+
 	release_reserved_undo_location(undoType);
 }
 
@@ -1912,6 +2143,9 @@ add_new_undo_stack_item_to_process(UndoLogType undoType,
 
 	if (!UndoLocationIsValid(pg_atomic_read_u64(&oProcData[pgprocno].undoRetainLocations[undoType].transactionUndoRetainLocation)))
 		pg_atomic_write_u64(&oProcData[pgprocno].undoRetainLocations[undoType].transactionUndoRetainLocation, location);
+
+	/* See add_new_undo_stack_item() for the page-dirty rationale. */
+	mark_undo_range_dirty(undoType, location, item->itemSize);
 
 	release_reserved_undo_location(undoType);
 }
@@ -2942,6 +3176,8 @@ undo_write_internal(UndoLogType undoType, UndoLocation location,
 		memcpy(GET_UNDO_REC(undoType, memoryUndoLocation),
 			   buf + (memoryUndoLocation - location),
 			   size - (memoryUndoLocation - location));
+		mark_undo_range_dirty(undoType, memoryUndoLocation,
+							  size - (memoryUndoLocation - location));
 		break;
 	}
 
