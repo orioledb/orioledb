@@ -261,3 +261,61 @@ The harness's single "divergence" label has now masked three different things. T
 3. **The does-not-shut-down livelock** — this issue proper.
 
 A correct harness should bucket these separately (`grep` for `Extent .* is neither free or busy`, `TRAP: failed Assert("UNDO_REC_EXISTS`, and `does not shut down` respectively) rather than collapsing all three into "divergence".
+
+## 11. Proposed fix design — filter deferred-rollback records out of `xmin_queue` (consumer-side)
+
+This is fix-direction §9(2), worked out concretely. **Goal:** stop the deferred crash-rollback of a low oxid from regressing the standby horizon, without changing the WAL format.
+
+### Why it works
+
+The horizon regression has exactly one source: `update_run_xmin` reading the offending oxid as the `xmin_queue` minimum. If the oxid is never inserted into `xmin_queue`, `update_run_xmin` never sees it, `globalXmin` never drops below `writtenXmin`, and the committed-FROZEN oxids in `[regress, writtenXmin)` stay covered by the `oxid < globalXmin` fast-path (read as committed-visible, never `IN_PROGRESS`). The livelock cannot form.
+
+### The predicate — `oxid < record.carried_xmin` (NOT `oxid < writtenXmin`)
+
+Filter on the rollback record's **carried xmin** (the primary's authoritative horizon, stamped at `wal.c:495-496`), not the replica's `writtenXmin`:
+
+- `oxid >= carried_xmin` → genuinely in-flight when rolled back (e.g. `oxid=452, carried_xmin=352`) → **add to `xmin_queue` normally**.
+- `oxid < carried_xmin` → the primary had already retired it from its own horizon (e.g. `oxid=248, carried_xmin=468`) → **apply undo but skip the `xmin_queue` insert**.
+
+`oxid < writtenXmin` is only the *symptom* site and would mis-handle live rollbacks; `oxid < carried_xmin` cleanly flags exactly the deferred-late set ({248, 332, 345} in the caught trial).
+
+### Implementation — three parts
+
+1. **Guard the insert** at `recovery.c:1919`:
+   ```c
+   if (worker_id < 0 && oxid >= record_carried_xmin) {
+       pairingheap_add(xmin_queue, &cur_state->xmin_ph_node);
+       cur_state->in_xmin_queue = true;
+   }
+   /* else: deferred-late rollback below the primary horizon — undo only, no horizon entry */
+   ```
+2. **Track membership** with a new `RecoveryXidState.in_xmin_queue` flag, because `check_delete_xid_state` (`recovery.c:1961`) does an **unconditional** `pairingheap_remove` for the leader — removing a node never inserted corrupts/aborts the heap:
+   ```c
+   if (worker_id < 0 && state->in_xmin_queue) {
+       pairingheap_remove(xmin_queue, &state->xmin_ph_node);
+       state->in_xmin_queue = false;
+       update_run_xmin();
+   }
+   ```
+3. **Leave the abort/undo path untouched.** The undo application (`walk_undo_stack`) and undo retention (`retain_undo_queues`, `undo_stacks`) are *separate* from `xmin_queue`, so the rollback itself still completes. This must be **verified, not assumed** (confirm oxid 248's undo applies and its slot resolves after the filter).
+
+Add an `elog(WARNING)`/assert if a **commit** (not a rollback) ever arrives with `oxid < carried_xmin` — that would be a strictly worse bug than this one and must not be silently swallowed.
+
+### Limitation (be explicit)
+
+This fixes the **livelock** only. Oxid 248's rows arrived via the base backup with its slot `FROZEN` (= "committed-visible") even though 248 **aborted**; those rows become invisible only when the rollback's **undo** physically removes them. Filtering does not change that — it relies on the undo path doing its job (the same tension as the `UNDO_REC_EXISTS` crash in §10). The "frozen-but-aborted backup rows until undo" question is a separate item.
+
+### Consumer-side filter vs. producer-side stamp
+
+| | §11 filter (consumer) | §9(1) stamp `min(runXmin, oxid)` at `wal.c:496` (producer) |
+|---|---|---|
+| Scope | standby only | every consumer of the record |
+| WAL format | unchanged | changed (record content) |
+| Special-casing | per-reader guard | none after the fix |
+| Risk | local, easy to ship | touches the wire |
+
+Recommended: ship the §11 filter now as the safe, local stopper (plus the §9(5) `FROZEN`-read invariant guard), and pursue the producer-side stamp as the proper root cure.
+
+### Verification plan
+
+Run the no-injection hunt (§7) with the filter in place and confirm: (a) **zero** `does-not-shut-down` catches across ≥150 trials; (b) the new `skip-xmin-insert` trace fires **only** for records with `oxid < carried_xmin` (the deferred-late set), never for live rollbacks; (c) `runxmin-backward belowWritten=1` no longer appears on the replica; (d) the bank-account invariant still holds (undo correctness — the abort still rolls back 248's rows).
