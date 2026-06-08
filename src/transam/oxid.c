@@ -140,9 +140,67 @@ static List *prevLogicalXids = NIL; /* remember all xids on subxact's chain
 									 * for correct release */
 static OXidMapItem *xidBuffer;
 
+/*
+ * Per-page dirty bitmap for xidBuffer.  One bit per ORIOLEDB_BLCKSZ page
+ * (i.e. per ORIOLEDB_BLCKSZ / sizeof(OXidMapItem) slots).  Set by writers
+ * whenever they store into a slot; cleared by the checkpoint-time flush
+ * (flush_dirty_xidsmap_range) and by the eviction path once the page has
+ * been pushed out to o_buffers.
+ *
+ * The bit signals "this page may differ from the on-disk copy" - it is set
+ * AFTER the slot store with a release barrier, so a checkpointer that has
+ * just observed it can read the slot data with an acquire barrier and is
+ * guaranteed to see the writer's update.  A late-setting writer (set bit
+ * after checkpoint cleared it) leaves the bit set so the next flush
+ * catches the update; the worst case is one redundant page write.
+ */
+static pg_atomic_uint64 *xidBufferDirty;
+
 XidMeta    *xid_meta;
 
 static pg_atomic_uint32 *logicalXidsShmemMap;
+
+/* # slots covered by one o_buffers page in the xidmap. */
+#define XID_SLOTS_PER_PAGE (ORIOLEDB_BLCKSZ / sizeof(OXidMapItem))
+
+/* # of pages in the circular buffer (== xid_buffers_count by construction). */
+#define XID_BUFFER_NPAGES \
+	(xid_circular_buffer_size / XID_SLOTS_PER_PAGE)
+
+/* # of uint64 words holding the dirty bitmap. */
+#define XID_BUFFER_DIRTY_WORDS \
+	((XID_BUFFER_NPAGES + 63) / 64)
+
+/* Ring-relative page index for oxid (folds modulo the circular buffer). */
+#define XID_BUFFER_PAGE_INDEX(oxid) \
+	(((oxid) % xid_circular_buffer_size) / XID_SLOTS_PER_PAGE)
+
+static inline void
+mark_xid_buffer_dirty(OXid oxid)
+{
+	uint32		page = XID_BUFFER_PAGE_INDEX(oxid);
+	uint64		mask = UINT64CONST(1) << (page % 64);
+
+	/*
+	 * Release fence so the preceding slot store is visible to a checkpointer
+	 * that observes the bit set.
+	 */
+	pg_atomic_fetch_or_u64(&xidBufferDirty[page / 64], mask);
+}
+
+/*
+ * Atomic test-and-clear of the dirty bit for one page.  Returns true if
+ * the bit was set (caller must persist the page to disk).  Acquire fence
+ * pairs with the release in mark_xid_buffer_dirty().
+ */
+static inline bool
+test_clear_xid_buffer_page_dirty(uint32 page)
+{
+	uint64		mask = UINT64CONST(1) << (page % 64);
+	uint64		old = pg_atomic_fetch_and_u64(&xidBufferDirty[page / 64], ~mask);
+
+	return (old & mask) != 0;
+}
 
 OSnapshot	o_in_progress_snapshot = {COMMITSEQNO_INPROGRESS, InvalidXLogRecPtr, 0, 0};
 
@@ -179,6 +237,8 @@ oxid_shmem_needs(void)
 	size = CACHELINEALIGN(sizeof(XidMeta));
 	size = add_size(size, mul_size(xid_circular_buffer_size,
 								   sizeof(OXidMapItem)));
+	size = add_size(size, CACHELINEALIGN(mul_size(XID_BUFFER_DIRTY_WORDS,
+												  sizeof(pg_atomic_uint64))));
 	size = add_size(size, o_buffers_shmem_needs(&buffersDesc));
 	size = add_size(size, mul_size(logical_xid_buffers_guc,
 								   ORIOLEDB_BLCKSZ));
@@ -286,6 +346,8 @@ oxid_init_shmem(Pointer ptr, bool found)
 	ptr += CACHELINEALIGN(sizeof(XidMeta));
 	xidBuffer = (OXidMapItem *) ptr;
 	ptr += xid_circular_buffer_size * sizeof(OXidMapItem);
+	xidBufferDirty = (pg_atomic_uint64 *) ptr;
+	ptr += CACHELINEALIGN(XID_BUFFER_DIRTY_WORDS * sizeof(pg_atomic_uint64));
 	o_buffers_shmem_init(&buffersDesc, ptr, found);
 	ptr += o_buffers_shmem_needs(&buffersDesc);
 	logicalXidsShmemMap = (pg_atomic_uint32 *) ptr;
@@ -301,6 +363,8 @@ oxid_init_shmem(Pointer ptr, bool found)
 			pg_atomic_init_u64(&xidBuffer[i].csn, COMMITSEQNO_FROZEN);
 			pg_atomic_init_u64(&xidBuffer[i].commitPtr, FirstNormalUnloggedLSN);
 		}
+		for (i = 0; i < XID_BUFFER_DIRTY_WORDS; i++)
+			pg_atomic_init_u64(&xidBufferDirty[i], 0);
 
 		xid_meta->xidMapTrancheId = LWLockNewTrancheId();
 		LWLockInitialize(&xid_meta->xidMapWriteLock,
@@ -593,6 +657,7 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 										   &oldCsn, csn))
 		{
 			Assert(oldCsn != COMMITSEQNO_FROZEN);
+			mark_xid_buffer_dirty(oxid);
 			return;
 		}
 
@@ -637,6 +702,7 @@ set_oxid_xlog_ptr_internal(OXid oxid, XLogRecPtr ptr)
 										   &oldPtr, ptr))
 		{
 			Assert(oldPtr != FirstNormalUnloggedLSN);
+			mark_xid_buffer_dirty(oxid);
 			return;
 		}
 
@@ -821,6 +887,30 @@ write_xidsmap(OXid targetXmax)
 						lastWrittenXmin * sizeof(OXidMapItem),
 						(oxid - lastWrittenXmin) * sizeof(OXidMapItem));
 
+	/*
+	 * Clear dirty bits for pages fully covered by this eviction.  The page
+	 * contents we just wrote are exactly the data on disk, so a subsequent
+	 * checkpoint-time flush can skip them.  Partial boundary pages are left
+	 * dirty: their tail still belongs to oxids beyond xmax that may be
+	 * actively written, and clearing the bit could mask their updates.
+	 */
+	{
+		OXid		fullStart,
+					fullEnd,
+					p;
+
+		fullStart = ((xmin + XID_SLOTS_PER_PAGE - 1) / XID_SLOTS_PER_PAGE)
+			* XID_SLOTS_PER_PAGE;
+		fullEnd = (xmax / XID_SLOTS_PER_PAGE) * XID_SLOTS_PER_PAGE;
+		for (p = fullStart; p < fullEnd; p += XID_SLOTS_PER_PAGE)
+		{
+			uint32		page = XID_BUFFER_PAGE_INDEX(p);
+			uint64		mask = UINT64CONST(1) << (page % 64);
+
+			pg_atomic_fetch_and_u64(&xidBufferDirty[page / 64], ~mask);
+		}
+	}
+
 	SpinLockAcquire(&xid_meta->xminMutex);
 	Assert(pg_atomic_read_u64(&xid_meta->writtenXmin) < xmax);
 	pg_atomic_write_u64(&xid_meta->writtenXmin, xmax);
@@ -830,19 +920,102 @@ write_xidsmap(OXid targetXmax)
 }
 
 /*
+ * Walk pages overlapping [xmin, xmax) and persist any whose dirty bit is
+ * set, leaving the ring buffer untouched (slots keep their data, writtenXmin
+ * does not advance).  This is the checkpoint-time flush: it makes the
+ * on-disk copy current without forcing future reads of the same oxids onto
+ * the slow path.
+ *
+ * Pages whose bit was cleared by the time we look at them are already on
+ * disk (or were never written since the last flush) and are skipped.  A
+ * writer that sets the bit again after we cleared it leaves the bit set,
+ * so the next flush will catch the update.
+ *
+ * The function works in short batches of XID_FLUSH_BATCH_PAGES under
+ * xidMapWriteLock in EXCLUSIVE mode, releasing the lock between batches.
+ * This keeps it serialised with the slot-pressure eviction path
+ * (write_xidsmap), which mutates the same slots and writtenXmin and would
+ * otherwise produce torn page snapshots; the brief release windows let
+ * concurrent eviction and waiters (set_oxid_csn / set_oxid_xlog_ptr
+ * SHARED-lock waiters) make progress instead of stalling for the whole
+ * flush.
+ */
+#define XID_FLUSH_BATCH_PAGES 128
+static void
+flush_dirty_xidsmap_range(OXid xmin, OXid xmax)
+{
+	OXid		pageOxid,
+				alignedXmin,
+				alignedXmax;
+	OXidMapItem buffer[XID_SLOTS_PER_PAGE];
+
+	if (xmin >= xmax)
+		return;
+
+	alignedXmin = xmin - (xmin % XID_SLOTS_PER_PAGE);
+	alignedXmax = ((xmax + XID_SLOTS_PER_PAGE - 1) / XID_SLOTS_PER_PAGE)
+		* XID_SLOTS_PER_PAGE;
+	if (alignedXmax - alignedXmin > xid_circular_buffer_size)
+		alignedXmax = alignedXmin + xid_circular_buffer_size;
+
+	pageOxid = alignedXmin;
+	while (pageOxid < alignedXmax)
+	{
+		int			processed;
+
+		LWLockAcquire(&xid_meta->xidMapWriteLock, LW_EXCLUSIVE);
+
+		for (processed = 0;
+			 processed < XID_FLUSH_BATCH_PAGES && pageOxid < alignedXmax;
+			 processed++, pageOxid += XID_SLOTS_PER_PAGE)
+		{
+			uint32		page = XID_BUFFER_PAGE_INDEX(pageOxid);
+			OXid		slot;
+
+			if (!test_clear_xid_buffer_page_dirty(page))
+				continue;
+
+			/*
+			 * Acquire-fence pair with the writer's release in
+			 * mark_xid_buffer_dirty() lives inside the atomic fetch_and that
+			 * test_clear_xid_buffer_page_dirty() just performed; the per-slot
+			 * reads below see all stores preceding the writer's bit set.
+			 *
+			 * Assemble the page into a local OXidMapItem buffer (writers do
+			 * not take the write lock, so per-slot CAS can race with our
+			 * read; the local buffer gives o_buffers_write_page_direct() a
+			 * stable page).  Bypass the o_buffers cache: reads of these oxids
+			 * stay in the ring (writtenXmin does not advance), so the cache
+			 * copy would only duplicate the bytes.
+			 */
+			for (slot = 0; slot < XID_SLOTS_PER_PAGE; slot++)
+			{
+				OXid		slotOxid = pageOxid + slot;
+				Size		idx = slotOxid % xid_circular_buffer_size;
+
+				pg_atomic_write_u64(&buffer[slot].csn,
+									pg_atomic_read_u64(&xidBuffer[idx].csn));
+				pg_atomic_write_u64(&buffer[slot].commitPtr,
+									pg_atomic_read_u64(&xidBuffer[idx].commitPtr));
+			}
+
+			o_buffers_write_page_direct(&buffersDesc,
+										(char *) buffer,
+										OXID_BUFFERS_TAG,
+										pageOxid * sizeof(OXidMapItem));
+		}
+
+		LWLockRelease(&xid_meta->xidMapWriteLock);
+	}
+}
+
+/*
  * Sync given range of xidmap with disk.
  */
 void
 fsync_xidmap_range(OXid xmin, OXid xmax, uint32 wait_event_info)
 {
-	while (xmax > pg_atomic_read_u64(&xid_meta->writtenXmin))
-	{
-		if (LWLockAcquireOrWait(&xid_meta->xidMapWriteLock, LW_EXCLUSIVE))
-		{
-			write_xidsmap(xmax);
-			LWLockRelease(&xid_meta->xidMapWriteLock);
-		}
-	}
+	flush_dirty_xidsmap_range(xmin, xmax);
 
 	o_buffers_sync(&buffersDesc,
 				   OXID_BUFFERS_TAG,
@@ -1150,6 +1323,24 @@ advance_global_xmin(OXid newXid)
 								FirstNormalUnloggedLSN);
 		}
 
+		/* Clear dirty bits for pages fully reset to FROZEN. */
+		{
+			OXid		fullStart,
+						fullEnd,
+						p;
+
+			fullStart = ((writtenXmin + XID_SLOTS_PER_PAGE - 1) / XID_SLOTS_PER_PAGE)
+				* XID_SLOTS_PER_PAGE;
+			fullEnd = (globalXmin / XID_SLOTS_PER_PAGE) * XID_SLOTS_PER_PAGE;
+			for (p = fullStart; p < fullEnd; p += XID_SLOTS_PER_PAGE)
+			{
+				uint32		page = XID_BUFFER_PAGE_INDEX(p);
+				uint64		mask = UINT64CONST(1) << (page % 64);
+
+				pg_atomic_fetch_and_u64(&xidBufferDirty[page / 64], ~mask);
+			}
+		}
+
 		pg_write_barrier();
 
 		pg_atomic_write_u64(&xid_meta->writtenXmin, globalXmin);
@@ -1233,6 +1424,7 @@ advance_oxids(OXid new_xid)
 								COMMITSEQNO_INPROGRESS);
 			pg_atomic_write_u64(&xidBuffer[xid % xid_circular_buffer_size].commitPtr,
 								InvalidXLogRecPtr);
+			mark_xid_buffer_dirty(xid);
 		}
 		pg_atomic_write_u64(&xid_meta->nextXid, xmax);
 	}
@@ -1300,6 +1492,7 @@ get_current_oxid(void)
 							XLOG_PTR_MAKE_SPECIAL(MYPROCNUMBER,
 												  nestingLevel,
 												  COMMITSEQNO_STATUS_IN_PROGRESS));
+		mark_xid_buffer_dirty(newOxid);
 		curOxid = newOxid;
 
 		/* Check if an autonomous transaction is in progress */

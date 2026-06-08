@@ -50,6 +50,8 @@ extern void o_buffers_write(OBuffersDesc *desc, Pointer buf,
 							uint32 tag, int64 offset, int64 size);
 extern bool o_buffers_write_if_exists(OBuffersDesc *desc, Pointer buf,
 									  uint32 tag, int64 offset, int64 size);
+extern void o_buffers_write_page_direct(OBuffersDesc *desc, char *data,
+										uint32 tag, int64 offset);
 extern void o_buffers_sync(OBuffersDesc *desc, uint32 tag, int64 fromOffset,
 						   int64 toOffset, uint32 wait_event_info);
 extern void o_buffers_unlink_blocks_range(OBuffersDesc *desc,
