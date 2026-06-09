@@ -10,7 +10,6 @@ from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 from .base_test import wait_checkpointer_stopevent
 
-
 SMALL_UNDO_CONF = """
 orioledb.main_buffers = 8MB
 orioledb.undo_buffers = 128
@@ -45,8 +44,7 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		self._create_table()
 		node.safe_psql(
 		    'postgres',
-		    "INSERT INTO o_ring SELECT i, 0 FROM generate_series(1, 200) i;"
-		)
+		    "INSERT INTO o_ring SELECT i, 0 FROM generate_series(1, 200) i;")
 
 		# FOR UPDATE installs a lock-only undo record; COMMIT triggers
 		# cleanChainHasLocks() -> in-place tuphdr writes.
@@ -59,8 +57,7 @@ class UndoRingKeepCheckpointTest(BaseTest):
 			    f"BEGIN; "
 			    f"SELECT v FROM o_ring WHERE id = {(w * 13 + i) % 200 + 1} FOR UPDATE; "
 			    f"UPDATE o_ring SET v = v + 1 WHERE id = {(w * 13 + i) % 200 + 1}; "
-			    f"COMMIT"
-			    for i in range(iters)
+			    f"COMMIT" for i in range(iters)
 			]) + ";"
 			workers.append(ThreadQueryExecutor(con, q))
 
@@ -83,10 +80,10 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		chkp_thread.join()
 
 		expected = n_workers * iters
-		got = node.execute('postgres',
-		                   "SELECT SUM(v) FROM o_ring;")[0][0]
-		self.assertEqual(got, expected,
-		                 f"lost or duplicated updates: got {got}, expected {expected}")
+		got = node.execute('postgres', "SELECT SUM(v) FROM o_ring;")[0][0]
+		self.assertEqual(
+		    got, expected,
+		    f"lost or duplicated updates: got {got}, expected {expected}")
 		self._amcheck()
 		chkp_con.close()
 		for c in worker_cons:
@@ -114,8 +111,7 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		chkp_con.execute('CHECKPOINT;')
 		con.commit()
 
-		got = node.execute('postgres',
-		                   "SELECT SUM(v) FROM o_ring;")[0][0]
+		got = node.execute('postgres', "SELECT SUM(v) FROM o_ring;")[0][0]
 		# sum(1..100000) + 100000
 		self.assertEqual(got, 5000150000)
 		self._amcheck()
@@ -131,8 +127,7 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		self._create_table()
 		node.safe_psql(
 		    'postgres',
-		    "INSERT INTO o_ring SELECT i, i FROM generate_series(1, 50000) i;"
-		)
+		    "INSERT INTO o_ring SELECT i, i FROM generate_series(1, 50000) i;")
 
 		# Held snapshot pins undo retention -> writer hits slot-pressure
 		# eviction path.
@@ -177,8 +172,7 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		self._create_table()
 		node.safe_psql(
 		    'postgres',
-		    "INSERT INTO o_ring SELECT i, 1 FROM generate_series(1, 1000) i;"
-		)
+		    "INSERT INTO o_ring SELECT i, 1 FROM generate_series(1, 1000) i;")
 		node.safe_psql('postgres', 'CHECKPOINT;')
 
 		# Post-checkpoint mix: new appends + in-place writes (row lock).
@@ -186,7 +180,8 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		con.execute("INSERT INTO o_ring SELECT i, 2 FROM "
 		            "generate_series(1001, 2000) i;")
 		con.begin()
-		con.execute("SELECT v FROM o_ring WHERE id BETWEEN 1 AND 100 FOR UPDATE;")
+		con.execute(
+		    "SELECT v FROM o_ring WHERE id BETWEEN 1 AND 100 FOR UPDATE;")
 		con.execute("UPDATE o_ring SET v = v + 10 WHERE id BETWEEN 1 AND 100;")
 		con.commit()
 		con.close()
@@ -213,14 +208,11 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		self._create_table()
 		node.safe_psql(
 		    'postgres',
-		    "INSERT INTO o_ring SELECT i, 0 FROM generate_series(1, 200) i;"
-		)
+		    "INSERT INTO o_ring SELECT i, 0 FROM generate_series(1, 200) i;")
 
 		worker_con = node.connect()
 		ctrl_con = node.connect()
-		ctrl_con.execute(
-		    "SELECT pg_stopevent_set('undo_flush', 'true');"
-		)
+		ctrl_con.execute("SELECT pg_stopevent_set('undo_flush', 'true');")
 
 		chkp_con = node.connect()
 		t_chkp = ThreadQueryExecutor(chkp_con, "CHECKPOINT;")
@@ -235,13 +227,10 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		    "UPDATE o_ring SET v = v + 1 WHERE id BETWEEN 1 AND 50;")
 		worker_con.commit()
 
-		ctrl_con.execute(
-		    "SELECT pg_stopevent_reset('undo_flush');"
-		)
+		ctrl_con.execute("SELECT pg_stopevent_reset('undo_flush');")
 		t_chkp.join()
 
-		got = node.execute('postgres',
-		                   "SELECT SUM(v) FROM o_ring;")[0][0]
+		got = node.execute('postgres', "SELECT SUM(v) FROM o_ring;")[0][0]
 		self.assertEqual(got, 50)
 		self._amcheck()
 		worker_con.close()
@@ -258,8 +247,7 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		t0 = time.time()
 		node.safe_psql(
 		    'postgres',
-		    "INSERT INTO o_ring SELECT i, i FROM generate_series(1, 50000) i;"
-		)
+		    "INSERT INTO o_ring SELECT i, i FROM generate_series(1, 50000) i;")
 		node.safe_psql('postgres', "UPDATE o_ring SET v = v + 1;")
 		node.safe_psql('postgres', "CHECKPOINT;")
 		self.assertLess(time.time() - t0, 120)
