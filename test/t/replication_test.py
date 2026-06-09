@@ -1717,3 +1717,321 @@ class ReplicationTest(BaseTest):
 					os.kill(p, signal.SIGKILL)
 				except ProcessLookupError:
 					pass
+
+	def test_recovery_finish_rollback_does_not_regress_replica_xmin(self):
+		"""
+		Issue #889: recovery_finish() rolls back in-flight oxids in
+		memory and emits WAL_REC_ROLLBACK for each one in a deferred
+		after-checkpoint hook.  Under the pre-fix horizon design the
+		standby could end up livelocked: o_btree_modify_handle_conflicts
+		would wait forever on an oxid it still saw as IN_PROGRESS,
+		because the standby's runXmin / globalXmin had regressed below
+		writtenXmin and oxid_get_csn() mis-read legitimately FROZEN
+		xidmap slots as IN_PROGRESS.
+
+		The bug surfaces as a livelocked recovery worker that cannot
+		shut down -- which is what this test actually asserts.
+
+		The horizon checks are intentionally loose.  A bounded lag
+		between primary and replica xmins is legitimate bookkeeping
+		bloat (globalXmin <= writtenXmin, deferred runXmin sync, etc.),
+		not the bug.  The bounds catch a catastrophic pin (lag growing
+		without bound as the primary keeps advancing) while tolerating
+		ordinary post-recovery bloat.
+		"""
+		master = self.node
+		master.append_conf("wal_keep_size = '128MB'\n")
+		master.start()
+		dangling_pids = set()
+		try:
+			with self.getReplica().start() as replica:
+				master.safe_psql("""
+					CREATE EXTENSION orioledb;
+					CREATE TABLE o_test_xmin_no_regress (
+						k int PRIMARY KEY,
+						v int
+					) USING orioledb;
+					INSERT INTO o_test_xmin_no_regress
+						SELECT g, 0 FROM generate_series(1, 100) g;
+				""")
+				self.catchup_orioledb(replica)
+
+				# Long-running tx whose single small UPDATE never
+				# overflows the 8 KB local_wal buffer.  Without an
+				# overflow, neither WAL_REC_XID(T_long) nor any
+				# modify record reaches the standby pre-crash, so
+				# T_long is invisible to the standby's hash.
+				t_long = master.connect()
+				t_long.begin()
+				t_long.execute(
+				    "UPDATE o_test_xmin_no_regress SET v = -1 WHERE k = 1;")
+
+				# Bump nextXid past T_long by many short commits, so
+				# post-restart runXmin = nextXid is *far* above
+				# T_long's oxid.  This is what made the malformed
+				# xmin observable in the bug report.
+				for i in range(200):
+					master.safe_psql(
+					    "UPDATE o_test_xmin_no_regress "
+					    f"SET v = v + 1 WHERE k = {2 + (i % 50)};")
+
+				# Checkpoint primary: its xids file now records
+				# T_long as in-flight.  Standby's xids file does
+				# *not* (that file is local to the primary).
+				master.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				# SIGKILL the postmaster *and* every backend so
+				# nobody gets a chance to wal_rollback() T_long.
+				pid_file = os.path.join(master.data_dir, 'postmaster.pid')
+				with open(pid_file) as f:
+					master_pid = int(f.readline().strip())
+				child_pids = [
+				    int(x) for x in subprocess.run(
+				        ['pgrep', '-P', str(master_pid)],
+				        capture_output=True,
+				        text=True,
+				        check=False).stdout.split()
+				]
+				dangling_pids.update([master_pid] + child_pids)
+				for p in child_pids + [master_pid]:
+					try:
+						os.kill(p, signal.SIGKILL)
+					except ProcessLookupError:
+						pass
+				deadline = time.time() + 30
+				while time.time() < deadline:
+					alive = False
+					for p in [master_pid] + child_pids:
+						try:
+							os.kill(p, 0)
+							alive = True
+							break
+						except ProcessLookupError:
+							continue
+					if not alive:
+						break
+					time.sleep(0.05)
+				master.is_started = False
+				try:
+					t_long.close()
+				except Exception:
+					pass
+				master.start()
+
+				# Trigger more WAL so the after-recovery
+				# WAL_REC_ROLLBACK(T_long) is shipped, then catch up.
+				master.safe_psql(
+				    "UPDATE o_test_xmin_no_regress SET v = 99 WHERE k = 1;")
+				master_lsn = master.execute(
+				    "SELECT pg_current_wal_lsn();")[0][0]
+				replica.poll_query_until(
+				    f"SELECT pg_last_wal_replay_lsn() >= "
+				    f"'{master_lsn}'::pg_lsn",
+				    expected=True,
+				    sleep_time=0.1,
+				    max_attempts=300)
+				replica.poll_query_until(
+				    "SELECT orioledb_recovery_synchronized();",
+				    expected=True,
+				    sleep_time=0.1,
+				    max_attempts=300)
+
+				# Force one more checkpoint round on the primary so
+				# anything still pending on the standby drains.
+				master.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+				replica.poll_query_until(
+				    "SELECT orioledb_recovery_synchronized();",
+				    expected=True,
+				    sleep_time=0.1,
+				    max_attempts=300)
+
+				master_runxmin, master_globalxmin = master.execute(
+				    "SELECT runxmin, globalxmin "
+				    "FROM orioledb_get_xid_meta();")[0]
+				replica_runxmin, replica_globalxmin = replica.execute(
+				    "SELECT runxmin, globalxmin "
+				    "FROM orioledb_get_xid_meta();")[0]
+
+				# Loose horizon bounds: pre-fix pin to T_long produced
+				# lag = (nextXid - T_long.oxid), unbounded as the
+				# primary keeps advancing.  Ordinary bloat from
+				# writtenXmin bookkeeping and deferred runXmin sync
+				# stays within a small constant.  The cap is generous
+				# enough to absorb that bloat while still catching a
+				# catastrophic pin.
+				self.assertLess(
+				    master_runxmin - replica_runxmin, 1000,
+				    f"replica runXmin {replica_runxmin} catastrophically "
+				    f"lags primary {master_runxmin}")
+				self.assertLess(
+				    master_globalxmin - replica_globalxmin, 1000,
+				    f"replica globalXmin {replica_globalxmin} "
+				    f"catastrophically lags primary {master_globalxmin}")
+
+				# Replica must shut down cleanly.  The pre-fix
+				# livelock would block fast shutdown indefinitely on
+				# the recovery worker.  Generous timeout for valgrind
+				# builds, which slow process teardown substantially.
+				t0 = time.time()
+				replica.stop(['-m', 'fast', '-t', '180'])
+				self.assertLess(
+				    time.time() - t0, 180,
+				    "replica did not shut down within 180s "
+				    "(potential livelock)")
+		finally:
+			try:
+				master.stop()
+			except Exception:
+				pass
+			for p in dangling_pids:
+				try:
+					os.kill(p, signal.SIGKILL)
+				except ProcessLookupError:
+					pass
+
+	def test_parallel_worker_rollback_undo_lost_to_compaction(self):
+		"""
+		Parallel-worker undo-vs-compaction race introduced by the
+		runXmin rework.
+
+		T_stop deletes k=1 on o_compact.  The recovery worker
+		handling T_stop's btree (W_K1) applies the DELETE and then
+		hits a before_apply_undo stopevent at the start of its
+		rollback undo -- so the tombstone-deletion record is still
+		visible on the page while undo is suspended.
+
+		While W_K1 is parked, the main recovery process keeps
+		processing WAL.  Post-rollback transactions on the master
+		emit WAL_REC_COMMIT records carrying xmin > T_stop.oxid,
+		because T_stop has already finished there.  The rework's
+		update_run_xmin tracks recovery_xmin directly, so the
+		standby's runXmin slides past T_stop.oxid.
+
+		Concurrent recovery workers (W_B etc.) applying modifies on
+		the same densely packed page touch k=1's tombstone; with the
+		advanced runXmin xid_is_finished_for_everybody(T_stop.oxid)
+		returns true, and the tombstone is dropped during
+		perform_page_compaction.  When the stopevent is released and
+		W_K1 finally runs its undo, there is nothing left on the page
+		to undo -- the row is gone for good.
+
+		Pre-rework the standby's xmin_queue held runXmin floored at
+		T_stop.oxid until W_K1 finished, so compaction never fired.
+		"""
+		master = self.node
+		master.append_conf("orioledb.enable_stopevents = true\n"
+		                   "orioledb.recovery_pool_size = 2\n")
+		master.start()
+		replica = None
+		try:
+			replica = self.getReplica()
+			replica.append_conf("orioledb.enable_stopevents = true\n"
+			                    "orioledb.recovery_pool_size = 2\n")
+			replica.start()
+
+			# Pack many narrow rows into the same page so the
+			# leftmost leaf holds k=1 along with k=2..N.  Use a
+			# wide text column whose post-rollback UPDATEs *grow*
+			# the tuples; this is what makes the worker's
+			# perform_page_compaction path fire on the page that
+			# holds k=1's tombstone.
+			master.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_compact (
+					k int PRIMARY KEY,
+					v text
+				) USING orioledb;
+				INSERT INTO o_compact
+					SELECT g, 'short' FROM generate_series(1, 100) g;
+			""")
+			master.safe_psql("CHECKPOINT;")
+			self.catchup_orioledb(replica)
+
+			# Park whichever recovery worker runs the abort-path
+			# undo for T_stop.  Main runs apply_undo_stack too as
+			# part of recovery_finish_current_oxid, but its
+			# $backendType is "startup" and is excluded by the
+			# filter -- only worker-side abort undo (which is what
+			# actually applies the page-level tombstone revert) is
+			# captured.
+			replica.safe_psql(
+			    "SELECT pg_stopevent_set('before_apply_undo', "
+			    "'$.commit == false "
+			    "&& $backendType == \"orioledb recovery worker\"');")
+
+			# T_stop: delete k=1 and roll back.
+			t_stop = master.connect()
+			t_stop.begin()
+			t_stop.execute("DELETE FROM o_compact WHERE k = 1;")
+			t_stop.execute("ROLLBACK;")
+			t_stop.close()
+
+			# Post-rollback commits.  Master's runXmin has advanced
+			# past T_stop.oxid, so each WAL_REC_COMMIT carries
+			# xmin > T_stop.oxid.  On the standby the rework's
+			# update_run_xmin slides runXmin past T_stop.oxid while
+			# the worker holding T_stop's undo is still parked.
+			# Growing each row's `v` forces the leftmost page (the
+			# one that holds k=1's tombstone) into the
+			# compaction-required regime: the next UPDATE on that
+			# page calls perform_page_compaction, which now sees
+			# xid_is_finished_for_everybody(T_stop.oxid) returning
+			# true (T_stop.oxid < advanced runXmin) and drops the
+			# tombstone for k=1.
+			big = "x" * 500
+			for i in range(2, 90):
+				master.safe_psql("UPDATE o_compact "
+				                 f"SET v = '{big}' WHERE k = {i};")
+
+			# Let the standby's main process digest those commits.
+			# This does NOT wait for the parked worker.
+			time.sleep(1.0)
+
+			# Release the stopevent.  W_K1 wakes up and runs undo;
+			# pre-rework the tombstone is still on the page and gets
+			# reverted; post-rework the page has been compacted and
+			# k=1 cannot be restored.
+			replica.safe_psql(
+			    "SELECT pg_stopevent_reset('before_apply_undo');")
+
+			master_lsn = master.execute("SELECT pg_current_wal_lsn();")[0][0]
+			replica.poll_query_until(
+			    f"SELECT pg_last_wal_replay_lsn() >= "
+			    f"'{master_lsn}'::pg_lsn",
+			    expected=True,
+			    sleep_time=0.1,
+			    max_attempts=300)
+			replica.poll_query_until(
+			    "SELECT orioledb_recovery_synchronized();",
+			    expected=True,
+			    sleep_time=0.1,
+			    max_attempts=300)
+
+			# T_stop's DELETE was rolled back: k=1 must still be
+			# present on the replica.  Pre-rework: passes.
+			# Post-rework: fails -- row was compacted away.
+			count = replica.execute(
+			    "SELECT count(*) FROM o_compact WHERE k = 1;")[0][0]
+			self.assertEqual(
+			    1, count, "T_stop's DELETE was rolled back on master, but "
+			    "k=1 is missing on the replica -- parallel-worker "
+			    "undo was lost to page compaction (replica's "
+			    "runXmin advanced past T_stop.oxid while the undo "
+			    "worker was parked)")
+		finally:
+			if replica is not None:
+				try:
+					replica.safe_psql(
+					    "SELECT pg_stopevent_reset('before_apply_undo');")
+				except Exception:
+					pass
+				try:
+					replica.stop(['-m', 'immediate', '-t', '30'])
+				except Exception:
+					pass
+			try:
+				master.stop()
+			except Exception:
+				pass
