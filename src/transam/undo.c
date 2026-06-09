@@ -1681,6 +1681,8 @@ flush_dirty_undo_range(UndoLogType undoType,
 			 * below reflects every store the writer made before it set the
 			 * bit.
 			 */
+			if (STOPEVENTS_ENABLED())
+				STOPEVENT(STOPEVENT_UNDO_FLUSH, NULL);
 			o_buffers_write_page_direct(&undoBuffersDesc,
 										circularBuffer +
 										(pageLoc % circularBufferSize),
