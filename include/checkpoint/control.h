@@ -45,7 +45,8 @@ typedef struct
 	uint32		lastCheckpointNumber;
 	uint32		controlFileVersion;
 	CommitSeqNo lastCSN;
-	OXid		lastXid;
+	OXid		lastXid;		/* Value unused, not deleted to preserve
+								 * compatibility of control file format */
 	UndoLocation lastUndoLocation;
 	XLogRecPtr	toastConsistentPtr;
 	XLogRecPtr	replayStartPtr;

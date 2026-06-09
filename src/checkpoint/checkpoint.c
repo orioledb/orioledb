@@ -1525,7 +1525,8 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	control.controlIdentifier = checkpoint_state->controlIdentifier;
 	control.lastCheckpointNumber = checkpoint_state->lastCheckpointNumber + 1;
 	control.lastCSN = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
-	control.lastXid = pg_atomic_read_u64(&xid_meta->nextXid);
+	control.lastXid = InvalidOXid;	/* Value unused, not deleted to preserve
+									 * compatibility of control file format */
 	control.sysTreesStartPtr = checkpoint_state->sysTreesStartPtr;
 	control.replayStartPtr = checkpoint_state->replayStartPtr;
 	control.toastConsistentPtr = checkpoint_state->toastConsistentPtr;
