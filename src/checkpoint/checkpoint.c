@@ -353,15 +353,45 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 			pg_atomic_write_u64(&undo_meta->cleanedCheckpointEndLocation, undo_info->checkpointRetainEndLocation);
 		}
 
-		pg_atomic_init_u64(&xid_meta->nextXid, control.lastXid);
-		pg_atomic_init_u64(&xid_meta->runXmin, control.lastXid);
-		pg_atomic_init_u64(&xid_meta->globalXmin, control.lastXid);
-		pg_atomic_init_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin, control.lastXid);
-		pg_atomic_init_u64(&xid_meta->writtenXmin, control.lastXid);
-		pg_atomic_init_u64(&xid_meta->writeInProgressXmin, control.lastXid);
+		/*
+		 * Seed xid horizons from the checkpoint's retain range, not from
+		 * lastXid:
+		 *
+		 * - nextXid / writtenXmin / writeInProgressXmin =
+		 * checkpointRetainXmax (master's nextXid at checkpoint time).
+		 * writtenXmin stays at the high mark so the on-disk xidmap range --
+		 * which may contain FROZEN slots that master's advance_global_xmin
+		 * stamped for oxids < master.runXmin -- is still treated as evicted
+		 * and served via o_buffers_read.
+		 *
+		 * - runXmin / globalXmin / cleanedXmin / lastXidWhenUpdatedGlobalXmin
+		 * = checkpointRetainXmin (master's runXmin at checkpoint time). This
+		 * is the actual floor of in-flight oxids and is what oxid_get_csn()'s
+		 * fast-path needs: every oxid < checkpointRetainXmin is FROZEN by
+		 * master's stamping invariant, so the `oxid < globalXmin =>
+		 * COMMITSEQNO_FROZEN` short-circuit is safe at startup, and the
+		 * standby cannot later regress globalXmin below it -- closing the
+		 * orioledb/orioledb#889 hole where update_run_xmin() would drag
+		 * globalXmin below writtenXmin and make oxid_get_csn() misread an
+		 * on-disk FROZEN slot as INPROGRESS.
+		 *
+		 * On a clean shutdown master writes checkpointRetainXmin ==
+		 * checkpointRetainXmax == nextXid, so all the horizons collapse to a
+		 * single value -- identical to the previous lastXid-based init.
+		 *
+		 * control.lastXid is now redundant with checkpointRetainXmax; it's
+		 * retained in the control file for backward compatibility with
+		 * existing data directories.
+		 */
+		pg_atomic_init_u64(&xid_meta->nextXid, control.checkpointRetainXmax);
+		pg_atomic_init_u64(&xid_meta->runXmin, control.checkpointRetainXmin);
+		pg_atomic_init_u64(&xid_meta->globalXmin, control.checkpointRetainXmin);
+		pg_atomic_init_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin, control.checkpointRetainXmin);
+		pg_atomic_init_u64(&xid_meta->writtenXmin, control.checkpointRetainXmax);
+		pg_atomic_init_u64(&xid_meta->writeInProgressXmin, control.checkpointRetainXmax);
 		pg_atomic_init_u64(&xid_meta->checkpointRetainXmin, control.checkpointRetainXmin);
 		pg_atomic_init_u64(&xid_meta->checkpointRetainXmax, control.checkpointRetainXmax);
-		pg_atomic_init_u64(&xid_meta->cleanedXmin, control.lastXid);
+		pg_atomic_init_u64(&xid_meta->cleanedXmin, control.checkpointRetainXmin);
 		pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmin, control.checkpointRetainXmin);
 		pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmax, control.checkpointRetainXmax);
 
