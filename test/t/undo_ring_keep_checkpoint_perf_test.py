@@ -11,7 +11,6 @@ import unittest
 
 from .base_test import BaseTest
 
-
 SMALL_UNDO_CONF = """
 orioledb.main_buffers = 16MB
 orioledb.undo_buffers = 256
@@ -55,15 +54,13 @@ class UndoRingKeepCheckpointPerfTest(BaseTest):
 		""")
 
 		t0 = time.time()
-		node.execute('postgres',
-		             "SELECT count(*) FROM o_perf WHERE v < 1000;")
+		node.execute('postgres', "SELECT count(*) FROM o_perf WHERE v < 1000;")
 		t_before = time.time() - t0
 
 		node.safe_psql('postgres', 'CHECKPOINT;')
 
 		t0 = time.time()
-		node.execute('postgres',
-		             "SELECT count(*) FROM o_perf WHERE v < 1000;")
+		node.execute('postgres', "SELECT count(*) FROM o_perf WHERE v < 1000;")
 		t_after = time.time() - t0
 
 		print(f"\nt_before={t_before*1000:.2f}ms "
@@ -102,8 +99,7 @@ class UndoRingKeepCheckpointPerfTest(BaseTest):
 		self._create_table()
 		node.safe_psql(
 		    'postgres',
-		    "INSERT INTO o_perf SELECT i, i FROM generate_series(1, 50000) i;"
-		)
+		    "INSERT INTO o_perf SELECT i, i FROM generate_series(1, 50000) i;")
 
 		ret_con = node.connect()
 		ret_con.begin()
@@ -117,8 +113,8 @@ class UndoRingKeepCheckpointPerfTest(BaseTest):
 			i = 0
 			while not stop[0]:
 				con.execute(
-				    "UPDATE o_perf SET v = v + 1 WHERE id BETWEEN %d AND %d;"
-				    % (i % 50 * 1000 + 1, i % 50 * 1000 + 1000))
+				    "UPDATE o_perf SET v = v + 1 WHERE id BETWEEN %d AND %d;" %
+				    (i % 50 * 1000 + 1, i % 50 * 1000 + 1000))
 				updates[0] += 1
 				i += 1
 			con.close()
@@ -155,8 +151,7 @@ class UndoRingKeepCheckpointPerfTest(BaseTest):
 		self._create_table()
 		node.safe_psql(
 		    'postgres',
-		    "INSERT INTO o_perf SELECT i, 0 FROM generate_series(1, 500) i;"
-		)
+		    "INSERT INTO o_perf SELECT i, 0 FROM generate_series(1, 500) i;")
 
 		stop = [False]
 		txns = [0]
@@ -167,11 +162,10 @@ class UndoRingKeepCheckpointPerfTest(BaseTest):
 			i = 0
 			while not stop[0]:
 				k = (wid * 91 + i * 7) % 500 + 1
-				con.execute(
-				    "BEGIN; "
-				    f"SELECT v FROM o_perf WHERE id = {k} FOR UPDATE; "
-				    f"UPDATE o_perf SET v = v + 1 WHERE id = {k}; "
-				    "COMMIT;")
+				con.execute("BEGIN; "
+				            f"SELECT v FROM o_perf WHERE id = {k} FOR UPDATE; "
+				            f"UPDATE o_perf SET v = v + 1 WHERE id = {k}; "
+				            "COMMIT;")
 				txns[0] += 1
 				i += 1
 			con.close()
@@ -183,8 +177,10 @@ class UndoRingKeepCheckpointPerfTest(BaseTest):
 				time.sleep(0.02)
 			con.close()
 
-		threads = [threading.Thread(target=worker, args=(w, ))
-		           for w in range(n_workers)]
+		threads = [
+		    threading.Thread(target=worker, args=(w, ))
+		    for w in range(n_workers)
+		]
 		tc = threading.Thread(target=chkp)
 		for t in threads:
 			t.start()
@@ -195,8 +191,7 @@ class UndoRingKeepCheckpointPerfTest(BaseTest):
 			t.join()
 		tc.join()
 
-		got = node.execute('postgres',
-		                   "SELECT SUM(v) FROM o_perf;")[0][0]
+		got = node.execute('postgres', "SELECT SUM(v) FROM o_perf;")[0][0]
 		print(f"\n{txns[0]} txns in 10s; SUM(v)={got}")
 		self.assertEqual(got, txns[0])
 		node.stop()
