@@ -246,6 +246,8 @@ mark_undo_range_dirty(UndoLogType undoType, UndoLocation location, Size size)
 	UndoLocation end = location + size;
 	UndoLocation pageLoc;
 
+	Assert(size > 0);
+	Assert(size <= o_undo_circular_sizes[(int) undoType]);
 	/* Walk page-aligned locations covering [location, end). */
 	for (pageLoc = location - (location % ORIOLEDB_BLCKSZ);
 		 pageLoc < end;
@@ -410,6 +412,8 @@ undo_shmem_needs(void)
 		{
 			Size		npages = o_undo_circular_sizes[t] / ORIOLEDB_BLCKSZ;
 			Size		nwords = (npages + 63) / 64;
+
+			Assert(o_undo_circular_sizes[t] % ORIOLEDB_BLCKSZ == 0);
 
 			o_undo_dirty_words[t] = nwords;
 			size = add_size(size,
@@ -1626,6 +1630,9 @@ flush_dirty_undo_range(UndoLogType undoType,
 				alignedFrom,
 				alignedTo;
 
+	/* Enforced in undo_shmem_needs() via TYPEALIGN. */
+	Assert(circularBufferSize % ORIOLEDB_BLCKSZ == 0);
+
 	if (fromLoc >= toLoc)
 		return;
 
@@ -1660,6 +1667,10 @@ flush_dirty_undo_range(UndoLogType undoType,
 			 * backend's reserved location is >= toLoc, so no backend can be
 			 * appending into our range concurrently.  That lets us hand the
 			 * ring-buffer page straight to the write without staging.
+			 *
+			 * In-place undo_write_internal writes (BTreeLeafTuphdr fixups)
+			 * may still race; they are loss-tolerant -- 8-byte halves are
+			 * atomic, WAL replay rebuilds the affected fields.
 			 *
 			 * Bypass the o_buffers cache: future reads of these locations
 			 * answer from the ring (writtenLocation does not advance), so
@@ -3172,6 +3183,9 @@ undo_write_internal(UndoLogType undoType, UndoLocation location,
 		 * At this point we should either detect concurrent writing of undo
 		 * log. Or concurrent writing of undo log should wait for our reserved
 		 * location.  So, it should be safe to write to the memory.
+		 *
+		 * Loss-tolerant in-place path: a concurrent flush may tear the pair
+		 * we write; WAL replay reconstructs the affected tuphdr fields.
 		 */
 		memcpy(GET_UNDO_REC(undoType, memoryUndoLocation),
 			   buf + (memoryUndoLocation - location),
