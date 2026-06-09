@@ -442,6 +442,8 @@ o_buffers_write_page_direct(OBuffersDesc *desc, char *data, uint32 tag,
 {
 	Assert(OBuffersMaxTagIsValid(tag));
 	Assert(offset >= 0 && offset % ORIOLEDB_BLCKSZ == 0);
+	Assert(data != NULL);
+	Assert(((uintptr_t) data % sizeof(uint64)) == 0);
 
 	write_buffer_data(desc, data, tag, offset / ORIOLEDB_BLCKSZ);
 }

@@ -162,6 +162,8 @@ static pg_atomic_uint32 *logicalXidsShmemMap;
 
 /* # slots covered by one o_buffers page in the xidmap. */
 #define XID_SLOTS_PER_PAGE (ORIOLEDB_BLCKSZ / sizeof(OXidMapItem))
+StaticAssertDecl(ORIOLEDB_BLCKSZ % sizeof(OXidMapItem) == 0,
+				 "OXidMapItem must tile ORIOLEDB_BLCKSZ");
 
 /* # of pages in the circular buffer (== xid_buffers_count by construction). */
 #define XID_BUFFER_NPAGES \
@@ -180,6 +182,8 @@ mark_xid_buffer_dirty(OXid oxid)
 {
 	uint32		page = XID_BUFFER_PAGE_INDEX(oxid);
 	uint64		mask = UINT64CONST(1) << (page % 64);
+
+	Assert(page < XID_BUFFER_NPAGES);
 
 	/*
 	 * Release fence so the preceding slot store is visible to a checkpointer
@@ -200,6 +204,33 @@ test_clear_xid_buffer_page_dirty(uint32 page)
 	uint64		old = pg_atomic_fetch_and_u64(&xidBufferDirty[page / 64], ~mask);
 
 	return (old & mask) != 0;
+}
+
+/*
+ * Clear dirty bits for pages fully covered by [xmin, xmax) so a subsequent
+ * checkpoint-time flush can skip them.  Used by write_xidsmap() (which has
+ * just written the pages out) and advance_global_xmin() (which has just
+ * reset them to FROZEN).  Partial boundary pages are left dirty: their
+ * tail still belongs to slots outside the range that may be actively
+ * written.
+ */
+static inline void
+clear_xid_dirty_range(OXid xmin, OXid xmax)
+{
+	OXid		fullStart,
+				fullEnd,
+				p;
+
+	fullStart = ((xmin + XID_SLOTS_PER_PAGE - 1) / XID_SLOTS_PER_PAGE)
+		* XID_SLOTS_PER_PAGE;
+	fullEnd = (xmax / XID_SLOTS_PER_PAGE) * XID_SLOTS_PER_PAGE;
+	for (p = fullStart; p < fullEnd; p += XID_SLOTS_PER_PAGE)
+	{
+		uint32		page = XID_BUFFER_PAGE_INDEX(p);
+		uint64		mask = UINT64CONST(1) << (page % 64);
+
+		pg_atomic_fetch_and_u64(&xidBufferDirty[page / 64], ~mask);
+	}
 }
 
 OSnapshot	o_in_progress_snapshot = {COMMITSEQNO_INPROGRESS, InvalidXLogRecPtr, 0, 0};
@@ -887,29 +918,7 @@ write_xidsmap(OXid targetXmax)
 						lastWrittenXmin * sizeof(OXidMapItem),
 						(oxid - lastWrittenXmin) * sizeof(OXidMapItem));
 
-	/*
-	 * Clear dirty bits for pages fully covered by this eviction.  The page
-	 * contents we just wrote are exactly the data on disk, so a subsequent
-	 * checkpoint-time flush can skip them.  Partial boundary pages are left
-	 * dirty: their tail still belongs to oxids beyond xmax that may be
-	 * actively written, and clearing the bit could mask their updates.
-	 */
-	{
-		OXid		fullStart,
-					fullEnd,
-					p;
-
-		fullStart = ((xmin + XID_SLOTS_PER_PAGE - 1) / XID_SLOTS_PER_PAGE)
-			* XID_SLOTS_PER_PAGE;
-		fullEnd = (xmax / XID_SLOTS_PER_PAGE) * XID_SLOTS_PER_PAGE;
-		for (p = fullStart; p < fullEnd; p += XID_SLOTS_PER_PAGE)
-		{
-			uint32		page = XID_BUFFER_PAGE_INDEX(p);
-			uint64		mask = UINT64CONST(1) << (page % 64);
-
-			pg_atomic_fetch_and_u64(&xidBufferDirty[page / 64], ~mask);
-		}
-	}
+	clear_xid_dirty_range(xmin, xmax);
 
 	SpinLockAcquire(&xid_meta->xminMutex);
 	Assert(pg_atomic_read_u64(&xid_meta->writtenXmin) < xmax);
@@ -987,6 +996,10 @@ flush_dirty_xidsmap_range(OXid xmin, OXid xmax)
 			 * stable page).  Bypass the o_buffers cache: reads of these oxids
 			 * stay in the ring (writtenXmin does not advance), so the cache
 			 * copy would only duplicate the bytes.
+			 *
+			 * The (csn, commitPtr) pair of a single slot is not atomic, so a
+			 * flush may capture a half-updated slot; WAL replay rebuilds
+			 * xidmap on recovery and any later write re-dirties the page.
 			 */
 			for (slot = 0; slot < XID_SLOTS_PER_PAGE; slot++)
 			{
@@ -1323,23 +1336,7 @@ advance_global_xmin(OXid newXid)
 								FirstNormalUnloggedLSN);
 		}
 
-		/* Clear dirty bits for pages fully reset to FROZEN. */
-		{
-			OXid		fullStart,
-						fullEnd,
-						p;
-
-			fullStart = ((writtenXmin + XID_SLOTS_PER_PAGE - 1) / XID_SLOTS_PER_PAGE)
-				* XID_SLOTS_PER_PAGE;
-			fullEnd = (globalXmin / XID_SLOTS_PER_PAGE) * XID_SLOTS_PER_PAGE;
-			for (p = fullStart; p < fullEnd; p += XID_SLOTS_PER_PAGE)
-			{
-				uint32		page = XID_BUFFER_PAGE_INDEX(p);
-				uint64		mask = UINT64CONST(1) << (page % 64);
-
-				pg_atomic_fetch_and_u64(&xidBufferDirty[page / 64], ~mask);
-			}
-		}
+		clear_xid_dirty_range(writtenXmin, globalXmin);
 
 		pg_write_barrier();
 
