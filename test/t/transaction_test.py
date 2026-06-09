@@ -305,7 +305,8 @@ class TransactionTest(BaseTest):
 					pass
 			node.stop()
 
-	def test_live_waiter_split_seq_scan_reads_adjacent_undo_leaves(self):
+	def _live_waiter_split_seq_scan_reads_adjacent_undo_leaves(
+	        self, evict_before_select=False):
 		node = self.node
 		node.append_conf('postgresql.conf',
 		                 "orioledb.enable_stopevents = true\n")
@@ -355,6 +356,9 @@ class TransactionTest(BaseTest):
 			t_holder.join()
 			t_waiter.join()
 
+			if evict_before_select:
+				ctl.execute("SELECT orioledb_evict_pages('t'::regclass, 0);")
+
 			rows = reader.execute("SELECT k FROM t;")
 			keys = [row[0] for row in rows]
 			counts = Counter(keys)
@@ -377,6 +381,13 @@ class TransactionTest(BaseTest):
 				except Exception:
 					pass
 			node.stop()
+
+	def test_live_waiter_split_seq_scan_reads_adjacent_undo_leaves(self):
+		self._live_waiter_split_seq_scan_reads_adjacent_undo_leaves()
+
+	def test_live_waiter_split_seq_scan_reads_adjacent_disk_undo_leaves(self):
+		self._live_waiter_split_seq_scan_reads_adjacent_undo_leaves(
+		    evict_before_select=True)
 
 	def _seq_scan_internal_page_read_before_split_downlink(
 	        self, evict_before_select=False):
