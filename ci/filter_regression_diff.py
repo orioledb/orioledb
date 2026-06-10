@@ -119,13 +119,10 @@ knownErrors = {
 	r"ERROR:  cannot refresh collation \"en-x-icu\" because orioledb (table|index) \"[a-z0-9_]+\" uses it": ["collate.icu.utf8"],
 
 	# generated_stored and generated_virtual run in the same parallel
-	# group and both CREATE/DROP regress_user11.  Whichever lands first
-	# creates the role; the other test's CREATE USER errors out, and the
-	# DROP USER in generated_virtual fails on the leftover privileges from
-	# generated_stored.  Accept both shapes plus the dependent-object
-	# detail lines so the role-sharing test ordering doesn't break CI.
-	r"ERROR:  role \"regress_user11\" already exists": ["generated_stored"],
-	r"ERROR:  role \"regress_user11\" cannot be dropped because some objects depend on it": ["generated_virtual"],
+	# group and both CREATE/DROP regress_user11.  The role-collision
+	# cascade is dropped wholesale via skip_hunk_errors below; only the
+	# psql \dp privilege-listing diff remains as a line-level filter
+	# (it appears outside the cascade hunk).
 	r"privileges for (column \w+ of table|table) generated_stored_tests\.\w+": ["generated_virtual"],
 }
 
@@ -138,6 +135,21 @@ skip_hunk_errors = {
 	# whole hunk so the cascaded "transaction is aborted" lines disappear.
 	r"ERROR:  orioledb does not support TID scan":
 	["generated_virtual"],
+	# generated_stored and generated_virtual both CREATE/DROP the shared
+	# role regress_user11.  Depending on which test the parallel scheduler
+	# starts first the other can hit CREATE USER ("already exists"),
+	# SET ROLE / GRANT ("does not exist"), or DROP USER ("cannot be
+	# dropped because some objects depend on it" / "does not exist").
+	# Each of those errors cascades: SELECT/CALL statements gated by
+	# SET ROLE return real rows instead of "permission denied", which
+	# leaves a multi-line table-vs-error diff -- sometimes in the same
+	# hunk as the role error, sometimes in a separate hunk further down
+	# whose only marker is the missing "permission denied" line.  Drop
+	# both shapes.
+	r"ERROR:  role \"regress_user11\" (already exists|does not exist|cannot be dropped because some objects depend on it)":
+	["generated_stored", "generated_virtual"],
+	r"ERROR:  permission denied for (table gtest\w+|function gf\w+)":
+	["generated_stored", "generated_virtual"],
 }
 
 def can_drop_hunk(testName, line):
