@@ -1555,6 +1555,26 @@ recovery_init(int worker_id)
 
 	o_set_syscache_hooks();
 
+	/*
+	 * Seed recovery_xmin with the checkpoint-era floor *before* read_xids()
+	 * runs its first update_run_xmin().  read_xids() pushes runXmin to
+	 * nextXid when the on-disk xids file is empty -- which it routinely is on
+	 * a streaming standby whose master had only long-running oxids with
+	 * modify records buffered in the master backend's private local_wal
+	 * (never reaching the wire, hence absent from the standby's recovery xid
+	 * hash and its own restartpoint's xids file).  With recovery_xmin left at
+	 * InvalidOXid (effectively unbounded), update_run_xmin's Min(...) cap is
+	 * ineffective and runXmin / globalXmin sail past the real master floor; a
+	 * later WAL_REC_XID(X) + WAL_REC_ROLLBACK(X) then drags globalXmin
+	 * backwards.
+	 *
+	 * Pinning recovery_xmin to checkpointRetainXmin keeps the floor honest
+	 * until a WAL commit/rollback record explicitly bumps it (see the Max()
+	 * in WAL_REC_COMMIT/ROLLBACK / WAL_REC_JOINT_COMMIT).
+	 */
+	if (worker_id < 0)
+		recovery_xmin = pg_atomic_read_u64(&xid_meta->checkpointRetainXmin);
+
 	if (checkpoint_state->lastCheckpointNumber > 0)
 		read_xids(checkpoint_state->lastCheckpointNumber,
 				  *recovery_single_process,
@@ -1571,7 +1591,6 @@ recovery_init(int worker_id)
 		idxbuild_oids_hash = hash_create("orioledb recovery index build queue relations hash",
 										 16, &reloid_ctl,
 										 HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-		recovery_xmin = pg_atomic_read_u64(&xid_meta->runXmin);
 	}
 
 	if (worker_id == index_build_leader)
