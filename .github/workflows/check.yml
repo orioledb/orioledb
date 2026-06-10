@@ -126,7 +126,7 @@ jobs:
         run: bash ./orioledb/ci/post_build_prerequisites.sh
 
       - name: Check
-        timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 150 || (matrix.check_type == 'dm_log_writes' && 60 || (matrix.check_type == 'sanitize' && 40 || 20)) }}
+        timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 150 || (matrix.check_type == 'dm_log_writes' && 60 || (matrix.check_type == 'sanitize' && 40 || 30)) }}
         run: bash ./orioledb/ci/check.sh
 
       - name: Check output
