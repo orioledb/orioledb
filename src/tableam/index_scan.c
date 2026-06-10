@@ -29,6 +29,7 @@
 #include "executor/nodeIndexscan.h"
 #if PG_VERSION_NUM >= 180000
 #include "commands/explain_format.h"
+#include "utils/datum.h"
 #endif
 #include "parser/parse_coerce.h"
 #include "pgstat.h"
@@ -241,11 +242,107 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 	return valid;
 }
 
+#if PG_VERSION_NUM >= 180000
+/*
+ * Vendored copies of nbtree's static array-advancement primitives.
+ *
+ * Upstream PG18 (commit 92fe23d93aa) added btree skip scan via the static
+ * helpers _bt_array_set_low_or_high and _bt_skiparray_set_element in
+ * nbtutils.c.  OrioleDB drives its scan loop from key-range bounds rather
+ * than per-tuple btree callbacks and needs to call these primitives directly
+ * to reset and pin skip arrays between ranges; they are not exported via
+ * nbtree.h.
+ *
+ * The copies below are kept structurally identical to upstream so future
+ * rebases can diff them mechanically.  They only touch public fields of
+ * BTArrayKeyInfo / ScanKey; no nbtree internals beyond the public header.
+ */
+static void
+o_bt_array_set_low_or_high(Relation rel, ScanKey skey, BTArrayKeyInfo *array,
+						   bool low_not_high)
+{
+	Assert(skey->sk_flags & SK_SEARCHARRAY);
+
+	if (array->num_elems != -1)
+	{
+		int			set_elem = 0;
+
+		Assert(!(skey->sk_flags & SK_BT_SKIP));
+
+		if (!low_not_high)
+			set_elem = array->num_elems - 1;
+
+		array->cur_elem = set_elem;
+		skey->sk_argument = array->elem_values[set_elem];
+		return;
+	}
+
+	Assert(skey->sk_flags & SK_BT_SKIP);
+	Assert(array->num_elems == -1);
+
+	if (!array->attbyval && skey->sk_argument)
+		pfree(DatumGetPointer(skey->sk_argument));
+
+	skey->sk_argument = (Datum) 0;
+	skey->sk_flags &= ~(SK_SEARCHNULL | SK_ISNULL |
+						SK_BT_MINVAL | SK_BT_MAXVAL |
+						SK_BT_NEXT | SK_BT_PRIOR);
+
+	if (array->null_elem &&
+		(low_not_high == ((skey->sk_flags & SK_BT_NULLS_FIRST) != 0)))
+		skey->sk_flags |= (SK_SEARCHNULL | SK_ISNULL);
+	else if (low_not_high)
+		skey->sk_flags |= SK_BT_MINVAL;
+	else
+		skey->sk_flags |= SK_BT_MAXVAL;
+}
+
+/*
+ * Pin a skip array to a concrete leading-column value from an in-flight
+ * tuple.  This is the orioledb counterpart of upstream's
+ * _bt_skiparray_set_element: it clears the MINVAL/MAXVAL/NEXT/PRIOR
+ * sentinel/transition flags and copies the tuple's datum into
+ * sk_argument so that the next o_key_data_to_key_range() call computes a
+ * point bound at this distinct leading value.
+ */
+static void
+o_bt_skiparray_set_element_from_tuple(ScanKey skey, BTArrayKeyInfo *array,
+									  Datum tupdatum, bool tupnull)
+{
+	Assert(skey->sk_flags & SK_BT_SKIP);
+	Assert(skey->sk_flags & SK_SEARCHARRAY);
+	Assert(array->num_elems == -1);
+
+	if (tupnull)
+	{
+		Assert(array->null_elem);
+
+		if (!array->attbyval && skey->sk_argument)
+			pfree(DatumGetPointer(skey->sk_argument));
+		skey->sk_argument = (Datum) 0;
+		skey->sk_flags &= ~(SK_BT_MINVAL | SK_BT_MAXVAL |
+							SK_BT_NEXT | SK_BT_PRIOR);
+		skey->sk_flags |= (SK_SEARCHNULL | SK_ISNULL);
+		return;
+	}
+
+	if (!array->attbyval && skey->sk_argument)
+		pfree(DatumGetPointer(skey->sk_argument));
+	skey->sk_flags &= ~(SK_SEARCHNULL | SK_ISNULL |
+						SK_BT_MINVAL | SK_BT_MAXVAL |
+						SK_BT_NEXT | SK_BT_PRIOR);
+	skey->sk_argument = datumCopy(tupdatum, array->attbyval, array->attlen);
+}
+#endif
+
 static bool
 o_bt_advance_array_keys_increment(OScanState *ostate, ScanDirection dir)
 {
 	IndexScanDesc scan = &ostate->scandesc;
 	BTScanOpaque so = (BTScanOpaque) scan->opaque;
+#if PG_VERSION_NUM >= 180000
+	Relation	rel = scan->indexRelation;
+#endif
 	int			i;
 	bool		have_array_keys = false;
 
@@ -262,17 +359,109 @@ o_bt_advance_array_keys_increment(OScanState *ostate, ScanDirection dir)
 		int			num_elems = curArrayKey->num_elems;
 		bool		rolled = false;
 
+		have_array_keys = true;
+
 #if PG_VERSION_NUM >= 180000
 
 		/*
-		 * Skip scan boundaries are handled by the executor, bypass manual
-		 * element advancement
+		 * Skip arrays (PG18+) drive per-distinct-value iteration. Handle them
+		 * before the trailing-array check because numPrefixExactKeys caps
+		 * itself at the skip array's scan_key (via
+		 * o_adjust_num_prefix_exact_keys), so the trailing check would
+		 * otherwise short-circuit the skip array's own advancement.
+		 *
+		 * Strategy: surface SK_BT_NEXT (forward) / SK_BT_PRIOR (backward) on
+		 * the skip array's scan key instead of using SkipSupport's
+		 * increment/decrement directly.  The flag makes
+		 * o_key_data_to_key_range produce an exclusive bound past
+		 * sk_argument; the iterator then probes for the next actual leading
+		 * value present in the index, and o_iterate_index pins sk_argument to
+		 * that tuple's value. Termination is natural: if no tuple is found
+		 * past sk_argument (within low_compare..high_compare), the iterator
+		 * returns NULL and the scan ends.
+		 *
+		 * Pre-check the relevant compare bound before setting the transition
+		 * flag so we don't keep iterating once sk_argument has reached the
+		 * global edge of the skip array.
 		 */
 		if (skey->sk_flags & SK_BT_SKIP)
-			continue;
+		{
+			ScanKey		bound_key;
+			bool		exhausted;
+
+			if (skey->sk_flags & (SK_BT_MINVAL | SK_BT_MAXVAL | SK_ISNULL))
+			{
+				/*
+				 * Still on the initial sentinel: either o_iterate_index never
+				 * saw a tuple from the broad probe, or it saw only
+				 * NULL-leading tuples (which observe_tuple does not
+				 * transition through -- see comment there).  Either way there
+				 * is no concrete sk_argument to advance from, so reset for
+				 * direction reversal and report exhaustion.
+				 *
+				 * Critically, ISNULL must be handled here and not fall
+				 * through to the "concrete state" path below: that path sets
+				 * SK_BT_NEXT/PRIOR on top of sk_argument, but sentinel-ISNULL
+				 * state has sk_argument == 0, and a subsequent
+				 * o_key_data_to_key_range build would pass that NULL datum
+				 * into o_fill_key_bounds -> comparator, segfaulting on
+				 * by-reference types (text, etc.).
+				 */
+				o_bt_array_set_low_or_high(rel, skey, curArrayKey,
+										   ScanDirectionIsForward(dir));
+				continue;
+			}
+
+			if (skey->sk_flags & (SK_BT_NEXT | SK_BT_PRIOR))
+			{
+				/*
+				 * Already in transition state and the probe failed to find
+				 * another tuple.  Reset and report exhaustion.
+				 */
+				skey->sk_flags &= ~(SK_BT_NEXT | SK_BT_PRIOR);
+				o_bt_array_set_low_or_high(rel, skey, curArrayKey,
+										   ScanDirectionIsForward(dir));
+				continue;
+			}
+
+			bound_key = ScanDirectionIsForward(dir)
+				? curArrayKey->high_compare
+				: curArrayKey->low_compare;
+			exhausted = false;
+			if (bound_key)
+			{
+				/*
+				 * Strategy <= for high_compare in forward scan, >= for
+				 * low_compare in backward scan: if sk_argument already fails
+				 * the bound, we've walked past the skip array's global edge.
+				 */
+				if (!DatumGetBool(FunctionCall2Coll(&bound_key->sk_func,
+													bound_key->sk_collation,
+													skey->sk_argument,
+													bound_key->sk_argument)))
+					exhausted = true;
+			}
+
+			if (exhausted)
+			{
+				o_bt_array_set_low_or_high(rel, skey, curArrayKey,
+										   ScanDirectionIsForward(dir));
+				continue;
+			}
+
+			/*
+			 * Signal advancement to the next distinct value via the upstream
+			 * NEXT/PRIOR flag mechanism.  sk_argument stays at the previous
+			 * distinct value -- the iterator will probe past it.
+			 */
+			if (ScanDirectionIsForward(dir))
+				skey->sk_flags |= SK_BT_NEXT;
+			else
+				skey->sk_flags |= SK_BT_PRIOR;
+			return true;
+		}
 #endif
 
-		have_array_keys = true;
 		if (curArrayKey->scan_key >= ostate->numPrefixExactKeys)
 			continue;
 
@@ -388,10 +577,108 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 		o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
 	}
 
+#if PG_VERSION_NUM >= 180000
+
+	/*
+	 * Mark the iterator as a probe range when any skip array is in its
+	 * sentinel (MINVAL/MAXVAL/SearchNull-initial) or transition
+	 * (SK_BT_NEXT/SK_BT_PRIOR) state.  o_iterate_index will use the first
+	 * non-NULL tuple to pin sk_argument and reopen with a narrow point bound.
+	 * If no tuple is found, the iterator simply returns NULL and the scan
+	 * terminates.
+	 */
+	ostate->skipScanProbePending = false;
+	if (so->numArrayKeys > 0)
+	{
+		for (int i = 0; i < so->numArrayKeys; i++)
+		{
+			ScanKey		skey = &so->keyData[so->arrayKeys[i].scan_key];
+
+			if ((skey->sk_flags & SK_BT_SKIP) &&
+				(skey->sk_flags & (SK_BT_MINVAL | SK_BT_MAXVAL | SK_ISNULL |
+								   SK_BT_NEXT | SK_BT_PRIOR)))
+			{
+				ostate->skipScanProbePending = true;
+				break;
+			}
+		}
+	}
+#endif
+
 	MemoryContextSwitchTo(oldcontext);
 
 	return true;
 }
+
+#if PG_VERSION_NUM >= 180000
+/*
+ * After o_iterate_index fetches the first tuple over a probe range,
+ * use the tuple's leading-column value to pin each prefix skip
+ * array's sk_argument.  The next iterator reopen with the updated
+ * scan-key state will build a narrow point bound on that value via
+ * o_key_data_to_key_range.
+ *
+ * Returns true if at least one skip array was transitioned (caller
+ * should reopen the iterator); false otherwise.
+ */
+static bool
+o_skip_arrays_observe_tuple(OIndexDescr *indexDescr, OScanState *ostate,
+							OTuple tup)
+{
+	IndexScanDesc scan = &ostate->scandesc;
+	BTScanOpaque so = (BTScanOpaque) scan->opaque;
+	bool		transitioned = false;
+
+	if (so->numArrayKeys == 0)
+		return false;
+
+	for (int i = 0; i < so->numArrayKeys; i++)
+	{
+		BTArrayKeyInfo *array = &so->arrayKeys[i];
+		ScanKey		skey = &so->keyData[array->scan_key];
+		AttrNumber	attnum;
+		Datum		value;
+		bool		isnull;
+
+		if (!(skey->sk_flags & SK_BT_SKIP))
+			continue;
+
+		/* Only act on a skip array that is in sentinel or transition. */
+		if (!(skey->sk_flags &
+			  (SK_BT_MINVAL | SK_BT_MAXVAL | SK_ISNULL |
+			   SK_BT_NEXT | SK_BT_PRIOR)))
+			continue;
+
+		attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, indexDescr,
+											  skey->sk_attno);
+		value = o_fastgetattr(tup, attnum, indexDescr->leafTupdesc,
+							  &indexDescr->leafSpec, &isnull);
+
+		/*
+		 * Don't transition on a NULL leading-column value.  Pinning
+		 * sk_argument to NULL via set_element_from_tuple lands the skip array
+		 * in the SK_ISNULL state, which is flag-indistinguishable from the
+		 * initial sentinel-NULL state that _bt_start_array_keys uses for
+		 * nulls-last + null_elem=true.  Without a way to tell those apart,
+		 * o_key_data_to_key_range falls back to the broad range -- which
+		 * would re-open the same iterator and re-emit the same NULL-leading
+		 * tuple, infinite-looping.  Leave the array in its current
+		 * (transition or sentinel) state and let the active iterator continue
+		 * from this position, emitting any further NULL-leading tuples that
+		 * match the trailing predicates and then exhausting.  Skip-scan
+		 * optimization is forfeited for the NULL band, but correctness is
+		 * preserved.
+		 */
+		if (isnull)
+			continue;
+
+		o_bt_skiparray_set_element_from_tuple(skey, array, value, isnull);
+		transitioned = true;
+	}
+
+	return transitioned;
+}
+#endif
 
 OTuple
 o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
@@ -488,6 +775,78 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 			O_TUPLE_SET_NULL(tup);
 			tup_fetched = true;
 		}
+
+#if PG_VERSION_NUM >= 180000
+
+		/*
+		 * Probe-then-narrow.  The just-fetched tuple came from a range opened
+		 * over one or more skip arrays in sentinel (initial broad probe) or
+		 * transition (post-advance) state. Pin each such skip array's
+		 * sk_argument to this tuple's leading-column value, drop the
+		 * broad/probe iterator, and reopen with a narrow point-bound range
+		 * for that distinct value via inline key-range rebuild.  Subsequent
+		 * matching tuples come from the narrow iterator; when it exhausts,
+		 * o_bt_advance_array_keys_increment sets SK_BT_NEXT (or SK_BT_PRIOR
+		 * for backward) so the next probe range opens past sk_argument.
+		 * Termination is natural: if a probe finds no tuple within
+		 * low_compare..high_compare, the iterator returns NULL and the scan
+		 * ends.
+		 *
+		 * Do not emit this probe tuple yet -- the narrow iterator's first
+		 * fetch will return the same row.  Loop back and let the narrow
+		 * iterator drive emission.
+		 */
+		if (tup_fetched && !O_TUPLE_IS_NULL(tup) &&
+			ostate->skipScanProbePending)
+		{
+			ostate->skipScanProbePending = false;
+			if (o_skip_arrays_observe_tuple(indexDescr, ostate, tup))
+			{
+				MemoryContext oldcontext;
+
+				/*
+				 * Rebuild iterator inline.  Avoid switch_to_next_range: its
+				 * curKeyRangeIsLoaded=false branch would call
+				 * _bt_start_array_keys and overwrite the pin; its
+				 * curKeyRangeIsLoaded=true branch would advance past it.
+				 */
+				if (ostate->iterator != NULL)
+				{
+					btree_iterator_free(ostate->iterator);
+					ostate->iterator = NULL;
+				}
+
+				oldcontext = MemoryContextSwitchTo(ostate->cxt);
+				ostate->exact = o_key_data_to_key_range(&ostate->curKeyRange,
+														so->keyData,
+														so->numberOfKeys,
+														(so->numArrayKeys > 0) ? so->arrayKeys : NULL,
+														ostate->numPrefixExactKeys,
+														indexDescr->nonLeafTupdesc->natts,
+														indexDescr->fields);
+
+				if (!ostate->exact && !ostate->curKeyRange.empty)
+				{
+					OBTreeKeyBound *new_bound;
+
+					new_bound = (ostate->scanDir == ForwardScanDirection
+								 ? &ostate->curKeyRange.low
+								 : &ostate->curKeyRange.high);
+					ostate->iterator = o_btree_iterator_create(&indexDescr->desc,
+															   (Pointer) new_bound,
+															   BTreeKeyBound,
+															   &ostate->oSnapshot,
+															   ostate->scanDir);
+					o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
+				}
+				MemoryContextSwitchTo(oldcontext);
+
+				tup_fetched = false;
+				O_TUPLE_SET_NULL(tup);
+				continue;
+			}
+		}
+#endif
 
 		if (!tup_fetched &&
 			!switch_to_next_range(indexDescr, ostate, tupleCxt))
