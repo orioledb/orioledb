@@ -33,6 +33,20 @@ typedef struct OScanState
 	bool		curKeyRangeIsLoaded;
 	int			numPrefixExactKeys;
 	bool		exact;
+#if PG_VERSION_NUM >= 180000
+
+	/*
+	 * Skip-scan probe state.  Set when the current key range was opened over
+	 * a skip array still in its sentinel (MINVAL/MAXVAL/ SearchNull-initial)
+	 * or transition (SK_BT_NEXT/SK_BT_PRIOR) state; in that case the iterator
+	 * is positioned at a probe range (broad slice over
+	 * low_compare..high_compare, or exclusive past sk_argument), and the next
+	 * non-NULL fetched tuple's leading-column value is used to pin
+	 * sk_argument and reopen the iterator with a narrow point-bound range. If
+	 * no tuple is found, the scan terminates naturally.
+	 */
+	bool		skipScanProbePending;
+#endif
 	OBTreeKeyRange curKeyRange;
 	BTreeIterator *iterator;
 	List	   *indexQuals;
