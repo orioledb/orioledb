@@ -454,6 +454,7 @@ extern MemoryContext btree_seqscan_context;
 extern double o_checkpoint_completion_ratio;
 extern int	bgwriter_num_workers;
 extern int	max_io_concurrency;
+extern int	btree_prefetch_depth;
 extern bool use_mmap;
 extern bool use_device;
 extern bool orioledb_use_sparse_files;
