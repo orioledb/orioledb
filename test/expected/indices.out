@@ -11,7 +11,7 @@ SELECT split_part(setting, '.', 1) major_version
 	FROM pg_settings WHERE name = 'server_version';
  major_version 
 ---------------
- 16
+ 18
 (1 row)
 
 SELECT orioledb_parallel_debug_start();
@@ -136,14 +136,12 @@ SELECT * FROM o_test51 WHERE key BETWEEN 100 and 110;
 (10 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test51 WHERE value BETWEEN 200 and 210;
-                       QUERY PLAN                        
----------------------------------------------------------
+                  QUERY PLAN                  
+----------------------------------------------
  Custom Scan (o_scan) on o_test51
-   Bitmap heap scan
-   Recheck Cond: ((value >= 200) AND (value <= 210))
-   ->  Bitmap Index Scan on o_test51_pkey
-         Index Cond: ((value >= 200) AND (value <= 210))
-(5 rows)
+   Forward index scan of: o_test51_pkey
+   Conds: ((value >= 200) AND (value <= 210))
+(3 rows)
 
 SELECT * FROM o_test51 WHERE value BETWEEN 200 and 210;
  key | value 
@@ -193,14 +191,12 @@ SELECT orioledb_tbl_indices('o_test52'::regclass);
 
 INSERT INTO o_test52 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 EXPLAIN (COSTS off) SELECT * FROM o_test52 WHERE key BETWEEN 100 and 110;
-                     QUERY PLAN                      
------------------------------------------------------
+                 QUERY PLAN                  
+---------------------------------------------
  Custom Scan (o_scan) on o_test52
-   Bitmap heap scan
-   Recheck Cond: ((key >= 100) AND (key <= 110))
-   ->  Bitmap Index Scan on o_test52_pkey
-         Index Cond: ((key >= 100) AND (key <= 110))
-(5 rows)
+   Forward index only scan of: o_test52_pkey
+   Conds: ((key >= 100) AND (key <= 110))
+(3 rows)
 
 SELECT * FROM o_test52 WHERE key BETWEEN 100 and 110;
  key | value 
@@ -218,14 +214,12 @@ SELECT * FROM o_test52 WHERE key BETWEEN 100 and 110;
 (10 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test52 WHERE value BETWEEN 200 and 210;
-                       QUERY PLAN                        
----------------------------------------------------------
+                  QUERY PLAN                  
+----------------------------------------------
  Custom Scan (o_scan) on o_test52
-   Bitmap heap scan
-   Recheck Cond: ((value >= 200) AND (value <= 210))
-   ->  Bitmap Index Scan on o_test52_pkey
-         Index Cond: ((value >= 200) AND (value <= 210))
-(5 rows)
+   Forward index only scan of: o_test52_pkey
+   Conds: ((value >= 200) AND (value <= 210))
+(3 rows)
 
 SELECT * FROM o_test52 WHERE value BETWEEN 200 and 210;
  key | value 
@@ -275,14 +269,12 @@ SELECT orioledb_tbl_indices('o_test53'::regclass);
 
 INSERT INTO o_test53 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 EXPLAIN (COSTS off) SELECT * FROM o_test53 WHERE key BETWEEN 100 and 110;
-                     QUERY PLAN                      
------------------------------------------------------
+                QUERY PLAN                
+------------------------------------------
  Custom Scan (o_scan) on o_test53
-   Bitmap heap scan
-   Recheck Cond: ((key >= 100) AND (key <= 110))
-   ->  Bitmap Index Scan on o_test53_pkey
-         Index Cond: ((key >= 100) AND (key <= 110))
-(5 rows)
+   Forward index scan of: o_test53_pkey
+   Conds: ((key >= 100) AND (key <= 110))
+(3 rows)
 
 SELECT * FROM o_test53 WHERE key BETWEEN 100 and 110;
  key | value 
@@ -668,7 +660,6 @@ SELECT orioledb_tbl_indices('o_test58'::regclass);
 (1 row)
 
 INSERT INTO o_test58 SELECT 100 + i, 200 + i, 300 + i, 400 + i FROM generate_series(1, 10) AS i;
-CHECKPOINT;
 SELECT orioledb_tbl_check('o_test58'::regclass);
  orioledb_tbl_check 
 --------------------
@@ -682,26 +673,20 @@ EXPLAIN (COSTS off) SELECT * FROM o_test58;
 (1 row)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test58 WHERE foo = 301;
-                QUERY PLAN                
-------------------------------------------
- Custom Scan (o_scan) on o_test58
-   Bitmap heap scan
-   Recheck Cond: (foo = 301)
-   ->  Bitmap Index Scan on o_test58_reg2
-         Index Cond: (foo = 301)
-(5 rows)
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_test58_reg2 on o_test58
+   Index Cond: (foo = 301)
+(2 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test58 WHERE foo > 300 and foo < 400 and
 												 bar = 300;
-                    QUERY PLAN                     
----------------------------------------------------
- Custom Scan (o_scan) on o_test58
+                 QUERY PLAN                  
+---------------------------------------------
+ Index Scan using o_test58_reg2 on o_test58
+   Index Cond: ((foo > 300) AND (foo < 400))
    Filter: (bar = 300)
-   Bitmap heap scan
-   Recheck Cond: ((foo > 300) AND (foo < 400))
-   ->  Bitmap Index Scan on o_test58_reg2
-         Index Cond: ((foo > 300) AND (foo < 400))
-(6 rows)
+(3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test58 WHERE bar = 200;
       QUERY PLAN       
@@ -713,15 +698,12 @@ EXPLAIN (COSTS off) SELECT * FROM o_test58 WHERE bar = 200;
 SELECT smart_explain(
 'EXPLAIN (COSTS off) UPDATE o_test58 SET foo = 100 WHERE foo > 102 AND
 														 foo < 400;');
-                      smart_explain                      
----------------------------------------------------------
+                   smart_explain                   
+---------------------------------------------------
  Update on o_test58
-   ->  Custom Scan (o_scan) on o_test58
-         Bitmap heap scan
-         Recheck Cond: ((foo > 102) AND (foo < 400))
-         ->  Bitmap Index Scan on o_test58_reg2
-               Index Cond: ((foo > 102) AND (foo < 400))
-(6 rows)
+   ->  Index Scan using o_test58_reg2 on o_test58
+         Index Cond: ((foo > 102) AND (foo < 400))
+(3 rows)
 
 UPDATE o_test58 SET foo = 100 WHERE foo > 102;
 --SELECT orioledb_tbl_structure('o_test58'::regclass);
@@ -740,71 +722,50 @@ CREATE TABLE o_test59
 CREATE INDEX o_test59_reg1 ON o_test59(sec1);
 CREATE INDEX o_test59_reg2 ON o_test59(sec2);
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE sec1 = 100;
-                QUERY PLAN                
-------------------------------------------
- Custom Scan (o_scan) on o_test59
-   Bitmap heap scan
-   Recheck Cond: (sec1 = 100)
-   ->  Bitmap Index Scan on o_test59_reg1
-         Index Cond: (sec1 = 100)
-(5 rows)
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_test59_reg1 on o_test59
+   Index Cond: (sec1 = 100)
+(2 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE sec1 = 100 and pri1 > 200;
-                QUERY PLAN                
-------------------------------------------
- Custom Scan (o_scan) on o_test59
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_test59_reg1 on o_test59
+   Index Cond: (sec1 = 100)
    Filter: (pri1 > 200)
-   Bitmap heap scan
-   Recheck Cond: (sec1 = 100)
-   ->  Bitmap Index Scan on o_test59_reg1
-         Index Cond: (sec1 = 100)
-(6 rows)
+(3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE sec1 = 100 and pri1 = 200;
-                   QUERY PLAN                    
--------------------------------------------------
- Custom Scan (o_scan) on o_test59
-   Bitmap heap scan
-   Recheck Cond: ((sec1 = 100) AND (pri1 = 200))
-   ->  BitmapAnd
-         ->  Bitmap Index Scan on o_test59_reg1
-               Index Cond: (sec1 = 100)
-         ->  Bitmap Index Scan on o_test59_pkey
-               Index Cond: (pri1 = 200)
-(8 rows)
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_test59_reg1 on o_test59
+   Index Cond: (sec1 = 100)
+   Filter: (pri1 = 200)
+(3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE pri1 = 100;
-                QUERY PLAN                
-------------------------------------------
+               QUERY PLAN               
+----------------------------------------
  Custom Scan (o_scan) on o_test59
-   Bitmap heap scan
-   Recheck Cond: (pri1 = 100)
-   ->  Bitmap Index Scan on o_test59_pkey
-         Index Cond: (pri1 = 100)
-(5 rows)
+   Forward index scan of: o_test59_pkey
+   Conds: (pri1 = 100)
+(3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE sec2 = 200;
-                QUERY PLAN                
-------------------------------------------
- Custom Scan (o_scan) on o_test59
-   Bitmap heap scan
-   Recheck Cond: (sec2 = 200)
-   ->  Bitmap Index Scan on o_test59_reg2
-         Index Cond: (sec2 = 200)
-(5 rows)
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_test59_reg2 on o_test59
+   Index Cond: (sec2 = 200)
+(2 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE sec2 = 200 and pri1 = 100;
-                   QUERY PLAN                    
--------------------------------------------------
- Custom Scan (o_scan) on o_test59
-   Bitmap heap scan
-   Recheck Cond: ((sec2 = 200) AND (pri1 = 100))
-   ->  BitmapAnd
-         ->  Bitmap Index Scan on o_test59_reg2
-               Index Cond: (sec2 = 200)
-         ->  Bitmap Index Scan on o_test59_pkey
-               Index Cond: (pri1 = 100)
-(8 rows)
+                 QUERY PLAN                 
+--------------------------------------------
+ Index Scan using o_test59_reg2 on o_test59
+   Index Cond: (sec2 = 200)
+   Filter: (pri1 = 100)
+(3 rows)
 
 INSERT INTO o_test59 SELECT 100 + i, 200 + i, 300 + i, 400 + i, 500 + i FROM generate_series(1, 10) AS i;
 --SELECT orioledb_tbl_structure('o_test59'::regclass);
@@ -812,45 +773,36 @@ INSERT INTO o_test59 SELECT 100 + i, 200 + i, 300 + i, 400 + i, 500 + i FROM gen
 SELECT smart_explain(
 'EXPLAIN (COSTS off) UPDATE o_test59 SET foo = 0 WHERE sec1 > 105 AND
 													   sec1 < 200;');
-                       smart_explain                       
------------------------------------------------------------
+                    smart_explain                    
+-----------------------------------------------------
  Update on o_test59
-   ->  Custom Scan (o_scan) on o_test59
-         Bitmap heap scan
-         Recheck Cond: ((sec1 > 105) AND (sec1 < 200))
-         ->  Bitmap Index Scan on o_test59_reg1
-               Index Cond: ((sec1 > 105) AND (sec1 < 200))
-(6 rows)
+   ->  Index Scan using o_test59_reg1 on o_test59
+         Index Cond: ((sec1 > 105) AND (sec1 < 200))
+(3 rows)
 
 UPDATE o_test59 SET foo = 0 WHERE sec1 > 105;
 --SELECT orioledb_tbl_structure('o_test59'::regclass);
 -- update only sec1 index field
 SELECT smart_explain(
 'EXPLAIN (COSTS off) UPDATE o_test59 SET sec1 = 100 WHERE sec2 > 405 and sec2 < 408;');
-                       smart_explain                       
------------------------------------------------------------
+                    smart_explain                    
+-----------------------------------------------------
  Update on o_test59
-   ->  Custom Scan (o_scan) on o_test59
-         Bitmap heap scan
-         Recheck Cond: ((sec2 > 405) AND (sec2 < 408))
-         ->  Bitmap Index Scan on o_test59_reg2
-               Index Cond: ((sec2 > 405) AND (sec2 < 408))
-(6 rows)
+   ->  Index Scan using o_test59_reg2 on o_test59
+         Index Cond: ((sec2 > 405) AND (sec2 < 408))
+(3 rows)
 
 UPDATE o_test59 SET sec1 = 100 WHERE sec2 > 405 and sec2 < 408;
 --SELECT orioledb_tbl_structure('o_test59'::regclass);
 -- update primary index field
 SELECT smart_explain(
 'EXPLAIN (COSTS off) UPDATE o_test59 SET pri1 = 50 WHERE sec1 = 100;');
-                 smart_explain                  
-------------------------------------------------
+                  smart_explain                   
+--------------------------------------------------
  Update on o_test59
-   ->  Custom Scan (o_scan) on o_test59
-         Bitmap heap scan
-         Recheck Cond: (sec1 = 100)
-         ->  Bitmap Index Scan on o_test59_reg1
-               Index Cond: (sec1 = 100)
-(6 rows)
+   ->  Index Scan using o_test59_reg1 on o_test59
+         Index Cond: (sec1 = 100)
+(3 rows)
 
 UPDATE o_test59 SET pri1 = 50 WHERE sec1 = 100;
 --SELECT orioledb_tbl_structure('o_test59'::regclass);
@@ -1858,13 +1810,11 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv = '22';
 
 -- Test Result node processing
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idi = 1;
-                      QUERY PLAN                       
--------------------------------------------------------
+        QUERY PLAN        
+--------------------------
  Result
    One-Time Filter: false
-   ->  Index Only Scan using o_test66_reg1 on o_test66
-         Index Cond: (idi = 2)
-(4 rows)
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idi = 1;
  idi | idv 
@@ -2100,12 +2050,11 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -2252,12 +2201,11 @@ SELECT idi, idv FROM o_test66 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -2269,12 +2217,11 @@ SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
  idi | idv 
@@ -2962,12 +2909,11 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -3108,12 +3054,11 @@ SELECT idi, idv FROM o_test67 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -3801,12 +3746,11 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -3947,12 +3891,11 @@ SELECT idi, idv FROM o_test68 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -3964,12 +3907,11 @@ SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
-                        QUERY PLAN                        
-----------------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan Backward using o_test68_reg1 on o_test68
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
  idi | idv 
@@ -4655,12 +4597,11 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                   QUERY PLAN                    
--------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: (idv = ANY ('{12,22}'::text[]))
-   Filter: (idi = ANY ('{2,4}'::integer[]))
-(3 rows)
+   Index Cond: ((idv = ANY ('{12,22}'::text[])) AND (idi = ANY ('{2,4}'::integer[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -5741,6 +5682,10 @@ INSERT INTO o_test_unique_as_pkey (key, val, val2)
 Indexes:
     "o_test_unique_as_pkey_pkey" PRIMARY KEY, btree (key, val)
     "o_test_unique_as_pkey_ix1" UNIQUE, btree (val, key)
+Not-null constraints:
+    "o_test_unique_as_pkey_key_not_null" NOT NULL "key"
+    "o_test_unique_as_pkey_val_not_null" NOT NULL "val"
+    "o_test_unique_as_pkey_val2_not_null" NOT NULL "val2"
 
 SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
               orioledb_tbl_indices              
@@ -5787,6 +5732,10 @@ Indexes:
     "o_test_unique_as_pkey_pkey" PRIMARY KEY, btree (key, val)
     "o_test_unique_as_pkey_ix1" UNIQUE, btree (val, key)
     "o_test_unique_as_pkey_ix2" UNIQUE, btree (val, key)
+Not-null constraints:
+    "o_test_unique_as_pkey_key_not_null" NOT NULL "key"
+    "o_test_unique_as_pkey_val_not_null" NOT NULL "val"
+    "o_test_unique_as_pkey_val2_not_null" NOT NULL "val2"
 
 SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
               orioledb_tbl_indices              
@@ -6087,6 +6036,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 \d+ o_test_reuse_multiple_indices_ix1
       Index "indices.o_test_reuse_multiple_indices_ix1"
@@ -6364,6 +6316,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 EXPLAIN (COSTS OFF)
 	SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
@@ -6475,6 +6430,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 \d+ o_test_reuse_multiple_indices_ix1
       Index "indices.o_test_reuse_multiple_indices_ix1"
@@ -6873,6 +6831,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 \d+ o_test_reuse_multiple_indices_ix1
       Index "indices.o_test_reuse_multiple_indices_ix1"
@@ -6956,6 +6917,8 @@ Indexes:
     "o_test_include_like_ix1" btree (key)
     "o_test_include_like_ix2" btree (value)
     "o_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 CREATE TABLE IF NOT EXISTS o_test_include_like_like
 	(LIKE o_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
@@ -6998,6 +6961,8 @@ Indexes:
     "o_test_include_like_like_key_idx" btree (key)
     "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value)
     "o_test_include_like_like_value_idx" btree (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 DROP TABLE o_test_include_like_like;
 ALTER TABLE o_test_include_like DROP CONSTRAINT o_test_include_like_pkey;
@@ -7038,6 +7003,8 @@ Indexes:
     "o_test_include_like_ix1" btree (key)
     "o_test_include_like_ix2" btree (value)
     "o_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 CREATE TABLE IF NOT EXISTS o_test_include_like_like
 	(LIKE o_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
@@ -7079,6 +7046,8 @@ Indexes:
     "o_test_include_like_like_key_idx" btree (key)
     "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value)
     "o_test_include_like_like_value_idx" btree (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 DROP TABLE o_test_include_like_like;
 -- Test that fields also added when we create table like postgres table
@@ -7104,6 +7073,8 @@ Indexes:
     "pg_test_include_like_ix1" btree (key)
     "pg_test_include_like_ix2" btree (value)
     "pg_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value)
+Not-null constraints:
+    "pg_test_include_like_key_not_null" NOT NULL "key"
 
 CREATE TABLE IF NOT EXISTS o_test_include_like_like
 	(LIKE pg_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
@@ -7146,6 +7117,8 @@ Indexes:
     "o_test_include_like_like_key_idx" btree (key)
     "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value)
     "o_test_include_like_like_value_idx" btree (value)
+Not-null constraints:
+    "pg_test_include_like_key_not_null" NOT NULL "key"
 
 DROP TABLE o_test_include_like_like;
 CREATE TABLE o_test_partial_unique(
@@ -7344,6 +7317,11 @@ CREATE INDEX o_test_pkey_mixed_ix1
 Indexes:
     "o_test_pkey_mixed_pkey" PRIMARY KEY, btree (pk1, pk2, pk3, pk4)
     "o_test_pkey_mixed_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 SELECT orioledb_tbl_indices('o_test_pkey_mixed'::regclass);
@@ -7381,6 +7359,11 @@ Indexes:
     "o_test_pkey_mixed_pkey" PRIMARY KEY, btree (pk1, pk2, pk3, pk4)
     "o_test_pkey_mixed_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
     "o_test_pkey_mixed_uniq1" UNIQUE, btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 -- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
@@ -7425,6 +7408,11 @@ Indexes:
     "o_test_pkey_mixed_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
     "o_test_pkey_mixed_ix3" btree (f3, f2, pk4, f1, pk4) INCLUDE (pk3)
     "o_test_pkey_mixed_uniq1" UNIQUE, btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 -- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
@@ -7476,6 +7464,11 @@ Indexes:
     "o_test_pkey_mixed_ix3" btree (f3, f2, pk4, f1, pk4) INCLUDE (pk3)
     "o_test_pkey_mixed_ix4" btree (i1, f1, pk4, f2, pk4) INCLUDE (pk3, i2)
     "o_test_pkey_mixed_uniq1" UNIQUE, btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 -- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
@@ -7656,6 +7649,8 @@ CREATE TABLE o_test_pkey_include_box
  f2     | integer |           |          |         | plain   |              | 
 Indexes:
     "o_test_pkey_include_box_pkey" PRIMARY KEY, btree (pk1) INCLUDE (pk2)
+Not-null constraints:
+    "o_test_pkey_include_box_pk1_not_null" NOT NULL "pk1"
 
 SELECT orioledb_tbl_indices('o_test_pkey_include_box'::regclass);
               orioledb_tbl_indices              
@@ -7803,6 +7798,8 @@ Indexes:
     "o_test_include_box_with_pkey_pkey" PRIMARY KEY, btree (val_1)
     "o_test_include_box_with_pkey_ix1" UNIQUE, btree (val_2) INCLUDE (val_4)
     "o_test_include_box_with_pkey_ix2" UNIQUE, btree (val_3)
+Not-null constraints:
+    "o_test_include_box_with_pkey_val_1_not_null" NOT NULL "val_1"
 
 SELECT orioledb_tbl_indices('o_test_include_box_with_pkey'::regclass);
                orioledb_tbl_indices                
@@ -7977,16 +7974,12 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey
 		WHERE (val_1, val_2) < (2, 3) AND val_1 > 0 AND val_2 > 0
 			ORDER BY val_1, val_2;
-                                         QUERY PLAN                                          
----------------------------------------------------------------------------------------------
- Sort
-   Sort Key: val_1, val_2
-   ->  Custom Scan (o_scan) on o_test_row_searchkey
-         Bitmap heap scan
-         Recheck Cond: ((ROW(val_1, val_2) < ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
-         ->  Bitmap Index Scan on o_test_row_searchkey_pkey
-               Index Cond: ((ROW(val_1, val_2) < ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
-(7 rows)
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((ROW(val_1, val_2) < ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
+(3 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1, val_2) < (2, 3) AND val_1 > 0 AND val_2 > 0
@@ -8006,19 +7999,13 @@ EXPLAIN (COSTS OFF)
 		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
 			  val_1 > 0 AND val_2 > 0
 			ORDER BY val_1, val_2;
-                                                               QUERY PLAN                                                               
-----------------------------------------------------------------------------------------------------------------------------------------
- Sort
-   Sort Key: val_1, val_2
-   ->  Custom Scan (o_scan) on o_test_row_searchkey
-         Bitmap heap scan
-         Recheck Cond: (((val_1 = 2) AND (val_1 > 0) AND (val_2 < 3) AND (val_2 > 0)) OR ((val_1 < 2) AND (val_1 > 0) AND (val_2 > 0)))
-         ->  BitmapOr
-               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
-                     Index Cond: ((val_1 = 2) AND (val_1 > 0) AND (val_2 < 3) AND (val_2 > 0))
-               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
-                     Index Cond: ((val_1 < 2) AND (val_1 > 0) AND (val_2 > 0))
-(10 rows)
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Filter: ((val_1 < 2) OR ((val_1 = 2) AND (val_2 < 3)))
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((val_1 > 0) AND (val_2 > 0))
+(4 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
@@ -8038,16 +8025,12 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey
 		WHERE (val_1, val_2) <= (2, 3) AND val_1 > 0 AND val_2 > 0
 			ORDER BY val_1, val_2;
-                                          QUERY PLAN                                          
-----------------------------------------------------------------------------------------------
- Sort
-   Sort Key: val_1, val_2
-   ->  Custom Scan (o_scan) on o_test_row_searchkey
-         Bitmap heap scan
-         Recheck Cond: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
-         ->  Bitmap Index Scan on o_test_row_searchkey_pkey
-               Index Cond: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
-(7 rows)
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
+(3 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1, val_2) <= (2, 3) AND val_1 > 0 AND val_2 > 0
@@ -8068,20 +8051,13 @@ EXPLAIN (COSTS OFF)
 		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3 OR val_2 = 3))) AND
 			  val_1 > 0 AND val_2 > 0
 			ORDER BY val_1, val_2;
-                                                       QUERY PLAN                                                       
-------------------------------------------------------------------------------------------------------------------------
- Sort
-   Sort Key: val_1, val_2
-   ->  Custom Scan (o_scan) on o_test_row_searchkey
-         Filter: ((val_1 < 2) OR ((val_1 = 2) AND ((val_2 < 3) OR (val_2 = 3))))
-         Bitmap heap scan
-         Recheck Cond: (((val_1 = 2) AND (val_1 > 0) AND (val_2 > 0)) OR ((val_1 < 2) AND (val_1 > 0) AND (val_2 > 0)))
-         ->  BitmapOr
-               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
-                     Index Cond: ((val_1 = 2) AND (val_1 > 0) AND (val_2 > 0))
-               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
-                     Index Cond: ((val_1 < 2) AND (val_1 > 0) AND (val_2 > 0))
-(11 rows)
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Filter: ((val_1 < 2) OR ((val_1 = 2) AND ((val_2 < 3) OR (val_2 = 3))))
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((val_1 > 0) AND (val_2 > 0))
+(4 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3 OR val_2 = 3))) AND
@@ -8102,16 +8078,12 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey
 		WHERE (val_1, val_2) < (2, 3) AND (val_1, val_2) > (1, 2)
 			ORDER BY val_1, val_2;
-                                           QUERY PLAN                                            
--------------------------------------------------------------------------------------------------
- Sort
-   Sort Key: val_1, val_2
-   ->  Custom Scan (o_scan) on o_test_row_searchkey
-         Bitmap heap scan
-         Recheck Cond: ((ROW(val_1, val_2) < ROW(2, 3)) AND (ROW(val_1, val_2) > ROW(1, 2)))
-         ->  Bitmap Index Scan on o_test_row_searchkey_pkey
-               Index Cond: ((ROW(val_1, val_2) < ROW(2, 3)) AND (ROW(val_1, val_2) > ROW(1, 2)))
-(7 rows)
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((ROW(val_1, val_2) < ROW(2, 3)) AND (ROW(val_1, val_2) > ROW(1, 2)))
+(3 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1, val_2) < (2, 3) AND (val_1, val_2) > (1, 2)
@@ -8130,20 +8102,12 @@ EXPLAIN (COSTS OFF)
 		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
 			  (val_1 > 1 OR (val_1 = 1 AND val_2 > 2))
 			ORDER BY val_1, val_2;
-                              QUERY PLAN                              
-----------------------------------------------------------------------
- Sort
-   Sort Key: val_1, val_2
-   ->  Custom Scan (o_scan) on o_test_row_searchkey
-         Filter: ((val_1 > 1) OR ((val_1 = 1) AND (val_2 > 2)))
-         Bitmap heap scan
-         Recheck Cond: (((val_1 = 2) AND (val_2 < 3)) OR (val_1 < 2))
-         ->  BitmapOr
-               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
-                     Index Cond: ((val_1 = 2) AND (val_2 < 3))
-               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
-                     Index Cond: (val_1 < 2)
-(11 rows)
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Filter: (((val_1 < 2) OR ((val_1 = 2) AND (val_2 < 3))) AND ((val_1 > 1) OR ((val_1 = 1) AND (val_2 > 2))))
+   Forward index only scan of: o_test_row_searchkey_pkey
+(3 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
@@ -8162,16 +8126,12 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey
 		WHERE (val_1, val_2) <= (2, 3) AND (val_1, val_2) >= (1, 2)
 			ORDER BY val_1, val_2;
-                                            QUERY PLAN                                             
----------------------------------------------------------------------------------------------------
- Sort
-   Sort Key: val_1, val_2
-   ->  Custom Scan (o_scan) on o_test_row_searchkey
-         Bitmap heap scan
-         Recheck Cond: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (ROW(val_1, val_2) >= ROW(1, 2)))
-         ->  Bitmap Index Scan on o_test_row_searchkey_pkey
-               Index Cond: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (ROW(val_1, val_2) >= ROW(1, 2)))
-(7 rows)
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Forward index only scan of: o_test_row_searchkey_pkey
+   Conds: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (ROW(val_1, val_2) >= ROW(1, 2)))
+(3 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1, val_2) <= (2, 3) AND (val_1, val_2) >= (1, 2)
@@ -8192,20 +8152,12 @@ EXPLAIN (COSTS OFF)
 		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 <= 3))) AND
 			  (val_1 > 1 OR (val_1 = 1 AND val_2 >= 2))
 			ORDER BY val_1, val_2;
-                              QUERY PLAN                               
------------------------------------------------------------------------
- Sort
-   Sort Key: val_1, val_2
-   ->  Custom Scan (o_scan) on o_test_row_searchkey
-         Filter: ((val_1 > 1) OR ((val_1 = 1) AND (val_2 >= 2)))
-         Bitmap heap scan
-         Recheck Cond: (((val_1 = 2) AND (val_2 <= 3)) OR (val_1 < 2))
-         ->  BitmapOr
-               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
-                     Index Cond: ((val_1 = 2) AND (val_2 <= 3))
-               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
-                     Index Cond: (val_1 < 2)
-(11 rows)
+                                                   QUERY PLAN                                                    
+-----------------------------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_row_searchkey
+   Filter: (((val_1 < 2) OR ((val_1 = 2) AND (val_2 <= 3))) AND ((val_1 > 1) OR ((val_1 = 1) AND (val_2 >= 2))))
+   Forward index only scan of: o_test_row_searchkey_pkey
+(3 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 <= 3))) AND
@@ -8252,14 +8204,12 @@ SELECT orioledb_tbl_structure('o_test_row_searchkey_pkey_include'::regclass,
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey_pkey_include
 		WHERE (val_1) < (2);
-                            QUERY PLAN                             
--------------------------------------------------------------------
+                              QUERY PLAN                              
+----------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_row_searchkey_pkey_include
-   Bitmap heap scan
-   Recheck Cond: (val_1 < 2)
-   ->  Bitmap Index Scan on o_test_row_searchkey_pkey_include_pkey
-         Index Cond: (val_1 < 2)
-(5 rows)
+   Forward index only scan of: o_test_row_searchkey_pkey_include_pkey
+   Conds: (val_1 < 2)
+(3 rows)
 
 SELECT * FROM o_test_row_searchkey_pkey_include
 	WHERE (val_1) < (2);
@@ -8499,6 +8449,8 @@ CREATE INDEX o_test_pkey_include_same_fields_ix1
 Indexes:
     "o_test_pkey_include_same_fields_pkey" PRIMARY KEY, btree (val_1) INCLUDE (val_2, val_2)
     "o_test_pkey_include_same_fields_ix1" btree (val_1) INCLUDE (val_2, val_2)
+Not-null constraints:
+    "o_test_pkey_include_same_fields_val_1_not_null" NOT NULL "val_1"
 
 SELECT orioledb_tbl_indices('o_test_pkey_include_same_fields'::regclass);
               orioledb_tbl_indices              
@@ -8618,17 +8570,13 @@ INSERT INTO o_test_saop
 	(SELECT i % 10, (i / 10) % 10, i / 100 FROM generate_series(1, 1000) i);
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
- Sort
-   Sort Key: i, j, k
-   ->  Custom Scan (o_scan) on o_test_saop
-         Filter: ((k > ALL ('{7,8}'::integer[])) AND (j = ANY ('{3,4,5}'::integer[])))
-         Bitmap heap scan
-         Recheck Cond: (i < ANY ('{3,4,5}'::integer[]))
-         ->  Bitmap Index Scan on o_test_saop_pkey
-               Index Cond: (i < ANY ('{3,4,5}'::integer[]))
-(8 rows)
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_saop
+   Filter: (k > ALL ('{7,8}'::integer[]))
+   Forward index only scan of: o_test_saop_pkey
+   Conds: ((i < ANY ('{3,4,5}'::integer[])) AND (j = ANY ('{3,4,5}'::integer[])))
+(4 rows)
 
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
  i | j | k 
@@ -8652,14 +8600,12 @@ SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 
 
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) ORDER BY i, j, k;
-                                     QUERY PLAN                                     
-------------------------------------------------------------------------------------
- Sort
-   Sort Key: i, j, k
-   ->  Custom Scan (o_scan) on o_test_saop
-         Forward index only scan of: o_test_saop_pkey
-         Conds: ((i = ANY ('{1,3}'::integer[])) AND (k = ANY ('{3,5}'::integer[])))
-(5 rows)
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_saop
+   Forward index only scan of: o_test_saop_pkey
+   Conds: ((i = ANY ('{1,3}'::integer[])) AND (k = ANY ('{3,5}'::integer[])))
+(3 rows)
 
 SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) ORDER BY i, j, k;
  i | j | k 
@@ -8708,17 +8654,12 @@ SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) OR
 
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Sort
-   Sort Key: i, j, k
-   ->  Custom Scan (o_scan) on o_test_saop
-         Filter: (j = ANY ('{1,3}'::integer[]))
-         Bitmap heap scan
-         Recheck Cond: (i < ANY ('{1,2}'::integer[]))
-         ->  Bitmap Index Scan on o_test_saop_pkey
-               Index Cond: (i < ANY ('{1,2}'::integer[]))
-(8 rows)
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_saop
+   Forward index only scan of: o_test_saop_pkey
+   Conds: ((i < ANY ('{1,2}'::integer[])) AND (j = ANY ('{1,3}'::integer[])))
+(3 rows)
 
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
  i | j | k 
@@ -8807,8 +8748,7 @@ CREATE UNIQUE INDEX o_test_idx_id ON o_test_add_index_constraint(id);
 -- Check initial state (index exists but no constraint)
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
-WHERE conrelid = 'o_test_add_index_constraint'::regclass
-ORDER BY conname;
+WHERE conrelid = 'o_test_add_index_constraint'::regclass;
  conname | contype | conindid 
 ---------+---------+----------
 (0 rows)
@@ -8821,12 +8761,12 @@ WARNING:  We cannot just reuse index for primary key in orioledb, because second
 -- Verify constraint was added
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
-WHERE conrelid = 'o_test_add_index_constraint'::regclass
-ORDER BY conname;
-  conname  | contype | conindid  
------------+---------+-----------
- o_test_pk | p       | o_test_pk
-(1 row)
+WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+                 conname                 | contype | conindid  
+-----------------------------------------+---------+-----------
+ o_test_add_index_constraint_id_not_null | n       | -
+ o_test_pk                               | p       | o_test_pk
+(2 rows)
 
 -- Test constraint enforcement
 INSERT INTO o_test_add_index_constraint VALUES (4, 'four');  -- Should succeed
@@ -8838,12 +8778,12 @@ CREATE UNIQUE INDEX o_test_idx_val ON o_test_add_index_constraint(val);
 -- Check state before adding UNIQUE constraint
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
-WHERE conrelid = 'o_test_add_index_constraint'::regclass
-ORDER BY conname;
-  conname  | contype | conindid  
------------+---------+-----------
- o_test_pk | p       | o_test_pk
-(1 row)
+WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+                 conname                 | contype | conindid  
+-----------------------------------------+---------+-----------
+ o_test_add_index_constraint_id_not_null | n       | -
+ o_test_pk                               | p       | o_test_pk
+(2 rows)
 
 -- Test AT_AddIndexConstraint: Add UNIQUE constraint using existing index
 ALTER TABLE o_test_add_index_constraint
@@ -8852,13 +8792,13 @@ NOTICE:  ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index "o_test_idx_
 -- Verify both constraints exist
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
-WHERE conrelid = 'o_test_add_index_constraint'::regclass
-ORDER BY conname;
-  conname  | contype | conindid  
------------+---------+-----------
- o_test_pk | p       | o_test_pk
- o_test_uq | u       | o_test_uq
-(2 rows)
+WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+                 conname                 | contype | conindid  
+-----------------------------------------+---------+-----------
+ o_test_add_index_constraint_id_not_null | n       | -
+ o_test_pk                               | p       | o_test_pk
+ o_test_uq                               | u       | o_test_uq
+(3 rows)
 
 -- Test UNIQUE constraint enforcement
 INSERT INTO o_test_add_index_constraint VALUES (5, 'five');  -- Should succeed
@@ -9006,159 +8946,113 @@ SELECT count(*) FROM o_test_null_mixed
 (1 row)
 
 RESET enable_seqscan;
--- Index-only scan coverage for secondary indexes.  These all force
--- enable_seqscan = off + enable_bitmapscan = off so the planner picks
--- IOS, then verify the plan uses the secondary AND the rows are
--- returned correctly.  Together they exercise the column-count /
--- column-order alignment between OrioleDB's itupdesc layout and the
--- planner-side indextlist that set_plain_rel_pathlist_hook() builds.
-SET enable_seqscan = off;
-SET enable_bitmapscan = off;
-SET enable_indexscan = off;
--- 1. Duplicate columns inside the secondary index (key + key, key + INCLUDE)
-CREATE TABLE o_ios_sk_dup (val_2 int, val_1 int) USING orioledb;
-CREATE INDEX o_ios_sk_dup_ix ON o_ios_sk_dup (val_1, val_2, val_1) INCLUDE (val_1);
-INSERT INTO o_ios_sk_dup SELECT v, v * 10 FROM generate_series(1, 5) v;
+-- PG18 btree skip scan: query with equality on a trailing column and NO
+-- constraint on the leading column.  _bt_preprocess_keys generates a
+-- skip array on the leading column; each iteration of the skip array
+-- positions the index at the next distinct value of x and probes for
+-- the y predicate.  Covers both the SkipSupport-aware path (int4 has
+-- skip support: increment is n+1) and the post-advancement path through
+-- o_key_data_to_key_range where the array's sk_argument carries a live
+-- value with SK_BT_NEXT semantics.
+CREATE TABLE o_test_skip_leading_int (
+	x int NOT NULL,
+	y int NOT NULL
+) USING orioledb;
+CREATE INDEX o_test_skip_leading_int_idx ON o_test_skip_leading_int(x, y);
+INSERT INTO o_test_skip_leading_int
+	SELECT g % 5, g FROM generate_series(1, 200) g;
+ANALYZE o_test_skip_leading_int;
+SET enable_seqscan = OFF;
+SET enable_bitmapscan = OFF;
 EXPLAIN (COSTS OFF)
-	SELECT val_1 FROM o_ios_sk_dup ORDER BY val_1;
-                      QUERY PLAN                       
--------------------------------------------------------
- Index Only Scan using o_ios_sk_dup_ix on o_ios_sk_dup
-(1 row)
+SELECT x, y FROM o_test_skip_leading_int WHERE y = 42 ORDER BY x, y;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Index Only Scan using o_test_skip_leading_int_idx on o_test_skip_leading_int
+   Index Cond: (y = 42)
+(2 rows)
 
-SELECT val_1 FROM o_ios_sk_dup ORDER BY val_1;
- val_1 
--------
-    10
-    20
-    30
-    40
-    50
-(5 rows)
-
-EXPLAIN (COSTS OFF)
-	SELECT val_1, val_2 FROM o_ios_sk_dup ORDER BY val_1;
-                      QUERY PLAN                       
--------------------------------------------------------
- Index Only Scan using o_ios_sk_dup_ix on o_ios_sk_dup
-(1 row)
-
-SELECT val_1, val_2 FROM o_ios_sk_dup ORDER BY val_1;
- val_1 | val_2 
--------+-------
-    10 |     1
-    20 |     2
-    30 |     3
-    40 |     4
-    50 |     5
-(5 rows)
-
-DROP TABLE o_ios_sk_dup;
--- 2. Duplicate columns inside the *unique* secondary index that
--- becomes the table's primary in OrioleDB (no explicit PRIMARY KEY).
-CREATE TABLE o_ios_pk_dup (a int NOT NULL, b text NOT NULL) USING orioledb;
-CREATE UNIQUE INDEX o_ios_pk_dup_ix ON o_ios_pk_dup (a, b, a);
-INSERT INTO o_ios_pk_dup
-	SELECT v, repeat('x', v) FROM generate_series(1, 5) v;
-EXPLAIN (COSTS OFF) SELECT a, b FROM o_ios_pk_dup ORDER BY a, b;
-                      QUERY PLAN                       
--------------------------------------------------------
- Index Only Scan using o_ios_pk_dup_ix on o_ios_pk_dup
-(1 row)
-
-SELECT a, b FROM o_ios_pk_dup ORDER BY a, b;
- a |   b   
----+-------
- 1 | x
- 2 | xx
- 3 | xxx
- 4 | xxxx
- 5 | xxxxx
-(5 rows)
-
-DROP TABLE o_ios_pk_dup;
--- 3. Overlap between secondary index columns and PK columns.  The PK
--- column `a` appears in the SK; `c` does not.  fill_itup must produce
--- (a, b, c) on the SK side -- not (a, b) (would miss c) and not (a, b,
--- a, c) (would mis-shape).
-CREATE TABLE o_ios_pk_sk_dup
-	(a int NOT NULL, b int NOT NULL, c int NOT NULL,
-	 PRIMARY KEY (a, c)) USING orioledb;
-CREATE INDEX o_ios_pk_sk_dup_ix ON o_ios_pk_sk_dup (a, b);
-INSERT INTO o_ios_pk_sk_dup
-	SELECT v, v * 10, v * 100 FROM generate_series(1, 5) v;
-EXPLAIN (COSTS OFF) SELECT a, b, c FROM o_ios_pk_sk_dup ORDER BY a, b;
-                         QUERY PLAN                          
--------------------------------------------------------------
- Index Only Scan using o_ios_pk_sk_dup_ix on o_ios_pk_sk_dup
-(1 row)
-
-SELECT a, b, c FROM o_ios_pk_sk_dup ORDER BY a, b;
- a | b  |  c  
----+----+-----
- 1 | 10 | 100
- 2 | 20 | 200
- 3 | 30 | 300
- 4 | 40 | 400
- 5 | 50 | 500
-(5 rows)
-
-DROP TABLE o_ios_pk_sk_dup;
--- 4. INCLUDE columns on the PK.  set_plain_rel_pathlist_hook() must
--- iterate only PK key columns (not its INCLUDE list) when extending
--- the secondary's indextlist, otherwise the INCLUDE'd column of PK
--- would be appended on the planner side but not present on the
--- orioledb-itupdesc side -- a natts mismatch on every IOS.
-CREATE TABLE o_ios_pk_include
-	(a int NOT NULL, b int NOT NULL, c int NOT NULL,
-	 PRIMARY KEY (a) INCLUDE (c)) USING orioledb;
-CREATE INDEX o_ios_pk_include_ix ON o_ios_pk_include (b);
-INSERT INTO o_ios_pk_include
-	SELECT v, v * 10, v * 100 FROM generate_series(1, 5) v;
-EXPLAIN (COSTS OFF) SELECT a, b FROM o_ios_pk_include ORDER BY b;
-                          QUERY PLAN                           
----------------------------------------------------------------
- Index Only Scan using o_ios_pk_include_ix on o_ios_pk_include
-(1 row)
-
-SELECT a, b FROM o_ios_pk_include ORDER BY b;
- a | b  
+SELECT x, y FROM o_test_skip_leading_int WHERE y = 42 ORDER BY x, y;
+ x | y  
 ---+----
- 1 | 10
- 2 | 20
- 3 | 30
- 4 | 40
- 5 | 50
-(5 rows)
-
-DROP TABLE o_ios_pk_include;
--- 5. INCLUDE columns on the secondary index itself.
-CREATE TABLE o_ios_sk_include
-	(a int NOT NULL PRIMARY KEY, b int NOT NULL, c int NOT NULL)
-	USING orioledb;
-CREATE INDEX o_ios_sk_include_ix ON o_ios_sk_include (b) INCLUDE (c);
-INSERT INTO o_ios_sk_include
-	SELECT v, v * 10, v * 100 FROM generate_series(1, 5) v;
-EXPLAIN (COSTS OFF) SELECT a, b, c FROM o_ios_sk_include ORDER BY b;
-                          QUERY PLAN                           
----------------------------------------------------------------
- Index Only Scan using o_ios_sk_include_ix on o_ios_sk_include
+ 2 | 42
 (1 row)
 
-SELECT a, b, c FROM o_ios_sk_include ORDER BY b;
- a | b  |  c  
----+----+-----
- 1 | 10 | 100
- 2 | 20 | 200
- 3 | 30 | 300
- 4 | 40 | 400
- 5 | 50 | 500
-(5 rows)
+-- Multiple matching y values across distinct x: every distinct x is
+-- visited exactly once by the skip-array driver.
+SELECT count(*), count(DISTINCT x) FROM o_test_skip_leading_int
+	WHERE y IN (42, 84, 126);
+ count | count 
+-------+-------
+     3 |     3
+(1 row)
 
-DROP TABLE o_ios_sk_include;
-RESET enable_seqscan;
 RESET enable_bitmapscan;
-RESET enable_indexscan;
+RESET enable_seqscan;
+DROP TABLE o_test_skip_leading_int;
+-- Non-SkipSupport leading type (text): _bt_array_increment sets the
+-- SK_BT_NEXT flag instead of generating the next discrete value, so the
+-- iterator must honor "strictly > current sk_argument" as an exclusive
+-- lower bound.  Covers o_key_data_to_key_range's SK_BT_NEXT/SK_BT_PRIOR
+-- handling.
+CREATE TABLE o_test_skip_leading_text (
+	x text NOT NULL,
+	y int NOT NULL
+) USING orioledb;
+CREATE INDEX o_test_skip_leading_text_idx ON o_test_skip_leading_text(x, y);
+INSERT INTO o_test_skip_leading_text
+	SELECT chr(65 + (g % 4)), g FROM generate_series(1, 200) g;
+ANALYZE o_test_skip_leading_text;
+SET enable_seqscan = OFF;
+SET enable_bitmapscan = OFF;
+EXPLAIN (COSTS OFF)
+SELECT x, y FROM o_test_skip_leading_text WHERE y = 42 ORDER BY x, y;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Index Only Scan using o_test_skip_leading_text_idx on o_test_skip_leading_text
+   Index Cond: (y = 42)
+(2 rows)
+
+SELECT x, y FROM o_test_skip_leading_text WHERE y = 42 ORDER BY x, y;
+ x | y  
+---+----
+ C | 42
+(1 row)
+
+RESET enable_bitmapscan;
+RESET enable_seqscan;
+DROP TABLE o_test_skip_leading_text;
+-- Backward scan over a skip array: each iteration must reposition to
+-- the next-lower distinct leading value.  _bt_array_decrement is the
+-- mirror of _bt_array_increment; SK_BT_PRIOR is the exclusive-upper
+-- counterpart of SK_BT_NEXT.
+CREATE TABLE o_test_skip_backward (
+	x int NOT NULL,
+	y int NOT NULL
+) USING orioledb;
+CREATE INDEX o_test_skip_backward_idx ON o_test_skip_backward(x, y);
+INSERT INTO o_test_skip_backward
+	SELECT g % 5, g FROM generate_series(1, 100) g;
+ANALYZE o_test_skip_backward;
+SET enable_seqscan = OFF;
+SET enable_bitmapscan = OFF;
+EXPLAIN (COSTS OFF)
+SELECT x, y FROM o_test_skip_backward WHERE y = 42 ORDER BY x DESC, y DESC;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Index Only Scan Backward using o_test_skip_backward_idx on o_test_skip_backward
+   Index Cond: (y = 42)
+(2 rows)
+
+SELECT x, y FROM o_test_skip_backward WHERE y = 42 ORDER BY x DESC, y DESC;
+ x | y  
+---+----
+ 2 | 42
+(1 row)
+
+RESET enable_bitmapscan;
+RESET enable_seqscan;
+DROP TABLE o_test_skip_backward;
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
 ------------------------------
