@@ -9145,6 +9145,113 @@ DROP TABLE o_ios_sk_include;
 RESET enable_seqscan;
 RESET enable_bitmapscan;
 RESET enable_indexscan;
+-- PG18 btree skip scan: query with equality on a trailing column and NO
+-- constraint on the leading column.  _bt_preprocess_keys generates a
+-- skip array on the leading column; each iteration of the skip array
+-- positions the index at the next distinct value of x and probes for
+-- the y predicate.  Covers both the SkipSupport-aware path (int4 has
+-- skip support: increment is n+1) and the post-advancement path through
+-- o_key_data_to_key_range where the array's sk_argument carries a live
+-- value with SK_BT_NEXT semantics.
+CREATE TABLE o_test_skip_leading_int (
+	x int NOT NULL,
+	y int NOT NULL
+) USING orioledb;
+CREATE INDEX o_test_skip_leading_int_idx ON o_test_skip_leading_int(x, y);
+INSERT INTO o_test_skip_leading_int
+	SELECT g % 5, g FROM generate_series(1, 200) g;
+ANALYZE o_test_skip_leading_int;
+SET enable_seqscan = OFF;
+SET enable_bitmapscan = OFF;
+EXPLAIN (COSTS OFF)
+SELECT x, y FROM o_test_skip_leading_int WHERE y = 42 ORDER BY x, y;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Index Only Scan using o_test_skip_leading_int_idx on o_test_skip_leading_int
+   Index Cond: (y = 42)
+(2 rows)
+
+SELECT x, y FROM o_test_skip_leading_int WHERE y = 42 ORDER BY x, y;
+ x | y  
+---+----
+ 2 | 42
+(1 row)
+
+-- Multiple matching y values across distinct x: every distinct x is
+-- visited exactly once by the skip-array driver.
+SELECT count(*), count(DISTINCT x) FROM o_test_skip_leading_int
+	WHERE y IN (42, 84, 126);
+ count | count 
+-------+-------
+     3 |     3
+(1 row)
+
+RESET enable_bitmapscan;
+RESET enable_seqscan;
+DROP TABLE o_test_skip_leading_int;
+-- Non-SkipSupport leading type (text): _bt_array_increment sets the
+-- SK_BT_NEXT flag instead of generating the next discrete value, so the
+-- iterator must honor "strictly > current sk_argument" as an exclusive
+-- lower bound.  Covers o_key_data_to_key_range's SK_BT_NEXT/SK_BT_PRIOR
+-- handling.
+CREATE TABLE o_test_skip_leading_text (
+	x text NOT NULL,
+	y int NOT NULL
+) USING orioledb;
+CREATE INDEX o_test_skip_leading_text_idx ON o_test_skip_leading_text(x, y);
+INSERT INTO o_test_skip_leading_text
+	SELECT chr(65 + (g % 4)), g FROM generate_series(1, 200) g;
+ANALYZE o_test_skip_leading_text;
+SET enable_seqscan = OFF;
+SET enable_bitmapscan = OFF;
+EXPLAIN (COSTS OFF)
+SELECT x, y FROM o_test_skip_leading_text WHERE y = 42 ORDER BY x, y;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Index Only Scan using o_test_skip_leading_text_idx on o_test_skip_leading_text
+   Index Cond: (y = 42)
+(2 rows)
+
+SELECT x, y FROM o_test_skip_leading_text WHERE y = 42 ORDER BY x, y;
+ x | y  
+---+----
+ C | 42
+(1 row)
+
+RESET enable_bitmapscan;
+RESET enable_seqscan;
+DROP TABLE o_test_skip_leading_text;
+-- Backward scan over a skip array: each iteration must reposition to
+-- the next-lower distinct leading value.  _bt_array_decrement is the
+-- mirror of _bt_array_increment; SK_BT_PRIOR is the exclusive-upper
+-- counterpart of SK_BT_NEXT.
+CREATE TABLE o_test_skip_backward (
+	x int NOT NULL,
+	y int NOT NULL
+) USING orioledb;
+CREATE INDEX o_test_skip_backward_idx ON o_test_skip_backward(x, y);
+INSERT INTO o_test_skip_backward
+	SELECT g % 5, g FROM generate_series(1, 100) g;
+ANALYZE o_test_skip_backward;
+SET enable_seqscan = OFF;
+SET enable_bitmapscan = OFF;
+EXPLAIN (COSTS OFF)
+SELECT x, y FROM o_test_skip_backward WHERE y = 42 ORDER BY x DESC, y DESC;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Index Only Scan Backward using o_test_skip_backward_idx on o_test_skip_backward
+   Index Cond: (y = 42)
+(2 rows)
+
+SELECT x, y FROM o_test_skip_backward WHERE y = 42 ORDER BY x DESC, y DESC;
+ x | y  
+---+----
+ 2 | 42
+(1 row)
+
+RESET enable_bitmapscan;
+RESET enable_seqscan;
+DROP TABLE o_test_skip_backward;
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
 ------------------------------
