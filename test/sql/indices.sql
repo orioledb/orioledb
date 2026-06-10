@@ -2229,6 +2229,13 @@ RESET enable_seqscan;
 RESET enable_bitmapscan;
 RESET enable_indexscan;
 
+-- Skip scan tests below exercise PG18's _bt_preprocess_keys synthesizing a
+-- skip array on the leading column.  On PG16/PG17 there are no skip arrays;
+-- skip the whole block instead of maintaining version-specific expected
+-- outputs for queries that test PG18-only optimization paths.
+SELECT current_setting('server_version_num')::int >= 180000 AS skip_scan_supported \gset
+\if :skip_scan_supported
+
 -- PG18 btree skip scan: query with equality on a trailing column and NO
 -- constraint on the leading column.  _bt_preprocess_keys generates a
 -- skip array on the leading column; each iteration of the skip array
@@ -2303,6 +2310,8 @@ SELECT x, y FROM o_test_skip_backward WHERE y = 42 ORDER BY x DESC, y DESC;
 RESET enable_bitmapscan;
 RESET enable_seqscan;
 DROP TABLE o_test_skip_backward;
+
+\endif
 
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
