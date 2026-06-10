@@ -1883,6 +1883,155 @@ class ReplicationTest(BaseTest):
 				except ProcessLookupError:
 					pass
 
+	def test_replica_restart_seeds_runxmin_from_checkpoint_floor(self):
+		"""
+		read_xids() pushes the replica's runXmin to nextXid when its
+		on-disk xids file is empty -- which it routinely is when the
+		master's only in-flight oxid X has all its modify records
+		buffered in the backend's private local_wal and none of them
+		have reached the wire yet.  The master's xids file records X
+		(its vxids[] still has the oxid), but the streaming standby
+		has never seen a WAL_REC_XID for X, so its own restartpoint
+		writes an xids file with no X in it.
+
+		Pre-fix:
+		  * Master checkpoint -> master's xids file has X.oxid
+		    (LOW); master's checkpointRetainXmin = X.oxid.
+		  * Replica restartpoint -> replica's xids file is empty.
+		  * Restart the replica.  read_xids() finds an empty file,
+		    update_run_xmin() falls into the empty-heap branch,
+		    `Min(xmin, recovery_xmin = InvalidOXid)` -> runXmin =
+		    nextXid (HIGH, master's nextXid at the checkpoint).
+		  * A subsequent advance_oxids() in the apply path then
+		    reads that HIGH runXmin and pushes globalXmin past the
+		    real floor.
+		  * When X eventually rolls back, the standby's xmin walk
+		    drags globalXmin *backwards*.
+
+		Post-fix:
+		  * recovery_xmin is seeded with
+		    xid_meta->checkpointRetainXmin (LOW) *before* read_xids()
+		    so its first update_run_xmin() caps xmin at the floor.
+		  * runXmin / globalXmin stay at the checkpoint-era floor
+		    until a WAL commit/rollback explicitly bumps them.
+
+		The user-visible failure that motivated this fix is still
+		not pinned down (the upstream issue is "globalXmin moves
+		backwards, exact corruption unclear"), so this test asserts
+		the symptom directly: the replica's runXmin must not jump
+		above master's runXmin while X is still in-flight.
+		"""
+		master = self.node
+		master.append_conf("wal_keep_size = '128MB'\n")
+		master.start()
+		try:
+			with self.getReplica().start() as replica:
+				master.safe_psql("""
+					CREATE EXTENSION orioledb;
+					CREATE TABLE o_test_xidfloor (
+						k int PRIMARY KEY,
+						v int
+					) USING orioledb;
+					INSERT INTO o_test_xidfloor
+						SELECT g, 0 FROM generate_series(1, 100) g;
+				""")
+				self.catchup_orioledb(replica)
+
+				# Long-running tx X.  A single small UPDATE
+				# easily fits in the 8 KB local_wal buffer so the
+				# modify record never reaches the wire (no
+				# overflow flush, no commit yet).  This is the
+				# crucial asymmetry: master's vxids[] holds X,
+				# but the standby's recovery xid hash never
+				# learns of it.
+				t_long = master.connect()
+				t_long.begin()
+				t_long.execute(
+				    "UPDATE o_test_xidfloor SET v = -1 WHERE k = 1;")
+				t_long_oxid = t_long.execute(
+				    "SELECT orioledb_get_current_oxid();")[0][0]
+
+				# Drive nextXid well past X.oxid so the gap
+				# between the checkpoint-era floor and nextXid is
+				# observable (the pre-fix bug pushes runXmin all
+				# the way up to nextXid).
+				for i in range(200):
+					master.safe_psql(
+					    "UPDATE o_test_xidfloor "
+					    f"SET v = v + 1 WHERE k = {2 + (i % 50)};")
+
+				# Master CHECKPOINT.  finish_write_xids() scans
+				# oProcData[].vxids[] and writes X.oxid to the
+				# master's xids file.  master's
+				# checkpointRetainXmin = X.oxid.
+				master.safe_psql("CHECKPOINT;")
+
+				# Wait for the standby to digest the checkpoint
+				# WAL and run its own restartpoint.  Two
+				# checkpoints + a synchronization barrier coax
+				# the standby into rotating its xids file: only
+				# *after* the second master checkpoint can the
+				# replica know the first checkpoint is committed
+				# and persist a fresh xids file for it.
+				self.catchup_orioledb(replica)
+				master.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				# Master state we'll compare against.  X is still
+				# in-flight, so master's runXmin is pinned at
+				# (around) X.oxid.
+				master_runxmin_before = master.execute(
+				    "SELECT runxmin FROM orioledb_get_xid_meta();")[0][0]
+
+				# Restart the standby.  Its restartpoint xids
+				# file does not contain X (no WAL ever mentioned
+				# it); pre-fix update_run_xmin() now sails
+				# runXmin past X.oxid.
+				replica.stop(['-m', 'fast', '-t', '60'])
+				replica.start()
+				replica.poll_query_until(
+				    "SELECT orioledb_recovery_synchronized();",
+				    expected=True,
+				    sleep_time=0.1,
+				    max_attempts=300)
+
+				replica_runxmin, replica_globalxmin = replica.execute(
+				    "SELECT runxmin, globalxmin "
+				    "FROM orioledb_get_xid_meta();")[0]
+
+				# The headline assertion.  Master's runXmin is
+				# bounded above by X.oxid (X holds it down).
+				# Replica must observe a horizon no higher than
+				# master's: a runaway replica runXmin past
+				# X.oxid is the pre-fix bug.  Bound is generous
+				# enough to absorb a small bookkeeping bump on
+				# either side but tight enough to catch the bug,
+				# which blows the gap open by ~250 (the number
+				# of post-X commits we ran).
+				self.assertLessEqual(
+				    replica_runxmin, master_runxmin_before + 50,
+				    f"replica runXmin {replica_runxmin} jumped past "
+				    f"master's runXmin {master_runxmin_before} after "
+				    f"restart while X (oxid {t_long_oxid}) was still "
+				    "in-flight")
+				self.assertLessEqual(
+				    replica_globalxmin, master_runxmin_before + 50,
+				    f"replica globalXmin {replica_globalxmin} jumped "
+				    f"past master's runXmin {master_runxmin_before} "
+				    f"after restart while X (oxid {t_long_oxid}) was "
+				    "still in-flight")
+
+				# Finish X cleanly so resources unwind.  Not part
+				# of the assertion -- just keeping the teardown
+				# honest.
+				t_long.rollback()
+				t_long.close()
+		finally:
+			try:
+				master.stop()
+			except Exception:
+				pass
+
 	def test_parallel_worker_rollback_undo_lost_to_compaction(self):
 		"""
 		Parallel-worker undo-vs-compaction race introduced by the
