@@ -2482,27 +2482,7 @@ update_run_xmin(void)
 	xmin = Min(xmin, recovery_xmin);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
 	if (xmin < pg_atomic_read_u64(&xid_meta->globalXmin))
-	{
-		OXid		wx = pg_atomic_read_u64(&xid_meta->writtenXmin);
-
-		/*
-		 * EXPLICIT CATCH of the #876 livelock root cause.  Lowering globalXmin
-		 * below writtenXmin re-exposes already-FROZEN slots (oxid < writtenXmin
-		 * have recycled circular-buffer entries), which oxid_get_csn then
-		 * mis-reads as IN_PROGRESS -> the recovery worker spins forever in
-		 * o_btree_modify_handle_conflicts.  LOG (do not crash) at the lowering
-		 * site with the offending oxid so the violation can be grepped out of
-		 * the trial logs for further investigation.
-		 */
-		if (xmin < wx)
-			elog(LOG, "LIVELOCK-ROOT invariant violation: update_run_xmin lowering globalXmin to oxid=%lu BELOW writtenXmin=%lu (globalXmin_was=%lu recovery_xmin=%lu queue_empty=%d nextXid=%lu)",
-				 (unsigned long) xmin, (unsigned long) wx,
-				 (unsigned long) pg_atomic_read_u64(&xid_meta->globalXmin),
-				 (unsigned long) recovery_xmin,
-				 (int) pairingheap_is_empty(xmin_queue),
-				 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid));
 		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
-	}
 }
 
 static void
