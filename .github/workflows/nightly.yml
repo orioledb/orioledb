@@ -39,46 +39,27 @@ jobs:
       nightly_build_id: ${{ needs.prepare.outputs.build_id }}
     secrets: inherit
 
-  # Publish the GitHub Release (and its git tag) only after Docker images are
-  # in place, so the tag never points at a build that failed to publish.
-  release:
+  # Push the git tag only after Docker images are in place, so the tag never
+  # points at a build that failed to publish. No GitHub Release is created to
+  # avoid sending release notifications to repo watchers.
+  tag:
     needs: [prepare, build-publish]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Create GitHub Release (prerelease)
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Push nightly git tag
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.prepare.outputs.git_tag }}
         run: |
           set -euo pipefail
 
-          # Nightly tags are immutable ("no moving git tag"): if the day's
-          # release already exists, treat as success rather than re-tagging.
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; skipping."
+          # Nightly tags are immutable: if the tag already exists, skip.
+          if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
+            echo "Tag $TAG already exists; skipping."
             exit 0
           fi
 
-          notes_file="$RUNNER_TEMP/release_body.md"
-          cat > "$notes_file" <<'EOF'
-          Automated nightly build of OrioleDB from `main` at commit `${{ github.sha }}`.
-
-          Docker images published to [`orioledb/orioledb`](https://hub.docker.com/r/orioledb/orioledb):
-
-          **Immutable (this build, ${{ needs.prepare.outputs.build_id }}):**
-          - `pg16-nightly-${{ needs.prepare.outputs.build_id }}` · `pg16-nightly-${{ needs.prepare.outputs.build_id }}-ubuntu`
-          - `pg17-nightly-${{ needs.prepare.outputs.build_id }}` · `pg17-nightly-${{ needs.prepare.outputs.build_id }}-ubuntu`
-
-          **Rolling (latest nightly):**
-          - `pg16-nightly` · `pg16-nightly-ubuntu`
-          - `pg17-nightly` · `pg17-nightly-ubuntu`
-          EOF
-
-          gh release create "$TAG" \
-            --prerelease \
-            --target "${{ github.sha }}" \
-            --title "$TAG" \
-            --notes-file "$notes_file"
+          git tag "$TAG" "${{ github.sha }}"
+          git push origin "$TAG"
