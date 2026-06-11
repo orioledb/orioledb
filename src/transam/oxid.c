@@ -1153,7 +1153,14 @@ advance_global_xmin(OXid newXid)
 	 * backwards.
 	 */
 	if (globalXmin > prevGlobalXmin)
+	{
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "GXMIN-TRACE advance_global_xmin RAISE globalXmin %lu -> %lu (writtenXmin=%lu pid=%d)",
+			 (unsigned long) prevGlobalXmin, (unsigned long) globalXmin,
+			 (unsigned long) pg_atomic_read_u64(&xid_meta->writtenXmin), MyProcPid);
+#endif
 		pg_atomic_write_u64(&xid_meta->globalXmin, globalXmin);
+	}
 
 	/*
 	 * Check if we can update writtenXmin without actual writing.
@@ -1185,6 +1192,11 @@ advance_global_xmin(OXid newXid)
 
 		pg_atomic_write_u64(&xid_meta->writtenXmin, globalXmin);
 		LWLockRelease(&xid_meta->xidMapWriteLock);
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "GXMIN-TRACE advance_global_xmin writtenXmin %lu -> %lu FROZEN-stamped [%lu,%lu) pid=%d",
+			 (unsigned long) writtenXmin, (unsigned long) globalXmin,
+			 (unsigned long) writtenXmin, (unsigned long) globalXmin, MyProcPid);
+#endif
 	}
 
 	oldCleanedXmin = pg_atomic_read_u64(&xid_meta->cleanedXmin);

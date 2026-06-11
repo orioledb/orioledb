@@ -2525,7 +2525,20 @@ update_run_xmin(void)
 	xmin = Min(xmin, recovery_xmin);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
 	if (xmin < pg_atomic_read_u64(&xid_meta->globalXmin))
+	{
+#ifdef USE_INJECTION_POINTS
+		OXid		old_gx = pg_atomic_read_u64(&xid_meta->globalXmin);
+		OXid		wx = pg_atomic_read_u64(&xid_meta->writtenXmin);
+
+		elog(LOG, "GXMIN-TRACE update_run_xmin LOWER globalXmin %lu -> %lu (recovery_xmin=%lu writtenXmin=%lu nextXid=%lu queue_empty=%d pid=%d)%s",
+			 (unsigned long) old_gx, (unsigned long) xmin,
+			 (unsigned long) recovery_xmin, (unsigned long) wx,
+			 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid),
+			 pairingheap_is_empty(xmin_queue) ? 1 : 0, MyProcPid,
+			 xmin < wx ? " *** BELOW-writtenXmin INVARIANT-VIOLATION ***" : "");
+#endif
 		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
+	}
 }
 
 static void
@@ -2536,7 +2549,15 @@ free_run_xmin(void)
 	xmin = pg_atomic_read_u64(&xid_meta->nextXid);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
 	if (xmin < pg_atomic_read_u64(&xid_meta->globalXmin))
+	{
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "GXMIN-TRACE free_run_xmin LOWER globalXmin %lu -> %lu (writtenXmin=%lu pid=%d)",
+			 (unsigned long) pg_atomic_read_u64(&xid_meta->globalXmin),
+			 (unsigned long) xmin,
+			 (unsigned long) pg_atomic_read_u64(&xid_meta->writtenXmin), MyProcPid);
+#endif
 		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
+	}
 }
 
 /*
