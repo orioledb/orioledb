@@ -2510,6 +2510,52 @@ update_run_xmin(void)
 {
 	OXid		xmin;
 
+	/*
+	 * Drain any fast-path-aborted oxids off the top of xmin_queue.  An entry
+	 * that is in xmin_queue because the checkpoint's xids file named it
+	 * (state->checkpoint_xid) but for which no WAL_REC_XID ever streamed
+	 * (!state->wal_xid), and whose oxid lies below recovery_xmin, can only be
+	 * a wal_rollback() fast-path abort on the master: the abort wrote no WAL
+	 * record and a later WAL_REC_COMMIT/ROLLBACK has since carried the
+	 * master's post-abort runXmin past its oxid.  Mark it ABORTED in shmem so
+	 * visibility checks see a settled txn rather than the
+	 * COMMITSEQNO_INPROGRESS that read_xids() stamped, apply any
+	 * checkpoint_undo_stacks the master captured (lock-only undo can be
+	 * present even though the abort took the no-WAL fast path), and drop it
+	 * from the heap so it stops pinning runXmin.
+	 */
+	while (!pairingheap_is_empty(xmin_queue))
+	{
+		RecoveryXidState *state;
+
+		state = pairingheap_container(RecoveryXidState, xmin_ph_node,
+									  pairingheap_first(xmin_queue));
+
+		if (state->oxid >= recovery_xmin)
+			break;
+		if (!state->checkpoint_xid || state->wal_xid)
+			break;
+
+		set_oxid_csn(state->oxid, COMMITSEQNO_ABORTED);
+
+		/*
+		 * walk_checkpoint_stacks() sets recovery_oxid / curUndoLocations /
+		 * oxid_needs_wal_flush as a side effect.  update_run_xmin() is only
+		 * called when there is no current oxid (read_xids() at startup, or
+		 * check_delete_xid_state() right after recovery_finish_current_oxid()
+		 * cleared the slot), so we can just reset those globals back to the
+		 * no-current-oxid state once the abort is processed.
+		 */
+		Assert(!OXidIsValid(recovery_oxid));
+		walk_checkpoint_stacks(state, COMMITSEQNO_ABORTED,
+							   InvalidSubTransactionId, false);
+		reset_cur_undo_locations();
+		recovery_oxid = InvalidOXid;
+		oxid_needs_wal_flush = false;
+
+		pairingheap_remove(xmin_queue, &state->xmin_ph_node);
+	}
+
 	if (!pairingheap_is_empty(xmin_queue))
 	{
 		RecoveryXidState *state;
@@ -2524,21 +2570,16 @@ update_run_xmin(void)
 	}
 	xmin = Min(xmin, recovery_xmin);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
-	if (xmin < pg_atomic_read_u64(&xid_meta->globalXmin))
-	{
-#ifdef USE_INJECTION_POINTS
-		OXid		old_gx = pg_atomic_read_u64(&xid_meta->globalXmin);
-		OXid		wx = pg_atomic_read_u64(&xid_meta->writtenXmin);
 
-		elog(LOG, "GXMIN-TRACE update_run_xmin LOWER globalXmin %lu -> %lu (recovery_xmin=%lu writtenXmin=%lu nextXid=%lu queue_empty=%d pid=%d)%s",
-			 (unsigned long) old_gx, (unsigned long) xmin,
-			 (unsigned long) recovery_xmin, (unsigned long) wx,
-			 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid),
-			 pairingheap_is_empty(xmin_queue) ? 1 : 0, MyProcPid,
-			 xmin < wx ? " *** BELOW-writtenXmin INVARIANT-VIOLATION ***" : "");
-#endif
-		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
-	}
+	/*
+	 * globalXmin must move monotonically forward.  The pre-existing "write
+	 * down if xmin < globalXmin" branch existed to publish the checkpoint-era
+	 * floor on the first read_xids() call, but checkpoint_shmem_init() now
+	 * seeds globalXmin from control.checkpointRetainXmin -- the same floor --
+	 * so any later downward move would be a regression we must never publish.
+	 * Make monotonicity an explicit invariant instead.
+	 */
+	Assert(xmin >= pg_atomic_read_u64(&xid_meta->globalXmin));
 }
 
 static void
@@ -2548,6 +2589,7 @@ free_run_xmin(void)
 
 	xmin = pg_atomic_read_u64(&xid_meta->nextXid);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
+<<<<<<< HEAD
 	if (xmin < pg_atomic_read_u64(&xid_meta->globalXmin))
 	{
 #ifdef USE_INJECTION_POINTS
@@ -2558,6 +2600,18 @@ free_run_xmin(void)
 #endif
 		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
 	}
+=======
+
+	/*
+	 * globalXmin is the actual horizon, including any live read-only sessions
+	 * that survive a promote -- their oProcData[].xmin can sit well below
+	 * nextXid.  Pulling globalXmin down to nextXid here would publish a
+	 * horizon higher than the real floor and break MVCC for those sessions.
+	 * Leave globalXmin alone; advance_global_xmin() will bring it forward
+	 * (only upward) once proc xmins clear.
+	 */
+	Assert(xmin >= pg_atomic_read_u64(&xid_meta->globalXmin));
+>>>>>>> 90bb9d88 (recovery: drop fast-path-aborted oxids off xmin_queue in update_run_xmin)
 }
 
 /*
