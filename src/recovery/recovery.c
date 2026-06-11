@@ -1820,6 +1820,8 @@ o_emit_recovery_finish_rollbacks(void)
 
 	for (i = 0; i < recovery_finish_aborted_count; i++)
 	{
+		if (recovery_finish_aborted_oxids[i].oxid < recovery_xmin)
+			continue;
 		elog(LOG, "orioledb: emitting WAL_REC_ROLLBACK for in-flight oxid " UINT64_FORMAT " aborted by recovery_finish",
 			 recovery_finish_aborted_oxids[i].oxid);
 		wal_emit_recovery_finish_rollback(recovery_finish_aborted_oxids[i].oxid,
