@@ -2084,7 +2084,8 @@ class ReplicationTest(BaseTest):
 
 				self.assertEqual(
 				    NodeStatus.Running, replica.status(),
-				    "standby crashed: runXmin >= globalXmin invariant violated")
+				    "standby crashed: runXmin >= globalXmin invariant violated"
+				)
 
 				replica_runxmin, replica_globalxmin = replica.execute(
 				    "SELECT runxmin, globalxmin "
@@ -2162,7 +2163,8 @@ class ReplicationTest(BaseTest):
 
 				self.assertEqual(
 				    NodeStatus.Running, replica.status(),
-				    "standby crashed: runXmin >= globalXmin invariant violated")
+				    "standby crashed: runXmin >= globalXmin invariant violated"
+				)
 
 				replica_runxmin, replica_globalxmin = replica.execute(
 				    "SELECT runxmin, globalxmin "
@@ -2272,7 +2274,8 @@ class ReplicationTest(BaseTest):
 
 				self.assertEqual(
 				    NodeStatus.Running, replica.status(),
-				    "standby crashed: runXmin >= globalXmin invariant violated")
+				    "standby crashed: runXmin >= globalXmin invariant violated"
+				)
 
 				# Invariant check (also catches non-cassert builds).
 				replica_runxmin, replica_globalxmin = replica.execute(
