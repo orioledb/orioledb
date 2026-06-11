@@ -2440,3 +2440,198 @@ class ReplicationTest(BaseTest):
 				master.stop()
 			except Exception:
 				pass
+
+	def test_crash_recovery_drops_fastpath_aborted_xids_silently(self):
+		"""
+		Master crashes with checkpoint-only fast-path-aborted oxids in
+		its xids file, after recovery_xmin has already streamed past
+		them.  Without the update_run_xmin() drainer the master's
+		crash recovery would consider them in-flight and ship a
+		spurious WAL_REC_XID + WAL_REC_ROLLBACK pair for each one --
+		landing oxids below the standby's already-advanced
+		globalXmin into xmin_queue and tripping
+		Assert(xmin >= globalXmin) on the next update_run_xmin().
+
+		Setup:
+		  1. Open N concurrent backends; each one calls
+		     orioledb_get_current_oxid() so it sits in vxids[] with a
+		     low oxid and no material WAL.
+		  2. CHECKPOINT the master -- its xids file now records all
+		     N oxids.
+		  3. Close every backend without COMMIT/ROLLBACK on the wire:
+		     PostgreSQL aborts them locally; orioledb's wal_rollback()
+		     fast-path returns without writing a single byte to WAL.
+		  4. Run many short COMMITs to push recovery_xmin (the xmin
+		     stamped on every WAL_REC_COMMIT) well above the N oxids.
+		     No second CHECKPOINT, so the xids file still lists the
+		     fast-path-aborted oxids.
+		  5. SIGKILL master and every backend.
+		  6. Restart master.
+
+		Master crash recovery now reads its old xids file, sees N
+		entries below recovery_xmin (driven by step 4's WAL), and
+		the drainer must (a) drop them off xmin_queue, (b) mark
+		state->csn = COMMITSEQNO_ABORTED, and (c) hash_search-REMOVE
+		so recovery_finish() never re-considers them.  If any one of
+		those is skipped, the master emits a stand-alone
+		WAL_REC_ROLLBACK for the oxid; the standby is then expected
+		either to crash on the Assert or, in non-cassert builds, to
+		end up with replica.runXmin < replica.globalXmin.
+		"""
+		master = self.node
+		master.append_conf("wal_keep_size = '128MB'\n")
+		master.start()
+		dangling_pids = set()
+		try:
+			with self.getReplica().start() as replica:
+				master.safe_psql("""
+					CREATE EXTENSION orioledb;
+					CREATE TABLE o_test_fp_abort (
+						k int PRIMARY KEY,
+						v int
+					) USING orioledb;
+					INSERT INTO o_test_fp_abort
+						SELECT g, 0 FROM generate_series(1, 50) g;
+				""")
+				self.catchup_orioledb(replica)
+
+				# Open N backends that each acquire an oxid without
+				# any material WAL -- orioledb_get_current_oxid() is
+				# exactly the SQL handle for get_current_oxid().
+				N = 8
+				stuck = []
+				for _ in range(N):
+					con = master.connect()
+					con.begin()
+					con.execute("SELECT orioledb_get_current_oxid();")
+					stuck.append(con)
+
+				# Checkpoint records every open oxid in the xids file.
+				master.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				# Close every stuck backend.  No COMMIT or ROLLBACK on
+				# the wire -- PG's AbortTransaction runs locally;
+				# orioledb's wal_rollback() takes the
+				# !has_material_changes fast path and returns without
+				# touching WAL.  The oxids stay in the master's xids
+				# file (no second CHECKPOINT) but their backends are
+				# gone, so master.runXmin can advance past them.
+				for con in stuck:
+					try:
+						con.close()
+					except Exception:
+						pass
+
+				# Push recovery_xmin (the xmin stamped on every
+				# WAL_REC_COMMIT) well above the N stuck oxids, then
+				# wait for the standby to apply that horizon.
+				for i in range(300):
+					master.safe_psql(f"UPDATE o_test_fp_abort SET v = v + 1 "
+					                 f"WHERE k = {(i % 50) + 1};")
+
+				master_lsn = master.execute(
+				    "SELECT pg_current_wal_lsn();")[0][0]
+				replica.poll_query_until(
+				    f"SELECT pg_last_wal_replay_lsn() >= "
+				    f"'{master_lsn}'::pg_lsn",
+				    expected=True,
+				    sleep_time=0.1,
+				    max_attempts=300)
+
+				# Standby globalXmin is now well above any fast-path-
+				# aborted oxid.  Record it; we want to be sure it does
+				# not regress after the master restart.
+				replica_globalxmin_pre = replica.execute(
+				    "SELECT globalxmin "
+				    "FROM orioledb_get_xid_meta();")[0][0]
+
+				# SIGKILL master + all backends.  No clean shutdown
+				# means no second CHECKPOINT; the xids file still
+				# records the N fast-path-aborted oxids as in-flight.
+				pid_file = os.path.join(master.data_dir, 'postmaster.pid')
+				with open(pid_file) as f:
+					master_pid = int(f.readline().strip())
+				child_pids = [
+				    int(x) for x in subprocess.run(
+				        ['pgrep', '-P', str(master_pid)],
+				        capture_output=True,
+				        text=True,
+				        check=False).stdout.split()
+				]
+				dangling_pids.update([master_pid] + child_pids)
+				for p in child_pids + [master_pid]:
+					try:
+						os.kill(p, signal.SIGKILL)
+					except ProcessLookupError:
+						pass
+				deadline = time.time() + 30
+				while time.time() < deadline:
+					alive = False
+					for p in [master_pid] + child_pids:
+						try:
+							os.kill(p, 0)
+							alive = True
+							break
+						except ProcessLookupError:
+							continue
+					if not alive:
+						break
+					time.sleep(0.05)
+				master.is_started = False
+				master.start()
+
+				# Drive enough WAL through the recovered master so any
+				# deferred WAL_REC_ROLLBACK from
+				# o_after_checkpoint_cleanup_hook() would have been
+				# shipped, then wait for the standby to catch up.
+				master.safe_psql(
+				    "UPDATE o_test_fp_abort SET v = 99 WHERE k = 1;")
+				master.safe_psql("CHECKPOINT;")
+				master_lsn = master.execute(
+				    "SELECT pg_current_wal_lsn();")[0][0]
+				replica.poll_query_until(
+				    f"SELECT pg_last_wal_replay_lsn() >= "
+				    f"'{master_lsn}'::pg_lsn",
+				    expected=True,
+				    sleep_time=0.1,
+				    max_attempts=300)
+				replica.poll_query_until(
+				    "SELECT orioledb_recovery_synchronized();",
+				    expected=True,
+				    sleep_time=0.1,
+				    max_attempts=300)
+
+				# Without the fix, replaying the spurious
+				# WAL_REC_ROLLBACK records on the standby trips
+				# Assert(xmin >= globalXmin) in update_run_xmin(),
+				# and the standby crashes.
+				self.assertEqual(
+				    NodeStatus.Running, replica.status(),
+				    "standby crashed: drainer left fast-path-aborted "
+				    "state stranded and a spurious WAL_REC_ROLLBACK "
+				    "violated runXmin >= globalXmin")
+
+				replica_runxmin, replica_globalxmin = replica.execute(
+				    "SELECT runxmin, globalxmin "
+				    "FROM orioledb_get_xid_meta();")[0]
+				self.assertGreaterEqual(
+				    replica_runxmin, replica_globalxmin,
+				    f"replica runXmin {replica_runxmin} < "
+				    f"globalXmin {replica_globalxmin}")
+				self.assertGreaterEqual(
+				    replica_globalxmin, replica_globalxmin_pre,
+				    f"replica globalXmin regressed from "
+				    f"{replica_globalxmin_pre} to "
+				    f"{replica_globalxmin} -- the master's spurious "
+				    f"WAL_REC_ROLLBACK pulled the horizon backwards")
+		finally:
+			try:
+				master.stop()
+			except Exception:
+				pass
+			for p in dangling_pids:
+				try:
+					os.kill(p, signal.SIGKILL)
+				except ProcessLookupError:
+					pass
