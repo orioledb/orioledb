@@ -2509,6 +2509,8 @@ static void
 update_run_xmin(void)
 {
 	OXid		xmin;
+	int			i;
+	bool		found;
 
 	/*
 	 * Drain any fast-path-aborted oxids off the top of xmin_queue.  An entry
@@ -2553,7 +2555,32 @@ update_run_xmin(void)
 		recovery_oxid = InvalidOXid;
 		oxid_needs_wal_flush = false;
 
+		/*
+		 * The entry is a pure checkpoint-only oxid (checkpoint_xid &&
+		 * !wal_xid) that has now been settled as ABORTED;
+		 * checkpoint_undo_stacks is empty (walk_checkpoint_stacks emptied
+		 * it), and in_finished_list / in_joint_commit_list are necessarily
+		 * false (those flags are only raised by WAL_REC_COMMIT /
+		 * WAL_REC_ROLLBACK / WAL_REC_JOINT_COMMIT processing, which never
+		 * touched this oxid).  Tear the entry down fully so nothing --
+		 * recovery_finish(), update_proc_retain_undo_location(), or anything
+		 * else iterating the hash -- has to consider it again.
+		 */
+		state->csn = COMMITSEQNO_ABORTED;
+		for (i = 0; i < (int) UndoLogsCount; i++)
+		{
+			if (state->in_retain_undo_heaps[i])
+			{
+				pairingheap_remove(retain_undo_queues[i],
+								   &state->retain_undo_ph_nodes[i]);
+				state->in_retain_undo_heaps[i] = false;
+			}
+		}
 		pairingheap_remove(xmin_queue, &state->xmin_ph_node);
+		if (state->used_by)
+			pfree(state->used_by);
+		hash_search(recovery_xid_state_hash, &state->oxid, HASH_REMOVE, &found);
+		Assert(found);
 	}
 
 	if (!pairingheap_is_empty(xmin_queue))
