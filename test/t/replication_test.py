@@ -2032,6 +2032,267 @@ class ReplicationTest(BaseTest):
 			except Exception:
 				pass
 
+	def test_meta_lock_autonomous_restore_strands_oxid(self):
+		"""
+		CREATE INDEX + ROLLBACK exercises o_tables_meta_lock (adds
+		WAL_REC_XID without setting has_material_changes) followed
+		by autonomous-tx sys-tree updates.  Checks the standby's
+		runXmin >= globalXmin invariant holds.
+		"""
+		master = self.node
+		master.append_conf("wal_keep_size = '128MB'\n")
+		master.start()
+		try:
+			with self.getReplica().start() as replica:
+				master.safe_psql("""
+					CREATE EXTENSION orioledb;
+					CREATE TABLE o_ml (
+						id int PRIMARY KEY,
+						val text NOT NULL
+					) USING orioledb;
+					INSERT INTO o_ml
+						SELECT g, repeat('x', 30)
+						FROM generate_series(1, 200) g;
+				""")
+				self.catchup_orioledb(replica)
+
+				# CREATE INDEX + ROLLBACK in a fresh tx each time.
+				for i in range(5):
+					con = master.connect()
+					con.begin()
+					con.execute(f"CREATE INDEX o_ml_idx_{i} "
+					            f"ON o_ml (val);")
+					con.execute("ROLLBACK;")
+					con.close()
+
+				# Advance recovery_xmin on the standby.
+				for i in range(300):
+					master.safe_psql("UPDATE o_ml SET val = "
+					                 f"'u{i}' WHERE id = {(i % 200) + 1};")
+				master.safe_psql("CHECKPOINT;")
+				master_lsn = master.execute(
+				    "SELECT pg_current_wal_lsn();")[0][0]
+				try:
+					replica.poll_query_until(
+					    f"SELECT pg_last_wal_replay_lsn() >= "
+					    f"'{master_lsn}'::pg_lsn",
+					    expected=True,
+					    sleep_time=0.1,
+					    max_attempts=300)
+				except Exception:
+					pass
+
+				self.assertEqual(
+				    NodeStatus.Running, replica.status(),
+				    "standby crashed: runXmin >= globalXmin invariant violated")
+
+				replica_runxmin, replica_globalxmin = replica.execute(
+				    "SELECT runxmin, globalxmin "
+				    "FROM orioledb_get_xid_meta();")[0]
+				self.assertGreaterEqual(
+				    replica_runxmin, replica_globalxmin,
+				    f"replica runXmin {replica_runxmin} < "
+				    f"globalXmin {replica_globalxmin}")
+		finally:
+			try:
+				master.stop()
+			except Exception:
+				pass
+
+	def test_bridge_erase_autonomous_restore_strands_oxid(self):
+		"""
+		VACUUM on a bridge-indexed table exercises
+		add_bridge_erase_wal_record (adds WAL_REC_XID without
+		setting has_material_changes) interleaved with
+		autonomous-tx class_cache TOAST inserts on a wide table.
+		Checks the standby's runXmin >= globalXmin invariant holds.
+		"""
+		master = self.node
+		master.append_conf("wal_keep_size = '128MB'\n")
+		master.start()
+		try:
+			with self.getReplica().start() as replica:
+				# Wide table -> TOAST'd class_cache entry, so any
+				# first access from a backend triggers autonomous.
+				master.safe_psql("CREATE EXTENSION orioledb;")
+				cols = ", ".join(f"c{i} text DEFAULT 'd'" for i in range(250))
+				master.safe_psql(
+				    f"CREATE TABLE o_br_wide (id int PRIMARY KEY, {cols}) "
+				    "USING orioledb;")
+				# Bridge index = a non-orioledb btree on an
+				# orioledb table; vacuum drives add_bridge_erase.
+				master.safe_psql("""
+					CREATE TABLE o_br (
+						id int PRIMARY KEY,
+						val text NOT NULL
+					) USING orioledb;
+					INSERT INTO o_br
+						SELECT g, repeat('x', 30)
+						FROM generate_series(1, 1000) g;
+					CREATE INDEX o_br_val_idx ON o_br USING btree (val) WITH (orioledb_index=off);
+				""")
+				self.catchup_orioledb(replica)
+
+				# Generate dead tuples + interleave a wide-table
+				# access that triggers the class_cache TOAST tx.
+				for i in range(5):
+					master.safe_psql(
+					    "BEGIN; "
+					    "DELETE FROM o_br "
+					    f"WHERE id BETWEEN {i*50+1} AND {i*50+50}; "
+					    f"INSERT INTO o_br_wide (id) VALUES ({i + 1}); "
+					    "ROLLBACK;")
+
+				master.safe_psql("VACUUM o_br;")
+				for i in range(300):
+					master.safe_psql("UPDATE o_br SET val = "
+					                 f"'u{i}' WHERE id = {(i % 1000) + 501};")
+				master.safe_psql("CHECKPOINT;")
+				master_lsn = master.execute(
+				    "SELECT pg_current_wal_lsn();")[0][0]
+				try:
+					replica.poll_query_until(
+					    f"SELECT pg_last_wal_replay_lsn() >= "
+					    f"'{master_lsn}'::pg_lsn",
+					    expected=True,
+					    sleep_time=0.1,
+					    max_attempts=300)
+				except Exception:
+					pass
+
+				self.assertEqual(
+				    NodeStatus.Running, replica.status(),
+				    "standby crashed: runXmin >= globalXmin invariant violated")
+
+				replica_runxmin, replica_globalxmin = replica.execute(
+				    "SELECT runxmin, globalxmin "
+				    "FROM orioledb_get_xid_meta();")[0]
+				self.assertGreaterEqual(
+				    replica_runxmin, replica_globalxmin,
+				    f"replica runXmin {replica_runxmin} < "
+				    f"globalXmin {replica_globalxmin}")
+		finally:
+			try:
+				master.stop()
+			except Exception:
+				pass
+
+	def test_runxmin_never_below_globalxmin_under_stuck_oxids(self):
+		"""
+		Composite stress for the standby's runXmin >= globalXmin
+		invariant: autonomous-TOAST inserts via wide tables, two
+		overlapping long-running INSERTs (WAL_REC_XID on the standby
+		arrives out of oxid order), SIGKILL master, restart,
+		savepoints, CHECKPOINTs.
+		"""
+		master = self.node
+		master.append_conf("wal_keep_size = '128MB'\n")
+		master.start()
+		dangling_pids = set()
+		try:
+			with self.getReplica().start() as replica:
+				# Wide tables -> class_cache entries take the
+				# TOAST autonomous-tx path on first access.
+				master.safe_psql("CREATE EXTENSION orioledb;")
+				cols = ", ".join(f"c{i} text DEFAULT 'd'" for i in range(250))
+				master.safe_psql(
+				    f"CREATE TABLE o_wide_a (id int PRIMARY KEY, {cols}) "
+				    "USING orioledb;")
+				master.safe_psql(
+				    f"CREATE TABLE o_wide_b (id int PRIMARY KEY, {cols}) "
+				    "USING orioledb;")
+				master.safe_psql("""
+					CREATE TABLE o_fp (
+						id int PRIMARY KEY,
+						val text NOT NULL
+					) USING orioledb;
+					INSERT INTO o_fp
+						SELECT g, repeat('x', 50)
+						FROM generate_series(1, 100) g;
+				""")
+				self.catchup_orioledb(replica)
+
+				# Two concurrent backends: wide-table access ->
+				# autonomous TOAST, savepoint, second wide-table
+				# access -> second autonomous, overflow INSERT,
+				# live ROLLBACK.
+				t_low = master.connect()
+				t_high = master.connect()
+				t_low.begin()
+				t_high.begin()
+				t_high.execute("INSERT INTO o_wide_a (id) VALUES (1);")
+				t_high.execute("SAVEPOINT sp_h;")
+				t_high.execute("INSERT INTO o_wide_b (id) VALUES (1);")
+				t_low.execute("INSERT INTO o_wide_a (id) VALUES (2);")
+				t_low.execute("SAVEPOINT sp_l;")
+				t_low.execute("INSERT INTO o_wide_b (id) VALUES (2);")
+				t_high.execute("""
+					INSERT INTO o_fp (id, val)
+					SELECT g, repeat('h', 200)
+					FROM generate_series(101, 1500) g;
+				""")
+				t_low.execute("""
+					INSERT INTO o_fp (id, val)
+					SELECT g, repeat('l', 200)
+					FROM generate_series(1501, 3000) g;
+				""")
+				t_high.execute("ROLLBACK;")
+				t_low.execute("ROLLBACK;")
+				try:
+					t_high.close()
+				except Exception:
+					pass
+				try:
+					t_low.close()
+				except Exception:
+					pass
+
+				# Post-rollback commits to advance recovery_xmin.
+				for i in range(200):
+					master.safe_psql("BEGIN; "
+					                 f"UPDATE o_fp SET val = 'u{i}' "
+					                 f"WHERE id = {(i % 100) + 1}; "
+					                 "SAVEPOINT sp; "
+					                 f"UPDATE o_fp SET val = 's{i}' "
+					                 f"WHERE id = {(i % 100) + 1}; "
+					                 "ROLLBACK TO SAVEPOINT sp; "
+					                 "COMMIT;")
+				master.safe_psql("CHECKPOINT;")
+				master_lsn = master.execute(
+				    "SELECT pg_current_wal_lsn();")[0][0]
+				try:
+					replica.poll_query_until(
+					    f"SELECT pg_last_wal_replay_lsn() >= "
+					    f"'{master_lsn}'::pg_lsn",
+					    expected=True,
+					    sleep_time=0.1,
+					    max_attempts=300)
+				except Exception:
+					pass
+
+				self.assertEqual(
+				    NodeStatus.Running, replica.status(),
+				    "standby crashed: runXmin >= globalXmin invariant violated")
+
+				# Invariant check (also catches non-cassert builds).
+				replica_runxmin, replica_globalxmin = replica.execute(
+				    "SELECT runxmin, globalxmin "
+				    "FROM orioledb_get_xid_meta();")[0]
+				self.assertGreaterEqual(
+				    replica_runxmin, replica_globalxmin,
+				    f"replica runXmin {replica_runxmin} < "
+				    f"globalXmin {replica_globalxmin}")
+		finally:
+			try:
+				master.stop()
+			except Exception:
+				pass
+			for p in dangling_pids:
+				try:
+					os.kill(p, signal.SIGKILL)
+				except ProcessLookupError:
+					pass
+
 	def test_parallel_worker_rollback_undo_lost_to_compaction(self):
 		"""
 		Parallel-worker undo-vs-compaction race introduced by the
