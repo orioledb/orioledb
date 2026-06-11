@@ -390,17 +390,6 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmin, control.checkpointRetainXmin);
 		pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmax, control.checkpointRetainXmax);
 
-#ifdef USE_INJECTION_POINTS
-		elog(LOG, "GXMIN-TRACE checkpoint_shmem_init SEED globalXmin=%lu writtenXmin=%lu runXmin=%lu nextXid=%lu (checkpointRetainXmin=%lu checkpointRetainXmax=%lu lastXid=%lu)",
-			 (unsigned long) control.checkpointRetainXmin,
-			 (unsigned long) control.checkpointRetainXmax,
-			 (unsigned long) control.checkpointRetainXmin,
-			 (unsigned long) control.checkpointRetainXmax,
-			 (unsigned long) control.checkpointRetainXmin,
-			 (unsigned long) control.checkpointRetainXmax,
-			 (unsigned long) control.lastXid);
-#endif
-
 		startupCommitSeqNo = control.lastCSN;
 	}
 
