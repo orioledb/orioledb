@@ -2558,19 +2558,33 @@ update_run_xmin(void)
 		set_oxid_csn(state->oxid, COMMITSEQNO_ABORTED);
 
 		/*
-		 * walk_checkpoint_stacks() sets recovery_oxid / curUndoLocations /
-		 * oxid_needs_wal_flush as a side effect.  update_run_xmin() is only
-		 * called when there is no current oxid (read_xids() at startup, or
-		 * check_delete_xid_state() right after recovery_finish_current_oxid()
-		 * cleared the slot), so we can just reset those globals back to the
-		 * no-current-oxid state once the abort is processed.
+		 * walk_checkpoint_stacks() clobbers recovery_oxid /
+		 * curUndoLocations[] / oxid_needs_wal_flush, but update_run_xmin()
+		 * can be re-entered from inside apply_wal_record() (via the
+		 * o_handle_startup_proc_interrupts_hook ->
+		 * update_proc_retain_undo_location -> check_delete_xid_state path)
+		 * while another oxid is being applied -- so save those globals around
+		 * the call and put them back.
 		 */
-		Assert(!OXidIsValid(recovery_oxid));
-		walk_checkpoint_stacks(state, COMMITSEQNO_ABORTED,
-							   InvalidSubTransactionId, false);
-		reset_cur_undo_locations();
-		recovery_oxid = InvalidOXid;
-		oxid_needs_wal_flush = false;
+		{
+			OXid		saved_recovery_oxid = recovery_oxid;
+			bool		saved_oxid_needs_wal_flush = oxid_needs_wal_flush;
+			UndoStackLocations saved_undo_locations[(int) UndoLogsCount];
+			int			j;
+
+			for (j = 0; j < (int) UndoLogsCount; j++)
+				get_cur_undo_locations(&saved_undo_locations[j],
+									   (UndoLogType) j);
+
+			walk_checkpoint_stacks(state, COMMITSEQNO_ABORTED,
+								   InvalidSubTransactionId, false);
+
+			for (j = 0; j < (int) UndoLogsCount; j++)
+				set_cur_undo_locations((UndoLogType) j,
+									   saved_undo_locations[j]);
+			recovery_oxid = saved_recovery_oxid;
+			oxid_needs_wal_flush = saved_oxid_needs_wal_flush;
+		}
 
 		/*
 		 * The entry is a pure checkpoint-only oxid (checkpoint_xid &&
