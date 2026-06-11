@@ -2630,18 +2630,6 @@ free_run_xmin(void)
 
 	xmin = pg_atomic_read_u64(&xid_meta->nextXid);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
-<<<<<<< HEAD
-	if (xmin < pg_atomic_read_u64(&xid_meta->globalXmin))
-	{
-#ifdef USE_INJECTION_POINTS
-		elog(LOG, "GXMIN-TRACE free_run_xmin LOWER globalXmin %lu -> %lu (writtenXmin=%lu pid=%d)",
-			 (unsigned long) pg_atomic_read_u64(&xid_meta->globalXmin),
-			 (unsigned long) xmin,
-			 (unsigned long) pg_atomic_read_u64(&xid_meta->writtenXmin), MyProcPid);
-#endif
-		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
-	}
-=======
 
 	/*
 	 * globalXmin is the actual horizon, including any live read-only sessions
@@ -2652,7 +2640,6 @@ free_run_xmin(void)
 	 * (only upward) once proc xmins clear.
 	 */
 	Assert(xmin >= pg_atomic_read_u64(&xid_meta->globalXmin));
->>>>>>> 90bb9d88 (recovery: drop fast-path-aborted oxids off xmin_queue in update_run_xmin)
 }
 
 /*
