@@ -115,6 +115,32 @@ This branch (`add_stress_bank_account_test`) carries an in-development crash-rec
 - `src/recovery/wal.c:336` — `orioledb-before-pre-commit-wal-finish` injection
 - Many `csn-trace` and `wal-trace` `elog(LOG, ...)` markers throughout `src/btree/` and `src/transam/` — these are **load-bearing timing scaffolding** for the bug repro, NOT to be reflowed without expecting bug rate to change
 
+### Streaming-standby recovery livelock — ROOT CAUSE PROVEN + FIX VERIFIED
+
+The headline bug on this branch is solved. Full writeup + the failed-attempt history is in
+**`test/t/crash/livelock_investigation/`** (read its `README.md` first; the deep model is
+`recovery_oxid_classification_investigation.md`). One-paragraph summary:
+
+> A transaction that aborts **in memory** advances the horizon `runXmin` (via
+> `advance_run_xmin`, called by *both* commit and abort) — and that horizon is streamed to
+> the standby as `finish.xmin`. But an empty/no-material-change abort takes the
+> `wal_rollback` `!has_material_changes` **no-op**, leaving **no durable rollback record**.
+> Crash recovery, which reconstructs state from durable artifacts only (the checkpoint xids
+> dump + replayed WAL finish records — it never sees the primary's in-memory CSN),
+> rediscovers that oxid as in-flight and emits a **deferred `WAL_REC_ROLLBACK`** (#876). On
+> the standby that rollback re-admits the oxid into `xmin_queue` *below* `writtenXmin`,
+> dragging `globalXmin` under the frozen watermark → committed oxids in the re-exposed band
+> read `INPROGRESS` → `o_btree_modify_handle_conflicts` (no `waitCallback` in recovery)
+> retries forever. **A watermark is a per-instance in-memory recyclability horizon, not a
+> durability claim — serializing it across the instance boundary over-promises.**
+
+Verified fix (zero added WAL): in `o_emit_recovery_finish_rollbacks` (`src/recovery/recovery.c`)
+skip the deferred rollback for `oxid < recovery_xmin` — the horizon already passed those, so
+they resolved in memory and the consumer already froze them; genuinely-in-flight oxids that
+#876 needs are `≥ recovery_xmin` and still emitted. **0 livelocks / 100×60s-6s chaos trials.**
+Two maintainer attempts (`81e8edcc`, `618396d2`) failed because they constrained *where the
+horizon value comes from*, but the lowering enters via `queue_min` from the deferred rollback.
+
 ## Conventions that bite if you don't know them
 
 - **Collation:** orioledb tables only support ICU, C, and POSIX collations. Default-locale `initdb` on macOS gives `UTF-8` collation which **breaks** orioledb text columns. Use `initdb --locale=C`.
