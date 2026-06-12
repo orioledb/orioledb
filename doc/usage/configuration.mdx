@@ -95,6 +95,16 @@ Shared memory size for metadata of block allocators for compressed tables. We re
 
 Shared memory size of table metadata. We recommend increasing the value of this parameter to work with a large number of tables.
 
+### `orioledb.temp_buffers`
+
+|             |       |
+| ----------- | ----- |
+| **Default** | 64 MB |
+
+Size of the per-backend local page pool used for OrioleDB temporary tables. Increase it to improve performance with
+large temporary tables. This memory is allocated in each backend's private memory, not in shared memory, so memory
+consumption will scale with the number of backends that touch OrioleDB temporary tables.
+
 ### `orioledb.system_undo_circular_buffer_fraction`
 
 |             |     |
@@ -206,6 +216,16 @@ Display compression column in orioledb_table_description.
 
 Try to allocate files as `sparse` at filesystem level. Saves occupied space on disk by excluding non-allocated
 regions in file from occupying disk space. It's an experimental option.
+
+### `orioledb.strict_mode`
+
+|             |     |
+| ----------- | --- |
+| **Default** | off |
+
+Controls how OrioleDB reacts when a session requests a feature it does not yet support on an OrioleDB table. When `off`,
+OrioleDB emits a `WARNING` and silently falls back to the non-concurrent or plain variant. When `on`, OrioleDB raises
+an `ERROR` instead, which is useful to catch unintended fallback in tests and CI.
 
 
 ## Options for undo-based rewind (experimental)
