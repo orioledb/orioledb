@@ -19,6 +19,7 @@
 #include "btree/io.h"
 #include "btree/merge.h"
 #include "btree/page_chunks.h"
+#include "btree/scan.h"
 #include "btree/undo.h"
 #include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
@@ -33,8 +34,32 @@
 
 #include "access/transam.h"
 #include "miscadmin.h"
+#include "utils/hsearch.h"
 #include "utils/inval.h"
+#include "utils/memutils.h"
 #include "utils/wait_event.h"
+
+/*
+ * Backend-local hash of leaf pages on which this backend has marked at least
+ * one tuple deleted in the current top-level transaction.  Used to gate the
+ * "no local deletes" condition that lets us skip page-level undo on
+ * split/compact.  Cleared at top-level commit/abort.
+ *
+ * The (blkno, pageChangeCount) key handles page recycling: an evicted-and-
+ * reloaded page bumps its change count, making old entries unreachable.
+ *
+ * Sub-transaction aborts are handled conservatively: stale entries from
+ * rolled-back subxacts remain in the hash, so the parent may emit
+ * unnecessary page-level undo on the affected pages.  Safe (extra undo
+ * is harmless) and avoids the cost of subxid tagging per entry.
+ */
+typedef struct
+{
+	OInMemoryBlkno blkno;
+	uint32		pageChangeCount;
+}			LocalDeletePageKey;
+
+static HTAB *deletedPagesHash = NULL;
 
 static void clean_chain_has_locks_flag(UndoLogType undoType,
 									   UndoLocation location,
@@ -48,6 +73,191 @@ static bool get_prev_leaf_header_from_undo_if_exists(UndoLogType undoType,
 static void update_leaf_header_in_undo(UndoLogType undoType,
 									   BTreeLeafTuphdr *tuphdr,
 									   UndoLocation location);
+
+bool		orioledb_debug_force_page_undo = false;
+
+/*
+ * Relation-scope: should this btree emit undo for the operation?
+ *
+ * Returns false when a rollback would discard the relation whole — the
+ * self-create shortcut: created in this oxid and no savepoint to roll back
+ * to, so any undo we'd emit is unreachable.
+ *
+ * `opOxid` is the operation's OXid.  Pass InvalidOXid when not available
+ * (lazy merge path); the helper then falls back to "creator transaction not
+ * yet finished", equivalent because pre-commit relations are visible only to
+ * their creator.
+ */
+bool
+relation_needs_undo(BTreeDescr *desc, OXid opOxid,
+					bool needsUndoForSelfCreated,
+					UndoLocation savepointUndoLoc)
+{
+	if (desc->undoType == UndoLogNone)
+		return false;
+
+	if (needsUndoForSelfCreated || !OXidIsValid(desc->createOxid))
+		return true;
+
+	if (UndoLocationIsValid(savepointUndoLoc))
+		return true;
+
+	if (OXidIsValid(opOxid))
+		return desc->createOxid != opOxid;
+	return XACT_INFO_IS_FINISHED(desc->createOxid);
+}
+
+/*
+ * Does this leaf split/compact/merge need a page-level undo image?
+ *
+ * Layered on top of relation_needs_undo: a relation-scope skip covers the
+ * page too.  Beyond that, page-level concerns — concurrent readers and
+ * on-page state that a concurrent or rolling-back transaction may still
+ * need to see — are checked in turn below; each gate carries its own
+ * inline WHY.
+ *
+ * Returns false for non-leaf pages; page-level undo applies only to leaves.
+ */
+bool
+page_needs_page_level_undo(BTreeDescr *desc, OInMemoryBlkno blkno, Page p,
+						   uint32 pageChangeCount, OXid opOxid)
+{
+	UndoLogType pageUndoType = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
+	UndoMeta   *meta;
+	UndoLocation lastUsed;
+	int			i;
+
+	if (!O_PAGE_IS(p, LEAF))
+		return false;
+
+	if (!relation_needs_undo(desc, opOxid, false, InvalidUndoLocation))
+		return false;
+
+	/*
+	 * The skip optimization only applies when we'd extend
+	 * UndoLogRegularPageLevel.  System trees use their own log whose
+	 * retention/visibility the cheap filters below don't model. (UndoLogNone
+	 * was already filtered in relation scope.)
+	 */
+	if (pageUndoType != UndoLogRegularPageLevel)
+		return true;
+
+	if (orioledb_debug_force_page_undo)
+		return true;
+
+	/* Active seq scan may need the pre-split layout to traverse. */
+	if (meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) > 0)
+		return true;
+
+	/* Our own rollback would replay these deletes against the original. */
+	if (page_has_local_deletes(blkno, pageChangeCount))
+		return true;
+
+	/*
+	 * On-page deleted tuples can be physically removed by a pending
+	 * compaction; older snapshots elsewhere may still need them.
+	 */
+	if (PAGE_GET_N_VACATED(p) > 0)
+		return true;
+
+	/*
+	 * Probe other backends' page-level retain.  A retain older than the
+	 * latest page-level write means a concurrent reader may still need the
+	 * older page state.
+	 *
+	 * Subtle: when no page-level undo has been emitted since active snapshots
+	 * were taken, this loop finds no holders even though snapshots exist —
+	 * safe, because the PAGE_GET_N_VACATED check above already rules out
+	 * compaction removing tuples those snapshots could see.
+	 */
+	meta = get_undo_meta_by_type(pageUndoType);
+	lastUsed = pg_atomic_read_u64(&meta->lastUsedLocation);
+	for (i = 0; i < max_procs; i++)
+	{
+		UndoLocation retain;
+
+		if (i == MYPROCNUMBER)
+			continue;
+
+		retain = pg_atomic_read_u64(&oProcData[i].undoRetainLocations[pageUndoType].snapshotRetainUndoLocation);
+		if (UndoLocationIsValid(retain) && retain < lastUsed)
+			return true;
+
+		retain = pg_atomic_read_u64(&oProcData[i].undoRetainLocations[pageUndoType].transactionUndoRetainLocation);
+		if (UndoLocationIsValid(retain) && retain < lastUsed)
+			return true;
+	}
+
+	return false;
+}
+
+/*
+ * Record that the current backend marked a tuple deleted on (blkno,
+ * pageChangeCount).  Called from o_btree_modify_delete after the
+ * BTreeOperationDelete undo record is created.
+ */
+void
+register_local_page_delete(OInMemoryBlkno blkno, uint32 pageChangeCount)
+{
+	LocalDeletePageKey key;
+
+	if (deletedPagesHash == NULL)
+	{
+		HASHCTL		ctl;
+
+		MemSet(&ctl, 0, sizeof(ctl));
+		ctl.keysize = sizeof(LocalDeletePageKey);
+		ctl.entrysize = sizeof(LocalDeletePageKey);
+		ctl.hcxt = TopMemoryContext;
+		deletedPagesHash = hash_create("orioledb local deleted pages",
+									   128, &ctl,
+									   HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+	}
+
+	key.blkno = blkno;
+	key.pageChangeCount = pageChangeCount;
+	(void) hash_search(deletedPagesHash, &key, HASH_ENTER, NULL);
+}
+
+/*
+ * Has the current backend marked any tuple deleted on this page in the
+ * current transaction?  A true result means a split or compaction here may
+ * still need page-level undo so a transaction abort can replay the deletes
+ * against the original page layout.
+ */
+bool
+page_has_local_deletes(OInMemoryBlkno blkno, uint32 pageChangeCount)
+{
+	LocalDeletePageKey key;
+	bool		found;
+
+	if (deletedPagesHash == NULL)
+		return false;
+
+	key.blkno = blkno;
+	key.pageChangeCount = pageChangeCount;
+	(void) hash_search(deletedPagesHash, &key, HASH_FIND, &found);
+	return found;
+}
+
+/*
+ * Drop all entries from the local-deletes hash.  Called at top-level
+ * transaction commit/abort.  Keeps the hash alive across transactions
+ * (with its bucket array and element freelist) to avoid a malloc/free
+ * pair per delete-heavy transaction.
+ */
+void
+reset_local_page_deletes(void)
+{
+	HASH_SEQ_STATUS status;
+	LocalDeletePageKey *entry;
+
+	if (deletedPagesHash == NULL)
+		return;
+	hash_seq_init(&status, deletedPagesHash);
+	while ((entry = hash_seq_search(&status)) != NULL)
+		(void) hash_search(deletedPagesHash, entry, HASH_REMOVE, NULL);
+}
 
 /*
  * Add page image to the undo log.

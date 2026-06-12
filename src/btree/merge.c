@@ -85,10 +85,10 @@ btree_try_merge_pages(BTreeDescr *desc,
 		return false;
 	}
 
-	needsUndo = O_PAGE_IS(left, LEAF) && desc->undoType != UndoLogNone;
-	if (needsUndo && OXidIsValid(desc->createOxid) &&
-		!XACT_INFO_IS_FINISHED(desc->createOxid))
-		needsUndo = false;
+	needsUndo = page_needs_page_level_undo(desc, left_blkno, left,
+										   O_PAGE_GET_CHANGE_COUNT(left), InvalidOXid) ||
+		page_needs_page_level_undo(desc, right_blkno, right,
+								   O_PAGE_GET_CHANGE_COUNT(right), InvalidOXid);
 
 	if (needsUndo)
 		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);

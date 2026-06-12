@@ -158,12 +158,9 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 
 retry:
 
-	context.needsUndo = desc->undoType != UndoLogNone;
-	if (!(callbackInfo && callbackInfo->needsUndoForSelfCreated) &&
-		OXidIsValid(desc->createOxid) &&
-		desc->createOxid == opOxid &&
-		!UndoLocationIsValid(context.savepointUndoLocation))
-		context.needsUndo = false;
+	context.needsUndo = relation_needs_undo(desc, opOxid,
+											callbackInfo && callbackInfo->needsUndoForSelfCreated,
+											context.savepointUndoLocation);
 	context.leafTuphdr.deleted = deleted;
 	context.leafTuphdr.undoLocation = InvalidUndoLocation;
 	context.leafTuphdr.formatFlags = 0;
@@ -875,6 +872,7 @@ o_btree_modify_delete(BTreeModifyInternalContext *context)
 		undoLocation = make_undo_record(desc, key, key_is_tuple,
 										BTreeOperationDelete, blkno,
 										pageChangeCount, tuphdr);
+		register_local_page_delete(blkno, pageChangeCount);
 
 		/*
 		 * Fire post-undo hook with the freshly created undo location, while

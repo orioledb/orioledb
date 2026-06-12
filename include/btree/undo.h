@@ -95,6 +95,20 @@ typedef struct
 extern bool page_item_rollback(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 							   bool loop, BTreeLeafTuphdr *non_lock_tuphdr_ptr,
 							   UndoLocation nonLockUndoLocation);
+extern bool relation_needs_undo(BTreeDescr *desc, OXid opOxid,
+								bool needsUndoForSelfCreated,
+								UndoLocation savepointUndoLoc);
+extern bool page_needs_page_level_undo(BTreeDescr *desc, OInMemoryBlkno blkno,
+									   Page p, uint32 pageChangeCount,
+									   OXid opOxid);
+extern void register_local_page_delete(OInMemoryBlkno blkno,
+									   uint32 pageChangeCount);
+extern bool page_has_local_deletes(OInMemoryBlkno blkno,
+								   uint32 pageChangeCount);
+extern void reset_local_page_deletes(void);
+
+extern bool orioledb_debug_force_page_undo;
+
 extern UndoLocation make_undo_record(BTreeDescr *desc, OTuple tuple,
 									 bool is_tuple,
 									 BTreeOperationType action,

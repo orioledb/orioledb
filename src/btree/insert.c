@@ -904,18 +904,6 @@ tuple_waiters_check_hikey(BTreeDescr *desc, Page p,
 }
 
 static bool
-o_btree_insert_needs_page_undo(BTreeDescr *desc, Page p)
-{
-	bool		needsUndo = O_PAGE_IS(p, LEAF) && desc->undoType != UndoLogNone;
-
-	if (needsUndo && OXidIsValid(desc->createOxid) &&
-		desc->createOxid == get_current_oxid_if_any())
-		needsUndo = false;
-
-	return needsUndo;
-}
-
-static bool
 o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 								 int reserve_kind,
 								 int tupleWaiterProcnums[BTREE_PAGE_MAX_SPLIT_ITEMS],
@@ -1057,7 +1045,15 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 	loc = curContext->items[curContext->index].locator;
 	offset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
 
-	needsUndo = o_btree_insert_needs_page_undo(desc, p);
+	/*
+	 * get_current_oxid_if_any() may return InvalidOXid here (e.g., bgwriter
+	 * completing a split mid-flight for a creator-owned page); the
+	 * relation_needs_undo fallback "creator not yet finished" then lets us
+	 * skip undo because creator rollback would wipe the relation.
+	 */
+	needsUndo = page_needs_page_level_undo(desc, blkno, p,
+										   O_PAGE_GET_CHANGE_COUNT(p),
+										   get_current_oxid_if_any());
 
 	/* Get CSN for undo item if needed */
 	if (needsUndo)
@@ -1266,7 +1262,9 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 		offset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
 
 		/* Get CSN for undo item if needed */
-		needsUndo = o_btree_insert_needs_page_undo(desc, p);
+		needsUndo = page_needs_page_level_undo(desc, blkno, p,
+											   O_PAGE_GET_CHANGE_COUNT(p),
+											   get_current_oxid_if_any());
 		if (needsUndo)
 			csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 		else

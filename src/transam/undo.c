@@ -2065,7 +2065,10 @@ undo_xact_callback(XactEvent event, void *arg)
 	ea_counters = NULL;
 
 	if (event == XACT_EVENT_COMMIT || event == XACT_EVENT_ABORT)
+	{
 		seq_scans_cleanup();
+		reset_local_page_deletes();
+	}
 
 	if (enable_rewind && event == XACT_EVENT_PRE_COMMIT)
 	{

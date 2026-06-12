@@ -288,6 +288,17 @@ Trace all the stop events to the system log.
 
 Disable bgwriter for debug.
 
+### `orioledb.debug_force_page_undo`
+
+|             |     |
+| ----------- | --- |
+| **Default** | off |
+
+Force page-level undo emission on every leaf split, compaction, and merge,
+bypassing the optimization that skips the page image when no concurrent
+reader or local-delete needs it. Intended for A/B comparisons of undo
+volume against the optimized path.
+
 ### `orioledb.debug_checkpoint_timeout`
 
 |             |                      |

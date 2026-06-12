@@ -19,6 +19,7 @@
 #include "btree/find.h"
 #include "btree/io.h"
 #include "btree/scan.h"
+#include "btree/undo.h"
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
@@ -493,6 +494,19 @@ _PG_init(void)
 							 &debug_disable_pools_limit,
 							 false,
 							 PGC_POSTMASTER,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomBoolVariable("orioledb.debug_force_page_undo",
+							 "Force page-level undo emission even when "
+							 "concurrent-reader and local-delete checks "
+							 "would allow skipping it.",
+							 NULL,
+							 &orioledb_debug_force_page_undo,
+							 false,
+							 PGC_USERSET,
 							 0,
 							 NULL,
 							 NULL,
