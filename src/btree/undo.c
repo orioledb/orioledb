@@ -57,7 +57,7 @@ typedef struct
 {
 	OInMemoryBlkno blkno;
 	uint32		pageChangeCount;
-}			LocalDeletePageKey;
+} LocalDeletePageKey;
 
 static HTAB *deletedPagesHash = NULL;
 
