@@ -159,13 +159,23 @@ btree_try_merge_pages(BTreeDescr *desc,
 
 	/* the right page can not be found in B-Tree after this line */
 
-	left_header->undoLocation = undo_loc;
-
 	/*
-	 * Memory barrier between write undo location and csn.  See comment in the
-	 * o_btree_read_page() for details.
+	 * When no undo image was emitted (skip-undo merge), don't overwrite the
+	 * existing left undoLocation: a concurrent reader can see the old csn but
+	 * the new InvalidUndoLocation and enter the undo branch with a bad
+	 * pointer. The new csn = COMMITSEQNO_INPROGRESS makes the same reader
+	 * skip the undo branch entirely, so preserving the old pointer is safe.
 	 */
-	pg_write_barrier();
+	if (UndoLocationIsValid(undo_loc))
+	{
+		left_header->undoLocation = undo_loc;
+
+		/*
+		 * Memory barrier between write undo location and csn.  See comment in
+		 * the o_btree_read_page() for details.
+		 */
+		pg_write_barrier();
+	}
 	left_header->csn = csn;
 
 	Assert(checkpoint_state->stack[level].hikeyBlkno != left_blkno);

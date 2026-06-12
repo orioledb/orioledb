@@ -481,15 +481,24 @@ perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 */
 	page_block_reads(blkno);
 
-	/* Link undo record with pages */
-	left_header->undoLocation = undoLoc;
-	right_header->undoLocation = undoLoc;
-
 	/*
-	 * Memory barrier between write undo location and csn.  See comment in the
-	 * o_btree_read_page() for details.
+	 * When no undo image was emitted (skip-undo split), don't overwrite the
+	 * existing left undoLocation: a concurrent reader can see the old csn but
+	 * the new InvalidUndoLocation and enter the undo branch with a bad
+	 * pointer. The new csn = COMMITSEQNO_INPROGRESS makes the same reader
+	 * skip the undo branch entirely, so preserving the old pointer is safe.
 	 */
-	pg_write_barrier();
+	if (UndoLocationIsValid(undoLoc))
+	{
+		left_header->undoLocation = undoLoc;
+		right_header->undoLocation = undoLoc;
+
+		/*
+		 * Memory barrier between write undo location and csn.  See comment in
+		 * the o_btree_read_page() for details.
+		 */
+		pg_write_barrier();
+	}
 
 	left_header->csn = csn;
 	right_header->csn = csn;
