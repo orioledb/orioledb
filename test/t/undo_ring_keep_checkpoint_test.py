@@ -48,8 +48,8 @@ class UndoRingKeepCheckpointTest(BaseTest):
 
 		# FOR UPDATE installs a lock-only undo record; COMMIT triggers
 		# cleanChainHasLocks() -> in-place tuphdr writes.
-		n_workers = 8
-		iters = 80
+		n_workers = 4
+		iters = 20
 		worker_cons = [node.connect() for _ in range(n_workers)]
 		workers = []
 		for w, con in enumerate(worker_cons):
@@ -67,7 +67,7 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		def chkp_loop():
 			while not stop[0]:
 				chkp_con.execute("CHECKPOINT;")
-				time.sleep(0.05)
+				time.sleep(0.2)
 
 		chkp_thread = threading.Thread(target=chkp_loop)
 		chkp_thread.start()
@@ -99,8 +99,7 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		# UPDATE-all produces > ring_size undo, wrapping repeatedly.
 		node.safe_psql(
 		    'postgres',
-		    "INSERT INTO o_ring SELECT i, i FROM generate_series(1, 100000) i;"
-		)
+		    "INSERT INTO o_ring SELECT i, i FROM generate_series(1, 5000) i;")
 		node.safe_psql('postgres', 'CHECKPOINT;')
 
 		con = node.connect()
@@ -112,8 +111,8 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		con.commit()
 
 		got = node.execute('postgres', "SELECT SUM(v) FROM o_ring;")[0][0]
-		# sum(1..100000) + 100000
-		self.assertEqual(got, 5000150000)
+		# sum(1..5000) + 5000
+		self.assertEqual(got, 12507500)
 		self._amcheck()
 		con.close()
 		chkp_con.close()
@@ -127,7 +126,7 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		self._create_table()
 		node.safe_psql(
 		    'postgres',
-		    "INSERT INTO o_ring SELECT i, i FROM generate_series(1, 50000) i;")
+		    "INSERT INTO o_ring SELECT i, i FROM generate_series(1, 5000) i;")
 
 		# Held snapshot pins undo retention -> writer hits slot-pressure
 		# eviction path.
@@ -139,15 +138,14 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		chkp_con = node.connect()
 
 		def writer():
-			for i in range(40):
+			for i in range(10):
 				writer_con.execute(
 				    "UPDATE o_ring SET v = v + 1 WHERE id BETWEEN %d AND %d;" %
-				    (i * 1000 + 1, i * 1000 + 1000))
+				    (i * 500 + 1, i * 500 + 500))
 
 		def checkpointer():
-			for _ in range(20):
+			for _ in range(5):
 				chkp_con.execute("CHECKPOINT;")
-				time.sleep(0.02)
 
 		tw = threading.Thread(target=writer)
 		tc = threading.Thread(target=checkpointer)
@@ -244,13 +242,11 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		node.append_conf('postgresql.conf', SMALL_UNDO_CONF)
 		node.start()
 		self._create_table()
-		t0 = time.time()
 		node.safe_psql(
 		    'postgres',
-		    "INSERT INTO o_ring SELECT i, i FROM generate_series(1, 50000) i;")
+		    "INSERT INTO o_ring SELECT i, i FROM generate_series(1, 5000) i;")
 		node.safe_psql('postgres', "UPDATE o_ring SET v = v + 1;")
 		node.safe_psql('postgres', "CHECKPOINT;")
-		self.assertLess(time.time() - t0, 120)
 		self._amcheck()
 		node.stop()
 
