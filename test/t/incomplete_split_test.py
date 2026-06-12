@@ -90,9 +90,12 @@ class SplitTest(BaseTest):
 
 		con2.execute("SELECT pg_stopevent_reset('split_fail');")
 		con2.execute("CHECKPOINT;")
-		# checkpoint fixes split and has autonomous page writes
-		# btree_check() will fail
-		self.checkSplitTable(100, False)
+		# checkpoint fixes split and has autonomous page writes; the
+		# extents freed by those autonomous writes live in the
+		# in-progress next checkpoint's tmpBuf (.tmp file + seq_buf
+		# in-memory chunk), and orioledb_tbl_check() now consults both
+		# so the check accepts the table as consistent.
+		self.checkSplitTable(100, True)
 		con2.execute("CHECKPOINT;")
 
 		# After second checkpoint there is no incomplete split pages and lost blocks in BTree
@@ -121,9 +124,12 @@ class SplitTest(BaseTest):
 
 		con2.execute("SELECT pg_stopevent_reset('split_fail');")
 		con2.execute("CHECKPOINT;")
-		# checkpoint fixes split and has autonomous page writes
-		# btree_check() will fail
-		self.checkSplitTable(58, False)
+		# checkpoint fixes split and has autonomous page writes; the
+		# extents freed by those autonomous writes live in the
+		# in-progress next checkpoint's tmpBuf (.tmp file + seq_buf
+		# in-memory chunk), and orioledb_tbl_check() now consults both
+		# so the check accepts the table as consistent.
+		self.checkSplitTable(58, True)
 		con2.execute("CHECKPOINT;")
 
 		# After second checkpoint there is no incomplete split pages and lost blocks in BTree
@@ -156,9 +162,12 @@ class SplitTest(BaseTest):
 		con2.execute("CHECKPOINT;")
 		con2.commit()
 
-		# checkpoint fixes split and has autonomous page writes
-		# btree_check() will fail
-		self.checkSplitTable(11, False)
+		# checkpoint fixes split and has autonomous page writes; the
+		# extents freed by those autonomous writes live in the
+		# in-progress next checkpoint's tmpBuf (.tmp file + seq_buf
+		# in-memory chunk), and orioledb_tbl_check() now consults both
+		# so the check accepts the table as consistent.
+		self.checkSplitTable(11, True)
 		con2.execute("CHECKPOINT;")
 		# After second checkpoint there is no incomplete split pages and lost blocks
 		self.checkSplitTable(11, True)
@@ -430,3 +439,66 @@ class SplitTest(BaseTest):
 			raise
 		except Exception:
 			self.assertTrue(True)
+
+	def test_tbl_check_sees_pending_tmpbuf_freelist(self):
+		"""
+		orioledb_tbl_check() rebuilds the free-extent set by reading both
+		the on-disk .map/.tmp files and the in-memory seq_buf chunks
+		that free_extent_for_checkpoint() writes to before the next
+		CHECKPOINT finalises them.  This test deterministically forces
+		the read-side path that used to produce phantom "Extent N M is
+		neither free or busy" reports.
+
+		Setup mirrors test_incomplete_leaf_checkpoint_fix but the
+		assertion order is named after the read-side property: right
+		after the CHECKPOINT that triggers autonomous in-place page
+		rewrites, the freed extents live in tmpBuf for the in-progress
+		next checkpoint -- not yet flushed to disk -- and the check
+		must consult that tmpBuf to avoid mis-reporting a hole.
+
+		Pre-fix this would return False (uncompressed loop bound was
+		`num < chkp_num`, so chkp.{chkp_num+1}.tmp was skipped, and
+		the in-memory seq_buf chunk was never read).  Post-fix it
+		returns True.
+		"""
+		node = self.node
+		self.insertToSplitTable(node, 10, 50, 4)
+
+		con1 = self.createConnection()
+		con1.execute("SET orioledb.enable_stopevents = true;")
+		con2 = self.createConnection()
+		con2.execute("SELECT pg_stopevent_set('split_fail', 'true');")
+
+		self.assertEqual(
+		    node.execute("SELECT COUNT(*) FROM o_split;")[0][0], 11)
+
+		# Force a phase-1-only split: the new right leaf is allocated
+		# but the parent's downlink isn't installed, so the tree has a
+		# BROKEN_SPLIT page reachable only via rightlink.
+		self.failedInsertToSplitTable(con1, 51, 90, 4)
+		self.checkSplitTable(11, False)
+		con2.execute("SELECT pg_stopevent_reset('split_fail');")
+
+		# CHECKPOINT runs autonomous in-place rewrites to finish the
+		# BROKEN_SPLIT.  The freed locations of the rewritten leaves go
+		# through free_extent_for_checkpoint() into tmpBuf for the
+		# *next* checkpoint -- specifically into the seq_buf in-memory
+		# chunk because the freed count is far below 8 KB.
+		con2.begin()
+		con2.execute("CHECKPOINT;")
+		con2.commit()
+
+		# Without a second CHECKPOINT to flush tmpBuf, the freed
+		# extents are visible only via:
+		#   (a) chkp.{chkp_num + 1}.tmp on disk
+		#   (b) the seq_buf in-memory chunk of desc->tmpBuf[]
+		# orioledb_tbl_check() must read both to report consistency.
+		# Pre-fix returned False here; post-fix returns True.
+		self.checkSplitTable(11, True)
+
+		# Sanity: the second CHECKPOINT finalises tmpBuf and the
+		# state must remain consistent.
+		con2.execute("CHECKPOINT;")
+		self.checkSplitTable(11, True)
+
+		self.stopAll()
