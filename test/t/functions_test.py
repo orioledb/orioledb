@@ -14,6 +14,10 @@ class FunctionTest(BaseTest):
 
 		node = self.node
 		node.append_conf('postgresql.conf', "checkpoint_timeout = 86400\n")
+		# Force page-level undo so the size check below remains meaningful;
+		# without this, the skip optimization elides most page undo.
+		node.append_conf('postgresql.conf',
+		                 "orioledb.debug_force_page_undo = on\n")
 		node.start()
 
 		node.safe_psql("""
