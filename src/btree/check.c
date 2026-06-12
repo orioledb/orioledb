@@ -63,6 +63,12 @@ static void get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 static void get_free_extents_from_file(SeqBufTag *tag, off_t offset,
 									   ExtentsArray *free_extents,
 									   bool compressed, bool should_exists);
+static void get_free_extents_from_seqbuf_pending(SeqBufDescPrivate *seqBuf,
+												 SeqBufTag *expected_tag,
+												 ExtentsArray *free_extents,
+												 bool compressed);
+static void decode_free_extent_buf(const char *buf, Size len,
+								   ExtentsArray *free_extents, bool compressed);
 static bool is_sorted_by_off(ExtentsArray *array);
 static bool is_sorted_by_len_off(ExtentsArray *array);
 
@@ -267,11 +273,31 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 		freebuf_offset = seq_buf_get_offset(&desc->freeBuf);
 
 		get_free_extents_from_file(&chkp_tag, freebuf_offset, free_extents, false, false);
-		for (num = chkp_tag.num; num < chkp_num; num++)
+
+		/*
+		 * Read every .tmp file whose data could still feed the free-extent
+		 * stream: anything written for the previous checkpoint (already
+		 * flushed) up to chkp_num + 1 (the "next" checkpoint accepting fresh
+		 * frees from in-flight merges and from copy-blkno page rewrites).
+		 * Mirrors the compressed branch below, which already extends the
+		 * range to chkp_num + 1.  Stopping at chkp_num leaves out frees that
+		 * are sitting in chkp.{chkp_num+1}.tmp and produces a phantom "Extent
+		 * ... is neither free or busy" report.
+		 *
+		 * For each .tmp file we also drain the matching desc->tmpBuf[] in
+		 * shared memory.  free_extent_for_checkpoint() buffers small writes
+		 * in an 8 KB seq_buf page; until the chunk fills or the checkpoint
+		 * finalises, the bytes are not visible via the on-disk file read.
+		 * Appending them here closes that read-side race.
+		 */
+		for (num = chkp_tag.num; num <= chkp_num; num++)
 		{
 			chkp_tag.num = num + 1;
 			chkp_tag.type = 't';
 			get_free_extents_from_file(&chkp_tag, 0, free_extents, false, false);
+			get_free_extents_from_seqbuf_pending(&desc->tmpBuf[(num + 1) % 2],
+												 &chkp_tag, free_extents,
+												 false);
 		}
 	}
 	else
@@ -292,7 +318,42 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 			chkp_tag.num = num;
 			chkp_tag.type = 't';
 			get_free_extents_from_file(&chkp_tag, 0, free_extents, true, false);
+			/* Mirror the uncompressed-path append (see comment above). */
+			get_free_extents_from_seqbuf_pending(&desc->tmpBuf[num % 2],
+												 &chkp_tag, free_extents,
+												 true);
 		}
+	}
+}
+
+/*
+ * Decode a buffer of contiguous extent records into the free_extents array.
+ * `len` is the number of bytes in `buf` to decode and must be a multiple of
+ * the on-disk record size for this index.
+ */
+static void
+decode_free_extent_buf(const char *buf, Size len, ExtentsArray *free_extents,
+					   bool compressed)
+{
+	FileExtent	extent;
+	uint32		off;
+	Size		i = 0;
+
+	while (i < len)
+	{
+		if (compressed || use_device)
+		{
+			memcpy(&extent, buf + i, sizeof(FileExtent));
+			i += sizeof(FileExtent);
+		}
+		else
+		{
+			memcpy(&off, buf + i, sizeof(uint32));
+			i += sizeof(uint32);
+			extent.off = off;
+			extent.len = 1;
+		}
+		add_extent(free_extents, extent);
 	}
 }
 
@@ -307,10 +368,7 @@ get_free_extents_from_file(SeqBufTag *tag, off_t offset,
 	char		buf[ORIOLEDB_BLCKSZ],
 			   *filename;
 	File		file;
-	FileExtent	extent;
 	off_t		bytes_read;
-	uint32		off;
-	int			i;
 
 	filename = get_seq_buf_filename(tag);
 	file = PathNameOpenFile(filename, O_RDONLY | PG_BINARY);
@@ -328,28 +386,38 @@ get_free_extents_from_file(SeqBufTag *tag, off_t offset,
 		bytes_read = OFileRead(file, buf, ORIOLEDB_BLCKSZ, offset,
 							   WAIT_EVENT_DATA_FILE_READ);
 		offset += bytes_read;
-
-		i = 0;
-		while (i < bytes_read)
-		{
-			if (compressed || use_device)
-			{
-				memcpy(&extent, buf + i, sizeof(FileExtent));
-				i += sizeof(FileExtent);
-			}
-			else
-			{
-				memcpy(&off, buf + i, sizeof(uint32));
-				i += sizeof(uint32);
-				extent.off = off;
-				extent.len = 1;
-			}
-			add_extent(free_extents, extent);
-		}
+		decode_free_extent_buf(buf, bytes_read, free_extents, compressed);
 	} while (bytes_read == ORIOLEDB_BLCKSZ);
 
 	FileClose(file);
 	pfree(filename);
+}
+
+/*
+ * Appends in-memory free-extent records that have been written to the given
+ * write-mode seq_buf but are not yet flushed to its on-disk file.  Pair with
+ * get_free_extents_from_file() to cover both halves of the stream when the
+ * caller wants a snapshot that includes mid-checkpoint writes.
+ */
+static void
+get_free_extents_from_seqbuf_pending(SeqBufDescPrivate *seqBuf,
+									 SeqBufTag *expected_tag,
+									 ExtentsArray *free_extents,
+									 bool compressed)
+{
+	char	   *buf;
+	Size		len;
+
+	if (!SEQ_BUF_SHARED_EXIST(seqBuf->shared))
+		return;
+	if (!SeqBufTagEqual(&seqBuf->shared->tag, expected_tag))
+		return;
+
+	buf = palloc(seq_buf_max_pending_data_size());
+	len = seq_buf_snapshot_pending_data(seqBuf, buf);
+	if (len > 0)
+		decode_free_extent_buf(buf, len, free_extents, compressed);
+	pfree(buf);
 }
 
 /*
