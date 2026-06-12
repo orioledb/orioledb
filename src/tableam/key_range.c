@@ -194,10 +194,59 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 			 */
 			if (key->sk_flags & SK_BT_SKIP)
 			{
+				bool		have_minval = (key->sk_flags & SK_BT_MINVAL) != 0;
+				bool		have_maxval = (key->sk_flags & SK_BT_MAXVAL) != 0;
+				bool		have_next = (key->sk_flags & SK_BT_NEXT) != 0;
+				bool		have_prior = (key->sk_flags & SK_BT_PRIOR) != 0;
+				bool		have_isnull = (key->sk_flags & SK_ISNULL) != 0;
+				bool		sentinel = have_minval || have_maxval || have_isnull;
+
 				Assert(arrayKeys->num_elems == -1);
 
-				/* Set up the lower bound from the skip scan low_compare key */
-				if (arrayKeys->low_compare)
+				/*
+				 * Post-advancement state: SkipSupport produced a concrete
+				 * next leading value (no MINVAL/MAXVAL, no NEXT/PRIOR, no
+				 * ISNULL).  Pin both bounds to sk_argument so the iterator
+				 * visits only the tuples for this distinct value.
+				 */
+				if (!sentinel && !have_next && !have_prior)
+				{
+					low.flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE;
+					high.flags = O_VALUE_BOUND_UPPER | O_VALUE_BOUND_INCLUSIVE;
+					o_fill_key_bounds(key->sk_argument,
+									  OidIsValid(key->sk_subtype) ? key->sk_subtype : field->inputtype,
+									  &low, &high, field);
+					res->low.keys[attnum] = low;
+					res->high.keys[attnum] = high;
+					arrayKeys++;
+					continue;
+				}
+
+				/*
+				 * Sentinel (MINVAL/MAXVAL/SearchNull-initial) or NEXT/PRIOR
+				 * transition.  Use the global low_compare/high_compare
+				 * bounds, lifting them past sk_argument when NEXT/PRIOR
+				 * signals an exclusive advance from the just-visited value.
+				 *
+				 * Note: SK_ISNULL appears here as a *sentinel* state too --
+				 * _bt_start_array_keys uses it when the direction-appropriate
+				 * sentinel of a skip array with null_elem=true falls on the
+				 * NULL band of the leading column (e.g. backward scan +
+				 * nulls-last). Without tuple-aware advancement OrioleDB can't
+				 * tell that apart from a real NULL position, so we keep the
+				 * same broad bound behavior the pre-skip-scan path used --
+				 * the trailing-column predicate inside is_tuple_valid() then
+				 * filters the actual rows.
+				 */
+				if (have_next)
+				{
+					low.flags = O_VALUE_BOUND_LOWER;	/* exclusive */
+					o_fill_key_bounds(key->sk_argument,
+									  OidIsValid(key->sk_subtype) ? key->sk_subtype : field->inputtype,
+									  &low, NULL, field);
+					res->low.keys[attnum] = low;
+				}
+				else if (arrayKeys->low_compare)
 				{
 					ScanKey		lk = arrayKeys->low_compare;
 
@@ -215,15 +264,22 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 					 * IS NOT NULL on the leading column gets rewritten by
 					 * _bt_preprocess_keys into a skip array with
 					 * null_elem=false and no low/high_compare; mirror the
-					 * SK_SEARCHNOTNULL handling above so we still cap the
-					 * scan boundary just past the NULL band.
+					 * SK_SEARCHNOTNULL handling so we still cap the scan
+					 * boundary just past the NULL band.
 					 */
 					res->low.keys[attnum].flags =
 						O_VALUE_BOUND_LOWER | O_VALUE_BOUND_NULL;
 				}
 
-				/* Set up the upper bound from the skip scan high_compare key */
-				if (arrayKeys->high_compare)
+				if (have_prior)
+				{
+					high.flags = O_VALUE_BOUND_UPPER;	/* exclusive */
+					o_fill_key_bounds(key->sk_argument,
+									  OidIsValid(key->sk_subtype) ? key->sk_subtype : field->inputtype,
+									  NULL, &high, field);
+					res->high.keys[attnum] = high;
+				}
+				else if (arrayKeys->high_compare)
 				{
 					ScanKey		hk = arrayKeys->high_compare;
 
@@ -237,7 +293,6 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 				}
 				else if (!arrayKeys->null_elem && !field->nullfirst)
 				{
-					/* Same NULL exclusion at the high end for nullslast. */
 					res->high.keys[attnum].flags =
 						O_VALUE_BOUND_UPPER | O_VALUE_BOUND_NULL;
 				}

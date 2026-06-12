@@ -8899,6 +8899,82 @@ SELECT count(*) FROM o_test_null_mixed
 (1 row)
 
 RESET enable_seqscan;
+-- Skip scan tests below exercise PG18's _bt_preprocess_keys synthesizing a
+-- skip array on the leading column.  On PG16/PG17 there are no skip arrays;
+-- skip the whole block instead of maintaining version-specific expected
+-- outputs for queries that test PG18-only optimization paths.
+SELECT current_setting('server_version_num')::int >= 180000 AS skip_scan_supported \gset
+\if :skip_scan_supported
+-- PG18 btree skip scan: query with equality on a trailing column and NO
+-- constraint on the leading column.  _bt_preprocess_keys generates a
+-- skip array on the leading column; each iteration of the skip array
+-- positions the index at the next distinct value of x and probes for
+-- the y predicate.  Covers both the SkipSupport-aware path (int4 has
+-- skip support: increment is n+1) and the post-advancement path through
+-- o_key_data_to_key_range where the array's sk_argument carries a live
+-- value with SK_BT_NEXT semantics.
+CREATE TABLE o_test_skip_leading_int (
+	x int NOT NULL,
+	y int NOT NULL
+) USING orioledb;
+CREATE INDEX o_test_skip_leading_int_idx ON o_test_skip_leading_int(x, y);
+INSERT INTO o_test_skip_leading_int
+	SELECT g % 5, g FROM generate_series(1, 200) g;
+ANALYZE o_test_skip_leading_int;
+SET enable_seqscan = OFF;
+SET enable_bitmapscan = OFF;
+EXPLAIN (COSTS OFF)
+SELECT x, y FROM o_test_skip_leading_int WHERE y = 42 ORDER BY x, y;
+SELECT x, y FROM o_test_skip_leading_int WHERE y = 42 ORDER BY x, y;
+-- Multiple matching y values across distinct x: every distinct x is
+-- visited exactly once by the skip-array driver.
+SELECT count(*), count(DISTINCT x) FROM o_test_skip_leading_int
+	WHERE y IN (42, 84, 126);
+RESET enable_bitmapscan;
+RESET enable_seqscan;
+DROP TABLE o_test_skip_leading_int;
+-- Non-SkipSupport leading type (text): _bt_array_increment sets the
+-- SK_BT_NEXT flag instead of generating the next discrete value, so the
+-- iterator must honor "strictly > current sk_argument" as an exclusive
+-- lower bound.  Covers o_key_data_to_key_range's SK_BT_NEXT/SK_BT_PRIOR
+-- handling.
+CREATE TABLE o_test_skip_leading_text (
+	x text NOT NULL,
+	y int NOT NULL
+) USING orioledb;
+CREATE INDEX o_test_skip_leading_text_idx ON o_test_skip_leading_text(x, y);
+INSERT INTO o_test_skip_leading_text
+	SELECT chr(65 + (g % 4)), g FROM generate_series(1, 200) g;
+ANALYZE o_test_skip_leading_text;
+SET enable_seqscan = OFF;
+SET enable_bitmapscan = OFF;
+EXPLAIN (COSTS OFF)
+SELECT x, y FROM o_test_skip_leading_text WHERE y = 42 ORDER BY x, y;
+SELECT x, y FROM o_test_skip_leading_text WHERE y = 42 ORDER BY x, y;
+RESET enable_bitmapscan;
+RESET enable_seqscan;
+DROP TABLE o_test_skip_leading_text;
+-- Backward scan over a skip array: each iteration must reposition to
+-- the next-lower distinct leading value.  _bt_array_decrement is the
+-- mirror of _bt_array_increment; SK_BT_PRIOR is the exclusive-upper
+-- counterpart of SK_BT_NEXT.
+CREATE TABLE o_test_skip_backward (
+	x int NOT NULL,
+	y int NOT NULL
+) USING orioledb;
+CREATE INDEX o_test_skip_backward_idx ON o_test_skip_backward(x, y);
+INSERT INTO o_test_skip_backward
+	SELECT g % 5, g FROM generate_series(1, 100) g;
+ANALYZE o_test_skip_backward;
+SET enable_seqscan = OFF;
+SET enable_bitmapscan = OFF;
+EXPLAIN (COSTS OFF)
+SELECT x, y FROM o_test_skip_backward WHERE y = 42 ORDER BY x DESC, y DESC;
+SELECT x, y FROM o_test_skip_backward WHERE y = 42 ORDER BY x DESC, y DESC;
+RESET enable_bitmapscan;
+RESET enable_seqscan;
+DROP TABLE o_test_skip_backward;
+\endif
 SELECT orioledb_parallel_debug_stop();
  orioledb_parallel_debug_stop 
 ------------------------------
