@@ -44,7 +44,7 @@ step "s2_select" { SELECT * FROM o_rightlink; }
 step "s2_bselect" { SELECT * FROM o_rightlink ORDER BY id DESC; }
 step "s2_select_struct" { SELECT orioledb_idx_structure('o_rightlink'::regclass,
 														'o_rightlink_pkey',
-														'nue'); }
+														'ne'); }
 step "s2_reset_s1" { SELECT pg_stopevent_reset('page_split'); }
 
 session "s3"
