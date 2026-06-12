@@ -20,6 +20,7 @@ OBJS = src/btree/btree.o \
 	   src/btree/find.o \
 	   src/btree/insert.o \
 	   src/btree/io.o \
+	   src/btree/io_aio.o \
 	   src/btree/iterator.o \
 	   src/btree/merge.o \
 	   src/btree/modify.o \
