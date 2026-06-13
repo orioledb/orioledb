@@ -288,8 +288,12 @@ class CheckpointSplit3Test(CheckpointSplitBaseTest):
 
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 28)
-		# autonomous checkpoint write happens
-		self.assertFalse(
+		# autonomous checkpoint write happens; the extents freed by
+		# the autonomous rewrites land in the next checkpoint's tmpBuf
+		# (chkp.{N+1}.tmp + seq_buf in-memory chunk).
+		# orioledb_tbl_check() now reads both so it reports the table
+		# as consistent at this mid-checkpoint snapshot.
+		self.assertTrue(
 		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
 		    [0][0])
 
@@ -343,8 +347,12 @@ class CheckpointSplit3Test(CheckpointSplitBaseTest):
 
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_checkpoint;")[0][0], 29)
-		# autonomous checkpoint page write happens
-		self.assertFalse(
+		# autonomous checkpoint page write happens; the extents freed
+		# by the autonomous rewrites land in the next checkpoint's
+		# tmpBuf (chkp.{N+1}.tmp + seq_buf in-memory chunk).
+		# orioledb_tbl_check() now reads both so it reports the table
+		# as consistent at this mid-checkpoint snapshot.
+		self.assertTrue(
 		    node.execute("SELECT orioledb_tbl_check('o_checkpoint'::regclass)")
 		    [0][0])
 
