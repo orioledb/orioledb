@@ -2544,12 +2544,19 @@ update_run_xmin(void)
 		if (!pairingheap_is_empty(xmin_queue))
 			qmin = pairingheap_container(RecoveryXidState, xmin_ph_node,
 										 pairingheap_first(xmin_queue))->oxid;
-		elog(LOG, "GXMIN-TRACE update_run_xmin BEGIN recovery_xmin=%lu queue_min_oxid=%lu "
-			 "globalXmin=%lu runXmin=%lu nextXid=%lu pid=%d",
-			 (unsigned long) recovery_xmin, (unsigned long) qmin,
-			 (unsigned long) pg_atomic_read_u64(&xid_meta->globalXmin),
-			 (unsigned long) pg_atomic_read_u64(&xid_meta->runXmin),
-			 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid), MyProcPid);
+		/*
+		 * Only trace when a low oxid sits below recovery_xmin -- the
+		 * drain-/bug-relevant window.  Logging every call (steady-state replay
+		 * fires this per-finish) is too heavy: it stalled standby shutdown and
+		 * cascaded ERRORs in the harness.
+		 */
+		if (OXidIsValid(qmin) && qmin < recovery_xmin)
+			elog(LOG, "GXMIN-TRACE update_run_xmin BEGIN recovery_xmin=%lu queue_min_oxid=%lu "
+				 "globalXmin=%lu runXmin=%lu nextXid=%lu pid=%d",
+				 (unsigned long) recovery_xmin, (unsigned long) qmin,
+				 (unsigned long) pg_atomic_read_u64(&xid_meta->globalXmin),
+				 (unsigned long) pg_atomic_read_u64(&xid_meta->runXmin),
+				 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid), MyProcPid);
 	}
 #endif
 
@@ -2700,12 +2707,14 @@ update_run_xmin(void)
 	Assert(xmin >= pg_atomic_read_u64(&xid_meta->globalXmin));
 
 #ifdef USE_INJECTION_POINTS
-	elog(LOG, "GXMIN-TRACE update_run_xmin END recovery_xmin=%lu wrote_runXmin=%lu "
-		 "globalXmin=%lu queue_min_oxid=%lu nextXid=%lu pid=%d",
-		 (unsigned long) recovery_xmin, (unsigned long) xmin,
-		 (unsigned long) pg_atomic_read_u64(&xid_meta->globalXmin),
-		 (unsigned long) queue_oxid,
-		 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid), MyProcPid);
+	/* Same gate as BEGIN: only the drain-/bug-relevant window. */
+	if (OXidIsValid(queue_oxid) && queue_oxid < recovery_xmin)
+		elog(LOG, "GXMIN-TRACE update_run_xmin END recovery_xmin=%lu wrote_runXmin=%lu "
+			 "globalXmin=%lu queue_min_oxid=%lu nextXid=%lu pid=%d",
+			 (unsigned long) recovery_xmin, (unsigned long) xmin,
+			 (unsigned long) pg_atomic_read_u64(&xid_meta->globalXmin),
+			 (unsigned long) queue_oxid,
+			 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid), MyProcPid);
 #endif
 }
 
