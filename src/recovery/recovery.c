@@ -1836,6 +1836,16 @@ o_emit_recovery_finish_rollbacks(void)
 
 	for (i = 0; i < recovery_finish_aborted_count; i++)
 	{
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "GXMIN-TRACE emit_recovery_rollback oxid=%lu recovery_xmin=%lu runXmin=%lu nextXid=%lu -- %s",
+			 (unsigned long) recovery_finish_aborted_oxids[i].oxid,
+			 (unsigned long) recovery_xmin,
+			 (unsigned long) pg_atomic_read_u64(&xid_meta->runXmin),
+			 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid),
+			 recovery_finish_aborted_oxids[i].oxid < recovery_xmin ?
+			 "oxid < recovery_xmin (emission-site fix WOULD skip this)" :
+			 "oxid >= recovery_xmin (emission-site fix would NOT skip)");
+#endif
 		elog(LOG, "orioledb: emitting WAL_REC_ROLLBACK for in-flight oxid %lu aborted by recovery_finish",
 			 recovery_finish_aborted_oxids[i].oxid);
 		wal_emit_recovery_finish_rollback(recovery_finish_aborted_oxids[i].oxid,
@@ -2551,7 +2561,15 @@ update_run_xmin(void)
 		if (state->oxid >= recovery_xmin)
 			break;
 		if (!state->checkpoint_xid || state->wal_xid)
+		{
+#ifdef USE_INJECTION_POINTS
+			elog(LOG, "GXMIN-TRACE update_run_xmin DRAIN-BLOCKED oxid=%lu < recovery_xmin=%lu "
+				 "but checkpoint_xid=%d wal_xid=%d -- cannot drain this oxid pid=%d",
+				 (unsigned long) state->oxid, (unsigned long) recovery_xmin,
+				 state->checkpoint_xid ? 1 : 0, state->wal_xid ? 1 : 0, MyProcPid);
+#endif
 			break;
+		}
 
 		set_oxid_csn(state->oxid, COMMITSEQNO_ABORTED);
 
