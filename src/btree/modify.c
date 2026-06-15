@@ -1093,9 +1093,9 @@ o_btree_normal_modify(BTreeDescr *desc, BTreeOperationType action,
 	Assert(findResult == OFindPageResultSuccess);
 
 	return o_btree_modify_internal(&pageFindContext, action, tuple, tupleType,
-								  key, keyType, opOxid, opCsn,
-								  lockMode, deleted, pageReserveKind,
-								  callbackInfo);
+								   key, keyType, opOxid, opCsn,
+								   lockMode, deleted, pageReserveKind,
+								   callbackInfo);
 }
 
 #include "tableam/descr.h"
@@ -1502,8 +1502,8 @@ o_btree_modify(BTreeDescr *desc, BTreeOperationType action,
 			   BTreeLocationHint *hint, BTreeModifyCallbackInfo *callbackInfo)
 {
 	return o_btree_normal_modify(desc, action, tuple, tupleType,
-							 key, keyType, oxid, csn, lockMode,
-							 hint, BTreeLeafTupleNonDeleted, callbackInfo);
+								 key, keyType, oxid, csn, lockMode,
+								 hint, BTreeLeafTupleNonDeleted, callbackInfo);
 }
 
 OBTreeModifyResult
