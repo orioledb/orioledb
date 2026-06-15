@@ -1155,8 +1155,9 @@ advance_global_xmin(OXid newXid)
 	if (globalXmin > prevGlobalXmin)
 	{
 #ifdef USE_INJECTION_POINTS
-		elog(LOG, "GXMIN-TRACE advance_global_xmin RAISE globalXmin %lu -> %lu (writtenXmin=%lu pid=%d)",
+		elog(LOG, "GXMIN-TRACE advance_global_xmin RAISE globalXmin %lu -> %lu (srcXid=%lu writtenXmin=%lu pid=%d)",
 			 (unsigned long) prevGlobalXmin, (unsigned long) globalXmin,
+			 (unsigned long) newXid,
 			 (unsigned long) pg_atomic_read_u64(&xid_meta->writtenXmin), MyProcPid);
 #endif
 		pg_atomic_write_u64(&xid_meta->globalXmin, globalXmin);

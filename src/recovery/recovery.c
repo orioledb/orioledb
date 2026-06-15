@@ -2509,6 +2509,7 @@ static void
 update_run_xmin(void)
 {
 	OXid		xmin;
+	OXid		queue_oxid = InvalidOXid;
 	int			i;
 	bool		found;
 
@@ -2604,6 +2605,7 @@ update_run_xmin(void)
 		state = pairingheap_container(RecoveryXidState, xmin_ph_node,
 									  pairingheap_first(xmin_queue));
 		xmin = state->oxid;
+		queue_oxid = state->oxid;
 	}
 	else
 	{
@@ -2620,6 +2622,21 @@ update_run_xmin(void)
 	 * so any later downward move would be a regression we must never publish.
 	 * Make monotonicity an explicit invariant instead.
 	 */
+#ifdef USE_INJECTION_POINTS
+	{
+		OXid		gx = pg_atomic_read_u64(&xid_meta->globalXmin);
+
+		if (xmin < gx)
+			elog(LOG, "GXMIN-TRACE update_run_xmin TRIGGER xmin=%lu < globalXmin=%lu "
+				 "(queue_min_oxid=%lu recovery_xmin=%lu nextXid=%lu writtenXmin=%lu pid=%d) "
+				 "*** ASSERT-WILL-FIRE ***",
+				 (unsigned long) xmin, (unsigned long) gx,
+				 (unsigned long) queue_oxid, (unsigned long) recovery_xmin,
+				 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid),
+				 (unsigned long) pg_atomic_read_u64(&xid_meta->writtenXmin),
+				 MyProcPid);
+	}
+#endif
 	Assert(xmin >= pg_atomic_read_u64(&xid_meta->globalXmin));
 }
 
@@ -2639,6 +2656,18 @@ free_run_xmin(void)
 	 * Leave globalXmin alone; advance_global_xmin() will bring it forward
 	 * (only upward) once proc xmins clear.
 	 */
+#ifdef USE_INJECTION_POINTS
+	{
+		OXid		gx = pg_atomic_read_u64(&xid_meta->globalXmin);
+
+		if (xmin < gx)
+			elog(LOG, "GXMIN-TRACE free_run_xmin TRIGGER nextXid=%lu < globalXmin=%lu "
+				 "(writtenXmin=%lu pid=%d) *** ASSERT-WILL-FIRE ***",
+				 (unsigned long) xmin, (unsigned long) gx,
+				 (unsigned long) pg_atomic_read_u64(&xid_meta->writtenXmin),
+				 MyProcPid);
+	}
+#endif
 	Assert(xmin >= pg_atomic_read_u64(&xid_meta->globalXmin));
 }
 
