@@ -474,9 +474,7 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	Assert(stage == OUndoCallbackStageAbort);
 
 	if (!desc)
-	{
 		return;
-	}
 
 	tuple.formatFlags = item->tuphdr.formatFlags;
 	tuple.data = (Pointer) item + sizeof(BTreeModifyUndoStackItem);

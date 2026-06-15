@@ -2387,9 +2387,7 @@ update_run_xmin(void)
 	xmin = Min(xmin, recovery_xmin);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
 	if (xmin < pg_atomic_read_u64(&xid_meta->globalXmin))
-	{
 		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
-	}
 }
 
 static void
@@ -2400,9 +2398,7 @@ free_run_xmin(void)
 	xmin = pg_atomic_read_u64(&xid_meta->nextXid);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
 	if (xmin < pg_atomic_read_u64(&xid_meta->globalXmin))
-	{
 		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
-	}
 }
 
 /*

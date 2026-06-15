@@ -409,6 +409,7 @@ lock_page(OInMemoryBlkno blkno)
 	OPageWaiterShmemState *lockerState = &lockerStates[MYPROCNUMBER];
 	uint64		prevState;
 	int			extraWaits = 0;
+
 	/* Local pages do not need locking */
 	if (O_PAGE_IS_LOCAL(blkno))
 		return;
@@ -460,6 +461,7 @@ lock_page_with_tuple(BTreeDescr *desc,
 	OPageWaiterShmemState *lockerState = &lockerStates[MYPROCNUMBER];
 	bool		keySerialized = false;
 	PageImg		img;
+
 	/* Local pages do not need locking */
 	if (O_PAGE_IS_LOCAL(*blkno))
 		return OLockPageWithTupleResultLocked;
