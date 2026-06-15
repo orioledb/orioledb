@@ -182,10 +182,6 @@ page_needs_page_level_undo(BTreeDescr *desc, OInMemoryBlkno blkno, Page p,
 		retain = pg_atomic_read_u64(&oProcData[i].undoRetainLocations[pageUndoType].snapshotRetainUndoLocation);
 		if (UndoLocationIsValid(retain) && retain < lastUsed)
 			return true;
-
-		retain = pg_atomic_read_u64(&oProcData[i].undoRetainLocations[pageUndoType].transactionUndoRetainLocation);
-		if (UndoLocationIsValid(retain) && retain < lastUsed)
-			return true;
 	}
 
 	return false;
