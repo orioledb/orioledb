@@ -93,6 +93,7 @@ class RrStressTest(BaseTest):
 		n_readers_pk = _env_int('RR_READERS_PK', 6)
 		n_readers_sk = _env_int('RR_READERS_SK', 6)
 		n_readers_mixed = _env_int('RR_READERS_MIXED', 6)
+		n_rollbackers = _env_int('RR_ROLLBACKERS', 0)
 		duration = _env_int('RR_DURATION', 3 * 60)
 		# When 1: PANIC + cluster recovery is treated as a test
 		# failure. When 0: PANIC is tolerated, cluster restart is
@@ -276,6 +277,7 @@ class RrStressTest(BaseTest):
 		conflict_count = [0]   # server-side ERRORs while con is alive
 		disconnect_count = [0]  # connection-level failures (cluster down etc.)
 		kill_count = [0]       # successful postmaster SIGKILLs by postmaster_kill_loop
+		rollback_count = [0]   # deliberate ROLLBACKs by rollbacker_loop
 
 		def record_error(msg):
 			with errors_lock:
@@ -385,6 +387,94 @@ class RrStressTest(BaseTest):
 					disconnect_count[0] += local_disc
 
 				disconnect_count[0] += local_disc
+
+		def rollbacker_loop(rollbacker_id):
+			# Abort-path traffic generator.  Every iteration opens a
+			# REPEATABLE READ tx and ALWAYS ends it with rollback(), never
+			# commit() -- so it never alters committed state and never
+			# touches the token universe (no pocket, no drain).  Its purpose
+			# is to feed the abort path that produces deferred WAL_REC_ROLLBACK
+			# records on crash recovery (the streaming-standby livelock /
+			# update_run_xmin-assert trigger).  A coin flip picks between two
+			# abort shapes each round:
+			#   2.1  empty tx: open RR, sleep, rollback with no DML.  Intended
+			#        to exercise wal_rollback's no-material-changes fast path.
+			#        NB: orioledb assigns an oxid lazily (on first modify), so
+			#        a tx that does zero writes may never acquire an oxid and
+			#        thus never reach wal_rollback at all -- it can be a pure
+			#        no-op.  Kept as specified; the oxid-bearing empty aborts
+			#        come mostly from txns SIGKILL'd mid-write.
+			#   2.2  dirty tx: do the same 2-row token swap as writer_loop,
+			#        then rollback instead of commit -- a has-material-changes
+			#        abort (durable rollback record / undo to unwind).
+			con = node.connect()
+			local_rb = 0
+			local_disc = 0
+			try:
+				while not stop.is_set():
+					if con is None:
+						try:
+							con = node.connect()
+						except Exception:
+							local_disc += 1
+							if stop.wait(0.5):
+								break
+							continue
+					try:
+						con.begin(IsolationLevel.RepeatableRead)
+						if random.randint(0, 1) == 0:
+							# 2.1 empty abort: sleep, then rollback.
+							time.sleep(random.randint(0, 10) * 0.1)
+						else:
+							# 2.2 dirty abort: writer-style swap, then rollback.
+							v_from = random.randint(1, n_accounts)
+							v_to = random.randint(1, n_accounts)
+							if v_from != v_to:
+								amount = random.randint(1, 10)
+								from_bal, from_token = con.execute(
+								    "SELECT balance, token "
+								    "FROM o_bank_account "
+								    f"WHERE id = {v_from}")[0]
+								to_bal, to_token = con.execute(
+								    "SELECT balance, token "
+								    "FROM o_bank_account "
+								    f"WHERE id = {v_to}")[0]
+								con.execute(
+								    "UPDATE o_bank_account "
+								    f"SET balance = {from_bal - amount}, "
+								    f"    token = {to_token} "
+								    f"WHERE id = {v_from}")
+								con.execute(
+								    "UPDATE o_bank_account "
+								    f"SET balance = {to_bal + amount}, "
+								    f"    token = {from_token} "
+								    f"WHERE id = {v_to}")
+						con.rollback()
+						local_rb += 1
+					except Exception:
+						# Same connection-health probe as writer_loop: if even
+						# rollback fails the backend is gone -> reconnect.
+						con_dead = False
+						try:
+							con.rollback()
+						except Exception:
+							con_dead = True
+						if con_dead:
+							try:
+								con.close()
+							except Exception:
+								pass
+							con = None
+							local_disc += 1
+			finally:
+				if con is not None:
+					try:
+						con.close()
+					except Exception:
+						pass
+				with counters_lock:
+					rollback_count[0] += local_rb
+					disconnect_count[0] += local_disc
 
 		def reader_pk_loop(reader_id):
 			con = node.connect()
@@ -1026,6 +1116,9 @@ class RrStressTest(BaseTest):
 		for rid in range(1, n_readers_mixed + 1):
 			threads.append(
 			    threading.Thread(target=reader_mixed_loop, args=(rid,)))
+		for rbid in range(1, n_rollbackers + 1):
+			threads.append(
+			    threading.Thread(target=rollbacker_loop, args=(rbid,)))
 		threads.append(threading.Thread(target=checkpointer_loop))
 		if wal_chaos_points:
 			threads.append(threading.Thread(target=wal_chaos_loop))
@@ -1043,7 +1136,7 @@ class RrStressTest(BaseTest):
 		    f'\n[config] storage={STORAGE_ENGINE} '
 		    f'duration={duration} writers={n_writers} '
 		    f'readers_pk={n_readers_pk} readers_sk={n_readers_sk} '
-		    f'readers_mixed={n_readers_mixed} '
+		    f'readers_mixed={n_readers_mixed} rollbackers={n_rollbackers} '
 		    f'injection_points={len(wal_chaos_points)} '
 		    f'list={wal_chaos_points}'
 		    f'{_kill_cfg}', flush=True)
@@ -1155,6 +1248,7 @@ class RrStressTest(BaseTest):
 		    f'\n[totals] writes={write_count[0]} '
 		    f'reads={read_count[0]} '
 		    f'conflicts={conflict_count[0]} '
+		    f'rollbacks={rollback_count[0]} '
 		    f'{_disc_breakdown}'
 		    f'{_kill_field} '
 		    f'first_error_at={_fet_s} '
