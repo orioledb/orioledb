@@ -1735,24 +1735,10 @@ recovery_finish(int worker_id)
 		pairingheap_free(retain_undo_queues[i]);
 	}
 	if (worker_id < 0)
+	{
 		pairingheap_free(xmin_queue);
-
-	/*
-	 * Do NOT advance runXmin here.  Recovery has just aborted in-flight oxids
-	 * in memory; if recovery_finish_aborted_oxids is non-empty, the
-	 * after-checkpoint hook will emit a WAL_REC_ROLLBACK for each, stamping
-	 * the record's xmin with the current runXmin.  If we advanced runXmin to
-	 * nextXid here, the post-recovery checkpoint that runs between
-	 * recovery_finish() and o_emit_recovery_finish_rollbacks() would persist
-	 * the advanced horizon as control.checkpointRetainXmin, and the standby
-	 * would replay that checkpoint before seeing the ROLLBACK records that
-	 * justify it.  After the standby's globalXmin slid forward, the ROLLBACK
-	 * records would then drag it back across slots already stamped FROZEN,
-	 * breaking oxid_get_csn()'s fast-path (orioledb/orioledb#889).
-	 * free_run_xmin() is deferred to o_emit_recovery_finish_rollbacks() so
-	 * the WAL records and the runXmin advance are atomic with respect to
-	 * checkpoint observers.
-	 */
+		free_run_xmin();
+	}
 	if (worker_id >= 0)
 		pg_atomic_write_u64(&worker_ptrs[worker_id].retainPtr,
 							pg_atomic_read_u64(&worker_ptrs[worker_id].commitPtr));
@@ -1787,6 +1773,9 @@ o_emit_recovery_finish_rollbacks(void)
 {
 	int			i;
 
+	if (recovery_finish_aborted_count == 0)
+		return;
+
 	for (i = 0; i < recovery_finish_aborted_count; i++)
 	{
 		elog(LOG, "orioledb: emitting WAL_REC_ROLLBACK for in-flight oxid %lu aborted by recovery_finish",
@@ -1795,23 +1784,10 @@ o_emit_recovery_finish_rollbacks(void)
 										  recovery_finish_aborted_oxids[i].xid);
 	}
 
-	if (recovery_finish_aborted_oxids != NULL)
-	{
-		pfree(recovery_finish_aborted_oxids);
-		recovery_finish_aborted_oxids = NULL;
-		recovery_finish_aborted_count = 0;
-		recovery_finish_aborted_capacity = 0;
-	}
-
-	/*
-	 * Now that every WAL_REC_ROLLBACK has been stamped with the
-	 * checkpoint-era runXmin, it is safe to lift the horizon to nextXid.
-	 * Deferred from recovery_finish() so the post-recovery checkpoint (which
-	 * sits between the two phases) observes the original floor and standbys
-	 * never see a checkpointRetainXmin that gets out from under the ROLLBACK
-	 * records that explain it (orioledb/orioledb#889).
-	 */
-	free_run_xmin();
+	pfree(recovery_finish_aborted_oxids);
+	recovery_finish_aborted_oxids = NULL;
+	recovery_finish_aborted_count = 0;
+	recovery_finish_aborted_capacity = 0;
 }
 
 /*
