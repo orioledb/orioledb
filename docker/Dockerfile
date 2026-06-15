@@ -234,12 +234,15 @@ RUN set -eux; \
 		# tzdata is optional, but only adds around 1Mb to image size and is recommended by Django documentation:
 		# https://docs.djangoproject.com/en/1.10/ref/databases/#optimizing-postgresql-s-configuration
 		tzdata \
+		jemalloc \
 		# install extra icu packages ( >=Alpine3.16 )
 		$EXTRA_ICU_PACKAGES \
 	; \
 	cd / ; \
 	postgres --version ; \
 	initdb --version
+
+ENV LD_PRELOAD=/usr/lib/libjemalloc.so.2
 
 ENV PGDATA=/var/lib/postgresql/data
 # this 777 will be replaced by 700 at runtime (allows semi-arbitrary "--user" values)

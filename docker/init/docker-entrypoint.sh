@@ -68,6 +68,9 @@ docker_init_database_dir() {
 	# "initdb" is particular about the current user existing in "/etc/passwd", so we use "nss_wrapper" to fake that if necessary
 	# see https://github.com/docker-library/postgres/pull/253, https://github.com/docker-library/postgres/issues/359, https://cwrap.org/nss_wrapper.html
 	local uid; uid="$(id -u)"
+	# remember any preexisting LD_PRELOAD (e.g. jemalloc set by the image) so we
+	# can restore it after the nss_wrapper override
+	local origLdPreload="${LD_PRELOAD-}"
 	if ! getent passwd "$uid" &> /dev/null; then
 		# see if we can find a suitable "libnss_wrapper.so" (https://salsa.debian.org/sssd-team/nss-wrapper/-/commit/b9925a653a54e24d09d9b498a2d913729f7abb15)
 		local wrapper
@@ -75,7 +78,7 @@ docker_init_database_dir() {
 			if [ -s "$wrapper" ]; then
 				NSS_WRAPPER_PASSWD="$(mktemp)"
 				NSS_WRAPPER_GROUP="$(mktemp)"
-				export LD_PRELOAD="$wrapper" NSS_WRAPPER_PASSWD NSS_WRAPPER_GROUP
+				export LD_PRELOAD="$wrapper${origLdPreload:+ $origLdPreload}" NSS_WRAPPER_PASSWD NSS_WRAPPER_GROUP
 				local gid; gid="$(id -g)"
 				echo "postgres:x:$uid:$gid:PostgreSQL:$PGDATA:/bin/false" > "$NSS_WRAPPER_PASSWD"
 				echo "postgres:x:$gid:" > "$NSS_WRAPPER_GROUP"
@@ -90,10 +93,15 @@ docker_init_database_dir() {
 
 	eval 'initdb --username="$POSTGRES_USER" --pwfile=<(echo "$POSTGRES_PASSWORD") '"$POSTGRES_INITDB_ARGS"' "$@"'
 
-	# unset/cleanup "nss_wrapper" bits
-	if [[ "${LD_PRELOAD:-}" == */libnss_wrapper.so ]]; then
+	# unset/cleanup "nss_wrapper" bits; restore the original LD_PRELOAD
+	if [ -n "${NSS_WRAPPER_PASSWD-}" ]; then
 		rm -f "$NSS_WRAPPER_PASSWD" "$NSS_WRAPPER_GROUP"
-		unset LD_PRELOAD NSS_WRAPPER_PASSWD NSS_WRAPPER_GROUP
+		unset NSS_WRAPPER_PASSWD NSS_WRAPPER_GROUP
+		if [ -n "$origLdPreload" ]; then
+			export LD_PRELOAD="$origLdPreload"
+		else
+			unset LD_PRELOAD
+		fi
 	fi
 }
 
