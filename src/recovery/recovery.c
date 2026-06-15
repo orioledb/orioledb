@@ -854,6 +854,12 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 						errmsg("could not read xid record from file %s: %m", xidFilename)));
 	offset += sizeof(count);
 
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "GXMIN-TRACE read_xids checkpoint=%d count=%u worker_id=%d pid=%d "
+		 "-- begin checkpoint in-flight xids dump",
+		 checkpointnum, count, worker_id, MyProcPid);
+#endif
+
 	for (i = 0; i < count; i++)
 	{
 		RecoveryXidState *state;
@@ -865,6 +871,14 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 					  WAIT_EVENT_SLRU_READ) != sizeof(xidRec))
 			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("could not read xid record from file %s: %m", xidFilename)));
+
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "GXMIN-TRACE read_xids REC oxid=%lu kind=%d undoLoc=%lu retainLoc=%lu "
+			 "worker_id=%d pid=%d",
+			 (unsigned long) xidRec.oxid, (int) xidRec.kind,
+			 (unsigned long) xidRec.undoLocation.location,
+			 (unsigned long) xidRec.retainLocation, worker_id, MyProcPid);
+#endif
 
 		advance_oxids(xidRec.oxid);
 		state = (RecoveryXidState *) hash_search(recovery_xid_state_hash,
