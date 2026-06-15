@@ -31,7 +31,7 @@
 #include "storage/procsignal.h"
 #include "storage/proc.h"
 #include "utils/snapmgr.h"
-#include "utils/injection_point.h"
+#include "utils/stopevent.h"
 #include "recovery/wal.h"
 
 #define XID_FILE_SIZE (0x1000000)
@@ -579,25 +579,17 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 	CommitSeqNo oldCsn;
 	OXid		writeInProgressXmin;
 
-	/*
-	 * Stress-test injection points.  See test/t/crash/tx_flow.md:149.
-	 * RECURSIVE: this function is called both on commit
-	 * (current_oxid_precommit / current_oxid_commit) AND on abort
-	 * (current_oxid_abort, with csn == COMMITSEQNO_ABORTED).  The
-	 * unguarded variant fires on every entry and PANICs if it raises
-	 * during a commit hit because the resulting abort re-enters here.
-	 * The -guarded variant skips the abort-side flip so an attached
-	 * error-mode injection only ever fires once per tx.
-	 */
-	INJECTION_POINT("orioledb-set-csn");
+	if (STOPEVENT_CONDITION(STOPEVENT_SET_CSN, NULL))
+		elog(ERROR, "stop event \"set_csn\" fired");
 	if (csn != COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
 											  GET_CUR_PROCDATA()->autonomousNestingLevel,
 											  COMMITSEQNO_STATUS_IN_PROGRESS)
 		&& csn != COMMITSEQNO_ABORTED)
 	{
 		if (call_injection) {
-			call_injection  = false;
-			INJECTION_POINT("orioledb-set-csn-guarded");
+			call_injection = false;
+			if (STOPEVENT_CONDITION(STOPEVENT_SET_CSN_GUARDED, NULL))
+				elog(ERROR, "stop event \"set_csn_guarded\" fired");
 		}
 	}
 
@@ -645,19 +637,11 @@ set_oxid_xlog_ptr_internal(OXid oxid, XLogRecPtr ptr)
 	XLogRecPtr	oldPtr;
 	OXid		writeInProgressXmin;
 
-	/*
-	 * Stress-test injection points.  See test/t/crash/tx_flow.md:133.
-	 * RECURSIVE: set_oxid_xlog_ptr is also reached on the abort path
-	 * (set_oxid_xlog_ptr(oxid, InvalidXLogRecPtr) inside
-	 * undo_xact_callback's XACT_EVENT_ABORT case).  The unguarded
-	 * variant raises PANIC if injected with error-mode during a
-	 * commit hit because the abort handler re-enters here.  The
-	 * -guarded variant excludes that abort-side InvalidXLogRecPtr
-	 * call so an error-mode attach is single-shot.
-	 */
-	INJECTION_POINT("orioledb-set-xlog-ptr");
-	if (ptr != InvalidXLogRecPtr)
-		INJECTION_POINT("orioledb-set-xlog-ptr-guarded");
+	if (STOPEVENT_CONDITION(STOPEVENT_SET_XLOG_PTR, NULL))
+		elog(ERROR, "stop event \"set_xlog_ptr\" fired");
+	if (ptr != InvalidXLogRecPtr &&
+		STOPEVENT_CONDITION(STOPEVENT_SET_XLOG_PTR_GUARDED, NULL))
+		elog(ERROR, "stop event \"set_xlog_ptr_guarded\" fired");
 
 	oldPtr = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr);
 	pg_read_barrier();
@@ -1508,6 +1492,10 @@ current_oxid_commit(CommitSeqNo csn)
 	if (!OXidIsValid(curOxid))
 		return;
 
+	/*
+	 * set_oxid_csn is called from multiple places and not every must trigger a
+	 * stopevent, so we need to set call_injection before calling oxid_csn
+	 */
 	call_injection = true;
 	set_oxid_csn(curOxid,
 				 csn | (enable_rewind ? COMMITSEQNO_RETAINED_FOR_REWIND : 0));
@@ -1517,7 +1505,8 @@ current_oxid_commit(CommitSeqNo csn)
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 
 	advance_run_xmin(curOxid);
-	INJECTION_POINT("oriole-before-curOxid-clear");
+	if (STOPEVENT_CONDITION(STOPEVENT_BEFORE_CUROXID_CLEAR, NULL))
+		elog(ERROR, "stop event \"before_curoxid_clear\" fired");
 	curOxid = InvalidOXid;
 	release_assigned_logical_xids();
 }

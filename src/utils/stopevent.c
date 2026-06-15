@@ -426,9 +426,25 @@ check_stopevent(int event_id, Jsonb *params)
 
 	Assert(event_id >= 0 && event_id < STOPEVENTS_COUNT);
 
-	if (event->enabled && check_stopevent_condition(event, params))
-		return true;
+	if (!event->enabled)
+		return false;
 
+	/*
+	 * Callers that pass explicit params own that memory (and may reuse it
+	 * after this call), so leave it alone.  When params is NULL we build a
+	 * throwaway empty document in stopevents_cxt and reclaim everything the
+	 * condition match allocated there, mirroring handle_stopevent().
+	 */
+	if (params)
+		return check_stopevent_condition(event, params);
+
+	params = make_empty_params();
+	if (check_stopevent_condition(event, params))
+	{
+		MemoryContextReset(stopevents_cxt);
+		return true;
+	}
+	MemoryContextReset(stopevents_cxt);
 	return false;
 }
 

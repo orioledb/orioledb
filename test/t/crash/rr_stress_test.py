@@ -5,7 +5,7 @@
 #
 # Standalone bank-account invariant stress test forked from
 # repeatable_read_stress_test.py. Adds env-var configuration,
-# crash watchdog, injection-point trace, post-test backend reaping.
+# crash watchdog, stop-event trace, post-test backend reaping.
 # Use this file for iteration / experiments without touching the
 # original test.
 
@@ -49,7 +49,6 @@ _USING_CLAUSE = 'USING orioledb' if STORAGE_ENGINE == 'orioledb' else ''
 
 SETUP_SQL = f"""
 	CREATE EXTENSION IF NOT EXISTS orioledb;
-	CREATE EXTENSION IF NOT EXISTS injection_points;
 	CREATE EXTENSION IF NOT EXISTS amcheck;
 
 	CREATE TABLE o_bank_account (
@@ -593,26 +592,84 @@ class RrStressTest(BaseTest):
 				except Exception:
 					pass
 
+		# Stop-event reference (moved out of the C sites).  Each name maps
+		# to a STOPEVENT_CONDITION + elog(ERROR) site; arming it makes the
+		# next backend that reaches the site raise an error.
+		#
+		# (un)guarded mechanism: several sites sit in functions that are
+		# reached on BOTH the commit and the abort path -- the function
+		# recurses because an ERROR raised on commit drives the abort, which
+		# re-enters the same function.  Arming the bare (unguarded) event
+		# would fire a second time during that abort, where ereport escalates
+		# to PANIC, crashing the backend.  Each such site therefore has a
+		# `_guarded` twin that fires only on the commit-side entry (gated by
+		# an isCommit-style check: the rec_type, the wal_in_rollback flag, or
+		# a non-abort csn), so an armed error stays single-shot.  This list
+		# arms only the `_guarded` names below (clean, recoverable errors);
+		# the unguarded twins are armed by `assert_chaos_points` instead,
+		# since firing them PANICs the cluster via the abort re-entry above.
+		#
+		#   set_csn_guarded (set_oxid_csn): also reached on abort via
+		#       current_oxid_abort (csn == COMMITSEQNO_ABORTED).
+		#   set_xlog_ptr_guarded (set_oxid_xlog_ptr): also reached on abort
+		#       via set_oxid_xlog_ptr(oxid, InvalidXLogRecPtr) in the
+		#       XACT_EVENT_ABORT case.
+		#   add_finish_wal_guarded (add_finish_wal_record): invoked for both
+		#       WAL_REC_COMMIT (wal_commit) and WAL_REC_ROLLBACK
+		#       (wal_rollback).
+		#   wal_flush_guarded (flush_local_wal + flush_local_wal_if_needed
+		#       overflow path): every flushed WAL batch funnels through here;
+		#       also called from wal_rollback.
+		#   csn_incremented (undo_xact_callback, XACT_EVENT_COMMIT):
+		#       window between the global CSN increment and the per-oxid CSN
+		#       flip in current_oxid_commit -- nextCommitSeqNo has advanced
+		#       but our oxid still reads INPROGRESS in xidBuffer.  Concurrent
+		#       readers acquiring a fresh CSN here see one past ours.
+		#       Commit-side only -- not reached during abort.
+		#   pk_mutated_pre_wal (o_tbl_update): PK leaf has been mutated in
+		#       shared buffers and is already write-unlocked; the undo record
+		#       is pushed and leafTuphdr->undoLocation is wired up, but
+		#       WAL_REC_UPDATE has NOT been packed into the local WAL buffer
+		#       yet.  Concurrent readers can already see the leaf and rely on
+		#       the lock-free undo chain + INPROGRESS CSN for the pre-image.
+		#       Firing here drives apply_undo_stack to revert the page with
+		#       no preceding WAL record -- exercises the "page changed but no
+		#       WAL" abort/recovery path.
+		#   update_pk_done_pre_sk (o_update): boundary between Phase 1 (PK
+		#       update via TableAM -- page mutation + WAL_REC_UPDATE in local
+		#       buffer) and Phase 2 (SK update via IndexAM dispatched by PG
+		#       core's ExecUpdateIndexTuples).  At this instant a reader
+		#       scanning by a changed SK column would still resolve to the
+		#       *old* key.  Not on the abort handler call graph -- safe
+		#       error-mode.
+		#   sk_mid_update (o_update): window between SK old-key delete and SK
+		#       new-key insert.  The PK already holds the new row image, but
+		#       this SK is missing the entry entirely (neither old key nor
+		#       new key resolves to this row).  An SK-ordered scan would skip
+		#       the row at this instant -- the bank-test reader_sk invariant
+		#       catches it directly.
+		#   before_curoxid_clear: leads to PK/SK desync; currently does not
+		#       look like a real problem.  Needs further investigation.
+		#   commit_assert (assert_chaos_points): raising inside the crit
+		#       section upgrades the ereport(ERROR) into PANIC, which exits
+		#       the backend via abort() and triggers postmaster crash
+		#       recovery.
 		wal_chaos_points = [
-			'before-tx-commit',
-			# 'postgres-precommit-on-commit-actions', -> recursion during injection detach
-			# detaching tx wanna commit and fall into the precommit injection
-			'orioledb-set-csn-guarded',
-			'orioledb-set-xlog-ptr-guarded',
-			'orioledb-add-finish-wal-guarded',
-			'orioledb-wal-flush-guarded',
-			'orioledb-csn-incremented',
-			'orioledb-after-flush-local-wal',
-			'orioledb-after-local_wal_has_material_changes-true',
-			'oriole-before-on-commit-undo-stack',
-			'oriole-before-curOxid-clear', # leads to PK/SK desync, currently does not look as a real problem. Nedd further investigation
-			'orioledb-pk-mutated-pre-wal',
-			'orioledb-update-pk-done-pre-sk',
-			'orioledb-sk-mid-update',
+			'set_csn_guarded',
+			'set_xlog_ptr_guarded',
+			'add_finish_wal_guarded',
+			'wal_flush_guarded',
+			'csn_incremented',
+			'after_flush_local_wal',
+			'before_on_commit_undo_stack',
+			'before_curoxid_clear',
+			'pk_mutated_pre_wal',
+			'update_pk_done_pre_sk',
+			'sk_mid_update',
 		]
-		# `orioledb-commit-assert` and `orioledb-before-pre-commit-wal-finish`
-		# are NOT in `wal_chaos_points` because attaching either always
-		# causes a PANIC (both sit inside a START_CRIT_SECTION).  They
+		# `commit_assert` and `before_pre_commit_wal_finish`
+		# are NOT in `wal_chaos_points` because arming either always
+		# causes a PANIC (both raise inside a START_CRIT_SECTION).  They
 		# share a dedicated worker (`assert_chaos_loop` below) that arms
 		# one of them on a slow, duration-relative cadence so we get a
 		# controlled number of crash+recovery cycles per run instead of
@@ -647,8 +704,8 @@ class RrStressTest(BaseTest):
 						rating.sort(key=lambda x: x[1])
 
 						con.execute(
-							"SELECT injection_points_attach("
-							f"'{rating[0][0]}', 'error')")
+							"SELECT pg_stopevent_set("
+							f"'{rating[0][0]}', 'true')")
 						con.commit()
 						current_injection[0] = rating[0][0]
 						with attach_counts_lock:
@@ -668,7 +725,7 @@ class RrStressTest(BaseTest):
 					try:
 						for point in wal_chaos_points:
 							con.execute(
-							    "SELECT injection_points_detach("
+							    "SELECT pg_stopevent_reset("
 							    f"'{point}')")
 						con.commit()
 						current_injection[0] = None
@@ -682,7 +739,7 @@ class RrStressTest(BaseTest):
 				try:
 					for point in wal_chaos_points:
 						con.execute(
-						    "SELECT injection_points_detach("
+						    "SELECT pg_stopevent_reset("
 						    f"'{point}')")
 					con.commit()
 				except Exception:
@@ -695,12 +752,29 @@ class RrStressTest(BaseTest):
 				except Exception:
 					pass
 
-		# produce the state corruption without nay injection enabled
+		# produce the state corruption without any stop event enabled
+		#
+		# Two kinds of PANIC site live here:
+		#   - crit-section sites (commit_assert, before_pre_commit_wal_finish,
+		#     before_xlog_insert, after_page_io): the elog(ERROR) is raised
+		#     inside a START_CRIT_SECTION, so it escalates to PANIC directly.
+		#   - unguarded twins (set_csn, set_xlog_ptr, add_finish_wal,
+		#     wal_flush): the first hit on the commit path raises a clean
+		#     ERROR, but the resulting abort re-enters the same function and
+		#     re-fires during XACT_EVENT_ABORT, where ereport escalates to
+		#     PANIC (this is exactly what the `_guarded` twins in
+		#     `wal_chaos_points` are designed to avoid).
+		# Either way the cluster goes down, so all of them share the slow,
+		# duration-relative `assert_chaos_loop` cadence.
 		assert_chaos_points = [
-			'orioledb-commit-assert',
-			'orioledb-before-pre-commit-wal-finish',
-			'orioledb-before-xlog-insert',
-			'orioledb-after-page-io',
+			'commit_assert',
+			'before_pre_commit_wal_finish',
+			'before_xlog_insert',
+			'after_page_io',
+			'set_csn',
+			'set_xlog_ptr',
+			'add_finish_wal',
+			'wal_flush',
 		]
 		_env_assert_pts = os.getenv('RR_ASSERT_POINTS')
 		if _env_assert_pts and _env_assert_pts != 'ALL':
@@ -710,19 +784,19 @@ class RrStressTest(BaseTest):
 			    p for p in assert_chaos_points if p in _assert_subset]
 
 		def assert_chaos_loop():
-			# Periodically arm one of `assert_chaos_points`.  Each point
-			# sits inside a START_CRIT_SECTION, so an attached `error`
-			# action turns into a PANIC on the next commit -- which
-			# takes the cluster down.  Same pattern as `wal_chaos_loop`:
-			# pick one via rating tournament, attach -> `time.sleep(0.5)`
-			# (release GIL for 500 ms so a writer has a realistic
-			# chance to slip into commit at low writer counts) ->
-			# detach every point in the list.  The attach window is
-			# wide enough that at higher writer counts several
-			# backends may hit the injection before the worker pulls
-			# it back; postmaster's quickdie fan-out kills every
-			# other backend, so the in-process abort pileup is still
-			# bounded.
+			# Periodically arm one of `assert_chaos_points`.  Every point
+			# here turns into a PANIC once it fires (directly via a
+			# START_CRIT_SECTION, or via abort re-entry for the unguarded
+			# twins -- see the list above), which takes the cluster down.
+			# Same pattern as `wal_chaos_loop`: pick one
+			# via rating tournament, arm -> `time.sleep(0.5)` (release
+			# GIL for 500 ms so a writer has a realistic chance to slip
+			# into commit at low writer counts) -> reset every point in
+			# the list.  The arm window is wide enough that at higher
+			# writer counts several backends may hit the event before
+			# the worker pulls it back; postmaster's quickdie fan-out
+			# kills every other backend, so the in-process abort pileup
+			# is still bounded.
 			target = max(_env_int('RR_ASSERT_FIRINGS', 0), 1)
 			interval = max(duration / (target + 1), 1.0)
 			con = None
@@ -750,8 +824,8 @@ class RrStressTest(BaseTest):
 						rating.sort(key=lambda x: x[1])
 						chosen = rating[0][0]
 						con.execute(
-						    "SELECT injection_points_attach("
-						    f"'{chosen}', 'error')")
+						    "SELECT pg_stopevent_set("
+						    f"'{chosen}', 'true')")
 						con.commit()
 						local_arms += 1
 						next_arm_at = time.time() + interval
@@ -773,12 +847,12 @@ class RrStressTest(BaseTest):
 					try:
 						for point in assert_chaos_points:
 							con.execute(
-							    "SELECT injection_points_detach("
+							    "SELECT pg_stopevent_reset("
 							    f"'{point}')")
 						con.commit()
 					except Exception:
-						# Detach failed -- cluster almost certainly
-						# PANICked while the injection was armed.
+						# Reset failed -- cluster almost certainly
+						# PANICked while the stop event was armed.
 						# Drop the now-broken connection; we'll
 						# reconnect on the next iteration.
 						try:
@@ -791,7 +865,7 @@ class RrStressTest(BaseTest):
 					try:
 						for point in assert_chaos_points:
 							con.execute(
-							    "SELECT injection_points_detach("
+							    "SELECT pg_stopevent_reset("
 							    f"'{point}')")
 						con.commit()
 					except Exception:
@@ -1044,7 +1118,7 @@ class RrStressTest(BaseTest):
 		    f'duration={duration} writers={n_writers} '
 		    f'readers_pk={n_readers_pk} readers_sk={n_readers_sk} '
 		    f'readers_mixed={n_readers_mixed} '
-		    f'injection_points={len(wal_chaos_points)} '
+		    f'stopevents={len(wal_chaos_points)} '
 		    f'list={wal_chaos_points}'
 		    f'{_kill_cfg}', flush=True)
 
@@ -1077,7 +1151,7 @@ class RrStressTest(BaseTest):
 
 		# Final authoritative check against the PG log.  Match both
 		# `PANIC` (ereport-driven) and `TRAP:` (Assert-driven crashes
-		# such as the orioledb-commit-assert injection).
+		# such as the commit_assert stop event).
 		log_path = os.path.join(node.logs_dir, 'postgresql.log')
 		panic_lines = []
 		try:

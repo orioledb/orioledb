@@ -37,7 +37,6 @@
 #include "tableam/handler.h"
 #include "utils/compress.h"
 #include "utils/elog.h"
-#include "utils/injection_point.h"
 #include "utils/page_pool.h"
 #include "utils/seq_buf.h"
 #include "utils/stopevent.h"
@@ -2250,9 +2249,15 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 			new_downlink = perform_page_io(desc, blkno, p,
 										   checkpoint_number, copy_blkno, &dirty_parent);
 
-			START_CRIT_SECTION();
-			INJECTION_POINT("orioledb-after-page-io");
-			END_CRIT_SECTION();
+			if (STOPEVENT_CONDITION(STOPEVENT_AFTER_PAGE_IO, NULL))
+			{
+				/*
+				 * CRIT_SECTION + elog(ERROR) = PANIC
+				 */
+				START_CRIT_SECTION();
+				elog(ERROR, "stop event \"after_page_io\" fired");
+				END_CRIT_SECTION();
+			}
 
 			if (DiskDownlinkIsValid(new_downlink))
 				writeback_put_extent(&io_writeback, desc, new_downlink);
@@ -2279,9 +2284,15 @@ write_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno, Page img,
 			new_downlink = perform_page_io(desc, blkno, img,
 										   checkpoint_number, copy_blkno, &dirty_parent);
 
-			START_CRIT_SECTION();
-			INJECTION_POINT("orioledb-after-page-io");
-			END_CRIT_SECTION();
+			if (STOPEVENT_CONDITION(STOPEVENT_AFTER_PAGE_IO, NULL))
+			{
+				/*
+				 * CRIT_SECTION + elog(ERROR) = PANIC
+				 */
+				START_CRIT_SECTION();
+				elog(ERROR, "stop event \"after_page_io\" fired");
+				END_CRIT_SECTION();
+			}
 
 			if (DiskDownlinkIsValid(new_downlink))
 				writeback_put_extent(&io_writeback, desc, new_downlink);
