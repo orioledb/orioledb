@@ -389,24 +389,17 @@ class RrStressTest(BaseTest):
 				disconnect_count[0] += local_disc
 
 		def rollbacker_loop(rollbacker_id):
-			# Abort-path traffic generator.  Every iteration opens a
-			# REPEATABLE READ tx and ALWAYS ends it with rollback(), never
-			# commit() -- so it never alters committed state and never
-			# touches the token universe (no pocket, no drain).  Its purpose
-			# is to feed the abort path that produces deferred WAL_REC_ROLLBACK
-			# records on crash recovery (the streaming-standby livelock /
-			# update_run_xmin-assert trigger).  A coin flip picks between two
-			# abort shapes each round:
-			#   2.1  empty tx: open RR, sleep, rollback with no DML.  Intended
-			#        to exercise wal_rollback's no-material-changes fast path.
-			#        NB: orioledb assigns an oxid lazily (on first modify), so
-			#        a tx that does zero writes may never acquire an oxid and
-			#        thus never reach wal_rollback at all -- it can be a pure
-			#        no-op.  Kept as specified; the oxid-bearing empty aborts
-			#        come mostly from txns SIGKILL'd mid-write.
-			#   2.2  dirty tx: do the same 2-row token swap as writer_loop,
-			#        then rollback instead of commit -- a has-material-changes
-			#        abort (durable rollback record / undo to unwind).
+			# TEMPORARY EXPERIMENT (fast-path-only): every iteration opens a
+			# REPEATABLE READ tx, forces an oxid with NO material changes via
+			# orioledb_get_current_oxid(), sleeps holding it, then rollback().
+			# This manufactures the exact toxic population at the heart of the
+			# bug: a no-material-change abort that takes wal_rollback's
+			# !has_material_changes fast path -> no durable rollback record ->
+			# resurrected as in-flight by crash recovery -> deferred
+			# WAL_REC_ROLLBACK.  The orioledb_get_current_oxid() call is what
+			# makes this exercise the fast path at all: a bare BEGIN/ROLLBACK
+			# acquires no oxid (lazy assignment) and never reaches wal_rollback.
+			# The dirty (has-material-changes) variant is disabled for this run.
 			con = node.connect()
 			local_rb = 0
 			local_disc = 0
@@ -422,33 +415,10 @@ class RrStressTest(BaseTest):
 							continue
 					try:
 						con.begin(IsolationLevel.RepeatableRead)
-						if random.randint(0, 1) == 0:
-							# 2.1 empty abort: sleep, then rollback.
-							time.sleep(random.randint(0, 10) * 0.1)
-						else:
-							# 2.2 dirty abort: writer-style swap, then rollback.
-							v_from = random.randint(1, n_accounts)
-							v_to = random.randint(1, n_accounts)
-							if v_from != v_to:
-								amount = random.randint(1, 10)
-								from_bal, from_token = con.execute(
-								    "SELECT balance, token "
-								    "FROM o_bank_account "
-								    f"WHERE id = {v_from}")[0]
-								to_bal, to_token = con.execute(
-								    "SELECT balance, token "
-								    "FROM o_bank_account "
-								    f"WHERE id = {v_to}")[0]
-								con.execute(
-								    "UPDATE o_bank_account "
-								    f"SET balance = {from_bal - amount}, "
-								    f"    token = {to_token} "
-								    f"WHERE id = {v_from}")
-								con.execute(
-								    "UPDATE o_bank_account "
-								    f"SET balance = {to_bal + amount}, "
-								    f"    token = {from_token} "
-								    f"WHERE id = {v_to}")
+						# Force oxid assignment with no material WAL, then hold
+						# it across the sleep so a SIGKILL can catch it in-flight.
+						con.execute("SELECT orioledb_get_current_oxid()")
+						time.sleep(random.randint(0, 10) * 0.1)
 						con.rollback()
 						local_rb += 1
 					except Exception:
