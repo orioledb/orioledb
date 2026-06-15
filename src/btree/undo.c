@@ -123,9 +123,9 @@ page_needs_page_level_undo(BTreeDescr *desc, OInMemoryBlkno blkno, Page p,
 						   uint32 pageChangeCount, OXid opOxid)
 {
 	UndoLogType pageUndoType = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
-//	UndoMeta   *meta;
-//	UndoLocation lastUsed;
-//	int			i;
+	UndoMeta   *meta;
+	UndoLocation lastUsed;
+	int			i;
 
 	if (!O_PAGE_IS(p, LEAF))
 		return false;
@@ -170,23 +170,23 @@ page_needs_page_level_undo(BTreeDescr *desc, OInMemoryBlkno blkno, Page p,
 	 * safe, because the PAGE_GET_N_VACATED check above already rules out
 	 * compaction removing tuples those snapshots could see.
 	 */
-//	meta = get_undo_meta_by_type(pageUndoType);
-//	lastUsed = pg_atomic_read_u64(&meta->lastUsedLocation);
-//	for (i = 0; i < max_procs; i++)
-//	{
-//		UndoLocation retain;
+	meta = get_undo_meta_by_type(pageUndoType);
+	lastUsed = pg_atomic_read_u64(&meta->lastUsedLocation);
+	for (i = 0; i < max_procs; i++)
+	{
+		UndoLocation retain;
 
-//		if (i == MYPROCNUMBER)
-//			continue;
+		if (i == MYPROCNUMBER)
+			continue;
 
-//		retain = pg_atomic_read_u64(&oProcData[i].undoRetainLocations[pageUndoType].snapshotRetainUndoLocation);
-//		if (UndoLocationIsValid(retain) && retain < lastUsed)
-//			return true;
+		retain = pg_atomic_read_u64(&oProcData[i].undoRetainLocations[pageUndoType].snapshotRetainUndoLocation);
+		if (UndoLocationIsValid(retain) && retain < lastUsed)
+			return true;
 
 //		retain = pg_atomic_read_u64(&oProcData[i].undoRetainLocations[pageUndoType].transactionUndoRetainLocation);
 //		if (UndoLocationIsValid(retain) && retain < lastUsed)
 //			return true;
-//	}
+	}
 
 	return false;
 }
