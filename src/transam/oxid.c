@@ -1421,17 +1421,12 @@ current_oxid_precommit(void)
 	if (!OXidIsValid(curOxid))
 		return;
 
-	elog(LOG, "set_oxid_csn called from current_oxid_precommit pid=%d oxid=%lu\n",
-		MyProcPid, (unsigned long) curOxid);
 	set_oxid_csn(curOxid, COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
 												   GET_CUR_PROCDATA()->autonomousNestingLevel,
 												   COMMITSEQNO_STATUS_CSN_COMMITTING));
 	csn_committing_set = true;
 
 	pg_write_barrier();
-
-	elog(LOG, "set_oxid_csn finished from current_oxid_precommit pid=%d oxid=%lu\n",
-		MyProcPid, (unsigned long) curOxid);
 }
 
 void
@@ -1512,16 +1507,13 @@ current_oxid_commit(CommitSeqNo csn)
 
 	if (!OXidIsValid(curOxid))
 		return;
-	elog(LOG, "set_oxid_csn called from current_oxid_commit pid=%d oxid=%lu\n",
-		MyProcPid, (unsigned long) curOxid);
+
 	call_injection = true;
 	set_oxid_csn(curOxid,
 				 csn | (enable_rewind ? COMMITSEQNO_RETAINED_FOR_REWIND : 0));
 	// error-injection inside set_oxid_csn -> Bug #2 (silent replica divergence)
 	//                                              (orioledb-set-csn-guarded from commit caller: ~10-15%)
 	pg_write_barrier();
-	elog(LOG, "set_oxid_csn finished from current_oxid_commit pid=%d oxid=%lu\n",
-		MyProcPid, (unsigned long) curOxid);
 	csn_committing_set = false;
 	xlog_ptr_committing_set = false;
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
@@ -1545,11 +1537,9 @@ current_oxid_abort(void)
 	ODBProcData *my_proc_info = &oProcData[MYPROCNUMBER];
 
 	if (!OXidIsValid(curOxid))
-	{
 		return;
-	}
 
-	set_oxid_csn(curOxid, COMMITSEQNO_ABORTED);
+	set_oxid_csn calledset_oxid_csn(curOxid, COMMITSEQNO_ABORTED);
 	pg_write_barrier();
 	csn_committing_set = false;
 	xlog_ptr_committing_set = false;
@@ -1593,27 +1583,19 @@ current_oxid_clear_committing(void)
 
 	if (csn_committing_set)
 	{
-		elog(LOG, "set_oxid_csn called from current_oxid_clear_committing pid=%d oxid=%lu\n",
-			MyProcPid, (unsigned long) curOxid);
 		set_oxid_csn(curOxid,
 					 COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
 											  nestingLevel,
 											  COMMITSEQNO_STATUS_IN_PROGRESS));
-		elog(LOG, "set_oxid_csn finished from current_oxid_clear_committing pid=%d oxid=%lu\n",
-			MyProcPid, (unsigned long) curOxid);
 		csn_committing_set = false;
 	}
 
 	if (xlog_ptr_committing_set)
 	{
-		elog(LOG, "set_oxid_xlog_ptr_internal called from current_oxid_clear_committing pid=%d oxid=%lu\n",
-			MyProcPid, (unsigned long) curOxid);
 		set_oxid_xlog_ptr_internal(curOxid,
 								   XLOG_PTR_MAKE_SPECIAL(MYPROCNUMBER,
 														 nestingLevel,
 														 XLOG_PTR_IN_PROGRESS));
-		elog(LOG, "set_oxid_xlog_ptr_internal finished from current_oxid_clear_committing pid=%d oxid=%lu\n",
-			MyProcPid, (unsigned long) curOxid);
 		xlog_ptr_committing_set = false;
 	}
 
@@ -1632,18 +1614,14 @@ oxid_get_csn(OXid oxid, bool getRawCsn)
 	SpinDelayStatus status;
 
 	if (oxid == BootstrapTransactionId)
-	{
 		return COMMITSEQNO_FROZEN;
-	}
 
 	init_local_spin_delay(&status);
 
 	while (true)
 	{
 		if (oxid < pg_atomic_read_u64(&xid_meta->globalXmin))
-		{
 			return COMMITSEQNO_FROZEN;
-		}
 
 		map_oxid(oxid, &csn, NULL, getRawCsn);
 		if (COMMITSEQNO_IS_SPECIAL(csn) &&
@@ -1656,9 +1634,7 @@ oxid_get_csn(OXid oxid, bool getRawCsn)
 	finish_spin_delay(&status);
 
 	if (COMMITSEQNO_IS_SPECIAL(csn))
-	{
 		return COMMITSEQNO_INPROGRESS;
-	}
 
 	return csn;
 }
@@ -1758,7 +1734,6 @@ oxid_match_snapshot(OXid oxid, OSnapshot *snapshot,
 	}
 
 	finish_spin_delay(&status);
-
 }
 
 void
