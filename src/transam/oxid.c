@@ -102,8 +102,6 @@ static OXid curOxid = InvalidOXid;	/* a 64-bit OrioleDB oxid */
 static bool csn_committing_set = false;
 static bool xlog_ptr_committing_set = false;
 
-extern bool commit_wal_record_added;
-
 static LogicalXidCtx logicalXidContext = {InvalidTransactionId, false};
 
 static bool call_injection = false;
@@ -1423,9 +1421,8 @@ current_oxid_precommit(void)
 	if (!OXidIsValid(curOxid))
 		return;
 
-	/* elog disabled: inside replica-bug-fix CRIT_SECTION (palloc forbidden)
 	elog(LOG, "set_oxid_csn called from current_oxid_precommit pid=%d oxid=%lu\n",
-		MyProcPid, (unsigned long) curOxid); */
+		MyProcPid, (unsigned long) curOxid);
 	set_oxid_csn(curOxid, COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
 												   GET_CUR_PROCDATA()->autonomousNestingLevel,
 												   COMMITSEQNO_STATUS_CSN_COMMITTING));
@@ -1433,9 +1430,8 @@ current_oxid_precommit(void)
 
 	pg_write_barrier();
 
-	/* elog disabled: inside replica-bug-fix CRIT_SECTION (palloc forbidden)
 	elog(LOG, "set_oxid_csn finished from current_oxid_precommit pid=%d oxid=%lu\n",
-		MyProcPid, (unsigned long) curOxid); */
+		MyProcPid, (unsigned long) curOxid);
 }
 
 void
@@ -1516,18 +1512,16 @@ current_oxid_commit(CommitSeqNo csn)
 
 	if (!OXidIsValid(curOxid))
 		return;
-	/* elog disabled: inside replica-bug-fix CRIT_SECTION (palloc forbidden)
 	elog(LOG, "set_oxid_csn called from current_oxid_commit pid=%d oxid=%lu\n",
-		MyProcPid, (unsigned long) curOxid); */
+		MyProcPid, (unsigned long) curOxid);
 	call_injection = true;
 	set_oxid_csn(curOxid,
 				 csn | (enable_rewind ? COMMITSEQNO_RETAINED_FOR_REWIND : 0));
 	// error-injection inside set_oxid_csn -> Bug #2 (silent replica divergence)
 	//                                              (orioledb-set-csn-guarded from commit caller: ~10-15%)
 	pg_write_barrier();
-	/* elog disabled: inside replica-bug-fix CRIT_SECTION (palloc forbidden)
 	elog(LOG, "set_oxid_csn finished from current_oxid_commit pid=%d oxid=%lu\n",
-		MyProcPid, (unsigned long) curOxid); */
+		MyProcPid, (unsigned long) curOxid);
 	csn_committing_set = false;
 	xlog_ptr_committing_set = false;
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
@@ -1537,18 +1531,11 @@ current_oxid_commit(CommitSeqNo csn)
 	//                                  partially reverts because xidBuffer.csn=real_csn)
 	//                                 (oriole-before-curOxid-clear: 2/4 BUGs ~50%)
 	INJECTION_POINT("oriole-before-curOxid-clear");
-	curOxid = InvalidOXid;
 	// ◄── THE BUG WINDOW CLOSES HERE: clearing curOxid causes
 	//     get_current_oxid_if_any() to return InvalidOXid, which makes
 	//     undo_xact_callback's early-return at the case entry skip the entire
 	//     abort path (wal_rollback, current_oxid_abort, apply_undo_stack).
-	if (commit_wal_record_added)
-	{
-		commit_wal_record_added = false;
-		END_CRIT_SECTION();
-	}
-	// Finished CRIT_SECTION for replica-bug-fix
-
+	curOxid = InvalidOXid;
 	release_assigned_logical_xids();
 }
 
