@@ -1511,22 +1511,13 @@ current_oxid_commit(CommitSeqNo csn)
 	call_injection = true;
 	set_oxid_csn(curOxid,
 				 csn | (enable_rewind ? COMMITSEQNO_RETAINED_FOR_REWIND : 0));
-	// error-injection inside set_oxid_csn -> Bug #2 (silent replica divergence)
-	//                                              (orioledb-set-csn-guarded from commit caller: ~10-15%)
 	pg_write_barrier();
 	csn_committing_set = false;
 	xlog_ptr_committing_set = false;
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 
 	advance_run_xmin(curOxid);
-	// error-injection here -> Bug #4 (primary PK/SK desync; apply_undo_stack
-	//                                  partially reverts because xidBuffer.csn=real_csn)
-	//                                 (oriole-before-curOxid-clear: 2/4 BUGs ~50%)
 	INJECTION_POINT("oriole-before-curOxid-clear");
-	// ◄── THE BUG WINDOW CLOSES HERE: clearing curOxid causes
-	//     get_current_oxid_if_any() to return InvalidOXid, which makes
-	//     undo_xact_callback's early-return at the case entry skip the entire
-	//     abort path (wal_rollback, current_oxid_abort, apply_undo_stack).
 	curOxid = InvalidOXid;
 	release_assigned_logical_xids();
 }
@@ -1539,7 +1530,7 @@ current_oxid_abort(void)
 	if (!OXidIsValid(curOxid))
 		return;
 
-	set_oxid_csn calledset_oxid_csn(curOxid, COMMITSEQNO_ABORTED);
+	set_oxid_csn(curOxid, COMMITSEQNO_ABORTED);
 	pg_write_barrier();
 	csn_committing_set = false;
 	xlog_ptr_committing_set = false;
