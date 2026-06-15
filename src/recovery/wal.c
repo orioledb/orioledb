@@ -424,6 +424,18 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 
 	if (!local_wal.has_material_changes)
 	{
+#ifdef USE_INJECTION_POINTS
+		/*
+		 * Fast-path abort: no material changes were buffered, so wal_rollback
+		 * writes NOTHING durable.  Log oxid-bearing cases (the ones that can
+		 * be re-discovered as in-flight by crash recovery and turned into a
+		 * deferred WAL_REC_ROLLBACK).
+		 */
+		if (OXidIsValid(oxid))
+			elog(LOG, "GXMIN-TRACE wal_rollback FAST-PATH oxid=%lu logicalXid=%u "
+				 "(no material changes -> no durable rollback record) pid=%d",
+				 (unsigned long) oxid, logicalXid, MyProcPid);
+#endif
 		local_wal.buffer_offset = 0;
 		local_wal.ix_type = oIndexInvalid;
 		ORelOidsSetInvalid(local_wal.oids);
