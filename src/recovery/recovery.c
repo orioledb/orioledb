@@ -2537,6 +2537,22 @@ update_run_xmin(void)
 	int			i;
 	bool		found;
 
+#ifdef USE_INJECTION_POINTS
+	{
+		OXid		qmin = InvalidOXid;
+
+		if (!pairingheap_is_empty(xmin_queue))
+			qmin = pairingheap_container(RecoveryXidState, xmin_ph_node,
+										 pairingheap_first(xmin_queue))->oxid;
+		elog(LOG, "GXMIN-TRACE update_run_xmin BEGIN recovery_xmin=%lu queue_min_oxid=%lu "
+			 "globalXmin=%lu runXmin=%lu nextXid=%lu pid=%d",
+			 (unsigned long) recovery_xmin, (unsigned long) qmin,
+			 (unsigned long) pg_atomic_read_u64(&xid_meta->globalXmin),
+			 (unsigned long) pg_atomic_read_u64(&xid_meta->runXmin),
+			 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid), MyProcPid);
+	}
+#endif
+
 	/*
 	 * Drain any fast-path-aborted oxids off the top of xmin_queue.  An entry
 	 * that is in xmin_queue because the checkpoint's xids file named it
@@ -2682,6 +2698,15 @@ update_run_xmin(void)
 	}
 #endif
 	Assert(xmin >= pg_atomic_read_u64(&xid_meta->globalXmin));
+
+#ifdef USE_INJECTION_POINTS
+	elog(LOG, "GXMIN-TRACE update_run_xmin END recovery_xmin=%lu wrote_runXmin=%lu "
+		 "globalXmin=%lu queue_min_oxid=%lu nextXid=%lu pid=%d",
+		 (unsigned long) recovery_xmin, (unsigned long) xmin,
+		 (unsigned long) pg_atomic_read_u64(&xid_meta->globalXmin),
+		 (unsigned long) queue_oxid,
+		 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid), MyProcPid);
+#endif
 }
 
 static void
