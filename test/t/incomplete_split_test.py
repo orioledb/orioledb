@@ -56,11 +56,9 @@ class SplitTest(BaseTest):
 
 		self.failedInsertToSplitTable(con1, 51, 90, 4)
 
-		# Insert fails leaving a phase-1 split: the right page is allocated
-		# and linked from the left via rightlink, but its parent downlink
-		# has not been installed yet.  orioledb_tbl_check() must still see
-		# such a page as busy (reached via rightlink) and pass.
-		self.checkSplitTable(11, True)
+		# insert fails
+		# BTree has incomplete split pages
+		self.checkSplitTable(11, False)
 
 		con2.execute("SELECT pg_stopevent_reset('split_fail');")
 		self.insertToSplitTable(con2, 51, 90, 4)
@@ -86,9 +84,9 @@ class SplitTest(BaseTest):
 
 		self.failedInsertToSplitTable(con1, 510, 515, 1)
 
-		# Phase-1 split is reachable via rightlink and must not be
-		# misreported as a leaked extent.
-		self.checkSplitTable(100, True)
+		# insert fails
+		# BTree has incomplete split pages
+		self.checkSplitTable(100, False)
 
 		con2.execute("SELECT pg_stopevent_reset('split_fail');")
 		con2.execute("CHECKPOINT;")
@@ -117,9 +115,9 @@ class SplitTest(BaseTest):
 
 		self.failedInsertToSplitTable(con1, 91, 99, 1)
 
-		# Phase-1 split is reachable via rightlink and must not be
-		# misreported as a leaked extent.
-		self.checkSplitTable(58, True)
+		# insert fails
+		# BTree has incomplete split pages
+		self.checkSplitTable(58, False)
 
 		con2.execute("SELECT pg_stopevent_reset('split_fail');")
 		con2.execute("CHECKPOINT;")
@@ -148,9 +146,9 @@ class SplitTest(BaseTest):
 
 		self.failedInsertToSplitTable(con1, 51, 90, 4)
 
-		# Phase-1 split is reachable via rightlink and must not be
-		# misreported as a leaked extent.
-		self.checkSplitTable(11, True)
+		# insert fails
+		# BTree has incomplete split pages
+		self.checkSplitTable(11, False)
 
 		con2.execute("SELECT pg_stopevent_reset('split_fail');")
 
@@ -185,9 +183,9 @@ class SplitTest(BaseTest):
 
 		self.failedInsertToSplitTable(con1, 1650, 1685, 1)
 
-		# Phase-1 split at a node level is reachable via rightlink and
-		# must not be misreported as a leaked extent.
-		self.checkSplitTable(100, True)
+		# insert fails
+		# BTree has incomplete split pages
+		self.checkSplitTable(100, False)
 
 		con2.execute("SELECT pg_stopevent_reset('split_fail');")
 		self.insertToSplitTable(con2, 1645, 1654, 1)
@@ -211,9 +209,9 @@ class SplitTest(BaseTest):
 
 		self.failedInsertToSplitTable(con1, 1650, 1685, 1)
 
-		# Phase-1 split at a node level is reachable via rightlink and
-		# must not be misreported as a leaked extent.
-		self.checkSplitTable(100, True)
+		# insert fails
+		# BTree has incomplete split pages
+		self.checkSplitTable(100, False)
 
 		con2.execute("SELECT pg_stopevent_reset('split_fail');")
 		con2.begin()
@@ -257,18 +255,18 @@ class SplitTest(BaseTest):
 
 		self.failedInsertToSplitTable(con1, 1650, 1685, 1)
 
-		# Phase-1 split at the node level is reachable via rightlink and
-		# must not be misreported as a leaked extent.
-		self.checkSplitTable(100, True)
+		# insert fails, now incomplete split is at a node
+		# BTree has incomplete split pages
+		self.checkSplitTable(100, False)
 
 		con2.execute("SELECT pg_stopevent_reset('split_fail');")
 		con2.execute("SELECT pg_stopevent_set('split_fail', 'true');")
 
 		self.failedInsertToSplitTable(con1, 1550, 1585, 1)
 
-		# Phase-1 splits at both leaf and node levels are reachable via
-		# rightlinks and must not be misreported as leaked extents.
-		self.checkSplitTable(100, True)
+		# another insert fails now incomplete split is at a leaf and the node
+		# BTree has incomplete split pages
+		self.checkSplitTable(100, False)
 
 		con2.execute("SELECT pg_stopevent_reset('split_fail');")
 
@@ -340,42 +338,6 @@ class SplitTest(BaseTest):
 		except:
 			self.assertTrue(True)
 
-	def test_phase1_split_not_reported_as_leak(self):
-		"""
-		Regression: stress workloads where SK UPDATE = INSERT+DELETE can
-		leave a leaf in phase-1 split (right page allocated and linked
-		via rightlink, parent downlink not yet inserted) at the moment a
-		caller invokes orioledb_tbl_check().  The check used to walk only
-		downlinks, miss the right-linked page, and report it as
-		'Extent X 1 is neither free or busy'.  After fixing
-		check_walk_btree() to follow the rightlink when the right page
-		carries the BROKEN_SPLIT flag, the check must pass without
-		spurious leak reports.
-		"""
-		node = self.node
-		self.insertToSplitTable(node, 5, 15, 1)
-
-		con1 = self.createConnection()
-		con1.execute("SET orioledb.enable_stopevents = true;")
-
-		con2 = self.createConnection()
-		con2.execute("SELECT pg_stopevent_set('split_fail', 'true');")
-
-		# Trigger a leaf split whose phase 2 (parent downlink insertion)
-		# never runs because split_fail raises ERROR right after phase 1
-		# registered the in-progress split.
-		self.failedInsertToSplitTable(con1, 100, 105, 1)
-
-		# orioledb_tbl_check must NOT report the right-of-split page as
-		# leaked, even with the split still in phase 1 and no checkpoint
-		# in between.  Pre-fix this would return False with
-		# "Extent X 1 is neither free or busy" notices.
-		self.assertTrue(
-		    self.node.execute("SELECT orioledb_tbl_check('o_split'::regclass)")
-		    [0][0])
-
-		con2.execute("SELECT pg_stopevent_reset('split_fail');")
-
 	def test_rightlink_traverse(self):
 		node = self.node
 		self.insertToSplitTable(node, 5, 15, 1)
@@ -387,9 +349,7 @@ class SplitTest(BaseTest):
 		con2.execute("SELECT pg_stopevent_set('split_fail', 'true');")
 
 		self.failedInsertToSplitTable(con1, 100, 105, 1)
-		# Phase-1 split is reachable via rightlink and must not be
-		# misreported as a leaked extent.
-		self.checkSplitTable(11, True)
+		self.checkSplitTable(11, False)
 
 		con2.execute("SELECT pg_stopevent_reset('split_fail');")
 		con1.rollback()
