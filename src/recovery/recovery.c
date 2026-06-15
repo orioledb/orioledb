@@ -2541,6 +2541,18 @@ update_run_xmin(void)
 
 		set_oxid_csn(state->oxid, COMMITSEQNO_ABORTED);
 
+#ifdef USE_INJECTION_POINTS
+		elog(LOG, "GXMIN-TRACE update_run_xmin DRAIN oxid=%lu "
+			 "(recovery_xmin=%lu globalXmin=%lu writtenXmin=%lu nextXid=%lu pid=%d) "
+			 "-- removing fast-path-aborted oxid from xmin_queue",
+			 (unsigned long) state->oxid,
+			 (unsigned long) recovery_xmin,
+			 (unsigned long) pg_atomic_read_u64(&xid_meta->globalXmin),
+			 (unsigned long) pg_atomic_read_u64(&xid_meta->writtenXmin),
+			 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid),
+			 MyProcPid);
+#endif
+
 		/*
 		 * walk_checkpoint_stacks() clobbers recovery_oxid /
 		 * curUndoLocations[] / oxid_needs_wal_flush, but update_run_xmin()
