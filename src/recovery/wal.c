@@ -143,20 +143,6 @@ add_modify_wal_record_extended(uint8 rec_type, BTreeDescr *desc,
 	if (OXidIsValid(recovery_oxid))
 		return;
 
-#ifdef USE_INJECTION_POINTS
-	{
-		OXid		_trc_oxid = get_current_oxid_if_any();
-#if 0  /* new trace disabled per peak-rate-old-traces-only recipe */
-		elog(LOG,
-			 "wal-trace modify pid=%d oxid=%lu rec=%s idx_oids=[%u/%u/%u] idx_type=%d len=%u",
-			 MyProcPid, (unsigned long) _trc_oxid,
-			 wal_record_type_to_string(rec_type),
-			 oids.datoid, oids.reloid, oids.relnode, (int) type,
-			 (unsigned) length);
-#endif
-	}
-#endif
-
 	if (!IS_SYS_TREE_OIDS(oids) && type == oIndexPrimary)
 	{
 		OIndexDescr *id = (OIndexDescr *) desc->arg;
@@ -359,18 +345,7 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 #ifdef USE_INJECTION_POINTS
 	// error-injection here -> Bug #3 (replica PANIC: undo_item_buf_read_item)
 	//                                (orioledb-after-flush-local-wal: 2/2 BUGs ~100%)
-	/* elog disabled: inside replica-bug-fix CRIT_SECTION (palloc forbidden)
-	elog(LOG,
-		 "post-flush-local-wal-trace pre-inject pid=%d oxid=%lu walPos=%X/%X",
-		 MyProcPid, (unsigned long) oxid,
-		 LSN_FORMAT_ARGS(walPos));
-	*/
 	INJECTION_POINT("orioledb-after-flush-local-wal");
-	/* elog disabled: inside replica-bug-fix CRIT_SECTION (palloc forbidden)
-	elog(LOG,
-		 "post-flush-local-wal-trace post-inject (no error fired) pid=%d oxid=%lu",
-		 MyProcPid, (unsigned long) oxid);
-	*/
 #endif
 
 	local_wal.has_material_changes = false;
@@ -529,19 +504,6 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 	/* elog disabled: WAL_REC_COMMIT path runs inside replica-bug-fix CRIT_SECTION (palloc forbidden)
 	elog(DEBUG4, "rec_type %d (%s)", rec_type, wal_record_type_to_string(rec_type)); */
 
-#ifdef USE_INJECTION_POINTS
-	{
-		OXid		_trc_oxid = get_current_oxid_if_any();
-#if 0  /* new trace disabled per peak-rate-old-traces-only recipe */
-		elog(LOG,
-			 "wal-trace finish pid=%d oxid=%lu rec=%s xmin=%lu",
-			 MyProcPid, (unsigned long) _trc_oxid,
-			 wal_record_type_to_string(rec_type),
-			 (unsigned long) xmin);
-#endif
-	}
-#endif
-
 	recLength = sizeof(WALRecFinish);
 	if (rec_type == WAL_REC_COMMIT &&
 		synchronous_commit >= SYNCHRONOUS_COMMIT_REMOTE_APPLY)
@@ -612,15 +574,6 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 	heapXid = GetTopTransactionIdIfAny();
 
 	elog(DEBUG4, "WAL_REC_XID oxid %lu logicalXid %u heapXid %u", oxid, logicalXid, heapXid);
-
-#ifdef USE_INJECTION_POINTS
-#if 0  /* new trace disabled per peak-rate-old-traces-only recipe */
-	elog(LOG,
-		 "wal-trace xid pid=%d oxid=%lu rec=WAL_REC_XID logicalXid=%u heapXid=%u",
-		 MyProcPid, (unsigned long) oxid,
-		 (unsigned) logicalXid, (unsigned) heapXid);
-#endif
-#endif
 
 	rec = (WALRecXid *) (&local_wal.buffer[local_wal.buffer_offset]);
 	rec->recType = WAL_REC_XID;
@@ -868,18 +821,6 @@ flush_local_wal(bool isCommit, bool withXactTime)
 	if (isCommit)
 		INJECTION_POINT("orioledb-wal-flush-guarded");
 
-#ifdef USE_INJECTION_POINTS
-	{
-		OXid		_trc_oxid = get_current_oxid_if_any();
-#if 0  /* new trace disabled per peak-rate-old-traces-only recipe */
-		elog(LOG,
-			 "wal-trace flush pid=%d oxid=%lu bytes=%d isCommit=%d withXactTime=%d",
-			 MyProcPid, (unsigned long) _trc_oxid,
-			 length, (int) isCommit, (int) withXactTime);
-#endif
-	}
-#endif
-
 	/*
 	 * Put the xlog location of our commit record to the shared memory.  This
 	 * will help concurrent checkpointer to wait till we do
@@ -897,15 +838,6 @@ flush_local_wal(bool isCommit, bool withXactTime)
 	START_CRIT_SECTION();
 
 	location = log_logical_wal_container(local_wal.buffer, length, withXactTime);
-
-#ifdef USE_INJECTION_POINTS
-#if 0  /* new trace disabled per peak-rate-old-traces-only recipe */
-	elog(LOG,
-		 "wal-trace flush-done pid=%d bytes=%d isCommit=%d lsn=%X/%X",
-		 MyProcPid, length, (int) isCommit,
-		 LSN_FORMAT_ARGS(location));
-#endif
-#endif
 
 	if (isCommit)
 		pg_atomic_write_u64(&GET_CUR_PROCDATA()->commitInProgressXlogLocation, location);

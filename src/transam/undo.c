@@ -1166,35 +1166,12 @@ walk_undo_range(UndoLogType undoType,
 {
 	UndoStackItem *item;
 	UndoItemTypeDescr *descr;
-#ifdef USE_INJECTION_POINTS
-	int			iter = 0;
-
-	elog(LOG, "csn-trace walk_undo_range enter pid=%d oxid=%lu stage=%d undoType=%d "
-			  "location=%lu toLoc=%lu",
-		 MyProcPid, (unsigned long) oxid, (int) stage, (int) undoType,
-		 (unsigned long) location, (unsigned long) toLoc);
-#endif
-
 	while (UndoLocationIsValid(location) && (location > toLoc || !UndoLocationIsValid(toLoc)))
 	{
 		item = undo_item_buf_read_item(buf, undoType, location);
 		descr = item_type_get_descr(item->type);
-#ifdef USE_INJECTION_POINTS
-		elog(LOG, "csn-trace walk_undo_range iter pid=%d oxid=%lu i=%d "
-				  "type=%d location=%lu callback begin",
-			 MyProcPid, (unsigned long) oxid, iter, (int) item->type,
-			 (unsigned long) location);
-#endif
 		descr->callback(undoType, location, item, oxid,
 						stage, changeCountsValid);
-#ifdef USE_INJECTION_POINTS
-		elog(LOG, "csn-trace walk_undo_range iter pid=%d oxid=%lu i=%d "
-				  "type=%d location=%lu callback end",
-			 MyProcPid, (unsigned long) oxid, iter, (int) item->type,
-			 (unsigned long) location);
-		iter++;
-#endif
-
 		/*
 		 * Update location of the last item, which needs an action on commit,
 		 * if needed.
@@ -1222,10 +1199,6 @@ walk_undo_range(UndoLogType undoType,
 		}
 	}
 
-#ifdef USE_INJECTION_POINTS
-	elog(LOG, "csn-trace walk_undo_range exit pid=%d oxid=%lu iters=%d",
-		 MyProcPid, (unsigned long) oxid, iter);
-#endif
 	return location;
 }
 
@@ -1238,25 +1211,12 @@ walk_undo_range_with_buf(UndoLogType undoType,
 {
 	UndoItemBuf buf;
 
-#ifdef USE_INJECTION_POINTS
-	elog(LOG, "csn-trace walk_undo_range_with_buf enter pid=%d oxid=%lu stage=%d "
-			  "undoType=%d location=%lu toLoc=%lu",
-		 MyProcPid, (unsigned long) oxid, (int) stage, (int) undoType,
-		 (unsigned long) location, (unsigned long) toLoc);
-#endif
-
 	ASAN_UNPOISON_MEMORY_REGION(&buf, sizeof(buf));
 
 	init_undo_item_buf(&buf);
 	location = walk_undo_range(undoType, location, toLoc, &buf, oxid, stage,
 							   onCommitLocation, changeCountsValid);
 	free_undo_item_buf(&buf);
-
-#ifdef USE_INJECTION_POINTS
-	elog(LOG, "csn-trace walk_undo_range_with_buf exit pid=%d oxid=%lu "
-			  "out_location=%lu",
-		 MyProcPid, (unsigned long) oxid, (unsigned long) location);
-#endif
 
 	return location;
 }
@@ -1305,13 +1265,6 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	UndoStackSharedLocations *sharedLocations = GET_CUR_UNDO_STACK_LOCATIONS(undoType);
 
-#ifdef USE_INJECTION_POINTS
-	elog(LOG, "csn-trace walk_undo_stack enter pid=%d oxid=%lu abortTrx=%d undoType=%d "
-			  "toLocation=%s",
-		 MyProcPid, (unsigned long) oxid, abortTrx ? 1 : 0, (int) undoType,
-		 toLocation ? "set" : "NULL");
-#endif
-
 	if (STOPEVENTS_ENABLED())
 	{
 		Jsonb	   *params;
@@ -1333,11 +1286,6 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		Assert(!toLocation);
 		location = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
 
-#ifdef USE_INJECTION_POINTS
-		elog(LOG, "csn-trace walk_undo_stack commit-branch pid=%d oxid=%lu "
-				  "onCommitLocation=%lu",
-			 MyProcPid, (unsigned long) oxid, (unsigned long) location);
-#endif
 		location = walk_undo_range_with_buf(undoType, location, InvalidUndoLocation,
 											oxid, OUndoCallbackStageCommit, NULL,
 											changeCountsValid);
@@ -1352,13 +1300,6 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		 */
 		location = pg_atomic_read_u64(&sharedLocations->location);
 		newOnCommitLocation = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
-#ifdef USE_INJECTION_POINTS
-		elog(LOG, "csn-trace walk_undo_stack abort-branch pid=%d oxid=%lu "
-				  "location=%lu newOnCommitLocation=%lu toLoc=%lu",
-			 MyProcPid, (unsigned long) oxid,
-			 (unsigned long) location, (unsigned long) newOnCommitLocation,
-			 (unsigned long) (toLocation ? toLocation->location : InvalidUndoLocation));
-#endif
 		location = walk_undo_range_with_buf(undoType, location,
 											toLocation ? toLocation->location : InvalidUndoLocation,
 											oxid, OUndoCallbackStageAbort, &newOnCommitLocation,
@@ -1371,16 +1312,7 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 	if (toLocation)
 		location = o_add_branch_undo_item(undoType, location);
 
-#ifdef USE_INJECTION_POINTS
-	elog(LOG, "csn-trace walk_undo_stack post-walk pid=%d oxid=%lu "
-			  "result_location=%lu acquiring undoStackLocationsFlushLock",
-		 MyProcPid, (unsigned long) oxid, (unsigned long) location);
-#endif
 	LWLockAcquire(&curProcData->undoStackLocationsFlushLock, LW_EXCLUSIVE);
-#ifdef USE_INJECTION_POINTS
-	elog(LOG, "csn-trace walk_undo_stack acquired undoStackLocationsFlushLock pid=%d oxid=%lu",
-		 MyProcPid, (unsigned long) oxid);
-#endif
 	if (toLocation)
 		pg_atomic_write_u64(&sharedLocations->branchLocation, location);
 
@@ -1403,10 +1335,6 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 	pg_atomic_write_u64(&sharedLocations->onCommitLocation, newOnCommitLocation);
 
 	LWLockRelease(&curProcData->undoStackLocationsFlushLock);
-#ifdef USE_INJECTION_POINTS
-	elog(LOG, "csn-trace walk_undo_stack exit pid=%d oxid=%lu",
-		 MyProcPid, (unsigned long) oxid);
-#endif
 }
 
 void
@@ -2122,10 +2050,6 @@ undo_xact_callback(XactEvent event, void *arg)
 	LogicalXidCtx logicalXidContext;
 
 	/* elog(LOG, "UNDO XACT CALLBACK"); */
-#ifdef USE_INJECTION_POINTS
-	elog(LOG, "csn-trace undo_xact_callback enter pid=%d event=%d oxid=%lu",
-		 MyProcPid, (int) event, (unsigned long) oxid);
-#endif
 	isParallelWorker = (MyProc->lockGroupLeader != NULL &&
 						MyProc->lockGroupLeader != MyProc) ||
 		IsInParallelMode();
@@ -2306,25 +2230,10 @@ undo_xact_callback(XactEvent event, void *arg)
 				 *     'orioledb-commit-assert', 'error');
 				 * Production builds compile this out entirely (no
 				 * USE_INJECTION_POINTS).
-				 *
-				 * Pre/post traces frame the crit section so post-test
-				 * analysis can count distinct backends that reached the
-				 * injection but did NOT come back out (i.e. were killed
-				 * by the assert).  `pre` lines without a matching `post`
-				 * line under the same pid are the writers that hit the
-				 * fault during one attach/detach cycle.
 				 */
-#if 0  /* new trace disabled per peak-rate-old-traces-only recipe */
-				elog(LOG, "commit-assert-trace pre  pid=%d oxid=%lu",
-					 MyProcPid, (unsigned long) oxid);
-#endif
 				START_CRIT_SECTION();
 				INJECTION_POINT("orioledb-commit-assert");
 				END_CRIT_SECTION();
-#if 0  /* new trace disabled per peak-rate-old-traces-only recipe */
-				elog(LOG, "commit-assert-trace post pid=%d oxid=%lu",
-					 MyProcPid, (unsigned long) oxid);
-#endif
 #endif
 
 				current_oxid_precommit();
@@ -2360,24 +2269,8 @@ undo_xact_callback(XactEvent event, void *arg)
 				 * Concurrent readers acquiring a fresh CSN here see one
 				 * past ours.  Commit-side only -- not reached during abort.
 				 */
-#ifdef USE_INJECTION_POINTS
-				/* elog disabled: inside replica-bug-fix CRIT_SECTION (palloc forbidden)
-				elog(LOG,
-					 "csn-trace pre-inject pid=%d oxid=%lu csn=%lu",
-					 MyProcPid, (unsigned long) oxid,
-					 (unsigned long) csn);
-				*/
-#endif
 				INJECTION_POINT("orioledb-csn-incremented");
 				// kill(MyProcPid, 9);
-#ifdef USE_INJECTION_POINTS
-				/* elog disabled: inside replica-bug-fix CRIT_SECTION (palloc forbidden)
-				elog(LOG,
-					 "csn-trace post-inject (no error fired) pid=%d oxid=%lu",
-					 MyProcPid, (unsigned long) oxid);
-				*/
-#endif
-
 				current_oxid_commit(csn);
 				// error-injection here is safe                                (oriole-before-on-commit-undo-stack: 0/30 BUGs;
 				//                                                              window already closed by curOxid=InvalidOXid in
@@ -2422,22 +2315,9 @@ undo_xact_callback(XactEvent event, void *arg)
 				elog(DEBUG4, "XACT_EVENT_ABORT oxid %lu logicalXid %u top heapXid %u current heapXid %u useHeap %d",
 					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
-#ifdef USE_INJECTION_POINTS
-				elog(LOG, "csn-trace abort enter pid=%d oxid=%lu",
-					 MyProcPid, (unsigned long) oxid);
-#endif
-
 				if (!RecoveryInProgress())
 				{
-#ifdef USE_INJECTION_POINTS
-					elog(LOG, "csn-trace abort wal_rollback begin pid=%d oxid=%lu",
-						 MyProcPid, (unsigned long) oxid);
-#endif
 					wal_rollback(oxid, logicalXidContext.xid, false);
-#ifdef USE_INJECTION_POINTS
-					elog(LOG, "csn-trace abort wal_rollback end pid=%d oxid=%lu",
-						 MyProcPid, (unsigned long) oxid);
-#endif
 				}
 
 				/*
@@ -2465,17 +2345,8 @@ undo_xact_callback(XactEvent event, void *arg)
 				 */
 				current_oxid_clear_committing();
 
-#ifdef USE_INJECTION_POINTS
-				elog(LOG, "csn-trace abort apply_undo_stack begin pid=%d oxid=%lu",
-					 MyProcPid, (unsigned long) oxid);
-#endif
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					apply_undo_stack((UndoLogType) i, oxid, NULL, true);
-#ifdef USE_INJECTION_POINTS
-				elog(LOG, "csn-trace abort apply_undo_stack end pid=%d oxid=%lu",
-					 MyProcPid, (unsigned long) oxid);
-#endif
-
 				/*
 				 * XACT_EVENT_ABORT may follow XACT_EVENT_PRE_COMMIT.  So we
 				 * still need the cleanup.
@@ -2484,15 +2355,7 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				reset_cur_undo_locations();
 				reset_command_undo_locations();
-#ifdef USE_INJECTION_POINTS
-				elog(LOG, "csn-trace abort current_oxid_abort begin pid=%d oxid=%lu",
-					 MyProcPid, (unsigned long) oxid);
-#endif
 				current_oxid_abort();
-#ifdef USE_INJECTION_POINTS
-				elog(LOG, "csn-trace abort current_oxid_abort end pid=%d oxid=%lu",
-					 MyProcPid, (unsigned long) oxid);
-#endif
 				set_oxid_xlog_ptr(oxid, InvalidXLogRecPtr);
 				oxid_needs_wal_flush = false;
 				xidless_commit_lsn = InvalidXLogRecPtr;

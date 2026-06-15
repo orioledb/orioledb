@@ -1666,20 +1666,6 @@ recovery_finish(int worker_id)
 
 		if (COMMITSEQNO_IS_INPROGRESS(cur_state->csn))
 		{
-#ifdef USE_INJECTION_POINTS
-			/*
-			 * In-flight transactions left INPROGRESS at recovery end are
-			 * aborted here, in memory, with no WAL emitted.  On the primary's
-			 * crash recovery this runs and cleans them up; a live streaming
-			 * standby never reaches recovery_finish(), so the oxid stays
-			 * INPROGRESS forever and a later replayed modify of its row
-			 * deadlocks in conflict resolution.  Trace the oxid so a repro can
-			 * confirm the dangling oxid the standby wedges on (e.g. 480) is one
-			 * the primary aborted here.  See test/t/crash/recovery_livelock_issue.md.
-			 */
-			elog(LOG, "recovery-finish-abort-trace pid=%d worker=%d aborting in-flight oxid=%lu",
-				 MyProcPid, worker_id, (unsigned long) cur_state->oxid);
-#endif
 			oxid_needs_wal_flush = cur_state->needs_wal_flush;
 			recovery_oxid = cur_state->oxid;
 			for (i = 0; i < (int) UndoLogsCount; i++)
@@ -2507,17 +2493,6 @@ update_run_xmin(void)
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
 	if (xmin < pg_atomic_read_u64(&xid_meta->globalXmin))
 	{
-#ifdef USE_INJECTION_POINTS
-		OXid		old_gx = pg_atomic_read_u64(&xid_meta->globalXmin);
-		OXid		wx = pg_atomic_read_u64(&xid_meta->writtenXmin);
-
-		elog(LOG, "GXMIN-TRACE update_run_xmin LOWER globalXmin %lu -> %lu (recovery_xmin=%lu writtenXmin=%lu nextXid=%lu queue_empty=%d pid=%d)%s",
-			 (unsigned long) old_gx, (unsigned long) xmin,
-			 (unsigned long) recovery_xmin, (unsigned long) wx,
-			 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid),
-			 pairingheap_is_empty(xmin_queue) ? 1 : 0, MyProcPid,
-			 xmin < wx ? " *** BELOW-writtenXmin INVARIANT-VIOLATION ***" : "");
-#endif
 		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
 	}
 }
@@ -2531,12 +2506,6 @@ free_run_xmin(void)
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
 	if (xmin < pg_atomic_read_u64(&xid_meta->globalXmin))
 	{
-#ifdef USE_INJECTION_POINTS
-		elog(LOG, "GXMIN-TRACE free_run_xmin LOWER globalXmin %lu -> %lu (writtenXmin=%lu pid=%d)",
-			 (unsigned long) pg_atomic_read_u64(&xid_meta->globalXmin),
-			 (unsigned long) xmin,
-			 (unsigned long) pg_atomic_read_u64(&xid_meta->writtenXmin), MyProcPid);
-#endif
 		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
 	}
 }
