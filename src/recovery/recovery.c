@@ -1989,6 +1989,22 @@ check_delete_xid_state(RecoveryXidState *state, int worker_id)
 		if (worker_id < 0)
 		{
 			pairingheap_remove(xmin_queue, &state->xmin_ph_node);
+#ifdef USE_INJECTION_POINTS
+			if (oxid < recovery_xmin)
+			{
+				OXid		new_front = pairingheap_is_empty(xmin_queue) ? InvalidOXid :
+				pairingheap_container(RecoveryXidState, xmin_ph_node,
+									  pairingheap_first(xmin_queue))->oxid;
+
+				elog(LOG, "GXMIN-TRACE xmin_queue POP oxid=%lu reason=teardown new_front=%lu "
+					 "recovery_xmin=%lu globalXmin=%lu runXmin=%lu nextXid=%lu pid=%d",
+					 (unsigned long) oxid, (unsigned long) new_front,
+					 (unsigned long) recovery_xmin,
+					 (unsigned long) pg_atomic_read_u64(&xid_meta->globalXmin),
+					 (unsigned long) pg_atomic_read_u64(&xid_meta->runXmin),
+					 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid), MyProcPid);
+			}
+#endif
 			update_run_xmin();
 		}
 		hash_search(recovery_xid_state_hash, &oxid, HASH_REMOVE, &found);
@@ -2659,6 +2675,21 @@ update_run_xmin(void)
 			}
 		}
 		pairingheap_remove(xmin_queue, &state->xmin_ph_node);
+#ifdef USE_INJECTION_POINTS
+		{
+			OXid		new_front = pairingheap_is_empty(xmin_queue) ? InvalidOXid :
+			pairingheap_container(RecoveryXidState, xmin_ph_node,
+								  pairingheap_first(xmin_queue))->oxid;
+
+			elog(LOG, "GXMIN-TRACE xmin_queue POP oxid=%lu reason=drain new_front=%lu "
+				 "recovery_xmin=%lu globalXmin=%lu runXmin=%lu nextXid=%lu pid=%d",
+				 (unsigned long) state->oxid, (unsigned long) new_front,
+				 (unsigned long) recovery_xmin,
+				 (unsigned long) pg_atomic_read_u64(&xid_meta->globalXmin),
+				 (unsigned long) pg_atomic_read_u64(&xid_meta->runXmin),
+				 (unsigned long) pg_atomic_read_u64(&xid_meta->nextXid), MyProcPid);
+		}
+#endif
 		if (state->used_by)
 			pfree(state->used_by);
 		hash_search(recovery_xid_state_hash, &state->oxid, HASH_REMOVE, &found);
