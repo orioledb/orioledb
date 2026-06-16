@@ -2791,6 +2791,11 @@ update_retain_location_with_heap(UndoLogType undoType, int worker_id,
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 	RecoveryXidState *state;
 
+#ifdef USE_INJECTION_POINTS
+	/* Dedup the BLOCK trace so a stuck front isn't logged every drain pass. */
+	static OXid last_retain_blocked[(int) UndoLogsCount] = {0};
+#endif
+
 	if (pairingheap_is_empty(retain_undo_queues[undoType]))
 		return false;
 
@@ -2804,11 +2809,40 @@ update_retain_location_with_heap(UndoLogType undoType, int worker_id,
 		Assert(state->in_retain_undo_heaps[undoType]);
 		pairingheap_remove(retain_undo_queues[undoType], &state->retain_undo_ph_nodes[undoType]);
 		state->in_retain_undo_heaps[undoType] = false;
+#ifdef USE_INJECTION_POINTS
+		{
+			OXid		new_front = pairingheap_is_empty(retain_undo_queues[undoType]) ? InvalidOXid :
+			RetainUndoNodeGetRecoveryXidState(pairingheap_first(retain_undo_queues[undoType]), undoType)->oxid;
+
+			last_retain_blocked[undoType] = InvalidOXid;
+			elog(LOG, "GXMIN-TRACE retain_heap RELEASE oxid=%lu undoType=%d retain_loc=%lu csn=%lu "
+				 "new_front_oxid=%lu recovery_xmin=%lu recoveryPtr=%X/%X pid=%d",
+				 (unsigned long) state->oxid, (int) undoType,
+				 (unsigned long) state->retain_locs[undoType],
+				 (unsigned long) state->csn, (unsigned long) new_front,
+				 (unsigned long) recovery_xmin,
+				 LSN_FORMAT_ARGS(recoveryPtr), MyProcPid);
+		}
+#endif
 		check_delete_xid_state(state, worker_id);
 		return true;
 	}
 	else
 	{
+#ifdef USE_INJECTION_POINTS
+		if (state->oxid != last_retain_blocked[undoType])
+		{
+			last_retain_blocked[undoType] = state->oxid;
+			elog(LOG, "GXMIN-TRACE retain_heap BLOCK front_oxid=%lu undoType=%d retain_loc=%lu csn=%lu "
+				 "ptr=%X/%X recoveryPtr=%X/%X in_finished_list=%d recovery_xmin=%lu pid=%d",
+				 (unsigned long) state->oxid, (int) undoType,
+				 (unsigned long) state->retain_locs[undoType],
+				 (unsigned long) state->csn,
+				 LSN_FORMAT_ARGS(state->ptr), LSN_FORMAT_ARGS(recoveryPtr),
+				 state->in_finished_list ? 1 : 0,
+				 (unsigned long) recovery_xmin, MyProcPid);
+		}
+#endif
 		return false;
 	}
 }
