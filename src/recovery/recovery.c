@@ -1732,32 +1732,37 @@ recovery_finish(int worker_id)
 			 * don't write WAL: only the main recovery process does. See issue
 			 * #876.
 			 */
-			if (worker_id < 0 && cur_state->wal_xid)
+			if (worker_id < 0)
 			{
-				MemoryContext oldcxt = MemoryContextSwitchTo(TopMemoryContext);
-
-				Assert(cur_state->oxid >= recovery_xmin);
-
-				if (recovery_finish_aborted_count == recovery_finish_aborted_capacity)
+				if (cur_state->oxid >= recovery_xmin)
 				{
-					int			new_cap = recovery_finish_aborted_capacity == 0
-						? 16 : recovery_finish_aborted_capacity * 2;
+					MemoryContext oldcxt = MemoryContextSwitchTo(TopMemoryContext);
 
-					if (recovery_finish_aborted_oxids == NULL)
-						recovery_finish_aborted_oxids =
-							palloc(new_cap * sizeof(RecoveryFinishAbortedOxid));
-					else
-						recovery_finish_aborted_oxids =
-							repalloc(recovery_finish_aborted_oxids,
-									 new_cap * sizeof(RecoveryFinishAbortedOxid));
-					recovery_finish_aborted_capacity = new_cap;
+					if (recovery_finish_aborted_count == recovery_finish_aborted_capacity)
+					{
+						int			new_cap = recovery_finish_aborted_capacity == 0
+							? 16 : recovery_finish_aborted_capacity * 2;
+
+						if (recovery_finish_aborted_oxids == NULL)
+							recovery_finish_aborted_oxids =
+								palloc(new_cap * sizeof(RecoveryFinishAbortedOxid));
+						else
+							recovery_finish_aborted_oxids =
+								repalloc(recovery_finish_aborted_oxids,
+										 new_cap * sizeof(RecoveryFinishAbortedOxid));
+						recovery_finish_aborted_capacity = new_cap;
+					}
+					recovery_finish_aborted_oxids[recovery_finish_aborted_count].oxid =
+						cur_state->oxid;
+					recovery_finish_aborted_oxids[recovery_finish_aborted_count].xid =
+						cur_state->xid;
+					recovery_finish_aborted_count++;
+					MemoryContextSwitchTo(oldcxt);
 				}
-				recovery_finish_aborted_oxids[recovery_finish_aborted_count].oxid =
-					cur_state->oxid;
-				recovery_finish_aborted_oxids[recovery_finish_aborted_count].xid =
-					cur_state->xid;
-				recovery_finish_aborted_count++;
-				MemoryContextSwitchTo(oldcxt);
+				else
+				{
+					Assert(!cur_state->wal_xid);
+				}
 			}
 		}
 		if (cur_state->in_finished_list && COMMITSEQNO_IS_COMMITTED(cur_state->csn) && worker_id < 0)
