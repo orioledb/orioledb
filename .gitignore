@@ -60,8 +60,8 @@ sql/orioledb--1.7--1.8.sql
 # Exclude the PostGIS Docker build directory
 /docker-postgis
 
-# devenv
-.devenv/
+# Nix
 .pg-src/
 .pg-install/
 .pg-data/
+.venv/
