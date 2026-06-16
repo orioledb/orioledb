@@ -4052,6 +4052,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 
 				recovery_xmin = Max(recovery_xmin, rec->u.finish.xmin);
+				update_run_xmin();
 
 				Assert(ctx->sys_tree_num <= 0 || sys_tree_supports_transactions(ctx->sys_tree_num));
 
@@ -4106,6 +4107,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				 LSN_FORMAT_ARGS(ctx->xlogRecEndPtr));
 
 			recovery_xmin = Max(recovery_xmin, rec->u.joint_commit.xmin);
+			update_run_xmin();
 			if (!cur_recovery_xid_state->in_joint_commit_list)
 			{
 				dlist_push_tail(&joint_commit_list,
