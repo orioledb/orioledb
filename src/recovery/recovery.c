@@ -1990,7 +1990,6 @@ check_delete_xid_state(RecoveryXidState *state, int worker_id)
 		{
 			pairingheap_remove(xmin_queue, &state->xmin_ph_node);
 #ifdef USE_INJECTION_POINTS
-			if (oxid < recovery_xmin)
 			{
 				OXid		new_front = pairingheap_is_empty(xmin_queue) ? InvalidOXid :
 				pairingheap_container(RecoveryXidState, xmin_ph_node,
