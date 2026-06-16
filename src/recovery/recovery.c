@@ -1272,6 +1272,7 @@ o_recovery_finish_hook(bool cleanup)
 		}
 	}
 
+	update_proc_retain_undo_location(-1);
 	recovery_finish(-1);
 
 	if (!recovery_single)
@@ -1736,31 +1737,38 @@ recovery_finish(int worker_id)
 			 */
 			if (worker_id < 0)
 			{
-				MemoryContext oldcxt = MemoryContextSwitchTo(TopMemoryContext);
-
-				if (recovery_finish_aborted_count == recovery_finish_aborted_capacity)
+				if (cur_state->oxid >= recovery_xmin)
 				{
-					int			new_cap = recovery_finish_aborted_capacity == 0
-						? 16 : recovery_finish_aborted_capacity * 2;
+					MemoryContext oldcxt = MemoryContextSwitchTo(TopMemoryContext);
 
-					if (recovery_finish_aborted_oxids == NULL)
-						recovery_finish_aborted_oxids =
-							palloc(new_cap * sizeof(RecoveryFinishAbortedOxid));
-					else
-						recovery_finish_aborted_oxids =
-							repalloc(recovery_finish_aborted_oxids,
-									 new_cap * sizeof(RecoveryFinishAbortedOxid));
-					recovery_finish_aborted_capacity = new_cap;
+					if (recovery_finish_aborted_count == recovery_finish_aborted_capacity)
+					{
+						int			new_cap = recovery_finish_aborted_capacity == 0
+							? 16 : recovery_finish_aborted_capacity * 2;
+
+						if (recovery_finish_aborted_oxids == NULL)
+							recovery_finish_aborted_oxids =
+								palloc(new_cap * sizeof(RecoveryFinishAbortedOxid));
+						else
+							recovery_finish_aborted_oxids =
+								repalloc(recovery_finish_aborted_oxids,
+										 new_cap * sizeof(RecoveryFinishAbortedOxid));
+						recovery_finish_aborted_capacity = new_cap;
+					}
+					recovery_finish_aborted_oxids[recovery_finish_aborted_count].oxid =
+						cur_state->oxid;
+					recovery_finish_aborted_oxids[recovery_finish_aborted_count].xid =
+						cur_state->xid;
+					recovery_finish_aborted_count++;
+					MemoryContextSwitchTo(oldcxt);
 				}
-				recovery_finish_aborted_oxids[recovery_finish_aborted_count].oxid =
-					cur_state->oxid;
-				recovery_finish_aborted_oxids[recovery_finish_aborted_count].xid =
-					cur_state->xid;
-				recovery_finish_aborted_count++;
-				MemoryContextSwitchTo(oldcxt);
+				else
+				{
+					Assert(!cur_state->wal_xid);
+				}
 			}
 		}
-		if (cur_state->in_finished_list && worker_id < 0)
+		if (cur_state->in_finished_list && COMMITSEQNO_IS_COMMITTED(cur_state->csn) && worker_id < 0)
 		{
 			set_oxid_csn(cur_state->oxid, COMMITSEQNO_COMMITTING);
 			cur_state->csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
@@ -3962,6 +3970,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 
 				recovery_xmin = Max(recovery_xmin, rec->u.finish.xmin);
+				update_run_xmin();
 
 				Assert(ctx->sys_tree_num <= 0 || sys_tree_supports_transactions(ctx->sys_tree_num));
 
@@ -4016,6 +4025,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				 LSN_FORMAT_ARGS(ctx->xlogRecEndPtr));
 
 			recovery_xmin = Max(recovery_xmin, rec->u.joint_commit.xmin);
+			update_run_xmin();
 			if (!cur_recovery_xid_state->in_joint_commit_list)
 			{
 				dlist_push_tail(&joint_commit_list,
