@@ -275,6 +275,7 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 			pg_atomic_init_u64(&undo_meta->minProcRetainLocation, 0);
 			pg_atomic_init_u64(&undo_meta->minRewindRetainLocation, 0);
 			pg_atomic_init_u64(&undo_meta->minProcTransactionRetainLocation, 0);
+			pg_atomic_init_u32(&undo_meta->numProcsHoldingSnapshotRetain, 0);
 			pg_atomic_init_u64(&undo_meta->minProcReservedLocation, 0);
 			pg_atomic_init_u64(&undo_meta->cleanedLocation, 0);
 			pg_atomic_init_u64(&undo_meta->checkpointRetainStartLocation, 0);
@@ -1407,8 +1408,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 		UndoMeta   *undo_meta = get_undo_meta_by_type(undoType);
 
 		checkpoint_start_loc[i] = pg_atomic_read_u64(&undo_meta->minProcTransactionRetainLocation);
-		pg_atomic_write_u64(&my_proc_info->undoRetainLocations[undoType].snapshotRetainUndoLocation,
-							checkpoint_start_loc[i]);
+		write_proc_snapshot_retain(my_proc_info, undoType, checkpoint_start_loc[i]);
 	}
 
 	pg_write_barrier();
@@ -1593,7 +1593,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	{
 		UndoLogType undoType = GetCheckpointableUndoLog(i);
 
-		pg_atomic_write_u64(&my_proc_info->undoRetainLocations[undoType].snapshotRetainUndoLocation, InvalidUndoLocation);
+		write_proc_snapshot_retain(my_proc_info, undoType, InvalidUndoLocation);
 	}
 
 	pg_atomic_write_u64(&my_proc_info->xmin, InvalidOXid);

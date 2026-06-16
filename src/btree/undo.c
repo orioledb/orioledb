@@ -163,7 +163,14 @@ page_needs_page_level_undo(BTreeDescr *desc, OInMemoryBlkno blkno, Page p,
 	/*
 	 * Probe other backends' page-level retain.  A retain older than the
 	 * latest page-level write means a concurrent reader may still need the
-	 * older page state.
+	 * older page state.  load_refind_page.spec is the canonical reproducer
+	 *
+	 * Fast path: meta->numProcsHoldingSnapshotRetain is the count of
+	 * backends that currently hold a valid snapshotRetainUndoLocation for
+	 * this undo type, maintained eagerly on register/unregister.  When the
+	 * count minus our own contribution is zero, no other backend can need
+	 * the older state and we skip the per-proc scan entirely — the common
+	 * case for solo bulk inserts.
 	 *
 	 * Subtle: when no page-level undo has been emitted since active snapshots
 	 * were taken, this loop finds no holders even though snapshots exist —
@@ -171,6 +178,15 @@ page_needs_page_level_undo(BTreeDescr *desc, OInMemoryBlkno blkno, Page p,
 	 * compaction removing tuples those snapshots could see.
 	 */
 	meta = get_undo_meta_by_type(pageUndoType);
+	{
+		uint32		count = pg_atomic_read_u32(&meta->numProcsHoldingSnapshotRetain);
+		UndoLocation myRetain = pg_atomic_read_u64(&GET_CUR_PROCDATA()->undoRetainLocations[pageUndoType].snapshotRetainUndoLocation);
+		uint32		selfContrib = UndoLocationIsValid(myRetain) ? 1 : 0;
+
+		if (count <= selfContrib)
+			return false;
+	}
+
 	lastUsed = pg_atomic_read_u64(&meta->lastUsedLocation);
 	for (i = 0; i < max_procs; i++)
 	{

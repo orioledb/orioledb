@@ -145,6 +145,16 @@ typedef struct
 	pg_atomic_uint64 minRewindRetainLocation;
 
 	/*
+	 * numProcsHoldingSnapshotRetain is the count of backends currently
+	 * holding a valid snapshotRetainUndoLocation for this undo type.
+	 * Lets page_needs_page_level_undo skip the per-proc scan in O(1) when
+	 * no other backend can need the older page state.
+	 *
+	 * Used only in UndoLogRegularPageLevel.
+	 */
+	pg_atomic_uint32 numProcsHoldingSnapshotRetain;
+
+	/*
 	 * minProcReservedLocation is a minimum location (among all backends)
 	 * within the RAM undo log buffer that is actually reserved (obtained) by
 	 * a backend for writing its undo log record to a RAM undo log buffer. The
@@ -438,6 +448,9 @@ extern bool have_retained_undo_location(void);
 extern UndoLocation get_snapshot_retained_undo_location(UndoLogType undoType);
 extern UndoLocation set_my_snapshot_retain_location(UndoLogType undoType);
 extern void clear_my_snapshot_retain_location(UndoLogType undoType);
+extern void write_proc_snapshot_retain(ODBProcData *procData,
+									   UndoLogType undoType,
+									   UndoLocation newValue);
 extern void orioledb_reset_xmin_hook(void);
 
 static inline void

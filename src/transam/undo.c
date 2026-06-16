@@ -984,6 +984,52 @@ set_my_reserved_location(UndoLogType undoType)
 		curRetainUndoLocations[undoType] = lastUsedLocation;
 }
 
+/*
+ * Atomically write a proc's snapshotRetainUndoLocation and maintain the
+ * meta->numProcsHoldingSnapshotRetain counter on Invalid<->Valid transitions.
+ *
+ * Counter is only maintained for UndoLogRegularPageLevel — the only undo
+ * type page_needs_page_level_undo's fast path consults.  Maintaining it for
+ * UndoLogRegular and UndoLogSystem would just add cache-line contention on
+ * every snapshot acquire for no benefit.
+ *
+ * Ordering: increment BEFORE writing a valid value (so a concurrent probe
+ * observing our valid field also sees us in the count), decrement AFTER
+ * writing Invalid (likewise).  This keeps `count >= selfContrib` for every
+ * concurrent observer, so `count - selfContrib` never underflows.
+ */
+void
+write_proc_snapshot_retain(ODBProcData *procData, UndoLogType undoType,
+						   UndoLocation newValue)
+{
+	pg_atomic_uint64 *snapshotRetainUndoLocationPtr =
+		&procData->undoRetainLocations[undoType].snapshotRetainUndoLocation;
+	UndoLocation oldValue = pg_atomic_read_u64(snapshotRetainUndoLocationPtr);
+	bool		wasValid = UndoLocationIsValid(oldValue);
+	bool		isValid = UndoLocationIsValid(newValue);
+
+	if (wasValid != isValid && undoType == UndoLogRegularPageLevel)
+	{
+		pg_atomic_uint32 *numProcsHoldingSnapshotRetainPtr =
+			&get_undo_meta_by_type(undoType)->numProcsHoldingSnapshotRetain;
+
+		if (isValid)
+		{
+			pg_atomic_fetch_add_u32(numProcsHoldingSnapshotRetainPtr, 1);
+			pg_atomic_write_u64(snapshotRetainUndoLocationPtr, newValue);
+		}
+		else
+		{
+			pg_atomic_write_u64(snapshotRetainUndoLocationPtr, newValue);
+			pg_atomic_fetch_sub_u32(numProcsHoldingSnapshotRetainPtr, 1);
+		}
+	}
+	else
+	{
+		pg_atomic_write_u64(snapshotRetainUndoLocationPtr, newValue);
+	}
+}
+
 UndoLocation
 set_my_snapshot_retain_location(UndoLogType undoType)
 {
@@ -999,7 +1045,7 @@ set_my_snapshot_retain_location(UndoLogType undoType)
 
 		if (!UndoLocationIsValid(curSnapshotRetainUndoLocation) ||
 			retainUndoLocation < curSnapshotRetainUndoLocation)
-			pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].snapshotRetainUndoLocation, retainUndoLocation);
+			write_proc_snapshot_retain(curProcData, undoType, retainUndoLocation);
 
 		pg_memory_barrier();
 
@@ -1022,8 +1068,7 @@ clear_my_snapshot_retain_location(UndoLogType undoType)
 {
 	ODBProcData *curProcData = GET_CUR_PROCDATA();
 
-	pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].snapshotRetainUndoLocation,
-						InvalidUndoLocation);
+	write_proc_snapshot_retain(curProcData, undoType, InvalidUndoLocation);
 }
 
 static void
@@ -1994,7 +2039,7 @@ orioledb_reset_xmin_hook(void)
 
 		if (pairingheap_is_empty(&retainUndoLocHeaps[undoType]))
 		{
-			pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].snapshotRetainUndoLocation, InvalidUndoLocation);
+			write_proc_snapshot_retain(curProcData, undoType, InvalidUndoLocation);
 		}
 		else
 		{
@@ -2004,7 +2049,7 @@ orioledb_reset_xmin_hook(void)
 											 pairingheap_first(&retainUndoLocHeaps[undoType]));
 			snapshot = RetainUndoLocationPHNodeGetSnapshot(location, undoType);
 			if (location->undoLocation > pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].snapshotRetainUndoLocation))
-				pg_atomic_write_u64(&curProcData->undoRetainLocations[undoType].snapshotRetainUndoLocation, location->undoLocation);
+				write_proc_snapshot_retain(curProcData, undoType, location->undoLocation);
 			if (!OXidIsValid(xmin) || snapshot->csnSnapshotData.xmin < xmin)
 				xmin = snapshot->csnSnapshotData.xmin;
 		}
@@ -2355,7 +2400,7 @@ undo_xact_callback(XactEvent event, void *arg)
 						pairingheap_remove_first(&retainUndoLocHeaps[i]);
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
-					pg_atomic_write_u64(&curProcData->undoRetainLocations[i].snapshotRetainUndoLocation, InvalidUndoLocation);
+					write_proc_snapshot_retain(curProcData, (UndoLogType) i, InvalidUndoLocation);
 
 				minParentSubId = InvalidSubTransactionId;
 
