@@ -1191,6 +1191,50 @@ class RrStressTest(BaseTest):
 					print(f'[save-log replica failed] '
 					      f'{_ce!r}', flush=True)
 
+		def _save_data_dirs(reason):
+			# Preserve the FULL data directories of both nodes (orioledb_data
+			# checkpoint files -- *.xid dump / *.xidmap / control -- plus pg_wal)
+			# for post-mortem debugging.  Gated by the caller to replica-TRAP
+			# catches only: the frequent SK-leak invariant trials must NOT
+			# trigger this or they would fill the disk.  The replica is already
+			# down (its startup process aborted), so its dir is frozen and
+			# consistent; the primary may still be live (best-effort snapshot).
+			results_dir = os.path.join(
+			    os.path.dirname(inspect.getfile(self.__class__)),
+			    'results')
+			os.makedirs(results_dir, exist_ok=True)
+			tag = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+			inst = os.getenv('RR_INSTANCE') or 'solo'
+			for label, n in (('primary', node), ('replica', replica)):
+				if n is None:
+					continue
+				src = os.path.join(n.base_dir, 'data')
+				ddst = os.path.join(
+				    results_dir,
+				    f'{tag}_{inst}_{reason}_{label}_datadir')
+				try:
+					shutil.copytree(src, ddst, symlinks=True,
+					                ignore_dangling_symlinks=True)
+					print(f'[saved-datadir] {ddst}', flush=True)
+				except Exception as _de:
+					print(f'[save-datadir {label} failed] {_de!r}',
+					      flush=True)
+
+		def _replica_trapped():
+			# True iff the replica's log carries a TRAP/PANIC (the
+			# update_run_xmin xmin>=globalXmin assert, or any other crash).
+			if replica is None:
+				return False
+			try:
+				rlog = os.path.join(replica.logs_dir, 'postgresql.log')
+				with open(rlog, errors='replace') as _f:
+					for _line in _f:
+						if 'TRAP:' in _line or 'PANIC:' in _line:
+							return True
+			except Exception:
+				pass
+			return False
+
 		if panic_lines:
 			_save_log('panic')
 
@@ -1742,6 +1786,13 @@ class RrStressTest(BaseTest):
 		violations.extend(_replica_violations)
 		if violations and log_saved_path[0] is None:
 			_save_log('invariant')
+		# On a replica TRAP/PANIC, also preserve both data directories
+		# (checkpoint files + WAL) for post-mortem debugging -- and make sure
+		# a log is saved even if there were no merged violations yet.
+		if _replica_trapped():
+			if log_saved_path[0] is None:
+				_save_log('replicatrap')
+			_save_data_dirs('replicatrap')
 		# Opt-in: save the log even on a clean pass so a batch can
 		# compare buggy vs normal runs side-by-side.
 		if (_env_int('RR_SAVE_ALL_LOGS', 0)
