@@ -944,6 +944,21 @@ finish_write_xids(uint32 chkpnum, bool shutdown)
 						if (xidRec.oxid != oProcData[i].vxids[j].oxid)
 							continue;
 
+#ifdef USE_INJECTION_POINTS
+						/*
+						 * Other half of the abort-snapshot race proof: record
+						 * which oxid is being captured in-flight, with this
+						 * checkpoint's replayStartPtr.  If the oxid's WAL_REC_ROLLBACK
+						 * is below replayStartPtr (see the clear_vxids trace + waldump),
+						 * the dump is inconsistent: recovery starts at replayStartPtr
+						 * and never replays that rollback.
+						 */
+						elog(LOG, "GXMIN-TRACE chkp_dump_inflight oxid=%lu undoType=%d undoLoc=%lu replayStart=%X/%X chkp=%u pid=%d",
+							 (unsigned long) xidRec.oxid, (int) undoType,
+							 (unsigned long) xidRec.undoLocation.location,
+							 LSN_FORMAT_ARGS(checkpoint_state->replayStartPtr),
+							 chkpnum, MyProcPid);
+#endif
 						write_to_xids_queue(&xidRec);
 					}
 					break;

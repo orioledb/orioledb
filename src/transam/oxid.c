@@ -23,6 +23,7 @@
 
 #include "access/transam.h"
 #include "access/twophase.h"
+#include "access/xlog.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "rewind/rewind.h"
@@ -1595,6 +1596,18 @@ current_oxid_abort(void)
 	pg_write_barrier();
 	csn_committing_set = false;
 	xlog_ptr_committing_set = false;
+#ifdef USE_INJECTION_POINTS
+	/*
+	 * Prove the checkpoint abort-snapshot race: log the WAL insert position at
+	 * the moment we clear this oxid's vxids slot.  wal_rollback already wrote
+	 * (and, under synchronous_commit, flushed) the WAL_REC_ROLLBACK *before*
+	 * this point, so if a concurrent finish_write_xids() snapshots vxids now it
+	 * captures this oxid as in-flight even though its rollback is already
+	 * durable below the checkpoint's replayStartPtr.
+	 */
+	elog(LOG, "GXMIN-TRACE clear_vxids reason=abort oxid=%lu insertPtr=%X/%X pid=%d",
+		 (unsigned long) curOxid, LSN_FORMAT_ARGS(GetXLogInsertRecPtr()), MyProcPid);
+#endif
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 
 	advance_run_xmin(curOxid);
