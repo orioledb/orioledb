@@ -1542,7 +1542,13 @@ recovery_init(int worker_id)
 		retain_undo_queues[i] = pairingheap_allocate(retain_undo_pairingheap_cmp,
 													 &retain_undo_queue_numbers[i]);
 	}
-	xmin_queue = pairingheap_allocate(xmin_pairingheap_cmp, NULL);
+
+	/*
+	 * Only the recovery leader maintains the runXmin horizon via xmin_queue;
+	 * recovery workers never touch it, so leave it NULL for them.
+	 */
+	if (worker_id < 0)
+		xmin_queue = pairingheap_allocate(xmin_pairingheap_cmp, NULL);
 	dlist_init(&finished_list);
 	dlist_init(&joint_commit_list);
 	CurTransactionContext = AllocSetContextCreate(TopMemoryContext,
@@ -2530,12 +2536,31 @@ orioledb_recovery_synchronized(PG_FUNCTION_ARGS)
 	PG_RETURN_BOOL(true);
 }
 
+/*
+ * Recompute and publish xid_meta->runXmin from the recovery leader's in-flight
+ * oxids.
+ *
+ * Must be called only by the recovery leader (worker_id < 0).  It reads and
+ * mutates the leader-only xmin_queue / retain_undo_queues and is the single
+ * writer of runXmin during recovery; recovery workers never touch these
+ * structures, so calling it from a worker would corrupt the horizon.
+ *
+ * This is invoked after every transaction finishes and after every
+ * recovery_xmin shift, so the published horizon is kept continuously
+ * up to date.  There is deliberately no full "scan the whole queue" pass:
+ * the queue is a pairing heap with no cheap ordered traversal, so we only
+ * ever inspect its top and advance the horizon as far as the current
+ * recovery_xmin allows.
+ */
 static void
 update_run_xmin(void)
 {
 	OXid		xmin;
 	int			i;
 	bool		found;
+
+	/* Leader-only: xmin_queue is allocated only when worker_id < 0. */
+	Assert(xmin_queue != NULL);
 
 	/*
 	 * Drain any fast-path-aborted oxids off the top of xmin_queue.  An entry
@@ -2558,6 +2583,18 @@ update_run_xmin(void)
 		state = pairingheap_container(RecoveryXidState, xmin_ph_node,
 									  pairingheap_first(xmin_queue));
 
+		/*
+		 * Only oxids strictly below recovery_xmin may be settled here: an
+		 * oxid below recovery_xmin is guaranteed finished on the primary
+		 * (recovery_xmin tracks the primary's advanced runXmin) and no
+		 * further WAL will arrive for it.  The heap top is the smallest oxid,
+		 * so once it reaches recovery_xmin there is nothing left to drain --
+		 * stop.  We never scan deeper into the heap: it is a pairing heap
+		 * with no cheap ordered traversal, and since update_run_xmin() runs
+		 * after every transaction finish and recovery_xmin shift, draining
+		 * just the eligible prefix each time keeps runXmin continuously up to
+		 * date.
+		 */
 		if (state->oxid >= recovery_xmin)
 			break;
 		if (!state->checkpoint_xid || state->wal_xid)
