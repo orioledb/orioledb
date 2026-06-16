@@ -1255,6 +1255,7 @@ o_recovery_finish_hook(bool cleanup)
 		}
 	}
 
+	update_proc_retain_undo_location(-1);
 	recovery_finish(-1);
 
 	if (!recovery_single)
@@ -1731,9 +1732,11 @@ recovery_finish(int worker_id)
 			 * don't write WAL: only the main recovery process does. See issue
 			 * #876.
 			 */
-			if (worker_id < 0)
+			if (worker_id < 0 && cur_state->wal_xid)
 			{
 				MemoryContext oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+
+				Assert(cur_state->oxid >= recovery_xmin);
 
 				if (recovery_finish_aborted_count == recovery_finish_aborted_capacity)
 				{
@@ -1757,7 +1760,7 @@ recovery_finish(int worker_id)
 				MemoryContextSwitchTo(oldcxt);
 			}
 		}
-		if (cur_state->in_finished_list && worker_id < 0)
+		if (cur_state->in_finished_list && COMMITSEQNO_IS_COMMITTED(cur_state->csn) && worker_id < 0)
 		{
 			set_oxid_csn(cur_state->oxid, COMMITSEQNO_COMMITTING);
 			cur_state->csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
