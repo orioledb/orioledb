@@ -52,6 +52,7 @@ typedef struct
 	ExtentsArray busy;
 	BTreeDescr *desc;
 	bool		hasError;
+	bool		emit_transient_notices;
 	OBTreeFindPageContext context;
 } BTreeCheckStatus;
 
@@ -92,6 +93,13 @@ check_btree(BTreeDescr *desc, bool force_file_check, bool wait_for_checkpoint)
 	/* get busy file extents */
 	status.desc = desc;
 	status.hasError = false;
+
+	/*
+	 * Legacy debug entry points (wait_for_checkpoint == false) keep the
+	 * BROKEN_SPLIT NOTICE; the user-facing verify_orioledb path stays silent
+	 * on that transient.
+	 */
+	status.emit_transient_notices = !wait_for_checkpoint;
 	init_page_find_context(&status.context, desc, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY);
 
 	/*
@@ -648,7 +656,7 @@ check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 	{
 		Page		rightP = O_GET_IN_MEMORY_PAGE(RIGHTLINK_GET_BLKNO(rightLink));
 
-		if (O_PAGE_IS(rightP, BROKEN_SPLIT))
+		if (O_PAGE_IS(rightP, BROKEN_SPLIT) && status->emit_transient_notices)
 		{
 			elog(NOTICE, "BTree has a broken split.");
 			status->hasError = true;
