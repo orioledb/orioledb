@@ -8,6 +8,8 @@
 #include "catalog/sys_trees.h"
 #include "recovery/wal.h"
 #include "recovery/wal_reader.h"
+#include "port/pg_crc32c.h"
+#include "checkpoint/control.h"
 
 #include "access/transam.h"
 #include "access/xlogreader.h"
@@ -45,7 +47,7 @@ typedef struct OrioledbKeyMap
 {
 	int			ntrees;
 	int			allocated;
-	OXid		lastXid;
+	OXid		divXid;
 	OrioledbTree *trees;
 	bool		fill_map;
 	OrioledbTreeKey tree_key;
@@ -70,7 +72,7 @@ create_orioledb_key_map(XLogRecPtr startpoint)
 
 	result->allocated = 8;
 	result->ntrees = 0;
-	result->lastXid = InvalidOXid;
+	result->divXid = InvalidOXid;
 	result->fill_map = false;
 	result->trees = palloc0(sizeof(OrioledbTree) * result->allocated);
 	return result;
@@ -710,6 +712,52 @@ write_binary(int fd, char *path, const void *buf, size_t nbyte)
 	}
 }
 
+/*
+ * Read the target's orioledb_data/control file and extract lastXid.
+ * Returns InvalidOXid if the file cannot be read or CRC is invalid.
+ */
+static OXid
+read_target_last_xid(const char *datadir_target)
+{
+	char		path[MAXPGPATH];
+	int			fd;
+	CheckpointControl control;
+	pg_crc32c	expected_crc;
+
+	snprintf(path, sizeof(path), "%s/orioledb_data/control", datadir_target);
+
+	fd = open(path, O_RDONLY | PG_BINARY);
+	if (fd < 0)
+	{
+		pg_log_debug("could not open orioledb control file \"%s\": %m", path);
+		return InvalidOXid;
+	}
+
+	if (read(fd, &control, sizeof(CheckpointControl)) != sizeof(CheckpointControl))
+	{
+		pg_log_debug("could not read orioledb control file \"%s\": %m", path);
+		close(fd);
+		return InvalidOXid;
+	}
+	close(fd);
+
+	/* Verify CRC to ensure the file contents are valid */
+	expected_crc = control.crc;
+	INIT_CRC32C(control.crc);
+	COMP_CRC32C(control.crc,
+				(char *) &control,
+				offsetof(CheckpointControl, crc));
+	FIN_CRC32C(control.crc);
+
+	if (!EQ_CRC32C(expected_crc, control.crc))
+	{
+		pg_log_debug("orioledb control file \"%s\" has invalid CRC", path);
+		return InvalidOXid;
+	}
+
+	return control.lastXid;
+}
+
 static void
 orioledb_process_row_map(OrioledbKeyMap *orioledb_map, const char *argv0,
 						 const char *datadir, bool debug, PGconn *conn,
@@ -822,8 +870,8 @@ pg_rewind_on_record(WalReaderState *r, WalRecord *rec)
 		case WAL_REC_COMMIT:
 		case WAL_REC_ROLLBACK:
 			{
-				if (!OXidIsValid(orioledb_map->lastXid))
-					orioledb_map->lastXid = rec->u.finish.xmin;
+				if (!OXidIsValid(orioledb_map->divXid))
+					orioledb_map->divXid = rec->u.finish.xmin;
 			}
 			break;
 		default:
@@ -884,21 +932,25 @@ _PG_rewind(const char *datadir_target, char *datadir_source,
 	orioledb_map->fill_map = true;
 	SimpleXLogRead(datadir_target, startpoint, tliIndex, endpoint,
 				   restoreCommand, extract_row_info, orioledb_map);
-	if (!OXidIsValid(orioledb_map->lastXid))
+	if (!OXidIsValid(orioledb_map->divXid))
 	{
-		/* This version is mainly LLM assumption, because it just tries to iterate page back */
-		XLogRecPtr prev_page = (startpoint - (startpoint % XLOG_BLCKSZ)) - XLOG_BLCKSZ;  
-		  
-		orioledb_map->fill_map = false;
-		SimpleXLogRead(datadir_target, prev_page, tliIndex, startpoint,
-					   restoreCommand, extract_row_info, orioledb_map);
+		/*
+		 * No orioledb commit/rollback found in WAL after divergence.
+		 * Read lastXid from the target's own checkpoint control file,
+		 * which holds the highest XID used on that node.
+		 */
+		pg_log_debug("no orioledb transactions found in WAL, "
+					 "reading lastXid from control file");
+		orioledb_map->divXid = read_target_last_xid(datadir_target);
+		if (!OXidIsValid(orioledb_map->divXid))
+			pg_fatal("could not determine lastXid for orioledb rewind");
 	}
-	Assert(OXidIsValid(orioledb_map->lastXid));
+	Assert(OXidIsValid(orioledb_map->divXid));
 	if (debug)
 		orioledb_key_map_print(orioledb_map);
 	orioledb_process_row_map(orioledb_map, argv0, datadir_target, debug,
 							 source_conn, startpoint,
-							 orioledb_map->lastXid);
+							 orioledb_map->divXid);
 	free_orioledb_key_map(orioledb_map);
 	PQfinish(source_conn);
 
