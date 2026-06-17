@@ -1909,6 +1909,24 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 					pairingheap_add(retain_undo_queues[i], &cur_state->retain_undo_ph_nodes[i]);
 				}
 			}
+
+#ifdef USE_INJECTION_POINTS
+			/*
+			 * Close the last Mode-2 gap: when switching AWAY from the previous
+			 * oxid, this loop saved the shared undo location into its
+			 * undo_stacks.  If the previous oxid is the future culprit, this
+			 * tells whether its memset-0 undoStack0 gets overwritten (to the
+			 * sentinel) here or survives as 0 until the deferred rollback's
+			 * found switch reads it.  prev_oxid==culprit + saved_undoStack0==0
+			 * would mean the save itself read 0 (shared was 0); absence of any
+			 * switch_away for the culprit between its two rollbacks would mean
+			 * the 0 simply was never re-saved.
+			 */
+			elog(LOG, "GXMIN-TRACE switch_away prev_oxid=%lu saved_undoStack0=%lu to_oxid=%lu worker_id=%d pid=%d",
+				 (unsigned long) cur_state->oxid,
+				 (unsigned long) cur_state->undo_stacks[0].location,
+				 (unsigned long) oxid, worker_id, MyProcPid);
+#endif
 		}
 
 		recovery_oxid = oxid;
@@ -1966,6 +1984,31 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 				cur_state->used_by = NULL;
 		}
 
+#ifdef USE_INJECTION_POINTS
+		/*
+		 * Logged AFTER the found/!found branch initialized the state, so the
+		 * values are realistic.  Distinguishes the Mode-2 crash path:
+		 *  - undoStack0 = cur_state->undo_stacks[0].location after init.
+		 *  - sharedLoc0 = the shared cur undo location walk_undo_stack reads:
+		 *    found copies undoStack0 into it (set_cur_undo_locations); !found
+		 *    calls reset_cur_undo_locations() -> sentinel 0x2000000000000000.
+		 * The undo_item_buf_read location=0 PANIC happens iff sharedLoc0 == 0
+		 * (found branch propagated a zeroed undo_stacks).  found=1 vs 0 and
+		 * checkpoint_xid tell whether the oxid was tracked / re-created.
+		 */
+		{
+			UndoStackLocations _shared0;
+
+			get_cur_undo_locations(&_shared0, (UndoLogType) 0);
+			elog(LOG, "GXMIN-TRACE switch_to_oxid oxid=%lu found=%d checkpoint_xid=%d wal_xid=%d undoStack0=%lu sharedLoc0=%lu worker_id=%d pid=%d",
+				 (unsigned long) oxid, found ? 1 : 0,
+				 cur_state->checkpoint_xid ? 1 : 0, cur_state->wal_xid ? 1 : 0,
+				 (unsigned long) cur_state->undo_stacks[0].location,
+				 (unsigned long) _shared0.location,
+				 worker_id, MyProcPid);
+		}
+#endif
+
 		cur_recovery_xid_state = cur_state;
 		update_proc_retain_undo_location(worker_id);
 	}
@@ -1984,6 +2027,26 @@ check_delete_xid_state(RecoveryXidState *state, int worker_id)
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		if (state->in_retain_undo_heaps[i])
 			in_retain_heaps = true;
+
+#ifdef USE_INJECTION_POINTS
+	/*
+	 * Confirm/refute the Mode-2 "retained-entry" hypothesis
+	 * (ISSUE_deferred_rollback_replica_two_crash_modes.md): after an oxid's
+	 * real rollback resolves it, is its RecoveryXidState DELETEd or RETAINed?
+	 * If RETAINed (held in a retain-undo heap / finished / joint-commit list),
+	 * the entry lingers, so a later deferred WAL_REC_ROLLBACK for that oxid
+	 * switches to it as found=1 with a zeroed undo_stacks -> sharedLoc0=0 ->
+	 * undo_item_buf_read location=0 PANIC.  A DELETEd entry instead re-creates
+	 * !found (masked to the sentinel by reset_cur_undo_locations) -> safe,
+	 * which is what the minimal test (oxid 102) does.
+	 */
+	elog(LOG, "GXMIN-TRACE check_delete oxid=%lu in_retain_heaps=%d in_finished_list=%d in_joint_commit_list=%d -> %s undoStack0=%lu worker_id=%d pid=%d",
+		 (unsigned long) state->oxid, in_retain_heaps ? 1 : 0,
+		 state->in_finished_list ? 1 : 0, state->in_joint_commit_list ? 1 : 0,
+		 (!in_retain_heaps && !state->in_finished_list && !state->in_joint_commit_list) ? "DELETE" : "RETAIN",
+		 (unsigned long) state->undo_stacks[0].location,
+		 worker_id, MyProcPid);
+#endif
 
 	if (!in_retain_heaps &&
 		!state->in_finished_list &&
@@ -4102,6 +4165,32 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 	Assert(rec);
 
 	elog(DEBUG4, "[%s] GET RTYPE %d `%s`", __func__, rec->type, wal_type_name(rec->type));
+
+	/*
+	 * Stall hook for the deterministic Mode-2 reproduction
+	 * (test_checkpoint_abort_snapshot_resurrects_inflight_oxid).  Blocking the
+	 * recovery leader here stops WAL dispatch to the recovery workers while the
+	 * walreceiver keeps writing the incoming stream to disk, so a backlog
+	 * accumulates.  When released, the leader bursts through the backlog
+	 * (dispatch is cheap) far ahead of the workers (apply is not), so
+	 * get_workers_commit_ptr() stays low and the finished_list drain cannot
+	 * remove a resurrected in-flight oxid before the deferred WAL_REC_ROLLBACK
+	 * re-finds it (found=1) on the leader -> location=0 PANIC.  Targeted via
+	 * params: pg_stopevent_set('replay_on_record', '$.type == <N>').
+	 * Runtime-gated by orioledb.enable_stopevents (off in production).
+	 */
+	if (STOPEVENTS_ENABLED())
+	{
+		Jsonb	   *params;
+		JsonbParseState *state = NULL;
+
+		pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+		jsonb_push_int8_key(&state, "type", (int64) rec->type);
+		jsonb_push_int8_key(&state, "oxid", (int64) rec->oxid);
+		params = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+
+		STOPEVENT(STOPEVENT_REPLAY_ON_RECORD, params);
+	}
 
 	switch (rec->type)
 	{
