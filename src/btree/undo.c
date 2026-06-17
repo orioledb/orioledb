@@ -19,6 +19,7 @@
 #include "btree/io.h"
 #include "btree/merge.h"
 #include "btree/page_chunks.h"
+#include "btree/scan.h"
 #include "btree/undo.h"
 #include "catalog/o_sys_cache.h"
 #include "recovery/recovery.h"
@@ -48,6 +49,8 @@ static bool get_prev_leaf_header_from_undo_if_exists(UndoLogType undoType,
 static void update_leaf_header_in_undo(UndoLogType undoType,
 									   BTreeLeafTuphdr *tuphdr,
 									   UndoLocation location);
+static bool page_op_drops_tuple(BTreeDescr *desc, Pointer p,
+								CommitSeqNo imageCsn);
 
 /*
  * Add page image to the undo log.
@@ -59,10 +62,53 @@ page_add_image_to_undo(BTreeDescr *desc, Pointer p, CommitSeqNo imageCsn,
 	UndoPageImageHeader *header;
 	UndoLocation undoLocation;
 	Pointer		ptr;
+	UndoLogType undoType = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
 
 	Assert(O_PAGE_IS(p, LEAF));
 
 	Assert(desc->undoType != UndoLogNone);
+
+	/*
+	 * Differential split: when the split drops no tuple physically, the two
+	 * post-split halves are an exact partition of the original page, so each
+	 * half can be reconstructed from the newer half carried forward in the
+	 * reader's buffer.  Store only the split key plus the original page's
+	 * undo continuation instead of a full page copy.  See
+	 * get_page_from_undo().
+	 *
+	 * A differential half only ever covers a single leaf's key range, which
+	 * is all a point lookup (MVCC) needs.  A sequential scan, however,
+	 * reconstructs whole historical pages and relies on the undo image
+	 * covering the full pre-split key range; across multi-level splits a half
+	 * cannot provide that.  So fall back to a full image whenever a
+	 * sequential scan is active on this tree -- it may read this image
+	 * through the undo chain.  (Index/range scans clip per-tuple to the
+	 * current leaf and are unaffected.)
+	 */
+	if (splitKey && !page_op_drops_tuple(desc, p, imageCsn) &&
+		meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) == 0)
+	{
+		BTreePageHeader *php = (BTreePageHeader *) p;
+		UndoSplitDiffData *diff;
+
+		ptr = get_undo_record(undoType, &undoLocation,
+							  O_SPLIT_DIFF_UNDO_IMAGE_SIZE(splitKeyLen));
+
+		header = (UndoPageImageHeader *) ptr;
+		header->type = UndoPageImageSplitDiff;
+		header->splitKeyFlags = splitKey->formatFlags;
+		header->splitKeyLen = splitKeyLen;
+
+		diff = (UndoSplitDiffData *) (ptr + MAXALIGN(sizeof(UndoPageImageHeader)));
+		diff->origCsn = php->csn;
+		diff->origUndoLoc = php->undoLocation;
+		memcpy((Pointer) diff + MAXALIGN(sizeof(UndoSplitDiffData)),
+			   splitKey->data, splitKeyLen);
+
+		release_reserved_undo_location(undoType);
+		return undoLocation;
+	}
+
 	if (splitKey)
 		ptr = get_undo_record(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType),
 							  &undoLocation,
@@ -1095,6 +1141,221 @@ read_hikey_from_undo(UndoLogType undoType, UndoLocation location,
 }
 
 /*
+ * Reconstruct a pre-merge half from a differential merge image.
+ *
+ * On entry `dest` holds the merged page (the newer page the undo chain walk
+ * carried forward); it is the exact union of the pre-merge left and right
+ * pages (the differential image is only written when the merge dropped no
+ * tuple).  We pick the half the caller needs (by `kind`/`key`, exactly like
+ * the full-merge case), trim `dest` to that half at the boundary key, and
+ * synthesize its header so the undo chain continues into that half's own
+ * pre-merge history.
+ */
+static void
+reconstruct_merge_diff_half(BTreeDescr *desc, UndoLocation undoLocation,
+							Pointer key, BTreeKeyType kind, Pointer dest,
+							bool *is_left, bool *is_right, OFixedKey *lokey)
+{
+	UndoLogType undoType = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
+	BTreePageHeader *header = (BTreePageHeader *) dest;
+	UndoMergeDiffData diff;
+	OFixedKey	boundary;
+	OFixedKey	rightHikey;
+	LocationIndex rightHikeySize = 0;
+	BTreePageItem items[BTREE_PAGE_MAX_CHUNK_ITEMS];
+	BTreePageItemLocator loc;
+	int			count = 0;
+	bool		wantRight;
+	OTuple		hikey;
+	LocationIndex hikeySize;
+
+	undo_read(undoType, undoLocation + MAXALIGN(sizeof(UndoPageImageHeader)),
+			  sizeof(UndoMergeDiffData), (Pointer) &diff);
+	undo_read(undoType,
+			  undoLocation + MAXALIGN(sizeof(UndoPageImageHeader)) +
+			  MAXALIGN(sizeof(UndoMergeDiffData)),
+			  diff.boundaryLen, boundary.fixedData);
+	boundary.tuple.formatFlags = diff.boundaryFlags;
+	boundary.tuple.data = boundary.fixedData;
+
+	/* Choose the half exactly as the full-merge path does. */
+	switch (kind)
+	{
+		case BTreeKeyNone:
+			wantRight = false;
+			break;
+		case BTreeKeyRightmost:
+			wantRight = true;
+			break;
+		default:
+			{
+				int			cmp_expected = (kind == BTreeKeyPageHiKey) ? 1 : 0;
+				BTreeKeyType realkind = (kind == BTreeKeyPageHiKey) ?
+					BTreeKeyNonLeafKey : kind;
+				int			cmp = o_btree_cmp(desc, key, realkind,
+											  &boundary.tuple, BTreeKeyNonLeafKey);
+
+				wantRight = (cmp >= cmp_expected);
+				break;
+			}
+	}
+
+	/*
+	 * Capture the merged page hikey before reorg overwrites it.  The right
+	 * half inherits it; the left half's hikey is the boundary key.
+	 */
+	if (!O_PAGE_IS(dest, RIGHTMOST))
+	{
+		OTuple		mhi;
+
+		BTREE_PAGE_GET_HIKEY(mhi, dest);
+		copy_fixed_key(desc, &rightHikey, mhi);
+		rightHikeySize = BTREE_PAGE_GET_HIKEY_SIZE(dest);
+	}
+	else
+		O_TUPLE_SET_NULL(rightHikey.tuple);
+
+	/* Collect the items of the requested half (M is sorted by key). */
+	BTREE_PAGE_FOREACH_ITEMS(dest, &loc)
+	{
+		OTuple		tup;
+		int			c;
+
+		BTREE_PAGE_READ_LEAF_TUPLE(tup, dest, &loc);
+		c = o_btree_cmp(desc, &tup, BTreeKeyLeafTuple,
+						&boundary.tuple, BTreeKeyNonLeafKey);
+		if ((wantRight && c >= 0) || (!wantRight && c < 0))
+		{
+			items[count].data = BTREE_PAGE_LOCATOR_GET_ITEM(dest, &loc);
+			items[count].flags = BTREE_PAGE_GET_ITEM_FLAGS(dest, &loc);
+			items[count].size = BTREE_PAGE_GET_ITEM_SIZE(dest, &loc);
+			count++;
+		}
+	}
+
+	if (wantRight)
+	{
+		header->flags &= ~O_BTREE_FLAG_LEFTMOST;
+		if (O_PAGE_IS(dest, RIGHTMOST))
+		{
+			hikeySize = 0;
+			O_TUPLE_SET_NULL(hikey);
+		}
+		else
+		{
+			hikey = rightHikey.tuple;
+			hikeySize = rightHikeySize;
+		}
+	}
+	else
+	{
+		header->flags &= ~O_BTREE_FLAG_RIGHTMOST;
+		hikey = boundary.tuple;
+		hikeySize = diff.boundaryLen;
+	}
+
+	btree_page_reorg(desc, dest, items, count, hikeySize, hikey);
+	o_btree_page_calculate_statistics(desc, dest);
+
+	header->csn = wantRight ? diff.rightCsn : diff.leftCsn;
+	header->undoLocation = wantRight ? diff.rightUndoLoc : diff.leftUndoLoc;
+
+	if (is_left)
+		*is_left = !wantRight;
+	if (is_right)
+		*is_right = wantRight;
+	if (wantRight && lokey)
+		copy_fixed_key(desc, lokey, boundary.tuple);
+}
+
+/*
+ * Reconstruct a pre-split half from a differential split image.
+ *
+ * On entry `dest` holds the post-split half the undo-chain walk carried forward
+ * (the left half [lo, splitKey) or the right half [splitKey, hi)); since the
+ * split dropped no tuple, that half is exactly the corresponding slice of the
+ * original page, so we keep `dest` as-is and only rewire its header to continue
+ * the chain into the original page's pre-split history.
+ *
+ * If that older history is a wider image (covering the original page's full
+ * range), the existing lokey/hikey machinery clips it back to this half: we set
+ * lokey to the split key on the right side (so a reader positions at splitKey),
+ * exactly as the full-image split path does, and the merge loop bounds the
+ * upper end by the leaf hikey.
+ *
+ * The two halves carry the same undo location, so is_left/is_right must
+ * distinguish them: the per-half image location O_UNDO_GET_IMAGE_LOCATION()
+ * is used by the iterator's step-left/right shortcut as an identity token to
+ * detect a single historical page spanning several current leaves.  Unlike a
+ * full split image (which returns the same wide page for both halves), each
+ * differential half is distinct, so they must yield distinct tokens or the
+ * iterator wrongly dedups one half against the other.
+ */
+static void
+reconstruct_split_diff(BTreeDescr *desc, UndoLocation undoLocation,
+					   Pointer dest, bool *is_left, bool *is_right,
+					   OFixedKey *lokey, OFixedKey *page_lokey)
+{
+	UndoLogType undoType = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
+	BTreePageHeader *header = (BTreePageHeader *) dest;
+	UndoPageImageHeader imgHeader;
+	UndoSplitDiffData diff;
+	OFixedKey	splitKey;
+	bool		rightHalf;
+
+	undo_read(undoType, undoLocation,
+			  sizeof(UndoPageImageHeader), (Pointer) &imgHeader);
+	undo_read(undoType, undoLocation + MAXALIGN(sizeof(UndoPageImageHeader)),
+			  sizeof(UndoSplitDiffData), (Pointer) &diff);
+	undo_read(undoType,
+			  undoLocation + MAXALIGN(sizeof(UndoPageImageHeader)) +
+			  MAXALIGN(sizeof(UndoSplitDiffData)),
+			  imgHeader.splitKeyLen, splitKey.fixedData);
+	splitKey.tuple.formatFlags = imgHeader.splitKeyFlags;
+	splitKey.tuple.data = splitKey.fixedData;
+
+	/*
+	 * Determine which half `dest` is from its own hikey: the left half's
+	 * hikey is exactly the split key; the right half's hikey is the original
+	 * page's (larger) hikey, or it is rightmost.
+	 */
+	if (O_PAGE_IS(dest, RIGHTMOST))
+		rightHalf = true;
+	else
+	{
+		OTuple		destHikey;
+
+		BTREE_PAGE_GET_HIKEY(destHikey, dest);
+		rightHalf = (o_btree_cmp(desc, &destHikey, BTreeKeyNonLeafKey,
+								 &splitKey.tuple, BTreeKeyNonLeafKey) != 0);
+	}
+
+	if (is_left != NULL)
+		*is_left = !rightHalf;
+	if (is_right != NULL)
+		*is_right = rightHalf;
+
+	/*
+	 * The right half's low boundary is the split key.  Report it through both
+	 * lokey (find / iterator path) and page_lokey (seq scan path) so a wider,
+	 * older image down the chain is clipped to this half.  The left half
+	 * starts at the original page's own low boundary, which the caller
+	 * already tracks.
+	 */
+	if (rightHalf)
+	{
+		if (lokey != NULL)
+			copy_fixed_key(desc, lokey, splitKey.tuple);
+		if (page_lokey != NULL)
+			copy_fixed_key(desc, page_lokey, splitKey.tuple);
+	}
+
+	/* Continue the chain into the original page's pre-split history. */
+	header->csn = diff.origCsn;
+	header->undoLocation = diff.origUndoLoc;
+}
+
+/*
  * Finds page image in undoLocation.
  */
 void
@@ -1115,6 +1376,20 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 	undo_read(undoType, undoLocation,
 			  sizeof(UndoPageImageHeader), (Pointer) &header);
 	left_loc = undoLocation + MAXALIGN(sizeof(UndoPageImageHeader));
+
+	if (header.type == UndoPageImageMergeDiff)
+	{
+		reconstruct_merge_diff_half(desc, undoLocation, key, kind, dest,
+									is_left, is_right, lokey);
+		return;
+	}
+
+	if (header.type == UndoPageImageSplitDiff)
+	{
+		reconstruct_split_diff(desc, undoLocation, dest,
+							   is_left, is_right, lokey, page_lokey);
+		return;
+	}
 
 	if (is_left != NULL)
 		*is_left = false;
@@ -1220,7 +1495,47 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 }
 
 /*
+ * Returns true if a merge or split would physically drop at least one tuple
+ * from the given page (a finished+deleted tuple whose deletion is visible to
+ * everybody as of imageCsn).  Mirrors the leaf drop condition in merge_pages()
+ * and make_split_items().
+ *
+ * When nothing is dropped, the post-op page(s) are an exact partition of the
+ * pre-op page(s), so a differential image (boundary/split key only) is
+ * sufficient: the pre-op page can be reconstructed from the newer page(s)
+ * carried forward.  When a tuple is dropped, an old snapshot may still need it,
+ * so we must fall back to a full page image.
+ */
+static bool
+page_op_drops_tuple(BTreeDescr *desc, Pointer p, CommitSeqNo imageCsn)
+{
+	BTreePageItemLocator loc;
+
+	Assert(O_PAGE_IS(p, LEAF));
+
+	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
+	{
+		BTreeLeafTuphdr *tupHdr;
+
+		tupHdr = (BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
+		if (XACT_INFO_FINISHED_FOR_EVERYBODY(tupHdr->xactInfo) &&
+			tupHdr->deleted)
+		{
+			if (COMMITSEQNO_IS_INPROGRESS(imageCsn) ||
+				XACT_INFO_MAP_CSN(tupHdr->xactInfo) < imageCsn)
+				return true;
+		}
+	}
+	return false;
+}
+
+/*
  * Copy images of the left and the right pages into undo log.
+ *
+ * When the merge drops no tuple, write a compact differential image
+ * (UndoPageImageMergeDiff) holding just the boundary key and per-half undo
+ * continuation, instead of two full page copies.  get_page_from_undo()
+ * reconstructs the requested half by trimming the merged page.
  */
 UndoLocation
 make_merge_undo_image(BTreeDescr *desc, Pointer left,
@@ -1230,22 +1545,65 @@ make_merge_undo_image(BTreeDescr *desc, Pointer left,
 	UndoLocation undoLocation;
 	Pointer		undo_rec;
 	UndoLogType undoType = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
+	BTreePageHeader *leftHeader = (BTreePageHeader *) left;
+	BTreePageHeader *rightHeader = (BTreePageHeader *) right;
+	OTuple		boundary;
+	LocationIndex boundaryLen;
 
 	Assert(O_PAGE_IS(left, LEAF) && O_PAGE_IS(right, LEAF));
-
+	/* Left always has a right sibling here, so it is never rightmost. */
+	Assert(!O_PAGE_IS(left, RIGHTMOST));
 	Assert(undoType != UndoLogNone);
-	undo_rec = get_undo_record(GET_PAGE_LEVEL_UNDO_TYPE(undoType),
-							   &undoLocation, O_MERGE_UNDO_IMAGE_SIZE);
+
+	if (page_op_drops_tuple(desc, left, imageCsn) ||
+		page_op_drops_tuple(desc, right, imageCsn))
+	{
+		/*
+		 * Full two-page image required: an old snapshot may need a dropped
+		 * tuple.
+		 */
+		undo_rec = get_undo_record(undoType, &undoLocation,
+								   O_MERGE_UNDO_IMAGE_SIZE);
+
+		header = (UndoPageImageHeader *) undo_rec;
+		header->type = UndoPageImageMerge;
+		undo_rec = undo_rec + MAXALIGN(sizeof(UndoPageImageHeader));
+
+		memcpy(undo_rec, left, ORIOLEDB_BLCKSZ);
+		memcpy(undo_rec + ORIOLEDB_BLCKSZ, right, ORIOLEDB_BLCKSZ);
+
+		release_reserved_undo_location(undoType);
+		return undoLocation;
+	}
+
+	/* Differential image: boundary key is the left page's hikey. */
+	BTREE_PAGE_GET_HIKEY(boundary, left);
+	boundaryLen = BTREE_PAGE_GET_HIKEY_SIZE(left);
+
+	undo_rec = get_undo_record(undoType, &undoLocation,
+							   O_MERGE_DIFF_UNDO_IMAGE_SIZE(boundaryLen));
 
 	header = (UndoPageImageHeader *) undo_rec;
-	header->type = UndoPageImageMerge;
-	undo_rec = undo_rec + MAXALIGN(sizeof(UndoPageImageHeader));
+	header->type = UndoPageImageMergeDiff;
+	header->splitKeyFlags = 0;
+	header->splitKeyLen = 0;
 
-	memcpy(undo_rec, left, ORIOLEDB_BLCKSZ);
-	memcpy(undo_rec + ORIOLEDB_BLCKSZ, right, ORIOLEDB_BLCKSZ);
+	{
+		UndoMergeDiffData *diff = (UndoMergeDiffData *)
+			(undo_rec + MAXALIGN(sizeof(UndoPageImageHeader)));
+		Pointer		boundaryPtr = (Pointer) diff + MAXALIGN(sizeof(UndoMergeDiffData));
 
-	release_reserved_undo_location(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+		diff->leftCsn = leftHeader->csn;
+		diff->rightCsn = rightHeader->csn;
+		diff->leftUndoLoc = leftHeader->undoLocation;
+		diff->rightUndoLoc = rightHeader->undoLocation;
+		diff->boundaryFlags = boundary.formatFlags;
+		diff->rightRightmost = O_PAGE_IS(right, RIGHTMOST) ? 1 : 0;
+		diff->boundaryLen = boundaryLen;
+		memcpy(boundaryPtr, boundary.data, boundaryLen);
+	}
 
+	release_reserved_undo_location(undoType);
 	return undoLocation;
 }
 
