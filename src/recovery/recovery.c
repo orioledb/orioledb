@@ -1943,9 +1943,11 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 
 			/*
 			 * undo_stacks might be copied into a temp file, so initialize it
-			 * with zeroes.
+			 * with InvalidUndoLocation.
 			 */
 			memset(cur_state->undo_stacks, 0, sizeof(cur_state->undo_stacks));
+			for (i = 0; i < (int) UndoLogsCount; i++)
+				undo_stack_locations_set_invalid(&cur_state->undo_stacks[i]);
 
 			dlist_init(&cur_state->checkpoint_undo_stacks);
 			oxid_needs_wal_flush = false;
