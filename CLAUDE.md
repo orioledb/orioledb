@@ -2,6 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Evidence discipline (READ FIRST — non-negotiable)
+
+**Do not theorize. State a claim only when you have strong proof from real code or real logs.**
+
+- Every mechanistic claim must be backed by a concrete artifact: a quoted source line (`file:line`), a grep hit from an actual log/checkpoint file, or a reproduced result. If you cannot point to one, do not assert it.
+- Distinguish **fact** from **inference** explicitly. If something is inferred, label it ("inferred", "not yet verified") and say exactly what artifact would confirm or refute it. Prefer running that check over guessing.
+- Verify config/state from the artifact, not from defaults or memory (e.g. read the *effective* `postgresql.conf` value, the *last* line wins; don't assume PG defaults).
+- Beware look-alike evidence: runtime traces ≠ redo/replay traces; absence in a *gated* trace ≠ absence of the event; one node's config ≠ the other's. Check which one you actually have.
+- When a single counter-fact contradicts a claim, retract the claim immediately and plainly — do not patch the theory to survive. Past over-theorizing in this repo (e.g. blaming `fsync=off` when it was overridden to `on`; conflating runtime vs redo `ROLLBACK` lines) caused repeated wrong conclusions. Cost of a wrong confident claim >> cost of "I don't know yet; here's what I'd grep."
+- It is correct and expected to answer "not established from the logs" and propose the exact grep/read to settle it, rather than produce a plausible story.
+
 ## What this repo is
 
 OrioleDB is a **PostgreSQL extension** that replaces the heap with a new index-organized table access method. It is loaded via `shared_preload_libraries = 'orioledb.so'` and tables are created with `USING orioledb`. It is **not** standalone — every build links against a forked PostgreSQL that carries extensibility patches:
