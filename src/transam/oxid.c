@@ -33,6 +33,7 @@
 #include "storage/proc.h"
 #include "utils/snapmgr.h"
 #include "utils/injection_point.h"
+#include "utils/stopevent.h"
 #include "recovery/wal.h"
 
 #define XID_FILE_SIZE (0x1000000)
@@ -1596,18 +1597,32 @@ current_oxid_abort(void)
 	pg_write_barrier();
 	csn_committing_set = false;
 	xlog_ptr_committing_set = false;
-#ifdef USE_INJECTION_POINTS
+
 	/*
-	 * Prove the checkpoint abort-snapshot race: log the WAL insert position at
-	 * the moment we clear this oxid's vxids slot.  wal_rollback already wrote
-	 * (and, under synchronous_commit, flushed) the WAL_REC_ROLLBACK *before*
-	 * this point, so if a concurrent finish_write_xids() snapshots vxids now it
-	 * captures this oxid as in-flight even though its rollback is already
-	 * durable below the checkpoint's replayStartPtr.
+	 * Deterministic-repro hook for the checkpoint abort-snapshot race
+	 * (test/t/crash/ISSUE_deferred_rollback_replica_two_crash_modes.md §4.1).
+	 * We are past wal_rollback (the WAL_REC_ROLLBACK is already written and,
+	 * under synchronous_commit, flushed) but have NOT yet cleared this oxid's
+	 * vxids slot.  Pausing here lets a concurrent checkpoint's
+	 * finish_write_xids() snapshot this oxid as in-flight (it gates only on
+	 * OXidIsValid(vxids[].oxid)) while its resolving rollback sits below the
+	 * checkpoint's replayStartPtr -- the exact inconsistency that makes crash
+	 * recovery resurrect the oxid and emit a spurious deferred rollback.
+	 * Targeted via params: pg_stopevent_set('before_abort_vxids_clear',
+	 * '$.oxid == <N>').  Runtime-gated by orioledb.enable_stopevents.
 	 */
-	elog(LOG, "GXMIN-TRACE clear_vxids reason=abort oxid=%lu insertPtr=%X/%X pid=%d",
-		 (unsigned long) curOxid, LSN_FORMAT_ARGS(GetXLogInsertRecPtr()), MyProcPid);
-#endif
+	if (STOPEVENTS_ENABLED())
+	{
+		Jsonb	   *params;
+		JsonbParseState *state = NULL;
+
+		pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+		jsonb_push_int8_key(&state, "oxid", (int64) curOxid);
+		params = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+
+		STOPEVENT(STOPEVENT_BEFORE_ABORT_VXIDS_CLEAR, params);
+	}
+
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 
 	advance_run_xmin(curOxid);

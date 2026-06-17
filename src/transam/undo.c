@@ -2038,27 +2038,6 @@ reset_cur_undo_locations(void)
 	UndoStackLocations location = {InvalidUndoLocation, InvalidUndoLocation, InvalidUndoLocation, InvalidUndoLocation};
 	int			i;
 
-#ifdef USE_INJECTION_POINTS
-	/*
-	 * Timestamp the undo-location reset (abort/commit finish).  Pairs with the
-	 * clear_vxids and chkp_dump_inflight traces: on the abort path this fires
-	 * AFTER the rollback WAL is durable, so a checkpoint scan before this point
-	 * still sees the valid shared undo location (e.g. 111904) for an oxid whose
-	 * rollback is already below replayStart.  Gated on CritSectionCount==0 so
-	 * the commit path's CRIT_SECTION caller cannot TRAP on palloc.
-	 */
-	if (CritSectionCount == 0)
-	{
-		UndoStackLocations _old0;
-
-		get_cur_undo_locations(&_old0, (UndoLogType) 0);
-		if (UndoLocationIsValid(_old0.location))
-			elog(LOG, "GXMIN-TRACE reset_undo_loc oxid=%lu oldLoc0=%lu pid=%d",
-				 (unsigned long) get_current_oxid_if_any(),
-				 (unsigned long) _old0.location, MyProcPid);
-	}
-#endif
-
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		set_cur_undo_locations((UndoLogType) i, location);
 }
