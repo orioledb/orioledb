@@ -275,8 +275,14 @@ serialize_tree(StringInfo str, OrioledbTree *tree)
 	appendHton32StringInfo(str, tree->nkeys);
 
 	keys_str = makeStringInfo();
+	pg_log_debug("serialize_tree: (%u %u %u): nkeys: %d",
+				 tree->tree_key.datoid,
+				 tree->tree_key.reloid,
+				 tree->tree_key.relnode,
+				 tree->nkeys);
 	for (j = 0; j < tree->nkeys; j++)
 	{
+		pg_log_debug("serialize_key: %d: %u", j, tree->keys[j]->dataLength);
 		appendStringInfoChar(keys_str, tree->keys[j]->tupleFormatFlags);
 		appendHton32StringInfo(keys_str, tree->keys[j]->dataLength);
 		appendBinaryStringInfoNT(keys_str, tree->keys[j]->data,
@@ -293,6 +299,7 @@ serialize_key_map(StringInfo str, OrioledbKeyMap *map)
 {
 	int			i;
 
+	pg_log_debug("serialize_key_map: ntrees: %d", map->ntrees);
 	for (i = 0; i < map->ntrees; i++)
 	{
 		serialize_tree(str, &map->trees[i]);
@@ -929,23 +936,19 @@ _PG_rewind(const char *datadir_target, char *datadir_source,
 	if (PQstatus(source_conn) == CONNECTION_BAD)
 		pg_fatal("%s", PQerrorMessage(source_conn));
 
+
 	orioledb_map->fill_map = true;
 	SimpleXLogRead(datadir_target, startpoint, tliIndex, endpoint,
 				   restoreCommand, extract_row_info, orioledb_map);
 	if (!OXidIsValid(orioledb_map->divXid))
 	{
-		/*
-		 * No orioledb commit/rollback found in WAL after divergence.
-		 * Read lastXid from the target's own checkpoint control file,
-		 * which holds the highest XID used on that node.
-		 */
 		pg_log_debug("no orioledb transactions found in WAL, "
 					 "reading lastXid from control file");
 		orioledb_map->divXid = read_target_last_xid(datadir_target);
 		if (!OXidIsValid(orioledb_map->divXid))
 			pg_fatal("could not determine lastXid for orioledb rewind");
 	}
-	Assert(OXidIsValid(orioledb_map->divXid));
+	pg_log_debug("divXid: %lu", orioledb_map->divXid);
 	if (debug)
 		orioledb_key_map_print(orioledb_map);
 	orioledb_process_row_map(orioledb_map, argv0, datadir_target, debug,

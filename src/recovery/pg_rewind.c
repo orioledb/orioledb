@@ -21,6 +21,7 @@
 #include "recovery/internal.h"
 #include "recovery/recovery.h"
 #include "tableam/descr.h"
+#include "transam/undo.h"
 
 #include "access/heapam.h"
 #include "access/table.h"
@@ -209,6 +210,7 @@ create_key_array(uint32 nkeys, size_t extension_size, char **ptr)
 
 		keyLength += extension_size;
 
+		elog(WARNING, "create_key_array: key_array[%d]: %u", i, keyLength);
 		key_array[i] = palloc0(offsetof(KeyArrayElement, data) +
 							   keyLength);
 		key_array[i]->tupleFormatFlags = tupleFormatFlags;
@@ -270,11 +272,14 @@ orioledb_pg_rewind_sorted_keys(PG_FUNCTION_ARGS)
 		OIndexDescr *indexDescr = NULL;
 		int			sys_tree_num;
 
-		elog(WARNING, "orioledb_pg_rewind_sorted_keys: %u %u %u",
-			 row->oids.datoid, row->oids.reloid, row->oids.relnode);
 		sys_tree_num = fill_descrs(row->oids, row->ix_type,
 								   &descr, &indexDescr);
 
+		elog(WARNING, "orioledb_pg_rewind_sorted_keys: (%u %u %u): nkeys: %d",
+					  row->oids.datoid,
+					  row->oids.reloid,
+					  row->oids.relnode,
+					  row->nkeys);
 		if ((indexDescr) || (sys_tree_num > 0))
 		{
 			int			i;
@@ -579,17 +584,6 @@ orioledb_pg_rewind_new_row_versions(PG_FUNCTION_ARGS)
 		appendHton32StringInfo(result_str, row->oids.reloid);
 		appendHton32StringInfo(result_str, row->oids.relnode);
 
-	{
-		Datum res;
-		VarChar    *optionsArg = (VarChar *) cstring_to_text("");
-		
-		extern Datum orioledb_sys_tree_structure(PG_FUNCTION_ARGS);
-		res = DirectFunctionCall3(orioledb_sys_tree_structure, 
-								  Int32GetDatum(3),
-								  PointerGetDatum(optionsArg),
-								  Int32GetDatum(32));
-		elog(WARNING, "TREE: %s", TextDatumGetCString(res));
-	}
 		process_tree(result_str, row);
 	}
 	table_endscan(scan);
@@ -647,7 +641,7 @@ apply_rewind_row(OTableDescr *descr, OIndexDescr *indexDescr,
 		pg_atomic_write_u64(recovery_ptr, rec);
 	}
 
-	recovery_finish_current_oxid(COMMITSEQNO_MAX_NORMAL - 1, rec, -1, sync);
+	recovery_finish_current_oxid(COMMITSEQNO_FROZEN, rec, -1, sync);
 }
 
 static void
@@ -912,12 +906,58 @@ replay_rewind(uint32 chkp_num, bool single)
 	checkpoint_state->controlSysTreesStartPtr = startpoint;
 	elog(WARNING, "lastXid: %lu", lastXid);
 	Assert(OXidIsValid(lastXid));
-	pg_atomic_init_u64(&xid_meta->nextXid, lastXid);
-	elog(WARNING, "SET runXmin AFTER REWIND: %lu", lastXid);
+
+	pg_atomic_init_u64(&xid_meta->nextXid, lastXid + 1);
+	elog(WARNING, "SET runXmin after rewind: %lu", lastXid);
 	pg_atomic_init_u64(&xid_meta->runXmin, lastXid);
 	pg_atomic_init_u64(&xid_meta->globalXmin, lastXid);
 	pg_atomic_init_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin, lastXid);
 	pg_atomic_init_u64(&xid_meta->writtenXmin, lastXid);
 	pg_atomic_init_u64(&xid_meta->writeInProgressXmin, lastXid);
+	pg_atomic_init_u64(&xid_meta->checkpointRetainXmin, lastXid);
+	pg_atomic_init_u64(&xid_meta->checkpointRetainXmax, lastXid + 1);
+	pg_atomic_init_u64(&xid_meta->cleanedXmin, lastXid);
+	pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmin, lastXid);
+	pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmax, lastXid + 1);
+
+	/*
+	 * Reset undo metadata for every undo log type.  All locations start at 0
+	 * and will be advanced by subsequent WAL replay.
+	 */
+	{
+		int i;
+		for (i = 0; i < (int) UndoLogsCount; i++)
+		{
+			UndoMeta *undo_meta = get_undo_meta_by_type((UndoLogType) i);
+
+			pg_atomic_init_u64(&undo_meta->lastUsedLocation, 0);
+			pg_atomic_init_u64(&undo_meta->advanceReservedLocation, 0);
+			pg_atomic_init_u64(&undo_meta->writeInProgressLocation, 0);
+			pg_atomic_init_u64(&undo_meta->writtenLocation, 0);
+			pg_atomic_init_u64(&undo_meta->lastUsedUndoLocationWhenUpdatedMinLocation, 0);
+			pg_atomic_init_u64(&undo_meta->minProcRetainLocation, 0);
+			pg_atomic_init_u64(&undo_meta->minRewindRetainLocation, 0);
+			pg_atomic_init_u64(&undo_meta->minProcTransactionRetainLocation, 0);
+			pg_atomic_init_u64(&undo_meta->minProcReservedLocation, 0);
+			pg_atomic_init_u64(&undo_meta->cleanedLocation, 0);
+			pg_atomic_init_u64(&undo_meta->checkpointRetainStartLocation, 0);
+			pg_atomic_init_u64(&undo_meta->checkpointRetainEndLocation, 0);
+			pg_atomic_init_u64(&undo_meta->cleanedCheckpointStartLocation, 0);
+			pg_atomic_init_u64(&undo_meta->cleanedCheckpointEndLocation, 0);
+		}
+	}
+
+	/*
+	 * Mark the checkpoint state as finished and reset the stack so that
+	 * everything is ready for the next real checkpoint.
+	 */
+	checkpoint_state->curKeyType = CurKeyFinished;
+	checkpoint_state->completed = true;
+	checkpoint_state->treeType = oIndexInvalid;
+	checkpoint_state->datoid = InvalidOid;
+	checkpoint_state->reloid = InvalidOid;
+	checkpoint_state->relnode = InvalidOid;
+	checkpoint_state->tablespace = InvalidOid;
+
 	elog(LOG, "orioledb rewind ended");
 }
