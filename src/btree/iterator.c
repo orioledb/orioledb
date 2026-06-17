@@ -130,6 +130,7 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 	bool		combinedResult = false;
 	OTuple		result;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
+	bool		forceFind = false;
 
 	/*
 	 * If we need to get the result from given snapshot in the past, and in
@@ -148,8 +149,10 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 						   combinedResult ? COMMITSEQNO_INPROGRESS : read_o_snapshot->csn,
 						   BTREE_PAGE_FIND_FETCH);
 
+retry:
+
 	/* Use page location hint if provided */
-	if (hint && OInMemoryBlknoIsValid(hint->blkno))
+	if (!forceFind && hint && OInMemoryBlknoIsValid(hint->blkno))
 		findResult = refind_page(&context, key, kind, 0, hint->blkno, hint->pageChangeCount);
 	else
 		findResult = find_page(&context, key, kind, 0);
@@ -231,7 +234,18 @@ o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 		 * There is no matching tuple modified by us.  So, we have to fetch
 		 * the page image from undo log as we didn't ask find_page() to do
 		 * this for us.
+		 *
+		 * The page was read partially (BTREE_PAGE_FIND_FETCH).  Differential
+		 * page-level undo images reconstruct the historical page in place
+		 * from the live page in img, so they need every chunk present; fully
+		 * materialize it first.  If the source page changed mid-load, the
+		 * find result is stale -- redo it with a fresh top-down search.
 		 */
+		if (!partial_load_full_page(&context.partial, img))
+		{
+			forceFind = true;
+			goto retry;
+		}
 		read_page_from_undo(desc, img, header->undoLocation, read_o_snapshot->csn,
 							key, kind, NULL);
 		btree_page_search(desc, img, key, kind, NULL, &loc);
@@ -1293,6 +1307,18 @@ undo_it_find_internal(UndoIterator *undoIt, void *key, BTreeKeyType kind)
 	undoLocation = undoIt->baseLoc;
 	undoIt->leftmost = true;
 	undoIt->rightmost = true;
+
+	/*
+	 * Seed the working image with the live data leaf before walking the
+	 * chain. Differential page-level undo images (UndoPageImage*Diff) do not
+	 * store page bytes; they reconstruct the historical page by transforming
+	 * the newer page in place.  Since each undo_it_find_internal() call
+	 * restarts the walk from baseLoc, it must restart from the live leaf --
+	 * mirroring the histImg re-seed in load_first_historical_page() /
+	 * load_next_historical_page(). For full images this memcpy is harmless:
+	 * they overwrite the image whole.
+	 */
+	memcpy(undoIt->image, undoIt->it->context.img, ORIOLEDB_BLCKSZ);
 
 	while (true)
 	{

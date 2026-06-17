@@ -27,6 +27,29 @@ typedef enum
 	UndoPageImageSplit,
 	/* produced by pages merge */
 	UndoPageImageMerge,
+
+	/*
+	 * Differential merge image: produced by pages merge when the merge
+	 * dropped no tuple physically.  Stores only the boundary key and the
+	 * per-half undo chain continuation, not the page bytes.  The pre-merge
+	 * left/right page is reconstructed by trimming the (newer) merged page
+	 * already present in the caller's destination buffer at the boundary key.
+	 * See get_page_from_undo() and make_merge_undo_image().
+	 */
+	UndoPageImageMergeDiff,
+
+	/*
+	 * Differential split image: produced by a page split that dropped no
+	 * tuple physically.  Stores only the split key and the original
+	 * (pre-split) page's undo-chain continuation, not the page bytes.  Either
+	 * pre-split half is reconstructed by keeping the newer half already
+	 * present in the caller's destination buffer and rewiring its header to
+	 * continue into the original page's pre-split history; an older, wider
+	 * image further down the chain is clipped to the half's range by the
+	 * existing lokey/hikey machinery.  See get_page_from_undo() and
+	 * page_add_image_to_undo().
+	 */
+	UndoPageImageSplitDiff,
 	/* unknown value for default init */
 	UndoPageImageInvalid
 } UndoPageImageType;
@@ -40,6 +63,45 @@ typedef struct
 	uint8		splitKeyFlags;
 	LocationIndex splitKeyLen;
 } UndoPageImageHeader;
+
+/*
+ * Payload of a differential merge image (UndoPageImageMergeDiff), stored
+ * right after UndoPageImageHeader and followed by the boundary key bytes.
+ *
+ * The boundary key is the pre-merge hikey of the left page (== lokey of the
+ * right page).  leftCsn/leftUndoLoc and rightCsn/rightUndoLoc are the pre-merge
+ * (csn, undoLocation) of the left and right pages, used to synthesize the
+ * reconstructed half's header so the undo chain continues into that half's own
+ * pre-merge history.  rightRightmost records whether the right page (and hence
+ * the merged page) was RIGHTMOST.
+ */
+typedef struct
+{
+	CommitSeqNo leftCsn;
+	CommitSeqNo rightCsn;
+	UndoLocation leftUndoLoc;
+	UndoLocation rightUndoLoc;
+	uint8		boundaryFlags;
+	uint8		rightRightmost;
+	LocationIndex boundaryLen;
+} UndoMergeDiffData;
+
+/*
+ * Payload of a differential split image (UndoPageImageSplitDiff), stored right
+ * after UndoPageImageHeader and followed by the split key bytes (described by
+ * the header's splitKeyFlags/splitKeyLen).
+ *
+ * The split key is the boundary between the pre-split left half ([lo, splitKey))
+ * and right half ([splitKey, hi)).  origCsn/origUndoLoc are the original
+ * (pre-split) page's (csn, undoLocation); they are written into the
+ * reconstructed half's header so the undo chain continues into the original
+ * page's own pre-split history.
+ */
+typedef struct
+{
+	CommitSeqNo origCsn;
+	UndoLocation origUndoLoc;
+} UndoSplitDiffData;
 
 /*
  * Status of existing lock on the tuple made by the same transaction;
@@ -87,6 +149,12 @@ typedef struct
 #define O_MODIFY_UNDO_RESERVE_SIZE (2 * (O_MAX_SPLIT_UNDO_IMAGE_SIZE + O_UPDATE_MAX_UNDO_SIZE))
 /* size of image in undo log produced by pages merge */
 #define O_MERGE_UNDO_IMAGE_SIZE (MAXALIGN(sizeof(UndoPageImageHeader)) + ORIOLEDB_BLCKSZ * 2)
+/* size of differential merge image (no page bytes, just the boundary key) */
+#define O_MERGE_DIFF_UNDO_IMAGE_SIZE(boundaryLen) (MAXALIGN(sizeof(UndoPageImageHeader)) + \
+												   MAXALIGN(sizeof(UndoMergeDiffData)) + MAXALIGN(boundaryLen))
+/* size of differential split image (no page bytes, just the split key) */
+#define O_SPLIT_DIFF_UNDO_IMAGE_SIZE(splitKeyLen) (MAXALIGN(sizeof(UndoPageImageHeader)) + \
+												   MAXALIGN(sizeof(UndoSplitDiffData)) + MAXALIGN(splitKeyLen))
 /* undo location of a page image */
 #define O_UNDO_GET_IMAGE_LOCATION(undo_loc, left) ((undo_loc) + MAXALIGN(sizeof(UndoPageImageHeader)) + ((left) ? 0 : ORIOLEDB_BLCKSZ))
 /* maximum size of undo record */
