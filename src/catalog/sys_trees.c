@@ -1257,8 +1257,14 @@ o_sys_xid_undo_location_tuple_print(BTreeDescr *desc, StringInfo buf, OTuple tup
 {
 	ReplicationRetainUndoTuple *tuple = (ReplicationRetainUndoTuple *) tup.data;
 
-	appendStringInfo(buf, "(%u, " UINT64_FORMAT ")",
-					 tuple->xid, tuple->undoLocation);
+	/*
+	 * The undo location is an absolute offset into the undo log, which shifts
+	 * with any change to undo allocation (e.g. differential page-level undo
+	 * images consume less space).  Mask it so the structure dump stays stable
+	 * across such layout changes; the actual value is verified separately via
+	 * orioledb_read_sys_xid_undo_location().
+	 */
+	appendStringInfo(buf, "(%u, X)", tuple->xid);
 }
 
 static JsonbValue *
