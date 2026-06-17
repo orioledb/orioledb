@@ -222,6 +222,12 @@ class RrStressTest(BaseTest):
 		#   `sub_obj`  -- testgres Subscription handle (logical only;
 		#                 used for sub_obj.catchup()).
 		replica = None
+		# All replica nodes spawned this trial (for streaming: 1 + extras).
+		# `replica` stays replicas[0] for the data-consistency checks; the
+		# TRAP/PANIC scan and the catch-save iterate the whole list so a
+		# Mode-2 crash on ANY standby is detected/preserved.
+		replicas = []
+		trapped_replica = [None]
 		sub_obj = None
 		if replica_mode == 'logical':
 			replica = self.getSubsriber()
@@ -233,13 +239,20 @@ class RrStressTest(BaseTest):
 			pub = node.publish('rr_pub', tables=['o_bank_account'])
 			sub_obj = replica.subscribe(pub, 'rr_sub')
 			wait_ready(replica)
+			replicas = [replica]
 		elif replica_mode == 'streaming':
 			# pg_basebackup the primary at its current state, then
 			# spawn the binary copy as a hot-standby.  Replica
 			# inherits the schema and the just-loaded 100 rows
-			# from the backup -- no separate DDL run.
-			replica = self.getReplica()
-			replica.start()
+			# from the backup -- no separate DDL run.  RR_REPLICAS
+			# (default 1) spawns extra independent standbys: each
+			# replays the deferred rollback on its own, multiplying
+			# the per-trial Mode-2 reproduction probability.
+			n_replicas = max(1, _env_int('RR_REPLICAS', 1))
+			replicas = self.getReplicas(n_replicas)
+			for _r in replicas:
+				_r.start()
+			replica = replicas[0]
 
 		test_start = time.time()
 		first_error_time = [None]
@@ -1178,10 +1191,11 @@ class RrStressTest(BaseTest):
 			# replica was spawned this trial.  testgres tears
 			# down its tmp dir on teardown, so the replica log
 			# is otherwise unrecoverable post-mortem.
-			if replica is not None:
+			_rep = trapped_replica[0] or replica
+			if _rep is not None:
 				try:
 					replica_log = os.path.join(
-					    replica.logs_dir, 'postgresql.log')
+					    _rep.logs_dir, 'postgresql.log')
 					rdst = os.path.join(
 					    results_dir,
 					    f'{tag}_{inst}_{pts}_{reason}_replica.log')
@@ -1205,7 +1219,8 @@ class RrStressTest(BaseTest):
 			os.makedirs(results_dir, exist_ok=True)
 			tag = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 			inst = os.getenv('RR_INSTANCE') or 'solo'
-			for label, n in (('primary', node), ('replica', replica)):
+			for label, n in (('primary', node),
+			                 ('replica', trapped_replica[0] or replica)):
 				if n is None:
 					continue
 				src = os.path.join(n.base_dir, 'data')
@@ -1221,18 +1236,22 @@ class RrStressTest(BaseTest):
 					      flush=True)
 
 		def _replica_trapped():
-			# True iff the replica's log carries a TRAP/PANIC (the
-			# update_run_xmin xmin>=globalXmin assert, or any other crash).
-			if replica is None:
-				return False
-			try:
-				rlog = os.path.join(replica.logs_dir, 'postgresql.log')
-				with open(rlog, errors='replace') as _f:
-					for _line in _f:
-						if 'TRAP:' in _line or 'PANIC:' in _line:
-							return True
-			except Exception:
-				pass
+			# True iff ANY replica's log carries a TRAP/PANIC (the Mode-2
+			# undo_item_buf_read PANIC, the Mode-1 xmin>=globalXmin assert,
+			# or any other crash).  Records the first trapped node in
+			# trapped_replica[0] so the save hooks preserve the right one.
+			for _r in replicas:
+				if _r is None:
+					continue
+				try:
+					rlog = os.path.join(_r.logs_dir, 'postgresql.log')
+					with open(rlog, errors='replace') as _f:
+						for _line in _f:
+							if 'TRAP:' in _line or 'PANIC:' in _line:
+								trapped_replica[0] = _r
+								return True
+				except Exception:
+					pass
 			return False
 
 		if panic_lines:
