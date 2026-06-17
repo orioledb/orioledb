@@ -3988,6 +3988,22 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 
 	elog(DEBUG4, "[%s] GET RTYPE %d `%s`", __func__, rec->type, wal_type_name(rec->type));
 
+	/*
+	 * Stall hook for the
+	 * test_checkpoint_abort_snapshot_resurrects_aborted_oxid). Blocking the
+	 * recovery leader here stops WAL dispatch to the recovery workers while
+	 * the walreceiver keeps writing the incoming stream to disk, so a backlog
+	 * accumulates.  When released, the leader bursts through the backlog
+	 * (dispatch is cheap) far ahead of the workers (apply is not), so
+	 * get_workers_commit_ptr() stays low and the finished_list drain cannot
+	 * remove a resurrected in-flight oxid before the deferred
+	 * WAL_REC_ROLLBACK re-finds it (found=1) on the leader.  The test only
+	 * needs to park on the next record after arming, so no params are pushed;
+	 * arm match-all with pg_stopevent_set('replay_on_record', 'true').
+	 * Runtime-gated by orioledb.enable_stopevents (off in production).
+	 */
+	STOPEVENT(STOPEVENT_REPLAY_ON_RECORD, NULL);
+
 	switch (rec->type)
 	{
 		case WAL_REC_XID:

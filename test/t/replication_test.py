@@ -8,7 +8,7 @@ import subprocess
 import time
 from testgres import NodeStatus
 
-from .base_test import BaseTest, ThreadQueryExecutor, wait_checkpointer_stopevent
+from .base_test import BaseTest, ThreadQueryExecutor, wait_checkpointer_stopevent, wait_stopevent
 
 
 class ReplicationTest(BaseTest):
@@ -2674,6 +2674,296 @@ class ReplicationTest(BaseTest):
 				    f"{replica_globalxmin} -- the master's spurious "
 				    f"WAL_REC_ROLLBACK pulled the horizon backwards")
 		finally:
+			try:
+				master.stop()
+			except Exception:
+				pass
+			for p in dangling_pids:
+				try:
+					os.kill(p, signal.SIGKILL)
+				except ProcessLookupError:
+					pass
+
+	def test_checkpoint_snapshot_resurrects_aborted_oxid(self):
+		"""
+		Deterministic repro of the streaming-standby undo-read
+		PANIC produced by the checkpoint abort-snapshot race
+
+        A transaction aborts with material changes -- its
+		WAL_REC_ROLLBACK is written and (synchronous_commit=on, fsync=on)
+		flushed -- but the checkpoint snapshots the in-flight xids set
+		from oProcData[].vxids[] *before* the aborting backend clears its
+		vxids slot.  finish_write_xids() gates only on
+		OXidIsValid(vxids[].oxid) (checkpoint.c), so it records the oxid
+		as in-flight even though its resolving rollback already sits below
+		the checkpoint's replayStartPtr.  Crash recovery re-discovers the
+		oxid in-flight, skips its (sub-replayStart) rollback, re-aborts
+		the phantom, and emits a *spurious* deferred WAL_REC_ROLLBACK that
+		streams to the standby.
+
+		The standby's recovery leader dispatches modifies
+		to workers by row-key hash and never materializes undo itself, so
+		for the resurrected oxid the leader holds undo_stacks=0 (the
+		!found memset).  When the real rollback replays it RETAINs the
+		entry on the leader's finished_list (deferred finalization, the
+		entry is detached so the 0 is never overwritten with the
+		sentinel).  If that entry has NOT yet been drained when the
+		deferred rollback re-finds it (found=1), set_cur_undo_locations
+		propagates the raw 0 -> walk_undo_stack reads location=0 ->
+		undo_item_buf_read_item() PANIC.
+
+		The finished_list drain (update_proc_retain_undo_location, leader)
+		is gated by get_workers_commit_ptr() = min recovery-worker
+		commitPtr.  On a quiescent standby the workers catch up and the
+		drain DELETEs the culprit before the deferred rollback arrives
+		(safe !found path) -- which is why the minimal workload does not
+		crash.  This test forces the RETAIN window with the
+		'replay_on_record' stop event: it parks the standby's recovery
+		leader so a large WAL backlog accumulates on disk (the walreceiver
+		keeps writing while the leader is frozen), then releases it.  The
+		leader bursts through the backlog far ahead of the workers
+		(dispatch is cheap, apply is not), so min worker commitPtr stays
+		far below the culprit's rollback LSN, the drain cannot remove it,
+		and the deferred rollback re-finds it (found=1) -> location=0
+		PANIC.
+		"""
+		master = self.node
+		master.append_conf("wal_keep_size = '512MB'\n")
+		master.append_conf("fsync = on\n")
+		master.append_conf("synchronous_commit = on\n")
+		master.append_conf("full_page_writes = on\n")
+		master.start()
+		dangling_pids = set()
+		rb_thread = None
+		con_rb = None
+
+		replica = self.getReplica()
+		# restart_after_crash = off makes PANIC take the postmaster
+		# down for an unambiguous "did the standby crash?" check (no recovery-loop
+		# flapping re-replaying the same toxic record).  A small recovery
+		# queue keeps workers from reading far ahead of where they apply,
+		# so min worker commitPtr stays low during the burst.
+		replica.append_conf("orioledb.enable_stopevents = on\n")
+		replica.append_conf("restart_after_crash = off\n")
+		replica.append_conf("orioledb.recovery_queue_size = 512\n")
+		try:
+			replica.start()
+			# (1) Base rows + checkpoint; let the standby catch up so
+			# its recovery workers sit at the baseline LSN.
+			master.safe_psql("""
+				CREATE EXTENSION orioledb;
+				CREATE TABLE o_abort_snap (
+					id int PRIMARY KEY,
+					v  int NOT NULL
+				) USING orioledb;
+				INSERT INTO o_abort_snap
+					SELECT g, 0 FROM generate_series(1, 100) g;
+			""")
+			master.safe_psql("CHECKPOINT;")
+			self.catchup_orioledb(replica)
+
+			# (2) Park the standby's recovery leader in replay_on_record
+			# on the next WAL record.  From here the leader replays
+			# nothing while the walreceiver keeps writing the incoming
+			# stream to disk -> a backlog builds up behind the parked
+			# leader.
+			replica.safe_psql(
+			    "SELECT pg_stopevent_set('replay_on_record', 'true');")
+			# One trigger write so the leader actually reaches and parks
+			# at the stop event; then confirm it is waiting.
+			master.safe_psql("UPDATE o_abort_snap SET v = v + 1 WHERE id = 1;")
+			replica.poll_query_until(
+			    "SELECT coalesce(array_length(waiter_pids, 1), 0) >= 1 "
+			    "FROM pg_stopevents() "
+			    "WHERE stopevent = 'replay_on_record'",
+			    expected=True,
+			    sleep_time=0.2,
+			    max_attempts=150)
+
+			# (3) Large committed bulk workload -> a deep backlog (well
+			# past the recovery queue depth) of modifies queued behind
+			# the parked leader, all at LSNs *below* the culprit's
+			# rollback.  On release the leader fills the worker queues
+			# with these and can only advance as workers drain, so when
+			# it reaches the deferred rollback the workers are still
+			# grinding bulk records far below the culprit -> the drain
+			# cannot have removed the culprit.
+			master.safe_psql("INSERT INTO o_abort_snap "
+			                 "SELECT g, 0 FROM generate_series(101, 50100) g;")
+
+			# (4) The to-be-rolled-back txn.  A material UPDATE forces
+			# has_material_changes=true, so its abort takes the slow
+			# path and wal_rollback writes a durable WAL_REC_ROLLBACK.
+			# Opened as the oldest live oxid so the checkpoint's retain
+			# floor (hence recovery_xmin after restart) sits at this
+			# oxid -- the emit-site guard `oxid >= recovery_xmin` then
+			# admits the deferred rollback.
+			con_rb = master.connect()
+			con_rb.begin()
+			con_rb.execute("UPDATE o_abort_snap SET v = -1 WHERE id = 1;")
+			rb_oxid = con_rb.execute(
+			    "SELECT orioledb_get_current_oxid();")[0][0]
+			rb_pid = con_rb.execute("SELECT pg_backend_pid();")[0][0]
+			dangling_pids.add(rb_pid)
+			# Stop events are per-process: only this backend will pause.
+			con_rb.execute("SET orioledb.enable_stopevents = on;")
+
+			# (5) Toggle the stop event, targeted at this exact oxid.
+			master.safe_psql(
+			    "SELECT pg_stopevent_set('before_abort_vxids_clear', "
+			    f"'$.oxid == {rb_oxid}');")
+
+			# (6) Roll back the txn.  wal_rollback writes+flushes the
+			# WAL_REC_ROLLBACK, then the backend parks inside
+			# current_oxid_abort() right before clearing its vxids
+			# slot (rollback now durable, but the slot still
+			# advertises the oxid as in-flight).
+			rb_thread = ThreadQueryExecutor(con_rb, "ROLLBACK;")
+			rb_thread.start()
+			wait_stopevent(master, rb_pid)
+
+			# Advance the WAL past the parked backend's rollback record
+			# so the upcoming checkpoint's replayStartPtr lands strictly
+			# above it (recovery will then skip the rollback on replay).
+			master.safe_psql("UPDATE o_abort_snap SET v = v + 1 WHERE id = 2;")
+
+			# (7) Run a checkpoint to completion WHILE the backend is
+			# parked.  finish_write_xids() scans vxids[] and records
+			# rb_oxid in the durable xids dump as in-flight, even
+			# though its rollback is already below replayStartPtr.
+			master.safe_psql("CHECKPOINT;")
+
+			# Release the parked backend; it finishes the abort
+			# (clears vxids, advances runXmin) -- the checkpoint
+			# already captured the inconsistent snapshot.
+			master.safe_psql(
+			    "SELECT pg_stopevent_reset('before_abort_vxids_clear');")
+			rb_thread.join()
+			rb_thread = None
+			con_rb.close()
+			con_rb = None
+
+			# (8) Crash the whole cluster (SIGKILL postmaster, every
+			# backend will automatically stop) and let it restart.
+			# Recovery re-discovers rb_oxid in-flight from the checkpoint dump,
+			# skips its (sub-replayStart) rollback, and emits a deferred
+			# WAL_REC_ROLLBACK that streams to the (still parked)
+			# standby's walreceiver.
+			pid_file = os.path.join(master.data_dir, 'postmaster.pid')
+			with open(pid_file) as f:
+				master_pid = int(f.readline().strip())
+			child_pids = [
+			    int(x) for x in subprocess.run(
+			        ['pgrep', '-P', str(master_pid)],
+			        capture_output=True,
+			        text=True,
+			        check=False).stdout.split()
+			]
+			dangling_pids.update([master_pid] + child_pids)
+			try:
+				os.kill(master_pid, signal.SIGKILL)
+			except ProcessLookupError:
+				pass
+			deadline = time.time() + 30
+			while time.time() < deadline:
+				alive = False
+				for p in [master_pid] + child_pids:
+					try:
+						os.kill(p, 0)
+						alive = True
+						break
+					except ProcessLookupError:
+						continue
+				if not alive:
+					break
+				time.sleep(0.05)
+			master.is_started = False
+			master.start()
+
+			# Drive a probe write so the standby has a concrete LSN
+			# target past the deferred rollback queued behind the burst:
+			# replaying up to it proves the standby survived the
+			# deferred rollback and kept going.
+			master.safe_psql("UPDATE o_abort_snap SET v = v + 1 WHERE id = 3;")
+			master_lsn = master.execute("SELECT pg_current_wal_lsn();")[0][0]
+
+			# (9) Release the standby's recovery leader.  It bursts
+			# through the whole backlog -- baseline bulk, the real
+			# rollback (RETAIN, undo_stacks=0), then the deferred
+			# duplicate -- far ahead of the workers, so the culprit is
+			# still RETAINed when the deferred rollback re-finds it
+			# (found=1).
+			replica.safe_psql("SELECT pg_stopevent_reset('replay_on_record');")
+
+			# (10) The standby must survive the burst and replay PAST
+			# the deferred rollback, up to the probe LSN.
+			replica_crashed = False
+			try:
+				replica.poll_query_until(
+				    f"SELECT pg_last_wal_replay_lsn() >= "
+				    f"'{master_lsn}'::pg_lsn",
+				    expected=True,
+				    sleep_time=0.5,
+				    max_attempts=240)
+			except Exception:
+				replica_crashed = True
+
+			self.assertFalse(
+			    replica_crashed,
+			    f"standby did not replay past the deferred rollback of "
+			    f"oxid {rb_oxid}")
+			self.assertEqual(NodeStatus.Running, replica.status(),
+			                 "standby went down")
+		finally:
+			# Release the parked recovery leader so replica.stop() can't hang,
+			# and SAVE BOTH node logs before teardown destroys the datadirs.
+			try:
+				replica.safe_psql(
+				    "SELECT pg_stopevent_reset('replay_on_record');")
+			except Exception:
+				pass
+			try:
+				master.safe_psql(
+				    "SELECT pg_stopevent_reset('before_abort_vxids_clear');")
+			except Exception:
+				pass
+			# Give the released standby a few seconds to actually replay the
+			# burst (crash-loop / livelock shows up here, not at reset time).
+			try:
+				time.sleep(8)
+			except Exception:
+				pass
+			_evdir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+			                      'crash', 'rootcause_evidence',
+			                      'abort_snap_pair')
+			try:
+				os.makedirs(_evdir, exist_ok=True)
+				for _lbl, _n in (('primary', master), ('replica', replica)):
+					try:
+						subprocess.run([
+						    'cp',
+						    os.path.join(_n.logs_dir, 'postgresql.log'),
+						    os.path.join(_evdir, _lbl + '.log')
+						],
+						               check=False)
+					except Exception:
+						pass
+			except Exception:
+				pass
+			try:
+				replica.stop()
+			except Exception:
+				pass
+			if rb_thread is not None:
+				try:
+					rb_thread.join()
+				except Exception:
+					pass
+			if con_rb is not None:
+				try:
+					con_rb.close()
+				except Exception:
+					pass
 			try:
 				master.stop()
 			except Exception:
