@@ -2746,8 +2746,8 @@ static void
 update_run_xmin(void)
 {
 	OXid		xmin;
-	elog(WARNING, "update_run_xmin");
 	int			i;
+	elog(WARNING, "update_run_xmin");
 	bool		found;
 
 	/* Leader-only: xmin_queue is allocated only when worker_id < 0. */
@@ -2850,6 +2850,7 @@ update_run_xmin(void)
 		Assert(found);
 	}
 
+	elog(WARNING, "pairingheap_is_empty(xmin_queue): %c", pairingheap_is_empty(xmin_queue) ? 'Y' : 'N');
 	if (!pairingheap_is_empty(xmin_queue))
 	{
 		RecoveryXidState *state;
