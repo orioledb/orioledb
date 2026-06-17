@@ -723,24 +723,24 @@ SELECT orioledb_sys_tree_structure(23, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 296, tuple = (752, 0)                         +
-     Item 1: offset = 328, tuple = (756, 96)                        +
-     Item 2: offset = 360, tuple = (757, 35184)                     +
-     Item 3: offset = 392, tuple = (758, 37584)                     +
-     Item 4: offset = 424, tuple = (759, 38040)                     +
-     Item 5: offset = 456, tuple = (761, 38608)                     +
-     Item 6: offset = 488, tuple = (762, 39600)                     +
-     Item 7: offset = 520, tuple = (765, 39760)                     +
-     Item 8: offset = 552, tuple = (766, 60576)                     +
-     Item 9: offset = 584, tuple = (767, 65104)                     +
-     Item 10: offset = 616, tuple = (768, 65552)                    +
-     Item 11: offset = 648, tuple = (769, 68288)                    +
-     Item 12: offset = 680, tuple = (1000, 2000)                    +
-     Item 13: offset = 712, tuple = (1001, 2001)                    +
-     Item 14: offset = 744, tuple = (1002, 2002)                    +
-     Item 15: offset = 776, tuple = (1003, 2003)                    +
-     Item 16: offset = 808, tuple = (1005, 2005)                    +
-     Item 17: offset = 840, tuple = (1006, 2006)                    +
+     Item 0: offset = 296, tuple = (752, X)                         +
+     Item 1: offset = 328, tuple = (756, X)                         +
+     Item 2: offset = 360, tuple = (757, X)                         +
+     Item 3: offset = 392, tuple = (758, X)                         +
+     Item 4: offset = 424, tuple = (759, X)                         +
+     Item 5: offset = 456, tuple = (761, X)                         +
+     Item 6: offset = 488, tuple = (762, X)                         +
+     Item 7: offset = 520, tuple = (765, X)                         +
+     Item 8: offset = 552, tuple = (766, X)                         +
+     Item 9: offset = 584, tuple = (767, X)                         +
+     Item 10: offset = 616, tuple = (768, X)                        +
+     Item 11: offset = 648, tuple = (769, X)                        +
+     Item 12: offset = 680, tuple = (1000, X)                       +
+     Item 13: offset = 712, tuple = (1001, X)                       +
+     Item 14: offset = 744, tuple = (1002, X)                       +
+     Item 15: offset = 776, tuple = (1003, X)                       +
+     Item 16: offset = 808, tuple = (1005, X)                       +
+     Item 17: offset = 840, tuple = (1006, X)                       +
                                                                     +
  
 (1 row)
@@ -759,8 +759,8 @@ SELECT orioledb_sys_tree_structure(23, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = (1005, 2005)                     +
-     Item 1: offset = 296, tuple = (1006, 2006)                     +
+     Item 0: offset = 264, tuple = (1005, X)                        +
+     Item 1: offset = 296, tuple = (1006, X)                        +
                                                                     +
  
 (1 row)
@@ -780,8 +780,8 @@ SELECT orioledb_sys_tree_structure(23, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = (1005, 2005)                     +
-     Item 1: offset = 296, tuple = (1006, 2006)                     +
+     Item 0: offset = 264, tuple = (1005, X)                        +
+     Item 1: offset = 296, tuple = (1006, X)                        +
                                                                     +
  
 (1 row)
@@ -800,9 +800,9 @@ SELECT orioledb_sys_tree_structure(23, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = (1005, 2005)                     +
-     Item 1: offset = 296, tuple = (1006, 2006)                     +
-     Item 2: offset = 328, tuple = (1009, 2009)                     +
+     Item 0: offset = 264, tuple = (1005, X)                        +
+     Item 1: offset = 296, tuple = (1006, X)                        +
+     Item 2: offset = 328, tuple = (1009, X)                        +
                                                                     +
  
 (1 row)
@@ -827,8 +827,8 @@ SELECT orioledb_sys_tree_structure(23, 'ne');
  state = free, datoid equal, relnode equal, ix_type = primary, dirty+
      Leftmost, Rightmost                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 64         +
-     Item 0: offset = 264, tuple = (1008, 2008)                     +
-     Item 1: offset = 296, tuple = (1009, 2009)                     +
+     Item 0: offset = 264, tuple = (1008, X)                        +
+     Item 1: offset = 296, tuple = (1009, X)                        +
                                                                     +
  
 (1 row)
