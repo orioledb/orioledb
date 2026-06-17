@@ -31,6 +31,7 @@ typedef struct
 } BTreePageItem;
 
 extern bool partial_load_hikeys_chunk(PartialPageState *partial, Page img);
+extern bool partial_load_full_page(PartialPageState *partial, Page img);
 extern bool partial_load_chunk(PartialPageState *partial, Page img,
 							   OffsetNumber chunkOffset,
 							   BTreePageItemLocator *loc);
