@@ -220,13 +220,15 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 *    location.  Note, that there is at least one memory barrier between
 	 *    increasing page change count and reusing the page during page unlock.
 	 */
+
 	/*
 	 * Always copy the live page into img first, then -- if it is too new for
 	 * our snapshot -- walk the page-level undo chain transforming img in
 	 * place.  Differential undo images (UndoPageImage*Diff) do not store page
-	 * bytes; they reconstruct the historical page from the newer image already
-	 * sitting in img.  So img must hold the live page before the chain walk,
-	 * which is why the former "read undo without copying" fast path is gone.
+	 * bytes; they reconstruct the historical page from the newer image
+	 * already sitting in img.  So img must hold the live page before the
+	 * chain walk, which is why the former "read undo without copying" fast
+	 * path is gone.
 	 */
 	if (!copy_page(blkno, pageChangeCount, img, partial,
 				   loadHikeysChunk, readCsn))
@@ -236,6 +238,17 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 	if (read_undo && COMMITSEQNO_IS_NORMAL(csn) && header->csn >= csn)
 	{
 		UndoLocation pageUndoLoc;
+
+		/*
+		 * Differential page-level undo images reconstruct the historical page
+		 * in place from the live page in img, so they need every chunk
+		 * present. Fully materialize a partially-loaded page before walking
+		 * the chain; if the source page changed mid-load, report failure so
+		 * the caller refetches the downlink.
+		 */
+		if (partial && partial->isPartial &&
+			!partial_load_full_page(partial, img))
+			return false;
 
 		pageUndoLoc = read_page_from_undo(desc, img, header->undoLocation, csn,
 										  key, keyType, lokey);
@@ -302,6 +315,11 @@ o_btree_try_read_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeC
 	header = (BTreePageHeader *) img;
 	if (read_undo && COMMITSEQNO_IS_NORMAL(csn) && header->csn >= csn)
 	{
+		/* See o_btree_read_page(): differential undo images need a full page. */
+		if (partial && partial->isPartial &&
+			!partial_load_full_page(partial, img))
+			return ReadPageResultFailed;
+
 		read_page_from_undo(desc, img, header->undoLocation, csn,
 							key, keyType, NULL);
 		header = (BTreePageHeader *) img;
