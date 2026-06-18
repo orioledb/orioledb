@@ -2191,21 +2191,21 @@ undo_xact_callback(XactEvent event, void *arg)
 					 oxid, logicalXidContext.xid, heapXid,
 					 GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
+				/*
+				 * Critical section wraps the code of commit flow that appears
+				 * to be not fully durable, but already partly visible for
+				 * replica. WAL_COMMIT record already in wal, but primary's
+				 * side commit flow not yet finished. So any error within that
+				 * section mast not lead to primary-replica desync.
+				 */
+				START_CRIT_SECTION();
+
 				if (!TransactionIdIsValid(heapXid))
 				{
 					bool		wrote_xlog;
 
 					/* Commit o - o : independent Oriole transaction */
-
-					flushPos = assign_xidless_commit_lsn(oxid, &wrote_xlog);
-
-					elog(DEBUG4, "XACT_EVENT_COMMIT [independent Oriole transaction] oxid "
-						 UINT64_FORMAT " logicalXid %u top heapXid %u current heapXid %u useHeap %d flushPos %X/%X",
-						 oxid, logicalXidContext.xid, heapXid,
-						 GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap,
-						 LSN_FORMAT_ARGS(flushPos));
-
-					flushPos = Max(flushPos, XactLastCommitEnd);
+					flushPos = Max(assign_xidless_commit_lsn(oxid, &wrote_xlog), XactLastCommitEnd);
 
 					/* Flush WAL if needed */
 					if (!XLogRecPtrIsInvalid(flushPos) &&
@@ -2230,30 +2230,14 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				current_oxid_precommit();
 
-				if (STOPEVENTS_ENABLED())
-				{
-					/*
-					 * XACT_EVENT_COMMIT runs under HOLD_INTERRUPTS, so a
-					 * normal CHECK_FOR_INTERRUPTS() is suppressed here. In
-					 * test/debug builds (orioledb.enable_stopevents) we
-					 * briefly lift the holdoff so a query cancel delivered
-					 * while parked at the stop event can fire and drive the
-					 * precommit→abort transition the test means to
-					 * exercise.  Production builds skip this entirely — the
-					 * stop event is compiled out to a no-op and the holdoff
-					 * stays intact.
-					 */
-					RESUME_INTERRUPTS();
-					STOPEVENT(STOPEVENT_AFTER_CSN_PRECOMMIT, NULL);
-					CHECK_FOR_INTERRUPTS();
-					HOLD_INTERRUPTS();
-				}
-
 				csn = GetCurrentCSN();
 				if (csn == COMMITSEQNO_INPROGRESS)
 					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 
 				current_oxid_commit(csn);
+
+				END_CRIT_SECTION();
+
 				Assert(enable_rewind || !csn_is_retained_for_rewind(csn));
 
 				if (enable_rewind)
@@ -2744,12 +2728,20 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			precommit_undo_stack((UndoLogType) i, oxid, true);
 
+		/*
+		 * Wraps the commit flow until full durability. See comment inside
+		 * undo_xact_callback:XACT_EVENT_COMMIT
+		 */
+		START_CRIT_SECTION();
+
 		if (!is_recovery_process())
 			wal_commit(oxid, get_current_logical_xid(), true);
 
 		current_oxid_precommit();
 		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 		current_oxid_commit(csn);
+
+		END_CRIT_SECTION();
 
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			on_commit_undo_stack((UndoLogType) i, oxid, true);
