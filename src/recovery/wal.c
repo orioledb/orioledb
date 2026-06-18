@@ -27,7 +27,6 @@
 #include "replication/origin.h"
 #include "storage/proc.h"
 
-static const char *wal_record_type_to_string(int wal_record);
 static void add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_version);
 
 typedef struct
@@ -55,55 +54,6 @@ static void add_relreplident_wal_record(char relreplident);
 static XLogRecPtr log_logical_wal_container(Pointer ptr, int length, bool withXactTime);
 
 #define XID_RESERVED_LENGTH ((local_wal.contains_xid) ? 0 : sizeof(WALRecXid))
-
-static const char *
-wal_record_type_to_string(int wal_record)
-{
-	switch (wal_record)
-	{
-		 /* 0 */ case WAL_REC_NONE:
-			return "NONE";
-		 /* 1 */ case WAL_REC_XID:
-			return "XID";
-		 /* 2 */ case WAL_REC_COMMIT:
-			return "COMMIT";
-		 /* 3 */ case WAL_REC_ROLLBACK:
-			return "ROLLBACK";
-		 /* 4 */ case WAL_REC_RELATION:
-			return "RELATION";
-		 /* 5 */ case WAL_REC_INSERT:
-			return "INSERT";
-		 /* 6 */ case WAL_REC_UPDATE:
-			return "UPDATE";
-		 /* 7 */ case WAL_REC_DELETE:
-			return "DELETE";
-		 /* 8 */ case WAL_REC_O_TABLES_META_LOCK:
-			return "O_TABLES_META_LOCK";
-		 /* 9 */ case WAL_REC_O_TABLES_META_UNLOCK:
-			return "O_TABLES_META_UNLOCK";
-		 /* 10 */ case WAL_REC_SAVEPOINT:
-			return "SAVEPOINT";
-		 /* 11 */ case WAL_REC_ROLLBACK_TO_SAVEPOINT:
-			return "ROLLBACK_TO_SAVEPOINT";
-		 /* 12 */ case WAL_REC_JOINT_COMMIT:
-			return "JOINT_COMMIT";
-		 /* 13 */ case WAL_REC_TRUNCATE:
-			return "TRUNCATE";
-		 /* 14 */ case WAL_REC_BRIDGE_ERASE:
-			return "BRIDGE_ERASE";
-		 /* 15 */ case WAL_REC_REINSERT:
-			return "REINSERT";
-		 /* 16 */ case WAL_REC_REPLAY_FEEDBACK:
-			return "REPLAY_FEEDBACK";
-		 /* 17 */ case WAL_REC_SWITCH_LOGICAL_XID:
-			return "SWITCH_LOGICAL_XID";
-		 /* 18 */ case WAL_REC_RELREPLIDENT:
-			return "RELREPLIDENT";
-		default:
-			return "UNKNOWN";
-	}
-	return "UNKNOWN";
-}
 
 void
 add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
@@ -305,9 +255,6 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	walPos = flush_local_wal(true, !isAutonomous);
 	local_wal.has_material_changes = false;
 
-	elog(DEBUG4, "[%s] COMMIT oxid " UINT64_FORMAT " logicalXid %u %X/%X",
-		 __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
-
 	return walPos;
 }
 
@@ -425,8 +372,6 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 	Assert(!is_recovery_process());
 	Assert(rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK);
 
-	elog(DEBUG4, "rec_type %d (%s)", rec_type, wal_record_type_to_string(rec_type));
-
 	recLength = sizeof(WALRecFinish);
 	if (rec_type == WAL_REC_COMMIT &&
 		synchronous_commit >= SYNCHRONOUS_COMMIT_REMOTE_APPLY)
@@ -495,9 +440,6 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 	Assert(local_wal.buffer_offset + sizeof(*rec) <= LOCAL_WAL_BUFFER_SIZE);
 
 	heapXid = GetTopTransactionIdIfAny();
-
-	elog(DEBUG4, "WAL_REC_XID oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
-		 oxid, logicalXid, heapXid);
 
 	rec = (WALRecXid *) (&local_wal.buffer[local_wal.buffer_offset]);
 	rec->recType = WAL_REC_XID;
@@ -767,8 +709,6 @@ flush_local_wal_if_needed(int required_length)
 	Assert(!is_recovery_process());
 	if (local_wal.buffer_offset + required_length + XID_RESERVED_LENGTH > LOCAL_WAL_BUFFER_SIZE)
 	{
-		elog(DEBUG4, "[%s] Going to FLUSH WAL on local WAL buffer overflow", __func__);
-
 		START_CRIT_SECTION();
 		log_logical_wal_container(local_wal.buffer, local_wal.buffer_offset, false);
 		reset_local_wal_buffer();
