@@ -7,8 +7,13 @@
 #
 # Env overrides (all optional; defaults match the production-style hunt):
 #   RR_WRITERS=20  RR_ACCOUNTS=100  RR_DURATION=15  RR_ROLLBACKERS=0
-#   RR_ASSERT_FIRINGS=3  RR_ASSERT_POINTS=orioledb-commit-assert
+#   RR_ASSERT_FIRINGS=3  RR_ASSERT_POINTS=commit_assert
+#   RR_REPLICA_MODE=none|logical|streaming  RR_REPLICAS=1
 #   RR_PANIC_FATAL=0  RR_SAVE_ALL_LOGS=0  TIMEOUT=90
+#
+# Stop-event names (RR_ASSERT_POINTS / RR_INJECTION_POINTS) use the
+# underscore form registered in stopevents.txt, e.g. commit_assert,
+# before_pre_commit_wal_finish, set_csn_guarded, wal_flush.
 #
 # Output: /tmp/hunt_<instance>.log
 #   - One header per trial: === trial N (Ts s, writes=W) ===
@@ -49,14 +54,17 @@ source "$VENV_ACTIVATE"
 : "${RR_DURATION:=15}"
 : "${RR_ROLLBACKERS:=0}"
 : "${RR_INJECTION_POINTS:=NONE}"
-: "${RR_ASSERT_POINTS:=orioledb-commit-assert}"
+: "${RR_ASSERT_POINTS:=commit_assert}"
 : "${RR_ASSERT_FIRINGS:=3}"
+: "${RR_REPLICA_MODE:=none}"
+: "${RR_REPLICAS:=1}"
 : "${RR_PANIC_FATAL:=0}"
 : "${RR_SAVE_ALL_LOGS:=0}"
 : "${TIMEOUT:=90}"
 
 export RR_WRITERS RR_ACCOUNTS RR_DURATION RR_ROLLBACKERS \
 	RR_INJECTION_POINTS RR_ASSERT_POINTS RR_ASSERT_FIRINGS \
+	RR_REPLICA_MODE RR_REPLICAS \
 	RR_PANIC_FATAL RR_SAVE_ALL_LOGS
 
 LOG=/tmp/hunt_${INSTANCE}.log
@@ -64,10 +72,15 @@ rm -f "$LOG"
 
 cd "$REPO_ROOT"
 
-echo "[config] trials=$TRIALS instance=$INSTANCE writers=$RR_WRITERS \
+CONFIG_LINE="[config] trials=$TRIALS instance=$INSTANCE writers=$RR_WRITERS \
 accounts=$RR_ACCOUNTS duration=$RR_DURATION rollbackers=$RR_ROLLBACKERS \
-assert_firings=$RR_ASSERT_FIRINGS panic_fatal=$RR_PANIC_FATAL \
-timeout=${TIMEOUT}s log=$LOG"
+injection_points=$RR_INJECTION_POINTS \
+assert_firings=$RR_ASSERT_FIRINGS assert_points=$RR_ASSERT_POINTS \
+replica_mode=$RR_REPLICA_MODE replicas=$RR_REPLICAS \
+panic_fatal=$RR_PANIC_FATAL timeout=${TIMEOUT}s log=$LOG"
+echo "$CONFIG_LINE"
+# Record the config (incl. injection_points) at the top of the log file too.
+echo "$CONFIG_LINE" >> "$LOG"
 
 # Per-trial plan-check: assert that every sk-forced query actually used
 # the token unique SK index and every pk-forced query was answered by
@@ -160,6 +173,10 @@ for trial in $(seq 1 "$TRIALS"); do
 	fi
 
 	echo "=== trial $trial (${dt}s, writes=${w:-?}, exit=$rc, status=$status) ===" >> "$LOG"
+	# Dump the resolved stop-event set the test actually armed this trial
+	# (RR_INJECTION_POINTS=ALL expands to the full wal_chaos list inside the
+	# test; this records the exact names so the log is self-describing).
+	echo "$out" | grep -oE "stopevents=[0-9]+ list=\[[^]]*\]" | head -1 >> "$LOG"
 	case "$status" in
 		clean)
 			echo "clean" >> "$LOG"

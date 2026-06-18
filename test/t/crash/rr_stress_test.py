@@ -92,6 +92,7 @@ class RrStressTest(BaseTest):
 		n_readers_pk = _env_int('RR_READERS_PK', 6)
 		n_readers_sk = _env_int('RR_READERS_SK', 6)
 		n_readers_mixed = _env_int('RR_READERS_MIXED', 6)
+		n_rollbackers = _env_int('RR_ROLLBACKERS', 0)
 		duration = _env_int('RR_DURATION', 3 * 60)
 		# When 1: PANIC + cluster recovery is treated as a test
 		# failure. When 0: PANIC is tolerated, cluster restart is
@@ -220,6 +221,12 @@ class RrStressTest(BaseTest):
 		#   `sub_obj`  -- testgres Subscription handle (logical only;
 		#                 used for sub_obj.catchup()).
 		replica = None
+		# All replica nodes spawned this trial (for streaming: 1 + extras).
+		# `replica` stays replicas[0] for the data-consistency checks; the
+		# TRAP/PANIC scan and the catch-save iterate the whole list so a
+		# crash on ANY standby is detected/preserved.
+		replicas = []
+		trapped_replica = [None]
 		sub_obj = None
 		if replica_mode == 'logical':
 			replica = self.getSubsriber()
@@ -231,13 +238,20 @@ class RrStressTest(BaseTest):
 			pub = node.publish('rr_pub', tables=['o_bank_account'])
 			sub_obj = replica.subscribe(pub, 'rr_sub')
 			wait_ready(replica)
+			replicas = [replica]
 		elif replica_mode == 'streaming':
 			# pg_basebackup the primary at its current state, then
 			# spawn the binary copy as a hot-standby.  Replica
 			# inherits the schema and the just-loaded 100 rows
-			# from the backup -- no separate DDL run.
-			replica = self.getReplica()
-			replica.start()
+			# from the backup -- no separate DDL run.  RR_REPLICAS
+			# (default 1) spawns extra independent standbys: each
+			# replays on its own, multiplying the per-trial
+			# reproduction probability.
+			n_replicas = max(1, _env_int('RR_REPLICAS', 1))
+			replicas = self.getReplicas(n_replicas)
+			for _r in replicas:
+				_r.start()
+			replica = replicas[0]
 
 		test_start = time.time()
 		first_error_time = [None]
@@ -275,6 +289,7 @@ class RrStressTest(BaseTest):
 		conflict_count = [0]   # server-side ERRORs while con is alive
 		disconnect_count = [0]  # connection-level failures (cluster down etc.)
 		kill_count = [0]       # successful postmaster SIGKILLs by postmaster_kill_loop
+		rollback_count = [0]   # deliberate ROLLBACKs by rollbacker_loop
 
 		def record_error(msg):
 			with errors_lock:
@@ -384,6 +399,63 @@ class RrStressTest(BaseTest):
 					disconnect_count[0] += local_disc
 
 				disconnect_count[0] += local_disc
+
+		def rollbacker_loop(rollbacker_id):
+			# Abort-path traffic generator.  Every iteration opens a
+			# REPEATABLE READ tx, forces an oxid with NO material changes via
+			# orioledb_get_current_oxid(), sleeps holding it, then rollback().
+			# This manufactures a no-material-change abort that takes
+			# wal_rollback's !has_material_changes fast path -> no durable
+			# rollback record -> resurrected as in-flight by crash recovery
+			# -> deferred WAL_REC_ROLLBACK.  The orioledb_get_current_oxid()
+			# call is what makes this exercise the fast path at all: a bare
+			# BEGIN/ROLLBACK acquires no oxid (lazy assignment) and never
+			# reaches wal_rollback.
+			con = node.connect()
+			local_rb = 0
+			local_disc = 0
+			try:
+				while not stop.is_set():
+					if con is None:
+						try:
+							con = node.connect()
+						except Exception:
+							local_disc += 1
+							if stop.wait(0.5):
+								break
+							continue
+					try:
+						con.begin(IsolationLevel.RepeatableRead)
+						# Force oxid assignment with no material WAL, then hold
+						# it across the sleep so a SIGKILL can catch it in-flight.
+						con.execute("SELECT orioledb_get_current_oxid()")
+						time.sleep(random.randint(0, 10) * 0.1)
+						con.rollback()
+						local_rb += 1
+					except Exception:
+						# Same connection-health probe as writer_loop: if even
+						# rollback fails the backend is gone -> reconnect.
+						con_dead = False
+						try:
+							con.rollback()
+						except Exception:
+							con_dead = True
+						if con_dead:
+							try:
+								con.close()
+							except Exception:
+								pass
+							con = None
+							local_disc += 1
+			finally:
+				if con is not None:
+					try:
+						con.close()
+					except Exception:
+						pass
+				with counters_lock:
+					rollback_count[0] += local_rb
+					disconnect_count[0] += local_disc
 
 		def reader_pk_loop(reader_id):
 			con = node.connect()
@@ -654,7 +726,7 @@ class RrStressTest(BaseTest):
 		#       section upgrades the ereport(ERROR) into PANIC, which exits
 		#       the backend via abort() and triggers postmaster crash
 		#       recovery.
-		wal_chaos_points = [
+		injection_points = [
 			'set_csn_guarded',
 			'set_xlog_ptr_guarded',
 			'add_finish_wal_guarded',
@@ -677,7 +749,7 @@ class RrStressTest(BaseTest):
 		_env_pts = os.getenv('RR_INJECTION_POINTS')
 		if _env_pts and _env_pts != 'ALL':
 			_subset = [p.strip() for p in _env_pts.split(',') if p.strip()]
-			wal_chaos_points = [p for p in wal_chaos_points if p in _subset]
+			injection_points = [p for p in injection_points if p in _subset]
 
 		def wal_chaos_loop():
 			con = node.connect()
@@ -697,10 +769,10 @@ class RrStressTest(BaseTest):
 						time.sleep(0.5 * random.random())
 
 						rating = []
-						for point in wal_chaos_points:
+						for point in injection_points:
 							rating.append(
 							    (point,
-							     random.randint(1, len(wal_chaos_points))))
+							     random.randint(1, len(injection_points))))
 						rating.sort(key=lambda x: x[1])
 
 						con.execute(
@@ -723,7 +795,7 @@ class RrStressTest(BaseTest):
 						log_once('attach', e)
 					time.sleep(0)
 					try:
-						for point in wal_chaos_points:
+						for point in injection_points:
 							con.execute(
 							    "SELECT pg_stopevent_reset("
 							    f"'{point}')")
@@ -737,7 +809,7 @@ class RrStressTest(BaseTest):
 						log_once('detach', e)
 			finally:
 				try:
-					for point in wal_chaos_points:
+					for point in injection_points:
 						con.execute(
 						    "SELECT pg_stopevent_reset("
 						    f"'{point}')")
@@ -789,9 +861,7 @@ class RrStressTest(BaseTest):
 			# START_CRIT_SECTION, or via abort re-entry for the unguarded
 			# twins -- see the list above), which takes the cluster down.
 			# Same pattern as `wal_chaos_loop`: pick one
-			# via rating tournament, arm -> `time.sleep(0.5)` (release
-			# GIL for 500 ms so a writer has a realistic chance to slip
-			# into commit at low writer counts) -> reset every point in
+			# via rating tournament, arm -> `time.sleep(0)` -> reset every point in
 			# the list.  The arm window is wide enough that at higher
 			# writer counts several backends may hit the event before
 			# the worker pulls it back; postmaster's quickdie fan-out
@@ -1100,8 +1170,11 @@ class RrStressTest(BaseTest):
 		for rid in range(1, n_readers_mixed + 1):
 			threads.append(
 			    threading.Thread(target=reader_mixed_loop, args=(rid,)))
+		for rbid in range(1, n_rollbackers + 1):
+			threads.append(
+			    threading.Thread(target=rollbacker_loop, args=(rbid,)))
 		threads.append(threading.Thread(target=checkpointer_loop))
-		if wal_chaos_points:
+		if injection_points:
 			threads.append(threading.Thread(target=wal_chaos_loop))
 		if _env_int('RR_ASSERT_FIRINGS', 0) > 0:
 			threads.append(threading.Thread(target=assert_chaos_loop))
@@ -1117,9 +1190,9 @@ class RrStressTest(BaseTest):
 		    f'\n[config] storage={STORAGE_ENGINE} '
 		    f'duration={duration} writers={n_writers} '
 		    f'readers_pk={n_readers_pk} readers_sk={n_readers_sk} '
-		    f'readers_mixed={n_readers_mixed} '
-		    f'stopevents={len(wal_chaos_points)} '
-		    f'list={wal_chaos_points}'
+		    f'readers_mixed={n_readers_mixed} rollbackers={n_rollbackers} '
+		    f'stopevents={len(injection_points)} '
+		    f'list={injection_points}'
 		    f'{_kill_cfg}', flush=True)
 
 		for t in threads:
@@ -1189,10 +1262,11 @@ class RrStressTest(BaseTest):
 			# replica was spawned this trial.  testgres tears
 			# down its tmp dir on teardown, so the replica log
 			# is otherwise unrecoverable post-mortem.
-			if replica is not None:
+			_rep = trapped_replica[0] or replica
+			if _rep is not None:
 				try:
 					replica_log = os.path.join(
-					    replica.logs_dir, 'postgresql.log')
+					    _rep.logs_dir, 'postgresql.log')
 					rdst = os.path.join(
 					    results_dir,
 					    f'{tag}_{inst}_{pts}_{reason}_replica.log')
@@ -1201,6 +1275,54 @@ class RrStressTest(BaseTest):
 				except Exception as _ce:
 					print(f'[save-log replica failed] '
 					      f'{_ce!r}', flush=True)
+
+		def _save_data_dirs(reason):
+			# Preserve the FULL data directories of both nodes (orioledb_data
+			# checkpoint files -- *.xid dump / *.xidmap / control -- plus pg_wal)
+			# for post-mortem debugging.  Gated by the caller to replica-TRAP
+			# catches only: the frequent SK-leak invariant trials must NOT
+			# trigger this or they would fill the disk.  The replica is already
+			# down (its startup process aborted), so its dir is frozen and
+			# consistent; the primary may still be live (best-effort snapshot).
+			results_dir = os.path.join(
+			    os.path.dirname(inspect.getfile(self.__class__)),
+			    'results')
+			os.makedirs(results_dir, exist_ok=True)
+			tag = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+			inst = os.getenv('RR_INSTANCE') or 'solo'
+			for label, n in (('primary', node),
+			                 ('replica', trapped_replica[0] or replica)):
+				if n is None:
+					continue
+				src = os.path.join(n.base_dir, 'data')
+				ddst = os.path.join(
+				    results_dir,
+				    f'{tag}_{inst}_{reason}_{label}_datadir')
+				try:
+					shutil.copytree(src, ddst, symlinks=True,
+					                ignore_dangling_symlinks=True)
+					print(f'[saved-datadir] {ddst}', flush=True)
+				except Exception as _de:
+					print(f'[save-datadir {label} failed] {_de!r}',
+					      flush=True)
+
+		def _replica_trapped():
+			# True iff ANY replica's log carries a TRAP/PANIC (a replica-side
+			# crash).  Records the first trapped node in trapped_replica[0] so
+			# the save hooks preserve the right one.
+			for _r in replicas:
+				if _r is None:
+					continue
+				try:
+					rlog = os.path.join(_r.logs_dir, 'postgresql.log')
+					with open(rlog, errors='replace') as _f:
+						for _line in _f:
+							if 'TRAP:' in _line or 'PANIC:' in _line:
+								trapped_replica[0] = _r
+								return True
+				except Exception:
+					pass
+			return False
 
 		if panic_lines:
 			_save_log('panic')
@@ -1229,6 +1351,7 @@ class RrStressTest(BaseTest):
 		    f'\n[totals] writes={write_count[0]} '
 		    f'reads={read_count[0]} '
 		    f'conflicts={conflict_count[0]} '
+		    f'rollbacks={rollback_count[0]} '
 		    f'{_disc_breakdown}'
 		    f'{_kill_field} '
 		    f'first_error_at={_fet_s} '
@@ -1752,6 +1875,13 @@ class RrStressTest(BaseTest):
 		violations.extend(_replica_violations)
 		if violations and log_saved_path[0] is None:
 			_save_log('invariant')
+		# On a replica TRAP/PANIC, also preserve both data directories
+		# (checkpoint files + WAL) for post-mortem debugging -- and make sure
+		# a log is saved even if there were no merged violations yet.
+		if _replica_trapped():
+			if log_saved_path[0] is None:
+				_save_log('replicatrap')
+			_save_data_dirs('replicatrap')
 		# Opt-in: save the log even on a clean pass so a batch can
 		# compare buggy vs normal runs side-by-side.
 		if (_env_int('RR_SAVE_ALL_LOGS', 0)
