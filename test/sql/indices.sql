@@ -9,6 +9,10 @@
 CREATE SCHEMA indices;
 SET SESSION search_path = 'indices';
 CREATE EXTENSION orioledb;
+
+SELECT split_part(setting, '.', 1) major_version
+	FROM pg_settings WHERE name = 'server_version';
+
 SELECT orioledb_parallel_debug_start();
 
 CREATE TABLE o_test50
@@ -2042,6 +2046,183 @@ INSERT INTO o_test_add_index_constraint VALUES (6, 'one');  -- Should fail (UNIQ
 
 -- Cleanup
 DROP TABLE o_test_add_index_constraint CASCADE;
+
+-- Contradictory scan keys (e.g. "col IS NULL AND col = N") must return
+-- zero rows even when an index is forced.  _bt_preprocess_keys sets
+-- so->qual_ok = false; switch_to_next_range must honor that on every
+-- supported PG major.  Before the fix, PG16 returned the whole table
+-- (the qual_ok check was nested inside a PG17-only #ifdef).  Both the
+-- index-scan and the bitmap-scan paths are exercised because they go
+-- through the same switch_to_next_range entry point.
+CREATE TABLE o_test_qual_contradiction (
+	a int,
+	b int
+) USING orioledb;
+INSERT INTO o_test_qual_contradiction
+	SELECT i, i FROM generate_series(1, 1000) i;
+INSERT INTO o_test_qual_contradiction (a, b) VALUES (NULL, -1), (NULL, NULL);
+CREATE INDEX o_test_qual_contradiction_a_idx
+	ON o_test_qual_contradiction (a);
+ANALYZE o_test_qual_contradiction;
+
+SET enable_seqscan = OFF;
+
+-- IS NULL AND = N -- contradicts; expect 0
+SET enable_bitmapscan = OFF;
+SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a = 500;
+SET enable_bitmapscan = ON;
+SET enable_indexscan = OFF;
+SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a = 500;
+RESET enable_indexscan;
+
+-- IS NULL AND > N -- contradicts; expect 0
+SET enable_bitmapscan = OFF;
+SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a > 500;
+SET enable_bitmapscan = ON;
+SET enable_indexscan = OFF;
+SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a > 500;
+RESET enable_indexscan;
+
+-- IS NULL AND < N -- contradicts; expect 0
+SET enable_bitmapscan = OFF;
+SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a < 500;
+SET enable_bitmapscan = ON;
+SET enable_indexscan = OFF;
+SELECT count(*) FROM o_test_qual_contradiction WHERE a IS NULL AND a < 500;
+RESET enable_indexscan;
+
+-- Negative control: just a = N (no contradiction) must still find row 500.
+SELECT count(*) FROM o_test_qual_contradiction WHERE a = 500;
+
+DROP TABLE o_test_qual_contradiction;
+RESET enable_seqscan;
+RESET enable_bitmapscan;
+
+-- Test skip scan bounds
+CREATE TABLE test_skip_bounds (
+	id int,
+	x int,
+	y int,
+	PRIMARY KEY (id)
+) USING orioledb;
+CREATE INDEX test_skip_xy_idx ON test_skip_bounds(x, y);
+
+-- Out of lower bound (should not be scanned)
+INSERT INTO test_skip_bounds (id, x, y) VALUES (1, 5, 42);
+-- Out of upper bound (should not be scanned)
+INSERT INTO test_skip_bounds (id, x, y) VALUES (7, 60, 99);
+-- Inside bounds, matching equality
+INSERT INTO test_skip_bounds (id, x, y) VALUES (3, 15, 42);
+-- Inside bounds, NOT matching equality
+INSERT INTO test_skip_bounds (id, x, y) VALUES (4, 20, 99);
+
+SET enable_seqscan = off;
+EXPLAIN (COSTS OFF)
+SELECT x, y FROM test_skip_bounds
+WHERE x > 10 AND x < 50 AND y = 42;
+
+SELECT x, y FROM test_skip_bounds
+WHERE x > 10 AND x < 50 AND y = 42
+ORDER BY x;
+
+RESET enable_seqscan;
+
+-- Combining "leading_col IS NOT NULL" with a trailing-column IS NULL
+-- qualifier against a unique btree must respect both predicates.  PG18's
+-- _bt_preprocess_keys rewrites a leading IS NOT NULL into a skip array
+-- with null_elem=false and no low_compare/high_compare; o_key_data_to_-
+-- key_range previously honored only low_compare/high_compare and lost
+-- the NULL exclusion entirely, so this query returned 3 (including the
+-- all-NULL row) instead of 2.  Verifies the fix in src/tableam/key_range.c.
+CREATE TABLE o_test_null_mixed (
+	unique1 int,
+	unique2 int
+) USING orioledb;
+INSERT INTO o_test_null_mixed
+VALUES (NULL, -1), (NULL, 2147483647), (NULL, NULL),
+	   (100, NULL), (500, NULL);
+CREATE UNIQUE INDEX o_test_null_mixed_idx
+	ON o_test_null_mixed (unique2, unique1);
+SET enable_seqscan = OFF;
+SELECT count(*) FROM o_test_null_mixed
+	WHERE unique1 IS NULL AND unique2 IS NOT NULL;
+RESET enable_seqscan;
+-- Index-only scan coverage for secondary indexes.  These all force
+-- enable_seqscan = off + enable_bitmapscan = off so the planner picks
+-- IOS, then verify the plan uses the secondary AND the rows are
+-- returned correctly.  Together they exercise the column-count /
+-- column-order alignment between OrioleDB's itupdesc layout and the
+-- planner-side indextlist that set_plain_rel_pathlist_hook() builds.
+
+SET enable_seqscan = off;
+SET enable_bitmapscan = off;
+SET enable_indexscan = off;
+
+-- 1. Duplicate columns inside the secondary index (key + key, key + INCLUDE)
+CREATE TABLE o_ios_sk_dup (val_2 int, val_1 int) USING orioledb;
+CREATE INDEX o_ios_sk_dup_ix ON o_ios_sk_dup (val_1, val_2, val_1) INCLUDE (val_1);
+INSERT INTO o_ios_sk_dup SELECT v, v * 10 FROM generate_series(1, 5) v;
+EXPLAIN (COSTS OFF)
+	SELECT val_1 FROM o_ios_sk_dup ORDER BY val_1;
+SELECT val_1 FROM o_ios_sk_dup ORDER BY val_1;
+EXPLAIN (COSTS OFF)
+	SELECT val_1, val_2 FROM o_ios_sk_dup ORDER BY val_1;
+SELECT val_1, val_2 FROM o_ios_sk_dup ORDER BY val_1;
+DROP TABLE o_ios_sk_dup;
+
+-- 2. Duplicate columns inside the *unique* secondary index that
+-- becomes the table's primary in OrioleDB (no explicit PRIMARY KEY).
+CREATE TABLE o_ios_pk_dup (a int NOT NULL, b text NOT NULL) USING orioledb;
+CREATE UNIQUE INDEX o_ios_pk_dup_ix ON o_ios_pk_dup (a, b, a);
+INSERT INTO o_ios_pk_dup
+	SELECT v, repeat('x', v) FROM generate_series(1, 5) v;
+EXPLAIN (COSTS OFF) SELECT a, b FROM o_ios_pk_dup ORDER BY a, b;
+SELECT a, b FROM o_ios_pk_dup ORDER BY a, b;
+DROP TABLE o_ios_pk_dup;
+
+-- 3. Overlap between secondary index columns and PK columns.  The PK
+-- column `a` appears in the SK; `c` does not.  fill_itup must produce
+-- (a, b, c) on the SK side -- not (a, b) (would miss c) and not (a, b,
+-- a, c) (would mis-shape).
+CREATE TABLE o_ios_pk_sk_dup
+	(a int NOT NULL, b int NOT NULL, c int NOT NULL,
+	 PRIMARY KEY (a, c)) USING orioledb;
+CREATE INDEX o_ios_pk_sk_dup_ix ON o_ios_pk_sk_dup (a, b);
+INSERT INTO o_ios_pk_sk_dup
+	SELECT v, v * 10, v * 100 FROM generate_series(1, 5) v;
+EXPLAIN (COSTS OFF) SELECT a, b, c FROM o_ios_pk_sk_dup ORDER BY a, b;
+SELECT a, b, c FROM o_ios_pk_sk_dup ORDER BY a, b;
+DROP TABLE o_ios_pk_sk_dup;
+
+-- 4. INCLUDE columns on the PK.  set_plain_rel_pathlist_hook() must
+-- iterate only PK key columns (not its INCLUDE list) when extending
+-- the secondary's indextlist, otherwise the INCLUDE'd column of PK
+-- would be appended on the planner side but not present on the
+-- orioledb-itupdesc side -- a natts mismatch on every IOS.
+CREATE TABLE o_ios_pk_include
+	(a int NOT NULL, b int NOT NULL, c int NOT NULL,
+	 PRIMARY KEY (a) INCLUDE (c)) USING orioledb;
+CREATE INDEX o_ios_pk_include_ix ON o_ios_pk_include (b);
+INSERT INTO o_ios_pk_include
+	SELECT v, v * 10, v * 100 FROM generate_series(1, 5) v;
+EXPLAIN (COSTS OFF) SELECT a, b FROM o_ios_pk_include ORDER BY b;
+SELECT a, b FROM o_ios_pk_include ORDER BY b;
+DROP TABLE o_ios_pk_include;
+
+-- 5. INCLUDE columns on the secondary index itself.
+CREATE TABLE o_ios_sk_include
+	(a int NOT NULL PRIMARY KEY, b int NOT NULL, c int NOT NULL)
+	USING orioledb;
+CREATE INDEX o_ios_sk_include_ix ON o_ios_sk_include (b) INCLUDE (c);
+INSERT INTO o_ios_sk_include
+	SELECT v, v * 10, v * 100 FROM generate_series(1, 5) v;
+EXPLAIN (COSTS OFF) SELECT a, b, c FROM o_ios_sk_include ORDER BY b;
+SELECT a, b, c FROM o_ios_sk_include ORDER BY b;
+DROP TABLE o_ios_sk_include;
+
+RESET enable_seqscan;
+RESET enable_bitmapscan;
+RESET enable_indexscan;
 
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;

@@ -23,6 +23,7 @@
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
 #include "checkpoint/checkpoint.h"
+#include "common/file_perm.h"
 #include "indexam/handler.h"
 #include "recovery/logical.h"
 #include "recovery/recovery.h"
@@ -84,8 +85,6 @@
 
 PG_MODULE_MAGIC;
 
-void		_PG_init(void);
-
 static bool debug_disable_pools_limit = false;
 static Pointer shared_segment = NULL;
 static bool shared_segment_initialized = false;
@@ -119,7 +118,7 @@ int			max_procs;
 Size		orioledb_buffers_size;
 Size		orioledb_buffers_count;
 Size		orioledb_temp_buffers_count;
-Size		page_descs_size;
+static Size page_descs_size;
 Size		undo_circular_buffer_size;
 uint32		undo_buffers_count;
 double		regular_block_undo_circular_buffer_fraction;
@@ -166,7 +165,7 @@ int			rewind_max_transactions = 0;
 int			logical_xid_buffers_guc = 64;
 bool		orioledb_strict_mode = false;
 XLogRecPtr	replay_until_lsn = InvalidXLogRecPtr;
-char	   *replay_until_lsn_string;
+static char *replay_until_lsn_string;
 
 /* For page eviction/read checkpoint test only */
 uint32		min_read_page_checkpoint = UINT32_MAX;
@@ -177,9 +176,12 @@ static shmem_startup_hook_type prev_shmem_startup_hook = NULL;
 static void (*prev_shmem_request_hook) (void) = NULL;
 static base_init_startup_hook_type prev_base_init_startup_hook = NULL;
 static get_relation_info_hook_type prev_get_relation_info_hook = NULL;
-static skip_tree_height_hook_type prev_skip_tree_height_hook = NULL;
 database_size_hook_type prev_database_size_hook = NULL;
 static AcceptInvalidationMessagesHookType prev_AcceptInvalidationMessagesHook = NULL;
+
+#if PG_VERSION_NUM < 180000
+static skip_tree_height_hook_type prev_skip_tree_height_hook = NULL;
+#endif
 
 CheckPoint_hook_type next_CheckPoint_hook = NULL;
 static bool o_newlocale_from_collation(void);
@@ -196,7 +198,7 @@ MemoryContext btree_insert_context = NULL;
  */
 MemoryContext btree_seqscan_context = NULL;
 
-OPagePool	page_pools[OPagePoolTypesCount];
+static OPagePool page_pools[OPagePoolTypesCount];
 LocalPagePool local_ppool;
 
 static size_t page_pools_size[OPagePoolTypesCount];
@@ -246,7 +248,9 @@ static void orioledb_get_relation_info_hook(PlannerInfo *root,
 											Oid relationObjectId,
 											bool inhparent,
 											RelOptInfo *rel);
+#if PG_VERSION_NUM < 180000
 static bool orioledb_skip_tree_height_hook(Relation indexRelation);
+#endif
 static void orioledb_get_running_transactions_extension(RunningTransactionsExtension *extension);
 static void orioledb_wait_snapshot(RunningTransactionsExtension *extension);
 
@@ -1268,8 +1272,10 @@ _PG_init(void)
 	reset_xmin_hook = orioledb_reset_xmin_hook;
 	prev_get_relation_info_hook = get_relation_info_hook;
 	get_relation_info_hook = orioledb_get_relation_info_hook;
+#if PG_VERSION_NUM < 180000
 	prev_skip_tree_height_hook = skip_tree_height_hook;
 	skip_tree_height_hook = orioledb_skip_tree_height_hook;
+#endif
 	xact_redo_hook = o_xact_redo_hook;
 	pg_newlocale_from_collation_hook = o_newlocale_from_collation;
 	prev_base_init_startup_hook = base_init_startup_hook;
@@ -1569,7 +1575,7 @@ o_verify_dir_exists_or_create(char *dirname, bool *created, bool *found)
 			/*
 			 * Does not exist, so create
 			 */
-			if (pg_mkdir_p(dirname, S_IRWXU) == -1)
+			if (pg_mkdir_p(dirname, pg_dir_create_mode) == -1)
 			{
 				if (errno == EEXIST)
 				{
@@ -1601,120 +1607,9 @@ o_verify_dir_exists_or_create(char *dirname, bool *created, bool *found)
 			elog(ERROR, "could not access directory \"%s\": %s",
 				 dirname, errstr);
 			return;
+		default:
+			Assert(false);
 	}
-	return;						/* keep compiler quiet */
-}
-
-/*
- * pg_mkdir_p --- create a directory and, if necessary, parent directories
- *
- * This is equivalent to "mkdir -p" except we don't complain if the target
- * directory already exists.
- *
- * We assume the path is in canonical form, i.e., uses / as the separator.
- *
- * omode is the file permissions bits for the target directory.  Note that any
- * parent directories that have to be created get permissions according to the
- * prevailing umask, but with u+wx forced on to ensure we can create there.
- * (We declare omode as int, not mode_t, to minimize dependencies for port.h.)
- *
- * Returns 0 on success, -1 (with errno set) on failure.
- *
- * Note that on failure, the path arg has been modified to show the particular
- * directory level we had problems with.
- */
-int
-pg_mkdir_p(char *path, int omode)
-{
-	struct stat sb;
-	mode_t		numask,
-				oumask;
-	int			last,
-				retval;
-	char	   *p;
-
-	retval = 0;
-	p = path;
-
-#ifdef WIN32
-	/* skip network and drive specifiers for win32 */
-	if (strlen(p) >= 2)
-	{
-		if (p[0] == '/' && p[1] == '/')
-		{
-			/* network drive */
-			p = strstr(p + 2, "/");
-			if (p == NULL)
-			{
-				errno = EINVAL;
-				return -1;
-			}
-		}
-		else if (p[1] == ':' &&
-				 ((p[0] >= 'a' && p[0] <= 'z') ||
-				  (p[0] >= 'A' && p[0] <= 'Z')))
-		{
-			/* local drive */
-			p += 2;
-		}
-	}
-#endif
-
-	/*
-	 * POSIX 1003.2: For each dir operand that does not name an existing
-	 * directory, effects equivalent to those caused by the following command
-	 * shall occur:
-	 *
-	 * mkdir -p -m $(umask -S),u+wx $(dirname dir) && mkdir [-m mode] dir
-	 *
-	 * We change the user's umask and then restore it, instead of doing
-	 * chmod's.  Note we assume umask() can't change errno.
-	 */
-	oumask = umask(0);
-	numask = oumask & ~(S_IWUSR | S_IXUSR);
-	(void) umask(numask);
-
-	if (p[0] == '/')			/* Skip leading '/'. */
-		++p;
-	for (last = 0; !last; ++p)
-	{
-		if (p[0] == '\0')
-			last = 1;
-		else if (p[0] != '/')
-			continue;
-		*p = '\0';
-		if (!last && p[1] == '\0')
-			last = 1;
-
-		if (last)
-			(void) umask(oumask);
-
-		/* check for pre-existing directory */
-		if (stat(path, &sb) == 0)
-		{
-			if (!S_ISDIR(sb.st_mode))
-			{
-				if (last)
-					errno = EEXIST;
-				else
-					errno = ENOTDIR;
-				retval = -1;
-				break;
-			}
-		}
-		else if (mkdir(path, last ? omode : S_IRWXU | S_IRWXG | S_IRWXO) < 0)
-		{
-			retval = -1;
-			break;
-		}
-		if (!last)
-			*p = '/';
-	}
-
-	/* ensure we restored umask */
-	(void) umask(oumask);
-
-	return retval;
 }
 
 Datum
@@ -2208,6 +2103,7 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 	table_close(relation, NoLock);
 }
 
+#if PG_VERSION_NUM < 180000
 static bool
 orioledb_skip_tree_height_hook(Relation indexRelation)
 {
@@ -2222,6 +2118,7 @@ orioledb_skip_tree_height_hook(Relation indexRelation)
 	table_close(tbl, NoLock);
 	return result;
 }
+#endif
 
 static void
 orioledb_get_running_transactions_extension(RunningTransactionsExtension *extension)

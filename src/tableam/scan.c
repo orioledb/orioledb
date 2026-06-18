@@ -34,6 +34,9 @@
 #include "executor/executor.h"
 #include "executor/nodeIndexscan.h"
 #include "executor/nodeModifyTable.h"
+#if PG_VERSION_NUM >= 180000
+#include "commands/explain_format.h"
+#endif
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -209,7 +212,7 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 		{
 			ListCell   *lc;
 			int			i;
-			int			nfields;
+			int			nkeyfields;
 			ORelOids	oids;
 			OTable	   *o_table;
 
@@ -224,9 +227,9 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 				 * Additional pkey fields are added to index target list so
 				 * that the index only scan is selected
 				 */
-				nfields = o_table->indices[PrimaryIndexNumber].nfields;
+				nkeyfields = o_table->indices[PrimaryIndexNumber].nkeyfields;
 
-				for (i = 0; i < nfields; i++)
+				for (i = 0; i < nkeyfields; i++)
 				{
 					OTableIndexField *pk_field;
 
@@ -623,6 +626,9 @@ o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 
 		init_index_scan_state(&ix_plan_state->o_plan_state, &ix_plan_state->ostate,
 							  index, node->ss.ps.ps_ExprContext,
+#if PG_VERSION_NUM >= 180000
+							  estate->es_snapshot,
+#endif
 							  &ix_plan_state->iss_RuntimeKeys,
 							  &ix_plan_state->iss_NumRuntimeKeys,
 							  &ix_plan_state->iss_ScanKeys,

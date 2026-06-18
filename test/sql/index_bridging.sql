@@ -910,6 +910,24 @@ SELECT * FROM tab1 ORDER BY a, b;
 
 DROP TABLE tab1;
 
+-- Same-txn CREATE TABLE / CREATE bridged-INDEX / INSERT / DELETE / ROLLBACK
+-- exercises o_btree_modify_internal's "self-created" shortcut for the bridge
+-- DELETE (needsUndoForSelfCreated=false), which used to leave the entry as
+-- (deleted, InvalidUndoLocation|cmd).  The subsequent ROLLBACK then walked
+-- the bridge INSERT undo record and re-entered page_item_rollback, tripping
+-- Assert(UndoLocationIsValid(tuphdr->undoLocation)).
+BEGIN;
+CREATE TABLE bridge_undo_rollback (
+	id int PRIMARY KEY,
+	val text
+) USING orioledb;
+CREATE INDEX bridge_undo_rollback_idx ON bridge_undo_rollback(val)
+	WITH (orioledb_index=false);
+INSERT INTO bridge_undo_rollback VALUES (1, 'a');
+DELETE FROM bridge_undo_rollback WHERE id = 1;
+ROLLBACK;
+SELECT 1 AS still_alive;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;

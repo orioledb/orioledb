@@ -355,15 +355,40 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 			pg_atomic_write_u64(&undo_meta->cleanedCheckpointEndLocation, undo_info->checkpointRetainEndLocation);
 		}
 
-		pg_atomic_init_u64(&xid_meta->nextXid, control.lastXid);
-		pg_atomic_init_u64(&xid_meta->runXmin, control.lastXid);
-		pg_atomic_init_u64(&xid_meta->globalXmin, control.lastXid);
-		pg_atomic_init_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin, control.lastXid);
-		pg_atomic_init_u64(&xid_meta->writtenXmin, control.lastXid);
-		pg_atomic_init_u64(&xid_meta->writeInProgressXmin, control.lastXid);
+		/*
+		 * Seed xid horizons from the checkpoint's retain range:
+		 *
+		 * - nextXid / writtenXmin / writeInProgressXmin =
+		 * checkpointRetainXmax (master's nextXid at checkpoint time).
+		 * writtenXmin stays at the high mark so the on-disk xidmap range --
+		 * which may contain FROZEN slots that master's advance_global_xmin
+		 * stamped for oxids < master.runXmin -- is still served via
+		 * o_buffers_read.
+		 *
+		 * - runXmin / globalXmin / cleanedXmin / lastXidWhenUpdatedGlobalXmin
+		 * = checkpointRetainXmin (master's runXmin at checkpoint time, the
+		 * actual floor of in-flight oxids).  This is the conservative
+		 * starting horizon that matches what subsequent WAL records will
+		 * reference.
+		 *
+		 * On a clean shutdown master writes checkpointRetainXmin ==
+		 * checkpointRetainXmax == nextXid, so all horizons collapse to a
+		 * single value -- behaviour identical to the previous lastXid-based
+		 * init.
+		 *
+		 * control.lastXid is now redundant with checkpointRetainXmax; it's
+		 * retained in the control file for backward compatibility with
+		 * existing data directories.
+		 */
+		pg_atomic_init_u64(&xid_meta->nextXid, control.checkpointRetainXmax);
+		pg_atomic_init_u64(&xid_meta->runXmin, control.checkpointRetainXmin);
+		pg_atomic_init_u64(&xid_meta->globalXmin, control.checkpointRetainXmin);
+		pg_atomic_init_u64(&xid_meta->lastXidWhenUpdatedGlobalXmin, control.checkpointRetainXmin);
+		pg_atomic_init_u64(&xid_meta->writtenXmin, control.checkpointRetainXmax);
+		pg_atomic_init_u64(&xid_meta->writeInProgressXmin, control.checkpointRetainXmax);
 		pg_atomic_init_u64(&xid_meta->checkpointRetainXmin, control.checkpointRetainXmin);
 		pg_atomic_init_u64(&xid_meta->checkpointRetainXmax, control.checkpointRetainXmax);
-		pg_atomic_init_u64(&xid_meta->cleanedXmin, control.lastXid);
+		pg_atomic_init_u64(&xid_meta->cleanedXmin, control.checkpointRetainXmin);
 		pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmin, control.checkpointRetainXmin);
 		pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmax, control.checkpointRetainXmax);
 
@@ -1867,6 +1892,15 @@ o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo, int flags)
 	/* called at the end of StartupXLOG */
 	*was_in_recovery = flags == 0;
 
+	/*
+	 * Right after end-of-recovery, XLog inserts have just been enabled. Flush
+	 * WAL_REC_ROLLBACK markers for in-flight oxids that recovery_finish()
+	 * aborted in memory, so streaming standbys can resolve them too (issue
+	 * #876).
+	 */
+	if (flags == 0)
+		o_emit_recovery_finish_rollbacks();
+
 	if (!(flags & (CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_END_OF_RECOVERY)))
 	{
 		o_sys_caches_delete_by_lsn(checkPointRedo);
@@ -1952,7 +1986,7 @@ finalize_chkp_map(File chkp_file, uint64 len, char *input_filename,
 
 	if (FileSize(chkp_file) != len)
 		ereport(FATAL, (errcode_for_file_access(),
-						errmsg("could not move to offset %lu for making finalize checkpoint map %s: %m",
+						errmsg("could not move to offset " UINT64_FORMAT " for making finalize checkpoint map %s: %m",
 							   len, FilePathName(chkp_file))));
 
 	if (input_filename != NULL)
@@ -2160,7 +2194,7 @@ sort_checkpoint_tmp_file(BTreeDescr *descr, int cur_chkp_index)
 		if (read_size != free_blocks_size)
 		{
 			ereport(FATAL, (errcode_for_file_access(),
-							errmsg("Could not read data from checkpoint tmp file: %s %d %lu: %m",
+							errmsg("Could not read data from checkpoint tmp file: %s %d " UINT64_FORMAT ": %m",
 								   filename, read_size, free_blocks_size)));
 		}
 	}
@@ -3782,7 +3816,7 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 						if (orioledb_s3_mode)
 							offset &= S3_OFFSET_MASK;
 
-						elog(ERROR, "unable to perform page IO for page %d to file %s with offset %lu",
+						elog(ERROR, "unable to perform page IO for page %d to file %s with offset " UINT64_FORMAT,
 							 blkno,
 							 btree_smgr_filename(descr, chkpNum, offset),
 							 offset);
@@ -4906,7 +4940,7 @@ checkpoint_internal_pass(BTreeDescr *descr, CheckpointState *state,
 					offset &= S3_OFFSET_MASK;
 
 				Assert(page_desc != NULL);
-				elog(ERROR, "Unable to perform page IO for page %d to file %s with offset %lu",
+				elog(ERROR, "Unable to perform page IO for page %d to file %s with offset " UINT64_FORMAT,
 					 blkno,
 					 btree_smgr_filename(descr, chkpNum, offset),
 					 offset);

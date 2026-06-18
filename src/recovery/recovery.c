@@ -289,6 +289,23 @@ static bool unexpected_worker_detach = false;
 static bool iam_recovery = false;
 
 /*
+ * In-flight oxids that recovery_finish() aborted in memory.  These were left
+ * COMMITSEQNO_INPROGRESS at end-of-redo with no COMMIT/ROLLBACK on the wire,
+ * so a streaming standby cannot resolve them on its own.  Captured here for
+ * the after-checkpoint hook to flush as WAL_REC_ROLLBACK once
+ * LocalSetXLogInsertAllowed() has run (issue #876).
+ */
+typedef struct
+{
+	OXid		oxid;
+	TransactionId xid;
+} RecoveryFinishAbortedOxid;
+
+static RecoveryFinishAbortedOxid *recovery_finish_aborted_oxids = NULL;
+static int	recovery_finish_aborted_count = 0;
+static int	recovery_finish_aborted_capacity = 0;
+
+/*
  * Current orioledb transaction recovery id
  */
 OXid		recovery_oxid = InvalidOXid;
@@ -663,7 +680,7 @@ RecoveryUndoLocFlush *recovery_undo_loc_flush;
 /*
  * The last xmin we received from primary.
  */
-OXid		recovery_xmin = InvalidOXid;
+static OXid recovery_xmin = InvalidOXid;
 
 /*
  * Number of successfully finished recovery workers.
@@ -739,7 +756,7 @@ static void flush_current_undo_stack(void);
 static void o_handle_startup_proc_interrupts_hook(void);
 static void abort_recovery(RecoveryWorkerState *workers_pool, bool send_to_idx_pool);
 
-static bool replay_container(Pointer ptr, Pointer endPtr,
+static bool replay_container(Pointer startPtr, Pointer endPtr,
 							 bool single, XLogRecPtr xlogRecPtr,
 							 XLogRecPtr xlogRecEndPtr);
 
@@ -751,7 +768,7 @@ static void workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback,
 static void workers_send_savepoint(SubTransactionId parentSubId);
 static void workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 											   SubTransactionId parentSubId);
-static void workers_synchronize(XLogRecPtr csn, bool send_synchronize);
+static void workers_synchronize(XLogRecPtr ptr, bool send_synchronize);
 static void workers_notify_toast_consistent(void);
 static void worker_wait_shutdown(RecoveryWorkerState *worker);
 
@@ -1328,6 +1345,7 @@ o_recovery_finish_hook(bool cleanup)
 		}
 	}
 
+	update_proc_retain_undo_location(-1);
 	recovery_finish(-1);
 
 	if (!recovery_single)
@@ -2206,7 +2224,13 @@ recovery_init(int worker_id)
 		retain_undo_queues[i] = pairingheap_allocate(retain_undo_pairingheap_cmp,
 													 &retain_undo_queue_numbers[i]);
 	}
-	xmin_queue = pairingheap_allocate(xmin_pairingheap_cmp, NULL);
+
+	/*
+	 * Only the recovery leader maintains the runXmin horizon via xmin_queue;
+	 * recovery workers never touch it, so leave it NULL for them.
+	 */
+	if (worker_id < 0)
+		xmin_queue = pairingheap_allocate(xmin_pairingheap_cmp, NULL);
 	dlist_init(&finished_list);
 	dlist_init(&joint_commit_list);
 	CurTransactionContext = AllocSetContextCreate(TopMemoryContext,
@@ -2219,6 +2243,26 @@ recovery_init(int worker_id)
 	InitCatalogCache();
 
 	o_set_syscache_hooks();
+
+	/*
+	 * Seed recovery_xmin with the checkpoint-era floor *before* read_xids()
+	 * runs its first update_run_xmin().  read_xids() pushes runXmin to
+	 * nextXid when the on-disk xids file is empty -- which it routinely is on
+	 * a streaming standby whose master had only long-running oxids with
+	 * modify records buffered in the master backend's private local_wal
+	 * (never reaching the wire, hence absent from the standby's recovery xid
+	 * hash and its own restartpoint's xids file).  With recovery_xmin left at
+	 * InvalidOXid (effectively unbounded), update_run_xmin's Min(...) cap is
+	 * ineffective and runXmin / globalXmin sail past the real master floor; a
+	 * later WAL_REC_XID(X) + WAL_REC_ROLLBACK(X) then drags globalXmin
+	 * backwards.
+	 *
+	 * Pinning recovery_xmin to checkpointRetainXmin keeps the floor honest
+	 * until a WAL commit/rollback record explicitly bumps it (see the Max()
+	 * in WAL_REC_COMMIT/ROLLBACK / WAL_REC_JOINT_COMMIT).
+	 */
+	if (worker_id < 0)
+		recovery_xmin = pg_atomic_read_u64(&xid_meta->checkpointRetainXmin);
 
 	if (checkpoint_state->lastCheckpointNumber > 0)
 		read_xids(checkpoint_state->lastCheckpointNumber,
@@ -2236,7 +2280,6 @@ recovery_init(int worker_id)
 		idxbuild_oids_hash = hash_create("orioledb recovery index build queue relations hash",
 										 16, &reloid_ctl,
 										 HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
-		recovery_xmin = pg_atomic_read_u64(&xid_meta->runXmin);
 	}
 
 	if (worker_id == index_build_leader)
@@ -2373,8 +2416,47 @@ recovery_finish(int worker_id)
 			walk_checkpoint_stacks(cur_state, COMMITSEQNO_ABORTED,
 								   InvalidSubTransactionId,
 								   flush_undo_pos);
+
+			/*
+			 * Remember this oxid so the after-checkpoint hook can emit a
+			 * WAL_REC_ROLLBACK for it once XLog inserts are allowed. Workers
+			 * don't write WAL: only the main recovery process does. See issue
+			 * #876.
+			 */
+			if (worker_id < 0)
+			{
+				if (cur_state->oxid >= recovery_xmin)
+				{
+					MemoryContext oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+
+					if (recovery_finish_aborted_count == recovery_finish_aborted_capacity)
+					{
+						int			new_cap = recovery_finish_aborted_capacity == 0
+							? 16 : recovery_finish_aborted_capacity * 2;
+
+						if (recovery_finish_aborted_oxids == NULL)
+							recovery_finish_aborted_oxids =
+								palloc(new_cap * sizeof(RecoveryFinishAbortedOxid));
+						else
+							recovery_finish_aborted_oxids =
+								repalloc(recovery_finish_aborted_oxids,
+										 new_cap * sizeof(RecoveryFinishAbortedOxid));
+						recovery_finish_aborted_capacity = new_cap;
+					}
+					recovery_finish_aborted_oxids[recovery_finish_aborted_count].oxid =
+						cur_state->oxid;
+					recovery_finish_aborted_oxids[recovery_finish_aborted_count].xid =
+						cur_state->xid;
+					recovery_finish_aborted_count++;
+					MemoryContextSwitchTo(oldcxt);
+				}
+				else
+				{
+					Assert(!cur_state->wal_xid);
+				}
+			}
 		}
-		if (cur_state->in_finished_list && worker_id < 0)
+		if (cur_state->in_finished_list && COMMITSEQNO_IS_COMMITTED(cur_state->csn) && worker_id < 0)
 		{
 			set_oxid_csn(cur_state->oxid, COMMITSEQNO_COMMITTING);
 			cur_state->csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
@@ -2399,10 +2481,24 @@ recovery_finish(int worker_id)
 		pairingheap_free(retain_undo_queues[i]);
 	}
 	if (worker_id < 0)
-	{
 		pairingheap_free(xmin_queue);
-		free_run_xmin();
-	}
+
+	/*
+	 * Do NOT advance runXmin here.  Recovery has just aborted in-flight oxids
+	 * in memory; if recovery_finish_aborted_oxids is non-empty, the
+	 * after-checkpoint hook will emit a WAL_REC_ROLLBACK for each, stamping
+	 * the record's xmin with the current runXmin.  If we advanced runXmin to
+	 * nextXid here, the post-recovery checkpoint that runs between
+	 * recovery_finish() and o_emit_recovery_finish_rollbacks() would persist
+	 * the advanced horizon as control.checkpointRetainXmin, and the standby
+	 * would replay that checkpoint before seeing the ROLLBACK records that
+	 * justify it.  After the standby's globalXmin slid forward, the ROLLBACK
+	 * records would then drag it back across slots already stamped FROZEN,
+	 * breaking oxid_get_csn()'s fast-path (orioledb/orioledb#889).
+	 * free_run_xmin() is deferred to o_emit_recovery_finish_rollbacks() so
+	 * the WAL records and the runXmin advance are atomic with respect to
+	 * checkpoint observers.
+	 */
 	if (worker_id >= 0)
 		pg_atomic_write_u64(&worker_ptrs[worker_id].retainPtr,
 							pg_atomic_read_u64(&worker_ptrs[worker_id].commitPtr));
@@ -2420,6 +2516,48 @@ recovery_finish(int worker_id)
 	iam_recovery = false;
 
 	o_unset_syscache_hooks();
+}
+
+/*
+ * Emit a WAL_REC_ROLLBACK for every oxid that recovery_finish() aborted in
+ * memory.  Called from the after_checkpoint_cleanup_hook at end of recovery,
+ * once LocalSetXLogInsertAllowed() has run so XLogInsert is permitted.
+ *
+ * Without this, streaming standbys that eagerly applied the in-flight txn's
+ * modify records hold the oxid INPROGRESS forever, and any later replayed
+ * modify targeting the same row spins in o_btree_modify_handle_conflicts
+ * (issue #876).
+ */
+void
+o_emit_recovery_finish_rollbacks(void)
+{
+	int			i;
+
+	for (i = 0; i < recovery_finish_aborted_count; i++)
+	{
+		elog(LOG, "orioledb: emitting WAL_REC_ROLLBACK for in-flight oxid " UINT64_FORMAT " aborted by recovery_finish",
+			 recovery_finish_aborted_oxids[i].oxid);
+		wal_emit_recovery_finish_rollback(recovery_finish_aborted_oxids[i].oxid,
+										  recovery_finish_aborted_oxids[i].xid);
+	}
+
+	if (recovery_finish_aborted_oxids != NULL)
+	{
+		pfree(recovery_finish_aborted_oxids);
+		recovery_finish_aborted_oxids = NULL;
+		recovery_finish_aborted_count = 0;
+		recovery_finish_aborted_capacity = 0;
+	}
+
+	/*
+	 * Now that every WAL_REC_ROLLBACK has been stamped with the
+	 * checkpoint-era runXmin, it is safe to lift the horizon to nextXid.
+	 * Deferred from recovery_finish() so the post-recovery checkpoint (which
+	 * sits between the two phases) observes the original floor and standbys
+	 * never see a checkpointRetainXmin that gets out from under the ROLLBACK
+	 * records that explain it (orioledb/orioledb#889).
+	 */
+	free_run_xmin();
 }
 
 /*
@@ -2487,9 +2625,11 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 
 			/*
 			 * undo_stacks might be copied into a temp file, so initialize it
-			 * with zeroes.
+			 * with InvalidUndoLocation.
 			 */
 			memset(cur_state->undo_stacks, 0, sizeof(cur_state->undo_stacks));
+			for (i = 0; i < (int) UndoLogsCount; i++)
+				undo_stack_locations_set_invalid(&cur_state->undo_stacks[i]);
 
 			dlist_init(&cur_state->checkpoint_undo_stacks);
 			oxid_needs_wal_flush = false;
@@ -3080,10 +3220,128 @@ orioledb_recovery_synchronized(PG_FUNCTION_ARGS)
 	PG_RETURN_BOOL(true);
 }
 
+/*
+ * Recompute and publish xid_meta->runXmin from the recovery leader's in-flight
+ * oxids.
+ *
+ * Must be called only by the recovery leader (worker_id < 0).  It reads and
+ * mutates the leader-only xmin_queue / retain_undo_queues and is the single
+ * writer of runXmin during recovery; recovery workers never touch these
+ * structures, so calling it from a worker would corrupt the horizon.
+ *
+ * This is invoked after every transaction finishes and after every
+ * recovery_xmin shift, so the published horizon is kept continuously
+ * up to date.  There is deliberately no full "scan the whole queue" pass:
+ * the queue is a pairing heap with no cheap ordered traversal, so we only
+ * ever inspect its top and advance the horizon as far as the current
+ * recovery_xmin allows.
+ */
 static void
 update_run_xmin(void)
 {
 	OXid		xmin;
+	int			i;
+	bool		found;
+
+	/* Leader-only: xmin_queue is allocated only when worker_id < 0. */
+	Assert(xmin_queue != NULL);
+
+	/*
+	 * Drain any fast-path-aborted oxids off the top of xmin_queue.  An entry
+	 * that is in xmin_queue because the checkpoint's xids file named it
+	 * (state->checkpoint_xid) but for which no WAL_REC_XID ever streamed
+	 * (!state->wal_xid), and whose oxid lies below recovery_xmin, can only be
+	 * a wal_rollback() fast-path abort on the master: the abort wrote no WAL
+	 * record and a later WAL_REC_COMMIT/ROLLBACK has since carried the
+	 * master's post-abort runXmin past its oxid.  Mark it ABORTED in shmem so
+	 * visibility checks see a settled txn rather than the
+	 * COMMITSEQNO_INPROGRESS that read_xids() stamped, apply any
+	 * checkpoint_undo_stacks the master captured (lock-only undo can be
+	 * present even though the abort took the no-WAL fast path), and drop it
+	 * from the heap so it stops pinning runXmin.
+	 */
+	while (!pairingheap_is_empty(xmin_queue))
+	{
+		RecoveryXidState *state;
+
+		state = pairingheap_container(RecoveryXidState, xmin_ph_node,
+									  pairingheap_first(xmin_queue));
+
+		/*
+		 * Only oxids strictly below recovery_xmin may be settled here: an
+		 * oxid below recovery_xmin is guaranteed finished on the primary
+		 * (recovery_xmin tracks the primary's advanced runXmin) and no
+		 * further WAL will arrive for it.  The heap top is the smallest oxid,
+		 * so once it reaches recovery_xmin there is nothing left to drain --
+		 * stop.  We never scan deeper into the heap: it is a pairing heap
+		 * with no cheap ordered traversal, and since update_run_xmin() runs
+		 * after every transaction finish and recovery_xmin shift, draining
+		 * just the eligible prefix each time keeps runXmin continuously up to
+		 * date.
+		 */
+		if (state->oxid >= recovery_xmin)
+			break;
+		if (!state->checkpoint_xid || state->wal_xid)
+			break;
+
+		set_oxid_csn(state->oxid, COMMITSEQNO_ABORTED);
+
+		/*
+		 * walk_checkpoint_stacks() clobbers recovery_oxid /
+		 * curUndoLocations[] / oxid_needs_wal_flush, but update_run_xmin()
+		 * can be re-entered from inside apply_wal_record() (via the
+		 * o_handle_startup_proc_interrupts_hook ->
+		 * update_proc_retain_undo_location -> check_delete_xid_state path)
+		 * while another oxid is being applied -- so save those globals around
+		 * the call and put them back.
+		 */
+		{
+			OXid		saved_recovery_oxid = recovery_oxid;
+			bool		saved_oxid_needs_wal_flush = oxid_needs_wal_flush;
+			UndoStackLocations saved_undo_locations[(int) UndoLogsCount];
+			int			j;
+
+			for (j = 0; j < (int) UndoLogsCount; j++)
+				get_cur_undo_locations(&saved_undo_locations[j],
+									   (UndoLogType) j);
+
+			walk_checkpoint_stacks(state, COMMITSEQNO_ABORTED,
+								   InvalidSubTransactionId, false);
+
+			for (j = 0; j < (int) UndoLogsCount; j++)
+				set_cur_undo_locations((UndoLogType) j,
+									   saved_undo_locations[j]);
+			recovery_oxid = saved_recovery_oxid;
+			oxid_needs_wal_flush = saved_oxid_needs_wal_flush;
+		}
+
+		/*
+		 * The entry is a pure checkpoint-only oxid (checkpoint_xid &&
+		 * !wal_xid) that has now been settled as ABORTED;
+		 * checkpoint_undo_stacks is empty (walk_checkpoint_stacks emptied
+		 * it), and in_finished_list / in_joint_commit_list are necessarily
+		 * false (those flags are only raised by WAL_REC_COMMIT /
+		 * WAL_REC_ROLLBACK / WAL_REC_JOINT_COMMIT processing, which never
+		 * touched this oxid).  Tear the entry down fully so nothing --
+		 * recovery_finish(), update_proc_retain_undo_location(), or anything
+		 * else iterating the hash -- has to consider it again.
+		 */
+		state->csn = COMMITSEQNO_ABORTED;
+		for (i = 0; i < (int) UndoLogsCount; i++)
+		{
+			if (state->in_retain_undo_heaps[i])
+			{
+				pairingheap_remove(retain_undo_queues[i],
+								   &state->retain_undo_ph_nodes[i]);
+				state->in_retain_undo_heaps[i] = false;
+			}
+		}
+		pairingheap_remove(xmin_queue, &state->xmin_ph_node);
+		if (state->used_by)
+			pfree(state->used_by);
+		hash_search(recovery_xid_state_hash, &state->oxid, HASH_REMOVE, &found);
+		Assert(found);
+	}
 
 	if (!pairingheap_is_empty(xmin_queue))
 	{
@@ -3099,8 +3357,16 @@ update_run_xmin(void)
 	}
 	xmin = Min(xmin, recovery_xmin);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
-	if (xmin < pg_atomic_read_u64(&xid_meta->globalXmin))
-		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
+
+	/*
+	 * globalXmin must move monotonically forward.  The pre-existing "write
+	 * down if xmin < globalXmin" branch existed to publish the checkpoint-era
+	 * floor on the first read_xids() call, but checkpoint_shmem_init() now
+	 * seeds globalXmin from control.checkpointRetainXmin -- the same floor --
+	 * so any later downward move would be a regression we must never publish.
+	 * Make monotonicity an explicit invariant instead.
+	 */
+	Assert(xmin >= pg_atomic_read_u64(&xid_meta->globalXmin));
 }
 
 static void
@@ -3110,8 +3376,16 @@ free_run_xmin(void)
 
 	xmin = pg_atomic_read_u64(&xid_meta->nextXid);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
-	if (xmin < pg_atomic_read_u64(&xid_meta->globalXmin))
-		pg_atomic_write_u64(&xid_meta->globalXmin, xmin);
+
+	/*
+	 * globalXmin is the actual horizon, including any live read-only sessions
+	 * that survive a promote -- their oProcData[].xmin can sit well below
+	 * nextXid.  Pulling globalXmin down to nextXid here would publish a
+	 * horizon higher than the real floor and break MVCC for those sessions.
+	 * Leave globalXmin alone; advance_global_xmin() will bring it forward
+	 * (only upward) once proc xmins clear.
+	 */
+	Assert(xmin >= pg_atomic_read_u64(&xid_meta->globalXmin));
 }
 
 /*
@@ -4610,6 +4884,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 
 				recovery_xmin = Max(recovery_xmin, rec->u.finish.xmin);
+				update_run_xmin();
 
 				Assert(ctx->sys_tree_num <= 0 || sys_tree_supports_transactions(ctx->sys_tree_num));
 
@@ -4647,7 +4922,7 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 
 				recovery_record_visible_boundary_pair(ctx->xlogRecEndPtr, xlogPtr);
 
-				elog(DEBUG1, "OrioleDB recovery %s transaction with oxid=%lu. "
+				elog(DEBUG1, "OrioleDB recovery %s transaction with oxid=" UINT64_FORMAT ". "
 					 "Next WAL record starts at LSN %X/%X",
 					 commit ? "committed" : "aborted", rec->oxid,
 					 LSN_FORMAT_ARGS(ctx->xlogRecEndPtr));
@@ -4663,11 +4938,12 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 		case WAL_REC_JOINT_COMMIT:
 			cur_recovery_xid_state->xid = rec->u.joint_commit.xid;
 			elog(DEBUG1, "OrioleDB recovery committed transaction (xid, oxid)="
-				 "(%u, %lu). Next WAL record starts at LSN %X/%X",
+				 "(%u, " UINT64_FORMAT "). Next WAL record starts at LSN %X/%X",
 				 cur_recovery_xid_state->xid, rec->oxid,
 				 LSN_FORMAT_ARGS(ctx->xlogRecEndPtr));
 
 			recovery_xmin = Max(recovery_xmin, rec->u.joint_commit.xmin);
+			update_run_xmin();
 			if (!cur_recovery_xid_state->in_joint_commit_list)
 			{
 				dlist_push_tail(&joint_commit_list,
@@ -5174,7 +5450,11 @@ delay_if_queued_for_idxbuild(void)
 		 * recovery worker, therefore check in which worker we are.
 		 */
 		if (AmStartupProcess())
+#if PG_VERSION_NUM >= 180000
+			ProcessStartupProcInterrupts();
+#else
 			HandleStartupProcInterrupts();
+#endif
 		else
 			o_worker_handle_interrupts();
 
@@ -5218,7 +5498,11 @@ delay_rels_queued_for_idxbuild(ORelOids oids)
 		 * recovery worker, therefore check in which worker we are.
 		 */
 		if (AmStartupProcess())
+#if PG_VERSION_NUM >= 180000
+			ProcessStartupProcInterrupts();
+#else
 			HandleStartupProcInterrupts();
+#endif
 		else
 			o_worker_handle_interrupts();
 

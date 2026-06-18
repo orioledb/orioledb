@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pg_version: [17]
+        pg_version: [18]
     env:
       LLVM_VER: 18
       CPU: ${{ matrix.cpu }}

@@ -1,0 +1,65 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 02:00 UTC daily
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    # Skip cron runs in forks; allow manual dispatch anywhere for testing.
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'orioledb/orioledb'
+    runs-on: ubuntu-24.04
+    outputs:
+      git_tag: ${{ steps.date.outputs.git_tag }}
+      build_id: ${{ steps.date.outputs.build_id }}
+    steps:
+      - id: date
+        run: |
+          date_iso=$(date -u +%Y-%m-%d)
+          date_compact=$(date -u +%Y%m%d)
+          sha_short=${GITHUB_SHA:0:7}
+          {
+            # build_id (compact date + 7-char SHA) makes every build uniquely
+            # taggable even if cron and a manual dispatch fire on the same UTC
+            # day from different commits.
+            echo "build_id=$date_compact-$sha_short"
+            echo "git_tag=nightly-$date_iso-$sha_short"
+          } >> "$GITHUB_OUTPUT"
+
+  build-publish:
+    needs: prepare
+    uses: ./.github/workflows/_docker-build-publish.yml
+    with:
+      mode: nightly
+      nightly_build_id: ${{ needs.prepare.outputs.build_id }}
+    secrets: inherit
+
+  # Push the git tag only after Docker images are in place, so the tag never
+  # points at a build that failed to publish. No GitHub Release is created to
+  # avoid sending release notifications to repo watchers.
+  tag:
+    needs: [prepare, build-publish]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Push nightly git tag
+        env:
+          TAG: ${{ needs.prepare.outputs.git_tag }}
+        run: |
+          set -euo pipefail
+
+          # Nightly tags are immutable: if the tag already exists, skip.
+          if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
+            echo "Tag $TAG already exists; skipping."
+            exit 0
+          fi
+
+          git tag "$TAG" "${{ github.sha }}"
+          git push origin "$TAG"

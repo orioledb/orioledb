@@ -93,7 +93,10 @@ static void orioledb_amrescan(IndexScanDesc scan, ScanKey scankey,
 static bool orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir);
 static int64 orioledb_amgetbitmap(IndexScanDesc scan, TIDBitmap *tbm);
 static void orioledb_amendscan(IndexScanDesc scan);
-#if PG_VERSION_NUM >= 170000
+#if PG_VERSION_NUM >= 180000
+static Size orioledb_amestimateparallelscan(Relation indexRelation, int nkeys,
+											int norderbys);
+#elif PG_VERSION_NUM >= 170000
 static Size orioledb_amestimateparallelscan(int nkeys, int norderbys);
 #else
 static Size orioledb_amestimateparallelscan(void);
@@ -116,7 +119,7 @@ typedef struct BridgedIndexAmRoutine
 	Oid			amhandler;
 } BridgedIndexAmRoutine;
 
-List	   *bridged_ams = NIL;
+static List *bridged_ams = NIL;
 
 static IndexAmRoutine *
 orioledb_btree_handler(void)
@@ -159,6 +162,9 @@ orioledb_btree_handler(void)
 	amroutine->amvacuumcleanup = orioledb_amvacuumcleanup;
 	amroutine->amcanreturn = orioledb_amcanreturn;
 	amroutine->amcostestimate = orioledb_amcostestimate;
+#if PG_VERSION_NUM >= 180000
+	amroutine->amgettreeheight = NULL;
+#endif
 	amroutine->amoptions = orioledb_amoptions;
 	amroutine->amproperty = orioledb_amproperty;
 	amroutine->ambuildphasename = orioledb_ambuildphasename;
@@ -381,7 +387,7 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 			if (i != 0)
 				appendStringInfo(str, ", ");
 			appendStringInfo(str, "%s",
-							 id->nonLeafTupdesc->attrs[i].attname.data);
+							 TupleDescAttr(id->nonLeafTupdesc, i)->attname.data);
 		}
 		appendStringInfo(str, ")=");
 
@@ -403,7 +409,7 @@ o_report_duplicate(Relation rel, OIndexDescr *id, TupleTableSlot *slot)
 				bool		typisvarlena;
 				char	   *res;
 
-				getTypeOutputInfo(id->nonLeafTupdesc->attrs[i].atttypid,
+				getTypeOutputInfo(TupleDescAttr(id->nonLeafTupdesc, i)->atttypid,
 								  &typoutput, &typisvarlena);
 				res = OidOutputFunctionCall(typoutput, value);
 				appendStringInfo(str, "%s", res);
@@ -793,7 +799,7 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 							bool		typisvarlena;
 							char	   *res;
 
-							getTypeOutputInfo(index_descr->leafTupdesc->attrs[i].atttypid,
+							getTypeOutputInfo(TupleDescAttr(index_descr->leafTupdesc, i)->atttypid,
 											  &typoutput, &typisvarlena);
 							res = OidOutputFunctionCall(typoutput, valuesOld[i]);
 							appendStringInfo(str, "'%s'", res);
@@ -929,7 +935,7 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 							bool		typisvarlena;
 							char	   *res;
 
-							getTypeOutputInfo(index_descr->nonLeafTupdesc->attrs[i].atttypid,
+							getTypeOutputInfo(TupleDescAttr(index_descr->nonLeafTupdesc, i)->atttypid,
 											  &typoutput, &typisvarlena);
 							res = OidOutputFunctionCall(typoutput, values[i]);
 							appendStringInfo(str, "'%s'", res);
@@ -1472,6 +1478,7 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 
 	/* get the scan */
 	scan = btbeginscan(rel, nkeys, norderbys);
+	scan->xs_snapshot = NULL;
 	o_scan->scandesc = *scan;
 	pfree(scan);
 
@@ -1520,6 +1527,24 @@ o_get_num_prefix_exact_keys(ScanKey scankey, int nscankeys)
 		prevAttr = scankey[i].sk_attno;
 	}
 	return i;
+}
+
+int
+o_adjust_num_prefix_exact_keys(BTScanOpaque so, int numPrefixExactKeys)
+{
+	int			adjusted = numPrefixExactKeys;
+
+#if PG_VERSION_NUM >= 180000
+	for (int i = 0; i < so->numArrayKeys; i++)
+	{
+		BTArrayKeyInfo *arrayKey = &so->arrayKeys[i];
+
+		if (arrayKey->num_elems <= 0 && arrayKey->scan_key < adjusted)
+			adjusted = arrayKey->scan_key;
+	}
+#endif
+
+	return adjusted;
 }
 
 static void
@@ -1806,6 +1831,24 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 			temp_rowid_isnull[i] = slot->tts_isnull[attnum];
 		}
 
+		/*
+		 * primaryFieldsAttnums covers PK key columns only (see
+		 * add_index_fields(fillPrimary=true), nFields = nkeyfields), but
+		 * o_new_rowid() formats the rowid against primary->nonLeafTupdesc
+		 * whose natts is nkeyfields + nIncludedFields when the PK has INCLUDE
+		 * columns.  Those INCLUDE columns aren't part of the secondary's leaf
+		 * either, so we have no value to plug in -- and refind only matches
+		 * against the key columns anyway.  Fill the tail of
+		 * temp_rowid_isnull[] with `true`s so that o_new_tuple_size doesn't
+		 * read uninitialised memory while computing the rowid tuple's null
+		 * bitmap.
+		 */
+		for (; i < GET_PRIMARY(descr)->nonLeafTupdesc->natts; i++)
+		{
+			temp_rowid_values[i] = (Datum) 0;
+			temp_rowid_isnull[i] = true;
+		}
+
 		if (o_scan->ixNum == PrimaryIndexNumber)
 		{
 			rowid_values = slot->tts_values;
@@ -1836,8 +1879,33 @@ fill_itup(IndexScanDesc scan, OTuple tuple, OTableDescr *descr,
 		pfree(scan->xs_itup);
 		scan->xs_itup = NULL;
 	}
+
+	/*--
+	 * OrioleDB's internal itupdesc already matches the planner-side
+	 * indextlist layout in both column count and column order:
+	 *
+	 *   itupdesc = [non-duplicate secondary key cols
+	 *               | non-duplicate INCLUDE cols
+	 *               | duplicate cols (refilled from their source columns)
+	 *               | extra PK key cols not already in the secondary],
+	 *
+	 *   planner indextlist = rd_att (all declared cols, including dups)
+	 *                       + (when has_primary, PK key cols not in
+	 *                          rd_att.indexkeys, added by
+	 *                          set_plain_rel_pathlist_hook()).
+	 *
+	 * Their natts agree because the duplicate slots in itupdesc account
+	 * for exactly the same columns as the duplicates inside rd_att, and
+	 * because scan.c's hook only adds PK *key* cols (matching the
+	 * !primaryIsCtid path that populates the PK tail of itupdesc).  The
+	 * duplicate-slot rearrangement done by the block right above this
+	 * comment leaves slot->tts_values in itupdesc order, so we hand the
+	 * pair directly to index_form_tuple.
+	 */
 	scan->xs_itupdesc = index_descr->itupdesc;
-	scan->xs_itup = index_form_tuple(index_descr->itupdesc, slot->tts_values, slot->tts_isnull);
+	scan->xs_itup = index_form_tuple(index_descr->itupdesc,
+									 slot->tts_values,
+									 slot->tts_isnull);
 
 	ItemPointerCopy(&slot->tts_tid, &scan->xs_itup->t_tid);
 
@@ -1953,7 +2021,9 @@ orioledb_amendscan(IndexScanDesc scan)
 }
 
 static Size
-#if PG_VERSION_NUM >= 170000
+#if PG_VERSION_NUM >= 180000
+orioledb_amestimateparallelscan(Relation indexRelation, int nkeys, int norderbys)
+#elif PG_VERSION_NUM >= 170000
 orioledb_amestimateparallelscan(int nkeys, int norderbys)
 #else
 orioledb_amestimateparallelscan(void)

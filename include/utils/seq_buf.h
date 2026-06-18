@@ -84,6 +84,9 @@ extern bool seq_buf_write_file_extent(SeqBufDescPrivate *seqBufPrivate, FileExte
 extern bool seq_buf_read_file_extent(SeqBufDescPrivate *seqBufPrivate, FileExtent *extent);
 
 extern uint64 seq_buf_finalize(SeqBufDescPrivate *seqBufPrivate);
+extern Size seq_buf_snapshot_pending_data(SeqBufDescPrivate *seqBufPrivate,
+										  char *buf);
+extern Size seq_buf_max_pending_data_size(void);
 extern char *get_seq_buf_filename(SeqBufTag *tag);
 extern uint64 seq_buf_get_offset(SeqBufDescPrivate *seqBufPrivate);
 extern SeqBufReplaceResult seq_buf_try_replace(SeqBufDescPrivate *seqBufPrivate,

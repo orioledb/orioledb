@@ -11,84 +11,78 @@ jobs:
       matrix: ${{ steps.gen.outputs.matrix }}
     steps:
       - id: gen
-        shell: python # run script directly using the Python interpreter
+        shell: python
         run: |
           import os, json, itertools
 
-          # Get event type and branch name
-          event = os.environ["GITHUB_EVENT_NAME"]
-          ref   = os.environ.get("GITHUB_REF_NAME", "")
+          event_name = os.environ["GITHUB_EVENT_NAME"]
+          ref        = os.environ.get("GITHUB_REF_NAME", "")
 
-          # Full matrix: used for main branch or pull requests
-          full = dict(
-              cpu        = ["amd64", "arm64"],
-              pg_version = [16, 17],
-              compiler   = ["clang", "gcc"],
-              check_type = [
-                  "normal", "debug", "sanitize", "check_page",
-                  "valgrind_1", "valgrind_2", "pg_tests", "dm_log_writes",
-              ],
-              # dm-log-writes needs a kernel module that isn't available on
-              # the arm64 runners, so skip it there.
-              exclude    = [
-                  {"cpu": "arm64", "check_type": "dm_log_writes"},
-              ],
-          )
+          check_types = [
+              "normal", "debug", "sanitize", "check_page",
+              "valgrind_1", "valgrind_2", "pg_tests", "dm_log_writes",
+          ]
 
-          # Reduced matrix: used for all other push events
+          # dm-log-writes needs a kernel module unavailable on arm64 runners
+          def make_matrix(combos):
+              return {
+                  "include": [
+                      {"cpu": cpu, "pg_version": pg, "compiler": comp, "check_type": ct}
+                      for (cpu, pg, comp), ct in itertools.product(combos, check_types)
+                      if not (cpu == "arm64" and ct == "dm_log_writes")
+                  ]
+              }
+
+          full_combos = list(itertools.product(
+              ["amd64", "arm64"], [16, 17, 18], ["clang", "gcc"]
+          ))
+
+          # Push to non-main branches: limited set to save CI time.
+          # PG18 is the current development target, so it keeps both
+          # cpu/compiler combos; PG16 and PG17 each get one combo as a
+          # smoke check.  We rotate which cpu+compiler each older major
+          # lands on between (amd64,gcc) and (arm64,clang) using the
+          # commit SHA, so a feature branch series exercises both
+          # architectures for both older majors over time.  Each push
+          # still has all four cpu/compiler cells covered (across the
+          # three majors), and the total job count is unchanged.
+          # Main pushes and fork PRs continue to exercise the full
+          # matrix unconditionally.
+          sha_hex = os.environ.get("GITHUB_SHA", "0") or "0"
+          flip = int(sha_hex[:8], 16) % 2
+          older_a = ("amd64", "gcc") if flip == 0 else ("arm64", "clang")
+          older_b = ("arm64", "clang") if flip == 0 else ("amd64", "gcc")
           branch_combos = [
-              ("amd64", 16, "gcc"),
-              ("amd64", 17, "clang"),
-              ("arm64", 16, "clang"),
-              ("arm64", 17, "gcc"),
+              (older_a[0], 16, older_a[1]),
+              (older_b[0], 17, older_b[1]),
+              ("amd64", 18, "gcc"),
+              ("arm64", 18, "clang"),
           ]
 
-          # Reverse matrix used for pull requests
-          reverse_combos = [
-              ("amd64", 16, "clang"),
-              ("amd64", 17, "gcc"),
+          # Same-repo PRs: complementary set covering what branch_combos skips
+          pr_combos = [
               ("arm64", 16, "gcc"),
-              ("arm64", 17, "clang"),
+              ("amd64", 16, "clang"),
+              ("arm64", 17, "gcc"),
+              ("amd64", 17, "clang"),
+              ("arm64", 18, "gcc"),
+              ("amd64", 18, "clang"),
           ]
 
-          # Make matrix for the PR
-          if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
-              with open(os.environ["GITHUB_EVENT_PATH"], "r") as f:
-                  event = json.load(f)
-
-              head_repo = event["pull_request"]["head"]["repo"]["full_name"]
-              base_repo = event["pull_request"]["base"]["repo"]["full_name"]
-
-              # If the PR is from a fork use full matrix
-              if head_repo != base_repo:
-                  matrix = full
-              # If the PR is from the main repository use reduced reverse matrix
-              else:
-                  matrix = {
-                      "include": [
-                          {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
-                          for (c, pg, comp), ct in itertools.product(reverse_combos, full["check_type"])
-                          if not (c == "arm64" and ct == "dm_log_writes")
-                      ]
-                  }
-          # Make matrix for branches
+          if event_name == "pull_request":
+              with open(os.environ["GITHUB_EVENT_PATH"]) as f:
+                  pr_event = json.load(f)
+              head_repo = pr_event["pull_request"]["head"]["repo"]["full_name"]
+              base_repo = pr_event["pull_request"]["base"]["repo"]["full_name"]
+              # Fork PRs get the full matrix; same-repo PRs get the complementary set
+              combos = full_combos if head_repo != base_repo else pr_combos
+          elif ref == "main":
+              combos = full_combos
           else:
-              # Use full matrix for the main branch
-              if ref == "main":
-                  matrix = full
-              # Use reduced matrix for other branches
-              else:
-                  matrix = {
-                      "include": [
-                          {"cpu": c, "pg_version": pg, "compiler": comp, "check_type": ct}
-                          for (c, pg, comp), ct in itertools.product(branch_combos, full["check_type"])
-                          if not (c == "arm64" and ct == "dm_log_writes")
-                      ]
-                  }
+              combos = branch_combos
 
-          # Export as job output
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"matrix={json.dumps(matrix)}\n")
+              f.write(f"matrix={json.dumps(make_matrix(combos))}\n")
 
   check:
     needs: matrix
@@ -109,53 +103,60 @@ jobs:
         uses: actions/checkout@v6
         with:
           path: orioledb
+
       - name: Get the required tag name
         shell: bash
         run: |
           echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+
       - name: Checkout PostgreSQL code into workspace directory
         uses: actions/checkout@v6
         with:
           repository: orioledb/postgres
           ref: ${{ env.PGTAG }}
           path: postgresql
+
       - name: Setup prerequisites
         run: bash ./orioledb/ci/prerequisites.sh
+
       - name: Build
         run: bash ./orioledb/ci/build.sh
+
       - name: Install post build prerequisites
         run: bash ./orioledb/ci/post_build_prerequisites.sh
 
       - name: Check
-        timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 150 || (matrix.check_type == 'dm_log_writes' && 60 || (matrix.check_type == 'sanitize' && 40 || 20)) }}
+        timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 150 || (matrix.check_type == 'dm_log_writes' && 60 || (matrix.check_type == 'sanitize' && 40 || 30)) }}
         run: bash ./orioledb/ci/check.sh
+
       - name: Check output
         run: bash ./orioledb/ci/check_output.sh
         if: ${{ success() || failure() }}
 
-      - name: Upload regression tests diffs
+      - name: Upload tests diffs
         uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_regression.diffs
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_test.diffs
           path: |
             ./orioledb/test/**/regression.diffs
             ./orioledb/test/**/isolation_filtered.diffs
-            ./orioledb/test/log/*.log
             ./postgresql/src/test/**/regression.diffs
             ./postgresql/src/test/**/isolation_filtered.diffs
             ./postgresql/dump_diff_*.txt
           retention-days: 2
           if-no-files-found: ignore
+
       - name: Upload tests logs
         uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_testgres.logs
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_test.logs
           path: |
             ./orioledb/test/tmp_check_t/*/logs/*log
             ./orioledb/test/tmp_check/log/*log
             ./orioledb/test/tmp_check_iso/log/*log
+            ./orioledb/test/log/*.log
             ./postgresql/pg.log
             ./postgresql/rep_pg.log
             ./postgresql/src/test/**/tmp_check/*.dump
@@ -170,6 +171,7 @@ jobs:
       - name: Run lcov
         if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
         run: bash ./orioledb/ci/lcov.sh
+
       - name: Create artifact for coverage.info
         if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
         uses: actions/upload-artifact@v7
@@ -187,10 +189,13 @@ jobs:
         uses: actions/checkout@v6
         with:
           path: orioledb
+
       - name: Retrieve saved coverage.infos
         uses: actions/download-artifact@v8
+
       - name: Merge coverage files
         run: bash ./orioledb/ci/lcov_merge.sh
+
       - name: coveralls
         uses: coverallsapp/github-action@v2
         with:

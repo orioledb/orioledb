@@ -2,6 +2,7 @@ CREATE SCHEMA indices_build;
 SET SESSION search_path = 'indices_build';
 SET SESSION log_error_verbosity = 'terse';
 CREATE EXTENSION orioledb;
+
 SELECT orioledb_parallel_debug_start();
 
 -- Index build with primary key
@@ -764,6 +765,17 @@ CREATE TABLE t_bridge_parallel (i int) USING orioledb
 	WITH (parallel_workers = 2);
 INSERT INTO t_bridge_parallel SELECT x FROM generate_series(1, 15000) x;
 CREATE INDEX ON t_bridge_parallel USING brin (i) WITH (pages_per_range = 1);
+
+-- Parallel bridged GIN build: each worker scans a disjoint slice of the
+-- primary tree so bridge_ctid emissions stay strictly ascending and unique,
+-- which PG18's GIN parallel-merge AssertCheckItemPointers requires.
+CREATE TABLE t_bridge_parallel_gin (i int, a tsvector) USING orioledb
+	WITH (parallel_workers = 2);
+INSERT INTO t_bridge_parallel_gin
+	SELECT g, to_tsvector('english', md5(g::text) || ' tag' || (g % 100))
+	FROM generate_series(1, 15000) g;
+CREATE INDEX ON t_bridge_parallel_gin USING gin (a);
+SELECT count(*) FROM t_bridge_parallel_gin WHERE a @@ to_tsquery('tag50');
 RESET min_parallel_table_scan_size;
 
 RESET maintenance_work_mem;

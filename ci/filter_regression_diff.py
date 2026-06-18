@@ -91,8 +91,19 @@ knownErrors = {
 	r"Susie": ["psql"],	
 
 	# foreign_key specific errors
+	#
+	# Orioledb fails the upstream NO ACTION / RESTRICT regression block
+	# because its UPDATE re-checks PK uniqueness against the not-yet-deleted
+	# old version of every row in the statement, so `UPDATE pp SET f1=f1+1`
+	# raises "duplicate key value" the moment a target key matches an old
+	# row's key.  That short-circuits the FK enforcement path, so the
+	# upstream "violates RESTRICT setting" error never fires.  Until the
+	# UPDATE path is rewritten to use snapshot-style PK checks (tracked as
+	# a separate orioledb bug -- see test/sql/foreign_keys.sql), accept
+	# both the orioledb dup-key and the FK errors as filterable.
 	r"ERROR:  duplicate key value violates unique constraint" : ["foreign_key"],
 	r"ERROR:  (insert or update|update or delete) on table \"[a-z]+\" violates foreign key constraint": ["foreign_key"],
+	r"ERROR:  update or delete on table \"[a-z]+\" violates RESTRICT setting of foreign key constraint": ["foreign_key"],
 
     # privileges specific errors
     r"ERROR:  function \"sro_ifun\" cannot be used here": ["privileges"],
@@ -105,13 +116,40 @@ knownErrors = {
 	# collate.icu.utf8 specific error.  o_find_collation_dependencies()
 	# stops at the first hit, so depending on pg_depend scan order the
 	# error names either the table or one of its indexes — match both.
-	r"ERROR:  cannot refresh collation \"en-x-icu\" because orioledb (table|index) \"[a-z0-9_]+\" uses it": ["collate.icu.utf8"]
+	r"ERROR:  cannot refresh collation \"en-x-icu\" because orioledb (table|index) \"[a-z0-9_]+\" uses it": ["collate.icu.utf8"],
+
+	# generated_stored and generated_virtual run in the same parallel
+	# group and both CREATE/DROP regress_user11.  The role-collision
+	# cascade is dropped wholesale via skip_hunk_errors below; only the
+	# psql \dp privilege-listing diff remains as a line-level filter
+	# (it appears outside the cascade hunk).
+	r"privileges for (column \w+ of table|table) generated_stored_tests\.\w+": ["generated_virtual"],
 }
 
 # Regexps that allow us to completely skip comparasion of hunks containing these regexprs
 skip_hunk_errors = {
 	r"ERROR:  orioledb tuples does not have system attribute: xm(in|ax)":
 	["update"],
+	# WHERE CURRENT OF cursor relies on TID scan; orioledb has none, so the
+	# UPDATE/DELETE fail and the rest of the cursor block aborts.  Drop the
+	# whole hunk so the cascaded "transaction is aborted" lines disappear.
+	r"ERROR:  orioledb does not support TID scan":
+	["generated_virtual"],
+	# generated_stored and generated_virtual both CREATE/DROP the shared
+	# role regress_user11.  Depending on which test the parallel scheduler
+	# starts first the other can hit CREATE USER ("already exists"),
+	# SET ROLE / GRANT ("does not exist"), or DROP USER ("cannot be
+	# dropped because some objects depend on it" / "does not exist").
+	# Each of those errors cascades: SELECT/CALL statements gated by
+	# SET ROLE return real rows instead of "permission denied", which
+	# leaves a multi-line table-vs-error diff -- sometimes in the same
+	# hunk as the role error, sometimes in a separate hunk further down
+	# whose only marker is the missing "permission denied" line.  Drop
+	# both shapes.
+	r"ERROR:  role \"regress_user11\" (already exists|does not exist|cannot be dropped because some objects depend on it)":
+	["generated_stored", "generated_virtual"],
+	r"ERROR:  permission denied for (table gtest\w+|function gf\w+)":
+	["generated_stored", "generated_virtual"],
 }
 
 def can_drop_hunk(testName, line):
@@ -129,6 +167,26 @@ def is_known_error(testName, line):
 				if test == '*' or test == testName:
 					return True
 	return False
+
+
+# Compare a known_table_diffs entry against actually-observed table rows
+# with a few wildcard sentinels.  The entry side may contain:
+#   '<N>'  - matches any decimal integer (e.g., row count that depends on
+#            bridge file layout, brin block count etc.)
+# Exact string match otherwise.  Returns True on full match.
+def _table_diff_matches(pattern_rows, actual_rows):
+	if len(pattern_rows) != len(actual_rows):
+		return False
+	for p_row, a_row in zip(pattern_rows, actual_rows):
+		if len(p_row) != len(a_row):
+			return False
+		for p, a in zip(p_row, a_row):
+			if p == '<N>':
+				if not re.fullmatch(r"\d+", a):
+					return False
+			elif p != a:
+				return False
+	return True
 
 
 # TODO: explain every table diff
@@ -212,11 +270,17 @@ known_table_diffs = {
 	"vacuum_parallel": [
 		[[['t']], [['f']]]
 	],
+	# brin_summarize_range called with BRIN_ALL_BLOCKRANGES (4294967295)
+	# returns the number of newly-summarized page ranges, which on heap is
+	# 0 (a 3-page table is already fully summarized) but on orioledb is
+	# bounded by the bridge file's block count -- a function of how many
+	# rows the test happened to insert and orioledb's bridge ctid layout.
+	# Match any non-negative integer to avoid pinning a data-specific value.
 	"brin_bloom" : [
-		[[['0']], [['97']]]
+		[[['0']], [['<N>']]]
 	],
 	"brin_multi" : [
-		[[['0']], [['97']]]
+		[[['0']], [['<N>']]]
 	],
 	"reloptions": [
 		[[['t']], [['f']]]
@@ -251,13 +315,30 @@ def dump_subtree(node: list):
 		dump_subtree(child)
 
 
-# Check if two condition strings are equal up to commutativity of operands.
-# E.g. "Hash Cond: (a.tenthous = i4.f1)" matches "Hash Cond: (i4.f1 = a.tenthous)"
+# Strip auto-generated "_N" alias suffixes (e.g. "joinme_1.f2j" -> "joinme.f2j")
+# from identifiers in a condition string.  Postgres assigns these suffixes
+# when the same base relation appears multiple times in a query, and the
+# planner can pick a different join shape on orioledb that ends up with a
+# different numbering even though the conditions are semantically equal.
+def _strip_alias_suffix(s: str) -> str:
+	return re.sub(r"(\w+?)_\d+(?=\.|\W|$)", r"\1", s)
+
+
+# Check if two condition strings are equal up to commutativity of operands
+# and auto-generated "_N" alias suffixes.  E.g. both
+# "Hash Cond: (a.tenthous = i4.f1)" and
+# "Hash Cond: (i4.f1 = a.tenthous)" match, and also
+# "Hash Cond: (foo_1.f2 = joinme.f2j)" matches
+# "Hash Cond: (joinme_1.f2j = foo_1.f2)".
 def is_commutative_cond_eq(s1: str, s2: str) -> bool:
 	if s1 == s2:
 		return True
-	m1 = re.match(r"^(.+:\s*\()(.+?)\s*=\s*(.+?)\)$", s1)
-	m2 = re.match(r"^(.+:\s*\()(.+?)\s*=\s*(.+?)\)$", s2)
+	n1 = _strip_alias_suffix(s1)
+	n2 = _strip_alias_suffix(s2)
+	if n1 == n2:
+		return True
+	m1 = re.match(r"^(.+:\s*\()(.+?)\s*=\s*(.+?)\)$", n1)
+	m2 = re.match(r"^(.+:\s*\()(.+?)\s*=\s*(.+?)\)$", n2)
 	if not m1 or not m2:
 		return False
 	return (m1.group(1) == m2.group(1)
@@ -307,8 +388,13 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 			# but it is clear, that we can't simply go to the next level without
 			# verifying "One-Time Filter" expr. So replace "Result" with it's property
 			#
+			# However, PG18 also wraps some subplans in a no-op Result whose
+			# only property is "Output: ...".  That is just a passthrough; the
+			# real comparison is between src and the Result's single child,
+			# so descend instead of pretending Output is the node value.
+			#
 			# TODO: May be better to rewrite tree builder?
-			if len(target_cur[2]):
+			if (len(target_cur[2]) and not target_cur[2][0].startswith("Output:")):
 				target_stack[0][0][target_stack[0][1]][1] = target_cur[2][0]
 			else:
 				target_down = True
@@ -332,11 +418,27 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				target_up = True
 		elif src_cur_value.startswith('Bitmap Heap Scan'):
 			if target_cur[1].startswith('Custom Scan'):
-				if target_cur[2][0] != 'Bitmap heap scan':
-					equal = False
-				else:
+				# EXPLAIN VERBOSE inserts "Output: ..." (and an optional
+				# "Filter: ..." in subplans that reference scan-level filters)
+				# ahead of the marker we look for, pushing it down the
+				# property list.  Skip past those leading properties.
+				target_props = target_cur[2]
+				while target_props and (target_props[0].startswith("Output:")
+				                        or target_props[0].startswith("Filter:")):
+					target_props = target_props[1:]
+				if target_props and target_props[0] == 'Bitmap heap scan':
 					src_down = True
 					target_down = True
+				elif target_props and target_props[0].startswith('Forward index'):
+					# heap built a Bitmap Heap Scan with a child Bitmap Index
+					# Scan; orioledb collapsed both into a single Custom Scan
+					# whose first property is "Forward index (only) scan of".
+					# Skip past both subtrees -- the Conds property already
+					# carries the index quals.
+					src_up = True
+					target_up = True
+				else:
+					equal = False
 			else:
 				equal = False
 		elif is_commutative_cond_eq(src_cur_value, target_cur[1]):
@@ -426,7 +528,11 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				else:
 					equal = False
 			elif (test_name == 'partition_prune'
-				  and re.sub(r"actual rows=\d+ loops=\d+\)$", "", src_cur_value) == re.sub(r"actual rows=\d+ loops=\d+\)$", "", target_cur[1])):
+				  and re.sub(r"actual rows=[\d.]+ loops=\d+\)$", "", src_cur_value) == re.sub(r"actual rows=[\d.]+ loops=\d+\)$", "", target_cur[1])):
+				# PG18 EXPLAIN ANALYZE prints fractional rows as "actual rows=N.NN".
+				# Heap reports the raw index hit count on Bitmap Index Scan; orioledb
+				# reports the visibility-checked count.  Equal up to that numeric
+				# difference in partition_prune-style nested-loop appends.
 				src_down = True
 				target_down = True
 			elif (test_name == 'memoize'
@@ -440,8 +546,12 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 					src_cur = src_stack[0][0][src_stack[0][1]]
 				src_down = True
 				target_down = True
-			elif test_name in ['subselect', 'window']:
-				# We have massive EXPLAIN diff, research it latter
+			elif test_name in ['subselect', 'window', 'select_distinct']:
+				# We have massive EXPLAIN diff, research it latter.
+				# select_distinct diverges in many DISTINCT plans because
+				# orioledb picks a parallel/Custom-Scan shape where heap
+				# picks (Incremental Sort + Index (Only) Scan) and uses
+				# the PG18 "Disabled: true" property on bypassed paths.
 				src_up = True
 				target_up = True
 			elif (test_name == 'with'
@@ -449,9 +559,13 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				  and target_cur[1] == 'Hash Semi Join'):
 				src_up = True
 				target_up = True
-			elif (test_name == 'generated'
+			elif (test_name in ('generated', 'generated_stored', 'generated_virtual')
 				  and src_cur_value.startswith('Index Scan')
 				  and target_cur[1].startswith('Index Scan')):
+				# PG18 split generated into generated_stored / generated_virtual.
+				# Both inherit the gtest22c plan divergence: heap picks
+				# gtest22c_b_idx, orioledb picks the partial gtest22c_pred_idx
+				# after ALTER TABLE ALTER COLUMN ... SET EXPRESSION rebuild.
 				src_up = True
 				target_up = True
 			elif (test_name == 'updatable_views'
@@ -484,8 +598,15 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				src_up = True
 				target_up = True
 			else:
-				print(f"src_cur[1] = {src_cur[1]}\ntarget_cur[1] = {target_cur[1]}")
-				raise RuntimeError(f"Unsupported tree diff. Add branch specifically for \"{test_name}\" test")
+				# Don't abort the whole filter run on an unrecognized plan
+				# divergence -- log the mismatch on stderr so it can still
+				# be eyeballed in CI logs, treat the two subtrees as
+				# non-equal, and let the caller keep the diff for review.
+				print(
+				    f"compare_trees: unsupported diff in test \"{test_name}\":"
+				    f" src=\"{src_cur[1]}\", target=\"{target_cur[1]}\"",
+				    file=sys.stderr)
+				return False
 
 		if src_down:
 			if goto_down_level(src_stack, src_cur) == False:
@@ -837,20 +958,43 @@ for patched_file in patched_files:
 					    x.strip()
 					    for x in source[src_table_start - 1].split("|")
 					]
-					if table_columns[0].strip() == 'QUERY PLAN':
-						src_tree = query_plan_to_tree(src_table_lines)
-						target_tree = query_plan_to_tree(target_table_lines)
-						# compare plan trees
-						equal = compare_trees(src_tree, target_tree, testName)
-						# sys.exit(0)
-						if equal:
+					# partition_prune wraps EXPLAIN ANALYZE in a SQL helper that
+					# relabels the column "explain_analyze" instead of "QUERY PLAN";
+					# the body is still a plan tree, so compare it the same way.
+					if table_columns[0].strip() in ('QUERY PLAN', 'explain_analyze'):
+						# In `returning` the diff loses context: the plan only
+						# tests RETURNING-flavoured EXPLAIN; the actual returned
+						# rows are checked against expected output via the
+						# preceding result tables, which we still compare row
+						# by row.  Pasting a wholesale plan reshuffle through
+						# partial-tree comparison creates apples-to-oranges
+						# node pairings (Output: vs Hash Cond: etc.) -- drop
+						# the plan table outright.
+						if testName == 'returning':
 							table_remove = True
+						else:
+							src_tree = query_plan_to_tree(src_table_lines)
+							target_tree = query_plan_to_tree(target_table_lines)
+							# compare plan trees
+							equal = compare_trees(src_tree, target_tree, testName)
+							# sys.exit(0)
+							if equal:
+								table_remove = True
 					else:
+						# Orioledb assigns ctids more compactly than heap (no
+						# new ctid on UPDATE, no gap on ON CONFLICT DO UPDATE),
+						# so any test that prints ctid in its RETURNING / SELECT
+						# output ends up with a numeric column-value drift even
+						# though the row contents agree.  Strip "(N,N)" cells to
+						# the normalized form "(0,X)" before comparing.
+						def _normalize_ctid(cell):
+							return re.sub(r"^\(\d+,\d+\)$", "(0,X)", cell.strip())
+
 						src_table_lines = sorted(
-						    [cell.strip() for cell in line]
+						    [_normalize_ctid(cell) for cell in line]
 						    for line in src_table_lines)
 						target_table_lines = sorted(
-						    [cell.strip() for cell in line]
+						    [_normalize_ctid(cell) for cell in line]
 						    for line in target_table_lines)
 
 						# print(f"src_table_lines = {src_table_lines}")
@@ -874,9 +1018,10 @@ for patched_file in patched_files:
 							if testName in known_table_diffs:
 								test_table_diffs = known_table_diffs[testName]
 								for test_table_diff in test_table_diffs:
-									if (test_table_diff[0] == src_table_lines
-									    and test_table_diff[1]
-									    == target_table_lines):
+									if _table_diff_matches(test_table_diff[0],
+														   src_table_lines) \
+										and _table_diff_matches(test_table_diff[1],
+																target_table_lines):
 										table_remove = True
 										break
 

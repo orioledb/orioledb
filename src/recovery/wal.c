@@ -305,7 +305,8 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	walPos = flush_local_wal(true, !isAutonomous);
 	local_wal.has_material_changes = false;
 
-	elog(DEBUG4, "[%s] COMMIT oxid %lu logicalXid %u %X/%X", __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
+	elog(DEBUG4, "[%s] COMMIT oxid " UINT64_FORMAT " logicalXid %u %X/%X",
+		 __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
 
 	return walPos;
 }
@@ -368,10 +369,50 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	wait_pos = flush_local_wal(false, !isAutonomous);
 	local_wal.has_material_changes = false;
 
-	elog(DEBUG4, "ROLLBACK oxid %lu logicalXid %u", oxid, logicalXid);
+	elog(DEBUG4, "ROLLBACK oxid " UINT64_FORMAT " logicalXid %u",
+		 oxid, logicalXid);
 
 	if (synchronous_commit > SYNCHRONOUS_COMMIT_OFF)
 		XLogFlush(wait_pos);
+}
+
+/*
+ * Emit a stand-alone WAL_REC_ROLLBACK on behalf of an in-flight oxid that
+ * recovery_finish() aborted in memory after end-of-redo.
+ *
+ * Streaming standbys eagerly apply each modify record marked
+ * COMMITSEQNO_INPROGRESS and rely on a later WAL_REC_COMMIT/ROLLBACK to
+ * resolve the verdict.  The primary's normal abort path (wal_rollback) gates
+ * on local_wal.has_material_changes — but the startup process that runs
+ * recovery_finish() never wrote those records into its own local_wal buffer
+ * (the original primary did, before it crashed), so wal_rollback() would
+ * silently no-op.  Without an explicit ROLLBACK marker on the wire, the
+ * standby holds the oxid INPROGRESS forever and livelocks on the next
+ * conflicting modify (orioledb/orioledb#876).
+ *
+ * Must be called after LocalSetXLogInsertAllowed() — i.e. from the
+ * after_checkpoint_cleanup_hook with flags=0, not from inside rm_cleanup
+ * itself, which still runs with XLogInsertAllowed() == false.
+ */
+void
+wal_emit_recovery_finish_rollback(OXid oxid, TransactionId logicalXid)
+{
+	XLogRecPtr	wait_pos;
+
+	Assert(!is_recovery_process());
+	Assert(local_wal.buffer_offset == 0);
+	Assert(!local_wal.contains_xid);
+
+	add_xid_wal_record(oxid, logicalXid);
+	add_finish_wal_record(WAL_REC_ROLLBACK,
+						  pg_atomic_read_u64(&xid_meta->runXmin));
+	wait_pos = flush_local_wal(false, false);
+	local_wal.has_material_changes = false;
+
+	elog(DEBUG1, "recovery-finish ROLLBACK oxid " UINT64_FORMAT " logicalXid %u %X/%X",
+		 oxid, logicalXid, LSN_FORMAT_ARGS(wait_pos));
+
+	XLogFlush(wait_pos);
 }
 
 static void
@@ -455,7 +496,8 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 
 	heapXid = GetTopTransactionIdIfAny();
 
-	elog(DEBUG4, "WAL_REC_XID oxid %lu logicalXid %u heapXid %u", oxid, logicalXid, heapXid);
+	elog(DEBUG4, "WAL_REC_XID oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
+		 oxid, logicalXid, heapXid);
 
 	rec = (WALRecXid *) (&local_wal.buffer[local_wal.buffer_offset]);
 	rec->recType = WAL_REC_XID;
@@ -526,7 +568,7 @@ add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_v
 	memcpy(rec->version, &version, sizeof(version));
 	memcpy(rec->baseVersion, &base_version, sizeof(base_version));
 
-	elog(DEBUG4, "[%s] WAL_REC_RELATION ADD oids [ %u %u %u ] type %d xmin/csn/cid %lu/%lu/%u version %u base_version %u", __func__,
+	elog(DEBUG4, "[%s] WAL_REC_RELATION ADD oids [ %u %u %u ] type %d xmin/csn/cid " UINT64_FORMAT "/" UINT64_FORMAT "/%u version %u base_version %u", __func__,
 		 oids.datoid, oids.reloid, oids.relnode,
 		 type, runXmin, csn, cid, version, base_version);
 
@@ -648,7 +690,8 @@ add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 	csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 	memcpy(rec->csn, &csn, sizeof(csn));
 
-	elog(DEBUG4, "[%s] xmin %lu csn %lu", __func__, runXmin, csn);
+	elog(DEBUG4, "[%s] xmin " UINT64_FORMAT " csn " UINT64_FORMAT,
+		 __func__, runXmin, csn);
 
 	local_wal.buffer_offset += sizeof(*rec);
 

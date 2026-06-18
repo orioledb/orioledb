@@ -63,6 +63,7 @@
 #include "parser/parse_type.h"
 #include "parser/parsetree.h"
 #include "pgstat.h"
+#include "replication/origin.h"
 #include "storage/bufmgr.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
@@ -409,6 +410,19 @@ orioledb_tuple_satisfies_snapshot(Relation rel, TupleTableSlot *slot,
 	return true;
 
 }
+
+#if PG_VERSION_NUM >= 180000
+/* OrioleDB doesn't store xmin in tuples, just return false */
+static bool
+orioledb_tuple_get_transaction_info(TupleTableSlot *slot, TransactionId *xmin,
+									RepOriginId *originid, TimestampTz *ts)
+{
+	*xmin = InvalidTransactionId;
+	*originid = InvalidRepOriginId;
+	*ts = 0;
+	return false;
+}
+#endif
 
 
 /* ----------------------------------------------------------------------------
@@ -1169,7 +1183,19 @@ orioledb_index_build_range_scan(Relation heapRelation,
 		descr = relation_get_descr(heapRelation);
 		Assert(descr != NULL);
 
-		seq_scan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc, &o_in_progress_snapshot, NULL);
+		/*
+		 * In a parallel index build PG hands us a TableScanDesc whose
+		 * rs_parallel was allocated by table_parallelscan_initialize and
+		 * sized by orioledb_parallelscan_estimate to fit a
+		 * ParallelOScanDescData.  Pass it down to make_btree_seq_scan so
+		 * workers coordinate on the same primary tree instead of each
+		 * scanning the whole tree independently (which would lead to
+		 * duplicate bridge_ctid emissions and trip PG's GIN parallel-merge
+		 * AssertCheckItemPointers / GinBufferStoreTuple invariants on PG18).
+		 */
+		seq_scan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc,
+									   &o_in_progress_snapshot,
+									   scan ? (ParallelOScanDesc) scan->rs_parallel : NULL);
 		primarySlot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
 
 		/* Arrange for econtext's scan tuple to be the tuple under test */
@@ -1622,6 +1648,7 @@ orioledb_estimate_rel_size(Relation rel, int32 *attr_widths,
  * ------------------------------------------------------------------------
  */
 
+#if PG_VERSION_NUM < 180000
 static bool
 orioledb_scan_bitmap_next_block(TableScanDesc scan,
 								TBMIterateResult *tbmres)
@@ -1629,11 +1656,20 @@ orioledb_scan_bitmap_next_block(TableScanDesc scan,
 	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 	return false;
 }
+#endif
 
 static bool
+#if PG_VERSION_NUM >= 180000
+orioledb_scan_bitmap_next_tuple(TableScanDesc scan,
+								TupleTableSlot *slot,
+								bool *recheck,
+								uint64 *lossy_pages,
+								uint64 *exact_pages)
+#else
 orioledb_scan_bitmap_next_tuple(TableScanDesc scan,
 								TBMIterateResult *tbmres,
 								TupleTableSlot *slot)
+#endif
 {
 	elog(ERROR, "Not implemented: %s", PG_FUNCNAME_MACRO);
 	return false;
@@ -1702,7 +1738,11 @@ orioledb_parallelscan_initialize(Relation rel, ParallelTableScanDesc pscan)
 		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
 						errmsg("\"%s\" is not a orioledb table", NameStr(rel->rd_rel->relname))));
 
+#if PG_VERSION_NUM >= 180000
+	poscan->phs_base.phs_locator = rel->rd_locator;
+#else
 	poscan->phs_base.phs_relid = RelationGetRelid(rel);
+#endif
 	poscan->phs_base.phs_syncscan = false;
 	return orioledb_parallelscan_initialize_inner(pscan);
 }
@@ -2507,6 +2547,9 @@ static const TableAmRoutine orioledb_am_methods = {
 	.tuple_get_latest_tid = orioledb_get_latest_tid,
 	.tuple_tid_valid = orioledb_tuple_tid_valid,
 	.tuple_satisfies_snapshot = orioledb_tuple_satisfies_snapshot,
+#if PG_VERSION_NUM >= 180000
+	.tuple_get_transaction_info = orioledb_tuple_get_transaction_info,
+#endif
 
 	.relation_set_new_filelocator = orioledb_relation_set_new_filenode,
 	.relation_nontransactional_truncate = orioledb_relation_nontransactional_truncate,
@@ -2523,7 +2566,9 @@ static const TableAmRoutine orioledb_am_methods = {
 	.relation_toast_am = orioledb_relation_toast_am,
 
 	.relation_estimate_size = orioledb_estimate_rel_size,
+#if PG_VERSION_NUM < 180000
 	.scan_bitmap_next_block = orioledb_scan_bitmap_next_block,
+#endif
 	.scan_bitmap_next_tuple = orioledb_scan_bitmap_next_tuple,
 	.scan_sample_next_block = orioledb_scan_sample_next_block,
 	.scan_sample_next_tuple = orioledb_scan_sample_next_tuple,
@@ -2777,6 +2822,8 @@ orioledb_calculate_database_size(Oid dbOid)
 		totalsize += prev_database_size_hook(dbOid);
 	}
 
-	elog(DEBUG4, "orioledb_calculate_database_size totalsize added: %ld", totalsize);
+	elog(DEBUG4,
+		 "orioledb_calculate_database_size totalsize added: " UINT64_FORMAT,
+		 totalsize);
 	return totalsize;
 }

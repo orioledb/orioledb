@@ -324,7 +324,7 @@ seq_buf_finish_prev_page(SeqBufDescPrivate *seqBufPrivate)
 			{
 				SpinLockRelease(&shared->lock);
 				elog(PANIC, "Error read sequence buffer file %s at offset %u. "
-					 "Bytes read = %d is not equal than expected = %lu",
+					 "Bytes read = %d is not equal than expected = " UINT64_FORMAT,
 					 get_seq_buf_filename(&seqBufPrivate->tag), (uint32) offset,
 					 nbytes, (uint64) shared->freeBytesNum);
 				return false;
@@ -540,6 +540,65 @@ seq_buf_finalize(SeqBufDescPrivate *seqBufPrivate)
 		seq_buf_remove_file(&seqBufPrivate->tag);
 
 	return result;
+}
+
+/*
+ * Snapshot data that has been written to this seq_buf but is not yet visible
+ * via the on-disk file -- i.e., bytes still buffered in the in-memory current
+ * page.  After this call, a reader can `OFileRead` the file path to get every
+ * byte committed to disk and then concatenate the returned tail bytes to see
+ * the full stream of data written so far.
+ *
+ * Behaviour mirrors seq_buf_finalize() for the previous-page state: any
+ * in-flight write is waited for, and a SeqBufPrevPageError is retried in
+ * place; on a second failure we PANIC.
+ *
+ * `buf` must be SEQBUF_CHUNK_SIZE bytes.  Returns the number of bytes copied
+ * (0 if the seq_buf is empty/uninitialised, at most SEQBUF_CHUNK_SIZE).  Only
+ * valid on write-mode seq_bufs.
+ */
+Size
+seq_buf_max_pending_data_size(void)
+{
+	return SEQBUF_CHUNK_SIZE;
+}
+
+Size
+seq_buf_snapshot_pending_data(SeqBufDescPrivate *seqBufPrivate, char *buf)
+{
+	SeqBufDescShared *shared = seqBufPrivate->shared;
+	Page		page;
+	Size		len;
+
+	Assert(seqBufPrivate->write);
+
+	if (!SEQ_BUF_SHARED_EXIST(shared))
+		return 0;
+
+	SpinLockAcquire(&shared->lock);
+	seq_buf_wait_prev_page(shared);
+	if (shared->prevPageState == SeqBufPrevPageError)
+	{
+		if (!seq_buf_finish_prev_page(seqBufPrivate))
+		{
+			SpinLockRelease(&shared->lock);
+			ereport(PANIC, (errcode_for_file_access(),
+							errmsg("could not finalize previous sequence buffer page to file %s: %m",
+								   get_seq_buf_filename(&seqBufPrivate->tag))));
+		}
+		shared->prevPageState = SeqBufPrevPageDone;
+	}
+
+	Assert(shared->location >= SEQBUF_DATA_OFF);
+	len = shared->location - SEQBUF_DATA_OFF;
+	if (len > 0)
+	{
+		page = O_GET_IN_MEMORY_PAGE(shared->pages[shared->curPageNum]);
+		memcpy(buf, page + SEQBUF_DATA_OFF, len);
+	}
+	SpinLockRelease(&shared->lock);
+
+	return len;
 }
 
 /*

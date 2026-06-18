@@ -295,6 +295,25 @@ UPDATE pp SET f1 = f1 - 1; -- fail
 DELETE FROM pp WHERE f1 = 10; -- fail
 DROP TABLE pp, cc;
 
+-- Cross-row PK conflict during UPDATE: "UPDATE pp_inc SET f1=f1+1" on rows
+-- (11, 12) wants to renumber them to (12, 13).  Heap visits the tuples in
+-- physical insertion order (12, 11) and defers the uniqueness check until
+-- after the whole statement, so the intermediate state where two rows
+-- briefly map to f1=12 is invisible to the constraint.
+-- Orioledb's index-organized storage iterates pp_inc in PK order (11, 12)
+-- and re-checks uniqueness inline against the not-yet-deleted old row, so
+-- the very first step (11 -> 12) collides with the existing 12 and fails
+-- with "duplicate key value".  The expected output below pins the current
+-- (buggy) behavior so a future fix to o_tbl_update lands as a single
+-- visible diff.
+CREATE TEMP TABLE pp_inc (f1 int PRIMARY KEY) USING orioledb;
+INSERT INTO pp_inc VALUES (12);
+INSERT INTO pp_inc VALUES (11);
+-- This should rewrite pp_inc to (13, 12); orioledb rejects with dup-key.
+UPDATE pp_inc SET f1 = f1 + 1;
+SELECT * FROM pp_inc ORDER BY f1;
+DROP TABLE pp_inc;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA foreign_keys CASCADE;
 RESET search_path;

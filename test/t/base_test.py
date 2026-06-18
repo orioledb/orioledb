@@ -25,7 +25,7 @@ from testgres.node import PostgresNode
 from testgres.operations.os_ops import OsOperations, ConnectionParams
 from testgres.port_manager import PortManager__Generic
 from testgres.utils import get_pg_version, get_pg_config
-from typing import Any
+from typing import Any, List, Optional
 
 # When USE_DM_LOG_WRITES=1 is passed (via Makefile's USE_DM_LOG_WRITES flag),
 # crash simulations use dm-log-writes to replay only the writes that actually
@@ -327,12 +327,14 @@ class BaseTest(unittest.TestCase):
 
 		return restoredNode
 
-	def initNode(self,
-	             base_port: int,
-	             suffix='tgsn',
-	             has_archiving: bool = False,
-	             allows_streaming: bool = False,
-	             override_base_dir: str = None) -> testgres.PostgresNode:
+	def initNode(
+	        self,
+	        base_port: int,
+	        suffix='tgsn',
+	        has_archiving: bool = False,
+	        allows_streaming: bool = False,
+	        override_base_dir: Optional[str] = None,
+	        initdb_args: Optional[List[str]] = None) -> testgres.PostgresNode:
 		(test_path,
 		 t) = os.path.split(os.path.dirname(inspect.getfile(self.__class__)))
 		if override_base_dir is not None:
@@ -347,7 +349,8 @@ class BaseTest(unittest.TestCase):
 		node = testgres.get_new_node('test',
 		                             base_dir=baseDir,
 		                             port_manager=port_manager)
-		node.init(["--no-locale", "--encoding=UTF8"])  # run initdb
+		node.init(initdb_args if initdb_args is not None else
+		          ["--no-locale", "--encoding=UTF8"])
 		node.append_conf(
 		    'postgresql.conf', "shared_preload_libraries = orioledb\n"
 		    "orioledb.use_sparse_files = true\n"

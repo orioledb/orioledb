@@ -48,9 +48,13 @@ elif [ $CHECK_TYPE = "sanitize" ]; then
 elif [ $CHECK_TYPE = "pg_tests" ]; then
     cd ../postgresql
     cat src/test/regress/parallel_schedule | sed "s/indirect_toast//" >$GITHUB_WORKSPACE/parallel_schedule_no_segfaults
+
     # Backport float tests patch
-    wget -O float-patch.patch "https://git.postgresql.org/gitweb/?p=postgresql.git;a=patch;h=da83b1ea10c2b7937d4c9e922465321749c6785b"
-    git apply float-patch.patch
+    if [ $PG_VERSION = "17" ] || [ $PG_VERSION = "16" ]; then
+        wget -O float-patch.patch "https://git.postgresql.org/gitweb/?p=postgresql.git;a=patch;h=da83b1ea10c2b7937d4c9e922465321749c6785b"
+        git apply float-patch.patch
+    fi
+
     # Initialize data directory and set OrioleDB as default AM
     initdb -N --encoding=UTF-8 --locale=C -D $GITHUB_WORKSPACE/pgsql/pgdata
 
@@ -59,15 +63,20 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
     # We don't support SSI.  Run regression/isolation tests with in 'error'
     # mode to catch the explicit errors.
     echo "orioledb.serializable = 'error'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+
+    # Start the server
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log start
+
+    # Run the tests
     make -C src/test/regress installcheck -j $(nproc) || status=$?
     make -C src/test/isolation installcheck -j $(nproc) || status=$?
     make -C src/test/subscription installcheck -j $(nproc) || status=$?
 
     if [ $status -eq 0 ]; then
         echo "default_table_access_method = 'orioledb'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+
         git apply patches/limit.patch
-        if [ $PG_VERSION = "17" ]; then
+        if [ $PG_VERSION != "16" ]; then
             git apply patches/subscription_enable_oriole.diff
             git apply patches/027_stream_regress.patch
         fi
@@ -184,7 +193,7 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         done
 
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log stop
-        if [ $PG_VERSION = "17" ]; then
+        if [ $PG_VERSION != "16" ]; then
             make -C src/test/subscription installcheck-oriole -j $(nproc) || status=$?
             make -C src/test/recovery installcheck-oriole -j $(nproc) || status=$?
         fi
