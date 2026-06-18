@@ -62,9 +62,6 @@ PG_FUNCTION_INFO_V1(orioledb_get_proc_retain_undo_locations);
 
 static int	undoLocCmp(const pairingheap_node *a, const pairingheap_node *b, void *arg);
 
-extern
-bool local_wal_has_material_changes;
-
 static pairingheap retainUndoLocHeaps[(int) UndoLogsCount] =
 {
 	{
@@ -2290,9 +2287,7 @@ undo_xact_callback(XactEvent event, void *arg)
 					 oxid, logicalXidContext.xid, heapXid, GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
 				if (!RecoveryInProgress())
-				{
 					wal_rollback(oxid, logicalXidContext.xid, false);
-				}
 
 				/*
 				 * If current_oxid_precommit() / current_oxid_xlog_precommit()
@@ -2321,6 +2316,7 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					apply_undo_stack((UndoLogType) i, oxid, NULL, true);
+
 				/*
 				 * XACT_EVENT_ABORT may follow XACT_EVENT_PRE_COMMIT.  So we
 				 * still need the cleanup.

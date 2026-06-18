@@ -27,7 +27,6 @@
 #include "replication/message.h"
 #include "replication/origin.h"
 #include "storage/proc.h"
-#include <iterator>
 
 typedef struct
 {

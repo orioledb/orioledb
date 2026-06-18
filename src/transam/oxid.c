@@ -579,17 +579,21 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 	CommitSeqNo oldCsn;
 	OXid		writeInProgressXmin;
 
-	if (STOPEVENT_CONDITION(STOPEVENT_SET_CSN, NULL))
-		elog(ERROR, "stop event \"set_csn\" fired");
-	if (csn != COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
+	if (STOPEVENTS_ENABLED())
+	{
+		if (STOPEVENT_CONDITION(STOPEVENT_SET_CSN, NULL))
+			elog(ERROR, "stop event \"set_csn\" fired");
+
+		if (csn != COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
 											  GET_CUR_PROCDATA()->autonomousNestingLevel,
 											  COMMITSEQNO_STATUS_IN_PROGRESS)
-		&& csn != COMMITSEQNO_ABORTED)
-	{
-		if (call_injection) {
-			call_injection = false;
-			if (STOPEVENT_CONDITION(STOPEVENT_SET_CSN_GUARDED, NULL))
-				elog(ERROR, "stop event \"set_csn_guarded\" fired");
+			&& csn != COMMITSEQNO_ABORTED)
+		{
+			if (call_injection) {
+				call_injection = false;
+				if (STOPEVENT_CONDITION(STOPEVENT_SET_CSN_GUARDED, NULL))
+					elog(ERROR, "stop event \"set_csn_guarded\" fired");
+			}
 		}
 	}
 
