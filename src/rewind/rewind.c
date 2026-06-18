@@ -71,9 +71,11 @@ PG_FUNCTION_INFO_V1(orioledb_get_rewind_queue_length);
 PG_FUNCTION_INFO_V1(orioledb_get_rewind_evicted_length);
 PG_FUNCTION_INFO_V1(orioledb_get_complete_oxid);
 PG_FUNCTION_INFO_V1(orioledb_get_complete_xid);
-/* Functions only under IS_DEV: */
+
+#ifdef IS_DEV
 PG_FUNCTION_INFO_V1(orioledb_rewind_sync);
 PG_FUNCTION_INFO_V1(orioledb_rewind_set_complete);
+#endif
 
 #define REWIND_MODE_UNKNOWN (0)
 #define	REWIND_MODE_TIME (1)
@@ -214,7 +216,7 @@ orioledb_get_complete_xid(PG_FUNCTION_ARGS)
 	PG_RETURN_DATUM(rewindMeta->complete_xid);
 }
 
-/* Testing functions included under IS_DEV */
+#ifdef IS_DEV
 
 /* Set complete xid/oxid for testing queue complete operation */
 Datum
@@ -253,7 +255,7 @@ orioledb_rewind_sync(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
-/* Testing functions end */
+#endif
 
 #ifdef REWIND_DEBUG_MODE
 static inline

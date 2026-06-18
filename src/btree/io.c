@@ -1183,6 +1183,8 @@ get_free_disk_extent_copy_blkno(BTreeDescr *desc, off_t page_size,
 	return FileExtentIsValid(*extent);
 }
 
+#ifdef IS_DEV
+
 /* Functions for eviction_page_checkpoint_numbers test included under IS_DEV */
 PG_FUNCTION_INFO_V1(reset_read_page_checkpoint_stats);
 PG_FUNCTION_INFO_V1(fetch_read_page_checkpoint_stats);
@@ -1211,6 +1213,8 @@ fetch_read_page_checkpoint_stats(PG_FUNCTION_ARGS)
 
 	return (Datum) 0;
 }
+
+#endif
 
 /* Store checkpoint statistics for page reads for eviction_page_checkpoint_numbers test */
 static void
