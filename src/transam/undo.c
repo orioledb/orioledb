@@ -1160,12 +1160,14 @@ walk_undo_range(UndoLogType undoType,
 {
 	UndoStackItem *item;
 	UndoItemTypeDescr *descr;
+
 	while (UndoLocationIsValid(location) && (location > toLoc || !UndoLocationIsValid(toLoc)))
 	{
 		item = undo_item_buf_read_item(buf, undoType, location);
 		descr = item_type_get_descr(item->type);
 		descr->callback(undoType, location, item, oxid,
 						stage, changeCountsValid);
+
 		/*
 		 * Update location of the last item, which needs an action on commit,
 		 * if needed.
@@ -1211,7 +1213,6 @@ walk_undo_range_with_buf(UndoLogType undoType,
 	location = walk_undo_range(undoType, location, toLoc, &buf, oxid, stage,
 							   onCommitLocation, changeCountsValid);
 	free_undo_item_buf(&buf);
-
 	return location;
 }
 
