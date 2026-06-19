@@ -13,7 +13,9 @@ class FunctionTest(BaseTest):
 	def test_undo_log_size(self):
 
 		node = self.node
-		node.append_conf('postgresql.conf', "checkpoint_timeout = 86400\n")
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 86400\n"
+		    "orioledb.undo_buffers = 128\n")
 		node.start()
 
 		node.safe_psql("""
@@ -22,13 +24,15 @@ class FunctionTest(BaseTest):
             CREATE TABLE oriole_table (i SERIAL PRIMARY KEY, t text STORAGE PLAIN) USING orioledb;
 		""")
 		node.safe_psql("""
-			INSERT INTO oriole_table(t) select repeat('a', 270) FROM  generate_series(1, 40000) as i;
+			INSERT INTO oriole_table(t) select repeat('a', 270) FROM  generate_series(1, 80000) as i;
 		""")
 
 		# Hold an old snapshot so the undo produced below cannot be freed and is
 		# forced out to the on-disk undo files that orioledb_undo_size() reads
 		# (with sparse undo files, unretained undo is reclaimed before it ever
-		# reaches disk).
+		# reaches disk).  The workload below is sized so the retained row undo
+		# overruns the per-type circular buffer floor
+		# (max_procs * 2 * O_MAX_UNDO_RECORD_SIZE), forcing evict-on-overflow.
 		con = node.connect()
 		con.begin()
 		con.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
