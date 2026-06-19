@@ -296,7 +296,6 @@ load_next_historical_page(BTreeSeqScan *scan)
 								  (Pointer) &prevHikey.tuple, BTreeKeyNonLeafKey,
 								  scan->histImg, NULL, NULL, NULL,
 								  NULL, NULL);
-
 		header = (BTreePageHeader *) scan->histImg;
 	}
 	BTREE_PAGE_LOCATOR_FIRST(scan->histImg, &scan->histLoc);
@@ -897,7 +896,6 @@ check_in_memory_leaf_page(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRang
 {
 	OTuple		leafHikey;
 	bool		result = false;
-	int			cmp_result = 0;
 
 	if (!O_PAGE_IS(scan->leafImg, RIGHTMOST))
 		BTREE_PAGE_GET_HIKEY(leafHikey, scan->leafImg);
@@ -913,10 +911,9 @@ check_in_memory_leaf_page(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRang
 	}
 	else
 	{
-		cmp_result = o_btree_cmp(scan->desc,
-								 &keyRangeHigh, BTreeKeyNonLeafKey,
-								 &leafHikey, BTreeKeyNonLeafKey);
-		if (cmp_result != 0)
+		if (o_btree_cmp(scan->desc,
+						&keyRangeHigh, BTreeKeyNonLeafKey,
+						&leafHikey, BTreeKeyNonLeafKey) != 0)
 			result = true;
 	}
 
@@ -1487,9 +1484,7 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 	{
 		tuple = btree_seq_scan_get_tuple_from_iterator(scan, tupleCsn, hint);
 		if (!O_TUPLE_IS_NULL(tuple))
-		{
 			return tuple;
-		}
 	}
 
 	while (true)
@@ -1612,9 +1607,7 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 																	   tupleCsn,
 																	   hint);
 						if (!O_TUPLE_IS_NULL(tuple))
-						{
 							return tuple;
-						}
 					}
 				}
 				else
@@ -1716,9 +1709,7 @@ btree_seq_scan_getnext_raw_internal(BTreeSeqScan *scan, MemoryContext mctx,
 
 		tuple = btree_seq_scan_get_tuple_from_iterator_raw(scan, &end, hint);
 		if (!end)
-		{
 			return tuple;
-		}
 	}
 
 	while (!BTREE_PAGE_LOCATOR_IS_VALID(scan->leafImg, &scan->leafLoc))
@@ -1734,9 +1725,7 @@ btree_seq_scan_getnext_raw_internal(BTreeSeqScan *scan, MemoryContext mctx,
 
 					tuple = btree_seq_scan_get_tuple_from_iterator_raw(scan, &end, hint);
 					if (!end)
-					{
 						return tuple;
-					}
 				}
 			}
 			else
