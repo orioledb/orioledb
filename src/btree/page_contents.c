@@ -283,7 +283,7 @@ ReadPageResult
 o_btree_try_read_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeCount, Page img,
 					  CommitSeqNo csn, Pointer key, BTreeKeyType keyType,
 					  PartialPageState *partial, bool loadHikeysChunk,
-					  CommitSeqNo *readCsn, bool *readFromUndo)
+					  CommitSeqNo *readCsn)
 {
 	Page		p;
 	BTreePageHeader *header;
@@ -291,9 +291,6 @@ o_btree_try_read_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeC
 	ReadPageResult result;
 
 	Assert(pageChangeCount != InvalidOPageChangeCount);
-
-	if (readFromUndo)
-		*readFromUndo = false;
 
 	/*
 	 * For local pool pages, the slot may have been reclaimed by a reentrant
@@ -326,8 +323,6 @@ o_btree_try_read_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeC
 		read_page_from_undo(desc, img, undoLoc, csn,
 							key, keyType, NULL);
 		header = (BTreePageHeader *) img;
-		if (readFromUndo)
-			*readFromUndo = true;
 		header->o_header.pageChangeCount = pageChangeCount;
 		if (readCsn)
 			*readCsn = header->csn;
@@ -346,8 +341,6 @@ o_btree_try_read_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeC
 		read_page_from_undo(desc, img, header->undoLocation, csn,
 							key, keyType, NULL);
 		header = (BTreePageHeader *) img;
-		if (readFromUndo)
-			*readFromUndo = true;
 		header->o_header.pageChangeCount = pageChangeCount;
 		if (readCsn)
 			*readCsn = header->csn;
