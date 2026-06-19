@@ -560,7 +560,6 @@ inspect_sys_tree_structure(int systree, int depth)
 
 	return DatumGetTextP(res);
 }
-
 #endif
 
 Datum
