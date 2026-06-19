@@ -5,7 +5,7 @@
 
 -- While most OrioleDB functions use the "orioledb_" prefix, it is
 -- omitted here for brevity since this is an internal, non-user-facing helper.
-CREATE OR REPLACE FUNCTION inspect_sys_tree_structure(systree int, depth int)
+CREATE FUNCTION inspect_sys_tree_structure(systree int, depth int)
 RETURNS text
 AS 'MODULE_PATHNAME', 'inspect_sys_tree_structure_sql'
 LANGUAGE C STRICT;

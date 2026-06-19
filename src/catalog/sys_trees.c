@@ -546,7 +546,7 @@ orioledb_sys_tree_structure(PG_FUNCTION_ARGS)
 }
 
 #ifdef IS_DEV
-/* No existing callers */
+
 text *
 inspect_sys_tree_structure(int systree, int depth)
 {
