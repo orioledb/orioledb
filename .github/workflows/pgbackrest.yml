@@ -1,0 +1,79 @@
+name: pgbackrest
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  pgbackrest-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        pg_version: [17, 18]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    env:
+      LLVM_VER: 18
+      CPU: amd64
+      CHECK_TYPE: normal
+      PG_VERSION: ${{ matrix.pg_version }}
+      COMPILER: gcc
+    steps:
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@v6
+        with:
+          path: orioledb
+
+      - name: Get the required tag name
+        shell: bash
+        run: |
+          echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+
+      - name: Checkout PostgreSQL code into workspace directory
+        uses: actions/checkout@v6
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PGTAG }}
+          path: postgresql
+
+      - name: Setup prerequisites
+        run: bash ./orioledb/ci/prerequisites.sh
+
+      - name: Install pgBackRest
+        run: |
+          # The Ubuntu universe package predates newer PostgreSQL majors
+          # (e.g. PG17) and rejects their catalog version, so pull
+          # pgbackrest from the PGDG apt repo instead, which tracks new
+          # PG majors promptly.
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get -y install -qq pgbackrest
+
+      - name: Build
+        run: bash ./orioledb/ci/build.sh
+
+      - name: Install post build prerequisites
+        run: bash ./orioledb/ci/post_build_prerequisites.sh
+
+      - name: Run pgbackrest test
+        timeout-minutes: 100
+        run: |
+          export PATH="$GITHUB_WORKSPACE/pgsql/bin:$GITHUB_WORKSPACE/python3-venv/bin:$PATH"
+          cd orioledb
+          python3 -W ignore::DeprecationWarning -m unittest -v test.integration.pgbackrest_test
+
+      - name: Upload test logs
+        uses: actions/upload-artifact@v7
+        if: ${{ failure() }}
+        with:
+          name: ${{ matrix.pg_version }}_pgbackrest_test.logs
+          path: |
+            ./orioledb/test/tmp_check_t/*/repo/logs/*.log
+            ./orioledb/test/tmp_check_t/*/logs/*log
+          retention-days: 2
+          if-no-files-found: ignore

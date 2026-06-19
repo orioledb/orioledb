@@ -38,6 +38,7 @@ make.flags
 
 # Local excludes in root directory
 /test/t/__pycache__/
+/test/integration/__pycache__/
 /test/__pycache__/
 /test/log/
 /log_docker_build/
