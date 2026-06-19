@@ -477,7 +477,10 @@ _PG_init(void)
 	o_verify_dir_exists_or_create(psprintf("%s/1", ORIOLEDB_DATA_DIR), NULL, NULL);
 
 	/* See InitializeMaxBackends(), InitProcGlobal() */
-#if PG_VERSION_NUM >= 170000
+#if PG_VERSION_NUM >= 180000
+	max_procs = MaxConnections + autovacuum_worker_slots + 1 +
+		max_worker_processes + max_wal_senders + NUM_SPECIAL_WORKER_PROCS + NUM_AUXILIARY_PROCS;
+#elif PG_VERSION_NUM >= 170000
 	max_procs = MaxConnections + autovacuum_max_workers + 1 +
 		max_worker_processes + max_wal_senders + NUM_SPECIAL_WORKER_PROCS + NUM_AUXILIARY_PROCS;
 #else
