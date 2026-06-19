@@ -163,8 +163,7 @@ extern PrintFunc sys_tree_tup_print(BTreeDescr *desc);
 extern void sys_tree_set_extra(int tree_num, Pointer extra);
 extern Pointer sys_tree_get_extra(int tree_num);
 #ifdef IS_DEV
-extern text *inspect_sys_tree_structure(int systree, int depth);
-extern Datum inspect_sys_tree_structure_sql(PG_FUNCTION_ARGS);
+extern const text *inspect_sys_tree_structure(int systree, int depth);
 #endif
 
 #endif							/* __SYS_TREES_H__ */

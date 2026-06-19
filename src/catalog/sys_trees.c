@@ -546,8 +546,8 @@ orioledb_sys_tree_structure(PG_FUNCTION_ARGS)
 }
 
 #ifdef IS_DEV
-
-text *
+/* No existing callers */
+const text *
 inspect_sys_tree_structure(int systree, int depth)
 {
 	Datum		res;
@@ -559,20 +559,6 @@ inspect_sys_tree_structure(int systree, int depth)
 							  Int32GetDatum(depth));
 
 	return DatumGetTextP(res);
-}
-
-/*
- * SQL wrapper to expose the helper for consistency with other debug utilities.
- */
-PG_FUNCTION_INFO_V1(inspect_sys_tree_structure_sql);
-
-Datum
-inspect_sys_tree_structure_sql(PG_FUNCTION_ARGS)
-{
-	int32		systree = PG_GETARG_INT32(0);
-	int32		depth = PG_GETARG_INT32(1);
-
-	PG_RETURN_TEXT_P(inspect_sys_tree_structure(systree, depth));
 }
 
 #endif
