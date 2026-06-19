@@ -733,9 +733,9 @@ pg_atomic_uint64 *recovery_published_visible_ptr;
  * boundary relevant to the current stop condition, without inferring that
  * mapping late in the barrier loop.
  */
-pg_atomic_uint32 *recovery_last_pair_seq;
-pg_atomic_uint64 *recovery_last_replay_ptr;
-pg_atomic_uint64 *recovery_last_visible_ptr;
+static pg_atomic_uint32 *recovery_last_pair_seq;
+static pg_atomic_uint64 *recovery_last_replay_ptr;
+static pg_atomic_uint64 *recovery_last_visible_ptr;
 bool	   *recovery_single_process;
 bool	   *was_in_recovery;
 pg_atomic_uint32 *after_recovery_cleaned;
@@ -2075,7 +2075,11 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 		 * requests are delivered through startup.c's shutdown_requested flag
 		 * rather than normal backend interrupt processing.
 		 */
+#if PG_VERSION_NUM >= 180000
+		ProcessStartupProcInterrupts();
+#else
 		HandleStartupProcInterrupts();
+#endif
 	}
 }
 
