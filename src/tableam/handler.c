@@ -1515,15 +1515,7 @@ orioledb_undo_size(PG_FUNCTION_ARGS)
 		bool		nulls[2];
 
 		nulls[0] = false;
-		if (i == UndoLogRegular)
-			values[0] = PointerGetDatum(cstring_to_text("row"));
-		else if (i == UndoLogRegularPageLevel)
-			values[0] = PointerGetDatum(cstring_to_text("page"));
-		else if (i == UndoLogSystem)
-			values[0] = PointerGetDatum(cstring_to_text("system"));
-		else
-			elog(ERROR, "Unknown undo log type number: %d", i);
-
+		values[0] = PointerGetDatum(cstring_to_text(get_undo_type_name(i)));
 		nulls[1] = false;
 		values[1] = totalsize[i];
 
