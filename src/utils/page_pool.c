@@ -203,12 +203,14 @@ o_ppool_reserve_pages(PagePool *pool, int kind, int count)
 #ifdef USE_ASSERT_CHECKING
 		if (ppool_run_clock_depth > 0)
 		{
+			/*
+			 * outer_pool is recorded by the outermost
+			 * o_ppool_run_maintenance()
+			 */
 			Assert(outer_pool);
 			Assert(pool == get_ppool(OPagePoolFreeTree) || pool == get_ppool(OPagePoolCatalog));
 			Assert(pool != outer_pool);
 		}
-		else
-			outer_pool = pool;
 #endif
 
 		if (!ppool_run_maintenance(pool, true, NULL))
@@ -418,7 +420,21 @@ o_ppool_run_maintenance(PagePool *pool, bool evict,
 	 * inherits the outer's setting and must not flip skip_ucm.
 	 */
 	if (ppool_run_clock_depth == 0)
+	{
 		skip_ucm = true;
+#ifdef USE_ASSERT_CHECKING
+
+		/*
+		 * Record the pool maintained by the outermost clock invocation so a
+		 * nested o_ppool_reserve_pages() (e.g. a descriptor fetch from a
+		 * TOAST system tree during eviction) can assert it targets a
+		 * different pool. This must cover every entry into the clock,
+		 * including the background writer, which does not go through
+		 * o_ppool_reserve_pages().
+		 */
+		outer_pool = pool;
+#endif
+	}
 	ppool_run_clock_depth++;
 
 	skippedLocalEvictionsLimit = (uint64) o_pool->size * UCM_USAGE_LEVELS;
@@ -470,7 +486,12 @@ o_ppool_run_maintenance(PagePool *pool, bool evict,
 
 	ppool_run_clock_depth--;
 	if (ppool_run_clock_depth == 0)
+	{
 		skip_ucm = false;
+#ifdef USE_ASSERT_CHECKING
+		outer_pool = NULL;
+#endif
+	}
 
 	/*
 	 * The caller might have the undo location reserved.  We need to carefully
