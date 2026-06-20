@@ -18,7 +18,7 @@ else
 	sudo env "PATH=$PATH" pip3 install --upgrade -r orioledb/requirements.txt
 fi
 
-if [ $GITHUB_JOB != "run-benchmark" ] && [ $GITHUB_JOB != "pgindent" ]; then
+if [ $GITHUB_JOB != "run-benchmark" ] && [ $GITHUB_JOB != "pgindent" ] && [ $GITHUB_JOB != "pg_upgrade" ]; then
     wget https://codeload.github.com/eulerto/wal2json/tar.gz/refs/tags/wal2json_2_6
     tar -zxf wal2json_2_6
     rm wal2json_2_6
