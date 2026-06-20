@@ -63,11 +63,35 @@ struct BTreeIterator
 	bool		combinedResult;
 	/* do we need to combine results in the current page? */
 	bool		combinedPage;
+	/* number of leaf pages visited; drives the FETCH->IMAGE switch */
+	int			pageCount;
 	/* memory context for returned tuples */
 	MemoryContext tupleCxt;
 	/* callback for fetching tuple version */
 	TupleFetchCallback fetchCallback;
 	void	   *fetchCallbackArg;
+
+	/*
+	 * Key of the last tuple position read from the current (FETCH-mode) leaf.
+	 * If the partial leaf's backing page changes mid-scan and a chunk can no
+	 * longer be loaded, we re-find this position from the root rather than
+	 * read stale data.  curKey is seeded at creation with the first tuple to
+	 * read, so it is valid even before the first fetch.  curKeyReturned tells
+	 * whether curKey has already been handed out: if so the re-find resumes
+	 * after it, otherwise it resumes at it.
+	 */
+	OFixedKey	curKey;
+	bool		curKeySet;
+	bool		curKeyReturned;
+
+	/*
+	 * The scan's original start key/kind, used to re-find from the beginning
+	 * when a partial read fails before any tuple has been read (curKeySet is
+	 * still false).  The caller keeps the key alive for the iterator's
+	 * lifetime, so storing the pointer is enough.
+	 */
+	void	   *startKey;
+	BTreeKeyType startKind;
 #ifdef USE_ASSERT_CHECKING
 	/* additional check for iteration order */
 	OFixedTuple prevTuple;
@@ -500,7 +524,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 						OSnapshot *o_snapshot, ScanDirection scanDir)
 {
 	BTreeIterator *it;
-	uint16		findFlags = BTREE_PAGE_FIND_IMAGE;
+	uint16		findFlags;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	it = (BTreeIterator *) palloc(sizeof(BTreeIterator));
@@ -519,12 +543,24 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	it->tupleCxt = CurrentMemoryContext;
 	it->fetchCallback = NULL;
 	it->fetchCallbackArg = NULL;
+	it->curKeySet = false;
+	it->curKeyReturned = false;
+	it->startKey = NULL;
+	it->startKind = BTreeKeyNone;
 	BTREE_PAGE_LOCATOR_SET_INVALID(&it->undoLoc);
 #ifdef USE_ASSERT_CHECKING
 	O_TUPLE_SET_NULL(it->prevTuple.tuple);
 #endif
 
 	undo_it_create(&it->undoIt, it);
+
+	/*
+	 * Read leaf pages partially (FETCH) by default; undo-merging scans use
+	 * IMAGE.  The iterator steps to siblings, so keep the parent image.
+	 */
+	findFlags = it->combinedResult ? BTREE_PAGE_FIND_IMAGE : BTREE_PAGE_FIND_FETCH;
+	findFlags |= BTREE_PAGE_FIND_KEEP_PARENT;
+	it->pageCount = 1;
 
 	if (IT_IS_BACKWARD(it))
 		findFlags |= BTREE_PAGE_FIND_KEEP_LOKEY;
@@ -539,6 +575,9 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 		else
 			kind = BTreeKeyRightmost;
 	}
+
+	it->startKey = key;
+	it->startKind = kind;
 
 	findResult = find_page(&it->context, key, kind, 0);
 	Assert(findResult == OFindPageResultSuccess);
@@ -574,6 +613,30 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 
 	load_page_from_undo(it, key,
 						kind != BTreeKeyRightmost ? kind : BTreeKeyNone);
+
+	/*
+	 * Seed the re-find key with the first tuple to read.  This way a partial
+	 * read failure on the very first fetch (the backing page can change
+	 * between positioning here and the first fetch, e.g. on a hot standby
+	 * applying WAL) still has a valid key to re-find from, marked as not yet
+	 * returned so the re-find resumes at it rather than past it.
+	 */
+	if (!it->combinedResult && BTREE_PAGE_FIND_IS(&it->context, FETCH))
+	{
+		BTreePageItemLocator *loc = &it->context.items[it->context.index].locator;
+
+		if (BTREE_PAGE_LOCATOR_IS_VALID(it->context.img, loc) &&
+			partial_load_chunk(&it->context.partial, it->context.img,
+							   loc->chunkOffset, NULL))
+		{
+			OTuple		tup;
+
+			BTREE_PAGE_READ_LEAF_TUPLE(tup, it->context.img, loc);
+			copy_fixed_key(desc, &it->curKey, tup);
+			it->curKeySet = true;
+			it->curKeyReturned = false;
+		}
+	}
 
 	return it;
 }
@@ -756,6 +819,114 @@ get_next_combined_location(BTreeIterator *it)
 }
 
 /*
+ * Recover the scan position after a partial (FETCH) leaf read failed because
+ * its backing page changed.  We must never read from a partial page whose
+ * chunk could not be loaded, so re-find the last read position from the root
+ * and leave the locator on the next tuple to return.
+ */
+static void
+iterator_refind_partial_leaf(BTreeIterator *it)
+{
+	OBTreeFindPageContext *context = &it->context;
+	BTreeDescr *desc = context->desc;
+	BTreePageItemLocator *loc;
+	OTuple		tup;
+	bool		match;
+
+	Assert(!it->combinedResult);
+
+	/*
+	 * A partial (FETCH) read just failed because the backing page changed
+	 * under us.  Switch this scan to whole-page images (IMAGE) for the rest
+	 * of its life before re-finding: a full page read is a consistent
+	 * snapshot, so the re-find below and every subsequent fetch are immune to
+	 * concurrent page changes and never touch the partial-read or fastpath
+	 * descent paths again.  (This is the same FETCH->IMAGE transition the
+	 * page-count heuristic makes; doing it here just makes it
+	 * failure-driven.)
+	 */
+	BTREE_PAGE_FIND_UNSET(context, FETCH);
+	BTREE_PAGE_FIND_SET(context, IMAGE);
+
+	/*
+	 * If we have not handed out any tuple yet, there is no resume key:
+	 * re-find the scan start from the original key/kind, mirroring the
+	 * positioning in o_btree_iterator_create().  (This happens when the very
+	 * first partial read fails -- e.g. the start position landed past the end
+	 * of the first page and the backing page changed before the next page
+	 * could be read.)
+	 */
+	if (!it->curKeySet)
+	{
+		(void) find_page(context, it->startKey, it->startKind, 0);
+
+		loc = &context->items[context->index].locator;
+		if (it->startKey != NULL && IT_IS_BACKWARD(it) &&
+			BTREE_PAGE_LOCATOR_IS_VALID(context->img, loc))
+		{
+			bool		make_dec = false;
+
+			if (BTREE_PAGE_LOCATOR_GET_OFFSET(context->img, loc) ==
+				BTREE_PAGE_ITEMS_COUNT(context->img))
+				make_dec = true;
+			else
+			{
+				BTREE_PAGE_READ_LEAF_TUPLE(tup, context->img, loc);
+				if (o_btree_cmp(desc, it->startKey, it->startKind,
+								&tup, BTreeKeyLeafTuple) < 0)
+					make_dec = true;
+			}
+			if (make_dec)
+				BTREE_PAGE_LOCATOR_PREV(context->img, loc);
+		}
+		return;
+	}
+
+	/*
+	 * find_page() sets up a fresh partial read for the current page change
+	 * count and loads the target locator's chunk (retrying internally on its
+	 * own partial-read failures), so the located tuple is always safe to
+	 * read.
+	 */
+	(void) find_page(context, &it->curKey.tuple, BTreeKeyNonLeafKey, 0);
+
+	loc = &context->items[context->index].locator;
+	if (!BTREE_PAGE_LOCATOR_IS_VALID(context->img, loc))
+		return;
+
+	/*
+	 * find_page() leaves the locator on the first tuple >= curKey (its chunk
+	 * loaded), so it is safe to read here.
+	 */
+	BTREE_PAGE_READ_LEAF_TUPLE(tup, context->img, loc);
+	match = o_btree_cmp(desc, &tup, BTreeKeyLeafTuple,
+						&it->curKey.tuple, BTreeKeyNonLeafKey) == 0;
+
+	if (IT_IS_FORWARD(it))
+	{
+		/*
+		 * The locator already sits on the first tuple >= curKey.  When curKey
+		 * was already returned and is still present, step past it to its
+		 * successor; otherwise (curKey not yet returned, or gone) the locator
+		 * is already on the next tuple to read.
+		 */
+		if (match && it->curKeyReturned)
+			BTREE_PAGE_LOCATOR_NEXT(context->img, loc);
+	}
+	else
+	{
+		/*
+		 * Backward: the next tuple to read is the largest one <= curKey.  If
+		 * curKey is present and not yet returned, that is curKey itself
+		 * (stay); otherwise (already returned, or gone) step left of the
+		 * first tuple >= curKey to reach the largest one strictly below it.
+		 */
+		if (it->curKeyReturned || !match)
+			BTREE_PAGE_LOCATOR_PREV(context->img, loc);
+	}
+}
+
+/*
  * Fetch next tuple without checking for end condition.
  */
 static OTuple
@@ -832,6 +1003,31 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn)
 		}
 		else
 		{
+			OTuple		posTup;
+
+			/* In FETCH mode the leaf is partial; load this tuple's chunk. */
+			if (BTREE_PAGE_FIND_IS(context, FETCH) &&
+				!partial_load_chunk(&context->partial, context->img,
+									leaf_item->locator.chunkOffset, NULL))
+			{
+				/*
+				 * The backing page changed since we set up the partial read.
+				 * Never read from it; re-find our position and retry.
+				 */
+				iterator_refind_partial_leaf(it);
+				continue;
+			}
+
+			/*
+			 * Remember this position in case the page changes later.  We are
+			 * about to consume this tuple, so mark it as returned: a later
+			 * re-find resumes after it.
+			 */
+			BTREE_PAGE_READ_LEAF_TUPLE(posTup, context->img, &leaf_item->locator);
+			copy_fixed_key(desc, &it->curKey, posTup);
+			it->curKeySet = true;
+			it->curKeyReturned = true;
+
 			result = o_find_tuple_version(desc, context->img,
 										  &leaf_item->locator,
 										  &it->oSnapshot, tupleCsn,
@@ -848,6 +1044,20 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn)
 
 	O_TUPLE_SET_NULL(result);
 	return result;				/* unreachable */
+}
+
+/*
+ * Switch the iterator from partial reads (FETCH) to whole-page images (IMAGE)
+ * once it has visited enough pages.  No-op for combined scans (always IMAGE).
+ */
+static inline void
+iterator_maybe_switch_to_image(BTreeIterator *it)
+{
+	if (BTREE_PAGE_FIND_IS(&it->context, FETCH) && ++it->pageCount >= 3)
+	{
+		BTREE_PAGE_FIND_UNSET(&it->context, FETCH);
+		BTREE_PAGE_FIND_SET(&it->context, IMAGE);
+	}
 }
 
 /*
@@ -873,6 +1083,8 @@ btree_iterator_check_load_next_page(BTreeIterator *it)
 
 		if (IS_LAST_PAGE(img, it))
 			return false;
+
+		iterator_maybe_switch_to_image(it);
 
 		if (IT_IS_FORWARD(it))
 			step_result = find_right_page(context, &key_buf);
@@ -1029,7 +1241,29 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 
 		if (BTREE_PAGE_LOCATOR_IS_VALID(img, loc))
 		{
+			/* In FETCH mode the leaf is partial; load this tuple's chunk. */
+			if (BTREE_PAGE_FIND_IS(context, FETCH) &&
+				!partial_load_chunk(&context->partial, context->img,
+									loc->chunkOffset, NULL))
+			{
+				/*
+				 * The backing page changed since we set up the partial read.
+				 * Never read from it; re-find our position and retry.
+				 */
+				iterator_refind_partial_leaf(it);
+				continue;
+			}
 			BTREE_PAGE_READ_LEAF_ITEM(*tupHdr, result, context->img, loc);
+
+			/*
+			 * Remember this position in case the page changes later.  This
+			 * tuple is being consumed, so mark it returned: a later re-find
+			 * resumes after it.
+			 */
+			copy_fixed_key(context->desc, &it->curKey, result);
+			it->curKeySet = true;
+			it->curKeyReturned = true;
+
 			IT_NEXT_OFFSET(it, loc);
 
 			if (end != NULL && endKind != BTreeKeyNone)
@@ -1069,6 +1303,8 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 			O_TUPLE_SET_NULL(result);
 			return result;
 		}
+
+		iterator_maybe_switch_to_image(it);
 
 		if (IT_IS_FORWARD(it))
 		{

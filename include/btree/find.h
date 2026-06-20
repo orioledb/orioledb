@@ -39,7 +39,21 @@ typedef struct
 	Pointer		parentImg;
 	char		imgData[ORIOLEDB_BLCKSZ];
 	char		parentImgData[ORIOLEDB_BLCKSZ];
+
+	/*
+	 * Partial read state of the target (leaf) page in context->img.  Used in
+	 * FETCH mode (the leaf is read partially); in IMAGE mode the leaf is read
+	 * in full and this is unused.
+	 */
 	PartialPageState partial;
+
+	/*
+	 * Partial read state of the immediate parent page in context->parentImg.
+	 * Used in both IMAGE and FETCH modes so
+	 * find_left_page()/find_right_page() can navigate to sibling pages
+	 * through the parent's downlinks.
+	 */
+	PartialPageState parentPartial;
 	CommitSeqNo csn;
 	CommitSeqNo imgReadCsn;
 	UndoLocation imgUndoLoc;
@@ -54,6 +68,17 @@ typedef struct
 	 * sibling.
 	 */
 	OFixedKey	lokey;
+
+	/*
+	 * Stable copy of the current page's own lokey (its downlink key in the
+	 * immediate parent), captured during find_page() descent and refreshed by
+	 * find_left_page() when stepping through parent downlinks.  Used instead
+	 * of re-reading the parent image, which is unreliable in FETCH mode where
+	 * parentImg is partial and may be reclaimed under page-pool pressure.
+	 * Only meaningful when the current page's downlink is not the parent's
+	 * first one (otherwise btree_find_context_lokey() falls back to lokey).
+	 */
+	OFixedKey	leafLokey;
 
 	/*
 	 * Helps to avoid overwriting of a hikey by non-consistency read of the
@@ -78,6 +103,13 @@ typedef struct
 #define BTREE_PAGE_FIND_IMAGE			(0x0200)
 #define BTREE_PAGE_FIND_DOWNLINK_LOCATION (0x0400)
 #define BTREE_PAGE_FIND_READ_CSN		(0x0800)
+/*
+ * The caller navigates to sibling pages with find_left_page()/find_right_page()
+ * and therefore needs the parent materialized in context->parentImg.  This is
+ * incompatible with the fastpath downlink search, which reads the downlink
+ * straight from the shared page, so it disables that optimization.
+ */
+#define BTREE_PAGE_FIND_KEEP_PARENT		(0x1000)
 
 #define BTREE_PAGE_FIND_SET(context, flag) ((context)->flags |= BTREE_PAGE_FIND_##flag)
 #define BTREE_PAGE_FIND_UNSET(context, flag) ((context)->flags &= ~(BTREE_PAGE_FIND_##flag))

@@ -219,8 +219,15 @@ OIndexKeyAttnumToTupleAttnum(BTreeKeyType keyType, OIndexDescr *idx, int attnum)
 	}
 	else
 	{
+		/*
+		 * A page hikey is stored in the non-leaf tuple format, so it maps the
+		 * same way as BTreeKeyNonLeafKey (e.g. the fastpath downlink search
+		 * decomposes a BTreeKeyPageHiKey when an iterator steps to a
+		 * sibling).
+		 */
 		Assert((keyType == BTreeKeyLeafTuple && attnum <= idx->leafTupdesc->natts) ||
-			   (keyType == BTreeKeyNonLeafKey && attnum <= idx->nFields));
+			   ((keyType == BTreeKeyNonLeafKey || keyType == BTreeKeyPageHiKey) &&
+				attnum <= idx->nFields));
 		return attnum;
 	}
 }
