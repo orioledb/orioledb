@@ -329,6 +329,15 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 
 		orioledb_checksums_enabled = control.checksums_enabled;
 
+		/*
+		 * If the on-disk state was written by a different PG major version
+		 * (e.g. carried over by pg_upgrade), the version-dependent OSysCache
+		 * trees were serialized with a layout this binary can't read, so they
+		 * must be rebuilt.
+		 */
+		checkpoint_state->resetSysCaches =
+			(control.pgVersion / 10000 != PG_VERSION_NUM / 10000);
+
 		checkpoint_state->controlIdentifier = control.controlIdentifier;
 		checkpoint_state->lastCheckpointNumber = control.lastCheckpointNumber;
 		checkpoint_state->controlToastConsistentPtr = control.toastConsistentPtr;

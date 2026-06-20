@@ -137,6 +137,14 @@ typedef struct
 	Oid			tablespace;
 	uint32		version;		/* not serialized in serialize_o_table */
 	MemoryContext tbl_mctx;		/* not serialized in serialize_o_table */
+
+	/*
+	 * Set (not serialized) when deserialization skipped index expressions
+	 * written by a different PG major version; they must be re-derived from
+	 * the catalog and rewritten before use.  See
+	 * o_table_refresh_expressions().
+	 */
+	bool		refresh_exprs;
 } OTable;
 
 #define OGetTableContext(table) \
@@ -158,6 +166,8 @@ typedef struct
 
 extern void o_table_fill_index(OTable *o_table, OIndexNumber ix_num,
 							   Relation index_rel);
+extern bool o_table_refresh_index_exprs(OTable *o_table, OIndexNumber ix_num,
+										Relation index_rel);
 
 /* Creates and fills OTable. */
 extern OTable *o_table_tableam_create(ORelOids oids, TupleDesc tupdesc,
@@ -249,6 +259,7 @@ extern void o_tables_rel_lock_exclusive_no_inval_no_log(ORelOids *oids);
 extern void o_tables_rel_unlock_extended(ORelOids *oids, int lockmode, bool checkpoint);
 
 /* Deserialize OTable stored in O_TABLES sys tree */
+extern bool o_node_deserialize_format_changed;
 extern void o_serialize_node(Node *node, StringInfo str);
 extern Node *o_deserialize_node(Pointer *ptr);
 extern bool o_deserialize_node_safe(Pointer *ptr, Pointer data, Size length, Node **out);

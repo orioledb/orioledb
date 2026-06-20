@@ -177,6 +177,21 @@ assign_new_oids(OTable *oTable, Relation rel, bool drop_pkey)
 
 	CheckTableForSerializableConflictIn(rel);
 
+	/*
+	 * Under pg_upgrade (binary upgrade) every relation's relfilenode is
+	 * preserved from the old cluster, and the on-disk OrioleDB trees are
+	 * carried over as-is.  Reassigning relfilenodes here would both ask the
+	 * core for a fresh relfilenumber -- which is forbidden in binary upgrade
+	 * mode -- and orphan the migrated data.  Keep the preserved relnodes and
+	 * just refresh the OTable oids from the (unchanged) relation.
+	 */
+	if (IsBinaryUpgrade)
+	{
+		o_table_fill_oids(oTable, rel, &RelGetNode(rel), drop_pkey);
+		orioledb_free_rd_amcache(rel);
+		return;
+	}
+
 	/* If toast relation exists, set new filenode for it */
 	toast_relid = rel->rd_rel->reltoastrelid;
 	if (OidIsValid(toast_relid))

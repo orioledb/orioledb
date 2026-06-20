@@ -806,17 +806,53 @@ o_deserialize_string_safe(Pointer *ptr, Pointer data, Size length, char **out)
 	return true;
 }
 
+/*
+ * Set while deserializing an OTable/OIndex whose persisted node trees were
+ * written by a different PostgreSQL major version: PostgreSQL's nodeToString
+ * format is not stable across majors, so we can't (and must not, e.g. in a
+ * catalog-free recovery worker) stringToNode such a blob.  We skip it and
+ * record that the expressions need to be re-derived from the catalog and
+ * rewritten -- see o_table_refresh_expressions().
+ */
+bool		o_node_deserialize_format_changed = false;
+
+/*
+ * Each serialized node blob is prefixed with the PG_VERSION_NUM that wrote it,
+ * so a reader on a different major version can detect the incompatible
+ * nodeToString format instead of parsing garbage.
+ */
 void
 o_serialize_node(Node *node, StringInfo str)
 {
 	char	   *node_str;
 	size_t		node_str_len;
+	int32		pg_version = PG_VERSION_NUM;
 
 	node_str = nodeToString(node);
 	node_str_len = strlen(node_str) + 1;
+	appendBinaryStringInfo(str, (Pointer) &pg_version, sizeof(pg_version));
 	appendBinaryStringInfo(str, (Pointer) &node_str_len, sizeof(size_t));
 	appendBinaryStringInfo(str, node_str, node_str_len);
 	pfree(node_str);
+}
+
+/* True if a node blob written by pg_version can be parsed by this binary. */
+static inline bool
+o_node_version_compatible(int32 pg_version)
+{
+	return pg_version / 10000 == PG_VERSION_NUM / 10000;
+}
+
+/*
+ * True if a serialized node string carries no actual node.  nodeToString()
+ * renders an empty/NULL list as "<>", so such a blob loses nothing when it
+ * cannot be parsed across majors -- only a non-empty tree marks the owning
+ * index as needing orioledb_upgrade_refresh().
+ */
+static inline bool
+o_node_str_is_empty(const char *node_str)
+{
+	return node_str[0] == '\0' || strcmp(node_str, "<>") == 0;
 }
 
 Node *
@@ -824,15 +860,22 @@ o_deserialize_node(Pointer *ptr)
 {
 	Node	   *result;
 	size_t		node_str_len;
-	int			len;
+	int32		pg_version;
 
-	len = sizeof(size_t);
-	memcpy(&node_str_len, *ptr, len);
-	*ptr += len;
+	memcpy(&pg_version, *ptr, sizeof(pg_version));
+	*ptr += sizeof(pg_version);
+	memcpy(&node_str_len, *ptr, sizeof(size_t));
+	*ptr += sizeof(size_t);
 
-	len = node_str_len;
-	result = stringToNode(*ptr);
-	*ptr += len;
+	if (o_node_version_compatible(pg_version))
+		result = stringToNode(*ptr);
+	else
+	{
+		if (!o_node_str_is_empty(*ptr))
+			o_node_deserialize_format_changed = true;
+		result = NULL;
+	}
+	*ptr += node_str_len;
 	return result;
 }
 
@@ -844,15 +887,25 @@ bool
 o_deserialize_node_safe(Pointer *ptr, Pointer data, Size length, Node **out)
 {
 	size_t		node_str_len;
+	int32		pg_version;
 
-	if ((*ptr - data) + (int) sizeof(size_t) > length)
+	if ((*ptr - data) + (int) (sizeof(pg_version) + sizeof(size_t)) > length)
 		return false;
+	memcpy(&pg_version, *ptr, sizeof(pg_version));
+	*ptr += sizeof(pg_version);
 	memcpy(&node_str_len, *ptr, sizeof(size_t));
 	*ptr += sizeof(size_t);
 
 	if ((*ptr - data) + (Size) node_str_len > length)
 		return false;
-	*out = stringToNode(*ptr);
+	if (o_node_version_compatible(pg_version))
+		*out = stringToNode(*ptr);
+	else
+	{
+		if (!o_node_str_is_empty(*ptr))
+			o_node_deserialize_format_changed = true;
+		*out = NULL;
+	}
 	*ptr += node_str_len;
 	return true;
 }
@@ -877,8 +930,8 @@ serialize_o_index(OIndex *o_index, int *size)
 	appendBinaryStringInfo(&str, (Pointer) o_index->leafFields,
 						   o_index->nLeafFields * sizeof(o_index->leafFields[0]));
 	o_serialize_node((Node *) o_index->predicate, &str);
-	if (o_index->predicate)
-		o_serialize_string(o_index->predicate_str, &str);
+	/* always present, see serialize_o_table_index for the rationale */
+	o_serialize_string(o_index->predicate_str, &str);
 	o_serialize_node((Node *) o_index->expressions, &str);
 	o_serialize_node((Node *) o_index->duplicates, &str);
 
@@ -935,20 +988,19 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 	mcxt = OGetIndexContext(oIndex);
 	old_mcxt = MemoryContextSwitchTo(mcxt);
 
+	o_node_deserialize_format_changed = false;
 	if (!o_deserialize_node_safe(&ptr, data, length,
 								 (Node **) &oIndex->predicate))
 	{
 		MemoryContextSwitchTo(old_mcxt);
 		goto truncated;
 	}
-	if (oIndex->predicate)
+	/* predicate_str is always present (see serialize_o_index) */
+	if (!o_deserialize_string_safe(&ptr, data, length,
+								   &oIndex->predicate_str))
 	{
-		if (!o_deserialize_string_safe(&ptr, data, length,
-									   &oIndex->predicate_str))
-		{
-			MemoryContextSwitchTo(old_mcxt);
-			goto truncated;
-		}
+		MemoryContextSwitchTo(old_mcxt);
+		goto truncated;
 	}
 	if (!o_deserialize_node_safe(&ptr, data, length,
 								 (Node **) &oIndex->expressions))
@@ -963,6 +1015,14 @@ deserialize_o_index(OIndexChunkKey *key, Pointer data, Size length)
 		goto truncated;
 	}
 	MemoryContextSwitchTo(old_mcxt);
+
+	/*
+	 * If any of the node trees above was written by a different PG major it
+	 * was skipped (its nodeToString format is unreadable here), leaving the
+	 * list NULL.  Flag the index so o_define_index_descr() refuses to use it
+	 * until orioledb_upgrade_refresh() rewrites the trees.
+	 */
+	oIndex->refresh_exprs = o_node_deserialize_format_changed;
 
 	if (oIndex->indexType == oIndexExclusion)
 	{
@@ -1044,6 +1104,15 @@ make_o_index(OTable *table, OIndexNumber ixNum, OIndexVersionMode ixVerMode)
 	}
 
 	index->data_version = ORIOLEDB_SYS_TREE_VERSION;
+
+	/*
+	 * Carry the table's "expressions written by another PG major" flag onto
+	 * the index built from it.  The normal table-access path builds index
+	 * descriptors from the OTable (not from the SYS_TREES_O_INDICES copy), so
+	 * without this o_index_fill_descr() would not know to refuse the index
+	 * after a cross-major pg_upgrade.  See OTable.refresh_exprs.
+	 */
+	index->refresh_exprs = table->refresh_exprs;
 	return index;
 }
 
@@ -1185,6 +1254,21 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 	bool		was_saving;
 
 	Assert(oIndex != NULL);
+
+	/*
+	 * The index's expression/predicate node trees were carried over from a
+	 * different PostgreSQL major by a cross-major pg_upgrade and dropped on
+	 * read (their nodeToString format is not portable).  Using the index now
+	 * would evaluate against missing trees and crash, so refuse until
+	 * orioledb_upgrade_refresh() rewrites them in this server's format.
+	 */
+	if (oIndex->refresh_exprs)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("OrioleDB index \"%s\" has expressions stored by another PostgreSQL major version",
+						oIndex->name.data),
+				 errdetail("This happens after a cross-major pg_upgrade, before the carried-over index expressions have been rewritten."),
+				 errhint("Run \"SELECT orioledb_upgrade_refresh();\" in this database before using the index.")));
 
 	/*
 	 * Defer invalidation messages while filling the index descriptor. Catalog

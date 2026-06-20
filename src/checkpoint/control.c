@@ -136,6 +136,9 @@ write_checkpoint_control(CheckpointControl *control)
 	File		controlFile;
 	char		buffer[CHECKPOINT_CONTROL_FILE_SIZE];
 
+	/* Stamp the writing server's PG version (see CheckpointControl). */
+	control->pgVersion = PG_VERSION_NUM;
+
 	INIT_CRC32C(control->crc);
 	COMP_CRC32C(control->crc, control, offsetof(CheckpointControl, crc));
 	FIN_CRC32C(control->crc);
