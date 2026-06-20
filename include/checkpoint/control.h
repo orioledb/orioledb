@@ -63,6 +63,14 @@ typedef struct
 	 * orioledb_checksums_enabled
 	 */
 	bool		checksums_enabled;
+
+	/*
+	 * PG_VERSION_NUM of the server that wrote this control file.  A change of
+	 * the major version means the version-dependent system caches (the
+	 * OSysCache trees) were serialized by a different PG and must be rebuilt
+	 * -- see reset of rebuildable sys-cache trees at startup.
+	 */
+	uint32		pgVersion;
 	/* CRC of all fields above. It should be last */
 	pg_crc32c	crc;
 } CheckpointControl;

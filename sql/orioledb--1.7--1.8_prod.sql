@@ -14,3 +14,13 @@ AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
 
 REVOKE ALL ON FUNCTION verify_orioledb(regclass, boolean) FROM PUBLIC;
+
+-- Refresh persisted index expressions of every OrioleDB table in the current
+-- database into the running server's node-tree format.  Run once per database
+-- after a cross-major pg_upgrade.
+CREATE FUNCTION orioledb_upgrade_refresh()
+RETURNS void
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
+
+REVOKE ALL ON FUNCTION orioledb_upgrade_refresh() FROM PUBLIC;
