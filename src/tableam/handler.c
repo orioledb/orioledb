@@ -935,8 +935,15 @@ orioledb_relation_set_new_filenode(Relation rel,
 		{
 			new_o_table->index_bridging = true;
 			new_o_table->bridge_oids.datoid = MyDatabaseId;
-			new_o_table->bridge_oids.relnode = GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
-																   rel->rd_rel->relpersistence);
+
+			/*
+			 * Under pg_upgrade fresh relfilenumber allocation is forbidden
+			 * and the real bridge is carried over with the data; this OTable
+			 * is discarded after the schema restore, so leave it invalid.
+			 */
+			new_o_table->bridge_oids.relnode = IsBinaryUpgrade ? InvalidOid :
+				GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
+									rel->rd_rel->relpersistence);
 			new_o_table->bridge_oids.reloid = new_o_table->bridge_oids.relnode;
 		}
 		else

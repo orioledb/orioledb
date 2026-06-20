@@ -218,6 +218,14 @@ typedef struct
 	int			punchHolesTrancheId;
 	pg_atomic_uint64 xidRecLastPos;
 	pg_atomic_uint64 xidRecFlushPos;
+
+	/*
+	 * Set at startup when the control file was written by a different PG
+	 * major version: the version-dependent OSysCache trees must be rebuilt
+	 * rather than read with a mismatching on-disk layout.  Consumed when the
+	 * cache sys-trees are first initialized.
+	 */
+	bool		resetSysCaches;
 	XidFileRec	xidRecQueue[FLEXIBLE_ARRAY_MEMBER];
 } CheckpointState;
 

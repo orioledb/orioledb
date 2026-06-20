@@ -327,6 +327,16 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		if (!get_checkpoint_control_data(&control))
 			return;
 
+		/*
+		 * If the on-disk state was written by a different PG major version
+		 * (e.g. carried over by pg_upgrade), the version-dependent OSysCache
+		 * trees were serialized with a layout this binary can't read, so they
+		 * must be rebuilt.  pgVersion == 0 means an old (version 1) control
+		 * file with no recorded version -- treat as a mismatch.
+		 */
+		checkpoint_state->resetSysCaches =
+			(control.pgVersion / 10000 != PG_VERSION_NUM / 10000);
+
 		checkpoint_state->controlIdentifier = control.controlIdentifier;
 		checkpoint_state->lastCheckpointNumber = control.lastCheckpointNumber;
 		checkpoint_state->controlToastConsistentPtr = control.toastConsistentPtr;
