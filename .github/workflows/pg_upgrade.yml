@@ -1,0 +1,95 @@
+name: pg_upgrade
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pg_upgrade:
+    strategy:
+      fail-fast: false
+      matrix:
+        cpu: [amd64, arm64]
+        compiler: [clang, gcc]
+        # Which major version we migrate from -> to.
+        version:
+          - { old: 16, new: 17 }
+          - { old: 16, new: 18 }
+          - { old: 17, new: 18 }
+
+    runs-on: ${{ matrix.cpu == 'arm64' && 'blacksmith-8vcpu-ubuntu-2404-arm' || 'blacksmith-8vcpu-ubuntu-2404' }}
+
+    env:
+      LLVM_VER: 18
+      CPU: ${{ matrix.cpu }}
+      COMPILER: ${{ matrix.compiler }}
+      # prerequisites.sh / post_build_prerequisites.sh branch on these;
+      # 'normal' selects the standard package set with no extra tooling.
+      CHECK_TYPE: normal
+      PG_OLD_VERSION: ${{ matrix.version.old }}
+      PG_NEW_VERSION: ${{ matrix.version.new }}
+      # Needed by prerequisites.sh; PG_VERSION is otherwise unused here.
+      PG_VERSION: ${{ matrix.version.new }}
+
+    steps:
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@v6
+        with:
+          path: orioledb
+
+      - name: Resolve required PG tags
+        shell: bash
+        run: |
+          echo "PG_OLD_TAG=$(grep "^${PG_OLD_VERSION}: " orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+          echo "PG_NEW_TAG=$(grep "^${PG_NEW_VERSION}: " orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+
+      - name: Checkout old PostgreSQL source
+        uses: actions/checkout@v6
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PG_OLD_TAG }}
+          path: postgresql${{ matrix.version.old }}
+
+      - name: Checkout new PostgreSQL source
+        uses: actions/checkout@v6
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PG_NEW_TAG }}
+          path: postgresql${{ matrix.version.new }}
+
+      - name: Setup prerequisites
+        run: bash ./orioledb/ci/prerequisites.sh
+
+      - name: Install Python prerequisites
+        run: bash ./orioledb/ci/post_build_prerequisites.sh
+
+      - name: Build old PostgreSQL + orioledb
+        run: bash ./orioledb/ci/pg_upgrade_build.sh "$PG_OLD_VERSION" "$GITHUB_WORKSPACE/postgresql$PG_OLD_VERSION" "$GITHUB_WORKSPACE/pgsql$PG_OLD_VERSION"
+
+      - name: Build new PostgreSQL + orioledb
+        run: bash ./orioledb/ci/pg_upgrade_build.sh "$PG_NEW_VERSION" "$GITHUB_WORKSPACE/postgresql$PG_NEW_VERSION" "$GITHUB_WORKSPACE/pgsql$PG_NEW_VERSION"
+
+      - name: Run pg_upgrade test
+        timeout-minutes: 30
+        run: bash ./orioledb/ci/pg_upgrade.sh
+
+      - name: Upload pg_upgrade logs
+        uses: actions/upload-artifact@v7
+        if: ${{ failure() }}
+        with:
+          name: ${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.version.old }}_to_${{ matrix.version.new }}_pg_upgrade.logs
+          path: |
+            ./pg${{ matrix.version.old }}.log
+            ./pg${{ matrix.version.new }}.log
+            ./pgsql${{ matrix.version.old }}/pgdata/log/*.log
+            ./pgsql${{ matrix.version.new }}/pgdata/log/*.log
+            ./pgsql${{ matrix.version.new }}/pgdata/pg_upgrade_output.d/**/*.log
+            ./pgsql${{ matrix.version.new }}/pgdata/pg_upgrade_output.d/**/*.txt
+            ./pre_upgrade*.sql
+            ./post_upgrade*.sql
+            ./schema_diff.txt
+            ./data_diff.txt
+            ./data_diff_regression.txt
+            ./postgresql${{ matrix.version.new }}/src/test/regress/regression.diffs
+          retention-days: 2
+          if-no-files-found: ignore
