@@ -32,7 +32,7 @@ typedef struct
  * Also on-the-flight conversion routine should be added to
  * check_checkpoint_control()
  */
-#define ORIOLEDB_CHECKPOINT_CONTROL_VERSION	1
+#define ORIOLEDB_CHECKPOINT_CONTROL_VERSION	2
 
 /*
  * To ensure correct reading of controlFileVersion, changes in struct layout
@@ -58,6 +58,15 @@ typedef struct
 	OXid		checkpointRetainXmax;
 	uint32		binaryVersion;
 	bool		s3Mode;
+
+	/*
+	 * PG_VERSION_NUM of the server that wrote this control file.  A change of
+	 * the major version means the version-dependent system caches (the
+	 * OSysCache trees) were serialized by a different PG and must be rebuilt
+	 * -- see reset of rebuildable sys-cache trees at startup.  Added in
+	 * control version 2; read as 0 ("unknown") for version 1 files.
+	 */
+	uint32		pgVersion;
 	/* CRC of all fields above. It should be last */
 	pg_crc32c	crc;
 } CheckpointControl;

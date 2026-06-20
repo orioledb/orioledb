@@ -81,6 +81,15 @@ typedef struct
 	Oid		   *exclops;
 	bool		immediate;
 	MemoryContext index_mctx;
+
+	/*
+	 * Set (not serialized) when deserialization skipped a node tree
+	 * (expression/predicate) written by a different PG major after a
+	 * cross-major pg_upgrade.  The index cannot be used until
+	 * orioledb_upgrade_refresh() rewrites it; o_define_index_descr() raises
+	 * an error rather than letting access crash on the missing trees.
+	 */
+	bool		refresh_exprs;
 } OIndex;
 
 /* callback for o_indices_foreach_oids() */

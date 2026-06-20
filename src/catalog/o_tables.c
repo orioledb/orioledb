@@ -621,6 +621,63 @@ o_table_fill_index(OTable *o_table, OIndexNumber ix_num, Relation index_rel)
 	}
 }
 
+/*
+ * Re-derive only the node-tree members (expressions and predicate) of an
+ * index from the catalog and replant them into the index's memory context.
+ *
+ * Used by orioledb_upgrade_refresh() after a cross-major pg_upgrade: the
+ * carried-over node trees were written in another PostgreSQL major's
+ * nodeToString format and are dropped on read (see o_deserialize_node),
+ * leaving these lists NULL.  Everything else in the OTableIndex (fields,
+ * exprfields, opclasses, collations, ...) deserializes unchanged because it
+ * has a fixed binary layout, so -- unlike o_table_fill_index -- we
+ * deliberately do *not* re-run the type/opclass/hash machinery.  That work is
+ * both unnecessary here (those fields are already correct) and unsafe to run
+ * against carried-over data, as it consults the version-specific class cache
+ * which may not be readable in the running major.
+ *
+ * Returns true if the index actually carries node trees (and was thus
+ * rewritten), false if it has none.
+ */
+bool
+o_table_refresh_index_exprs(OTable *o_table, OIndexNumber ix_num,
+							Relation index_rel)
+{
+	OTableIndex *index = &o_table->indices[ix_num];
+	MemoryContext mcxt,
+				old_mcxt;
+	ListCell   *lc;
+
+	RelationGetIndexExpressions(index_rel);
+	RelationGetIndexPredicate(index_rel);
+
+	/* No node trees were persisted for this index: nothing to rewrite. */
+	if (index_rel->rd_indexprs == NIL && index_rel->rd_indpred == NIL)
+		return false;
+
+	mcxt = OGetIndexContext(index);
+	old_mcxt = MemoryContextSwitchTo(mcxt);
+
+	index->predicate = (List *)
+		expression_planner((Expr *) index_rel->rd_indpred);
+	if (index->predicate)
+		index->predicate_str =
+			o_deparse_expression(nodeToString(index->predicate),
+								 o_table->oids.reloid);
+
+	index->expressions = NIL;
+	foreach(lc, index_rel->rd_indexprs)
+	{
+		Expr	   *e = (Expr *) lfirst(lc);
+
+		index->expressions = lappend(index->expressions,
+									 expression_planner(e));
+	}
+
+	MemoryContextSwitchTo(old_mcxt);
+	return true;
+}
+
 void
 o_table_resize_constr(OTable *o_table)
 {
@@ -1983,8 +2040,14 @@ serialize_o_table_index(OTableIndex *o_table_index, StringInfo str)
 	appendBinaryStringInfo(str, (Pointer) o_table_index->exprfields,
 						   o_table_index->nexprfields * sizeof(OTableField));
 	o_serialize_node((Node *) o_table_index->predicate, str);
-	if (o_table_index->predicate)
-		o_serialize_string(o_table_index->predicate_str, str);
+
+	/*
+	 * Always serialize predicate_str (even when NULL) so the record layout is
+	 * fixed: a reader on a different PG major skips the predicate node
+	 * without being able to tell whether predicate_str follows, so it must
+	 * always be there to keep the stream aligned.
+	 */
+	o_serialize_string(o_table_index->predicate_str, str);
 	o_serialize_node((Node *) o_table_index->expressions, str);
 	appendBinaryStringInfo(str, (Pointer) &o_table_index->tablespace, sizeof(Oid));
 	if (o_table_index->type == oIndexExclusion)
@@ -2078,14 +2141,12 @@ deserialize_o_table_index(OTableIndex *o_table_index, Pointer *ptr,
 		MemoryContextSwitchTo(old_mcxt);
 		return false;
 	}
-	if (o_table_index->predicate)
+	/* predicate_str is always present (see serialize_o_table_index) */
+	if (!o_deserialize_string_safe(ptr, data, length,
+								   &o_table_index->predicate_str))
 	{
-		if (!o_deserialize_string_safe(ptr, data, length,
-									   &o_table_index->predicate_str))
-		{
-			MemoryContextSwitchTo(old_mcxt);
-			return false;
-		}
+		MemoryContextSwitchTo(old_mcxt);
+		return false;
 	}
 	if (!o_deserialize_node_safe(ptr, data, length,
 								 (Node **) &o_table_index->expressions))
@@ -2217,6 +2278,7 @@ deserialize_o_table(Pointer data, Size length)
 
 	len = o_table->nindices * sizeof(OTableIndex);
 	o_table->indices = (OTableIndex *) palloc0(len);
+	o_node_deserialize_format_changed = false;
 	for (i = 0; i < o_table->nindices; i++)
 	{
 		if (!deserialize_o_table_index(&o_table->indices[i], &ptr,
@@ -2227,6 +2289,14 @@ deserialize_o_table(Pointer data, Size length)
 			return NULL;
 		}
 	}
+
+	/*
+	 * If any index expression/predicate was written by a different PG major
+	 * version it was skipped above (its nodeToString format is unreadable
+	 * here); flag the table so the expressions get re-derived from the
+	 * catalog and rewritten before use.
+	 */
+	o_table->refresh_exprs = o_node_deserialize_format_changed;
 	if ((ptr - data) > length)
 	{
 		MemoryContextSwitchTo(oldcxt);
@@ -2369,8 +2439,15 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, boo
 	if (oTable->index_bridging)
 	{
 		oTable->bridge_oids.datoid = MyDatabaseId;
-		oTable->bridge_oids.relnode = GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
-														  rel->rd_rel->relpersistence);
+
+		/*
+		 * Under pg_upgrade fresh relfilenumber allocation is forbidden and
+		 * the real bridge is carried over with the data; this OTable is
+		 * discarded after the schema restore, so leave it invalid.
+		 */
+		oTable->bridge_oids.relnode = IsBinaryUpgrade ? InvalidOid :
+			GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
+								rel->rd_rel->relpersistence);
 		oTable->bridge_oids.reloid = oTable->bridge_oids.relnode;
 	}
 

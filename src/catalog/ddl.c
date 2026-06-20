@@ -33,8 +33,10 @@
 #include "utils/compress.h"
 #include "recovery/wal.h"
 
+#include "access/genam.h"
 #include "access/heapam.h"
 #include "access/reloptions.h"
+#include "access/table.h"
 #include "access/tableam.h"
 #include "access/toast_compression.h"
 #include "access/transam.h"
@@ -2138,8 +2140,15 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 		if (index_bridging)
 		{
 			o_table->bridge_oids.datoid = MyDatabaseId;
-			o_table->bridge_oids.relnode = GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
-															   rel->rd_rel->relpersistence);
+
+			/*
+			 * Under pg_upgrade fresh relfilenumber allocation is forbidden
+			 * and the real bridge is carried over with the data; this OTable
+			 * is discarded after the schema restore, so leave it invalid.
+			 */
+			o_table->bridge_oids.relnode = IsBinaryUpgrade ? InvalidOid :
+				GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
+									rel->rd_rel->relpersistence);
 			o_table->bridge_oids.reloid = o_table->bridge_oids.relnode;
 		}
 	}
@@ -4380,6 +4389,14 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		Form_pg_database dbform;
 		int32		cluster_encoding;
 
+		/*
+		 * Make the just-created pg_database row visible before touching the
+		 * database cache.  pg_upgrade restores template1 itself with an
+		 * explicit OID (CREATE DATABASE "template1" ... OID = 1); in that
+		 * case the template1 cache refresh below looks up the very row being
+		 * created, which is not yet visible without this increment.
+		 */
+		CommandCounterIncrement();
 
 		if (IsTransactionState())
 		{
@@ -4389,7 +4406,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			o_database_cache_add_if_needed(Template1DbOid, Template1DbOid, cur_lsn, NULL);
 		}
 
-		CommandCounterIncrement();
 		dbTuple = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(objectId));
 
 		if (!HeapTupleIsValid(dbTuple))
@@ -5213,4 +5229,113 @@ o_process_added_column(AlterTableCmd *cmd)
 	o_added_columns = lappend(o_added_columns,
 	/* cppcheck-suppress unknownEvaluationOrder */
 							  list_make2(makeInteger(typeid), makeString(def->colname)));
+}
+
+/*
+ * Re-derive one OrioleDB table's index expressions/predicates from the
+ * catalog and re-persist OTable/OIndex in the current node-tree format.
+ *
+ * After a cross-major pg_upgrade the carried-over expression blobs were
+ * written by another PostgreSQL major and are skipped on read (their
+ * nodeToString format is not portable; see o_deserialize_node).  This
+ * re-derives them from RelationGetIndexExpressions/Predicate via
+ * o_table_refresh_index_exprs, then saves -- so subsequent reads (including
+ * catalog-free recovery) get current-format blobs.  Only the node trees are
+ * touched; the fixed-layout index metadata is left as deserialized, so we
+ * avoid the type/class-cache machinery that o_table_fill_index would run.
+ */
+static void
+o_refresh_table_expressions(Oid reloid)
+{
+	Relation	rel;
+	ORelOids	oids;
+	OTable	   *o_table;
+	OXid		oxid;
+	OSnapshot	oSnapshot;
+	int			ix_num;
+
+	rel = table_open(reloid, AccessExclusiveLock);
+	if (!is_orioledb_rel(rel))
+	{
+		table_close(rel, AccessExclusiveLock);
+		return;
+	}
+
+	ORelOidsSetFromRel(oids, rel);
+	o_table = o_tables_get(oids);
+	if (o_table == NULL)
+	{
+		table_close(rel, AccessExclusiveLock);
+		return;
+	}
+
+	for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
+	{
+		OTableIndex *index = &o_table->indices[ix_num];
+		Relation	index_rel;
+
+		/* ctid pseudo-index has no catalog relation */
+		if (!OidIsValid(index->oids.reloid))
+			continue;
+		index_rel = index_open(index->oids.reloid, AccessShareLock);
+		o_table_refresh_index_exprs(o_table, ix_num, index_rel);
+		index_close(index_rel, AccessShareLock);
+	}
+
+	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+	o_tables_rel_meta_lock(rel);
+	for (ix_num = 0; ix_num < o_table->nindices; ix_num++)
+	{
+		int			ctid_idx_off = o_table->has_primary ? 0 : 1;
+		OTableIndex *index = &o_table->indices[ix_num];
+
+		o_indices_update(o_table, ix_num + ctid_idx_off, oxid, oSnapshot.csn);
+		o_invalidate_oids(index->oids);
+		o_add_invalidate_undo_item(index->oids, O_INVALIDATE_OIDS_ON_ABORT);
+	}
+	o_tables_update(o_table, oxid, oSnapshot.csn);
+	o_tables_rel_meta_unlock(rel, InvalidOid);
+	o_invalidate_oids(oids);
+	o_add_invalidate_undo_item(oids, O_INVALIDATE_OIDS_ON_ABORT);
+
+	o_table_free(o_table);
+	table_close(rel, AccessExclusiveLock);
+}
+
+PG_FUNCTION_INFO_V1(orioledb_upgrade_refresh);
+
+/*
+ * SQL-callable: refresh every OrioleDB table in the current database.  Meant
+ * to be run once per database after a cross-major pg_upgrade so the persisted
+ * index expressions are rewritten in the running server's node-tree format.
+ */
+Datum
+orioledb_upgrade_refresh(PG_FUNCTION_ARGS)
+{
+	Oid			orioledb_am = get_am_oid("orioledb", false);
+	Relation	pgclass;
+	SysScanDesc scan;
+	HeapTuple	tup;
+	List	   *reloids = NIL;
+	ListCell   *lc;
+
+	/* Collect the orioledb table OIDs first; refresh outside the scan. */
+	pgclass = table_open(RelationRelationId, AccessShareLock);
+	scan = systable_beginscan(pgclass, InvalidOid, false, NULL, 0, NULL);
+	while (HeapTupleIsValid(tup = systable_getnext(scan)))
+	{
+		Form_pg_class cf = (Form_pg_class) GETSTRUCT(tup);
+
+		if ((cf->relkind == RELKIND_RELATION ||
+			 cf->relkind == RELKIND_MATVIEW) &&
+			cf->relam == orioledb_am)
+			reloids = lappend_oid(reloids, cf->oid);
+	}
+	systable_endscan(scan);
+	table_close(pgclass, AccessShareLock);
+
+	foreach(lc, reloids)
+		o_refresh_table_expressions(lfirst_oid(lc));
+
+	PG_RETURN_VOID();
 }

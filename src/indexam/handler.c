@@ -35,6 +35,7 @@
 #include "access/relation.h"
 #include "commands/progress.h"
 #include "commands/vacuum.h"
+#include "miscadmin.h"
 #include "nodes/pathnodes.h"
 #include "optimizer/optimizer.h"
 #include "parser/parsetree.h"
@@ -271,6 +272,17 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	IndexBuildResult *result;
 	String	   *relname;
 	OBTOptions *options = (OBTOptions *) index->rd_options;
+
+	/*
+	 * Under pg_upgrade the index data is carried over with the rest of the
+	 * storage -- orioledb_data/ for native indexes, the transferred
+	 * relfilenode for bridged ones -- so build nothing here.  Reorganizing
+	 * the table (e.g. ADD PRIMARY KEY) or re-inserting shared-root
+	 * placeholders for the preserved relnodes would corrupt or duplicate the
+	 * carried-over state.
+	 */
+	if (IsBinaryUpgrade)
+		return (IndexBuildResult *) palloc0(sizeof(IndexBuildResult));
 
 	if (options && !options->orioledb_index)
 	{

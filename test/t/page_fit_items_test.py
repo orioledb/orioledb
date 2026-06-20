@@ -37,8 +37,8 @@ class PageFitItemsTest(BaseTest):
 	# MAGIC NUMBERS RELATIVE TO TUPLES STRUCTURES
 	RELATION_SINGLE_FIELD_TUPLE_SIZE = 197
 	RELATION_EXTRA_FIELD_TUPLE_SIZE = 97
-	INDEX_EXTRA_TUPLE_SIZE = 891
-	PER_TUPLE_EXTRA_SIZE = 52
+	INDEX_EXTRA_TUPLE_SIZE = 907
+	PER_TUPLE_EXTRA_SIZE = 55
 
 	def setUp(self):
 		super().setUp()
@@ -336,12 +336,14 @@ class PageFitItemsTest(BaseTest):
 
 		node = self.node
 
-		self.startup_page_filling(8192 - self.estimateTupleSize(4, 0) + 100)
+		relDescr = self.startup_page_filling(8192 -
+		                                     self.estimateTupleSize(4, 0) +
+		                                     100)
 		self.assertSysTreePagesCount(1)
 
 		node.safe_psql(
 		    'postgres',
-		    "CREATE TABLE o_table4(t1 text, t2 text, t3 text, t4 text, t5 text, t6 text, t7 text, t8 text) USING orioledb;\n"
+		    f"CREATE TABLE o_test{len(relDescr) + 1}(t1 text, t2 text, t3 text, t4 text, t5 text, t6 text, t7 text, t8 text) USING orioledb;\n"
 		)
 
 		self.assertSysTreePagesCount(3)
@@ -403,10 +405,19 @@ class PageFitItemsTest(BaseTest):
 
 		self.assertSysTreePagesCount(1)
 
+		# The new tuple must not fit even in (free space + the space vacated
+		# by the drop), so the page is forced to split.  Size it from the
+		# test's own estimate -- the free space left by startup plus the
+		# vacated tuple -- so the bound holds regardless of the per-tuple
+		# sizes of the running PostgreSQL major.
+		freeAndVacated = self.estimateTupleSize(1, 0) + smalestTupSize
+		fields = 4
+		while self.estimateTupleSize(fields, 0) <= freeAndVacated + 256:
+			fields += 1
+		cols = ", ".join(f"t{i} text" for i in range(fields))
 		node.safe_psql(
 		    'postgres',
-		    f"CREATE TABLE o_test{len(relDescr) + 1}(t1 text, t2 text, t3 text, t4 text, t5 text, t6 text, t7 text) USING orioledb;"
-		)
+		    f"CREATE TABLE o_test{len(relDescr) + 1}({cols}) USING orioledb;")
 
 		self.assertSysTreePagesCount(3)
 		node.stop()
