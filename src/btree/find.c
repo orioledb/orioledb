@@ -61,6 +61,18 @@ static void btree_page_search_items(BTreeDescr *desc, Page p, Pointer key,
 									BTreeKeyType keyType,
 									BTreePageItemLocator *locator);
 static void refresh_parent_img_chunk(OBTreeFindPageInternalContext *intCxt);
+static void convert_fastpath_parent_to_img(OBTreeFindPageInternalContext *intCxt);
+
+/*
+ * A parent locator that find_left_page()/find_right_page() will navigate must
+ * point into context->parentImg (or be NULL).  Assert that at every place we
+ * record or advance such a locator, so a stray shared-page/img pointer is
+ * caught at its producer rather than only when the sibling step consumes it.
+ */
+#define ASSERT_PARENT_LOCATOR_LOCAL(context, loc) \
+	Assert((loc).chunk == NULL || \
+		   ((Pointer) (loc).chunk >= (context)->parentImg && \
+			(Pointer) (loc).chunk < (context)->parentImg + ORIOLEDB_BLCKSZ))
 
 /*
  * Initialize B-tree page find context.
@@ -385,12 +397,55 @@ refresh_parent_img_chunk(OBTreeFindPageInternalContext *intCxt)
 		   src + chunkBegin,
 		   chunkEnd - chunkBegin);
 
-	context->partial.src = src;
-	context->partial.isPartial = true;
-	context->partial.hikeysChunkIsLoaded = true;
-	memset(context->partial.chunkIsLoaded, 0,
-		   sizeof(context->partial.chunkIsLoaded));
-	context->partial.chunkIsLoaded[chunkOffset] = true;
+	context->parentPartial.src = src;
+	context->parentPartial.isPartial = true;
+	context->parentPartial.hikeysChunkIsLoaded = true;
+	memset(context->parentPartial.chunkIsLoaded, 0,
+		   sizeof(context->parentPartial.chunkIsLoaded));
+	context->parentPartial.chunkIsLoaded[chunkOffset] = true;
+
+	locator->chunk =
+		(BTreePageChunk *) (context->parentImg + chunkBegin);
+}
+
+/*
+ * The fastpath downlink search positions the locator straight onto the shared
+ * page (it skips copying the page into parentImg).  Callers that step to
+ * siblings (KEEP_PARENT) need the parent in context->parentImg, so convert the
+ * locator from the shared page to a local one: copy the header (with hikeys)
+ * and the referenced chunk into parentImg, set up parentPartial so other chunks
+ * load on demand, and rebind the locator onto parentImg.
+ */
+static void
+convert_fastpath_parent_to_img(OBTreeFindPageInternalContext *intCxt)
+{
+	OBTreeFindPageContext *context = intCxt->context;
+	Pointer		src = O_GET_IN_MEMORY_PAGE(intCxt->blkno);
+	BTreePageItemLocator *locator = &context->items[context->index].locator;
+	BTreePageHeader *hdr = (BTreePageHeader *) src;
+	OffsetNumber chunkOffset = locator->chunkOffset;
+	LocationIndex chunkBegin;
+	LocationIndex chunkEnd;
+
+	chunkBegin = SHORT_GET_LOCATION(hdr->chunkDesc[chunkOffset].shortLocation);
+	if (chunkOffset + 1 < hdr->chunksCount)
+		chunkEnd = SHORT_GET_LOCATION(hdr->chunkDesc[chunkOffset + 1].shortLocation);
+	else
+		chunkEnd = hdr->dataSize;
+
+	/* Header including the hikeys chunk. */
+	memcpy(context->parentImg, src, hdr->hikeysEnd);
+	/* The single chunk that `locator` references. */
+	memcpy(context->parentImg + chunkBegin,
+		   src + chunkBegin,
+		   chunkEnd - chunkBegin);
+
+	context->parentPartial.src = src;
+	context->parentPartial.isPartial = true;
+	context->parentPartial.hikeysChunkIsLoaded = true;
+	memset(context->parentPartial.chunkIsLoaded, 0,
+		   sizeof(context->parentPartial.chunkIsLoaded));
+	context->parentPartial.chunkIsLoaded[chunkOffset] = true;
 
 	locator->chunk =
 		(BTreePageChunk *) (context->parentImg + chunkBegin);
@@ -428,15 +483,17 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	OBTreeFindPageInternalContext intCxt;
 	BTreePageItemLocator loc;
 	bool		needLock = false,
-				fetchFlag PG_USED_FOR_ASSERTS_ONLY = BTREE_PAGE_FIND_IS(context, FETCH),
+				fetchFlag = BTREE_PAGE_FIND_IS(context, FETCH),
 				modifyFlag = BTREE_PAGE_FIND_IS(context, MODIFY),
 				imageFlag = BTREE_PAGE_FIND_IS(context, IMAGE),
 				tryFlag = BTREE_PAGE_FIND_IS(context, TRY_LOCK),
 				fixLeafFlag = BTREE_PAGE_FIND_IS(context, FIX_LEAF_SPLIT),
 				noFixFlag PG_USED_FOR_ASSERTS_ONLY = BTREE_PAGE_FIND_IS(context, NO_FIX_SPLIT),
 				keepLokeyFlag = BTREE_PAGE_FIND_IS(context, KEEP_LOKEY),
+				keepParentFlag = BTREE_PAGE_FIND_IS(context, KEEP_PARENT),
 				downlinkLocationFlag = BTREE_PAGE_FIND_IS(context, DOWNLINK_LOCATION);
 	bool		shmemIsReloaded = false;
+	bool		loadHikeys;
 	FastpathFindDownlinkMeta fastpathMeta;
 	Jsonb	   *params = NULL;
 
@@ -460,7 +517,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	 */
 	Assert((imageFlag && (targetLevel <= ORIOLEDB_MAX_DEPTH) && !fetchFlag && !modifyFlag)
 		   || (imageFlag && targetLevel == 0 && !fetchFlag && modifyFlag)
-		   || (!imageFlag && fetchFlag && !modifyFlag && !keepLokeyFlag)
+		   || (!imageFlag && fetchFlag && !modifyFlag)
 		   || (!imageFlag && !fetchFlag && modifyFlag && !keepLokeyFlag));
 	Assert(!(COMMITSEQNO_IS_NORMAL(context->csn) && modifyFlag));
 
@@ -473,6 +530,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	}
 	context->imgUndoLoc = InvalidUndoLocation;
 	context->partial.isPartial = false;
+	context->parentPartial.isPartial = false;
 	context->index = 0;
 
 	if (!tryFlag)
@@ -525,13 +583,15 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		fastpath = fastpath && (keyType != BTreeKeyPageHiKey || level > 0);
 
 		intCxt.partial = NULL;
-		if (!imageFlag || level > 0)
-			context->partial.isPartial = false;
 
 		/*
-		 * else saves isPartial flag for the parent of the leaf in imageFlag
-		 * case
+		 * The leaf's partial state is re-initialized by each page read, so it
+		 * is safe to reset here unconditionally.  The parent's partial state
+		 * lives in context->parentPartial and is preserved across the leaf
+		 * read so find_left_page()/find_right_page() can navigate siblings
+		 * via the parent.
 		 */
+		context->partial.isPartial = false;
 
 		if (needLock || (modifyFlag && level == targetLevel))
 		{
@@ -582,12 +642,19 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		{
 			bool		useParentImg = false;
 
-			if (imageFlag)
+			if (imageFlag || fetchFlag)
 			{
 				/*
-				 * In BTREE_PAGE_FIND_IMAGE case we read a target targetLevel
-				 * to the context.img without partial and read upper non-leaf
-				 * pages to the context.parentImg partially.
+				 * In both BTREE_PAGE_FIND_IMAGE and BTREE_PAGE_FIND_FETCH we
+				 * read upper non-leaf (parent) pages partially to
+				 * context->parentImg using context->parentPartial, so
+				 * find_left_page()/find_right_page() can navigate to sibling
+				 * pages through the parent's downlinks.
+				 *
+				 * The target (leaf) page is read to context->img: in full for
+				 * IMAGE (cheaper to iterate the whole page in memory) and
+				 * partially for FETCH (cheaper when only part of the page is
+				 * actually read).
 				 *
 				 * We consider it's OK to return page of lower targetLevel
 				 * than required, if tree doesn't have enough height.  That's
@@ -596,25 +663,43 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 				if (level <= targetLevel)
 				{
 					useParentImg = false;
-					intCxt.partial = NULL;
-					Assert(!fastpath);
+					if (fetchFlag)
+					{
+						intCxt.partial = &context->partial;
+					}
+					else
+					{
+						intCxt.partial = NULL;
+						Assert(!fastpath);
+					}
 				}
 				else
 				{
 					useParentImg = true;
-					intCxt.partial = &context->partial;
+					intCxt.partial = &context->parentPartial;
 				}
 			}
 			else
 			{
 				/*
-				 * In other cases we can use the img to hold a partial data.
+				 * BTREE_PAGE_FIND_MODIFY: parent pages are read partially to
+				 * context->img; the target page is locked above.
 				 */
 				useParentImg = false;
 				intCxt.partial = &context->partial;
 			}
 
 			intCxt.haveLock = false;
+
+			/*
+			 * The fastpath skips loading the hikeys chunk.  That is fine for
+			 * a single-tuple search, but a sibling-navigating caller
+			 * (KEEP_PARENT) iterates the whole target leaf and needs the page
+			 * header / chunk descriptors to cross chunks, so always load the
+			 * hikeys chunk for the leaf in that case.
+			 */
+			loadHikeys = !fastpath || (keepParentFlag && !useParentImg);
+
 			if (tryFlag)
 			{
 				ReadPageResult result;
@@ -624,7 +709,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 												  useParentImg,
 												  key, keyType,
 												  intCxt.partial,
-												  !fastpath);
+												  loadHikeys);
 				intCxt.pagePtr = useParentImg ? context->parentImg : context->img;
 				if (result == ReadPageResultWrongPageChangeCount)
 				{
@@ -643,7 +728,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 											  intCxt.pageChangeCount,
 											  useParentImg, key, keyType,
 											  intCxt.partial,
-											  !fastpath);
+											  loadHikeys);
 				intCxt.pagePtr = useParentImg ? context->parentImg : context->img;
 				if (!result)
 				{
@@ -771,10 +856,46 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 
 		context->items[context->index].locator = loc;
 		context->items[context->index].blkno = intCxt.blkno;
+
+		/*
+		 * The immediate parent's downlink may have been located via the
+		 * fastpath, leaving the locator pointing into the shared page (and
+		 * parentImg not populated).  A sibling-navigating caller
+		 * (KEEP_PARENT, e.g. the iterator) needs the parent in parentImg, so
+		 * materialize it and rebind the locator before recording the page
+		 * change count from parentImg.
+		 */
+		if (fastpath && keepParentFlag && level == targetLevel + 1)
+			convert_fastpath_parent_to_img(&intCxt);
+
 		context->items[context->index].pageChangeCount = O_PAGE_GET_CHANGE_COUNT(intCxt.pagePtr);
 
-		/* Save the lokey if needed */
-		if (keepLokeyFlag && level > 1 &&
+		/*
+		 * Save the lokey if needed.
+		 *
+		 * For levels above the immediate parent the located downlink is the
+		 * propagated lokey of the leftmost descent below; keep it in
+		 * context->lokey (LOKEY_EXISTS), which btree_find_context_lokey()
+		 * returns when the target page's own downlink is the parent's first
+		 * one.
+		 *
+		 * For the immediate parent of a *leaf* target (level == 1, i.e. the
+		 * leaf iterator's targetLevel == 0) the located downlink is the leaf
+		 * page's own lokey; stash it in the dedicated, stable
+		 * context->leafLokey so btree_find_context_lokey() can return it
+		 * without re-reading the parent image -- which is unreliable in FETCH
+		 * mode, where parentImg is partial and may be reclaimed under
+		 * page-pool pressure during iteration.
+		 *
+		 * When targetLevel > 0 (e.g. the sequential scan descends to
+		 * targetLevel == 1 with KEEP_LOKEY and reads context->lokey
+		 * directly), the immediate parent's downlink is still the target
+		 * page's own lokey, but its consumer expects it in context->lokey,
+		 * exactly as the pre-FETCH-iterator code produced it.  So only divert
+		 * to leafLokey for the leaf case (targetLevel == 0); otherwise fall
+		 * through to context->lokey.
+		 */
+		if (keepLokeyFlag && level > targetLevel &&
 			BTREE_PAGE_LOCATOR_GET_OFFSET(intCxt.pagePtr, &loc) > 0)
 		{
 			OTuple		lokey;
@@ -782,10 +903,16 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			Assert(nonLeafHdr);
 
 			BTREE_PAGE_READ_INTERNAL_TUPLE(lokey, intCxt.pagePtr, &loc);
-			copy_fixed_key(context->desc, &context->lokey, lokey);
-			BTREE_PAGE_FIND_SET(context, LOKEY_EXISTS);
-			BTREE_PAGE_FIND_UNSET(context, LOKEY_SIBLING);
-			BTREE_PAGE_FIND_UNSET(context, LOKEY_UNDO);
+
+			if (level == targetLevel + 1 && targetLevel == 0)
+				copy_fixed_key(context->desc, &context->leafLokey, lokey);
+			else
+			{
+				copy_fixed_key(context->desc, &context->lokey, lokey);
+				BTREE_PAGE_FIND_SET(context, LOKEY_EXISTS);
+				BTREE_PAGE_FIND_UNSET(context, LOKEY_SIBLING);
+				BTREE_PAGE_FIND_UNSET(context, LOKEY_UNDO);
+			}
 		}
 
 		if (level != targetLevel && (!imageFlag || level > targetLevel) && !nonLeafHdr)
@@ -872,14 +999,16 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 					continue;
 				}
 
-				if (imageFlag && level == targetLevel + 1)
+				if ((imageFlag || keepParentFlag) && level == targetLevel + 1)
 				{
 					/*
 					 * Just loaded the target's child into shared memory and
 					 * refound the parent under MODIFY lock; the parent's
 					 * downlinks differ from the pre-load partial read still
 					 * sitting in parentImg.  Refresh parentImg and rebind the
-					 * locator before stepping down.
+					 * locator before stepping down.  Needed for any caller
+					 * that later navigates siblings (IMAGE, or FETCH via
+					 * KEEP_PARENT).
 					 */
 					refresh_parent_img_chunk(&intCxt);
 				}
@@ -914,7 +1043,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			 * locator onto parentImg so subsequent reads do not race against
 			 * concurrent writers on the unlocked shared page.
 			 */
-			if (imageFlag && level == targetLevel + 1 &&
+			if ((imageFlag || keepParentFlag) && level == targetLevel + 1 &&
 				intCxt.haveLock && intCxt.pagePtr != context->parentImg)
 				refresh_parent_img_chunk(&intCxt);
 		}
@@ -1351,7 +1480,7 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 		BTreeNonLeafTuphdr *tuphdr = NULL;
 		bool		tup_loaded = true;
 
-		tup_loaded = partial_load_chunk(&context->partial, context->parentImg,
+		tup_loaded = partial_load_chunk(&context->parentPartial, context->parentImg,
 										loc.chunkOffset, NULL);
 		if (tup_loaded)
 		{
@@ -1372,7 +1501,9 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 			item->pageChangeCount = DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(tuphdr->downlink);
 
 			success = btree_find_read_page(context, item->blkno, item->pageChangeCount,
-										   false, &hikey->tuple, BTreeKeyNonLeafKey, NULL,
+										   false, &hikey->tuple, BTreeKeyNonLeafKey,
+										   BTREE_PAGE_FIND_IS(context, FETCH) ?
+										   &context->partial : NULL,
 										   true);
 			if (success &&
 				PAGE_GET_LEVEL(context->img) == level)
@@ -1391,6 +1522,25 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 	 */
 	(void) find_page(context, hikey, BTreeKeyNonLeafKey, level);
 	return true;
+}
+
+/*
+ * Refresh the stable copy of the current page's own lokey after find_left_page()
+ * steps to a sibling through the parent downlink at *loc.  When the downlink is
+ * the parent's first one the sibling inherits the parent's propagated lokey
+ * (kept in context->lokey), so there is nothing to capture here.
+ */
+static inline void
+refresh_context_leaf_lokey(OBTreeFindPageContext *context,
+						   BTreePageItemLocator *loc)
+{
+	if (BTREE_PAGE_LOCATOR_GET_OFFSET(context->parentImg, loc) > 0)
+	{
+		OTuple		lokey;
+
+		BTREE_PAGE_READ_INTERNAL_TUPLE(lokey, context->parentImg, loc);
+		copy_fixed_key(context->desc, &context->leafLokey, lokey);
+	}
 }
 
 /*
@@ -1464,7 +1614,7 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 			if (BTREE_PAGE_LOCATOR_IS_VALID(context->parentImg, &loc))
 			{
 				BTREE_PAGE_LOCATOR_PREV(context->parentImg, &loc);
-				next_lokey_loaded = partial_load_chunk(&context->partial,
+				next_lokey_loaded = partial_load_chunk(&context->parentPartial,
 													   context->parentImg,
 													   loc.chunkOffset,
 													   NULL);
@@ -1490,7 +1640,8 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 												   false,
 												   NULL,
 												   BTreeKeyRightmost,
-												   NULL,
+												   BTREE_PAGE_FIND_IS(context, FETCH) ?
+												   &context->partial : NULL,
 												   true);
 
 					if (success &&
@@ -1498,6 +1649,7 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 						prevLoc == context->imgUndoLoc)
 					{
 						parentItem->locator = loc;
+						refresh_context_leaf_lokey(context, &loc);
 						continue;
 					}
 
@@ -1513,6 +1665,7 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 						{
 							Assert(O_PAGE_GET_CHANGE_COUNT(context->img) == item->pageChangeCount);
 							parentItem->locator = loc;
+							refresh_context_leaf_lokey(context, &loc);
 							BTREE_PAGE_LOCATOR_LAST(context->img, &item->locator);
 							return true;
 						}
@@ -1590,12 +1743,14 @@ btree_find_context_lokey(OBTreeFindPageContext *context)
 	else if (BTREE_PAGE_LOCATOR_GET_OFFSET(context->parentImg, &ploc) > 0)
 	{
 		/*
-		 * Fetches lokey for the left sibling from the parent image.
+		 * The current page's own lokey is its downlink key in the parent.
+		 * find_page() descent and find_left_page() stepping keep it in the
+		 * stable context->leafLokey, so return that instead of re-reading the
+		 * parent image.  In FETCH mode parentImg is partial and may have been
+		 * reclaimed under page-pool pressure since it was last read, which
+		 * would make a re-read return garbage.
 		 */
-		OTuple		result;
-
-		BTREE_PAGE_READ_INTERNAL_TUPLE(result, context->parentImg, &ploc);
-		return result;
+		return context->leafLokey.tuple;
 	}
 	else if (BTREE_PAGE_FIND_IS(context, LOKEY_EXISTS))
 	{

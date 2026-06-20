@@ -108,7 +108,15 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 		keyType == BTreeKeyUniqueUpperBound)
 		meta->numKeys = id->nUniqueFields;
 	else if (id->desc.type != oIndexToast && id->desc.type != oIndexBridge)
-		meta->numKeys = id->nKeyFields;
+
+		/*
+		 * Compare the whole tuple-identifying key, not just the user key
+		 * fields.  A non-unique index appends the primary key to make every
+		 * downlink/leaf key unique; comparing only the leading nKeyFields
+		 * would treat duplicate user-key values as an ambiguous prefix and
+		 * could descend into the wrong child (skipping earlier duplicates).
+		 */
+		meta->numKeys = id->nUniqueFields;
 	else
 		meta->numKeys = id->nonLeafSpec.natts;
 
@@ -119,7 +127,14 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 																	   TupleDescAttr(id->nonLeafTupdesc, i)->atttypid);
 		OIndexField *field = &id->fields[i];
 
-		if (!searchDesc || searchDesc->opcid != field->opclass)
+		/*
+		 * The array-search routines compare raw datums assuming an ascending
+		 * layout, so they cannot be used for a DESC-ordered key field (its
+		 * values are stored in descending order).  Fall back to the regular
+		 * binary search in that case.
+		 */
+		if (!searchDesc || searchDesc->opcid != field->opclass ||
+			!field->ascending)
 		{
 			meta->enabled = false;
 			return;
@@ -217,10 +232,51 @@ find_downlink_get_keys(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 				flags[i] = (f & O_VALUE_BOUND_LOWER) ? FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF : FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF;
 				values[i] = (Datum) 0;
 			}
+			else if (f & O_VALUE_BOUND_NULL)
+			{
+				/*
+				 * A NULL bound sorts to one extreme of the value range
+				 * depending on the field's NULLS FIRST/LAST ordering, exactly
+				 * as o_idx_cmp_range_key_to_value() resolves it.  Without
+				 * this the bound would be searched as its (meaningless) raw
+				 * value, sending the descent to the wrong end of the tree --
+				 * e.g. a backward scan's "+infinity" upper bound (UPPER |
+				 * NULL) would otherwise land on the leftmost page.
+				 */
+				flags[i] = id->fields[i].nullfirst ? FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF : FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF;
+				values[i] = (Datum) 0;
+			}
 			else
 			{
 				flags[i] = 0;
 				values[i] = bound->keys[i].value;
+			}
+		}
+
+		/*
+		 * The bound may specify fewer columns than the key (e.g. "i = v" on a
+		 * (i, pk) key).  Such a bound fences either just before or just after
+		 * the whole run of entries sharing its specified prefix; represent
+		 * that fence by pinning every unspecified trailing column to -inf or
+		 * +inf. A lower-inclusive or upper-exclusive bound fences before the
+		 * run (-inf), a lower-exclusive or upper-inclusive bound fences after
+		 * it (+inf).  Leaving these columns unset would compare against
+		 * garbage and could position the descent in the wrong child.
+		 */
+		if (num > 0 && num < numValues)
+		{
+			uint8		f = bound->keys[num - 1].flags;
+			uint8		inf;
+
+			if (((f & O_VALUE_BOUND_LOWER) != 0) == ((f & O_VALUE_BOUND_INCLUSIVE) != 0))
+				inf = FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF;
+			else
+				inf = FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF;
+
+			for (i = num; i < numValues; i++)
+			{
+				flags[i] = inf;
+				values[i] = (Datum) 0;
 			}
 		}
 		return true;
