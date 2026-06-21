@@ -221,6 +221,19 @@ btree_try_merge_pages(BTreeDescr *desc,
 	right_extent = right_desc->fileExtent;
 
 	CLEAN_DIRTY(desc->ppool, right_blkno);
+
+	/*
+	 * Block reads on the right page before retiring it.  Throughout the merge
+	 * the right page is only locked, never read-blocked, so its unlock inside
+	 * ppool_free_page() would otherwise not bump the page-state change count
+	 * (unlock_page() bumps it only when reads were blocked).  Without that
+	 * bump, a concurrent lock-free reader that already holds an in-memory
+	 * downlink to the right page can't tell from the state bits that the page
+	 * is gone, and has to rely solely on pageChangeCount.  Setting NO_READ
+	 * here makes the change count advance as well -- symmetric with how the
+	 * parent and left pages are handled.
+	 */
+	page_block_reads(right_blkno);
 	O_PAGE_CHANGE_COUNT_INC(right);
 
 	ppool_free_page(desc->ppool, right_blkno, true);
