@@ -61,7 +61,7 @@ static void btree_page_search_items(BTreeDescr *desc, Page p, Pointer key,
 									BTreeKeyType keyType,
 									BTreePageItemLocator *locator);
 static void refresh_parent_img_chunk(OBTreeFindPageInternalContext *intCxt);
-static void convert_fastpath_parent_to_img(OBTreeFindPageInternalContext *intCxt);
+static bool convert_fastpath_parent_to_img(OBTreeFindPageInternalContext *intCxt);
 
 /*
  * A parent locator that find_left_page()/find_right_page() will navigate must
@@ -415,30 +415,70 @@ refresh_parent_img_chunk(OBTreeFindPageInternalContext *intCxt)
  * locator from the shared page to a local one: copy the header (with hikeys)
  * and the referenced chunk into parentImg, set up parentPartial so other chunks
  * load on demand, and rebind the locator onto parentImg.
+ *
+ * The copy is made from the live shared page without a page lock, so it has to
+ * be validated the same way try_copy_page() validates a partial read: bail out
+ * if reads are blocked, if a header field used to size the copy is out of
+ * range (a torn read), if the page-state change count moved across the copy, or
+ * if the page is no longer the one we descended to (pageChangeCount changed).
+ * Returns false in any of those cases; the caller must re-read the parent.
  */
-static void
+static bool
 convert_fastpath_parent_to_img(OBTreeFindPageInternalContext *intCxt)
 {
 	OBTreeFindPageContext *context = intCxt->context;
-	Pointer		src = O_GET_IN_MEMORY_PAGE(intCxt->blkno);
+	OInMemoryBlkno blkno = intCxt->blkno;
+	Pointer		src = O_GET_IN_MEMORY_PAGE(blkno);
 	BTreePageItemLocator *locator = &context->items[context->index].locator;
 	BTreePageHeader *hdr = (BTreePageHeader *) src;
 	OffsetNumber chunkOffset = locator->chunkOffset;
 	LocationIndex chunkBegin;
 	LocationIndex chunkEnd;
+	LocationIndex hikeysEnd;
+	OffsetNumber chunksCount;
+	uint64		state1,
+				state2;
+
+	state1 = pg_atomic_read_u64(&(O_PAGE_HEADER(src)->state));
+	if (O_PAGE_STATE_READ_IS_BLOCKED(state1))
+		return false;
+
+	pg_read_barrier();
+
+	hikeysEnd = hdr->hikeysEnd;
+	chunksCount = hdr->chunksCount;
+	if (hikeysEnd < MAXALIGN(sizeof(BTreePageHeader)) || hikeysEnd > ORIOLEDB_BLCKSZ ||
+		chunkOffset >= chunksCount)
+		return false;
 
 	chunkBegin = SHORT_GET_LOCATION(hdr->chunkDesc[chunkOffset].shortLocation);
-	if (chunkOffset + 1 < hdr->chunksCount)
+	if (chunkOffset + 1 < chunksCount)
 		chunkEnd = SHORT_GET_LOCATION(hdr->chunkDesc[chunkOffset + 1].shortLocation);
 	else
 		chunkEnd = hdr->dataSize;
+	if (chunkBegin > chunkEnd || chunkEnd > ORIOLEDB_BLCKSZ)
+		return false;
+
+	pg_read_barrier();
 
 	/* Header including the hikeys chunk. */
-	memcpy(context->parentImg, src, hdr->hikeysEnd);
+	memcpy(context->parentImg, src, hikeysEnd);
 	/* The single chunk that `locator` references. */
 	memcpy(context->parentImg + chunkBegin,
 		   src + chunkBegin,
 		   chunkEnd - chunkBegin);
+
+	pg_read_barrier();
+	state2 = pg_atomic_read_u64(&(O_PAGE_HEADER(src)->state));
+
+	/* The page must not have changed or been blocked while we copied it. */
+	if ((state1 & PAGE_STATE_CHANGE_COUNT_MASK) != (state2 & PAGE_STATE_CHANGE_COUNT_MASK) ||
+		O_PAGE_STATE_READ_IS_BLOCKED(state2))
+		return false;
+
+	/* ... and it must still be the page we descended to. */
+	if (O_PAGE_GET_CHANGE_COUNT(src) != intCxt->pageChangeCount)
+		return false;
 
 	context->parentPartial.src = src;
 	context->parentPartial.isPartial = true;
@@ -449,6 +489,7 @@ convert_fastpath_parent_to_img(OBTreeFindPageInternalContext *intCxt)
 
 	locator->chunk =
 		(BTreePageChunk *) (context->parentImg + chunkBegin);
+	return true;
 }
 
 /*--
@@ -863,10 +904,13 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		 * parentImg not populated).  A sibling-navigating caller
 		 * (KEEP_PARENT, e.g. the iterator) needs the parent in parentImg, so
 		 * materialize it and rebind the locator before recording the page
-		 * change count from parentImg.
+		 * change count from parentImg.  The copy is validated; if the parent
+		 * changed under us while copying, re-read it from the top of the loop
+		 * (a stale/evicted parent is then caught by the change-count checks).
 		 */
-		if (fastpath && keepParentFlag && level == targetLevel + 1)
-			convert_fastpath_parent_to_img(&intCxt);
+		if (fastpath && keepParentFlag && level == targetLevel + 1 &&
+			!convert_fastpath_parent_to_img(&intCxt))
+			continue;
 
 		context->items[context->index].pageChangeCount = O_PAGE_GET_CHANGE_COUNT(intCxt.pagePtr);
 
