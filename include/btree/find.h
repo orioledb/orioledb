@@ -87,6 +87,18 @@ typedef struct
 	 * BTREE_PAGE_FIND_LOKEY_UNDO is set when present.
 	 */
 	OFixedKey	undoLokey;
+
+	/*
+	 * A forward (non-KEEP_LOKEY) iterator descent that locates the immediate
+	 * parent via the fastpath defers materializing it into parentImg until
+	 * find_right_page() actually steps to a sibling.  While this is set the
+	 * parent's locator still points into the shared page and
+	 * parentImg/parentPartial are not yet valid; find_right_page() calls
+	 * convert_fastpath_parent_to_img() on demand.  A backward (KEEP_LOKEY)
+	 * descent reads the parent's lokey during the descent and so materializes
+	 * the parent eagerly, leaving this false.
+	 */
+	bool		parentImgDeferred;
 	uint16		flags;
 } OBTreeFindPageContext;
 
