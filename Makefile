@@ -108,6 +108,7 @@ REGRESSCHECKS = btree_sys_check \
 				ddl \
 				exclude \
 				explain \
+				fastpath_desc \
 				fillfactor \
 				foreign_keys \
 				generated \

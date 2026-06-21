@@ -49,17 +49,17 @@ static bool find_downlink_get_keys(BTreeDescr *desc,
 								   Oid *types, Datum *values, uint8 *flags);
 
 static void oid_array_search(Pointer p, int stride, int *lower,
-							 int *upper, Datum keyDatum);
+							 int *upper, Datum keyDatum, bool descending);
 static void int4_array_search(Pointer p, int stride, int *lower,
-							  int *upper, Datum keyDatum);
+							  int *upper, Datum keyDatum, bool descending);
 static void int8_array_search(Pointer p, int stride, int *lower,
-							  int *upper, Datum keyDatum);
+							  int *upper, Datum keyDatum, bool descending);
 static void float4_array_search(Pointer p, int stride, int *lower,
-								int *upper, Datum keyDatum);
+								int *upper, Datum keyDatum, bool descending);
 static void float8_array_search(Pointer p, int stride, int *lower,
-								int *upper, Datum keyDatum);
+								int *upper, Datum keyDatum, bool descending);
 static void tid_array_search(Pointer p, int stride, int *lower,
-							 int *upper, Datum keyDatum);
+							 int *upper, Datum keyDatum, bool descending);
 
 static ArraySearchDesc arraySearchDescs[] = {
 	{OIDOID, OID_BTREE_OPS_OID, sizeof(Oid), ALIGNOF_INT, oid_array_search},
@@ -128,13 +128,14 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 		OIndexField *field = &id->fields[i];
 
 		/*
-		 * The array-search routines compare raw datums assuming an ascending
-		 * layout, so they cannot be used for a DESC-ordered key field (its
-		 * values are stored in descending order).  Fall back to the regular
-		 * binary search in that case.
+		 * The array-search routines compare raw datums, so they require the
+		 * field's btree opclass to match the default one they implement. DESC
+		 * ordering is supported: the routine gets a "descending" flag and
+		 * find_downlink_get_keys() expresses bounds as storage directions, so
+		 * a DESC field is handled by mirroring the comparison rather than
+		 * bailing.
 		 */
-		if (!searchDesc || searchDesc->opcid != field->opclass ||
-			!field->ascending)
+		if (!searchDesc || searchDesc->opcid != field->opclass)
 		{
 			meta->enabled = false;
 			return;
@@ -143,6 +144,7 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 		offset = TYPEALIGN(searchDesc->align, offset);
 		meta->funcs[i] = searchDesc->func;
 		meta->offsets[i] = offset;
+		meta->descending[i] = !field->ascending;
 		types[i] = searchDesc->typeid;
 
 		offset += searchDesc->typlen;
@@ -207,7 +209,12 @@ find_downlink_get_keys(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 	{
 		for (i = 0; i < numValues; i++)
 		{
-			flags[i] = (keyType == BTreeKeyNone) ? FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF : FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF;
+			/*
+			 * "None" is the leftmost (first storage slot), "Rightmost" the
+			 * last one -- these are storage positions, independent of
+			 * ASC/DESC.
+			 */
+			flags[i] = (keyType == BTreeKeyNone) ? FASTPATH_FIND_DOWNLINK_FLAG_FIRST : FASTPATH_FIND_DOWNLINK_FLAG_LAST;
 			values[i] = (Datum) 0;
 		}
 		return true;
@@ -229,21 +236,31 @@ find_downlink_get_keys(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 
 			if (f & O_VALUE_BOUND_UNBOUNDED)
 			{
-				flags[i] = (f & O_VALUE_BOUND_LOWER) ? FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF : FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF;
+				/*
+				 * An unbounded-below column is a -infinity value, unbounded-
+				 * above a +infinity value.  Map the value extreme to a
+				 * storage slot through the column's ASC/DESC ordering: -inf
+				 * sits at the first slot for ASC and the last for DESC, +inf
+				 * vice versa.
+				 */
+				bool		valueMinusInf = (f & O_VALUE_BOUND_LOWER) != 0;
+
+				flags[i] = (valueMinusInf == id->fields[i].ascending) ?
+					FASTPATH_FIND_DOWNLINK_FLAG_FIRST : FASTPATH_FIND_DOWNLINK_FLAG_LAST;
 				values[i] = (Datum) 0;
 			}
 			else if (f & O_VALUE_BOUND_NULL)
 			{
 				/*
-				 * A NULL bound sorts to one extreme of the value range
-				 * depending on the field's NULLS FIRST/LAST ordering, exactly
-				 * as o_idx_cmp_range_key_to_value() resolves it.  Without
-				 * this the bound would be searched as its (meaningless) raw
-				 * value, sending the descent to the wrong end of the tree --
-				 * e.g. a backward scan's "+infinity" upper bound (UPPER |
-				 * NULL) would otherwise land on the leftmost page.
+				 * A NULL bound sorts to one storage extreme according to the
+				 * field's NULLS FIRST/LAST ordering, exactly as
+				 * o_idx_cmp_range_key_to_value() resolves it.  NULLS FIRST
+				 * puts NULLs in the first storage slot, NULLS LAST in the
+				 * last -- independent of ASC/DESC.  Without this the bound
+				 * would be searched as its (meaningless) raw value, sending
+				 * the descent to the wrong end of the tree.
 				 */
-				flags[i] = id->fields[i].nullfirst ? FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF : FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF;
+				flags[i] = id->fields[i].nullfirst ? FASTPATH_FIND_DOWNLINK_FLAG_FIRST : FASTPATH_FIND_DOWNLINK_FLAG_LAST;
 				values[i] = (Datum) 0;
 			}
 			else
@@ -257,25 +274,28 @@ find_downlink_get_keys(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 		 * The bound may specify fewer columns than the key (e.g. "i = v" on a
 		 * (i, pk) key).  Such a bound fences either just before or just after
 		 * the whole run of entries sharing its specified prefix; represent
-		 * that fence by pinning every unspecified trailing column to -inf or
-		 * +inf. A lower-inclusive or upper-exclusive bound fences before the
-		 * run (-inf), a lower-exclusive or upper-inclusive bound fences after
-		 * it (+inf).  Leaving these columns unset would compare against
-		 * garbage and could position the descent in the wrong child.
+		 * that fence by pinning every unspecified trailing column to the
+		 * run's first or last storage slot.  A lower-inclusive or
+		 * upper-exclusive bound fences before the run (first slot), a
+		 * lower-exclusive or upper-inclusive bound fences after it (last
+		 * slot).  These are storage positions of the prefix run as a whole,
+		 * so they do not depend on the trailing columns' ASC/DESC.  Leaving
+		 * these columns unset would compare against garbage and could
+		 * position the descent in the wrong child.
 		 */
 		if (num > 0 && num < numValues)
 		{
 			uint8		f = bound->keys[num - 1].flags;
-			uint8		inf;
+			uint8		fence;
 
 			if (((f & O_VALUE_BOUND_LOWER) != 0) == ((f & O_VALUE_BOUND_INCLUSIVE) != 0))
-				inf = FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF;
+				fence = FASTPATH_FIND_DOWNLINK_FLAG_FIRST;
 			else
-				inf = FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF;
+				fence = FASTPATH_FIND_DOWNLINK_FLAG_LAST;
 
 			for (i = num; i < numValues; i++)
 			{
-				flags[i] = inf;
+				flags[i] = fence;
 				values[i] = (Datum) 0;
 			}
 		}
@@ -311,7 +331,7 @@ find_downlink_get_keys(BTreeDescr *desc, void *key, BTreeKeyType keyType,
 		values[i] = o_fastgetattr(*tuple, attnum, tupdesc, spec, &isnull);
 
 		if (isnull)
-			flags[i] = (id->fields[i].nullfirst) ? FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF : FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF;
+			flags[i] = (id->fields[i].nullfirst) ? FASTPATH_FIND_DOWNLINK_FLAG_FIRST : FASTPATH_FIND_DOWNLINK_FLAG_LAST;
 		else
 			flags[i] = 0;
 	}
@@ -388,10 +408,10 @@ fastpath_find_downlink(Pointer pagePtr,
 		if (meta->flags[i] == 0)
 			meta->funcs[i] (base + MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + meta->offsets[i],
 							MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + meta->length,
-							&lower, &upper, meta->values[i]);
-		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF)
+							&lower, &upper, meta->values[i], meta->descending[i]);
+		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_FIRST)
 			upper = lower;
-		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF)
+		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_LAST)
 			lower = upper;
 	}
 
@@ -531,10 +551,10 @@ fastpath_find_chunk(Pointer pagePtr,
 		if (meta->flags[i] == 0)
 			meta->funcs[i] (base + meta->offsets[i],
 							meta->length, &lower, &upper,
-							meta->values[i]);
-		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF)
+							meta->values[i], meta->descending[i]);
+		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_FIRST)
 			upper = lower;
-		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF)
+		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_LAST)
 			lower = upper;
 	}
 
@@ -560,7 +580,8 @@ fastpath_find_chunk(Pointer pagePtr,
  * below do the same for other datatypes.
  */
 static void
-int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
+int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
+				  bool descending)
 {
 	int			i;
 	bool		lowerSet = false;
@@ -577,7 +598,7 @@ int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 			*lower = i;
 			lowerSet = true;
 		}
-		else if (value > key)
+		else if (descending ? value < key : value > key)
 		{
 			if (!lowerSet)
 				*lower = i;
@@ -592,7 +613,8 @@ int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 }
 
 static void
-int8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
+int8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
+				  bool descending)
 {
 	int			i;
 	bool		lowerSet = false;
@@ -609,7 +631,7 @@ int8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 			*lower = i;
 			lowerSet = true;
 		}
-		else if (value > key)
+		else if (descending ? value < key : value > key)
 		{
 			if (!lowerSet)
 				*lower = i;
@@ -624,7 +646,8 @@ int8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 }
 
 static void
-oid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
+oid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
+				 bool descending)
 {
 	int			i;
 	bool		lowerSet = false;
@@ -641,7 +664,7 @@ oid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 			*lower = i;
 			lowerSet = true;
 		}
-		else if (value > key)
+		else if (descending ? value < key : value > key)
 		{
 			if (!lowerSet)
 				*lower = i;
@@ -656,7 +679,8 @@ oid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 }
 
 static void
-float4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
+float4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
+					bool descending)
 {
 	int			i;
 	bool		lowerSet = false;
@@ -674,7 +698,7 @@ float4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatu
 			*lower = i;
 			lowerSet = true;
 		}
-		else if (value > key)
+		else if (descending ? value < key : value > key)
 		{
 			if (!lowerSet)
 				*lower = i;
@@ -689,7 +713,8 @@ float4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatu
 }
 
 static void
-float8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
+float8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
+					bool descending)
 {
 	int			i;
 	bool		lowerSet = false;
@@ -707,7 +732,7 @@ float8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatu
 			*lower = i;
 			lowerSet = true;
 		}
-		else if (value > key)
+		else if (descending ? value < key : value > key)
 		{
 			if (!lowerSet)
 				*lower = i;
@@ -742,7 +767,8 @@ tid_cmp(ItemPointer arg1, ItemPointer arg2)
 }
 
 static void
-tid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
+tid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
+				 bool descending)
 {
 	int			i;
 	bool		lowerSet = false;
@@ -759,7 +785,7 @@ tid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum)
 			*lower = i;
 			lowerSet = true;
 		}
-		else if (cmp > 0)
+		else if (descending ? cmp < 0 : cmp > 0)
 		{
 			if (!lowerSet)
 				*lower = i;

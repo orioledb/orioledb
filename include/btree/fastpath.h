@@ -19,11 +19,26 @@
 #include "btree/page_contents.h"
 
 #define FASTPATH_FIND_DOWNLINK_MAX_KEYS (4)
-#define FASTPATH_FIND_DOWNLINK_FLAG_MINUS_INF (1)
-#define FASTPATH_FIND_DOWNLINK_FLAG_PLUS_INF (2)
 
+/*
+ * Per-key flags directing the array narrowing.  Unlike a raw value, these name
+ * a *storage position* (the on-page slot order), so they are correct for both
+ * ASC and DESC key columns: FIRST collapses the search range to its lowest
+ * storage slot, LAST to its highest.  find_downlink_get_keys() resolves value
+ * infinities, unbounded columns, and NULLs (via the column's ASC/DESC and
+ * NULLS FIRST/LAST ordering) into these storage directions.
+ */
+#define FASTPATH_FIND_DOWNLINK_FLAG_FIRST (1)
+#define FASTPATH_FIND_DOWNLINK_FLAG_LAST (2)
+
+/*
+ * Array-search routine over a fixed-stride column.  "descending" selects the
+ * DESC-ordered variant (values stored high-to-low) so the same routines serve
+ * both index orderings.
+ */
 typedef void (*ArraySearchFunc) (Pointer p, int stride,
-								 int *lower, int *upper, Datum keyDatum);
+								 int *lower, int *upper, Datum keyDatum,
+								 bool descending);
 
 typedef struct
 {
@@ -36,6 +51,7 @@ typedef struct
 	ArraySearchFunc funcs[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
 	Datum		values[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
 	uint8		flags[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
+	bool		descending[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
 } FastpathFindDownlinkMeta;
 
 typedef enum
