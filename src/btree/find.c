@@ -734,12 +734,14 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 
 			/*
 			 * The fastpath skips loading the hikeys chunk.  That is fine for
-			 * a single-tuple search, but a sibling-navigating caller
-			 * (KEEP_PARENT) iterates the whole target leaf and needs the page
-			 * header / chunk descriptors to cross chunks, so always load the
-			 * hikeys chunk for the leaf in that case.
+			 * a single-tuple search; a sibling-navigating caller
+			 * (KEEP_PARENT, the iterator) loads the hikeys chunk on demand
+			 * only when it needs it -- when stepping to a sibling, or when
+			 * crossing a chunk boundary within a leaf (the chunk-descriptor
+			 * array lives in the hikeys chunk).  So it does not need the
+			 * hikeys chunk in the image here either.
 			 */
-			loadHikeys = !fastpath || (keepParentFlag && !useParentImg);
+			loadHikeys = !fastpath;
 
 			if (tryFlag)
 			{
