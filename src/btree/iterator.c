@@ -588,6 +588,23 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 		bool		make_dec = false;
 
 		/*
+		 * Positioning the backward start reads the leaf's chunk descriptor
+		 * array (BTREE_PAGE_LOCATOR_GET_OFFSET / _PREV), which a partial
+		 * (FETCH) image read through the fastpath does not contain
+		 * (loadHikeys = !fastpath).  Load the hikeys chunk so the descriptors
+		 * are present; if the backing page changed, fall back to a whole-page
+		 * image read and re-position there.
+		 */
+		if (BTREE_PAGE_FIND_IS(&it->context, FETCH) &&
+			!partial_load_hikeys_chunk(&it->context.partial, it->context.img))
+		{
+			BTREE_PAGE_FIND_UNSET(&it->context, FETCH);
+			BTREE_PAGE_FIND_SET(&it->context, IMAGE);
+			(void) find_page(&it->context, key, kind, 0);
+			loc = &it->context.items[it->context.index].locator;
+		}
+
+		/*
 		 * From btree_page_binary_search(): "When nextkey is false (this
 		 * case), we are looking for the first item >= scankey."
 		 *
@@ -927,6 +944,50 @@ iterator_refind_partial_leaf(BTreeIterator *it)
 }
 
 /*
+ * Advance the leaf locator by one item in the scan direction.
+ *
+ * In IMAGE mode the whole page (including the chunk-descriptor array) is in
+ * context->img, so the plain BTREE_PAGE_LOCATOR_NEXT/PREV macros can cross
+ * chunk boundaries by reading the descriptors from the image.
+ *
+ * In FETCH mode the leaf is partial and the descriptor array is NOT loaded
+ * eagerly (loadHikeys = !fastpath in find_page()).  Moving inside the current
+ * chunk needs only the locator's cached per-chunk counts.  But crossing a
+ * chunk boundary needs the descriptor array, so we load the hikeys chunk (which
+ * contains it) on demand first; that is a no-op once it is loaded, so a
+ * multi-chunk leaf pays for it only on the first crossing.  After that the
+ * regular BTREE_PAGE_LOCATOR_NEXT/PREV macros cross using the descriptors now
+ * present in the image, and the loop in the caller loads the destination
+ * chunk's data before reading from it.
+ *
+ * Returns false if the hikeys chunk could not be loaded because the backing
+ * page changed; the caller must re-find.  On end-of-page in the scan direction
+ * the locator is left invalid (BTREE_PAGE_LOCATOR_IS_VALID() == false).
+ */
+static inline bool
+iterator_advance_leaf(BTreeIterator *it, BTreePageItemLocator *loc)
+{
+	OBTreeFindPageContext *context = &it->context;
+
+	if (BTREE_PAGE_FIND_IS(context, FETCH))
+	{
+		bool		crossing;
+
+		if (IT_IS_FORWARD(it))
+			crossing = loc->itemOffset + 1 >= loc->chunkItemsCount;
+		else
+			crossing = loc->itemOffset == 0;
+
+		if (crossing &&
+			!partial_load_hikeys_chunk(&context->partial, context->img))
+			return false;
+	}
+
+	IT_NEXT_OFFSET(it, loc);
+	return true;
+}
+
+/*
  * Fetch next tuple without checking for end condition.
  */
 static OTuple
@@ -1035,7 +1096,8 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn)
 										  it->fetchCallback,
 										  it->fetchCallbackArg);
 
-			IT_NEXT_OFFSET(it, &leaf_item->locator);
+			if (!iterator_advance_leaf(it, &leaf_item->locator))
+				iterator_refind_partial_leaf(it);
 
 			if (!O_TUPLE_IS_NULL(result))
 				return result;
@@ -1085,6 +1147,22 @@ btree_iterator_check_load_next_page(BTreeIterator *it)
 			return false;
 
 		iterator_maybe_switch_to_image(it);
+
+		/*
+		 * find_right_page() reads the current leaf's hikey to locate its
+		 * right sibling.  With hikeys loaded on demand (loadHikeys =
+		 * !fastpath), a FETCH leaf reached via the fastpath has no hikeys
+		 * chunk yet -- load it now.  partial_load_hikeys_chunk() is a no-op
+		 * once the chunk (or the whole page, in IMAGE mode) is present; on a
+		 * backing-page change recover through the standard re-find.  Backward
+		 * stepping uses the lokey, never the current leaf's hikey.
+		 */
+		if (IT_IS_FORWARD(it) &&
+			!partial_load_hikeys_chunk(&context->partial, context->img))
+		{
+			iterator_refind_partial_leaf(it);
+			continue;
+		}
 
 		if (IT_IS_FORWARD(it))
 			step_result = find_right_page(context, &key_buf);
@@ -1264,7 +1342,11 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 			it->curKeySet = true;
 			it->curKeyReturned = true;
 
-			IT_NEXT_OFFSET(it, loc);
+			if (!iterator_advance_leaf(it, loc))
+			{
+				iterator_refind_partial_leaf(it);
+				loc = &context->items[context->index].locator;
+			}
 
 			if (end != NULL && endKind != BTreeKeyNone)
 			{
@@ -1305,6 +1387,17 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 		}
 
 		iterator_maybe_switch_to_image(it);
+
+		/*
+		 * Load the current leaf's hikeys on demand for find_right_page() (see
+		 * the matching comment in btree_iterator_check_load_next_page()).
+		 */
+		if (IT_IS_FORWARD(it) &&
+			!partial_load_hikeys_chunk(&context->partial, context->img))
+		{
+			iterator_refind_partial_leaf(it);
+			continue;
+		}
 
 		if (IT_IS_FORWARD(it))
 		{
