@@ -339,6 +339,7 @@ fastpath_find_downlink(Pointer pagePtr,
 	Pointer		base;
 	uint64		state;
 	uint64		imageChangeCount = pg_atomic_read_u64(&imgHdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK;
+	uint32		imagePageChangeCount = O_PAGE_GET_CHANGE_COUNT(imgHdr);
 	OBTreeFastPathFindResult result;
 	static BTreeNonLeafTuphdr tuphdr;
 
@@ -400,7 +401,8 @@ fastpath_find_downlink(Pointer pagePtr,
 
 	state = pg_atomic_read_u64(&hdr->o_header.state);
 	if (O_PAGE_STATE_READ_IS_BLOCKED(state) ||
-		(state & PAGE_STATE_CHANGE_COUNT_MASK) != imageChangeCount)
+		(state & PAGE_STATE_CHANGE_COUNT_MASK) != imageChangeCount ||
+		O_PAGE_GET_CHANGE_COUNT(hdr) != imagePageChangeCount)
 		return OBTreeFastPathFindRetry;
 
 	if (chunkIndex == 0)
@@ -484,7 +486,8 @@ fastpath_find_downlink(Pointer pagePtr,
 
 	state = pg_atomic_read_u64(&hdr->o_header.state);
 	if (O_PAGE_STATE_READ_IS_BLOCKED(state) ||
-		(state & PAGE_STATE_CHANGE_COUNT_MASK) != imageChangeCount)
+		(state & PAGE_STATE_CHANGE_COUNT_MASK) != imageChangeCount ||
+		O_PAGE_GET_CHANGE_COUNT(hdr) != imagePageChangeCount)
 		return OBTreeFastPathFindRetry;
 
 	return OBTreeFastPathFindOK;
@@ -505,6 +508,7 @@ fastpath_find_chunk(Pointer pagePtr,
 	int			offset;
 	Pointer		base;
 	uint64		imageChangeCount = pg_atomic_read_u64(&imgHdr->o_header.state) & PAGE_STATE_CHANGE_COUNT_MASK;
+	uint32		imagePageChangeCount = O_PAGE_GET_CHANGE_COUNT(imgHdr);
 	uint64		state;
 
 	if (!O_PAGE_IS(pagePtr, HIKEYS_FIXED))
@@ -544,7 +548,8 @@ fastpath_find_chunk(Pointer pagePtr,
 
 	state = pg_atomic_read_u64(&hdr->o_header.state);
 	if (O_PAGE_STATE_READ_IS_BLOCKED(state) ||
-		(state & PAGE_STATE_CHANGE_COUNT_MASK) != imageChangeCount)
+		(state & PAGE_STATE_CHANGE_COUNT_MASK) != imageChangeCount ||
+		O_PAGE_GET_CHANGE_COUNT(hdr) != imagePageChangeCount)
 		return OBTreeFastPathFindRetry;
 
 	return OBTreeFastPathFindOK;
