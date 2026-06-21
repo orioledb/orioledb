@@ -61,7 +61,8 @@ static void btree_page_search_items(BTreeDescr *desc, Page p, Pointer key,
 									BTreeKeyType keyType,
 									BTreePageItemLocator *locator);
 static void refresh_parent_img_chunk(OBTreeFindPageInternalContext *intCxt);
-static bool convert_fastpath_parent_to_img(OBTreeFindPageInternalContext *intCxt);
+static bool convert_fastpath_parent_to_img(OBTreeFindPageContext *context,
+										   BTreePageItemLocator *locator);
 
 /*
  * A parent locator that find_left_page()/find_right_page() will navigate must
@@ -410,85 +411,40 @@ refresh_parent_img_chunk(OBTreeFindPageInternalContext *intCxt)
 
 /*
  * The fastpath downlink search positions the locator straight onto the shared
- * page (it skips copying the page into parentImg).  Callers that step to
- * siblings (KEEP_PARENT) need the parent in context->parentImg, so convert the
- * locator from the shared page to a local one: copy the header (with hikeys)
- * and the referenced chunk into parentImg, set up parentPartial so other chunks
- * load on demand, and rebind the locator onto parentImg.
+ * page (it skips loading the hikeys chunk, so parentImg holds only the base
+ * header that the descent's partial read already copied there).  Callers that
+ * step to siblings (KEEP_PARENT) need the parent fully navigable in parentImg,
+ * so finish that partial read on top of the *existing* snapshot: load the
+ * hikeys chunk (the chunk-descriptor array) and the chunk holding the downlink
+ * into parentImg through the already-set-up context->parentPartial, then rebind
+ * the locator onto parentImg.
  *
- * The copy is made from the live shared page without a page lock, so it has to
- * be validated the same way try_copy_page() validates a partial read: bail out
- * if reads are blocked, if a header field used to size the copy is out of
- * range (a torn read), if the page-state change count moved across the copy, or
- * if the page is no longer the one we descended to (pageChangeCount changed).
- * Returns false in any of those cases; the caller must re-read the parent.
+ * We deliberately do NOT re-read the page from scratch (o_btree_read_page()):
+ * the base header was snapshotted during the descent, and re-snapshotting would
+ * capture a possibly newer page version, leaving parentImg inconsistent with
+ * the downlink the fastpath already chose off that snapshot.  Both loads
+ * validate against the snapshot's change count (state bits + pageChangeCount),
+ * so a parent that changed or was evicted/reused under us makes them fail and
+ * the caller re-finds.  partial_load_chunk() positions the locator at item 0,
+ * so the caller's real itemOffset is restored afterwards.
+ *
+ * Returns false if the parent changed under us; the caller must re-find.
  */
 static bool
-convert_fastpath_parent_to_img(OBTreeFindPageInternalContext *intCxt)
+convert_fastpath_parent_to_img(OBTreeFindPageContext *context,
+							   BTreePageItemLocator *locator)
 {
-	OBTreeFindPageContext *context = intCxt->context;
-	OInMemoryBlkno blkno = intCxt->blkno;
-	Pointer		src = O_GET_IN_MEMORY_PAGE(blkno);
-	BTreePageItemLocator *locator = &context->items[context->index].locator;
-	BTreePageHeader *hdr = (BTreePageHeader *) src;
 	OffsetNumber chunkOffset = locator->chunkOffset;
-	LocationIndex chunkBegin;
-	LocationIndex chunkEnd;
-	LocationIndex hikeysEnd;
-	OffsetNumber chunksCount;
-	uint64		state1,
-				state2;
+	OffsetNumber itemOffset = locator->itemOffset;
 
-	state1 = pg_atomic_read_u64(&(O_PAGE_HEADER(src)->state));
-	if (O_PAGE_STATE_READ_IS_BLOCKED(state1))
+	if (!partial_load_hikeys_chunk(&context->parentPartial, context->parentImg))
 		return false;
 
-	pg_read_barrier();
-
-	hikeysEnd = hdr->hikeysEnd;
-	chunksCount = hdr->chunksCount;
-	if (hikeysEnd < MAXALIGN(sizeof(BTreePageHeader)) || hikeysEnd > ORIOLEDB_BLCKSZ ||
-		chunkOffset >= chunksCount)
+	if (!partial_load_chunk(&context->parentPartial, context->parentImg,
+							chunkOffset, locator))
 		return false;
 
-	chunkBegin = SHORT_GET_LOCATION(hdr->chunkDesc[chunkOffset].shortLocation);
-	if (chunkOffset + 1 < chunksCount)
-		chunkEnd = SHORT_GET_LOCATION(hdr->chunkDesc[chunkOffset + 1].shortLocation);
-	else
-		chunkEnd = hdr->dataSize;
-	if (chunkBegin > chunkEnd || chunkEnd > ORIOLEDB_BLCKSZ)
-		return false;
-
-	pg_read_barrier();
-
-	/* Header including the hikeys chunk. */
-	memcpy(context->parentImg, src, hikeysEnd);
-	/* The single chunk that `locator` references. */
-	memcpy(context->parentImg + chunkBegin,
-		   src + chunkBegin,
-		   chunkEnd - chunkBegin);
-
-	pg_read_barrier();
-	state2 = pg_atomic_read_u64(&(O_PAGE_HEADER(src)->state));
-
-	/* The page must not have changed or been blocked while we copied it. */
-	if ((state1 & PAGE_STATE_CHANGE_COUNT_MASK) != (state2 & PAGE_STATE_CHANGE_COUNT_MASK) ||
-		O_PAGE_STATE_READ_IS_BLOCKED(state2))
-		return false;
-
-	/* ... and it must still be the page we descended to. */
-	if (O_PAGE_GET_CHANGE_COUNT(src) != intCxt->pageChangeCount)
-		return false;
-
-	context->parentPartial.src = src;
-	context->parentPartial.isPartial = true;
-	context->parentPartial.hikeysChunkIsLoaded = true;
-	memset(context->parentPartial.chunkIsLoaded, 0,
-		   sizeof(context->parentPartial.chunkIsLoaded));
-	context->parentPartial.chunkIsLoaded[chunkOffset] = true;
-
-	locator->chunk =
-		(BTreePageChunk *) (context->parentImg + chunkBegin);
+	locator->itemOffset = itemOffset;
 	return true;
 }
 
@@ -545,6 +501,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 	intCxt.keyType = keyType;
 	intCxt.targetLevel = targetLevel;
 	intCxt.inserted = false;
+	context->parentImgDeferred = false;
 
 
 	ASAN_UNPOISON_MEMORY_REGION(&fastpathMeta, sizeof(fastpathMeta));
@@ -904,15 +861,30 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		 * The immediate parent's downlink may have been located via the
 		 * fastpath, leaving the locator pointing into the shared page (and
 		 * parentImg not populated).  A sibling-navigating caller
-		 * (KEEP_PARENT, e.g. the iterator) needs the parent in parentImg, so
-		 * materialize it and rebind the locator before recording the page
-		 * change count from parentImg.  The copy is validated; if the parent
-		 * changed under us while copying, re-read it from the top of the loop
-		 * (a stale/evicted parent is then caught by the change-count checks).
+		 * (KEEP_PARENT, e.g. the iterator) needs the parent in parentImg.
+		 *
+		 * A backward scan (KEEP_LOKEY) reads the parent's lokey from
+		 * parentImg just below, so materialize it now; if the parent changed
+		 * under us, re-read it from the top of the loop.  A forward scan
+		 * touches the parent only when it steps right, so defer the copy to
+		 * find_right_page() -- a scan that never crosses a parent boundary
+		 * then pays nothing, and the on-demand copy is fresher than one
+		 * carried across many iterator steps.  (A slowpath parent read
+		 * already filled parentImg, so nothing to do there.)
 		 */
-		if (fastpath && keepParentFlag && level == targetLevel + 1 &&
-			!convert_fastpath_parent_to_img(&intCxt))
-			continue;
+		if (level == targetLevel + 1)
+		{
+			if (fastpath && keepParentFlag && !keepLokeyFlag)
+				context->parentImgDeferred = true;
+			else
+			{
+				context->parentImgDeferred = false;
+				if (fastpath && keepParentFlag &&
+					!convert_fastpath_parent_to_img(context,
+													&context->items[context->index].locator))
+					continue;
+			}
+		}
 
 		context->items[context->index].pageChangeCount = O_PAGE_GET_CHANGE_COUNT(intCxt.pagePtr);
 
@@ -1506,6 +1478,25 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 	parentItem = &context->items[context->index - 1];
 	item = &context->items[context->index];
 
+	/* copy hikey (also needed for the find_page() fallback below) */
+	copy_fixed_hikey(desc, hikey, context->img);
+
+	/*
+	 * A forward descent that located the parent via the fastpath deferred
+	 * copying it into parentImg (see find_page()).  Now that we actually need
+	 * the parent's downlinks, materialize it; on failure (the parent changed
+	 * or was evicted) fall back to a find_page() re-descent from the root.
+	 */
+	if (context->parentImgDeferred)
+	{
+		if (!convert_fastpath_parent_to_img(context, &parentItem->locator))
+		{
+			(void) find_page(context, hikey, BTreeKeyNonLeafKey, level);
+			return true;
+		}
+		context->parentImgDeferred = false;
+	}
+
 	/* Try to get next item from the parent page */
 	loc = context->items[context->index - 1].locator;
 
@@ -1515,9 +1506,6 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 
 	if (BTREE_PAGE_LOCATOR_IS_VALID(context->parentImg, &loc))
 		BTREE_PAGE_LOCATOR_NEXT(context->parentImg, &loc);
-
-	/* copy hikey */
-	copy_fixed_hikey(desc, hikey, context->img);
 
 	/* Try to load next page using next parent downlink */
 	if (BTREE_PAGE_LOCATOR_IS_VALID(context->parentImg, &loc))
