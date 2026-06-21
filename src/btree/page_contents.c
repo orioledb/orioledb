@@ -87,14 +87,17 @@ read_page_from_undo(BTreeDescr *desc, Page img, UndoLocation undo_loc,
  * Try to copy consistent image of page with page number = blkno to dest.
  */
 static inline ReadPageResult
-try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
-			  PartialPageState *partial, bool loadHikeysChunk,
+try_copy_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeCount,
+			  Page dest, PartialPageState *partial, bool loadHikeysChunk,
 			  CommitSeqNo *readCsn)
 {
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	uint64		state1,
 				state2;
 	bool		hiKeysEndOK PG_USED_FOR_ASSERTS_ONLY = true;
+#ifdef USE_ASSERT_CHECKING
+	ORelOids	pageOids;
+#endif
 	PagePool   *ppool;
 
 	state1 = pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state));
@@ -123,6 +126,20 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
 	else
 		memcpy(dest, p, ORIOLEDB_BLCKSZ);
 
+#ifdef USE_ASSERT_CHECKING
+
+	/*
+	 * Read the page's owning tree oids inside the same barrier-protected
+	 * window as the copy.  If the state checks below confirm the page did not
+	 * change under us, these oids describe the page we copied and its
+	 * physical identity must match the tree we descended -- otherwise we
+	 * followed a downlink onto a page that belongs to a different tree (a
+	 * reused/evicted page).  Validated by the Assert() after all the regular
+	 * checks pass.
+	 */
+	pageOids = O_GET_IN_MEMORY_PAGEDESC(blkno)->oids;
+#endif
+
 	if (readCsn)
 		*readCsn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 
@@ -138,6 +155,22 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
 
 	Assert(hiKeysEndOK);
 
+	/*
+	 * A shared-pool page must physically belong to the tree we descended.
+	 * Compare only the physical identity (datoid + relnode): reloid is the
+	 * logical catalog OID stamped into the descriptor at page creation and
+	 * can legitimately drift from desc->oids.reloid after DDL that keeps the
+	 * same relfilenode (e.g. ALTER TYPE), so it is excluded.  Local-pool
+	 * (temp) pages are skipped: they use a private oid scheme and a
+	 * per-backend slot can be reused across the temp relation's own indexes,
+	 * so their descriptor oids need not match.  The cross-tree reuse this
+	 * guards against (a stale downlink onto an evicted-and-reused page, e.g.
+	 * on a hot standby) is a shared-pool concern.
+	 */
+	Assert(O_PAGE_IS_LOCAL(blkno) ||
+		   (pageOids.datoid == desc->oids.datoid &&
+			pageOids.relnode == desc->oids.relnode));
+
 	ppool = get_ppool_by_blkno(blkno);
 	ppool_ucm_inc_usage(ppool, blkno);
 
@@ -148,15 +181,15 @@ try_copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
  * Copy consistent image of page with page number = blkno to dest.
  */
 static inline bool
-copy_page(OInMemoryBlkno blkno, uint32 pageChangeCount, Page dest,
-		  PartialPageState *partial, bool loadHikeysChunk,
+copy_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeCount,
+		  Page dest, PartialPageState *partial, bool loadHikeysChunk,
 		  CommitSeqNo *readCsn)
 {
 	while (true)
 	{
 		ReadPageResult result;
 
-		result = try_copy_page(blkno, pageChangeCount, dest,
+		result = try_copy_page(desc, blkno, pageChangeCount, dest,
 							   partial, loadHikeysChunk, readCsn);
 
 		if (result == ReadPageResultOK)
@@ -230,7 +263,7 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 * chain walk, which is why the former "read undo without copying" fast
 	 * path is gone.
 	 */
-	if (!copy_page(blkno, pageChangeCount, img, partial,
+	if (!copy_page(desc, blkno, pageChangeCount, img, partial,
 				   loadHikeysChunk, readCsn))
 		return false;
 	header = (BTreePageHeader *) img;
@@ -307,7 +340,7 @@ o_btree_try_read_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeC
 	 * the page must be present before walking the undo chain (see
 	 * o_btree_read_page()).
 	 */
-	result = try_copy_page(blkno, pageChangeCount, img, partial,
+	result = try_copy_page(desc, blkno, pageChangeCount, img, partial,
 						   loadHikeysChunk, readCsn);
 	if (result != ReadPageResultOK)
 		return result;
