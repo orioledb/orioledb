@@ -14,6 +14,7 @@
 #include "c.h"
 #include "postgres.h"
 
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "orioledb.h"
@@ -45,6 +46,7 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "pgstat.h"
+#include "storage/fd.h"
 #include "storage/lmgr.h"
 #include "storage/md.h"
 #include "storage/proc.h"
@@ -61,6 +63,7 @@ static void reset_command_undo_locations(void);
 
 PG_FUNCTION_INFO_V1(orioledb_read_sys_xid_undo_location);
 PG_FUNCTION_INFO_V1(orioledb_insert_sys_xid_undo_location);
+PG_FUNCTION_INFO_V1(orioledb_undo_size);
 PG_FUNCTION_INFO_V1(orioledb_get_undo_meta);
 PG_FUNCTION_INFO_V1(orioledb_get_proc_retain_undo_locations);
 
@@ -3245,6 +3248,88 @@ o_add_rewind_relfilenode_undo_item(RelFileNode *onCommit, RelFileNode *onAbort,
 		onAbort += stepOnAbort;
 		nOnAbort -= stepOnAbort;
 	}
+}
+
+/*
+ * Output OrioleDB undo sizes per each undo type.
+ * There is a single undo dir for all tablespaces and databasess.
+ */
+Datum
+orioledb_undo_size(PG_FUNCTION_ARGS)
+{
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	struct dirent *direntry;
+	DIR		   *dirdesc;
+	char		filename[MAXPGPATH * 2];
+	const char	path[15] = "orioledb_undo";
+	int			totalsize[UndoLogsCount];
+
+	InitMaterializedSRF(fcinfo, 0);
+
+	memset(totalsize, 0, sizeof(totalsize));
+
+	dirdesc = AllocateDir(path);
+
+	if (!dirdesc)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not open directory \"%s\": %m", path)));
+
+	while ((direntry = ReadDir(dirdesc, path)) != NULL)
+	{
+		struct stat fst;
+		char		undo_type[7];
+
+		CHECK_FOR_INTERRUPTS();
+
+		if (strcmp(direntry->d_name, ".") == 0 ||
+			strcmp(direntry->d_name, "..") == 0)
+			continue;
+
+		snprintf(filename, sizeof(filename), "%s/%s", path, direntry->d_name);
+
+		if (stat(filename, &fst) < 0)
+		{
+			if (errno == ENOENT)
+				continue;
+			else
+				ereport(ERROR,
+						(errcode_for_file_access(),
+						 errmsg("could not stat file \"%s\": %m", filename)));
+		}
+
+		snprintf(undo_type, 7, "%s", direntry->d_name + 10);
+
+		if (strcmp(undo_type, "row") == 0)
+		{
+			totalsize[UndoLogRegular] += fst.st_size;
+		}
+		else if (strcmp(undo_type, "page") == 0)
+		{
+			totalsize[UndoLogRegularPageLevel] += fst.st_size;
+		}
+		else if (strcmp(undo_type, "system") == 0)
+		{
+			totalsize[UndoLogSystem] += fst.st_size;
+		}
+	}
+
+	FreeDir(dirdesc);
+
+	for (int i = 0; i < UndoLogsCount; i++)
+	{
+		Datum		values[2];
+		bool		nulls[2];
+
+		nulls[0] = false;
+		values[0] = PointerGetDatum(cstring_to_text(get_undo_type_name(i)));
+		nulls[1] = false;
+		values[1] = totalsize[i];
+
+		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+	}
+
+	return (Datum) 0;
 }
 
 Datum
