@@ -2998,20 +2998,32 @@ class RecoveryWithArchivingTest(BaseTest):
 		    "Recovery target reached: stop-after synchronization barrier "
 		    "completed",
 		    "Recovery target reached: waiting for replay progress to "
-		    "reach the stop-after replay boundary",
+		    "reach the stop-after Oriole replay boundary",
 		    "Recovery target reached: waiting for replay path to expose "
 		    "a visible boundary corresponding to the stop-after target",
 		    "Recovery target reached: waiting for deferred finalization "
 		    "publication to reach the stop-after visible boundary"
 		])
 
-	def _assert_stop_after_barrier_logs(self, replica_log):
+	def _assert_stop_after_barrier_logs(self,
+	                                    replica_log,
+	                                    allow_base_backup=False):
 		self._assert_log_contains(replica_log, [
 		    "Recovery target reached: start synchronization barrier",
-		    "stop_after=1",
-		    "Recovery target reached: stop-after synchronization "
-		    "barrier completed"
+		    "stop_after=1"
 		])
+		if allow_base_backup:
+			self._assert_log_contains_any(replica_log, [
+			    "Recovery target reached: stop-after synchronization "
+			    "barrier completed",
+			    "Recovery target reached: synchronization barrier "
+			    "completed at base-backup visible state after stop"
+			])
+		else:
+			self._assert_log_contains(replica_log, [
+			    "Recovery target reached: stop-after synchronization "
+			    "barrier completed"
+			])
 		self._assert_log_not_contains(replica_log, [
 		    "Recovery target reached: stop-before synchronization "
 		    "barrier completed",
@@ -3513,11 +3525,56 @@ recovery_target_action = 'pause'
 			self._assert_stop_after_barrier_logs(replica_log)
 			self._assert_log_contains_any(replica_log, [
 			    "Recovery target reached: waiting for replay progress to "
-			    "reach the stop-after replay boundary",
+			    "reach the stop-after Oriole replay boundary",
 			    "Recovery target reached: waiting for deferred finalization "
 			    "publication to reach the stop-after visible boundary",
 			    "Recovery target reached: stop-after synchronization "
 			    "barrier completed"
+			])
+
+	def test_recovery_target_xid_barrier_stop_after_first_post_backup(
+	        self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1001,2000));
+			    SELECT pg_current_wal_lsn(), pg_current_xact_id();
+			    COMMIT;
+			    """)
+			(_,
+			 recovery_txid) = ret.decode().strip().splitlines()[-1].split('|')
+
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_action = 'pause'
+""")
+
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			replica.start()
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 2000, 2000)
+
+			replica_log = self._read_replica_log(replica)
+
+			self._assert_stop_after_barrier_logs(replica_log)
+			self._assert_log_not_contains(replica_log, [
+			    "Recovery target reached: synchronization barrier "
+			    "completed at base-backup visible state after stop"
 			])
 
 	def test_recovery_target_xid_barrier_stop_after_promote(self):
@@ -3829,12 +3886,88 @@ recovery_target_action = 'pause'
 			self._assert_stop_after_barrier_logs(replica_log)
 			self._assert_log_contains_any(replica_log, [
 			    "Recovery target reached: waiting for replay progress to "
-			    "reach the stop-after replay boundary",
+			    "reach the stop-after Oriole replay boundary",
 			    "Recovery target reached: waiting for deferred finalization "
 			    "publication to reach the stop-after visible boundary",
 			    "Recovery target reached: stop-after synchronization "
 			    "barrier completed"
 			])
+
+	def test_recovery_target_lsn_barrier_stop_after_heap_boundary(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+			CREATE TABLE heap_marker (a int);
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+			node.safe_psql("INSERT INTO heap_marker VALUES (1)")
+			recovery_lsn = node.safe_psql(
+			    "SELECT pg_current_wal_lsn()").decode().strip()
+
+			replica.append_conf(f"""
+recovery_target_lsn = '{recovery_lsn}'
+recovery_target_action = 'pause'
+""")
+
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			replica.start()
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 2000, 2000)
+
+			replica_log = self._read_replica_log(replica)
+
+			self._assert_stop_after_barrier_logs(replica_log)
+
+	def test_recovery_target_lsn_barrier_stop_after_base_backup_heap_boundary(
+	        self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+			CREATE TABLE heap_marker (a int);
+		""")
+
+		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			node.safe_psql("INSERT INTO heap_marker VALUES (1)")
+			recovery_lsn = node.safe_psql(
+			    "SELECT pg_current_wal_lsn()").decode().strip()
+
+			replica.append_conf(f"""
+recovery_target_lsn = '{recovery_lsn}'
+recovery_target_action = 'pause'
+""")
+
+			node.safe_psql("SELECT pg_switch_wal()")
+
+			replica.start()
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			self._assert_visible_series(replica, 1000, 1000)
+
+			replica_log = self._read_replica_log(replica)
+
+			self._assert_stop_after_barrier_logs(replica_log,
+			                                     allow_base_backup=True)
 
 	def test_recovery_target_lsn_barrier_stop_after_late_boundary(self):
 		node = self.node

@@ -1594,6 +1594,9 @@ orioledb_recovery_stops_before_hook(XLogReaderState *record,
 			 recoveryTargetInclusive,
 			 stop_here ? "stop-before" : "continue");
 
+		pfree(xact_time_str);
+		pfree(target_time_str);
+
 		return stop_here;
 	}
 
@@ -1624,7 +1627,6 @@ void
 orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 {
 	XLogRecPtr	target_ptr;
-	XLogRecPtr	required_visible_ptr;
 
 	Assert(info);
 
@@ -1632,34 +1634,32 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 	 * Use PostgreSQL's stop-record boundary directly as the primary recovery
 	 * stop reference point.
 	 *
-	 * For stop-after semantics this is the replay-side boundary that Oriole
-	 * must reach before publication/retain convergence is checked.
+	 * For stop-after semantics PostgreSQL's stop-record boundary is used to
+	 * select the latest Oriole replay/visible pair that is already part of
+	 * the stopped recovery state.  Oriole may not have a replay boundary
+	 * equal to target_ptr when the target is a non-Oriole WAL record.
 	 *
 	 * For stop-before semantics this is the upper bound that published
 	 * visible state must remain strictly below.
 	 */
 	target_ptr = info->recordPtr;
-	required_visible_ptr = info->recoveryStopAfter ?
-		target_ptr : InvalidXLogRecPtr;
 
 	elog(DEBUG4,
 		 "Recovery target reached: start synchronization barrier "
 		 "(target=%d action=%d stop_after=%d record_ptr=%X/%X "
-		 "record_end_ptr=%X/%X target_ptr=%X/%X required_visible_ptr=%X/%X)",
+		 "record_end_ptr=%X/%X target_ptr=%X/%X)",
 		 recoveryTarget,
 		 recoveryTargetAction,
 		 info->recoveryStopAfter,
 		 LSN_FORMAT_ARGS(info->recordPtr),
 		 LSN_FORMAT_ARGS(info->recordEndPtr),
-		 LSN_FORMAT_ARGS(target_ptr),
-		 LSN_FORMAT_ARGS(required_visible_ptr));
+		 LSN_FORMAT_ARGS(target_ptr));
 
 	/*
 	 * PerformWalRecovery() invokes this hook for the WAL record that caused
 	 * recovery to stop, so recordPtr is expected to be a valid stop boundary.
 	 */
 	Assert(XLogRecPtrIsValid(target_ptr));
-	Assert(XLogRecPtrIsValid(required_visible_ptr) || !info->recoveryStopAfter);
 
 	while (true)
 	{
@@ -1697,6 +1697,14 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 		XLogRecPtr	stop_after_visible_ptr;
 
 		/*
+		 * Oriole replay boundary corresponding to stop_after_visible_ptr.
+		 * This may be older than PostgreSQL's target_ptr when the recovery
+		 * target is a non-Oriole WAL record after the latest Oriole-visible
+		 * boundary.
+		 */
+		XLogRecPtr	stop_after_replay_ptr;
+
+		/*
 		 * The hook runs in the startup process itself, so it must drive the
 		 * startup-side deferred finalization instead of waiting for some
 		 * other process to advance recovery_published_visible_ptr.
@@ -1709,6 +1717,7 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 		recovery_read_visible_boundary_pair(&last_replay_ptr_snapshot, &last_visible_ptr_snapshot);
 		stop_before_visible_ptr = InvalidXLogRecPtr;
 		stop_after_visible_ptr = InvalidXLogRecPtr;
+		stop_after_replay_ptr = InvalidXLogRecPtr;
 
 		if (!info->recoveryStopAfter &&
 			XLogRecPtrIsValid(last_replay_ptr_snapshot) &&
@@ -1718,15 +1727,18 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 
 		if (info->recoveryStopAfter &&
 			XLogRecPtrIsValid(last_replay_ptr_snapshot) &&
-			last_replay_ptr_snapshot >= target_ptr &&
 			XLogRecPtrIsValid(last_visible_ptr_snapshot))
+		{
+			stop_after_replay_ptr = last_replay_ptr_snapshot;
 			stop_after_visible_ptr = last_visible_ptr_snapshot;
+		}
 
 		elog(DEBUG2,
 			 "Recovery target barrier state: current_ptr=%X/%X retain_ptr=%X/%X "
 			 "finished_ptr=%X/%X main_retain_ptr=%X/%X recovery_ptr=%X/%X "
 			 "last_replay_ptr=%X/%X last_visible_ptr=%X/%X "
-			 "stop_before_visible_ptr=%X/%X stop_after_visible_ptr=%X/%X "
+			 "stop_before_visible_ptr=%X/%X stop_after_replay_ptr=%X/%X "
+			 "stop_after_visible_ptr=%X/%X "
 			 "nextCommitSeqNo=" UINT64_FORMAT,
 			 LSN_FORMAT_ARGS(current_ptr),
 			 LSN_FORMAT_ARGS(retain_ptr),
@@ -1736,16 +1748,17 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 			 LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
 			 LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
 			 LSN_FORMAT_ARGS(stop_before_visible_ptr),
+			 LSN_FORMAT_ARGS(stop_after_replay_ptr),
 			 LSN_FORMAT_ARGS(stop_after_visible_ptr),
 			 pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo));
 
 		/*
 		 * For stop-after semantics, PostgreSQL stops after the stop record
-		 * becomes part of the visible recovery state.  Oriole therefore first
-		 * requires replay progress to reach PostgreSQL's explicit stop
-		 * boundary, and then requires publication/retain convergence to the
-		 * corresponding Oriole-visible stop-after boundary captured during
-		 * replay.
+		 * becomes part of the visible recovery state.  Oriole must converge
+		 * on the latest Oriole-visible boundary already replayed at that
+		 * point.  That boundary may be older than PostgreSQL's target_ptr
+		 * when the target is a non-Oriole WAL record after the latest Oriole
+		 * commit-producing event.
 		 *
 		 * For stop-before semantics, PostgreSQL stops before applying the
 		 * stop record.  In that case Oriole must converge on the latest safe
@@ -1930,13 +1943,13 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 			elog(DEBUG4,
 				 "Recovery target reached: stop-after snapshot after "
 				 "startup-side publication attempt "
-				 "(target_ptr=%X/%X required_visible_ptr=%X/%X "
+				 "(target_ptr=%X/%X stop_after_replay_ptr=%X/%X "
 				 "recovery_ptr=%X/%X last_replay_ptr=%X/%X "
 				 "last_visible_ptr=%X/%X stop_after_visible_ptr=%X/%X "
 				 "main_retain_ptr=%X/%X current_ptr=%X/%X "
 				 "retain_ptr=%X/%X finished_ptr=%X/%X)",
 				 LSN_FORMAT_ARGS(target_ptr),
-				 LSN_FORMAT_ARGS(required_visible_ptr),
+				 LSN_FORMAT_ARGS(stop_after_replay_ptr),
 				 LSN_FORMAT_ARGS(recovery_ptr_snapshot),
 				 LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
 				 LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
@@ -1946,16 +1959,58 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 				 LSN_FORMAT_ARGS(retain_ptr),
 				 LSN_FORMAT_ARGS(finished_ptr));
 
-			if (current_ptr < required_visible_ptr)
+			if (!XLogRecPtrIsValid(stop_after_visible_ptr))
+			{
+				/*
+				 * The target may be a non-Oriole WAL record before the first
+				 * post-backup Oriole-visible boundary.  In that case there is
+				 * no pair to publish: the base-backup visible state is already
+				 * the correct stop-after Oriole state.
+				 */
+				if (!XLogRecPtrIsValid(last_visible_ptr_snapshot) &&
+					!XLogRecPtrIsValid(finished_ptr))
+				{
+					elog(DEBUG4,
+						 "Recovery target reached: synchronization barrier "
+						 "completed at base-backup visible state after stop "
+						 "(target_ptr=%X/%X recovery_ptr=%X/%X "
+						 "last_replay_ptr=%X/%X last_visible_ptr=%X/%X "
+						 "main_retain_ptr=%X/%X current_ptr=%X/%X "
+						 "retain_ptr=%X/%X finished_ptr=%X/%X)",
+						 LSN_FORMAT_ARGS(target_ptr),
+						 LSN_FORMAT_ARGS(recovery_ptr_snapshot),
+						 LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
+						 LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
+						 LSN_FORMAT_ARGS(main_retain_ptr),
+						 LSN_FORMAT_ARGS(current_ptr),
+						 LSN_FORMAT_ARGS(retain_ptr),
+						 LSN_FORMAT_ARGS(finished_ptr));
+					break;
+				}
+				else
+				{
+					elog(DEBUG4,
+						 "Recovery target reached: waiting for replay path to expose "
+						 "a visible boundary corresponding to the stop-after target "
+						 "(target_ptr=%X/%X last_replay_ptr=%X/%X "
+						 "last_visible_ptr=%X/%X current_ptr=%X/%X finished_ptr=%X/%X)",
+						 LSN_FORMAT_ARGS(target_ptr),
+						 LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
+						 LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
+						 LSN_FORMAT_ARGS(current_ptr),
+						 LSN_FORMAT_ARGS(finished_ptr));
+				}
+			}
+			else if (current_ptr < stop_after_replay_ptr)
 			{
 				elog(DEBUG4,
 					 "Recovery target reached: waiting for replay progress to "
-					 "reach the stop-after replay boundary "
-					 "(stop_after=%d target_ptr=%X/%X required_visible_ptr=%X/%X "
+					 "reach the stop-after Oriole replay boundary "
+					 "(stop_after=%d target_ptr=%X/%X stop_after_replay_ptr=%X/%X "
 					 "current_ptr=%X/%X)",
 					 info->recoveryStopAfter,
 					 LSN_FORMAT_ARGS(target_ptr),
-					 LSN_FORMAT_ARGS(required_visible_ptr),
+					 LSN_FORMAT_ARGS(stop_after_replay_ptr),
 					 LSN_FORMAT_ARGS(current_ptr));
 			}
 			else if (current_ptr != retain_ptr)
@@ -1968,19 +2023,6 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 					 LSN_FORMAT_ARGS(target_ptr),
 					 LSN_FORMAT_ARGS(current_ptr),
 					 LSN_FORMAT_ARGS(retain_ptr));
-			}
-			else if (!XLogRecPtrIsValid(stop_after_visible_ptr))
-			{
-				elog(DEBUG4,
-					 "Recovery target reached: waiting for replay path to expose "
-					 "a visible boundary corresponding to the stop-after target "
-					 "(target_ptr=%X/%X last_replay_ptr=%X/%X "
-					 "last_visible_ptr=%X/%X current_ptr=%X/%X finished_ptr=%X/%X)",
-					 LSN_FORMAT_ARGS(target_ptr),
-					 LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
-					 LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
-					 LSN_FORMAT_ARGS(current_ptr),
-					 LSN_FORMAT_ARGS(finished_ptr));
 			}
 			else if (finished_ptr < stop_after_visible_ptr)
 			{
@@ -2011,13 +2053,13 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 					 "Recovery target reached: stop-after synchronization "
 					 "barrier completed "
 					 "(target_ptr=%X/%X recovery_ptr=%X/%X "
-					 "required_visible_ptr=%X/%X last_replay_ptr=%X/%X "
+					 "stop_after_replay_ptr=%X/%X last_replay_ptr=%X/%X "
 					 "last_visible_ptr=%X/%X stop_after_visible_ptr=%X/%X "
 					 "main_retain_ptr=%X/%X "
 					 "current_ptr=%X/%X retain_ptr=%X/%X finished_ptr=%X/%X)",
 					 LSN_FORMAT_ARGS(target_ptr),
 					 LSN_FORMAT_ARGS(recovery_ptr_snapshot),
-					 LSN_FORMAT_ARGS(required_visible_ptr),
+					 LSN_FORMAT_ARGS(stop_after_replay_ptr),
 					 LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
 					 LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
 					 LSN_FORMAT_ARGS(stop_after_visible_ptr),
@@ -2050,13 +2092,13 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 					 "Recovery target reached: stop-after wait aborted due to "
 					 "unexpected_worker_detach "
 					 "(target_ptr=%X/%X recovery_ptr=%X/%X "
-					 "required_visible_ptr=%X/%X last_replay_ptr=%X/%X "
+					 "stop_after_replay_ptr=%X/%X last_replay_ptr=%X/%X "
 					 "last_visible_ptr=%X/%X stop_after_visible_ptr=%X/%X "
 					 "main_retain_ptr=%X/%X current_ptr=%X/%X "
 					 "retain_ptr=%X/%X finished_ptr=%X/%X)",
 					 LSN_FORMAT_ARGS(target_ptr),
 					 LSN_FORMAT_ARGS(recovery_ptr_snapshot),
-					 LSN_FORMAT_ARGS(required_visible_ptr),
+					 LSN_FORMAT_ARGS(stop_after_replay_ptr),
 					 LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
 					 LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
 					 LSN_FORMAT_ARGS(stop_after_visible_ptr),
