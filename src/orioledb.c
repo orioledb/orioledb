@@ -270,7 +270,7 @@ typedef struct WalDescCtx
 {
 	StringInfo	buf;
 
-}			WalDescCtx;
+} WalDescCtx;
 
 static WalParseResult
 wal_desc_check_version(const WalReaderState *r)

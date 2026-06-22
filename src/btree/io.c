@@ -1183,6 +1183,8 @@ get_free_disk_extent_copy_blkno(BTreeDescr *desc, off_t page_size,
 	return FileExtentIsValid(*extent);
 }
 
+#ifdef IS_DEV
+
 /* Functions for eviction_page_checkpoint_numbers test included under IS_DEV */
 PG_FUNCTION_INFO_V1(reset_read_page_checkpoint_stats);
 PG_FUNCTION_INFO_V1(fetch_read_page_checkpoint_stats);
@@ -1221,6 +1223,8 @@ store_read_page_checkpoint_stats(uint32 checkpointNum)
 	min_read_page_checkpoint = Min(min_read_page_checkpoint, checkpointNum);
 	elog(DEBUG1, "Remember read_page_checkpoin: min %u max %u", min_read_page_checkpoint, max_read_page_checkpoint);
 }
+
+#endif
 
 /*
  * Now we have only one page version (1). When we have
@@ -1380,8 +1384,10 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 	memset(img, 0, O_PAGE_HEADER_SIZE);
 	((BTreePageHeader *) img)->o_header.checkpointNum = ondisk_page_header.checkpointNum;
 
+#ifdef IS_DEV
 	/* For eviction/page checkpoint number test */
 	store_read_page_checkpoint_stats(((BTreePageHeader *) img)->o_header.checkpointNum);
+#endif
 
 	return true;
 }
