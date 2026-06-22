@@ -199,6 +199,16 @@ struct BTreeSeqScan
 	/* Parallel index scan range filter */
 	OBTreeKeyRange *scanRange;
 
+	/*
+	 * Optimization flags for range-filtered scans.  pageFullyInRange is set
+	 * when the current page's key range is entirely within scanRange,
+	 * allowing per-tuple range checks to be skipped.  enteredRange is set
+	 * once the first tuple on the current page passes the low-bound check;
+	 * subsequent key-ordered tuples only need the high-bound check.
+	 */
+	bool		pageFullyInRange;
+	bool		enteredRange;
+
 	/* Private parallel worker info in a backend */
 	ParallelOScanDesc poscan;
 	int			workerNumber;
@@ -1429,6 +1439,51 @@ check_downlink_in_scan_range(BTreeSeqScan *scan, OTuple keyRangeLow,
 }
 
 /*
+ * Checks if a page's entire key range is within the scan's qualification
+ * range.  When this returns true, every tuple on the page is guaranteed to
+ * be in range, so per-tuple checks can be skipped entirely.
+ */
+static bool
+page_fully_in_scan_range(BTreeSeqScan *scan, OTuple keyRangeLow,
+						 OTuple keyRangeHigh)
+{
+	OBTreeKeyRange *scanRange = scan->scanRange;
+
+	if (!scanRange)
+		return false;
+
+	/* Page must start at or after scan low bound */
+	if (!O_TUPLE_IS_NULL(keyRangeLow))
+	{
+		int			cmp;
+
+		cmp = o_btree_cmp(scan->desc,
+						  &keyRangeLow, BTreeKeyNonLeafKey,
+						  &scanRange->low, BTreeKeyBound);
+		if (cmp < 0)
+			return false;
+	}
+	else
+		return false;			/* page starts at -infinity */
+
+	/* Page must end at or before scan high bound */
+	if (!O_TUPLE_IS_NULL(keyRangeHigh))
+	{
+		int			cmp;
+
+		cmp = o_btree_cmp(scan->desc,
+						  &keyRangeHigh, BTreeKeyNonLeafKey,
+						  &scanRange->high, BTreeKeyBound);
+		if (cmp > 0)
+			return false;
+	}
+	else
+		return false;			/* page ends at +infinity */
+
+	return true;
+}
+
+/*
  * Checks if a leaf tuple is within the scan's qualification range.
  * Returns:
  *   -1 if the tuple is before the scan range (skip it)
@@ -1437,6 +1492,10 @@ check_downlink_in_scan_range(BTreeSeqScan *scan, OTuple keyRangeLow,
  *
  * Inclusivity is encoded in OBTreeValueBound.flags, and o_btree_cmp
  * incorporates it into the comparison result automatically.
+ *
+ * Uses the enteredRange optimization: once the first tuple on the current
+ * page passes the low-bound check, all subsequent key-ordered tuples only
+ * need the high-bound check.
  */
 static int
 tuple_in_scan_range(BTreeSeqScan *scan, OTuple tuple)
@@ -1447,11 +1506,15 @@ tuple_in_scan_range(BTreeSeqScan *scan, OTuple tuple)
 	if (!scanRange)
 		return 0;
 
-	cmp = o_btree_cmp(scan->desc,
-					  &tuple, BTreeKeyLeafTuple,
-					  &scanRange->low, BTreeKeyBound);
-	if (cmp < 0)
-		return -1;
+	if (!scan->enteredRange)
+	{
+		cmp = o_btree_cmp(scan->desc,
+						  &tuple, BTreeKeyLeafTuple,
+						  &scanRange->low, BTreeKeyBound);
+		if (cmp < 0)
+			return -1;
+		scan->enteredRange = true;
+	}
 
 	cmp = o_btree_cmp(scan->desc,
 					  &tuple, BTreeKeyLeafTuple,
@@ -1504,7 +1567,21 @@ iterate_internal_page(BTreeSeqScan *scan)
 					pg_atomic_fetch_sub_u32(&scan->poscan->downlinksWritersInProgress, 1);
 				break;
 			}
+
+			/*
+			 * Downlink overlaps scan range.  Check if it is fully contained —
+			 * if so, per-tuple range checks can be skipped for all tuples on
+			 * this page.
+			 */
+			scan->pageFullyInRange =
+				page_fully_in_scan_range(scan,
+										 scan->keyRangeLow.tuple,
+										 scan->keyRangeHigh.tuple);
 		}
+		else
+			scan->pageFullyInRange = false;
+
+		scan->enteredRange = false;
 
 		if (scan->cb && scan->cb->isRangeValid)
 			valid_downlink = scan->cb->isRangeValid(scan->keyRangeLow.tuple, scan->keyRangeHigh.tuple,
@@ -1737,6 +1814,8 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 	 */
 	scan->leafPartial.isPartial = false;
 	scan->haveLastLeafKey = false;
+	scan->pageFullyInRange = false;
+	scan->enteredRange = false;
 
 	BTREE_PAGE_LOCATOR_FIRST(scan->leafImg, &scan->leafLoc);
 	scan->hint.blkno = OInvalidInMemoryBlkno;
@@ -1963,6 +2042,8 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
 
 	scan->scanRange = NULL;
+	scan->pageFullyInRange = false;
+	scan->enteredRange = false;
 
 	dlist_push_tail(&listOfScans, &scan->listNode);
 	scan->resowner = NULL;
@@ -2284,7 +2365,7 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 			BTREE_PAGE_LOCATOR_NEXT(scan->histImg, &scan->histLoc);
 			if (!O_TUPLE_IS_NULL(tuple))
 			{
-				if (scan->scanRange)
+				if (scan->scanRange && !scan->pageFullyInRange)
 				{
 					int			rangeCheck = tuple_in_scan_range(scan, tuple);
 
@@ -2396,7 +2477,7 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 		BTREE_PAGE_LOCATOR_NEXT(scan->leafImg, &scan->leafLoc);
 		if (!O_TUPLE_IS_NULL(tuple))
 		{
-			if (scan->scanRange)
+			if (scan->scanRange && !scan->pageFullyInRange)
 			{
 				int			rangeCheck = tuple_in_scan_range(scan, tuple);
 
