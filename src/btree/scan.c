@@ -76,6 +76,13 @@ typedef struct
 {
 	uint64		downlink;
 	CommitSeqNo csn;
+
+	/*
+	 * True when the downlink's key range is entirely within the scan's
+	 * qualification range (pre-computed during collection).  Lets the disk
+	 * phase skip per-tuple range checks without re-reading the hikey.
+	 */
+	bool		fullyInRange;
 } BTreeSeqScanDiskDownlink;
 
 struct BTreeSeqScan
@@ -424,7 +431,8 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 }
 
 static void
-add_on_disk_downlink(BTreeSeqScan *scan, uint64 downlink, CommitSeqNo csn)
+add_on_disk_downlink(BTreeSeqScan *scan, uint64 downlink, CommitSeqNo csn,
+					 bool fullyInRange)
 {
 	ParallelOScanDesc poscan = scan->poscan;
 
@@ -439,6 +447,7 @@ add_on_disk_downlink(BTreeSeqScan *scan, uint64 downlink, CommitSeqNo csn)
 		}
 		scan->diskDownlinks[scan->downlinksCount].downlink = downlink;
 		scan->diskDownlinks[scan->downlinksCount].csn = csn;
+		scan->diskDownlinks[scan->downlinksCount].fullyInRange = fullyInRange;
 		scan->downlinksCount++;
 	}
 	else
@@ -467,6 +476,7 @@ add_on_disk_downlink(BTreeSeqScan *scan, uint64 downlink, CommitSeqNo csn)
 				shared = (BTreeSeqScanDiskDownlink *) dsm_segment_address(scan->dsmSeg);
 				shared[index].downlink = downlink;
 				shared[index].csn = csn;
+				shared[index].fullyInRange = fullyInRange;
 				LWLockRelease(&poscan->downlinksPublish);
 				return;
 			}
@@ -1152,7 +1162,8 @@ iterate_internal_page(BTreeSeqScan *scan)
 		{
 			if (DOWNLINK_IS_ON_DISK(downlink))
 			{
-				add_on_disk_downlink(scan, downlink, scan->context.imgReadCsn);
+				add_on_disk_downlink(scan, downlink, scan->context.imgReadCsn,
+									 scan->pageFullyInRange);
 				if (scan->poscan)
 					pg_atomic_fetch_sub_u32(&scan->poscan->downlinksWritersInProgress, 1);
 			}
@@ -1309,7 +1320,7 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 		break;
 	} while (true);
 
-	scan->pageFullyInRange = false;
+	scan->pageFullyInRange = downlink.fullyInRange;
 	scan->enteredRange = false;
 
 	BTREE_PAGE_LOCATOR_FIRST(scan->leafImg, &scan->leafLoc);
