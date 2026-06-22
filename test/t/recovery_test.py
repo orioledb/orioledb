@@ -3532,8 +3532,7 @@ recovery_target_action = 'pause'
 			    "barrier completed"
 			])
 
-	def test_recovery_target_xid_barrier_stop_after_first_post_backup(
-	        self):
+	def test_recovery_target_xid_barrier_stop_after_first_post_backup(self):
 		node = self.node
 		node.start()
 

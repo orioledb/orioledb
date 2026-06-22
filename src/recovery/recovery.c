@@ -1964,8 +1964,8 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 				/*
 				 * The target may be a non-Oriole WAL record before the first
 				 * post-backup Oriole-visible boundary.  In that case there is
-				 * no pair to publish: the base-backup visible state is already
-				 * the correct stop-after Oriole state.
+				 * no pair to publish: the base-backup visible state is
+				 * already the correct stop-after Oriole state.
 				 */
 				if (!XLogRecPtrIsValid(last_visible_ptr_snapshot) &&
 					!XLogRecPtrIsValid(finished_ptr))
