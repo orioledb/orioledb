@@ -1598,7 +1598,6 @@ make_merge_undo_image(BTreeDescr *desc, Pointer left,
 		diff->leftUndoLoc = leftHeader->undoLocation;
 		diff->rightUndoLoc = rightHeader->undoLocation;
 		diff->boundaryFlags = boundary.formatFlags;
-		diff->rightRightmost = O_PAGE_IS(right, RIGHTMOST) ? 1 : 0;
 		diff->boundaryLen = boundaryLen;
 		memcpy(boundaryPtr, boundary.data, boundaryLen);
 	}
