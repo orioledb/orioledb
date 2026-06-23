@@ -12,7 +12,6 @@ from .base_test import generate_string
 from .base_test import wait_stopevent
 from .base_test import wait_checkpointer_stopevent
 
-from testgres.enums import NodeStatus
 
 
 class RecoveryTest(BaseTest):
@@ -2967,15 +2966,19 @@ class RecoveryWithArchivingTest(BaseTest):
 	def _wait_for_node_shutdown(self, node, timeout_s=60):
 		pidfile_path = os.path.join(node.data_dir, "postmaster.pid")
 		deadline = time.time() + timeout_s
+		started = False
 		while time.time() < deadline:
-			if not os.path.exists(pidfile_path):
-				return
-			if node.status() != NodeStatus.Running:
+			pidfile_exists = os.path.exists(pidfile_path)
+			if pidfile_exists:
+				started = True
+			elif started:
 				return
 			time.sleep(0.1)
-		self.fail("node did not shut down within %s seconds; status=%s, "
+		self.fail("node did not complete startup and shutdown within %s "
+		          "seconds; startup observed=%s, status=%s, "
 		          "postmaster.pid exists=%s" %
-		          (timeout_s, node.status(), os.path.exists(pidfile_path)))
+		          (timeout_s, started, node.status(),
+		           os.path.exists(pidfile_path)))
 
 	def _replace_recovery_target_action(self,
 	                                    node,
