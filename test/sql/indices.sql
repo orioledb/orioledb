@@ -204,6 +204,7 @@ CREATE INDEX o_test58_reg1 ON o_test58(key);
 CREATE INDEX o_test58_reg2 ON o_test58(foo);
 SELECT orioledb_tbl_indices('o_test58'::regclass);
 INSERT INTO o_test58 SELECT 100 + i, 200 + i, 300 + i, 400 + i FROM generate_series(1, 10) AS i;
+CHECKPOINT;
 SELECT orioledb_tbl_check('o_test58'::regclass);
 
 EXPLAIN (COSTS off) SELECT * FROM o_test58;

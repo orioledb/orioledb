@@ -19,6 +19,7 @@
 #include "btree/io.h"
 #include "btree/page_chunks.h"
 #include "catalog/free_extents.h"
+#include "catalog/sys_trees.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
 #include "tableam/descr.h"
@@ -29,6 +30,7 @@
 
 #include "pgstat.h"
 #include "access/transam.h"
+#include "storage/latch.h"
 
 /*
  * Dynamic array of file extents.
@@ -50,6 +52,7 @@ typedef struct
 	ExtentsArray busy;
 	BTreeDescr *desc;
 	bool		hasError;
+	bool		emit_transient_notices;
 	OBTreeFindPageContext context;
 } BTreeCheckStatus;
 
@@ -73,16 +76,16 @@ static bool is_sorted_by_off(ExtentsArray *array);
 static bool is_sorted_by_len_off(ExtentsArray *array);
 
 bool
-check_btree(BTreeDescr *desc, bool force_file_check)
+check_btree(BTreeDescr *desc, bool force_file_check, bool wait_for_checkpoint)
 {
+	bool		is_sys_tree = IS_SYS_TREE_OIDS(desc->oids);
 	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
 	BTreeCheckStatus status;
 	ExtentsArray free_extents;
 	uint64		data_file_len = pg_atomic_read_u64(&metaPageBlkno->datafileLength[0]);	/* Fix for S3 mode */
 	bool		is_compressed = OCompressIsValid(desc->compress);
 	uint32		checkpoint_number = 0;
-	bool		result,
-				copy_blkno;
+	bool		copy_blkno;
 
 	memset(&status, 0, sizeof(BTreeCheckStatus));
 	memset(&free_extents, 0, sizeof(ExtentsArray));
@@ -90,15 +93,47 @@ check_btree(BTreeDescr *desc, bool force_file_check)
 	/* get busy file extents */
 	status.desc = desc;
 	status.hasError = false;
+
+	/*
+	 * Legacy debug entry points (wait_for_checkpoint == false) keep the
+	 * BROKEN_SPLIT NOTICE; the user-facing verify_orioledb path stays silent
+	 * on that transient.
+	 */
+	status.emit_transient_notices = !wait_for_checkpoint;
 	init_page_find_context(&status.context, desc, COMMITSEQNO_INPROGRESS, BTREE_PAGE_FIND_MODIFY);
 
-	result = get_checkpoint_number(desc, desc->rootInfo.rootPageBlkno,
-								   &checkpoint_number, &copy_blkno);
-	if (!result)
+	/*
+	 * get_checkpoint_number() returns false while the checkpointer holds the
+	 * per-tree state.  With wait_for_checkpoint, retry until it moves past;
+	 * otherwise the caller is a debug entry point and gets the legacy NOTICE.
+	 */
+	while (!get_checkpoint_number(desc, desc->rootInfo.rootPageBlkno,
+								  &checkpoint_number, &copy_blkno))
 	{
-		/* Error is possible only when calling check_btree() without lock */
-		elog(NOTICE, "Tree is under checkpoint now");
-		return false;
+		if (!wait_for_checkpoint)
+		{
+			elog(NOTICE, "Tree is under checkpoint now");
+			return false;
+		}
+
+		/*
+		 * Holding the per-tree lock here would block the checkpointer we are
+		 * waiting on, so drop it across the latch wait and reacquire after.
+		 * Sys trees serialize against the checkpointer via oSysTreesLock.
+		 */
+		if (is_sys_tree)
+			LWLockRelease(&checkpoint_state->oSysTreesLock);
+		else
+			o_tables_rel_unlock_extended(&desc->oids, AccessExclusiveLock, true);
+		(void) WaitLatch(MyLatch,
+						 WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
+						 10L, WAIT_EVENT_PG_SLEEP);
+		ResetLatch(MyLatch);
+		CHECK_FOR_INTERRUPTS();
+		if (is_sys_tree)
+			LWLockAcquire(&checkpoint_state->oSysTreesLock, LW_EXCLUSIVE);
+		else
+			o_tables_rel_lock_extended(&desc->oids, AccessExclusiveLock, true);
 	}
 
 	Assert(checkpoint_number > 0);
@@ -621,7 +656,7 @@ check_walk_btree(BTreeCheckStatus *status, OInMemoryBlkno blkno,
 	{
 		Page		rightP = O_GET_IN_MEMORY_PAGE(RIGHTLINK_GET_BLKNO(rightLink));
 
-		if (O_PAGE_IS(rightP, BROKEN_SPLIT))
+		if (O_PAGE_IS(rightP, BROKEN_SPLIT) && status->emit_transient_notices)
 		{
 			elog(NOTICE, "BTree has a broken split.");
 			status->hasError = true;

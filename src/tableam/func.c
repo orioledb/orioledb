@@ -1281,8 +1281,12 @@ orioledb_tbl_check(PG_FUNCTION_ARGS)
 
 	for (i = 0; i < descr->nIndices; i++)
 	{
-		o_btree_load_shmem(&descr->indices[i]->desc);
-		result = check_btree(&descr->indices[i]->desc, force_map_check);
+		OIndexDescr *idx = descr->indices[i];
+
+		o_tables_rel_lock_extended(&idx->oids, AccessExclusiveLock, true);
+		o_btree_load_shmem(&idx->desc);
+		result = check_btree(&idx->desc, force_map_check, false);
+		o_tables_rel_unlock_extended(&idx->oids, AccessExclusiveLock, true);
 
 		if (result == false)
 			break;
@@ -1294,9 +1298,9 @@ orioledb_tbl_check(PG_FUNCTION_ARGS)
 
 /*
  * amcheck entry point: verify all b-trees of the orioledb relation and emit
- * one row per failed index as (index_name, msg).  `thorough_check` forces
- * the on-disk map check inside check_btree.  Per-index checkpoint lock
- * blocks the checkpointer on this tree so check_btree isn't racing it.
+ * one row per failed index.  `thorough_check` forces the on-disk map check.
+ * wait_for_checkpoint=true makes check_btree retry across checkpointer
+ * overlap rather than report it as corruption.
  */
 Datum
 verify_orioledb(PG_FUNCTION_ARGS)
@@ -1325,10 +1329,9 @@ verify_orioledb(PG_FUNCTION_ARGS)
 		OIndexDescr *idx = descr->indices[i];
 		bool		success;
 
-		o_btree_load_shmem(&idx->desc);
-
 		o_tables_rel_lock_extended(&idx->oids, AccessExclusiveLock, true);
-		success = check_btree(&idx->desc, thorough_check);
+		o_btree_load_shmem(&idx->desc);
+		success = check_btree(&idx->desc, thorough_check, true);
 		o_tables_rel_unlock_extended(&idx->oids, AccessExclusiveLock, true);
 
 		if (!success)

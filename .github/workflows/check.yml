@@ -209,3 +209,4 @@ jobs:
         uses: geekyeggo/delete-artifact@v6
         with:
           name: "*coverage.info"
+          failOnError: false

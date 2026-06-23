@@ -573,7 +573,9 @@ orioledb_sys_tree_check(PG_FUNCTION_ARGS)
 
 	orioledb_check_shmem();
 
-	result = check_btree(get_sys_tree(num), force_map_check);
+	LWLockAcquire(&checkpoint_state->oSysTreesLock, LW_EXCLUSIVE);
+	result = check_btree(get_sys_tree(num), force_map_check, false);
+	LWLockRelease(&checkpoint_state->oSysTreesLock);
 
 	PG_RETURN_BOOL(result);
 }

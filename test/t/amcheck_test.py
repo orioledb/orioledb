@@ -40,6 +40,56 @@ class AmcheckTest(BaseTest):
 		    "SELECT * FROM verify_orioledb('o_t'::regclass, true);")
 		self.assertEqual(rows, [])
 
+	def test_verify_orioledb_no_false_positive_with_broken_split(self):
+		"""Pre-fix, a rightlink pointing to a BROKEN_SPLIT page made
+		verify_orioledb emit 'BTree has a broken split.' and return a
+		spurious ('o_t_pkey', 'check failed') row, even though a broken
+		split is a benign in-progress state finished by the next inserter
+		or checkpoint. This test forces a split failure via the split_fail
+		stopevent and asserts the default mode is clean both before and
+		after the fixup checkpoint."""
+		node = self.node
+		node.append_conf('postgresql.conf',
+		                 "orioledb.enable_stopevents = true\n")
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_t (id text PRIMARY KEY) USING orioledb;
+			INSERT INTO o_t SELECT repeat('x', 400) || id
+				FROM generate_series(1, 20) id;
+			CHECKPOINT;
+		""")
+
+		con_set = node.connect()
+		con_set.execute("SELECT pg_stopevent_set('split_fail', 'true');")
+
+		# An INSERT that triggers a split now errors out; the error
+		# cleanup hook marks the in-progress split as broken.
+		con_ins = node.connect()
+		con_ins.execute("SET orioledb.enable_stopevents = true;")
+		with self.assertRaises(Exception):
+			con_ins.execute("INSERT INTO o_t SELECT repeat('x', 400) || id "
+			                "FROM generate_series(131, 139) id;")
+		con_ins.close()
+		con_set.execute("SELECT pg_stopevent_reset('split_fail');")
+		con_set.close()
+
+		# Pre-fix, the broken-split walk emits a NOTICE and the function
+		# returns a 'check failed' row.
+		rows = node.execute("SELECT * FROM verify_orioledb('o_t'::regclass);")
+		self.assertEqual(rows, [], f"verify returned false positive: {rows!r}")
+
+		# A CHECKPOINT completes the pending split. Both modes clean now.
+		node.safe_psql('postgres', "CHECKPOINT;")
+		self.assertEqual(
+		    node.execute("SELECT * FROM verify_orioledb('o_t'::regclass);"),
+		    [])
+		self.assertEqual(
+		    node.execute(
+		        "SELECT * FROM verify_orioledb('o_t'::regclass, true);"), [])
+		node.stop()
+
 	def test_verify_heapam_rejects_orioledb(self):
 		"""verify_heapam() must error on non-heap relations"""
 		node = self.node
