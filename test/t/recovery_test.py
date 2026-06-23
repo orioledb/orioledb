@@ -2973,6 +2973,14 @@ class RecoveryWithArchivingTest(BaseTest):
 				started = True
 			elif started:
 				return
+			elif os.path.exists(node.pg_log_file):
+				with open(node.pg_log_file, encoding='utf-8') as f:
+					replica_log = f.read()
+					if (
+					    "Recovery target reached: start synchronization "
+					    "barrier" in replica_log
+					    and "database system is shut down" in replica_log):
+						return
 			time.sleep(0.1)
 		self.fail("node did not complete startup and shutdown within %s "
 		          "seconds; startup observed=%s, status=%s, "
