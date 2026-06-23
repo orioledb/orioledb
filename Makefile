@@ -189,10 +189,7 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/recovery_worker_test.py \
 						test/t/replication_test.py \
 						test/t/types_test.py \
-						test/t/undo_eviction_test.py \
-						test/t/rewind_xid_test.py \
-						test/t/rewind_xid_evict_large_test.py \
-						test/t/page_fit_items_test.py
+						test/t/undo_eviction_test.py
 TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/checkpoint_eviction_test.py \
 						test/t/checkpoint_same_trx_test.py \
@@ -210,8 +207,11 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/merge_into_test.py \
 						test/t/not_supported_yet_test.py \
 						test/t/pg_dump_restore_test.py \
+						test/t/page_fit_items_test.py \
 						test/t/parallel_test.py \
 						test/t/reindex_test.py \
+						test/t/rewind_xid_test.py \
+						test/t/rewind_xid_evict_large_test.py \
 						test/t/s3_test.py \
 						test/t/schema_test.py \
 						test/t/temp_local_pool_test.py \
