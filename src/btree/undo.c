@@ -1595,6 +1595,7 @@ make_merge_undo_image(BTreeDescr *desc, Pointer left,
 			(undo_rec + MAXALIGN(sizeof(UndoPageImageHeader)));
 		Pointer		boundaryPtr = (Pointer) diff + MAXALIGN(sizeof(UndoMergeDiffData));
 
+		memset(diff, 0, sizeof(*diff));
 		diff->leftCsn = leftHeader->csn;
 		diff->rightCsn = rightHeader->csn;
 		diff->leftUndoLoc = leftHeader->undoLocation;
