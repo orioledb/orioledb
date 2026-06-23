@@ -3325,10 +3325,12 @@ recovery_target_action = 'shutdown'
 			    os.path.exists(
 			        os.path.join(replica.data_dir, "recovery.signal")))
 
-			replica_log = self._read_replica_log_until_contains(
-			    replica, ["database system is shut down"])
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False, allow_base_backup=True)
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
+			self._assert_log_contains(replica_log,
+			                          ["database system is shut down"])
 
 			self._replace_recovery_target_action(replica)
 			replica.is_started = False
@@ -3508,9 +3510,11 @@ recovery_target_action = 'shutdown'
 			    os.path.exists(
 			        os.path.join(replica.data_dir, "recovery.signal")))
 
-			replica_log = self._read_replica_log_until_contains(
-			    replica, ["database system is shut down"])
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False)
 			self._assert_stop_before_barrier_logs(replica_log)
+			self._assert_log_contains(replica_log,
+			                          ["database system is shut down"])
 
 			self._replace_recovery_target_action(replica)
 			replica.is_started = False
@@ -3703,9 +3707,11 @@ recovery_target_action = 'shutdown'
 			    os.path.exists(
 			        os.path.join(replica.data_dir, "recovery.signal")))
 
-			replica_log = self._read_replica_log_until_contains(
-			    replica, ["database system is shut down"])
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=True)
 			self._assert_stop_after_barrier_logs(replica_log)
+			self._assert_log_contains(replica_log,
+			                          ["database system is shut down"])
 
 			self._replace_recovery_target_action(replica)
 			replica.is_started = False
@@ -3840,10 +3846,12 @@ recovery_target_action = 'shutdown'
 			    os.path.exists(
 			        os.path.join(replica.data_dir, "recovery.signal")))
 
-			replica_log = self._read_replica_log_until_contains(
-			    replica, ["database system is shut down"])
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False, allow_base_backup=True)
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
+			self._assert_log_contains(replica_log,
+			                          ["database system is shut down"])
 
 			self._replace_recovery_target_action(replica)
 			replica.is_started = False
@@ -4179,9 +4187,11 @@ recovery_target_action = 'shutdown'
 			    os.path.exists(
 			        os.path.join(replica.data_dir, "recovery.signal")))
 
-			replica_log = self._read_replica_log_until_contains(
-			    replica, ["database system is shut down"])
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False)
 			self._assert_stop_before_barrier_logs(replica_log)
+			self._assert_log_contains(replica_log,
+			                          ["database system is shut down"])
 
 			self._replace_recovery_target_action(replica)
 			replica.is_started = False
@@ -4304,10 +4314,12 @@ recovery_target_action = 'shutdown'
 			    os.path.exists(
 			        os.path.join(replica.data_dir, "recovery.signal")))
 
-			replica_log = self._read_replica_log_until_contains(
-			    replica, ["database system is shut down"])
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False, allow_base_backup=True)
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
+			self._assert_log_contains(replica_log,
+			                          ["database system is shut down"])
 
 			self._replace_recovery_target_action(replica)
 			replica.is_started = False
