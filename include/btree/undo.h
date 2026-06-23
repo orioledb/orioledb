@@ -55,18 +55,30 @@ typedef enum
 } UndoPageImageType;
 
 /*
- * B-Tree page images header in undo log.
+ * Each page-level undo image starts with `UndoPageImageType type` at offset 0
+ * so the reader can peek the type before reading the per-type header.
+ * UndoPageImageCompact and UndoPageImageMerge carry no extra metadata and
+ * use the peek header directly; the other types have their own headers below.
+ */
+typedef struct
+{
+	UndoPageImageType type;
+} UndoPageImageHeader;
+
+/*
+ * Full split image (UndoPageImageSplit) header, followed by the pre-split page
+ * and the split key.
  */
 typedef struct
 {
 	UndoPageImageType type;
 	uint8		splitKeyFlags;
 	LocationIndex splitKeyLen;
-} UndoPageImageHeader;
+} UndoPageImageSplitHeader;
 
 /*
- * Payload of a differential merge image (UndoPageImageMergeDiff), stored
- * right after UndoPageImageHeader and followed by the boundary key bytes.
+ * Differential merge image (UndoPageImageMergeDiff) header, followed by the
+ * boundary key bytes.
  *
  * The boundary key is the pre-merge hikey of the left page (== lokey of the
  * right page).  leftCsn/leftUndoLoc and rightCsn/rightUndoLoc are the pre-merge
@@ -77,18 +89,18 @@ typedef struct
  */
 typedef struct
 {
+	UndoPageImageType type;
+	uint8		boundaryFlags;
+	LocationIndex boundaryLen;
 	CommitSeqNo leftCsn;
 	CommitSeqNo rightCsn;
 	UndoLocation leftUndoLoc;
 	UndoLocation rightUndoLoc;
-	uint8		boundaryFlags;
-	LocationIndex boundaryLen;
-} UndoMergeDiffData;
+} UndoPageImageMergeDiffHeader;
 
 /*
- * Payload of a differential split image (UndoPageImageSplitDiff), stored right
- * after UndoPageImageHeader and followed by the split key bytes (described by
- * the header's splitKeyFlags/splitKeyLen).
+ * Differential split image (UndoPageImageSplitDiff) header, followed by the
+ * split key bytes.
  *
  * The split key is the boundary between the pre-split left half ([lo, splitKey))
  * and right half ([splitKey, hi)).  origCsn/origUndoLoc are the original
@@ -98,9 +110,12 @@ typedef struct
  */
 typedef struct
 {
+	UndoPageImageType type;
+	uint8		splitKeyFlags;
+	LocationIndex splitKeyLen;
 	CommitSeqNo origCsn;
 	UndoLocation origUndoLoc;
-} UndoSplitDiffData;
+} UndoPageImageSplitDiffHeader;
 
 /*
  * Status of existing lock on the tuple made by the same transaction;
@@ -139,9 +154,9 @@ typedef struct
 /* size of image in undo log produced by page compaction  */
 #define O_COMPACT_UNDO_IMAGE_SIZE (MAXALIGN(sizeof(UndoPageImageHeader)) + ORIOLEDB_BLCKSZ)
 /* max size of image in undo log produced by page split */
-#define O_MAX_SPLIT_UNDO_IMAGE_SIZE (MAXALIGN(sizeof(UndoPageImageHeader)) + ORIOLEDB_BLCKSZ + O_BTREE_MAX_KEY_SIZE)
+#define O_MAX_SPLIT_UNDO_IMAGE_SIZE (MAXALIGN(sizeof(UndoPageImageSplitHeader)) + ORIOLEDB_BLCKSZ + O_BTREE_MAX_KEY_SIZE)
 /* size of image in undo log produced by page split */
-#define O_SPLIT_UNDO_IMAGE_SIZE(splitKeySize) (MAXALIGN(sizeof(UndoPageImageHeader)) + ORIOLEDB_BLCKSZ + MAXALIGN(splitKeySize))
+#define O_SPLIT_UNDO_IMAGE_SIZE(splitKeySize) (MAXALIGN(sizeof(UndoPageImageSplitHeader)) + ORIOLEDB_BLCKSZ + MAXALIGN(splitKeySize))
 /* max size of update undo record */
 #define O_UPDATE_MAX_UNDO_SIZE (sizeof(BTreeModifyUndoStackItem) + O_BTREE_MAX_TUPLE_SIZE)
 /* on modification we should reserve size for split and update undo records */
@@ -149,11 +164,9 @@ typedef struct
 /* size of image in undo log produced by pages merge */
 #define O_MERGE_UNDO_IMAGE_SIZE (MAXALIGN(sizeof(UndoPageImageHeader)) + ORIOLEDB_BLCKSZ * 2)
 /* size of differential merge image (no page bytes, just the boundary key) */
-#define O_MERGE_DIFF_UNDO_IMAGE_SIZE(boundaryLen) (MAXALIGN(sizeof(UndoPageImageHeader)) + \
-												   MAXALIGN(sizeof(UndoMergeDiffData)) + MAXALIGN(boundaryLen))
+#define O_MERGE_DIFF_UNDO_IMAGE_SIZE(boundaryLen) (MAXALIGN(sizeof(UndoPageImageMergeDiffHeader)) + MAXALIGN(boundaryLen))
 /* size of differential split image (no page bytes, just the split key) */
-#define O_SPLIT_DIFF_UNDO_IMAGE_SIZE(splitKeyLen) (MAXALIGN(sizeof(UndoPageImageHeader)) + \
-												   MAXALIGN(sizeof(UndoSplitDiffData)) + MAXALIGN(splitKeyLen))
+#define O_SPLIT_DIFF_UNDO_IMAGE_SIZE(splitKeyLen) (MAXALIGN(sizeof(UndoPageImageSplitDiffHeader)) + MAXALIGN(splitKeyLen))
 /* undo location of a page image */
 #define O_UNDO_GET_IMAGE_LOCATION(undo_loc, left) ((undo_loc) + MAXALIGN(sizeof(UndoPageImageHeader)) + ((left) ? 0 : ORIOLEDB_BLCKSZ))
 /* maximum size of undo record */
