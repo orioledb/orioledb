@@ -59,7 +59,6 @@ UndoLocation
 page_add_image_to_undo(BTreeDescr *desc, Pointer p, CommitSeqNo imageCsn,
 					   OTuple *splitKey, LocationIndex splitKeyLen)
 {
-	UndoPageImageHeader *header;
 	UndoLocation undoLocation;
 	Pointer		ptr;
 	UndoLogType undoType = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
@@ -89,55 +88,54 @@ page_add_image_to_undo(BTreeDescr *desc, Pointer p, CommitSeqNo imageCsn,
 		meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) == 0)
 	{
 		BTreePageHeader *php = (BTreePageHeader *) p;
-		UndoSplitDiffData *diff;
+		UndoPageImageSplitDiffHeader *sdHeader;
 
 		ptr = get_undo_record(undoType, &undoLocation,
 							  O_SPLIT_DIFF_UNDO_IMAGE_SIZE(splitKeyLen));
 
-		header = (UndoPageImageHeader *) ptr;
-		header->type = UndoPageImageSplitDiff;
-		header->splitKeyFlags = splitKey->formatFlags;
-		header->splitKeyLen = splitKeyLen;
-
-		diff = (UndoSplitDiffData *) (ptr + MAXALIGN(sizeof(UndoPageImageHeader)));
-		diff->origCsn = php->csn;
-		diff->origUndoLoc = php->undoLocation;
-		memcpy((Pointer) diff + MAXALIGN(sizeof(UndoSplitDiffData)),
-			   splitKey->data, splitKeyLen);
+		sdHeader = (UndoPageImageSplitDiffHeader *) ptr;
+		memset(sdHeader, 0, sizeof(*sdHeader));
+		sdHeader->type = UndoPageImageSplitDiff;
+		sdHeader->splitKeyFlags = splitKey->formatFlags;
+		sdHeader->splitKeyLen = splitKeyLen;
+		sdHeader->origCsn = php->csn;
+		sdHeader->origUndoLoc = php->undoLocation;
+		memcpy(ptr + MAXALIGN(sizeof(*sdHeader)), splitKey->data, splitKeyLen);
 
 		release_reserved_undo_location(undoType);
 		return undoLocation;
 	}
 
 	if (splitKey)
-		ptr = get_undo_record(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType),
-							  &undoLocation,
-							  O_SPLIT_UNDO_IMAGE_SIZE(splitKeyLen));
-	else
-		ptr = get_undo_record(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType),
-							  &undoLocation,
-							  O_COMPACT_UNDO_IMAGE_SIZE);
+	{
+		UndoPageImageSplitHeader *splitHeader;
 
-	header = (UndoPageImageHeader *) ptr;
-	if (splitKey)
-	{
-		header->type = UndoPageImageSplit;
-		header->splitKeyFlags = splitKey->formatFlags;
-		header->splitKeyLen = splitKeyLen;
-	}
-	else
-	{
-		header->type = UndoPageImageCompact;
-	}
-	ptr += MAXALIGN(sizeof(UndoPageImageHeader));
-	memcpy(ptr, p, ORIOLEDB_BLCKSZ);
-	if (splitKey)
-	{
+		ptr = get_undo_record(undoType, &undoLocation,
+							  O_SPLIT_UNDO_IMAGE_SIZE(splitKeyLen));
+
+		splitHeader = (UndoPageImageSplitHeader *) ptr;
+		splitHeader->type = UndoPageImageSplit;
+		splitHeader->splitKeyFlags = splitKey->formatFlags;
+		splitHeader->splitKeyLen = splitKeyLen;
+		ptr += MAXALIGN(sizeof(*splitHeader));
+		memcpy(ptr, p, ORIOLEDB_BLCKSZ);
 		ptr += ORIOLEDB_BLCKSZ;
 		memcpy(ptr, splitKey->data, splitKeyLen);
 	}
+	else
+	{
+		UndoPageImageHeader *header;
 
-	release_reserved_undo_location(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+		ptr = get_undo_record(undoType, &undoLocation,
+							  O_COMPACT_UNDO_IMAGE_SIZE);
+
+		header = (UndoPageImageHeader *) ptr;
+		header->type = UndoPageImageCompact;
+		ptr += MAXALIGN(sizeof(*header));
+		memcpy(ptr, p, ORIOLEDB_BLCKSZ);
+	}
+
+	release_reserved_undo_location(undoType);
 
 	return undoLocation;
 }
@@ -1158,7 +1156,7 @@ reconstruct_merge_diff_half(BTreeDescr *desc, UndoLocation undoLocation,
 {
 	UndoLogType undoType = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
 	BTreePageHeader *header = (BTreePageHeader *) dest;
-	UndoMergeDiffData diff;
+	UndoPageImageMergeDiffHeader mdHeader;
 	OFixedKey	boundary;
 	OFixedKey	rightHikey;
 	LocationIndex rightHikeySize = 0;
@@ -1169,14 +1167,12 @@ reconstruct_merge_diff_half(BTreeDescr *desc, UndoLocation undoLocation,
 	OTuple		hikey;
 	LocationIndex hikeySize;
 
-	undo_read(undoType, undoLocation + MAXALIGN(sizeof(UndoPageImageHeader)),
-			  sizeof(UndoMergeDiffData), (Pointer) &diff);
-	Assert(diff.boundaryLen <= O_BTREE_MAX_KEY_SIZE);
-	undo_read(undoType,
-			  undoLocation + MAXALIGN(sizeof(UndoPageImageHeader)) +
-			  MAXALIGN(sizeof(UndoMergeDiffData)),
-			  diff.boundaryLen, boundary.fixedData);
-	boundary.tuple.formatFlags = diff.boundaryFlags;
+	undo_read(undoType, undoLocation,
+			  sizeof(mdHeader), (Pointer) &mdHeader);
+	Assert(mdHeader.boundaryLen <= O_BTREE_MAX_KEY_SIZE);
+	undo_read(undoType, undoLocation + MAXALIGN(sizeof(mdHeader)),
+			  mdHeader.boundaryLen, boundary.fixedData);
+	boundary.tuple.formatFlags = mdHeader.boundaryFlags;
 	boundary.tuple.data = boundary.fixedData;
 
 	/* Choose the half exactly as the full-merge path does. */
@@ -1252,14 +1248,14 @@ reconstruct_merge_diff_half(BTreeDescr *desc, UndoLocation undoLocation,
 	{
 		header->flags &= ~O_BTREE_FLAG_RIGHTMOST;
 		hikey = boundary.tuple;
-		hikeySize = diff.boundaryLen;
+		hikeySize = mdHeader.boundaryLen;
 	}
 
 	btree_page_reorg(desc, dest, items, count, hikeySize, hikey);
 	o_btree_page_calculate_statistics(desc, dest);
 
-	header->csn = wantRight ? diff.rightCsn : diff.leftCsn;
-	header->undoLocation = wantRight ? diff.rightUndoLoc : diff.leftUndoLoc;
+	header->csn = wantRight ? mdHeader.rightCsn : mdHeader.leftCsn;
+	header->undoLocation = wantRight ? mdHeader.rightUndoLoc : mdHeader.leftUndoLoc;
 
 	if (is_left)
 		*is_left = !wantRight;
@@ -1299,21 +1295,16 @@ reconstruct_split_diff(BTreeDescr *desc, UndoLocation undoLocation,
 {
 	UndoLogType undoType = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
 	BTreePageHeader *header = (BTreePageHeader *) dest;
-	UndoPageImageHeader imgHeader;
-	UndoSplitDiffData diff;
+	UndoPageImageSplitDiffHeader sdHeader;
 	OFixedKey	splitKey;
 	bool		rightHalf;
 
 	undo_read(undoType, undoLocation,
-			  sizeof(UndoPageImageHeader), (Pointer) &imgHeader);
-	Assert(imgHeader.splitKeyLen <= O_BTREE_MAX_KEY_SIZE);
-	undo_read(undoType, undoLocation + MAXALIGN(sizeof(UndoPageImageHeader)),
-			  sizeof(UndoSplitDiffData), (Pointer) &diff);
-	undo_read(undoType,
-			  undoLocation + MAXALIGN(sizeof(UndoPageImageHeader)) +
-			  MAXALIGN(sizeof(UndoSplitDiffData)),
-			  imgHeader.splitKeyLen, splitKey.fixedData);
-	splitKey.tuple.formatFlags = imgHeader.splitKeyFlags;
+			  sizeof(sdHeader), (Pointer) &sdHeader);
+	Assert(sdHeader.splitKeyLen <= O_BTREE_MAX_KEY_SIZE);
+	undo_read(undoType, undoLocation + MAXALIGN(sizeof(sdHeader)),
+			  sdHeader.splitKeyLen, splitKey.fixedData);
+	splitKey.tuple.formatFlags = sdHeader.splitKeyFlags;
 	splitKey.tuple.data = splitKey.fixedData;
 
 	/*
@@ -1353,8 +1344,8 @@ reconstruct_split_diff(BTreeDescr *desc, UndoLocation undoLocation,
 	}
 
 	/* Continue the chain into the original page's pre-split history. */
-	header->csn = diff.origCsn;
-	header->undoLocation = diff.origUndoLoc;
+	header->csn = sdHeader.origCsn;
+	header->undoLocation = sdHeader.origUndoLoc;
 }
 
 /*
@@ -1366,7 +1357,13 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 				   bool *is_left, bool *is_right, OFixedKey *lokey,
 				   OFixedKey *page_lokey, OTuple *page_hikey)
 {
-	UndoPageImageHeader header = {UndoPageImageInvalid, 0, 0};
+	/*
+	 * Read enough bytes to cover the peek header and (if this is a full Split)
+	 * its splitKeyFlags/splitKeyLen.  Compact/Merge/diff records are all at
+	 * least this long, so a single read works regardless of type; diff types
+	 * read their own larger headers in the reconstructor.
+	 */
+	UndoPageImageSplitHeader header = {UndoPageImageInvalid, 0, 0};
 	int			cmp,
 				cmp_expected;
 	OTuple		hikey;
@@ -1375,9 +1372,8 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 	LocationIndex loc = 0;
 	UndoLogType undoType = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
 
-	undo_read(undoType, undoLocation,
-			  sizeof(UndoPageImageHeader), (Pointer) &header);
-	left_loc = undoLocation + MAXALIGN(sizeof(UndoPageImageHeader));
+	undo_read(undoType, undoLocation, sizeof(header), (Pointer) &header);
+	left_loc = undoLocation + MAXALIGN(sizeof(header));
 
 	if (header.type == UndoPageImageMergeDiff)
 	{
@@ -1543,11 +1539,9 @@ UndoLocation
 make_merge_undo_image(BTreeDescr *desc, Pointer left,
 					  Pointer right, CommitSeqNo imageCsn)
 {
-	UndoPageImageHeader *header;
-	UndoMergeDiffData *diff;
+	UndoPageImageMergeDiffHeader *mdHeader;
 	UndoLocation undoLocation;
 	Pointer		undo_rec;
-	Pointer		boundaryPtr;
 	UndoLogType undoType = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
 	BTreePageHeader *leftHeader = (BTreePageHeader *) left;
 	BTreePageHeader *rightHeader = (BTreePageHeader *) right;
@@ -1566,12 +1560,14 @@ make_merge_undo_image(BTreeDescr *desc, Pointer left,
 		 * Full two-page image required: an old snapshot may need a dropped
 		 * tuple.
 		 */
+		UndoPageImageHeader *header;
+
 		undo_rec = get_undo_record(undoType, &undoLocation,
 								   O_MERGE_UNDO_IMAGE_SIZE);
 
 		header = (UndoPageImageHeader *) undo_rec;
 		header->type = UndoPageImageMerge;
-		undo_rec = undo_rec + MAXALIGN(sizeof(UndoPageImageHeader));
+		undo_rec = undo_rec + MAXALIGN(sizeof(*header));
 
 		memcpy(undo_rec, left, ORIOLEDB_BLCKSZ);
 		memcpy(undo_rec + ORIOLEDB_BLCKSZ, right, ORIOLEDB_BLCKSZ);
@@ -1587,22 +1583,16 @@ make_merge_undo_image(BTreeDescr *desc, Pointer left,
 	undo_rec = get_undo_record(undoType, &undoLocation,
 							   O_MERGE_DIFF_UNDO_IMAGE_SIZE(boundaryLen));
 
-	header = (UndoPageImageHeader *) undo_rec;
-	header->type = UndoPageImageMergeDiff;
-	header->splitKeyFlags = 0;
-	header->splitKeyLen = 0;
-
-	diff = (UndoMergeDiffData *) (undo_rec + MAXALIGN(sizeof(UndoPageImageHeader)));
-	boundaryPtr = (Pointer) diff + MAXALIGN(sizeof(UndoMergeDiffData));
-
-	memset(diff, 0, sizeof(*diff));
-	diff->leftCsn = leftHeader->csn;
-	diff->rightCsn = rightHeader->csn;
-	diff->leftUndoLoc = leftHeader->undoLocation;
-	diff->rightUndoLoc = rightHeader->undoLocation;
-	diff->boundaryFlags = boundary.formatFlags;
-	diff->boundaryLen = boundaryLen;
-	memcpy(boundaryPtr, boundary.data, boundaryLen);
+	mdHeader = (UndoPageImageMergeDiffHeader *) undo_rec;
+	memset(mdHeader, 0, sizeof(*mdHeader));
+	mdHeader->type = UndoPageImageMergeDiff;
+	mdHeader->boundaryFlags = boundary.formatFlags;
+	mdHeader->boundaryLen = boundaryLen;
+	mdHeader->leftCsn = leftHeader->csn;
+	mdHeader->rightCsn = rightHeader->csn;
+	mdHeader->leftUndoLoc = leftHeader->undoLocation;
+	mdHeader->rightUndoLoc = rightHeader->undoLocation;
+	memcpy(undo_rec + MAXALIGN(sizeof(*mdHeader)), boundary.data, boundaryLen);
 
 	release_reserved_undo_location(undoType);
 	return undoLocation;
