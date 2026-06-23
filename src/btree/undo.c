@@ -1171,6 +1171,7 @@ reconstruct_merge_diff_half(BTreeDescr *desc, UndoLocation undoLocation,
 
 	undo_read(undoType, undoLocation + MAXALIGN(sizeof(UndoPageImageHeader)),
 			  sizeof(UndoMergeDiffData), (Pointer) &diff);
+	Assert(diff.boundaryLen <= O_BTREE_MAX_KEY_SIZE);
 	undo_read(undoType,
 			  undoLocation + MAXALIGN(sizeof(UndoPageImageHeader)) +
 			  MAXALIGN(sizeof(UndoMergeDiffData)),
@@ -1305,6 +1306,7 @@ reconstruct_split_diff(BTreeDescr *desc, UndoLocation undoLocation,
 
 	undo_read(undoType, undoLocation,
 			  sizeof(UndoPageImageHeader), (Pointer) &imgHeader);
+	Assert(imgHeader.splitKeyLen <= O_BTREE_MAX_KEY_SIZE);
 	undo_read(undoType, undoLocation + MAXALIGN(sizeof(UndoPageImageHeader)),
 			  sizeof(UndoSplitDiffData), (Pointer) &diff);
 	undo_read(undoType,
