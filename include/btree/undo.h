@@ -72,8 +72,8 @@ typedef struct
  * right page).  leftCsn/leftUndoLoc and rightCsn/rightUndoLoc are the pre-merge
  * (csn, undoLocation) of the left and right pages, used to synthesize the
  * reconstructed half's header so the undo chain continues into that half's own
- * pre-merge history.  rightRightmost records whether the right page (and hence
- * the merged page) was RIGHTMOST.
+ * pre-merge history.  The merged page's RIGHTMOST flag (== the right page's
+ * pre-merge RIGHTMOST) is read directly from the live merged page on reconstruct.
  */
 typedef struct
 {
@@ -82,7 +82,6 @@ typedef struct
 	UndoLocation leftUndoLoc;
 	UndoLocation rightUndoLoc;
 	uint8		boundaryFlags;
-	uint8		rightRightmost;
 	LocationIndex boundaryLen;
 } UndoMergeDiffData;
 
