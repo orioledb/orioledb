@@ -88,29 +88,54 @@ if [ $CHECK_TYPE = "valgrind_1" ] || [ $CHECK_TYPE = "valgrind_2" ]; then
 	done
 fi
 
-# check core dumps if any
-if [ $CHECK_TYPE = "valgrind_1" ] || [ $CHECK_TYPE = "valgrind_2" ]; then
-	cores=$(find orioledb/ -name '*.core.*' 2>/dev/null)
-else
+# Check core dumps (plain path only).  Under valgrind we do NOT inspect cores:
+# vgcore files lack the .auxv note, so gdb cannot locate the (PIE) executable
+# base and produces a bogus, mis-symbolized backtrace.  The authoritative
+# backtrace there is the one valgrind itself prints in the pid-*.log files,
+# already surfaced above.
+if [ $CHECK_TYPE != "valgrind_1" ] && [ $CHECK_TYPE != "valgrind_2" ]; then
 	cores=$(find /tmp/cores-$GITHUB_SHA-$TIMESTAMP/ -name '*.core' 2>/dev/null)
-fi
 
-if [ -n "$cores" ]; then
-	for corefile in $cores ; do
-		if [[ $corefile != *_3.core ]]; then
-			if [ $CHECK_TYPE = "valgrind_1" ] || [ $CHECK_TYPE = "valgrind_2" ]; then
-				# Valgring core dumps have not auxiliary vector. We can't detect a binary file dynamically
-				# but this value is valid for most cases.
-				binary=tmp_install/usr/local/pgsql/bin/postgres
-			else
-				binary=$(gdb -quiet -core $corefile -batch -ex 'info auxv' | grep AT_EXECFN | perl -pe "s/^.*\"(.*)\"\$/\$1/g")
+	if [ -n "$cores" ]; then
+		for corefile in $cores ; do
+			if [[ $corefile == *_3.core ]]; then
+				continue
+			fi
+
+			# Filter out cores that don't belong to a postgres process.  The
+			# kernel can drop a core into the same directory for any process
+			# the tests happen to spawn -- shell wrappers, `cp` invoked from
+			# perl recovery tests, etc.  Those are unrelated to orioledb /
+			# PostgreSQL and trying to read PG symbols out of them just makes
+			# `cmds.gdb` error out and tank the whole job.
+			#
+			# `file` parses the ELF psinfo / NT_AUXV notes and prints
+			#   "from '<argv0> <argv1>...', ..., execfn: '<path>'"
+			# We accept the core if either:
+			#   - argv0 starts with "postgres" (followed by space, ':',
+			#     end-of-quote -- this matches the postmaster as well as
+			#     backends renamed via set_ps_display, e.g. "postgres: io
+			#     worker 0"), or
+			#   - execfn ends in "/postgres".
+			file_out=$(file -b "$corefile" 2>/dev/null || true)
+			if ! { echo "$file_out" | grep -Eq "from 'postgres[ :']|execfn: '[^']*/postgres'"; }; then
+				echo "skipping non-postgres core $corefile: $file_out"
+				continue
+			fi
+
+			binary=$(gdb -quiet -core $corefile -batch -ex 'info auxv' 2>/dev/null \
+				| grep AT_EXECFN | perl -pe "s/^.*\"(.*)\"\$/\$1/g")
+			if [ -z "$binary" ]; then
+				# Fall back to the installed postgres if we have already
+				# verified above that the core belongs to a postgres process.
+				binary="$GITHUB_WORKSPACE/pgsql/bin/postgres"
 			fi
 			echo dumping $corefile for $binary
 			gdb --batch --quiet -x ./orioledb/ci/cmds.gdb $binary $corefile
 			status=1
-		fi
-	done
-	tar -czf /tmp/cores-$GITHUB_SHA-$TIMESTAMP.tar.gz . $cores
+		done
+		tar -czf /tmp/cores-$GITHUB_SHA-$TIMESTAMP.tar.gz . $cores
+	fi
 fi
 
 rm -rf /tmp/cores-$GITHUB_SHA-$TIMESTAMP

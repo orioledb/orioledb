@@ -226,6 +226,8 @@ PG_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test --temp-instance=./t
 PG_ISOLATION_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test/output_iso --temp-instance=./test/tmp_check_iso
 
 ifdef IS_DEV
+override PG_CPPFLAGS += -DIS_DEV
+
 sql/%.sql:
 	@cat sql/$*_prod.sql sql/$*_dev.sql > $@
 else

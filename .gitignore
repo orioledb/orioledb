@@ -57,5 +57,7 @@ sql/orioledb--1.4--1.5.sql
 sql/orioledb--1.5--1.6.sql
 sql/orioledb--1.6--1.7.sql
 sql/orioledb--1.7--1.8.sql
+# XXX: ^ Sync with .dockerignore
+
 # Exclude the PostGIS Docker build directory
 /docker-postgis
