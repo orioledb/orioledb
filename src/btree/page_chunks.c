@@ -193,14 +193,8 @@ partial_load_full_page(PartialPageState *partial, Page img)
 			return false;
 	}
 
-	/*
-	 * Zero the free-space tail after header->dataSize so whole page
-	 * doesn't contain undefined data. btree_page_reorg() checks this
-	 * under Valgrind.
-	 */
-	if (header->dataSize < ORIOLEDB_BLCKSZ)
-		memset((Pointer) img + header->dataSize, 0,
-			   ORIOLEDB_BLCKSZ - header->dataSize);
+	/* btree_page_reorg() checks the free-space tail is zeroed under Valgrind. */
+	null_unused_bytes(img);
 
 	partial->isPartial = false;
 	return true;
