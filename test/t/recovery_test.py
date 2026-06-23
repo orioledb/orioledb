@@ -2895,6 +2895,44 @@ class RecoveryWithArchivingTest(BaseTest):
 			time.sleep(0.1)
 		return last_log
 
+	def _read_replica_log_until_barrier_completed(self,
+	                                              replica,
+	                                              stop_after,
+	                                              allow_base_backup=False,
+	                                              timeout_s=10):
+		start_lines = [
+		    "Recovery target reached: start synchronization barrier",
+		    f"stop_after={1 if stop_after else 0}"
+		]
+		if stop_after:
+			completed_lines = [
+			    "Recovery target reached: stop-after synchronization "
+			    "barrier completed"
+			]
+			if allow_base_backup:
+				completed_lines.append(
+				    "Recovery target reached: synchronization barrier "
+				    "completed at base-backup visible state after stop")
+		else:
+			completed_lines = [
+			    "Recovery target reached: stop-before synchronization "
+			    "barrier completed"
+			]
+			if allow_base_backup:
+				completed_lines.append(
+				    "Recovery target reached: synchronization barrier "
+				    "completed at base-backup visible state before stop")
+
+		deadline = time.time() + timeout_s
+		last_log = ""
+		while time.time() < deadline:
+			last_log = self._read_replica_log(replica)
+			if all(line in last_log for line in start_lines) and any(
+			    line in last_log for line in completed_lines):
+				return last_log
+			time.sleep(0.1)
+		return last_log
+
 	def _assert_log_contains(self, replica_log, expected_lines):
 		for expected_line in expected_lines:
 			self.assertIn(expected_line, replica_log)
@@ -3079,7 +3117,10 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, expected_count, expected_max)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica,
+			    stop_after=False,
+			    allow_base_backup=not inclusive)
 			self._assert_stop_before_barrier_logs(
 			    replica_log, allow_base_backup=not inclusive)
 
@@ -3158,7 +3199,8 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, 3000, 3000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False)
 
 			self._assert_stop_before_barrier_logs(replica_log)
 			self._assert_log_contains_any(replica_log, [
@@ -3204,7 +3246,8 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, 1000, 1000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False, allow_base_backup=True)
 
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
@@ -3243,7 +3286,8 @@ recovery_target_action = 'promote'
 
 			self._assert_visible_series(replica, 1000, 1000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False, allow_base_backup=True)
 
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
@@ -3331,7 +3375,8 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, 2000, 2000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False)
 
 			self._assert_stop_before_barrier_logs(replica_log)
 
@@ -3375,7 +3420,8 @@ recovery_target_action = 'promote'
 
 			self._assert_visible_series(replica, 3000, 3000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False)
 
 			self._assert_stop_before_barrier_logs(replica_log)
 			self._assert_log_contains_any(replica_log, [
@@ -3423,7 +3469,8 @@ recovery_target_action = 'promote'
 
 			self._assert_visible_series(replica, 2000, 2000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False)
 
 			self._assert_stop_before_barrier_logs(replica_log)
 
@@ -3520,7 +3567,8 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, 2000, 2000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=True)
 
 			self._assert_stop_after_barrier_logs(replica_log)
 			self._assert_log_contains_any(replica_log, [
@@ -3568,7 +3616,8 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, 2000, 2000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=True)
 
 			self._assert_stop_after_barrier_logs(replica_log)
 			self._assert_log_not_contains(replica_log, [
@@ -3613,7 +3662,8 @@ recovery_target_action = 'promote'
 
 			self._assert_visible_series(replica, 2000, 2000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=True)
 
 			self._assert_stop_after_barrier_logs(replica_log)
 
@@ -3704,7 +3754,8 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, 1000, 1000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False, allow_base_backup=True)
 
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
@@ -3746,7 +3797,8 @@ recovery_target_action = 'promote'
 
 			self._assert_visible_series(replica, 1000, 1000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False, allow_base_backup=True)
 
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
@@ -3842,7 +3894,8 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, 2000, 2000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False)
 
 			self._assert_stop_before_barrier_logs(replica_log)
 
@@ -3880,7 +3933,8 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, 2000, 2000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=True)
 
 			self._assert_stop_after_barrier_logs(replica_log)
 			self._assert_log_contains_any(replica_log, [
@@ -3926,7 +3980,8 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, 2000, 2000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=True)
 
 			self._assert_stop_after_barrier_logs(replica_log)
 
@@ -3963,7 +4018,8 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, 1000, 1000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=True, allow_base_backup=True)
 
 			self._assert_stop_after_barrier_logs(replica_log,
 			                                     allow_base_backup=True)
@@ -4004,7 +4060,8 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, 3000, 3000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=True)
 
 			self._assert_stop_after_barrier_logs(replica_log)
 
@@ -4043,7 +4100,8 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, 2000, 2000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False)
 
 			self._assert_stop_before_barrier_logs(replica_log)
 
@@ -4082,7 +4140,8 @@ recovery_target_action = 'promote'
 
 			self._assert_visible_series(replica, 2000, 2000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False)
 
 			self._assert_stop_before_barrier_logs(replica_log)
 
@@ -4167,7 +4226,8 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, 1000, 1000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False, allow_base_backup=True)
 
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
@@ -4205,7 +4265,8 @@ recovery_target_action = 'promote'
 
 			self._assert_visible_series(replica, 1000, 1000)
 
-			replica_log = self._read_replica_log(replica)
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False, allow_base_backup=True)
 
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
