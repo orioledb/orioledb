@@ -3118,9 +3118,7 @@ recovery_target_action = 'pause'
 			self._assert_visible_series(replica, expected_count, expected_max)
 
 			replica_log = self._read_replica_log_until_barrier_completed(
-			    replica,
-			    stop_after=False,
-			    allow_base_backup=not inclusive)
+			    replica, stop_after=False, allow_base_backup=not inclusive)
 			self._assert_stop_before_barrier_logs(
 			    replica_log, allow_base_backup=not inclusive)
 
