@@ -56,6 +56,38 @@ class MergeTest(BaseTest):
 		    node.execute("SELECT orioledb_tbl_check('o_merge'::regclass)")[0]
 		    [0])
 
+	def _open_merge_diff_snapshot(self, table):
+		"""
+		Shared setup for the test_merge_diff_old_snapshot_* cases: populate a
+		low-fillfactor table, open a REPEATABLE READ snapshot, then CHECKPOINT
+		so its page-merge pass writes differential merge images above the
+		snapshot's csn.
+		"""
+		node = self.node
+		node.safe_psql(
+		    'postgres', "CREATE TABLE IF NOT EXISTS %s ("
+		    "    id int NOT NULL,"
+		    "    payload text NOT NULL,"
+		    "    PRIMARY KEY (id)"
+		    ") USING orioledb WITH (fillfactor = 10);"
+		    "TRUNCATE %s;" % (table, table))
+		node.execute(
+		    "INSERT INTO %s "
+		    "(SELECT id, repeat('x', 100) FROM generate_series(1, 3000) id);" %
+		    table)
+
+		con_snap = node.connect()
+		con_snap.begin()
+		con_snap.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+		self.assertEqual(
+		    con_snap.execute("SELECT count(*) FROM %s;" % table)[0][0], 3000)
+
+		# CHECKPOINT merges the sparse, co-resident leaves (no deletes -> the
+		# merge drops nothing -> differential images), with a fresh csn above
+		# the snapshot's.
+		node.execute("CHECKPOINT;")
+		return con_snap
+
 	def test_merge_diff_old_snapshot_read(self):
 		"""
 		Exercises the differential merge undo image and its read path.
@@ -70,46 +102,27 @@ class MergeTest(BaseTest):
 		trimming the merged page at the boundary key -- returning the exact
 		original key set.
 		"""
-		node = self.node
-		node.safe_psql(
-		    'postgres', "CREATE TABLE IF NOT EXISTS o_merge_diff ("
-		    "    id int NOT NULL,"
-		    "    payload text NOT NULL,"
-		    "    PRIMARY KEY (id)"
-		    ") USING orioledb WITH (fillfactor = 10);"
-		    "TRUNCATE o_merge_diff;")
-		node.execute(
-		    "INSERT INTO o_merge_diff "
-		    "(SELECT id, repeat('x', 100) FROM generate_series(1, 3000) id);")
-
-		con_snap = node.connect()
-		con_snap.begin()
-		con_snap.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
-		self.assertEqual(
-		    con_snap.execute("SELECT count(*) FROM o_merge_diff;")[0][0], 3000)
-
-		# CHECKPOINT merges the sparse, co-resident leaves (no deletes -> the
-		# merge drops nothing -> differential images), with a fresh csn above
-		# the snapshot's.
-		node.execute("CHECKPOINT;")
+		table = 'o_merge_diff'
+		con_snap = self._open_merge_diff_snapshot(table)
 
 		# The old snapshot reads the merged pages through undo and must
 		# reconstruct the exact original key set.
 		self.assertEqual(
-		    con_snap.execute("SELECT count(*) FROM o_merge_diff;")[0][0], 3000)
+		    con_snap.execute("SELECT count(*) FROM %s;" % table)[0][0], 3000)
 		self.assertEqual(
-		    con_snap.execute("SELECT count(*) FROM o_merge_diff "
-		                     "WHERE id BETWEEN 1000 AND 2000;")[0][0], 1001)
+		    con_snap.execute("SELECT count(*) FROM %s "
+		                     "WHERE id BETWEEN 1000 AND 2000;" % table)[0][0],
+		    1001)
 		self.assertEqual(
 		    con_snap.execute(
-		        "SELECT min(id), max(id), sum(id::bigint) FROM o_merge_diff;")
-		    [0], (1, 3000, 4501500))
+		        "SELECT min(id), max(id), sum(id::bigint) FROM %s;" %
+		        table)[0], (1, 3000, 4501500))
 		con_snap.rollback()
 		con_snap.close()
 
 		self.assertTrue(
-		    node.execute("SELECT orioledb_tbl_check('o_merge_diff'::regclass)")
-		    [0][0])
+		    self.node.execute("SELECT orioledb_tbl_check('%s'::regclass)" %
+		                      table)[0][0])
 
 	def test_merge_diff_old_snapshot_index_read(self):
 		"""
@@ -119,52 +132,35 @@ class MergeTest(BaseTest):
 		than the seq-scan path.  Confirms the iterator seeds its working image
 		from the live merged leaf before reconstructing differential halves.
 		"""
-		node = self.node
-		node.safe_psql(
-		    'postgres', "CREATE TABLE IF NOT EXISTS o_merge_diff_idx ("
-		    "    id int NOT NULL,"
-		    "    payload text NOT NULL,"
-		    "    PRIMARY KEY (id)"
-		    ") USING orioledb WITH (fillfactor = 10);"
-		    "TRUNCATE o_merge_diff_idx;")
-		node.execute(
-		    "INSERT INTO o_merge_diff_idx "
-		    "(SELECT id, repeat('x', 100) FROM generate_series(1, 3000) id);")
-
-		con_snap = node.connect()
-		con_snap.begin()
-		con_snap.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+		table = 'o_merge_diff_idx'
+		con_snap = self._open_merge_diff_snapshot(table)
 		con_snap.execute("SET enable_seqscan = off;")
 		con_snap.execute("SET enable_bitmapscan = off;")
-		self.assertEqual(
-		    con_snap.execute("SELECT count(*) FROM o_merge_diff_idx;")[0][0],
-		    3000)
-
-		node.execute("CHECKPOINT;")
 
 		# Ordered/range index reads route through the page-level undo iterator.
 		self.assertEqual(
-		    con_snap.execute("SELECT count(*) FROM o_merge_diff_idx "
-		                     "WHERE id BETWEEN 1000 AND 2000;")[0][0], 1001)
+		    con_snap.execute("SELECT count(*) FROM %s "
+		                     "WHERE id BETWEEN 1000 AND 2000;" % table)[0][0],
+		    1001)
 		self.assertEqual(
-		    con_snap.execute("SELECT id FROM o_merge_diff_idx "
-		                     "WHERE id BETWEEN 500 AND 2500 ORDER BY id;"),
-		    [(i, ) for i in range(500, 2501)])
+		    con_snap.execute("SELECT id FROM %s "
+		                     "WHERE id BETWEEN 500 AND 2500 ORDER BY id;" %
+		                     table), [(i, ) for i in range(500, 2501)])
 		self.assertEqual(
 		    con_snap.execute(
-		        "SELECT id FROM o_merge_diff_idx "
-		        "WHERE id BETWEEN 500 AND 2500 ORDER BY id DESC;"),
+		        "SELECT id FROM %s "
+		        "WHERE id BETWEEN 500 AND 2500 ORDER BY id DESC;" % table),
 		    [(i, ) for i in range(2500, 499, -1)])
 		self.assertEqual(
-		    con_snap.execute("SELECT min(id), max(id), sum(id::bigint) "
-		                     "FROM o_merge_diff_idx;")[0], (1, 3000, 4501500))
+		    con_snap.execute(
+		        "SELECT min(id), max(id), sum(id::bigint) FROM %s;" %
+		        table)[0], (1, 3000, 4501500))
 		con_snap.rollback()
 		con_snap.close()
 
 		self.assertTrue(
-		    node.execute(
-		        "SELECT orioledb_tbl_check('o_merge_diff_idx'::regclass)")[0]
-		    [0])
+		    self.node.execute("SELECT orioledb_tbl_check('%s'::regclass)" %
+		                      table)[0][0])
 
 	def test_merge_diff_old_snapshot_point_read(self):
 		"""
@@ -175,26 +171,8 @@ class MergeTest(BaseTest):
 		fully materialize that page before reconstructing in place; this test
 		guards the partial-page materialization fix.
 		"""
-		node = self.node
-		node.safe_psql(
-		    'postgres', "CREATE TABLE IF NOT EXISTS o_merge_diff_pt ("
-		    "    id int NOT NULL,"
-		    "    payload text NOT NULL,"
-		    "    PRIMARY KEY (id)"
-		    ") USING orioledb WITH (fillfactor = 10);"
-		    "TRUNCATE o_merge_diff_pt;")
-		node.execute(
-		    "INSERT INTO o_merge_diff_pt "
-		    "(SELECT id, repeat('x', 100) FROM generate_series(1, 3000) id);")
-
-		con_snap = node.connect()
-		con_snap.begin()
-		con_snap.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
-		self.assertEqual(
-		    con_snap.execute("SELECT count(*) FROM o_merge_diff_pt;")[0][0],
-		    3000)
-
-		node.execute("CHECKPOINT;")
+		table = 'o_merge_diff_pt'
+		con_snap = self._open_merge_diff_snapshot(table)
 
 		# Point lookups (index scan) over merged pages through undo.
 		con_snap.execute("SET enable_seqscan = off;")
@@ -202,26 +180,26 @@ class MergeTest(BaseTest):
 		for pk in (1, 2, 1500, 1501, 2999, 3000):
 			self.assertEqual(
 			    con_snap.execute(
-			        "SELECT id, payload = repeat('x', 100) FROM o_merge_diff_pt "
-			        "WHERE id = %d;" % pk), [(pk, True)])
+			        "SELECT id, payload = repeat('x', 100) FROM %s "
+			        "WHERE id = %d;" % (table, pk)), [(pk, True)])
 		self.assertEqual(
-		    con_snap.execute("SELECT count(*) FROM o_merge_diff_pt "
-		                     "WHERE id IN (700, 1300, 2200, 2900);")[0][0], 4)
+		    con_snap.execute("SELECT count(*) FROM %s "
+		                     "WHERE id IN (700, 1300, 2200, 2900);" %
+		                     table)[0][0], 4)
 
 		# Bitmap scan over merged pages through undo.
-		con_snap.execute("SET enable_seqscan = off;")
 		con_snap.execute("SET enable_bitmapscan = on;")
 		con_snap.execute("SET enable_indexscan = off;")
 		self.assertEqual(
-		    con_snap.execute("SELECT count(*) FROM o_merge_diff_pt "
-		                     "WHERE id < 100 OR id > 2950;")[0][0], 99 + 50)
+		    con_snap.execute("SELECT count(*) FROM %s "
+		                     "WHERE id < 100 OR id > 2950;" % table)[0][0],
+		    99 + 50)
 		con_snap.rollback()
 		con_snap.close()
 
 		self.assertTrue(
-		    node.execute(
-		        "SELECT orioledb_tbl_check('o_merge_diff_pt'::regclass)")[0]
-		    [0])
+		    self.node.execute("SELECT orioledb_tbl_check('%s'::regclass)" %
+		                      table)[0][0])
 
 	def test_split_diff_old_snapshot_read(self):
 		"""
