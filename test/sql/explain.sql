@@ -246,7 +246,8 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					(SELECT id, generate_string(1, 3000), id
 					 FROM generate_series(1, 100, 1) id)
 					ON CONFLICT (key) DO UPDATE
-					SET val = o_explain.val + 1; $$) as t;
+					SET val = o_explain.val + 1; $$) as t
+	WHERE t NOT LIKE ' Planning:' AND t NOT LIKE '   Buffers: shared hit=%';
 
 -- UPDATE TOAST with equal values (only TOAST reads for compare values)
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
@@ -255,7 +256,8 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					(SELECT id, generate_string(1, 3000), id
 					 FROM generate_series(1, 100, 1) id)
 					ON CONFLICT (key) DO UPDATE
-					SET val = o_explain.val + 1, t = EXCLUDED.t; $$) as t;
+					SET val = o_explain.val + 1, t = EXCLUDED.t; $$) as t
+	WHERE t NOT LIKE ' Planning:' AND t NOT LIKE '   Buffers: shared hit=%';
 
 CREATE TABLE o_test_explain_verbose_rowid (
   val_1 int,

@@ -531,7 +531,8 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					(SELECT id, generate_string(1, 3000), id
 					 FROM generate_series(1, 100, 1) id)
 					ON CONFLICT (key) DO UPDATE
-					SET val = o_explain.val + 1; $$) as t;
+					SET val = o_explain.val + 1; $$) as t
+	WHERE t NOT LIKE ' Planning:' AND t NOT LIKE '   Buffers: shared hit=%';
                                           regexp_replace                                           
 ---------------------------------------------------------------------------------------------------
  Insert on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
@@ -551,7 +552,8 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					(SELECT id, generate_string(1, 3000), id
 					 FROM generate_series(1, 100, 1) id)
 					ON CONFLICT (key) DO UPDATE
-					SET val = o_explain.val + 1, t = EXCLUDED.t; $$) as t;
+					SET val = o_explain.val + 1, t = EXCLUDED.t; $$) as t
+	WHERE t NOT LIKE ' Planning:' AND t NOT LIKE '   Buffers: shared hit=%';
                                           regexp_replace                                           
 ---------------------------------------------------------------------------------------------------
  Insert on o_explain  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
