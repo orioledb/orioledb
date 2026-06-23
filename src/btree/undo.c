@@ -1544,8 +1544,10 @@ make_merge_undo_image(BTreeDescr *desc, Pointer left,
 					  Pointer right, CommitSeqNo imageCsn)
 {
 	UndoPageImageHeader *header;
+	UndoMergeDiffData *diff;
 	UndoLocation undoLocation;
 	Pointer		undo_rec;
+	Pointer		boundaryPtr;
 	UndoLogType undoType = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
 	BTreePageHeader *leftHeader = (BTreePageHeader *) left;
 	BTreePageHeader *rightHeader = (BTreePageHeader *) right;
@@ -1590,20 +1592,17 @@ make_merge_undo_image(BTreeDescr *desc, Pointer left,
 	header->splitKeyFlags = 0;
 	header->splitKeyLen = 0;
 
-	{
-		UndoMergeDiffData *diff = (UndoMergeDiffData *)
-			(undo_rec + MAXALIGN(sizeof(UndoPageImageHeader)));
-		Pointer		boundaryPtr = (Pointer) diff + MAXALIGN(sizeof(UndoMergeDiffData));
+	diff = (UndoMergeDiffData *) (undo_rec + MAXALIGN(sizeof(UndoPageImageHeader)));
+	boundaryPtr = (Pointer) diff + MAXALIGN(sizeof(UndoMergeDiffData));
 
-		memset(diff, 0, sizeof(*diff));
-		diff->leftCsn = leftHeader->csn;
-		diff->rightCsn = rightHeader->csn;
-		diff->leftUndoLoc = leftHeader->undoLocation;
-		diff->rightUndoLoc = rightHeader->undoLocation;
-		diff->boundaryFlags = boundary.formatFlags;
-		diff->boundaryLen = boundaryLen;
-		memcpy(boundaryPtr, boundary.data, boundaryLen);
-	}
+	memset(diff, 0, sizeof(*diff));
+	diff->leftCsn = leftHeader->csn;
+	diff->rightCsn = rightHeader->csn;
+	diff->leftUndoLoc = leftHeader->undoLocation;
+	diff->rightUndoLoc = rightHeader->undoLocation;
+	diff->boundaryFlags = boundary.formatFlags;
+	diff->boundaryLen = boundaryLen;
+	memcpy(boundaryPtr, boundary.data, boundaryLen);
 
 	release_reserved_undo_location(undoType);
 	return undoLocation;
