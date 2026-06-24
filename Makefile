@@ -175,7 +175,6 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/correlation_test.py \
 						test/t/eviction_bgwriter_test.py \
 						test/t/eviction_compression_test.py \
-						test/t/eviction_test.py \
 						test/t/file_operations_test.py \
 						test/t/files_test.py \
 						test/t/functions_test.py \
@@ -199,6 +198,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/checkpoint_update_compress_test.py \
 						test/t/checkpoint_update_test.py \
 						test/t/ddl_test.py \
+						test/t/eviction_test.py \
 						test/t/eviction_full_memory_test.py \
 						test/t/include_indices_test.py \
 						test/t/indices_build_test.py \
