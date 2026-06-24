@@ -2194,21 +2194,15 @@ undo_xact_callback(XactEvent event, void *arg)
 					 oxid, logicalXidContext.xid, heapXid,
 					 GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
 
+				START_CRIT_SECTION();
+
 				if (!TransactionIdIsValid(heapXid))
 				{
 					bool		wrote_xlog;
 
 					/* Commit o - o : independent Oriole transaction */
 
-					flushPos = assign_xidless_commit_lsn(oxid, &wrote_xlog);
-
-					elog(DEBUG4, "XACT_EVENT_COMMIT [independent Oriole transaction] oxid "
-						 UINT64_FORMAT " logicalXid %u top heapXid %u current heapXid %u useHeap %d flushPos %X/%X",
-						 oxid, logicalXidContext.xid, heapXid,
-						 GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap,
-						 LSN_FORMAT_ARGS(flushPos));
-
-					flushPos = Max(flushPos, XactLastCommitEnd);
+					flushPos = Max(assign_xidless_commit_lsn(oxid, &wrote_xlog), XactLastCommitEnd);
 
 					/* Flush WAL if needed */
 					if (!XLogRecPtrIsInvalid(flushPos) &&
@@ -2231,32 +2225,28 @@ undo_xact_callback(XactEvent event, void *arg)
 					set_oxid_xlog_ptr(oxid, XactLastCommitEnd);
 				}
 
-				current_oxid_precommit();
-
-				if (STOPEVENTS_ENABLED())
+				if (STOPEVENT_CONDITION(STOPEVENT_COMMIT_ASSERT, NULL))
 				{
 					/*
-					 * XACT_EVENT_COMMIT runs under HOLD_INTERRUPTS, so a
-					 * normal CHECK_FOR_INTERRUPTS() is suppressed here. In
-					 * test/debug builds (orioledb.enable_stopevents) we
-					 * briefly lift the holdoff so a query cancel delivered
-					 * while parked at the stop event can fire and drive the
-					 * precommit→abort transition the test means to
-					 * exercise.  Production builds skip this entirely — the
-					 * stop event is compiled out to a no-op and the holdoff
-					 * stays intact.
+					 * CRIT_SECTION + elog(ERROR) = PANIC
 					 */
-					RESUME_INTERRUPTS();
-					STOPEVENT(STOPEVENT_AFTER_CSN_PRECOMMIT, NULL);
-					CHECK_FOR_INTERRUPTS();
-					HOLD_INTERRUPTS();
+					START_CRIT_SECTION();
+					elog(ERROR, "stop event \"commit_assert\" fired");
+					END_CRIT_SECTION();
 				}
+
+				current_oxid_precommit();
 
 				csn = GetCurrentCSN();
 				if (csn == COMMITSEQNO_INPROGRESS)
 					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 
+				if (STOPEVENT_CONDITION(STOPEVENT_CSN_INCREMENTED, NULL))
+					elog(ERROR, "stop event \"csn_incremented\" fired");
 				current_oxid_commit(csn);
+
+				END_CRIT_SECTION();
+
 				Assert(enable_rewind || !csn_is_retained_for_rewind(csn));
 
 				if (enable_rewind)
@@ -2267,6 +2257,9 @@ undo_xact_callback(XactEvent event, void *arg)
 					add_to_rewind_buffer(oxid, xid1, nsubxids, subxids);
 					reset_precommit_xid_subxids();
 				}
+
+				if (STOPEVENT_CONDITION(STOPEVENT_BEFORE_ON_COMMIT_UNDO_STACK, NULL))
+					elog(ERROR, "stop event \"before_on_commit_undo_stack\" fired");
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 				{
@@ -2294,7 +2287,6 @@ undo_xact_callback(XactEvent event, void *arg)
 					 " logicalXid %u top heapXid %u current heapXid %u useHeap %d",
 					 oxid, logicalXidContext.xid, heapXid,
 					 GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
-
 
 				if (!RecoveryInProgress())
 					wal_rollback(oxid, logicalXidContext.xid, false);
@@ -2747,12 +2739,16 @@ finish_autonomous_transaction(OAutonomousTxState *state)
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			precommit_undo_stack((UndoLogType) i, oxid, true);
 
+		START_CRIT_SECTION();
+
 		if (!is_recovery_process())
 			wal_commit(oxid, get_current_logical_xid(), true);
 
 		current_oxid_precommit();
 		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 		current_oxid_commit(csn);
+
+		END_CRIT_SECTION();
 
 		for (i = 0; i < (int) UndoLogsCount; i++)
 			on_commit_undo_stack((UndoLogType) i, oxid, true);

@@ -424,13 +424,25 @@ bool
 check_stopevent(int event_id, Jsonb *params)
 {
 	StopEvent  *event = &stopevents[event_id];
+	bool		result;
 
 	Assert(event_id >= 0 && event_id < STOPEVENTS_COUNT);
 
-	if (event->enabled && check_stopevent_condition(event, params))
-		return true;
+	if (!event->enabled)
+		return false;
 
-	return false;
+	/*
+	 * If params are allocated by user side, do not reset stopevents_ctx for
+	 * further reuse of params.
+	 */
+	if (params)
+		return check_stopevent_condition(event, params);
+
+	params = make_empty_params();
+	result = check_stopevent_condition(event, params);
+	MemoryContextReset(stopevents_cxt);
+
+	return result;
 }
 
 void

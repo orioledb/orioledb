@@ -771,6 +771,9 @@ orioledb_tuple_update(Relation relation, Datum tupleid, TupleTableSlot *slot,
 	bms_free(marg.keyAttrs);
 	Assert(mres.success);
 
+	if (STOPEVENT_CONDITION(STOPEVENT_UPDATE_PK_DONE_PRE_SK, NULL))
+		elog(ERROR, "stop event \"update_pk_done_pre_sk\" fired");
+
 	return mres.oldTuple ? TM_Ok : (marg.modified ? TM_Updated : TM_Deleted);
 }
 

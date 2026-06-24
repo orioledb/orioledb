@@ -204,6 +204,20 @@ elif [ $CHECK_TYPE = "dm_log_writes" ]; then
 	# Each crash point uses dm-log-writes: only writes that reached the
 	# block device before the mark survive, discarding OS-buffered data.
 	make USE_PGXS=1 IS_DEV=1 USE_DM_LOG_WRITES=1 test/t/recovery_test.py || status=$?
+elif [ $CHECK_TYPE = "bank_account_crash" ]; then
+    # It is ok for bank_account_test to abort nodes with PANICs,
+    # so collecting cores can false positively trigger the CI
+    ulimit -c 0 -S
+
+    # Run 2 different workloads. The first one with injections
+    # and the second one with postmaster SIGKILL. Both workloads
+    # involve streaming replication in setup
+
+    make USE_PGXS=1 IS_DEV=1 RR_INJECTION_POINTS=ALL RR_ASSERT_POINTS=ALL RR_DURATION=120 RR_ASSERT_PERIOD=15 TIMEOUT=200 bankcrashcheck || status=$?
+    sleep 5
+    make USE_PGXS=1 IS_DEV=1 RR_ROLLBACKERS=5 RR_KILL_POSTMASTER=1 RR_DURATION=120 RR_KILL_POSTMASTER_INTERVAL=5 TIMEOUT=200 bankcrashcheck || status=$?
+
+    ulimit -c unlimited -S
 else
 	make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?
 fi

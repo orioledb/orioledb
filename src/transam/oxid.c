@@ -34,6 +34,7 @@
 #include "utils/memutils.h"
 #endif
 #include "utils/snapmgr.h"
+#include "utils/stopevent.h"
 #include "recovery/wal.h"
 
 #define XID_FILE_SIZE (0x1000000)
@@ -105,6 +106,8 @@ static bool csn_committing_set = false;
 static bool xlog_ptr_committing_set = false;
 
 static LogicalXidCtx logicalXidContext = {InvalidTransactionId, false};
+
+static bool call_injection = false;
 
 static inline void
 reset_logical_xid_ctx(void)
@@ -583,6 +586,25 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 	CommitSeqNo oldCsn;
 	OXid		writeInProgressXmin;
 
+	if (STOPEVENTS_ENABLED())
+	{
+		if (STOPEVENT_CONDITION(STOPEVENT_SET_CSN, NULL))
+			elog(ERROR, "stop event \"set_csn\" fired");
+
+		if (csn != COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
+											GET_CUR_PROCDATA()->autonomousNestingLevel,
+											COMMITSEQNO_STATUS_IN_PROGRESS)
+			&& csn != COMMITSEQNO_ABORTED)
+		{
+			if (call_injection)
+			{
+				call_injection = false;
+				if (STOPEVENT_CONDITION(STOPEVENT_SET_CSN_GUARDED, NULL))
+					elog(ERROR, "stop event \"set_csn_guarded\" fired");
+			}
+		}
+	}
+
 	oldCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn);
 	pg_read_barrier();
 	writeInProgressXmin = pg_atomic_read_u64(&xid_meta->writeInProgressXmin);
@@ -626,6 +648,12 @@ set_oxid_xlog_ptr_internal(OXid oxid, XLogRecPtr ptr)
 {
 	XLogRecPtr	oldPtr;
 	OXid		writeInProgressXmin;
+
+	if (STOPEVENT_CONDITION(STOPEVENT_SET_XLOG_PTR, NULL))
+		elog(ERROR, "stop event \"set_xlog_ptr\" fired");
+	if (ptr != InvalidXLogRecPtr &&
+		STOPEVENT_CONDITION(STOPEVENT_SET_XLOG_PTR_GUARDED, NULL))
+		elog(ERROR, "stop event \"set_xlog_ptr_guarded\" fired");
 
 	oldPtr = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr);
 	pg_read_barrier();
@@ -1121,7 +1149,9 @@ advance_global_xmin(OXid newXid)
 	 * backwards.
 	 */
 	if (globalXmin > prevGlobalXmin)
+	{
 		pg_atomic_write_u64(&xid_meta->globalXmin, globalXmin);
+	}
 
 	/*
 	 * Check if we can update writtenXmin without actual writing.
@@ -1476,6 +1506,11 @@ current_oxid_commit(CommitSeqNo csn)
 	if (!OXidIsValid(curOxid))
 		return;
 
+	/*
+	 * set_oxid_csn is called from multiple places and not every must trigger
+	 * a stopevent, so we need to set call_injection before calling oxid_csn
+	 */
+	call_injection = true;
 	set_oxid_csn(curOxid,
 				 csn | (enable_rewind ? COMMITSEQNO_RETAINED_FOR_REWIND : 0));
 	pg_write_barrier();
@@ -1484,6 +1519,8 @@ current_oxid_commit(CommitSeqNo csn)
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 
 	advance_run_xmin(curOxid);
+	if (STOPEVENT_CONDITION(STOPEVENT_BEFORE_CUROXID_CLEAR, NULL))
+		elog(ERROR, "stop event \"before_curoxid_clear\" fired");
 	curOxid = InvalidOXid;
 	release_assigned_logical_xids();
 }

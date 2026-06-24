@@ -583,7 +583,9 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 		btree_try_merge_and_unlock(context.desc, blkno, true, true);
 	}
 	else
+	{
 		unlock_page(blkno);
+	}
 }
 
 /*
