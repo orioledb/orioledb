@@ -1,6 +1,9 @@
 name: pgindent
 
-on: [workflow_dispatch, pull_request]
+on:
+  push: ["main"]
+  pull_request:
+  workflow_dispatch:
 
 jobs:
   pgindent:
