@@ -67,6 +67,7 @@ jobs:
           check_types = [
               "normal", "debug", "sanitize", "check_page",
               "valgrind_1", "valgrind_2", "pg_tests", "dm_log_writes",
+              "bank_account_crash"
           ]
 
           # workflow_dispatch can ask for several copies of every cell, so a
