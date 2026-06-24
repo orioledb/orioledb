@@ -22,6 +22,7 @@
 #include "recovery/wal_record.h"
 #include "tableam/descr.h"
 #include "transam/oxid.h"
+#include "utils/stopevent.h"
 
 #include "replication/message.h"
 #include "replication/origin.h"
@@ -42,6 +43,12 @@ typedef struct
 } LocalWal;
 
 static LocalWal local_wal;
+
+/*
+ * Set by wal_rollback() while it is running so the -guarded variants
+ * of the wal-flush stop events can skip an abort-side reentry.
+ */
+static bool wal_in_rollback = false;
 
 static void add_finish_wal_record(uint8 rec_type, OXid xmin);
 static void add_joint_commit_wal_record(TransactionId xid, OXid xmin);
@@ -301,12 +308,27 @@ wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	if (!local_wal.contains_xid)
 		add_xid_wal_record(oxid, logicalXid);
 
+	if (STOPEVENT_CONDITION(STOPEVENT_BEFORE_PRE_COMMIT_WAL_FINISH, NULL))
+	{
+		/*
+		 * CRIT_SECTION + elog(ERROR) = PANIC
+		 */
+		START_CRIT_SECTION();
+		elog(ERROR, "stop event \"before_pre_commit_wal_finish\" fired");
+		END_CRIT_SECTION();
+	}
+
 	add_finish_wal_record(WAL_REC_COMMIT, pg_atomic_read_u64(&xid_meta->runXmin));
 	walPos = flush_local_wal(true, !isAutonomous);
-	local_wal.has_material_changes = false;
 
-	elog(DEBUG4, "[%s] COMMIT oxid " UINT64_FORMAT " logicalXid %u %X/%X",
-		 __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
+	if (CritSectionCount == 0)
+		elog(DEBUG4, "[%s] COMMIT oxid " UINT64_FORMAT " logicalXid %u %X/%X",
+			 __func__, oxid, logicalXid, LSN_FORMAT_ARGS(walPos));
+
+	if (STOPEVENT_CONDITION(STOPEVENT_AFTER_FLUSH_LOCAL_WAL, NULL))
+		elog(ERROR, "stop event \"after_flush_local_wal\" fired");
+
+	local_wal.has_material_changes = false;
 
 	return walPos;
 }
@@ -358,6 +380,16 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 	}
 
 	Assert(!is_recovery_process());
+
+	/*
+	 * Mark that any flush_local_wal / flush_local_wal_if_needed call below
+	 * originates from the abort path, so the -guarded variants of the
+	 * wal-flush stop events skip themselves and avoid re-entering ereport
+	 * during XACT_EVENT_ABORT (-> PANIC).
+	 */
+	if (STOPEVENTS_ENABLED())
+		wal_in_rollback = true;
+
 	flush_local_wal_if_needed(sizeof(WALRecFinish));
 	Assert(local_wal.buffer_offset + sizeof(WALRecFinish) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
@@ -371,6 +403,9 @@ wal_rollback(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 
 	elog(DEBUG4, "ROLLBACK oxid " UINT64_FORMAT " logicalXid %u",
 		 oxid, logicalXid);
+
+	if (STOPEVENTS_ENABLED())
+		wal_in_rollback = false;
 
 	if (synchronous_commit > SYNCHRONOUS_COMMIT_OFF)
 		XLogFlush(wait_pos);
@@ -425,7 +460,14 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 	Assert(!is_recovery_process());
 	Assert(rec_type == WAL_REC_COMMIT || rec_type == WAL_REC_ROLLBACK);
 
-	elog(DEBUG4, "rec_type %d (%s)", rec_type, wal_record_type_to_string(rec_type));
+	if (STOPEVENT_CONDITION(STOPEVENT_ADD_FINISH_WAL, NULL))
+		elog(ERROR, "stop event \"add_finish_wal\" fired");
+	if (rec_type == WAL_REC_COMMIT &&
+		STOPEVENT_CONDITION(STOPEVENT_ADD_FINISH_WAL_GUARDED, NULL))
+		elog(ERROR, "stop event \"add_finish_wal_guarded\" fired");
+
+	if (CritSectionCount == 0)
+		elog(DEBUG4, "rec_type %d (%s)", rec_type, wal_record_type_to_string(rec_type));
 
 	recLength = sizeof(WALRecFinish);
 	if (rec_type == WAL_REC_COMMIT &&
@@ -496,8 +538,9 @@ add_xid_wal_record(OXid oxid, TransactionId logicalXid)
 
 	heapXid = GetTopTransactionIdIfAny();
 
-	elog(DEBUG4, "WAL_REC_XID oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
-		 oxid, logicalXid, heapXid);
+	if (CritSectionCount == 0)
+		elog(DEBUG4, "WAL_REC_XID oxid " UINT64_FORMAT " logicalXid %u heapXid %u",
+			 oxid, logicalXid, heapXid);
 
 	rec = (WALRecXid *) (&local_wal.buffer[local_wal.buffer_offset]);
 	rec->recType = WAL_REC_XID;
@@ -732,6 +775,11 @@ flush_local_wal(bool isCommit, bool withXactTime)
 	Assert(!is_recovery_process());
 	Assert(length > 0);
 
+	if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH, NULL))
+		elog(ERROR, "stop event \"wal_flush\" fired");
+	if (isCommit && STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH_GUARDED, NULL))
+		elog(ERROR, "stop event \"wal_flush_guarded\" fired");
+
 	/*
 	 * Put the xlog location of our commit record to the shared memory.  This
 	 * will help concurrent checkpointer to wait till we do
@@ -767,7 +815,14 @@ flush_local_wal_if_needed(int required_length)
 	Assert(!is_recovery_process());
 	if (local_wal.buffer_offset + required_length + XID_RESERVED_LENGTH > LOCAL_WAL_BUFFER_SIZE)
 	{
-		elog(DEBUG4, "[%s] Going to FLUSH WAL on local WAL buffer overflow", __func__);
+		if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH, NULL))
+			elog(ERROR, "stop event \"wal_flush\" fired");
+		if (STOPEVENT_CONDITION(STOPEVENT_WAL_FLUSH_GUARDED, NULL)
+			&& !wal_in_rollback)
+			elog(ERROR, "stop event \"wal_flush_guarded\" fired");
+
+		if (CritSectionCount == 0)
+			elog(DEBUG4, "[%s] Going to FLUSH WAL on local WAL buffer overflow", __func__);
 
 		START_CRIT_SECTION();
 		log_logical_wal_container(local_wal.buffer, local_wal.buffer_offset, false);
@@ -821,6 +876,15 @@ log_logical_wal_container(Pointer ptr, int length, bool withXactTime)
 	}
 
 	XLogRegisterData(ptr, length);
+	if (STOPEVENT_CONDITION(STOPEVENT_BEFORE_XLOG_INSERT, NULL))
+	{
+		/*
+		 * CRIT_SECTION + elog(ERROR) = PANIC
+		 */
+		START_CRIT_SECTION();
+		elog(ERROR, "stop event \"before_xlog_insert\" fired");
+		END_CRIT_SECTION();
+	}
 	return XLogInsert(ORIOLEDB_RMGR_ID, ORIOLEDB_XLOG_CONTAINER);
 }
 
