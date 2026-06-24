@@ -734,7 +734,6 @@ pg_atomic_uint64 *recovery_published_visible_ptr;
  * boundary relevant to the current stop condition, without inferring that
  * mapping late in the barrier loop.
  */
-static pg_atomic_uint32 *recovery_last_pair_seq;
 static pg_atomic_uint64 *recovery_last_replay_ptr;
 static pg_atomic_uint64 *recovery_last_visible_ptr;
 bool	   *recovery_single_process;
@@ -802,9 +801,7 @@ recovery_shmem_needs(void)
 	size = add_size(size, CACHELINEALIGN(sizeof(RecoveryUndoLocFlush)));
 	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(RecoveryWorkerPtrs),
 												  recovery_pool_size_guc + recovery_idx_pool_size_guc)));
-	size = add_size(size,
-					CACHELINEALIGN(add_size(mul_size(sizeof(pg_atomic_uint64), 6),
-											 sizeof(pg_atomic_uint32))));
+	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 6)));
 	size = add_size(size, CACHELINEALIGN(sizeof(bool)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint64)));
@@ -862,11 +859,8 @@ recovery_shmem_init(Pointer ptr, bool found)
 	recovery_last_replay_ptr = recovery_ptr + 4;
 	/* 5: matching Oriole-visible boundary for that event */
 	recovery_last_visible_ptr = recovery_ptr + 5;
-	/* Sequence counter protecting the replay/visible pair. */
-	recovery_last_pair_seq = (pg_atomic_uint32 *) (recovery_ptr + 6);
 
-	ptr += CACHELINEALIGN(add_size(mul_size(sizeof(pg_atomic_uint64), 6),
-								   sizeof(pg_atomic_uint32)));
+	ptr += CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 6));
 
 	was_in_recovery = (bool *) ptr;
 	ptr += CACHELINEALIGN(sizeof(bool));
@@ -909,7 +903,6 @@ recovery_shmem_init(Pointer ptr, bool found)
 		pg_atomic_init_u64(recovery_main_retain_ptr, InvalidXLogRecPtr);
 		pg_atomic_init_u64(recovery_finished_list_ptr, InvalidXLogRecPtr);
 		pg_atomic_init_u64(recovery_published_visible_ptr, InvalidXLogRecPtr);
-		pg_atomic_init_u32(recovery_last_pair_seq, 0);
 
 		/*
 		 * No stop-after replay/visible pair is known until replay reaches a
@@ -2153,22 +2146,18 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
  * replay records the latest replay/visible pair as commit-producing events
  * are applied, and the recovery-target hook later derives the Oriole-visible
  * boundary relevant to the current stop condition from that latest pair.
+ *
+ * Both writers and the recovery-target hook run in the startup process, so
+ * pair updates and reads cannot execute concurrently.
  */
 static inline void
 recovery_record_visible_boundary_pair(XLogRecPtr replay_ptr, XLogRecPtr visible_ptr)
 {
-	uint32		seq;
-
 	if (XLogRecPtrIsInvalid(replay_ptr) || XLogRecPtrIsInvalid(visible_ptr))
 		return;
 
-	seq = pg_atomic_read_u32(recovery_last_pair_seq);
-	pg_atomic_write_u32(recovery_last_pair_seq, seq + 1);
-	pg_write_barrier();
 	pg_atomic_write_u64(recovery_last_replay_ptr, replay_ptr);
 	pg_atomic_write_u64(recovery_last_visible_ptr, visible_ptr);
-	pg_write_barrier();
-	pg_atomic_write_u32(recovery_last_pair_seq, seq + 2);
 
 	elog(DEBUG4,
 		 "Recovery visible boundary pair updated "
@@ -2180,27 +2169,11 @@ recovery_record_visible_boundary_pair(XLogRecPtr replay_ptr, XLogRecPtr visible_
 static inline void
 recovery_read_visible_boundary_pair(XLogRecPtr *replay_ptr, XLogRecPtr *visible_ptr)
 {
-	uint32		seq1,
-				seq2;
-
 	Assert(replay_ptr);
 	Assert(visible_ptr);
 
-	while (true)
-	{
-		seq1 = pg_atomic_read_u32(recovery_last_pair_seq);
-		if (seq1 & 1)
-			continue;
-
-		pg_read_barrier();
-		*replay_ptr = pg_atomic_read_u64(recovery_last_replay_ptr);
-		*visible_ptr = pg_atomic_read_u64(recovery_last_visible_ptr);
-		pg_read_barrier();
-
-		seq2 = pg_atomic_read_u32(recovery_last_pair_seq);
-		if (seq1 == seq2)
-			return;
-	}
+	*replay_ptr = pg_atomic_read_u64(recovery_last_replay_ptr);
+	*visible_ptr = pg_atomic_read_u64(recovery_last_visible_ptr);
 }
 
 static XLogRecPtr
