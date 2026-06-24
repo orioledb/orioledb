@@ -2708,6 +2708,11 @@ undo_xact_callback(XactEvent event, void *arg)
 				if (TransactionIdIsValid(heapXid))
 					current_oxid_precommit();
 
+				/*
+				 * TODO: Add here commit assert injection as it is alternative path for
+				 * heap xidfull tx
+				 */
+
 				break;
 
 			case XACT_EVENT_COMMIT:
@@ -2771,13 +2776,25 @@ undo_xact_callback(XactEvent event, void *arg)
 				 * XACT_EVENT_PRE_PROC_ARRAY already, before its CSN became
 				 * visible; see the comment there.
 				 */
-				if (!TransactionIdIsValid(heapXid))
+				if (!TransactionIdIsValid(heapXid)) {
+    				if (STOPEVENT_CONDITION(STOPEVENT_COMMIT_ASSERT, NULL))
+    				{
+    					/*
+    					 * CRIT_SECTION + elog(ERROR) = PANIC
+    					 */
+    					START_CRIT_SECTION();
+    					elog(ERROR, "stop event \"commit_assert\" fired");
+    					END_CRIT_SECTION();
+    				}
 					current_oxid_precommit();
+				}
 
 				csn = GetCurrentCSN();
 				if (csn == COMMITSEQNO_INPROGRESS)
 					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 
+				if (STOPEVENT_CONDITION(STOPEVENT_CSN_INCREMENTED, NULL))
+					elog(ERROR, "stop event \"csn_incremented\" fired");
 				current_oxid_commit(csn);
 
 				END_CRIT_SECTION();
@@ -2792,6 +2809,9 @@ undo_xact_callback(XactEvent event, void *arg)
 					add_to_rewind_buffer(oxid, xid1, nsubxids, subxids);
 					reset_precommit_xid_subxids();
 				}
+
+				if (STOPEVENT_CONDITION(STOPEVENT_BEFORE_ON_COMMIT_UNDO_STACK, NULL))
+					elog(ERROR, "stop event \"before_on_commit_undo_stack\" fired");
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 				{
@@ -2820,7 +2840,6 @@ undo_xact_callback(XactEvent event, void *arg)
 					 " logicalXid %u top heapXid %u current heapXid %u useHeap %d",
 					 oxid, logicalXidContext.xid, heapXid,
 					 GetCurrentTransactionIdIfAny(), logicalXidContext.useHeap);
-
 
 				if (!RecoveryInProgress())
 					wal_rollback(oxid, logicalXidContext.xid, false);
