@@ -37,6 +37,7 @@
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "tuple/slot.h"
+#include "utils/datetime.h"
 #include "utils/dsa.h"
 #include "utils/elog.h"
 #include "utils/inval.h"
@@ -1566,8 +1567,6 @@ orioledb_recovery_stops_before_hook(XLogReaderState *record,
 	if (st == WALPARSE_STOP)	/* WAL_CONTAINER_HAS_XACT_INFO is present */
 	{
 		bool		stop_here;
-		char	   *xact_time_str;
-		char	   *target_time_str;
 
 		Assert(r.container.flags & WAL_CONTAINER_HAS_XACT_INFO);
 
@@ -1579,23 +1578,28 @@ orioledb_recovery_stops_before_hook(XLogReaderState *record,
 		else
 			stop_here = r.container.xact_info.xactTime >= recoveryTargetTime;
 
-		xact_time_str = pstrdup(timestamptz_to_str(*recordXtime));
-		target_time_str = pstrdup(timestamptz_to_str(recoveryTargetTime));
+		if (message_level_is_interesting(DEBUG4))
+		{
+			char		xact_time_str[MAXDATELEN + 1];
+			char		target_time_str[MAXDATELEN + 1];
 
-		elog(DEBUG4,
-			 "RecoveryStopsBeforeHook: WAL container xact_info "
-			 "(record_ptr=%X/%X record_end_ptr=%X/%X xid=%u xact_time=%s "
-			 "target_time=%s inclusive=%d decision=%s)",
-			 LSN_FORMAT_ARGS(record->ReadRecPtr),
-			 LSN_FORMAT_ARGS(record->EndRecPtr),
-			 *recordXid,
-			 xact_time_str,
-			 target_time_str,
-			 recoveryTargetInclusive,
-			 stop_here ? "stop-before" : "continue");
+			strlcpy(xact_time_str, timestamptz_to_str(*recordXtime),
+					sizeof(xact_time_str));
+			strlcpy(target_time_str, timestamptz_to_str(recoveryTargetTime),
+					sizeof(target_time_str));
 
-		pfree(xact_time_str);
-		pfree(target_time_str);
+			elog(DEBUG4,
+				 "RecoveryStopsBeforeHook: WAL container xact_info "
+				 "(record_ptr=%X/%X record_end_ptr=%X/%X xid=%u "
+				 "xact_time=%s target_time=%s inclusive=%d decision=%s)",
+				 LSN_FORMAT_ARGS(record->ReadRecPtr),
+				 LSN_FORMAT_ARGS(record->EndRecPtr),
+				 *recordXid,
+				 xact_time_str,
+				 target_time_str,
+				 recoveryTargetInclusive,
+				 stop_here ? "stop-before" : "continue");
+		}
 
 		return stop_here;
 	}
