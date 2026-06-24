@@ -2153,6 +2153,8 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 static inline void
 recovery_record_visible_boundary_pair(XLogRecPtr replay_ptr, XLogRecPtr visible_ptr)
 {
+	Assert(AmStartupProcess() || !IsUnderPostmaster);
+
 	if (XLogRecPtrIsInvalid(replay_ptr) || XLogRecPtrIsInvalid(visible_ptr))
 		return;
 
@@ -2169,6 +2171,7 @@ recovery_record_visible_boundary_pair(XLogRecPtr replay_ptr, XLogRecPtr visible_
 static inline void
 recovery_read_visible_boundary_pair(XLogRecPtr *replay_ptr, XLogRecPtr *visible_ptr)
 {
+	Assert(AmStartupProcess() || !IsUnderPostmaster);
 	Assert(replay_ptr);
 	Assert(visible_ptr);
 
