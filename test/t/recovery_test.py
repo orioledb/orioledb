@@ -13,7 +13,6 @@ from .base_test import wait_stopevent
 from .base_test import wait_checkpointer_stopevent
 
 
-
 class RecoveryTest(BaseTest):
 
 	def setUp(self):
@@ -2976,17 +2975,16 @@ class RecoveryWithArchivingTest(BaseTest):
 			elif os.path.exists(node.pg_log_file):
 				with open(node.pg_log_file, encoding='utf-8') as f:
 					replica_log = f.read()
-					if (
-					    "Recovery target reached: start synchronization "
+					if ("Recovery target reached: start synchronization "
 					    "barrier" in replica_log
 					    and "database system is shut down" in replica_log):
 						return
 			time.sleep(0.1)
-		self.fail("node did not complete startup and shutdown within %s "
-		          "seconds; startup observed=%s, status=%s, "
-		          "postmaster.pid exists=%s" %
-		          (timeout_s, started, node.status(),
-		           os.path.exists(pidfile_path)))
+		self.fail(
+		    "node did not complete startup and shutdown within %s "
+		    "seconds; startup observed=%s, status=%s, "
+		    "postmaster.pid exists=%s" %
+		    (timeout_s, started, node.status(), os.path.exists(pidfile_path)))
 
 	def _replace_recovery_target_action(self,
 	                                    node,
@@ -3300,9 +3298,7 @@ recovery_target_action = 'promote'
 			self._assert_visible_series(replica, 1000, 1000)
 
 			replica_log = self._read_replica_log_until_barrier_completed(
-			    replica,
-			    stop_after=False,
-			    allow_base_backup=True)
+			    replica, stop_after=False, allow_base_backup=True)
 
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
@@ -3826,9 +3822,7 @@ recovery_target_action = 'promote'
 			self._assert_visible_series(replica, 1000, 1000)
 
 			replica_log = self._read_replica_log_until_barrier_completed(
-			    replica,
-			    stop_after=False,
-			    allow_base_backup=True)
+			    replica, stop_after=False, allow_base_backup=True)
 
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
@@ -4266,9 +4260,7 @@ recovery_target_action = 'pause'
 			self._assert_visible_series(replica, 1000, 1000)
 
 			replica_log = self._read_replica_log_until_barrier_completed(
-			    replica,
-			    stop_after=False,
-			    allow_base_backup=True)
+			    replica, stop_after=False, allow_base_backup=True)
 
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
@@ -4307,9 +4299,7 @@ recovery_target_action = 'promote'
 			self._assert_visible_series(replica, 1000, 1000)
 
 			replica_log = self._read_replica_log_until_barrier_completed(
-			    replica,
-			    stop_after=False,
-			    allow_base_backup=True)
+			    replica, stop_after=False, allow_base_backup=True)
 
 			self._assert_stop_before_barrier_logs(replica_log,
 			                                      allow_base_backup=True)
