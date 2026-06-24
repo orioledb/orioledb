@@ -21,6 +21,7 @@ jobs:
           check_types = [
               "normal", "debug", "sanitize", "check_page",
               "valgrind_1", "valgrind_2", "pg_tests", "dm_log_writes",
+              "bank_account_crash"
           ]
 
           # dm-log-writes needs a kernel module unavailable on arm64 runners
