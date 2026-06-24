@@ -802,8 +802,9 @@ recovery_shmem_needs(void)
 	size = add_size(size, CACHELINEALIGN(sizeof(RecoveryUndoLocFlush)));
 	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(RecoveryWorkerPtrs),
 												  recovery_pool_size_guc + recovery_idx_pool_size_guc)));
-	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
-	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 6)));
+	size = add_size(size,
+					CACHELINEALIGN(add_size(mul_size(sizeof(pg_atomic_uint64), 6),
+											 sizeof(pg_atomic_uint32))));
 	size = add_size(size, CACHELINEALIGN(sizeof(bool)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint64)));
@@ -846,9 +847,6 @@ recovery_shmem_init(Pointer ptr, bool found)
 	worker_ptrs = (RecoveryWorkerPtrs *) ptr;
 	ptr += CACHELINEALIGN(mul_size(sizeof(RecoveryWorkerPtrs), recovery_pool_size_guc + recovery_idx_pool_size_guc));
 
-	recovery_last_pair_seq = (pg_atomic_uint32 *) ptr;
-	ptr += CACHELINEALIGN(sizeof(pg_atomic_uint32));
-
 	/*
 	 * Shared recovery pointers are laid out as one compact block: 0: replay
 	 * progress boundary
@@ -864,8 +862,11 @@ recovery_shmem_init(Pointer ptr, bool found)
 	recovery_last_replay_ptr = recovery_ptr + 4;
 	/* 5: matching Oriole-visible boundary for that event */
 	recovery_last_visible_ptr = recovery_ptr + 5;
+	/* Sequence counter protecting the replay/visible pair. */
+	recovery_last_pair_seq = (pg_atomic_uint32 *) (recovery_ptr + 6);
 
-	ptr += CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 6));
+	ptr += CACHELINEALIGN(add_size(mul_size(sizeof(pg_atomic_uint64), 6),
+								   sizeof(pg_atomic_uint32)));
 
 	was_in_recovery = (bool *) ptr;
 	ptr += CACHELINEALIGN(sizeof(bool));
