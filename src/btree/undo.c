@@ -114,6 +114,7 @@ page_add_image_to_undo(BTreeDescr *desc, Pointer p, CommitSeqNo imageCsn,
 							  O_SPLIT_UNDO_IMAGE_SIZE(splitKeyLen));
 
 		splitHeader = (UndoPageImageSplitHeader *) ptr;
+		memset(splitHeader, 0, sizeof(*splitHeader));
 		splitHeader->type = UndoPageImageSplit;
 		splitHeader->splitKeyFlags = splitKey->formatFlags;
 		splitHeader->splitKeyLen = splitKeyLen;
@@ -1358,10 +1359,10 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 				   OFixedKey *page_lokey, OTuple *page_hikey)
 {
 	/*
-	 * Read enough bytes to cover the peek header and (if this is a full Split)
-	 * its splitKeyFlags/splitKeyLen.  Compact/Merge/diff records are all at
-	 * least this long, so a single read works regardless of type; diff types
-	 * read their own larger headers in the reconstructor.
+	 * Read enough bytes to cover the peek header and (if this is a full
+	 * Split) its splitKeyFlags/splitKeyLen.  Compact/Merge/diff records are
+	 * all at least this long, so a single read works regardless of type; diff
+	 * types read their own larger headers in the reconstructor.
 	 */
 	UndoPageImageSplitHeader header = {UndoPageImageInvalid, 0, 0};
 	int			cmp,

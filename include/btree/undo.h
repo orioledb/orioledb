@@ -172,6 +172,19 @@ typedef struct
 /* maximum size of undo record */
 #define O_MAX_UNDO_RECORD_SIZE O_MERGE_UNDO_IMAGE_SIZE
 
+/*
+ * O_UNDO_GET_IMAGE_LOCATION() and get_page_from_undo() locate the page image
+ * at a fixed offset past the header, derived from UndoPageImageHeader, for
+ * every full-page image type: Compact and Merge use UndoPageImageHeader, while
+ * Split uses UndoPageImageSplitHeader.  That single offset is only correct if
+ * all full-image headers MAXALIGN to the same size.  Guard it so that, e.g.,
+ * adding a field to UndoPageImageSplitHeader cannot silently shift the split
+ * page image out from under those readers.
+ */
+StaticAssertDecl(MAXALIGN(sizeof(UndoPageImageHeader)) ==
+				 MAXALIGN(sizeof(UndoPageImageSplitHeader)),
+				 "full-page undo image headers must MAXALIGN to the same size");
+
 extern bool page_item_rollback(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 							   bool loop, BTreeLeafTuphdr *non_lock_tuphdr_ptr,
 							   UndoLocation nonLockUndoLocation);
