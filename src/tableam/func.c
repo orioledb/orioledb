@@ -1281,15 +1281,19 @@ orioledb_tbl_check(PG_FUNCTION_ARGS)
 
 	for (i = 0; i < descr->nIndices; i++)
 	{
+	    bool curr_tree_result = true;
 		OIndexDescr *idx = descr->indices[i];
 
 		o_tables_rel_lock_extended(&idx->oids, AccessExclusiveLock, true);
 		o_btree_load_shmem(&idx->desc);
-		result = check_btree(&idx->desc, force_map_check, false);
+		curr_tree_result = check_btree(&idx->desc, force_map_check, false);
 		o_tables_rel_unlock_extended(&idx->oids, AccessExclusiveLock, true);
 
-		if (result == false)
-			break;
+		if (!curr_tree_result)
+		{
+			elog(NOTICE, "Corrupted index name = %s", descr->indices[i]->name.data);
+			result = false;
+		}
 	}
 	relation_close(rel, AccessExclusiveLock);
 
