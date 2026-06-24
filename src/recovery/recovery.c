@@ -1737,7 +1737,7 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 			stop_after_visible_ptr = last_visible_ptr_snapshot;
 		}
 
-		elog(DEBUG2,
+		elog(DEBUG4,
 			 "Recovery target barrier state: current_ptr=%X/%X retain_ptr=%X/%X "
 			 "finished_ptr=%X/%X main_retain_ptr=%X/%X recovery_ptr=%X/%X "
 			 "last_replay_ptr=%X/%X last_visible_ptr=%X/%X "
