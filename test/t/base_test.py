@@ -211,8 +211,17 @@ class TestPortManager(PortManager__Generic):
 
 	def __init__(self, os_ops: OsOperations, base_port: int):
 		super().__init__(os_ops)
+		# Primary + N streaming replicas need N+1 ports.  RR_REPLICAS
+		# (default 1) widens the pool for the crash hunt's multi-replica
+		# mode.  Default 1 -> {base, base+1}, unchanged for every other
+		# test.  The crash test runs alone (sequential unittest), so
+		# overlapping the next test's base_port is harmless.
+		try:
+			_n_repl = max(1, int(os.getenv('RR_REPLICAS', '1') or '1'))
+		except ValueError:
+			_n_repl = 1
 		self._available_ports: typing.Set[int] = set(
-		    [base_port, base_port + 1])
+		    range(base_port, base_port + 1 + _n_repl))
 
 	def is_port_free(self, port: int):
 		port_free = port in self._available_ports
@@ -256,6 +265,7 @@ class TestPortManager(PortManager__Generic):
 
 class BaseTest(unittest.TestCase):
 	replica = None
+	extra_replicas = None
 	subscriber = None
 	restoredNode = None
 	basePort = None
@@ -297,6 +307,29 @@ class BaseTest(unittest.TestCase):
 				    self.replica, os.path.join(self.node.base_dir, "archives"))
 
 		return self.replica
+
+	def getReplicas(self, n: int) -> list:
+		# Spawn n streaming hot-standbys off self.node.  replicas[0] is the
+		# cached self.replica (so existing single-replica teardown/checks
+		# keep working); replicas[1:] are tracked in self.extra_replicas and
+		# stopped/cleaned in tearDown.  Needs the primary's TestPortManager
+		# pool wide enough (set RR_REPLICAS=n); see TestPortManager.
+		if self.extra_replicas is None:
+			self.extra_replicas = []
+		replicas = [self.getReplica()]
+		(test_path,
+		 t) = os.path.split(os.path.dirname(inspect.getfile(self.__class__)))
+		for k in range(1, n):
+			baseDir = os.path.join(test_path, 'tmp_check_t',
+			                       self.myName + ('_tgsb%d' % k))
+			if os.path.exists(baseDir):
+				shutil.rmtree(baseDir)
+			r = self.node.backup(base_dir=baseDir).spawn_replica('replica%d' %
+			                                                     k)
+			r.append_conf(port=r.port)
+			self.extra_replicas.append(r)
+			replicas.append(r)
+		return replicas
 
 	def getSubsriber(self) -> testgres.PostgresNode:
 		if self.subscriber is None:
@@ -524,6 +557,21 @@ class BaseTest(unittest.TestCase):
 				self.replica.cleanup()
 			else:
 				print("\nReplica base directory: " + self.replica.base_dir)
+		if self.extra_replicas:
+			for _r in self.extra_replicas:
+				try:
+					if _r.status() == NodeStatus.Running:
+						_r.stop()
+				except Exception:
+					pass
+				if ok:
+					try:
+						_r._custom_base_dir = None
+						_r.cleanup()
+					except Exception:
+						pass
+				else:
+					print("\nExtra replica base directory: " + _r.base_dir)
 		if self.subscriber:
 			if self.subscriber.status() == NodeStatus.Running:
 				self.subscriber.stop(
