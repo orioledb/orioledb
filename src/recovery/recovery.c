@@ -1797,7 +1797,7 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 				 pg_atomic_read_u64(&xid_meta->globalXmin),
 				 recovery_xmin);
 
-			if (!XLogRecPtrIsValid(finished_ptr))
+			if (XLogRecPtrIsInvalid(finished_ptr))
 			{
 				/*
 				 * For stop-before of the first post-backup transaction, the
@@ -1808,10 +1808,10 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 				 * waiting forever for a boundary that must not appear before
 				 * stop.
 				 */
-				if (!XLogRecPtrIsValid(recovery_ptr_snapshot) &&
-					!XLogRecPtrIsValid(current_ptr) &&
-					!XLogRecPtrIsValid(retain_ptr) &&
-					!XLogRecPtrIsValid(main_retain_ptr))
+				if (XLogRecPtrIsInvalid(recovery_ptr_snapshot) &&
+					XLogRecPtrIsInvalid(current_ptr) &&
+					XLogRecPtrIsInvalid(retain_ptr) &&
+					XLogRecPtrIsInvalid(main_retain_ptr))
 				{
 					elog(DEBUG4,
 						 "Recovery target reached: synchronization barrier "
@@ -1847,8 +1847,8 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 				 * state is still the backup baseline, so waiting for a
 				 * published boundary would hang forever.
 				 */
-				if (!XLogRecPtrIsValid(last_visible_ptr_snapshot) &&
-					!XLogRecPtrIsValid(stop_before_visible_ptr))
+				if (XLogRecPtrIsInvalid(last_visible_ptr_snapshot) &&
+					XLogRecPtrIsInvalid(stop_before_visible_ptr))
 				{
 					elog(DEBUG4,
 						 "Recovery target reached: synchronization barrier "
@@ -1882,7 +1882,7 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 					 LSN_FORMAT_ARGS(stop_before_visible_ptr),
 					 LSN_FORMAT_ARGS(finished_ptr));
 			}
-			else if (!XLogRecPtrIsValid(stop_before_visible_ptr))
+			else if (XLogRecPtrIsInvalid(stop_before_visible_ptr))
 			{
 				elog(DEBUG4,
 					 "Recovery target reached: waiting for replay path to expose "
@@ -1963,7 +1963,7 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 				 LSN_FORMAT_ARGS(retain_ptr),
 				 LSN_FORMAT_ARGS(finished_ptr));
 
-			if (!XLogRecPtrIsValid(stop_after_visible_ptr))
+			if (XLogRecPtrIsInvalid(stop_after_visible_ptr))
 			{
 				/*
 				 * The target may be a non-Oriole WAL record before the first
@@ -1971,8 +1971,8 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 				 * no pair to publish: the base-backup visible state is
 				 * already the correct stop-after Oriole state.
 				 */
-				if (!XLogRecPtrIsValid(last_visible_ptr_snapshot) &&
-					!XLogRecPtrIsValid(finished_ptr))
+				if (XLogRecPtrIsInvalid(last_visible_ptr_snapshot) &&
+					XLogRecPtrIsInvalid(finished_ptr))
 				{
 					elog(DEBUG4,
 						 "Recovery target reached: synchronization barrier "
@@ -2158,7 +2158,7 @@ recovery_record_visible_boundary_pair(XLogRecPtr replay_ptr, XLogRecPtr visible_
 {
 	uint32		seq;
 
-	if (!XLogRecPtrIsValid(replay_ptr) || !XLogRecPtrIsValid(visible_ptr))
+	if (XLogRecPtrIsInvalid(replay_ptr) || XLogRecPtrIsInvalid(visible_ptr))
 		return;
 
 	seq = pg_atomic_read_u32(recovery_last_pair_seq);
