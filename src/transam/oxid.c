@@ -34,6 +34,7 @@
 #include "utils/memutils.h"
 #endif
 #include "utils/snapmgr.h"
+#include "utils/stopevent.h"
 #include "recovery/wal.h"
 
 #define XID_FILE_SIZE (0x1000000)
@@ -1500,6 +1501,30 @@ current_oxid_abort(void)
 	pg_write_barrier();
 	csn_committing_set = false;
 	xlog_ptr_committing_set = false;
+
+	if (STOPEVENTS_ENABLED())
+	{
+		/*
+		 * Deterministic-repro hook for the checkpoint abort-snapshot race We
+		 * are past wal_rollback (the WAL_REC_ROLLBACK is already written and,
+		 * under synchronous_commit, flushed) but have NOT yet cleared this
+		 * oxid's vxids slot.  Pausing here lets a concurrent checkpoint's
+		 * finish_write_xids() snapshot this oxid as in-flight (it gates only
+		 * on OXidIsValid(vxids[].oxid)) while its resolving rollback sits
+		 * below the checkpoint's replayStartPtr -- the exact inconsistency
+		 * that makes crash recovery resurrect the oxid and emit a spurious
+		 * deferred rollback.
+		 */
+		Jsonb	   *params;
+		JsonbParseState *state = NULL;
+
+		pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+		jsonb_push_int8_key(&state, "oxid", (int64) curOxid);
+		params = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+
+		STOPEVENT(STOPEVENT_BEFORE_ABORT_VXIDS_CLEAR, params);
+	}
+
 	my_proc_info->vxids[GET_CUR_PROCDATA()->autonomousNestingLevel].oxid = InvalidOXid;
 
 	advance_run_xmin(curOxid);
