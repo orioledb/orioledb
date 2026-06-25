@@ -1597,13 +1597,29 @@ btree_find_context_lokey(OBTreeFindPageContext *context)
 		BTREE_PAGE_READ_INTERNAL_TUPLE(result, context->parentImg, &ploc);
 		return result;
 	}
+	else if (BTREE_PAGE_FIND_IS(context, LOKEY_EXISTS))
+	{
+		/*
+		 * Hikey of the left sibling of the parent, carried down the descent.
+		 */
+		return context->lokey.tuple;
+	}
 	else
 	{
 		/*
-		 * Hikey of the left sibling of the parent.
+		 * The descent established no lokey for this page.  This happens for a
+		 * frozen no-record split half (see o_btree_insert_split()) reached
+		 * live during a backward scan: its csn was not bumped, so the reader
+		 * never walked the undo chain that would have supplied a lokey.  Such
+		 * a page drops no tuple, so its smallest stored key is its lokey.
 		 */
-		Assert(context->flags & BTREE_PAGE_FIND_LOKEY_EXISTS);
-		return context->lokey.tuple;
+		OTuple		firstTuple;
+		BTreePageItemLocator loc;
+
+		BTREE_PAGE_LOCATOR_FIRST(context->img, &loc);
+		Assert(BTREE_PAGE_LOCATOR_IS_VALID(context->img, &loc));
+		BTREE_PAGE_READ_TUPLE(firstTuple, context->img, &loc);
+		return firstTuple;
 	}
 }
 

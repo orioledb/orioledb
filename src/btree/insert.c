@@ -20,6 +20,7 @@
 #include "btree/split.h"
 #include "btree/page_contents.h"
 #include "btree/page_chunks.h"
+#include "btree/scan.h"
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
@@ -789,10 +790,54 @@ o_btree_insert_split(BTreeInsertStackItem *insert_item,
 											items,
 											&split_key, &split_key_len);
 
-	/* Make page-level undo item if needed */
+	/*
+	 * Make a page-level undo item if needed.
+	 *
+	 * A no-drop split is invisible to readers: it repartitions the same
+	 * tuples across two pages without removing any.  The only reason to keep
+	 * a page-level image is then to reconstruct the pre-split page structure
+	 * for a reader whose snapshot predates the split; when the page's own
+	 * pre-split undo location is already below the retain horizon (or
+	 * invalid), no such reader exists.  In that case we write no image at all
+	 * and mark both halves frozen with an invalid undo location: every reader
+	 * reads them live (a frozen csn precedes any snapshot, so the undo chain
+	 * is never walked) and per-tuple MVCC handles visibility, exactly as for
+	 * a freshly initialized page.
+	 *
+	 * If the split physically drops a tuple, we must keep a full image: a
+	 * tuple is droppable once it is finished for everybody (deleting xid <
+	 * runXmin), but that is xid-based -- an active snapshot whose csn
+	 * precedes the delete's commit still needs the tuple, and only the image
+	 * preserves it.
+	 *
+	 * A concurrent sequential scan is the other exception: it reconstructs
+	 * whole historical pages spanning the full pre-split key range through
+	 * the undo chain, so it needs a full image.  Fall back to one whenever a
+	 * seq scan is active on this tree.
+	 */
 	if (needsUndo)
-		undoLocation = page_add_image_to_undo(desc, p, csn,
-											  &split_key, split_key_len);
+	{
+		BTreePageHeader *php = (BTreePageHeader *) p;
+		UndoMeta   *undoMeta = get_undo_meta_by_type(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+		UndoLocation retainLoc = pg_atomic_read_u64(enable_rewind ?
+													&undoMeta->minRewindRetainLocation :
+													&undoMeta->minProcRetainLocation);
+		bool		noRetainedReader = !UndoLocationIsValid(php->undoLocation) ||
+			php->undoLocation < retainLoc;
+
+		if (noRetainedReader &&
+			!page_op_drops_tuple(desc, p, csn) &&
+			meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) == 0)
+		{
+			csn = COMMITSEQNO_FROZEN;
+			undoLocation = InvalidUndoLocation;
+		}
+		else
+		{
+			undoLocation = page_add_image_to_undo(desc, p, csn,
+												  &split_key, split_key_len);
+		}
+	}
 	else
 		undoLocation = InvalidUndoLocation;
 
