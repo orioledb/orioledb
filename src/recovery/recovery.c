@@ -2107,8 +2107,7 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 			break;
 		}
 
-		WakeupRecovery();
-		pg_usleep(200);
+		pg_usleep(1000L);
 
 		/*
 		 * This loop runs inside PostgreSQL's startup process, so shutdown
