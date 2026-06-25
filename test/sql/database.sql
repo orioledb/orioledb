@@ -43,7 +43,7 @@ select round(pg_database_size('oriole_database'), -6);
 
 CREATE EXTENSION orioledb;
 CREATE TABLE oriole_table (i SERIAL PRIMARY KEY, t text STORAGE PLAIN) USING orioledb;
-INSERT INTO oriole_table(t) select generate_string(i, 270) FROM  generate_series(1, 10000) as i;
+INSERT INTO oriole_table(t) select generate_string(i, 250) FROM  generate_series(1, 10000) as i;
 CHECKPOINT;
 select round(pg_database_size('oriole_database'), -6);
 
@@ -81,7 +81,7 @@ CHECKPOINT;
 select round(pg_database_size('mixed_database'), -6);
 
 CREATE TABLE heap_table (i SERIAL PRIMARY KEY, t text STORAGE PLAIN) USING heap;
-INSERT INTO heap_table(t) select generate_string(i, 270) FROM  generate_series(1, 10000) as i;
+INSERT INTO heap_table(t) select generate_string(i, 250) FROM  generate_series(1, 10000) as i;
 CHECKPOINT;
 select round(pg_database_size('mixed_database'), -6);
 
