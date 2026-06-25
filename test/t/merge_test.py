@@ -201,16 +201,18 @@ class MergeTest(BaseTest):
 
 	def test_split_diff_old_snapshot_read(self):
 		"""
-		Exercises the differential split undo image and its read paths.
+		Exercises a no-drop split's read paths under an old snapshot.
 
 		An old REPEATABLE READ snapshot is taken over a fully-populated table.
 		Then a second transaction inserts keys interleaved between the existing
 		ones, forcing the pre-existing (full) leaves to split.  Each split drops
-		no tuple -> it writes a differential split image (split key only), with a
-		csn above the snapshot's.  The old snapshot then reads the split leaves
-		through the page-level undo chain via seq, index, point and bitmap scans
-		-- each must reconstruct the exact original key set, with none of the
-		newly inserted interleaved keys visible.
+		no tuple and the leaves carry no retained pre-split history, so it writes
+		no page-level undo image at all: both halves are frozen with an invalid
+		undo location and read live.  The old snapshot then reads the split
+		leaves through seq, index, point and bitmap scans -- each must return the
+		exact original key set, with the newly inserted interleaved keys filtered
+		out by per-tuple MVCC (physically present on the live halves but
+		invisible to the old snapshot).
 
 		Also covers UPDATE-driven splits (a single UPDATE that grows rows and
 		re-fetches them through undo), which routes the page-level undo walk
@@ -237,8 +239,8 @@ class MergeTest(BaseTest):
 		    con_snap.execute("SELECT count(*) FROM o_split_diff;")[0][0], 5000)
 
 		# Odd keys 1..9999 interleave between the existing even keys, forcing the
-		# pre-existing full leaves to split (no deletes -> differential images),
-		# with fresh csns above the snapshot's.
+		# pre-existing full leaves to split (no deletes -> no page-level undo
+		# image; the halves are frozen with an invalid undo location).
 		node.execute("INSERT INTO o_split_diff "
 		             "(SELECT id * 2 - 1, repeat('y', 100) "
 		             "FROM generate_series(1, 5000) id);")
