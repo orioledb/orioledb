@@ -118,6 +118,7 @@ REGRESSCHECKS = btree_sys_check \
 				indices_build \
 				inherits \
 				ioc \
+				iterator \
 				joins \
 				nulls \
 				opclass \
