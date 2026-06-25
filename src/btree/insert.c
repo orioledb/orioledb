@@ -20,7 +20,6 @@
 #include "btree/split.h"
 #include "btree/page_contents.h"
 #include "btree/page_chunks.h"
-#include "btree/scan.h"
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
@@ -810,10 +809,17 @@ o_btree_insert_split(BTreeInsertStackItem *insert_item,
 	 * precedes the delete's commit still needs the tuple, and only the image
 	 * preserves it.
 	 *
-	 * A concurrent sequential scan is the other exception: it reconstructs
-	 * whole historical pages spanning the full pre-split key range through
-	 * the undo chain, so it needs a full image.  Fall back to one whenever a
-	 * seq scan is active on this tree.
+	 * Sequential scans are covered by the same retain-horizon test, not by a
+	 * separate numSeqScans probe.  orioledb_snapshot_hook() runs on every
+	 * snapshot acquisition and calls set_my_snapshot_retain_location() for
+	 * UndoLogRegularPageLevel; the retry-on-changecount loop guarantees the
+	 * resulting retain is folded into minProcRetainLocation before the hook
+	 * returns and therefore before the executor can fetch the first tuple
+	 * (init_btree_seq_scan() / numSeqScans is bumped lazily on the first
+	 * getnext(), strictly after the snapshot is in place).  So if a seq scan
+	 * would need the pre-split page-level image, its snapshot's retain is
+	 * already <= php->undoLocation and the test above keeps the image; no
+	 * additional gate on numSeqScans is required.
 	 */
 	if (needsUndo)
 	{
@@ -825,9 +831,7 @@ o_btree_insert_split(BTreeInsertStackItem *insert_item,
 		bool		noRetainedReader = !UndoLocationIsValid(php->undoLocation) ||
 			php->undoLocation < retainLoc;
 
-		if (noRetainedReader &&
-			!page_op_drops_tuple(desc, p, csn) &&
-			meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) == 0)
+		if (noRetainedReader && !page_op_drops_tuple(desc, p, csn))
 		{
 			csn = COMMITSEQNO_FROZEN;
 			undoLocation = InvalidUndoLocation;

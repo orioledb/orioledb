@@ -19,7 +19,6 @@
 #include "btree/io.h"
 #include "btree/merge.h"
 #include "btree/page_chunks.h"
-#include "btree/scan.h"
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "utils/page_pool.h"
@@ -143,13 +142,14 @@ btree_try_merge_pages(BTreeDescr *desc,
 	 * invalid), no such reader exists.  In that case we write no image at all
 	 * and freeze the merged page with an invalid undo location: every reader
 	 * reads it live and per-tuple MVCC handles visibility (see
-	 * o_btree_insert_split()).
+	 * o_btree_insert_split() for the split counterpart and for why a
+	 * sequential scan does not need a separate numSeqScans gate -- its
+	 * snapshot's page-level retain is published before the first getnext()).
 	 *
 	 * If the merge physically drops a tuple, we must keep an image:
 	 * droppability is xid-based (deleting xid < runXmin), so an active
 	 * snapshot whose csn precedes the delete's commit still needs the tuple,
-	 * and only the image preserves it.  A concurrent sequential scan is the
-	 * other exception, as for a split.
+	 * and only the image preserves it.
 	 */
 	headerCsn = csn;
 	if (needsUndo)
@@ -167,8 +167,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 
 		if (noRetainedReader &&
 			!page_op_drops_tuple(desc, left, csn) &&
-			!page_op_drops_tuple(desc, right, csn) &&
-			meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) == 0)
+			!page_op_drops_tuple(desc, right, csn))
 		{
 			undo_loc = InvalidUndoLocation;
 			headerCsn = COMMITSEQNO_FROZEN;
