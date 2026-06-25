@@ -22,6 +22,7 @@
 #include "btree/undo.h"
 #include "catalog/sys_trees.h"
 #include "tableam/descr.h"
+#include "tableam/key_range.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "utils/page_pool.h"
@@ -1685,3 +1686,129 @@ undo_it_find_internal(UndoIterator *undoIt, void *key, BTreeKeyType kind)
 	/* if O_PAGE_IS(undoIt->image, LEFTMOST) then undoIt->leftmost == true */
 	Assert(!O_PAGE_IS(undoIt->image, LEFTMOST) || undoIt->leftmost);
 }
+
+#ifdef IS_DEV
+/* ------------------------------------------------------------------------
+ * C-side test helpers.  Compiled only when IS_DEV is defined (-DIS_DEV);
+ * the SQL bindings are registered in the 1.8->1.9 dev migration.  See
+ * test/sql/iterator.sql for the test driver.
+ * ------------------------------------------------------------------------ */
+
+#include "access/relation.h"
+#include "fmgr.h"
+#include "tuple/format.h"
+#include "utils/builtins.h"
+
+/*
+ * Whitebox test: prove that the premature it->curKeyReturned = true at
+ * iterator.c:1358 (set before the end-key bound check at :1372) can leak
+ * into a partial-read refind and silently drop a tuple from a resumed scan.
+ *
+ * 1. Open a forward iterator at start_at.
+ * 2. iterate_raw with end == start_at exclusive: reads the tuple at start_at,
+ *    sets curKey=start_at and curKeyReturned=true, then rejects it via the
+ *    end bound and returns NULL with scanEnd=true.  State now claims
+ *    start_at was handed out, even though only NULL went to the caller.
+ * 3. Force iterator_refind_partial_leaf(), the path partial-read failures
+ *    take when the backing page changes.  With the bug it steps past
+ *    curKey=start_at; with the fix (no spurious "returned") it stays at it.
+ * 4. Resume with a wide end and drain the iterator.  Return the PKs as an
+ *    int4 array so the caller can `unnest` them: row count tells the story.
+ *
+ * Expected (post-fix): N rows starting at start_at.
+ * Bug (current code):  N-1 rows starting at start_at + 1 -- start_at lost.
+ *
+ * Assumes the relation's primary index has a single int4 key column.
+ */
+PG_FUNCTION_INFO_V1(orioledb_test_endkey_returned_skip);
+Datum
+orioledb_test_endkey_returned_skip(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	int32		start_at = PG_GETARG_INT32(1);
+	Relation	rel;
+	OTableDescr *descr;
+	OIndexDescr *primary;
+	OBTreeKeyBound startBound,
+				narrowEnd,
+				wideEnd;
+	BTreeIterator *it;
+	OTuple		result;
+	bool		scanEnd = false;
+	bool		isnull;
+	Datum	   *elems;
+	int			nelems = 0;
+	int			alloc = 16;
+	int			dims[1],
+				lbs[1];
+
+	rel = relation_open(relid, AccessShareLock);
+	descr = relation_get_descr(rel);
+	if (!descr)
+		elog(ERROR, "relation is not an orioledb table");
+	primary = GET_PRIMARY(descr);
+	if (primary->nKeyFields < 1 || primary->fields[0].inputtype != INT4OID)
+		elog(ERROR, "test requires a single int4 primary key column");
+
+	startBound.nkeys = 1;
+	startBound.n_row_keys = 0;
+	startBound.row_keys = NULL;
+	startBound.keys[0].type = INT4OID;
+	startBound.keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
+	startBound.keys[0].comparator = primary->fields[0].comparator;
+	startBound.keys[0].exclusion_fn = NULL;
+	startBound.keys[0].value = Int32GetDatum(start_at);
+
+	narrowEnd = startBound;
+	wideEnd = startBound;
+	wideEnd.keys[0].value = Int32GetDatum(PG_INT32_MAX);
+
+	it = o_btree_iterator_create(&primary->desc, (Pointer) &startBound,
+								 BTreeKeyBound, &o_in_progress_snapshot,
+								 ForwardScanDirection);
+
+	/* Drive the iterator into the buggy state. */
+	result = btree_iterate_raw(it, (Pointer) &narrowEnd, BTreeKeyBound,
+							   false, &scanEnd, NULL);
+	if (!O_TUPLE_IS_NULL(result) || !scanEnd)
+		elog(ERROR, "unexpected first iterate_raw: scanEnd=%d, tuple is %s",
+			 scanEnd, O_TUPLE_IS_NULL(result) ? "null" : "non-null");
+
+	/* Simulate the partial-read failure that forces a refind. */
+	iterator_refind_partial_leaf(it);
+
+	/* Resume with a wide end and collect every PK the iterator now emits. */
+	elems = (Datum *) palloc(alloc * sizeof(Datum));
+	for (;;)
+	{
+		scanEnd = false;
+		result = btree_iterate_raw(it, (Pointer) &wideEnd, BTreeKeyBound,
+								   true, &scanEnd, NULL);
+		if (O_TUPLE_IS_NULL(result))
+		{
+			if (!scanEnd)
+				elog(ERROR, "iterate_raw returned NULL without scanEnd");
+			break;
+		}
+		if (nelems == alloc)
+		{
+			alloc *= 2;
+			elems = (Datum *) repalloc(elems, alloc * sizeof(Datum));
+		}
+		elems[nelems++] = o_fastgetattr(result, 1, primary->leafTupdesc,
+										&primary->leafSpec, &isnull);
+		if (isnull)
+			elog(ERROR, "PK column unexpectedly NULL");
+	}
+
+	btree_iterator_free(it);
+	relation_close(rel, AccessShareLock);
+
+	dims[0] = nelems;
+	lbs[0] = 1;
+	PG_RETURN_ARRAYTYPE_P(construct_md_array(elems, NULL, 1, dims, lbs,
+											 INT4OID, sizeof(int32), true,
+											 TYPALIGN_INT));
+}
+
+#endif							/* IS_DEV */
