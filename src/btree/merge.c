@@ -19,6 +19,7 @@
 #include "btree/io.h"
 #include "btree/merge.h"
 #include "btree/page_chunks.h"
+#include "btree/scan.h"
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "utils/page_pool.h"
@@ -64,6 +65,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 	BTreePageHeader *left_header = (BTreePageHeader *) left;
 	FileExtent	right_extent;
 	CommitSeqNo csn;
+	CommitSeqNo headerCsn;
 	UndoLocation undo_loc;
 	uint32		checkpoint_number;
 	bool		copy_blkno;
@@ -130,17 +132,58 @@ btree_try_merge_pages(BTreeDescr *desc,
 		*merge_parent = false;
 	}
 
-	/* Make a page-level undo item if needed */
+	/*
+	 * Make a page-level undo item if needed.
+	 *
+	 * Like a no-drop split, a no-drop merge is invisible to readers: it only
+	 * moves the right page's tuples onto the left page without removing any.
+	 * The only reason to keep a page-level image is then to reconstruct the
+	 * pre-merge pages for a reader whose snapshot predates the merge; when
+	 * neither page's own undo location is still retained (or both are
+	 * invalid), no such reader exists.  In that case we write no image at all
+	 * and freeze the merged page with an invalid undo location: every reader
+	 * reads it live and per-tuple MVCC handles visibility (see
+	 * o_btree_insert_split()).
+	 *
+	 * If the merge physically drops a tuple, we must keep an image:
+	 * droppability is xid-based (deleting xid < runXmin), so an active
+	 * snapshot whose csn precedes the delete's commit still needs the tuple,
+	 * and only the image preserves it.  A concurrent sequential scan is the
+	 * other exception, as for a split.
+	 */
+	headerCsn = csn;
 	if (needsUndo)
 	{
-		undo_loc = make_merge_undo_image(desc, left, right, csn);
-		Assert(UndoLocationIsValid(undo_loc));
+		UndoMeta   *undoMeta = get_undo_meta_by_type(GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType));
+		UndoLocation retainLoc = pg_atomic_read_u64(enable_rewind ?
+													&undoMeta->minRewindRetainLocation :
+													&undoMeta->minProcRetainLocation);
+		BTreePageHeader *right_header = (BTreePageHeader *) right;
+		bool		noRetainedReader =
+			(!UndoLocationIsValid(left_header->undoLocation) ||
+			 left_header->undoLocation < retainLoc) &&
+			(!UndoLocationIsValid(right_header->undoLocation) ||
+			 right_header->undoLocation < retainLoc);
 
-		/*
-		 * Memory barrier between making undo image and setting the undo
-		 * location.
-		 */
-		pg_write_barrier();
+		if (noRetainedReader &&
+			!page_op_drops_tuple(desc, left, csn) &&
+			!page_op_drops_tuple(desc, right, csn) &&
+			meta_page_get_num_seq_scans(desc->rootInfo.metaPageBlkno) == 0)
+		{
+			undo_loc = InvalidUndoLocation;
+			headerCsn = COMMITSEQNO_FROZEN;
+		}
+		else
+		{
+			undo_loc = make_merge_undo_image(desc, left, right, csn);
+			Assert(UndoLocationIsValid(undo_loc));
+
+			/*
+			 * Memory barrier between making undo image and setting the undo
+			 * location.
+			 */
+			pg_write_barrier();
+		}
 	}
 	else
 	{
@@ -166,7 +209,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 	 * o_btree_read_page() for details.
 	 */
 	pg_write_barrier();
-	left_header->csn = csn;
+	left_header->csn = headerCsn;
 
 	Assert(checkpoint_state->stack[level].hikeyBlkno != left_blkno);
 	if (checkpoint_state->stack[level].hikeyBlkno == right_blkno)

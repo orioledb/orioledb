@@ -206,6 +206,8 @@ extern UndoLocation page_add_image_to_undo(BTreeDescr *desc, Pointer p,
 										   OTuple *splitKey, LocationIndex splitKeyLen);
 extern UndoLocation make_merge_undo_image(BTreeDescr *desc, Pointer left,
 										  Pointer right, CommitSeqNo imageCsn);
+extern bool page_op_drops_tuple(BTreeDescr *desc, Pointer p,
+								CommitSeqNo imageCsn);
 extern bool row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 							   BTreeLeafTuphdr *conflictTupHdr,
 							   UndoLogType undoType,

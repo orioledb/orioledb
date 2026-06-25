@@ -49,8 +49,6 @@ static bool get_prev_leaf_header_from_undo_if_exists(UndoLogType undoType,
 static void update_leaf_header_in_undo(UndoLogType undoType,
 									   BTreeLeafTuphdr *tuphdr,
 									   UndoLocation location);
-static bool page_op_drops_tuple(BTreeDescr *desc, Pointer p,
-								CommitSeqNo imageCsn);
 
 /*
  * Add page image to the undo log.
@@ -1505,7 +1503,7 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
  * carried forward.  When a tuple is dropped, an old snapshot may still need it,
  * so we must fall back to a full page image.
  */
-static bool
+bool
 page_op_drops_tuple(BTreeDescr *desc, Pointer p, CommitSeqNo imageCsn)
 {
 	BTreePageItemLocator loc;
