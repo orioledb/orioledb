@@ -213,7 +213,7 @@ elif [ $CHECK_TYPE = "bank_account_crash" ]; then
     # and the second one with postmaster SIGKILL. Both workloads
     # involve streaming replication in setup
 
-    make USE_PGXS=1 IS_DEV=1 RR_INJECTION_POINTS=ALL RR_ASSERT_POINTS=ALL RR_DURATION=120 RR_ASSERT_PERIOD=15 TIMEOUT=200 bankcrashcheck || status=$?
+    make USE_PGXS=1 IS_DEV=1 RR_ERROR_INJECTIONS=ALL RR_ASSERT_INJECTIONS=ALL RR_DURATION=120 RR_ASSERT_PERIOD=15 TIMEOUT=200 bankcrashcheck || status=$?
     sleep 5
     make USE_PGXS=1 IS_DEV=1 RR_ROLLBACKERS=5 RR_KILL_POSTMASTER=1 RR_DURATION=120 RR_KILL_POSTMASTER_INTERVAL=5 TIMEOUT=200 bankcrashcheck || status=$?
 

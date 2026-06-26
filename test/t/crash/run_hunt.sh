@@ -8,12 +8,13 @@
 # Env overrides (all optional; defaults match the production-style hunt):
 #   RR_WRITERS=20  RR_ACCOUNTS=100  RR_DURATION=15  RR_ROLLBACKERS=0
 #   RR_ASSERT_PERIOD=<seconds between assertion firings; default RR_DURATION/3>
-#   RR_ASSERT_POINTS=commit_assert
+#   RR_ASSERT_INJECTIONS=commit_assert
 #   RR_REPLICAS=1
 #   RR_KILL_POSTMASTER=1  RR_KILL_POSTMASTER_INTERVAL=<seconds; default RR_DURATION/3>
+#   RR_TEST_BRIDGE=0  (1 = add a GIN bridge index on token_arr and verify it)
 #   RR_PANIC_FATAL=0  RR_SAVE_ALL_LOGS=0  TIMEOUT=90
 #
-# Stop-event names (RR_ASSERT_POINTS / RR_INJECTION_POINTS) use the
+# Stop-event names (RR_ASSERT_INJECTIONS / RR_ERROR_INJECTIONS) use the
 # underscore form registered in stopevents.txt, e.g. commit_assert,
 # before_pre_commit_wal_finish, set_csn_guarded, wal_flush.
 #
@@ -54,20 +55,21 @@ fi
 : "${RR_ACCOUNTS:=100}"
 : "${RR_DURATION:=15}"
 : "${RR_ROLLBACKERS:=0}"
-: "${RR_INJECTION_POINTS:=NONE}"
-: "${RR_ASSERT_POINTS:=NONE}"
+: "${RR_ERROR_INJECTIONS:=NONE}"
+: "${RR_ASSERT_INJECTIONS:=NONE}"
 : "${RR_ASSERT_PERIOD:=$((RR_DURATION / 3))}"
 : "${RR_REPLICAS:=1}"
 : "${RR_KILL_POSTMASTER:=1}"
 : "${RR_KILL_POSTMASTER_INTERVAL:=$((RR_DURATION / 3))}"
 : "${RR_PANIC_FATAL:=0}"
 : "${RR_SAVE_ALL_LOGS:=0}"
+: "${RR_TEST_BRIDGE:=0}"
 : "${TIMEOUT:=90}"
 
 export RR_WRITERS RR_ACCOUNTS RR_DURATION RR_ROLLBACKERS \
-	RR_INJECTION_POINTS RR_ASSERT_POINTS RR_ASSERT_PERIOD \
+	RR_ERROR_INJECTIONS RR_ASSERT_INJECTIONS RR_ASSERT_PERIOD \
 	RR_REPLICAS RR_KILL_POSTMASTER RR_KILL_POSTMASTER_INTERVAL \
-	RR_PANIC_FATAL RR_SAVE_ALL_LOGS
+	RR_PANIC_FATAL RR_SAVE_ALL_LOGS RR_TEST_BRIDGE
 
 LOG=/tmp/hunt_${INSTANCE}.log
 rm -f "$LOG"
@@ -76,18 +78,20 @@ cd "$REPO_ROOT"
 
 CONFIG_LINE="[config] trials=$TRIALS instance=$INSTANCE writers=$RR_WRITERS \
 accounts=$RR_ACCOUNTS duration=$RR_DURATION rollbackers=$RR_ROLLBACKERS \
-injection_points=$RR_INJECTION_POINTS \
-assert_period=$RR_ASSERT_PERIOD assert_points=$RR_ASSERT_POINTS \
+error_injections=$RR_ERROR_INJECTIONS \
+assert_period=$RR_ASSERT_PERIOD assert_injections=$RR_ASSERT_INJECTIONS \
 replicas=$RR_REPLICAS \
 kill_postmaster=$RR_KILL_POSTMASTER kill_postmaster_interval=$RR_KILL_POSTMASTER_INTERVAL \
+test_bridge=$RR_TEST_BRIDGE \
 panic_fatal=$RR_PANIC_FATAL timeout=${TIMEOUT}s log=$LOG"
 echo "$CONFIG_LINE"
-# Record the config (incl. injection_points) at the top of the log file too.
+# Record the config (incl. error_injections) at the top of the log file too.
 echo "$CONFIG_LINE" >> "$LOG"
 
 # Per-trial plan-check: assert that every sk-forced query actually used
-# the token unique SK index and every pk-forced query read the PK btree --
-# either via Seq Scan or orioledb's primary-index scan
+# the token unique SK index, every gin-forced query used the GIN bridge
+# index o_token_to_id, and every pk-forced query read the PK
+# btree -- either via Seq Scan or orioledb's primary-index scan
 # (o_bank_account_pkey) -- and did NOT leak into the SK token index.
 # Emits PASS or one FAIL line per broken expectation. The verifier
 # operates on the trial's captured stdout regardless of clean/buggy
@@ -97,15 +101,20 @@ verify_explain_plans() {
 	local trial=$2
 	local fails
 	fails=$(awk -v trial="$trial" '
-		match($0, /^\[explain (sk-forced|pk-forced) [^]]+\] /) {
+		match($0, /^\[explain (sk-forced|pk-forced|gin-forced) [^]]+\] /) {
 			header = substr($0, RSTART, RLENGTH - 1)
 			plans[header] = plans[header] substr($0, RSTART + RLENGTH) "\n"
 		}
 		END {
 			for (h in plans) {
 				p = plans[h]
-				kind = (index(h, "sk-forced") ? "sk" : "pk")
+				# gin-forced is a bridge-index diagnostic (token_arr @> ...):
+				# it must be answered by the GIN bridge index o_token_to_id
+				# (a Bitmap Index Scan wrapped in Custom Scan (o_scan)),
+				# never a seq-scan fallback.
+				kind = (index(h, "gin-forced") ? "gin" : (index(h, "sk-forced") ? "sk" : "pk"))
 				idx_used = (index(p, "using o_bank_account_token_uniq") > 0)
+				gin_used = (index(p, "o_token_to_id") > 0)
 				# A pk-forced query is PK-authoritative if it read the
 				# primary tree by EITHER path: a plain Seq Scan, or
 				# orioledb`s primary-index scan (Custom Scan (o_scan) ->
@@ -115,6 +124,10 @@ verify_explain_plans() {
 				# free; both still read the PK, not the SK token index.
 				pk_used = (index(p, "Seq Scan on o_bank_account") > 0) ||
 				          (index(p, "o_bank_account_pkey") > 0)
+				if (kind == "gin" && !gin_used) {
+					print "[plan-check trial=" trial " FAIL] " h \
+					      " did NOT use the GIN bridge index o_token_to_id"
+				}
 				if (kind == "sk" && !idx_used) {
 					print "[plan-check trial=" trial " FAIL] " h \
 					      " did NOT use o_bank_account_token_uniq"
@@ -187,7 +200,7 @@ for trial in $(seq 1 "$TRIALS"); do
 
 	echo "=== trial $trial (${dt}s, writes=${w:-?}, exit=$rc, status=$status) ===" >> "$LOG"
 	# Dump the resolved stop-event set the test actually armed this trial
-	# (RR_INJECTION_POINTS=ALL expands to the full error_chaos list inside the
+	# (RR_ERROR_INJECTIONS=ALL expands to the full error_chaos list inside the
 	# test; this records the exact names so the log is self-describing).
 	echo "$out" | grep -oE "stopevents=[0-9]+ list=\[[^]]*\]" | head -1 >> "$LOG"
 	case "$status" in
