@@ -60,6 +60,14 @@ SETUP_SQL = f"""
 	) {_USING_CLAUSE};
 """
 
+BRIDGE_IDX_SETUP_SQL = """
+	ALTER TABLE o_bank_account
+		ADD COLUMN token_arr bigint[];
+	CREATE INDEX o_token_to_id
+			ON o_bank_account
+			USING GIN (token_arr);
+"""
+
 
 class RrStressTest(BaseTest):
 
@@ -94,6 +102,7 @@ class RrStressTest(BaseTest):
 		n_rollbackers = _env_int('RR_ROLLBACKERS', 0)
 		duration = _env_int('RR_DURATION', 3 * 60)
 		n_replicas = int(_env_int('RR_REPLICAS', 0))
+		bridge_enabled = _env_int('RR_TEST_BRIDGE', 0)
 		# When 1: PANIC + cluster recovery is treated as a test
 		# failure. When 0: PANIC is tolerated, cluster restart is
 		# allowed, and the test only fails on data-invariant
@@ -171,6 +180,9 @@ class RrStressTest(BaseTest):
 		node.start()
 		node.safe_psql(SETUP_SQL)
 
+		if bridge_enabled:
+			node.safe_psql(BRIDGE_IDX_SETUP_SQL)
+
 		node.safe_psql("ALTER SYSTEM SET orioledb.enable_stopevents = on")
 		# Bump server-side log level so check_btree's NOTICE
 		# messages (`BTree has a broken split.`, `Not used file
@@ -180,8 +192,8 @@ class RrStressTest(BaseTest):
 		node.safe_psql("ALTER SYSTEM SET log_min_messages = notice")
 		node.safe_psql("SELECT pg_reload_conf()")
 		node.safe_psql(f"""
-			INSERT INTO o_bank_account(id, balance, token)
-				SELECT i, {initial_balance}, i
+			INSERT INTO o_bank_account(id, balance, token {", token_arr" if bridge_enabled else ""})
+				SELECT i, {initial_balance}, i {", ARRAY[i]::bigint[]" if bridge_enabled else ""}
 				FROM generate_series(1, {n_accounts}) AS i;
 		""")
 
@@ -279,27 +291,19 @@ class RrStressTest(BaseTest):
 						                               f"WHERE id = {v_to}")[0]
 						# Pocket-free 2-row swap: tokens rotate directly
 						# between v_from and v_to with no writer-side
-						# pocket state. The old 3-participant variant
-						# (writer pocket + v_from + v_to) drifted under
-						# cascade conditions because a writer SIGQUIT'd
-						# between XLogFlush(commit) and the Python
-						# `my_token = to_token` assignment ended up with
-						# a stale pocket while the DB had the post-commit
-						# state -- producing thousands of spurious
-						# `duplicate key value violates unique constraint
-						# o_bank_account_token_uniq` errors that throttled
-						# the workload by ~15x without surfacing any real
-						# SK bug. With the direct swap, no inter-tx
-						# writer state exists, so no drift is possible.
+						# pocket state. So token set must be fully complete even
+						# even after postmaster SIGKILL or any injection
 						con.execute("UPDATE o_bank_account "
 						            f"SET balance = {from_bal - amount}, "
 						            f"    token = {to_token} "
+									f"{	f', token_arr = ARRAY[{to_token}]::bigint[] ' if bridge_enabled else ""}"
 						            f"WHERE id = {v_from}")
 						if random.randint(0, 1) == 0:
 							time.sleep(0)
 						con.execute("UPDATE o_bank_account "
 						            f"SET balance = {to_bal + amount}, "
 						            f"    token = {from_token} "
+									f"{	f', token_arr =  ARRAY[{from_token}]::bigint[] ' if bridge_enabled else ""}"
 						            f"WHERE id = {v_to}")
 						con.commit()
 						local_w += 1
@@ -609,7 +613,7 @@ class RrStressTest(BaseTest):
 		# an isCommit-style check: the rec_type, the wal_in_rollback flag, or
 		# a non-abort csn), so an armed error stays single-shot.  This list
 		# arms only the `_guarded` names below (clean, recoverable errors);
-		# the unguarded twins are armed by `assert_chaos_points` instead,
+		# the unguarded twins are armed by `assert_injections` instead,
 		# since firing them PANICs the cluster via the abort re-entry above.
 		#
 		#   set_csn_guarded (set_oxid_csn): also reached on abort via
@@ -653,27 +657,27 @@ class RrStressTest(BaseTest):
 		#       catches it directly.
 		#   before_curoxid_clear: leads to PK/SK desync; currently does not
 		#       look like a real problem.  Needs further investigation.
-		#   commit_assert (assert_chaos_points): raising inside the crit
+		#   commit_assert (assert_injections): raising inside the crit
 		#       section upgrades the ereport(ERROR) into PANIC, which exits
 		#       the backend via abort() and triggers postmaster crash
 		#       recovery.
-		injection_points = [
+		error_injections = [
 		    'before_on_commit_undo_stack',
 		    'pk_mutated_pre_wal',
 		    'update_pk_done_pre_sk',
 		    'sk_mid_update',
 		]
 		# `commit_assert` and `before_pre_commit_wal_finish`
-		# are NOT in `error_chaos_points` because arming either always
+		# are NOT in `error_injections` because arming either always
 		# causes a PANIC (both raise inside a START_CRIT_SECTION).  They
 		# share a dedicated worker (`assert_chaos_loop` below) that arms
 		# one of them on a slow, duration-relative cadence so we get a
 		# controlled number of crash+recovery cycles per run instead of
 		# one per ~0.1s.
-		_env_pts = os.getenv('RR_INJECTION_POINTS')
+		_env_pts = os.getenv('RR_ERROR_INJECTIONS', 'NONE')
 		if _env_pts and _env_pts != 'ALL':
 			_subset = [p.strip() for p in _env_pts.split(',') if p.strip()]
-			injection_points = [p for p in injection_points if p in _subset]
+			error_injections = [p for p in error_injections if p in _subset]
 
 		def error_chaos_loop():
 			con = node.connect()
@@ -693,10 +697,10 @@ class RrStressTest(BaseTest):
 						time.sleep(0.5 * random.random())
 
 						rating = []
-						for point in injection_points:
+						for point in error_injections:
 							rating.append(
 							    (point, random.randint(1,
-							                           len(injection_points))))
+							                           len(error_injections))))
 						rating.sort(key=lambda x: x[1])
 
 						con.execute("SELECT pg_stopevent_set("
@@ -718,7 +722,7 @@ class RrStressTest(BaseTest):
 						log_once('attach', e)
 					time.sleep(0)
 					try:
-						for point in injection_points:
+						for point in error_injections:
 							con.execute("SELECT pg_stopevent_reset("
 							            f"'{point}')")
 						con.commit()
@@ -731,7 +735,7 @@ class RrStressTest(BaseTest):
 						log_once('detach', e)
 			finally:
 				try:
-					for point in injection_points:
+					for point in error_injections:
 						con.execute("SELECT pg_stopevent_reset("
 						            f"'{point}')")
 					con.commit()
@@ -756,10 +760,10 @@ class RrStressTest(BaseTest):
 		#     ERROR, but the resulting abort re-enters the same function and
 		#     re-fires during XACT_EVENT_ABORT, where ereport escalates to
 		#     PANIC (this is exactly what the `_guarded` twins in
-		#     `error_chaos_points` are designed to avoid).
+		#     `error_injections` are designed to avoid).
 		# Either way the cluster goes down, so all of them share the slow,
 		# duration-relative `assert_chaos_loop` cadence.
-		assert_chaos_points = [
+		assert_injections = [
 		    'commit_assert',
 		    'before_pre_commit_wal_finish',
 		    'before_xlog_insert',
@@ -776,17 +780,17 @@ class RrStressTest(BaseTest):
 		    'after_flush_local_wal',
 		    'before_curoxid_clear',
 		]
-		_env_assert_pts = os.getenv('RR_ASSERT_POINTS')
+		_env_assert_pts = os.getenv('RR_ASSERT_INJECTIONS', 'NONE')
 		if _env_assert_pts and _env_assert_pts != 'ALL':
 			_assert_subset = [
 			    p.strip() for p in _env_assert_pts.split(',') if p.strip()
 			]
-			assert_chaos_points = [
-			    p for p in assert_chaos_points if p in _assert_subset
+			assert_injections = [
+			    p for p in assert_injections if p in _assert_subset
 			]
 
 		def assert_chaos_loop():
-			# Arm one of `assert_chaos_points` once every `interval`
+			# Arm one of `assert_injections` once every `interval`
 			# seconds (the configurable RR_ASSERT_PERIOD cadence, default
 			# duration/3).  Every point here turns into a PANIC once it
 			# fires (directly via a START_CRIT_SECTION, or via abort
@@ -817,10 +821,10 @@ class RrStressTest(BaseTest):
 						continue
 					try:
 						rating = []
-						for point in assert_chaos_points:
+						for point in assert_injections:
 							rating.append(
 							    (point,
-							     random.randint(1, len(assert_chaos_points))))
+							     random.randint(1, len(assert_injections))))
 						rating.sort(key=lambda x: x[1])
 						chosen = rating[0][0]
 						con.execute("SELECT pg_stopevent_set("
@@ -844,7 +848,7 @@ class RrStressTest(BaseTest):
 						continue
 					time.sleep(0)
 					try:
-						for point in assert_chaos_points:
+						for point in assert_injections:
 							con.execute("SELECT pg_stopevent_reset("
 							            f"'{point}')")
 						con.commit()
@@ -861,7 +865,7 @@ class RrStressTest(BaseTest):
 			finally:
 				if con is not None:
 					try:
-						for point in assert_chaos_points:
+						for point in assert_injections:
 							con.execute("SELECT pg_stopevent_reset("
 							            f"'{point}')")
 						con.commit()
@@ -1092,9 +1096,9 @@ class RrStressTest(BaseTest):
 			threads.append(
 			    threading.Thread(target=rollbacker_loop, args=(rbid, )))
 		threads.append(threading.Thread(target=checkpointer_loop))
-		if injection_points:
+		if error_injections:
 			threads.append(threading.Thread(target=error_chaos_loop))
-		if assert_chaos_interval > 0:
+		if assert_chaos_interval > 0 and assert_injections:
 			threads.append(threading.Thread(target=assert_chaos_loop))
 		if postmaster_kill_enabled:
 			threads.append(threading.Thread(target=postmaster_kill_loop))
@@ -1105,14 +1109,15 @@ class RrStressTest(BaseTest):
 		    if postmaster_kill_enabled else '')
 		_assert_cfg = (
 		    f' assert_period={assert_chaos_interval:.1f}s'
-		    if assert_chaos_interval > 0 else ' assert_chaos=off')
+		    if (assert_chaos_interval > 0 and assert_injections)
+		    else ' assert_chaos=off')
 		print(
 		    f'\n[config] storage={STORAGE_ENGINE} '
 		    f'duration={duration} writers={n_writers} '
 		    f'readers_pk={n_readers_pk} readers_sk={n_readers_sk} '
 		    f'readers_mixed={n_readers_mixed} rollbackers={n_rollbackers} '
-		    f'stopevents={len(injection_points)} '
-		    f'list={injection_points}'
+		    f'stopevents={len(error_injections)} '
+		    f'list={error_injections}'
 		    f'{_kill_cfg}{_assert_cfg}',
 		    flush=True)
 
@@ -1168,7 +1173,7 @@ class RrStressTest(BaseTest):
 			    os.path.dirname(inspect.getfile(self.__class__)), 'results')
 			os.makedirs(results_dir, exist_ok=True)
 			tag = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-			pts = (os.getenv('RR_INJECTION_POINTS')
+			pts = (os.getenv('RR_ERROR_INJECTIONS')
 			       or 'ALL').replace(',', '+')[:60]
 			inst = os.getenv('RR_INSTANCE') or 'solo'
 			dst = os.path.join(results_dir, f'{tag}_{inst}_{pts}_{reason}.log')
@@ -1182,7 +1187,7 @@ class RrStressTest(BaseTest):
 			# replica was spawned this trial.  testgres tears
 			# down its tmp dir on teardown, so the replica log
 			# is otherwise unrecoverable post-mortem.
-			_rep = trapped_replicas[0] or replica
+			_rep = trapped_replicas[0]
 			if _rep is not None:
 				try:
 					replica_log = os.path.join(_rep.logs_dir, 'postgresql.log')
@@ -1208,8 +1213,7 @@ class RrStressTest(BaseTest):
 			os.makedirs(results_dir, exist_ok=True)
 			tag = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 			inst = os.getenv('RR_INSTANCE') or 'solo'
-			for label, n in (('primary', node), ('replica', trapped_replicas[0]
-			                                     or replica)):
+			for label, n in (('primary', node), ('replica', trapped_replicas[0])):
 				if n is None:
 					continue
 				src = os.path.join(n.base_dir, 'data')
@@ -1328,9 +1332,9 @@ class RrStressTest(BaseTest):
 		# None because testgres exposes only the LAST statement's result
 		# (COMMIT, no rows). We instead open one connection, set the
 		# planner GUCs session-level, run the SELECT, return its rows.
-		def _pk_force_seq(sql, label=None):
+		def _pk_force_seq(sql, label=None, instance_node=node):
 			try:
-				with node.connect(autocommit=True) as con:
+				with instance_node.connect(autocommit=True) as con:
 					con.execute("SET enable_indexonlyscan = off")
 					con.execute("SET enable_indexscan = off")
 					con.execute("SET enable_bitmapscan = off")
@@ -1345,9 +1349,9 @@ class RrStressTest(BaseTest):
 		# plan for `SELECT token ...` is an index-(only-)scan on the
 		# unique(token) SK. Lets us enumerate what the SK actually
 		# contains and diff against the PK row set.
-		def _sk_force_idx(sql, label=None):
+		def _sk_force_idx(sql, label=None, instance_node=node):
 			try:
-				with node.connect(autocommit=True) as con:
+				with instance_node.connect(autocommit=True) as con:
 					con.execute("SET enable_seqscan = off")
 					con.execute("SET enable_bitmapscan = off")
 					if label:
@@ -1357,11 +1361,29 @@ class RrStressTest(BaseTest):
 			except Exception as _e:
 				return f'ERROR: {_e!r}'
 
+		# Bridge-index force: a GIN (bridge) index is only reachable via a
+		# Bitmap Index Scan, so -- unlike _sk_force_idx -- we keep
+		# enable_bitmapscan ON and only disable seqscan, forcing the GIN
+		# bridge scan (Custom Scan (o_scan) -> Bitmap Index Scan on
+		# o_token_to_id) rather than a seq-scan fallback. Printed under the
+		# sk-forced label so run_hunt's plan-check validates the GIN block.
+		def _gin_force(sql, label=None, instance_node=node):
+			try:
+				with instance_node.connect(autocommit=True) as con:
+					con.execute("SET enable_seqscan = off")
+					con.execute("SET enable_bitmapscan = on")
+					if label:
+						for _ln in _explain_lines(con, sql):
+							print(f'[explain gin-forced {label}] {_ln}')
+					return con.execute(sql)
+			except Exception as _e:
+				return f'ERROR: {_e!r}'
+
 		# Default-plan execution with EXPLAIN logging, so we can see what
 		# the planner picked for queries that have no override.
-		def _default_exec(sql, label=None):
+		def _default_exec(sql, label=None, instance_node=node):
 			try:
-				with node.connect(autocommit=True) as con:
+				with instance_node.connect(autocommit=True) as con:
 					if label:
 						for _ln in _explain_lines(con, sql):
 							print(f'[explain default {label}] {_ln}')
@@ -1401,7 +1423,6 @@ class RrStressTest(BaseTest):
 		    "SELECT count(*)::int FROM o_bank_account", label='count(*)')[0][0]
 		sk_row_count = _sk_force_idx(
 		    "SELECT count(token)::int FROM o_bank_account", label='count(*)')[0][0]
-		rows = pk_row_count
 		# Structural-consistency check: branches on STORAGE_ENGINE.
 		# OrioleDB: orioledb_tbl_check returns True/False.
 		# Heap: amcheck's verify_heapam returns one row per
@@ -1581,6 +1602,31 @@ class RrStressTest(BaseTest):
 				else:
 					print(f'  {pk_dump}')
 
+		def bridge_check(instance_node, violations_list):
+			for token in pk_set:
+				gin_selected_row = _gin_force(
+					"SELECT id, token FROM o_bank_account "
+					f"WHERE token_arr @> ARRAY[{token}]::bigint[]",
+					label='GIN SELECT',
+					instance_node=instance_node
+				)
+
+				if len(gin_selected_row) != 1:
+					violations_list.append(f"GIN index duplicates corrupted on token = {token}: len(rows) for that = {len(gin_selected_row)}")
+				if len(gin_selected_row) > 0 and gin_selected_row[0][1] != token:
+					violations_list.append("GIN index token mismatch: "
+				  					 f"GIN idx's token = {token}, "
+									 f"GIN referenced row's token = {gin_selected_row[0][1]}")
+
+		# Collect every invariant violation so a single failure does not
+		# hide the others.  All checks are evaluated first, then a
+		# single assertEqual against an empty list reports all failures
+		# together.
+		violations = []
+
+		if bridge_enabled:
+			bridge_check(node, violations_list=violations)
+
 		# Replica invariants.  Run *before* node.stop() so catchup
 		# can still reach primary's current LSN and the dump-vs-
 		# primary comparison can query both nodes.  Results are
@@ -1595,6 +1641,9 @@ class RrStressTest(BaseTest):
 				except Exception as _e:
 					_replica_violations.append(
 					    f'replicas[{i}]: catchup() failed: {_e!r}')
+
+				if bridge_enabled:
+					bridge_check(replica, violations_list=_replica_violations)
 
 				# Core scalar invariants on replica.
 				try:
@@ -1656,11 +1705,6 @@ class RrStressTest(BaseTest):
 		n_dangling = int((_ps.stdout or '0').strip() or 0)
 		print(f'[dangling-check] surviving backends: {n_dangling}', flush=True)
 
-		# Collect every invariant violation so a single failure does not
-		# hide the others.  All checks are evaluated first, then a
-		# single assertEqual against an empty list reports all failures
-		# together.
-		violations = []
 		if final_total != expected_total:
 			violations.append(f'final total {final_total} != expected '
 			                  f'{expected_total} (mismatch = lost update)')
@@ -1693,8 +1737,8 @@ class RrStressTest(BaseTest):
 			    f'token universe extra: {len(universe_extra)} '
 			    f'token(s) outside [1,{n_accounts + n_writers}]: '
 			    f'{universe_extra}')
-		if rows != n_accounts:
-			violations.append(f'rows {rows} != {n_accounts}')
+		if pk_row_count != n_accounts:
+			violations.append(f'pk_row_count {pk_row_count} != {n_accounts}')
 		if seen:
 			violations.append(f'snapshot reads saw inconsistency: {seen}')
 		if not tbl_check_ok:
