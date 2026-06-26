@@ -14,6 +14,7 @@
 #ifndef __RECOVERY_H__
 #define __RECOVERY_H__
 
+#include "access/xlogrecovery.h"
 #include "btree/btree.h"
 #include "recovery/internal.h"
 #include "btree/page_contents.h"
@@ -44,12 +45,19 @@ extern bool orioledb_recovery_stops_before_hook(XLogReaderState *record,
 												TransactionId *recordXid,
 												TimestampTz *recordXtime);
 
+/*
+ * Synchronize Oriole recovery state against the exact PostgreSQL recovery
+ * stop boundary before recovery_target_action is applied.
+ */
+extern void orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info);
+
 extern int	recovery_queue_size_guc;
 extern int	recovery_pool_size_guc;
 extern int	recovery_idx_pool_size_guc;
 extern OXid recovery_oxid;
 extern TransactionId recoveryHeapTransactionId;
 extern pg_atomic_uint64 *recovery_finished_list_ptr;
+extern pg_atomic_uint64 *recovery_published_visible_ptr;
 
 typedef struct BTreeDescr BTreeDescr;
 
