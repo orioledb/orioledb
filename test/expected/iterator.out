@@ -25,6 +25,30 @@ SELECT unnest(orioledb_test_endkey_returned_skip('o_endkey_skip'::regclass, 5)) 
 (6 rows)
 
 DROP TABLE o_endkey_skip;
+-- Backward refind: silent invalid locator at items_count in
+-- iterator_refind_partial_leaf().  orioledb_test_back_refind_skip_tail()
+-- opens a backward iterator, forges curKey to a value past the leaf's max,
+-- then forces a refind.  With the bug the locator stays invalid; with the
+-- fix it decrements to the leaf's tail (mirroring the seed path) and the
+-- backward drain sees every row, descending.
+CREATE TABLE o_back_refind (id int4 PRIMARY KEY) USING orioledb;
+INSERT INTO o_back_refind SELECT g FROM generate_series(1, 10) g;
+SELECT unnest(orioledb_test_back_refind_skip_tail('o_back_refind'::regclass, 1000)) AS id;
+ id 
+----
+ 10
+  9
+  8
+  7
+  6
+  5
+  4
+  3
+  2
+  1
+(10 rows)
+
+DROP TABLE o_back_refind;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA iterator CASCADE;
 RESET search_path;
