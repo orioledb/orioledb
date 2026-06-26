@@ -1882,10 +1882,10 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 			{
 				/*
 				 * The latest pair is written only by the startup process
-				 * while applying WAL.  A stop-before target is checked
-				 * before the target record is applied, so every previously
-				 * recorded replay boundary must be at or before target_ptr.
-				 * The hook cannot obtain a different pair by waiting.
+				 * while applying WAL.  A stop-before target is checked before
+				 * the target record is applied, so every previously recorded
+				 * replay boundary must be at or before target_ptr. The hook
+				 * cannot obtain a different pair by waiting.
 				 */
 				ereport(ERROR,
 						(errmsg("inconsistent OrioleDB recovery visibility "
@@ -2023,11 +2023,12 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 				{
 					/*
 					 * The replay/visible pair is written only by the startup
-					 * process while applying WAL.  PostgreSQL invokes this hook
-					 * after leaving the redo loop, so no new pair can appear
-					 * while the hook is running.  Therefore, any state other
-					 * than the empty base-backup baseline above cannot converge
-					 * by waiting and indicates broken boundary bookkeeping.
+					 * process while applying WAL.  PostgreSQL invokes this
+					 * hook after leaving the redo loop, so no new pair can
+					 * appear while the hook is running.  Therefore, any state
+					 * other than the empty base-backup baseline above cannot
+					 * converge by waiting and indicates broken boundary
+					 * bookkeeping.
 					 */
 					ereport(ERROR,
 							(errmsg("inconsistent OrioleDB recovery visibility "
@@ -2907,8 +2908,8 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 	/*
 	 * A synchronous finish bypasses finished_list because every relevant
 	 * worker has already reached ptr and the xid has been finalized above.
-	 * Publish earlier deferred xids first through the common path, then expose
-	 * this boundary directly.
+	 * Publish earlier deferred xids first through the common path, then
+	 * expose this boundary directly.
 	 */
 	if (sync)
 	{

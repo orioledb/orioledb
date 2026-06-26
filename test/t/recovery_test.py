@@ -3551,7 +3551,8 @@ recovery_target_action = 'shutdown'
 	def test_recovery_target_time_barrier_commit_timestamp_exclusive(self):
 		self._run_recovery_target_time_commit_timestamp_case(False, 1000, 1000)
 
-	def test_recovery_target_time_stop_before_oriole_boundary_not_crossed(self):
+	def test_recovery_target_time_stop_before_oriole_boundary_not_crossed(
+	        self):
 		node = self.node
 		node.append_conf("track_commit_timestamp = on")
 		node.start()
@@ -3603,8 +3604,7 @@ recovery_target_action = 'pause'
 			    re.finditer(
 			        r"stop-before snapshot after startup-side publication "
 			        r"attempt \(target_ptr=([0-9A-F]+/[0-9A-F]+).*?"
-			        r"finished_ptr=([0-9A-F]+/[0-9A-F]+)",
-			        replica_log))
+			        r"finished_ptr=([0-9A-F]+/[0-9A-F]+)", replica_log))
 			self.assertTrue(snapshots)
 			snapshot = snapshots[-1]
 			self.assertLessEqual(
@@ -4034,21 +4034,18 @@ recovery_target_action = 'pause'
 				self.assertIn(
 				    "Recovery target reached: waiting for a published "
 				    "visible boundary before stop", replica_log)
-				self.fail(
-				    "synchronously finalized recovery boundary was not "
-				    "published before the recovery target")
+				self.fail("synchronously finalized recovery boundary was not "
+				          "published before the recovery target")
 			self._assert_stop_before_barrier_logs(replica_log)
 
 			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
 			                         expected=True)
 			self._assert_visible_series(replica, 1000, 1000)
 			self.assertEqual(
-			    replica.execute(
-			        "SELECT count(*) FROM pg_class "
-			        "WHERE relname = 'tab_int_a_idx'")[0][0], 1)
+			    replica.execute("SELECT count(*) FROM pg_class "
+			                    "WHERE relname = 'tab_int_a_idx'")[0][0], 1)
 
-	def test_recovery_target_xid_barrier_stop_before_deferred_then_sync(
-	        self):
+	def test_recovery_target_xid_barrier_stop_before_deferred_then_sync(self):
 		node = self.node
 		node.start()
 
@@ -4092,9 +4089,8 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, 1500, 1500)
 			self.assertEqual(
-			    replica.execute(
-			        "SELECT count(*) FROM pg_class "
-			        "WHERE relname = 'tab_int_a_idx'")[0][0], 1)
+			    replica.execute("SELECT count(*) FROM pg_class "
+			                    "WHERE relname = 'tab_int_a_idx'")[0][0], 1)
 
 	def test_recovery_target_xid_barrier_stop_after_sync_finalization(self):
 		node = self.node
@@ -4139,9 +4135,8 @@ recovery_target_action = 'pause'
 
 			self._assert_visible_series(replica, 1000, 1000)
 			self.assertEqual(
-			    replica.execute(
-			        "SELECT count(*) FROM pg_class "
-			        "WHERE relname = 'tab_int_a_idx'")[0][0], 1)
+			    replica.execute("SELECT count(*) FROM pg_class "
+			                    "WHERE relname = 'tab_int_a_idx'")[0][0], 1)
 
 	def test_recovery_target_lsn_barrier_stop_after(self):
 		node = self.node
