@@ -3,6 +3,7 @@
 
 import os
 import random
+import re
 import time
 
 from .base_test import BaseTest
@@ -3550,6 +3551,67 @@ recovery_target_action = 'shutdown'
 	def test_recovery_target_time_barrier_commit_timestamp_exclusive(self):
 		self._run_recovery_target_time_commit_timestamp_case(False, 1000, 1000)
 
+	def test_recovery_target_time_stop_before_oriole_boundary_not_crossed(self):
+		node = self.node
+		node.append_conf("track_commit_timestamp = on")
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+			INSERT INTO tab_int VALUES (generate_series(1,1000));
+		""")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			# Establish a synchronously published post-backup boundary.  The
+			# exclusive time target is then detected in the following custom
+			# Oriole WAL container before that container is replayed.
+			node.safe_psql("CREATE INDEX tab_int_a_idx ON tab_int (a)")
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1001,2000));
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			recovery_txid = ret.decode().strip().splitlines()[-1]
+			recovery_time = node.execute(
+			    f"SELECT pg_xact_commit_timestamp('{recovery_txid}'::xid)"
+			)[0][0]
+
+			replica.append_conf(f"""
+recovery_target_time = '{recovery_time}'
+recovery_target_inclusive = false
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False)
+			self._assert_stop_before_barrier_logs(replica_log)
+			self._assert_visible_series(replica, 1000, 1000)
+
+			def lsn_to_int(lsn):
+				high, low = lsn.split('/')
+				return (int(high, 16) << 32) + int(low, 16)
+
+			snapshots = list(
+			    re.finditer(
+			        r"stop-before snapshot after startup-side publication "
+			        r"attempt \(target_ptr=([0-9A-F]+/[0-9A-F]+).*?"
+			        r"finished_ptr=([0-9A-F]+/[0-9A-F]+)",
+			        replica_log))
+			self.assertTrue(snapshots)
+			snapshot = snapshots[-1]
+			self.assertLessEqual(
+			    lsn_to_int(snapshot.group(2)),
+			    lsn_to_int(snapshot.group(1)),
+			    msg="custom Oriole stop-before crossed the recovery target")
+
 	def test_recovery_target_xid_barrier_stop_after(self):
 		node = self.node
 		node.start()
@@ -3927,6 +3989,159 @@ recovery_target_action = 'pause'
 			    replica, stop_after=False)
 
 			self._assert_stop_before_barrier_logs(replica_log)
+
+	def test_recovery_target_xid_barrier_stop_before_sync_finalization(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+			INSERT INTO tab_int VALUES (generate_series(1,1000));
+		""")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			# CREATE INDEX modifies Oriole system trees, forcing synchronous
+			# recovery finalization.  The following exclusive xid target then
+			# stops before the next transaction and requires that synchronously
+			# finalized boundary to have been published.
+			node.safe_psql("CREATE INDEX tab_int_a_idx ON tab_int (a)")
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1001,2000));
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			recovery_txid = ret.decode().strip().splitlines()[-1]
+
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_inclusive = false
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+
+			# Keep the failure bounded: without publishing the synchronous
+			# boundary, the target hook cannot complete and would otherwise
+			# wait indefinitely.
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False, timeout_s=10)
+			if ("Recovery target reached: stop-before synchronization "
+			    "barrier completed" not in replica_log):
+				self.assertIn(
+				    "Recovery target reached: waiting for a published "
+				    "visible boundary before stop", replica_log)
+				self.fail(
+				    "synchronously finalized recovery boundary was not "
+				    "published before the recovery target")
+			self._assert_stop_before_barrier_logs(replica_log)
+
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+			self._assert_visible_series(replica, 1000, 1000)
+			self.assertEqual(
+			    replica.execute(
+			        "SELECT count(*) FROM pg_class "
+			        "WHERE relname = 'tab_int_a_idx'")[0][0], 1)
+
+	def test_recovery_target_xid_barrier_stop_before_deferred_then_sync(
+	        self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+			INSERT INTO tab_int VALUES (generate_series(1,1000));
+		""")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			# Leave an ordinary xid on finished_list, then force synchronous
+			# finalization.  Publishing the synchronous boundary must first
+			# drain the earlier deferred xid.
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,1500))")
+			node.safe_psql("CREATE INDEX tab_int_a_idx ON tab_int (a)")
+
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_int VALUES (generate_series(1501,2000));
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			recovery_txid = ret.decode().strip().splitlines()[-1]
+
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_inclusive = false
+recovery_target_action = 'pause'
+""")
+
+			replica.start()
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=False)
+			self._assert_stop_before_barrier_logs(replica_log)
+
+			self._assert_visible_series(replica, 1500, 1500)
+			self.assertEqual(
+			    replica.execute(
+			        "SELECT count(*) FROM pg_class "
+			        "WHERE relname = 'tab_int_a_idx'")[0][0], 1)
+
+	def test_recovery_target_xid_barrier_stop_after_sync_finalization(self):
+		node = self.node
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_int (a int) USING orioledb;
+			INSERT INTO tab_int VALUES (generate_series(1,1000));
+		""")
+
+		with self.getReplica(has_restoring=True) as replica:
+			replica.append_conf("log_min_messages = DEBUG4")
+
+			# Make the synchronously finalized transaction itself the inclusive
+			# target.  The stop-after path must observe its directly published
+			# visible boundary.
+			ret = node.safe_psql("""
+			    BEGIN;
+			    CREATE INDEX tab_int_a_idx ON tab_int (a);
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			recovery_txid = ret.decode().strip().splitlines()[-1]
+
+			replica.append_conf(f"""
+recovery_target_xid = '{recovery_txid}'
+recovery_target_inclusive = true
+recovery_target_action = 'pause'
+""")
+
+			node.safe_psql(
+			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
+
+			replica.start()
+			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
+			                         expected=True)
+
+			replica_log = self._read_replica_log_until_barrier_completed(
+			    replica, stop_after=True)
+			self._assert_stop_after_barrier_logs(replica_log)
+
+			self._assert_visible_series(replica, 1000, 1000)
+			self.assertEqual(
+			    replica.execute(
+			        "SELECT count(*) FROM pg_class "
+			        "WHERE relname = 'tab_int_a_idx'")[0][0], 1)
 
 	def test_recovery_target_lsn_barrier_stop_after(self):
 		node = self.node

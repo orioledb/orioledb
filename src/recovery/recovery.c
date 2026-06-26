@@ -783,6 +783,7 @@ static inline RecoveryMsgType recovery_msg_from_wal_record(WalRecordType rec_typ
 static void recovery_send_init(int worker_num);
 static inline void recovery_record_visible_boundary_pair(XLogRecPtr replay_ptr, XLogRecPtr visible_ptr);
 static inline void recovery_read_visible_boundary_pair(XLogRecPtr *replay_ptr, XLogRecPtr *visible_ptr);
+static void recovery_publish_visible_ptr(XLogRecPtr ptr);
 
 /*
  * Returns full size of the shared memory needed to recovery.
@@ -1638,7 +1639,8 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 	 * equal to target_ptr when the target is a non-Oriole WAL record.
 	 *
 	 * For stop-before semantics this is the upper bound that published
-	 * visible state must remain strictly below.
+	 * visible state must not cross.  A previous record's end boundary may
+	 * equal the target record's start boundary without including the target.
 	 */
 	target_ptr = info->recordPtr;
 
@@ -1878,15 +1880,31 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 			}
 			else if (XLogRecPtrIsInvalid(stop_before_visible_ptr))
 			{
-				elog(DEBUG4,
-					 "Recovery target reached: waiting for replay path to expose "
-					 "the last visible boundary before stop "
-					 "(target_ptr=%X/%X last_replay_ptr=%X/%X "
-					 "last_visible_ptr=%X/%X finished_ptr=%X/%X)",
-					 LSN_FORMAT_ARGS(target_ptr),
-					 LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
-					 LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
-					 LSN_FORMAT_ARGS(finished_ptr));
+				/*
+				 * The latest pair is written only by the startup process
+				 * while applying WAL.  A stop-before target is checked
+				 * before the target record is applied, so every previously
+				 * recorded replay boundary must be at or before target_ptr.
+				 * The hook cannot obtain a different pair by waiting.
+				 */
+				ereport(ERROR,
+						(errmsg("inconsistent OrioleDB recovery visibility "
+								"state before recovery target"),
+						 errdetail("target_ptr=%X/%X recovery_ptr=%X/%X "
+								   "last_replay_ptr=%X/%X "
+								   "last_visible_ptr=%X/%X "
+								   "stop_before_visible_ptr=%X/%X "
+								   "main_retain_ptr=%X/%X current_ptr=%X/%X "
+								   "retain_ptr=%X/%X finished_ptr=%X/%X",
+								   LSN_FORMAT_ARGS(target_ptr),
+								   LSN_FORMAT_ARGS(recovery_ptr_snapshot),
+								   LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
+								   LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
+								   LSN_FORMAT_ARGS(stop_before_visible_ptr),
+								   LSN_FORMAT_ARGS(main_retain_ptr),
+								   LSN_FORMAT_ARGS(current_ptr),
+								   LSN_FORMAT_ARGS(retain_ptr),
+								   LSN_FORMAT_ARGS(finished_ptr))));
 			}
 			else if (finished_ptr < stop_before_visible_ptr)
 			{
@@ -1902,7 +1920,22 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 			}
 			else
 			{
-				Assert(finished_ptr < target_ptr);
+				if (finished_ptr > target_ptr)
+					ereport(ERROR,
+							(errmsg("OrioleDB recovery visible boundary crossed "
+									"the recovery target"),
+							 errdetail("target_ptr=%X/%X recovery_ptr=%X/%X "
+									   "stop_before_visible_ptr=%X/%X "
+									   "main_retain_ptr=%X/%X current_ptr=%X/%X "
+									   "retain_ptr=%X/%X finished_ptr=%X/%X",
+									   LSN_FORMAT_ARGS(target_ptr),
+									   LSN_FORMAT_ARGS(recovery_ptr_snapshot),
+									   LSN_FORMAT_ARGS(stop_before_visible_ptr),
+									   LSN_FORMAT_ARGS(main_retain_ptr),
+									   LSN_FORMAT_ARGS(current_ptr),
+									   LSN_FORMAT_ARGS(retain_ptr),
+									   LSN_FORMAT_ARGS(finished_ptr))));
+				Assert(finished_ptr <= target_ptr);
 				if (main_retain_ptr < finished_ptr)
 				{
 					elog(DEBUG4,
@@ -1965,7 +1998,8 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 				 * no pair to publish: the base-backup visible state is
 				 * already the correct stop-after Oriole state.
 				 */
-				if (XLogRecPtrIsInvalid(last_visible_ptr_snapshot) &&
+				if (XLogRecPtrIsInvalid(last_replay_ptr_snapshot) &&
+					XLogRecPtrIsInvalid(last_visible_ptr_snapshot) &&
 					XLogRecPtrIsInvalid(finished_ptr))
 				{
 					elog(DEBUG4,
@@ -1987,16 +2021,34 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 				}
 				else
 				{
-					elog(DEBUG4,
-						 "Recovery target reached: waiting for replay path to expose "
-						 "a visible boundary corresponding to the stop-after target "
-						 "(target_ptr=%X/%X last_replay_ptr=%X/%X "
-						 "last_visible_ptr=%X/%X current_ptr=%X/%X finished_ptr=%X/%X)",
-						 LSN_FORMAT_ARGS(target_ptr),
-						 LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
-						 LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
-						 LSN_FORMAT_ARGS(current_ptr),
-						 LSN_FORMAT_ARGS(finished_ptr));
+					/*
+					 * The replay/visible pair is written only by the startup
+					 * process while applying WAL.  PostgreSQL invokes this hook
+					 * after leaving the redo loop, so no new pair can appear
+					 * while the hook is running.  Therefore, any state other
+					 * than the empty base-backup baseline above cannot converge
+					 * by waiting and indicates broken boundary bookkeeping.
+					 */
+					ereport(ERROR,
+							(errmsg("inconsistent OrioleDB recovery visibility "
+									"state at recovery target"),
+							 errdetail("target_ptr=%X/%X recovery_ptr=%X/%X "
+									   "last_replay_ptr=%X/%X "
+									   "last_visible_ptr=%X/%X "
+									   "stop_after_replay_ptr=%X/%X "
+									   "stop_after_visible_ptr=%X/%X "
+									   "main_retain_ptr=%X/%X current_ptr=%X/%X "
+									   "retain_ptr=%X/%X finished_ptr=%X/%X",
+									   LSN_FORMAT_ARGS(target_ptr),
+									   LSN_FORMAT_ARGS(recovery_ptr_snapshot),
+									   LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
+									   LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
+									   LSN_FORMAT_ARGS(stop_after_replay_ptr),
+									   LSN_FORMAT_ARGS(stop_after_visible_ptr),
+									   LSN_FORMAT_ARGS(main_retain_ptr),
+									   LSN_FORMAT_ARGS(current_ptr),
+									   LSN_FORMAT_ARGS(retain_ptr),
+									   LSN_FORMAT_ARGS(finished_ptr))));
 				}
 			}
 			else if (current_ptr < stop_after_replay_ptr)
@@ -2851,6 +2903,18 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 	cur_recovery_xid_state = NULL;
 
 	update_proc_retain_undo_location(worker_id);
+
+	/*
+	 * A synchronous finish bypasses finished_list because every relevant
+	 * worker has already reached ptr and the xid has been finalized above.
+	 * Publish earlier deferred xids first through the common path, then expose
+	 * this boundary directly.
+	 */
+	if (sync)
+	{
+		Assert(worker_id < 0);
+		recovery_publish_visible_ptr(ptr);
+	}
 }
 
 static void
@@ -3502,6 +3566,29 @@ recovery_xid_state_workers_reached_ptr(RecoveryXidState *state, XLogRecPtr ptr)
 }
 
 /*
+ * Publish a startup-visible recovery boundary without allowing it to move
+ * backwards.  The startup process is the only writer.
+ */
+static void
+recovery_publish_visible_ptr(XLogRecPtr ptr)
+{
+	XLogRecPtr	old_ptr;
+
+	Assert(AmStartupProcess() || !IsUnderPostmaster);
+
+	old_ptr = pg_atomic_read_u64(recovery_published_visible_ptr);
+	if (XLogRecPtrIsValid(old_ptr) &&
+		(XLogRecPtrIsInvalid(ptr) || ptr < old_ptr))
+		ereport(ERROR,
+				(errmsg("OrioleDB recovery visible boundary moved backwards"),
+				 errdetail("old_ptr=%X/%X new_ptr=%X/%X",
+						   LSN_FORMAT_ARGS(old_ptr),
+						   LSN_FORMAT_ARGS(ptr))));
+
+	pg_atomic_write_u64(recovery_published_visible_ptr, ptr);
+}
+
+/*
  * Update process transactionUndoRetainLocation according to the state of
  * retain_undo_queues[undoType].  Removes finished transactions from the top
  * of the heap when appropriate.
@@ -3656,7 +3743,7 @@ update_proc_retain_undo_location(int worker_id)
 		 * startup has actually published as visible state
 		 */
 		pg_atomic_write_u64(recovery_finished_list_ptr, recoveryPtr);
-		pg_atomic_write_u64(recovery_published_visible_ptr, publishedPtr);
+		recovery_publish_visible_ptr(publishedPtr);
 		elog(DEBUG4,
 			 "UpdateRetainUndoLocation: updated startup pointers "
 			 "(worker_id=%d release_fence_ptr=%X/%X "
