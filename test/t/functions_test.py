@@ -13,7 +13,9 @@ class FunctionTest(BaseTest):
 	def test_undo_log_size(self):
 
 		node = self.node
-		node.append_conf('postgresql.conf', "checkpoint_timeout = 86400\n")
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 86400\n"
+		    "orioledb.undo_buffers = 128\n")
 		node.start()
 
 		node.safe_psql("""
@@ -22,10 +24,32 @@ class FunctionTest(BaseTest):
             CREATE TABLE oriole_table (i SERIAL PRIMARY KEY, t text STORAGE PLAIN) USING orioledb;
 		""")
 		node.safe_psql("""
-			INSERT INTO oriole_table(t) select repeat('a', 270) FROM  generate_series(1, 40000) as i;
+			INSERT INTO oriole_table(t) select repeat('a', 270) FROM  generate_series(1, 80000) as i;
+		""")
+
+		# Hold an old snapshot so the undo produced below cannot be freed and is
+		# forced out to the on-disk undo files that orioledb_undo_size() reads
+		# (with sparse undo files, unretained undo is reclaimed before it ever
+		# reaches disk).  The workload below is sized so the retained row undo
+		# overruns the per-type circular buffer floor
+		# (max_procs * 2 * O_MAX_UNDO_RECORD_SIZE), forcing evict-on-overflow.
+		con = node.connect()
+		con.begin()
+		con.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+		con.execute("SELECT count(*) FROM oriole_table;")
+
+		# Delete two thirds of the rows (interleaved, so survivors share pages
+		# with the deleted tuples), then grow the survivors.  The growing update
+		# forces page compaction/splits that physically drop the committed-dead
+		# tuples, which take a full-page undo image.  (A split or merge that
+		# drops nothing now uses a tiny differential image; the old same-size
+		# UPDATE produced only such differential page undo, which no longer
+		# spills to disk.)
+		node.safe_psql("""
+			DELETE FROM oriole_table WHERE MOD(i, 3) <> 0;
 		""")
 		node.safe_psql("""
-			UPDATE oriole_table set t = repeat('c', 270) WHERE i > 5000;
+			UPDATE oriole_table set t = repeat('c', 1200) WHERE i > 5000;
 		""")
 
 		self.assertGreaterEqual(
@@ -37,6 +61,8 @@ class FunctionTest(BaseTest):
 		        "SELECT undo_size FROM orioledb_undo_size() WHERE undo_type = 'page';"
 		    )[0][0], 200000)
 
+		con.rollback()
+		con.close()
 		node.stop()
 
 	def test_undo_log_size_system(self):

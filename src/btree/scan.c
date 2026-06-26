@@ -226,6 +226,14 @@ load_first_historical_page(BTreeSeqScan *scan)
 		O_TUPLE_SET_NULL(hikey.tuple);
 	O_TUPLE_SET_NULL(lokey.tuple);
 
+	/*
+	 * Seed histImg with the live page: differential page-level undo images
+	 * (UndoPageImage*Diff) reconstruct the historical page by transforming
+	 * the newer page in place, so the chain walk must start from the live
+	 * page.
+	 */
+	memcpy(scan->histImg, scan->leafImg, ORIOLEDB_BLCKSZ);
+
 	while (COMMITSEQNO_IS_NORMAL(header->csn) &&
 		   header->csn >= scan->oSnapshot.csn)
 	{
@@ -281,6 +289,15 @@ load_next_historical_page(BTreeSeqScan *scan)
 	OFixedKey	prevHikey;
 
 	copy_fixed_hikey(scan->desc, &prevHikey, scan->histImg);
+
+	/*
+	 * Re-seed histImg with the live page before reconstructing the next
+	 * historical sub-page.  Differential undo images transform the page in
+	 * place, so each reconstruction must restart from the live (merged) page
+	 * rather than the previous sub-page left in histImg.  prevHikey above was
+	 * captured from that previous sub-page first.
+	 */
+	memcpy(scan->histImg, scan->leafImg, ORIOLEDB_BLCKSZ);
 
 	while (COMMITSEQNO_IS_NORMAL(header->csn) &&
 		   header->csn >= scan->oSnapshot.csn)

@@ -165,6 +165,41 @@ partial_load_chunk(PartialPageState *partial, Page img,
 	return true;
 }
 
+/*
+ * Fully materialize a partially-loaded page image: load the hikeys chunk and
+ * every data chunk from the source page, leaving `img` a complete copy.
+ *
+ * Differential page-level undo images (UndoPageImage*Diff) reconstruct the
+ * historical page in place from the live page carried in `img`, so they require
+ * every chunk present; the partial-read fast path (BTREE_PAGE_FIND_FETCH) only
+ * loads the chunks touched so far.  Returns false if the source page changed
+ * mid-load (consistency lost) -- the caller must retry the read.
+ */
+bool
+partial_load_full_page(PartialPageState *partial, Page img)
+{
+	BTreePageHeader *header = (BTreePageHeader *) img;
+	OffsetNumber i;
+
+	if (!partial->isPartial)
+		return true;
+
+	if (!partial_load_hikeys_chunk(partial, img))
+		return false;
+
+	for (i = 0; i < header->chunksCount; i++)
+	{
+		if (!partial_load_chunk(partial, img, i, NULL))
+			return false;
+	}
+
+	/* btree_page_reorg() checks the free-space tail is zeroed under Valgrind. */
+	null_unused_bytes(img);
+
+	partial->isPartial = false;
+	return true;
+}
+
 BTreeItemPageFitType
 page_locator_fits_item(BTreeDescr *desc, Page p, BTreePageItemLocator *locator,
 					   LocationIndex size, bool replace, CommitSeqNo csn)

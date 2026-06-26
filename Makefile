@@ -167,6 +167,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  rll_deadlock \
 				  rll_mix \
 				  rll_subtrans \
+				  skipundo \
 				  table_lock_test \
 				  concurrent_truncate \
 				  uniq
@@ -214,6 +215,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/reindex_test.py \
 						test/t/s3_test.py \
 						test/t/schema_test.py \
+						test/t/seq_scan_undo_test.py \
 						test/t/temp_local_pool_test.py \
 						test/t/toast_index_test.py \
 						test/t/trigger_test.py \

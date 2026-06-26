@@ -1,0 +1,99 @@
+Parsed test spec with 2 sessions
+
+starting permutation: bs_s1_setup bs_s2_setup bs_s1_seed bs_s1_evict bs_s1_arm_refind bs_s2_bscan bs_s1_insert_low1 bs_s1_insert_low2 bs_s1_continue
+step bs_s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's1';
+
+step bs_s2_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET application_name = 's2';
+	SET enable_seqscan = off;
+
+step bs_s1_seed: 
+	INSERT INTO o_skipfb
+		(SELECT id || repeat('x', 2600)
+		 FROM generate_series(18, 21, 1) id);
+
+step bs_s1_evict: 
+	SELECT orioledb_evict_pages('o_skipfb'::regclass, 1);
+
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step bs_s1_arm_refind: 
+	SELECT pg_stopevent_set('load_page_refind',
+		'$.level == 0 && $applicationName == "s2"');
+
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step bs_s2_bscan: 
+	SELECT substr(id, 1, 2) FROM o_skipfb ORDER BY id DESC;
+ <waiting ...>
+step bs_s1_insert_low1: 
+	INSERT INTO o_skipfb
+		(SELECT id || repeat('x', 2600)
+		 FROM generate_series(10, 13, 1) id);
+
+step bs_s1_insert_low2: 
+	INSERT INTO o_skipfb
+		(SELECT id || repeat('x', 2600)
+		 FROM generate_series(14, 17, 1) id);
+
+step bs_s1_continue: 
+	SELECT pg_stopevent_reset('load_page_refind');
+
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step bs_s2_bscan: <... completed>
+substr
+------
+    21
+    20
+    19
+    18
+(4 rows)
+
+
+starting permutation: sr_s1_seed sr_s1_begin sr_s1_take_snap sr_s2_split_inserts sr_s2_deletes sr_s1_seqscan sr_s1_commit
+step sr_s1_seed: 
+	INSERT INTO o_skipss
+		(SELECT i, repeat('p', 1000)
+		 FROM generate_series(1, 200, 1) id(i));
+
+step sr_s1_begin: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step sr_s1_take_snap: 
+	SELECT count(*) FROM o_skipss WHERE id <= 0;
+
+count
+-----
+    0
+(1 row)
+
+step sr_s2_split_inserts: 
+	INSERT INTO o_skipss
+		(SELECT i, repeat('p', 1000)
+		 FROM generate_series(201, 400, 1) id(i));
+
+step sr_s2_deletes: 
+	DELETE FROM o_skipss WHERE id BETWEEN 50 AND 60;
+
+step sr_s1_seqscan: 
+	SET enable_indexscan = off;
+	SET enable_bitmapscan = off;
+	SELECT count(*), min(id), max(id), sum(id::bigint) FROM o_skipss;
+
+count|min|max|  sum
+-----+---+---+-----
+  200|  1|200|20100
+(1 row)
+
+step sr_s1_commit: COMMIT;

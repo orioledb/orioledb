@@ -182,8 +182,6 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 {
 	Page		p;
 	BTreePageHeader *header;
-	CommitSeqNo headerCsn;
-	UndoLocation headerUndoLocation;
 	bool		read_undo;
 
 	Assert(pageChangeCount != InvalidOPageChangeCount);
@@ -222,40 +220,35 @@ o_btree_read_page(BTreeDescr *desc, OInMemoryBlkno blkno,
 	 *    location.  Note, that there is at least one memory barrier between
 	 *    increasing page change count and reusing the page during page unlock.
 	 */
-	headerCsn = header->csn;
 
-	if (read_undo && COMMITSEQNO_IS_NORMAL(csn) && headerCsn >= csn)
-	{
-		UndoLocation pageUndoLoc;
-
-		pg_read_barrier();
-		headerUndoLocation = header->undoLocation;
-		pg_read_barrier();
-		if (header->o_header.pageChangeCount != pageChangeCount)
-			return false;
-
-		pageUndoLoc = read_page_from_undo(desc, img, headerUndoLocation, csn,
-										  key, keyType, lokey);
-		header = (BTreePageHeader *) img;
-		header->o_header.pageChangeCount = pageChangeCount;
-		if (partial)
-			partial->isPartial = false;
-		if (undoLocation)
-			*undoLocation = pageUndoLoc;
-		if (readCsn)
-			*readCsn = header->csn;
-		return true;
-	}
-
+	/*
+	 * Always copy the live page into img first, then -- if it is too new for
+	 * our snapshot -- walk the page-level undo chain transforming img in
+	 * place.  Differential undo images (UndoPageImage*Diff) do not store page
+	 * bytes; they reconstruct the historical page from the newer image
+	 * already sitting in img.  So img must hold the live page before the
+	 * chain walk, which is why the former "read undo without copying" fast
+	 * path is gone.
+	 */
 	if (!copy_page(blkno, pageChangeCount, img, partial,
 				   loadHikeysChunk, readCsn))
 		return false;
 	header = (BTreePageHeader *) img;
 
-	/* Re-try reading page-level undo item due to concurrent changes */
 	if (read_undo && COMMITSEQNO_IS_NORMAL(csn) && header->csn >= csn)
 	{
 		UndoLocation pageUndoLoc;
+
+		/*
+		 * Differential page-level undo images reconstruct the historical page
+		 * in place from the live page in img, so they need every chunk
+		 * present. Fully materialize a partially-loaded page before walking
+		 * the chain; if the source page changed mid-load, report failure so
+		 * the caller refetches the downlink.
+		 */
+		if (partial && partial->isPartial &&
+			!partial_load_full_page(partial, img))
+			return false;
 
 		pageUndoLoc = read_page_from_undo(desc, img, header->undoLocation, csn,
 										  key, keyType, lokey);
@@ -308,36 +301,25 @@ o_btree_try_read_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeC
 
 	EA_READ_INC(blkno);
 
-	/* Check pointer to page-level undo item */
-	if (read_undo && COMMITSEQNO_IS_NORMAL(csn) && header->csn >= csn)
-	{
-		UndoLocation undoLoc;
-
-		pg_read_barrier();
-		undoLoc = header->undoLocation;
-		pg_read_barrier();
-
-		if (header->o_header.pageChangeCount != pageChangeCount)
-			return ReadPageResultWrongPageChangeCount;
-
-		read_page_from_undo(desc, img, undoLoc, csn,
-							key, keyType, NULL);
-		header = (BTreePageHeader *) img;
-		header->o_header.pageChangeCount = pageChangeCount;
-		if (readCsn)
-			*readCsn = header->csn;
-		return ReadPageResultOK;
-	}
-
+	/*
+	 * Copy the live page into img first; differential page-level undo images
+	 * reconstruct the historical page from the newer page already in img, so
+	 * the page must be present before walking the undo chain (see
+	 * o_btree_read_page()).
+	 */
 	result = try_copy_page(blkno, pageChangeCount, img, partial,
 						   loadHikeysChunk, readCsn);
 	if (result != ReadPageResultOK)
 		return result;
 
-	/* Re-try reading page-level undo item due to concurrent changes */
 	header = (BTreePageHeader *) img;
 	if (read_undo && COMMITSEQNO_IS_NORMAL(csn) && header->csn >= csn)
 	{
+		/* See o_btree_read_page(): differential undo images need a full page. */
+		if (partial && partial->isPartial &&
+			!partial_load_full_page(partial, img))
+			return ReadPageResultFailed;
+
 		read_page_from_undo(desc, img, header->undoLocation, csn,
 							key, keyType, NULL);
 		header = (BTreePageHeader *) img;
