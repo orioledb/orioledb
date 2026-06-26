@@ -1818,4 +1818,122 @@ orioledb_test_endkey_returned_skip(PG_FUNCTION_ARGS)
 											 TYPALIGN_INT));
 }
 
+/*
+ * Whitebox test: prove that iterator_refind_partial_leaf()'s curKeySet
+ * branch bails out (iterator.c:911) without decrementing the locator when
+ * find_page() lands past-end on a backward scan.  The seed path and the
+ * !curKeySet path both decrement in this case; only this branch doesn't.
+ * If find_page legitimately lands on a leaf with no tuple >= curKey
+ * (e.g. curKey got deleted and the leaf's max < curKey), the backward
+ * scan silently drops the leaf's tail.
+ *
+ * 1. Open a backward iterator past the leaf's max.  The seed lands the
+ *    locator on the leaf's largest tuple and copies it into curKey.
+ * 2. Overwrite curKey with a forged tuple whose PK is fake_curkey (chosen
+ *    > all tuples in the table) so find_page() lands past-end on refind.
+ * 3. iterator_refind_partial_leaf() -- the partial-read-failure path.
+ *    With the bug, curKeySet branch returns early; the locator stays
+ *    invalid and the caller's next find_left_page from the leftmost leaf
+ *    ends the scan.  With the fix (mirror seed/!curKeySet behaviour) the
+ *    locator decrements to the leaf's tail and the drain reads it.
+ * 4. Drain backward and return the PKs as int4[].
+ *
+ * Expected (post-fix): every row in the table, descending.
+ * Bug (current code): empty array -- the leaf's tail is silently dropped.
+ *
+ * Assumes the relation's primary index has a single int4 key column.
+ */
+PG_FUNCTION_INFO_V1(orioledb_test_back_refind_skip_tail);
+Datum
+orioledb_test_back_refind_skip_tail(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	int32		fake_curkey = PG_GETARG_INT32(1);
+	Relation	rel;
+	OTableDescr *descr;
+	OIndexDescr *primary;
+	OBTreeKeyBound startBound;
+	BTreeIterator *it;
+	OTuple		result;
+	OTuple		fakeTup;
+	Datum		fakeValue;
+	bool		fakeNull = false;
+	bool		scanEnd = false;
+	bool		isnull;
+	Datum	   *elems;
+	int			nelems = 0;
+	int			alloc = 16;
+	int			dims[1],
+				lbs[1];
+
+	rel = relation_open(relid, AccessShareLock);
+	descr = relation_get_descr(rel);
+	if (!descr)
+		elog(ERROR, "relation is not an orioledb table");
+	primary = GET_PRIMARY(descr);
+	if (primary->nKeyFields < 1 || primary->fields[0].inputtype != INT4OID)
+		elog(ERROR, "test requires a single int4 primary key column");
+
+	startBound.nkeys = 1;
+	startBound.n_row_keys = 0;
+	startBound.row_keys = NULL;
+	startBound.keys[0].type = INT4OID;
+	startBound.keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
+	startBound.keys[0].comparator = primary->fields[0].comparator;
+	startBound.keys[0].exclusion_fn = NULL;
+	startBound.keys[0].value = Int32GetDatum(fake_curkey);
+
+	it = o_btree_iterator_create(&primary->desc, (Pointer) &startBound,
+								 BTreeKeyBound, &o_in_progress_snapshot,
+								 BackwardScanDirection);
+
+	/*
+	 * Forge curKey: a leaf-format tuple whose PK is fake_curkey.  Once
+	 * copied into it->curKey, find_page() on refind will land past-end.
+	 */
+	fakeValue = Int32GetDatum(fake_curkey);
+	fakeTup = o_form_tuple(primary->leafTupdesc, &primary->leafSpec, 0,
+						   &fakeValue, &fakeNull, NULL);
+	copy_fixed_key(&primary->desc, &it->curKey, fakeTup);
+	pfree(fakeTup.data);
+	it->curKeySet = true;
+	it->curKeyReturned = false;
+
+	/* Force the partial-read-failure refind path. */
+	iterator_refind_partial_leaf(it);
+
+	/* Drain backward; collect every PK the iterator now emits. */
+	elems = (Datum *) palloc(alloc * sizeof(Datum));
+	for (;;)
+	{
+		scanEnd = false;
+		result = btree_iterate_raw(it, NULL, BTreeKeyNone, false,
+								   &scanEnd, NULL);
+		if (O_TUPLE_IS_NULL(result))
+		{
+			if (!scanEnd)
+				elog(ERROR, "iterate_raw returned NULL without scanEnd");
+			break;
+		}
+		if (nelems == alloc)
+		{
+			alloc *= 2;
+			elems = (Datum *) repalloc(elems, alloc * sizeof(Datum));
+		}
+		elems[nelems++] = o_fastgetattr(result, 1, primary->leafTupdesc,
+										&primary->leafSpec, &isnull);
+		if (isnull)
+			elog(ERROR, "PK column unexpectedly NULL");
+	}
+
+	btree_iterator_free(it);
+	relation_close(rel, AccessShareLock);
+
+	dims[0] = nelems;
+	lbs[0] = 1;
+	PG_RETURN_ARRAYTYPE_P(construct_md_array(elems, NULL, 1, dims, lbs,
+											 INT4OID, sizeof(int32), true,
+											 TYPALIGN_INT));
+}
+
 #endif							/* IS_DEV */
