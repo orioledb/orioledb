@@ -130,6 +130,7 @@ extern void cleanup_btree(OIndexKey ix_key, bool files, bool fsync);
 extern bool o_drop_shared_root_info(Oid datoid, Oid relnode);
 extern void o_tableam_descr_init(void);
 extern void o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode);
+extern List *o_evict_db_relations(Oid datoid);
 extern bool o_start_saving_inval_messages(void);
 extern void o_stop_saving_inval_messages(bool was_saving);
 extern void o_replay_saved_inval_messages(void);

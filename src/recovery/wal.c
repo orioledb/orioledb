@@ -99,6 +99,8 @@ wal_record_type_to_string(int wal_record)
 			return "SWITCH_LOGICAL_XID";
 		 /* 18 */ case WAL_REC_RELREPLIDENT:
 			return "RELREPLIDENT";
+		 /* 19 */ case WAL_REC_DATABASE_COPY:
+			return "DATABASE_COPY";
 		default:
 			return "UNKNOWN";
 	}
@@ -614,6 +616,27 @@ add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode)
 	memcpy(rec->reloid, &oids.reloid, sizeof(Oid));
 	memcpy(rec->old_relnode, &oldRelnode, sizeof(Oid));
 	memcpy(rec->new_relnode, &oids.relnode, sizeof(Oid));
+
+	local_wal.buffer_offset += sizeof(*rec);
+}
+
+void
+add_database_copy_wal_record(Oid dboid, Oid src_tblspc, Oid dst_tblspc)
+{
+	WALRecDbCopy *rec;
+
+	Assert(!is_recovery_process());
+	flush_local_wal_if_needed(sizeof(*rec));
+	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+
+	add_xid_wal_record_if_needed();
+
+	rec = (WALRecDbCopy *) (&local_wal.buffer[local_wal.buffer_offset]);
+
+	rec->recType = WAL_REC_DATABASE_COPY;
+	memcpy(rec->datid, &dboid, sizeof(Oid));
+	memcpy(rec->src_tblspc, &src_tblspc, sizeof(Oid));
+	memcpy(rec->dst_tblspc, &dst_tblspc, sizeof(Oid));
 
 	local_wal.buffer_offset += sizeof(*rec);
 }

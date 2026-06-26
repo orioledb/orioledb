@@ -182,6 +182,9 @@ extern OTable *o_tables_drop_by_oids(ORelOids oids, OXid oxid, CommitSeqNo csn);
 /* Drops all tables from o_tables list */
 extern void o_tables_drop_all(OXid oxid, CommitSeqNo csn, Oid database_id);
 
+/* Move all tables from o_tables list */
+extern void o_tables_move_all(OXid oxid, CommitSeqNo csn, Oid database_id, Oid old_tspcoid, Oid new_tspcoid);
+
 /* Drops all columns of a specific type */
 extern void o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn, Oid type_oid);
 

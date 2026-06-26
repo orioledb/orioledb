@@ -90,6 +90,15 @@ typedef struct
 {
 	OXid		oxid;
 	CommitSeqNo csn;
+	Oid			datoid;
+	Oid			old_tablespace;
+	Oid			new_tablespace;
+} OTablesMoveAllArg;
+
+typedef struct
+{
+	OXid		oxid;
+	CommitSeqNo csn;
 	Oid			type_oid;
 	Form_pg_type type_data;
 } OTablesDropAllWithTypeArg;
@@ -1226,6 +1235,73 @@ o_tables_drop_all(OXid oxid, CommitSeqNo csn, Oid database_id)
 
 	o_tables_foreach_oids(o_tables_drop_all_callback,
 						  &o_non_deleted_snapshot, &arg);
+}
+
+static void
+o_tables_move_all_callback(OTable *o_table, void *arg)
+{
+	OTablesMoveAllArg *move_arg = (OTablesMoveAllArg *) arg;
+	int			ctid_idx_off = o_table->has_primary ? 0 : 1;
+	bool		table_moved = false;
+
+	Assert(o_table);
+
+	if (move_arg->datoid != o_table->oids.datoid)
+		return;
+
+	if (o_table->tablespace == move_arg->old_tablespace)
+	{
+		o_table->tablespace = move_arg->new_tablespace;
+		if (!o_table->has_primary)
+		{
+			o_indices_update(o_table, PrimaryIndexNumber, move_arg->oxid, move_arg->csn);
+			table_moved = true;
+		}
+		if (ORelOidsIsValid(o_table->toast_oids))
+		{
+			o_indices_update(o_table, TOASTIndexNumber, move_arg->oxid, move_arg->csn);
+			table_moved = true;
+		}
+		if (ORelOidsIsValid(o_table->bridge_oids))
+		{
+			o_indices_update(o_table, BridgeIndexNumber, move_arg->oxid, move_arg->csn);
+			table_moved = true;
+		}
+	}
+
+	for (int ixnum = 0; ixnum < o_table->nindices; ixnum++)
+	{
+		OTableIndex *ix_table;
+
+		ix_table = &o_table->indices[ixnum];
+		if (ix_table->tablespace != move_arg->old_tablespace)
+			continue;
+		ix_table->tablespace = move_arg->new_tablespace;
+		o_indices_update(o_table, ixnum + ctid_idx_off, move_arg->oxid, move_arg->csn);
+		o_invalidate_oids(ix_table->oids);
+		o_invalidate_descrs(ix_table->oids.datoid, ix_table->oids.reloid, ix_table->oids.relnode);
+	}
+	if (table_moved)
+	{
+		o_tables_update(o_table, move_arg->oxid, move_arg->csn);
+	}
+	o_tables_after_update(o_table, move_arg->oxid, move_arg->csn);
+}
+
+void
+o_tables_move_all(OXid oxid, CommitSeqNo csn, Oid database_id, Oid old_tspcoid, Oid new_tspcoid)
+{
+	OTablesMoveAllArg arg;
+
+	arg.oxid = oxid;
+	arg.csn = csn;
+	arg.datoid = database_id;
+	arg.old_tablespace = old_tspcoid;
+	arg.new_tablespace = new_tspcoid;
+
+	add_database_copy_wal_record(database_id, old_tspcoid, new_tspcoid);
+	o_tables_foreach(o_tables_move_all_callback,
+					 &o_non_deleted_snapshot, &arg);
 }
 
 void

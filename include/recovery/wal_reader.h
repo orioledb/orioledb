@@ -99,6 +99,14 @@ typedef struct WalRecord
 
 			bool		read_two_tuples;
 		}			modify;
+
+		struct
+		{
+			Oid			datOid;
+			Oid			src_tblspc;
+			Oid			dst_tblspc;
+		}			dbcopy;
+
 	}			u;
 
 } WalRecord;

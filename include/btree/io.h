@@ -32,6 +32,7 @@ extern void btree_io_error_cleanup(void);
 extern void request_btree_io_lwlocks(void);
 extern int	assign_io_num(OInMemoryBlkno blkno, OffsetNumber offnum);
 extern OWalkPageResult walk_page(OInMemoryBlkno blkno, bool evict);
+extern void write_tree_pages(BTreeDescr *desc, int maxLevel, bool evict);
 extern void unlock_io(int ionum);
 extern void wait_for_io_completion(int ionum);
 extern bool cleanup_btree_files(OIndexKey key, bool fsync);
