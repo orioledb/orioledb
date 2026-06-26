@@ -771,11 +771,11 @@ static void workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 static void workers_synchronize(XLogRecPtr ptr, bool send_synchronize);
 static void recovery_check_worker_detach(void);
 static void recovery_abort_if_worker_detached(XLogRecPtr target_ptr,
-											 XLogRecPtr recovery_ptr,
-											 XLogRecPtr main_retain_ptr,
-											 XLogRecPtr current_ptr,
-											 XLogRecPtr retain_ptr,
-											 XLogRecPtr finished_ptr);
+											  XLogRecPtr recovery_ptr,
+											  XLogRecPtr main_retain_ptr,
+											  XLogRecPtr current_ptr,
+											  XLogRecPtr retain_ptr,
+											  XLogRecPtr finished_ptr);
 static void workers_notify_toast_consistent(void);
 static void worker_wait_shutdown(RecoveryWorkerState *worker);
 
@@ -1802,11 +1802,11 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 
 			recovery_check_worker_detach();
 			recovery_abort_if_worker_detached(target_ptr,
-											 recovery_ptr_snapshot,
-											 main_retain_ptr,
-											 current_ptr,
-											 retain_ptr,
-											 finished_ptr);
+											  recovery_ptr_snapshot,
+											  main_retain_ptr,
+											  current_ptr,
+											  retain_ptr,
+											  finished_ptr);
 
 			if (XLogRecPtrIsInvalid(finished_ptr))
 			{
@@ -2007,11 +2007,11 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 
 			recovery_check_worker_detach();
 			recovery_abort_if_worker_detached(target_ptr,
-											 recovery_ptr_snapshot,
-											 main_retain_ptr,
-											 current_ptr,
-											 retain_ptr,
-											 finished_ptr);
+											  recovery_ptr_snapshot,
+											  main_retain_ptr,
+											  current_ptr,
+											  retain_ptr,
+											  finished_ptr);
 
 			if (XLogRecPtrIsInvalid(stop_after_visible_ptr))
 			{

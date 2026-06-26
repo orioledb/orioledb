@@ -3694,7 +3694,8 @@ recovery_target_action = 'pause'
 		""")
 
 		with self.getReplica(has_restoring=True) as replica:
-			target_xid = int(node.execute("SELECT pg_current_xact_id()")[0][0]) + 1
+			target_xid = int(
+			    node.execute("SELECT pg_current_xact_id()")[0][0]) + 1
 
 			replica.append_conf(f"""
 log_min_messages = DEBUG4
@@ -3704,10 +3705,9 @@ recovery_target_xid = '{target_xid}'
 recovery_target_action = 'pause'
 """)
 			replica.start()
-			replica.safe_psql(
-			    "SELECT pg_stopevent_set('sk_modify_pending', "
-			    "'$backendType == \"orioledb recovery worker\" "
-			    "&& $.treeName == \"tab_detach_pkey\"');")
+			replica.safe_psql("SELECT pg_stopevent_set('sk_modify_pending', "
+			                  "'$backendType == \"orioledb recovery worker\" "
+			                  "&& $.treeName == \"tab_detach_pkey\"');")
 
 			ret = node.safe_psql("""
 			    BEGIN;
@@ -3736,7 +3736,7 @@ recovery_target_action = 'pause'
 			    "Recovery target synchronization barrier could not complete",
 			    "orioledb recovery worker detached unexpectedly"
 			],
-			                                                   timeout_s=30)
+			                                                    timeout_s=30)
 			self._assert_log_contains(replica_log, [
 			    "Recovery target synchronization barrier could not complete",
 			    "orioledb recovery worker detached unexpectedly"
