@@ -57,7 +57,8 @@
 	X(WAL_REC_REINSERT,             15, "REINSERT",           wal_parse_rec_modify) \
 	X(WAL_REC_REPLAY_FEEDBACK,      16, "REPLAY_FEEDBACK",    wal_parse_empty) \
 	X(WAL_REC_SWITCH_LOGICAL_XID,   17, "SWITCH_LOGICAL_XID", wal_parse_rec_switch_logical_xid) \
-	X(WAL_REC_RELREPLIDENT,         18, "RELREPLIDENT",       wal_parse_rec_relreplident)
+	X(WAL_REC_RELREPLIDENT,         18, "RELREPLIDENT",       wal_parse_rec_relreplident) \
+	X(WAL_REC_DATABASE_COPY,        19, "DATABASE_COPY",      wal_parse_rec_dbcopy)
 
 typedef enum
 {

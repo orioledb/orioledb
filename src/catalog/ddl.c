@@ -23,6 +23,7 @@
 #include "catalog/o_sys_cache.h"
 #include "storage/lockdefs.h"
 #include "tableam/descr.h"
+#include "storage/copydir.h"
 #include "tableam/operations.h"
 #include "catalog/pg_am.h"
 #include "tableam/toast.h"
@@ -110,6 +111,13 @@
 static IndexBuildResult o_pkey_result;
 static void o_drop_table(ORelOids oids);
 
+typedef struct
+{
+	Oid			dest_dboid;		/* DB we are trying to move */
+	Oid			src_tsoid;		/* tablespace we are trying to move from */
+	Oid			dest_tsoid;		/* tablespace we are trying to move to */
+} movedb_params;
+
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
 
@@ -130,6 +138,7 @@ static IndexBuildResult o_pkey_result = {0};
 bool		o_in_add_column = false;
 static CreateStmt *create_stmt = NULL;
 static List *o_added_columns = NIL;
+static movedb_params o_movedb_data = {InvalidOid, InvalidOid, InvalidOid};
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -156,6 +165,8 @@ static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
 static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
 static void o_validate_replica_identity(Relation rel, ReplicaIdentityStmt *stmt);
 static void o_process_added_column(AlterTableCmd *cmd);
+static void o_check_movedb(const AlterDatabaseStmt *stmt, movedb_params *movedb);
+static void o_movedb_failure_callback(int code, Datum arg);
 
 void
 orioledb_setup_ddl_hooks(void)
@@ -1441,6 +1452,11 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	{
 		create_stmt = (CreateStmt *) pstmt->utilityStmt;
 	}
+	else if (IsA(pstmt->utilityStmt, AlterDatabaseStmt))
+	{
+		memset(&o_movedb_data, 0, sizeof(o_movedb_data));
+		o_check_movedb(castNode(AlterDatabaseStmt, pstmt->utilityStmt), &o_movedb_data);
+	}
 #if PG_VERSION_NUM >= 170000
 	else if (IsA(pstmt->utilityStmt, CreateTableAsStmt))
 	{
@@ -1664,6 +1680,10 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			/* cppcheck-suppress unknownEvaluationOrder */
 									  list_make2(expression_planner((Expr *) nve), makeString(colname)));
 		}
+	}
+	else if (IsA(pstmt->utilityStmt, AlterDatabaseStmt))
+	{
+		memset(&o_movedb_data, 0, sizeof(o_movedb_data));
 	}
 
 	free_parsestate(pstate);
@@ -4381,6 +4401,107 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 							  "It is easier to use single one during checkpoint."));
 		ReleaseSysCache(dbTuple);
 	}
+	else if (access == OAT_POST_ALTER && classId == DatabaseRelationId)
+	{
+		/*
+		 * Move all the orioledb objects from the source tablespace to the
+		 * destination tablespace. At this point CHECKPOINT was done and there
+		 * is no new connection to the moved database because
+		 * LockSharedObjectForSession on database was done as well.
+		 */
+		if (OidIsValid(o_movedb_data.dest_dboid) &&
+			OidIsValid(o_movedb_data.src_tsoid) &&
+			OidIsValid(o_movedb_data.dest_tsoid) &&
+			o_tables_num(o_movedb_data.dest_dboid))
+		{
+			char	   *src_dbpath = NULL;
+			char	   *dst_dbpath = NULL;
+			char	   *dst_prefix = NULL;
+			DIR		   *dir;
+			struct dirent *xlde;
+			bool		skipMoving = true;
+
+			o_get_prefixes_for_tablespace(o_movedb_data.dest_dboid, o_movedb_data.src_tsoid, NULL, &src_dbpath);
+			o_get_prefixes_for_tablespace(o_movedb_data.dest_dboid, o_movedb_data.dest_tsoid, &dst_prefix, &dst_dbpath);
+
+			/*
+			 * Fast exit if there are no relations in the source tablespace.
+			 */
+			dir = AllocateDir(src_dbpath);
+			if (dir != NULL)
+			{
+				bool		hasFiles = false;
+
+				while ((xlde = ReadDir(dir, src_dbpath)) != NULL)
+				{
+					if (strcmp(xlde->d_name, ".") == 0 ||
+						strcmp(xlde->d_name, "..") == 0)
+						continue;
+					hasFiles = true;
+					break;
+				}
+
+				FreeDir(dir);
+				skipMoving = !hasFiles;
+			}
+
+			if (!skipMoving)
+			{
+				dir = AllocateDir(dst_dbpath);
+				if (dir != NULL)
+				{
+					while ((xlde = ReadDir(dir, dst_dbpath)) != NULL)
+					{
+						if (strcmp(xlde->d_name, ".") == 0 ||
+							strcmp(xlde->d_name, "..") == 0)
+							continue;
+
+						ereport(ERROR,
+								(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+								 errmsg("some relations of database \"%d\" are already in tablespace \"%d\"",
+										o_movedb_data.dest_dboid, o_movedb_data.dest_tsoid),
+								 errhint("You must move them back to the database's default tablespace before using this command.")));
+					}
+
+					FreeDir(dir);
+
+					/*
+					 * The directory exists but is empty. We must remove it
+					 * before using the copydir function.
+					 */
+					if (rmdir(dst_dbpath) != 0)
+						elog(ERROR, "could not remove directory \"%s\": %m",
+							 dst_dbpath);
+				}
+
+				PG_ENSURE_ERROR_CLEANUP(o_movedb_failure_callback,
+										PointerGetDatum(&o_movedb_data));
+				{
+					OSnapshot	oSnapshot;
+					OXid		oxid;
+
+					fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+
+					o_verify_dir_exists_or_create(dst_prefix, NULL, NULL);
+					copydir(src_dbpath, dst_dbpath, false);
+
+					o_tables_table_meta_lock(NULL);
+					o_tables_move_all(oxid, oSnapshot.csn, o_movedb_data.dest_dboid, o_movedb_data.src_tsoid, o_movedb_data.dest_tsoid);
+					o_tables_table_meta_unlock(NULL, InvalidOid);
+
+					if (!rmtree(src_dbpath, true))
+						ereport(WARNING,
+								(errmsg("some useless files may be left behind in old database directory \"%s\"",
+										src_dbpath)));
+				}
+				PG_END_ENSURE_ERROR_CLEANUP(o_movedb_failure_callback,
+											PointerGetDatum(&o_movedb_data));
+			}
+
+			pfree(src_dbpath);
+			pfree(dst_dbpath);
+		}
+	}
 	else if (access == OAT_POST_ALTER && classId == IndexRelationId)
 	{
 		bool		old_indisprimary;
@@ -4799,6 +4920,70 @@ o_createdb(ParseState *pstate, const CreatedbStmt *stmt)
 	return result;
 }
 
+static void
+o_check_movedb(const AlterDatabaseStmt *stmt, movedb_params *movedb)
+{
+	Oid			src_tblspcoid = InvalidOid;
+	Oid			db_id = InvalidOid;
+	ListCell   *option;
+	DefElem    *dtablespace = NULL;
+	HeapTuple	tuple = NULL;
+
+	if (!get_db_info(stmt->dbname, NoLock, &db_id))
+
+		/*
+		 * Lets standard processing of moving datatabase generates an error.
+		 */
+		return;
+
+
+	foreach(option, stmt->options)
+	{
+		DefElem    *defel = (DefElem *) lfirst(option);
+
+		if (strcmp(defel->defname, "tablespace") == 0)
+		{
+			/*
+			 * skip check options because it will done in core statement
+			 * handling before this hook was called.
+			 */
+			dtablespace = defel;
+		}
+	}
+
+	if (dtablespace == NULL)
+		return;
+
+	tuple = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(db_id));
+	if (HeapTupleIsValid(tuple))
+	{
+		Form_pg_database dbform = (Form_pg_database) GETSTRUCT(tuple);
+
+		src_tblspcoid = dbform->dattablespace;
+		ReleaseSysCache(tuple);
+	}
+
+	movedb->dest_dboid = db_id;
+	movedb->src_tsoid = src_tblspcoid;
+	movedb->dest_tsoid = get_tablespace_oid(defGetString(dtablespace), false);
+}
+
+static void
+o_movedb_failure_callback(int code, Datum arg)
+{
+	movedb_params *fparms = (movedb_params *) DatumGetPointer(arg);
+	char	   *dstpath = NULL;
+
+	/* Get rid of anything we managed to copy to the target directory */
+	o_get_prefixes_for_tablespace(fparms->dest_dboid, fparms->dest_tsoid, NULL, &dstpath);
+
+	if (dstpath)
+	{
+		(void) rmtree(dstpath, true);
+		pfree(dstpath);
+	}
+}
+
 int16
 o_parse_compress(const char *value)
 {
@@ -4929,6 +5114,7 @@ o_ddl_cleanup(void)
 	o_added_columns = NIL;
 	o_in_add_column = false;
 	create_stmt = NULL;
+	memset(&o_movedb_data, 0, sizeof(o_movedb_data));
 }
 
 static Node *
