@@ -3156,7 +3156,7 @@ write_tree_pages_recursive(UndoLogType undoType,
 										  maxLevel,
 										  evict);
 
-	if (level <= maxLevel)
+	if (level <= maxLevel || maxLevel == -1)
 	{
 		while (true)
 		{
@@ -3171,7 +3171,7 @@ write_tree_pages_recursive(UndoLogType undoType,
 	return true;
 }
 
-static void
+void
 write_tree_pages(BTreeDescr *desc, int maxLevel, bool evict)
 {
 	o_btree_load_shmem(desc);
@@ -3403,6 +3403,8 @@ perform_writeback(IOWriteBack *writeback)
 				char	   *filename;
 
 				filename = btree_filename(cur.key, segno, chkpNum);
+				if (cur.key.oids.datoid > 1000)
+					ereport(LOG, (errmsg("2: Open file with create %s", filename)));
 				file = PathNameOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
 				pfree(filename);
 				offset = cur.fileExtent.off;
