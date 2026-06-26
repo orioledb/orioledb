@@ -86,10 +86,11 @@ struct BTreeIterator
 	bool		curKeyReturned;
 
 	/*
-	 * The scan's original start key/kind, used to re-find from the beginning
-	 * when a partial read fails before any tuple has been read (curKeySet is
-	 * still false).  The caller keeps the key alive for the iterator's
-	 * lifetime, so storing the pointer is enough.
+	 * The scan's original start key/kind.  Contract: the caller must keep
+	 * the key alive and unmodified for the iterator's lifetime; the
+	 * !curKeySet branch of iterator_refind_partial_leaf() reads it to re-find
+	 * the scan start when a partial read fails before any tuple has been
+	 * returned.
 	 */
 	void	   *startKey;
 	BTreeKeyType startKind;

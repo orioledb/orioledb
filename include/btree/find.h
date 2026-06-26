@@ -117,9 +117,10 @@ typedef struct
 #define BTREE_PAGE_FIND_READ_CSN		(0x0800)
 /*
  * The caller navigates to sibling pages with find_left_page()/find_right_page()
- * and therefore needs the parent materialized in context->parentImg.  This is
- * incompatible with the fastpath downlink search, which reads the downlink
- * straight from the shared page, so it disables that optimization.
+ * and therefore needs the parent materialized in context->parentImg.  Forward
+ * descents still take the fastpath downlink search; the parent's materialized
+ * image is then deferred until a sibling step actually needs it
+ * (convert_fastpath_parent_to_img() in find_right_page() / find_left_page()).
  */
 #define BTREE_PAGE_FIND_KEEP_PARENT		(0x1000)
 
