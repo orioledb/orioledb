@@ -3104,6 +3104,10 @@ retry:
 	return evict ? OWalkPageEvicted : OWalkPageWritten;
 }
 
+/*
+ * Recursively write pages in the tree. Stop reqursion if we reach maxLevel,
+ * when it has non-negtive value. To write all pages, set maxLevel to -1.
+ */
 static bool
 write_tree_pages_recursive(UndoLogType undoType,
 						   OInMemoryBlkno blkno, uint32 loadId,
@@ -3164,7 +3168,7 @@ write_tree_pages_recursive(UndoLogType undoType,
 										  maxLevel,
 										  evict);
 
-	if (level <= maxLevel)
+	if (level <= maxLevel || maxLevel == -1)
 	{
 		while (true)
 		{
@@ -3179,7 +3183,7 @@ write_tree_pages_recursive(UndoLogType undoType,
 	return true;
 }
 
-static void
+void
 write_tree_pages(BTreeDescr *desc, int maxLevel, bool evict)
 {
 	o_btree_load_shmem(desc);

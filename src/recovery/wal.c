@@ -561,6 +561,27 @@ add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode)
 }
 
 void
+add_database_copy_wal_record(Oid dboid, Oid src_tblspc, Oid dst_tblspc)
+{
+	WALRecDbCopy *rec;
+
+	Assert(!is_recovery_process());
+	flush_local_wal_if_needed(sizeof(*rec));
+	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+
+	add_xid_wal_record_if_needed();
+
+	rec = (WALRecDbCopy *) (&local_wal.buffer[local_wal.buffer_offset]);
+
+	rec->recType = WAL_REC_DATABASE_COPY;
+	memcpy(rec->datid, &dboid, sizeof(Oid));
+	memcpy(rec->src_tblspc, &src_tblspc, sizeof(Oid));
+	memcpy(rec->dst_tblspc, &dst_tblspc, sizeof(Oid));
+
+	local_wal.buffer_offset += sizeof(*rec);
+}
+
+void
 add_switch_logical_xid_wal_record(TransactionId logicalXid_top, TransactionId logicalXid_sub)
 {
 	WALRecSwitchLogicalXid *rec;
