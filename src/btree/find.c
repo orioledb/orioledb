@@ -1453,6 +1453,7 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 			   *item;
 	int			level;
 	Jsonb	   *params;
+	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	/* Nothing to do with rightmost page */
 	if (O_PAGE_IS(context->img, RIGHTMOST))
@@ -1491,7 +1492,8 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 	{
 		if (!convert_fastpath_parent_to_img(context, &parentItem->locator))
 		{
-			(void) find_page(context, hikey, BTreeKeyNonLeafKey, level);
+			findResult = find_page(context, hikey, BTreeKeyNonLeafKey, level);
+			Assert(findResult == OFindPageResultSuccess);
 			return true;
 		}
 		context->parentImgDeferred = false;
@@ -1554,7 +1556,8 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 	 * Give up with parent downlink.  Find the page from the root in a usual
 	 * way.  Should happen rarely.
 	 */
-	(void) find_page(context, hikey, BTreeKeyNonLeafKey, level);
+	findResult = find_page(context, hikey, BTreeKeyNonLeafKey, level);
+	Assert(findResult == OFindPageResultSuccess);
 	return true;
 }
 
@@ -1596,6 +1599,7 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 	UndoLocation prevLoc;
 	Jsonb	   *params;
 	OTuple		imgHikey;
+	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	Assert(BTREE_PAGE_FIND_IS(context, KEEP_LOKEY));
 
@@ -1708,7 +1712,8 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 			}
 		}
 
-		(void) find_page(context, &hikey->tuple, BTreeKeyPageHiKey, level);
+		findResult = find_page(context, &hikey->tuple, BTreeKeyPageHiKey, level);
+		Assert(findResult == OFindPageResultSuccess);
 
 		/* context levels may be changed */
 		parentItem = &context->items[context->index - 1];

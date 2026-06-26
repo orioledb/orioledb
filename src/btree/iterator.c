@@ -615,7 +615,8 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 		{
 			BTREE_PAGE_FIND_UNSET(&it->context, FETCH);
 			BTREE_PAGE_FIND_SET(&it->context, IMAGE);
-			(void) find_page(&it->context, key, kind, 0);
+			findResult = find_page(&it->context, key, kind, 0);
+			Assert(findResult == OFindPageResultSuccess);
 			loc = &it->context.items[it->context.index].locator;
 		}
 
@@ -864,6 +865,7 @@ iterator_refind_partial_leaf(BTreeIterator *it)
 	BTreePageItemLocator *loc;
 	OTuple		tup;
 	bool		match;
+	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
 
 	Assert(!it->combinedResult);
 
@@ -890,7 +892,8 @@ iterator_refind_partial_leaf(BTreeIterator *it)
 	 */
 	if (!it->curKeySet)
 	{
-		(void) find_page(context, it->startKey, it->startKind, 0);
+		findResult = find_page(context, it->startKey, it->startKind, 0);
+		Assert(findResult == OFindPageResultSuccess);
 
 		loc = &context->items[context->index].locator;
 		if (it->startKey != NULL && IT_IS_BACKWARD(it) &&
@@ -920,7 +923,8 @@ iterator_refind_partial_leaf(BTreeIterator *it)
 	 * own partial-read failures), so the located tuple is always safe to
 	 * read.
 	 */
-	(void) find_page(context, &it->curKey.tuple, BTreeKeyNonLeafKey, 0);
+	findResult = find_page(context, &it->curKey.tuple, BTreeKeyNonLeafKey, 0);
+	Assert(findResult == OFindPageResultSuccess);
 
 	loc = &context->items[context->index].locator;
 
