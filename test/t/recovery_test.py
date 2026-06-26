@@ -4,6 +4,7 @@
 import os
 import random
 import re
+import signal
 import time
 
 from .base_test import BaseTest
@@ -2987,6 +2988,20 @@ class RecoveryWithArchivingTest(BaseTest):
 		    "postmaster.pid exists=%s" %
 		    (timeout_s, started, node.status(), os.path.exists(pidfile_path)))
 
+	def _wait_stopevent_waiter_pid(self, node, stopevent, timeout_s=30):
+		deadline = time.time() + timeout_s
+		while time.time() < deadline:
+			rows = node.execute("""
+				SELECT waiter_pids[1]
+				FROM pg_stopevents()
+				WHERE stopevent = %s
+				  AND coalesce(array_length(waiter_pids, 1), 0) > 0
+			""" % ("'" + stopevent + "'", ))
+			if rows:
+				return rows[0][0]
+			time.sleep(0.1)
+		self.fail("no waiter pid observed for stopevent %s" % stopevent)
+
 	def _replace_recovery_target_action(self,
 	                                    node,
 	                                    old_action='shutdown',
@@ -3662,6 +3677,75 @@ recovery_target_action = 'pause'
 			    "barrier completed"
 			])
 
+	def test_recovery_target_xid_barrier_worker_detach_errors(self):
+		node = self.node
+		node.append_conf("orioledb.recovery_pool_size = 1")
+		node.start()
+
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE tab_detach (
+				id int NOT NULL,
+				token int NOT NULL,
+				PRIMARY KEY (id)
+			) USING orioledb;
+			CREATE UNIQUE INDEX tab_detach_token_idx ON tab_detach (token);
+			INSERT INTO tab_detach VALUES (1, 1);
+		""")
+
+		with self.getReplica(has_restoring=True) as replica:
+			target_xid = int(node.execute("SELECT pg_current_xact_id()")[0][0]) + 1
+
+			replica.append_conf(f"""
+log_min_messages = DEBUG4
+orioledb.enable_stopevents = true
+orioledb.recovery_pool_size = 1
+recovery_target_xid = '{target_xid}'
+recovery_target_action = 'pause'
+""")
+			replica.start()
+			replica.safe_psql(
+			    "SELECT pg_stopevent_set('sk_modify_pending', "
+			    "'$backendType == \"orioledb recovery worker\" "
+			    "&& $.treeName == \"tab_detach_pkey\"');")
+
+			ret = node.safe_psql("""
+			    BEGIN;
+			    INSERT INTO tab_detach VALUES (2, 2);
+			    SELECT pg_current_xact_id();
+			    COMMIT;
+			    """)
+			actual_xid = int(ret.decode().strip().splitlines()[-1])
+			self.assertEqual(actual_xid, target_xid)
+
+			worker_pid = self._wait_stopevent_waiter_pid(
+			    replica, 'sk_modify_pending')
+			replica_log = self._read_replica_log_until_contains(
+			    replica,
+			    ["Recovery target reached: start synchronization barrier"],
+			    timeout_s=30)
+			self.assertIn(
+			    "Recovery target reached: start synchronization barrier",
+			    replica_log)
+
+			os.kill(worker_pid, signal.SIGTERM)
+			replica.safe_psql(
+			    "SELECT pg_stopevent_reset('sk_modify_pending');")
+
+			replica_log = self._read_replica_log_until_contains(replica, [
+			    "Recovery target synchronization barrier could not complete",
+			    "orioledb recovery worker detached unexpectedly"
+			],
+			                                                   timeout_s=30)
+			self._assert_log_contains(replica_log, [
+			    "Recovery target synchronization barrier could not complete",
+			    "orioledb recovery worker detached unexpectedly"
+			])
+			self._assert_log_not_contains(replica_log, [
+			    "Recovery target reached: stop-after synchronization "
+			    "barrier completed"
+			])
+
 	def test_recovery_target_xid_barrier_stop_after_first_post_backup(self):
 		node = self.node
 		node.start()
@@ -4026,16 +4110,15 @@ recovery_target_action = 'pause'
 
 			# Keep the failure bounded: without publishing the synchronous
 			# boundary, the target hook cannot complete and would otherwise
-			# wait indefinitely.
+			# wait indefinitely.  Valgrind runners can spend noticeably longer
+			# in replay before the barrier reaches its terminal log line.
 			replica_log = self._read_replica_log_until_barrier_completed(
-			    replica, stop_after=False, timeout_s=10)
+			    replica, stop_after=False, timeout_s=60)
 			if ("Recovery target reached: stop-before synchronization "
 			    "barrier completed" not in replica_log):
-				self.assertIn(
-				    "Recovery target reached: waiting for a published "
-				    "visible boundary before stop", replica_log)
 				self.fail("synchronously finalized recovery boundary was not "
-				          "published before the recovery target")
+				          "published before the recovery target. Last replica "
+				          "log tail:\n%s" % replica_log[-4000:])
 			self._assert_stop_before_barrier_logs(replica_log)
 
 			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",

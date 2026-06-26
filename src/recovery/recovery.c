@@ -769,6 +769,13 @@ static void workers_send_savepoint(SubTransactionId parentSubId);
 static void workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 											   SubTransactionId parentSubId);
 static void workers_synchronize(XLogRecPtr ptr, bool send_synchronize);
+static void recovery_check_worker_detach(void);
+static void recovery_abort_if_worker_detached(XLogRecPtr target_ptr,
+											 XLogRecPtr recovery_ptr,
+											 XLogRecPtr main_retain_ptr,
+											 XLogRecPtr current_ptr,
+											 XLogRecPtr retain_ptr,
+											 XLogRecPtr finished_ptr);
 static void workers_notify_toast_consistent(void);
 static void worker_wait_shutdown(RecoveryWorkerState *worker);
 
@@ -1793,6 +1800,14 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 				 pg_atomic_read_u64(&xid_meta->globalXmin),
 				 recovery_xmin);
 
+			recovery_check_worker_detach();
+			recovery_abort_if_worker_detached(target_ptr,
+											 recovery_ptr_snapshot,
+											 main_retain_ptr,
+											 current_ptr,
+											 retain_ptr,
+											 finished_ptr);
+
 			if (XLogRecPtrIsInvalid(finished_ptr))
 			{
 				/*
@@ -1990,6 +2005,14 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 				 LSN_FORMAT_ARGS(retain_ptr),
 				 LSN_FORMAT_ARGS(finished_ptr));
 
+			recovery_check_worker_detach();
+			recovery_abort_if_worker_detached(target_ptr,
+											 recovery_ptr_snapshot,
+											 main_retain_ptr,
+											 current_ptr,
+											 retain_ptr,
+											 finished_ptr);
+
 			if (XLogRecPtrIsInvalid(stop_after_visible_ptr))
 			{
 				/*
@@ -2121,43 +2144,6 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 
 				break;
 			}
-		}
-
-		if (unexpected_worker_detach)
-		{
-			if (!info->recoveryStopAfter)
-				elog(DEBUG4,
-					 "Recovery target reached: stop-before wait aborted due to "
-					 "unexpected_worker_detach "
-					 "(target_ptr=%X/%X recovery_ptr=%X/%X "
-					 "main_retain_ptr=%X/%X current_ptr=%X/%X "
-					 "retain_ptr=%X/%X finished_ptr=%X/%X)",
-					 LSN_FORMAT_ARGS(target_ptr),
-					 LSN_FORMAT_ARGS(recovery_ptr_snapshot),
-					 LSN_FORMAT_ARGS(main_retain_ptr),
-					 LSN_FORMAT_ARGS(current_ptr),
-					 LSN_FORMAT_ARGS(retain_ptr),
-					 LSN_FORMAT_ARGS(finished_ptr));
-			else
-				elog(DEBUG4,
-					 "Recovery target reached: stop-after wait aborted due to "
-					 "unexpected_worker_detach "
-					 "(target_ptr=%X/%X recovery_ptr=%X/%X "
-					 "stop_after_replay_ptr=%X/%X last_replay_ptr=%X/%X "
-					 "last_visible_ptr=%X/%X stop_after_visible_ptr=%X/%X "
-					 "main_retain_ptr=%X/%X current_ptr=%X/%X "
-					 "retain_ptr=%X/%X finished_ptr=%X/%X)",
-					 LSN_FORMAT_ARGS(target_ptr),
-					 LSN_FORMAT_ARGS(recovery_ptr_snapshot),
-					 LSN_FORMAT_ARGS(stop_after_replay_ptr),
-					 LSN_FORMAT_ARGS(last_replay_ptr_snapshot),
-					 LSN_FORMAT_ARGS(last_visible_ptr_snapshot),
-					 LSN_FORMAT_ARGS(stop_after_visible_ptr),
-					 LSN_FORMAT_ARGS(main_retain_ptr),
-					 LSN_FORMAT_ARGS(current_ptr),
-					 LSN_FORMAT_ARGS(retain_ptr),
-					 LSN_FORMAT_ARGS(finished_ptr));
-			break;
 		}
 
 		pg_usleep(1000L);
@@ -5929,6 +5915,62 @@ workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback, bool commit)
 		}
 	}
 	pg_atomic_write_u64(recovery_ptr, ptr);
+}
+
+/*
+ * Check whether regular recovery workers are still alive while the startup
+ * process waits inside the recovery-target synchronization barrier.
+ */
+static void
+recovery_check_worker_detach(void)
+{
+	int			i;
+
+	if (*recovery_single_process || unexpected_worker_detach)
+		return;
+
+	for (i = 0; i < recovery_pool_size_guc; i++)
+	{
+		BgwHandleStatus status;
+		pid_t		pid;
+
+		if (workers_pool[i].queue == NULL || workers_pool[i].handle == NULL)
+			continue;
+
+		status = GetBackgroundWorkerPid(workers_pool[i].handle, &pid);
+		if (status != BGWH_STARTED && status != BGWH_NOT_YET_STARTED)
+		{
+			unexpected_worker_detach = true;
+			break;
+		}
+	}
+}
+
+static void
+recovery_abort_if_worker_detached(XLogRecPtr target_ptr,
+								  XLogRecPtr recovery_ptr,
+								  XLogRecPtr main_retain_ptr,
+								  XLogRecPtr current_ptr,
+								  XLogRecPtr retain_ptr,
+								  XLogRecPtr finished_ptr)
+{
+	if (!unexpected_worker_detach)
+		return;
+
+	abort_recovery(workers_pool, false);
+	ereport(ERROR,
+			(errmsg("orioledb recovery worker detached unexpectedly"),
+			 errdetail("Recovery target synchronization barrier could "
+					   "not complete. target_ptr=%X/%X "
+					   "recovery_ptr=%X/%X main_retain_ptr=%X/%X "
+					   "current_ptr=%X/%X retain_ptr=%X/%X "
+					   "finished_ptr=%X/%X",
+					   LSN_FORMAT_ARGS(target_ptr),
+					   LSN_FORMAT_ARGS(recovery_ptr),
+					   LSN_FORMAT_ARGS(main_retain_ptr),
+					   LSN_FORMAT_ARGS(current_ptr),
+					   LSN_FORMAT_ARGS(retain_ptr),
+					   LSN_FORMAT_ARGS(finished_ptr))));
 }
 
 /*
