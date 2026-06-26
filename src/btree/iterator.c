@@ -1335,20 +1335,12 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 			BTREE_PAGE_READ_LEAF_ITEM(*tupHdr, result, context->img, loc);
 
 			/*
-			 * Remember this position in case the page changes later.  This
-			 * tuple is being consumed, so mark it returned: a later re-find
-			 * resumes after it.
+			 * Apply the end-key bound before mutating any iterator state.
+			 * A rejected tuple must leave curKey/curKeyReturned and the
+			 * locator untouched: a later partial-read refind would
+			 * otherwise treat it as already handed out and step past it,
+			 * silently dropping the row on a resumed scan.
 			 */
-			copy_fixed_key(context->desc, &it->curKey, result);
-			it->curKeySet = true;
-			it->curKeyReturned = true;
-
-			if (!iterator_advance_leaf(it, loc))
-			{
-				iterator_refind_partial_leaf(it);
-				loc = &context->items[context->index].locator;
-			}
-
 			if (end != NULL && endKind != BTreeKeyNone)
 			{
 				BTreeDescr *desc = it->context.desc;
@@ -1361,6 +1353,21 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 					O_TUPLE_SET_NULL(result);
 					return result;
 				}
+			}
+
+			/*
+			 * Remember this position in case the page changes later.  The
+			 * tuple is being consumed, so mark it returned: a later re-find
+			 * resumes after it.
+			 */
+			copy_fixed_key(context->desc, &it->curKey, result);
+			it->curKeySet = true;
+			it->curKeyReturned = true;
+
+			if (!iterator_advance_leaf(it, loc))
+			{
+				iterator_refind_partial_leaf(it);
+				loc = &context->items[context->index].locator;
 			}
 
 			if (!deleted_as_null ||
