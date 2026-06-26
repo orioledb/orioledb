@@ -923,8 +923,23 @@ iterator_refind_partial_leaf(BTreeIterator *it)
 	(void) find_page(context, &it->curKey.tuple, BTreeKeyNonLeafKey, 0);
 
 	loc = &context->items[context->index].locator;
+
+	/*
+	 * find_page() can land the locator past-end (offset == items_count) when
+	 * no tuple on the leaf is >= curKey -- e.g. curKey got deleted and the
+	 * leaf's max is now strictly less than curKey.  For forward we leave the
+	 * locator invalid so the caller's outer loop steps to the right sibling.
+	 * For backward the largest tuple <= curKey on this leaf is the last
+	 * item, so decrement to it; mirrors the seed and !curKeySet paths.
+	 */
 	if (!BTREE_PAGE_LOCATOR_IS_VALID(context->img, loc))
+	{
+		if (IT_IS_BACKWARD(it) &&
+			BTREE_PAGE_LOCATOR_GET_OFFSET(context->img, loc) ==
+			BTREE_PAGE_ITEMS_COUNT(context->img))
+			BTREE_PAGE_LOCATOR_PREV(context->img, loc);
 		return;
+	}
 
 	/*
 	 * find_page() leaves the locator on the first tuple >= curKey (its chunk
