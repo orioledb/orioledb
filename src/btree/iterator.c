@@ -1668,7 +1668,6 @@ undo_it_find_internal(UndoIterator *undoIt, void *key, BTreeKeyType kind)
 	Assert(!O_PAGE_IS(undoIt->image, LEFTMOST) || undoIt->leftmost);
 }
 
-#ifdef IS_DEV
 /* ------------------------------------------------------------------------
  * C-side test helpers.  Compiled only when IS_DEV is defined (-DIS_DEV);
  * the SQL bindings are registered in the 1.8->1.9 dev migration.  See
@@ -1792,4 +1791,3 @@ orioledb_test_endkey_returned_skip(PG_FUNCTION_ARGS)
 											 TYPALIGN_INT));
 }
 
-#endif							/* IS_DEV */
