@@ -221,6 +221,22 @@ class UndoRingKeepCheckpointTest(BaseTest):
 
 		worker_con = node.connect()
 		ctrl_con = node.connect()
+
+		# Pin the undo range so the checkpointer is guaranteed to reach the
+		# undo_flush stopevent.  The INSERT above committed, so its undo is
+		# evictable: the bgwriter could free the whole range before the
+		# checkpointer gets to flush_dirty_undo_range, leaving nothing dirty,
+		# so the flush would never stop and wait_checkpointer_stopevent() would
+		# hang.  An open transaction that has written undo keeps its retain
+		# location pinned (the undo may still be rolled back) and the pages
+		# dirty, so the flush always finds work and parks.  Rows 101..200 are
+		# disjoint from the worker's 1..50, and the transaction is rolled back,
+		# so it does not affect the final SUM.
+		ret_con = node.connect()
+		ret_con.begin()
+		ret_con.execute(
+		    "UPDATE o_ring SET v = v + 1 WHERE id BETWEEN 101 AND 200;")
+
 		ctrl_con.execute("SELECT pg_stopevent_set('undo_flush', 'true');")
 
 		chkp_con = node.connect()
@@ -241,12 +257,16 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		release_parked_flush_on_lock(node, worker_con, worker, ctrl_con)
 		t_chkp.join()
 
+		# Drop the retainer's writes; only the worker's 1..50 +1 remains.
+		ret_con.rollback()
+
 		got = node.execute('postgres', "SELECT SUM(v) FROM o_ring;")[0][0]
 		self.assertEqual(got, 50)
 		self._amcheck()
 		worker_con.close()
 		ctrl_con.close()
 		chkp_con.close()
+		ret_con.close()
 		node.stop()
 
 	def test_dirty_bit_overhead_smoke(self):
