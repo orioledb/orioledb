@@ -1460,7 +1460,19 @@ page_locator_find_real_item(Page p, PartialPageState *partial,
 			return true;
 
 		offset = locator->itemOffset - locator->chunkItemsCount;
-		if (partial)
+
+		/*
+		 * Advance the locator into the next chunk.  partial_load_chunk() only
+		 * fills the locator (chunkItemsCount, chunk pointer) when the page is
+		 * actually read partially; for a whole-page image it returns early
+		 * without touching the locator, so we must use the plain fill there.
+		 * Check partial->isPartial, not just the pointer: the iterator passes
+		 * a non-NULL PartialPageState even for IMAGE reads (isPartial ==
+		 * false), and trusting the pointer would leave the locator stuck in
+		 * the current chunk -- collapsing a cross-chunk position to chunk 0,
+		 * offset 0.
+		 */
+		if (partial && partial->isPartial)
 		{
 			if (!partial_load_chunk(partial, p, locator->chunkOffset + 1, locator))
 				return false;
