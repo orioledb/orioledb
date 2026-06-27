@@ -9,6 +9,7 @@ import unittest
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 from .base_test import wait_checkpointer_stopevent
+from .base_test import release_parked_flush_on_lock
 
 SMALL_UNDO_CONF = """
 orioledb.main_buffers = 8MB
@@ -196,8 +197,18 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		node.stop()
 
 	def test_undo_flush_race_via_stopevent(self):
-		"""Park flush mid-page; row-lock COMMIT mutates the same page;
-		resume.  Asserts result is consistent and amcheck clean."""
+		"""Park flush mid-page; row-lock COMMIT mutates the same page; resume.
+		Asserts result is consistent and amcheck clean.
+
+		The checkpointer parks at the 'undo_flush' stopevent while holding
+		undoWriteLock (OUndoWriteTranche) in EXCLUSIVE mode.  The row-lock
+		worker runs in its own thread/connection because its undo write can
+		block on that lock; if it ran on the main thread and blocked, the
+		stopevent reset would never fire and the checkpointer would stay parked
+		forever (the CI hang this test used to produce under Valgrind).
+		release_parked_flush_on_lock() resets the stopevent as soon as the
+		worker is seen waiting on undoWriteLock -- or once it finishes without
+		needing it -- never gating the reset on the worker's completion."""
 		node = self.node
 		node.append_conf('postgresql.conf', SMALL_UNDO_CONF)
 		node.append_conf('postgresql.conf',
@@ -217,15 +228,17 @@ class UndoRingKeepCheckpointTest(BaseTest):
 		t_chkp.start()
 		wait_checkpointer_stopevent(node)
 
-		# Mid-flush: row-lock COMMIT fires in-place undo write.
-		worker_con.begin()
-		worker_con.execute(
-		    "SELECT v FROM o_ring WHERE id BETWEEN 1 AND 50 FOR UPDATE;")
-		worker_con.execute(
-		    "UPDATE o_ring SET v = v + 1 WHERE id BETWEEN 1 AND 50;")
-		worker_con.commit()
+		# Mid-flush: row-lock COMMIT fires in-place undo write.  Run it in its
+		# own thread so a block on undoWriteLock cannot stall the reset.
+		def worker():
+			worker_con.begin()
+			worker_con.execute(
+			    "SELECT v FROM o_ring WHERE id BETWEEN 1 AND 50 FOR UPDATE;")
+			worker_con.execute(
+			    "UPDATE o_ring SET v = v + 1 WHERE id BETWEEN 1 AND 50;")
+			worker_con.commit()
 
-		ctrl_con.execute("SELECT pg_stopevent_reset('undo_flush');")
+		release_parked_flush_on_lock(node, worker_con, worker, ctrl_con)
 		t_chkp.join()
 
 		got = node.execute('postgres', "SELECT SUM(v) FROM o_ring;")[0][0]
