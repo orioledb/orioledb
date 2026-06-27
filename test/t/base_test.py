@@ -747,6 +747,41 @@ def wait_bgwriter_stopevent(node):
 	wait_stopevent(node, bgwriter_pid)
 
 
+# Runs concurrent load against a parked flush, releasing it safely.
+#
+# `worker_fn` (which must drive `worker_con`) is run in its own thread while a
+# flush is parked at the `event` stopevent.  The `event` is reset as soon as
+# the worker is seen waiting on `wait_event` (the undoWriteLock tranche by
+# default) -- or once the worker has finished without needing it -- so the
+# reset is never gated on the worker completing.  A worker whose undo write
+# blocks on the lock held by the parked flush therefore cannot deadlock the
+# test: detecting the wait releases the flush, the flush drops the lock, and
+# the worker proceeds.  Returns once the worker thread has joined; the caller
+# still joins the checkpoint/flush thread itself.
+def release_parked_flush_on_lock(node,
+                                 worker_con,
+                                 worker_fn,
+                                 ctrl_con,
+                                 event='undo_flush',
+                                 wait_event='OUndoWriteTranche',
+                                 timeout=30):
+	worker_pid = worker_con.execute("SELECT pg_backend_pid();")[0][0]
+	t = Thread(target=worker_fn)
+	t.start()
+
+	deadline = time.time() + timeout
+	while t.is_alive():
+		blocked = node.execute(
+		    'postgres', "SELECT 1 FROM pg_stat_activity "
+		    "WHERE pid = %d AND wait_event = '%s';" % (worker_pid, wait_event))
+		if blocked or time.time() > deadline:
+			break
+		time.sleep(0.05)
+
+	ctrl_con.execute("SELECT pg_stopevent_reset('%s');" % event)
+	t.join()
+
+
 # workaround for testgres error messages on empty results
 def new_execute(self, query, *args):
 	self.cursor.execute(query, args)
