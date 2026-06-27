@@ -86,11 +86,10 @@ struct BTreeIterator
 	bool		curKeyReturned;
 
 	/*
-	 * The scan's original start key/kind.  Contract: the caller must keep
-	 * the key alive and unmodified for the iterator's lifetime; the
-	 * !curKeySet branch of iterator_refind_partial_leaf() reads it to re-find
-	 * the scan start when a partial read fails before any tuple has been
-	 * returned.
+	 * The scan's original start key/kind.  Contract: the caller must keep the
+	 * key alive and unmodified for the iterator's lifetime; the !curKeySet
+	 * branch of iterator_refind_partial_leaf() reads it to re-find the scan
+	 * start when a partial read fails before any tuple has been returned.
 	 */
 	void	   *startKey;
 	BTreeKeyType startKind;
@@ -934,8 +933,8 @@ iterator_refind_partial_leaf(BTreeIterator *it)
 	 * no tuple on the leaf is >= curKey -- e.g. curKey got deleted and the
 	 * leaf's max is now strictly less than curKey.  For forward we leave the
 	 * locator invalid so the caller's outer loop steps to the right sibling.
-	 * For backward the largest tuple <= curKey on this leaf is the last
-	 * item, so decrement to it; mirrors the seed and !curKeySet paths.
+	 * For backward the largest tuple <= curKey on this leaf is the last item,
+	 * so decrement to it; mirrors the seed and !curKeySet paths.
 	 */
 	if (!BTREE_PAGE_LOCATOR_IS_VALID(context->img, loc))
 	{
@@ -1199,6 +1198,21 @@ btree_iterator_check_load_next_page(BTreeIterator *it)
 			continue;
 		}
 
+		/*
+		 * Backward stepping needs the current page's lokey.  A frozen
+		 * no-record split half (o_btree_insert_split()) reached live in FETCH
+		 * mode can arrive here with no reliable lokey source -- it is the
+		 * leftmost child of its parent, carries no lokey, and its frozen csn
+		 * means the undo chain supplies none either.  Stepping left off that
+		 * bogus lokey would skip rows, so re-descend (switching to whole-page
+		 * reads) instead.
+		 */
+		if (IT_IS_BACKWARD(it) && !btree_find_context_has_lokey(context))
+		{
+			iterator_refind_partial_leaf(it);
+			continue;
+		}
+
 		if (IT_IS_FORWARD(it))
 			step_result = find_right_page(context, &key_buf);
 		else
@@ -1369,11 +1383,11 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 			BTREE_PAGE_READ_LEAF_ITEM(*tupHdr, result, context->img, loc);
 
 			/*
-			 * Apply the end-key bound before mutating any iterator state.
-			 * A rejected tuple must leave curKey/curKeyReturned and the
-			 * locator untouched: a later partial-read refind would
-			 * otherwise treat it as already handed out and step past it,
-			 * silently dropping the row on a resumed scan.
+			 * Apply the end-key bound before mutating any iterator state. A
+			 * rejected tuple must leave curKey/curKeyReturned and the locator
+			 * untouched: a later partial-read refind would otherwise treat it
+			 * as already handed out and step past it, silently dropping the
+			 * row on a resumed scan.
 			 */
 			if (end != NULL && endKind != BTreeKeyNone)
 			{
@@ -1908,8 +1922,8 @@ orioledb_test_back_refind_skip_tail(PG_FUNCTION_ARGS)
 								 BackwardScanDirection);
 
 	/*
-	 * Forge curKey: a leaf-format tuple whose PK is fake_curkey.  Once
-	 * copied into it->curKey, find_page() on refind will land past-end.
+	 * Forge curKey: a leaf-format tuple whose PK is fake_curkey.  Once copied
+	 * into it->curKey, find_page() on refind will land past-end.
 	 */
 	fakeValue = Int32GetDatum(fake_curkey);
 	fakeTup = o_form_tuple(primary->leafTupdesc, &primary->leafSpec, 0,
