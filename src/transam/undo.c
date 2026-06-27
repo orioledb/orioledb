@@ -2050,6 +2050,17 @@ get_undo_record(UndoLogType undoType, UndoLocation *undoLocation, Size size)
 		if ((location + size) % circularBufferSize >
 			location % circularBufferSize)
 		{
+			/*
+			 * Publish the pages this record occupies as dirty so a later
+			 * checkpoint-time flush or slot-pressure eviction persists them.
+			 * Marking ahead of the caller's payload write is safe: our
+			 * reserved location pins [location, location+size) until
+			 * release_reserved_undo_location(), and both the flush and the
+			 * eviction wait for every backend's reserved location to advance
+			 * past their range before touching it -- so neither can read
+			 * these pages until the payload is in place.
+			 */
+			mark_undo_range_dirty(undoType, location, size);
 			*undoLocation = location;
 			return GET_UNDO_REC(undoType, location);
 		}
@@ -2117,14 +2128,7 @@ add_new_undo_stack_item(UndoLogType undoType, UndoLocation location)
 		pg_atomic_write_u64(&sharedLocations->onCommitLocation, location);
 	}
 
-	/*
-	 * Caller has finished writing the item's payload via the pointer returned
-	 * by get_undo_record(); publish the touched page(s) so the next
-	 * checkpoint-time flush observes the update.  Release fence is embedded
-	 * in pg_atomic_fetch_or_u64.
-	 */
-	mark_undo_range_dirty(undoType, location, item->itemSize);
-
+	/* The item's pages were marked dirty when get_undo_record() allocated it. */
 	release_reserved_undo_location(undoType);
 }
 
@@ -2166,9 +2170,7 @@ add_new_undo_stack_item_to_process(UndoLogType undoType,
 	if (!UndoLocationIsValid(pg_atomic_read_u64(&oProcData[pgprocno].undoRetainLocations[undoType].transactionUndoRetainLocation)))
 		pg_atomic_write_u64(&oProcData[pgprocno].undoRetainLocations[undoType].transactionUndoRetainLocation, location);
 
-	/* See add_new_undo_stack_item() for the page-dirty rationale. */
-	mark_undo_range_dirty(undoType, location, item->itemSize);
-
+	/* The item's pages were marked dirty when get_undo_record() allocated it. */
 	release_reserved_undo_location(undoType);
 }
 
