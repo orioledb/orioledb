@@ -154,7 +154,7 @@ static OXidMapItem *xidBuffer;
  * after checkpoint cleared it) leaves the bit set so the next flush
  * catches the update; the worst case is one redundant page write.
  */
-static pg_atomic_uint64 *xidBufferDirty;
+static pg_atomic_uint32 *xidBufferDirty;
 
 XidMeta    *xid_meta;
 
@@ -169,9 +169,9 @@ StaticAssertDecl(ORIOLEDB_BLCKSZ % sizeof(OXidMapItem) == 0,
 #define XID_BUFFER_NPAGES \
 	(xid_circular_buffer_size / XID_SLOTS_PER_PAGE)
 
-/* # of uint64 words holding the dirty bitmap. */
+/* # of uint32 words holding the dirty bitmap. */
 #define XID_BUFFER_DIRTY_WORDS \
-	((XID_BUFFER_NPAGES + 63) / 64)
+	((XID_BUFFER_NPAGES + 31) / 32)
 
 /* Ring-relative page index for oxid (folds modulo the circular buffer). */
 #define XID_BUFFER_PAGE_INDEX(oxid) \
@@ -181,7 +181,7 @@ static inline void
 mark_xid_buffer_dirty(OXid oxid)
 {
 	uint32		page = XID_BUFFER_PAGE_INDEX(oxid);
-	uint64		mask = UINT64CONST(1) << (page % 64);
+	uint32		mask = 1U << (page % 32);
 
 	Assert(page < XID_BUFFER_NPAGES);
 
@@ -189,7 +189,7 @@ mark_xid_buffer_dirty(OXid oxid)
 	 * Release fence so the preceding slot store is visible to a checkpointer
 	 * that observes the bit set.
 	 */
-	pg_atomic_fetch_or_u64(&xidBufferDirty[page / 64], mask);
+	pg_atomic_fetch_or_u32(&xidBufferDirty[page / 32], mask);
 }
 
 /*
@@ -200,10 +200,23 @@ mark_xid_buffer_dirty(OXid oxid)
 static inline bool
 test_clear_xid_buffer_page_dirty(uint32 page)
 {
-	uint64		mask = UINT64CONST(1) << (page % 64);
-	uint64		old = pg_atomic_fetch_and_u64(&xidBufferDirty[page / 64], ~mask);
+	uint32		mask = 1U << (page % 32);
+	uint32		old = pg_atomic_fetch_and_u32(&xidBufferDirty[page / 32], ~mask);
 
 	return (old & mask) != 0;
+}
+
+/*
+ * Non-destructive read of one page's dirty bit.  Used for partial boundary
+ * pages, whose bit must be left intact (their tail still covers slots
+ * outside the range being written).
+ */
+static inline bool
+xid_buffer_page_dirty(uint32 page)
+{
+	uint32		mask = 1U << (page % 32);
+
+	return (pg_atomic_read_u32(&xidBufferDirty[page / 32]) & mask) != 0;
 }
 
 /*
@@ -227,9 +240,9 @@ clear_xid_dirty_range(OXid xmin, OXid xmax)
 	for (p = fullStart; p < fullEnd; p += XID_SLOTS_PER_PAGE)
 	{
 		uint32		page = XID_BUFFER_PAGE_INDEX(p);
-		uint64		mask = UINT64CONST(1) << (page % 64);
+		uint32		mask = 1U << (page % 32);
 
-		pg_atomic_fetch_and_u64(&xidBufferDirty[page / 64], ~mask);
+		pg_atomic_fetch_and_u32(&xidBufferDirty[page / 32], ~mask);
 	}
 }
 
@@ -269,7 +282,7 @@ oxid_shmem_needs(void)
 	size = add_size(size, mul_size(xid_circular_buffer_size,
 								   sizeof(OXidMapItem)));
 	size = add_size(size, CACHELINEALIGN(mul_size(XID_BUFFER_DIRTY_WORDS,
-												  sizeof(pg_atomic_uint64))));
+												  sizeof(pg_atomic_uint32))));
 	size = add_size(size, o_buffers_shmem_needs(&buffersDesc));
 	size = add_size(size, mul_size(logical_xid_buffers_guc,
 								   ORIOLEDB_BLCKSZ));
@@ -377,8 +390,8 @@ oxid_init_shmem(Pointer ptr, bool found)
 	ptr += CACHELINEALIGN(sizeof(XidMeta));
 	xidBuffer = (OXidMapItem *) ptr;
 	ptr += xid_circular_buffer_size * sizeof(OXidMapItem);
-	xidBufferDirty = (pg_atomic_uint64 *) ptr;
-	ptr += CACHELINEALIGN(XID_BUFFER_DIRTY_WORDS * sizeof(pg_atomic_uint64));
+	xidBufferDirty = (pg_atomic_uint32 *) ptr;
+	ptr += CACHELINEALIGN(XID_BUFFER_DIRTY_WORDS * sizeof(pg_atomic_uint32));
 	o_buffers_shmem_init(&buffersDesc, ptr, found);
 	ptr += o_buffers_shmem_needs(&buffersDesc);
 	logicalXidsShmemMap = (pg_atomic_uint32 *) ptr;
@@ -395,7 +408,7 @@ oxid_init_shmem(Pointer ptr, bool found)
 			pg_atomic_init_u64(&xidBuffer[i].commitPtr, FirstNormalUnloggedLSN);
 		}
 		for (i = 0; i < XID_BUFFER_DIRTY_WORDS; i++)
-			pg_atomic_init_u64(&xidBufferDirty[i], 0);
+			pg_atomic_init_u32(&xidBufferDirty[i], 0);
 
 		xid_meta->xidMapTrancheId = LWLockNewTrancheId();
 		LWLockInitialize(&xid_meta->xidMapWriteLock,
@@ -858,7 +871,7 @@ write_xidsmap(OXid targetXmax)
 	OXid		oxid,
 				xmin,
 				xmax,
-				lastWrittenXmin;
+				pageOxid;
 	int			bufferLength = ORIOLEDB_BLCKSZ / sizeof(OXidMapItem);
 	OXidMapItem buffer[ORIOLEDB_BLCKSZ / sizeof(OXidMapItem)];
 
@@ -890,35 +903,56 @@ write_xidsmap(OXid targetXmax)
 
 	Assert(xmax > xmin);
 
-	lastWrittenXmin = xmin;
-	for (oxid = xmin; oxid < xmax; oxid++)
+	for (pageOxid = xmin; pageOxid < xmax;)
 	{
-		if (oxid % bufferLength == 0 && oxid > lastWrittenXmin)
+		OXid		pageBase = pageOxid - (pageOxid % XID_SLOTS_PER_PAGE);
+		OXid		writeStart = pageOxid;
+		OXid		writeEnd = Min(pageBase + XID_SLOTS_PER_PAGE, xmax);
+		uint32		page = XID_BUFFER_PAGE_INDEX(pageOxid);
+		bool		isFull = (writeStart == pageBase &&
+							  writeEnd == pageBase + XID_SLOTS_PER_PAGE);
+		bool		dirty;
+
+		/*
+		 * Drain this page's slots into the local buffer, resetting the ring
+		 * slots to FROZEN so the ring space is freed.  This happens for every
+		 * page regardless of the dirty bit -- writtenXmin advances past the
+		 * whole range below, so the slots must be vacated either way.
+		 */
+		for (oxid = writeStart; oxid < writeEnd; oxid++)
 		{
-			o_buffers_write(&buffersDesc,
-							(Pointer) &buffer[lastWrittenXmin % bufferLength],
-							OXID_BUFFERS_TAG,
-							lastWrittenXmin * sizeof(OXidMapItem),
-							(oxid - lastWrittenXmin) * sizeof(OXidMapItem));
-			lastWrittenXmin = oxid;
+			Size		idx = oxid % xid_circular_buffer_size;
+
+			pg_atomic_write_u64(&buffer[oxid % bufferLength].csn,
+								pg_atomic_exchange_u64(&xidBuffer[idx].csn,
+													   COMMITSEQNO_FROZEN));
+			pg_atomic_write_u64(&buffer[oxid % bufferLength].commitPtr,
+								pg_atomic_exchange_u64(&xidBuffer[idx].commitPtr,
+													   FirstNormalUnloggedLSN));
 		}
 
-		pg_atomic_write_u64(&buffer[oxid % bufferLength].csn,
-							pg_atomic_exchange_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn,
-												   COMMITSEQNO_FROZEN));
-		pg_atomic_write_u64(&buffer[oxid % bufferLength].commitPtr,
-							pg_atomic_exchange_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr,
-												   FirstNormalUnloggedLSN));
+		/*
+		 * Persist the page only if its dirty bit is set immediately before
+		 * the write: a page a checkpoint-time flush already pushed out is
+		 * clean and need not be rewritten.  Consume the bit for a fully
+		 * covered page (test-and-clear); only peek for a partial boundary
+		 * page, leaving its bit set since the tail slots beyond [xmin, xmax)
+		 * may still be dirty.
+		 */
+		if (isFull)
+			dirty = test_clear_xid_buffer_page_dirty(page);
+		else
+			dirty = xid_buffer_page_dirty(page);
+
+		if (dirty)
+			o_buffers_write(&buffersDesc,
+							(Pointer) &buffer[writeStart % bufferLength],
+							OXID_BUFFERS_TAG,
+							writeStart * sizeof(OXidMapItem),
+							(writeEnd - writeStart) * sizeof(OXidMapItem));
+
+		pageOxid = writeEnd;
 	}
-
-	if (oxid > lastWrittenXmin)
-		o_buffers_write(&buffersDesc,
-						(Pointer) &buffer[lastWrittenXmin % bufferLength],
-						OXID_BUFFERS_TAG,
-						lastWrittenXmin * sizeof(OXidMapItem),
-						(oxid - lastWrittenXmin) * sizeof(OXidMapItem));
-
-	clear_xid_dirty_range(xmin, xmax);
 
 	SpinLockAcquire(&xid_meta->xminMutex);
 	Assert(pg_atomic_read_u64(&xid_meta->writtenXmin) < xmax);
