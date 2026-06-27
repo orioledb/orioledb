@@ -334,7 +334,7 @@ get_buffer(OBuffersDesc *desc, uint32 tag, int64 blockNum, bool write,
 static bool
 o_buffers_rw(OBuffersDesc *desc, Pointer buf,
 			 uint32 tag, int64 offset, int64 size,
-			 bool write, bool missing_ok)
+			 bool write, bool missing_ok, bool markClean)
 {
 	int64		firstBlockNum = offset / ORIOLEDB_BLCKSZ,
 				lastBlockNum = (offset + size - 1) / ORIOLEDB_BLCKSZ,
@@ -378,7 +378,15 @@ o_buffers_rw(OBuffersDesc *desc, Pointer buf,
 		if (write)
 		{
 			memcpy(&buffer->data[copyOffset], ptr, copySize);
-			buffer->dirty = true;
+
+			/*
+			 * In markClean mode the data is already durable on disk (the
+			 * caller is refreshing the cache copy of a page a checkpoint-time
+			 * flush already pushed out), so leave the buffer clean -- no
+			 * write-back is needed and none must clobber the on-disk image.
+			 * Otherwise the cache copy now differs from disk: mark it dirty.
+			 */
+			buffer->dirty = !markClean;
 		}
 		else
 		{
@@ -394,7 +402,7 @@ void
 o_buffers_read(OBuffersDesc *desc, Pointer buf, uint32 tag, int64 offset, int64 size)
 {
 	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
-	o_buffers_rw(desc, buf, tag, offset, size, false, false);
+	o_buffers_rw(desc, buf, tag, offset, size, false, false, false);
 }
 
 bool
@@ -402,14 +410,30 @@ o_buffers_read_if_exists(OBuffersDesc *desc, Pointer buf, uint32 tag,
 						 int64 offset, int64 size)
 {
 	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
-	return o_buffers_rw(desc, buf, tag, offset, size, false, true);
+	return o_buffers_rw(desc, buf, tag, offset, size, false, true, false);
 }
 
 void
 o_buffers_write(OBuffersDesc *desc, Pointer buf, uint32 tag, int64 offset, int64 size)
 {
 	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
-	o_buffers_rw(desc, buf, tag, offset, size, true, false);
+	o_buffers_rw(desc, buf, tag, offset, size, true, false, false);
+}
+
+/*
+ * Like o_buffers_write(), but leaves the touched cache buffers clean instead
+ * of dirty and performs no disk write.  The undo/xidmap eviction paths use
+ * this for ring pages a checkpoint-time flush already pushed to disk: the data
+ * is already durable, so this just refreshes the (possibly stale) cache copy
+ * to match the ring without dirtying it -- a later read then never sees a
+ * stale copy, and the buffer is never written back over the on-disk image.
+ */
+void
+o_buffers_write_clean(OBuffersDesc *desc, Pointer buf, uint32 tag,
+					  int64 offset, int64 size)
+{
+	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
+	o_buffers_rw(desc, buf, tag, offset, size, true, false, true);
 }
 
 bool
@@ -417,7 +441,7 @@ o_buffers_write_if_exists(OBuffersDesc *desc, Pointer buf, uint32 tag,
 						  int64 offset, int64 size)
 {
 	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
-	return o_buffers_rw(desc, buf, tag, offset, size, true, true);
+	return o_buffers_rw(desc, buf, tag, offset, size, true, true, false);
 }
 
 /*
@@ -435,17 +459,45 @@ o_buffers_write_if_exists(OBuffersDesc *desc, Pointer buf, uint32 tag,
  * other paths that mutate desc->curFile (the process-local open-file
  * cache); the typical pattern is to hold the same write lock that
  * serialises the eviction path.
+ *
+ * If the page does happen to be resident in the cache -- only the partial
+ * boundary pages the eviction path leaves behind ever are -- its copy is
+ * refreshed to match what we put on disk and marked clean, so a subsequent
+ * read of it does not return now-stale bytes.  Absent pages are deliberately
+ * not pulled in: their data stays hot in the caller's ring buffer and a
+ * cache copy would only duplicate it.
  */
 void
 o_buffers_write_page_direct(OBuffersDesc *desc, char *data, uint32 tag,
 							int64 offset)
 {
+	int64		blockNum = offset / ORIOLEDB_BLCKSZ;
+	OBuffersGroup *group;
+	int			i;
+
 	Assert(OBuffersMaxTagIsValid(tag));
 	Assert(offset >= 0 && offset % ORIOLEDB_BLCKSZ == 0);
 	Assert(data != NULL);
 	Assert(((uintptr_t) data % sizeof(uint64)) == 0);
 
-	write_buffer_data(desc, data, tag, offset / ORIOLEDB_BLCKSZ);
+	group = &desc->groups[blockNum % desc->groupsCount];
+	LWLockAcquire(&group->groupCtlLock, LW_SHARED);
+	for (i = 0; i < O_BUFFERS_PER_GROUP; i++)
+	{
+		OBuffer    *buffer = &group->buffers[i];
+
+		if (buffer->blockNum == blockNum && buffer->tag == tag)
+		{
+			LWLockAcquire(&buffer->bufferCtlLock, LW_EXCLUSIVE);
+			memcpy(buffer->data, data, ORIOLEDB_BLCKSZ);
+			buffer->dirty = false;
+			LWLockRelease(&buffer->bufferCtlLock);
+			break;
+		}
+	}
+	LWLockRelease(&group->groupCtlLock);
+
+	write_buffer_data(desc, data, tag, blockNum);
 }
 
 static void

@@ -932,12 +932,16 @@ write_xidsmap(OXid targetXmax)
 		}
 
 		/*
-		 * Persist the page only if its dirty bit is set immediately before
-		 * the write: a page a checkpoint-time flush already pushed out is
-		 * clean and need not be rewritten.  Consume the bit for a fully
-		 * covered page (test-and-clear); only peek for a partial boundary
-		 * page, leaving its bit set since the tail slots beyond [xmin, xmax)
-		 * may still be dirty.
+		 * A page whose dirty bit is set is written to o_buffers dirty as
+		 * usual.  A page whose bit is already clear was pushed straight to
+		 * disk by a checkpoint-time flush (flush_dirty_xidsmap_range), so its
+		 * on-disk copy is current; we still write it into the o_buffers cache
+		 * as *clean* rather than skipping it, so a stale partial copy an
+		 * earlier eviction may have left resident is refreshed before
+		 * writtenXmin advances past it.  Consume the bit for a fully covered
+		 * page (test-and-clear); only peek for a partial boundary page,
+		 * leaving its bit set since the tail slots beyond [xmin, xmax) may
+		 * still be dirty.
 		 */
 		if (isFull)
 			dirty = test_clear_xid_buffer_page_dirty(page);
@@ -950,6 +954,12 @@ write_xidsmap(OXid targetXmax)
 							OXID_BUFFERS_TAG,
 							writeStart * sizeof(OXidMapItem),
 							(writeEnd - writeStart) * sizeof(OXidMapItem));
+		else
+			o_buffers_write_clean(&buffersDesc,
+								  (Pointer) &buffer[writeStart % bufferLength],
+								  OXID_BUFFERS_TAG,
+								  writeStart * sizeof(OXidMapItem),
+								  (writeEnd - writeStart) * sizeof(OXidMapItem));
 
 		pageOxid = writeEnd;
 	}

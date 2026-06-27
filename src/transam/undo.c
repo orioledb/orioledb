@@ -1586,6 +1586,23 @@ write_undo_range(OBuffersDesc *desc, Pointer buf, UndoLogType undoType,
 		o_buffers_write(desc, buf, (uint32) undoType, minLoc, maxLoc - minLoc);
 }
 
+/*
+ * Like write_undo_range(), but for a page whose dirty bit is already clear:
+ * the page is durable on disk (a checkpoint-time flush pushed it out), so we
+ * only refresh the o_buffers cache copy as clean.  Without this, eviction
+ * would skip the page entirely and a stale partial copy left in the cache by
+ * an earlier eviction could be read back after writtenLocation advances past
+ * it.
+ */
+static void
+write_undo_range_clean(OBuffersDesc *desc, Pointer buf, UndoLogType undoType,
+					   UndoLocation minLoc, UndoLocation maxLoc)
+{
+	if (maxLoc > minLoc)
+		o_buffers_write_clean(desc, buf, (uint32) undoType, minLoc,
+							  maxLoc - minLoc);
+}
+
 static void
 read_undo_range(OBuffersDesc *desc, Pointer buf, UndoLogType undoType,
 				UndoLocation minLoc, UndoLocation maxLoc)
@@ -1785,14 +1802,17 @@ evict_undo_to_disk(UndoLogType undoType,
 
 
 	/*
-	 * Persist [retainUndoLocation, targetUndoLocation) page by page, writing
-	 * each page only if its dirty bit is set immediately before the write: a
-	 * page a checkpoint-time flush already pushed straight to disk is clean
-	 * and need not be rewritten (and is absent from the o_buffers cache, so a
-	 * later read of it cache-misses to the current on-disk copy).  A single
-	 * page never wraps the ring -- pages are ORIOLEDB_BLCKSZ-aligned and the
-	 * ring is a whole number of pages -- so each maps to a contiguous slice
-	 * of the circular buffer.
+	 * Persist [retainUndoLocation, targetUndoLocation) page by page.  A page
+	 * whose dirty bit is set is written to o_buffers dirty as usual.  A page
+	 * whose bit is already clear was pushed straight to disk by a
+	 * checkpoint-time flush (flush_dirty_undo_range), so its on-disk copy is
+	 * current; we still write it into the o_buffers cache as *clean* rather
+	 * than skipping it, so that a stale partial copy an earlier eviction may
+	 * have left resident is refreshed to the ring's current bytes before
+	 * writtenLocation advances past it (otherwise a later read could return
+	 * that stale copy).  A single page never wraps the ring -- pages are
+	 * ORIOLEDB_BLCKSZ-aligned and the ring is a whole number of pages -- so
+	 * each maps to a contiguous slice of the circular buffer.
 	 *
 	 * For a fully covered page consume the bit (test-and-clear) so a later
 	 * flush can skip it.  A partial boundary page is only peeked and left
@@ -1823,6 +1843,10 @@ evict_undo_to_disk(UndoLogType undoType,
 				write_undo_range(&undoBuffersDesc,
 								 circularBuffer + writeStart % circularBufferSize,
 								 undoType, writeStart, writeEnd);
+			else
+				write_undo_range_clean(&undoBuffersDesc,
+									   circularBuffer + writeStart % circularBufferSize,
+									   undoType, writeStart, writeEnd);
 
 			loc = writeEnd;
 		}

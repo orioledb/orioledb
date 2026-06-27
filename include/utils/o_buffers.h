@@ -48,6 +48,8 @@ extern bool o_buffers_read_if_exists(OBuffersDesc *desc, Pointer buf,
 									 uint32 tag, int64 offset, int64 size);
 extern void o_buffers_write(OBuffersDesc *desc, Pointer buf,
 							uint32 tag, int64 offset, int64 size);
+extern void o_buffers_write_clean(OBuffersDesc *desc, Pointer buf,
+								  uint32 tag, int64 offset, int64 size);
 extern bool o_buffers_write_if_exists(OBuffersDesc *desc, Pointer buf,
 									  uint32 tag, int64 offset, int64 size);
 extern void o_buffers_write_page_direct(OBuffersDesc *desc, char *data,
