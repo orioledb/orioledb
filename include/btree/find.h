@@ -151,6 +151,7 @@ extern OFindPageResult refind_page(OBTreeFindPageContext *context, void *key,
 extern bool find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey);
 extern bool find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey);
 extern OTuple btree_find_context_lokey(OBTreeFindPageContext *context);
+extern bool btree_find_context_has_lokey(OBTreeFindPageContext *context);
 extern void btree_find_context_from_modify_to_read(OBTreeFindPageContext *context,
 												   Pointer key,
 												   BTreeKeyType keyType,

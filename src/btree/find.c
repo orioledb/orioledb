@@ -1791,30 +1791,47 @@ btree_find_context_lokey(OBTreeFindPageContext *context)
 		 */
 		return context->leafLokey.tuple;
 	}
-	else if (BTREE_PAGE_FIND_IS(context, LOKEY_EXISTS))
-	{
-		/*
-		 * Hikey of the left sibling of the parent, carried down the descent.
-		 */
-		return context->lokey.tuple;
-	}
 	else
 	{
 		/*
-		 * The descent established no lokey for this page.  This happens for a
-		 * frozen no-record split half (see o_btree_insert_split()) reached
-		 * live during a backward scan: its csn was not bumped, so the reader
-		 * never walked the undo chain that would have supplied a lokey.  Such
-		 * a page drops no tuple, so its smallest stored key is its lokey.
+		 * The current page is the leftmost child of its immediate parent, so
+		 * its lokey is the parent's lokey, carried down the descent in
+		 * context->lokey (LOKEY_EXISTS).
+		 *
+		 * A frozen no-record split half (see o_btree_insert_split()) reached
+		 * live during a backward FETCH scan can transiently arrive here with
+		 * the lokey unestablished -- it is the leftmost child of its parent,
+		 * has no carried lokey, and its frozen csn means no undo chain
+		 * supplies one.  The backward iterator detects that via
+		 * btree_find_context_has_lokey() and re-descends
+		 * (iterator_refind_partial_leaf, which also switches to whole-page
+		 * reads) before stepping left, so by the time we reach here
+		 * LOKEY_EXISTS always holds.
 		 */
-		OTuple		firstTuple;
-		BTreePageItemLocator loc;
-
-		BTREE_PAGE_LOCATOR_FIRST(context->img, &loc);
-		Assert(BTREE_PAGE_LOCATOR_IS_VALID(context->img, &loc));
-		BTREE_PAGE_READ_TUPLE(firstTuple, context->img, &loc);
-		return firstTuple;
+		Assert(BTREE_PAGE_FIND_IS(context, LOKEY_EXISTS));
+		return context->lokey.tuple;
 	}
+}
+
+/*
+ * Whether btree_find_context_lokey() can return the current page's real lokey,
+ * i.e. the descent established one of its reliable sources.  Returns false only
+ * in the transient state a frozen no-record split half leaves when reached live
+ * in FETCH mode (leftmost child of its parent, no carried lokey and no undo
+ * chain to recover it); the backward iterator recovers from that by
+ * re-descending instead of stepping left off a bogus lokey.
+ */
+bool
+btree_find_context_has_lokey(OBTreeFindPageContext *context)
+{
+	BTreePageItemLocator ploc = context->items[context->index - 1].locator;
+
+	Assert(BTREE_PAGE_FIND_IS(context, KEEP_LOKEY));
+
+	return BTREE_PAGE_FIND_IS(context, LOKEY_UNDO) ||
+		BTREE_PAGE_FIND_IS(context, LOKEY_SIBLING) ||
+		BTREE_PAGE_LOCATOR_GET_OFFSET(context->parentImg, &ploc) > 0 ||
+		BTREE_PAGE_FIND_IS(context, LOKEY_EXISTS);
 }
 
 static Pointer
