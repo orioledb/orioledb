@@ -205,7 +205,7 @@ static Size o_undo_circular_sizes[(int) UndoLogsCount] =
  * bit after the checkpointer cleared it) leaves the bit set, so the next
  * flush catches the update; worst case is one redundant page write.
  */
-static pg_atomic_uint64 *o_undo_dirty_bitmaps[(int) UndoLogsCount] =
+static pg_atomic_uint32 *o_undo_dirty_bitmaps[(int) UndoLogsCount] =
 {
 	NULL
 };
@@ -225,13 +225,13 @@ static Size o_undo_dirty_words[(int) UndoLogsCount] =
 static inline void
 mark_undo_page_dirty(UndoLogType undoType, uint32 page)
 {
-	uint64		mask = UINT64CONST(1) << (page % 64);
+	uint32		mask = 1U << (page % 32);
 
 	/*
 	 * Release fence so the writer's preceding store in the page is visible to
 	 * a checkpointer that observes the bit set via the fetch_and.
 	 */
-	pg_atomic_fetch_or_u64(&o_undo_dirty_bitmaps[(int) undoType][page / 64],
+	pg_atomic_fetch_or_u32(&o_undo_dirty_bitmaps[(int) undoType][page / 32],
 						   mask);
 }
 
@@ -262,11 +262,25 @@ mark_undo_range_dirty(UndoLogType undoType, UndoLocation location, Size size)
 static inline bool
 test_clear_undo_page_dirty(UndoLogType undoType, uint32 page)
 {
-	uint64		mask = UINT64CONST(1) << (page % 64);
-	uint64		old = pg_atomic_fetch_and_u64(
-											  &o_undo_dirty_bitmaps[(int) undoType][page / 64], ~mask);
+	uint32		mask = 1U << (page % 32);
+	uint32		old = pg_atomic_fetch_and_u32(
+											  &o_undo_dirty_bitmaps[(int) undoType][page / 32], ~mask);
 
 	return (old & mask) != 0;
+}
+
+/*
+ * Non-destructive read of one page's dirty bit.  Used for partial boundary
+ * pages, whose bit must be left intact (their tail may still belong to undo
+ * records beyond the range being written).
+ */
+static inline bool
+undo_page_dirty(UndoLogType undoType, uint32 page)
+{
+	uint32		mask = 1U << (page % 32);
+
+	return (pg_atomic_read_u32(&o_undo_dirty_bitmaps[(int) undoType][page / 32])
+			& mask) != 0;
 }
 
 PendingTruncatesMeta *pending_truncates_meta;
@@ -411,14 +425,14 @@ undo_shmem_needs(void)
 		for (t = 0; t < (int) UndoLogsCount; t++)
 		{
 			Size		npages = o_undo_circular_sizes[t] / ORIOLEDB_BLCKSZ;
-			Size		nwords = (npages + 63) / 64;
+			Size		nwords = (npages + 31) / 32;
 
 			Assert(o_undo_circular_sizes[t] % ORIOLEDB_BLCKSZ == 0);
 
 			o_undo_dirty_words[t] = nwords;
 			size = add_size(size,
 							CACHELINEALIGN(mul_size(nwords,
-													sizeof(pg_atomic_uint64))));
+													sizeof(pg_atomic_uint32))));
 		}
 	}
 
@@ -448,9 +462,9 @@ undo_shmem_init(Pointer buf, bool found)
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
 	{
-		o_undo_dirty_bitmaps[i] = (pg_atomic_uint64 *) ptr;
+		o_undo_dirty_bitmaps[i] = (pg_atomic_uint32 *) ptr;
 		ptr += CACHELINEALIGN(o_undo_dirty_words[i] *
-							  sizeof(pg_atomic_uint64));
+							  sizeof(pg_atomic_uint32));
 	}
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
@@ -463,7 +477,7 @@ undo_shmem_init(Pointer buf, bool found)
 			Size		w;
 
 			for (w = 0; w < o_undo_dirty_words[i]; w++)
-				pg_atomic_init_u64(&o_undo_dirty_bitmaps[i][w], 0);
+				pg_atomic_init_u32(&o_undo_dirty_bitmaps[i][w], 0);
 		}
 	}
 
@@ -1770,52 +1784,47 @@ evict_undo_to_disk(UndoLogType undoType,
 		wait_for_reserved_location(undoType, targetUndoLocation + circularBufferSize);
 
 
-	if (retainUndoLocation % circularBufferSize <
-		targetUndoLocation % circularBufferSize)
-	{
-		write_undo_range(&undoBuffersDesc,
-						 circularBuffer + retainUndoLocation % circularBufferSize,
-						 undoType,
-						 retainUndoLocation, targetUndoLocation);
-	}
-	else
-	{
-		UndoLocation breakUndoLocation;
-
-		breakUndoLocation = retainUndoLocation + (circularBufferSize -
-												  (retainUndoLocation % circularBufferSize));
-		write_undo_range(&undoBuffersDesc,
-						 circularBuffer + retainUndoLocation % circularBufferSize,
-						 undoType,
-						 retainUndoLocation, breakUndoLocation);
-		write_undo_range(&undoBuffersDesc,
-						 circularBuffer, undoType,
-						 breakUndoLocation, targetUndoLocation);
-	}
-
 	/*
-	 * The pages we just persisted match the on-disk copy.  Clear their dirty
-	 * bits for pages fully covered by this write so a later checkpoint-time
-	 * flush can skip them.  Partial boundary pages are left dirty: their tail
-	 * may still belong to undo records beyond targetUndoLocation that other
-	 * backends are actively writing, and clearing the bit could mask their
-	 * updates.
+	 * Persist [retainUndoLocation, targetUndoLocation) page by page, writing
+	 * each page only if its dirty bit is set immediately before the write: a
+	 * page a checkpoint-time flush already pushed straight to disk is clean
+	 * and need not be rewritten (and is absent from the o_buffers cache, so a
+	 * later read of it cache-misses to the current on-disk copy).  A single
+	 * page never wraps the ring -- pages are ORIOLEDB_BLCKSZ-aligned and the
+	 * ring is a whole number of pages -- so each maps to a contiguous slice
+	 * of the circular buffer.
+	 *
+	 * For a fully covered page consume the bit (test-and-clear) so a later
+	 * flush can skip it.  A partial boundary page is only peeked and left
+	 * dirty: its tail may still belong to undo records beyond
+	 * targetUndoLocation that other backends are actively writing, and
+	 * clearing the bit could mask their updates.
 	 */
 	{
-		UndoLocation pageStart,
-					pageEnd,
-					p;
+		UndoLocation loc;
 
-		pageStart = ((retainUndoLocation + ORIOLEDB_BLCKSZ - 1)
-					 / ORIOLEDB_BLCKSZ) * ORIOLEDB_BLCKSZ;
-		pageEnd = (targetUndoLocation / ORIOLEDB_BLCKSZ) * ORIOLEDB_BLCKSZ;
-		for (p = pageStart; p < pageEnd; p += ORIOLEDB_BLCKSZ)
+		for (loc = retainUndoLocation; loc < targetUndoLocation;)
 		{
-			uint32		page = UNDO_PAGE_INDEX(undoType, p);
-			uint64		mask = UINT64CONST(1) << (page % 64);
+			UndoLocation pageBase = loc - (loc % ORIOLEDB_BLCKSZ);
+			UndoLocation writeStart = loc;
+			UndoLocation writeEnd = Min(pageBase + ORIOLEDB_BLCKSZ,
+										targetUndoLocation);
+			uint32		page = UNDO_PAGE_INDEX(undoType, loc);
+			bool		isFull = (writeStart == pageBase &&
+								  writeEnd == pageBase + ORIOLEDB_BLCKSZ);
+			bool		dirty;
 
-			pg_atomic_fetch_and_u64(&o_undo_dirty_bitmaps[(int) undoType][page / 64],
-									~mask);
+			if (isFull)
+				dirty = test_clear_undo_page_dirty(undoType, page);
+			else
+				dirty = undo_page_dirty(undoType, page);
+
+			if (dirty)
+				write_undo_range(&undoBuffersDesc,
+								 circularBuffer + writeStart % circularBufferSize,
+								 undoType, writeStart, writeEnd);
+
+			loc = writeEnd;
 		}
 	}
 
