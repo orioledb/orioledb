@@ -194,6 +194,38 @@ class IndexBridgingTest(BaseTest):
 		    expected_ctids, key=lambda ctid: int(ctid[0][1:-1].split(',')[1]))
 		check(expected_ctids)
 
+	def test_bridge_gin_dead_tids_on_earlier_page(self):
+		"""When the bridge_ctid counter crosses
+		MaxHeapTuplesPerPage (291), bridge index holds dead TIDs on block 0 and the
+		live TID on block 1.  Bridge bitmap scan must advance past the
+		all-dead page rather than terminating after it."""
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TABLE o_test (
+				id  int NOT NULL,
+				arr bigint[],
+				PRIMARY KEY (id)
+			) USING orioledb;
+			ALTER TABLE o_test SET (autovacuum_enabled = off);
+			CREATE INDEX ON o_test USING GIN (arr);
+			INSERT INTO o_test VALUES (1, ARRAY[1]::bigint[]);
+			DO $$
+			BEGIN
+				FOR k IN 2..294 LOOP
+					UPDATE o_test SET arr = ARRAY[k]::bigint[] WHERE id = 1;
+				END LOOP;
+				UPDATE o_test SET arr = ARRAY[1]::bigint[] WHERE id = 1;
+			END $$;
+		""")
+		self.assertEqual(
+		    node.execute("""
+				SET enable_seqscan = off;
+				SET enable_indexscan = off;
+				SELECT count(*) FROM o_test WHERE arr @> ARRAY[1]::bigint[];
+			""")[0][0], 1)
+
 	def test_bridge_recovery(self):
 		node = self.node
 		node.start()

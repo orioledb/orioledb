@@ -840,8 +840,28 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 
 			if (O_TUPLE_IS_NULL(tuple))
 			{
-				slot = ExecClearTuple(node->ss.ss_ScanTupleSlot);
-				fetched = true;
+				/*
+				 * The per-page primary seq scan is exhausted.  In bridge mode
+				 * the TIDBitmap may still hold more pages: dead bridge_ctids
+				 * left by earlier UPDATEs make the keybitmap on a page
+				 * resolve to fewer (or zero) live PKs than page_ntuples, so
+				 * BRIDGE_NEXT_TUPLE never marks the page exhausted on its
+				 * own.  Force the advance here and continue the outer loop.
+				 */
+				if (bridge_iter->tbmiterator != NULL)
+				{
+#if PG_VERSION_NUM >= 180000
+					bridge_iter->tbmres.blockno = InvalidBlockNumber;
+#else
+					bridge_iter->tbmres = NULL;
+#endif
+					continue;	/* skip the InstrCountFiltered2 below */
+				}
+				else
+				{
+					slot = ExecClearTuple(node->ss.ss_ScanTupleSlot);
+					fetched = true;
+				}
 			}
 			else
 			{
