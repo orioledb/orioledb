@@ -49,17 +49,17 @@ static bool find_downlink_get_keys(BTreeDescr *desc,
 								   Oid *types, Datum *values, uint8 *flags);
 
 static void oid_array_search(Pointer p, int stride, int *lower,
-							 int *upper, Datum keyDatum, bool descending);
+							 int *upper, Datum keyDatum, bool ascending);
 static void int4_array_search(Pointer p, int stride, int *lower,
-							  int *upper, Datum keyDatum, bool descending);
+							  int *upper, Datum keyDatum, bool ascending);
 static void int8_array_search(Pointer p, int stride, int *lower,
-							  int *upper, Datum keyDatum, bool descending);
+							  int *upper, Datum keyDatum, bool ascending);
 static void float4_array_search(Pointer p, int stride, int *lower,
-								int *upper, Datum keyDatum, bool descending);
+								int *upper, Datum keyDatum, bool ascending);
 static void float8_array_search(Pointer p, int stride, int *lower,
-								int *upper, Datum keyDatum, bool descending);
+								int *upper, Datum keyDatum, bool ascending);
 static void tid_array_search(Pointer p, int stride, int *lower,
-							 int *upper, Datum keyDatum, bool descending);
+							 int *upper, Datum keyDatum, bool ascending);
 
 static ArraySearchDesc arraySearchDescs[] = {
 	{OIDOID, OID_BTREE_OPS_OID, sizeof(Oid), ALIGNOF_INT, oid_array_search},
@@ -130,7 +130,7 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 		/*
 		 * The array-search routines compare raw datums, so they require the
 		 * field's btree opclass to match the default one they implement. DESC
-		 * ordering is supported: the routine gets a "descending" flag and
+		 * ordering is supported: the routine gets an "ascending" flag and
 		 * find_downlink_get_keys() expresses bounds as storage directions, so
 		 * a DESC field is handled by mirroring the comparison rather than
 		 * bailing.
@@ -144,7 +144,7 @@ can_fastpath_find_downlink(OBTreeFindPageContext *context,
 		offset = TYPEALIGN(searchDesc->align, offset);
 		meta->funcs[i] = searchDesc->func;
 		meta->offsets[i] = offset;
-		meta->descending[i] = !field->ascending;
+		meta->ascending[i] = field->ascending;
 		types[i] = searchDesc->typeid;
 
 		offset += searchDesc->typlen;
@@ -408,7 +408,7 @@ fastpath_find_downlink(Pointer pagePtr,
 		if (meta->flags[i] == 0)
 			meta->funcs[i] (base + MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + meta->offsets[i],
 							MAXALIGN(sizeof(BTreeNonLeafTuphdr)) + meta->length,
-							&lower, &upper, meta->values[i], meta->descending[i]);
+							&lower, &upper, meta->values[i], meta->ascending[i]);
 		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_FIRST)
 			upper = lower;
 		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_LAST)
@@ -551,7 +551,7 @@ fastpath_find_chunk(Pointer pagePtr,
 		if (meta->flags[i] == 0)
 			meta->funcs[i] (base + meta->offsets[i],
 							meta->length, &lower, &upper,
-							meta->values[i], meta->descending[i]);
+							meta->values[i], meta->ascending[i]);
 		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_FIRST)
 			upper = lower;
 		else if (meta->flags[i] & FASTPATH_FIND_DOWNLINK_FLAG_LAST)
@@ -581,7 +581,7 @@ fastpath_find_chunk(Pointer pagePtr,
  */
 static void
 int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
-				  bool descending)
+				  bool ascending)
 {
 	int			i;
 	bool		lowerSet = false;
@@ -598,7 +598,7 @@ int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
 			*lower = i;
 			lowerSet = true;
 		}
-		else if (descending ? value < key : value > key)
+		else if (ascending ? value > key : value < key)
 		{
 			if (!lowerSet)
 				*lower = i;
@@ -614,7 +614,7 @@ int4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
 
 static void
 int8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
-				  bool descending)
+				  bool ascending)
 {
 	int			i;
 	bool		lowerSet = false;
@@ -631,7 +631,7 @@ int8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
 			*lower = i;
 			lowerSet = true;
 		}
-		else if (descending ? value < key : value > key)
+		else if (ascending ? value > key : value < key)
 		{
 			if (!lowerSet)
 				*lower = i;
@@ -647,7 +647,7 @@ int8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
 
 static void
 oid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
-				 bool descending)
+				 bool ascending)
 {
 	int			i;
 	bool		lowerSet = false;
@@ -664,7 +664,7 @@ oid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
 			*lower = i;
 			lowerSet = true;
 		}
-		else if (descending ? value < key : value > key)
+		else if (ascending ? value > key : value < key)
 		{
 			if (!lowerSet)
 				*lower = i;
@@ -680,7 +680,7 @@ oid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
 
 static void
 float4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
-					bool descending)
+					bool ascending)
 {
 	int			i;
 	bool		lowerSet = false;
@@ -698,7 +698,7 @@ float4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatu
 			*lower = i;
 			lowerSet = true;
 		}
-		else if (descending ? value < key : value > key)
+		else if (ascending ? value > key : value < key)
 		{
 			if (!lowerSet)
 				*lower = i;
@@ -714,7 +714,7 @@ float4_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatu
 
 static void
 float8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
-					bool descending)
+					bool ascending)
 {
 	int			i;
 	bool		lowerSet = false;
@@ -732,7 +732,7 @@ float8_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatu
 			*lower = i;
 			lowerSet = true;
 		}
-		else if (descending ? value < key : value > key)
+		else if (ascending ? value > key : value < key)
 		{
 			if (!lowerSet)
 				*lower = i;
@@ -768,7 +768,7 @@ tid_cmp(ItemPointer arg1, ItemPointer arg2)
 
 static void
 tid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
-				 bool descending)
+				 bool ascending)
 {
 	int			i;
 	bool		lowerSet = false;
@@ -785,7 +785,7 @@ tid_array_search(Pointer p, int stride, int *lower, int *upper, Datum keyDatum,
 			*lower = i;
 			lowerSet = true;
 		}
-		else if (descending ? cmp < 0 : cmp > 0)
+		else if (ascending ? cmp > 0 : cmp < 0)
 		{
 			if (!lowerSet)
 				*lower = i;
