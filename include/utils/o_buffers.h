@@ -42,16 +42,12 @@ typedef struct
 
 extern Size o_buffers_shmem_needs(OBuffersDesc *desc);
 extern void o_buffers_shmem_init(OBuffersDesc *desc, void *buf, bool found);
-extern void o_buffers_read(OBuffersDesc *desc, Pointer buf,
-						   uint32 tag, int64 offset, int64 size);
-extern bool o_buffers_read_if_exists(OBuffersDesc *desc, Pointer buf,
-									 uint32 tag, int64 offset, int64 size);
-extern void o_buffers_write(OBuffersDesc *desc, Pointer buf,
-							uint32 tag, int64 offset, int64 size);
-extern void o_buffers_write_clean(OBuffersDesc *desc, Pointer buf,
-								  uint32 tag, int64 offset, int64 size);
-extern bool o_buffers_write_if_exists(OBuffersDesc *desc, Pointer buf,
-									  uint32 tag, int64 offset, int64 size);
+extern bool o_buffers_read(OBuffersDesc *desc, Pointer buf,
+						   uint32 tag, int64 offset, int64 size,
+						   bool if_exists);
+extern bool o_buffers_write(OBuffersDesc *desc, Pointer buf,
+							uint32 tag, int64 offset, int64 size,
+							bool if_exists, bool mark_clean);
 extern void o_buffers_write_page_direct(OBuffersDesc *desc, char *data,
 										uint32 tag, int64 offset);
 extern void o_buffers_sync(OBuffersDesc *desc, uint32 tag, int64 fromOffset,

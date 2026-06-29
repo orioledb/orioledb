@@ -1583,7 +1583,8 @@ write_undo_range(OBuffersDesc *desc, Pointer buf, UndoLogType undoType,
 				 UndoLocation minLoc, UndoLocation maxLoc)
 {
 	if (maxLoc > minLoc)
-		o_buffers_write(desc, buf, (uint32) undoType, minLoc, maxLoc - minLoc);
+		o_buffers_write(desc, buf, (uint32) undoType, minLoc, maxLoc - minLoc,
+						false, false);
 }
 
 /*
@@ -1599,8 +1600,8 @@ write_undo_range_clean(OBuffersDesc *desc, Pointer buf, UndoLogType undoType,
 					   UndoLocation minLoc, UndoLocation maxLoc)
 {
 	if (maxLoc > minLoc)
-		o_buffers_write_clean(desc, buf, (uint32) undoType, minLoc,
-							  maxLoc - minLoc);
+		o_buffers_write(desc, buf, (uint32) undoType, minLoc, maxLoc - minLoc,
+						false, true);
 }
 
 static void
@@ -1608,7 +1609,7 @@ read_undo_range(OBuffersDesc *desc, Pointer buf, UndoLogType undoType,
 				UndoLocation minLoc, UndoLocation maxLoc)
 {
 	Assert(maxLoc > minLoc);
-	o_buffers_read(desc, buf, (uint32) undoType, minLoc, maxLoc - minLoc);
+	o_buffers_read(desc, buf, (uint32) undoType, minLoc, maxLoc - minLoc, false);
 }
 
 static bool
@@ -1616,7 +1617,8 @@ write_undo_range_if_exists(OBuffersDesc *desc, Pointer buf, UndoLogType undoType
 						   UndoLocation minLoc, UndoLocation maxLoc)
 {
 	if (maxLoc > minLoc)
-		return o_buffers_write_if_exists(desc, buf, (uint32) undoType, minLoc, maxLoc - minLoc);
+		return o_buffers_write(desc, buf, (uint32) undoType, minLoc,
+							   maxLoc - minLoc, true, false);
 	return true;
 }
 
@@ -1625,7 +1627,8 @@ read_undo_range_if_exists(OBuffersDesc *desc, Pointer buf, UndoLogType undoType,
 						  UndoLocation minLoc, UndoLocation maxLoc)
 {
 	Assert(maxLoc > minLoc);
-	return o_buffers_read_if_exists(desc, buf, (uint32) undoType, minLoc, maxLoc - minLoc);
+	return o_buffers_read(desc, buf, (uint32) undoType, minLoc,
+						  maxLoc - minLoc, true);
 }
 
 /*
