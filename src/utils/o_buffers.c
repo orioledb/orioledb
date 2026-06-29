@@ -327,19 +327,31 @@ get_buffer(OBuffersDesc *desc, uint32 tag, int64 blockNum, bool write,
 }
 
 /*
- * Read or write a range of data from/to buffers.  When missing_ok is true
- * and the underlying file does not exist (read path only), returns false
- * with buf zeroed.
+ * Read or write a range of data from/to buffers.
+ *
+ * missing_ok: a missing underlying file returns false instead of panicking
+ * (read path returns with buf zeroed).  Otherwise the call always returns
+ * true.
+ *
+ * mark_clean (write only): the data is already durable on disk (the caller
+ * is refreshing the cache copy of a page a checkpoint-time flush already
+ * pushed out).  The touched buffers are left clean -- no write-back is
+ * performed and none must clobber the on-disk image.  Used by the
+ * undo/xidmap eviction paths so a stale partial copy a prior eviction left
+ * in the cache does not get read back after the written-frontier advances
+ * past it.
  */
 static bool
 o_buffers_rw(OBuffersDesc *desc, Pointer buf,
 			 uint32 tag, int64 offset, int64 size,
-			 bool write, bool missing_ok, bool markClean)
+			 bool write, bool missing_ok, bool mark_clean)
 {
 	int64		firstBlockNum = offset / ORIOLEDB_BLCKSZ,
 				lastBlockNum = (offset + size - 1) / ORIOLEDB_BLCKSZ,
 				blockNum;
 	Pointer		ptr = buf;
+
+	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
 
 	for (blockNum = firstBlockNum; blockNum <= lastBlockNum; blockNum++)
 	{
@@ -378,15 +390,7 @@ o_buffers_rw(OBuffersDesc *desc, Pointer buf,
 		if (write)
 		{
 			memcpy(&buffer->data[copyOffset], ptr, copySize);
-
-			/*
-			 * In markClean mode the data is already durable on disk (the
-			 * caller is refreshing the cache copy of a page a checkpoint-time
-			 * flush already pushed out), so leave the buffer clean -- no
-			 * write-back is needed and none must clobber the on-disk image.
-			 * Otherwise the cache copy now differs from disk: mark it dirty.
-			 */
-			buffer->dirty = !markClean;
+			buffer->dirty = !mark_clean;
 		}
 		else
 		{
@@ -398,50 +402,19 @@ o_buffers_rw(OBuffersDesc *desc, Pointer buf,
 	return true;
 }
 
-void
-o_buffers_read(OBuffersDesc *desc, Pointer buf, uint32 tag, int64 offset, int64 size)
+bool
+o_buffers_read(OBuffersDesc *desc, Pointer buf, uint32 tag,
+			   int64 offset, int64 size, bool if_exists)
 {
-	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
-	o_buffers_rw(desc, buf, tag, offset, size, false, false, false);
+	return o_buffers_rw(desc, buf, tag, offset, size, false, if_exists, false);
 }
 
 bool
-o_buffers_read_if_exists(OBuffersDesc *desc, Pointer buf, uint32 tag,
-						 int64 offset, int64 size)
+o_buffers_write(OBuffersDesc *desc, Pointer buf, uint32 tag,
+				int64 offset, int64 size, bool if_exists, bool mark_clean)
 {
-	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
-	return o_buffers_rw(desc, buf, tag, offset, size, false, true, false);
-}
-
-void
-o_buffers_write(OBuffersDesc *desc, Pointer buf, uint32 tag, int64 offset, int64 size)
-{
-	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
-	o_buffers_rw(desc, buf, tag, offset, size, true, false, false);
-}
-
-/*
- * Like o_buffers_write(), but leaves the touched cache buffers clean instead
- * of dirty and performs no disk write.  The undo/xidmap eviction paths use
- * this for ring pages a checkpoint-time flush already pushed to disk: the data
- * is already durable, so this just refreshes the (possibly stale) cache copy
- * to match the ring without dirtying it -- a later read then never sees a
- * stale copy, and the buffer is never written back over the on-disk image.
- */
-void
-o_buffers_write_clean(OBuffersDesc *desc, Pointer buf, uint32 tag,
-					  int64 offset, int64 size)
-{
-	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
-	o_buffers_rw(desc, buf, tag, offset, size, true, false, true);
-}
-
-bool
-o_buffers_write_if_exists(OBuffersDesc *desc, Pointer buf, uint32 tag,
-						  int64 offset, int64 size)
-{
-	Assert(OBuffersMaxTagIsValid(tag) && offset >= 0 && size > 0);
-	return o_buffers_rw(desc, buf, tag, offset, size, true, true, false);
+	return o_buffers_rw(desc, buf, tag, offset, size, true,
+						if_exists, mark_clean);
 }
 
 /*

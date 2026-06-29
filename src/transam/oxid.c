@@ -725,7 +725,7 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 	Assert(oxid < pg_atomic_read_u64(&xid_meta->writtenXmin));
 	o_buffers_write(&buffersDesc, (Pointer) &csn, OXID_BUFFERS_TAG,
 					oxid * sizeof(OXidMapItem) + offsetof(OXidMapItem, csn),
-					sizeof(CommitSeqNo));
+					sizeof(CommitSeqNo), false, false);
 }
 
 /*
@@ -770,7 +770,7 @@ set_oxid_xlog_ptr_internal(OXid oxid, XLogRecPtr ptr)
 	Assert(oxid < pg_atomic_read_u64(&xid_meta->writtenXmin));
 	o_buffers_write(&buffersDesc, (Pointer) &ptr, OXID_BUFFERS_TAG,
 					oxid * sizeof(OXidMapItem) + offsetof(OXidMapItem, commitPtr),
-					sizeof(XLogRecPtr));
+					sizeof(XLogRecPtr), false, false);
 }
 
 void
@@ -827,7 +827,7 @@ map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr, bool getRawCsn)
 	Assert(oxid < pg_atomic_read_u64(&xid_meta->writtenXmin));
 	o_buffers_read(&buffersDesc, (Pointer) &mapItem, OXID_BUFFERS_TAG,
 				   oxid * sizeof(OXidMapItem),
-				   sizeof(OXidMapItem));
+				   sizeof(OXidMapItem), false);
 
 	/* Recheck if globalXmin was advanced concurrently */
 	if (oxid < pg_atomic_read_u64(&xid_meta->globalXmin))
@@ -948,18 +948,12 @@ write_xidsmap(OXid targetXmax)
 		else
 			dirty = xid_buffer_page_dirty(page);
 
-		if (dirty)
-			o_buffers_write(&buffersDesc,
-							(Pointer) &buffer[writeStart % bufferLength],
-							OXID_BUFFERS_TAG,
-							writeStart * sizeof(OXidMapItem),
-							(writeEnd - writeStart) * sizeof(OXidMapItem));
-		else
-			o_buffers_write_clean(&buffersDesc,
-								  (Pointer) &buffer[writeStart % bufferLength],
-								  OXID_BUFFERS_TAG,
-								  writeStart * sizeof(OXidMapItem),
-								  (writeEnd - writeStart) * sizeof(OXidMapItem));
+		o_buffers_write(&buffersDesc,
+						(Pointer) &buffer[writeStart % bufferLength],
+						OXID_BUFFERS_TAG,
+						writeStart * sizeof(OXidMapItem),
+						(writeEnd - writeStart) * sizeof(OXidMapItem),
+						false, !dirty);
 
 		pageOxid = writeEnd;
 	}

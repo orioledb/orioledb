@@ -334,7 +334,7 @@ log_print_rewind_queue(void)
 		o_buffers_read(&rewindBuffersDesc,
 					   (Pointer) &buffer, REWIND_BUFFERS_TAG,
 					   pos * sizeof(RewindItem),
-					   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
+					   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem), false);
 
 		for (i = 0; i < REWIND_DISK_BUFFER_LENGTH; i++)
 		{
@@ -437,7 +437,8 @@ do_rewind(int rewind_mode, int rewind_time, TimestampTz rewindStartTimeStamp, OX
 				o_buffers_read(&rewindBuffersDesc,
 							   (Pointer) &tmpbuf, REWIND_BUFFERS_TAG,
 							   (pos - REWIND_DISK_BUFFER_LENGTH + 1) * sizeof(RewindItem),
-							   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
+							   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem),
+							   false);
 				k = REWIND_DISK_BUFFER_LENGTH;
 			}
 			k--;
@@ -1097,18 +1098,19 @@ try_restore_evicted_rewind_page(void)
 			o_buffers_read(&rewindBuffersDesc,
 						   (Pointer) &rewindCompleteBuffer[start], REWIND_BUFFERS_TAG,
 						   rewindMeta->restorePos * sizeof(RewindItem),
-						   length_to_end * sizeof(RewindItem));
+						   length_to_end * sizeof(RewindItem), false);
 			o_buffers_read(&rewindBuffersDesc,
 						   (Pointer) &rewindCompleteBuffer[0], REWIND_BUFFERS_TAG,
 						   (rewindMeta->restorePos + length_to_end) * sizeof(RewindItem),
-						   (REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem));
+						   (REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem),
+						   false);
 		}
 		else
 		{
 			o_buffers_read(&rewindBuffersDesc,
 						   (Pointer) &rewindCompleteBuffer[start], REWIND_BUFFERS_TAG,
 						   rewindMeta->restorePos * sizeof(RewindItem),
-						   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
+						   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem), false);
 		}
 
 #ifdef USE_ASSERT_CHECKING
@@ -1490,13 +1492,15 @@ evict_rewind_items(uint64 curAddPosFilled)
 								(Pointer) &rewindAddBuffer[start],
 								REWIND_BUFFERS_TAG,
 								pg_atomic_read_u64(&rewindMeta->evictPos) * sizeof(RewindItem),
-								length_to_end * sizeof(RewindItem));
+								length_to_end * sizeof(RewindItem),
+								false, false);
 
 				o_buffers_write(&rewindBuffersDesc,
 								(Pointer) &rewindAddBuffer[0],
 								REWIND_BUFFERS_TAG,
 								(pg_atomic_read_u64(&rewindMeta->evictPos) + length_to_end) * sizeof(RewindItem),
-								(REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem));
+								(REWIND_DISK_BUFFER_LENGTH - length_to_end) * sizeof(RewindItem),
+								false, false);
 			}
 			else
 			{
@@ -1504,7 +1508,8 @@ evict_rewind_items(uint64 curAddPosFilled)
 								(Pointer) &rewindAddBuffer[start],
 								REWIND_BUFFERS_TAG,
 								pg_atomic_read_u64(&rewindMeta->evictPos) * sizeof(RewindItem),
-								REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
+								REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem),
+								false, false);
 			}
 
 			/* Clean written items from ring buffer */
@@ -1887,7 +1892,8 @@ checkpoint_write_rewind_xids(void)
 			o_buffers_read(&rewindBuffersDesc,
 						   (Pointer) &buffer, REWIND_BUFFERS_TAG,
 						   startbuf * sizeof(RewindItem),
-						   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem));
+						   REWIND_DISK_BUFFER_LENGTH * sizeof(RewindItem),
+						   false);
 			buffer_loaded = true;
 		}
 
