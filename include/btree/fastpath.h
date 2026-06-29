@@ -32,13 +32,13 @@
 #define FASTPATH_FIND_DOWNLINK_FLAG_LAST (2)
 
 /*
- * Array-search routine over a fixed-stride column.  "descending" selects the
- * DESC-ordered variant (values stored high-to-low) so the same routines serve
- * both index orderings.
+ * Array-search routine over a fixed-stride column.  "ascending" mirrors
+ * OIndexField.ascending: false selects the DESC-ordered variant (values stored
+ * high-to-low) so the same routines serve both index orderings.
  */
 typedef void (*ArraySearchFunc) (Pointer p, int stride,
 								 int *lower, int *upper, Datum keyDatum,
-								 bool descending);
+								 bool ascending);
 
 typedef struct
 {
@@ -51,7 +51,7 @@ typedef struct
 	ArraySearchFunc funcs[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
 	Datum		values[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
 	uint8		flags[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
-	bool		descending[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
+	bool		ascending[FASTPATH_FIND_DOWNLINK_MAX_KEYS];
 } FastpathFindDownlinkMeta;
 
 typedef enum
