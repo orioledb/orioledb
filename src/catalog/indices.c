@@ -665,6 +665,23 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		}
 	}
 
+	/*
+	 * Verify or create tablespace directory for defined secondary index if it
+	 * have to be located in differen tablespace then the table, but table is
+	 * an empty yet.
+	 */
+	if (!is_build && table_index->type != oIndexPrimary && o_table->tablespace != tablespace)
+	{
+		char	   *prefix;
+		char	   *db_prefix;
+
+		o_get_prefixes_for_tablespace(MyDatabaseId, tablespace,
+										&prefix, &db_prefix);
+		o_verify_dir_exists_or_create(prefix, NULL, NULL);
+		o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+		pfree(db_prefix);
+	}
+
 	if (reindex)
 	{
 		o_invalidate_oids(table_index->oids);

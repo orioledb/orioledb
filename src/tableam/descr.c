@@ -1284,6 +1284,44 @@ o_invalidate_descrs(Oid datoid, Oid reloid, Oid relfilenode)
 	o_stop_saving_inval_messages(was_saving);
 }
 
+List* o_evict_db_relations(Oid datoid)
+{
+	HASH_SEQ_STATUS scan_status;
+	OTableDescr *tableDescr;
+	List *evicted = NIL;
+
+	Assert(!have_locked_pages());
+
+	hash_seq_init(&scan_status, oTableDescrHash);
+	while ((tableDescr = (OTableDescr *) hash_seq_search(&scan_status)) != NULL)
+	{
+		if (tableDescr->oids.datoid == datoid)
+		{
+			int treen;
+			BTreeDescr *td;
+			table_descr_inc_refcnt(tableDescr);
+			for (treen = tableDescr->nIndices - 1; treen >= 0; treen--)
+			{
+				td = &tableDescr->indices[treen]->desc;
+				write_tree_pages(td, -1, true);
+				evicted = lappend_oid(evicted, td->oids.relnode);
+			}
+			table_descr_dec_refcnt(tableDescr);
+			{
+				bool		delete = tableDescr->refcnt == 0;
+
+				if (!delete)
+					delete = !recreate_table_descr(tableDescr);
+
+				if (delete)
+					table_descr_delete_from_hash(tableDescr);
+			}
+		}
+	}
+
+	return evicted;
+}
+
 SharedRootInfo *
 o_find_shared_root_info(SharedRootInfoKey *key)
 {

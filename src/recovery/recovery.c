@@ -31,6 +31,7 @@
 #include "recovery/wal_reader.h"
 #include "replication/walreceiver.h"
 #include "storage/itemptr.h"
+#include "storage/copydir.h"
 #include "tableam/descr.h"
 #include "tableam/operations.h"
 #include "tableam/tree.h"
@@ -48,6 +49,7 @@
 #include "access/hash.h"
 #include "access/xlog_internal.h"
 #include "access/xlogrecovery.h"
+#include "access/xlogutils.h"
 #include "lib/ilist.h"
 #include "lib/pairingheap.h"
 #include "miscadmin.h"
@@ -58,9 +60,11 @@
 #include "storage/ipc.h"
 #include "storage/shm_mq.h"
 #include "storage/standby.h"
+#include "storage/lmgr.h"
 #include "utils/memdebug.h"
 #include "utils/memutils.h"
 #include "utils/typcache.h"
+#include "catalog/pg_database.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -3917,6 +3921,114 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 }
 
 static void
+handle_movedb(Oid dbOid, Oid src_tblspcoid, Oid dst_tblspcoid)
+{
+	char *src_dbpath = NULL;
+	char *dst_dbpath = NULL;
+	char *dst_prefix = NULL;
+	char *dst_prefix_copy = NULL;
+	DIR		   *dstdir;
+	struct dirent *xlde;
+	List *evicted = NIL;
+	ListCell *lc;
+
+	/*
+	 * Prepare stage of moving: check destination directory.
+	 */
+	o_get_prefixes_for_tablespace(dbOid, src_tblspcoid, NULL, &src_dbpath);
+	o_get_prefixes_for_tablespace(dbOid, dst_tblspcoid, &dst_prefix, &dst_dbpath);
+
+	dstdir = AllocateDir(dst_dbpath);
+	if (dstdir != NULL)
+	{
+		while ((xlde = ReadDir(dstdir, dst_dbpath)) != NULL)
+		{
+			if (strcmp(xlde->d_name, ".") == 0 ||
+				strcmp(xlde->d_name, "..") == 0)
+				continue;
+
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("some relations of database \"%d\" are already in tablespace \"%d\"",
+							dbOid, dst_tblspcoid),
+					 errhint("You must move them back to the database's default tablespace before using this command.")));
+		}
+
+		FreeDir(dstdir);
+
+		/*
+		 * The directory exists but is empty. We must remove it before using
+		 * the copydir function.
+		 */
+		if (rmdir(dst_dbpath) != 0)
+			elog(ERROR, "could not remove directory \"%s\": %m",
+				 dst_dbpath);
+	}
+
+	if (InHotStandby)
+	{
+		/*
+		 * Lock database while we resolve conflicts to ensure that
+		 * InitPostgres() cannot fully re-execute concurrently. This
+		 * avoids backends re-connecting automatically to same database,
+		 * which can happen in some cases.
+		 *
+		 * This will lock out walsenders trying to connect to db-specific
+		 * slots for logical decoding too, so it's safe for us to drop
+		 * slots.
+		 */
+		LockSharedObjectForSession(DatabaseRelationId, dbOid, 0, AccessExclusiveLock);
+		ResolveRecoveryConflictWithDatabase(dbOid);
+	}
+
+	/*
+	 * Evict all relation related to the moved database. As soon as all backends
+	 * are terminated and LockSharedObjectForSession is acquired, no new pages
+	 * will appear in page pool till the and of moving database.
+	 */
+	dst_prefix_copy = pstrdup(dst_prefix);
+	evicted = o_evict_db_relations(dbOid);
+
+	o_verify_dir_exists_or_create(dst_prefix_copy, NULL, NULL);
+	copydir(src_dbpath, dst_dbpath, false);
+
+	/*
+	 * Change tablespace in evicted meta data as well.
+	 */
+	foreach(lc, evicted)
+	{
+		EvictedTreeData *evicted_data = NULL;
+		Oid relnode = lfirst_oid(lc);
+		evicted_data = read_evicted_data(dbOid, relnode, true);
+
+		if (evicted_data != NULL)
+		{
+			evicted_data->freeBuf.tag.key.tablespace = dst_tblspcoid;
+			evicted_data->nextChkp.tag.key.tablespace = dst_tblspcoid;
+			evicted_data->tmpBuf.tag.key.tablespace = dst_tblspcoid;
+			insert_evicted_data(evicted_data);
+		}
+	}
+
+	rmtree(src_dbpath, true);
+
+	if (InHotStandby)
+	{
+		/*
+			* Release locks prior to commit. XXX There is a race condition
+			* here that may allow backends to reconnect, but the window for
+			* this is small because the gap between here and commit is mostly
+			* fairly small and it is unlikely that people will be dropping
+			* databases that we are trying to connect to anyway.
+			*/
+		UnlockSharedObjectForSession(DatabaseRelationId, dbOid, 0, AccessExclusiveLock);
+	}
+	pfree(dst_prefix_copy);
+	pfree(src_dbpath);
+	pfree(dst_dbpath);
+}
+
+static void
 invalidate_typcache(void)
 {
 	SharedInvalidationMessage msg;
@@ -4160,6 +4272,10 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			cur_recovery_xid_state->o_tables_meta_locked = true;
 			elog(DEBUG3, "[%s] META_LOCK for [ %u %u %u ] ctx->sys_tree_num %d", __func__,
 				 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode, ctx->sys_tree_num);
+			break;
+
+		case WAL_REC_DATABASE_COPY:
+			handle_movedb(rec->u.dbcopy.datOid, rec->u.dbcopy.src_tblspc, rec->u.dbcopy.dst_tblspc);
 			break;
 
 		case WAL_REC_O_TABLES_META_UNLOCK:

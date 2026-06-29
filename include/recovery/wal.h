@@ -189,6 +189,13 @@ typedef struct
 	uint8		origin_lsn[sizeof(XLogRecPtr)];
 } WALRecOriginInfo;
 
+typedef struct
+{
+        uint8           recType;
+        uint8           datid[sizeof(Oid)];
+        uint8           src_tblspc[sizeof(Oid)];
+        uint8           dst_tblspc[sizeof(Oid)];
+} WALRecDbCopy;
 
 #define LOCAL_WAL_BUFFER_SIZE	(8192)
 #define ORIOLEDB_WAL_PREFIX	"o_wal"
@@ -205,6 +212,7 @@ extern void add_switch_logical_xid_wal_record(TransactionId logicalXid_top, Tran
 extern void add_savepoint_wal_record(SubTransactionId parentSubid,
 									 TransactionId prentLogicalXid);
 extern void add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid);
+extern void add_o_database_copy_record(Oid dboid, Oid src_tblspc, Oid dst_tblspc);
 extern bool local_wal_is_empty(void);
 extern XLogRecPtr flush_local_wal(bool isCommit, bool withXactTime);
 extern XLogRecPtr wal_commit(OXid oxid, TransactionId logicalXid,
