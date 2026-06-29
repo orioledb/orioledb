@@ -776,6 +776,8 @@ static void recovery_abort_if_worker_detached(XLogRecPtr target_ptr,
 											  XLogRecPtr current_ptr,
 											  XLogRecPtr retain_ptr,
 											  XLogRecPtr finished_ptr);
+static Jsonb *recovery_target_barrier_stopevent_params(const char *phase,
+													   bool stop_after);
 static void workers_notify_toast_consistent(void);
 static void worker_wait_shutdown(RecoveryWorkerState *worker);
 
@@ -1841,6 +1843,9 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 						 pg_atomic_read_u64(&xid_meta->runXmin),
 						 pg_atomic_read_u64(&xid_meta->globalXmin),
 						 recovery_xmin);
+					STOPEVENT(STOPEVENT_RECOVERY_TARGET_BARRIER,
+							  recovery_target_barrier_stopevent_params("completed",
+																		false));
 					break;
 				}
 
@@ -1880,6 +1885,9 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 						 pg_atomic_read_u64(&xid_meta->runXmin),
 						 pg_atomic_read_u64(&xid_meta->globalXmin),
 						 recovery_xmin);
+					STOPEVENT(STOPEVENT_RECOVERY_TARGET_BARRIER,
+							  recovery_target_barrier_stopevent_params("completed",
+																		false));
 					break;
 				}
 
@@ -1978,6 +1986,9 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 						 LSN_FORMAT_ARGS(retain_ptr),
 						 LSN_FORMAT_ARGS(finished_ptr));
 
+					STOPEVENT(STOPEVENT_RECOVERY_TARGET_BARRIER,
+							  recovery_target_barrier_stopevent_params("completed",
+																		false));
 					break;
 				}
 			}
@@ -2040,6 +2051,9 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 						 LSN_FORMAT_ARGS(current_ptr),
 						 LSN_FORMAT_ARGS(retain_ptr),
 						 LSN_FORMAT_ARGS(finished_ptr));
+					STOPEVENT(STOPEVENT_RECOVERY_TARGET_BARRIER,
+							  recovery_target_barrier_stopevent_params("completed",
+																		true));
 					break;
 				}
 				else
@@ -2142,6 +2156,9 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 					 LSN_FORMAT_ARGS(retain_ptr),
 					 LSN_FORMAT_ARGS(finished_ptr));
 
+				STOPEVENT(STOPEVENT_RECOVERY_TARGET_BARRIER,
+						  recovery_target_barrier_stopevent_params("completed",
+																	true));
 				break;
 			}
 		}
@@ -2159,6 +2176,25 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 		HandleStartupProcInterrupts();
 #endif
 	}
+}
+
+static Jsonb *
+recovery_target_barrier_stopevent_params(const char *phase, bool stop_after)
+{
+	JsonbParseState *state = NULL;
+	Jsonb	   *res;
+	MemoryContext mctx;
+
+	mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+	jsonb_push_string_key(&state, "phase", phase);
+	jsonb_push_bool_key(&state, "stopAfter", stop_after);
+	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+
+	MemoryContextSwitchTo(mctx);
+
+	return res;
 }
 
 /*

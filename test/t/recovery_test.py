@@ -3200,7 +3200,7 @@ recovery_target_action = 'pause'
 		node.safe_psql("INSERT INTO tab_int VALUES (generate_series(1,1000))")
 
 		with self.getReplica(has_restoring=True) as replica:
-			replica.append_conf("log_min_messages = DEBUG4")
+			replica.append_conf("orioledb.enable_stopevents = true")
 
 			node.safe_psql(
 			    "INSERT INTO tab_int VALUES (generate_series(1001,2000))")
@@ -3217,28 +3217,25 @@ recovery_target_inclusive = true
 recovery_target_action = 'pause'
 """)
 
+			replica.start()
+			replica.safe_psql("""
+				SELECT pg_stopevent_set(
+					'recovery_target_barrier',
+					'$.phase == "completed" && $.stopAfter == false');
+			""")
+
 			node.safe_psql(
 			    "INSERT INTO tab_int VALUES (generate_series(3001,4000))")
 
-			replica.start()
+			self._wait_stopevent_waiter_pid(replica,
+			                                'recovery_target_barrier')
+			replica.safe_psql(
+			    "SELECT pg_stopevent_reset('recovery_target_barrier');")
+
 			replica.poll_query_until("SELECT pg_is_wal_replay_paused()",
 			                         expected=True)
 
 			self._assert_visible_series(replica, 3000, 3000)
-
-			replica_log = self._read_replica_log_until_barrier_completed(
-			    replica, stop_after=False)
-
-			self._assert_stop_before_barrier_logs(replica_log)
-			self._assert_log_contains_any(replica_log, [
-			    "Recovery target reached: waiting for a published visible "
-			    "boundary before stop",
-			    "Recovery target reached: waiting for startup retain "
-			    "bookkeeping to catch up with the published visible "
-			    "boundary",
-			    "Recovery target reached: stop-before synchronization "
-			    "barrier completed"
-			])
 
 	def test_recovery_target_time_barrier_stop_before_base_backup(self):
 		node = self.node
