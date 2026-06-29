@@ -193,8 +193,8 @@ partial_load_full_page(PartialPageState *partial, Page img)
 			return false;
 	}
 
-	/* btree_page_reorg() checks the free-space tail is zeroed under Valgrind. */
-	null_unused_bytes(img);
+	/* btree_page_reorg() checks the whole page is defined under Valgrind. */
+	VALGRIND_MAKE_MEM_DEFINED(img, ORIOLEDB_BLCKSZ);
 
 	partial->isPartial = false;
 	return true;

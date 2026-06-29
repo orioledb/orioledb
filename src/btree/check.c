@@ -24,6 +24,7 @@
 #include "recovery/recovery.h"
 #include "tableam/descr.h"
 #include "utils/compress.h"
+#include "utils/memdebug.h"
 #include "utils/page_pool.h"
 #include "utils/seq_buf.h"
 #include "utils/ucm.h"
@@ -752,7 +753,7 @@ btree_check_compression_recursive(BTreeDescr *desc, BTreeCompressStats *stats, O
 	}
 
 	memcpy(buf, p, ORIOLEDB_BLCKSZ);
-	null_unused_bytes(buf);
+	VALGRIND_MAKE_MEM_DEFINED(buf, ORIOLEDB_BLCKSZ);
 
 	PG_TRY();
 	{

@@ -506,18 +506,6 @@ page_get_vacated_space(BTreeDescr *desc, Page p, CommitSeqNo csn)
 	return page_get_vacated_skip_item(desc, p, csn, -1);
 }
 
-/*
- * Sets to 0 unused space on the page.
- */
-void
-null_unused_bytes(Page img)
-{
-	BTreePageHeader *header = (BTreePageHeader *) img;
-
-	memset((Pointer) img + header->dataSize, 0,
-		   ORIOLEDB_BLCKSZ - header->dataSize);
-}
-
 void
 page_cut_first_key(Page node)
 {
