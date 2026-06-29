@@ -1455,6 +1455,16 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 			continue;
 		}
 
+		/*
+		 * Backward stepping needs a reliable lokey; mirror the guard in
+		 * btree_iterator_check_load_next_page().
+		 */
+		if (IT_IS_BACKWARD(it) && !btree_find_context_has_lokey(context))
+		{
+			iterator_refind_partial_leaf(it);
+			continue;
+		}
+
 		if (IT_IS_FORWARD(it))
 		{
 			if (!find_right_page(context, &key_buf))
