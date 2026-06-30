@@ -367,6 +367,43 @@ INSERT INTO o_test_domain_rollback VALUES ('{10}', 10, '10.10.10.10');
 SELECT * FROM o_test_domain_rollback;
 ROLLBACK;
 
+CREATE TYPE test_ulid;
+
+CREATE FUNCTION test_ulid_in(cstring) RETURNS test_ulid AS 'textin' LANGUAGE internal IMMUTABLE STRICT;
+CREATE FUNCTION test_ulid_out(test_ulid) RETURNS cstring AS 'textout' LANGUAGE internal IMMUTABLE STRICT;
+CREATE TYPE test_ulid (
+    INTERNALLENGTH = variable,
+    INPUT = test_ulid_in,
+    OUTPUT = test_ulid_out,
+    STORAGE = extended
+);
+CREATE FUNCTION test_ulid_eq(test_ulid, test_ulid) RETURNS boolean AS 'texteq' LANGUAGE internal IMMUTABLE STRICT;
+
+CREATE OPERATOR = (
+    LEFTARG = test_ulid,
+    RIGHTARG = test_ulid,
+    FUNCTION = test_ulid_eq,
+    COMMUTATOR = =
+);
+CREATE FUNCTION test_ulid_hash(test_ulid) RETURNS integer AS 'hashtext' LANGUAGE internal IMMUTABLE STRICT;
+CREATE OPERATOR FAMILY test_ulid_hash_ops USING hash;
+CREATE OPERATOR CLASS test_ulid_hash_ops
+    DEFAULT FOR TYPE test_ulid USING hash
+	FAMILY test_ulid_hash_ops AS
+    OPERATOR 1  = ,
+    FUNCTION 1  test_ulid_hash(test_ulid);
+CREATE FUNCTION test_ulid_cmp(test_ulid, test_ulid) RETURNS integer AS 'bttextcmp' LANGUAGE internal IMMUTABLE STRICT;
+CREATE OPERATOR FAMILY test_ulid_btree_ops USING btree;
+CREATE OPERATOR CLASS test_ulid_btree_ops
+    DEFAULT FOR TYPE test_ulid USING btree
+	FAMILY test_ulid_btree_ops AS
+    OPERATOR 3  = ,
+    FUNCTION 1  test_ulid_cmp(test_ulid, test_ulid);
+
+CREATE TABLE o_test_ulid (
+    id test_ulid PRIMARY KEY
+) USING orioledb;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA types CASCADE;
 RESET search_path;

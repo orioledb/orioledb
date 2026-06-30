@@ -1377,6 +1377,7 @@ o_cache_type_opclasses(Oid datoid, Oid typoid,
 		Oid			sys_datoid;
 		Oid			hash_opf;
 		Oid			hash_opintype;
+		Oid			hash_extended_proc = InvalidOid;
 
 		hash_opf = get_opclass_family(hash_opclass);
 		hash_opintype = get_opclass_input_type(hash_opclass);
@@ -1391,9 +1392,14 @@ o_cache_type_opclasses(Oid datoid, Oid typoid,
 		o_amproc_cache_add_if_needed(datoid, hash_opf, hash_opintype,
 									 hash_opintype, HASHSTANDARD_PROC,
 									 insert_lsn, NULL);
-		o_amproc_cache_add_if_needed(datoid, hash_opf, hash_opintype,
-									 hash_opintype, HASHEXTENDED_PROC,
-									 insert_lsn, NULL);
+		hash_extended_proc = get_opfamily_proc(hash_opf,
+											   hash_opintype,
+											   hash_opintype,
+											   HASHEXTENDED_PROC);
+		if (OidIsValid(hash_extended_proc))
+			o_amproc_cache_add_if_needed(datoid, hash_opf, hash_opintype,
+										 hash_opintype, HASHEXTENDED_PROC,
+										 insert_lsn, NULL);
 
 		o_class_cache_add_if_needed(sys_datoid, AccessMethodOperatorRelationId,
 									sys_lsn, NULL);
