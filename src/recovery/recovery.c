@@ -734,8 +734,10 @@ pg_atomic_uint64 *recovery_published_visible_ptr;
  * boundary relevant to the current stop condition, without inferring that
  * mapping late in the barrier loop.
  */
-static pg_atomic_uint64 *recovery_last_replay_ptr;
-static pg_atomic_uint64 *recovery_last_visible_ptr;
+/* Latest replay-side WAL boundary for a commit-producing recovery event. */
+static XLogRecPtr recovery_last_replay_ptr = InvalidXLogRecPtr;
+/* Oriole-visible transaction boundary paired with recovery_last_replay_ptr. */
+static XLogRecPtr recovery_last_visible_ptr = InvalidXLogRecPtr;
 bool	   *recovery_single_process;
 bool	   *was_in_recovery;
 pg_atomic_uint32 *after_recovery_cleaned;
@@ -811,7 +813,7 @@ recovery_shmem_needs(void)
 	size = add_size(size, CACHELINEALIGN(sizeof(RecoveryUndoLocFlush)));
 	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(RecoveryWorkerPtrs),
 												  recovery_pool_size_guc + recovery_idx_pool_size_guc)));
-	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 6)));
+	size = add_size(size, CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 4)));
 	size = add_size(size, CACHELINEALIGN(sizeof(bool)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint32)));
 	size = add_size(size, CACHELINEALIGN(sizeof(pg_atomic_uint64)));
@@ -865,12 +867,8 @@ recovery_shmem_init(Pointer ptr, bool found)
 	recovery_finished_list_ptr = recovery_ptr + 2;
 	/* 3: startup-published visible boundary */
 	recovery_published_visible_ptr = recovery_ptr + 3;
-	/* 4: last replay boundary seen for a commit-producing event */
-	recovery_last_replay_ptr = recovery_ptr + 4;
-	/* 5: matching Oriole-visible boundary for that event */
-	recovery_last_visible_ptr = recovery_ptr + 5;
 
-	ptr += CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 6));
+	ptr += CACHELINEALIGN(mul_size(sizeof(pg_atomic_uint64), 4));
 
 	was_in_recovery = (bool *) ptr;
 	ptr += CACHELINEALIGN(sizeof(bool));
@@ -913,13 +911,8 @@ recovery_shmem_init(Pointer ptr, bool found)
 		pg_atomic_init_u64(recovery_main_retain_ptr, InvalidXLogRecPtr);
 		pg_atomic_init_u64(recovery_finished_list_ptr, InvalidXLogRecPtr);
 		pg_atomic_init_u64(recovery_published_visible_ptr, InvalidXLogRecPtr);
-
-		/*
-		 * No stop-after replay/visible pair is known until replay reaches a
-		 * commit-producing event and records it explicitly.
-		 */
-		pg_atomic_init_u64(recovery_last_replay_ptr, InvalidXLogRecPtr);
-		pg_atomic_init_u64(recovery_last_visible_ptr, InvalidXLogRecPtr);
+		recovery_last_replay_ptr = InvalidXLogRecPtr;
+		recovery_last_visible_ptr = InvalidXLogRecPtr;
 
 		*was_in_recovery = false;
 		pg_atomic_init_u32(after_recovery_cleaned, 0);
@@ -2232,8 +2225,8 @@ recovery_record_visible_boundary_pair(XLogRecPtr replay_ptr, XLogRecPtr visible_
 	if (XLogRecPtrIsInvalid(replay_ptr) || XLogRecPtrIsInvalid(visible_ptr))
 		return;
 
-	pg_atomic_write_u64(recovery_last_replay_ptr, replay_ptr);
-	pg_atomic_write_u64(recovery_last_visible_ptr, visible_ptr);
+	recovery_last_replay_ptr = replay_ptr;
+	recovery_last_visible_ptr = visible_ptr;
 
 	elog(DEBUG4,
 		 "Recovery visible boundary pair updated "
@@ -2249,8 +2242,8 @@ recovery_read_visible_boundary_pair(XLogRecPtr *replay_ptr, XLogRecPtr *visible_
 	Assert(replay_ptr);
 	Assert(visible_ptr);
 
-	*replay_ptr = pg_atomic_read_u64(recovery_last_replay_ptr);
-	*visible_ptr = pg_atomic_read_u64(recovery_last_visible_ptr);
+	*replay_ptr = recovery_last_replay_ptr;
+	*visible_ptr = recovery_last_visible_ptr;
 }
 
 static XLogRecPtr
