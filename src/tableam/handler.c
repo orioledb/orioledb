@@ -1868,10 +1868,32 @@ static void
 orioledb_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
 					  CommandId cid, int options, BulkInsertState bistate)
 {
+	OTableDescr *descr;
+	OSnapshot	oSnapshot;
+	OXid		oxid;
 	int			i;
 
+	if (OidIsValid(relation->rd_rel->relrewrite))
+		return;
+
+	o_serializable_lock_relation(RelationGetRelid(relation));
+	o_set_current_command(cid);
+	descr = relation_get_descr(relation);
+	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+
+	/*
+	 * Batched path drains adjacent ordered keys into the same primary leaf
+	 * under a single lwlock (see o_tbl_multi_insert).  Single-row or GUC-off
+	 * falls back to per-row.
+	 */
+	if (!orioledb_debug_disable_multi_insert && ntuples > 1)
+	{
+		o_tbl_multi_insert(descr, relation, slots, ntuples, oxid, oSnapshot.csn);
+		return;
+	}
+
 	for (i = 0; i < ntuples; i++)
-		orioledb_tuple_insert(relation, slots[i], cid, options, bistate);
+		o_tbl_insert(descr, relation, slots[i], oxid, oSnapshot.csn);
 }
 
 static void

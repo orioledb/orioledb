@@ -120,6 +120,7 @@ REGRESSCHECKS = btree_sys_check \
 				ioc \
 				iterator \
 				joins \
+				multi_insert \
 				nulls \
 				opclass \
 				parallel_scan \
@@ -212,6 +213,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/logical_test.py \
 						test/t/logical_xid_subxacts_test.py \
 						test/t/merge_into_test.py \
+						test/t/multi_insert_test.py \
 						test/t/not_supported_yet_test.py \
 						test/t/pg_dump_restore_test.py \
 						test/t/parallel_test.py \

@@ -101,6 +101,7 @@ OrioleDBPageDesc *local_ppool_page_descs = NULL;
 
 /* Custom GUC variables */
 int			orioledb_serializable_mode = O_SERIALIZABLE_TABLE_LOCK;
+bool		orioledb_debug_disable_multi_insert = false;
 
 static const struct config_enum_entry serializable_mode_options[] = {
 	{"table_lock", O_SERIALIZABLE_TABLE_LOCK, false},
@@ -509,6 +510,20 @@ _PG_init(void)
 							 &orioledb_serializable_mode,
 							 O_SERIALIZABLE_TABLE_LOCK,
 							 serializable_mode_options,
+							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomBoolVariable("orioledb.debug_disable_multi_insert",
+							 "Disable the batched same-leaf primary insert path.",
+							 "Debug switch.  When on, orioledb_multi_insert falls "
+							 "back to per-row o_tbl_insert instead of draining "
+							 "adjacent ordered keys into the same primary leaf "
+							 "under one lwlock.",
+							 &orioledb_debug_disable_multi_insert,
+							 false,
 							 PGC_USERSET,
 							 0,
 							 NULL,
