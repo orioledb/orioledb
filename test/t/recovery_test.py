@@ -3227,8 +3227,7 @@ recovery_target_action = 'pause'
 			node.safe_psql(
 			    "INSERT INTO tab_int VALUES (generate_series(3001,4000))")
 
-			self._wait_stopevent_waiter_pid(replica,
-			                                'recovery_target_barrier')
+			self._wait_stopevent_waiter_pid(replica, 'recovery_target_barrier')
 			replica.safe_psql(
 			    "SELECT pg_stopevent_reset('recovery_target_barrier');")
 

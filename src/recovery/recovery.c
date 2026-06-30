@@ -736,6 +736,7 @@ pg_atomic_uint64 *recovery_published_visible_ptr;
  */
 /* Latest replay-side WAL boundary for a commit-producing recovery event. */
 static XLogRecPtr recovery_last_replay_ptr = InvalidXLogRecPtr;
+
 /* Oriole-visible transaction boundary paired with recovery_last_replay_ptr. */
 static XLogRecPtr recovery_last_visible_ptr = InvalidXLogRecPtr;
 bool	   *recovery_single_process;
@@ -1838,7 +1839,7 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 						 recovery_xmin);
 					STOPEVENT(STOPEVENT_RECOVERY_TARGET_BARRIER,
 							  recovery_target_barrier_stopevent_params("completed",
-																		false));
+																	   false));
 					break;
 				}
 
@@ -1880,7 +1881,7 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 						 recovery_xmin);
 					STOPEVENT(STOPEVENT_RECOVERY_TARGET_BARRIER,
 							  recovery_target_barrier_stopevent_params("completed",
-																		false));
+																	   false));
 					break;
 				}
 
@@ -1981,7 +1982,7 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 
 					STOPEVENT(STOPEVENT_RECOVERY_TARGET_BARRIER,
 							  recovery_target_barrier_stopevent_params("completed",
-																		false));
+																	   false));
 					break;
 				}
 			}
@@ -2046,7 +2047,7 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 						 LSN_FORMAT_ARGS(finished_ptr));
 					STOPEVENT(STOPEVENT_RECOVERY_TARGET_BARRIER,
 							  recovery_target_barrier_stopevent_params("completed",
-																		true));
+																	   true));
 					break;
 				}
 				else
@@ -2151,7 +2152,7 @@ orioledb_recovery_target_reached_hook(const RecoveryTargetReachedInfo *info)
 
 				STOPEVENT(STOPEVENT_RECOVERY_TARGET_BARRIER,
 						  recovery_target_barrier_stopevent_params("completed",
-																	true));
+																   true));
 				break;
 			}
 		}
