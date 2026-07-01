@@ -2050,11 +2050,6 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 
 					options = (OBTOptions *) index->rd_options;
 
-					/*
-					 * TODO: Remove when parallel index scan will be
-					 * implemented
-					 */
-					info->amcanparallel = false;
 					hasbitmap = info->indexoid != primary->oids.reloid &&
 						primary->nFields <= 1;
 					for (i = 0;
