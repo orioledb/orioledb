@@ -1876,6 +1876,8 @@ reserve_undo_size_extended(UndoLogType undoType, Size size,
 	Assert(!waitForUndoLocation || !have_locked_pages());
 	Assert(undoType != UndoLogNone);
 	Assert(size > 0);
+	Assert(size <= 2 * O_MAX_UNDO_RECORD_SIZE);
+	Assert(reserved_undo_sizes[(int) undoType] <= 2 * O_MAX_UNDO_RECORD_SIZE);
 	Assert(pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].reservedUndoLocation) == InvalidUndoLocation);
 
 	if (undoType == UndoLogSystem && wal_level >= WAL_LEVEL_LOGICAL)
