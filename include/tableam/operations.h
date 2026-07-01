@@ -94,6 +94,9 @@ typedef struct
 extern TupleTableSlot *o_tbl_insert(OTableDescr *descr, Relation relation,
 									TupleTableSlot *slot, OXid oxid,
 									CommitSeqNo csn);
+extern void o_tbl_multi_insert(OTableDescr *descr, Relation relation,
+							   TupleTableSlot **slots, int ntuples,
+							   OXid oxid, CommitSeqNo csn);
 extern TupleTableSlot *o_tbl_insert_with_arbiter(Relation rel,
 												 OTableDescr *descr,
 												 TupleTableSlot *slot,

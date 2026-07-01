@@ -960,6 +960,211 @@ o_btree_insert_needs_page_undo(BTreeDescr *desc, Page p)
 	return needsUndo;
 }
 
+/*
+ * Per-item pre-check shared by o_btree_insert_item_with_waiters()
+ * branch and o_btree_multi_insert_item(): hikey gate, btree_page_search,
+ * raw fit check, duplicate-at-locator probe.  Positions *loc on success
+ * and on Duplicate (so the caller can read the conflicting tuple if it
+ * wants); leaves it indeterminate on HikeyCrossed (no search was done)
+ * and may leave it positioned-but-unfit on NoFit.
+ *
+ * key/keyType match how the caller addresses the new item: waiters pass
+ * the leaf tuple itself with BTreeKeyLeafTuple, the multi-insert driver
+ * passes the precomputed OBTreeKeyBound with BTreeKeyBound.
+ */
+static BTreeLeafProbeResult
+btree_leaf_probe_insert_slot(BTreeDescr *desc, Page p, bool rightmost,
+							 OTuple *hikey,
+							 Pointer key, BTreeKeyType keyType,
+							 LocationIndex newItemSize,
+							 BTreePageItemLocator *loc)
+{
+	if (!rightmost &&
+		o_btree_cmp(desc, hikey, BTreeKeyNonLeafKey, key, keyType) <= 0)
+		return BTreeLeafProbeHikeyCrossed;
+
+	btree_page_search(desc, p, key, keyType, NULL, loc);
+
+	if (!page_locator_fits_new_item(p, loc, newItemSize))
+		return BTreeLeafProbeNoFit;
+
+	if (BTREE_PAGE_LOCATOR_IS_VALID(p, loc))
+	{
+		OTuple		existing;
+
+		BTREE_PAGE_READ_LEAF_TUPLE(existing, p, loc);
+		if (o_btree_cmp(desc, key, keyType,
+						&existing, BTreeKeyLeafTuple) == 0)
+			return BTreeLeafProbeDuplicate;
+	}
+
+	return BTreeLeafProbeFits;
+}
+
+/*
+ * Write one new leaf item at *loc.  Shared page-write body for
+ * o_btree_insert_item_with_waiters() and o_btree_multi_insert_item().
+ * Caller has positioned loc, made any undo record, decided that the
+ * item fits, and entered the critical section.  Caller follows
+ * with optional page_split_chunk_if_needed() + MARK_DIRTY.
+ */
+static inline void
+btree_leaf_write_new_item(BTreeDescr *desc, Page p,
+						  BTreePageItemLocator *loc,
+						  const BTreeLeafTuphdr *tuphdr,
+						  OTuple tuple, LocationIndex tuplen)
+{
+	BTreePageHeader *header = (BTreePageHeader *) p;
+	LocationIndex newItemSize = MAXALIGN(tuplen) + BTreeLeafTuphdrSize;
+	LocationIndex keyLen;
+	Pointer		ptr;
+
+	page_locator_insert_item(p, loc, newItemSize);
+	header->prevInsertOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, loc);
+	keyLen = MAXALIGN(o_btree_len(desc, tuple, OTupleKeyLengthNoVersion));
+	header->maxKeyLen = Max(header->maxKeyLen, keyLen);
+
+	ptr = BTREE_PAGE_LOCATOR_GET_ITEM(p, loc);
+	memcpy(ptr, tuphdr, BTreeLeafTuphdrSize);
+	ptr += BTreeLeafTuphdrSize;
+	memcpy(ptr, tuple.data, tuplen);
+	BTREE_PAGE_SET_ITEM_FLAGS(p, loc, tuple.formatFlags);
+
+	if (!(tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
+		header->chunkDesc[loc->chunkOffset].chunkKeysFixed = 0;
+}
+
+/*
+ * Insert a strict prefix of items[0..nitems-1] into the leaf ctx is parked
+ * on, in one lock cycle.  Returns N, the count inserted:
+ *   items[0..N-1]        inserted, in order.
+ *   items[N]             the item that bailed; *result says why
+ *                        (HikeyCrossed / NoFit / Duplicate).
+ *   items[N+1..nitems-1] untouched.
+ * N == nitems means the whole batch fit; *result is left at Fits.
+ *
+ * The leaf is always unlocked before return.
+ *
+ * Caller is responsible for:
+ *  - ctx points at a LEAF, locked exclusive, no incomplete split
+ *  - desc->ppool->numPagesReserved[PPOOL_RESERVE_INSERT] >= 2
+ *  - keys[] ascending, tuples[] are the matching leaf tuples
+ *  - Reserving enough row-undo for every per-row make_undo_record
+ *    plus one extra row of slack for get_undo_record's buffer-wrap retry,
+ *    so no eviction happens with the leaf locked
+ */
+int
+o_btree_multi_insert_item(OBTreeFindPageContext *ctx,
+						  OTuple *tuples, LocationIndex *tuplens,
+						  Pointer *keys, BTreeKeyType keyType,
+						  int nitems,
+						  OXid opOxid, RowLockMode lockMode,
+						  BTreeModifyCallbackInfo *cb,
+						  void **cb_args,
+						  BTreeLeafProbeResult *result)
+{
+	BTreeDescr *desc = ctx->desc;
+	OInMemoryBlkno blkno;
+	Page		p;
+	BTreePageItemLocator loc;
+	OTupleXactInfo xactInfo;
+	OTuple		hikey;
+	bool		rightmost;
+	bool		needsUndo;
+	int			inserted = 0;
+	int			k;
+
+	Assert(ctx->index >= 0 && ctx->index < ORIOLEDB_MAX_DEPTH);
+	blkno = ctx->items[ctx->index].blkno;
+	p = O_GET_IN_MEMORY_PAGE(blkno);
+	Assert(O_PAGE_IS(p, LEAF));
+	Assert(desc->ppool->numPagesReserved[PPOOL_RESERVE_INSERT] >= 2);
+
+	rightmost = O_PAGE_IS(p, RIGHTMOST);
+	if (!rightmost)
+		BTREE_PAGE_GET_HIKEY(hikey, p);
+
+	xactInfo = OXID_GET_XACT_INFO(OXidIsValid(opOxid) ? opOxid : BootstrapTransactionId,
+								  lockMode, false);
+
+	/*
+	 * Mirrors the needsUndo logic in o_btree_modify_internal (self-created
+	 * shortcut).
+	 */
+	needsUndo = desc->undoType != UndoLogNone;
+	if (!(cb && cb->needsUndoForSelfCreated) &&
+		OXidIsValid(desc->createOxid) &&
+		desc->createOxid == opOxid &&
+		!UndoLocationIsValid(get_subxact_undo_location(desc->undoType)))
+		needsUndo = false;
+
+	page_block_reads(blkno);
+
+	*result = BTreeLeafProbeFits;
+
+	for (k = 0; k < nitems; k++)
+	{
+		OTuple		tuple = tuples[k];
+		LocationIndex tuplen = tuplens[k];
+		LocationIndex newItemSize = MAXALIGN(tuplen) + BTreeLeafTuphdrSize;
+		BTreeLeafTuphdr tuphdr;
+		UndoLocation undoLocation = InvalidUndoLocation;
+
+		*result = btree_leaf_probe_insert_slot(desc, p, rightmost, &hikey,
+											   keys[k], keyType, newItemSize, &loc);
+		if (*result != BTreeLeafProbeFits)
+		{
+			/*
+			 * Items are sorted: HikeyCrossed means every remaining key is
+			 * also past, so the outer driver re-finds the next leaf.  NoFit
+			 * and Duplicate are bailed-to-slow-path conditions.
+			 */
+			break;
+		}
+
+		/*
+		 * Build per-row undo record + tuphdr.  Matches the non-replace branch
+		 * of o_btree_modify_add_undo_record: real undo record goes on the
+		 * undo stack via make_undo_record(), tuphdr.undoLocation in the page
+		 * only carries the command-tag for UndoLogRegular.
+		 */
+		if (needsUndo)
+			undoLocation = make_undo_record(desc, tuple, true,
+											BTreeOperationInsert, blkno,
+											O_PAGE_GET_CHANGE_COUNT(p), NULL);
+
+		tuphdr.xactInfo = xactInfo;
+		tuphdr.deleted = BTreeLeafTupleNonDeleted;
+		tuphdr.chainHasLocks = false;
+		tuphdr.formatFlags = 0;
+		tuphdr.undoLocation = InvalidUndoLocation;
+		if (desc->undoType == UndoLogRegular && !is_recovery_process())
+			tuphdr.undoLocation |= current_command_get_undo_location();
+
+		START_CRIT_SECTION();
+
+		btree_leaf_write_new_item(desc, p, &loc, &tuphdr, tuple, tuplen);
+		page_split_chunk_if_needed(desc, p, &loc);
+		MARK_DIRTY(desc, blkno);
+
+		/*
+		 * Fire the post-undo hook under the page lock so the pendingSkUndoLoc
+		 * marker is installed before the next iteration advances the page --
+		 * matches the ordering in o_btree_modify_insert_update().
+		 */
+		if (cb && cb->postUndoRecorded)
+			cb->postUndoRecorded(needsUndo ? undoLocation : WaitingSkUndoLoc,
+								 cb_args ? cb_args[k] : cb->arg);
+
+		END_CRIT_SECTION();
+
+		inserted++;
+	}
+
+	unlock_page(blkno);
+	return inserted;
+}
+
 static bool
 o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 								 int reserve_kind,
@@ -996,17 +1201,19 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 		totalSize + MAXALIGN(sizeof(LocationIndex)) * (tupleWaitersCount + 1) <=
 		BTREE_PAGE_FREE_SPACE(p))
 	{
+		bool		rightmost = O_PAGE_IS(p, RIGHTMOST);
+		OTuple		hikey;
+
+		if (!rightmost)
+			hikey = page_get_hikey(p);
 
 		page_block_reads(blkno);
 
 		for (i = 0; i <= tupleWaitersCount; i++)
 		{
 			LocationIndex tuplen;
-			LocationIndex keyLen;
-			BTreePageHeader *header = (BTreePageHeader *) p;
 			BTreeLeafTuphdr tuphdr;
 			OTuple		tuple;
-			Pointer		ptr;
 
 			if (i == 0)
 			{
@@ -1020,37 +1227,28 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 			{
 				TupleWaiterInfo *waiterInfo = &tupleWaiterInfos[i - 1];
 				OPageWaiterShmemState *lockerState = &lockerStates[waiterInfo->pgprocno];
+				BTreeLeafProbeResult result;
 
 				tuple.formatFlags = waiterInfo->item.flags;
 				tuple.data = waiterInfo->item.data + BTreeLeafTuphdrSize;
 				tuphdr = *((BTreeLeafTuphdr *) waiterInfo->item.data);
 				tuplen = waiterInfo->item.size - BTreeLeafTuphdrSize;
 
-				if (!O_PAGE_IS(p, RIGHTMOST))
-				{
-					OTuple		hikey;
+				result = btree_leaf_probe_insert_slot(desc, p, rightmost, &hikey,
+													  (Pointer) &tuple, BTreeKeyLeafTuple,
+													  waiterInfo->item.size, &loc);
 
-					hikey = page_get_hikey(p);
-					if (o_btree_cmp(desc, &tuple, BTreeKeyLeafTuple, &hikey, BTreeKeyNonLeafKey) >= 0)
-						continue;
-
-				}
-
-				btree_page_search(desc, p, (Pointer) &tuple,
-								  BTreeKeyLeafTuple, NULL, &loc);
-
-				if (!page_locator_fits_new_item(p, &loc, waiterInfo->item.size))
+				/*
+				 * Waiters arrive in arrival order, not sorted: a stray past
+				 * the hikey or a duplicate doesn't imply later waiters fail
+				 * too, so skip and keep trying.  A non-fit means the page is
+				 * out of slack for the remaining items -- abandon them.
+				 */
+				if (result == BTreeLeafProbeHikeyCrossed ||
+					result == BTreeLeafProbeDuplicate)
+					continue;
+				if (result == BTreeLeafProbeNoFit)
 					break;
-
-				if (BTREE_PAGE_LOCATOR_IS_VALID(p, &loc))
-				{
-					OTuple		existingTup;
-
-					BTREE_PAGE_READ_LEAF_TUPLE(existingTup, p, &loc);
-
-					if (o_btree_cmp(desc, &tuple, BTreeKeyLeafTuple, &existingTup, BTreeKeyLeafTuple) == 0)
-						continue;
-				}
 
 				START_CRIT_SECTION();
 				if (desc->undoType != UndoLogNone)
@@ -1065,27 +1263,12 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 				lockerState->inserted = true;
 			}
 
-			page_locator_insert_item(p, &loc, MAXALIGN(tuplen) + BTreeLeafTuphdrSize);
-			header->prevInsertOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc);
-			keyLen = MAXALIGN(o_btree_len(desc, tuple, OTupleKeyLengthNoVersion));
-			header->maxKeyLen = Max(header->maxKeyLen, keyLen);
-
-			/* Copy new tuple and header */
-			ptr = BTREE_PAGE_LOCATOR_GET_ITEM(p, &loc);
-			memcpy(ptr, &tuphdr, BTreeLeafTuphdrSize);
-			ptr += BTreeLeafTuphdrSize;
-			memcpy(ptr, tuple.data, tuplen);
-			BTREE_PAGE_SET_ITEM_FLAGS(p, &loc, tuple.formatFlags);
-
-			if (!(tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT))
-				header->chunkDesc[loc.chunkOffset].chunkKeysFixed = 0;
+			btree_leaf_write_new_item(desc, p, &loc, &tuphdr, tuple, tuplen);
 			MARK_DIRTY(desc, blkno);
 			END_CRIT_SECTION();
 		}
 
 		unlock_page(blkno);
-
-
 		return true;
 	}
 

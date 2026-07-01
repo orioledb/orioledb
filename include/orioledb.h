@@ -447,6 +447,7 @@ extern Page *local_ppool_pages;
 extern OrioleDBPageDesc *page_descs;
 extern OrioleDBPageDesc *local_ppool_page_descs;
 extern bool remove_old_checkpoint_files;
+extern bool orioledb_debug_disable_multi_insert;
 extern bool skip_unmodified_trees;
 extern bool debug_disable_bgwriter;
 extern MemoryContext btree_insert_context;

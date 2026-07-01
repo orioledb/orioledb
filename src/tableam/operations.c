@@ -16,9 +16,12 @@
 #include "orioledb.h"
 
 #include "btree/btree.h"
+#include "btree/find.h"
+#include "btree/insert.h"
 #include "btree/iterator.h"
 #include "btree/modify.h"
 #include "btree/undo.h"
+#include "utils/page_pool.h"
 #include "indexam/handler.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
@@ -350,7 +353,8 @@ o_apply_new_bridge_index_ctid(OTableDescr *descr, Relation relation,
 		fill_current_oxid_osnapshot(&oxid, &o_snapshot);
 
 		success = (o_tbl_index_insert(descr, descr->bridge, &tuple, bridge_slot,
-									  oxid, o_snapshot.csn, &callbackInfo, UNIQUE_CHECK_YES) == OBTreeModifyResultInserted);
+									  oxid, o_snapshot.csn, &callbackInfo,
+									  UNIQUE_CHECK_YES) == OBTreeModifyResultInserted);
 
 		if (!success && !overflow)
 			o_report_duplicate(relation, descr->bridge, bridge_slot);
@@ -464,7 +468,8 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 								false);
 
 	mres.success = (o_tbl_index_insert(descr, descr->indices[0], NULL, slot,
-									   oxid, csn, &callbackInfo, UNIQUE_CHECK_YES) == OBTreeModifyResultInserted);
+									   oxid, csn, &callbackInfo,
+									   UNIQUE_CHECK_YES) == OBTreeModifyResultInserted);
 
 	/*
 	 * The marker (if any) was already installed under page lock by the
@@ -496,6 +501,333 @@ o_tbl_insert(OTableDescr *descr, Relation relation,
 		o_wal_insert(&primary->desc, tup, relation->rd_rel->relreplident, descr->version);
 
 	return slot;
+}
+
+/*
+ * Comparator for qsort_arg'ing the permutation array idx[] used by
+ * o_tbl_multi_insert when input keys are not monotone.  Sorts indices
+ * by the key bound they refer to.
+ */
+typedef struct MultiInsertSortCtx
+{
+	BTreeDescr *desc;
+	OBTreeKeyBound *keys;
+} MultiInsertSortCtx;
+
+static int
+multi_insert_sort_cmp(const void *a, const void *b, void *arg)
+{
+	MultiInsertSortCtx *cx = (MultiInsertSortCtx *) arg;
+	int			ia = *(const int *) a;
+	int			ib = *(const int *) b;
+
+	return o_btree_cmp(cx->desc,
+					   (Pointer) &cx->keys[ia], BTreeKeyBound,
+					   (Pointer) &cx->keys[ib], BTreeKeyBound);
+}
+
+/*
+ * Multi-row insert with same-leaf batching for the primary index.
+ *
+ * Phase 1: per-slot primary tuple, key bound, ctid + bridge ctid, in-row
+ *          TOAST.
+ *
+ * Phase 2: optimistically assume keys[] are monotone and just verify with
+ *          an O(n) scan; the common cases (CTID-PK by construction,
+ *          ordered explicit-PK COPY) hit this fast path and reuse the
+ *          original arrays in place.  Only if the check fails do we fall
+ *          back to building an idx[] permutation, qsort_arg-ing by key,
+ *          and materializing sorted views of tuples / tuplens / keyptrs /
+ *          cb_args.  The caller's slots[] stays in arrival order so
+ *          copyfrom.c's linenos[] indexing remains valid.  Sorting is
+ *          required because the leaf probe detects "key past this leaf's
+ *          hikey" but not "key before this leaf's lokey", so non-monotone
+ *          input could corrupt downlinks.
+ *
+ * Phase 3: stream sorted keys through primary leaves, holding each leaf's
+ *          lwlock for as many adjacent keys as fit
+ *          (o_btree_multi_insert_item).  Each iteration tops up row-undo
+ *          for the upcoming batch, capped at 2 * O_MAX_UNDO_RECORD_SIZE
+ *          so max_procs concurrent multi_inserts can't outrun the row
+ *          buffer; larger inputs split across iterations.  HikeyCrossed
+ *          re-finds the next leaf; NoFit / Duplicate slow-paths one row
+ *          via o_tbl_index_insert and resumes.
+ *
+ * Phase 4: per-slot TOAST values insert + WAL.
+ *
+ * Slots that aren't already orioledb-typed share a single descr->newTuple
+ * scratch slot and can't be batched -- in that case fall back to per-row
+ * o_tbl_insert before doing any work.
+ */
+void
+o_tbl_multi_insert(OTableDescr *descr, Relation relation,
+				   TupleTableSlot **slots, int ntuples,
+				   OXid oxid, CommitSeqNo csn)
+{
+	OIndexDescr *primary = GET_PRIMARY(descr);
+	BTreeDescr *pdesc = &primary->desc;
+	bool		was_saving;
+	OTuple	   *tuples;
+	LocationIndex *tuplens;
+	OBTreeKeyBound *keys;
+	Pointer    *keyptrs;
+	OBTreeFindPageContext ctx;
+	BTreeModifyCallbackInfo callbackInfo =
+	{
+		.waitCallback = NULL,
+		.modifyDeletedCallback = o_insert_callback,
+		.modifyCallback = NULL,
+		.needsUndoForSelfCreated = false,
+		.postUndoRecorded = set_pending_sk_marker_from_slot
+	};
+	int			i;
+
+	was_saving = o_start_saving_inval_messages();
+	CheckCmdReplicaIdentity(relation, CMD_INSERT);
+	o_stop_saving_inval_messages(was_saving);
+
+	o_btree_load_shmem(pdesc);
+
+	/*
+	 * Non-orioledb slots share descr->newTuple; can't hold N independent
+	 * pre-formed tuples across Phase 3.  Fall back to per-row.
+	 */
+	for (i = 0; i < ntuples; i++)
+	{
+		TupleTableSlot *slot = slots[i];
+
+		if (slot->tts_ops != descr->newTuple->tts_ops ||
+			(((OTableSlot *) slot)->descr != NULL &&
+			 ((OTableSlot *) slot)->descr != descr))
+		{
+			for (i = 0; i < ntuples; i++)
+				o_tbl_insert(descr, relation, slots[i], oxid, csn);
+			return;
+		}
+	}
+
+	tuples = (OTuple *) palloc(sizeof(OTuple) * ntuples);
+	tuplens = (LocationIndex *) palloc(sizeof(LocationIndex) * ntuples);
+	keys = (OBTreeKeyBound *) palloc(sizeof(OBTreeKeyBound) * ntuples);
+	keyptrs = (Pointer *) palloc(sizeof(Pointer) * ntuples);
+
+	/* Phase 1: per-slot prep (ctid, bridge, toast, form, key bound). */
+	for (i = 0; i < ntuples; i++)
+	{
+		TupleTableSlot *slot = slots[i];
+
+		if (primary->primaryIsCtid)
+		{
+			ItemPointerData iptr = btree_ctid_get_and_inc(pdesc);
+
+			tts_orioledb_set_ctid(slot, &iptr);
+		}
+
+		if (descr->bridge)
+			o_apply_new_bridge_index_ctid(descr, relation, slot, csn, true);
+
+		tts_orioledb_toast(slot, descr);
+
+		tuples[i] = tts_orioledb_form_tuple(slot, descr);
+		tuplens[i] = o_tuple_size(tuples[i], &primary->leafSpec);
+		o_btree_check_size_of_tuple(tuplens[i],
+									RelationGetRelationName(relation), false);
+
+		tts_orioledb_fill_key_bound(slot, primary, &keys[i]);
+		keyptrs[i] = (Pointer) &keys[i];
+	}
+
+	/*
+	 * Phase 2: the batch helper assumes keys[] ascend (its probe detects
+	 * "past hikey" but not "before lokey" -- lokey lives in the parent, not
+	 * the leaf, so a key < lokey would silently corrupt the downlink
+	 * invariant).  CTID-PK input is monotone by construction (Phase 1's
+	 * btree_ctid_get_and_inc); explicit-PK COPY may arrive unsorted.
+	 *
+	 * Optimistically assume monotone and just verify with an O(n) scan; the
+	 * common cases pass and Phase 3 consumes the original arrays in place. On
+	 * the first out-of-order pair fall back to sorting: build an idx[]
+	 * permutation, qsort it by key, and materialise sorted views of the
+	 * parallel arrays.  slots[] itself stays in arrival order so the caller's
+	 * linenos[] indexing (copyfrom.c) remains correct; the sorted view's
+	 * cb_args[] and the post-insert bookkeeping resolve back to the original
+	 * slot via idx[].
+	 */
+	{
+		OTuple	   *use_tuples = tuples;
+		LocationIndex *use_tuplens = tuplens;
+		Pointer    *use_keyptrs = keyptrs;
+		void	  **use_cb_args = (void **) slots;
+		int		   *idx = NULL;
+		bool		sorted = true;
+
+		for (i = 1; i < ntuples; i++)
+		{
+			if (o_btree_cmp(pdesc, keyptrs[i - 1], BTreeKeyBound,
+							keyptrs[i], BTreeKeyBound) > 0)
+			{
+				sorted = false;
+				break;
+			}
+		}
+
+		if (!sorted)
+		{
+			MultiInsertSortCtx sortcx = {pdesc, keys};
+			OTuple	   *sorted_tuples;
+			LocationIndex *sorted_tuplens;
+			Pointer    *sorted_keyptrs;
+			void	  **sorted_cb_args;
+
+			idx = (int *) palloc(sizeof(int) * ntuples);
+			for (i = 0; i < ntuples; i++)
+				idx[i] = i;
+			qsort_arg(idx, ntuples, sizeof(int),
+					  multi_insert_sort_cmp, &sortcx);
+
+			sorted_tuples = (OTuple *) palloc(sizeof(OTuple) * ntuples);
+			sorted_tuplens = (LocationIndex *) palloc(sizeof(LocationIndex) * ntuples);
+			sorted_keyptrs = (Pointer *) palloc(sizeof(Pointer) * ntuples);
+			sorted_cb_args = (void **) palloc(sizeof(void *) * ntuples);
+			for (i = 0; i < ntuples; i++)
+			{
+				sorted_tuples[i] = tuples[idx[i]];
+				sorted_tuplens[i] = tuplens[idx[i]];
+				sorted_keyptrs[i] = (Pointer) &keys[idx[i]];
+				sorted_cb_args[i] = slots[idx[i]];
+			}
+			use_tuples = sorted_tuples;
+			use_tuplens = sorted_tuplens;
+			use_keyptrs = sorted_keyptrs;
+			use_cb_args = sorted_cb_args;
+		}
+
+		/* Phase 3: drain into primary leaves. */
+		init_page_find_context(&ctx, pdesc, COMMITSEQNO_INPROGRESS,
+							   BTREE_PAGE_FIND_MODIFY | BTREE_PAGE_FIND_FIX_LEAF_SPLIT);
+
+		i = 0;
+		while (i < ntuples)
+		{
+			OFindPageResult fr PG_USED_FOR_ASSERTS_ONLY;
+			BTreeLeafProbeResult result;
+			int			n;
+			int			remaining = ntuples - i;
+			int			batch = remaining;
+			int			k;
+			int			orig;
+
+			if (pdesc->undoType != UndoLogNone)
+			{
+				Size		need = MAXIMUM_ALIGNOF;
+				Size		maxrow = 0;
+
+				/*
+				 * Bound the batch by the per-backend row-undo share the
+				 * circular buffer is sized for (see undo_shmem_needs); larger
+				 * inputs are processed in successive chunks.  The trailing
+				 * maxrow slot absorbs the one extra `size` that
+				 * get_undo_record may consume on a buffer-wrap retry.
+				 */
+				for (k = 0; k < remaining; k++)
+				{
+					Size		one = MAXALIGN(sizeof(BTreeModifyUndoStackItem) + use_tuplens[i + k]);
+
+					if (k > 0 && need + one + Max(maxrow, one) > 2 * O_MAX_UNDO_RECORD_SIZE)
+						break;
+					need += one;
+					if (one > maxrow)
+						maxrow = one;
+				}
+				batch = k;
+				need += maxrow;
+				reserve_undo_size(pdesc->undoType, need);
+			}
+			ppool_reserve_pages(pdesc->ppool, PPOOL_RESERVE_INSERT, 2);
+
+			fr = find_page(&ctx, use_keyptrs[i], BTreeKeyBound, 0);
+			Assert(fr == OFindPageResultSuccess);
+
+			n = o_btree_multi_insert_item(&ctx,
+										  use_tuples + i, use_tuplens + i,
+										  use_keyptrs + i, BTreeKeyBound,
+										  batch,
+										  oxid, RowLockUpdate,
+										  &callbackInfo,
+										  use_cb_args + i,
+										  &result);
+
+			for (k = 0; k < n; k++)
+			{
+				orig = idx ? idx[i + k] : i + k;
+				((OTableSlot *) slots[orig])->version = o_tuple_get_version(use_tuples[i + k]);
+				pgstat_count_heap_insert(relation, 1);
+				fire_sk_modify_pending_stopevent(descr);
+			}
+			i += n;
+
+			if (i >= ntuples)
+				break;
+
+			/*
+			 * HikeyCrossed -> re-find the next leaf; Fits with i < ntuples
+			 * means the helper exited because the per-batch undo cap was
+			 * reached, not because of a bail condition -- just re-reserve and
+			 * continue.  Slow path runs only on NoFit / Duplicate.
+			 */
+			if (result == BTreeLeafProbeHikeyCrossed ||
+				result == BTreeLeafProbeFits)
+				continue;
+
+			/*
+			 * Slow path for one item.  Resolve back to the original slot so
+			 * o_report_duplicate and the post-undo callback see the row the
+			 * caller submitted, not the sorted-position alias.
+			 */
+			orig = idx ? idx[i] : i;
+			callbackInfo.arg = slots[orig];
+			if (o_tbl_index_insert(descr, primary, &tuples[orig], slots[orig],
+								   oxid, csn, &callbackInfo,
+								   UNIQUE_CHECK_YES) != OBTreeModifyResultInserted)
+			{
+				o_report_apply_conflict(CT_INSERT_EXISTS);
+				o_report_duplicate(relation, primary, slots[orig]);
+			}
+			else
+			{
+				pgstat_count_heap_insert(relation, 1);
+			}
+			fire_sk_modify_pending_stopevent(descr);
+			i++;
+		}
+	}
+
+	/*
+	 * Release any reservation still held (idempotent if the last iteration
+	 * slow-pathed and the modify already released).
+	 */
+	if (pdesc->undoType != UndoLogNone)
+		release_undo_size(pdesc->undoType);
+	ppool_release_reserved(pdesc->ppool, PPOOL_RESERVE_INSERT_MASK);
+
+	/* Phase 4: per-slot TOAST values + WAL. */
+	for (i = 0; i < ntuples; i++)
+	{
+		TupleTableSlot *slot = slots[i];
+		OTuple		tup;
+
+		o_toast_insert_values(relation, descr, slot, oxid, csn);
+		tup = tts_orioledb_form_tuple(slot, descr);
+
+		if (pdesc->storageType == BTreeStoragePersistence)
+			o_wal_insert(pdesc, tup, relation->rd_rel->relreplident,
+						 descr->version);
+	}
+
+	pfree(tuples);
+	pfree(tuplens);
+	pfree(keys);
+	pfree(keyptrs);
 }
 
 static RowLockMode
@@ -1079,7 +1411,8 @@ o_tbl_insert_with_arbiter(Relation rel,
 
 			ioc_arg.conflictIxNum = InvalidIndexNumber;
 			result = o_tbl_index_insert(descr, descr->indices[i], NULL, slot,
-										oxid, csn, &callbackInfo, UNIQUE_CHECK_YES);
+										oxid, csn, &callbackInfo,
+										UNIQUE_CHECK_YES);
 
 			if (result != OBTreeModifyResultInserted)
 			{
