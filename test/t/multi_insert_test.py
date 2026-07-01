@@ -12,7 +12,7 @@ correct conflict semantics under concurrency.
 test_ab_ordered_copy A/B-benchmarks orioledb.debug_disable_multi_insert
 to catch regressions in the batched same-leaf primary insert path
 (o_tbl_multi_insert), which orioledb_multi_insert dispatches to for
-COPY-driven bulk loads.  Gated behind RUN_ORIOLEDB_PERF_TESTS=1.
+COPY-driven bulk loads.  Gated behind ORIOLEDB_RUN_PERF=1.
 """
 
 import io
@@ -36,9 +36,9 @@ VALGRIND = os.environ.get('USE_VALGRIND', '') == '1'
 
 # Perf tests cost minutes (valgrind: 5+ minutes for the 1.4M-row benchmark)
 # and add nothing to correctness coverage already in the concurrency cases
-# and test/sql/multi_insert.sql.  Opt in via RUN_ORIOLEDB_PERF_TESTS=1 from
+# and test/sql/multi_insert.sql.  Opt in via ORIOLEDB_RUN_PERF=1 from
 # a dedicated perf CI job or a manual pre-release run.
-PERF_TESTS = os.environ.get('RUN_ORIOLEDB_PERF_TESTS', '') == '1'
+PERF_TESTS = os.environ.get('ORIOLEDB_RUN_PERF', '') == '1'
 
 
 def _build_csv(n: int) -> str:
@@ -201,7 +201,7 @@ class MultiInsertTest(BaseTest):
 		return time.perf_counter() - start
 
 	@unittest.skipUnless(PERF_TESTS,
-	                     "perf test; set RUN_ORIOLEDB_PERF_TESTS=1 to enable")
+	                     "perf test; set ORIOLEDB_RUN_PERF=1 to enable")
 	def test_ab_ordered_copy(self):
 		node = self.node
 		node.start()
