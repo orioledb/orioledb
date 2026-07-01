@@ -25,6 +25,10 @@ the size of shared memory, where hot data pages of OrioleDB tables are cached.  
 
 The shared memory ring buffer size for older versions of rows and pages.
 
+Each undo type's circular buffer is at least `max_procs * 2 *
+O_MAX_UNDO_RECORD_SIZE` bytes, so the actual buffer at startup may be larger than
+what this GUC requested when `max_procs` is high.
+
 ### `orioledb.recovery_pool_size`
 
 |             |     |
