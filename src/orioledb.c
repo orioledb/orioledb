@@ -556,7 +556,10 @@ _PG_init(void)
 
 	DefineCustomIntVariable("orioledb.undo_buffers",
 							"Size of orioledb engine undo log buffers.",
-							NULL,
+							"Each undo type's circular buffer is at least "
+							"max_procs * 2 * O_MAX_UNDO_RECORD_SIZE bytes, so "
+							"the actual buffer at startup may be larger than "
+							"what this GUC requested when max_procs is high.",
 							&undo_buffers_guc,
 							Max(128, 16 * max_procs),
 							16 * max_procs,
