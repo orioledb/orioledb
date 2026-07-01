@@ -199,7 +199,8 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 
 		if (arrayKey->scan_key >= numPrefixExactKeys)
 		{
-			int			j;
+			int			lo = 0;
+			int			hi = arrayKey->num_elems - 1;
 			bool		isnull;
 			int			attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple,
 															  id,
@@ -209,28 +210,33 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 			bool		found = false;
 			OBTreeValueBound *bound = &low->keys[key->sk_attno - 1];
 			OIndexField *field = &id->fields[key->sk_attno - 1];
+			OComparator *comparator;
 
 			Assert(arrayKey->num_elems > 0);
 
-			for (j = 0; j < arrayKey->num_elems; j++)
+			if (o_bound_is_coercible(bound, field))
+				comparator = field->comparator;
+			else
+				comparator = bound->comparator;
+
+			while (lo <= hi)
 			{
+				int			mid = lo + (hi - lo) / 2;
 				int			cmp;
 
-				if (o_bound_is_coercible(bound, field))
-				{
-					cmp = o_call_comparator(field->comparator,
-											value, arrayKey->elem_values[j]);
-				}
-				else
-				{
-					cmp = o_call_comparator(bound->comparator,
-											value, arrayKey->elem_values[j]);
-				}
+				cmp = o_call_comparator(comparator,
+										value, arrayKey->elem_values[mid]);
+				if (!field->ascending)
+					cmp = -cmp;
 				if (cmp == 0)
 				{
 					found = true;
 					break;
 				}
+				else if (cmp < 0)
+					hi = mid - 1;
+				else
+					lo = mid + 1;
 			}
 
 			if (!found)
