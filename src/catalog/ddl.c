@@ -118,6 +118,7 @@ static List *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
 static List *o_alter_generated_column_id = NIL;
 static List *dropped_attrs = NIL;
+static bool o_composite_alter_index_safe = false;
 Oid			o_saved_relrewrite = InvalidOid;
 static Oid	o_saved_reltablespace = InvalidOid;
 List	   *o_reuse_indices = NIL;
@@ -959,6 +960,33 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		dropped_attrs = NIL;
 
 		/*
+		 * ALTER TYPE ADD ATTRIBUTE on a composite type does not alter the
+		 * on-disk representation or comparison order of stored composite
+		 * values: existing tuples keep their natts count and the extra
+		 * fields read back as NULL.  Skip the composite-type dependency
+		 * check in that case.  DROP ATTRIBUTE and ALTER ATTRIBUTE TYPE
+		 * change comparison semantics and stay strict.
+		 */
+		o_composite_alter_index_safe = false;
+		if (objtype == OBJECT_TYPE && atstmt->cmds != NIL)
+		{
+			ListCell   *lc;
+			bool		all_safe = true;
+
+			foreach(lc, atstmt->cmds)
+			{
+				AlterTableCmd *cmd = (AlterTableCmd *) lfirst(lc);
+
+				if (cmd->subtype != AT_AddColumn)
+				{
+					all_safe = false;
+					break;
+				}
+			}
+			o_composite_alter_index_safe = all_safe;
+		}
+
+		/*
 		 * Figure out lock mode, and acquire lock.  This also does basic
 		 * permissions checks, so that we won't wait for a lock on (for
 		 * example) a relation on which we have no permissions.
@@ -1100,6 +1128,18 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			}
 			table_close(rel, lockmode);
 		}
+	}
+	else if (IsA(pstmt->utilityStmt, RenameStmt))
+	{
+		RenameStmt *stmt = (RenameStmt *) pstmt->utilityStmt;
+
+		/*
+		 * Renaming a composite type or one of its attributes touches only
+		 * catalog names; stored composite values are unaffected.
+		 */
+		if (stmt->renameType == OBJECT_TYPE ||
+			stmt->renameType == OBJECT_ATTRIBUTE)
+			o_composite_alter_index_safe = true;
 	}
 	else if (IsA(pstmt->utilityStmt, ClusterStmt))
 	{
@@ -1581,11 +1621,17 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		list_free(dropped_attrs);
 		dropped_attrs = NIL;
 
+		o_composite_alter_index_safe = false;
+
 		/*
 		 * Don't free memory explicitly, delegate it to the memory context
 		 * mechanism
 		 */
 		o_added_columns = NIL;
+	}
+	else if (IsA(pstmt->utilityStmt, RenameStmt))
+	{
+		o_composite_alter_index_safe = false;
 	}
 	else if (IsA(pstmt->utilityStmt, CreateStmt))
 	{
@@ -1859,7 +1905,7 @@ o_find_composite_type_dependencies(Oid typeOid, Relation origRelation)
 				}
 
 
-				if (found)
+				if (found && !o_composite_alter_index_safe)
 				{
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),

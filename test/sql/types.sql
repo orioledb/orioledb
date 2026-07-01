@@ -295,15 +295,15 @@ ALTER TABLE o_test_record_type_alter
 	ADD COLUMN val5 record_type_altered NOT NULL
 		DEFAULT (1, 5)::record_type_altered;
 
-ALTER TYPE record_type_non_altered RENAME TO record_type_renamed;
 ALTER TYPE record_type_non_altered DROP ATTRIBUTE b;
 ALTER TYPE record_type_non_altered ADD ATTRIBUTE c int;
 ALTER TYPE record_type_non_altered ALTER ATTRIBUTE b TYPE text;
+ALTER TYPE record_type_non_altered RENAME TO record_type_renamed;
 
-ALTER TYPE record_type_altered RENAME TO record_type_renamed;
-ALTER TYPE record_type_renamed ADD ATTRIBUTE c int;
-ALTER TYPE record_type_renamed DROP ATTRIBUTE b;
-ALTER TYPE record_type_renamed ALTER ATTRIBUTE c TYPE text;
+ALTER TYPE record_type_altered RENAME TO record_type_altered_new;
+ALTER TYPE record_type_altered_new ADD ATTRIBUTE c int;
+ALTER TYPE record_type_altered_new DROP ATTRIBUTE b;
+ALTER TYPE record_type_altered_new ALTER ATTRIBUTE c TYPE text;
 
 SELECT * FROM o_test_record_type_alter;
 UPDATE o_test_record_type_alter SET val5.b = 4;
@@ -312,6 +312,132 @@ SELECT * FROM o_test_record_type_alter;
 SELECT * FROM o_test_record_type_alter WHERE (val5).c % 6 = 0;
 SELECT * FROM o_test_record_type_alter WHERE val4 = 'abc';
 SELECT orioledb_tbl_structure('o_test_record_type_alter'::regclass, 'ne');
+
+-- ALTER TYPE ADD ATTRIBUTE with a composite type inside an array column
+-- covered by a UNIQUE index.
+CREATE TYPE o_test_filter AS (col text, op text, val text);
+CREATE TABLE o_test_filter_tbl
+(
+	id bigint PRIMARY KEY,
+	sub_id uuid NOT NULL,
+	filters o_test_filter[] NOT NULL DEFAULT '{}'
+) USING orioledb;
+CREATE UNIQUE INDEX o_test_filter_tbl_uq ON o_test_filter_tbl (sub_id, filters);
+INSERT INTO o_test_filter_tbl (id, sub_id, filters) VALUES
+	(1, '11111111-1111-1111-1111-111111111111',
+	 ARRAY[('c','eq','v')::o_test_filter]);
+ALTER TYPE o_test_filter ADD ATTRIBUTE negate boolean CASCADE;
+SELECT id, filters FROM o_test_filter_tbl ORDER BY id;
+INSERT INTO o_test_filter_tbl (id, sub_id, filters) VALUES
+	(2, '22222222-2222-2222-2222-222222222222',
+	 ARRAY[('c2','eq','v2',true)::o_test_filter]);
+SELECT id, filters FROM o_test_filter_tbl ORDER BY id;
+INSERT INTO o_test_filter_tbl (id, sub_id, filters) VALUES
+	(3, '11111111-1111-1111-1111-111111111111',
+	 ARRAY[('c','eq','v',NULL)::o_test_filter]);
+
+-- ALTER TYPE ADD ATTRIBUTE with a composite as the primary key column,
+-- mixing pre-ALTER and post-ALTER rows in the same primary tree.
+CREATE TYPE o_test_pk AS (a int, b int);
+CREATE TABLE o_test_pk_tbl (key o_test_pk PRIMARY KEY, v text) USING orioledb;
+INSERT INTO o_test_pk_tbl VALUES
+	((1,10)::o_test_pk, 'r1'),
+	((2,20)::o_test_pk, 'r2'),
+	((3,30)::o_test_pk, 'r3');
+ALTER TYPE o_test_pk ADD ATTRIBUTE c int CASCADE;
+INSERT INTO o_test_pk_tbl VALUES
+	((4,40,400)::o_test_pk, 'r4'),
+	((5,50,NULL)::o_test_pk, 'r5');
+SELECT key, v FROM o_test_pk_tbl ORDER BY key;
+SELECT v FROM o_test_pk_tbl WHERE key = (1,10,NULL)::o_test_pk;
+SELECT v FROM o_test_pk_tbl WHERE key = (4,40,400)::o_test_pk;
+UPDATE o_test_pk_tbl SET v = 'r1u' WHERE key = (1,10,NULL)::o_test_pk;
+SELECT key, v FROM o_test_pk_tbl ORDER BY key;
+-- New-shape probe must collide with an existing pre-ALTER row.
+INSERT INTO o_test_pk_tbl VALUES ((2,20,NULL)::o_test_pk, 'dup');
+SELECT key, v FROM o_test_pk_tbl WHERE key > (2,20,NULL)::o_test_pk ORDER BY key;
+
+-- ALTER TYPE ADD ATTRIBUTE with a bridged (non-orioledb) index over a column
+-- referencing the composite type.
+CREATE TYPE o_test_br AS (a int, b int);
+CREATE TABLE o_test_br_tbl (id int PRIMARY KEY, keys o_test_br[]) USING orioledb;
+INSERT INTO o_test_br_tbl SELECT g,
+	ARRAY[(g, g*10)::o_test_br, (g+1, g*20)::o_test_br]
+	FROM generate_series(1, 3) g;
+CREATE INDEX o_test_br_tbl_gin ON o_test_br_tbl USING gin (keys);
+ALTER TYPE o_test_br ADD ATTRIBUTE c int CASCADE;
+SELECT id, keys FROM o_test_br_tbl ORDER BY id;
+SET enable_seqscan = off;
+SELECT id FROM o_test_br_tbl
+	WHERE keys @> ARRAY[(2, 20, NULL)::o_test_br] ORDER BY id;
+INSERT INTO o_test_br_tbl VALUES (100, ARRAY[(2, 20, 999)::o_test_br]);
+SELECT id FROM o_test_br_tbl
+	WHERE keys @> ARRAY[(2, 20, 999)::o_test_br];
+SELECT id FROM o_test_br_tbl
+	WHERE keys @> ARRAY[(2, 20, NULL)::o_test_br] ORDER BY id;
+RESET enable_seqscan;
+
+-- ALTER TYPE RENAME TO / RENAME ATTRIBUTE with a composite inside an array
+-- column covered by a UNIQUE index.
+CREATE TYPE o_test_rfilter AS (col text, op text, val text);
+CREATE TABLE o_test_rfilter_tbl
+(
+	id bigint PRIMARY KEY,
+	sub_id uuid NOT NULL,
+	filters o_test_rfilter[] NOT NULL DEFAULT '{}'
+) USING orioledb;
+CREATE UNIQUE INDEX o_test_rfilter_tbl_uq
+	ON o_test_rfilter_tbl (sub_id, filters);
+INSERT INTO o_test_rfilter_tbl (id, sub_id, filters) VALUES
+	(1, '11111111-1111-1111-1111-111111111111',
+	 ARRAY[('c','eq','v')::o_test_rfilter]);
+ALTER TYPE o_test_rfilter RENAME ATTRIBUTE val TO value;
+ALTER TYPE o_test_rfilter RENAME TO o_test_rfilter_new;
+SELECT id, filters FROM o_test_rfilter_tbl ORDER BY id;
+INSERT INTO o_test_rfilter_tbl (id, sub_id, filters) VALUES
+	(2, '22222222-2222-2222-2222-222222222222',
+	 ARRAY[('c2','eq','v2')::o_test_rfilter_new]);
+INSERT INTO o_test_rfilter_tbl (id, sub_id, filters) VALUES
+	(3, '11111111-1111-1111-1111-111111111111',
+	 ARRAY[('c','eq','v')::o_test_rfilter_new]);
+SELECT (f).col, (f).op, (f).value
+	FROM o_test_rfilter_tbl, unnest(filters) f ORDER BY id, (f).col;
+
+-- ALTER TYPE RENAME TO / RENAME ATTRIBUTE with a composite as the primary
+-- key column.
+CREATE TYPE o_test_rpk AS (a int, b int);
+CREATE TABLE o_test_rpk_tbl (key o_test_rpk PRIMARY KEY, v text) USING orioledb;
+INSERT INTO o_test_rpk_tbl VALUES
+	((1,10)::o_test_rpk, 'r1'),
+	((2,20)::o_test_rpk, 'r2'),
+	((3,30)::o_test_rpk, 'r3');
+ALTER TYPE o_test_rpk RENAME ATTRIBUTE b TO b_new;
+ALTER TYPE o_test_rpk RENAME TO o_test_rpk_new;
+SELECT key, v FROM o_test_rpk_tbl ORDER BY key;
+SELECT v FROM o_test_rpk_tbl WHERE key = (2,20)::o_test_rpk_new;
+INSERT INTO o_test_rpk_tbl VALUES ((4,40)::o_test_rpk_new, 'r4');
+INSERT INTO o_test_rpk_tbl VALUES ((1,10)::o_test_rpk_new, 'dup');
+SELECT (key).a, (key).b_new, v FROM o_test_rpk_tbl ORDER BY (key).a;
+
+-- ALTER TYPE RENAME TO / RENAME ATTRIBUTE with a bridged (non-orioledb)
+-- index over a column referencing the composite type.
+CREATE TYPE o_test_rbr AS (a int, b int);
+CREATE TABLE o_test_rbr_tbl (id int PRIMARY KEY, keys o_test_rbr[]) USING orioledb;
+INSERT INTO o_test_rbr_tbl SELECT g,
+	ARRAY[(g, g*10)::o_test_rbr, (g+1, g*20)::o_test_rbr]
+	FROM generate_series(1, 3) g;
+CREATE INDEX o_test_rbr_tbl_gin ON o_test_rbr_tbl USING gin (keys);
+ALTER TYPE o_test_rbr RENAME ATTRIBUTE b TO b_new;
+ALTER TYPE o_test_rbr RENAME TO o_test_rbr_new;
+SELECT id, keys FROM o_test_rbr_tbl ORDER BY id;
+SET enable_seqscan = off;
+SELECT id FROM o_test_rbr_tbl
+	WHERE keys @> ARRAY[(2, 20)::o_test_rbr_new] ORDER BY id;
+INSERT INTO o_test_rbr_tbl VALUES
+	(100, ARRAY[(4, 40)::o_test_rbr_new]);
+SELECT id FROM o_test_rbr_tbl
+	WHERE keys @> ARRAY[(4, 40)::o_test_rbr_new];
+RESET enable_seqscan;
 
 -- Test missing with fixed format
 CREATE TABLE o_test_record_type_alter2
