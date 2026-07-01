@@ -664,141 +664,390 @@ SELECT * FROM o_test_record_type_alter;
 ALTER TABLE o_test_record_type_alter
 	ADD COLUMN val5 record_type_altered NOT NULL
 		DEFAULT (1, 5)::record_type_altered;
-ALTER TYPE record_type_non_altered RENAME TO record_type_renamed;
-ERROR:  cannot alter type "record_type_non_altered" because index "o_test_record_type_alter_pkey" uses it
 ALTER TYPE record_type_non_altered DROP ATTRIBUTE b;
 ERROR:  cannot alter type "record_type_non_altered" because index "o_test_record_type_alter_pkey" uses it
 ALTER TYPE record_type_non_altered ADD ATTRIBUTE c int;
-ERROR:  cannot alter type "record_type_non_altered" because index "o_test_record_type_alter_pkey" uses it
 ALTER TYPE record_type_non_altered ALTER ATTRIBUTE b TYPE text;
 ERROR:  cannot alter type "record_type_non_altered" because column "o_test_record_type_alter.key" uses it
-ALTER TYPE record_type_altered RENAME TO record_type_renamed;
-ALTER TYPE record_type_renamed ADD ATTRIBUTE c int;
-ALTER TYPE record_type_renamed DROP ATTRIBUTE b;
-ALTER TYPE record_type_renamed ALTER ATTRIBUTE c TYPE text;
-ERROR:  cannot alter type "record_type_renamed" because column "o_test_record_type_alter.val5" uses it
+ALTER TYPE record_type_non_altered RENAME TO record_type_renamed;
+ALTER TYPE record_type_altered RENAME TO record_type_altered_new;
+ALTER TYPE record_type_altered_new ADD ATTRIBUTE c int;
+ALTER TYPE record_type_altered_new DROP ATTRIBUTE b;
+ALTER TYPE record_type_altered_new ALTER ATTRIBUTE c TYPE text;
+ERROR:  cannot alter type "record_type_altered_new" because column "o_test_record_type_alter.val5" uses it
 SELECT * FROM o_test_record_type_alter;
-   key   | val | val3 | val4 | val5 
----------+-----+------+------+------
- (1,2)   |   5 |   18 | abc  | (1,)
- (2,4)   |   5 |   18 | abc  | (1,)
- (3,6)   |   5 |   18 | abc  | (1,)
- (4,8)   |   5 |   18 | abc  | (1,)
- (5,10)  |   5 |   33 | abc  | (1,)
- (6,12)  |   5 |   33 | abc  | (1,)
- (7,14)  |   5 |   33 | c    | (1,)
- (8,16)  |   5 |   33 | c    | (1,)
- (9,18)  |   5 |   18 | c    | (1,)
- (10,20) |   5 |   18 | abc  | (1,)
- (11,22) |   5 |   11 | b    | (1,)
- (12,24) |   5 |   12 | b    | (1,)
- (13,26) |   5 |   13 | b    | (1,)
- (14,28) |   5 |      | b    | (1,)
- (15,30) |   5 |      | b    | (1,)
+   key    | val | val3 | val4 | val5 
+----------+-----+------+------+------
+ (1,2,)   |   5 |   18 | abc  | (1,)
+ (2,4,)   |   5 |   18 | abc  | (1,)
+ (3,6,)   |   5 |   18 | abc  | (1,)
+ (4,8,)   |   5 |   18 | abc  | (1,)
+ (5,10,)  |   5 |   33 | abc  | (1,)
+ (6,12,)  |   5 |   33 | abc  | (1,)
+ (7,14,)  |   5 |   33 | c    | (1,)
+ (8,16,)  |   5 |   33 | c    | (1,)
+ (9,18,)  |   5 |   18 | c    | (1,)
+ (10,20,) |   5 |   18 | abc  | (1,)
+ (11,22,) |   5 |   11 | b    | (1,)
+ (12,24,) |   5 |   12 | b    | (1,)
+ (13,26,) |   5 |   13 | b    | (1,)
+ (14,28,) |   5 |      | b    | (1,)
+ (15,30,) |   5 |      | b    | (1,)
 (15 rows)
 
 UPDATE o_test_record_type_alter SET val5.b = 4;
-ERROR:  cannot assign to field "b" of column "val5" because there is no such column in data type record_type_renamed
+ERROR:  cannot assign to field "b" of column "val5" because there is no such column in data type record_type_altered_new
 LINE 1: UPDATE o_test_record_type_alter SET val5.b = 4;
                                             ^
 UPDATE o_test_record_type_alter t SET val5.c = (t.key).a * 2;
 SELECT * FROM o_test_record_type_alter;
-   key   | val | val3 | val4 |  val5  
----------+-----+------+------+--------
- (1,2)   |   5 |   18 | abc  | (1,2)
- (2,4)   |   5 |   18 | abc  | (1,4)
- (3,6)   |   5 |   18 | abc  | (1,6)
- (4,8)   |   5 |   18 | abc  | (1,8)
- (5,10)  |   5 |   33 | abc  | (1,10)
- (6,12)  |   5 |   33 | abc  | (1,12)
- (7,14)  |   5 |   33 | c    | (1,14)
- (8,16)  |   5 |   33 | c    | (1,16)
- (9,18)  |   5 |   18 | c    | (1,18)
- (10,20) |   5 |   18 | abc  | (1,20)
- (11,22) |   5 |   11 | b    | (1,22)
- (12,24) |   5 |   12 | b    | (1,24)
- (13,26) |   5 |   13 | b    | (1,26)
- (14,28) |   5 |      | b    | (1,28)
- (15,30) |   5 |      | b    | (1,30)
+   key    | val | val3 | val4 |  val5  
+----------+-----+------+------+--------
+ (1,2,)   |   5 |   18 | abc  | (1,2)
+ (2,4,)   |   5 |   18 | abc  | (1,4)
+ (3,6,)   |   5 |   18 | abc  | (1,6)
+ (4,8,)   |   5 |   18 | abc  | (1,8)
+ (5,10,)  |   5 |   33 | abc  | (1,10)
+ (6,12,)  |   5 |   33 | abc  | (1,12)
+ (7,14,)  |   5 |   33 | c    | (1,14)
+ (8,16,)  |   5 |   33 | c    | (1,16)
+ (9,18,)  |   5 |   18 | c    | (1,18)
+ (10,20,) |   5 |   18 | abc  | (1,20)
+ (11,22,) |   5 |   11 | b    | (1,22)
+ (12,24,) |   5 |   12 | b    | (1,24)
+ (13,26,) |   5 |   13 | b    | (1,26)
+ (14,28,) |   5 |      | b    | (1,28)
+ (15,30,) |   5 |      | b    | (1,30)
 (15 rows)
 
 SELECT * FROM o_test_record_type_alter WHERE (val5).c % 6 = 0;
-   key   | val | val3 | val4 |  val5  
----------+-----+------+------+--------
- (3,6)   |   5 |   18 | abc  | (1,6)
- (6,12)  |   5 |   33 | abc  | (1,12)
- (9,18)  |   5 |   18 | c    | (1,18)
- (12,24) |   5 |   12 | b    | (1,24)
- (15,30) |   5 |      | b    | (1,30)
+   key    | val | val3 | val4 |  val5  
+----------+-----+------+------+--------
+ (3,6,)   |   5 |   18 | abc  | (1,6)
+ (6,12,)  |   5 |   33 | abc  | (1,12)
+ (9,18,)  |   5 |   18 | c    | (1,18)
+ (12,24,) |   5 |   12 | b    | (1,24)
+ (15,30,) |   5 |      | b    | (1,30)
 (5 rows)
 
 SELECT * FROM o_test_record_type_alter WHERE val4 = 'abc';
-   key   | val | val3 | val4 |  val5  
----------+-----+------+------+--------
- (1,2)   |   5 |   18 | abc  | (1,2)
- (2,4)   |   5 |   18 | abc  | (1,4)
- (3,6)   |   5 |   18 | abc  | (1,6)
- (4,8)   |   5 |   18 | abc  | (1,8)
- (5,10)  |   5 |   33 | abc  | (1,10)
- (6,12)  |   5 |   33 | abc  | (1,12)
- (10,20) |   5 |   18 | abc  | (1,20)
+   key    | val | val3 | val4 |  val5  
+----------+-----+------+------+--------
+ (1,2,)   |   5 |   18 | abc  | (1,2)
+ (2,4,)   |   5 |   18 | abc  | (1,4)
+ (3,6,)   |   5 |   18 | abc  | (1,6)
+ (4,8,)   |   5 |   18 | abc  | (1,8)
+ (5,10,)  |   5 |   33 | abc  | (1,10)
+ (6,12,)  |   5 |   33 | abc  | (1,12)
+ (10,20,) |   5 |   18 | abc  | (1,20)
 (7 rows)
 
 SELECT orioledb_tbl_structure('o_test_record_type_alter'::regclass, 'ne');
-                                orioledb_tbl_structure                                 
----------------------------------------------------------------------------------------
- Index o_test_record_type_alter_pkey contents                                         +
- Page 0: level = 0, maxKeyLen = 37, nVacatedBytes = 0                                 +
- state = free, datoid equal, relnode equal, ix_type = primary, dirty                  +
-     Leftmost, Rightmost                                                              +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(5,10)')       +
-     Item 0: offset = 264, tuple = ('(1,2)', '5', '18', 'abc', '(1,2)')               +
-     Item 1: offset = 368, tuple = ('(2,4)', '5', '18', 'abc', '(1,4)')               +
-     Item 2: offset = 472, tuple = ('(3,6)', '5', '18', 'abc', '(1,6)')               +
-     Item 3: offset = 576, tuple = ('(4,8)', '5', '18', 'abc', '(1,8)')               +
-   Chunk 1: offset = 4, location = 680, hikey location = 112, hikey = ('(9,18)')      +
-     Item 4: offset = 688, tuple = ('(5,10)', '5', '33', 'abc', '(1,10)')             +
-     Item 5: offset = 792, tuple = ('(6,12)', '5', '33', 'abc', '(1,12)')             +
-     Item 6: offset = 896, tuple = ('(7,14)', '5', '33', 'c', '(1,14)')               +
-     Item 7: offset = 1000, tuple = ('(8,16)', '5', '33', 'c', '(1,16)')              +
-   Chunk 2: offset = 8, location = 1104, hikey location = 152, hikey = ('(13,26)')    +
-     Item 8: offset = 1112, tuple = ('(9,18)', '5', '18', 'c', '(1,18)')              +
-     Item 9: offset = 1216, tuple = ('(10,20)', '5', '18', 'abc', '(1,20)')           +
-     Item 10: offset = 1320, tuple = ('(11,22)', '5', '11', 'b', '(1,22)')            +
-     Item 11: offset = 1424, tuple = ('(12,24)', '5', '12', 'b', '(1,24)')            +
-   Chunk 3: offset = 12, location = 1528, hikey location = 192                        +
-     Item 12: offset = 1536, tuple = ('(13,26)', '5', '13', 'b', '(1,26)')            +
-     Item 13: offset = 1640, tuple = ('(14,28)', '5', null, 'b', '(1,28)')            +
-     Item 14: offset = 1744, tuple = ('(15,30)', '5', null, 'b', '(1,30)')            +
-                                                                                      +
- Index o_test_record_type_alter_idx1 contents                                         +
- Page 0: level = 0, maxKeyLen = 41, nVacatedBytes = 0                                 +
- state = free, datoid equal, relnode equal, ix_type = regular, clean                  +
-     Leftmost, Rightmost                                                              +
-   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('abc', '(5,10)')+
-     Item 0: offset = 264, tuple = ('abc', '(1,2)')                                   +
-     Item 1: offset = 328, tuple = ('abc', '(2,4)')                                   +
-     Item 2: offset = 392, tuple = ('abc', '(3,6)')                                   +
-     Item 3: offset = 456, tuple = ('abc', '(4,8)')                                   +
-   Chunk 1: offset = 4, location = 520, hikey location = 120, hikey = ('b', '(12,24)')+
-     Item 4: offset = 528, tuple = ('abc', '(5,10)')                                  +
-     Item 5: offset = 592, tuple = ('abc', '(6,12)')                                  +
-     Item 6: offset = 656, tuple = ('abc', '(10,20)')                                 +
-     Item 7: offset = 720, tuple = ('b', '(11,22)')                                   +
-   Chunk 2: offset = 8, location = 776, hikey location = 160, hikey = ('c', '(7,14)') +
-     Item 8: offset = 784, tuple = ('b', '(12,24)')                                   +
-     Item 9: offset = 840, tuple = ('b', '(13,26)')                                   +
-     Item 10: offset = 896, tuple = ('b', '(14,28)')                                  +
-     Item 11: offset = 952, tuple = ('b', '(15,30)')                                  +
-   Chunk 3: offset = 12, location = 1008, hikey location = 200                        +
-     Item 12: offset = 1016, tuple = ('c', '(7,14)')                                  +
-     Item 13: offset = 1072, tuple = ('c', '(8,16)')                                  +
-     Item 14: offset = 1128, tuple = ('c', '(9,18)')                                  +
-                                                                                      +
- Index toast: not loaded                                                              +
+                                 orioledb_tbl_structure                                 
+----------------------------------------------------------------------------------------
+ Index o_test_record_type_alter_pkey contents                                          +
+ Page 0: level = 0, maxKeyLen = 37, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = primary, dirty                   +
+     Leftmost, Rightmost                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('(5,10,)')       +
+     Item 0: offset = 264, tuple = ('(1,2,)', '5', '18', 'abc', '(1,2)')               +
+     Item 1: offset = 368, tuple = ('(2,4,)', '5', '18', 'abc', '(1,4)')               +
+     Item 2: offset = 472, tuple = ('(3,6,)', '5', '18', 'abc', '(1,6)')               +
+     Item 3: offset = 576, tuple = ('(4,8,)', '5', '18', 'abc', '(1,8)')               +
+   Chunk 1: offset = 4, location = 680, hikey location = 112, hikey = ('(9,18,)')      +
+     Item 4: offset = 688, tuple = ('(5,10,)', '5', '33', 'abc', '(1,10)')             +
+     Item 5: offset = 792, tuple = ('(6,12,)', '5', '33', 'abc', '(1,12)')             +
+     Item 6: offset = 896, tuple = ('(7,14,)', '5', '33', 'c', '(1,14)')               +
+     Item 7: offset = 1000, tuple = ('(8,16,)', '5', '33', 'c', '(1,16)')              +
+   Chunk 2: offset = 8, location = 1104, hikey location = 152, hikey = ('(13,26,)')    +
+     Item 8: offset = 1112, tuple = ('(9,18,)', '5', '18', 'c', '(1,18)')              +
+     Item 9: offset = 1216, tuple = ('(10,20,)', '5', '18', 'abc', '(1,20)')           +
+     Item 10: offset = 1320, tuple = ('(11,22,)', '5', '11', 'b', '(1,22)')            +
+     Item 11: offset = 1424, tuple = ('(12,24,)', '5', '12', 'b', '(1,24)')            +
+   Chunk 3: offset = 12, location = 1528, hikey location = 192                         +
+     Item 12: offset = 1536, tuple = ('(13,26,)', '5', '13', 'b', '(1,26)')            +
+     Item 13: offset = 1640, tuple = ('(14,28,)', '5', null, 'b', '(1,28)')            +
+     Item 14: offset = 1744, tuple = ('(15,30,)', '5', null, 'b', '(1,30)')            +
+                                                                                       +
+ Index o_test_record_type_alter_idx1 contents                                          +
+ Page 0: level = 0, maxKeyLen = 41, nVacatedBytes = 0                                  +
+ state = free, datoid equal, relnode equal, ix_type = regular, clean                   +
+     Leftmost, Rightmost                                                               +
+   Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = ('abc', '(5,10,)')+
+     Item 0: offset = 264, tuple = ('abc', '(1,2,)')                                   +
+     Item 1: offset = 328, tuple = ('abc', '(2,4,)')                                   +
+     Item 2: offset = 392, tuple = ('abc', '(3,6,)')                                   +
+     Item 3: offset = 456, tuple = ('abc', '(4,8,)')                                   +
+   Chunk 1: offset = 4, location = 520, hikey location = 120, hikey = ('b', '(12,24,)')+
+     Item 4: offset = 528, tuple = ('abc', '(5,10,)')                                  +
+     Item 5: offset = 592, tuple = ('abc', '(6,12,)')                                  +
+     Item 6: offset = 656, tuple = ('abc', '(10,20,)')                                 +
+     Item 7: offset = 720, tuple = ('b', '(11,22,)')                                   +
+   Chunk 2: offset = 8, location = 776, hikey location = 160, hikey = ('c', '(7,14,)') +
+     Item 8: offset = 784, tuple = ('b', '(12,24,)')                                   +
+     Item 9: offset = 840, tuple = ('b', '(13,26,)')                                   +
+     Item 10: offset = 896, tuple = ('b', '(14,28,)')                                  +
+     Item 11: offset = 952, tuple = ('b', '(15,30,)')                                  +
+   Chunk 3: offset = 12, location = 1008, hikey location = 200                         +
+     Item 12: offset = 1016, tuple = ('c', '(7,14,)')                                  +
+     Item 13: offset = 1072, tuple = ('c', '(8,16,)')                                  +
+     Item 14: offset = 1128, tuple = ('c', '(9,18,)')                                  +
+                                                                                       +
+ Index toast: not loaded                                                               +
  
 (1 row)
 
+-- ALTER TYPE ADD ATTRIBUTE with a composite type inside an array column
+-- covered by a UNIQUE index.
+CREATE TYPE o_test_filter AS (col text, op text, val text);
+CREATE TABLE o_test_filter_tbl
+(
+	id bigint PRIMARY KEY,
+	sub_id uuid NOT NULL,
+	filters o_test_filter[] NOT NULL DEFAULT '{}'
+) USING orioledb;
+CREATE UNIQUE INDEX o_test_filter_tbl_uq ON o_test_filter_tbl (sub_id, filters);
+INSERT INTO o_test_filter_tbl (id, sub_id, filters) VALUES
+	(1, '11111111-1111-1111-1111-111111111111',
+	 ARRAY[('c','eq','v')::o_test_filter]);
+ALTER TYPE o_test_filter ADD ATTRIBUTE negate boolean CASCADE;
+SELECT id, filters FROM o_test_filter_tbl ORDER BY id;
+ id |    filters    
+----+---------------
+  1 | {"(c,eq,v,)"}
+(1 row)
+
+INSERT INTO o_test_filter_tbl (id, sub_id, filters) VALUES
+	(2, '22222222-2222-2222-2222-222222222222',
+	 ARRAY[('c2','eq','v2',true)::o_test_filter]);
+SELECT id, filters FROM o_test_filter_tbl ORDER BY id;
+ id |     filters      
+----+------------------
+  1 | {"(c,eq,v,)"}
+  2 | {"(c2,eq,v2,t)"}
+(2 rows)
+
+INSERT INTO o_test_filter_tbl (id, sub_id, filters) VALUES
+	(3, '11111111-1111-1111-1111-111111111111',
+	 ARRAY[('c','eq','v',NULL)::o_test_filter]);
+ERROR:  duplicate key value violates unique constraint "o_test_filter_tbl_uq"
+DETAIL:  Key (sub_id, filters)=(11111111-1111-1111-1111-111111111111, {"(c,eq,v,)"}) already exists.
+-- ALTER TYPE ADD ATTRIBUTE with a composite as the primary key column,
+-- mixing pre-ALTER and post-ALTER rows in the same primary tree.
+CREATE TYPE o_test_pk AS (a int, b int);
+CREATE TABLE o_test_pk_tbl (key o_test_pk PRIMARY KEY, v text) USING orioledb;
+INSERT INTO o_test_pk_tbl VALUES
+	((1,10)::o_test_pk, 'r1'),
+	((2,20)::o_test_pk, 'r2'),
+	((3,30)::o_test_pk, 'r3');
+ALTER TYPE o_test_pk ADD ATTRIBUTE c int CASCADE;
+INSERT INTO o_test_pk_tbl VALUES
+	((4,40,400)::o_test_pk, 'r4'),
+	((5,50,NULL)::o_test_pk, 'r5');
+SELECT key, v FROM o_test_pk_tbl ORDER BY key;
+    key     | v  
+------------+----
+ (1,10,)    | r1
+ (2,20,)    | r2
+ (3,30,)    | r3
+ (4,40,400) | r4
+ (5,50,)    | r5
+(5 rows)
+
+SELECT v FROM o_test_pk_tbl WHERE key = (1,10,NULL)::o_test_pk;
+ v  
+----
+ r1
+(1 row)
+
+SELECT v FROM o_test_pk_tbl WHERE key = (4,40,400)::o_test_pk;
+ v  
+----
+ r4
+(1 row)
+
+UPDATE o_test_pk_tbl SET v = 'r1u' WHERE key = (1,10,NULL)::o_test_pk;
+SELECT key, v FROM o_test_pk_tbl ORDER BY key;
+    key     |  v  
+------------+-----
+ (1,10,)    | r1u
+ (2,20,)    | r2
+ (3,30,)    | r3
+ (4,40,400) | r4
+ (5,50,)    | r5
+(5 rows)
+
+-- New-shape probe must collide with an existing pre-ALTER row.
+INSERT INTO o_test_pk_tbl VALUES ((2,20,NULL)::o_test_pk, 'dup');
+ERROR:  duplicate key value violates unique constraint "o_test_pk_tbl_pkey"
+DETAIL:  Key (key)=((2,20,)) already exists.
+SELECT key, v FROM o_test_pk_tbl WHERE key > (2,20,NULL)::o_test_pk ORDER BY key;
+    key     | v  
+------------+----
+ (3,30,)    | r3
+ (4,40,400) | r4
+ (5,50,)    | r5
+(3 rows)
+
+-- ALTER TYPE ADD ATTRIBUTE with a bridged (non-orioledb) index over a column
+-- referencing the composite type.
+CREATE TYPE o_test_br AS (a int, b int);
+CREATE TABLE o_test_br_tbl (id int PRIMARY KEY, keys o_test_br[]) USING orioledb;
+INSERT INTO o_test_br_tbl SELECT g,
+	ARRAY[(g, g*10)::o_test_br, (g+1, g*20)::o_test_br]
+	FROM generate_series(1, 3) g;
+CREATE INDEX o_test_br_tbl_gin ON o_test_br_tbl USING gin (keys);
+NOTICE:  index bridging is enabled for orioledb table 'o_test_br_tbl'
+DETAIL:  index access method 'gin' is supported only via index bridging for OrioleDB table
+ALTER TYPE o_test_br ADD ATTRIBUTE c int CASCADE;
+SELECT id, keys FROM o_test_br_tbl ORDER BY id;
+ id |         keys          
+----+-----------------------
+  1 | {"(1,10,)","(2,20,)"}
+  2 | {"(2,20,)","(3,40,)"}
+  3 | {"(3,30,)","(4,60,)"}
+(3 rows)
+
+SET enable_seqscan = off;
+SELECT id FROM o_test_br_tbl
+	WHERE keys @> ARRAY[(2, 20, NULL)::o_test_br] ORDER BY id;
+ id 
+----
+  1
+  2
+(2 rows)
+
+INSERT INTO o_test_br_tbl VALUES (100, ARRAY[(2, 20, 999)::o_test_br]);
+SELECT id FROM o_test_br_tbl
+	WHERE keys @> ARRAY[(2, 20, 999)::o_test_br];
+ id  
+-----
+ 100
+(1 row)
+
+SELECT id FROM o_test_br_tbl
+	WHERE keys @> ARRAY[(2, 20, NULL)::o_test_br] ORDER BY id;
+ id 
+----
+  1
+  2
+(2 rows)
+
+RESET enable_seqscan;
+-- ALTER TYPE RENAME TO / RENAME ATTRIBUTE with a composite inside an array
+-- column covered by a UNIQUE index.
+CREATE TYPE o_test_rfilter AS (col text, op text, val text);
+CREATE TABLE o_test_rfilter_tbl
+(
+	id bigint PRIMARY KEY,
+	sub_id uuid NOT NULL,
+	filters o_test_rfilter[] NOT NULL DEFAULT '{}'
+) USING orioledb;
+CREATE UNIQUE INDEX o_test_rfilter_tbl_uq
+	ON o_test_rfilter_tbl (sub_id, filters);
+INSERT INTO o_test_rfilter_tbl (id, sub_id, filters) VALUES
+	(1, '11111111-1111-1111-1111-111111111111',
+	 ARRAY[('c','eq','v')::o_test_rfilter]);
+ALTER TYPE o_test_rfilter RENAME ATTRIBUTE val TO value;
+ALTER TYPE o_test_rfilter RENAME TO o_test_rfilter_new;
+SELECT id, filters FROM o_test_rfilter_tbl ORDER BY id;
+ id |   filters    
+----+--------------
+  1 | {"(c,eq,v)"}
+(1 row)
+
+INSERT INTO o_test_rfilter_tbl (id, sub_id, filters) VALUES
+	(2, '22222222-2222-2222-2222-222222222222',
+	 ARRAY[('c2','eq','v2')::o_test_rfilter_new]);
+INSERT INTO o_test_rfilter_tbl (id, sub_id, filters) VALUES
+	(3, '11111111-1111-1111-1111-111111111111',
+	 ARRAY[('c','eq','v')::o_test_rfilter_new]);
+ERROR:  duplicate key value violates unique constraint "o_test_rfilter_tbl_uq"
+DETAIL:  Key (sub_id, filters)=(11111111-1111-1111-1111-111111111111, {"(c,eq,v)"}) already exists.
+SELECT (f).col, (f).op, (f).value
+	FROM o_test_rfilter_tbl, unnest(filters) f ORDER BY id, (f).col;
+ col | op | value 
+-----+----+-------
+ c   | eq | v
+ c2  | eq | v2
+(2 rows)
+
+-- ALTER TYPE RENAME TO / RENAME ATTRIBUTE with a composite as the primary
+-- key column.
+CREATE TYPE o_test_rpk AS (a int, b int);
+CREATE TABLE o_test_rpk_tbl (key o_test_rpk PRIMARY KEY, v text) USING orioledb;
+INSERT INTO o_test_rpk_tbl VALUES
+	((1,10)::o_test_rpk, 'r1'),
+	((2,20)::o_test_rpk, 'r2'),
+	((3,30)::o_test_rpk, 'r3');
+ALTER TYPE o_test_rpk RENAME ATTRIBUTE b TO b_new;
+ALTER TYPE o_test_rpk RENAME TO o_test_rpk_new;
+SELECT key, v FROM o_test_rpk_tbl ORDER BY key;
+  key   | v  
+--------+----
+ (1,10) | r1
+ (2,20) | r2
+ (3,30) | r3
+(3 rows)
+
+SELECT v FROM o_test_rpk_tbl WHERE key = (2,20)::o_test_rpk_new;
+ v  
+----
+ r2
+(1 row)
+
+INSERT INTO o_test_rpk_tbl VALUES ((4,40)::o_test_rpk_new, 'r4');
+INSERT INTO o_test_rpk_tbl VALUES ((1,10)::o_test_rpk_new, 'dup');
+ERROR:  duplicate key value violates unique constraint "o_test_rpk_tbl_pkey"
+DETAIL:  Key (key)=((1,10)) already exists.
+SELECT (key).a, (key).b_new, v FROM o_test_rpk_tbl ORDER BY (key).a;
+ a | b_new | v  
+---+-------+----
+ 1 |    10 | r1
+ 2 |    20 | r2
+ 3 |    30 | r3
+ 4 |    40 | r4
+(4 rows)
+
+-- ALTER TYPE RENAME TO / RENAME ATTRIBUTE with a bridged (non-orioledb)
+-- index over a column referencing the composite type.
+CREATE TYPE o_test_rbr AS (a int, b int);
+CREATE TABLE o_test_rbr_tbl (id int PRIMARY KEY, keys o_test_rbr[]) USING orioledb;
+INSERT INTO o_test_rbr_tbl SELECT g,
+	ARRAY[(g, g*10)::o_test_rbr, (g+1, g*20)::o_test_rbr]
+	FROM generate_series(1, 3) g;
+CREATE INDEX o_test_rbr_tbl_gin ON o_test_rbr_tbl USING gin (keys);
+NOTICE:  index bridging is enabled for orioledb table 'o_test_rbr_tbl'
+DETAIL:  index access method 'gin' is supported only via index bridging for OrioleDB table
+ALTER TYPE o_test_rbr RENAME ATTRIBUTE b TO b_new;
+ALTER TYPE o_test_rbr RENAME TO o_test_rbr_new;
+SELECT id, keys FROM o_test_rbr_tbl ORDER BY id;
+ id |        keys         
+----+---------------------
+  1 | {"(1,10)","(2,20)"}
+  2 | {"(2,20)","(3,40)"}
+  3 | {"(3,30)","(4,60)"}
+(3 rows)
+
+SET enable_seqscan = off;
+SELECT id FROM o_test_rbr_tbl
+	WHERE keys @> ARRAY[(2, 20)::o_test_rbr_new] ORDER BY id;
+ id 
+----
+  1
+  2
+(2 rows)
+
+INSERT INTO o_test_rbr_tbl VALUES
+	(100, ARRAY[(4, 40)::o_test_rbr_new]);
+SELECT id FROM o_test_rbr_tbl
+	WHERE keys @> ARRAY[(4, 40)::o_test_rbr_new];
+ id  
+-----
+ 100
+(1 row)
+
+RESET enable_seqscan;
 -- Test missing with fixed format
 CREATE TABLE o_test_record_type_alter2
 (
@@ -1053,7 +1302,7 @@ CREATE TABLE o_test_ulid (
     id test_ulid PRIMARY KEY
 ) USING orioledb;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 12 other objects
+NOTICE:  drop cascades to 18 other objects
 DETAIL:  drop cascades to table o_test_record_type
 drop cascades to table o_test_range
 drop cascades to table o_test_custom_range
@@ -1063,17 +1312,29 @@ drop cascades to table o_test_enum_index
 drop cascades to table o_test_domain_index
 drop cascades to table o_test_domain_array_index
 drop cascades to table o_test_record_type_alter
+drop cascades to table o_test_filter_tbl
+drop cascades to table o_test_pk_tbl
+drop cascades to table o_test_br_tbl
+drop cascades to table o_test_rfilter_tbl
+drop cascades to table o_test_rpk_tbl
+drop cascades to table o_test_rbr_tbl
 drop cascades to table o_test_record_type_alter2
 drop cascades to table o_test_domain_check
 drop cascades to table o_test_ulid
 DROP SCHEMA types CASCADE;
-NOTICE:  drop cascades to 17 other objects
+NOTICE:  drop cascades to 23 other objects
 DETAIL:  drop cascades to type coordinates
 drop cascades to type custom_range
 drop cascades to type pg_rec
 drop cascades to type o_rec
-drop cascades to type record_type_non_altered
 drop cascades to type record_type_renamed
+drop cascades to type record_type_altered_new
+drop cascades to type o_test_filter
+drop cascades to type o_test_pk
+drop cascades to type o_test_br
+drop cascades to type o_test_rfilter_new
+drop cascades to type o_test_rpk_new
+drop cascades to type o_test_rbr_new
 drop cascades to type o_test_domain_1
 drop cascades to type o_test_domain_2
 drop cascades to function test_ulid_out(test_ulid)
