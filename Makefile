@@ -163,6 +163,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  concurrent_update_delete \
 				  descr_torn_pair \
 				  fkeys \
+				  forupdate_reinsert \
 				  include_pk_wait \
 				  included \
 				  insert_fails \
