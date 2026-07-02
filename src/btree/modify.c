@@ -81,8 +81,7 @@ typedef enum ConflictResolution
 {
 	ConflictResolutionOK,
 	ConflictResolutionRetry,
-	ConflictResolutionFound,
-	ConflictResolutionDeleted
+	ConflictResolutionFound
 } ConflictResolution;
 
 BTreeModifyCallbackInfo nullCallbackInfo =
@@ -241,11 +240,6 @@ retry:
 			return OBTreeModifyResultFound;
 		else if (resolution == ConflictResolutionRetry)
 			goto retry;
-		else if (resolution == ConflictResolutionDeleted)
-		{
-			unlock_release(&context, true);
-			return OBTreeModifyResultDeleted;
-		}
 	}
 
 	Assert(page_is_locked(blkno) || O_PAGE_IS_LOCAL(blkno));
@@ -725,14 +719,12 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				Assert(COMMITSEQNO_IS_INPROGRESS(csn));
 
 				if (context->action == BTreeOperationLock &&
+					IsolationUsesXactSnapshot() &&
+					IsRelationTree(desc) &&
 					tuple_is_deleted_for_csn(desc->undoType, tuphdr, context->opCsn))
-				{
-					if (IsolationUsesXactSnapshot() && IsRelationTree(desc))
-						ereport(ERROR,
-								(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-								 errmsg("could not serialize access due to concurrent delete")));
-					return ConflictResolutionDeleted;
-				}
+					ereport(ERROR,
+							(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+							 errmsg("could not serialize access due to concurrent delete")));
 
 				if (context->callbackInfo->waitCallback)
 				{
