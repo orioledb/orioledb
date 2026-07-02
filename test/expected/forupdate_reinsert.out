@@ -1,6 +1,7 @@
 Parsed test spec with 3 sessions
 
-starting permutation: s1_snapshot s2_delete s3_reinsert s1_forupdate s3_commit s1_commit
+starting permutation: s1_begin_rr s1_snapshot s2_delete s3_reinsert s1_forupdate s3_commit s1_commit
+step s1_begin_rr: BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
 step s1_snapshot: SELECT count(*) FROM fu_reins;
 count
 -----
@@ -11,5 +12,39 @@ step s2_delete: DELETE FROM fu_reins WHERE id = 5;
 step s3_reinsert: INSERT INTO fu_reins VALUES (5, 200);
 step s1_forupdate: SELECT id FROM fu_reins ORDER BY id ASC LIMIT 1 FOR UPDATE;
 ERROR:  could not serialize access due to concurrent delete
+step s3_commit: COMMIT;
+step s1_commit: COMMIT;
+
+starting permutation: s1_begin_rr s1_snapshot s2_delete s3_reinsert s3_rollback s1_forupdate s1_commit
+step s1_begin_rr: BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s1_snapshot: SELECT count(*) FROM fu_reins;
+count
+-----
+    3
+(1 row)
+
+step s2_delete: DELETE FROM fu_reins WHERE id = 5;
+step s3_reinsert: INSERT INTO fu_reins VALUES (5, 200);
+step s3_rollback: ROLLBACK;
+step s1_forupdate: SELECT id FROM fu_reins ORDER BY id ASC LIMIT 1 FOR UPDATE;
+ERROR:  could not serialize access due to concurrent delete
+step s1_commit: COMMIT;
+
+starting permutation: s1_begin_rc s1_snapshot s2_delete s3_reinsert s1_forupdate s3_commit s1_commit
+step s1_begin_rc: BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+step s1_snapshot: SELECT count(*) FROM fu_reins;
+count
+-----
+    3
+(1 row)
+
+step s2_delete: DELETE FROM fu_reins WHERE id = 5;
+step s3_reinsert: INSERT INTO fu_reins VALUES (5, 200);
+step s1_forupdate: SELECT id FROM fu_reins ORDER BY id ASC LIMIT 1 FOR UPDATE;
+id
+--
+10
+(1 row)
+
 step s3_commit: COMMIT;
 step s1_commit: COMMIT;
