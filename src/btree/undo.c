@@ -1648,12 +1648,10 @@ clean_chain_has_locks_flag(UndoLogType undoType, UndoLocation location,
 
 
 /*
- * Lock/Update at snapshot my_csn: return true if the row must be treated as
- * deleted -- walking the version chain from the top down, the first committed
- * version (skipping in-progress/aborted/lock-only) is a delete, or a committed
- * delete is seen before reaching our visible committed version, or the undo
- * chain breaks before reaching my_csn.  Avoids waiting on an in-progress
- * re-inserter whose committed delete lies below it in the chain.
+ * True if the row is deleted at my_csn: the first committed version at or
+ * below the chain top is a delete, or the chain ends before a live version
+ * visible to my_csn.  Lets FOR UPDATE short-circuit an in-progress re-inserter
+ * whose committed delete sits below it.
  */
 bool
 tuple_is_deleted_for_csn(UndoLogType undoType, BTreeLeafTuphdr *pageTuphdr,
@@ -1668,16 +1666,13 @@ tuple_is_deleted_for_csn(UndoLogType undoType, BTreeLeafTuphdr *pageTuphdr,
 		{
 			CommitSeqNo csn = oxid_get_csn(XACT_INFO_GET_OXID(cur.xactInfo), false);
 
-			if (!COMMITSEQNO_IS_INPROGRESS(csn) && !COMMITSEQNO_IS_ABORTED(csn))
+			if (COMMITSEQNO_IS_NORMAL(csn) || COMMITSEQNO_IS_FROZEN(csn))
 			{
-				/* committed version */
 				if (cur.deleted != BTreeLeafTupleNonDeleted)
 					return true;
 				if (csn < my_csn)
 					return false;
-				/* committed live but csn >= my_csn: keep walking */
 			}
-			/* in-progress or aborted: skip */
 		}
 		if (!UndoLocationIsValid(cur.undoLocation) ||
 			cur.undoLocation < retainedUndoLocation)
