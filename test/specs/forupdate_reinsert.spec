@@ -21,7 +21,8 @@ teardown
 }
 
 session "s1"
-setup { BEGIN ISOLATION LEVEL REPEATABLE READ; }
+step "s1_begin_rr" { BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ; }
+step "s1_begin_rc" { BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED; }
 step "s1_snapshot"  { SELECT count(*) FROM fu_reins; }
 step "s1_forupdate" { SELECT id FROM fu_reins ORDER BY id ASC LIMIT 1 FOR UPDATE; }
 step "s1_commit"    { COMMIT; }
@@ -33,5 +34,8 @@ session "s3"
 setup { BEGIN; }
 step "s3_reinsert"  { INSERT INTO fu_reins VALUES (5, 200); }
 step "s3_commit"    { COMMIT; }
+step "s3_rollback"  { ROLLBACK; }
 
-permutation "s1_snapshot" "s2_delete" "s3_reinsert" "s1_forupdate" "s3_commit" "s1_commit"
+permutation "s1_begin_rr" "s1_snapshot" "s2_delete" "s3_reinsert" "s1_forupdate" "s3_commit" "s1_commit"
+permutation "s1_begin_rr" "s1_snapshot" "s2_delete" "s3_reinsert" "s3_rollback" "s1_forupdate" "s1_commit"
+permutation "s1_begin_rc" "s1_snapshot" "s2_delete" "s3_reinsert" "s1_forupdate" "s3_commit" "s1_commit"
