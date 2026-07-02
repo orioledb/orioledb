@@ -45,8 +45,10 @@
 #include "optimizer/restrictinfo.h"
 #include "optimizer/plancat.h"
 #include "optimizer/planmain.h"
+#include "parser/parse_coerce.h"
 #include "parser/parsetree.h"
 #include "utils/json.h"
+#include "utils/datum.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
@@ -91,6 +93,14 @@ static void o_rescan_custom_scan(CustomScanState *node);
 static void o_explain_custom_scan(CustomScanState *node, List *ancestors,
 								  ExplainState *es);
 static Node *o_create_custom_scan_state(CustomScan *cscan);
+static bool o_extract_row_array_keys(OIndexDescr *primary, Index scanrelid,
+									 bool prefixUsesIndexVars,
+									 bool qpqualUsesIndexVars,
+									 List *indexqual, List *qpqual,
+									 List **out_key_exprs, int *out_ntuples,
+									 int *out_nkeys, List **out_key_types);
+static void o_maybe_inject_row_array_path(PlannerInfo *root, RelOptInfo *rel,
+										  OTableDescr *descr);
 
 static CustomPathMethods o_path_methods =
 {
@@ -195,6 +205,123 @@ transform_path(Path *src_path, OTableDescr *descr)
 		result->custom_private = list_make1(new_path);
 	}
 	return &result->path;
+}
+
+/*
+ * If the rel has a row-array-IN on a contiguous prefix of the primary key but
+ * no primary index path was generated to serve it pointwise (e.g. a covering
+ * secondary index whose leading column matches only the common prefix wins, or
+ * a parameterized/generic plan where no common leading value is known), inject
+ * a full primary index scan path.  The row-array-IN OR (and any planner-derived
+ * leading equality) stays in baserestrictinfo and becomes the scan's qpqual,
+ * which o_plan_custom_path turns into N per-tuple probes.
+ *
+ * This works for SELECT and for UPDATE/DELETE: the primary index scan is
+ * transformed into an o_scan that already emits the row identity (rowid) the
+ * ModifyTable node needs, exactly like a planner-generated primary index
+ * UPDATE/DELETE scan.
+ */
+static bool
+o_rel_is_rowmarked(PlannerInfo *root, Index relid)
+{
+	ListCell   *lc;
+
+	foreach(lc, root->rowMarks)
+	{
+		PlanRowMark *rc = lfirst_node(PlanRowMark, lc);
+
+		if (rc->rti == relid)
+			return true;
+	}
+	return false;
+}
+
+static void
+o_maybe_inject_row_array_path(PlannerInfo *root, RelOptInfo *rel,
+							  OTableDescr *descr)
+{
+	OIndexDescr *primary = GET_PRIMARY(descr);
+	IndexOptInfo *primaryIndex = NULL;
+	ListCell   *lc;
+	bool		matched = false;
+	List	   *dummyExprs;
+	int			dummyNTuples,
+				dummyNKeys;
+	List	   *dummyTypes;
+
+	if (o_rel_is_rowmarked(root, rel->relid))
+		return;
+
+	if (primary->primaryIsCtid || primary->nUniqueFields <= 1)
+		return;
+
+	foreach(lc, rel->indexlist)
+	{
+		IndexOptInfo *index = (IndexOptInfo *) lfirst(lc);
+
+		if (index->indexoid == primary->oids.reloid)
+		{
+			primaryIndex = index;
+			break;
+		}
+	}
+	if (primaryIndex == NULL)
+		return;
+
+	/*
+	 * Split the base restrict clauses into the row-array-IN OR and the plain
+	 * equalities the planner may have derived alongside it (e.g. a common
+	 * "o_w_id = const" pulled out of the OR).  Those equalities pin the
+	 * shared leading prefix, so pass them as the "prefix"
+	 * (indexqual-equivalent) with table-var resolution; the OR is the qpqual.
+	 */
+	{
+		List	   *orClauses = NIL;
+		List	   *eqClauses = NIL;
+
+		foreach(lc, rel->baserestrictinfo)
+		{
+			RestrictInfo *rinfo = (RestrictInfo *) lfirst(lc);
+			Node	   *clause = (Node *) rinfo->clause;
+
+			if (IsA(clause, BoolExpr) &&
+				((BoolExpr *) clause)->boolop == OR_EXPR)
+				orClauses = lappend(orClauses, clause);
+			else if (IsA(clause, OpExpr))
+				eqClauses = lappend(eqClauses, clause);
+		}
+
+		if (list_length(orClauses) == 1 &&
+			!o_rel_is_rowmarked(root, rel->relid) &&
+			o_extract_row_array_keys(primary, rel->relid, false, false,
+									 eqClauses, orClauses,
+									 &dummyExprs, &dummyNTuples,
+									 &dummyNKeys, &dummyTypes))
+			matched = true;
+	}
+	if (!matched)
+		return;
+
+	{
+		IndexPath  *ipath;
+		double		nprobes = (double) dummyNTuples;
+		Cost		per_probe = 2.0 * cpu_operator_cost * primary->nUniqueFields
+			+ random_page_cost;
+
+		ipath = create_index_path(root, primaryIndex,
+								  NIL, NIL, NIL, NIL,
+								  ForwardScanDirection,
+								  false,
+								  rel->lateral_relids, 1.0, false);
+
+		if (ipath != NULL)
+		{
+			ipath->path.startup_cost = 0.0;
+			ipath->path.total_cost = nprobes * per_probe +
+				ipath->path.rows * cpu_tuple_cost;
+			add_path(rel, (Path *) ipath);
+		}
+	}
 }
 
 bool
@@ -340,6 +467,8 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 			descr = relation_get_descr(relation);
 			Assert(descr != NULL);
 
+			o_maybe_inject_row_array_path(root, rel, descr);
+
 			/*
 			 * transform all postgres scans to custom scans
 			 */
@@ -416,6 +545,344 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 }
 
 /*
+ * Detect a "row-array-IN" qual that pins the same contiguous leading prefix
+ * of the primary key across every OR arm, so the scan can iterate the N
+ * tuples as N per-tuple probes instead of one whole-index prefix scan.
+ *
+ * Given key columns (c1..cn), we handle "(c1..cj) IN (list)" for any leading
+ * prefix length j (1 <= j <= n) where every OR arm pins the SAME contiguous
+ * leading prefix c1..cj to exact equality values.  Each resulting per-tuple
+ * range sets the first j key columns exact and leaves the rest unbounded:
+ *   - j == n -> a point lookup (ostate->exact);
+ *   - j <  n -> a prefix range scan (iterator path), exactly like
+ *               "WHERE c1=.. AND .. AND cj=..".
+ *
+ * We look for exactly one top-level BoolExpr(OR) among the qpqual clauses
+ * where every arm is a conjunction of btree-equalities "keycol = value".
+ * Equalities may also come from the leading index cond (indexqual); those are
+ * shared by all arms.  Value expressions must not reference the scan relation
+ * itself (they must be evaluable as runtime keys).
+ *
+ * On success returns true and sets *out_key_exprs to a flat List (arm-major,
+ * key-position order) of value Exprs of length ntuples*j, *out_ntuples = N,
+ * *out_nkeys = j (the pinned prefix length), and *out_key_types to a List of j
+ * Oid (Integer nodes), one per pinned key position.  On any mismatch returns
+ * false and leaves the outputs unchanged (caller keeps existing behavior).
+ *
+ * The OR clause is intentionally left in the qpqual as a cheap recheck so
+ * results are guaranteed identical for all inputs.
+ */
+static bool
+o_extract_row_array_keys(OIndexDescr *primary, Index scanrelid,
+						 bool prefixUsesIndexVars, bool qpqualUsesIndexVars,
+						 List *indexqual, List *qpqual,
+						 List **out_key_exprs, int *out_ntuples,
+						 int *out_nkeys, List **out_key_types)
+{
+	int			nkeys = primary->nUniqueFields;
+	int		   *keyForAttnum;
+	int			maxAttnum;
+	Expr	  **prefixExpr;
+	Oid		   *prefixType;
+	bool	   *prefixSet;
+	int			prefixLen;		/* contiguous prefix pinned by index cond */
+	BoolExpr   *orExpr = NULL;
+	ListCell   *lc;
+	List	   *armKeyExprs = NIL;
+	List	   *keyTypes = NIL;
+	int			ntuples;
+	int			coverLen = -1;	/* pinned prefix length, shared by all arms */
+	int			i;
+	bool		ok = true;
+
+	if (nkeys <= 1 || nkeys > INDEX_MAX_KEYS)
+		return false;
+	/* Only the plain user-defined primary key, not a surrogate ctid pkey */
+	if (primary->primaryIsCtid)
+		return false;
+
+	/* Find exactly one top-level OR BoolExpr in the qpqual. */
+	foreach(lc, qpqual)
+	{
+		Node	   *clause = (Node *) lfirst(lc);
+
+		if (IsA(clause, BoolExpr) && ((BoolExpr *) clause)->boolop == OR_EXPR)
+		{
+			if (orExpr != NULL)
+				return false;	/* more than one OR: bail */
+			orExpr = (BoolExpr *) clause;
+		}
+	}
+	if (orExpr == NULL || list_length(orExpr->args) < 2)
+		return false;
+
+	/*
+	 * Build the table-attnum -> key-position map for the primary key columns.
+	 * tableAttnums[keypos] is the (1-based) table attnum for key position
+	 * keypos.
+	 */
+	maxAttnum = primary->maxTableAttnum;
+	if (maxAttnum <= 0)
+		return false;
+	keyForAttnum = (int *) palloc(sizeof(int) * (maxAttnum + 1));
+	for (i = 0; i <= maxAttnum; i++)
+		keyForAttnum[i] = -1;
+	for (i = 0; i < nkeys; i++)
+	{
+		AttrNumber	tattno = primary->tableAttnums[i];
+
+		if (tattno <= 0 || tattno > maxAttnum)
+			return false;
+		keyForAttnum[tattno] = i;
+	}
+
+	prefixExpr = (Expr **) palloc0(sizeof(Expr *) * nkeys);
+	prefixType = (Oid *) palloc0(sizeof(Oid) * nkeys);
+	prefixSet = (bool *) palloc0(sizeof(bool) * nkeys);
+
+	/*
+	 * Collect leading equalities pinned by the index cond.  These use
+	 * INDEX_VAR with varattno = index attribute number; for the primary index
+	 * the index attribute i maps to key position i-1.  We only accept plain
+	 * scalar equalities (single constant/param RHS) here; SAOP index conds
+	 * are not eligible for the pointwise expansion.
+	 */
+	foreach(lc, indexqual)
+	{
+		Node	   *clause = (Node *) lfirst(lc);
+		OpExpr	   *op;
+		Node	   *lhs,
+				   *rhs;
+		Var		   *var;
+		int			keypos;
+
+		if (!IsA(clause, OpExpr))
+			return false;		/* e.g. SAOP: not a clean pointwise prefix */
+		op = (OpExpr *) clause;
+		if (list_length(op->args) != 2)
+			return false;
+		lhs = (Node *) linitial(op->args);
+		rhs = (Node *) lsecond(op->args);
+		if (!IsA(lhs, Var))
+			return false;
+		var = (Var *) lhs;
+		if (prefixUsesIndexVars)
+		{
+			if (var->varno != INDEX_VAR)
+				return false;
+			keypos = var->varattno - 1;
+			if (keypos < 0 || keypos >= nkeys)
+				return false;
+		}
+		else
+		{
+			if (var->varno != scanrelid || var->varattno <= 0 ||
+				var->varattno > maxAttnum)
+				return false;
+			keypos = keyForAttnum[var->varattno];
+			if (keypos < 0)
+				return false;
+		}
+		if (get_op_opfamily_strategy(op->opno,
+									 primary->fields[keypos].opfamily)
+			!= BTEqualStrategyNumber)
+			return false;
+		/* value must not depend on the scan relation */
+		if (bms_is_member(scanrelid, pull_varnos(NULL, rhs)))
+			return false;
+		if (prefixSet[keypos])
+			return false;
+		prefixExpr[keypos] = (Expr *) rhs;
+		prefixType[keypos] = exprType(rhs);
+		prefixSet[keypos] = true;
+	}
+
+	/*
+	 * The index-cond equalities must themselves form a contiguous leading
+	 * prefix (they always do for the OrioleDB scan-key builder, but verify).
+	 */
+	prefixLen = 0;
+	while (prefixLen < nkeys && prefixSet[prefixLen])
+		prefixLen++;
+	for (i = prefixLen; i < nkeys; i++)
+	{
+		if (prefixSet[i])
+			return false;		/* gap in the index-cond prefix */
+	}
+
+	/*
+	 * Walk the OR arms.  Each arm's equalities, together with the shared
+	 * index-cond prefix, must pin the SAME contiguous leading prefix c1..cj.
+	 */
+	ntuples = list_length(orExpr->args);
+	foreach(lc, orExpr->args)
+	{
+		Node	   *arm = (Node *) lfirst(lc);
+		List	   *conj;
+		ListCell   *lc2;
+		Expr	  **armExpr = (Expr **) palloc0(sizeof(Expr *) * nkeys);
+		Oid		   *armType = (Oid *) palloc0(sizeof(Oid) * nkeys);
+		bool	   *armSet = (bool *) palloc0(sizeof(bool) * nkeys);
+		int			j;
+		int			k;
+
+		if (IsA(arm, BoolExpr) && ((BoolExpr *) arm)->boolop == AND_EXPR)
+			conj = ((BoolExpr *) arm)->args;
+		else
+			conj = list_make1(arm);
+
+		foreach(lc2, conj)
+		{
+			Node	   *clause = (Node *) lfirst(lc2);
+			OpExpr	   *op;
+			Node	   *lhs,
+					   *rhs;
+			Var		   *var;
+			int			keypos;
+			Relids		rhs_relids;
+
+			if (!IsA(clause, OpExpr))
+			{
+				ok = false;
+				break;
+			}
+			op = (OpExpr *) clause;
+			if (list_length(op->args) != 2)
+			{
+				ok = false;
+				break;
+			}
+			lhs = (Node *) linitial(op->args);
+			rhs = (Node *) lsecond(op->args);
+			if (!IsA(lhs, Var))
+			{
+				ok = false;
+				break;
+			}
+			var = (Var *) lhs;
+
+			/*
+			 * Arm vars reference either the scan relation (plain IndexScan
+			 * qpqual, by table attnum) or INDEX_VAR (IndexOnlyScan qpqual, by
+			 * index attribute = key position + 1).
+			 */
+			if (qpqualUsesIndexVars)
+			{
+				if (var->varno != INDEX_VAR)
+				{
+					ok = false;
+					break;
+				}
+				keypos = var->varattno - 1;
+				if (keypos < 0 || keypos >= nkeys)
+				{
+					ok = false;
+					break;
+				}
+			}
+			else
+			{
+				if (var->varno != scanrelid || var->varattno <= 0 ||
+					var->varattno > maxAttnum)
+				{
+					ok = false;
+					break;
+				}
+				keypos = keyForAttnum[var->varattno];
+				if (keypos < 0)
+				{
+					ok = false;
+					break;
+				}
+			}
+			if (get_op_opfamily_strategy(op->opno,
+										 primary->fields[keypos].opfamily)
+				!= BTEqualStrategyNumber)
+			{
+				ok = false;
+				break;
+			}
+			/* value must not depend on the scan relation */
+			rhs_relids = pull_varnos(NULL, rhs);
+			if (bms_is_member(scanrelid, rhs_relids))
+			{
+				ok = false;
+				break;
+			}
+			if (armSet[keypos] || prefixSet[keypos])
+			{
+				/* duplicate / conflicts with the fixed prefix */
+				ok = false;
+				break;
+			}
+			armExpr[keypos] = (Expr *) rhs;
+			armType[keypos] = exprType(rhs);
+			armSet[keypos] = true;
+		}
+
+		if (!ok)
+			break;
+
+		/* Merge the shared prefix into this arm's coverage */
+		for (k = 0; k < prefixLen; k++)
+		{
+			armExpr[k] = prefixExpr[k];
+			armType[k] = prefixType[k];
+			armSet[k] = true;
+		}
+
+		/* Combined coverage must be a contiguous leading prefix c1..cj */
+		j = 0;
+		while (j < nkeys && armSet[j])
+			j++;
+		if (j == 0)
+		{
+			ok = false;
+			break;
+		}
+		for (k = j; k < nkeys; k++)
+		{
+			if (armSet[k])
+			{
+				ok = false;		/* gap: not a contiguous leading prefix */
+				break;
+			}
+		}
+		if (!ok)
+			break;
+
+		/* All arms must pin the same prefix length */
+		if (coverLen == -1)
+			coverLen = j;
+		else if (coverLen != j)
+		{
+			ok = false;
+			break;
+		}
+
+		for (k = 0; k < j; k++)
+			armKeyExprs = lappend(armKeyExprs, armExpr[k]);
+	}
+
+	if (!ok || coverLen <= 0)
+		return false;
+
+	/* Build the per-key type list (coverLen positions) from the first arm. */
+	for (i = 0; i < coverLen; i++)
+	{
+		Expr	   *e = (Expr *) list_nth(armKeyExprs, i);
+
+		keyTypes = lappend(keyTypes, makeInteger((int) exprType((Node *) e)));
+	}
+
+	*out_key_exprs = armKeyExprs;
+	*out_ntuples = ntuples;
+	*out_nkeys = coverLen;
+	*out_key_types = keyTypes;
+	return true;
+}
+
+/*
  * Creates orioledb CustomScan plan from orioledb CustomPath.
  */
 static Plan *
@@ -463,6 +930,10 @@ o_plan_custom_path(PlannerInfo *root, RelOptInfo *rel,
 	{
 		OIndexPath *ix_path = (OIndexPath *) o_path;
 		bool		onlyCurIx = IsA(custom_plan, IndexOnlyScan);
+		List	   *rowArrayExprs = NIL;
+		int			rowArrayNTuples = 0;
+		int			rowArrayNKeys = 0;
+		List	   *rowArrayKeyTypes = NIL;
 
 		if (custom_plans && IsA(custom_plan, IndexScan))
 		{
@@ -471,6 +942,20 @@ o_plan_custom_path(PlannerInfo *root, RelOptInfo *rel,
 			plan->targetlist = ix_scan->scan.plan.targetlist;
 			custom_scan->custom_scan_tlist = NIL;
 			qpqual = ix_scan->scan.plan.qual;
+
+			/*
+			 * Try to recognize a row-array-IN on the primary key so we can do
+			 * N exact point lookups instead of a whole-index prefix scan.
+			 */
+			if (ix_path->ix_num == PrimaryIndexNumber)
+			{
+				OIndexDescr *primary = GET_PRIMARY(descr);
+
+				o_extract_row_array_keys(primary, rel->relid, true, false,
+										 ix_scan->indexqual, qpqual,
+										 &rowArrayExprs, &rowArrayNTuples,
+										 &rowArrayNKeys, &rowArrayKeyTypes);
+			}
 		}
 		else if (custom_plans && IsA(custom_plan, IndexOnlyScan))
 		{
@@ -479,15 +964,38 @@ o_plan_custom_path(PlannerInfo *root, RelOptInfo *rel,
 			plan->targetlist = ixo_scan->scan.plan.targetlist;
 			custom_scan->custom_scan_tlist = ixo_scan->indextlist;
 			qpqual = ixo_scan->scan.plan.qual;
+
+			/*
+			 * The index-only scan qpqual references the scan relation by
+			 * table attnum (like a plain IndexScan qpqual).  Its indexqual,
+			 * however, is expressed in INDEX_VAR terms.
+			 */
+			if (ix_path->ix_num == PrimaryIndexNumber)
+			{
+				OIndexDescr *primary = GET_PRIMARY(descr);
+
+				o_extract_row_array_keys(primary, rel->relid, true, false,
+										 ixo_scan->indexqual, qpqual,
+										 &rowArrayExprs, &rowArrayNTuples,
+										 &rowArrayNKeys, &rowArrayKeyTypes);
+			}
 		}
 
-		custom_scan->custom_exprs = NIL;
+		custom_scan->custom_exprs = rowArrayExprs;
 		custom_scan->custom_private =
 		/* cppcheck-suppress unknownEvaluationOrder */
 			list_make4(makeInteger(O_IndexPlan),
 					   makeInteger(ix_path->ix_num),
 					   makeInteger(ix_path->scandir),
 					   makeInteger(onlyCurIx));
+		custom_scan->custom_private =
+			lappend(custom_scan->custom_private,
+					makeInteger(rowArrayNTuples));
+		custom_scan->custom_private =
+			lappend(custom_scan->custom_private,
+					makeInteger(rowArrayNKeys));
+		custom_scan->custom_private =
+			lappend(custom_scan->custom_private, rowArrayKeyTypes);
 	}
 	else
 	{
@@ -570,6 +1078,33 @@ o_create_custom_scan_state(CustomScan *cscan)
 		ix_plan_state->ostate.onlyCurIx =
 			intVal(lfourth(cscan->custom_private));
 
+		/*
+		 * Row-array-IN metadata (custom_private positions 5..7 and the value
+		 * expressions in custom_exprs).  rowArrayNTuples == 0 => inactive.
+		 */
+		ix_plan_state->rowArrayNTuples =
+			intVal(list_nth(cscan->custom_private, 4));
+		ix_plan_state->rowArrayNKeys =
+			intVal(list_nth(cscan->custom_private, 5));
+		if (ix_plan_state->rowArrayNTuples > 0)
+		{
+			List	   *typeList = (List *) list_nth(cscan->custom_private, 6);
+			int			k;
+			ListCell   *tlc;
+
+			Assert(list_length(typeList) == ix_plan_state->rowArrayNKeys);
+			ix_plan_state->rowArrayKeyTypes = (Oid *)
+				palloc(sizeof(Oid) * ix_plan_state->rowArrayNKeys);
+			k = 0;
+			foreach(tlc, typeList)
+				ix_plan_state->rowArrayKeyTypes[k++] = (Oid) intVal(lfirst(tlc));
+
+			ix_plan_state->rowArrayKeyExprList = copyObject(cscan->custom_exprs);
+			Assert(list_length(ix_plan_state->rowArrayKeyExprList) ==
+				   ix_plan_state->rowArrayNTuples *
+				   ix_plan_state->rowArrayNKeys);
+		}
+
 		ocstate->o_plan_state = (OPlanState *) ix_plan_state;
 	}
 	else if (plan_tag == O_BitmapHeapPlan)
@@ -644,6 +1179,39 @@ o_begin_custom_scan(CustomScanState *node, EState *estate, int eflags)
 		ix_plan_state->indexRelation = index;
 
 		ix_plan_state->iss_RuntimeContext = CreateExprContext(estate);
+
+		/*
+		 * Set up the row-array-IN value expressions and per-tuple buffers.
+		 * The expressions are evaluated at rescan in iss_RuntimeContext (they
+		 * reference only constants/outer params, never the scan tuple).
+		 */
+		if (ix_plan_state->rowArrayNTuples > 0)
+		{
+			int			ntotal = ix_plan_state->rowArrayNTuples *
+				ix_plan_state->rowArrayNKeys;
+			int			k;
+			ListCell   *elc;
+
+			scan_state->rowArrayNTuples = ix_plan_state->rowArrayNTuples;
+			scan_state->rowArrayNKeys = ix_plan_state->rowArrayNKeys;
+			scan_state->rowArrayKeyTypes = ix_plan_state->rowArrayKeyTypes;
+			scan_state->rowArrayKeyExprs = (ExprState **)
+				palloc(sizeof(ExprState *) * ntotal);
+			scan_state->rowArrayValues = (Datum *) palloc(sizeof(Datum) * ntotal);
+			scan_state->rowArrayNulls = (bool *) palloc(sizeof(bool) * ntotal);
+			scan_state->rowArrayOrder = (int *)
+				palloc(sizeof(int) * scan_state->rowArrayNTuples);
+			scan_state->rowArrayNValid = 0;
+
+			k = 0;
+			foreach(elc, ix_plan_state->rowArrayKeyExprList)
+			{
+				Expr	   *e = (Expr *) lfirst(elc);
+
+				scan_state->rowArrayKeyExprs[k++] =
+					ExecInitExpr(e, &node->ss.ps);
+			}
+		}
 
 		/*
 		 * If no run-time keys to calculate or they are ready, go ahead and
@@ -782,6 +1350,156 @@ o_exec_custom_scan(CustomScanState *node)
 }
 
 /*
+ * Compare two row-array-IN arms by their pinned key columns, using the index
+ * field comparators (with the same coercion fallback as is_tuple_valid).
+ * Returns <0, 0, >0.
+ */
+static int
+o_row_array_cmp(OScanState *ostate, OIndexDescr *id, int a, int b)
+{
+	int			k;
+	int			nkeys = ostate->rowArrayNKeys;
+
+	for (k = 0; k < nkeys; k++)
+	{
+		Datum		va = ostate->rowArrayValues[a * nkeys + k];
+		Datum		vb = ostate->rowArrayValues[b * nkeys + k];
+		OIndexField *field = &id->fields[k];
+		Oid			type = ostate->rowArrayKeyTypes[k];
+		int			cmp;
+
+		if (!OidIsValid(type))
+			type = field->inputtype;
+
+		/*
+		 * If the arm value type is binary-coercible to the field input type
+		 * we compare with the field comparator directly, otherwise use a
+		 * type-specific comparator (mirrors o_bound_is_coercible /
+		 * key_range).
+		 */
+		if (type == field->opclass || type == field->inputtype ||
+			IsBinaryCoercible(type, field->inputtype))
+		{
+			cmp = o_call_comparator(field->comparator, va, vb);
+		}
+		else
+		{
+			OComparator *c = o_find_comparator(field->opfamily, type,
+											   field->inputtype,
+											   field->collation);
+
+			cmp = o_call_comparator(c, va, vb);
+		}
+
+		if (cmp != 0)
+			return field->ascending ? cmp : -cmp;
+	}
+	return 0;
+}
+
+/*
+ * Evaluate the row-array-IN value expressions (runtime keys) and build the
+ * ordering of arms in ascending key order, skipping any arm whose key
+ * contains a NULL (equality never matches NULL).
+ */
+static void
+o_eval_row_array_keys(CustomScanState *node, OIndexPlanState *ix_plan_state)
+{
+	OScanState *ostate = &ix_plan_state->ostate;
+	OTableDescr *descr = relation_get_descr(node->ss.ss_currentRelation);
+	OIndexDescr *id = descr->indices[ostate->ixNum];
+	ExprContext *econtext = ix_plan_state->iss_RuntimeContext;
+	MemoryContext oldcxt;
+	int			nkeys = ostate->rowArrayNKeys;
+	int			t;
+	int			nvalid = 0;
+
+	/*
+	 * Evaluate in the per-scan context so the resulting Datums survive for
+	 * the lifetime of the scan (they are read on every switch_to_next_range).
+	 */
+	ResetExprContext(econtext);
+	oldcxt = MemoryContextSwitchTo(ostate->cxt);
+
+	for (t = 0; t < ostate->rowArrayNTuples; t++)
+	{
+		int			k;
+		bool		hasnull = false;
+
+		for (k = 0; k < nkeys; k++)
+		{
+			int			idx = t * nkeys + k;
+			ExprState  *es = ostate->rowArrayKeyExprs[idx];
+			Datum		val;
+			bool		isnull;
+
+			val = ExecEvalExpr(es, econtext, &isnull);
+			if (isnull)
+			{
+				hasnull = true;
+				ostate->rowArrayValues[idx] = (Datum) 0;
+				ostate->rowArrayNulls[idx] = true;
+			}
+			else
+			{
+				int16		typlen;
+				bool		typbyval;
+
+				/*
+				 * Copy the value into the per-scan context; the runtime
+				 * context is reset on every rescan.
+				 */
+				get_typlenbyval(ostate->rowArrayKeyTypes[k], &typlen, &typbyval);
+				ostate->rowArrayValues[idx] = datumCopy(val, typbyval, typlen);
+				ostate->rowArrayNulls[idx] = false;
+			}
+		}
+
+		if (!hasnull)
+			ostate->rowArrayOrder[nvalid++] = t;
+	}
+
+	ostate->rowArrayCurTuple = 0;
+
+	/* Insertion sort the valid arm indices by ascending key order. */
+	for (t = 1; t < nvalid; t++)
+	{
+		int			cur = ostate->rowArrayOrder[t];
+		int			s = t - 1;
+
+		while (s >= 0 &&
+			   o_row_array_cmp(ostate, id, ostate->rowArrayOrder[s], cur) > 0)
+		{
+			ostate->rowArrayOrder[s + 1] = ostate->rowArrayOrder[s];
+			s--;
+		}
+		ostate->rowArrayOrder[s + 1] = cur;
+	}
+
+	/*
+	 * Drop duplicate keys.  The original whole-index scan visits each
+	 * physical tuple once regardless of how many times its key appears in the
+	 * IN list, so a duplicate arm must not yield the tuple again.  After
+	 * sorting, equal keys are adjacent.
+	 */
+	if (nvalid > 1)
+	{
+		int			w = 1;
+
+		for (t = 1; t < nvalid; t++)
+		{
+			if (o_row_array_cmp(ostate, id, ostate->rowArrayOrder[w - 1],
+								ostate->rowArrayOrder[t]) != 0)
+				ostate->rowArrayOrder[w++] = ostate->rowArrayOrder[t];
+		}
+		nvalid = w;
+	}
+	ostate->rowArrayNValid = nvalid;
+
+	MemoryContextSwitchTo(oldcxt);
+}
+
+/*
  * Restarts the scan.
  */
 static void
@@ -824,6 +1542,10 @@ o_rescan_custom_scan(CustomScanState *node)
 		ix_plan_state->ostate.curKeyRange.low.n_row_keys = 0;
 		ix_plan_state->ostate.curKeyRange.high.n_row_keys = 0;
 		ix_plan_state->ostate.iterator = NULL;
+
+		/* Evaluate row-array-IN value expressions and order the tuples. */
+		if (ix_plan_state->ostate.rowArrayNTuples > 0)
+			o_eval_row_array_keys(node, ix_plan_state);
 	}
 	else if (ocstate->o_plan_state->type == O_BitmapHeapPlan)
 	{

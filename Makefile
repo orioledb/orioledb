@@ -126,6 +126,7 @@ REGRESSCHECKS = btree_sys_check \
 				partial \
 				partition \
 				primary_key \
+				row_array_in \
 				row_level_locks \
 				row_security \
 				sanitizers \

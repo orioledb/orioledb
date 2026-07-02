@@ -36,6 +36,31 @@ typedef struct OScanState
 	OBTreeKeyRange curKeyRange;
 	BTreeIterator *iterator;
 	List	   *indexQuals;
+
+	/*
+	 * Row-array-IN pointwise mode.  When a qual of the form "(c1,...,ck) IN
+	 * ((v11,...,v1k), ...)" pins a set of full multi-column index keys, we
+	 * iterate the N tuples as N exact point lookups instead of one
+	 * prefix-bounded whole-index scan.  rowArrayNKeys is the number of key
+	 * columns each arm pins (== index nUniqueFields); rowArrayNTuples the
+	 * number of arms; rowArrayKeyExprs is a flat array of ExprState* of
+	 * length rowArrayNTuples * rowArrayNKeys (arm-major order) evaluated at
+	 * rescan; rowArrayCurTuple is the current arm index during iteration.
+	 * When rowArrayNTuples == 0 this mode is inactive and the scan behaves as
+	 * before.
+	 */
+	int			rowArrayNKeys;
+	int			rowArrayNTuples;
+	int			rowArrayCurTuple;
+	struct ExprState **rowArrayKeyExprs;
+	/* evaluated per-arm key values, valid after rescan; length as above */
+	Datum	   *rowArrayValues;
+	bool	   *rowArrayNulls;
+	/* per key column: index field type, for building bounds */
+	Oid		   *rowArrayKeyTypes;
+	/* arm indices in key order (asc), skipping NULL-bearing arms */
+	int		   *rowArrayOrder;
+	int			rowArrayNValid;
 	/* used only by direct modify functions */
 	CmdType		cmd;
 	OSnapshot	oSnapshot;
@@ -54,6 +79,17 @@ typedef struct OIndexPlanState
 	int			iss_NumRuntimeKeys;
 	bool		iss_RuntimeKeysReady;
 	ExprContext *iss_RuntimeContext;
+
+	/*
+	 * Row-array-IN pointwise mode metadata carried from the plan.  The value
+	 * expressions (arm-major, key-position order; length ntuples*nkeys) are
+	 * initialized into ExprState in o_begin_custom_scan and evaluated at
+	 * rescan.  rowArrayNTuples == 0 means the mode is inactive.
+	 */
+	List	   *rowArrayKeyExprList;
+	int			rowArrayNTuples;
+	int			rowArrayNKeys;
+	Oid		   *rowArrayKeyTypes;
 
 	/*
 	 * Keep the index relation open for the lifetime of the scan so that

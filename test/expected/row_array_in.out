@@ -1,0 +1,312 @@
+CREATE SCHEMA row_array_in;
+SET SESSION search_path = 'row_array_in';
+CREATE EXTENSION orioledb;
+-- Composite primary key table (index-organized) and an identical heap twin.
+CREATE TABLE o_orders (
+	w int,
+	d int,
+	o int,
+	c int,
+	payload text,
+	PRIMARY KEY (w, d, o)
+) USING orioledb;
+CREATE TABLE h_orders (
+	w int,
+	d int,
+	o int,
+	c int,
+	payload text,
+	PRIMARY KEY (w, d, o)
+);
+INSERT INTO o_orders
+	SELECT w, d, o, ((w * 97 + d * 7 + o) % 50) + 1, 'p' || (w * 10000 + d * 1000 + o)
+	FROM generate_series(1, 3) w,
+		 generate_series(1, 10) d,
+		 generate_series(1, 40) o;
+INSERT INTO h_orders SELECT * FROM o_orders;
+-- A covering secondary index whose leading column is only the common prefix of
+-- the row-array-IN (mirrors TPCC idx_order); without the fix the planner would
+-- prefer this whole-"w" index scan over pointwise primary-key probes.
+CREATE INDEX o_orders_sec ON o_orders (w, d, c, o);
+CREATE INDEX h_orders_sec ON h_orders (w, d, c, o);
+ANALYZE o_orders;
+ANALYZE h_orders;
+-- A four-column PK table to exercise a PARTIAL leading-prefix row-array-IN.
+CREATE TABLE o_lines (
+	w int,
+	d int,
+	o int,
+	num int,
+	amt int,
+	PRIMARY KEY (w, d, o, num)
+) USING orioledb;
+CREATE TABLE h_lines (
+	w int,
+	d int,
+	o int,
+	num int,
+	amt int,
+	PRIMARY KEY (w, d, o, num)
+);
+INSERT INTO o_lines
+	SELECT w, d, o, num, w * 1000 + d * 100 + o * 10 + num
+	FROM generate_series(1, 3) w,
+		 generate_series(1, 10) d,
+		 generate_series(1, 20) o,
+		 generate_series(1, 5) num;
+INSERT INTO h_lines SELECT * FROM o_lines;
+ANALYZE o_lines;
+ANALYZE h_lines;
+-- Helper: run the same query text against the orioledb table and its heap
+-- twin and report whether the row multiset is identical.  We EXECUTE dynamic
+-- SQL so the same statement runs under whatever plan_cache_mode is in effect;
+-- the printed result is plan-independent so the expected file is stable.
+CREATE FUNCTION cmp(otext text, htext text) RETURNS text AS $$
+DECLARE
+	diff bigint;
+BEGIN
+	EXECUTE format($f$
+		SELECT count(*) FROM (
+			(SELECT * FROM (%s) oq EXCEPT ALL SELECT * FROM (%s) hq)
+			UNION ALL
+			(SELECT * FROM (%s) hq2 EXCEPT ALL SELECT * FROM (%s) oq2)
+		) s
+	$f$, otext, htext, htext, otext) INTO diff;
+	IF diff = 0 THEN
+		RETURN 'OK';
+	ELSE
+		RETURN 'MISMATCH (' || diff || ')';
+	END IF;
+END;
+$$ LANGUAGE plpgsql;
+-- Run a battery of shapes under both custom and generic plans.  For each shape
+-- we compare the orioledb result to the heap result.  The genuine row-array-IN
+-- must match; the neighboring NON-row-array shapes (plain equality prefix with
+-- ORDER BY/LIMIT, single-arm IN, range, ScalarArrayOp) must ALSO match and must
+-- keep correct rows/order.
+CREATE FUNCTION run_battery() RETURNS SETOF text AS $$
+DECLARE
+	mode text;
+BEGIN
+	FOREACH mode IN ARRAY ARRAY['force_custom_plan', 'force_generic_plan'] LOOP
+		EXECUTE 'SET LOCAL plan_cache_mode = ' || quote_literal(mode);
+
+		-- 1. genuine full-key row-array-IN (>=2 arms), same leading w
+		RETURN NEXT mode || ' fullkey_in: ' || cmp(
+			'SELECT w,d,o,c FROM o_orders WHERE (w,d,o) IN ((1,1,1),(1,2,2),(1,3,3),(1,5,40)) ORDER BY w,d,o',
+			'SELECT w,d,o,c FROM h_orders WHERE (w,d,o) IN ((1,1,1),(1,2,2),(1,3,3),(1,5,40)) ORDER BY w,d,o');
+
+		-- 2. full-key row-array-IN spanning multiple leading w values
+		RETURN NEXT mode || ' fullkey_in_multiw: ' || cmp(
+			'SELECT w,d,o FROM o_orders WHERE (w,d,o) IN ((1,1,1),(2,3,4),(3,10,40)) ORDER BY w,d,o',
+			'SELECT w,d,o FROM h_orders WHERE (w,d,o) IN ((1,1,1),(2,3,4),(3,10,40)) ORDER BY w,d,o');
+
+		-- 3. duplicate arms must not multiply rows
+		RETURN NEXT mode || ' fullkey_in_dups: ' || cmp(
+			'SELECT w,d,o FROM o_orders WHERE (w,d,o) IN ((1,1,1),(1,1,1),(1,2,2)) ORDER BY w,d,o',
+			'SELECT w,d,o FROM h_orders WHERE (w,d,o) IN ((1,1,1),(1,1,1),(1,2,2)) ORDER BY w,d,o');
+
+		-- 4. partial leading prefix row-array-IN on a 4-column key
+		RETURN NEXT mode || ' prefix_in: ' || cmp(
+			'SELECT w,d,o,num FROM o_lines WHERE (w,d,o) IN ((1,1,1),(1,2,2),(2,3,3)) ORDER BY w,d,o,num',
+			'SELECT w,d,o,num FROM h_lines WHERE (w,d,o) IN ((1,1,1),(1,2,2),(2,3,3)) ORDER BY w,d,o,num');
+
+		-- 5. NON-matching: plain equality prefix + ORDER BY/LIMIT (backward)
+		RETURN NEXT mode || ' eq_prefix_limit: ' || cmp(
+			'SELECT o,c FROM o_orders WHERE w=1 AND d=3 ORDER BY o DESC LIMIT 3',
+			'SELECT o,c FROM h_orders WHERE w=1 AND d=3 ORDER BY o DESC LIMIT 3');
+
+		-- 6. NON-matching: full equality lookup
+		RETURN NEXT mode || ' eq_full: ' || cmp(
+			'SELECT w,d,o,c FROM o_orders WHERE w=1 AND d=2 AND o=3',
+			'SELECT w,d,o,c FROM h_orders WHERE w=1 AND d=2 AND o=3');
+
+		-- 7. NON-matching: single-arm IN (must behave like plain equality)
+		RETURN NEXT mode || ' single_arm_in: ' || cmp(
+			'SELECT w,d,o FROM o_orders WHERE (w,d,o) IN ((1,5,5))',
+			'SELECT w,d,o FROM h_orders WHERE (w,d,o) IN ((1,5,5))');
+
+		-- 8. NON-matching: range scan
+		RETURN NEXT mode || ' range: ' || cmp(
+			'SELECT count(*)::text FROM o_orders WHERE w=1 AND d BETWEEN 2 AND 5',
+			'SELECT count(*)::text FROM h_orders WHERE w=1 AND d BETWEEN 2 AND 5');
+
+		-- 9. NON-matching: plain ScalarArrayOp on leading column
+		RETURN NEXT mode || ' saop: ' || cmp(
+			'SELECT w,d,o FROM o_orders WHERE w IN (1,2) AND d=1 AND o=1 ORDER BY w,d,o',
+			'SELECT w,d,o FROM h_orders WHERE w IN (1,2) AND d=1 AND o=1 ORDER BY w,d,o');
+
+		-- 10. row-array-IN combined with an extra restrict clause on payload
+		RETURN NEXT mode || ' in_plus_filter: ' || cmp(
+			'SELECT w,d,o FROM o_orders WHERE (w,d,o) IN ((1,1,1),(1,2,2),(1,3,3)) AND c > 0 ORDER BY w,d,o',
+			'SELECT w,d,o FROM h_orders WHERE (w,d,o) IN ((1,1,1),(1,2,2),(1,3,3)) AND c > 0 ORDER BY w,d,o');
+
+		-- 11. no matching rows
+		RETURN NEXT mode || ' no_match: ' || cmp(
+			'SELECT w,d,o FROM o_orders WHERE (w,d,o) IN ((1,1,999),(2,2,999))',
+			'SELECT w,d,o FROM h_orders WHERE (w,d,o) IN ((1,1,999),(2,2,999))');
+	END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+SELECT * FROM run_battery();
+               run_battery                
+------------------------------------------
+ force_custom_plan fullkey_in: OK
+ force_custom_plan fullkey_in_multiw: OK
+ force_custom_plan fullkey_in_dups: OK
+ force_custom_plan prefix_in: OK
+ force_custom_plan eq_prefix_limit: OK
+ force_custom_plan eq_full: OK
+ force_custom_plan single_arm_in: OK
+ force_custom_plan range: OK
+ force_custom_plan saop: OK
+ force_custom_plan in_plus_filter: OK
+ force_custom_plan no_match: OK
+ force_generic_plan fullkey_in: OK
+ force_generic_plan fullkey_in_multiw: OK
+ force_generic_plan fullkey_in_dups: OK
+ force_generic_plan prefix_in: OK
+ force_generic_plan eq_prefix_limit: OK
+ force_generic_plan eq_full: OK
+ force_generic_plan single_arm_in: OK
+ force_generic_plan range: OK
+ force_generic_plan saop: OK
+ force_generic_plan in_plus_filter: OK
+ force_generic_plan no_match: OK
+(22 rows)
+
+-- DML battery: a row-array-IN UPDATE and DELETE must affect exactly the same
+-- rows on the orioledb table as on the heap twin, under both plan modes.  This
+-- exercises the row-identity (rowid) wiring of the pointwise primary path used
+-- for UPDATE/DELETE.  We reset both tables before each check and report the
+-- symmetric row-difference (0 == identical) plus ROW_COUNT parity.
+CREATE FUNCTION run_dml_battery() RETURNS SETOF text AS $$
+DECLARE
+	mode text;
+	oro bigint;
+	hro bigint;
+	symdiff bigint;
+BEGIN
+	FOREACH mode IN ARRAY ARRAY['force_custom_plan', 'force_generic_plan'] LOOP
+		EXECUTE 'SET LOCAL plan_cache_mode = ' || quote_literal(mode);
+
+		-- UPDATE spanning multiple leading w values
+		DELETE FROM h_orders;
+		INSERT INTO h_orders SELECT * FROM o_orders;
+		EXECUTE 'UPDATE o_orders SET c = c + 1000 WHERE (w,d,o) IN ((1,1,1),(1,2,2),(2,3,3),(3,10,40))';
+		GET DIAGNOSTICS oro = ROW_COUNT;
+		UPDATE h_orders SET c = c + 1000 WHERE (w,d,o) IN ((1,1,1),(1,2,2),(2,3,3),(3,10,40));
+		GET DIAGNOSTICS hro = ROW_COUNT;
+		symdiff := (SELECT count(*) FROM (SELECT * FROM o_orders EXCEPT SELECT * FROM h_orders) a)
+				 + (SELECT count(*) FROM (SELECT * FROM h_orders EXCEPT SELECT * FROM o_orders) b);
+		RETURN NEXT mode || ' UPDATE rowcount_match=' || (oro = hro) || ' state_symdiff=' || symdiff;
+
+		-- DELETE spanning multiple leading w values
+		DELETE FROM o_orders; INSERT INTO o_orders SELECT * FROM h_orders;
+		DELETE FROM h_orders; INSERT INTO h_orders SELECT * FROM o_orders;
+		EXECUTE 'DELETE FROM o_orders WHERE (w,d,o) IN ((1,4,4),(2,5,5),(3,6,6))';
+		GET DIAGNOSTICS oro = ROW_COUNT;
+		DELETE FROM h_orders WHERE (w,d,o) IN ((1,4,4),(2,5,5),(3,6,6));
+		GET DIAGNOSTICS hro = ROW_COUNT;
+		symdiff := (SELECT count(*) FROM (SELECT * FROM o_orders EXCEPT SELECT * FROM h_orders) a)
+				 + (SELECT count(*) FROM (SELECT * FROM h_orders EXCEPT SELECT * FROM o_orders) b);
+		RETURN NEXT mode || ' DELETE rowcount_match=' || (oro = hro) || ' state_symdiff=' || symdiff;
+
+		-- restore both tables to a common baseline for the next iteration
+		DELETE FROM o_orders; DELETE FROM h_orders;
+		INSERT INTO o_orders
+			SELECT w, d, o, ((w * 97 + d * 7 + o) % 50) + 1, 'p' || (w * 10000 + d * 1000 + o)
+			FROM generate_series(1, 3) w, generate_series(1, 10) d, generate_series(1, 40) o;
+		INSERT INTO h_orders SELECT * FROM o_orders;
+	END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+SELECT * FROM run_dml_battery();
+                        run_dml_battery                        
+---------------------------------------------------------------
+ force_custom_plan UPDATE rowcount_match=true state_symdiff=0
+ force_custom_plan DELETE rowcount_match=true state_symdiff=0
+ force_generic_plan UPDATE rowcount_match=true state_symdiff=0
+ force_generic_plan DELETE rowcount_match=true state_symdiff=0
+(4 rows)
+
+-- Show the plan shape for the genuine row-array-IN (common leading value): it
+-- must be a pointwise primary-key o_scan, not a whole-warehouse scan on the
+-- covering secondary index with the OR only in the Filter.  (Literal / custom
+-- plan.)  UPDATE and DELETE must likewise use the pointwise primary path.
+SET plan_cache_mode = force_custom_plan;
+EXPLAIN (COSTS off)
+	SELECT w,d,o FROM o_orders WHERE (w,d,o) IN ((1,1,1),(1,2,2),(1,3,3));
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_orders
+   Filter: ((w = 1) AND (((d = 1) AND (o = 1)) OR ((d = 2) AND (o = 2)) OR ((d = 3) AND (o = 3))))
+   Forward index scan of: o_orders_pkey
+(3 rows)
+
+EXPLAIN (COSTS off)
+	UPDATE o_orders SET c = c WHERE (w,d,o) IN ((1,1,1),(1,2,2),(1,3,3));
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Update on o_orders
+   ->  Custom Scan (o_scan) on o_orders
+         Filter: ((w = 1) AND (((d = 1) AND (o = 1)) OR ((d = 2) AND (o = 2)) OR ((d = 3) AND (o = 3))))
+         Forward index scan of: o_orders_pkey
+(4 rows)
+
+EXPLAIN (COSTS off)
+	DELETE FROM o_orders WHERE (w,d,o) IN ((1,1,1),(1,2,2),(1,3,3));
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Delete on o_orders
+   ->  Custom Scan (o_scan) on o_orders
+         Filter: ((w = 1) AND (((d = 1) AND (o = 1)) OR ((d = 2) AND (o = 2)) OR ((d = 3) AND (o = 3))))
+         Forward index scan of: o_orders_pkey
+(4 rows)
+
+-- FOR UPDATE row-array-IN must NOT use the injected pointwise path.  Row locking
+-- over the pointwise per-tuple scan degrades into a heavyweight tuple-lock convoy
+-- under concurrency (observed as a >10x TPCC collapse), and such queries already
+-- reach a pointwise plan via the planner's ScalarArrayOp collapse when the
+-- leading columns are equal.  So a row-marked relation is left on its ordinary
+-- plan.
+EXPLAIN (COSTS off)
+	SELECT w,d,o FROM o_orders WHERE (w,d,o) IN ((1,1,1),(1,2,2),(1,3,3)) FOR UPDATE;
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ LockRows
+   ->  Custom Scan (o_scan) on o_orders
+         Filter: (((d = 1) AND (o = 1)) OR ((d = 2) AND (o = 2)) OR ((d = 3) AND (o = 3)))
+         Forward index scan of: o_orders_pkey
+         Conds: (w = 1)
+(5 rows)
+
+-- Non-matching shapes keep their ordinary plans (no row-array Filter recheck).
+EXPLAIN (COSTS off)
+	SELECT w,d,o,c FROM o_orders WHERE w=1 AND d=2 AND o=3;
+                 QUERY PLAN                 
+--------------------------------------------
+ Custom Scan (o_scan) on o_orders
+   Forward index scan of: o_orders_pkey
+   Conds: ((w = 1) AND (d = 2) AND (o = 3))
+(3 rows)
+
+EXPLAIN (COSTS off)
+	SELECT o,c FROM o_orders WHERE w=1 AND d=3 ORDER BY o DESC LIMIT 3;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Limit
+   ->  Custom Scan (o_scan) on o_orders
+         Backward index scan of: o_orders_pkey
+         Conds: ((w = 1) AND (d = 3))
+(4 rows)
+
+DROP FUNCTION run_dml_battery();
+DROP FUNCTION run_battery();
+DROP FUNCTION cmp(text, text);
+DROP TABLE o_orders;
+DROP TABLE h_orders;
+DROP TABLE o_lines;
+DROP TABLE h_lines;
+DROP EXTENSION orioledb CASCADE;
+DROP SCHEMA row_array_in;

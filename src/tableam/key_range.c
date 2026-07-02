@@ -353,6 +353,58 @@ o_key_data_to_key_range(OBTreeKeyRange *res, ScanKeyData *keyData,
 	return exact;
 }
 
+/*
+ * Build a per-tuple key range that pins a contiguous leading prefix.
+ *
+ * Used by the row-array-IN scan mode: each OR arm of a "(c1..cj) IN (...)"
+ * qual pins the first nPinned key columns to exact equality values, leaving
+ * the remaining (resultNKeys - nPinned) columns unbounded.  The pinned columns
+ * are set inclusive with low == high; the rest get -inf/+inf.  The value types
+ * are given per pinned column in types[]; NULLs are not accepted here (callers
+ * must skip NULL-bearing arms, since equality never matches NULL).
+ *
+ * Returns true if the resulting range is exact (nPinned == resultNKeys, i.e. a
+ * point lookup), false if it is a prefix range (nPinned < resultNKeys).
+ */
+bool
+o_exact_key_range_from_values(OBTreeKeyRange *res, Datum *values,
+							  const Oid *types, int nPinned,
+							  int resultNKeys, OIndexField *fields)
+{
+	int			i;
+
+	res->empty = false;
+	res->low.nkeys = resultNKeys;
+	res->high.nkeys = resultNKeys;
+	res->low.n_row_keys = 0;
+	res->high.n_row_keys = 0;
+
+	for (i = 0; i < resultNKeys; i++)
+	{
+		OIndexField *field = &fields[i];
+		OBTreeValueBound low = {0, 0, O_VALUE_BOUND_MINUS_INFINITY, NULL, NULL};
+		OBTreeValueBound high = {0, 0, O_VALUE_BOUND_PLUS_INFINITY, NULL, NULL};
+
+		if (i < nPinned)
+		{
+			Oid			type = types[i];
+
+			low.flags = O_VALUE_BOUND_LOWER | O_VALUE_BOUND_INCLUSIVE;
+			high.flags = O_VALUE_BOUND_UPPER | O_VALUE_BOUND_INCLUSIVE;
+
+			if (!OidIsValid(type))
+				type = field->inputtype;
+
+			o_fill_key_bounds(values[i], type, &low, &high, field);
+		}
+
+		res->low.keys[i] = low;
+		res->high.keys[i] = high;
+	}
+
+	return nPinned == resultNKeys;
+}
+
 static void
 o_fill_key_bounds(Datum v, Oid type,
 				  OBTreeValueBound *low, OBTreeValueBound *high,

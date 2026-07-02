@@ -73,4 +73,11 @@ extern bool o_key_data_to_key_range(OBTreeKeyRange *res,
 									int resultNKeys,
 									OIndexField *fields);
 
+extern bool o_exact_key_range_from_values(OBTreeKeyRange *res,
+										  Datum *values,
+										  const Oid *types,
+										  int nPinned,
+										  int resultNKeys,
+										  OIndexField *fields);
+
 #endif

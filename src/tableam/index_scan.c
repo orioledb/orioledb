@@ -324,6 +324,72 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	if (!so->qual_ok)
 		return false;
 
+	/*
+	 * Row-array-IN mode: iterate the list of per-tuple ranges.  Each range
+	 * pins the same contiguous leading prefix (rowArrayNKeys columns).  When
+	 * the prefix covers the whole key it is a point lookup (exact); otherwise
+	 * it is a prefix range served by an iterator.  rowArrayOrder holds the
+	 * arm indices in key order (ascending); we walk it forward or backward
+	 * according to the scan direction so the output matches the index order
+	 * the plan promised.
+	 */
+	if (ostate->rowArrayNTuples > 0)
+	{
+		int			ord;
+		int			totalNKeys = indexDescr->nonLeafTupdesc->natts;
+
+		if (!ostate->curKeyRangeIsLoaded)
+			ostate->rowArrayCurTuple = 0;
+		else
+			ostate->rowArrayCurTuple++;
+		ostate->curKeyRangeIsLoaded = true;
+
+		if (ostate->rowArrayCurTuple >= ostate->rowArrayNValid)
+		{
+			ostate->exact = false;
+			return false;
+		}
+
+		if (ostate->iterator != NULL)
+		{
+			btree_iterator_free(ostate->iterator);
+			ostate->iterator = NULL;
+		}
+
+		/* forward walks ascending, backward walks descending */
+		if (ostate->scanDir == BackwardScanDirection)
+			ord = ostate->rowArrayOrder[ostate->rowArrayNValid - 1 -
+										ostate->rowArrayCurTuple];
+		else
+			ord = ostate->rowArrayOrder[ostate->rowArrayCurTuple];
+
+		oldcontext = MemoryContextSwitchTo(ostate->cxt);
+		ostate->exact =
+			o_exact_key_range_from_values(&ostate->curKeyRange,
+										  &ostate->rowArrayValues[ord * ostate->rowArrayNKeys],
+										  ostate->rowArrayKeyTypes,
+										  ostate->rowArrayNKeys,
+										  totalNKeys,
+										  indexDescr->fields);
+
+		if (!ostate->exact)
+		{
+			bound = (ostate->scanDir == ForwardScanDirection
+					 ? &ostate->curKeyRange.low
+					 : &ostate->curKeyRange.high);
+			ostate->iterator = o_btree_iterator_create(&indexDescr->desc,
+													   (Pointer) bound,
+													   BTreeKeyBound,
+													   &ostate->oSnapshot,
+													   ostate->scanDir);
+			o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
+		}
+
+		MemoryContextSwitchTo(oldcontext);
+
+		return true;
+	}
+
 #if PG_VERSION_NUM >= 170000
 
 	if (so->numArrayKeys)
