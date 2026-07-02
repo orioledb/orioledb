@@ -1648,6 +1648,46 @@ clean_chain_has_locks_flag(UndoLogType undoType, UndoLocation location,
 
 
 /*
+ * Lock/Update at snapshot my_csn: return true if the row must be treated as
+ * deleted -- walking the version chain from the top down, the first committed
+ * version (skipping in-progress/aborted/lock-only) is a delete, or a committed
+ * delete is seen before reaching our visible committed version, or the undo
+ * chain breaks before reaching my_csn.  Avoids waiting on an in-progress
+ * re-inserter whose committed delete lies below it in the chain.
+ */
+bool
+tuple_is_deleted_for_csn(UndoLogType undoType, BTreeLeafTuphdr *pageTuphdr,
+						 CommitSeqNo my_csn)
+{
+	BTreeLeafTuphdr cur = *pageTuphdr;
+	UndoLocation retainedUndoLocation = get_snapshot_retained_undo_location(undoType);
+
+	while (true)
+	{
+		if (!XACT_INFO_IS_LOCK_ONLY(cur.xactInfo))
+		{
+			CommitSeqNo csn = oxid_get_csn(XACT_INFO_GET_OXID(cur.xactInfo), false);
+
+			if (!COMMITSEQNO_IS_INPROGRESS(csn) && !COMMITSEQNO_IS_ABORTED(csn))
+			{
+				/* committed version */
+				if (cur.deleted != BTreeLeafTupleNonDeleted)
+					return true;
+				if (csn < my_csn)
+					return false;
+				/* committed live but csn >= my_csn: keep walking */
+			}
+			/* in-progress or aborted: skip */
+		}
+		if (!UndoLocationIsValid(cur.undoLocation) ||
+			cur.undoLocation < retainedUndoLocation)
+			return true;
+		if (!get_prev_leaf_header_from_undo_if_exists(undoType, &cur))
+			return true;
+	}
+}
+
+/*
  * Check for row-level lock conflict
  *
  * Returns true if lock conflict.  On lock conflict places the conflicting undo
