@@ -95,9 +95,7 @@ try_copy_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeCount,
 	uint64		state1,
 				state2;
 	bool		hiKeysEndOK PG_USED_FOR_ASSERTS_ONLY = true;
-#ifdef USE_ASSERT_CHECKING
 	ORelOids	pageOids;
-#endif
 	PagePool   *ppool;
 
 	state1 = pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state));
@@ -126,19 +124,17 @@ try_copy_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeCount,
 	else
 		memcpy(dest, p, ORIOLEDB_BLCKSZ);
 
-#ifdef USE_ASSERT_CHECKING
-
 	/*
 	 * Read the page's owning tree oids inside the same barrier-protected
-	 * window as the copy.  If the state checks below confirm the page did not
-	 * change under us, these oids describe the page we copied and its
-	 * physical identity must match the tree we descended -- otherwise we
-	 * followed a downlink onto a page that belongs to a different tree (a
-	 * reused/evicted page).  Validated by the Assert() after all the regular
-	 * checks pass.
+	 * window as the copy.  If the state and pageChangeCount checks below
+	 * confirm the page did not change under us, these oids describe the page
+	 * we copied and its physical identity must match the tree we descended --
+	 * otherwise we followed a downlink onto a page that belongs to a different
+	 * tree (a reused/evicted page, e.g. on a hot standby where recovery apply
+	 * repurposes slots concurrently).  Signalled to the caller as
+	 * ReadPageResultWrongPageChangeCount so it re-descends.
 	 */
 	pageOids = O_GET_IN_MEMORY_PAGEDESC(blkno)->oids;
-#endif
 
 	if (readCsn)
 		*readCsn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
@@ -163,13 +159,12 @@ try_copy_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint32 pageChangeCount,
 	 * same relfilenode (e.g. ALTER TYPE), so it is excluded.  Local-pool
 	 * (temp) pages are skipped: they use a private oid scheme and a
 	 * per-backend slot can be reused across the temp relation's own indexes,
-	 * so their descriptor oids need not match.  The cross-tree reuse this
-	 * guards against (a stale downlink onto an evicted-and-reused page, e.g.
-	 * on a hot standby) is a shared-pool concern.
+	 * so their descriptor oids need not match.
 	 */
-	Assert(O_PAGE_IS_LOCAL(blkno) ||
-		   (pageOids.datoid == desc->oids.datoid &&
-			pageOids.relnode == desc->oids.relnode));
+	if (!O_PAGE_IS_LOCAL(blkno) &&
+		(pageOids.datoid != desc->oids.datoid ||
+		 pageOids.relnode != desc->oids.relnode))
+		return ReadPageResultWrongPageChangeCount;
 
 	ppool = get_ppool_by_blkno(blkno);
 	ppool_ucm_inc_usage(ppool, blkno);
