@@ -380,8 +380,8 @@ o_pk_encode_leaf(OTuple tuple, OIndexDescr *id, uint8 *out)
 	bool		isPrimary = (id->desc.type == oIndexPrimary);
 	int			npk = isPrimary ? id->nKeyFields : id->nPrimaryFields;
 	int			pk_from = id->nFields - id->nPrimaryFields;
-	AttrNumber	attnums[INDEX_MAX_KEYS];
-	Oid			types[INDEX_MAX_KEYS];
+	AttrNumber	attnums[INDEX_MAX_KEYS] = {0};
+	Oid			types[INDEX_MAX_KEYS] = {0};
 	int			i;
 	int			len = 0;
 	int			off;
@@ -413,8 +413,8 @@ o_pk_encode_leaf(OTuple tuple, OIndexDescr *id, uint8 *out)
 static void
 o_pk_encode_nonleaf(OTuple tuple, OIndexDescr *primary, uint8 *out)
 {
-	AttrNumber	attnums[INDEX_MAX_KEYS];
-	Oid			types[INDEX_MAX_KEYS];
+	AttrNumber	attnums[INDEX_MAX_KEYS] = {0};
+	Oid			types[INDEX_MAX_KEYS] = {0};
 	int			i;
 	int			len = 0;
 	int			off;
@@ -444,8 +444,8 @@ o_pk_decode_to_key(const uint8 *keybytes, OIndexDescr *primary, OFixedKey *key)
 {
 	Datum		values[INDEX_MAX_KEYS];
 	bool		isnull[INDEX_MAX_KEYS];
-	AttrNumber	attnums[INDEX_MAX_KEYS];
-	Oid			types[INDEX_MAX_KEYS];
+	AttrNumber	attnums[INDEX_MAX_KEYS] = {0};
+	Oid			types[INDEX_MAX_KEYS] = {0};
 	int			natts = primary->nonLeafTupdesc->natts;
 	int			i;
 	int			len = 0;

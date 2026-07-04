@@ -586,7 +586,11 @@ o_keybitmap_get_next(OKeyBitmap *bm, uint64 prev, bool *found)
 		uint64		chunk = bm->chunks[idx];
 		OKeyBitmapChunk *entry = okbm_find(bm->tree, chunk);
 		int			startOff = (chunk == chunkPrev) ? offPrev : 0;
-		int			nextOff = find_next_offset(entry->bitmap, startOff);
+		int			nextOff;
+
+		/* chunk came from bm->chunks[], so the tree always has it */
+		Assert(entry != NULL);
+		nextOff = find_next_offset(entry->bitmap, startOff);
 
 		if (nextOff >= 0)
 		{
