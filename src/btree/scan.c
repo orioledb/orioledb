@@ -392,7 +392,8 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 						Page page,
 						BTreePageItemLocator *intLoc,
 						OffsetNumber *startOffset,
-						const bool prevIsLeftmostOrNone)
+						const bool prevIsLeftmostOrNone,
+						bool isBitmapJump)
 {
 	bool		has_next = false;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
@@ -434,7 +435,23 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 		 */
 		*intLoc = scan->context.items[scan->context.index].locator;
 		*startOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(page, intLoc);
-		if (!O_TUPLE_IS_NULL(prevHikey))
+		if (isBitmapJump)
+		{
+			/*
+			 * A bitmap page skip is a fresh descent straight to the wanted
+			 * key, so there is no continuity with a previous page to verify
+			 * (and hence no iterator to build).  find_page() landed on the
+			 * downlink covering the key; record the page's low key as
+			 * prevHikey so get_current_downlink_key() derives the first
+			 * downlink's low bound from it.
+			 */
+			if (O_TUPLE_IS_NULL(scan->context.lokey.tuple))
+				clear_fixed_key(&scan->prevHikey);
+			else
+				copy_fixed_key(scan->desc, &scan->prevHikey,
+							   scan->context.lokey.tuple);
+		}
+		else if (!O_TUPLE_IS_NULL(prevHikey))
 		{
 			OTuple		intTup;
 
@@ -764,30 +781,77 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 			/* Try to load next internal page if needed */
 			if (!pageIsLoaded)
 			{
-				if (scan->firstPageIsLoaded)
+				/*
+				 * A bitmap scan can skip whole internal pages that hold no
+				 * wanted keys: ask the callback for the next needed key at or
+				 * after the finished page's hikey and descend straight to the
+				 * page covering it, instead of stepping to the immediate next
+				 * page.  The landed downlink is fed to the same in-memory /
+				 * on-disk handling below, so the per-leaf FETCH walk still
+				 * applies.
+				 */
+				if (scan->cb && scan->cb->getNextPageKey)
 				{
-					Assert(!O_PAGE_IS(scan->context.img, RIGHTMOST));
-					if (scan->context.img)
-						prevIsLeftmostOrNone = O_PAGE_IS(scan->context.img, LEFTMOST);
-					copy_fixed_hikey(scan->desc, &scan->prevHikey, scan->context.img);
-				}
+					OFixedKey	jumpKey;
 
-				if (!load_next_internal_page(scan, scan->prevHikey.tuple,
-											 NULL,
-											 &scan->intLoc,
-											 &scan->intStartOffset,
-											 prevIsLeftmostOrNone))
+					if (scan->firstPageIsLoaded)
+						copy_fixed_hikey(scan->desc, &jumpKey, scan->context.img);
+					else
+						clear_fixed_key(&jumpKey);
+
+					if (!scan->cb->getNextPageKey(&jumpKey, scan->arg))
+					{
+						/* Nothing left in the bitmap. */
+						clear_fixed_key(keyRangeLow);
+						clear_fixed_key(keyRangeHigh);
+						return false;
+					}
+
+					if (!load_next_internal_page(scan, jumpKey.tuple,
+												 NULL,
+												 &scan->intLoc,
+												 &scan->intStartOffset,
+												 true,
+												 true))
+					{
+						/* Single leaf page (tree has no internal level). */
+						scan->isSingleLeafPage = true;
+						clear_fixed_key(keyRangeLow);
+						clear_fixed_key(keyRangeHigh);
+						return false;
+					}
+
+					/* A jump is a fresh descent; it never builds an iterator. */
+					Assert(!scan->iter);
+				}
+				else
 				{
-					/* first page only */
-					Assert(O_PAGE_IS(scan->context.img, LEFTMOST));
-					scan->isSingleLeafPage = true;
-					clear_fixed_key(keyRangeLow);
-					clear_fixed_key(keyRangeHigh);
-					return false;
-				}
+					if (scan->firstPageIsLoaded)
+					{
+						Assert(!O_PAGE_IS(scan->context.img, RIGHTMOST));
+						if (scan->context.img)
+							prevIsLeftmostOrNone = O_PAGE_IS(scan->context.img, LEFTMOST);
+						copy_fixed_hikey(scan->desc, &scan->prevHikey, scan->context.img);
+					}
 
-				if (scan->iter)
-					return false;
+					if (!load_next_internal_page(scan, scan->prevHikey.tuple,
+												 NULL,
+												 &scan->intLoc,
+												 &scan->intStartOffset,
+												 prevIsLeftmostOrNone,
+												 false))
+					{
+						/* first page only */
+						Assert(O_PAGE_IS(scan->context.img, LEFTMOST));
+						scan->isSingleLeafPage = true;
+						clear_fixed_key(keyRangeLow);
+						clear_fixed_key(keyRangeHigh);
+						return false;
+					}
+
+					if (scan->iter)
+						return false;
+				}
 			}
 
 			if (BTREE_PAGE_LOCATOR_IS_VALID(scan->context.img, &scan->intLoc))
@@ -856,6 +920,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 													  curPage->img,
 													  &loc,
 													  &curPage->startOffset,
+													  false,
 													  false);
 				if (!next_loaded)
 				{
@@ -903,6 +968,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 													  nextPage->img,
 													  &loc,
 													  &nextPage->startOffset,
+													  false,
 													  false);
 				Assert(next_loaded);
 

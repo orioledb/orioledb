@@ -32,6 +32,17 @@ typedef struct BTreeSeqScanCallbacks
 {
 	bool		(*isRangeValid) (OTuple low, OTuple high, void *arg);
 	bool		(*getNextKey) (OFixedKey *key, bool inclusive, void *arg);
+
+	/*
+	 * Optional (may be NULL).  Given the just-finished internal page's hikey
+	 * in key->tuple (an exclusive upper bound: every key on that page is less
+	 * than it; a NULL tuple means "from the start of the tree"), rewrite key
+	 * with the smallest key the scan still needs that is >= the hikey, as a
+	 * non-leaf key usable for a fresh descent.  Returns false when nothing is
+	 * left, letting the sequential scan skip whole internal pages that hold
+	 * no wanted keys instead of stepping through every one.
+	 */
+	bool		(*getNextPageKey) (OFixedKey *key, void *arg);
 } BTreeSeqScanCallbacks;
 
 extern BTreeScanShmem *btreeScanShmem;
