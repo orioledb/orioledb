@@ -162,6 +162,16 @@
 #endif
 
 /*
+ * This is a verbatim copy of PostgreSQL's lib/radixtree.h -- upstream code we
+ * don't audit.  Mark it a system header so the clang static analyzer skips its
+ * (benign) reports; guarded for clang so GCC's -Werror doesn't trip over an
+ * unknown pragma.  cppcheck is handled separately via ci/cppcheck-suppress.
+ */
+#ifdef __clang__
+#pragma clang system_header
+#endif
+
+/*
  * PG16 portability.  This template is taken from PG17's lib/radixtree.h and
  * relies on helpers that PG17 introduced but PG16 lacks: port/simd.h has no
  * vector8_highbit_mask()/vector8_min(), and nodes/bitmapset.h has no bmw_*

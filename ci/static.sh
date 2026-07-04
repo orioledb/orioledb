@@ -10,7 +10,6 @@ cd orioledb
 if [ "$COMPILER" = "clang" ]; then
 	scan-build-$LLVM_VER --status-bugs --use-cc=clang-$LLVM_VER \
 		-disable-checker deadcode.DeadStores \
-		--exclude include/lib/o_radixtree.h \
 		make CLANG=clang-$LLVM_VER USE_PGXS=1 IS_DEV=1 USE_ASSERT_CHECKING=1 || status=$?
 
 elif [ "$COMPILER" = "gcc" ]; then
