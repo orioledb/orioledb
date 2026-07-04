@@ -1537,11 +1537,12 @@ explain (verbose, costs off) select min(1-id) from matest0;
                                    ->  Custom Scan (o_scan) on inherits.matest2 matest0_3
                                          Output: matest0_3.id
                                          Filter: ((1 - matest0_3.id) IS NOT NULL)
-                                         Forward index only scan of: matest2_pkey
+                                         Bitmap heap scan
+                                         ->  Bitmap Index Scan on matest2_pkey
                        ->  Index Only Scan using matest3i on inherits.matest3 matest0_4
                              Output: matest0_4.id, ((1 - matest0_4.id))
                              Index Cond: (((1 - matest0_4.id)) IS NOT NULL)
-(27 rows)
+(28 rows)
 
 select min(1-id) from matest0;
  min 

@@ -136,12 +136,14 @@ SELECT * FROM o_test51 WHERE key BETWEEN 100 and 110;
 (10 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test51 WHERE value BETWEEN 200 and 210;
-                  QUERY PLAN                  
-----------------------------------------------
+                       QUERY PLAN                        
+---------------------------------------------------------
  Custom Scan (o_scan) on o_test51
-   Forward index scan of: o_test51_pkey
-   Conds: ((value >= 200) AND (value <= 210))
-(3 rows)
+   Bitmap heap scan
+   Recheck Cond: ((value >= 200) AND (value <= 210))
+   ->  Bitmap Index Scan on o_test51_pkey
+         Index Cond: ((value >= 200) AND (value <= 210))
+(5 rows)
 
 SELECT * FROM o_test51 WHERE value BETWEEN 200 and 210;
  key | value 
@@ -191,12 +193,14 @@ SELECT orioledb_tbl_indices('o_test52'::regclass);
 
 INSERT INTO o_test52 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 EXPLAIN (COSTS off) SELECT * FROM o_test52 WHERE key BETWEEN 100 and 110;
-                 QUERY PLAN                  
----------------------------------------------
+                     QUERY PLAN                      
+-----------------------------------------------------
  Custom Scan (o_scan) on o_test52
-   Forward index only scan of: o_test52_pkey
-   Conds: ((key >= 100) AND (key <= 110))
-(3 rows)
+   Bitmap heap scan
+   Recheck Cond: ((key >= 100) AND (key <= 110))
+   ->  Bitmap Index Scan on o_test52_pkey
+         Index Cond: ((key >= 100) AND (key <= 110))
+(5 rows)
 
 SELECT * FROM o_test52 WHERE key BETWEEN 100 and 110;
  key | value 
@@ -214,12 +218,14 @@ SELECT * FROM o_test52 WHERE key BETWEEN 100 and 110;
 (10 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test52 WHERE value BETWEEN 200 and 210;
-                  QUERY PLAN                  
-----------------------------------------------
+                       QUERY PLAN                        
+---------------------------------------------------------
  Custom Scan (o_scan) on o_test52
-   Forward index only scan of: o_test52_pkey
-   Conds: ((value >= 200) AND (value <= 210))
-(3 rows)
+   Bitmap heap scan
+   Recheck Cond: ((value >= 200) AND (value <= 210))
+   ->  Bitmap Index Scan on o_test52_pkey
+         Index Cond: ((value >= 200) AND (value <= 210))
+(5 rows)
 
 SELECT * FROM o_test52 WHERE value BETWEEN 200 and 210;
  key | value 
@@ -269,12 +275,14 @@ SELECT orioledb_tbl_indices('o_test53'::regclass);
 
 INSERT INTO o_test53 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 EXPLAIN (COSTS off) SELECT * FROM o_test53 WHERE key BETWEEN 100 and 110;
-                QUERY PLAN                
-------------------------------------------
+                     QUERY PLAN                      
+-----------------------------------------------------
  Custom Scan (o_scan) on o_test53
-   Forward index scan of: o_test53_pkey
-   Conds: ((key >= 100) AND (key <= 110))
-(3 rows)
+   Bitmap heap scan
+   Recheck Cond: ((key >= 100) AND (key <= 110))
+   ->  Bitmap Index Scan on o_test53_pkey
+         Index Cond: ((key >= 100) AND (key <= 110))
+(5 rows)
 
 SELECT * FROM o_test53 WHERE key BETWEEN 100 and 110;
  key | value 
@@ -674,20 +682,26 @@ EXPLAIN (COSTS off) SELECT * FROM o_test58;
 (1 row)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test58 WHERE foo = 301;
-                 QUERY PLAN                 
---------------------------------------------
- Index Scan using o_test58_reg2 on o_test58
-   Index Cond: (foo = 301)
-(2 rows)
+                QUERY PLAN                
+------------------------------------------
+ Custom Scan (o_scan) on o_test58
+   Bitmap heap scan
+   Recheck Cond: (foo = 301)
+   ->  Bitmap Index Scan on o_test58_reg2
+         Index Cond: (foo = 301)
+(5 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test58 WHERE foo > 300 and foo < 400 and
 												 bar = 300;
-                 QUERY PLAN                  
----------------------------------------------
- Index Scan using o_test58_reg2 on o_test58
-   Index Cond: ((foo > 300) AND (foo < 400))
+                    QUERY PLAN                     
+---------------------------------------------------
+ Custom Scan (o_scan) on o_test58
    Filter: (bar = 300)
-(3 rows)
+   Bitmap heap scan
+   Recheck Cond: ((foo > 300) AND (foo < 400))
+   ->  Bitmap Index Scan on o_test58_reg2
+         Index Cond: ((foo > 300) AND (foo < 400))
+(6 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test58 WHERE bar = 200;
       QUERY PLAN       
@@ -699,12 +713,15 @@ EXPLAIN (COSTS off) SELECT * FROM o_test58 WHERE bar = 200;
 SELECT smart_explain(
 'EXPLAIN (COSTS off) UPDATE o_test58 SET foo = 100 WHERE foo > 102 AND
 														 foo < 400;');
-                   smart_explain                   
----------------------------------------------------
+                      smart_explain                      
+---------------------------------------------------------
  Update on o_test58
-   ->  Index Scan using o_test58_reg2 on o_test58
-         Index Cond: ((foo > 102) AND (foo < 400))
-(3 rows)
+   ->  Custom Scan (o_scan) on o_test58
+         Bitmap heap scan
+         Recheck Cond: ((foo > 102) AND (foo < 400))
+         ->  Bitmap Index Scan on o_test58_reg2
+               Index Cond: ((foo > 102) AND (foo < 400))
+(6 rows)
 
 UPDATE o_test58 SET foo = 100 WHERE foo > 102;
 --SELECT orioledb_tbl_structure('o_test58'::regclass);
@@ -723,50 +740,71 @@ CREATE TABLE o_test59
 CREATE INDEX o_test59_reg1 ON o_test59(sec1);
 CREATE INDEX o_test59_reg2 ON o_test59(sec2);
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE sec1 = 100;
-                 QUERY PLAN                 
---------------------------------------------
- Index Scan using o_test59_reg1 on o_test59
-   Index Cond: (sec1 = 100)
-(2 rows)
+                QUERY PLAN                
+------------------------------------------
+ Custom Scan (o_scan) on o_test59
+   Bitmap heap scan
+   Recheck Cond: (sec1 = 100)
+   ->  Bitmap Index Scan on o_test59_reg1
+         Index Cond: (sec1 = 100)
+(5 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE sec1 = 100 and pri1 > 200;
-                 QUERY PLAN                 
---------------------------------------------
- Index Scan using o_test59_reg1 on o_test59
-   Index Cond: (sec1 = 100)
+                QUERY PLAN                
+------------------------------------------
+ Custom Scan (o_scan) on o_test59
    Filter: (pri1 > 200)
-(3 rows)
+   Bitmap heap scan
+   Recheck Cond: (sec1 = 100)
+   ->  Bitmap Index Scan on o_test59_reg1
+         Index Cond: (sec1 = 100)
+(6 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE sec1 = 100 and pri1 = 200;
-                 QUERY PLAN                 
---------------------------------------------
- Index Scan using o_test59_reg1 on o_test59
-   Index Cond: (sec1 = 100)
-   Filter: (pri1 = 200)
-(3 rows)
+                   QUERY PLAN                    
+-------------------------------------------------
+ Custom Scan (o_scan) on o_test59
+   Bitmap heap scan
+   Recheck Cond: ((sec1 = 100) AND (pri1 = 200))
+   ->  BitmapAnd
+         ->  Bitmap Index Scan on o_test59_reg1
+               Index Cond: (sec1 = 100)
+         ->  Bitmap Index Scan on o_test59_pkey
+               Index Cond: (pri1 = 200)
+(8 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE pri1 = 100;
-               QUERY PLAN               
-----------------------------------------
+                QUERY PLAN                
+------------------------------------------
  Custom Scan (o_scan) on o_test59
-   Forward index scan of: o_test59_pkey
-   Conds: (pri1 = 100)
-(3 rows)
+   Bitmap heap scan
+   Recheck Cond: (pri1 = 100)
+   ->  Bitmap Index Scan on o_test59_pkey
+         Index Cond: (pri1 = 100)
+(5 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE sec2 = 200;
-                 QUERY PLAN                 
---------------------------------------------
- Index Scan using o_test59_reg2 on o_test59
-   Index Cond: (sec2 = 200)
-(2 rows)
+                QUERY PLAN                
+------------------------------------------
+ Custom Scan (o_scan) on o_test59
+   Bitmap heap scan
+   Recheck Cond: (sec2 = 200)
+   ->  Bitmap Index Scan on o_test59_reg2
+         Index Cond: (sec2 = 200)
+(5 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test59 WHERE sec2 = 200 and pri1 = 100;
-                 QUERY PLAN                 
---------------------------------------------
- Index Scan using o_test59_reg2 on o_test59
-   Index Cond: (sec2 = 200)
-   Filter: (pri1 = 100)
-(3 rows)
+                   QUERY PLAN                    
+-------------------------------------------------
+ Custom Scan (o_scan) on o_test59
+   Bitmap heap scan
+   Recheck Cond: ((sec2 = 200) AND (pri1 = 100))
+   ->  BitmapAnd
+         ->  Bitmap Index Scan on o_test59_reg2
+               Index Cond: (sec2 = 200)
+         ->  Bitmap Index Scan on o_test59_pkey
+               Index Cond: (pri1 = 100)
+(8 rows)
 
 INSERT INTO o_test59 SELECT 100 + i, 200 + i, 300 + i, 400 + i, 500 + i FROM generate_series(1, 10) AS i;
 --SELECT orioledb_tbl_structure('o_test59'::regclass);
@@ -774,36 +812,45 @@ INSERT INTO o_test59 SELECT 100 + i, 200 + i, 300 + i, 400 + i, 500 + i FROM gen
 SELECT smart_explain(
 'EXPLAIN (COSTS off) UPDATE o_test59 SET foo = 0 WHERE sec1 > 105 AND
 													   sec1 < 200;');
-                    smart_explain                    
------------------------------------------------------
+                       smart_explain                       
+-----------------------------------------------------------
  Update on o_test59
-   ->  Index Scan using o_test59_reg1 on o_test59
-         Index Cond: ((sec1 > 105) AND (sec1 < 200))
-(3 rows)
+   ->  Custom Scan (o_scan) on o_test59
+         Bitmap heap scan
+         Recheck Cond: ((sec1 > 105) AND (sec1 < 200))
+         ->  Bitmap Index Scan on o_test59_reg1
+               Index Cond: ((sec1 > 105) AND (sec1 < 200))
+(6 rows)
 
 UPDATE o_test59 SET foo = 0 WHERE sec1 > 105;
 --SELECT orioledb_tbl_structure('o_test59'::regclass);
 -- update only sec1 index field
 SELECT smart_explain(
 'EXPLAIN (COSTS off) UPDATE o_test59 SET sec1 = 100 WHERE sec2 > 405 and sec2 < 408;');
-                    smart_explain                    
------------------------------------------------------
+                       smart_explain                       
+-----------------------------------------------------------
  Update on o_test59
-   ->  Index Scan using o_test59_reg2 on o_test59
-         Index Cond: ((sec2 > 405) AND (sec2 < 408))
-(3 rows)
+   ->  Custom Scan (o_scan) on o_test59
+         Bitmap heap scan
+         Recheck Cond: ((sec2 > 405) AND (sec2 < 408))
+         ->  Bitmap Index Scan on o_test59_reg2
+               Index Cond: ((sec2 > 405) AND (sec2 < 408))
+(6 rows)
 
 UPDATE o_test59 SET sec1 = 100 WHERE sec2 > 405 and sec2 < 408;
 --SELECT orioledb_tbl_structure('o_test59'::regclass);
 -- update primary index field
 SELECT smart_explain(
 'EXPLAIN (COSTS off) UPDATE o_test59 SET pri1 = 50 WHERE sec1 = 100;');
-                  smart_explain                   
---------------------------------------------------
+                 smart_explain                  
+------------------------------------------------
  Update on o_test59
-   ->  Index Scan using o_test59_reg1 on o_test59
-         Index Cond: (sec1 = 100)
-(3 rows)
+   ->  Custom Scan (o_scan) on o_test59
+         Bitmap heap scan
+         Recheck Cond: (sec1 = 100)
+         ->  Bitmap Index Scan on o_test59_reg1
+               Index Cond: (sec1 = 100)
+(6 rows)
 
 UPDATE o_test59 SET pri1 = 50 WHERE sec1 = 100;
 --SELECT orioledb_tbl_structure('o_test59'::regclass);
@@ -7930,12 +7977,16 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey
 		WHERE (val_1, val_2) < (2, 3) AND val_1 > 0 AND val_2 > 0
 			ORDER BY val_1, val_2;
-                                 QUERY PLAN                                 
-----------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_row_searchkey
-   Forward index only scan of: o_test_row_searchkey_pkey
-   Conds: ((ROW(val_1, val_2) < ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
-(3 rows)
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: val_1, val_2
+   ->  Custom Scan (o_scan) on o_test_row_searchkey
+         Bitmap heap scan
+         Recheck Cond: ((ROW(val_1, val_2) < ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
+         ->  Bitmap Index Scan on o_test_row_searchkey_pkey
+               Index Cond: ((ROW(val_1, val_2) < ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
+(7 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1, val_2) < (2, 3) AND val_1 > 0 AND val_2 > 0
@@ -7955,13 +8006,19 @@ EXPLAIN (COSTS OFF)
 		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
 			  val_1 > 0 AND val_2 > 0
 			ORDER BY val_1, val_2;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Custom Scan (o_scan) on o_test_row_searchkey
-   Filter: ((val_1 < 2) OR ((val_1 = 2) AND (val_2 < 3)))
-   Forward index only scan of: o_test_row_searchkey_pkey
-   Conds: ((val_1 > 0) AND (val_2 > 0))
-(4 rows)
+                                                               QUERY PLAN                                                               
+----------------------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: val_1, val_2
+   ->  Custom Scan (o_scan) on o_test_row_searchkey
+         Bitmap heap scan
+         Recheck Cond: (((val_1 = 2) AND (val_1 > 0) AND (val_2 < 3) AND (val_2 > 0)) OR ((val_1 < 2) AND (val_1 > 0) AND (val_2 > 0)))
+         ->  BitmapOr
+               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
+                     Index Cond: ((val_1 = 2) AND (val_1 > 0) AND (val_2 < 3) AND (val_2 > 0))
+               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
+                     Index Cond: ((val_1 < 2) AND (val_1 > 0) AND (val_2 > 0))
+(10 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
@@ -7981,12 +8038,16 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey
 		WHERE (val_1, val_2) <= (2, 3) AND val_1 > 0 AND val_2 > 0
 			ORDER BY val_1, val_2;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_row_searchkey
-   Forward index only scan of: o_test_row_searchkey_pkey
-   Conds: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
-(3 rows)
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: val_1, val_2
+   ->  Custom Scan (o_scan) on o_test_row_searchkey
+         Bitmap heap scan
+         Recheck Cond: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
+         ->  Bitmap Index Scan on o_test_row_searchkey_pkey
+               Index Cond: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (val_1 > 0) AND (val_2 > 0))
+(7 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1, val_2) <= (2, 3) AND val_1 > 0 AND val_2 > 0
@@ -8007,13 +8068,20 @@ EXPLAIN (COSTS OFF)
 		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3 OR val_2 = 3))) AND
 			  val_1 > 0 AND val_2 > 0
 			ORDER BY val_1, val_2;
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_row_searchkey
-   Filter: ((val_1 < 2) OR ((val_1 = 2) AND ((val_2 < 3) OR (val_2 = 3))))
-   Forward index only scan of: o_test_row_searchkey_pkey
-   Conds: ((val_1 > 0) AND (val_2 > 0))
-(4 rows)
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: val_1, val_2
+   ->  Custom Scan (o_scan) on o_test_row_searchkey
+         Filter: ((val_1 < 2) OR ((val_1 = 2) AND ((val_2 < 3) OR (val_2 = 3))))
+         Bitmap heap scan
+         Recheck Cond: (((val_1 = 2) AND (val_1 > 0) AND (val_2 > 0)) OR ((val_1 < 2) AND (val_1 > 0) AND (val_2 > 0)))
+         ->  BitmapOr
+               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
+                     Index Cond: ((val_1 = 2) AND (val_1 > 0) AND (val_2 > 0))
+               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
+                     Index Cond: ((val_1 < 2) AND (val_1 > 0) AND (val_2 > 0))
+(11 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3 OR val_2 = 3))) AND
@@ -8034,12 +8102,16 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey
 		WHERE (val_1, val_2) < (2, 3) AND (val_1, val_2) > (1, 2)
 			ORDER BY val_1, val_2;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_row_searchkey
-   Forward index only scan of: o_test_row_searchkey_pkey
-   Conds: ((ROW(val_1, val_2) < ROW(2, 3)) AND (ROW(val_1, val_2) > ROW(1, 2)))
-(3 rows)
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: val_1, val_2
+   ->  Custom Scan (o_scan) on o_test_row_searchkey
+         Bitmap heap scan
+         Recheck Cond: ((ROW(val_1, val_2) < ROW(2, 3)) AND (ROW(val_1, val_2) > ROW(1, 2)))
+         ->  Bitmap Index Scan on o_test_row_searchkey_pkey
+               Index Cond: ((ROW(val_1, val_2) < ROW(2, 3)) AND (ROW(val_1, val_2) > ROW(1, 2)))
+(7 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1, val_2) < (2, 3) AND (val_1, val_2) > (1, 2)
@@ -8058,12 +8130,20 @@ EXPLAIN (COSTS OFF)
 		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
 			  (val_1 > 1 OR (val_1 = 1 AND val_2 > 2))
 			ORDER BY val_1, val_2;
-                                                  QUERY PLAN                                                   
----------------------------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_row_searchkey
-   Filter: (((val_1 < 2) OR ((val_1 = 2) AND (val_2 < 3))) AND ((val_1 > 1) OR ((val_1 = 1) AND (val_2 > 2))))
-   Forward index only scan of: o_test_row_searchkey_pkey
-(3 rows)
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Sort
+   Sort Key: val_1, val_2
+   ->  Custom Scan (o_scan) on o_test_row_searchkey
+         Filter: ((val_1 > 1) OR ((val_1 = 1) AND (val_2 > 2)))
+         Bitmap heap scan
+         Recheck Cond: (((val_1 = 2) AND (val_2 < 3)) OR (val_1 < 2))
+         ->  BitmapOr
+               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
+                     Index Cond: ((val_1 = 2) AND (val_2 < 3))
+               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
+                     Index Cond: (val_1 < 2)
+(11 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 < 3))) AND
@@ -8082,12 +8162,16 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey
 		WHERE (val_1, val_2) <= (2, 3) AND (val_1, val_2) >= (1, 2)
 			ORDER BY val_1, val_2;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_row_searchkey
-   Forward index only scan of: o_test_row_searchkey_pkey
-   Conds: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (ROW(val_1, val_2) >= ROW(1, 2)))
-(3 rows)
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Sort
+   Sort Key: val_1, val_2
+   ->  Custom Scan (o_scan) on o_test_row_searchkey
+         Bitmap heap scan
+         Recheck Cond: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (ROW(val_1, val_2) >= ROW(1, 2)))
+         ->  Bitmap Index Scan on o_test_row_searchkey_pkey
+               Index Cond: ((ROW(val_1, val_2) <= ROW(2, 3)) AND (ROW(val_1, val_2) >= ROW(1, 2)))
+(7 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1, val_2) <= (2, 3) AND (val_1, val_2) >= (1, 2)
@@ -8108,12 +8192,20 @@ EXPLAIN (COSTS OFF)
 		WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 <= 3))) AND
 			  (val_1 > 1 OR (val_1 = 1 AND val_2 >= 2))
 			ORDER BY val_1, val_2;
-                                                   QUERY PLAN                                                    
------------------------------------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_row_searchkey
-   Filter: (((val_1 < 2) OR ((val_1 = 2) AND (val_2 <= 3))) AND ((val_1 > 1) OR ((val_1 = 1) AND (val_2 >= 2))))
-   Forward index only scan of: o_test_row_searchkey_pkey
-(3 rows)
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Sort
+   Sort Key: val_1, val_2
+   ->  Custom Scan (o_scan) on o_test_row_searchkey
+         Filter: ((val_1 > 1) OR ((val_1 = 1) AND (val_2 >= 2)))
+         Bitmap heap scan
+         Recheck Cond: (((val_1 = 2) AND (val_2 <= 3)) OR (val_1 < 2))
+         ->  BitmapOr
+               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
+                     Index Cond: ((val_1 = 2) AND (val_2 <= 3))
+               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
+                     Index Cond: (val_1 < 2)
+(11 rows)
 
 SELECT * FROM o_test_row_searchkey
 	WHERE (val_1 < 2 OR (val_1 = 2 AND (val_2 <= 3))) AND
@@ -8160,12 +8252,14 @@ SELECT orioledb_tbl_structure('o_test_row_searchkey_pkey_include'::regclass,
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey_pkey_include
 		WHERE (val_1) < (2);
-                              QUERY PLAN                              
-----------------------------------------------------------------------
+                            QUERY PLAN                             
+-------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_row_searchkey_pkey_include
-   Forward index only scan of: o_test_row_searchkey_pkey_include_pkey
-   Conds: (val_1 < 2)
-(3 rows)
+   Bitmap heap scan
+   Recheck Cond: (val_1 < 2)
+   ->  Bitmap Index Scan on o_test_row_searchkey_pkey_include_pkey
+         Index Cond: (val_1 < 2)
+(5 rows)
 
 SELECT * FROM o_test_row_searchkey_pkey_include
 	WHERE (val_1) < (2);
@@ -8524,13 +8618,17 @@ INSERT INTO o_test_saop
 	(SELECT i % 10, (i / 10) % 10, i / 100 FROM generate_series(1, 1000) i);
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
-                                   QUERY PLAN                                    
----------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_test_saop
-   Filter: ((k > ALL ('{7,8}'::integer[])) AND (j = ANY ('{3,4,5}'::integer[])))
-   Forward index only scan of: o_test_saop_pkey
-   Conds: (i < ANY ('{3,4,5}'::integer[]))
-(4 rows)
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Sort
+   Sort Key: i, j, k
+   ->  Custom Scan (o_scan) on o_test_saop
+         Filter: ((k > ALL ('{7,8}'::integer[])) AND (j = ANY ('{3,4,5}'::integer[])))
+         Bitmap heap scan
+         Recheck Cond: (i < ANY ('{3,4,5}'::integer[]))
+         ->  Bitmap Index Scan on o_test_saop_pkey
+               Index Cond: (i < ANY ('{3,4,5}'::integer[]))
+(8 rows)
 
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
  i | j | k 
@@ -8610,13 +8708,17 @@ SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) OR
 
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
-                   QUERY PLAN                   
-------------------------------------------------
- Custom Scan (o_scan) on o_test_saop
-   Filter: (j = ANY ('{1,3}'::integer[]))
-   Forward index only scan of: o_test_saop_pkey
-   Conds: (i < ANY ('{1,2}'::integer[]))
-(4 rows)
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Sort
+   Sort Key: i, j, k
+   ->  Custom Scan (o_scan) on o_test_saop
+         Filter: (j = ANY ('{1,3}'::integer[]))
+         Bitmap heap scan
+         Recheck Cond: (i < ANY ('{1,2}'::integer[]))
+         ->  Bitmap Index Scan on o_test_saop_pkey
+               Index Cond: (i < ANY ('{1,2}'::integer[]))
+(8 rows)
 
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
  i | j | k 
