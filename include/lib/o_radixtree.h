@@ -162,16 +162,6 @@
 #endif
 
 /*
- * This is a verbatim copy of PostgreSQL's lib/radixtree.h -- upstream code we
- * don't audit.  Mark it a system header so the clang static analyzer skips its
- * (benign) reports; guarded for clang so GCC's -Werror doesn't trip over an
- * unknown pragma.  cppcheck is handled separately via ci/cppcheck-suppress.
- */
-#ifdef __clang__
-#pragma clang system_header
-#endif
-
-/*
  * PG16 portability.  This template is taken from PG17's lib/radixtree.h and
  * relies on helpers that PG17 introduced but PG16 lacks: port/simd.h has no
  * vector8_highbit_mask()/vector8_min(), and nodes/bitmapset.h has no bmw_*
@@ -1212,6 +1202,18 @@ RT_FIND(RT_RADIX_TREE * tree, RT_KEY key)
 		node.alloc = *slot;
 		shift -= RT_SPAN;
 	}
+
+#ifdef __clang_analyzer__
+
+	/*
+	 * start_shift is always >= 0, so the descent above always runs and either
+	 * sets slot or returns; the clang analyzer can't prove that and flags the
+	 * *slot dereference below as a possible null dereference.  This guard is
+	 * compiled only under the analyzer and has no runtime effect.
+	 */
+	if (slot == NULL)
+		return NULL;
+#endif
 
 	if (RT_CHILDPTR_IS_VALUE(*slot))
 		return (RT_VALUE_TYPE *) slot;
