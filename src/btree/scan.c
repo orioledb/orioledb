@@ -101,6 +101,20 @@ struct BTreeSeqScan
 	PartialPageState leafPartial;
 	bool		leafPartialFailed;
 
+	/*
+	 * Key of the last leaf tuple emitted from the current partially-read leaf
+	 * (valid only while haveLastLeafKey).  When a partial chunk load loses
+	 * the race with a concurrent modification after some tuples of the leaf
+	 * were already emitted, the fallback iterator must resume strictly after
+	 * this key rather than re-read the whole leaf range (which would emit
+	 * those tuples a second time).  iterSkipKey asks the iterator to drop a
+	 * leading tuple that is <= this key (the resume point is inclusive).
+	 */
+	bool		haveLastLeafKey;
+	OFixedKey	lastLeafKey;
+	bool		iterSkipKey;
+	OFixedKey	iterSkipKeyVal;
+
 	bool		initialized;
 	bool		checkpointNumberSet;
 	OSnapshot	oSnapshot;
@@ -477,6 +491,9 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 	{
 		Assert(PAGE_GET_LEVEL(page) == 0);
 		memcpy(scan->leafImg, page, ORIOLEDB_BLCKSZ);
+		/* A whole-page leaf: no partial-read state must leak into it. */
+		scan->leafPartial.isPartial = false;
+		scan->haveLastLeafKey = false;
 		BTREE_PAGE_LOCATOR_FIRST(scan->leafImg, &scan->leafLoc);
 		scan->hint.blkno = scan->context.items[0].blkno;
 		scan->hint.pageChangeCount = scan->context.items[0].pageChangeCount;
@@ -698,6 +715,7 @@ scan_make_iterator(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRangeHigh)
 	 */
 	scan->leafPartial.isPartial = false;
 	scan->leafPartialFailed = false;
+	scan->haveLastLeafKey = false;
 }
 
 /* Output item downlink and key using provided page and current locator */
@@ -1123,6 +1141,7 @@ iterate_internal_page(BTreeSeqScan *scan)
 					memset(scan->leafPartial.chunkIsLoaded, 0,
 						   sizeof(scan->leafPartial.chunkIsLoaded));
 					scan->leafPartialFailed = false;
+					scan->haveLastLeafKey = false;
 					leafPartial = &scan->leafPartial;
 				}
 
@@ -1261,6 +1280,15 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 
 	if (!success)
 		elog(ERROR, "can not read leaf page from disk");
+
+	/*
+	 * A disk leaf is read whole into the private leafImg, so any partial-read
+	 * state left over from a previous in-memory leaf must not leak into it
+	 * (it would make seq_leaf_partial_ensure() re-read chunks from a stale
+	 * source).
+	 */
+	scan->leafPartial.isPartial = false;
+	scan->haveLastLeafKey = false;
 
 	BTREE_PAGE_LOCATOR_FIRST(scan->leafImg, &scan->leafLoc);
 	scan->downlinkIndex++;
@@ -1472,6 +1500,8 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	scan->leafPartial.isPartial = false;
 	scan->leafPartial.src = NULL;
 	scan->leafPartialFailed = false;
+	scan->haveLastLeafKey = false;
+	scan->iterSkipKey = false;
 
 	scan->firstPageIsLoaded = false;
 	scan->intStartOffset = 0;
@@ -1521,14 +1551,29 @@ btree_seq_scan_get_tuple_from_iterator(BTreeSeqScan *scan,
 {
 	OTuple		result;
 
-	if (!O_TUPLE_IS_NULL(scan->iterEnd))
-		result = o_btree_iterator_fetch(scan->iter, tupleCsn,
-										&scan->iterEnd, BTreeKeyNonLeafKey,
-										false, hint);
-	else
-		result = o_btree_iterator_fetch(scan->iter, tupleCsn,
-										NULL, BTreeKeyNone,
-										false, hint);
+	while (true)
+	{
+		if (!O_TUPLE_IS_NULL(scan->iterEnd))
+			result = o_btree_iterator_fetch(scan->iter, tupleCsn,
+											&scan->iterEnd, BTreeKeyNonLeafKey,
+											false, hint);
+		else
+			result = o_btree_iterator_fetch(scan->iter, tupleCsn,
+											NULL, BTreeKeyNone,
+											false, hint);
+
+		/*
+		 * When a partial-read fallback resumed the scan at (inclusive) the
+		 * last already-emitted key, drop that leading duplicate so count/rows
+		 * aren't doubled.
+		 */
+		if (scan->iterSkipKey && !O_TUPLE_IS_NULL(result) &&
+			o_btree_cmp(scan->desc, &result, BTreeKeyLeafTuple,
+						&scan->iterSkipKeyVal.tuple, BTreeKeyNonLeafKey) <= 0)
+			continue;
+		scan->iterSkipKey = false;
+		break;
+	}
 
 	if (O_TUPLE_IS_NULL(result))
 	{
@@ -1799,16 +1844,29 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 
 		if (scan->leafPartialFailed)
 		{
+			OTuple		resumeLow;
+
 			/*
 			 * A partial leaf chunk load lost its race with a concurrent page
-			 * modification.  Abandon the partial image and re-read the
-			 * current downlink's key range through an iterator; the bitmap
-			 * fetch layer rechecks every tuple, so over-reading the range is
-			 * safe.
+			 * modification.  Abandon the partial image and re-read the rest
+			 * of the current downlink's key range through an iterator; the
+			 * bitmap fetch layer rechecks every tuple, so over-reading is
+			 * safe as long as we don't re-emit tuples already returned.  If
+			 * we already emitted tuples from this leaf, resume from the last
+			 * of them (inclusive) and let the iterator drop that leading
+			 * duplicate; otherwise re-read the whole range.
 			 */
 			scan->leafPartialFailed = false;
-			scan_make_iterator(scan, scan->keyRangeLow.tuple,
-							   scan->keyRangeHigh.tuple);
+			if (scan->haveLastLeafKey)
+			{
+				resumeLow = scan->lastLeafKey.tuple;
+				copy_fixed_key(scan->desc, &scan->iterSkipKeyVal,
+							   scan->lastLeafKey.tuple);
+				scan->iterSkipKey = true;
+			}
+			else
+				resumeLow = scan->keyRangeLow.tuple;
+			scan_make_iterator(scan, resumeLow, scan->keyRangeHigh.tuple);
 			tuple = btree_seq_scan_get_tuple_from_iterator(scan, tupleCsn, hint);
 			if (!O_TUPLE_IS_NULL(tuple))
 				return tuple;
@@ -1845,6 +1903,20 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 				}
 			}
 			continue;
+		}
+
+		/*
+		 * While reading a leaf partially, remember the key we're about to
+		 * process so a later partial-read failure can resume just after it
+		 * instead of re-reading (and re-emitting) the whole leaf.
+		 * scan->nextKey is the bitmap key positioned by apply_next_key(),
+		 * i.e. the key of the tuple at leafLoc, already in the non-leaf key
+		 * form comparisons use.
+		 */
+		if (scan->leafPartial.isPartial && !O_TUPLE_IS_NULL(scan->nextKey.tuple))
+		{
+			copy_fixed_key(scan->desc, &scan->lastLeafKey, scan->nextKey.tuple);
+			scan->haveLastLeafKey = true;
 		}
 
 		tuple = o_find_tuple_version(scan->desc,
