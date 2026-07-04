@@ -161,6 +161,30 @@
 #include "storage/lwlock.h"
 #endif
 
+/*
+ * PG16 portability.  This template is taken from PG17's lib/radixtree.h and
+ * relies on helpers that PG17 introduced but PG16 lacks: port/simd.h has no
+ * vector8_highbit_mask()/vector8_min(), and nodes/bitmapset.h has no bmw_*
+ * word helpers.  Every use of the vector8 helpers (and the Vector8 locals they
+ * need) is already guarded by USE_NO_SIMD, so forcing the scalar node-search
+ * paths sidesteps the missing SIMD helpers; the bmw_* helpers are used
+ * unconditionally, so define them here.  Both are no-ops on PG17+.
+ */
+#if PG_VERSION_NUM < 170000
+#ifndef USE_NO_SIMD
+#define USE_NO_SIMD
+#endif
+#ifndef bmw_rightmost_one_pos
+#if BITS_PER_BITMAPWORD == 32
+#define bmw_rightmost_one_pos(w)	pg_rightmost_one_pos32(w)
+#define bmw_popcount(w)				pg_popcount32(w)
+#else
+#define bmw_rightmost_one_pos(w)	pg_rightmost_one_pos64(w)
+#define bmw_popcount(w)				pg_popcount64(w)
+#endif
+#endif
+#endif
+
 /* helpers */
 #define RT_MAKE_PREFIX(a) CppConcat(a,_)
 #define RT_MAKE_NAME(name) RT_MAKE_NAME_(RT_MAKE_PREFIX(RT_PREFIX),name)
@@ -301,8 +325,8 @@ typedef dsa_pointer RT_HANDLE;
 #endif
 
 #ifdef RT_SHMEM
-RT_SCOPE	RT_RADIX_TREE *RT_CREATE(MemoryContext ctx, dsa_area * dsa, int tranche_id);
-RT_SCOPE	RT_RADIX_TREE *RT_ATTACH(dsa_area * dsa, dsa_pointer dp);
+RT_SCOPE	RT_RADIX_TREE *RT_CREATE(MemoryContext ctx, dsa_area *dsa, int tranche_id);
+RT_SCOPE	RT_RADIX_TREE *RT_ATTACH(dsa_area *dsa, dsa_pointer dp);
 RT_SCOPE void RT_DETACH(RT_RADIX_TREE * tree);
 RT_SCOPE	RT_HANDLE RT_GET_HANDLE(RT_RADIX_TREE * tree);
 RT_SCOPE void RT_LOCK_EXCLUSIVE(RT_RADIX_TREE * tree);
@@ -1878,7 +1902,7 @@ have_slot:
  */
 RT_SCOPE	RT_RADIX_TREE *
 #ifdef RT_SHMEM
-RT_CREATE(MemoryContext ctx, dsa_area * dsa, int tranche_id)
+RT_CREATE(MemoryContext ctx, dsa_area *dsa, int tranche_id)
 #else
 RT_CREATE(MemoryContext ctx)
 #endif
@@ -1961,7 +1985,7 @@ RT_CREATE(MemoryContext ctx)
 
 #ifdef RT_SHMEM
 RT_SCOPE	RT_RADIX_TREE *
-RT_ATTACH(dsa_area * dsa, RT_HANDLE handle)
+RT_ATTACH(dsa_area *dsa, RT_HANDLE handle)
 {
 	RT_RADIX_TREE *tree;
 	dsa_pointer control;
