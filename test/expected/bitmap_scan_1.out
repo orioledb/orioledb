@@ -3844,6 +3844,59 @@ SELECT * FROM bitmap_test_complex WHERE val < '13!';
  11 |   5 |   2 | 11!
 (2 rows)
 
+-- A bitmap scan skips internal pages that hold no wanted keys by descending
+-- straight to the next needed key.  Check it returns exactly the same rows as
+-- a plain scan for keys scattered across a table spanning several pages, for
+-- both a single-column and a composite primary key.  Raises on any mismatch.
+CREATE TABLE bitmap_jump_test (id int8 PRIMARY KEY, v int8) USING orioledb;
+INSERT INTO bitmap_jump_test
+	SELECT g, g * 7 % 100000 FROM generate_series(1, 20000) g;
+ANALYZE bitmap_jump_test;
+CREATE TABLE bitmap_jump_ctest (a int4, b int4, x int8, PRIMARY KEY (a, b))
+	USING orioledb;
+INSERT INTO bitmap_jump_ctest
+	SELECT g / 200, g % 200, g * 3 FROM generate_series(1, 20000) g;
+ANALYZE bitmap_jump_ctest;
+DO $$
+DECLARE
+	bmp_cnt		bigint;
+	seq_cnt		bigint;
+	bmp_sum		bigint;
+	seq_sum		bigint;
+BEGIN
+	SET LOCAL enable_seqscan = off;
+	SET LOCAL enable_indexscan = off;
+	SET LOCAL enable_bitmapscan = on;
+	SELECT count(*), coalesce(sum(v), 0) INTO bmp_cnt, bmp_sum
+		FROM bitmap_jump_test
+		WHERE id IN (1, 3000, 6000, 9000, 12000, 15000, 18000, 20000, 7777, 13131);
+	SET LOCAL enable_seqscan = on;
+	SET LOCAL enable_bitmapscan = off;
+	SELECT count(*), coalesce(sum(v), 0) INTO seq_cnt, seq_sum
+		FROM bitmap_jump_test
+		WHERE id IN (1, 3000, 6000, 9000, 12000, 15000, 18000, 20000, 7777, 13131);
+	IF bmp_cnt <> seq_cnt OR bmp_sum <> seq_sum THEN
+		RAISE EXCEPTION 'single-key bitmap jump mismatch: bmp=(%,%) seq=(%,%)',
+			bmp_cnt, bmp_sum, seq_cnt, seq_sum;
+	END IF;
+
+	SET LOCAL enable_seqscan = off;
+	SET LOCAL enable_bitmapscan = on;
+	SELECT count(*), coalesce(sum(x), 0) INTO bmp_cnt, bmp_sum
+		FROM bitmap_jump_ctest
+		WHERE (a, b) IN ((0, 5), (25, 100), (50, 199), (75, 1), (99, 199));
+	SET LOCAL enable_seqscan = on;
+	SET LOCAL enable_bitmapscan = off;
+	SELECT count(*), coalesce(sum(x), 0) INTO seq_cnt, seq_sum
+		FROM bitmap_jump_ctest
+		WHERE (a, b) IN ((0, 5), (25, 100), (50, 199), (75, 1), (99, 199));
+	IF bmp_cnt <> seq_cnt OR bmp_sum <> seq_sum THEN
+		RAISE EXCEPTION 'composite-key bitmap jump mismatch: bmp=(%,%) seq=(%,%)',
+			bmp_cnt, bmp_sum, seq_cnt, seq_sum;
+	END IF;
+END $$;
+DROP TABLE bitmap_jump_test;
+DROP TABLE bitmap_jump_ctest;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 8 other objects
 DETAIL:  drop cascades to table bitmap_test

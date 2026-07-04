@@ -105,6 +105,7 @@ typedef struct OBitmapScan
 
 static bool o_bitmap_is_range_valid(OTuple low, OTuple high, void *arg);
 static bool o_bitmap_get_next_key(OFixedKey *key, bool inclusive, void *arg);
+static bool o_bitmap_get_next_page_key(OFixedKey *key, void *arg);
 
 static void bridge_begin_iterate(BridgeIterator *iter);
 static bool bridge_iterate(BridgeIterator *iter);
@@ -113,7 +114,8 @@ static void bridge_next_page(OBitmapScan *scan,
 
 static BTreeSeqScanCallbacks bitmap_seq_scan_callbacks = {
 	.isRangeValid = o_bitmap_is_range_valid,
-	.getNextKey = o_bitmap_get_next_key
+	.getNextKey = o_bitmap_get_next_key,
+	.getNextPageKey = o_bitmap_get_next_page_key
 };
 
 #define UINT64_HIGH_BIT (UINT64CONST(1) << 63)
@@ -1371,6 +1373,70 @@ o_bitmap_get_next_key(OFixedKey *key, bool inclusive, void *arg)
 	}
 
 	return found;
+}
+
+/*
+ * Non-leaf-key variant of o_bitmap_get_next_key used to skip whole internal
+ * pages.  key->tuple carries the finished internal page's hikey (an exclusive
+ * page boundary, or NULL to start from the tree's beginning); rewrite it with
+ * the smallest bitmap key >= that boundary, encoded as a non-leaf key.  Returns
+ * false when no such key remains.
+ */
+static bool
+o_bitmap_get_next_page_key(OFixedKey *key, void *arg)
+{
+	BitmapSeqScanArg *barg = (BitmapSeqScanArg *) arg;
+	OIndexDescr *primary = GET_PRIMARY(barg->tbl_desc);
+
+	if (o_keybitmap_pk_mode(primary, NULL) == O_KEYBITMAP_FIXED)
+	{
+		uint8		prevKey[OKBM_FIXED_BYTES];
+		uint8		outKey[OKBM_FIXED_BYTES];
+
+		if (!O_TUPLE_IS_NULL(key->tuple))
+			o_pk_encode_nonleaf(key->tuple, primary, prevKey);
+		else
+			memset(prevKey, 0, OKBM_FIXED_BYTES);
+
+		if (o_keybitmap_get_next_key(barg->bitmap, prevKey, outKey))
+		{
+			o_pk_decode_to_key(outKey, primary, key);
+			return true;
+		}
+		O_TUPLE_SET_NULL(key->tuple);
+		return false;
+	}
+	else
+	{
+		uint64		prev_value = 0;
+		uint64		res_value;
+		bool		found;
+		FormData_pg_attribute *attr;
+		OTupleHeader tuphdr;
+
+		if (!O_TUPLE_IS_NULL(key->tuple))
+			prev_value = primary_tuple_get_data(key->tuple, primary, true);
+
+		res_value = o_keybitmap_get_next(barg->bitmap, prev_value, &found);
+		if (!found)
+		{
+			O_TUPLE_SET_NULL(key->tuple);
+			return false;
+		}
+
+		attr = TupleDescAttr(primary->nonLeafTupdesc, 0);
+		Assert(primary->nFields == 1);
+		tuphdr = (OTupleHeader) key->fixedData;
+		tuphdr->hasnulls = false;
+		tuphdr->natts = 1;
+		tuphdr->len = SizeOfOTupleHeader + attr->attlen;
+		uint64_get_val(res_value,
+					   attr->atttypid,
+					   &key->fixedData[SizeOfOTupleHeader]);
+		key->tuple.data = key->fixedData;
+		key->tuple.formatFlags = 0;
+		return true;
+	}
 }
 
 static void
