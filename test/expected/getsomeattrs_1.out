@@ -733,11 +733,12 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_pkey_include_same_field;
-                            QUERY PLAN                             
--------------------------------------------------------------------
+                           QUERY PLAN                           
+----------------------------------------------------------------
  Custom Scan (o_scan) on o_test_pkey_include_same_field
-   Forward index only scan of: o_test_pkey_include_same_field_pkey
-(2 rows)
+   Bitmap heap scan
+   ->  Bitmap Index Scan on o_test_pkey_include_same_field_pkey
+(3 rows)
 
 SELECT * FROM o_test_pkey_include_same_field;
  val_1 

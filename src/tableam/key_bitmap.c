@@ -1,7 +1,18 @@
 /*-------------------------------------------------------------------------
  *
  * key_bitmap.c
- *		Routines for bitmap scan of orioledb table
+ *		Routines for bitmap scan of orioledb table.
+ *
+ *		The bitmap is a set of uint64 keys, stored densely: the key is split
+ *		into a high part (the chunk, key >> OKBM_CHUNK_BITS) and a low part
+ *		(OKBM_CHUNK_BITS bits).  Each chunk maps to a bitmap covering its
+ *		OKBM_CHUNK_VALUES low-part offsets.  Chunks are held in an adaptive
+ *		radix tree (include/lib/o_radixtree.h), which keeps them ordered so
+ *		iteration and range queries are efficient.
+ *
+ *		Ordered seeks (o_keybitmap_range_is_valid / o_keybitmap_get_next) are
+ *		served from a sorted array of chunk keys built lazily once the bitmap
+ *		stops being mutated (the build phase always precedes the scan phase).
  *
  * Copyright (c) 2021-2026, Oriole DB Inc.
  * Copyright (c) 2025-2026, Supabase Inc.
@@ -14,181 +25,85 @@
 
 #include "orioledb.h"
 
-#include "btree/io.h"
-#include "btree/iterator.h"
-#include "btree/page_chunks.h"
 #include "tableam/bitmap_scan.h"
-#include "tableam/index_scan.h"
-#include "tuple/slot.h"
 
-#include "lib/rbtree.h"
+#include "utils/memutils.h"
 
-static int	bm_rbt_comparator(const RBTNode *a, const RBTNode *b, void *arg);
-static void bm_rbt_combiner(RBTNode *existing, const RBTNode *newdata, void *arg);
-static RBTNode *bm_rbt_allocfunc(void *arg);
-static void bm_rbt_freefunc(RBTNode *x, void *arg);
+#define OKBM_CHUNK_BITS		10
+#define OKBM_CHUNK_VALUES	(UINT64CONST(1) << OKBM_CHUNK_BITS)
+#define OKBM_LOW_MASK		(OKBM_CHUNK_VALUES - 1)
+#define OKBM_BITMAP_BYTES	(OKBM_CHUNK_VALUES / 8)
 
-#define HIGH_PART_MASK	(0xFFFFFFFFFFFFFC00)
-#define LOW_PART_MASK	(0x00000000000003FF)
-#define BITMAP_SIZE		0x80
-
-typedef struct
+typedef struct OKeyBitmapChunk
 {
-	RBTNode		rbtnode;
-	uint64		key;
-	uint8	   *bitmap;
-} OKeyBitmapRBTNode;
+	uint8		bitmap[OKBM_BITMAP_BYTES];
+} OKeyBitmapChunk;
 
-RBTree *
-o_keybitmap_create(void)
-{
-	return rbt_create(sizeof(OKeyBitmapRBTNode),
-					  bm_rbt_comparator,
-					  bm_rbt_combiner,
-					  bm_rbt_allocfunc,
-					  bm_rbt_freefunc,
-					  NULL);
-}
+#define RT_PREFIX okbm
+#define RT_SCOPE static
+#define RT_DECLARE
+#define RT_DEFINE
+#define RT_USE_DELETE
+#define RT_VALUE_TYPE OKeyBitmapChunk
+#include "lib/o_radixtree.h"
 
-void
-o_keybitmap_insert(RBTree *rbtree, uint64 value)
+/*
+ * Fixed-key mode: for composite / non-int primary keys the key is an
+ * order-preserving byte string of OKBM_FIXED_BYTES bytes (see
+ * include/tableam/bitmap_scan.h).  These are stored, un-densified, in a
+ * fixed-length-key radix tree whose value carries no information.
+ */
+typedef struct OKbmDummy
 {
-	OKeyBitmapRBTNode node;
-	bool		is_new;
+	uint8		unused;
+} OKbmDummy;
+
+#define RT_PREFIX okbmf
+#define RT_SCOPE static
+#define RT_DECLARE
+#define RT_DEFINE
+#define RT_USE_DELETE
+#define RT_KEY_SIZE OKBM_FIXED_BYTES
+#define RT_VALUE_TYPE OKbmDummy
+#include "lib/o_radixtree.h"
+
+struct OKeyBitmap
+{
+	bool		fixed;			/* false: uint64 densified; true: fixed-key */
+
+	okbm_radix_tree *tree;		/* uint64 mode */
+	okbmf_radix_tree *ftree;	/* fixed-key mode */
+
+	/* dedicated context owned by the radix tree (reset/freed by okbm*_free) */
+	MemoryContext treeCxt;
+	/* context holding this struct and the seek arrays */
+	MemoryContext cxt;
 
 	/*
-	 * For the moment, fill only the fields of node that will be looked at by
-	 * bm_rbt_combiner or bm_rbt_comparator.
+	 * Sorted key arrays, built lazily by okbm_finalize() to serve ordered
+	 * seeks.  Invalidated (finalized = false) on every mutation.  uint64 mode
+	 * stores chunk keys in chunks[]; fixed mode stores whole keys, each
+	 * OKBM_FIXED_BYTES bytes, in fkeys[].
 	 */
-	node.key = value;
-	node.bitmap = NULL;
-	(void) rbt_insert(rbtree, (RBTNode *) &node, &is_new);
-}
+	uint64	   *chunks;
+	uint8	   *fkeys;
+	int			nchunks;
+	int			chunksCapacity;
+	bool		finalized;
+};
 
-bool
-o_keybitmap_test(RBTree *rbtree, uint64 value)
-{
-	OKeyBitmapRBTNode node;
-	OKeyBitmapRBTNode *found;
-
-	/*
-	 * For the moment, fill only the fields of node that will be looked at by
-	 * bm_rbt_comparator.
-	 */
-	node.key = value;
-	node.bitmap = NULL;
-	found = (OKeyBitmapRBTNode *) rbt_find(rbtree, (RBTNode *) &node);
-	if (!found)
-		return false;
-
-	if (found->bitmap)
-	{
-		int			offset = (value & LOW_PART_MASK);
-
-		if (found->bitmap[offset >> 3] & (1 << (offset & 7)))
-			return true;
-		else
-			return false;
-	}
-	else
-	{
-		return (found->key == value);
-	}
-}
-
-bool
-o_keybitmap_range_is_valid(RBTree *rbtree, uint64 low, uint64 high)
-{
-	OKeyBitmapRBTNode lowNode;
-	OKeyBitmapRBTNode *node;
-	int			i,
-				iStart,
-				iEnd;
-	uint8		startMask,
-				endMask;
-	bool		valid = false;
-	bool		first = true;
-
-	while (!valid && ((low & HIGH_PART_MASK) <= (high & HIGH_PART_MASK)))
-	{
-		bool		skip_step = false;
-
-		/*
-		 * For the moment, fill only the fields of node that will be looked at
-		 * by bt_rbt_comparator.
-		 */
-		lowNode.key = low;
-		lowNode.bitmap = NULL;
-
-		node = (OKeyBitmapRBTNode *) rbt_find_great(rbtree,
-													(RBTNode *) &lowNode,
-													true);
-		if (!node)
-			break;
-
-		if (!node->bitmap)
-		{
-			if (node->key >= low && node->key < high)
-				valid = true;
-			skip_step = true;
-		}
-
-		if (!skip_step)
-		{
-			if ((low & HIGH_PART_MASK) == (node->key & HIGH_PART_MASK))
-			{
-				iStart = (low & LOW_PART_MASK) >> 3;
-				startMask = 0xFF << ((low & LOW_PART_MASK) & 7);
-			}
-			else
-			{
-				iStart = 0;
-				startMask = 0xFF;
-			}
-
-			if ((high & HIGH_PART_MASK) == (node->key & HIGH_PART_MASK))
-			{
-				iEnd = ((high - 1) & LOW_PART_MASK) >> 3;
-				endMask = 0xFF >> (7 - (((high - 1) & LOW_PART_MASK) & 7));
-			}
-			else
-			{
-				iEnd = BITMAP_SIZE - 1;
-				endMask = 0xFF;
-			}
-			for (i = iStart; i <= iEnd; i++)
-			{
-				uint8		mask;
-
-				mask = (i == iStart) ? startMask : 0xFF;
-				if (i == iEnd)
-					mask &= endMask;
-
-				if (node->bitmap[i] & mask)
-					valid = true;
-			}
-		}
-		if (!valid)
-		{
-			low = node->key;
-			if (!first)
-				low += (1L << 10);
-		}
-		first = false;
-	}
-
-	return valid;
-}
-
+/*
+ * Return the first set bit offset >= minOffset within a chunk bitmap, or -1.
+ */
 static int
-find_next_offset(uint8 *bitmap, int minOffset)
+find_next_offset(const uint8 *bitmap, int minOffset)
 {
 	int			i;
 	uint8		mask;
 
 	i = minOffset >> 3;
 	mask = 0xFF << (minOffset & 7);
-	while (i < BITMAP_SIZE)
+	while (i < OKBM_BITMAP_BYTES)
 	{
 		mask &= bitmap[i];
 		if (mask)
@@ -209,310 +124,535 @@ find_next_offset(uint8 *bitmap, int minOffset)
 	return -1;
 }
 
-
-uint64
-o_keybitmap_get_next(RBTree *rbtree, uint64 prev, bool *found)
+OKeyBitmap *
+o_keybitmap_create(void)
 {
-	OKeyBitmapRBTNode lowNode;
-	OKeyBitmapRBTNode *node;
-	RBTreeIterator iter;
+	OKeyBitmap *bm = palloc0(sizeof(OKeyBitmap));
+
+	/* okbm_memory_usage() is part of the generated API but unused here */
+	(void) okbm_memory_usage;
+
+	bm->cxt = CurrentMemoryContext;
 
 	/*
-	 * For the moment, fill only the fields of node that will be looked at by
-	 * bm_rbt_comparator.
+	 * The radix tree owns the context it is created in: okbm_free() resets it
+	 * and deletes its child contexts.  Give it a dedicated child context so
+	 * that freeing the tree does not clobber this struct or the chunks array,
+	 * which live in bm->cxt.
 	 */
-	lowNode.key = prev;
-	lowNode.bitmap = NULL;
-	node = (OKeyBitmapRBTNode *) rbt_find_great(rbtree,
-												(RBTNode *) &lowNode,
-												true);
-	if (!node)
-	{
-		*found = false;
-		return 0;
-	}
-
-	if (!node->bitmap)
-	{
-		if (node->key >= prev)
-		{
-			*found = true;
-			return node->key;
-		}
-	}
-	else if ((prev & HIGH_PART_MASK) == (node->key & HIGH_PART_MASK))
-	{
-		int			nextOffset;
-
-		nextOffset = find_next_offset(node->bitmap, prev & LOW_PART_MASK);
-
-		if (nextOffset >= 0)
-		{
-			*found = true;
-			return node->key + nextOffset;
-		}
-	}
-
-	if ((prev & HIGH_PART_MASK) == (node->key & HIGH_PART_MASK))
-	{
-		rbt_begin_iterate(rbtree, LeftRightWalk, &iter);
-		iter.last_visited = (RBTNode *) node;
-		node = (OKeyBitmapRBTNode *) rbt_iterate(&iter);
-	}
-
-	if (!node)
-	{
-		*found = false;
-		return 0;
-	}
-
-	if (!node->bitmap)
-	{
-		*found = true;
-		return node->key;
-	}
-	else
-	{
-		int			nextOffset = find_next_offset(node->bitmap, 0);
-
-		Assert(nextOffset >= 0);
-		*found = true;
-		return node->key + nextOffset;
-	}
+	bm->treeCxt = AllocSetContextCreate(bm->cxt, "o_keybitmap radix tree",
+										ALLOCSET_SMALL_SIZES);
+	bm->fixed = false;
+	bm->tree = okbm_create(bm->treeCxt);
+	bm->ftree = NULL;
+	bm->chunks = NULL;
+	bm->fkeys = NULL;
+	bm->nchunks = 0;
+	bm->chunksCapacity = 0;
+	bm->finalized = false;
+	return bm;
 }
 
-static void
-free_tree_node(RBTNode *node)
+OKeyBitmap *
+o_keybitmap_create_fixed(void)
 {
-	OKeyBitmapRBTNode *keyNode = (OKeyBitmapRBTNode *) node;
+	OKeyBitmap *bm = palloc0(sizeof(OKeyBitmap));
 
-	if (node->left == node)
-	{
-		Assert(node->right == node);
-		return;
-	}
-	if (keyNode->bitmap)
-		pfree(keyNode->bitmap);
-	free_tree_node(node->left);
-	free_tree_node(node->right);
-	pfree(node);
+	/* okbmf_memory_usage() is part of the generated API but unused here */
+	(void) okbmf_memory_usage;
+
+	bm->cxt = CurrentMemoryContext;
+	bm->treeCxt = AllocSetContextCreate(bm->cxt, "o_keybitmap radix tree",
+										ALLOCSET_SMALL_SIZES);
+	bm->fixed = true;
+	bm->tree = NULL;
+	bm->ftree = okbmf_create(bm->treeCxt);
+	bm->chunks = NULL;
+	bm->fkeys = NULL;
+	bm->nchunks = 0;
+	bm->chunksCapacity = 0;
+	bm->finalized = false;
+	return bm;
 }
 
 void
-o_keybitmap_free(RBTree *tree)
+o_keybitmap_free(OKeyBitmap *bm)
 {
-	free_tree_node(*((RBTNode **) tree));
-	pfree(tree);
+	if (bm->fixed)
+		okbmf_free(bm->ftree);
+	else
+		okbm_free(bm->tree);
+	MemoryContextDelete(bm->treeCxt);
+	if (bm->chunks)
+		pfree(bm->chunks);
+	if (bm->fkeys)
+		pfree(bm->fkeys);
+	pfree(bm);
+}
+
+/* --- fixed-key mode helpers --- */
+
+static inline okbmf_key
+okbmf_mkkey(const uint8 *key)
+{
+	okbmf_key	k;
+
+	memcpy(k.data, key, OKBM_FIXED_BYTES);
+	return k;
+}
+
+void
+o_keybitmap_insert_key(OKeyBitmap *bm, const uint8 *key)
+{
+	okbmf_key	k = okbmf_mkkey(key);
+
+	Assert(bm->fixed);
+	if (okbmf_find(bm->ftree, k) == NULL)
+	{
+		OKbmDummy	dummy = {0};
+
+		(void) okbmf_set(bm->ftree, k, &dummy);
+	}
+	bm->finalized = false;
 }
 
 bool
-o_keybitmap_is_empty(RBTree *rbtree)
+o_keybitmap_test_key(OKeyBitmap *bm, const uint8 *key)
 {
-	return rbt_leftmost(rbtree) == NULL;
+	okbmf_key	k = okbmf_mkkey(key);
+
+	Assert(bm->fixed);
+	return okbmf_find(bm->ftree, k) != NULL;
 }
 
 void
-o_keybitmap_intersect(RBTree *a, RBTree *b)
+o_keybitmap_insert(OKeyBitmap *bm, uint64 value)
 {
-	RBTreeIterator iterA;
-	RBTreeIterator iterB;
-	OKeyBitmapRBTNode *nodeA;
-	OKeyBitmapRBTNode *nodeB;
-	List	   *removing = NIL;
-	ListCell   *lc;
+	uint64		chunk = value >> OKBM_CHUNK_BITS;
+	int			offset = value & OKBM_LOW_MASK;
+	OKeyBitmapChunk *entry = okbm_find(bm->tree, chunk);
 
-	rbt_begin_iterate(a, LeftRightWalk, &iterA);
-	rbt_begin_iterate(b, LeftRightWalk, &iterB);
-
-	nodeB = (OKeyBitmapRBTNode *) rbt_iterate(&iterB);
-	while ((nodeA = (OKeyBitmapRBTNode *) rbt_iterate(&iterA)) != NULL)
+	if (entry == NULL)
 	{
-		while (nodeB &&
-			   (nodeB->key & HIGH_PART_MASK) < (nodeA->key & HIGH_PART_MASK))
-		{
-			nodeB = (OKeyBitmapRBTNode *) rbt_iterate(&iterB);
-		}
+		OKeyBitmapChunk newentry;
 
-		if (!nodeB ||
-			(nodeB->key & HIGH_PART_MASK) > (nodeA->key & HIGH_PART_MASK))
-		{
-			OKeyBitmapRBTNode *removed_node;
-
-			removed_node = palloc0(sizeof(OKeyBitmapRBTNode));
-			memcpy(removed_node, nodeA, sizeof(OKeyBitmapRBTNode));
-			removing = lappend(removing, removed_node);
-			continue;
-		}
-
-		Assert((nodeA->key & HIGH_PART_MASK) == (nodeB->key & HIGH_PART_MASK));
-
-		if (!nodeA->bitmap)
-		{
-			if (!nodeB->bitmap)
-			{
-				if (nodeA->key != nodeB->key)
-				{
-					OKeyBitmapRBTNode *removed_node;
-
-					removed_node = palloc0(sizeof(OKeyBitmapRBTNode));
-					memcpy(removed_node, nodeA, sizeof(OKeyBitmapRBTNode));
-					removing = lappend(removing, removed_node);
-					continue;
-				}
-			}
-			else
-			{
-				int			offset = (nodeA->key & LOW_PART_MASK);
-
-				if (!(nodeB->bitmap[offset >> 3] & (1 << (offset & 7))))
-				{
-					OKeyBitmapRBTNode *removed_node;
-
-					removed_node = palloc0(sizeof(OKeyBitmapRBTNode));
-					memcpy(removed_node, nodeA, sizeof(OKeyBitmapRBTNode));
-					removing = lappend(removing, removed_node);
-					continue;
-				}
-			}
-		}
-		else
-		{
-			if (!nodeB->bitmap)
-			{
-				int			offset = (nodeB->key & LOW_PART_MASK);
-
-				if (!(nodeA->bitmap[offset >> 3] & (1 << (offset & 7))))
-				{
-					OKeyBitmapRBTNode *removed_node;
-
-					removed_node = palloc0(sizeof(OKeyBitmapRBTNode));
-					memcpy(removed_node, nodeA, sizeof(OKeyBitmapRBTNode));
-					removing = lappend(removing, removed_node);
-					continue;
-				}
-				pfree(nodeA->bitmap);
-				nodeA->bitmap = NULL;
-				nodeA->key = nodeB->key;
-			}
-			else
-			{
-				int			i;
-				bool		empty = true;
-
-				for (i = 0; i < BITMAP_SIZE; i++)
-				{
-					nodeA->bitmap[i] &= nodeB->bitmap[i];
-					if (nodeA->bitmap[i] != 0)
-						empty = false;
-				}
-
-				if (empty)
-				{
-					OKeyBitmapRBTNode *removed_node;
-
-					removed_node = palloc0(sizeof(OKeyBitmapRBTNode));
-					memcpy(removed_node, nodeA, sizeof(OKeyBitmapRBTNode));
-					removing = lappend(removing, removed_node);
-					continue;
-				}
-			}
-		}
+		memset(&newentry, 0, sizeof(newentry));
+		newentry.bitmap[offset >> 3] |= (1 << (offset & 7));
+		(void) okbm_set(bm->tree, chunk, &newentry);
 	}
+	else
+		entry->bitmap[offset >> 3] |= (1 << (offset & 7));
 
-	foreach(lc, removing)
-	{
-		OKeyBitmapRBTNode *search_node;
-		OKeyBitmapRBTNode *removing_node;
-
-		search_node = (OKeyBitmapRBTNode *) lfirst(lc);
-		if (search_node->bitmap)
-			pfree(search_node->bitmap);
-		removing_node = (OKeyBitmapRBTNode *) rbt_find(a,
-													   (RBTNode *) search_node);
-		rbt_delete(a, (RBTNode *) removing_node);
-		pfree(search_node);
-	}
-	list_free(removing);
+	bm->finalized = false;
 }
 
-void
-o_keybitmap_union(RBTree *a, RBTree *b)
+bool
+o_keybitmap_test(OKeyBitmap *bm, uint64 value)
 {
-	RBTreeIterator iterB;
-	OKeyBitmapRBTNode *nodeB;
+	uint64		chunk = value >> OKBM_CHUNK_BITS;
+	int			offset = value & OKBM_LOW_MASK;
+	OKeyBitmapChunk *entry = okbm_find(bm->tree, chunk);
 
-	rbt_begin_iterate(b, LeftRightWalk, &iterB);
-	while ((nodeB = (OKeyBitmapRBTNode *) rbt_iterate(&iterB)) != NULL)
-	{
-		bool		is_new;
+	if (entry == NULL)
+		return false;
 
-		rbt_insert(a, &nodeB->rbtnode, &is_new);
-	}
+	return (entry->bitmap[offset >> 3] & (1 << (offset & 7))) != 0;
 }
 
-static int
-bm_rbt_comparator(const RBTNode *a, const RBTNode *b, void *arg)
+bool
+o_keybitmap_is_empty(OKeyBitmap *bm)
 {
-	const OKeyBitmapRBTNode *keyA = (OKeyBitmapRBTNode *) a;
-	const OKeyBitmapRBTNode *keyB = (OKeyBitmapRBTNode *) b;
-	uint64		va = keyA->key & HIGH_PART_MASK;
-	uint64		vb = keyB->key & HIGH_PART_MASK;
+	bool		empty;
 
-	return va > vb ? 1 : va < vb ? -1 : 0;
-}
-
-static void
-node_make_bitmap(OKeyBitmapRBTNode *node)
-{
-	int			offset;
-
-	node->bitmap = palloc0(BITMAP_SIZE);
-	offset = node->key & LOW_PART_MASK;
-
-	node->bitmap[offset >> 3] |= 1 << (offset & 7);
-	node->key &= HIGH_PART_MASK;
-}
-
-static void
-bm_rbt_combiner(RBTNode *existing,
-				const RBTNode *newdata,
-				void *arg)
-{
-	OKeyBitmapRBTNode *old = (OKeyBitmapRBTNode *) existing;
-	OKeyBitmapRBTNode *new = (OKeyBitmapRBTNode *) newdata;
-
-	if (!old->bitmap)
+	if (bm->fixed)
 	{
-		if (!new->bitmap && new->key == old->key)
-			return;
-		node_make_bitmap(old);
-	}
+		okbmf_iter *iter = okbmf_begin_iterate(bm->ftree);
+		okbmf_key	k;
 
-	if (!new->bitmap)
-	{
-		int			offset = new->key & LOW_PART_MASK;
-
-		old->bitmap[offset >> 3] |= 1 << (offset & 7);
+		empty = (okbmf_iterate_next(iter, &k) == NULL);
+		okbmf_end_iterate(iter);
 	}
 	else
 	{
-		int			i;
+		okbm_iter  *iter = okbm_begin_iterate(bm->tree);
+		uint64		chunk;
 
-		for (i = 0; i < BITMAP_SIZE; i++)
-			old->bitmap[i] |= new->bitmap[i];
+		empty = (okbm_iterate_next(iter, &chunk) == NULL);
+		okbm_end_iterate(iter);
 	}
+	return empty;
 }
 
-static RBTNode *
-bm_rbt_allocfunc(void *arg)
+void
+o_keybitmap_union(OKeyBitmap *a, OKeyBitmap *b)
 {
-	RBTNode    *result = palloc0(sizeof(OKeyBitmapRBTNode));
+	okbm_iter  *iter;
+	OKeyBitmapChunk *bentry;
+	uint64		chunk;
 
-	return result;
+	Assert(a->fixed == b->fixed);
+
+	if (a->fixed)
+	{
+		okbmf_iter *fiter = okbmf_begin_iterate(b->ftree);
+		okbmf_key	k;
+
+		while (okbmf_iterate_next(fiter, &k) != NULL)
+		{
+			if (okbmf_find(a->ftree, k) == NULL)
+			{
+				OKbmDummy	dummy = {0};
+
+				(void) okbmf_set(a->ftree, k, &dummy);
+			}
+		}
+		okbmf_end_iterate(fiter);
+		a->finalized = false;
+		return;
+	}
+
+	iter = okbm_begin_iterate(b->tree);
+
+	while ((bentry = okbm_iterate_next(iter, &chunk)) != NULL)
+	{
+		OKeyBitmapChunk *aentry = okbm_find(a->tree, chunk);
+
+		if (aentry == NULL)
+			(void) okbm_set(a->tree, chunk, bentry);
+		else
+		{
+			int			i;
+
+			for (i = 0; i < OKBM_BITMAP_BYTES; i++)
+				aentry->bitmap[i] |= bentry->bitmap[i];
+		}
+	}
+	okbm_end_iterate(iter);
+	a->finalized = false;
 }
 
+void
+o_keybitmap_intersect(OKeyBitmap *a, OKeyBitmap *b)
+{
+	okbm_iter  *iter;
+	OKeyBitmapChunk *aentry;
+	uint64		chunk;
+	uint64	   *toDelete = NULL;
+	int			nDelete = 0;
+	int			deleteCap = 0;
+	int			i;
+
+	Assert(a->fixed == b->fixed);
+
+	if (a->fixed)
+	{
+		okbmf_iter *fiter = okbmf_begin_iterate(a->ftree);
+		okbmf_key	k;
+		okbmf_key  *fdel = NULL;
+		int			nfdel = 0;
+		int			fcap = 0;
+
+		while (okbmf_iterate_next(fiter, &k) != NULL)
+		{
+			if (okbmf_find(b->ftree, k) == NULL)
+			{
+				if (nfdel >= fcap)
+				{
+					fcap = fcap ? fcap * 2 : 16;
+					if (fdel == NULL)
+						fdel = MemoryContextAlloc(a->cxt, sizeof(okbmf_key) * fcap);
+					else
+						fdel = repalloc(fdel, sizeof(okbmf_key) * fcap);
+				}
+				fdel[nfdel++] = k;
+			}
+		}
+		okbmf_end_iterate(fiter);
+
+		for (i = 0; i < nfdel; i++)
+			(void) okbmf_delete(a->ftree, fdel[i]);
+		if (fdel)
+			pfree(fdel);
+
+		a->finalized = false;
+		return;
+	}
+
+	iter = okbm_begin_iterate(a->tree);
+
+	/*
+	 * AND each of a's chunks in place with the matching chunk of b.  Chunks
+	 * that become empty (or have no counterpart in b) are collected and
+	 * removed after iteration; deleting during iteration would invalidate the
+	 * iterator.  Modifying leaf values in place is safe.
+	 */
+	while ((aentry = okbm_iterate_next(iter, &chunk)) != NULL)
+	{
+		OKeyBitmapChunk *bentry = okbm_find(b->tree, chunk);
+		bool		empty = true;
+
+		if (bentry != NULL)
+		{
+			for (i = 0; i < OKBM_BITMAP_BYTES; i++)
+			{
+				aentry->bitmap[i] &= bentry->bitmap[i];
+				if (aentry->bitmap[i] != 0)
+					empty = false;
+			}
+		}
+
+		if (empty)
+		{
+			if (nDelete >= deleteCap)
+			{
+				deleteCap = deleteCap ? deleteCap * 2 : 16;
+				if (toDelete == NULL)
+					toDelete = MemoryContextAlloc(a->cxt,
+												  sizeof(uint64) * deleteCap);
+				else
+					toDelete = repalloc(toDelete, sizeof(uint64) * deleteCap);
+			}
+			toDelete[nDelete++] = chunk;
+		}
+	}
+	okbm_end_iterate(iter);
+
+	for (i = 0; i < nDelete; i++)
+		(void) okbm_delete(a->tree, toDelete[i]);
+	if (toDelete)
+		pfree(toDelete);
+
+	a->finalized = false;
+}
+
+/*
+ * Build the sorted array of chunk keys.  okbm iteration already yields chunks
+ * in ascending order, so we just collect them.  No-op if already finalized.
+ */
 static void
-bm_rbt_freefunc(RBTNode *x, void *arg)
+okbm_finalize(OKeyBitmap *bm)
 {
-	pfree(x);
+	okbm_iter  *iter;
+	uint64		chunk;
+
+	if (bm->finalized)
+		return;
+
+	bm->nchunks = 0;
+
+	if (bm->fixed)
+	{
+		okbmf_iter *fiter = okbmf_begin_iterate(bm->ftree);
+		okbmf_key	k;
+
+		while (okbmf_iterate_next(fiter, &k) != NULL)
+		{
+			if (bm->nchunks >= bm->chunksCapacity)
+			{
+				bm->chunksCapacity = bm->chunksCapacity ? bm->chunksCapacity * 2 : 64;
+				if (bm->fkeys == NULL)
+					bm->fkeys = MemoryContextAlloc(bm->cxt,
+												   (Size) OKBM_FIXED_BYTES * bm->chunksCapacity);
+				else
+					bm->fkeys = repalloc(bm->fkeys,
+										 (Size) OKBM_FIXED_BYTES * bm->chunksCapacity);
+			}
+			memcpy(bm->fkeys + (Size) bm->nchunks * OKBM_FIXED_BYTES,
+				   k.data, OKBM_FIXED_BYTES);
+			bm->nchunks++;
+		}
+		okbmf_end_iterate(fiter);
+		bm->finalized = true;
+		return;
+	}
+
+	iter = okbm_begin_iterate(bm->tree);
+	while (okbm_iterate_next(iter, &chunk) != NULL)
+	{
+		if (bm->nchunks >= bm->chunksCapacity)
+		{
+			bm->chunksCapacity = bm->chunksCapacity ? bm->chunksCapacity * 2 : 64;
+			if (bm->chunks == NULL)
+				bm->chunks = MemoryContextAlloc(bm->cxt,
+												sizeof(uint64) * bm->chunksCapacity);
+			else
+				bm->chunks = repalloc(bm->chunks,
+									  sizeof(uint64) * bm->chunksCapacity);
+		}
+		bm->chunks[bm->nchunks++] = chunk;
+	}
+	okbm_end_iterate(iter);
+
+	bm->finalized = true;
+}
+
+/* Index of the first chunk key >= target. */
+static int
+okbm_lower_bound(OKeyBitmap *bm, uint64 target)
+{
+	int			lo = 0,
+				hi = bm->nchunks;
+
+	while (lo < hi)
+	{
+		int			mid = lo + (hi - lo) / 2;
+
+		if (bm->chunks[mid] < target)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return lo;
+}
+
+bool
+o_keybitmap_range_is_valid(OKeyBitmap *bm, uint64 low, uint64 high)
+{
+	uint64		chunkLow;
+	uint64		chunkHigh;
+	int			idx;
+
+	if (high <= low)
+		return false;
+
+	okbm_finalize(bm);
+
+	chunkLow = low >> OKBM_CHUNK_BITS;
+	chunkHigh = (high - 1) >> OKBM_CHUNK_BITS;
+
+	for (idx = okbm_lower_bound(bm, chunkLow); idx < bm->nchunks; idx++)
+	{
+		uint64		chunk = bm->chunks[idx];
+		OKeyBitmapChunk *entry;
+		int			iStart,
+					iEnd,
+					i;
+		uint8		startMask,
+					endMask;
+
+		if (chunk > chunkHigh)
+			break;
+
+		entry = okbm_find(bm->tree, chunk);
+
+		if (chunk == chunkLow)
+		{
+			iStart = (low & OKBM_LOW_MASK) >> 3;
+			startMask = 0xFF << (low & 7);
+		}
+		else
+		{
+			iStart = 0;
+			startMask = 0xFF;
+		}
+
+		if (chunk == chunkHigh)
+		{
+			iEnd = ((high - 1) & OKBM_LOW_MASK) >> 3;
+			endMask = 0xFF >> (7 - ((high - 1) & 7));
+		}
+		else
+		{
+			iEnd = OKBM_BITMAP_BYTES - 1;
+			endMask = 0xFF;
+		}
+
+		for (i = iStart; i <= iEnd; i++)
+		{
+			uint8		mask = (i == iStart) ? startMask : 0xFF;
+
+			if (i == iEnd)
+				mask &= endMask;
+
+			if (entry->bitmap[i] & mask)
+				return true;
+		}
+	}
+
+	return false;
+}
+
+uint64
+o_keybitmap_get_next(OKeyBitmap *bm, uint64 prev, bool *found)
+{
+	uint64		chunkPrev = prev >> OKBM_CHUNK_BITS;
+	int			offPrev = prev & OKBM_LOW_MASK;
+	int			idx;
+
+	okbm_finalize(bm);
+
+	for (idx = okbm_lower_bound(bm, chunkPrev); idx < bm->nchunks; idx++)
+	{
+		uint64		chunk = bm->chunks[idx];
+		OKeyBitmapChunk *entry = okbm_find(bm->tree, chunk);
+		int			startOff = (chunk == chunkPrev) ? offPrev : 0;
+		int			nextOff = find_next_offset(entry->bitmap, startOff);
+
+		if (nextOff >= 0)
+		{
+			*found = true;
+			return (chunk << OKBM_CHUNK_BITS) + nextOff;
+		}
+	}
+
+	*found = false;
+	return 0;
+}
+
+/* --- fixed-key mode ordered seeks --- */
+
+/* Index of the first key >= target (memcmp order) in the finalized fkeys[]. */
+static int
+okbmf_lower_bound(OKeyBitmap *bm, const uint8 *target)
+{
+	int			lo = 0,
+				hi = bm->nchunks;
+
+	while (lo < hi)
+	{
+		int			mid = lo + (hi - lo) / 2;
+
+		if (memcmp(bm->fkeys + (Size) mid * OKBM_FIXED_BYTES, target,
+				   OKBM_FIXED_BYTES) < 0)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return lo;
+}
+
+bool
+o_keybitmap_range_is_valid_key(OKeyBitmap *bm, const uint8 *low, const uint8 *high)
+{
+	int			idx;
+
+	Assert(bm->fixed);
+	if (memcmp(low, high, OKBM_FIXED_BYTES) >= 0)
+		return false;
+
+	okbm_finalize(bm);
+
+	idx = okbmf_lower_bound(bm, low);
+	if (idx >= bm->nchunks)
+		return false;
+
+	/* the first key >= low is in range iff it is < high */
+	return memcmp(bm->fkeys + (Size) idx * OKBM_FIXED_BYTES, high,
+				  OKBM_FIXED_BYTES) < 0;
+}
+
+bool
+o_keybitmap_get_next_key(OKeyBitmap *bm, const uint8 *prev, uint8 *result)
+{
+	int			idx;
+
+	Assert(bm->fixed);
+	okbm_finalize(bm);
+
+	idx = okbmf_lower_bound(bm, prev);
+	if (idx >= bm->nchunks)
+		return false;
+
+	memcpy(result, bm->fkeys + (Size) idx * OKBM_FIXED_BYTES, OKBM_FIXED_BYTES);
+	return true;
 }

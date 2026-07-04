@@ -36,6 +36,7 @@
 #include "s3/requests.h"
 #include "s3/worker.h"
 #include "storage/standby.h"
+#include "tableam/bitmap_scan.h"
 #include "tableam/handler.h"
 #include "tableam/scan.h"
 #include "tableam/toast.h"
@@ -2026,7 +2027,6 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 
 		if (relation->rd_rel->relhasindex)
 		{
-			int			i;
 			ListCell   *lc;
 			OTableDescr *descr = relation_get_descr(relation);
 			OIndexDescr *primary;
@@ -2055,18 +2055,25 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 					 * implemented
 					 */
 					info->amcanparallel = false;
-					hasbitmap = info->indexoid != primary->oids.reloid &&
-						primary->nFields <= 1;
-					for (i = 0;
-						 hasbitmap && i < primary->nFields; i++)
-					{
-						Oid			typeoid = primary->fields[i].inputtype;
-						bool		valid = typeoid == INT4OID ||
-							typeoid == INT8OID ||
-							typeoid == TIDOID;
 
-						hasbitmap = hasbitmap && valid;
-					}
+					/*
+					 * Only the single-field uint64 encoding is enabled in the
+					 * planner for now.  The composite (fixed-key) path is
+					 * fully implemented and unit-tested, but choosing it well
+					 * needs a bitmap-heap cost that reflects orioledb's
+					 * primary-index scan at plan-generation time (a
+					 * patched-PG change); until then it stays out of
+					 * amhasgetbitmap.
+					 */
+
+					/*
+					 * Offer a bitmap scan whenever the primary key can back
+					 * one (single int/ctid, or a composite of small ints).
+					 * This covers row-array IN() on a composite primary key,
+					 * planned as a BitmapOr of per-tuple primary-index scans,
+					 * which on large tables beats the common-prefix scan.
+					 */
+					hasbitmap = o_keybitmap_pk_mode(primary, NULL) != O_KEYBITMAP_NONE;
 					info->amhasgetbitmap = hasbitmap;
 
 					if (index->rd_rel->relam != BTREE_AM_OID || (options && !options->orioledb_index))

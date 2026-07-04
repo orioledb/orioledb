@@ -472,13 +472,15 @@ SET LOCAL enable_seqscan TO off;
 SET LOCAL enable_indexscan TO off;
 SET LOCAL enable_bitmapscan TO on;
 EXPLAIN (COSTS off) SELECT count(*) FROM test_last_scan WHERE idx_col = 1;
-                       QUERY PLAN                        
----------------------------------------------------------
+                      QUERY PLAN                      
+------------------------------------------------------
  Aggregate
    ->  Custom Scan (o_scan) on test_last_scan
-         Forward index only scan of: test_last_scan_pkey
-         Conds: (idx_col = 1)
-(4 rows)
+         Bitmap heap scan
+         Recheck Cond: (idx_col = 1)
+         ->  Bitmap Index Scan on test_last_scan_pkey
+               Index Cond: (idx_col = 1)
+(6 rows)
 
 SELECT count(*) FROM test_last_scan WHERE idx_col = 1;
  count 
@@ -498,7 +500,7 @@ SELECT seq_scan, :'test_last_seq' = last_seq_scan AS seq_ok, idx_scan, :'test_la
 FROM pg_stat_all_tables WHERE relid = 'test_last_scan'::regclass;
  seq_scan | seq_ok | idx_scan | idx_ok 
 ----------+--------+----------+--------
-        2 | t      |        3 | t
+        2 | t      |        2 | f
 (1 row)
 
 -- pg_stat_have_stats returns true for committed index creation

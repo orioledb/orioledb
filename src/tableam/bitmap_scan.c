@@ -26,7 +26,6 @@
 #include "access/table.h"
 #include "catalog/pg_type.h"
 #include "executor/nodeIndexscan.h"
-#include "lib/rbtree.h"
 #include "nodes/execnodes.h"
 #include "utils/memutils.h"
 
@@ -36,7 +35,7 @@
 typedef struct BitmapSeqScanArg
 {
 	OTableDescr *tbl_desc;
-	RBTree	   *bitmap;
+	OKeyBitmap *bitmap;
 } BitmapSeqScanArg;
 
 typedef struct BridgeIterator
@@ -225,10 +224,263 @@ primary_tuple_get_data(OTuple tuple, OIndexDescr *primary, bool onlyPkey)
 	return val_get_uint64(val, attr->atttypid);
 }
 
+/* ---- composite (fixed-key) primary key encoding ---- */
+
+static int
+o_pk_int_width(Oid typeoid)
+{
+	switch (typeoid)
+	{
+		case INT2OID:
+			return 2;
+		case INT4OID:
+			return 4;
+		case INT8OID:
+			return 8;
+		default:
+			return -1;
+	}
+}
+
+OKeyBitmapMode
+o_keybitmap_pk_mode(OIndexDescr *primary, int *fixedKeyLen)
+{
+	int			i;
+	int			len = 0;
+
+	/*
+	 * For the primary index descriptor the PK columns are its own key fields
+	 * (nKeyFields; INCLUDE columns in nFields are not part of the ordering
+	 * and must be ignored).  nPrimaryFields is zero here (it counts the PK
+	 * columns appended to *secondary* indexes).
+	 */
+
+	/*
+	 * uint64 densified mode: the historically supported single-field case.
+	 * Gated on nFields (not nKeyFields) so a single-key PK with INCLUDE
+	 * columns falls through to fixed-key mode rather than the uint64 helpers,
+	 * whose asserts require nFields == 1.
+	 */
+	if (primary->nFields <= 1)
+	{
+		bool		ok = true;
+
+		for (i = 0; i < primary->nFields; i++)
+		{
+			Oid			t = primary->fields[i].inputtype;
+
+			if (!(t == INT4OID || t == INT8OID || t == TIDOID))
+			{
+				ok = false;
+				break;
+			}
+		}
+		if (ok)
+			return O_KEYBITMAP_UINT64;
+	}
+
+	/* fixed-key mode: composite of small, ascending integer fields */
+	if (primary->primaryIsCtid)
+		return O_KEYBITMAP_NONE;
+	for (i = 0; i < primary->nKeyFields; i++)
+	{
+		int			w = o_pk_int_width(primary->fields[i].inputtype);
+
+		if (w < 0 || !primary->fields[i].ascending)
+			return O_KEYBITMAP_NONE;
+		len += w;
+	}
+	if (len == 0 || len > OKBM_FIXED_BYTES)
+		return O_KEYBITMAP_NONE;
+	if (fixedKeyLen)
+		*fixedKeyLen = len;
+	return O_KEYBITMAP_FIXED;
+}
+
+/* order-preserving big-endian encode of one integer Datum; returns width */
+static int
+o_pk_encode_one(Datum val, Oid typeoid, uint8 *out)
+{
+	int			i,
+				w;
+	uint64		u;
+
+	switch (typeoid)
+	{
+		case INT2OID:
+			u = (uint16) DatumGetInt16(val) ^ UINT64CONST(0x8000);
+			w = 2;
+			break;
+		case INT4OID:
+			u = (uint32) DatumGetInt32(val) ^ UINT64CONST(0x80000000);
+			w = 4;
+			break;
+		case INT8OID:
+			u = (uint64) DatumGetInt64(val) ^ UINT64CONST(0x8000000000000000);
+			w = 8;
+			break;
+		default:
+			elog(ERROR, "unsupported fixed keybitmap type %u", typeoid);
+			return 0;
+	}
+	for (i = w - 1; i >= 0; i--)
+	{
+		out[i] = (uint8) (u & 0xFF);
+		u >>= 8;
+	}
+	return w;
+}
+
+static Datum
+o_pk_decode_one(const uint8 *in, Oid typeoid, int *width)
+{
+	uint64		u = 0;
+	int			i,
+				w;
+
+	switch (typeoid)
+	{
+		case INT2OID:
+			w = 2;
+			break;
+		case INT4OID:
+			w = 4;
+			break;
+		case INT8OID:
+			w = 8;
+			break;
+		default:
+			elog(ERROR, "unsupported fixed keybitmap type %u", typeoid);
+			return (Datum) 0;
+	}
+	for (i = 0; i < w; i++)
+		u = (u << 8) | in[i];
+	*width = w;
+	switch (typeoid)
+	{
+		case INT2OID:
+			return Int16GetDatum((int16) (uint16) (u ^ UINT64CONST(0x8000)));
+		case INT4OID:
+			return Int32GetDatum((int32) (uint32) (u ^ UINT64CONST(0x80000000)));
+		default:
+			return Int64GetDatum((int64) (u ^ UINT64CONST(0x8000000000000000)));
+	}
+}
+
+/*
+ * Encode the primary key held in a leaf tuple of index "id" (primary or a
+ * secondary, which carries the pk fields) into a right-aligned, zero-high-
+ * padded OKBM_FIXED_BYTES buffer.
+ */
+static void
+o_pk_encode_leaf(OTuple tuple, OIndexDescr *id, uint8 *out)
+{
+	bool		isPrimary = (id->desc.type == oIndexPrimary);
+	int			npk = isPrimary ? id->nKeyFields : id->nPrimaryFields;
+	int			pk_from = id->nFields - id->nPrimaryFields;
+	AttrNumber	attnums[INDEX_MAX_KEYS];
+	Oid			types[INDEX_MAX_KEYS];
+	int			i;
+	int			len = 0;
+	int			off;
+
+	for (i = 0; i < npk; i++)
+	{
+		if (isPrimary)
+			attnums[i] = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, id, i + 1);
+		else
+			attnums[i] = id->primaryFieldsAttnums[i];
+		types[i] = TupleDescAttr(id->leafTupdesc,
+								 isPrimary ? attnums[i] - 1 : pk_from + i)->atttypid;
+		len += o_pk_int_width(types[i]);
+	}
+
+	memset(out, 0, OKBM_FIXED_BYTES);
+	off = OKBM_FIXED_BYTES - len;
+	for (i = 0; i < npk; i++)
+	{
+		bool		isnull;
+		Datum		val = o_fastgetattr(tuple, attnums[i], id->leafTupdesc,
+										&id->leafSpec, &isnull);
+
+		off += o_pk_encode_one(val, types[i], out + off);
+	}
+}
+
+/* Encode the primary key held in a non-leaf (pk-only) tuple. */
+static void
+o_pk_encode_nonleaf(OTuple tuple, OIndexDescr *primary, uint8 *out)
+{
+	AttrNumber	attnums[INDEX_MAX_KEYS];
+	Oid			types[INDEX_MAX_KEYS];
+	int			i;
+	int			len = 0;
+	int			off;
+
+	for (i = 0; i < primary->nKeyFields; i++)
+	{
+		attnums[i] = OIndexKeyAttnumToTupleAttnum(BTreeKeyNonLeafKey, primary, i + 1);
+		types[i] = TupleDescAttr(primary->nonLeafTupdesc, attnums[i] - 1)->atttypid;
+		len += o_pk_int_width(types[i]);
+	}
+
+	memset(out, 0, OKBM_FIXED_BYTES);
+	off = OKBM_FIXED_BYTES - len;
+	for (i = 0; i < primary->nKeyFields; i++)
+	{
+		bool		isnull;
+		Datum		val = o_fastgetattr(tuple, attnums[i], primary->nonLeafTupdesc,
+										&primary->nonLeafSpec, &isnull);
+
+		off += o_pk_encode_one(val, types[i], out + off);
+	}
+}
+
+/* Decode a fixed key back into a non-leaf pk tuple stored in key->fixedData. */
+static void
+o_pk_decode_to_key(const uint8 *keybytes, OIndexDescr *primary, OFixedKey *key)
+{
+	Datum		values[INDEX_MAX_KEYS];
+	bool		isnull[INDEX_MAX_KEYS];
+	AttrNumber	attnums[INDEX_MAX_KEYS];
+	Oid			types[INDEX_MAX_KEYS];
+	int			natts = primary->nonLeafTupdesc->natts;
+	int			i;
+	int			len = 0;
+	int			off;
+	OTuple		tup;
+
+	for (i = 0; i < natts; i++)
+		isnull[i] = false;		/* pk columns are NOT NULL */
+
+	for (i = 0; i < primary->nKeyFields; i++)
+	{
+		attnums[i] = OIndexKeyAttnumToTupleAttnum(BTreeKeyNonLeafKey, primary, i + 1);
+		types[i] = TupleDescAttr(primary->nonLeafTupdesc, attnums[i] - 1)->atttypid;
+		len += o_pk_int_width(types[i]);
+	}
+
+	off = OKBM_FIXED_BYTES - len;
+	for (i = 0; i < primary->nKeyFields; i++)
+	{
+		int			w;
+
+		values[attnums[i] - 1] = o_pk_decode_one(keybytes + off, types[i], &w);
+		off += w;
+	}
+
+	tup = o_form_tuple(primary->nonLeafTupdesc, &primary->nonLeafSpec, 0,
+					   values, isnull, NULL);
+	key->tuple.formatFlags = tup.formatFlags;
+	memcpy(key->fixedData, tup.data, o_tuple_size(tup, &primary->nonLeafSpec));
+	pfree(tup.data);
+	key->tuple.data = key->fixedData;
+}
+
 static double
 o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 				  BitmapIndexScanState *node,
-				  RBTree *bitmap, TIDBitmap *tbm_result)
+				  OKeyBitmap *bitmap, TIDBitmap *tbm_result)
 {
 	OScanState	ostate = {0};
 	OTableDescr *descr;
@@ -351,8 +603,27 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 
 			if (!tbm_result)
 			{
-				data = seconary_tuple_get_pk_data(tuple, indexDescr);
-				o_keybitmap_insert(bitmap, data);
+				if (o_keybitmap_pk_mode(GET_PRIMARY(descr), NULL) == O_KEYBITMAP_FIXED)
+				{
+					uint8		key[OKBM_FIXED_BYTES];
+
+					o_pk_encode_leaf(tuple, indexDescr, key);
+					o_keybitmap_insert_key(bitmap, key);
+				}
+				else
+				{
+					/*
+					 * The scanned index may be the primary index itself (e.g.
+					 * a bitmap index scan over the primary for a row-array
+					 * IN), in which case the pk is the tuple's own key rather
+					 * than an appended secondary payload.
+					 */
+					if (indexDescr->desc.type == oIndexPrimary)
+						data = primary_tuple_get_data(tuple, indexDescr, false);
+					else
+						data = seconary_tuple_get_pk_data(tuple, indexDescr);
+					o_keybitmap_insert(bitmap, data);
+				}
 			}
 			else
 			{
@@ -433,7 +704,7 @@ o_index_getbitmap(OBitmapHeapPlanState *bitmap_state,
 
 static void
 exec_bitmap_index_state(OBitmapHeapPlanState *bitmap_state, PlanState *planstate,
-						RBTree **rbt_result, TIDBitmap **tbm_result)
+						OKeyBitmap **rbt_result, TIDBitmap **tbm_result)
 {
 	double		nTuples = 0;
 	BitmapIndexScanState *node;
@@ -512,7 +783,14 @@ exec_bitmap_index_state(OBitmapHeapPlanState *bitmap_state, PlanState *planstate
 	else
 	{
 		if (*tbm_result == NULL && *rbt_result == NULL)
-			*rbt_result = o_keybitmap_create();
+		{
+			OIndexDescr *primary = GET_PRIMARY(bitmap_state->scan->arg.tbl_desc);
+
+			if (o_keybitmap_pk_mode(primary, NULL) == O_KEYBITMAP_FIXED)
+				*rbt_result = o_keybitmap_create_fixed();
+			else
+				*rbt_result = o_keybitmap_create();
+		}
 #if PG_VERSION_NUM >= 180000
 		node->biss_Instrument.nsearches++;
 #endif
@@ -523,7 +801,7 @@ exec_bitmap_index_state(OBitmapHeapPlanState *bitmap_state, PlanState *planstate
 }
 
 static void
-add_rbt_to_tbm(OBitmapHeapPlanState *bitmap_state, TIDBitmap *tbm, RBTree *rbt)
+add_rbt_to_tbm(OBitmapHeapPlanState *bitmap_state, TIDBitmap *tbm, OKeyBitmap *rbt)
 {
 	BTreeSeqScan *seq_scan;
 	BitmapSeqScanArg arg;
@@ -572,7 +850,7 @@ add_rbt_to_tbm(OBitmapHeapPlanState *bitmap_state, TIDBitmap *tbm, RBTree *rbt)
 
 static void
 o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate,
-				  RBTree **rbt_result, TIDBitmap **tbm_result)
+				  OKeyBitmap **rbt_result, TIDBitmap **tbm_result)
 {
 	Assert(rbt_result && tbm_result);
 	Assert(*rbt_result == NULL || *tbm_result == NULL);
@@ -591,7 +869,7 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate,
 				for (i = 0; i < node->nplans; i++)
 				{
 					PlanState  *subnode = node->bitmapplans[i];
-					RBTree	   *rbt_subresult = NULL;
+					OKeyBitmap *rbt_subresult = NULL;
 					TIDBitmap  *tbm_subresult = NULL;
 
 					o_exec_bitmapqual(bitmap_state, subnode, &rbt_subresult, &tbm_subresult);
@@ -673,7 +951,7 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate,
 				for (i = 0; i < node->nplans; i++)
 				{
 					PlanState  *subnode = node->bitmapplans[i];
-					RBTree	   *rbt_subresult = NULL;
+					OKeyBitmap *rbt_subresult = NULL;
 					TIDBitmap  *tbm_subresult = NULL;
 
 					if (IsA(subnode, BitmapIndexScanState))
@@ -830,7 +1108,7 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 				bridge_next_page(scan, bitmap_state);
 		}
 
-		/* Path 2: Iterate using RBTree bitmap with seq scan */
+		/* Path 2: Iterate using OKeyBitmap bitmap with seq scan */
 		if (!fetched)
 		{
 			Assert(scan->seq_scan);
@@ -866,12 +1144,27 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 			else
 			{
 				OTableDescr *descr;
+				OIndexDescr *primary;
 				uint64		value;
+				bool		in_bitmap;
 
 				descr = relation_get_descr(node->ss.ss_currentRelation);
-				value = primary_tuple_get_data(tuple, GET_PRIMARY(descr), false);
+				primary = GET_PRIMARY(descr);
 
-				if (o_keybitmap_test(scan->arg.bitmap, value))
+				if (o_keybitmap_pk_mode(primary, NULL) == O_KEYBITMAP_FIXED)
+				{
+					uint8		key[OKBM_FIXED_BYTES];
+
+					o_pk_encode_leaf(tuple, primary, key);
+					in_bitmap = o_keybitmap_test_key(scan->arg.bitmap, key);
+				}
+				else
+				{
+					value = primary_tuple_get_data(tuple, primary, false);
+					in_bitmap = o_keybitmap_test(scan->arg.bitmap, value);
+				}
+
+				if (in_bitmap)
 				{
 					slot = node->ss.ss_ScanTupleSlot;
 					tts_orioledb_store_tuple(slot, tuple,
@@ -965,6 +1258,24 @@ o_bitmap_is_range_valid(OTuple low, OTuple high, void *arg)
 	uint64		lowValue,
 				highValue;
 
+	if (o_keybitmap_pk_mode(primary, NULL) == O_KEYBITMAP_FIXED)
+	{
+		uint8		lowKey[OKBM_FIXED_BYTES];
+		uint8		highKey[OKBM_FIXED_BYTES];
+
+		if (!O_TUPLE_IS_NULL(low))
+			o_pk_encode_nonleaf(low, primary, lowKey);
+		else
+			memset(lowKey, 0, OKBM_FIXED_BYTES);
+
+		if (!O_TUPLE_IS_NULL(high))
+			o_pk_encode_nonleaf(high, primary, highKey);
+		else
+			memset(highKey, 0xFF, OKBM_FIXED_BYTES);
+
+		return o_keybitmap_range_is_valid_key(barg->bitmap, lowKey, highKey);
+	}
+
 	if (!O_TUPLE_IS_NULL(low))
 		lowValue = primary_tuple_get_data(low, primary, true);
 	else
@@ -988,6 +1299,42 @@ o_bitmap_get_next_key(OFixedKey *key, bool inclusive, void *arg)
 	uint64		res_value;
 	OTupleHeader tuphdr;
 	OIndexDescr *primary = GET_PRIMARY(barg->tbl_desc);
+
+	if (o_keybitmap_pk_mode(primary, NULL) == O_KEYBITMAP_FIXED)
+	{
+		uint8		prevKey[OKBM_FIXED_BYTES];
+		uint8		outKey[OKBM_FIXED_BYTES];
+
+		if (!O_TUPLE_IS_NULL(key->tuple))
+		{
+			/* apply_next_key() passes the current leaf tuple as the position */
+			o_pk_encode_leaf(key->tuple, primary, prevKey);
+			if (!inclusive)
+			{
+				int			i;
+
+				/* smallest key strictly greater than prev */
+				for (i = OKBM_FIXED_BYTES - 1; i >= 0; i--)
+					if (++prevKey[i] != 0)
+						break;
+				if (i < 0)
+				{
+					O_TUPLE_SET_NULL(key->tuple);
+					return false;
+				}
+			}
+		}
+		else
+			memset(prevKey, 0, OKBM_FIXED_BYTES);
+
+		if (o_keybitmap_get_next_key(barg->bitmap, prevKey, outKey))
+		{
+			o_pk_decode_to_key(outKey, primary, key);
+			return true;
+		}
+		O_TUPLE_SET_NULL(key->tuple);
+		return false;
+	}
 
 	if (!O_TUPLE_IS_NULL(key->tuple))
 	{
