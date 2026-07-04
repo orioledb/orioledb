@@ -1236,6 +1236,19 @@ EXPLAIN (COSTS OFF)
 	SELECT * FROM bitmap_test_multi WHERE i < 100 ORDER BY i LIMIT 20;
 SELECT * FROM bitmap_test_multi WHERE i < 100 ORDER BY i LIMIT 20;
 
+-- Row-array IN() over a composite primary key: planned as a BitmapOr of
+-- per-tuple primary-index scans (the shape that was slow in TPCC delivery).
+-- The result must match a sequential scan.
+EXPLAIN (COSTS OFF)
+	SELECT count(*) FROM bitmap_test_multi
+		WHERE (id, id2) IN ((100001, 100001), (100050, 100050), (104000, 104000));
+SELECT count(*) FROM bitmap_test_multi
+	WHERE (id, id2) IN ((100001, 100001), (100050, 100050), (104000, 104000));
+SET enable_bitmapscan = off;
+SELECT count(*) FROM bitmap_test_multi
+	WHERE (id, id2) IN ((100001, 100001), (100050, 100050), (104000, 104000));
+SET enable_bitmapscan = on;
+
 CREATE SEQUENCE bitmap_test_multi_inval_id2_seq AS integer;
 
 -- Test multi column some not valid bitmap

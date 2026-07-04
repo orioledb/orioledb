@@ -19,7 +19,12 @@
 #include "tableam/scan.h"
 
 #include "executor/executor.h"
-#include "lib/rbtree.h"
+
+/*
+ * Opaque set of uint64 keys backing the orioledb bitmap scan.  Implemented in
+ * key_bitmap.c on top of the adaptive radix tree.
+ */
+typedef struct OKeyBitmap OKeyBitmap;
 
 typedef struct OBitmapScan OBitmapScan;
 
@@ -48,14 +53,51 @@ extern TupleTableSlot *o_exec_bitmap_fetch(OBitmapScan *scan,
 										   CustomScanState *node);
 extern void o_free_bitmap_scan(OBitmapScan *scan);
 
-extern RBTree *o_keybitmap_create(void);
-extern void o_keybitmap_insert(RBTree *rbtree, uint64 value);
-extern void o_keybitmap_intersect(RBTree *a, RBTree *b);
-extern void o_keybitmap_union(RBTree *a, RBTree *b);
-extern void o_keybitmap_free(RBTree *tree);
-extern bool o_keybitmap_is_empty(RBTree *rbtree);
-extern bool o_keybitmap_test(RBTree *rbtree, uint64 value);
-extern bool o_keybitmap_range_is_valid(RBTree *rbtree, uint64 low, uint64 high);
-extern uint64 o_keybitmap_get_next(RBTree *rbtree, uint64 prev, bool *found);
+/*
+ * Maximum length, in bytes, of an order-preserving encoded composite primary
+ * key handled by the fixed-key bitmap.  Keys shorter than this are encoded
+ * right-aligned with a zero high-pad; wider primary keys are not eligible for
+ * a bitmap scan.
+ */
+#define OKBM_FIXED_BYTES 24
+
+extern OKeyBitmap *o_keybitmap_create(void);
+extern void o_keybitmap_insert(OKeyBitmap *bm, uint64 value);
+extern void o_keybitmap_intersect(OKeyBitmap *a, OKeyBitmap *b);
+extern void o_keybitmap_union(OKeyBitmap *a, OKeyBitmap *b);
+extern void o_keybitmap_free(OKeyBitmap *bm);
+extern bool o_keybitmap_is_empty(OKeyBitmap *bm);
+extern bool o_keybitmap_test(OKeyBitmap *bm, uint64 value);
+extern bool o_keybitmap_range_is_valid(OKeyBitmap *bm, uint64 low, uint64 high);
+extern uint64 o_keybitmap_get_next(OKeyBitmap *bm, uint64 prev, bool *found);
+
+/*
+ * Which bitmap encoding a table's primary key is eligible for.  NONE means the
+ * primary key can't back a bitmap scan (the planner then won't offer one).
+ */
+typedef enum OKeyBitmapMode
+{
+	O_KEYBITMAP_NONE,
+	O_KEYBITMAP_UINT64,			/* single int4/int8/ctid field, densified */
+	O_KEYBITMAP_FIXED			/* composite of small ints, order-preserving */
+} OKeyBitmapMode;
+
+/*
+ * Classify a table's primary key.  On O_KEYBITMAP_FIXED, *fixedKeyLen (if not
+ * NULL) receives the meaningful encoded length in bytes.  Defined in
+ * bitmap_scan.c; used both by the planner (get_relation_info_hook) and the
+ * executor so the two always agree.
+ */
+extern OKeyBitmapMode o_keybitmap_pk_mode(OIndexDescr *primary,
+										  int *fixedKeyLen);
+
+/* Fixed-key (composite primary key) variant. */
+extern OKeyBitmap *o_keybitmap_create_fixed(void);
+extern void o_keybitmap_insert_key(OKeyBitmap *bm, const uint8 *key);
+extern bool o_keybitmap_test_key(OKeyBitmap *bm, const uint8 *key);
+extern bool o_keybitmap_range_is_valid_key(OKeyBitmap *bm, const uint8 *low,
+										   const uint8 *high);
+extern bool o_keybitmap_get_next_key(OKeyBitmap *bm, const uint8 *prev,
+									 uint8 *result);
 
 #endif							/* __TABLEAM_BITMAP_SCAN_H__ */

@@ -493,16 +493,23 @@ o_plan_custom_path(PlannerInfo *root, RelOptInfo *rel,
 	{
 		BitmapHeapScan *bh_scan = (BitmapHeapScan *) custom_plan;
 		OIndexDescr *primary = GET_PRIMARY(descr);
+		Oid			typeoid;
 
 		custom_scan->scan.plan.targetlist =
 			copyObject(bh_scan->scan.plan.targetlist);
 		qpqual = bh_scan->scan.plan.qual;
 
-		Assert(primary->nFields == 1);
+		/*
+		 * typeoid is consumed only by the single-field uint64 encoding; the
+		 * composite fixed-key path derives everything from the descriptor at
+		 * run time, so a placeholder is fine there.
+		 */
+		typeoid = (o_keybitmap_pk_mode(primary, NULL) == O_KEYBITMAP_UINT64)
+			? primary->fields[0].inputtype : InvalidOid;
 		custom_scan->custom_private =
 		/* cppcheck-suppress unknownEvaluationOrder */
 			list_make2(makeInteger(O_BitmapHeapPlan),
-					   makeInteger(primary->fields[0].inputtype));
+					   makeInteger(typeoid));
 	}
 
 	table_close(relation, NoLock);

@@ -2134,12 +2134,14 @@ INSERT INTO pkey_bitmap_test (i)
 	SELECT pseudo_random(5, v) * 20000 FROM generate_series(1,5000) v
 		ON CONFLICT DO NOTHING;
 EXPLAIN (COSTS OFF) SELECT * FROM pkey_bitmap_test WHERE i < 100;
-                     QUERY PLAN                      
------------------------------------------------------
+                    QUERY PLAN                    
+--------------------------------------------------
  Custom Scan (o_scan) on pkey_bitmap_test
-   Forward index only scan of: pkey_bitmap_test_pkey
-   Conds: (i < 100)
-(3 rows)
+   Bitmap heap scan
+   Recheck Cond: (i < 100)
+   ->  Bitmap Index Scan on pkey_bitmap_test_pkey
+         Index Cond: (i < 100)
+(5 rows)
 
 -- Test ctid bitmap
 CREATE TABLE bitmap_test_ctid
@@ -3571,12 +3573,15 @@ INSERT INTO bitmap_test_multi (i)
 ANALYZE bitmap_test_multi;
 CREATE INDEX bitmap_test_multi_ix1 ON bitmap_test_multi (i);
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_multi WHERE i < 100;
-                               QUERY PLAN                               
-------------------------------------------------------------------------
+                       QUERY PLAN                       
+--------------------------------------------------------
  Aggregate
-   ->  Index Only Scan using bitmap_test_multi_ix1 on bitmap_test_multi
-         Index Cond: (i < 100)
-(3 rows)
+   ->  Custom Scan (o_scan) on bitmap_test_multi
+         Bitmap heap scan
+         Recheck Cond: (i < 100)
+         ->  Bitmap Index Scan on bitmap_test_multi_ix1
+               Index Cond: (i < 100)
+(6 rows)
 
 SELECT count(*) FROM bitmap_test_multi WHERE i < 100;
  count 
@@ -3586,12 +3591,17 @@ SELECT count(*) FROM bitmap_test_multi WHERE i < 100;
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM bitmap_test_multi WHERE i < 100 ORDER BY i LIMIT 20;
-                               QUERY PLAN                               
-------------------------------------------------------------------------
+                          QUERY PLAN                          
+--------------------------------------------------------------
  Limit
-   ->  Index Only Scan using bitmap_test_multi_ix1 on bitmap_test_multi
-         Index Cond: (i < 100)
-(3 rows)
+   ->  Sort
+         Sort Key: i
+         ->  Custom Scan (o_scan) on bitmap_test_multi
+               Bitmap heap scan
+               Recheck Cond: (i < 100)
+               ->  Bitmap Index Scan on bitmap_test_multi_ix1
+                     Index Cond: (i < 100)
+(8 rows)
 
 SELECT * FROM bitmap_test_multi WHERE i < 100 ORDER BY i LIMIT 20;
    id   |  id2   | i  
@@ -3610,14 +3620,51 @@ SELECT * FROM bitmap_test_multi WHERE i < 100 ORDER BY i LIMIT 20;
  101672 | 101672 | 67
  100431 | 100431 | 72
  102448 | 102448 | 73
- 102088 | 102088 | 81
  104447 | 104447 | 81
+ 102088 | 102088 | 81
  102646 | 102646 | 85
  102805 | 102805 | 86
  101322 | 101322 | 87
  102688 | 102688 | 87
 (20 rows)
 
+-- Row-array IN() over a composite primary key: planned as a BitmapOr of
+-- per-tuple primary-index scans (the shape that was slow in TPCC delivery).
+-- The result must match a sequential scan.
+EXPLAIN (COSTS OFF)
+	SELECT count(*) FROM bitmap_test_multi
+		WHERE (id, id2) IN ((100001, 100001), (100050, 100050), (104000, 104000));
+                                                               QUERY PLAN                                                               
+----------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Custom Scan (o_scan) on bitmap_test_multi
+         Bitmap heap scan
+         Recheck Cond: (((id = 100001) AND (id2 = 100001)) OR ((id = 100050) AND (id2 = 100050)) OR ((id = 104000) AND (id2 = 104000)))
+         ->  BitmapOr
+               ->  Bitmap Index Scan on bitmap_test_multi_pkey
+                     Index Cond: ((id = 100001) AND (id2 = 100001))
+               ->  Bitmap Index Scan on bitmap_test_multi_pkey
+                     Index Cond: ((id = 100050) AND (id2 = 100050))
+               ->  Bitmap Index Scan on bitmap_test_multi_pkey
+                     Index Cond: ((id = 104000) AND (id2 = 104000))
+(11 rows)
+
+SELECT count(*) FROM bitmap_test_multi
+	WHERE (id, id2) IN ((100001, 100001), (100050, 100050), (104000, 104000));
+ count 
+-------
+     3
+(1 row)
+
+SET enable_bitmapscan = off;
+SELECT count(*) FROM bitmap_test_multi
+	WHERE (id, id2) IN ((100001, 100001), (100050, 100050), (104000, 104000));
+ count 
+-------
+     3
+(1 row)
+
+SET enable_bitmapscan = on;
 CREATE SEQUENCE bitmap_test_multi_inval_id2_seq AS integer;
 -- Test multi column some not valid bitmap
 CREATE TABLE bitmap_test_multi_inval
