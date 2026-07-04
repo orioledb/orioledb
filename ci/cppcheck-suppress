@@ -3,3 +3,5 @@ uselessAssignmentPtrArg:*
 incorrectStringBooleanError:*
 nullPointerRedundantCheck:*
 integerOverflowCond:*/atomics/generic.h
+# Vendored verbatim from PostgreSQL's lib/radixtree.h; not ours to audit.
+*:*/lib/o_radixtree.h
