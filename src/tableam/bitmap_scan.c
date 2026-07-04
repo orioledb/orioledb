@@ -452,8 +452,19 @@ o_pk_decode_to_key(const uint8 *keybytes, OIndexDescr *primary, OFixedKey *key)
 	int			off;
 	OTuple		tup;
 
+	/*
+	 * Only the ordering key columns can be recovered from the encoded key.  A
+	 * covering primary key also carries INCLUDE columns in nonLeafTupdesc,
+	 * but they are not part of the ordering and can't be navigated by, so the
+	 * seek key needs only the ordering columns; leave the rest NULL.  Marking
+	 * any attribute NULL makes o_form_tuple() build a non-fixed tuple with a
+	 * null bitmap and skip those attributes, so it never reads the
+	 * uninitialized INCLUDE values (which would be undefined behavior -- e.g.
+	 * a bogus by-ref box).  o_btree_cmp() on the result only touches the
+	 * nKeyFields columns.
+	 */
 	for (i = 0; i < natts; i++)
-		isnull[i] = false;		/* pk columns are NOT NULL */
+		isnull[i] = true;
 
 	for (i = 0; i < primary->nKeyFields; i++)
 	{
@@ -468,6 +479,7 @@ o_pk_decode_to_key(const uint8 *keybytes, OIndexDescr *primary, OFixedKey *key)
 		int			w;
 
 		values[attnums[i] - 1] = o_pk_decode_one(keybytes + off, types[i], &w);
+		isnull[attnums[i] - 1] = false; /* ordering key column is present */
 		off += w;
 	}
 
