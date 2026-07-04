@@ -3897,6 +3897,42 @@ BEGIN
 END $$;
 DROP TABLE bitmap_jump_test;
 DROP TABLE bitmap_jump_ctest;
+-- Covering primary key (INCLUDE columns, incl. a by-ref type): the fixed-key
+-- bitmap must build the seek key from the ordering columns only and leave the
+-- INCLUDE columns out, or it would form a tuple over uninitialized values.
+-- Row-comparison range that indexes on the leading key columns.  Result must
+-- match a sequential scan.
+CREATE TABLE bitmap_cover_test (c1 int, c2 int, c3 int, c4 box,
+	CONSTRAINT bitmap_cover_pk PRIMARY KEY (c1, c2) INCLUDE (c3, c4))
+	USING orioledb;
+INSERT INTO bitmap_cover_test
+	SELECT 1, 2, 3 * x, box('4,4,4,4') FROM generate_series(1, 10) x
+	ON CONFLICT DO NOTHING;
+INSERT INTO bitmap_cover_test
+	SELECT x, 2 * x, NULL, NULL FROM generate_series(1, 300) x
+	ON CONFLICT DO NOTHING;
+ANALYZE bitmap_cover_test;
+DO $$
+DECLARE
+	bmp_cnt		bigint;
+	seq_cnt		bigint;
+BEGIN
+	SET LOCAL enable_seqscan = off;
+	SET LOCAL enable_indexscan = off;
+	SET LOCAL enable_bitmapscan = on;
+	SELECT count(*) INTO bmp_cnt FROM bitmap_cover_test
+		WHERE (c1, c2, c3) < (2, 5, 1);
+	SET LOCAL enable_seqscan = on;
+	SET LOCAL enable_bitmapscan = off;
+	SET LOCAL enable_indexscan = off;
+	SELECT count(*) INTO seq_cnt FROM bitmap_cover_test
+		WHERE (c1, c2, c3) < (2, 5, 1);
+	IF bmp_cnt <> seq_cnt THEN
+		RAISE EXCEPTION 'covering-pk bitmap mismatch: bmp=% seq=%',
+			bmp_cnt, seq_cnt;
+	END IF;
+END $$;
+DROP TABLE bitmap_cover_test;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 8 other objects
 DETAIL:  drop cascades to table bitmap_test
