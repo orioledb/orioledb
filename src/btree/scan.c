@@ -85,6 +85,22 @@ struct BTreeSeqScan
 	char		leafImg[ORIOLEDB_BLCKSZ];
 	char		histImg[ORIOLEDB_BLCKSZ];
 
+	/*
+	 * FETCH-mode partial reads for bitmap scans.  When `fetch` is set (bitmap
+	 * callbacks present and non-parallel scan) the in-memory leaf page is
+	 * read partially into leafImg: only the chunks actually visited by the
+	 * bitmap's key-driven iteration are materialized from the live shared
+	 * page via `leafPartial`.  `leafPartialFailed` is raised when a chunk
+	 * load detects a concurrent modification; the caller then falls back to
+	 * an iterator over the current key range.  Parallel scans keep whole-page
+	 * IMAGE reads (they share the page image through DSM, which a partial
+	 * image can't back), and pages carrying historical/undo data are fully
+	 * materialized (IMAGE).
+	 */
+	bool		fetch;
+	PartialPageState leafPartial;
+	bool		leafPartialFailed;
+
 	bool		initialized;
 	bool		checkpointNumberSet;
 	OSnapshot	oSnapshot;
@@ -205,6 +221,34 @@ btree_scan_init_shmem(Pointer ptr, bool found)
 						  "OBTreeScanDownlinksPublishTrancheId");
 }
 
+
+/*
+ * Materialize the data chunk that `loc` points into for a partially-read leaf
+ * image (bitmap FETCH scan).
+ *
+ * For a whole-page image -- every non-fetch scan, the historical image, and any
+ * leaf we fully materialized because it carried undo -- leafPartial.isPartial
+ * is false and this is a no-op.  Otherwise it copies the chunk from the live
+ * shared page (rechecking the page change count); the chunk boundaries live in
+ * the hikeys chunk, which o_btree_try_read_page already loaded, so the
+ * locator's item offset is preserved.  A concurrent modification raises
+ * scan->leafPartialFailed and returns false, and the caller must abandon the
+ * partial image and re-read the current key range through an iterator (the
+ * bitmap fetch layer rechecks each tuple, so over-reading the range is safe).
+ */
+static inline bool
+seq_leaf_partial_ensure(BTreeSeqScan *scan, Page p, BTreePageItemLocator *loc)
+{
+	if (!scan->leafPartial.isPartial || p != scan->leafImg)
+		return true;
+
+	if (!partial_load_chunk(&scan->leafPartial, p, loc->chunkOffset, NULL))
+	{
+		scan->leafPartialFailed = true;
+		return false;
+	}
+	return true;
+}
 
 static void
 load_first_historical_page(BTreeSeqScan *scan)
@@ -629,6 +673,14 @@ scan_make_iterator(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRangeHigh)
 	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
 	scan->haveHistImg = false;
 	scan->iterEnd = keyRangeHigh;
+
+	/*
+	 * The iterator produces tuples directly; the partial leaf image (if any)
+	 * is abandoned, so make on-demand chunk loads inert until the next leaf
+	 * read.
+	 */
+	scan->leafPartial.isPartial = false;
+	scan->leafPartialFailed = false;
 }
 
 /* Output item downlink and key using provided page and current locator */
@@ -987,9 +1039,26 @@ iterate_internal_page(BTreeSeqScan *scan)
 			else if (DOWNLINK_IS_IN_MEMORY(downlink))
 			{
 				ReadPageResult result;
+				PartialPageState *leafPartial = NULL;
 
 				if (scan->poscan)
 					pg_atomic_fetch_sub_u32(&scan->poscan->downlinksWritersInProgress, 1);
+
+				if (scan->fetch)
+				{
+					/*
+					 * Read the leaf partially: only the chunks the bitmap's
+					 * key-driven walk actually visits are copied from the
+					 * live shared page (on demand, via
+					 * seq_leaf_partial_ensure).
+					 */
+					scan->leafPartial.isPartial = true;
+					scan->leafPartial.hikeysChunkIsLoaded = false;
+					memset(scan->leafPartial.chunkIsLoaded, 0,
+						   sizeof(scan->leafPartial.chunkIsLoaded));
+					scan->leafPartialFailed = false;
+					leafPartial = &scan->leafPartial;
+				}
 
 				result = o_btree_try_read_page(scan->desc,
 											   DOWNLINK_GET_IN_MEMORY_BLKNO(downlink),
@@ -998,7 +1067,7 @@ iterate_internal_page(BTreeSeqScan *scan)
 											   scan->context.imgReadCsn,
 											   NULL,
 											   BTreeKeyNone,
-											   NULL,
+											   leafPartial,
 											   true,
 											   NULL);
 
@@ -1007,6 +1076,31 @@ iterate_internal_page(BTreeSeqScan *scan)
 					check_in_memory_leaf_page(scan, scan->keyRangeLow.tuple, scan->keyRangeHigh.tuple);
 					if (scan->iter)
 						return true;
+
+					/*
+					 * A leaf carrying historical/undo data is read whole: the
+					 * historical merge in btree_seq_scan_getnext_internal()
+					 * and load_first_historical_page() walk leaf items
+					 * directly and seed histImg with the full page.
+					 * o_btree_try_read_page() already materialized the page
+					 * for its own undo replay when imgReadCsn required it;
+					 * materialize explicitly against the scan snapshot too so
+					 * a partial image never reaches those paths.  A
+					 * concurrent change during materialization falls back to
+					 * an iterator over the current key range.
+					 */
+					if (leafPartial && scan->leafPartial.isPartial &&
+						COMMITSEQNO_IS_NORMAL(scan->oSnapshot.csn) &&
+						((BTreePageHeader *) scan->leafImg)->csn >= scan->oSnapshot.csn)
+					{
+						if (!partial_load_full_page(&scan->leafPartial, scan->leafImg))
+						{
+							scan_make_iterator(scan, scan->keyRangeLow.tuple,
+											   scan->keyRangeHigh.tuple);
+							Assert(scan->iter);
+							return true;
+						}
+					}
 
 					scan->hint.blkno = DOWNLINK_GET_IN_MEMORY_BLKNO(downlink);
 					scan->hint.pageChangeCount = DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(downlink);
@@ -1302,6 +1396,17 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	scan->iter = NULL;
 	scan->cb = cb;
 	scan->arg = arg;
+
+	/*
+	 * A bitmap scan (callbacks with getNextKey) that isn't parallel drives a
+	 * key-directed walk of each leaf, so we can read leaves partially.  See
+	 * the comment on BTreeSeqScan.fetch.
+	 */
+	scan->fetch = (cb != NULL && cb->getNextKey != NULL && poscan == NULL);
+	scan->leafPartial.isPartial = false;
+	scan->leafPartial.src = NULL;
+	scan->leafPartialFailed = false;
+
 	scan->firstPageIsLoaded = false;
 	scan->intStartOffset = 0;
 	scan->samplingNumber = 0;
@@ -1380,6 +1485,8 @@ adjust_location_with_next_key(BTreeSeqScan *scan,
 	if (!BTREE_PAGE_LOCATOR_IS_VALID(p, loc))
 		return false;
 
+	if (!seq_leaf_partial_ensure(scan, p, loc))
+		return false;
 	BTREE_PAGE_READ_LEAF_TUPLE(key, p, loc);
 
 	cmp = o_btree_cmp(desc, &key, BTreeKeyLeafTuple,
@@ -1410,6 +1517,14 @@ adjust_location_with_next_key(BTreeSeqScan *scan,
 
 	while (BTREE_PAGE_LOCATOR_IS_VALID(p, loc))
 	{
+		/*
+		 * The chunk-skip loop above navigates via chunk hikeys (in the loaded
+		 * hikeys chunk), and BTREE_PAGE_LOCATOR_NEXT below can step across a
+		 * chunk boundary when nextKey falls in the gap between a chunk's last
+		 * item and its hikey; materialize the current chunk before reading.
+		 */
+		if (!seq_leaf_partial_ensure(scan, p, loc))
+			return false;
 		BTREE_PAGE_READ_LEAF_TUPLE(key, p, loc);
 		cmp = o_btree_cmp(desc,
 						  &key, BTreeKeyLeafTuple,
@@ -1439,7 +1554,11 @@ apply_next_key(BTreeSeqScan *scan)
 					histResult;
 
 		if (BTREE_PAGE_LOCATOR_IS_VALID(scan->leafImg, &scan->leafLoc))
+		{
+			if (!seq_leaf_partial_ensure(scan, scan->leafImg, &scan->leafLoc))
+				return;
 			BTREE_PAGE_READ_LEAF_TUPLE(key, scan->leafImg, &scan->leafLoc);
+		}
 		else
 			O_TUPLE_SET_NULL(key);
 
@@ -1611,6 +1730,24 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 		if (scan->cb && scan->cb->getNextKey &&
 			BTREE_PAGE_LOCATOR_IS_VALID(scan->leafImg, &scan->leafLoc))
 			apply_next_key(scan);
+
+		if (scan->leafPartialFailed)
+		{
+			/*
+			 * A partial leaf chunk load lost its race with a concurrent page
+			 * modification.  Abandon the partial image and re-read the
+			 * current downlink's key range through an iterator; the bitmap
+			 * fetch layer rechecks every tuple, so over-reading the range is
+			 * safe.
+			 */
+			scan->leafPartialFailed = false;
+			scan_make_iterator(scan, scan->keyRangeLow.tuple,
+							   scan->keyRangeHigh.tuple);
+			tuple = btree_seq_scan_get_tuple_from_iterator(scan, tupleCsn, hint);
+			if (!O_TUPLE_IS_NULL(tuple))
+				return tuple;
+			continue;
+		}
 
 		if (!BTREE_PAGE_LOCATOR_IS_VALID(scan->leafImg, &scan->leafLoc))
 		{
