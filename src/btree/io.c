@@ -1502,8 +1502,7 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 void
 load_page(OBTreeFindPageContext *context)
 {
-	OrioleDBPageDesc *parent_page_desc,
-			   *page_desc;
+	OrioleDBPageDesc *page_desc;
 	BTreeDescr *desc = context->desc;
 	OInMemoryBlkno parent_blkno;
 	Page		parent_page;
@@ -1564,7 +1563,6 @@ load_page(OBTreeFindPageContext *context)
 
 	Assert(OInMemoryBlknoIsValid(blkno));
 	page = O_GET_IN_MEMORY_PAGE(blkno);
-	parent_page_desc = O_GET_IN_MEMORY_PAGEDESC(parent_blkno);
 	page_desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
 
 	page_desc->flags = 0;
@@ -1586,8 +1584,18 @@ load_page(OBTreeFindPageContext *context)
 
 	put_page_image(blkno, buf);
 	ppool_ucm_init(desc->ppool, blkno);
-	page_desc->type = parent_page_desc->type;
-	page_desc->oids = parent_page_desc->oids;
+
+	/*
+	 * Stamp the page's identity from the descriptor of the tree we are
+	 * descending, not from the parent's page descriptor: the parent was
+	 * unlocked above and may have been evicted/reused (potentially by the
+	 * reentrant eviction inside ppool_alloc_page() just above), in which case
+	 * its page descriptor's oids would be invalid (0,0,0) or belong to
+	 * another tree.  The loaded page belongs to desc, so use desc's oids/type
+	 * -- which is exactly what init_new_btree_page() does.
+	 */
+	page_desc->type = desc->type;
+	page_desc->oids = desc->oids;
 
 	Assert(O_PAGE_IS(page, LEAF) ||
 		   (PAGE_GET_N_ONDISK(page) == BTREE_PAGE_ITEMS_COUNT(page)));
