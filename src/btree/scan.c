@@ -102,6 +102,32 @@ struct BTreeSeqScan
 	bool		leafPartialFailed;
 
 	/*
+	 * FETCH-mode partial read of the level-1 internal page.  When `fetch` is
+	 * set the internal page is read partially into scan->context.img via
+	 * scan->context.partial (find_page FETCH mode): only the hikeys chunk
+	 * plus the chunks holding downlinks the bitmap walk actually visits are
+	 * materialized.  The bitmap-driven walk skips whole chunks of downlinks
+	 * via their chunk hikeys (get_next_downlink ->
+	 * internal_skip_to_next_key), exactly mirroring the leaf's
+	 * adjust_location_with_next_key(). intPartialFailed is raised when an
+	 * on-demand chunk load loses the race with a concurrent page
+	 * modification; load_next_internal_page then re-reads the whole page
+	 * (IMAGE) and the walk continues on the full image.
+	 */
+	bool		intPartialFailed;
+
+	/*
+	 * High key of the last downlink get_next_downlink() returned (the low
+	 * bound of where the walk should resume).  When an on-demand
+	 * internal-chunk load fails mid-walk, get_next_downlink() re-reads the
+	 * internal page whole (IMAGE) by descending to this key, so
+	 * already-returned downlinks are not revisited.  haveIntResumeKey is
+	 * false before the first downlink of a scan.
+	 */
+	bool		haveIntResumeKey;
+	OFixedKey	intResumeKey;
+
+	/*
 	 * Key of the last leaf tuple emitted from the current partially-read leaf
 	 * (valid only while haveLastLeafKey).  When a partial chunk load loses
 	 * the race with a concurrent modification after some tuples of the leaf
@@ -264,6 +290,48 @@ seq_leaf_partial_ensure(BTreeSeqScan *scan, Page p, BTreePageItemLocator *loc)
 	return true;
 }
 
+/*
+ * Materialize the hikeys chunk of the partially-read internal page (bitmap
+ * FETCH scan).  The chunk-descriptor array and the chunk hikeys used to skip
+ * downlinks live in it.  No-op for a whole-page image.  Sets
+ * scan->intPartialFailed and returns false on a concurrent modification.
+ */
+static inline bool
+seq_int_partial_ensure_hikeys(BTreeSeqScan *scan)
+{
+	if (!scan->context.partial.isPartial ||
+		scan->context.partial.hikeysChunkIsLoaded)
+		return true;
+
+	if (!partial_load_hikeys_chunk(&scan->context.partial, scan->context.img))
+	{
+		scan->intPartialFailed = true;
+		return false;
+	}
+	return true;
+}
+
+/*
+ * Materialize the data chunk that `loc` points into for the partially-read
+ * internal page in scan->context.img.  No-op for a whole-page image (every
+ * parallel scan and any page re-read in IMAGE mode after a partial failure).
+ * Sets scan->intPartialFailed and returns false on a concurrent modification.
+ */
+static inline bool
+seq_int_partial_ensure(BTreeSeqScan *scan, BTreePageItemLocator *loc)
+{
+	if (!scan->context.partial.isPartial)
+		return true;
+
+	if (!partial_load_chunk(&scan->context.partial, scan->context.img,
+							loc->chunkOffset, NULL))
+	{
+		scan->intPartialFailed = true;
+		return false;
+	}
+	return true;
+}
+
 static void
 load_first_historical_page(BTreeSeqScan *scan)
 {
@@ -414,24 +482,89 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 
 	CHECK_FOR_INTERRUPTS();
 	elog(DEBUG3, "load_next_internal_page");
-	scan->context.flags |= BTREE_PAGE_FIND_DOWNLINK_LOCATION;
 
-	if (!O_TUPLE_IS_NULL(prevHikey))
+	/*
+	 * A non-parallel bitmap (FETCH) scan reads the level-1 internal page
+	 * partially: find_page() in FETCH mode leaves it in scan->context.img
+	 * with scan->context.partial tracking the loaded chunks, and the
+	 * bitmap-driven walk below skips whole chunks of downlinks it does not
+	 * need.  Parallel scans (page != NULL) share the whole page through DSM,
+	 * and a page whose partial read lost a race (intPartialFailed) is re-read
+	 * whole; both use IMAGE.  The retry loop below re-reads whole if
+	 * materializing the hikeys chunk (needed to iterate/skip) loses a race
+	 * after the partial read.
+	 */
+	while (true)
 	{
-		STOPEVENT(STOPEVENT_SEQ_SCAN_LOAD_INTERNAL_PAGE,
-				  btree_lokey_stopevent_params(scan->desc, prevHikey, prevIsLeftmostOrNone));
-		findResult = find_page(&scan->context, &prevHikey, BTreeKeyNonLeafKey, 1);
+		bool		useFetch = scan->fetch && !page && !scan->intPartialFailed;
+
+		if (useFetch)
+		{
+			BTREE_PAGE_FIND_UNSET(&scan->context, IMAGE);
+			BTREE_PAGE_FIND_SET(&scan->context, FETCH);
+		}
+		else
+		{
+			BTREE_PAGE_FIND_UNSET(&scan->context, FETCH);
+			BTREE_PAGE_FIND_SET(&scan->context, IMAGE);
+		}
+		scan->context.flags |= BTREE_PAGE_FIND_DOWNLINK_LOCATION;
+
+		if (!O_TUPLE_IS_NULL(prevHikey))
+		{
+			STOPEVENT(STOPEVENT_SEQ_SCAN_LOAD_INTERNAL_PAGE,
+					  btree_lokey_stopevent_params(scan->desc, prevHikey, prevIsLeftmostOrNone));
+			findResult = find_page(&scan->context, &prevHikey, BTreeKeyNonLeafKey, 1);
+		}
+		else
+		{
+			findResult = find_page(&scan->context, NULL, BTreeKeyNone, 1);
+		}
+		Assert(findResult == OFindPageResultSuccess);
+
+		if (scan->context.partial.isPartial)
+		{
+			/*
+			 * find_page() returns a page below targetLevel when the tree is
+			 * shallower than requested (a single leaf, no level-1 page).  The
+			 * level-0 branch below copies the whole page into leafImg, so
+			 * re-read it in IMAGE mode.  (The fixed page header is
+			 * materialized by the partial read, so PAGE_GET_LEVEL is valid
+			 * here.)
+			 */
+			if (PAGE_GET_LEVEL(scan->context.img) != 1)
+			{
+				scan->intPartialFailed = true;
+				continue;
+			}
+
+			/*
+			 * A partial read needs the hikeys chunk materialized before we
+			 * touch item offsets, iterate, or skip.  If that loses a race
+			 * with a concurrent modification, fall back to a whole-page IMAGE
+			 * read.
+			 */
+			if (!seq_int_partial_ensure_hikeys(scan))
+			{
+				Assert(scan->intPartialFailed);
+				continue;
+			}
+		}
+		break;
 	}
-	else
-	{
-		findResult = find_page(&scan->context, NULL, BTreeKeyNone, 1);
-	}
-	Assert(findResult == OFindPageResultSuccess);
+
+	/*
+	 * The page is now consistently loaded (partially in FETCH, whole after an
+	 * IMAGE fallback).  Clear the failure latch so the next page can be tried
+	 * partially again.
+	 */
+	scan->intPartialFailed = false;
 
 	/* In case of parallel scan copy page image into shared state */
 	if (page)
 	{
 		Assert(scan->poscan);
+		Assert(!scan->context.partial.isPartial);
 		memcpy(page, scan->context.img, ORIOLEDB_BLCKSZ);
 	}
 	else
@@ -731,6 +864,18 @@ get_current_downlink_key(BTreeSeqScan *scan,
 	BTreeNonLeafTuphdr *tuphdr;
 	OTuple		tuple;
 
+	/*
+	 * Partial FETCH read of the internal page: materialize the chunk holding
+	 * this downlink before reading it.  On a concurrent modification bail
+	 * with intPartialFailed set; get_next_downlink() re-reads the page whole.
+	 */
+	if (!seq_int_partial_ensure(scan, loc))
+	{
+		*downlink = 0;
+		clear_fixed_key(curKey);
+		return;
+	}
+
 	STOPEVENT(STOPEVENT_STEP_DOWN, btree_downlink_stopevent_params(scan->desc,
 																   page, loc));
 
@@ -763,11 +908,90 @@ get_next_key(BTreeSeqScan *scan, BTreePageItemLocator *intLoc, OFixedKey *nextKe
 {
 	BTREE_PAGE_LOCATOR_NEXT(page, intLoc);
 	if (BTREE_PAGE_LOCATOR_IS_VALID(page, intLoc))
+	{
+		/*
+		 * The chunk-descriptor array in the (loaded) hikeys chunk lets
+		 * BTREE_PAGE_LOCATOR_NEXT step across a chunk boundary without the
+		 * data chunk; materialize the landed chunk before reading its key.
+		 */
+		if (!seq_int_partial_ensure(scan, intLoc))
+		{
+			clear_fixed_key(nextKey);
+			return;
+		}
 		copy_fixed_page_key(scan->desc, nextKey, page, intLoc);
+	}
 	else if (!O_PAGE_IS(page, RIGHTMOST))
 		copy_fixed_hikey(scan->desc, nextKey, page);
 	else
 		clear_fixed_key(nextKey);
+}
+
+/*
+ * Bitmap FETCH within-page skip.  On entry scan->intLoc points at the downlink
+ * immediately following the one just returned (its low bound is `boundary`).
+ * Advance scan->intLoc to the downlink covering the next bitmap key at or after
+ * `boundary`, skipping whole chunks of unwanted downlinks -- btree_page_search()
+ * jumps via the chunk hikeys and materializes only the target chunk, so the
+ * skipped chunks are never copied out of the shared page.  Mirrors the leaf's
+ * adjust_location_with_next_key().
+ *
+ * Leaves scan->intLoc invalid (caller loads/descends to the next page) when the
+ * next wanted key is beyond this page's hikey or the bitmap is exhausted.  On a
+ * concurrent modification sets scan->intPartialFailed and returns; scan->intLoc
+ * is then unusable and the next get_next_downlink() call re-reads the page whole
+ * before touching it.
+ */
+static void
+internal_skip_to_next_key(BTreeSeqScan *scan, Page page,
+						  BTreePageItemLocator *intLoc, OTuple boundary)
+{
+	OFixedKey	probe;
+
+	/* A leftmost gap has no key to probe with; fall back to sequential. */
+	if (O_TUPLE_IS_NULL(boundary))
+		return;
+
+	copy_fixed_key(scan->desc, &probe, boundary);
+	if (!scan->cb->getNextPageKey(&probe, scan->arg))
+	{
+		/* Nothing left in the bitmap anywhere. */
+		BTREE_PAGE_LOCATOR_SET_INVALID(intLoc);
+		return;
+	}
+
+	/* Beyond this page: let the caller descend to the covering page. */
+	if (!O_PAGE_IS(page, RIGHTMOST))
+	{
+		OFixedKey	hikey;
+
+		copy_fixed_hikey(scan->desc, &hikey, page);
+		if (o_btree_cmp(scan->desc, &probe.tuple, BTreeKeyNonLeafKey,
+						&hikey.tuple, BTreeKeyNonLeafKey) >= 0)
+		{
+			BTREE_PAGE_LOCATOR_SET_INVALID(intLoc);
+			return;
+		}
+	}
+
+	/*
+	 * Within this page: position intLoc on the downlink covering the key.
+	 * btree_page_search() lands one past the covering downlink (on the first
+	 * separator strictly greater than the key), so step back and materialize
+	 * the landed chunk -- exactly as page_find_downlink() does during
+	 * descent.
+	 */
+	if (!btree_page_search(scan->desc, page, (Pointer) &probe.tuple,
+						   BTreeKeyNonLeafKey, &scan->context.partial, intLoc))
+	{
+		scan->intPartialFailed = true;
+		return;
+	}
+	BTREE_PAGE_LOCATOR_PREV(page, intLoc);
+	if (scan->context.partial.isPartial &&
+		!partial_load_chunk(&scan->context.partial, page, intLoc->chunkOffset,
+							NULL))
+		scan->intPartialFailed = true;
 }
 
 /*
@@ -872,6 +1096,35 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				}
 			}
 
+			/*
+			 * A prior call's within-page skip lost the race with a concurrent
+			 * modification after it had already returned its downlink,
+			 * leaving scan->intLoc unusable.  Re-read the internal page whole
+			 * (IMAGE) by descending to the resume boundary before touching
+			 * it; load_next_internal_page() clears intPartialFailed and lands
+			 * scan->intLoc on the downlink covering intResumeKey.
+			 */
+			if (pageIsLoaded && scan->intPartialFailed)
+			{
+				OTuple		resumeKey;
+
+				if (scan->haveIntResumeKey)
+					resumeKey = scan->intResumeKey.tuple;
+				else
+					O_TUPLE_SET_NULL(resumeKey);
+
+				if (!load_next_internal_page(scan, resumeKey, NULL,
+											 &scan->intLoc, &scan->intStartOffset,
+											 true, true))
+				{
+					scan->isSingleLeafPage = true;
+					clear_fixed_key(keyRangeLow);
+					clear_fixed_key(keyRangeHigh);
+					return false;
+				}
+				Assert(!scan->intPartialFailed);
+			}
+
 			if (BTREE_PAGE_LOCATOR_IS_VALID(scan->context.img, &scan->intLoc))
 			{
 				get_current_downlink_key(scan, &scan->intLoc, scan->intStartOffset,
@@ -882,7 +1135,54 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				 * construct fixed hikey of internal item and get next
 				 * internal locator
 				 */
-				get_next_key(scan, &scan->intLoc, keyRangeHigh, scan->context.img);
+				if (!scan->intPartialFailed)
+					get_next_key(scan, &scan->intLoc, keyRangeHigh, scan->context.img);
+
+				if (scan->intPartialFailed)
+				{
+					/*
+					 * A partial chunk load for the current downlink lost the
+					 * race.  Re-read the page whole from the resume boundary
+					 * and recompute this downlink (it has not been returned
+					 * yet).
+					 */
+					OTuple		resumeKey;
+
+					if (scan->haveIntResumeKey)
+						resumeKey = scan->intResumeKey.tuple;
+					else
+						O_TUPLE_SET_NULL(resumeKey);
+
+					if (!load_next_internal_page(scan, resumeKey, NULL,
+												 &scan->intLoc, &scan->intStartOffset,
+												 true, true))
+					{
+						scan->isSingleLeafPage = true;
+						clear_fixed_key(keyRangeLow);
+						clear_fixed_key(keyRangeHigh);
+						return false;
+					}
+					Assert(!scan->intPartialFailed);
+					continue;
+				}
+
+				/* Remember where the walk resumes (this downlink's high key). */
+				scan->haveIntResumeKey = !O_TUPLE_IS_NULL(keyRangeHigh->tuple);
+				if (scan->haveIntResumeKey)
+					copy_fixed_key(scan->desc, &scan->intResumeKey,
+								   keyRangeHigh->tuple);
+
+				/*
+				 * Bitmap-driven within-page skip: advance scan->intLoc
+				 * straight to the downlink covering the next wanted key,
+				 * skipping whole chunks of downlinks the bitmap does not
+				 * need.
+				 */
+				if (scan->fetch && scan->cb && scan->cb->getNextPageKey &&
+					BTREE_PAGE_LOCATOR_IS_VALID(scan->context.img, &scan->intLoc))
+					internal_skip_to_next_key(scan, scan->context.img,
+											  &scan->intLoc, keyRangeHigh->tuple);
+
 				return true;
 			}
 
@@ -1502,6 +1802,8 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	scan->leafPartialFailed = false;
 	scan->haveLastLeafKey = false;
 	scan->iterSkipKey = false;
+	scan->intPartialFailed = false;
+	scan->haveIntResumeKey = false;
 
 	scan->firstPageIsLoaded = false;
 	scan->intStartOffset = 0;

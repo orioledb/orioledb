@@ -913,27 +913,45 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 		 * to leafLokey for the leaf case (targetLevel == 0); otherwise fall
 		 * through to context->lokey.
 		 */
-		if (keepLokeyFlag && level > targetLevel &&
-			BTREE_PAGE_LOCATOR_GET_OFFSET(intCxt.pagePtr, &loc) > 0)
+		if (keepLokeyFlag && level > targetLevel)
 		{
 			OTuple		lokey;
 
-			Assert(nonLeafHdr);
+			/*
+			 * A FETCH-mode descent locates the downlink via the fastpath,
+			 * which does not materialize parentImg
+			 * (can_fastpath_find_downlink() only enables the fastpath in
+			 * FETCH mode).  The offset check and the lokey read below both
+			 * touch parentImg -- the offset needs the hikeys chunk (chunk
+			 * descriptors) and the read needs the chunk holding `loc` -- so
+			 * materialize them.  This is a no-op when the parent was read
+			 * whole (IMAGE/MODIFY disable the fastpath) or the chunk is
+			 * already loaded; a lost race re-descends from the top.
+			 */
+			if (context->parentPartial.isPartial &&
+				intCxt.pagePtr == context->parentImg &&
+				!convert_fastpath_parent_to_img(context, &loc))
+				continue;
 
-			BTREE_PAGE_READ_INTERNAL_TUPLE(lokey, intCxt.pagePtr, &loc);
-
-			if (level == targetLevel + 1 && targetLevel == 0)
-				copy_fixed_key(context->desc, &context->leafLokey, lokey);
-			else
+			if (BTREE_PAGE_LOCATOR_GET_OFFSET(intCxt.pagePtr, &loc) > 0)
 			{
-				copy_fixed_key(context->desc, &context->lokey, lokey);
-				BTREE_PAGE_FIND_SET(context, LOKEY_EXISTS);
-				BTREE_PAGE_FIND_UNSET(context, LOKEY_SIBLING);
-				BTREE_PAGE_FIND_UNSET(context, LOKEY_UNDO);
+				Assert(nonLeafHdr);
+
+				BTREE_PAGE_READ_INTERNAL_TUPLE(lokey, intCxt.pagePtr, &loc);
+
+				if (level == targetLevel + 1 && targetLevel == 0)
+					copy_fixed_key(context->desc, &context->leafLokey, lokey);
+				else
+				{
+					copy_fixed_key(context->desc, &context->lokey, lokey);
+					BTREE_PAGE_FIND_SET(context, LOKEY_EXISTS);
+					BTREE_PAGE_FIND_UNSET(context, LOKEY_SIBLING);
+					BTREE_PAGE_FIND_UNSET(context, LOKEY_UNDO);
+				}
 			}
 		}
 
-		if (level != targetLevel && (!imageFlag || level > targetLevel) && !nonLeafHdr)
+		if (level != targetLevel && ((!imageFlag && !fetchFlag) || level > targetLevel) && !nonLeafHdr)
 		{
 			Assert(tryFlag);
 			if (intCxt.haveLock)
@@ -944,7 +962,7 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			return OFindPageResultFailure;
 		}
 
-		if (level == targetLevel || (imageFlag && level <= targetLevel))
+		if (level == targetLevel || ((imageFlag || fetchFlag) && level <= targetLevel))
 		{
 			if (intCxt.haveLock)
 			{
