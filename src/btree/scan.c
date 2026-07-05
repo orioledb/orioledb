@@ -953,7 +953,7 @@ internal_skip_to_next_key(BTreeSeqScan *scan, Page page,
 		return;
 
 	copy_fixed_key(scan->desc, &probe, boundary);
-	if (!scan->cb->getNextPageKey(&probe, scan->arg))
+	if (!scan->cb->getNextKey(&probe, BTreeKeyNonLeafKey, true, scan->arg))
 	{
 		/* Nothing left in the bitmap anywhere. */
 		BTREE_PAGE_LOCATOR_SET_INVALID(intLoc);
@@ -1032,7 +1032,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				 * on-disk handling below, so the per-leaf FETCH walk still
 				 * applies.
 				 */
-				if (scan->cb && scan->cb->getNextPageKey)
+				if (scan->cb && scan->cb->getNextKey)
 				{
 					OFixedKey	jumpKey;
 
@@ -1041,7 +1041,8 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 					else
 						clear_fixed_key(&jumpKey);
 
-					if (!scan->cb->getNextPageKey(&jumpKey, scan->arg))
+					if (!scan->cb->getNextKey(&jumpKey, BTreeKeyNonLeafKey,
+											  true, scan->arg))
 					{
 						/* Nothing left in the bitmap. */
 						clear_fixed_key(keyRangeLow);
@@ -1178,7 +1179,7 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 				 * skipping whole chunks of downlinks the bitmap does not
 				 * need.
 				 */
-				if (scan->fetch && scan->cb && scan->cb->getNextPageKey &&
+				if (scan->fetch && scan->cb && scan->cb->getNextKey &&
 					BTREE_PAGE_LOCATOR_IS_VALID(scan->context.img, &scan->intLoc))
 					internal_skip_to_next_key(scan, scan->context.img,
 											  &scan->intLoc, keyRangeHigh->tuple);
@@ -1996,7 +1997,8 @@ apply_next_key(BTreeSeqScan *scan)
 
 		scan->nextKey.tuple = key;
 		if (O_TUPLE_IS_NULL(key) ||
-			!scan->cb->getNextKey(&scan->nextKey, true, scan->arg))
+			!scan->cb->getNextKey(&scan->nextKey, BTreeKeyLeafTuple, true,
+								  scan->arg))
 		{
 			BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
 			return;

@@ -31,18 +31,25 @@ typedef struct BTreeSeqScan BTreeSeqScan;
 typedef struct BTreeSeqScanCallbacks
 {
 	bool		(*isRangeValid) (OTuple low, OTuple high, void *arg);
-	bool		(*getNextKey) (OFixedKey *key, bool inclusive, void *arg);
 
 	/*
-	 * Optional (may be NULL).  Given the just-finished internal page's hikey
-	 * in key->tuple (an exclusive upper bound: every key on that page is less
-	 * than it; a NULL tuple means "from the start of the tree"), rewrite key
-	 * with the smallest key the scan still needs that is >= the hikey, as a
-	 * non-leaf key usable for a fresh descent.  Returns false when nothing is
-	 * left, letting the sequential scan skip whole internal pages that hold
-	 * no wanted keys instead of stepping through every one.
+	 * Rewrite key->tuple with the smallest key the scan still needs at or
+	 * after the position it carries (a NULL tuple means "from the start of
+	 * the tree"), returning false when nothing is left.
+	 *
+	 * keyType says how to interpret the incoming position and drives the
+	 * bitmap-directed walk at two levels: - BTreeKeyLeafTuple: the position
+	 * is the current leaf tuple; used by the per-tuple leaf walk. -
+	 * BTreeKeyNonLeafKey: the position is an internal-page boundary (a
+	 * downlink separator or page hikey, an exclusive upper bound); used to
+	 * skip whole internal pages / downlinks that hold no wanted keys and to
+	 * descend straight to the covering one.  Always called with inclusive.
+	 *
+	 * When inclusive is false the result is strictly greater than the
+	 * position.
 	 */
-	bool		(*getNextPageKey) (OFixedKey *key, void *arg);
+	bool		(*getNextKey) (OFixedKey *key, BTreeKeyType keyType,
+							   bool inclusive, void *arg);
 } BTreeSeqScanCallbacks;
 
 extern BTreeScanShmem *btreeScanShmem;
