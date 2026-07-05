@@ -322,9 +322,16 @@ o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock)
 	/*
 	 * Reset page header and descriptor.  Do this while holding a page lock in
 	 * order to prevent race condition with walk_page().
+	 *
+	 * Block reads before changing the identity: bumping pageChangeCount alone
+	 * lets a lockless reader observe the invalidated oids without the count
+	 * bump and slip past the change-count check.  page_block_reads() makes
+	 * unlock_page() bump the state change count, forcing such a reader to
+	 * retry (idempotent if the caller already blocked reads).
 	 */
 	if (!haveLock)
 		lock_page(blkno);
+	page_block_reads(blkno);
 	O_PAGE_CHANGE_COUNT_INC(p);
 	ORelOidsSetInvalid(page_desc->oids);
 	page_desc->type = 0;
