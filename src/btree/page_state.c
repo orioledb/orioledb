@@ -764,6 +764,16 @@ page_block_reads(OInMemoryBlkno blkno)
 	Assert((myLockedPages[i].state & PAGE_STATE_CHANGE_NON_WAITERS_MASK) ==
 		   (pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state)) & PAGE_STATE_CHANGE_NON_WAITERS_MASK));
 
+	/*
+	 * Idempotent: if reads are already blocked on this locked page, a
+	 * repeated call is a no-op.  Callers may legitimately double up -- e.g.
+	 * o_ppool_free_page() now blocks reads defensively on every free, which
+	 * can stack with a caller (such as free_page()) that already blocked
+	 * them.
+	 */
+	if (myLockedPages[i].state & PAGE_STATE_NO_READ_FLAG)
+		return;
+
 	state = pg_atomic_fetch_or_u64(&(O_PAGE_HEADER(p)->state), PAGE_STATE_NO_READ_FLAG);
 	Assert((state & PAGE_STATE_LOCKED_FLAG));
 	myLockedPages[i].state = state | PAGE_STATE_NO_READ_FLAG;
