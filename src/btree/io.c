@@ -3640,6 +3640,18 @@ try_to_punch_holes(BTreeDescr *desc)
 							errmsg("could not open file %s: %m", filename)));
 		file_size = FileSize(file);
 
+		/*
+		 * Each -N.tmp file is a self-contained list of freed block offsets
+		 * and must be read from its own offset 0.  Reset the read cursor /
+		 * byte counter for every file: when a single try_to_punch_holes()
+		 * call drains more than one checkpoint's tmp file (several
+		 * checkpoints accumulated undrained files), a stale len would seek
+		 * past the next file's EOF and trip the file_size != len check below.
+		 * (add_free_extents_from_tmp() declares len inside its loop for the
+		 * same reason.)
+		 */
+		len = 0;
+
 		while (true)
 		{
 			BlockNumber *cur_off;
