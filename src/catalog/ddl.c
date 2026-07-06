@@ -3007,7 +3007,7 @@ drop_bridge_index(Relation tbl, OTable *o_table)
 }
 
 static void
-cleanup_tablespace_dir(char *tablespace_path)
+cleanup_tablespace_dir(const char *tablespace_path)
 {
 	DIR		   *dir;
 	struct dirent *file;
@@ -3054,6 +3054,15 @@ cleanup_tablespace_dir(char *tablespace_path)
 						errmsg("unable to clean up orioledb tablespace: %m")));
 	}
 	closedir(dir);
+}
+
+static void
+cleanup_tablespace_dir_cb(Oid tablespace, const char *prefix,
+						  void *arg)
+{
+	if (tablespace == DEFAULTTABLESPACE_OID)
+		return;
+	cleanup_tablespace_dir(prefix);
 }
 
 /*
@@ -4563,64 +4572,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 	}
 	else if (access == OAT_DROP && classId == TableSpaceRelationId)
 	{
-		DIR		   *dir;
-		char		path[MAXPGPATH];
-		char		targetpath[MAXPGPATH];
-		struct dirent *file;
-
-#define PG_TBLSPC "pg_tblspc"
-
-		dir = opendir(PG_TBLSPC);
-		while (errno = 0, (file = readdir(dir)) != NULL)
-		{
-			struct stat st;
-			int			rllen;
-
-			/* Skip special stuff */
-			if (strcmp(file->d_name, ".") == 0 || strcmp(file->d_name, "..") == 0)
-				continue;
-
-			path[0] = '\0';
-			pg_snprintf(path, MAXPGPATH,
-						PG_TBLSPC "/%s/" TABLESPACE_VERSION_DIRECTORY,
-						file->d_name);
-			if (lstat(path, &st) < 0)
-			{
-				ereport(ERROR,
-						(errcode_for_file_access(),
-						 errmsg("could not stat file \"%s\": %m",
-								file->d_name)));
-			}
-
-			if (!S_ISLNK(st.st_mode))
-			{
-				strlcat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
-				cleanup_tablespace_dir(path);
-			}
-			else
-			{
-				rllen = readlink(path, targetpath, sizeof(targetpath));
-				if (rllen < 0)
-					ereport(ERROR,
-							(errcode_for_file_access(),
-							 errmsg("could not read symbolic link \"%s\": %m",
-									path)));
-				if (rllen >= sizeof(targetpath))
-					ereport(ERROR,
-							(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-							 errmsg("symbolic link \"%s\" target is too long",
-									path)));
-				targetpath[rllen] = '\0';
-
-				path[0] = '\0';
-				pg_snprintf(path, MAXPGPATH,
-							"%s/" ORIOLEDB_DATA_DIR,
-							targetpath);
-				cleanup_tablespace_dir(path);
-			}
-		}
-		closedir(dir);
-#undef PG_TBLSPC
+		o_tablespaces_foreach_prefix(cleanup_tablespace_dir_cb, NULL);
 	}
 
 #if PG_VERSION_NUM >= 180000
