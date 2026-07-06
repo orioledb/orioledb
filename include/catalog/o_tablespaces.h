@@ -17,4 +17,12 @@
 extern void o_get_prefixes_for_tablespace(Oid datoid, Oid tablespace,
 										  char **prefix, char **db_prefix);
 
+/* callback for o_tablespaces_foreach_prefix() */
+typedef void (*OTablespacesPrefixCallback) (Oid tablespace,
+											const char *prefix,
+											void *arg);
+
+extern void o_tablespaces_foreach_prefix(OTablespacesPrefixCallback callback,
+										 void *arg);
+
 #endif							/* __O_TABLESPACES_H__ */
