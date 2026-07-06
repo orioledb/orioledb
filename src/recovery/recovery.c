@@ -3671,7 +3671,7 @@ worker_wait_shutdown(RecoveryWorkerState *worker)
 }
 
 static void
-cleanup_tablespace_old_files(char *path, Oid tablespace, uint32 chkp_num,
+cleanup_tablespace_old_files(const char *path, Oid tablespace, uint32 chkp_num,
 							 bool before_recovery)
 {
 	DIR		   *dir,
@@ -3827,81 +3827,32 @@ cleanup_tablespace_old_files(char *path, Oid tablespace, uint32 chkp_num,
 	closedir(dir);
 }
 
+typedef struct CleanupOldFilesArg
+{
+	uint32		chkp_num;
+	bool		before_recovery;
+} CleanupOldFilesArg;
+
+static void
+cleanup_old_files_cb(Oid tablespace, const char *prefix, void *arg)
+{
+	CleanupOldFilesArg *c = (CleanupOldFilesArg *) arg;
+
+	cleanup_tablespace_old_files(prefix, tablespace, c->chkp_num,
+								 c->before_recovery);
+}
+
 void
 recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 {
-	DIR		   *dir;
-	char		path[MAXPGPATH];
-	char		targetpath[MAXPGPATH];
-	struct dirent *file;
-
-#define PG_TBLSPC "pg_tblspc"
+	CleanupOldFilesArg arg;
 
 	if (!before_recovery && chkp_num == 0)
 		return;
 
-	path[0] = '\0';
-	strlcat(path, ORIOLEDB_DATA_DIR, MAXPGPATH);
-	cleanup_tablespace_old_files(path, DEFAULTTABLESPACE_OID, chkp_num,
-								 before_recovery);
-
-	dir = opendir(PG_TBLSPC);
-	while (errno = 0, (file = readdir(dir)) != NULL)
-	{
-		struct stat st;
-		int			rllen;
-		Oid			tablespace;
-
-		/* Skip special stuff */
-		if (strcmp(file->d_name, ".") == 0 || strcmp(file->d_name, "..") == 0)
-			continue;
-
-		tablespace = pg_strtoint64(file->d_name);
-		Assert(OidIsValid(tablespace));
-
-		path[0] = '\0';
-		pg_snprintf(path, MAXPGPATH,
-					PG_TBLSPC "/%s/" TABLESPACE_VERSION_DIRECTORY,
-					file->d_name);
-		if (lstat(path, &st) < 0)
-		{
-			ereport(ERROR,
-					(errcode_for_file_access(),
-					 errmsg("could not stat file \"%s\": %m",
-							file->d_name)));
-		}
-
-		if (!S_ISLNK(st.st_mode))
-		{
-			strlcat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
-			cleanup_tablespace_old_files(path, tablespace, chkp_num,
-										 before_recovery);
-		}
-		else
-		{
-			rllen = readlink(path, targetpath, sizeof(targetpath));
-			if (rllen < 0)
-				ereport(ERROR,
-						(errcode_for_file_access(),
-						 errmsg("could not read symbolic link \"%s\": %m",
-								path)));
-			if (rllen >= sizeof(targetpath))
-				ereport(ERROR,
-						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-						 errmsg("symbolic link \"%s\" target is too long",
-								path)));
-			targetpath[rllen] = '\0';
-
-			path[0] = '\0';
-			pg_snprintf(path, MAXPGPATH,
-						"%s/" ORIOLEDB_DATA_DIR,
-						targetpath);
-			cleanup_tablespace_old_files(path, tablespace, chkp_num,
-										 before_recovery);
-		}
-	}
-	closedir(dir);
-#undef PG_TBLSPC
+	arg.chkp_num = chkp_num;
+	arg.before_recovery = before_recovery;
+	o_tablespaces_foreach_prefix(cleanup_old_files_cb, &arg);
 }
 
 static OIndexKey *

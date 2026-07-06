@@ -25,9 +25,16 @@
 #include "recovery/recovery.h"
 #include "utils/syscache.h"
 
+#include <sys/stat.h>
+#include <unistd.h>
+
 /* Silent cppcheck */
 #ifndef TABLESPACE_VERSION_DIRECTORY
 #define TABLESPACE_VERSION_DIRECTORY
+#endif
+
+#ifndef PG_TBLSPC_DIR
+#define PG_TBLSPC_DIR "pg_tblspc"
 #endif
 
 void
@@ -59,4 +66,76 @@ o_get_prefixes_for_tablespace(Oid datoid, Oid tablespace,
 		*prefix = pathbuf;
 	if (db_prefix)
 		*db_prefix = psprintf("%s/%u", pathbuf, datoid);
+}
+
+void
+o_tablespaces_foreach_prefix(OTablespacesPrefixCallback callback, void *arg)
+{
+	DIR		   *dir;
+	char		path[MAXPGPATH];
+	char		targetpath[MAXPGPATH];
+	struct dirent *file;
+	struct stat st;
+	int			rllen;
+	Oid			tablespace;
+
+	path[0] = '\0';
+	strlcat(path, ORIOLEDB_DATA_DIR, MAXPGPATH);
+	callback(DEFAULTTABLESPACE_OID, path, arg);
+
+	dir = opendir(PG_TBLSPC_DIR);
+	if (dir == NULL)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not open directory \"%s\": %m",
+						PG_TBLSPC_DIR)));
+
+	while (errno = 0, (file = readdir(dir)) != NULL)
+	{
+		if (strcmp(file->d_name, ".") == 0 ||
+			strcmp(file->d_name, "..") == 0)
+			continue;
+
+		tablespace = pg_strtoint64(file->d_name);
+		Assert(OidIsValid(tablespace));
+
+		path[0] = '\0';
+		pg_snprintf(path, MAXPGPATH,
+					PG_TBLSPC_DIR "/%s/" TABLESPACE_VERSION_DIRECTORY,
+					file->d_name);
+		if (lstat(path, &st) < 0)
+		{
+			ereport(ERROR,
+					(errcode_for_file_access(),
+					 errmsg("could not stat file \"%s\": %m",
+							file->d_name)));
+		}
+
+		if (!S_ISLNK(st.st_mode))
+		{
+			strlcat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
+		}
+		else
+		{
+			rllen = readlink(path, targetpath, sizeof(targetpath));
+			if (rllen < 0)
+				ereport(ERROR,
+						(errcode_for_file_access(),
+						 errmsg("could not read symbolic link \"%s\": %m",
+								path)));
+			if (rllen >= (int) sizeof(targetpath))
+				ereport(ERROR,
+						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+						 errmsg("symbolic link \"%s\" target is too long",
+								path)));
+			targetpath[rllen] = '\0';
+
+			path[0] = '\0';
+			pg_snprintf(path, MAXPGPATH,
+						"%s/" ORIOLEDB_DATA_DIR,
+						targetpath);
+		}
+		callback(tablespace, path, arg);
+	}
+	closedir(dir);
 }
