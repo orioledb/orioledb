@@ -24,6 +24,7 @@
 #include "catalog/indices.h"
 #include "catalog/o_indices.h"
 #include "catalog/o_sys_cache.h"
+#include "catalog/o_tablespaces.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
 #include "recovery/internal.h"

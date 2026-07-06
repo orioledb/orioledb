@@ -17,7 +17,7 @@
 #include "orioledb.h"
 
 #include "btree/io.h"
-#include "catalog/o_sys_cache.h"
+#include "catalog/o_tablespaces.h"
 #include "s3/checksum.h"
 #include "s3/headers.h"
 #include "s3/queue.h"
