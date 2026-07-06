@@ -20,6 +20,7 @@
 
 #include "btree/btree.h"
 #include "btree/io.h"
+#include "catalog/o_tablespaces.h"
 #include "checkpoint/checkpoint.h"
 #include "s3/headers.h"
 #include "s3/worker.h"

@@ -1,13 +1,13 @@
 /*-------------------------------------------------------------------------
  *
- * o_tablespace_cache.c
- * 		Routines to get tablespace path for relnode
+ * o_tablespaces.c
+ * 		Tablespace data directory routines
  *
  * Copyright (c) 2021-2026, Oriole DB Inc.
  * Copyright (c) 2025-2026, Supabase Inc.
  *
  * IDENTIFICATION
- *	  contrib/orioledb/src/catalog/o_tablespace_cache.c
+ *	  contrib/orioledb/src/catalog/o_tablespaces.c
  *
  *-------------------------------------------------------------------------
  */
@@ -17,7 +17,7 @@
 #include "orioledb.h"
 
 #include "btree/undo.h"
-#include "catalog/o_sys_cache.h"
+#include "catalog/o_tablespaces.h"
 #include "tableam/descr.h"
 
 #include "catalog/pg_tablespace_d.h"
