@@ -355,11 +355,6 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 	if (!result)
 		return false;
 
-	if (ostate->iterator != NULL)
-	{
-		btree_iterator_free(ostate->iterator);
-		ostate->iterator = NULL;
-	}
 
 	oldcontext = MemoryContextSwitchTo(ostate->cxt);
 	ostate->exact = o_key_data_to_key_range(&ostate->curKeyRange,
@@ -375,9 +370,18 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 		bound = (ostate->scanDir == ForwardScanDirection
 				 ? &ostate->curKeyRange.low
 				 : &ostate->curKeyRange.high);
-		ostate->iterator = o_btree_iterator_create(&indexDescr->desc, (Pointer) bound,
-												   BTreeKeyBound, &ostate->oSnapshot,
-												   ostate->scanDir);
+
+		/* Re-use the existing iterator when possible */
+		if (!ostate->iterator)
+			ostate->iterator = o_btree_iterator_create(&indexDescr->desc,
+													   (Pointer) bound,
+													   BTreeKeyBound,
+													   &ostate->oSnapshot,
+													   ostate->scanDir);
+		else
+			o_btree_iterator_advance(ostate->iterator,
+									 (Pointer) bound,
+									 BTreeKeyBound);
 		o_btree_iterator_set_tuple_ctx(ostate->iterator, tupleCxt);
 	}
 
@@ -415,10 +419,32 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 			if (hint)
 				hint->blkno = OInvalidInMemoryBlkno;
 
-			tup = o_btree_find_tuple_by_key(&indexDescr->desc,
-											&ostate->curKeyRange.low,
-											BTreeKeyBound, &ostate->oSnapshot,
-											tupleCsn, tupleCxt, hint);
+			if (!so->numArrayKeys)
+			{
+				tup = o_btree_find_tuple_by_key(&indexDescr->desc,
+												&ostate->curKeyRange.low,
+												BTreeKeyBound, &ostate->oSnapshot,
+												tupleCsn, tupleCxt, hint);
+			}
+			else
+			{
+				if (!ostate->iterator)
+				{
+					tup = o_btree_find_tuples_start(&indexDescr->desc,
+													&ostate->curKeyRange.low,
+													BTreeKeyBound, &ostate->oSnapshot,
+													ostate->scanDir,
+													tupleCsn, tupleCxt, hint,
+													NULL, NULL, NULL, &ostate->iterator);
+				}
+				else
+				{
+					tup = o_btree_find_tuples_continue(ostate->iterator,
+													   &ostate->curKeyRange.low,
+													   BTreeKeyBound,
+													   tupleCsn, hint, NULL);
+				}
+			}
 			if (!O_TUPLE_IS_NULL(tup))
 				tup_fetched = true;
 		}
@@ -516,8 +542,6 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 				/* cppcheck-suppress uninitvar */
 				return tup;
 			}
-
-			_bt_start_array_keys(&ostate->scandesc, ForwardScanDirection);
 		}
 		_bt_preprocess_keys(&ostate->scandesc);
 		ostate->numPrefixExactKeys =
