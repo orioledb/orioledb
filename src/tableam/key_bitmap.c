@@ -225,6 +225,26 @@ o_keybitmap_test_key(OKeyBitmap *bm, const uint8 *key)
 	return okbmf_find(bm->ftree, k) != NULL;
 }
 
+/*
+ * Insert key and report whether it was newly added.  Used as a dedup
+ * test-and-set while streaming a BitmapOr of primary scans: a true return
+ * means this is the first time the key is seen (emit it), false means a prior
+ * branch already produced it (skip).
+ */
+bool
+o_keybitmap_emit_key(OKeyBitmap *bm, const uint8 *key)
+{
+	okbmf_key	k = okbmf_mkkey(key);
+	OKbmDummy	dummy = {0};
+
+	Assert(bm->fixed);
+	if (okbmf_find(bm->ftree, k) != NULL)
+		return false;
+	(void) okbmf_set(bm->ftree, k, &dummy);
+	bm->finalized = false;
+	return true;
+}
+
 void
 o_keybitmap_insert(OKeyBitmap *bm, uint64 value)
 {
@@ -257,6 +277,33 @@ o_keybitmap_test(OKeyBitmap *bm, uint64 value)
 		return false;
 
 	return (entry->bitmap[offset >> 3] & (1 << (offset & 7))) != 0;
+}
+
+/* uint64 variant of o_keybitmap_emit_key(): insert, return true if newly added. */
+bool
+o_keybitmap_emit(OKeyBitmap *bm, uint64 value)
+{
+	uint64		chunk = value >> OKBM_CHUNK_BITS;
+	int			offset = value & OKBM_LOW_MASK;
+	int			byte = offset >> 3;
+	uint8		mask = 1 << (offset & 7);
+	OKeyBitmapChunk *entry = okbm_find(bm->tree, chunk);
+
+	if (entry == NULL)
+	{
+		OKeyBitmapChunk newentry;
+
+		memset(&newentry, 0, sizeof(newentry));
+		newentry.bitmap[byte] |= mask;
+		(void) okbm_set(bm->tree, chunk, &newentry);
+		bm->finalized = false;
+		return true;
+	}
+	if (entry->bitmap[byte] & mask)
+		return false;
+	entry->bitmap[byte] |= mask;
+	bm->finalized = false;
+	return true;
 }
 
 bool
