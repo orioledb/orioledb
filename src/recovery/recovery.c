@@ -3946,7 +3946,7 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 
 	arg.chkp_num = chkp_num;
 	arg.before_recovery = before_recovery;
-	o_tablespaces_foreach_prefix(cleanup_old_files_cb, &arg);
+	o_tablespaces_foreach_prefix(cleanup_old_files_cb, &arg, ERROR);
 }
 
 static OIndexKey *
