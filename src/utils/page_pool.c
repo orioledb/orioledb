@@ -196,21 +196,8 @@ o_ppool_reserve_pages(PagePool *pool, int kind, int count)
 		 * walk_page_prelock_check() → index_oids_get_btree_descr(), which
 		 * may need to fetch a table descriptor from a TOAST system tree:
 		 * o_btree_load_shmem() → ppool_reserve_pages() →
-		 * ppool_run_clock(). Check recursion depth, possible outer and inner
-		 * pool types.
+		 * ppool_run_clock()).
 		 */
-		Assert(ppool_run_clock_depth <= 1);
-#ifdef USE_ASSERT_CHECKING
-		if (ppool_run_clock_depth > 0)
-		{
-			Assert(outer_pool);
-			Assert(pool == get_ppool(OPagePoolFreeTree) || pool == get_ppool(OPagePoolCatalog));
-			Assert(pool != outer_pool);
-		}
-		else
-			outer_pool = pool;
-#endif
-
 		if (!ppool_run_maintenance(pool, true, NULL))
 
 		{
@@ -420,6 +407,19 @@ o_ppool_run_maintenance(PagePool *pool, bool evict,
 
 	Assert(blkno >= o_pool->offset && blkno < o_pool->offset + o_pool->size);
 
+	/* Check recursion depth, possible outer and inner pool types. */
+	Assert(ppool_run_clock_depth <= 1);
+#ifdef USE_ASSERT_CHECKING
+	if (ppool_run_clock_depth > 0)
+	{
+		Assert(outer_pool);
+		Assert(pool == get_ppool(OPagePoolFreeTree) || pool == get_ppool(OPagePoolCatalog));
+		Assert(pool != outer_pool);
+	}
+	else
+		outer_pool = pool;
+#endif
+
 	/*
 	 * Only the outermost call manages the UCM. A nested clock invocation
 	 * inherits the outer's setting and must not flip skip_ucm.
@@ -477,7 +477,12 @@ o_ppool_run_maintenance(PagePool *pool, bool evict,
 
 	ppool_run_clock_depth--;
 	if (ppool_run_clock_depth == 0)
+	{
 		skip_ucm = false;
+#ifdef USE_ASSERT_CHECKING
+		outer_pool = NULL;
+#endif
+	}
 
 	/*
 	 * The caller might have the undo location reserved.  We need to carefully
