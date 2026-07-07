@@ -578,6 +578,7 @@ extern bool o_in_add_column;
 
 extern void orioledb_setup_ddl_hooks(void);
 extern void o_ddl_cleanup(void);
+extern void orioledb_drop_database_xact_callback(XactEvent event, void *arg);
 
 /* scan.c */
 extern CustomScanMethods o_scan_methods;

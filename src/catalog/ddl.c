@@ -141,6 +141,8 @@ static CreateStmt *create_stmt = NULL;
 static List *o_added_columns = NIL;
 static movedb_params o_movedb_data = {InvalidOid, InvalidOid, InvalidOid};
 
+static Oid	dropped_database_oid = InvalidOid;
+
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
 									 bool readOnlyTree,
@@ -3065,6 +3067,41 @@ cleanup_tablespace_dir_cb(Oid tablespace, const char *prefix,
 	cleanup_tablespace_dir(prefix);
 }
 
+static void
+rmdir_dropped_database_cb(Oid tablespace, const char *prefix, void *arg)
+{
+	Oid			dbOid = *((Oid *) arg);
+	char		path[MAXPGPATH];
+
+	pg_snprintf(path, MAXPGPATH, "%s/%u", prefix, dbOid);
+	if (rmdir(path) < 0 && errno != ENOENT && errno != ENOTEMPTY)
+		ereport(WARNING,
+				(errcode_for_file_access(),
+				 errmsg("could not remove orioledb database directory \"%s\": %m",
+						path)));
+}
+
+static void
+cleanup_dropped_database_dirs(void)
+{
+	Oid			dbOid = dropped_database_oid;
+
+	if (!OidIsValid(dbOid))
+		return;
+
+	o_tablespaces_foreach_prefix(rmdir_dropped_database_cb, &dbOid);
+	dropped_database_oid = InvalidOid;
+}
+
+void
+orioledb_drop_database_xact_callback(XactEvent event, void *arg)
+{
+	if (event == XACT_EVENT_COMMIT)
+		cleanup_dropped_database_dirs();
+	else if (event == XACT_EVENT_ABORT)
+		dropped_database_oid = InvalidOid;
+}
+
 /*
  * get_collation		- fetch qualified name of a collation
  *
@@ -3434,6 +3471,8 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 		o_tables_table_meta_lock(NULL);
 		o_tables_drop_all(oxid, oSnapshot.csn, objectId);
 		o_tables_table_meta_unlock(NULL, InvalidOid);
+
+		dropped_database_oid = objectId;
 	}
 	else if (access == OAT_DROP && classId == TypeRelationId &&
 			 ActiveSnapshotSet())
