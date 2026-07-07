@@ -86,6 +86,19 @@ struct BTreeIterator
 	bool		curKeyReturned;
 
 	/*
+	 * Optimistic array-advance parking.  When o_btree_iterator_fetch()
+	 * discards a tuple that overshot the end bound -- e.g. the first row of
+	 * the next array element in a "col = ANY" scan -- it rewinds the leaf
+	 * locator to that tuple (resumeLoc), so o_btree_iterator_advance() to
+	 * that element can verify the already-loaded tuple directly and skip the
+	 * per-key binary search.  resumeLocValid is set only when the discarded
+	 * tuple came from the plain in-memory leaf path with a clean (non-refind)
+	 * advance.
+	 */
+	BTreePageItemLocator resumeLoc;
+	bool		resumeLocValid;
+
+	/*
 	 * The scan's original start key/kind.  Contract: the caller must keep the
 	 * key alive and unmodified for the iterator's lifetime; the !curKeySet
 	 * branch of iterator_refind_partial_leaf() reads it to re-find the scan
@@ -378,8 +391,42 @@ o_btree_find_tuples_continue(BTreeIterator *it,
 
 	if (page_contains_key(it, key, kind, img, get_lokey_if_exists(it)))
 	{
+		/*
+		 * Optimistic next-item check.  A dense "col IN (...)" / "col = ANY"
+		 * list asks for consecutive keys, and fetch_tuple_from_page() leaves
+		 * the locator on the previous element's matching item, so the next
+		 * element is frequently the immediately following item on the same
+		 * page.  Peek that item and, on an exact match, skip the per-key
+		 * binary search below (btree_page_search() was the dominant cost of
+		 * the array scan on this path).  Restricted to the forward case and
+		 * to a step that stays within the already-loaded chunk, so no extra
+		 * partial-chunk load is needed; every other case (chunk crossing,
+		 * gaps, backward) falls through to the search unchanged.  Since the
+		 * keys are unique this only ever replaces a search that would have
+		 * landed on the very same item.
+		 */
+		if (IT_IS_FORWARD(it) && BTREE_PAGE_LOCATOR_IS_VALID(img, loc))
+		{
+			BTreePageItemLocator next = *loc;
+
+			BTREE_PAGE_LOCATOR_NEXT(img, &next);
+			if (BTREE_PAGE_LOCATOR_IS_VALID(img, &next) &&
+				next.chunkOffset == loc->chunkOffset)
+			{
+				OTuple		cur;
+
+				BTREE_PAGE_READ_TUPLE(cur, img, &next);
+				if (o_btree_cmp(desc, key, kind, &cur, BTreeKeyLeafTuple) == 0)
+				{
+					*loc = next;
+					needToReloadPage = false;
+				}
+			}
+		}
+
 		/* Search within the loaded page */
-		if (btree_page_search(desc, img, key, kind, &context->partial, loc))
+		if (needToReloadPage &&
+			btree_page_search(desc, img, key, kind, &context->partial, loc))
 			needToReloadPage = false;
 	}
 
@@ -1022,20 +1069,42 @@ get_lokey_if_exists(BTreeIterator *it)
 void
 o_btree_iterator_advance(BTreeIterator *it, void *key, BTreeKeyType kind)
 {
-	Assert(key != NULL && kind != BTreeKeyNone);
-
 	BTreePageItemLocator *loc = &it->context.items[it->context.index].locator;
 	bool		found_in_page = false;
 
+	Assert(key != NULL && kind != BTreeKeyNone);
+
 	/*
-	 * Try to reposition within the already-loaded leaf.  btree_page_search()
-	 * must be given the partial-read state: on a FETCH (partial) image
-	 * searching with a NULL partial reads unloaded chunks as garbage and
-	 * mis-positions the locator (e.g. a sparse "col = ANY" scan leaking
-	 * tuples of the values between array elements).  A failed partial load
-	 * falls through to the re-find below.
+	 * Optimistic next-item check.  The previous element's scan left the leaf
+	 * locator on the first item past its end bound (rewound there by
+	 * o_btree_iterator_fetch() after discarding it), which for an adjacent /
+	 * dense "col = ANY" element is already the first item >= the new key.
+	 * Verify that item directly and skip the per-key binary search below.
+	 * Forward only: a backward scan parks the locator differently.
 	 */
-	if (page_contains_key(it, key, kind,
+	if (IT_IS_FORWARD(it) &&
+		BTREE_PAGE_LOCATOR_IS_VALID(it->context.img, loc) &&
+		partial_load_chunk(&it->context.partial, it->context.img,
+						   loc->chunkOffset, NULL))
+	{
+		OTuple		cur;
+
+		BTREE_PAGE_READ_TUPLE(cur, it->context.img, loc);
+		if (o_btree_cmp(it->context.desc, key, kind,
+						&cur, BTreeKeyLeafTuple) <= 0)
+			found_in_page = true;
+	}
+
+	/*
+	 * Otherwise reposition within the already-loaded leaf.
+	 * btree_page_search() must be given the partial-read state: on a FETCH
+	 * (partial) image searching with a NULL partial reads unloaded chunks as
+	 * garbage and mis-positions the locator (e.g. a sparse "col = ANY" scan
+	 * leaking tuples of the values between array elements).  A failed partial
+	 * load falls through to the re-find below.
+	 */
+	if (!found_in_page &&
+		page_contains_key(it, key, kind,
 						  it->context.img, get_lokey_if_exists(it)) &&
 		btree_page_search(it->context.desc, it->context.img, key, kind,
 						  &it->context.partial, loc) &&
@@ -1154,6 +1223,7 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 
 	ASAN_UNPOISON_MEMORY_REGION(&result, sizeof(result));
 
+	it->resumeLocValid = false;
 	result = o_btree_iterator_fetch_internal(it, tupleCsn, endPtr);
 
 	if (!O_TUPLE_IS_NULL(result) && endKey != NULL)
@@ -1167,6 +1237,20 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 		{
 			pfree(result.data);
 			O_TUPLE_SET_NULL(result);
+
+			/*
+			 * This tuple overshot the end bound and o_btree_iterator_fetch_
+			 * internal() already advanced the leaf locator past it.  Rewind
+			 * to it so an advance to the next "col = ANY" array element can
+			 * verify it in place (o_btree_iterator_advance()) instead of
+			 * re-searching. It was never delivered, so mark it
+			 * not-yet-returned.
+			 */
+			if (it->resumeLocValid)
+			{
+				it->context.items[it->context.index].locator = it->resumeLoc;
+				it->curKeyReturned = false;
+			}
 			return result;
 		}
 	}
@@ -1559,8 +1643,19 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 										  it->fetchCallback,
 										  it->fetchCallbackArg);
 
+			/*
+			 * Remember this tuple's position before advancing, so a caller
+			 * that discards it for overshooting the end bound can rewind here
+			 * (see o_btree_iterator_fetch()).  A refind re-descends the page,
+			 * making the saved locator stale.
+			 */
+			it->resumeLoc = leaf_item->locator;
+			it->resumeLocValid = true;
 			if (!iterator_advance_leaf(it, &leaf_item->locator))
+			{
+				it->resumeLocValid = false;
 				iterator_refind_partial_leaf(it);
+			}
 
 			if (!O_TUPLE_IS_NULL(result))
 				return result;
