@@ -68,6 +68,7 @@ extern void o_keybitmap_union(OKeyBitmap *a, OKeyBitmap *b);
 extern void o_keybitmap_free(OKeyBitmap *bm);
 extern bool o_keybitmap_is_empty(OKeyBitmap *bm);
 extern bool o_keybitmap_test(OKeyBitmap *bm, uint64 value);
+extern bool o_keybitmap_emit(OKeyBitmap *bm, uint64 value);
 extern bool o_keybitmap_range_is_valid(OKeyBitmap *bm, uint64 low, uint64 high);
 extern uint64 o_keybitmap_get_next(OKeyBitmap *bm, uint64 prev, bool *found);
 
@@ -95,6 +96,7 @@ extern OKeyBitmapMode o_keybitmap_pk_mode(OIndexDescr *primary,
 extern OKeyBitmap *o_keybitmap_create_fixed(void);
 extern void o_keybitmap_insert_key(OKeyBitmap *bm, const uint8 *key);
 extern bool o_keybitmap_test_key(OKeyBitmap *bm, const uint8 *key);
+extern bool o_keybitmap_emit_key(OKeyBitmap *bm, const uint8 *key);
 extern bool o_keybitmap_range_is_valid_key(OKeyBitmap *bm, const uint8 *low,
 										   const uint8 *high);
 extern bool o_keybitmap_get_next_key(OKeyBitmap *bm, const uint8 *prev,

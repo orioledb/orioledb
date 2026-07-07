@@ -89,6 +89,16 @@ typedef struct BridgeIterator
 #define BRIDGE_ITER_NTUPLES(iter) ((iter)->tbmres->ntuples)
 #endif
 
+/* One streamed primary index scan (a single BitmapIndexScan node). */
+typedef struct OBitmapStreamChild
+{
+	OScanState	ostate;
+	OIndexDescr *ix;
+	Relation	index;			/* kept open for scandesc.indexRelation */
+	bool		scandesc_ready; /* scandesc + cxt were initialized */
+	bool		empty;			/* qual_ok false / empty array: no rows */
+} OBitmapStreamChild;
+
 typedef struct OBitmapScan
 {
 	ScanState  *ss;
@@ -101,6 +111,25 @@ typedef struct OBitmapScan
 	BitmapSeqScanArg arg;
 
 	BridgeIterator bridge_iter;
+
+	/*
+	 * Primary-scan streaming.  When the bitmap qual is a single
+	 * BitmapIndexScan over the primary index -- or a BitmapOr of such scans
+	 * (e.g. a row-array "(a,b,c) IN (...)" on a composite pk) -- there is
+	 * nothing to intersect and the union only needs de-duplication.  Instead
+	 * of materializing a key bitmap and re-reading the primary tree we drive
+	 * the primary index scan(s) directly and hand their live tuples straight
+	 * to the output (o_exec_fetch-style), keeping full orioledb row identity
+	 * (csn / hint / rowid) for locking, EPQ and toast and skipping the second
+	 * pass.  For a BitmapOr the children can produce the same pk (duplicate /
+	 * overlapping branches), so a dedup bitmap carries the "already emitted"
+	 * bit.
+	 */
+	bool		stream_primary;
+	OBitmapStreamChild *stream_children;
+	int			stream_nchildren;
+	int			stream_cur;
+	OKeyBitmap *stream_dedup;	/* NULL for a single child (no dup possible) */
 } OBitmapScan;
 
 static bool o_bitmap_is_range_valid(OTuple low, OTuple high, void *arg);
@@ -1038,6 +1067,293 @@ o_exec_bitmapqual(OBitmapHeapPlanState *bitmap_state, PlanState *planstate,
 	}
 }
 
+/*
+ * Set up one streamed primary index scan for a BitmapIndexScan node (mirroring
+ * exec_bitmap_index_state() + o_index_getbitmap()'s setup, minus the collect
+ * loop) that o_bitmap_stream_fetch() drives directly.  Returns false -- leaving
+ * *child untouched apart from a closed index -- when this node is not a
+ * streamable primary orioledb index scan, so the caller falls back to building
+ * a key bitmap.
+ */
+static bool
+setup_primary_stream(OBitmapHeapPlanState *bitmap_state, OBitmapScan *scan,
+					 BitmapIndexScanState *node, OBitmapStreamChild *child)
+{
+	OScanState *ostate = &child->ostate;
+	OTableDescr *descr = scan->arg.tbl_desc;
+	OIndexDescr *indexDescr = NULL;
+	OIndexNumber ix_num;
+	Relation	index;
+	BitmapIndexScan *bitmap_ix_scan = (BitmapIndexScan *) node->ss.ps.plan;
+	ExprContext *econtext = scan->ss->ps.ps_ExprContext;
+	OBTOptions *options = (OBTOptions *) node->biss_RelationDesc->rd_options;
+	BTScanOpaque so;
+
+	/* Non-orioledb (bridged) indexes go through the TIDBitmap path. */
+	if (node->biss_RelationDesc->rd_rel->relam != BTREE_AM_OID ||
+		(options && !options->orioledb_index))
+		return false;
+
+	index = index_open(bitmap_ix_scan->indexid, AccessShareLock);
+	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
+	{
+		indexDescr = descr->indices[ix_num];
+		if (indexDescr->oids.reloid == bitmap_ix_scan->indexid)
+			break;
+	}
+	Assert(ix_num < descr->nIndices && indexDescr != NULL);
+
+	/* Only the primary index scan yields the table's own rows directly. */
+	if (indexDescr->desc.type != oIndexPrimary)
+	{
+		index_close(index, AccessShareLock);
+		return false;
+	}
+
+	child->index = index;
+	child->ix = indexDescr;
+
+	/* Evaluate runtime / array keys (cf. exec_bitmap_index_state()). */
+	if (node->biss_NumRuntimeKeys != 0)
+		ExecIndexEvalRuntimeKeys(econtext, node->biss_RuntimeKeys,
+								 node->biss_NumRuntimeKeys);
+	if (node->biss_NumArrayKeys != 0)
+		node->biss_RuntimeKeysReady =
+			ExecIndexEvalArrayKeys(econtext, node->biss_ArrayKeys,
+								   node->biss_NumArrayKeys);
+	else
+		node->biss_RuntimeKeysReady = true;
+
+	/* Empty array key: the scan yields nothing. */
+	if (!node->biss_RuntimeKeysReady)
+	{
+		child->empty = true;
+		return true;
+	}
+
+	/* Build the orioledb scan state (cf. o_index_getbitmap()). */
+	memset(ostate, 0, sizeof(*ostate));
+	ostate->ixNum = ix_num;
+	ostate->scanDir = ForwardScanDirection;
+	ostate->indexQuals = bitmap_ix_scan->indexqual;
+	bitmap_state->o_plan_state.plan_state = &node->ss.ps;
+	ResetExprContext(econtext);
+
+	if (node->biss_ScanKeys)
+	{
+		pfree(node->biss_ScanKeys);
+		node->biss_ScanKeys = NULL;
+	}
+	if (node->biss_RuntimeKeys)
+	{
+		pfree(node->biss_RuntimeKeys);
+		node->biss_RuntimeKeys = NULL;
+		node->biss_NumRuntimeKeys = 0;
+	}
+
+	init_index_scan_state(&bitmap_state->o_plan_state, ostate, index, econtext,
+#if PG_VERSION_NUM >= 180000
+						  bitmap_state->bitmapqualplanstate->state->es_snapshot,
+#endif
+						  &node->biss_RuntimeKeys, &node->biss_NumRuntimeKeys,
+						  &node->biss_ScanKeys, &node->biss_NumScanKeys);
+
+	if (node->biss_NumRuntimeKeys != 0)
+	{
+		ResetExprContext(node->biss_RuntimeContext);
+		ExecIndexEvalRuntimeKeys(node->biss_RuntimeContext,
+								 node->biss_RuntimeKeys,
+								 node->biss_NumRuntimeKeys);
+		node->biss_RuntimeKeysReady = true;
+	}
+
+	if ((node->biss_NumRuntimeKeys == 0 && node->biss_NumArrayKeys == 0) ||
+		node->biss_RuntimeKeysReady)
+	{
+		btrescan(&ostate->scandesc, node->biss_ScanKeys,
+				 node->biss_NumScanKeys, NULL, 0);
+		ostate->numPrefixExactKeys =
+			o_get_num_prefix_exact_keys(node->biss_ScanKeys, node->biss_NumScanKeys);
+	}
+
+	ostate->oSnapshot = scan->oSnapshot;
+	ostate->onlyCurIx = true;
+	ostate->cxt = AllocSetContextCreate(scan->cxt,
+										"orioledb bitmap primary stream",
+										ALLOCSET_DEFAULT_SIZES);
+	ostate->curKeyRangeIsLoaded = false;
+	ostate->curKeyRange.empty = true;
+	ostate->curKeyRange.low.n_row_keys = 0;
+	ostate->curKeyRange.high.n_row_keys = 0;
+	child->scandesc_ready = true;
+
+	so = (BTScanOpaque) ostate->scandesc.opaque;
+	_bt_preprocess_keys(&ostate->scandesc);
+	if (!so->qual_ok)
+	{
+		child->empty = true;
+		return true;
+	}
+	ostate->numPrefixExactKeys =
+		o_adjust_num_prefix_exact_keys(so, ostate->numPrefixExactKeys);
+	if (so->numArrayKeys)
+		_bt_start_array_keys(&ostate->scandesc, ForwardScanDirection);
+	ostate->curKeyRange.empty = true;
+
+	return true;
+}
+
+/*
+ * Set up primary-scan streaming for the whole bitmap qual, if it is a single
+ * BitmapIndexScan over the primary index or a BitmapOr of only such scans.
+ * Returns false (having freed anything it opened) to fall back to a key bitmap.
+ */
+static bool
+setup_primary_stream_qual(OBitmapHeapPlanState *bitmap_state, OBitmapScan *scan,
+						  PlanState *qual)
+{
+	if (IsA(qual, BitmapIndexScanState))
+	{
+		scan->stream_children = MemoryContextAllocZero(scan->cxt,
+													   sizeof(OBitmapStreamChild));
+		if (!setup_primary_stream(bitmap_state, scan,
+								  (BitmapIndexScanState *) qual,
+								  &scan->stream_children[0]))
+		{
+			pfree(scan->stream_children);
+			scan->stream_children = NULL;
+			return false;
+		}
+		scan->stream_nchildren = 1;
+		/* a single scan never yields the same pk twice: no dedup needed */
+		return true;
+	}
+	else if (IsA(qual, BitmapOrState))
+	{
+		BitmapOrState *orstate = (BitmapOrState *) qual;
+		int			i;
+
+		/* Only when every branch is itself a plain BitmapIndexScan. */
+		for (i = 0; i < orstate->nplans; i++)
+			if (!IsA(orstate->bitmapplans[i], BitmapIndexScanState))
+				return false;
+
+		scan->stream_children = MemoryContextAllocZero(scan->cxt,
+													   sizeof(OBitmapStreamChild) * orstate->nplans);
+		for (i = 0; i < orstate->nplans; i++)
+		{
+			if (!setup_primary_stream(bitmap_state, scan,
+									  (BitmapIndexScanState *) orstate->bitmapplans[i],
+									  &scan->stream_children[i]))
+			{
+				/* tear down the children already set up, then fall back */
+				int			j;
+
+				for (j = 0; j <= i; j++)
+				{
+					OBitmapStreamChild *c = &scan->stream_children[j];
+
+					if (c->scandesc_ready)
+					{
+						if (c->ostate.iterator)
+							btree_iterator_free(c->ostate.iterator);
+						btendscan(&c->ostate.scandesc);
+						if (c->ostate.cxt)
+							MemoryContextDelete(c->ostate.cxt);
+					}
+					if (c->index)
+						index_close(c->index, AccessShareLock);
+				}
+				pfree(scan->stream_children);
+				scan->stream_children = NULL;
+				return false;
+			}
+			scan->stream_nchildren++;
+		}
+
+		/* Branches can overlap / duplicate pks: dedup emitted rows. */
+		if (o_keybitmap_pk_mode(GET_PRIMARY(scan->arg.tbl_desc), NULL) == O_KEYBITMAP_FIXED)
+			scan->stream_dedup = o_keybitmap_create_fixed();
+		else
+			scan->stream_dedup = o_keybitmap_create();
+		return true;
+	}
+
+	return false;
+}
+
+/*
+ * Fetch the next tuple of a primary-scan-streamed bitmap scan.  Mirrors
+ * o_exec_fetch(): pull one live primary tuple from the current child scan and
+ * hand it to the scan slot with full row identity, applying the node qual.  A
+ * BitmapOr's branches are streamed in turn; a dedup bitmap drops any pk already
+ * emitted by an earlier (overlapping / duplicate) branch.
+ */
+static TupleTableSlot *
+o_bitmap_stream_fetch(OBitmapScan *scan, CustomScanState *node)
+{
+	ScanState  *ss = &node->ss;
+	OTableDescr *descr = relation_get_descr(ss->ss_currentRelation);
+	OIndexDescr *primary = GET_PRIMARY(scan->arg.tbl_desc);
+	MemoryContext tupleCxt = ss->ss_ScanTupleSlot->tts_mcxt;
+	TupleTableSlot *slot;
+
+	while (scan->stream_cur < scan->stream_nchildren)
+	{
+		OBitmapStreamChild *child = &scan->stream_children[scan->stream_cur];
+		BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
+		CommitSeqNo tupleCsn;
+		OTuple		tuple;
+
+		if (child->empty)
+		{
+			scan->stream_cur++;
+			continue;
+		}
+
+		tuple = o_iterate_index(child->ix, &child->ostate, &tupleCsn, tupleCxt,
+								&hint);
+		if (O_TUPLE_IS_NULL(tuple))
+		{
+			scan->stream_cur++;
+			continue;
+		}
+
+		/* Dedup across BitmapOr branches. */
+		if (scan->stream_dedup)
+		{
+			bool		fresh;
+
+			if (o_keybitmap_pk_mode(primary, NULL) == O_KEYBITMAP_FIXED)
+			{
+				uint8		key[OKBM_FIXED_BYTES];
+
+				o_pk_encode_leaf(tuple, child->ix, key);
+				fresh = o_keybitmap_emit_key(scan->stream_dedup, key);
+			}
+			else
+				fresh = o_keybitmap_emit(scan->stream_dedup,
+										 primary_tuple_get_data(tuple, child->ix, false));
+
+			if (!fresh)
+			{
+				pfree(tuple.data);
+				continue;		/* already emitted by an earlier branch */
+			}
+		}
+
+		tts_orioledb_store_tuple(ss->ss_ScanTupleSlot, tuple, descr, tupleCsn,
+								 PrimaryIndexNumber, true, &hint);
+		slot = ss->ss_ScanTupleSlot;
+
+		if (o_exec_qual(ss->ps.ps_ExprContext, ss->ps.qual, slot))
+			return slot;
+		/* qual failed: keep scanning */
+	}
+
+	return ExecClearTuple(ss->ss_ScanTupleSlot);
+}
+
 OBitmapScan *
 o_make_bitmap_scan(OBitmapHeapPlanState *bitmap_state, ScanState *ss,
 				   PlanState *bitmapqualplanstate, Relation rel,
@@ -1052,6 +1368,18 @@ o_make_bitmap_scan(OBitmapHeapPlanState *bitmap_state, ScanState *ss,
 	scan->ss = ss;
 	scan->arg.tbl_desc = relation_get_descr(rel);
 	bitmap_state->scan = scan;
+
+	/*
+	 * Fast path: a single primary BitmapIndexScan, or a BitmapOr of only such
+	 * scans, is executed as live primary index scan(s) -- no key bitmap, no
+	 * second pass over the primary tree.
+	 */
+	if (setup_primary_stream_qual(bitmap_state, scan, bitmapqualplanstate))
+	{
+		scan->stream_primary = true;
+		return scan;
+	}
+
 	o_exec_bitmapqual(bitmap_state, bitmapqualplanstate,
 					  &scan->arg.bitmap,
 					  &scan->bridge_iter.tidbitmap);
@@ -1079,6 +1407,9 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 	OBitmapHeapPlanState *bitmap_state =
 		(OBitmapHeapPlanState *) ocstate->o_plan_state;
 	BridgeIterator *bridge_iter = &scan->bridge_iter;
+
+	if (scan->stream_primary)
+		return o_bitmap_stream_fetch(scan, node);
 
 	do
 	{
@@ -1248,6 +1579,33 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 void
 o_free_bitmap_scan(OBitmapScan *scan)
 {
+	if (scan->stream_primary)
+	{
+		int			i;
+
+		for (i = 0; i < scan->stream_nchildren; i++)
+		{
+			OBitmapStreamChild *c = &scan->stream_children[i];
+
+			if (c->scandesc_ready)
+			{
+				if (c->ostate.iterator)
+					btree_iterator_free(c->ostate.iterator);
+				btendscan(&c->ostate.scandesc);
+				if (c->ostate.cxt)
+					MemoryContextDelete(c->ostate.cxt);
+			}
+			if (c->index)
+				index_close(c->index, AccessShareLock);
+		}
+		if (scan->stream_children)
+			pfree(scan->stream_children);
+		if (scan->stream_dedup)
+			o_keybitmap_free(scan->stream_dedup);
+		pfree(scan);
+		return;
+	}
+
 	if (scan->seq_scan)
 		free_btree_seq_scan(scan->seq_scan);
 	if (scan->arg.bitmap)
