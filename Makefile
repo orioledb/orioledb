@@ -232,6 +232,9 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/page_pool_test.py
 TESTGRESCHECKS_PART_3 = test/t/rewind_time_test.py
 
+# perf/*_perf.py -- see perf/README.md.
+PERFCHECKS = $(sort $(wildcard perf/*_perf.py))
+
 PG_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test --temp-instance=./test/tmp_check
 PG_ISOLATION_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test/output_iso --temp-instance=./test/tmp_check_iso
 
@@ -279,6 +282,12 @@ $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3): $(IN
 	$(TEMP_INSTALL_COMMAND) \
 	python3 -W ignore::DeprecationWarning -m unittest -v $@
 
+$(PERFCHECKS): $(INSTALL_REQUIREMENT)
+	$(TEMP_INSTALL_COMMAND) \
+	python3 -W ignore::DeprecationWarning $@
+
+perfcheck: $(PERFCHECKS)
+
 ifdef IS_DEV
 installcheck: regresscheck isolationcheck testgrescheck
 	echo "All checks are successful!"
@@ -310,6 +319,13 @@ $(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3): | su
 	PG_CONFIG="$(abs_top_builddir)/tmp_install$(bindir)/pg_config" \
 		$(with_temp_install) \
 		python3 -m unittest -v $@
+
+$(PERFCHECKS): | submake-orioledb temp-install
+	PG_CONFIG="$(abs_top_builddir)/tmp_install$(bindir)/pg_config" \
+		$(with_temp_install) \
+		python3 $@
+
+perfcheck: $(PERFCHECKS)
 
 ifdef IS_DEV
 check: regresscheck isolationcheck testgrescheck
@@ -392,5 +408,6 @@ yapf:
 	yapf -i *.py
 
 .PHONY: submake-orioledb submake-regress check \
-	regresscheck isolationcheck testgrescheck pgindent \
-	$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3)
+	regresscheck isolationcheck testgrescheck perfcheck pgindent \
+	$(TESTGRESCHECKS_PART_1) $(TESTGRESCHECKS_PART_2) $(TESTGRESCHECKS_PART_3) \
+	$(PERFCHECKS)
