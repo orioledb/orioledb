@@ -304,6 +304,26 @@ o_bt_advance_array_keys_increment(OScanState *ostate, ScanDirection dir)
 	return false;
 }
 
+#if PG_VERSION_NUM >= 180000
+/*
+ * Does the scan have any PG18 skip array?  A skip array (num_elems == -1)
+ * carries a dynamic range (low_compare / high_compare) that changes from one
+ * range to the next, so the o_key_data_update_array_key_range() shortcut --
+ * which only refreshes fixed array element values -- cannot represent it and
+ * switch_to_next_range() must rebuild the full key range instead.
+ */
+static bool
+scan_has_skip_array(BTScanOpaque so)
+{
+	int			i;
+
+	for (i = 0; i < so->numArrayKeys; i++)
+		if (so->arrayKeys[i].num_elems == -1)
+			return true;
+	return false;
+}
+#endif
+
 static bool
 switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 					 MemoryContext tupleCxt)
@@ -358,7 +378,12 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 
 	oldcontext = MemoryContextSwitchTo(ostate->cxt);
 
-	if (!ostate->curKeyRangeIsLoaded)
+	if (!ostate->curKeyRangeIsLoaded
+#if PG_VERSION_NUM >= 180000
+	/* skip arrays have dynamic ranges: rebuild fully, see comment above */
+		|| (so->numArrayKeys > 0 && scan_has_skip_array(so))
+#endif
+		)
 		ostate->exact = o_key_data_to_key_range(&ostate->curKeyRange,
 												so->keyData,
 												so->numberOfKeys,
