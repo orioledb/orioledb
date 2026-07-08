@@ -4,6 +4,7 @@
 import os
 import re
 import signal
+import tempfile
 import time
 import unittest
 
@@ -51,13 +52,13 @@ class EvictionBGWriterTest(BaseTest):
 		    ") USING orioledb;\n\n")
 		n = 200000
 
-		for i in range(1, 100):
-			node.safe_psql(
-			    'postgres', "CREATE TABLE o_tmp (\n"
-			    "	key integer NOT NULL,\n"
-			    "	PRIMARY KEY(key)\n"
-			    ") USING orioledb;\n")
-			node.safe_psql("DROP TABLE o_tmp;")
+		fp = tempfile.NamedTemporaryFile(mode='wt', delete=False)
+		fp.write("CREATE TABLE o_tmp ("
+		         "key integer NOT NULL, PRIMARY KEY(key)) USING orioledb;\n"
+		         "DROP TABLE o_tmp;\n")
+		fp.close()
+		node.pgbench_with_wait(
+		    options=['-f', fp.name, '-n', '-c', '1', '-t', '99'])
 
 		node.safe_psql(
 		    'postgres', "INSERT INTO o_eviction\n"

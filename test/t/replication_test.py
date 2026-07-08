@@ -5,6 +5,7 @@ import os
 import re
 import signal
 import subprocess
+import tempfile
 import time
 from testgres import NodeStatus
 
@@ -1810,10 +1811,14 @@ class ReplicationTest(BaseTest):
 				# post-restart runXmin = nextXid is *far* above
 				# T_long's oxid.  This is what made the malformed
 				# xmin observable in the bug report.
-				for i in range(200):
-					master.safe_psql(
-					    "UPDATE o_test_xmin_no_regress "
-					    f"SET v = v + 1 WHERE k = {2 + (i % 50)};")
+				fp = tempfile.NamedTemporaryFile(mode='wt', delete=False)
+				fp.write("UPDATE o_test_xmin_no_regress "
+				         "SET v = v + 1 WHERE k = 2;\n")
+				fp.close()
+				master.pgbench_with_wait(options=[
+				    '-M', 'prepared', '-f', fp.name, '-n', '-c', '1', '-t',
+				    '50'
+				])
 
 				# Checkpoint primary: its xids file now records
 				# T_long as in-flight.  Standby's xids file does
@@ -2003,10 +2008,14 @@ class ReplicationTest(BaseTest):
 				# between the checkpoint-era floor and nextXid is
 				# observable (the pre-fix bug pushes runXmin all
 				# the way up to nextXid).
-				for i in range(200):
-					master.safe_psql(
-					    "UPDATE o_test_xidfloor "
-					    f"SET v = v + 1 WHERE k = {2 + (i % 50)};")
+				fp = tempfile.NamedTemporaryFile(mode='wt', delete=False)
+				fp.write("UPDATE o_test_xidfloor "
+				         "SET v = v + 1 WHERE k = 2;\n")
+				fp.close()
+				master.pgbench_with_wait(options=[
+				    '-M', 'prepared', '-f', fp.name, '-n', '-c', '1', '-t',
+				    '50'
+				])
 
 				# Master CHECKPOINT.  finish_write_xids() scans
 				# oProcData[].vxids[] and writes X.oxid to the
@@ -2114,9 +2123,13 @@ class ReplicationTest(BaseTest):
 					con.close()
 
 				# Advance recovery_xmin on the standby.
-				for i in range(300):
-					master.safe_psql("UPDATE o_ml SET val = "
-					                 f"'u{i}' WHERE id = {(i % 200) + 1};")
+				fp = tempfile.NamedTemporaryFile(mode='wt', delete=False)
+				fp.write("UPDATE o_ml SET val = 'u' WHERE id = 1;\n")
+				fp.close()
+				master.pgbench_with_wait(options=[
+				    '-M', 'prepared', '-f', fp.name, '-n', '-c', '1', '-t',
+				    '50'
+				])
 				master.safe_psql("CHECKPOINT;")
 				master_lsn = master.execute(
 				    "SELECT pg_current_wal_lsn();")[0][0]
@@ -2193,9 +2206,13 @@ class ReplicationTest(BaseTest):
 					    "ROLLBACK;")
 
 				master.safe_psql("VACUUM o_br;")
-				for i in range(300):
-					master.safe_psql("UPDATE o_br SET val = "
-					                 f"'u{i}' WHERE id = {(i % 1000) + 501};")
+				fp = tempfile.NamedTemporaryFile(mode='wt', delete=False)
+				fp.write("UPDATE o_br SET val = 'u' WHERE id = 501;\n")
+				fp.close()
+				master.pgbench_with_wait(options=[
+				    '-M', 'prepared', '-f', fp.name, '-n', '-c', '1', '-t',
+				    '50'
+				])
 				master.safe_psql("CHECKPOINT;")
 				master_lsn = master.execute(
 				    "SELECT pg_current_wal_lsn();")[0][0]
@@ -2298,15 +2315,18 @@ class ReplicationTest(BaseTest):
 					pass
 
 				# Post-rollback commits to advance recovery_xmin.
-				for i in range(200):
-					master.safe_psql("BEGIN; "
-					                 f"UPDATE o_fp SET val = 'u{i}' "
-					                 f"WHERE id = {(i % 100) + 1}; "
-					                 "SAVEPOINT sp; "
-					                 f"UPDATE o_fp SET val = 's{i}' "
-					                 f"WHERE id = {(i % 100) + 1}; "
-					                 "ROLLBACK TO SAVEPOINT sp; "
-					                 "COMMIT;")
+				fp = tempfile.NamedTemporaryFile(mode='wt', delete=False)
+				fp.write("BEGIN;\n"
+				         "UPDATE o_fp SET val = 'u' WHERE id = 1;\n"
+				         "SAVEPOINT sp;\n"
+				         "UPDATE o_fp SET val = 's' WHERE id = 1;\n"
+				         "ROLLBACK TO SAVEPOINT sp;\n"
+				         "END;\n")
+				fp.close()
+				master.pgbench_with_wait(options=[
+				    '-M', 'prepared', '-f', fp.name, '-n', '-c', '1', '-t',
+				    '50'
+				])
 				master.safe_psql("CHECKPOINT;")
 				master_lsn = master.execute(
 				    "SELECT pg_current_wal_lsn();")[0][0]
@@ -2574,9 +2594,14 @@ class ReplicationTest(BaseTest):
 				# Push recovery_xmin (the xmin stamped on every
 				# WAL_REC_COMMIT) well above the N stuck oxids, then
 				# wait for the standby to apply that horizon.
-				for i in range(300):
-					master.safe_psql(f"UPDATE o_test_fp_abort SET v = v + 1 "
-					                 f"WHERE k = {(i % 50) + 1};")
+				fp = tempfile.NamedTemporaryFile(mode='wt', delete=False)
+				fp.write("UPDATE o_test_fp_abort SET v = v + 1 "
+				         "WHERE k = 1;\n")
+				fp.close()
+				master.pgbench_with_wait(options=[
+				    '-M', 'prepared', '-f', fp.name, '-n', '-c', '1', '-t',
+				    '50'
+				])
 
 				master_lsn = master.execute(
 				    "SELECT pg_current_wal_lsn();")[0][0]
