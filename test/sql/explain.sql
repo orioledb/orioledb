@@ -215,7 +215,8 @@ FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val1, val2 FROM o_explain WHERE val2 > 0
-					AND val2 < 1000 ORDER BY val2; $$) as t;
+					AND val2 < 1000 ORDER BY val2; $$) as t
+	WHERE t NOT LIKE ' Planning:' AND t NOT LIKE '   Buffers: shared hit=%';
 -- uses only secondary index for fetching values from secondary index
 SELECT regexp_replace(t, '[\d\.]+', 'x', 'g')
 FROM query_to_text($$ EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
