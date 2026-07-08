@@ -2,6 +2,7 @@
 # coding: utf-8
 # Tests for some user SQL functions
 
+import os
 import subprocess
 
 from .base_test import BaseTest
@@ -98,3 +99,40 @@ class FunctionTest(BaseTest):
 		    )[0][0], 10000)
 
 		node.stop()
+
+	def test_undo_log_size_over_int32(self):
+		# Regression: orioledb_undo_size() accumulated per-stream file
+		# sizes into an int[] and returned each element as a bare Datum.
+		# Once a stream exceeded INT32_MAX (~2.147 GiB) the sum wrapped
+		# to a negative or truncated value.  At TPC-C scale the row
+		# stream easily reaches tens of GiB.
+		#
+		# Fabricate one sparse file just past INT32_MAX and confirm the
+		# reported total is at least its apparent size.  Sparse keeps
+		# the test cheap on constrained CI: no blocks consumed, no
+		# workload required to produce the bytes.
+		node = self.node
+		node.start()
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+
+		undo_dir = os.path.join(node.data_dir, "orioledb_undo")
+		# File naming follows include/transam/undo.h templates:
+		#   ORIOLEDB_UNDO_DATA_ROW_FILENAME_TEMPLATE  "/%02X%08Xrow"
+		# INT32_MAX == 2^31 - 1 bytes ≈ 2.147 GiB.  2.5 GiB trips the
+		# wrap unambiguously without leaving the counter near a
+		# power-of-two boundary that could accidentally look correct.
+		fake_size = int(2.5 * 1024 * 1024 * 1024)
+		fake_path = os.path.join(undo_dir, "0000000F00row")
+		try:
+			with open(fake_path, "wb") as f:
+				os.ftruncate(f.fileno(), fake_size)
+
+			total = node.execute("SELECT undo_size FROM orioledb_undo_size() "
+			                     "WHERE undo_type = 'row';")[0][0]
+			self.assertGreaterEqual(total, fake_size)
+		finally:
+			try:
+				os.remove(fake_path)
+			except FileNotFoundError:
+				pass
+			node.stop()
