@@ -995,6 +995,16 @@ o_explain_node(PlanState *planstate, OExplainContext *ec)
 						ec->es->indent++;
 						break;
 				}
+
+				/*
+				 * ExplainNode() above already popped this node's group.  JSON
+				 * and YAML tracks the object on es->grouping_stack, so
+				 * re-push it here.
+				 */
+				if (ec->es->format == EXPLAIN_FORMAT_JSON ||
+					ec->es->format == EXPLAIN_FORMAT_YAML)
+					ec->es->grouping_stack = lcons_int(1, ec->es->grouping_stack);
+
 				if (is_explain_analyze(ocstate->o_plan_state->plan_state))
 				{
 					OIndexNumber ix_num;
