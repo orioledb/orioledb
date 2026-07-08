@@ -3546,7 +3546,7 @@ orioledb_undo_size(PG_FUNCTION_ARGS)
 	DIR		   *dirdesc;
 	char		filename[MAXPGPATH * 2];
 	const char	path[15] = "orioledb_undo";
-	int			totalsize[UndoLogsCount];
+	int64		totalsize[UndoLogsCount];
 
 	InitMaterializedSRF(fcinfo, 0);
 
@@ -3608,7 +3608,7 @@ orioledb_undo_size(PG_FUNCTION_ARGS)
 		nulls[0] = false;
 		values[0] = PointerGetDatum(cstring_to_text(get_undo_type_name(i)));
 		nulls[1] = false;
-		values[1] = totalsize[i];
+		values[1] = Int64GetDatum(totalsize[i]);
 
 		tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
 	}
