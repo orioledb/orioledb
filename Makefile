@@ -231,7 +231,8 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/unlogged_test.py \
 						test/t/vacuum_test.py \
 						test/t/transaction_test.py \
-						test/t/page_pool_test.py
+						test/t/page_pool_test.py \
+						test/t/bitmap_partition_test.py
 TESTGRESCHECKS_PART_3 = test/t/rewind_time_test.py
 
 # perf/*_perf.py -- see perf/README.md.
