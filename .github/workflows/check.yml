@@ -76,13 +76,26 @@ jobs:
               base_repo = pr_event["pull_request"]["base"]["repo"]["full_name"]
               # Fork PRs get the full matrix; same-repo PRs get the complementary set
               combos = full_combos if head_repo != base_repo else pr_combos
+              matrix_obj = make_matrix(combos)
           elif ref == "main":
-              combos = full_combos
+              matrix_obj = make_matrix(full_combos)
           else:
-              combos = branch_combos
+              # XXX temporary: stress the load_page() refind race with a fleet
+              # of pg_tests jobs on PG18 (the crash was PG18, amd64/gcc and
+              # arm64/clang), each with a unique `run` id so artifacts don't
+              # collide.  Revert to `make_matrix(branch_combos)` when done.
+              pg18 = [("amd64", "gcc"), ("arm64", "clang")]
+              matrix_obj = {
+                  "include": [
+                      {"cpu": pg18[i % 2][0], "pg_version": 18,
+                       "compiler": pg18[i % 2][1], "check_type": "pg_tests",
+                       "run": i}
+                      for i in range(64)
+                  ]
+              }
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"matrix={json.dumps(make_matrix(combos))}\n")
+              f.write(f"matrix={json.dumps(matrix_obj)}\n")
 
   check:
     needs: matrix
@@ -137,7 +150,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_test.diffs
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_run${{ matrix.run }}_test.diffs
           path: |
             ./orioledb/test/**/regression.diffs
             ./orioledb/test/**/isolation_filtered.diffs
@@ -151,7 +164,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_test.logs
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_run${{ matrix.run }}_test.logs
           path: |
             ./orioledb/test/tmp_check_t/*/logs/*log
             ./orioledb/test/tmp_check/log/*log
@@ -176,7 +189,7 @@ jobs:
         if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_coverage.info
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_run${{ matrix.run }}_coverage.info
           path: ./orioledb/coverage.info
           retention-days: 1
           overwrite: true

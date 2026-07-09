@@ -1715,7 +1715,36 @@ load_page(OBTreeFindPageContext *context)
 	page_block_reads(parent_blkno);
 	parent_page = O_GET_IN_MEMORY_PAGE(parent_blkno);
 	int_hdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(parent_page, parent_loc);
-	Assert(int_hdr->downlink == MAKE_IO_DOWNLINK(ionum));
+
+	/*
+	 * Diagnostic (XXX temporary): the refound parent slot must still carry
+	 * the IO downlink we installed before unlocking the parent.  If it does
+	 * not, a concurrent operation replaced it during the load window --
+	 * report exactly what it became (in-memory / a different IO num /
+	 * reverted to on-disk) and whether refind landed on a page whose change
+	 * count moved, so the class of race can be identified from CI logs.
+	 * PANIC (not Assert) so it also fires in non-cassert builds.
+	 */
+	if (int_hdr->downlink != MAKE_IO_DOWNLINK(ionum))
+	{
+		uint64		dl = int_hdr->downlink;
+
+		elog(PANIC,
+			 "load_page: refind parent downlink mismatch in tree (%u,%u,%u): "
+			 "expected io_downlink ionum=%d (" UINT64_FORMAT "), got " UINT64_FORMAT
+			 " [%s] mem(blkno=%u,cc=%u) io(ionum=%u) disk(off=" UINT64_FORMAT ",len=%u); "
+			 "child_blkno=%u parent_blkno=%u parent_pcc=%u parent_now_pcc=%u",
+			 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
+			 ionum, (uint64) MAKE_IO_DOWNLINK(ionum), dl,
+			 DOWNLINK_IS_IN_MEMORY(dl) ? "in_memory" :
+			 (DOWNLINK_IS_IN_IO(dl) ? "io" : "on_disk"),
+			 DOWNLINK_GET_IN_MEMORY_BLKNO(dl),
+			 DOWNLINK_GET_IN_MEMORY_CHANGECOUNT(dl),
+			 DOWNLINK_GET_IO_LOCKNUM(dl),
+			 DOWNLINK_GET_DISK_OFF(dl), (uint32) DOWNLINK_GET_DISK_LEN(dl),
+			 blkno, parent_blkno, parent_change_count,
+			 O_PAGE_GET_CHANGE_COUNT(parent_page));
+	}
 	int_hdr->downlink = MAKE_IN_MEMORY_DOWNLINK(blkno, O_PAGE_HEADER(page)->pageChangeCount);
 
 	unlock_io(ionum);
