@@ -766,6 +766,81 @@ read_target_last_xid(const char *datadir_target)
 }
 
 static void
+patch_orioledb_control_file(const char *datadir, OXid divXid)
+{
+	char		path[MAXPGPATH];
+	int			fd;
+	CheckpointControl control;
+	pg_crc32c	expected_crc;
+
+	snprintf(path, sizeof(path), "%s/orioledb_data/control", datadir);
+
+	fd = open(path, O_RDWR | PG_BINARY);
+	if (fd < 0)
+	{
+		pg_log_debug("could not open orioledb control file \"%s\" for patching: %m", path);
+		return;
+	}
+
+	if (read(fd, &control, sizeof(CheckpointControl)) != sizeof(CheckpointControl))
+	{
+		pg_log_debug("could not read orioledb control file \"%s\": %m", path);
+		close(fd);
+		return;
+	}
+
+	/* Verify CRC before modifying */
+	expected_crc = control.crc;
+	INIT_CRC32C(control.crc);
+	COMP_CRC32C(control.crc,
+				(char *) &control,
+				offsetof(CheckpointControl, crc));
+	FIN_CRC32C(control.crc);
+
+	if (!EQ_CRC32C(expected_crc, control.crc))
+	{
+		pg_log_debug("orioledb control file \"%s\" has invalid CRC, skipping patch", path);
+		close(fd);
+		return;
+	}
+
+	/*
+	 * Patch xid retain range to divXid so that globalXmin/runXmin are
+	 * initialized to a value <= the divergence point xmin, allowing WAL
+	 * replay to proceed without asserting xmin >= globalXmin.
+	 *
+	 * divXid is the xmin from the last commit/rollback record at or before
+	 * the divergence point, so it is safe to use as both Xmin and Xmax:
+	 * recovery will advance these forward as it replays WAL.
+	 */
+	control.checkpointRetainXmin = divXid;
+	control.checkpointRetainXmax = divXid;
+	control.lastXid = divXid;
+
+	/* Recompute CRC */
+	INIT_CRC32C(control.crc);
+	COMP_CRC32C(control.crc,
+				(char *) &control,
+				offsetof(CheckpointControl, crc));
+	FIN_CRC32C(control.crc);
+
+	if (lseek(fd, 0, SEEK_SET) < 0)
+	{
+		pg_log_debug("could not seek orioledb control file \"%s\": %m", path);
+		close(fd);
+		return;
+	}
+
+	write_binary(fd, path, &control, sizeof(CheckpointControl));
+
+	if (close(fd) != 0)
+		pg_fatal("could not close orioledb control file \"%s\": %m", path);
+
+	pg_log_debug("patched orioledb control file: checkpointRetainXmin/Xmax/lastXid -> %lu",
+				 (unsigned long) divXid);
+}
+
+static void
 orioledb_process_row_map(OrioledbKeyMap *orioledb_map, const char *argv0,
 						 const char *datadir, bool debug, PGconn *conn,
 						 XLogRecPtr startpoint, OXid lastXid)
@@ -814,6 +889,7 @@ orioledb_process_row_map(OrioledbKeyMap *orioledb_map, const char *argv0,
 		pfree(str->data);
 		pfree(str);
 	}
+	patch_orioledb_control_file(datadir, lastXid);
 }
 
 static WalParseResult
@@ -928,6 +1004,7 @@ _PG_rewind(const char *datadir_target, char *datadir_source,
 {
 	OrioledbKeyMap *orioledb_map = create_orioledb_key_map(startpoint);
 	PGconn	   *source_conn;
+	OXid		targetLastXid;
 
 /* TODO:Close connection atexit */
 
@@ -936,18 +1013,25 @@ _PG_rewind(const char *datadir_target, char *datadir_source,
 	if (PQstatus(source_conn) == CONNECTION_BAD)
 		pg_fatal("%s", PQerrorMessage(source_conn));
 
+	/* Read target's control file NOW, before source files overwrite it */
+	targetLastXid = read_target_last_xid(datadir_target);
+	pg_log_debug("target lastXid from control file: %lu",
+				 (unsigned long) targetLastXid);
 
 	orioledb_map->fill_map = true;
 	SimpleXLogRead(datadir_target, startpoint, tliIndex, endpoint,
 				   restoreCommand, extract_row_info, orioledb_map);
-	if (!OXidIsValid(orioledb_map->divXid))
-	{
-		pg_log_debug("no orioledb transactions found in WAL, "
-					 "reading lastXid from control file");
-		orioledb_map->divXid = read_target_last_xid(datadir_target);
-		if (!OXidIsValid(orioledb_map->divXid))
-			pg_fatal("could not determine lastXid for orioledb rewind");
-	}
+	/*
+	 * Use the target's own checkpoint lastXid as divXid - it reflects the
+	 * state at the last checkpoint before divergence, which is always <=
+	 * any xmin that WAL replay will encounter.  The WAL-derived xmin from
+	 * commit records in the diverged segment can be higher than the
+	 * checkpoint floor and is not safe to use for initializing globalXmin.
+	 */
+	if (OXidIsValid(targetLastXid))
+		orioledb_map->divXid = targetLastXid;
+	else if (!OXidIsValid(orioledb_map->divXid))
+		pg_fatal("could not determine lastXid for orioledb rewind");
 	pg_log_debug("divXid: %lu", orioledb_map->divXid);
 	if (debug)
 		orioledb_key_map_print(orioledb_map);
