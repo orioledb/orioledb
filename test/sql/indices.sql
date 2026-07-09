@@ -2009,7 +2009,8 @@ CREATE UNIQUE INDEX o_test_idx_id ON o_test_add_index_constraint(id);
 -- Check initial state (index exists but no constraint)
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
-WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+WHERE conrelid = 'o_test_add_index_constraint'::regclass
+ORDER BY conname;
 
 -- Test AT_AddIndexConstraint: Add PRIMARY KEY using existing index
 ALTER TABLE o_test_add_index_constraint
@@ -2018,7 +2019,8 @@ ALTER TABLE o_test_add_index_constraint
 -- Verify constraint was added
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
-WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+WHERE conrelid = 'o_test_add_index_constraint'::regclass
+ORDER BY conname;
 
 -- Test constraint enforcement
 INSERT INTO o_test_add_index_constraint VALUES (4, 'four');  -- Should succeed
@@ -2030,7 +2032,8 @@ CREATE UNIQUE INDEX o_test_idx_val ON o_test_add_index_constraint(val);
 -- Check state before adding UNIQUE constraint
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
-WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+WHERE conrelid = 'o_test_add_index_constraint'::regclass
+ORDER BY conname;
 
 -- Test AT_AddIndexConstraint: Add UNIQUE constraint using existing index
 ALTER TABLE o_test_add_index_constraint
@@ -2039,7 +2042,8 @@ ALTER TABLE o_test_add_index_constraint
 -- Verify both constraints exist
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
-WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+WHERE conrelid = 'o_test_add_index_constraint'::regclass
+ORDER BY conname;
 
 -- Test UNIQUE constraint enforcement
 INSERT INTO o_test_add_index_constraint VALUES (5, 'five');  -- Should succeed

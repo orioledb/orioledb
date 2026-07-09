@@ -8705,7 +8705,8 @@ CREATE UNIQUE INDEX o_test_idx_id ON o_test_add_index_constraint(id);
 -- Check initial state (index exists but no constraint)
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
-WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+WHERE conrelid = 'o_test_add_index_constraint'::regclass
+ORDER BY conname;
  conname | contype | conindid 
 ---------+---------+----------
 (0 rows)
@@ -8718,7 +8719,8 @@ WARNING:  We cannot just reuse index for primary key in orioledb, because second
 -- Verify constraint was added
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
-WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+WHERE conrelid = 'o_test_add_index_constraint'::regclass
+ORDER BY conname;
   conname  | contype | conindid  
 -----------+---------+-----------
  o_test_pk | p       | o_test_pk
@@ -8734,7 +8736,8 @@ CREATE UNIQUE INDEX o_test_idx_val ON o_test_add_index_constraint(val);
 -- Check state before adding UNIQUE constraint
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
-WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+WHERE conrelid = 'o_test_add_index_constraint'::regclass
+ORDER BY conname;
   conname  | contype | conindid  
 -----------+---------+-----------
  o_test_pk | p       | o_test_pk
@@ -8747,7 +8750,8 @@ NOTICE:  ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index "o_test_idx_
 -- Verify both constraints exist
 SELECT conname, contype, conindid::regclass
 FROM pg_constraint
-WHERE conrelid = 'o_test_add_index_constraint'::regclass;
+WHERE conrelid = 'o_test_add_index_constraint'::regclass
+ORDER BY conname;
   conname  | contype | conindid  
 -----------+---------+-----------
  o_test_pk | p       | o_test_pk
