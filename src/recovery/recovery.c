@@ -2863,6 +2863,7 @@ update_run_xmin(void)
 	{
 		xmin = pg_atomic_read_u64(&xid_meta->nextXid);
 	}
+	elog(WARNING, "SET runXmin 2: xmin = Min(%lu, %lu)", xmin, recovery_xmin);
 	xmin = Min(xmin, recovery_xmin);
 	elog(WARNING, "SET runXmin 2: %lu", xmin);
 	pg_atomic_write_u64(&xid_meta->runXmin, xmin);
@@ -2875,6 +2876,7 @@ update_run_xmin(void)
 	 * so any later downward move would be a regression we must never publish.
 	 * Make monotonicity an explicit invariant instead.
 	 */
+	elog(WARNING, "xmin(%lu) >= pg_atomic_read_u64(&xid_meta->globalXmin)(%lu)", xmin, pg_atomic_read_u64(&xid_meta->globalXmin));
 	Assert(xmin >= pg_atomic_read_u64(&xid_meta->globalXmin));
 }
 
