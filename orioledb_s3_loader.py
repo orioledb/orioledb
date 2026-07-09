@@ -543,7 +543,10 @@ def get_orioledb_control_data(data_dir: str):
 	Return contents of OrioleDB control file.
 	"""
 
-	f = open(f"{data_dir}/orioledb_data/control", 'rb')
+	control_path = os.path.realpath(os.path.join(data_dir, "orioledb_data", "control"))
+	if not control_path.startswith(os.path.realpath(data_dir) + os.sep):
+		raise ValueError(f"Path traversal detected: {control_path}")
+	f = open(control_path, 'rb')
 	data = f.read(8 * 13)
 	(undoRegularStartLocation,
 	 undoRegularEndLocation) = struct.unpack('QQ', data[8 * 8:8 * 10])
