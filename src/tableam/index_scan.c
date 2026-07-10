@@ -868,11 +868,19 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 		if (tup_fetched && !O_TUPLE_IS_NULL(tup) &&
 			ostate->skipScanProbePending)
 		{
+			MemoryContext oldcontext;
+
 			ostate->skipScanProbePending = false;
+
+			/*
+			 * Switch to scan-lifetime context before observe_tuple so
+			 * datumCopy() into sk_argument lands in ostate->cxt, not in
+			 * whatever short-lived context the executor called us from --
+			 * sk_argument must survive across iterator rebuild.
+			 */
+			oldcontext = MemoryContextSwitchTo(ostate->cxt);
 			if (o_skip_arrays_observe_tuple(indexDescr, ostate, tup))
 			{
-				MemoryContext oldcontext;
-
 				/*
 				 * Rebuild iterator inline.  Avoid switch_to_next_range: its
 				 * curKeyRangeIsLoaded=false branch would call
@@ -885,7 +893,6 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 					ostate->iterator = NULL;
 				}
 
-				oldcontext = MemoryContextSwitchTo(ostate->cxt);
 				ostate->exact = o_key_data_to_key_range(&ostate->curKeyRange,
 														so->keyData,
 														so->numberOfKeys,
@@ -914,6 +921,7 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 				O_TUPLE_SET_NULL(tup);
 				continue;
 			}
+			MemoryContextSwitchTo(oldcontext);
 		}
 #endif
 
