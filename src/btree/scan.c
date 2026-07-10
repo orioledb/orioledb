@@ -82,7 +82,7 @@ struct BTreeSeqScan
 {
 	BTreeDescr *desc;
 
-	char		leafImg[ORIOLEDB_BLCKSZ];
+	char		pg_attribute_aligned(sizeof(uint32)) leafImg[ORIOLEDB_BLCKSZ];
 	char		histImg[ORIOLEDB_BLCKSZ];
 
 	/*
@@ -1538,7 +1538,7 @@ static bool
 load_next_disk_leaf_page(BTreeSeqScan *scan)
 {
 	FileExtent	extent;
-	bool		success;
+	OReadPageResult read_result;
 	BTreePageHeader *header;
 	BTreeSeqScanDiskDownlink downlink;
 	ParallelOScanDesc poscan = scan->poscan;
@@ -1566,10 +1566,10 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 		downlink = ((BTreeSeqScanDiskDownlink *) dsm_segment_address(scan->dsmSeg))[index];
 	}
 
-	success = read_page_from_disk(scan->desc,
-								  scan->leafImg,
-								  downlink.downlink,
-								  &extent);
+	read_result = read_page_from_disk(scan->desc,
+									  scan->leafImg,
+									  downlink.downlink,
+									  &extent);
 	header = (BTreePageHeader *) scan->leafImg;
 	if (header->csn >= downlink.csn)
 		read_page_from_undo(scan->desc, scan->leafImg, header->undoLocation,
@@ -1579,8 +1579,16 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 			  btree_page_stopevent_params(scan->desc,
 										  scan->leafImg));
 
-	if (!success)
-		elog(ERROR, "can not read leaf page from disk");
+	if (read_result != OReadPageResultOk)
+	{
+		if (read_result == OReadPageResultChecksumFailed)
+			ereport(ERROR,
+					(errcode(ERRCODE_DATA_CORRUPTED),
+					 errmsg("invalid leaf page with file offset " UINT64_FORMAT " read from disk",
+							DOWNLINK_GET_DISK_OFF(downlink.downlink))));
+		else
+			elog(ERROR, "can not read leaf page from disk");
+	}
 
 	/*
 	 * A disk leaf is read whole into the private leafImg, so any partial-read

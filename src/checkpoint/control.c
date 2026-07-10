@@ -74,6 +74,7 @@ get_checkpoint_control_data(CheckpointControl *control)
 
 /*
  * Check checkpoint control data
+ *   - Check control version
  *   - Check CRC
  *   - Check control parameters
  */
@@ -82,13 +83,11 @@ check_checkpoint_control(CheckpointControl *control)
 {
 	pg_crc32c	crc;
 
-	INIT_CRC32C(crc);
-	COMP_CRC32C(crc, control, offsetof(CheckpointControl, crc));
-	FIN_CRC32C(crc);
-
-	if (crc != control->crc)
-		elog(ERROR, "Wrong CRC in control file");
-
+	/*
+	 * Check the version before the CRC: a version bump can move
+	 * offsetof(CheckpointControl, crc), which would otherwise fail as a
+	 * misleading "Wrong CRC" rather than a version mismatch.
+	 */
 	if (control->controlFileVersion != ORIOLEDB_CHECKPOINT_CONTROL_VERSION)
 	{
 		/*
@@ -103,6 +102,13 @@ check_checkpoint_control(CheckpointControl *control)
 						   " but the currently required version is %d.",
 						   control->controlFileVersion, ORIOLEDB_CHECKPOINT_CONTROL_VERSION)));
 	}
+
+	INIT_CRC32C(crc);
+	COMP_CRC32C(crc, control, offsetof(CheckpointControl, crc));
+	FIN_CRC32C(crc);
+
+	if (crc != control->crc)
+		elog(ERROR, "Wrong CRC in control file");
 
 	if (control->binaryVersion != ORIOLEDB_BINARY_VERSION)
 		ereport(FATAL,

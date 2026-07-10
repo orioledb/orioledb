@@ -47,6 +47,8 @@
 #include "access/relation.h"
 #include "pgstat.h"
 #include "storage/bufmgr.h"
+#include "storage/checksum.h"
+#include "storage/checksum_impl.h"
 #include "utils/memutils.h"
 #include "utils/syscache.h"
 #include "funcapi.h"
@@ -76,6 +78,21 @@ typedef struct IOWriteBack
 	int			extentsAllocated;
 	TreeOffset *extents;
 } IOWriteBack;
+
+typedef union
+{
+	OrioleDBOndiskPageHeader phdr;
+	uint32		data[ORIOLEDB_BLCKSZ / (sizeof(uint32) * N_SUMS)][N_SUMS];
+} OrioleDBChecksummablePage;
+
+
+StaticAssertDecl(sizeof(OrioleDBChecksummablePage) == ORIOLEDB_BLCKSZ,
+				 "OrioleDBChecksummablePage size doesn't match ORIOLEDB_BLCKSZ");
+
+StaticAssertDecl(ORIOLEDB_BLCKSZ % (sizeof(uint32) * N_SUMS) == 0,
+				 "ORIOLEDB_BLCKSZ is not a multiple of sizeof(uint32) * N_SUMS");
+StaticAssertDecl(ORIOLEDB_COMP_BLCKSZ % (sizeof(uint32) * N_SUMS) == 0,
+				 "ORIOLEDB_COMP_BLCKSZ is not a multiple of sizeof(uint32) * N_SUMS");
 
 static IOWriteBack io_writeback =
 {
@@ -1249,6 +1266,69 @@ convert_orioledb_page_version(Pointer img)
 	elog(FATAL, "Page version conversion is not implemented");
 }
 
+static inline uint32
+oriole_checksum_block_len(uint32 blk_size)
+{
+	return (uint32) (blk_size / (sizeof(uint32) * N_SUMS));
+}
+
+/*
+ * Block checksum algorithm.  The page must be adequately aligned
+ * (at least on 4-byte boundary).
+ */
+static inline uint32
+oriole_checksum_block(const OrioleDBChecksummablePage *page, uint32 len)
+{
+	uint32		sums[N_SUMS];
+	uint32		result = 0;
+	uint32		i,
+				j;
+
+	/* initialize partial checksums to their corresponding offsets */
+	memcpy(sums, checksumBaseOffsets, sizeof(checksumBaseOffsets));
+
+	/* main checksum calculation */
+	for (i = 0; i < len; i++)
+		for (j = 0; j < N_SUMS; j++)
+			CHECKSUM_COMP(sums[j], page->data[i][j]);
+
+	/* finally add in two rounds of zeroes for additional mixing */
+	for (i = 0; i < 2; i++)
+		for (j = 0; j < N_SUMS; j++)
+			CHECKSUM_COMP(sums[j], 0);
+
+	/* xor fold partial checksums together */
+	for (i = 0; i < N_SUMS; i++)
+		result ^= sums[i];
+
+	return result;
+}
+
+static bool
+check_orioledb_page_checksum(OrioleDBOndiskPageHeader ondisk_page_header,
+							 char *buf, const char *label, uint32 len)
+{
+	uint16		computedCheckSum = 0;
+
+	((OrioleDBOndiskPageHeader *) buf)->checkSum = 0;
+
+	computedCheckSum = (uint16) ((oriole_checksum_block((const OrioleDBChecksummablePage *) buf, len) % 65535) + 1);
+
+	elog(DEBUG1, "Read %s disk page: stored checksum %u, computed checksum %u",
+		 label, ondisk_page_header.checkSum, computedCheckSum);
+
+	if (computedCheckSum != ondisk_page_header.checkSum)
+	{
+		ereport(WARNING,
+				(errcode(ERRCODE_DATA_CORRUPTED),
+				 errmsg("%s page checksum mismatch: stored %u, computed %u",
+						label, ondisk_page_header.checkSum, computedCheckSum)));
+		/* TODO: maybe ereport(ERROR) here once caller cleanup is safe */
+		return false;
+	}
+	return true;
+}
+
 /*
  * Now we have only one compresss version (1). When we have
  * different versions we'll need to bump
@@ -1269,7 +1349,7 @@ check_orioledb_compress_version(OrioleDBOndiskPageHeader ondisk_page_header)
  * Reads a page from disk to the img from a valid downlink. It's fills an empty
  * array of offsets for the page.
  */
-bool
+OReadPageResult
 read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 					FileExtent *extent)
 {
@@ -1282,6 +1362,8 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 	OrioleDBOndiskPageHeader ondisk_page_header = {0};
 	bool		needs_page_version_convert;
 
+	/* for the checksum computation we need aligned buffer */
+	Assert(((uintptr_t) img % sizeof(uint32)) == 0);
 	Assert(FileExtentOffIsValid(offset));
 	Assert(FileExtentLenIsValid(len));
 
@@ -1307,16 +1389,22 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 
 		err = btree_smgr_read(desc, img, chkpNum, read_size, byte_offset) != read_size;
 		if (err)
-			return false;
+			return OReadPageResultIOError;
 
 		ondisk_page_header = *((OrioleDBOndiskPageHeader *) img);
 		needs_page_version_convert = check_orioledb_page_version(ondisk_page_header);
+
+		if (orioledb_checksums_enabled &&
+			!check_orioledb_page_checksum(ondisk_page_header, img, "plain", oriole_checksum_block_len(read_size)))
+			return OReadPageResultChecksumFailed;
 
 		elog(DEBUG1, "Read plain disk page: checkpoint %u", ondisk_page_header.checkpointNum);
 	}
 	else
 	{
-		char		buf[ORIOLEDB_BLCKSZ];
+		OrioleDBChecksummablePage cp;
+		char	   *buf = (char *) &cp;
+
 		bool		compressed = len != (ORIOLEDB_BLCKSZ / ORIOLEDB_COMP_BLCKSZ);
 
 		if (compressed)
@@ -1328,10 +1416,14 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 
 			err = btree_smgr_read(desc, buf, chkpNum, read_size, byte_offset) != read_size;
 			if (err)
-				return false;
+				return OReadPageResultIOError;
 
 			ondisk_page_header = *((OrioleDBOndiskPageHeader *) buf);
 			needs_page_version_convert = check_orioledb_page_version(ondisk_page_header);
+
+			if (orioledb_checksums_enabled &&
+				!check_orioledb_page_checksum(ondisk_page_header, buf, "compressed", oriole_checksum_block_len(read_size)))
+				return OReadPageResultChecksumFailed;
 
 			needs_compress_version_convert = check_orioledb_compress_version(ondisk_page_header);
 			Assert(!needs_compress_version_convert);
@@ -1355,14 +1447,29 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 			byte_offset += read_size;
 
 			if (err)
-				return false;
+				return OReadPageResultIOError;
 
 			read_size = ORIOLEDB_BLCKSZ - O_PAGE_HEADER_SIZE;
 			err = btree_smgr_read(desc, img + O_PAGE_HEADER_SIZE, chkpNum, read_size, byte_offset) != read_size;
 			if (err)
-				return false;
+				return OReadPageResultIOError;
 
 			needs_page_version_convert = check_orioledb_page_version(ondisk_page_header);
+
+			if (orioledb_checksums_enabled)
+			{
+				/*
+				 * The body is already in place at img + O_PAGE_HEADER_SIZE;
+				 * put the header back in front of it so img holds the whole
+				 * on-disk image, then verify.  img's header area is
+				 * overwritten below.
+				 */
+				memcpy(img, &ondisk_page_header, O_PAGE_HEADER_SIZE);
+
+				if (!check_orioledb_page_checksum(ondisk_page_header, img, "compressed (len=1)", oriole_checksum_block_len(ORIOLEDB_BLCKSZ)))
+					return OReadPageResultChecksumFailed;
+			}
+
 			elog(DEBUG1, "Read disk page: checkpoint %u size %d", ondisk_page_header.checkpointNum, ORIOLEDB_BLCKSZ);
 		}
 	}
@@ -1389,7 +1496,7 @@ read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink,
 	store_read_page_checkpoint_stats(((BTreePageHeader *) img)->o_header.checkpointNum);
 #endif
 
-	return true;
+	return OReadPageResultOk;
 }
 
 /*
@@ -1404,7 +1511,8 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 				write_size;
 	bool		err = false;
 	uint32		chkpNum = 0;
-	char		buf[ORIOLEDB_BLCKSZ];
+	OrioleDBChecksummablePage cp;
+	char	   *buf = (char *) &cp;
 
 	Assert(FileExtentOffIsValid(extent->off));
 
@@ -1438,6 +1546,9 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 		ondisk_page_header->page_version = ORIOLEDB_PAGE_VERSION;
 		memcpy(&buf[O_PAGE_HEADER_SIZE], page + O_PAGE_HEADER_SIZE, ORIOLEDB_BLCKSZ - O_PAGE_HEADER_SIZE);
 
+		if (orioledb_checksums_enabled)
+			ondisk_page_header->checkSum = (uint16) ((oriole_checksum_block(&cp, oriole_checksum_block_len(write_size)) % 65535) + 1);
+
 		err = btree_smgr_write(desc, buf, chkpNum, write_size, byte_offset) != write_size;
 
 		elog(DEBUG1, "Wrote plain disk page: checkpoint %u", curChkpNum);
@@ -1459,6 +1570,31 @@ write_page_to_disk(BTreeDescr *desc, FileExtent *extent, uint32 curChkpNum,
 		ondisk_page_header.checkpointNum = curChkpNum;
 		ondisk_page_header.compress_version = ORIOLEDB_COMPRESS_VERSION;
 		ondisk_page_header.page_version = ORIOLEDB_PAGE_VERSION;
+
+		if (orioledb_checksums_enabled)
+		{
+			off_t		image_size;
+			char	   *body;
+
+			if (page_size != ORIOLEDB_BLCKSZ)
+			{
+				image_size = extent->len * ORIOLEDB_COMP_BLCKSZ;
+				body = page;
+			}
+			else
+			{
+				/*
+				 * Compression freed less than one ORIOLEDB_COMP_BLCKSZ, so
+				 * the page is stored full and its header is inline in page.
+				 */
+				image_size = ORIOLEDB_BLCKSZ;
+				body = page + O_PAGE_HEADER_SIZE;
+			}
+
+			memcpy(buf, &ondisk_page_header, O_PAGE_HEADER_SIZE);
+			memcpy(&buf[O_PAGE_HEADER_SIZE], body, image_size - O_PAGE_HEADER_SIZE);
+			ondisk_page_header.checkSum = (uint16) ((oriole_checksum_block(&cp, oriole_checksum_block_len(image_size)) % 65535) + 1);
+		}
 
 		write_size = O_PAGE_HEADER_SIZE;
 		err = btree_smgr_write(desc, (char *) &ondisk_page_header, chkpNum, write_size, byte_offset) != write_size;
@@ -1517,12 +1653,13 @@ load_page(OBTreeFindPageContext *context)
 	OFixedKey	target_hikey;
 	int			target_level;
 	Page		page;
-	char		buf[ORIOLEDB_BLCKSZ];
+	char		pg_attribute_aligned(sizeof(uint32)) buf[ORIOLEDB_BLCKSZ];
 	bool		was_modify;
 	bool		was_downlink_location;
 	bool		was_fetch = false;
 	bool		was_image = false;
 	bool		was_keep_lokey = false;
+	OReadPageResult read_result;
 	uint32		chkpNum = 0;
 
 	context_index = context->index;
@@ -1568,7 +1705,9 @@ load_page(OBTreeFindPageContext *context)
 	page_desc->flags = 0;
 
 	/* Read page data and put it to the page */
-	if (!read_page_from_disk(desc, buf, downlink, &page_desc->fileExtent))
+	read_result = read_page_from_disk(desc, buf, downlink,
+									  &page_desc->fileExtent);
+	if (read_result != OReadPageResultOk)
 	{
 		int_hdr->downlink = downlink;
 		PAGE_INC_N_ONDISK(parent_page);
@@ -1576,10 +1715,16 @@ load_page(OBTreeFindPageContext *context)
 		if (orioledb_s3_mode)
 			chkpNum = S3_GET_CHKP_NUM(page_desc->fileExtent.off);
 
-		ereport(ERROR, (errcode_for_file_access(),
-						errmsg("could not read page with file offset " UINT64_FORMAT " from %s: %m",
-							   DOWNLINK_GET_DISK_OFF(downlink),
-							   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(downlink), chkpNum))));
+		if (read_result == OReadPageResultChecksumFailed)
+			ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+							errmsg("invalid page with file offset " UINT64_FORMAT " in %s",
+								   DOWNLINK_GET_DISK_OFF(downlink),
+								   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(downlink), chkpNum))));
+		else
+			ereport(ERROR, (errcode_for_file_access(),
+							errmsg("could not read page with file offset " UINT64_FORMAT " from %s: %m",
+								   DOWNLINK_GET_DISK_OFF(downlink),
+								   btree_smgr_filename(desc, DOWNLINK_GET_DISK_OFF(downlink), chkpNum))));
 	}
 
 	put_page_image(blkno, buf);
