@@ -55,7 +55,17 @@ extern void btree_smgr_punch_hole(BTreeDescr *desc, uint32 chkpNum,
 extern void punch_fd_hole(int fd, off_t offset, off_t length,
 						  const char *fileName);
 extern void init_btree_io_lwlocks(void);
-extern bool read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink, FileExtent *extent);
+
+typedef enum
+{
+	OReadPageResultOk,
+	/* the page could not be read from the disk at all */
+	OReadPageResultIOError,
+	/* the page was read, but its checksum didn't match */
+	OReadPageResultChecksumFailed
+} OReadPageResult;
+
+extern OReadPageResult read_page_from_disk(BTreeDescr *desc, Pointer img, uint64 downlink, FileExtent *extent);
 extern void load_page(OBTreeFindPageContext *context);
 extern uint64 perform_page_io(BTreeDescr *desc, OInMemoryBlkno blkno,
 							  Page img, uint32 checkpoint_number,

@@ -32,7 +32,7 @@ typedef struct
  * Also on-the-flight conversion routine should be added to
  * check_checkpoint_control()
  */
-#define ORIOLEDB_CHECKPOINT_CONTROL_VERSION	1
+#define ORIOLEDB_CHECKPOINT_CONTROL_VERSION	2
 
 /*
  * To ensure correct reading of controlFileVersion, changes in struct layout
@@ -58,6 +58,11 @@ typedef struct
 	OXid		checkpointRetainXmax;
 	uint32		binaryVersion;
 	bool		s3Mode;
+
+	/*
+	 * orioledb_checksums_enabled
+	 */
+	bool		checksums_enabled;
 	/* CRC of all fields above. It should be last */
 	pg_crc32c	crc;
 } CheckpointControl;

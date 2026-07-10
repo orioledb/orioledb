@@ -98,7 +98,7 @@
  * these values makes sense only within one ORIOLEDB_BINARY_VERSION value.
  */
 #define ORIOLEDB_VERSION "OrioleDB beta 16"
-#define ORIOLEDB_BINARY_VERSION 9
+#define ORIOLEDB_BINARY_VERSION 10
 #define ORIOLEDB_SYS_TREE_VERSION	1	/* Version of system catalog */
 #define ORIOLEDB_PAGE_VERSION		1	/* Version of binary page format */
 #define ORIOLEDB_COMPRESS_VERSION	1	/* Version of page compression (only
@@ -385,7 +385,8 @@ typedef struct
 	 * pages it should be used for conversion of uncompressed images
 	 */
 	uint8		page_version;
-	uint32		reserved1;
+	uint16		checkSum;
+	uint16		reserved1;
 	uint32		reserved2;
 } OrioleDBOndiskPageHeader;
 
@@ -470,6 +471,7 @@ extern bool orioledb_table_description_compress;
 extern char *max_bridge_ctid_string;
 extern BlockNumber max_bridge_ctid_blkno;
 extern bool orioledb_s3_mode;
+extern bool orioledb_checksums_enabled;
 extern int	s3_num_workers;
 extern int	s3_desired_size;
 extern int	s3_queue_size_guc;

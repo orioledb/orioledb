@@ -327,6 +327,8 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		if (!get_checkpoint_control_data(&control))
 			return;
 
+		orioledb_checksums_enabled = control.checksums_enabled;
+
 		checkpoint_state->controlIdentifier = control.controlIdentifier;
 		checkpoint_state->lastCheckpointNumber = control.lastCheckpointNumber;
 		checkpoint_state->controlToastConsistentPtr = control.toastConsistentPtr;
@@ -1539,6 +1541,7 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	control.checkpointRetainXmax = checkpoint_xmax;
 	control.binaryVersion = ORIOLEDB_BINARY_VERSION;
 	control.s3Mode = orioledb_s3_mode;
+	control.checksums_enabled = orioledb_checksums_enabled;
 	control.controlFileVersion = ORIOLEDB_CHECKPOINT_CONTROL_VERSION;
 
 	write_checkpoint_control(&control);
@@ -5611,23 +5614,31 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 	if (DiskDownlinkIsValid(file_header.rootDownlink))
 	{
 		OrioleDBPageDesc *root_desc;
-		char		buf[ORIOLEDB_BLCKSZ];
-		bool		rerror;
+		char		pg_attribute_aligned(sizeof(uint32)) buf[ORIOLEDB_BLCKSZ];
+		OReadPageResult read_result;
 
 		lock_page(desc->rootInfo.rootPageBlkno);
 		page_block_reads(desc->rootInfo.rootPageBlkno);
 		root_desc = O_GET_IN_MEMORY_PAGEDESC(desc->rootInfo.rootPageBlkno);
 
-		rerror = !read_page_from_disk(desc, buf, file_header.rootDownlink, &root_desc->fileExtent);
+		read_result = read_page_from_disk(desc, buf, file_header.rootDownlink,
+										  &root_desc->fileExtent);
 
-		if (rerror)
+		if (read_result != OReadPageResultOk)
 		{
 			unlock_page(desc->rootInfo.rootPageBlkno);
-			ereport(ERROR, (errcode_for_file_access(),
-							errmsg("could not read rootPageBlkno page from %s: %m",
-								   btree_smgr_filename(desc,
-													   DOWNLINK_GET_DISK_OFF(file_header.rootDownlink),
-													   chkp_num))));
+			if (read_result == OReadPageResultChecksumFailed)
+				ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
+								errmsg("invalid rootPageBlkno page in %s",
+									   btree_smgr_filename(desc,
+														   DOWNLINK_GET_DISK_OFF(file_header.rootDownlink),
+														   chkp_num))));
+			else
+				ereport(ERROR, (errcode_for_file_access(),
+								errmsg("could not read rootPageBlkno page from %s: %m",
+									   btree_smgr_filename(desc,
+														   DOWNLINK_GET_DISK_OFF(file_header.rootDownlink),
+														   chkp_num))));
 		}
 
 		put_page_image(desc->rootInfo.rootPageBlkno, buf);

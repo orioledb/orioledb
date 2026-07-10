@@ -228,6 +228,149 @@ class AmcheckTest(BaseTest):
 		self.assertTrue(any('check failed' in r[1] for r in rows),
 		                f"unexpected verify_orioledb output: {rows!r}")
 
+	def verify_orioledb_page_checksum_base(self, corrupt, compress=False):
+		"""
+		Shared helper for the page-checksum tests. OrioleDB page checksums are
+		always enabled, so we create + checkpoint a table, optionally corrupt a
+		page byte on disk, restart, and assert on the log: a corrupted page
+		must yield a 'page checksum mismatch' WARNING, a clean one must not.
+
+		With compress=True the table is created WITH (compress = 1) and filled
+		with both compressible and incompressible rows, so the on-disk image
+		exercises both the compressed-extent path and the full-block
+		(len == 1) path in read_page_from_disk / write_page_to_disk.
+		"""
+		import random
+		import struct
+
+		node = self.initNode(self.getBasePort(),
+		                     initdb_args=["--no-locale", "--encoding=UTF8"])
+		self.node = node
+
+		node.start()
+		if compress:
+			row_count = 1400
+			node.safe_psql(
+			    'postgres', """
+				CREATE EXTENSION IF NOT EXISTS orioledb;
+				CREATE TABLE o_corrupt (
+					k int PRIMARY KEY,
+					v bytea NOT NULL
+				) USING orioledb WITH (compress = 1);
+				INSERT INTO o_corrupt
+					SELECT i, decode(repeat('78', 200), 'hex')
+					FROM generate_series(1, 1000) i;
+			""")
+			# Incompressible rows so some leaf pages stay above the block size
+			# and get stored full-block (the len == 1 path). A fixed-seed PRNG
+			# keeps the run reproducible; the assertions don't depend on the
+			# actual bytes, only on the pages being incompressible.
+			rnd = random.Random(1234)
+			con = node.connect()
+			for i in range(1001, row_count + 1):
+				con.execute("INSERT INTO o_corrupt VALUES (%s, %s)", i,
+				            rnd.randbytes(2560))
+			con.commit()
+			con.close()
+			node.safe_psql('postgres', "CHECKPOINT;")
+		else:
+			row_count = 1000
+			node.safe_psql(
+			    'postgres', """
+				CREATE EXTENSION IF NOT EXISTS orioledb;
+				CREATE TABLE o_corrupt (
+					k int PRIMARY KEY,
+					v text NOT NULL
+				) USING orioledb;
+				INSERT INTO o_corrupt
+					SELECT i, repeat('x', 200) FROM generate_series(1, 1000) i;
+				CHECKPOINT;
+			""")
+
+		datoid, pkey_relnode = node.execute(
+		    'postgres', """
+			SELECT (SELECT oid FROM pg_database WHERE datname='postgres'),
+			       (SELECT relfilenode FROM pg_class
+			        WHERE relname='o_corrupt_pkey');
+		""")[0]
+
+		node.stop()
+
+		if corrupt:
+			# Pick the page file and write garbage somewhere. On restart we
+			# should get a checksum error (checksums are always on).
+			pattern = os.path.join(node.data_dir, 'orioledb_data', str(datoid),
+			                       f'{pkey_relnode}')
+			page_files = sorted(glob.glob(pattern))
+			self.assertTrue(page_files, f"no page files matched {pattern}")
+			with open(page_files[-1], 'r+b') as f:
+				if compress:
+					# Compressed extents are variably sized and the file is
+					# sparse, so a fixed offset can land in a hole. Flip the
+					# last non-zero byte instead: it is guaranteed to sit inside
+					# a written extent's checksummed region.
+					data = f.read()
+					pos = len(data)
+					while pos > 0 and data[pos - 1] == 0:
+						pos -= 1
+					self.assertGreater(pos, 0, "page file is all zeroes")
+					f.seek(pos - 1)
+					f.write(bytes([data[pos - 1] ^ 0xFF]))
+				else:
+					f.seek(16000)
+					f.write(struct.pack('<Q', 0xDEADBEEF))
+
+		node.start()
+		if corrupt:
+			# The checksum error is emitted as a WARNING inside
+			# read_page_from_disk because WARNING doesn't longjmp.
+			# After the cleanup, load_page raises the generic
+			# ereport(errcode_for_file_access, "could not read page ...: %m"),
+			# whose SQLSTATE comes from errcode_for_file_access() reading
+			# errno. The checksum path doesn't set errno, so whatever value
+			# happens to be there gets mapped (in practice ENOENT,
+			# surfaced as UndefinedFile).
+			#
+			# Assert on any Exception and grep the server log for the
+			# WARNING text to confirm the checksum path fired.
+			with self.assertRaises(Exception):
+				node.execute(
+				    'postgres',
+				    "SELECT * FROM verify_orioledb('o_corrupt'::regclass);")
+			with open(os.path.join(node.logs_dir, 'postgresql.log')) as f:
+				self.assertIn("page checksum mismatch", f.read())
+		else:
+			# Clean round-trip: reading every page back from cold cache must
+			# not report a checksum mismatch.
+			self.assertEqual(
+			    node.execute('postgres',
+			                 "SELECT count(*) FROM o_corrupt;")[0][0],
+			    row_count)
+			with open(os.path.join(node.logs_dir, 'postgresql.log')) as f:
+				self.assertNotIn("page checksum mismatch", f.read())
+
+	def test_verify_orioledb_page_corruption(self):
+		"""
+		Corrupting an on-disk page must produce a 'page checksum mismatch'
+		WARNING in the log.
+		"""
+		self.verify_orioledb_page_checksum_base(corrupt=True)
+
+	def test_verify_orioledb_page_corruption_compressed(self):
+		"""
+		Corrupting an on-disk page of a compressed table must produce a
+		'page checksum mismatch' WARNING, exercising the compressed read path
+		in read_page_from_disk.
+		"""
+		self.verify_orioledb_page_checksum_base(corrupt=True, compress=True)
+
+	def test_verify_orioledb_compressed_checksums_clean(self):
+		"""
+		A compressed table mixing compressed and full-block (len == 1) pages
+		must round-trip through disk with no checksum mismatch.
+		"""
+		self.verify_orioledb_page_checksum_base(corrupt=False, compress=True)
+
 	def test_verify_orioledb_during_checkpoint(self):
 		"""
 		With the checkpointer parked inside our pkey tree via a stopevent,

@@ -135,6 +135,7 @@ bool		debug_disable_bgwriter = false;
 bool		use_mmap = false;
 bool		use_device = false;
 bool		orioledb_use_sparse_files = false;
+bool		orioledb_checksums_enabled = true;
 char	   *device_filename = NULL;
 Pointer		mmap_data = NULL;
 int			device_fd;
@@ -912,6 +913,20 @@ _PG_init(void)
 							 false,
 							 PGC_POSTMASTER,
 							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	/*
+	 * Read-only and currently always on.
+	 */
+	DefineCustomBoolVariable("orioledb.checksums_enabled",
+							 "Shows whether OrioleDB page checksums are enabled.",
+							 NULL,
+							 &orioledb_checksums_enabled,
+							 true,
+							 PGC_INTERNAL,
+							 GUC_NOT_IN_SAMPLE,
 							 NULL,
 							 NULL,
 							 NULL);
