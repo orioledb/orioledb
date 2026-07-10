@@ -2311,6 +2311,73 @@ RESET enable_bitmapscan;
 RESET enable_seqscan;
 DROP TABLE o_test_skip_backward;
 
+-- Multi-row per distinct value across 10 distinct leading values: the
+-- sentinel probe returns the first match, the narrow iterator walks
+-- the remaining 2, advance sets SK_BT_NEXT, and the next probe opens
+-- past sk_argument.  count = 30 confirms every match is emitted once.
+CREATE TABLE o_test_skip_multirow (
+	x int NOT NULL,
+	y int NOT NULL
+) USING orioledb;
+CREATE INDEX o_test_skip_multirow_idx ON o_test_skip_multirow(x, y);
+INSERT INTO o_test_skip_multirow
+	SELECT x, 42 FROM generate_series(0, 9) x, generate_series(1, 3) r;
+INSERT INTO o_test_skip_multirow
+	SELECT x, y FROM generate_series(0, 9) x, generate_series(0, 5) y;
+ANALYZE o_test_skip_multirow;
+
+SET enable_seqscan = OFF;
+SET enable_bitmapscan = OFF;
+SELECT count(*), count(DISTINCT x) FROM o_test_skip_multirow WHERE y = 42;
+RESET enable_bitmapscan;
+RESET enable_seqscan;
+DROP TABLE o_test_skip_multirow;
+
+-- Nullable leading column: o_skip_arrays_observe_tuple deliberately
+-- does not pin sk_argument to a NULL leading value (would collide with
+-- the SK_ISNULL sentinel state) so the scan falls back to the broad
+-- iterator on the NULL band.  Both non-NULL and NULL-leading matches
+-- must still be returned correctly.
+CREATE TABLE o_test_skip_nullable (
+	x int,
+	y int NOT NULL
+) USING orioledb;
+CREATE INDEX o_test_skip_nullable_idx ON o_test_skip_nullable(x, y);
+INSERT INTO o_test_skip_nullable
+	SELECT g % 5, g FROM generate_series(1, 30) g;
+INSERT INTO o_test_skip_nullable
+	SELECT NULL, g FROM generate_series(100, 104) g;
+ANALYZE o_test_skip_nullable;
+
+SET enable_seqscan = OFF;
+SET enable_bitmapscan = OFF;
+SELECT x, y FROM o_test_skip_nullable WHERE y = 25;
+SELECT x, y FROM o_test_skip_nullable WHERE y = 102;
+RESET enable_bitmapscan;
+RESET enable_seqscan;
+DROP TABLE o_test_skip_nullable;
+
+-- Skip array with a non-null high_compare: WHERE x < 5 caps the array
+-- so o_bt_advance_array_keys_increment's pre-check against high_compare
+-- must terminate advance once sk_argument reaches the edge.  Every
+-- distinct x in [0, 5) yields 3 matching tuples.
+CREATE TABLE o_test_skip_bounded (
+	x int NOT NULL,
+	y int NOT NULL
+) USING orioledb;
+CREATE INDEX o_test_skip_bounded_idx ON o_test_skip_bounded(x, y);
+INSERT INTO o_test_skip_bounded
+	SELECT x, y FROM generate_series(0, 19) x, generate_series(1, 5) y;
+ANALYZE o_test_skip_bounded;
+
+SET enable_seqscan = OFF;
+SET enable_bitmapscan = OFF;
+SELECT count(*), count(DISTINCT x) FROM o_test_skip_bounded
+	WHERE x < 5 AND y IN (2, 3, 4);
+RESET enable_bitmapscan;
+RESET enable_seqscan;
+DROP TABLE o_test_skip_bounded;
+
 \endif
 
 SELECT orioledb_parallel_debug_stop();
