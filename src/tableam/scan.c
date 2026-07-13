@@ -765,6 +765,40 @@ o_exec_custom_scan(CustomScanState *node)
 		OBitmapHeapPlanState *bitmap_state =
 			(OBitmapHeapPlanState *) ocstate->o_plan_state;
 
+		/*
+		 * During EvalPlanQual (e.g. a FOR UPDATE recheck after a concurrent
+		 * update) the executor drives this scan for a single substituted
+		 * tuple.  Honour it exactly as the index-plan branch does; otherwise
+		 * we would re-execute the whole bitmap scan and return its own rows
+		 * (the first being the range minimum) instead of the EPQ tuple,
+		 * duplicating that row and dropping the concurrently-updated one.
+		 */
+		epqstate = node->ss.ps.state->es_epq_active;
+		if (epqstate)
+		{
+			Index		scanrelid = ((Scan *) node->ss.ps.plan)->scanrelid;
+
+			if (epqstate->relsubs_done[scanrelid - 1])
+			{
+				slot = node->ss.ss_ScanTupleSlot;
+				return ExecClearTuple(slot);
+			}
+			else if (epqstate->relsubs_slot[scanrelid - 1] != NULL)
+			{
+				slot = epqstate->relsubs_slot[scanrelid - 1];
+				Assert(epqstate->relsubs_rowmark[scanrelid - 1] == NULL);
+				epqstate->relsubs_done[scanrelid - 1] = true;
+
+				if (TupIsNull(slot))
+					return NULL;
+				if (!o_exec_qual(node->ss.ps.ps_ExprContext,
+								 node->ss.ps.qual, slot))
+					return NULL;
+				return o_exec_project(node->ss.ps.ps_ProjInfo,
+									  node->ss.ps.ps_ExprContext, slot, NULL);
+			}
+		}
+
 		if (bitmap_state->scan == NULL)
 		{
 			PlanState  *bitmapqualplanstate = bitmap_state->bitmapqualplanstate;

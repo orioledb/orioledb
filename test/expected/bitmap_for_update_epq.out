@@ -1,0 +1,22 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s2_update s1_forupdate s2_commit
+step s2_update: 
+	BEGIN;
+	UPDATE o_bfu SET q = q + 1 WHERE w = 1 AND i = 30;
+
+step s1_forupdate: 
+	SELECT i FROM o_bfu WHERE w = 1 AND i IN (10, 20, 30, 40) FOR UPDATE;
+ <waiting ...>
+step s2_commit: 
+	COMMIT;
+
+step s1_forupdate: <... completed>
+ i
+--
+10
+20
+30
+40
+(4 rows)
+
