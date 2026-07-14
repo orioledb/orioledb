@@ -3680,12 +3680,15 @@ INSERT INTO bitmap_test_multi_inval (i)
 ANALYZE bitmap_test_multi_inval;
 CREATE INDEX bitmap_test_multi_inval_ix1 ON bitmap_test_multi_inval (i);
 EXPLAIN (COSTS OFF) SELECT count(*) FROM bitmap_test_multi_inval WHERE i < 100;
-                                     QUERY PLAN                                     
-------------------------------------------------------------------------------------
+                          QUERY PLAN                          
+--------------------------------------------------------------
  Aggregate
-   ->  Index Only Scan using bitmap_test_multi_inval_ix1 on bitmap_test_multi_inval
-         Index Cond: (i < 100)
-(3 rows)
+   ->  Custom Scan (o_scan) on bitmap_test_multi_inval
+         Bitmap heap scan
+         Recheck Cond: (i < 100)
+         ->  Bitmap Index Scan on bitmap_test_multi_inval_ix1
+               Index Cond: (i < 100)
+(6 rows)
 
 SELECT count(*) FROM bitmap_test_multi_inval WHERE i < 100;
  count 
@@ -3695,12 +3698,17 @@ SELECT count(*) FROM bitmap_test_multi_inval WHERE i < 100;
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM bitmap_test_multi_inval WHERE i < 100 ORDER BY i LIMIT 20;
-                                     QUERY PLAN                                     
-------------------------------------------------------------------------------------
+                             QUERY PLAN                             
+--------------------------------------------------------------------
  Limit
-   ->  Index Only Scan using bitmap_test_multi_inval_ix1 on bitmap_test_multi_inval
-         Index Cond: (i < 100)
-(3 rows)
+   ->  Sort
+         Sort Key: i
+         ->  Custom Scan (o_scan) on bitmap_test_multi_inval
+               Bitmap heap scan
+               Recheck Cond: (i < 100)
+               ->  Bitmap Index Scan on bitmap_test_multi_inval_ix1
+                     Index Cond: (i < 100)
+(8 rows)
 
 SELECT * FROM bitmap_test_multi_inval WHERE i < 100 ORDER BY i LIMIT 20;
    id   | id2  | i  

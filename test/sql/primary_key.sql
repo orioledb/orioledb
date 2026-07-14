@@ -360,10 +360,14 @@ CREATE TABLE o_pk5 (
 INSERT INTO o_pk5
 SELECT i % 5, '2021-01-01'::date + interval '1 month' * (i / 5) FROM generate_series(0, 24) i;
 SET enable_seqscan = OFF;
+-- keep the ordered index-only scan: a selective (equality + range) composite
+-- key is cheaper via a direct primary scan than a bitmap heap scan.
+SET enable_bitmapscan = OFF;
 EXPLAIN (COSTS off) SELECT * FROM o_pk5 WHERE i = 2 AND dt >= '2021-03-01'::timestamp;
 SELECT * FROM o_pk5 WHERE i = 2 AND dt >= '2021-03-01'::timestamp;
 EXPLAIN (COSTS off) SELECT * FROM o_pk5 WHERE i = 2 AND dt >= '2021-03-01'::date;
 SELECT * FROM o_pk5 WHERE i = 2 AND dt >= '2021-03-01'::date;
+RESET enable_bitmapscan;
 RESET enable_seqscan;
 
 CREATE TABLE o_pk6 (

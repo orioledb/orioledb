@@ -256,20 +256,72 @@ primary_tuple_get_data(OTuple tuple, OIndexDescr *primary, bool onlyPkey)
 
 /* ---- composite (fixed-key) primary key encoding ---- */
 
-static int
-o_pk_int_width(Oid typeoid)
+/*
+ * How one fixed-size attribute is turned into order-preserving key bytes.  The
+ * bitmap's radix tree is walked in byte order to drive the primary-tree seek
+ * (o_bitmap_get_next_key), so the encoding of every supported type must sort
+ * bytewise exactly as the type's default btree opclass sorts values.
+ */
+typedef enum OPkEncKind
 {
-	switch (typeoid)
-	{
-		case INT2OID:
-			return 2;
-		case INT4OID:
-			return 4;
-		case INT8OID:
-			return 8;
-		default:
-			return -1;
-	}
+	PKENC_SINT,					/* signed integer: big-endian, sign bit
+								 * flipped */
+	PKENC_UINT,					/* unsigned integer / raw byte: big-endian */
+	PKENC_FLOAT,				/* IEEE float: order-preserving bit transform */
+	PKENC_RAW,					/* fixed-size by-ref, already memcmp-ordered */
+} OPkEncKind;
+
+typedef struct OPkFixedType
+{
+	Oid			typeoid;
+	int8		width;
+	OPkEncKind	kind;
+} OPkFixedType;
+
+/*
+ * All built-in fixed-size types whose default btree ordering has an
+ * order-preserving fixed-width byte encoding.  Types whose ordering is not a
+ * bytewise function of a fixed-size value are intentionally absent (they fall
+ * back to O_KEYBITMAP_NONE): xid/xid8 (modular), timetz/interval (multi-field
+ * ordering), name (64 bytes > OKBM_FIXED_BYTES), and all varlena types.
+ */
+static const OPkFixedType o_pk_fixed_types[] = {
+	{BOOLOID, 1, PKENC_UINT},
+	{CHAROID, 1, PKENC_UINT},	/* "char" compares as unsigned byte */
+	{INT2OID, 2, PKENC_SINT},
+	{INT4OID, 4, PKENC_SINT},
+	{DATEOID, 4, PKENC_SINT},
+	{OIDOID, 4, PKENC_UINT},
+	{FLOAT4OID, 4, PKENC_FLOAT},
+	{INT8OID, 8, PKENC_SINT},
+	{TIMEOID, 8, PKENC_SINT},	/* time-of-day, non-negative int64 */
+	{TIMESTAMPOID, 8, PKENC_SINT},
+	{TIMESTAMPTZOID, 8, PKENC_SINT},
+	{MONEYOID, 8, PKENC_SINT},	/* Cash is a signed int64 */
+	{FLOAT8OID, 8, PKENC_FLOAT},
+	{MACADDROID, 6, PKENC_RAW},
+	{MACADDR8OID, 8, PKENC_RAW},
+	{UUIDOID, 16, PKENC_RAW},
+};
+
+static const OPkFixedType *
+o_pk_fixed_lookup(Oid typeoid)
+{
+	int			i;
+
+	for (i = 0; i < lengthof(o_pk_fixed_types); i++)
+		if (o_pk_fixed_types[i].typeoid == typeoid)
+			return &o_pk_fixed_types[i];
+	return NULL;
+}
+
+/* Encoded width of a fixed-size key column, or -1 if the type is unsupported. */
+static int
+o_pk_fixed_width(Oid typeoid)
+{
+	const OPkFixedType *t = o_pk_fixed_lookup(typeoid);
+
+	return t ? t->width : -1;
 }
 
 OKeyBitmapMode
@@ -309,12 +361,21 @@ o_keybitmap_pk_mode(OIndexDescr *primary, int *fixedKeyLen)
 			return O_KEYBITMAP_UINT64;
 	}
 
-	/* fixed-key mode: composite of small, ascending integer fields */
+	/*
+	 * Fixed-key mode: composite of ascending fixed-size fields.  Classify by
+	 * the stored attribute type (atttypid of the ordering tuple) -- exactly
+	 * what o_pk_encode_nonleaf()/o_pk_decode_to_key() encode -- so the mode
+	 * decision and the encoding can never disagree.
+	 */
 	if (primary->primaryIsCtid)
 		return O_KEYBITMAP_NONE;
 	for (i = 0; i < primary->nKeyFields; i++)
 	{
-		int			w = o_pk_int_width(primary->fields[i].inputtype);
+		AttrNumber	attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyNonLeafKey,
+														  primary, i + 1);
+		Oid			typeoid = TupleDescAttr(primary->nonLeafTupdesc,
+											attnum - 1)->atttypid;
+		int			w = o_pk_fixed_width(typeoid);
 
 		if (w < 0 || !primary->fields[i].ascending)
 			return O_KEYBITMAP_NONE;
@@ -327,36 +388,117 @@ o_keybitmap_pk_mode(OIndexDescr *primary, int *fixedKeyLen)
 	return O_KEYBITMAP_FIXED;
 }
 
-/* order-preserving big-endian encode of one integer Datum; returns width */
+/*
+ * Order-preserving transform masks for o_pk_encode_one()/o_pk_decode_one(),
+ * named by the encoded width in bits.  A signed integer has its sign bit
+ * flipped so negatives sort before positives; an IEEE float has its sign bit
+ * flipped when non-negative and all bits flipped when negative (the all-ones
+ * masks are PG_UINT{32,64}_MAX).
+ */
+#define OKBM_SIGNBIT16	UINT64CONST(0x8000)
+#define OKBM_SIGNBIT32	0x80000000U
+#define OKBM_SIGNBIT64	UINT64CONST(0x8000000000000000)
+/* Canonical quiet-NaN bit patterns (sort highest after the float transform). */
+#define OKBM_FLOAT4_NAN	0x7fc00000U
+#define OKBM_FLOAT8_NAN	UINT64CONST(0x7ff8000000000000)
+
+/*
+ * Order-preserving encode of one fixed-size Datum into big-endian key bytes;
+ * returns the width written.  See OPkEncKind for the per-kind transforms.
+ */
 static int
 o_pk_encode_one(Datum val, Oid typeoid, uint8 *out)
 {
+	const OPkFixedType *t = o_pk_fixed_lookup(typeoid);
 	int			i,
 				w;
-	uint64		u;
+	uint64		u = 0;
 
-	switch (typeoid)
+	if (t == NULL)
+		elog(ERROR, "unsupported fixed keybitmap type %u", typeoid);
+	w = t->width;
+
+	switch (t->kind)
 	{
-		case INT2OID:
-			u = (uint16) DatumGetInt16(val) ^ UINT64CONST(0x8000);
-			w = 2;
+		case PKENC_RAW:
+			/* already memcmp-ordered (uuid, macaddr*): copy raw bytes */
+			memcpy(out, DatumGetPointer(val), w);
+			return w;
+		case PKENC_UINT:
+			u = (w == 1) ? (uint8) DatumGetChar(val)
+				: (uint32) DatumGetObjectId(val);
 			break;
-		case INT4OID:
-			u = (uint32) DatumGetInt32(val) ^ UINT64CONST(0x80000000);
-			w = 4;
+		case PKENC_SINT:
+			if (w == 2)
+				u = (uint16) DatumGetInt16(val) ^ OKBM_SIGNBIT16;
+			else if (w == 4)
+				u = (uint32) DatumGetInt32(val) ^ OKBM_SIGNBIT32;
+			else
+				u = (uint64) DatumGetInt64(val) ^ OKBM_SIGNBIT64;
 			break;
-		case INT8OID:
-			u = (uint64) DatumGetInt64(val) ^ UINT64CONST(0x8000000000000000);
-			w = 8;
+		case PKENC_FLOAT:
+
+			/*
+			 * IEEE 754 -> sortable unsigned integer, the standard trick used
+			 * for radix-sorting floats.  Reinterpret the value's bits as an
+			 * unsigned integer, then: - non-negative (sign bit 0): set the
+			 * sign bit.  Non-negatives keep their relative order and all sort
+			 * above negatives. - negative (sign bit 1): flip every bit.  This
+			 * both clears the sign bit (so negatives sort below
+			 * non-negatives) and reverses the order among negatives, which is
+			 * what we want: the IEEE magnitude fields increase as the value
+			 * moves away from zero, so -1.0 has a smaller bit pattern than
+			 * -2.0 and flipping restores -2.0 < -1.0.  Both cases collapse to
+			 * one XOR: with all-ones when the sign bit is set, with just the
+			 * sign bit otherwise.  o_pk_decode_one() applies the inverse.
+			 *
+			 * Portability: this only assumes IEEE 754 binary32/binary64,
+			 * which PostgreSQL requires (see the float ordering in float.h /
+			 * the configure checks), and that float and uint of the same
+			 * width share the machine's byte order -- true on every supported
+			 * platform. memcpy (not a pointer cast / union) reinterprets the
+			 * bits without violating strict aliasing.  We work on the integer
+			 * *value*, not the raw memory bytes, and
+			 * o_pk_encode_one()/o_pk_decode_one() serialize/deserialize that
+			 * value big-endian symmetrically, so the key is
+			 * endianness-independent.  -0.0 and NaN are normalized above (to
+			 * +0.0 and one canonical NaN) so equal-comparing values never get
+			 * two distinct encodings.
+			 */
+			if (w == 4)
+			{
+				float		f = DatumGetFloat4(val);
+				uint32		bits;
+
+				if (isnan(f))
+					bits = OKBM_FLOAT4_NAN;
+				else if (f == 0.0f)
+					bits = 0;	/* normalize -0 to +0 */
+				else
+					memcpy(&bits, &f, sizeof(bits));
+				bits ^= (bits & OKBM_SIGNBIT32) ? PG_UINT32_MAX : OKBM_SIGNBIT32;
+				u = bits;
+			}
+			else
+			{
+				double		d = DatumGetFloat8(val);
+				uint64		bits;
+
+				if (isnan(d))
+					bits = OKBM_FLOAT8_NAN;
+				else if (d == 0.0)
+					bits = 0;	/* normalize -0 to +0 */
+				else
+					memcpy(&bits, &d, sizeof(bits));
+				bits ^= (bits & OKBM_SIGNBIT64) ? PG_UINT64_MAX : OKBM_SIGNBIT64;
+				u = bits;
+			}
 			break;
-		default:
-			elog(ERROR, "unsupported fixed keybitmap type %u", typeoid);
-			return 0;
 	}
 	for (i = w - 1; i >= 0; i--)
 	{
-		out[i] = (uint8) (u & 0xFF);
-		u >>= 8;
+		out[i] = (uint8) u;
+		u >>= BITS_PER_BYTE;
 	}
 	return w;
 }
@@ -364,36 +506,72 @@ o_pk_encode_one(Datum val, Oid typeoid, uint8 *out)
 static Datum
 o_pk_decode_one(const uint8 *in, Oid typeoid, int *width)
 {
+	const OPkFixedType *t = o_pk_fixed_lookup(typeoid);
 	uint64		u = 0;
 	int			i,
 				w;
 
-	switch (typeoid)
-	{
-		case INT2OID:
-			w = 2;
-			break;
-		case INT4OID:
-			w = 4;
-			break;
-		case INT8OID:
-			w = 8;
-			break;
-		default:
-			elog(ERROR, "unsupported fixed keybitmap type %u", typeoid);
-			return (Datum) 0;
-	}
-	for (i = 0; i < w; i++)
-		u = (u << 8) | in[i];
+	if (t == NULL)
+		elog(ERROR, "unsupported fixed keybitmap type %u", typeoid);
+	w = t->width;
 	*width = w;
-	switch (typeoid)
+
+	if (t->kind == PKENC_RAW)
 	{
-		case INT2OID:
-			return Int16GetDatum((int16) (uint16) (u ^ UINT64CONST(0x8000)));
-		case INT4OID:
-			return Int32GetDatum((int32) (uint32) (u ^ UINT64CONST(0x80000000)));
+		Pointer		p = palloc(w);
+
+		memcpy(p, in, w);
+		return PointerGetDatum(p);
+	}
+
+	for (i = 0; i < w; i++)
+		u = (u << BITS_PER_BYTE) | in[i];
+
+	switch (t->kind)
+	{
+		case PKENC_UINT:
+			return (w == 1) ? CharGetDatum((char) (uint8) u)
+				: ObjectIdGetDatum((Oid) (uint32) u);
+		case PKENC_SINT:
+			if (w == 2)
+				return Int16GetDatum((int16) (uint16) (u ^ OKBM_SIGNBIT16));
+			else if (w == 4)
+				return Int32GetDatum((int32) (uint32) (u ^ OKBM_SIGNBIT32));
+			else
+				return Int64GetDatum((int64) (u ^ OKBM_SIGNBIT64));
+		case PKENC_FLOAT:
+
+			/*
+			 * Inverse of the o_pk_encode_one() float transform.  The encoded
+			 * sign bit tells which case produced it: a set sign bit came from
+			 * a non-negative value (encode set it), so clear it back with an
+			 * XOR of the sign bit; a clear sign bit came from a negative
+			 * value (encode flipped all bits), so restore it by flipping all
+			 * bits again.  See o_pk_encode_one() for the ordering and
+			 * portability rationale.
+			 */
+			if (w == 4)
+			{
+				uint32		bits = (uint32) u;
+				float		f;
+
+				bits ^= (bits & OKBM_SIGNBIT32) ? OKBM_SIGNBIT32 : PG_UINT32_MAX;
+				memcpy(&f, &bits, sizeof(f));
+				return Float4GetDatum(f);
+			}
+			else
+			{
+				uint64		bits = u;
+				double		d;
+
+				bits ^= (bits & OKBM_SIGNBIT64) ? OKBM_SIGNBIT64 : PG_UINT64_MAX;
+				memcpy(&d, &bits, sizeof(d));
+				return Float8GetDatum(d);
+			}
 		default:
-			return Int64GetDatum((int64) (u ^ UINT64CONST(0x8000000000000000)));
+			/* PKENC_RAW handled above */
+			Assert(false);
+			return (Datum) 0;
 	}
 }
 
@@ -422,7 +600,7 @@ o_pk_encode_leaf(OTuple tuple, OIndexDescr *id, uint8 *out)
 			attnums[i] = id->primaryFieldsAttnums[i];
 		types[i] = TupleDescAttr(id->leafTupdesc,
 								 isPrimary ? attnums[i] - 1 : pk_from + i)->atttypid;
-		len += o_pk_int_width(types[i]);
+		len += o_pk_fixed_width(types[i]);
 	}
 
 	memset(out, 0, OKBM_FIXED_BYTES);
@@ -451,7 +629,7 @@ o_pk_encode_nonleaf(OTuple tuple, OIndexDescr *primary, uint8 *out)
 	{
 		attnums[i] = OIndexKeyAttnumToTupleAttnum(BTreeKeyNonLeafKey, primary, i + 1);
 		types[i] = TupleDescAttr(primary->nonLeafTupdesc, attnums[i] - 1)->atttypid;
-		len += o_pk_int_width(types[i]);
+		len += o_pk_fixed_width(types[i]);
 	}
 
 	memset(out, 0, OKBM_FIXED_BYTES);
@@ -498,7 +676,7 @@ o_pk_decode_to_key(const uint8 *keybytes, OIndexDescr *primary, OFixedKey *key)
 	{
 		attnums[i] = OIndexKeyAttnumToTupleAttnum(BTreeKeyNonLeafKey, primary, i + 1);
 		types[i] = TupleDescAttr(primary->nonLeafTupdesc, attnums[i] - 1)->atttypid;
-		len += o_pk_int_width(types[i]);
+		len += o_pk_fixed_width(types[i]);
 	}
 
 	off = OKBM_FIXED_BYTES - len;

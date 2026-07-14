@@ -2135,11 +2135,17 @@ SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91 ORDER BY id DESC;
 (20 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
- Seq Scan on o_pk2
-   Filter: ((id <= '71'::double precision) OR (id > '91'::double precision))
-(2 rows)
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_pk2
+   Bitmap heap scan
+   Recheck Cond: ((id <= '71'::double precision) OR (id > '91'::double precision))
+   ->  BitmapOr
+         ->  Bitmap Index Scan on o_pk2_pkey
+               Index Cond: (id <= '71'::double precision)
+         ->  Bitmap Index Scan on o_pk2_pkey
+               Index Cond: (id > '91'::double precision)
+(8 rows)
 
 SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91;
  id  |   value   
@@ -2413,11 +2419,17 @@ SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91 ORDER BY id DESC;
 (80 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
- Seq Scan on o_pk2
-   Filter: ((id >= '71'::double precision) OR (id < '19'::double precision))
-(2 rows)
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_pk2
+   Bitmap heap scan
+   Recheck Cond: ((id < '19'::double precision) OR (id >= '71'::double precision))
+   ->  BitmapOr
+         ->  Bitmap Index Scan on o_pk2_pkey
+               Index Cond: (id < '19'::double precision)
+         ->  Bitmap Index Scan on o_pk2_pkey
+               Index Cond: (id >= '71'::double precision)
+(8 rows)
 
 SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19;
  id  |   value   
@@ -3242,6 +3254,9 @@ CREATE TABLE o_pk5 (
 INSERT INTO o_pk5
 SELECT i % 5, '2021-01-01'::date + interval '1 month' * (i / 5) FROM generate_series(0, 24) i;
 SET enable_seqscan = OFF;
+-- keep the ordered index-only scan: a selective (equality + range) composite
+-- key is cheaper via a direct primary scan than a bitmap heap scan.
+SET enable_bitmapscan = OFF;
 EXPLAIN (COSTS off) SELECT * FROM o_pk5 WHERE i = 2 AND dt >= '2021-03-01'::timestamp;
                                        QUERY PLAN                                       
 ----------------------------------------------------------------------------------------
@@ -3274,6 +3289,7 @@ SELECT * FROM o_pk5 WHERE i = 2 AND dt >= '2021-03-01'::date;
  2 | 05-01-2021
 (3 rows)
 
+RESET enable_bitmapscan;
 RESET enable_seqscan;
 CREATE TABLE o_pk6 (
 	i int4 NOT NULL,
