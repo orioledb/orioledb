@@ -9,8 +9,6 @@ standby restore and promotion, async archiving, and point-in-time recovery
 by time and named restore point.
 """
 
-import glob
-import inspect
 import json
 import os
 import shutil
@@ -19,14 +17,11 @@ import time
 
 from threading import Thread
 
-import testgres
-from testgres.node import PostgresNode
-from testgres.operations.os_ops import ConnectionParams
-
-from test.t.base_test import BaseTest, TestPortManager, wait_checkpointer_stopevent
+from test.t.base_backup_test import BaseBackupTest
+from test.t.base_test import wait_checkpointer_stopevent
 
 
-class PgBackRestTest(BaseTest):
+class PgBackRestTest(BaseBackupTest):
 	STANZA = 'test'
 
 	# ------------------------------------------------------------------
@@ -121,25 +116,7 @@ class PgBackRestTest(BaseTest):
 		self._pgbackrest('restore', '--delta', *extra_opts)
 
 	def _create_standby(self):
-		"""
-		Restore from pgbackrest into a fresh data dir and return a configured
-		testgres node ready to start.  Stored in self.replica so tearDown
-		cleans it up.
-		"""
-		(test_path,
-		 _) = os.path.split(os.path.dirname(inspect.getfile(self.__class__)))
-		base_dir = os.path.join(test_path, 'tmp_check_t',
-		                        self.myName + '_tgsb')
-		if os.path.exists(base_dir):
-			shutil.rmtree(base_dir)
-
-		port = self.getBasePort() + 1
-		pm = TestPortManager(PostgresNode._get_os_ops(ConnectionParams()),
-		                     port)
-		standby = testgres.get_new_node('standby',
-		                                base_dir=base_dir,
-		                                port_manager=pm)
-		os.makedirs(standby.data_dir, exist_ok=True)
+		standby = self.createStandby()
 
 		standby_spool_path = os.path.join(standby.base_dir, 'spool')
 		os.makedirs(standby_spool_path, exist_ok=True)
@@ -186,47 +163,28 @@ class PgBackRestTest(BaseTest):
 		    f" --stanza={self.STANZA} archive-push \"%p\"'\n"
 		    f"port = {standby.port}\n")
 
-	def _next_scratch_port(self):
-		"""Allocate a port beyond the primary (basePort) and standby
-		(basePort + 1) for one-off verification nodes."""
-		self._scratch_port_counter = getattr(self, '_scratch_port_counter',
-		                                     1) + 1
-		return self.getBasePort() + self._scratch_port_counter
+	def _history_archive_pattern(self, timeline):
+		return os.path.join(self._repo_path, 'archive', self.STANZA, '*',
+		                    f'{timeline:08X}.history*')
+
+	def _wait_for_history_archive(self, standby, timeout=30):
+		return self.waitForHistoryArchive(standby,
+		                                  self._history_archive_pattern,
+		                                  timeout=timeout)
 
 	def _restore_to_new_node(self, node_name, restore_opts, restore_count=1):
-		"""
-		Restore a backup into a fresh standalone data dir and return a
-		started testgres node.  Used to verify backup+restore integrity
-		independently of the primary's own in-place restore flow.
-
-		restore_count > 1 runs the same restore command that many times
-		in a row against the same (increasingly populated) directory
-		before starting Postgres -- e.g. to check that pgBackRest's
-		--delta comparison is idempotent.
-		"""
-		(test_path,
-		 _) = os.path.split(os.path.dirname(inspect.getfile(self.__class__)))
-		base_dir = os.path.join(test_path, 'tmp_check_t',
-		                        self.myName + '_' + node_name)
-		if os.path.exists(base_dir):
-			shutil.rmtree(base_dir)
-
-		port = self._next_scratch_port()
-		pm = TestPortManager(PostgresNode._get_os_ops(ConnectionParams()),
-		                     port)
-		scratch = testgres.get_new_node(node_name,
-		                                base_dir=base_dir,
-		                                port_manager=pm)
-		os.makedirs(scratch.data_dir, exist_ok=True)
-
-		conf_path = os.path.join(scratch.base_dir,
-		                         f'pgbackrest_{node_name}.conf')
-		spool_path = os.path.join(scratch.base_dir, 'spool')
-		os.makedirs(spool_path, exist_ok=True)
-		self._write_pgbackrest_conf(conf_path, scratch.data_dir, scratch.port,
-		                            spool_path)
+		# restore_count > 1 runs the same restore command that many times
+		# in a row against the same (increasingly populated) directory --
+		# e.g. to check that pgBackRest's --delta comparison is idempotent.
+		scratch = self.restoreToNewNode(node_name)
 
 		for _ in range(restore_count):
+			conf_path = os.path.join(scratch.base_dir,
+			                         f'pgbackrest_{node_name}.conf')
+			spool_path = os.path.join(scratch.base_dir, 'spool')
+			os.makedirs(spool_path, exist_ok=True)
+			self._write_pgbackrest_conf(conf_path, scratch.data_dir,
+			                            scratch.port, spool_path)
 			self._pgbackrest_with_conf(conf_path, 'restore',
 			                           f'--pg1-path={scratch.data_dir}',
 			                           *restore_opts)
@@ -236,22 +194,9 @@ class PgBackRestTest(BaseTest):
 		# only used to verify already-archived data, not to produce more.
 		scratch.append_conf('postgresql.conf', f"archive_mode = off\n"
 		                    f"port = {scratch.port}\n")
+
 		scratch.start()
 		return scratch
-
-	def _wait_for_history_archive(self, standby, timeout=30):
-		wal_filename = standby.execute(
-		    'postgres', 'SELECT pg_walfile_name(pg_current_wal_lsn())')[0][0]
-		timeline = int(wal_filename[:8], 16)
-		pattern = os.path.join(self._repo_path, 'archive', self.STANZA, '*',
-		                       f'{timeline:08X}.history*')
-		deadline = time.time() + timeout
-		while time.time() < deadline:
-			if glob.glob(pattern):
-				return
-			time.sleep(0.5)
-		raise AssertionError(
-		    f"timeline history file {timeline:08X}.history was not archived")
 
 	# ------------------------------------------------------------------
 	# Test
@@ -395,8 +340,8 @@ class PgBackRestTest(BaseTest):
 		    [f'--set={incr_backup_1["label"]}', '--target-timeline=current'])
 		try:
 			churn_fingerprint_restored = scratch.execute(
-				'postgres', "SELECT md5(string_agg(val, '' ORDER BY id)) "
-				"FROM churn_tbl")[0][0]
+			    'postgres', "SELECT md5(string_agg(val, '' ORDER BY id)) "
+			    "FROM churn_tbl")[0][0]
 			self.assertEqual(churn_fingerprint_restored, churn_fingerprint_1)
 			scratch.stop()
 		finally:
@@ -426,11 +371,11 @@ class PgBackRestTest(BaseTest):
 		                                    ['--target-timeline=current'])
 		try:
 			self.assertEqual(
-				scratch.execute('postgres', 'SELECT message FROM status')[0][0],
-				'incr2')
+			    scratch.execute('postgres',
+			                    'SELECT message FROM status')[0][0], 'incr2')
 			churn_fingerprint_chain = scratch.execute(
-				'postgres', "SELECT md5(string_agg(val, '' ORDER BY id)) "
-				"FROM churn_tbl")[0][0]
+			    'postgres', "SELECT md5(string_agg(val, '' ORDER BY id)) "
+			    "FROM churn_tbl")[0][0]
 			self.assertEqual(churn_fingerprint_chain, churn_fingerprint_2)
 			scratch.stop()
 		finally:
@@ -446,12 +391,13 @@ class PgBackRestTest(BaseTest):
 		                                          restore_count=2)
 		try:
 			self.assertEqual(
-				scratch_delta.execute('postgres',
-									  'SELECT message FROM status')[0][0], 'incr2')
+			    scratch_delta.execute('postgres',
+			                          'SELECT message FROM status')[0][0],
+			    'incr2')
 			self.assertEqual(
-				scratch_delta.execute(
-					'postgres', "SELECT md5(string_agg(val, '' ORDER BY id)) "
-					"FROM churn_tbl")[0][0], churn_fingerprint_2)
+			    scratch_delta.execute(
+			        'postgres', "SELECT md5(string_agg(val, '' ORDER BY id)) "
+			        "FROM churn_tbl")[0][0], churn_fingerprint_2)
 			scratch_delta.stop()
 		finally:
 			scratch_delta.cleanup()
@@ -465,9 +411,9 @@ class PgBackRestTest(BaseTest):
 		])
 		try:
 			self.assertEqual(
-				scratch_baseline.execute(
-					'postgres', "SELECT md5(string_agg(val, '' ORDER BY id)) "
-					"FROM churn_tbl")[0][0], churn_fingerprint_2)
+			    scratch_baseline.execute(
+			        'postgres', "SELECT md5(string_agg(val, '' ORDER BY id)) "
+			        "FROM churn_tbl")[0][0], churn_fingerprint_2)
 			scratch_baseline.stop()
 		finally:
 			scratch_baseline.cleanup()

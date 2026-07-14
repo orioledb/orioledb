@@ -3,9 +3,8 @@
 This directory holds testgres-based tests that exercise OrioleDB against
 external tools, rather than PostgreSQL itself. Unlike `test/t`, these tests
 are not wired into the Makefile's `testgrescheck`/`installcheck`/`check`
-targets (or its `yapf` target), since they depend on external binaries not
-guaranteed to be present in every build environment. Run them manually,
-with the corresponding tool installed and on `PATH`.
+targets. Run them manually, with the corresponding tool installed and on
+`PATH`.
 
 ## Tests
 
@@ -13,6 +12,11 @@ with the corresponding tool installed and on `PATH`.
   (stanza creation, full/incremental backups, standby restore/promotion,
   async archiving, and point-in-time recovery) against an OrioleDB table.
   Requires `pgbackrest` on `PATH`.
+
+- `walg_test.py` - exercises the wal-g v2.0.1 integration flow
+  (full/incremental backups, standby restore/promotion, and point-in-time
+  recovery by time and named restore point) against an OrioleDB table.
+  Requires `wal-g` on `PATH`.
 
 ## Running a test
 
