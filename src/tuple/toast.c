@@ -16,6 +16,8 @@
 #include "orioledb.h"
 
 #include "btree/btree.h"
+#include "btree/find.h"
+#include "btree/insert.h"
 #include "btree/modify.h"
 #include "recovery/recovery.h"
 #include "recovery/wal.h"
@@ -23,9 +25,11 @@
 #include "tableam/descr.h"
 #include "tableam/toast.h"
 #include "transam/oxid.h"
+#include "tuple/slot.h"
 #include "tuple/toast.h"
 #include "tuple/format.h"
 #include "tuple/sort.h"
+#include "utils/page_pool.h"
 
 #include "access/heapam.h"
 #include "access/htup_details.h"
@@ -964,6 +968,358 @@ o_toast_insert(OTableDescr *descr, OTuple pk, uint16 attn,
 								  data_size, oxid, csn, &arg);
 
 	return result;
+}
+
+/*
+ * Max chunks per sub-batch in o_toast_multi_insert: batched insert
+ * pre-allocates every chunk tuple in Phase 1 and holds them all until
+ * Phase 4 WAL. Without a limit, a large-TOAST COPY can reserve much
+ * transient memory. Processing in sub-batches keeps that peak
+ * bounded by ~max_chunks * chunk_size (~256 KB at 128 chunks, chunk ~ 2 KB)
+ * without losing the same-leaf lwlock as one sub-batch covers tens of
+ * leaves at typical fill.
+ */
+#define O_TOAST_MULTI_MAX_CHUNKS 128
+
+typedef struct OToastMultiInsertJob
+{
+	OTuple		pk;
+	Pointer		data;
+	Size		size;
+	uint32		max_length;
+	uint32		nchunks;
+	uint16		attnum;
+	bool		free;
+} OToastMultiInsertJob;
+
+/*
+ * Multi-slot TOAST-values insert.  Extract every (pk, attn, data) job from
+ * the slots' to_toast bitmaps, split each job into chunks and drain adjacent
+ * chunks into the same TOAST leaf under one lwlock via
+ * o_btree_multi_insert_item.  Mirrors o_tbl_multi_insert's four-phase shape:
+ * expand jobs -> monotone-check-or-sort -> batched insert -> WAL.
+ *
+ * Slots without a to_toast bitmap contribute nothing.  Detoasted values
+ * are held until the batch completes and then pfree'd together, so a single
+ * job may hold a temporary allocation across many chunks.
+ *
+ * Chunks of one job share (pk, attn) and only differ in chunknum, so
+ * intra-job locality is guaranteed.  Inter-job locality is high when the
+ * caller's pk arrives monotone (CTID PK / sorted-PK COPY); an out-of-order
+ * first pair invokes an idx[] sort.  WAL emission is deferred until after
+ * the leaf-lock phase to keep it order-independent.
+ *
+ * Jobs are processed in sub-batches of at most O_TOAST_MULTI_MAX_CHUNKS
+ * chunks to limit peak transient memory.
+ *
+ * ereports on failure so the caller sees the same error o_toast_insert_values
+ * raises per row.
+ */
+void
+o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
+							TupleTableSlot **slots, int nslots,
+							OXid oxid, CommitSeqNo csn)
+{
+	OIndexDescr *toastd = descr->toast;
+	BTreeDescr *tdesc = &toastd->desc;
+	OTableToastArg arg = {GET_PRIMARY(descr), toastd, descr->version};
+	ToastAPI   *api = &tableToastAPI;
+	int			ctid_off = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
+	OToastMultiInsertJob *jobs = NULL;
+	int			njobs = 0;
+	int			allocated_jobs = 0;
+	int			s,
+				i,
+				j,
+				j_start;
+	uint32		chunk_start = 0;
+	bool		ok = true;
+	uint16		failed_attnum = 0;
+
+	Assert(descr->toast->desc.type == oIndexToast);
+	Assert(ORelOidsIsEqual(descr->toast->tableOids, descr->oids));
+
+	if (GET_PRIMARY(descr)->bridging)
+		ctid_off++;
+
+	/* Collect (pk, attn, data) jobs from slots' to_toast bitmaps. */
+	for (s = 0; s < nslots; s++)
+	{
+		OTableSlot *oslot = (OTableSlot *) slots[s];
+		TupleDesc	tupleDesc = slots[s]->tts_tupleDescriptor;
+		OTuple		idx_tup;
+		bool		key_recorded = false;
+
+		if (oslot->to_toast == NULL)
+			continue;
+
+		for (i = 0; i < tupleDesc->natts; i++)
+		{
+			Datum		value;
+			Pointer		p;
+			bool		free;
+			Size		sz;
+
+			Assert(oslot->to_toast[i] != ORIOLEDB_TO_TOAST_COMPRESSION_TRIED);
+			if (oslot->to_toast[i] != ORIOLEDB_TO_TOAST_ON)
+				continue;
+
+			if (!key_recorded)
+			{
+				idx_tup = tts_orioledb_make_key(slots[s], descr);
+				key_recorded = true;
+			}
+
+			value = o_get_src_value(slots[s]->tts_values[i], &free);
+			p = DatumGetPointer(value);
+			sz = toast_datum_size(value);
+
+			if (njobs == allocated_jobs)
+			{
+				allocated_jobs = allocated_jobs ? allocated_jobs * 2 : 32;
+				jobs = jobs
+					? (OToastMultiInsertJob *) repalloc(jobs, sizeof(OToastMultiInsertJob) * allocated_jobs)
+					: (OToastMultiInsertJob *) palloc(sizeof(OToastMultiInsertJob) * allocated_jobs);
+			}
+			jobs[njobs].pk = idx_tup;
+			jobs[njobs].attnum = i + 1 + ctid_off;
+			jobs[njobs].data = p;
+			jobs[njobs].size = sz;
+			jobs[njobs].free = free;
+			njobs++;
+		}
+	}
+
+	/* No TOAST_ON columns found; no allocations made yet. */
+	if (njobs == 0)
+		return;
+
+	o_btree_load_shmem(tdesc);
+
+	for (j = 0; j < njobs; j++)
+	{
+		OToastKey	tkey;
+
+		tkey.pk_tuple = jobs[j].pk;
+		tkey.attnum = jobs[j].attnum;
+		tkey.chunknum = 0;
+
+		Assert(jobs[j].size > 0);
+		jobs[j].max_length = api->getMaxChunkSize(&tkey, &arg);
+		jobs[j].nchunks = (jobs[j].size + jobs[j].max_length - 1) / jobs[j].max_length;
+	}
+
+	/*
+	 * Process jobs in sub-batches of at most O_TOAST_MULTI_MAX_CHUNKS chunks.
+	 * Each iteration runs the full four-phase insert cycle (expand -> sort ->
+	 * batched leaf insert -> WAL) for one sub-batch.
+	 */
+	j_start = 0;
+	while (ok && j_start < njobs)
+	{
+		int			next_job = j_start;
+		uint32		next_chunk = chunk_start;
+		int			sub_total;
+		OTuple	   *tuples;
+		LocationIndex *tuplens;
+		OToastKey  *chunkkeys;
+		Pointer    *keyptrs;
+		OTuple	   *use_tuples;
+		LocationIndex *use_tuplens;
+		Pointer    *use_keyptrs;
+		int		   *idx;
+		OBTreeFindPageContext ctx;
+		int			pos;
+
+		tuples = (OTuple *) palloc(sizeof(OTuple) * O_TOAST_MULTI_MAX_CHUNKS);
+		tuplens = (LocationIndex *) palloc(sizeof(LocationIndex) * O_TOAST_MULTI_MAX_CHUNKS);
+		chunkkeys = (OToastKey *) palloc(sizeof(OToastKey) * O_TOAST_MULTI_MAX_CHUNKS);
+		keyptrs = (Pointer *) palloc(sizeof(Pointer) * O_TOAST_MULTI_MAX_CHUNKS);
+
+		/* Phase 1: expand every chunk into the parallel arrays. */
+		pos = 0;
+		while (next_job < njobs && pos < O_TOAST_MULTI_MAX_CHUNKS)
+		{
+			Size		remaining;
+			uint32		offset;
+			uint32		max_length = jobs[next_job].max_length;
+
+			offset = next_chunk * max_length;
+			remaining = jobs[next_job].size - offset;
+
+			while (remaining > 0 && pos < O_TOAST_MULTI_MAX_CHUNKS)
+			{
+				int			length = (remaining < max_length) ? remaining : max_length;
+				OToastKey  *ckey = &chunkkeys[pos];
+
+				ckey->pk_tuple = jobs[next_job].pk;
+				ckey->attnum = jobs[next_job].attnum;
+				ckey->chunknum = next_chunk;
+
+				tuples[pos] = api->createTuple((void *) ckey,
+											   jobs[next_job].data, offset, next_chunk,
+											   length, &arg);
+				tuplens[pos] = o_btree_len(tdesc, tuples[pos], OTupleLength);
+				keyptrs[pos] = (Pointer) ckey;
+
+				offset += length;
+				next_chunk++;
+				remaining -= length;
+				pos++;
+			}
+			if (remaining == 0)
+			{
+				next_job++;
+				next_chunk = 0;
+			}
+		}
+		sub_total = pos;
+
+		/*
+		 * Phase 2: monotone-verify; fall back to a permutation sort on the
+		 * first out-of-order pair.  Same rationale as o_tbl_multi_insert's
+		 * Phase 2 -- the leaf probe detects "past hikey" but not "before
+		 * lokey".
+		 */
+		use_tuples = tuples;
+		use_tuplens = tuplens;
+		use_keyptrs = keyptrs;
+		idx = NULL;
+
+		if (multi_insert_prepare_sort_if_needed(tdesc, keyptrs, sub_total, &idx))
+		{
+			OTuple	   *sorted_tuples;
+			LocationIndex *sorted_tuplens;
+			Pointer    *sorted_keyptrs;
+
+			sorted_tuples = (OTuple *) palloc(sizeof(OTuple) * sub_total);
+			sorted_tuplens = (LocationIndex *) palloc(sizeof(LocationIndex) * sub_total);
+			sorted_keyptrs = (Pointer *) palloc(sizeof(Pointer) * sub_total);
+			for (i = 0; i < sub_total; i++)
+			{
+				sorted_tuples[i] = tuples[idx[i]];
+				sorted_tuplens[i] = tuplens[idx[i]];
+				sorted_keyptrs[i] = keyptrs[idx[i]];
+			}
+			use_tuples = sorted_tuples;
+			use_tuplens = sorted_tuplens;
+			use_keyptrs = sorted_keyptrs;
+			pfree(idx);
+		}
+
+		/* Phase 3: drain sorted chunks into TOAST leaves. */
+		init_page_find_context(&ctx, tdesc, COMMITSEQNO_INPROGRESS,
+							   BTREE_PAGE_FIND_MODIFY | BTREE_PAGE_FIND_FIX_LEAF_SPLIT);
+
+		i = 0;
+		while (i < sub_total)
+		{
+			OFindPageResult fr PG_USED_FOR_ASSERTS_ONLY;
+			BTreeLeafProbeResult result;
+			int			n;
+			int			remaining = sub_total - i;
+			int			batch_size;
+
+			batch_size = multi_insert_prepare_batch(tdesc->undoType,
+													use_tuplens + i, remaining);
+			ppool_reserve_pages(tdesc->ppool, PPOOL_RESERVE_INSERT, 2);
+
+			fr = find_page(&ctx, use_keyptrs[i], BTreeKeyBound, 0);
+			Assert(fr == OFindPageResultSuccess);
+
+			n = o_btree_multi_insert_item(&ctx,
+										  use_tuples + i, use_tuplens + i,
+										  use_keyptrs + i, BTreeKeyBound,
+										  batch_size,
+										  oxid, RowLockUpdate,
+										  NULL, NULL, &result);
+			i += n;
+
+			if (i >= sub_total)
+				break;
+
+			if (result == BTreeLeafProbeHikeyCrossed ||
+				result == BTreeLeafProbeFits)
+				continue;
+
+			/*
+			 * NoFit / Duplicate: slow-path a single chunk via o_btree_modify.
+			 * Matches the per-chunk contract of generic_toast_insert -- if
+			 * that returns anything but Inserted the caller sees the same
+			 * false result as before.
+			 */
+			if (o_btree_modify(tdesc, BTreeOperationInsert,
+							   use_tuples[i], BTreeKeyLeafTuple,
+							   use_keyptrs[i], BTreeKeyBound,
+							   oxid, csn, RowLockUpdate,
+							   NULL, &nullCallbackInfo) != OBTreeModifyResultInserted)
+			{
+				failed_attnum = ((OToastKey *) use_keyptrs[i])->attnum;
+				ok = false;
+				i++;
+				break;
+			}
+			i++;
+		}
+
+		if (tdesc->undoType != UndoLogNone)
+			release_undo_size(tdesc->undoType);
+		ppool_release_reserved(tdesc->ppool, PPOOL_RESERVE_INSERT_MASK);
+
+		if (use_tuples != tuples)
+		{
+			pfree(use_tuples);
+			pfree(use_tuplens);
+			pfree(use_keyptrs);
+		}
+
+		/* Phase 4: per-chunk WAL. */
+		if (ok && tdesc->storageType == BTreeStoragePersistence)
+		{
+			uint32		version = GET_BTREE_VERSION(api, &arg);
+			uint32		base_version = GET_BASE_BTREE_VERSION(api, &arg);
+
+			for (i = 0; i < sub_total; i++)
+				add_modify_wal_record(WAL_REC_INSERT, tdesc, tuples[i],
+									  tuplens[i], REPLICA_IDENTITY_DEFAULT,
+									  version, base_version);
+		}
+
+		for (i = 0; i < sub_total; i++)
+			pfree(tuples[i].data);
+		pfree(tuples);
+		pfree(tuplens);
+		pfree(chunkkeys);
+		pfree(keyptrs);
+
+		j_start = next_job;
+		chunk_start = next_chunk;
+	}
+
+	for (i = 0; i < njobs; i++)
+	{
+		if (jobs[i].free)
+			pfree(jobs[i].data);
+	}
+	for (i = 0; i < njobs; i++)
+	{
+		if (i == 0 || jobs[i].pk.data != jobs[i - 1].pk.data)
+			pfree(jobs[i].pk.data);
+	}
+
+	pfree(jobs);
+
+	/*
+	 * WAL was skipped for the failed sub-batch (ok guards Phase 4); ERROR
+	 * aborts the transaction so undo rolls back all inserted chunks.
+	 */
+	if (!ok)
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("Unable to insert TOASTable value in \"%s\"",
+						RelationGetRelationName(rel)),
+				 errdetail("Failed to insert TOAST chunks for attribute %u.",
+						   failed_attnum)));
 }
 
 void

@@ -102,12 +102,19 @@ OrioleDBPageDesc *local_ppool_page_descs = NULL;
 
 /* Custom GUC variables */
 int			orioledb_serializable_mode = O_SERIALIZABLE_TABLE_LOCK;
-bool		orioledb_debug_disable_multi_insert = false;
+int			orioledb_debug_disable_multi_insert = O_DISABLE_MULTI_INSERT_NONE;
 
 static const struct config_enum_entry serializable_mode_options[] = {
 	{"table_lock", O_SERIALIZABLE_TABLE_LOCK, false},
 	{"error", O_SERIALIZABLE_ERROR, false},
 	{"repeatable_read", O_SERIALIZABLE_REPEATABLE_READ, false},
+	{NULL, 0, false}
+};
+
+static const struct config_enum_entry disable_multi_insert_options[] = {
+	{"none", O_DISABLE_MULTI_INSERT_NONE, false},
+	{"all", O_DISABLE_MULTI_INSERT_ALL, false},
+	{"toast", O_DISABLE_MULTI_INSERT_TOAST, false},
 	{NULL, 0, false}
 };
 
@@ -518,14 +525,16 @@ _PG_init(void)
 							 NULL,
 							 NULL);
 
-	DefineCustomBoolVariable("orioledb.debug_disable_multi_insert",
-							 "Disable the batched same-leaf primary insert path.",
-							 "Debug switch.  When on, orioledb_multi_insert falls "
-							 "back to per-row o_tbl_insert instead of draining "
-							 "adjacent ordered keys into the same primary leaf "
-							 "under one lwlock.",
+	DefineCustomEnumVariable("orioledb.debug_disable_multi_insert",
+							 "Disable the batched same-leaf insert paths.",
+							 "Debug switch.  \"all\" falls back to per-row "
+							 "o_tbl_insert; \"toast\" keeps the primary "
+							 "batching but emits TOAST chunks per row via "
+							 "o_toast_insert_values; \"none\" (default) "
+							 "drains both primary and TOAST leaves.",
 							 &orioledb_debug_disable_multi_insert,
-							 false,
+							 O_DISABLE_MULTI_INSERT_NONE,
+							 disable_multi_insert_options,
 							 PGC_USERSET,
 							 0,
 							 NULL,

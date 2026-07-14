@@ -448,7 +448,16 @@ extern Page *local_ppool_pages;
 extern OrioleDBPageDesc *page_descs;
 extern OrioleDBPageDesc *local_ppool_page_descs;
 extern bool remove_old_checkpoint_files;
-extern bool orioledb_debug_disable_multi_insert;
+typedef enum ODisableMultiInsertMode
+{
+	O_DISABLE_MULTI_INSERT_NONE,	/* both primary + toast batching on
+									 * (default) */
+	O_DISABLE_MULTI_INSERT_ALL, /* fall back to per-row o_tbl_insert */
+	O_DISABLE_MULTI_INSERT_TOAST,	/* primary batching on, Phase 4 toast
+									 * batching off */
+}			ODisableMultiInsertMode;
+
+extern int	orioledb_debug_disable_multi_insert;
 extern bool skip_unmodified_trees;
 extern bool debug_disable_bgwriter;
 extern MemoryContext btree_insert_context;

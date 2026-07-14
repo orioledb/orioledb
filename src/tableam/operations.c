@@ -33,6 +33,7 @@
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "tuple/slot.h"
+#include "tuple/toast.h"
 #include "utils/stopevent.h"
 
 #include "access/heapam.h"
@@ -749,13 +750,21 @@ o_tbl_multi_insert(OTableDescr *descr, Relation relation,
 		release_undo_size(pdesc->undoType);
 	ppool_release_reserved(pdesc->ppool, PPOOL_RESERVE_INSERT_MASK);
 
-	/* Phase 4: per-slot TOAST values + WAL. */
+	/*
+	 * Phase 4: batched TOAST inserts across all slots, then per-slot primary
+	 * WAL. debug_disable_multi_insert  = 'toast' falls back to per-slot
+	 * o_toast_insert_values.
+	 */
+	if (orioledb_debug_disable_multi_insert != O_DISABLE_MULTI_INSERT_TOAST)
+		o_toast_multi_insert_values(relation, descr, slots, ntuples, oxid, csn);
+
 	for (i = 0; i < ntuples; i++)
 	{
 		TupleTableSlot *slot = slots[i];
 		OTuple		tup;
 
-		o_toast_insert_values(relation, descr, slot, oxid, csn);
+		if (orioledb_debug_disable_multi_insert == O_DISABLE_MULTI_INSERT_TOAST)
+			o_toast_insert_values(relation, descr, slot, oxid, csn);
 		tup = tts_orioledb_form_tuple(slot, descr);
 
 		if (pdesc->storageType == BTreeStoragePersistence)
