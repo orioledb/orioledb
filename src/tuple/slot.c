@@ -119,7 +119,7 @@ tts_orioledb_clear(TupleTableSlot *slot)
 	ItemPointerSetInvalid(&slot->tts_tid);
 }
 
-static OTuple
+OTuple
 tts_orioledb_make_key(TupleTableSlot *slot, OTableDescr *descr)
 {
 	OIndexDescr *id = GET_PRIMARY(descr);
