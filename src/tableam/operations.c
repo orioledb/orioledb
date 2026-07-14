@@ -618,6 +618,7 @@ o_tbl_multi_insert(OTableDescr *descr, Relation relation,
 	Pointer    *use_keyptrs;
 	void	  **use_cb_args;
 	int		   *idx = NULL;
+	bool		non_sorted;
 	OBTreeFindPageContext ctx;
 	BTreeModifyCallbackInfo callbackInfo =
 	{
@@ -714,7 +715,8 @@ o_tbl_multi_insert(OTableDescr *descr, Relation relation,
 	use_keyptrs = keyptrs;
 	use_cb_args = (void **) slots;
 
-	if (multi_insert_prepare_sort_if_needed(pdesc, keyptrs, ntuples, &idx))
+	non_sorted = multi_insert_prepare_sort_if_needed(pdesc, keyptrs, ntuples, &idx);
+	if (non_sorted)
 	{
 		OTuple	   *sorted_tuples;
 		LocationIndex *sorted_tuplens;
@@ -771,7 +773,7 @@ o_tbl_multi_insert(OTableDescr *descr, Relation relation,
 
 		for (k = 0; k < n; k++)
 		{
-			orig = idx ? idx[i + k] : i + k;
+			orig = non_sorted ? idx[i + k] : i + k;
 			((OTableSlot *) slots[orig])->version = o_tuple_get_version(use_tuples[i + k]);
 			pgstat_count_heap_insert(relation, 1);
 			fire_sk_modify_pending_stopevent(descr, i + k + 1, false);
@@ -796,7 +798,7 @@ o_tbl_multi_insert(OTableDescr *descr, Relation relation,
 		 * o_report_duplicate and the post-undo callback see the row the
 		 * caller submitted, not the sorted-position alias.
 		 */
-		orig = idx ? idx[i] : i;
+		orig = non_sorted ? idx[i] : i;
 		callbackInfo.arg = slots[orig];
 		if (o_tbl_index_insert(descr, primary, &tuples[orig], slots[orig],
 							   oxid, csn, &callbackInfo,
@@ -843,6 +845,14 @@ o_tbl_multi_insert(OTableDescr *descr, Relation relation,
 						 descr->version);
 	}
 
+	if (non_sorted)
+	{
+		pfree(use_tuples);
+		pfree(use_tuplens);
+		pfree(use_keyptrs);
+		pfree(use_cb_args);
+		pfree(idx);
+	}
 	pfree(tuples);
 	pfree(tuplens);
 	pfree(keys);
