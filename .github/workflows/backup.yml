@@ -1,4 +1,4 @@
-name: pgbackrest
+name: backup
 
 on:
   workflow_dispatch:
@@ -74,6 +74,73 @@ jobs:
           name: ${{ matrix.pg_version }}_pgbackrest_test.logs
           path: |
             ./orioledb/test/tmp_check_t/*/repo/logs/*.log
+            ./orioledb/test/tmp_check_t/*/logs/*log
+          retention-days: 2
+          if-no-files-found: ignore
+
+  walg-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        pg_version: [17, 18]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    env:
+      LLVM_VER: 18
+      CPU: amd64
+      CHECK_TYPE: normal
+      PG_VERSION: ${{ matrix.pg_version }}
+      COMPILER: gcc
+    steps:
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@v6
+        with:
+          path: orioledb
+
+      - name: Get the required tag name
+        shell: bash
+        run: |
+          echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+
+      - name: Checkout PostgreSQL code into workspace directory
+        uses: actions/checkout@v6
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PGTAG }}
+          path: postgresql
+
+      - name: Setup prerequisites
+        run: bash ./orioledb/ci/prerequisites.sh
+
+      - name: Install wal-g
+        run: |
+          # wal-g has no apt package; pull the prebuilt PG-flavored binary
+          # from the GitHub release. The ubuntu-20.04 build is a
+          # statically-enough linked Go binary that also runs fine on
+          # newer Ubuntu releases (e.g. the 24.04 runner used here).
+          curl -fsSL \
+            -o /tmp/wal-g \
+            https://github.com/wal-g/wal-g/releases/download/v2.0.1/wal-g-pg-ubuntu-20.04-amd64
+          sudo install -m 0755 /tmp/wal-g /usr/local/bin/wal-g
+
+      - name: Build
+        run: bash ./orioledb/ci/build.sh
+
+      - name: Install post build prerequisites
+        run: bash ./orioledb/ci/post_build_prerequisites.sh
+
+      - name: Run wal-g test
+        timeout-minutes: 100
+        run: |
+          export PATH="$GITHUB_WORKSPACE/pgsql/bin:$GITHUB_WORKSPACE/python3-venv/bin:$PATH"
+          cd orioledb
+          python3 -W ignore::DeprecationWarning -m unittest -v test.integration.walg_test
+
+      - name: Upload test logs
+        uses: actions/upload-artifact@v7
+        if: ${{ failure() }}
+        with:
+          name: ${{ matrix.pg_version }}_walg_test.logs
+          path: |
             ./orioledb/test/tmp_check_t/*/logs/*log
           retention-days: 2
           if-no-files-found: ignore
