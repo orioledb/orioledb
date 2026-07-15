@@ -315,6 +315,23 @@ o_btree_find_tuples_start(BTreeDescr *desc, void *key,
 	it->fetchCallback = cb;
 	it->fetchCallbackArg = arg;
 
+	/*
+	 * Initialize the iterator-reuse bookkeeping fields.  An iterator built
+	 * here can later be driven through o_btree_iterator_fetch()/_advance()
+	 * (e.g. the PG18 skip-scan probe-then-narrow path reuses ostate->iterator
+	 * across the exact and range branches of o_iterate_index()), which read
+	 * these fields.  Leaving them at the recycled palloc chunk's garbage
+	 * makes the monotonicity assertion in o_btree_iterator_fetch()
+	 * dereference a bogus prevTuple.  Mirror o_btree_iterator_create().
+	 */
+	it->curKeySet = false;
+	it->curKeyReturned = false;
+	it->startKey = NULL;
+	it->startKind = BTreeKeyNone;
+#ifdef USE_ASSERT_CHECKING
+	O_TUPLE_SET_NULL(it->prevTuple.tuple);
+#endif
+
 	undo_it_create(&it->undoIt, it);
 
 	/*
