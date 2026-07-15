@@ -2,6 +2,8 @@ CREATE SCHEMA multi_insert;
 SET SESSION search_path = 'multi_insert';
 CREATE EXTENSION IF NOT EXISTS orioledb;
 
+\getenv abs_builddir PG_ABS_BUILDDIR
+
 -- The batched same-leaf primary insert path must not change visible
 -- results regardless of the debug GUC.  Each scenario runs both with
 -- the batched path enabled and disabled so a mishap in either branch
@@ -78,15 +80,16 @@ SELECT id FROM t_copy_unsorted WHERE id IN (1, 3, 7, 9999, 12345, 15555)
 -- B-tree integrity: a corrupted downlink would make this fail.
 SELECT orioledb_tbl_check('t_copy_unsorted'::regclass);
 
--- F) Larger unsorted COPY through psql's \copy with COPY FROM PROGRAM.
+-- F) Larger unsorted COPY via temp file.
 -- Builds a multi-leaf tree first, then COPYs an interleaving set of
 -- keys in reverse order to keep the monotonicity-fallback path exercised
 -- across multiple leaves.
 CREATE TABLE t_copy_reverse (id integer PRIMARY KEY, val int) USING orioledb;
 INSERT INTO t_copy_reverse SELECT i * 10, i FROM generate_series(1, 5000) i;
+\set copyfile :abs_builddir '/results/copy_reverse.data'
+COPY (SELECT 50001 + i, i FROM generate_series(999, 1, -2) i) TO :'copyfile';
 SET orioledb.debug_disable_multi_insert = off;
-COPY t_copy_reverse FROM PROGRAM
-  'for i in $(seq 999 -2 1); do echo "$((50001 + i))\t$i"; done';
+COPY t_copy_reverse FROM :'copyfile';
 SELECT count(*) FROM t_copy_reverse;
 SELECT orioledb_tbl_check('t_copy_reverse'::regclass);
 
@@ -109,12 +112,13 @@ SELECT orioledb_tbl_check('t_dup_existing'::regclass);
 -- equals the inserting oxid so o_btree_modify_internal's "needsUndo = false"
 -- shortcut fires.  The multi-insert helper mirrors that and the post-undo
 -- callback receives WaitingSkUndoLoc instead of a real undo loc.
+\set copyfile :abs_builddir '/results/selfcreated.data'
+COPY (SELECT i, i * 3 FROM generate_series(1, 500) i) TO :'copyfile';
 BEGIN;
 CREATE TABLE t_selfcreated (id integer PRIMARY KEY, val int) USING orioledb;
 CREATE INDEX ON t_selfcreated (val);
 SET LOCAL orioledb.debug_disable_multi_insert = off;
-COPY t_selfcreated FROM PROGRAM
-  'for i in $(seq 1 500); do echo "$i\t$((i*3))"; done';
+COPY t_selfcreated FROM :'copyfile';
 SELECT count(*) FROM t_selfcreated;
 SELECT count(*) FROM t_selfcreated WHERE val BETWEEN 100 AND 300;
 COMMIT;
@@ -124,13 +128,10 @@ SELECT orioledb_tbl_check('t_selfcreated'::regclass);
 -- to decide what to toast; Phase 3 calls o_toast_insert_values to write
 -- the toast btree entries.  Verify both ends survive a multi-row COPY.
 CREATE TABLE t_toast (id integer PRIMARY KEY, body text) USING orioledb;
+\set copyfile :abs_builddir '/results/toast.data'
+COPY (SELECT i, repeat('X', 6000) FROM generate_series(1, 200) i) TO :'copyfile';
 SET orioledb.debug_disable_multi_insert = off;
-COPY t_toast FROM PROGRAM
-  'for i in $(seq 1 200); do
-     printf "%d\t" "$i"
-     printf "X%.0s" $(seq 1 6000)
-     printf "\n"
-   done';
+COPY t_toast FROM :'copyfile';
 SELECT count(*), min(length(body)), max(length(body)) FROM t_toast;
 -- Verify TOASTed values round-trip intact for a sample of rows.
 SELECT id, length(body) FROM t_toast WHERE id IN (1, 100, 200) ORDER BY id;
@@ -142,9 +143,10 @@ SELECT orioledb_tbl_check('t_toast'::regclass);
 -- crossing leaf hikeys via HikeyCrossed -> refind.
 CREATE TABLE t_ctid_pk (val int, grp int) USING orioledb;
 CREATE INDEX ON t_ctid_pk (val);
+\set copyfile :abs_builddir '/results/ctid_pk.data'
+COPY (SELECT i, i % 47 FROM generate_series(1, 5000) i) TO :'copyfile';
 SET orioledb.debug_disable_multi_insert = off;
-COPY t_ctid_pk FROM PROGRAM
-  'for i in $(seq 1 5000); do echo "$i\t$((i % 47))"; done';
+COPY t_ctid_pk FROM :'copyfile';
 SELECT count(*), min(val), max(val) FROM t_ctid_pk;
 SELECT count(*) FROM t_ctid_pk WHERE val BETWEEN 1000 AND 2000;
 SELECT orioledb_tbl_check('t_ctid_pk'::regclass);
