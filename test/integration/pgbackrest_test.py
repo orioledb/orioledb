@@ -549,3 +549,74 @@ class PgBackRestTest(BaseBackupTest):
 		node.stop()
 		self._pgbackrest('stop')
 		self._pgbackrest('stanza-delete', '--force')
+
+	def test_incr_backup_block_diffs_orioledb_file(self):
+		"""
+		Unlike wal-g (see test_delta_backup_ships_whole_orioledb_file in
+		walg_test.py), pgBackRest's block-incremental eligibility
+		(manifestBuildBlockIncrSize() in
+		src/info/manifest/build.c.inc) is decided purely from a file's
+		size and age, with no check that it lives under base/ or
+		pg_tblspc/ -- so it should genuinely block-diff OrioleDB files
+		too. This pins that down empirically: touching a tiny fraction
+		of a large single-file OrioleDB table should still produce a
+		small block-incremental backup, rather than re-storing the
+		whole file.
+
+		The comparison is against the repo (stored, compressed) size of
+		the earlier full backup rather than the file's raw on-disk
+		size, so both sides went through the same compression and the
+		result isolates block-level dedup rather than conflating it
+		with compression ratio.
+		"""
+		node = self.node
+		node.start()
+
+		self._pgbackrest('stanza-create')
+		self._pgbackrest('check')
+
+		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+
+		# Single relation, single file, with quasi-random (not
+		# trivially compressible) content so the comparison below
+		# isn't swamped by how well repetitive filler compresses.
+		node.safe_psql("CREATE TABLE big_tbl (id int PRIMARY KEY, "
+		               "val text) USING orioledb")
+		node.safe_psql(
+		    "INSERT INTO big_tbl SELECT i, "
+		    "(SELECT string_agg(md5(i::text || ':' || g::text), '') "
+		    "FROM generate_series(1, 25) g) FROM generate_series(1, 20000) i")
+		node.safe_psql("CHECKPOINT")
+		node.safe_psql("SELECT pg_switch_wal()")
+
+		self._pgbackrest('backup', '--type=full', '--repo1-block',
+		                 '--repo1-bundle')
+		info = json.loads(self._pgbackrest('info', '--output=json').stdout)
+		full_backup = info[0]['backup'][-1]
+		self.assertEqual(full_backup['type'], 'full')
+		full_repo_size = full_backup['info']['repository']['delta']
+
+		# Touch a tiny fraction of rows: a real block-level diff would
+		# ship only ~1/500th of the file's blocks.
+		node.safe_psql(
+		    "UPDATE big_tbl SET val = "
+		    "(SELECT string_agg(md5(id::text || '!' || g::text), '') "
+		    "FROM generate_series(1, 25) g) WHERE id % 500 = 0")
+		node.safe_psql("CHECKPOINT")
+
+		self._pgbackrest('backup', '--type=incr', '--repo1-block',
+		                 '--repo1-bundle')
+		info = json.loads(self._pgbackrest('info', '--output=json').stdout)
+		incr_backup = info[0]['backup'][-1]
+		self.assertEqual(incr_backup['type'], 'incr')
+		incr_repo_delta = incr_backup['info']['repository']['delta']
+
+		# If pgBackRest's block-incremental had the same base/pg_tblspc-
+		# only restriction as wal-g, this would land close to
+		# full_repo_size (a whole-file re-store of big_tbl). Instead it
+		# should be a small fraction of it.
+		self.assertLess(incr_repo_delta, 0.3 * full_repo_size)
+
+		node.stop()
+		self._pgbackrest('stop')
+		self._pgbackrest('stanza-delete', '--force')
