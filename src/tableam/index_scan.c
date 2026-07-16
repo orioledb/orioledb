@@ -577,6 +577,17 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 #else
 	if (ostate->curKeyRangeIsLoaded)
 		result = o_bt_advance_array_keys_increment(ostate, ostate->scanDir);
+	else if (so->numArrayKeys)
+
+		/*
+		 * First range of an array scan: position the array keys at the
+		 * scan-direction start (last element for a backward scan, first for
+		 * forward).  Without this a backward scan starts on the smallest
+		 * element and the first o_bt_advance_array_keys_increment() rolls off
+		 * the low end, dropping every element but the smallest.  (PG17+ does
+		 * this in the branch above.)
+		 */
+		_bt_start_array_keys(scan, ostate->scanDir);
 #endif
 
 	if (!result)
