@@ -2527,6 +2527,26 @@ DROP TABLE o_test_skip_bounded;
 
 \endif
 
+-- A backward scan over an array (SAOP) key must cover every element, not just
+-- the one the forward scan would start at.
+CREATE TABLE o_test_array_backward (
+	a int NOT NULL,
+	b int NOT NULL
+) USING orioledb;
+CREATE INDEX o_test_array_backward_idx ON o_test_array_backward(a);
+INSERT INTO o_test_array_backward SELECT a, a FROM generate_series(1, 1000) a;
+ANALYZE o_test_array_backward;
+
+SET enable_seqscan = OFF;
+SET enable_bitmapscan = OFF;
+SELECT a FROM o_test_array_backward WHERE a IN (1, 1000) ORDER BY a DESC;
+SELECT a FROM o_test_array_backward WHERE a IN (1, 500, 1000) ORDER BY a DESC;
+SELECT a FROM o_test_array_backward WHERE a IN (1, 1000) ORDER BY a;
+SELECT a, b FROM o_test_array_backward WHERE a IN (1, 1000) ORDER BY a DESC;
+RESET enable_bitmapscan;
+RESET enable_seqscan;
+DROP TABLE o_test_array_backward;
+
 SELECT orioledb_parallel_debug_stop();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA indices CASCADE;
