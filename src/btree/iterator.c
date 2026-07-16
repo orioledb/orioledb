@@ -328,9 +328,22 @@ o_btree_find_tuples_start(BTreeDescr *desc, void *key,
 	it->curKeyReturned = false;
 	it->startKey = NULL;
 	it->startKind = BTreeKeyNone;
+	it->pageCount = 1;
+	BTREE_PAGE_LOCATOR_SET_INVALID(&it->undoLoc);
 #ifdef USE_ASSERT_CHECKING
 	O_TUPLE_SET_NULL(it->prevTuple.tuple);
 #endif
+
+	/*
+	 * combinedPage is only assigned on the combined-result branch below (via
+	 * load_page_from_undo()); the plain non-combined path returns without
+	 * touching it.  A reused iterator would then keep the recycled chunk's
+	 * garbage value, and o_btree_iterator_fetch_internal() reads it to decide
+	 * whether to merge the (here uninitialized) undo image into the result --
+	 * a garbage-true value dereferences that stale image and returns a bogus
+	 * tuple.  Default it to false so the non-combined path is well-defined.
+	 */
+	it->combinedPage = false;
 
 	undo_it_create(&it->undoIt, it);
 
