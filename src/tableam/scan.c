@@ -197,12 +197,10 @@ transform_path(Path *src_path, OTableDescr *descr)
 	return &result->path;
 }
 
-bool
+void
 orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 									 RangeTblEntry *rte)
 {
-	bool		result = true;
-
 	if (rte->rtekind == RTE_RELATION &&
 		(rte->relkind == RELKIND_RELATION || rte->relkind == RELKIND_MATVIEW))
 	{
@@ -307,9 +305,6 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 
 					MemSet(&rclauseset, 0, sizeof(rclauseset));
 					match_restriction_clauses_to_index(root, index, &rclauseset);
-
-					/* This result is currently ignored */
-					result = result && !rclauseset.nonempty;
 				}
 			}
 			o_table_free(o_table);
@@ -317,7 +312,7 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 		relation_close(relation, NoLock);
 	}
 
-	return result;
+	return;
 }
 
 /*

@@ -2090,17 +2090,11 @@ SELECT id, value FROM o_pk2 WHERE id >= 71 AND id < 91 ORDER BY id DESC;
 (20 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91;
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Bitmap heap scan
-   Recheck Cond: ((id <= '71'::double precision) OR (id > '91'::double precision))
-   ->  BitmapOr
-         ->  Bitmap Index Scan on o_pk2_pkey
-               Index Cond: (id <= '71'::double precision)
-         ->  Bitmap Index Scan on o_pk2_pkey
-               Index Cond: (id > '91'::double precision)
-(8 rows)
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Seq Scan on o_pk2
+   Filter: ((id <= '71'::double precision) OR (id > '91'::double precision))
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91;
  id  |   value   
@@ -2374,17 +2368,11 @@ SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91 ORDER BY id DESC;
 (80 rows)
 
 EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19;
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
- Custom Scan (o_scan) on o_pk2
-   Bitmap heap scan
-   Recheck Cond: ((id < '19'::double precision) OR (id >= '71'::double precision))
-   ->  BitmapOr
-         ->  Bitmap Index Scan on o_pk2_pkey
-               Index Cond: (id < '19'::double precision)
-         ->  Bitmap Index Scan on o_pk2_pkey
-               Index Cond: (id >= '71'::double precision)
-(8 rows)
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
+ Seq Scan on o_pk2
+   Filter: ((id >= '71'::double precision) OR (id < '19'::double precision))
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19;
  id  |   value   
