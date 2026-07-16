@@ -42,6 +42,8 @@ SELECT * FROM o_pk1;
   58 | *58***
 (20 rows)
 
+SET enable_seqscan = off;
+SET enable_bitmapscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 1;
              QUERY PLAN              
 -------------------------------------
@@ -98,14 +100,12 @@ SELECT payload FROM o_pk1 WHERE key = 19;
 (1 row)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key IN (1, 4, 13, 20);
-                         QUERY PLAN                         
-------------------------------------------------------------
+                   QUERY PLAN                    
+-------------------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: (key = ANY ('{1,4,13,20}'::integer[]))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: (key = ANY ('{1,4,13,20}'::integer[]))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: (key = ANY ('{1,4,13,20}'::integer[]))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key IN (1, 4, 13, 20);
  key | payload 
@@ -116,14 +116,12 @@ SELECT * FROM o_pk1 WHERE key IN (1, 4, 13, 20);
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 1 OR key = 4 OR key = 13 OR key = 20;
-                              QUERY PLAN                              
-----------------------------------------------------------------------
+                   QUERY PLAN                    
+-------------------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key = 1) OR (key = 4) OR (key = 13) OR (key = 20))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: (key = ANY ('{1,4,13,20}'::integer[]))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: (key = ANY ('{1,4,13,20}'::integer[]))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key = 1 OR key = 4 OR key = 13 OR key = 20;
  key | payload 
@@ -134,14 +132,12 @@ SELECT * FROM o_pk1 WHERE key = 1 OR key = 4 OR key = 13 OR key = 20;
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 AND key >  19;
-                   QUERY PLAN                    
--------------------------------------------------
+              QUERY PLAN              
+--------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key > 10) AND (key > 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key > 10) AND (key > 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key > 10) AND (key > 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key >  10 AND key >  19;
  key | payload 
@@ -162,14 +158,12 @@ SELECT * FROM o_pk1 WHERE key >  10 AND key >  19;
 (13 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 AND key >  19;
-                    QUERY PLAN                    
---------------------------------------------------
+              QUERY PLAN               
+---------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key >= 10) AND (key > 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key >= 10) AND (key > 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key >= 10) AND (key > 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key >= 10 AND key >  19;
  key | payload 
@@ -190,14 +184,12 @@ SELECT * FROM o_pk1 WHERE key >= 10 AND key >  19;
 (13 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 AND key >= 19;
-                    QUERY PLAN                    
---------------------------------------------------
+              QUERY PLAN               
+---------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key > 10) AND (key >= 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key > 10) AND (key >= 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key > 10) AND (key >= 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key >  10 AND key >= 19;
  key | payload 
@@ -219,14 +211,12 @@ SELECT * FROM o_pk1 WHERE key >  10 AND key >= 19;
 (14 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 AND key >= 19;
-                    QUERY PLAN                     
----------------------------------------------------
+               QUERY PLAN               
+----------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key >= 10) AND (key >= 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key >= 10) AND (key >= 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key >= 10) AND (key >= 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key >= 10 AND key >= 19;
  key | payload 
@@ -248,14 +238,12 @@ SELECT * FROM o_pk1 WHERE key >= 10 AND key >= 19;
 (14 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 AND key <  19;
-                   QUERY PLAN                    
--------------------------------------------------
+              QUERY PLAN              
+--------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key > 10) AND (key < 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key > 10) AND (key < 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key > 10) AND (key < 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key >  10 AND key <  19;
  key | payload 
@@ -265,14 +253,12 @@ SELECT * FROM o_pk1 WHERE key >  10 AND key <  19;
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 AND key <  19;
-                    QUERY PLAN                    
---------------------------------------------------
+              QUERY PLAN               
+---------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key >= 10) AND (key < 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key >= 10) AND (key < 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key >= 10) AND (key < 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key >= 10 AND key <  19;
  key | payload 
@@ -283,14 +269,12 @@ SELECT * FROM o_pk1 WHERE key >= 10 AND key <  19;
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 AND key <= 19;
-                    QUERY PLAN                    
---------------------------------------------------
+              QUERY PLAN               
+---------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key > 10) AND (key <= 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key > 10) AND (key <= 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key > 10) AND (key <= 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key >  10 AND key <= 19;
  key | payload 
@@ -301,14 +285,12 @@ SELECT * FROM o_pk1 WHERE key >  10 AND key <= 19;
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 AND key <= 19;
-                    QUERY PLAN                     
----------------------------------------------------
+               QUERY PLAN               
+----------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key >= 10) AND (key <= 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key >= 10) AND (key <= 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key >= 10) AND (key <= 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key >= 10 AND key <= 19;
  key | payload 
@@ -320,14 +302,12 @@ SELECT * FROM o_pk1 WHERE key >= 10 AND key <= 19;
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 AND key >  19;
-                   QUERY PLAN                    
--------------------------------------------------
+              QUERY PLAN              
+--------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key < 10) AND (key > 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key < 10) AND (key > 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key < 10) AND (key > 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key <  10 AND key >  19;
  key | payload 
@@ -335,14 +315,12 @@ SELECT * FROM o_pk1 WHERE key <  10 AND key >  19;
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 AND key >  19;
-                    QUERY PLAN                    
---------------------------------------------------
+              QUERY PLAN               
+---------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key <= 10) AND (key > 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key <= 10) AND (key > 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key <= 10) AND (key > 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key <= 10 AND key >  19;
  key | payload 
@@ -350,14 +328,12 @@ SELECT * FROM o_pk1 WHERE key <= 10 AND key >  19;
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 AND key >= 19;
-                    QUERY PLAN                    
---------------------------------------------------
+              QUERY PLAN               
+---------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key < 10) AND (key >= 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key < 10) AND (key >= 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key < 10) AND (key >= 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key <  10 AND key >= 19;
  key | payload 
@@ -365,14 +341,12 @@ SELECT * FROM o_pk1 WHERE key <  10 AND key >= 19;
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 AND key >= 19;
-                    QUERY PLAN                     
----------------------------------------------------
+               QUERY PLAN               
+----------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key <= 10) AND (key >= 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key <= 10) AND (key >= 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key <= 10) AND (key >= 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key <= 10 AND key >= 19;
  key | payload 
@@ -380,14 +354,12 @@ SELECT * FROM o_pk1 WHERE key <= 10 AND key >= 19;
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 AND key <  19;
-                   QUERY PLAN                    
--------------------------------------------------
+              QUERY PLAN              
+--------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key < 10) AND (key < 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key < 10) AND (key < 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key < 10) AND (key < 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key <  10 AND key <  19;
  key | payload 
@@ -398,14 +370,12 @@ SELECT * FROM o_pk1 WHERE key <  10 AND key <  19;
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 AND key <  19;
-                    QUERY PLAN                    
---------------------------------------------------
+              QUERY PLAN               
+---------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key <= 10) AND (key < 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key <= 10) AND (key < 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key <= 10) AND (key < 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key <= 10 AND key <  19;
  key | payload 
@@ -417,14 +387,12 @@ SELECT * FROM o_pk1 WHERE key <= 10 AND key <  19;
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 AND key <= 19;
-                    QUERY PLAN                    
---------------------------------------------------
+              QUERY PLAN               
+---------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key < 10) AND (key <= 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key < 10) AND (key <= 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key < 10) AND (key <= 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key <  10 AND key <= 19;
  key | payload 
@@ -435,14 +403,12 @@ SELECT * FROM o_pk1 WHERE key <  10 AND key <= 19;
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 AND key <= 19;
-                    QUERY PLAN                     
----------------------------------------------------
+               QUERY PLAN               
+----------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: ((key <= 10) AND (key <= 19))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: ((key <= 10) AND (key <= 19))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: ((key <= 10) AND (key <= 19))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key <= 10 AND key <= 19;
  key | payload 
@@ -879,14 +845,12 @@ SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4]);
 (1 row)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4,10]);
-                      QUERY PLAN                       
--------------------------------------------------------
+                 QUERY PLAN                 
+--------------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: (key = ANY ('{4,10}'::integer[]))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: (key = ANY ('{4,10}'::integer[]))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: (key = ANY ('{4,10}'::integer[]))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4,10]);
  key | payload 
@@ -896,14 +860,12 @@ SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4,10]);
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4,10, NULL]);
-                         QUERY PLAN                         
-------------------------------------------------------------
+                   QUERY PLAN                    
+-------------------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: (key = ANY ('{4,10,NULL}'::integer[]))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: (key = ANY ('{4,10,NULL}'::integer[]))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: (key = ANY ('{4,10,NULL}'::integer[]))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key = ANY (ARRAY[4,10, NULL]);
  key | payload 
@@ -950,14 +912,12 @@ SELECT * FROM o_pk1 WHERE key = ALL (ARRAY[4,10, NULL]);
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4]);
-                     QUERY PLAN                     
-----------------------------------------------------
+               QUERY PLAN                
+-----------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: (key < ANY ('{4}'::integer[]))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: (key < ANY ('{4}'::integer[]))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: (key < ANY ('{4}'::integer[]))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4]);
  key | payload 
@@ -966,14 +926,12 @@ SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4]);
 (1 row)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4,10]);
-                      QUERY PLAN                       
--------------------------------------------------------
+                 QUERY PLAN                 
+--------------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: (key < ANY ('{4,10}'::integer[]))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: (key < ANY ('{4,10}'::integer[]))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: (key < ANY ('{4,10}'::integer[]))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4,10]);
  key | payload 
@@ -984,14 +942,12 @@ SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4,10]);
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4,10, NULL]);
-                         QUERY PLAN                         
-------------------------------------------------------------
+                   QUERY PLAN                    
+-------------------------------------------------
  Custom Scan (o_scan) on o_pk1
-   Bitmap heap scan
-   Recheck Cond: (key < ANY ('{4,10,NULL}'::integer[]))
-   ->  Bitmap Index Scan on o_pk1_pkey
-         Index Cond: (key < ANY ('{4,10,NULL}'::integer[]))
-(5 rows)
+   Forward index scan of: o_pk1_pkey
+   Conds: (key < ANY ('{4,10,NULL}'::integer[]))
+(3 rows)
 
 SELECT * FROM o_pk1 WHERE key < ANY (ARRAY[4,10, NULL]);
  key | payload 
@@ -1040,7 +996,6 @@ SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4,5, NULL]);
 (0 rows)
 
 -- Check for non-coersible case
-SET enable_seqscan = OFF;
 EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 1.0;
             QUERY PLAN            
 ----------------------------------
@@ -2607,6 +2562,7 @@ SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19 ORDER BY id DESC;
 (48 rows)
 
 RESET enable_seqscan;
+RESET enable_bitmapscan;
 -- Test for composite primary key
 CREATE TABLE o_pk3
 (

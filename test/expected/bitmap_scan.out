@@ -2133,6 +2133,8 @@ CREATE TABLE pkey_bitmap_test
 INSERT INTO pkey_bitmap_test (i)
 	SELECT pseudo_random(5, v) * 20000 FROM generate_series(1,5000) v
 		ON CONFLICT DO NOTHING;
+-- Update stats so the planner knows which plan to choose
+ANALYZE pkey_bitmap_test;
 EXPLAIN (COSTS OFF) SELECT * FROM pkey_bitmap_test WHERE i < 100;
                     QUERY PLAN                    
 --------------------------------------------------
