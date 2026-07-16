@@ -997,13 +997,17 @@ o_rescan_custom_scan(CustomScanState *node)
 		/*
 		 * btrescan() copies scan keys to scan->keyData but leaves
 		 * so->numberOfKeys = 0, expecting the caller to run
-		 * _bt_preprocess_keys() to populate so->keyData/numberOfKeys/
-		 * qual_ok.  The serial scan path handles this in
-		 * o_index_scan_getnext(), but the parallel path enters
-		 * o_exec_parallel_idx_scan() directly.  Call it here so both paths
-		 * have a properly initialized BTScanOpaque.
+		 * _bt_preprocess_keys() to populate so->keyData/numberOfKeys/qual_ok.
+		 * Do NOT call it here: both execution entry points already do so at
+		 * their start -- the serial path in o_index_scan_getnext() and the
+		 * parallel path in o_exec_parallel_idx_scan_load_keyrange().  On
+		 * PG17+ a second _bt_preprocess_keys() before _bt_start_array_keys()
+		 * has run takes the "numberOfKeys > 0" fast path, whose
+		 * _bt_verify_keys_with_arraykeys() assertion fires because a
+		 * SEARCHARRAY key's sk_argument still points at the array rather than
+		 * elem_values[cur_elem] (crash in bitmap_scan on the "col = ANY(...)"
+		 * queries under a cassert build).
 		 */
-		_bt_preprocess_keys(&ix_plan_state->ostate.scandesc);
 
 		if (ix_plan_state->ostate.iterator != NULL)
 		{
