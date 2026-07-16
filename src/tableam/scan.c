@@ -294,18 +294,6 @@ orioledb_set_plain_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 						}
 					}
 				}
-
-				foreach(lc, rel->indexlist)
-				{
-					IndexClauseSet rclauseset;
-					IndexOptInfo *index = (IndexOptInfo *) lfirst(lc);
-
-					if (index->indpred != NIL && !index->predOK)
-						continue;
-
-					MemSet(&rclauseset, 0, sizeof(rclauseset));
-					match_restriction_clauses_to_index(root, index, &rclauseset);
-				}
 			}
 			o_table_free(o_table);
 		}
