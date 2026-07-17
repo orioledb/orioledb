@@ -58,8 +58,12 @@ SELECT orioledb_tbl_indices('o_test52'::regclass);
 INSERT INTO o_test52 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 EXPLAIN (COSTS off) SELECT * FROM o_test52 WHERE key BETWEEN 100 and 110;
 SELECT * FROM o_test52 WHERE key BETWEEN 100 and 110;
+
+SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_test52 WHERE value BETWEEN 200 and 210;
 SELECT * FROM o_test52 WHERE value BETWEEN 200 and 210;
+RESET enable_seqscan;
+
 EXPLAIN (COSTS off) SELECT * FROM o_test52;
 SELECT count(*) FROM o_test52;
 TRUNCATE o_test52;
@@ -1745,11 +1749,16 @@ INSERT INTO o_test_row_searchkey_pkey_include
 SELECT orioledb_tbl_structure('o_test_row_searchkey_pkey_include'::regclass,
 							  'nue');
 
+
+SET enable_seqscan = off;
+
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_row_searchkey_pkey_include
 		WHERE (val_1) < (2);
 SELECT * FROM o_test_row_searchkey_pkey_include
 	WHERE (val_1) < (2);
+
+RESET enable_seqscan;
 
 CREATE TABLE o_test_duplicate_error (
 	val_1 int,
@@ -1945,6 +1954,8 @@ CREATE TABLE o_test_saop (
 INSERT INTO o_test_saop
 	(SELECT i % 10, (i / 10) % 10, i / 100 FROM generate_series(1, 1000) i);
 
+SET enable_seqscan = off;
+
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
@@ -1956,6 +1967,8 @@ SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) OR
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
+
+RESET enable_seqscan;
 
 -- no doubled parameter
 CREATE TABLE concur_reindex_tab (c1 int, c2 text) USING orioledb;
