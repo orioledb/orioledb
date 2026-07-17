@@ -16,14 +16,7 @@ testing and performance analysis through stop events and CI workflows.
 ```sql
 orioledb
 |- .github
-|  |- workflows
-|  |  |- check.yml      -- build & test each commit
-|  |  |- docker.yml     -- build docker images for each release
-|  |  |- dockertest.yml -- tests the docker images
-|  |  |- pgindent.yml   -- checks C-source code formatting
-|  |  |- rpm.yml        -- build CentOS 7 packages on demand
-|  |  |- static.yml     -- runs static analysis
-|  |- FUNDING.yml
+|  |- workflows -- GitHub workflows
 |
 |- ci  -- scripts for building, testing, and CI automation
 |- doc -- documentation
@@ -36,16 +29,17 @@ orioledb
 |  |- orioledb-config.sh -- Docker images tests configuration
 |  |- postgresql.docker.conf -- configuration file used by Docker images
 |- include -- C-headers of extension
+|- perf -- performance benchmarks
 |- sql -- installation scripts with definitions of the extension's SQL-level objects
 |- src -- C-sources of extension
 |- test
 |  |- expected -- expected output for regression and isolation tests
+|  |- integration -- integration tests
 |  |- specs -- isolation tests
 |  |- sql -- regression tests
 |  |- t -- python tests
 |  |- orioledb_isolation.conf -- configuration file used during isolation tests
 |  |- orioledb_regression.conf -- configuration file used during regression tests
-|- LICENSE -- defines PostgreSQL-licence for the project
 |- Makefile -- defines make targets
 |- README.md -- main documentation entrypoint
 |- orioledb.control -- extension control file
