@@ -132,6 +132,7 @@ static Oid	o_saved_reltablespace = InvalidOid;
 List	   *o_reuse_indices = NIL;
 static ORelOids saved_oids;
 static bool in_rewrite = false;
+static bool in_cluster_rebuild = false;
 List	   *reindex_list = NIL;
 static Query *savedDataQuery = NULL;
 static IndexBuildResult o_pkey_result = {0};
@@ -919,6 +920,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		ORelOidsSetInvalid(saved_oids);
 		savedDataQuery = NULL;
 		in_nontransactional_truncate = false;
+		in_cluster_rebuild = false;
 	}
 
 	pstate = make_parsestate(NULL);
@@ -1203,6 +1205,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		if (full)
 		{
 			List	   *relations = vacstmt->rels;
+
+			in_cluster_rebuild = true;
 
 			if (relations != NIL)
 			{
@@ -1597,6 +1601,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 									context, params, env,
 									dest, qc);
 	}
+
+	in_cluster_rebuild = false;
 
 	if (IsA(pstmt->utilityStmt, ReindexStmt))
 	{
@@ -4168,7 +4174,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				table_close(tbl, AccessShareLock);
 			}
 			else if (rel->rd_rel->relkind == RELKIND_TOASTVALUE &&
-					 (subId == 0))
+					 (subId == 0) && !in_cluster_rebuild)
 			{
 				Oid			tbl_oid;
 				Relation	tbl = NULL;

@@ -135,6 +135,13 @@ class NotSupportedYetTest(BaseTest):
 	def test_vacuum_full(self):
 		node = self.node
 		node.start()
+
+		# Since pg18 pg_indexes has toast tables, so VACUUM FULL shouldn't trigger
+		# empty index list assertion for them.
+		node.safe_psql("""
+			VACUUM FULL;
+		""")
+
 		node.safe_psql("""
 			CREATE EXTENSION orioledb;
 
