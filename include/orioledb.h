@@ -83,7 +83,7 @@
  *
  * ORIOLEDB_BINARY_VERSION of a cluster is written to a checkpoint control file. At start OrioleDB
  * will check if current ORIOLEDB_BINARY_VERSION is equal to what is in the control file. Otherwise
- *  the cluster will refuse to start. (We don't go to the following versions checks in this case)
+ * the cluster will refuse to start. (We don't go to the following versions checks in this case)
  *
  * - ORIOLEDB_SYS_TREE_VERSION - Version of OrioleDB system trees format
  * - ORIOLEDB_PAGE_VERSION - Version of OrioleDB page format
