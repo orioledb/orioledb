@@ -1055,6 +1055,14 @@ o_exec_parallel_idx_scan_new_seqscan(OScanState *ostate,
 	if (!ostate->curKeyRange.empty)
 		btree_seq_scan_set_range_filter(seqScan, &ostate->curKeyRange);
 
+	/*
+	 * TEMPORARY (phase 2 verification): force ordered inline-disk scanning in
+	 * the plan's scan direction via a debug GUC, until the planner grows a
+	 * dedicated ordered parallel path (phase 5).
+	 */
+	if (debug_parallel_ordered_scan)
+		btree_seq_scan_set_ordered(seqScan, true, ostate->scanDir);
+
 	return seqScan;
 }
 
@@ -1121,7 +1129,8 @@ o_exec_parallel_idx_scan(OScanState *ostate, ScanState *ss)
 	if (ostate->seqScan == NULL)
 	{
 		Assert(ostate->pidxscan != NULL);
-		Assert(ostate->scanDir == ForwardScanDirection);
+		Assert(ostate->scanDir == ForwardScanDirection ||
+			   ostate->scanDir == BackwardScanDirection);
 
 		o_exec_parallel_idx_scan_load_keyrange(ostate, indexDescr, tupleCxt);
 

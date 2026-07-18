@@ -74,6 +74,8 @@ extern OTuple btree_seq_scan_getnext_raw(BTreeSeqScan *scan, MemoryContext mctx,
 extern void free_btree_seq_scan(BTreeSeqScan *scan);
 extern void btree_seq_scan_set_range_filter(BTreeSeqScan *scan,
 											OBTreeKeyRange *scanRange);
+extern void btree_seq_scan_set_ordered(BTreeSeqScan *scan, bool ordered,
+									   ScanDirection scanDir);
 extern void seq_scans_cleanup(void);
 extern int	meta_page_get_num_seq_scans(OInMemoryBlkno metaPageBlkno);
 

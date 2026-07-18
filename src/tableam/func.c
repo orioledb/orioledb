@@ -18,6 +18,7 @@
 
 #include "btree/btree.h"
 #include "btree/check.h"
+#include "btree/scan.h"
 #include "btree/io.h"
 #include "btree/iterator.h"
 #include "btree/page_chunks.h"
@@ -1808,4 +1809,64 @@ orioledb_tree_stat(PG_FUNCTION_ARGS)
 	pfree(stat);
 
 	return (Datum) 0;
+}
+
+PG_FUNCTION_INFO_V1(orioledb_debug_seqscan_count);
+
+/*
+ * Debug harness (phase 2b): drive a serial ordered seq scan of a relation's
+ * primary index in the given direction and return the number of tuples seen.
+ * Under a cassert build the per-tuple monotonicity assertion in
+ * btree_seq_scan_getnext() validates that the emitted keys are in scan-
+ * direction order.  Used to verify the backward ordered walk in isolation.
+ */
+Datum
+orioledb_debug_seqscan_count(PG_FUNCTION_ARGS)
+{
+	Oid			relid = PG_GETARG_OID(0);
+	bool		forward = PG_GETARG_BOOL(1);
+	Relation	rel;
+	OTableDescr *descr;
+	BTreeSeqScan *sscan;
+	OTuple		tuple;
+	CommitSeqNo tupleCsn;
+	BTreeLocationHint hint;
+	int64		count = 0;
+	MemoryContext tupleCxt;
+
+	orioledb_check_shmem();
+
+	rel = relation_open(relid, AccessShareLock);
+	descr = relation_get_descr(rel);
+	if (!descr)
+		ereport(ERROR,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("relation \"%s\" is not orioledb",
+						RelationGetRelationName(rel))));
+
+	o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
+
+	tupleCxt = AllocSetContextCreate(CurrentMemoryContext,
+									 "orioledb_debug_seqscan",
+									 ALLOCSET_DEFAULT_SIZES);
+
+	sscan = make_btree_seq_scan(&GET_PRIMARY(descr)->desc,
+								&o_in_progress_snapshot, NULL);
+	btree_seq_scan_set_ordered(sscan, true,
+							   forward ? ForwardScanDirection
+							   : BackwardScanDirection);
+
+	do
+	{
+		tuple = btree_seq_scan_getnext(sscan, tupleCxt, &tupleCsn, &hint);
+		if (!O_TUPLE_IS_NULL(tuple))
+			count++;
+		MemoryContextReset(tupleCxt);
+	} while (!O_TUPLE_IS_NULL(tuple));
+
+	free_btree_seq_scan(sscan);
+	MemoryContextDelete(tupleCxt);
+	relation_close(rel, AccessShareLock);
+
+	PG_RETURN_INT64(count);
 }
