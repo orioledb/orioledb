@@ -1,0 +1,49 @@
+volumes:
+  minio_data:
+    name: minio_data
+  orioledb_data:
+    name: orioledb_data
+
+services:
+  infra.minio:
+    container_name: minio
+    hostname: minio
+    # latest as of 2026-07-15
+    image: quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: ["server", "--console-address", ":9001", "/data"]
+    init: true
+    volumes:
+      - minio_data:/data
+    environment:
+      - MINIO_ROOT_USER=minio
+      - MINIO_ROOT_PASSWORD=minio-secret
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 30
+
+  data.buckets:
+    # latest as of 2026-07-15
+    image: quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      infra.minio:
+        condition: service_healthy
+    restart: on-failure
+    entrypoint: >
+      /bin/sh -c "
+      set -eu;
+      /usr/bin/mc alias set dockerminio http://minio:9000 minio minio-secret;
+      /usr/bin/mc mb --ignore-existing --region us-east-1 dockerminio/orioledb;
+      "
+
+  # merge s3 config + dependency into main orioledb definition
+  test.orioledb:
+    volumes:
+      # /etc/postresql/postgresql.conf has an include_dir directive for conf.d
+      - "./config/setup/s3/postgres.conf:/etc/postgresql/conf.d/s3.conf:ro"
+      # Keep the local control file paired with the persistent S3 data (local testing)
+      - "orioledb_data:/var/lib/postgresql/data"
+    depends_on:
+      data.buckets:
+        condition: service_completed_successfully
