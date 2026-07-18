@@ -1,0 +1,31 @@
+#!/bin/sh
+set -eu
+
+status=0
+java \
+	-Djava.awt.headless=true \
+	-server \
+	-jar /opt/jepsen/jepsen-postgres.jar \
+	test-all \
+	--test-count 1 \
+	--no-ssh \
+	--workload "$JEPSEN_WORKLOAD" \
+	--isolation "$JEPSEN_ISOLATION" \
+	--expected-consistency-model "$JEPSEN_EXPECTED_CONSISTENCY_MODEL" \
+	--concurrency "$JEPSEN_CONCURRENCY" \
+	--max-writes-per-key "$JEPSEN_MAX_WRITES_PER_KEY" \
+	--rate "$JEPSEN_RATE" \
+	--time-limit "$JEPSEN_TIME_LIMIT" \
+	--nemesis "$JEPSEN_NEMESIS" \
+	--node "$JEPSEN_NODE" \
+	--existing-postgres \
+	--postgres-user "$JEPSEN_POSTGRES_USER" \
+	--postgres-password "$JEPSEN_POSTGRES_PASSWORD" \
+	--postgres-port "$JEPSEN_POSTGRES_PORT" \
+	"$@" || status=$?
+
+if [ -n "${ANTITHESIS_OUTPUT_DIR:-}" ] && [ -d store ]; then
+	cp -R store "$ANTITHESIS_OUTPUT_DIR/"
+fi
+
+exit "$status"
