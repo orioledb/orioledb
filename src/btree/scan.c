@@ -1704,14 +1704,12 @@ read_downlink_range_backward(BTreeSeqScan *scan, Page page,
  *     BTreeKeyPageHiKey (lands on the page whose hikey == lokey, i.e. the
  *     immediate left sibling), mirroring the iterator's backward step.
  *
- * The low key is the key of the parent downlink we followed (KEEP_PARENT +
- * KEEP_LOKEY materialize parentImg eagerly).  A first-in-parent downlink
- * (offset 0) means the leftmost level-1 page (low bound -infinity).  Returns
- * false when the tree is a single leaf page (no level-1 page).
- *
- * NOTE: reading the low key from the immediate parent is correct for
- * root->level-1->leaf trees; deeper trees need the recursive lokey and trip
- * the LEFTMOST assert below (addressed later).
+ * The low key is the level-1 page's own low key, which the KEEP_LOKEY descent
+ * establishes in context->lokey (LOKEY_EXISTS) at arbitrary tree depth: it is
+ * the nearest ancestor separator to the left of the descent path.  A leftmost
+ * descent (LOKEY_EXISTS unset) means the leftmost level-1 page (low bound
+ * -infinity).  Returns false when the tree is a single leaf page (no level-1
+ * page).
  */
 static bool
 load_prev_internal_page(BTreeSeqScan *scan, OTuple lokey, Page page,
@@ -1719,7 +1717,6 @@ load_prev_internal_page(BTreeSeqScan *scan, OTuple lokey, Page page,
 						OFixedKey *outLokey, bool *outHave)
 {
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
-	OBtreePageFindItem *parentItem;
 
 	BTREE_PAGE_FIND_UNSET(&scan->context, FETCH);
 	BTREE_PAGE_FIND_SET(&scan->context, IMAGE);
@@ -1738,16 +1735,15 @@ load_prev_internal_page(BTreeSeqScan *scan, OTuple lokey, Page page,
 		return false;			/* single leaf page (no level-1 page) */
 	}
 
-	parentItem = &scan->context.items[scan->context.index - 1];
-	if (scan->context.index > 0 &&
-		BTREE_PAGE_LOCATOR_GET_OFFSET(scan->context.parentImg,
-									  &parentItem->locator) > 0)
+	/*
+	 * The KEEP_LOKEY descent to targetLevel == 1 stashes the target page's
+	 * own low key in context->lokey and sets LOKEY_EXISTS; a fully-leftmost
+	 * descent leaves it unset (low bound -infinity).  This is the recursive
+	 * lokey and works at any tree height.
+	 */
+	if (BTREE_PAGE_FIND_IS(&scan->context, LOKEY_EXISTS))
 	{
-		OTuple		plokey;
-
-		BTREE_PAGE_READ_INTERNAL_TUPLE(plokey, scan->context.parentImg,
-									   &parentItem->locator);
-		copy_fixed_key(scan->desc, outLokey, plokey);
+		copy_fixed_key(scan->desc, outLokey, scan->context.lokey.tuple);
 		*outHave = true;
 	}
 	else
