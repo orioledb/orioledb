@@ -10,6 +10,7 @@ Build via `make build` (see details under Usage)
 
 - `orioledb-config:<git sha>_pg<PG_MAJOR>_odb<ORIOLEDB_REF><config name>` - antithesis config image, contains dynamically built `docker-compose.yaml` and supporting files for a specific configuration set and OrioleDB version.
 - `orioledb-antithesis:<ISO8601>-<sha>_pg<PG_MAJOR>_odb<ORIOLEDB_REF>` - patched postgres + `orioledb.so` instrumented to run under Antithesis simulation
+    - The default OrioleDB is latest main branch `git@github.com:orioledb/orioledb.git`, but can be any git reference
 - `jepsen:<ISO8601>-<sha>` - client workload
     - the append workload is a transactional correctness test for upsert operations. It hammers Postgres with concurrent multi-key transactions that append unique integers to CSV-encoded "lists." After a period of upsert writes and read operations, it reads back the state and analyzes the observed histories for anomalies.
     - because every appended element is unique and lists preserve order, the workload can reconstruct version history and detect transactional anomalies (cycles → serializability violations, lost updates, aborted reads, etc.)
