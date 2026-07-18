@@ -102,4 +102,12 @@ extern bool o_keybitmap_range_is_valid_key(OKeyBitmap *bm, const uint8 *low,
 extern bool o_keybitmap_get_next_key(OKeyBitmap *bm, const uint8 *prev,
 									 uint8 *result);
 
+/*
+ * Serialize a finalized bitmap into a flat, pointerless buffer (for sharing
+ * across parallel workers), and attach a read-only wrapper over such a buffer.
+ */
+extern Size o_keybitmap_serialized_size(OKeyBitmap *bm);
+extern void o_keybitmap_serialize(OKeyBitmap *bm, void *buf);
+extern OKeyBitmap *o_keybitmap_attach(void *buf, MemoryContext cxt);
+
 #endif							/* __TABLEAM_BITMAP_SCAN_H__ */

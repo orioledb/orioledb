@@ -756,3 +756,97 @@ o_keybitmap_get_next_key(OKeyBitmap *bm, const uint8 *prev, uint8 *result)
 	memcpy(result, bm->fkeys + (Size) idx * OKBM_FIXED_BYTES, OKBM_FIXED_BYTES);
 	return true;
 }
+
+/* --- serialization (for sharing a finalized bitmap across workers) --- */
+
+/*
+ * On-buffer header.  The flat arrays follow at MAXALIGN(sizeof(header)):
+ *   uint64 mode: uint64 chunks[nchunks]; OKeyBitmapChunk payloads[nchunks];
+ *   fixed mode:  uint8  fkeys[nchunks * OKBM_FIXED_BYTES];
+ * The layout contains no pointers, so it can be copied into shared memory and
+ * attached (o_keybitmap_attach) at a different mapping address per worker.
+ */
+typedef struct OKeyBitmapSerialHeader
+{
+	int32		nchunks;
+	bool		fixed;
+} OKeyBitmapSerialHeader;
+
+#define OKBM_SERIAL_BODY_OFFSET MAXALIGN(sizeof(OKeyBitmapSerialHeader))
+
+Size
+o_keybitmap_serialized_size(OKeyBitmap *bm)
+{
+	Size		sz = OKBM_SERIAL_BODY_OFFSET;
+
+	okbm_finalize(bm);
+
+	if (bm->fixed)
+		sz += (Size) bm->nchunks * OKBM_FIXED_BYTES;
+	else
+		sz += (Size) bm->nchunks * (sizeof(uint64) + sizeof(OKeyBitmapChunk));
+	return sz;
+}
+
+void
+o_keybitmap_serialize(OKeyBitmap *bm, void *buf)
+{
+	OKeyBitmapSerialHeader *hdr = (OKeyBitmapSerialHeader *) buf;
+	char	   *body = (char *) buf + OKBM_SERIAL_BODY_OFFSET;
+
+	okbm_finalize(bm);
+
+	hdr->nchunks = bm->nchunks;
+	hdr->fixed = bm->fixed;
+
+	if (bm->fixed)
+	{
+		if (bm->nchunks > 0)
+			memcpy(body, bm->fkeys, (Size) bm->nchunks * OKBM_FIXED_BYTES);
+	}
+	else if (bm->nchunks > 0)
+	{
+		memcpy(body, bm->chunks, (Size) bm->nchunks * sizeof(uint64));
+		memcpy(body + (Size) bm->nchunks * sizeof(uint64), bm->payloads,
+			   (Size) bm->nchunks * sizeof(OKeyBitmapChunk));
+	}
+}
+
+/*
+ * Attach a read-only bitmap over a buffer produced by o_keybitmap_serialize().
+ * The wrapper is allocated in `cxt` and holds pointers into `buf` (valid for
+ * the caller's mapping of the shared segment); o_keybitmap_free() drops only
+ * the wrapper.
+ */
+OKeyBitmap *
+o_keybitmap_attach(void *buf, MemoryContext cxt)
+{
+	OKeyBitmapSerialHeader *hdr = (OKeyBitmapSerialHeader *) buf;
+	char	   *body = (char *) buf + OKBM_SERIAL_BODY_OFFSET;
+	OKeyBitmap *bm = MemoryContextAllocZero(cxt, sizeof(OKeyBitmap));
+
+	bm->cxt = cxt;
+	bm->treeCxt = NULL;
+	bm->tree = NULL;
+	bm->ftree = NULL;
+	bm->fixed = hdr->fixed;
+	bm->nchunks = hdr->nchunks;
+	bm->chunksCapacity = 0;
+	bm->finalized = true;
+	bm->shared = true;
+
+	if (bm->fixed)
+	{
+		bm->chunks = NULL;
+		bm->payloads = NULL;
+		bm->fkeys = (uint8 *) body;
+	}
+	else
+	{
+		bm->chunks = (uint64 *) body;
+		bm->payloads = (OKeyBitmapChunk *)
+			(body + (Size) bm->nchunks * sizeof(uint64));
+		bm->fkeys = NULL;
+	}
+	return bm;
+}
