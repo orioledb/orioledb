@@ -217,15 +217,6 @@ struct BTreeSeqScan
 	 */
 	bool		ordered;
 	ScanDirection scanDir;
-
-	/*
-	 * Backward serial walk: low key of the currently loaded level-1 page
-	 * (context->lokey is overwritten by the next find_page).  Used both for
-	 * the leftmost downlink's low bound and as the re-descent key
-	 * (BTreeKeyPageHiKey) to step to the previous level-1 page.
-	 */
-	bool		haveCurPageLokey;
-	OFixedKey	curPageLokey;
 #ifdef USE_ASSERT_CHECKING
 
 	/*
@@ -258,8 +249,6 @@ struct BTreeSeqScan
 static dlist_head listOfScans = DLIST_STATIC_INIT(listOfScans);
 
 static void scan_make_iterator(BTreeSeqScan *scan, OTuple startKey, OTuple keyRangeHigh);
-static bool get_prev_downlink_serial(BTreeSeqScan *scan, uint64 *downlink,
-									 OFixedKey *keyRangeLow, OFixedKey *keyRangeHigh);
 static bool get_prev_downlink_parallel(BTreeSeqScan *scan, uint64 *downlink,
 									   OFixedKey *keyRangeLow, OFixedKey *keyRangeHigh);
 static void get_next_key(BTreeSeqScan *scan, BTreePageItemLocator *intLoc, OFixedKey *nextKey, Page page);
@@ -1074,10 +1063,8 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 		bool		pageIsLoaded = scan->firstPageIsLoaded;
 		bool		prevIsLeftmostOrNone = true;
 
-		/* Serial backward ordered walk (phase 2b). */
-		if (scan->scanDir == BackwardScanDirection)
-			return get_prev_downlink_serial(scan, downlink,
-											keyRangeLow, keyRangeHigh);
+		/* Ordered scanning is only ever generated as a parallel path. */
+		Assert(scan->scanDir == ForwardScanDirection);
 
 		while (true)
 		{
@@ -1763,62 +1750,6 @@ load_prev_internal_page(BTreeSeqScan *scan, OTuple lokey, Page page,
 	BTREE_PAGE_LOCATOR_LAST(page, outLoc);
 	*startOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(page, outLoc);
 	return true;
-}
-
-/*
- * Serial backward downlink generator: yields level-1 downlinks in descending
- * key order, stepping left across level-1 pages.
- */
-static bool
-get_prev_downlink_serial(BTreeSeqScan *scan, uint64 *downlink,
-						 OFixedKey *keyRangeLow, OFixedKey *keyRangeHigh)
-{
-	Assert(!scan->poscan);
-
-	while (true)
-	{
-		if (!scan->firstPageIsLoaded ||
-			!BTREE_PAGE_LOCATOR_IS_VALID(scan->context.img, &scan->intLoc))
-		{
-			OTuple		stepKey;
-			OffsetNumber startOffset;
-
-			if (!scan->firstPageIsLoaded)
-				O_TUPLE_SET_NULL(stepKey);
-			else if (O_PAGE_IS(scan->context.img, LEFTMOST))
-			{
-				clear_fixed_key(keyRangeLow);
-				clear_fixed_key(keyRangeHigh);
-				return false;
-			}
-			else
-			{
-				Assert(scan->haveCurPageLokey);
-				stepKey = scan->curPageLokey.tuple;
-			}
-
-			if (!load_prev_internal_page(scan, stepKey, NULL, &scan->intLoc,
-										 &startOffset, &scan->curPageLokey,
-										 &scan->haveCurPageLokey))
-			{
-				clear_fixed_key(keyRangeLow);
-				clear_fixed_key(keyRangeHigh);
-				return false;
-			}
-			scan->firstPageIsLoaded = true;
-		}
-
-		if (BTREE_PAGE_LOCATOR_IS_VALID(scan->context.img, &scan->intLoc))
-		{
-			read_downlink_range_backward(scan, scan->context.img, &scan->intLoc,
-										 scan->haveCurPageLokey,
-										 scan->curPageLokey.tuple,
-										 downlink, keyRangeLow, keyRangeHigh);
-			BTREE_PAGE_LOCATOR_PREV(scan->context.img, &scan->intLoc);
-			return true;
-		}
-		/* Page had no items (shouldn't happen); try the previous page. */
-	}
 }
 
 /*
@@ -2535,7 +2466,6 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 
 	scan->ordered = false;
 	scan->scanDir = ForwardScanDirection;
-	scan->haveCurPageLokey = false;
 #ifdef USE_ASSERT_CHECKING
 	scan->haveOrderedPrev = false;
 #endif
