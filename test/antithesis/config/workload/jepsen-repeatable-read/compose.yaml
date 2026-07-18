@@ -1,0 +1,21 @@
+services:
+  jepsen-client:
+    image: "${IMAGE_REPO}jepsen-client:${IMAGE_TAG}"
+    container_name: jepsen-client
+    environment:
+      JEPSEN_POSTGRES_USER: "${POSTGRES_USER}"
+      JEPSEN_POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      JEPSEN_NODE: orioledb
+
+      # JEPSEN_ISOLATION                   sets connection transaction level
+      # JEPSEN_EXPECTED_CONSISTENCY_MODEL  defaults to the isolation level
+      # NB postgres "repeatable-read" is not Adya repeatable read
+      # and instead guarantees snapshot isolation.
+      # Ergo, we must specify the expected consistency model explicitly.
+      JEPSEN_ISOLATION: repeatable-read
+      JEPSEN_EXPECTED_CONSISTENCY_MODEL: snapshot-isolation
+    platform: linux/amd64
+    build: ./jepsen
+    depends_on:
+      test.orioledb:
+        condition: service_healthy
