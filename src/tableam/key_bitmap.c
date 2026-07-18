@@ -82,15 +82,31 @@ struct OKeyBitmap
 	/*
 	 * Sorted key arrays, built lazily by okbm_finalize() to serve ordered
 	 * seeks.  Invalidated (finalized = false) on every mutation.  uint64 mode
-	 * stores chunk keys in chunks[]; fixed mode stores whole keys, each
+	 * stores chunk keys in chunks[] and the matching per-chunk bitmaps in
+	 * payloads[] (so the read path is self-contained -- no radix-tree lookup
+	 * -- and the finalized form is a set of flat POD arrays that can be
+	 * shared across parallel workers); fixed mode stores whole keys, each
 	 * OKBM_FIXED_BYTES bytes, in fkeys[].
 	 */
 	uint64	   *chunks;
+	OKeyBitmapChunk *payloads;
 	uint8	   *fkeys;
 	int			nchunks;
 	int			chunksCapacity;
 	bool		finalized;
+
+	/*
+	 * A shared (read-only) bitmap attached over a serialized buffer: chunks/
+	 * payloads/fkeys point into that buffer, tree/ftree are NULL and
+	 * finalized is true.  o_keybitmap_free() must not free the buffer-backed
+	 * arrays.
+	 */
+	bool		shared;
 };
+
+static void okbm_finalize(OKeyBitmap *bm);
+static int	okbm_lower_bound(OKeyBitmap *bm, uint64 target);
+static int	okbmf_lower_bound(OKeyBitmap *bm, const uint8 *target);
 
 /*
  * Return the first set bit offset >= minOffset within a chunk bitmap, or -1.
@@ -146,10 +162,12 @@ o_keybitmap_create(void)
 	bm->tree = okbm_create(bm->treeCxt);
 	bm->ftree = NULL;
 	bm->chunks = NULL;
+	bm->payloads = NULL;
 	bm->fkeys = NULL;
 	bm->nchunks = 0;
 	bm->chunksCapacity = 0;
 	bm->finalized = false;
+	bm->shared = false;
 	return bm;
 }
 
@@ -168,16 +186,25 @@ o_keybitmap_create_fixed(void)
 	bm->tree = NULL;
 	bm->ftree = okbmf_create(bm->treeCxt);
 	bm->chunks = NULL;
+	bm->payloads = NULL;
 	bm->fkeys = NULL;
 	bm->nchunks = 0;
 	bm->chunksCapacity = 0;
 	bm->finalized = false;
+	bm->shared = false;
 	return bm;
 }
 
 void
 o_keybitmap_free(OKeyBitmap *bm)
 {
+	if (bm->shared)
+	{
+		/* Arrays live in the shared buffer; only the wrapper is ours. */
+		pfree(bm);
+		return;
+	}
+
 	if (bm->fixed)
 		okbmf_free(bm->ftree);
 	else
@@ -185,6 +212,8 @@ o_keybitmap_free(OKeyBitmap *bm)
 	MemoryContextDelete(bm->treeCxt);
 	if (bm->chunks)
 		pfree(bm->chunks);
+	if (bm->payloads)
+		pfree(bm->payloads);
 	if (bm->fkeys)
 		pfree(bm->fkeys);
 	pfree(bm);
@@ -219,10 +248,15 @@ o_keybitmap_insert_key(OKeyBitmap *bm, const uint8 *key)
 bool
 o_keybitmap_test_key(OKeyBitmap *bm, const uint8 *key)
 {
-	okbmf_key	k = okbmf_mkkey(key);
+	int			idx;
 
 	Assert(bm->fixed);
-	return okbmf_find(bm->ftree, k) != NULL;
+	okbm_finalize(bm);
+
+	idx = okbmf_lower_bound(bm, key);
+	return idx < bm->nchunks &&
+		memcmp(bm->fkeys + (Size) idx * OKBM_FIXED_BYTES, key,
+			   OKBM_FIXED_BYTES) == 0;
 }
 
 /*
@@ -271,12 +305,15 @@ o_keybitmap_test(OKeyBitmap *bm, uint64 value)
 {
 	uint64		chunk = value >> OKBM_CHUNK_BITS;
 	int			offset = value & OKBM_LOW_MASK;
-	OKeyBitmapChunk *entry = okbm_find(bm->tree, chunk);
+	int			idx;
 
-	if (entry == NULL)
+	okbm_finalize(bm);
+
+	idx = okbm_lower_bound(bm, chunk);
+	if (idx >= bm->nchunks || bm->chunks[idx] != chunk)
 		return false;
 
-	return (entry->bitmap[offset >> 3] & (1 << (offset & 7))) != 0;
+	return (bm->payloads[idx].bitmap[offset >> 3] & (1 << (offset & 7))) != 0;
 }
 
 /* uint64 variant of o_keybitmap_emit_key(): insert, return true if newly added. */
@@ -514,19 +551,33 @@ okbm_finalize(OKeyBitmap *bm)
 	}
 
 	iter = okbm_begin_iterate(bm->tree);
-	while (okbm_iterate_next(iter, &chunk) != NULL)
 	{
-		if (bm->nchunks >= bm->chunksCapacity)
+		OKeyBitmapChunk *entry;
+
+		while ((entry = okbm_iterate_next(iter, &chunk)) != NULL)
 		{
-			bm->chunksCapacity = bm->chunksCapacity ? bm->chunksCapacity * 2 : 64;
-			if (bm->chunks == NULL)
-				bm->chunks = MemoryContextAlloc(bm->cxt,
-												sizeof(uint64) * bm->chunksCapacity);
-			else
-				bm->chunks = repalloc(bm->chunks,
-									  sizeof(uint64) * bm->chunksCapacity);
+			if (bm->nchunks >= bm->chunksCapacity)
+			{
+				bm->chunksCapacity = bm->chunksCapacity ? bm->chunksCapacity * 2 : 64;
+				if (bm->chunks == NULL)
+				{
+					bm->chunks = MemoryContextAlloc(bm->cxt,
+													sizeof(uint64) * bm->chunksCapacity);
+					bm->payloads = MemoryContextAlloc(bm->cxt,
+													  sizeof(OKeyBitmapChunk) * bm->chunksCapacity);
+				}
+				else
+				{
+					bm->chunks = repalloc(bm->chunks,
+										  sizeof(uint64) * bm->chunksCapacity);
+					bm->payloads = repalloc(bm->payloads,
+											sizeof(OKeyBitmapChunk) * bm->chunksCapacity);
+				}
+			}
+			bm->chunks[bm->nchunks] = chunk;
+			memcpy(&bm->payloads[bm->nchunks], entry, sizeof(OKeyBitmapChunk));
+			bm->nchunks++;
 		}
-		bm->chunks[bm->nchunks++] = chunk;
 	}
 	okbm_end_iterate(iter);
 
@@ -580,7 +631,7 @@ o_keybitmap_range_is_valid(OKeyBitmap *bm, uint64 low, uint64 high)
 		if (chunk > chunkHigh)
 			break;
 
-		entry = okbm_find(bm->tree, chunk);
+		entry = &bm->payloads[idx];
 
 		if (chunk == chunkLow)
 		{
@@ -631,12 +682,10 @@ o_keybitmap_get_next(OKeyBitmap *bm, uint64 prev, bool *found)
 	for (idx = okbm_lower_bound(bm, chunkPrev); idx < bm->nchunks; idx++)
 	{
 		uint64		chunk = bm->chunks[idx];
-		OKeyBitmapChunk *entry = okbm_find(bm->tree, chunk);
+		OKeyBitmapChunk *entry = &bm->payloads[idx];
 		int			startOff = (chunk == chunkPrev) ? offPrev : 0;
 		int			nextOff;
 
-		/* chunk came from bm->chunks[], so the tree always has it */
-		Assert(entry != NULL);
 		nextOff = find_next_offset(entry->bitmap, startOff);
 
 		if (nextOff >= 0)
