@@ -132,7 +132,6 @@ uint32		rewind_buffers_count;
 bool		remove_old_checkpoint_files = true;
 bool		skip_unmodified_trees = true;
 bool		debug_disable_bgwriter = false;
-bool		debug_parallel_ordered_scan = false;
 bool		use_mmap = false;
 bool		use_device = false;
 bool		orioledb_use_sparse_files = false;
@@ -703,18 +702,6 @@ _PG_init(void)
 							 &debug_disable_bgwriter,
 							 false,
 							 PGC_POSTMASTER,
-							 0,
-							 NULL,
-							 NULL,
-							 NULL);
-
-	DefineCustomBoolVariable("orioledb.debug_parallel_ordered_scan",
-							 "Force ordered (inline on-disk) parallel index scan "
-							 "(temporary; phase 0-1 verification).",
-							 NULL,
-							 &debug_parallel_ordered_scan,
-							 false,
-							 PGC_USERSET,
 							 0,
 							 NULL,
 							 NULL,

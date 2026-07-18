@@ -450,7 +450,6 @@ extern bool remove_old_checkpoint_files;
 extern bool orioledb_debug_disable_multi_insert;
 extern bool skip_unmodified_trees;
 extern bool debug_disable_bgwriter;
-extern bool debug_parallel_ordered_scan;
 extern MemoryContext btree_insert_context;
 extern MemoryContext btree_seqscan_context;
 extern double o_checkpoint_completion_ratio;
