@@ -1056,11 +1056,10 @@ o_exec_parallel_idx_scan_new_seqscan(OScanState *ostate,
 		btree_seq_scan_set_range_filter(seqScan, &ostate->curKeyRange);
 
 	/*
-	 * TEMPORARY (phase 2 verification): force ordered inline-disk scanning in
-	 * the plan's scan direction via a debug GUC, until the planner grows a
-	 * dedicated ordered parallel path (phase 5).
+	 * An ordered parallel path reads on-disk downlinks inline in the plan's
+	 * scan direction so each worker emits a sorted stream (for Gather Merge).
 	 */
-	if (debug_parallel_ordered_scan)
+	if (ostate->ordered)
 		btree_seq_scan_set_ordered(seqScan, true, ostate->scanDir);
 
 	return seqScan;

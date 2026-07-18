@@ -72,6 +72,8 @@ typedef struct OIndexPath
 	OPath		o_path;
 	ScanDirection scandir;
 	OIndexNumber ix_num;
+	/* ordered (key-order) parallel scan: reads on-disk downlinks inline */
+	bool		ordered;
 } OIndexPath;
 
 typedef struct OBitmapHeapPath
@@ -192,13 +194,12 @@ o_estimate_parallel_workers(PlannerInfo *root, RelOptInfo *rel,
 	double		heap_pages;
 
 	/*
-	 * Backward parallel index scans are gated behind the ordered-scan debug
-	 * GUC until phase 5 wires a proper ordered path: without the ordered
-	 * backward engine a backward parallel scan would run the forward walk.
+	 * Only forward and backward index scans are supported; a backward scan
+	 * runs the ordered backward engine (the caller only keeps the ordered
+	 * variant of a backward path).
 	 */
 	if (ipath->indexscandir != ForwardScanDirection &&
-		!(ipath->indexscandir == BackwardScanDirection &&
-		  debug_parallel_ordered_scan))
+		ipath->indexscandir != BackwardScanDirection)
 		return 0;
 
 	if (!ipath->path.parallel_safe)
@@ -230,7 +231,7 @@ o_estimate_parallel_workers(PlannerInfo *root, RelOptInfo *rel,
 }
 
 static Path *
-transform_path(Path *src_path, OTableDescr *descr)
+transform_path(Path *src_path, OTableDescr *descr, bool ordered)
 {
 	CustomPath *result;
 
@@ -259,6 +260,7 @@ transform_path(Path *src_path, OTableDescr *descr)
 		new_path->o_path.type = O_IndexPath;
 		new_path->ix_num = PrimaryIndexNumber;
 		new_path->scandir = ForwardScanDirection;
+		new_path->ordered = ordered;
 		result->custom_private = list_make1(new_path);
 	}
 	else if (IsA(src_path, IndexPath))
@@ -279,6 +281,7 @@ transform_path(Path *src_path, OTableDescr *descr)
 		new_path->o_path.type = O_IndexPath;
 		new_path->ix_num = ix_num;
 		new_path->scandir = ix_path->indexscandir;
+		new_path->ordered = ordered;
 		result->custom_private = list_make1(new_path);
 	}
 	else if (IsA(src_path, BitmapHeapPath))
@@ -454,7 +457,8 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 
 					if (replace)
 					{
-						Path	   *custom_path = transform_path(path, descr);
+						Path	   *custom_path = transform_path(path, descr,
+																 false);
 
 						rel->pathlist = list_delete_nth_cell(rel->pathlist, i);
 
@@ -478,55 +482,89 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 					/*
 					 * Transform OrioleDB IndexPath entries into CustomPath
 					 * entries so they can run as parallel-aware index scans.
-					 * Forward always; backward only under the ordered-scan
-					 * debug GUC (see o_estimate_parallel_workers).
+					 * We can emit two variants:
+					 *
+					 * - Unordered (forward only): the default parallel index
+					 * scan does not guarantee per-worker sorted output --
+					 * disk-phase downlinks are sorted by physical location
+					 * and the in-memory/disk phase boundary breaks key order
+					 * -- so drop pathkeys and let the planner use Gather (+
+					 * Sort if an ordering is needed).  This is the cheapest
+					 * variant.
+					 *
+					 * - Ordered (forward and backward): reads on-disk
+					 * downlinks inline in key order, so each worker emits a
+					 * sorted stream and the planner can use Gather Merge.
+					 * Reading disk leaves inline forgoes the physically
+					 * sorted disk phase, so its cost is penalised; the
+					 * planner then prefers the unordered variant unless the
+					 * ordering pays for itself.  A backward index path exists
+					 * only to provide descending order, so only its ordered
+					 * variant is useful.
 					 */
 					if (ix_num >= 0 &&
 						(ix_path->indexscandir == ForwardScanDirection ||
-						 (ix_path->indexscandir == BackwardScanDirection &&
-						  debug_parallel_ordered_scan)))
+						 ix_path->indexscandir == BackwardScanDirection))
 					{
-						Path	   *custom_path;
 						int			parallel_workers;
 
 						parallel_workers = o_estimate_parallel_workers(root,
 																	   rel,
 																	   ix_path,
 																	   ix_num == PrimaryIndexNumber);
+
+						/* The original IndexPath is always replaced. */
+						rel->partial_pathlist =
+							list_delete_nth_cell(rel->partial_pathlist, i);
+
 						if (parallel_workers > 0)
 						{
-							custom_path = transform_path(path, descr);
-							custom_path->parallel_aware = true;
-							custom_path->parallel_workers = parallel_workers;
+							int			ninserted = 0;
 
-							/*
-							 * The default (unordered) parallel index scan
-							 * does not guarantee per-worker sorted output:
-							 * disk-phase downlinks are sorted by physical
-							 * location and the in-memory/disk phase boundary
-							 * breaks key order. Clear pathkeys so the planner
-							 * uses Gather + Sort.
-							 *
-							 * Under the ordered-scan debug GUC the scan reads
-							 * on-disk downlinks inline in key order, so each
-							 * worker's stream is sorted -- keep pathkeys so
-							 * the planner can pick Gather Merge (previews
-							 * phase 5).
-							 */
-							if (!debug_parallel_ordered_scan)
-								custom_path->pathkeys = NIL;
+							if (ix_path->indexscandir == ForwardScanDirection)
+							{
+								Path	   *unordered;
 
-							rel->partial_pathlist =
-								list_delete_nth_cell(rel->partial_pathlist, i);
-							rel->partial_pathlist =
-								list_insert_nth(rel->partial_pathlist, i,
-												custom_path);
-							i++;
-						}
-						else
-						{
-							rel->partial_pathlist =
-								list_delete_nth_cell(rel->partial_pathlist, i);
+								unordered = transform_path(path, descr, false);
+								unordered->parallel_aware = true;
+								unordered->parallel_workers = parallel_workers;
+								unordered->pathkeys = NIL;
+								rel->partial_pathlist =
+									list_insert_nth(rel->partial_pathlist,
+													i + ninserted, unordered);
+								ninserted++;
+							}
+
+							if (ix_path->path.pathkeys != NIL)
+							{
+								Path	   *ordered;
+								double		pages;
+								Cost		penalty;
+
+								ordered = transform_path(path, descr, true);
+								ordered->parallel_aware = true;
+								ordered->parallel_workers = parallel_workers;
+
+								/*
+								 * Penalise the inline on-disk reads: roughly
+								 * one random access per selected index page
+								 * instead of the sequential disk phase,
+								 * spread over the workers.
+								 */
+								pages = ix_path->indexinfo->pages *
+									ix_path->indexselectivity;
+								penalty = pages *
+									Max(random_page_cost - seq_page_cost, 0.0) /
+									(parallel_workers + 1);
+								ordered->total_cost += penalty;
+
+								rel->partial_pathlist =
+									list_insert_nth(rel->partial_pathlist,
+													i + ninserted, ordered);
+								ninserted++;
+							}
+
+							i += ninserted;
 						}
 					}
 					else
@@ -632,10 +670,11 @@ o_plan_custom_path(PlannerInfo *root, RelOptInfo *rel,
 		custom_scan->custom_exprs = NIL;
 		custom_scan->custom_private =
 		/* cppcheck-suppress unknownEvaluationOrder */
-			list_make4(makeInteger(O_IndexPlan),
+			list_make5(makeInteger(O_IndexPlan),
 					   makeInteger(ix_path->ix_num),
 					   makeInteger(ix_path->scandir),
-					   makeInteger(onlyCurIx));
+					   makeInteger(onlyCurIx),
+					   makeInteger(ix_path->ordered));
 	}
 	else
 	{
@@ -695,6 +734,8 @@ o_create_custom_scan_state(CustomScan *cscan)
 
 		ix_plan_state->ostate.ixNum = intVal(lsecond(cscan->custom_private));
 		ix_plan_state->ostate.scanDir = intVal(lthird(cscan->custom_private));
+		ix_plan_state->ostate.ordered =
+			intVal(list_nth(cscan->custom_private, 4));
 		ix_plan_state->ostate.iterator = NULL;
 		ix_plan_state->ostate.curKeyRangeIsLoaded = false;
 		ix_plan_state->ostate.curKeyRange.empty = true;

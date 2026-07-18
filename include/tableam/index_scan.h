@@ -27,6 +27,8 @@ typedef struct OScanState
 	OIndexNumber ixNum;
 	MemoryContext cxt;
 	ScanDirection scanDir;
+	/* parallel ordered (key-order) scan: read on-disk downlinks inline */
+	bool		ordered;
 	bool		addJunk;
 	/* is only current index can be used in scan */
 	bool		onlyCurIx;
