@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+	echo "Usage: $0 [CONFIG ...]"
+	echo
+	echo "Build a Docker Compose configuration from config/docker-compose.base.yaml"
+	echo "and optional config directories (for example, setup/s3)."
+}
+
+for config in "$@"; do
+	if [[ "$config" == "-h" || "$config" == "--help" ]]; then
+		usage
+		exit 0
+	fi
+done
+
+base_compose="config/docker-compose.base.yaml"
+base_env="config/base.env"
+
+IMAGE_TAG="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)"
+export IMAGE_TAG
+
+env_args=()
+compose_args=()
+
+for config in "$@"; do
+	env_file="config/$config/env"
+	compose_file="config/$config/compose.yaml"
+
+	if [[ ! -f "$env_file" ]]; then
+		echo "Error: $env_file does not exist" >&2
+		exit 1
+	fi
+	if [[ ! -f "$compose_file" ]]; then
+		echo "Error: $compose_file does not exist" >&2
+		exit 1
+	fi
+
+	env_args+=(--env-file "$env_file")
+	compose_args+=(-f "$compose_file")
+done
+
+exec docker compose \
+	--env-file "$base_env" \
+	"${env_args[@]}" \
+	-f "$base_compose" \
+	"${compose_args[@]}" \
+	config --no-path-resolution

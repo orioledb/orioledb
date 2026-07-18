@@ -1,0 +1,44 @@
+services:
+  test.orioledb:
+    image: "${IMAGE_REPO}orioledb-antithesis:${IMAGE_TAG}_pg${PG_MAJOR}_odb${ORIOLEDB_REF_TAG}"
+    container_name: orioledb
+    hostname: orioledb
+    platform: linux/amd64
+    build:
+      context: ./orioledb
+      args:
+        ORIOLEDB_REF: "${ORIOLEDB_REF:-main}"
+        PG_MAJOR: "${PG_MAJOR:-17}"
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB}"
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+    ports:
+      - "5432:5432"
+    init: true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "pg_isready",
+          "-h",
+          "localhost",
+          "-p",
+          "5432",
+          "-U",
+          "${POSTGRES_USER}",
+          "-d",
+          "${POSTGRES_DB}",
+        ]
+      interval: 1s
+      timeout: 5s
+      retries: 30
+
+  health-checker:
+    image: "${IMAGE_REPO}health-checker:${IMAGE_TAG}"
+    container_name: health-checker
+    platform: linux/amd64
+    build: ./health-checker
+    depends_on:
+      test.orioledb:
+        condition: service_healthy

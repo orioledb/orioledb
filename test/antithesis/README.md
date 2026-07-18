@@ -1,0 +1,74 @@
+# OrioleDB ❤️ Antithesis
+
+Defines antithesis-ready simulation tests for OrioleDB. Each simulation is defined by a combination of container images and docker-compose configuration.  The container images have instrumented binaries and property assertions to guide the simulation search.
+
+## Components
+
+### Images
+
+Build via `make build` (see details under Usage)
+
+- `orioledb-config:<git sha>_pg<PG_MAJOR>_odb<ORIOLEDB_REF><config name>` - antithesis config image, contains dynamically built `docker-compose.yaml` and supporting files for a specific configuration set and OrioleDB version.
+- `orioledb-antithesis:<ISO8601>-<sha>_pg<PG_MAJOR>_odb<ORIOLEDB_REF>` - patched postgres + `orioledb.so` instrumented to run under Antithesis simulation
+- `jepsen:<ISO8601>-<sha>` - client workload
+    - the append workload is a transactional correctness test for upsert operations. It hammers Postgres with concurrent multi-key transactions that append unique integers to CSV-encoded "lists." After a period of upsert writes and read operations, it reads back the state and analyzes the observed histories for anomalies.
+    - because every appended element is unique and lists preserve order, the workload can reconstruct version history and detect transactional anomalies (cycles → serializability violations, lost updates, aborted reads, etc.)
+- `health-checker:<ISO8601>-<sha>` - simulation ready signal (see Appendix)
+- flake1 - TODO
+
+### Configurations
+
+| Config  | Description  |
+|:--|:--|
+| [setup/s3](./config/setup/s3)  | additive; runs orioledb in s3 mode with local minio backend  |
+| [workload/jepsen-repeatable-read](./config/workload/jepsens-repeatable-read)  | adds a jepsen client with append/rr workload  |
+| flake repro  | todo  |
+
+- individual configuration sets are merged with `config/docker-compose.base.yaml` to define a simulation
+- a config follows simple conventions
+    - named by a path inside the `config` folder (e.g. `setup/s3` points to ``<repo>/config/setup/s3`)
+    - `compose.yaml` - merged with base compose file
+    - `env` - enivronment customizations
+
+## Usage
+
+Before pushing to Antithesis, it's worth running your changes locally. 
+
+```bash
+# builds simulation containers for
+# - PostgreSQL 18
+# - OrioleDB feature branch mhamilton/perf-improvements
+# - stock OrioleDB configuration, no s3 or undo rewind
+# - jepsen RR workload
+make build CONFIGS='workload/jepsen-repeatable-read' PG_MAJOR=18 ORIOLEDB_REF=mhamilton/perf-improvements
+
+# same CONFIGS as above except storage is in minio/s3
+make build # defaults to CONFIGS='setup/s3 workload/jepsen-repeatable-read' PG_MAJOR=17 ORIOLEDB_REF=main 
+
+# starts simulation locally
+make up
+
+# tears down running sim, volumes, and intermediate files
+make clean
+```
+
+
+### Pre-requisites
+
+- [Docker](https://www.docker.com/) for building images, running workloads locally
+- [mise](https://mise.jdx.dev/) (optional) installs snouty and other dev-local tools
+
+# Appendix
+
+## Reference
+
+- [Getting started with Antithesis and docker compose](https://antithesis.com/docs/getting_started/setup/)
+- [etcd test cluster example](https://antithesis.com/docs/tutorials/cluster-setup/)
+- [SDK](https://antithesis.com/docs/using_antithesis/sdk/)
+- [Testing best practices](https://antithesis.com/docs/best_practices/optimizing/)
+- driving workloads
+    - can use any container entrypoint or
+    - have a dedicated test driver container and use [Test Composer](https://antithesis.com/docs/test_templates/)
+        - [basics](https://antithesis.com/docs/test_templates/first_test/)
+        - [reference](https://antithesis.com/docs/test_templates/test_composer_reference/)
+        - [an entrypoint](https://github.com/DataDog/dd-profiling-antithesis/blob/main/runner/resources/entrypoint.sh) that does `sleep infinity` inside antithesis and automatically runs the test composer tests itself is useful for local testing.
