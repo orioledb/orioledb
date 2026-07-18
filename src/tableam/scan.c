@@ -191,7 +191,14 @@ o_estimate_parallel_workers(PlannerInfo *root, RelOptInfo *rel,
 	double		index_pages;
 	double		heap_pages;
 
-	if (ipath->indexscandir != ForwardScanDirection)
+	/*
+	 * Backward parallel index scans are gated behind the ordered-scan debug
+	 * GUC until phase 5 wires a proper ordered path: without the ordered
+	 * backward engine a backward parallel scan would run the forward walk.
+	 */
+	if (ipath->indexscandir != ForwardScanDirection &&
+		!(ipath->indexscandir == BackwardScanDirection &&
+		  debug_parallel_ordered_scan))
 		return 0;
 
 	if (!ipath->path.parallel_safe)
@@ -471,10 +478,13 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 					/*
 					 * Transform OrioleDB IndexPath entries into CustomPath
 					 * entries so they can run as parallel-aware index scans.
-					 * Only forward scans are supported.
+					 * Forward always; backward only under the ordered-scan
+					 * debug GUC (see o_estimate_parallel_workers).
 					 */
 					if (ix_num >= 0 &&
-						ix_path->indexscandir == ForwardScanDirection)
+						(ix_path->indexscandir == ForwardScanDirection ||
+						 (ix_path->indexscandir == BackwardScanDirection &&
+						  debug_parallel_ordered_scan)))
 					{
 						Path	   *custom_path;
 						int			parallel_workers;
@@ -490,15 +500,21 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 							custom_path->parallel_workers = parallel_workers;
 
 							/*
-							 * Parallel index scan does not guarantee
-							 * per-worker sorted output: disk-phase downlinks
-							 * are sorted by physical location (not key order)
-							 * and the boundary between in-memory and disk
-							 * phases breaks key ordering across phases. Clear
-							 * pathkeys so the planner uses Gather + Sort
-							 * instead of Gather Merge.
+							 * The default (unordered) parallel index scan
+							 * does not guarantee per-worker sorted output:
+							 * disk-phase downlinks are sorted by physical
+							 * location and the in-memory/disk phase boundary
+							 * breaks key order. Clear pathkeys so the planner
+							 * uses Gather + Sort.
+							 *
+							 * Under the ordered-scan debug GUC the scan reads
+							 * on-disk downlinks inline in key order, so each
+							 * worker's stream is sorted -- keep pathkeys so
+							 * the planner can pick Gather Merge (previews
+							 * phase 5).
 							 */
-							custom_path->pathkeys = NIL;
+							if (!debug_parallel_ordered_scan)
+								custom_path->pathkeys = NIL;
 
 							rel->partial_pathlist =
 								list_delete_nth_cell(rel->partial_pathlist, i);

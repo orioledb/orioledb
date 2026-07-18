@@ -12,3 +12,8 @@ CREATE FUNCTION orioledb_test_back_refind_skip_tail(relid oid, fake_curkey int4)
 RETURNS int4[]
 AS 'MODULE_PATHNAME'
 VOLATILE LANGUAGE C;
+
+CREATE FUNCTION orioledb_debug_seqscan_count(relid oid, forward bool)
+RETURNS int8
+AS 'MODULE_PATHNAME'
+VOLATILE LANGUAGE C;
