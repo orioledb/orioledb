@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+	echo "Usage: $0 [CONFIG ...]"
+	echo
+	echo "Build a config image from config/docker-compose.base.yaml"
+	echo "and optional config directories (for example, setup/s3)."
+}
+
+for config in "$@"; do
+	if [[ "$config" == "-h" || "$config" == "--help" ]]; then
+		usage
+		exit 0
+	fi
+done
+
+mkdir -p target
+config/make-compose "$@" >target/docker-compose.yaml
+
+name=""
+for config in "$@"; do
+	[[ -n "$name" ]] && name+="_"
+	name+="${config//\//-}"
+done
+
+sha="$(git rev-parse --short HEAD)"
+tag="${sha}_pg${PG_MAJOR}_odb${ORIOLEDB_REF_TAG}_${name}"
+
+docker build -f config/Dockerfile -t "orioledb-config:$tag" .

@@ -1,0 +1,3 @@
+[tools]
+"cargo:snouty" = "0.6.1"
+rust = "1.94.1"
