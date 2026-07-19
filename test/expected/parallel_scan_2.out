@@ -740,15 +740,16 @@ EXPLAIN (COSTS OFF)
 				WHERE ot1.val_1 % 1000 = 1 AND ot2.val_1 = any(array[1]);
                                QUERY PLAN                               
 ------------------------------------------------------------------------
- Nested Loop
-   Join Filter: (ot1.val_1 = ot2.val_1)
-   ->  Seq Scan on o_test_parallelscan_reinitialize1 ot1
-         Filter: ((val_1 % 1000) = 1)
-   ->  Gather
-         Workers Planned: 3
+ Gather
+   Workers Planned: 3
+   ->  Nested Loop
+         Join Filter: (ot1.val_1 = ot2.val_1)
          ->  Parallel Seq Scan on o_test_parallelscan_reinitialize2 ot2
                Filter: (val_1 = ANY ('{1}'::integer[]))
-(8 rows)
+         ->  Materialize
+               ->  Seq Scan on o_test_parallelscan_reinitialize1 ot1
+                     Filter: ((val_1 % 1000) = 1)
+(9 rows)
 
 SELECT ot1.val_1, ot1.val_2 ot1v2, ot2.val_2 ot2v2
 	FROM o_test_parallelscan_reinitialize1 ot1
@@ -758,14 +759,14 @@ SELECT ot1.val_1, ot1.val_2 ot1v2, ot2.val_2 ot2v2
  val_1 | ot1v2 | ot2v2 
 -------+-------+-------
      1 |     1 |     1
-     1 |     1 |     2
      1 |     2 |     1
-     1 |     2 |     2
      1 |     3 |     1
-     1 |     3 |     2
      1 |     4 |     1
-     1 |     4 |     2
      1 |     5 |     1
+     1 |     1 |     2
+     1 |     2 |     2
+     1 |     3 |     2
+     1 |     4 |     2
      1 |     5 |     2
 (10 rows)
 
