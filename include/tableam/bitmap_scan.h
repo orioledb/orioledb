@@ -19,6 +19,9 @@
 #include "tableam/scan.h"
 
 #include "executor/executor.h"
+#include "storage/condition_variable.h"
+#include "storage/spin.h"
+#include "utils/dsa.h"
 
 /*
  * Opaque set of uint64 keys backing the orioledb bitmap scan.  Implemented in
@@ -27,6 +30,32 @@
 typedef struct OKeyBitmap OKeyBitmap;
 
 typedef struct OBitmapScan OBitmapScan;
+
+/*
+ * Shared (DSM) state coordinating a parallel bitmap heap scan.  The bitmap is
+ * built once by the first worker to arrive and serialized into es_query_dsa;
+ * the others wait on `cv` and then attach the same buffer read-only.  The
+ * primary tree is then fetched cooperatively through `poscan`.
+ */
+typedef enum OBitmapParallelStage
+{
+	OBITMAP_PARALLEL_NEW = 0,	/* nobody has started building yet */
+	OBITMAP_PARALLEL_BUILDING,	/* one worker is building the bitmap */
+	OBITMAP_PARALLEL_READY,		/* bitmap serialized (or empty); fetch may run */
+} OBitmapParallelStage;
+
+typedef struct ParallelOBitmapScanDesc
+{
+	ParallelOScanDescData poscan;	/* cooperative primary fetch scan */
+	slock_t		mutex;			/* protects the fields below */
+	ConditionVariable cv;		/* waited on until stage == READY */
+	OBitmapParallelStage stage;
+	bool		empty;			/* built bitmap has no keys (skip fetch) */
+	dsa_pointer bitmap_dsa;		/* serialized bitmap in es_query_dsa */
+	Size		bitmap_size;
+} ParallelOBitmapScanDesc;
+
+typedef ParallelOBitmapScanDesc *ParallelOBitmapScan;
 
 typedef struct OBitmapHeapPlanState
 {
@@ -42,6 +71,9 @@ typedef struct OBitmapHeapPlanState
 	MemoryContext cxt;
 	OBitmapScan *scan;
 	OEACallsCounters *eaCounters;
+	/* parallel scan: DSM coordination state + the query DSA (NULL if serial) */
+	ParallelOBitmapScan pbitmap;
+	dsa_area   *dsa;
 } OBitmapHeapPlanState;
 
 extern OBitmapScan *o_make_bitmap_scan(OBitmapHeapPlanState *bitmap_state,
