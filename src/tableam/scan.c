@@ -644,8 +644,10 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 					 * cooperatively. Only the native key-bitmap path is
 					 * parallelized, so the qual must reference only OrioleDB
 					 * indexes and the primary key must be bitmap-eligible.
+					 * Parallel scans are not supported during recovery.
 					 */
-					if (o_keybitmap_pk_mode(GET_PRIMARY(descr), NULL) !=
+					if (!RecoveryInProgress() &&
+						o_keybitmap_pk_mode(GET_PRIMARY(descr), NULL) !=
 						O_KEYBITMAP_NONE &&
 						bitmap_qual_all_native(bh_path->bitmapqual, descr))
 					{
