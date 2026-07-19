@@ -169,6 +169,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  merge \
 				  parallel_idx_scan \
 				  parallel_ordered_scan \
+				  parallel_bitmap_scan \
 				  partition_move \
 				  rightlink \
 				  rll \
@@ -224,6 +225,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/pg_dump_restore_test.py \
 						test/t/parallel_test.py \
 						test/t/parallel_ordered_scan_test.py \
+						test/t/parallel_bitmap_scan_test.py \
 						test/t/reindex_test.py \
 						test/t/s3_test.py \
 						test/t/schema_test.py \

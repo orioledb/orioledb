@@ -105,6 +105,15 @@ static void o_idx_scan_init_worker(CustomScanState *node,
 static void o_idx_scan_reinit_dsm(CustomScanState *node,
 								  ParallelContext *pcxt, void *coordinate);
 
+static Size o_bitmap_scan_estimate_dsm(CustomScanState *node,
+									   ParallelContext *pcxt);
+static void o_bitmap_scan_init_dsm(CustomScanState *node,
+								   ParallelContext *pcxt, void *coordinate);
+static void o_bitmap_scan_init_worker(CustomScanState *node,
+									  shm_toc *toc, void *coordinate);
+static void o_bitmap_scan_reinit_dsm(CustomScanState *node,
+									 ParallelContext *pcxt, void *coordinate);
+
 static CustomPathMethods o_path_methods =
 {
 	.CustomName = "o_path",
@@ -151,6 +160,23 @@ static CustomExecMethods o_parallel_idx_scan_exec_methods =
 	o_explain_custom_scan
 };
 
+static CustomExecMethods o_parallel_bitmap_scan_exec_methods =
+{
+	"o_exec_parallel_bitmap_scan",
+	o_begin_custom_scan,
+	o_exec_custom_scan,
+	o_end_custom_scan,
+	o_rescan_custom_scan,
+	NULL,
+	NULL,
+	o_bitmap_scan_estimate_dsm,
+	o_bitmap_scan_init_dsm,
+	o_bitmap_scan_reinit_dsm,
+	o_bitmap_scan_init_worker,
+	NULL,
+	o_explain_custom_scan
+};
+
 /* No existing callers */
 bool
 is_o_custom_scan(CustomScan *scan)
@@ -163,7 +189,8 @@ bool
 is_o_custom_scan_state(CustomScanState *scan)
 {
 	return scan->methods == &o_scan_exec_methods ||
-		scan->methods == &o_parallel_idx_scan_exec_methods;
+		scan->methods == &o_parallel_idx_scan_exec_methods ||
+		scan->methods == &o_parallel_bitmap_scan_exec_methods;
 }
 
 /*
@@ -181,6 +208,52 @@ o_find_ix_num(IndexPath *ix_path, OTableDescr *descr)
 			return ix_num;
 	}
 	return -1;
+}
+
+/*
+ * Whether every leaf of a bitmap qual path is a native OrioleDB index (so the
+ * bitmap scan builds a key bitmap rather than a bridge TIDBitmap).  The
+ * parallel bitmap heap scan only supports the native key-bitmap path.
+ */
+static bool
+bitmap_qual_all_native(Path *bitmapqual, OTableDescr *descr)
+{
+	ListCell   *lc;
+
+	if (IsA(bitmapqual, IndexPath))
+		return o_find_ix_num((IndexPath *) bitmapqual, descr) >= 0;
+	else if (IsA(bitmapqual, BitmapAndPath))
+	{
+		foreach(lc, ((BitmapAndPath *) bitmapqual)->bitmapquals)
+		{
+			if (!bitmap_qual_all_native((Path *) lfirst(lc), descr))
+				return false;
+		}
+		return true;
+	}
+	else if (IsA(bitmapqual, BitmapOrPath))
+	{
+		foreach(lc, ((BitmapOrPath *) bitmapqual)->bitmapquals)
+		{
+			if (!bitmap_qual_all_native((Path *) lfirst(lc), descr))
+				return false;
+		}
+		return true;
+	}
+	return false;
+}
+
+/*
+ * Whether a bitmap qual is a single bridged-index scan -- one IndexPath whose
+ * index is not a native OrioleDB index (so the scan builds a bridge TIDBitmap).
+ * The parallel bitmap scan supports this via a shared DSA TIDBitmap; And/Or
+ * combinations of bridged indexes are not parallelized (they stay serial).
+ */
+static bool
+bitmap_qual_single_bridged(Path *bitmapqual, OTableDescr *descr)
+{
+	return IsA(bitmapqual, IndexPath) &&
+		o_find_ix_num((IndexPath *) bitmapqual, descr) < 0;
 }
 
 /*
@@ -573,12 +646,48 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 							list_delete_nth_cell(rel->partial_pathlist, i);
 					}
 				}
+				else if (IsA(path, BitmapHeapPath))
+				{
+					BitmapHeapPath *bh_path = (BitmapHeapPath *) path;
+
+					/*
+					 * Transform a partial BitmapHeapPath into a
+					 * parallel-aware custom bitmap scan: the first worker
+					 * builds the bitmap and the primary tree is fetched
+					 * cooperatively.  Supported when the primary key is
+					 * bitmap-eligible and the qual is either all native
+					 * OrioleDB indexes (key bitmap) or a single bridged index
+					 * (shared DSA TIDBitmap).  Not supported during recovery.
+					 */
+					if (!RecoveryInProgress() &&
+						o_keybitmap_pk_mode(GET_PRIMARY(descr), NULL) !=
+						O_KEYBITMAP_NONE &&
+						(bitmap_qual_all_native(bh_path->bitmapqual, descr) ||
+						 bitmap_qual_single_bridged(bh_path->bitmapqual, descr)))
+					{
+						Path	   *custom_path = transform_path(path, descr,
+																 false);
+
+						custom_path->parallel_aware = true;
+						if (custom_path->parallel_workers < 1)
+							custom_path->parallel_workers = 1;
+
+						rel->partial_pathlist =
+							list_delete_nth_cell(rel->partial_pathlist, i);
+						rel->partial_pathlist =
+							list_insert_nth(rel->partial_pathlist, i,
+											custom_path);
+						i++;
+					}
+					else
+					{
+						rel->partial_pathlist =
+							list_delete_nth_cell(rel->partial_pathlist, i);
+					}
+				}
 				else if (!IsA(path, Path))
 				{
-					/*
-					 * TODO: Remove when parallel bitmap heap scan will be
-					 * implemented
-					 */
+					/* Other partial paths are not supported yet. */
 					rel->partial_pathlist =
 						list_delete_nth_cell(rel->partial_pathlist, i);
 				}
@@ -782,6 +891,9 @@ o_create_custom_scan_state(CustomScan *cscan)
 		bitmap_state->bitmapqualplan = copyObject(bh_scan->scan.plan.lefttree);
 		bitmap_state->bitmapqualorig = copyObject(bh_scan->bitmapqualorig);
 		ocstate->o_plan_state = (OPlanState *) bitmap_state;
+
+		if (cscan->scan.plan.parallel_aware)
+			ocstate->css.methods = &o_parallel_bitmap_scan_exec_methods;
 	}
 	else
 	{
@@ -1455,4 +1567,69 @@ o_idx_scan_reinit_dsm(CustomScanState *node, ParallelContext *pcxt,
 	orioledb_parallelscan_initialize_inner(&poscan->phs_base);
 
 	ix_plan_state->ostate.seqScan = NULL;
+}
+
+static Size
+o_bitmap_scan_estimate_dsm(CustomScanState *node, ParallelContext *pcxt)
+{
+	return MAXALIGN(sizeof(ParallelOBitmapScanDesc));
+}
+
+static void
+o_bitmap_scan_init_dsm(CustomScanState *node, ParallelContext *pcxt,
+					   void *coordinate)
+{
+	OCustomScanState *ocstate = (OCustomScanState *) node;
+	OBitmapHeapPlanState *bitmap_state =
+		(OBitmapHeapPlanState *) ocstate->o_plan_state;
+	ParallelOBitmapScan pbitmap = (ParallelOBitmapScan) coordinate;
+
+	orioledb_parallelscan_initialize_inner(&pbitmap->poscan.phs_base);
+	SpinLockInit(&pbitmap->mutex);
+	ConditionVariableInit(&pbitmap->cv);
+	pbitmap->stage = OBITMAP_PARALLEL_NEW;
+	pbitmap->empty = false;
+	pbitmap->bitmap_dsa = InvalidDsaPointer;
+	pbitmap->bitmap_size = 0;
+	pbitmap->is_bridge = false;
+	pbitmap->tbm_iter = InvalidDsaPointer;
+
+	bitmap_state->pbitmap = pbitmap;
+	bitmap_state->dsa = node->ss.ps.state->es_query_dsa;
+	node->pscan_len = sizeof(ParallelOBitmapScanDesc);
+}
+
+static void
+o_bitmap_scan_init_worker(CustomScanState *node, shm_toc *toc,
+						  void *coordinate)
+{
+	OCustomScanState *ocstate = (OCustomScanState *) node;
+	OBitmapHeapPlanState *bitmap_state =
+		(OBitmapHeapPlanState *) ocstate->o_plan_state;
+	ParallelOBitmapScan pbitmap = (ParallelOBitmapScan) coordinate;
+
+	bitmap_state->pbitmap = pbitmap;
+	bitmap_state->dsa = node->ss.ps.state->es_query_dsa;
+}
+
+static void
+o_bitmap_scan_reinit_dsm(CustomScanState *node, ParallelContext *pcxt,
+						 void *coordinate)
+{
+	OCustomScanState *ocstate = (OCustomScanState *) node;
+	OBitmapHeapPlanState *bitmap_state =
+		(OBitmapHeapPlanState *) ocstate->o_plan_state;
+	ParallelOBitmapScan pbitmap = (ParallelOBitmapScan) coordinate;
+
+	/* Drop a bitmap built by the previous scan iteration (rescan). */
+	if (DsaPointerIsValid(pbitmap->bitmap_dsa) && bitmap_state->dsa != NULL)
+		dsa_free(bitmap_state->dsa, pbitmap->bitmap_dsa);
+
+	orioledb_parallelscan_initialize_inner(&pbitmap->poscan.phs_base);
+	pbitmap->stage = OBITMAP_PARALLEL_NEW;
+	pbitmap->empty = false;
+	pbitmap->bitmap_dsa = InvalidDsaPointer;
+	pbitmap->bitmap_size = 0;
+	pbitmap->is_bridge = false;
+	pbitmap->tbm_iter = InvalidDsaPointer;
 }

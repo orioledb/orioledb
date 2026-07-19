@@ -1384,8 +1384,185 @@ SELECT count(*), min(id), max(id) FROM (
 (1 row)
 
 COMMIT;
+-- Parallel bitmap heap scan.  The first worker builds the key bitmap and the
+-- primary tree is fetched cooperatively.  An always-true but per-row-expensive
+-- sqrt() filter makes the parallel bitmap path win, so the planner picks
+-- Gather over a Parallel Custom Scan bitmap scan.
+BEGIN;
+CREATE TABLE o_test_parallel_bitmap (
+	id int8 PRIMARY KEY,
+	val int8
+) USING orioledb;
+INSERT INTO o_test_parallel_bitmap
+	SELECT g, g % 1000 FROM generate_series(1, 200000) g;
+CREATE INDEX o_test_parallel_bitmap_val ON o_test_parallel_bitmap (val);
+ANALYZE o_test_parallel_bitmap;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_indexscan = off;
+SET LOCAL enable_indexonlyscan = off;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL parallel_tuple_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 0;
+SET LOCAL min_parallel_index_scan_size = 0;
+SET LOCAL max_parallel_workers_per_gather = 3;
+-- Plan shape: Gather over a parallel custom bitmap scan.
+EXPLAIN (COSTS OFF)
+	SELECT count(*) FROM o_test_parallel_bitmap
+		WHERE val < 50 AND sqrt(id::float8) >= 0;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Finalize Aggregate
+   ->  Gather
+         Workers Planned: 3
+         ->  Partial Aggregate
+               ->  Parallel Custom Scan (o_scan) on o_test_parallel_bitmap
+                     Filter: (sqrt((id)::double precision) >= '0'::double precision)
+                     Bitmap heap scan
+                     Recheck Cond: (val < 50)
+                     ->  Bitmap Index Scan on o_test_parallel_bitmap_val
+                           Index Cond: (val < 50)
+(10 rows)
+
+-- Parallel vs serial equivalence (single index).
+SELECT count(*), sum(id) FROM o_test_parallel_bitmap
+	WHERE val < 50 AND sqrt(id::float8) >= 0;
+ count |    sum    
+-------+-----------
+ 10000 | 995445000
+(1 row)
+
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT count(*), sum(id) FROM o_test_parallel_bitmap
+	WHERE val < 50 AND sqrt(id::float8) >= 0;
+ count |    sum    
+-------+-----------
+ 10000 | 995445000
+(1 row)
+
+-- BitmapOr, parallel vs serial.
+SET LOCAL max_parallel_workers_per_gather = 3;
+SELECT count(*), sum(id) FROM o_test_parallel_bitmap
+	WHERE (val < 30 OR val > 970) AND sqrt(id::float8) >= 0;
+ count |    sum     
+-------+------------
+ 11800 | 1180100000
+(1 row)
+
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT count(*), sum(id) FROM o_test_parallel_bitmap
+	WHERE (val < 30 OR val > 970) AND sqrt(id::float8) >= 0;
+ count |    sum     
+-------+------------
+ 11800 | 1180100000
+(1 row)
+
+-- Empty match: parallel scan returns no rows and does not error.
+SET LOCAL max_parallel_workers_per_gather = 3;
+SELECT count(*) FROM o_test_parallel_bitmap
+	WHERE val = 999999 AND sqrt(id::float8) >= 0;
+ count 
+-------
+     0
+(1 row)
+
+-- Composite (fixed-mode) primary key.
+CREATE TABLE o_test_parallel_bitmap_fixed (
+	a int8,
+	b text,
+	val int8,
+	PRIMARY KEY (a, b)
+) USING orioledb;
+INSERT INTO o_test_parallel_bitmap_fixed
+	SELECT g, 'k' || (g % 500), g % 1000 FROM generate_series(1, 120000) g;
+CREATE INDEX o_test_parallel_bitmap_fixed_val
+	ON o_test_parallel_bitmap_fixed (val);
+ANALYZE o_test_parallel_bitmap_fixed;
+SET LOCAL max_parallel_workers_per_gather = 3;
+SELECT count(*), sum(a) FROM o_test_parallel_bitmap_fixed
+	WHERE val < 40 AND sqrt(a::float8) >= 0;
+ count |    sum    
+-------+-----------
+  4800 | 285813600
+(1 row)
+
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT count(*), sum(a) FROM o_test_parallel_bitmap_fixed
+	WHERE val < 40 AND sqrt(a::float8) >= 0;
+ count |    sum    
+-------+-----------
+  4800 | 285813600
+(1 row)
+
+COMMIT;
+-- Parallel bitmap scan over a single bridged (non-orioledb) index.  The bitmap
+-- qual builds a TIDBitmap in es_query_dsa; workers share its iterator and each
+-- resolves its pages to primary keys.
+BEGIN;
+CREATE TABLE o_test_parallel_bitmap_bridged (
+	id int8 PRIMARY KEY,
+	val int8
+) USING orioledb WITH (index_bridging);
+INSERT INTO o_test_parallel_bitmap_bridged
+	SELECT g, g % 1000 FROM generate_series(1, 200000) g;
+CREATE INDEX o_test_parallel_bitmap_bridged_val
+	ON o_test_parallel_bitmap_bridged USING btree (val) WITH (orioledb_index = off);
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
+ANALYZE o_test_parallel_bitmap_bridged;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_indexscan = off;
+SET LOCAL enable_indexonlyscan = off;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL parallel_tuple_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 0;
+SET LOCAL min_parallel_index_scan_size = 0;
+SET LOCAL max_parallel_workers_per_gather = 3;
+-- Plan shape: Gather over a parallel custom bitmap scan on the bridged index.
+EXPLAIN (COSTS OFF)
+	SELECT count(*) FROM o_test_parallel_bitmap_bridged
+		WHERE val < 50 AND sqrt(id::float8) >= 0;
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Finalize Aggregate
+   ->  Gather
+         Workers Planned: 3
+         ->  Partial Aggregate
+               ->  Parallel Custom Scan (o_scan) on o_test_parallel_bitmap_bridged
+                     Filter: (sqrt((id)::double precision) >= '0'::double precision)
+                     Bitmap heap scan
+                     Recheck Cond: (val < 50)
+                     ->  Bitmap Index Scan on o_test_parallel_bitmap_bridged_val
+                           Index Cond: (val < 50)
+(10 rows)
+
+-- Parallel vs serial equivalence.
+SELECT count(*), sum(id) FROM o_test_parallel_bitmap_bridged
+	WHERE val < 50 AND sqrt(id::float8) >= 0;
+ count |    sum    
+-------+-----------
+ 10000 | 995445000
+(1 row)
+
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT count(*), sum(id) FROM o_test_parallel_bitmap_bridged
+	WHERE val < 50 AND sqrt(id::float8) >= 0;
+ count |    sum    
+-------+-----------
+ 10000 | 995445000
+(1 row)
+
+-- Empty match.
+SET LOCAL max_parallel_workers_per_gather = 3;
+SELECT count(*) FROM o_test_parallel_bitmap_bridged
+	WHERE val = 999999 AND sqrt(id::float8) >= 0;
+ count 
+-------
+     0
+(1 row)
+
+COMMIT;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 19 other objects
+NOTICE:  drop cascades to 22 other objects
 DETAIL:  drop cascades to table seq_scan_test
 drop cascades to table o_test_o_scan_register
 drop cascades to table o_test_1
@@ -1405,6 +1582,9 @@ drop cascades to table o_test_parallel_join
 drop cascades to table o_test_parallel_join2
 drop cascades to table o_test_no_parallel_bitmap_scan
 drop cascades to table o_test_ordered_scan
+drop cascades to table o_test_parallel_bitmap
+drop cascades to table o_test_parallel_bitmap_fixed
+drop cascades to table o_test_parallel_bitmap_bridged
 DROP SCHEMA parallel_scan CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to function pseudo_random(bigint,bigint)

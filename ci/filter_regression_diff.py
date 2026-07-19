@@ -417,7 +417,11 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				src_up = True
 				target_up = True
 		elif src_cur_value.startswith('Bitmap Heap Scan'):
-			if target_cur[1].startswith('Custom Scan'):
+			# normalize_src_value() has already stripped a leading "Parallel "
+			# from the source, so a parallel bitmap heap scan on the heap side
+			# matches orioledb's "Parallel Custom Scan (o_scan)" too.
+			if (target_cur[1].startswith('Custom Scan')
+					or target_cur[1].startswith('Parallel Custom Scan')):
 				# EXPLAIN VERBOSE inserts "Output: ..." (and an optional
 				# "Filter: ..." in subplans that reference scan-level filters)
 				# ahead of the marker we look for, pushing it down the
