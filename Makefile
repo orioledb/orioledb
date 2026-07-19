@@ -169,6 +169,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  merge \
 				  parallel_idx_scan \
 				  parallel_ordered_scan \
+				  parallel_bitmap_scan \
 				  partition_move \
 				  rightlink \
 				  rll \
