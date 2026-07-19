@@ -126,7 +126,7 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
             sleep 1
         done
         if [ $replica_synced -eq 0 ]; then
-            echo "ERROR: Replica failed to synchronize within 30 seconds"
+            echo "ERROR: Replica failed to synchronize within 60 seconds"
             exit 1
         fi
 
