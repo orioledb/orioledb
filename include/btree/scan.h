@@ -64,6 +64,11 @@ extern BTreeSeqScan *make_btree_seq_scan_cb(BTreeDescr *desc,
 											OSnapshot *oSnapshot,
 											BTreeSeqScanCallbacks *cb,
 											void *arg);
+extern BTreeSeqScan *make_btree_seq_scan_cb_parallel(BTreeDescr *desc,
+													 OSnapshot *oSnapshot,
+													 BTreeSeqScanCallbacks *cb,
+													 void *arg,
+													 void *poscan);
 extern BTreeSeqScan *make_btree_sampling_scan(BTreeDescr *desc,
 											  BlockSampler sampler);
 extern OTuple btree_seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,

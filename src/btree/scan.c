@@ -2494,6 +2494,21 @@ make_btree_seq_scan_cb(BTreeDescr *desc, OSnapshot *oSnapshot,
 	return make_btree_seq_scan_internal(desc, oSnapshot, cb, arg, NULL, NULL);
 }
 
+/*
+ * Parallel variant of make_btree_seq_scan_cb(): the callback-pruned scan runs
+ * cooperatively across workers via `poscan`.  The bitmap-directed partial-leaf
+ * "fetch" optimization is disabled in this mode (see BTreeSeqScan.fetch); the
+ * scan still skips whole downlinks/pages via the isRangeValid callback, and
+ * each worker independently tests the tuples of its share.
+ */
+BTreeSeqScan *
+make_btree_seq_scan_cb_parallel(BTreeDescr *desc, OSnapshot *oSnapshot,
+								BTreeSeqScanCallbacks *cb, void *arg,
+								void *poscan)
+{
+	return make_btree_seq_scan_internal(desc, oSnapshot, cb, arg, NULL, poscan);
+}
+
 BTreeSeqScan *
 make_btree_sampling_scan(BTreeDescr *desc, BlockSampler sampler)
 {
