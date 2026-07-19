@@ -244,6 +244,19 @@ bitmap_qual_all_native(Path *bitmapqual, OTableDescr *descr)
 }
 
 /*
+ * Whether a bitmap qual is a single bridged-index scan -- one IndexPath whose
+ * index is not a native OrioleDB index (so the scan builds a bridge TIDBitmap).
+ * The parallel bitmap scan supports this via a shared DSA TIDBitmap; And/Or
+ * combinations of bridged indexes are not parallelized (they stay serial).
+ */
+static bool
+bitmap_qual_single_bridged(Path *bitmapqual, OTableDescr *descr)
+{
+	return IsA(bitmapqual, IndexPath) &&
+		o_find_ix_num((IndexPath *) bitmapqual, descr) < 0;
+}
+
+/*
  * Estimate the number of parallel workers for a parallel index scan.
  */
 static int
@@ -640,16 +653,17 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 					/*
 					 * Transform a partial BitmapHeapPath into a
 					 * parallel-aware custom bitmap scan: the first worker
-					 * builds the key bitmap and the primary tree is fetched
-					 * cooperatively. Only the native key-bitmap path is
-					 * parallelized, so the qual must reference only OrioleDB
-					 * indexes and the primary key must be bitmap-eligible.
-					 * Parallel scans are not supported during recovery.
+					 * builds the bitmap and the primary tree is fetched
+					 * cooperatively.  Supported when the primary key is
+					 * bitmap-eligible and the qual is either all native
+					 * OrioleDB indexes (key bitmap) or a single bridged index
+					 * (shared DSA TIDBitmap).  Not supported during recovery.
 					 */
 					if (!RecoveryInProgress() &&
 						o_keybitmap_pk_mode(GET_PRIMARY(descr), NULL) !=
 						O_KEYBITMAP_NONE &&
-						bitmap_qual_all_native(bh_path->bitmapqual, descr))
+						(bitmap_qual_all_native(bh_path->bitmapqual, descr) ||
+						 bitmap_qual_single_bridged(bh_path->bitmapqual, descr)))
 					{
 						Path	   *custom_path = transform_path(path, descr,
 																 false);
@@ -1577,6 +1591,8 @@ o_bitmap_scan_init_dsm(CustomScanState *node, ParallelContext *pcxt,
 	pbitmap->empty = false;
 	pbitmap->bitmap_dsa = InvalidDsaPointer;
 	pbitmap->bitmap_size = 0;
+	pbitmap->is_bridge = false;
+	pbitmap->tbm_iter = InvalidDsaPointer;
 
 	bitmap_state->pbitmap = pbitmap;
 	bitmap_state->dsa = node->ss.ps.state->es_query_dsa;
@@ -1614,4 +1630,6 @@ o_bitmap_scan_reinit_dsm(CustomScanState *node, ParallelContext *pcxt,
 	pbitmap->empty = false;
 	pbitmap->bitmap_dsa = InvalidDsaPointer;
 	pbitmap->bitmap_size = 0;
+	pbitmap->is_bridge = false;
+	pbitmap->tbm_iter = InvalidDsaPointer;
 }

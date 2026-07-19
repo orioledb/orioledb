@@ -43,6 +43,13 @@ typedef struct BridgeIterator
 {
 	TIDBitmap  *tidbitmap;
 
+	/*
+	 * For a parallel bridged scan the TIDBitmap lives in es_query_dsa and is
+	 * consumed cooperatively through this shared iterator (NULL for a serial
+	 * scan, which uses the private tbmiterator below).
+	 */
+	TBMSharedIterator *shared_iterator;
+
 #if PG_VERSION_NUM >= 180000
 	TBMPrivateIterator *tbmiterator;
 	TBMIterateResult tbmres;
@@ -964,8 +971,13 @@ exec_bitmap_index_state(OBitmapHeapPlanState *bitmap_state, PlanState *planstate
 		bool		doscan;
 		IndexScanDesc scandesc;
 
+		/*
+		 * A parallel bridged scan builds the TIDBitmap in es_query_dsa so it
+		 * can be iterated cooperatively; bitmap_state->dsa is NULL for a
+		 * serial scan (backend-local bitmap), unchanged.
+		 */
 		if (*tbm_result == NULL)
-			*tbm_result = tbm_create(work_mem * 1024L, NULL);
+			*tbm_result = tbm_create(work_mem * 1024L, bitmap_state->dsa);
 
 		/*
 		 * extract necessary information from index scan node
@@ -1535,13 +1547,18 @@ o_bitmap_stream_fetch(OBitmapScan *scan, CustomScanState *node)
 
 /*
  * Parallel build coordination: the first worker to arrive builds the whole
- * key bitmap (running the bitmap qual), serializes it into es_query_dsa and
- * publishes it; the others wait on the condition variable and then attach the
- * same buffer read-only.  Returns the attached (shared) bitmap, or NULL when
- * the built bitmap is empty.  The cooperative primary fetch then runs through
- * pbitmap->poscan.
+ * bitmap (running the bitmap qual) and publishes it in es_query_dsa; the others
+ * wait on the condition variable and then attach the same shared state.  Sets
+ * up `scan` for the cooperative fetch: for a native key bitmap, attaches it
+ * read-only and creates the cooperative primary seq scan; for a bridge
+ * TIDBitmap, attaches the shared TID iterator.  Leaves the scan empty (no
+ * seq_scan, no iterator) when the built bitmap is empty.
+ *
+ * The bridge TIDBitmap is intentionally NOT freed by the building worker: it
+ * lives in es_query_dsa and is reclaimed when that area is destroyed at query
+ * end, so a worker finishing early can never free it out from under the others.
  */
-static OKeyBitmap *
+static void
 o_bitmap_parallel_prepare(OBitmapHeapPlanState *bitmap_state, OBitmapScan *scan,
 						  PlanState *bitmapqualplanstate)
 {
@@ -1560,14 +1577,22 @@ o_bitmap_parallel_prepare(OBitmapHeapPlanState *bitmap_state, OBitmapScan *scan,
 		OKeyBitmap *local = NULL;
 		TIDBitmap  *tbm = NULL;
 		dsa_pointer dp = InvalidDsaPointer;
+		dsa_pointer tbm_iter = InvalidDsaPointer;
 		Size		sz = 0;
 		bool		empty = true;
+		bool		is_bridge = false;
 
 		o_exec_bitmapqual(bitmap_state, bitmapqualplanstate, &local, &tbm);
-		/* The planner only offers a parallel path for native-index quals. */
-		Assert(tbm == NULL);
 
-		if (local != NULL && !o_keybitmap_is_empty(local))
+		if (tbm != NULL)
+		{
+			/* Bridged qual: share the DSA TIDBitmap's iterator. */
+			is_bridge = true;
+			empty = false;
+			tbm_iter = tbm_prepare_shared_iterate(tbm);
+			/* Do not free tbm: es_query_dsa owns its pages until query end. */
+		}
+		else if (local != NULL && !o_keybitmap_is_empty(local))
 		{
 			sz = o_keybitmap_serialized_size(local);
 			dp = dsa_allocate(dsa, sz);
@@ -1578,8 +1603,10 @@ o_bitmap_parallel_prepare(OBitmapHeapPlanState *bitmap_state, OBitmapScan *scan,
 			o_keybitmap_free(local);
 
 		SpinLockAcquire(&pbitmap->mutex);
+		pbitmap->is_bridge = is_bridge;
 		pbitmap->bitmap_dsa = dp;
 		pbitmap->bitmap_size = sz;
+		pbitmap->tbm_iter = tbm_iter;
 		pbitmap->empty = empty;
 		pbitmap->stage = OBITMAP_PARALLEL_READY;
 		SpinLockRelease(&pbitmap->mutex);
@@ -1604,10 +1631,31 @@ o_bitmap_parallel_prepare(OBitmapHeapPlanState *bitmap_state, OBitmapScan *scan,
 	}
 
 	if (pbitmap->empty)
-		return NULL;
+		return;
 
-	return o_keybitmap_attach(dsa_get_address(dsa, pbitmap->bitmap_dsa),
-							  scan->cxt);
+	if (pbitmap->is_bridge)
+	{
+		scan->bridge_iter.shared_iterator =
+			tbm_attach_shared_iterate(dsa, pbitmap->tbm_iter);
+		scan->bridge_iter.tidbitmap = NULL;
+#if PG_VERSION_NUM >= 180000
+		scan->bridge_iter.tbmres.blockno = InvalidBlockNumber;
+#else
+		scan->bridge_iter.tbmres = NULL;
+#endif
+	}
+	else
+	{
+		scan->arg.bitmap =
+			o_keybitmap_attach(dsa_get_address(dsa, pbitmap->bitmap_dsa),
+							   scan->cxt);
+		scan->seq_scan =
+			make_btree_seq_scan_cb_parallel(&GET_PRIMARY(scan->arg.tbl_desc)->desc,
+											&scan->oSnapshot,
+											&bitmap_seq_scan_callbacks,
+											&scan->arg,
+											&pbitmap->poscan);
+	}
 }
 
 OBitmapScan *
@@ -1632,15 +1680,7 @@ o_make_bitmap_scan(OBitmapHeapPlanState *bitmap_state, ScanState *ss,
 	 */
 	if (bitmap_state->pbitmap != NULL)
 	{
-		scan->arg.bitmap = o_bitmap_parallel_prepare(bitmap_state, scan,
-													 bitmapqualplanstate);
-		if (scan->arg.bitmap != NULL)
-			scan->seq_scan =
-				make_btree_seq_scan_cb_parallel(&GET_PRIMARY(scan->arg.tbl_desc)->desc,
-												&scan->oSnapshot,
-												&bitmap_seq_scan_callbacks,
-												&scan->arg,
-												&bitmap_state->pbitmap->poscan);
+		o_bitmap_parallel_prepare(bitmap_state, scan, bitmapqualplanstate);
 		return scan;
 	}
 
@@ -1687,7 +1727,8 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 		return o_bitmap_stream_fetch(scan, node);
 
 	/* An empty (parallel) bitmap has no primary scan and no bridge iterator. */
-	if (scan->seq_scan == NULL && bridge_iter->tbmiterator == NULL)
+	if (scan->seq_scan == NULL && bridge_iter->tbmiterator == NULL &&
+		bridge_iter->shared_iterator == NULL)
 		return ExecClearTuple(node->ss.ss_ScanTupleSlot);
 
 	do
@@ -1717,8 +1758,9 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 		 */
 		ResetExprContext(node->ss.ps.ps_ExprContext);
 
-		/* Path 1: Iterate using bridge bitmap */
-		if (bridge_iter->tbmiterator != NULL && page_exhausted)
+		/* Path 1: Iterate using bridge bitmap (private or shared iterator) */
+		if ((bridge_iter->tbmiterator != NULL ||
+			 bridge_iter->shared_iterator != NULL) && page_exhausted)
 		{
 			if (!bridge_iterate(bridge_iter))
 			{
@@ -1749,7 +1791,8 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 				 * BRIDGE_NEXT_TUPLE never marks the page exhausted on its
 				 * own.  Force the advance here and continue the outer loop.
 				 */
-				if (bridge_iter->tbmiterator != NULL)
+				if (bridge_iter->tbmiterator != NULL ||
+					bridge_iter->shared_iterator != NULL)
 				{
 #if PG_VERSION_NUM >= 180000
 					bridge_iter->tbmres.blockno = InvalidBlockNumber;
@@ -1895,6 +1938,15 @@ o_free_bitmap_scan(OBitmapScan *scan)
 #else
 		tbm_end_iterate(scan->bridge_iter.tbmiterator);
 #endif
+
+	/*
+	 * A parallel bridged scan uses a shared iterator over a DSA TIDBitmap:
+	 * end the per-worker iterator, but do NOT tbm_free the bitmap --
+	 * es_query_dsa owns it and reclaims it at query end (freeing it here
+	 * would corrupt the other workers' iterators).
+	 */
+	if (scan->bridge_iter.shared_iterator)
+		tbm_end_shared_iterate(scan->bridge_iter.shared_iterator);
 	if (scan->bridge_iter.tidbitmap)
 		tbm_free(scan->bridge_iter.tidbitmap);
 	pfree(scan);
@@ -2065,7 +2117,13 @@ bridge_iterate(BridgeIterator *iter)
 #if PG_VERSION_NUM >= 180000
 	if (!BlockNumberIsValid(iter->tbmres.blockno))
 	{
-		if (!tbm_private_iterate(iter->tbmiterator, &iter->tbmres))
+		bool		ok;
+
+		if (iter->shared_iterator != NULL)
+			ok = tbm_shared_iterate(iter->shared_iterator, &iter->tbmres);
+		else
+			ok = tbm_private_iterate(iter->tbmiterator, &iter->tbmres);
+		if (!ok)
 			return false;
 		if (!iter->tbmres.lossy)
 			iter->iter_ntuples = tbm_extract_page_tuple(&iter->tbmres,
@@ -2075,7 +2133,12 @@ bridge_iterate(BridgeIterator *iter)
 	return BlockNumberIsValid(iter->tbmres.blockno);
 #else
 	if (iter->tbmres == NULL)
-		iter->tbmres = tbm_iterate(iter->tbmiterator);
+	{
+		if (iter->shared_iterator != NULL)
+			iter->tbmres = tbm_shared_iterate(iter->shared_iterator);
+		else
+			iter->tbmres = tbm_iterate(iter->tbmiterator);
+	}
 	return iter->tbmres != NULL;
 #endif
 }
@@ -2086,7 +2149,8 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 	OIndexDescr *bridge = scan->arg.tbl_desc->bridge;
 	BridgeIterator *iter;
 
-	Assert(scan->bridge_iter.tbmiterator != NULL);
+	Assert(scan->bridge_iter.tbmiterator != NULL ||
+		   scan->bridge_iter.shared_iterator != NULL);
 #if PG_VERSION_NUM >= 180000
 	Assert(BlockNumberIsValid(scan->bridge_iter.tbmres.blockno));
 #else
