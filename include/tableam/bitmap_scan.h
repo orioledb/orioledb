@@ -51,8 +51,10 @@ typedef struct ParallelOBitmapScanDesc
 	ConditionVariable cv;		/* waited on until stage == READY */
 	OBitmapParallelStage stage;
 	bool		empty;			/* built bitmap has no keys (skip fetch) */
-	dsa_pointer bitmap_dsa;		/* serialized bitmap in es_query_dsa */
+	bool		is_bridge;		/* built a bridge TIDBitmap, not a key bitmap */
+	dsa_pointer bitmap_dsa;		/* serialized key bitmap in es_query_dsa */
 	Size		bitmap_size;
+	dsa_pointer tbm_iter;		/* bridge: shared TIDBitmap iterator */
 } ParallelOBitmapScanDesc;
 
 typedef ParallelOBitmapScanDesc *ParallelOBitmapScan;
