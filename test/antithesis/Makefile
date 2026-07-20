@@ -6,7 +6,7 @@ PG_MAJOR ?= 17
 
 export IMAGE_TAG IMAGE_REPO ORIOLEDB_REF ORIOLEDB_REF_TAG PG_MAJOR
 
-CONFIGS ?= setup/s3 workload/jepsen-repeatable-read
+CFG ?= workload/jepsen-repeatable-read
 
 .DEFAULT_GOAL := help
 
@@ -14,16 +14,20 @@ CONFIGS ?= setup/s3 workload/jepsen-repeatable-read
 help:
 	@grep '^.PHONY: .* #' Makefile | sed 's/\.PHONY: \(.*\) # \(.*\)/\1\t\2/' | expand -t20
 
+.PHONY: config # print reified configs
+config:
+	config/make-compose $(CFG)
+
 .PHONY: build # Build Docker images
 build:
-	config/make-compose $(CONFIGS) | docker compose -f - build
-	config/make-image $(CONFIGS)
+	config/make-compose $(CFG) | docker compose -f - build
+	config/make-image $(CFG)
 
 .PHONY: up # Build Docker images
 up:
-	config/make-compose $(CONFIGS) | docker compose -f - up -d
+	config/make-compose $(CFG) | docker compose -f - up --pull=build --detach
 
-.PHONY: clean # Stop Docker services, remove volumes, delete intermediate files
-clean:
-	config/make-compose $(CONFIGS) | docker compose -f - down --volumes
+.PHONY: down # Stop Docker services, remove volumes, delete intermediate files
+down:
+	config/make-compose $(CFG) | docker compose -f - down --volumes
 	rm -rf ./target
