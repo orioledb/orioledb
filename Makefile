@@ -153,6 +153,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  btree_scan \
 				  concurrent_update_delete \
 				  fkeys \
+				  forupdate_reinsert \
 				  included \
 				  insert_fails \
 				  ioc_deadlock \
