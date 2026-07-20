@@ -1,0 +1,4 @@
+services:
+  test.orioledb:
+    # swap out orioledb for a stock postgres image
+    image: postgres:${PG_MAJOR:-17}
