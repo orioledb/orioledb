@@ -41,16 +41,16 @@ Before pushing to Antithesis, it's worth running your changes locally.
 # - OrioleDB feature branch mhamilton/perf-improvements
 # - stock OrioleDB configuration, no s3 or undo rewind
 # - jepsen RR workload
-make build CONFIGS='workload/jepsen-repeatable-read' PG_MAJOR=18 ORIOLEDB_REF=mhamilton/perf-improvements
+make build PG_MAJOR=18 ORIOLEDB_REF=mhamilton/perf-improvements # PG_MAJOR=17 and ORIOLEDB_REF=main are default
 
-# same CONFIGS as above except storage is in minio/s3
-make build # defaults to CONFIGS='setup/s3 workload/jepsen-repeatable-read' PG_MAJOR=17 ORIOLEDB_REF=main 
+# Run jepsen workload against orioledb configured in s3 mode (minio)
+make build CFG='setup/s3 workload/jepsen-repeatable-read'
 
 # starts simulation locally
-make up
+make up # [CFG='...']
 
 # tears down running sim, volumes, and intermediate files
-make clean
+make down # [CFG='...']
 ```
 
 
