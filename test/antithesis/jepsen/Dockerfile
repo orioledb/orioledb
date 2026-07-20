@@ -50,13 +50,13 @@ WORKDIR /opt/jepsen
 COPY --from=build /opt/java-runtime /opt/java
 COPY --from=build /jepsen-postgres.jar ./jepsen-postgres.jar
 
-ENV JEPSEN_MAX_WRITES_PER_KEY=4 \
+ENV JEPSEN_WORKLOAD=append \
     JEPSEN_CONCURRENCY=50 \
     JEPSEN_RATE=500 \
-    JEPSEN_WORKLOAD=append \
+    JEPSEN_MAX_WRITES_PER_KEY=4 \
+    JEPSEN_TIME_LIMIT=60 \
     JEPSEN_ISOLATION=serializable \
     JEPSEN_EXPECTED_CONSISTENCY_MODEL=serializable \
-    JEPSEN_TIME_LIMIT=60 \
     JEPSEN_NEMESIS=none \
     JEPSEN_NODE=localhost \
     JEPSEN_POSTGRES_USER=jepsen \
