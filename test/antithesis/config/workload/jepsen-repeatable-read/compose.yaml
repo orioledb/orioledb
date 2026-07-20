@@ -3,9 +3,15 @@ services:
     image: "${IMAGE_REPO}jepsen-client:${IMAGE_TAG}"
     container_name: jepsen-client
     environment:
+      JEPSEN_NODE: orioledb
       JEPSEN_POSTGRES_USER: "${POSTGRES_USER}"
       JEPSEN_POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
-      JEPSEN_NODE: orioledb
+
+      JEPSEN_WORKLOAD: "${JEPSEN_WORKLOAD:-append}"
+      JEPSEN_CONCURRENCY: "${JEPSEN_CONCURRENCY:-50}"
+      JEPSEN_RATE: "${JEPSEN_RATE:-500}"
+      JEPSEN_MAX_WRITES_PER_KEY: "${JEPSEN_MAX_WRITES_PER_KEY:-4}"
+      JEPSEN_TIME_LIMIT: "${JEPSEN_TIME_LIMIT:-60}"
 
       # JEPSEN_ISOLATION                   sets connection transaction level
       # JEPSEN_EXPECTED_CONSISTENCY_MODEL  defaults to the isolation level
