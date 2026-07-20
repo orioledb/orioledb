@@ -16,6 +16,7 @@ services:
     ports:
       - "5432:5432"
     init: true
+    restart: on-failure:2
     healthcheck:
       test:
         [
