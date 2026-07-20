@@ -21,7 +21,8 @@ Build via `make build` (see details under Usage)
 
 | Config  | Description  |
 |:--|:--|
-| [setup/s3](./config/setup/s3)  | additive; runs orioledb in s3 mode with local minio backend  |
+| [setup/s3](./config/setup/s3)  | additive; runs orioledb in s3 mode with local minio backend; not compatible with `setup/postgres`  |
+| [setup/postgres](./config/setup/postgres)  | replaces orioledb with stock postgres image for sanity checking compatible workloads |
 | [workload/jepsen-repeatable-read](./config/workload/jepsens-repeatable-read)  | adds a jepsen client with append/rr workload  |
 | flake repro  | todo  |
 
