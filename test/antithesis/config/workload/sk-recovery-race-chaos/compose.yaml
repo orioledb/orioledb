@@ -1,5 +1,6 @@
 services:
   test.orioledb:
+    restart: always
     volumes:
       - "./config/workload/sk-recovery-race-chaos/postgres.conf:/etc/postgresql/conf.d/sk-recovery-race-chaos.conf:ro"
 
