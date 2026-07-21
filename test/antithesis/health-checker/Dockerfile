@@ -7,9 +7,7 @@ ARG TARGETARCH
 
 WORKDIR /src
 
-COPY go.mod go.sum ./
-RUN go mod download
-
+COPY go.mod ./
 COPY main.go ./
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w" -o /out/health-checker ./main.go
