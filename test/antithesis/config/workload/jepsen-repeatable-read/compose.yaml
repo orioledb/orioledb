@@ -13,6 +13,8 @@ services:
       JEPSEN_MAX_WRITES_PER_KEY: "${JEPSEN_MAX_WRITES_PER_KEY:-4}"
       JEPSEN_TIME_LIMIT: "${JEPSEN_TIME_LIMIT:-60}"
 
+      JEPSEN_SUPPRESS_STDOUT: "${JEPSEN_SUPPRESS_STDOUT:-}"
+
       # JEPSEN_ISOLATION                   sets connection transaction level
       # JEPSEN_EXPECTED_CONSISTENCY_MODEL  defaults to the isolation level
       # NB postgres "repeatable-read" is not Adya repeatable read
