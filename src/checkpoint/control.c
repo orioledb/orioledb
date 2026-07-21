@@ -24,6 +24,24 @@
 #include "utils/wait_event.h"
 
 /*
+ * The v1 -> v2 conversion in check_checkpoint_control() reads a version-1
+ * control file's CRC from the byte offset that pgVersion now occupies: v1 had
+ * no pgVersion field, so its trailing crc sat immediately after s3Mode, exactly
+ * where pgVersion was inserted in v2.  Enforce that invariant statically so a
+ * future reorder of CheckpointControl (moving pgVersion away from just-before
+ * crc, or changing its width) can't silently break reading pre-v2 files -- the
+ * offending change trips these asserts and must revisit the conversion instead.
+ * New fields must be appended right before crc (bumping the control version and
+ * adding a conversion), never inserted earlier.
+ */
+StaticAssertDecl(offsetof(CheckpointControl, crc) ==
+				 offsetof(CheckpointControl, pgVersion) +
+				 sizeof(((CheckpointControl *) 0)->pgVersion),
+				 "pgVersion must sit immediately before crc so a v1 file's crc aligns with pgVersion");
+StaticAssertDecl(sizeof(((CheckpointControl *) 0)->pgVersion) == sizeof(pg_crc32c),
+				 "pgVersion must be the same width as the v1 crc it overlays");
+
+/*
  * Read checkpoint control file data from the disk.
  *
  * Returns false if the control file doesn't exist.

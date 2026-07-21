@@ -89,6 +89,18 @@ struct OProc
 	Oid		   *argtypes;
 	sql_func_data *sql_func;
 
+	/*
+	 * True when this entry's SQL-function parse trees were serialized by a
+	 * different PG major version and could not be deserialized (their
+	 * nodeToString format is not portable; o_deserialize_node returned NULL).
+	 * The scalar metadata above is still valid, but the parse trees are
+	 * missing, so executing the function would crash.  Set on read after a
+	 * cross-major pg_upgrade; cleared once orioledb_upgrade_refresh()
+	 * rebuilds the entry in this server's format.  In-memory only (never
+	 * serialized).
+	 */
+	bool		node_format_stale;
+
 	MemoryContext cxt;
 };
 
@@ -409,6 +421,13 @@ o_proc_cache_deserialize_entry(MemoryContext mcxt, Pointer data, Size length)
 		sql_func = (sql_func_data *) palloc0(sizeof(sql_func_data));
 		o_proc->sql_func = sql_func;
 
+		/*
+		 * Track whether any parse tree below was written by a different PG
+		 * major and dropped on read (o_deserialize_node sets the global
+		 * flag). Reset it first so it reflects only this entry.
+		 */
+		o_node_deserialize_format_changed = false;
+
 		sql_func->src = o_deserialize_string(&ptr);
 
 		len = offsetof(sql_func_data, jf_targetList) -
@@ -451,6 +470,8 @@ o_proc_cache_deserialize_entry(MemoryContext mcxt, Pointer data, Size length)
 				sql_func->qtlists[i][j] = o_deserialize_node(&ptr);
 			}
 		}
+
+		o_proc->node_format_stale = o_node_deserialize_format_changed;
 	}
 
 	MemoryContextSwitchTo(old_mcxt);
@@ -816,7 +837,25 @@ init_sql_fcache(FunctionCallInfo fcinfo, Oid collation, bool lazyEvalOK,
 	o_proc = o_proc_cache_search(datoid, fcinfo->flinfo->fn_oid, cur_lsn,
 								 proc_cache->nkeys);
 	if (o_proc)
+	{
+		/*
+		 * The cached parse trees were written by a different PG major version
+		 * and dropped on read (see o_proc_cache_deserialize_entry); executing
+		 * the function now would dereference missing trees.  Refuse cleanly
+		 * until orioledb_upgrade_refresh() rebuilds the entry in this
+		 * server's node-tree format.  We cannot fall back to the catalog
+		 * here: this path also runs in background workers (recovery,
+		 * checkpointer) that have no database catalog to consult.
+		 */
+		if (o_proc->node_format_stale)
+			ereport(ERROR,
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("OrioleDB SQL function \"%s\" was stored by another PostgreSQL major version",
+							o_proc->proname),
+					 errdetail("This happens after a cross-major pg_upgrade, before the carried-over function parse trees have been rebuilt."),
+					 errhint("Run \"SELECT orioledb_upgrade_refresh();\" in this database before using it.")));
 		sql_func = o_proc->sql_func;
+	}
 
 	/*
 	 * Create memory context that holds all the SQLFunctionCache data.  It
