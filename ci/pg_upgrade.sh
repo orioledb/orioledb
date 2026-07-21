@@ -408,14 +408,25 @@ fi
 #     skips on read (see o_deserialize_node); orioledb_upgrade_refresh()
 #     re-derives them from the catalog and rewrites them.  Run once per
 #     database that has the extension, before anything reads those tables.
+#
+#     $TEST_DB is fully controlled by this script, so a refresh failure
+#     there is a real bug -- fail the job immediately rather than hoping
+#     the later dump diff catches it.  The regression database can be left
+#     half-broken by a tolerated mid-suite failure (see step 2), so its
+#     refresh stays best-effort, but we still surface the actual error.
 # ----------------------------------------------------------------------
-for db in "$TEST_DB" regression; do
-	db_exists $PORT_NEW "$db" || continue
-	"$NEW_PREFIX/bin/psql" -p $PORT_NEW -d "$db" -v ON_ERROR_STOP=1 \
-		-c "SELECT orioledb_upgrade_refresh();" \
-		&& echo "Refreshed OrioleDB expressions in $db" \
-		|| echo "[WARN] orioledb_upgrade_refresh() failed in $db"
-done
+if db_exists $PORT_NEW "$TEST_DB"; then
+	"$NEW_PREFIX/bin/psql" -p $PORT_NEW -d "$TEST_DB" -v ON_ERROR_STOP=1 \
+		-c "SELECT orioledb_upgrade_refresh();"
+	echo "Refreshed OrioleDB expressions in $TEST_DB"
+fi
+
+if db_exists $PORT_NEW regression; then
+	refresh_out=$("$NEW_PREFIX/bin/psql" -p $PORT_NEW -d regression -v ON_ERROR_STOP=1 \
+		-c "SELECT orioledb_upgrade_refresh();" 2>&1) \
+		&& echo "Refreshed OrioleDB expressions in regression" \
+		|| echo "[WARN] orioledb_upgrade_refresh() failed in regression: $refresh_out"
+fi
 
 # ----------------------------------------------------------------------
 # 8. Dump the post-upgrade state.  This must happen before step 10's
