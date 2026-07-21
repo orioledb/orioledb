@@ -1,0 +1,3 @@
+POSTGRES_DB=skrecoveryracechaos
+POSTGRES_USER=skrecoveryracechaos
+POSTGRES_PASSWORD=pw
