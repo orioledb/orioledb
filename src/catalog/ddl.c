@@ -21,6 +21,7 @@
 #include "catalog/o_indices.h"
 #include "catalog/o_tables.h"
 #include "catalog/o_sys_cache.h"
+#include "checkpoint/checkpoint.h"
 #include "storage/lockdefs.h"
 #include "tableam/descr.h"
 #include "storage/copydir.h"
@@ -40,6 +41,7 @@
 #include "access/tableam.h"
 #include "access/toast_compression.h"
 #include "access/transam.h"
+#include "access/xlog.h"
 #include "catalog/catalog.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
@@ -153,6 +155,7 @@ static void orioledb_utility_command(PlannedStmt *pstmt,
 									 struct QueryCompletion *qc);
 static void orioledb_object_access_hook(ObjectAccessType access, Oid classId,
 										Oid objectId, int subId, void *arg);
+static void maybe_auto_upgrade_refresh(void);
 
 static void o_alter_column_type(AlterTableCmd *cmd, const char *queryString,
 								Relation rel);
@@ -908,6 +911,14 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	bool		isTopLevel = (context == PROCESS_UTILITY_TOPLEVEL);
 	ParseState *pstate;
 	bool		call_next = true;
+
+	/*
+	 * First use of this database after a cross-major restart: rewrite the
+	 * carried-over index expressions / proc trees into this server's format,
+	 * so orioledb_upgrade_refresh() need not be called by hand.  A no-op
+	 * unless a cross-major upgrade actually happened (see the guards inside).
+	 */
+	maybe_auto_upgrade_refresh();
 
 	/* copied from standard_ProcessUtility */
 	if (readOnlyTree)
@@ -5254,6 +5265,33 @@ o_refresh_table_expressions(Oid reloid)
 	OSnapshot	oSnapshot;
 	int			ix_num;
 
+	/*
+	 * Cheap pre-check under a share lock: a table whose persisted expressions
+	 * are already in this server's node-tree format has refresh_exprs unset
+	 * and needs no rewrite.  Skipping it here avoids taking an exclusive lock
+	 * on every table -- important for the automatic per-database refresh,
+	 * where repeated calls (from later backends, once the first has done the
+	 * work) must not serialize the whole database behind exclusive locks.
+	 */
+	rel = table_open(reloid, AccessShareLock);
+	if (!is_orioledb_rel(rel))
+	{
+		table_close(rel, AccessShareLock);
+		return;
+	}
+	ORelOidsSetFromRel(oids, rel);
+	o_table = o_tables_get(oids);
+	if (o_table == NULL || !o_table->refresh_exprs)
+	{
+		if (o_table)
+			o_table_free(o_table);
+		table_close(rel, AccessShareLock);
+		return;
+	}
+	o_table_free(o_table);
+	table_close(rel, AccessShareLock);
+
+	/* Stale: rewrite the node trees under an exclusive lock. */
 	rel = table_open(reloid, AccessExclusiveLock);
 	if (!is_orioledb_rel(rel))
 	{
@@ -5263,8 +5301,11 @@ o_refresh_table_expressions(Oid reloid)
 
 	ORelOidsSetFromRel(oids, rel);
 	o_table = o_tables_get(oids);
-	if (o_table == NULL)
+	/* Recheck: another backend may have refreshed it since the share lock. */
+	if (o_table == NULL || !o_table->refresh_exprs)
 	{
+		if (o_table)
+			o_table_free(o_table);
 		table_close(rel, AccessExclusiveLock);
 		return;
 	}
@@ -5302,15 +5343,14 @@ o_refresh_table_expressions(Oid reloid)
 	table_close(rel, AccessExclusiveLock);
 }
 
-PG_FUNCTION_INFO_V1(orioledb_upgrade_refresh);
-
 /*
- * SQL-callable: refresh every OrioleDB table in the current database.  Meant
- * to be run once per database after a cross-major pg_upgrade so the persisted
- * index expressions are rewritten in the running server's node-tree format.
+ * Rewrite the persisted index expressions/predicates of every OrioleDB table in
+ * the current database into the running server's node-tree format (and rebuild
+ * the referenced proc-cache entries).  Tables already in the current format are
+ * skipped cheaply (see o_refresh_table_expressions).  Idempotent.
  */
-Datum
-orioledb_upgrade_refresh(PG_FUNCTION_ARGS)
+static void
+o_upgrade_refresh_database(void)
 {
 	Oid			orioledb_am = get_am_oid("orioledb", false);
 	Relation	pgclass;
@@ -5336,6 +5376,65 @@ orioledb_upgrade_refresh(PG_FUNCTION_ARGS)
 
 	foreach(lc, reloids)
 		o_refresh_table_expressions(lfirst_oid(lc));
+}
+
+/*
+ * Automatically refresh the current database once, the first time it is used
+ * after the cluster started from on-disk state written by a different PG major
+ * (e.g. carried over by pg_upgrade), so the manual orioledb_upgrade_refresh()
+ * call is not required.
+ *
+ * Guards -- this must NOT run:
+ *  - unless the cross-major reset actually happened (resetSysCaches);
+ *  - during pg_upgrade's own binary-upgrade restore (IsBinaryUpgrade): the
+ *    catalog is not yet populated and orioledb_data/ is not yet in place, so a
+ *    refresh then would see no tables and wrongly stamp the database as done;
+ *  - on a standby / during recovery (cannot write);
+ *  - outside a normal, fully-initialized backend bound to a real database.
+ *
+ * It runs at most once per backend (a cheap boolean short-circuits afterwards).
+ * The persisted per-table refresh_exprs flag is the shared "already done"
+ * marker: once the first backend rewrites a table, later backends find nothing
+ * stale and o_refresh_table_expressions returns cheaply, so no cross-backend
+ * lock or extra bookkeeping is needed.  The read-time errors on stale
+ * index/proc entries remain as a fallback for a backend that touches a stale
+ * object before this runs (e.g. a SELECT-only session issuing no utility
+ * command).
+ */
+static void
+maybe_auto_upgrade_refresh(void)
+{
+	static bool attempted = false;
+
+	if (attempted)
+		return;
+
+	if (checkpoint_state == NULL || !checkpoint_state->resetSysCaches)
+		return;
+	if (IsBinaryUpgrade ||
+		RecoveryInProgress() ||
+		!IsNormalProcessingMode() ||
+		!IsTransactionState() ||
+		!OidIsValid(MyDatabaseId))
+		return;
+
+	attempted = true;
+	o_upgrade_refresh_database();
+}
+
+PG_FUNCTION_INFO_V1(orioledb_upgrade_refresh);
+
+/*
+ * SQL-callable: refresh every OrioleDB table in the current database.  Meant
+ * to be run once per database after a cross-major pg_upgrade so the persisted
+ * index expressions are rewritten in the running server's node-tree format.
+ * Normally unnecessary -- maybe_auto_upgrade_refresh() does this automatically
+ * on first use -- but kept for manual invocation and backward compatibility.
+ */
+Datum
+orioledb_upgrade_refresh(PG_FUNCTION_ARGS)
+{
+	o_upgrade_refresh_database();
 
 	PG_RETURN_VOID();
 }
