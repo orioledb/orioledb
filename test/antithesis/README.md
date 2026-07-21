@@ -8,16 +8,16 @@ Defines antithesis-ready simulation tests for OrioleDB. Each simulation is defin
 
 Build via `make build` (see details under Usage)
 
-- `orioledb-config:<ISO8601>-<sha>_pg<PG_MAJOR>_odb<ORIOLEDB_REF><config name>` - antithesis config image, contains dynamically built `docker-compose.yaml` and supporting files for a specific configuration set and OrioleDB version.
-- `orioledb-antithesis:<ISO8601>-<sha>_pg<PG_MAJOR>_odb<ORIOLEDB_REF>` - patched postgres + `orioledb.so` instrumented to run under Antithesis simulation
+- `orioledb-config:<sha>_pg<PG_MAJOR>_odb<ORIOLEDB_REF><config name>` - antithesis config image, contains dynamically built `docker-compose.yaml` and supporting files for a specific configuration set and OrioleDB version.
+- `orioledb-antithesis:<sha>_pg<PG_MAJOR>_odb<ORIOLEDB_REF>` - patched postgres + `orioledb.so` instrumented to run under Antithesis simulation
     - The default OrioleDB is latest main branch `git@github.com:orioledb/orioledb.git`, but can be any git reference
-- `jepsen:<ISO8601>-<sha>` - client workload
+- `jepsen:<sha>` - client workload
     - the append workload is a transactional correctness test for upsert operations. It hammers Postgres with concurrent multi-key transactions that append unique integers to CSV-encoded "lists." After a period of upsert writes and read operations, it reads back the state and analyzes the observed histories for anomalies.
     - because every appended element is unique and lists preserve order, the workload can reconstruct version history and detect transactional anomalies (cycles → serializability violations, lost updates, aborted reads, etc.)
-- `health-checker:<ISO8601>-<sha>` - simulation ready signal (see Appendix)
-- `sk-recovery-race-client:<ISO8601>-<sha>` - client workload
+- `health-checker:<sha>` - simulation ready signal (see Appendix)
+- `sk-recovery-race-client:<sha>` - client workload
     - deterministically constructs the PK/SK checkpoint race fixed in [orioledb#855](https://github.com/orioledb/orioledb/issues/855): pins concurrent INSERT/UPDATE/DELETE backends at the PK-applied/SK-pending boundary via `pg_stopevent_set`, forces a `CHECKPOINT` through them, then holds the window open for `RACE_WINDOW_SECONDS` so Antithesis's fault injection has a real chance of landing inside it. Reports via Antithesis SDK assertions (`always`/`reachable`).
-- `sk-recovery-race-chaos-client:<ISO8601>-<sha>` - client workload
+- `sk-recovery-race-chaos-client:<sha>` - client workload
     - best-effort variant of the above with no `pg_stopevent_set`: runs concurrent INSERT/UPDATE/DELETE bursts against the same table shape under a very short `checkpoint_timeout`, relying on chance overlap with an automatic checkpoint plus Antithesis's own fault injection. Reports via Antithesis SDK assertions (`always`/`sometimes`).
 - flake1 - TODO
 
