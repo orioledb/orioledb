@@ -38,34 +38,42 @@ shutdown means no WAL replay is required for the copied files).
        cp -R "$OLD_DATA/orioledb_undo" "$NEW_DATA/orioledb_undo"
    ```
 
-3. **Start the new cluster** and, **in every database that uses OrioleDB**,
-   rewrite the carried-over index expressions into the new server's format:
+3. **Start the new cluster.**  Nothing else is required: OrioleDB rewrites the
+   carried-over index expressions into the new server's format **automatically**,
+   the first time each database is used after the upgrade.
+
+   If you prefer to do it eagerly (for example in a migration script, before
+   opening the database to traffic), you can trigger the same work explicitly
+   **in every database that uses OrioleDB**:
 
    ```sql title="psql"
    SELECT orioledb_upgrade_refresh();
    ```
 
-   Do this before reading or writing the affected tables.
+## How the expression rewrite works
 
-## Why `orioledb_upgrade_refresh()` is required
+OrioleDB stores index **expressions** and **partial-index predicates** (and the
+parse trees of any SQL functions they call) as serialized PostgreSQL node trees,
+so that recovery and background workers can evaluate them without access to the
+catalog.  That serialization format (`nodeToString`) is **not stable across
+major versions**.  After a cross-major upgrade the carried-over node trees were
+written by the old major and cannot be parsed by the new server, so they are
+dropped on read.
 
-OrioleDB stores index **expressions** and **partial-index predicates** as
-serialized PostgreSQL node trees so that recovery and background workers can
-evaluate them without access to the catalog.  That serialization format
-(`nodeToString`) is **not stable across major versions**.  After a cross-major
-upgrade the carried-over node trees were written by the old major and cannot be
-parsed by the new server, so they are dropped on read.
+The rewrite re-derives those expressions and predicates from the catalog and
+stores them in the running server's format.  It runs automatically on first use
+of each database, and `orioledb_upgrade_refresh()` performs exactly the same
+work on demand.  Either way it only touches indexes that actually carry node
+trees (expression and partial indexes); plain indexes need no rewriting.  It is
+safe to run more than once and is a no-op when there is nothing to rewrite.
 
-`orioledb_upgrade_refresh()` re-derives those expressions and predicates from
-the catalog and rewrites them in the running server's format.  It only touches
-indexes that actually carry node trees (expression and partial indexes); plain
-indexes need no rewriting and are unaffected.  The function is safe to run more
-than once and is a no-op when there is nothing to rewrite.
-
-:::warning
-Until `orioledb_upgrade_refresh()` has been run, accessing an **expression** or
-**partial** index whose trees came from the old major raises a clear error
-rather than crashing the backend:
+:::note
+The automatic rewrite is triggered by the first statement in a database that
+goes through utility processing (which the tools that connect after an upgrade,
+including `pg_dump`, do at session start).  A session that issues only a bare
+`SELECT` against a not-yet-rewritten **expression** or **partial** index before
+that happens gets a clear error rather than a crash, and can proceed after
+running `orioledb_upgrade_refresh()`:
 
 ```
 ERROR:  OrioleDB index "..." has expressions stored by another PostgreSQL major version
