@@ -8,7 +8,7 @@ Defines antithesis-ready simulation tests for OrioleDB. Each simulation is defin
 
 Build via `make build` (see details under Usage)
 
-- `orioledb-config:<git sha>_pg<PG_MAJOR>_odb<ORIOLEDB_REF><config name>` - antithesis config image, contains dynamically built `docker-compose.yaml` and supporting files for a specific configuration set and OrioleDB version.
+- `orioledb-config:<ISO8601>-<sha>_pg<PG_MAJOR>_odb<ORIOLEDB_REF><config name>` - antithesis config image, contains dynamically built `docker-compose.yaml` and supporting files for a specific configuration set and OrioleDB version.
 - `orioledb-antithesis:<ISO8601>-<sha>_pg<PG_MAJOR>_odb<ORIOLEDB_REF>` - patched postgres + `orioledb.so` instrumented to run under Antithesis simulation
     - The default OrioleDB is latest main branch `git@github.com:orioledb/orioledb.git`, but can be any git reference
 - `jepsen:<ISO8601>-<sha>` - client workload

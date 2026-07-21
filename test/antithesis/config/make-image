@@ -3,29 +3,44 @@
 set -euo pipefail
 
 usage() {
-	echo "Usage: $0 [CONFIG ...]"
+	echo "Usage: $0 [--push] [CONFIG ...]"
 	echo
 	echo "Build a config image from config/docker-compose.base.yaml"
 	echo "and optional config directories (for example, setup/s3)."
+	echo
+	echo "  --push  Push the built config image"
 }
 
-for config in "$@"; do
-	if [[ "$config" == "-h" || "$config" == "--help" ]]; then
+push=false
+configs=()
+for arg in "$@"; do
+	case "$arg" in
+	-h | --help)
 		usage
 		exit 0
-	fi
+		;;
+	--push)
+		push=true
+		;;
+	*)
+		configs+=("$arg")
+		;;
+	esac
 done
 
 mkdir -p target
-config/make-compose "$@" >target/docker-compose.yaml
+config/make-compose "${configs[@]}" >target/docker-compose.yaml
 
 name=""
-for config in "$@"; do
+for config in "${configs[@]}"; do
 	[[ -n "$name" ]] && name+="_"
 	name+="${config//\//-}"
 done
 
-sha="$(git rev-parse --short HEAD)"
-tag="${sha}_pg${PG_MAJOR}_odb${ORIOLEDB_REF_TAG}_${name}"
+tag="${IMAGE_TAG}_pg${PG_MAJOR}_odb${ORIOLEDB_REF_TAG}_${name}"
+image="${IMAGE_REPO}orioledb-config:$tag"
 
-docker build -f config/Dockerfile -t "orioledb-config:$tag" .
+docker build --platform "linux/amd64" -f config/Dockerfile -t "$image" .
+if [[ "$push" == true ]]; then
+	docker push "$image"
+fi
