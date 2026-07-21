@@ -1,9 +1,27 @@
 CREATE SCHEMA tablespace;
 SET SESSION search_path = 'tablespace';
 CREATE EXTENSION orioledb;
-SET allow_in_place_tablespaces = true;
-CREATE TABLESPACE regress_tblspace LOCATION '';
+\! rm -rf test/tblspc && mkdir -p test/tblspc && echo '*' >test/tblspc/.gitignore
+\set tblspc_path `echo "$PWD/test/tblspc"`
+CREATE TABLESPACE regress_tblspace LOCATION :'tblspc_path';
 CREATE DATABASE tblspace_test_db TABLESPACE regress_tblspace;
+CREATE TABLE testts1 (
+	id int,
+	val text
+) USING orioledb TABLESPACE regress_tblspace;
+SELECT orioledb_tbl_indices('testts1'::regclass);
+              orioledb_tbl_indices              
+------------------------------------------------
+ Index ctid_primary                            +
+     Index type: primary, unique, ctid         +
+     Leaf tuple size: 3, non-leaf tuple size: 1+
+     Non-leaf tuple fields: ctid               +
+     Leaf tuple fields: ctid, id, val          +
+ 
+(1 row)
+
+ALTER TABLE testts1 ADD CONSTRAINT testts1_pk PRIMARY KEY (id) USING INDEX TABLESPACE pg_default;
+INSERT INTO testts1 SELECT i, repeat('x', 200) FROM generate_series(2, 5) i;
 CREATE TABLE foo_def (i int) USING orioledb TABLESPACE pg_default;
 \d+ foo_def
                                 Table "tablespace.foo_def"
@@ -770,13 +788,10 @@ SELECT orioledb_rewind_sync();
 (1 row)
 
 DROP TABLESPACE regress_tblspace_renamed;
--- TODO: Add tablespaces support to iterate_files
--- TODO: Add test for symlinked tablespaces, probably
--- \set cwd `echo "$PWD/tblspc"`
--- CREATE TABLESPACE regress_tblspace LOCATION :'cwd';
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 2 other objects
-DETAIL:  drop cascades to table foo_def
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table testts1
+drop cascades to table foo_def
 drop cascades to table foo
 DROP SCHEMA tablespace CASCADE;
 NOTICE:  drop cascades to table foo_def_pg

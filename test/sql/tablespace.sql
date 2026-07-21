@@ -2,10 +2,18 @@ CREATE SCHEMA tablespace;
 SET SESSION search_path = 'tablespace';
 CREATE EXTENSION orioledb;
 
-SET allow_in_place_tablespaces = true;
-CREATE TABLESPACE regress_tblspace LOCATION '';
-
+\! rm -rf test/tblspc && mkdir -p test/tblspc && echo '*' >test/tblspc/.gitignore
+\set tblspc_path `echo "$PWD/test/tblspc"`
+CREATE TABLESPACE regress_tblspace LOCATION :'tblspc_path';
 CREATE DATABASE tblspace_test_db TABLESPACE regress_tblspace;
+
+CREATE TABLE testts1 (
+	id int,
+	val text
+) USING orioledb TABLESPACE regress_tblspace;
+SELECT orioledb_tbl_indices('testts1'::regclass);
+ALTER TABLE testts1 ADD CONSTRAINT testts1_pk PRIMARY KEY (id) USING INDEX TABLESPACE pg_default;
+INSERT INTO testts1 SELECT i, repeat('x', 200) FROM generate_series(2, 5) i;
 
 CREATE TABLE foo_def (i int) USING orioledb TABLESPACE pg_default;
 \d+ foo_def
@@ -183,7 +191,6 @@ ALTER TABLE atable SET (fillfactor=80);
 \d+ atable
 
 DROP TABLE atable;
-
 DROP DATABASE tblspace_test_db;
 
 ALTER TABLE ALL IN TABLESPACE regress_tblspace SET TABLESPACE pg_default;
@@ -197,12 +204,6 @@ ALTER MATERIALIZED VIEW ALL IN TABLESPACE regress_tblspace_renamed SET TABLESPAC
 SELECT orioledb_rewind_sync();
 
 DROP TABLESPACE regress_tblspace_renamed;
-
--- TODO: Add tablespaces support to iterate_files
--- TODO: Add test for symlinked tablespaces, probably
--- \set cwd `echo "$PWD/tblspc"`
--- CREATE TABLESPACE regress_tblspace LOCATION :'cwd';
-
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA tablespace CASCADE;
 RESET search_path;
