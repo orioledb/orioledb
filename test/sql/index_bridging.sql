@@ -928,6 +928,11 @@ DELETE FROM bridge_undo_rollback WHERE id = 1;
 ROLLBACK;
 SELECT 1 AS still_alive;
 
+CREATE TABLE o_table_filled(pk text PRIMARY KEY, data text) USING orioledb;
+INSERT INTO o_table_filled VALUES ('key1', 'some_data');
+CREATE INDEX idx_filled_data ON o_table_filled USING brin(data);
+DROP TABLE o_table_filled;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;
