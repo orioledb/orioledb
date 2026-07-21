@@ -52,13 +52,12 @@ shutdown means no WAL replay is required for the copied files).
 
 ## How the expression rewrite works
 
-OrioleDB stores index **expressions** and **partial-index predicates** (and the
-parse trees of any SQL functions they call) as serialized PostgreSQL node trees,
-so that recovery and background workers can evaluate them without access to the
-catalog.  That serialization format (`nodeToString`) is **not stable across
-major versions**.  After a cross-major upgrade the carried-over node trees were
-written by the old major and cannot be parsed by the new server, so they are
-dropped on read.
+OrioleDB stores index **expressions** and **partial-index predicates** as
+serialized PostgreSQL node trees, so that recovery and background workers can
+evaluate them without access to the catalog.  That serialization format
+(`nodeToString`) is **not stable across major versions**.  After a cross-major
+upgrade the carried-over node trees were written by the old major and cannot be
+parsed by the new server, so they are dropped on read.
 
 The rewrite re-derives those expressions and predicates from the catalog and
 stores them in the running server's format.  It runs automatically on first use
