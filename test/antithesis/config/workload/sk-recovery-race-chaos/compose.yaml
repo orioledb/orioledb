@@ -1,0 +1,21 @@
+services:
+  test.orioledb:
+    volumes:
+      - "./config/workload/sk-recovery-race-chaos/postgres.conf:/etc/postgresql/conf.d/sk-recovery-race-chaos.conf:ro"
+
+  sk-recovery-race-chaos-client:
+    image: "${IMAGE_REPO}sk-recovery-race-chaos-client:${IMAGE_TAG}"
+    container_name: sk-recovery-race-chaos-client
+    environment:
+      PGHOST: orioledb
+      PGPORT: "5432"
+      PGDATABASE: "${POSTGRES_DB}"
+      PGUSER: "${POSTGRES_USER}"
+      PGPASSWORD: "${POSTGRES_PASSWORD}"
+      BURST_SECONDS: "${BURST_SECONDS:-5}"
+      BURST_WORKERS: "${BURST_WORKERS:-8}"
+    platform: linux/amd64
+    build: ./sk-recovery-race-chaos
+    depends_on:
+      test.orioledb:
+        condition: service_healthy

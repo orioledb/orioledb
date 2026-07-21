@@ -1,0 +1,22 @@
+services:
+  # merge stopevent/checkpoint config into the shared orioledb image
+  test.orioledb:
+    volumes:
+      # /etc/postgresql/postgresql.conf has an include_dir directive for conf.d
+      - "./config/workload/sk-recovery-race/postgres.conf:/etc/postgresql/conf.d/sk-recovery-race.conf:ro"
+
+  sk-recovery-race-client:
+    image: "${IMAGE_REPO}sk-recovery-race-client:${IMAGE_TAG}"
+    container_name: sk-recovery-race-client
+    environment:
+      PGHOST: orioledb
+      PGPORT: "5432"
+      PGDATABASE: "${POSTGRES_DB}"
+      PGUSER: "${POSTGRES_USER}"
+      PGPASSWORD: "${POSTGRES_PASSWORD}"
+      RACE_WINDOW_SECONDS: "${RACE_WINDOW_SECONDS:-2}"
+    platform: linux/amd64
+    build: ./sk-recovery-race
+    depends_on:
+      test.orioledb:
+        condition: service_healthy
