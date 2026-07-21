@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # BEGIN build image
-FROM --platform=${BUILDPLATFORM} clojure:temurin-21-lein-2.11.2-bookworm-slim AS build
+FROM clojure:temurin-21-lein-2.11.2-bookworm-slim AS build
 
 ARG JEPSEN_POSTGRES_REF=main
 
@@ -34,7 +34,7 @@ RUN jlink \
 
 # BEGIN runtime
 
-FROM --platform=${BUILDPLATFORM} debian:bookworm-slim AS runtime
+FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
