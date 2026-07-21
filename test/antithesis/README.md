@@ -15,6 +15,10 @@ Build via `make build` (see details under Usage)
     - the append workload is a transactional correctness test for upsert operations. It hammers Postgres with concurrent multi-key transactions that append unique integers to CSV-encoded "lists." After a period of upsert writes and read operations, it reads back the state and analyzes the observed histories for anomalies.
     - because every appended element is unique and lists preserve order, the workload can reconstruct version history and detect transactional anomalies (cycles → serializability violations, lost updates, aborted reads, etc.)
 - `health-checker:<ISO8601>-<sha>` - simulation ready signal (see Appendix)
+- `sk-recovery-race-client:<ISO8601>-<sha>` - client workload
+    - deterministically constructs the PK/SK checkpoint race fixed in [orioledb#855](https://github.com/orioledb/orioledb/issues/855): pins concurrent INSERT/UPDATE/DELETE backends at the PK-applied/SK-pending boundary via `pg_stopevent_set`, forces a `CHECKPOINT` through them, then holds the window open for `RACE_WINDOW_SECONDS` so Antithesis's fault injection has a real chance of landing inside it. Reports via Antithesis SDK assertions (`always`/`reachable`).
+- `sk-recovery-race-chaos-client:<ISO8601>-<sha>` - client workload
+    - best-effort variant of the above with no `pg_stopevent_set`: runs concurrent INSERT/UPDATE/DELETE bursts against the same table shape under a very short `checkpoint_timeout`, relying on chance overlap with an automatic checkpoint plus Antithesis's own fault injection. Reports via Antithesis SDK assertions (`always`/`sometimes`).
 - flake1 - TODO
 
 ### Configurations
@@ -24,6 +28,8 @@ Build via `make build` (see details under Usage)
 | [setup/s3](./config/setup/s3)  | additive; runs orioledb in s3 mode with local minio backend; not compatible with `setup/postgres`  |
 | [setup/postgres](./config/setup/postgres)  | replaces orioledb with stock postgres image for sanity checking compatible workloads |
 | [workload/jepsen-repeatable-read](./config/workload/jepsens-repeatable-read)  | adds a jepsen client with append/rr workload  |
+| [workload/sk-recovery-race](./config/workload/sk-recovery-race)  | adds a client that deterministically constructs the orioledb#855 PK/SK checkpoint race via stopevents and checks consistency each iteration  |
+| [workload/sk-recovery-race-chaos](./config/workload/sk-recovery-race-chaos)  | adds a client that stresses the same PK/SK checkpoint race with concurrent DML and frequent checkpoints, no stopevents  |
 | flake repro  | todo  |
 
 - individual configuration sets are merged with `config/docker-compose.base.yaml` to define a simulation
