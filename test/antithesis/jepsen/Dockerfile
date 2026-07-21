@@ -63,7 +63,7 @@ ENV JEPSEN_WORKLOAD=append \
     JEPSEN_POSTGRES_PASSWORD=pw \
     JEPSEN_POSTGRES_PORT=5432
 
-COPY --chmod=755 singleton_driver_jepsen-postgres /opt/antithesis/test/v1/jepsen-postgres/
+COPY ./test /opt/antithesis/test
 COPY --chmod=755 entrypoint /usr/local/bin/
 
 ENTRYPOINT ["/usr/local/bin/entrypoint"]
