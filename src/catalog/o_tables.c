@@ -674,17 +674,6 @@ o_table_refresh_index_exprs(OTable *o_table, OIndexNumber ix_num,
 									 expression_planner(e));
 	}
 
-	/*
-	 * Rebuild the proc cache for any SQL function referenced by these
-	 * expressions.  Its entries may hold parse trees in the old major's
-	 * node-tree format (unreadable here); force them to be re-serialized in
-	 * this server's format so evaluating the just-rewritten expressions -- in
-	 * foreground backends and in background workers alike -- finds valid
-	 * trees.
-	 */
-	o_collect_funcexpr_refresh((Node *) index->predicate);
-	o_collect_funcexpr_refresh((Node *) index->expressions);
-
 	MemoryContextSwitchTo(old_mcxt);
 	return true;
 }

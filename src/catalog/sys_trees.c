@@ -762,20 +762,9 @@ sys_tree_init_if_needed(int i)
  * across PG majors in practice (it gained datlocale/daticurules/datctype),
  * which is what crashed deserialization after pg_upgrade.
  *
- * Per-object caches are handled without dropping the tree, because emptying
- * them would break the reads described above:
- *
- *  - class and collation caches version-gate their layout by appending fields,
- *    so an old-major entry still deserializes correctly and needs nothing.
- *
- *  - the proc cache stores SQL-function parse trees whose nodeToString format
- *    is NOT portable across majors, so an old-major entry deserializes with
- *    missing trees.  That cannot be papered over by a gate, but neither can the
- *    tree be reset (per-object, LSN-pinned, and consulted from background
- *    workers that have no catalog to fall back to).  Instead such an entry is
- *    marked stale and refused at use (o_proc_cache's node_format_stale guard),
- *    and orioledb_upgrade_refresh() rebuilds it in this server's format
- *    alongside the index expressions that reference it.
+ * Per-object caches with version-gated layouts (class, proc, collation) are
+ * intentionally left alone: their gated fields are appended, so old data
+ * still reads back, and resetting them would break existing reads.
  */
 static bool
 sys_tree_reset_on_major_upgrade(int tree_num)

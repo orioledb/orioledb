@@ -843,13 +843,6 @@ o_collect_function(Node *node, void *context)
 	return false;
 }
 
-/*
- * When true, o_collect_function_walker() force-rebuilds existing proc-cache
- * entries instead of leaving them as-is.  Set only around
- * o_collect_funcexpr_refresh().
- */
-static bool o_collect_funcs_refresh = false;
-
 void
 o_collect_funcexpr(Node *node)
 {
@@ -860,35 +853,6 @@ o_collect_funcexpr(Node *node)
 
 	expression_tree_walker(o_wrap_top_funcexpr(node), o_collect_function,
 						   &processed);
-	list_free_deep(processed);
-}
-
-/*
- * Like o_collect_funcexpr(), but rebuilds every proc-cache entry it visits
- * from the current catalog even if one already exists.  Used by
- * orioledb_upgrade_refresh() so SQL-function parse trees carried over from a
- * different PG major (and unreadable in this server's format) are re-serialized
- * in the running server's format, matching the just-rewritten index expressions.
- */
-void
-o_collect_funcexpr_refresh(Node *node)
-{
-	List	   *processed = NIL;
-
-	if (!node)
-		return;
-
-	o_collect_funcs_refresh = true;
-	PG_TRY();
-	{
-		expression_tree_walker(o_wrap_top_funcexpr(node), o_collect_function,
-							   &processed);
-	}
-	PG_FINALLY();
-	{
-		o_collect_funcs_refresh = false;
-	}
-	PG_END_TRY();
 	list_free_deep(processed);
 }
 
@@ -908,17 +872,6 @@ o_collect_function_walker(Oid functionId, Oid inputcollid, List *args,
 	procedureStruct = (Form_pg_proc) GETSTRUCT(procedureTuple);
 	o_sys_cache_set_datoid_lsn(&cur_lsn, &datoid);
 	o_class_cache_add_if_needed(datoid, TypeRelationId, cur_lsn, NULL);
-
-	/*
-	 * In refresh mode (orioledb_upgrade_refresh, after a cross-major upgrade)
-	 * an entry may already exist but hold parse trees in the old major's
-	 * node-tree format; add_if_needed would leave it untouched, and the proc
-	 * cache forbids in-place updates.  Drop the stale entry first so the add
-	 * below re-creates it from the current catalog in this server's format --
-	 * see o_proc_cache's node_format_stale guard.
-	 */
-	if (o_collect_funcs_refresh)
-		o_proc_cache_delete(datoid, functionId);
 	o_proc_cache_add_if_needed(datoid, functionId, cur_lsn, (Pointer) &arg);
 	o_class_cache_add_if_needed(datoid, AuthIdRelationId, cur_lsn, NULL);
 	for (i = 0; i < procedureStruct->pronargs; i++)
