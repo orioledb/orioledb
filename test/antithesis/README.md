@@ -38,6 +38,52 @@ Build via `make build` (see details under Usage)
     - `compose.yaml` - merged with base compose file
     - `env` - enivronment customizations
 
+### Test Suites
+
+These examples assume a working [snouty](https://github.com/antithesishq/snouty).  Run `eval "$(mise activate bash)"` and `snouty doctor` for setup instructions.
+
+> [!note]
+> If a test suite fails to come up locally, run `make down [CFG='...']` and try again.
+
+
+#### Jepsen Standalone
+
+```
+make build push config CFG='workload/jepsen-repeatable-read'
+
+# optional
+snouty validate target/
+
+# note the config image built above (make build push ...)
+# TODO: add a convenience for this in the Makefile
+snouty launch \
+   --config-image us-central1-docker.pkg.dev/molten-verve-216720/supabase-repository/orioledb-config:6c01d7c2_pg17_odbmain_workload-jepsen-repeatable-read \
+  --test-name 'orioledb_jepsen' \
+  --description 'pg17_odbmain_workload-jepsen-repeatable-read fixed health checker' \
+  --duration 20m \
+  --ephemeral \
+  --webhook basic_test
+```
+
+#### sk-recovery-race[-chaos]
+
+```
+make build push CFG='workload/sk-recovery-race' PG_MAJOR=18
+
+# optional
+snouty validate target/
+
+snouty launch \
+  --config-image us-central1-docker.pkg.dev/molten-verve-216720/supabase-repository/orioledb-config:15a774fa_pg18_odbmain_workload-sk-recovery-race-chaos \
+  --test-name 'sk-recovery-race' \
+  --description 'sk-recovery-race trial' \
+  --duration 20m \
+  --ephemeral \
+  --param custom.container_faults_enable=true \
+  --param custom.container_faults_exclusion='sk-recovery-race-chaos-client' \
+  --webhook supabase
+```
+
 ## Usage
 
 Before pushing to Antithesis, it's worth running your changes locally. 
