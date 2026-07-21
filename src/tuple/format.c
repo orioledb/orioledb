@@ -433,7 +433,7 @@ o_tuple_compute_data_size(TupleDesc tupleDesc, ItemPointer iptr, BridgeData *bri
 
 	if (iptr)
 		ctid_off++;
-	if (has_bridge_ctid)
+	if (has_bridge_ctid && bridge_data->is_pkey)
 		ctid_off++;
 
 	for (i = 0; i < natts; i++)
@@ -512,7 +512,7 @@ o_new_tuple_size(TupleDesc tupleDesc, OTupleFixedFormatSpec *spec,
 
 	if (iptr)
 		ctid_off++;
-	if (has_bridge_ctid)
+	if (has_bridge_ctid && bridge_data->is_pkey)
 		ctid_off++;
 
 	/*

@@ -4454,6 +4454,12 @@ SELECT 1 AS still_alive;
            1
 (1 row)
 
+CREATE TABLE o_table_filled(pk text PRIMARY KEY, data text) USING orioledb;
+INSERT INTO o_table_filled VALUES ('key1', 'some_data');
+CREATE INDEX idx_filled_data ON o_table_filled USING brin(data);
+NOTICE:  index bridging is enabled for orioledb table 'o_table_filled'
+DETAIL:  index access method 'brin' is supported only via index bridging for OrioleDB table
+DROP TABLE o_table_filled;
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 17 other objects
