@@ -386,12 +386,10 @@ fi
 	-o "-p $PORT_NEW" -l "$GITHUB_WORKSPACE/pg${NEW_VERSION}.log" -w start
 
 # ----------------------------------------------------------------------
-# 7a. Before anything triggers the automatic refresh, confirm that a
-#     plain read of an index whose expression trees were written by the old
-#     major raises a clean error instead of crashing.  A bare SELECT does not
-#     go through ProcessUtility, so it does not trip the automatic refresh
-#     (step 7b) and still exercises the read-time fallback guard.  Only
-#     meaningful across majors; same-version carries compatible trees.
+# 7a. Before refreshing, confirm that touching an index whose expression
+#     trees were written by the old major raises a clean error instead of
+#     crashing the backend.  Only meaningful across majors; same-version
+#     "upgrades" carry compatible trees and need no refresh.
 # ----------------------------------------------------------------------
 if [ "$OLD_VERSION" != "$NEW_VERSION" ] && db_exists $PORT_NEW "$TEST_DB"; then
 	set +e
@@ -400,7 +398,7 @@ if [ "$OLD_VERSION" != "$NEW_VERSION" ] && db_exists $PORT_NEW "$TEST_DB"; then
 	refresh_rc=$?
 	set -e
 	if [ $refresh_rc -eq 0 ]; then
-		echo "ERROR: expression-index table was readable before the automatic refresh"
+		echo "ERROR: expression-index table was readable before orioledb_upgrade_refresh()"
 		echo "$refresh_err"
 		exit 1
 	fi
@@ -417,33 +415,30 @@ if [ "$OLD_VERSION" != "$NEW_VERSION" ] && db_exists $PORT_NEW "$TEST_DB"; then
 fi
 
 # ----------------------------------------------------------------------
-# 7b. Exercise the AUTOMATIC refresh.  A cross-major upgrade carries over
-#     expression/predicate/SQL-function node trees in the old major's
-#     nodeToString format, which the new server cannot read; OrioleDB rewrites
-#     them into the running server's format on the first utility command in
-#     each database (maybe_auto_upgrade_refresh), so no manual
-#     orioledb_upgrade_refresh() call is required.  Issue one trivial utility
-#     statement to trigger it, then confirm the expression-index table that
-#     erred in step 7a is now readable.
+# 7b. Refresh OrioleDB index expressions into the new server's node-tree
+#     format.  A cross-major upgrade carries over expression/predicate
+#     blobs in the old major's nodeToString format, which the new server
+#     skips on read (see o_deserialize_node); orioledb_upgrade_refresh()
+#     re-derives them from the catalog and rewrites them.  Run once per
+#     database that has the extension, before anything reads those tables.
 #
-#     $TEST_DB is fully controlled by this script, so a failure there is a real
-#     bug -- fail the job immediately.  The regression database can be left
-#     half-broken by a tolerated mid-suite failure (see step 2), so it stays
-#     best-effort, but we still surface the actual error.
+#     $TEST_DB is fully controlled by this script, so a refresh failure
+#     there is a real bug -- fail the job immediately rather than hoping
+#     the later dump diff catches it.  The regression database can be left
+#     half-broken by a tolerated mid-suite failure (see step 2), so its
+#     refresh stays best-effort, but we still surface the actual error.
 # ----------------------------------------------------------------------
 if db_exists $PORT_NEW "$TEST_DB"; then
-	"$NEW_PREFIX/bin/psql" -p $PORT_NEW -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
-DISCARD ALL;					-- utility command: triggers the automatic refresh
-SELECT count(*) FROM numbers;	-- erred in step 7a; must succeed after the refresh
-SQL
-	echo "Auto-refreshed OrioleDB expressions in $TEST_DB"
+	"$NEW_PREFIX/bin/psql" -p $PORT_NEW -d "$TEST_DB" -v ON_ERROR_STOP=1 \
+		-c "SELECT orioledb_upgrade_refresh();"
+	echo "Refreshed OrioleDB expressions in $TEST_DB"
 fi
 
 if db_exists $PORT_NEW regression; then
 	refresh_out=$("$NEW_PREFIX/bin/psql" -p $PORT_NEW -d regression -v ON_ERROR_STOP=1 \
-		-c "DISCARD ALL;" 2>&1) \
-		&& echo "Auto-refresh triggered in regression" \
-		|| echo "[WARN] triggering auto-refresh in regression failed: $refresh_out"
+		-c "SELECT orioledb_upgrade_refresh();" 2>&1) \
+		&& echo "Refreshed OrioleDB expressions in regression" \
+		|| echo "[WARN] orioledb_upgrade_refresh() failed in regression: $refresh_out"
 fi
 
 # ----------------------------------------------------------------------
