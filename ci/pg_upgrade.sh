@@ -64,6 +64,19 @@ collect_core_dumps() {
 	return $found
 }
 
+# Print core-dump backtraces on any exit -- including the `set -e` exit taken
+# when a backend crashes mid-test (which otherwise surfaces only as "server
+# closed the connection unexpectedly" with no cause).  This mirrors the check
+# workflow's post-run core inspection; the short sleep lets the kernel finish
+# writing the core before we read it.  The original exit code is preserved.
+dump_cores_on_exit() {
+	local rc=$?
+	sleep 2
+	collect_core_dumps || true
+	exit $rc
+}
+trap dump_cores_on_exit EXIT
+
 write_pg_conf() {
 	local data=$1
 	cat >> "$data/postgresql.conf" <<EOF
