@@ -19,9 +19,6 @@ done
 base_compose="config/docker-compose.base.yaml"
 base_env="config/base.env"
 
-IMAGE_TAG="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)"
-export IMAGE_TAG
-
 env_args=()
 compose_args=()
 
