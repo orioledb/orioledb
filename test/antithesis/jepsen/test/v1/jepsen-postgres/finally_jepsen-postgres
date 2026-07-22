@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+if [ -n "${ANTITHESIS_OUTPUT_DIR:-}" ] && [ -d store ]; then
+	cp -a store/latest/results.edn "$ANTITHESIS_OUTPUT_DIR/" || true
+	cp -a store/latest/history.edn "$ANTITHESIS_OUTPUT_DIR/"
+fi

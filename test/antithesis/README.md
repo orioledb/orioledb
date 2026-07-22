@@ -131,3 +131,144 @@ make down # [CFG='...']
         - [basics](https://antithesis.com/docs/test_templates/first_test/)
         - [reference](https://antithesis.com/docs/test_templates/test_composer_reference/)
         - [an entrypoint](https://github.com/DataDog/dd-profiling-antithesis/blob/main/runner/resources/entrypoint.sh) that does `sleep infinity` inside antithesis and automatically runs the test composer tests itself is useful for local testing.
+
+## Debugging running processes
+
+### Java debugger: Jepsen
+
+JDWP must be enabled when the Jepsen JVM starts:
+
+```bash
+JEPSEN_JDWP_PORT=7896 \
+  make up CFG='workload/jepsen-repeatable-read'
+```
+
+The port is bound inside the container, so run the debugger there:
+
+```bash
+docker exec -it jepsen-client jdb -attach 7896
+```
+
+Useful interactive JDB commands:
+
+```text
+threads
+where all
+catch java.lang.Throwable
+stop in some.java.Class.someMethod
+cont
+locals
+dump someVariable
+exit
+```
+
+A non-interactive example suitable for scripts or Antithesis MVD:
+
+```bash
+docker exec jepsen-client sh -c \
+  'printf "threads\nwhere all\nexit\n" | /opt/java/bin/jdb -attach 7896'
+```
+
+Other Java diagnostics do not require JDWP:
+
+```bash
+# Find the Jepsen JVM
+docker exec jepsen-client jcmd -l
+
+# Capture a thread dump
+docker exec jepsen-client jcmd 8 Thread.print
+
+# Display VM flags
+docker exec jepsen-client jcmd 8 VM.flags
+
+# Write a heap dump for extraction
+docker exec jepsen-client jcmd 8 GC.heap_dump /tmp/jepsen.hprof
+
+# Start a 30-second Flight Recorder recording
+docker exec jepsen-client jcmd 8 JFR.start \
+  name=jepsen-debug \
+  duration=30s \
+  filename=/tmp/jepsen.jfr
+```
+
+Replace `8` with the PID reported by `jcmd -l`.
+
+### GDB: OrioleDB/PostgreSQL
+
+
+> [!note]
+> `gdb` attachment to an x64_86 process doesn't work on mac/OrbStack/Rosetta. You'll need native amd64 Linux.
+
+List PostgreSQL processes:
+
+```bash
+docker exec orioledb pgrep -a postgres
+```
+
+Attach to the postmaster—the oldest PostgreSQL process:
+
+```bash
+docker exec --privileged -it orioledb sh -c \
+  'exec gdb -q -p "$(pgrep -o -x postgres)"'
+```
+
+Useful interactive GDB commands:
+
+```text
+set pagination off
+info threads
+bt
+bt full
+frame 2
+info args
+info locals
+break SomeOrioleDBFunction
+continue
+detach
+quit
+```
+
+To attach to a particular client backend, first list sessions:
+
+```bash
+docker exec orioledb sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -x -c "
+     SELECT pid,
+            usename,
+            application_name,
+            state,
+            wait_event_type,
+            wait_event,
+            left(query, 100) AS query
+       FROM pg_stat_activity
+      WHERE backend_type = '\''client backend'\''
+      ORDER BY pid;
+   "'
+```
+
+Then attach using the returned PID:
+
+```bash
+docker exec --privileged -it orioledb gdb -q -p <PID>
+```
+
+Non-interactive backtrace:
+
+```bash
+docker exec --privileged orioledb sh -c '
+  pid=$(pgrep -o -x postgres)
+  exec gdb -q -nx -batch -p "$pid" \
+    -ex "set pagination off" \
+    -ex "thread apply all bt full" \
+    -ex "detach"
+'
+```
+
+Core dump without terminating PostgreSQL:
+
+```bash
+docker exec --privileged orioledb sh -c '
+  pid=$(pgrep -o -x postgres)
+  gcore -o /tmp/postgres-core "$pid"
+'
+```
