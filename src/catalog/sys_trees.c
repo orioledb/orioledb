@@ -17,6 +17,7 @@
 #include "orioledb.h"
 
 #include "btree/check.h"
+#include "btree/io.h"
 #include "btree/iterator.h"
 #include "catalog/sys_trees.h"
 #include "catalog/o_sys_cache.h"
@@ -747,6 +748,41 @@ sys_tree_init_if_needed(int i)
 }
 
 /*
+ * Should this system tree be discarded and rebuilt when the on-disk state was
+ * written by a different PG major version?
+ *
+ * The OSysCache trees cache PostgreSQL catalog data and some serialize with a
+ * PG-version-dependent layout, so a cross-major restart (e.g. via pg_upgrade)
+ * would read them with a mismatching layout.  But most of these caches are
+ * keyed by object OID and pinned to the object's creation LSN; emptying them
+ * breaks reads of pre-existing objects (the entry can no longer be resolved
+ * at the reading snapshot).  Only the database cache is safe to drop: it is
+ * keyed by database OID, re-resolved on demand, and not consulted while
+ * reading user relations.  It is also the cache whose layout actually changed
+ * across PG majors in practice (it gained datlocale/daticurules/datctype),
+ * which is what crashed deserialization after pg_upgrade.
+ *
+ * Per-object caches with version-gated layouts (class, proc, collation) are
+ * intentionally left alone: their gated fields are appended, so old data
+ * still reads back, and resetting them would break existing reads.
+ */
+static bool
+sys_tree_reset_on_major_upgrade(int tree_num)
+{
+	/*
+	 * The class cache stores tuple descriptors as raw FormData_pg_attribute
+	 * arrays, whose element size changes across PG majors, so a carried-over
+	 * entry fails o_class_cache_deserialize_entry's length check.  It is only
+	 * ever read in catalog-free contexts (recovery, checkpointer) via the
+	 * syscache hook, and always for system catalogs, so dropping it lets
+	 * o_class_cache_fill_entry rebuild each entry from the relcache in the
+	 * running server's format -- safe in every backend.
+	 */
+	return tree_num == SYS_TREES_DATABASE_CACHE ||
+		tree_num == SYS_TREES_CLASS_CACHE;
+}
+
+/*
  * Initializes the system B-tree.
  *
  * We can not initialize system BTree on shmem startup because it uses
@@ -803,6 +839,23 @@ sys_tree_init(int i, bool init_shmem)
 
 	if (descr->storageType == BTreeStoragePersistence)
 	{
+		/*
+		 * When the on-disk state came from a different PG major version, the
+		 * rebuildable cache trees were serialized with an incompatible
+		 * layout. Delete their files before init so the tree comes up empty
+		 * (as on a fresh cluster) and is repopulated on demand, instead of
+		 * reading stale-layout entries.  Only the process that initializes
+		 * shared memory does this, and only for the rebuildable caches.
+		 */
+		if (init_shmem && checkpoint_state->resetSysCaches &&
+			sys_tree_reset_on_major_upgrade(i + 1))
+		{
+			OIndexKey	key;
+
+			key.oids = descr->oids;
+			key.tablespace = descr->tablespace;
+			cleanup_btree_files(key, false);
+		}
 		checkpointable_tree_init(descr, init_shmem, NULL);
 	}
 	else if (descr->storageType == BTreeStorageTemporary)

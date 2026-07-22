@@ -2102,14 +2102,29 @@ orioledb_get_relation_info_hook(PlannerInfo *root,
 
 					index_close(index, AccessShareLock);
 
+					index_descr = NULL;
 					for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
 					{
-						index_descr = descr->indices[ix_num];
-						if (index_descr->oids.reloid == info->indexoid)
+						if (descr->indices[ix_num]->oids.reloid == info->indexoid)
+						{
+							index_descr = descr->indices[ix_num];
 							break;
+						}
 					}
-					Assert(ix_num < descr->nIndices);
-					Assert(index_descr);
+
+					/*
+					 * During a binary upgrade the OrioleDB descr is not yet
+					 * populated -- the storage and its system trees are
+					 * carried over from the old cluster afterwards -- so an
+					 * index present in the catalog may be missing here.
+					 * Planner estimates are irrelevant during the upgrade, so
+					 * just skip it.
+					 */
+					if (index_descr == NULL)
+					{
+						Assert(IsBinaryUpgrade);
+						continue;
+					}
 					o_btree_load_shmem(&index_descr->desc);
 					rootPageBlkno = index_descr->desc.rootInfo.rootPageBlkno;
 					root_page = O_GET_IN_MEMORY_PAGE(rootPageBlkno);

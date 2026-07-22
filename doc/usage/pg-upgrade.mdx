@@ -1,0 +1,86 @@
+---
+id: pg-upgrade
+sidebar_label: Major upgrades (pg_upgrade)
+---
+
+# Major upgrades with `pg_upgrade`
+
+`pg_upgrade` migrates a PostgreSQL cluster to a new major version in place by
+copying the catalog and the heap relation files it knows about.  OrioleDB,
+however, keeps its table and index data in its own `orioledb_data/` directory
+(plus undo logs in `orioledb_undo/`), which `pg_upgrade` does not touch, and it
+persists some version-specific metadata in its system trees.  Upgrading an
+OrioleDB cluster therefore needs two extra manual steps that the stock
+`pg_upgrade` flow does not perform.
+
+:::note
+Always take a backup before upgrading, and run the steps below against a copy
+first.  Both clusters must be **stopped** during the file copy, and the old
+cluster must have been shut down cleanly (a final checkpoint on a clean
+shutdown means no WAL replay is required for the copied files).
+:::
+
+## Procedure
+
+1. **Stop the old cluster cleanly** and run `pg_upgrade` as usual (including
+   `pg_upgrade --check`).  OrioleDB tables are restored as empty shells at this
+   point — their data still lives in the old cluster's `orioledb_data/`.
+
+2. **Copy the OrioleDB storage** from the old data directory to the new one.
+   `pg_upgrade` preserves database OIDs, relation OIDs and relfilenodes, and
+   OrioleDB names its files by `(datoid, relnode)`, so the old cluster's files
+   are valid as-is in the new cluster:
+
+   ```bash title="bash"
+   rm -rf "$NEW_DATA/orioledb_data" "$NEW_DATA/orioledb_undo"
+   cp -R "$OLD_DATA/orioledb_data" "$NEW_DATA/orioledb_data"
+   [ -d "$OLD_DATA/orioledb_undo" ] && \
+       cp -R "$OLD_DATA/orioledb_undo" "$NEW_DATA/orioledb_undo"
+   ```
+
+3. **Start the new cluster.**  Nothing else is required: OrioleDB rewrites the
+   carried-over index expressions into the new server's format **automatically**,
+   the first time each database is used after the upgrade.
+
+   If you prefer to do it eagerly (for example in a migration script, before
+   opening the database to traffic), you can trigger the same work explicitly
+   **in every database that uses OrioleDB**:
+
+   ```sql title="psql"
+   SELECT orioledb_upgrade_refresh();
+   ```
+
+## How the expression rewrite works
+
+OrioleDB stores index **expressions** and **partial-index predicates** as
+serialized PostgreSQL node trees, and caches version-dependent catalog data
+(such as tuple descriptors and the database locale) in its own system trees, so
+that recovery and background workers can work without access to the catalog.
+Those formats are **not stable across major versions**.  After a cross-major
+upgrade the carried-over node trees were written by the old major and cannot be
+parsed by the new server, and the affected caches are dropped and rebuilt.
+
+The rewrite re-derives the index expressions and predicates from the catalog,
+stores them in the running server's format, and repopulates the caches it
+depends on.  It runs automatically on first use of each database, and
+`orioledb_upgrade_refresh()` performs exactly the same work on demand.  Either
+way it only touches indexes that actually carry node trees (expression and
+partial indexes); plain indexes need no rewriting.  It is safe to run more than
+once and is a no-op when there is nothing to rewrite.
+
+:::note
+The automatic rewrite is triggered by the first statement in a database that
+goes through utility processing (which the tools that connect after an upgrade,
+including `pg_dump`, do at session start).  A session that issues only a bare
+`SELECT` against a not-yet-rewritten **expression** or **partial** index before
+that happens gets a clear error rather than a crash, and can proceed after
+running `orioledb_upgrade_refresh()`:
+
+```
+ERROR:  OrioleDB index "..." has expressions stored by another PostgreSQL major version
+HINT:   Run "SELECT orioledb_upgrade_refresh();" in this database before using the index.
+```
+
+Tables without such indexes are unaffected and remain usable immediately after
+the upgrade.
+:::
