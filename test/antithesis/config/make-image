@@ -31,14 +31,7 @@ done
 mkdir -p target
 config/make-compose "${configs[@]}" >target/docker-compose.yaml
 
-name=""
-for config in "${configs[@]}"; do
-	[[ -n "$name" ]] && name+="_"
-	name+="${config//\//-}"
-done
-
-tag="${IMAGE_TAG}_pg${PG_MAJOR}_odb${ORIOLEDB_REF_TAG}_${name}"
-image="${IMAGE_REPO}orioledb-config:$tag"
+image="$(config/print-config-image "${configs[@]}")"
 
 docker build --platform "linux/amd64" -f config/Dockerfile -t "$image" .
 if [[ "$push" == true ]]; then
