@@ -80,11 +80,23 @@ dump_all() {
             psout=$(ps -o pid,command "$p" 2>/dev/null | tail -n +2)
             [ -z "$psout" ] && continue
             echo "--- pid $psout ---"
+            # Signal mask / pending (SigBlk bit 9 = 0x200 => SIGUSR1 blocked;
+            # SigPnd 0x200 => a SIGUSR1 is pending-but-undelivered).  Cheap and
+            # non-perturbing -- read straight from /proc.
+            grep -E "SigBlk|SigPnd|SigCgt" "/proc/$p/status" 2>/dev/null
             sudo gdb --batch --quiet \
                 -ex "thread apply all bt full" \
                 -ex 'eval "p *((LWLockHandle (*) [%u]) held_lwlocks)", num_held_lwlocks' \
                 -ex 'eval "p *((MyLockedPage (*) [%u]) myLockedPages)", numberOfMyLockedPages' \
                 -ex "source $here/dump_stuck_pages.py" \
+                -ex "print InterruptPending" \
+                -ex "print ProcSignalBarrierPending" \
+                -ex "print InterruptHoldoffCount" \
+                -ex "print CritSectionCount" \
+                -ex "print MyProcSignalSlot" \
+                -ex "print MyProcSignalSlot->pss_barrierGeneration.value" \
+                -ex "print MyProcSignalSlot->pss_barrierCheckMask.value" \
+                -ex "print ProcSignal->psh_barrierGeneration.value" \
                 -ex "quit" \
                 -p "$p" 2>/dev/null
         done

@@ -29,11 +29,18 @@ for round in $(seq 1 "$SNAP_ROUNDS"); do
             psout=$(echo -ne "$psout" | tail +2)
             echo "::group::Backtrace [round $round/$SNAP_ROUNDS] $psout"
             echo -e $psout
+            grep -E "SigBlk|SigPnd|SigCgt" "/proc/$process/status" 2>/dev/null
             sudo gdb --batch --quiet \
                 -ex "thread apply all bt full" \
                 -ex 'eval "p *((LWLockHandle (*) [%u]) held_lwlocks)", num_held_lwlocks' \
                 -ex 'eval "p *((MyLockedPage (*) [%u]) myLockedPages)", numberOfMyLockedPages' \
                 -ex "source $(dirname "$0")/dump_stuck_pages.py" \
+                -ex "print InterruptPending" \
+                -ex "print ProcSignalBarrierPending" \
+                -ex "print InterruptHoldoffCount" \
+                -ex "print CritSectionCount" \
+                -ex "print MyProcSignalSlot->pss_barrierGeneration.value" \
+                -ex "print ProcSignal->psh_barrierGeneration.value" \
                 -ex "quit" \
                 -p $process
             echo ::endgroup::
