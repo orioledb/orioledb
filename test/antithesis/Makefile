@@ -1,5 +1,5 @@
 IMAGE_TAG := $(shell git rev-parse --short HEAD)$(shell git diff-index --quiet HEAD -- || printf '%s' -DIRTY)
-IMAGE_REPO := us-central1-docker.pkg.dev/molten-verve-216720/supabase-repository/
+IMAGE_REPO := $(shell awk -F '"' '/^[[:space:]]*repository[[:space:]]*=/ { sub(/\/+$$/, "", $$2); print $$2 "/"; exit }' .snouty.toml)
 ORIOLEDB_REF ?= main
 ORIOLEDB_REF_TAG := $(subst /,-,$(ORIOLEDB_REF))
 PG_MAJOR ?= 17
