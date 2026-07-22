@@ -25,7 +25,7 @@ fi
 
 # pg_tests run TAP suites (recovery/041, /046, /047, …) that skip without
 # injection-point support, so opt in for that check type.
-if [ $CHECK_TYPE = "pg_tests" ]; then
+if [ $CHECK_TYPE = "pg_tests" ] || [ $CHECK_TYPE = "pg_tests_asan" ]; then
 	CONFIG_ARGS="$CONFIG_ARGS --enable-injection-points"
 fi
 
@@ -51,7 +51,11 @@ fi
 export PATH="$GITHUB_WORKSPACE/pgsql/bin:$PATH"
 
 cd orioledb
-if [ $CHECK_TYPE = "sanitize" ]; then
+if [ $CHECK_TYPE = "sanitize" ] || [ $CHECK_TYPE = "pg_tests_asan" ]; then
+	# pg_tests_asan builds orioledb with ASAN/UBSAN (like sanitize) but runs the
+	# pg_tests churn workload, so the rare memory-corruption bugs the stress hunt
+	# surfaces (descr-invalidation MAXALIGN, iterator ordering) are caught at the
+	# first bad access with a precise alloc/free/access trace.
 	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -fno-omit-frame-pointer -fsanitize=alignment -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fno-sanitize=nonnull-attribute -fstack-protector" LDFLAGS_SL="-lubsan -fsanitize=address -fsanitize=undefined -lasan"
 elif [ $CHECK_TYPE = "check_page" ]; then
 	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -DCHECK_PAGE_STRUCT -DCHECK_PAGE_STATS"

@@ -1,29 +1,65 @@
-pgrep postgres | xargs -r ps
+# Stop the background hang watchdog and surface whatever it captured live
+# (its backtraces are taken *before* the TAP harness tears the nodes down,
+# which is the only way to catch a 027_stream_regress replay-freeze hang).
+pkill -f ci/hang_watchdog.sh 2>/dev/null || true
+if [ -s /tmp/hang_watchdog.log ]; then
+    echo "::group::hang_watchdog.log (live backtraces captured during the run)"
+    cat /tmp/hang_watchdog.log
+    echo "::endgroup::"
+fi
+
+# Take several snapshots a few seconds apart.  A process that is genuinely
+# stuck shows an identical stack (and the same held locks / locked pages)
+# across rounds, while one merely making slow progress moves between rounds --
+# and a wait-for cycle can be confirmed to persist rather than being a
+# one-frame coincidence.  Tunable via env.
+SNAP_ROUNDS="${STUCK_SNAP_ROUNDS:-3}"
+SNAP_INTERVAL="${STUCK_SNAP_INTERVAL:-5}"
+
 pgrep memcheck | xargs -r ps
 pgrep python | xargs -r ps
 
-for process in $(pgrep postgres); do
-    psout=$(ps -o pid,command $process)
-    status=$?
-    if [ $status -eq 0 ]; then
-        psout=$(echo -ne "$psout" | tail +2)
-        echo ::group::Backtrace $psout
-        echo -e $psout
-        sudo gdb --batch --quiet \
-            -ex "thread apply all bt full" \
-            -ex 'eval "p *((LWLockHandle (*) [%u]) held_lwlocks)", num_held_lwlocks' \
-            -ex 'eval "p *((MyLockedPage (*) [%u]) myLockedPages)", numberOfMyLockedPages' \
-            -ex "source $(dirname "$0")/dump_stuck_pages.py" \
-            -ex "quit" \
-            -p $process
-        echo ::endgroup::
-        echo $psout
-        if [[ "$psout" =~ ^.*\ -D\ /tmp/([a-z0-9_]+)/.*$ ]]; then
-            logfile="/tmp/${BASH_REMATCH[1]}/logs/postgresql.log"
-            echo ::group::tail -n 100 $logfile
-            tail -n 100 $logfile
+for round in $(seq 1 "$SNAP_ROUNDS"); do
+    echo "=== stuck-process snapshot round $round/$SNAP_ROUNDS at $(date -u +%H:%M:%S) ==="
+    pgrep postgres | xargs -r ps
+    for process in $(pgrep postgres); do
+        psout=$(ps -o pid,command $process)
+        status=$?
+        if [ $status -eq 0 ]; then
+            psout=$(echo -ne "$psout" | tail +2)
+            echo "::group::Backtrace [round $round/$SNAP_ROUNDS] $psout"
+            echo -e $psout
+            grep -E "SigBlk|SigPnd|SigCgt" "/proc/$process/status" 2>/dev/null
+            sudo gdb --batch --quiet \
+                -ex "thread apply all bt full" \
+                -ex 'eval "p *((LWLockHandle (*) [%u]) held_lwlocks)", num_held_lwlocks' \
+                -ex 'eval "p *((MyLockedPage (*) [%u]) myLockedPages)", numberOfMyLockedPages' \
+                -ex "source $(dirname "$0")/dump_stuck_pages.py" \
+                -ex "print InterruptPending" \
+                -ex "print ProcSignalBarrierPending" \
+                -ex "print InterruptHoldoffCount" \
+                -ex "print CritSectionCount" \
+                -ex "print MyProcSignalSlot->pss_barrierGeneration.value" \
+                -ex "print ProcSignal->psh_barrierGeneration.value" \
+                -ex "quit" \
+                -p $process
             echo ::endgroup::
+            echo $psout
         fi
+    done
+    if [ "$round" -lt "$SNAP_ROUNDS" ]; then
+        sleep "$SNAP_INTERVAL"
+    fi
+done
+
+# Tail each live server's log once, after the snapshots.
+for process in $(pgrep postgres); do
+    psout=$(ps -o pid,command $process 2>/dev/null | tail +2)
+    if [[ "$psout" =~ ^.*\ -D\ /tmp/([a-z0-9_]+)/.*$ ]]; then
+        logfile="/tmp/${BASH_REMATCH[1]}/logs/postgresql.log"
+        echo ::group::tail -n 100 $logfile
+        tail -n 100 $logfile
+        echo ::endgroup::
     fi
 done
 
