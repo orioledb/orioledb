@@ -125,7 +125,33 @@ def dump_page(blkno, seen):
 		steps += 1
 
 
+def dump_held_lwlocks():
+	"""Name the LWLocks this process holds.  A held LWLock keeps
+	InterruptHoldoffCount > 0, which makes ProcessInterrupts() (hence
+	ProcessProcSignalBarrier()) a no-op -- the mechanism behind the
+	recovery-leader self-deadlock in WaitForProcSignalBarrier."""
+	n = safe_eval("num_held_lwlocks")
+	try:
+		n = int(n)
+	except (TypeError, ValueError, gdb.error):
+		return
+	if n <= 0:
+		return
+	print(f"    held_lwlocks: num={n}")
+	for i in range(min(n, 16)):
+		lock = safe_eval(f"held_lwlocks[{i}].lock")
+		mode = safe_eval(f"held_lwlocks[{i}].mode")
+		tr = safe_eval(f"held_lwlocks[{i}].lock->tranche")
+		# tr is a valid registered id for a genuinely held lock, so the
+		# GetLWTrancheName() call is safe.
+		name = "<n/a>"
+		if not isinstance(tr, str):
+			name = safe_eval(f"GetLWTrancheName((int){int(tr)})")
+		print(f"      [{i}] lock={lock} tranche={tr} name={name} mode={mode}")
+
+
 def main():
+	dump_held_lwlocks()
 	seen = set()
 	inferior = gdb.selected_inferior()
 	threads = inferior.threads()
