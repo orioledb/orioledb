@@ -5623,7 +5623,7 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 		if (rerror)
 		{
 			unlock_page(desc->rootInfo.rootPageBlkno);
-			ereport(ERROR, (errcode_for_file_access(),
+			ereport(FATAL, (errcode_for_file_access(),
 							errmsg("could not read rootPageBlkno page from %s: %m",
 								   btree_smgr_filename(desc,
 													   DOWNLINK_GET_DISK_OFF(file_header.rootDownlink),
