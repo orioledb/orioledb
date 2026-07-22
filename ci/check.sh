@@ -64,6 +64,21 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
     # mode to catch the explicit errors.
     echo "orioledb.serializable = 'error'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
 
+    # ci_fixes stress hunt: force very frequent checkpoints/restartpoints so
+    # the checkpoint <-> replay/undo race (the flaky streaming-regress hang)
+    # gets many more chances to trigger.  Scoped to ci_fixes so normal CI is
+    # unaffected.  log_checkpoints gives a timeline if it does hang.
+    if [ "${GITHUB_REF_NAME:-}" = "ci_fixes" ]; then
+        cat >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf <<'CONF'
+checkpoint_timeout = 30s
+max_wal_size = 96MB
+min_wal_size = 48MB
+checkpoint_completion_target = 0.1
+log_checkpoints = on
+log_recovery_conflict_waits = on
+CONF
+    fi
+
     # Start the server
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log start
 
@@ -87,6 +102,17 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         echo "port = 5433" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         echo "primary_conninfo = 'host=/tmp port=5432'" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         echo "allow_in_place_tablespaces = true" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
+        # ci_fixes stress hunt: aggressive restartpoints on the standby too.
+        if [ "${GITHUB_REF_NAME:-}" = "ci_fixes" ]; then
+            cat >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf <<'CONF'
+checkpoint_timeout = 30s
+max_wal_size = 96MB
+min_wal_size = 48MB
+checkpoint_completion_target = 0.1
+log_checkpoints = on
+log_recovery_conflict_waits = on
+CONF
+        fi
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log start
 
         cd src/test/regress

@@ -23,6 +23,8 @@
 
 set -u
 
+export PATH="${GITHUB_WORKSPACE:-}/pgsql/bin:$PATH"
+
 INTERVAL="${WATCHDOG_INTERVAL:-15}"      # seconds between samples
 STUCK_CONSEC="${WATCHDOG_STUCK_CONSEC:-4}"  # unchanged samples -> candidate
 GAP_MIN_SEG="${WATCHDOG_GAP_MIN_SEG:-3}"    # receive must lead replay by >= this many 16MB segments
@@ -55,7 +57,22 @@ recv_seg() {
 
 dump_all() {
     local tag="$1"
-    local r p psout
+    local r p psout port
+    # Wait-event / replication context for the manual primary(5432)+standby(5433).
+    # Best-effort: the 027 TAP nodes use their own sockets and won't answer here,
+    # but their processes are still backtraced below.
+    echo "::group::WATCHDOG $tag replication/activity at $(date -u +%H:%M:%S)"
+    for port in 5432 5433; do
+        echo "--- port $port ---"
+        psql -h /tmp -p "$port" -d postgres -Xtc \
+            "SELECT now(), pg_is_in_recovery(), pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn();" 2>/dev/null \
+            || { echo "(port $port unreachable)"; continue; }
+        psql -h /tmp -p "$port" -d postgres -Xc \
+            "SELECT pid, backend_type, wait_event_type, wait_event, state FROM pg_stat_activity ORDER BY backend_type, pid;" 2>/dev/null
+        psql -h /tmp -p "$port" -d postgres -Xc \
+            "SELECT application_name, state, sent_lsn, flush_lsn, replay_lsn, replay_lag FROM pg_stat_replication;" 2>/dev/null
+    done
+    echo "::endgroup::"
     for r in $(seq 1 "$SNAP_ROUNDS"); do
         echo "::group::WATCHDOG $tag snapshot $r/$SNAP_ROUNDS at $(date -u +%H:%M:%S)"
         pgrep postgres | xargs -r ps -o pid,command
