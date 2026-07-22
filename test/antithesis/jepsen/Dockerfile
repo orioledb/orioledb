@@ -25,10 +25,22 @@ RUN git init \
     && cp target/*-standalone.jar /jepsen-postgres.jar
 
 RUN jlink \
-    --add-modules java.base,java.desktop,java.instrument,java.management,java.naming,java.scripting,java.security.jgss,java.sql,jdk.crypto.ec,jdk.random,jdk.unsupported \
+    --add-modules java.base,java.desktop,java.instrument,java.management,java.naming,java.scripting,java.security.jgss,java.sql,jdk.attach,jdk.crypto.ec,jdk.hotspot.agent,jdk.jcmd,jdk.jdi,jdk.jdwp.agent,jdk.jfr,jdk.random,jdk.unsupported \
     --no-header-files \
     --no-man-pages \
-    --output /opt/java-runtime
+    --output /opt/java-runtime \
+    && for tool in java jcmd jdb jfr jhsdb jinfo jmap jps jstack; do \
+         test -x "/opt/java-runtime/bin/${tool}"; \
+       done
+
+# Retain the exact workload sources without build output so JDB can resolve
+# source locations recorded in the compiled classes.
+FROM build AS debug-source
+RUN rm -rf \
+    /src/sql/.git \
+    /src/sql/target \
+    /src/jepsen-postgres/.git \
+    /src/jepsen-postgres/postgres/target
 
 # END build image
 
@@ -38,9 +50,15 @@ FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
+      binutils \
+      file \
+      gdb \
       git-core \
       gnuplot-nox \
       graphviz \
+      lsof \
+      procps \
+      strace \
     && rm -rf /var/lib/apt/lists/*
 
 ENV JAVA_HOME=/opt/java \
@@ -49,6 +67,13 @@ ENV JAVA_HOME=/opt/java \
 WORKDIR /opt/jepsen
 COPY --from=build /opt/java-runtime /opt/java
 COPY --from=build /jepsen-postgres.jar ./jepsen-postgres.jar
+COPY --from=debug-source /src/sql /src/sql
+COPY --from=debug-source /src/jepsen-postgres /src/jepsen-postgres
+
+RUN set -eux; \
+    for tool in gdb jcmd jdb jfr jhsdb jinfo jmap jps jstack lsof pgrep strace; do \
+      command -v "${tool}"; \
+    done
 
 ENV JEPSEN_WORKLOAD=append \
     JEPSEN_CONCURRENCY=50 \
@@ -61,7 +86,8 @@ ENV JEPSEN_WORKLOAD=append \
     JEPSEN_NODE=localhost \
     JEPSEN_POSTGRES_USER=jepsen \
     JEPSEN_POSTGRES_PASSWORD=pw \
-    JEPSEN_POSTGRES_PORT=5432
+    JEPSEN_POSTGRES_PORT=5432 \
+    JEPSEN_JDWP_PORT=
 
 COPY ./test /opt/antithesis/test
 COPY --chmod=755 entrypoint /usr/local/bin/
