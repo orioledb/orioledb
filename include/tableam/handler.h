@@ -135,6 +135,7 @@ extern void o_stop_saving_inval_messages(bool was_saving);
 extern void o_replay_saved_inval_messages(void);
 extern void init_print_options(BTreePrintOptions *printOptions, VarChar *optionsArg);
 extern void orioledb_free_rd_amcache(Relation rel);
+extern HTAB *oIndexDescrHash;
 extern OTableDescr *relation_get_descr(Relation rel);
 extern void table_descr_inc_refcnt(OTableDescr *descr);
 extern void table_descr_dec_refcnt(OTableDescr *descr);
