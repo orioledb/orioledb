@@ -18,6 +18,10 @@ help:
 config:
 	config/make-compose $(CFG)
 
+.PHONY: config-image # print reified configs
+config-image:
+	@config/print-config-image $(CFG)
+
 .PHONY: build # Build Docker images
 build:
 	config/make-compose $(CFG) | docker compose -f - build

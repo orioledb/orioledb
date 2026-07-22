@@ -49,7 +49,7 @@ These examples assume a working [snouty](https://github.com/antithesishq/snouty)
 #### Jepsen Standalone
 
 ```
-make build push config CFG='workload/jepsen-repeatable-read'
+make build push CFG='workload/jepsen-repeatable-read'
 
 # optional
 snouty validate target/
@@ -57,7 +57,7 @@ snouty validate target/
 # note the config image built above (make build push ...)
 # TODO: add a convenience for this in the Makefile
 snouty launch \
-   --config-image us-central1-docker.pkg.dev/molten-verve-216720/supabase-repository/orioledb-config:6c01d7c2_pg17_odbmain_workload-jepsen-repeatable-read \
+  --config-image "$(make config-image CFG='workload/jepsen-repeatable-read')"
   --test-name 'orioledb_jepsen' \
   --description 'pg17_odbmain_workload-jepsen-repeatable-read fixed health checker' \
   --duration 20m \
@@ -68,13 +68,14 @@ snouty launch \
 #### sk-recovery-race[-chaos]
 
 ```
-make build push CFG='workload/sk-recovery-race' PG_MAJOR=18
+# ref before fix
+make build push CFG='workload/sk-recovery-race' PG_MAJOR=18 ORIOLEDB_REF=ce4681c77e3a0b8e67f900704bb598838837171e
 
 # optional
 snouty validate target/
 
 snouty launch \
-  --config-image us-central1-docker.pkg.dev/molten-verve-216720/supabase-repository/orioledb-config:15a774fa_pg18_odbmain_workload-sk-recovery-race-chaos \
+  --config-image "$(make config-image CFG='workload/sk-recovery-race' PG_MAJOR=18 ORIOLEDB_REF=ce4681c77e3a0b8e67f900704bb598838837171e)" \
   --test-name 'sk-recovery-race' \
   --description 'sk-recovery-race trial' \
   --duration 20m \
