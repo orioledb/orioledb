@@ -446,6 +446,47 @@ if db_exists $PORT_NEW regression; then
 fi
 
 # ----------------------------------------------------------------------
+# 7c. Exercise the catalog-free paths that actually crash if the cross-major
+#     cache handling regresses.  A foreground query alone would not: the
+#     checkpointer and crash recovery read OrioleDB's version-dependent caches
+#     (class cache tuple descriptors, database-cache locale) WITHOUT a catalog,
+#     via the syscache hook, and that is exactly where a carried-over
+#     old-major entry blows up.  So drive both explicitly on $TEST_DB (it has
+#     an expression + partial index, whose descriptor fill reads those caches):
+#
+#       1. CHECKPOINT   -> checkpointer fills index descriptors.
+#       2. INSERT into the expression-index table, then crash (-m immediate)
+#          and restart -> recovery must REPLAY that insert, rebuilding the
+#          expression-index tuple (reading the class + database caches) with no
+#          catalog of its own.  This is the scenario that asserted in
+#          o_class_cache_deserialize_entry / "default locale not initialized"
+#          before the fix.
+#
+#     Cross-major only; a same-version upgrade carries compatible caches.
+# ----------------------------------------------------------------------
+if [ "$OLD_VERSION" != "$NEW_VERSION" ] && db_exists $PORT_NEW "$TEST_DB"; then
+	"$NEW_PREFIX/bin/psql" -p $PORT_NEW -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
+CHECKPOINT;
+INSERT INTO numbers SELECT i, 'v_' || i FROM generate_series(1000001, 1000050) i;
+SQL
+	# Crash without a clean shutdown so recovery has to replay the insert.
+	"$NEW_PREFIX/bin/pg_ctl" -D "$NEW_DATA" -m immediate stop
+	"$NEW_PREFIX/bin/pg_ctl" -D "$NEW_DATA" \
+		-o "-p $PORT_NEW" -l "$GITHUB_WORKSPACE/pg${NEW_VERSION}.log" -w start
+	if ! db_exists $PORT_NEW "$TEST_DB"; then
+		echo "ERROR: server did not come up after crash recovery of an expression-index insert"
+		exit 1
+	fi
+	rowcount=$("$NEW_PREFIX/bin/psql" -p $PORT_NEW -d "$TEST_DB" -tAc \
+		"SELECT count(*) FROM numbers WHERE (val || '_x') = 'v_1000001_x'")
+	if [ "$rowcount" != "1" ]; then
+		echo "ERROR: expression index wrong after crash recovery (got '$rowcount', want 1)"
+		exit 1
+	fi
+	echo "OK: checkpoint + crash recovery of an expression-index insert survived"
+fi
+
+# ----------------------------------------------------------------------
 # 8. Dump the post-upgrade state.  This must happen before step 10's
 #    regression run, which drops and recreates the regression database.
 # ----------------------------------------------------------------------
