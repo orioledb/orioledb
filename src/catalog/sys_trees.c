@@ -769,7 +769,17 @@ sys_tree_init_if_needed(int i)
 static bool
 sys_tree_reset_on_major_upgrade(int tree_num)
 {
-	return tree_num == SYS_TREES_DATABASE_CACHE;
+	/*
+	 * The class cache stores tuple descriptors as raw FormData_pg_attribute
+	 * arrays, whose element size changes across PG majors, so a carried-over
+	 * entry fails o_class_cache_deserialize_entry's length check.  It is only
+	 * ever read in catalog-free contexts (recovery, checkpointer) via the
+	 * syscache hook, and always for system catalogs, so dropping it lets
+	 * o_class_cache_fill_entry rebuild each entry from the relcache in the
+	 * running server's format -- safe in every backend.
+	 */
+	return tree_num == SYS_TREES_DATABASE_CACHE ||
+		tree_num == SYS_TREES_CLASS_CACHE;
 }
 
 /*

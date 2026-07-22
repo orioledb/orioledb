@@ -674,6 +674,19 @@ o_table_refresh_index_exprs(OTable *o_table, OIndexNumber ix_num,
 									 expression_planner(e));
 	}
 
+	/*
+	 * Repopulate the sys caches these expressions/predicates reference
+	 * (types, operators, procedures, ...).  This runs in a normal
+	 * transaction, so the class cache -- dropped by the cross-major reset
+	 * because its FormData_pg_attribute layout is version-dependent -- is
+	 * refilled from the relcache in the running server's format.  Recovery
+	 * and the checkpointer later read these entries via the syscache hook
+	 * without a catalog of their own, so they must be present and
+	 * current-format before then.
+	 */
+	o_collect_funcexpr((Node *) index->predicate);
+	o_collect_funcexpr((Node *) index->expressions);
+
 	MemoryContextSwitchTo(old_mcxt);
 	return true;
 }

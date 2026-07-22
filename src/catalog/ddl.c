@@ -5319,6 +5319,24 @@ orioledb_upgrade_refresh(PG_FUNCTION_ARGS)
 	List	   *reloids = NIL;
 	ListCell   *lc;
 
+	/*
+	 * The database cache was dropped by the cross-major reset (its locale
+	 * fields have a version-dependent on-disk layout).  Repopulate it now, in
+	 * this normal transaction, so recovery and the checkpointer can set up
+	 * the default collation from it
+	 * (o_database_cache_set_default_locale_provider) -- they have no catalog
+	 * of their own and cannot rebuild it.
+	 */
+#if PG_VERSION_NUM >= 170000
+	{
+		XLogRecPtr	cur_lsn;
+
+		o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
+		o_database_cache_add_if_needed(Template1DbOid, Template1DbOid, cur_lsn,
+									   NULL);
+	}
+#endif
+
 	/* Collect the orioledb table OIDs first; refresh outside the scan. */
 	pgclass = table_open(RelationRelationId, AccessShareLock);
 	scan = systable_beginscan(pgclass, InvalidOid, false, NULL, 0, NULL);
