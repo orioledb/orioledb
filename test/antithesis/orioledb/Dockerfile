@@ -180,6 +180,16 @@ RUN set -eux; \
 	postgres --version; \
 	initdb --version
 
+# Keep an exact, source-only copy at the paths recorded in the binaries' DWARF
+# data.  This stage can be cleaned without affecting the installed artifacts
+# copied from builder below.
+FROM builder AS debug-source
+
+RUN set -eux; \
+	cd /usr/src/postgresql; \
+	make distclean; \
+	rm -rf /usr/src/postgresql/contrib/orioledb/.git
+
 # END Build Image
 
 # BEGIN sim image
@@ -200,9 +210,16 @@ RUN set -eux; \
 RUN set -eux; \
 	apt-get update; \
 	DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+		binutils \
 		ca-certificates \
+		file \
+		gdb \
 		gnupg \
+		libc6-dbg \
 		locales \
+		lsof \
+		procps \
+		strace \
 		tzdata \
 		\
 		# Ensures compatibility with the official PostgreSQL Docker image
@@ -251,9 +268,16 @@ RUN set -eux; \
 	gosu nobody true
 
 COPY --from=builder /usr/local /usr/local
+COPY --from=debug-source /usr/src/postgresql /usr/src/postgresql
 
 RUN set -eux; \
 	ldconfig; \
+	command -v gdb; \
+	command -v lsof; \
+	command -v pgrep; \
+	command -v strace; \
+	readelf --sections --wide /usr/local/bin/postgres | grep -q '[.]debug_info'; \
+	readelf --sections --wide /usr/local/lib/postgresql/orioledb.so | grep -q '[.]debug_info'; \
 	mkdir -p \
 		/etc/postgresql \
 		/var/run/postgresql \
