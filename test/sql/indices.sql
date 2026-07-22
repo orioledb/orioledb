@@ -2242,6 +2242,85 @@ RESET enable_seqscan;
 RESET enable_bitmapscan;
 RESET enable_indexscan;
 
+-- amnblocks: INSERT -> CREATE INDEX (no ANALYZE)
+CREATE TABLE o_test_amnblocks1 (
+	id int8 NOT NULL PRIMARY KEY,
+	k int8 NOT NULL,
+	c char(120) NOT NULL DEFAULT '',
+	pad char(60) NOT NULL DEFAULT ''
+) USING orioledb;
+INSERT INTO o_test_amnblocks1 SELECT i, i, '', '' FROM generate_series(1, 10000) i;
+CREATE INDEX o_test_amnblocks1_k ON o_test_amnblocks1(k);
+SET enable_seqscan = off;
+EXPLAIN (COSTS off)
+	SELECT k FROM o_test_amnblocks1
+		WHERE k IN (1000, 2000, 3000, 4000, 5000,
+					6000, 7000, 8000, 9000, 10000);
+SELECT relpages > 0 AS idx_pages_ok FROM pg_class
+	WHERE relname = 'o_test_amnblocks1_k';
+RESET enable_seqscan;
+DROP TABLE o_test_amnblocks1;
+
+-- amnblocks: INSERT -> CREATE INDEX -> ANALYZE
+CREATE TABLE o_test_amnblocks2 (
+	id int8 NOT NULL PRIMARY KEY,
+	k int8 NOT NULL,
+	c char(120) NOT NULL DEFAULT '',
+	pad char(60) NOT NULL DEFAULT ''
+) USING orioledb;
+INSERT INTO o_test_amnblocks2 SELECT i, i, '', '' FROM generate_series(1, 10000) i;
+CREATE INDEX o_test_amnblocks2_k ON o_test_amnblocks2(k);
+ANALYZE o_test_amnblocks2;
+SET enable_seqscan = off;
+EXPLAIN (COSTS off)
+	SELECT k FROM o_test_amnblocks2
+		WHERE k IN (1000, 2000, 3000, 4000, 5000,
+					6000, 7000, 8000, 9000, 10000);
+SELECT relpages > 0 AS idx_pages_ok FROM pg_class
+	WHERE relname = 'o_test_amnblocks2_k';
+RESET enable_seqscan;
+DROP TABLE o_test_amnblocks2;
+
+-- amnblocks: CREATE INDEX -> INSERT -> ANALYZE
+CREATE TABLE o_test_amnblocks3 (
+	id int8 NOT NULL PRIMARY KEY,
+	k int8 NOT NULL,
+	c char(120) NOT NULL DEFAULT '',
+	pad char(60) NOT NULL DEFAULT ''
+) USING orioledb;
+CREATE INDEX o_test_amnblocks3_k ON o_test_amnblocks3(k);
+INSERT INTO o_test_amnblocks3 SELECT i, i, '', '' FROM generate_series(1, 10000) i;
+ANALYZE o_test_amnblocks3;
+SET enable_seqscan = off;
+EXPLAIN (COSTS off)
+	SELECT k FROM o_test_amnblocks3
+		WHERE k IN (1000, 2000, 3000, 4000, 5000,
+					6000, 7000, 8000, 9000, 10000);
+SELECT relpages > 0 AS idx_pages_ok FROM pg_class
+	WHERE relname = 'o_test_amnblocks3_k';
+RESET enable_seqscan;
+DROP TABLE o_test_amnblocks3;
+
+-- amnblocks: VACUUM ANALYZE updates pg_class.relpages
+CREATE TABLE o_test_amnblocks4 (
+	id int8 NOT NULL PRIMARY KEY,
+	k int8 NOT NULL,
+	c char(120) NOT NULL DEFAULT '',
+	pad char(60) NOT NULL DEFAULT ''
+) USING orioledb;
+CREATE INDEX o_test_amnblocks4_k ON o_test_amnblocks4(k);
+INSERT INTO o_test_amnblocks4 SELECT i, i, '', '' FROM generate_series(1, 10000) i;
+VACUUM ANALYZE o_test_amnblocks4;
+SET enable_seqscan = off;
+EXPLAIN (COSTS off)
+	SELECT k FROM o_test_amnblocks4
+		WHERE k IN (1000, 2000, 3000, 4000, 5000,
+					6000, 7000, 8000, 9000, 10000);
+SELECT relpages > 0 AS idx_pages_ok FROM pg_class
+	WHERE relname = 'o_test_amnblocks4_k';
+RESET enable_seqscan;
+DROP TABLE o_test_amnblocks4;
+
 -- Skip scan tests below exercise PG18's _bt_preprocess_keys synthesizing a
 -- skip array on the leading column.  On PG16/PG17 there are no skip arrays;
 -- skip the whole block instead of maintaining version-specific expected
