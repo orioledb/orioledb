@@ -111,6 +111,11 @@ make down # [CFG='...']
 
 - [Docker](https://www.docker.com/) for building images, running workloads locally
 - [mise](https://mise.jdx.dev/) (optional) installs snouty and other dev-local tools
+- [snouty](https://github.com/antithesishq/snouty)
+    - mise installs snouty
+    - `.snouty.toml` has tenant coordinates
+    - You need to define the `ANTITHESIS_API_KEY` env var
+    - run `snouty doctor` if you have any errors executing snouty
 
 # Appendix
 

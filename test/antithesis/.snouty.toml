@@ -1,0 +1,3 @@
+# config for https://github.com/antithesishq/snouty
+tenant = "supabase"
+repository = "us-central1-docker.pkg.dev/molten-verve-216720/supabase-repository"
