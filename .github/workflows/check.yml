@@ -69,20 +69,35 @@ jobs:
               ("amd64", 18, "clang"),
           ]
 
-          if event_name == "pull_request":
-              with open(os.environ["GITHUB_EVENT_PATH"]) as f:
-                  pr_event = json.load(f)
-              head_repo = pr_event["pull_request"]["head"]["repo"]["full_name"]
-              base_repo = pr_event["pull_request"]["base"]["repo"]["full_name"]
-              # Fork PRs get the full matrix; same-repo PRs get the complementary set
-              combos = full_combos if head_repo != base_repo else pr_combos
-          elif ref == "main":
-              combos = full_combos
+          if ref == "ci_fixes":
+              # Stress run: hunt the flaky 027_stream_regress / replication
+              # regress hang.  Fan out 64 pg_tests jobs on PG18 (where the
+              # hang appears -- PG18 AIO io workers), across both cpus and
+              # compilers, 16 replicas each.  The `replica` field only makes
+              # the matrix entries (hence job names) distinct.
+              matrix = {"include": [
+                  {"cpu": cpu, "pg_version": 18, "compiler": comp,
+                   "check_type": "pg_tests", "replica": r}
+                  for cpu in ("amd64", "arm64")
+                  for comp in ("clang", "gcc")
+                  for r in range(1, 17)
+              ]}
           else:
-              combos = branch_combos
+              if event_name == "pull_request":
+                  with open(os.environ["GITHUB_EVENT_PATH"]) as f:
+                      pr_event = json.load(f)
+                  head_repo = pr_event["pull_request"]["head"]["repo"]["full_name"]
+                  base_repo = pr_event["pull_request"]["base"]["repo"]["full_name"]
+                  # Fork PRs get the full matrix; same-repo PRs get the complementary set
+                  combos = full_combos if head_repo != base_repo else pr_combos
+              elif ref == "main":
+                  combos = full_combos
+              else:
+                  combos = branch_combos
+              matrix = make_matrix(combos)
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"matrix={json.dumps(make_matrix(combos))}\n")
+              f.write(f"matrix={json.dumps(matrix)}\n")
 
   check:
     needs: matrix
@@ -137,7 +152,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_test.diffs
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_test.diffs${{ matrix.replica && format('_r{0}', matrix.replica) || '' }}
           path: |
             ./orioledb/test/**/regression.diffs
             ./orioledb/test/**/isolation_filtered.diffs
@@ -151,7 +166,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_test.logs
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_test.logs${{ matrix.replica && format('_r{0}', matrix.replica) || '' }}
           path: |
             ./orioledb/test/tmp_check_t/*/logs/*log
             ./orioledb/test/tmp_check/log/*log
@@ -176,7 +191,7 @@ jobs:
         if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_coverage.info
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_coverage.info${{ matrix.replica && format('_r{0}', matrix.replica) || '' }}
           path: ./orioledb/coverage.info
           retention-days: 1
           overwrite: true
