@@ -130,7 +130,7 @@ struct OComparator
 };
 
 static HTAB *oTableDescrHash;
-static HTAB *oIndexDescrHash;
+HTAB	   *oIndexDescrHash;
 static HTAB *comparatorCache;
 static HTAB *exclusionFnCache;
 static HTAB *hashFnCache;
@@ -738,6 +738,8 @@ table_descr_free(OTableDescr *descr)
 					index_descr_delete_from_hash(descr->indices[i]);
 			}
 		pfree(descr->indices);
+		descr->indices = NULL;
+		descr->nIndices = 0;
 	}
 
 	if (descr->oldTuple)

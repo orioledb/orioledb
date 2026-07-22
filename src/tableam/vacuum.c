@@ -257,8 +257,8 @@ vac_open_bridged_indexes(Relation relation, LOCKMODE lockmode,
 	 * parallel_vacuum_main(), so a different index count between leader and
 	 * worker would mis-index the shared PVIndStats array.
 	 *
-	 * orioledb_ambulkdelete() / orioledb_amvacuumcleanup() are no-ops for
-	 * orioledb-managed indexes.
+	 * orioledb_ambulkdelete() is a no-op for orioledb-managed indexes;
+	 * orioledb_amvacuumcleanup() reports page/tuple counts for pg_class.
 	 */
 	i = 0;
 	foreach(indexoidscan, indexoidlist)
