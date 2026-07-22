@@ -45,7 +45,18 @@ elif [ $CHECK_TYPE = "sanitize" ]; then
 	END
 	) \
 		make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?
-elif [ $CHECK_TYPE = "pg_tests" ]; then
+elif [ $CHECK_TYPE = "pg_tests" ] || [ $CHECK_TYPE = "pg_tests_asan" ]; then
+    # pg_tests_asan runs the identical pg_tests churn workload, but against the
+    # ASAN/UBSAN-instrumented orioledb build.  Export the sanitizer options so
+    # every child -- the pg_ctl-started server AND the 027_stream_regress TAP
+    # clusters it forks -- inherits them and writes asan.log/ubsan.log that
+    # check_output.sh already surfaces.
+    if [ $CHECK_TYPE = "pg_tests_asan" ]; then
+        if [ $COMPILER = "clang" ]; then FAKE_STACK=1; else FAKE_STACK=0; fi
+        export UBSAN_OPTIONS="log_path=$PWD/ubsan.log"
+        export ASAN_OPTIONS="verify_asan_link_order=0:detect_stack_use_after_return=$FAKE_STACK:detect_leaks=0:abort_on_error=1:disable_coredump=0:strict_string_checks=1:check_initialization_order=1:strict_init_order=1:detect_odr_violation=0:log_path=$PWD/asan.log:max_uar_stack_size_log=25"
+    fi
+
     cd ../postgresql
     cat src/test/regress/parallel_schedule | sed "s/indirect_toast//" >$GITHUB_WORKSPACE/parallel_schedule_no_segfaults
 
@@ -64,6 +75,21 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
     # We don't support SSI.  Run regression/isolation tests with in 'error'
     # mode to catch the explicit errors.
     echo "orioledb.serializable = 'error'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
+
+    # ci_fixes stress hunt: force very frequent checkpoints/restartpoints so
+    # the checkpoint <-> replay/undo race (the flaky streaming-regress hang)
+    # gets many more chances to trigger.  Scoped to ci_fixes so normal CI is
+    # unaffected.  log_checkpoints gives a timeline if it does hang.
+    if [ "${GITHUB_REF_NAME:-}" = "ci_fixes" ]; then
+        cat >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf <<'CONF'
+checkpoint_timeout = 30s
+max_wal_size = 96MB
+min_wal_size = 48MB
+checkpoint_completion_target = 0.1
+log_checkpoints = on
+log_recovery_conflict_waits = on
+CONF
+    fi
 
     # Start the server
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log start
@@ -88,7 +114,37 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         echo "port = 5433" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         echo "primary_conninfo = 'host=/tmp port=5432'" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         echo "allow_in_place_tablespaces = true" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
+        # ci_fixes stress hunt: aggressive restartpoints on the standby too.
+        if [ "${GITHUB_REF_NAME:-}" = "ci_fixes" ]; then
+            cat >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf <<'CONF'
+checkpoint_timeout = 30s
+max_wal_size = 96MB
+min_wal_size = 48MB
+checkpoint_completion_target = 0.1
+log_checkpoints = on
+log_recovery_conflict_waits = on
+CONF
+        fi
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log start
+
+        # ci_fixes stress hunt: hammer the exact trigger of the standby
+        # replay self-deadlock -- XLOG_DBASE_DROP redo emits a
+        # PROCSIGNAL_BARRIER_SMGRRELEASE on the standby (dbase_redo).  Churn
+        # create/drop database on the primary in the background so many such
+        # barrier records stream to the (catchable) manual standby while the
+        # regress workload runs, raising the odds of hitting the flaky hang.
+        if [ "${GITHUB_REF_NAME:-}" = "ci_fixes" ]; then
+            (
+                i=0
+                while [ $i -lt 800 ]; do
+                    i=$((i + 1))
+                    createdb -p 5432 "dbchurn$i" >/dev/null 2>&1 || continue
+                    dropdb -p 5432 "dbchurn$i" >/dev/null 2>&1 || true
+                done
+            ) &
+            DBCHURN_PID=$!
+            echo "started create/drop-database churn (pid $DBCHURN_PID)"
+        fi
 
         cd src/test/regress
         make installcheck-tests EXTRA_REGRESS_OPTS="--load-extension=orioledb --schedule=$GITHUB_WORKSPACE/parallel_schedule_no_segfaults" TESTS="" -j $(nproc) || true
