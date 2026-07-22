@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
+import glob
 import os
 import re
+import time
 
 from .base_test import BaseTest
 
@@ -59,3 +61,59 @@ class FileOperationsTest(BaseTest):
 
 	def getOrioleDBDir(self):
 		return self.node.data_dir + "/orioledb_data"
+
+	def test_checkpoint_fatal_on_corrupted_tree(self):
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', """
+			orioledb.main_buffers = 8MB
+			orioledb.debug_disable_bgwriter = true
+		""")
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE o_corrupt (
+				k int PRIMARY KEY,
+				v text NOT NULL
+			) USING orioledb;
+			INSERT INTO o_corrupt
+				SELECT i, repeat('x', 200) FROM generate_series(1, 5000) i;
+			CHECKPOINT;
+		""")
+
+		datoid = node.execute(
+		    'postgres',
+		    "SELECT oid FROM pg_database WHERE datname='postgres';")[0][0]
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT orioledb_evict_pages('o_corrupt'::regclass, 99);")
+
+		datoid_dir = os.path.join(node.data_dir, 'orioledb_data', str(datoid))
+		for f in glob.glob(os.path.join(datoid_dir, '*')):
+			if not f.endswith('.map'):
+				with open(f, 'r+b') as fh:
+					fh.truncate(0)
+
+		# Without the fix the checkpointer gets ERROR and either hits an
+		# Assert (debug builds) or silently skips the corrupted tree on
+		# subsequent checkpoints (release builds). With the fix it FATALs
+		# immediately and shuts down the cluster cleanly.
+		try:
+			node.safe_psql('postgres', "CHECKPOINT;")
+		except Exception:
+			pass
+
+		for _ in range(10):
+			if node.status() != NodeStatus.Running:
+				break
+			time.sleep(1)
+
+		self.assertEqual(node.status(), NodeStatus.Stopped)
+
+		with open(os.path.join(node.logs_dir, 'postgresql.log')) as f:
+			log = f.read()
+			self.assertIn("could not read rootPageBlkno page from", log)
+			# With the fix the shutdown is FATAL, not an Assert crash.
+			self.assertNotIn("TRAP", log)

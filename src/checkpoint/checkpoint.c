@@ -5628,13 +5628,13 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 		{
 			unlock_page(desc->rootInfo.rootPageBlkno);
 			if (read_result == OReadPageResultChecksumFailed)
-				ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-								errmsg("invalid rootPageBlkno page in %s",
+				ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
+								errmsg("invalid rootPageBlkno page in %s: %m",
 									   btree_smgr_filename(desc,
 														   DOWNLINK_GET_DISK_OFF(file_header.rootDownlink),
 														   chkp_num))));
 			else
-				ereport(ERROR, (errcode_for_file_access(),
+				ereport(FATAL, (errcode_for_file_access(),
 								errmsg("could not read rootPageBlkno page from %s: %m",
 									   btree_smgr_filename(desc,
 														   DOWNLINK_GET_DISK_OFF(file_header.rootDownlink),
