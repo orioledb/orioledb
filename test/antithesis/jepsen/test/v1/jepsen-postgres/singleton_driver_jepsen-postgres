@@ -1,15 +1,28 @@
 #!/bin/sh
 set -eu
 
-status=0
+jdwp_option=
+if [ -n "${JEPSEN_JDWP_PORT:-}" ]; then
+	case "$JEPSEN_JDWP_PORT" in
+	*[!0-9]*)
+		echo "JEPSEN_JDWP_PORT must be a number" >&2
+		exit 2
+		;;
+	esac
+	if [ "$JEPSEN_JDWP_PORT" -lt 1 ] || [ "$JEPSEN_JDWP_PORT" -gt 65535 ]; then
+		echo "JEPSEN_JDWP_PORT must be between 1 and 65535" >&2
+		exit 2
+	fi
+	jdwp_option="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:${JEPSEN_JDWP_PORT}"
+fi
 
 (
-	#if [ -n "${ANTITHESIS_OUTPUT_DIR:-}" ] && [ -n "${JEPSEN_SUPPRESS_STDOUT:-}" ]; then
 	if [ -n "${JEPSEN_SUPPRESS_STDOUT:-}" ]; then
 		exec >/dev/null
 	fi
 
 	java \
+		${jdwp_option:+"$jdwp_option"} \
 		-Djava.awt.headless=true \
 		-server \
 		-jar /opt/jepsen/jepsen-postgres.jar \
@@ -30,10 +43,4 @@ status=0
 		--postgres-password "$JEPSEN_POSTGRES_PASSWORD" \
 		--postgres-port "$JEPSEN_POSTGRES_PORT" \
 		"$@"
-) || status=$?
-
-if [ -n "${ANTITHESIS_OUTPUT_DIR:-}" ] && [ -d store ]; then
-	cp -R store "$ANTITHESIS_OUTPUT_DIR/"
-fi
-
-exit "$status"
+)
