@@ -24,15 +24,34 @@
 set -u
 
 INTERVAL="${WATCHDOG_INTERVAL:-15}"      # seconds between samples
-STUCK_CONSEC="${WATCHDOG_STUCK_CONSEC:-3}"  # unchanged samples -> "stuck"
+STUCK_CONSEC="${WATCHDOG_STUCK_CONSEC:-4}"  # unchanged samples -> candidate
+GAP_MIN_SEG="${WATCHDOG_GAP_MIN_SEG:-3}"    # receive must lead replay by >= this many 16MB segments
 SNAP_ROUNDS="${WATCHDOG_SNAP_ROUNDS:-3}"    # backtrace snapshots per dump
 SNAP_INTERVAL="${WATCHDOG_SNAP_INTERVAL:-4}"
 MAX_DUMPS="${WATCHDOG_MAX_DUMPS:-3}"        # stop after this many dumps
 
 here="$(dirname "$0")"
-prev_sig=""
+prev_replay=""
 same=0
 dumps=0
+
+# Absolute 16MB-segment number of the most-behind standby's replay position,
+# parsed from "startup recovering <24-hex WAL filename>" (logid*256 + seg).
+replay_seg() {
+    pgrep -a postgres 2>/dev/null \
+        | grep -oE "recovering [0-9A-F]{24}" | awk '{print $2}' \
+        | while read -r w; do echo $(( 16#${w:8:8} * 256 + 16#${w:16:8} )); done \
+        | sort -n | head -1
+}
+
+# Absolute 16MB-segment number of the furthest-ahead streamed position, parsed
+# from "streaming <hi>/<lo>" of any walsender/walreceiver (hi*256 + lo/16MB).
+recv_seg() {
+    pgrep -a postgres 2>/dev/null \
+        | grep -oE "streaming [0-9A-F]+/[0-9A-F]+" | awk '{print $2}' \
+        | while read -r l; do echo $(( 16#${l%/*} * 256 + 16#${l#*/} / 16777216 )); done \
+        | sort -n | tail -1
+}
 
 dump_all() {
     local tag="$1"
@@ -62,33 +81,41 @@ echo "hang_watchdog: started (interval=${INTERVAL}s, stuck after ${STUCK_CONSEC}
 while [ "$dumps" -lt "$MAX_DUMPS" ]; do
     sleep "$INTERVAL"
 
-    # Coarse replay position(s) and whether a walreceiver is streaming.
-    sig=$(pgrep -a postgres 2>/dev/null \
-          | grep -oE "startup recovering [0-9A-F]+" | sort -u | tr '\n' '|')
+    rseg=$(replay_seg)
     wr=$(pgrep -a postgres 2>/dev/null | grep -c "walreceiver")
 
-    if [ -z "$sig" ] || [ "$wr" -eq 0 ]; then
+    if [ -z "$rseg" ] || [ "$wr" -eq 0 ]; then
         # No standby in recovery right now.
-        prev_sig=""; same=0
+        prev_replay=""; same=0
         continue
     fi
 
-    if [ "$sig" = "$prev_sig" ]; then
+    # Count how long replay has sat at the same segment.
+    if [ "$rseg" = "$prev_replay" ]; then
         same=$((same + 1))
     else
         same=1
-        prev_sig="$sig"
+        prev_replay="$rseg"
     fi
 
-    if [ "$same" -ge "$STUCK_CONSEC" ]; then
-        echo "hang_watchdog: standby replay STUCK for $((same * INTERVAL))s" \
-             "(recovering '${sig}', walreceiver up) -- dumping backtraces"
-        # Show the receive-vs-replay gap straight from ps titles.
-        pgrep -a postgres 2>/dev/null | grep -E "startup recovering|walreceiver|walsender" || true
-        dump_all "stuck-replay"
-        dumps=$((dumps + 1))
-        same=0   # require a fresh stuck streak before dumping again
+    [ "$same" -lt "$STUCK_CONSEC" ] && continue
+
+    # Frozen long enough -- but only a hang if the receive side is far ahead of
+    # the frozen replay (the real signature: flush hundreds of MB past replay).
+    # A benign quiet spell has receive ~= replay (small gap) -> skip.
+    vseg=$(recv_seg)
+    [ -z "$vseg" ] && continue
+    gap=$(( vseg - rseg ))
+    if [ "$gap" -lt "$GAP_MIN_SEG" ]; then
+        continue
     fi
+
+    echo "hang_watchdog: standby replay STUCK for $((same * INTERVAL))s at" \
+         "segment $rseg while receive reached $vseg (gap ${gap} x16MB) -- dumping backtraces"
+    pgrep -a postgres 2>/dev/null | grep -E "startup recovering|walreceiver|walsender" || true
+    dump_all "stuck-replay"
+    dumps=$((dumps + 1))
+    same=0   # require a fresh stuck streak before dumping again
 done
 
 echo "hang_watchdog: reached MAX_DUMPS=${MAX_DUMPS}, exiting"
