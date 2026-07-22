@@ -1,3 +1,13 @@
+# Stop the background hang watchdog and surface whatever it captured live
+# (its backtraces are taken *before* the TAP harness tears the nodes down,
+# which is the only way to catch a 027_stream_regress replay-freeze hang).
+pkill -f ci/hang_watchdog.sh 2>/dev/null || true
+if [ -s /tmp/hang_watchdog.log ]; then
+    echo "::group::hang_watchdog.log (live backtraces captured during the run)"
+    cat /tmp/hang_watchdog.log
+    echo "::endgroup::"
+fi
+
 # Take several snapshots a few seconds apart.  A process that is genuinely
 # stuck shows an identical stack (and the same held locks / locked pages)
 # across rounds, while one merely making slow progress moves between rounds --

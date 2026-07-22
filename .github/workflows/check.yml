@@ -140,6 +140,13 @@ jobs:
       - name: Install post build prerequisites
         run: bash ./orioledb/ci/post_build_prerequisites.sh
 
+      - name: Start hang watchdog
+        if: ${{ matrix.check_type == 'pg_tests' }}
+        run: |
+          nohup bash ./orioledb/ci/hang_watchdog.sh > /tmp/hang_watchdog.log 2>&1 &
+          disown || true
+          echo "hang watchdog launched (pid $!)"
+
       - name: Check
         timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 150 || (matrix.check_type == 'dm_log_writes' && 60 || (matrix.check_type == 'sanitize' && 40 || 30)) }}
         run: bash ./orioledb/ci/check.sh
