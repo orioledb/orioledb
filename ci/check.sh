@@ -115,6 +115,25 @@ CONF
         fi
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log start
 
+        # ci_fixes stress hunt: hammer the exact trigger of the standby
+        # replay self-deadlock -- XLOG_DBASE_DROP redo emits a
+        # PROCSIGNAL_BARRIER_SMGRRELEASE on the standby (dbase_redo).  Churn
+        # create/drop database on the primary in the background so many such
+        # barrier records stream to the (catchable) manual standby while the
+        # regress workload runs, raising the odds of hitting the flaky hang.
+        if [ "${GITHUB_REF_NAME:-}" = "ci_fixes" ]; then
+            (
+                i=0
+                while [ $i -lt 800 ]; do
+                    i=$((i + 1))
+                    createdb -p 5432 "dbchurn$i" >/dev/null 2>&1 || continue
+                    dropdb -p 5432 "dbchurn$i" >/dev/null 2>&1 || true
+                done
+            ) &
+            DBCHURN_PID=$!
+            echo "started create/drop-database churn (pid $DBCHURN_PID)"
+        fi
+
         cd src/test/regress
         make installcheck-tests EXTRA_REGRESS_OPTS="--load-extension=orioledb --schedule=$GITHUB_WORKSPACE/parallel_schedule_no_segfaults" TESTS="" -j $(nproc) || true
         cd ../../..
