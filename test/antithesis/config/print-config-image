@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+name=""
+for config in "$@"; do
+	[[ -n "$name" ]] && name+="_"
+	name+="${config//\//-}"
+done
+
+tag="${IMAGE_TAG}_pg${PG_MAJOR}_odb${ORIOLEDB_REF_TAG}_${name}"
+image="${IMAGE_REPO}orioledb-config:$tag"
+printf '%s\n' "$image"
