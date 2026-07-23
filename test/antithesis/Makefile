@@ -3,8 +3,9 @@ IMAGE_REPO := $(shell awk -F '"' '/^[[:space:]]*repository[[:space:]]*=/ { sub(/
 ORIOLEDB_REF ?= main
 ORIOLEDB_REF_TAG := $(subst /,-,$(ORIOLEDB_REF))
 PG_MAJOR ?= 17
+PLATFORM ?= linux/amd64
 
-export IMAGE_TAG IMAGE_REPO ORIOLEDB_REF ORIOLEDB_REF_TAG PG_MAJOR
+export IMAGE_TAG IMAGE_REPO ORIOLEDB_REF ORIOLEDB_REF_TAG PG_MAJOR PLATFORM
 
 CFG ?= workload/jepsen-repeatable-read
 

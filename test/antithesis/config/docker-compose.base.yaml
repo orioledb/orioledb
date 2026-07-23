@@ -3,7 +3,7 @@ services:
     image: "${IMAGE_REPO}orioledb-antithesis:${IMAGE_TAG}_pg${PG_MAJOR}_odb${ORIOLEDB_REF_TAG}"
     container_name: orioledb
     hostname: orioledb
-    platform: linux/amd64
+    platform: "${PLATFORM}"
     build:
       context: ./orioledb
       args:
@@ -38,7 +38,7 @@ services:
   health-checker:
     image: "${IMAGE_REPO}health-checker:${IMAGE_TAG}"
     container_name: health-checker
-    platform: linux/amd64
+    platform: "${PLATFORM}"
     build: ./health-checker
     depends_on:
       test.orioledb:
