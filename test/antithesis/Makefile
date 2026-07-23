@@ -16,7 +16,7 @@ help:
 
 .PHONY: config # print reified configs
 config:
-	config/make-compose $(CFG)
+	@config/make-compose $(CFG)
 
 .PHONY: config-image # print reified configs
 config-image:
