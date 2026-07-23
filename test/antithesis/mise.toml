@@ -1,3 +1,4 @@
 [tools]
 "cargo:snouty" = "0.6.1"
+jq = "1.8.2"
 rust = "1.94.1"
