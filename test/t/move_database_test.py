@@ -207,11 +207,11 @@ class TablespaceTest(BaseTest):
 		self.ensureDataAccess(
 		    node, "testdb", "set enable_seqscan = off;",
 		    "SELECT count(*) FROM test_tbl_ctid WHERE mod(j, 3) = 0;",
-		    "Index Scan", [(666, )])
+		    "Index Only Scan", [(666, )])
 		self.ensureDataAccess(
 		    node, "testdb", "set enable_seqscan = off;",
 		    "SELECT count(*) FROM test_tbl_ctid WHERE t like 'test11%';",
-		    "Index Scan", [(111, )])
+		    "Index Only Scan", [(111, )])
 		self.ensureDataAccess(
 		    node, "testdb", "",
 		    "SELECT count(*) FROM test_tbl_ctid WHERE mod(i, 10) = 0;",
@@ -219,11 +219,11 @@ class TablespaceTest(BaseTest):
 		self.ensureDataAccess(
 		    node, "testdb", "set enable_seqscan = off;",
 		    "SELECT count(*) FROM test_tbl_pkey WHERE mod(j, 3) = 0;",
-		    "Index Scan", [(666, )])
+		    "Index Only Scan", [(666, )])
 		self.ensureDataAccess(
 		    node, "testdb", "set enable_seqscan = off;",
 		    "SELECT count(*) FROM test_tbl_pkey WHERE t like 'test11%';",
-		    "Index Scan", [(111, )])
+		    "Index Only Scan", [(111, )])
 		self.ensureDataAccess(
 		    node, "testdb", "",
 		    "SELECT count(*) FROM test_tbl_pkey WHERE mod(i, 10) = 0;",

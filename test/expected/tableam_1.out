@@ -1237,10 +1237,10 @@ SELECT smart_explain($$
 	EXPLAIN (COSTS off) SELECT (value || 'WOW') FROM o_test_expression
 		WHERE (value || 'WOW') BETWEEN '6' AND '9';
 $$);
-                                          smart_explain                                          
--------------------------------------------------------------------------------------------------
- Index Scan using o_test_expression_ix3 on o_test_expression
-   Index Cond: (((value || 'WOW'::text) >= '6'::text) AND ((value || 'WOW'::text) <= '9'::text))
+                                            smart_explain                                            
+-----------------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_expression_ix4 on o_test_expression
+   Index Cond: ((((value || 'WOW'::text)) >= '6'::text) AND (((value || 'WOW'::text)) <= '9'::text))
 (2 rows)
 
 SELECT (value || 'WOW') FROM o_test_expression
@@ -1256,10 +1256,10 @@ SELECT smart_explain($$
 	EXPLAIN (COSTS off) SELECT (value || 'WOW') FROM o_test_expression
 		WHERE UPPER(value) BETWEEN '6' AND '9';
 $$);
-                                smart_explain                                
------------------------------------------------------------------------------
- Index Scan using o_test_expression_ix6 on o_test_expression
-   Index Cond: ((upper(value) >= '6'::text) AND (upper(value) <= '9'::text))
+                              smart_explain                              
+-------------------------------------------------------------------------
+ Index Only Scan using o_test_expression_ix5 on o_test_expression
+   Filter: ((upper(value) >= '6'::text) AND (upper(value) <= '9'::text))
 (2 rows)
 
 SELECT (value || 'WOW') FROM o_test_expression
@@ -1274,10 +1274,10 @@ SELECT (value || 'WOW') FROM o_test_expression
 EXPLAIN (COSTS off) SELECT * FROM o_test_expression
 	WHERE UPPER(value) BETWEEN '1' AND '9' AND
 		  LOWER(value) BETWEEN '4' AND '7';
-                                                                 QUERY PLAN                                                                  
----------------------------------------------------------------------------------------------------------------------------------------------
- Index Scan using o_test_expression_ix6 on o_test_expression
-   Index Cond: ((upper(value) >= '1'::text) AND (upper(value) <= '9'::text) AND (lower(value) >= '4'::text) AND (lower(value) <= '7'::text))
+                                                               QUERY PLAN                                                                
+-----------------------------------------------------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_expression_ix5 on o_test_expression
+   Filter: ((upper(value) >= '1'::text) AND (upper(value) <= '9'::text) AND (lower(value) >= '4'::text) AND (lower(value) <= '7'::text))
 (2 rows)
 
 SELECT * FROM o_test_expression
@@ -1615,10 +1615,10 @@ SELECT smart_explain($$
 	EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
 		WHERE (key * 100) BETWEEN 100 AND 1000;
 $$);
-                         smart_explain                          
-----------------------------------------------------------------
- Index Scan using o_test_expression_ix1 on o_test_expression
-   Index Cond: (((key * 100) >= 100) AND ((key * 100) <= 1000))
+                           smart_explain                            
+--------------------------------------------------------------------
+ Index Only Scan using o_test_expression_ix2 on o_test_expression
+   Index Cond: ((((key * 100)) >= 100) AND (((key * 100)) <= 1000))
 (2 rows)
 
 SELECT (key * 100) FROM o_test_expression
@@ -4931,7 +4931,7 @@ SET enable_seqscan = off;
 EXPLAIN SELECT * FROM o_test_1 ORDER BY b;
                                     QUERY PLAN                                    
 ----------------------------------------------------------------------------------
- Index Only Scan using o_test_1_idx on o_test_1  (cost=0.13..8.16 rows=2 width=8)
+ Index Only Scan using o_test_1_idx on o_test_1  (cost=0.13..4.16 rows=2 width=8)
 (1 row)
 
 SELECT * FROM o_test_1 ORDER BY b;
