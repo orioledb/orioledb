@@ -1065,6 +1065,20 @@ SELECT COUNT(*) FROM o_test_lockstep WHERE a in (1,2,3,4,5,6,7,8,9,10,12,13,14,1
 SELECT * FROM o_test_lockstep WHERE a in (1000, 1);
 SELECT * FROM o_test_lockstep WHERE a in (1, 1000) ORDER BY a DESC, b DESC;
 
+-- Backward IOS with 3-element IN list
+SELECT * FROM o_test_lockstep WHERE a in (1, 500, 1000) ORDER BY a DESC, b DESC;
+-- Backward IOS with IN on both columns
+SELECT * FROM o_test_lockstep WHERE a in (1, 500) AND b in (1, 500)
+	ORDER BY a DESC, b DESC;
+-- Multiple rows per array element
+INSERT INTO o_test_lockstep VALUES (1, 100), (1, 200), (1000, 100), (1000, 200);
+SELECT * FROM o_test_lockstep WHERE a in (1, 1000) ORDER BY a DESC, b DESC;
+-- Forward same query for comparison
+SELECT * FROM o_test_lockstep WHERE a in (1, 1000) ORDER BY a, b;
+-- Backward with LIMIT
+SELECT * FROM o_test_lockstep WHERE a in (1, 500, 1000)
+	ORDER BY a DESC, b DESC LIMIT 2;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA tableam CASCADE;
 RESET search_path;
