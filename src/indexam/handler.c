@@ -237,6 +237,7 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 				bridged->routine.ambuild = bridged_ambuild;
 				bridged->routine.aminsertextended = bridged_aminsert;
 				bridged->routine.ambeginscan = bridged_ambeginscan;
+				bridged->routine.amcanreturn = NULL;
 				MemoryContextSwitchTo(old_mcxt);
 				amroutine = palloc0(sizeof(IndexAmRoutine));
 				memcpy(amroutine, &bridged->routine, sizeof(IndexAmRoutine));
@@ -1034,7 +1035,7 @@ orioledb_amcanreturn(Relation index, int attno)
 	OBTOptions *options = (OBTOptions *) index->rd_options;
 
 	if (options && !options->orioledb_index)
-		return btcanreturn(index, attno);
+		return false;
 
 	return true;
 }
