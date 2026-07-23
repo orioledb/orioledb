@@ -34,7 +34,14 @@ up:
 
 .PHONY: push # push simulation images
 push:
-	config/make-compose $(CFG) | docker compose -f - push
+	@compose="$$(config/make-compose $(CFG))"; \
+	services="$$(printf '%s\n' "$$compose" | docker compose -f - config --format json | \
+		jq -r --arg repo "$$IMAGE_REPO" '.services | to_entries[] | select((.value.image // "") | startswith($$repo)) | .key')"; \
+	if [ -z "$$IMAGE_REPO" ] || [ -z "$$services" ]; then \
+		echo "Error: no services target IMAGE_REPO=$$IMAGE_REPO" >&2; \
+		exit 1; \
+	fi; \
+	printf '%s\n' "$$compose" | docker compose -f - push $$services
 	config/make-image --push $(CFG)
 
 .PHONY: down # Stop Docker services, remove volumes, delete intermediate files
