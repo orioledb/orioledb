@@ -89,20 +89,35 @@ class MetaLockDeadlockTest(BaseTest):
 		    "SELECT pg_stopevent_reset('before_o_tables_meta_unlock');")
 		t_ddl.join()
 		t_drop.join()
+		con_ddl.commit()
 		con_ddl.close()
 		if drop_err:
 			raise drop_err[0]
 
 		# The stream now contains
 		#   [META_LOCK + O_TABLES modify] ... [dbase_redo] ... [META_UNLOCK]
-		# The standby must replay all of it.  With the bug the leader
-		# self-deadlocks in dbase_redo and this catchup() times out.
-		self.catchup_orioledb(replica)
+		# The standby must replay all of it.  With the bug the recovery leader
+		# self-deadlocks in dbase_redo while holding oTablesMetaLock and replay
+		# freezes; with the fix it catches up.  Bounded poll so the failure is
+		# fast (rather than hanging the whole CI job).
+		target = master.execute("SELECT pg_current_wal_lsn();")[0][0]
+		deadline = time.time() + 60
+		caught = False
+		while time.time() < deadline:
+			if replica.execute(
+			    "SELECT pg_last_wal_replay_lsn() >= '%s'::pg_lsn;" % target
+			)[0][0]:
+				caught = True
+				break
+			time.sleep(1)
+		self.assertTrue(
+		    caught,
+		    "standby replay did not reach %s within 60s -- recovery leader "
+		    "self-deadlocked replaying dbase_redo while holding "
+		    "oTablesMetaLock" % target)
 
-		# Sanity: the new table reached the standby.
-		self.assertEqual(
-		    replica.execute("SELECT count(*) FROM t;")[0][0], 0)
-		# And the dropped database is gone on the standby too.
+		# Sanity: the new table and the dropped database replicated.
+		self.assertEqual(replica.execute("SELECT count(*) FROM t;")[0][0], 0)
 		self.assertEqual(
 		    replica.execute(
 		        "SELECT count(*) FROM pg_database WHERE datname = 'victim';")
