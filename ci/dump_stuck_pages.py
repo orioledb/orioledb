@@ -142,11 +142,23 @@ def dump_held_lwlocks():
 		lock = safe_eval(f"held_lwlocks[{i}].lock")
 		mode = safe_eval(f"held_lwlocks[{i}].mode")
 		tr = safe_eval(f"held_lwlocks[{i}].lock->tranche")
-		# tr is a valid registered id for a genuinely held lock, so the
-		# GetLWTrancheName() call is safe.
+		# Resolve the tranche name from the runtime tables (GetLWTrancheName
+		# is often inlined/unresolvable in gdb).  User-defined tranches
+		# (>= LWTRANCHE_FIRST_USER_DEFINED) live in LWLockTrancheNames;
+		# built-ins in BuiltinTrancheNames.
 		name = "<n/a>"
 		if not isinstance(tr, str):
-			name = safe_eval(f"GetLWTrancheName((int){int(tr)})")
+			tri = int(tr)
+			first = safe_eval("(int) LWTRANCHE_FIRST_USER_DEFINED")
+			nind = safe_eval("(int) NUM_INDIVIDUAL_LWLOCKS")
+			try:
+				first_i = int(first)
+				if tri >= first_i:
+					name = safe_eval(f"LWLockTrancheNames[{tri} - {first_i}]")
+				elif not isinstance(nind, str):
+					name = safe_eval(f"BuiltinTrancheNames[{tri} - {int(nind)}]")
+			except (TypeError, ValueError, gdb.error):
+				pass
 		print(f"      [{i}] lock={lock} tranche={tr} name={name} mode={mode}")
 
 
