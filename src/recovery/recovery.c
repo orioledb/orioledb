@@ -159,7 +159,14 @@ typedef struct
 	bool		systree_modified;
 	/* is typecache invalidation needed after this transaction */
 	bool		invalidate_typcache;
-	/* is oTablesMetaLock held by transaction */
+	/*
+	 * meta window open: this xid replayed WAL_REC_O_TABLES_META_LOCK and its
+	 * enclosed O_TABLES/O_INDICES modifies are being buffered in meta_buf
+	 * (they are applied atomically under oTablesMetaLock at the matching
+	 * WAL_REC_O_TABLES_META_UNLOCK).  Formerly this meant oTablesMetaLock was
+	 * held for the whole window -- which self-deadlocked when an interleaved
+	 * dbase_redo replayed a ProcSignalBarrier under the held LWLock.
+	 */
 	bool		o_tables_meta_locked;
 	/* is provided by checkpoint xids file */
 	bool		checkpoint_xid;
@@ -167,6 +174,10 @@ typedef struct
 	bool		wal_xid;
 	/* usage map */
 	bool	   *used_by;
+	/* buffered O_TABLES/O_INDICES modifies (List of MetaBufOp *) */
+	List	   *meta_buf;
+	/* WAL start of this window's META_LOCK container (0 = no open window) */
+	XLogRecPtr	meta_window_lsn;
 } RecoveryXidState;
 
 #define RetainUndoNodeGetRecoveryXidState(node, undoType) \
@@ -739,6 +750,8 @@ static inline void spread_idx_modify(BTreeDescr *desc,
 
 static inline RecoveryMsgType recovery_msg_from_wal_record(WalRecordType rec_type);
 static void recovery_send_init(int worker_num);
+static void recovery_meta_buf_discard(RecoveryXidState *state);
+static void recovery_publish_oldest_meta_window(void);
 
 /*
  * Returns full size of the shared memory needed to recovery.
@@ -933,6 +946,8 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			state->systree_modified = false;
 			state->invalidate_typcache = false;
 			state->o_tables_meta_locked = false;
+			state->meta_buf = NIL;
+			state->meta_window_lsn = InvalidXLogRecPtr;
 			state->checkpoint_xid = true;
 			state->wal_xid = false;
 			if (!recovery_single && worker_id < 0)
@@ -1721,8 +1736,11 @@ recovery_finish(int worker_id)
 	{
 		if (cur_state->o_tables_meta_locked)
 		{
-			o_tables_meta_unlock_no_wal();
+			/* window never applied (no UNLOCK replayed): drop the buffer */
+			recovery_meta_buf_discard(cur_state);
 			cur_state->o_tables_meta_locked = false;
+			cur_state->meta_window_lsn = InvalidXLogRecPtr;
+			recovery_publish_oldest_meta_window();
 		}
 
 		if (COMMITSEQNO_IS_INPROGRESS(cur_state->csn))
@@ -1963,6 +1981,8 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			cur_state->systree_modified = false;
 			cur_state->invalidate_typcache = false;
 			cur_state->o_tables_meta_locked = false;
+			cur_state->meta_buf = NIL;
+			cur_state->meta_window_lsn = InvalidXLogRecPtr;
 			cur_state->checkpoint_xid = false;
 			if (worker_id < 0 && !*recovery_single_process)
 				cur_state->used_by = palloc0((recovery_pool_size_guc + recovery_idx_pool_size_guc) *
@@ -2119,8 +2139,11 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 
 	if (cur_recovery_xid_state->o_tables_meta_locked)
 	{
-		o_tables_meta_unlock_no_wal();
+		/* window never applied (no UNLOCK replayed): drop the buffer */
+		recovery_meta_buf_discard(cur_recovery_xid_state);
 		cur_recovery_xid_state->o_tables_meta_locked = false;
+		cur_recovery_xid_state->meta_window_lsn = InvalidXLogRecPtr;
+		recovery_publish_oldest_meta_window();
 	}
 
 	oxid_needs_wal_flush = false;
@@ -3641,6 +3664,155 @@ recovery_send_init(int worker_num)
 	worker_queue_flush(worker_num);
 }
 
+/*
+ * MetaBufOp: one buffered O_TABLES/O_INDICES modify captured between a
+ * replayed WAL_REC_O_TABLES_META_LOCK and its matching
+ * WAL_REC_O_TABLES_META_UNLOCK.  Buffered ops are applied atomically, under
+ * oTablesMetaLock, at the UNLOCK -- so the recovery leader never holds that
+ * lock while replaying the unrelated records interleaved into the same WAL
+ * window (notably dbase_redo, whose ProcSignalBarrier would otherwise
+ * self-deadlock the leader under the held LWLock's interrupt holdoff).
+ */
+typedef struct MetaBufOp
+{
+	int			sys_tree_num;
+	uint16		type;			/* RecoveryMsgType */
+	OXid		oxid;
+	XLogRecPtr	xlogPtr;
+	OFixedTuple tuple;
+} MetaBufOp;
+
+/*
+ * Apply one O_TABLES/O_INDICES modify to the system trees, including the
+ * O_INDICES relnode side effects (create/drop-relnode undo + data-dir
+ * creation).  Used both in place (non-buffered sys-tree modifies) and when
+ * flushing a buffered meta window.
+ */
+static bool
+recovery_apply_systree_modify(int sys_tree_num, uint16 type, OTuple tuple,
+							  OXid oxid, XLogRecPtr xlogPtr, bool single)
+{
+	bool		success;
+
+	if (!single)
+		workers_synchronize(xlogPtr, true);
+
+	success = apply_sys_tree_modify_record(sys_tree_num, type, tuple, oxid,
+										   COMMITSEQNO_INPROGRESS);
+
+	if (sys_tree_num == SYS_TREES_O_INDICES && success)
+	{
+		OIndexKey  *trees = NULL;
+		ORelOids	tmp_oids;
+
+		if (type == RecoveryMsgTypeDelete)
+		{
+			trees = o_indices_get_trees(tuple.data, &tmp_oids);
+			if (trees)
+				add_undo_drop_relnode(tmp_oids, trees, 1);
+		}
+		else if (type == RecoveryMsgTypeInsert)
+		{
+			trees = o_indices_get_trees(tuple.data, &tmp_oids);
+			if (trees)
+			{
+				char	   *prefix;
+				char	   *db_prefix;
+
+				o_get_prefixes_for_tablespace(trees->oids.datoid,
+											  trees->tablespace,
+											  &prefix, &db_prefix);
+				o_verify_dir_exists_or_create(prefix, NULL, NULL);
+				o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+				pfree(db_prefix);
+				add_undo_create_relnode(tmp_oids, trees, 1, true);
+			}
+		}
+	}
+
+	return success;
+}
+
+/*
+ * Recompute the oldest open meta-window WAL position across all in-flight
+ * recovery xids and publish it for the checkpointer (0 = none open).
+ */
+static void
+recovery_publish_oldest_meta_window(void)
+{
+	HASH_SEQ_STATUS seq;
+	RecoveryXidState *s;
+	XLogRecPtr	oldest = InvalidXLogRecPtr;
+
+	if (recovery_xid_state_hash != NULL)
+	{
+		hash_seq_init(&seq, recovery_xid_state_hash);
+		while ((s = (RecoveryXidState *) hash_seq_search(&seq)) != NULL)
+		{
+			if (s->o_tables_meta_locked &&
+				!XLogRecPtrIsInvalid(s->meta_window_lsn) &&
+				(XLogRecPtrIsInvalid(oldest) || s->meta_window_lsn < oldest))
+				oldest = s->meta_window_lsn;
+		}
+	}
+
+	pg_atomic_write_u64(&checkpoint_state->oldestOpenMetaWindow,
+						(uint64) oldest);
+}
+
+/* Append a modify to the current xid's meta-window buffer. */
+static void
+recovery_meta_buf_append(RecoveryXidState *state, int sys_tree_num,
+						 uint16 type, OFixedTuple *tuple, OXid oxid,
+						 XLogRecPtr xlogPtr)
+{
+	MemoryContext old = MemoryContextSwitchTo(TopMemoryContext);
+	MetaBufOp  *op = palloc(sizeof(MetaBufOp));
+
+	op->sys_tree_num = sys_tree_num;
+	op->type = type;
+	op->oxid = oxid;
+	op->xlogPtr = xlogPtr;
+	op->tuple = *tuple;
+	/* re-anchor the OTuple data pointer into the copied fixedData */
+	if (!O_TUPLE_IS_NULL(tuple->tuple))
+		op->tuple.tuple.data = op->tuple.fixedData +
+			(tuple->tuple.data - tuple->fixedData);
+	state->meta_buf = lappend(state->meta_buf, op);
+	MemoryContextSwitchTo(old);
+}
+
+/* Apply and free all buffered ops of the current meta window (in order). */
+static void
+recovery_meta_buf_flush(RecoveryXidState *state, bool single)
+{
+	ListCell   *lc;
+
+	foreach(lc, state->meta_buf)
+	{
+		MetaBufOp  *op = (MetaBufOp *) lfirst(lc);
+
+		recovery_apply_systree_modify(op->sys_tree_num, op->type,
+									  op->tuple.tuple, op->oxid,
+									  op->xlogPtr, single);
+		pfree(op);
+	}
+	list_free(state->meta_buf);
+	state->meta_buf = NIL;
+}
+
+/* Discard (without applying) all buffered ops -- used on abort. */
+static void
+recovery_meta_buf_discard(RecoveryXidState *state)
+{
+	ListCell   *lc;
+
+	foreach(lc, state->meta_buf)
+		pfree(lfirst(lc));
+	list_free(state->meta_buf);
+	state->meta_buf = NIL;
+}
+
 static void
 handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 {
@@ -3653,6 +3825,17 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 		 */
 		return;
 	}
+
+	/*
+	 * Take oTablesMetaLock now (it was NOT held across the window) and apply
+	 * the buffered O_TABLES/O_INDICES modifies atomically, so the checkpointer
+	 * never observes a partial DDL.  The existing body below then reads the
+	 * applied metadata and releases the lock at its usual points.
+	 */
+	o_tables_meta_lock_no_wal();
+	recovery_meta_buf_flush(cur_recovery_xid_state, *recovery_single_process);
+	cur_recovery_xid_state->meta_window_lsn = InvalidXLogRecPtr;
+	recovery_publish_oldest_meta_window();
 
 	if (ORelOidsIsValid(oids))
 		recreate_table_descr_by_oids(oids);
@@ -4269,8 +4452,17 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 
 		case WAL_REC_O_TABLES_META_LOCK:
 			Assert(!cur_recovery_xid_state->o_tables_meta_locked);
-			o_tables_meta_lock_no_wal();
+
+			/*
+			 * Do NOT take oTablesMetaLock here.  Open a buffered window: the
+			 * enclosed O_TABLES/O_INDICES modifies are collected in meta_buf
+			 * and applied atomically under the lock at the matching UNLOCK.
+			 * Publish this window's WAL start so a restartpoint clamps
+			 * replayStartPtr to it (see o_perform_checkpoint).
+			 */
 			cur_recovery_xid_state->o_tables_meta_locked = true;
+			cur_recovery_xid_state->meta_window_lsn = ctx->xlogRecPtr;
+			recovery_publish_oldest_meta_window();
 			elog(DEBUG3, "[%s] META_LOCK for [ %u %u %u ] ctx->sys_tree_num %d", __func__,
 				 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode, ctx->sys_tree_num);
 			break;
@@ -4367,12 +4559,10 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 		case WAL_REC_DELETE:
 		case WAL_REC_REINSERT:
 			{
-				bool		success;
 				OFixedTuple tuple1,
 							tuple2;
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 				uint16		type = recovery_msg_from_wal_record(rec->type);
-				Pointer		sys_tree_oids_ptr = rec->data + sizeof(uint8) + sizeof(OffsetNumber);
 
 				Assert(rec->oxid != InvalidOXid);
 
@@ -4389,52 +4579,23 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 					if (ctx->sys_tree_num == SYS_TREES_O_TABLES)
 						Assert(cur_recovery_xid_state->o_tables_meta_locked);
 
-					if (!ctx->single)
-						workers_synchronize(xlogPtr, true);
-
-					success = apply_sys_tree_modify_record(ctx->sys_tree_num, type,
-														   tuple1.tuple, rec->oxid,
-														   COMMITSEQNO_INPROGRESS);
-
-					if (ctx->sys_tree_num == SYS_TREES_O_INDICES && success)
-					{
-						OIndexKey  *trees = NULL;
-						ORelOids	tmp_oids;
-
-						if (type == RecoveryMsgTypeDelete)
-						{
-							trees = o_indices_get_trees(sys_tree_oids_ptr, &tmp_oids);
-							if (trees)
-								add_undo_drop_relnode(tmp_oids, trees, 1);
-						}
-						else if (type == RecoveryMsgTypeInsert)
-						{
-							trees = o_indices_get_trees(sys_tree_oids_ptr, &tmp_oids);
-							if (trees)
-							{
-								char	   *prefix;
-								char	   *db_prefix;
-
-								/*
-								 * Ensure the per-tablespace and per-database
-								 * orioledb data directories exist.  On the
-								 * primary these are created in indices.c
-								 * before the first btree file is opened.  On
-								 * the replica we must do it here when
-								 * replaying the SYS_TREES_O_INDICES INSERT
-								 * that accompanies CREATE TABLE / CREATE
-								 * INDEX.
-								 */
-								o_get_prefixes_for_tablespace(trees->oids.datoid,
-															  trees->tablespace,
-															  &prefix, &db_prefix);
-								o_verify_dir_exists_or_create(prefix, NULL, NULL);
-								o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
-								pfree(db_prefix);
-								add_undo_create_relnode(tmp_oids, trees, 1, true);
-							}
-						}
-					}
+					/*
+					 * O_TABLES/O_INDICES modifies inside an open meta window
+					 * are buffered and applied atomically at the UNLOCK; all
+					 * other sys-tree modifies (e.g. OSysCache trees) apply in
+					 * place.  Buffering keeps oTablesMetaLock unheld while the
+					 * leader replays the records interleaved into the window.
+					 */
+					if (cur_recovery_xid_state->o_tables_meta_locked &&
+						(ctx->sys_tree_num == SYS_TREES_O_TABLES ||
+						 ctx->sys_tree_num == SYS_TREES_O_INDICES))
+						recovery_meta_buf_append(cur_recovery_xid_state,
+												 ctx->sys_tree_num, type,
+												 &tuple1, rec->oxid, xlogPtr);
+					else
+						recovery_apply_systree_modify(ctx->sys_tree_num, type,
+													  tuple1.tuple, rec->oxid,
+													  xlogPtr, ctx->single);
 				}
 
 				if (ctx->sys_tree_num > 0 || ctx->indexDescr == NULL)

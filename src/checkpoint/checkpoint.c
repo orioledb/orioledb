@@ -261,6 +261,7 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		checkpoint_state->curKeyType = CurKeyFinished;
 		checkpoint_state->pid = InvalidPid;
 		pg_atomic_init_u64(&checkpoint_state->mmapDataLength, 0);
+		pg_atomic_init_u64(&checkpoint_state->oldestOpenMetaWindow, 0);
 		pg_atomic_init_u32(&checkpoint_state->autonomousLevel, ORIOLEDB_MAX_DEPTH);
 
 		for (i = 0; i < (int) UndoLogsCount; i++)
@@ -1417,6 +1418,24 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	acquire_chkp_lock_drain(&checkpoint_state->oSysTreesLock);
 
 	checkpoint_state->replayStartPtr = get_checkpoint_xlog_ptr();
+
+	/*
+	 * If the standby recovery leader has an open oTablesMeta window (its
+	 * O_TABLES/O_INDICES modifies are buffered, not yet applied, so the sys
+	 * trees we are about to checkpoint show the pre-DDL state), start recovery
+	 * no later than that window's WAL_REC_O_TABLES_META_LOCK.  Otherwise a
+	 * restart would begin inside the window, miss the META_LOCK, and lose the
+	 * buffered modifies.  0 means no open window (always so on the primary).
+	 */
+	{
+		XLogRecPtr	openWin = (XLogRecPtr)
+			pg_atomic_read_u64(&checkpoint_state->oldestOpenMetaWindow);
+
+		if (!XLogRecPtrIsInvalid(openWin) &&
+			openWin < checkpoint_state->replayStartPtr)
+			checkpoint_state->replayStartPtr = openWin;
+	}
+
 	wait_finish_active_commits(checkpoint_state->replayStartPtr);
 
 	LWLockAcquire(&checkpoint_state->oXidQueueLock, LW_EXCLUSIVE);
@@ -1432,6 +1451,19 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	 * trees.
 	 */
 	checkpoint_state->sysTreesStartPtr = get_checkpoint_xlog_ptr();
+
+	/* Same clamp as replayStartPtr: don't start sys-tree replay inside an
+	 * open (buffered) meta window, or its buffered O_TABLES/O_INDICES modifies
+	 * would be skipped on restart. */
+	{
+		XLogRecPtr	openWin = (XLogRecPtr)
+			pg_atomic_read_u64(&checkpoint_state->oldestOpenMetaWindow);
+
+		if (!XLogRecPtrIsInvalid(openWin) &&
+			openWin < checkpoint_state->sysTreesStartPtr)
+			checkpoint_state->sysTreesStartPtr = openWin;
+	}
+
 	LWLockRelease(&checkpoint_state->oSysTreesLock);
 	LWLockRelease(&checkpoint_state->oTablesMetaLock);
 
