@@ -297,7 +297,7 @@ FROM
 	generate_series(1, 4) as b,
 	generate_series(1, 4) as c;
 SELECT count(*) FROM o_pk3;
-SELECT id1, id2 FROM o_pk3;
+SELECT id1, id2 FROM o_pk3 ORDER BY id1, id2;
 
 \i 'sql/composite_pk_quals'
 
@@ -326,7 +326,7 @@ FROM
 	generate_series(1, 4) as b,
 	generate_series(1, 4) as c;
 SELECT count(*) FROM o_pk3;
-SELECT id1, id2 FROM o_pk3;
+SELECT id1, id2 FROM o_pk3 ORDER BY id1, id2;
 
 \i 'sql/composite_pk_quals'
 
@@ -382,9 +382,9 @@ INSERT INTO o_pk6
 SELECT i % 5, '2021-01-01'::date + interval '1 month' * (i / 5) FROM generate_series(0, 24) i;
 SET enable_seqscan = OFF;
 EXPLAIN (COSTS off) SELECT * FROM o_pk6 WHERE i <= 2 AND dt = '2021-03-01'::timestamp;
-SELECT * FROM o_pk6 WHERE i = 2 AND dt >= '2021-03-01'::timestamp;
+SELECT * FROM o_pk6 WHERE i = 2 AND dt >= '2021-03-01'::timestamp ORDER BY dt;
 EXPLAIN (COSTS off) SELECT * FROM o_pk6 WHERE i <= 2 AND dt = '2021-03-01'::date;
-SELECT * FROM o_pk6 WHERE i = 2 AND dt >= '2021-03-01'::date;
+SELECT * FROM o_pk6 WHERE i = 2 AND dt >= '2021-03-01'::date ORDER BY dt;
 RESET enable_seqscan;
 
 DROP EXTENSION orioledb CASCADE;

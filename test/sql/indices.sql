@@ -299,7 +299,7 @@ CREATE INDEX o_test65_reg1 ON o_test65(id DESC);
 
 INSERT INTO o_test65 SELECT i+1, i FROM generate_series(1, 60) AS i;
 SELECT count(*) FROM o_test65;
-SELECT id, val FROM o_test65;
+SELECT id, val FROM o_test65 ORDER BY id;
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT val, id FROM o_test65 ORDER BY id;
 SELECT val, id FROM o_test65 ORDER BY id;
@@ -2320,6 +2320,27 @@ SELECT relpages > 0 AS idx_pages_ok FROM pg_class
 	WHERE relname = 'o_test_amnblocks4_k';
 RESET enable_seqscan;
 DROP TABLE o_test_amnblocks4;
+
+-- allvisfrac: IOS preferred even with low correlation (random insert order)
+-- With allvisfrac=1.0 the IOS heap-fetch cost drops to 0 so IOS wins
+-- over bitmap even when csquared is near 0.
+CREATE TABLE o_test_allvisfrac (
+	id int8 NOT NULL PRIMARY KEY,
+	k int8 NOT NULL,
+	c char(120) NOT NULL DEFAULT '',
+	pad char(60) NOT NULL DEFAULT ''
+) USING orioledb;
+INSERT INTO o_test_allvisfrac
+	SELECT i, (i * 7919) % 10000, '', '' FROM generate_series(1, 10000) i;
+CREATE INDEX o_test_allvisfrac_k ON o_test_allvisfrac(k);
+ANALYZE o_test_allvisfrac;
+SET enable_seqscan = off;
+EXPLAIN (COSTS off)
+	SELECT k FROM o_test_allvisfrac
+		WHERE k IN (1000, 2000, 3000, 4000, 5000,
+					6000, 7000, 8000, 9000, 10000);
+RESET enable_seqscan;
+DROP TABLE o_test_allvisfrac;
 
 -- Skip scan tests below exercise PG18's _bt_preprocess_keys synthesizing a
 -- skip array on the leading column.  On PG16/PG17 there are no skip arrays;

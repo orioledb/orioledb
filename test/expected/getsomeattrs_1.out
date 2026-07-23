@@ -736,9 +736,8 @@ EXPLAIN (COSTS OFF)
                            QUERY PLAN                           
 ----------------------------------------------------------------
  Custom Scan (o_scan) on o_test_pkey_include_same_field
-   Bitmap heap scan
-   ->  Bitmap Index Scan on o_test_pkey_include_same_field_pkey
-(3 rows)
+   Forward index only scan of: o_test_pkey_include_same_field_pkey
+(2 rows)
 
 SELECT * FROM o_test_pkey_include_same_field;
  val_1 
