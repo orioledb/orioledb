@@ -15,7 +15,7 @@ services:
       PGPASSWORD: "${POSTGRES_PASSWORD}"
       BURST_SECONDS: "${BURST_SECONDS:-5}"
       BURST_WORKERS: "${BURST_WORKERS:-8}"
-    platform: linux/amd64
+    platform: "${PLATFORM}"
     build: ./sk-recovery-race-chaos
     depends_on:
       test.orioledb:
