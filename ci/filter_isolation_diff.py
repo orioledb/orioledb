@@ -56,6 +56,7 @@ allowedRegexes = {
 	r"ERROR:  orioledb does not support TID range scan": ['*'],
 	r"\s*->\s+Custom Scan \(o_scan\) on ios_bitmap": ['index-only-bitmapscan'],
 	r"\s+Bitmap heap scan": ['index-only-bitmapscan'],
+	r"\s*(->\s+)?Index (Only )?Scan\b": ['*'],
 }
 
 def is_allowed_line(testName, line):

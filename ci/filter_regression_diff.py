@@ -464,6 +464,10 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 		elif src_cur_value == target_cur[1]:
 			src_down = True
 			target_down = True
+		elif (src_cur_value.startswith('Index Only Scan')
+			  and target_cur[1].startswith('Index Scan')):
+			src_up = True
+			target_up = True
 		else:
 			# processing known real plan differences,
 			# that are omitted for now but should be checked in the future
