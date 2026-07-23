@@ -69,13 +69,13 @@ snouty launch \
 
 ```
 # ref before fix
-make build push CFG='workload/sk-recovery-race' PG_MAJOR=18 ORIOLEDB_REF=ce4681c77e3a0b8e67f900704bb598838837171e
+make build push CFG='workload/sk-recovery-race' PG_MAJOR=17 ORIOLEDB_REF=ce4681c77e3a0b8e67f900704bb598838837171e
 
 # optional
 snouty validate target/
 
 snouty launch \
-  --config-image "$(make config-image CFG='workload/sk-recovery-race' PG_MAJOR=18 ORIOLEDB_REF=ce4681c77e3a0b8e67f900704bb598838837171e)" \
+  --config-image "$(make config-image CFG='workload/sk-recovery-race' PG_MAJOR=17 ORIOLEDB_REF=ce4681c77e3a0b8e67f900704bb598838837171e)" \
   --test-name 'sk-recovery-race' \
   --description 'sk-recovery-race trial' \
   --duration 20m \
