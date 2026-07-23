@@ -33,7 +33,7 @@ config/make-compose "${configs[@]}" >target/docker-compose.yaml
 
 image="$(config/print-config-image "${configs[@]}")"
 
-docker build --platform "linux/amd64" -f config/Dockerfile -t "$image" .
+docker build --platform "${PLATFORM:-linux/amd64}" -f config/Dockerfile -t "$image" .
 if [[ "$push" == true ]]; then
 	docker push "$image"
 fi

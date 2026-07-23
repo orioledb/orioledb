@@ -25,7 +25,10 @@ services:
       # Ergo, we must specify the expected consistency model explicitly.
       JEPSEN_ISOLATION: repeatable-read
       JEPSEN_EXPECTED_CONSISTENCY_MODEL: snapshot-isolation
-    platform: linux/amd64
+    # We require a separate value for setting the jepsen's target architecture
+    # because there is a bug in Rosetta emulation preventing jepsen from
+    # executing as a linux/amd64 image on MacOS.
+    platform: "${JEPSEN_PLATFORM}"
     build: ./jepsen
     depends_on:
       test.orioledb:

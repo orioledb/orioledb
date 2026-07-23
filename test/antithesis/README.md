@@ -107,6 +107,9 @@ make up # [CFG='...']
 make down # [CFG='...']
 ```
 
+> [!warning]
+> The jepsen workload does not work under MacOS/Rosetta with the default `PLATFORM` (`linux/amd64`).
+> If you are running local jepsen workloads on MacOS, use `JEPSEN_PLATFORM=linux/arm64 make ...` for all commands you run locally. **But you should always remove that override before running `make build push`**. Antithesis can only execute `x86_64` binaries.
 
 ### Pre-requisites
 
