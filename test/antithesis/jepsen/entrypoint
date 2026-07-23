@@ -7,4 +7,5 @@ if [ -n "${ANTITHESIS_OUTPUT_DIR:-}" ]; then
 	exec sleep infinity
 fi
 
-exec /opt/antithesis/test/v1/jepsen-postgres/singleton_driver_jepsen-postgres "$@"
+/opt/antithesis/test/v1/jepsen-postgres/singleton_driver_jepsen-postgres "$@"
+/opt/antithesis/test/v1/jepsen-postgres/finally_jepsen-postgres "$@"
