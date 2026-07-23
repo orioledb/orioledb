@@ -28,11 +28,10 @@ class MetaLockDeadlockTest(BaseTest):
 
 	def test_meta_lock_dbase_redo_no_deadlock(self):
 		master = self.node
-		master.append_conf(
-		    "orioledb.enable_stopevents = on\n"
-		    "wal_level = replica\n"
-		    "max_wal_senders = 4\n"
-		    "max_replication_slots = 4\n")
+		master.append_conf("orioledb.enable_stopevents = on\n"
+		                   "wal_level = replica\n"
+		                   "max_wal_senders = 4\n"
+		                   "max_replication_slots = 4\n")
 		master.start()
 
 		replica = self.getReplica()
@@ -105,8 +104,8 @@ class MetaLockDeadlockTest(BaseTest):
 		caught = False
 		while time.time() < deadline:
 			if replica.execute(
-			    "SELECT pg_last_wal_replay_lsn() >= '%s'::pg_lsn;" % target
-			)[0][0]:
+			    "SELECT pg_last_wal_replay_lsn() >= '%s'::pg_lsn;" %
+			    target)[0][0]:
 				caught = True
 				break
 			time.sleep(1)

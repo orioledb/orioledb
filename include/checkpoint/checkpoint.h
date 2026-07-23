@@ -204,6 +204,18 @@ typedef struct
 	pg_atomic_uint64 mmapDataLength;
 
 	/*
+	 * Oldest WAL position of a currently-open oTablesMeta window on the
+	 * standby recovery leader (0 = none).  The leader replays
+	 * WAL_REC_O_TABLES_META_LOCK..WAL_REC_O_TABLES_META_UNLOCK by buffering
+	 * the enclosed O_TABLES/O_INDICES modifies and applying them atomically
+	 * at the UNLOCK; while a window is open the sys trees show the pre-DDL
+	 * state.  The checkpointer clamps replayStartPtr/sysTreesStartPtr to this
+	 * value so recovery never restarts inside an open (buffered) window and
+	 * thus never loses the buffered modifies.
+	 */
+	pg_atomic_uint64 oldestOpenMetaWindow;
+
+	/*
 	 * Shared memory queue of records for writing to the xids file.  Backends
 	 * write to this queue last undo position on transaction commit/abort.
 	 * Checkpoint writes current undo positions for in-progress transactions.
