@@ -9,9 +9,11 @@ RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
-# 2026-07-17: temporary workaround until https://github.com/jepsen-io/sql/pull/2 is merged upsgream
 WORKDIR /src
-RUN git clone https://github.com/pmbauer/sql.git \
+
+# 2026-07-23: temporary workaround until https://github.com/jepsen-io/sql/pull/2 is
+# pushed to clojars
+RUN git clone --depth=1 https://github.com/jepsen-io/sql.git \
     && cd sql \
     && lein install
 
