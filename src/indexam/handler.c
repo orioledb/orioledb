@@ -32,6 +32,7 @@
 #include "utils/stopevent.h"
 
 #include "access/amapi.h"
+#include "access/multixact.h"
 #include "access/relation.h"
 #include "commands/progress.h"
 #include "commands/vacuum.h"
@@ -1025,6 +1026,23 @@ orioledb_amvacuumcleanup(IndexVacuumInfo *info, IndexBulkDeleteResult *stats)
 	}
 	stats->num_index_tuples = info->num_heap_tuples;
 	stats->estimated_count = info->estimated_count;
+
+	if (info->index->rd_index->indisprimary)
+	{
+		BlockNumber curpages = RelationGetNumberOfBlocks(info->heaprel);
+
+		vac_update_relstats(info->heaprel,
+							curpages,
+							info->num_heap_tuples,
+							curpages,
+#if PG_VERSION_NUM >= 180000
+							0,
+#endif
+							true,
+							InvalidTransactionId,
+							InvalidMultiXactId,
+							NULL, NULL, false);
+	}
 
 	return stats;
 }
