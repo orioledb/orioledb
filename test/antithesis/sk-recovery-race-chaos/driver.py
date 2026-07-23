@@ -94,10 +94,23 @@ def assert_consistent(conn, label):
 
 
 def checkpoint_count(conn):
-    (timed, req) = execute(
-        conn,
-        "SELECT checkpoints_timed, checkpoints_req FROM pg_stat_bgwriter"
-    )[0]
+    # PostgreSQL 17 split checkpoint stats out of pg_stat_bgwriter into a
+    # dedicated pg_stat_checkpointer view (checkpoints_timed/checkpoints_req
+    # became num_timed/num_requested); this repo supports PG 16-18, so
+    # detect which one exists at runtime instead of hardcoding a version.
+    (has_checkpointer_view,) = execute(
+        conn, "SELECT to_regclass('pg_stat_checkpointer') IS NOT NULL")[0]
+    if has_checkpointer_view:
+        (timed, req) = execute(
+            conn,
+            "SELECT num_timed, num_requested FROM pg_stat_checkpointer"
+        )[0]
+    else:
+        (timed, req) = execute(
+            conn,
+            "SELECT checkpoints_timed, checkpoints_req "
+            "FROM pg_stat_bgwriter"
+        )[0]
     return timed + req
 
 
