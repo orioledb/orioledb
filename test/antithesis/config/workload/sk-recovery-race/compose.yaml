@@ -16,7 +16,7 @@ services:
       PGUSER: "${POSTGRES_USER}"
       PGPASSWORD: "${POSTGRES_PASSWORD}"
       RACE_WINDOW_SECONDS: "${RACE_WINDOW_SECONDS:-2}"
-    platform: linux/amd64
+    platform: "${PLATFORM}"
     build: ./sk-recovery-race
     depends_on:
       test.orioledb:
