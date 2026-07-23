@@ -571,6 +571,8 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 #else
 	if (ostate->curKeyRangeIsLoaded)
 		result = o_bt_advance_array_keys_increment(ostate, ostate->scanDir);
+	else if (so->numArrayKeys)
+		_bt_start_array_keys(scan, ostate->scanDir);
 #endif
 
 	if (!result)
