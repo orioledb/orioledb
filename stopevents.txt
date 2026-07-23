@@ -33,3 +33,4 @@ after_find_downlink
 before_abort_vxids_clear
 replay_on_record
 undo_flush
+before_o_tables_meta_unlock
