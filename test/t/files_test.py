@@ -568,7 +568,7 @@ class FilesTest(BaseTest):
 		    "	PRIMARY KEY (id)\n"
 		    ") USING orioledb;\n"
 		    "INSERT INTO o_test\n"
-		    "	(SELECT id, repeat('x', 250) FROM generate_series(1, 1000, 1) id);\n"
+		    "	(SELECT id, repeat('x', 250) FROM generate_series(1, 2000, 1) id);\n"
 		    "CHECKPOINT;\n")
 
 		con = node.connect()
@@ -596,6 +596,140 @@ class FilesTest(BaseTest):
 		stat2 = os.stat(fname)
 
 		self.assertEqual(stat1.st_blocks, stat2.st_blocks)
+
+		node.start()
+
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_test;")[0][0], 2000)
+		self.assertEqual(
+		    node.execute(
+		        "SELECT count(*) FROM o_test WHERE val = repeat('y', 250);")[0]
+		    [0], 2000)
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_test'::regclass);")[0]
+		    [0])
+
+		node.safe_psql("DELETE FROM o_test WHERE id <= 1000;\n"
+		               "CHECKPOINT;\n")
+		node.safe_psql("INSERT INTO o_test\n"
+		               "	(SELECT id, repeat('z', 250) FROM"
+		               " generate_series(2001, 3000, 1) id);\n"
+		               "CHECKPOINT;\n")
+
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_test;")[0][0], 2000)
+		self.assertEqual(
+		    node.execute(
+		        "SELECT count(*) FROM o_test WHERE val = repeat('y', 250);")[0]
+		    [0], 1000)
+		self.assertEqual(
+		    node.execute(
+		        "SELECT count(*) FROM o_test WHERE val = repeat('z', 250);")[0]
+		    [0], 1000)
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_test'::regclass);")[0]
+		    [0])
+
+		node.stop()
+		node.start()
+
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_test;")[0][0], 2000)
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_test'::regclass);")[0]
+		    [0])
+
+		node.stop()
+
+		os.truncate(fname, os.stat(fname).st_size)
+		stat3 = os.stat(fname)
+		self.assertLessEqual(stat3.st_blocks, stat1.st_blocks)
+
+	@unittest.skipIf(not BaseTest.sparse_files_supported(),
+	                 'sparse files are not supported by file system')
+	def test_sparse_files_undo(self):
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "checkpoint_timeout = 1d\n"
+		    "orioledb.undo_buffers = 128\n"
+		    "orioledb.use_sparse_files = true\n")
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE IF NOT EXISTS o_test (\n"
+		    "	id int NOT NULL,\n"
+		    "	val text NOT NULL,\n"
+		    "	PRIMARY KEY (id)\n"
+		    ") USING orioledb;\n"
+		    "INSERT INTO o_test\n"
+		    "	(SELECT id, repeat('a', 500)"
+		    " FROM generate_series(1, 20000, 1) id);\n")
+
+		node.execute("SELECT * FROM orioledb_get_undo_meta();")
+
+		con1 = node.connect()
+		con1.begin()
+		con1.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+		con1.execute("SELECT count(*) FROM o_test;")
+
+		node.safe_psql("DELETE FROM o_test WHERE id > 10000;\n"
+		               "UPDATE o_test SET val = repeat('b', 2000);\n")
+
+		node.execute("SELECT * FROM orioledb_get_undo_meta();")
+
+		con2 = node.connect()
+		con2.begin()
+		con2.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+		con2.execute("SELECT count(*) FROM o_test;")
+
+		node.safe_psql("UPDATE o_test SET val = repeat('c', 2000)"
+		               " WHERE id <= 3000;\n")
+
+		self.assertEqual(
+		    con1.execute("SELECT count(*) FROM o_test;")[0][0], 20000)
+		self.assertEqual(
+		    con1.execute("SELECT count(*) FROM o_test"
+		                 " WHERE val = repeat('a', 500);")[0][0], 20000)
+
+		node.safe_psql("CHECKPOINT;\n")
+
+		con1.commit()
+		con1.close()
+
+		node.safe_psql("CHECKPOINT;\n")
+		node.execute("SELECT * FROM orioledb_get_undo_meta();")
+
+		self.assertEqual(
+		    con2.execute("SELECT count(*) FROM o_test;")[0][0], 10000)
+		self.assertEqual(
+		    con2.execute("SELECT count(*) FROM o_test"
+		                 " WHERE val = repeat('b', 2000);")[0][0], 10000)
+
+		con2.commit()
+		con2.close()
+
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_test;")[0][0], 10000)
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_test"
+		                 " WHERE val = repeat('c', 2000);")[0][0], 3000)
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_test"
+		                 " WHERE val = repeat('b', 2000);")[0][0], 7000)
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_test'::regclass);")[0]
+		    [0])
+
+		node.stop()
+		node.start()
+
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_test;")[0][0], 10000)
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_test'::regclass);")[0]
+		    [0])
+
+		node.stop()
 
 
 class FilesGroupAccessTest(BaseTest):
