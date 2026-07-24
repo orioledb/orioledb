@@ -81,6 +81,14 @@ How OrioleDB handles a client request for SERIALIZABLE isolation. OrioleDB does 
 - `error`: reject SERIALIZABLE transactions with `ERRCODE_FEATURE_NOT_SUPPORTED` (the legacy behavior).
 - `repeatable_read`: treat SERIALIZABLE as `REPEATABLE READ` for OrioleDB tables only — no extra locks are taken, since OrioleDB's CSN-based snapshot already provides per-transaction stable reads. Heap tables in the same transaction continue to use PG's SSI as usual.
 
+### `orioledb.checksums_enabled`
+
+|             |    |
+| ----------- | -- |
+| **Default** | on |
+
+Read-only. Shows whether OrioleDB page checksums are enabled. OrioleDB always stores and verifies page checksums independently of the PostgreSQL `data_checksums` cluster setting.
+
 ## Advanced config options
 
 ### `orioledb.free_tree_buffers`

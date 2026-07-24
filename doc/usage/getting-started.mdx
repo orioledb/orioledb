@@ -240,7 +240,7 @@ OrioleDB automatically merges sparse pages. Therefore, when many rows are delete
 
 ### Checkpoints, WAL & recovery
 
-OrioleDB has its own recovery mechanism: copy-on-write checkpoints and row-level WAL. However, both OrioleDB's checkpoints and WAL are integrated into PostgreSQL. PostgreSQL checkpointer process handles OrioleDB's tables as well. PostgreSQL WAL stream contains both WAL-records of built-in PostgreSQL tables and row-level WAL-records of OrioleDB's tables.
+OrioleDB has its own recovery mechanism: copy-on-write checkpoints and row-level WAL. However, both OrioleDB's checkpoints and WAL are integrated into PostgreSQL. PostgreSQL checkpointer process handles OrioleDB's tables as well. PostgreSQL WAL stream contains both WAL-records of built-in PostgreSQL tables and row-level WAL-records of OrioleDB's tables. OrioleDB always stores and verifies page checksums, regardless of the PostgreSQL `data_checksums` cluster setting.
 
 Recovery using row-level WAL records might require significant CPU resources. Therefore parallel recovery of OrioleDB's tables is implemented. OrioleDB launches its own pool of recovery workers, each of them responsible for replaying a particular part of WAL records.
 
@@ -299,8 +299,7 @@ OrioleDB is currently in the development stage. Therefore it has the following t
     - `error`: reject SERIALIZABLE transactions with `ERRCODE_FEATURE_NOT_SUPPORTED` (the legacy behavior).
     - `repeatable_read`: treat SERIALIZABLE as `REPEATABLE READ` for OrioleDB tables only — no extra locks are taken, OrioleDB's CSN snapshot already provides per-transaction stable reads. Heap tables in the same transaction continue to use PG's SSI as usual.
 11. Backward fetches from a cursor is supported only when the cursor is declared with `SCROLL`.
-12. OrioleDB doesn't use checksums on data pages and initializing a database
-cluster with `-k` (`--data-checksums`) doesn't have effect on OrioleDB tables.
+12. OrioleDB always uses checksums on data pages and initializing a database cluster without data checksums doesn't have effect on OrioleDB tables.
 13. PostgreSQL sequences are backed by heap relations. Accessing them (e.g., via `nextval()`) forces full PostgreSQL Transaction ID (XID) allocation, bypassing OrioleDB's optimized transaction mechanics unless sequence caching is utilized.
 
 ## Links
