@@ -281,6 +281,27 @@ btree_smgr_filename(BTreeDescr *desc, off_t offset, uint32 chkpNum)
 	return btree_filename(key, segno, chkpNum);
 }
 
+/*
+ * Ensure the data directory for this tree exists.
+ *
+ * A primary tree can resolve to the database's default tablespace
+ * even when the table lives in a user tablespace, and nothing else
+ * may have created that default directory yet.
+ * See https://github.com/orioledb/orioledb/issues/986
+ */
+static void
+btree_smgr_ensure_dir(BTreeDescr *desc)
+{
+	char	   *prefix,
+			   *db_prefix;
+
+	o_get_prefixes_for_tablespace(desc->oids.datoid, desc->tablespace,
+								  &prefix, &db_prefix);
+	o_verify_dir_exists_or_create(prefix, NULL, NULL);
+	o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+	pfree(db_prefix);
+}
+
 static File
 btree_open_smgr_file(BTreeDescr *desc, uint32 num, uint32 chkpNum,
 					 uint32 loadId)
@@ -307,6 +328,12 @@ btree_open_smgr_file(BTreeDescr *desc, uint32 num, uint32 chkpNum,
 									   (off_t) num * ORIOLEDB_SEGMENT_SIZE,
 									   chkpNum);
 		hashElem->file = PathNameOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
+		if (hashElem->file <= 0 && errno == ENOENT)
+		{
+			/* The data directory may not exist - create and retry. */
+			btree_smgr_ensure_dir(desc);
+			hashElem->file = PathNameOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
+		}
 		hashElem->loadId = loadId;
 		if (hashElem->file <= 0)
 			ereport(FATAL,
@@ -345,6 +372,12 @@ btree_open_smgr_file(BTreeDescr *desc, uint32 num, uint32 chkpNum,
 									   (off_t) num * ORIOLEDB_SEGMENT_SIZE,
 									   chkpNum);
 		desc->smgr.array.files[num] = PathNameOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
+		if (desc->smgr.array.files[num] <= 0 && errno == ENOENT)
+		{
+			/* The data directory may not exist - create and retry. */
+			btree_smgr_ensure_dir(desc);
+			desc->smgr.array.files[num] = PathNameOpenFile(filename, O_RDWR | O_CREAT | PG_BINARY);
+		}
 
 		if (desc->smgr.array.files[num] <= 0)
 			ereport(FATAL,
