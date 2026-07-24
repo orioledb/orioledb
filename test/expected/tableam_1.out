@@ -4928,10 +4928,10 @@ CREATE INDEX o_test_1_idx ON o_test_1 (b, a);
 UPDATE o_test_1 SET b = '-0' WHERE b = '0';
 UPDATE o_test_1 SET a = '-0' WHERE a = '0';
 SET enable_seqscan = off;
-EXPLAIN SELECT * FROM o_test_1 ORDER BY b;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
- Index Only Scan using o_test_1_idx on o_test_1  (cost=0.13..4.16 rows=2 width=8)
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_1 ORDER BY b;
+                   QUERY PLAN                   
+------------------------------------------------
+ Index Only Scan using o_test_1_idx on o_test_1
 (1 row)
 
 SELECT * FROM o_test_1 ORDER BY b;
