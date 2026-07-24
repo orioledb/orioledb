@@ -374,7 +374,11 @@ make_primary_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	else
 		result->compress = table->primary_compress;
 	result->fillfactor = table->fillfactor;
-	result->tablespace = tableIndex->tablespace;
+
+	/*
+	 * Explicitly set tablespace or it will be defaulted
+	 */
+	result->tablespace = table->tablespace;
 	Assert(result->tablespace);
 	saved_nLeafFields = table->nfields;
 	result->nLeafFields = table->nfields;
