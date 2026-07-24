@@ -175,6 +175,21 @@ CREATE TABLE composite (
 INSERT INTO composite SELECT i / 100, i % 100, md5(i::text)
                       FROM generate_series(1, 10000) i;
 
+-- SQL-language function used inside an index expression.  SECURITY DEFINER
+-- stops the planner from inlining it, so it is really invoked through the SQL
+-- function call manager.  In catalog-free contexts (recovery, checkpointer)
+-- that manager is OrioleDB's o_fmgr_sql, which reads the function's parse
+-- trees (jf_targetList/qtlists) from the OrioleDB proc cache.  Those trees are
+-- stored in this major's nodeToString format; a cross-major upgrade must
+-- rebuild the proc cache, or evaluating this index expression during recovery
+-- dereferences NULL trees and crashes (see step 9b).
+CREATE FUNCTION oriole_suffix(t text) RETURNS text
+	LANGUAGE sql IMMUTABLE SECURITY DEFINER AS $$ SELECT t || '_sql' $$;
+
+CREATE TABLE func_index (id int PRIMARY KEY, val text) USING orioledb;
+INSERT INTO func_index SELECT i, 'v_' || i FROM generate_series(1, 1000) i;
+CREATE INDEX func_index_expr ON func_index ((oriole_suffix(val)));
+
 CHECKPOINT;
 EOF
 
@@ -434,6 +449,11 @@ if db_exists $PORT_NEW "$TEST_DB"; then
 	"$NEW_PREFIX/bin/psql" -p $PORT_NEW -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
 DISCARD ALL;					-- utility command: triggers the automatic refresh
 SELECT count(*) FROM numbers;	-- erred in step 7a; must succeed after the refresh
+-- Foreground read of the SQL-function index: this backend has a catalog, so
+-- the function is resolved through it (not the proc cache) and succeeds even
+-- if the proc cache is stale.  The proc-cache path is exercised catalog-free
+-- in step 9b.
+SELECT count(*) FROM func_index WHERE oriole_suffix(val) = 'v_1_sql';
 SQL
 	echo "Auto-refreshed OrioleDB expressions in $TEST_DB"
 fi
@@ -504,6 +524,12 @@ fi
 #          catalog of its own.  This is the scenario that asserted in
 #          o_class_cache_deserialize_entry / "default locale not initialized"
 #          before the fix.
+#       3. INSERT into func_index too: its index expression calls a SQL
+#          function, so recovery rebuilding that tuple evaluates the function
+#          via o_fmgr_sql, which reads the function's parse trees from the
+#          OrioleDB proc cache.  A cross-major upgrade leaves those trees NULL
+#          unless the proc cache is rebuilt, so recovery crashes here if the
+#          proc-cache handling regresses.
 #
 #     This runs AFTER the pre/post data comparison (step 9) on purpose: it
 #     mutates $TEST_DB (the INSERT below), so running it earlier would make the
@@ -516,8 +542,9 @@ if [ "$OLD_VERSION" != "$NEW_VERSION" ] && db_exists $PORT_NEW "$TEST_DB"; then
 	"$NEW_PREFIX/bin/psql" -p $PORT_NEW -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
 CHECKPOINT;
 INSERT INTO numbers SELECT i, 'v_' || i FROM generate_series(1000001, 1000050) i;
+INSERT INTO func_index SELECT i, 'v_' || i FROM generate_series(100001, 100050) i;
 SQL
-	# Crash without a clean shutdown so recovery has to replay the insert.
+	# Crash without a clean shutdown so recovery has to replay the inserts.
 	"$NEW_PREFIX/bin/pg_ctl" -D "$NEW_DATA" -m immediate stop
 	"$NEW_PREFIX/bin/pg_ctl" -D "$NEW_DATA" \
 		-o "-p $PORT_NEW" -l "$GITHUB_WORKSPACE/pg${NEW_VERSION}.log" -w start
@@ -529,6 +556,13 @@ SQL
 		"SELECT count(*) FROM numbers WHERE (val || '_x') = 'v_1000001_x'")
 	if [ "$rowcount" != "1" ]; then
 		echo "ERROR: expression index wrong after crash recovery (got '$rowcount', want 1)"
+		exit 1
+	fi
+	# Probe the SQL-function index rebuilt by recovery via the proc cache.
+	rowcount=$("$NEW_PREFIX/bin/psql" -p $PORT_NEW -d "$TEST_DB" -tAc \
+		"SELECT count(*) FROM func_index WHERE oriole_suffix(val) = 'v_100001_sql'")
+	if [ "$rowcount" != "1" ]; then
+		echo "ERROR: SQL-function index wrong after crash recovery (got '$rowcount', want 1)"
 		exit 1
 	fi
 	echo "OK: checkpoint + crash recovery of an expression-index insert survived"
