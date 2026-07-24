@@ -20,6 +20,7 @@
 
 #include "btree/btree.h"
 #include "btree/io.h"
+#include "catalog/o_tablespaces.h"
 #include "checkpoint/checkpoint.h"
 #include "s3/headers.h"
 #include "s3/worker.h"
@@ -991,7 +992,8 @@ s3_headers_error_cleanup(void)
 typedef void (*IterateFilesCallback) (S3HeaderTag tag);
 
 static void
-iterate_tablespace_files(Oid tablespace, char *path, IterateFilesCallback callback)
+iterate_tablespace_files(Oid tablespace, const char *path,
+						 IterateFilesCallback callback)
 {
 	DIR		   *dir,
 			   *dbDir;
@@ -1058,77 +1060,15 @@ iterate_tablespace_files(Oid tablespace, char *path, IterateFilesCallback callba
 }
 
 static void
+iterate_files_cb(Oid tablespace, const char *prefix, void *arg)
+{
+	iterate_tablespace_files(tablespace, prefix, (IterateFilesCallback) arg);
+}
+
+static void
 iterate_files(IterateFilesCallback callback)
 {
-	DIR		   *dir;
-	char		path[MAXPGPATH];
-	char		targetpath[MAXPGPATH];
-	struct dirent *file;
-
-#define PG_TBLSPC "pg_tblspc"
-
-	path[0] = '\0';
-	strlcat(path, ORIOLEDB_DATA_DIR, MAXPGPATH);
-	iterate_tablespace_files(DEFAULTTABLESPACE_OID, path, callback);
-
-	dir = opendir(PG_TBLSPC);
-	if (dir == NULL)
-		ereport(ERROR,
-				(errcode_for_file_access(),
-				 errmsg("could not open directory \"%s\": %m", PG_TBLSPC)));
-	while (errno = 0, (file = readdir(dir)) != NULL)
-	{
-		struct stat st;
-		int			rllen;
-		Oid			tablespace;
-
-		/* Skip special stuff */
-		if (strcmp(file->d_name, ".") == 0 || strcmp(file->d_name, "..") == 0)
-			continue;
-
-		tablespace = pg_strtoint64(file->d_name);
-		Assert(OidIsValid(tablespace));
-		path[0] = '\0';
-		pg_snprintf(path, MAXPGPATH,
-					PG_TBLSPC "/%s/" TABLESPACE_VERSION_DIRECTORY,
-					file->d_name);
-		if (lstat(path, &st) < 0)
-		{
-			ereport(PANIC,
-					(errcode_for_file_access(),
-					 errmsg("could not stat file \"%s\": %m",
-							file->d_name)));
-		}
-
-		if (!S_ISLNK(st.st_mode))
-		{
-			strlcat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
-			iterate_tablespace_files(tablespace, path, callback);
-		}
-		else
-		{
-			rllen = readlink(path, targetpath, sizeof(targetpath));
-			if (rllen < 0)
-				ereport(ERROR,
-						(errcode_for_file_access(),
-						 errmsg("could not read symbolic link \"%s\": %m",
-								path)));
-			if (rllen >= sizeof(targetpath))
-				ereport(ERROR,
-						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-						 errmsg("symbolic link \"%s\" target is too long",
-								path)));
-			targetpath[rllen] = '\0';
-
-			path[0] = '\0';
-			pg_snprintf(path, MAXPGPATH,
-						"%s/" ORIOLEDB_DATA_DIR,
-						targetpath);
-			iterate_tablespace_files(tablespace, path, callback);
-		}
-	}
-	closedir(dir);
-#undef PG_TBLSPC
+	o_tablespaces_foreach_prefix(iterate_files_cb, callback);
 }
 
 static off_t totalFilesSize;

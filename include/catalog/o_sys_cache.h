@@ -662,7 +662,4 @@ o_set_sys_cache_search_datoid(Oid datoid)
 	}
 }
 
-extern void o_get_prefixes_for_tablespace(Oid datoid, Oid tablespace,
-										  char **prefix, char **db_prefix);
-
 #endif							/* __O_SYS_CACHE_H__ */
