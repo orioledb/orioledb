@@ -1,7 +1,14 @@
 #!/bin/sh
 set -eu
 
+copy_output() {
+	source=$1
+	if ! cp -a "$source" "$ANTITHESIS_OUTPUT_DIR/"; then
+		echo "warning: failed to copy $source to $ANTITHESIS_OUTPUT_DIR" >&2
+	fi
+}
+
 if [ -n "${ANTITHESIS_OUTPUT_DIR:-}" ] && [ -d store ]; then
-	cp -a store/latest/results.edn "$ANTITHESIS_OUTPUT_DIR/" || true
-	cp -a store/latest/history.edn "$ANTITHESIS_OUTPUT_DIR/"
+	copy_output store/latest/results.edn
+	copy_output store/latest/history.edn
 fi
