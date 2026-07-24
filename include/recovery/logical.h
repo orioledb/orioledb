@@ -17,10 +17,12 @@
 #include "btree/btree.h"
 #include "recovery/internal.h"
 
+#include "access/xact.h"
 #include "replication/decode.h"
 #include "replication/logical.h"
 
 extern void orioledb_decode(LogicalDecodingContext *ctx,
 							XLogRecordBuffer *buf);
+extern DecodingXidStatus orioledb_logical_xid_status(TransactionId xid);
 
 #endif							/* __LOGICAL_H__ */

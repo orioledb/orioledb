@@ -25,6 +25,9 @@
 #include "tableam/descr.h"
 #include "tuple/slot.h"
 
+#include "transam/oxid.h"
+
+#include "access/transam.h"
 #include "catalog/pg_tablespace.h"
 #include "replication/origin.h"
 #include "replication/reorderbuffer.h"
@@ -141,6 +144,27 @@ get_reorder_buffer_txn(ReorderBuffer *rb, TransactionId xid)
 		return ent->txn;
 	else
 		return NULL;
+}
+
+/*
+ * Mark the top-level transaction of the given xid as not streamable.
+ *
+ * OrioleDB's logical-xid graph (top logical xid, per-subtransaction logical
+ * xids, heap xid for mixed transactions) is fully assembled only when the
+ * finish records are decoded.  Streaming a partially-assembled graph sends
+ * pieces of one transaction as several independent streamed transactions,
+ * which the subscriber applies concurrently: parallel apply workers deadlock
+ * on each other and transaction atomicity is lost.  Until the graph is
+ * linked eagerly at record-emission time, transactions with subtransactions
+ * or heap involvement must take the spill path.
+ */
+static void
+disable_streaming_for_txn(ReorderBuffer *rb, TransactionId xid)
+{
+	ReorderBufferTXN *txn = get_reorder_buffer_txn(rb, xid);
+
+	if (txn != NULL)
+		rbtxn_get_toptxn(txn)->txn_flags |= RBTXN_NO_STREAMING;
 }
 
 /*
@@ -627,6 +651,96 @@ remove_skipped_dml(HTAB **cache, uint64 oxid)
  */
 static HTAB *skippedDMLHash = NULL;
 
+/*
+ * Per-process map from the logical xid Oriole puts into WAL records to the
+ * OXid of the owning transaction.
+ *
+ * Logical xids are allocated from a bitmap (see acquire_logical_xid()) and
+ * have no clog backing, so the concurrent-abort detection in streamed
+ * decoding cannot resolve their status through
+ * TransactionIdIsInProgress()/TransactionIdDidCommit().  During decoding we
+ * observe (oxid, logicalXid) pairs in WAL_REC_XID records; this map lets
+ * orioledb_logical_xid_status() answer status questions from the oxid state
+ * (oxid_get_csn()) instead of clog.
+ *
+ * Entries are created when a WAL_REC_XID record is decoded and removed when
+ * the corresponding finish record (COMMIT/ROLLBACK/JOINT_COMMIT) has been
+ * fully processed.  The map is local to the decoding process.
+ */
+typedef struct LogicalXidOxidEntry
+{
+	TransactionId logicalXid;
+	OXid		oxid;
+} LogicalXidOxidEntry;
+
+static HTAB *logicalXidOxidHash = NULL;
+
+static void
+record_logical_xid_oxid(TransactionId logicalXid, OXid oxid)
+{
+	LogicalXidOxidEntry *entry;
+
+	if (!TransactionIdIsValid(logicalXid) || !OXidIsValid(oxid))
+		return;
+
+	if (logicalXidOxidHash == NULL)
+	{
+		HASHCTL		ctl;
+
+		MemSet(&ctl, 0, sizeof(ctl));
+		ctl.keysize = sizeof(TransactionId);
+		ctl.entrysize = sizeof(LogicalXidOxidEntry);
+		ctl.hcxt = TopMemoryContext;
+		logicalXidOxidHash = hash_create("orioledb logical xid to oxid map",
+										 64, &ctl,
+										 HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+	}
+
+	entry = (LogicalXidOxidEntry *) hash_search(logicalXidOxidHash,
+												&logicalXid, HASH_ENTER, NULL);
+	entry->oxid = oxid;
+}
+
+static void
+forget_logical_xid_oxid(TransactionId logicalXid)
+{
+	if (logicalXidOxidHash == NULL || !TransactionIdIsValid(logicalXid))
+		return;
+
+	hash_search(logicalXidOxidHash, &logicalXid, HASH_REMOVE, NULL);
+}
+
+/*
+ * decoding_xid_status_hook implementation: report the status of a logical
+ * xid from the owning transaction's oxid state.  Returns
+ * DECODING_XID_NOT_HANDLED for xids this decoding session has not seen in a
+ * WAL_REC_XID record, which makes the caller fall back to the regular clog
+ * paths (heap transactions).
+ */
+DecodingXidStatus
+orioledb_logical_xid_status(TransactionId xid)
+{
+	LogicalXidOxidEntry *entry;
+	CommitSeqNo csn;
+
+	if (logicalXidOxidHash == NULL)
+		return DECODING_XID_NOT_HANDLED;
+
+	entry = (LogicalXidOxidEntry *) hash_search(logicalXidOxidHash,
+												&xid, HASH_FIND, NULL);
+	if (entry == NULL)
+		return DECODING_XID_NOT_HANDLED;
+
+	csn = oxid_get_csn(entry->oxid, false);
+	if (COMMITSEQNO_IS_ABORTED(csn))
+		return DECODING_XID_ABORTED;
+	if (COMMITSEQNO_IS_INPROGRESS(csn))
+		return DECODING_XID_IN_PROGRESS;
+
+	/* frozen or normal csn: the transaction committed */
+	return DECODING_XID_COMMITTED;
+}
+
 static WalParseResult
 decode_check_version(const WalReaderState *r)
 {
@@ -699,6 +813,8 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 
 					csnSnapshot = SnapBuildGetCSNSnaphot(ctx->decodeCtx->snapshot_builder);
 					csnSnapshot->nextXid = Max(csnSnapshot->nextXid, rec->oxid);
+
+					record_logical_xid_oxid(rec->logicalXid, rec->oxid);
 				}
 				else
 				{
@@ -727,6 +843,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 				Assert(TransactionIdIsValid(subXid));
 
 				ReorderBufferAssignChild(ctx->decodeCtx->reorder, topXid, subXid, xlogPtr);
+				disable_streaming_for_txn(ctx->decodeCtx->reorder, topXid);
 
 				break;
 			}
@@ -818,6 +935,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 							ReorderBufferForget(ctx->decodeCtx->reorder, txn->xid,
 												ctx->xlogRecPtr);
 
+							forget_logical_xid_oxid(rec->logicalXid);
 							rec->oxid = InvalidOXid;
 							rec->logicalXid = InvalidTransactionId;
 
@@ -882,6 +1000,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 
 				UpdateDecodingStats(ctx->decodeCtx);
 
+				forget_logical_xid_oxid(rec->logicalXid);
 				rec->oxid = InvalidOXid;
 				rec->logicalXid = InvalidTransactionId;
 
@@ -961,6 +1080,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 					UpdateDecodingStats(ctx->decodeCtx);
 				}
 
+				forget_logical_xid_oxid(rec->logicalXid);
 				rec->oxid = InvalidOXid;
 				rec->logicalXid = InvalidTransactionId;
 
@@ -1105,7 +1225,10 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 				 rec->type, recname, rec->oxid, rec->logicalXid, rec->u.savepoint.parentLogicalXid);
 
 			if (!ctx->decodeCtx->fast_forward)
+			{
 				ReorderBufferAssignChild(ctx->decodeCtx->reorder, rec->u.savepoint.parentLogicalXid, rec->logicalXid, ctx->decodeBuf->origptr);
+				disable_streaming_for_txn(ctx->decodeCtx->reorder, rec->u.savepoint.parentLogicalXid);
+			}
 
 			break;
 
@@ -1257,6 +1380,21 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 				txn = get_reorder_buffer_txn(ctx->decodeCtx->reorder, rec->logicalXid);
 				txn->txn_flags |= RBTXN_DISTR_SKIP_CLEANUP;
 
+				/*
+				 * Gate OrioleDB transactions to the spill path.  Streaming is
+				 * only safe for transactions that commit through the
+				 * pure-OrioleDB commit path (WAL_REC_COMMIT with the same
+				 * logical xid).  A transaction that later creates a savepoint
+				 * or acquires a heap xid is finished through the joint-commit
+				 * machinery, which re-parents the reorder buffer transaction;
+				 * chunks streamed before that point are never
+				 * stream-committed and would be lost by consumers. Whether
+				 * either applies is unknowable when streaming would start, so
+				 * all OrioleDB transactions spill until the logical-xid graph
+				 * is linked eagerly at emission time.
+				 */
+				disable_streaming_for_txn(ctx->decodeCtx->reorder, rec->logicalXid);
+
 				/* Skip actual record processing in fast_forward mode */
 				if (ctx->decodeCtx->fast_forward)
 					break;
@@ -1361,9 +1499,6 @@ orioledb_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	};
 
 	WalParseResult st;
-
-	/* do our best to disable streaming */
-	ctx->streaming = false;
 
 	elog(DEBUG4, "OrioleDB decode started startXLogPtr %X/%X endXLogPtr %X/%X",
 		 LSN_FORMAT_ARGS(startXLogPtr), LSN_FORMAT_ARGS(endXLogPtr));

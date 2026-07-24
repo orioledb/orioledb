@@ -114,6 +114,87 @@ class LogicalTest(BaseTest):
 		    "table public.data: INSERT: id[integer]:2 data[text]:'2'\n"
 		    "COMMIT\n")
 
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_streaming_gate(self):
+		node = self.node
+		node.append_conf('postgresql.conf',
+		                 "logical_decoding_work_mem = 64kB\n")
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE o_str(id int primary key, t text) USING orioledb;\n"
+		    "CREATE TABLE h_str(id int primary key, t text) USING heap;\n")
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		def decode():
+			return [
+			    r[0] for r in node.execute(
+			        "SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'stream-changes', '1');"
+			    )
+			]
+
+		# Heap transactions over logical_decoding_work_mem must stream.
+		# Streamed changes are printed by test_decoding as "streaming change
+		# for TXN n" without tuple data; count both forms so the assertion
+		# holds regardless of how much of the transaction was streamed
+		# before the commit was reached.
+		def change_lines(rows):
+			return len([
+			    r for r in rows
+			    if 'INSERT' in r or r.startswith('streaming change')
+			])
+
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO h_str SELECT g, repeat('x', 100) FROM generate_series(1, 5000) g;\n"
+		    "COMMIT;\n")
+		rows = decode()
+		self.assertGreater(
+		    len([r for r in rows if r.startswith('opening a streamed block')]),
+		    0)
+		self.assertEqual(change_lines(rows), 5000)
+
+		# OrioleDB transactions are gated to the spill path and must decode
+		# completely.
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO o_str SELECT g, repeat('x', 100) FROM generate_series(1, 5000) g;\n"
+		    "COMMIT;\n")
+		rows = decode()
+		self.assertEqual(len([r for r in rows if 'streamed' in r]), 0)
+		self.assertEqual(len([r for r in rows if 'INSERT' in r]), 5000)
+
+		# The savepoint variant must also decode completely without
+		# streaming (streamed chunks of a transaction that is later
+		# re-parented by the joint-commit machinery would be lost).
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO o_str SELECT g + 10000, repeat('x', 100) FROM generate_series(1, 2000) g;\n"
+		    "SAVEPOINT s1;\n"
+		    "INSERT INTO o_str SELECT g + 20000, repeat('x', 100) FROM generate_series(1, 3000) g;\n"
+		    "RELEASE SAVEPOINT s1;\n"
+		    "COMMIT;\n")
+		rows = decode()
+		self.assertEqual(len([r for r in rows if 'streamed' in r]), 0)
+		self.assertEqual(len([r for r in rows if 'INSERT' in r]), 5000)
+
+		# A heap transaction following OrioleDB WAL in the same decode pass
+		# must still stream: the gate is per-transaction, not per-session.
+		node.safe_psql('postgres',
+		               "INSERT INTO o_str(id, t) VALUES (99999, 'marker');")
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO h_str SELECT g + 10000, repeat('x', 100) FROM generate_series(1, 5000) g;\n"
+		    "COMMIT;\n")
+		rows = decode()
+		self.assertGreater(
+		    len([r for r in rows if r.startswith('opening a streamed block')]),
+		    0)
+
 	def test_simple_replident(self):
 		node = self.node
 		node.start()  # start PostgreSQL
