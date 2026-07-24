@@ -1034,7 +1034,7 @@ CREATE INDEX o_test_1_idx ON o_test_1 (b, a);
 UPDATE o_test_1 SET b = '-0' WHERE b = '0';
 UPDATE o_test_1 SET a = '-0' WHERE a = '0';
 SET enable_seqscan = off;
-EXPLAIN SELECT * FROM o_test_1 ORDER BY b;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_1 ORDER BY b;
 SELECT * FROM o_test_1 ORDER BY b;
 RESET enable_seqscan;
 DROP TABLE o_test_1;

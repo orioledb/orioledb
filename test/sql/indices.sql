@@ -1177,11 +1177,11 @@ SELECT * FROM o_test_partial_idx_update;
 SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
 UPDATE o_test_partial_idx_update SET am=0 WHERE user_id=100500;
 SELECT * FROM o_test_partial_idx_update;
-EXPLAIN SELECT * FROM o_test_partial_idx_update
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_partial_idx_update
 	WHERE user_id=100500 and am > 0;
 SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
 SET enable_bitmapscan = off;
-EXPLAIN SELECT * FROM o_test_partial_idx_update
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_partial_idx_update
 	WHERE user_id=100500 and am > 0;
 SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
 SET enable_bitmapscan = on;
@@ -1329,13 +1329,13 @@ SELECT orioledb_tbl_structure('o_test_reuse_multiple_indices'::regclass,
 EXPLAIN (COSTS OFF)
 	SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
 SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
-EXPLAIN SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+EXPLAIN (COSTS OFF) SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
 SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
 ALTER TABLE o_test_reuse_multiple_indices ALTER val_5 TYPE char
 	USING chr(ASCII('a') + val_5 / 1000);
 SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
 SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
-EXPLAIN SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+EXPLAIN (COSTS OFF) SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
 SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
 
 \d+ o_test_reuse_multiple_indices
