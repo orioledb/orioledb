@@ -282,13 +282,12 @@ class TablespaceTest(BaseTest):
                         CREATE TABLE test_tbl_ctid(i int, j int, t text) USING orioledb TABLESPACE user_ts1;
                         CREATE INDEX secondary_idx_ctid1 ON test_tbl_ctid (t);
                         CREATE INDEX secondary_idx_ctid2 ON test_tbl_ctid (j);"""
-		# Primary key relation always create in database default tablespace.
-		# So it moved with database.
+		# test_tbl_pkey is in user_ts1, so its pk stays in the tablespace.
 		moved_relations = [
-		    'secondary_idx_ctid1', 'secondary_idx_ctid2', 'test_tbl_pkey_pkey',
+		    'secondary_idx_ctid1', 'secondary_idx_ctid2',
 		    'secondary_idx_pkey1', 'secondary_idx_pkey2'
 		]
-		stay_relations = ['test_tbl_ctid']
+		stay_relations = ['test_tbl_ctid', 'test_tbl_pkey_pkey']
 		created_ts = (None,
 		              os.path.join(self.node.base_dir, 'data',
 		                           'orioledb_data'))

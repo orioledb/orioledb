@@ -1058,7 +1058,15 @@ o_table_make_index_keys(OTable *table, int *num)
 	for (i = 0; i < trees_num; i++)
 	{
 		trees[i].oids = table->indices[i].oids;
-		trees[i].tablespace = table->indices[i].tablespace;
+
+		/*
+		 * The primary follows the table's tablespace. See also
+		 * make_o_index();
+		 */
+		if (table->indices[i].type == oIndexPrimary)
+			trees[i].tablespace = table->tablespace;
+		else
+			trees[i].tablespace = table->indices[i].tablespace;
 	}
 
 	if (ORelOidsIsValid(table->bridge_oids))

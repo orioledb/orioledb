@@ -374,7 +374,13 @@ make_primary_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	else
 		result->compress = table->primary_compress;
 	result->fillfactor = table->fillfactor;
-	result->tablespace = tableIndex->tablespace;
+
+	/*
+	 * The primary tree is the table's storage, so it follows the table's
+	 * tablespace, not the index's own (a user PK inherits the database
+	 * default).  Like the ctid-primary/TOAST/bridge trees.
+	 */
+	result->tablespace = table->tablespace;
 	Assert(result->tablespace);
 	saved_nLeafFields = table->nfields;
 	result->nLeafFields = table->nfields;
