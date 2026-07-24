@@ -779,7 +779,8 @@ sys_tree_reset_on_major_upgrade(int tree_num)
 	 * running server's format -- safe in every backend.
 	 */
 	return tree_num == SYS_TREES_DATABASE_CACHE ||
-		tree_num == SYS_TREES_CLASS_CACHE;
+		tree_num == SYS_TREES_CLASS_CACHE ||
+		tree_num == SYS_TREES_PROC_CACHE;
 }
 
 /*
