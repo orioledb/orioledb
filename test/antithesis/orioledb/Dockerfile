@@ -83,6 +83,14 @@ RUN set -eux; \
 	echo "PGTAG=${PGTAG}"; \
 	echo "ORIOLEDB_VERSION=${ORIOLEDB_VERSION}"; \
 	echo "ORIOLEDB_BUILDTIME=${ORIOLEDB_BUILDTIME}"; \
+	mkdir -p /opt/orioledb; \
+	printf '%s\n' \
+		"PGTAG=${PGTAG}" \
+		"PG_MAJOR=${PG_MAJOR}" \
+		"ORIOLEDB_REF=${ORIOLEDB_REF}" \
+		"ORIOLEDB_VERSION=${ORIOLEDB_VERSION}" \
+		"ORIOLEDB_BUILDTIME=${ORIOLEDB_BUILDTIME}" \
+		> /opt/orioledb/manifest.out; \
     \
 	curl -fsSL "https://github.com/orioledb/postgres/tarball/${PGTAG}" -o /tmp/postgresql.tar.gz; \
 	tar \
@@ -268,6 +276,7 @@ RUN set -eux; \
 	gosu nobody true
 
 COPY --from=builder /usr/local /usr/local
+COPY --from=builder /opt/orioledb/manifest.out /opt/orioledb/manifest.out
 COPY --from=debug-source /usr/src/postgresql /usr/src/postgresql
 
 RUN set -eux; \
