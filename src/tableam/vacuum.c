@@ -944,12 +944,23 @@ lazy_vacuum_bridge_index(LVRelState *vacrel)
 		flush_local_wal(false, false);
 
 	/*
-	 * We set all LP_DEAD items from the first heap pass to LP_UNUSED during
-	 * the second heap pass.  No more, no less.
+	 * We remove all the dead items collected during the first pass, no more
+	 * and no less.
+	 *
+	 * Unlike the heap this invariant is derived from, we do NOT also assert
+	 * vacuumed_pages == lpdead_item_pages.  Both counters count bridge-index
+	 * leaf pages carrying dead items, but they are computed in two separate
+	 * passes over a concurrently-mutable B-tree: lazy_scan_bridge_index()
+	 * counts them while walking page images left-to-right, and this function
+	 * counts them while walking the live tree by dead TID.  Concurrent DML
+	 * (page splits/merges) and eviction between the two passes redistribute
+	 * the same dead items across a different number of pages, so the page
+	 * counts legitimately diverge under load.  The item count is unaffected:
+	 * every dead TID is still located (find_page relocates split items) and
+	 * erased, and TIDs concurrently removed are simply skipped.
 	 */
 	Assert(vacrel->num_index_scans > 1 ||
-		   (NUM_ITEMS(vacrel) == vacrel->lpdead_items &&
-			vacuumed_pages == vacrel->lpdead_item_pages));
+		   NUM_ITEMS(vacrel) == vacrel->lpdead_items);
 
 	ereport(DEBUG2,
 			(errmsg("table \"%s\": removed %lld dead item identifiers in %u pages",
