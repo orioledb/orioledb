@@ -19,6 +19,7 @@
 
 #include "access/nbtree.h"
 #include "access/sdir.h"
+#include "btree/scan.h"
 
 typedef struct OScanState
 {
@@ -26,6 +27,8 @@ typedef struct OScanState
 	OIndexNumber ixNum;
 	MemoryContext cxt;
 	ScanDirection scanDir;
+	/* parallel ordered (key-order) scan: read on-disk downlinks inline */
+	bool		ordered;
 	bool		addJunk;
 	/* is only current index can be used in scan */
 	bool		onlyCurIx;
@@ -53,6 +56,9 @@ typedef struct OScanState
 	/* used only by direct modify functions */
 	CmdType		cmd;
 	OSnapshot	oSnapshot;
+	/* Parallel index scan state (NULL for serial scans) */
+	ParallelOScanDesc pidxscan;
+	BTreeSeqScan *seqScan;
 } OScanState;
 
 typedef struct OIndexPlanState

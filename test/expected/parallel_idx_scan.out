@@ -1,0 +1,372 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s2_setup s2_begin_rr s2_count_all s1_insert s2_count_all s2_commit
+step s2_setup: 
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 4;
+step s2_begin_rr: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+10000
+(1 row)
+
+step s1_insert: 
+	INSERT INTO o_par_idx_scan
+		SELECT i, i % 100 FROM generate_series(10001, 11000) AS i;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+10000
+(1 row)
+
+step s2_commit: COMMIT;
+
+starting permutation: s2_setup s2_begin_rr s2_count_all s1_delete s2_count_all s2_commit
+step s2_setup: 
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 4;
+step s2_begin_rr: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+10000
+(1 row)
+
+step s1_delete: 
+	DELETE FROM o_par_idx_scan WHERE id BETWEEN 5001 AND 6000;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+10000
+(1 row)
+
+step s2_commit: COMMIT;
+
+starting permutation: s2_setup s2_begin_rr s2_count_all s1_update s2_count_all s2_commit
+step s2_setup: 
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 4;
+step s2_begin_rr: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+10000
+(1 row)
+
+step s1_update: 
+	UPDATE o_par_idx_scan SET val = val + 1000 WHERE id <= 500;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+10000
+(1 row)
+
+step s2_commit: COMMIT;
+
+starting permutation: s2_setup s2_begin_rr s2_count_range s1_insert s2_count_range s2_commit
+step s2_setup: 
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 4;
+step s2_begin_rr: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_count_range: 
+	SELECT count(*) FROM o_par_idx_scan WHERE id BETWEEN 1 AND 5000;
+count
+-----
+ 5000
+(1 row)
+
+step s1_insert: 
+	INSERT INTO o_par_idx_scan
+		SELECT i, i % 100 FROM generate_series(10001, 11000) AS i;
+step s2_count_range: 
+	SELECT count(*) FROM o_par_idx_scan WHERE id BETWEEN 1 AND 5000;
+count
+-----
+ 5000
+(1 row)
+
+step s2_commit: COMMIT;
+
+starting permutation: s2_setup s2_begin_rr s2_count_range s1_delete s2_count_range s2_commit
+step s2_setup: 
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 4;
+step s2_begin_rr: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_count_range: 
+	SELECT count(*) FROM o_par_idx_scan WHERE id BETWEEN 1 AND 5000;
+count
+-----
+ 5000
+(1 row)
+
+step s1_delete: 
+	DELETE FROM o_par_idx_scan WHERE id BETWEEN 5001 AND 6000;
+step s2_count_range: 
+	SELECT count(*) FROM o_par_idx_scan WHERE id BETWEEN 1 AND 5000;
+count
+-----
+ 5000
+(1 row)
+
+step s2_commit: COMMIT;
+
+starting permutation: s2_setup s2_begin_rr s2_count_range s1_update s2_count_range s2_commit
+step s2_setup: 
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 4;
+step s2_begin_rr: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_count_range: 
+	SELECT count(*) FROM o_par_idx_scan WHERE id BETWEEN 1 AND 5000;
+count
+-----
+ 5000
+(1 row)
+
+step s1_update: 
+	UPDATE o_par_idx_scan SET val = val + 1000 WHERE id <= 500;
+step s2_count_range: 
+	SELECT count(*) FROM o_par_idx_scan WHERE id BETWEEN 1 AND 5000;
+count
+-----
+ 5000
+(1 row)
+
+step s2_commit: COMMIT;
+
+starting permutation: s2_setup s2_begin_rr s2_count_val s1_update s2_count_val s2_commit
+step s2_setup: 
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 4;
+step s2_begin_rr: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_count_val: 
+	SELECT count(*) FROM o_par_idx_scan WHERE val = 0;
+count
+-----
+  100
+(1 row)
+
+step s1_update: 
+	UPDATE o_par_idx_scan SET val = val + 1000 WHERE id <= 500;
+step s2_count_val: 
+	SELECT count(*) FROM o_par_idx_scan WHERE val = 0;
+count
+-----
+  100
+(1 row)
+
+step s2_commit: COMMIT;
+
+starting permutation: s2_setup s2_begin_rc s2_count_all s1_begin_rc s1_insert s1_commit s2_count_all s2_commit
+step s2_setup: 
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 4;
+step s2_begin_rc: 
+	BEGIN ISOLATION LEVEL READ COMMITTED;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+10000
+(1 row)
+
+step s1_begin_rc: 
+	BEGIN ISOLATION LEVEL READ COMMITTED;
+step s1_insert: 
+	INSERT INTO o_par_idx_scan
+		SELECT i, i % 100 FROM generate_series(10001, 11000) AS i;
+step s1_commit: COMMIT;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+11000
+(1 row)
+
+step s2_commit: COMMIT;
+
+starting permutation: s2_setup s2_begin_rc s2_count_all s1_begin_rc s1_delete s1_commit s2_count_all s2_commit
+step s2_setup: 
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 4;
+step s2_begin_rc: 
+	BEGIN ISOLATION LEVEL READ COMMITTED;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+10000
+(1 row)
+
+step s1_begin_rc: 
+	BEGIN ISOLATION LEVEL READ COMMITTED;
+step s1_delete: 
+	DELETE FROM o_par_idx_scan WHERE id BETWEEN 5001 AND 6000;
+step s1_commit: COMMIT;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+ 9000
+(1 row)
+
+step s2_commit: COMMIT;
+
+starting permutation: s2_setup s2_begin_rc s2_count_all s1_begin_rc s1_update s1_commit s2_count_all s2_commit
+step s2_setup: 
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 4;
+step s2_begin_rc: 
+	BEGIN ISOLATION LEVEL READ COMMITTED;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+10000
+(1 row)
+
+step s1_begin_rc: 
+	BEGIN ISOLATION LEVEL READ COMMITTED;
+step s1_update: 
+	UPDATE o_par_idx_scan SET val = val + 1000 WHERE id <= 500;
+step s1_commit: COMMIT;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+10000
+(1 row)
+
+step s2_commit: COMMIT;
+
+starting permutation: s2_setup s2_begin_rc s2_count_all s1_begin_rc s1_insert s1_rollback s2_count_all s2_commit
+step s2_setup: 
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 4;
+step s2_begin_rc: 
+	BEGIN ISOLATION LEVEL READ COMMITTED;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+10000
+(1 row)
+
+step s1_begin_rc: 
+	BEGIN ISOLATION LEVEL READ COMMITTED;
+step s1_insert: 
+	INSERT INTO o_par_idx_scan
+		SELECT i, i % 100 FROM generate_series(10001, 11000) AS i;
+step s1_rollback: ROLLBACK;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+10000
+(1 row)
+
+step s2_commit: COMMIT;
+
+starting permutation: s2_setup s2_begin_rr s2_sum_val s1_update s2_sum_val s2_commit
+step s2_setup: 
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 4;
+step s2_begin_rr: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_sum_val: 
+	SELECT sum(val) FROM o_par_idx_scan WHERE id BETWEEN 1 AND 1000;
+  sum
+-----
+49500
+(1 row)
+
+step s1_update: 
+	UPDATE o_par_idx_scan SET val = val + 1000 WHERE id <= 500;
+step s2_sum_val: 
+	SELECT sum(val) FROM o_par_idx_scan WHERE id BETWEEN 1 AND 1000;
+  sum
+-----
+49500
+(1 row)
+
+step s2_commit: COMMIT;
+
+starting permutation: s1_begin_rr s2_setup s2_begin_rr s2_count_all s1_insert s2_count_all s1_commit s2_commit
+step s1_begin_rr: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_setup: 
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 4;
+step s2_begin_rr: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+10000
+(1 row)
+
+step s1_insert: 
+	INSERT INTO o_par_idx_scan
+		SELECT i, i % 100 FROM generate_series(10001, 11000) AS i;
+step s2_count_all: 
+	SELECT count(*) FROM o_par_idx_scan;
+count
+-----
+10000
+(1 row)
+
+step s1_commit: COMMIT;
+step s2_commit: COMMIT;

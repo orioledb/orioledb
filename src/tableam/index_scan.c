@@ -62,6 +62,12 @@ init_index_scan_state(OPlanState *o_plan_state, OScanState *ostate,
 	pfree(scan);
 	scan = &ostate->scandesc;
 
+	/*
+	 * For parallel-aware index scans, the parallel state is managed through
+	 * OScanState.pidxscan rather than the standard IndexScanDescData
+	 * parallel_scan.  Leave parallel_scan NULL in that case since we don't
+	 * use the standard parallel index scan infrastructure.
+	 */
 	scan->parallel_scan = NULL;
 	scan->xs_temp_snap = false;
 #if PG_VERSION_NUM >= 180000
@@ -571,6 +577,17 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 #else
 	if (ostate->curKeyRangeIsLoaded)
 		result = o_bt_advance_array_keys_increment(ostate, ostate->scanDir);
+	else if (so->numArrayKeys)
+
+		/*
+		 * First range of an array scan: position the array keys at the
+		 * scan-direction start (last element for a backward scan, first for
+		 * forward).  Without this a backward scan starts on the smallest
+		 * element and the first o_bt_advance_array_keys_increment() rolls off
+		 * the low end, dropping every element but the smallest.  (PG17+ does
+		 * this in the branch above.)
+		 */
+		_bt_start_array_keys(scan, ostate->scanDir);
 #endif
 
 	if (!result)
@@ -1025,6 +1042,170 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 	return tup;
 }
 
+static BTreeSeqScan *
+o_exec_parallel_idx_scan_new_seqscan(OScanState *ostate,
+									 OIndexDescr *indexDescr)
+{
+	BTreeSeqScan *seqScan;
+
+	seqScan = make_btree_seq_scan(&indexDescr->desc,
+								  &ostate->oSnapshot,
+								  ostate->pidxscan);
+
+	if (!ostate->curKeyRange.empty)
+		btree_seq_scan_set_range_filter(seqScan, &ostate->curKeyRange);
+
+	/*
+	 * An ordered parallel path reads on-disk downlinks inline in the plan's
+	 * scan direction so each worker emits a sorted stream (for Gather Merge).
+	 */
+	if (ostate->ordered)
+		btree_seq_scan_set_ordered(seqScan, true, ostate->scanDir);
+
+	return seqScan;
+}
+
+static void
+o_exec_parallel_idx_scan_load_keyrange(OScanState *ostate,
+									   OIndexDescr *indexDescr,
+									   MemoryContext tupleCxt)
+{
+	BTScanOpaque so = (BTScanOpaque) ostate->scandesc.opaque;
+	MemoryContext oldcontext;
+
+	if (ostate->curKeyRangeIsLoaded)
+		return;
+
+	ostate->curKeyRangeIsLoaded = true;
+
+	if (so->numArrayKeys)
+	{
+		/* punt if we have any unsatisfiable array keys */
+		if (so->numArrayKeys < 0)
+		{
+			ostate->curKeyRange.empty = true;
+			return;
+		}
+
+		_bt_start_array_keys(&ostate->scandesc, ostate->scanDir);
+	}
+	_bt_preprocess_keys(&ostate->scandesc);
+	ostate->numPrefixExactKeys =
+		o_adjust_num_prefix_exact_keys(so, ostate->numPrefixExactKeys);
+	ostate->curKeyRange.empty = true;
+
+	pgstat_count_index_scan(ostate->scandesc.indexRelation);
+#if PG_VERSION_NUM >= 180000
+
+	/*
+	 * Match upstream AMs (nbtsearch.c::_bt_first et al.) and bump the PG18
+	 * EXPLAIN ANALYZE "Index Searches" counter once per descent from root.
+	 * This is the same point at which we account a logical index scan for
+	 * pgstat.
+	 */
+	if (ostate->scandesc.instrument)
+		ostate->scandesc.instrument->nsearches++;
+#endif
+
+	oldcontext = MemoryContextSwitchTo(ostate->cxt);
+	ostate->exact = o_key_data_to_key_range(&ostate->curKeyRange,
+											so->keyData,
+											so->numberOfKeys,
+											(so->numArrayKeys > 0) ? so->arrayKeys : NULL,
+											0,
+											indexDescr->nonLeafTupdesc->natts,
+											indexDescr->fields);
+	MemoryContextSwitchTo(oldcontext);
+}
+
+static TupleTableSlot *
+o_exec_parallel_idx_scan(OScanState *ostate, ScanState *ss)
+{
+	OTableDescr *descr = relation_get_descr(ss->ss_currentRelation);
+	OIndexDescr *indexDescr = descr->indices[ostate->ixNum];
+	MemoryContext tupleCxt = ss->ss_ScanTupleSlot->tts_mcxt;
+
+	if (ostate->seqScan == NULL)
+	{
+		Assert(ostate->pidxscan != NULL);
+		Assert(ostate->scanDir == ForwardScanDirection ||
+			   ostate->scanDir == BackwardScanDirection);
+
+		o_exec_parallel_idx_scan_load_keyrange(ostate, indexDescr, tupleCxt);
+
+		if (ostate->curKeyRange.empty)
+			return ExecClearTuple(ss->ss_ScanTupleSlot);
+
+		ostate->seqScan = o_exec_parallel_idx_scan_new_seqscan(ostate,
+															   indexDescr);
+	}
+
+	while (true)
+	{
+		BTreeLocationHint hint = {OInvalidInMemoryBlkno, 0};
+		CommitSeqNo tupleCsn;
+		OTuple		tuple;
+		BTScanOpaque so = (BTScanOpaque) ostate->scandesc.opaque;
+
+		tuple = btree_seq_scan_getnext(ostate->seqScan, tupleCxt,
+									   &tupleCsn, &hint);
+
+		if (O_TUPLE_IS_NULL(tuple))
+			return ExecClearTuple(ss->ss_ScanTupleSlot);
+
+		if (!ostate->curKeyRange.empty)
+		{
+			/*
+			 * For parallel scans with SAOP, we use a union range covering all
+			 * array elements (see o_exec_parallel_idx_scan_load_keyrange
+			 * passing numPrefixExactKeys=0).  Filter each tuple against the
+			 * actual array elements by passing 0 here too, so that
+			 * is_tuple_valid checks every array key regardless of position.
+			 */
+			int			numPrefix = so->numArrayKeys > 0 ? 0 :
+				ostate->numPrefixExactKeys;
+
+			if (!is_tuple_valid(tuple, indexDescr, &ostate->curKeyRange,
+								so, numPrefix))
+				continue;
+		}
+
+		if (ostate->ixNum == PrimaryIndexNumber || ostate->onlyCurIx)
+		{
+			tts_orioledb_store_tuple(ss->ss_ScanTupleSlot, tuple,
+									 descr, tupleCsn, ostate->ixNum,
+									 true, &hint);
+		}
+		else
+		{
+			OBTreeKeyBound bound;
+			OTuple		ptup;
+			OIndexDescr *primary = GET_PRIMARY(descr);
+
+			o_fill_pindex_tuple_key_bound(&indexDescr->desc, tuple, &bound);
+
+			ptup = o_btree_find_tuple_by_key(&primary->desc,
+											 (Pointer) &bound, BTreeKeyBound,
+											 &ostate->oSnapshot, &tupleCsn,
+											 tupleCxt, NULL);
+			pfree(tuple.data);
+
+			if (O_TUPLE_IS_NULL(ptup))
+				continue;
+
+			tts_orioledb_store_tuple(ss->ss_ScanTupleSlot, ptup,
+									 descr, tupleCsn, PrimaryIndexNumber,
+									 true, NULL);
+		}
+
+		if (!o_exec_qual(ss->ps.ps_ExprContext,
+						 ss->ps.qual, ss->ss_ScanTupleSlot))
+			continue;
+
+		return ss->ss_ScanTupleSlot;
+	}
+}
+
 /* fetches next tuple for oIterateDirectModify */
 TupleTableSlot *
 o_exec_fetch(OScanState *ostate, ScanState *ss)
@@ -1035,6 +1216,9 @@ o_exec_fetch(OScanState *ostate, ScanState *ss)
 	bool		scan_primary = ostate->ixNum == PrimaryIndexNumber ||
 		!ostate->onlyCurIx;
 	MemoryContext tupleCxt = ss->ss_ScanTupleSlot->tts_mcxt;
+
+	if (ostate->pidxscan)
+		return o_exec_parallel_idx_scan(ostate, ss);
 
 	do
 	{

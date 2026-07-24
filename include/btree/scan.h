@@ -16,6 +16,7 @@
 
 #include "btree/btree.h"
 #include "btree/page_contents.h"
+#include "tableam/key_range.h"
 
 #include "executor/tuptable.h"
 #include "utils/sampling.h"
@@ -71,6 +72,10 @@ extern OTuple btree_seq_scan_getnext(BTreeSeqScan *scan, MemoryContext mctx,
 extern OTuple btree_seq_scan_getnext_raw(BTreeSeqScan *scan, MemoryContext mctx,
 										 bool *end, BTreeLocationHint *hint);
 extern void free_btree_seq_scan(BTreeSeqScan *scan);
+extern void btree_seq_scan_set_range_filter(BTreeSeqScan *scan,
+											OBTreeKeyRange *scanRange);
+extern void btree_seq_scan_set_ordered(BTreeSeqScan *scan, bool ordered,
+									   ScanDirection scanDir);
 extern void seq_scans_cleanup(void);
 extern int	meta_page_get_num_seq_scans(OInMemoryBlkno metaPageBlkno);
 
