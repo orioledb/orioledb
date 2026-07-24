@@ -23,6 +23,12 @@ PAGE_STATE_INVALID_PROCNO = PAGE_STATE_LIST_TAIL_MASK
 ORIOLEDB_BLCKSZ = 8192
 O_BLKNO_MASK = 0x7FFFFFFF
 
+# Constants for ODBProcData.commitInProgressXlogLocation (include/recovery/wal.h).
+# OWalInvalidCommitPos is the idle sentinel; OWalTmpCommitPos (0) is set on
+# entry to flush_local_wal(isCommit=true) before the commit LSN is known.
+OWAL_INVALID_COMMIT_POS = 0xFFFFFFFFFFFFFFFF
+OWAL_TMP_COMMIT_POS = 0
+
 
 def safe_eval(expr):
 	try:
@@ -125,6 +131,55 @@ def dump_page(blkno, seen):
 		steps += 1
 
 
+def dump_commit_in_progress():
+	"""Dump every proc slot whose commitInProgressXlogLocation is not the
+	idle sentinel, flagging the ones <= the checkpointer's redo_pos.
+
+	wait_finish_active_commits(redo_pos) busy-waits until EVERY slot's
+	commitInProgressXlogLocation exceeds redo_pos, with no liveness/ownership
+	guard.  A single slot stuck <= redo_pos (a leaked value never reset to
+	OWalInvalidCommitPos, or a live committer blocked mid-commit) hangs the
+	checkpointer forever while it holds oTablesMetaLock+oSysTreesLock EXCLUSIVE
+	-- exactly the primary-side hang this dump is meant to pin down.  redo_pos
+	is read from checkpoint_state->replayStartPtr, the value passed at
+	src/checkpoint/checkpoint.c:1440."""
+	max_procs_val = safe_eval("max_procs")
+	try:
+		max_procs_int = int(max_procs_val)
+	except (TypeError, ValueError, gdb.error):
+		print("    commitInProgress scan: max_procs unavailable")
+		return
+	redo = safe_eval("checkpoint_state->replayStartPtr")
+	try:
+		redo_int = int(redo)
+	except (TypeError, ValueError, gdb.error):
+		redo_int = None
+	redo_str = ("0x%x" % redo_int) if redo_int is not None else "<n/a>"
+	print(f"    commitInProgress scan: max_procs={max_procs_int} "
+	      f"redo_pos(checkpoint_state->replayStartPtr)={redo_str}")
+	any_hit = False
+	for i in range(max_procs_int):
+		v = safe_eval(f"oProcData[{i}].commitInProgressXlogLocation.value")
+		try:
+			vi = int(v) & 0xFFFFFFFFFFFFFFFF
+		except (TypeError, ValueError, gdb.error):
+			continue
+		if vi == OWAL_INVALID_COMMIT_POS:
+			continue
+		any_hit = True
+		pid = safe_eval(f"ProcGlobal->allProcs[{i}].pid")
+		if vi == OWAL_TMP_COMMIT_POS:
+			tag = "  TMP(0): mid flush_local_wal, LSN not yet assigned"
+		elif redo_int is not None and vi <= redo_int:
+			tag = "  <= redo_pos  ** HANGS wait_finish_active_commits **"
+		else:
+			tag = "  > redo_pos (not blocking)"
+		print(f"      [proc {i}] pid={pid} "
+		      f"commitInProgressXlogLocation=0x{vi:x}{tag}")
+	if not any_hit:
+		print("      (all slots idle = OWalInvalidCommitPos)")
+
+
 def dump_held_lwlocks():
 	"""Name the LWLocks this process holds.  A held LWLock keeps
 	InterruptHoldoffCount > 0, which makes ProcessInterrupts() (hence
@@ -165,6 +220,7 @@ def dump_held_lwlocks():
 def main():
 	dump_held_lwlocks()
 	seen = set()
+	commit_dumped = False
 	inferior = gdb.selected_inferior()
 	threads = inferior.threads()
 	if not threads:
@@ -189,6 +245,16 @@ def main():
 					dump_page(blkno, seen)
 				else:
 					print("    (blkno optimised out)")
+			# The checkpointer hangs in wait_finish_active_commits (often
+			# inlined into o_perform_checkpoint) waiting for every proc's
+			# commit to drain -- dump the slots so the culprit is named.
+			if (not commit_dumped
+			    and fname in ("wait_finish_active_commits",
+			                  "o_perform_checkpoint")):
+				print(f"--- {fname} in thread {thread.num}: "
+				      f"checkpointer waiting for commit drain ---")
+				dump_commit_in_progress()
+				commit_dumped = True
 			try:
 				frame = frame.older()
 			except gdb.error:
