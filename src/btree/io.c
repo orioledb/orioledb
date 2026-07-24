@@ -29,7 +29,7 @@
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "catalog/free_extents.h"
-#include "catalog/o_sys_cache.h"
+#include "catalog/o_tablespaces.h"
 #include "recovery/recovery.h"
 #include "s3/headers.h"
 #include "s3/worker.h"

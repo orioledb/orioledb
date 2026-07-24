@@ -1278,6 +1278,7 @@ _PG_init(void)
 	AcceptInvalidationMessagesHook = orioledb_AcceptInvalidationMessagesHook;
 	set_rel_pathlist_hook = orioledb_set_rel_pathlist_hook;
 	set_plain_rel_pathlist_hook = orioledb_set_plain_rel_pathlist_hook;
+	RegisterXactCallback(orioledb_drop_database_xact_callback, NULL);
 	RegisterXactCallback(undo_xact_callback, NULL);
 	RegisterSubXactCallback(undo_subxact_callback, NULL);
 	get_xidless_commit_lsn_hook = orioledb_get_xidless_commit_lsn;
