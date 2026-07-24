@@ -178,6 +178,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  concurrent_truncate \
 				  uniq
 TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
+						test/t/tablespace_test.py \
 						test/t/checkpointer_test.py \
 						test/t/correlation_test.py \
 						test/t/eviction_bgwriter_test.py \
