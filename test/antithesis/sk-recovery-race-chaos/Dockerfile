@@ -12,7 +12,7 @@ ENV PGHOST=orioledb \
     PGDATABASE=skrecoveryracechaos \
     PGUSER=skrecoveryracechaos \
     PGPASSWORD=pw \
-    BURST_SECONDS=5 \
+    BURST_SECONDS=90 \
     BURST_WORKERS=8
 
 COPY --chmod=755 singleton_driver_sk-recovery-race-chaos /opt/antithesis/test/v1/sk-recovery-race-chaos/

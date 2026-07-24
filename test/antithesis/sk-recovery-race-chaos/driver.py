@@ -21,7 +21,7 @@ PGPORT = int(os.environ.get("PGPORT", "5432"))
 PGDATABASE = os.environ["PGDATABASE"]
 PGUSER = os.environ["PGUSER"]
 PGPASSWORD = os.environ["PGPASSWORD"]
-BURST_SECONDS = float(os.environ.get("BURST_SECONDS", "5"))
+BURST_SECONDS = float(os.environ.get("BURST_SECONDS", "90"))
 BURST_WORKERS = int(os.environ.get("BURST_WORKERS", "8"))
 
 TABLE = "o_sk_pending"
