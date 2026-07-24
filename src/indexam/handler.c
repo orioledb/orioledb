@@ -32,6 +32,7 @@
 #include "utils/stopevent.h"
 
 #include "access/amapi.h"
+#include "access/multixact.h"
 #include "access/relation.h"
 #include "commands/progress.h"
 #include "commands/vacuum.h"
@@ -103,6 +104,7 @@ static Size orioledb_amestimateparallelscan(void);
 #endif
 static void orioledb_aminitparallelscan(void *target);
 static void orioledb_amparallelrescan(IndexScanDesc scan);
+static BlockNumber orioledb_amnblocks(Relation indexRelation, ForkNumber forkNum);
 
 static IndexBuildResult *bridged_ambuild(Relation heap, Relation index, IndexInfo *indexInfo);
 static bool bridged_aminsert(Relation rel, Datum *values, bool *isnull,
@@ -180,6 +182,7 @@ orioledb_btree_handler(void)
 	amroutine->amestimateparallelscan = orioledb_amestimateparallelscan;
 	amroutine->aminitparallelscan = orioledb_aminitparallelscan;
 	amroutine->amparallelrescan = orioledb_amparallelrescan;
+	amroutine->amnblocks = orioledb_amnblocks;
 
 	return amroutine;
 }
@@ -235,6 +238,7 @@ orioledb_indexam_routine_hook(Oid tamoid, Oid amhandler)
 				bridged->routine.ambuild = bridged_ambuild;
 				bridged->routine.aminsertextended = bridged_aminsert;
 				bridged->routine.ambeginscan = bridged_ambeginscan;
+				bridged->routine.amcanreturn = NULL;
 				MemoryContextSwitchTo(old_mcxt);
 				amroutine = palloc0(sizeof(IndexAmRoutine));
 				memcpy(amroutine, &bridged->routine, sizeof(IndexAmRoutine));
@@ -311,7 +315,6 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	result->heap_tuples = 0.0;
 	result->index_tuples = 0.0;
 
-
 	if (in_nontransactional_truncate || !OidIsValid(o_saved_relrewrite))
 	{
 		ORelOids	tbl_oids;
@@ -325,6 +328,8 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 			/* If table already has primary index, redefine it */
 			drop_primary_index(heap, o_table);
 			redefine_pkey_for_rel(heap);
+			result->heap_tuples = heap->rd_rel->reltuples;
+			result->index_tuples = heap->rd_rel->reltuples;
 		}
 		else
 		{
@@ -996,9 +1001,48 @@ IndexBulkDeleteResult *
 orioledb_amvacuumcleanup(IndexVacuumInfo *info, IndexBulkDeleteResult *stats)
 {
 	OBTOptions *options = (OBTOptions *) info->index->rd_options;
+	OTableDescr *descr;
+	ORelOids	idxOids;
+	OIndexNumber ixnum;
 
 	if (options && !options->orioledb_index)
 		return btvacuumcleanup(info, stats);
+
+	if (stats == NULL)
+		stats = (IndexBulkDeleteResult *) palloc0(sizeof(IndexBulkDeleteResult));
+
+	descr = relation_get_descr(info->heaprel);
+	if (descr != NULL)
+	{
+		ORelOidsSetFromRel(idxOids, info->index);
+		ixnum = find_tree_in_descr(descr, idxOids);
+		if (ixnum != InvalidIndexNumber)
+		{
+			BTreeDescr *td = &descr->indices[ixnum]->desc;
+
+			o_btree_load_shmem(td);
+			stats->num_pages = TREE_NUM_LEAF_PAGES(td);
+		}
+	}
+	stats->num_index_tuples = info->num_heap_tuples;
+	stats->estimated_count = info->estimated_count;
+
+	if (info->index->rd_index->indisprimary)
+	{
+		BlockNumber curpages = RelationGetNumberOfBlocks(info->heaprel);
+
+		vac_update_relstats(info->heaprel,
+							curpages,
+							info->num_heap_tuples,
+							curpages,
+#if PG_VERSION_NUM >= 180000
+							0,
+#endif
+							true,
+							InvalidTransactionId,
+							InvalidMultiXactId,
+							NULL, NULL, false);
+	}
 
 	return stats;
 }
@@ -1009,7 +1053,7 @@ orioledb_amcanreturn(Relation index, int attno)
 	OBTOptions *options = (OBTOptions *) index->rd_options;
 
 	if (options && !options->orioledb_index)
-		return btcanreturn(index, attno);
+		return false;
 
 	return true;
 }
@@ -2040,6 +2084,24 @@ orioledb_aminitparallelscan(void *target)
 static void
 orioledb_amparallelrescan(IndexScanDesc scan)
 {
+}
+
+static BlockNumber
+orioledb_amnblocks(Relation indexRelation, ForkNumber forkNum)
+{
+	OIndexDescr *indexDescr;
+	ORelOids	idxOids;
+	bool		found;
+
+	if (oIndexDescrHash == NULL)
+		return InvalidBlockNumber;
+
+	ORelOidsSetFromRel(idxOids, indexRelation);
+	indexDescr = hash_search(oIndexDescrHash, &idxOids, HASH_FIND, &found);
+	if (found && OMetaPageIsValid(&indexDescr->desc))
+		return TREE_NUM_LEAF_PAGES(&indexDescr->desc);
+
+	return InvalidBlockNumber;
 }
 
 static IndexAmRoutine *

@@ -257,9 +257,9 @@ SELECT * FROM o_test_ix_ams ORDER BY j;
 
 EXPLAIN (COSTS OFF)
 	SELECT j FROM o_test_ix_ams ORDER BY j;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Index Only Scan using o_test_ix_ams_ix1 on o_test_ix_ams
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Scan using o_test_ix_ams_ix1 on o_test_ix_ams
 (1 row)
 
 SELECT j FROM o_test_ix_ams ORDER BY j;
@@ -1501,9 +1501,9 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT p FROM o_test_ix_ams WHERE p <@ box(point(0,0), point(4000, 5000));
-                        QUERY PLAN                        
-----------------------------------------------------------
- Index Only Scan using o_test_ix_ams_ix4 on o_test_ix_ams
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Index Scan using o_test_ix_ams_ix4 on o_test_ix_ams
    Index Cond: (p <@ '(4000,5000),(0,0)'::box)
 (2 rows)
 
@@ -3674,9 +3674,9 @@ SELECT * FROM o_test_bridged_index_only_scan ORDER BY t;
 SET LOCAL enable_bitmapscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT t FROM o_test_bridged_index_only_scan WHERE t = 'x';
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
- Index Only Scan using o_test_bridged_index_only_scan_ix1 on o_test_bridged_index_only_scan
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Index Scan using o_test_bridged_index_only_scan_ix1 on o_test_bridged_index_only_scan
    Index Cond: (t = 'x'::text)
 (2 rows)
 
@@ -4206,9 +4206,9 @@ SELECT orioledb_tbl_indices('test_no_bmscan_on_text_pkey'::regclass, true);
 (1 row)
 
 EXPLAIN (COSTS OFF) SELECT data2 from test_no_bmscan_on_text_pkey where data2 = 'barbar';
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
- Index Only Scan using test_no_bmscan_on_text_pkey_data2_idx on test_no_bmscan_on_text_pkey
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Index Scan using test_no_bmscan_on_text_pkey_data2_idx on test_no_bmscan_on_text_pkey
    Index Cond: (data2 = 'barbar'::text)
 (2 rows)
 

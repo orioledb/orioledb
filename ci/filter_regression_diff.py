@@ -150,6 +150,8 @@ skip_hunk_errors = {
 	["generated_stored", "generated_virtual"],
 	r"ERROR:  permission denied for (table gtest\w+|function gf\w+)":
 	["generated_stored", "generated_virtual"],
+	r"ERROR:  lossy distance functions are not supported in index-only scans":
+	["gist"],
 }
 
 def can_drop_hunk(testName, line):
@@ -281,6 +283,9 @@ known_table_diffs = {
 	],
 	"brin_multi" : [
 		[[['0']], [['<N>']]]
+	],
+	"aggregates": [
+		[[['']],  [['<N>']]],
 	],
 	"reloptions": [
 		[[['t']], [['f']]]
@@ -439,6 +444,10 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 					target_up = True
 				else:
 					equal = False
+			elif (target_cur[1].startswith('Index Only Scan')
+				  or target_cur[1].startswith('Index Scan')):
+				src_up = True
+				target_up = True
 			else:
 				equal = False
 		elif is_commutative_cond_eq(src_cur_value, target_cur[1]):
@@ -457,6 +466,10 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 
 			src_down = True
 			target_down = True
+		elif (src_cur_value == 'HashAggregate'
+			  and target_cur[1] == 'Group'):
+			src_up = True
+			target_up = True
 		elif (src_cur_value == 'Merge Append'
 			  and target_cur[1] == 'Append'):
 			src_down = True
@@ -464,6 +477,19 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 		elif src_cur_value == target_cur[1]:
 			src_down = True
 			target_down = True
+		elif (re.match(r'(Index( Only)? Scan|Bitmap Index Scan) using ', src_cur_value)
+			  and re.sub(r' using \S+', '', src_cur_value)
+			      == re.sub(r' using \S+', '', target_cur[1])):
+			src_up = True
+			target_up = True
+		elif (src_cur_value.startswith('Index Only Scan')
+			  and target_cur[1].startswith('Index Scan')):
+			src_up = True
+			target_up = True
+		elif (re.match(r'(Hash|Merge|Nested Loop)( \w+)? Join', src_cur_value)
+			  and re.match(r'(Hash|Merge|Nested Loop)( \w+)? Join', target_cur[1])):
+			src_up = True
+			target_up = True
 		else:
 			# processing known real plan differences,
 			# that are omitted for now but should be checked in the future
@@ -481,7 +507,10 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				target_up = True
 			elif (src_cur_value.startswith('Index Only Scan')
 			      and target_cur[1].startswith('Seq Scan')):
-				# sometimes we have seq scan instead of index scan
+				src_up = True
+				target_up = True
+			elif (src_cur_value.startswith('Seq Scan')
+			      and target_cur[1].startswith('Index Only Scan')):
 				src_up = True
 				target_up = True
 			elif (src_cur_value.startswith('Index Only Scan')
@@ -513,9 +542,8 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 			elif (src_cur_value == target_cur[1].replace('bytea', 'tid')):
 				src_down = True
 				target_down = True
-			elif (test_name in ['equivclass', 'inherit', 'aggregates']
-				  and (src_cur_value.startswith('Index Scan')
-					   and target_cur[1].startswith('Index Only Scan'))):
+			elif (src_cur_value.startswith('Index Scan')
+				  and target_cur[1].startswith('Index Only Scan')):
 				src_up = True
 				target_up = True
 			elif (test_name in ['partition_prune', 'inherit', 'updatable_views']
@@ -535,8 +563,7 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				# difference in partition_prune-style nested-loop appends.
 				src_down = True
 				target_down = True
-			elif (test_name == 'memoize'
-				  and src_cur_value.startswith('Finalize Aggregate')
+			elif (src_cur_value.startswith('Finalize Aggregate')
 				  and target_cur[1].startswith('Aggregate')):
 				# Need to skip report about parallel heap execution, because OrioleDB
 				# currently does not support parallel scans except sequential

@@ -299,7 +299,7 @@ CREATE INDEX o_test65_reg1 ON o_test65(id DESC);
 
 INSERT INTO o_test65 SELECT i+1, i FROM generate_series(1, 60) AS i;
 SELECT count(*) FROM o_test65;
-SELECT id, val FROM o_test65;
+SELECT id, val FROM o_test65 ORDER BY id;
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT val, id FROM o_test65 ORDER BY id;
 SELECT val, id FROM o_test65 ORDER BY id;
@@ -1177,11 +1177,11 @@ SELECT * FROM o_test_partial_idx_update;
 SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
 UPDATE o_test_partial_idx_update SET am=0 WHERE user_id=100500;
 SELECT * FROM o_test_partial_idx_update;
-EXPLAIN SELECT * FROM o_test_partial_idx_update
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_partial_idx_update
 	WHERE user_id=100500 and am > 0;
 SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
 SET enable_bitmapscan = off;
-EXPLAIN SELECT * FROM o_test_partial_idx_update
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_partial_idx_update
 	WHERE user_id=100500 and am > 0;
 SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
 SET enable_bitmapscan = on;
@@ -1329,13 +1329,13 @@ SELECT orioledb_tbl_structure('o_test_reuse_multiple_indices'::regclass,
 EXPLAIN (COSTS OFF)
 	SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
 SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
-EXPLAIN SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+EXPLAIN (COSTS OFF) SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
 SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
 ALTER TABLE o_test_reuse_multiple_indices ALTER val_5 TYPE char
 	USING chr(ASCII('a') + val_5 / 1000);
 SELECT orioledb_table_description('o_test_reuse_multiple_indices'::regclass);
 SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
-EXPLAIN SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+EXPLAIN (COSTS OFF) SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
 SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
 
 \d+ o_test_reuse_multiple_indices
@@ -2241,6 +2241,106 @@ DROP TABLE o_ios_sk_include;
 RESET enable_seqscan;
 RESET enable_bitmapscan;
 RESET enable_indexscan;
+
+-- amnblocks: INSERT -> CREATE INDEX (no ANALYZE)
+CREATE TABLE o_test_amnblocks1 (
+	id int8 NOT NULL PRIMARY KEY,
+	k int8 NOT NULL,
+	c char(120) NOT NULL DEFAULT '',
+	pad char(60) NOT NULL DEFAULT ''
+) USING orioledb;
+INSERT INTO o_test_amnblocks1 SELECT i, i, '', '' FROM generate_series(1, 10000) i;
+CREATE INDEX o_test_amnblocks1_k ON o_test_amnblocks1(k);
+SET enable_seqscan = off;
+EXPLAIN (COSTS off)
+	SELECT k FROM o_test_amnblocks1
+		WHERE k IN (1000, 2000, 3000, 4000, 5000,
+					6000, 7000, 8000, 9000, 10000);
+SELECT relpages > 0 AS idx_pages_ok FROM pg_class
+	WHERE relname = 'o_test_amnblocks1_k';
+RESET enable_seqscan;
+DROP TABLE o_test_amnblocks1;
+
+-- amnblocks: INSERT -> CREATE INDEX -> ANALYZE
+CREATE TABLE o_test_amnblocks2 (
+	id int8 NOT NULL PRIMARY KEY,
+	k int8 NOT NULL,
+	c char(120) NOT NULL DEFAULT '',
+	pad char(60) NOT NULL DEFAULT ''
+) USING orioledb;
+INSERT INTO o_test_amnblocks2 SELECT i, i, '', '' FROM generate_series(1, 10000) i;
+CREATE INDEX o_test_amnblocks2_k ON o_test_amnblocks2(k);
+ANALYZE o_test_amnblocks2;
+SET enable_seqscan = off;
+EXPLAIN (COSTS off)
+	SELECT k FROM o_test_amnblocks2
+		WHERE k IN (1000, 2000, 3000, 4000, 5000,
+					6000, 7000, 8000, 9000, 10000);
+SELECT relpages > 0 AS idx_pages_ok FROM pg_class
+	WHERE relname = 'o_test_amnblocks2_k';
+RESET enable_seqscan;
+DROP TABLE o_test_amnblocks2;
+
+-- amnblocks: CREATE INDEX -> INSERT -> ANALYZE
+CREATE TABLE o_test_amnblocks3 (
+	id int8 NOT NULL PRIMARY KEY,
+	k int8 NOT NULL,
+	c char(120) NOT NULL DEFAULT '',
+	pad char(60) NOT NULL DEFAULT ''
+) USING orioledb;
+CREATE INDEX o_test_amnblocks3_k ON o_test_amnblocks3(k);
+INSERT INTO o_test_amnblocks3 SELECT i, i, '', '' FROM generate_series(1, 10000) i;
+ANALYZE o_test_amnblocks3;
+SET enable_seqscan = off;
+EXPLAIN (COSTS off)
+	SELECT k FROM o_test_amnblocks3
+		WHERE k IN (1000, 2000, 3000, 4000, 5000,
+					6000, 7000, 8000, 9000, 10000);
+SELECT relpages > 0 AS idx_pages_ok FROM pg_class
+	WHERE relname = 'o_test_amnblocks3_k';
+RESET enable_seqscan;
+DROP TABLE o_test_amnblocks3;
+
+-- amnblocks: VACUUM ANALYZE updates pg_class.relpages
+CREATE TABLE o_test_amnblocks4 (
+	id int8 NOT NULL PRIMARY KEY,
+	k int8 NOT NULL,
+	c char(120) NOT NULL DEFAULT '',
+	pad char(60) NOT NULL DEFAULT ''
+) USING orioledb;
+CREATE INDEX o_test_amnblocks4_k ON o_test_amnblocks4(k);
+INSERT INTO o_test_amnblocks4 SELECT i, i, '', '' FROM generate_series(1, 10000) i;
+VACUUM ANALYZE o_test_amnblocks4;
+SET enable_seqscan = off;
+EXPLAIN (COSTS off)
+	SELECT k FROM o_test_amnblocks4
+		WHERE k IN (1000, 2000, 3000, 4000, 5000,
+					6000, 7000, 8000, 9000, 10000);
+SELECT relpages > 0 AS idx_pages_ok FROM pg_class
+	WHERE relname = 'o_test_amnblocks4_k';
+RESET enable_seqscan;
+DROP TABLE o_test_amnblocks4;
+
+-- allvisfrac: IOS preferred even with low correlation (random insert order)
+-- With allvisfrac=1.0 the IOS heap-fetch cost drops to 0 so IOS wins
+-- over bitmap even when csquared is near 0.
+CREATE TABLE o_test_allvisfrac (
+	id int8 NOT NULL PRIMARY KEY,
+	k int8 NOT NULL,
+	c char(120) NOT NULL DEFAULT '',
+	pad char(60) NOT NULL DEFAULT ''
+) USING orioledb;
+INSERT INTO o_test_allvisfrac
+	SELECT i, (i * 7919) % 10000, '', '' FROM generate_series(1, 10000) i;
+CREATE INDEX o_test_allvisfrac_k ON o_test_allvisfrac(k);
+ANALYZE o_test_allvisfrac;
+SET enable_seqscan = off;
+EXPLAIN (COSTS off)
+	SELECT k FROM o_test_allvisfrac
+		WHERE k IN (1000, 2000, 3000, 4000, 5000,
+					6000, 7000, 8000, 9000, 10000);
+RESET enable_seqscan;
+DROP TABLE o_test_allvisfrac;
 
 -- Skip scan tests below exercise PG18's _bt_preprocess_keys synthesizing a
 -- skip array on the leading column.  On PG16/PG17 there are no skip arrays;

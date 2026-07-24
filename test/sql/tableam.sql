@@ -1034,7 +1034,7 @@ CREATE INDEX o_test_1_idx ON o_test_1 (b, a);
 UPDATE o_test_1 SET b = '-0' WHERE b = '0';
 UPDATE o_test_1 SET a = '-0' WHERE a = '0';
 SET enable_seqscan = off;
-EXPLAIN SELECT * FROM o_test_1 ORDER BY b;
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_1 ORDER BY b;
 SELECT * FROM o_test_1 ORDER BY b;
 RESET enable_seqscan;
 DROP TABLE o_test_1;
@@ -1064,6 +1064,20 @@ SELECT COUNT(*) FROM o_test_lockstep WHERE a in (1,2,3,4,5,6,7,8,9,10,12,13,14,1
 										   b in (1,2,3,4,5,6,7,8,9,10,12,13,14,15,16,17);
 SELECT * FROM o_test_lockstep WHERE a in (1000, 1);
 SELECT * FROM o_test_lockstep WHERE a in (1, 1000) ORDER BY a DESC, b DESC;
+
+-- Backward IOS with 3-element IN list
+SELECT * FROM o_test_lockstep WHERE a in (1, 500, 1000) ORDER BY a DESC, b DESC;
+-- Backward IOS with IN on both columns
+SELECT * FROM o_test_lockstep WHERE a in (1, 500) AND b in (1, 500)
+	ORDER BY a DESC, b DESC;
+-- Multiple rows per array element
+INSERT INTO o_test_lockstep VALUES (1, 100), (1, 200), (1000, 100), (1000, 200);
+SELECT * FROM o_test_lockstep WHERE a in (1, 1000) ORDER BY a DESC, b DESC;
+-- Forward same query for comparison
+SELECT * FROM o_test_lockstep WHERE a in (1, 1000) ORDER BY a, b;
+-- Backward with LIMIT
+SELECT * FROM o_test_lockstep WHERE a in (1, 500, 1000)
+	ORDER BY a DESC, b DESC LIMIT 2;
 
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA tableam CASCADE;
