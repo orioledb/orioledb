@@ -448,9 +448,16 @@ append_rowid_values(OIndexDescr *id,
 	if (!id->primaryIsCtid)
 	{
 		ORowIdAddendumNonCtid *add;
+		ORowIdAddendumNonCtid addbuf;
 		OTuple		tuple;
 
-		add = (ORowIdAddendumNonCtid *) p;
+		/*
+		 * The rowid varlena may be only 4-byte aligned in storage, so decode
+		 * the addendum through an aligned copy rather than a misaligned typed
+		 * pointer (whose 8-byte csn would be a misalignment UB).
+		 */
+		memcpy(&addbuf, p, sizeof(addbuf));
+		add = &addbuf;
 		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
 		*csn = add->csn;
 
@@ -483,9 +490,12 @@ append_rowid_values(OIndexDescr *id,
 	else
 	{
 		ORowIdAddendumCtid *add;
+		ORowIdAddendumCtid addbuf;
 		AttrNumber	attnum = id->nFields - 1;
 
-		add = (ORowIdAddendumCtid *) p;
+		/* Decode through an aligned copy; see the non-ctid branch above. */
+		memcpy(&addbuf, p, sizeof(addbuf));
+		add = &addbuf;
 		*csn = add->csn;
 		*version = add->version;
 		p += MAXALIGN(sizeof(ORowIdAddendumCtid));

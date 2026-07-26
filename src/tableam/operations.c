@@ -1366,9 +1366,16 @@ o_tbl_insert_with_arbiter(Relation rel,
 					if (!primary->primaryIsCtid)
 					{
 						ORowIdAddendumNonCtid *add;
+						ORowIdAddendumNonCtid addbuf;
 						OTuple		tuple;
 
-						add = (ORowIdAddendumNonCtid *) p;
+						/*
+						 * The rowid varlena may be only 4-byte aligned, so
+						 * decode the addendum through an aligned copy rather
+						 * than a misaligned typed pointer (8-byte csn -> UB).
+						 */
+						memcpy(&addbuf, p, sizeof(addbuf));
+						add = &addbuf;
 						p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
 
 						if (primary->bridging)

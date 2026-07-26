@@ -2560,10 +2560,18 @@ get_keys_from_rowid(OIndexDescr *primary, Datum pkDatum, OBTreeKeyBound *key,
 	{
 		OTuple		tuple;
 		ORowIdAddendumNonCtid *add;
+		ORowIdAddendumNonCtid addbuf;
 
 		rowid = DatumGetByteaP(pkDatum);
 		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
-		add = (ORowIdAddendumNonCtid *) p;
+
+		/*
+		 * The rowid varlena may be only 4-byte aligned in storage, so decode
+		 * the addendum through an aligned copy rather than a misaligned typed
+		 * pointer (whose 8-byte csn would be a misalignment UB).
+		 */
+		memcpy(&addbuf, p, sizeof(addbuf));
+		add = &addbuf;
 		p += MAXALIGN(sizeof(ORowIdAddendumNonCtid));
 		if (hint)
 			*hint = add->hint;
@@ -2590,10 +2598,14 @@ get_keys_from_rowid(OIndexDescr *primary, Datum pkDatum, OBTreeKeyBound *key,
 	else
 	{
 		ORowIdAddendumCtid *add;
+		ORowIdAddendumCtid addbuf;
 
 		rowid = DatumGetByteaP(pkDatum);
 		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
-		add = (ORowIdAddendumCtid *) p;
+
+		/* Decode through an aligned copy; see the non-ctid branch above. */
+		memcpy(&addbuf, p, sizeof(addbuf));
+		add = &addbuf;
 		if (hint)
 			*hint = add->hint;
 		if (csn)
@@ -2629,21 +2641,23 @@ rowid_set_csn(OIndexDescr *id, Datum pkDatum, CommitSeqNo csn)
 
 	if (!id->primaryIsCtid)
 	{
-		ORowIdAddendumNonCtid *add;
-
 		rowid = DatumGetByteaP(pkDatum);
 		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
-		add = (ORowIdAddendumNonCtid *) p;
-		add->csn = csn;
+
+		/*
+		 * The rowid varlena may be only 4-byte aligned in storage, so store
+		 * the 8-byte csn with memcpy rather than through a misaligned typed
+		 * pointer (which would be a misalignment UB).
+		 */
+		memcpy(p + offsetof(ORowIdAddendumNonCtid, csn), &csn, sizeof(csn));
 	}
 	else
 	{
-		ORowIdAddendumCtid *add;
-
 		rowid = DatumGetByteaP(pkDatum);
 		p = (Pointer) rowid + MAXALIGN(VARHDRSZ);
-		add = (ORowIdAddendumCtid *) p;
-		add->csn = csn;
+
+		/* See the non-ctid branch above. */
+		memcpy(p + offsetof(ORowIdAddendumCtid, csn), &csn, sizeof(csn));
 	}
 }
 
