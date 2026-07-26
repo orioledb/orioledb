@@ -3744,8 +3744,42 @@ cleanup_btree_files(OIndexKey key, bool fsync)
 static void
 fsync_callback(const char *filename, uint32 segno, char *ext, void *arg)
 {
-	if (ext == NULL || strcmp(ext, "tmp") != 0)
-		fsync_fname(filename, false);
+	File		file;
+
+	if (ext != NULL && strcmp(ext, "tmp") == 0)
+		return;
+
+	/*
+	 * A secondary file (a segment, or a "-<chkp>.map"/".evt" checkpoint
+	 * sidecar) that readdir listed can be unlinked concurrently before we
+	 * fsync it -- the checkpointer's superseded-map cleanup unlinks the old
+	 * map once a newer one is durable.  Open it ourselves and return quietly
+	 * if it has already vanished (ENOENT): a pre-check with access() would
+	 * only narrow the race (the file can still go between the check and the
+	 * open), whereas tolerating ENOENT on the open closes it.  Skipping a
+	 * vanished sidecar is safe -- the current map is durable and the
+	 * transaction's data durability rests on the base and segment files,
+	 * which are not removed concurrently.  A genuine I/O error on a present
+	 * file still ERRORs (a PANIC at the PreCommit undo callback).  Open it
+	 * O_RDWR, not O_RDONLY: pg_fsync() forbids fsyncing a read-only
+	 * descriptor.
+	 */
+	file = PathNameOpenFile(filename, O_RDWR | PG_BINARY);
+	if (file < 0)
+	{
+		if (errno == ENOENT)
+			return;
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not open file %s: %m", filename)));
+	}
+
+	if (FileSync(file, WAIT_EVENT_DATA_FILE_SYNC) != 0)
+		ereport(ERROR,
+				(errcode_for_file_access(),
+				 errmsg("could not fsync file %s: %m", filename)));
+
+	FileClose(file);
 }
 
 bool
