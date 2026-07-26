@@ -148,6 +148,12 @@ skip_hunk_errors = {
 	# both shapes.
 	r"ERROR:  role \"regress_user11\" (already exists|does not exist|cannot be dropped because some objects depend on it)":
 	["generated_stored", "generated_virtual"],
+	# Same regress_user11 race, OID-based variant: when the other test's
+	# concurrent DROP USER removes the role's pg_authid tuple between this
+	# DROP USER's catalog lookup and its delete, the error names the role by
+	# OID ("could not find tuple for role <oid>") instead of by name.
+	r"ERROR:  could not find tuple for role \d+":
+	["generated_stored", "generated_virtual"],
 	r"ERROR:  permission denied for (table gtest\w+|function gf\w+)":
 	["generated_stored", "generated_virtual"],
 	# Upstream anomaly 9a3ddeb519e8 is not reproduced on Oriole as it
