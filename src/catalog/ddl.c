@@ -3134,6 +3134,22 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 {
 	Relation	rel;
 
+	/*
+	 * For an object drop `arg` is the caller's ObjectAccessDrop.  ASAN can
+	 * spuriously flag reads of it as stack-use-after-scope: PostgreSQL's
+	 * sigsetjmp/longjmp error unwinding leaves earlier nested-scope stack
+	 * slots poisoned and this live struct on the caller's frame can alias
+	 * one. The RelationRelationId drop branch below already unpoisons its
+	 * copy, but the PG18 ConstraintRelationId branch reads dropflags inside
+	 * its if-condition (before any body runs), so unpoison up front to cover
+	 * it. The read is legitimate; this is a no-op in non-ASAN builds.  arg is
+	 * never NULL for OAT_DROP (the drop branches below already dereference it
+	 * unconditionally); do not add a NULL guard here, or the static analyzer
+	 * infers arg may be NULL and flags those existing dereferences.
+	 */
+	if (access == OAT_DROP)
+		ASAN_UNPOISON_MEMORY_REGION(arg, sizeof(ObjectAccessDrop));
+
 	if (access == OAT_POST_CREATE && classId == ExtensionRelationId)
 	{
 #if PG_VERSION_NUM >= 170000
