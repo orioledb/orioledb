@@ -1397,6 +1397,19 @@ orioledb_amcostestimate(PlannerInfo *root, IndexPath *path, double loop_count,
 
 	ReleaseVariableStats(vardata);
 
+	/*
+	 * These out-params are cost_index()'s stack locals.  ASAN can report the
+	 * stores below as writes to poisoned stack: PostgreSQL's
+	 * sigsetjmp/longjmp error unwinding leaves stack shadow stale, so a
+	 * reused caller stack slot trips a false stack-use-after-scope.  The
+	 * writes are legitimate; unpoison first.  No-op in non-ASAN builds.
+	 */
+	ASAN_UNPOISON_MEMORY_REGION(indexStartupCost, sizeof(*indexStartupCost));
+	ASAN_UNPOISON_MEMORY_REGION(indexTotalCost, sizeof(*indexTotalCost));
+	ASAN_UNPOISON_MEMORY_REGION(indexSelectivity, sizeof(*indexSelectivity));
+	ASAN_UNPOISON_MEMORY_REGION(indexCorrelation, sizeof(*indexCorrelation));
+	ASAN_UNPOISON_MEMORY_REGION(indexPages, sizeof(*indexPages));
+
 	*indexStartupCost = costs.indexStartupCost;
 	*indexTotalCost = costs.indexTotalCost;
 	*indexSelectivity = costs.indexSelectivity;
