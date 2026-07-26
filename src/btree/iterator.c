@@ -1104,6 +1104,21 @@ o_btree_iterator_advance(BTreeIterator *it, void *key, BTreeKeyType kind)
 
 	Assert(key != NULL && kind != BTreeKeyNone);
 
+#ifdef USE_ASSERT_CHECKING
+
+	/*
+	 * Advancing to a new "col = ANY" array element begins a fresh ordered
+	 * sub-scan.  Tuples of different array elements are not globally ordered
+	 * (the array need not be sorted and elements' key ranges can be adjacent
+	 * or overlap -- the optimistic resume can even re-verify the previous
+	 * element's parked tuple, giving cmp == 0), so drop the previous
+	 * element's last tuple.  This keeps the monotonicity assert in
+	 * o_btree_iterator_fetch() scoped to a single element, where it still
+	 * holds, without weakening it for plain (non-advancing) scans.
+	 */
+	O_TUPLE_SET_NULL(it->prevTuple.tuple);
+#endif
+
 	/*
 	 * Optimistic next-item check.  The previous element's scan left the leaf
 	 * locator on the first item past its end bound (rewound there by
