@@ -1037,7 +1037,28 @@ get_next_downlink(BTreeSeqScan *scan, uint64 *downlink,
 					OFixedKey	jumpKey;
 
 					if (scan->firstPageIsLoaded)
+					{
+						/*
+						 * The rightmost internal page has no hikey and no
+						 * successor, so there is no "next wanted key at or
+						 * after its hikey" to jump to -- the tree is fully
+						 * scanned.  The non-jump path below relies on the
+						 * same invariant (it Asserts !RIGHTMOST before
+						 * copying the hikey), because the loop returns false
+						 * at its O_PAGE_IS(RIGHTMOST) check once the
+						 * rightmost page's downlinks are exhausted.  The jump
+						 * path can reach here with the rightmost page still
+						 * loaded, so it must make the same check itself
+						 * instead of copying a non-existent hikey.
+						 */
+						if (O_PAGE_IS(scan->context.img, RIGHTMOST))
+						{
+							clear_fixed_key(keyRangeLow);
+							clear_fixed_key(keyRangeHigh);
+							return false;
+						}
 						copy_fixed_hikey(scan->desc, &jumpKey, scan->context.img);
+					}
 					else
 						clear_fixed_key(&jumpKey);
 
