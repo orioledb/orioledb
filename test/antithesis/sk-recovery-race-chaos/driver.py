@@ -114,6 +114,9 @@ def checkpoint_count(conn):
     return timed + req
 
 
+CONNECTION_LOST_ERRORS = (psycopg2.OperationalError, psycopg2.InterfaceError)
+
+
 def dml_worker(stop_at, errors, index):
     conn = connect(f"chaos_{index}")
     conn.autocommit = False
@@ -136,12 +139,22 @@ def dml_worker(stop_at, errors, index):
                     f"nextval('{TABLE}_race_seq') WHERE id = {upd_id};")
                 execute(conn, f"DELETE FROM {TABLE} WHERE id = {del_id};")
                 conn.commit()
+            except CONNECTION_LOST_ERRORS:
+                # Connection is gone - most likely Antithesis's own fault
+                # injection killed the target mid-transaction. rollback()
+                # would itself raise InterfaceError on a dead connection,
+                # so don't attempt it; let this propagate as a graceful
+                # exit instead of masking it into an unhandled crash.
+                raise
             except psycopg2.Error:
                 conn.rollback()
     except Exception as exc:  # noqa: BLE001 - surfaced via errors list
         errors[index] = exc
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001 - best-effort cleanup
+            pass
 
 
 def dml_burst(ctl_conn):
@@ -183,7 +196,7 @@ def main():
         assert_consistent(ctl_conn, "startup")
         dml_burst(ctl_conn)
         assert_consistent(ctl_conn, "post-burst")
-    except psycopg2.OperationalError as exc:
+    except CONNECTION_LOST_ERRORS as exc:
         print(
             f"lost connection to target (likely fault injection landed "
             f"mid-burst), will re-check on next run: {exc}",
