@@ -150,8 +150,6 @@ skip_hunk_errors = {
 	["generated_stored", "generated_virtual"],
 	r"ERROR:  permission denied for (table gtest\w+|function gf\w+)":
 	["generated_stored", "generated_virtual"],
-	r"ERROR:  lossy distance functions are not supported in index-only scans":
-	["gist"],
 }
 
 def can_drop_hunk(testName, line):
