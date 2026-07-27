@@ -150,6 +150,8 @@ skip_hunk_errors = {
 	["generated_stored", "generated_virtual"],
 	r"ERROR:  permission denied for (table gtest\w+|function gf\w+)":
 	["generated_stored", "generated_virtual"],
+	# Upstream anomaly 9a3ddeb519e8 is not reproduced on Oriole as it
+	# doesn't do IOS for bridged indices.
 	r"ERROR:  lossy distance functions are not supported in index-only scans":
 	["gist"],
 }
