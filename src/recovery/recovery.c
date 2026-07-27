@@ -5044,6 +5044,8 @@ workers_synchronize(XLogRecPtr ptr, bool send_synchronize)
 			BgwHandleStatus status;
 			pid_t		pid;
 
+			CHECK_FOR_INTERRUPTS();
+
 			pg_usleep(10);
 
 			if (j % 100 == 0)
