@@ -185,7 +185,7 @@ static void sort_checkpoint_tmp_file(BTreeDescr *descr, int cur_chkp_index);
 static inline void checkpoint_ix_init_state(CheckpointState *state, BTreeDescr *descr);
 static void checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum);
 static bool checkpoint_temporary_tree(int flags, BTreeDescr *descr);
-static bool checkpoint_ix(int flags, BTreeDescr *descr);
+static BTreeDescr *checkpoint_ix(int flags, BTreeDescr *descr);
 static uint64 checkpoint_btree(BTreeDescr **descrPtr, CheckpointState *state,
 							   CheckpointWriteBack *writeback);
 static Jsonb *prepare_checkpoint_step_params(BTreeDescr *descr,
@@ -1127,7 +1127,7 @@ checkpoint_sys_trees(int flags, uint32 cur_chkp_num,
 		if (desc->storageType == BTreeStoragePersistence ||
 			desc->storageType == BTreeStorageUnlogged)
 		{
-			success = checkpoint_ix(flags, desc);
+			success = checkpoint_ix(flags, desc) != NULL;
 			/* System trees can't be concurrently deleted */
 			Assert(success);
 			if (!orioledb_s3_mode)
@@ -1160,7 +1160,7 @@ checkpoint_chkp_nums(int flags, uint32 cur_chkp_num,
 	checkpoint_ix_init_state(checkpoint_state, desc);
 	checkpoint_init_new_seq_bufs(desc, cur_chkp_num);
 
-	success = checkpoint_ix(flags, desc);
+	success = checkpoint_ix(flags, desc) != NULL;
 
 	/* System trees can't be concurrently deleted */
 	Assert(success);
@@ -2711,12 +2711,16 @@ backend_set_autonomous_level(CheckpointState *state, uint32 level)
 /*
  * Make checkpoint of an index (persistent or unlogged).
  *
- * The caller must hold the OrioleDB checkpointer table lock.  On success
- * (true), the lock is still held and the caller must release it.  On
- * failure (false), the lock has already been released by
- * perform_writeback_and_relock() inside checkpoint_btree().
+ * The caller must hold the OrioleDB checkpointer table lock.  On success the
+ * lock is still held and the (possibly re-fetched) descriptor is returned; the
+ * caller MUST switch to it, because checkpoint_btree() /
+ * perform_writeback_and_relock() re-fetch the descriptor after each
+ * unlock/relock cycle and the descriptor passed in may have been freed by a
+ * concurrent invalidation in the meantime.  On failure NULL is returned and
+ * the lock has already been released by perform_writeback_and_relock() inside
+ * checkpoint_btree().
  */
-static bool
+static BTreeDescr *
 checkpoint_ix(int flags, BTreeDescr *descr)
 {
 	FileExtentsArray *free_extents = NULL;
@@ -2746,7 +2750,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 	{
 		/* Lock already released by perform_writeback_and_relock() */
 		free_writeback(&writeback);
-		return false;
+		return NULL;
 	}
 	descr = perform_writeback_and_relock(descr, &writeback,
 										 checkpoint_state, NULL, 0);
@@ -2754,7 +2758,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 	if (!descr)
 	{
 		/* Lock already released by perform_writeback_and_relock() */
-		return false;
+		return NULL;
 	}
 
 	Assert(checkpoint_state->curKeyType == CurKeyGreatest);
@@ -3045,7 +3049,7 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 		o_update_latest_chkp_num(descr->oids.datoid,
 								 descr->oids.relnode,
 								 chkpNum);
-	return true;
+	return descr;
 }
 
 
@@ -5209,7 +5213,15 @@ checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 			Assert(td->storageType == BTreeStoragePersistence ||
 				   td->storageType == BTreeStorageUnlogged);
 
-			success = checkpoint_ix(tbl_arg->flags, td);
+			/*
+			 * checkpoint_ix() may have re-fetched the descriptor after an
+			 * unlock/relock cycle (a concurrent invalidation could have freed
+			 * the one we passed in), so adopt the returned descriptor for the
+			 * post-checkpoint steps below (sort_checkpoint_*_file / the
+			 * postProcessList entry) instead of the now-possibly-stale td.
+			 */
+			td = checkpoint_ix(tbl_arg->flags, td);
+			success = (td != NULL);
 
 			if (success)
 			{
