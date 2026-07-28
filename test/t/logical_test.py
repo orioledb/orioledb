@@ -195,6 +195,44 @@ class LogicalTest(BaseTest):
 		    len([r for r in rows if r.startswith('opening a streamed block')]),
 		    0)
 
+		# Mixed transactions: streaming may already be in progress when the
+		# transaction first touches an OrioleDB table.  The switch record
+		# marks the transaction at that point; the already-streamed part
+		# completes through the regular partial-stream machinery and the
+		# OrioleDB changes travel in the stream-commit tail.  Content and
+		# single-transaction atomicity must be preserved.
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO h_str SELECT g + 20000, repeat('x', 100) FROM generate_series(1, 5000) g;\n"
+		    "INSERT INTO o_str SELECT g + 30000, repeat('y', 100) FROM generate_series(1, 200) g;\n"
+		    "COMMIT;\n")
+		rows = decode()
+		self.assertEqual(change_lines(rows), 5200)
+		self.assertEqual(
+		    len([r for r in rows if r.startswith('committing streamed')]), 1)
+
+		# Same with the OrioleDB modification first.
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO o_str SELECT g + 40000, repeat('y', 100) FROM generate_series(1, 200) g;\n"
+		    "INSERT INTO h_str SELECT g + 40000, repeat('x', 100) FROM generate_series(1, 5000) g;\n"
+		    "COMMIT;\n")
+		rows = decode()
+		self.assertEqual(change_lines(rows), 5200)
+
+		# Rolled-back OrioleDB subtransaction inside a streamed heap
+		# transaction: its changes must not reach the output.
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "INSERT INTO h_str SELECT g + 50000, repeat('x', 100) FROM generate_series(1, 5000) g;\n"
+		    "SAVEPOINT s1;\n"
+		    "INSERT INTO o_str SELECT g + 60000, repeat('y', 100) FROM generate_series(1, 200) g;\n"
+		    "ROLLBACK TO SAVEPOINT s1;\n"
+		    "INSERT INTO o_str(id, t) VALUES (70000, 'survivor');\n"
+		    "COMMIT;\n")
+		rows = decode()
+		self.assertEqual(change_lines(rows), 5001)
+
 	def test_simple_replident(self):
 		node = self.node
 		node.start()  # start PostgreSQL
