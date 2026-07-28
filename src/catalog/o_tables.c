@@ -723,7 +723,18 @@ o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 		if (!old_field || (!old_field->hasmissing && !missingIsNull))
 		{
 			attrmiss = &attrmiss_temp;
-			field->hasmissing = true;
+
+			/*
+			 * A missing value exists only when the evaluated default is
+			 * non-null.  For ADD COLUMN (!old_field) the guard above is
+			 * short-circuited, so gate hasmissing on missingIsNull here too;
+			 * otherwise a null default (e.g. adding a domain column with no
+			 * default) would mark the missing value present and datumCopy() a
+			 * NULL varlena below -> crash.  attrmiss stays set so the new
+			 * column's missing slot is still initialized (am_present =
+			 * false).
+			 */
+			field->hasmissing = !missingIsNull;
 		}
 	}
 	o_in_add_column = false;
