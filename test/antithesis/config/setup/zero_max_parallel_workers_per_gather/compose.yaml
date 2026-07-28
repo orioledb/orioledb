@@ -1,0 +1,5 @@
+services:
+  test.orioledb:
+    volumes:
+      # /etc/postresql/postgresql.conf has an include_dir directive for conf.d
+      - "./config/setup/zero_max_parallel_workers_per_gather/postgres.conf:/etc/postgresql/conf.d/zero_max_parallel_workers_per_gather.conf:ro"
