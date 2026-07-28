@@ -168,9 +168,14 @@ CONF
 
         psql postgres -p 5432 -c 'CREATE EXTENSION orioledb;' || true
 
-        # Wait for replica to synchronize with primary after tests
+        # Wait for replica to synchronize with primary after tests.  180s (not
+        # 60s): under pg_tests_asan the replica replays 2-5x slower, so a healthy
+        # replica that is merely catching up after the churn was timing out at
+        # 60s -- the startup process was idle in WaitForWALToBecomeAvailable, not
+        # stuck.  A genuine replay hang will still fail, just after 180s.
+        sync_timeout=180
         replica_synced=0
-        for i in $(seq 1 60); do
+        for i in $(seq 1 $sync_timeout); do
             primary_lsn=$(psql postgres -p 5432 -tA -c "SELECT pg_current_wal_lsn();" 2>/dev/null || echo "N/A")
             replica_lsn=$(psql postgres -p 5433 -tA -c "SELECT pg_last_wal_replay_lsn();" 2>/dev/null || echo "N/A")
             if [ "$primary_lsn" != "N/A" ] && [ "$replica_lsn" != "N/A" ] && \
@@ -179,11 +184,11 @@ CONF
                 replica_synced=1
                 break
             fi
-            echo "Waiting for replica to synchronize... ($i/60): primary=$primary_lsn replica=$replica_lsn"
+            echo "Waiting for replica to synchronize... ($i/$sync_timeout): primary=$primary_lsn replica=$replica_lsn"
             sleep 1
         done
         if [ $replica_synced -eq 0 ]; then
-            echo "ERROR: Replica failed to synchronize within 60 seconds"
+            echo "ERROR: Replica failed to synchronize within $sync_timeout seconds"
             exit 1
         fi
 
