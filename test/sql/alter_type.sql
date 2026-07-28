@@ -371,6 +371,18 @@ CREATE INDEX o_test_drop_index_list_ix2 ON o_test_drop_index_list (phone);
 ALTER TABLE o_test_drop_index_list ALTER COLUMN phone TYPE text;
 ALTER TABLE o_test_drop_index_list ALTER COLUMN phone TYPE varchar(15);
 
+-- ADD COLUMN of a domain type with a NULL missing value to a populated table
+-- must not crash: o_table_fill_constr() used to mark the missing value present
+-- and datumCopy() a NULL varlena (o_in_add_column short-circuited the
+-- missingIsNull guard).
+CREATE DOMAIN alter_type_intarr AS int[];
+CREATE TABLE o_test_add_domain_col (
+	a int PRIMARY KEY
+) USING orioledb;
+INSERT INTO o_test_add_domain_col VALUES (1), (2);
+ALTER TABLE o_test_add_domain_col ADD COLUMN b alter_type_intarr;
+SELECT * FROM o_test_add_domain_col ORDER BY a;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA alter_type CASCADE;
 RESET search_path;
