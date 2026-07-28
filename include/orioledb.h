@@ -45,6 +45,20 @@
 #endif
 
 /*
+ * O_USE_ASAN is defined when this build is instrumented with AddressSanitizer
+ * (gcc's __SANITIZE_ADDRESS__ or clang's address_sanitizer feature).  Used to
+ * enable ASAN-only diagnostics that trade a little memory/speed for turning
+ * latent heap corruption into precise use-after-free reports.
+ */
+#if defined(__SANITIZE_ADDRESS__)
+#define O_USE_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define O_USE_ASAN 1
+#endif
+#endif
+
+/*
  * Currently OrioleDB has the following version-related values:
  *
  * Reference-only value:

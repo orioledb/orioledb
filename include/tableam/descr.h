@@ -232,12 +232,36 @@ OIndexKeyAttnumToTupleAttnum(BTreeKeyType keyType, OIndexDescr *idx, int attnum)
 	}
 }
 
+/*
+ * The per-descriptor index context holds a descriptor's tupdesc constr/missing
+ * (see o_tupdesc_load_constr()) and fields/comparators.  Under ASAN create it
+ * with a nonzero minContextSize so it bypasses aset.c's context freelist: then
+ * MemoryContextDelete() actually free()s its blocks, ASAN poisons them, and a
+ * dangling access to a freed descriptor's constr surfaces as a precise
+ * use-after-free (with the freeing and accessing stacks) instead of a later
+ * MAXALIGN trap in FreeTupleDesc() during checkpoint descr invalidation.
+ * Non-ASAN builds are unchanged (ALLOCSET_DEFAULT_SIZES, freelist-cached).
+ */
+/* Self-contained ASAN detection (do not rely on orioledb.h include order). */
+#if defined(__SANITIZE_ADDRESS__)
+#define O_INDEX_CONTEXT_SIZES \
+	1024, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define O_INDEX_CONTEXT_SIZES \
+	1024, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE
+#endif
+#endif
+#ifndef O_INDEX_CONTEXT_SIZES
+#define O_INDEX_CONTEXT_SIZES ALLOCSET_DEFAULT_SIZES
+#endif
+
 #define OGetIndexContext(index) \
 	((index)->index_mctx ? \
 	 (index)->index_mctx : \
 		((index)->index_mctx = AllocSetContextCreate(TopMemoryContext, \
 													 "OIndexContext", \
-													 ALLOCSET_DEFAULT_SIZES)))
+													 O_INDEX_CONTEXT_SIZES)))
 
 #define OIgnoreColumn(descr, attnum) \
 	((descr->desc.type != oIndexToast && descr->desc.type != oIndexBridge) && \
