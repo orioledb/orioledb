@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""
+Continuous consistency check for recovery-sk-rebuild-desync
+(antithesis/scratchbook/properties/recovery-sk-rebuild-desync.md). Runs
+repeatedly alongside the DML driver and active fault injection, so a
+divergence is caught soon after it happens (work-validate-work) instead of
+only once at the end of the timeline.
+"""
+import helper_common as h
+
+
+def main():
+    conn = None
+    try:
+        conn = h.connect("anytime_check")
+        h.assert_consistent(conn, "anytime")
+    except h.CONNECTION_LOST_ERRORS as exc:
+        # The system is most likely mid-crash/recovery right now -- not a
+        # bug on its own; the next anytime_/finally_ invocation checks
+        # again once it's back up.
+        print(f"anytime check skipped, connection lost: {exc}", flush=True)
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 - best-effort cleanup
+                pass
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""
+One-time per-timeline setup for the recovery-sk-rebuild-desync workload
+(antithesis/scratchbook/properties/recovery-sk-rebuild-desync.md).
+
+Creates the schema and seeds rows, then swarms and persists this timeline's
+workload bias (action-weight preset, DML batch-size family) into
+o_sk_desync_config so every later parallel_driver_/anytime_/finally_
+invocation in this timeline reads the same bias instead of each process
+re-rolling independently (see antithesis-workload skill,
+references/test-commands.md "Vary randomness across timelines").
+"""
+from antithesis.random import random_choice
+
+import helper_common as h
+
+
+def main():
+    conn = h.connect("first_setup")
+    try:
+        seed_rows = random_choice(h.SEED_ROWS_MENU)
+        h.ensure_schema(conn, seed_rows)
+
+        weights_preset = random_choice(h.ACTION_WEIGHT_PRESETS)
+        batch_typical = random_choice(h.BATCH_TYPICAL_MENU)
+        h.save_config(conn, "action_weights", weights_preset)
+        h.save_config(conn, "batch_typical", batch_typical)
+
+        h.assert_consistent(conn, "first")
+        print(f"setup complete: seed_rows={seed_rows} "
+              f"weights={weights_preset} batch_typical={batch_typical}",
+              flush=True)
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    main()

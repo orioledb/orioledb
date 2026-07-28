@@ -19,6 +19,8 @@ Build via `make build` (see details under Usage)
     - deterministically constructs the PK/SK checkpoint race fixed in [orioledb#855](https://github.com/orioledb/orioledb/issues/855): pins concurrent INSERT/UPDATE/DELETE backends at the PK-applied/SK-pending boundary via `pg_stopevent_set`, forces a `CHECKPOINT` through them, then holds the window open for `RACE_WINDOW_SECONDS` so Antithesis's fault injection has a real chance of landing inside it. Reports via Antithesis SDK assertions (`always`/`reachable`).
 - `sk-recovery-race-chaos-client:<sha>` - client workload
     - best-effort variant of the above with no `pg_stopevent_set`: runs concurrent INSERT/UPDATE/DELETE bursts against the same table shape under a very short `checkpoint_timeout`, relying on chance overlap with an automatic checkpoint plus Antithesis's own fault injection. Reports via Antithesis SDK assertions (`always`/`sometimes`).
+- `sk-rebuild-desync-client:<sha>` - client workload
+    - targets `recovery-sk-rebuild-desync` (see `antithesis/scratchbook/properties/recovery-sk-rebuild-desync.md`): a secondary-index/PK divergence caused by crash-recovery's replay of *other*, unrelated, cleanly-committing transactions, not the crashing one. No `pg_stopevent_set`/checkpoint tuning involved — reproduces via a crash landing near any ordinary commit, so it just keeps committing single-statement INSERT/UPDATE(token)/DELETE operations against a unique-secondary-indexed table (swarmed action mix and batch size per timeline) and lets Antithesis's own fault injection do the rest. Reports via Antithesis SDK assertions (`always`/`reachable`), checked continuously (`anytime_`) and once more after faults stop (`finally_`).
 - flake1 - TODO
 
 ### Configurations
@@ -30,6 +32,7 @@ Build via `make build` (see details under Usage)
 | [workload/jepsen-repeatable-read](./config/workload/jepsens-repeatable-read)  | adds a jepsen client with append/rr workload  |
 | [workload/sk-recovery-race](./config/workload/sk-recovery-race)  | adds a client that deterministically constructs the orioledb#855 PK/SK checkpoint race via stopevents and checks consistency each iteration  |
 | [workload/sk-recovery-race-chaos](./config/workload/sk-recovery-race-chaos)  | adds a client that stresses the same PK/SK checkpoint race with concurrent DML and frequent checkpoints, no stopevents  |
+| [workload/sk-rebuild-desync](./config/workload/sk-rebuild-desync)  | adds a client that commits ordinary concurrent DML (no stopevents, no checkpoint tuning) and checks PK/SK consistency continuously, targeting recovery's replay of unrelated committed transactions  |
 | flake repro  | todo  |
 
 - individual configuration sets are merged with `config/docker-compose.base.yaml` to define a simulation
@@ -82,6 +85,25 @@ snouty launch \
   --ephemeral \
   --param custom.container_faults_enable=true \
   --param custom.container_faults_exclusion='sk-recovery-race-chaos-client' \
+  --webhook supabase
+```
+
+#### sk-rebuild-desync
+
+```
+make build push CFG='workload/sk-rebuild-desync'
+
+# optional
+snouty validate target/
+
+snouty launch \
+  --config-image "$(make config-image CFG='workload/sk-rebuild-desync')" \
+  --test-name 'sk-rebuild-desync' \
+  --description 'recovery-sk-rebuild-desync trial' \
+  --duration 20m \
+  --ephemeral \
+  --param custom.container_faults_enable=true \
+  --param custom.container_faults_exclusion='sk-rebuild-desync-client' \
   --webhook supabase
 ```
 

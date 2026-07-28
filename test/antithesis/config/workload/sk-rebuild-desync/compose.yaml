@@ -1,0 +1,20 @@
+services:
+  # No test.orioledb config override needed: unlike sk-recovery-race[-chaos],
+  # this property doesn't depend on a specific checkpoint/stopevent window --
+  # it reproduces via a crash landing near *any* ordinary commit, so default
+  # checkpoint/WAL settings are fine.
+
+  sk-rebuild-desync-client:
+    image: "${IMAGE_REPO}sk-rebuild-desync-client:${IMAGE_TAG}"
+    container_name: sk-rebuild-desync-client
+    environment:
+      PGHOST: orioledb
+      PGPORT: "5432"
+      PGDATABASE: "${POSTGRES_DB}"
+      PGUSER: "${POSTGRES_USER}"
+      PGPASSWORD: "${POSTGRES_PASSWORD}"
+    platform: "${PLATFORM}"
+    build: ./sk-rebuild-desync
+    depends_on:
+      test.orioledb:
+        condition: service_healthy

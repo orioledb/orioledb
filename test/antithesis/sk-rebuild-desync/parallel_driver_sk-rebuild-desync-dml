@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""
+Antithesis parallel_driver workload for the recovery-sk-rebuild-desync
+property (antithesis/scratchbook/properties/recovery-sk-rebuild-desync.md).
+
+Unlike sk-recovery-race[-chaos], this property does not depend on pinning a
+specific race window with pg_stopevent_set: the root-cause docs behind it
+show the secondary-index divergence is caused by recovery's replay/rebuild
+of *other*, unrelated, cleanly-committing transactions' WAL_REC_COMMIT
+records -- reproducible via a fault landing at effectively any point in the
+commit pipeline of any backend. So this driver's only job is to keep
+committing ordinary single-statement transactions against a table with a
+unique secondary index and let Antithesis's own fault injection (process
+kills/restarts) do the rest; Antithesis runs many instances of this script
+concurrently and repeatedly, each performing one bounded batch of DML before
+exiting.
+"""
+import os
+
+import psycopg2
+from antithesis.assertions import reachable
+from antithesis.random import get_random, random_choice
+
+import helper_common as h
+
+
+def dml_unit(conn, action):
+    if action == "insert":
+        h.execute(
+            conn, f"INSERT INTO {h.TABLE} VALUES "
+            f"(nextval('{h.SEQUENCE}'), nextval('{h.SEQUENCE}'));")
+    elif action == "update_token":
+        row = h.execute(
+            conn, f"SELECT id FROM {h.TABLE} ORDER BY random() LIMIT 1")
+        if not row:
+            return
+        (row_id,) = row[0]
+        h.execute(
+            conn, f"UPDATE {h.TABLE} SET token = nextval('{h.SEQUENCE}') "
+            f"WHERE id = %s;", (row_id,))
+    elif action == "delete":
+        row = h.execute(
+            conn, f"SELECT id FROM {h.TABLE} ORDER BY random() LIMIT 1")
+        if not row:
+            return
+        (row_id,) = row[0]
+        h.execute(conn, f"DELETE FROM {h.TABLE} WHERE id = %s;", (row_id,))
+
+
+def new_conn():
+    conn = h.connect(f"sk_rebuild_dml_{os.getpid()}_{get_random()}")
+    conn.autocommit = True  # one statement per unit == one commit per unit
+    return conn
+
+
+def main():
+    conn = new_conn()
+    try:
+        try:
+            actions = h.load_action_menu(conn)
+            batch_menu = h.load_batch_menu(conn)
+        except h.CONNECTION_LOST_ERRORS:
+            # Setup/config not reachable yet (e.g. right after a restart) --
+            # nothing to do this invocation, Antithesis will run us again.
+            return
+        batch_size = random_choice(batch_menu)
+
+        for _ in range(batch_size):
+            action = random_choice(actions)
+            try:
+                dml_unit(conn, action)
+            except h.CONNECTION_LOST_ERRORS as exc:
+                reachable(
+                    "sk-rebuild-desync DML unit observed a lost connection, "
+                    "consistent with fault injection landing mid-transaction",
+                    {"action": action, "error": str(exc)},
+                )
+                return
+            except psycopg2.Error as exc:
+                # Transient/expected under fault injection or concurrent
+                # DML (e.g. a serialization/lock conflict) -- reconnect and
+                # keep making progress toward the batch instead of treating
+                # this as a failure (see antithesis-workload skill,
+                # references/component-implementation.md "Fault Tolerance").
+                print(f"dml_unit({action}) failed, reconnecting: {exc}",
+                      flush=True)
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001 - best-effort cleanup
+                    pass
+                conn = new_conn()
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001 - best-effort cleanup
+            pass
+
+
+if __name__ == "__main__":
+    main()

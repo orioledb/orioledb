@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""
+Final consistency check for recovery-sk-rebuild-desync
+(antithesis/scratchbook/properties/recovery-sk-rebuild-desync.md). Runs
+after every started command in the timeline has completed and fault
+injection has stopped, so it retries through the system's post-fault
+stabilization window before asserting -- a connection error here is
+expected while crash recovery finishes, not a bug on its own.
+"""
+import time
+
+import helper_common as h
+
+MAX_WAIT_SECONDS = 120
+POLL_INTERVAL_SECONDS = 1.0
+
+
+def main():
+    deadline = time.monotonic() + MAX_WAIT_SECONDS
+    while True:
+        conn = None
+        try:
+            conn = h.connect("finally_check")
+            h.assert_consistent(conn, "finally")
+            return
+        except h.CONNECTION_LOST_ERRORS as exc:
+            if time.monotonic() >= deadline:
+                raise
+            print(f"finally check retrying, connection not ready: {exc}",
+                  flush=True)
+            time.sleep(POLL_INTERVAL_SECONDS)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001 - best-effort cleanup
+                    pass
+
+
+if __name__ == "__main__":
+    main()

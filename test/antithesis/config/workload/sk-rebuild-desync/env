@@ -1,0 +1,3 @@
+POSTGRES_DB=skrebuilddesync
+POSTGRES_USER=skrebuilddesync
+POSTGRES_PASSWORD=pw
