@@ -55,12 +55,30 @@ if [ $CHECK_TYPE = "sanitize" ] || [ $CHECK_TYPE = "pg_tests_asan" ]; then
 	# pg_tests_asan builds orioledb with ASAN/UBSAN (like sanitize) but runs the
 	# pg_tests churn workload, so the rare memory-corruption bugs the stress hunt
 	# surfaces (descr-invalidation MAXALIGN, iterator ordering) are caught at the
-	# first bad access with a precise alloc/free/access trace.
-	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -fno-omit-frame-pointer -fsanitize=alignment -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fno-sanitize=nonnull-attribute -fstack-protector" LDFLAGS_SL="-lubsan -fsanitize=address -fsanitize=undefined -lasan"
+	# first bad access with a precise alloc/free/access trace.  For pg_tests_asan
+	# also enable -DCHECK_PAGE_STRUCT (o_check_page_struct(NULL, p), no descriptor,
+	# no allocation) so page corruption is caught at the modification that
+	# introduces it, not later at page_split_chunk.  NOT -DCHECK_PAGE_STATS: its
+	# unlock_check_page path fetches the index descriptor, which allocates / grows
+	# a hash table under the page's critical section -- illegal, and frequent
+	# under the churn's DDL-driven descriptor cache misses.
+	EXTRA_CFLAGS=""
+	if [ $CHECK_TYPE = "pg_tests_asan" ]; then
+		EXTRA_CFLAGS="-DCHECK_PAGE_STRUCT"
+	fi
+	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -fno-omit-frame-pointer -fsanitize=alignment -fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fno-sanitize=nonnull-attribute -fstack-protector $EXTRA_CFLAGS" LDFLAGS_SL="-lubsan -fsanitize=address -fsanitize=undefined -lasan"
 elif [ $CHECK_TYPE = "check_page" ]; then
 	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -DCHECK_PAGE_STRUCT -DCHECK_PAGE_STATS"
 elif [ $CHECK_TYPE = "valgrind_1" ] || [ $CHECK_TYPE = "valgrind_2" ]; then
 	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -coverage -fprofile-update=atomic -flto"
+elif [ $CHECK_TYPE = "pg_tests" ]; then
+	# The stress-hunt churn: enable -DCHECK_PAGE_STRUCT (o_check_page_struct(NULL,
+	# p) -- no descriptor, no allocation) so page corruption (e.g. the recovery
+	# page_split_chunk assert) is caught early, at the modification that corrupts
+	# the page rather than a later split/read.  NOT -DCHECK_PAGE_STATS: it fetches
+	# the index descriptor in unlock_check_page and allocates under the page's
+	# critical section, which crashes constantly under the churn's DDL cache misses.
+	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -coverage -fprofile-update=atomic -DCHECK_PAGE_STRUCT"
 elif [ $CHECK_TYPE != "static" ]; then
 	make -j `nproc` USE_PGXS=1 IS_DEV=1 CFLAGS_SL="$(pg_config --cflags_sl) -Werror -coverage -fprofile-update=atomic"
 fi
