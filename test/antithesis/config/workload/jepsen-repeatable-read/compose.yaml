@@ -23,8 +23,8 @@ services:
       # NB postgres "repeatable-read" is not Adya repeatable read
       # and instead guarantees snapshot isolation.
       # Ergo, we must specify the expected consistency model explicitly.
-      JEPSEN_ISOLATION: repeatable-read
-      JEPSEN_EXPECTED_CONSISTENCY_MODEL: snapshot-isolation
+      JEPSEN_ISOLATION: "${JEPSEN_ISOLATION:-repeatable-read}"
+      JEPSEN_EXPECTED_CONSISTENCY_MODEL: "${JEPSEN_EXPECTED_CONSISTENCY_MODEL:-snapshot-isolation}"
     # We require a separate value for setting the jepsen's target architecture
     # because there is a bug in Rosetta emulation preventing jepsen from
     # executing as a linux/amd64 image on MacOS.
