@@ -1021,8 +1021,23 @@ SELECT id, length(m), length(e) FROM o_sm_upsert;
 SELECT orioledb_tbl_structure('o_sm_upsert'::regclass, 'nuet');
 
 -----
+-- misaligned VARSIZE_EXTERNAL read with multiple TOAST columns
+-----
+CREATE TABLE o_test_varsize_align (
+	id integer PRIMARY KEY,
+	a  text,
+	b  text
+) USING orioledb;
+
+INSERT INTO o_test_varsize_align
+VALUES (1, repeat('x', 6000), repeat('y', 6000));
+
+SELECT id, length(a), length(b) FROM o_test_varsize_align;
+
+-----
 -- Cleanup
 -----
+DROP TABLE o_test_varsize_align;
 DROP TABLE o_sm_text;
 DROP TABLE o_sm_mix;
 DROP TABLE o_sm_bytea;
