@@ -1385,13 +1385,15 @@ get_index_descr(ORelOids ixOids, OIndexType ixType,
 	OIndex	   *oIndex;
 	MemoryContext mcxt;
 	bool		found = false;
+	bool		existed;
+	int			refcnt = 0;
 
 	result = hash_search(oIndexDescrHash, &ixOids, HASH_ENTER, &found);
 	Assert((found && result) || !found);
 
-	found = found && (ctx.version == O_TABLE_INVALID_VERSION || result->version == ctx.version);
-
-	if (found)
+	existed = found;
+	if (existed && (ctx.version == O_TABLE_INVALID_VERSION ||
+					result->version == ctx.version))
 		return result;
 
 	oIndex = o_indices_get_extended(ixOids, ixType, ctx);
@@ -1402,6 +1404,22 @@ get_index_descr(ORelOids ixOids, OIndexType ixType,
 		Assert(found);
 		return NULL;
 	}
+
+	/*
+	 * Re-filling an existing entry whose metadata version changed.
+	 * o_index_fill_descr() memset()s the descriptor and resets refcnt to 0,
+	 * so free the old tupdescs / index_mctx / btree state and preserve the
+	 * reference count first -- exactly like recreate_index_descr(). Otherwise
+	 * a descriptor still referenced by an OTableDescr would leak its old
+	 * contents and, worse, have its refcnt clobbered to 0, letting a
+	 * concurrent checkpoint invalidation free it while it is still in use
+	 * (use-after-free -> later FreeTupleDesc MAXALIGN crash).
+	 */
+	if (existed)
+	{
+		refcnt = result->refcnt;
+		index_descr_free(result);
+	}
 	mcxt = MemoryContextSwitchTo(descrCxt);
 	o_index_fill_descr(result, oIndex, o_table_source, source);
 	MemoryContextSwitchTo(mcxt);
@@ -1409,6 +1427,8 @@ get_index_descr(ORelOids ixOids, OIndexType ixType,
 						  result->oids, oIndex->indexType,
 						  oIndex->table_persistence, oIndex->tablespace,
 						  oIndex->createOxid, result);
+	if (existed)
+		result->refcnt = refcnt;
 	free_o_index(oIndex);
 
 	return result;
