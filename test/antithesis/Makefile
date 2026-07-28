@@ -28,9 +28,10 @@ build:
 	config/make-compose $(CFG) | docker compose -f - build
 	config/make-image $(CFG)
 
+ARGS_UP ?= --pull=build --detach
 .PHONY: up # Build Docker images
 up:
-	config/make-compose $(CFG) | docker compose -f - up --pull=build --detach
+	config/make-compose $(CFG) | docker compose -f - up $(ARGS_UP)
 
 .PHONY: push # push simulation images
 push:
