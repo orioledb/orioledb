@@ -13,14 +13,9 @@ ARG UBUNTU_VERSION=noble
 
 # BEGIN build image
 
-FROM ubuntu:${UBUNTU_VERSION} AS builder
+FROM ubuntu:${UBUNTU_VERSION} AS build-base
 
 ARG UBUNTU_VERSION
-ARG PG_MAJOR=17
-ARG ORIOLEDB_REPO=https://github.com/orioledb/orioledb.git
-ARG ORIOLEDB_REF=main
-ARG ANTITHESIS_SDK_REF=0.4.8
-ARG PGTAG=
 
 ENV LANG=en_US.utf8
 
@@ -58,13 +53,44 @@ RUN set -eux; \
 	rm -rf /var/lib/apt/lists/*; \
     apt-get clean
 
-# shallow clone OrioleDB sources at specified coordinates
+# Shallow clone OrioleDB sources at the specified coordinates. The checkout is
+# copied into the PostgreSQL tree only after PostgreSQL has been built.
+FROM build-base AS orioledb-source
+
+ARG ORIOLEDB_REPO=https://github.com/orioledb/orioledb.git
+ARG ORIOLEDB_REF=main
+
 RUN set -eux; \
-	git init /usr/src/postgresql/contrib/orioledb; \
-	cd /usr/src/postgresql/contrib/orioledb; \
+	git init /usr/src/orioledb; \
+	cd /usr/src/orioledb; \
 	git remote add origin "${ORIOLEDB_REPO}"; \
 	git fetch --depth 1 origin "${ORIOLEDB_REF}"; \
 	git checkout --detach FETCH_HEAD
+
+# Produce a narrow, deterministic set of PostgreSQL build inputs. BuildKit can
+# reuse the downstream PostgreSQL layers when a new OrioleDB ref produces the
+# same files here.
+FROM orioledb-source AS postgres-inputs
+
+ARG PG_MAJOR=17
+ARG PGTAG=
+
+RUN set -eux; \
+	if [ -z "${PGTAG}" ]; then \
+		PGTAG="$(awk -v major="${PG_MAJOR}" '$1 == major ":" { print $2; exit }' /usr/src/orioledb/.pgtags)"; \
+	fi; \
+	test -n "${PGTAG}"; \
+	mkdir -p /opt/postgresql-inputs; \
+	printf '%s\n' "${PGTAG}" > /opt/postgresql-inputs/pgtag; \
+	printf '%s\n' "${PG_MAJOR}" > /opt/postgresql-inputs/pg-major; \
+	install -m 0755 /usr/src/orioledb/docker/config.guess /opt/postgresql-inputs/config.guess; \
+	install -m 0755 /usr/src/orioledb/docker/config.sub /opt/postgresql-inputs/config.sub
+
+FROM build-base AS postgres-builder
+
+ARG UBUNTU_VERSION
+
+COPY --from=postgres-inputs /opt/postgresql-inputs/ /opt/postgresql-inputs/
 
 # NB we are not coverage-instrumenting the main postgres service.
 # Only instrumenting orioledb.so will help guide the simulation search and focus on orioledb.so
@@ -72,26 +98,11 @@ RUN set -eux; \
 # as this current build will not focus on those changes.
 
 RUN set -eux; \
-	if [ -z "${PGTAG}" ]; then \
-		PGTAG="$(awk -v major="${PG_MAJOR}" '$1 == major ":" { print $2; exit }' /usr/src/postgresql/contrib/orioledb/.pgtags)"; \
-	fi; \
-	test -n "${PGTAG}"; \
-	ORIOLEDB_VERSION=$(grep "^#define ORIOLEDB_VERSION" /usr/src/postgresql/contrib/orioledb/include/orioledb.h | cut -d'"' -f2); \
-	ORIOLEDB_BUILDTIME=$(date -Iseconds); \
-    \
+	PGTAG="$(cat /opt/postgresql-inputs/pgtag)"; \
+	PG_MAJOR="$(cat /opt/postgresql-inputs/pg-major)"; \
 	echo "PG_MAJOR=${PG_MAJOR}"; \
 	echo "PGTAG=${PGTAG}"; \
-	echo "ORIOLEDB_VERSION=${ORIOLEDB_VERSION}"; \
-	echo "ORIOLEDB_BUILDTIME=${ORIOLEDB_BUILDTIME}"; \
-	mkdir -p /opt/orioledb; \
-	printf '%s\n' \
-		"PGTAG=${PGTAG}" \
-		"PG_MAJOR=${PG_MAJOR}" \
-		"ORIOLEDB_REF=${ORIOLEDB_REF}" \
-		"ORIOLEDB_VERSION=${ORIOLEDB_VERSION}" \
-		"ORIOLEDB_BUILDTIME=${ORIOLEDB_BUILDTIME}" \
-		> /opt/orioledb/manifest.out; \
-    \
+	mkdir -p /usr/src/postgresql; \
 	curl -fsSL "https://github.com/orioledb/postgres/tarball/${PGTAG}" -o /tmp/postgresql.tar.gz; \
 	tar \
 		--extract \
@@ -106,8 +117,8 @@ RUN set -eux; \
 	\
 	gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
 # explicitly update autoconf config.guess and config.sub so they support more arches/libcs
-	cp /usr/src/postgresql/contrib/orioledb/docker/config.guess config/config.guess; \
-	cp /usr/src/postgresql/contrib/orioledb/docker/config.sub config/config.sub; \
+	cp /opt/postgresql-inputs/config.guess config/config.guess; \
+	cp /opt/postgresql-inputs/config.sub config/config.sub; \
 	( CC=clang ./configure \
 		--build="${gnuArch}" \
 		--enable-debug \
@@ -131,7 +142,7 @@ RUN set -eux; \
 		--with-zstd \
 		# The "testgres" package expects the PostgreSQL version as the last word.
 		# Therefore, the extra ${POSTGRESQL_VERSION} is added as a workaround.
-		--with-extra-version=" ${ORIOLEDB_VERSION} PGTAG=${PGTAG} antithesis ubuntu:${UBUNTU_VERSION}+clang build:${ORIOLEDB_BUILDTIME} ${POSTGRESQL_VERSION}" \
+		--with-extra-version=" PGTAG=${PGTAG} antithesis ubuntu:${UBUNTU_VERSION}+clang ${POSTGRESQL_VERSION}" \
 		|| { cat config.log; exit 1; } \
 	); \
 	if printf "%s\n" "$PGTAG" | grep -Fqe "patches${PG_MAJOR}_"; then \
@@ -147,6 +158,32 @@ RUN set -eux; \
 	make install; \
 	make -C contrib install
 
+FROM postgres-builder AS builder
+
+ARG ORIOLEDB_REF=main
+
+COPY --from=orioledb-source /usr/src/orioledb/ /usr/src/postgresql/contrib/orioledb/
+
+# Keep OrioleDB-specific metadata out of the PostgreSQL binaries so a change in
+# ORIOLEDB_REF can reuse the PostgreSQL build when its resolved inputs are the same.
+RUN set -eux; \
+	PGTAG="$(cat /opt/postgresql-inputs/pgtag)"; \
+	PG_MAJOR="$(cat /opt/postgresql-inputs/pg-major)"; \
+	ORIOLEDB_VERSION="$(grep "^#define ORIOLEDB_VERSION" /usr/src/postgresql/contrib/orioledb/include/orioledb.h | cut -d'"' -f2)"; \
+	ORIOLEDB_BUILDTIME="$(date -Iseconds)"; \
+	echo "PG_MAJOR=${PG_MAJOR}"; \
+	echo "PGTAG=${PGTAG}"; \
+	echo "ORIOLEDB_VERSION=${ORIOLEDB_VERSION}"; \
+	echo "ORIOLEDB_BUILDTIME=${ORIOLEDB_BUILDTIME}"; \
+	mkdir -p /opt/orioledb; \
+	printf '%s\n' \
+		"PGTAG=${PGTAG}" \
+		"PG_MAJOR=${PG_MAJOR}" \
+		"ORIOLEDB_REF=${ORIOLEDB_REF}" \
+		"ORIOLEDB_VERSION=${ORIOLEDB_VERSION}" \
+		"ORIOLEDB_BUILDTIME=${ORIOLEDB_BUILDTIME}" \
+		> /opt/orioledb/manifest.out
+
 # Build orioledb.so with Antithesis coverage instrumentation
 # see https://antithesis.com/docs/reference/sdk/cpp/instrumentation/
 
@@ -156,6 +193,8 @@ RUN set -eux; \
 # WITHOUT -fsanitize-coverage/-flto: the callbacks must not trace themselves,
 # and a regular object mixes fine into a ThinLTO link.
 # (Kept after the postgres layer so an SDK bump only rebuilds orioledb.)
+ARG ANTITHESIS_SDK_REF=0.4.8
+
 RUN set -eux; \
 	mkdir -p /usr/src/antithesis; \
 	curl -fsSL \
@@ -172,10 +211,10 @@ RUN set -eux; \
 # COPT reaches every object's CFLAGS (and LDFLAGS) via Makefile.global;
 # the LDFLAGS_SL override reaches the .so link line
 	make -j "$(nproc)" USE_PGXS=1 IS_DEV=1 \
-		COPT="-fsanitize-coverage=trace-pc-guard -flto=thin -g" \
+		COPT="-fsanitize-coverage=trace-pc-guard -flto=thin -g -DUSE_ANTITHESIS_SDK" \
 		LDFLAGS_SL="-flto=thin -fsanitize-coverage=trace-pc-guard -fuse-ld=lld -Wl,--build-id /usr/src/antithesis/antithesis_instrumentation.o"; \
 	make USE_PGXS=1 IS_DEV=1 \
-		COPT="-fsanitize-coverage=trace-pc-guard -flto=thin -g" \
+		COPT="-fsanitize-coverage=trace-pc-guard -flto=thin -g -DUSE_ANTITHESIS_SDK" \
 		LDFLAGS_SL="-flto=thin -fsanitize-coverage=trace-pc-guard -fuse-ld=lld -Wl,--build-id /usr/src/antithesis/antithesis_instrumentation.o" \
 		install; \
 	PKGLIB="$(pg_config --pkglibdir)"; \
