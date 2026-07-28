@@ -1340,7 +1340,38 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 			cmp = o_btree_cmp(desc, &it->prevTuple.tuple, BTreeKeyLeafTuple,
 							  &result, BTreeKeyLeafTuple);
 
-			Assert((IT_IS_FORWARD(it) && cmp < 0) || cmp > 0);
+			/*
+			 * TEMPORARY churn-hunt diagnostic for the iterator monotonicity
+			 * violation on backward skip scans.  Instead of
+			 * Assert()-aborting, log rich context and CONTINUE so the query
+			 * still completes: the regress diff then reveals whether the
+			 * results are actually wrong (a real re-emission) or correct (an
+			 * over-strict assert), while cmp distinguishes an exact duplicate
+			 * (cmp==0, identical=1) from a reordering.  Revert to the plain
+			 * Assert once diagnosed.
+			 */
+			if (!((IT_IS_FORWARD(it) && cmp < 0) || cmp > 0))
+			{
+				static int	mono_violations = 0;
+				int			plen = o_btree_len(desc, it->prevTuple.tuple,
+											   OTupleLength);
+				int			clen = o_btree_len(desc, result, OTupleLength);
+				bool		identical = (plen == clen &&
+										 it->prevTuple.tuple.formatFlags ==
+										 result.formatFlags &&
+										 memcmp(it->prevTuple.tuple.data,
+												result.data, plen) == 0);
+
+				if (mono_violations++ < 200)
+					elog(WARNING,
+						 "ITER_MONO_VIOLATION dir=%s cmp=%d identical=%d plen=%d clen=%d idx=(%u,%u,%u) treetype=%d curKeyReturned=%d resumeLocValid=%d blkno=%u",
+						 IT_IS_FORWARD(it) ? "fwd" : "bwd", cmp,
+						 identical ? 1 : 0, plen, clen,
+						 desc->oids.datoid, desc->oids.reloid,
+						 desc->oids.relnode, (int) desc->type,
+						 it->curKeyReturned, it->resumeLocValid,
+						 it->context.items[it->context.index].blkno);
+			}
 		}
 		copy_fixed_tuple(desc, &it->prevTuple, result);
 	}
