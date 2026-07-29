@@ -676,13 +676,18 @@ apply_modify_record(OTableDescr *descr, OIndexDescr *id, uint16 type,
 	oxid = get_current_oxid();
 
 	/*
-	 * Don't apply changes to secondary indices before TOAST is consisntent.
+	 * Don't apply changes to secondary indices before TOAST is consistent.
 	 * Otherwise, values of secondary indices on TOASTed fields can be
 	 * invalid.
+	 *
+	 * Tables without a TOAST index can safely apply SK changes immediately:
+	 * all column values are inline in the PK tuple, so SK derivation does not
+	 * depend on TOAST tree state.  Deferring SK updates for such tables
+	 * creates a window where PK-only WAL replay leaves stale SK entries from
+	 * the checkpoint that the pending-fixup mechanism cannot clean up.
 	 */
-	if (descr && toast_consistent)
+	if (descr && (toast_consistent || descr->toast == NULL))
 	{
-		/* Modify table */
 		apply_tbl_modify_record(descr, type, p, oxid, COMMITSEQNO_INPROGRESS);
 	}
 	else
