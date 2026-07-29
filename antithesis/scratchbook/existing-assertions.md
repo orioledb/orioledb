@@ -9,13 +9,27 @@ external_references:
 
 # Existing Antithesis SDK Assertions
 
-Scanned: `src/`, `include/` (the orioledb C extension — no hits) and `test/antithesis/` (the Antithesis harness — all hits found here). Search patterns: `assert_always`, `assert_sometimes`, `assert_reachable`, `assert_unreachable`, `antithesis` (case-sensitive grep across `*.py`, `*.c`, `*.h`, `*.go`). Per the scope restriction recorded in `property-catalog.md`, `/Users/artur/supabase/orioledb_postgres` is no longer scanned as of this update (it was checked in the original pass, with no hits, before the scope was narrowed).
+Scanned: `src/`, `include/` (the orioledb C extension) and `test/antithesis/` (the Antithesis harness). Search patterns: `assert_always`, `assert_sometimes`, `assert_reachable`, `assert_unreachable`, `antithesis` (case-sensitive grep across `*.py`, `*.c`, `*.h`, `*.go`), plus `ALWAYS(`, `ALWAYS_OR_UNREACHABLE(`, `SOMETIMES(`, `REACHABLE(`, `UNREACHABLE(` for the vendored C macro names (see below). Per the scope restriction recorded in `property-catalog.md`, `/Users/artur/supabase/orioledb_postgres` is no longer scanned as of this update (it was checked in the original pass, with no hits, before the scope was narrowed).
 
-**No Antithesis SDK assertions exist anywhere in the C extension itself (`src/`, `include/`).** All existing instrumentation lives in the Python workload drivers under `test/antithesis/`. This means every property currently checked is verified from the workload/client side only — there is no SUT-side (in-process) instrumentation yet. See `sut-analysis.md` §11 for candidate internal states (e.g. the checkpoint-during-recovery LSN synchronization gap) where a surgical SUT-side assertion would give materially better search guidance than a workload-only check, since they concern internal states not directly observable from a SQL client.
+**Update (2026-07-29): a vendored C SDK now exists and is already in use — this section is no longer accurate as originally written.** `include/utils/antithesis_sdk.h` (commit `f0b429c8`, "antithesis: vendor Antithesis SDK") implements `ALWAYS`/`ALWAYS_OR_UNREACHABLE`/`SOMETIMES`/`REACHABLE`/`UNREACHABLE` as C macros (mirroring `antithesis-sdk-cpp` 0.4.8's wire protocol), backed by `src/utils/antithesis_sdk.c`, compiled in only when `USE_ANTITHESIS_SDK` is defined — and it is: `test/antithesis/orioledb/Dockerfile` passes `-DUSE_ANTITHESIS_SDK` via `COPT` in the instrumented build. Two follow-up commits added real call sites (see "Found assertions" below): `72fb9c47` ("antithesis: add lock group instrumentation") and `d98de50c` ("antithesis: downlink instrumentation"). SUT-side (in-process) instrumentation is no longer absent — 5 call sites exist today, all guarding one specific concurrency gate (see below). See `sut-analysis.md` §11 for other candidate internal states (e.g. the checkpoint-during-recovery LSN synchronization gap) that remain uninstrumented.
 
-**Update (2026-07-29):** `test/antithesis/sk-recovery-race-chaos/` was retired and folded into `test/antithesis/sk-rebuild-desync/` (checkpoint-timing swarming + its `sometimes()` check moved there; see below and `property-catalog.md`'s `recovery-sk-rebuild-desync` entry). Its assertions no longer exist as a separate file.
+**Also (2026-07-29):** `test/antithesis/sk-recovery-race-chaos/` was retired and folded into `test/antithesis/sk-rebuild-desync/` (checkpoint-timing swarming + its `sometimes()` check moved there; see below and `property-catalog.md`'s `recovery-sk-rebuild-desync` entry). Its assertions no longer exist as a separate file.
 
 ## Found assertions
+
+### `src/btree/scan.c` and `src/btree/iterator.c` (C extension, SUT-side)
+
+C SDK: `#include "utils/antithesis_sdk.h"`, macros used directly (no import statement — these are preprocessor macros, compiled in only under `USE_ANTITHESIS_SDK`).
+
+| File:Line | Type | Message | Notes |
+|---|---|---|---|
+| `src/btree/scan.c:708` | `ALWAYS_OR_UNREACHABLE` | "parallel scan: on-disk downlink published before the disk-phase sort" | Parallel B-tree scan: a shared-memory downlink slot must never be published to the DSM array before `O_PARALLEL_DOWNLINKS_SORTED` is set on the same poscan, or a later-published slot could land on an index a finished consumer already read past, silently skipping that leaf page. Sampled under `downlinksPublish` held in shared mode. |
+| `src/btree/scan.c:1369` | `ALWAYS_OR_UNREACHABLE` | (same invariant, second call site) | Second instance of the same publish-ordering gate; not yet read in detail — same mechanism as line 708 by inspection of the surrounding function. |
+| `src/btree/iterator.c:219` | `ALWAYS` | "combined-read gate covers lock-group undo: point lookup" | `o_btree_find_tuple_by_key_cb()`: the combined-result gate (whether a read must merge the page image with undo) must account for the *whole parallel lock group's* undo, not just the calling backend's — a parallel worker's transaction undo hangs off the lock-group leader. Guards **orioledb#982**, a read-own-writes anomaly (a non-combined read in a parallel worker reverts pages below the transaction's own writes, silently losing them). |
+| `src/btree/iterator.c:326` | `ALWAYS` | "combined-read gate covers lock-group undo: find-tuples start" | Same gate, at `o_btree_find_tuples_start()`; comment cross-references the point-lookup site above. |
+| `src/btree/iterator.c:951` | `ALWAYS` | "combined-read gate covers lock-group undo: range iterator" | Same gate again, at the range-iterator variant. |
+
+All five call sites check the identical condition shape: `combinedResult || !COMMITSEQNO_IS_NORMAL(csn) || !have_lock_group_undo(desc->undoType)` (or the scan.c equivalent for downlink publish ordering), backed by a new `have_lock_group_undo()` function (`src/transam/undo.c:2944`, declared `include/transam/undo.h:408`) that widens `have_current_undo()` to the whole lock group when running as a parallel worker. **orioledb#982 is not currently in `property-catalog.md`** — this instrumentation exists but no property entry, evidence file, or workload targets it yet.
 
 ### `test/antithesis/sk-recovery-race/driver.py`
 
@@ -46,9 +60,9 @@ Contains the string `antithesis_setup` (line 9) as a static JSON status marker (
 
 ## Summary
 
+- **C extension (`src/`, `include/`)**: 5 SUT-side call sites, all guarding one gate (parallel lock-group undo / combined-read correctness, `orioledb#982`) — 3 `ALWAYS` (`src/btree/iterator.c`), 2 `ALWAYS_OR_UNREACHABLE` (`src/btree/scan.c`, parallel downlink publish ordering, likely the same underlying parallel-worker concurrency surface). This was **0** as of the original research pass; the vendored SDK (`include/utils/antithesis_sdk.h`, `src/utils/antithesis_sdk.c`) and these call sites were added afterward. No corresponding property/evidence file/workload exists yet for `orioledb#982`.
 - **`sk-recovery-race/driver.py`** (unchanged): 1 `always`, 1 `reachable` — targets orioledb#855's PK/SK consistency across the deterministically-pinned checkpoint boundary.
-- **`sk-rebuild-desync/`** (new, replaces the retired `sk-recovery-race-chaos/`): 1 `always` (shared, called from three test commands), 1 `reachable`, 1 `sometimes` — targets `recovery-sk-rebuild-desync` (a distinct property from #855) plus the checkpoint-overlap liveness check folded in from the retired chaos workload.
-- **0 assertions** exist in the C extension (`src/`, `include/`).
+- **`sk-rebuild-desync/`** (replaces the retired `sk-recovery-race-chaos/`): 1 `always` (shared, called from three test commands), 1 `reachable`, 1 `sometimes` — targets `recovery-sk-rebuild-desync` (a distinct property from #855) plus the checkpoint-overlap liveness check folded in from the retired chaos workload.
 - **0 assertions** exist in the jepsen workload — its verdict is currently exported as a results file, not scored as an SDK assertion (gap, see above).
 - The health-checker uses the standard setup-complete signal convention correctly but is not an assertion.
 
@@ -56,3 +70,5 @@ Contains the string `antithesis_setup` (line 9) as a static JSON status marker (
 
 - Did not inspect `test/antithesis/target/` (build output, likely snouty-generated docker-compose artifacts) for assertion usage — assumed it's derived from the source files scanned above, not hand-authored.
 - Whether the jepsen Docker image itself (external, not vendored) contains any Antithesis SDK calls internally was not checked — only this repo's wrapper scripts were scanned, per the SUT path scope.
+- `src/btree/scan.c:1369` was located by grep but not read in as much depth as line 708 — assumed (not independently confirmed line-by-line) to guard the identical publish-ordering invariant based on the surrounding function's shape.
+- Whether `orioledb#982` should become a cataloged property, and whether any workload currently exercises parallel scans/lock groups enough to reach these 5 call sites at all, was not investigated here (out of scope for an assertion inventory) — noted for whoever next updates `property-catalog.md`.
