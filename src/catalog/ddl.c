@@ -507,6 +507,26 @@ get_all_vacuum_rels(int options)
 	return vacrels;
 }
 
+/*
+ * If 'ind' is an orioledb btree index, add its name to reindex_list and return
+ * true; otherwise leave the list unchanged and return false.
+ */
+static bool
+add_index_to_reindex_list(Relation ind)
+{
+	OBTOptions *options = (OBTOptions *) ind->rd_options;
+
+	if (ind->rd_rel->relam == BTREE_AM_OID &&
+		!(options && !options->orioledb_index))
+	{
+		String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
+
+		reindex_list = list_append_unique(reindex_list, ix_name);
+		return true;
+	}
+	return false;
+}
+
 /* Based on postgres function ReindexMultipleTables */
 static bool
 check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool concurrently)
@@ -665,16 +685,9 @@ check_multiple_tables(const char *objectName, ReindexObjectType objectKind, bool
 
 			foreach(index, RelationGetIndexList(tbl))
 			{
-				Oid			indexOid = lfirst_oid(index);
-				Relation	ind = relation_open(indexOid, AccessShareLock);
-				OBTOptions *options = (OBTOptions *) ind->rd_options;
+				Relation	ind = relation_open(lfirst_oid(index), AccessShareLock);
 
-				if (ind->rd_rel->relam == BTREE_AM_OID && !(options && !options->orioledb_index))
-				{
-					String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
-
-					reindex_list = list_append_unique(reindex_list, ix_name);
-				}
+				add_index_to_reindex_list(ind);
 				relation_close(ind, AccessShareLock);
 			}
 
@@ -865,28 +878,37 @@ ReindexPartitions(Oid relid, bool concurrently)
 
 		Assert(part_rel->rd_rel->relkind == RELKIND_INDEX ||
 			   part_rel->rd_rel->relkind == RELKIND_RELATION);
-
-		if (concurrently)
+		if ((part_rel->rd_rel->relkind == RELKIND_RELATION ||
+			 part_rel->rd_rel->relkind == RELKIND_MATVIEW) &&
+			is_orioledb_rel(part_rel))
 		{
-			if ((part_rel->rd_rel->relkind == RELKIND_RELATION ||
-				 part_rel->rd_rel->relkind == RELKIND_MATVIEW) &&
-				is_orioledb_rel(part_rel))
+			ListCell   *index;
+
+			/* Every index of it gets reindexed.  */
+			foreach(index, RelationGetIndexList(part_rel))
 			{
+				Relation	ind = relation_open(lfirst_oid(index), AccessShareLock);
+
+				add_index_to_reindex_list(ind);
+				relation_close(ind, AccessShareLock);
+			}
+
+			if (concurrently)
 				has_orioledb = true;
-			}
-			else if (part_rel->rd_rel->relkind == RELKIND_INDEX)
+		}
+		else if (part_rel->rd_rel->relkind == RELKIND_INDEX)
+		{
+			Relation	tbl = relation_open(part_rel->rd_index->indrelid, AccessShareLock);
+
+			if (tbl->rd_rel->relkind == RELKIND_RELATION &&
+				is_orioledb_rel(tbl))
 			{
-				Relation	tbl;
-
-				tbl = relation_open(part_rel->rd_index->indrelid, AccessShareLock);
-
-				if ((tbl->rd_rel->relkind == RELKIND_RELATION) &&
-					is_orioledb_rel(tbl))
-				{
+				add_index_to_reindex_list(part_rel);
+				if (concurrently)
 					has_orioledb = true;
-				}
-				relation_close(tbl, AccessShareLock);
 			}
+
+			relation_close(tbl, AccessShareLock);
 		}
 		relation_close(part_rel, AccessShareLock);
 	}
@@ -1331,7 +1353,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 														  false);
 					Relation	iRel,
 								tbl;
-					OBTOptions *options;
 
 					if (get_rel_relkind(indOid) == RELKIND_PARTITIONED_INDEX)
 					{
@@ -1342,18 +1363,9 @@ orioledb_utility_command(PlannedStmt *pstmt,
 					iRel = index_open(indOid, AccessShareLock);
 					tbl = relation_open(iRel->rd_index->indrelid,
 										AccessShareLock);
-					options = (OBTOptions *) iRel->rd_options;
 					if (is_orioledb_rel(tbl) &&
-						iRel->rd_rel->relam == BTREE_AM_OID &&
-						!(options && !options->orioledb_index))
-					{
-						String	   *ix_name;
-
-						ix_name = makeString(pstrdup(iRel->rd_rel->relname.data));
-						reindex_list = list_append_unique(reindex_list, ix_name);
-						if (concurrently)
-							has_orioledb = true;
-					}
+						add_index_to_reindex_list(iRel) && concurrently)
+						has_orioledb = true;
 					relation_close(tbl, AccessShareLock);
 					relation_close(iRel, AccessShareLock);
 				}
@@ -1377,16 +1389,10 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 						foreach(index, RelationGetIndexList(tbl))
 						{
-							Oid			indexOid = lfirst_oid(index);
-							Relation	ind = relation_open(indexOid, AccessShareLock);
-							OBTOptions *options = (OBTOptions *) ind->rd_options;
+							Relation	ind = relation_open(lfirst_oid(index),
+															AccessShareLock);
 
-							if (ind->rd_rel->relam == BTREE_AM_OID && !(options && !options->orioledb_index))
-							{
-								String	   *ix_name = makeString(pstrdup(ind->rd_rel->relname.data));
-
-								reindex_list = list_append_unique(reindex_list, ix_name);
-							}
+							add_index_to_reindex_list(ind);
 							relation_close(ind, AccessShareLock);
 							if (concurrently)
 								has_orioledb = true;
