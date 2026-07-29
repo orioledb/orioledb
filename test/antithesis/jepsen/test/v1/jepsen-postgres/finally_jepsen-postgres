@@ -10,5 +10,8 @@ copy_output() {
 
 if [ -n "${ANTITHESIS_OUTPUT_DIR:-}" ] && [ -d store ]; then
 	copy_output store/latest/results.edn
-	copy_output store/latest/history.edn
+
+	if [ -z "${JEPSEN_SUPPRESS_STDOUT:-}" ]; then
+		copy_output store/latest/history.edn
+	fi
 fi
