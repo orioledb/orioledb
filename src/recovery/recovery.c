@@ -159,7 +159,17 @@ typedef struct
 	bool		systree_modified;
 	/* is typecache invalidation needed after this transaction */
 	bool		invalidate_typcache;
-	/* is oTablesMetaLock held by transaction */
+
+	/*
+	 * meta window open: this xid replayed WAL_REC_O_TABLES_META_LOCK and not
+	 * yet its matching WAL_REC_O_TABLES_META_UNLOCK.  The enclosed
+	 * O_TABLES/O_INDICES modifies are applied in place.  With the fuzzy
+	 * sys-tree checkpoint, recovery can legitimately start past a window's
+	 * META_LOCK (its sys-tree changes already fully in the checkpoint image);
+	 * handle_o_tables_meta_unlock() uses this flag to tell that case apart
+	 * from a window whose META_LOCK it did see, and skips the (already
+	 * unnecessary) descriptor reconciliation for the former.
+	 */
 	bool		o_tables_meta_locked;
 	/* is provided by checkpoint xids file */
 	bool		checkpoint_xid;
@@ -337,6 +347,46 @@ int			recovery_queue_size_guc;
  * Are TOAST trees consistent with primary indices.
  */
 bool		toast_consistent = false;
+
+/*
+ * Deferred data-log undo application for the fuzzy sys-tree checkpoint's
+ * stage-0 window [sysTreesStartPtr, replayStartPtr).
+ *
+ * A checkpoint xid (one read out of the xids file into checkpoint_undo_stacks)
+ * can finish -- commit, abort, or roll back to a savepoint -- while recovery
+ * is still inside stage 0.  Applying its captured data-log
+ * (UndoLogRegular/UndoLogRegularPageLevel) undo right there would fetch a data
+ * tree descriptor (O_TABLES/O_INDICES) before the sys trees are consistent,
+ * which is not allowed.  walk_checkpoint_stacks() therefore parks such an
+ * entry on this list instead of applying it; the list is drained -- in FIFO
+ * order, so each xid's Regular/RegularPageLevel pair and the cross-xid finish
+ * order are preserved -- the moment recovery crosses controlReplayStartPtr,
+ * before any forward data record is replayed (see the crossing block in
+ * orioledb_redo()).  UndoLogSystem entries are always applied in place:
+ * sys-tree undo is exactly what stage 0 is bringing to consistency.
+ *
+ * Leader only: checkpoint_undo_stacks are populated only for worker_id < 0.
+ */
+typedef struct DeferredCheckpointUndo
+{
+	OXid		oxid;
+	bool		needs_wal_flush;
+	XidRecKind	kind;
+	UndoStackLocations undoStack;
+	CommitSeqNo csn;
+	SubTransactionId parentSubid;
+	bool		flush_undo_pos;
+	dlist_node	node;
+} DeferredCheckpointUndo;
+
+static dlist_head deferred_checkpoint_undo;
+
+/*
+ * False while recovery is inside the stage-0 sys-tree-consistency window
+ * [sysTreesStartPtr, replayStartPtr); flipped true once recovery crosses
+ * controlReplayStartPtr and deferred_checkpoint_undo has been drained.
+ */
+static bool replay_start_reached = false;
 
 /*
  * Pending PK->SK fix-ups, populated from XidRecPendingSkFixup records read
@@ -711,6 +761,7 @@ static void update_run_xmin(void);
 static void free_run_xmin(void);
 static bool need_flush_undo_pos(int worker_id);
 static void flush_current_undo_stack(void);
+static void apply_deferred_checkpoint_undo(void);
 static void o_handle_startup_proc_interrupts_hook(void);
 static void abort_recovery(RecoveryWorkerState *workers_pool, bool send_to_idx_pool);
 
@@ -1220,6 +1271,29 @@ orioledb_redo(XLogReaderState *record)
 	}
 
 
+	if (record->ReadRecPtr >= checkpoint_state->controlReplayStartPtr &&
+		!replay_start_reached)
+	{
+		/*
+		 * Crossing out of the stage-0 sys-tree-consistency window
+		 * [sysTreesStartPtr, replayStartPtr): the sys trees are now
+		 * consistent, so data-tree descriptors are assemblable.  Drain the
+		 * worker queues up to here (stage 0 dispatches no data modifies, but
+		 * this is also the barrier the leader-side undo below needs), then
+		 * apply the data-log undo of every checkpoint xid that finished
+		 * inside stage 0 -- parked on deferred_checkpoint_undo precisely
+		 * because applying it earlier would have fetched a data descriptor
+		 * before the sys trees were consistent.  Must run before the first
+		 * forward data record is replayed.
+		 */
+		if (!recovery_single)
+			workers_synchronize(record->ReadRecPtr, true);
+
+		apply_deferred_checkpoint_undo();
+
+		replay_start_reached = true;
+	}
+
 	if (record->ReadRecPtr >= checkpoint_state->controlToastConsistentPtr && !toast_consistent)
 	{
 		/*
@@ -1240,7 +1314,7 @@ orioledb_redo(XLogReaderState *record)
 			workers_notify_toast_consistent();
 	}
 
-	if (record->ReadRecPtr >= checkpoint_state->controlReplayStartPtr)
+	if (record->ReadRecPtr >= checkpoint_state->controlSysTreesStartPtr)
 	{
 		if (!replay_container(msg_start, msg_start + msg_len, recovery_single,
 							  record->ReadRecPtr, record->EndRecPtr))
@@ -1555,6 +1629,8 @@ recovery_init(int worker_id)
 		xmin_queue = pairingheap_allocate(xmin_pairingheap_cmp, NULL);
 	dlist_init(&finished_list);
 	dlist_init(&joint_commit_list);
+	dlist_init(&deferred_checkpoint_undo);
+	replay_start_reached = false;
 	CurTransactionContext = AllocSetContextCreate(TopMemoryContext,
 												  "orioledb recovery current transaction context",
 												  ALLOCSET_DEFAULT_SIZES);
@@ -1668,27 +1744,113 @@ walk_checkpoint_stacks(RecoveryXidState *recovery_xid_state, CommitSeqNo csn,
 		{
 			UndoLogType undoType = (UndoLogType) stack->kind;
 
-			set_cur_undo_locations(undoType, stack->undoStack);
-			if (flushUndoPos)
-				flush_current_undo_stack();
-			if (COMMITSEQNO_IS_ABORTED(csn))
+			if (!replay_start_reached && undoType != UndoLogSystem)
 			{
-				if (parentSubid == InvalidSubTransactionId)
-					apply_undo_stack(undoType, recovery_oxid,
-									 NULL, false);
-				else
-					rollback_to_savepoint(undoType, UndoStackHead,
-										  parentSubid, false);
+				/*
+				 * Stage-0 finish of a checkpoint xid: park the data-log undo
+				 * until the sys trees are consistent.  It is drained at the
+				 * controlReplayStartPtr crossing
+				 * (apply_deferred_checkpoint_undo). recovery_oxid /
+				 * oxid_needs_wal_flush carry this xid's values here (set at
+				 * the top of the function), so capture them.
+				 */
+				DeferredCheckpointUndo *d;
+
+				d = (DeferredCheckpointUndo *)
+					MemoryContextAlloc(TopMemoryContext, sizeof(*d));
+				d->oxid = recovery_oxid;
+				d->needs_wal_flush = oxid_needs_wal_flush;
+				d->kind = stack->kind;
+				d->undoStack = stack->undoStack;
+				d->csn = csn;
+				d->parentSubid = parentSubid;
+				d->flush_undo_pos = flushUndoPos;
+				dlist_push_tail(&deferred_checkpoint_undo, &d->node);
 			}
 			else
 			{
-				precommit_undo_stack(undoType, recovery_oxid, false);
-				on_commit_undo_stack(undoType, recovery_oxid, false);
+				set_cur_undo_locations(undoType, stack->undoStack);
+				if (flushUndoPos)
+					flush_current_undo_stack();
+				if (COMMITSEQNO_IS_ABORTED(csn))
+				{
+					if (parentSubid == InvalidSubTransactionId)
+						apply_undo_stack(undoType, recovery_oxid,
+										 NULL, false);
+					else
+						rollback_to_savepoint(undoType, UndoStackHead,
+											  parentSubid, false);
+				}
+				else
+				{
+					precommit_undo_stack(undoType, recovery_oxid, false);
+					on_commit_undo_stack(undoType, recovery_oxid, false);
+				}
 			}
 		}
 		dlist_delete(miter.cur);
 		pfree(stack);
 	}
+}
+
+/*
+ * Drain deferred_checkpoint_undo (see its comment): apply the data-log undo of
+ * every checkpoint xid that finished inside stage 0, now that recovery has
+ * crossed controlReplayStartPtr and the sys trees are consistent.  Called once
+ * from orioledb_redo()'s crossing block, before any forward data record is
+ * replayed.
+ *
+ * walk_checkpoint_stacks() clobbers recovery_oxid / oxid_needs_wal_flush /
+ * curUndoLocations[]; this does too, so save and restore them around the drain
+ * exactly as the update_run_xmin() caller of walk_checkpoint_stacks() does.
+ */
+static void
+apply_deferred_checkpoint_undo(void)
+{
+	dlist_mutable_iter miter;
+	OXid		saved_recovery_oxid = recovery_oxid;
+	bool		saved_oxid_needs_wal_flush = oxid_needs_wal_flush;
+	UndoStackLocations saved_undo_locations[(int) UndoLogsCount];
+	int			j;
+
+	if (dlist_is_empty(&deferred_checkpoint_undo))
+		return;
+
+	for (j = 0; j < (int) UndoLogsCount; j++)
+		get_cur_undo_locations(&saved_undo_locations[j], (UndoLogType) j);
+
+	dlist_foreach_modify(miter, &deferred_checkpoint_undo)
+	{
+		DeferredCheckpointUndo *d = dlist_container(DeferredCheckpointUndo,
+													node, miter.cur);
+		UndoLogType undoType = (UndoLogType) d->kind;
+
+		recovery_oxid = d->oxid;
+		oxid_needs_wal_flush = d->needs_wal_flush;
+		set_cur_undo_locations(undoType, d->undoStack);
+		if (d->flush_undo_pos)
+			flush_current_undo_stack();
+		if (COMMITSEQNO_IS_ABORTED(d->csn))
+		{
+			if (d->parentSubid == InvalidSubTransactionId)
+				apply_undo_stack(undoType, recovery_oxid, NULL, false);
+			else
+				rollback_to_savepoint(undoType, UndoStackHead,
+									  d->parentSubid, false);
+		}
+		else
+		{
+			precommit_undo_stack(undoType, recovery_oxid, false);
+			on_commit_undo_stack(undoType, recovery_oxid, false);
+		}
+		dlist_delete(miter.cur);
+		pfree(d);
+	}
+
+	for (j = 0; j < (int) UndoLogsCount; j++)
+		set_cur_undo_locations((UndoLogType) j, saved_undo_locations[j]);
+	recovery_oxid = saved_recovery_oxid;
+	oxid_needs_wal_flush = saved_oxid_needs_wal_flush;
 }
 
 /*
@@ -1716,14 +1878,26 @@ recovery_finish(int worker_id)
 		cur_recovery_xid_state = NULL;
 	}
 
+	/*
+	 * If WAL replay never crossed replayStartPtr -- e.g. nothing was logged
+	 * past the checkpoint that pinned it, so orioledb_redo()'s crossing block
+	 * never ran -- any data-log undo deferred during stage 0 is still parked,
+	 * and the in-progress aborts below would keep deferring into a list
+	 * nobody drains.  Recovery replay is over and the sys trees are now
+	 * consistent, so drain the deferred undo and stop deferring.  Leader only
+	 * (deferred_checkpoint_undo / replay_start_reached are leader state).
+	 */
+	if (worker_id < 0 && !replay_start_reached)
+	{
+		apply_deferred_checkpoint_undo();
+		replay_start_reached = true;
+	}
+
 	hash_seq_init(&hash_seq, recovery_xid_state_hash);
 	while ((cur_state = (RecoveryXidState *) hash_seq_search(&hash_seq)) != NULL)
 	{
-		if (cur_state->o_tables_meta_locked)
-		{
-			o_tables_meta_unlock_no_wal();
-			cur_state->o_tables_meta_locked = false;
-		}
+		/* window never closed (no UNLOCK replayed): reset the flag */
+		cur_state->o_tables_meta_locked = false;
 
 		if (COMMITSEQNO_IS_INPROGRESS(cur_state->csn))
 		{
@@ -2117,11 +2291,8 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 	cur_recovery_xid_state->csn = csn;
 	cur_recovery_xid_state->ptr = ptr;
 
-	if (cur_recovery_xid_state->o_tables_meta_locked)
-	{
-		o_tables_meta_unlock_no_wal();
-		cur_recovery_xid_state->o_tables_meta_locked = false;
-	}
+	/* window never closed (no UNLOCK replayed): reset the flag */
+	cur_recovery_xid_state->o_tables_meta_locked = false;
 
 	oxid_needs_wal_flush = false;
 	reset_cur_undo_locations();
@@ -3641,6 +3812,58 @@ recovery_send_init(int worker_num)
 	worker_queue_flush(worker_num);
 }
 
+/*
+ * Apply one O_TABLES/O_INDICES modify to the system trees, including the
+ * O_INDICES relnode side effects (create/drop-relnode undo + data-dir
+ * creation).  Applied in place as each sys-tree modify is replayed; the
+ * overwrite recovery callbacks make it idempotent against the fuzzy sys-tree
+ * checkpoint image.
+ */
+static bool
+recovery_apply_systree_modify(int sys_tree_num, uint16 type, OTuple tuple,
+							  OXid oxid, XLogRecPtr xlogPtr, bool single)
+{
+	bool		success;
+
+	if (!single)
+		workers_synchronize(xlogPtr, true);
+
+	success = apply_sys_tree_modify_record(sys_tree_num, type, tuple, oxid,
+										   COMMITSEQNO_INPROGRESS);
+
+	if (sys_tree_num == SYS_TREES_O_INDICES && success)
+	{
+		OIndexKey  *trees = NULL;
+		ORelOids	tmp_oids;
+
+		if (type == RecoveryMsgTypeDelete)
+		{
+			trees = o_indices_get_trees(tuple.data, &tmp_oids);
+			if (trees)
+				add_undo_drop_relnode(tmp_oids, trees, 1);
+		}
+		else if (type == RecoveryMsgTypeInsert)
+		{
+			trees = o_indices_get_trees(tuple.data, &tmp_oids);
+			if (trees)
+			{
+				char	   *prefix;
+				char	   *db_prefix;
+
+				o_get_prefixes_for_tablespace(trees->oids.datoid,
+											  trees->tablespace,
+											  &prefix, &db_prefix);
+				o_verify_dir_exists_or_create(prefix, NULL, NULL);
+				o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
+				pfree(db_prefix);
+				add_undo_create_relnode(tmp_oids, trees, 1, true);
+			}
+		}
+	}
+
+	return success;
+}
+
 static void
 handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 {
@@ -3653,6 +3876,14 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 		 */
 		return;
 	}
+
+	/*
+	 * The O_TABLES/O_INDICES modifies were already applied in place during
+	 * the window.  Take oTablesMetaLock (it was NOT held across the window)
+	 * only for the descriptor reconciliation below, which reads the freshly
+	 * applied metadata; the body releases the lock at its usual points.
+	 */
+	o_tables_meta_lock_no_wal();
 
 	if (ORelOidsIsValid(oids))
 		recreate_table_descr_by_oids(oids);
@@ -4269,7 +4500,14 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 
 		case WAL_REC_O_TABLES_META_LOCK:
 			Assert(!cur_recovery_xid_state->o_tables_meta_locked);
-			o_tables_meta_lock_no_wal();
+
+			/*
+			 * Do NOT take oTablesMetaLock here.  The enclosed
+			 * O_TABLES/O_INDICES modifies are applied in place (the overwrite
+			 * recovery callbacks are idempotent against the fuzzy sys-tree
+			 * image); we only track that the window is open, for
+			 * handle_o_tables_meta_unlock()'s own guard.
+			 */
 			cur_recovery_xid_state->o_tables_meta_locked = true;
 			elog(DEBUG3, "[%s] META_LOCK for [ %u %u %u ] ctx->sys_tree_num %d", __func__,
 				 rec->oids.datoid, rec->oids.reloid, rec->oids.relnode, ctx->sys_tree_num);
@@ -4289,7 +4527,17 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				if (!ctx->single)
 					workers_synchronize(xlogPtr, true);
 
-				Assert(cur_recovery_xid_state->o_tables_meta_locked);
+				/*
+				 * No Assert(o_tables_meta_locked) here: with the fuzzy
+				 * sys-tree checkpoint, recovery legitimately starts at a
+				 * sysTreesStartPtr that is past some window's META_LOCK (a
+				 * window whose sys-tree changes are already fully in the
+				 * checkpoint image).  We then see its UNLOCK with no matching
+				 * META_LOCK; handle_o_tables_ meta_unlock() returns early in
+				 * that case (nothing to reconcile).  The old exact-cut
+				 * invariant that a UNLOCK always had its META_LOCK no longer
+				 * holds.
+				 */
 				handle_o_tables_meta_unlock(rec->u.unlock.oids, rec->u.unlock.oldRelnode);
 
 				if (!ctx->single)
@@ -4367,12 +4615,10 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 		case WAL_REC_DELETE:
 		case WAL_REC_REINSERT:
 			{
-				bool		success;
 				OFixedTuple tuple1,
 							tuple2;
 				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
 				uint16		type = recovery_msg_from_wal_record(rec->type);
-				Pointer		sys_tree_oids_ptr = rec->data + sizeof(uint8) + sizeof(OffsetNumber);
 
 				Assert(rec->oxid != InvalidOXid);
 
@@ -4386,55 +4632,25 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 					cur_recovery_xid_state->systree_modified = true;
 					if (IS_TYPCACHE_SYSTREE(ctx->sys_tree_num))
 						cur_recovery_xid_state->invalidate_typcache = true;
-					if (ctx->sys_tree_num == SYS_TREES_O_TABLES)
-						Assert(cur_recovery_xid_state->o_tables_meta_locked);
 
-					if (!ctx->single)
-						workers_synchronize(xlogPtr, true);
+					/*
+					 * No Assert(o_tables_meta_locked) for O_TABLES modifies:
+					 * with the fuzzy sys-tree checkpoint recovery can start
+					 * past a window's META_LOCK, so an O_TABLES modify may be
+					 * replayed with the flag unset.  Applying it in place is
+					 * still correct -- the overwrite recovery callback is
+					 * idempotent.
+					 */
 
-					success = apply_sys_tree_modify_record(ctx->sys_tree_num, type,
-														   tuple1.tuple, rec->oxid,
-														   COMMITSEQNO_INPROGRESS);
-
-					if (ctx->sys_tree_num == SYS_TREES_O_INDICES && success)
-					{
-						OIndexKey  *trees = NULL;
-						ORelOids	tmp_oids;
-
-						if (type == RecoveryMsgTypeDelete)
-						{
-							trees = o_indices_get_trees(sys_tree_oids_ptr, &tmp_oids);
-							if (trees)
-								add_undo_drop_relnode(tmp_oids, trees, 1);
-						}
-						else if (type == RecoveryMsgTypeInsert)
-						{
-							trees = o_indices_get_trees(sys_tree_oids_ptr, &tmp_oids);
-							if (trees)
-							{
-								char	   *prefix;
-								char	   *db_prefix;
-
-								/*
-								 * Ensure the per-tablespace and per-database
-								 * orioledb data directories exist.  On the
-								 * primary these are created in indices.c
-								 * before the first btree file is opened.  On
-								 * the replica we must do it here when
-								 * replaying the SYS_TREES_O_INDICES INSERT
-								 * that accompanies CREATE TABLE / CREATE
-								 * INDEX.
-								 */
-								o_get_prefixes_for_tablespace(trees->oids.datoid,
-															  trees->tablespace,
-															  &prefix, &db_prefix);
-								o_verify_dir_exists_or_create(prefix, NULL, NULL);
-								o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
-								pfree(db_prefix);
-								add_undo_create_relnode(tmp_oids, trees, 1, true);
-							}
-						}
-					}
+					/*
+					 * Apply the sys-tree modify in place.  Recovery's
+					 * overwrite callbacks make re-application idempotent
+					 * against the fuzzy sys-tree checkpoint image, so no
+					 * deferred atomic-window apply is needed.
+					 */
+					recovery_apply_systree_modify(ctx->sys_tree_num, type,
+												  tuple1.tuple, rec->oxid,
+												  xlogPtr, ctx->single);
 				}
 
 				if (ctx->sys_tree_num > 0 || ctx->indexDescr == NULL)
@@ -4442,6 +4658,28 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 					/* nothing to do here */
 					break;
 				}
+
+				/*
+				 * Data (PK/toast/SK) records below replayStartPtr are already
+				 * in the fuzzy PK image; only sys-tree records are applied in
+				 * the [sysTreesStartPtr, replayStartPtr) sys-tree-consistency
+				 * stage. Start applying data at replayStartPtr.
+				 *
+				 * Skipping the data modify here keeps the *current* oxid's
+				 * rebuilt UndoLogRegular / UndoLogRegularPageLevel stack
+				 * empty throughout stage 0, so an abort of the current oxid
+				 * in stage 0 finds nothing to undo.  That is NOT enough on
+				 * its own, though: a checkpoint xid (read out of the xids
+				 * file into checkpoint_undo_stacks) can also finish inside
+				 * stage 0, and *its* captured data-log undo stack is not
+				 * empty.  Applying that stack would fetch a data descriptor
+				 * before the sys trees are consistent, so
+				 * walk_checkpoint_stacks() parks it on
+				 * deferred_checkpoint_undo and orioledb_redo() drains it at
+				 * the replayStartPtr crossing.  See deferred_checkpoint_undo.
+				 */
+				if (ctx->xlogRecPtr < checkpoint_state->controlReplayStartPtr)
+					break;
 
 				if (ctx->indexDescr->desc.type == oIndexBridge)
 				{
