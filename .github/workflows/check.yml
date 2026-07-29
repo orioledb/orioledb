@@ -81,8 +81,21 @@ jobs:
           else:
               combos = branch_combos
 
+          if ref.startswith("dmtest"):
+              # BISECT: N parallel dm_log_writes jobs (amd64/18/clang) to
+              # sample the flaky test_recovery_sk_cross_row_rotation failure
+              # rate in a single run.  The `replica` field only makes the
+              # matrix entries (and job/artifact names) distinct.
+              matrix = {"include": [
+                  {"cpu": "amd64", "pg_version": 18, "compiler": "clang",
+                   "check_type": "dm_log_writes", "replica": s}
+                  for s in range(1, 13)
+              ]}
+          else:
+              matrix = make_matrix(combos)
+
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"matrix={json.dumps(make_matrix(combos))}\n")
+              f.write(f"matrix={json.dumps(matrix)}\n")
 
   check:
     needs: matrix
