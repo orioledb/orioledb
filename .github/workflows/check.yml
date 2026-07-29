@@ -89,7 +89,7 @@ jobs:
               matrix = {"include": [
                   {"cpu": "amd64", "pg_version": 18, "compiler": "clang",
                    "check_type": "dm_log_writes", "replica": s}
-                  for s in range(1, 13)
+                  for s in range(1, 65)
               ]}
           else:
               matrix = make_matrix(combos)
