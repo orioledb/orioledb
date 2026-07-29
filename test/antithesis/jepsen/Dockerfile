@@ -11,15 +11,15 @@ RUN apt-get update \
 
 WORKDIR /src
 
-# 2026-07-23: temporary workaround until https://github.com/jepsen-io/sql/pull/2 is
-# pushed to clojars
-RUN git clone --depth=1 https://github.com/jepsen-io/sql.git \
+# 2026-07-29: use antithesis-instrumented sql workload
+RUN git clone --depth=1 https://github.com/pmbauer/jepsen-sql.git sql \
     && cd sql \
     && lein install
 
+# 2026-07-29: use antithesis-instrumented postgres driver
 WORKDIR /src/jepsen-postgres
 RUN git init \
-    && git remote add origin https://github.com/jepsen-io/postgres.git \
+    && git remote add origin https://github.com/pmbauer/jepsen-postgres.git \
     && git fetch --depth=1 origin "${JEPSEN_POSTGRES_REF}" \
     && git checkout --detach FETCH_HEAD \
     && cd postgres \
@@ -76,6 +76,10 @@ RUN set -eux; \
     for tool in gdb jcmd jdb jfr jhsdb jinfo jmap jps jstack lsof pgrep strace; do \
       command -v "${tool}"; \
     done
+
+# register jar with antithesis for coverage instrumentation and assertions
+RUN mkdir -p /opt/antithesis/catalog \
+    && ln -s /opt/jepsen/jepsen-postgres.jar /opt/antithesis/catalog/jepsen-postgres.jar
 
 ENV JEPSEN_WORKLOAD=append \
     JEPSEN_CONCURRENCY=50 \
