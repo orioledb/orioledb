@@ -3,6 +3,7 @@
 
 import os
 import random
+import subprocess
 import time
 
 from .base_test import BaseTest
@@ -2728,6 +2729,42 @@ class RecoveryTest(BaseTest):
 		    node.execute(
 		        'postgres',
 		        "SELECT orioledb_tbl_check('o_sk_self'::regclass)")[0][0])
+		node.stop()
+
+	def test_single_user_recovery(self):
+		"""
+		Crash recovery in a standalone backend
+
+		This one should call for checkpoint.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+				CREATE EXTENSION IF NOT EXISTS orioledb;
+				CREATE TABLE o_single_user(
+					id int PRIMARY KEY,
+					val text COLLATE "C"
+				) USING orioledb;
+				INSERT INTO o_single_user SELECT g, g || 'val' FROM generate_series(1, 1000) g;
+		""")
+		node.stop(['-m', 'immediate'])
+		# Standalone backend: crash recovery (with its end-of-recovery
+		# checkpoint) and the queries all run in this single process.
+		res = subprocess.run(
+		    ['postgres', '--single', '-D', node.data_dir, 'postgres'],
+		    input="SELECT count(*) FROM o_single_user;\n"
+		    "CHECKPOINT;\n"
+		    "SELECT count(*) FROM o_single_user;\n",
+		    capture_output=True,
+		    text=True)
+		self.assertEqual(res.returncode, 0,
+		                 f"standalone backend failed: {res.stderr!r}")
+		self.assertEqual(res.stdout.count('count = "1000"'), 2, res.stdout)
+
+		node.start()
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_single_user")[0][0], 1000)
 		node.stop()
 
 

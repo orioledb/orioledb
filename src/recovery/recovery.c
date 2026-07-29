@@ -1379,6 +1379,11 @@ o_recovery_finish_hook(bool cleanup)
 	if (cleanup && remove_old_checkpoint_files)
 		recovery_cleanup_old_files(startup_chkp_num, false);
 
+#if PG_VERSION_NUM >= 180000
+	if (!IsPostmasterEnvironment)
+		o_database_cache_restore_default_locale();
+#endif
+
 	elog(LOG, "orioledb recovery finished.");
 	recovery_undo_loc_flush->completedCheckpointNumber = UINT32_MAX;
 }

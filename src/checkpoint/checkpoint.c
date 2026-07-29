@@ -536,7 +536,7 @@ perform_writeback(BTreeDescr *desc, CheckpointWriteBack *writeback)
 static void
 acquire_chkp_lock_drain(LWLock *lock)
 {
-	Assert(AmCheckpointerProcess());
+	Assert(AmCheckpointerProcess() || !IsPostmasterEnvironment);
 
 	while (!LWLockConditionalAcquire(lock, LW_EXCLUSIVE))
 	{
@@ -1377,11 +1377,14 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 		 checkpoint_state->lastCheckpointNumber + 1);
 
 	o_set_syscache_hooks();
-	o_database_cache_set_database_encoding();
+	if (!OidIsValid(MyDatabaseId))
+	{
+		o_database_cache_set_database_encoding();
 #if PG_VERSION_NUM >= 170000
-	o_database_cache_set_default_locale_provider();
+		o_database_cache_set_default_locale_provider();
 #endif
-	o_database_cache_set_lc_collate();
+		o_database_cache_set_lc_collate();
+	}
 
 	memset(&control, 0, sizeof(control));
 
@@ -1730,6 +1733,11 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	if (orioledb_s3_mode)
 		s3_perform_backup(flags, maxLocation);
+
+#if PG_VERSION_NUM >= 180000
+	if (!IsPostmasterEnvironment)
+		o_database_cache_restore_default_locale();
+#endif
 
 	MemoryContextResetOnly(chkp_main_context);
 	MemoryContextSwitchTo(prev_context);

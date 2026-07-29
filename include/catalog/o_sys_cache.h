@@ -662,6 +662,9 @@ o_set_sys_cache_search_datoid(Oid datoid)
 	}
 }
 
+#if PG_VERSION_NUM >= 180000
+extern void o_database_cache_restore_default_locale(void);
+#endif
 extern void o_get_prefixes_for_tablespace(Oid datoid, Oid tablespace,
 										  char **prefix, char **db_prefix);
 
