@@ -2048,6 +2048,53 @@ flush_current_undo_stack(void)
 }
 
 /*
+ * Verify the front sys-tree-consistency stage never applies data-log undo.
+ *
+ * Inside [sysTreesStartPtr, replayStartPtr) the sys trees are still being
+ * reconciled, so no data (PK/toast/SK) descriptor is assemblable yet.  Data
+ * modifies below replayStartPtr are skipped at the data gate in
+ * replay_on_record(), which keeps a WAL-discovered xid's Regular undo stack
+ * empty -- but a xid carried in by the checkpoint's xids file arrives with a
+ * ready-made stack that walk_checkpoint_stacks() would apply right here.
+ * checkpoint_state->xidsQueueSysTreeOnly exists to keep data-log locations out
+ * of that file for exactly these xids; this asserts that it worked.
+ */
+static void
+check_no_stage0_data_undo(RecoveryXidState *state, XLogRecPtr ptr)
+{
+#ifdef USE_ASSERT_CHECKING
+	dlist_iter	iter;
+
+	if (XLogRecPtrIsInvalid(ptr) ||
+		ptr >= checkpoint_state->controlReplayStartPtr)
+		return;
+
+	dlist_foreach(iter, &state->checkpoint_undo_stacks)
+	{
+		CheckpointUndoStack *stack = dlist_container(CheckpointUndoStack, node,
+													 iter.cur);
+
+		if ((int) stack->kind >= (int) UndoLogsCount ||
+			(UndoLogType) stack->kind == UndoLogSystem)
+			continue;
+		if (!UndoLocationIsValid(stack->undoStack.location))
+			continue;
+
+		elog(PANIC, "data-log undo in the sys-tree stage: oxid " UINT64_FORMAT
+			 " finishes at %X/%X, before replayStartPtr %X/%X "
+			 "(sysTreesStartPtr %X/%X), with a %s checkpoint undo stack at "
+			 UINT64_FORMAT,
+			 state->oxid, LSN_FORMAT_ARGS(ptr),
+			 LSN_FORMAT_ARGS(checkpoint_state->controlReplayStartPtr),
+			 LSN_FORMAT_ARGS(checkpoint_state->controlSysTreesStartPtr),
+			 (UndoLogType) stack->kind == UndoLogRegular ?
+			 "regular" : "regular-page-level",
+			 (uint64) stack->undoStack.location);
+	}
+#endif
+}
+
+/*
  * Finishes the current recovery transaction for the current recovery process.
  */
 void
@@ -2059,6 +2106,8 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 	int			i;
 
 	Assert(cur_recovery_xid_state != NULL);
+
+	check_no_stage0_data_undo(cur_recovery_xid_state, ptr);
 
 	delay_if_queued_for_idxbuild();
 
