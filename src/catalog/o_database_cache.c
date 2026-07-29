@@ -172,6 +172,40 @@ o_database_cache_set_database_encoding()
 	SetDatabaseEncoding(encoding);
 }
 
+#if PG_VERSION_NUM >= 180000
+static struct pg_locale_struct o_default_locale;
+static pg_locale_t prev_default_locale = NULL;
+static bool o_default_locale_installed = false;
+static bool o_default_locale_initialized = false;
+
+/* Remember the previous value of default_locale.  */
+static pg_locale_t
+o_database_cache_install_default_locale(void)
+{
+	if (!o_default_locale_installed)
+	{
+		prev_default_locale = default_locale;
+		o_default_locale_installed = true;
+	}
+
+	default_locale = &o_default_locale;
+	return default_locale;
+}
+
+/* Restore the previous default_locale.  */
+void
+o_database_cache_restore_default_locale(void)
+{
+	/* We didn't change default locale.  */
+	if (!o_default_locale_installed)
+		return;
+
+	default_locale = prev_default_locale;
+	prev_default_locale = NULL;
+	o_default_locale_installed = false;
+}
+#endif
+
 #if PG_VERSION_NUM >= 170000
 void
 o_database_cache_set_default_locale_provider()
@@ -185,25 +219,34 @@ o_database_cache_set_default_locale_provider()
 	if (o_database)
 	{
 #if PG_VERSION_NUM >= 180000
-		if (default_locale == NULL)
-			default_locale = MemoryContextAllocZero(TopMemoryContext,
-													sizeof(struct pg_locale_struct));
+		pg_locale_t loc = o_database_cache_install_default_locale();
 
-		if (o_database->datlocprovider == COLLPROVIDER_BUILTIN)
+		/*
+		 * template1's locale is constant for the life of the process, so
+		 * initialize the shared struct only once.  Re-running
+		 * init_pg_locale_*() on every checkpoint would leak the previously
+		 * allocated locale resources (e.g. the ICU collator), since
+		 * pg_locale_t has no public deinitializer.
+		 */
+		if (!o_default_locale_initialized)
 		{
-			init_pg_locale_builtin(default_locale, o_database->datlocale,
+			if (o_database->datlocprovider == COLLPROVIDER_BUILTIN)
+			{
+				init_pg_locale_builtin(loc, o_database->datlocale,
+									   TopMemoryContext);
+			}
+			else if (o_database->datlocprovider == COLLPROVIDER_ICU)
+			{
+				init_pg_locale_icu(loc, o_database->datlocale,
+								   o_database->daticurules, true,
 								   TopMemoryContext);
-		}
-		else if (o_database->datlocprovider == COLLPROVIDER_ICU)
-		{
-			init_pg_locale_icu(default_locale, o_database->datlocale,
-							   o_database->daticurules, true,
-							   TopMemoryContext);
-		}
-		else if (o_database->datlocprovider == COLLPROVIDER_LIBC)
-		{
-			init_pg_locale_libc(default_locale, o_database->datcollate,
-								o_database->datctype);
+			}
+			else if (o_database->datlocprovider == COLLPROVIDER_LIBC)
+			{
+				init_pg_locale_libc(loc, o_database->datcollate,
+									o_database->datctype);
+			}
+			o_default_locale_initialized = true;
 		}
 #else
 		if (o_database->datlocprovider == COLLPROVIDER_BUILTIN)
@@ -223,7 +266,7 @@ o_database_cache_set_default_locale_provider()
 	else
 	{
 #if PG_VERSION_NUM >= 180000
-		pg_locale_t loc = default_locale;
+		pg_locale_t loc = o_default_locale_installed ? &o_default_locale : NULL;
 #else
 		pg_locale_t loc = &default_locale;
 #endif
