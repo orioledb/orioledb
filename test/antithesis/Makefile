@@ -23,9 +23,10 @@ config:
 config-image:
 	@config/print-config-image $(CFG)
 
+ARGS_BUILD ?=
 .PHONY: build # Build Docker images
 build:
-	config/make-compose $(CFG) | docker compose -f - build
+	config/make-compose $(CFG) | docker compose -f - build $(ARGS_BUILD)
 	config/make-image $(CFG)
 
 ARGS_UP ?= --pull=build --detach
