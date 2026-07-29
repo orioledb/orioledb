@@ -26,9 +26,14 @@ def main():
         h.save_config(conn, "action_weights", weights_preset)
         h.save_config(conn, "batch_typical", batch_typical)
 
+        checkpoint_preset = random_choice(h.CHECKPOINT_CONFIG_PRESETS)
+        h.apply_checkpoint_config(conn, checkpoint_preset)
+        h.save_config(conn, "checkpoint_config", checkpoint_preset)
+
         h.assert_consistent(conn, "first")
         print(f"setup complete: seed_rows={seed_rows} "
-              f"weights={weights_preset} batch_typical={batch_typical}",
+              f"weights={weights_preset} batch_typical={batch_typical} "
+              f"checkpoint_config={checkpoint_preset}",
               flush=True)
     finally:
         conn.close()

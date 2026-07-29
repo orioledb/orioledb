@@ -47,6 +47,25 @@ ACTION_WEIGHT_PRESETS = [
     {"insert": 3, "update_token": 3, "delete": 0},  # grow-only
 ]
 
+# Checkpoint-timing presets, swarmed per timeline the same way as the action
+# weights. Folded in from the now-retired sk-recovery-race-chaos workload:
+# this property doesn't need a checkpoint at all to reproduce (it reproduces
+# from a crash near *any* ordinary commit), but some timelines should still
+# bias toward frequent automatic checkpoints so Antithesis also gets a
+# chance to land faults specifically near a checkpoint boundary -- the
+# "aggressive" preset below is chaos's exact former postgres.conf values.
+# Applied dynamically via ALTER SYSTEM SET + pg_reload_conf() in first_,
+# rather than a static compose-mounted postgres.conf, precisely so it can be
+# swarmed per timeline instead of fixed per container image.
+CHECKPOINT_CONFIG_PRESETS = [
+    {"checkpoint_timeout": "5min", "max_wal_size": "1GB",
+     "checkpoint_completion_target": "0.9"},  # ~Postgres default ("relaxed")
+    {"checkpoint_timeout": "2min", "max_wal_size": "256MB",
+     "checkpoint_completion_target": "0.5"},  # moderate
+    {"checkpoint_timeout": "30s", "max_wal_size": "64MB",
+     "checkpoint_completion_target": "0.1"},  # aggressive (ex-chaos values)
+]
+
 
 def connect(application_name):
     conn = psycopg2.connect(
@@ -133,6 +152,37 @@ def load_batch_menu(conn):
     typical = load_config(conn, "batch_typical", BATCH_TYPICAL_MENU[1])
     family = {1, max(1, typical - 1), typical, typical + 1, 2 * typical, 64}
     return sorted(family)
+
+
+def apply_checkpoint_config(conn, preset):
+    # Preset keys/values are always drawn from CHECKPOINT_CONFIG_PRESETS
+    # above (fixed, hardcoded constants, never external input), so building
+    # the SQL directly is safe -- ALTER SYSTEM SET doesn't support
+    # parameterizing the GUC name via a placeholder.
+    for key, value in preset.items():
+        execute(conn, f"ALTER SYSTEM SET {key} = '{value}';")
+    execute(conn, "SELECT pg_reload_conf();")
+
+
+def checkpoint_count(conn):
+    # PostgreSQL 17 split checkpoint stats out of pg_stat_bgwriter into a
+    # dedicated pg_stat_checkpointer view (checkpoints_timed/checkpoints_req
+    # became num_timed/num_requested); this repo supports PG 16-18, so
+    # detect which one exists at runtime instead of hardcoding a version.
+    (has_checkpointer_view,) = execute(
+        conn, "SELECT to_regclass('pg_stat_checkpointer') IS NOT NULL")[0]
+    if has_checkpointer_view:
+        (timed, req) = execute(
+            conn,
+            "SELECT num_timed, num_requested FROM pg_stat_checkpointer"
+        )[0]
+    else:
+        (timed, req) = execute(
+            conn,
+            "SELECT checkpoints_timed, checkpoints_req "
+            "FROM pg_stat_bgwriter"
+        )[0]
+    return timed + req
 
 
 def assert_consistent(conn, label):

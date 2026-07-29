@@ -1,5 +1,18 @@
 # chaos-driver-skips-check-on-fault-landing
 
+> **Update (2026-07-29): resolved by design, not by patching the old file.**
+> `test/antithesis/sk-recovery-race-chaos/` was retired and its checkpoint-
+> timing coverage folded into `test/antithesis/sk-rebuild-desync/` (see
+> `property-catalog.md`'s `recovery-sk-rebuild-desync` entry). The new
+> workload's consistency check is not a single scripted burst-then-check —
+> `anytime_sk-rebuild-desync-check` and `finally_sk-rebuild-desync-check`
+> each independently open a fresh connection and run the check, so a
+> connection lost during one `parallel_driver_` DML invocation no longer
+> suppresses the *next* independent check the way chaos's single end-of-burst
+> `assert_consistent` call used to. The systematic bias described below no
+> longer applies to the current harness. Left in place as a historical
+> record of the finding and the reasoning, not updated further.
+
 ## Focus
 
 Wildcard (attention focus 12) — a property about the test harness's own verification logic, discovered by reading the most recent commit on this branch (`a975c702`, "sk-recovery-race-chaos/driver.py: Handle lost connection") rather than any single SUT focus area. This is the kind of "the fix for one problem quietly reintroduces a different, opposite-shaped problem" pattern the Wildcard lens is meant to catch.

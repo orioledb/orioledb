@@ -18,7 +18,7 @@ exiting.
 import os
 
 import psycopg2
-from antithesis.assertions import reachable
+from antithesis.assertions import reachable, sometimes
 from antithesis.random import get_random, random_choice
 
 import helper_common as h
@@ -59,6 +59,7 @@ def main():
         try:
             actions = h.load_action_menu(conn)
             batch_menu = h.load_batch_menu(conn)
+            checkpoints_before = h.checkpoint_count(conn)
         except h.CONNECTION_LOST_ERRORS:
             # Setup/config not reachable yet (e.g. right after a restart) --
             # nothing to do this invocation, Antithesis will run us again.
@@ -89,6 +90,24 @@ def main():
                 except Exception:  # noqa: BLE001 - best-effort cleanup
                     pass
                 conn = new_conn()
+
+        # Only reached if the whole batch committed without a lost
+        # connection -- folded in from the retired sk-recovery-race-chaos
+        # workload: confirms that whichever checkpoint-timing preset this
+        # timeline swarmed in first_ (see CHECKPOINT_CONFIG_PRESETS) is
+        # actually producing automatic checkpoints that overlap concurrent
+        # DML, not just sitting configured-but-unexercised.
+        try:
+            checkpoints_after = h.checkpoint_count(conn)
+            sometimes(
+                checkpoints_after > checkpoints_before,
+                "at least one automatic checkpoint fired while concurrent "
+                "INSERT/UPDATE/DELETE were in flight against o_sk_desync",
+                {"checkpoints_before": checkpoints_before,
+                 "checkpoints_after": checkpoints_after},
+            )
+        except h.CONNECTION_LOST_ERRORS:
+            pass  # connection died between the last unit and this check
     finally:
         try:
             conn.close()

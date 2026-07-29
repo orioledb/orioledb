@@ -1,5 +1,15 @@
 # checkpoint-stats-view-pg-major-branch
 
+> **Update (2026-07-29):** `test/antithesis/sk-recovery-race-chaos/driver.py`
+> (referenced throughout this file) was retired. The exact same
+> `checkpoint_count()` function (PG16-vs-PG17+ `pg_stat_checkpointer`/
+> `pg_stat_bgwriter` detection, copied verbatim) now lives in
+> `test/antithesis/sk-rebuild-desync/helper_common.py`. The regression-guard
+> concern below is still valid against that new location — file:line
+> references to `sk-recovery-race-chaos/driver.py:96-114` below should be
+> read as `sk-rebuild-desync/helper_common.py`'s `checkpoint_count()`
+> instead. Not otherwise re-verified against the new file.
+
 ## Focus
 
 Version Compatibility (attention focus pass). Task prompt explicitly names
