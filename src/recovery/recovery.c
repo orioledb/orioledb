@@ -605,6 +605,17 @@ apply_one_pending_sk_fixup(PendingSkFixup *entry)
 			}
 		}
 
+		/* TEMP diagnostic: what SK entries the fix-up synthesises */
+		elog(LOG,
+			 "SKFIXUP oxid=%llu tbl=(%u,%u,%u) act=%d pkid=%lld skrel=%u del=%d ins=%d oldtok=%lld newtok=%lld",
+			 (unsigned long long) entry->oxid,
+			 descr->oids.datoid, descr->oids.reloid, descr->oids.relnode,
+			 (int) item.action,
+			 (long long) (pkKey.nkeys > 0 ? (int64) pkKey.keys[0].value : -1),
+			 sk->oids.relnode, needDelete, needInsert,
+			 (long long) (needDelete && oldSkKey.nkeys > 0 ? (int64) oldSkKey.keys[0].value : -1),
+			 (long long) (needInsert && newSkKey.nkeys > 0 ? (int64) newSkKey.keys[0].value : -1));
+
 		o_btree_load_shmem(&sk->desc);
 
 		if (needDelete &&
@@ -663,6 +674,13 @@ apply_pending_sk_fixups(void)
 {
 	PendingSkFixup *entry = pending_sk_fixups_head;
 	OXid		saved_oxid = recovery_oxid;
+
+	/* TEMP diagnostic: boundaries at which the fix-up pass runs */
+	elog(LOG,
+		 "SKFIXUP-PASS sysTree=%X/%X replayStart=%X/%X toastConsistent=%X/%X",
+		 LSN_FORMAT_ARGS(checkpoint_state->controlSysTreesStartPtr),
+		 LSN_FORMAT_ARGS(checkpoint_state->controlReplayStartPtr),
+		 LSN_FORMAT_ARGS(checkpoint_state->controlToastConsistentPtr));
 
 	while (entry != NULL)
 	{

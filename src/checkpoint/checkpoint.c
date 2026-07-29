@@ -1073,6 +1073,11 @@ checkpoint_write_pending_sk_fixups(void)
 			xidRec.oxid = oxid;
 			xidRec.undoLocation.location = pendingLoc;
 			write_to_xids_queue(&xidRec);
+			/* TEMP diagnostic: which in-flight PK-applied/SK-pending txns
+			 * this checkpoint recorded a fix-up for */
+			elog(LOG, "SKFIXUP-REC proc=%d oxid=%llu pendingLoc=%llu",
+				 i, (unsigned long long) oxid,
+				 (unsigned long long) pendingLoc);
 		}
 
 		LWLockRelease(&oProcData[i].undoStackLocationsFlushLock);
