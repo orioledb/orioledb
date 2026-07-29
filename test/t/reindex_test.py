@@ -283,3 +283,77 @@ class ReindexTest(BaseTest):
 				    replica.execute(
 				        f"{set_scan.format('off', 'on', 'on')}  SELECT * FROM o_test_1 WHERE val_3 = 'test_data250';"
 				    ), [(250, 500, 'test_data250')])
+
+	def _partitioned_setup(self, node):
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			SET default_table_access_method = 'orioledb';
+			CREATE TABLE o_part (id int, val int) PARTITION BY RANGE (id);
+			CREATE TABLE o_part_1 PARTITION OF o_part FOR VALUES FROM (0) TO (100);
+			CREATE TABLE o_part_2 PARTITION OF o_part FOR VALUES FROM (100) TO (200);
+			CREATE INDEX o_part_val_idx ON o_part (val);
+			INSERT INTO o_part SELECT i, i FROM generate_series(0, 199) i;
+		""")
+
+	def _n_indices(self, node, part):
+		# orioledb_tbl_indices() prints one "Index type:" line per orioledb
+		# index of the table; a duplicated index adds one more.
+		descr = node.execute("SELECT orioledb_tbl_indices('%s'::regclass);" %
+		                     part)[0][0]
+		return descr.count('Index type:')
+
+	def test_reindex_table_partitioned_no_duplicate(self):
+		"""
+		REINDEX TABLE <partitioned orioledb table> reindexes every partition's
+		indexes in place; it must NOT create duplicate orioledb indexes.
+
+		Before the ReindexPartitions() fix the partition children were never
+		added to reindex_list, so orioledb_ambuild() ran with reindex=false and
+		o_define_index() added a second copy of each secondary index to every
+		partition's o_table.
+		"""
+		node = self.node
+		node.start()
+		self._partitioned_setup(node)
+
+		before1 = self._n_indices(node, 'o_part_1')
+		before2 = self._n_indices(node, 'o_part_2')
+		# sanity: each leaf partition has ctid primary + the secondary index
+		self.assertEqual(before1, 2)
+		self.assertEqual(before2, 2)
+
+		node.safe_psql("REINDEX TABLE o_part;")
+
+		self.assertEqual(self._n_indices(node, 'o_part_1'), before1,
+		                 "REINDEX TABLE duplicated indices in o_part_1")
+		self.assertEqual(self._n_indices(node, 'o_part_2'), before2,
+		                 "REINDEX TABLE duplicated indices in o_part_2")
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_part WHERE val < 50;")[0][0],
+		    50)
+		node.stop()
+
+	def test_reindex_index_partitioned_no_duplicate(self):
+		"""
+		Same as above but for REINDEX INDEX <partitioned index>: each child
+		index must be reindexed in place, not duplicated.
+		"""
+		node = self.node
+		node.start()
+		self._partitioned_setup(node)
+
+		before1 = self._n_indices(node, 'o_part_1')
+		before2 = self._n_indices(node, 'o_part_2')
+		self.assertEqual(before1, 2)
+		self.assertEqual(before2, 2)
+
+		node.safe_psql("REINDEX INDEX o_part_val_idx;")
+
+		self.assertEqual(self._n_indices(node, 'o_part_1'), before1,
+		                 "REINDEX INDEX duplicated indices in o_part_1")
+		self.assertEqual(self._n_indices(node, 'o_part_2'), before2,
+		                 "REINDEX INDEX duplicated indices in o_part_2")
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_part WHERE val < 50;")[0][0],
+		    50)
+		node.stop()
