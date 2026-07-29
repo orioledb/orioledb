@@ -2498,6 +2498,22 @@ class RecoveryTest(BaseTest):
 			      f"  SK duplicate tokens: "
 			      f"{[t for t,c in Counter(sk_tokens).items() if c > 1][:10]}")
 
+			# TEMP diagnostic: dump the SK-fixup recovery trace to stdout (the
+			# node log lives on the dm-log-writes mount, not tmp_check_t, so it
+			# is not captured by the test.logs artifact).
+			orphans = sorted(sk_set - pk_set)
+			print(f"  --- SKFIXUP trace (orphans={orphans}) ---")
+			for _root, _dirs, _files in os.walk(node.base_dir):
+				for _fn in _files:
+					try:
+						with open(os.path.join(_root, _fn),
+						          errors='replace') as _fh:
+							for _ln in _fh:
+								if 'SKFIXUP' in _ln:
+									print('  ' + _ln.rstrip())
+					except Exception:
+						pass
+
 		self.assertEqual(
 		    n_pk, n_sk,
 		    f"PK rows ({n_pk}) != SK distinct tokens ({n_sk}) after recovery")
