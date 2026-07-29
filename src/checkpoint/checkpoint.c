@@ -670,7 +670,7 @@ add_index_id_item(List *list, BTreeDescr *desc)
  * `redo_pos`.
  *
  * Ensures every transaction, which WAL record is written before redo_pos,
- * passed to write_to_xids_queue(),
+ * don't go to write_to_xids_queue(),
  */
 static inline void
 wait_finish_active_commits(XLogRecPtr redo_pos)
@@ -1415,12 +1415,46 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	pg_write_barrier();
 
-	acquire_chkp_lock_drain(&checkpoint_state->oTablesMetaLock);
-	acquire_chkp_lock_drain(&checkpoint_state->oSysTreesLock);
+	/*
+	 * Sys trees are checkpointed as a fuzzy per-page image WITHOUT freezing
+	 * concurrent DDL (no EXCLUSIVE oTablesMetaLock/oSysTreesLock across the
+	 * capture).  Pin the sys-tree replay start BEFORE capturing them: any
+	 * sys-tree WAL record already durable at this point is necessarily
+	 * already reflected in the page the fuzzy walk will read (a buffer is
+	 * modified before its XLogInsert() returns, under the same content lock
+	 * the walk's own read takes), and any record from here on falls inside
+	 * the forward-replay window below and gets reconciled there.  These are
+	 * the same two mechanisms (forward replay from a single snapshot point,
+	 * plus the xids file just armed above for anything still in flight) that
+	 * already cover the PK/data walk -- no separate clamp to the oldest open
+	 * DDL window is needed here either.
+	 *
+	 * Then wait for every commit stamped at or before sysTreesStartPtr to
+	 * finish before snapshotting the in-progress xids.  Because if we miss
+	 * the transaction commit WAL records, but the transaction undo stack is
+	 * in xids file, we will eventually consider it as aborted (when recovery
+	 * is finished or xid horizon has gone).
+	 *
+	 * There is a window between capturing sysTreesStartPtr and
+	 * start_write_xids() meaning we will replay some transactions (or their
+	 * parts), but don't have their undo stacks in xids file.  That must be
+	 * OK, as effects of those transactions must be already seen in
+	 * checkpointed trees.
+	 */
+	checkpoint_state->sysTreesStartPtr = get_checkpoint_xlog_ptr();
+	wait_finish_active_commits(checkpoint_state->sysTreesStartPtr);
 
-	checkpoint_state->replayStartPtr = get_checkpoint_xlog_ptr();
-	wait_finish_active_commits(checkpoint_state->replayStartPtr);
-
+	/*
+	 * Arm the xids-queue flush BEFORE capturing sys trees, same as it is
+	 * already armed before the PK/data walk further down.  apply_undo_stack()
+	 * (transam/undo.c) only records a finishing oxid into the xids file when
+	 * flushUndoLocations is already true; without arming this early, a
+	 * sys-tree-touching oxid that finishes (commit or abort) while the fuzzy
+	 * walk below is running would be invisible to both WAL replay (abort
+	 * commonly takes the no-WAL fast path) and the xids file, so a page the
+	 * walk already wrote out with that oxid's not-yet-final content would
+	 * have no reconciliation path left for recovery.
+	 */
 	LWLockAcquire(&checkpoint_state->oXidQueueLock, LW_EXCLUSIVE);
 	before_writing_xids_file(cur_chkp_num);
 	start_write_xids(cur_chkp_num);
@@ -1428,16 +1462,25 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	checkpoint_sys_trees(flags, cur_chkp_num, &chkp_tbl_arg);
 
 	/*
-	 * We get start position for replay changes to system trees while holding
-	 * the oTablesMetaLock.  That guarantees that we will start recovery from
-	 * the state there is no partial changes to tables and indices system
-	 * trees.
+	 * Restore stop events (they were suppressed only for the sys-tree
+	 * checkpoint's own debug noise) and expose a park point strictly between
+	 * the sysTreesStartPtr and replayStartPtr pins, so tests can land WAL
+	 * inside the sys-tree-consistency stage window [sysTreesStartPtr,
+	 * replayStartPtr).
 	 */
-	checkpoint_state->sysTreesStartPtr = get_checkpoint_xlog_ptr();
-	LWLockRelease(&checkpoint_state->oSysTreesLock);
-	LWLockRelease(&checkpoint_state->oTablesMetaLock);
-
 	enable_stopevents = old_enable_stopevents;
+	STOPEVENT(STOPEVENT_CHECKPOINT_BEFORE_REPLAY_START, NULL);
+
+	/*
+	 * Pin replayStartPtr AFTER the sys-tree image.  This is where
+	 * PK/user-data fuzzy replay starts, and also the point at which recovery
+	 * declares the sys trees consistent: recovery replays sys-tree records
+	 * from sysTreesStartPtr up to here before applying any PK/toast record,
+	 * so descriptors are assemblable throughout PK replay.  The PK image is
+	 * captured later in the table walk, so it corresponds to >=
+	 * replayStartPtr and is replayed forward from here (idempotent).
+	 */
+	checkpoint_state->replayStartPtr = get_checkpoint_xlog_ptr();
 
 	acquire_chkp_lock_drain(&checkpoint_state->oTablesMetaLock);
 	o_indices_foreach_oids(checkpoint_tables_callback, &chkp_tbl_arg);

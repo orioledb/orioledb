@@ -251,6 +251,7 @@ typedef struct
 {
 	UndoRetainSharedLocations undoRetainLocations[(int) UndoLogsCount];
 	pg_atomic_uint64 commitInProgressXlogLocation;
+
 	int			autonomousNestingLevel;
 	LWLock		undoStackLocationsFlushLock;
 	bool		flushUndoLocations;
