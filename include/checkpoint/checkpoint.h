@@ -204,6 +204,23 @@ typedef struct
 	pg_atomic_uint64 mmapDataLength;
 
 	/*
+	 * While true, apply_undo_stack() (transam/undo.c) only queues a finishing
+	 * oxid's UndoLogSystem location to the xids file, not
+	 * UndoLogRegular/UndoLogRegularPageLevel.  Set from just before the
+	 * sys-tree walk until replayStartPtr is pinned (o_perform_checkpoint): a
+	 * transaction finishing in that window has its finish record (or, for a
+	 * fast-path abort, whatever WAL later lets recovery infer it via
+	 * recovery_xmin) necessarily >= replayStartPtr-to-be, so once this flag
+	 * is cleared any further finish is safely at/after replayStartPtr too --
+	 * no race, WAL position and wall-clock order together on one stream.
+	 * Restricting the data-log entries here keeps a data tree's descriptor
+	 * (O_TABLES/O_INDICES) from ever needing to be fetched (via
+	 * walk_checkpoint_stacks() applying a checkpoint_undo_stacks entry)
+	 * before the sys trees are consistent.
+	 */
+	pg_atomic_flag xidsQueueSysTreeOnly;
+
+	/*
 	 * Shared memory queue of records for writing to the xids file.  Backends
 	 * write to this queue last undo position on transaction commit/abort.
 	 * Checkpoint writes current undo positions for in-progress transactions.

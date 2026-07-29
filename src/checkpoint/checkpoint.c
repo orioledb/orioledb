@@ -262,6 +262,7 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		checkpoint_state->pid = InvalidPid;
 		pg_atomic_init_u64(&checkpoint_state->mmapDataLength, 0);
 		pg_atomic_init_u32(&checkpoint_state->autonomousLevel, ORIOLEDB_MAX_DEPTH);
+		pg_atomic_init_flag(&checkpoint_state->xidsQueueSysTreeOnly);
 
 		for (i = 0; i < (int) UndoLogsCount; i++)
 		{
@@ -665,23 +666,28 @@ add_index_id_item(List *list, BTreeDescr *desc)
 }
 
 /*
- * Wait all the committing transactions to finish completely.  Ensures all the
- * transactions finished afterwards will have greater WAL position than given
- * `redo_pos`.
+ * Scan every proc for a transaction that has stamped its
+ * commitInProgressXlogLocation at or before redo_pos but has not yet finished
+ * committing (i.e. not yet passed write_to_xids_queue()).  Returns the proc
+ * number of the first such transaction, or -1 when every commit whose WAL
+ * record is before redo_pos has drained.
  *
- * Ensures every transaction, which WAL record is written before redo_pos,
- * passed to write_to_xids_queue(),
+ * This is a single non-blocking pass, not a wait: the caller (o_perform_checkpoint)
+ * must be able to release the checkpoint locks and retry, because a blocking
+ * committer may be one that needs those very locks to finish (see the retry
+ * loop there for the deadlock this avoids).
  */
-static inline void
-wait_finish_active_commits(XLogRecPtr redo_pos)
+static inline int
+find_unfinished_active_commit(XLogRecPtr redo_pos)
 {
 	int			i;
 
 	for (i = 0; i < max_procs; i++)
 	{
-		while (pg_atomic_read_u64(&oProcData[i].commitInProgressXlogLocation) <= redo_pos)
-			pg_usleep(100);
+		if (pg_atomic_read_u64(&oProcData[i].commitInProgressXlogLocation) <= redo_pos)
+			return i;
 	}
+	return -1;
 }
 
 static void
@@ -1415,29 +1421,81 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	pg_write_barrier();
 
-	acquire_chkp_lock_drain(&checkpoint_state->oTablesMetaLock);
-	acquire_chkp_lock_drain(&checkpoint_state->oSysTreesLock);
-
-	checkpoint_state->replayStartPtr = get_checkpoint_xlog_ptr();
-	wait_finish_active_commits(checkpoint_state->replayStartPtr);
-
+	/*
+	 * Arm the xids-queue flush BEFORE capturing sys trees, same as it is
+	 * already armed before the PK/data walk further down.  apply_undo_stack()
+	 * (transam/undo.c) only records a finishing oxid into the xids file when
+	 * flushUndoLocations is already true; without arming this early, a
+	 * sys-tree-touching oxid that finishes (commit or abort) while the fuzzy
+	 * walk below is running would be invisible to both WAL replay (abort
+	 * commonly takes the no-WAL fast path) and the xids file, so a page the
+	 * walk already wrote out with that oxid's not-yet-final content would
+	 * have no reconciliation path left for recovery.
+	 */
 	LWLockAcquire(&checkpoint_state->oXidQueueLock, LW_EXCLUSIVE);
 	before_writing_xids_file(cur_chkp_num);
+	pg_atomic_test_set_flag(&checkpoint_state->xidsQueueSysTreeOnly);
 	start_write_xids(cur_chkp_num);
+
+	/*
+	 * Sys trees are checkpointed as a fuzzy per-page image WITHOUT freezing
+	 * concurrent DDL (no EXCLUSIVE oTablesMetaLock/oSysTreesLock across the
+	 * capture).  Pin the sys-tree replay start BEFORE capturing them: any
+	 * sys-tree WAL record already durable at this point is necessarily
+	 * already reflected in the page the fuzzy walk will read (a buffer is
+	 * modified before its XLogInsert() returns, under the same content lock
+	 * the walk's own read takes), and any record from here on falls inside
+	 * the forward-replay window below and gets reconciled there.  These are
+	 * the same two mechanisms (forward replay from a single snapshot point,
+	 * plus the xids file just armed above for anything still in flight) that
+	 * already cover the PK/data walk -- no separate clamp to the oldest open
+	 * DDL window is needed here either.
+	 */
+	checkpoint_state->sysTreesStartPtr = get_checkpoint_xlog_ptr();
 
 	checkpoint_sys_trees(flags, cur_chkp_num, &chkp_tbl_arg);
 
 	/*
-	 * We get start position for replay changes to system trees while holding
-	 * the oTablesMetaLock.  That guarantees that we will start recovery from
-	 * the state there is no partial changes to tables and indices system
-	 * trees.
+	 * Restore stop events (they were suppressed only for the sys-tree
+	 * checkpoint's own debug noise) and expose a park point strictly between
+	 * the sysTreesStartPtr and replayStartPtr pins, so tests can land WAL
+	 * inside the sys-tree-consistency stage window [sysTreesStartPtr,
+	 * replayStartPtr).
 	 */
-	checkpoint_state->sysTreesStartPtr = get_checkpoint_xlog_ptr();
-	LWLockRelease(&checkpoint_state->oSysTreesLock);
-	LWLockRelease(&checkpoint_state->oTablesMetaLock);
-
 	enable_stopevents = old_enable_stopevents;
+	STOPEVENT(STOPEVENT_CHECKPOINT_BEFORE_REPLAY_START, NULL);
+
+	/*
+	 * Pin replayStartPtr AFTER the sys-tree image.  This is where
+	 * PK/user-data fuzzy replay starts, and also the point at which recovery
+	 * declares the sys trees consistent: recovery replays sys-tree records
+	 * from sysTreesStartPtr up to here before applying any PK/toast record,
+	 * so descriptors are assemblable throughout PK replay.  The PK image is
+	 * captured later in the table walk, so it corresponds to >=
+	 * replayStartPtr and is replayed forward from here (idempotent).
+	 *
+	 * Then drain every commit stamped at or before replayStartPtr before
+	 * snapshotting the in-progress xids.  We hold none of the meta locks
+	 * across this drain, so an ON COMMIT DROP committer that grabs
+	 * oTablesMetaLock (LW_SHARED) in CommitTransaction()'s
+	 * PreCommit_on_commit_actions() -- after it stamped its commit position
+	 * at XACT_EVENT_PRE_COMMIT -- always makes progress: no AB-BA deadlock,
+	 * just poll until drained from a fresh replayStartPtr.
+	 */
+	for (;;)
+	{
+		checkpoint_state->replayStartPtr = get_checkpoint_xlog_ptr();
+		if (find_unfinished_active_commit(checkpoint_state->replayStartPtr) < 0)
+			break;
+		pg_usleep(1000L);
+	}
+
+	/*
+	 * From here on a finishing oxid's data-log (UndoLogRegular/
+	 * UndoLogRegularPageLevel) location is safe to queue too: its finish is
+	 * necessarily at/after replayStartPtr (see xidsQueueSysTreeOnly).
+	 */
+	pg_atomic_clear_flag(&checkpoint_state->xidsQueueSysTreeOnly);
 
 	acquire_chkp_lock_drain(&checkpoint_state->oTablesMetaLock);
 	o_indices_foreach_oids(checkpoint_tables_callback, &chkp_tbl_arg);

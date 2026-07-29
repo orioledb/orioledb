@@ -31,6 +31,7 @@
 #include "tuple/toast.h"
 #include "utils/elog.h"
 #include "utils/planner.h"
+#include "utils/stopevent.h"
 
 #include "access/hash.h"
 #include "access/heapam.h"
@@ -2434,6 +2435,18 @@ o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 {
 	if (!is_recovery_process())
 	{
+		/*
+		 * Test hook: park here holding oTablesMetaLock, after the
+		 * WAL_REC_O_TABLES_META_LOCK (+ the sys-tree modify) container has
+		 * already been flushed by systrees_modify_end but before
+		 * WAL_REC_O_TABLES_META_UNLOCK is written.  A concurrent DROP
+		 * DATABASE issued while we are parked then lands its dbase_redo WAL
+		 * record between META_LOCK and META_UNLOCK -- the interleaving that
+		 * makes the standby recovery leader replay dbase_redo while holding
+		 * the meta lock.
+		 */
+		STOPEVENT(STOPEVENT_BEFORE_O_TABLES_META_UNLOCK, NULL);
+
 		add_o_tables_meta_unlock_wal_record(oids, oldRelnode);
 		(void) flush_local_wal(false, false);
 

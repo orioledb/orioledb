@@ -1454,9 +1454,16 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 
 	/*
 	 * Flush undo location to checkpoint if concurrent checkpointing requires
-	 * that.
+	 * that.  While xidsQueueSysTreeOnly is set, a concurrent checkpoint's
+	 * sys-tree walk is still in progress and only wants to know about
+	 * UndoLogSystem: queuing a data-log (Regular/RegularPageLevel) location
+	 * here would let a later crash's recovery apply it via
+	 * walk_checkpoint_stacks() before the sys trees are consistent (see
+	 * xidsQueueSysTreeOnly's comment in checkpoint.h).
 	 */
-	if (!toLocation && curProcData->flushUndoLocations)
+	if (!toLocation && curProcData->flushUndoLocations &&
+		(undoType == UndoLogSystem ||
+		 pg_atomic_unlocked_test_flag(&checkpoint_state->xidsQueueSysTreeOnly)))
 	{
 		XidFileRec	rec;
 
