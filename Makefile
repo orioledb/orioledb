@@ -196,6 +196,10 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/recovery_opclass_test.py \
 						test/t/recovery_worker_test.py \
 						test/t/replication_test.py \
+						test/t/meta_lock_deadlock_test.py \
+						test/t/systree_stage_test.py \
+						test/t/systree_xids_gap_test.py \
+						test/t/systree_wal_retention_gap_test.py \
 						test/t/types_test.py \
 						test/t/undo_eviction_test.py \
 						test/t/undo_ring_keep_checkpoint_test.py \
