@@ -18,6 +18,7 @@ extern void o_validate_funcexpr(Node *node, char *hint_msg);
 extern void o_validate_function_by_oid(Oid procoid, char *hint_msg);
 
 extern void o_collect_funcexpr(Node *node);
+extern void o_collect_funcexpr_refresh(Node *node);
 extern void o_collect_op_by_oid(Oid opoid);
 
 extern void o_collect_function_by_oid(Oid procoid, Oid inputcollid,

@@ -684,9 +684,19 @@ o_table_refresh_index_exprs(OTable *o_table, OIndexNumber ix_num,
 	 * and the checkpointer later read these entries via the syscache hook
 	 * without a catalog of their own, so they must be present and
 	 * current-format before then.
+	 *
+	 * Use the refresh variant: a referenced SQL function's proc-cache entry
+	 * may already exist but hold parse trees in the old major's node-tree
+	 * format (unreadable here), and the proc cache forbids in-place updates,
+	 * so the stale entry is dropped and re-created from the current catalog
+	 * in this server's format.  This is safe now that the class cache is
+	 * reset first: rebuilding a proc entry collects its referenced types into
+	 * an empty class-cache tree, which refills from the relcache instead of
+	 * deserializing a stale old-major entry -- the deserialize that crashed
+	 * the earlier walker-based rebuild before the class cache was reset.
 	 */
-	o_collect_funcexpr((Node *) index->predicate);
-	o_collect_funcexpr((Node *) index->expressions);
+	o_collect_funcexpr_refresh((Node *) index->predicate);
+	o_collect_funcexpr_refresh((Node *) index->expressions);
 
 	MemoryContextSwitchTo(old_mcxt);
 	return true;
