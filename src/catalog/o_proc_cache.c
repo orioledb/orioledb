@@ -2197,7 +2197,23 @@ o_proc_cache_search_htup(TupleDesc tupdesc, Oid procoid)
 		values[Anum_pg_proc_proname - 1] = NameGetDatum(&procname);
 		values[Anum_pg_proc_proowner - 1] = ObjectIdGetDatum(o_proc->proowner);
 		values[Anum_pg_proc_prolang - 1] = ObjectIdGetDatum(o_proc->prolang);
-		if (o_proc->prosrc)
+
+		/*
+		 * For a SQL function fmgr_symbol() stored the language-handler symbol
+		 * in o_proc->prosrc ("fmgr_sql", or "fmgr_security_definer" for a
+		 * SECURITY DEFINER / SET-clause function) -- not the function body. A
+		 * catalog-free caller that re-parses the body from this synthetic
+		 * tuple (PostgreSQL's native fmgr_sql, reached in recovery when the
+		 * FmgrInfo is built outside o_proc_cache_fill_finfo) would then choke
+		 * on that symbol.  Hand back the real body text (sql_func->src)
+		 * instead; the synthetic tuple advertises prosecdef = false, so no
+		 * wrapper is involved and the plain SQL body is what must be parsed.
+		 */
+		if (o_proc->prolang == SQLlanguageId && o_proc->sql_func &&
+			o_proc->sql_func->src)
+			values[Anum_pg_proc_prosrc - 1] =
+				CStringGetTextDatum(o_proc->sql_func->src);
+		else if (o_proc->prosrc)
 			values[Anum_pg_proc_prosrc - 1] =
 				CStringGetTextDatum(o_proc->prosrc);
 		else
