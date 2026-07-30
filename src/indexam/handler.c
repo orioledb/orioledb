@@ -1570,6 +1570,27 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 	ORelOidsSetFromRel(oids, rel);
 	ix_type = o_index_rel_get_ix_type(rel);
 	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
+
+	/*
+	 * Under pg_upgrade's binary-upgrade restore the carried-over OrioleDB
+	 * trees are migrated only after pg_upgrade finishes, so a relation
+	 * created during the restore has no descriptor yet and holds no live
+	 * data.  A scan over it must behave like the empty relation it currently
+	 * is -- this is how a heap FK re-validation (RI_Initial_Check for ALTER
+	 * TABLE ... ADD CONSTRAINT ... FOREIGN KEY) works against the
+	 * not-yet-swapped files too. Return a scan that yields nothing instead of
+	 * dereferencing a NULL descriptor.  Outside binary upgrade a missing
+	 * descriptor is a real bug.
+	 */
+	if (index_descr == NULL && IsBinaryUpgrade)
+	{
+		o_scan->emptyScan = true;
+		o_scan->cxt = AllocSetContextCreate(CurrentMemoryContext,
+											"orioledb_cs plan data",
+											ALLOCSET_DEFAULT_SIZES);
+		return scan;
+	}
+
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
 	Assert(descr != NULL);
@@ -2021,6 +2042,10 @@ orioledb_amgettuple(IndexScanDesc scan, ScanDirection dir)
 	{
 		return btgettuple(scan, dir);
 	}
+
+	/* Binary-upgrade restore: carried-over relation has no data yet. */
+	if (o_scan->emptyScan)
+		return false;
 
 	o_scan->scanDir = dir;
 

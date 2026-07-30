@@ -25,6 +25,12 @@ typedef struct OScanState
 	IndexScanDescData scandesc;
 	OIndexNumber ixNum;
 	MemoryContext cxt;
+
+	/*
+	 * set by orioledb_ambeginscan when the descriptor is absent under
+	 * IsBinaryUpgrade: the scan yields no rows (see orioledb_amgettuple)
+	 */
+	bool		emptyScan;
 	ScanDirection scanDir;
 	bool		addJunk;
 	/* is only current index can be used in scan */
