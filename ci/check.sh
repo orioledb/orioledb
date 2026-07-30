@@ -109,10 +109,21 @@ CONF
         fi
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log restart
 
+        # Retain WAL for the standby with a persistent physical slot.  Without
+        # one, a primary restart + checkpoint mid-test recycles the WAL segment
+        # the slot-less replica is still at, so the replica can never catch up
+        # ("requested WAL segment ... has already been removed") -- the flaky
+        # "Replica failed to synchronize" failure.  The slot survives the later
+        # primary restart (persistent), and advances with the replica so it does
+        # not pin WAL unboundedly.
+        psql postgres -p 5432 -c \
+            "SELECT pg_create_physical_replication_slot('orioledb_rep_slot');"
+
         pg_basebackup -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -Fp -Xs -P
         touch $GITHUB_WORKSPACE/pgsql/rep_pgdata/standby.signal
         echo "port = 5433" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         echo "primary_conninfo = 'host=/tmp port=5432'" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
+        echo "primary_slot_name = 'orioledb_rep_slot'" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         echo "allow_in_place_tablespaces = true" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         # ci_fixes stress hunt: aggressive restartpoints on the standby too.
         if [ "${GITHUB_REF_NAME:-}" = "ci_fixes" ]; then
