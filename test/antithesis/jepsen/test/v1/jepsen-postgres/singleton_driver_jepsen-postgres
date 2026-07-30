@@ -21,7 +21,7 @@ fi
 		exec >/dev/null
 	fi
 
-	# Antithesis injects runtime dependency JARs beside the application JAR
+	set -x
 	java \
 		-ea -cp "/opt/jepsen/*" \
 		${jdwp_option:+"$jdwp_option"} \
