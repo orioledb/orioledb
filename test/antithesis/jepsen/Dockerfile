@@ -12,7 +12,8 @@ RUN apt-get update \
 WORKDIR /src
 
 # 2026-07-29: use antithesis-instrumented sql workload
-RUN git clone --depth=1 https://github.com/pmbauer/jepsen-sql.git sql \
+# RUN git clone --depth=1 https://github.com/pmbauer/jepsen-sql.git sql \
+RUN git clone --depth=1 https://github.com/jepsen-io/sql.git \
     && cd sql \
     && lein install
 
