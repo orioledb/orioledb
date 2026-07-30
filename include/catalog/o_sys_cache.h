@@ -524,6 +524,7 @@ extern void o_proc_cache_validate_add(Oid datoid, Oid procoid, Oid fncollation,
 									  List **processed);
 extern void o_proc_cache_fill_finfo(FmgrInfo *finfo, Oid procoid, Oid datoid);
 extern HeapTuple o_proc_cache_search_htup(TupleDesc tupdesc, Oid procoid);
+extern bool o_proc_cache_delete_if_stale(Oid datoid, Oid procoid);
 
 /* o_type_cache.c */
 typedef struct OType

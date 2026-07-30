@@ -913,12 +913,16 @@ o_collect_function_walker(Oid functionId, Oid inputcollid, List *args,
 	 * In refresh mode (orioledb_upgrade_refresh, after a cross-major upgrade)
 	 * an entry may already exist but hold parse trees in the old major's
 	 * node-tree format; add_if_needed would leave it untouched, and the proc
-	 * cache forbids in-place updates.  Drop the stale entry first so the add
-	 * below re-creates it from the current catalog in this server's format --
-	 * see o_proc_cache's node_format_stale guard.
+	 * cache forbids in-place updates.  Drop only such a stale entry so the
+	 * add below re-creates it from the current catalog in this server's
+	 * format. The walker also visits INTERNAL opclass support procs
+	 * (comparators, hash) transitively; those have no node trees, are fine
+	 * across majors, and are relied on by index-descriptor fills, so
+	 * o_proc_cache_delete_if_stale leaves them in place (dropping one crashes
+	 * o_proc_cache_fill_finfo).
 	 */
 	if (o_collect_funcs_refresh)
-		o_proc_cache_delete(datoid, functionId);
+		o_proc_cache_delete_if_stale(datoid, functionId);
 	o_proc_cache_add_if_needed(datoid, functionId, cur_lsn, (Pointer) &arg);
 	o_class_cache_add_if_needed(datoid, AuthIdRelationId, cur_lsn, NULL);
 	for (i = 0; i < procedureStruct->pronargs; i++)

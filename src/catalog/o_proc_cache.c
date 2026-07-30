@@ -2064,6 +2064,36 @@ o_proc_cache_validate_add(Oid datoid, Oid procoid, Oid fncollation,
 }
 
 /*
+ * For the cross-major upgrade refresh (o_collect_funcexpr_refresh): drop a
+ * proc-cache entry ONLY if its SQL-function parse trees were carried over from
+ * another PG major and dropped on read (node_format_stale), so the caller can
+ * re-add it from the catalog in this server's node-tree format.
+ *
+ * A non-stale entry must be left in place.  In particular an INTERNAL opclass
+ * support proc (comparator, hash, sort support) has no node trees, deserializes
+ * fine across majors, and is relied on by index-descriptor fills -- dropping
+ * one (as an unconditional delete did) leaves it missing and trips
+ * o_proc_cache_fill_finfo's Assert(o_proc).  The refresh walker visits such
+ * procs transitively (operator support functions), so the guard is essential.
+ *
+ * Returns true if a stale entry was dropped.
+ */
+bool
+o_proc_cache_delete_if_stale(Oid datoid, Oid procoid)
+{
+	XLogRecPtr	cur_lsn;
+	OProc	   *o_proc;
+
+	o_sys_cache_set_datoid_lsn(&cur_lsn, datoid == InvalidOid ? &datoid : NULL);
+	o_proc = o_proc_cache_search(datoid, procoid, cur_lsn, proc_cache->nkeys);
+	if (o_proc == NULL || !o_proc->node_format_stale)
+		return false;
+
+	o_proc_cache_delete(datoid, procoid);
+	return true;
+}
+
+/*
  * o_proc_cache_fill_finfo
  *
  * Fill FmgrInfo for procoid in the provided database context.
