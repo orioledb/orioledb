@@ -11,6 +11,7 @@ from testgres.connection import NodeConnection
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 from .base_test import wait_checkpointer_stopevent
+from .base_test import wait_stopevent
 
 
 class MergeTest(BaseTest):
@@ -333,6 +334,69 @@ class MergeTest(BaseTest):
 		node.start()
 		self.assertEqual(
 		    node.execute("SELECT COUNT(*) FROM o_merge;")[0][0], 5000)
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_merge'::regclass)")[0]
+		    [0])
+
+	def test_merge_free_extent_concurrent_checkpoint(self):
+		"""
+		btree_try_merge_pages() captures the right page's checkpoint number while
+		parent, left and right are all locked, then reports the retired page's
+		extent via free_extent_for_checkpoint().  If the left page is unlocked
+		before that report, the checkpointer can finish the checkpoint
+		(checkpoint_ix() -> seq_buf_finalize() + free_seq_buf_pages()), so
+		shared->pages[i] becomes OInvalidInMemoryBlkno and the report writes into
+		a freed seq_buf.  The fix reports under the left page lock, which blocks
+		the checkpointer until the report is done.
+		"""
+		node = self.node
+		node.execute(
+		    "INSERT INTO o_merge SELECT g FROM generate_series(1, 20000) g;")
+
+		node.execute("CHECKPOINT;")
+
+		node.execute("DELETE FROM o_merge WHERE mod(id, 8) <> 0;")
+
+		con1 = node.connect()
+		con2 = node.connect()
+		con3 = node.connect()
+		con2_pid = con2.pid
+
+		con1.execute("SELECT pg_stopevent_set('merge_before_free_extent',\n"
+		             "'$.treeName == \"o_merge_pkey\" && "
+		             "$.hadExtent == true && "
+		             "$backendType == \"client backend\"');")
+
+		t2 = ThreadQueryExecutor(
+		    con2, "SELECT orioledb_write_pages('o_merge'::regclass);")
+		t2.start()
+		wait_stopevent(node, con2_pid)
+
+		# Checkpointer should be blocked, because the left page is blocked
+		t3 = ThreadQueryExecutor(con3, "CHECKPOINT;")
+		t3.start()
+		t3.join(10)
+		self.assertTrue(
+		    t3.is_alive(),
+		    "checkpointer must block on the left page lock held by the merge")
+
+		self.assertTrue(
+		    con1.execute(
+		        "SELECT pg_stopevent_reset('merge_before_free_extent')")[0][0])
+		try:
+			t2.join()
+			t3.join()
+		except Exception as e:
+			raise AssertionError("The released merge lost its connection!")
+
+		con1.close()
+		con2.close()
+		con3.close()
+
+		node.stop()
+		node.start()
+		self.assertEqual(
+		    node.execute("SELECT COUNT(*) FROM o_merge;")[0][0], 2500)
 		self.assertTrue(
 		    node.execute("SELECT orioledb_tbl_check('o_merge'::regclass)")[0]
 		    [0])

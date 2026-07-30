@@ -23,6 +23,7 @@
 #include "btree/undo.h"
 #include "checkpoint/checkpoint.h"
 #include "utils/page_pool.h"
+#include "utils/stopevent.h"
 #include "transam/undo.h"
 
 #include "miscadmin.h"
@@ -43,6 +44,23 @@ static bool can_be_merged(BTreeDescr *desc, Page left, Page right,
 static void merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 						Page right, CommitSeqNo csn);
 
+static Jsonb *
+prepare_merge_before_free_extent_params(BTreeDescr *desc, int level, uint32 checkpoint_num, bool extent)
+{
+	JsonbParseState *state = NULL;
+	Jsonb	   *res;
+	MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+	btree_desc_stopevent_params_internal(desc, &state);
+	jsonb_push_int8_key(&state, "level", level);
+	jsonb_push_int8_key(&state, "checkpointNum", checkpoint_num);
+	jsonb_push_bool_key(&state, "hadExtent", extent);
+	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+	MemoryContextSwitchTo(mctx);
+
+	return res;
+}
 
 /*
  * Try to merge right page to the left page.  Returns true iff succeed.
@@ -70,6 +88,7 @@ btree_try_merge_pages(BTreeDescr *desc,
 	uint32		checkpoint_number;
 	bool		copy_blkno;
 	bool		needsUndo;
+	bool		extent;
 	int			level = PAGE_GET_LEVEL(right);
 
 	if (RightLinkIsValid(BTREE_PAGE_GET_RIGHTLINK(right)))
@@ -214,11 +233,10 @@ btree_try_merge_pages(BTreeDescr *desc,
 	Assert(checkpoint_state->stack[level].hikeyBlkno != left_blkno);
 	if (checkpoint_state->stack[level].hikeyBlkno == right_blkno)
 		checkpoint_state->stack[level].hikeyBlkno = left_blkno;
-	unlock_page(left_blkno);
-	left_blkno = OInvalidInMemoryBlkno;
 
 	right_desc = O_GET_IN_MEMORY_PAGEDESC(right_blkno);
 	right_extent = right_desc->fileExtent;
+	extent = FileExtentIsValid(right_extent);
 
 	CLEAN_DIRTY(desc->ppool, right_blkno);
 
@@ -243,11 +261,21 @@ btree_try_merge_pages(BTreeDescr *desc,
 
 	END_CRIT_SECTION();
 
+	if (STOPEVENTS_ENABLED())
+	{
+		Jsonb	   *params;
+
+		params = prepare_merge_before_free_extent_params(desc, level, checkpoint_number, extent);
+		STOPEVENT(STOPEVENT_MERGE_BEFORE_FREE_EXTENT, params);
+	}
+
 	if (FileExtentIsValid(right_extent))
 	{
 		free_extent_for_checkpoint(desc, &right_extent,
 								   checkpoint_number);
 	}
+
+	unlock_page(left_blkno);
 
 	return true;
 }
