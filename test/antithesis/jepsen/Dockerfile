@@ -23,8 +23,16 @@ RUN git init \
     && git fetch --depth=1 origin "${JEPSEN_POSTGRES_REF}" \
     && git checkout --detach FETCH_HEAD \
     && cd postgres \
-    && lein uberjar \
-    && cp target/*-standalone.jar /jepsen-postgres.jar
+    && lein jar \
+    && mkdir -p /opt/jepsen \
+    && cp target/postgres-*.jar /opt/jepsen/jepsen-postgres.jar \
+    && lein classpath \
+       | tr ':' '\n' \
+       | while IFS= read -r dependency; do \
+           case "${dependency}" in \
+             *.jar) cp "${dependency}" /opt/jepsen/ ;; \
+           esac; \
+         done
 
 RUN jlink \
     --add-modules java.base,java.desktop,java.instrument,java.management,java.naming,java.scripting,java.security.jgss,java.sql,jdk.attach,jdk.crypto.ec,jdk.hotspot.agent,jdk.jcmd,jdk.jdi,jdk.jdwp.agent,jdk.jfr,jdk.random,jdk.unsupported \
@@ -68,7 +76,7 @@ ENV JAVA_HOME=/opt/java \
 
 WORKDIR /opt/jepsen
 COPY --from=build /opt/java-runtime /opt/java
-COPY --from=build /jepsen-postgres.jar ./jepsen-postgres.jar
+COPY --from=build /opt/jepsen /opt/jepsen
 COPY --from=debug-source /src/sql /src/sql
 COPY --from=debug-source /src/jepsen-postgres /src/jepsen-postgres
 
@@ -77,8 +85,7 @@ RUN set -eux; \
       command -v "${tool}"; \
     done
 
-# register jar with antithesis for coverage instrumentation and assertions
-# 2026-07-30: disabling because of classloader exception
+# Register only the application JAR for Antithesis coverage instrumentation and assertions.
 RUN mkdir -p /opt/antithesis/catalog \
     && ln -s /opt/jepsen/jepsen-postgres.jar /opt/antithesis/catalog/jepsen-postgres.jar
 
