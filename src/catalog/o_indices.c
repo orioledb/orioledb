@@ -31,6 +31,8 @@
 #include "access/genam.h"
 #include "access/relation.h"
 #include "access/table.h"
+#include "executor/execExpr.h"
+#include "executor/functions.h"
 #include "catalog/pg_opclass_d.h"
 #include "catalog/pg_tablespace_d.h"
 #include "catalog/pg_type_d.h"
@@ -1221,6 +1223,68 @@ cache_scan_tupdesc_and_slot(OIndexDescr *index_descr, OIndex *oIndex)
 }
 
 /*
+ * Redirect SQL-function calls in a compiled index expression/predicate to
+ * o_fmgr_sql.
+ *
+ * ExecInitExpr/ExecInitQual give a SQL function PostgreSQL's native fmgr_sql,
+ * which parses and executes the function body against the catalog.  In a
+ * catalog-free context (recovery, checkpointer) there is no catalog, so such a
+ * call crashes (native fmgr_sql segfaults in the executor).  o_fmgr_sql instead
+ * evaluates the function from the parse trees cached in the OrioleDB proc
+ * cache.  This mirrors the comparator fixup in descr.c; only relevant when the
+ * syscache hooks are active (installed only outside a transaction), so the
+ * caller gates on o_is_syscache_hooks_set().  fn_extra is cleared because the
+ * SQLFunctionCache layout differs between fmgr_sql and o_fmgr_sql.
+ */
+static void
+o_index_expr_redirect_sql_funcs(ExprState *state)
+{
+	int			i;
+
+	if (state == NULL || !o_is_syscache_hooks_set())
+		return;
+
+	for (i = 0; i < state->steps_len; i++)
+	{
+		ExprEvalStep *step = &state->steps[i];
+		FmgrInfo   *finfo = NULL;
+
+		switch (ExecEvalStepOp(state, step))
+		{
+			case EEOP_FUNCEXPR:
+			case EEOP_FUNCEXPR_STRICT:
+			case EEOP_FUNCEXPR_FUSAGE:
+			case EEOP_FUNCEXPR_STRICT_FUSAGE:
+#if PG_VERSION_NUM >= 180000
+			case EEOP_FUNCEXPR_STRICT_1:
+			case EEOP_FUNCEXPR_STRICT_2:
+#endif
+			case EEOP_DISTINCT:
+			case EEOP_NOT_DISTINCT:
+			case EEOP_NULLIF:
+				finfo = step->d.func.finfo;
+				break;
+			default:
+				break;
+		}
+
+		if (finfo != NULL && step->d.func.fn_addr == fmgr_sql)
+		{
+			/*
+			 * ExecInterpExpr calls the cached step->d.func.fn_addr directly
+			 * (the finfo indirection is bypassed for speed), so redirect that
+			 * copy; keep finfo consistent too.  fn_extra is cleared because
+			 * the SQLFunctionCache layout differs between fmgr_sql and
+			 * o_fmgr_sql.
+			 */
+			step->d.func.fn_addr = o_fmgr_sql;
+			finfo->fn_addr = o_fmgr_sql;
+			finfo->fn_extra = NULL;
+		}
+	}
+}
+
+/*
  * o_index_fill_descr()
  *
  * Initialize *descr from the catalog OIndex entry.
@@ -1473,6 +1537,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 
 	o_set_syscache_hooks();
 	descr->predicate_state = ExecInitQual(descr->predicate, NULL);
+	o_index_expr_redirect_sql_funcs(descr->predicate_state);
 	descr->expressions_state = NIL;
 	foreach(lc, descr->expressions)
 	{
@@ -1480,6 +1545,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 		ExprState  *expr_state;
 
 		expr_state = ExecInitExpr(node, NULL);
+		o_index_expr_redirect_sql_funcs(expr_state);
 
 		descr->expressions_state = lappend(descr->expressions_state,
 										   expr_state);
