@@ -4105,20 +4105,29 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					 (subId == 0))
 			{
 				/*
-				 * We come here during "ALTER TABLE ... SET TABLESPACE" after
-				 * orioledb_relation_copy_data
+				 * We reach here at OAT_POST_ALTER for any RELATION/MATVIEW,
+				 * not only "ALTER TABLE ... SET TABLESPACE" after
+				 * orioledb_relation_copy_data -- an ALTER COLUMN TYPE rewrite
+				 * lands here too.  So act only on a genuine tablespace
+				 * change: compare the pre-command reltablespace against the
+				 * value after CommandCounterIncrement() using the raw stored
+				 * oids (0 is the database default).  Normalizing 0 to
+				 * MyDatabaseTableSpace before the comparison would make a
+				 * default-tablespace relation look changed and clobber the
+				 * saved_oids the rewrite path set above; normalize only once
+				 * a real change is confirmed.
 				 */
 				if (is_orioledb_rel(rel))
 				{
 					ORelOids	old_oids;
 					Oid			old_reltablespace = rel->rd_rel->reltablespace;
 
-					if (!OidIsValid(old_reltablespace))
-						old_reltablespace = MyDatabaseTableSpace;
 					ORelOidsSetFromRel(old_oids, rel);
 					CommandCounterIncrement();
 					if (old_reltablespace != rel->rd_rel->reltablespace)
 					{
+						if (!OidIsValid(old_reltablespace))
+							old_reltablespace = MyDatabaseTableSpace;
 						o_saved_reltablespace = old_reltablespace;
 						saved_oids = old_oids;
 					}

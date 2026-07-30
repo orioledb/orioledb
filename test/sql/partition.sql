@@ -2,6 +2,26 @@ CREATE SCHEMA partition;
 SET SESSION search_path = 'partition';
 CREATE EXTENSION orioledb;
 
+set default_table_access_method='orioledb';
+CREATE TABLE test_tbl (id bigserial, start_date timestamp, status_char varchar(1), status_num smallint, note text, data bytea, skills varchar(1)[] ,work_hours INTEGER[7]) PARTITION BY RANGE (id);
+CREATE TABLE test_tbl_p1 PARTITION OF test_tbl FOR VALUES FROM (1) TO (100);
+CREATE TABLE test_tbl_p2 PARTITION OF test_tbl FOR VALUES FROM (100) TO (200);
+CREATE TABLE test_tbl_p3 PARTITION OF test_tbl FOR VALUES FROM (200) TO (300);
+CREATE INDEX test_tbl_id_idx ON test_tbl USING btree (id);
+CREATE INDEX test_tbl_status_num_idx ON test_tbl USING btree (status_num) ;
+INSERT INTO test_tbl SELECT g.id,'2024-07-04 15:34:40.472880','A',1,'book','\x00010203040506070809',ARRAY['X', 'Y', 'Z'],ARRAY[8, 8, 8, 8, 8, 0, 0] FROM generate_series(1,299) g(id);
+ALTER TABLE test_tbl ALTER COLUMN status_num TYPE NUMERIC(10,4);
+INSERT INTO test_tbl SELECT g.id,'2024-07-04 15:34:40.472880','B',2,'book','\x00010203040506070809',ARRAY['X', 'Y', 'Z'],ARRAY[8, 8, 8, 8, 8, 0, 0] FROM generate_series(1,299) g(id);
+BEGIN;
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM test_tbl;
+SELECT COUNT(*) FROM test_tbl;
+SET LOCAL enable_seqscan = off;
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM test_tbl WHERE status_num < 2;
+SELECT COUNT(*) FROM test_tbl WHERE status_num < 2;
+COMMIT;
+DROP TABLE test_tbl;
+set default_table_access_method='heap';
+
 CREATE TABLE o_test_partition_on_conflict_range (
   val_1 int,
   val_2 int
