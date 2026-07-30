@@ -78,8 +78,9 @@ RUN set -eux; \
     done
 
 # register jar with antithesis for coverage instrumentation and assertions
-RUN mkdir -p /opt/antithesis/catalog \
-    && ln -s /opt/jepsen/jepsen-postgres.jar /opt/antithesis/catalog/jepsen-postgres.jar
+# 2026-07-30: disabling because of classloader exception
+#RUN mkdir -p /opt/antithesis/catalog \
+#    && ln -s /opt/jepsen/jepsen-postgres.jar /opt/antithesis/catalog/jepsen-postgres.jar
 
 ENV JEPSEN_WORKLOAD=append \
     JEPSEN_CONCURRENCY=50 \
