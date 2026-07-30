@@ -21,11 +21,13 @@ fi
 		exec >/dev/null
 	fi
 
+	# Antithesis injects runtime dependency JARs beside the application JAR
 	java \
+		-ea -cp "/opt/jepsen/*" \
 		${jdwp_option:+"$jdwp_option"} \
 		-Djava.awt.headless=true \
 		-server \
-		-jar /opt/jepsen/jepsen-postgres.jar \
+		jepsen.postgres.cli \
 		test-all \
 		--test-count 1 \
 		--no-ssh \
