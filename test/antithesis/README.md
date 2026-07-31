@@ -65,26 +65,6 @@ snouty launch \
   --webhook basic_test
 ```
 
-#### sk-recovery-race
-
-```
-# ref before fix
-make build push CFG='workload/sk-recovery-race' PG_MAJOR=17 ORIOLEDB_REF=ce4681c77e3a0b8e67f900704bb598838837171e
-
-# optional
-snouty validate target/
-
-snouty launch \
-  --config-image "$(make config-image CFG='workload/sk-recovery-race' PG_MAJOR=17 ORIOLEDB_REF=ce4681c77e3a0b8e67f900704bb598838837171e)" \
-  --test-name 'sk-recovery-race' \
-  --description 'sk-recovery-race trial' \
-  --duration 20m \
-  --ephemeral \
-  --param custom.container_faults_enable=true \
-  --param custom.container_faults_exclusion='sk-recovery-race-client' \
-  --webhook supabase
-```
-
 #### sk-rebuild-desync
 
 Also covers the checkpoint-overlap exploration angle the retired
