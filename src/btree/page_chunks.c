@@ -1227,6 +1227,28 @@ btree_page_reorg(BTreeDescr *desc, Page p, BTreePageItem *items,
 		hikeysFreeSpace >= SHORT_LOCATION_MULTIPLIER)
 		hikeysFreeSpace -= SHORT_LOCATION_MULTIPLIER;
 
+	/*
+	 * The item data, the per-item locator array and the fixed hikeys area
+	 * must fit within a single page.  A caller can hand us more than fits --
+	 * e.g. a page merge whose can_be_merged() estimate did not account for
+	 * the merged page's layout overhead.  Detect that here and fail with a
+	 * clear error, instead of letting the unsigned subtraction below wrap and
+	 * silently build a page with dataSize > ORIOLEDB_BLCKSZ (which only a
+	 * CHECK_PAGE_STRUCT build would later catch, and which is on-disk
+	 * corruption otherwise).
+	 */
+	if ((uint32) hikeysEnd + (uint32) totalDataSize +
+		(uint32) MAXALIGN(sizeof(LocationIndex) * count) > (uint32) ORIOLEDB_BLCKSZ)
+		ereport(ERROR,
+				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+				 errmsg("OrioleDB %s page does not fit after reorganization",
+						O_PAGE_IS(p, LEAF) ? "leaf" : "internal"),
+				 errdetail("Tree (%u, %u, %u) type %d: %u items need %u data bytes, %u locator bytes and %u hikeys bytes, exceeding the %d-byte page.",
+						   desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
+						   (int) desc->type, (uint32) count, (uint32) totalDataSize,
+						   (uint32) MAXALIGN(sizeof(LocationIndex) * count),
+						   (uint32) hikeysEnd, ORIOLEDB_BLCKSZ)));
+
 	dataFreeSpaceLeft = dataFreeSpace = (ORIOLEDB_BLCKSZ - hikeysEnd) - totalDataSize - MAXALIGN(sizeof(LocationIndex) * count);
 
 	/*
