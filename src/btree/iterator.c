@@ -161,6 +161,18 @@ static void undo_it_find_internal(UndoIterator *undoIt, void *key, BTreeKeyType 
 #define IS_LAST_PAGE(page, it) ((IT_IS_FORWARD((it)) && O_PAGE_IS(page, RIGHTMOST)) \
 								|| (IT_IS_BACKWARD((it)) && O_PAGE_IS(page, LEFTMOST)))
 
+static void
+copy_fixed_leaf_key(BTreeDescr *desc, OFixedKey *dst, OTuple leafTup)
+{
+	bool		allocated;
+	OTuple		key;
+
+	key = o_btree_tuple_make_key(desc, leafTup, dst->fixedData, false, &allocated);
+	Assert(!allocated);
+	dst->tuple.formatFlags = key.formatFlags;
+	dst->tuple.data = dst->fixedData;
+}
+
 #define IT_NEXT_OFFSET(it, loc) \
 	do { \
 		if (IT_IS_FORWARD(it)) \
@@ -1018,7 +1030,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 			OTuple		tup;
 
 			BTREE_PAGE_READ_LEAF_TUPLE(tup, it->context.img, loc);
-			copy_fixed_key(desc, &it->curKey, tup);
+			copy_fixed_leaf_key(desc, &it->curKey, tup);
 			it->curKeySet = true;
 			it->curKeyReturned = false;
 		}
@@ -1682,7 +1694,7 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 			 * re-find resumes after it.
 			 */
 			BTREE_PAGE_READ_LEAF_TUPLE(posTup, context->img, &leaf_item->locator);
-			copy_fixed_key(desc, &it->curKey, posTup);
+			copy_fixed_leaf_key(desc, &it->curKey, posTup);
 			it->curKeySet = true;
 			it->curKeyReturned = true;
 
@@ -2043,7 +2055,7 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 			 * tuple is being consumed, so mark it returned: a later re-find
 			 * resumes after it.
 			 */
-			copy_fixed_key(context->desc, &it->curKey, result);
+			copy_fixed_leaf_key(context->desc, &it->curKey, result);
 			it->curKeySet = true;
 			it->curKeyReturned = true;
 
@@ -2573,7 +2585,7 @@ orioledb_test_back_refind_skip_tail(PG_FUNCTION_ARGS)
 	fakeValue = Int32GetDatum(fake_curkey);
 	fakeTup = o_form_tuple(primary->leafTupdesc, &primary->leafSpec, 0,
 						   &fakeValue, &fakeNull, NULL);
-	copy_fixed_key(&primary->desc, &it->curKey, fakeTup);
+	copy_fixed_leaf_key(&primary->desc, &it->curKey, fakeTup);
 	pfree(fakeTup.data);
 	it->curKeySet = true;
 	it->curKeyReturned = false;
