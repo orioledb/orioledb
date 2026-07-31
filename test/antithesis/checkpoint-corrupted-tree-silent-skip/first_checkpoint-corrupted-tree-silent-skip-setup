@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+from antithesis.random import random_choice
+
+import helper_common as h
+
+
+def main():
+    conn = h.connect("first_setup")
+    try:
+        h.ensure_schema(conn)
+
+        batch_typical = random_choice(h.BATCH_TYPICAL_MENU)
+        h.save_config(conn, "batch_typical", batch_typical)
+
+        checkpoint_preset = random_choice(h.CHECKPOINT_CONFIG_PRESETS)
+        h.apply_checkpoint_config(conn, checkpoint_preset)
+        h.save_config(conn, "checkpoint_config", checkpoint_preset)
+
+        style = random_choice(h.CORRUPTION_STYLES)
+        h.save_config(conn, "corruption_style", style)
+        h.save_config(conn, "corrupted", False)
+
+        start_time = h.postmaster_start_time(conn)
+        h.maybe_record_restart(conn, start_time)
+
+        print(f"setup complete: batch_typical={batch_typical} "
+              f"checkpoint_config={checkpoint_preset} "
+              f"corruption_style={style}", flush=True)
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    main()

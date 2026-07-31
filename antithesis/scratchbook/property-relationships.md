@@ -1,7 +1,7 @@
 ---
 sut_path: /Users/artur/supabase/orioledb
-commit: a975c702156cd449e9c0a8db6f8d9bf5bca4537d
-updated: 2026-07-27
+commit: 8d513bb4c5ccaf27be34aa8bfe88ef3a06cabc8c
+updated: 2026-07-31
 external_references:
   - path: doc/
     why: In-repo documentation site (doc/architecture/*.mdx, doc/usage/*.mdx, doc/contributing/*.mdx) is the primary source of claimed guarantees and product framing; treated as leads to validate, not facts.
@@ -78,13 +78,18 @@ divergence:
   shape (both are concrete, independently re-traced bugs on unmerged
   branches, structurally similar to `checkpoint-abort-snapshot-standby-panic`
   and `sk-extent-leak-after-crash`) rather than by sharing PK/SK-fixup code
-  paths specifically. **Important distinction from the rest of this
-  cluster**: unlike `recovery-finish-abort-livelock`/`replica-xmin-
-  monotonicity` in Cluster 2 (regression guards for bugs already fixed on
-  `main`), these two are **confirmed still-open defects** — `git merge-base
-  --is-ancestor` confirms neither fix (`1df605da`; `af851ce4`/`d482623e`) is
-  an ancestor of the analyzed commit. A workload built for either tests for
-  an existing bug, not a fix regressing.
+  paths specifically. At the time this clustering was written, both were
+  **confirmed still-open defects** — `git merge-base --is-ancestor` found
+  neither fix (`1df605da`; `af851ce4`/`d482623e`) to be an ancestor of the
+  analyzed commit — distinct from `recovery-finish-abort-livelock`/`replica-
+  xmin-monotonicity` in Cluster 2 (regression guards for bugs already fixed
+  on `main`). **Update (2026-07-31): `checkpoint-corrupted-tree-silent-skip`
+  no longer belongs in that bucket** — a third copy of the same fix
+  (`07f9e00a`) has since landed on `main`, so its original framing ("silent
+  skip, still open") is stale; see its own catalog entry for the pivoted
+  crash-loop property now implemented in its place.
+  `recovery-meta-lock-signal-barrier-deadlock`'s open-defect status was not
+  re-checked in this update.
 
 ## Cluster 2: Streaming-standby xmin/livelock family (orioledb#876 / #889)
 

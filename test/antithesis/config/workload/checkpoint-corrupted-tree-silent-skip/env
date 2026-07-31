@@ -1,0 +1,3 @@
+POSTGRES_DB=checkpointcorrupt
+POSTGRES_USER=checkpointcorrupt
+POSTGRES_PASSWORD=pw

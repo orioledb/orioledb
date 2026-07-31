@@ -1,0 +1,31 @@
+volumes:
+  checkpoint-corrupt-data:
+    name: checkpoint-corrupt-data
+
+services:
+  # This property needs direct filesystem access to corrupt one tree's
+  # on-disk root page (no SQL-level API can target that), so PGDATA is
+  # shared with the client via a named volume instead of the container's
+  # private writable layer.
+  test.orioledb:
+    restart: always
+    volumes:
+      - "checkpoint-corrupt-data:/var/lib/postgresql/data"
+
+  checkpoint-corrupted-tree-silent-skip-client:
+    image: "${IMAGE_REPO}checkpoint-corrupted-tree-silent-skip-client:${IMAGE_TAG}"
+    container_name: checkpoint-corrupted-tree-silent-skip-client
+    environment:
+      PGHOST: orioledb
+      PGPORT: "5432"
+      PGDATABASE: "${POSTGRES_DB}"
+      PGUSER: "${POSTGRES_USER}"
+      PGPASSWORD: "${POSTGRES_PASSWORD}"
+      PGDATA_DIR: /var/lib/postgresql/data
+    platform: "${PLATFORM}"
+    build: ./checkpoint-corrupted-tree-silent-skip
+    volumes:
+      - "checkpoint-corrupt-data:/var/lib/postgresql/data"
+    depends_on:
+      test.orioledb:
+        condition: service_healthy

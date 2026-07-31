@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+from antithesis.random import get_random
+
+import helper_common as h
+
+# Fixed fallback only -- first_ always persists a real style choice before
+# singleton_driver_ ever runs (test-commands.md: first_ runs before all
+# other commands), so this path should be unreachable in practice. A plain
+# constant avoids drawing SDK randomness on a code path that shouldn't need
+# it.
+_DEFAULT_STYLE = h.CORRUPTION_STYLES[0]
+
+
+def main():
+    conn = h.connect("corrupt_singleton")
+    try:
+        already = h.load_config(conn, "corrupted", False)
+        if already:
+            print("already corrupted this timeline, nothing to do",
+                  flush=True)
+            return
+
+        style = h.load_config(conn, "corruption_style", _DEFAULT_STYLE)
+        datoid = h.get_datoid(conn)
+        relfilenode = h.get_relfilenode(conn, h.CORRUPT_TABLE)
+
+        h.execute(conn, "CHECKPOINT;")
+        h.execute(
+            conn,
+            f"SELECT orioledb_evict_pages('{h.CORRUPT_TABLE}'::regclass, 999);"
+        )
+
+        files = h.find_target_files(datoid, relfilenode)
+        if not files:
+            print(f"no on-disk files found for {h.CORRUPT_TABLE} "
+                  f"(datoid={datoid} relfilenode={relfilenode}) -- "
+                  "skipping corruption this timeline", flush=True)
+            return
+
+        rng_value = get_random()
+        for path in files:
+            h.corrupt_file(path, style, rng_value)
+
+        h.save_config(conn, "corrupted", True)
+        print(f"corrupted {len(files)} file(s) for {h.CORRUPT_TABLE} "
+              f"(datoid={datoid} relfilenode={relfilenode} style={style})",
+              flush=True)
+
+        # Trigger the first FATAL deterministically rather than waiting on
+        # an automatic checkpoint to happen to land first.
+        try:
+            h.execute(conn, "CHECKPOINT;")
+            h.bump_counter(conn, "probe_attempts", 1)
+            print("forced post-corruption CHECKPOINT completed without "
+                  "losing the connection", flush=True)
+        except h.CONNECTION_LOST_ERRORS as exc:
+            # The probing connection is dead -- reconnect just to record
+            # the outcome, mirroring serial_driver_...-probe's own pattern.
+            try:
+                record_conn = h.connect("corrupt_singleton_record")
+                try:
+                    h.bump_counter(record_conn, "probe_attempts", 1)
+                    h.bump_counter(record_conn, "probe_fatals", 1)
+                finally:
+                    record_conn.close()
+            except h.CONNECTION_LOST_ERRORS:
+                pass
+            print(f"forced post-corruption CHECKPOINT lost its connection "
+                  f"(expected FATAL path): {exc}", flush=True)
+    except h.CONNECTION_LOST_ERRORS as exc:
+        print(f"corrupt step: connection lost before corruption landed, "
+              f"will not retry (singleton_driver_ runs once): {exc}",
+              flush=True)
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001 - best-effort cleanup
+            pass
+
+
+if __name__ == "__main__":
+    main()

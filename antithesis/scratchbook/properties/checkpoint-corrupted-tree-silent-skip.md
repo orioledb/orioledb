@@ -1,6 +1,28 @@
 # checkpoint-corrupted-tree-silent-skip
 
-## Status
+## Update (2026-07-31): fixed on `main`; property pivoted
+
+The original defect described below is now fixed: `07f9e00a` ("FATAL on
+corrupted page file during checkpoint tree load", 2026-07-22) is an ancestor
+of `HEAD` (`git merge-base --is-ancestor 07f9e00a HEAD` confirms it), and
+`evictable_tree_init_meta()` (`src/checkpoint/checkpoint.c:5699-5719`) now
+does `ereport(FATAL, ...)` on both failure branches instead of the `ERROR`
+described throughout this file. The fix's own regression test,
+`test_checkpoint_fatal_on_corrupted_tree`, now exists at
+`test/t/file_operations_test.py:65-119`.
+
+The rest of this file (mechanism trace, investigation log) is preserved
+as-is for historical reference — it accurately describes the bug as it
+existed when written. The catalog entry (`property-catalog.md`) has been
+**pivoted** to test the open question this fix itself raises instead: does
+a persistently corrupted root page cause an unbounded FATAL/restart crash
+loop, since nothing stops the checkpoint from re-attempting the identical
+failing load on every subsequent cycle? See the workload implemented at
+`test/antithesis/checkpoint-corrupted-tree-silent-skip/` and the updated
+catalog entry for the new property statement, invariant, and two SUT-side
+`REACHABLE` markers added at the FATAL call sites.
+
+## Status (original finding, superseded above)
 
 **Confirmed open/unfixed at the analyzed commit `a975c702156cd449e9c0a8db6f8d9bf5bca4537d`.**
 This is Task B, item 2, of a follow-up gap-filling pass: a checkpoint that can

@@ -1,7 +1,7 @@
 ---
 sut_path: /Users/artur/supabase/orioledb
-commit: a975c702156cd449e9c0a8db6f8d9bf5bca4537d
-updated: 2026-07-29
+commit: 8d513bb4c5ccaf27be34aa8bfe88ef3a06cabc8c
+updated: 2026-07-31
 external_references:
   - path: doc/
     why: In-repo documentation site (doc/architecture/*.mdx, doc/usage/*.mdx, doc/contributing/*.mdx) is the primary source of claimed guarantees and product framing; treated as leads to validate, not facts.
@@ -234,32 +234,44 @@ against a fix regressing.
 - Does this same deadlock shape recur for any other `WaitForProcSignalBarrier` call reachable from a "regular" redo function's replay path while `oTablesMetaLock` is held open, or is `dbase_redo` the only trigger reachable today? `(partial: mechanism generalized correctly; exhaustive call-site enumeration not performed)`
 - Is the fix on `origin/recovery-meta-buffering` actively targeted for merge, or stalled? Affects whether this should be framed as "regression guard, imminent fix" vs. "open defect, no active remediation." `(needs human input)`
 
-### checkpoint-corrupted-tree-silent-skip — A checkpoint can silently exclude a corrupted tree from sys-tree bookkeeping and still report success (confirmed open defect, not a regression target)
+### checkpoint-corrupted-tree-silent-skip — A checkpoint can silently exclude a corrupted tree from sys-tree bookkeeping and still report success (fixed on `main`; property pivoted to the fix's own open crash-loop question)
 
-**Gap-fill addition (evaluation G5(b), Wildcard lens).** Found via the same
-branch sweep as the property above; **confirmed open/unfixed at the analyzed
-commit** — two independent, identically-shaped fix commits exist on two
-unmerged branches (`af851ce4` on `origin/checkpoint-io-error-fatal`,
-`d482623e` on `origin/checkpoint_avoid_error_loops`), and `git merge-base
---is-ancestor` confirms neither is an ancestor of `a975c702`. As with the
-entry above, **this is a live, still-open defect** — distinct from this
-category's several regression-guard entries for already-fixed bugs; a
-workload here tests for an existing gap, not a fix regressing.
+**Gap-fill addition (evaluation G5(b), Wildcard lens).** Originally found via
+a branch sweep, sourced from two unmerged branches (`af851ce4` on
+`origin/checkpoint-io-error-fatal`, `d482623e` on
+`origin/checkpoint_avoid_error_loops`) that were not ancestors of the
+catalog's original analyzed commit (`a975c702`). **Superseded finding
+(2026-07-31): a third copy of the identical fix, `07f9e00a` ("FATAL on
+corrupted page file during checkpoint tree load", 2026-07-22), is now an
+ancestor of `HEAD` — `git merge-base --is-ancestor 07f9e00a HEAD` confirms
+it — and direct code reading confirms `evictable_tree_init_meta()`
+(`src/checkpoint/checkpoint.c:5699-5719`) now does `ereport(FATAL, ...)` on
+both the checksum-failure and generic-I/O-failure branches, not the `ERROR`
+this entry originally described. The fix's own regression test,
+`test_checkpoint_fatal_on_corrupted_tree`, is present at
+`test/t/file_operations_test.py:65-119`. The original property — "a
+checkpoint silently drops a corrupted tree from bookkeeping and still
+reports success" — **no longer holds** and is not a useful thing to build a
+workload against (it would pass vacuously). Per the fix's own third open
+question below, the property has been **pivoted** to test what the `FATAL`
+remedy itself risks: an unbounded crash loop on repeated checkpoint attempts
+against the same persistently corrupted tree.
 
 | | |
 |---|---|
-| **Type** | Safety |
-| **Priority** | High — confirmed open, unfixed defect: a checkpoint can silently lose crash-consistency coverage for a tree |
-| **Property** | A checkpoint never completes and reports success while having silently excluded a tree from `SYS_TREES_SHARED_ROOT_INFO` bookkeeping due to an on-disk read failure (checksum mismatch or I/O error) during that tree's root-page load — either the checkpoint fails loudly and attributably, or the affected tree's exclusion is recorded somewhere a monitoring/verification pass could detect it; the exclusion must never be indistinguishable from "this tree was legitimately, benignly dropped mid-checkpoint by a concurrent `DROP`/`TRUNCATE`" (the case `o_btree_load_shmem_internal()`'s early-return comment was actually written for). |
-| **Invariant** | `Always(checkpoint_failure_surfaces_loudly_or_is_recorded)`: after deliberately corrupting an on-disk root page (truncate/bit-flip a data file, mirroring the unmerged fix's own regression test) and forcing a checkpoint, assert that either the process terminates with a clear, corruption-attributed `FATAL`, or a subsequent `orioledb_tbl_check()`/`verify_orioledb()` pass flags the affected tree as inconsistent — today, as confirmed by direct tracing, **neither holds**: the process continues (`ERROR` only, not `FATAL`, in `evictable_tree_init_meta()`) and the silent exclusion is indistinguishable from benign concurrent deletion by any existing check. |
-| **Antithesis Angle** | Direct disk-level fault injection (bit-flip or zero-fill a B-tree data file's root page while on disk but not buffer-resident) timed just before a `CHECKPOINT` needs to load that tree's root, repeated across multiple checkpoint cycles — reachable on the existing single-node harness (no standby needed), with `orioledb_checksums_enabled` at its default (`true`, never overridden in `test/antithesis/`). Pair a periodic forced `CHECKPOINT` with a periodic structural check of every table created, to surface a tree that quietly stopped being checkpointed N cycles ago. |
-| **Why It Matters** | A **silent, permanent loss of checkpoint coverage** for a corrupted tree, masked as checkpoint success — the "wrong query results or lost writes" failure class `sut-analysis.md` §10 calls worst-case for a database engine, specialized to "a whole tree's crash-consistency guarantee silently degrades and nothing says so." The root-cause mechanism was independently re-traced against current `a975c702` code line-by-line (not merely accepted from the fix commits' own message): `evictable_tree_init_meta()`'s `ERROR` fires *before* `SYS_TREES_SHARED_ROOT_INFO` is (re-)inserted, so the next checkpoint's `o_btree_load_shmem_internal()` sees a missing entry, believes it's the benign concurrent-deletion case, and silently gives up — with the `false` return propagating unremarked through `perform_writeback_and_relock()`/`checkpoint_btree()`. |
+| **Type** | Liveness (availability) — retargeted from the original Safety framing |
+| **Priority** | High — the original defect is fixed, but the fix's own chosen remedy (`FATAL`, i.e. crash the instance) opens exactly the crash-loop question `sut-analysis.md` §6 already documents for other subsystems, and no test in this repo checks repeated-restart behavior |
+| **Property** | A single, permanently corrupted B-tree root page does not cause the whole instance to `FATAL`, restart, and `FATAL` again indefinitely on every subsequent checkpoint attempt against that same tree — the instance either stops re-attempting the load after a bounded number of failures, or ordinary work against unrelated tables keeps making progress despite the repeated restarts. |
+| **Invariant** | Workload-side: `Always(fatal_count <= MAX_TOLERATED_FATAL_PROBES)` where `fatal_count` counts deliberate, repeated `CHECKPOINT` probes issued directly against the corrupted tree that lose their connection (a workload-chosen tolerance of 2, not a SUT-derived limit — see `test/antithesis/checkpoint-corrupted-tree-silent-skip/helper_common.py`), paired with `Reachable(...)` confirming the FATAL path was actually hit at least once. SUT-side: two `REACHABLE(...)` markers now sit at the two `ereport(FATAL, ...)` call sites in `evictable_tree_init_meta()` (`src/checkpoint/checkpoint.c`), confirming which specific failure branch (checksum vs. generic I/O) is exercised, independent of the workload's own inference from lost connections. |
+| **Antithesis Angle** | Single-node, no standby needed. A one-time `singleton_driver_` checkpoints then evicts a target table, corrupts its on-disk root page directly via a PGDATA volume shared with the `orioledb` container (truncate-to-zero, truncate-partial, or single-byte-flip, swarmed per timeline — no SQL-level API can target one tree's page precisely enough, so this can't be left to Antithesis's generic disk-fault injection), then forces the first `CHECKPOINT`. A `serial_driver_` then repeatedly re-issues `CHECKPOINT` directly against the same corrupted tree — deliberately re-triggering the exact mechanism rather than waiting on chance overlap with automatic checkpoints or ambient container-kill faults, which can't be attributed to this specific bug. A `parallel_driver_` keeps ordinary DML flowing against a separate, uncorrupted table to check whether the crash loop takes the whole instance down with it. Implemented at `test/antithesis/checkpoint-corrupted-tree-silent-skip/`. |
+| **Why It Matters** | The team's own two-branch fix history (two differently-named branches attempting the same remedy) suggests active iteration on this exact tradeoff, and the chosen remedy trades a silent bookkeeping gap for a hard crash — worth confirming that trade doesn't recreate a worse failure mode (permanent unavailability from one bad page) than the one it fixed. |
+| **Implementation status** | **Implemented** — `test/antithesis/checkpoint-corrupted-tree-silent-skip/` (client `checkpoint-corrupted-tree-silent-skip-client`, config `config/workload/checkpoint-corrupted-tree-silent-skip`), plus two SUT-side `REACHABLE` markers added in `src/checkpoint/checkpoint.c`. Not yet run through `snouty validate` with built images — see the workload's own files for that follow-up. |
 
 **Open Questions:**
 
-- Does `orioledb_tbl_check()`/`verify_orioledb()`, run independently of a checkpoint, actually detect that a tree's `SYS_TREES_SHARED_ROOT_INFO` entry is stale/missing relative to its last-known-good checkpoint — i.e., is there any existing oracle that would catch this today, even without a fix? `(needs further investigation — determines whether this property needs new instrumentation or can reuse the existing structural-check oracle)`
-- Is the unmerged fix's chosen remedy (escalate to `FATAL`, i.e. crash the instance) the intended long-term approach, or a stopgap while a more surgical bookkeeping fix is pending? The two differently-named branches suggest active iteration on this exact tradeoff. `(needs human input)`
-- Does the `FATAL` remedy reintroduce a crash-loop risk (`sut-analysis.md` §6's already-documented pattern) if the underlying corruption is persistent and re-checkpointed on every restart? Not traced — the fix's own test only checks the first FATAL/clean shutdown, not repeated-restart behavior. `(needs further investigation)`
+- Is `07f9e00a`'s `FATAL` remedy the team's intended long-term approach for this specific failure, or a stopgap? Not re-resolved by this pass — only its presence on `main` and its code shape were confirmed. `(needs human input)`
+- What is the actual bound on `MAX_TOLERATED_FATAL_PROBES` that the team would consider acceptable, if any — the workload's tolerance of 2 is a placeholder choice, not a value sourced from the SUT or team guidance. `(needs human input)`
+- Does anything in the codebase outside `evictable_tree_init_meta()`'s immediate callers ever quarantine, drop, or otherwise stop re-attempting a load against a tree that has already FATALed the instance once for the same reason? Not traced in this pass. `(needs further investigation)`
 
 ---
 

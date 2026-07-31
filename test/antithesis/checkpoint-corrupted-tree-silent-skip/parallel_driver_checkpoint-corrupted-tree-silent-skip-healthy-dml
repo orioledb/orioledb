@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+import os
+
+import psycopg2
+from antithesis.assertions import reachable
+from antithesis.random import get_random, random_choice
+
+import helper_common as h
+
+
+def dml_unit(conn, action):
+    if action == "insert":
+        h.execute(
+            conn, f"INSERT INTO {h.HEALTHY_TABLE} VALUES "
+            f"(nextval('{h.HEALTHY_SEQUENCE}'), 0);")
+    elif action == "update":
+        row = h.execute(
+            conn, f"SELECT id FROM {h.HEALTHY_TABLE} ORDER BY random() LIMIT 1")
+        if not row:
+            return
+        (row_id,) = row[0]
+        h.execute(
+            conn, f"UPDATE {h.HEALTHY_TABLE} SET val = val + 1 "
+            f"WHERE id = %s;", (row_id,))
+    elif action == "delete":
+        row = h.execute(
+            conn, f"SELECT id FROM {h.HEALTHY_TABLE} ORDER BY random() LIMIT 1")
+        if not row:
+            return
+        (row_id,) = row[0]
+        h.execute(conn, f"DELETE FROM {h.HEALTHY_TABLE} WHERE id = %s;",
+                  (row_id,))
+
+
+def new_conn():
+    conn = h.connect(f"ckpt_healthy_dml_{os.getpid()}_{get_random()}")
+    conn.autocommit = True
+    return conn
+
+
+def main():
+    conn = new_conn()
+    try:
+        try:
+            batch_menu = h.load_batch_menu(conn)
+            corrupted_before_batch = h.load_config(conn, "corrupted", False)
+        except h.CONNECTION_LOST_ERRORS:
+            return
+        batch_size = random_choice(batch_menu)
+        committed_any = False
+
+        for _ in range(batch_size):
+            action = random_choice(["insert", "update", "delete"])
+            try:
+                dml_unit(conn, action)
+                committed_any = True
+            except h.CONNECTION_LOST_ERRORS as exc:
+                reachable(
+                    "checkpoint-corrupted-tree-silent-skip healthy-table "
+                    "DML unit observed a lost connection",
+                    {"action": action, "error": str(exc)},
+                )
+                return
+            except psycopg2.Error as exc:
+                print(f"dml_unit({action}) failed, reconnecting: {exc}",
+                      flush=True)
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001 - best-effort cleanup
+                    pass
+                conn = new_conn()
+
+        if committed_any and corrupted_before_batch:
+            reachable(
+                "ordinary DML against o_ckpt_healthy still commits after "
+                "the corrupted tree has been introduced elsewhere in the "
+                "same instance",
+                {"batch_size": batch_size},
+            )
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001 - best-effort cleanup
+            pass
+
+
+if __name__ == "__main__":
+    main()

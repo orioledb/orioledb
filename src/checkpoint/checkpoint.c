@@ -44,6 +44,7 @@
 #include "tableam/toast.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
+#include "utils/antithesis_sdk.h"
 #include "utils/page_pool.h"
 #include "utils/seq_buf.h"
 #include "utils/stopevent.h"
@@ -5786,17 +5787,23 @@ evictable_tree_init_meta(BTreeDescr *desc, EvictedTreeData **evicted_data,
 		{
 			unlock_page(desc->rootInfo.rootPageBlkno);
 			if (read_result == OReadPageResultChecksumFailed)
+			{
+				REACHABLE("checkpoint tree-load FATAL: corrupted rootPageBlkno checksum (evictable_tree_init_meta)");
 				ereport(FATAL, (errcode(ERRCODE_DATA_CORRUPTED),
 								errmsg("invalid rootPageBlkno page in %s: %m",
 									   btree_smgr_filename(desc,
 														   DOWNLINK_GET_DISK_OFF(file_header.rootDownlink),
 														   chkp_num))));
+			}
 			else
+			{
+				REACHABLE("checkpoint tree-load FATAL: rootPageBlkno read failure, not checksum (evictable_tree_init_meta)");
 				ereport(FATAL, (errcode_for_file_access(),
 								errmsg("could not read rootPageBlkno page from %s: %m",
 									   btree_smgr_filename(desc,
 														   DOWNLINK_GET_DISK_OFF(file_header.rootDownlink),
 														   chkp_num))));
+			}
 		}
 
 		put_page_image(desc->rootInfo.rootPageBlkno, buf);

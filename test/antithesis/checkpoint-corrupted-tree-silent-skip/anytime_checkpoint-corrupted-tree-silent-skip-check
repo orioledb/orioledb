@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+import helper_common as h
+
+
+def main():
+    conn = None
+    try:
+        conn = h.connect("anytime_check")
+        h.assert_bounded_crash_loop(conn, "anytime")
+    except h.CONNECTION_LOST_ERRORS as exc:
+        # The system is most likely mid-crash/recovery right now -- not a
+        # bug on its own; the next anytime_/finally_ invocation checks
+        # again once it's back up.
+        print(f"anytime check skipped, connection lost: {exc}", flush=True)
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 - best-effort cleanup
+                pass
+
+
+if __name__ == "__main__":
+    main()

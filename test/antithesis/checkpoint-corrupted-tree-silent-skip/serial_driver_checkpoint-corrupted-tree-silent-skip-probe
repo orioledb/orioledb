@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+from antithesis.assertions import reachable
+
+import helper_common as h
+
+
+def main():
+    conn = h.connect("checkpoint_probe")
+    try:
+        try:
+            corrupted = h.load_config(conn, "corrupted", False)
+            start_before = h.postmaster_start_time(conn)
+        except h.CONNECTION_LOST_ERRORS:
+            # Not up yet (e.g. right after a restart) -- Antithesis will
+            # run us again.
+            return
+
+        h.maybe_record_restart(conn, start_before)
+
+        if not corrupted:
+            return  # nothing to probe yet this timeline
+
+        try:
+            h.execute(conn, "CHECKPOINT;")
+            h.bump_counter(conn, "probe_attempts", 1)
+        except h.CONNECTION_LOST_ERRORS as exc:
+            # Reconnect just to record the outcome -- the probing
+            # connection itself is dead, but the config table's state
+            # survives the crash like any other committed row.
+            try:
+                record_conn = h.connect("checkpoint_probe_record")
+                try:
+                    h.bump_counter(record_conn, "probe_attempts", 1)
+                    h.bump_counter(record_conn, "probe_fatals", 1)
+                finally:
+                    record_conn.close()
+            except h.CONNECTION_LOST_ERRORS:
+                # Can't even reconnect to record this one -- the next
+                # probe invocation's maybe_record_restart() will still
+                # catch the restart itself.
+                pass
+            reachable(
+                "checkpoint-corrupted-tree-silent-skip: a deliberate "
+                "CHECKPOINT against a corrupted tree lost its connection, "
+                "consistent with evictable_tree_init_meta's FATAL on "
+                "root-page load failure",
+                {"error": str(exc)},
+            )
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001 - best-effort cleanup
+            pass
+
+
+if __name__ == "__main__":
+    main()

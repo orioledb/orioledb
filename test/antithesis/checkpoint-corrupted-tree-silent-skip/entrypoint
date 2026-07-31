@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+# This container only hosts test commands for Antithesis to invoke
+# (see /opt/antithesis/test/v1/checkpoint-corrupted-tree-silent-skip/); it
+# has no long-running process of its own, so just stay alive.
+exec sleep infinity
