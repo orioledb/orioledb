@@ -39,7 +39,13 @@ make -sj `nproc` install
 make -C contrib -sj `nproc`
 make -C contrib -sj `nproc` install
 
-if [ $PG_VERSION = "17" ]; then
+# Install the injection_points test module (SQL helpers to attach/detach
+# points) on every PG version that has injection points.  The ci_fixes stress
+# hunt runs pg_tests on PG18, so a PG17-only gate left the module (and thus
+# injection points) unavailable there.  (The --enable-injection-points config
+# flag is only added for the pg_tests check types, and is simply skipped on
+# PG16, so this only ever matters for PG17/18.)
+if [ $PG_VERSION = "17" ] || [ $PG_VERSION = "18" ]; then
 	make -C src/test/modules/injection_points -sj `nproc` install
 fi
 cd ..
