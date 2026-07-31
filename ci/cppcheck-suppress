@@ -5,3 +5,5 @@ nullPointerRedundantCheck:*
 integerOverflowCond:*/atomics/generic.h
 # Vendored verbatim from PostgreSQL's lib/radixtree.h; not ours to audit.
 *:*/lib/o_radixtree.h
+# Vendored Antithesis SDK; project code uses utils/antithesis.h instead.
+*:*/lib/antithesis_sdk_c.h
