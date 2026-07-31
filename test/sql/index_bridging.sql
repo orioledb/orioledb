@@ -933,6 +933,309 @@ INSERT INTO o_table_filled VALUES ('key1', 'some_data');
 CREATE INDEX idx_filled_data ON o_table_filled USING brin(data);
 DROP TABLE o_table_filled;
 
+---
+--- Bridge DML: basic DELETE and UPDATE
+---
+
+CREATE TABLE o_bridge_dml_gist (
+	id int NOT NULL PRIMARY KEY, pos point, val int
+) USING orioledb;
+INSERT INTO o_bridge_dml_gist
+	SELECT i, point(i, i), i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_dml_gist USING gist(pos);
+
+SELECT count(*) FROM o_bridge_dml_gist;
+DELETE FROM o_bridge_dml_gist WHERE id BETWEEN 200 AND 250;
+SELECT count(*) FROM o_bridge_dml_gist;
+UPDATE o_bridge_dml_gist SET val = val + 10000 WHERE id BETWEEN 100 AND 150;
+SELECT count(*) FROM o_bridge_dml_gist WHERE val > 10000;
+SELECT count(*) FROM o_bridge_dml_gist;
+
+CREATE TABLE o_bridge_dml_spgist (
+	id int NOT NULL PRIMARY KEY, pos point, val int
+) USING orioledb;
+INSERT INTO o_bridge_dml_spgist
+	SELECT i, point(i, i), i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_dml_spgist USING spgist(pos);
+
+SELECT count(*) FROM o_bridge_dml_spgist;
+DELETE FROM o_bridge_dml_spgist WHERE id BETWEEN 200 AND 250;
+SELECT count(*) FROM o_bridge_dml_spgist;
+UPDATE o_bridge_dml_spgist SET val = val + 10000 WHERE id BETWEEN 100 AND 150;
+SELECT count(*) FROM o_bridge_dml_spgist WHERE val > 10000;
+SELECT count(*) FROM o_bridge_dml_spgist;
+
+CREATE TABLE o_bridge_dml_gin (
+	id int NOT NULL PRIMARY KEY, tags int[], val int
+) USING orioledb;
+INSERT INTO o_bridge_dml_gin
+	SELECT i, ARRAY[i, i+1], i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_dml_gin USING gin(tags);
+
+SELECT count(*) FROM o_bridge_dml_gin;
+DELETE FROM o_bridge_dml_gin WHERE id BETWEEN 200 AND 250;
+SELECT count(*) FROM o_bridge_dml_gin;
+UPDATE o_bridge_dml_gin SET val = val + 10000 WHERE id BETWEEN 100 AND 150;
+SELECT count(*) FROM o_bridge_dml_gin WHERE val > 10000;
+SELECT count(*) FROM o_bridge_dml_gin;
+
+CREATE TABLE o_bridge_dml_btree (
+	id int NOT NULL PRIMARY KEY, ival int, val int
+) USING orioledb;
+INSERT INTO o_bridge_dml_btree
+	SELECT i, i, i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_dml_btree USING btree(ival) WITH (orioledb_index=off);
+
+SELECT count(*) FROM o_bridge_dml_btree;
+DELETE FROM o_bridge_dml_btree WHERE id BETWEEN 200 AND 250;
+SELECT count(*) FROM o_bridge_dml_btree;
+UPDATE o_bridge_dml_btree SET val = val + 10000 WHERE id BETWEEN 100 AND 150;
+SELECT count(*) FROM o_bridge_dml_btree WHERE val > 10000;
+SELECT count(*) FROM o_bridge_dml_btree;
+
+---
+--- Bridge DML: multipage (wide rows force page splits)
+---
+
+CREATE TABLE o_bridge_big_gist (
+	id int NOT NULL PRIMARY KEY, pad text, pos point
+) USING orioledb;
+INSERT INTO o_bridge_big_gist
+	SELECT i, repeat('x', 200), point(i, i) FROM generate_series(1, 2000) i;
+CREATE INDEX ON o_bridge_big_gist USING gist(pos);
+
+SELECT count(*) FROM o_bridge_big_gist;
+DELETE FROM o_bridge_big_gist WHERE id BETWEEN 500 AND 1500;
+SELECT count(*) FROM o_bridge_big_gist;
+UPDATE o_bridge_big_gist SET pad = 'updated' WHERE id BETWEEN 1 AND 200;
+SELECT count(*) FROM o_bridge_big_gist WHERE pad = 'updated';
+
+CREATE TABLE o_bridge_big_spgist (
+	id int NOT NULL PRIMARY KEY, pad text, pos point
+) USING orioledb;
+INSERT INTO o_bridge_big_spgist
+	SELECT i, repeat('x', 200), point(i, i) FROM generate_series(1, 2000) i;
+CREATE INDEX ON o_bridge_big_spgist USING spgist(pos);
+
+SELECT count(*) FROM o_bridge_big_spgist;
+DELETE FROM o_bridge_big_spgist WHERE id BETWEEN 500 AND 1500;
+SELECT count(*) FROM o_bridge_big_spgist;
+UPDATE o_bridge_big_spgist SET pad = 'updated' WHERE id BETWEEN 1 AND 200;
+SELECT count(*) FROM o_bridge_big_spgist WHERE pad = 'updated';
+
+CREATE TABLE o_bridge_big_gin (
+	id int NOT NULL PRIMARY KEY, pad text, tags int[]
+) USING orioledb;
+INSERT INTO o_bridge_big_gin
+	SELECT i, repeat('x', 200), ARRAY[i, i+1] FROM generate_series(1, 2000) i;
+CREATE INDEX ON o_bridge_big_gin USING gin(tags);
+
+SELECT count(*) FROM o_bridge_big_gin;
+DELETE FROM o_bridge_big_gin WHERE id BETWEEN 500 AND 1500;
+SELECT count(*) FROM o_bridge_big_gin;
+UPDATE o_bridge_big_gin SET pad = 'updated' WHERE id BETWEEN 1 AND 200;
+SELECT count(*) FROM o_bridge_big_gin WHERE pad = 'updated';
+
+CREATE TABLE o_bridge_big_btree (
+	id int NOT NULL PRIMARY KEY, pad text, ival int
+) USING orioledb;
+INSERT INTO o_bridge_big_btree
+	SELECT i, repeat('x', 200), i FROM generate_series(1, 2000) i;
+CREATE INDEX ON o_bridge_big_btree USING btree(ival) WITH (orioledb_index=off);
+
+SELECT count(*) FROM o_bridge_big_btree;
+DELETE FROM o_bridge_big_btree WHERE id BETWEEN 500 AND 1500;
+SELECT count(*) FROM o_bridge_big_btree;
+UPDATE o_bridge_big_btree SET pad = 'updated' WHERE id BETWEEN 1 AND 200;
+SELECT count(*) FROM o_bridge_big_btree WHERE pad = 'updated';
+
+---
+--- Bridge DML: composite primary key
+---
+
+CREATE TABLE o_bridge_cpk_gist (
+	a int NOT NULL, b int NOT NULL, pos point, val int,
+	PRIMARY KEY (a, b)
+) USING orioledb;
+INSERT INTO o_bridge_cpk_gist
+	SELECT i / 10, i % 10, point(i, i), i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_cpk_gist USING gist(pos);
+
+SELECT count(*) FROM o_bridge_cpk_gist;
+DELETE FROM o_bridge_cpk_gist WHERE a BETWEEN 20 AND 30;
+SELECT count(*) FROM o_bridge_cpk_gist;
+UPDATE o_bridge_cpk_gist SET val = val + 10000 WHERE a BETWEEN 10 AND 15;
+SELECT count(*) FROM o_bridge_cpk_gist WHERE val > 10000;
+SELECT count(*) FROM o_bridge_cpk_gist;
+
+CREATE TABLE o_bridge_cpk_spgist (
+	a int NOT NULL, b int NOT NULL, pos point, val int,
+	PRIMARY KEY (a, b)
+) USING orioledb;
+INSERT INTO o_bridge_cpk_spgist
+	SELECT i / 10, i % 10, point(i, i), i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_cpk_spgist USING spgist(pos);
+
+SELECT count(*) FROM o_bridge_cpk_spgist;
+DELETE FROM o_bridge_cpk_spgist WHERE a BETWEEN 20 AND 30;
+SELECT count(*) FROM o_bridge_cpk_spgist;
+UPDATE o_bridge_cpk_spgist SET val = val + 10000 WHERE a BETWEEN 10 AND 15;
+SELECT count(*) FROM o_bridge_cpk_spgist WHERE val > 10000;
+SELECT count(*) FROM o_bridge_cpk_spgist;
+
+CREATE TABLE o_bridge_cpk_gin (
+	a int NOT NULL, b int NOT NULL, tags int[], val int,
+	PRIMARY KEY (a, b)
+) USING orioledb;
+INSERT INTO o_bridge_cpk_gin
+	SELECT i / 10, i % 10, ARRAY[i, i+1], i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_cpk_gin USING gin(tags);
+
+SELECT count(*) FROM o_bridge_cpk_gin;
+DELETE FROM o_bridge_cpk_gin WHERE a BETWEEN 20 AND 30;
+SELECT count(*) FROM o_bridge_cpk_gin;
+UPDATE o_bridge_cpk_gin SET val = val + 10000 WHERE a BETWEEN 10 AND 15;
+SELECT count(*) FROM o_bridge_cpk_gin WHERE val > 10000;
+SELECT count(*) FROM o_bridge_cpk_gin;
+
+CREATE TABLE o_bridge_cpk_btree (
+	a int NOT NULL, b int NOT NULL, ival int, val int,
+	PRIMARY KEY (a, b)
+) USING orioledb;
+INSERT INTO o_bridge_cpk_btree
+	SELECT i / 10, i % 10, i, i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_cpk_btree USING btree(ival) WITH (orioledb_index=off);
+
+SELECT count(*) FROM o_bridge_cpk_btree;
+DELETE FROM o_bridge_cpk_btree WHERE a BETWEEN 20 AND 30;
+SELECT count(*) FROM o_bridge_cpk_btree;
+UPDATE o_bridge_cpk_btree SET val = val + 10000 WHERE a BETWEEN 10 AND 15;
+SELECT count(*) FROM o_bridge_cpk_btree WHERE val > 10000;
+SELECT count(*) FROM o_bridge_cpk_btree;
+
+---
+--- Bridge DML: UPDATE of the indexed column
+---
+
+CREATE TABLE o_bridge_updidx_gist (
+	id int NOT NULL PRIMARY KEY, pos point, val int
+) USING orioledb;
+INSERT INTO o_bridge_updidx_gist
+	SELECT i, point(i, i), i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_updidx_gist USING gist(pos);
+
+UPDATE o_bridge_updidx_gist SET pos = point(id + 1000, id + 1000)
+	WHERE id BETWEEN 100 AND 200;
+SELECT count(*) FROM o_bridge_updidx_gist WHERE id BETWEEN 100 AND 200;
+
+CREATE TABLE o_bridge_updidx_spgist (
+	id int NOT NULL PRIMARY KEY, pos point, val int
+) USING orioledb;
+INSERT INTO o_bridge_updidx_spgist
+	SELECT i, point(i, i), i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_updidx_spgist USING spgist(pos);
+
+UPDATE o_bridge_updidx_spgist SET pos = point(id + 1000, id + 1000)
+	WHERE id BETWEEN 100 AND 200;
+SELECT count(*) FROM o_bridge_updidx_spgist WHERE id BETWEEN 100 AND 200;
+
+CREATE TABLE o_bridge_updidx_gin (
+	id int NOT NULL PRIMARY KEY, tags int[], val int
+) USING orioledb;
+INSERT INTO o_bridge_updidx_gin
+	SELECT i, ARRAY[i, i+1], i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_updidx_gin USING gin(tags);
+
+UPDATE o_bridge_updidx_gin SET tags = ARRAY[id + 1000]
+	WHERE id BETWEEN 100 AND 200;
+SELECT count(*) FROM o_bridge_updidx_gin WHERE id BETWEEN 100 AND 200;
+
+CREATE TABLE o_bridge_updidx_btree (
+	id int NOT NULL PRIMARY KEY, ival int, val int
+) USING orioledb;
+INSERT INTO o_bridge_updidx_btree
+	SELECT i, i, i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_updidx_btree USING btree(ival) WITH (orioledb_index=off);
+
+UPDATE o_bridge_updidx_btree SET ival = ival + 1000
+	WHERE id BETWEEN 100 AND 200;
+SELECT count(*) FROM o_bridge_updidx_btree WHERE id BETWEEN 100 AND 200;
+
+-- Secondary bridged index query tests: verify that queries through the
+-- bridged secondary index return correct results after DML on the table.
+
+CREATE TABLE o_bridge_sec_gist (
+	id int NOT NULL PRIMARY KEY,
+	pos point,
+	val int
+) USING orioledb;
+INSERT INTO o_bridge_sec_gist
+	SELECT i, point(i, i), i FROM generate_series(1, 300) i;
+CREATE INDEX ON o_bridge_sec_gist USING gist(pos);
+
+SET enable_seqscan = off;
+SELECT count(*) FROM o_bridge_sec_gist WHERE pos <@ box '(0,0),(300,300)';
+DELETE FROM o_bridge_sec_gist WHERE id BETWEEN 200 AND 250;
+SELECT count(*) FROM o_bridge_sec_gist WHERE pos <@ box '(0,0),(300,300)';
+UPDATE o_bridge_sec_gist SET pos = point(id + 1000, id + 1000)
+	WHERE id BETWEEN 100 AND 150;
+SELECT count(*) FROM o_bridge_sec_gist WHERE pos <@ box '(0,0),(300,300)';
+RESET enable_seqscan;
+
+CREATE TABLE o_bridge_sec_spgist (
+	id int NOT NULL PRIMARY KEY,
+	pos point,
+	val int
+) USING orioledb;
+INSERT INTO o_bridge_sec_spgist
+	SELECT i, point(i, i), i FROM generate_series(1, 300) i;
+CREATE INDEX ON o_bridge_sec_spgist USING spgist(pos);
+
+SET enable_seqscan = off;
+SELECT count(*) FROM o_bridge_sec_spgist WHERE pos <@ box '(0,0),(300,300)';
+DELETE FROM o_bridge_sec_spgist WHERE id BETWEEN 200 AND 250;
+SELECT count(*) FROM o_bridge_sec_spgist WHERE pos <@ box '(0,0),(300,300)';
+UPDATE o_bridge_sec_spgist SET pos = point(id + 1000, id + 1000)
+	WHERE id BETWEEN 100 AND 150;
+SELECT count(*) FROM o_bridge_sec_spgist WHERE pos <@ box '(0,0),(300,300)';
+RESET enable_seqscan;
+
+CREATE TABLE o_bridge_sec_gin (
+	id int NOT NULL PRIMARY KEY,
+	tags int[],
+	val int
+) USING orioledb;
+INSERT INTO o_bridge_sec_gin
+	SELECT i, ARRAY[i, i+1], i FROM generate_series(1, 300) i;
+CREATE INDEX ON o_bridge_sec_gin USING gin(tags);
+
+SET enable_seqscan = off;
+SELECT count(*) FROM o_bridge_sec_gin WHERE tags @> ARRAY[150];
+DELETE FROM o_bridge_sec_gin WHERE id BETWEEN 200 AND 250;
+SELECT count(*) FROM o_bridge_sec_gin WHERE tags @> ARRAY[150];
+UPDATE o_bridge_sec_gin SET tags = ARRAY[id + 1000]
+	WHERE id BETWEEN 100 AND 150;
+SELECT count(*) FROM o_bridge_sec_gin WHERE tags @> ARRAY[150];
+RESET enable_seqscan;
+
+CREATE TABLE o_bridge_sec_btree (
+	id int NOT NULL PRIMARY KEY,
+	ival int,
+	val int
+) USING orioledb;
+INSERT INTO o_bridge_sec_btree
+	SELECT i, i, i FROM generate_series(1, 300) i;
+CREATE INDEX ON o_bridge_sec_btree USING btree(ival) WITH (orioledb_index=off);
+
+SET enable_seqscan = off;
+SELECT count(*) FROM o_bridge_sec_btree WHERE ival BETWEEN 100 AND 200;
+DELETE FROM o_bridge_sec_btree WHERE id BETWEEN 150 AND 180;
+SELECT count(*) FROM o_bridge_sec_btree WHERE ival BETWEEN 100 AND 200;
+UPDATE o_bridge_sec_btree SET ival = ival + 1000
+	WHERE id BETWEEN 100 AND 120;
+SELECT count(*) FROM o_bridge_sec_btree WHERE ival BETWEEN 100 AND 200;
+RESET enable_seqscan;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;

@@ -4460,9 +4460,617 @@ CREATE INDEX idx_filled_data ON o_table_filled USING brin(data);
 NOTICE:  index bridging is enabled for orioledb table 'o_table_filled'
 DETAIL:  index access method 'brin' is supported only via index bridging for OrioleDB table
 DROP TABLE o_table_filled;
+---
+--- Bridge DML: basic DELETE and UPDATE
+---
+CREATE TABLE o_bridge_dml_gist (
+	id int NOT NULL PRIMARY KEY, pos point, val int
+) USING orioledb;
+INSERT INTO o_bridge_dml_gist
+	SELECT i, point(i, i), i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_dml_gist USING gist(pos);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_dml_gist'
+DETAIL:  index access method 'gist' is supported only via index bridging for OrioleDB table
+SELECT count(*) FROM o_bridge_dml_gist;
+ count 
+-------
+   500
+(1 row)
+
+DELETE FROM o_bridge_dml_gist WHERE id BETWEEN 200 AND 250;
+SELECT count(*) FROM o_bridge_dml_gist;
+ count 
+-------
+   449
+(1 row)
+
+UPDATE o_bridge_dml_gist SET val = val + 10000 WHERE id BETWEEN 100 AND 150;
+SELECT count(*) FROM o_bridge_dml_gist WHERE val > 10000;
+ count 
+-------
+    51
+(1 row)
+
+SELECT count(*) FROM o_bridge_dml_gist;
+ count 
+-------
+   449
+(1 row)
+
+CREATE TABLE o_bridge_dml_spgist (
+	id int NOT NULL PRIMARY KEY, pos point, val int
+) USING orioledb;
+INSERT INTO o_bridge_dml_spgist
+	SELECT i, point(i, i), i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_dml_spgist USING spgist(pos);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_dml_spgist'
+DETAIL:  index access method 'spgist' is supported only via index bridging for OrioleDB table
+SELECT count(*) FROM o_bridge_dml_spgist;
+ count 
+-------
+   500
+(1 row)
+
+DELETE FROM o_bridge_dml_spgist WHERE id BETWEEN 200 AND 250;
+SELECT count(*) FROM o_bridge_dml_spgist;
+ count 
+-------
+   449
+(1 row)
+
+UPDATE o_bridge_dml_spgist SET val = val + 10000 WHERE id BETWEEN 100 AND 150;
+SELECT count(*) FROM o_bridge_dml_spgist WHERE val > 10000;
+ count 
+-------
+    51
+(1 row)
+
+SELECT count(*) FROM o_bridge_dml_spgist;
+ count 
+-------
+   449
+(1 row)
+
+CREATE TABLE o_bridge_dml_gin (
+	id int NOT NULL PRIMARY KEY, tags int[], val int
+) USING orioledb;
+INSERT INTO o_bridge_dml_gin
+	SELECT i, ARRAY[i, i+1], i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_dml_gin USING gin(tags);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_dml_gin'
+DETAIL:  index access method 'gin' is supported only via index bridging for OrioleDB table
+SELECT count(*) FROM o_bridge_dml_gin;
+ count 
+-------
+   500
+(1 row)
+
+DELETE FROM o_bridge_dml_gin WHERE id BETWEEN 200 AND 250;
+SELECT count(*) FROM o_bridge_dml_gin;
+ count 
+-------
+   449
+(1 row)
+
+UPDATE o_bridge_dml_gin SET val = val + 10000 WHERE id BETWEEN 100 AND 150;
+SELECT count(*) FROM o_bridge_dml_gin WHERE val > 10000;
+ count 
+-------
+    51
+(1 row)
+
+SELECT count(*) FROM o_bridge_dml_gin;
+ count 
+-------
+   449
+(1 row)
+
+CREATE TABLE o_bridge_dml_btree (
+	id int NOT NULL PRIMARY KEY, ival int, val int
+) USING orioledb;
+INSERT INTO o_bridge_dml_btree
+	SELECT i, i, i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_dml_btree USING btree(ival) WITH (orioledb_index=off);
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_dml_btree'
+DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
+SELECT count(*) FROM o_bridge_dml_btree;
+ count 
+-------
+   500
+(1 row)
+
+DELETE FROM o_bridge_dml_btree WHERE id BETWEEN 200 AND 250;
+SELECT count(*) FROM o_bridge_dml_btree;
+ count 
+-------
+   449
+(1 row)
+
+UPDATE o_bridge_dml_btree SET val = val + 10000 WHERE id BETWEEN 100 AND 150;
+SELECT count(*) FROM o_bridge_dml_btree WHERE val > 10000;
+ count 
+-------
+    51
+(1 row)
+
+SELECT count(*) FROM o_bridge_dml_btree;
+ count 
+-------
+   449
+(1 row)
+
+---
+--- Bridge DML: multipage (wide rows force page splits)
+---
+CREATE TABLE o_bridge_big_gist (
+	id int NOT NULL PRIMARY KEY, pad text, pos point
+) USING orioledb;
+INSERT INTO o_bridge_big_gist
+	SELECT i, repeat('x', 200), point(i, i) FROM generate_series(1, 2000) i;
+CREATE INDEX ON o_bridge_big_gist USING gist(pos);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_big_gist'
+DETAIL:  index access method 'gist' is supported only via index bridging for OrioleDB table
+SELECT count(*) FROM o_bridge_big_gist;
+ count 
+-------
+  2000
+(1 row)
+
+DELETE FROM o_bridge_big_gist WHERE id BETWEEN 500 AND 1500;
+SELECT count(*) FROM o_bridge_big_gist;
+ count 
+-------
+   999
+(1 row)
+
+UPDATE o_bridge_big_gist SET pad = 'updated' WHERE id BETWEEN 1 AND 200;
+SELECT count(*) FROM o_bridge_big_gist WHERE pad = 'updated';
+ count 
+-------
+   200
+(1 row)
+
+CREATE TABLE o_bridge_big_spgist (
+	id int NOT NULL PRIMARY KEY, pad text, pos point
+) USING orioledb;
+INSERT INTO o_bridge_big_spgist
+	SELECT i, repeat('x', 200), point(i, i) FROM generate_series(1, 2000) i;
+CREATE INDEX ON o_bridge_big_spgist USING spgist(pos);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_big_spgist'
+DETAIL:  index access method 'spgist' is supported only via index bridging for OrioleDB table
+SELECT count(*) FROM o_bridge_big_spgist;
+ count 
+-------
+  2000
+(1 row)
+
+DELETE FROM o_bridge_big_spgist WHERE id BETWEEN 500 AND 1500;
+SELECT count(*) FROM o_bridge_big_spgist;
+ count 
+-------
+   999
+(1 row)
+
+UPDATE o_bridge_big_spgist SET pad = 'updated' WHERE id BETWEEN 1 AND 200;
+SELECT count(*) FROM o_bridge_big_spgist WHERE pad = 'updated';
+ count 
+-------
+   200
+(1 row)
+
+CREATE TABLE o_bridge_big_gin (
+	id int NOT NULL PRIMARY KEY, pad text, tags int[]
+) USING orioledb;
+INSERT INTO o_bridge_big_gin
+	SELECT i, repeat('x', 200), ARRAY[i, i+1] FROM generate_series(1, 2000) i;
+CREATE INDEX ON o_bridge_big_gin USING gin(tags);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_big_gin'
+DETAIL:  index access method 'gin' is supported only via index bridging for OrioleDB table
+SELECT count(*) FROM o_bridge_big_gin;
+ count 
+-------
+  2000
+(1 row)
+
+DELETE FROM o_bridge_big_gin WHERE id BETWEEN 500 AND 1500;
+SELECT count(*) FROM o_bridge_big_gin;
+ count 
+-------
+   999
+(1 row)
+
+UPDATE o_bridge_big_gin SET pad = 'updated' WHERE id BETWEEN 1 AND 200;
+SELECT count(*) FROM o_bridge_big_gin WHERE pad = 'updated';
+ count 
+-------
+   200
+(1 row)
+
+CREATE TABLE o_bridge_big_btree (
+	id int NOT NULL PRIMARY KEY, pad text, ival int
+) USING orioledb;
+INSERT INTO o_bridge_big_btree
+	SELECT i, repeat('x', 200), i FROM generate_series(1, 2000) i;
+CREATE INDEX ON o_bridge_big_btree USING btree(ival) WITH (orioledb_index=off);
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_big_btree'
+DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
+SELECT count(*) FROM o_bridge_big_btree;
+ count 
+-------
+  2000
+(1 row)
+
+DELETE FROM o_bridge_big_btree WHERE id BETWEEN 500 AND 1500;
+SELECT count(*) FROM o_bridge_big_btree;
+ count 
+-------
+   999
+(1 row)
+
+UPDATE o_bridge_big_btree SET pad = 'updated' WHERE id BETWEEN 1 AND 200;
+SELECT count(*) FROM o_bridge_big_btree WHERE pad = 'updated';
+ count 
+-------
+   200
+(1 row)
+
+---
+--- Bridge DML: composite primary key
+---
+CREATE TABLE o_bridge_cpk_gist (
+	a int NOT NULL, b int NOT NULL, pos point, val int,
+	PRIMARY KEY (a, b)
+) USING orioledb;
+INSERT INTO o_bridge_cpk_gist
+	SELECT i / 10, i % 10, point(i, i), i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_cpk_gist USING gist(pos);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_cpk_gist'
+DETAIL:  index access method 'gist' is supported only via index bridging for OrioleDB table
+SELECT count(*) FROM o_bridge_cpk_gist;
+ count 
+-------
+   500
+(1 row)
+
+DELETE FROM o_bridge_cpk_gist WHERE a BETWEEN 20 AND 30;
+SELECT count(*) FROM o_bridge_cpk_gist;
+ count 
+-------
+   390
+(1 row)
+
+UPDATE o_bridge_cpk_gist SET val = val + 10000 WHERE a BETWEEN 10 AND 15;
+SELECT count(*) FROM o_bridge_cpk_gist WHERE val > 10000;
+ count 
+-------
+    60
+(1 row)
+
+SELECT count(*) FROM o_bridge_cpk_gist;
+ count 
+-------
+   390
+(1 row)
+
+CREATE TABLE o_bridge_cpk_spgist (
+	a int NOT NULL, b int NOT NULL, pos point, val int,
+	PRIMARY KEY (a, b)
+) USING orioledb;
+INSERT INTO o_bridge_cpk_spgist
+	SELECT i / 10, i % 10, point(i, i), i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_cpk_spgist USING spgist(pos);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_cpk_spgist'
+DETAIL:  index access method 'spgist' is supported only via index bridging for OrioleDB table
+SELECT count(*) FROM o_bridge_cpk_spgist;
+ count 
+-------
+   500
+(1 row)
+
+DELETE FROM o_bridge_cpk_spgist WHERE a BETWEEN 20 AND 30;
+SELECT count(*) FROM o_bridge_cpk_spgist;
+ count 
+-------
+   390
+(1 row)
+
+UPDATE o_bridge_cpk_spgist SET val = val + 10000 WHERE a BETWEEN 10 AND 15;
+SELECT count(*) FROM o_bridge_cpk_spgist WHERE val > 10000;
+ count 
+-------
+    60
+(1 row)
+
+SELECT count(*) FROM o_bridge_cpk_spgist;
+ count 
+-------
+   390
+(1 row)
+
+CREATE TABLE o_bridge_cpk_gin (
+	a int NOT NULL, b int NOT NULL, tags int[], val int,
+	PRIMARY KEY (a, b)
+) USING orioledb;
+INSERT INTO o_bridge_cpk_gin
+	SELECT i / 10, i % 10, ARRAY[i, i+1], i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_cpk_gin USING gin(tags);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_cpk_gin'
+DETAIL:  index access method 'gin' is supported only via index bridging for OrioleDB table
+SELECT count(*) FROM o_bridge_cpk_gin;
+ count 
+-------
+   500
+(1 row)
+
+DELETE FROM o_bridge_cpk_gin WHERE a BETWEEN 20 AND 30;
+SELECT count(*) FROM o_bridge_cpk_gin;
+ count 
+-------
+   390
+(1 row)
+
+UPDATE o_bridge_cpk_gin SET val = val + 10000 WHERE a BETWEEN 10 AND 15;
+SELECT count(*) FROM o_bridge_cpk_gin WHERE val > 10000;
+ count 
+-------
+    60
+(1 row)
+
+SELECT count(*) FROM o_bridge_cpk_gin;
+ count 
+-------
+   390
+(1 row)
+
+CREATE TABLE o_bridge_cpk_btree (
+	a int NOT NULL, b int NOT NULL, ival int, val int,
+	PRIMARY KEY (a, b)
+) USING orioledb;
+INSERT INTO o_bridge_cpk_btree
+	SELECT i / 10, i % 10, i, i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_cpk_btree USING btree(ival) WITH (orioledb_index=off);
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_cpk_btree'
+DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
+SELECT count(*) FROM o_bridge_cpk_btree;
+ count 
+-------
+   500
+(1 row)
+
+DELETE FROM o_bridge_cpk_btree WHERE a BETWEEN 20 AND 30;
+SELECT count(*) FROM o_bridge_cpk_btree;
+ count 
+-------
+   390
+(1 row)
+
+UPDATE o_bridge_cpk_btree SET val = val + 10000 WHERE a BETWEEN 10 AND 15;
+SELECT count(*) FROM o_bridge_cpk_btree WHERE val > 10000;
+ count 
+-------
+    60
+(1 row)
+
+SELECT count(*) FROM o_bridge_cpk_btree;
+ count 
+-------
+   390
+(1 row)
+
+---
+--- Bridge DML: UPDATE of the indexed column
+---
+CREATE TABLE o_bridge_updidx_gist (
+	id int NOT NULL PRIMARY KEY, pos point, val int
+) USING orioledb;
+INSERT INTO o_bridge_updidx_gist
+	SELECT i, point(i, i), i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_updidx_gist USING gist(pos);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_updidx_gist'
+DETAIL:  index access method 'gist' is supported only via index bridging for OrioleDB table
+UPDATE o_bridge_updidx_gist SET pos = point(id + 1000, id + 1000)
+	WHERE id BETWEEN 100 AND 200;
+SELECT count(*) FROM o_bridge_updidx_gist WHERE id BETWEEN 100 AND 200;
+ count 
+-------
+   101
+(1 row)
+
+CREATE TABLE o_bridge_updidx_spgist (
+	id int NOT NULL PRIMARY KEY, pos point, val int
+) USING orioledb;
+INSERT INTO o_bridge_updidx_spgist
+	SELECT i, point(i, i), i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_updidx_spgist USING spgist(pos);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_updidx_spgist'
+DETAIL:  index access method 'spgist' is supported only via index bridging for OrioleDB table
+UPDATE o_bridge_updidx_spgist SET pos = point(id + 1000, id + 1000)
+	WHERE id BETWEEN 100 AND 200;
+SELECT count(*) FROM o_bridge_updidx_spgist WHERE id BETWEEN 100 AND 200;
+ count 
+-------
+   101
+(1 row)
+
+CREATE TABLE o_bridge_updidx_gin (
+	id int NOT NULL PRIMARY KEY, tags int[], val int
+) USING orioledb;
+INSERT INTO o_bridge_updidx_gin
+	SELECT i, ARRAY[i, i+1], i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_updidx_gin USING gin(tags);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_updidx_gin'
+DETAIL:  index access method 'gin' is supported only via index bridging for OrioleDB table
+UPDATE o_bridge_updidx_gin SET tags = ARRAY[id + 1000]
+	WHERE id BETWEEN 100 AND 200;
+SELECT count(*) FROM o_bridge_updidx_gin WHERE id BETWEEN 100 AND 200;
+ count 
+-------
+   101
+(1 row)
+
+CREATE TABLE o_bridge_updidx_btree (
+	id int NOT NULL PRIMARY KEY, ival int, val int
+) USING orioledb;
+INSERT INTO o_bridge_updidx_btree
+	SELECT i, i, i FROM generate_series(1, 500) i;
+CREATE INDEX ON o_bridge_updidx_btree USING btree(ival) WITH (orioledb_index=off);
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_updidx_btree'
+DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
+UPDATE o_bridge_updidx_btree SET ival = ival + 1000
+	WHERE id BETWEEN 100 AND 200;
+SELECT count(*) FROM o_bridge_updidx_btree WHERE id BETWEEN 100 AND 200;
+ count 
+-------
+   101
+(1 row)
+
+-- Secondary bridged index query tests: verify that queries through the
+-- bridged secondary index return correct results after DML on the table.
+CREATE TABLE o_bridge_sec_gist (
+	id int NOT NULL PRIMARY KEY,
+	pos point,
+	val int
+) USING orioledb;
+INSERT INTO o_bridge_sec_gist
+	SELECT i, point(i, i), i FROM generate_series(1, 300) i;
+CREATE INDEX ON o_bridge_sec_gist USING gist(pos);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_sec_gist'
+DETAIL:  index access method 'gist' is supported only via index bridging for OrioleDB table
+SET enable_seqscan = off;
+SELECT count(*) FROM o_bridge_sec_gist WHERE pos <@ box '(0,0),(300,300)';
+ count 
+-------
+   300
+(1 row)
+
+DELETE FROM o_bridge_sec_gist WHERE id BETWEEN 200 AND 250;
+SELECT count(*) FROM o_bridge_sec_gist WHERE pos <@ box '(0,0),(300,300)';
+ count 
+-------
+   249
+(1 row)
+
+UPDATE o_bridge_sec_gist SET pos = point(id + 1000, id + 1000)
+	WHERE id BETWEEN 100 AND 150;
+SELECT count(*) FROM o_bridge_sec_gist WHERE pos <@ box '(0,0),(300,300)';
+ count 
+-------
+   198
+(1 row)
+
+RESET enable_seqscan;
+CREATE TABLE o_bridge_sec_spgist (
+	id int NOT NULL PRIMARY KEY,
+	pos point,
+	val int
+) USING orioledb;
+INSERT INTO o_bridge_sec_spgist
+	SELECT i, point(i, i), i FROM generate_series(1, 300) i;
+CREATE INDEX ON o_bridge_sec_spgist USING spgist(pos);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_sec_spgist'
+DETAIL:  index access method 'spgist' is supported only via index bridging for OrioleDB table
+SET enable_seqscan = off;
+SELECT count(*) FROM o_bridge_sec_spgist WHERE pos <@ box '(0,0),(300,300)';
+ count 
+-------
+   300
+(1 row)
+
+DELETE FROM o_bridge_sec_spgist WHERE id BETWEEN 200 AND 250;
+SELECT count(*) FROM o_bridge_sec_spgist WHERE pos <@ box '(0,0),(300,300)';
+ count 
+-------
+   249
+(1 row)
+
+UPDATE o_bridge_sec_spgist SET pos = point(id + 1000, id + 1000)
+	WHERE id BETWEEN 100 AND 150;
+SELECT count(*) FROM o_bridge_sec_spgist WHERE pos <@ box '(0,0),(300,300)';
+ count 
+-------
+   198
+(1 row)
+
+RESET enable_seqscan;
+CREATE TABLE o_bridge_sec_gin (
+	id int NOT NULL PRIMARY KEY,
+	tags int[],
+	val int
+) USING orioledb;
+INSERT INTO o_bridge_sec_gin
+	SELECT i, ARRAY[i, i+1], i FROM generate_series(1, 300) i;
+CREATE INDEX ON o_bridge_sec_gin USING gin(tags);
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_sec_gin'
+DETAIL:  index access method 'gin' is supported only via index bridging for OrioleDB table
+SET enable_seqscan = off;
+SELECT count(*) FROM o_bridge_sec_gin WHERE tags @> ARRAY[150];
+ count 
+-------
+     2
+(1 row)
+
+DELETE FROM o_bridge_sec_gin WHERE id BETWEEN 200 AND 250;
+SELECT count(*) FROM o_bridge_sec_gin WHERE tags @> ARRAY[150];
+ count 
+-------
+     2
+(1 row)
+
+UPDATE o_bridge_sec_gin SET tags = ARRAY[id + 1000]
+	WHERE id BETWEEN 100 AND 150;
+SELECT count(*) FROM o_bridge_sec_gin WHERE tags @> ARRAY[150];
+ count 
+-------
+     0
+(1 row)
+
+RESET enable_seqscan;
+CREATE TABLE o_bridge_sec_btree (
+	id int NOT NULL PRIMARY KEY,
+	ival int,
+	val int
+) USING orioledb;
+INSERT INTO o_bridge_sec_btree
+	SELECT i, i, i FROM generate_series(1, 300) i;
+CREATE INDEX ON o_bridge_sec_btree USING btree(ival) WITH (orioledb_index=off);
+WARNING:  using bridged btree index for orioledb
+DETAIL:  This feature is intended for testing purposes and is not recommended for normal usage.
+NOTICE:  index bridging is enabled for orioledb table 'o_bridge_sec_btree'
+DETAIL:  index access method 'btree' is requested with index bridging for OrioleDB table
+SET enable_seqscan = off;
+SELECT count(*) FROM o_bridge_sec_btree WHERE ival BETWEEN 100 AND 200;
+ count 
+-------
+   101
+(1 row)
+
+DELETE FROM o_bridge_sec_btree WHERE id BETWEEN 150 AND 180;
+SELECT count(*) FROM o_bridge_sec_btree WHERE ival BETWEEN 100 AND 200;
+ count 
+-------
+    70
+(1 row)
+
+UPDATE o_bridge_sec_btree SET ival = ival + 1000
+	WHERE id BETWEEN 100 AND 120;
+SELECT count(*) FROM o_bridge_sec_btree WHERE ival BETWEEN 100 AND 200;
+ count 
+-------
+    49
+(1 row)
+
+RESET enable_seqscan;
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
-NOTICE:  drop cascades to 17 other objects
+NOTICE:  drop cascades to 37 other objects
 DETAIL:  drop cascades to table o_test_ix_ams
 drop cascades to table o_test_bridging_with_regular_no_pkey
 drop cascades to table o_test_bridging_with_regular_pkey
@@ -4480,6 +5088,26 @@ drop cascades to table test_no_bmscan_on_text_pkey
 drop cascades to table brin_test_multi
 drop cascades to table hash_i4_heap
 drop cascades to table gin_test_table
+drop cascades to table o_bridge_dml_gist
+drop cascades to table o_bridge_dml_spgist
+drop cascades to table o_bridge_dml_gin
+drop cascades to table o_bridge_dml_btree
+drop cascades to table o_bridge_big_gist
+drop cascades to table o_bridge_big_spgist
+drop cascades to table o_bridge_big_gin
+drop cascades to table o_bridge_big_btree
+drop cascades to table o_bridge_cpk_gist
+drop cascades to table o_bridge_cpk_spgist
+drop cascades to table o_bridge_cpk_gin
+drop cascades to table o_bridge_cpk_btree
+drop cascades to table o_bridge_updidx_gist
+drop cascades to table o_bridge_updidx_spgist
+drop cascades to table o_bridge_updidx_gin
+drop cascades to table o_bridge_updidx_btree
+drop cascades to table o_bridge_sec_gist
+drop cascades to table o_bridge_sec_spgist
+drop cascades to table o_bridge_sec_gin
+drop cascades to table o_bridge_sec_btree
 DROP SCHEMA index_bridging CASCADE;
 NOTICE:  drop cascades to 6 other objects
 DETAIL:  drop cascades to function btree_index_content(name)

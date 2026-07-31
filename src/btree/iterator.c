@@ -26,6 +26,7 @@
 #include "transam/oxid.h"
 #include "transam/undo.h"
 #include "utils/page_pool.h"
+#include "utils/stopevent.h"
 
 #include "access/transam.h"
 #include "miscadmin.h"
@@ -1657,6 +1658,10 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 		else
 		{
 			OTuple		posTup;
+
+			if (STOPEVENTS_ENABLED() && it->curKeySet)
+				STOPEVENT(STOPEVENT_ITERATOR_NEXT,
+						  btree_page_stopevent_params(desc, context->img));
 
 			/* In FETCH mode the leaf is partial; load this tuple's chunk. */
 			if (BTREE_PAGE_FIND_IS(context, FETCH) &&
