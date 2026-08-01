@@ -1248,6 +1248,24 @@ undo_item_buf_read_item(UndoItemBuf *buf,
 		}
 	}
 
+	if (itemSize < sizeof(UndoStackItem))
+	{
+		UndoStackItem *hdr = (UndoStackItem *) buf->data;
+		UndoMeta   *undoMeta = get_undo_meta_by_type(undoType);
+
+		elog(PANIC,
+			 "UNDOCORRUPT undo_item_buf_read_item bad itemSize: "
+			 "undoType=%d location=%llu itemSize=%u type=%u indexType=%u prev=%llu "
+			 "minProcRetain=%llu chkpRetainStart=%llu chkpRetainEnd=%llu pid=%d",
+			 (int) undoType, (unsigned long long) location,
+			 (unsigned) itemSize, (unsigned) hdr->type, (unsigned) hdr->indexType,
+			 (unsigned long long) hdr->prev,
+			 (unsigned long long) pg_atomic_read_u64(&undoMeta->minProcRetainLocation),
+			 (unsigned long long) pg_atomic_read_u64(&undoMeta->checkpointRetainStartLocation),
+			 (unsigned long long) pg_atomic_read_u64(&undoMeta->checkpointRetainEndLocation),
+			 MyProcPid);
+	}
+
 	Assert(itemSize >= sizeof(UndoStackItem));
 	undo_read(undoType,
 			  location + sizeof(UndoStackItem),
@@ -1301,10 +1319,56 @@ walk_undo_range(UndoLogType undoType,
 {
 	UndoStackItem *item;
 	UndoItemTypeDescr *descr;
+#define UNDO_TRACE_RING 16
+	UndoLocation ringLoc[UNDO_TRACE_RING];
+	uint8		ringType[UNDO_TRACE_RING];
+	uint16		ringSize[UNDO_TRACE_RING];
+	uint8		ringIdx[UNDO_TRACE_RING];
+	UndoLocation ringPrev[UNDO_TRACE_RING];
+	int			ringPos = 0;
+	int			ringNum = 0;
 
 	while (UndoLocationIsValid(location) && (location > toLoc || !UndoLocationIsValid(toLoc)))
 	{
 		item = undo_item_buf_read_item(buf, undoType, location);
+
+		ringLoc[ringPos] = location;
+		ringType[ringPos] = item->type;
+		ringSize[ringPos] = item->itemSize;
+		ringIdx[ringPos] = item->indexType;
+		ringPrev[ringPos] = item->prev;
+		ringPos = (ringPos + 1) % UNDO_TRACE_RING;
+		if (ringNum < UNDO_TRACE_RING)
+			ringNum++;
+
+		if ((int) item->type < 1 ||
+			(int) item->type > (int) (sizeof(undoItemTypeDescrs) / sizeof(undoItemTypeDescrs[0])))
+		{
+			char		chainbuf[2048];
+			int			off = 0;
+			int			k;
+
+			chainbuf[0] = '\0';
+			for (k = 0; k < ringNum; k++)
+			{
+				int			p = (ringPos - ringNum + k + UNDO_TRACE_RING) % UNDO_TRACE_RING;
+
+				off += snprintf(chainbuf + off, sizeof(chainbuf) - off,
+								" [%d]loc=%llu,type=%u,size=%u,idx=%u,prev=%llu",
+								k, (unsigned long long) ringLoc[p],
+								(unsigned) ringType[p], (unsigned) ringSize[p],
+								(unsigned) ringIdx[p], (unsigned long long) ringPrev[p]);
+				if (off >= (int) sizeof(chainbuf))
+					break;
+			}
+			elog(PANIC,
+				 "UNDOCORRUPT walk_undo_range bad type: undoType=%d oxid=%llu stage=%d "
+				 "location=%llu toLoc=%llu type=%u chain(oldest..newest):%s pid=%d",
+				 (int) undoType, (unsigned long long) oxid, (int) stage,
+				 (unsigned long long) location, (unsigned long long) toLoc,
+				 (unsigned) item->type, chainbuf, MyProcPid);
+		}
+
 		descr = item_type_get_descr(item->type);
 		descr->callback(undoType, location, item, oxid,
 						stage, changeCountsValid);
