@@ -1320,11 +1320,12 @@ walk_undo_range(UndoLogType undoType,
 	UndoStackItem *item;
 	UndoItemTypeDescr *descr;
 #define UNDO_TRACE_RING 16
-	UndoLocation ringLoc[UNDO_TRACE_RING];
-	uint8		ringType[UNDO_TRACE_RING];
-	uint16		ringSize[UNDO_TRACE_RING];
-	uint8		ringIdx[UNDO_TRACE_RING];
-	UndoLocation ringPrev[UNDO_TRACE_RING];
+	/* static (off-stack) so this debug frame stays small under ASAN */
+	static UndoLocation ringLoc[UNDO_TRACE_RING];
+	static uint8 ringType[UNDO_TRACE_RING];
+	static uint16 ringSize[UNDO_TRACE_RING];
+	static uint8 ringIdx[UNDO_TRACE_RING];
+	static UndoLocation ringPrev[UNDO_TRACE_RING];
 	int			ringPos = 0;
 	int			ringNum = 0;
 
@@ -1344,7 +1345,7 @@ walk_undo_range(UndoLogType undoType,
 		if ((int) item->type < 1 ||
 			(int) item->type > (int) (sizeof(undoItemTypeDescrs) / sizeof(undoItemTypeDescrs[0])))
 		{
-			char		chainbuf[2048];
+			static char chainbuf[2048];
 			int			off = 0;
 			int			k;
 
