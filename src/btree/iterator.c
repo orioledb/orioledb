@@ -119,6 +119,33 @@ struct BTreeIterator
 #ifdef USE_ASSERT_CHECKING
 	/* additional check for iteration order */
 	OFixedTuple prevTuple;
+
+	/*
+	 * Diagnostics for the iteration-order check in o_btree_iterator_fetch().
+	 * Where prevTuple came from, and the state of the last
+	 * iterator_refind_partial_leaf() -- the re-descend that resumes a scan
+	 * whose partial (FETCH) leaf read lost a race with a page modification.
+	 * A violation is most likely a resume that failed to step past the
+	 * already-returned curKey, so the report needs the inputs and the outcome
+	 * of that resume, which curKey itself no longer holds by then.
+	 */
+	OInMemoryBlkno prevBlkno;
+	uint32		prevPageChangeCount;
+	BTreePageItemLocator prevLoc;
+	int			refindCount;
+	OFixedKey	curKeyAtRefind;
+	bool		curKeySetAtRefind;
+	bool		curKeyReturnedAtRefind;
+	BTreePageItemLocator locAfterRefind;
+
+	/*
+	 * Outcome of the curKey comparison the last resume made: 1 match, 0 no
+	 * match, -1 the comparison was not reached.  Together with
+	 * curKeySetAtRefind this names the branch taken: !curKeySetAtRefind is the
+	 * scan-start re-find, -1 with curKeySetAtRefind is the past-end bail out,
+	 * and 0/1 is the full re-position.
+	 */
+	int			refindMatch;
 #endif
 };
 
@@ -197,6 +224,69 @@ copy_fixed_leaf_key(BTreeDescr *desc, OFixedKey *dst, OTuple leafTup)
 		else if (IT_IS_BACKWARD(it)) \
 			BTREE_PAGE_LOCATOR_PREV((undoIt)->image, (loc)); \
 	} while (0); \
+
+#ifdef USE_ASSERT_CHECKING
+
+/* How many leading tuple bytes the iteration-order report renders. */
+#define ITERATOR_DUMP_BYTES		24
+#define ITERATOR_DUMP_BUFSZ		(ITERATOR_DUMP_BYTES * 2 + 8)
+
+/*
+ * Reset the iteration-order check and its diagnostics.  Called from both
+ * iterator constructors; o_btree_iterator_advance() deliberately clears only
+ * prevTuple, since the refind history describes the iterator as a whole and
+ * the prevTuple provenance is rewritten together with prevTuple itself.
+ */
+static inline void
+iterator_reset_order_check(BTreeIterator *it)
+{
+	O_TUPLE_SET_NULL(it->prevTuple.tuple);
+	it->prevBlkno = OInvalidInMemoryBlkno;
+	it->prevPageChangeCount = 0;
+	BTREE_PAGE_LOCATOR_SET_INVALID(&it->prevLoc);
+	it->refindCount = 0;
+	clear_fixed_key(&it->curKeyAtRefind);
+	it->curKeySetAtRefind = false;
+	it->curKeyReturnedAtRefind = false;
+	BTREE_PAGE_LOCATOR_SET_INVALID(&it->locAfterRefind);
+	it->refindMatch = -1;
+}
+
+/*
+ * Render the leading bytes of a tuple as hex into buf (at least
+ * ITERATOR_DUMP_BUFSZ long) for the iteration-order report.  Allocation-free,
+ * so it is safe on the way to an abort and inside a critical section.
+ */
+static const char *
+iterator_tuple_to_hex(BTreeDescr *desc, OTuple tup, OLengthType lenType,
+					  char *buf)
+{
+	static const char hexdigits[] = "0123456789abcdef";
+	char	   *p = buf;
+	int			len;
+	int			i;
+
+	if (O_TUPLE_IS_NULL(tup))
+		return "(null)";
+
+	len = o_btree_len(desc, tup, lenType);
+	if (len < 0)
+		len = 0;
+	else if (len > ITERATOR_DUMP_BYTES)
+		len = ITERATOR_DUMP_BYTES;
+
+	for (i = 0; i < len; i++)
+	{
+		uint8		b = (uint8) tup.data[i];
+
+		*p++ = hexdigits[b >> 4];
+		*p++ = hexdigits[b & 0x0f];
+	}
+	*p = '\0';
+
+	return buf;
+}
+#endif							/* USE_ASSERT_CHECKING */
 
 /*
  * Fetches tuple from the tree with given CSN snapshot.  Tuple is allocated
@@ -357,7 +447,7 @@ o_btree_find_tuples_start(BTreeDescr *desc, void *key,
 	it->pageCount = 1;
 	BTREE_PAGE_LOCATOR_SET_INVALID(&it->undoLoc);
 #ifdef USE_ASSERT_CHECKING
-	O_TUPLE_SET_NULL(it->prevTuple.tuple);
+	iterator_reset_order_check(it);
 #endif
 
 	/*
@@ -970,7 +1060,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	it->startKind = BTreeKeyNone;
 	BTREE_PAGE_LOCATOR_SET_INVALID(&it->undoLoc);
 #ifdef USE_ASSERT_CHECKING
-	O_TUPLE_SET_NULL(it->prevTuple.tuple);
+	iterator_reset_order_check(it);
 #endif
 
 	undo_it_create(&it->undoIt, it);
@@ -1333,6 +1423,8 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 #ifdef USE_ASSERT_CHECKING
 	if (!O_TUPLE_IS_NULL(result))
 	{
+		OBtreePageFindItem *curItem = &it->context.items[it->context.index];
+
 		if (!O_TUPLE_IS_NULL(it->prevTuple.tuple))
 		{
 			int			cmp;
@@ -1340,9 +1432,52 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 			cmp = o_btree_cmp(desc, &it->prevTuple.tuple, BTreeKeyLeafTuple,
 							  &result, BTreeKeyLeafTuple);
 
-			Assert((IT_IS_FORWARD(it) && cmp < 0) || cmp > 0);
+			ANTITHESIS_ALWAYS((IT_IS_FORWARD(it) && cmp < 0) || cmp > 0,
+							  "BTree iterator returns strictly ordered tuples",
+							  NULL);
+
+			if (!((IT_IS_FORWARD(it) && cmp < 0) || cmp > 0))
+			{
+				char		prevHex[ITERATOR_DUMP_BUFSZ];
+				char		curHex[ITERATOR_DUMP_BUFSZ];
+				char		refindHex[ITERATOR_DUMP_BUFSZ];
+
+				/*
+				 * cmp == 0 means the same key was handed out twice, cmp > 0 (in
+				 * a forward scan) that the iterator moved backwards.  Either is
+				 * a wrong-results bug, not just a broken invariant, so report
+				 * the state that distinguishes the causes instead of asserting:
+				 * whether a resume ran, what key it was told to resume from,
+				 * whether it recognised that key on the re-found page, and
+				 * where it left the locator.
+				 */
+				elog(PANIC,
+					 "OrioleDB iterator returned out-of-order tuple: cmp=%d dir=%d flags=0x%x pageCount=%d refinds=%d "
+					 "prev={blkno=%u pageChangeCount=%u chunk=%u item=%u} "
+					 "cur={blkno=%u pageChangeCount=%u chunk=%u item=%u} "
+					 "refind={curKeySet=%d curKeyReturned=%d match=%d chunk=%u item=%u} "
+					 "prevTuple=%s curTuple=%s refindKey=%s",
+					 cmp, (int) it->scanDir, it->context.flags,
+					 it->pageCount, it->refindCount,
+					 it->prevBlkno, it->prevPageChangeCount,
+					 it->prevLoc.chunkOffset, it->prevLoc.itemOffset,
+					 curItem->blkno, curItem->pageChangeCount,
+					 curItem->locator.chunkOffset, curItem->locator.itemOffset,
+					 (int) it->curKeySetAtRefind, (int) it->curKeyReturnedAtRefind,
+					 it->refindMatch,
+					 it->locAfterRefind.chunkOffset, it->locAfterRefind.itemOffset,
+					 iterator_tuple_to_hex(desc, it->prevTuple.tuple,
+										   OTupleLength, prevHex),
+					 iterator_tuple_to_hex(desc, result,
+										   OTupleLength, curHex),
+					 iterator_tuple_to_hex(desc, it->curKeyAtRefind.tuple,
+										   OKeyLength, refindHex));
+			}
 		}
 		copy_fixed_tuple(desc, &it->prevTuple, result);
+		it->prevBlkno = curItem->blkno;
+		it->prevPageChangeCount = curItem->pageChangeCount;
+		it->prevLoc = curItem->locator;
 	}
 #endif
 
@@ -1478,7 +1613,7 @@ get_next_combined_location(BTreeIterator *it)
  * and leave the locator on the next tuple to return.
  */
 static void
-iterator_refind_partial_leaf(BTreeIterator *it)
+iterator_refind_partial_leaf_internal(BTreeIterator *it)
 {
 	OBTreeFindPageContext *context = &it->context;
 	BTreeDescr *desc = context->desc;
@@ -1572,6 +1707,9 @@ iterator_refind_partial_leaf(BTreeIterator *it)
 	BTREE_PAGE_READ_LEAF_TUPLE(tup, context->img, loc);
 	match = o_btree_cmp(desc, &tup, BTreeKeyLeafTuple,
 						&it->curKey.tuple, BTreeKeyNonLeafKey) == 0;
+#ifdef USE_ASSERT_CHECKING
+	it->refindMatch = match ? 1 : 0;
+#endif
 
 	if (IT_IS_FORWARD(it))
 	{
@@ -1595,6 +1733,33 @@ iterator_refind_partial_leaf(BTreeIterator *it)
 		if (it->curKeyReturned || !match)
 			BTREE_PAGE_LOCATOR_PREV(context->img, loc);
 	}
+}
+
+/*
+ * Wrapper recording what the resume was given and where it landed, so a later
+ * iteration-order violation can be attributed without a second debugger
+ * session.  curKey is overwritten by the next tuple read, so its value here is
+ * not recoverable after the fact.
+ */
+static void
+iterator_refind_partial_leaf(BTreeIterator *it)
+{
+#ifdef USE_ASSERT_CHECKING
+	it->refindCount++;
+	it->curKeySetAtRefind = it->curKeySet;
+	it->curKeyReturnedAtRefind = it->curKeyReturned;
+	it->refindMatch = -1;
+	if (it->curKeySet)
+		copy_fixed_key(it->context.desc, &it->curKeyAtRefind, it->curKey.tuple);
+	else
+		clear_fixed_key(&it->curKeyAtRefind);
+#endif
+
+	iterator_refind_partial_leaf_internal(it);
+
+#ifdef USE_ASSERT_CHECKING
+	it->locAfterRefind = it->context.items[it->context.index].locator;
+#endif
 }
 
 /*
