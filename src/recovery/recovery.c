@@ -2237,7 +2237,6 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 	if (!COMMITSEQNO_IS_ABORTED(csn) && sync)
 	{
 		Assert(worker_id < 0);
-		set_oxid_csn(oxid, COMMITSEQNO_COMMITTING);
 		if (flush_undo_pos)
 			flush_current_undo_stack();
 		for (i = 0; i < (int) UndoLogsCount; i++)
@@ -2246,6 +2245,7 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 			on_commit_undo_stack((UndoLogType) i, oxid, true);
 		walk_checkpoint_stacks(cur_recovery_xid_state, csn,
 							   InvalidSubTransactionId, flush_undo_pos);
+		set_oxid_csn(oxid, COMMITSEQNO_COMMITTING);
 		csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 		set_oxid_csn(oxid, csn);
 		set_oxid_xlog_ptr(oxid, XLOG_PTR_ALIGN(ptr));
