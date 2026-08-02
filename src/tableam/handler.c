@@ -373,6 +373,10 @@ orioledb_fetch_row_version(Relation relation,
 			CommitSeqNo ecsn = COMMITSEQNO_INPROGRESS;
 			BTreeLocationHint ehint = hint;
 			OTuple		et;
+			OSnapshot	rSnapshot;
+			CommitSeqNo r2csn = COMMITSEQNO_INPROGRESS;
+			BTreeLocationHint rhint = hint;
+			OTuple		et2;
 
 			descr->noInvalidation = true;
 			et = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
@@ -381,7 +385,22 @@ orioledb_fetch_row_version(Relation relation,
 										   slot->tts_mcxt, &ehint);
 			descr->noInvalidation = false;
 
-			elog(LOG, "ORI217 fetch-miss rowidCsn=%llx version=%u tupleCsn=%llx deleted=%d anySnap=%d pkNkeys=%d pk=[%lld,%lld,%lld] | latest_cb: found=%d latestCsn=%llx latestDel=%d | latest_nocb: found=%d ecsn=%llx | runXmin=%llu globalXmin=%llu writtenXmin=%llu nextCsn=%llx pid=%d",
+			/*
+			 * Re-probe at the EXACT rowid CSN (marg.csn) with NO callback:
+			 * pure MVCC visibility of the version the rowid references.
+			 * found2=0 => that version is no longer retained (undo truncated
+			 * by the checkpoint); found2=1 => retained but the fetch callback
+			 * rejected it.  This is the decisive discriminator.
+			 */
+			O_LOAD_SNAPSHOT_CSN(&rSnapshot, csn);
+			descr->noInvalidation = true;
+			et2 = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
+											(Pointer) &pkey, BTreeKeyBound,
+											&rSnapshot, &r2csn,
+											slot->tts_mcxt, &rhint);
+			descr->noInvalidation = false;
+
+			elog(LOG, "ORI217 fetch-miss rowidCsn=%llx version=%u tupleCsn=%llx deleted=%d anySnap=%d pkNkeys=%d pk=[%lld,%lld,%lld] | latest_cb: found=%d latestCsn=%llx latestDel=%d | latest_nocb: found=%d ecsn=%llx | atRowidCsn_nocb: found=%d r2csn=%llx | runXmin=%llu globalXmin=%llu writtenXmin=%llu nextCsn=%llx pid=%d",
 				 (unsigned long long) csn, version,
 				 (unsigned long long) tupleCsn, deleted ? 1 : 0,
 				 snapshot == SnapshotAny ? 1 : 0,
@@ -389,6 +408,7 @@ orioledb_fetch_row_version(Relation relation,
 				 O_TUPLE_IS_NULL(lt) ? 0 : 1, (unsigned long long) lcsn,
 				 ldel ? 1 : 0,
 				 O_TUPLE_IS_NULL(et) ? 0 : 1, (unsigned long long) ecsn,
+				 O_TUPLE_IS_NULL(et2) ? 0 : 1, (unsigned long long) r2csn,
 				 (unsigned long long) pg_atomic_read_u64(&xid_meta->runXmin),
 				 (unsigned long long) pg_atomic_read_u64(&xid_meta->globalXmin),
 				 (unsigned long long) pg_atomic_read_u64(&xid_meta->writtenXmin),
