@@ -359,17 +359,42 @@ orioledb_fetch_row_version(Relation relation,
 										  fetch_row_version_callback, &lver);
 		descr->noInvalidation = false;
 
-		elog(LOG, "ORI217 fetch-miss rowidCsn=%llx version=%u tupleCsn=%llx deleted=%d anySnap=%d | latest: found=%d latestCsn=%llx latestDel=%d | runXmin=%llu globalXmin=%llu writtenXmin=%llu nextCsn=%llx pid=%d",
-			 (unsigned long long) csn, version,
-			 (unsigned long long) tupleCsn, deleted ? 1 : 0,
-			 snapshot == SnapshotAny ? 1 : 0,
-			 O_TUPLE_IS_NULL(lt) ? 0 : 1, (unsigned long long) lcsn,
-			 ldel ? 1 : 0,
-			 (unsigned long long) pg_atomic_read_u64(&xid_meta->runXmin),
-			 (unsigned long long) pg_atomic_read_u64(&xid_meta->globalXmin),
-			 (unsigned long long) pg_atomic_read_u64(&xid_meta->writtenXmin),
-			 (unsigned long long) pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo),
-			 MyProcPid);
+		{
+			/*
+			 * Also print the decoded PK (orders: o_w_id, o_d_id, o_id) so the
+			 * row can be checked in the table by hand, and re-probe once more at
+			 * the latest snapshot with a NULL callback (pure PK existence, no
+			 * version/self-modified filter) to separate "PK genuinely absent"
+			 * from a callback artifact.
+			 */
+			long long	pk0 = pkey.nkeys > 0 ? (long long) pkey.keys[0].value : -1;
+			long long	pk1 = pkey.nkeys > 1 ? (long long) pkey.keys[1].value : -1;
+			long long	pk2 = pkey.nkeys > 2 ? (long long) pkey.keys[2].value : -1;
+			CommitSeqNo ecsn = COMMITSEQNO_INPROGRESS;
+			BTreeLocationHint ehint = hint;
+			OTuple		et;
+
+			descr->noInvalidation = true;
+			et = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
+										   (Pointer) &pkey, BTreeKeyBound,
+										   &o_in_progress_snapshot, &ecsn,
+										   slot->tts_mcxt, &ehint);
+			descr->noInvalidation = false;
+
+			elog(LOG, "ORI217 fetch-miss rowidCsn=%llx version=%u tupleCsn=%llx deleted=%d anySnap=%d pkNkeys=%d pk=[%lld,%lld,%lld] | latest_cb: found=%d latestCsn=%llx latestDel=%d | latest_nocb: found=%d ecsn=%llx | runXmin=%llu globalXmin=%llu writtenXmin=%llu nextCsn=%llx pid=%d",
+				 (unsigned long long) csn, version,
+				 (unsigned long long) tupleCsn, deleted ? 1 : 0,
+				 snapshot == SnapshotAny ? 1 : 0,
+				 pkey.nkeys, pk0, pk1, pk2,
+				 O_TUPLE_IS_NULL(lt) ? 0 : 1, (unsigned long long) lcsn,
+				 ldel ? 1 : 0,
+				 O_TUPLE_IS_NULL(et) ? 0 : 1, (unsigned long long) ecsn,
+				 (unsigned long long) pg_atomic_read_u64(&xid_meta->runXmin),
+				 (unsigned long long) pg_atomic_read_u64(&xid_meta->globalXmin),
+				 (unsigned long long) pg_atomic_read_u64(&xid_meta->writtenXmin),
+				 (unsigned long long) pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo),
+				 MyProcPid);
+		}
 		return false;
 	}
 
