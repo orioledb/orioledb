@@ -670,6 +670,15 @@ index_descr_free(OIndexDescr *tree)
 	}
 	if (tree->leafTupdesc)
 	{
+		/*
+		 * TEMP DESCRFREELEAF instrumentation: log every primary leafTupdesc
+		 * free so the aliasing timeline (alloc -> free -> reuse while another
+		 * cached descr still points here) can be reconstructed by address.
+		 */
+		if (tree->desc.type == oIndexPrimary)
+			elog(LOG, "DESCRFREELEAF primary tree=[%u/%u/%u] leafTupdesc=%p pid=%d",
+				 tree->oids.datoid, tree->oids.reloid, tree->oids.relnode,
+				 (void *) tree->leafTupdesc, MyProcPid);
 		FreeTupleDesc(tree->leafTupdesc);
 		tree->leafTupdesc = NULL;
 	}
