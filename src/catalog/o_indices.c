@@ -1353,6 +1353,21 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 	descr->leafTupdesc = o_table_fields_make_tupdesc(oIndex->leafTableFields,
 													 oIndex->nLeafFields);
 
+	/*
+	 * TEMP DESCRALLOC instrumentation (leafTupdesc aliasing / double-free
+	 * hunt). Log which tree owns each freshly allocated primary leafTupdesc
+	 * and in which memory context -- if any path allocates outside the
+	 * long-lived descrCxt, that tupdesc is freed on a context reset without
+	 * nulling the descriptor field, explaining the aliased double-free.
+	 * Match the address against DESCRFREELEAF / DESCRFREE.
+	 */
+	if (oIndex->indexType == oIndexPrimary)
+		elog(LOG, "DESCRALLOC primary tree=[%u/%u/%u] leafTupdesc=%p ctx=%s pid=%d",
+			 oIndex->indexOids.datoid, oIndex->indexOids.reloid,
+			 oIndex->indexOids.relnode, (void *) descr->leafTupdesc,
+			 CurrentMemoryContext->name ? CurrentMemoryContext->name : "?",
+			 MyProcPid);
+
 	if (oIndex->indexType == oIndexPrimary)
 	{
 		bool		free_oTable = false;
