@@ -1837,6 +1837,8 @@ oxid_get_csn(OXid oxid, bool getRawCsn)
 		if (COMMITSEQNO_IS_SPECIAL(csn) &&
 			COMMITSEQNO_GET_STATUS(csn) & COMMITSEQNO_STATUS_CSN_COMMITTING)
 			perform_spin_delay(&status);
+		else if (csn == COMMITSEQNO_COMMITTING)
+			perform_spin_delay(&status);
 		else
 			break;
 	}
