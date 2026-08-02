@@ -1223,7 +1223,25 @@ o_invalidate_descrs_internal(Oid datoid, Oid reloid, Oid relfilenode)
 		while ((indexDescr = (OIndexDescr *) hash_seq_search(&scan_status)) != NULL)
 		{
 			if (indexDescr->refcnt == 0)
+			{
+				/*
+				 * TEMP DESCRFREE instrumentation (descr-invalidation MAXALIGN
+				 * hunt): name the tree about to be freed so the FreeTupleDesc
+				 * crash (a dangling leafTupdesc) can be tied to the tree and
+				 * the operation that corrupted it.  Only the raw pointers are
+				 * read, so this is safe even if the tupdesc is already
+				 * corrupt.
+				 */
+				elog(LOG, "DESCRFREE full-reset tree=[%u/%u/%u] ts=%u type=%d leafTupdesc=%p nonLeafTupdesc=%p itupdesc=%p pid=%d",
+					 indexDescr->oids.datoid, indexDescr->oids.reloid,
+					 indexDescr->oids.relnode,
+					 (unsigned) indexDescr->desc.tablespace,
+					 (int) indexDescr->desc.type,
+					 (void *) indexDescr->leafTupdesc,
+					 (void *) indexDescr->nonLeafTupdesc,
+					 (void *) indexDescr->itupdesc, MyProcPid);
 				index_descr_delete_from_hash(indexDescr);
+			}
 			else
 				recreate_index_descr(indexDescr);
 		}
@@ -1251,7 +1269,18 @@ o_invalidate_descrs_internal(Oid datoid, Oid reloid, Oid relfilenode)
 		if (found)
 		{
 			if (indexDescr->refcnt == 0)
+			{
+				/* TEMP DESCRFREE instrumentation (see the full-reset branch). */
+				elog(LOG, "DESCRFREE single tree=[%u/%u/%u] ts=%u type=%d leafTupdesc=%p nonLeafTupdesc=%p itupdesc=%p pid=%d",
+					 indexDescr->oids.datoid, indexDescr->oids.reloid,
+					 indexDescr->oids.relnode,
+					 (unsigned) indexDescr->desc.tablespace,
+					 (int) indexDescr->desc.type,
+					 (void *) indexDescr->leafTupdesc,
+					 (void *) indexDescr->nonLeafTupdesc,
+					 (void *) indexDescr->itupdesc, MyProcPid);
 				index_descr_delete_from_hash(indexDescr);
+			}
 			else
 				recreate_index_descr(indexDescr);
 		}
