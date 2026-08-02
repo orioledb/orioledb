@@ -336,7 +336,43 @@ orioledb_fetch_row_version(Relation relation,
 		return true;
 
 	if (O_TUPLE_IS_NULL(tuple))
+	{
+		/*
+		 * TEMP ORI217 instrumentation: this NULL is what makes the executor
+		 * raise "failed to fetch tuple being updated" (nodeModifyTable.c).  The
+		 * re-fetch reads the row at the CSN embedded in the rowid (set by
+		 * rowid_set_csn(marg.csn) on a TM_Updated).  Dump that CSN + version,
+		 * the visibility outcome, and the CSN horizons, and re-probe the same
+		 * PK at the latest (in-progress) snapshot to distinguish "invisible at
+		 * the rowid CSN" from "genuinely gone".  Fires only on the miss.
+		 */
+		OTuple		lt;
+		CommitSeqNo lcsn = COMMITSEQNO_INPROGRESS;
+		bool		ldel = false;
+		BTreeLocationHint lhint = hint;
+		uint32		lver = version;
+
+		descr->noInvalidation = true;
+		lt = o_btree_find_tuple_by_key_cb(&GET_PRIMARY(descr)->desc,
+										  (Pointer) &pkey, BTreeKeyBound,
+										  &o_in_progress_snapshot, &lcsn,
+										  slot->tts_mcxt, &lhint, &ldel,
+										  fetch_row_version_callback, &lver);
+		descr->noInvalidation = false;
+
+		elog(LOG, "ORI217 fetch-miss rowidCsn=%llx version=%u tupleCsn=%llx deleted=%d anySnap=%d | latest: found=%d latestCsn=%llx latestDel=%d | runXmin=%llu globalXmin=%llu writtenXmin=%llu nextCsn=%llx pid=%d",
+			 (unsigned long long) csn, version,
+			 (unsigned long long) tupleCsn, deleted ? 1 : 0,
+			 snapshot == SnapshotAny ? 1 : 0,
+			 O_TUPLE_IS_NULL(lt) ? 0 : 1, (unsigned long long) lcsn,
+			 ldel ? 1 : 0,
+			 (unsigned long long) pg_atomic_read_u64(&xid_meta->runXmin),
+			 (unsigned long long) pg_atomic_read_u64(&xid_meta->globalXmin),
+			 (unsigned long long) pg_atomic_read_u64(&xid_meta->writtenXmin),
+			 (unsigned long long) pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo),
+			 MyProcPid);
 		return false;
+	}
 
 	tts_orioledb_store_tuple(slot, tuple, descr, tupleCsn,
 							 PrimaryIndexNumber, true, &hint);
