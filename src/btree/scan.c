@@ -194,6 +194,16 @@ struct BTreeSeqScan
 	bool		isSingleLeafPage;	/* Scan couldn't read first internal page */
 	OFixedKey	keyRangeLow,
 				keyRangeHigh;
+
+	/*
+	 * Durable copy of the current iterator's start key.
+	 * o_btree_iterator_create() stores the start-key pointer (not a copy) for
+	 * the iterator's whole lifetime -- iterator_refind_partial_leaf()
+	 * dereferences it when a FETCH partial read fails before any tuple is
+	 * returned.  The iterator outlives scan_make_iterator()'s stack frame, so
+	 * the start key must live in the scan struct, not on that frame.
+	 */
+	OFixedKey	iterKeyLow;
 	bool		firstPageIsLoaded;
 
 	/* Private parallel worker info in a backend */
@@ -830,8 +840,18 @@ scan_make_iterator(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRangeHigh)
 
 	mctx = MemoryContextSwitchTo(scan->mctx);
 	if (!O_TUPLE_IS_NULL(keyRangeLow))
-		scan->iter = o_btree_iterator_create(scan->desc, &keyRangeLow, BTreeKeyNonLeafKey,
+	{
+		/*
+		 * keyRangeLow is a by-value parameter on our stack, but the iterator
+		 * keeps the start-key pointer for its whole lifetime (see
+		 * iterKeyLow). Persist it in the scan struct and hand the iterator
+		 * that durable copy.
+		 */
+		copy_fixed_key(scan->desc, &scan->iterKeyLow, keyRangeLow);
+		scan->iter = o_btree_iterator_create(scan->desc, &scan->iterKeyLow.tuple,
+											 BTreeKeyNonLeafKey,
 											 &scan->oSnapshot, ForwardScanDirection);
+	}
 	else
 		scan->iter = o_btree_iterator_create(scan->desc, NULL, BTreeKeyNone,
 											 &scan->oSnapshot, ForwardScanDirection);
