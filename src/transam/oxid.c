@@ -1853,6 +1853,17 @@ current_oxid_abort(void)
 	if (!OXidIsValid(curOxid))
 		return;
 
+	/* TEMP ORI217: record that current_oxid_abort() actually ran for this oxid */
+	{
+		extern int	ori217_wundo;
+
+		if (ori217_wundo < 50000)
+		{
+			ori217_wundo++;
+			elog(LOG, "OXABORT oxid=%llu", (unsigned long long) curOxid);
+		}
+	}
+
 	set_oxid_csn(curOxid, COMMITSEQNO_ABORTED);
 	pg_write_barrier();
 	csn_committing_set = false;
