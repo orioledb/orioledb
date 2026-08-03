@@ -720,16 +720,20 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 		if (ori217_trace)
 			ori217_levels = _trLvl + 1;
 		if (ori217_trace)
-			elog(LOG, "ORI217chain lvl=%d snapCsn=%llx oxid=%llu tupcsn=%llx txFin=%d deleted=%d lockOnly=%d undoLoc=%llx undoValid=%d hasCb=%d",
-				 _trLvl++,
+			elog(LOG, "ORI217chain lvl=%d snapCsn=%llx oxid=%llu rawXactInfo=%llx xiFinished=%d tupcsn=%llx txFin=%d deleted=%d lockOnly=%d undoLoc=%llx undoValid=%d hasCb=%d",
+				 _trLvl,
 				 (unsigned long long) oSnapshot->csn,
 				 (unsigned long long) XACT_INFO_GET_OXID(xactInfo),
+				 (unsigned long long) xactInfo,
+				 XACT_INFO_IS_FINISHED(xactInfo) ? 1 : 0,
 				 (unsigned long long) tupcsn, txIsFinished ? 1 : 0,
 				 tupHdr.deleted,
 				 XACT_INFO_IS_LOCK_ONLY(xactInfo) ? 1 : 0,
 				 (unsigned long long) tupHdr.undoLocation,
 				 UndoLocationIsValid(tupHdr.undoLocation) ? 1 : 0,
 				 cb ? 1 : 0);
+		if (ori217_trace)
+			_trLvl++;
 
 		if (tupleCsn)
 		{
