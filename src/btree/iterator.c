@@ -34,6 +34,8 @@
 
 /* TEMP ORI217: when set, o_find_tuple_version() traces its undo-chain walk */
 bool		ori217_trace = false;
+OXid		ori217_last_oxid = InvalidOXid;	/* on-page (lvl 0) oxid at a trace */
+int			ori217_levels = 0;	/* number of chain levels walked at a trace */
 
 /* Iterates through undo images */
 typedef struct
@@ -713,6 +715,10 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 		txIsFinished = COMMITSEQNO_IS_COMMITTED(tupcsn);
 
+		if (ori217_trace && _trLvl == 0)
+			ori217_last_oxid = XACT_INFO_GET_OXID(xactInfo);
+		if (ori217_trace)
+			ori217_levels = _trLvl + 1;
 		if (ori217_trace)
 			elog(LOG, "ORI217chain lvl=%d snapCsn=%llx oxid=%llu tupcsn=%llx txFin=%d deleted=%d lockOnly=%d undoLoc=%llx undoValid=%d hasCb=%d",
 				 _trLvl++,

@@ -102,6 +102,9 @@ static void rowid_set_csn(OIndexDescr *id, Datum pkDatum, CommitSeqNo csn);
 
 /* TEMP ORI217: chain-walk trace flag defined in src/btree/iterator.c */
 extern bool ori217_trace;
+extern OXid ori217_last_oxid;
+extern int	ori217_levels;
+extern void ori217_probe_oxid(OXid oxid);
 
 /* ------------------------------------------------------------------------
  * SQL functions
@@ -398,6 +401,8 @@ orioledb_fetch_row_version(Relation relation,
 			 */
 			O_LOAD_SNAPSHOT_CSN(&rSnapshot, csn);
 			descr->noInvalidation = true;
+			ori217_last_oxid = InvalidOXid;
+			ori217_levels = 0;
 			ori217_trace = true;
 			et2 = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
 											(Pointer) &pkey, BTreeKeyBound,
@@ -405,6 +410,39 @@ orioledb_fetch_row_version(Relation relation,
 											slot->tts_mcxt, &rhint);
 			ori217_trace = false;
 			descr->noInvalidation = false;
+
+			/*
+			 * Decide committed-vs-aborted for the on-page (lvl 0) oxid: raw
+			 * in-memory slot vs on-disk xidmap vs map_oxid, plus a proper
+			 * committed MVCC read at the latest committed csn (a NORMAL
+			 * snapshot, NOT o_in_progress which short-circuits and returns the
+			 * physical tuple regardless of abort).  If the on-page oxid is the
+			 * sole version (ori217_levels==1, undo invalid) yet a committed
+			 * reader finds the row, map_oxid's ABORTED is a corrupt/racy read.
+			 */
+			{
+				OSnapshot	cSnapshot;
+				CommitSeqNo ccsn = COMMITSEQNO_INPROGRESS;
+				BTreeLocationHint chint = hint;
+				OTuple		ct;
+				CommitSeqNo latestCsn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
+
+				ori217_probe_oxid(ori217_last_oxid);
+
+				O_LOAD_SNAPSHOT_CSN(&cSnapshot, latestCsn);
+				descr->noInvalidation = true;
+				ct = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
+											   (Pointer) &pkey, BTreeKeyBound,
+											   &cSnapshot, &ccsn,
+											   slot->tts_mcxt, &chint);
+				descr->noInvalidation = false;
+				elog(LOG, "ORI217committedRead atLatestCsn=%llx found=%d ccsn=%llx onpageLevels=%d onpageOxid=%llu",
+					 (unsigned long long) latestCsn,
+					 O_TUPLE_IS_NULL(ct) ? 0 : 1,
+					 (unsigned long long) ccsn,
+					 ori217_levels,
+					 (unsigned long long) ori217_last_oxid);
+			}
 
 			/*
 			 * Retain state at the miss: my registered snapshot retain vs the

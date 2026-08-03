@@ -845,6 +845,57 @@ map_oxid(OXid oxid, CommitSeqNo *outCsn, XLogRecPtr *outPtr, bool getRawCsn)
 		*outPtr = pg_atomic_read_u64(&mapItem.commitPtr);
 }
 
+/*
+ * TEMP ORI217: dump everything known about one oxid's csn resolution to tell
+ * a genuine ABORTED from a corrupt/racy map read.  Compares the raw in-memory
+ * circular-buffer slot, two map_oxid() reads, and a direct on-disk xidmap read
+ * against the xmin horizons.  A committed oxid reported ABORTED by map_oxid
+ * (esp. if the on-disk slot disagrees) means map corruption / a bad read.
+ */
+void
+ori217_probe_oxid(OXid oxid)
+{
+	OXidMapItem diskItem = {0};
+	CommitSeqNo memCsn,
+				mapCsn1 = 0,
+				mapCsn2 = 0,
+				diskCsn = 0;
+	OXid		gmin = pg_atomic_read_u64(&xid_meta->globalXmin);
+	OXid		wmin = pg_atomic_read_u64(&xid_meta->writtenXmin);
+	OXid		wipmin = pg_atomic_read_u64(&xid_meta->writeInProgressXmin);
+	OXid		rmin = pg_atomic_read_u64(&xid_meta->runXmin);
+
+	if (!OXidIsValid(oxid))
+	{
+		elog(LOG, "ORI217oxid oxid=INVALID");
+		return;
+	}
+
+	memCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn);
+	map_oxid(oxid, &mapCsn1, NULL, false);
+	map_oxid(oxid, &mapCsn2, NULL, false);
+	if (oxid < wmin && oxid >= gmin)
+	{
+		o_buffers_read(&buffersDesc, (Pointer) &diskItem, OXID_BUFFERS_TAG,
+					   oxid * sizeof(OXidMapItem), sizeof(OXidMapItem), false);
+		diskCsn = pg_atomic_read_u64(&diskItem.csn);
+	}
+
+	elog(LOG, "ORI217oxid oxid=%llu memSlotCsn=%llx map1=%llx map2=%llx diskCsn=%llx | globalXmin=%llu writtenXmin=%llu writeInProgXmin=%llu runXmin=%llu | inDiskWindow=%d slotIdx=%llu belowRunXmin=%llu",
+		 (unsigned long long) oxid,
+		 (unsigned long long) memCsn,
+		 (unsigned long long) mapCsn1,
+		 (unsigned long long) mapCsn2,
+		 (unsigned long long) diskCsn,
+		 (unsigned long long) gmin,
+		 (unsigned long long) wmin,
+		 (unsigned long long) wipmin,
+		 (unsigned long long) rmin,
+		 (oxid >= gmin && oxid < wmin) ? 1 : 0,
+		 (unsigned long long) (oxid % xid_circular_buffer_size),
+		 (unsigned long long) (OXidIsValid(rmin) && rmin > oxid ? rmin - oxid : 0));
+}
+
 void
 clear_rewind_oxid(OXid oxid)
 {
