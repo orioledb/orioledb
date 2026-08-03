@@ -472,6 +472,79 @@ orioledb_fetch_row_version(Relation relation,
 				 (unsigned long long) pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo),
 				 MyProcPid);
 		}
+
+		/*
+		 * TEMP ORI217: MEASURE whether the on-page oxid changes over time.
+		 * There is no tuple finalization anymore, so the header xactInfo is
+		 * only rewritten by an explicit modify / undo-apply.  Poll the on-page
+		 * (in-progress) oxid and a committed reader's visibility every 100ms
+		 * for ~6s, logging every oxid transition and the moment the row turns
+		 * visible.  Bounded to 3 polls per process to avoid pile-ups.
+		 */
+		{
+			static int	ori217_polls = 0;
+
+			if (ori217_polls < 3)
+			{
+				OXid		prevOxid;
+				int			it;
+				long long	ppk0 = pkey.nkeys > 0 ? (long long) pkey.keys[0].value : -1;
+				long long	ppk1 = pkey.nkeys > 1 ? (long long) pkey.keys[1].value : -1;
+				long long	ppk2 = pkey.nkeys > 2 ? (long long) pkey.keys[2].value : -1;
+
+				ori217_polls++;
+				prevOxid = ori217_last_oxid;
+				elog(LOG, "ORI217poll START pk=[%lld,%lld,%lld] onpageOxid=%llu",
+					 ppk0, ppk1, ppk2, (unsigned long long) prevOxid);
+				for (it = 0; it < 60; it++)
+				{
+					OTuple		pt;
+					CommitSeqNo pcsn = COMMITSEQNO_INPROGRESS;
+					BTreeLocationHint ph = hint;
+					OSnapshot	lsnap;
+					CommitSeqNo lcsn2 = COMMITSEQNO_INPROGRESS;
+					BTreeLocationHint lh2 = hint;
+					OTuple		lt2;
+					CommitSeqNo latest = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
+					OXid		curOxid;
+					bool		vis;
+
+					descr->noInvalidation = true;
+					ori217_last_oxid = InvalidOXid;
+					ori217_trace = true;
+					pt = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
+												   (Pointer) &pkey, BTreeKeyBound,
+												   &o_in_progress_snapshot, &pcsn,
+												   slot->tts_mcxt, &ph);
+					ori217_trace = false;
+					curOxid = ori217_last_oxid;
+
+					O_LOAD_SNAPSHOT_CSN(&lsnap, latest);
+					lt2 = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
+													(Pointer) &pkey, BTreeKeyBound,
+													&lsnap, &lcsn2,
+													slot->tts_mcxt, &lh2);
+					descr->noInvalidation = false;
+					vis = !O_TUPLE_IS_NULL(lt2);
+
+					if (curOxid != prevOxid || vis)
+					{
+						elog(LOG, "ORI217poll it=%d onpageOxid=%llu prevOxid=%llu onpageExists=%d committedVisible=%d committedCsn=%llx",
+							 it, (unsigned long long) curOxid,
+							 (unsigned long long) prevOxid,
+							 O_TUPLE_IS_NULL(pt) ? 0 : 1,
+							 vis ? 1 : 0, (unsigned long long) lcsn2);
+						prevOxid = curOxid;
+					}
+					if (vis)
+						break;
+					CHECK_FOR_INTERRUPTS();
+					pg_usleep(100000); /* 100ms */
+				}
+				elog(LOG, "ORI217poll END pk=[%lld,%lld,%lld] lastOnpageOxid=%llu iters=%d",
+					 ppk0, ppk1, ppk2, (unsigned long long) prevOxid, it);
+			}
+		}
 		return false;
 	}
 
