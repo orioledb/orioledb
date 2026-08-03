@@ -938,6 +938,33 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 			for (i = 0; i < numTrees; i++)
 				fsync_btree_files(trees[i]);
 		}
+
+		/*
+		 * Acquire here locks the commit stage below needs to drop the old
+		 * trees.
+		 *
+		 * The commit stage runs from an XACT_EVENT_COMMIT callback, which
+		 * PG's core calls between HOLD_INTERRUPTS() and RESUME_INTERRUPTS(),
+		 * so the locks there cannot be interrupted.
+		 *
+		 * XACT_EVENT_PRE_COMMIT is called before the interrupt holdoff, so
+		 * waiting here is safe and can be cancelled (using request cancel or
+		 * timeout).  Once we hold the locks, the commit stage acquires them
+		 * without waiting.
+		 */
+		if (OidIsValid(relnode_item->oldRelnode) &&
+			!is_recovery_in_progress())
+		{
+			ORelOids	oids = {relnode_item->datoid, relnode_item->relid,
+			relnode_item->oldRelnode};
+			int			i;
+
+			o_tables_rel_lock_exclusive_no_inval_no_log(&oids);
+
+			for (i = 0; i < relnode_item->oldNumTrees; i++)
+				o_tables_rel_lock_exclusive_no_inval_no_log(&relnode_item->trees[i].oids);
+		}
+
 		return;
 	}
 
