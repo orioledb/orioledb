@@ -543,7 +543,7 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	{
 		extern int	ori217_wundo;
 
-		if (item->action == BTreeOperationInsert && item->header.indexType == oIndexPrimary && ori217_wundo < 400)
+		if (item->action == BTreeOperationInsert && item->header.indexType == oIndexPrimary && ori217_wundo < 50000)
 		{
 			ori217_wundo++;
 			elog(LOG, "WUNDO-APPLY loc=%llx oxid=%llu action=insert blkno=%u",

@@ -2206,7 +2206,7 @@ add_new_undo_stack_item_to_process(UndoLogType undoType,
 			pg_atomic_write_u64(&oProcData[pgprocno].undoRetainLocations[undoType].transactionUndoRetainLocation, location);
 
 		/* TEMP ORI217: trace waiter-insert undo linkage + retain fate */
-		if (undoType == UndoLogRegular && ori217_wundo < 400)
+		if (undoType == UndoLogRegular && ori217_wundo < 50000)
 		{
 			ori217_wundo++;
 			elog(LOG, "WUNDO-MAKE loc=%llx prev=%llx waiterProc=%d nesting=%d retainBefore=%llx retainAfter=%llx headWas=%llx",
