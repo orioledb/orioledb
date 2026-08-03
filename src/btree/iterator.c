@@ -32,6 +32,9 @@
 #include "utils/memutils.h"
 #include "utils/resowner.h"
 
+/* TEMP ORI217: when set, o_find_tuple_version() traces its undo-chain walk */
+bool		ori217_trace = false;
+
 /* Iterates through undo images */
 typedef struct
 {
@@ -688,6 +691,7 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	bool		curTupleAllocated = false;
 	MemoryContext prevMctx;
 	bool		txIsFinished = false;
+	int			_trLvl = 0;
 
 	prevMctx = MemoryContextSwitchTo(mcxt);
 
@@ -708,6 +712,18 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 							XLogRecPtrIsInvalid(oSnapshot->xlogptr) ? NULL : &tupptr);
 
 		txIsFinished = COMMITSEQNO_IS_COMMITTED(tupcsn);
+
+		if (ori217_trace)
+			elog(LOG, "ORI217chain lvl=%d snapCsn=%llx oxid=%llu tupcsn=%llx txFin=%d deleted=%d lockOnly=%d undoLoc=%llx undoValid=%d hasCb=%d",
+				 _trLvl++,
+				 (unsigned long long) oSnapshot->csn,
+				 (unsigned long long) XACT_INFO_GET_OXID(xactInfo),
+				 (unsigned long long) tupcsn, txIsFinished ? 1 : 0,
+				 tupHdr.deleted,
+				 XACT_INFO_IS_LOCK_ONLY(xactInfo) ? 1 : 0,
+				 (unsigned long long) tupHdr.undoLocation,
+				 UndoLocationIsValid(tupHdr.undoLocation) ? 1 : 0,
+				 cb ? 1 : 0);
 
 		if (tupleCsn)
 		{
@@ -807,6 +823,8 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 		if (!UndoLocationIsValid(undoLocation))
 		{
+			if (ori217_trace)
+				elog(LOG, "ORI217chain END-NULL reason=undo-chain-exhausted lvl=%d", _trLvl);
 			if (curTupleAllocated)
 				pfree(curTuple.data);
 			O_TUPLE_SET_NULL(result);
@@ -836,6 +854,8 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 		if (tupHdr.deleted != BTreeLeafTupleNonDeleted &&
 			txIsFinished)
 		{
+			if (ori217_trace)
+				elog(LOG, "ORI217chain END-NULL reason=non-deleted-snap-deleted-finished lvl=%d", _trLvl);
 			if (curTupleAllocated)
 				pfree(curTuple.data);
 			O_TUPLE_SET_NULL(result);
@@ -845,12 +865,17 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 	}
 	else if (tupHdr.deleted != BTreeLeafTupleNonDeleted && !cb)
 	{
+		if (ori217_trace)
+			elog(LOG, "ORI217chain END-NULL reason=deleted-nocb lvl=%d", _trLvl);
 		if (curTupleAllocated)
 			pfree(curTuple.data);
 		O_TUPLE_SET_NULL(result);
 		MemoryContextSwitchTo(prevMctx);
 		return result;
 	}
+
+	if (ori217_trace)
+		elog(LOG, "ORI217chain END-FOUND lvl=%d deleted=%d", _trLvl, tupHdr.deleted);
 
 	if (!curTupleAllocated)
 	{

@@ -34,6 +34,7 @@
 #include "tableam/tree.h"
 #include "tableam/vacuum.h"
 #include "transam/oxid.h"
+#include "transam/undo.h"
 #include "tuple/slot.h"
 #include "utils/compress.h"
 #include "utils/rel.h"
@@ -98,6 +99,9 @@ static void get_keys_from_rowid(OIndexDescr *primary, Datum pkDatum, OBTreeKeyBo
 								BTreeLocationHint *hint, CommitSeqNo *csn,
 								uint32 *version, ItemPointer *bridge_ctid);
 static void rowid_set_csn(OIndexDescr *id, Datum pkDatum, CommitSeqNo csn);
+
+/* TEMP ORI217: chain-walk trace flag defined in src/btree/iterator.c */
+extern bool ori217_trace;
 
 /* ------------------------------------------------------------------------
  * SQL functions
@@ -394,11 +398,26 @@ orioledb_fetch_row_version(Relation relation,
 			 */
 			O_LOAD_SNAPSHOT_CSN(&rSnapshot, csn);
 			descr->noInvalidation = true;
+			ori217_trace = true;
 			et2 = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
 											(Pointer) &pkey, BTreeKeyBound,
 											&rSnapshot, &r2csn,
 											slot->tts_mcxt, &rhint);
+			ori217_trace = false;
 			descr->noInvalidation = false;
+
+			/*
+			 * Retain state at the miss: my registered snapshot retain vs the
+			 * reclaim floor.  If the chain trace shows a level whose undoLoc <
+			 * floor, the version the rowid CSN needs was reclaimed (retain
+			 * gap); if my snapshot retain is <= that undoLoc, the retain
+			 * should have protected it (model holds).
+			 */
+			elog(LOG, "ORI217retain mySnapRetain=%llx floor(minProcRetain)=%llx floor(cleaned)=%llx xactRetain=%llx",
+				 (unsigned long long) get_snapshot_retained_undo_location(UndoLogRegular),
+				 (unsigned long long) pg_atomic_read_u64(&get_undo_meta_by_type(UndoLogRegular)->minProcRetainLocation),
+				 (unsigned long long) pg_atomic_read_u64(&get_undo_meta_by_type(UndoLogRegular)->cleanedLocation),
+				 (unsigned long long) pg_atomic_read_u64(&get_undo_meta_by_type(UndoLogRegular)->minProcTransactionRetainLocation));
 
 			elog(LOG, "ORI217 fetch-miss rowidCsn=%llx version=%u tupleCsn=%llx deleted=%d anySnap=%d pkNkeys=%d pk=[%lld,%lld,%lld] | latest_cb: found=%d latestCsn=%llx latestDel=%d | latest_nocb: found=%d ecsn=%llx | atRowidCsn_nocb: found=%d r2csn=%llx | runXmin=%llu globalXmin=%llu writtenXmin=%llu nextCsn=%llx pid=%d",
 				 (unsigned long long) csn, version,
