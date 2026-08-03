@@ -933,12 +933,13 @@ ori217_probe_oxid(OXid oxid)
 	memCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn);
 	map_oxid(oxid, &mapCsn1, NULL, false);
 	map_oxid(oxid, &mapCsn2, NULL, false);
-	if (oxid < wmin && oxid >= gmin)
-	{
-		o_buffers_read(&buffersDesc, (Pointer) &diskItem, OXID_BUFFERS_TAG,
-					   oxid * sizeof(OXidMapItem), sizeof(OXidMapItem), false);
+	/* TEMP ORI217: read disk UNCONDITIONALLY (missing_ok) -- the stuck oxid may
+	 * race below globalXmin by probe time, but we still want the on-disk value. */
+	if (o_buffers_read(&buffersDesc, (Pointer) &diskItem, OXID_BUFFERS_TAG,
+					   oxid * sizeof(OXidMapItem), sizeof(OXidMapItem), true))
 		diskCsn = pg_atomic_read_u64(&diskItem.csn);
-	}
+	else
+		diskCsn = 0xdead;
 
 	elog(LOG, "ORI217oxid oxid=%llu memSlotCsn=%llx map1=%llx map2=%llx diskCsn=%llx | globalXmin=%llu writtenXmin=%llu writeInProgXmin=%llu runXmin=%llu | inDiskWindow=%d slotIdx=%llu belowRunXmin=%llu",
 		 (unsigned long long) oxid,
@@ -962,7 +963,6 @@ ori217_probe_oxid(OXid oxid)
 	 * wrong on-disk value (a write persisted ABORTED).  A contiguous run of
 	 * equal stale values points at a whole-page flush clobber.
 	 */
-	if (oxid < wmin && oxid >= gmin)
 	{
 		int			d;
 
@@ -974,7 +974,7 @@ ori217_probe_oxid(OXid oxid)
 			bool		rok;
 
 			o_buffers_read(&buffersDesc, (Pointer) &cItem, OXID_BUFFERS_TAG,
-						   ox * sizeof(OXidMapItem), sizeof(OXidMapItem), false);
+						   ox * sizeof(OXidMapItem), sizeof(OXidMapItem), true);
 			rok = o_buffers_read_raw(&buffersDesc, OXID_BUFFERS_TAG,
 									 ox * sizeof(OXidMapItem),
 									 (Pointer) &rItem, sizeof(OXidMapItem));
