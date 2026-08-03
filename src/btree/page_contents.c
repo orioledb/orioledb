@@ -586,6 +586,144 @@ o_btree_page_calculate_statistics(BTreeDescr *desc, Pointer p)
 	}
 }
 
+#ifdef USE_ASSERT_CHECKING
+
+/* How many leading tuple bytes the page-order report renders. */
+#define PAGE_ORDER_DUMP_BYTES	24
+#define PAGE_ORDER_DUMP_BUFSZ	(PAGE_ORDER_DUMP_BYTES * 2 + 8)
+
+/*
+ * Render the leading bytes of a tuple as hex into buf (at least
+ * PAGE_ORDER_DUMP_BUFSZ long).  Allocation-free, so it is safe on the way to an
+ * abort and inside a critical section.
+ */
+static const char *
+page_order_tuple_to_hex(BTreeDescr *desc, OTuple tup, char *buf)
+{
+	static const char hexdigits[] = "0123456789abcdef";
+	char	   *p = buf;
+	int			len;
+	int			i;
+
+	if (O_TUPLE_IS_NULL(tup))
+		return "(null)";
+
+	len = o_btree_len(desc, tup, OTupleLength);
+	if (len < 0)
+		len = 0;
+	else if (len > PAGE_ORDER_DUMP_BYTES)
+		len = PAGE_ORDER_DUMP_BYTES;
+
+	for (i = 0; i < len; i++)
+	{
+		uint8		b = (uint8) tup.data[i];
+
+		*p++ = hexdigits[b >> 4];
+		*p++ = hexdigits[b & 0x0f];
+	}
+	*p = '\0';
+
+	return buf;
+}
+
+/*
+ * See the comment on BTREE_ASSERT_LEAF_ORDER in page_contents.h.
+ *
+ * Reads both tuples straight out of the page rather than copying, which is safe
+ * because the caller holds the page and nothing here allocates.  Equal key bytes
+ * mean two items share a key -- for a primary index that is a duplicate key, so
+ * the report carries each item's xactInfo, undoLocation and deleted flag to
+ * identify the transactions that wrote them.
+ */
+void
+o_btree_check_leaf_page_dup_keys(BTreeDescr *desc, Page p, OInMemoryBlkno blkno,
+								 const char *where)
+{
+	static MemoryContext scratch = NULL;
+	BTreePageItemLocator loc,
+				prevLoc;
+	bool		havePrev = false;
+	MemoryContext oldCxt;
+
+	Assert(CritSectionCount == 0);
+
+	if (!O_PAGE_IS(p, LEAF))
+		return;
+
+	/*
+	 * Only primary indexes of user tables.  Comparing two leaf tuples with
+	 * BTreeKeyLeafTuple is meaningful there (see the oIndexPrimary case in
+	 * o_idx_cmp(), tableam/descr.h); on TOAST, bridge and sys trees the leaf
+	 * form is different and the comparator returns nonsense, and a non-unique
+	 * secondary index may hold equal indexed values legitimately.  The bug being
+	 * hunted is a duplicate primary key, so this is the tree that matters.
+	 */
+	if (desc->type != oIndexPrimary || IS_SYS_TREE_OIDS(desc->oids))
+		return;
+
+	/*
+	 * o_btree_cmp() allocates -- varlena and numeric comparisons palloc, and
+	 * first use of an opclass caches its FmgrInfo -- so give it a private
+	 * context and reset it on the way out, keeping a per-page-write check from
+	 * growing the caller's context.
+	 */
+	if (scratch == NULL)
+		scratch = AllocSetContextCreate(TopMemoryContext,
+										"orioledb leaf dup-key check",
+										ALLOCSET_SMALL_SIZES);
+	oldCxt = MemoryContextSwitchTo(scratch);
+
+	BTREE_PAGE_FOREACH_ITEMS(p, &loc)
+	{
+		if (havePrev)
+		{
+			BTreeLeafTuphdr *prevHdr,
+					   *curHdr;
+			OTuple		prevTup,
+						curTup;
+			int			cmp;
+
+			BTREE_PAGE_READ_LEAF_ITEM(prevHdr, prevTup, p, &prevLoc);
+			BTREE_PAGE_READ_LEAF_ITEM(curHdr, curTup, p, &loc);
+
+			cmp = o_btree_cmp(desc, &prevTup, BTreeKeyLeafTuple,
+							  &curTup, BTreeKeyLeafTuple);
+			if (cmp >= 0)
+			{
+				char		prevHex[PAGE_ORDER_DUMP_BUFSZ];
+				char		curHex[PAGE_ORDER_DUMP_BUFSZ];
+
+				elog(PANIC,
+					 "OrioleDB leaf page items not strictly ordered at %s: cmp=%d blkno=%u "
+					 "tree=(%u, %u, %u) itemsCount=%d "
+					 "prev={offset=%u chunk=%u item=%u deleted=%d xactInfo=" UINT64_FORMAT " undoLoc=" UINT64_FORMAT "} "
+					 "cur={offset=%u chunk=%u item=%u deleted=%d xactInfo=" UINT64_FORMAT " undoLoc=" UINT64_FORMAT "} "
+					 "prevTuple=%s curTuple=%s",
+					 where, cmp, blkno,
+					 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
+					 BTREE_PAGE_ITEMS_COUNT(p),
+					 BTREE_PAGE_LOCATOR_GET_OFFSET(p, &prevLoc),
+					 prevLoc.chunkOffset, prevLoc.itemOffset,
+					 (int) prevHdr->deleted,
+					 (uint64) prevHdr->xactInfo, (uint64) prevHdr->undoLocation,
+					 BTREE_PAGE_LOCATOR_GET_OFFSET(p, &loc),
+					 loc.chunkOffset, loc.itemOffset,
+					 (int) curHdr->deleted,
+					 (uint64) curHdr->xactInfo, (uint64) curHdr->undoLocation,
+					 page_order_tuple_to_hex(desc, prevTup, prevHex),
+					 page_order_tuple_to_hex(desc, curTup, curHex));
+			}
+		}
+
+		prevLoc = loc;
+		havePrev = true;
+	}
+
+	MemoryContextSwitchTo(oldCxt);
+	MemoryContextReset(scratch);
+}
+#endif							/* USE_ASSERT_CHECKING */
+
 void
 copy_fixed_tuple(BTreeDescr *desc, OFixedTuple *dst, OTuple src)
 {

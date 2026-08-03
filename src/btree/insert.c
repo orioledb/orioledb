@@ -1141,6 +1141,7 @@ o_btree_multi_insert_item(OBTreeFindPageContext *ctx,
 		if (desc->undoType == UndoLogRegular && !is_recovery_process())
 			tuphdr.undoLocation |= current_command_get_undo_location();
 
+		BTREE_ASSERT_LEAF_ORDER(desc, p, blkno, "insert_item_with_waiters");
 		START_CRIT_SECTION();
 
 		btree_leaf_write_new_item(desc, p, &loc, &tuphdr, tuple, tuplen);
@@ -1331,6 +1332,7 @@ o_btree_insert_item_with_waiters(BTreeInsertStackItem *insert_item,
 
 	if (!split)
 	{
+		BTREE_ASSERT_LEAF_ORDER(desc, p, blkno, "insert_item_compaction");
 		START_CRIT_SECTION();
 		perform_page_compaction(desc, blkno, &newItems, needsUndo, csn);
 		MARK_DIRTY(desc, blkno);
@@ -1382,6 +1384,8 @@ o_btree_insert_item_no_waiters(BTreeInsertStackItem *insert_item,
 	 * The result could be somewhat pessimistic: it might happen that we could
 	 * actually compact more due to advance of nextCommitSeqNo.
 	 */
+	BTREE_ASSERT_LEAF_ORDER(desc, p, blkno, "insert_item");
+
 	fit = page_locator_fits_item(desc,
 								 p,
 								 &loc,

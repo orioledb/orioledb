@@ -385,6 +385,33 @@ typedef struct ItemPointerData ItemPointerData;
 extern ItemPointerData btree_ctid_get_and_inc(BTreeDescr *desc);
 extern void btree_ctid_update_if_needed(BTreeDescr *desc, ItemPointerData ctid);
 
+/*
+ * Look for two adjacent leaf items with byte-identical keys.  Meant to be called
+ * by a writer with the page still locked, right before MARK_DIRTY, so a page
+ * that has just gained a duplicate key is reported by the backend that did it
+ * rather than by some reader much later.  PANICs with both items on failure;
+ * `where` names the call site in the report.
+ *
+ * Deliberately NOT a general ordering check: every caller runs inside a critical
+ * section, and o_btree_cmp() allocates (varlena/numeric comparison, and
+ * first-use comparator setup lands in CacheMemoryContext), which trips mcxt.c's
+ * no-allocation assert.  Comparing the key prefix with memcmp is allocation-free
+ * and detects exactly the shape we are hunting -- two rows sharing a primary
+ * key.  It will not catch mis-ordering, nor duplicates whose keys differ
+ * bytewise but compare equal under a collation.
+ *
+ * Compiled out without USE_ASSERT_CHECKING: it is O(items) per page write.
+ */
+#ifdef USE_ASSERT_CHECKING
+extern void o_btree_check_leaf_page_dup_keys(BTreeDescr *desc, Page p,
+											 OInMemoryBlkno blkno,
+											 const char *where);
+#define BTREE_ASSERT_LEAF_ORDER(desc, p, blkno, where) \
+	o_btree_check_leaf_page_dup_keys((desc), (p), (blkno), (where))
+#else
+#define BTREE_ASSERT_LEAF_ORDER(desc, p, blkno, where) ((void) 0)
+#endif
+
 extern void copy_fixed_tuple(BTreeDescr *desc, OFixedTuple *dst, OTuple src);
 extern void copy_fixed_key(BTreeDescr *desc, OFixedKey *dst, OTuple src);
 extern void copy_fixed_page_key(BTreeDescr *desc, OFixedKey *dst,
