@@ -5,7 +5,13 @@ import helper_common as h
 
 
 def main():
-    conn = h.connect("checkpoint_probe")
+    try:
+        conn = h.connect("checkpoint_probe")
+    except h.CONNECTION_LOST_ERRORS:
+        # orioledb not reachable yet (e.g. a node-stop fault landed right as
+        # this invocation started) -- nothing to do this invocation,
+        # Antithesis will run us again.
+        return
     try:
         try:
             corrupted = h.load_config(conn, "corrupted", False)
@@ -15,7 +21,13 @@ def main():
             # run us again.
             return
 
-        h.maybe_record_restart(conn, start_before)
+        try:
+            h.maybe_record_restart(conn, start_before)
+        except h.CONNECTION_LOST_ERRORS:
+            # Lost the connection between the earlier reads and this write
+            # (e.g. a node-kill fault landed mid-invocation) -- the next
+            # probe invocation will still catch the restart transition.
+            return
 
         if not corrupted:
             return  # nothing to probe yet this timeline

@@ -39,7 +39,13 @@ def new_conn():
 
 
 def main():
-    conn = new_conn()
+    try:
+        conn = new_conn()
+    except h.CONNECTION_LOST_ERRORS:
+        # orioledb not reachable yet (e.g. a node-stop fault landed right as
+        # this invocation started) -- nothing to do this invocation,
+        # Antithesis will run us again.
+        return
     try:
         try:
             batch_menu = h.load_batch_menu(conn)
