@@ -775,6 +775,13 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 			 (unsigned long long) pg_atomic_read_u64(&xid_meta->writtenXmin),
 			 (unsigned long long) pg_atomic_read_u64(&xid_meta->writeInProgressXmin));
 	}
+	/* TEMP ORI217: trace every set_oxid_csn disk write (oxid + value) */
+	if (ori217_drain < 200000)
+	{
+		ori217_drain++;
+		elog(LOG, "DISKWRITE-CSN oxid=%llu csn=%llx", (unsigned long long) oxid,
+			 (unsigned long long) csn);
+	}
 	o_buffers_write(&buffersDesc, (Pointer) &csn, OXID_BUFFERS_TAG,
 					oxid * sizeof(OXidMapItem) + offsetof(OXidMapItem, csn),
 					sizeof(CommitSeqNo), false, false);
@@ -946,6 +953,40 @@ ori217_probe_oxid(OXid oxid)
 		 (oxid >= gmin && oxid < wmin) ? 1 : 0,
 		 (unsigned long long) (oxid % xid_circular_buffer_size),
 		 (unsigned long long) (OXidIsValid(rmin) && rmin > oxid ? rmin - oxid : 0));
+
+	/*
+	 * TEMP ORI217: compare the cached xidmap read (o_buffers_read, what
+	 * map_oxid uses) against a straight-from-file read (bypassing the
+	 * o_buffers cache), for oxid and its neighbours.  cached != raw ⇒ a
+	 * stale/corrupt o_buffers cache page; cached == raw == 2 ⇒ a genuinely
+	 * wrong on-disk value (a write persisted ABORTED).  A contiguous run of
+	 * equal stale values points at a whole-page flush clobber.
+	 */
+	if (oxid < wmin && oxid >= gmin)
+	{
+		int			d;
+
+		for (d = -2; d <= 2; d++)
+		{
+			OXid		ox = oxid + d;
+			OXidMapItem cItem = {0};
+			OXidMapItem rItem = {0};
+			bool		rok;
+
+			o_buffers_read(&buffersDesc, (Pointer) &cItem, OXID_BUFFERS_TAG,
+						   ox * sizeof(OXidMapItem), sizeof(OXidMapItem), false);
+			rok = o_buffers_read_raw(&buffersDesc, OXID_BUFFERS_TAG,
+									 ox * sizeof(OXidMapItem),
+									 (Pointer) &rItem, sizeof(OXidMapItem));
+			elog(LOG, "ORI217disk oxid=%llu d=%d cachedCsn=%llx rawCsn=%llx rawOk=%d cachedPtr=%llx rawPtr=%llx",
+				 (unsigned long long) ox, d,
+				 (unsigned long long) pg_atomic_read_u64(&cItem.csn),
+				 (unsigned long long) pg_atomic_read_u64(&rItem.csn),
+				 rok ? 1 : 0,
+				 (unsigned long long) pg_atomic_read_u64(&cItem.commitPtr),
+				 (unsigned long long) pg_atomic_read_u64(&rItem.commitPtr));
+		}
+	}
 }
 
 void

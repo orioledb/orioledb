@@ -418,6 +418,34 @@ o_buffers_write(OBuffersDesc *desc, Pointer buf, uint32 tag,
 }
 
 /*
+ * TEMP ORI217: read a slice straight from the on-disk file, bypassing the
+ * o_buffers in-memory cache.  Lets a probe compare the cached value
+ * (o_buffers_read, what map_oxid sees) with what is actually persisted in the
+ * file, to tell a stale/corrupt cache page from a genuinely wrong on-disk value.
+ */
+bool
+o_buffers_read_raw(OBuffersDesc *desc, uint32 tag, int64 offset,
+				   Pointer buf, int64 size)
+{
+	int64		blockNum = offset / ORIOLEDB_BLCKSZ;
+	uint64		fileNum = blockNum / (desc->singleFileSize / ORIOLEDB_BLCKSZ);
+	int64		infileOff = (blockNum * ORIOLEDB_BLCKSZ) % desc->singleFileSize
+		+ (offset % ORIOLEDB_BLCKSZ);
+	char		path[MAXPGPATH];
+	File		f;
+	int			r;
+
+	pg_snprintf(path, MAXPGPATH, desc->filenameTemplate[tag],
+				(uint32) (fileNum >> 32), (uint32) fileNum);
+	f = PathNameOpenFile(path, O_RDONLY | PG_BINARY);
+	if (f < 0)
+		return false;
+	r = OFileRead(f, (char *) buf, size, infileOff, WAIT_EVENT_SLRU_READ);
+	FileClose(f);
+	return r == (int) size;
+}
+
+/*
  * Write one ORIOLEDB_BLCKSZ-aligned page straight to the on-disk file,
  * bypassing the o_buffers cache.
  *

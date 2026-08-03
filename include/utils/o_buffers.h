@@ -50,6 +50,9 @@ extern bool o_buffers_write(OBuffersDesc *desc, Pointer buf,
 							bool if_exists, bool mark_clean);
 extern void o_buffers_write_page_direct(OBuffersDesc *desc, char *data,
 										uint32 tag, int64 offset);
+/* TEMP ORI217 */
+extern bool o_buffers_read_raw(OBuffersDesc *desc, uint32 tag, int64 offset,
+							   Pointer buf, int64 size);
 extern void o_buffers_sync(OBuffersDesc *desc, uint32 tag, int64 fromOffset,
 						   int64 toOffset, uint32 wait_event_info);
 extern void o_buffers_unlink_blocks_range(OBuffersDesc *desc,
