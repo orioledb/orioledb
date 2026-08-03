@@ -214,3 +214,66 @@ class DDLTest(BaseTest):
 		    con1.execute(f"""
 			SELECT COUNT(*) FROM orioledb_sys_tree_rows(1) r;
 		""")[0][0], 0)
+
+	def test_drop_index_concurrently_statement_timeout(self):
+		"""
+		DROP INDEX CONCURRENTLY keeps only ShareUpdateExclusiveLock, so
+		during commit stage interrupts are switched off, so statement_timeout
+		was never processed and the backend waited for the reader instead of
+		failing.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+
+			CREATE TABLE o_test_drop_index (
+				val_1 int PRIMARY KEY,
+				val_2 int
+			) USING orioledb;
+
+			INSERT INTO o_test_drop_index
+				SELECT v, v FROM generate_series(1, 100) v;
+
+			CREATE INDEX o_test_drop_index_ix ON o_test_drop_index (val_2);
+		""")
+
+		reader = node.connect()
+		dropper = node.connect(autocommit=True)
+		try:
+			reader.execute("SET idle_in_transaction_session_timeout = '30s';")
+			reader.execute("SELECT * FROM o_test_drop_index LIMIT 1;")
+
+			# Here we should catch an error by timeout, because the transaction
+			# holds locks.
+			dropper.execute("SET statement_timeout = '1s';")
+			with self.assertRaises(Exception) as e:
+				dropper.execute("""
+					DROP INDEX CONCURRENTLY o_test_drop_index_ix;
+				""")
+			self.assertIn("canceling statement due to statement timeout",
+			              str(e.exception))
+
+			# The failed drop left the index in place and valid.
+			self.assertEqual([(True, )],
+			                 dropper.execute("""
+								 SELECT indisvalid FROM pg_index
+									 WHERE indexrelid =
+										   'o_test_drop_index_ix'::regclass;
+							 """))
+
+			# Nobody reads the table anymore, so the drop goes through.
+			reader.rollback()
+			dropper.execute("""
+				DROP INDEX CONCURRENTLY o_test_drop_index_ix;
+			""")
+			self.assertEqual([(0, )],
+			                 dropper.execute("""
+								 SELECT count(*) FROM pg_class
+									 WHERE relname = 'o_test_drop_index_ix';
+							 """))
+		finally:
+			reader.close()
+			dropper.close()
+
+		node.stop()
