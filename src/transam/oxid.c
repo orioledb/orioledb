@@ -114,16 +114,6 @@ reset_logical_xid_ctx(void)
 	logicalXidContext.useHeap = false;
 }
 
-static inline LogicalXidCtx *
-clone_logical_xid_ctx(void)
-{
-	LogicalXidCtx *clone = (LogicalXidCtx *) palloc(sizeof(LogicalXidCtx));
-
-	Assert(clone);
-	memcpy(clone, &logicalXidContext, sizeof(LogicalXidCtx));
-	return clone;
-}
-
 Datum
 orioledb_get_current_logical_xid(PG_FUNCTION_ARGS)
 {
@@ -136,8 +126,41 @@ orioledb_get_current_heap_xid(PG_FUNCTION_ARGS)
 	PG_RETURN_INT64(GetCurrentTransactionIdIfAny());
 }
 
-static List *prevLogicalXids = NIL; /* remember all xids on subxact's chain
-									 * for correct release */
+/*
+ * Saved logical xid context together with the subtransaction whose start
+ * pushed it.  The subid tag makes push and pop symmetric: a subtransaction
+ * end must only pop the entry it pushed itself.  A subtransaction that
+ * started before the transaction's first OrioleDB modification pushes
+ * nothing (see undo_subxact_callback), so its end must leave the current
+ * context untouched.
+ */
+typedef struct
+{
+	LogicalXidCtx ctx;
+	SubTransactionId subid;
+} PrevLogicalXidEntry;
+
+static List *prevLogicalXids = NIL; /* stack of PrevLogicalXidEntry for all
+									 * xids on subxact's chain, for correct
+									 * restore and release */
+
+/*
+ * Check whether the top of prevLogicalXids was pushed by the subtransaction
+ * identified by subid.
+ */
+static bool
+prev_logical_xid_pushed_by(SubTransactionId subid)
+{
+	PrevLogicalXidEntry *entry;
+
+	if (prevLogicalXids == NIL)
+		return false;
+
+	entry = (PrevLogicalXidEntry *) llast(prevLogicalXids);
+
+	return entry != NULL && entry->subid == subid;
+}
+
 static OXidMapItem *xidBuffer;
 
 /*
@@ -558,52 +581,55 @@ acquire_logical_xid_wrapper(bool *isValidHeapXid)
 }
 
 void
-assign_subtransaction_logical_xid(void)
+assign_subtransaction_logical_xid(SubTransactionId mySubid)
 {
 	TransactionId nextLogicalXid;
 	bool		isValidHeapXid = false;
+	PrevLogicalXidEntry *entry;
+	MemoryContext mcxt;
 
 	nextLogicalXid = acquire_logical_xid_wrapper(&isValidHeapXid);
 
 	/*
-	 * Check previous logical xid if present and store it in a list of xids
+	 * Store the previous logical xid context (even an invalid one) tagged
+	 * with the subtransaction id, so that the end of this subtransaction can
+	 * recognize its own entry and other subtransaction ends leave the stack
+	 * alone.
 	 */
-	if (TransactionIdIsValid(logicalXidContext.xid))
-	{
-		MemoryContext mcxt = MemoryContextSwitchTo(TopMemoryContext);
-
-		elog(DEBUG4, "STORE logical xid %u useHeap %d", logicalXidContext.xid, logicalXidContext.useHeap);
-		prevLogicalXids = lappend(prevLogicalXids, clone_logical_xid_ctx());
-		MemoryContextSwitchTo(mcxt);
-	}
+	mcxt = MemoryContextSwitchTo(TopMemoryContext);
+	elog(DEBUG4, "STORE logical xid %u useHeap %d subid %u",
+		 logicalXidContext.xid, logicalXidContext.useHeap, mySubid);
+	entry = (PrevLogicalXidEntry *) palloc(sizeof(PrevLogicalXidEntry));
+	entry->ctx = logicalXidContext;
+	entry->subid = mySubid;
+	prevLogicalXids = lappend(prevLogicalXids, entry);
+	MemoryContextSwitchTo(mcxt);
 
 	logicalXidContext.xid = nextLogicalXid;
 	logicalXidContext.useHeap = isValidHeapXid;
 }
 
 static void
-setup_prev_logical_xid_ctx(void)
+setup_prev_logical_xid_ctx(SubTransactionId mySubid)
 {
-	int			llen = 0;
-	LogicalXidCtx *ptr = NULL;
+	PrevLogicalXidEntry *entry;
 
-	llen = list_length(prevLogicalXids);
-	if (llen > 0)
-	{
-		ptr = (LogicalXidCtx *) llast(prevLogicalXids);
-		if (ptr)
-		{
-			logicalXidContext.xid = ptr->xid;
-			logicalXidContext.useHeap = ptr->useHeap;
-			elog(DEBUG4, "RESTORE logical xid %u useHeap %d", logicalXidContext.xid, logicalXidContext.useHeap);
-			pfree(ptr);
-		}
-		prevLogicalXids = list_delete_last(prevLogicalXids);
-	}
-	else
-	{
-		reset_logical_xid_ctx();
-	}
+	/*
+	 * Pop only the entry this subtransaction pushed itself.  If the
+	 * subtransaction started before the transaction's first OrioleDB
+	 * modification, nothing was pushed for it, and the current context
+	 * (possibly assigned lazily inside this subtransaction) must stay valid
+	 * up to the top-level commit record.
+	 */
+	if (!prev_logical_xid_pushed_by(mySubid))
+		return;
+
+	entry = (PrevLogicalXidEntry *) llast(prevLogicalXids);
+	logicalXidContext = entry->ctx;
+	elog(DEBUG4, "RESTORE logical xid %u useHeap %d subid %u",
+		 logicalXidContext.xid, logicalXidContext.useHeap, mySubid);
+	pfree(entry);
+	prevLogicalXids = list_delete_last(prevLogicalXids);
 }
 
 void
@@ -619,7 +645,16 @@ oxid_subxact_callback(
 			{
 				if (have_retained_undo_location())
 				{
-					if (TransactionIdIsValid(logicalXidContext.xid))
+					/*
+					 * Release and restore only the logical xid this
+					 * subtransaction assigned at its start.  If nothing was
+					 * pushed for it (the subtransaction started before the
+					 * first OrioleDB modification), the current logical xid
+					 * belongs to the whole transaction and must survive up to
+					 * the top-level commit record.
+					 */
+					if (TransactionIdIsValid(logicalXidContext.xid) &&
+						prev_logical_xid_pushed_by(mySubid))
 					{
 						release_logical_xid(&logicalXidContext);
 
@@ -649,7 +684,7 @@ oxid_subxact_callback(
 
 						if (!RecoveryInProgress())
 						{
-							setup_prev_logical_xid_ctx();
+							setup_prev_logical_xid_ctx(mySubid);
 						}
 					}
 				}
@@ -670,7 +705,7 @@ oxid_subxact_callback(
 								 logicalXidContext.xid,
 								 GetTopTransactionIdIfAny());
 
-							setup_prev_logical_xid_ctx();
+							setup_prev_logical_xid_ctx(mySubid);
 						}
 					}
 				}
@@ -1681,15 +1716,17 @@ release_assigned_logical_xids(void)
 	if (GET_CUR_PROCDATA()->autonomousNestingLevel == 0)
 	{
 		ListCell   *lc = NULL;
-		LogicalXidCtx *ptr = NULL;
+		PrevLogicalXidEntry *entry = NULL;
 
 		foreach(lc, prevLogicalXids)
 		{
-			ptr = lfirst(lc);
-			if (ptr)
+			entry = lfirst(lc);
+			if (entry)
 			{
-				release_logical_xid(ptr);
-				pfree(ptr);
+				/* Entries saved before the first assignment hold no xid */
+				if (TransactionIdIsValid(entry->ctx.xid))
+					release_logical_xid(&entry->ctx);
+				pfree(entry);
 			}
 		}
 		list_free(prevLogicalXids);

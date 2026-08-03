@@ -114,6 +114,61 @@ class LogicalTest(BaseTest):
 		    "table public.data: INSERT: id[integer]:2 data[text]:'2'\n"
 		    "COMMIT\n")
 
+	@unittest.skipIf(not BaseTest.extension_installed("test_decoding"),
+	                 "'test_decoding' is not installed")
+	def test_savepoint_before_first_change(self):
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE data(id serial primary key, data text) USING orioledb;\n"
+		)
+
+		node.safe_psql(
+		    'postgres',
+		    "SELECT * FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding', false, true);\n"
+		)
+
+		# The savepoint is created before the transaction's first OrioleDB
+		# modification: the whole transaction must still be decoded.
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "SAVEPOINT s1;\n"
+		    "INSERT INTO data(data) VALUES('1');\n"
+		    "RELEASE SAVEPOINT s1;\n"
+		    "INSERT INTO data(data) VALUES('2');\n"
+		    "COMMIT;\n")
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:1 data[text]:'1'\n"
+		    "table public.data: INSERT: id[integer]:2 data[text]:'2'\n"
+		    "COMMIT\n")
+
+		# Same, without an explicit RELEASE before COMMIT.
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "SAVEPOINT s1;\n"
+		    "INSERT INTO data(data) VALUES('3');\n"
+		    "COMMIT;\n")
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:3 data[text]:'3'\n"
+		    "COMMIT\n")
+
+		# Rollback to a savepoint created before the first change: only the
+		# changes made after the rollback must be decoded.
+		node.safe_psql(
+		    'postgres', "BEGIN;\n"
+		    "SAVEPOINT s1;\n"
+		    "INSERT INTO data(data) VALUES('4');\n"
+		    "ROLLBACK TO SAVEPOINT s1;\n"
+		    "INSERT INTO data(data) VALUES('5');\n"
+		    "COMMIT;\n")
+		self.assertEqual(
+		    self.retrieve_logical_changes(), "BEGIN\n"
+		    "table public.data: INSERT: id[integer]:5 data[text]:'5'\n"
+		    "COMMIT\n")
+
 	def test_simple_replident(self):
 		node = self.node
 		node.start()  # start PostgreSQL

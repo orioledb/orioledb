@@ -2855,7 +2855,7 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 				(void) get_current_oxid();
 				add_subxact_undo_item(parentSubid);
 				prentLogicalXid = GetTopTransactionId();
-				assign_subtransaction_logical_xid();
+				assign_subtransaction_logical_xid(mySubid);
 				add_savepoint_wal_record(parentSubid, prentLogicalXid);
 				if (minParentSubId == InvalidSubTransactionId)
 					minParentSubId = parentSubid;
