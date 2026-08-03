@@ -1439,6 +1439,19 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		 */
 		location = pg_atomic_read_u64(&sharedLocations->location);
 		newOnCommitLocation = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
+
+		/* TEMP ORI217: trace abort undo-stack walk head per oxid */
+		if (undoType == UndoLogRegular && ori217_wundo < 50000)
+		{
+			ori217_wundo++;
+			elog(LOG, "ABORTWALK oxid=%llu undoType=%d startHead=%llx headValid=%d toLoc=%llx retain=%llx",
+				 (unsigned long long) oxid, (int) undoType,
+				 (unsigned long long) location,
+				 UndoLocationIsValid(location) ? 1 : 0,
+				 (unsigned long long) (toLocation ? toLocation->location : InvalidUndoLocation),
+				 (unsigned long long) pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation));
+		}
+
 		location = walk_undo_range_with_buf(undoType, location,
 											toLocation ? toLocation->location : InvalidUndoLocation,
 											oxid, OUndoCallbackStageAbort, &newOnCommitLocation,
