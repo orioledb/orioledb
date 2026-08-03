@@ -52,6 +52,18 @@ typedef struct
 	bool		rightmost;
 } UndoIterator;
 
+#ifdef USE_ASSERT_CHECKING
+/* Where a returned tuple came from; see BTreeIterator.curRaw. */
+typedef struct
+{
+	OFixedTuple tuple;			/* the item as stored on the page */
+	UndoLocation undoLocation;
+	OTupleXactInfo xactInfo;
+	int			deleted;
+	int			source;			/* 0 leaf page, 1 undo image, -1 unrecorded */
+} IteratorRawItem;
+#endif
+
 struct BTreeIterator
 {
 	OBTreeFindPageContext context;
@@ -119,6 +131,17 @@ struct BTreeIterator
 #ifdef USE_ASSERT_CHECKING
 	/* additional check for iteration order */
 	OFixedTuple prevTuple;
+
+	/*
+	 * The raw leaf item a returned tuple was materialised from.
+	 * o_find_tuple_version() walks the undo chain, so the tuple handed to the
+	 * caller need not be the item stored on the page.  Comparing raw against
+	 * materialised separates the two ways the order check can break: the page
+	 * genuinely holding two items with one key, versus a version lookup
+	 * yielding a tuple that belongs to a different item.
+	 */
+	IteratorRawItem curRaw;
+	IteratorRawItem prevRaw;
 
 	/*
 	 * Diagnostics for the iteration-order check in o_btree_iterator_fetch().
@@ -231,6 +254,28 @@ copy_fixed_leaf_key(BTreeDescr *desc, OFixedKey *dst, OTuple leafTup)
 #define ITERATOR_DUMP_BYTES		24
 #define ITERATOR_DUMP_BUFSZ		(ITERATOR_DUMP_BYTES * 2 + 8)
 
+static inline void
+iterator_clear_raw_item(IteratorRawItem *raw)
+{
+	O_TUPLE_SET_NULL(raw->tuple.tuple);
+	raw->undoLocation = InvalidUndoLocation;
+	raw->xactInfo = 0;
+	raw->deleted = -1;
+	raw->source = -1;
+}
+
+/*
+ * OFixedTuple.tuple.data points into the same struct's fixedData, so a plain
+ * assignment would leave the destination aliasing the source's buffer.
+ */
+static inline void
+iterator_copy_raw_item(IteratorRawItem *dst, const IteratorRawItem *src)
+{
+	*dst = *src;
+	if (!O_TUPLE_IS_NULL(dst->tuple.tuple))
+		dst->tuple.tuple.data = dst->tuple.fixedData;
+}
+
 /*
  * Reset the iteration-order check and its diagnostics.  Called from both
  * iterator constructors; o_btree_iterator_advance() deliberately clears only
@@ -250,6 +295,28 @@ iterator_reset_order_check(BTreeIterator *it)
 	it->curKeyReturnedAtRefind = false;
 	BTREE_PAGE_LOCATOR_SET_INVALID(&it->locAfterRefind);
 	it->refindMatch = -1;
+	iterator_clear_raw_item(&it->curRaw);
+	iterator_clear_raw_item(&it->prevRaw);
+}
+
+/*
+ * Record the raw leaf item at loc as the origin of the tuple about to be
+ * materialised from it.  source distinguishes the live leaf page from the undo
+ * page image a combined scan merges with it.
+ */
+static inline void
+iterator_record_raw_item(IteratorRawItem *raw, BTreeDescr *desc, Page p,
+						 BTreePageItemLocator *loc, int source)
+{
+	BTreeLeafTuphdr *tuphdr;
+	OTuple		tup;
+
+	BTREE_PAGE_READ_LEAF_ITEM(tuphdr, tup, p, loc);
+	copy_fixed_tuple(desc, &raw->tuple, tup);
+	raw->undoLocation = tuphdr->undoLocation;
+	raw->xactInfo = tuphdr->xactInfo;
+	raw->deleted = tuphdr->deleted;
+	raw->source = source;
 }
 
 /*
@@ -1442,22 +1509,33 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 				char		prevHex[ITERATOR_DUMP_BUFSZ];
 				char		curHex[ITERATOR_DUMP_BUFSZ];
 				char		refindHex[ITERATOR_DUMP_BUFSZ];
+				char		prevRawHex[ITERATOR_DUMP_BUFSZ];
+				char		curRawHex[ITERATOR_DUMP_BUFSZ];
 
 				/*
 				 * cmp == 0 means the same key was handed out twice, cmp > 0 (in
 				 * a forward scan) that the iterator moved backwards.  Either is
 				 * a wrong-results bug, not just a broken invariant, so report
-				 * the state that distinguishes the causes instead of asserting:
-				 * whether a resume ran, what key it was told to resume from,
-				 * whether it recognised that key on the re-found page, and
-				 * where it left the locator.
+				 * the state that distinguishes the causes instead of asserting.
+				 *
+				 * The raw items are the discriminator.  Equal raw keys mean the
+				 * leaf really holds two items with one key, and the write path
+				 * is at fault.  Differing raw keys with equal materialised keys
+				 * mean o_find_tuple_version() resolved at least one item to a
+				 * version that is not its own, and the undo chain is at fault --
+				 * the deleted flag, xactInfo and undoLocation of each item say
+				 * which chain to look at.  The refind fields and the locators
+				 * cover the third possibility, a resume that failed to skip its
+				 * own curKey.
 				 */
 				elog(PANIC,
 					 "OrioleDB iterator returned out-of-order tuple: cmp=%d dir=%d flags=0x%x pageCount=%d refinds=%d "
 					 "prev={blkno=%u pageChangeCount=%u chunk=%u item=%u} "
 					 "cur={blkno=%u pageChangeCount=%u chunk=%u item=%u} "
 					 "refind={curKeySet=%d curKeyReturned=%d match=%d chunk=%u item=%u} "
-					 "prevTuple=%s curTuple=%s refindKey=%s",
+					 "prevRaw={src=%d deleted=%d xactInfo=" UINT64_FORMAT " undoLoc=" UINT64_FORMAT "} "
+					 "curRaw={src=%d deleted=%d xactInfo=" UINT64_FORMAT " undoLoc=" UINT64_FORMAT "} "
+					 "prevTuple=%s curTuple=%s prevRawTuple=%s curRawTuple=%s refindKey=%s",
 					 cmp, (int) it->scanDir, it->context.flags,
 					 it->pageCount, it->refindCount,
 					 it->prevBlkno, it->prevPageChangeCount,
@@ -1467,10 +1545,18 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 					 (int) it->curKeySetAtRefind, (int) it->curKeyReturnedAtRefind,
 					 it->refindMatch,
 					 it->locAfterRefind.chunkOffset, it->locAfterRefind.itemOffset,
+					 it->prevRaw.source, it->prevRaw.deleted,
+					 (uint64) it->prevRaw.xactInfo, (uint64) it->prevRaw.undoLocation,
+					 it->curRaw.source, it->curRaw.deleted,
+					 (uint64) it->curRaw.xactInfo, (uint64) it->curRaw.undoLocation,
 					 iterator_tuple_to_hex(desc, it->prevTuple.tuple,
 										   OTupleLength, prevHex),
 					 iterator_tuple_to_hex(desc, result,
 										   OTupleLength, curHex),
+					 iterator_tuple_to_hex(desc, it->prevRaw.tuple.tuple,
+										   OTupleLength, prevRawHex),
+					 iterator_tuple_to_hex(desc, it->curRaw.tuple.tuple,
+										   OTupleLength, curRawHex),
 					 iterator_tuple_to_hex(desc, it->curKeyAtRefind.tuple,
 										   OKeyLength, refindHex));
 			}
@@ -1479,6 +1565,7 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 		it->prevBlkno = curItem->blkno;
 		it->prevPageChangeCount = curItem->pageChangeCount;
 		it->prevLoc = curItem->locator;
+		iterator_copy_raw_item(&it->prevRaw, &it->curRaw);
 	}
 #endif
 
@@ -1851,6 +1938,10 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 
 			if (cmp <= 0)
 			{
+#ifdef USE_ASSERT_CHECKING
+				iterator_record_raw_item(&it->curRaw, desc, img,
+										 &leaf_item->locator, 0);
+#endif
 				result = o_find_tuple_version(desc, img,
 											  &leaf_item->locator,
 											  &it->oSnapshot, tupleCsn,
@@ -1870,6 +1961,10 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 			}
 			else
 			{
+#ifdef USE_ASSERT_CHECKING
+				iterator_record_raw_item(&it->curRaw, desc, hImg,
+										 &it->undoLoc, 1);
+#endif
 				result = o_find_tuple_version(desc, hImg,
 											  &it->undoLoc,
 											  &it->oSnapshot, tupleCsn,
@@ -1914,6 +2009,10 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 			it->curKeySet = true;
 			it->curKeyReturned = true;
 
+#ifdef USE_ASSERT_CHECKING
+			iterator_record_raw_item(&it->curRaw, desc, context->img,
+									 &leaf_item->locator, 0);
+#endif
 			result = o_find_tuple_version(desc, context->img,
 										  &leaf_item->locator,
 										  &it->oSnapshot, tupleCsn,
