@@ -162,6 +162,7 @@ XidMeta    *xid_meta;
  * [0]=abort-over-commit [1]=csn-over-frozen [2]=cas-fail-inwindow
  * [3]=diskwrite-above-written [4]=slot-reuse-not-frozen */
 int			ori217_warns[5] = {0, 0, 0, 0, 0};
+int			ori217_drain = 0;
 
 /* True only for a genuine committed NORMAL csn (special/in-progress markers,
  * which have bit 63 set, are excluded: IS_NORMAL alone has no upper bound). */
@@ -1024,10 +1025,27 @@ write_xidsmap(OXid targetXmax)
 		for (oxid = writeStart; oxid < writeEnd; oxid++)
 		{
 			Size		idx = oxid % xid_circular_buffer_size;
+			CommitSeqNo drained;
 
-			pg_atomic_write_u64(&buffer[oxid % bufferLength].csn,
-								pg_atomic_exchange_u64(&xidBuffer[idx].csn,
-													   COMMITSEQNO_FROZEN));
+			drained = pg_atomic_exchange_u64(&xidBuffer[idx].csn,
+											 COMMITSEQNO_FROZEN);
+			pg_atomic_write_u64(&buffer[oxid % bufferLength].csn, drained);
+
+			/*
+			 * TEMP ORI217: the drain persists this in-memory slot value to
+			 * disk[oxid].  If it is ABORTED, that oxid will read ABORTED
+			 * forever.  Log it to see whether a committed oxid's slot is
+			 * being drained as ABORTED (and whether it matches a later
+			 * fetch-miss oxid).
+			 */
+			if ((drained & ~COMMITSEQNO_RETAINED_FOR_REWIND) == COMMITSEQNO_ABORTED &&
+				ori217_drain < 200000)
+			{
+				ori217_drain++;
+				elog(LOG, "DRAIN-ABORTED oxid=%llu slotIdx=%llu",
+					 (unsigned long long) oxid, (unsigned long long) idx);
+			}
+
 			pg_atomic_write_u64(&buffer[oxid % bufferLength].commitPtr,
 								pg_atomic_exchange_u64(&xidBuffer[idx].commitPtr,
 													   FirstNormalUnloggedLSN));
