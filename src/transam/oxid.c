@@ -1157,6 +1157,21 @@ flush_dirty_xidsmap_range(OXid xmin, OXid xmax)
 				alignedXmax;
 	OXidMapItem buffer[XID_SLOTS_PER_PAGE];
 
+	/*
+	 * Only oxids at or above writtenXmin still own their ring slot.  Oxids
+	 * below writtenXmin have been drained (their on-disk copy is already
+	 * current) and their ring slots have been recycled by newer
+	 * (oxid + xid_circular_buffer_size) transactions -- reading such a slot
+	 * and persisting it to the OLD oxid's absolute on-disk offset corrupts a
+	 * committed oxid's xidmap entry (e.g. to ABORTED).  This bites whenever
+	 * the active range (nextXid - runXmin) outgrows the ring, i.e. when
+	 * globalXmin lags by more than xid_circular_buffer_size.  So clamp the
+	 * lower bound to writtenXmin.  writtenXmin only advances, so this is
+	 * safe; it is re-read per batch under xidMapWriteLock below because it
+	 * can advance while we release the lock between batches.
+	 */
+	xmin = Max(xmin, pg_atomic_read_u64(&xid_meta->writtenXmin));
+
 	if (xmin >= xmax)
 		return;
 
@@ -1170,8 +1185,16 @@ flush_dirty_xidsmap_range(OXid xmin, OXid xmax)
 	while (pageOxid < alignedXmax)
 	{
 		int			processed;
+		OXid		writtenNow;
 
 		LWLockAcquire(&xid_meta->xidMapWriteLock, LW_EXCLUSIVE);
+
+		/*
+		 * Re-check the drained frontier under the lock: write_xidsmap() (also
+		 * under xidMapWriteLock) may have advanced writtenXmin while we held
+		 * no lock between batches, recycling more ring slots.
+		 */
+		writtenNow = pg_atomic_read_u64(&xid_meta->writtenXmin);
 
 		for (processed = 0;
 			 processed < XID_FLUSH_BATCH_PAGES && pageOxid < alignedXmax;
@@ -1179,6 +1202,14 @@ flush_dirty_xidsmap_range(OXid xmin, OXid xmax)
 		{
 			uint32		page = XID_BUFFER_PAGE_INDEX(pageOxid);
 			OXid		slot;
+
+			/*
+			 * Skip any page not wholly at/above writtenXmin: its slots have
+			 * been (or are being) recycled and must not be read from the ring
+			 * and written to their old absolute offsets.
+			 */
+			if (pageOxid < writtenNow)
+				continue;
 
 			if (!test_clear_xid_buffer_page_dirty(page))
 				continue;
