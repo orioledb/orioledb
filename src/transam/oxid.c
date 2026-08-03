@@ -158,6 +158,9 @@ static pg_atomic_uint32 *xidBufferDirty;
 
 XidMeta    *xid_meta;
 
+/* TEMP ORI217: cap on xidmap corruption-detector log lines */
+int			ori217_xidmap_warns = 0;
+
 static pg_atomic_uint32 *logicalXidsShmemMap;
 
 /* # slots covered by one o_buffers page in the xidmap. */
@@ -694,13 +697,38 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 
 	oldCsn = pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn);
 	pg_read_barrier();
+
+	/*
+	 * TEMP ORI217: writing ABORTED over an already-committed csn is the exact
+	 * corruption signature behind the fetch-miss (a committed order's oxid
+	 * later reads ABORTED).  Log it at the write source.
+	 */
+	if (csn == COMMITSEQNO_ABORTED && COMMITSEQNO_IS_NORMAL(oldCsn & ~COMMITSEQNO_RETAINED_FOR_REWIND) && ori217_xidmap_warns < 200)
+	{
+		ori217_xidmap_warns++;
+		elog(LOG, "XIDMAP-ABORT-OVER-COMMIT oxid=%llu oldCsn=%llx slotIdx=%llu writtenXmin=%llu writeInProgXmin=%llu globalXmin=%llu",
+			 (unsigned long long) oxid, (unsigned long long) oldCsn,
+			 (unsigned long long) (oxid % xid_circular_buffer_size),
+			 (unsigned long long) pg_atomic_read_u64(&xid_meta->writtenXmin),
+			 (unsigned long long) pg_atomic_read_u64(&xid_meta->writeInProgressXmin),
+			 (unsigned long long) pg_atomic_read_u64(&xid_meta->globalXmin));
+	}
+
 	writeInProgressXmin = pg_atomic_read_u64(&xid_meta->writeInProgressXmin);
 	if (oxid >= writeInProgressXmin)
 	{
 		if (pg_atomic_compare_exchange_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn,
 										   &oldCsn, csn))
 		{
-			Assert(oldCsn != COMMITSEQNO_FROZEN);
+			if (oldCsn == COMMITSEQNO_FROZEN && ori217_xidmap_warns < 200)
+			{
+				ori217_xidmap_warns++;
+				elog(LOG, "XIDMAP-CSN-OVER-FROZEN oxid=%llu csn=%llx slotIdx=%llu writtenXmin=%llu writeInProgXmin=%llu",
+					 (unsigned long long) oxid, (unsigned long long) csn,
+					 (unsigned long long) (oxid % xid_circular_buffer_size),
+					 (unsigned long long) pg_atomic_read_u64(&xid_meta->writtenXmin),
+					 (unsigned long long) writeInProgressXmin);
+			}
 			mark_xid_buffer_dirty(oxid);
 			return;
 		}
@@ -710,7 +738,15 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 		 * Thus, it could be only wiped out from the circular buffer to
 		 * o_buffers.
 		 */
-		Assert(oxid < pg_atomic_read_u64(&xid_meta->writeInProgressXmin));
+		if (oxid >= pg_atomic_read_u64(&xid_meta->writeInProgressXmin) && ori217_xidmap_warns < 200)
+		{
+			ori217_xidmap_warns++;
+			elog(LOG, "XIDMAP-CAS-FAIL-INWINDOW oxid=%llu csn=%llx oldCsn=%llx nowSlot=%llx writeInProgXmin=%llu",
+				 (unsigned long long) oxid, (unsigned long long) csn,
+				 (unsigned long long) oldCsn,
+				 (unsigned long long) pg_atomic_read_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn),
+				 (unsigned long long) pg_atomic_read_u64(&xid_meta->writeInProgressXmin));
+		}
 	}
 
 	/*
@@ -722,7 +758,14 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 		LWLockRelease(&xid_meta->xidMapWriteLock);
 	}
 
-	Assert(oxid < pg_atomic_read_u64(&xid_meta->writtenXmin));
+	if (oxid >= pg_atomic_read_u64(&xid_meta->writtenXmin) && ori217_xidmap_warns < 200)
+	{
+		ori217_xidmap_warns++;
+		elog(LOG, "XIDMAP-DISKWRITE-ABOVE-WRITTEN oxid=%llu csn=%llx writtenXmin=%llu writeInProgXmin=%llu",
+			 (unsigned long long) oxid, (unsigned long long) csn,
+			 (unsigned long long) pg_atomic_read_u64(&xid_meta->writtenXmin),
+			 (unsigned long long) pg_atomic_read_u64(&xid_meta->writeInProgressXmin));
+	}
 	o_buffers_write(&buffersDesc, (Pointer) &csn, OXID_BUFFERS_TAG,
 					oxid * sizeof(OXidMapItem) + offsetof(OXidMapItem, csn),
 					sizeof(CommitSeqNo), false, false);
@@ -1569,6 +1612,32 @@ get_current_oxid(void)
 		vxidElem->vxid.BACKENDID = MyProc->PROCBACKENDID;
 		vxidElem->vxid.localTransactionId = MyProc->LXID;
 
+		/*
+		 * TEMP ORI217: this slot MUST be a FROZEN delimiter before reuse.  If
+		 * it still holds a live/committed value, the previous owner
+		 * (newOxid - buffer_size) was not drained before its slot got reused
+		 * -- the aliasing that lets write_xidsmap later persist the WRONG
+		 * (e.g. ABORTED) csn to an old committed oxid's on-disk offset.  This
+		 * is a no-op Assert under --disable-cassert, so log it always.
+		 */
+		{
+			CommitSeqNo slotCsn = pg_atomic_read_u64(&xidBuffer[newOxid % xid_circular_buffer_size].csn);
+
+			if (slotCsn != COMMITSEQNO_FROZEN && ori217_xidmap_warns < 200)
+			{
+				ori217_xidmap_warns++;
+				elog(LOG, "XIDMAP-SLOT-REUSE-NOT-FROZEN newOxid=%llu slotIdx=%llu slotCsn=%llx writtenXmin=%llu writeInProgXmin=%llu globalXmin=%llu nextXid=%llu inflight=%llu bufsize=%llu",
+					 (unsigned long long) newOxid,
+					 (unsigned long long) (newOxid % xid_circular_buffer_size),
+					 (unsigned long long) slotCsn,
+					 (unsigned long long) pg_atomic_read_u64(&xid_meta->writtenXmin),
+					 (unsigned long long) pg_atomic_read_u64(&xid_meta->writeInProgressXmin),
+					 (unsigned long long) pg_atomic_read_u64(&xid_meta->globalXmin),
+					 (unsigned long long) pg_atomic_read_u64(&xid_meta->nextXid),
+					 (unsigned long long) (newOxid - pg_atomic_read_u64(&xid_meta->writtenXmin)),
+					 (unsigned long long) xid_circular_buffer_size);
+			}
+		}
 		Assert(pg_atomic_read_u64(&xidBuffer[newOxid % xid_circular_buffer_size].csn) == COMMITSEQNO_FROZEN);
 		pg_atomic_write_u64(&xidBuffer[newOxid % xid_circular_buffer_size].csn,
 							COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
