@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from antithesis.random import random_choice
+from antithesis.random import get_random, random_choice
 
 import helper_common as h
 
@@ -19,6 +19,51 @@ def main():
         style = random_choice(h.CORRUPTION_STYLES)
         h.save_config(conn, "corruption_style", style)
         h.save_config(conn, "corrupted", False)
+
+        # Corruption itself happens here, not in a singleton_driver_: per
+        # the Antithesis test-composer docs, a timeline that runs a
+        # singleton_driver_ command never also runs serial_driver_/
+        # parallel_driver_ commands, which would strand the probe and
+        # healthy-DML drivers with nothing to observe. first_ runs exactly
+        # once per timeline before any driver starts, which is what this
+        # deterministic setup step actually needs.
+        datoid = h.get_datoid(conn)
+        relfilenode = h.get_relfilenode(conn, h.CORRUPT_TABLE)
+
+        h.execute(conn, "CHECKPOINT;")
+        h.execute(
+            conn,
+            f"SELECT orioledb_evict_pages('{h.CORRUPT_TABLE}'::regclass, 999);"
+        )
+
+        files = h.find_target_files(datoid, relfilenode)
+        if not files:
+            print(f"no on-disk files found for {h.CORRUPT_TABLE} "
+                  f"(datoid={datoid} relfilenode={relfilenode}) -- "
+                  "skipping corruption this timeline", flush=True)
+        else:
+            rng_value = get_random()
+            for path in files:
+                h.corrupt_file(path, style, rng_value)
+            h.save_config(conn, "corrupted", True)
+            print(f"corrupted {len(files)} file(s) for {h.CORRUPT_TABLE} "
+                  f"(datoid={datoid} relfilenode={relfilenode} "
+                  f"style={style})", flush=True)
+
+            # Trigger the first FATAL deterministically rather than
+            # waiting on an automatic checkpoint to happen to land first.
+            try:
+                h.execute(conn, "CHECKPOINT;")
+                h.bump_counter(conn, "probe_attempts", 1)
+                print("forced post-corruption CHECKPOINT completed "
+                      "without losing the connection", flush=True)
+            except h.CONNECTION_LOST_ERRORS as exc:
+                print(f"forced post-corruption CHECKPOINT lost its "
+                      f"connection (expected FATAL path): {exc}",
+                      flush=True)
+                conn = h.connect("first_setup_record")
+                h.bump_counter(conn, "probe_attempts", 1)
+                h.bump_counter(conn, "probe_fatals", 1)
 
         start_time = h.postmaster_start_time(conn)
         h.maybe_record_restart(conn, start_time)

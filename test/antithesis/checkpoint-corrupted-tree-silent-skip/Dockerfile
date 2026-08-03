@@ -14,7 +14,6 @@ ENV PGHOST=orioledb \
 COPY --chmod=755 \
 	helper_common.py \
 	first_checkpoint-corrupted-tree-silent-skip-setup \
-	singleton_driver_checkpoint-corrupted-tree-silent-skip-corrupt \
 	serial_driver_checkpoint-corrupted-tree-silent-skip-probe \
 	parallel_driver_checkpoint-corrupted-tree-silent-skip-healthy-dml \
 	anytime_checkpoint-corrupted-tree-silent-skip-check \
