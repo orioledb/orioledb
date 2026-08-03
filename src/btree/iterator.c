@@ -1136,8 +1136,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	 * Read leaf pages partially (FETCH) by default; undo-merging scans use
 	 * IMAGE.  The iterator steps to siblings, so keep the parent image.
 	 */
-	//findFlags = it->combinedResult ? BTREE_PAGE_FIND_IMAGE : BTREE_PAGE_FIND_FETCH;
-	findFlags = BTREE_PAGE_FIND_IMAGE;
+	findFlags = it->combinedResult ? BTREE_PAGE_FIND_IMAGE : BTREE_PAGE_FIND_FETCH;
 	findFlags |= BTREE_PAGE_FIND_KEEP_PARENT;
 	it->pageCount = 1;
 
