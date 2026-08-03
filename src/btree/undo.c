@@ -539,6 +539,19 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 	tuple.formatFlags = item->tuphdr.formatFlags;
 	tuple.data = (Pointer) item + sizeof(BTreeModifyUndoStackItem);
 
+	/* TEMP ORI217: trace which modify-undo records get applied on abort */
+	{
+		extern int	ori217_wundo;
+
+		if (item->action == BTreeOperationInsert && item->header.indexType == oIndexPrimary && ori217_wundo < 400)
+		{
+			ori217_wundo++;
+			elog(LOG, "WUNDO-APPLY loc=%llx oxid=%llu action=insert blkno=%u",
+				 (unsigned long long) location, (unsigned long long) oxid,
+				 item->blkno);
+		}
+	}
+
 	if (STOPEVENTS_ENABLED())
 	{
 		Jsonb	   *params = undo_record_key_stopevent_params(item->action,

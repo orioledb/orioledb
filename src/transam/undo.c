@@ -182,6 +182,9 @@ static UndoItemTypeDescr undoItemTypeDescrs[] = {
 
 PG_FUNCTION_INFO_V1(orioledb_has_retained_undo);
 
+/* TEMP ORI217: cap on waiter-undo linkage/apply trace lines */
+int			ori217_wundo = 0;
+
 static UndoMeta *undo_metas = NULL;
 static Pointer o_undo_buffers[(int) UndoLogsCount] =
 {
@@ -2196,8 +2199,25 @@ add_new_undo_stack_item_to_process(UndoLogType undoType,
 	item->prev = pg_atomic_read_u64(&sharedLocations->location);
 	pg_atomic_write_u64(&sharedLocations->location, location);
 
-	if (!UndoLocationIsValid(pg_atomic_read_u64(&oProcData[pgprocno].undoRetainLocations[undoType].transactionUndoRetainLocation)))
-		pg_atomic_write_u64(&oProcData[pgprocno].undoRetainLocations[undoType].transactionUndoRetainLocation, location);
+	{
+		UndoLocation retainBefore = pg_atomic_read_u64(&oProcData[pgprocno].undoRetainLocations[undoType].transactionUndoRetainLocation);
+
+		if (!UndoLocationIsValid(retainBefore))
+			pg_atomic_write_u64(&oProcData[pgprocno].undoRetainLocations[undoType].transactionUndoRetainLocation, location);
+
+		/* TEMP ORI217: trace waiter-insert undo linkage + retain fate */
+		if (undoType == UndoLogRegular && ori217_wundo < 400)
+		{
+			ori217_wundo++;
+			elog(LOG, "WUNDO-MAKE loc=%llx prev=%llx waiterProc=%d nesting=%d retainBefore=%llx retainAfter=%llx headWas=%llx",
+				 (unsigned long long) location,
+				 (unsigned long long) item->prev,
+				 pgprocno, autonomousNestingLevel,
+				 (unsigned long long) retainBefore,
+				 (unsigned long long) pg_atomic_read_u64(&oProcData[pgprocno].undoRetainLocations[undoType].transactionUndoRetainLocation),
+				 (unsigned long long) item->prev);
+		}
+	}
 
 	/* The item's pages were marked dirty when get_undo_record() allocated it. */
 	release_reserved_undo_location(undoType);
