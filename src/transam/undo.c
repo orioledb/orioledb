@@ -185,6 +185,19 @@ PG_FUNCTION_INFO_V1(orioledb_has_retained_undo);
 /* TEMP ORI217: cap on waiter-undo linkage/apply trace lines */
 int			ori217_wundo = 0;
 
+/*
+ * TEMP ORI217: per-backend ring of the last undo-stack adds (location + prev +
+ * whether it was a primary-index INSERT), dumped at ABORTWALK so we can tell
+ * whether the aborting transaction's insert undo records were ever linked into
+ * its stack, and whether they're reachable from the walk's start head.
+ */
+#define ORI217_RING 24
+static UndoLocation ori217_ring_loc[ORI217_RING];
+static UndoLocation ori217_ring_prev[ORI217_RING];
+static uint8 ori217_ring_ins[ORI217_RING];
+static int	ori217_ring_pos = 0;
+static uint64 ori217_ring_cnt = 0;
+
 static UndoMeta *undo_metas = NULL;
 static Pointer o_undo_buffers[(int) UndoLogsCount] =
 {
@@ -1440,16 +1453,34 @@ walk_undo_stack(UndoLogType undoType, OXid oxid,
 		location = pg_atomic_read_u64(&sharedLocations->location);
 		newOnCommitLocation = pg_atomic_read_u64(&sharedLocations->onCommitLocation);
 
-		/* TEMP ORI217: trace abort undo-stack walk head per oxid */
+		/* TEMP ORI217: trace abort undo-stack walk head per oxid + ring of
+		 * primary-insert undo adds this backend made (to see whether the
+		 * aborting txn's insert records were linked and are reachable). */
 		if (undoType == UndoLogRegular && ori217_wundo < 50000)
 		{
+			char		ringbuf[512];
+			int			off = 0;
+			int			k;
+
+			ringbuf[0] = '\0';
+			for (k = 0; k < ORI217_RING; k++)
+			{
+				int			idx = (ori217_ring_pos - 1 - k + 2 * ORI217_RING) % ORI217_RING;
+
+				if (ori217_ring_ins[idx] && UndoLocationIsValid(ori217_ring_loc[idx]) &&
+					off < (int) sizeof(ringbuf) - 40)
+					off += snprintf(ringbuf + off, sizeof(ringbuf) - off, "%llx<%llx ",
+									(unsigned long long) ori217_ring_loc[idx],
+									(unsigned long long) ori217_ring_prev[idx]);
+			}
 			ori217_wundo++;
-			elog(LOG, "ABORTWALK oxid=%llu undoType=%d startHead=%llx headValid=%d toLoc=%llx retain=%llx",
-				 (unsigned long long) oxid, (int) undoType,
+			elog(LOG, "ABORTWALK oxid=%llu startHead=%llx headValid=%d toLoc=%llx retain=%llx ringCnt=%llu insRing=[%s]",
+				 (unsigned long long) oxid,
 				 (unsigned long long) location,
 				 UndoLocationIsValid(location) ? 1 : 0,
 				 (unsigned long long) (toLocation ? toLocation->location : InvalidUndoLocation),
-				 (unsigned long long) pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation));
+				 (unsigned long long) pg_atomic_read_u64(&curProcData->undoRetainLocations[undoType].transactionUndoRetainLocation),
+				 (unsigned long long) ori217_ring_cnt, ringbuf);
 		}
 
 		location = walk_undo_range_with_buf(undoType, location,
@@ -2164,6 +2195,21 @@ add_new_undo_stack_item(UndoLogType undoType, UndoLocation location)
 
 	item->prev = pg_atomic_read_u64(&sharedLocations->location);
 	pg_atomic_write_u64(&sharedLocations->location, location);
+
+	/* TEMP ORI217: record this add in the per-backend ring */
+	if (undoType == UndoLogRegular)
+	{
+		BTreeModifyUndoStackItem *mi = (BTreeModifyUndoStackItem *) item;
+		bool		isPrimIns = (item->type == ModifyUndoItemType &&
+								 mi->action == BTreeOperationInsert &&
+								 mi->header.indexType == oIndexPrimary);
+
+		ori217_ring_loc[ori217_ring_pos] = location;
+		ori217_ring_prev[ori217_ring_pos] = item->prev;
+		ori217_ring_ins[ori217_ring_pos] = isPrimIns ? 1 : 0;
+		ori217_ring_pos = (ori217_ring_pos + 1) % ORI217_RING;
+		ori217_ring_cnt++;
+	}
 
 	if (descr->callOnCommit)
 	{
