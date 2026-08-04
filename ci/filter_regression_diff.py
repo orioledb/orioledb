@@ -154,6 +154,13 @@ skip_hunk_errors = {
 	# OID ("could not find tuple for role <oid>") instead of by name.
 	r"ERROR:  could not find tuple for role \d+":
 	["generated_stored", "generated_virtual"],
+	# Same regress_user11 race, low-level unique-index variant: when a
+	# concurrent CREATE USER inserts the shared rolname between this
+	# backend's "role already exists" pre-check and its pg_authid insert,
+	# the unique index on pg_authid.rolname raises the raw duplicate-key
+	# error instead of the friendly "already exists" message caught above.
+	r"ERROR:  duplicate key value violates unique constraint \"pg_authid_rolname_index\"":
+	["generated_stored", "generated_virtual"],
 	r"ERROR:  permission denied for (table gtest\w+|function gf\w+)":
 	["generated_stored", "generated_virtual"],
 	# Upstream anomaly 9a3ddeb519e8 is not reproduced on Oriole as it
