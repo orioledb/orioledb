@@ -57,6 +57,7 @@
 #include "transam/oxid.h"
 #include "tableam/descr.h"
 #include "tuple/slot.h"
+#include "utils/antithesis.h"
 #include "utils/page_pool.h"
 #include "utils/resowner.h"
 #include "utils/sampling.h"
@@ -2487,11 +2488,19 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 		scan->dsmSeg = NULL;
 	}
 
+	/*
+	 * A sequential scan only holds an iterator in fallback mode
+	 * (scan_make_iterator())
+	 */
+	ANTITHESIS_SOMETIMES(scan->iter != NULL,
+						 "sequential scan is released while a fallback iterator is attached",
+						 NULL);
+
 	if (scan->iter)
 	{
 		/*
-		 * Pass fromResowner down: like the dsm_detach above, the iterator must
-		 * not touch the ResourceOwner currently being released.
+		 * Pass fromResowner down: like the dsm_detach above, the iterator
+		 * must not touch the ResourceOwner currently being released.
 		 */
 		btree_iterator_free_extended(scan->iter, fromResowner);
 		scan->iter = NULL;
@@ -2506,6 +2515,14 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 	if (!IS_SYS_TREE_OIDS(desc->oids))
 	{
 		OIndexDescr *indexDescr = (OIndexDescr *) desc->arg;
+
+		/*
+		 * The scan's own pin, taken in make_btree_seq_scan_internal(). A zero
+		 * refcnt here would mean some pin was dropped twice.
+		 */
+		ANTITHESIS_ALWAYS(indexDescr->refcnt > 0,
+						  "OIndexDescr refcnt is positive when a sequential scan drops its reference",
+						  NULL);
 		indexDescr->refcnt--;
 	}
 	scan->status = BTreeSeqScanFinished;

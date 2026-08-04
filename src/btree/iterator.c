@@ -25,6 +25,7 @@
 #include "tableam/key_range.h"
 #include "transam/oxid.h"
 #include "transam/undo.h"
+#include "utils/antithesis.h"
 #include "utils/page_pool.h"
 #include "utils/stopevent.h"
 
@@ -57,12 +58,11 @@ struct BTreeIterator
 	OIndexDescr *oidescr;
 
 	/*
-     * Mirrors BTreeSeqScan.resowner
-     * Ensures scan cleanup on transaction abort or resource owner release.
-     * Iterator can be freed during transaction abort cleanup after
-     * CurrentResourceOwner is already pointing to
-     * TopTransactionResourceOwner, so we have to track it here.
-     */
+	 * Mirrors BTreeSeqScan.resowner Ensures scan cleanup on transaction abort
+	 * or resource owner release. Iterator can be freed during transaction
+	 * abort cleanup after CurrentResourceOwner is already pointing to
+	 * TopTransactionResourceOwner, so we have to track it here.
+	 */
 	ResourceOwner resowner;
 	OSnapshot	oSnapshot;
 	UndoIterator undoIt;
@@ -1366,15 +1366,26 @@ btree_iterator_free_extended(BTreeIterator *it, bool fromResowner)
 {
 	if (it->oidescr)
 	{
+		ANTITHESIS_ALWAYS(it->resowner != NULL,
+						  "BTreeIterator knows the ResourceOwner that pinned its OIndexDescr",
+						  NULL);
+
 		/*
-		 * It is unsafe to forget when called from a ResrouceOwner
-		 * release callback for the pinning owner.  We can only safely
-		 * forget when we are either:
-		 * - not invoked from a release callback
-		 * - not already in "releasing" state
-		 * NB There is no public interface for ResourceOwner "releasing" state
-		 * it->resowner == CurrentResourceOwner is set during the walk and
-		 * is the only signal we can use here
+		 * Durring transaction abort, cleanup sets CurrentResourceOwner to
+		 * TopTransactionResourceOwner before the iterator is freed. Always
+		 * using CurrentResourceOwner used to PANIC
+		 */
+		ANTITHESIS_SOMETIMES(it->resowner != CurrentResourceOwner,
+							 "BTreeIterator is freed while a ResourceOwner other than the pinning one is current",
+							 NULL);
+
+		/*
+		 * It is unsafe to forget when called from a ResrouceOwner release
+		 * callback for the pinning owner.  We can only safely forget when we
+		 * are either: - not invoked from a release callback - not already in
+		 * "releasing" state NB There is no public interface for ResourceOwner
+		 * "releasing" state it->resowner == CurrentResourceOwner is set
+		 * during the walk and is the only signal we can use here
 		 */
 		if (!(fromResowner && it->resowner == CurrentResourceOwner))
 			ResourceOwnerForgetOIndexDescr(it->resowner, it->oidescr);
