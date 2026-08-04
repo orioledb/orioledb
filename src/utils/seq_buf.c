@@ -68,6 +68,77 @@ static bool seq_buf_read_pages(SeqBufDescPrivate *seqBufPrivate,
 							   SeqBufDescShared *shared, int header_off, off_t evicted_off);
 
 /*
+ * TEMP churn diagnostic: process-local ring of recent seq_buf lifecycle ops,
+ * to root-cause the checkpoint_ix seq_buf double-finalize (a finalize of a
+ * seq_buf whose in-memory pages were already freed -> O_GET_IN_MEMORY_PAGE
+ * validity assert).  The checkpointer drives these ops sequentially, so a
+ * per-process ring, dumped only on the bad finalize, shows the exact op order
+ * for the offending shared struct (e.g. a free with no re-init before the next
+ * finalize) with zero shared-memory change and zero hot-path I/O.
+ */
+typedef struct
+{
+	char		op;				/* 'I' init, 'r' reload, 'X' free, 'F'
+								 * finalize */
+	void	   *shared;
+	Oid			datoid;
+	Oid			relnode;
+	uint32		num;
+	int			type;
+	int			curPageNum;
+	int			location;
+	OInMemoryBlkno p0;
+	OInMemoryBlkno p1;
+}			SeqBufOpRec;
+
+#define SEQBUF_OP_RING_SIZE 1024
+static SeqBufOpRec seqbuf_op_ring[SEQBUF_OP_RING_SIZE];
+static uint32 seqbuf_op_ring_pos = 0;
+
+void
+seq_buf_op_record(char op, SeqBufDescShared *shared)
+{
+	SeqBufOpRec *r = &seqbuf_op_ring[seqbuf_op_ring_pos % SEQBUF_OP_RING_SIZE];
+
+	seqbuf_op_ring_pos++;
+	r->op = op;
+	r->shared = shared;
+	r->datoid = shared->tag.key.oids.datoid;
+	r->relnode = shared->tag.key.oids.relnode;
+	r->num = shared->tag.num;
+	r->type = shared->tag.type;
+	r->curPageNum = shared->curPageNum;
+	r->location = shared->location;
+	r->p0 = shared->pages[0];
+	r->p1 = shared->pages[1];
+}
+
+void
+seq_buf_op_dump(SeqBufDescShared *shared, const char *why)
+{
+	uint32		i;
+	uint32		start = seqbuf_op_ring_pos > SEQBUF_OP_RING_SIZE
+		? seqbuf_op_ring_pos - SEQBUF_OP_RING_SIZE : 0;
+
+	elog(WARNING,
+		 "SEQBUF_OP_DUMP (%s) shared=%p tag=[%u/%u num=%u type=%d] curPg=%d loc=%d pages=[%u,%u] -- recent ops for this shared:",
+		 why, (void *) shared, shared->tag.key.oids.datoid,
+		 shared->tag.key.oids.relnode, shared->tag.num, shared->tag.type,
+		 shared->curPageNum, shared->location,
+		 shared->pages[0], shared->pages[1]);
+	for (i = start; i < seqbuf_op_ring_pos; i++)
+	{
+		SeqBufOpRec *r = &seqbuf_op_ring[i % SEQBUF_OP_RING_SIZE];
+
+		if (r->shared == shared)
+			elog(WARNING,
+				 "  seqbuf op #%u %c tag=[%u/%u num=%u type=%d] curPg=%d loc=%d pages=[%u,%u]",
+				 i, r->op, r->datoid, r->relnode, r->num, r->type,
+				 r->curPageNum, r->location, r->p0, r->p1);
+	}
+}
+
+/*
  * Initialize sequential buffered access to given file.
  */
 bool
@@ -128,6 +199,8 @@ init_seq_buf(SeqBufDescPrivate *seqBufPrivate, SeqBufDescShared *shared,
 	{
 		seqBufPrivate->tag = shared->tag;
 	}
+
+	seq_buf_op_record(init_shared ? 'I' : 'r', shared);
 
 	return ok;
 }
@@ -494,6 +567,8 @@ seq_buf_finalize(SeqBufDescPrivate *seqBufPrivate)
 	SeqBufDescShared *shared = seqBufPrivate->shared;
 	off_t		result;
 
+	seq_buf_op_record('F', shared);
+
 	SpinLockAcquire(&shared->lock);
 	seq_buf_wait_prev_page(shared);
 	if (shared->prevPageState == SeqBufPrevPageError)
@@ -521,6 +596,16 @@ seq_buf_finalize(SeqBufDescPrivate *seqBufPrivate)
 		if (shared->location > 0)
 		{
 			off_t		offset = SEQBUF_FILE_OFFSET(shared, (off_t) shared->filePageNum);
+
+			/*
+			 * TEMP: about to dereference the current in-memory page; if it
+			 * has already been freed (the double-finalize bug) dump the op
+			 * ring before O_GET_IN_MEMORY_PAGE's validity assert crashes us,
+			 * so the log names which prior free left it invalid with no
+			 * re-init.
+			 */
+			if (!OInMemoryBlknoIsValid(shared->pages[shared->curPageNum]))
+				seq_buf_op_dump(shared, "finalize-badpage");
 
 			if (OFileWrite(seqBufPrivate->file, SEQBUF_DATA_POS(O_GET_IN_MEMORY_PAGE(shared->pages[shared->curPageNum])),
 						   shared->location - SEQBUF_DATA_OFF, offset, WAIT_EVENT_SLRU_WRITE) != shared->location - SEQBUF_DATA_OFF)
