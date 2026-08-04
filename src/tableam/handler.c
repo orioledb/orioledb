@@ -1403,6 +1403,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		idxOids.datoid = MyDatabaseId;
 		idxOids.reloid = rel->rd_rel->oid;
 		idxOids.relnode = rel->rd_rel->relfilenode;
+		idxOids.spcoid = InvalidOid;	/* matched by reloid */
 
 		tbl = relation_open(rel->rd_index->indrelid, AccessShareLock);
 
