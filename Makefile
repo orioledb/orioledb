@@ -147,6 +147,7 @@ REGRESSCHECKS = btree_sys_check \
 				rewind
 ISOLATIONCHECKS = bitmap_hist_scan \
 				  bitmap_for_update_epq \
+				  bridge_index \
 				  btree_iterate \
 				  btree_iterate_split \
 				  btree_print_backend_id \
