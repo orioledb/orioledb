@@ -2042,7 +2042,7 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 
 			bridge_tup = o_btree_find_tuple_by_key(&bridge->desc,
 												   (Pointer) &bridge_bound, BTreeKeyBound,
-												   &o_in_progress_snapshot, &tupleCsn,
+												   &o_non_deleted_snapshot, &tupleCsn,
 												   CurrentMemoryContext, NULL);
 
 			if (!O_TUPLE_IS_NULL(bridge_tup))
@@ -2096,7 +2096,7 @@ bridge_next_page(OBitmapScan *scan, OBitmapHeapPlanState *bitmap_state)
 		end_bound.row_keys = NULL;
 
 		it = o_btree_iterator_create(&bridge->desc, (Pointer) &start_bound, BTreeKeyBound,
-									 &o_in_progress_snapshot, ForwardScanDirection);
+									 &o_non_deleted_snapshot, ForwardScanDirection);
 		primarySlot = MakeSingleTupleTableSlot(tbl_descr->tupdesc, &TTSOpsOrioleDB);
 
 		do
