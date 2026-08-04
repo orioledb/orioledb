@@ -32,6 +32,7 @@
 #include "tableam/tree.h"
 #include "tuple/slot.h"
 #include "transam/undo.h"
+#include "utils/antithesis.h"
 #include "utils/page_pool.h"
 #include "utils/stopevent.h"
 
@@ -2662,6 +2663,9 @@ void
 ResourceOwnerForgetOIndexDescr(ResourceOwner owner, OIndexDescr *descr)
 {
 	ResourceOwnerForget(owner, PointerGetDatum(descr), &o_index_descr_resowner_desc);
+	ANTITHESIS_ALWAYS(descr->refcnt > 0,
+					  "OIndexDescr refcnt is positive when a ResourceOwner pin is forgotten",
+					  NULL);
 	descr->refcnt--;
 }
 
@@ -2670,6 +2674,14 @@ ResOwnerReleaseOIndexDescr(Datum res)
 {
 	OIndexDescr *descr = (OIndexDescr *) DatumGetPointer(res);
 
+	/*
+	 * Runs for a pin that was still remembered when its owner was released,
+	 * e.g. the descr of an iterator freed by this release, which The pin must
+	 * be dropped exactly once.
+	 */
+	ANTITHESIS_ALWAYS(descr->refcnt > 0,
+					  "OIndexDescr refcnt is positive when a ResourceOwner pin is released",
+					  NULL);
 	descr->refcnt--;
 }
 
@@ -2712,6 +2724,15 @@ ResOwnerReleaseOIndexDescrCallback(ResourceReleasePhase phase,
 		if (item->owner == CurrentResourceOwner)
 		{
 			*prev = item->next;
+
+			/*
+			 * Runs for a pin that was still remembered when its owner was
+			 * released, e.g. the descr of an iterator freed by this release,
+			 * which The pin must be dropped exactly once.
+			 */
+			ANTITHESIS_ALWAYS(item->descr->refcnt > 0,
+							  "OIndexDescr refcnt is positive when a ResourceOwner pin is released",
+							  NULL);
 			item->descr->refcnt--;
 			pfree(item);
 			item = *prev;
@@ -2755,6 +2776,9 @@ ResourceOwnerForgetOIndexDescr(ResourceOwner owner, OIndexDescr *descr)
 		{
 			*prev = item->next;
 			pfree(item);
+			ANTITHESIS_ALWAYS(descr->refcnt > 0,
+							  "OIndexDescr refcnt is positive when a ResourceOwner pin is forgotten",
+							  NULL);
 			descr->refcnt--;
 			return;
 		}
