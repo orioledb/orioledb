@@ -1370,6 +1370,7 @@ o_tables_move_all_callback(OTable *o_table, void *arg)
 		}
 		if (ORelOidsIsValid(o_table->toast_oids))
 		{
+			o_table->toast_oids.spcoid = move_arg->new_tablespace;
 			o_indices_move(o_table, TOASTIndexNumber, move_arg->old_tablespace,
 						   move_arg->oxid, move_arg->csn);
 			o_move_tree_meta(o_table->toast_oids.datoid, o_table->toast_oids.relnode,
@@ -1378,6 +1379,7 @@ o_tables_move_all_callback(OTable *o_table, void *arg)
 		}
 		if (ORelOidsIsValid(o_table->bridge_oids))
 		{
+			o_table->bridge_oids.spcoid = move_arg->new_tablespace;
 			o_indices_move(o_table, BridgeIndexNumber, move_arg->old_tablespace,
 						   move_arg->oxid, move_arg->csn);
 			o_move_tree_meta(o_table->bridge_oids.datoid, o_table->bridge_oids.relnode,
