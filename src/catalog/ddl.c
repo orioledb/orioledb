@@ -4766,13 +4766,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				o_table = o_tables_get(oids);
 				if (o_table != NULL)
 				{
-					OSnapshot	oSnapshot;
-					OXid		oxid;
+
 					bool		changed = false;
 					bool		is_add = (access == OAT_POST_CREATE || access == OAT_POST_ALTER);
-
-					fill_current_oxid_osnapshot(&oxid, &oSnapshot);
-					o_tables_rel_meta_lock(conrel);
 
 					/*
 					 * Directly update the notnull flag on the OrioleDB table
@@ -4796,6 +4792,12 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 					if (changed)
 					{
+						OSnapshot	oSnapshot;
+						OXid		oxid;
+
+						fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+						o_tables_rel_meta_lock(conrel);
+
 						/*
 						 * Persist the updated configuration to the OrioleDB
 						 * catalog tree
@@ -4803,8 +4805,9 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						o_indices_update(o_table, PrimaryIndexNumber, oxid, oSnapshot.csn);
 						o_tables_update(o_table, oxid, oSnapshot.csn);
 						o_tables_after_update(o_table, oxid, oSnapshot.csn);
+
+						o_tables_rel_meta_unlock(conrel, InvalidOid);
 					}
-					o_tables_rel_meta_unlock(conrel, InvalidOid);
 					o_table_free(o_table);
 				}
 			}
