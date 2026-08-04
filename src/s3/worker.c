@@ -677,7 +677,7 @@ s3_schedule_file_part_read(uint32 chkpNum, OIndexKey key, int32 segNum,
 	char	   *prefix;
 	char	   *db_prefix;
 
-	o_get_prefixes_for_tablespace(key.oids.datoid, key.tablespace,
+	o_get_prefixes_for_tablespace(key.oids.datoid, key.oids.spcoid,
 								  &prefix, &db_prefix);
 	o_verify_dir_exists_or_create(prefix, NULL, NULL);
 	o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
@@ -799,7 +799,7 @@ s3_schedule_downlink_load(BTreeDescr *desc, uint64 downlink)
 
 	while (true)
 	{
-		OIndexKey	key = {.oids = desc->oids,.tablespace = desc->tablespace};
+		OIndexKey	key = {.oids = desc->oids};
 		S3TaskLocation location;
 
 		segNum = byte_offset / ORIOLEDB_SEGMENT_SIZE;

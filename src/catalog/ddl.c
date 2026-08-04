@@ -2167,6 +2167,9 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 				GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
 									rel->rd_rel->relpersistence);
 			o_table->bridge_oids.reloid = o_table->bridge_oids.relnode;
+			/* A bridge index lives in its table's tablespace. */
+			o_table->bridge_oids.spcoid = OidIsValid(rel->rd_rel->reltablespace) ?
+				rel->rd_rel->reltablespace : MyDatabaseTableSpace;
 		}
 	}
 
@@ -4075,7 +4078,7 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						Assert(ix_num < o_table->nindices);
 						if (!OidIsValid(reltablespace))
 							reltablespace = MyDatabaseTableSpace;
-						if (o_table->indices[ix_num].tablespace == reltablespace)
+						if (o_table->indices[ix_num].oids.spcoid == reltablespace)
 						{
 							int			ctid_idx_off = o_table->has_primary ? 0 : 1;
 

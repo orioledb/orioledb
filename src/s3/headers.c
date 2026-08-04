@@ -55,7 +55,7 @@ s3_header_tag_hash(S3HeaderTag tag)
 
 	hashKey.datoid = tag.key.oids.datoid;
 	hashKey.relnode = tag.key.oids.relnode;
-	hashKey.tablespace = tag.key.tablespace;
+	hashKey.tablespace = tag.key.oids.spcoid;
 	hashKey.checkpointNum = tag.checkpointNum;
 	hashKey.segNum = tag.segNum;
 	return hash_any((unsigned char *) &hashKey, sizeof(hashKey));
@@ -659,8 +659,8 @@ s3_header_compare_and_swap(S3HeaderTag tag, int index,
 /*
  * We allow only one part to be locked simultaneosly.
  */
-static S3HeaderTag curLockedTag = {{{InvalidOid, InvalidOid, InvalidOid},
-InvalidOid}, 0, 0};
+static S3HeaderTag curLockedTag = {{{InvalidOid, InvalidOid, InvalidOid,
+InvalidOid}}, 0, 0};
 static int	curLockedIndex = 0;
 
 /*
@@ -1033,7 +1033,7 @@ iterate_tablespace_files(Oid tablespace, char *path, IterateFilesCallback callba
 			{
 				tag.key.oids.datoid = dbOid;
 				tag.key.oids.relnode = file_relnode;
-				tag.key.tablespace = tablespace;
+				tag.key.oids.spcoid = tablespace;
 				tag.checkpointNum = file_chkp;
 				tag.segNum = 0;
 				callback(tag);
@@ -1044,7 +1044,7 @@ iterate_tablespace_files(Oid tablespace, char *path, IterateFilesCallback callba
 			{
 				tag.key.oids.datoid = dbOid;
 				tag.key.oids.relnode = file_relnode;
-				tag.key.tablespace = tablespace;
+				tag.key.oids.spcoid = tablespace;
 				tag.checkpointNum = file_chkp;
 				tag.segNum = file_segno;
 				callback(tag);

@@ -881,8 +881,8 @@ o_table_tableam_create(ORelOids oids, TupleDesc tupdesc, char relpersistence,
 	o_table->primary_init_nfields = o_table->nfields + 1;	/* + ctid field */
 	o_table->fields = palloc0(o_table->nfields * sizeof(OTableField));
 	o_table->oids = oids;
-	o_table->tablespace = tablespace;
-	Assert(o_table->tablespace);
+	o_table->oids.spcoid = tablespace;
+	Assert(o_table->oids.spcoid);
 	o_table->tid_btree_ops_oid = GetDefaultOpClass(TIDOID, BTREE_AM_OID);
 
 	hash_opclass = GetDefaultOpClass(TIDOID, HASH_AM_OID);
@@ -1150,20 +1150,20 @@ o_table_make_index_keys(OTable *table, int *num)
 	for (i = 0; i < trees_num; i++)
 	{
 		trees[i].oids = table->indices[i].oids;
-		trees[i].tablespace = table->indices[i].tablespace;
+		trees[i].oids.spcoid = table->indices[i].oids.spcoid;
 	}
 
 	if (ORelOidsIsValid(table->bridge_oids))
 	{
 		trees[trees_num].oids = table->bridge_oids;
-		trees[trees_num].tablespace = table->tablespace;
+		trees[trees_num].oids.spcoid = table->oids.spcoid;
 		trees_num++;
 	}
 
 	if (ORelOidsIsValid(table->toast_oids))
 	{
 		trees[trees_num].oids = table->toast_oids;
-		trees[trees_num].tablespace = table->tablespace;
+		trees[trees_num].oids.spcoid = table->oids.spcoid;
 		trees_num++;
 	}
 
@@ -1172,7 +1172,7 @@ o_table_make_index_keys(OTable *table, int *num)
 		table->indices[PrimaryIndexNumber].type != oIndexPrimary)
 	{
 		trees[trees_num].oids = table->oids;
-		trees[trees_num].tablespace = table->tablespace;
+		trees[trees_num].oids.spcoid = table->oids.spcoid;
 		trees_num++;
 	}
 
@@ -1348,22 +1348,38 @@ o_tables_move_all_callback(OTable *o_table, void *arg)
 	if (move_arg->datoid != o_table->oids.datoid)
 		return;
 
-	if (o_table->tablespace == move_arg->old_tablespace)
+	/*
+	 * The tablespace is part of the tree-identity keys (OIndexChunkKey,
+	 * SharedRootInfo, seq_buf, ...), so moving a tree between tablespaces
+	 * must delete the old-tablespace-keyed OIndex entry and insert a
+	 * new-tablespace-keyed one (o_indices_move), rather than an in-place
+	 * update keyed by the new tablespace which would orphan the old entry.
+	 */
+	if (o_table->oids.spcoid == move_arg->old_tablespace)
 	{
-		o_table->tablespace = move_arg->new_tablespace;
+		o_table->oids.spcoid = move_arg->new_tablespace;
 		if (!o_table->has_primary)
 		{
-			o_indices_update(o_table, PrimaryIndexNumber, move_arg->oxid, move_arg->csn);
+			o_indices_move(o_table, PrimaryIndexNumber, move_arg->old_tablespace,
+						   move_arg->oxid, move_arg->csn);
+			o_move_tree_meta(o_table->oids.datoid, o_table->oids.relnode,
+							 move_arg->old_tablespace, move_arg->new_tablespace);
 			table_moved = true;
 		}
 		if (ORelOidsIsValid(o_table->toast_oids))
 		{
-			o_indices_update(o_table, TOASTIndexNumber, move_arg->oxid, move_arg->csn);
+			o_indices_move(o_table, TOASTIndexNumber, move_arg->old_tablespace,
+						   move_arg->oxid, move_arg->csn);
+			o_move_tree_meta(o_table->toast_oids.datoid, o_table->toast_oids.relnode,
+							 move_arg->old_tablespace, move_arg->new_tablespace);
 			table_moved = true;
 		}
 		if (ORelOidsIsValid(o_table->bridge_oids))
 		{
-			o_indices_update(o_table, BridgeIndexNumber, move_arg->oxid, move_arg->csn);
+			o_indices_move(o_table, BridgeIndexNumber, move_arg->old_tablespace,
+						   move_arg->oxid, move_arg->csn);
+			o_move_tree_meta(o_table->bridge_oids.datoid, o_table->bridge_oids.relnode,
+							 move_arg->old_tablespace, move_arg->new_tablespace);
 			table_moved = true;
 		}
 	}
@@ -1373,16 +1389,44 @@ o_tables_move_all_callback(OTable *o_table, void *arg)
 		OTableIndex *ix_table;
 
 		ix_table = &o_table->indices[ixnum];
-		if (ix_table->tablespace != move_arg->old_tablespace)
+		if (ix_table->oids.spcoid != move_arg->old_tablespace)
 			continue;
-		ix_table->tablespace = move_arg->new_tablespace;
-		o_indices_update(o_table, ixnum + ctid_idx_off, move_arg->oxid, move_arg->csn);
-		o_invalidate_oids(ix_table->oids);
-		o_invalidate_descrs(ix_table->oids.datoid, ix_table->oids.reloid, ix_table->oids.relnode);
+		ix_table->oids.spcoid = move_arg->new_tablespace;
+		o_indices_move(o_table, ixnum + ctid_idx_off, move_arg->old_tablespace,
+					   move_arg->oxid, move_arg->csn);
+		o_move_tree_meta(ix_table->oids.datoid, ix_table->oids.relnode,
+						 move_arg->old_tablespace, move_arg->new_tablespace);
+		/* A secondary index can move while its table stays behind. */
+		table_moved = true;
 	}
+
 	if (table_moved)
 	{
+		/*
+		 * Persist the OTable carrying the new per-tree tablespaces before
+		 * invalidating descriptors: a rebuild fetches each OIndex using the
+		 * table's tablespace as part of the key, so it must already resolve
+		 * to the destination tablespace.
+		 */
 		o_tables_update(o_table, move_arg->oxid, move_arg->csn);
+
+		/*
+		 * Drop cached descriptors of the moved trees so the next fetch
+		 * rebuilds them (and their seq_buf tags / file paths) at the
+		 * destination tablespace.  Invalidating the table descr recreates the
+		 * whole table descriptor, including primary/toast/bridge and
+		 * secondary indices.
+		 */
+		for (int ixnum = 0; ixnum < o_table->nindices; ixnum++)
+		{
+			o_invalidate_oids(o_table->indices[ixnum].oids);
+			o_invalidate_descrs(o_table->indices[ixnum].oids.datoid,
+								o_table->indices[ixnum].oids.reloid,
+								o_table->indices[ixnum].oids.relnode);
+		}
+		o_invalidate_oids(o_table->oids);
+		o_invalidate_descrs(o_table->oids.datoid, o_table->oids.reloid,
+							o_table->oids.relnode);
 	}
 	o_tables_after_update(o_table, move_arg->oxid, move_arg->csn);
 }
@@ -1571,7 +1615,8 @@ o_tables_get_by_tree(ORelOids oids, OIndexType type)
 	bool		result;
 
 	/* See if it's index oid first */
-	result = o_indices_find_table_oids(oids, type, &o_in_progress_snapshot,
+	result = o_indices_find_table_oids(oids, type,
+									   &o_in_progress_snapshot,
 									   &tableOids);
 	if (!result)
 		return NULL;
@@ -2084,7 +2129,7 @@ serialize_o_table_index(OTableIndex *o_table_index, StringInfo str)
 	 */
 	o_serialize_string(o_table_index->predicate_str, str);
 	o_serialize_node((Node *) o_table_index->expressions, str);
-	appendBinaryStringInfo(str, (Pointer) &o_table_index->tablespace, sizeof(Oid));
+	appendBinaryStringInfo(str, (Pointer) &o_table_index->oids.spcoid, sizeof(Oid));
 	if (o_table_index->type == oIndexExclusion)
 		appendBinaryStringInfo(str, (Pointer) o_table_index->exclops, sizeof(Oid) * o_table_index->nkeyfields);
 	appendBinaryStringInfo(str, &o_table_index->immediate, sizeof(bool));
@@ -2134,7 +2179,7 @@ serialize_o_table(OTable *o_table, int *size)
 		appendBinaryStringInfo(&str, buf_start, field_size);
 	}
 
-	appendBinaryStringInfo(&str, (Pointer) &o_table->tablespace, sizeof(Oid));
+	appendBinaryStringInfo(&str, (Pointer) &o_table->oids.spcoid, sizeof(Oid));
 
 	*size = str.len;
 	return str.data;
@@ -2196,7 +2241,7 @@ deserialize_o_table_index(OTableIndex *o_table_index, Pointer *ptr,
 		MemoryContextSwitchTo(old_mcxt);
 		return false;
 	}
-	memcpy(&o_table_index->tablespace, *ptr, len);
+	memcpy(&o_table_index->oids.spcoid, *ptr, len);
 	*ptr += len;
 
 	if (o_table_index->type == oIndexExclusion)
@@ -2381,7 +2426,7 @@ deserialize_o_table(Pointer data, Size length)
 		o_table_free(o_table);
 		return NULL;
 	}
-	memcpy(&o_table->tablespace, ptr, len);
+	memcpy(&o_table->oids.spcoid, ptr, len);
 	ptr += len;
 
 	if (ptr - data != length)
@@ -2459,6 +2504,8 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, boo
 	oTable->oids.datoid = MyDatabaseId;
 	oTable->oids.reloid = rel->rd_id;
 	oTable->oids.relnode = RelFileNodeGetNode(newrnode);
+	oTable->oids.spcoid = OidIsValid(rel->rd_rel->reltablespace) ?
+		rel->rd_rel->reltablespace : MyDatabaseTableSpace;
 
 	if (rel->rd_rel->reltoastrelid)
 	{
@@ -2484,6 +2531,8 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, boo
 			GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
 								rel->rd_rel->relpersistence);
 		oTable->bridge_oids.reloid = oTable->bridge_oids.relnode;
+		/* A bridge index lives in its table's tablespace. */
+		oTable->bridge_oids.spcoid = oTable->oids.spcoid;
 	}
 
 	for (i = 0; i < oTable->nindices; i++)

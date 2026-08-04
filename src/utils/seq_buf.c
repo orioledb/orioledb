@@ -106,6 +106,7 @@ init_seq_buf(SeqBufDescPrivate *seqBufPrivate, SeqBufDescShared *shared,
 			OrioleDBPageDesc *page_desc = O_GET_IN_MEMORY_PAGEDESC(shared->pages[i]);
 
 			ORelOidsSetInvalid(page_desc->oids);
+			page_desc->oids.spcoid = InvalidOid;
 			page_desc->type = oIndexInvalid;
 		}
 
@@ -138,7 +139,7 @@ get_seq_buf_filename(SeqBufTag *tag)
 	char	   *typename;
 	char	   *db_prefix;
 
-	o_get_prefixes_for_tablespace(tag->key.oids.datoid, tag->key.tablespace,
+	o_get_prefixes_for_tablespace(tag->key.oids.datoid, tag->key.oids.spcoid,
 								  NULL, &db_prefix);
 	if (tag->type == 't')
 		typename = "tmp";
@@ -160,11 +161,13 @@ static bool
 seq_buf_tag_eq(SeqBufTag *t1, SeqBufTag *t2)
 {
 	/*
-	 * Tablespace is intentionally omitted: (datoid, relnode) already uniquely
-	 * identifies a btree regardless of which tablespace it lives in.
+	 * Tablespace is part of the identity: relfilenumber uniqueness is
+	 * enforced by PG only per-tablespace, so the same (datoid, relnode) can
+	 * name two different btrees living in different tablespaces.
 	 */
 	if (t1->key.oids.datoid == t2->key.oids.datoid &&
 		t1->key.oids.relnode == t2->key.oids.relnode &&
+		t1->key.oids.spcoid == t2->key.oids.spcoid &&
 		t1->num == t2->num &&
 		t1->type == t2->type)
 		return true;

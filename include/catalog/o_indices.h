@@ -28,7 +28,6 @@ typedef struct
 	char		table_persistence;
 	uint8		fillfactor;
 	uint16		data_version;
-	Oid			tablespace;
 	OXid		createOxid;
 	NameData	name;
 	bool		primaryIsCtid;
@@ -94,7 +93,7 @@ typedef struct
 
 /* callback for o_indices_foreach_oids() */
 typedef void (*OIndexOidsCallback) (OIndexType type, ORelOids treeOids,
-									ORelOids tableOids, Oid tablespace, void *arg);
+									ORelOids tableOids, void *arg);
 
 typedef enum
 {
@@ -118,10 +117,13 @@ extern bool o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid,
 extern bool o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid,
 						  CommitSeqNo csn);
 extern OIndex *o_indices_get(ORelOids oids, OIndexType type);
-extern OIndex *o_indices_get_extended(ORelOids oids, OIndexType type, OTableFetchContext ctx);
+extern OIndex *o_indices_get_extended(ORelOids oids, OIndexType type,
+									  OTableFetchContext ctx);
 
 extern bool o_indices_update(OTable *table, OIndexNumber ixNum,
 							 OXid oxid, CommitSeqNo csn);
+extern bool o_indices_move(OTable *table, OIndexNumber ixNum,
+						   Oid old_tablespace, OXid oxid, CommitSeqNo csn);
 extern bool o_indices_find_table_oids(ORelOids indexOids, OIndexType type,
 									  OSnapshot *oSnapshot,
 									  ORelOids *tableOids);

@@ -65,6 +65,7 @@
 #include "utils/memutils.h"
 #include "utils/typcache.h"
 #include "catalog/pg_database.h"
+#include "catalog/pg_tablespace_d.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -3482,7 +3483,8 @@ worker_wait_shutdown(RecoveryWorkerState *worker)
 }
 
 static void
-cleanup_tablespace_old_files(char *path, uint32 chkp_num, bool before_recovery)
+cleanup_tablespace_old_files(char *path, Oid tablespace, uint32 chkp_num,
+							 bool before_recovery)
 {
 	DIR		   *dir,
 			   *dbDir;
@@ -3559,13 +3561,14 @@ cleanup_tablespace_old_files(char *path, uint32 chkp_num, bool before_recovery)
 						bool		found;
 
 						my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid,
+															tablespace,
 															chkp_num, &found);
 
 						cleanup = (file_chkp > my_chkp_num);
 
 						if (!found && file_chkp == chkp_num)
 							o_update_latest_chkp_num(dbOid, file_reloid,
-													 file_chkp);
+													 tablespace, file_chkp);
 					}
 
 					if (!cleanup)
@@ -3590,6 +3593,7 @@ cleanup_tablespace_old_files(char *path, uint32 chkp_num, bool before_recovery)
 						uint32		my_chkp_num;
 
 						my_chkp_num = o_get_latest_chkp_num(dbOid, file_reloid,
+															tablespace,
 															chkp_num, NULL);
 
 						cleanup = (file_chkp < my_chkp_num);
@@ -3650,17 +3654,22 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 
 	path[0] = '\0';
 	strlcat(path, ORIOLEDB_DATA_DIR, MAXPGPATH);
-	cleanup_tablespace_old_files(path, chkp_num, before_recovery);
+	cleanup_tablespace_old_files(path, DEFAULTTABLESPACE_OID, chkp_num,
+								 before_recovery);
 
 	dir = opendir(PG_TBLSPC);
 	while (errno = 0, (file = readdir(dir)) != NULL)
 	{
 		struct stat st;
 		int			rllen;
+		Oid			tablespace;
 
 		/* Skip special stuff */
 		if (strcmp(file->d_name, ".") == 0 || strcmp(file->d_name, "..") == 0)
 			continue;
+
+		tablespace = pg_strtoint64(file->d_name);
+		Assert(OidIsValid(tablespace));
 
 		path[0] = '\0';
 		pg_snprintf(path, MAXPGPATH,
@@ -3677,7 +3686,8 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 		if (!S_ISLNK(st.st_mode))
 		{
 			strlcat(path, "/" ORIOLEDB_DATA_DIR, MAXPGPATH);
-			cleanup_tablespace_old_files(path, chkp_num, before_recovery);
+			cleanup_tablespace_old_files(path, tablespace, chkp_num,
+										 before_recovery);
 		}
 		else
 		{
@@ -3698,7 +3708,8 @@ recovery_cleanup_old_files(uint32 chkp_num, bool before_recovery)
 			pg_snprintf(path, MAXPGPATH,
 						"%s/" ORIOLEDB_DATA_DIR,
 						targetpath);
-			cleanup_tablespace_old_files(path, chkp_num, before_recovery);
+			cleanup_tablespace_old_files(path, tablespace, chkp_num,
+										 before_recovery);
 		}
 	}
 	closedir(dir);
@@ -3716,19 +3727,16 @@ o_indices_get_trees(Pointer tuple, ORelOids *tableOids)
 	if (chunk.key.chunknum != 0)
 		return NULL;
 
-	/*
-	 * The serialized OIndex blob starts at OIndex.tableOids (the key fields
-	 * indexOids/indexType/indexVersion are stored in OIndexChunkKey).
-	 * tablespace must lie after tableOids in the struct so the subtraction
-	 * below is positive and the field lands in the first chunk.
-	 */
-	StaticAssertStmt(offsetof(OIndex, tablespace) > offsetof(OIndex, tableOids),
-					 "OIndex.tablespace must follow OIndex.tableOids");
 	Assert(chunk.dataLength >= sizeof(*tableOids));
 	memcpy(tableOids, tuple + offsetof(OIndexChunk, data), sizeof(*tableOids));
 	trees = (OIndexKey *) MemoryContextAlloc(CurTransactionContext, sizeof(OIndexKey));
+
+	/*
+	 * The tablespace is part of the tree identity (ORelOids.spcoid) and is
+	 * stored in OIndexChunkKey.oids, so copying the key oids carries it too
+	 * -- no need to read it back out of the serialized OIndex blob.
+	 */
 	trees->oids = chunk.key.oids;
-	memcpy(&trees->tablespace, tuple + offsetof(OIndexChunk, data) + (offsetof(OIndex, tablespace) - offsetof(OIndex, tableOids)), sizeof(Oid));
 
 	return trees;
 }
@@ -3856,7 +3864,7 @@ recovery_apply_systree_modify(int sys_tree_num, uint16 type, OTuple tuple,
 				char	   *db_prefix;
 
 				o_get_prefixes_for_tablespace(trees->oids.datoid,
-											  trees->tablespace,
+											  trees->oids.spcoid,
 											  &prefix, &db_prefix);
 				o_verify_dir_exists_or_create(prefix, NULL, NULL);
 				o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
@@ -3938,7 +3946,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 				break;
 		}
 
-		if (new_o_table->tablespace != old_o_table->tablespace)
+		if (new_o_table->oids.spcoid != old_o_table->oids.spcoid)
 			changed_tablespace = true;
 		if (new_o_table->nindices > old_o_table->nindices)
 		{
@@ -3947,7 +3955,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 			o_fill_tmp_table_descr(&tmp_descr, new_o_table);
 			if (new_o_table->indices[ix_num].type == oIndexPrimary)
 			{
-				if (tbl_data_exists(&old_o_table->oids, old_o_table->tablespace))
+				if (tbl_data_exists(&old_o_table->oids))
 				{
 					old_descr = o_fetch_table_descr(old_o_table->oids);
 					if (!changed_tablespace)
@@ -3984,7 +3992,8 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 			{
 				if (!changed_tablespace)
 					o_insert_shared_root_placeholder(new_o_table->indices[ix_num].oids.datoid,
-													 new_o_table->indices[ix_num].oids.relnode);
+													 new_o_table->indices[ix_num].oids.relnode,
+													 new_o_table->indices[ix_num].oids.spcoid);
 				o_tables_meta_unlock_no_wal();
 
 				Assert(is_recovery_in_progress());
@@ -4021,7 +4030,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 				OTableDescr tmp_descr;
 
 				o_fill_tmp_table_descr(&tmp_descr, new_o_table);
-				if (tbl_data_exists(&old_o_table->indices[ix_num].oids, old_o_table->indices[ix_num].tablespace))
+				if (tbl_data_exists(&old_o_table->indices[ix_num].oids))
 				{
 					old_descr = o_fetch_table_descr(old_o_table->oids);
 					if (!changed_tablespace)
@@ -4071,14 +4080,10 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 			 */
 			OTableDescr tmp_descr;
 			ORelOids	srcOids;
-			Oid			srcTablespace;
 
 			srcOids = old_o_table->has_primary ?
 				old_o_table->indices[PrimaryIndexNumber].oids :
 				old_o_table->oids;
-			srcTablespace = old_o_table->has_primary ?
-				old_o_table->indices[PrimaryIndexNumber].tablespace :
-				old_o_table->tablespace;
 
 			/*
 			 * o_fill_tmp_table_descr() already initializes shared root info
@@ -4086,7 +4091,7 @@ handle_o_tables_meta_unlock(ORelOids oids, Oid oldRelnode)
 			 * call rebuild_indices_insert_placeholders() afterwards.
 			 */
 			o_fill_tmp_table_descr(&tmp_descr, new_o_table);
-			if (tbl_data_exists(&srcOids, srcTablespace))
+			if (tbl_data_exists(&srcOids))
 			{
 				old_descr = o_fetch_table_descr(old_o_table->oids);
 				o_tables_meta_unlock_no_wal();
@@ -4235,13 +4240,19 @@ handle_movedb(Oid dbOid, Oid src_tblspcoid, Oid dst_tblspcoid)
 		EvictedTreeData *evicted_data = NULL;
 		Oid			relnode = lfirst_oid(lc);
 
-		evicted_data = read_evicted_data(dbOid, relnode, true);
+		evicted_data = read_evicted_data(dbOid, relnode, src_tblspcoid, true);
 
 		if (evicted_data != NULL)
 		{
-			evicted_data->freeBuf.tag.key.tablespace = dst_tblspcoid;
-			evicted_data->nextChkp.tag.key.tablespace = dst_tblspcoid;
-			evicted_data->tmpBuf.tag.key.tablespace = dst_tblspcoid;
+			/*
+			 * Re-key the EVICTED_DATA entry (and its seq_buf tags) to the
+			 * destination tablespace: tablespace is part of the tree
+			 * identity, so the entry must move with the tree.
+			 */
+			evicted_data->key.tablespace = dst_tblspcoid;
+			evicted_data->freeBuf.tag.key.oids.spcoid = dst_tblspcoid;
+			evicted_data->nextChkp.tag.key.oids.spcoid = dst_tblspcoid;
+			evicted_data->tmpBuf.tag.key.oids.spcoid = dst_tblspcoid;
 			insert_evicted_data(evicted_data);
 		}
 	}
@@ -4468,7 +4479,8 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				{
 					Assert(ix_type == oIndexToast || ix_type == oIndexBridge);
 					ctx->descr = NULL;
-					ctx->indexDescr = o_fetch_index_descr(rec->oids, ix_type, false, NULL);
+					ctx->indexDescr = o_fetch_index_descr(rec->oids, ix_type,
+														  false, NULL);
 				}
 
 				if (ctx->sys_tree_num == -1 && (ctx->descr || ctx->indexDescr))
@@ -4481,13 +4493,13 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 					if (ctx->descr)
 					{
 						oids = GET_PRIMARY(ctx->descr)->desc.oids;
-						tablespace = GET_PRIMARY(ctx->descr)->desc.tablespace;
+						tablespace = GET_PRIMARY(ctx->descr)->desc.oids.spcoid;
 					}
 					else
 					{
 						Assert(ctx->indexDescr);
 						oids = ctx->indexDescr->oids;
-						tablespace = ctx->indexDescr->desc.tablespace;
+						tablespace = ctx->indexDescr->desc.oids.spcoid;
 					}
 					o_get_prefixes_for_tablespace(oids.datoid, tablespace,
 												  &prefix, &db_prefix);

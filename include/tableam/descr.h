@@ -275,9 +275,6 @@ struct OTableDescr
 	int			nIndices;
 	/* number of unique trees */
 	int			nUniqueIndices;
-	/* OID of the tablespace for table */
-	Oid			tablespace;
-
 	bool		noInvalidation;
 };
 
@@ -337,7 +334,9 @@ extern bool o_btree_load_shmem_checkpoint(BTreeDescr *desc);
 extern bool o_btree_try_use_shmem(BTreeDescr *desc);
 
 extern SharedRootInfo *o_find_shared_root_info(SharedRootInfoKey *key);
-extern void o_insert_shared_root_placeholder(Oid datoid, Oid relnode);
+extern void o_insert_shared_root_placeholder(Oid datoid, Oid relnode, Oid tablespace);
+extern void o_move_tree_meta(Oid datoid, Oid relnode, Oid old_tablespace,
+							 Oid new_tablespace);
 
 extern OComparator *o_find_comparator(Oid opfamily,
 									  Oid lefttype,
@@ -348,7 +347,7 @@ extern int	o_call_comparator(OComparator *comparator, Datum left,
 extern int	o_call_exclusion_fn(OExclusionFn *exclusion_fn, Datum left, Datum right, Oid collation);
 extern uint32 o_call_hash_fn(OHashFn *hash_fn, Oid collation, Datum val);
 
-extern EvictedTreeData *read_evicted_data(Oid datoid, Oid relnode, bool delete);
+extern EvictedTreeData *read_evicted_data(Oid datoid, Oid relnode, Oid tablespace, bool delete);
 extern void insert_evicted_data(EvictedTreeData *data);
 
 extern void oFillFieldOpClassAndComparator(OIndexField *field, Oid datoid,

@@ -216,12 +216,13 @@ print_unloaded_tree(StringInfoData *buf, BTreeDescr *td, const char *treeName,
 
 	memset(&prev_chkp_tag, 0, sizeof(prev_chkp_tag));
 	prev_chkp_tag.key.oids = td->oids;
-	prev_chkp_tag.key.tablespace = td->tablespace;
+	prev_chkp_tag.key.oids.spcoid = td->oids.spcoid;
 	prev_chkp_tag.num = checkpoint_state->lastCheckpointNumber;
 	prev_chkp_tag.type = 'm';
 
 	evicted_data = read_evicted_data(td->oids.datoid,
 									 td->oids.relnode,
+									 td->oids.spcoid,
 									 false);
 
 	/*
@@ -313,6 +314,7 @@ tree_structure(StringInfo buf,
 
 	key.datoid = td->oids.datoid;
 	key.relnode = td->oids.relnode;
+	key.tablespace = td->oids.spcoid;
 	sharedRootInfo = o_find_shared_root_info(&key);
 
 	if (sharedRootInfo != NULL && !sharedRootInfo->placeholder)
@@ -835,6 +837,7 @@ tree_bin_structure(StringInfo buf, OIndexDescr *id, bool print_bytes,
 
 	key.datoid = td->oids.datoid;
 	key.relnode = td->oids.relnode;
+	key.tablespace = td->oids.spcoid;
 	sharedRootInfo = o_find_shared_root_info(&key);
 
 	if (sharedRootInfo != NULL && !sharedRootInfo->placeholder)
@@ -1153,6 +1156,7 @@ orioledb_table_pages(PG_FUNCTION_ARGS)
 
 		key.datoid = td->oids.datoid;
 		key.relnode = td->oids.relnode;
+		key.tablespace = td->oids.spcoid;
 		sharedRootInfo = o_find_shared_root_info(&key);
 
 		if (sharedRootInfo == NULL || sharedRootInfo->placeholder)

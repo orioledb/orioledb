@@ -98,8 +98,8 @@
  * these values makes sense only within one ORIOLEDB_BINARY_VERSION value.
  */
 #define ORIOLEDB_VERSION "OrioleDB beta 16"
-#define ORIOLEDB_BINARY_VERSION 10
-#define ORIOLEDB_SYS_TREE_VERSION	1	/* Version of system catalog */
+#define ORIOLEDB_BINARY_VERSION 11
+#define ORIOLEDB_SYS_TREE_VERSION	2	/* Version of system catalog */
 #define ORIOLEDB_PAGE_VERSION		1	/* Version of binary page format */
 #define ORIOLEDB_COMPRESS_VERSION	1	/* Version of page compression (only
 										 * for compressed pages) */
@@ -275,6 +275,9 @@ typedef struct
 	Oid			datoid;
 	Oid			reloid;
 	Oid			relnode;
+	Oid			spcoid;			/* tablespace: part of the tree identity,
+								 * since relfilenumber uniqueness is only
+								 * per-tablespace */
 } ORelOids;
 
 typedef uint64 S3TaskLocation;
@@ -286,6 +289,8 @@ typedef RelFileLocator RelFileNode;
 		(oids).datoid = MyDatabaseId; \
 		(oids).reloid = (rel)->rd_id; \
 		(oids).relnode = (rel)->rd_locator.relNumber; \
+		(oids).spcoid = OidIsValid((rel)->rd_rel->reltablespace) ? \
+			(rel)->rd_rel->reltablespace : MyDatabaseTableSpace; \
 	} while (0)
 #define RelIsInMyDatabase(rel) ((rel)->rd_locator.dbOid == MyDatabaseId)
 #define RelGetNode(rel) ((rel)->rd_locator)
@@ -295,9 +300,16 @@ typedef RelFileLocator RelFileNode;
 		RelationSetNewRelfilenumber(relation, persistence)
 
 #define ORelOidsIsValid(oids) (OidIsValid((oids).datoid) && OidIsValid((oids).reloid) && OidIsValid((oids).relnode))
+/*
+ * Tree identity: (datoid, reloid, relnode).  spcoid (tablespace) is
+ * deliberately NOT compared here -- reloid is already unique per relation, so
+ * this triple never suffers the cross-tablespace relnode collision.  spcoid
+ * matters only for the reloid-omitting keys (sys trees, seq_buf), which
+ * compare it explicitly.
+ */
 #define ORelOidsIsEqual(l, r) ((l).datoid == (r).datoid && (l).reloid == (r).reloid && (l).relnode == (r).relnode)
 #define ORelOidsSetInvalid(oids) \
-	((oids).datoid = (oids).reloid = (oids).relnode = InvalidOid)
+	((oids).datoid = (oids).reloid = (oids).relnode = (oids).spcoid = InvalidOid)
 
 #if PG_VERSION_NUM >= 170000
 

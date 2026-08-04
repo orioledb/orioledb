@@ -200,9 +200,10 @@ check_btree(BTreeDescr *desc, bool force_file_check, bool wait_for_checkpoint)
 		memset(&tmp_extents, 0, sizeof(ExtentsArray));
 
 		tag.key.oids = desc->oids;
-		tag.key.tablespace = desc->tablespace;
+		tag.key.oids.spcoid = desc->oids.spcoid;
 		tag.num = o_get_latest_chkp_num(desc->oids.datoid,
 										desc->oids.relnode,
+										desc->oids.spcoid,
 										checkpoint_number - 1,
 										&found);
 		tag.type = 'm';
@@ -279,7 +280,7 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 	bool		is_compressed = OCompressIsValid(desc->compress);
 
 	chkp_tag.key.oids = desc->oids;
-	chkp_tag.key.tablespace = desc->tablespace;
+	chkp_tag.key.oids.spcoid = desc->oids.spcoid;
 
 	if (force_file_check)
 	{
@@ -291,6 +292,7 @@ get_free_extents(BTreeDescr *desc, ExtentsArray *free_extents,
 		chkp_tag.type = 'm';
 		chkp_tag.num = o_get_latest_chkp_num(desc->oids.datoid,
 											 desc->oids.relnode,
+											 desc->oids.spcoid,
 											 chkp_num,
 											 &found);
 

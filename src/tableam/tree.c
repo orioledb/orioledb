@@ -98,7 +98,7 @@ index_btree_desc_init(BTreeDescr *desc, OCompress compress, int fillfactor,
 		desc->ops = &secondaryOps;
 
 	desc->oids = oids;
-	desc->tablespace = tablespace;
+	desc->oids.spcoid = tablespace;
 	desc->arg = arg;
 	desc->compress = compress;
 	if (fillfactor >= BTREE_MIN_FILLFACTOR && fillfactor <= 100)

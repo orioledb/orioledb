@@ -22,6 +22,8 @@
 
 #include "orioledb.h"
 
+#include "catalog/pg_tablespace_d.h"
+
 #include "btree/page_contents.h"
 #include "catalog/sys_trees.h"
 #include "recovery/wal_reader.h"
@@ -141,6 +143,19 @@ wal_parse_rec_relation(WalReaderState *r, WalRecord *rec)
 		rec->u.relation.version = O_TABLE_INVALID_VERSION;
 		rec->u.relation.base_version = O_TABLE_INVALID_VERSION;
 	}
+
+	/*
+	 * The tablespace is part of the tree identity (ORelOids.spcoid).  WAL
+	 * written before version 18 predates the per-tablespace relnode identity,
+	 * so default it to the default tablespace (matching
+	 * o_get_prefixes_for_tablespace()).
+	 */
+	if (r->container.version >= 18)
+	{
+		WR_PARSE(r, &rec->oids.spcoid);
+	}
+	else
+		rec->oids.spcoid = DEFAULTTABLESPACE_OID;
 
 	return WALPARSE_OK;
 }

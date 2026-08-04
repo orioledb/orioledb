@@ -1291,7 +1291,7 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 #else
 						change = ReorderBufferGetChange(ctx->decodeCtx->reorder);
 #endif
-						change->data.tp.rlocator.spcOid = ctx->descr->tablespace;
+						change->data.tp.rlocator.spcOid = ctx->descr->oids.spcoid;
 						change->data.tp.rlocator.dbOid = rec->oids.datoid;
 						change->data.tp.rlocator.relNumber = rec->oids.relnode;
 						elog(DEBUG4, "reloid: %u", rec->oids.reloid);

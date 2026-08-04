@@ -28,7 +28,7 @@
  * ORIOLEDB_COMPRESS_VERSION (see big comment on versioning
  * in include/orioledb.h)
  */
-#define ORIOLEDB_WAL_VERSION (17)
+#define ORIOLEDB_WAL_VERSION (18)
 
 /*
  * Value has been fixed at the moment of introducing WAL versioning.
@@ -93,6 +93,8 @@ typedef struct
 	uint8		cid[sizeof(CommandId)];
 	uint8		version[sizeof(uint32)];
 	uint8		baseVersion[sizeof(uint32)];
+	/* Since ORIOLEDB_WAL_VERSION = 18 */
+	uint8		tablespace[sizeof(Oid)];
 } WALRecRelation;
 
 typedef struct

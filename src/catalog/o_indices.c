@@ -166,6 +166,7 @@ oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 	/* Ignore reloid because it may changes */
 	if (tupleKey->oids.datoid == boundKey->key.oids.datoid &&
 		tupleKey->oids.relnode == boundKey->key.oids.relnode &&
+		tupleKey->oids.spcoid == boundKey->key.oids.spcoid &&
 		tupleKey->type == boundKey->key.type)
 	{
 		if (COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn) &&
@@ -287,8 +288,8 @@ make_ctid_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	result->primaryIsCtid = true;
 	result->compress = table->primary_compress;
 	result->fillfactor = table->fillfactor;
-	result->tablespace = table->tablespace;
-	Assert(result->tablespace);
+	result->indexOids.spcoid = table->oids.spcoid;
+	Assert(result->indexOids.spcoid);
 	result->nLeafFields = table->nfields + 1;
 	if (table->index_bridging)
 		result->nLeafFields++;
@@ -376,8 +377,8 @@ make_primary_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	else
 		result->compress = table->primary_compress;
 	result->fillfactor = table->fillfactor;
-	result->tablespace = tableIndex->tablespace;
-	Assert(result->tablespace);
+	result->indexOids.spcoid = tableIndex->oids.spcoid;
+	Assert(result->indexOids.spcoid);
 	saved_nLeafFields = table->nfields;
 	result->nLeafFields = table->nfields;
 	if (table->index_bridging)
@@ -547,8 +548,8 @@ make_secondary_o_index(OTable *table, OTableIndex *tableIndex, OIndexVersionMode
 	result->bridging = table->index_bridging;
 	result->compress = tableIndex->compress;
 	result->fillfactor = tableIndex->fillfactor;
-	result->tablespace = tableIndex->tablespace;
-	Assert(result->tablespace);
+	result->indexOids.spcoid = tableIndex->oids.spcoid;
+	Assert(result->indexOids.spcoid);
 	result->nulls_not_distinct = tableIndex->nulls_not_distinct;
 	result->nIncludedFields = tableIndex->nfields - tableIndex->nkeyfields;
 	result->nLeafFields = tableIndex->nfields;
@@ -625,8 +626,8 @@ make_toast_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = table->toast_compress;
 	result->fillfactor = HEAP_DEFAULT_FILLFACTOR;
-	result->tablespace = table->tablespace;
-	Assert(result->tablespace);
+	result->indexOids.spcoid = table->oids.spcoid;
+	Assert(result->indexOids.spcoid);
 	if (table->has_primary)
 	{
 		primary = &table->indices[0];
@@ -705,7 +706,7 @@ make_bridge_o_index(OTable *table, OIndexVersionMode ixVerMode)
 	result->primaryIsCtid = !table->has_primary;
 	result->compress = table->primary_compress;
 	result->nLeafFields = 1;
-	result->tablespace = table->tablespace;
+	result->indexOids.spcoid = table->oids.spcoid;
 	if (table->has_primary)
 	{
 		primary = &table->indices[0];
@@ -1603,6 +1604,7 @@ o_indices_add(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 
 	oIndex->createOxid = oxid;
 	key.oids = oIndex->indexOids;
+	key.oids.spcoid = oIndex->indexOids.spcoid;
 	key.type = oIndex->indexType;
 	key.chunknum = 0;
 	key.version = 0;
@@ -1635,6 +1637,7 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 
 	oIndex = make_o_index(table, ixNum, OIndexVersionPass);
 	key.oids = oIndex->indexOids;
+	key.oids.spcoid = oIndex->indexOids.spcoid;
 	key.type = oIndex->indexType;
 	key.chunknum = 0;
 	key.version = oIndex->indexVersion;
@@ -1657,7 +1660,8 @@ o_indices_del(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 OIndex *
 o_indices_get(ORelOids oids, OIndexType type)
 {
-	return o_indices_get_extended(oids, type, default_table_fetch_context);
+	return o_indices_get_extended(oids, type,
+								  default_table_fetch_context);
 }
 
 /*
@@ -1666,7 +1670,8 @@ o_indices_get(ORelOids oids, OIndexType type)
  * O_DESERIALIZE_MAX_RETRIES times before reporting an error.
  */
 OIndex *
-o_indices_get_extended(ORelOids oids, OIndexType type, OTableFetchContext ctx)
+o_indices_get_extended(ORelOids oids, OIndexType type,
+					   OTableFetchContext ctx)
 {
 	OIndexChunkKey key;
 	int			retry;
@@ -1739,7 +1744,9 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	BTreeDescr *sys_tree;
 
 	oIndex = make_o_index(table, ixNum, OIndexVersionPass);
-	oIndexOld = o_indices_get_extended(oIndex->indexOids, oIndex->indexType, default_table_fetch_context);
+	oIndexOld = o_indices_get_extended(oIndex->indexOids,
+									   oIndex->indexType,
+									   default_table_fetch_context);
 	if (oIndexOld)
 	{
 		oIndex->createOxid = oIndexOld->createOxid;
@@ -1747,6 +1754,7 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 	}
 	data = serialize_o_index(oIndex, &len);
 	key.oids = oIndex->indexOids;
+	key.oids.spcoid = oIndex->indexOids.spcoid;
 	key.type = oIndex->indexType;
 	key.chunknum = 0;
 	key.version = oIndex->indexVersion;
@@ -1764,6 +1772,72 @@ o_indices_update(OTable *table, OIndexNumber ixNum, OXid oxid, CommitSeqNo csn)
 											   (Pointer) &key, data, len, oxid,
 											   csn, sys_tree, table->persistence != RELPERSISTENCE_TEMP);
 	systrees_modify_end(table->persistence != RELPERSISTENCE_TEMP);
+
+	pfree(data);
+
+	return result;
+}
+
+/*
+ * Re-key an OIndex chunk from old_tablespace to the tablespace currently set
+ * on `table` (used by ALTER DATABASE ... SET TABLESPACE).
+ *
+ * The tablespace is now part of OIndexChunkKey, so a plain o_indices_update()
+ * keyed by the new tablespace would insert a fresh entry and leave the old
+ * entry orphaned at the source tablespace, making the tree resolvable at both
+ * (or neither) tablespace.  We therefore delete the old-tablespace-keyed chunk
+ * and insert a new-tablespace-keyed one, preserving the index incarnation
+ * version and createOxid so concurrent catalog MVCC and logical decoding keep
+ * seeing a consistent OIndex.
+ */
+bool
+o_indices_move(OTable *table, OIndexNumber ixNum, Oid old_tablespace,
+			   OXid oxid, CommitSeqNo csn)
+{
+	OIndex	   *oIndex;
+	OIndex	   *oIndexOld;
+	OIndexChunkKey oldKey;
+	OIndexChunkKey newKey;
+	bool		result;
+	bool		wal = table->persistence != RELPERSISTENCE_TEMP;
+	Pointer		data;
+	int			len;
+	BTreeDescr *sys_tree;
+
+	/* `table` already carries the destination tablespace */
+	oIndex = make_o_index(table, ixNum, OIndexVersionPass);
+	Assert(oIndex->indexOids.spcoid != old_tablespace);
+
+	oIndexOld = o_indices_get_extended(oIndex->indexOids,
+									   oIndex->indexType,
+									   default_table_fetch_context);
+	if (oIndexOld)
+	{
+		oIndex->createOxid = oIndexOld->createOxid;
+		free_o_index(oIndexOld);
+	}
+	data = serialize_o_index(oIndex, &len);
+
+	oldKey.oids = oIndex->indexOids;
+	oldKey.oids.spcoid = old_tablespace;
+	oldKey.type = oIndex->indexType;
+	oldKey.chunknum = 0;
+	oldKey.version = oIndex->indexVersion;
+
+	newKey = oldKey;
+	newKey.oids.spcoid = oIndex->indexOids.spcoid;
+
+	free_o_index(oIndex);
+
+	systrees_modify_start();
+	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
+	(void) generic_toast_delete_optional_wal(&oIndicesToastAPI,
+											 (Pointer) &oldKey, oxid, csn,
+											 sys_tree, wal);
+	result = generic_toast_insert_optional_wal(&oIndicesToastAPI,
+											   (Pointer) &newKey, data, len,
+											   oxid, csn, sys_tree, wal);
+	systrees_modify_end(wal);
 
 	pfree(data);
 
@@ -1803,6 +1877,7 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 	OIndexChunkKey chunkKey;
 	ORelOids	oids = {0, 0, 0},
 				old_oids PG_USED_FOR_ASSERTS_ONLY;
+	Oid			old_tablespace PG_USED_FOR_ASSERTS_ONLY = InvalidOid;
 	OIndexType	type = oIndexInvalid;
 	BTreeIterator *it;
 	OTuple		tuple;
@@ -1810,6 +1885,7 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 
 	chunkKey.type = type;
 	chunkKey.oids = oids;
+	chunkKey.oids.spcoid = 0;
 	chunkKey.chunknum = 0;
 	chunkKey.version = O_TABLE_INVALID_VERSION;
 
@@ -1829,25 +1905,37 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 		OIndexChunk *chunk = (OIndexChunk *) tuple.data;
 		ORelOids	tableOids;
 		bool		temp_table;
-		Oid			tablespace;
 
 		type = chunk->key.type;
 		oids = chunk->key.oids;
 		Assert(chunk->dataLength >= sizeof(tableOids));
 		memcpy(&tableOids, chunk->data, sizeof(tableOids));
 		memcpy(&temp_table, chunk->data + sizeof(tableOids), sizeof(bool));
-		memcpy(&tablespace, chunk->data + (offsetof(OIndex, tablespace) - offsetof(OIndex, tableOids)), sizeof(Oid));
 		Assert(chunk->key.chunknum == 0);
 		Assert(ORelOidsIsValid(oids));
-		Assert(!ORelOidsIsEqual(old_oids, oids));
-		old_oids = oids;
 
-		callback(type, oids, tableOids, tablespace, arg);
+		/*
+		 * The same (datoid, relnode) can appear under different tablespaces,
+		 * so only a full (oids, tablespace) repeat means we failed to
+		 * advance.
+		 */
+		Assert(!(ORelOidsIsEqual(old_oids, oids) &&
+				 old_tablespace == chunk->key.oids.spcoid));
+		old_oids = oids;
+		old_tablespace = chunk->key.oids.spcoid;
+
+		callback(type, oids, tableOids, arg);
 
 		pfree(tuple.data);
 		btree_iterator_free(it);
 
-		oids.relnode += 1;		/* go to the next oid */
+		/*
+		 * Advance to the next tree.  tablespace sorts above relnode, so
+		 * bumping relnode within the current tablespace lands on the next
+		 * tree (a higher relnode in this tablespace, or the first tree of the
+		 * next tablespace).
+		 */
+		oids.relnode += 1;
 		chunkKey.oids = oids;
 		chunkKey.type = type;
 		chunkKey.chunknum = 0;
@@ -1903,7 +1991,7 @@ index_type_from_str(const char *s, int len)
 
 static void
 o_index_oids_array_callback(OIndexType type, ORelOids treeOids,
-							ORelOids tableOids, Oid tablespace, void *arg)
+							ORelOids tableOids, void *arg)
 {
 	ReturnSetInfo *rsinfo = (ReturnSetInfo *) arg;
 	Datum		values[6];
@@ -2069,7 +2157,12 @@ orioledb_index_description(PG_FUNCTION_ARGS)
 	oids.reloid = PG_GETARG_OID(1);
 	oids.relnode = PG_GETARG_OID(2);
 
-	PG_RETURN_DATUM(HeapTupleGetDatum(describe_index(tupdesc, oids, indexType)));
+	oids.spcoid = get_rel_tablespace(oids.reloid);
+	if (!OidIsValid(oids.spcoid))
+		oids.spcoid = MyDatabaseTableSpace;
+
+	PG_RETURN_DATUM(HeapTupleGetDatum(describe_index(tupdesc, oids,
+													 indexType)));
 }
 
 /*
