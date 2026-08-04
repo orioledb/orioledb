@@ -230,21 +230,34 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 		bridge_bound.keys[0].flags = O_VALUE_BOUND_PLAIN_VALUE;
 		bridge_bound.keys[0].comparator = NULL;
 		bridge_bound.keys[0].exclusion_fn = NULL;
-		csn = COMMITSEQNO_INPROGRESS;
 
-		bridge_tup = o_btree_find_tuple_by_key(&descr->bridge->desc,
-											   (Pointer) &bridge_bound, BTreeKeyBound,
-											   &o_in_progress_snapshot, &tupleCsn,
-											   slot->tts_mcxt, NULL);
+		if (snapshot->snapshot_type == SNAPSHOT_DIRTY)
+		{
+			bridge_tup = o_btree_find_tuple_by_key(&descr->bridge->desc,
+												   (Pointer) &bridge_bound, BTreeKeyBound,
+												   &o_in_progress_snapshot, &tupleCsn,
+												   slot->tts_mcxt, NULL);
+			oSnapshot = o_in_progress_snapshot;
+		}
+		else
+		{
+			bridge_tup = o_btree_find_tuple_by_key(&descr->bridge->desc,
+												   (Pointer) &bridge_bound, BTreeKeyBound,
+												   &o_non_deleted_snapshot, &tupleCsn,
+												   slot->tts_mcxt, NULL);
+			O_LOAD_SNAPSHOT(&oSnapshot, snapshot);
+		}
 		if (O_TUPLE_IS_NULL(bridge_tup))
 			return false;
 
 		o_fill_pindex_tuple_key_bound(&descr->bridge->desc, bridge_tup, &pkey);
 	}
 	else
+	{
 		get_keys_from_rowid(GET_PRIMARY(descr), tupleid, &pkey, &hint,
 							&csn, &version, NULL);
-	O_LOAD_SNAPSHOT_CSN(&oSnapshot, csn);
+		O_LOAD_SNAPSHOT_CSN(&oSnapshot, csn);
+	}
 
 	tuple = o_btree_find_tuple_by_key(&GET_PRIMARY(descr)->desc,
 									  (Pointer) &pkey,
