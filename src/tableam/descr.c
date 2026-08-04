@@ -1511,6 +1511,36 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OTableFetchCon
 	return result;
 }
 
+/*
+ * Return an already-built index descriptor straight from the descriptor cache,
+ * or NULL when it is absent or was built for a different tablespace.  Unlike
+ * get_index_descr(), this NEVER reads the O_INDICES sys-tree (which would
+ * palloc a multi-kilobyte TOAST buffer) and never rebuilds the descriptor, so
+ * it is safe to call from a critical section -- e.g. the CHECK_PAGE_STATS
+ * diagnostic in unlock_check_page(), which runs while a page is locked.
+ */
+OIndexDescr *
+get_cached_index_descr(ORelOids oids)
+{
+	OIndexDescr *result;
+	bool		found;
+
+	result = hash_search(oIndexDescrHash, &oids, HASH_FIND, &found);
+	if (!found || result == NULL)
+		return NULL;
+
+	/*
+	 * The cache is keyed by (datoid, reloid, relnode); the tablespace
+	 * (spcoid) is part of the tree identity.  A descriptor cached for a
+	 * different tablespace is stale here (rebuilding it is exactly what we
+	 * must avoid), so treat it as a miss.
+	 */
+	if (result->desc.oids.spcoid != oids.spcoid)
+		return NULL;
+
+	return result;
+}
+
 static void
 recreate_index_descr(OIndexDescr *descr)
 {

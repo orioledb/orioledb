@@ -318,6 +318,7 @@ extern OIndexDescr *o_fetch_index_descr_extended(ORelOids oids, OIndexType type,
 extern OTableDescr *o_fetch_table_descr(ORelOids oids);
 extern OIndexDescr *o_fetch_index_descr(ORelOids oids, OIndexType type,
 										bool lock, bool *nested);
+extern OIndexDescr *get_cached_index_descr(ORelOids oids);
 
 extern void recreate_table_descr_by_oids(ORelOids oids);
 extern void o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table);

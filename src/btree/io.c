@@ -2837,6 +2837,35 @@ index_oids_get_btree_descr(ORelOids oids, OIndexType type)
 	return desc;
 }
 
+/*
+ * Like index_oids_get_btree_descr(), but never builds or rebuilds the
+ * descriptor: it only returns one that is already cached for the tablespace in
+ * oids.spcoid.  This avoids the O_INDICES TOAST read (a multi-kilobyte palloc)
+ * that get_index_descr() performs on a cache miss / tablespace mismatch, so it
+ * is safe to call from a critical section.  Used by the CHECK_PAGE_STATS
+ * diagnostic in unlock_check_page(); the checked page is locked in memory, so
+ * the tree's shared root is already loaded and o_btree_try_use_shmem() below
+ * hits its fast path without reserving pages.  Returns NULL when no suitable
+ * cached descriptor exists (the diagnostic then simply skips the page).
+ */
+BTreeDescr *
+index_oids_get_btree_descr_cached(ORelOids oids)
+{
+	OIndexDescr *indexDescr;
+	BTreeDescr *desc;
+
+	indexDescr = get_cached_index_descr(oids);
+	if (indexDescr == NULL)
+		return NULL;
+
+	desc = &indexDescr->desc;
+
+	if (!o_btree_try_use_shmem(desc))
+		return NULL;
+
+	return desc;
+}
+
 typedef struct
 {
 	bool		indexRegularLock;

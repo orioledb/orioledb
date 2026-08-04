@@ -857,8 +857,11 @@ unlock_check_page(OInMemoryBlkno blkno)
 #ifdef CHECK_PAGE_STATS
 	{
 		/*
-		 * XXX: index_oids_get_btree_descr() might expand a hash table under
-		 * critical section.
+		 * This runs inside a critical section, so use the cache-only
+		 * descriptor lookup: it never reads the O_INDICES sys-tree (a
+		 * multi-kilobyte TOAST palloc) and never rebuilds the descriptor.  A
+		 * cache miss just skips the statistics check for this page, which is
+		 * acceptable for a diagnostic.
 		 */
 		OrioleDBPageDesc *page_desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
 
@@ -868,8 +871,7 @@ unlock_check_page(OInMemoryBlkno blkno)
 			BTreeDescr *desc;
 
 			if (!IS_SYS_TREE_OIDS(oids))
-				desc = index_oids_get_btree_descr(oids,
-												  page_desc->type);
+				desc = index_oids_get_btree_descr_cached(oids);
 			else
 				desc = get_sys_tree_no_init(oids.reloid);
 			if (desc)
