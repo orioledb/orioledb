@@ -45,6 +45,8 @@
 #include "catalog/pg_range.h"
 #include "catalog/pg_tablespace_d.h"
 #include "catalog/pg_type.h"
+#include "catalog/storage.h"
+#include "storage/smgr.h"
 #include "commands/defrem.h"
 #include "executor/execExpr.h"
 #include "executor/functions.h"
@@ -2498,6 +2500,88 @@ o_tables_drop_columns_by_type(OXid oxid, CommitSeqNo csn, Oid type_oid)
 					 &o_in_progress_snapshot, &arg);
 }
 
+/*
+ * Build the RelFileLocator of a bridge relnode's standard-path marker file.
+ *
+ * The marker lives in the bridge's own tablespace, resolving an unset (0)
+ * tablespace to DEFAULTTABLESPACE_OID -- the same rule
+ * o_get_prefixes_for_tablespace() uses -- so that the create side and the drop
+ * side (which runs the marker unlink from btree_relnode_undo_callback, possibly
+ * during recovery) agree on the path using only values carried in the undo item
+ * (datoid, tablespace, relnode).  No dependence on MyDatabaseId /
+ * MyDatabaseTableSpace, which are unset while applying undo in recovery.
+ */
+static RelFileLocator
+o_bridge_marker_locator(Oid datoid, Oid tablespace, Oid relnode)
+{
+	RelFileLocator locator;
+
+	locator.spcOid = OidIsValid(tablespace) ? tablespace : DEFAULTTABLESPACE_OID;
+	locator.dbOid = (locator.spcOid == GLOBALTABLESPACE_OID) ? InvalidOid : datoid;
+	locator.relNumber = relnode;
+
+	return locator;
+}
+
+/*
+ * Assign a fresh relnode for a bridge index and reserve it against PG's
+ * GetNewRelFileNumber() uniqueness probe.
+ *
+ * The bridge index is the only OrioleDB tree that self-assigns its
+ * relfilenumber via GetNewRelFileNumber() and, unlike every other tree, has no
+ * pg_class row.  GetNewRelFileNumber() guarantees uniqueness solely by probing
+ * for an existing main-fork file at the standard path (access(relpath(...),
+ * F_OK)); OrioleDB keeps the bridge in orioledb_data/, so that probe is blind to
+ * it.  Since the relnode comes from the wrapping OID counter and the counter can
+ * regress on crash recovery, PG can then hand the same relnode out again to
+ * another relation in the same tablespace -- two relations end up sharing a
+ * (tablespace, relnode) and the tree-identity layer (descr / SharedRootInfo /
+ * seq_bufs / files) corrupts (observed as the SEQBUF_BADPAGE nextChkp
+ * double-finalize).
+ *
+ * Regular OrioleDB tables avoid this because orioledb_relation_set_new_filenode
+ * creates the standard-path storage (RelationCreateStorage), which the probe
+ * detects.  Mirror that for the bridge: create the main-fork file so the probe
+ * sees the relnode and never reuses it.  register_delete = true unlinks it if
+ * the creating transaction aborts.  o_bridge_drop_relnode_marker() removes it
+ * when the bridge is durably dropped.
+ */
+Oid
+o_bridge_new_relnode(Oid tablespace, char relpersistence)
+{
+	RelFileLocator locator;
+	SMgrRelation srel;
+	Oid			spcOid;
+	Oid			relnode;
+
+	spcOid = OidIsValid(tablespace) ? tablespace : DEFAULTTABLESPACE_OID;
+	relnode = GetNewRelFileNumber(spcOid, NULL, relpersistence);
+
+	locator = o_bridge_marker_locator(MyDatabaseId, tablespace, relnode);
+	srel = RelationCreateStorage(locator, relpersistence, true);
+	smgrclose(srel);
+
+	return relnode;
+}
+
+/*
+ * Drop the standard-path marker file that o_bridge_new_relnode() created, once
+ * the bridge is durably dropped, so PG can reuse the relnode.  Called from
+ * btree_relnode_undo_callback(); the locator is rebuilt purely from the undo
+ * item's (datoid, tablespace, relnode), so it is correct while applying undo in
+ * recovery too.
+ */
+void
+o_bridge_drop_relnode_marker(Oid datoid, Oid tablespace, Oid relnode)
+{
+	RelFileLocator locator = o_bridge_marker_locator(datoid, tablespace, relnode);
+	SMgrRelation srel;
+
+	srel = smgropen(locator, O_INVALID_PROCNUMBER);
+	smgrdounlinkall(&srel, 1, false);
+	smgrclose(srel);
+}
+
 void
 o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, bool drop_pkey)
 {
@@ -2525,6 +2609,8 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, boo
 	if (oTable->index_bridging)
 	{
 		oTable->bridge_oids.datoid = MyDatabaseId;
+		/* A bridge index lives in its table's tablespace. */
+		oTable->bridge_oids.spcoid = oTable->oids.spcoid;
 
 		/*
 		 * Under pg_upgrade fresh relfilenumber allocation is forbidden and
@@ -2532,11 +2618,9 @@ o_table_fill_oids(OTable *oTable, Relation rel, const RelFileNode *newrnode, boo
 		 * discarded after the schema restore, so leave it invalid.
 		 */
 		oTable->bridge_oids.relnode = IsBinaryUpgrade ? InvalidOid :
-			GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
-								rel->rd_rel->relpersistence);
+			o_bridge_new_relnode(oTable->bridge_oids.spcoid,
+								 rel->rd_rel->relpersistence);
 		oTable->bridge_oids.reloid = oTable->bridge_oids.relnode;
-		/* A bridge index lives in its table's tablespace. */
-		oTable->bridge_oids.spcoid = oTable->oids.spcoid;
 	}
 
 	for (i = 0; i < oTable->nindices; i++)

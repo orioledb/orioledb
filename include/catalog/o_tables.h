@@ -172,6 +172,13 @@ extern OTable *o_table_tableam_create(ORelOids oids, TupleDesc tupdesc,
 									  char relpersistence, uint8 fillfactor,
 									  Oid tablespace, bool bridging);
 
+/* Assigns a bridge-index relnode and reserves it against relnode reuse. */
+extern Oid	o_bridge_new_relnode(Oid tablespace, char relpersistence);
+
+/* Drops the marker file reserving a bridge relnode. */
+extern void o_bridge_drop_relnode_marker(Oid datoid, Oid tablespace,
+										 Oid relnode);
+
 OTableField *o_tables_get_builtin_field(Oid type);
 extern void o_tables_tupdesc_init_builtin(TupleDesc desc, AttrNumber att_num,
 										  char *name, Oid type);
