@@ -327,6 +327,7 @@ typedef RelFileLocator RelFileNode;
 #define MYPROCNUMBER MyProcNumber
 #define MyBackendId MyProcNumber
 #define	PROCNUMBER(proc) GetNumberFromPGProc(proc)
+#define O_INVALID_PROCNUMBER INVALID_PROC_NUMBER
 /* Deprecated */
 #define palloc0fast palloc0
 
@@ -341,6 +342,7 @@ typedef RelFileLocator RelFileNode;
 #define PROCBACKENDID backendId
 #define MYPROCNUMBER MyProc->pgprocno
 #define PROCNUMBER(proc) ((proc)->pgprocno)
+#define O_INVALID_PROCNUMBER InvalidBackendId
 
 #endif
 

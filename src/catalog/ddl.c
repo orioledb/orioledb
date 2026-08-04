@@ -2157,6 +2157,9 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 		if (index_bridging)
 		{
 			o_table->bridge_oids.datoid = MyDatabaseId;
+			/* A bridge index lives in its table's tablespace. */
+			o_table->bridge_oids.spcoid = OidIsValid(rel->rd_rel->reltablespace) ?
+				rel->rd_rel->reltablespace : MyDatabaseTableSpace;
 
 			/*
 			 * Under pg_upgrade fresh relfilenumber allocation is forbidden
@@ -2164,12 +2167,9 @@ set_toast_oids_and_options(Relation rel, Relation toast_rel, bool only_fillfacto
 			 * is discarded after the schema restore, so leave it invalid.
 			 */
 			o_table->bridge_oids.relnode = IsBinaryUpgrade ? InvalidOid :
-				GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
-									rel->rd_rel->relpersistence);
+				o_bridge_new_relnode(o_table->bridge_oids.spcoid,
+									 rel->rd_rel->relpersistence);
 			o_table->bridge_oids.reloid = o_table->bridge_oids.relnode;
-			/* A bridge index lives in its table's tablespace. */
-			o_table->bridge_oids.spcoid = OidIsValid(rel->rd_rel->reltablespace) ?
-				rel->rd_rel->reltablespace : MyDatabaseTableSpace;
 		}
 	}
 
