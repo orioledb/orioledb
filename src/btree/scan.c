@@ -838,7 +838,15 @@ scan_make_iterator(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRangeHigh)
 {
 	MemoryContext mctx;
 
-	mctx = MemoryContextSwitchTo(scan->mctx);
+	/*
+	 * The iterator has to live as long as the scan does, so it goes into the
+	 * scan's own context rather than the executor's: on abort
+	 * AtAbort_Portals() deletes the portal's memory (scan->mctx included)
+	 * before undo_xact_callback() runs seq_scans_cleanup(), which would then
+	 * work through a freed iterator.  Tuples still come from the executor's
+	 * context, where the scan's caller expects them.
+	 */
+	mctx = MemoryContextSwitchTo(btree_seqscan_context);
 	if (!O_TUPLE_IS_NULL(keyRangeLow))
 	{
 		/*
@@ -856,6 +864,7 @@ scan_make_iterator(BTreeSeqScan *scan, OTuple keyRangeLow, OTuple keyRangeHigh)
 		scan->iter = o_btree_iterator_create(scan->desc, NULL, BTreeKeyNone,
 											 &scan->oSnapshot, ForwardScanDirection);
 	MemoryContextSwitchTo(mctx);
+	o_btree_iterator_set_tuple_ctx(scan->iter, scan->mctx);
 
 	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
 	scan->haveHistImg = false;
@@ -1538,6 +1547,7 @@ iterate_internal_page(BTreeSeqScan *scan)
 				}
 				else
 				{
+					elog(DEBUG3, "scan_make_iterator 3");
 					scan_make_iterator(scan, scan->keyRangeLow.tuple, scan->keyRangeHigh.tuple);
 					Assert(scan->iter);
 					return true;
