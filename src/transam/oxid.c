@@ -996,6 +996,21 @@ flush_dirty_xidsmap_range(OXid xmin, OXid xmax)
 				alignedXmax;
 	OXidMapItem buffer[XID_SLOTS_PER_PAGE];
 
+	/*
+	 * Only oxids at or above writtenXmin still own their ring slot.  Oxids
+	 * below writtenXmin have been drained (their on-disk copy is already
+	 * current) and their ring slots have been recycled by newer (oxid +
+	 * xid_circular_buffer_size) transactions -- reading such a slot and
+	 * persisting it to the OLD oxid's absolute on-disk offset corrupts a
+	 * committed oxid's xidmap entry (e.g. to ABORTED).  This bites whenever
+	 * the active range (nextXid - runXmin) outgrows the ring, i.e. when
+	 * globalXmin lags by more than xid_circular_buffer_size.  So clamp the
+	 * lower bound to writtenXmin.  writtenXmin only advances, so this is
+	 * safe; it is re-read per batch under xidMapWriteLock below because it
+	 * can advance while we release the lock between batches.
+	 */
+	xmin = Max(xmin, pg_atomic_read_u64(&xid_meta->writtenXmin));
+
 	if (xmin >= xmax)
 		return;
 
@@ -1009,8 +1024,16 @@ flush_dirty_xidsmap_range(OXid xmin, OXid xmax)
 	while (pageOxid < alignedXmax)
 	{
 		int			processed;
+		OXid		writtenNow;
 
 		LWLockAcquire(&xid_meta->xidMapWriteLock, LW_EXCLUSIVE);
+
+		/*
+		 * Re-check the drained frontier under the lock: write_xidsmap() (also
+		 * under xidMapWriteLock) may have advanced writtenXmin while we held
+		 * no lock between batches, recycling more ring slots.
+		 */
+		writtenNow = pg_atomic_read_u64(&xid_meta->writtenXmin);
 
 		for (processed = 0;
 			 processed < XID_FLUSH_BATCH_PAGES && pageOxid < alignedXmax;
@@ -1018,9 +1041,34 @@ flush_dirty_xidsmap_range(OXid xmin, OXid xmax)
 		{
 			uint32		page = XID_BUFFER_PAGE_INDEX(pageOxid);
 			OXid		slot;
+			bool		straddles;
+
+			/*
+			 * A page wholly below writtenXmin has all its slots drained and
+			 * recycled by newer (oxid + xid_circular_buffer_size)
+			 * transactions.  Reading such a slot from the ring and persisting
+			 * it to the old oxid's absolute on-disk offset would corrupt a
+			 * committed oxid's xidmap entry (e.g. to ABORTED), so skip it
+			 * entirely -- its on-disk copy is already current from the drain.
+			 */
+			if (pageOxid + XID_SLOTS_PER_PAGE <= writtenNow)
+				continue;
 
 			if (!test_clear_xid_buffer_page_dirty(page))
 				continue;
+
+			/*
+			 * The page straddling writtenXmin has both live in-ring slots (>=
+			 * writtenXmin) and recycled slots (< writtenXmin).  Preload its
+			 * current on-disk contents so the recycled slots are preserved
+			 * verbatim; only the live slots are refreshed from the ring
+			 * below.
+			 */
+			straddles = (pageOxid < writtenNow);
+			if (straddles)
+				o_buffers_read(&buffersDesc, (Pointer) buffer, OXID_BUFFERS_TAG,
+							   pageOxid * sizeof(OXidMapItem),
+							   XID_SLOTS_PER_PAGE * sizeof(OXidMapItem), true);
 
 			/*
 			 * Acquire-fence pair with the writer's release in
@@ -1043,6 +1091,13 @@ flush_dirty_xidsmap_range(OXid xmin, OXid xmax)
 			{
 				OXid		slotOxid = pageOxid + slot;
 				Size		idx = slotOxid % xid_circular_buffer_size;
+
+				/*
+				 * Keep preloaded on-disk value for recycled (out-of-ring)
+				 * slots.
+				 */
+				if (straddles && slotOxid < writtenNow)
+					continue;
 
 				pg_atomic_write_u64(&buffer[slot].csn,
 									pg_atomic_read_u64(&xidBuffer[idx].csn));
