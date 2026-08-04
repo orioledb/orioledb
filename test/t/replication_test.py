@@ -2998,3 +2998,44 @@ class ReplicationTest(BaseTest):
 					os.kill(p, signal.SIGKILL)
 				except ProcessLookupError:
 					pass
+
+	def test_replication_partition_index(self):
+		with self.node as master:
+			self.node.append_conf("default_table_access_method = 'orioledb'")
+			master.start()
+
+			# create a backup
+			with self.getReplica().start() as replica:
+				master.execute("CREATE EXTENSION orioledb;")
+				master.execute("""CREATE TABLE accounts (
+										custid bigint      NOT NULL,
+										name   varchar(64) NOT NULL,
+										CONSTRAINT pk_accounts PRIMARY KEY (custid))
+										PARTITION BY RANGE (custid);""")
+				master.execute(
+				    """CREATE INDEX idx_accounts_name ON accounts (name);""")
+				master.execute(
+				    """CREATE TABLE accounts_p0 PARTITION OF accounts FOR VALUES FROM (1) TO (10);"""
+				)
+				master.execute(
+				    """CREATE TABLE accounts_p1 PARTITION OF accounts FOR VALUES FROM (10) TO (20);"""
+				)
+				master.execute(
+				    """CREATE TABLE accounts_p2 PARTITION OF accounts FOR VALUES FROM (20) TO (30);"""
+				)
+				master.execute(
+				    "INSERT INTO accounts SELECT x, 'data' || x FROM generate_series(1,29) x;"
+				)
+
+				# wait for synchronization
+				self.catchup_orioledb(replica)
+				replica.poll_query_until(
+				    "SELECT orioledb_has_retained_undo();", expected=False)
+
+				mcount = master.execute(
+				    """SELECT COUNT(*) FROM accounts;""")[0][0]
+				rcount = replica.execute(
+				    """SELECT COUNT(*) FROM accounts;""")[0][0]
+				self.assertEqual(mcount, rcount)
+				master.stop()
+				replica.stop()
