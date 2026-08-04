@@ -26,6 +26,9 @@ typedef struct
 	uint16		natts;
 	bool		hasnulls;
 	bool		slow;
+	/* TEMP churn diagnostic: tuple byte bounds for the OOB attr-walk check */
+	char	   *start;			/* tuple.data */
+	uint32		len;			/* total tuple length in bytes */
 } OTupleReaderState;
 
 typedef struct
