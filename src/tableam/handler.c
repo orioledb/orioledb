@@ -1416,6 +1416,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		tblOids.datoid = MyDatabaseId;
 		tblOids.reloid = tbl->rd_rel->oid;
 		tblOids.relnode = tbl->rd_rel->relfilenode;
+		tblOids.spcoid = InvalidOid;	/* looked up by reloid */
 
 		table_desc = o_fetch_table_descr(tblOids);
 		ixnum = find_tree_in_descr(table_desc, idxOids);

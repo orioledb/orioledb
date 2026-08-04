@@ -1670,6 +1670,7 @@ fetch_index_descr_by_oid(Oid relid)
 	tblOids.datoid = MyDatabaseId;
 	tblOids.reloid = rel->rd_rel->oid;
 	tblOids.relnode = rel->rd_rel->relfilenode;
+	tblOids.spcoid = InvalidOid;	/* looked up by reloid */
 
 	descr = o_fetch_table_descr(tblOids);
 
