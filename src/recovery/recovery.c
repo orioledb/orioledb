@@ -1678,7 +1678,13 @@ recovery_init(int worker_id)
 		HASHCTL		reloid_ctl;
 
 		MemSet(&reloid_ctl, 0, sizeof(reloid_ctl));
-		reloid_ctl.keysize = sizeof(ORelOids);
+		/*
+		 * Key by tree identity (datoid, reloid, relnode) only -- spcoid is
+		 * excluded so a modify and the queued index build match regardless of
+		 * which resolves the tablespace, keeping data applies delayed behind an
+		 * in-progress build (else they race into the unbuilt placeholder).
+		 */
+		reloid_ctl.keysize = offsetof(ORelOids, spcoid);
 		reloid_ctl.entrysize = sizeof(RecoveryIdxBuildQueueState);
 		reloid_ctl.hcxt = TopMemoryContext;
 		idxbuild_oids_hash = hash_create("orioledb recovery index build queue relations hash",
