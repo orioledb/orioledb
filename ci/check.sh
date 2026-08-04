@@ -49,10 +49,11 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
     cd ../postgresql
     cat src/test/regress/parallel_schedule | sed "s/indirect_toast//" >$GITHUB_WORKSPACE/parallel_schedule_no_segfaults
 
-    # Backport float tests patch
+    # Backport float tests patch (PostgreSQL commit da83b1ea).  Vendored in the
+    # repo (ci/float-patch.patch) instead of fetched from git.postgresql.org,
+    # whose gitweb endpoint intermittently returns 503 and breaks CI.
     if [ $PG_VERSION = "17" ] || [ $PG_VERSION = "16" ]; then
-        wget -O float-patch.patch "https://git.postgresql.org/gitweb/?p=postgresql.git;a=patch;h=da83b1ea10c2b7937d4c9e922465321749c6785b"
-        git apply float-patch.patch
+        git apply $GITHUB_WORKSPACE/orioledb/ci/float-patch.patch
     fi
 
     # Initialize data directory and set OrioleDB as default AM

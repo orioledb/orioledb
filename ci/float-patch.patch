@@ -1,0 +1,126 @@
+From da83b1ea10c2b7937d4c9e922465321749c6785b Mon Sep 17 00:00:00 2001
+From: Tom Lane <tgl@sss.pgh.pa.us>
+Date: Tue, 22 Apr 2025 14:24:21 -0400
+Subject: [PATCH] Avoid depending on post-UPDATE row order in float4/float8
+ tests.
+
+While heapam reproduces the insertion order of rows well, updates
+can move rows to varying places depending on autovacuum activity.
+In most regression tests we've guarded against getting variable
+results due to that, but float4.sql and float8.sql had escaped
+notice so far because they update tables that are too small for
+autovacuum to pay attention to.
+
+With increasing interest in non-heap table AMs, it seems worth
+allowing for update behaviors that are not like heapam's.  Hence,
+add ORDER BY to stabilize the results in case the updates put
+the rows in a different order.  (We'll continue to assume that a
+seqscan will reproduce original insertion order, though.  Removing
+that assumption would require vastly-more-invasive test changes.)
+
+Author: Pavel Borisov <pashkin.elfe@gmail.com>
+Reviewed-by: Tom Lane <tgl@sss.pgh.pa.us>
+Discussion: https://postgr.es/m/CALT9ZEExHAnBoBVQzQuWPMKUbapF5-FBO3fdeYG3s2tuWQz1NQ@mail.gmail.com
+---
+ src/test/regress/expected/float4-misrounded-input.out | 8 ++++----
+ src/test/regress/expected/float4.out                  | 8 ++++----
+ src/test/regress/expected/float8.out                  | 8 ++++----
+ src/test/regress/sql/float4.sql                       | 2 +-
+ src/test/regress/sql/float8.sql                       | 2 +-
+ 5 files changed, 14 insertions(+), 14 deletions(-)
+
+diff --git a/src/test/regress/expected/float4-misrounded-input.out b/src/test/regress/expected/float4-misrounded-input.out
+index 20fd7139136e6..61c68a6c9fff5 100644
+--- a/src/test/regress/expected/float4-misrounded-input.out
++++ b/src/test/regress/expected/float4-misrounded-input.out
+@@ -308,14 +308,14 @@ SELECT f.f1, @f.f1 AS abs_f1 FROM FLOAT4_TBL f;
+ UPDATE FLOAT4_TBL
+    SET f1 = FLOAT4_TBL.f1 * '-1'
+    WHERE FLOAT4_TBL.f1 > '0.0';
+-SELECT * FROM FLOAT4_TBL;
++SELECT * FROM FLOAT4_TBL ORDER BY 1;
+        f1       
+ ----------------
+-              0
+-         -34.84
+-        -1004.3
+  -1.2345679e+20
++        -1004.3
++         -34.84
+  -1.2345679e-20
++              0
+ (5 rows)
+ 
+ -- test edge-case coercions to integer
+diff --git a/src/test/regress/expected/float4.out b/src/test/regress/expected/float4.out
+index 1d21c4390ad71..eaed1f2bfe71d 100644
+--- a/src/test/regress/expected/float4.out
++++ b/src/test/regress/expected/float4.out
+@@ -308,14 +308,14 @@ SELECT f.f1, @f.f1 AS abs_f1 FROM FLOAT4_TBL f;
+ UPDATE FLOAT4_TBL
+    SET f1 = FLOAT4_TBL.f1 * '-1'
+    WHERE FLOAT4_TBL.f1 > '0.0';
+-SELECT * FROM FLOAT4_TBL;
++SELECT * FROM FLOAT4_TBL ORDER BY 1;
+        f1       
+ ----------------
+-              0
+-         -34.84
+-        -1004.3
+  -1.2345679e+20
++        -1004.3
++         -34.84
+  -1.2345679e-20
++              0
+ (5 rows)
+ 
+ -- test edge-case coercions to integer
+diff --git a/src/test/regress/expected/float8.out b/src/test/regress/expected/float8.out
+index 10a5a6e1b65eb..9c519f1a1a1a5 100644
+--- a/src/test/regress/expected/float8.out
++++ b/src/test/regress/expected/float8.out
+@@ -648,14 +648,14 @@ SELECT exp(f.f1) from FLOAT8_TBL f;
+ ERROR:  value out of range: underflow
+ SELECT f.f1 / '0.0' from FLOAT8_TBL f;
+ ERROR:  division by zero
+-SELECT * FROM FLOAT8_TBL;
++SELECT * FROM FLOAT8_TBL ORDER BY 1;
+           f1           
+ -----------------------
+-                     0
+-                -34.84
+-               -1004.3
+  -1.2345678901234e+200
++               -1004.3
++                -34.84
+  -1.2345678901234e-200
++                     0
+ (5 rows)
+ 
+ -- hyperbolic functions
+diff --git a/src/test/regress/sql/float4.sql b/src/test/regress/sql/float4.sql
+index 8fb12368c39b1..44418a64002ed 100644
+--- a/src/test/regress/sql/float4.sql
++++ b/src/test/regress/sql/float4.sql
+@@ -98,7 +98,7 @@ UPDATE FLOAT4_TBL
+    SET f1 = FLOAT4_TBL.f1 * '-1'
+    WHERE FLOAT4_TBL.f1 > '0.0';
+ 
+-SELECT * FROM FLOAT4_TBL;
++SELECT * FROM FLOAT4_TBL ORDER BY 1;
+ 
+ -- test edge-case coercions to integer
+ SELECT '32767.4'::float4::int2;
+diff --git a/src/test/regress/sql/float8.sql b/src/test/regress/sql/float8.sql
+index db8d5724c25ce..0ef271f27020e 100644
+--- a/src/test/regress/sql/float8.sql
++++ b/src/test/regress/sql/float8.sql
+@@ -197,7 +197,7 @@ SELECT exp(f.f1) from FLOAT8_TBL f;
+ 
+ SELECT f.f1 / '0.0' from FLOAT8_TBL f;
+ 
+-SELECT * FROM FLOAT8_TBL;
++SELECT * FROM FLOAT8_TBL ORDER BY 1;
+ 
+ -- hyperbolic functions
+ -- we run these with extra_float_digits = 0 too, since different platforms
