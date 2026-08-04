@@ -173,6 +173,69 @@ copy_fixed_leaf_key(BTreeDescr *desc, OFixedKey *dst, OTuple leafTup)
 	dst->tuple.data = dst->fixedData;
 }
 
+/*
+ * TEMP churn diagnostic + safety net for the FETCH-mode array-scan wild read
+ * (o_toast_nocachegetattr SEGV during "col = ANY" bitmap scans, iterator.c
+ * leaf read).  BTREE_PAGE_LOCATOR_IS_VALID() checks only the locator's cached
+ * chunk pointer and item count, never the page.  Recompute the chunk base and
+ * item count for loc->chunkOffset straight from the page header; if the cached
+ * locator disagrees it is stale relative to img and reading the leaf tuple
+ * would return a garbage OTuple (later dereferenced wild in make_key).  Logs
+ * rich context (rate-limited) and returns true so the caller re-finds / falls
+ * back to the binary search instead of reading garbage.
+ */
+static bool
+iter_leaf_loc_stale(BTreeDescr *desc, Page img, PartialPageState *partial,
+					BTreePageItemLocator *loc, OInMemoryBlkno blkno,
+					const char *site)
+{
+	BTreePageHeader *header = (BTreePageHeader *) img;
+	OffsetNumber chunkOffset = loc->chunkOffset;
+	BTreePageChunk *expectChunk = NULL;
+	OffsetNumber realItems = 0;
+	bool		stale;
+
+	if (loc->chunk == NULL)
+		return false;			/* BTREE_PAGE_LOCATOR_IS_VALID rejects this */
+
+	if (chunkOffset >= header->chunksCount)
+		stale = true;
+	else
+	{
+		LocationIndex chunkBegin =
+			SHORT_GET_LOCATION(header->chunkDesc[chunkOffset].shortLocation);
+
+		expectChunk = (BTreePageChunk *) ((Pointer) img + chunkBegin);
+		if (chunkOffset + 1 < header->chunksCount)
+			realItems = header->chunkDesc[chunkOffset + 1].offset -
+				header->chunkDesc[chunkOffset].offset;
+		else
+			realItems = header->itemsCount -
+				header->chunkDesc[chunkOffset].offset;
+		stale = (loc->chunk != expectChunk) || (loc->itemOffset >= realItems);
+	}
+
+	if (stale)
+	{
+		static int	stale_cnt = 0;
+
+		if (stale_cnt++ < 200)
+			elog(WARNING,
+				 "ITER_STALE_LEAF_LOC site=%s tree=[%u/%u/%u] type=%d blkno=%u "
+				 "chunkOffset=%u chunksCount=%u itemOffset=%u cachedItems=%u realItems=%u "
+				 "loc_chunk=%p expect_chunk=%p isPartial=%d chunkLoaded=%d",
+				 site, desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
+				 (int) desc->type, blkno, chunkOffset, header->chunksCount,
+				 loc->itemOffset, loc->chunkItemsCount, realItems,
+				 (void *) loc->chunk, (void *) expectChunk,
+				 partial ? (int) partial->isPartial : -1,
+				 (partial && partial->isPartial &&
+				  chunkOffset < BTREE_PAGE_MAX_CHUNKS)
+				 ? (int) partial->chunkIsLoaded[chunkOffset] : -1);
+	}
+	return stale;
+}
+
 #define IT_NEXT_OFFSET(it, loc) \
 	do { \
 		if (IT_IS_FORWARD(it)) \
@@ -448,7 +511,10 @@ o_btree_find_tuples_continue(BTreeIterator *it,
 		 * keys are unique this only ever replaces a search that would have
 		 * landed on the very same item.
 		 */
-		if (IT_IS_FORWARD(it) && BTREE_PAGE_LOCATOR_IS_VALID(img, loc))
+		if (IT_IS_FORWARD(it) && BTREE_PAGE_LOCATOR_IS_VALID(img, loc) &&
+			!iter_leaf_loc_stale(desc, img, &context->partial, loc,
+								 it->context.items[it->context.index].blkno,
+								 "continue"))
 		{
 			BTreePageItemLocator next = *loc;
 
@@ -1143,7 +1209,11 @@ o_btree_iterator_advance(BTreeIterator *it, void *key, BTreeKeyType kind)
 	if (IT_IS_FORWARD(it) &&
 		BTREE_PAGE_LOCATOR_IS_VALID(it->context.img, loc) &&
 		partial_load_chunk(&it->context.partial, it->context.img,
-						   loc->chunkOffset, NULL))
+						   loc->chunkOffset, NULL) &&
+		!iter_leaf_loc_stale(it->context.desc, it->context.img,
+							 &it->context.partial, loc,
+							 it->context.items[it->context.index].blkno,
+							 "advance"))
 	{
 		OTuple		cur;
 
@@ -1715,6 +1785,21 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 				 * The backing page changed since we set up the partial read.
 				 * Never read from it; re-find our position and retry.
 				 */
+				iterator_refind_partial_leaf(it);
+				continue;
+			}
+
+			/*
+			 * TEMP: the locator's cached chunk pointer / item count may be
+			 * stale relative to context->img even though it passed the
+			 * loop-entry validity check (which ignores the page).  Reading a
+			 * stale locator yields a garbage OTuple -> wild deref in
+			 * make_key. Re-find instead of reading garbage.
+			 */
+			if (iter_leaf_loc_stale(desc, context->img, &context->partial,
+									&leaf_item->locator,
+									leaf_item->blkno, "fetch"))
+			{
 				iterator_refind_partial_leaf(it);
 				continue;
 			}
