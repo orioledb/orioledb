@@ -62,12 +62,69 @@ o_tuple_init_reader(OTupleReaderState *state, OTuple tuple, TupleDesc desc,
 	state->attnum = 0;
 	state->desc = desc;
 	state->slow = false;
+	/* TEMP: byte bounds for the OOB attr-walk diagnostic */
+	state->start = (char *) data;
+	state->len = (tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT)
+		? spec->len : header->len;
+}
+
+/*
+ * TEMP churn diagnostic for the o_toast_nocachegetattr wild-address SEGV
+ * ("col = ANY" array bitmap scan): a leaf tuple whose attribute walk runs off
+ * the end of the tuple -- either because the tuple bytes are torn/stale or
+ * because the driving TupleDesc/spec is corrupt.  Called right before a field
+ * dereference; if the computed offset falls outside [start, start+len) log
+ * rich context (tuple hex, attnum, offsets, natts) and ERROR out instead of
+ * reading wild memory, so the churn run names the exact tuple/attr.
+ */
+static pg_noinline void
+o_tuple_reader_report_oob(OTupleReaderState *state, uint32 off)
+{
+	static int	oob_cnt = 0;
+	OTupleHeader hdr = (OTupleHeader) state->start;
+	char		hex[3 * 32 + 1];
+	int			i,
+				n = Min((int) state->len, 32);
+
+	for (i = 0; i < n; i++)
+		sprintf(hex + i * 3, "%02x ", (unsigned char) state->start[i]);
+	hex[i > 0 ? i * 3 - 1 : 0] = '\0';
+
+	if (oob_cnt++ < 100)
+		elog(WARNING,
+			 "OTUPLE_ATTR_OOB attnum=%u natts=%u readerNatts=%u off=%u tpOff=%ld len=%u hasnulls=%d hdrNatts=%u hdrLen=%u descNatts=%d bytes=[%s]",
+			 state->attnum, state->natts, state->natts, off,
+			 (long) (state->tp - state->start), state->len,
+			 state->hasnulls ? 1 : 0, hdr->natts, hdr->len,
+			 state->desc ? state->desc->natts : -1, hex);
+
+	elog(ERROR, "OTUPLE_ATTR_OOB: attribute walk ran off tuple (attnum=%u off=%u len=%u)",
+		 state->attnum, off, state->len);
+}
+
+/* TEMP: true if a field dereference at offset `off` would leave the tuple */
+static inline bool
+o_tuple_reader_off_oob(OTupleReaderState *state, uint32 off)
+{
+	size_t		absOff = (size_t) (state->tp - state->start) + off;
+
+	return absOff >= (size_t) state->len;
 }
 
 uint32
 o_tuple_next_field_offset(OTupleReaderState *state, OTupleAttrCompact * att)
 {
 	uint32		off;
+
+	/*
+	 * TEMP: the offset left by the previous attribute is this attribute's
+	 * start; alignment/length probing below dereferences state->tp + off, so
+	 * bounds-check before any read.  A torn tuple or a corrupt driving spec
+	 * makes this offset run off the tuple end (the o_toast_nocachegetattr
+	 * wild-address SEGV).
+	 */
+	if (unlikely(o_tuple_reader_off_oob(state, state->off)))
+		o_tuple_reader_report_oob(state, state->off);
 
 	if (!state->slow && att->attcacheoff >= 0)
 	{
