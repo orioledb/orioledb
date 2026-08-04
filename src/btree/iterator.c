@@ -55,6 +55,15 @@ struct BTreeIterator
 {
 	OBTreeFindPageContext context;
 	OIndexDescr *oidescr;
+
+	/*
+     * Mirrors BTreeSeqScan.resowner
+     * Ensures scan cleanup on transaction abort or resource owner release.
+     * Iterator can be freed during transaction abort cleanup after
+     * CurrentResourceOwner is already pointing to
+     * TopTransactionResourceOwner, so we have to track it here.
+     */
+	ResourceOwner resowner;
 	OSnapshot	oSnapshot;
 	UndoIterator undoIt;
 	/* scan direction of current iterator: forward or backward */
@@ -317,9 +326,13 @@ o_btree_find_tuples_start(BTreeDescr *desc, void *key,
 	{
 		it->oidescr = (OIndexDescr *) desc->arg;
 		ResourceOwnerRememberOIndexDescr(CurrentResourceOwner, it->oidescr);
+		it->resowner = CurrentResourceOwner;
 	}
 	else
+	{
 		it->oidescr = NULL;
+		it->resowner = NULL;
+	}
 
 	it->combinedResult = have_current_undo(desc->undoType) && COMMITSEQNO_IS_NORMAL(read_o_snapshot->csn);
 	it->oSnapshot = *read_o_snapshot;
@@ -937,9 +950,13 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	{
 		it->oidescr = (OIndexDescr *) desc->arg;
 		ResourceOwnerRememberOIndexDescr(CurrentResourceOwner, it->oidescr);
+		it->resowner = CurrentResourceOwner;
 	}
 	else
+	{
 		it->oidescr = NULL;
+		it->resowner = NULL;
+	}
 
 	it->combinedResult = have_current_undo(desc->undoType) && COMMITSEQNO_IS_NORMAL(o_snapshot->csn);
 	it->oSnapshot = *o_snapshot;
@@ -1340,13 +1357,35 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 
 /*
  * Free resouces associated with iterator.
+ *
+ * fromResowner is true when we are called (perhaps indirectly) from the
+ * release callback of the ResourceOwner that is being released.
  */
+void
+btree_iterator_free_extended(BTreeIterator *it, bool fromResowner)
+{
+	if (it->oidescr)
+	{
+		/*
+		 * It is unsafe to forget when called from a ResrouceOwner
+		 * release callback for the pinning owner.  We can only safely
+		 * forget when we are either:
+		 * - not invoked from a release callback
+		 * - not already in "releasing" state
+		 * NB There is no public interface for ResourceOwner "releasing" state
+		 * it->resowner == CurrentResourceOwner is set during the walk and
+		 * is the only signal we can use here
+		 */
+		if (!(fromResowner && it->resowner == CurrentResourceOwner))
+			ResourceOwnerForgetOIndexDescr(it->resowner, it->oidescr);
+	}
+	pfree(it);
+}
+
 void
 btree_iterator_free(BTreeIterator *it)
 {
-	if (it->oidescr)
-		ResourceOwnerForgetOIndexDescr(CurrentResourceOwner, it->oidescr);
-	pfree(it);
+	btree_iterator_free_extended(it, false);
 }
 
 /*

@@ -91,6 +91,7 @@ extern OTuple btree_iterate_all(BTreeIterator *it, void *end,
 								bool *scanEnd, BTreeLocationHint *hint,
 								BTreeLeafTuphdr **tupHdr);
 extern void btree_iterator_free(BTreeIterator *it);
+extern void btree_iterator_free_extended(BTreeIterator *it, bool fromResowner);
 
 extern OTuple o_btree_find_tuple_by_key_cb(BTreeDescr *desc, void *key,
 										   BTreeKeyType kind,
