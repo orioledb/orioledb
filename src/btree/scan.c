@@ -2479,7 +2479,11 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 
 	if (scan->iter)
 	{
-		btree_iterator_free(scan->iter);
+		/*
+		 * Pass fromResowner down: like the dsm_detach above, the iterator must
+		 * not touch the ResourceOwner currently being released.
+		 */
+		btree_iterator_free_extended(scan->iter, fromResowner);
 		scan->iter = NULL;
 	}
 
@@ -2490,7 +2494,10 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 	}
 
 	if (!IS_SYS_TREE_OIDS(desc->oids))
-		((OIndexDescr *) desc->arg)->refcnt--;
+	{
+		OIndexDescr *indexDescr = (OIndexDescr *) desc->arg;
+		indexDescr->refcnt--;
+	}
 	scan->status = BTreeSeqScanFinished;
 
 	if (!fromResowner)
