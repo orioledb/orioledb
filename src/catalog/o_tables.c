@@ -1906,6 +1906,8 @@ orioledb_table_description(PG_FUNCTION_ARGS)
 		oids.datoid = PG_GETARG_OID(0);
 		oids.reloid = PG_GETARG_OID(1);
 		oids.relnode = PG_GETARG_OID(2);
+		/* describe_table() looks up by reloid, so spcoid is not consulted. */
+		oids.spcoid = InvalidOid;
 	}
 	else
 	{
