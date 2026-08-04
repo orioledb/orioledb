@@ -379,6 +379,7 @@ init_new_btree_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint16 flags,
 	}
 
 	page_desc->oids = desc->oids;
+	page_desc->oids.spcoid = desc->oids.spcoid;
 	page_desc->type = desc->type;
 	page_desc->fileExtent.len = InvalidFileExtentLen;
 	page_desc->fileExtent.off = InvalidFileExtentOff;
@@ -435,6 +436,7 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 
 	page_desc->type = oIndexInvalid;
 	ORelOidsSetInvalid(page_desc->oids);
+	page_desc->oids.spcoid = InvalidOid;
 	page_desc->fileExtent.len = InvalidFileExtentLen;
 	page_desc->fileExtent.off = InvalidFileExtentOff;
 

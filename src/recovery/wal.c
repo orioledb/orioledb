@@ -510,6 +510,9 @@ add_rel_wal_record(ORelOids oids, OIndexType type, uint32 version, uint32 base_v
 	memcpy(rec->version, &version, sizeof(version));
 	memcpy(rec->baseVersion, &base_version, sizeof(base_version));
 
+	/* Since ORIOLEDB_REL_TABLESPACE_WAL_VERSION */
+	memcpy(rec->tablespace, &oids.spcoid, sizeof(Oid));
+
 	elog(DEBUG4, "[%s] WAL_REC_RELATION ADD oids [ %u %u %u ] type %d xmin/csn/cid " UINT64_FORMAT "/" UINT64_FORMAT "/%u version %u base_version %u", __func__,
 		 oids.datoid, oids.reloid, oids.relnode,
 		 type, runXmin, csn, cid, version, base_version);

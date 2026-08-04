@@ -24,7 +24,6 @@ typedef enum
 typedef struct
 {
 	ORelOids	oids;
-	Oid			tablespace;
 } OIndexKey;
 
 typedef struct
@@ -36,6 +35,7 @@ typedef struct
 
 #define SeqBufTagEqual(l, r) ((l)->key.oids.datoid == (r)->key.oids.datoid && \
 							  (l)->key.oids.relnode == (r)->key.oids.relnode && \
+							  (l)->key.oids.spcoid == (r)->key.oids.spcoid && \
 							  (l)->num == (r)->num && \
 							  (l)->type == (r)->type)
 

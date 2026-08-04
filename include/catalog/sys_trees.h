@@ -66,6 +66,7 @@ typedef struct
 {
 	Oid			datoid;
 	Oid			relnode;
+	Oid			tablespace;
 } SharedRootInfoKey;
 
 typedef struct

@@ -38,7 +38,7 @@ typedef enum
 #define S3HeaderTagsIsEqual(t1, t2) \
 	((t1).key.oids.datoid == (t2).key.oids.datoid && \
 	 (t1).key.oids.relnode == (t2).key.oids.relnode && \
-	 (t1).key.tablespace == (t2).key.tablespace && \
+	 (t1).key.oids.spcoid == (t2).key.oids.spcoid && \
 	 (t1).checkpointNum == (t2).checkpointNum && \
 	 (t1).segNum == (t2).segNum)
 

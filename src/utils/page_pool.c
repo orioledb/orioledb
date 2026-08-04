@@ -321,6 +321,7 @@ o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock)
 	page_block_reads(blkno);
 	O_PAGE_CHANGE_COUNT_INC(p);
 	ORelOidsSetInvalid(page_desc->oids);
+	page_desc->oids.spcoid = InvalidOid;
 	page_desc->type = 0;
 	page_desc->fileExtent.off = InvalidFileExtentOff;
 	page_desc->fileExtent.len = InvalidFileExtentLen;

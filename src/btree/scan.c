@@ -1688,14 +1688,12 @@ init_checkpoit_number(BTreeSeqScan *scan)
 	 * concurrent switching tree to the next checkpoint.  So, we have to
 	 * workaround this with recheck-retry loop,
 	 */
-	checkpointNumberBefore = get_cur_checkpoint_number(&desc->oids,
-													   desc->type,
+	checkpointNumberBefore = get_cur_checkpoint_number(&desc->oids, desc->type,
 													   &checkpointConcurrent);
 	while (true)
 	{
 		(void) pg_atomic_fetch_add_u32(&metaPage->numSeqScans[checkpointNumberBefore % NUM_SEQ_SCANS_ARRAY_SIZE], 1);
-		checkpointNumberAfter = get_cur_checkpoint_number(&desc->oids,
-														  desc->type,
+		checkpointNumberAfter = get_cur_checkpoint_number(&desc->oids, desc->type,
 														  &checkpointConcurrent);
 		if (checkpointNumberAfter == checkpointNumberBefore)
 		{

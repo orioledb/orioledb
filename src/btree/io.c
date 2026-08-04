@@ -238,7 +238,7 @@ btree_filename(OIndexKey key, int segno, uint32 chkpNum)
 	char	   *result;
 	char	   *db_prefix;
 
-	o_get_prefixes_for_tablespace(key.oids.datoid, key.tablespace,
+	o_get_prefixes_for_tablespace(key.oids.datoid, key.oids.spcoid,
 								  NULL, &db_prefix);
 
 	if (orioledb_s3_mode)
@@ -276,7 +276,7 @@ char *
 btree_smgr_filename(BTreeDescr *desc, off_t offset, uint32 chkpNum)
 {
 	int			segno = offset / ORIOLEDB_SEGMENT_SIZE;
-	OIndexKey	key = {.oids = desc->oids,.tablespace = desc->tablespace};
+	OIndexKey	key = {.oids = desc->oids};
 
 	return btree_filename(key, segno, chkpNum);
 }
@@ -295,7 +295,7 @@ btree_smgr_ensure_dir(BTreeDescr *desc)
 	char	   *prefix,
 			   *db_prefix;
 
-	o_get_prefixes_for_tablespace(desc->oids.datoid, desc->tablespace,
+	o_get_prefixes_for_tablespace(desc->oids.datoid, desc->oids.spcoid,
 								  &prefix, &db_prefix);
 	o_verify_dir_exists_or_create(prefix, NULL, NULL);
 	o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
@@ -461,8 +461,7 @@ btree_close_smgr(BTreeDescr *descr)
 				partNum = descr->buildPartsInfo[j].dirtyParts[i].partNum;
 				if (segNum >= 0 && partNum >= 0)
 				{
-					OIndexKey	key = {.oids = descr->oids,
-					.tablespace = descr->tablespace};
+					OIndexKey	key = {.oids = descr->oids};
 
 					location = s3_schedule_file_part_write(chkpNum, key, segNum,
 														   partNum);
@@ -516,7 +515,7 @@ btree_s3_flush(BTreeDescr *desc, uint32 chkpNum)
 		partNum = meta->partsInfo[chkpNum % 2].dirtyParts[i].partNum;
 		if (segNum >= 0 && partNum >= 0)
 		{
-			OIndexKey	key = {.oids = desc->oids,.tablespace = desc->tablespace};
+			OIndexKey	key = {.oids = desc->oids};
 
 			Assert(chkpNum == meta->partsInfo[chkpNum % 2].dirtyParts[i].chkpNum);
 			location = s3_schedule_file_part_write(chkpNum, key, segNum, partNum);
@@ -576,7 +575,7 @@ btree_smgr_schedule_s3_write(BTreeDescr *desc, uint32 chkpNum,
 		if (i == MAX_NUM_DIRTY_PARTS - 1)
 		{
 			S3TaskLocation location;
-			OIndexKey	key = {.oids = desc->oids,.tablespace = desc->tablespace};
+			OIndexKey	key = {.oids = desc->oids};
 
 			location = s3_schedule_file_part_write(curChkpNum, key, curSegNum,
 												   curPartNum);
@@ -614,7 +613,7 @@ btree_smgr_write(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 	{
 		granularity = ORIOLEDB_S3_PART_SIZE;
 		tag.key.oids = desc->oids;
-		tag.key.tablespace = desc->tablespace;
+		tag.key.oids.spcoid = desc->oids.spcoid;
 		tag.checkpointNum = chkpNum;
 	}
 	else
@@ -706,7 +705,7 @@ btree_smgr_read(BTreeDescr *desc, char *buffer, uint32 chkpNum,
 	{
 		granularity = ORIOLEDB_S3_PART_SIZE;
 		tag.key.oids = desc->oids;
-		tag.key.tablespace = desc->tablespace;
+		tag.key.oids.spcoid = desc->oids.spcoid;
 		tag.checkpointNum = chkpNum;
 	}
 	else
@@ -782,7 +781,7 @@ btree_smgr_writeback(BTreeDescr *desc, uint32 chkpNum,
 		if (orioledb_s3_mode)
 		{
 			S3HeaderTag tag = {
-				.key = {.oids = desc->oids,.tablespace = desc->tablespace},
+				.key = {.oids = desc->oids},
 				.checkpointNum = chkpNum,
 			.segNum = segno};
 
@@ -830,7 +829,7 @@ btree_smgr_sync(BTreeDescr *desc, uint32 chkpNum, off_t length)
 		if (orioledb_s3_mode)
 		{
 			S3HeaderTag tag = {
-				.key = {.oids = desc->oids,.tablespace = desc->tablespace},
+				.key = {.oids = desc->oids},
 				.checkpointNum = chkpNum,
 			.segNum = num};
 
@@ -1014,7 +1013,7 @@ get_free_disk_offset(BTreeDescr *desc)
 		}
 
 		tag.key.oids = desc->oids;
-		tag.key.tablespace = desc->tablespace;
+		tag.key.oids.spcoid = desc->oids.spcoid;
 		tag.num = free_buf_num + 1;
 		tag.type = 't';
 
@@ -1029,6 +1028,7 @@ get_free_disk_offset(BTreeDescr *desc)
 			{
 				uint32		chkpNum = o_get_latest_chkp_num(tag.key.oids.datoid,
 															tag.key.oids.relnode,
+															tag.key.oids.spcoid,
 															checkpoint_state->lastCheckpointNumber,
 															NULL);
 
@@ -1774,6 +1774,7 @@ load_page(OBTreeFindPageContext *context)
 	 */
 	page_desc->type = desc->type;
 	page_desc->oids = desc->oids;
+	page_desc->oids.spcoid = desc->oids.spcoid;
 
 	Assert(O_PAGE_IS(page, LEAF) ||
 		   (PAGE_GET_N_ONDISK(page) == BTREE_PAGE_ITEMS_COUNT(page)));
@@ -2279,7 +2280,7 @@ perform_page_io_build(BTreeDescr *desc, Page img,
 				   (extent->off + threshold - 1 + extent->len) / threshold);
 
 			tag.key.oids = desc->oids;
-			tag.key.tablespace = desc->tablespace;
+			tag.key.oids.spcoid = desc->oids.spcoid;
 			tag.checkpointNum = chkpNum;
 			tag.segNum = offset / ORIOLEDB_SEGMENT_SIZE;
 			index = (offset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
@@ -2668,6 +2669,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	 */
 	evict_key.datoid = desc->oids.datoid;
 	evict_key.relnode = desc->oids.relnode;
+	evict_key.tablespace = desc->oids.spcoid;
 	evict_lockNo = tag_hash(&evict_key, sizeof(evict_key)) % SHARED_ROOT_INFO_INSERT_NUM_LOCKS;
 	if (!LWLockConditionalAcquire(&checkpoint_state->oSharedRootInfoInsertLocks[evict_lockNo],
 								  LW_EXCLUSIVE))
@@ -2757,6 +2759,7 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 
 	evicted_tree_data.key.datoid = desc->oids.datoid;
 	evicted_tree_data.key.relnode = desc->oids.relnode;
+	evicted_tree_data.key.tablespace = desc->oids.spcoid;
 	evicted_tree_data.file_header = file_header;
 	evicted_tree_data.maxLocation[0] = metaPage->partsInfo[0].writeMaxLocation;
 	evicted_tree_data.maxLocation[1] = metaPage->partsInfo[1].writeMaxLocation;
@@ -2801,7 +2804,8 @@ evict_btree(BTreeDescr *desc, uint32 checkpoint_number)
 	 * Shared descr drops to signalize other backends that tree is evicted.
 	 * Backends and workers can create a new SharedRootInfo* after this.
 	 */
-	o_drop_shared_root_info(desc->oids.datoid, desc->oids.relnode);
+	o_drop_shared_root_info(desc->oids.datoid, desc->oids.relnode,
+							desc->oids.spcoid);
 
 	LWLockRelease(&checkpoint_state->oSharedRootInfoInsertLocks[evict_lockNo]);
 
@@ -2819,8 +2823,38 @@ index_oids_get_btree_descr(ORelOids oids, OIndexType type)
 	bool		nested;
 
 	/* Check is this table is visible for us */
-	indexDescr = o_fetch_index_descr(oids, type, false, &nested);
+	indexDescr = o_fetch_index_descr(oids, type,
+									 false, &nested);
 
+	if (indexDescr == NULL)
+		return NULL;
+
+	desc = &indexDescr->desc;
+
+	if (!o_btree_try_use_shmem(desc))
+		return NULL;
+
+	return desc;
+}
+
+/*
+ * Like index_oids_get_btree_descr(), but never builds or rebuilds the
+ * descriptor: it only returns one that is already cached for the tablespace in
+ * oids.spcoid.  This avoids the O_INDICES TOAST read (a multi-kilobyte palloc)
+ * that get_index_descr() performs on a cache miss / tablespace mismatch, so it
+ * is safe to call from a critical section.  Used by the CHECK_PAGE_STATS
+ * diagnostic in unlock_check_page(); the checked page is locked in memory, so
+ * the tree's shared root is already loaded and o_btree_try_use_shmem() below
+ * hits its fast path without reserving pages.  Returns NULL when no suitable
+ * cached descriptor exists (the diagnostic then simply skips the page).
+ */
+BTreeDescr *
+index_oids_get_btree_descr_cached(ORelOids oids)
+{
+	OIndexDescr *indexDescr;
+	BTreeDescr *desc;
+
+	indexDescr = get_cached_index_descr(oids);
 	if (indexDescr == NULL)
 		return NULL;
 
@@ -2847,8 +2881,8 @@ typedef struct
  * the table as well, because a concurrent seq scan can lock only the table.
  */
 static BTreeDescr *
-get_evict_btree_locks(OInMemoryBlkno blkno, ORelOids oids, OIndexType type,
-					  EvictBtreeLocksState *state)
+get_evict_btree_locks(OInMemoryBlkno blkno, ORelOids oids,
+					  OIndexType type, EvictBtreeLocksState *state)
 {
 	BTreeDescr *desc;
 	OIndexDescr *id;
@@ -2969,7 +3003,8 @@ walk_page_prelock_check(OInMemoryBlkno blkno, bool evict,
 	else
 	{
 		/* Check is this index is visible for us */
-		desc = index_oids_get_btree_descr(*oids, page_desc->type);
+		desc = index_oids_get_btree_descr(*oids,
+										  page_desc->type);
 
 		if (desc == NULL)
 			return NULL;
@@ -3082,7 +3117,8 @@ walk_page_evict_root(BTreeDescr *desc, OInMemoryBlkno blkno,
 
 	memset(&locksState, 0, sizeof(locksState));
 
-	desc = get_evict_btree_locks(blkno, oids, page_desc->type, &locksState);
+	desc = get_evict_btree_locks(blkno, oids,
+								 page_desc->type, &locksState);
 
 	if (!desc)
 	{
@@ -3491,7 +3527,7 @@ writeback_put_extent(IOWriteBack *writeback, BTreeDescr *desc,
 	Assert(extent.len <= (ORIOLEDB_BLCKSZ / ORIOLEDB_COMP_BLCKSZ));
 
 	offset.key.oids = desc->oids;
-	offset.key.tablespace = desc->tablespace;
+	offset.key.oids.spcoid = desc->oids.spcoid;
 	offset.compressed = OCompressIsValid(desc->compress);
 	blcksz = offset.compressed ? ORIOLEDB_COMP_BLCKSZ : ORIOLEDB_BLCKSZ;
 	offset.segno = blcksz * extent.off / ORIOLEDB_SEGMENT_SIZE;
@@ -3658,7 +3694,7 @@ iterate_relnode_files(OIndexKey key, RelnodeFileCallback callback, void *arg)
 	bool		first_file_deleted = false;
 	char	   *db_prefix;
 
-	o_get_prefixes_for_tablespace(key.oids.datoid, key.tablespace,
+	o_get_prefixes_for_tablespace(key.oids.datoid, key.oids.spcoid,
 								  NULL, &db_prefix);
 
 	dir = opendir(db_prefix);
@@ -3833,7 +3869,7 @@ try_to_punch_holes(BTreeDescr *desc)
 		}
 
 		tag.key.oids = desc->oids;
-		tag.key.tablespace = desc->tablespace;
+		tag.key.oids.spcoid = desc->oids.spcoid;
 		tag.type = 't';
 		tag.num = chkp_num;
 		if (!seq_buf_file_exist(&tag))

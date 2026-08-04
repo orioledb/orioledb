@@ -501,7 +501,8 @@ get_tree_descr(ORelOids oids, OIndexType type)
 	}
 	else
 	{
-		OIndexDescr *descr = o_fetch_index_descr(oids, type, false, NULL);
+		OIndexDescr *descr = o_fetch_index_descr(oids, type,
+												 false, NULL);
 
 		if (!descr)
 			return NULL;
@@ -518,7 +519,8 @@ modify_undo_callback(UndoLogType undoType, UndoLocation location,
 					 OUndoCallbackStage stage, bool changeCountsValid)
 {
 	BTreeModifyUndoStackItem *item = (BTreeModifyUndoStackItem *) baseItem;
-	BTreeDescr *desc = get_tree_descr(item->oids, item->header.indexType);
+	BTreeDescr *desc = get_tree_descr(item->oids,
+									  item->header.indexType);
 	OTuple		tuple;
 	Page		p;
 	int			cmp;
@@ -638,7 +640,8 @@ lock_undo_callback(UndoLogType undoType, UndoLocation location,
 				   OUndoCallbackStage stage, bool changeCountsValid)
 {
 	BTreeModifyUndoStackItem *item = (BTreeModifyUndoStackItem *) baseItem;
-	BTreeDescr *desc = get_tree_descr(item->oids, item->header.indexType);
+	BTreeDescr *desc = get_tree_descr(item->oids,
+									  item->header.indexType);
 	OTuple		key;
 	Page		p;
 	int			cmp;
@@ -995,7 +998,8 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 			{
 				cleanup_btree(dropTrees[i], cleanupFiles, true);
 				o_delete_chkp_num(dropTrees[i].oids.datoid,
-								  dropTrees[i].oids.relnode);
+								  dropTrees[i].oids.relnode,
+								  dropTrees[i].oids.spcoid);
 			}
 			o_invalidate_oids(dropTrees[i].oids);
 			if (!recovery)
