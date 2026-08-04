@@ -22,6 +22,7 @@
 #include "btree/scan.h"
 #include "btree/undo.h"
 #include "catalog/o_sys_cache.h"
+#include "catalog/o_tables.h"
 #include "recovery/recovery.h"
 #include "rewind/rewind.h"
 #include "tableam/descr.h"
@@ -1000,6 +1001,22 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 				o_delete_chkp_num(dropTrees[i].oids.datoid,
 								  dropTrees[i].oids.relnode,
 								  dropTrees[i].oids.spcoid);
+
+				/*
+				 * A bridge index (reloid == relnode) reserved its relnode
+				 * with a standard-path marker file (o_bridge_new_relnode).
+				 * Now that the bridge is durably dropped, remove the marker
+				 * so PG can reuse the relnode.  The locator is rebuilt from
+				 * the undo item's (datoid, spcoid, relnode) -- all carried in
+				 * ORelOids -- so this is correct in recovery too.  Only on
+				 * commit: an aborted create's marker is removed by the
+				 * register_delete pending-delete instead.
+				 */
+				if (stage == OUndoCallbackStageCommit &&
+					dropTrees[i].oids.reloid == dropTrees[i].oids.relnode)
+					o_bridge_drop_relnode_marker(dropTrees[i].oids.datoid,
+												 dropTrees[i].oids.spcoid,
+												 dropTrees[i].oids.relnode);
 			}
 			o_invalidate_oids(dropTrees[i].oids);
 			if (!recovery)
