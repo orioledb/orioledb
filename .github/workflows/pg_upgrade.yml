@@ -69,9 +69,21 @@ jobs:
       - name: Build new PostgreSQL + orioledb
         run: bash ./orioledb/ci/pg_upgrade_build.sh "$PG_NEW_VERSION" "$GITHUB_WORKSPACE/postgresql$PG_NEW_VERSION" "$GITHUB_WORKSPACE/pgsql$PG_NEW_VERSION"
 
+      - name: Start hang watchdog
+        run: |
+          nohup bash ./orioledb/ci/hang_watchdog_cpu.sh > /tmp/hang_watchdog.log 2>&1 &
+          echo "hang watchdog launched (pid $!)"
+
       - name: Run pg_upgrade test
         timeout-minutes: 30
         run: bash ./orioledb/ci/pg_upgrade.sh
+
+      # Surface whatever the watchdog captured live (a step timeout reaps the
+      # backends before this runs, so the live dump is the reliable trace) and
+      # take a final snapshot of anything still stuck.
+      - name: Show stuck processes
+        if: ${{ always() }}
+        run: bash ./orioledb/ci/list_stuck.sh
 
       - name: Upload pg_upgrade logs
         uses: actions/upload-artifact@v7
