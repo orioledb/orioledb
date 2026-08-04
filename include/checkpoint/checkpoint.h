@@ -260,10 +260,13 @@ extern CheckpointState *checkpoint_state;
 
 extern Size checkpoint_shmem_size(void);
 extern void checkpoint_shmem_init(Pointer ptr, bool found);
-extern uint32 o_get_latest_chkp_num(Oid datoid, Oid relnode,
+extern uint32 o_get_latest_chkp_num(Oid datoid, Oid relnode, Oid tablespace,
 									uint32 max_chkp_num, bool *found);
-extern void o_update_latest_chkp_num(Oid datoid, Oid relnode, uint32 chkp_num);
-extern void o_delete_chkp_num(Oid datoid, Oid relnode);
+extern void o_update_latest_chkp_num(Oid datoid, Oid relnode, Oid tablespace,
+									 uint32 chkp_num);
+extern void o_delete_chkp_num(Oid datoid, Oid relnode, Oid tablespace);
+extern void o_move_latest_chkp_num(Oid datoid, Oid relnode, Oid old_tablespace,
+								   Oid new_tablespace);
 
 extern void o_perform_checkpoint(XLogRecPtr redo_pos, int flags);
 extern void o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo,
@@ -277,7 +280,7 @@ extern uint32 get_cur_checkpoint_number(ORelOids *oids, OIndexType type, bool *c
 extern bool can_use_checkpoint_extents(BTreeDescr *desc, uint32 chkp_num);
 extern void free_extent_for_checkpoint(BTreeDescr *desc, FileExtent *extent, uint32 chkp_num);
 extern void backend_set_autonomous_level(CheckpointState *state, uint32 level);
-extern bool tbl_data_exists(ORelOids *oids, Oid tablespace);
+extern bool tbl_data_exists(ORelOids *oids);
 extern void evictable_tree_init(BTreeDescr *desc, bool init_shmem,
 								bool *was_evicted);
 extern void checkpointable_tree_init(BTreeDescr *desc, bool init_shmem,

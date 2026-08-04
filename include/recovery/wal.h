@@ -28,7 +28,7 @@
  * ORIOLEDB_COMPRESS_VERSION (see big comment on versioning
  * in include/orioledb.h)
  */
-#define ORIOLEDB_WAL_VERSION (17)
+#define ORIOLEDB_WAL_VERSION (18)
 
 /*
  * Value has been fixed at the moment of introducing WAL versioning.
@@ -50,6 +50,14 @@
  * We should never change this value.
  */
 #define ORIOLEDB_CONTAINER_FLAGS_WAL_VERSION (17)
+
+/*
+ * Particular WAL version when the relation's tablespace was added to the
+ * WAL_REC_RELATION record (tablespace became part of the tree identity).
+ *
+ * We should never change this value.
+ */
+#define ORIOLEDB_REL_TABLESPACE_WAL_VERSION (18)
 
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
@@ -93,6 +101,8 @@ typedef struct
 	uint8		cid[sizeof(CommandId)];
 	uint8		version[sizeof(uint32)];
 	uint8		baseVersion[sizeof(uint32)];
+	/* Since ORIOLEDB_REL_TABLESPACE_WAL_VERSION */
+	uint8		tablespace[sizeof(Oid)];
 } WALRecRelation;
 
 typedef struct

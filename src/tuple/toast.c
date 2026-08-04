@@ -232,6 +232,7 @@ o_detoast(struct varlena *attr)
 	oids.datoid = ote.datoid;
 	oids.reloid = ote.relid;
 	oids.relnode = ote.relnode;
+	oids.spcoid = InvalidOid;	/* looked up by reloid */
 	descr = o_fetch_table_descr(oids);
 
 	Assert(descr);

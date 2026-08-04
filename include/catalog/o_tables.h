@@ -80,7 +80,6 @@ typedef struct
 	List	   *expressions;	/* list of Expr */
 	char	   *predicate_str;
 	List	   *predicate;		/* list of Expr */
-	Oid			tablespace;
 	Oid		   *exclops;
 	bool		immediate;
 	MemoryContext index_mctx;
@@ -134,7 +133,6 @@ typedef struct
 	OTableIndex *indices;
 	OTableField *fields;
 	AttrMissing *missing;		/* missing attributes values, NULL if none */
-	Oid			tablespace;
 	uint32		version;		/* not serialized in serialize_o_table */
 	MemoryContext tbl_mctx;		/* not serialized in serialize_o_table */
 

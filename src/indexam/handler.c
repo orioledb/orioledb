@@ -614,7 +614,8 @@ orioledb_aminsert(Relation rel, Datum *values, bool *isnull,
 
 	ORelOidsSetFromRel(oids, rel);
 	ix_type = o_index_rel_get_ix_type(rel);
-	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
+	index_descr = o_fetch_index_descr(oids, ix_type,
+									  false, NULL);
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
 	Assert(descr != NULL);
@@ -750,7 +751,8 @@ orioledb_amupdate(Relation rel, bool new_valid, bool old_valid,
 
 	ORelOidsSetFromRel(oids, rel);
 	ix_type = o_index_rel_get_ix_type(rel);
-	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
+	index_descr = o_fetch_index_descr(oids, ix_type,
+									  false, NULL);
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
 	Assert(descr != NULL);
@@ -900,7 +902,8 @@ orioledb_amdelete(Relation rel, Datum *values, bool *isnull,
 
 	ORelOidsSetFromRel(oids, rel);
 	ix_type = o_index_rel_get_ix_type(rel);
-	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
+	index_descr = o_fetch_index_descr(oids, ix_type,
+									  false, NULL);
 	Assert(index_descr != NULL);
 	descr = o_fetch_table_descr(index_descr->tableOids);
 	Assert(descr != NULL);
@@ -1569,7 +1572,8 @@ orioledb_ambeginscan(Relation rel, int nkeys, int norderbys)
 
 	ORelOidsSetFromRel(oids, rel);
 	ix_type = o_index_rel_get_ix_type(rel);
-	index_descr = o_fetch_index_descr(oids, ix_type, false, NULL);
+	index_descr = o_fetch_index_descr(oids, ix_type,
+									  false, NULL);
 
 	/*
 	 * Under pg_upgrade's binary-upgrade restore the carried-over OrioleDB

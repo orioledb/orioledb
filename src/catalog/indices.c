@@ -210,6 +210,9 @@ assign_new_oids(OTable *oTable, Relation rel, bool drop_pkey)
 		oTable->bridge_oids.relnode = GetNewRelFileNumber(MyDatabaseTableSpace, NULL,
 														  rel->rd_rel->relpersistence);
 		oTable->bridge_oids.reloid = oTable->bridge_oids.relnode;
+		/* A bridge index lives in its table's tablespace. */
+		oTable->bridge_oids.spcoid = OidIsValid(rel->rd_rel->reltablespace) ?
+			rel->rd_rel->reltablespace : MyDatabaseTableSpace;
 	}
 
 	PG_TRY();
@@ -378,12 +381,14 @@ rebuild_indices_insert_placeholders(OTableDescr *descr)
 		if (descr->indices[i]->desc.storageType == BTreeStorageTemporary)
 			continue;
 		o_insert_shared_root_placeholder(descr->indices[i]->desc.oids.datoid,
-										 descr->indices[i]->desc.oids.relnode);
+										 descr->indices[i]->desc.oids.relnode,
+										 descr->indices[i]->desc.oids.spcoid);
 	}
 	if (descr->toast &&
 		descr->toast->desc.storageType != BTreeStorageTemporary)
 		o_insert_shared_root_placeholder(descr->toast->desc.oids.datoid,
-										 descr->toast->desc.oids.relnode);
+										 descr->toast->desc.oids.relnode,
+										 descr->toast->desc.oids.spcoid);
 }
 
 static Jsonb *
@@ -519,17 +524,12 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		else
 		{
 			ORelOids	primary_oids;
-			Oid			primary_tablespace;
 
 			primary_oids = ix_type == oIndexPrimary ||
 				!old_o_table->has_primary ?
 				old_o_table->oids :
 				old_o_table->indices[PrimaryIndexNumber].oids;
-			primary_tablespace = ix_type == oIndexPrimary ||
-				!old_o_table->has_primary ?
-				old_o_table->tablespace :
-				old_o_table->indices[PrimaryIndexNumber].tablespace;
-			is_build = tbl_data_exists(&primary_oids, primary_tablespace);
+			is_build = tbl_data_exists(&primary_oids);
 
 			/* Rebuild, assign new oids */
 			if (ix_type == oIndexPrimary)
@@ -603,8 +603,8 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	table_index->oids.reloid = index->rd_rel->oid;
 	if (tablespace == 0)
 		tablespace = MyDatabaseTableSpace;
-	table_index->tablespace = tablespace;
-	Assert(table_index->tablespace);
+	table_index->oids.spcoid = tablespace;
+	Assert(table_index->oids.spcoid);
 	table_index->immediate = index->rd_index->indimmediate;
 
 	if (!reuse_relnode && is_build)
@@ -631,8 +631,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		o_tables_update(o_table, oxid, oSnapshot.csn);
 		if (!reuse_relnode)
 		{
-			OIndexKey	key = {.oids = table_index->oids,
-			.tablespace = table_index->tablespace};
+			OIndexKey	key = {.oids = table_index->oids};
 
 			add_undo_create_relnode(o_table->oids, &key, 1, !is_temp);
 		}
@@ -676,7 +675,8 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 			 */
 			if (o_table->persistence != RELPERSISTENCE_TEMP)
 				o_insert_shared_root_placeholder(table_index->oids.datoid,
-												 table_index->oids.relnode);
+												 table_index->oids.relnode,
+												 table_index->oids.spcoid);
 		}
 	}
 
@@ -685,7 +685,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	 * have to be located in differen tablespace then the table, but table is
 	 * an empty yet.
 	 */
-	if (!is_build && table_index->type != oIndexPrimary && o_table->tablespace != tablespace)
+	if (!is_build && table_index->type != oIndexPrimary && o_table->oids.spcoid != tablespace)
 	{
 		char	   *prefix;
 		char	   *db_prefix;
@@ -1488,7 +1488,7 @@ o_calculate_index_workers(BTreeDescr *primary, bool shmem_loaded, int nindices)
 	{
 		Assert(primary);
 
-		if (tbl_data_exists(&primary->oids, primary->tablespace))
+		if (tbl_data_exists(&primary->oids))
 		{
 			if (!shmem_loaded)
 				o_btree_load_shmem(primary);
@@ -1729,7 +1729,8 @@ build_secondary_index(Oid oldTblRelnode, OTable *o_table,
 	btree_write_file_header(&idx->desc, &fileHeader);
 	if (!setting_tbl_tablespace)
 		o_drop_shared_root_info(idx->desc.oids.datoid,
-								idx->desc.oids.relnode);
+								idx->desc.oids.relnode,
+								idx->desc.oids.spcoid);
 
 	o_tables_table_meta_unlock(o_table, oldTblRelnode);
 
@@ -2192,19 +2193,22 @@ rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 		{
 			location = btree_write_file_header(&descr->indices[i]->desc, &fileHeaders[i]);
 			o_drop_shared_root_info(descr->indices[i]->desc.oids.datoid,
-									descr->indices[i]->desc.oids.relnode);
+									descr->indices[i]->desc.oids.relnode,
+									descr->indices[i]->desc.oids.spcoid);
 		}
 		else if (descr->toast && i == descr->nIndices)	/* TOAST sort state */
 		{
 			location = btree_write_file_header(&descr->toast->desc, &fileHeaders[i]);
 			o_drop_shared_root_info(descr->toast->desc.oids.datoid,
-									descr->toast->desc.oids.relnode);
+									descr->toast->desc.oids.relnode,
+									descr->toast->desc.oids.spcoid);
 		}
 		else if (descr->bridge) /* bridge_index sort state */
 		{
 			location = btree_write_file_header(&descr->bridge->desc, &fileHeaders[i]);
 			o_drop_shared_root_info(descr->bridge->desc.oids.datoid,
-									descr->bridge->desc.oids.relnode);
+									descr->bridge->desc.oids.relnode,
+									descr->bridge->desc.oids.spcoid);
 		}
 		maxLocation = Max(maxLocation, location);
 	}
@@ -2291,7 +2295,7 @@ drop_secondary_index(OTable *o_table, OIndexNumber ix_num)
 	Assert(o_table->indices[ix_num].type != oIndexInvalid);
 
 	deletedTrees.oids = o_table->indices[ix_num].oids;
-	deletedTrees.tablespace = o_table->indices[ix_num].tablespace;
+	deletedTrees.oids.spcoid = o_table->indices[ix_num].oids.spcoid;
 	o_table->nindices--;
 	if (o_table->nindices > 0)
 	{

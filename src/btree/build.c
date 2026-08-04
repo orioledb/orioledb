@@ -429,7 +429,7 @@ btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 
 		memset(&prev_chkp_tag, 0, sizeof(prev_chkp_tag));
 		prev_chkp_tag.key.oids = desc->oids;
-		prev_chkp_tag.key.tablespace = desc->tablespace;
+		prev_chkp_tag.key.oids.spcoid = desc->oids.spcoid;
 		prev_chkp_tag.num = checkpoint_number;
 		prev_chkp_tag.type = 'm';
 
@@ -463,11 +463,12 @@ btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 
 		o_update_latest_chkp_num(desc->oids.datoid,
 								 desc->oids.relnode,
+								 desc->oids.spcoid,
 								 checkpoint_number);
 
 		if (orioledb_s3_mode)
 		{
-			OIndexKey	key = {.oids = desc->oids,.tablespace = desc->tablespace};
+			OIndexKey	key = {.oids = desc->oids};
 
 			result = s3_schedule_file_part_write(checkpoint_number, key, -1, -1);
 		}
@@ -478,6 +479,7 @@ btree_write_file_header(BTreeDescr *desc, CheckpointFileHeader *file_header)
 
 		evicted_tree_data.key.datoid = desc->oids.datoid;
 		evicted_tree_data.key.relnode = desc->oids.relnode;
+		evicted_tree_data.key.tablespace = desc->oids.spcoid;
 		evicted_tree_data.file_header = *file_header;
 		insert_evicted_data(&evicted_tree_data);
 	}

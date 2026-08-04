@@ -61,8 +61,7 @@ typedef struct
 	Oid			righttype;
 } InvalidateComparatorUndoStackItem;
 
-static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType,
-									bool miss_ok, OTableFetchContext ctx, void *o_table_source, OTableSource source);
+static OIndexDescr *get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OTableFetchContext ctx, void *o_table_source, OTableSource source);
 static bool o_table_descr_fill_indices(OTableDescr *descr, OTable *table, OSnapshot *snapshot);
 static void init_shared_root_info(PagePool *pool,
 								  SharedRootInfo *sharedRootInfo);
@@ -239,7 +238,7 @@ drop_local_shared_root_info(SharedRootInfoKey *key)
 }
 
 EvictedTreeData *
-read_evicted_data(Oid datoid, Oid relnode, bool delete)
+read_evicted_data(Oid datoid, Oid relnode, Oid tablespace, bool delete)
 {
 	SharedRootInfoKey key;
 	OTuple		keyTuple;
@@ -255,6 +254,7 @@ read_evicted_data(Oid datoid, Oid relnode, bool delete)
 
 	key.datoid = datoid;
 	key.relnode = relnode;
+	key.tablespace = tablespace;
 	keyTuple.formatFlags = 0;
 	keyTuple.data = (Pointer) &key;
 
@@ -385,6 +385,7 @@ o_btree_load_shmem_internal(BTreeDescr *desc, bool checkpoint)
 	memset(&key, 0, sizeof(SharedRootInfoKey));
 	key.datoid = desc->oids.datoid;
 	key.relnode = desc->oids.relnode;
+	key.tablespace = desc->oids.spcoid;
 
 	/*
 	 * evictable_tree_init() needs that.  Initialized it before we get one of
@@ -568,6 +569,7 @@ o_btree_try_use_shmem(BTreeDescr *desc)
 
 		key.datoid = desc->oids.datoid;
 		key.relnode = desc->oids.relnode;
+		key.tablespace = desc->oids.spcoid;
 
 		shared = o_find_shared_root_info(&key);
 		if (shared == NULL)
@@ -804,7 +806,7 @@ fill_table_descr_common_fields(OTableDescr *descr, OTable *o_table)
 	descr->refcnt = refcnt;
 	descr->oids = o_table->oids;
 	descr->version = o_table->version;
-	descr->tablespace = o_table->tablespace;
+	descr->oids.spcoid = o_table->oids.spcoid;
 	descr->tupdesc = o_table_tupdesc(o_table);
 	descr->oldTuple = MakeSingleTupleTableSlot(descr->tupdesc,
 											   &TTSOpsOrioleDB);
@@ -867,7 +869,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 		index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
 							  indexDescr->fillfactor, indexDescr->oids,
 							  index->indexType, index->table_persistence,
-							  index->tablespace, index->createOxid,
+							  index->indexOids.spcoid, index->createOxid,
 							  indexDescr);
 		free_o_index(index);
 		descr->indices[cur_ix] = indexDescr;
@@ -879,7 +881,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 	index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
 						  indexDescr->fillfactor, indexDescr->oids,
 						  index->indexType, index->table_persistence,
-						  index->tablespace, index->createOxid, indexDescr);
+						  index->indexOids.spcoid, index->createOxid, indexDescr);
 	free_o_index(index);
 	descr->toast = indexDescr;
 
@@ -891,7 +893,7 @@ o_fill_tmp_table_descr(OTableDescr *descr, OTable *o_table)
 		index_btree_desc_init(&indexDescr->desc, indexDescr->compress,
 							  indexDescr->fillfactor,
 							  indexDescr->oids, index->indexType,
-							  index->table_persistence, index->tablespace,
+							  index->table_persistence, index->indexOids.spcoid,
 							  index->createOxid, indexDescr);
 		free_o_index(index);
 		descr->bridge = indexDescr;
@@ -1076,7 +1078,8 @@ o_fetch_index_descr(ORelOids oids, OIndexType type, bool lock, bool *nested)
  *    descriptor mismatches during logical decoding and recovery.
  */
 OIndexDescr *
-o_fetch_index_descr_extended(ORelOids oids, OIndexType type, bool lock,
+o_fetch_index_descr_extended(ORelOids oids, OIndexType type,
+							 bool lock,
 							 OTableFetchContext ctx, OTableFetchContext base_ctx)
 {
 	OIndexDescr *index_descr = NULL;
@@ -1309,7 +1312,7 @@ o_find_shared_root_info(SharedRootInfoKey *key)
 }
 
 void
-o_insert_shared_root_placeholder(Oid datoid, Oid relnode)
+o_insert_shared_root_placeholder(Oid datoid, Oid relnode, Oid tablespace)
 {
 	OTuple		sharedRootInfoTuple;
 	SharedRootInfo sharedRootInfo = {0};
@@ -1321,6 +1324,7 @@ o_insert_shared_root_placeholder(Oid datoid, Oid relnode)
 	memset(&sharedRootInfo, 0, sizeof(sharedRootInfo));
 	sharedRootInfo.key.datoid = datoid;
 	sharedRootInfo.key.relnode = relnode;
+	sharedRootInfo.key.tablespace = tablespace;
 	sharedRootInfo.placeholder = true;
 	sharedRootInfo.rootInfo.metaPageBlkno = OInvalidInMemoryBlkno;
 	sharedRootInfo.rootInfo.rootPageBlkno = OInvalidInMemoryBlkno;
@@ -1331,6 +1335,66 @@ o_insert_shared_root_placeholder(Oid datoid, Oid relnode)
 	Assert(inserted);
 }
 
+/*
+ * Re-key a tree's in-memory checkpoint identity from old_tablespace to
+ * new_tablespace (ALTER DATABASE ... SET TABLESPACE).
+ *
+ * The tablespace is part of the SharedRootInfo / EvictedData key and of the
+ * seq_buf tags, and both are maintained autonomously (immediately visible to
+ * the checkpointer).  Unless they move with the tree, a checkpoint running
+ * before the ALTER commits would still find the tree under the source
+ * tablespace and flush its files back into the source directory after it was
+ * removed.  A tree is either resident (SharedRootInfo) or evicted
+ * (EvictedData), never both.
+ */
+void
+o_move_tree_meta(Oid datoid, Oid relnode, Oid old_tablespace,
+				 Oid new_tablespace)
+{
+	SharedRootInfoKey oldKey;
+	SharedRootInfo *shared;
+	EvictedTreeData *evicted;
+
+	/*
+	 * Move the tree's latest-checkpoint-number record so recovery finds the
+	 * moved tree's map/tmp files under the destination tablespace.
+	 */
+	o_move_latest_chkp_num(datoid, relnode, old_tablespace, new_tablespace);
+
+	oldKey.datoid = datoid;
+	oldKey.relnode = relnode;
+	oldKey.tablespace = old_tablespace;
+
+	shared = o_find_shared_root_info(&oldKey);
+	if (shared != NULL)
+	{
+		OTuple		tuple;
+		bool		ok PG_USED_FOR_ASSERTS_ONLY;
+
+		ok = o_drop_shared_root_info(datoid, relnode, old_tablespace);
+		Assert(ok);
+
+		shared->key.tablespace = new_tablespace;
+		tuple.formatFlags = 0;
+		tuple.data = (Pointer) shared;
+		ok = o_btree_autonomous_insert(get_sys_tree(SYS_TREES_SHARED_ROOT_INFO),
+									   tuple);
+		Assert(ok);
+		pfree(shared);
+		return;
+	}
+
+	evicted = read_evicted_data(datoid, relnode, old_tablespace, true);
+	if (evicted != NULL)
+	{
+		evicted->key.tablespace = new_tablespace;
+		evicted->freeBuf.tag.key.oids.spcoid = new_tablespace;
+		evicted->nextChkp.tag.key.oids.spcoid = new_tablespace;
+		evicted->tmpBuf.tag.key.oids.spcoid = new_tablespace;
+		insert_evicted_data(evicted);
+	}
+}
+
 void
 cleanup_btree(OIndexKey ix_key, bool files, bool fsync)
 {
@@ -1339,6 +1403,7 @@ cleanup_btree(OIndexKey ix_key, bool files, bool fsync)
 
 	key.datoid = ix_key.oids.datoid;
 	key.relnode = ix_key.oids.relnode;
+	key.tablespace = ix_key.oids.spcoid;
 
 	shared = o_find_shared_root_info(&key);
 
@@ -1346,7 +1411,8 @@ cleanup_btree(OIndexKey ix_key, bool files, bool fsync)
 	{
 		bool		drop_result PG_USED_FOR_ASSERTS_ONLY;
 
-		drop_result = o_drop_shared_root_info(key.datoid, key.relnode);
+		drop_result = o_drop_shared_root_info(key.datoid, key.relnode,
+											  key.tablespace);
 		Assert(drop_result);
 		if (!shared->placeholder)
 			o_btree_cleanup_pages(shared->rootInfo.rootPageBlkno,
@@ -1359,13 +1425,14 @@ cleanup_btree(OIndexKey ix_key, bool files, bool fsync)
 }
 
 bool
-o_drop_shared_root_info(Oid datoid, Oid relnode)
+o_drop_shared_root_info(Oid datoid, Oid relnode, Oid tablespace)
 {
 	SharedRootInfoKey key;
 	OTuple		key_tuple;
 
 	key.datoid = datoid;
 	key.relnode = relnode;
+	key.tablespace = tablespace;
 
 	if (drop_local_shared_root_info(&key))
 		return true;
@@ -1378,8 +1445,7 @@ o_drop_shared_root_info(Oid datoid, Oid relnode)
 }
 
 static OIndexDescr *
-get_index_descr(ORelOids ixOids, OIndexType ixType,
-				bool miss_ok, OTableFetchContext ctx, void *o_table_source, OTableSource source)
+get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OTableFetchContext ctx, void *o_table_source, OTableSource source)
 {
 	OIndexDescr *result;
 	OIndex	   *oIndex;
@@ -1392,8 +1458,19 @@ get_index_descr(ORelOids ixOids, OIndexType ixType,
 	Assert((found && result) || !found);
 
 	existed = found;
-	if (existed && (ctx.version == O_TABLE_INVALID_VERSION ||
-					result->version == ctx.version))
+
+	/*
+	 * The descriptor cache is keyed by (datoid, reloid, relnode) only, but
+	 * the tablespace (ORelOids.spcoid) is now part of the tree identity (file
+	 * location, seq_buf tags, OIndex key).  A cached descriptor built for a
+	 * different tablespace -- e.g. after ALTER DATABASE ... SET TABLESPACE
+	 * re-keyed the tree -- must be rebuilt so the caller (notably the
+	 * checkpointer) resolves the tree at the requested tablespace instead of
+	 * writing its files back into the old one.
+	 */
+	if (existed && result->desc.oids.spcoid == ixOids.spcoid &&
+		(ctx.version == O_TABLE_INVALID_VERSION ||
+		 result->version == ctx.version))
 		return result;
 
 	oIndex = o_indices_get_extended(ixOids, ixType, ctx);
@@ -1425,11 +1502,41 @@ get_index_descr(ORelOids ixOids, OIndexType ixType,
 	MemoryContextSwitchTo(mcxt);
 	index_btree_desc_init(&result->desc, result->compress, result->fillfactor,
 						  result->oids, oIndex->indexType,
-						  oIndex->table_persistence, oIndex->tablespace,
+						  oIndex->table_persistence, oIndex->indexOids.spcoid,
 						  oIndex->createOxid, result);
 	if (existed)
 		result->refcnt = refcnt;
 	free_o_index(oIndex);
+
+	return result;
+}
+
+/*
+ * Return an already-built index descriptor straight from the descriptor cache,
+ * or NULL when it is absent or was built for a different tablespace.  Unlike
+ * get_index_descr(), this NEVER reads the O_INDICES sys-tree (which would
+ * palloc a multi-kilobyte TOAST buffer) and never rebuilds the descriptor, so
+ * it is safe to call from a critical section -- e.g. the CHECK_PAGE_STATS
+ * diagnostic in unlock_check_page(), which runs while a page is locked.
+ */
+OIndexDescr *
+get_cached_index_descr(ORelOids oids)
+{
+	OIndexDescr *result;
+	bool		found;
+
+	result = hash_search(oIndexDescrHash, &oids, HASH_FIND, &found);
+	if (!found || result == NULL)
+		return NULL;
+
+	/*
+	 * The cache is keyed by (datoid, reloid, relnode); the tablespace
+	 * (spcoid) is part of the tree identity.  A descriptor cached for a
+	 * different tablespace is stale here (rebuilding it is exactly what we
+	 * must avoid), so treat it as a miss.
+	 */
+	if (result->desc.oids.spcoid != oids.spcoid)
+		return NULL;
 
 	return result;
 }
@@ -1441,7 +1548,8 @@ recreate_index_descr(OIndexDescr *descr)
 	int			refcnt;
 	MemoryContext mcxt;
 
-	oIndex = o_indices_get(descr->oids, descr->desc.type);
+	oIndex = o_indices_get(descr->oids,
+						   descr->desc.type);
 	if (!oIndex)
 	{
 		descr->valid = false;
@@ -1454,7 +1562,7 @@ recreate_index_descr(OIndexDescr *descr)
 	MemoryContextSwitchTo(mcxt);
 	index_btree_desc_init(&descr->desc, descr->compress, descr->fillfactor,
 						  descr->oids, oIndex->indexType,
-						  oIndex->table_persistence, oIndex->tablespace,
+						  oIndex->table_persistence, oIndex->indexOids.spcoid,
 						  oIndex->createOxid, descr);
 	descr->refcnt = refcnt;
 	free_o_index(oIndex);
@@ -2084,7 +2192,16 @@ o_tableam_descr_init(void)
 									 ALLOCSET_DEFAULT_SIZES);
 
 	MemSet(&ctl, 0, sizeof(ctl));
-	ctl.keysize = sizeof(ORelOids);
+
+	/*
+	 * The descriptor caches are keyed by tree identity (datoid, reloid,
+	 * relnode) -- ORelOids.spcoid is intentionally excluded from the key so a
+	 * tree that changed tablespace keeps the same cache slot
+	 * (get_index_descr() rebuilds it in place on a spcoid mismatch).  spcoid
+	 * follows relnode in ORelOids, so offsetof(ORelOids, spcoid) covers
+	 * exactly the identity fields.
+	 */
+	ctl.keysize = offsetof(ORelOids, spcoid);
 	ctl.entrysize = sizeof(OTableDescr);
 	ctl.hcxt = descrCxt;
 	oTableDescrHash = hash_create("OrioleDB table descriptors", 8,
@@ -2092,7 +2209,7 @@ o_tableam_descr_init(void)
 								  HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 
 	MemSet(&ctl, 0, sizeof(ctl));
-	ctl.keysize = sizeof(ORelOids);
+	ctl.keysize = offsetof(ORelOids, spcoid);
 	ctl.entrysize = sizeof(OIndexDescr);
 	ctl.hcxt = descrCxt;
 	oIndexDescrHash = hash_create("OrioleDB index descriptors", 8,

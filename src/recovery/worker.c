@@ -438,7 +438,7 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 														 NULL);
 					}
 					o_get_prefixes_for_tablespace(oids.datoid,
-												  indexDescr->desc.tablespace,
+												  indexDescr->desc.oids.spcoid,
 												  &prefix, &db_prefix);
 					o_verify_dir_exists_or_create(prefix, NULL, NULL);
 					o_verify_dir_exists_or_create(db_prefix, NULL, NULL);

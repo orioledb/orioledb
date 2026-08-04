@@ -1355,7 +1355,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method == TABLE_SIZE)
 		{
-			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids, GET_PRIMARY(descr)->desc.tablespace))
+			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
 				o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 				result += (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
@@ -1368,7 +1368,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method == TOAST_TABLE_SIZE)
 		{
-			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids, GET_PRIMARY(descr)->desc.tablespace))
+			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
 				o_btree_load_shmem(&descr->toast->desc);
 				result = (uint64) TREE_NUM_LEAF_PAGES(&descr->toast->desc) *
@@ -1377,7 +1377,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		}
 		else if (method == RELATION_SIZE || method == DEFAULT_SIZE)
 		{
-			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids, GET_PRIMARY(descr)->desc.tablespace))
+			if (descr && tbl_data_exists(&GET_PRIMARY(descr)->oids))
 			{
 				o_btree_load_shmem(&GET_PRIMARY(descr)->desc);
 				result = (uint64) TREE_NUM_LEAF_PAGES(&GET_PRIMARY(descr)->desc) *
@@ -1403,6 +1403,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		idxOids.datoid = MyDatabaseId;
 		idxOids.reloid = rel->rd_rel->oid;
 		idxOids.relnode = rel->rd_rel->relfilenode;
+		idxOids.spcoid = InvalidOid;	/* matched by reloid */
 
 		tbl = relation_open(rel->rd_index->indrelid, AccessShareLock);
 
@@ -1416,6 +1417,7 @@ orioledb_calculate_relation_size(Relation rel, ForkNumber forkNumber, uint8 meth
 		tblOids.datoid = MyDatabaseId;
 		tblOids.reloid = tbl->rd_rel->oid;
 		tblOids.relnode = tbl->rd_rel->relfilenode;
+		tblOids.spcoid = InvalidOid;	/* looked up by reloid */
 
 		table_desc = o_fetch_table_descr(tblOids);
 		ixnum = find_tree_in_descr(table_desc, idxOids);

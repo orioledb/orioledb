@@ -830,7 +830,7 @@ sys_tree_init(int i, bool init_shmem)
 	descr->oids.datoid = SYS_TREES_DATOID;
 	descr->oids.reloid = i + 1;
 	descr->oids.relnode = i + 1;
-	descr->tablespace = DEFAULTTABLESPACE_OID;
+	descr->oids.spcoid = DEFAULTTABLESPACE_OID;
 
 	descr->arg = meta;
 	ops->key_to_jsonb = meta->keyToJsonb;
@@ -864,7 +864,7 @@ sys_tree_init(int i, bool init_shmem)
 			OIndexKey	key;
 
 			key.oids = descr->oids;
-			key.tablespace = descr->tablespace;
+			key.oids.spcoid = descr->oids.spcoid;
 			cleanup_btree_files(key, false);
 		}
 		checkpointable_tree_init(descr, init_shmem, NULL);
@@ -949,6 +949,11 @@ shared_root_info_key_cmp(BTreeDescr *desc,
 	else if (key1->relnode > key2->relnode)
 		return 1;
 
+	if (key1->tablespace < key2->tablespace)
+		return -1;
+	else if (key1->tablespace > key2->tablespace)
+		return 1;
+
 	return 0;
 }
 
@@ -957,7 +962,8 @@ idx_descr_key_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg)
 {
 	SharedRootInfoKey *key = (SharedRootInfoKey *) tup.data;
 
-	appendStringInfo(buf, "(%u, %u)", key->datoid, key->relnode);
+	appendStringInfo(buf, "(%u, %u, %u)", key->datoid, key->relnode,
+					 key->tablespace);
 }
 
 static void
@@ -965,9 +971,10 @@ idx_descr_tup_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer arg)
 {
 	SharedRootInfo *sh_descr = (SharedRootInfo *) tup.data;
 
-	appendStringInfo(buf, "((%u, %u), %u, %u)",
+	appendStringInfo(buf, "((%u, %u, %u), %u, %u)",
 					 sh_descr->key.datoid,
 					 sh_descr->key.relnode,
+					 sh_descr->key.tablespace,
 					 sh_descr->rootInfo.rootPageBlkno,
 					 sh_descr->rootInfo.metaPageBlkno);
 }
@@ -980,6 +987,7 @@ idx_descr_key_to_jsonb(BTreeDescr *desc, OTuple tup, JsonbParseState **state)
 	(void) pushJsonbValue(state, WJB_BEGIN_OBJECT, NULL);
 	jsonb_push_int8_key(state, "datoid", key->datoid);
 	jsonb_push_int8_key(state, "relnode", key->relnode);
+	jsonb_push_int8_key(state, "tablespace", key->tablespace);
 	return pushJsonbValue(state, WJB_END_OBJECT, NULL);
 }
 
@@ -1112,6 +1120,16 @@ o_index_chunk_cmp(BTreeDescr *desc,
 	if (key1->oids.datoid != key2->oids.datoid)
 		return (key1->oids.datoid < key2->oids.datoid) ? -1 : 1;
 
+	/*
+	 * Tablespace before relnode: relfilenumber uniqueness is per-tablespace,
+	 * so the same (datoid, relnode) can name two different indexes in
+	 * different tablespaces.  Keeping tablespace above relnode also preserves
+	 * the relnode+1 "next key" boundary used by oIndicesGetNextKey() and
+	 * o_indices_foreach_oids().
+	 */
+	if (key1->oids.spcoid != key2->oids.spcoid)
+		return (key1->oids.spcoid < key2->oids.spcoid) ? -1 : 1;
+
 	if (key1->oids.relnode != key2->oids.relnode)
 		return (key1->oids.relnode < key2->oids.relnode) ? -1 : 1;
 
@@ -1134,7 +1152,7 @@ o_index_chunk_key_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer ar
 {
 	OIndexChunkKey *key = (OIndexChunkKey *) tup.data;
 
-	appendStringInfo(buf, "(%d, (%u, %u, %u), %u)", (int) key->type, key->oids.datoid, key->oids.relnode, key->oids.reloid, key->chunknum);
+	appendStringInfo(buf, "(%d, (%u, %u, %u), %u, %u)", (int) key->type, key->oids.datoid, key->oids.relnode, key->oids.reloid, key->oids.spcoid, key->chunknum);
 }
 
 static void
@@ -1142,11 +1160,12 @@ o_index_chunk_tup_print(BTreeDescr *desc, StringInfo buf, OTuple tup, Pointer ar
 {
 	OIndexChunk *chunk = (OIndexChunk *) tup.data;
 
-	appendStringInfo(buf, "((%d, (%u, %u, %u), %u), %u)",
+	appendStringInfo(buf, "((%d, (%u, %u, %u), %u, %u), %u)",
 					 (int) chunk->key.type,
 					 chunk->key.oids.datoid,
 					 chunk->key.oids.relnode,
 					 chunk->key.oids.reloid,
+					 chunk->key.oids.spcoid,
 					 chunk->key.chunknum,
 					 chunk->dataLength);
 }
@@ -1161,6 +1180,7 @@ o_index_chunk_key_to_jsonb(BTreeDescr *desc, OTuple tup, JsonbParseState **state
 	jsonb_push_int8_key(state, "datoid", key->oids.datoid);
 	jsonb_push_int8_key(state, "reloid", key->oids.reloid);
 	jsonb_push_int8_key(state, "relnode", key->oids.relnode);
+	jsonb_push_int8_key(state, "tablespace", key->oids.spcoid);
 	jsonb_push_int8_key(state, "chunknum", key->chunknum);
 	return pushJsonbValue(state, WJB_END_OBJECT, NULL);
 }

@@ -3046,7 +3046,7 @@ o_truncate_table(ORelOids oids, bool missingOK)
 
 	if (!invalidatedTable)
 	{
-		OIndexKey	key = {.oids = oids,.tablespace = o_table->tablespace};
+		OIndexKey	key = {.oids = oids};
 
 		cleanup_btree(key, true, !is_temp);
 		o_invalidate_oids(oids);
