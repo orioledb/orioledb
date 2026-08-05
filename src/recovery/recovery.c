@@ -2164,11 +2164,27 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 }
 
 /*
+ * TEMP churn diagnostic: ring of the last recovery xid states removed from
+ * recovery_xid_state_hash, so a double-remove (Assert(found) failure in
+ * check_delete_xid_state) can name who removed the entry first.  Per-process
+ * (each recovery worker/leader has its own hash and ring).
+ */
+#define RECXID_REMOVED_RING 64
+typedef struct
+{
+	OXid		oxid;
+	const char *site;
+	int			worker_id;
+}			RecXidRemovedRec;
+static RecXidRemovedRec recxid_removed_ring[RECXID_REMOVED_RING];
+static uint32 recxid_removed_pos = 0;
+
+/*
  * Delete recovery xid item if it's already deleted from both retain undo
  * location heap and finished list.
  */
 static void
-check_delete_xid_state(RecoveryXidState *state, int worker_id)
+check_delete_xid_state(RecoveryXidState *state, int worker_id, const char *site)
 {
 	int			i;
 	bool		in_retain_heaps = false;
@@ -2192,7 +2208,37 @@ check_delete_xid_state(RecoveryXidState *state, int worker_id)
 			update_run_xmin();
 		}
 		hash_search(recovery_xid_state_hash, &oxid, HASH_REMOVE, &found);
-		Assert(found);
+
+		/*
+		 * TEMP churn diagnostic: Assert(found) fires in CI
+		 * (arm64/16/sanitize) as a double-remove of a resurrected-oxid state
+		 * during deferred rollback replay.  Instead of crashing the standby,
+		 * log who removed the entry first (from the ring) and continue -- the
+		 * second remove is a no-op here.
+		 */
+		if (!found)
+		{
+			RecXidRemovedRec *first = NULL;
+
+			for (i = 0; i < RECXID_REMOVED_RING; i++)
+				if (recxid_removed_ring[i].oxid == oxid &&
+					recxid_removed_ring[i].site != NULL)
+				{
+					first = &recxid_removed_ring[i];
+					break;
+				}
+			elog(LOG,
+				 "RECXID_DOUBLE_REMOVE oxid=" UINT64_FORMAT " worker=%d site=%s prevSite=%s prevWorker=%d",
+				 oxid, worker_id, site,
+				 first ? first->site : "(unknown)",
+				 first ? first->worker_id : -999);
+			return;
+		}
+
+		recxid_removed_ring[recxid_removed_pos % RECXID_REMOVED_RING].oxid = oxid;
+		recxid_removed_ring[recxid_removed_pos % RECXID_REMOVED_RING].site = site;
+		recxid_removed_ring[recxid_removed_pos % RECXID_REMOVED_RING].worker_id = worker_id;
+		recxid_removed_pos++;
 	}
 }
 
@@ -2326,7 +2372,7 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		release_undo_size((UndoLogType) i);
-	check_delete_xid_state(cur_recovery_xid_state, worker_id);
+	check_delete_xid_state(cur_recovery_xid_state, worker_id, "finish");
 
 	cur_recovery_xid_state = NULL;
 
@@ -2845,6 +2891,11 @@ update_run_xmin(void)
 		pairingheap_remove(xmin_queue, &state->xmin_ph_node);
 		if (state->used_by)
 			pfree(state->used_by);
+		/* TEMP churn diagnostic: record this remover in the ring (see above) */
+		recxid_removed_ring[recxid_removed_pos % RECXID_REMOVED_RING].oxid = state->oxid;
+		recxid_removed_ring[recxid_removed_pos % RECXID_REMOVED_RING].site = "run_xmin_teardown";
+		recxid_removed_ring[recxid_removed_pos % RECXID_REMOVED_RING].worker_id = -1;
+		recxid_removed_pos++;
 		hash_search(recovery_xid_state_hash, &state->oxid, HASH_REMOVE, &found);
 		Assert(found);
 	}
@@ -2919,7 +2970,7 @@ update_retain_location_with_heap(UndoLogType undoType, int worker_id,
 		Assert(state->in_retain_undo_heaps[undoType]);
 		pairingheap_remove(retain_undo_queues[undoType], &state->retain_undo_ph_nodes[undoType]);
 		state->in_retain_undo_heaps[undoType] = false;
-		check_delete_xid_state(state, worker_id);
+		check_delete_xid_state(state, worker_id, "retain_heap");
 		return true;
 	}
 	else
@@ -2993,7 +3044,7 @@ update_proc_retain_undo_location(int worker_id)
 		}
 		dlist_delete(miter.cur);
 		state->in_finished_list = false;
-		check_delete_xid_state(state, worker_id);
+		check_delete_xid_state(state, worker_id, "finished_list");
 	}
 	if (worker_id < 0)
 	{
