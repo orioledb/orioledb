@@ -11,7 +11,7 @@ SELECT split_part(setting, '.', 1) major_version
 	FROM pg_settings WHERE name = 'server_version';
  major_version 
 ---------------
- 17
+ 16
 (1 row)
 
 SELECT orioledb_parallel_debug_start();
@@ -1855,11 +1855,13 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv = '22';
 
 -- Test Result node processing
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idi = 1;
-        QUERY PLAN        
---------------------------
+                      QUERY PLAN                       
+-------------------------------------------------------
  Result
    One-Time Filter: false
-(2 rows)
+   ->  Index Only Scan using o_test66_reg1 on o_test66
+         Index Cond: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idi = 1;
  idi | idv 
@@ -2095,11 +2097,12 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                                      QUERY PLAN                                      
---------------------------------------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
-(2 rows)
+   Index Cond: (idi = ANY ('{2,4}'::integer[]))
+   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -2246,11 +2249,12 @@ SELECT idi, idv FROM o_test66 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
-                          QUERY PLAN                           
----------------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
-(2 rows)
+   Index Cond: (idi > 1)
+   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -2262,11 +2266,12 @@ SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
-                          QUERY PLAN                           
----------------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
-(2 rows)
+   Index Cond: (idi > 1)
+   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
  idi | idv 
@@ -2954,11 +2959,12 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                                      QUERY PLAN                                      
---------------------------------------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
-(2 rows)
+   Index Cond: (idi = ANY ('{2,4}'::integer[]))
+   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -3099,11 +3105,12 @@ SELECT idi, idv FROM o_test67 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
-                          QUERY PLAN                           
----------------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
-(2 rows)
+   Index Cond: (idi > 1)
+   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -3791,11 +3798,12 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                                      QUERY PLAN                                      
---------------------------------------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
-(2 rows)
+   Index Cond: (idi = ANY ('{2,4}'::integer[]))
+   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -3936,11 +3944,12 @@ SELECT idi, idv FROM o_test68 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
-                          QUERY PLAN                           
----------------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
-(2 rows)
+   Index Cond: (idi > 1)
+   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -3952,11 +3961,12 @@ SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
-                          QUERY PLAN                           
----------------------------------------------------------------
+                        QUERY PLAN                        
+----------------------------------------------------------
  Index Only Scan Backward using o_test68_reg1 on o_test68
-   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
-(2 rows)
+   Index Cond: (idi > 1)
+   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
  idi | idv 
@@ -4642,11 +4652,12 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                                      QUERY PLAN                                      
---------------------------------------------------------------------------------------
+                   QUERY PLAN                    
+-------------------------------------------------
  Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv = ANY ('{12,22}'::text[])) AND (idi = ANY ('{2,4}'::integer[])))
-(2 rows)
+   Index Cond: (idv = ANY ('{12,22}'::text[]))
+   Filter: (idi = ANY ('{2,4}'::integer[]))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -8573,12 +8584,12 @@ INSERT INTO o_test_saop
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_saop
-   Filter: (k > ALL ('{7,8}'::integer[]))
+   Filter: ((k > ALL ('{7,8}'::integer[])) AND (j = ANY ('{3,4,5}'::integer[])))
    Forward index only scan of: o_test_saop_pkey
-   Conds: ((i < ANY ('{3,4,5}'::integer[])) AND (j = ANY ('{3,4,5}'::integer[])))
+   Conds: (i < ANY ('{3,4,5}'::integer[]))
 (4 rows)
 
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
@@ -8603,12 +8614,13 @@ SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 
 
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) ORDER BY i, j, k;
-                                  QUERY PLAN                                  
-------------------------------------------------------------------------------
+                   QUERY PLAN                   
+------------------------------------------------
  Custom Scan (o_scan) on o_test_saop
+   Filter: (k = ANY ('{3,5}'::integer[]))
    Forward index only scan of: o_test_saop_pkey
-   Conds: ((i = ANY ('{1,3}'::integer[])) AND (k = ANY ('{3,5}'::integer[])))
-(3 rows)
+   Conds: (i = ANY ('{1,3}'::integer[]))
+(4 rows)
 
 SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) ORDER BY i, j, k;
  i | j | k 
@@ -8657,12 +8669,13 @@ SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) OR
 
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
-                                  QUERY PLAN                                  
-------------------------------------------------------------------------------
+                   QUERY PLAN                   
+------------------------------------------------
  Custom Scan (o_scan) on o_test_saop
+   Filter: (j = ANY ('{1,3}'::integer[]))
    Forward index only scan of: o_test_saop_pkey
-   Conds: ((i < ANY ('{1,2}'::integer[])) AND (j = ANY ('{1,3}'::integer[])))
-(3 rows)
+   Conds: (i < ANY ('{1,2}'::integer[]))
+(4 rows)
 
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
  i | j | k 

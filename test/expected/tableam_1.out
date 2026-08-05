@@ -2184,10 +2184,9 @@ FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 -------------------------------------------------------------------------------------------------------
  Index Scan using o_tableamx_ixx on o_tableamx  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
    Index Cond: ((val > 'x'::text) AND (val < 'a'::text))
-   Index Searches: x
  Planning Time: x ms
  Execution Time: x ms
-(5 rows)
+(4 rows)
 
 DROP TABLE o_tableam5;
 CREATE TABLE o_tableam_delete1
@@ -4213,15 +4212,12 @@ FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE) WITH src AS (
    ->  Hash Join  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
          Hash Cond: ((srcxid + x) = dstxid)
          ->  CTE Scan on src  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-               Storage: Memory  Maximum Storage: xkB
          ->  Hash  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
                Buckets: x  Batches: x  Memory Usage: xkB
                ->  Seq Scan on o_tableam_explain_x dst  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
- Planning:
-   Buffers: shared hit=x
  Planning Time: x ms
  Execution Time: x ms
-(17 rows)
+(14 rows)
 
 SELECT * FROM o_tableam_explain_1;
  id | val | val2 

@@ -5,7 +5,7 @@ SELECT split_part(setting, '.', 1) major_version
 	FROM pg_settings WHERE name = 'server_version';
  major_version 
 ---------------
- 17
+ 16
 (1 row)
 
 -- Test for integer primary key
@@ -781,12 +781,12 @@ SELECT * FROM o_pk1 WHERE key <= 10 OR  key <= 19 AND payload LIKE '%7*%';
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1
 WHERE key >  10 AND key <  19 AND key = (SELECT i FROM generate_series(13,13) AS i);
-                             QUERY PLAN                             
---------------------------------------------------------------------
+                     QUERY PLAN                      
+-----------------------------------------------------
  Custom Scan (o_scan) on o_pk1
    Forward index scan of: o_pk1_pkey
-   Conds: ((key > 10) AND (key < 19) AND (key = (InitPlan 1).col1))
-   InitPlan 1
+   Conds: ((key > 10) AND (key < 19) AND (key = $0))
+   InitPlan 1 (returns $0)
      ->  Function Scan on generate_series i
 (5 rows)
 
@@ -799,11 +799,11 @@ WHERE key >  10 AND key <  19 AND key = (SELECT i FROM generate_series(13,13) AS
 
 EXPLAIN (COSTS off) SELECT * FROM o_pk1
 WHERE key <  10 OR  key >  19 OR key = (SELECT i FROM generate_series(13,13) AS i);
-                            QUERY PLAN                             
--------------------------------------------------------------------
+                     QUERY PLAN                     
+----------------------------------------------------
  Seq Scan on o_pk1
-   Filter: ((key < 10) OR (key > 19) OR (key = (InitPlan 1).col1))
-   InitPlan 1
+   Filter: ((key < 10) OR (key > 19) OR (key = $0))
+   InitPlan 1 (returns $0)
      ->  Function Scan on generate_series i
 (4 rows)
 
@@ -2646,12 +2646,14 @@ sql/composite_pk_quals: No such file or directory
 -- translate index attnum -> table attnum so PKs whose column order
 -- differs from the table column order still filter correctly.
 EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
-                  QUERY PLAN                  
-----------------------------------------------
- Custom Scan (o_scan) on o_pk3
-   Forward index only scan of: o_pk3_pkey
-   Conds: (id2 = ANY ('{xyy,xxyyy}'::text[]))
-(3 rows)
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Sort Key: id1, id2
+   ->  Custom Scan (o_scan) on o_pk3
+         Forward index only scan of: o_pk3_pkey
+         Conds: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(5 rows)
 
 SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
  id1 |  id2  
@@ -2667,12 +2669,14 @@ SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1
 (8 rows)
 
 EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
-                  QUERY PLAN                  
-----------------------------------------------
- Custom Scan (o_scan) on o_pk3
-   Forward index only scan of: o_pk3_pkey
-   Conds: (id2 = ANY ('{xyy,xxyyy}'::text[]))
-(3 rows)
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Sort Key: id1, id2
+   ->  Custom Scan (o_scan) on o_pk3
+         Forward index only scan of: o_pk3_pkey
+         Conds: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(5 rows)
 
 SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
  id1 |  id2  
@@ -2688,12 +2692,13 @@ SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
 (8 rows)
 
 EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
+                  QUERY PLAN                   
+-----------------------------------------------
  Custom Scan (o_scan) on o_pk3
+   Filter: (id2 = ANY ('{xyy,xxyyy}'::text[]))
    Forward index only scan of: o_pk3_pkey
-   Conds: ((id1 = '2'::double precision) AND (id2 = ANY ('{xyy,xxyyy}'::text[])))
-(3 rows)
+   Conds: (id1 = '2'::double precision)
+(4 rows)
 
 SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
  id1 |  id2  
@@ -2795,12 +2800,14 @@ SELECT id1, id2 FROM o_pk3;
 \i 'sql/composite_pk_quals'
 sql/composite_pk_quals: No such file or directory
 EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
-                  QUERY PLAN                  
-----------------------------------------------
- Custom Scan (o_scan) on o_pk3
-   Forward index only scan of: o_pk3_pkey
-   Conds: (id2 = ANY ('{xyy,xxyyy}'::text[]))
-(3 rows)
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Sort Key: id1, id2
+   ->  Custom Scan (o_scan) on o_pk3
+         Forward index only scan of: o_pk3_pkey
+         Conds: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(5 rows)
 
 SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
  id1 |  id2  
@@ -2816,12 +2823,14 @@ SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1
 (8 rows)
 
 EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
-                  QUERY PLAN                  
-----------------------------------------------
- Custom Scan (o_scan) on o_pk3
-   Forward index only scan of: o_pk3_pkey
-   Conds: (id2 = ANY ('{xyy,xxyyy}'::text[]))
-(3 rows)
+                     QUERY PLAN                     
+----------------------------------------------------
+ Sort
+   Sort Key: id1, id2
+   ->  Custom Scan (o_scan) on o_pk3
+         Forward index only scan of: o_pk3_pkey
+         Conds: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(5 rows)
 
 SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
  id1 |  id2  
@@ -2837,12 +2846,13 @@ SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
 (8 rows)
 
 EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
+                  QUERY PLAN                   
+-----------------------------------------------
  Custom Scan (o_scan) on o_pk3
+   Filter: (id2 = ANY ('{xyy,xxyyy}'::text[]))
    Forward index only scan of: o_pk3_pkey
-   Conds: ((id1 = '2'::double precision) AND (id2 = ANY ('{xyy,xxyyy}'::text[])))
-(3 rows)
+   Conds: (id1 = '2'::double precision)
+(4 rows)
 
 SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
  id1 |  id2  
@@ -2946,12 +2956,11 @@ sql/composite_pk_quals: No such file or directory
 EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
                        QUERY PLAN                        
 ---------------------------------------------------------
- Incremental Sort
+ Sort
    Sort Key: id1, id2
-   Presorted Key: id1
    ->  Index Only Scan using o_pk3_idx on o_pk3
          Index Cond: (id2 = ANY ('{xyy,xxyyy}'::text[]))
-(5 rows)
+(4 rows)
 
 SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
  id1 |  id2  
@@ -2969,12 +2978,11 @@ SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1
 EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
                        QUERY PLAN                        
 ---------------------------------------------------------
- Incremental Sort
+ Sort
    Sort Key: id1, id2
-   Presorted Key: id1
    ->  Index Only Scan using o_pk3_idx on o_pk3
          Index Cond: (id2 = ANY ('{xyy,xxyyy}'::text[]))
-(5 rows)
+(4 rows)
 
 SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
  id1 |  id2  
@@ -2990,11 +2998,12 @@ SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
 (8 rows)
 
 EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Index Only Scan Backward using o_pk3_idx on o_pk3
-   Index Cond: ((id1 = '2'::double precision) AND (id2 = ANY ('{xyy,xxyyy}'::text[])))
-(2 rows)
+   Index Cond: (id1 = '2'::double precision)
+   Filter: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(3 rows)
 
 SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
  id1 |  id2  
@@ -3096,11 +3105,13 @@ SELECT id1, id2 FROM o_pk3 ORDER BY id1, id2;
 \i 'sql/composite_pk_quals'
 sql/composite_pk_quals: No such file or directory
 EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan Backward using o_pk3_idx on o_pk3
-   Index Cond: (id2 = ANY ('{xyy,xxyyy}'::text[]))
-(2 rows)
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Sort
+   Sort Key: id1, id2
+   ->  Index Only Scan using o_pk3_idx on o_pk3
+         Index Cond: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(4 rows)
 
 SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
  id1 |  id2  
@@ -3116,11 +3127,13 @@ SELECT id1, id2 FROM o_pk3 WHERE id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1
 (8 rows)
 
 EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan Backward using o_pk3_idx on o_pk3
-   Index Cond: (id2 = ANY ('{xyy,xxyyy}'::text[]))
-(2 rows)
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Sort
+   Sort Key: id1, id2
+   ->  Index Only Scan using o_pk3_idx on o_pk3
+         Index Cond: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(4 rows)
 
 SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
  id1 |  id2  
@@ -3136,11 +3149,12 @@ SELECT id1, id2 FROM o_pk3 WHERE id2 IN ('xyy', 'xxyyy') ORDER BY id1, id2;
 (8 rows)
 
 EXPLAIN (COSTS off) SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Index Only Scan Backward using o_pk3_idx on o_pk3
-   Index Cond: ((id1 = '2'::double precision) AND (id2 = ANY ('{xyy,xxyyy}'::text[])))
-(2 rows)
+   Index Cond: (id1 = '2'::double precision)
+   Filter: (id2 = ANY ('{xyy,xxyyy}'::text[]))
+(3 rows)
 
 SELECT id1, id2 FROM o_pk3 WHERE id1 = 2 AND id2 = ANY ('{xyy, xxyyy}'::text[]) ORDER BY id1, id2;
  id1 |  id2  
