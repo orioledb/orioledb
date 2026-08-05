@@ -105,6 +105,15 @@ typedef struct DeferredDescrInvalidation
 static bool saving_inval_messages = false;
 static List *saved_descr_invals = NIL;
 
+/*
+ * Descriptors currently being (re)filled by get_index_descr() /
+ * get_table_descr().  o_invalidate_descrs_internal() skips them so a reentrant
+ * invalidation never frees a half-built entry; reset_filling_descrs() clears
+ * the flag on transaction abort (called from the orioledb error-cleanup hook).
+ */
+static OIndexDescr *filling_index_descr = NULL;
+static OTableDescr *filling_table_descr = NULL;
+
 
 struct OComparatorKey
 {
@@ -920,6 +929,7 @@ create_table_descr(ORelOids oids, OTableFetchContext ctx)
 	bool		found;
 	OTable	   *o_table;
 	bool		old_enable_stopevents;
+	OTableDescr *prev_filling;
 
 	old_enable_stopevents = enable_stopevents;
 	enable_stopevents = false;
@@ -940,15 +950,32 @@ create_table_descr(ORelOids oids, OTableFetchContext ctx)
 
 	Assert(ctx.snapshot);
 
+	/*
+	 * Protect the half-built entry: fill_table_descr() fetches per-index
+	 * descriptors, which read catalogs and can run
+	 * AcceptInvalidationMessages() -> o_invalidate_descrs() reentrantly.
+	 * Mark the entry so that reentrant invalidation skips it instead of
+	 * freeing/recreating a descriptor whose indices[] array is not populated
+	 * yet (see OIndexDescr.fill_in_progress).
+	 */
+	prev_filling = filling_table_descr;
+	filling_table_descr = descr;
+	descr->fill_in_progress = true;
+
 	descr->refcnt = 0;
 	if (!fill_table_descr(descr, o_table, ctx.snapshot))
 	{
+		descr->fill_in_progress = false;
+		filling_table_descr = prev_filling;
 		table_descr_free(descr);
 		(void) hash_search(oTableDescrHash, &oids,
 						   HASH_REMOVE, &found);
 		enable_stopevents = old_enable_stopevents;
 		return NULL;
 	}
+
+	descr->fill_in_progress = false;
+	filling_table_descr = prev_filling;
 
 	enable_stopevents = old_enable_stopevents;
 	return descr;
@@ -1217,7 +1244,13 @@ o_invalidate_descrs_internal(Oid datoid, Oid reloid, Oid relfilenode)
 		hash_seq_init(&scan_status, oTableDescrHash);
 		while ((tableDescr = (OTableDescr *) hash_seq_search(&scan_status)) != NULL)
 		{
-			bool		delete = tableDescr->refcnt == 0;
+			bool		delete;
+
+			/* Never touch an entry that is still being (re)filled. */
+			if (tableDescr->fill_in_progress)
+				continue;
+
+			delete = tableDescr->refcnt == 0;
 
 			Assert(!tableDescr->noInvalidation);
 
@@ -1231,6 +1264,10 @@ o_invalidate_descrs_internal(Oid datoid, Oid reloid, Oid relfilenode)
 		hash_seq_init(&scan_status, oIndexDescrHash);
 		while ((indexDescr = (OIndexDescr *) hash_seq_search(&scan_status)) != NULL)
 		{
+			/* Never touch an entry that is still being (re)filled. */
+			if (indexDescr->fill_in_progress)
+				continue;
+
 			if (indexDescr->refcnt == 0)
 			{
 				/*
@@ -1261,7 +1298,7 @@ o_invalidate_descrs_internal(Oid datoid, Oid reloid, Oid relfilenode)
 		bool		found;
 
 		tableDescr = hash_search(oTableDescrHash, &oids, HASH_FIND, &found);
-		if (found)
+		if (found && !tableDescr->fill_in_progress)
 		{
 			bool		delete = tableDescr->refcnt == 0;
 
@@ -1275,7 +1312,7 @@ o_invalidate_descrs_internal(Oid datoid, Oid reloid, Oid relfilenode)
 		}
 
 		indexDescr = hash_search(oIndexDescrHash, &oids, HASH_FIND, &found);
-		if (found)
+		if (found && !indexDescr->fill_in_progress)
 		{
 			if (indexDescr->refcnt == 0)
 			{
@@ -1492,6 +1529,7 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OTableFetchCon
 	bool		found = false;
 	bool		existed;
 	int			refcnt = 0;
+	OIndexDescr *prev_filling;
 
 	result = hash_search(oIndexDescrHash, &ixOids, HASH_ENTER, &found);
 	Assert((found && result) || !found);
@@ -1512,10 +1550,28 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OTableFetchCon
 		 result->version == ctx.version))
 		return result;
 
+	/*
+	 * Mark the entry as being (re)filled before the first call that can run
+	 * AcceptInvalidationMessages() (o_indices_get_extended() reads the
+	 * O_INDICES sys-tree).  Until o_index_fill_descr() runs, a fresh
+	 * HASH_ENTER slot still carries a previously-freed descriptor's stale
+	 * pointers, and an existing entry we are about to index_descr_free() is
+	 * half-torn-down; a reentrant o_invalidate_descrs() must skip it rather
+	 * than free it (which would double-free a shared-descrCxt tupdesc chunk
+	 * -> FreeTupleDesc MAXALIGN crash in the checkpointer).
+	 * o_index_fill_descr() memset()s the flag off, but wraps its own body in
+	 * o_start_saving_inval_messages(), so the whole (re)fill window stays
+	 * protected.
+	 */
+	prev_filling = filling_index_descr;
+	filling_index_descr = result;
+	result->fill_in_progress = true;
+
 	oIndex = o_indices_get_extended(ixOids, ixType, ctx);
 	Assert(oIndex || miss_ok);
 	if (!oIndex && miss_ok)
 	{
+		filling_index_descr = prev_filling;
 		(void) hash_search(oIndexDescrHash, &ixOids, HASH_REMOVE, &found);
 		Assert(found);
 		return NULL;
@@ -1546,6 +1602,9 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OTableFetchCon
 	if (existed)
 		result->refcnt = refcnt;
 	free_o_index(oIndex);
+
+	result->fill_in_progress = false;
+	filling_index_descr = prev_filling;
 
 	return result;
 }
@@ -2559,6 +2618,27 @@ void
 reset_saving_inval_messages(void)
 {
 	saving_inval_messages = false;
+}
+
+/*
+ * Clear the "being filled" flag on any descriptor whose get_index_descr() /
+ * create_table_descr() was interrupted by an error longjmp, so it is not left
+ * permanently exempt from invalidation.  Called from the orioledb
+ * error-cleanup hook.
+ */
+void
+reset_filling_descrs(void)
+{
+	if (filling_index_descr != NULL)
+	{
+		filling_index_descr->fill_in_progress = false;
+		filling_index_descr = NULL;
+	}
+	if (filling_table_descr != NULL)
+	{
+		filling_table_descr->fill_in_progress = false;
+		filling_table_descr = NULL;
+	}
 }
 
 /*
