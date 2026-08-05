@@ -433,6 +433,34 @@ ToastAPI	tableToastAPI = {
 	.fetchCallback = tableVersionCallback
 };
 
+static void
+generic_toast_emit_wal(ToastAPI *api, void *key, BTreeDescr *desc,
+					   Pointer data, Size data_size, void *arg)
+{
+	uint32		max_length = api->getMaxChunkSize(key, arg);
+	uint32		version = GET_BTREE_VERSION(api, arg);
+	uint32		base_version = GET_BASE_BTREE_VERSION(api, arg);
+	uint32		offset = 0;
+	uint32		chunknum = 0;
+
+	while (data_size > 0)
+	{
+		int			length = (data_size < max_length) ? data_size : max_length;
+		OTuple		tup;
+
+		tup = api->createTuple(key, data, offset, chunknum, length, arg);
+		add_modify_wal_record(WAL_REC_INSERT, desc, tup,
+							  o_btree_len(desc, tup, OTupleLength),
+							  REPLICA_IDENTITY_DEFAULT,
+							  version, base_version);
+		pfree(tup.data);
+
+		offset += length;
+		chunknum++;
+		data_size -= length;
+	}
+}
+
 bool
 generic_toast_insert_optional_wal(ToastAPI *api, void *key, Pointer data,
 								  Size data_size, OXid oxid, CommitSeqNo csn,
@@ -452,16 +480,7 @@ generic_toast_insert_optional_wal(ToastAPI *api, void *key, Pointer data,
 	while (data_size > 0)
 	{
 		OTuple		tup;
-		int			length = 0;
-
-		if (data_size < max_length)
-		{
-			length = data_size;
-		}
-		else
-		{
-			length = max_length;
-		}
+		int			length = (data_size < max_length) ? data_size : max_length;
 
 		tup = api->createTuple(key, data, offset, chunknum, length, arg);
 
@@ -471,27 +490,18 @@ generic_toast_insert_optional_wal(ToastAPI *api, void *key, Pointer data,
 								  oxid, csn, RowLockUpdate,
 								  NULL, &callbackInfo) == OBTreeModifyResultInserted;
 
-		if (!inserted)
-		{
-			pfree(tup.data);
-			break;
-		}
-
-		if (desc->storageType == BTreeStoragePersistence && wal)
-		{
-			uint32		version = GET_BTREE_VERSION(api, arg);
-			uint32		base_version = GET_BASE_BTREE_VERSION(api, arg);
-
-			add_modify_wal_record(WAL_REC_INSERT, desc, tup,
-								  o_btree_len(desc, tup, OTupleLength), REPLICA_IDENTITY_DEFAULT, version, base_version);
-		}
-
 		pfree(tup.data);
+
+		if (!inserted)
+			break;
 
 		offset += length;
 		chunknum++;
 		data_size -= length;
 	}
+
+	if (desc->storageType == BTreeStoragePersistence && wal && offset > 0)
+		generic_toast_emit_wal(api, key, desc, data, offset, arg);
 
 	return inserted;
 }
@@ -997,8 +1007,12 @@ typedef struct OToastMultiInsertJob
  * Multi-slot TOAST-values insert.  Extract every (pk, attn) job from the
  * slots' to_toast bitmaps, split each job into chunks and drain adjacent
  * chunks into the same TOAST leaf under one lwlock via
- * o_btree_multi_insert_item.  Four-phase shape per sub-batch: expand jobs ->
- * monotone-check-or-sort -> batched insert -> WAL.
+ * o_btree_multi_insert_item.  Three-phase shape per sub-batch: expand jobs ->
+ * monotone-check-or-sort -> batched insert.
+ *
+ * WAL is NOT emitted here; the caller must emit per-slot TOAST WAL via
+ * o_toast_emit_slot_wal interleaved with PK WAL so that logical decoding sees
+ * each row's TOAST chunks before its PK record.
  *
  * Detoasting is deferred to sub-batch processing: only values whose chunks
  * belong to the current sub-batch are detoasted, and they are freed as soon
@@ -1266,18 +1280,6 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 			pfree(use_keyptrs);
 		}
 
-		/* Phase 4: per-chunk WAL. */
-		if (ok && tdesc->storageType == BTreeStoragePersistence)
-		{
-			uint32		version = GET_BTREE_VERSION(api, &arg);
-			uint32		base_version = GET_BASE_BTREE_VERSION(api, &arg);
-
-			for (i = 0; i < sub_total; i++)
-				add_modify_wal_record(WAL_REC_INSERT, tdesc, tuples[i],
-									  tuplens[i], REPLICA_IDENTITY_DEFAULT,
-									  version, base_version);
-		}
-
 		for (i = 0; i < sub_total; i++)
 			pfree(tuples[i].data);
 		pfree(tuples);
@@ -1313,10 +1315,6 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 
 	pfree(jobs);
 
-	/*
-	 * WAL was skipped for the failed sub-batch (ok guards Phase 4); ERROR
-	 * aborts the transaction so undo rolls back all inserted chunks.
-	 */
 	if (!ok)
 		ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
@@ -1324,6 +1322,62 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 						RelationGetRelationName(rel)),
 				 errdetail("Failed to insert TOAST chunks for attribute %u.",
 						   failed_attnum)));
+}
+
+/*
+ * Emit per-slot TOAST WAL records.  Re-creates chunk tuples and emits
+ * WAL_REC_INSERT for each, matching the per-chunk contract of
+ * generic_toast_insert.  Must be called per-slot before the slot's PK WAL
+ * so that logical decoding sees TOAST chunks before the PK row.
+ */
+void
+o_toast_emit_slot_wal(OTableDescr *descr, TupleTableSlot *slot)
+{
+	OTableSlot *oslot = (OTableSlot *) slot;
+	TupleDesc	tupleDesc = slot->tts_tupleDescriptor;
+	OIndexDescr *toastd = descr->toast;
+	BTreeDescr *tdesc = &toastd->desc;
+	OTableToastArg arg = {GET_PRIMARY(descr), toastd, descr->version};
+	ToastAPI   *api = &tableToastAPI;
+	int			ctid_off = GET_PRIMARY(descr)->primaryIsCtid ? 1 : 0;
+	OTuple		idx_tup;
+	int			i;
+
+	if (tdesc->storageType != BTreeStoragePersistence)
+		return;
+	if (oslot->to_toast == NULL)
+		return;
+
+	if (GET_PRIMARY(descr)->bridging)
+		ctid_off++;
+
+	idx_tup = tts_orioledb_make_key(slot, descr);
+
+	for (i = 0; i < tupleDesc->natts; i++)
+	{
+		OToastKey	tkey;
+		Datum		value;
+		Pointer		p;
+		bool		free;
+		Size		sz;
+
+		if (oslot->to_toast[i] != ORIOLEDB_TO_TOAST_ON)
+			continue;
+
+		value = o_get_src_value(slot->tts_values[i], &free);
+		p = DatumGetPointer(value);
+		sz = toast_datum_size(value);
+
+		tkey.pk_tuple = idx_tup;
+		tkey.attnum = i + 1 + ctid_off;
+		tkey.chunknum = 0;
+
+		generic_toast_emit_wal(api, &tkey, tdesc, p, sz, &arg);
+
+		if (free)
+			pfree(p);
+	}
+	pfree(idx_tup.data);
 }
 
 void

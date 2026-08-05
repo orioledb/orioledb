@@ -751,9 +751,8 @@ o_tbl_multi_insert(OTableDescr *descr, Relation relation,
 	ppool_release_reserved(pdesc->ppool, PPOOL_RESERVE_INSERT_MASK);
 
 	/*
-	 * Phase 4: batched TOAST inserts across all slots, then per-slot primary
-	 * WAL. debug_disable_multi_insert  = 'toast' falls back to per-slot
-	 * o_toast_insert_values.
+	 * Phase 4: batched TOAST inserts, then per-slot WAL (TOAST WAL before PK
+	 * WAL per row for correct logical decoding).
 	 */
 	if (orioledb_debug_disable_multi_insert != O_DISABLE_MULTI_INSERT_TOAST)
 		o_toast_multi_insert_values(relation, descr, slots, ntuples, oxid, csn);
@@ -765,6 +764,9 @@ o_tbl_multi_insert(OTableDescr *descr, Relation relation,
 
 		if (orioledb_debug_disable_multi_insert == O_DISABLE_MULTI_INSERT_TOAST)
 			o_toast_insert_values(relation, descr, slot, oxid, csn);
+		else
+			o_toast_emit_slot_wal(descr, slot);
+
 		tup = tts_orioledb_form_tuple(slot, descr);
 
 		if (pdesc->storageType == BTreeStoragePersistence)
