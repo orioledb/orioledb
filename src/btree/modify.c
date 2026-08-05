@@ -158,6 +158,24 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 
 retry:
 
+	/*
+	 * Keep the modify retry loop interruptible.  A row-lock conflict against
+	 * a concurrent transaction can livelock here:
+	 * o_btree_modify_handle_conflicts() returns ConflictResolutionRetry --
+	 * e.g. a committed/aborted lock-only undo record that has not yet been
+	 * removed from the chain -- and we loop with the leaf page-content lock
+	 * held and without waiting, at 100% CPU.  Without an interrupt check that
+	 * spin is uninterruptible: a query cancel / statement_timeout can't break
+	 * it and it runs until the job/step timeout. CHECK_FOR_INTERRUPTS() is
+	 * safe here even under the page lock -- page locks don't hold off
+	 * interrupts, and orioledb_error_cleanup_hook() releases all held page
+	 * locks on the resulting error, which also breaks the page-lock vs.
+	 * apply_undo_stack() deadlock the STOPEVENT below documents.  It is a
+	 * no-op inside critical sections (the actual page mutation happens
+	 * later).
+	 */
+	CHECK_FOR_INTERRUPTS();
+
 	context.needsUndo = desc->undoType != UndoLogNone;
 	if (!(callbackInfo && callbackInfo->needsUndoForSelfCreated) &&
 		OXidIsValid(desc->createOxid) &&
@@ -1251,6 +1269,14 @@ o_btree_insert_unique(BTreeDescr *desc, OTuple tuple, BTreeKeyType tupleType,
 	Assert(findResult == OFindPageResultSuccess);
 
 retry:
+
+	/*
+	 * Interruptible for the same reason as o_btree_modify_internal()'s retry
+	 * loop: the unique-check path also retries under a row-lock conflict (the
+	 * wait_for_oxid() paths below), and must remain cancellable.  Safe under
+	 * the page lock -- see the note there.
+	 */
+	CHECK_FOR_INTERRUPTS();
 
 	fastpath = false;
 	found_but_insert = false;
