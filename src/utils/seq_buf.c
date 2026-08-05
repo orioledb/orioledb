@@ -120,7 +120,7 @@ seq_buf_op_dump(SeqBufDescShared *shared, const char *why)
 	uint32		start = seqbuf_op_ring_pos > SEQBUF_OP_RING_SIZE
 		? seqbuf_op_ring_pos - SEQBUF_OP_RING_SIZE : 0;
 
-	elog(WARNING,
+	elog(LOG,
 		 "SEQBUF_OP_DUMP (%s) shared=%p tag=[%u/%u num=%u type=%d] curPg=%d loc=%d pages=[%u,%u] -- recent ops for this shared:",
 		 why, (void *) shared, shared->tag.key.oids.datoid,
 		 shared->tag.key.oids.relnode, shared->tag.num, shared->tag.type,
@@ -131,7 +131,7 @@ seq_buf_op_dump(SeqBufDescShared *shared, const char *why)
 		SeqBufOpRec *r = &seqbuf_op_ring[i % SEQBUF_OP_RING_SIZE];
 
 		if (r->shared == shared)
-			elog(WARNING,
+			elog(LOG,
 				 "  seqbuf op #%u %c tag=[%u/%u num=%u type=%d] curPg=%d loc=%d pages=[%u,%u]",
 				 i, r->op, r->datoid, r->relnode, r->num, r->type,
 				 r->curPageNum, r->location, r->p0, r->p1);
