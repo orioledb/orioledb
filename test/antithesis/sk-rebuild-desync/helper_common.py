@@ -188,16 +188,31 @@ def checkpoint_count(conn):
 def assert_consistent(conn, label):
     (n_pk,) = execute(conn, f"SELECT count(*) FROM {TABLE}")[0]
     (n_sk,) = execute(conn, f"SELECT count(DISTINCT token) FROM {TABLE}")[0]
-    (tbl_ok,) = execute(
+    (check_ok,) = execute(
         conn, f"SELECT orioledb_tbl_check('{TABLE}'::regclass)")[0]
-    consistent = (n_pk == n_sk) and bool(tbl_ok)
-    print(f"[{label}] pk_rows={n_pk} sk_distinct={n_sk} tbl_check={tbl_ok} "
-          f"consistent={consistent}", flush=True)
+    (verify_ok,) = execute(
+        conn, f"SELECT verify_orioledb('{TABLE}'::regclass)")[0]
+
+    check_consistent = (n_pk == n_sk) and bool(check_ok)
+    verify_consistent = (n_pk == n_sk) and bool(verify_ok)
+
+    print(f"[{label}] pk_rows={n_pk} sk_distinct={n_sk} tbl_check={check_ok} verify={verify_ok}"
+          f"check_consistent={check_consistent} verify_consistent={verify_consistent}",
+          flush=True)
+
     always(
-        consistent,
+        verify_consistent,
         "o_sk_desync PK rows match distinct SK tokens after ordinary "
         "commits and crash recovery of unrelated transactions "
         "(recovery-sk-rebuild-desync)",
         {"label": label, "pk_rows": n_pk, "sk_distinct": n_sk,
-         "tbl_check": bool(tbl_ok)},
+         "verify_ok": bool(verify_ok)},
+    )
+    always(
+        verify_consistent,
+        "o_sk_desync PK rows match distinct SK tokens after ordinary "
+        "commits and crash recovery of unrelated transactions "
+        "(recovery-sk-rebuild-desync)",
+        {"label": label, "pk_rows": n_pk, "sk_distinct": n_sk,
+         "check_ok": bool(check_ok)},
     )
