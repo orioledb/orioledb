@@ -91,7 +91,7 @@ o_tuple_reader_report_oob(OTupleReaderState *state, uint32 off)
 	hex[i > 0 ? i * 3 - 1 : 0] = '\0';
 
 	if (oob_cnt++ < 100)
-		elog(WARNING,
+		elog(LOG,
 			 "OTUPLE_ATTR_OOB attnum=%u natts=%u readerNatts=%u off=%u tpOff=%ld len=%u hasnulls=%d hdrNatts=%u hdrLen=%u descNatts=%d bytes=[%s]",
 			 state->attnum, state->natts, state->natts, off,
 			 (long) (state->tp - state->start), state->len,

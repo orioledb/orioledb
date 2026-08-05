@@ -220,7 +220,7 @@ iter_leaf_loc_stale(BTreeDescr *desc, Page img, PartialPageState *partial,
 		static int	stale_cnt = 0;
 
 		if (stale_cnt++ < 200)
-			elog(WARNING,
+			elog(LOG,
 				 "ITER_STALE_LEAF_LOC site=%s tree=[%u/%u/%u] type=%d blkno=%u "
 				 "chunkOffset=%u chunksCount=%u itemOffset=%u cachedItems=%u realItems=%u "
 				 "loc_chunk=%p expect_chunk=%p isPartial=%d chunkLoaded=%d",
@@ -1416,7 +1416,7 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 												result.data, plen) == 0);
 
 				if (mono_violations++ < 200)
-					elog(WARNING,
+					elog(LOG,
 						 "ITER_MONO_VIOLATION dir=%s cmp=%d identical=%d plen=%d clen=%d idx=(%u,%u,%u) treetype=%d curKeyReturned=%d resumeLocValid=%d blkno=%u",
 						 IT_IS_FORWARD(it) ? "fwd" : "bwd", cmp,
 						 identical ? 1 : 0, plen, clen,
@@ -1934,7 +1934,7 @@ iter_term_page_stale(BTreeIterator *it)
 		OInMemoryBlkno blkno = it->context.items[it->context.index].blkno;
 
 		if (stale_cnt++ < 200)
-			elog(WARNING,
+			elog(LOG,
 				 "ITER_EARLY_TERM_STALE dir=%s tree=[%u/%u/%u] type=%d blkno=%u "
 				 "-- FETCH page changed under us at scan termination; re-finding "
 				 "instead of ending the scan",
@@ -1968,9 +1968,9 @@ btree_iterator_check_load_next_page(BTreeIterator *it, BtreeIterationEnd *end)
 		BTreePageHeader *header;
 
 		/*
-		 * TEMP: never decide the scan is finished on a stale FETCH image.
-		 * The IS_LAST_PAGE() and page_contains_end() checks below read the
-		 * page header flags and hikey; if the backing page changed under us,
+		 * TEMP: never decide the scan is finished on a stale FETCH image. The
+		 * IS_LAST_PAGE() and page_contains_end() checks below read the page
+		 * header flags and hikey; if the backing page changed under us,
 		 * re-find and re-evaluate rather than ending the scan early (see
 		 * helper).
 		 */
