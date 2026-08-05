@@ -59,6 +59,143 @@ static int	numberOfMyInProgressSplitPages = 0;
 
 OPageWaiterShmemState *lockerStates = NULL;
 
+/*
+ * TEMP churn diagnostic: torn FETCH page-image dump.  The iterator sets these
+ * around a lock-free leaf-tuple parse so that an out-of-bounds attribute walk
+ * detected deep in format.c can dump the copied image, the live page, and the
+ * per-page action ring of this page.
+ */
+OInMemoryBlkno o_torn_dump_blkno = OInvalidInMemoryBlkno;
+Pointer		o_torn_dump_img = NULL;
+
+static const char *
+o_page_action_name(uint8 action)
+{
+	switch (action)
+	{
+		case OPA_INIT:
+			return "init";
+		case OPA_LOAD:
+			return "load";
+		case OPA_MODIFY:
+			return "modify";
+		case OPA_SPLIT:
+			return "split";
+		case OPA_SPLIT_RIGHT:
+			return "split_right";
+		case OPA_COMPACT:
+			return "compact";
+		case OPA_MERGE:
+			return "merge";
+		case OPA_REORG:
+			return "reorg";
+		case OPA_CHUNK_SPLIT:
+			return "chunk_split";
+		case OPA_EVICT:
+			return "evict";
+		default:
+			return "?";
+	}
+}
+
+/*
+ * Append one action to the page's ring.  Racy on purpose (diagnostic only): a
+ * concurrent writer may clobber a neighbouring slot, but the pid+changeCount
+ * still tell us who touched the page and at what version.
+ */
+void
+o_page_desc_log_action(OInMemoryBlkno blkno, uint8 action)
+{
+	OrioleDBPageDesc *desc;
+	OPageActionRec *rec;
+	uint32		pos;
+
+	if (!OInMemoryBlknoIsValid(blkno))
+		return;
+
+	desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
+	pos = desc->actionLogPos++;
+	rec = &desc->actionLog[pos % O_PAGE_ACTION_LOG_SIZE];
+	rec->action = action;
+	rec->pid = (uint16) (MyProcPid & 0xFFFF);
+	rec->changeCount = O_PAGE_GET_CHANGE_COUNT(O_GET_IN_MEMORY_PAGE(blkno));
+}
+
+/*
+ * Dump everything we know about a page whose FETCH image looks torn: the
+ * copied (stale) header, the current live header, the page descriptor identity,
+ * and the recent-action ring.  Rate-limited; LOG only (server-log).
+ */
+void
+o_dump_torn_page(const char *site, OInMemoryBlkno blkno, Pointer img)
+{
+	static int	dump_cnt = 0;
+	OrioleDBPageDesc *desc;
+	BTreePageHeader *live;
+	BTreePageHeader *copy;
+	StringInfoData buf;
+	uint32		i;
+
+	if (dump_cnt++ >= 100)
+		return;
+	if (!OInMemoryBlknoIsValid(blkno))
+		return;
+
+	desc = O_GET_IN_MEMORY_PAGEDESC(blkno);
+	live = (BTreePageHeader *) O_GET_IN_MEMORY_PAGE(blkno);
+	copy = (BTreePageHeader *) img;
+
+	initStringInfo(&buf);
+	appendStringInfo(&buf,
+					 "TORN_PAGE_DUMP site=%s blkno=%u pid=%d desc[oids=%u/%u/%u type=%u]",
+					 site, blkno, MyProcPid,
+					 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
+					 desc->type);
+
+	if (copy != NULL)
+		appendStringInfo(&buf,
+						 " copy[cc=%u flags=%u chunks=%u items=%u hikeysEnd=%u dataSize=%u]",
+						 O_PAGE_GET_CHANGE_COUNT(copy), copy->flags,
+						 copy->chunksCount, copy->itemsCount, copy->hikeysEnd,
+						 copy->dataSize);
+
+	appendStringInfo(&buf,
+					 " live[cc=%u flags=%u chunks=%u items=%u hikeysEnd=%u dataSize=%u]",
+					 O_PAGE_GET_CHANGE_COUNT(live), live->flags,
+					 live->chunksCount, live->itemsCount, live->hikeysEnd,
+					 live->dataSize);
+
+	/* Copied vs live chunk-desc offsets (first few) to see the sewing */
+	if (copy != NULL)
+	{
+		appendStringInfoString(&buf, " copyChunks=");
+		for (i = 0; i < copy->chunksCount && i < 8; i++)
+			appendStringInfo(&buf, "%u:%u ", copy->chunkDesc[i].offset,
+							 copy->chunkDesc[i].shortLocation);
+	}
+	appendStringInfoString(&buf, "liveChunks=");
+	for (i = 0; i < live->chunksCount && i < 8; i++)
+		appendStringInfo(&buf, "%u:%u ", live->chunkDesc[i].offset,
+						 live->chunkDesc[i].shortLocation);
+
+	/* Action ring, oldest first */
+	appendStringInfoString(&buf, "actions=");
+	for (i = 0; i < O_PAGE_ACTION_LOG_SIZE; i++)
+	{
+		uint32		idx = (desc->actionLogPos + i) % O_PAGE_ACTION_LOG_SIZE;
+		OPageActionRec *rec = &desc->actionLog[idx];
+
+		if (rec->action == OPA_NONE)
+			continue;
+		appendStringInfo(&buf, "%s(pid=%u,cc=%u) ",
+						 o_page_action_name(rec->action), rec->pid,
+						 rec->changeCount);
+	}
+
+	elog(LOG, "%s", buf.data);
+	pfree(buf.data);
+}
+
 #ifdef CHECK_PAGE_STATS
 static void o_check_btree_page_statistics(BTreeDescr *desc, Pointer p);
 #endif
@@ -737,6 +874,9 @@ page_block_reads(OInMemoryBlkno blkno)
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 	uint64		state;
 	int			i;
+
+	/* TEMP churn diagnostic: record the ordinary modification */
+	o_page_desc_log_action(blkno, OPA_MODIFY);
 
 	if (O_PAGE_IS_LOCAL(blkno))
 	{

@@ -383,6 +383,8 @@ init_new_btree_page(BTreeDescr *desc, OInMemoryBlkno blkno, uint16 flags,
 	page_desc->type = desc->type;
 	page_desc->fileExtent.len = InvalidFileExtentLen;
 	page_desc->fileExtent.off = InvalidFileExtentOff;
+	/* TEMP churn diagnostic: fresh b-tree page initialized in this buffer */
+	o_page_desc_log_action(blkno, OPA_INIT);
 	header->flags = flags;
 	if (flags & O_BTREE_FLAG_LEAF)
 	{

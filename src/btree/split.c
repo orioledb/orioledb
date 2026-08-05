@@ -169,6 +169,8 @@ perform_page_compaction(BTreeDescr *desc, OInMemoryBlkno blkno,
 		hikeySize = BTREE_PAGE_GET_HIKEY_SIZE(p);
 	}
 
+	/* TEMP churn diagnostic: leaf compacted in place */
+	o_page_desc_log_action(blkno, OPA_COMPACT);
 	btree_page_reorg(desc, p, items->items,
 					 items->itemsCount, hikeySize, hikey.tuple);
 	Assert(header->dataSize <= ORIOLEDB_BLCKSZ);
@@ -471,6 +473,8 @@ perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno,
 		BTREE_PAGE_GET_HIKEY(hikey, left_page);
 	}
 
+	/* TEMP churn diagnostic: filling the new right half of a split */
+	o_page_desc_log_action(new_blkno, OPA_SPLIT_RIGHT);
 	btree_page_reorg(desc, right_page, &items->items[left_count],
 					 items->itemsCount - left_count,
 					 hikeySize, hikey);
@@ -501,6 +505,8 @@ perform_page_split(BTreeDescr *desc, OInMemoryBlkno blkno,
 		O_GET_IN_MEMORY_PAGEDESC(RIGHTLINK_GET_BLKNO(rightlink))->leftBlkno = new_blkno;
 	O_GET_IN_MEMORY_PAGEDESC(new_blkno)->leftBlkno = blkno;
 
+	/* TEMP churn diagnostic: rewriting the left half of a split in place */
+	o_page_desc_log_action(blkno, OPA_SPLIT);
 	btree_page_reorg(desc, left_page, &items->items[0], left_count,
 					 splitkey_len, splitkey);
 

@@ -1541,6 +1541,8 @@ o_page_desc_init(OrioleDBPageDesc *desc)
 	desc->ionum = -1;
 	desc->type = 0;
 	desc->flags = 0;
+	desc->actionLogPos = 0;
+	memset(desc->actionLog, 0, sizeof(desc->actionLog));
 }
 
 uint64

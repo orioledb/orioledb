@@ -1860,6 +1860,16 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 			 * re-find resumes after it.
 			 */
 			BTREE_PAGE_READ_LEAF_TUPLE(posTup, context->img, &leaf_item->locator);
+
+			/*
+			 * TEMP churn diagnostic: expose the page context to a torn-tuple
+			 * OOB detected deep in the attribute walk (format.c) so it can
+			 * dump the copied image, the live page, and this page's action
+			 * ring.
+			 */
+			o_torn_dump_blkno = leaf_item->blkno;
+			o_torn_dump_img = context->img;
+
 			copy_fixed_leaf_key(desc, &it->curKey, posTup);
 			it->curKeySet = true;
 			it->curKeyReturned = true;
@@ -1870,6 +1880,9 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 										  it->tupleCxt,
 										  it->fetchCallback,
 										  it->fetchCallbackArg);
+
+			o_torn_dump_blkno = OInvalidInMemoryBlkno;
+			o_torn_dump_img = NULL;
 
 			/*
 			 * Remember this tuple's position before advancing, so a caller

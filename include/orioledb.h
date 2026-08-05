@@ -448,6 +448,37 @@ StaticAssertDecl(sizeof(OrioleDBPageHeader) == sizeof(OrioleDBOndiskPageHeader),
 										: ((page_size) + sizeof(OrioleDBOndiskPageHeader) + ORIOLEDB_COMP_BLCKSZ - 1))
 #define FileExtentLen(page_size) (CompressedSize(page_size) / ORIOLEDB_COMP_BLCKSZ)
 
+/*
+ * TEMP churn diagnostic: per-page ring of the last structural actions applied
+ * to an in-memory page.  Dumped together with the copied-vs-live header when a
+ * torn FETCH page image is detected (o_toast_nocachegetattr wild read /
+ * OTUPLE_ATTR_OOB), to see what rewrote the page under a lock-free reader.
+ */
+typedef enum
+{
+	OPA_NONE = 0,
+	OPA_INIT,					/* init_new_btree_page */
+	OPA_LOAD,					/* page read into the buffer */
+	OPA_MODIFY,					/* page_block_reads: ordinary tuple
+								 * insert/update/delete, undo rollback, or a
+								 * non-leaf downlink rewrite */
+	OPA_SPLIT,					/* perform_page_split (this = target/left) */
+	OPA_SPLIT_RIGHT,			/* the freshly-created right half of a split */
+	OPA_COMPACT,				/* perform_page_compaction */
+	OPA_MERGE,					/* merge_pages (target/left) */
+	OPA_REORG,					/* btree_page_reorg */
+	OPA_CHUNK_SPLIT,			/* split_page_by_chunks */
+	OPA_EVICT					/* evict_btree */
+}			OPageAction;
+
+#define O_PAGE_ACTION_LOG_SIZE 16
+typedef struct
+{
+	uint8		action;			/* OPageAction */
+	uint16		pid;			/* low 16 bits of the acting backend pid */
+	uint32		changeCount;	/* page change count observed at the action */
+}			OPageActionRec;
+
 typedef struct
 {
 	ORelOids	oids;
@@ -456,6 +487,9 @@ typedef struct
 	uint32		flags:4,
 				type:28;
 	OInMemoryBlkno leftBlkno;
+	/* TEMP churn diagnostic (see OPageActionRec above) */
+	uint32		actionLogPos;
+	OPageActionRec actionLog[O_PAGE_ACTION_LOG_SIZE];
 } OrioleDBPageDesc;
 
 /* orioledb.c */
@@ -595,6 +629,17 @@ extern void jsonb_push_int8_key(JsonbParseState **state, char *key, int64 value)
 extern void jsonb_push_string_key(JsonbParseState **state, const char *key, const char *value);
 extern bool is_bump_memory_context(MemoryContext mxct);
 extern void o_page_desc_init(OrioleDBPageDesc *desc);
+
+/* TEMP churn diagnostic: per-page action ring + torn-image dump (page_state.c) */
+extern void o_page_desc_log_action(OInMemoryBlkno blkno, uint8 action);
+extern void o_dump_torn_page(const char *site, OInMemoryBlkno blkno, Pointer img);
+
+/*
+ * TEMP: the iterator sets these around a FETCH leaf-tuple parse so a torn-tuple
+ * OOB detected deep in the attribute walk (format.c) can dump the page context.
+ */
+extern OInMemoryBlkno o_torn_dump_blkno;
+extern Pointer o_torn_dump_img;
 
 extern CheckPoint_hook_type next_CheckPoint_hook;
 
