@@ -984,6 +984,7 @@ o_toast_insert(OTableDescr *descr, OTuple pk, uint16 attn,
 typedef struct OToastMultiInsertJob
 {
 	OTuple		pk;
+	Datum		value;
 	Pointer		data;
 	Size		size;
 	uint32		max_length;
@@ -993,27 +994,18 @@ typedef struct OToastMultiInsertJob
 } OToastMultiInsertJob;
 
 /*
- * Multi-slot TOAST-values insert.  Extract every (pk, attn, data) job from
- * the slots' to_toast bitmaps, split each job into chunks and drain adjacent
+ * Multi-slot TOAST-values insert.  Extract every (pk, attn) job from the
+ * slots' to_toast bitmaps, split each job into chunks and drain adjacent
  * chunks into the same TOAST leaf under one lwlock via
- * o_btree_multi_insert_item.  Mirrors o_tbl_multi_insert's four-phase shape:
- * expand jobs -> monotone-check-or-sort -> batched insert -> WAL.
+ * o_btree_multi_insert_item.  Four-phase shape per sub-batch: expand jobs ->
+ * monotone-check-or-sort -> batched insert -> WAL.
  *
- * Slots without a to_toast bitmap contribute nothing.  Detoasted values
- * are held until the batch completes and then pfree'd together, so a single
- * job may hold a temporary allocation across many chunks.
- *
- * Chunks of one job share (pk, attn) and only differ in chunknum, so
- * intra-job locality is guaranteed.  Inter-job locality is high when the
- * caller's pk arrives monotone (CTID PK / sorted-PK COPY); an out-of-order
- * first pair invokes an idx[] sort.  WAL emission is deferred until after
- * the leaf-lock phase to keep it order-independent.
+ * Detoasting is deferred to sub-batch processing: only values whose chunks
+ * belong to the current sub-batch are detoasted, and they are freed as soon
+ * as their job is fully consumed.
  *
  * Jobs are processed in sub-batches of at most O_TOAST_MULTI_MAX_CHUNKS
  * chunks to limit peak transient memory.
- *
- * ereports on failure so the caller sees the same error o_toast_insert_values
- * raises per row.
  */
 void
 o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
@@ -1055,11 +1047,6 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 
 		for (i = 0; i < tupleDesc->natts; i++)
 		{
-			Datum		value;
-			Pointer		p;
-			bool		free;
-			Size		sz;
-
 			Assert(oslot->to_toast[i] != ORIOLEDB_TO_TOAST_COMPRESSION_TRIED);
 			if (oslot->to_toast[i] != ORIOLEDB_TO_TOAST_ON)
 				continue;
@@ -1070,10 +1057,6 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 				key_recorded = true;
 			}
 
-			value = o_get_src_value(slots[s]->tts_values[i], &free);
-			p = DatumGetPointer(value);
-			sz = toast_datum_size(value);
-
 			if (njobs == allocated_jobs)
 			{
 				allocated_jobs = allocated_jobs ? allocated_jobs * 2 : 32;
@@ -1083,9 +1066,10 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 			}
 			jobs[njobs].pk = idx_tup;
 			jobs[njobs].attnum = i + 1 + ctid_off;
-			jobs[njobs].data = p;
-			jobs[njobs].size = sz;
-			jobs[njobs].free = free;
+			jobs[njobs].value = slots[s]->tts_values[i];
+			jobs[njobs].data = NULL;
+			jobs[njobs].size = o_get_src_size(slots[s]->tts_values[i]);
+			jobs[njobs].free = false;
 			njobs++;
 		}
 	}
@@ -1143,6 +1127,15 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 			Size		remaining;
 			uint32		offset;
 			uint32		max_length = jobs[next_job].max_length;
+
+			/* Detoast on first access */
+			if (jobs[next_job].data == NULL)
+			{
+				Datum		val;
+
+				val = o_get_src_value(jobs[next_job].value, &jobs[next_job].free);
+				jobs[next_job].data = DatumGetPointer(val);
+			}
 
 			offset = next_chunk * max_length;
 			remaining = jobs[next_job].size - offset;
@@ -1292,13 +1285,24 @@ o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 		pfree(chunkkeys);
 		pfree(keyptrs);
 
+		/* Free detoasted values for fully consumed jobs. */
+		for (i = j_start; i < next_job; i++)
+		{
+			if (jobs[i].free)
+			{
+				pfree(jobs[i].data);
+				jobs[i].data = NULL;
+				jobs[i].free = false;
+			}
+		}
+
 		j_start = next_job;
 		chunk_start = next_chunk;
 	}
 
 	for (i = 0; i < njobs; i++)
 	{
-		if (jobs[i].free)
+		if (jobs[i].data && jobs[i].free)
 			pfree(jobs[i].data);
 	}
 	for (i = 0; i < njobs; i++)
