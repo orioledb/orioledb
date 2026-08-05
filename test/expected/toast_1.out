@@ -656,12 +656,6 @@ SELECT id, length(val) FROM o_test1;
 -- DELETE with TOAST values
 INSERT INTO o_test1 VALUES (2, generate_string(5, 10000));
 DELETE FROM o_test1 WHERE id = 2;
-SELECT orioledb_rewind_sync();
- orioledb_rewind_sync 
-----------------------
- 
-(1 row)
-
 INSERT INTO o_test1 VALUES (2, generate_string(6, 15000));
 SELECT id, length(val) FROM o_test1;
  id | length 
@@ -733,12 +727,6 @@ SELECT id, length(val) FROM o_test1 WHERE id = 5;
 -- update pk, delete all old toasted values and insert new
 INSERT INTO o_test1 VALUES (6, generate_string(13, 4000));
 UPDATE o_test1 SET id = 7 WHERE id = 6;
-SELECT orioledb_rewind_sync();
- orioledb_rewind_sync 
-----------------------
- 
-(1 row)
-
 SELECT id, length(val) FROM o_test1 WHERE id = 7;
  id | length 
 ----+--------
@@ -746,12 +734,6 @@ SELECT id, length(val) FROM o_test1 WHERE id = 7;
 (1 row)
 
 UPDATE o_test1 SET id = 6, val = generate_string(14, 5000) WHERE id = 7;
-SELECT orioledb_rewind_sync();
- orioledb_rewind_sync 
-----------------------
- 
-(1 row)
-
 SELECT id, length(val) FROM o_test1 WHERE id > 5;
  id | length 
 ----+--------
@@ -1715,7 +1697,7 @@ SELECT orioledb_tbl_structure('o_sm_text'::regclass, 'nuet');
    Chunk 2: offset = 2, location = 5680, hikey location = 104, hikey = (PK: ('2'), attnum 2, chunknum 0) +
      Item 2: offset = 5688, tuple = (PK: ('1'), attnum 2, chunknum 2, data_length 690)                   +
                                                                                                          +
- Page 2: level = 0, maxKeyLen = 16, nVacatedBytes = 3296                                                 +
+ Page 2: level = 0, maxKeyLen = 16, nVacatedBytes = 3296, sparse                                         +
  state = free, datoid equal, relnode equal, ix_type = toast, dirty                                       +
      Rightlink is invalid                                                                                +
      Hikey: offset = 80, key = (PK: ('3'), attnum 2, chunknum 0)                                         +

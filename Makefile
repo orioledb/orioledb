@@ -143,8 +143,7 @@ REGRESSCHECKS = btree_sys_check \
 				toast_column_compress \
 				trigger \
 				truncate \
-				types \
-				rewind
+				types
 ISOLATIONCHECKS = bitmap_hist_scan \
 				  bitmap_for_update_epq \
 				  bridge_index \

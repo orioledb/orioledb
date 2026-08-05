@@ -212,7 +212,6 @@ ALTER MATERIALIZED VIEW o_test_mv_select SET TABLESPACE regress_tblspace;
 SELECT * FROM o_test_mv_select;
 DROP MATERIALIZED VIEW o_test_mv_select;
 
-SELECT orioledb_rewind_sync();
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA createas CASCADE;
 DROP TABLESPACE regress_tblspace;

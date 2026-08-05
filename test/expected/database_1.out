@@ -80,12 +80,6 @@ Tablespace: "dbsize_tblspace"
 
 \c postgres
 DROP DATABASE oriole_database;
-SELECT orioledb_rewind_sync();
- orioledb_rewind_sync 
-----------------------
- 
-(1 row)
-
 DROP TABLESPACE dbsize_tblspace;
 DROP EXTENSION orioledb CASCADE;
 CREATE EXTENSION orioledb;
@@ -172,11 +166,5 @@ Tablespace: "dbsize_tblspace"
 
 \c postgres
 DROP DATABASE mixed_database;
-SELECT orioledb_rewind_sync();
- orioledb_rewind_sync 
-----------------------
- 
-(1 row)
-
 DROP TABLESPACE dbsize_tblspace;
 DROP EXTENSION orioledb CASCADE;

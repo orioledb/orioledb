@@ -315,7 +315,6 @@ SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
 DELETE FROM o_bridging_vacuum_test;
 SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');
 SELECT * FROM gist_index_content('o_bridging_vacuum_test_p_idx');
-SELECT orioledb_rewind_sync();
 VACUUM o_bridging_vacuum_test;
 SELECT * FROM o_bridging_vacuum_test WHERE p <@ box(point(0,0), point(1,1));
 SELECT orioledb_tbl_structure('o_bridging_vacuum_test'::regclass, 'ne');

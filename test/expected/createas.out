@@ -558,12 +558,6 @@ SELECT * FROM o_test_mv_select;
 (2 rows)
 
 DROP MATERIALIZED VIEW o_test_mv_select;
-SELECT orioledb_rewind_sync();
- orioledb_rewind_sync 
-----------------------
- 
-(1 row)
-
 DROP EXTENSION orioledb CASCADE;
 NOTICE:  drop cascades to 10 other objects
 DETAIL:  drop cascades to table o_test_create_as
