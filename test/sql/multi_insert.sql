@@ -181,7 +181,7 @@ SELECT id, length(a), length(b), length(c)
 SELECT orioledb_tbl_check('t_toast_multi'::regclass);
 
 -- L) Mixed TOAST value sizes in one COPY: the sub-batch packer greedily
--- accumulates up to O_TOAST_MULTI_INSERT_CHUNK_CAP (128) chunks per
+-- accumulates up to O_TOAST_MULTI_MAX_CHUNKS (128) chunks per
 -- sub-batch and cuts at the boundary.  Alternating small and larger
 -- bodies exercises uneven packing.
 CREATE TABLE t_toast_mix (
@@ -236,7 +236,7 @@ SELECT id, length(body) FROM t_toast_unsorted
 SELECT orioledb_tbl_check('t_toast_unsorted'::regclass);
 
 -- O) debug_disable_multi_insert = 'toast' parity: the batched
--- tts_orioledb_multi_insert_toast_values path must produce identical
+-- o_toast_multi_insert_values path must produce identical
 -- rows to the per-slot o_toast_insert_values fallback.
 CREATE TABLE t_toast_par_a (
     id integer PRIMARY KEY,
@@ -260,7 +260,7 @@ SELECT orioledb_tbl_check('t_toast_par_a'::regclass);
 SELECT orioledb_tbl_check('t_toast_par_b'::regclass);
 
 -- P) CTID-PK + TOAST: primaryIsCtid = true, bridging = false, so
--- tts_orioledb_multi_insert_toast_values computes ctid_off = 1.
+-- o_toast_multi_insert_values computes ctid_off = 1.
 CREATE TABLE t_toast_ctid (
     val int,
     body text GENERATED ALWAYS AS (generate_string(val, 6000)) STORED
