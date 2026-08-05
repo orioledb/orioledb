@@ -729,7 +729,8 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		o_verify_dir_exists_or_create(db_prefix, NULL, NULL);
 		pfree(db_prefix);
 		o_insert_shared_root_placeholder(table_index->oids.datoid,
-										 table_index->oids.relnode);
+										 table_index->oids.relnode,
+										 table_index->oids.spcoid);
 	}
 
 	/*
