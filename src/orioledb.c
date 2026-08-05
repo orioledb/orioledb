@@ -2041,6 +2041,7 @@ orioledb_error_cleanup_hook(void)
 		s3_headers_error_cleanup();
 	in_nontransactional_truncate = false;
 	reset_saving_inval_messages();
+	reset_filling_descrs();
 }
 
 static void

@@ -120,6 +120,19 @@ struct OIndexDescr
 	int			refcnt;
 	bool		valid;
 
+	/*
+	 * Set while get_index_descr() is (re)filling this cache entry.  Between
+	 * HASH_ENTER and o_index_fill_descr() the entry is not yet initialized (a
+	 * fresh dynahash slot still holds a previously-freed descriptor's stale
+	 * pointers), and o_indices_get_extended() can run
+	 * AcceptInvalidationMessages -> o_invalidate_descrs() reentrantly.
+	 * o_invalidate_descrs_internal() skips entries with this flag so it never
+	 * frees a half-built descriptor (which would FreeTupleDesc() a stale
+	 * leafTupdesc and corrupt/double-free the shared descrCxt chunk).
+	 * Cleared by reset_filling_descrs() on error.
+	 */
+	bool		fill_in_progress;
+
 	BTreeDescr	desc;
 
 	/* Name of the index */
@@ -300,6 +313,8 @@ struct OTableDescr
 	/* number of unique trees */
 	int			nUniqueIndices;
 	bool		noInvalidation;
+	/* see OIndexDescr.fill_in_progress -- same guard for the table entry */
+	bool		fill_in_progress;
 };
 
 typedef struct
@@ -393,6 +408,7 @@ extern void o_invalidate_comparator_callback(UndoLogType undoType, UndoLocation 
 											 OXid oxid, OUndoCallbackStage stage,
 											 bool changeCountsValid);
 extern void reset_saving_inval_messages(void);
+extern void reset_filling_descrs(void);
 
 extern void ResourceOwnerRememberOTableDescr(ResourceOwner owner, OTableDescr *descr);
 extern void ResourceOwnerForgetOTableDescr(ResourceOwner owner, OTableDescr *descr);
