@@ -151,6 +151,7 @@ extern bool o_toast_insert(OTableDescr *descr,
 extern void o_toast_multi_insert_values(Relation rel, OTableDescr *descr,
 										TupleTableSlot **slots, int nslots,
 										OXid oxid, CommitSeqNo csn);
+extern void o_toast_emit_slot_wal(OTableDescr *descr, TupleTableSlot *slot);
 extern void o_toast_sort_add(OTableDescr *descr,
 							 OTuple pk, uint16 attn,
 							 Pointer data, Size data_size,
