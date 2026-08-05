@@ -59,7 +59,6 @@ select round(pg_database_size('oriole_database'), -6);
 
 \c postgres
 DROP DATABASE oriole_database;
-SELECT orioledb_rewind_sync();
 DROP TABLESPACE dbsize_tblspace;
 DROP EXTENSION orioledb CASCADE;
 
@@ -105,6 +104,5 @@ select round(pg_database_size('mixed_database'), -6);
 \c postgres
 
 DROP DATABASE mixed_database;
-SELECT orioledb_rewind_sync();
 DROP TABLESPACE dbsize_tblspace;
 DROP EXTENSION orioledb CASCADE;
