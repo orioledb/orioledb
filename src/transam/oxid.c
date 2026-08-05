@@ -697,11 +697,30 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 	writeInProgressXmin = pg_atomic_read_u64(&xid_meta->writeInProgressXmin);
 	if (oxid >= writeInProgressXmin)
 	{
+		/*
+		 * Mark the page dirty BEFORE publishing the new csn with the CAS
+		 * below, not after.  write_xidsmap() drains this slot into o_buffers
+		 * and decides whether to write the page dirty or clean by
+		 * test-and-clearing the page dirty bit, then advances writtenXmin
+		 * past the slot.  If we set the dirty bit only after a successful
+		 * CAS, a concurrent write_xidsmap() can slip in between the CAS and
+		 * mark_xid_buffer_dirty(): it drains our freshly written csn but sees
+		 * the page as clean (our bit is not set yet), writes it to o_buffers
+		 * clean, and advances writtenXmin past oxid -- so our subsequent
+		 * mark_xid_buffer_dirty() lands on a page that is never flushed
+		 * again, and a later eviction can drop the clean copy, leaving the
+		 * stale (e.g. COMMITTING) value on disk permanently.  Readers of a
+		 * tuple modified by oxid then spin forever in oxid_get_csn() on a
+		 * committing bit that never clears (observed as a checkpoint-race
+		 * hang: FOR KEY SHARE / FK check on a just-committed row).  Setting
+		 * the dirty bit first closes the window: any flush that can observe
+		 * the new csn also observes the dirty bit.
+		 */
+		mark_xid_buffer_dirty(oxid);
 		if (pg_atomic_compare_exchange_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn,
 										   &oldCsn, csn))
 		{
 			Assert(oldCsn != COMMITSEQNO_FROZEN);
-			mark_xid_buffer_dirty(oxid);
 			return;
 		}
 
@@ -742,11 +761,18 @@ set_oxid_xlog_ptr_internal(OXid oxid, XLogRecPtr ptr)
 	writeInProgressXmin = pg_atomic_read_u64(&xid_meta->writeInProgressXmin);
 	if (oxid >= writeInProgressXmin)
 	{
+		/*
+		 * Mark the page dirty before the CAS, for the same reason as in
+		 * set_oxid_csn(): otherwise a concurrent write_xidsmap() can drain
+		 * the new commitPtr while seeing the page clean and advance
+		 * writtenXmin past oxid, stranding the update on a never-reflushed
+		 * page.
+		 */
+		mark_xid_buffer_dirty(oxid);
 		if (pg_atomic_compare_exchange_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr,
 										   &oldPtr, ptr))
 		{
 			Assert(oldPtr != FirstNormalUnloggedLSN);
-			mark_xid_buffer_dirty(oxid);
 			return;
 		}
 
