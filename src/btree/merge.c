@@ -762,6 +762,8 @@ merge_pages(BTreeDescr *desc, OInMemoryBlkno left_blkno,
 
 	left_header->flags = left_header->flags | right_header->flags;
 
+	/* TEMP churn diagnostic: right page merged into the left page in place */
+	o_page_desc_log_action(left_blkno, OPA_MERGE);
 	btree_page_reorg(desc, left, items, i, rightHikeySize, rightHikey);
 
 	o_btree_page_calculate_statistics(desc, left);

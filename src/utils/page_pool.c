@@ -319,6 +319,8 @@ o_ppool_free_page(PagePool *pool, OInMemoryBlkno blkno, bool haveLock)
 	if (!haveLock)
 		lock_page(blkno);
 	page_block_reads(blkno);
+	/* TEMP churn diagnostic: this buffer is being freed/evicted */
+	o_page_desc_log_action(blkno, OPA_EVICT);
 	O_PAGE_CHANGE_COUNT_INC(p);
 	ORelOidsSetInvalid(page_desc->oids);
 	page_desc->oids.spcoid = InvalidOid;

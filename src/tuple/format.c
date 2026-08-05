@@ -98,6 +98,14 @@ o_tuple_reader_report_oob(OTupleReaderState *state, uint32 off)
 			 state->hasnulls ? 1 : 0, hdr->natts, hdr->len,
 			 state->desc ? state->desc->natts : -1, hex);
 
+	/*
+	 * TEMP churn diagnostic: if a FETCH read set the page context, dump the
+	 * copied vs live header and the page action ring to see what rewrote the
+	 * page under the lock-free reader.
+	 */
+	if (OInMemoryBlknoIsValid(o_torn_dump_blkno))
+		o_dump_torn_page("iter-fetch", o_torn_dump_blkno, o_torn_dump_img);
+
 	elog(ERROR, "OTUPLE_ATTR_OOB: attribute walk ran off tuple (attnum=%u off=%u len=%u)",
 		 state->attnum, off, state->len);
 }

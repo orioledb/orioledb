@@ -1776,6 +1776,9 @@ load_page(OBTreeFindPageContext *context)
 	page_desc->oids = desc->oids;
 	page_desc->oids.spcoid = desc->oids.spcoid;
 
+	/* TEMP churn diagnostic: page (re)loaded into this buffer from disk */
+	o_page_desc_log_action(blkno, OPA_LOAD);
+
 	Assert(O_PAGE_IS(page, LEAF) ||
 		   (PAGE_GET_N_ONDISK(page) == BTREE_PAGE_ITEMS_COUNT(page)));
 
