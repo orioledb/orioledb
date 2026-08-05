@@ -31,6 +31,7 @@
 #include "utils/ucm.h"
 
 #include "access/transam.h"
+#include "common/hashfn.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "storage/proc.h"
@@ -50,6 +51,16 @@ typedef struct
 {
 	OInMemoryBlkno blkno;
 	uint64		state;
+#ifdef CHECK_PAGE_STRUCT
+	/*
+	 * Checksum of the page content (everything except the OrioleDBPageHeader)
+	 * and the header's pageChangeCount, both captured when the page was
+	 * locked.  On unlock we verify that if the content checksum changed, then
+	 * either pageChangeCount or the state change-count bits changed too.
+	 */
+	uint32		lockContentChecksum;
+	uint32		lockPageChangeCount;
+#endif
 } MyLockedPage;
 
 static MyLockedPage myLockedPages[MAX_PAGES_PER_PROCESS];
@@ -202,6 +213,19 @@ static void o_check_btree_page_statistics(BTreeDescr *desc, Pointer p);
 
 #ifdef CHECK_PAGE_STRUCT
 static void o_check_page_struct(BTreeDescr *desc, Page p);
+
+/*
+ * Checksum of the page content excluding the OrioleDBPageHeader (state,
+ * pageChangeCount, checkpointNum).  Locking/unlocking only touches the header,
+ * so this is stable across a lock/unlock cycle unless the page content was
+ * actually modified.
+ */
+static inline uint32
+o_page_content_checksum(Page p)
+{
+	return hash_bytes((const unsigned char *) p + O_PAGE_HEADER_SIZE,
+					  ORIOLEDB_BLCKSZ - O_PAGE_HEADER_SIZE);
+}
 #endif
 
 Size
@@ -237,7 +261,18 @@ my_locked_page_add(OInMemoryBlkno blkno, uint64 state)
 
 	Assert(pg_atomic_read_u64(&((OrioleDBPageHeader *) O_GET_IN_MEMORY_PAGE(blkno))->state) & PAGE_STATE_LOCKED_FLAG);
 	myLockedPages[numberOfMyLockedPages].blkno = blkno;
-	myLockedPages[numberOfMyLockedPages++].state = state;
+	myLockedPages[numberOfMyLockedPages].state = state;
+#ifdef CHECK_PAGE_STRUCT
+	{
+		Page		p = O_GET_IN_MEMORY_PAGE(blkno);
+
+		myLockedPages[numberOfMyLockedPages].lockContentChecksum =
+			o_page_content_checksum(p);
+		myLockedPages[numberOfMyLockedPages].lockPageChangeCount =
+			O_PAGE_HEADER(p)->pageChangeCount;
+	}
+#endif
+	numberOfMyLockedPages++;
 }
 
 static uint64
@@ -980,6 +1015,35 @@ unlock_check_page(OInMemoryBlkno blkno)
 #ifdef CHECK_PAGE_STRUCT
 	if (O_GET_IN_MEMORY_PAGEDESC(blkno)->type != oIndexInvalid)
 		o_check_page_struct(NULL, p);
+
+	{
+		int			idx = get_my_locked_page_index(blkno);
+
+		/*
+		 * If the page content (everything except the OrioleDBPageHeader)
+		 * changed while we held the lock, then the modification must be
+		 * observable to concurrent readers through a change count.  That means
+		 * one of:
+		 *   - OrioleDBPageHeader.pageChangeCount was bumped
+		 *     (O_PAGE_CHANGE_COUNT_INC, e.g. eviction/split), or
+		 *   - the state change-count bits (PAGE_STATE_CHANGE_COUNT_MASK) were
+		 *     already bumped, or
+		 *   - reads are blocked on this page (PAGE_STATE_NO_READ_FLAG): the
+		 *     state change-count bits are bumped by unlock_page_internal() right
+		 *     after this check, so this modification is still covered.
+		 * Otherwise a reader relying on the change count could miss the change.
+		 */
+		if (idx >= 0 &&
+			o_page_content_checksum(p) != myLockedPages[idx].lockContentChecksum)
+		{
+			uint64		curState = pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state));
+
+			Assert(O_PAGE_HEADER(p)->pageChangeCount != myLockedPages[idx].lockPageChangeCount ||
+				   (curState & PAGE_STATE_CHANGE_COUNT_MASK) !=
+				   (myLockedPages[idx].state & PAGE_STATE_CHANGE_COUNT_MASK) ||
+				   O_PAGE_STATE_READ_IS_BLOCKED(curState));
+		}
+	}
 #else
 	if (O_GET_IN_MEMORY_PAGEDESC(blkno)->type != oIndexInvalid)
 	{
