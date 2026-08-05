@@ -1536,11 +1536,11 @@ advance_oxids(OXid new_xid)
 		xmax = Min(new_xid + 1, pg_atomic_read_u64(&xid_meta->writtenXmin) + xid_circular_buffer_size);
 		for (; xid < xmax; xid++)
 		{
+			mark_xid_buffer_dirty(xid);
 			pg_atomic_write_u64(&xidBuffer[xid % xid_circular_buffer_size].csn,
 								COMMITSEQNO_INPROGRESS);
 			pg_atomic_write_u64(&xidBuffer[xid % xid_circular_buffer_size].commitPtr,
 								InvalidXLogRecPtr);
-			mark_xid_buffer_dirty(xid);
 		}
 		pg_atomic_write_u64(&xid_meta->nextXid, xmax);
 	}
@@ -1600,6 +1600,7 @@ get_current_oxid(void)
 		vxidElem->vxid.localTransactionId = MyProc->LXID;
 
 		Assert(pg_atomic_read_u64(&xidBuffer[newOxid % xid_circular_buffer_size].csn) == COMMITSEQNO_FROZEN);
+		mark_xid_buffer_dirty(newOxid);
 		pg_atomic_write_u64(&xidBuffer[newOxid % xid_circular_buffer_size].csn,
 							COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
 													 nestingLevel,
@@ -1608,7 +1609,6 @@ get_current_oxid(void)
 							XLOG_PTR_MAKE_SPECIAL(MYPROCNUMBER,
 												  nestingLevel,
 												  COMMITSEQNO_STATUS_IN_PROGRESS));
-		mark_xid_buffer_dirty(newOxid);
 		curOxid = newOxid;
 
 		/* Check if an autonomous transaction is in progress */
