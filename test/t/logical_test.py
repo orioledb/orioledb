@@ -2733,3 +2733,64 @@ COMMIT\n""")
 				self.assertListEqual(
 				    subscriber.execute('SELECT a FROM tab1 ORDER BY a'),
 				    [(2, )])
+
+	def test_logical_subscription_toast_multi_insert(self):
+		"""COPY of multiple rows with TOAST values via multi-insert.
+
+		Exercises per-slot TOAST WAL ordering: each row's TOAST chunks
+		must precede its PK record so that ReorderBufferToastAppendChunk
+		sees sequential chunk_seq per chunk_id.  Grouped WAL (all PK
+		records then all TOAST records) causes chunk_id collisions when
+		multiple rows toast the same attribute.
+		"""
+		with self.node as publisher:
+			publisher.start()
+
+			subscriber = self.getSubsriber()
+
+			with subscriber.start() as subscriber:
+				gen_string = """
+					CREATE OR REPLACE FUNCTION generate_string(
+						seed integer, length integer
+					) RETURNS text AS $$
+						SELECT substr(string_agg(
+							substr(encode(sha256(
+								seed::text::bytea || '_' || i::text::bytea
+							), 'hex'), 1, 21),
+						''), 1, length)
+						FROM generate_series(1, (length + 20) / 21) i;
+					$$ LANGUAGE SQL IMMUTABLE;
+				"""
+				create_sql = """
+					CREATE EXTENSION IF NOT EXISTS orioledb;
+					CREATE TABLE o_toast_multi (
+						id integer PRIMARY KEY,
+						body text
+					) USING orioledb;
+				"""
+				publisher.safe_psql(gen_string + create_sql)
+				subscriber.safe_psql(create_sql)
+
+				pub = publisher.publish('test_pub', tables=['o_toast_multi'])
+				sub = subscriber.subscribe(pub, 'test_sub')
+				wait_ready(subscriber)
+
+				publisher.safe_psql("""
+					COPY (
+						SELECT i, generate_string(i, 10000)
+						FROM generate_series(1, 5) i
+					) TO '/tmp/toast_multi.csv';
+					COPY o_toast_multi FROM '/tmp/toast_multi.csv';
+				""")
+
+				expected = publisher.execute(
+				    'SELECT id, length(body) FROM o_toast_multi ORDER BY id')
+
+				sub.catchup()
+				subscriber.poll_query_until(
+				    "SELECT orioledb_recovery_synchronized();", expected=True)
+
+				self.assertListEqual(
+				    subscriber.execute(
+				        'SELECT id, length(body) FROM o_toast_multi ORDER BY id'
+				    ), expected)
