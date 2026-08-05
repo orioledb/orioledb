@@ -1901,6 +1901,52 @@ page_contains_end(BTreeIterator *it, Page p,
 }
 
 /*
+ * TEMP churn diagnostic + recovery for the FETCH-mode range-scan early
+ * termination (wrong short result: e.g. "select array_agg(ten) from (select
+ * ten from tenk1 where unique1 < 15 order by unique1)" returning a single row
+ * under stream-regress).  Before btree_iterator_check_load_next_page() decides
+ * the scan is done -- IS_LAST_PAGE() (reads the header RIGHTMOST/LEFTMOST flag)
+ * or page_contains_end() (reads the hikey) -- those reads come from the FETCH
+ * partial page image.  partial_load_hikeys_chunk() early-returns once the
+ * hikeys chunk is loaded and never re-checks the page change count, so after a
+ * concurrent split / eviction / checkpoint the image can be stale or torn and
+ * the terminator wrongly concludes there is nothing left to read.
+ *
+ * Force a change-count-validated reload of the header+hikeys region: clear the
+ * loaded flag so partial_load_hikeys_chunk() actually re-copies and runs its
+ * PAGE_STATE_CHANGE_COUNT check.  If the backing page changed under us, log it
+ * and tell the caller to re-find instead of ending the scan on stale data.
+ * No-op in IMAGE mode (the image is a full consistent copy).
+ */
+static bool
+iter_term_page_stale(BTreeIterator *it)
+{
+	PartialPageState *partial = &it->context.partial;
+
+	if (!partial->isPartial)
+		return false;
+
+	partial->hikeysChunkIsLoaded = false;
+	if (!partial_load_hikeys_chunk(partial, it->context.img))
+	{
+		static int	stale_cnt = 0;
+		BTreeDescr *desc = it->context.desc;
+		OInMemoryBlkno blkno = it->context.items[it->context.index].blkno;
+
+		if (stale_cnt++ < 200)
+			elog(WARNING,
+				 "ITER_EARLY_TERM_STALE dir=%s tree=[%u/%u/%u] type=%d blkno=%u "
+				 "-- FETCH page changed under us at scan termination; re-finding "
+				 "instead of ending the scan",
+				 IT_IS_FORWARD(it) ? "fwd" : "bwd",
+				 desc->oids.datoid, desc->oids.reloid, desc->oids.relnode,
+				 (int) desc->type, blkno);
+		return true;
+	}
+	return false;
+}
+
+/*
  * Check and load the next tree page if needed.  Works with both normal and undo
  * pages.  Return true on success.  False means there is nothing more to read.
  */
@@ -1920,6 +1966,19 @@ btree_iterator_check_load_next_page(BTreeIterator *it, BtreeIterationEnd *end)
 	{
 		bool		step_result;
 		BTreePageHeader *header;
+
+		/*
+		 * TEMP: never decide the scan is finished on a stale FETCH image.
+		 * The IS_LAST_PAGE() and page_contains_end() checks below read the
+		 * page header flags and hikey; if the backing page changed under us,
+		 * re-find and re-evaluate rather than ending the scan early (see
+		 * helper).
+		 */
+		if (BTREE_PAGE_FIND_IS(context, FETCH) && iter_term_page_stale(it))
+		{
+			iterator_refind_partial_leaf(it);
+			continue;
+		}
 
 		if (IS_LAST_PAGE(img, it))
 			return false;
