@@ -191,7 +191,7 @@ def assert_consistent(conn, label):
     (check_ok,) = execute(
         conn, f"SELECT orioledb_tbl_check('{TABLE}'::regclass)")[0]
     (verify_ok,) = execute(
-        conn, f"SELECT verify_orioledb('{TABLE}'::regclass)")[0]
+        conn, f"SELECT count(*) = 0 FROM verify_orioledb('{TABLE}'::regclass, false)")[0]
 
     check_consistent = (n_pk == n_sk) and bool(check_ok)
     verify_consistent = (n_pk == n_sk) and bool(verify_ok)
