@@ -60,6 +60,7 @@ typedef struct
 	 */
 	uint32		lockContentChecksum;
 	uint32		lockPageChangeCount;
+	char		lockImage[ORIOLEDB_BLCKSZ];	/* TEMP diag: page image at lock */
 #endif
 } MyLockedPage;
 
@@ -270,6 +271,7 @@ my_locked_page_add(OInMemoryBlkno blkno, uint64 state)
 			o_page_content_checksum(p);
 		myLockedPages[numberOfMyLockedPages].lockPageChangeCount =
 			O_PAGE_HEADER(p)->pageChangeCount;
+		memcpy(myLockedPages[numberOfMyLockedPages].lockImage, p, ORIOLEDB_BLCKSZ);
 	}
 #endif
 	numberOfMyLockedPages++;
@@ -949,6 +951,39 @@ page_block_reads(OInMemoryBlkno blkno)
 	if (myLockedPages[i].state & PAGE_STATE_NO_READ_FLAG)
 		return;
 
+#ifdef CHECK_PAGE_STRUCT
+	/*
+	 * Reads must be blocked BEFORE the page is modified: otherwise a lockless
+	 * reader could copy a half-modified image without the change count telling
+	 * it to retry.  So at the first page_block_reads() the content must still
+	 * equal the image captured at lock time.
+	 */
+	if (o_page_content_checksum(p) != myLockedPages[i].lockContentChecksum)
+	{
+		char	   *cur = (char *) p;
+		char	   *old = myLockedPages[i].lockImage;
+		int			lo = -1,
+					hi = -1,
+					j,
+					ndiff = 0;
+
+		for (j = O_PAGE_HEADER_SIZE; j < ORIOLEDB_BLCKSZ; j++)
+			if (cur[j] != old[j])
+			{
+				if (lo < 0)
+					lo = j;
+				hi = j;
+				ndiff++;
+			}
+		elog(WARNING, "CHKPGBLK blkno=%u leaf=%d level=%d diff[%d..%d] ndiff=%d "
+			 "(modified before page_block_reads)",
+			 blkno, O_PAGE_IS(p, LEAF) ? 1 : 0, PAGE_GET_LEVEL(p), lo, hi, ndiff);
+	}
+	/* Re-baseline: modifications after this point are announced to readers. */
+	myLockedPages[i].lockContentChecksum = o_page_content_checksum(p);
+	memcpy(myLockedPages[i].lockImage, p, ORIOLEDB_BLCKSZ);
+#endif
+
 	state = pg_atomic_fetch_or_u64(&(O_PAGE_HEADER(p)->state), PAGE_STATE_NO_READ_FLAG);
 	Assert((state & PAGE_STATE_LOCKED_FLAG));
 	myLockedPages[i].state = state | PAGE_STATE_NO_READ_FLAG;
@@ -1037,11 +1072,41 @@ unlock_check_page(OInMemoryBlkno blkno)
 			o_page_content_checksum(p) != myLockedPages[idx].lockContentChecksum)
 		{
 			uint64		curState = pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state));
+			bool		covered =
+				(O_PAGE_HEADER(p)->pageChangeCount != myLockedPages[idx].lockPageChangeCount ||
+				 (curState & PAGE_STATE_CHANGE_COUNT_MASK) !=
+				 (myLockedPages[idx].state & PAGE_STATE_CHANGE_COUNT_MASK) ||
+				 O_PAGE_STATE_READ_IS_BLOCKED(curState));
 
-			Assert(O_PAGE_HEADER(p)->pageChangeCount != myLockedPages[idx].lockPageChangeCount ||
-				   (curState & PAGE_STATE_CHANGE_COUNT_MASK) !=
-				   (myLockedPages[idx].state & PAGE_STATE_CHANGE_COUNT_MASK) ||
-				   O_PAGE_STATE_READ_IS_BLOCKED(curState));
+			if (!covered)
+			{
+				/* TEMP diag (CHKPGDIFF): report differing byte range instead of asserting */
+				char	   *cur = (char *) p;
+				char	   *old = myLockedPages[idx].lockImage;
+				int			lo = -1,
+							hi = -1,
+							i,
+							ndiff = 0;
+				BTreePageHeader *h = (BTreePageHeader *) p;
+				BTreePageHeader *oh = (BTreePageHeader *) old;
+
+				for (i = O_PAGE_HEADER_SIZE; i < ORIOLEDB_BLCKSZ; i++)
+					if (cur[i] != old[i])
+					{
+						if (lo < 0)
+							lo = i;
+						hi = i;
+						ndiff++;
+					}
+				elog(WARNING, "CHKPGDIFF blkno=%u leaf=%d level=%d diff[%d..%d] ndiff=%d "
+					 "dataSize %u->%u chunks %u->%u itemsCount %u->%u pcc %u->%u",
+					 blkno, O_PAGE_IS(p, LEAF) ? 1 : 0, PAGE_GET_LEVEL(p),
+					 lo, hi, ndiff,
+					 oh->dataSize, h->dataSize,
+					 oh->chunksCount, h->chunksCount,
+					 (unsigned) BTREE_PAGE_ITEMS_COUNT(old), (unsigned) BTREE_PAGE_ITEMS_COUNT(p),
+					 myLockedPages[idx].lockPageChangeCount, O_PAGE_HEADER(p)->pageChangeCount);
+			}
 		}
 	}
 #else
