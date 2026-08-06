@@ -81,7 +81,11 @@ typedef struct
 	char		op;				/* 'I' init, 'r' reload, 'X' free, 'F'
 								 * finalize */
 	void	   *shared;
+	const void *owner;			/* BTreeDescr* for 'X', SeqBufDescPrivate* for
+								 * I/r/F -- identifies which descr slot / handle
+								 * drove the op, to spot a stale nextChkp.shared */
 	Oid			datoid;
+	Oid			reloid;
 	Oid			relnode;
 	uint32		num;
 	int			type;
@@ -91,19 +95,25 @@ typedef struct
 	OInMemoryBlkno p1;
 }			SeqBufOpRec;
 
-#define SEQBUF_OP_RING_SIZE 1024
+/*
+ * Large enough that the earlier free ('X') of a shared struct does not scroll
+ * off before its (buggy) re-finalize -- the 1024 global window did.
+ */
+#define SEQBUF_OP_RING_SIZE 65536
 static SeqBufOpRec seqbuf_op_ring[SEQBUF_OP_RING_SIZE];
 static uint32 seqbuf_op_ring_pos = 0;
 
 void
-seq_buf_op_record(char op, SeqBufDescShared *shared)
+seq_buf_op_record(char op, SeqBufDescShared *shared, const void *owner)
 {
 	SeqBufOpRec *r = &seqbuf_op_ring[seqbuf_op_ring_pos % SEQBUF_OP_RING_SIZE];
 
 	seqbuf_op_ring_pos++;
 	r->op = op;
 	r->shared = shared;
+	r->owner = owner;
 	r->datoid = shared->tag.key.oids.datoid;
+	r->reloid = shared->tag.key.oids.reloid;
 	r->relnode = shared->tag.key.oids.relnode;
 	r->num = shared->tag.num;
 	r->type = shared->tag.type;
@@ -121,8 +131,9 @@ seq_buf_op_dump(SeqBufDescShared *shared, const char *why)
 		? seqbuf_op_ring_pos - SEQBUF_OP_RING_SIZE : 0;
 
 	elog(LOG,
-		 "SEQBUF_OP_DUMP (%s) shared=%p tag=[%u/%u num=%u type=%d] curPg=%d loc=%d pages=[%u,%u] -- recent ops for this shared:",
+		 "SEQBUF_OP_DUMP (%s) shared=%p tag=[dat=%u rel=%u relnode=%u num=%u type=%d] curPg=%d loc=%d pages=[%u,%u] -- recent ops for this shared:",
 		 why, (void *) shared, shared->tag.key.oids.datoid,
+		 shared->tag.key.oids.reloid,
 		 shared->tag.key.oids.relnode, shared->tag.num, shared->tag.type,
 		 shared->curPageNum, shared->location,
 		 shared->pages[0], shared->pages[1]);
@@ -132,8 +143,8 @@ seq_buf_op_dump(SeqBufDescShared *shared, const char *why)
 
 		if (r->shared == shared)
 			elog(LOG,
-				 "  seqbuf op #%u %c tag=[%u/%u num=%u type=%d] curPg=%d loc=%d pages=[%u,%u]",
-				 i, r->op, r->datoid, r->relnode, r->num, r->type,
+				 "  seqbuf op #%u %c owner=%p tag=[dat=%u rel=%u relnode=%u num=%u type=%d] curPg=%d loc=%d pages=[%u,%u]",
+				 i, r->op, r->owner, r->datoid, r->reloid, r->relnode, r->num, r->type,
 				 r->curPageNum, r->location, r->p0, r->p1);
 	}
 }
@@ -200,7 +211,7 @@ init_seq_buf(SeqBufDescPrivate *seqBufPrivate, SeqBufDescShared *shared,
 		seqBufPrivate->tag = shared->tag;
 	}
 
-	seq_buf_op_record(init_shared ? 'I' : 'r', shared);
+	seq_buf_op_record(init_shared ? 'I' : 'r', shared, seqBufPrivate);
 
 	return ok;
 }
@@ -567,7 +578,7 @@ seq_buf_finalize(SeqBufDescPrivate *seqBufPrivate)
 	SeqBufDescShared *shared = seqBufPrivate->shared;
 	off_t		result;
 
-	seq_buf_op_record('F', shared);
+	seq_buf_op_record('F', shared, seqBufPrivate);
 
 	SpinLockAcquire(&shared->lock);
 	seq_buf_wait_prev_page(shared);

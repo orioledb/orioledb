@@ -5491,7 +5491,7 @@ static inline void
 free_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared)
 {
 	/* TEMP: record the free in the seq_buf op ring before invalidating pages */
-	seq_buf_op_record('X', shared);
+	seq_buf_op_record('X', shared, desc);
 	FREE_PAGE_IF_VALID(desc->ppool, shared->pages[0]);
 	FREE_PAGE_IF_VALID(desc->ppool, shared->pages[1]);
 }
