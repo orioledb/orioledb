@@ -97,7 +97,8 @@ extern bool seq_buf_remove_file(SeqBufTag *tag);
 extern void seq_buf_close_file(SeqBufDescPrivate *seqBufPrivate);
 
 /* TEMP churn diagnostic: seq_buf lifecycle op ring (see seq_buf.c) */
-extern void seq_buf_op_record(char op, SeqBufDescShared *shared);
+extern void seq_buf_op_record(char op, SeqBufDescShared *shared,
+							  const void *owner);
 extern void seq_buf_op_dump(SeqBufDescShared *shared, const char *why);
 
 #endif							/* __SEQ_BUF_H__ */
