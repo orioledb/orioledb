@@ -1536,6 +1536,24 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OTableFetchCon
 
 	existed = found;
 
+	if (!found)
+	{
+		/*
+		 * A fresh HASH_ENTER slot carries a previously-freed descriptor's
+		 * stale pointers (dynahash does not zero the value part).  If the
+		 * (re)fill below errors before o_index_fill_descr() memset()s the
+		 * descriptor -- e.g. o_indices_get_extended() longjmps -- the
+		 * error-cleanup hook only clears fill_in_progress and leaves this entry
+		 * in the hash.  A later o_invalidate_descrs() would then treat those
+		 * stale tupdesc pointers as live and FreeTupleDesc() them, corrupting
+		 * memory or crashing the checkpointer on a MAXALIGN assert.  Zero the
+		 * slot now (restoring the hash key) so such a half-built entry is safe:
+		 * all freeable pointers are NULL and refcnt is 0.
+		 */
+		memset(result, 0, sizeof(*result));
+		result->oids = ixOids;
+	}
+
 	/*
 	 * The descriptor cache is keyed by (datoid, reloid, relnode) only, but
 	 * the tablespace (ORelOids.spcoid) is now part of the tree identity (file
