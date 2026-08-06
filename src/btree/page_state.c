@@ -60,6 +60,14 @@ typedef struct
 	 */
 	uint32		lockContentChecksum;
 	uint32		lockPageChangeCount;
+
+	/*
+	 * Set when the page was locked blindly by a stale (blkno, pageChangeCount)
+	 * hint and turned out not to be our B-tree page (possibly a seq_buf or
+	 * meta page, see try_lock_page_and_check()).  Its content is not under our
+	 * control, so unlock_check_page() skips all structural checks for it.
+	 */
+	bool		skipContentCheck;
 #endif
 } MyLockedPage;
 
@@ -270,6 +278,7 @@ my_locked_page_add(OInMemoryBlkno blkno, uint64 state)
 			o_page_content_checksum(p);
 		myLockedPages[numberOfMyLockedPages].lockPageChangeCount =
 			O_PAGE_HEADER(p)->pageChangeCount;
+		myLockedPages[numberOfMyLockedPages].skipContentCheck = false;
 	}
 #endif
 	numberOfMyLockedPages++;
@@ -621,6 +630,100 @@ lock_page(OInMemoryBlkno blkno)
 	 */
 	while (extraWaits-- > 0)
 		PGSemaphoreUnlock(MyProc->sem);
+}
+
+/*
+ * Like lock_page(), but for locking a page found via a cached
+ * (blkno, pageChangeCount) hint that may be stale.  The hinted in-memory
+ * block could have been evicted and reused since the hint was taken - even
+ * for a non-B-tree page such as a seq_buf or a B-tree meta page.  We
+ * therefore validate the page level and change count *while holding the
+ * lock* and, on any mismatch, release the lock and report failure instead of
+ * letting the caller operate on (or assert against) an unrelated page.
+ *
+ * Returns true with the page left locked when it still matches the expected
+ * (level, pageChangeCount); returns false with the page left unlocked
+ * otherwise.
+ */
+bool
+try_lock_page_and_check(OInMemoryBlkno blkno, uint16 level,
+						uint32 pageChangeCount)
+{
+	OPageWaiterShmemState *lockerState = &lockerStates[MYPROCNUMBER];
+	uint64		prevState;
+	int			extraWaits = 0;
+	Page		p;
+
+	/* Local pages do not need locking, but still validate the hint */
+	if (O_PAGE_IS_LOCAL(blkno))
+	{
+		p = O_GET_IN_MEMORY_PAGE(blkno);
+		return PAGE_GET_LEVEL(p) == level &&
+			O_PAGE_GET_CHANGE_COUNT(p) == pageChangeCount;
+	}
+
+	Assert(get_my_locked_page_index(blkno) < 0);
+
+	EA_LOCK_INC(blkno);
+
+	while (true)
+	{
+		prevState = lock_page_or_queue(blkno, MYPROCNUMBER);
+
+		if (!O_PAGE_STATE_IS_LOCKED(prevState))
+			break;
+
+		pgstat_report_wait_start(PG_WAIT_LWLOCK | LWTRANCHE_BUFFER_CONTENT);
+
+		for (;;)
+		{
+			PGSemaphoreLock(MyProc->sem);
+			if (lockerState->status == OPageWaitWakeUp)
+				break;
+			extraWaits++;
+		}
+
+		pgstat_report_wait_end();
+	}
+
+	my_locked_page_add(blkno, prevState | PAGE_STATE_LOCKED_FLAG);
+
+	/*
+	 * Fix the process wait semaphore's count for any absorbed wakeups.
+	 */
+	while (extraWaits-- > 0)
+		PGSemaphoreUnlock(MyProc->sem);
+
+	/*
+	 * Now that we hold the lock, verify the page is still the one the caller
+	 * expects.  A mismatch means the block was evicted and reused; bail out
+	 * without applying any B-tree page invariants to it.
+	 */
+	p = O_GET_IN_MEMORY_PAGE(blkno);
+	if (PAGE_GET_LEVEL(p) != level ||
+		O_PAGE_GET_CHANGE_COUNT(p) != pageChangeCount)
+	{
+#ifdef CHECK_PAGE_STRUCT
+
+		/*
+		 * We blindly locked a page that turned out not to be ours (possibly a
+		 * seq_buf or meta page).  Its content can change under us despite the
+		 * lock, because its real owner doesn't honor the B-tree page lock, so
+		 * rebaselining the checksum wouldn't help.  Disable the structural
+		 * checks for this locked-page entry entirely.
+		 */
+		{
+			int			idx = get_my_locked_page_index(blkno);
+
+			if (idx >= 0)
+				myLockedPages[idx].skipContentCheck = true;
+		}
+#endif
+		unlock_page(blkno);
+		return false;
+	}
+
+	return true;
 }
 
 /*
@@ -1025,11 +1128,20 @@ unlock_check_page(OInMemoryBlkno blkno)
 	Page		p = O_GET_IN_MEMORY_PAGE(blkno);
 
 #ifdef CHECK_PAGE_STRUCT
-	if (O_GET_IN_MEMORY_PAGEDESC(blkno)->type != oIndexInvalid)
-		o_check_page_struct(NULL, p);
-
 	{
 		int			idx = get_my_locked_page_index(blkno);
+
+		/*
+		 * The page may have been locked blindly by a stale hint and turned out
+		 * not to be a B-tree page of ours (see try_lock_page_and_check()).
+		 * Skip all structural checks in that case: neither the page structure
+		 * nor its content is under our control.
+		 */
+		if (idx >= 0 && myLockedPages[idx].skipContentCheck)
+			return;
+
+		if (O_GET_IN_MEMORY_PAGEDESC(blkno)->type != oIndexInvalid)
+			o_check_page_struct(NULL, p);
 
 		/*
 		 * If the page content (everything except the OrioleDBPageHeader)
