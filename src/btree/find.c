@@ -1324,7 +1324,17 @@ retry:
 		}
 		else
 		{
-			lock_page(intCxt.blkno);
+			/*
+			 * Lock the page by the cached (blkno, pageChangeCount) hint.  The
+			 * hint may be stale: the block could have been evicted and reused
+			 * meanwhile, even for a non-B-tree page (seq_buf or meta page).
+			 * try_lock_page_and_check() validates level/pageChangeCount under
+			 * the lock and reports failure (leaving the page unlocked) rather
+			 * than letting us operate on an unrelated page.
+			 */
+			if (!try_lock_page_and_check(intCxt.blkno, level,
+										 intCxt.pageChangeCount))
+				return find_page(context, key, keyType, level);
 		}
 		p = O_GET_IN_MEMORY_PAGE(intCxt.blkno);
 		intCxt.haveLock = true;
