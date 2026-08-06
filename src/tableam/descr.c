@@ -660,6 +660,38 @@ o_tree_init_free_extents(BTreeDescr *desc)
 	return false;
 }
 
+/*
+ * TEMP DESCRCORRUPT instrumentation.  OrioleDB tupdescs are built by
+ * o_tupdesc_load_constr(), which palloc0's the TupleConstr (num_defval == 0,
+ * num_check == 0, defval/check == NULL).  A non-zero num_defval/num_check (or a
+ * non-NULL defval/check) therefore means the constr chunk was corrupted or is
+ * dangling -- FreeTupleDesc() would then walk a garbage defval[]/check[] and
+ * pfree a misaligned adbin/ccbin pointer, aborting on the mcxt.c MAXALIGN
+ * assert.  Catch it here, with full descriptor/constr context, BEFORE the
+ * crash so the offending tree + constr address can be correlated with the
+ * DESCRALLOC/DESCRALLOCCONSTR timeline.
+ */
+static void
+descr_check_tupdesc_constr(OIndexDescr *tree, const char *which, TupleDesc td)
+{
+	TupleConstr *constr;
+
+	if (td == NULL || td->constr == NULL)
+		return;
+
+	constr = td->constr;
+	if (constr->num_defval != 0 || constr->num_check != 0 ||
+		constr->defval != NULL || constr->check != NULL)
+		elog(LOG,
+			 "DESCRCORRUPT tree=[%u/%u/%u] type=%d which=%s td=%p constr=%p "
+			 "num_defval=%d num_check=%d defval=%p check=%p missing=%p natts=%d pid=%d",
+			 tree->oids.datoid, tree->oids.reloid, tree->oids.relnode,
+			 tree->desc.type, which, (void *) td, (void *) constr,
+			 constr->num_defval, constr->num_check,
+			 (void *) constr->defval, (void *) constr->check,
+			 (void *) constr->missing, td->natts, MyProcPid);
+}
+
 static void
 index_descr_free(OIndexDescr *tree)
 {
@@ -689,16 +721,19 @@ index_descr_free(OIndexDescr *tree)
 			elog(LOG, "DESCRFREELEAF primary tree=[%u/%u/%u] leafTupdesc=%p pid=%d",
 				 tree->oids.datoid, tree->oids.reloid, tree->oids.relnode,
 				 (void *) tree->leafTupdesc, MyProcPid);
+		descr_check_tupdesc_constr(tree, "leaf", tree->leafTupdesc);
 		FreeTupleDesc(tree->leafTupdesc);
 		tree->leafTupdesc = NULL;
 	}
 	if (tree->nonLeafTupdesc)
 	{
+		descr_check_tupdesc_constr(tree, "nonLeaf", tree->nonLeafTupdesc);
 		FreeTupleDesc(tree->nonLeafTupdesc);
 		tree->nonLeafTupdesc = NULL;
 	}
 	if (tree->itupdesc)
 	{
+		descr_check_tupdesc_constr(tree, "itup", tree->itupdesc);
 		FreeTupleDesc(tree->itupdesc);
 		tree->itupdesc = NULL;
 	}

@@ -1390,6 +1390,18 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 		if (oTable)
 		{
 			o_tupdesc_load_constr(descr->leafTupdesc, oTable, descr);
+			/*
+			 * TEMP DESCRALLOCCONSTR instrumentation: log the constr chunk
+			 * address (lives in the per-descr index_mctx, unlike leafTupdesc
+			 * which lives in the shared descrCxt) so a later DESCRCORRUPT can
+			 * be classified as chunk-reuse/dangling (address recurs for a
+			 * different tree) vs buffer-overrun (address stable, contents
+			 * garbage).
+			 */
+			elog(LOG, "DESCRALLOCCONSTR primary tree=[%u/%u/%u] leafTupdesc=%p constr=%p pid=%d",
+				 oIndex->indexOids.datoid, oIndex->indexOids.reloid,
+				 oIndex->indexOids.relnode, (void *) descr->leafTupdesc,
+				 (void *) descr->leafTupdesc->constr, MyProcPid);
 			primary_init_nfields = palloc(sizeof(*primary_init_nfields));
 			*primary_init_nfields = oTable->primary_init_nfields;
 			if (free_oTable)
