@@ -452,6 +452,84 @@ lock_page(OInMemoryBlkno blkno)
 }
 
 /*
+ * Like lock_page(), but for locking a page found via a cached
+ * (blkno, pageChangeCount) hint that may be stale.  The hinted in-memory
+ * block could have been evicted and reused since the hint was taken - even
+ * for a non-B-tree page such as a seq_buf or a B-tree meta page.  We
+ * therefore validate the page level and change count *while holding the
+ * lock* and, on any mismatch, release the lock and report failure instead of
+ * letting the caller operate on (or assert against) an unrelated page.
+ *
+ * Returns true with the page left locked when it still matches the expected
+ * (level, pageChangeCount); returns false with the page left unlocked
+ * otherwise.
+ */
+bool
+try_lock_page_and_check(OInMemoryBlkno blkno, uint16 level,
+						uint32 pageChangeCount)
+{
+	OPageWaiterShmemState *lockerState = &lockerStates[MYPROCNUMBER];
+	uint64		prevState;
+	int			extraWaits = 0;
+	Page		p;
+
+	/* Local pages do not need locking, but still validate the hint */
+	if (O_PAGE_IS_LOCAL(blkno))
+	{
+		p = O_GET_IN_MEMORY_PAGE(blkno);
+		return PAGE_GET_LEVEL(p) == level &&
+			O_PAGE_GET_CHANGE_COUNT(p) == pageChangeCount;
+	}
+
+	Assert(get_my_locked_page_index(blkno) < 0);
+
+	EA_LOCK_INC(blkno);
+
+	while (true)
+	{
+		prevState = lock_page_or_queue(blkno, MYPROCNUMBER);
+
+		if (!O_PAGE_STATE_IS_LOCKED(prevState))
+			break;
+
+		pgstat_report_wait_start(PG_WAIT_LWLOCK | LWTRANCHE_BUFFER_CONTENT);
+
+		for (;;)
+		{
+			PGSemaphoreLock(MyProc->sem);
+			if (lockerState->status == OPageWaitWakeUp)
+				break;
+			extraWaits++;
+		}
+
+		pgstat_report_wait_end();
+	}
+
+	my_locked_page_add(blkno, prevState | PAGE_STATE_LOCKED_FLAG);
+
+	/*
+	 * Fix the process wait semaphore's count for any absorbed wakeups.
+	 */
+	while (extraWaits-- > 0)
+		PGSemaphoreUnlock(MyProc->sem);
+
+	/*
+	 * Now that we hold the lock, verify the page is still the one the caller
+	 * expects.  A mismatch means the block was evicted and reused; bail out
+	 * without applying any B-tree page invariants to it.
+	 */
+	p = O_GET_IN_MEMORY_PAGE(blkno);
+	if (PAGE_GET_LEVEL(p) != level ||
+		O_PAGE_GET_CHANGE_COUNT(p) != pageChangeCount)
+	{
+		unlock_page(blkno);
+		return false;
+	}
+
+	return true;
+}
+
+/*
  * Place exclusive lock on the page.  Doesn't block readers before
  * page_block_reads() is called.
  */
