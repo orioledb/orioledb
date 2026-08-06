@@ -80,7 +80,7 @@ elif [ $CHECK_TYPE = "pg_tests" ] || [ $CHECK_TYPE = "pg_tests_asan" ]; then
     # the checkpoint <-> replay/undo race (the flaky streaming-regress hang)
     # gets many more chances to trigger.  Scoped to ci_fixes so normal CI is
     # unaffected.  log_checkpoints gives a timeline if it does hang.
-    if [ "${GITHUB_REF_NAME:-}" = "ci_fixes" ]; then
+    if [ "${GITHUB_REF_NAME:-}" = "ci_fixes2" ]; then
         cat >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf <<'CONF'
 checkpoint_timeout = 30s
 max_wal_size = 96MB
@@ -126,7 +126,7 @@ CONF
         echo "primary_slot_name = 'orioledb_rep_slot'" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         echo "allow_in_place_tablespaces = true" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         # ci_fixes stress hunt: aggressive restartpoints on the standby too.
-        if [ "${GITHUB_REF_NAME:-}" = "ci_fixes" ]; then
+        if [ "${GITHUB_REF_NAME:-}" = "ci_fixes2" ]; then
             cat >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf <<'CONF'
 checkpoint_timeout = 30s
 max_wal_size = 96MB
@@ -144,7 +144,7 @@ CONF
         # create/drop database on the primary in the background so many such
         # barrier records stream to the (catchable) manual standby while the
         # regress workload runs, raising the odds of hitting the flaky hang.
-        if [ "${GITHUB_REF_NAME:-}" = "ci_fixes" ]; then
+        if [ "${GITHUB_REF_NAME:-}" = "ci_fixes2" ]; then
             (
                 i=0
                 while [ $i -lt 800 ]; do

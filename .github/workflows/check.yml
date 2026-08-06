@@ -70,7 +70,7 @@ jobs:
               ("amd64", 18, "clang"),
           ]
 
-          if ref == "ci_fixes":
+          if ref == "ci_fixes2":
               # Stress run: hunt the flaky 027_stream_regress / replication
               # regress hang.  Fan out 64 pg_tests jobs on PG18 (where the
               # hang appears -- PG18 AIO io workers), across both cpus and
@@ -81,7 +81,7 @@ jobs:
               # same churn under ASAN/UBSAN to pin down the rare memory-corruption
               # bugs (descr-invalidation MAXALIGN, iterator ordering) with a
               # first-touch alloc/free trace.  ASAN is ~2-3x slower, hence the
-              # smaller count and the 90-min timeout above.
+              # smaller count and the 90-min timeout above..
               matrix = {"include": [
                   {"cpu": cpu, "pg_version": 18, "compiler": comp,
                    "check_type": "pg_tests", "replica": r}
