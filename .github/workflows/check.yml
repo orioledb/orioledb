@@ -81,7 +81,7 @@ jobs:
               # same churn under ASAN/UBSAN to pin down the rare memory-corruption
               # bugs (descr-invalidation MAXALIGN, iterator ordering) with a
               # first-touch alloc/free trace.  ASAN is ~2-3x slower, hence the
-              # smaller count and the 90-min timeout above.
+              # smaller count and the 90-min timeout above..
               matrix = {"include": [
                   {"cpu": cpu, "pg_version": 18, "compiler": comp,
                    "check_type": "pg_tests", "replica": r}
