@@ -163,8 +163,13 @@ oIndicesFetchCallback(OTuple tuple, OXid tupOxid, OSnapshot *oSnapshot,
 	OIndexChunkKey *tupleKey = (OIndexChunkKey *) tuple.data;
 	OIndexChunkBoundKey *boundKey = (OIndexChunkBoundKey *) arg;
 
-	/* Ignore reloid because it may changes */
+	/*
+	 * reloid must match: relfilenumbers are reused, so a differing reloid on
+	 * the same (datoid, relnode) means a DIFFERENT relation took over that
+	 * relnode after a drop -- exactly the collision we must not resolve to.
+	 */
 	if (tupleKey->oids.datoid == boundKey->key.oids.datoid &&
+		tupleKey->oids.reloid == boundKey->key.oids.reloid &&
 		tupleKey->oids.relnode == boundKey->key.oids.relnode &&
 		tupleKey->oids.spcoid == boundKey->key.oids.spcoid &&
 		tupleKey->type == boundKey->key.type)
