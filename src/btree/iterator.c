@@ -1964,6 +1964,16 @@ page_contains_end(BTreeIterator *it, Page p,
 }
 
 /*
+ * REPRO SWITCH: the probe+recovery below forces a change-count-validated
+ * hikeys reload at the top of every FETCH page step, which perturbs the
+ * scan-vs-eviction timing enough to close the race window (the torn-image
+ * wrong result stopped reproducing under churn).  Default OFF so the natural
+ * bug manifests again as the stream-regress `arrays` wrong result; flip to
+ * true to re-enable detection+recovery.
+ */
+static bool iter_term_stale_recover = false;
+
+/*
  * TEMP churn diagnostic + recovery for the FETCH-mode range-scan early
  * termination (wrong short result: e.g. "select array_agg(ten) from (select
  * ten from tenk1 where unique1 < 15 order by unique1)" returning a single row
@@ -2037,7 +2047,8 @@ btree_iterator_check_load_next_page(BTreeIterator *it, BtreeIterationEnd *end)
 		 * re-find and re-evaluate rather than ending the scan early (see
 		 * helper).
 		 */
-		if (BTREE_PAGE_FIND_IS(context, FETCH) && iter_term_page_stale(it))
+		if (iter_term_stale_recover &&
+			BTREE_PAGE_FIND_IS(context, FETCH) && iter_term_page_stale(it))
 		{
 			iterator_refind_partial_leaf(it);
 			continue;
