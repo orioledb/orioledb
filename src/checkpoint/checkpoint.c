@@ -3844,11 +3844,14 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 
 			/*
 			 * Check if it not the page we expected, because it might
-			 * disappear due to concurrent eviction.
+			 * disappear due to concurrent eviction.  Root pages are never
+			 * evicted, so a change-count mismatch there is just a concurrent
+			 * modification; proceed with current content.
 			 */
 			if (O_PAGE_GET_CHANGE_COUNT(page) != message.content.downwards.pageChangeCount
-				&& blkno == message.content.downwards.blkno)	/* rootPageBlkno level
-																 * does not change */
+				&& blkno == message.content.downwards.blkno /* rootPageBlkno level
+															 * does not change */
+				&& blkno != descr->rootInfo.rootPageBlkno)
 			{
 				unlock_page(blkno);
 				message.action = WalkUpwards;
