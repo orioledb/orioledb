@@ -1899,7 +1899,8 @@ orioledb_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
 	 * under a single lwlock (see o_tbl_multi_insert).  Single-row or GUC-off
 	 * falls back to per-row.
 	 */
-	if (!orioledb_debug_disable_multi_insert && ntuples > 1)
+	if (orioledb_debug_disable_multi_insert != O_DISABLE_MULTI_INSERT_ALL &&
+		ntuples > 1)
 	{
 		o_tbl_multi_insert(descr, relation, slots, ntuples, oxid, oSnapshot.csn);
 		return;

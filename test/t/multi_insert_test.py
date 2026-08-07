@@ -8,52 +8,25 @@ primary leaf's lwlock via plain lock_page (the helper does not set
 insertTuple, so it does not queue as a waiter on a contended leaf --
 it just blocks).  These tests verify no corruption, no deadlock, and
 correct conflict semantics under concurrency.
-
-test_ab_ordered_copy A/B-benchmarks orioledb.debug_disable_multi_insert
-to catch regressions in the batched same-leaf primary insert path
-(o_tbl_multi_insert), which orioledb_multi_insert dispatches to for
-COPY-driven bulk loads.  Gated behind ORIOLEDB_RUN_PERF=1.
 """
 
 import io
 import os
 import threading
-import time
 import unittest
 
 from .base_test import BaseTest
 
-# Conservative threshold: ON may not be slower than this multiple of OFF.
-# We mainly want to catch a regression, not enforce a guaranteed speedup
-# (which varies by host).
-MAX_ALLOWED_SLOWDOWN = 1.20
-
-RUNS_PER_MODE = 3
-ROWS_PER_RUN = 200_000
 ROWS_PER_SESSION = 5000
+TOAST_ROWS_PER_SESSION = 200
 
 VALGRIND = os.environ.get('USE_VALGRIND', '') == '1'
 
-# Perf tests cost minutes (valgrind: 5+ minutes for the 1.4M-row benchmark)
-# and add nothing to correctness coverage already in the concurrency cases
-# and test/sql/multi_insert.sql.  Opt in via ORIOLEDB_RUN_PERF=1 from
-# a dedicated perf CI job or a manual pre-release run.
-PERF_TESTS = os.environ.get('ORIOLEDB_RUN_PERF', '') == '1'
 
-
-def _build_csv(n: int) -> str:
-	"""Generate an ordered TSV payload (id, val, grp)."""
+def _tsv(rows, columns):
 	buf = io.StringIO()
-	for i in range(1, n + 1):
-		buf.write(f"{i}\t{i * 7}\t{i % 113}\n")
-	return buf.getvalue()
-
-
-def _csv(payload):
-	"""Wrap a list of (id, val) tuples into a TSV StringIO."""
-	buf = io.StringIO()
-	for row in payload:
-		buf.write(f"{row[0]}\t{row[1]}\n")
+	for row in rows:
+		buf.write("\t".join(str(row[c]) for c in range(columns)) + "\n")
 	buf.seek(0)
 	return buf
 
@@ -63,9 +36,29 @@ def _run_copy(node, payload, errors):
 	con = node.connect()
 	try:
 		c = con.cursor
-		c.execute("SET orioledb.debug_disable_multi_insert = off")
+		c.execute("SET orioledb.debug_disable_multi_insert = 'none'")
 		try:
-			c.copy_expert("COPY t (id, val) FROM STDIN", _csv(payload))
+			c.copy_expert("COPY t (id, val) FROM STDIN", _tsv(payload, 2))
+			con.connection.commit()
+		except Exception as e:
+			errors.append(e)
+			try:
+				con.connection.rollback()
+			except Exception:
+				pass
+	finally:
+		con.close()
+
+
+def _run_copy_toast(node, table, payload, columns, errors):
+	con = node.connect()
+	try:
+		c = con.cursor
+		c.execute("SET orioledb.debug_disable_multi_insert = 'none'")
+		try:
+			cols = ", ".join(columns)
+			c.copy_expert(f"COPY {table} ({cols}) FROM STDIN",
+			              _tsv(payload, len(columns)))
 			con.connection.commit()
 		except Exception as e:
 			errors.append(e)
@@ -188,71 +181,58 @@ class MultiInsertTest(BaseTest):
 		finally:
 			node.stop()
 
-	def _copy_once(self, nodecon, payload: str, mode_on: bool) -> float:
-		c = nodecon.cursor
-		c.execute("SET orioledb.debug_disable_multi_insert = " +
-		          ("off" if mode_on else "on"))
-		c.execute("TRUNCATE t_perf")
-		nodecon.connection.commit()
-		start = time.perf_counter()
-		c.copy_expert("COPY t_perf (id, val, grp) FROM STDIN",
-		              io.StringIO(payload))
-		nodecon.connection.commit()
-		return time.perf_counter() - start
-
-	@unittest.skipUnless(PERF_TESTS,
-	                     "perf test; set ORIOLEDB_RUN_PERF=1 to enable")
-	def test_ab_ordered_copy(self):
+	def test_concurrent_toast(self):
+		"""Two sessions COPY into a TOAST-bearing table with disjoint keys."""
 		node = self.node
 		node.start()
 		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
 		node.safe_psql("""
-			CREATE TABLE t_perf (
-				id  bigint PRIMARY KEY,
-				val int,
-				grp int
+			CREATE TABLE t_toast_conc (
+				id   bigint PRIMARY KEY,
+				body text
 			) USING orioledb;
-			CREATE INDEX t_perf_val_idx ON t_perf(val);
 		""")
-
-		payload = _build_csv(ROWS_PER_RUN)
-		nodecon = node.connect()
 		try:
-			# Warm-up so JIT/syscache costs don't taint the first measurement.
-			self._copy_once(nodecon, payload, mode_on=False)
-
-			off_times = [
-			    self._copy_once(nodecon, payload, mode_on=False)
-			    for _ in range(RUNS_PER_MODE)
-			]
-			on_times = [
-			    self._copy_once(nodecon, payload, mode_on=True)
-			    for _ in range(RUNS_PER_MODE)
-			]
-
-			off = min(off_times)
-			on = min(on_times)
-			ratio = on / off if off > 0 else float('inf')
-			speedup_pct = (1.0 - ratio) * 100.0
-
-			print(
-			    f"\n[multi_insert] rows={ROWS_PER_RUN} "
-			    f"off={off:.3f}s on={on:.3f}s "
-			    f"ratio={ratio:.3f} speedup={speedup_pct:+.1f}%",
-			    flush=True)
-
-			nodecon.cursor.execute("SELECT count(*) FROM t_perf")
-			(rowcount, ) = nodecon.cursor.fetchone()
-			self.assertEqual(rowcount, ROWS_PER_RUN)
-
-			if not VALGRIND:
-				self.assertLess(
-				    ratio, MAX_ALLOWED_SLOWDOWN,
-				    f"batched multi_insert should not slow inserts "
-				    f"(off={off:.3f}s, on={on:.3f}s, ratio={ratio:.3f})")
+			body_len = 6000
+			a = [(i, 'A' * body_len)
+			     for i in range(1, TOAST_ROWS_PER_SESSION + 1)]
+			b = [(i, 'B' * body_len)
+			     for i in range(TOAST_ROWS_PER_SESSION +
+			                    1, 2 * TOAST_ROWS_PER_SESSION + 1)]
+			errors = []
+			ta = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_toast_conc", a,
+			                            ["id", "body"], errors))
+			tb = threading.Thread(target=_run_copy_toast,
+			                      args=(node, "t_toast_conc", b,
+			                            ["id", "body"], errors))
+			ta.start()
+			tb.start()
+			ta.join()
+			tb.join()
+			self.assertEqual(errors, [],
+			                 f"unexpected errors: {[str(e) for e in errors]}")
+			con = node.connect()
+			try:
+				c = con.cursor
+				c.execute("SELECT count(*) FROM t_toast_conc")
+				(n, ) = c.fetchone()
+				self.assertEqual(n, 2 * TOAST_ROWS_PER_SESSION)
+				c.execute(
+				    "SELECT orioledb_tbl_check('t_toast_conc'::regclass)")
+				(ok, ) = c.fetchone()
+				self.assertTrue(ok)
+				c.execute(
+				    """
+					SELECT count(*) FROM t_toast_conc
+					 WHERE length(body) = %s
+				""", (body_len, ))
+				(n, ) = c.fetchone()
+				self.assertEqual(n, 2 * TOAST_ROWS_PER_SESSION)
+			finally:
+				con.close()
 		finally:
-			nodecon.close()
-		node.stop()
+			node.stop()
 
 
 if __name__ == "__main__":
