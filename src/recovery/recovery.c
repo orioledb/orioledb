@@ -1476,7 +1476,7 @@ recovery_get_effective_replay_ptr(void)
 	XLogRecPtr	ptr,
 				finishedPtr;
 
-	if (!RecoveryInProgress() || *recovery_single_process)
+	if (*recovery_single_process)
 		return InvalidXLogRecPtr;
 
 	ptr = pg_atomic_read_u64(recovery_ptr);
