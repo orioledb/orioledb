@@ -189,10 +189,10 @@ bgwriter_main(Datum main_arg)
 				writeInProgressLocation = pg_atomic_read_u64(&undo_meta->writeInProgressLocation);
 				lastUsedLocation = pg_atomic_read_u64(&undo_meta->lastUsedLocation);
 				if (writeInProgressLocation + undo_circular_buffer_size <
-					lastUsedLocation + undo_circular_buffer_size / 20)
+					lastUsedLocation + undo_circular_buffer_size / 10)
 				{
 					UndoLocation minProcReservedLocation = pg_atomic_read_u64(&undo_meta->minProcReservedLocation);
-					UndoLocation targetLocation = lastUsedLocation - (19 * undo_circular_buffer_size) / 20;
+					UndoLocation targetLocation = lastUsedLocation - (17 * undo_circular_buffer_size) / 20;
 
 					if (targetLocation < minProcReservedLocation)
 						evict_undo_to_disk((UndoLogType) j, targetLocation,
