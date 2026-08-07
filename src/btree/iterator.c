@@ -1964,47 +1964,59 @@ page_contains_end(BTreeIterator *it, Page p,
 }
 
 /*
- * REPRO SWITCH: the probe+recovery below forces a change-count-validated
- * hikeys reload at the top of every FETCH page step, which perturbs the
- * scan-vs-eviction timing enough to close the race window (the torn-image
- * wrong result stopped reproducing under churn).  Default OFF so the natural
- * bug manifests again as the stream-regress `arrays` wrong result; flip to
- * true to re-enable detection+recovery.
+ * REPRO SWITCH: gate the terminator-staleness recovery below.  Default OFF so
+ * the natural bug still manifests as the stream-regress `arrays` wrong result
+ * while we reproduce it; flip to true to re-enable detection+recovery (the
+ * check is now copy-free, so it no longer perturbs the scan-vs-eviction
+ * timing the way the old forced reload did).
  */
 static bool iter_term_stale_recover = false;
 
 /*
- * TEMP churn diagnostic + recovery for the FETCH-mode range-scan early
- * termination (wrong short result: e.g. "select array_agg(ten) from (select
- * ten from tenk1 where unique1 < 15 order by unique1)" returning a single row
- * under stream-regress).  Before btree_iterator_check_load_next_page() decides
- * the scan is done -- IS_LAST_PAGE() (reads the header RIGHTMOST/LEFTMOST flag)
- * or page_contains_end() (reads the hikey) -- those reads come from the FETCH
+ * Diagnostic + recovery for the FETCH-mode range-scan early termination (wrong
+ * short result: e.g. "select array_agg(ten) from (select ten from tenk1 where
+ * unique1 < 15 order by unique1)" returning a single row under stream-regress).
+ * Before btree_iterator_check_load_next_page() decides the scan is done --
+ * IS_LAST_PAGE() (reads the header RIGHTMOST/LEFTMOST flag) or
+ * page_contains_end() (reads the hikey) -- those reads come from the FETCH
  * partial page image.  partial_load_hikeys_chunk() early-returns once the
  * hikeys chunk is loaded and never re-checks the page change count, so after a
  * concurrent split / eviction / checkpoint the image can be stale or torn and
  * the terminator wrongly concludes there is nothing left to read.
  *
- * Force a change-count-validated reload of the header+hikeys region: clear the
- * loaded flag so partial_load_hikeys_chunk() actually re-copies and runs its
- * PAGE_STATE_CHANGE_COUNT check.  If the backing page changed under us, log it
- * and tell the caller to re-find instead of ending the scan on stale data.
- * No-op in IMAGE mode (the image is a full consistent copy).
+ * Re-validate the ALREADY-LOADED image WITHOUT re-copying it: the image header
+ * still holds the page state + page change count captured when the hikeys chunk
+ * was copied, so comparing those to the live backing page is exactly
+ * partial_load_hikeys_chunk()'s consistency check minus the memcpy.  A content
+ * change-count bump, a blocked read, or an evicted/reused page (identity change
+ * count differs) means the copied hikey/flags are stale; tell the caller to
+ * re-find instead of ending the scan.  No-op in IMAGE mode (full consistent
+ * copy) or before the hikeys chunk is loaded (the terminator loads+validates
+ * it itself).
  */
 static bool
 iter_term_page_stale(BTreeIterator *it)
 {
-	PartialPageState *partial = &it->context.partial;
+	OBTreeFindPageContext *context = &it->context;
+	PartialPageState *partial = &context->partial;
+	Page		img = context->img;
+	Page		src = partial->src;
+	uint64		imgState,
+				srcState;
 
-	if (!partial->isPartial)
+	if (!partial->isPartial || !partial->hikeysChunkIsLoaded)
 		return false;
 
-	partial->hikeysChunkIsLoaded = false;
-	if (!partial_load_hikeys_chunk(partial, it->context.img))
+	imgState = pg_atomic_read_u64(&(O_PAGE_HEADER(img)->state));
+	srcState = pg_atomic_read_u64(&(O_PAGE_HEADER(src)->state));
+
+	if ((imgState & PAGE_STATE_CHANGE_COUNT_MASK) != (srcState & PAGE_STATE_CHANGE_COUNT_MASK) ||
+		O_PAGE_STATE_READ_IS_BLOCKED(srcState) ||
+		O_PAGE_GET_CHANGE_COUNT(img) != O_PAGE_GET_CHANGE_COUNT(src))
 	{
 		static int	stale_cnt = 0;
-		BTreeDescr *desc = it->context.desc;
-		OInMemoryBlkno blkno = it->context.items[it->context.index].blkno;
+		BTreeDescr *desc = context->desc;
+		OInMemoryBlkno blkno = context->items[context->index].blkno;
 
 		if (stale_cnt++ < 200)
 			elog(LOG,
