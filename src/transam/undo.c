@@ -1731,7 +1731,8 @@ read_undo_range_if_exists(OBuffersDesc *desc, Pointer buf, UndoLogType undoType,
 #define UNDO_FLUSH_BATCH_PAGES 128
 static void
 flush_dirty_undo_range(UndoLogType undoType,
-					   UndoLocation fromLoc, UndoLocation toLoc)
+					   UndoLocation fromLoc, UndoLocation toLoc,
+					   UndoLocation minProcReservedLocation)
 {
 	UndoMeta   *meta = get_undo_meta_by_type(undoType);
 	Pointer		circularBuffer = o_undo_buffers[(int) undoType];
@@ -1740,8 +1741,27 @@ flush_dirty_undo_range(UndoLogType undoType,
 				alignedFrom,
 				alignedTo;
 
+	/*
+	 * Staging area for the page straddling writtenLocation.  Static rather
+	 * than on the stack: this runs on the abort/longjmp-reachable path where
+	 * a large frame trips ASAN's stale stack poison, and the function is not
+	 * recursive.
+	 */
+	static char stagingPage[ORIOLEDB_BLCKSZ];
+
 	/* Enforced in undo_shmem_needs() via TYPEALIGN. */
 	Assert(circularBufferSize % ORIOLEDB_BLCKSZ == 0);
+
+	/*
+	 * Only locations at or above writtenLocation still own their ring slot.
+	 * Below it the undo was drained to disk and the slots were recycled by
+	 * newer (location + ring size) records; persisting those bytes back to
+	 * the old location's absolute on-disk offset would corrupt an
+	 * already-drained record.  writtenLocation only advances, so clamping
+	 * here is safe -- it is re-read per batch under the lock below, because
+	 * it can advance while we hold no lock between batches.
+	 */
+	fromLoc = Max(fromLoc, pg_atomic_read_u64(&meta->writtenLocation));
 
 	if (fromLoc >= toLoc)
 		return;
@@ -1758,29 +1778,86 @@ flush_dirty_undo_range(UndoLogType undoType,
 	while (pageLoc < alignedTo)
 	{
 		int			processed;
+		UndoLocation writtenNow;
 
 		LWLockAcquire(&meta->undoWriteLock, LW_EXCLUSIVE);
+
+		/*
+		 * Re-read the drained frontier under the lock: evict_undo_to_disk()
+		 * (also under undoWriteLock) may have advanced writtenLocation while
+		 * we held no lock between batches, recycling more ring slots.
+		 */
+		writtenNow = pg_atomic_read_u64(&meta->writtenLocation);
 
 		for (processed = 0;
 			 processed < UNDO_FLUSH_BATCH_PAGES && pageLoc < alignedTo;
 			 processed++, pageLoc += ORIOLEDB_BLCKSZ)
 		{
 			uint32		page = UNDO_PAGE_INDEX(undoType, pageLoc);
+			UndoLocation pageEnd = pageLoc + ORIOLEDB_BLCKSZ;
+			Pointer		src = circularBuffer + (pageLoc % circularBufferSize);
+			Size		liveOff;
 
-			if (!test_clear_undo_page_dirty(undoType, page))
+			/*
+			 * A page wholly below writtenNow is fully drained: its on-disk
+			 * copy is already current and its ring slots now belong to newer
+			 * records.  Skip it -- writing those recycled bytes to this
+			 * page's offset is exactly how an old record's undo turns into
+			 * garbage.
+			 */
+			if (pageEnd <= writtenNow)
 				continue;
 
 			/*
-			 * Pages in [fromLoc, toLoc) are stable while we copy them:
-			 * fsync_undo_range() called check_reserved_undo_location() with
-			 * toLoc + ring_size before invoking us, which waits until every
-			 * backend's reserved location is >= toLoc, so no backend can be
-			 * appending into our range concurrently.  That lets us hand the
-			 * ring-buffer page straight to the write without staging.
+			 * The dirty bit may only be trusted -- and consumed -- for a page
+			 * lying ENTIRELY below minProcReservedLocation.  At or above that
+			 * frontier a backend may still be filling a record it reserved:
+			 * get_undo_record() publishes the pages dirty BEFORE its caller
+			 * writes the payload, so clearing the bit here would strand that
+			 * payload (the page would look clean to every later flush and
+			 * eviction, and the record would never reach disk).  For such
+			 * pages write unconditionally and leave the bit set, so the
+			 * completed record gets flushed again later.
+			 */
+			if (pageEnd <= minProcReservedLocation)
+			{
+				if (!test_clear_undo_page_dirty(undoType, page))
+					continue;
+			}
+
+			/*
+			 * Assemble the page in a staging buffer instead of handing the
+			 * live ring page to the write: writers do not hold undoWriteLock,
+			 * so the ring bytes can shift under o_buffers_write_page_direct()
+			 * and yield a torn page image.  That is not hypothetical for
+			 * pages at or above minProcReservedLocation -- those are exactly
+			 * the ones a backend may be filling right now.
 			 *
+			 * The page straddling writtenNow additionally holds
+			 * already-drained bytes (< writtenNow) whose ring slots now
+			 * belong to newer records.  Preload the current on-disk page so
+			 * that prefix is preserved verbatim, and take only the live tail
+			 * from the ring.
+			 */
+			if (pageLoc < writtenNow)
+			{
+				liveOff = writtenNow - pageLoc;
+				if (!o_buffers_read(&undoBuffersDesc, stagingPage,
+									(uint32) undoType, pageLoc,
+									ORIOLEDB_BLCKSZ, true))
+					memset(stagingPage, 0, liveOff);
+			}
+			else
+			{
+				liveOff = 0;
+			}
+			memcpy(stagingPage + liveOff, src + liveOff,
+				   ORIOLEDB_BLCKSZ - liveOff);
+
+			/*
 			 * In-place undo_write_internal writes (BTreeLeafTuphdr fixups)
-			 * may still race; they are loss-tolerant -- 8-byte halves are
-			 * atomic, WAL replay rebuilds the affected fields.
+			 * may still race with the copy; they are loss-tolerant -- 8-byte
+			 * halves are atomic, WAL replay rebuilds the affected fields.
 			 *
 			 * Bypass the o_buffers cache: future reads of these locations
 			 * answer from the ring (writtenLocation does not advance), so
@@ -1788,16 +1865,12 @@ flush_dirty_undo_range(UndoLogType undoType,
 			 *
 			 * The acquire pairing with mark_undo_range_dirty() lives inside
 			 * test_clear_undo_page_dirty()'s fetch_and; the page we read
-			 * below reflects every store the writer made before it set the
-			 * bit.
+			 * reflects every store the writer made before it set the bit.
 			 */
 			if (STOPEVENTS_ENABLED())
 				STOPEVENT(STOPEVENT_UNDO_FLUSH, NULL);
-			o_buffers_write_page_direct(&undoBuffersDesc,
-										circularBuffer +
-										(pageLoc % circularBufferSize),
-										(uint32) undoType,
-										pageLoc);
+			o_buffers_write_page_direct(&undoBuffersDesc, stagingPage,
+										(uint32) undoType, pageLoc);
 		}
 
 		LWLockRelease(&meta->undoWriteLock);
@@ -2092,8 +2165,6 @@ fsync_undo_range(UndoLogType undoType,
 				 uint32 wait_event_info)
 {
 	UndoLocation minProcReservedLocation;
-	UndoMeta   *meta = get_undo_meta_by_type(undoType);
-	UndoLocation writtenLocation;
 
 	(void) check_reserved_undo_location(undoType,
 										toLoc + o_undo_circular_sizes[(int) undoType],
@@ -2103,19 +2174,18 @@ fsync_undo_range(UndoLogType undoType,
 	/*
 	 * Push dirty pages overlapping [fromLoc, toLoc) out to o_buffers without
 	 * touching the ring or advancing writtenLocation.  Pages already on disk
-	 * (bit cleared by a prior eviction or flush) are skipped.
+	 * (bit cleared by a prior eviction or flush) are skipped, but only where
+	 * the bit can be trusted -- hence minProcReservedLocation is passed down:
+	 * at or above it a backend may still be filling a record whose pages were
+	 * published dirty ahead of the payload.
 	 *
-	 * Locations below writtenLocation are guaranteed on disk already, so we
-	 * clamp fromLoc up to writtenLocation to avoid pointless bit scans. The
-	 * flush internally acquires undoWriteLock in EXCLUSIVE mode in short
+	 * The flush clamps fromLoc up to writtenLocation itself (and re-reads it
+	 * per batch).  It acquires undoWriteLock in EXCLUSIVE mode in short
 	 * batches and releases it between them; that keeps it serialised with
 	 * evict_undo_to_disk() while letting concurrent eviction make progress
 	 * instead of waiting for the whole flush.
 	 */
-	writtenLocation = pg_atomic_read_u64(&meta->writtenLocation);
-	flush_dirty_undo_range(undoType,
-						   Max(fromLoc, writtenLocation),
-						   toLoc);
+	flush_dirty_undo_range(undoType, fromLoc, toLoc, minProcReservedLocation);
 
 	o_buffers_sync(&undoBuffersDesc, (uint32) undoType,
 				   fromLoc, toLoc, wait_event_info);
@@ -3160,6 +3230,43 @@ undo_read(UndoLogType undoType, UndoLocation location, Size size, Pointer buf)
 	{
 		read_undo_range(&undoBuffersDesc, buf, undoType, location,
 						location + size);
+	}
+
+	/*
+	 * Re-check that the record is still retained, now that we have read it.
+	 * Callers test UNDO_REC_EXISTS() *before* the read (see
+	 * undo_item_buf_read_item()), which is not enough: the retain floor can
+	 * advance past `location` while we copy, freeing the ring slot for reuse
+	 * and unlinking the on-disk file, so what we handed back is garbage from
+	 * a recycled circular-buffer slot.  Without this check the bogus bytes
+	 * propagate outwards and only fail much later as an out-of-range item
+	 * type in walk_undo_range() or a bad itemSize in
+	 * undo_item_buf_read_item(), naming neither the concurrent clean nor the
+	 * location that lost its data.
+	 *
+	 * This mirrors map_oxid()'s post-read globalXmin re-check and the
+	 * identical re-check in undo_read_if_exists(); unlike that one,
+	 * undo_read() is the must-exist variant, so a concurrent clean is a
+	 * broken retain invariant rather than an expected outcome.
+	 */
+	if (!UNDO_REC_EXISTS(undoType, location))
+	{
+		ODBProcData *curProcData = GET_CUR_PROCDATA();
+
+		elog(PANIC,
+			 "undo_read(): undo record was cleaned concurrently with the read: "
+			 "undoType=%d location=%llu size=%u "
+			 "transactionUndoRetainLocation=%llu snapshotRetainUndoLocation=%llu "
+			 "minProcRetainLocation=%llu writtenLocation=%llu "
+			 "checkpointRetain=[%llu,%llu) pid=%d",
+			 (int) undoType, (unsigned long long) location, (unsigned) size,
+			 (unsigned long long) pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].transactionUndoRetainLocation),
+			 (unsigned long long) pg_atomic_read_u64(&curProcData->undoRetainLocations[(int) undoType].snapshotRetainUndoLocation),
+			 (unsigned long long) pg_atomic_read_u64(&meta->minProcRetainLocation),
+			 (unsigned long long) pg_atomic_read_u64(&meta->writtenLocation),
+			 (unsigned long long) pg_atomic_read_u64(&meta->checkpointRetainStartLocation),
+			 (unsigned long long) pg_atomic_read_u64(&meta->checkpointRetainEndLocation),
+			 MyProcPid);
 	}
 }
 
