@@ -1970,7 +1970,7 @@ page_contains_end(BTreeIterator *it, Page p,
  * check is now copy-free, so it no longer perturbs the scan-vs-eviction
  * timing the way the old forced reload did).
  */
-static bool iter_term_stale_recover = false;
+static bool iter_term_stale_recover = true;
 
 /*
  * Diagnostic + recovery for the FETCH-mode range-scan early termination (wrong

@@ -43,8 +43,29 @@ partial_load_hikeys_chunk(PartialPageState *partial, Page img)
 				chunkEnd;
 	BTreePageHeader *header = (BTreePageHeader *) img;
 
-	if (!partial->isPartial || partial->hikeysChunkIsLoaded)
+	if (!partial->isPartial)
 		return true;
+
+	if (partial->hikeysChunkIsLoaded)
+	{
+		/*
+		 * Already loaded -- but the backing page may have been split/merged
+		 * (content change-count bump) or evicted/reused (identity
+		 * change-count bump) since we copied it.  Re-run the same consistency
+		 * check as the load path below, minus the memcpy: compare the state +
+		 * page change count baked into img at copy time against the live src.
+		 * On divergence the copied hikeys are stale; return false so the
+		 * caller re-finds instead of trusting a stale image (wrong-result /
+		 * early scan termination).
+		 */
+		imgState = pg_atomic_read_u64(&(O_PAGE_HEADER(img)->state));
+		srcState = pg_atomic_read_u64(&(O_PAGE_HEADER(src)->state));
+		if ((imgState & PAGE_STATE_CHANGE_COUNT_MASK) != (srcState & PAGE_STATE_CHANGE_COUNT_MASK) ||
+			O_PAGE_STATE_READ_IS_BLOCKED(srcState) ||
+			O_PAGE_GET_CHANGE_COUNT(img) != O_PAGE_GET_CHANGE_COUNT(src))
+			return false;
+		return true;
+	}
 
 	chunkBegin = offsetof(BTreePageHeader, chunkDesc);
 	chunkEnd = header->hikeysEnd;
@@ -85,8 +106,25 @@ partial_load_chunk(PartialPageState *partial, Page img,
 				chunkEnd;
 	BTreePageHeader *header;
 
-	if (!partial->isPartial || partial->chunkIsLoaded[chunkOffset])
+	if (!partial->isPartial)
 		return true;
+
+	if (partial->chunkIsLoaded[chunkOffset])
+	{
+		/*
+		 * Already loaded -- re-validate copy-free that the backing page has
+		 * not been split/merged (content change-count) or evicted/reused
+		 * (identity change-count) since we copied this chunk; if it has, the
+		 * chunk is stale and the caller must re-find.  See the matching check
+		 * in partial_load_hikeys_chunk().
+		 */
+		srcState = pg_atomic_read_u64(&(O_PAGE_HEADER(src)->state));
+		if ((imgState & PAGE_STATE_CHANGE_COUNT_MASK) != (srcState & PAGE_STATE_CHANGE_COUNT_MASK) ||
+			O_PAGE_STATE_READ_IS_BLOCKED(srcState) ||
+			O_PAGE_GET_CHANGE_COUNT(img) != O_PAGE_GET_CHANGE_COUNT(src))
+			return false;
+		return true;
+	}
 
 	if (partial->hikeysChunkIsLoaded)
 	{
