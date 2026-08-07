@@ -680,16 +680,59 @@ descr_check_tupdesc_constr(OIndexDescr *tree, const char *which, TupleDesc td)
 		return;
 
 	constr = td->constr;
-	if (constr->num_defval != 0 || constr->num_check != 0 ||
-		constr->defval != NULL || constr->check != NULL)
-		elog(LOG,
-			 "DESCRCORRUPT tree=[%u/%u/%u] type=%d which=%s td=%p constr=%p "
-			 "num_defval=%d num_check=%d defval=%p check=%p missing=%p natts=%d pid=%d",
-			 tree->oids.datoid, tree->oids.reloid, tree->oids.relnode,
-			 tree->desc.type, which, (void *) td, (void *) constr,
-			 constr->num_defval, constr->num_check,
-			 (void *) constr->defval, (void *) constr->check,
-			 (void *) constr->missing, td->natts, MyProcPid);
+
+	/*
+	 * Predict which pointer FreeTupleDesc() would pfree misaligned, so the
+	 * offending field is named BEFORE the MAXALIGN abort.  Every pointer is
+	 * alignment-checked; array counts are range-checked before any array is
+	 * walked so a dangling constr can't send us reading wild memory.
+	 */
+	{
+		const char *bad = NULL;
+
+		if (td != (TupleDesc) MAXALIGN(td))
+			bad = "td";
+		else if (td->natts < 0 || td->natts > MaxTupleAttributeNumber)
+			bad = "natts";
+		else if (constr != (TupleConstr *) MAXALIGN(constr))
+			bad = "constr";
+		else if (constr->num_defval != 0 || constr->num_check != 0)
+			bad = "nonzero-defval/check";	/* OrioleDB palloc0's these */
+		else if (constr->defval != NULL)
+			bad = "defval-nonnull";
+		else if (constr->check != NULL)
+			bad = "check-nonnull";
+		else if (constr->missing != NULL &&
+				 constr->missing != (AttrMissing *) MAXALIGN(constr->missing))
+			bad = "missing-ptr";
+		else if (constr->missing != NULL)
+		{
+			AttrMissing *m = constr->missing;
+			int			i;
+
+			for (i = 0; i < td->natts; i++)
+			{
+				if (!m[i].am_present || TupleDescAttr(td, i)->attbyval)
+					continue;
+				if (DatumGetPointer(m[i].am_value) !=
+					(Pointer) MAXALIGN(DatumGetPointer(m[i].am_value)))
+				{
+					bad = "missing-am_value";
+					break;
+				}
+			}
+		}
+
+		if (bad)
+			elog(LOG,
+				 "DESCRCORRUPT tree=[%u/%u/%u] type=%d which=%s bad=%s td=%p constr=%p "
+				 "num_defval=%d num_check=%d defval=%p check=%p missing=%p natts=%d pid=%d",
+				 tree->oids.datoid, tree->oids.reloid, tree->oids.relnode,
+				 tree->desc.type, which, bad, (void *) td, (void *) constr,
+				 constr->num_defval, constr->num_check,
+				 (void *) constr->defval, (void *) constr->check,
+				 (void *) constr->missing, td->natts, MyProcPid);
+	}
 }
 
 static void
