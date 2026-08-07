@@ -126,14 +126,14 @@ SELECT regexp_replace(
  state = free, datoid equal, relnode equal, ix_type = primary, clean                                +
      Leftmost, Rightmost                                                                            +
    Chunk 0: offset = 0, location = 256, hikey location = 72, hikey = (1, (NNN, NNN, NNN), 1663, 0)  +
-     Item 0: deleted, offset = 264, tuple = ((1, (NNN, NNN, NNN), 1663, 0), 702)                    +
+     Item 0: deleted, offset = 264, tuple = ((1, (NNN, NNN, NNN), 1663, 0), 703)                    +
    Chunk 1: offset = 1, location = 1016, hikey location = 104, hikey = (3, (NNN, NNN, NNN), 1663, 0)+
-     Item 1: deleted, offset = 1024, tuple = ((1, (NNN, NNN, NNN), 1663, 0), 1050)                  +
-     Item 2: deleted, offset = 2128, tuple = ((1, (NNN, NNN, NNN), 1663, 0), 702)                   +
+     Item 1: deleted, offset = 1024, tuple = ((1, (NNN, NNN, NNN), 1663, 0), 1051)                  +
+     Item 2: deleted, offset = 2128, tuple = ((1, (NNN, NNN, NNN), 1663, 0), 703)                   +
    Chunk 2: offset = 3, location = 2880, hikey location = 136                                       +
-     Item 3: deleted, offset = 2888, tuple = ((3, (NNN, NNN, NNN), 1663, 0), 818)                   +
-     Item 4: deleted, offset = 3760, tuple = ((3, (NNN, NNN, NNN), 1663, 0), 702)                   +
-     Item 5: deleted, offset = 4512, tuple = ((3, (NNN, NNN, NNN), 1663, 0), 818)                   +
+     Item 3: deleted, offset = 2888, tuple = ((3, (NNN, NNN, NNN), 1663, 0), 819)                   +
+     Item 4: deleted, offset = 3760, tuple = ((3, (NNN, NNN, NNN), 1663, 0), 703)                   +
+     Item 5: deleted, offset = 4512, tuple = ((3, (NNN, NNN, NNN), 1663, 0), 819)                   +
                                                                                                     +
  
 (1 row)

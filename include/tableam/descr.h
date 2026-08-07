@@ -15,6 +15,7 @@
 #define __TABLEAM_DESCR_H__
 
 #include "checkpoint/checkpoint.h"
+#include "catalog/o_indices.h"
 #include "catalog/sys_trees.h"
 #include "utils/seq_buf.h"
 #include "s3/queue.h"
@@ -119,6 +120,15 @@ struct OIndexDescr
 	/* reference count */
 	int			refcnt;
 	bool		valid;
+
+	/*
+	 * CIC lifecycle.  Mirrored from OIndex.state at descriptor fill time.
+	 * builderOxid is the oxid of the CIC build session (== OIndex.createOxid
+	 * when state != OINDEX_STATE_VALID); used to locate the spool dir on the
+	 * DML hot path.  For VALID indexes both fields are unused.
+	 */
+	OIndexState state;
+	OXid		builderOxid;
 
 	BTreeDescr	desc;
 
