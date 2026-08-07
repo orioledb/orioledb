@@ -697,31 +697,14 @@ set_oxid_csn(OXid oxid, CommitSeqNo csn)
 	writeInProgressXmin = pg_atomic_read_u64(&xid_meta->writeInProgressXmin);
 	if (oxid >= writeInProgressXmin)
 	{
-		/*
-		 * Mark the page dirty BEFORE publishing the new csn with the CAS
-		 * below, not after.  write_xidsmap() drains this slot into o_buffers
-		 * and decides whether to write the page dirty or clean by
-		 * test-and-clearing the page dirty bit, then advances writtenXmin
-		 * past the slot.  If we set the dirty bit only after a successful
-		 * CAS, a concurrent write_xidsmap() can slip in between the CAS and
-		 * mark_xid_buffer_dirty(): it drains our freshly written csn but sees
-		 * the page as clean (our bit is not set yet), writes it to o_buffers
-		 * clean, and advances writtenXmin past oxid -- so our subsequent
-		 * mark_xid_buffer_dirty() lands on a page that is never flushed
-		 * again, and a later eviction can drop the clean copy, leaving the
-		 * stale (e.g. COMMITTING) value on disk permanently.  Readers of a
-		 * tuple modified by oxid then spin forever in oxid_get_csn() on a
-		 * committing bit that never clears (observed as a checkpoint-race
-		 * hang: FOR KEY SHARE / FK check on a just-committed row).  Setting
-		 * the dirty bit first closes the window: any flush that can observe
-		 * the new csn also observes the dirty bit.
-		 */
-		mark_xid_buffer_dirty(oxid);
 		if (pg_atomic_compare_exchange_u64(&xidBuffer[oxid % xid_circular_buffer_size].csn,
 										   &oldCsn, csn))
 		{
+			mark_xid_buffer_dirty(oxid);
 			Assert(oldCsn != COMMITSEQNO_FROZEN);
-			return;
+
+			if (oxid >= pg_atomic_read_u64(&xid_meta->writeInProgressXmin))
+				return;
 		}
 
 		/*
@@ -761,19 +744,14 @@ set_oxid_xlog_ptr_internal(OXid oxid, XLogRecPtr ptr)
 	writeInProgressXmin = pg_atomic_read_u64(&xid_meta->writeInProgressXmin);
 	if (oxid >= writeInProgressXmin)
 	{
-		/*
-		 * Mark the page dirty before the CAS, for the same reason as in
-		 * set_oxid_csn(): otherwise a concurrent write_xidsmap() can drain
-		 * the new commitPtr while seeing the page clean and advance
-		 * writtenXmin past oxid, stranding the update on a never-reflushed
-		 * page.
-		 */
-		mark_xid_buffer_dirty(oxid);
 		if (pg_atomic_compare_exchange_u64(&xidBuffer[oxid % xid_circular_buffer_size].commitPtr,
 										   &oldPtr, ptr))
 		{
+			mark_xid_buffer_dirty(oxid);
 			Assert(oldPtr != FirstNormalUnloggedLSN);
-			return;
+
+			if (oxid >= pg_atomic_read_u64(&xid_meta->writeInProgressXmin))
+				return;
 		}
 
 		/*
@@ -1536,11 +1514,16 @@ advance_oxids(OXid new_xid)
 		xmax = Min(new_xid + 1, pg_atomic_read_u64(&xid_meta->writtenXmin) + xid_circular_buffer_size);
 		for (; xid < xmax; xid++)
 		{
-			mark_xid_buffer_dirty(xid);
 			pg_atomic_write_u64(&xidBuffer[xid % xid_circular_buffer_size].csn,
 								COMMITSEQNO_INPROGRESS);
 			pg_atomic_write_u64(&xidBuffer[xid % xid_circular_buffer_size].commitPtr,
 								InvalidXLogRecPtr);
+
+			/*
+			 * Nobody can evict this to the disk before we advance nextXid.
+			 * So, marking bufffer dirty is safe.
+			 */
+			mark_xid_buffer_dirty(xid);
 		}
 		pg_atomic_write_u64(&xid_meta->nextXid, xmax);
 	}
@@ -1599,17 +1582,61 @@ get_current_oxid(void)
 		vxidElem->vxid.BACKENDID = MyProc->PROCBACKENDID;
 		vxidElem->vxid.localTransactionId = MyProc->LXID;
 
-		Assert(pg_atomic_read_u64(&xidBuffer[newOxid % xid_circular_buffer_size].csn) == COMMITSEQNO_FROZEN);
-		mark_xid_buffer_dirty(newOxid);
-		pg_atomic_write_u64(&xidBuffer[newOxid % xid_circular_buffer_size].csn,
-							COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
-													 nestingLevel,
-													 COMMITSEQNO_STATUS_IN_PROGRESS));
-		pg_atomic_write_u64(&xidBuffer[newOxid % xid_circular_buffer_size].commitPtr,
-							XLOG_PTR_MAKE_SPECIAL(MYPROCNUMBER,
-												  nestingLevel,
-												  COMMITSEQNO_STATUS_IN_PROGRESS));
-		curOxid = newOxid;
+		{
+			CommitSeqNo initCsn = COMMITSEQNO_MAKE_SPECIAL(MYPROCNUMBER,
+														   nestingLevel,
+														   COMMITSEQNO_STATUS_IN_PROGRESS);
+			XLogRecPtr	initPtr = XLOG_PTR_MAKE_SPECIAL(MYPROCNUMBER,
+														nestingLevel,
+														COMMITSEQNO_STATUS_IN_PROGRESS);
+
+			/*
+			 * The slot holds COMMITSEQNO_FROZEN until we set the csn below,
+			 * and write_xidsmap() never drains that delimiter -- so it cannot
+			 * advance writeInProgressXmin past newOxid and evict our slot
+			 * before the csn is set.  The ring write is therefore
+			 * unconditionally safe.
+			 */
+			Assert(pg_atomic_read_u64(&xidBuffer[newOxid % xid_circular_buffer_size].csn) == COMMITSEQNO_FROZEN);
+
+			/*
+			 * Write commitPtr first because write_xidmap() takes csn into
+			 * account
+			 */
+			pg_atomic_write_u64(&xidBuffer[newOxid % xid_circular_buffer_size].commitPtr,
+								initPtr);
+			pg_write_barrier();
+			pg_atomic_write_u64(&xidBuffer[newOxid % xid_circular_buffer_size].csn,
+								initCsn);
+			mark_xid_buffer_dirty(newOxid);
+
+			/*
+			 * Now that the slot carries a real csn it can be drained.  If a
+			 * concurrent write_xidsmap() advanced writeInProgressXmin past
+			 * newOxid, our ring slot was drained to o_buffers; wait for that
+			 * write to finish and persist the item there ourselves (mirroring
+			 * set_oxid_csn()).  Do NOT mark the recycled ring slot dirty here
+			 * -- a later flush would otherwise overwrite our on-disk offset
+			 * with that recycled slot's value.
+			 */
+			if (newOxid < pg_atomic_read_u64(&xid_meta->writeInProgressXmin))
+			{
+				if (newOxid >= pg_atomic_read_u64(&xid_meta->writtenXmin))
+				{
+					LWLockAcquire(&xid_meta->xidMapWriteLock, LW_SHARED);
+					LWLockRelease(&xid_meta->xidMapWriteLock);
+				}
+				Assert(newOxid < pg_atomic_read_u64(&xid_meta->writtenXmin));
+				/* commitPtr first, as in the ring case */
+				o_buffers_write(&buffersDesc, (Pointer) &initPtr, OXID_BUFFERS_TAG,
+								newOxid * sizeof(OXidMapItem) + offsetof(OXidMapItem, commitPtr),
+								sizeof(XLogRecPtr), false, false);
+				o_buffers_write(&buffersDesc, (Pointer) &initCsn, OXID_BUFFERS_TAG,
+								newOxid * sizeof(OXidMapItem) + offsetof(OXidMapItem, csn),
+								sizeof(CommitSeqNo), false, false);
+			}
+			curOxid = newOxid;
+		}
 
 		/* Check if an autonomous transaction is in progress */
 		if (nestingLevel > 0)
