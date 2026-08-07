@@ -1348,6 +1348,7 @@ walk_undo_range(UndoLogType undoType,
 			static char chainbuf[2048];
 			int			off = 0;
 			int			k;
+			UndoMeta   *m = get_undo_meta_by_type(undoType);
 
 			chainbuf[0] = '\0';
 			for (k = 0; k < ringNum; k++)
@@ -1364,10 +1365,20 @@ walk_undo_range(UndoLogType undoType,
 			}
 			elog(PANIC,
 				 "UNDOCORRUPT walk_undo_range bad type: undoType=%d oxid=%llu stage=%d "
-				 "location=%llu toLoc=%llu type=%u chain(oldest..newest):%s pid=%d",
+				 "location=%llu toLoc=%llu type=%u "
+				 "meta{written=%llu lastUsed=%llu advResv=%llu minProcRetain=%llu "
+				 "minXactRetain=%llu chkpRetain=[%llu,%llu)} chain(oldest..newest):%s pid=%d",
 				 (int) undoType, (unsigned long long) oxid, (int) stage,
 				 (unsigned long long) location, (unsigned long long) toLoc,
-				 (unsigned) item->type, chainbuf, MyProcPid);
+				 (unsigned) item->type,
+				 (unsigned long long) pg_atomic_read_u64(&m->writtenLocation),
+				 (unsigned long long) pg_atomic_read_u64(&m->lastUsedLocation),
+				 (unsigned long long) pg_atomic_read_u64(&m->advanceReservedLocation),
+				 (unsigned long long) pg_atomic_read_u64(&m->minProcRetainLocation),
+				 (unsigned long long) pg_atomic_read_u64(&m->minProcTransactionRetainLocation),
+				 (unsigned long long) pg_atomic_read_u64(&m->checkpointRetainStartLocation),
+				 (unsigned long long) pg_atomic_read_u64(&m->checkpointRetainEndLocation),
+				 chainbuf, MyProcPid);
 		}
 
 		descr = item_type_get_descr(item->type);
