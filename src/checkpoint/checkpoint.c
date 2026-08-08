@@ -3010,9 +3010,25 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 
 	if (!orioledb_s3_mode)
 	{
+		/*
+		 * TEMP churn diagnostic: we must still hold the checkpointer
+		 * namespace AccessShareLock on the tree here.  That lock is what
+		 * keeps a concurrent evictor (which takes AccessExclusiveLock in the
+		 * same namespace) from finalizing and freeing these seq bufs under
+		 * us.  If it is gone, we found the race behind the finalize-badpage
+		 * crash.
+		 */
+		Assert(!ORelOidsIsValid(descr->oids) || IS_SYS_TREE_OIDS(descr->oids) ||
+			   o_tables_rel_lock_held_by_me(&descr->oids, AccessShareLock,
+											true));
+
 		/* finalizes *.tmp file */
 		seq_buf_finalize(&descr->tmpBuf[cur_chkp_index]);
 		free_seq_buf_pages(descr, descr->tmpBuf[cur_chkp_index].shared);
+
+		Assert(!ORelOidsIsValid(descr->oids) || IS_SYS_TREE_OIDS(descr->oids) ||
+			   o_tables_rel_lock_held_by_me(&descr->oids, AccessShareLock,
+											true));
 
 		/* finalizes *.map file */
 		map_len = seq_buf_finalize(&descr->nextChkp[cur_chkp_index]);

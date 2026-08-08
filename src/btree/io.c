@@ -30,6 +30,7 @@
 #include "checkpoint/checkpoint.h"
 #include "catalog/free_extents.h"
 #include "catalog/o_sys_cache.h"
+#include "catalog/o_tables.h"
 #include "recovery/recovery.h"
 #include "s3/headers.h"
 #include "s3/worker.h"
@@ -2579,6 +2580,17 @@ btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data)
 		   desc->storageType == BTreeStoragePersistence ||
 		   desc->storageType == BTreeStorageUnlogged);
 
+	/*
+	 * TEMP churn diagnostic: the evictor is supposed to hold the checkpointer
+	 * namespace AccessExclusiveLock on the tree (get_evict_btree_locks()),
+	 * which is what excludes the checkpointer (it holds AccessShareLock in
+	 * the same namespace) from finalizing these very seq bufs concurrently.
+	 * If that is not true, we found the race.
+	 */
+	Assert(!ORelOidsIsValid(desc->oids) || IS_SYS_TREE_OIDS(desc->oids) ||
+		   o_tables_rel_lock_held_by_me(&desc->oids, AccessExclusiveLock,
+										true));
+
 	/* we must not evict BTree under checkpoint */
 
 	if (desc->storageType == BTreeStoragePersistence || desc->storageType == BTreeStorageUnlogged)
@@ -2609,6 +2621,8 @@ btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data)
 	{
 		evicted_data->freeBuf.tag = desc->freeBuf.shared->tag;
 		evicted_data->freeBuf.offset = seq_buf_finalize(&desc->freeBuf);
+		/* TEMP: record the eviction free in the seq_buf op ring */
+		seq_buf_op_record('E', desc->freeBuf.shared, desc);
 		FREE_PAGE_IF_VALID(desc->ppool, desc->freeBuf.shared->pages[0]);
 		FREE_PAGE_IF_VALID(desc->ppool, desc->freeBuf.shared->pages[1]);
 	}
@@ -2625,11 +2639,15 @@ btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data)
 	{
 		evicted_data->nextChkp.tag = desc->nextChkp[chkp_index].shared->tag;
 		evicted_data->nextChkp.offset = seq_buf_finalize(&desc->nextChkp[chkp_index]);
+		/* TEMP: record the eviction free in the seq_buf op ring */
+		seq_buf_op_record('E', desc->nextChkp[chkp_index].shared, desc);
 		FREE_PAGE_IF_VALID(desc->ppool, desc->nextChkp[chkp_index].shared->pages[0]);
 		FREE_PAGE_IF_VALID(desc->ppool, desc->nextChkp[chkp_index].shared->pages[1]);
 
 		evicted_data->tmpBuf.tag = desc->tmpBuf[chkp_index].shared->tag;
 		evicted_data->tmpBuf.offset = seq_buf_finalize(&desc->tmpBuf[chkp_index]);
+		/* TEMP: record the eviction free in the seq_buf op ring */
+		seq_buf_op_record('E', desc->tmpBuf[chkp_index].shared, desc);
 		FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[0]);
 		FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[1]);
 	}
@@ -2637,6 +2655,8 @@ btree_finalize_private_seq_bufs(BTreeDescr *desc, EvictedTreeData *evicted_data)
 	{
 		evicted_data->tmpBuf.tag = desc->tmpBuf[chkp_index].shared->tag;
 		evicted_data->tmpBuf.offset = seq_buf_finalize(&desc->tmpBuf[chkp_index]);
+		/* TEMP: record the eviction free in the seq_buf op ring */
+		seq_buf_op_record('E', desc->tmpBuf[chkp_index].shared, desc);
 		FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[0]);
 		FREE_PAGE_IF_VALID(desc->ppool, desc->tmpBuf[chkp_index].shared->pages[1]);
 	}

@@ -30,6 +30,7 @@
 #include "catalog/o_sys_cache.h"
 #include "utils/seq_buf.h"
 
+#include "miscadmin.h"
 #include "pgstat.h"
 #include "sys/stat.h"
 #include "utils/memdebug.h"
@@ -68,22 +69,27 @@ static bool seq_buf_read_pages(SeqBufDescPrivate *seqBufPrivate,
 							   SeqBufDescShared *shared, int header_off, off_t evicted_off);
 
 /*
- * TEMP churn diagnostic: process-local ring of recent seq_buf lifecycle ops,
+ * TEMP churn diagnostic: shared-memory ring of recent seq_buf lifecycle ops,
  * to root-cause the checkpoint_ix seq_buf double-finalize (a finalize of a
  * seq_buf whose in-memory pages were already freed -> O_GET_IN_MEMORY_PAGE
- * validity assert).  The checkpointer drives these ops sequentially, so a
- * per-process ring, dumped only on the bad finalize, shows the exact op order
- * for the offending shared struct (e.g. a free with no re-init before the next
- * finalize) with zero shared-memory change and zero hot-path I/O.
+ * validity assert).  The ring used to be a process-local static array, which
+ * proved that the offending free is done by *another* process (the ring of the
+ * crashing checkpointer showed no free of its own) but could not name it.  It
+ * now lives in shared memory, with an atomic position counter, so every
+ * process' ops land in the same ring and the dump on the bad finalize names the
+ * pid and the backend type of whoever freed the pages.
  */
 typedef struct
 {
-	char		op;				/* 'I' init, 'r' reload, 'X' free, 'F'
-								 * finalize */
+	char		op;				/* 'I' init, 'r' reload, 'X' free, 'E' evict
+								 * free, 'F' finalize */
 	void	   *shared;
-	const void *owner;			/* BTreeDescr* for 'X', SeqBufDescPrivate* for
-								 * I/r/F -- identifies which descr slot / handle
-								 * drove the op, to spot a stale nextChkp.shared */
+	const void *owner;			/* BTreeDescr* for 'X'/'E', SeqBufDescPrivate*
+								 * for I/r/F -- identifies which descr slot /
+								 * handle drove the op, to spot a stale
+								 * nextChkp.shared */
+	int			pid;			/* who did the op */
+	char		backendType[16];	/* ... and what kind of process it is */
 	Oid			datoid;
 	Oid			reloid;
 	Oid			relnode;
@@ -93,25 +99,58 @@ typedef struct
 	int			location;
 	OInMemoryBlkno p0;
 	OInMemoryBlkno p1;
-}			SeqBufOpRec;
+} SeqBufOpRec;
 
 /*
- * Large enough that the earlier free ('X') of a shared struct does not scroll
- * off before its (buggy) re-finalize -- the 1024 global window did.
+ * Large enough that the earlier free ('X'/'E') of a shared struct does not
+ * scroll off before its (buggy) re-finalize -- the 1024 global window did.
  */
 #define SEQBUF_OP_RING_SIZE 65536
-static SeqBufOpRec seqbuf_op_ring[SEQBUF_OP_RING_SIZE];
-static uint32 seqbuf_op_ring_pos = 0;
+
+typedef struct
+{
+	pg_atomic_uint32 pos;
+	SeqBufOpRec ring[SEQBUF_OP_RING_SIZE];
+} SeqBufOpShmem;
+
+static SeqBufOpShmem *seqbufOpShmem = NULL;
+
+Size
+seq_buf_op_shmem_needs(void)
+{
+	return CACHELINEALIGN(sizeof(SeqBufOpShmem));
+}
+
+void
+seq_buf_op_shmem_init(Pointer buf, bool found)
+{
+	seqbufOpShmem = (SeqBufOpShmem *) buf;
+
+	if (!found)
+	{
+		pg_atomic_init_u32(&seqbufOpShmem->pos, 0);
+		memset(seqbufOpShmem->ring, 0, sizeof(seqbufOpShmem->ring));
+	}
+}
 
 void
 seq_buf_op_record(char op, SeqBufDescShared *shared, const void *owner)
 {
-	SeqBufOpRec *r = &seqbuf_op_ring[seqbuf_op_ring_pos % SEQBUF_OP_RING_SIZE];
+	SeqBufOpRec *r;
+	uint32		pos;
 
-	seqbuf_op_ring_pos++;
+	if (seqbufOpShmem == NULL)
+		return;
+
+	pos = pg_atomic_fetch_add_u32(&seqbufOpShmem->pos, 1);
+	r = &seqbufOpShmem->ring[pos % SEQBUF_OP_RING_SIZE];
+
 	r->op = op;
 	r->shared = shared;
 	r->owner = owner;
+	r->pid = MyProcPid;
+	strlcpy(r->backendType, GetBackendTypeDesc(MyBackendType),
+			sizeof(r->backendType));
 	r->datoid = shared->tag.key.oids.datoid;
 	r->reloid = shared->tag.key.oids.reloid;
 	r->relnode = shared->tag.key.oids.relnode;
@@ -127,8 +166,14 @@ void
 seq_buf_op_dump(SeqBufDescShared *shared, const char *why)
 {
 	uint32		i;
-	uint32		start = seqbuf_op_ring_pos > SEQBUF_OP_RING_SIZE
-		? seqbuf_op_ring_pos - SEQBUF_OP_RING_SIZE : 0;
+	uint32		pos;
+	uint32		start;
+
+	if (seqbufOpShmem == NULL)
+		return;
+
+	pos = pg_atomic_read_u32(&seqbufOpShmem->pos);
+	start = pos > SEQBUF_OP_RING_SIZE ? pos - SEQBUF_OP_RING_SIZE : 0;
 
 	elog(LOG,
 		 "SEQBUF_OP_DUMP (%s) shared=%p tag=[dat=%u rel=%u relnode=%u num=%u type=%d] curPg=%d loc=%d pages=[%u,%u] -- recent ops for this shared:",
@@ -137,14 +182,15 @@ seq_buf_op_dump(SeqBufDescShared *shared, const char *why)
 		 shared->tag.key.oids.relnode, shared->tag.num, shared->tag.type,
 		 shared->curPageNum, shared->location,
 		 shared->pages[0], shared->pages[1]);
-	for (i = start; i < seqbuf_op_ring_pos; i++)
+	for (i = start; i < pos; i++)
 	{
-		SeqBufOpRec *r = &seqbuf_op_ring[i % SEQBUF_OP_RING_SIZE];
+		SeqBufOpRec *r = &seqbufOpShmem->ring[i % SEQBUF_OP_RING_SIZE];
 
 		if (r->shared == shared)
 			elog(LOG,
-				 "  seqbuf op #%u %c owner=%p tag=[dat=%u rel=%u relnode=%u num=%u type=%d] curPg=%d loc=%d pages=[%u,%u]",
-				 i, r->op, r->owner, r->datoid, r->reloid, r->relnode, r->num, r->type,
+				 "  seqbuf op #%u %c pid=%d (%s) owner=%p tag=[dat=%u rel=%u relnode=%u num=%u type=%d] curPg=%d loc=%d pages=[%u,%u]",
+				 i, r->op, r->pid, r->backendType, r->owner, r->datoid,
+				 r->reloid, r->relnode, r->num, r->type,
 				 r->curPageNum, r->location, r->p0, r->p1);
 	}
 }

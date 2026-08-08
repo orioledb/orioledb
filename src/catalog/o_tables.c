@@ -1800,6 +1800,32 @@ o_tables_rel_lock_exclusive_no_inval_no_log(ORelOids *oids)
 	LockAcquire(&locktag, AccessExclusiveLock, false, false);
 }
 
+/*
+ * Does the current process hold the given OrioleDB relation lock?
+ *
+ * Builds the same locktag as o_tables_rel_lock_extended() /
+ * o_tables_rel_try_lock_extended() and asks the lock manager.  Note that the
+ * NO_LOG_LOCKMETHOD those functions substitute for AccessExclusiveLock is not
+ * replicated here: LockAcquireExtended() rewrites it back to
+ * DEFAULT_LOCKMETHOD before building the LOCALLOCK tag, so the recorded lock
+ * (and o_tables_rel_unlock_extended(), which doesn't substitute either) uses
+ * the plain tag.  Only used by assertions, the caller must exclude system
+ * trees (o_tables_rel_fill_locktag() asserts !IS_SYS_TREE_OIDS).
+ */
+bool
+o_tables_rel_lock_held_by_me(ORelOids *oids, int lockmode, bool checkpoint)
+{
+	LOCKTAG		locktag;
+
+	o_tables_rel_fill_locktag(&locktag, oids, lockmode, checkpoint);
+
+#if PG_VERSION_NUM >= 170000
+	return LockHeldByMe(&locktag, lockmode, false);
+#else
+	return LockHeldByMe(&locktag, lockmode);
+#endif
+}
+
 void
 o_tables_rel_unlock_extended(ORelOids *oids, int lockmode, bool checkpoint)
 {

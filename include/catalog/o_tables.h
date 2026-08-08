@@ -263,6 +263,13 @@ extern void o_tables_rel_lock_extended_no_inval(ORelOids *oids, int lockmode,
 extern void o_tables_rel_lock_exclusive_no_inval_no_log(ORelOids *oids);
 extern void o_tables_rel_unlock_extended(ORelOids *oids, int lockmode, bool checkpoint);
 
+/*
+ * TEMP churn diagnostic: assertion helper telling whether this process holds
+ * the given OrioleDB relation lock.  Callers must exclude system trees.
+ */
+extern bool o_tables_rel_lock_held_by_me(ORelOids *oids, int lockmode,
+										 bool checkpoint);
+
 /* Deserialize OTable stored in O_TABLES sys tree */
 extern bool o_node_deserialize_format_changed;
 extern void o_serialize_node(Node *node, StringInfo str);
