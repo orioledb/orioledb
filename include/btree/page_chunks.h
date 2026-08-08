@@ -32,9 +32,18 @@ typedef struct
 
 extern bool partial_load_hikeys_chunk(PartialPageState *partial, Page img);
 extern bool partial_load_full_page(PartialPageState *partial, Page img);
-extern bool partial_load_chunk(PartialPageState *partial, Page img,
-							   OffsetNumber chunkOffset,
-							   BTreePageItemLocator *loc);
+extern bool partial_load_chunk_impl(PartialPageState *partial, Page img,
+									OffsetNumber chunkOffset,
+									BTreePageItemLocator *loc,
+									const char *file, int line);
+
+/*
+ * The already-loaded early return does not position the caller's locator, so
+ * the call site is what a violation has to name.
+ */
+#define partial_load_chunk(partial, img, chunkOffset, loc) \
+	partial_load_chunk_impl((partial), (img), (chunkOffset), (loc), \
+							__FILE__, __LINE__)
 extern BTreeItemPageFitType page_locator_fits_item(BTreeDescr *desc,
 												   Page p,
 												   BTreePageItemLocator *locator,

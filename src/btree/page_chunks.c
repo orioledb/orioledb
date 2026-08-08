@@ -27,6 +27,12 @@
 #include "utils/page_pool.h"
 #include "utils/ucm.h"
 
+#ifdef USE_ASSERT_CHECKING
+static bool chunkStaleLocReported = false;
+#else
+#define chunkStaleLocReported true
+#endif
+
 #include "access/transam.h"
 #include "miscadmin.h"
 #include "utils/memdebug.h"
@@ -76,8 +82,9 @@ partial_load_hikeys_chunk(PartialPageState *partial, Page img)
  * Load chunk to the partial page.
  */
 bool
-partial_load_chunk(PartialPageState *partial, Page img,
-				   OffsetNumber chunkOffset, BTreePageItemLocator *loc)
+partial_load_chunk_impl(PartialPageState *partial, Page img,
+						OffsetNumber chunkOffset, BTreePageItemLocator *loc,
+						const char *file, int line)
 {
 	uint64		imgState = pg_atomic_read_u64(&(O_PAGE_HEADER(img)->state)),
 				srcState;
@@ -95,8 +102,16 @@ partial_load_chunk(PartialPageState *partial, Page img,
 		 * (possibly never-loaded) chunk while believing it points at
 		 * chunkOffset.
 		 */
-		Assert(loc == NULL || !partial->isPartial ||
-			   (loc->chunk != NULL && loc->chunkOffset == chunkOffset));
+		if (loc != NULL && partial->isPartial &&
+			(loc->chunk == NULL || loc->chunkOffset != chunkOffset) &&
+			!chunkStaleLocReported)
+		{
+			chunkStaleLocReported = true;
+			elog(LOG, "partial_load_chunk() left the locator stale at %s:%d: asked for chunk %u, locator on %u, chunk %p",
+				 file, line, chunkOffset,
+				 loc->chunk ? loc->chunkOffset : (OffsetNumber) -1,
+				 (void *) loc->chunk);
+		}
 		return true;
 	}
 
