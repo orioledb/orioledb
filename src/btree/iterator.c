@@ -537,6 +537,7 @@ o_btree_find_tuples_continue(BTreeIterator *it,
 			{
 				OTuple		cur;
 
+				ASSERT_CHUNK_LOADED(&context->partial, img, &next);
 				BTREE_PAGE_READ_TUPLE(cur, img, &next);
 				if (o_btree_cmp(desc, key, kind, &cur, BTreeKeyLeafTuple) == 0)
 				{
@@ -612,6 +613,7 @@ o_btree_find_tuples_continue(BTreeIterator *it,
 	/*
 	 * Fetch the relevant tuple version from the page.
 	 */
+	ASSERT_CHUNK_LOADED(&context->partial, img, loc);
 	return fetch_tuple_from_page(desc, img, loc, key, kind, &it->oSnapshot,
 								 it->tupleCxt, out_csn, deleted,
 								 it->fetchCallback, it->fetchCallbackArg);
@@ -992,6 +994,7 @@ advance_page_location_if_needed(BTreeIterator *it, void *key,
 		{
 			OTuple		tup;
 
+			ASSERT_CHUNK_LOADED(&it->context.partial, p, loc);
 			BTREE_PAGE_READ_TUPLE(tup, p, loc);
 			if (o_btree_cmp(it->context.desc, key, kind, &tup, BTreeKeyLeafTuple) < 0)
 				make_dec = true;
@@ -1112,6 +1115,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 		{
 			OTuple		tup;
 
+			ASSERT_CHUNK_LOADED(&it->context.partial, it->context.img, loc);
 			BTREE_PAGE_READ_LEAF_TUPLE(tup, it->context.img, loc);
 			copy_fixed_leaf_key(desc, &it->curKey, tup);
 			it->curKeySet = true;
@@ -1234,6 +1238,7 @@ o_btree_iterator_advance(BTreeIterator *it, void *key, BTreeKeyType kind)
 	{
 		OTuple		cur;
 
+		ASSERT_CHUNK_LOADED(&it->context.partial, it->context.img, loc);
 		BTREE_PAGE_READ_TUPLE(cur, it->context.img, loc);
 		if (o_btree_cmp(it->context.desc, key, kind,
 						&cur, BTreeKeyLeafTuple) <= 0)
@@ -1563,6 +1568,7 @@ get_next_combined_location(BTreeIterator *it)
 	{
 		BTreeLeafTuphdr *tupHdr;
 
+		ASSERT_CHUNK_LOADED(&context->partial, img, loc);
 		tupHdr = (BTreeLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(img, loc);
 
 		if (XACT_INFO_OXID_EQ(tupHdr->xactInfo, oxid))
@@ -1627,6 +1633,7 @@ iterator_refind_partial_leaf(BTreeIterator *it)
 				make_dec = true;
 			else
 			{
+				ASSERT_CHUNK_LOADED(&context->partial, context->img, loc);
 				BTREE_PAGE_READ_LEAF_TUPLE(tup, context->img, loc);
 				if (o_btree_cmp(desc, it->startKey, it->startKind,
 								&tup, BTreeKeyLeafTuple) < 0)
@@ -1670,6 +1677,7 @@ iterator_refind_partial_leaf(BTreeIterator *it)
 	 * find_page() leaves the locator on the first tuple >= curKey (its chunk
 	 * loaded), so it is safe to read here.
 	 */
+	ASSERT_CHUNK_LOADED(&context->partial, context->img, loc);
 	BTREE_PAGE_READ_LEAF_TUPLE(tup, context->img, loc);
 	match = o_btree_cmp(desc, &tup, BTreeKeyLeafTuple,
 						&it->curKey.tuple, BTreeKeyNonLeafKey) == 0;
@@ -1826,7 +1834,7 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 				STOPEVENT(STOPEVENT_ITERATOR_NEXT,
 						  btree_page_stopevent_params(desc, context->img));
 
-			/* In FETCH mode the leaf is partial; load this tuple's chunk. */
+			/* A partial (FETCH-read) leaf needs this tuple's chunk loaded. */
 			if (BTREE_PAGE_FIND_IS(context, FETCH) &&
 				!partial_load_chunk(&context->partial, context->img,
 									leaf_item->locator.chunkOffset, NULL))
@@ -1859,6 +1867,8 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 			 * about to consume this tuple, so mark it as returned: a later
 			 * re-find resumes after it.
 			 */
+			ASSERT_CHUNK_LOADED(&context->partial, context->img,
+								&leaf_item->locator);
 			BTREE_PAGE_READ_LEAF_TUPLE(posTup, context->img, &leaf_item->locator);
 
 			/*
@@ -2276,7 +2286,7 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 
 		if (BTREE_PAGE_LOCATOR_IS_VALID(img, loc))
 		{
-			/* In FETCH mode the leaf is partial; load this tuple's chunk. */
+			/* A partial (FETCH-read) leaf needs this tuple's chunk loaded. */
 			if (BTREE_PAGE_FIND_IS(context, FETCH) &&
 				!partial_load_chunk(&context->partial, context->img,
 									loc->chunkOffset, NULL))
@@ -2288,6 +2298,7 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 				iterator_refind_partial_leaf(it);
 				continue;
 			}
+			ASSERT_CHUNK_LOADED(&context->partial, context->img, loc);
 			BTREE_PAGE_READ_LEAF_ITEM(*tupHdr, result, context->img, loc);
 
 			/*

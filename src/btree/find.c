@@ -203,6 +203,7 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 		}
 	}
 
+	ASSERT_CHUNK_LOADED(intCxt->partial, intCxt->pagePtr, loc);
 	*tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt->pagePtr, loc);
 
 	return OBTreeFastPathFindOK;
@@ -261,6 +262,7 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 											intCxt->partial,
 											loc))
 			{
+				ASSERT_CHUNK_LOADED(intCxt->partial, intCxt->pagePtr, loc);
 				if (level > 0)
 					*tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt->pagePtr, loc);
 
@@ -352,6 +354,7 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 		return OBTreeFastPathFindRetry;
 	}
 
+	ASSERT_CHUNK_LOADED(intCxt->partial, intCxt->pagePtr, loc);
 	if (level > 0)
 		*tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt->pagePtr, loc);
 
@@ -1548,6 +1551,8 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 										loc.chunkOffset, NULL);
 		if (tup_loaded)
 		{
+			ASSERT_CHUNK_LOADED(&context->parentPartial, context->parentImg,
+								&loc);
 			BTREE_PAGE_READ_INTERNAL_ITEM(tuphdr, internalTuple, context->parentImg, &loc);
 			Assert(tuphdr != NULL);
 		}
@@ -1603,6 +1608,7 @@ refresh_context_leaf_lokey(OBTreeFindPageContext *context,
 	{
 		OTuple		lokey;
 
+		ASSERT_CHUNK_LOADED(&context->parentPartial, context->parentImg, loc);
 		BTREE_PAGE_READ_INTERNAL_TUPLE(lokey, context->parentImg, loc);
 		copy_fixed_key(context->desc, &context->leafLokey, lokey);
 	}
@@ -1688,6 +1694,8 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 
 			if (next_lokey_loaded && BTREE_PAGE_LOCATOR_IS_VALID(context->parentImg, &loc))
 			{
+				ASSERT_CHUNK_LOADED(&context->parentPartial,
+									context->parentImg, &loc);
 				tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(context->parentImg, &loc);
 
 				/*

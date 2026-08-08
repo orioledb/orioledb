@@ -287,6 +287,17 @@ btree_scan_init_shmem(Pointer ptr, bool found)
  * partial image and re-read the current key range through an iterator (the
  * bitmap fetch layer rechecks each tuple, so over-reading the range is safe).
  */
+/*
+ * ASSERT_CHUNK_LOADED() variants which pair a page with the partial read state
+ * describing it: a locator on any other image is checked against nothing.
+ */
+#define ASSERT_LEAF_CHUNK_LOADED(scan, page, loc) \
+	ASSERT_CHUNK_LOADED((page) == (scan)->leafImg ? &(scan)->leafPartial : NULL, \
+						(page), (loc))
+#define ASSERT_INT_CHUNK_LOADED(scan, page, loc) \
+	ASSERT_CHUNK_LOADED((page) == (scan)->context.img ? &(scan)->context.partial : NULL, \
+						(page), (loc))
+
 static inline bool
 seq_leaf_partial_ensure(BTreeSeqScan *scan, Page p, BTreePageItemLocator *loc)
 {
@@ -298,6 +309,7 @@ seq_leaf_partial_ensure(BTreeSeqScan *scan, Page p, BTreePageItemLocator *loc)
 		scan->leafPartialFailed = true;
 		return false;
 	}
+	ASSERT_LEAF_CHUNK_LOADED(scan, p, loc);
 	return true;
 }
 
@@ -329,9 +341,14 @@ seq_int_partial_ensure_hikeys(BTreeSeqScan *scan)
  * Sets scan->intPartialFailed and returns false on a concurrent modification.
  */
 static inline bool
-seq_int_partial_ensure(BTreeSeqScan *scan, BTreePageItemLocator *loc)
+seq_int_partial_ensure(BTreeSeqScan *scan, Page page, BTreePageItemLocator *loc)
 {
-	if (!scan->context.partial.isPartial)
+	/*
+	 * The parallel scan walks a shared whole-page image (curPage->img) with
+	 * its own locator; only a locator on scan->context.img describes chunks
+	 * of the partially read internal page.
+	 */
+	if (!scan->context.partial.isPartial || page != scan->context.img)
 		return true;
 
 	if (!partial_load_chunk(&scan->context.partial, scan->context.img,
@@ -340,6 +357,7 @@ seq_int_partial_ensure(BTreeSeqScan *scan, BTreePageItemLocator *loc)
 		scan->intPartialFailed = true;
 		return false;
 	}
+	ASSERT_INT_CHUNK_LOADED(scan, page, loc);
 	return true;
 }
 
@@ -614,7 +632,10 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 			OTuple		intTup;
 
 			if (*startOffset > 0)
+			{
+				ASSERT_INT_CHUNK_LOADED(scan, page, intLoc);
 				BTREE_PAGE_READ_INTERNAL_TUPLE(intTup, page, intLoc);
+			}
 			else
 				intTup = scan->context.lokey.tuple;
 
@@ -899,7 +920,7 @@ get_current_downlink_key(BTreeSeqScan *scan,
 	 * this downlink before reading it.  On a concurrent modification bail
 	 * with intPartialFailed set; get_next_downlink() re-reads the page whole.
 	 */
-	if (!seq_int_partial_ensure(scan, loc))
+	if (!seq_int_partial_ensure(scan, page, loc))
 	{
 		*downlink = 0;
 		clear_fixed_key(curKey);
@@ -944,7 +965,7 @@ get_next_key(BTreeSeqScan *scan, BTreePageItemLocator *intLoc, OFixedKey *nextKe
 		 * BTREE_PAGE_LOCATOR_NEXT step across a chunk boundary without the
 		 * data chunk; materialize the landed chunk before reading its key.
 		 */
-		if (!seq_int_partial_ensure(scan, intLoc))
+		if (!seq_int_partial_ensure(scan, page, intLoc))
 		{
 			clear_fixed_key(nextKey);
 			return;
@@ -2160,6 +2181,8 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 				OTuple		leafTuple;
 				int			cmp;
 
+				ASSERT_LEAF_CHUNK_LOADED(scan, scan->leafImg,
+										 &scan->leafLoc);
 				BTREE_PAGE_READ_LEAF_ITEM(tuphdr, leafTuple,
 										  scan->leafImg, &scan->leafLoc);
 
@@ -2398,6 +2421,7 @@ btree_seq_scan_getnext_raw_internal(BTreeSeqScan *scan, MemoryContext mctx,
 		}
 	}
 
+	ASSERT_LEAF_CHUNK_LOADED(scan, scan->leafImg, &scan->leafLoc);
 	BTREE_PAGE_READ_LEAF_ITEM(tupHdr, tuple, scan->leafImg, &scan->leafLoc);
 	BTREE_PAGE_LOCATOR_NEXT(scan->leafImg, &scan->leafLoc);
 
