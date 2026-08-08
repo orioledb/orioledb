@@ -913,8 +913,6 @@ finish_write_xids(uint32 chkpnum, bool shutdown)
 	int			i,
 				j,
 				k;
-	int			total_recovery_workers = recovery_pool_size_guc + recovery_idx_pool_size_guc;
-	bool	   *temp_file_loaded;
 
 	memset(&xidRec, 0, sizeof(xidRec));
 	ASAN_UNPOISON_MEMORY_REGION(&xidRec, sizeof(xidRec));
@@ -959,11 +957,31 @@ finish_write_xids(uint32 chkpnum, bool shutdown)
 		checkpoint_write_rewind_xids();
 
 	recovery_undo_loc_flush->immediateRequestCheckpointNumber = chkpnum;
+}
 
-	/*
-	 * Wait till recovery undo position will be flushed. But don't wait for
-	 * exited workers.
-	 */
+/*
+ * Wait till the recovery undo position is flushed for `chkpnum`.  But don't
+ * wait for exited workers.
+ *
+ * Split out of finish_write_xids() and called by o_perform_checkpoint() AFTER
+ * oXidQueueLock is released, and it must stay that way.  On a standby this
+ * waits for the startup process to run o_handle_startup_proc_interrupts_hook()
+ * (recovery.c), which is the only writer of completedCheckpointNumber.  Holding
+ * an LWLock raises InterruptHoldoffCount, so a checkpointer waiting here under
+ * oXidQueueLock could not absorb a ProcSignalBarrier -- and the startup process
+ * emits one from dbase_redo() (PROCSIGNAL_BARRIER_SMGRRELEASE) when it replays
+ * DROP DATABASE and then blocks in WaitForProcSignalBarrier() until every
+ * backend absorbs it.  That closed the loop: startup waited for the
+ * checkpointer's barrier, the checkpointer waited for startup's progress, and
+ * replay stopped forever (observed as "Replica failed to synchronize").
+ */
+static void
+wait_recovery_undo_loc_flushed(uint32 chkpnum, bool shutdown)
+{
+	int			i;
+	int			total_recovery_workers = recovery_pool_size_guc + recovery_idx_pool_size_guc;
+	bool	   *temp_file_loaded;
+
 	temp_file_loaded = (bool *) palloc0(sizeof(bool) * total_recovery_workers);
 	while (recovery_undo_loc_flush->completedCheckpointNumber <
 		   recovery_undo_loc_flush->immediateRequestCheckpointNumber)
@@ -993,6 +1011,13 @@ finish_write_xids(uint32 chkpnum, bool shutdown)
 
 		if (all_workers_done)
 			break;
+
+		/*
+		 * Absorb interrupts -- notably the ProcSignalBarrier the startup
+		 * process is waiting on (see the comment above).  Safe here only
+		 * because the caller has already released oXidQueueLock.
+		 */
+		CHECK_FOR_INTERRUPTS();
 
 		WakeupRecovery();
 		pg_usleep(10000L);
@@ -1585,6 +1610,16 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	finish_write_xids(cur_chkp_num, (flags & CHECKPOINT_IS_SHUTDOWN) ? true : false);
 	close_xids_file();
 	LWLockRelease(&checkpoint_state->oXidQueueLock);
+
+	/*
+	 * Only now, with oXidQueueLock released, wait for the recovery workers to
+	 * flush their undo positions: that wait depends on the startup process
+	 * making progress, and holding an LWLock across it deadlocks a standby
+	 * against dbase_redo()'s ProcSignalBarrier (see
+	 * wait_recovery_undo_loc_flushed()).
+	 */
+	wait_recovery_undo_loc_flushed(cur_chkp_num,
+								   (flags & CHECKPOINT_IS_SHUTDOWN) ? true : false);
 
 	for (i = 0; i < NUM_CHECKPOINTABLE_UNDO_LOGS; i++)
 	{
@@ -2899,6 +2934,22 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 		/* Lock already released by perform_writeback_and_relock() */
 		return NULL;
 	}
+
+	/*
+	 * perform_writeback_and_relock() unlocks the tree and re-fetches the
+	 * descriptor, so `descr` may be a different object than the one we
+	 * derived meta_page from.  A tree under checkpoint is supposed to be
+	 * protected from eviction, so the meta page must be the same one -- but
+	 * everything below still uses the meta_page captured before the unlock:
+	 * the copyBlknoLock that serialises us against the concurrent
+	 * get_free_disk_extent_copy_blkno() writers appending into
+	 * nextChkp[cur_chkp_index] (btree/io.c), and the datafileLength /
+	 * leafPagesNum / ctid / bridge_ctid values written into the map file
+	 * header.  If it ever diverged we would silently take the wrong lock and
+	 * persist another meta page's numbers, so assert the invariant instead of
+	 * trusting it.
+	 */
+	Assert(meta_page == BTREE_GET_META(descr));
 
 	Assert(checkpoint_state->curKeyType == CurKeyGreatest);
 	Assert(DiskDownlinkIsValid(root_downlink));

@@ -1312,6 +1312,56 @@ o_index_expr_redirect_sql_funcs(ExprState *state)
  * Requirements:
  * - oIndex != NULL, descr points to writable memory.
  */
+
+/*
+ * How many times o_index_fill_descr() re-reads the OTable trying to catch it
+ * at the same incarnation as the OIndex it already holds.  A DDL writes the
+ * pair back to back, so one retry is normally enough; the extra ones only
+ * cover being unlucky twice.
+ */
+#define O_INDEX_TABLE_FETCH_ATTEMPTS 8
+
+/*
+ * Incarnation counter that the OTable records for the given index kind.
+ * make_ctid_o_index() / make_primary_o_index() / make_toast_o_index() /
+ * make_bridge_o_index() write the same value into OIndex.indexVersion and
+ * into the field returned here, so the two records can be matched up.
+ * Index kinds that have no such counter return O_TABLE_INVALID_VERSION.
+ */
+static uint32
+o_index_table_ixversion(OTable *o_table, OIndexType type)
+{
+	switch (type)
+	{
+		case oIndexPrimary:
+			return o_table->primary_ixversion;
+		case oIndexToast:
+			return o_table->toast_ixversion;
+		case oIndexBridge:
+			return o_table->bridge_ixversion;
+		default:
+			return O_TABLE_INVALID_VERSION;
+	}
+}
+
+/*
+ * Do this OTable and OIndex describe the same incarnation of the relation?
+ * Only the kinds that carry a counter can be checked; for the rest, and while
+ * the counter is still uninitialized, we have nothing to compare and accept
+ * the pair.
+ */
+static bool
+o_index_table_versions_match(OTable *o_table, OIndex *oIndex)
+{
+	uint32		tableIxVersion = o_index_table_ixversion(o_table, oIndex->indexType);
+
+	if (tableIxVersion == O_TABLE_INVALID_VERSION ||
+		oIndex->indexVersion == O_TABLE_INVALID_VERSION)
+		return true;
+
+	return tableIxVersion == oIndex->indexVersion;
+}
+
 void
 o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTableSource source)
 {
@@ -1363,8 +1413,8 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 	 * hunt). Log which tree owns each freshly allocated primary leafTupdesc
 	 * and in which memory context -- if any path allocates outside the
 	 * long-lived descrCxt, that tupdesc is freed on a context reset without
-	 * nulling the descriptor field, explaining the aliased double-free.
-	 * Match the address against DESCRFREELEAF / DESCRFREE.
+	 * nulling the descriptor field, explaining the aliased double-free. Match
+	 * the address against DESCRFREELEAF / DESCRFREE.
 	 */
 	if (oIndex->indexType == oIndexPrimary)
 		elog(LOG, "DESCRALLOC primary tree=[%u/%u/%u] leafTupdesc=%p ctx=%s pid=%d",
@@ -1382,8 +1432,51 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 
 		if (source == oTableSourceContext)
 		{
-			oTable = o_tables_get_extended(descr->tableOids, *((OTableFetchContext *) o_table_source));
+			int			attempt;
+
+			/*
+			 * The OIndex above and the OTable here are two INDEPENDENT reads
+			 * of two sys trees, both under a dirty snapshot, while DDL writes
+			 * the pair in a fixed order (o_indices_update() then
+			 * o_tables_update()).  A read landing between those two writes
+			 * gets a NEW index record with an OLD table record.  That skew is
+			 * silent but lethal: o_tupdesc_load_constr() sizes
+			 * leafTupdesc->constr->missing[] from the table (nfields +
+			 * fields_start) while natts comes from the index (nLeafFields),
+			 * so FreeTupleDesc() later walks the missing[] array out of
+			 * bounds, or reads a by-value Datum through an entry whose
+			 * attbyval says by-reference, and pfree()s a bogus pointer.
+			 *
+			 * The two records carry a shared incarnation counter for exactly
+			 * this purpose: make_*_o_index() writes the same value into
+			 * oIndex->indexVersion and into the OTable's per-kind
+			 * *_ixversion.  So re-read the table until the pair agrees.
+			 */
+			for (attempt = 0; attempt < O_INDEX_TABLE_FETCH_ATTEMPTS; attempt++)
+			{
+				oTable = o_tables_get_extended(descr->tableOids, *((OTableFetchContext *) o_table_source));
+				if (oTable == NULL ||
+					o_index_table_versions_match(oTable, oIndex))
+					break;
+				o_table_free(oTable);
+				oTable = NULL;
+			}
 			free_oTable = (oTable != NULL);
+
+			/*
+			 * Losing the race repeatedly means something is wrong with the
+			 * version bookkeeping rather than with our timing; refuse to
+			 * build a skewed descriptor either way.
+			 */
+			if (oTable != NULL && !o_index_table_versions_match(oTable, oIndex))
+				elog(ERROR,
+					 "could not fetch a consistent OTable/OIndex pair for index \"%s\" "
+					 "(tree [%u/%u/%u], type %d, indexVersion %u, table ixversion %u)",
+					 oIndex->name.data,
+					 oIndex->indexOids.datoid, oIndex->indexOids.reloid,
+					 oIndex->indexOids.relnode, (int) oIndex->indexType,
+					 oIndex->indexVersion,
+					 o_index_table_ixversion(oTable, oIndex->indexType));
 		}
 		else
 		{
@@ -1395,6 +1488,7 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 		if (oTable)
 		{
 			o_tupdesc_load_constr(descr->leafTupdesc, oTable, descr);
+
 			/*
 			 * TEMP DESCRALLOCCONSTR instrumentation: log the constr chunk
 			 * address (lives in the per-descr index_mctx, unlike leafTupdesc

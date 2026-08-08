@@ -994,6 +994,19 @@ o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 
 	all_attrs += fields_start;
 
+	/*
+	 * FreeTupleDesc() walks missing[] over the whole [0, natts) range and
+	 * decides how to free each entry from TupleDescAttr(tupdesc,
+	 * i)->attbyval. So the array we build here must cover natts exactly, and
+	 * entry i must describe attribute i.  Both hold only while the OTable we
+	 * were handed and the OIndex that produced this tupdesc are the same
+	 * incarnation of the relation -- see the version check in
+	 * o_index_fill_descr().  If they ever diverge the mismatch is silent here
+	 * and only surfaces much later, as a pfree() of a bogus pointer inside
+	 * FreeTupleDesc().
+	 */
+	Assert(tupdesc->natts == all_attrs);
+
 	tupdesc->constr = (TupleConstr *) palloc0(sizeof(TupleConstr));
 	tupdesc->constr->missing = (AttrMissing *) palloc0(all_attrs * sizeof(AttrMissing));
 
@@ -1004,6 +1017,15 @@ o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 	{
 		OTableField *field = &o_table->fields[i];
 		AttrMissing *tupdesc_miss = &tupdesc->constr->missing[i + fields_start];
+
+		/*
+		 * The predicate used to copy the Datum here must be the one
+		 * FreeTupleDesc() will use to free it, or a by-value Datum gets
+		 * pfree()d as if it were a pointer.
+		 */
+		Assert(i + fields_start < tupdesc->natts);
+		Assert(TupleDescAttr(tupdesc, i + fields_start)->attbyval == field->byval);
+		Assert(TupleDescAttr(tupdesc, i + fields_start)->attlen == field->typlen);
 
 		tupdesc_miss->am_present = o_table->missing[i].am_present;
 
