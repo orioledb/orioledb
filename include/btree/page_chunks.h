@@ -32,18 +32,9 @@ typedef struct
 
 extern bool partial_load_hikeys_chunk(PartialPageState *partial, Page img);
 extern bool partial_load_full_page(PartialPageState *partial, Page img);
-extern bool partial_load_chunk_impl(PartialPageState *partial, Page img,
-									OffsetNumber chunkOffset,
-									BTreePageItemLocator *loc,
-									const char *file, int line);
-
-/*
- * The already-loaded early return does not position the caller's locator, so
- * the call site is what a violation has to name.
- */
-#define partial_load_chunk(partial, img, chunkOffset, loc) \
-	partial_load_chunk_impl((partial), (img), (chunkOffset), (loc), \
-							__FILE__, __LINE__)
+extern bool partial_load_chunk(PartialPageState *partial, Page img,
+							   OffsetNumber chunkOffset,
+							   BTreePageItemLocator *loc);
 extern BTreeItemPageFitType page_locator_fits_item(BTreeDescr *desc,
 												   Page p,
 												   BTreePageItemLocator *locator,
@@ -94,10 +85,9 @@ extern OffsetNumber page_locator_get_offset(Page p, BTreePageItemLocator *locato
  */
 #ifdef USE_ASSERT_CHECKING
 extern void assert_partial_chunk_loaded(PartialPageState *partial, Page img,
-										BTreePageItemLocator *locator,
-										const char *file, int line);
+										BTreePageItemLocator *locator);
 #define ASSERT_CHUNK_LOADED(partial, img, locator) \
-	assert_partial_chunk_loaded((partial), (img), (locator), __FILE__, __LINE__)
+	assert_partial_chunk_loaded((partial), (img), (locator))
 #else
 #define ASSERT_CHUNK_LOADED(partial, img, locator) ((void) 0)
 #endif
