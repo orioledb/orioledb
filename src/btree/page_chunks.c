@@ -19,6 +19,7 @@
 #include "btree/find.h"
 #include "btree/insert.h"
 #include "btree/page_chunks.h"
+#include "btree/page_state.h"
 #include "btree/undo.h"
 #include "recovery/recovery.h"
 #include "transam/undo.h"
@@ -1521,7 +1522,7 @@ page_locator_find_real_item(Page p, PartialPageState *partial,
 
 #ifdef USE_ASSERT_CHECKING
 #define CHUNK_LOADED_FMT \
-	"chunkOffset %u of %u, hikeysLoaded %d, loaded %d, itemOffset %u/%u, chunkDelta %ld, srcDelta %ld, chunkBegin %u"
+	"chunkOffset %u of %u, hikeysLoaded %d, loaded %d, itemOffset %u/%u, chunkDelta %ld, srcDelta %ld, chunkBegin %u, srcLocked %d, weLock %d, imgCC %u, srcCC %u, imgChunks %u, srcChunks %u"
 #define CHUNK_LOADED_ARGS \
 	locator->chunkOffset, header->chunksCount, \
 	(int) partial->hikeysChunkIsLoaded, \
@@ -1530,7 +1531,11 @@ page_locator_find_real_item(Page p, PartialPageState *partial,
 	locator->itemOffset, locator->chunkItemsCount, \
 	(long) ((Pointer) locator->chunk - (Pointer) img), \
 	(long) ((Pointer) locator->chunk - (Pointer) partial->src), \
-	(unsigned) SHORT_GET_LOCATION(header->chunkDesc[locator->chunkOffset].shortLocation)
+	(unsigned) SHORT_GET_LOCATION(header->chunkDesc[locator->chunkOffset].shortLocation), \
+	(int) (O_PAGE_STATE_IS_LOCKED(pg_atomic_read_u64(&(O_PAGE_HEADER(partial->src)->state))) ? 1 : 0), \
+	(int) have_locked_pages(), \
+	O_PAGE_GET_CHANGE_COUNT(img), O_PAGE_GET_CHANGE_COUNT(partial->src), \
+	header->chunksCount, ((BTreePageHeader *) partial->src)->chunksCount
 
 static bool chunkUnloadedReported = false;
 static bool chunkPositionReported = false;

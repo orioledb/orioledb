@@ -610,6 +610,7 @@ load_next_internal_page(BTreeSeqScan *scan, OTuple prevHikey,
 		 * previous hikey.  Otherwise, use iterator to correct the situation.
 		 */
 		*intLoc = scan->context.items[scan->context.index].locator;
+		ASSERT_INT_CHUNK_LOADED(scan, page, intLoc);
 		*startOffset = BTREE_PAGE_LOCATOR_GET_OFFSET(page, intLoc);
 		if (isBitmapJump)
 		{
