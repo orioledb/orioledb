@@ -940,7 +940,18 @@ close_xids_file(void)
 	{
 		uint64		flushedBefore = pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos);
 
-		flush_xids_queue();
+		/*
+		 * Must go through try_flush_xids_queue(): flush_xids_queue() is not
+		 * safe to run concurrently, and producers reach it holding
+		 * oXidQueueFlushLock.  Calling it directly from here raced them --
+		 * both sides read xidRecFlushPos, scan, clear the oxids they wrote
+		 * and then store their own endPos unconditionally, so the one that
+		 * started earlier could move xidRecFlushPos *backwards* onto slots
+		 * the other had already flushed and cleared.  From there the scan
+		 * meets an InvalidOXid that nobody will ever rewrite, and this loop
+		 * spins forever -- the standby shutdown stall.
+		 */
+		try_flush_xids_queue();
 
 		if (pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos) != flushedBefore)
 			continue;
