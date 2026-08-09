@@ -30,6 +30,7 @@
 #include "transam/oxid.h"
 #include "tuple/format.h"
 #include "utils/page_pool.h"
+#include "utils/seq_buf.h"
 #include "utils/stopevent.h"
 
 #include "fmgr.h"
@@ -200,6 +201,24 @@ free_meta_page(PagePool *pool, OInMemoryBlkno metaPageBlkno)
 				j;
 
 	meta_page = (BTreeMetaPage *) O_GET_IN_MEMORY_PAGE(metaPageBlkno);
+
+	/*
+	 * TEMP: this is the free path the seq_buf op ring was missing.  It drops
+	 * pages[0] of every seq buf before any pages[1], which is exactly the
+	 * progression the finalize-badpage captures show, and unlike
+	 * free_seq_buf_pages() it was never recorded -- so the ring showed no
+	 * free at all and the wipe looked like it came from nowhere.  Record it
+	 * as 'C' (cleanup) with the tree oids, so the next capture says whether
+	 * the tree being cleaned up is the one the checkpointer is finalizing (a
+	 * hole in the checkpoint-namespace locking) or a different one (the
+	 * checkpointer holding a stale descriptor).
+	 */
+	seq_buf_op_record('C', &meta_page->freeBuf, meta_page);
+	for (i = 0; i < 2; i++)
+	{
+		seq_buf_op_record('C', &meta_page->nextChkp[i], meta_page);
+		seq_buf_op_record('C', &meta_page->tmpBuf[i], meta_page);
+	}
 
 	for (i = 0; i < 2; i++)
 	{
