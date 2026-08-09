@@ -17,7 +17,6 @@
 #include "orioledb.h"
 
 #include "btree/page_state.h"
-#include "lib/stringinfo.h"
 #include "utils/dsa.h"
 #include "utils/ucm.h"
 
@@ -164,29 +163,42 @@ init_ucm(UsageCountMap *map, Pointer ptr, bool found)
 static void
 ucm_report_stuck(UsageCountMap *map, int i, int prev, int next, uint32 val)
 {
-	StringInfoData buf;
+	char		buf[1024];
+	int			off = 0;
 	int			j;
 
-	initStringInfo(&buf);
-	appendStringInfo(&buf,
-					 "UCMSTUCK node=%d %s total=%d nonLeaf=%d size=%u offset=%u "
-					 "epoch=%u prev=%d next=%d val=%08x",
-					 i, i < map->nonLeaf ? "internal" : "leaf",
-					 map->total, map->nonLeaf, map->size, map->offset,
-					 pg_atomic_read_u32(map->epoch), prev, next, val);
+#define APPEND(...) \
+	do { \
+		if (off < (int) sizeof(buf) - 1) \
+			off += snprintf(buf + off, sizeof(buf) - off, __VA_ARGS__); \
+		if (off > (int) sizeof(buf) - 1) \
+			off = sizeof(buf) - 1; \
+	} while (0)
+
+	/*
+	 * Must not allocate: ucm_inc_recursive() runs with a page locked, i.e.
+	 * inside a critical section, where palloc() trips "CritSectionCount == 0
+	 * || allowInCritSection".  Hence the stack buffer rather than a
+	 * StringInfo.
+	 */
+	APPEND("UCMSTUCK node=%d %s total=%d nonLeaf=%d size=%u offset=%u "
+		   "epoch=%u prev=%d next=%d val=%08x",
+		   i, i < map->nonLeaf ? "internal" : "leaf",
+		   map->total, map->nonLeaf, map->size, map->offset,
+		   pg_atomic_read_u32(map->epoch), prev, next, val);
 
 	if (prev != UCM_INVALID_LEVEL)
-		appendStringInfo(&buf, " prevCount=%u",
-						 (val >> (prev * UCM_LEVEL_BITS)) & UCM_LEVEL_MASK);
+		APPEND(" prevCount=%u",
+			   (val >> (prev * UCM_LEVEL_BITS)) & UCM_LEVEL_MASK);
 	if (next != UCM_INVALID_LEVEL)
-		appendStringInfo(&buf, " nextCount=%u",
-						 (val >> (next * UCM_LEVEL_BITS)) & UCM_LEVEL_MASK);
+		APPEND(" nextCount=%u",
+			   (val >> (next * UCM_LEVEL_BITS)) & UCM_LEVEL_MASK);
 
 	/* The chain up to the root: an imbalance is usually visible one level up. */
-	appendStringInfoString(&buf, " chain=");
+	APPEND(" chain=");
 	for (j = i; j >= UCM_BRANCH_FACTOR; j = (j / UCM_BRANCH_FACTOR) - 1)
-		appendStringInfo(&buf, "[%d]=%08x ", j, pg_atomic_read_u32(&map->ucm[j]));
-	appendStringInfo(&buf, "[%d]=%08x", j, pg_atomic_read_u32(&map->ucm[j]));
+		APPEND("[%d]=%08x ", j, pg_atomic_read_u32(&map->ucm[j]));
+	APPEND("[%d]=%08x", j, pg_atomic_read_u32(&map->ucm[j]));
 
 	/* For a leaf the page states are the ground truth. */
 	if (i >= map->nonLeaf && i < map->total)
@@ -197,23 +209,24 @@ ucm_report_stuck(UsageCountMap *map, int i, int prev, int next, uint32 val)
 		uint32		expected = 0;
 
 		blkno_max = Min((group_num + 1) * UCM_BRANCH_FACTOR, map->size);
-		appendStringInfoString(&buf, " pages=");
+		APPEND(" pages=");
 		for (blkno = group_num * UCM_BRANCH_FACTOR; blkno < blkno_max; blkno++)
 		{
 			Page		p = O_GET_IN_MEMORY_PAGE(blkno + map->offset);
 			uint32		usageCount;
 
 			usageCount = O_PAGE_STATE_GET_USAGE_COUNT(pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state)));
-			appendStringInfo(&buf, "%x", usageCount);
+			APPEND("%x", usageCount);
 			if (usageCount < UCM_LEVELS)
 				expected += (1 << (UCM_LEVEL_BITS * usageCount));
 		}
-		appendStringInfo(&buf, " expected=%08x %s", expected,
-						 expected == val ? "MATCH" : "MISMATCH");
+		APPEND(" expected=%08x %s", expected,
+			   expected == val ? "MATCH" : "MISMATCH");
 	}
 
-	elog(LOG, "%s", buf.data);
-	pfree(buf.data);
+#undef APPEND
+
+	elog(LOG, "%s", buf);
 }
 
 static void
