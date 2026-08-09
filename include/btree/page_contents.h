@@ -61,6 +61,18 @@ typedef struct
 
 	LWLock		punchHolesLock;
 	uint32		punchHolesChkpNum;
+
+	/*
+	 * Number of the checkpoint during which this tree's shared memory was
+	 * (re)initialized while that checkpoint was already working on the tree
+	 * -- a TRUNCATE replacing the tree inside
+	 * perform_writeback_and_relock()'s window, say.
+	 * checkpointable_tree_init() then sets the tree up as one that checkpoint
+	 * has already passed, and the checkpointer skips it when it comes back
+	 * and finds its own number here.  Zero means nothing to skip; no clearing
+	 * is needed because the number simply stops matching.
+	 */
+	uint32		reinitCheckpointNum;
 } BTreeMetaPage;
 
 StaticAssertDecl(sizeof(BTreeMetaPage) <= ORIOLEDB_BLCKSZ,

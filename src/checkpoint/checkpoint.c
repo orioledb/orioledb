@@ -618,6 +618,23 @@ perform_writeback_and_relock(BTreeDescr *desc,
 			return NULL;
 		}
 
+		/*
+		 * The tree was re-created while we had it released -- which is
+		 * exactly what a TRUNCATE of a table created in the current
+		 * transaction does, and this window is its opportunity.
+		 * checkpointable_tree_init() has already set the new tree up as one
+		 * this checkpoint has passed, so drop it here: the seq bufs we opened
+		 * for it are gone, and the ones it has now belong to the next
+		 * checkpoint.
+		 */
+		if (BTREE_GET_META(desc)->reinitCheckpointNum ==
+			checkpoint_state->lastCheckpointNumber + 1)
+		{
+			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
+			LWLockRelease(&checkpoint_state->oTablesMetaLock);
+			return NULL;
+		}
+
 		LWLockRelease(&checkpoint_state->oTablesMetaLock);
 	}
 	else
@@ -6211,22 +6228,41 @@ checkpointable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 	bool		checkpoint_concurrent;
 	uint32		chkp_num;
 	uint32		map_chkp_num;
+	uint32		skip_chkp_num = 0;
 	EvictedTreeData *evicted_tree_data = NULL;
 	bool		map_file_exists = false;
 
 	chkp_num = get_cur_checkpoint_number(&desc->oids, desc->type,
 										 &checkpoint_concurrent);
+
+	/*
+	 * Initializing shared memory while a checkpoint is working on this very
+	 * tree used to be simply forbidden -- the checkpointer set that memory up
+	 * before it started, so re-creating it underneath leaves the checkpointer
+	 * finalizing seq bufs whose pages were freed by init_meta_page().  But it
+	 * does happen: a TRUNCATE of a table created in the current transaction
+	 * frees the trees right away, and perform_writeback_and_relock() hands it
+	 * exactly the window to do so.
+	 *
+	 * Treat the tree as one the running checkpoint has already passed, the
+	 * same way get_cur_checkpoint_number() does for a tree behind the
+	 * checkpointer's position, and record which checkpoint must ignore it.
+	 * The checkpointer picks that up after its relock and skips the tree; the
+	 * next checkpoint sees a normally initialized one.
+	 */
+	if (init_shmem && checkpoint_concurrent)
+	{
+		skip_chkp_num = checkpoint_state->lastCheckpointNumber + 1;
+		chkp_num += 1;
+		checkpoint_concurrent = false;
+	}
+
 	map_chkp_num = chkp_num;
 
 	elog(DEBUG1, "checkpointable_tree_init: (%u, %u) chkp_num=%u concurrent=%d",
 		 desc->oids.datoid, desc->oids.relnode,
 		 chkp_num, checkpoint_concurrent);
 
-	/*
-	 * We shouldn't initialize shared memory concurrently to checkpoint.
-	 * Checkpointer should have initialized that before start working on this
-	 * tree.
-	 */
 	Assert(!init_shmem || !checkpoint_concurrent);
 
 	btree_open_smgr(desc);
@@ -6244,6 +6280,13 @@ checkpointable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 		ereport(FATAL, (errcode_for_file_access(),
 						errmsg("could not fill sequence buffers: %m")));
 	}
+
+	/*
+	 * init_meta_page() zeroed the meta page, so this has to land after the
+	 * initialization above.
+	 */
+	if (skip_chkp_num != 0)
+		BTREE_GET_META(desc)->reinitCheckpointNum = skip_chkp_num;
 
 	if (init_shmem && was_evicted)
 		*was_evicted = evicted_tree_data != NULL;
