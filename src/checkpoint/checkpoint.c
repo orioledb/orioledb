@@ -837,6 +837,16 @@ write_to_xids_queue(XidFileRec *rec)
 	target = &checkpoint_state->xidRecQueue[location % XID_RECS_QUEUE_SIZE];
 
 	/*
+	 * TEMP: a flushed slot is cleared to InvalidOXid, so `kind` is dead space
+	 * until we publish below.  Stamp the claiming pid there: it is what tells
+	 * the XIDQUEUEWAIT map apart -- a hole showing a pid was claimed and
+	 * never published, a hole showing a XidRecKind was never claimed in this
+	 * round at all.  (c4534e4f dropped this along with HOLD_INTERRUPTS and
+	 * blinded the map; the stall it was meant to fix is still there.)
+	 */
+	target->kind = (XidRecKind) MyProcPid;
+
+	/*
 	 * Flush queue to the file till our position is available for write.
 	 */
 	while (location >= pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos) + XID_RECS_QUEUE_SIZE)
