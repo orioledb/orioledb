@@ -17,6 +17,7 @@
 #include "orioledb.h"
 
 #include "btree/page_state.h"
+#include "lib/stringinfo.h"
 #include "utils/dsa.h"
 #include "utils/ucm.h"
 
@@ -29,6 +30,8 @@ bool		skip_ucm = false;
 static int	init_ucm_non_leaf_recursive(UsageCountMap *map, int i);
 static void ucm_inc_recursive(UsageCountMap *map, int i, int prev, int next);
 static bool ucm_check_recursive(UsageCountMap *map, int i);
+static void ucm_report_stuck(UsageCountMap *map, int i, int prev, int next,
+							 uint32 val);
 
 /*
  * Estimate shaed memory space for UCM data structure.
@@ -147,6 +150,72 @@ init_ucm(UsageCountMap *map, Pointer ptr, bool found)
 /*
  * Worker function, which recursively increments value of ucm map.
  */
+/*
+ * TEMP: report the state of the usage count map when ucm_inc_recursive() has
+ * been spinning long enough that perform_spin_delay() is about to PANIC with
+ * "stuck spinlock".  The wait there is not a lock: it waits for the counter of
+ * level "prev" to become non-zero (so it can be decremented) and for the
+ * counter of level "next" not to be saturated.  Both are supposed to be
+ * transient -- another process is mid-way through its own two-level update --
+ * so a permanent wait means the map disagrees with the pages it describes.
+ * Print enough to tell which of the two conditions is stuck, at which node,
+ * and -- for a leaf -- what the page states say the counters should be.
+ */
+static void
+ucm_report_stuck(UsageCountMap *map, int i, int prev, int next, uint32 val)
+{
+	StringInfoData buf;
+	int			j;
+
+	initStringInfo(&buf);
+	appendStringInfo(&buf,
+					 "UCMSTUCK node=%d %s total=%d nonLeaf=%d size=%u offset=%u "
+					 "epoch=%u prev=%d next=%d val=%08x",
+					 i, i < map->nonLeaf ? "internal" : "leaf",
+					 map->total, map->nonLeaf, map->size, map->offset,
+					 pg_atomic_read_u32(map->epoch), prev, next, val);
+
+	if (prev != UCM_INVALID_LEVEL)
+		appendStringInfo(&buf, " prevCount=%u",
+						 (val >> (prev * UCM_LEVEL_BITS)) & UCM_LEVEL_MASK);
+	if (next != UCM_INVALID_LEVEL)
+		appendStringInfo(&buf, " nextCount=%u",
+						 (val >> (next * UCM_LEVEL_BITS)) & UCM_LEVEL_MASK);
+
+	/* The chain up to the root: an imbalance is usually visible one level up. */
+	appendStringInfoString(&buf, " chain=");
+	for (j = i; j >= UCM_BRANCH_FACTOR; j = (j / UCM_BRANCH_FACTOR) - 1)
+		appendStringInfo(&buf, "[%d]=%08x ", j, pg_atomic_read_u32(&map->ucm[j]));
+	appendStringInfo(&buf, "[%d]=%08x", j, pg_atomic_read_u32(&map->ucm[j]));
+
+	/* For a leaf the page states are the ground truth. */
+	if (i >= map->nonLeaf && i < map->total)
+	{
+		int			group_num = i - map->nonLeaf;
+		OInMemoryBlkno blkno,
+					blkno_max;
+		uint32		expected = 0;
+
+		blkno_max = Min((group_num + 1) * UCM_BRANCH_FACTOR, map->size);
+		appendStringInfoString(&buf, " pages=");
+		for (blkno = group_num * UCM_BRANCH_FACTOR; blkno < blkno_max; blkno++)
+		{
+			Page		p = O_GET_IN_MEMORY_PAGE(blkno + map->offset);
+			uint32		usageCount;
+
+			usageCount = O_PAGE_STATE_GET_USAGE_COUNT(pg_atomic_read_u64(&(O_PAGE_HEADER(p)->state)));
+			appendStringInfo(&buf, "%x", usageCount);
+			if (usageCount < UCM_LEVELS)
+				expected += (1 << (UCM_LEVEL_BITS * usageCount));
+		}
+		appendStringInfo(&buf, " expected=%08x %s", expected,
+						 expected == val ? "MATCH" : "MISMATCH");
+	}
+
+	elog(LOG, "%s", buf.data);
+	pfree(buf.data);
+}
+
 static void
 ucm_inc_recursive(UsageCountMap *map, int i, int32 prev, int32 next)
 {
@@ -195,6 +264,8 @@ ucm_inc_recursive(UsageCountMap *map, int i, int32 prev, int32 next)
 			{
 				perform_spin_delay(&delayStatus);
 				val = pg_atomic_read_u32(&map->ucm[i]);
+				if (delayStatus.delays == 300)
+					ucm_report_stuck(map, i, prev, next, val);
 			}
 			finish_spin_delay(&delayStatus);
 		}
