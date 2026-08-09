@@ -765,6 +765,9 @@ flush_xids_queue(void)
 				location,
 				endPos;
 
+	Assert(LWLockHeldByMeInMode(&checkpoint_state->oXidQueueFlushLock,
+								LW_EXCLUSIVE));
+
 	open_xids_file();
 	startPos = pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos);
 	endPos = Min(pg_atomic_read_u64(&checkpoint_state->xidRecLastPos), startPos + XID_RECS_QUEUE_SIZE);
