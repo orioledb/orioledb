@@ -616,12 +616,18 @@ perform_writeback_and_relock(BTreeDescr *desc,
 		indexDescr = o_fetch_index_descr(treeOids, type, true, NULL);
 		if (!indexDescr)
 		{
+			elog(LOG, "CHKPSKIP no-descr tree=[%u/%u/%u] type=%d chkp=%u",
+				 treeOids.datoid, treeOids.reloid, treeOids.relnode, type,
+				 checkpoint_state->lastCheckpointNumber + 1);
 			LWLockRelease(&checkpoint_state->oTablesMetaLock);
 			return NULL;
 		}
 		desc = &indexDescr->desc;
 		if (!o_btree_load_shmem_checkpoint(desc))
 		{
+			elog(LOG, "CHKPSKIP no-shmem tree=[%u/%u/%u] type=%d chkp=%u",
+				 treeOids.datoid, treeOids.reloid, treeOids.relnode, type,
+				 checkpoint_state->lastCheckpointNumber + 1);
 			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 			LWLockRelease(&checkpoint_state->oTablesMetaLock);
 			return NULL;
@@ -639,6 +645,9 @@ perform_writeback_and_relock(BTreeDescr *desc,
 		if (BTREE_GET_META(desc)->reinitCheckpointNum ==
 			checkpoint_state->lastCheckpointNumber + 1)
 		{
+			elog(LOG, "CHKPSKIP reinit tree=[%u/%u/%u] type=%d chkp=%u",
+				 treeOids.datoid, treeOids.reloid, treeOids.relnode, type,
+				 checkpoint_state->lastCheckpointNumber + 1);
 			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 			LWLockRelease(&checkpoint_state->oTablesMetaLock);
 			return NULL;
@@ -652,9 +661,8 @@ perform_writeback_and_relock(BTreeDescr *desc,
 		 * pointers can now address a freed (and possibly recycled) page, and
 		 * the finalize at the end of checkpoint_ix() reads pages[] out of it:
 		 *
-		 * r  checkpointer  lock=S   attach, binds .shared C  backend
-		 * lock=X   free_meta_page() F  checkpointer  lock=S
-		 * seq_buf_finalize() -> TRAP
+		 * r  checkpointer  lock=S   attach, binds .shared C  backend lock=X
+		 * free_meta_page() F  checkpointer  lock=S seq_buf_finalize() -> TRAP
 		 *
 		 * (the seq buf op ring, run 31325040926 job on amd64/18/gcc/r2; the
 		 * two conflicting modes coexist only because we released in between).
@@ -667,6 +675,7 @@ perform_writeback_and_relock(BTreeDescr *desc,
 			SharedRootInfoKey key;
 			SharedRootInfo *sharedRootInfo;
 			bool		gone;
+			bool		found;
 
 			key.datoid = desc->oids.datoid;
 			key.relnode = desc->oids.relnode;
@@ -679,11 +688,17 @@ perform_writeback_and_relock(BTreeDescr *desc,
 					sharedRootInfo->rootInfo.metaPageBlkno !=
 					desc->rootInfo.metaPageBlkno);
 
+			found = (sharedRootInfo != NULL);
 			if (sharedRootInfo)
 				pfree(sharedRootInfo);
 
 			if (gone)
 			{
+				elog(LOG, "CHKPSKIP dropped tree=[%u/%u/%u] type=%d chkp=%u "
+					 "meta=%u->%u sri=%d",
+					 treeOids.datoid, treeOids.reloid, treeOids.relnode, type,
+					 checkpoint_state->lastCheckpointNumber + 1,
+					 oldMetaBlkno, desc->rootInfo.metaPageBlkno, found);
 				o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 				LWLockRelease(&checkpoint_state->oTablesMetaLock);
 				return NULL;
