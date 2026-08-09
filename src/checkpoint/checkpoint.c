@@ -814,6 +814,15 @@ write_to_xids_queue(XidFileRec *rec)
 	Assert(OXidIsValid(rec->oxid));
 
 	/*
+	 * TEMP: a flushed slot is cleared to InvalidOXid, so until we publish the
+	 * record below nobody reads this slot and `kind` is dead space.  Stash
+	 * the claiming pid there so the XIDQUEUEWAIT map can name whoever is
+	 * sitting on an unpublished slot.  The publish overwrites it with the
+	 * real kind before oxid becomes visible.
+	 */
+	target->kind = (XidRecKind) MyProcPid;
+
+	/*
 	 * The fetch_add above already claimed this slot, and close_xids_file()
 	 * waits for every claimed slot to be published.  So we must not leave
 	 * without publishing: an ERROR here -- "terminating orioledb worker due
@@ -938,8 +947,13 @@ close_xids_file(void)
 
 				published = OXidIsValid(checkpoint_state->xidRecQueue[loc % XID_RECS_QUEUE_SIZE].oxid);
 				if (published)
+				{
 					npub++;
-				appendStringInfoChar(&sbuf, published ? '+' : '.');
+					appendStringInfoChar(&sbuf, '+');
+				}
+				else
+					appendStringInfo(&sbuf, "[%d]",
+									 (int) checkpoint_state->xidRecQueue[loc % XID_RECS_QUEUE_SIZE].kind);
 			}
 			elog(LOG, "XIDQUEUEWAIT stalled=%ds flushPos=" UINT64_FORMAT " lastPos=" UINT64_FORMAT " outstanding=" UINT64_FORMAT " published=%d qsize=%d map=%s",
 				 stalled_us / 1000000, flushPos, lastPos, lastPos - flushPos,
@@ -4169,6 +4183,29 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 				{
 					Assert(state->stack[level].autonomous == false);
 					parent_dirty = false;
+
+					/*
+					 * TEMP: a page whose extent went invalid under us looks a
+					 * lot like the seq_buf finalize-badpage crash -- both are
+					 * the checkpointer finding state it owns already torn
+					 * down, and o_btree_cleanup_pages() frees the tree's
+					 * pages and its meta page's seq buf pages in one go.
+					 * Dump the op ring for this tree's meta seq bufs so a
+					 * capture shows whether a 'C' (cleanup) landed on this
+					 * very tree.
+					 */
+					if (!FileExtentIsValid(O_GET_IN_MEMORY_PAGEDESC(blkno)->fileExtent))
+					{
+						BTreeMetaPage *mp = BTREE_GET_META(descr);
+
+						elog(LOG, "EXTENTINVALID tree=[%u/%u/%u] type=%d blkno=%u level=%d pid=%d",
+							 descr->oids.datoid, descr->oids.reloid,
+							 descr->oids.relnode, (int) descr->type,
+							 blkno, level, MyProcPid);
+						seq_buf_op_dump(&mp->freeBuf, "extent-invalid/freeBuf");
+						seq_buf_op_dump(&mp->nextChkp[0], "extent-invalid/nextChkp0");
+						seq_buf_op_dump(&mp->nextChkp[1], "extent-invalid/nextChkp1");
+					}
 					Assert(FileExtentIsValid(O_GET_IN_MEMORY_PAGEDESC(blkno)->fileExtent));
 					downlink = MAKE_ON_DISK_DOWNLINK(O_GET_IN_MEMORY_PAGEDESC(blkno)->fileExtent);
 
