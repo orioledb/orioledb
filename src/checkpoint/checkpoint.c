@@ -62,6 +62,14 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 
+/*
+ * TEMP: marks a queue slot as claimed but not yet published.  Lives in the
+ * high bits of retainLocation, which no real undo location reaches, so a hole
+ * in the XIDQUEUEWAIT map can say whether anyone ever claimed it.
+ */
+#define XIDQUEUE_CLAIM_MASK		UINT64CONST(0xFFFF000000000000)
+#define XIDQUEUE_CLAIM_MAGIC	UINT64CONST(0xC1A1000000000000)
+
 static void before_writing_xids_file(int chkpnum);
 
 /*
@@ -980,15 +988,20 @@ close_xids_file(void)
 			{
 				bool		published;
 
-				published = OXidIsValid(checkpoint_state->xidRecQueue[loc % XID_RECS_QUEUE_SIZE].oxid);
+				XidFileRec *slot = &checkpoint_state->xidRecQueue[loc % XID_RECS_QUEUE_SIZE];
+
+				published = OXidIsValid(slot->oxid);
 				if (published)
 				{
 					npub++;
 					appendStringInfoChar(&sbuf, '+');
 				}
+				else if ((slot->retainLocation & XIDQUEUE_CLAIM_MASK) == XIDQUEUE_CLAIM_MAGIC)
+					appendStringInfo(&sbuf, "[claimed pid=%d]",
+									 (int) (slot->retainLocation & 0xFFFFFFFF));
 				else
-					appendStringInfo(&sbuf, "[%d]",
-									 (int) checkpoint_state->xidRecQueue[loc % XID_RECS_QUEUE_SIZE].kind);
+					appendStringInfo(&sbuf, "[unclaimed kind=%d]",
+									 (int) slot->kind);
 			}
 			elog(LOG, "XIDQUEUEWAIT stalled=%ds flushPos=" UINT64_FORMAT " lastPos=" UINT64_FORMAT " outstanding=" UINT64_FORMAT " published=%d qsize=%d map=%s",
 				 stalled_us / 1000000, flushPos, lastPos, lastPos - flushPos,
