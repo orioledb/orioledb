@@ -991,6 +991,8 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 
 		for (i = 0; i < dropNumTrees; i++)
 		{
+			bool		dropBridgeMarker = false;
+
 			if (!recovery)
 				o_tables_rel_lock_exclusive_no_inval_no_log(&dropTrees[i].oids);
 			o_tables_rel_lock_extended_no_inval(&dropTrees[i].oids,
@@ -1012,16 +1014,32 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 				 * commit: an aborted create's marker is removed by the
 				 * register_delete pending-delete instead.
 				 */
-				if (stage == OUndoCallbackStageCommit &&
-					dropTrees[i].oids.reloid == dropTrees[i].oids.relnode)
-					o_bridge_drop_relnode_marker(dropTrees[i].oids.datoid,
-												 dropTrees[i].oids.spcoid,
-												 dropTrees[i].oids.relnode);
+				dropBridgeMarker = (stage == OUndoCallbackStageCommit &&
+									dropTrees[i].oids.reloid == dropTrees[i].oids.relnode);
 			}
 			o_invalidate_oids(dropTrees[i].oids);
 			if (!recovery)
 				o_tables_rel_unlock_extended(&dropTrees[i].oids, AccessExclusiveLock, false);
 			o_tables_rel_unlock_extended(&dropTrees[i].oids, AccessExclusiveLock, true);
+
+			/*
+			 * Drop the marker only once the locks are gone.  It unlinks a
+			 * relation file, and smgr's RegisterSyncRequest() waits for the
+			 * checkpointer to drain its request queue when that queue is
+			 * full.  The checkpointer takes this very lock in AccessShare
+			 * while fetching an index descriptor, so holding it here is a
+			 * deadlock: it cannot absorb the queue until we release, and we
+			 * cannot release until it absorbs.  Neither side is visible to
+			 * the deadlock detector -- ours is a latch wait, not a lock wait
+			 * -- so the cluster simply stops (seen as the recurring
+			 * 027_stream_regress hang).  Dropping the marker later is safe:
+			 * the tree is already durably gone, and the marker only exists to
+			 * keep PG from reusing the relnode until then.
+			 */
+			if (dropBridgeMarker)
+				o_bridge_drop_relnode_marker(dropTrees[i].oids.datoid,
+											 dropTrees[i].oids.spcoid,
+											 dropTrees[i].oids.relnode);
 		}
 	}
 

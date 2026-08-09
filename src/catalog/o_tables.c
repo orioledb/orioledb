@@ -56,6 +56,7 @@
 #include "optimizer/optimizer.h"
 #include "parser/parse_relation.h"
 #include "pgstat.h"
+#include "postmaster/bgwriter.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"
@@ -1785,7 +1786,26 @@ o_tables_rel_lock_extended(ORelOids *oids, int lockmode, bool checkpoint)
 	if (lockmode == AccessExclusiveLock && checkpoint)
 		locktag.locktag_lockmethodid = NO_LOG_LOCKMETHOD;
 
-	LockAcquire(&locktag, lockmode, false, false);
+	if (checkpoint && AmCheckpointerProcess())
+	{
+		/*
+		 * The holder of this lock may be blocked in RegisterSyncRequest()
+		 * waiting for us to drain the sync request queue -- an undo callback
+		 * unlinking a relation file does exactly that.  Plain waiting would
+		 * then deadlock, and invisibly: our wait is a lock wait, theirs is a
+		 * latch wait, so the deadlock detector sees no cycle.  Keep draining
+		 * between attempts, like acquire_chkp_lock_drain() does for the
+		 * checkpoint-coordination LWLocks.
+		 */
+		while (LockAcquire(&locktag, lockmode, false, true) == LOCKACQUIRE_NOT_AVAIL)
+		{
+			AbsorbSyncRequests();
+			pg_usleep(1000L);
+			CHECK_FOR_INTERRUPTS();
+		}
+	}
+	else
+		LockAcquire(&locktag, lockmode, false, false);
 	AcceptInvalidationMessages();
 }
 
