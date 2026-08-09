@@ -56,7 +56,8 @@ class TruncateUnderCheckpointTest(BaseTest):
 		)
 		node.safe_psql('postgres', "CHECKPOINT;")
 		node.safe_psql(
-		    'postgres', "UPDATE o_park SET val = repeat('q', 200) WHERE id % 5 = 0;\n"
+		    'postgres',
+		    "UPDATE o_park SET val = repeat('q', 200) WHERE id % 5 = 0;\n"
 		    "UPDATE o_victim SET val = repeat('w', 200) WHERE id % 5 = 0;\n")
 
 		con1 = node.connect()
@@ -159,8 +160,9 @@ class TruncateUnderCheckpointTest(BaseTest):
 		con1.begin()
 		con1.execute("CREATE TABLE o_nt (id int NOT NULL, val text,\n"
 		             "	PRIMARY KEY (id)) USING orioledb;")
-		con1.execute("INSERT INTO o_nt\n"
-		             "	SELECT i, repeat('n', 200) FROM generate_series(1, 5000) i;")
+		con1.execute(
+		    "INSERT INTO o_nt\n"
+		    "	SELECT i, repeat('n', 200) FROM generate_series(1, 5000) i;")
 
 		con2.execute("SELECT pg_stopevent_set('checkpoint_writeback',\n"
 		             "'$.treeName == \"o_nt_pkey\"');")
@@ -171,8 +173,9 @@ class TruncateUnderCheckpointTest(BaseTest):
 
 		# The checkpointer released o_nt's tree here and is about to re-fetch it.
 		con1.execute("TRUNCATE o_nt;")
-		con1.execute("INSERT INTO o_nt\n"
-		             "	SELECT i, repeat('m', 200) FROM generate_series(1, 2000) i;")
+		con1.execute(
+		    "INSERT INTO o_nt\n"
+		    "	SELECT i, repeat('m', 200) FROM generate_series(1, 2000) i;")
 
 		con2.execute("SELECT pg_stopevent_reset('checkpoint_writeback')")
 		con2.close()

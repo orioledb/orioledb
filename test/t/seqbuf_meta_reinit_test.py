@@ -62,8 +62,9 @@ class SeqBufMetaReinitTest(BaseTest):
 		# tree (root included) out of shared memory and read it back: the read
 		# goes through evictable_tree_init(init_shmem = true), which wipes both
 		# slots and restores only the next one.
-		node.safe_psql('postgres',
-		               "SELECT orioledb_evict_pages('o_seqbuf'::regclass, -1);")
+		node.safe_psql(
+		    'postgres',
+		    "SELECT orioledb_evict_pages('o_seqbuf'::regclass, -1);")
 		node.safe_psql('postgres', "SELECT count(*) FROM o_seqbuf;")
 
 		con2.execute("SELECT pg_stopevent_reset('checkpoint_writeback')")
