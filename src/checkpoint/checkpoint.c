@@ -301,6 +301,7 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 		checkpoint_state->oSharedRootInfoInsertTrancheId = LWLockNewTrancheId();
 		checkpoint_state->oXidQueueTrancheId = LWLockNewTrancheId();
 		checkpoint_state->oXidQueueFlushTrancheId = LWLockNewTrancheId();
+		checkpoint_state->oXidQueueResetTrancheId = LWLockNewTrancheId();
 		checkpoint_state->copyBlknoTrancheId = LWLockNewTrancheId();
 		checkpoint_state->oMetaTrancheId = LWLockNewTrancheId();
 		checkpoint_state->punchHolesTrancheId = LWLockNewTrancheId();
@@ -315,6 +316,8 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 						 checkpoint_state->oXidQueueTrancheId);
 		LWLockInitialize(&checkpoint_state->oXidQueueFlushLock,
 						 checkpoint_state->oXidQueueFlushTrancheId);
+		LWLockInitialize(&checkpoint_state->oXidQueueResetLock,
+						 checkpoint_state->oXidQueueResetTrancheId);
 		pg_atomic_init_u64(&checkpoint_state->xidRecLastPos, 0);
 		pg_atomic_init_u64(&checkpoint_state->xidRecFlushPos, 0);
 		memset(checkpoint_state->xidRecQueue,
@@ -419,6 +422,8 @@ checkpoint_shmem_init(Pointer ptr, bool found)
 						  "OXidQueueTranche");
 	LWLockRegisterTranche(checkpoint_state->oXidQueueFlushTrancheId,
 						  "OXidQueueFlushTrancheId");
+	LWLockRegisterTranche(checkpoint_state->oXidQueueResetTrancheId,
+						  "OXidQueueResetTranche");
 	LWLockRegisterTranche(checkpoint_state->oSharedRootInfoInsertTrancheId,
 						  "OSharedRootInfoInsertTranche");
 }
@@ -808,37 +813,28 @@ try_flush_xids_queue(void)
 void
 write_to_xids_queue(XidFileRec *rec)
 {
-	uint64		location = pg_atomic_fetch_add_u64(&checkpoint_state->xidRecLastPos, 1);
-	XidFileRec *target = &checkpoint_state->xidRecQueue[location % XID_RECS_QUEUE_SIZE];
+	uint64		location;
+	XidFileRec *target;
 
 	Assert(OXidIsValid(rec->oxid));
 
 	/*
-	 * TEMP: a flushed slot is cleared to InvalidOXid, so until we publish the
-	 * record below nobody reads this slot and `kind` is dead space.  Stash
-	 * the claiming pid there so the XIDQUEUEWAIT map can name whoever is
-	 * sitting on an unpublished slot.  The publish overwrites it with the
-	 * real kind before oxid becomes visible.
-	 */
-	target->kind = (XidRecKind) MyProcPid;
-
-	/*
-	 * The fetch_add above already claimed this slot, and close_xids_file()
-	 * waits for every claimed slot to be published.  So we must not leave
-	 * without publishing: an ERROR here -- "terminating orioledb worker due
-	 * to administrator command" arriving while we wait below -- would leave
-	 * the slot holding InvalidOXid forever, and the checkpointer would wait
-	 * on a record nobody will ever write.  A standby caught exactly that,
-	 * failing its fast shutdown with flushPos stuck 24 slots behind lastPos
-	 * on a slot whose oxid was InvalidOXid.
+	 * Hold the reset barrier from claiming the slot until the record is
+	 * published.  before_writing_xids_file() resets xidRecLastPos /
+	 * xidRecFlushPos and clears the queue at the start of every checkpoint;
+	 * without this a producer that claimed a position in the old numbering
+	 * stores into a slot the new one never handed out, and the queue's
+	 * position-to-slot correspondence is gone -- close_xids_file() then waits
+	 * forever on a hole nobody will fill.
 	 *
-	 * The hole cannot be repaired after the fact either: the file is a flat
-	 * array of xidRecLastPos records and its reader feeds every one of them
-	 * to advance_oxids(), so there is no value that means "skip me".  Hold
-	 * interrupts across the window instead; the wait is bounded by the
-	 * checkpointer draining the queue.
+	 * It cannot be oXidQueueLock, which the checkpointer holds EXCLUSIVE
+	 * across the entire checkpoint body: this side would then block for the
+	 * whole checkpoint while close_xids_file() waits for it.
 	 */
-	HOLD_INTERRUPTS();
+	LWLockAcquire(&checkpoint_state->oXidQueueResetLock, LW_SHARED);
+
+	location = pg_atomic_fetch_add_u64(&checkpoint_state->xidRecLastPos, 1);
+	target = &checkpoint_state->xidRecQueue[location % XID_RECS_QUEUE_SIZE];
 
 	/*
 	 * Flush queue to the file till our position is available for write.
@@ -854,7 +850,7 @@ write_to_xids_queue(XidFileRec *rec)
 
 	target->oxid = rec->oxid;
 
-	RESUME_INTERRUPTS();
+	LWLockRelease(&checkpoint_state->oXidQueueResetLock);
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(target, sizeof(*target));
 }
@@ -869,6 +865,16 @@ before_writing_xids_file(int chkpnum)
 
 	if (checkpoint_state->xidQueueCheckpointNum < chkpnum)
 	{
+		/*
+		 * Exclude in-flight producers while the numbering restarts.  They
+		 * hold this barrier SHARED from claiming a slot until they publish
+		 * it, so taking it EXCLUSIVE here guarantees no store lands in a slot
+		 * that was claimed under the previous numbering.  The window is just
+		 * the reset -- nothing here waits on a producer, so there is no
+		 * cycle.
+		 */
+		LWLockAcquire(&checkpoint_state->oXidQueueResetLock, LW_EXCLUSIVE);
+
 		checkpoint_state->xidQueueCheckpointNum = chkpnum;
 		pg_atomic_write_u64(&checkpoint_state->xidRecLastPos, 0);
 		pg_atomic_write_u64(&checkpoint_state->xidRecFlushPos, 0);
@@ -877,6 +883,8 @@ before_writing_xids_file(int chkpnum)
 			   sizeof(XidFileRec) * XID_RECS_QUEUE_SIZE);
 		for (i = 0; i < XID_RECS_QUEUE_SIZE; i++)
 			checkpoint_state->xidRecQueue[i].oxid = InvalidOXid;
+
+		LWLockRelease(&checkpoint_state->oXidQueueResetLock);
 	}
 }
 
@@ -4189,10 +4197,9 @@ checkpoint_btree_loop(BTreeDescr **descrPtr,
 					 * lot like the seq_buf finalize-badpage crash -- both are
 					 * the checkpointer finding state it owns already torn
 					 * down, and o_btree_cleanup_pages() frees the tree's
-					 * pages and its meta page's seq buf pages in one go.
-					 * Dump the op ring for this tree's meta seq bufs so a
-					 * capture shows whether a 'C' (cleanup) landed on this
-					 * very tree.
+					 * pages and its meta page's seq buf pages in one go. Dump
+					 * the op ring for this tree's meta seq bufs so a capture
+					 * shows whether a 'C' (cleanup) landed on this very tree.
 					 */
 					if (!FileExtentIsValid(O_GET_IN_MEMORY_PAGEDESC(blkno)->fileExtent))
 					{

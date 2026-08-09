@@ -213,6 +213,17 @@ typedef struct
 	LWLock		oXidQueueLock;
 	int			oXidQueueFlushTrancheId;
 	LWLock		oXidQueueFlushLock;
+
+	/*
+	 * Barrier between producers filling the xid record queue and the reset
+	 * that before_writing_xids_file() performs at the start of a checkpoint.
+	 * Producers hold it SHARED from claiming their slot until they publish
+	 * it, the reset takes it EXCLUSIVE.  It cannot be oXidQueueLock: that one
+	 * is held EXCLUSIVE across the whole checkpoint body, including the drain
+	 * in close_xids_file() which waits for these very producers.
+	 */
+	int			oXidQueueResetTrancheId;
+	LWLock		oXidQueueResetLock;
 	int			copyBlknoTrancheId;
 	int			oMetaTrancheId;
 	int			punchHolesTrancheId;
