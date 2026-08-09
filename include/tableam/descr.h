@@ -128,8 +128,8 @@ struct OIndexDescr
 	 * AcceptInvalidationMessages -> o_invalidate_descrs() reentrantly.
 	 * o_invalidate_descrs_internal() skips entries with this flag so it never
 	 * frees a half-built descriptor (which would FreeTupleDesc() a stale
-	 * leafTupdesc and corrupt/double-free the shared descrCxt chunk).
-	 * Cleared by reset_filling_descrs() on error.
+	 * leafTupdesc and corrupt/double-free the shared descrCxt chunk). Cleared
+	 * by reset_filling_descrs() on error.
 	 */
 	bool		fill_in_progress;
 

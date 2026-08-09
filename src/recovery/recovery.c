@@ -2175,7 +2175,7 @@ typedef struct
 	OXid		oxid;
 	const char *site;
 	int			worker_id;
-}			RecXidRemovedRec;
+} RecXidRemovedRec;
 static RecXidRemovedRec recxid_removed_ring[RECXID_REMOVED_RING];
 static uint32 recxid_removed_pos = 0;
 

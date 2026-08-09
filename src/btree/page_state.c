@@ -52,6 +52,7 @@ typedef struct
 	OInMemoryBlkno blkno;
 	uint64		state;
 #ifdef CHECK_PAGE_STRUCT
+
 	/*
 	 * Checksum of the page content (everything except the OrioleDBPageHeader)
 	 * and the header's pageChangeCount, both captured when the page was
@@ -62,10 +63,11 @@ typedef struct
 	uint32		lockPageChangeCount;
 
 	/*
-	 * Set when the page was locked blindly by a stale (blkno, pageChangeCount)
-	 * hint and turned out not to be our B-tree page (possibly a seq_buf or
-	 * meta page, see try_lock_page_and_check()).  Its content is not under our
-	 * control, so unlock_check_page() skips all structural checks for it.
+	 * Set when the page was locked blindly by a stale (blkno,
+	 * pageChangeCount) hint and turned out not to be our B-tree page
+	 * (possibly a seq_buf or meta page, see try_lock_page_and_check()).  Its
+	 * content is not under our control, so unlock_check_page() skips all
+	 * structural checks for it.
 	 */
 	bool		skipContentCheck;
 #endif
@@ -1053,11 +1055,12 @@ page_block_reads(OInMemoryBlkno blkno)
 		return;
 
 #ifdef CHECK_PAGE_STRUCT
+
 	/*
 	 * Reads must be blocked BEFORE the page is modified: otherwise a lockless
-	 * reader could copy a half-modified image without the change count telling
-	 * it to retry.  So at the first page_block_reads() the content must still
-	 * equal what was there at lock time.
+	 * reader could copy a half-modified image without the change count
+	 * telling it to retry.  So at the first page_block_reads() the content
+	 * must still equal what was there at lock time.
 	 */
 	Assert(o_page_content_checksum(p) == myLockedPages[i].lockContentChecksum);
 	/* Re-baseline: modifications after this point are announced to readers. */
@@ -1132,10 +1135,11 @@ unlock_check_page(OInMemoryBlkno blkno)
 		int			idx = get_my_locked_page_index(blkno);
 
 		/*
-		 * The page may have been locked blindly by a stale hint and turned out
-		 * not to be a B-tree page of ours (see try_lock_page_and_check()).
-		 * Skip all structural checks in that case: neither the page structure
-		 * nor its content is under our control.
+		 * The page may have been locked blindly by a stale hint and turned
+		 * out not to be a B-tree page of ours (see
+		 * try_lock_page_and_check()). Skip all structural checks in that
+		 * case: neither the page structure nor its content is under our
+		 * control.
 		 */
 		if (idx >= 0 && myLockedPages[idx].skipContentCheck)
 			return;
@@ -1146,16 +1150,15 @@ unlock_check_page(OInMemoryBlkno blkno)
 		/*
 		 * If the page content (everything except the OrioleDBPageHeader)
 		 * changed while we held the lock, then the modification must be
-		 * observable to concurrent readers through a change count.  That means
-		 * one of:
-		 *   - OrioleDBPageHeader.pageChangeCount was bumped
-		 *     (O_PAGE_CHANGE_COUNT_INC, e.g. eviction/split), or
-		 *   - the state change-count bits (PAGE_STATE_CHANGE_COUNT_MASK) were
-		 *     already bumped, or
-		 *   - reads are blocked on this page (PAGE_STATE_NO_READ_FLAG): the
-		 *     state change-count bits are bumped by unlock_page_internal() right
-		 *     after this check, so this modification is still covered.
-		 * Otherwise a reader relying on the change count could miss the change.
+		 * observable to concurrent readers through a change count.  That
+		 * means one of: - OrioleDBPageHeader.pageChangeCount was bumped
+		 * (O_PAGE_CHANGE_COUNT_INC, e.g. eviction/split), or - the state
+		 * change-count bits (PAGE_STATE_CHANGE_COUNT_MASK) were already
+		 * bumped, or - reads are blocked on this page
+		 * (PAGE_STATE_NO_READ_FLAG): the state change-count bits are bumped
+		 * by unlock_page_internal() right after this check, so this
+		 * modification is still covered. Otherwise a reader relying on the
+		 * change count could miss the change.
 		 */
 		if (idx >= 0 &&
 			o_page_content_checksum(p) != myLockedPages[idx].lockContentChecksum)

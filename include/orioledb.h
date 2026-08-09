@@ -477,7 +477,7 @@ typedef struct
 	uint8		action;			/* OPageAction */
 	uint16		pid;			/* low 16 bits of the acting backend pid */
 	uint32		changeCount;	/* page change count observed at the action */
-}			OPageActionRec;
+} OPageActionRec;
 
 typedef struct
 {
