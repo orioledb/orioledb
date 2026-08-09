@@ -1056,6 +1056,36 @@ create_table_descr(ORelOids oids, OTableFetchContext ctx)
 	filling_table_descr = descr;
 	descr->fill_in_progress = true;
 
+	/*
+	 * o_fetch_table_descr_extended() lands here for an entry that is already
+	 * in the hash whenever its metadata version no longer matches, so this is
+	 * a re-fill and the previous incarnation has to be released first --
+	 * exactly what recreate_table_descr() does.
+	 * fill_table_descr_common_fields() only memset()s the descriptor, so
+	 * without this its tupdesc and tuple slots leak into the never-reset
+	 * descrCxt and, worse, the references o_table_descr_fill_indices() took
+	 * on the index descriptors are never dropped: their refcnt can no longer
+	 * reach zero, so they are pinned for the life of the backend and every
+	 * invalidation rebuilds them instead of freeing them.
+	 */
+	if (found)
+		table_descr_free(descr);
+	else
+	{
+		/*
+		 * A fresh HASH_ENTER slot still holds a previously-freed descriptor's
+		 * pointers -- dynahash does not zero the value part.  Nothing reads
+		 * them before fill_table_descr_common_fields() memset()s the entry,
+		 * but an error longjmp in between would leave them in the hash with
+		 * the "being filled" flag cleared by reset_filling_descrs(), and the
+		 * next invalidation would free another descriptor's tupdesc and
+		 * slots.  Zero it now (restoring the hash key), mirroring
+		 * get_index_descr().
+		 */
+		memset(descr, 0, sizeof(*descr));
+		descr->oids = o_table->oids;
+	}
+
 	descr->refcnt = 0;
 	if (!fill_table_descr(descr, o_table, ctx.snapshot))
 	{
