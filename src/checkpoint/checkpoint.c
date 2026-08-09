@@ -982,6 +982,9 @@ wait_recovery_undo_loc_flushed(uint32 chkpnum, bool shutdown)
 	int			total_recovery_workers = recovery_pool_size_guc + recovery_idx_pool_size_guc;
 	bool	   *temp_file_loaded;
 
+	int			waited_us = 0;
+	int			reported_us = 0;
+
 	temp_file_loaded = (bool *) palloc0(sizeof(bool) * total_recovery_workers);
 	while (recovery_undo_loc_flush->completedCheckpointNumber <
 		   recovery_undo_loc_flush->immediateRequestCheckpointNumber)
@@ -1021,6 +1024,37 @@ wait_recovery_undo_loc_flushed(uint32 chkpnum, bool shutdown)
 
 		WakeupRecovery();
 		pg_usleep(10000L);
+		waited_us += 10000;
+
+		/*
+		 * TEMP diagnostic: this loop has been seen spinning forever in a
+		 * standby's shutdown restartpoint ("pg_ctl: server does not shut
+		 * down", checkpointer stuck here).  A recovery worker that exits on
+		 * ShutdownRequestPending leaves through the "detached" error path,
+		 * which may skip saving its state -- so hasTempFile is never set and
+		 * we keep waiting on a worker that is already gone.  Name the workers
+		 * we are still waiting for, and their counters, so the next hit says
+		 * which one and whether it was an index-pool worker.
+		 */
+		if (waited_us - reported_us >= 10 * 1000000)
+		{
+			StringInfoData buf;
+
+			reported_us = waited_us;
+			initStringInfo(&buf);
+			for (i = 0; i < total_recovery_workers; i++)
+				appendStringInfo(&buf, " [%d%s flushed=%u tempFile=%d]", i,
+								 i < recovery_pool_size_guc ? "" : "/idx",
+								 worker_ptrs[i].flushedUndoLocCompletedCheckpointNumber,
+								 pg_atomic_unlocked_test_flag(&worker_ptrs[i].hasTempFile) ? 0 : 1);
+			elog(LOG, "UNDOLOCWAIT chkpnum=%u shutdown=%d waited=%ds completed=%u request=%u main=%u workers:%s",
+				 chkpnum, (int) shutdown, waited_us / 1000000,
+				 recovery_undo_loc_flush->completedCheckpointNumber,
+				 recovery_undo_loc_flush->immediateRequestCheckpointNumber,
+				 recovery_undo_loc_flush->recoveryMainCompletedCheckpointNumber,
+				 buf.data);
+			pfree(buf.data);
+		}
 	}
 	pfree(temp_file_loaded);
 }
