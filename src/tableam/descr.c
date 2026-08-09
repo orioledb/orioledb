@@ -738,6 +738,22 @@ table_descr_free(OTableDescr *descr)
 		descr->toast->refcnt--;
 		if (!descr->toast->valid && descr->toast->refcnt == 0)
 			index_descr_delete_from_hash(descr->toast);
+		descr->toast = NULL;
+	}
+
+	/*
+	 * o_table_descr_fill_indices() takes a reference on the bridge descriptor
+	 * exactly like it does for toast and the regular indices, so drop it here
+	 * too.  Without this its refcnt only ever grows: the descriptor is never
+	 * freed once its index record is gone, and every invalidation keeps
+	 * rebuilding it instead.
+	 */
+	if (descr->bridge)
+	{
+		descr->bridge->refcnt--;
+		if (!descr->bridge->valid && descr->bridge->refcnt == 0)
+			index_descr_delete_from_hash(descr->bridge);
+		descr->bridge = NULL;
 	}
 
 	if (descr->indices)
@@ -1526,7 +1542,18 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OTableFetchCon
 	 * checkpointer) resolves the tree at the requested tablespace instead of
 	 * writing its files back into the old one.
 	 */
-	if (existed && result->desc.oids.spcoid == ixOids.spcoid &&
+
+	/*
+	 * A descriptor whose index record has gone away is kept in the hash while
+	 * someone still holds it (see recreate_index_descr()), but it must not be
+	 * handed out again: a caller that gets one instead of NULL -- the
+	 * checkpointer above all -- loses its only signal that the relation was
+	 * concurrently dropped or truncated.  Fall through and re-read the record
+	 * instead; that returns NULL while the index is really gone, and refills
+	 * the entry if it came back.
+	 */
+	if (existed && result->valid &&
+		result->desc.oids.spcoid == ixOids.spcoid &&
 		(ctx.version == O_TABLE_INVALID_VERSION ||
 		 result->version == ctx.version))
 		return result;
@@ -1553,8 +1580,29 @@ get_index_descr(ORelOids ixOids, OIndexType ixType, bool miss_ok, OTableFetchCon
 	if (!oIndex && miss_ok)
 	{
 		filling_index_descr = prev_filling;
-		(void) hash_search(oIndexDescrHash, &ixOids, HASH_REMOVE, &found);
-		Assert(found);
+		result->fill_in_progress = false;
+
+		/*
+		 * The index record is gone.  Tear the entry down the way invalidation
+		 * does it (recreate_index_descr): drop it only when nobody holds it,
+		 * and otherwise just mark it invalid so the last holder removes it
+		 * (table_descr_free).  Removing a held entry here would hand its
+		 * dynahash element back to the freelist while an OTableDescr still
+		 * points at it, so a later descriptor would be built on that memory
+		 * and the holder's refcnt decrements would land on the wrong one.
+		 *
+		 * A slot we entered ourselves was only zeroed, never filled, so it
+		 * needs no index_descr_free().
+		 */
+		if (!existed)
+		{
+			(void) hash_search(oIndexDescrHash, &ixOids, HASH_REMOVE, &found);
+			Assert(found);
+		}
+		else if (result->refcnt == 0)
+			index_descr_delete_from_hash(result);
+		else
+			result->valid = false;
 		return NULL;
 	}
 
