@@ -814,6 +814,24 @@ write_to_xids_queue(XidFileRec *rec)
 	Assert(OXidIsValid(rec->oxid));
 
 	/*
+	 * The fetch_add above already claimed this slot, and close_xids_file()
+	 * waits for every claimed slot to be published.  So we must not leave
+	 * without publishing: an ERROR here -- "terminating orioledb worker due
+	 * to administrator command" arriving while we wait below -- would leave
+	 * the slot holding InvalidOXid forever, and the checkpointer would wait
+	 * on a record nobody will ever write.  A standby caught exactly that,
+	 * failing its fast shutdown with flushPos stuck 24 slots behind lastPos
+	 * on a slot whose oxid was InvalidOXid.
+	 *
+	 * The hole cannot be repaired after the fact either: the file is a flat
+	 * array of xidRecLastPos records and its reader feeds every one of them
+	 * to advance_oxids(), so there is no value that means "skip me".  Hold
+	 * interrupts across the window instead; the wait is bounded by the
+	 * checkpointer draining the queue.
+	 */
+	HOLD_INTERRUPTS();
+
+	/*
 	 * Flush queue to the file till our position is available for write.
 	 */
 	while (location >= pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos) + XID_RECS_QUEUE_SIZE)
@@ -826,6 +844,8 @@ write_to_xids_queue(XidFileRec *rec)
 	pg_write_barrier();
 
 	target->oxid = rec->oxid;
+
+	RESUME_INTERRUPTS();
 
 	VALGRIND_CHECK_MEM_IS_DEFINED(target, sizeof(*target));
 }
