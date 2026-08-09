@@ -926,12 +926,25 @@ close_xids_file(void)
 		{
 			uint64		flushPos = pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos);
 			uint64		lastPos = pg_atomic_read_u64(&checkpoint_state->xidRecLastPos);
+			StringInfoData sbuf;
+			uint64		loc;
+			int			npub = 0;
 
 			reported_us = stalled_us;
-			elog(LOG, "XIDQUEUEWAIT stalled=%ds flushPos=" UINT64_FORMAT " lastPos=" UINT64_FORMAT " unpublishedSlot=" UINT64_FORMAT " oxid=" UINT64_FORMAT,
-				 stalled_us / 1000000, flushPos, lastPos,
-				 flushPos % XID_RECS_QUEUE_SIZE,
-				 (uint64) checkpoint_state->xidRecQueue[flushPos % XID_RECS_QUEUE_SIZE].oxid);
+			initStringInfo(&sbuf);
+			for (loc = flushPos; loc < lastPos && loc < flushPos + 64; loc++)
+			{
+				bool		published;
+
+				published = OXidIsValid(checkpoint_state->xidRecQueue[loc % XID_RECS_QUEUE_SIZE].oxid);
+				if (published)
+					npub++;
+				appendStringInfoChar(&sbuf, published ? '+' : '.');
+			}
+			elog(LOG, "XIDQUEUEWAIT stalled=%ds flushPos=" UINT64_FORMAT " lastPos=" UINT64_FORMAT " outstanding=" UINT64_FORMAT " published=%d qsize=%d map=%s",
+				 stalled_us / 1000000, flushPos, lastPos, lastPos - flushPos,
+				 npub, (int) XID_RECS_QUEUE_SIZE, sbuf.data);
+			pfree(sbuf.data);
 		}
 	}
 
