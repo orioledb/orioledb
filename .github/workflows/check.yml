@@ -243,5 +243,5 @@ jobs:
       - name: remove artifacts
         uses: geekyeggo/delete-artifact@v6
         with:
-          name: "*coverage.info"
+          name: "*coverage.info*"
           failOnError: false
