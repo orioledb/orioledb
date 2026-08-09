@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+import os
+import unittest
+
 from .base_test import BaseTest
 from .base_test import ThreadQueryExecutor
 from .base_test import wait_checkpointer_stopevent
@@ -104,4 +107,91 @@ class TruncateUnderCheckpointTest(BaseTest):
 		self.assertEqual(
 		    5000,
 		    node.execute('postgres', "SELECT count(*) FROM o_park;")[0][0])
+		node.stop()
+
+	@unittest.skipUnless(
+	    os.environ.get('ORIOLEDB_REPRO'),
+	    'crashes the server on purpose; run with ORIOLEDB_REPRO=1')
+	def test_nontransactional_truncate_of_parked_tree(self):
+		"""
+		The tree the checkpointer is parked on is replaced underneath it.
+
+		TRUNCATE of a table created in the current transaction, with no
+		savepoints, goes through relation_nontransactional_truncate ->
+		o_truncate_table(), which frees the trees immediately instead of
+		deferring to commit-time undo.  Doing that in
+		perform_writeback_and_relock()'s window -- the one place the checkpointer
+		releases the tree -- means it comes back to a tree that no longer exists,
+		and the following INSERT puts a brand new one under the same reloid.
+
+		Reproduces deterministically (3/3) as
+
+		  TRAP: failed Assert("!init_shmem || !checkpoint_concurrent")
+		        src/checkpoint/checkpoint.c
+
+		in the backend running the TRUNCATE.  The assertion states the invariant
+		the code relies on: shared memory for a tree must not be initialized
+		while a checkpoint on it is in flight, because the checkpointer set that
+		memory up before it started.  With assertions off the run continues into
+		init_meta_page(), which wipes the meta page including the seq buf page
+		references, while checkpointable_tree_fill_seq_buffers() re-allocates
+		only slot (chkp_num + 1) % 2 -- leaving the current slot's pages invalid
+		for the checkpointer to finalize.
+
+		Skipped by default because it takes the server down: the failure lands
+		in teardown as well, which no expectedFailure marker covers.  Run it
+		with ORIOLEDB_REPRO=1.
+		"""
+		node = self.node
+		node.append_conf(
+		    'postgresql.conf', "orioledb.enable_stopevents = true\n"
+		    "checkpoint_flush_after = 0\n")
+		node.start()
+		node.safe_psql('postgres',
+		               "CREATE EXTENSION IF NOT EXISTS orioledb;\n")
+
+		con1 = node.connect()
+		con2 = node.connect()
+		con3 = node.connect()
+
+		# Created inside the transaction that will truncate it: that is what
+		# makes the truncate non-transactional.
+		con1.begin()
+		con1.execute("CREATE TABLE o_nt (id int NOT NULL, val text,\n"
+		             "	PRIMARY KEY (id)) USING orioledb;")
+		con1.execute("INSERT INTO o_nt\n"
+		             "	SELECT i, repeat('n', 200) FROM generate_series(1, 5000) i;")
+
+		con2.execute("SELECT pg_stopevent_set('checkpoint_writeback',\n"
+		             "'$.treeName == \"o_nt_pkey\"');")
+
+		t1 = ThreadQueryExecutor(con3, "CHECKPOINT;")
+		t1.start()
+		wait_checkpointer_stopevent(node)
+
+		# The checkpointer released o_nt's tree here and is about to re-fetch it.
+		con1.execute("TRUNCATE o_nt;")
+		con1.execute("INSERT INTO o_nt\n"
+		             "	SELECT i, repeat('m', 200) FROM generate_series(1, 2000) i;")
+
+		con2.execute("SELECT pg_stopevent_reset('checkpoint_writeback')")
+		con2.close()
+		t1.join()
+		con3.close()
+
+		con1.commit()
+		self.assertEqual(2000,
+		                 con1.execute("SELECT count(*) FROM o_nt;")[0][0])
+		con1.close()
+
+		node.safe_psql('postgres', "CHECKPOINT;")
+		self.assertEqual(
+		    2000,
+		    node.execute('postgres', "SELECT count(*) FROM o_nt;")[0][0])
+
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(
+		    2000,
+		    node.execute('postgres', "SELECT count(*) FROM o_nt;")[0][0])
 		node.stop()
