@@ -3048,8 +3048,22 @@ o_truncate_table(ORelOids oids, bool missingOK)
 	{
 		OIndexKey	key = {.oids = oids};
 
+		/*
+		 * Take the checkpoint-namespace lock as well, exactly like the loop
+		 * above does for each tree.  The AccessExclusiveLock held since the
+		 * top of this function is the plain variant, which the checkpointer
+		 * never takes -- it locks trees in the checkpoint namespace.  Without
+		 * this, cleanup_btree() frees the tree's pages and its meta page (and
+		 * with it the seq buf page references) while the checkpointer is
+		 * walking that very tree, which surfaces as either
+		 * Assert(FileExtentIsValid(...)) in checkpoint_btree_loop() or
+		 * Assert(OInMemoryBlknoIsValid(shared->pages[...])) in
+		 * seq_buf_finalize().
+		 */
+		o_tables_rel_lock_extended(&oids, AccessExclusiveLock, true);
 		cleanup_btree(key, true, !is_temp);
 		o_invalidate_oids(oids);
+		o_tables_rel_unlock_extended(&oids, AccessExclusiveLock, true);
 /*		if (is_recovery_process())
 			o_invalidate_descrs(oids.datoid, oids.reloid, oids.relnode);*/
 	}
