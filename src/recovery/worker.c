@@ -224,6 +224,15 @@ recovery_worker_main(Datum main_arg)
 		shm_mq_set_receiver(GET_WORKER_QUEUE(id), MyProc);
 		recovery_worker_queue = shm_mq_attach(GET_WORKER_QUEUE(id), NULL, NULL);
 
+		/*
+		 * Register before processing anything, not on the first
+		 * RecoveryMsgTypeInit.  The checkpointer's shutdown wait keeps
+		 * waiting on any worker that has not marked itself gone, and a worker
+		 * which never receives a message would otherwise exit without the
+		 * callback ever running -- wedging the shutdown restartpoint.
+		 */
+		before_shmem_exit(recovery_on_proc_exit, Int32GetDatum(id));
+
 		my_ptr = pg_atomic_read_u64(&worker_ptrs[id].commitPtr);
 		recovery_queue_process(recovery_worker_queue, id);
 
@@ -645,7 +654,6 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 			else if (type == RecoveryMsgTypeInit)
 			{
 				Assert(!recovery_initialized);
-				before_shmem_exit(recovery_on_proc_exit, Int32GetDatum(id));
 				recovery_init(id);
 				recovery_initialized = true;
 				data_pos += sizeof(RecoveryMsgEmpty);

@@ -864,7 +864,29 @@ close_xids_file(void)
 	while (pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos) <
 		   pg_atomic_read_u64(&checkpoint_state->xidRecLastPos))
 	{
+		uint64		flushedBefore = pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos);
+
 		flush_xids_queue();
+
+		if (pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos) != flushedBefore)
+			continue;
+
+		/*
+		 * No progress: a producer has taken a queue slot
+		 * (write_to_xids_queue() bumps xidRecLastPos before filling the
+		 * record) and has not published it yet.  On a standby that producer
+		 * is the startup process, which can be sitting in
+		 * RegisterSyncRequest() -- xact_redo_commit() -> DropRelationFiles()
+		 * -> smgrdounlinkall() -- waiting for us to drain the sync queue.
+		 * Spinning here without draining wedges replay against its own
+		 * restartpoint, and the tight loop was not even interruptible.  Same
+		 * cycle acquire_chkp_lock_drain() breaks for the
+		 * checkpoint-coordination LWLocks.
+		 */
+		if (AmCheckpointerProcess())
+			AbsorbSyncRequests();
+		pg_usleep(1000L);
+		CHECK_FOR_INTERRUPTS();
 	}
 
 	count = pg_atomic_read_u64(&checkpoint_state->xidRecLastPos);

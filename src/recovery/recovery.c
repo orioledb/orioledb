@@ -3449,9 +3449,6 @@ recovery_on_proc_exit(int code, Datum arg)
 {
 	int			worker_id = (int) arg;
 
-	if (!recovery_xid_state_hash)
-		return;
-
 	/*
 	 * The startup process (worker_id < 0) is not a recovery worker and
 	 * doesn't use worker_ptrs[].  save_state_to_file() and hasTempFile are
@@ -3463,9 +3460,20 @@ recovery_on_proc_exit(int code, Datum arg)
 
 	elog(LOG, "recovery on exit: %d", worker_id);
 
-	save_state_to_file(worker_id);
+	/* Only a worker that built its xid state has anything to hand over. */
+	if (recovery_xid_state_hash)
+		save_state_to_file(worker_id);
 
-	/* Mark worker as having saved state and exited */
+	/*
+	 * Mark the worker gone even when it had no state to save.  The flag is
+	 * what tells the checkpointer's shutdown wait
+	 * (wait_recovery_undo_loc_flushed()) that this worker no longer owes an
+	 * undo-location flush; without it the wait treats the worker as still
+	 * running and spins forever.  A worker that never received a
+	 * RecoveryMsgTypeInit has neither state nor a flushed counter, so it is
+	 * exactly the one that would wedge the shutdown restartpoint.
+	 * recovery_load_state_from_file() tolerates the missing file.
+	 */
 	pg_atomic_test_set_flag(&worker_ptrs[worker_id].hasTempFile);
 }
 
