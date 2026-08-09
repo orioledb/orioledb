@@ -1346,14 +1346,28 @@ o_index_table_ixversion(OTable *o_table, OIndexType type)
 
 /*
  * Do this OTable and OIndex describe the same incarnation of the relation?
- * Only the kinds that carry a counter can be checked; for the rest, and while
- * the counter is still uninitialized, we have nothing to compare and accept
- * the pair.
+ *
+ * The incarnation counters answer this only when both records carry one: an
+ * OIndex read out of the sys tree can hold O_TABLE_INVALID_VERSION, and then
+ * the comparison below succeeds vacuously and lets a skewed pair through.
+ * That is not hypothetical -- a checkpointer crashed on exactly it, pairing a
+ * 4-column OIndex (nLeafFields 5, indexVersion invalid) with a 3-column
+ * OTable (primary_ixversion 2).
+ *
+ * So also check the invariant the descriptor actually depends on, which needs
+ * no bookkeeping to be trustworthy: the leaf tupdesc built from the index has
+ * one entry per attribute the table describes.  o_tupdesc_load_constr() sizes
+ * missing[] from the table while natts comes from the index, and
+ * FreeTupleDesc() later walks missing[] over the whole [0, natts) range.
  */
 static bool
 o_index_table_versions_match(OTable *o_table, OIndex *oIndex)
 {
 	uint32		tableIxVersion = o_index_table_ixversion(o_table, oIndex->indexType);
+
+	if (oIndex->indexType == oIndexPrimary &&
+		oIndex->nLeafFields != o_table_leaf_attnum_count(o_table))
+		return false;
 
 	if (tableIxVersion == O_TABLE_INVALID_VERSION ||
 		oIndex->indexVersion == O_TABLE_INVALID_VERSION)

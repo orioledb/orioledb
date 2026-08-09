@@ -976,6 +976,25 @@ o_table_fields_make_tupdesc(OTableField *fields, int nfields)
 	return tupdesc;
 }
 
+/*
+ * Number of leaf attributes the primary index describes for this table: the
+ * user fields plus the synthetic ctid column (when there is no declared
+ * primary key) and the bridge column.  This is both the size of the missing[]
+ * array o_tupdesc_load_constr() builds and the natts of the leaf tupdesc
+ * make_primary_o_index()/make_ctid_o_index() derive from OIndex.nLeafFields,
+ * so the two must agree -- see o_index_fill_descr().
+ */
+int
+o_table_leaf_attnum_count(OTable *o_table)
+{
+	int			fields_start = o_table->has_primary ? 0 : 1;
+
+	if (o_table->index_bridging)
+		fields_start++;
+
+	return o_table->nfields + fields_start;
+}
+
 void
 o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 {
@@ -983,16 +1002,11 @@ o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 	MemoryContext idx_cxt;
 	int			i;
 	int			fields_start;
-	int			all_attrs = o_table->nfields;
+	int			all_attrs = o_table_leaf_attnum_count(o_table);
 
 	idx_cxt = OGetIndexContext(descr);
 	oldcxt = MemoryContextSwitchTo(idx_cxt);
-	fields_start = o_table->has_primary ? 0 : 1;
-
-	if (o_table->index_bridging)
-		fields_start++;
-
-	all_attrs += fields_start;
+	fields_start = all_attrs - o_table->nfields;
 
 	/*
 	 * FreeTupleDesc() walks missing[] over the whole [0, natts) range and
