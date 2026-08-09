@@ -214,6 +214,20 @@ ucm_inc_recursive(UsageCountMap *map, int i, int32 prev, int32 next)
 void
 ucm_inc(UsageCountMap *map, OInMemoryBlkno blkno, int prev, int next)
 {
+	/*
+	 * Moving a page from a level to itself changes nothing:
+	 * ucm_inc_recursive() would compute new_val = val - one + one and
+	 * propagate nothing.  It would still *wait* first, though, for the
+	 * counter of that level to be non-zero -- and if the map does not count
+	 * this page there, nothing will ever raise it and the wait is forever.
+	 * That is the "stuck spinlock detected at ucm_inc_recursive" PANIC,
+	 * caught with prev = next = 6 under o_ucm_init(), which sets a freshly
+	 * allocated page's usage count to (epoch + 2) % UCM_USAGE_LEVELS without
+	 * regard for what it already is.
+	 */
+	if (prev == next)
+		return;
+
 	ucm_inc_recursive(map, map->nonLeaf + blkno / UCM_BRANCH_FACTOR, prev, next);
 }
 
