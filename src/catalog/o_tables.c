@@ -2195,7 +2195,30 @@ o_tables_rel_fill_locktag(LOCKTAG *tag, ORelOids *oids, int lockmode, bool check
 	Assert(lockmode == AccessShareLock || lockmode == AccessExclusiveLock);
 	Assert(ORelOidsIsValid(*oids) && !IS_SYS_TREE_OIDS(*oids));
 	memset(tag, 0, sizeof(LOCKTAG));
-	SET_LOCKTAG_RELATION(*tag, datoid, oids->reloid);
+
+	/*
+	 * The checkpoint namespace protects a tree's shared state -- its shared
+	 * root info, meta page, seq bufs and files -- and every one of those is
+	 * keyed by (datoid, relnode, tablespace), never by reloid.  Key the lock
+	 * the same way.  Keying it by reloid meant two ORelOids naming the same
+	 * tree under different reloids took *different* locks and did not exclude
+	 * each other at all, while cleanup_btree() -- which looks the tree up by
+	 * relnode alone -- happily freed the meta page of the tree the
+	 * checkpointer was finalizing.  That is the
+	 * Assert(OInMemoryBlknoIsValid(shared->pages[curPageNum])) in
+	 * seq_buf_finalize(), whose op ring showed the freeing backend and the
+	 * finalizing checkpointer on one shared seq buf with the tree named
+	 * (73256, 107092, 107108) by one and (73256, 107111, 107108) by the
+	 * other.
+	 *
+	 * Nothing is lost by dropping reloid: two trees sharing a reloid but not
+	 * a relnode share no shared state, and descriptors are identified by
+	 * relnode as well.  Tablespace is still absent from the tag, which can
+	 * only merge two locks that would not have conflicted -- conservative,
+	 * not unsafe.
+	 */
+	SET_LOCKTAG_RELATION(*tag, datoid,
+						 checkpoint ? oids->relnode : oids->reloid);
 	if (checkpoint)
 		tag->locktag_type = LOCKTAG_USERLOCK;
 }
