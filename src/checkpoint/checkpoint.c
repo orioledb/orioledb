@@ -858,6 +858,8 @@ static void
 close_xids_file(void)
 {
 	uint32		count;
+	int			stalled_us = 0;
+	int			reported_us = 0;
 
 	open_xids_file();
 
@@ -887,6 +889,30 @@ close_xids_file(void)
 			AbsorbSyncRequests();
 		pg_usleep(1000L);
 		CHECK_FOR_INTERRUPTS();
+
+		/*
+		 * TEMP diagnostic.  Draining only helps while the producer is alive.
+		 * A worker killed between the fetch_add that reserves its slot and
+		 * the store that publishes it -- "terminating orioledb worker due to
+		 * administrator command" is an ERROR longjmp, and the reserve/publish
+		 * window contains a try_flush_xids_queue() loop -- leaves the slot
+		 * reserved forever, and this wait can never finish.  That matches a
+		 * standby whose fast shutdown timed out right after its recovery
+		 * workers were terminated.  Report the stalled position so the next
+		 * hit confirms it (and says which slot).
+		 */
+		stalled_us += 1000;
+		if (stalled_us - reported_us >= 10 * 1000000)
+		{
+			uint64		flushPos = pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos);
+			uint64		lastPos = pg_atomic_read_u64(&checkpoint_state->xidRecLastPos);
+
+			reported_us = stalled_us;
+			elog(LOG, "XIDQUEUEWAIT stalled=%ds flushPos=" UINT64_FORMAT " lastPos=" UINT64_FORMAT " unpublishedSlot=" UINT64_FORMAT " oxid=" UINT64_FORMAT,
+				 stalled_us / 1000000, flushPos, lastPos,
+				 flushPos % XID_RECS_QUEUE_SIZE,
+				 (uint64) checkpoint_state->xidRecQueue[flushPos % XID_RECS_QUEUE_SIZE].oxid);
+		}
 	}
 
 	count = pg_atomic_read_u64(&checkpoint_state->xidRecLastPos);
