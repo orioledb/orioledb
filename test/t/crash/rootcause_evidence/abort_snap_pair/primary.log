@@ -1,0 +1,172 @@
+2026-08-09 04:38:09.581 GMT [12073] LOG:  registered custom resource manager "OrioleDB resource manager" with ID 129
+2026-08-09 04:38:09.598 GMT [12073] LOG:  starting PostgreSQL 18.4 on aarch64-apple-darwin25.5.0, compiled by Homebrew clang version 22.1.8, 64-bit
+2026-08-09 04:38:09.599 GMT [12073] LOG:  listening on IPv4 address "127.0.0.1", port 20092
+2026-08-09 04:38:09.599 GMT [12073] LOG:  listening on Unix socket "/tmp/.s.PGSQL.20092"
+2026-08-09 04:38:09.603 GMT [12084] LOG:  Cleanup of old files at startup. Checkpoint 0
+2026-08-09 04:38:09.603 GMT [12084] LOG:  database system was shut down at 2026-08-09 04:38:09 GMT
+2026-08-09 04:38:09.603 GMT [12085] LOG:  orioledb background writer 0 started
+2026-08-09 04:38:09.605 GMT [12073] LOG:  database system is ready to accept connections
+2026-08-09 04:38:09.703 GMT [12081] LOG:  checkpoint starting: force wait
+2026-08-09 04:38:09.705 GMT [12081] LOG:  orioledb checkpoint 1 started
+2026-08-09 04:38:11.889 GMT [12081] LOG:  orioledb checkpoint 1 complete
+2026-08-09 04:38:11.903 GMT [12081] LOG:  checkpoint complete: wrote 0 buffers (0.0%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=2.186 s, sync=0.001 s, total=2.201 s; sync files=2, longest=0.001 s, average=0.001 s; distance=8650 kB, estimate=8650 kB; lsn=0/2000098, redo lsn=0/2000028
+2026-08-09 04:38:12.357 GMT [12114] LOG:  statement: 
+					CREATE EXTENSION orioledb;
+					CREATE TABLE o_abort_snap (
+						id int PRIMARY KEY,
+						v  int NOT NULL
+					) USING orioledb;
+					INSERT INTO o_abort_snap
+						SELECT g, 0 FROM generate_series(1, 100) g;
+				
+2026-08-09 04:38:12.380 GMT [12114] LOG:  DESCRALLOC primary tree=[5/16473/16473] leafTupdesc=0x713011148 ctx=OrioleDB descriptors pid=12114
+2026-08-09 04:38:12.380 GMT [12114] STATEMENT:  
+					CREATE EXTENSION orioledb;
+					CREATE TABLE o_abort_snap (
+						id int PRIMARY KEY,
+						v  int NOT NULL
+					) USING orioledb;
+					INSERT INTO o_abort_snap
+						SELECT g, 0 FROM generate_series(1, 100) g;
+				
+2026-08-09 04:38:12.380 GMT [12114] LOG:  DESCRALLOCCONSTR primary tree=[5/16473/16473] leafTupdesc=0x713011148 constr=0x71314c100 pid=12114
+2026-08-09 04:38:12.380 GMT [12114] STATEMENT:  
+					CREATE EXTENSION orioledb;
+					CREATE TABLE o_abort_snap (
+						id int PRIMARY KEY,
+						v  int NOT NULL
+					) USING orioledb;
+					INSERT INTO o_abort_snap
+						SELECT g, 0 FROM generate_series(1, 100) g;
+				
+2026-08-09 04:38:12.382 GMT [12114] LOG:  ITER_EARLY_TERM_STALE dir=fwd tree=[1/3/3] type=3 blkno=1032 -- FETCH page changed under us at scan termination; re-finding instead of ending the scan
+2026-08-09 04:38:12.382 GMT [12114] STATEMENT:  
+					CREATE EXTENSION orioledb;
+					CREATE TABLE o_abort_snap (
+						id int PRIMARY KEY,
+						v  int NOT NULL
+					) USING orioledb;
+					INSERT INTO o_abort_snap
+						SELECT g, 0 FROM generate_series(1, 100) g;
+				
+2026-08-09 04:38:12.382 GMT [12114] LOG:  ITER_EARLY_TERM_STALE dir=fwd tree=[1/2/2] type=3 blkno=1024 -- FETCH page changed under us at scan termination; re-finding instead of ending the scan
+2026-08-09 04:38:12.382 GMT [12114] STATEMENT:  
+					CREATE EXTENSION orioledb;
+					CREATE TABLE o_abort_snap (
+						id int PRIMARY KEY,
+						v  int NOT NULL
+					) USING orioledb;
+					INSERT INTO o_abort_snap
+						SELECT g, 0 FROM generate_series(1, 100) g;
+				
+2026-08-09 04:38:12.382 GMT [12114] LOG:  DESCRALLOC primary tree=[5/16480/16483] leafTupdesc=0x713011e90 ctx=OrioleDB descriptors pid=12114
+2026-08-09 04:38:12.382 GMT [12114] STATEMENT:  
+					CREATE EXTENSION orioledb;
+					CREATE TABLE o_abort_snap (
+						id int PRIMARY KEY,
+						v  int NOT NULL
+					) USING orioledb;
+					INSERT INTO o_abort_snap
+						SELECT g, 0 FROM generate_series(1, 100) g;
+				
+2026-08-09 04:38:12.382 GMT [12114] LOG:  DESCRALLOCCONSTR primary tree=[5/16480/16483] leafTupdesc=0x713011e90 constr=0x713196100 pid=12114
+2026-08-09 04:38:12.382 GMT [12114] STATEMENT:  
+					CREATE EXTENSION orioledb;
+					CREATE TABLE o_abort_snap (
+						id int PRIMARY KEY,
+						v  int NOT NULL
+					) USING orioledb;
+					INSERT INTO o_abort_snap
+						SELECT g, 0 FROM generate_series(1, 100) g;
+				
+2026-08-09 04:38:12.401 GMT [12116] LOG:  statement: CHECKPOINT;
+2026-08-09 04:38:12.401 GMT [12081] LOG:  checkpoint starting: immediate force wait
+2026-08-09 04:38:12.403 GMT [12081] LOG:  orioledb checkpoint 2 started
+2026-08-09 04:38:12.412 GMT [12081] LOG:  DESCRALLOC primary tree=[5/16480/16483] leafTupdesc=0x713010100 ctx=OrioleDB descriptors pid=12081
+2026-08-09 04:38:12.413 GMT [12081] LOG:  DESCRALLOCCONSTR primary tree=[5/16480/16483] leafTupdesc=0x713010100 constr=0x713114100 pid=12081
+2026-08-09 04:38:12.417 GMT [12081] LOG:  orioledb checkpoint 2 complete
+2026-08-09 04:38:12.420 GMT [12081] LOG:  checkpoint complete: wrote 111 buffers (0.7%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.017 s, sync=0.003 s, total=0.020 s; sync files=60, longest=0.001 s, average=0.001 s; distance=17165 kB, estimate=17165 kB; lsn=0/30C3548, redo lsn=0/30C34D8
+2026-08-09 04:38:12.424 GMT [12117] LOG:  statement: select pg_catalog.pg_current_wal_lsn()::text
+2026-08-09 04:38:13.472 GMT [12132] LOG:  statement: UPDATE o_abort_snap SET v = v + 1 WHERE id = 1;
+2026-08-09 04:38:13.472 GMT [12132] LOG:  DESCRALLOC primary tree=[5/16480/16483] leafTupdesc=0x713010de8 ctx=OrioleDB descriptors pid=12132
+2026-08-09 04:38:13.472 GMT [12132] STATEMENT:  UPDATE o_abort_snap SET v = v + 1 WHERE id = 1;
+2026-08-09 04:38:13.472 GMT [12132] LOG:  DESCRALLOCCONSTR primary tree=[5/16480/16483] leafTupdesc=0x713010de8 constr=0x71311e100 pid=12132
+2026-08-09 04:38:13.472 GMT [12132] STATEMENT:  UPDATE o_abort_snap SET v = v + 1 WHERE id = 1;
+2026-08-09 04:38:13.485 GMT [12135] LOG:  statement: INSERT INTO o_abort_snap SELECT g, 0 FROM generate_series(101, 50100) g;
+2026-08-09 04:38:13.485 GMT [12135] LOG:  DESCRALLOC primary tree=[5/16480/16483] leafTupdesc=0x713010de8 ctx=OrioleDB descriptors pid=12135
+2026-08-09 04:38:13.485 GMT [12135] STATEMENT:  INSERT INTO o_abort_snap SELECT g, 0 FROM generate_series(101, 50100) g;
+2026-08-09 04:38:13.485 GMT [12135] LOG:  DESCRALLOCCONSTR primary tree=[5/16480/16483] leafTupdesc=0x713010de8 constr=0x713120100 pid=12135
+2026-08-09 04:38:13.485 GMT [12135] STATEMENT:  INSERT INTO o_abort_snap SELECT g, 0 FROM generate_series(101, 50100) g;
+2026-08-09 04:38:13.686 GMT [12136] LOG:  statement: BEGIN
+2026-08-09 04:38:13.686 GMT [12136] LOG:  statement: SET TRANSACTION ISOLATION LEVEL read committed
+2026-08-09 04:38:13.686 GMT [12136] LOG:  statement: UPDATE o_abort_snap SET v = -1 WHERE id = 1;
+2026-08-09 04:38:13.687 GMT [12136] LOG:  DESCRALLOC primary tree=[5/16480/16483] leafTupdesc=0x713010de8 ctx=OrioleDB descriptors pid=12136
+2026-08-09 04:38:13.687 GMT [12136] STATEMENT:  UPDATE o_abort_snap SET v = -1 WHERE id = 1;
+2026-08-09 04:38:13.687 GMT [12136] LOG:  DESCRALLOCCONSTR primary tree=[5/16480/16483] leafTupdesc=0x713010de8 constr=0x713120100 pid=12136
+2026-08-09 04:38:13.687 GMT [12136] STATEMENT:  UPDATE o_abort_snap SET v = -1 WHERE id = 1;
+2026-08-09 04:38:13.688 GMT [12136] LOG:  statement: SELECT orioledb_get_current_oxid();
+2026-08-09 04:38:13.688 GMT [12136] LOG:  statement: SELECT pg_backend_pid();
+2026-08-09 04:38:13.688 GMT [12136] LOG:  statement: SET orioledb.enable_stopevents = on;
+2026-08-09 04:38:13.696 GMT [12138] LOG:  statement: SELECT pg_stopevent_set('before_abort_vxids_clear', '$.oxid == 54');
+2026-08-09 04:38:13.697 GMT [12136] LOG:  statement: ROLLBACK;
+2026-08-09 04:38:13.699 GMT [12139] LOG:  statement: SELECT EXISTS(
+								 SELECT se.*
+								 FROM pg_stopevents() se
+								 WHERE se.waiter_pids @> ARRAY[12136]
+							  );
+2026-08-09 04:38:13.708 GMT [12141] LOG:  statement: UPDATE o_abort_snap SET v = v + 1 WHERE id = 2;
+2026-08-09 04:38:13.708 GMT [12141] LOG:  DESCRALLOC primary tree=[5/16480/16483] leafTupdesc=0x713010de8 ctx=OrioleDB descriptors pid=12141
+2026-08-09 04:38:13.708 GMT [12141] STATEMENT:  UPDATE o_abort_snap SET v = v + 1 WHERE id = 2;
+2026-08-09 04:38:13.708 GMT [12141] LOG:  DESCRALLOCCONSTR primary tree=[5/16480/16483] leafTupdesc=0x713010de8 constr=0x713120100 pid=12141
+2026-08-09 04:38:13.708 GMT [12141] STATEMENT:  UPDATE o_abort_snap SET v = v + 1 WHERE id = 2;
+2026-08-09 04:38:13.718 GMT [12143] LOG:  statement: CHECKPOINT;
+2026-08-09 04:38:13.718 GMT [12081] LOG:  checkpoint starting: immediate force wait
+2026-08-09 04:38:13.719 GMT [12081] LOG:  orioledb checkpoint 3 started
+2026-08-09 04:38:13.731 GMT [12081] LOG:  orioledb checkpoint 3 complete
+2026-08-09 04:38:13.732 GMT [12081] LOG:  checkpoint complete: wrote 12 buffers (0.1%), wrote 0 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.013 s, sync=0.001 s, total=0.014 s; sync files=7, longest=0.001 s, average=0.001 s; distance=668 kB, estimate=15515 kB; lsn=0/316A848, redo lsn=0/316A7D8
+2026-08-09 04:38:13.741 GMT [12145] LOG:  statement: SELECT pg_stopevent_reset('before_abort_vxids_clear');
+2026-08-09 04:38:13.774 GMT [12085] LOG:  orioledb bgwriter 0 is shut down
+2026-08-09 04:38:13.861 GMT [12149] LOG:  registered custom resource manager "OrioleDB resource manager" with ID 129
+2026-08-09 04:38:13.879 GMT [12149] LOG:  starting PostgreSQL 18.4 on aarch64-apple-darwin25.5.0, compiled by Homebrew clang version 22.1.8, 64-bit
+2026-08-09 04:38:13.879 GMT [12149] LOG:  listening on IPv4 address "127.0.0.1", port 20092
+2026-08-09 04:38:13.879 GMT [12149] LOG:  listening on Unix socket "/tmp/.s.PGSQL.20092"
+2026-08-09 04:38:13.883 GMT [12155] LOG:  Cleanup of old files at startup. Checkpoint 3
+2026-08-09 04:38:13.884 GMT [12156] LOG:  orioledb background writer 0 started
+2026-08-09 04:38:13.886 GMT [12155] LOG:  database system was interrupted; last known up at 2026-08-09 04:38:13 GMT
+2026-08-09 04:38:14.043 GMT [12155] LOG:  database system was not properly shut down; automatic recovery in progress
+2026-08-09 04:38:14.044 GMT [12155] LOG:  orioledb recovery started.
+2026-08-09 04:38:14.045 GMT [12157] LOG:  orioledb recovery worker 1 started.
+2026-08-09 04:38:14.045 GMT [12158] LOG:  orioledb recovery worker 0 started.
+2026-08-09 04:38:14.046 GMT [12159] LOG:  orioledb recovery worker 3 started.
+2026-08-09 04:38:14.046 GMT [12160] LOG:  orioledb recovery worker 2 started.
+2026-08-09 04:38:14.046 GMT [12155] LOG:  redo starts at 0/316A7D8
+2026-08-09 04:38:14.046 GMT [12155] LOG:  invalid record length at 0/316A8C0: expected at least 24, got 0
+2026-08-09 04:38:14.046 GMT [12160] LOG:  orioledb recovery worker 2 finished.
+2026-08-09 04:38:14.046 GMT [12160] LOG:  recovery on exit: 2
+2026-08-09 04:38:14.046 GMT [12158] LOG:  orioledb recovery worker 0 finished.
+2026-08-09 04:38:14.046 GMT [12158] LOG:  recovery on exit: 0
+2026-08-09 04:38:14.046 GMT [12157] LOG:  orioledb recovery worker 1 finished.
+2026-08-09 04:38:14.047 GMT [12157] LOG:  recovery on exit: 1
+2026-08-09 04:38:14.047 GMT [12161] LOG:  orioledb recovery worker 5 started.
+2026-08-09 04:38:14.047 GMT [12162] LOG:  orioledb recovery worker 4 started.
+2026-08-09 04:38:14.048 GMT [12162] LOG:  orioledb recovery worker 4 finished.
+2026-08-09 04:38:14.048 GMT [12162] LOG:  recovery on exit: 4
+2026-08-09 04:38:14.048 GMT [12161] LOG:  orioledb recovery worker 5 finished.
+2026-08-09 04:38:14.048 GMT [12161] LOG:  recovery on exit: 5
+2026-08-09 04:38:14.048 GMT [12159] LOG:  orioledb recovery worker 3 finished.
+2026-08-09 04:38:14.048 GMT [12159] LOG:  recovery on exit: 3
+2026-08-09 04:38:14.049 GMT [12155] LOG:  orioledb recovery finished.
+2026-08-09 04:38:14.049 GMT [12155] LOG:  redo done at 0/316A848 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.00 s
+2026-08-09 04:38:14.050 GMT [12153] LOG:  checkpoint starting: end-of-recovery immediate wait
+2026-08-09 04:38:14.051 GMT [12153] LOG:  orioledb checkpoint 4 started
+2026-08-09 04:38:14.060 GMT [12153] LOG:  orioledb checkpoint 4 complete
+2026-08-09 04:38:14.060 GMT [12153] LOG:  checkpoint complete: wrote 0 buffers (0.0%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.010 s, sync=0.001 s, total=0.011 s; sync files=2, longest=0.001 s, average=0.001 s; distance=0 kB, estimate=0 kB; lsn=0/316A8C0, redo lsn=0/316A8C0
+2026-08-09 04:38:14.060 GMT [12155] LOG:  orioledb: emitting WAL_REC_ROLLBACK for in-flight oxid 54 aborted by recovery_finish
+2026-08-09 04:38:14.061 GMT [12149] LOG:  database system is ready to accept connections
+2026-08-09 04:38:14.182 GMT [12167] LOG:  statement: UPDATE o_abort_snap SET v = v + 1 WHERE id = 3;
+2026-08-09 04:38:14.183 GMT [12167] LOG:  DESCRALLOC primary tree=[5/16480/16483] leafTupdesc=0xc8b010de8 ctx=OrioleDB descriptors pid=12167
+2026-08-09 04:38:14.183 GMT [12167] STATEMENT:  UPDATE o_abort_snap SET v = v + 1 WHERE id = 3;
+2026-08-09 04:38:14.183 GMT [12167] LOG:  DESCRALLOCCONSTR primary tree=[5/16480/16483] leafTupdesc=0xc8b010de8 constr=0xc8b144100 pid=12167
+2026-08-09 04:38:14.183 GMT [12167] STATEMENT:  UPDATE o_abort_snap SET v = v + 1 WHERE id = 3;
+2026-08-09 04:38:14.187 GMT [12168] LOG:  statement: SELECT pg_current_wal_lsn();
+2026-08-09 04:38:15.265 GMT [12181] LOG:  statement: SELECT pg_stopevent_reset('before_abort_vxids_clear');

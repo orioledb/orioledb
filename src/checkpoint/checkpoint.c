@@ -3124,6 +3124,16 @@ checkpoint_ix(int flags, BTreeDescr *descr)
 			   o_tables_rel_lock_held_by_me(&descr->oids, AccessShareLock,
 											true));
 
+		/*
+		 * TEMP: the two seq bufs finalized here must be distinct structs.  If
+		 * they ever aliased, free_seq_buf_pages() below would invalidate the
+		 * pages the *.map finalize is about to read -- as pages[0] then
+		 * pages[1], exactly the progression the finalize-badpage captures
+		 * show.
+		 */
+		Assert(descr->tmpBuf[cur_chkp_index].shared !=
+			   descr->nextChkp[cur_chkp_index].shared);
+
 		/* finalizes *.tmp file */
 		seq_buf_finalize(&descr->tmpBuf[cur_chkp_index]);
 		free_seq_buf_pages(descr, descr->tmpBuf[cur_chkp_index].shared);

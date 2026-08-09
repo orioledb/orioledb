@@ -17,6 +17,7 @@
 
 #include "btree/find.h"
 #include "btree/page_chunks.h"
+#include "utils/seq_buf.h"
 #include "btree/undo.h"
 #include "recovery/recovery.h"
 #include "tableam/descr.h"
@@ -442,6 +443,22 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 	page_desc->fileExtent.len = InvalidFileExtentLen;
 	page_desc->fileExtent.off = InvalidFileExtentOff;
 
+	/*
+	 * TEMP: record the wipe in the seq_buf op ring.  This is the only writer
+	 * of SeqBufDescShared.pages[] that neither frees nor re-allocates, so it
+	 * is the only candidate left for the "finalize-badpage" crash once the
+	 * ring has ruled out every free path ('X') and eviction ('E').  Recording
+	 * it here puts it on the same timeline as the I/r/F ops, so the next
+	 * capture shows directly whether a wipe lands between a checkpointer's
+	 * init and its finalize -- and which pid did it.
+	 */
+	seq_buf_op_record('M', &metaPage->freeBuf, metaPage);
+	for (j = 0; j < 2; j++)
+	{
+		seq_buf_op_record('M', &metaPage->nextChkp[j], metaPage);
+		seq_buf_op_record('M', &metaPage->tmpBuf[j], metaPage);
+	}
+
 	for (i = 0; i < 2; i++)
 	{
 		metaPage->freeBuf.pages[i] = OInvalidInMemoryBlkno;
@@ -460,6 +477,7 @@ init_meta_page(OInMemoryBlkno blkno, uint32 leafPagesNum)
 	}
 	metaPage->punchHolesChkpNum = checkpoint_state->lastCheckpointNumber;
 	metaPage->toBeFreedOnSeqScanRelease = false;
+	elog(LOG, "METAWIPE blkno=%u pid=%d", blkno, MyProcPid);
 }
 
 /*

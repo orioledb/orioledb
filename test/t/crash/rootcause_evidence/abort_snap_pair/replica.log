@@ -1,0 +1,73 @@
+2026-08-09 04:38:12.250 GMT [12097] LOG:  registered custom resource manager "OrioleDB resource manager" with ID 129
+2026-08-09 04:38:12.263 GMT [12097] LOG:  starting PostgreSQL 18.4 on aarch64-apple-darwin25.5.0, compiled by Homebrew clang version 22.1.8, 64-bit
+2026-08-09 04:38:12.263 GMT [12097] LOG:  listening on IPv4 address "127.0.0.1", port 20093
+2026-08-09 04:38:12.264 GMT [12097] LOG:  listening on Unix socket "/tmp/.s.PGSQL.20093"
+2026-08-09 04:38:12.267 GMT [12103] LOG:  Cleanup of old files at startup. Checkpoint 1
+2026-08-09 04:38:12.267 GMT [12104] LOG:  orioledb background writer 0 started
+2026-08-09 04:38:12.268 GMT [12103] LOG:  database system was interrupted; last known up at 2026-08-09 04:38:11 GMT
+2026-08-09 04:38:12.315 GMT [12103] LOG:  starting backup recovery with redo LSN 0/2000028, checkpoint LSN 0/2000098, on timeline ID 1
+2026-08-09 04:38:12.315 GMT [12103] LOG:  entering standby mode
+2026-08-09 04:38:12.316 GMT [12103] LOG:  orioledb recovery started.
+2026-08-09 04:38:12.317 GMT [12105] LOG:  orioledb recovery worker 1 started.
+2026-08-09 04:38:12.317 GMT [12106] LOG:  orioledb recovery worker 0 started.
+2026-08-09 04:38:12.317 GMT [12107] LOG:  orioledb recovery worker 3 started.
+2026-08-09 04:38:12.318 GMT [12108] LOG:  orioledb recovery worker 2 started.
+2026-08-09 04:38:12.318 GMT [12103] LOG:  redo starts at 0/2000028
+2026-08-09 04:38:12.318 GMT [12103] LOG:  completed backup recovery with redo LSN 0/2000028 and end LSN 0/2000138
+2026-08-09 04:38:12.318 GMT [12103] LOG:  consistent recovery state reached at 0/2000138
+2026-08-09 04:38:12.319 GMT [12109] LOG:  orioledb recovery worker 5 started.
+2026-08-09 04:38:12.319 GMT [12097] LOG:  database system is ready to accept read-only connections
+2026-08-09 04:38:12.319 GMT [12110] LOG:  orioledb recovery worker 4 started.
+2026-08-09 04:38:12.322 GMT [12111] LOG:  started streaming WAL from primary at 0/3000000 on timeline 1
+2026-08-09 04:38:12.434 GMT [12118] LOG:  statement: select pg_catalog.pg_last_wal_replay_lsn() >= '0/30C35C0'::pg_lsn
+2026-08-09 04:38:12.464 GMT [12103] LOG:  DESCRALLOC primary tree=[5/16473/16473] leafTupdesc=0x997011148 ctx=OrioleDB descriptors pid=12103
+2026-08-09 04:38:12.464 GMT [12103] CONTEXT:  WAL redo at 0/30AFD50 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.464 GMT [12103] LOG:  DESCRALLOCCONSTR primary tree=[5/16473/16473] leafTupdesc=0x997011148 constr=0x997104100 pid=12103
+2026-08-09 04:38:12.464 GMT [12103] CONTEXT:  WAL redo at 0/30AFD50 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.465 GMT [12103] LOG:  DESCRALLOC primary tree=[5/16473/16473] leafTupdesc=0x9970117b0 ctx=OrioleDB descriptors pid=12103
+2026-08-09 04:38:12.465 GMT [12103] CONTEXT:  WAL redo at 0/30AFD50 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.465 GMT [12103] LOG:  DESCRALLOCCONSTR primary tree=[5/16473/16473] leafTupdesc=0x9970117b0 constr=0x99712c100 pid=12103
+2026-08-09 04:38:12.465 GMT [12103] CONTEXT:  WAL redo at 0/30AFD50 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.465 GMT [12103] LOG:  DESCRFREELEAF primary tree=[5/16473/16473] leafTupdesc=0x9970117b0 pid=12103
+2026-08-09 04:38:12.465 GMT [12103] CONTEXT:  WAL redo at 0/30AFD50 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.466 GMT [12103] LOG:  DESCRFREELEAF primary tree=[5/16473/16473] leafTupdesc=0x997011148 pid=12103
+2026-08-09 04:38:12.466 GMT [12103] CONTEXT:  WAL redo at 0/30B9300 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.466 GMT [12103] LOG:  DESCRALLOC primary tree=[5/16473/16473] leafTupdesc=0x997011cf8 ctx=OrioleDB descriptors pid=12103
+2026-08-09 04:38:12.466 GMT [12103] CONTEXT:  WAL redo at 0/30B9300 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.466 GMT [12103] LOG:  DESCRALLOCCONSTR primary tree=[5/16473/16473] leafTupdesc=0x997011cf8 constr=0x99712c100 pid=12103
+2026-08-09 04:38:12.466 GMT [12103] CONTEXT:  WAL redo at 0/30B9300 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.466 GMT [12103] LOG:  DESCRALLOC primary tree=[5/16473/16473] leafTupdesc=0x997010ea8 ctx=OrioleDB descriptors pid=12103
+2026-08-09 04:38:12.466 GMT [12103] CONTEXT:  WAL redo at 0/30B9300 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.466 GMT [12103] LOG:  DESCRALLOCCONSTR primary tree=[5/16473/16473] leafTupdesc=0x997010ea8 constr=0x99713c100 pid=12103
+2026-08-09 04:38:12.466 GMT [12103] CONTEXT:  WAL redo at 0/30B9300 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.466 GMT [12103] LOG:  DESCRFREELEAF primary tree=[5/16473/16473] leafTupdesc=0x997010ea8 pid=12103
+2026-08-09 04:38:12.466 GMT [12103] CONTEXT:  WAL redo at 0/30B9300 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.467 GMT [12103] LOG:  DESCRALLOC primary tree=[5/16480/16483] leafTupdesc=0x997140458 ctx=OrioleDB descriptors pid=12103
+2026-08-09 04:38:12.467 GMT [12103] CONTEXT:  WAL redo at 0/30C1318 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.467 GMT [12103] LOG:  DESCRALLOCCONSTR primary tree=[5/16480/16483] leafTupdesc=0x997140458 constr=0x997144100 pid=12103
+2026-08-09 04:38:12.467 GMT [12103] CONTEXT:  WAL redo at 0/30C1318 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.467 GMT [12103] LOG:  DESCRALLOC primary tree=[5/16480/16483] leafTupdesc=0x9971409a8 ctx=OrioleDB descriptors pid=12103
+2026-08-09 04:38:12.467 GMT [12103] CONTEXT:  WAL redo at 0/30C1318 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.467 GMT [12103] LOG:  DESCRALLOCCONSTR primary tree=[5/16480/16483] leafTupdesc=0x9971409a8 constr=0x99714e100 pid=12103
+2026-08-09 04:38:12.467 GMT [12103] CONTEXT:  WAL redo at 0/30C1318 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.467 GMT [12103] LOG:  DESCRFREELEAF primary tree=[5/16480/16483] leafTupdesc=0x9971409a8 pid=12103
+2026-08-09 04:38:12.467 GMT [12103] CONTEXT:  WAL redo at 0/30C1318 for OrioleDB resource manager/OrioleDB WAL container:  XID (4 4286578688 752); META_UNLOCK;
+2026-08-09 04:38:12.468 GMT [12106] LOG:  DESCRALLOC primary tree=[5/16480/16483] leafTupdesc=0x997010bf8 ctx=OrioleDB descriptors pid=12106
+2026-08-09 04:38:12.468 GMT [12106] LOG:  DESCRALLOCCONSTR primary tree=[5/16480/16483] leafTupdesc=0x997010bf8 constr=0x997406100 pid=12106
+2026-08-09 04:38:12.468 GMT [12108] LOG:  DESCRALLOC primary tree=[5/16480/16483] leafTupdesc=0x997010bf8 ctx=OrioleDB descriptors pid=12108
+2026-08-09 04:38:12.468 GMT [12108] LOG:  DESCRALLOCCONSTR primary tree=[5/16480/16483] leafTupdesc=0x997010bf8 constr=0x997112100 pid=12108
+2026-08-09 04:38:12.468 GMT [12105] LOG:  DESCRALLOC primary tree=[5/16480/16483] leafTupdesc=0x997010bf8 ctx=OrioleDB descriptors pid=12105
+2026-08-09 04:38:12.468 GMT [12105] LOG:  DESCRALLOCCONSTR primary tree=[5/16480/16483] leafTupdesc=0x997010bf8 constr=0x997112100 pid=12105
+2026-08-09 04:38:13.452 GMT [12128] LOG:  statement: select pg_catalog.pg_last_wal_replay_lsn() >= '0/30C35C0'::pg_lsn
+2026-08-09 04:38:13.463 GMT [12130] LOG:  statement: SELECT pg_stopevent_set('replay_on_record', 'true');
+2026-08-09 04:38:13.476 GMT [12133] LOG:  statement: SELECT coalesce(array_length(waiter_pids, 1), 0) >= 1 FROM pg_stopevents() WHERE stopevent = 'replay_on_record'
+2026-08-09 04:38:13.775 GMT [12111] FATAL:  could not receive data from WAL stream: server closed the connection unexpectedly
+		This probably means the server terminated abnormally
+		before or while processing the request.
+2026-08-09 04:38:14.195 GMT [12170] LOG:  statement: SELECT pg_stopevent_reset('replay_on_record');
+2026-08-09 04:38:14.198 GMT [12171] LOG:  statement: SELECT pg_last_wal_replay_lsn() >= '0/316F7F8'::pg_lsn
+2026-08-09 04:38:14.237 GMT [12103] LOG:  invalid record length at 0/316A8C0: expected at least 24, got 0
+2026-08-09 04:38:14.241 GMT [12172] LOG:  started streaming WAL from primary at 0/3000000 on timeline 1
+2026-08-09 04:38:14.705 GMT [12174] LOG:  statement: SELECT pg_last_wal_replay_lsn() >= '0/316F7F8'::pg_lsn
+2026-08-09 04:38:15.224 GMT [12176] LOG:  statement: SELECT pg_last_wal_replay_lsn() >= '0/316F7F8'::pg_lsn
+2026-08-09 04:38:15.252 GMT [12179] LOG:  statement: SELECT pg_stopevent_reset('replay_on_record');
