@@ -594,6 +594,7 @@ perform_writeback_and_relock(BTreeDescr *desc,
 	ORelOids	treeOids = desc->oids;
 	OIndexType	type = desc->type;
 	OIndexDescr *indexDescr;
+	OInMemoryBlkno oldMetaBlkno = desc->rootInfo.metaPageBlkno;
 
 	if (!IS_SYS_TREE_OIDS(treeOids))
 	{
@@ -641,6 +642,52 @@ perform_writeback_and_relock(BTreeDescr *desc,
 			o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
 			LWLockRelease(&checkpoint_state->oTablesMetaLock);
 			return NULL;
+		}
+
+		/*
+		 * The caller's private seq bufs (descr->{tmpBuf,nextChkp,freeBuf}[])
+		 * hold raw pointers into the meta page they were bound to before the
+		 * unlock above.  Concurrent deletion -- which that unlock exists to
+		 * allow -- runs cleanup_btree() -> free_meta_page(), so those
+		 * pointers can now address a freed (and possibly recycled) page, and
+		 * the finalize at the end of checkpoint_ix() reads pages[] out of it:
+		 *
+		 * r  checkpointer  lock=S   attach, binds .shared C  backend
+		 * lock=X   free_meta_page() F  checkpointer  lock=S
+		 * seq_buf_finalize() -> TRAP
+		 *
+		 * (the seq buf op ring, run 31325040926 job on amd64/18/gcc/r2; the
+		 * two conflicting modes coexist only because we released in between).
+		 * Holding the lock again proves nothing about the meta page -- the
+		 * lock manager is happy to hand out a lock on a name whose tree is
+		 * gone.  Compare the page itself and give up on this tree if it
+		 * moved; the caller already handles a NULL return.
+		 */
+		{
+			SharedRootInfoKey key;
+			SharedRootInfo *sharedRootInfo;
+			bool		gone;
+
+			key.datoid = desc->oids.datoid;
+			key.relnode = desc->oids.relnode;
+			key.tablespace = desc->oids.spcoid;
+			sharedRootInfo = o_find_shared_root_info(&key);
+
+			gone = (desc->rootInfo.metaPageBlkno != oldMetaBlkno ||
+					sharedRootInfo == NULL ||
+					sharedRootInfo->placeholder ||
+					sharedRootInfo->rootInfo.metaPageBlkno !=
+					desc->rootInfo.metaPageBlkno);
+
+			if (sharedRootInfo)
+				pfree(sharedRootInfo);
+
+			if (gone)
+			{
+				o_tables_rel_unlock_extended(&treeOids, AccessShareLock, true);
+				LWLockRelease(&checkpoint_state->oTablesMetaLock);
+				return NULL;
+			}
 		}
 
 		LWLockRelease(&checkpoint_state->oTablesMetaLock);
