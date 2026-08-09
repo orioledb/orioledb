@@ -28,6 +28,7 @@
 
 #include "btree/io.h"
 #include "catalog/o_sys_cache.h"
+#include "catalog/o_tables.h"
 #include "utils/seq_buf.h"
 
 #include "miscadmin.h"
@@ -99,6 +100,17 @@ typedef struct
 	int			location;
 	OInMemoryBlkno p0;
 	OInMemoryBlkno p1;
+
+	/*
+	 * TEMP: which checkpoint-namespace lock this process held on the tree at
+	 * the time of the op.  'X' = exclusive, 'S' = shared, '-' = none, '?' =
+	 * not applicable (sys tree / invalid oids).  The op ring keeps showing a
+	 * backend's free_meta_page ('C') landing between the checkpointer's
+	 * attach ('r') and its finalize ('F') on one shared seq buf; if the two
+	 * really do hold conflicting modes at once, the lock is not doing what we
+	 * think.
+	 */
+	char		lockHeld;
 } SeqBufOpRec;
 
 /*
@@ -158,6 +170,18 @@ seq_buf_op_record(char op, SeqBufDescShared *shared, const void *owner)
 	r->type = shared->tag.type;
 	r->curPageNum = shared->curPageNum;
 	r->location = shared->location;
+	{
+		ORelOids	oids = shared->tag.key.oids;
+
+		if (!ORelOidsIsValid(oids) || IS_SYS_TREE_OIDS(oids))
+			r->lockHeld = '?';
+		else if (o_tables_rel_lock_held_by_me(&oids, AccessExclusiveLock, true))
+			r->lockHeld = 'X';
+		else if (o_tables_rel_lock_held_by_me(&oids, AccessShareLock, true))
+			r->lockHeld = 'S';
+		else
+			r->lockHeld = '-';
+	}
 	r->p0 = shared->pages[0];
 	r->p1 = shared->pages[1];
 }
@@ -188,8 +212,8 @@ seq_buf_op_dump(SeqBufDescShared *shared, const char *why)
 
 		if (r->shared == shared)
 			elog(LOG,
-				 "  seqbuf op #%u %c pid=%d (%s) owner=%p tag=[dat=%u rel=%u relnode=%u num=%u type=%d] curPg=%d loc=%d pages=[%u,%u]",
-				 i, r->op, r->pid, r->backendType, r->owner, r->datoid,
+				 "  seqbuf op #%u %c lock=%c pid=%d (%s) owner=%p tag=[dat=%u rel=%u relnode=%u num=%u type=%d] curPg=%d loc=%d pages=[%u,%u]",
+				 i, r->op, r->lockHeld, r->pid, r->backendType, r->owner, r->datoid,
 				 r->reloid, r->relnode, r->num, r->type,
 				 r->curPageNum, r->location, r->p0, r->p1);
 	}
