@@ -32,6 +32,14 @@
 
 #include "miscadmin.h"
 
+/*
+ * TEMP: consecutive ConflictResolutionRetry rounds through the finished
+ * lock-only branch of o_btree_modify_handle_conflicts().  Reset at the top of
+ * o_btree_modify_internal(), i.e. per modify call, not per retry.
+ */
+static uint64 rowlock_retry_spins = 0;
+
+
 #define IsRelationTree(desc) (ORelOidsIsValid(desc->oids) && !IS_SYS_TREE_OIDS(desc->oids))
 
 /*
@@ -155,6 +163,9 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 
 	/* Undo should be reserved for transactional operations */
 	Assert(OXidIsValid(opOxid) == context.undoIsReserved);
+
+	/* TEMP: see the ROWLOCKSPIN report in o_btree_modify_handle_conflicts() */
+	rowlock_retry_spins = 0;
 
 retry:
 
@@ -527,6 +538,41 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				 * the undo chain.  But if locker transaction commit or abort
 				 * concurrently, then retry.
 				 */
+
+				/*
+				 * TEMP: this branch is the livelock.  We do NOT reach
+				 * wait_for_tuple() here -- by construction: it is taken
+				 * exactly when the conflicting transaction has already
+				 * finished, so there is nothing to wait for.  We just return
+				 * Retry with the leaf page-content lock still held, and the
+				 * caller loops straight back into row_lock_conflicts().  One
+				 * such round is the documented race (the locker finished
+				 * between row_lock_conflicts()'s oxid_get_csn() and ours);
+				 * thousands of them mean row_lock_conflicts() keeps handing
+				 * back the same finished lock-only record instead of removing
+				 * it.  Report the state of that transaction, and the one
+				 * condition that stops the removal: row_lock_conflicts() only
+				 * deletes a finished lock-only record when the chain link it
+				 * would splice in is still retained (undoLocation >=
+				 * retainedUndoLocation).
+				 */
+				if (++rowlock_retry_spins == 10000)
+					elog(LOG, "ROWLOCKSPIN oxid=" UINT64_FORMAT " myOxid=" UINT64_FORMAT
+						 " csn=" UINT64_FORMAT " lockMode=%d myLockMode=%d"
+						 " lockOnly=%d finished=%d chainHasLocks=%d"
+						 " conflictUndoLoc=" UINT64_FORMAT
+						 " retainedUndoLoc=" UINT64_FORMAT
+						 " undoType=%d blkno=%u action=%d",
+						 (uint64) oxid, (uint64) context->opOxid, (uint64) csn,
+						 (int) XACT_INFO_GET_LOCK_MODE(xactInfo),
+						 (int) context->lockMode,
+						 XACT_INFO_IS_LOCK_ONLY(xactInfo) ? 1 : 0,
+						 XACT_INFO_IS_FINISHED(xactInfo) ? 1 : 0,
+						 context->conflictTupHdr.chainHasLocks ? 1 : 0,
+						 (uint64) context->conflictUndoLocation,
+						 (uint64) get_snapshot_retained_undo_location(desc->undoType),
+						 (int) desc->undoType, blkno, (int) context->action);
+
 				return ConflictResolutionRetry;
 			}
 
