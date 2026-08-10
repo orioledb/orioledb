@@ -1,0 +1,108 @@
+name: rr-hunt
+
+# Hunts the ORI-229 repeatable-read anomalies (read-own-writes, phantom reads,
+# duplicate primary keys) with ci/rr_append_hunt.py, which reproduces the
+# statement shapes of the jepsen "append" workload and checks its
+# intra-transaction invariants directly.
+#
+# The anomalies have so far only been seen on x86_64 (Antithesis' hypervisor
+# and MacOS/Rosetta), never on arm64, so the matrix runs both architectures
+# side by side with everything else held equal.
+#
+# Runs only on rr-hunt* branches and on demand.
+
+on:
+  push:
+    branches:
+      - 'rr-hunt*'
+  workflow_dispatch:
+    inputs:
+      replicas:
+        description: 'Replicas per architecture'
+        default: '8'
+      seconds:
+        description: 'Hunt duration per job, seconds'
+        default: '900'
+
+jobs:
+  matrix:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+    steps:
+      - id: gen
+        shell: python
+        env:
+          REPLICAS: ${{ github.event.inputs.replicas || '8' }}
+        run: |
+          import os, json
+
+          replicas = int(os.environ["REPLICAS"])
+          include = [
+              {"cpu": cpu, "replica": r, "isolation": iso}
+              for cpu in ("amd64", "arm64")
+              for iso in ("repeatable-read", "read-committed")
+              for r in range(1, replicas + 1)
+          ]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={json.dumps({'include': include})}\n")
+
+  hunt:
+    needs: matrix
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
+
+    runs-on: ${{ matrix.cpu == 'arm64' && 'blacksmith-8vcpu-ubuntu-2404-arm' || 'blacksmith-8vcpu-ubuntu-2404' }}
+    env:
+      LLVM_VER: 18
+      CPU: ${{ matrix.cpu }}
+      # A release build, like the one the jepsen/Antithesis runs use: the
+      # anomalies are wrong answers, not assertion failures.
+      CHECK_TYPE: normal
+      PG_VERSION: 17
+      COMPILER: gcc
+      RR_ISOLATION: ${{ matrix.isolation }}
+      RR_SECONDS: ${{ github.event.inputs.seconds || '900' }}
+      RR_SEED: ${{ matrix.replica }}
+    steps:
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@v6
+        with:
+          path: orioledb
+
+      - name: Get the required tag name
+        shell: bash
+        run: |
+          echo "PGTAG=$(grep '^${{ env.PG_VERSION }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+
+      - name: Checkout PostgreSQL code into workspace directory
+        uses: actions/checkout@v6
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PGTAG }}
+          path: postgresql
+
+      - name: Setup prerequisites
+        run: bash ./orioledb/ci/prerequisites.sh
+
+      - name: Build
+        run: bash ./orioledb/ci/build.sh
+
+      - name: Install post build prerequisites
+        run: bash ./orioledb/ci/post_build_prerequisites.sh
+
+      - name: Hunt
+        timeout-minutes: 30
+        run: bash ./orioledb/ci/rr_hunt.sh
+
+      - name: Upload server log
+        uses: actions/upload-artifact@v7
+        if: ${{ failure() }}
+        with:
+          name: rr_${{ matrix.cpu }}_${{ matrix.isolation }}_${{ matrix.replica }}_log
+          path: |
+            ./rr_pg.log
+            /tmp/rrcores/*
+          retention-days: 3
+          if-no-files-found: ignore
