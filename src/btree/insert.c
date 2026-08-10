@@ -519,7 +519,8 @@ merge_waited_tuples(BTreeDescr *desc, Page p, BTreeSplitItems *outputItems,
 {
 	int			inputIndex = 0,
 				outputIndex = 0,
-				waitersIndex = 0;
+				waitersIndex = 0,
+				lastAcceptedWaiter = -1;
 	int			totalSize = 0,
 				totalCount = 0;
 	int			rightSpace,
@@ -620,6 +621,45 @@ merge_waited_tuples(BTreeDescr *desc, Page p, BTreeSplitItems *outputItems,
 						newLeftSpace,
 						candidateTotalSize;
 
+			/*
+			 * Waiters are only ever compared against the *input* items above,
+			 * never against each other -- and when the inputs run out that
+			 * comparison is skipped entirely (cmp is forced to 1).  Two
+			 * waiters carrying the same key would therefore both be accepted
+			 * and both written out by the split, leaving two live items with
+			 * one key in the leaf.
+			 *
+			 * The non-split branch of o_btree_insert_item_with_waiters() does
+			 * not have the problem: it probes each waiter against the page
+			 * after the earlier ones have already been written into it, so
+			 * btree_leaf_probe_insert_slot() reports the duplicate.
+			 *
+			 * waiter_info_cmp() sorts by key, so equal keys are adjacent and
+			 * comparing against the last accepted waiter is enough.  Drop the
+			 * duplicate exactly like an input conflict: leaving `inserted`
+			 * false makes that backend re-take the page lock and resolve the
+			 * conflict itself against the key it now finds there.
+			 */
+			if (lastAcceptedWaiter >= 0)
+			{
+				OTuple		prevTup;
+				OTuple		curTup;
+
+				prevTup.formatFlags = tupleWaiterInfos[lastAcceptedWaiter].item.flags;
+				prevTup.data = tupleWaiterInfos[lastAcceptedWaiter].item.data +
+					BTreeLeafTuphdrSize;
+				curTup.formatFlags = tupleWaiterInfos[waitersIndex].item.flags;
+				curTup.data = tupleWaiterInfos[waitersIndex].item.data +
+					BTreeLeafTuphdrSize;
+
+				if (o_btree_cmp(desc, &prevTup, BTreeKeyLeafTuple,
+								&curTup, BTreeKeyLeafTuple) == 0)
+				{
+					waitersIndex++;
+					continue;
+				}
+			}
+
 			item = tupleWaiterInfos[waitersIndex].item;
 			tup.formatFlags = item.flags;
 			tup.data = item.data + BTreeLeafTuphdrSize;
@@ -647,6 +687,7 @@ merge_waited_tuples(BTreeDescr *desc, Page p, BTreeSplitItems *outputItems,
 			}
 
 			tupleWaiterInfos[waitersIndex].inserted = true;
+			lastAcceptedWaiter = waitersIndex;
 			accepted[acceptedTop].outputPos = outputIndex;
 			accepted[acceptedTop].waiterIdx = waitersIndex;
 			accepted[acceptedTop].keyLen = newKeyLen;
