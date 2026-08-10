@@ -1,0 +1,3 @@
+JEPSEN_ISOLATION=read-committed
+JEPSEN_EXPECTED_CONSISTENCY_MODEL=read-committed
+

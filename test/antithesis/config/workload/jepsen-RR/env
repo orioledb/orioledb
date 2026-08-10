@@ -1,0 +1,2 @@
+JEPSEN_ISOLATION=repeatable-read
+JEPSEN_EXPECTED_CONSISTENCY_MODEL=snapshot-isolation
