@@ -780,7 +780,26 @@ wait_finish_active_commits(XLogRecPtr redo_pos)
 	for (i = 0; i < max_procs; i++)
 	{
 		while (pg_atomic_read_u64(&oProcData[i].commitInProgressXlogLocation) <= redo_pos)
+		{
+			/*
+			 * A commit we are waiting for may be inside
+			 * RegisterSyncRequest(), which blocks until the checkpointer
+			 * drains its request queue -- so sleeping here without draining
+			 * is a deadlock, not a wait. Neither side is visible to the
+			 * deadlock detector: ours is a sleep, theirs is a latch wait, so
+			 * the cluster simply stops.
+			 *
+			 * Captured on the churn harness: three backends sat in DROP TABLE
+			 * on Timeout/RegisterSyncRequest for fourteen minutes while this
+			 * loop spun, with "orioledb checkpoint 8 started" and no
+			 * completion.  Every other checkpointer wait already absorbs
+			 * (acquire_chkp_lock_drain(), the xid queue drain); this one was
+			 * missed.
+			 */
+			AbsorbSyncRequests();
+			CHECK_FOR_INTERRUPTS();
 			pg_usleep(100);
+		}
 	}
 }
 
