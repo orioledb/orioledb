@@ -160,7 +160,12 @@ CheckpointState *checkpoint_state = NULL;
 static MemoryContext chkp_main_context = NULL;
 static MemoryContext chkp_tree_context = NULL;
 
-static char *xidFilename = NULL;
+/*
+ * Built with snprintf into a fixed buffer rather than psprintf'd: this name is
+ * (re)built from inside write_to_xids_queue()'s critical section, where any
+ * palloc trips Assert(CritSectionCount == 0 || allowInCritSection).
+ */
+static char xidFilename[MAXPGPATH] = "";
 static uint32 xidFileCheckpointnum = 0;
 static File xidFile = -1;
 static S3TaskLocation maxLocation = 0;
@@ -774,15 +779,11 @@ open_xids_file(void)
 
 	if (xidFile < 0 || xidFileCheckpointnum != checkpointnum)
 	{
-		MemoryContext mctx = MemoryContextSwitchTo(TopMemoryContext);
-
-		if (xidFilename)
-			pfree(xidFilename);
 		if (xidFile >= 0)
 			FileClose(xidFile);
 
-		xidFilename = psprintf(XID_FILENAME_FORMAT, checkpointnum);
-		MemoryContextSwitchTo(mctx);
+		snprintf(xidFilename, sizeof(xidFilename),
+				 XID_FILENAME_FORMAT, checkpointnum);
 		xidFile = PathNameOpenFile(xidFilename, O_WRONLY | O_CREAT | PG_BINARY);
 		if (xidFile < 0)
 			ereport(FATAL, (errcode_for_file_access(),
@@ -1038,8 +1039,7 @@ close_xids_file(void)
 						errmsg("could not sync xid file %s: %m", xidFilename)));
 
 	FileClose(xidFile);
-	pfree(xidFilename);
-	xidFilename = NULL;
+	xidFilename[0] = '\0';
 	xidFile = -1;
 }
 
