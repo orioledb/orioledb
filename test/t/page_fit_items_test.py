@@ -948,3 +948,115 @@ class MergeWaitedTuplesTest(BaseTest):
 			    [0])
 		finally:
 			node.stop()
+
+	def test_merge_waited_tuples_drops_duplicate_waiter(self):
+		"""
+		Two waiters carrying the SAME key must not both be inserted.
+
+		merge_waited_tuples() compares each waiter against the *input* items
+		of the page only, never against the other waiters -- and once the
+		inputs run out it forces cmp = 1 and accepts every remaining waiter
+		with no comparison at all.  So two waiters with one key both got
+		accepted and both were written out by the split, leaving two live
+		items with the same primary key in the leaf.
+
+		The non-split path does not have the problem: it probes each waiter
+		against the page after the earlier ones have already been written
+		into it, so btree_leaf_probe_insert_slot() reports the duplicate.
+
+		This is ORI-233, where the duplicate surfaced far from its origin --
+		as an out-of-order tuple tripping the ordering assertion in
+		o_btree_iterator_fetch() under the jepsen "append" workload.
+		"""
+
+		node = self.node
+		node.append_conf('postgresql.conf',
+		                 "orioledb.enable_stopevents = true\n")
+		node.start()
+		node.safe_psql(
+		    'postgres', """
+			CREATE EXTENSION IF NOT EXISTS orioledb;
+			CREATE TABLE t (
+				k text NOT NULL,
+				v text NOT NULL,
+				PRIMARY KEY (k)
+			) USING orioledb;
+
+			-- Values wide enough that the splitter plus the two waiters
+			-- cannot share a page with these three, so the merge has to
+			-- split.
+			INSERT INTO t (k, v)
+			SELECT 'k' || to_char(g * 10, 'fm0000'), repeat('a', 2000)
+			FROM generate_series(1, 3) g;
+		""")
+
+		splitter = node.connect(autocommit=True)
+		waiters = [node.connect(autocommit=True) for _ in range(2)]
+		ctl = node.connect()
+
+		try:
+			ctl.execute(
+			    "SELECT pg_stopevent_set('before_get_waiters_with_tuples',\n"
+			    "                        'true');")
+
+			splitter_pid = splitter.pid
+			t_split = ThreadQueryExecutor(
+			    splitter, "INSERT INTO t (k, v) VALUES "
+			    "('k0035', repeat('h', 2000));")
+			t_split.start()
+			wait_stopevent(node, splitter_pid)
+
+			# Both waiters insert one and the same key, and it sorts after
+			# every item on the page -- that is the branch where the merge
+			# stopped comparing altogether.
+			waiter_threads = []
+			pids = []
+			for i, conn in enumerate(waiters):
+				pids.append(conn.pid)
+				thr = ThreadQueryExecutor(
+				    conn, "INSERT INTO t (k, v) VALUES "
+				    "('k0045', repeat('%s', 2000));" % (chr(ord('b') + i), ))
+				thr.start()
+				waiter_threads.append(thr)
+
+				# One at a time: the order they enter the queue in is what
+				# decides which one the merge sees first.
+				deadline = time.time() + 300.0
+				while time.time() < deadline:
+					blocked = node.execute(
+					    "SELECT count(*) FROM pg_stat_activity "
+					    "WHERE pid IN (%s) AND wait_event IS NOT NULL;" %
+					    (','.join([str(pid) for pid in pids])))[0][0]
+					if blocked >= len(pids):
+						break
+					time.sleep(0.1)
+
+			ctl.execute("SELECT pg_stopevent_reset("
+			            "'before_get_waiters_with_tuples');")
+
+			t_split.join()
+
+			errors = 0
+			for thr in waiter_threads:
+				try:
+					thr.join()
+				except DatabaseError:
+					errors += 1
+
+			# A point lookup by the primary key stops at the first match, so
+			# it reports one row either way: the duplicate is only visible to
+			# something that walks the leaf.
+			self.assertEqual([('k0010', ), ('k0020', ), ('k0030', ),
+			                  ('k0035', ), ('k0045', )],
+			                 node.execute("SELECT k FROM t;"))
+
+			# The dropped waiter re-takes the page lock, finds the key it
+			# wanted already there and fails on the unique constraint.
+			# Exactly one of the two has to get that far.
+			self.assertEqual(1, errors)
+
+			self.assertTrue(
+			    node.execute("SELECT orioledb_tbl_check('t'::regclass);")[0]
+			    [0])
+		finally:
+			node.stop()
