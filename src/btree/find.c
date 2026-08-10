@@ -203,6 +203,7 @@ page_find_downlink(OBTreeFindPageInternalContext *intCxt,
 		}
 	}
 
+	ASSERT_CHUNK_LOADED(intCxt->partial, intCxt->pagePtr, loc);
 	*tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt->pagePtr, loc);
 
 	return OBTreeFastPathFindOK;
@@ -261,6 +262,7 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 											intCxt->partial,
 											loc))
 			{
+				ASSERT_CHUNK_LOADED(intCxt->partial, intCxt->pagePtr, loc);
 				if (level > 0)
 					*tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt->pagePtr, loc);
 
@@ -352,6 +354,7 @@ page_find_item(OBTreeFindPageInternalContext *intCxt,
 		return OBTreeFastPathFindRetry;
 	}
 
+	ASSERT_CHUNK_LOADED(intCxt->partial, intCxt->pagePtr, loc);
 	if (level > 0)
 		*tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(intCxt->pagePtr, loc);
 
@@ -428,24 +431,49 @@ refresh_parent_img_chunk(OBTreeFindPageInternalContext *intCxt)
  * the caller re-finds.  partial_load_chunk() positions the locator at item 0,
  * so the caller's real itemOffset is restored afterwards.
  *
- * Returns false if the parent changed under us; the caller must re-find.
+ * Returns false if the page changed under us; the caller must re-find.
  */
 static bool
-convert_fastpath_parent_to_img(OBTreeFindPageContext *context,
-							   BTreePageItemLocator *locator)
+convert_fastpath_locator_to_img(PartialPageState *partial, Pointer img,
+								BTreePageItemLocator *locator)
 {
 	OffsetNumber chunkOffset = locator->chunkOffset;
 	OffsetNumber itemOffset = locator->itemOffset;
 
-	if (!partial_load_hikeys_chunk(&context->parentPartial, context->parentImg))
+	if (!partial_load_hikeys_chunk(partial, img))
 		return false;
 
-	if (!partial_load_chunk(&context->parentPartial, context->parentImg,
-							chunkOffset, locator))
+	if (!partial_load_chunk(partial, img, chunkOffset, locator))
 		return false;
 
 	locator->itemOffset = itemOffset;
 	return true;
+}
+
+static bool
+convert_fastpath_parent_to_img(OBTreeFindPageContext *context,
+							   BTreePageItemLocator *locator)
+{
+	return convert_fastpath_locator_to_img(&context->parentPartial,
+										   context->parentImg, locator);
+}
+
+/*
+ * The same conversion for the target page's own locator in context->img.
+ *
+ * BTREE_PAGE_FIND_DOWNLINK_LOCATION (the sequential scan) asks for a downlink
+ * location rather than a tuple, so find_page() routes even the target level
+ * through page_find_downlink() -- and hence through the fastpath, which leaves
+ * the locator on the shared page.  Unlike the descent, this locator is handed
+ * to the caller and read through long after find_page() returned, with the
+ * page neither locked nor re-validated, so it has to be moved onto the image.
+ */
+static bool
+convert_fastpath_target_to_img(OBTreeFindPageContext *context,
+							   BTreePageItemLocator *locator)
+{
+	return convert_fastpath_locator_to_img(&context->partial,
+										   context->img, locator);
 }
 
 /*--
@@ -850,6 +878,19 @@ find_page(OBTreeFindPageContext *context, void *key, BTreeKeyType keyType,
 			params = btree_page_stopevent_params(desc, intCxt.pagePtr);
 			STOPEVENT(STOPEVENT_AFTER_FIND_DOWNLINK, params);
 		}
+
+		/*
+		 * A DOWNLINK_LOCATION caller reaches its target level through
+		 * page_find_downlink(), so the fastpath may have left `loc` on the
+		 * shared page.  The caller reads downlinks through it after
+		 * find_page() has returned and the page is no longer locked or
+		 * re-validated, so move it onto context->img now; a page that changed
+		 * under us makes the conversion fail and we re-descend.
+		 */
+		if (level <= targetLevel && downlinkLocationFlag &&
+			context->partial.isPartial &&
+			!convert_fastpath_target_to_img(context, &loc))
+			continue;
 
 		/* Place new item to the context */
 		Assert(context->index < ORIOLEDB_MAX_DEPTH);
@@ -1548,6 +1589,8 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 										loc.chunkOffset, NULL);
 		if (tup_loaded)
 		{
+			ASSERT_CHUNK_LOADED(&context->parentPartial, context->parentImg,
+								&loc);
 			BTREE_PAGE_READ_INTERNAL_ITEM(tuphdr, internalTuple, context->parentImg, &loc);
 			Assert(tuphdr != NULL);
 		}
@@ -1603,6 +1646,7 @@ refresh_context_leaf_lokey(OBTreeFindPageContext *context,
 	{
 		OTuple		lokey;
 
+		ASSERT_CHUNK_LOADED(&context->parentPartial, context->parentImg, loc);
 		BTREE_PAGE_READ_INTERNAL_TUPLE(lokey, context->parentImg, loc);
 		copy_fixed_key(context->desc, &context->leafLokey, lokey);
 	}
@@ -1688,6 +1732,8 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 
 			if (next_lokey_loaded && BTREE_PAGE_LOCATOR_IS_VALID(context->parentImg, &loc))
 			{
+				ASSERT_CHUNK_LOADED(&context->parentPartial,
+									context->parentImg, &loc);
 				tuphdr = (BTreeNonLeafTuphdr *) BTREE_PAGE_LOCATOR_GET_ITEM(context->parentImg, &loc);
 
 				/*
@@ -1892,6 +1938,22 @@ btree_find_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 
 	pagePtr = set_page_ptr(context, parent);
 
+	/*
+	 * The page is about to be copied whole.  o_btree_read_page() only touches
+	 * a PartialPageState it is handed, so the one describing this image would
+	 * keep claiming a partial read -- with a src still pointing at whatever
+	 * page that read used.  An iterator that switches from FETCH to IMAGE
+	 * mid-scan (iterator_maybe_switch_to_image()) reads its next sibling with
+	 * partial == NULL and would carry that lie into every later chunk test.
+	 */
+	if (partial == NULL)
+	{
+		if (parent)
+			context->parentPartial.isPartial = false;
+		else
+			context->partial.isPartial = false;
+	}
+
 	BTREE_PAGE_FIND_UNSET(context, LOKEY_UNDO);
 	if (lokey)
 		clear_fixed_key(lokey);
@@ -1924,6 +1986,22 @@ btree_find_try_read_page(OBTreeFindPageContext *context, OInMemoryBlkno blkno,
 	Pointer		pagePtr;
 
 	pagePtr = set_page_ptr(context, parent);
+
+	/*
+	 * The page is about to be copied whole.  o_btree_read_page() only touches
+	 * a PartialPageState it is handed, so the one describing this image would
+	 * keep claiming a partial read -- with a src still pointing at whatever
+	 * page that read used.  An iterator that switches from FETCH to IMAGE
+	 * mid-scan (iterator_maybe_switch_to_image()) reads its next sibling with
+	 * partial == NULL and would carry that lie into every later chunk test.
+	 */
+	if (partial == NULL)
+	{
+		if (parent)
+			context->parentPartial.isPartial = false;
+		else
+			context->partial.isPartial = false;
+	}
 
 	result = o_btree_try_read_page(context->desc, blkno, pageChangeCount,
 								   pagePtr, context->csn,

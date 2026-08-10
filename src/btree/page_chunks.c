@@ -84,8 +84,24 @@ partial_load_chunk(PartialPageState *partial, Page img,
 	LocationIndex chunkBegin,
 				chunkEnd;
 	BTreePageHeader *header;
+	bool		alreadyLoaded;
 
-	if (!partial->isPartial || partial->chunkIsLoaded[chunkOffset])
+	/* A whole-page image has everything; the caller positions its own locator */
+	if (!partial->isPartial)
+		return true;
+
+	alreadyLoaded = partial->chunkIsLoaded[chunkOffset];
+
+	/*
+	 * Nothing to copy and no locator to position: the common repeat call.
+	 *
+	 * When there IS a locator we must fall through even for a chunk already
+	 * in the image.  Callers pass a locator precisely to have it positioned
+	 * on chunkOffset, and returning early would leave it wherever it was --
+	 * on another chunk, or (when fastpath_find_downlink() produced it) on the
+	 * live shared page.
+	 */
+	if (alreadyLoaded && loc == NULL)
 		return true;
 
 	if (partial->hikeysChunkIsLoaded)
@@ -137,24 +153,28 @@ partial_load_chunk(PartialPageState *partial, Page img,
 	Assert(chunkBegin >= 0 && chunkBegin <= ORIOLEDB_BLCKSZ);
 	Assert(chunkEnd >= 0 && chunkEnd <= ORIOLEDB_BLCKSZ);
 
-	VALGRIND_CHECK_MEM_IS_DEFINED((Pointer) src + chunkBegin,
-								  chunkEnd - chunkBegin);
+	if (!alreadyLoaded)
+	{
+		VALGRIND_CHECK_MEM_IS_DEFINED((Pointer) src + chunkBegin,
+									  chunkEnd - chunkBegin);
 
-	memcpy((Pointer) img + chunkBegin,
-		   (Pointer) src + chunkBegin,
-		   chunkEnd - chunkBegin);
+		memcpy((Pointer) img + chunkBegin,
+			   (Pointer) src + chunkBegin,
+			   chunkEnd - chunkBegin);
 
-	pg_read_barrier();
+		pg_read_barrier();
 
-	srcState = pg_atomic_read_u64(&(O_PAGE_HEADER(src)->state));
-	if ((imgState & PAGE_STATE_CHANGE_COUNT_MASK) != (srcState & PAGE_STATE_CHANGE_COUNT_MASK) ||
-		O_PAGE_STATE_READ_IS_BLOCKED(srcState))
-		return false;
+		srcState = pg_atomic_read_u64(&(O_PAGE_HEADER(src)->state));
+		if ((imgState & PAGE_STATE_CHANGE_COUNT_MASK) != (srcState & PAGE_STATE_CHANGE_COUNT_MASK) ||
+			O_PAGE_STATE_READ_IS_BLOCKED(srcState))
+			return false;
 
-	if (O_PAGE_GET_CHANGE_COUNT(img) != O_PAGE_GET_CHANGE_COUNT(src))
-		return false;
+		if (O_PAGE_GET_CHANGE_COUNT(img) != O_PAGE_GET_CHANGE_COUNT(src))
+			return false;
 
-	partial->chunkIsLoaded[chunkOffset] = true;
+		partial->chunkIsLoaded[chunkOffset] = true;
+	}
+
 	if (loc)
 	{
 		loc->chunkOffset = chunkOffset;
@@ -1507,6 +1527,68 @@ page_locator_find_real_item(Page p, PartialPageState *partial,
 	}
 	return true;
 }
+
+#ifdef USE_ASSERT_CHECKING
+void
+assert_partial_chunk_loaded(PartialPageState *partial, Page img,
+							BTreePageItemLocator *locator)
+{
+	BTreePageHeader *header = (BTreePageHeader *) img;
+	LocationIndex chunkBegin,
+				chunkEnd;
+
+	/* Whole-page images have everything loaded by construction */
+	if (partial == NULL || !partial->isPartial)
+		return;
+
+	/* An invalid locator is not going to be dereferenced */
+	if (locator->chunk == NULL)
+		return;
+
+	/*
+	 * A chunk which was never loaded holds whatever the image buffer happened
+	 * to contain, so reading through such a locator is always wrong.
+	 */
+	Assert(locator->chunkOffset < BTREE_PAGE_MAX_CHUNKS);
+	Assert(partial->chunkIsLoaded[locator->chunkOffset]);
+
+	/*
+	 * The chunk descriptors live in the hikeys chunk.  The fastpath descent
+	 * loads a single data chunk without them (its locator comes from the
+	 * fastpath hint instead), so the header-derived cross-checks below only
+	 * apply once the hikeys chunk is there.
+	 */
+	if (!partial->hikeysChunkIsLoaded)
+		return;
+
+	Assert(header->chunksCount >= 1 &&
+		   header->chunksCount <= BTREE_PAGE_MAX_CHUNKS);
+	Assert(locator->chunkOffset < header->chunksCount);
+
+	chunkBegin = SHORT_GET_LOCATION(header->chunkDesc[locator->chunkOffset].shortLocation);
+	if (locator->chunkOffset + 1 < header->chunksCount)
+		chunkEnd = SHORT_GET_LOCATION(header->chunkDesc[locator->chunkOffset + 1].shortLocation);
+	else
+		chunkEnd = header->dataSize;
+
+	Assert(chunkBegin <= chunkEnd && chunkEnd <= ORIOLEDB_BLCKSZ);
+
+	/*
+	 * A locator addressing the live source page instead of the image is a
+	 * different failure: the bytes are real, but they are read without the
+	 * copy-then-validate protocol, so they can be torn.
+	 */
+	Assert((Pointer) locator->chunk == (Pointer) img + chunkBegin);
+
+	/*
+	 * An empty chunk (an empty page has one) gives a locator which is not
+	 * valid: it is never dereferenced, so there is no item to check.
+	 */
+	if (locator->itemOffset < locator->chunkItemsCount)
+		Assert(ITEM_GET_OFFSET(locator->chunk->items[locator->itemOffset]) <
+			   chunkEnd - chunkBegin);
+}
+#endif							/* USE_ASSERT_CHECKING */
 
 /* No existing callers */
 OffsetNumber
