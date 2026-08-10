@@ -3037,5 +3037,385 @@ class ReplicationTest(BaseTest):
 				rcount = replica.execute(
 				    """SELECT COUNT(*) FROM accounts;""")[0][0]
 				self.assertEqual(mcount, rcount)
-				master.stop()
-				replica.stop()
+			master.stop()
+			replica.stop()
+
+	def test_tablespace_pk_replication_crash(self):
+		"""
+		Crash the replica while it replays an ADD PRIMARY KEY ... USING
+		INDEX TABLESPACE <ts> whose heap lives in pg_default.  The replica
+		starts recovery from a checkpoint that predates the PK rebuild,
+		so handle_o_tables_meta_unlock() must run the rebuild path and
+		tbl_data_exists() must resolve the *old* (heap) tablespace to
+		find the pre-checkpoint rows.  The companion
+		test_tablespace_pk_replication catches the no-crash variant of
+		this bug (the rebuild silently skipped, table empty on replica);
+		this test adds the crash dimension: the replica restarts from a
+		stale checkpoint and replays the rebuild WAL.  Verifies the
+		rebuilt PK on the replica contains both the pre- and
+		post-checkpoint batches and the old heap relnode files are
+		reclaimed.
+		"""
+		with self.node as master:
+			master.append_conf('postgresql.conf',
+			                   "allow_in_place_tablespaces = true\n")
+			master.start()
+
+			master.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+			master.safe_psql("CREATE TABLESPACE regress_tblspace LOCATION '';")
+
+			master.safe_psql("""
+				CREATE TABLE foo (d int) USING orioledb;
+				INSERT INTO foo SELECT g FROM generate_series(1, 50) g;
+			""")
+
+			with self.getReplica().start() as replica:
+				self.catchup_orioledb(replica)
+				master.safe_psql("CHECKPOINT;")
+				replica.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				self.assertEqual(
+				    50, replica.execute("SELECT COUNT(*) FROM foo;")[0][0])
+
+				old_datoid = master.execute(
+				    "SELECT oid FROM pg_database "
+				    "WHERE datname = current_database();")[0][0]
+				old_relnode = master.execute(
+				    "SELECT relfilenode FROM pg_class "
+				    "WHERE relname = 'foo';")[0][0]
+
+				master.safe_psql("""
+					INSERT INTO foo
+						SELECT g FROM generate_series(51, 100) g;
+					ALTER TABLE foo ADD PRIMARY KEY (d)
+						USING INDEX TABLESPACE regress_tblspace;
+				""")
+
+				new_relnode = master.execute(
+				    "SELECT relfilenode FROM pg_class "
+				    "WHERE relname = 'foo';")[0][0]
+				self.assertNotEqual(old_relnode, new_relnode)
+
+				# crash the replica before it applies the PK rebuild WAL
+				replica.stop(['-m', 'immediate'])
+				replica.start()
+				self.catchup_orioledb(replica)
+
+				# both batches must be present (the rebuild happened)
+				self.assertEqual(
+				    100, replica.execute("SELECT COUNT(*) FROM foo;")[0][0])
+				self.assertEqual(
+				    1, replica.execute("SELECT d FROM foo WHERE d = 1;")[0][0])
+				self.assertEqual(
+				    100,
+				    replica.execute("SELECT d FROM foo WHERE d = 100;")[0][0])
+
+				# the rebuilt PK is usable via index scan on the replica
+				plan = replica.execute("""
+					SET enable_seqscan = off;
+					EXPLAIN (COSTS OFF) SELECT * FROM foo ORDER BY d;
+				""")
+				self.assertTrue(
+				    any('foo_pkey' in str(p) for p in plan),
+				    "replica must use the rebuilt PK index: %r" % (plan, ))
+
+				# old (pre-rebuild) heap relnode file must be reclaimed
+				old_tree_path = os.path.join(replica.data_dir,
+				                            "orioledb_data", str(old_datoid),
+				                            str(old_relnode))
+				self.assertFalse(
+				    os.path.exists(old_tree_path),
+				    f"old relnode file {old_tree_path} should be gone on replica")
+
+	def test_replication_add_bridge_index_crash(self):
+		"""
+		Crash the replica while it replays a CREATE INDEX USING gist that
+		triggers add_bridge_index() and a heap rewrite.  The replica
+		starts from a checkpoint predating the bridge-index build, so
+		recovery must replay both the post-checkpoint inserts and the
+		bridge-index rebuild.  test_replication_add_bridge_index covers
+		the no-crash variant; this test adds the crash dimension (cf.
+		test_replication_rebuild_pk_after_checkpoint for the PK rebuild
+		case).  Verifies the GiST scan returns both batches and the old
+		(pre-bridge) heap relnode files are reclaimed on the replica.
+		"""
+		with self.node as master:
+			master.append_conf('postgresql.conf',
+			                   "orioledb.recovery_pool_size = 1\n")
+			master.start()
+
+			with self.getReplica().start() as replica:
+				master.safe_psql("""
+					CREATE EXTENSION orioledb;
+					CREATE TABLE o_test (
+						id int primary key,
+						val text,
+						p point
+					) USING orioledb;
+					INSERT INTO o_test
+						SELECT id, 'batch1_' || id, point(id, id)
+						FROM generate_series(1, 50) id;
+				""")
+				self.catchup_orioledb(replica)
+				master.safe_psql("CHECKPOINT;")
+				replica.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+				self.assertEqual(
+				    50, replica.execute("SELECT count(*) FROM o_test;")[0][0])
+
+				old_datoid = master.execute(
+				    "SELECT oid FROM pg_database "
+				    "WHERE datname = current_database();")[0][0]
+				old_relnode = master.execute(
+				    "SELECT relfilenode FROM pg_class "
+				    "WHERE relname = 'o_test';")[0][0]
+
+				master.safe_psql("""
+					INSERT INTO o_test
+						SELECT id, 'batch2_' || id, point(id, id)
+						FROM generate_series(51, 100) id;
+					CREATE INDEX o_test_gist ON o_test USING gist (p);
+				""")
+
+				new_relnode = master.execute(
+				    "SELECT relfilenode FROM pg_class "
+				    "WHERE relname = 'o_test';")[0][0]
+				self.assertNotEqual(old_relnode, new_relnode)
+
+				# crash the replica before it applies the bridge-index build
+				replica.stop(['-m', 'immediate'])
+				replica.start()
+				self.catchup_orioledb(replica)
+
+				self.assertEqual(
+				    100, replica.execute("SELECT count(*) FROM o_test;")[0][0])
+				self.assertEqual(
+				    'batch1_1',
+				    replica.execute("SELECT val FROM o_test WHERE id = 1;")[0]
+				    [0])
+				self.assertEqual(
+				    'batch2_51',
+				    replica.execute(
+				        "SELECT val FROM o_test WHERE id = 51;")[0][0])
+
+				# the bridge index must be usable on the replica after recovery
+				result = replica.execute("""
+					SET enable_indexonlyscan = off;
+					SELECT count(*) FROM o_test
+						WHERE p <@ '((0,0),(100,100))'::box;
+				""")
+				self.assertEqual(100, result[0][0])
+
+				# old (pre-bridge) heap relnode file must be reclaimed
+				old_tree_path = os.path.join(replica.data_dir,
+				                            "orioledb_data", str(old_datoid),
+				                            str(old_relnode))
+				self.assertFalse(
+				    os.path.exists(old_tree_path),
+				    f"old relnode file {old_tree_path} should be gone on replica")
+
+	def test_recovery_add_bridge_index_all_ams_replicated(self):
+		"""
+		For each built-in bridged AM (gist, gin, brin, spgist) crash the
+		master right after CREATE INDEX ... USING <am> so crash recovery
+		replays the bridge-index build, then stream the result to the
+		replica.  test_recovery_add_bridge_index covers gist on the
+		master only; this test covers all four built-in bridge AMs and
+		adds the replica, verifying the bridge index is fully present
+		and queryable on both the recovered master and the replica --
+		never half-registered -- across a crash.
+		"""
+		cases = [
+			("gist", "p point",
+			 "USING gist (p)",
+			 "SELECT count(*) FROM o_bridge "
+			 "WHERE p <@ '((0,0),(100,100))'::box;"),
+			("gin", "arr int[]",
+			 "USING gin (arr)",
+			 "SELECT count(*) FROM o_bridge "
+			 "WHERE arr @> ARRAY[1]::int[];"),
+			("brin", "b int",
+			 "USING brin (b)",
+			 "SELECT count(*) FROM o_bridge WHERE b > 0;"),
+			("spgist", "t text",
+			 "USING spgist (t)",
+			 "SELECT count(*) FROM o_bridge "
+			 "WHERE t >= 'key' AND t < 'kez';"),
+		]
+		inserts = {
+			"gist": "point(id, id)",
+			"gin": "ARRAY[1, id]",
+			"brin": "id",
+			"spgist": "'key' || id",
+		}
+		with self.node as master:
+			master.append_conf('postgresql.conf',
+			                   "orioledb.recovery_pool_size = 1\n"
+			                   "checkpoint_timeout = 1d\n")
+			master.start()
+			master.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+			with self.getReplica().start() as replica:
+				for am, col, idx, check in cases:
+					with self.subTest(am=am):
+						master.safe_psql(f"""
+							CREATE TABLE o_bridge (
+								id int primary key,
+								{col}
+							) USING orioledb;
+							INSERT INTO o_bridge
+								SELECT id, {inserts[am]}
+								FROM generate_series(1, 100) id;
+							CHECKPOINT;
+						""")
+						self.catchup_orioledb(replica)
+
+						master.safe_psql(
+						    f"CREATE INDEX o_bridge_{am} ON o_bridge {idx};")
+
+						# crash the master so it must replay the
+						# bridge-index build from WAL on restart
+						self.crash_with_os_buffer_loss()
+						master.start()
+						self.catchup_orioledb(replica)
+
+						for node, label in ((master, "master"),
+						                    (replica, "replica")):
+							self.assertEqual(
+							    100,
+							    node.execute(f"""
+									SET enable_seqscan = off;
+									SET enable_indexonlyscan = off;
+									{check}
+								""")[0][0],
+							    f"{am}: bridge scan on {label} returned wrong count")
+							self.assertEqual(
+							    100,
+							    node.execute(
+							        "SELECT count(*) FROM o_bridge;")[0][0],
+							    f"{am}: total row count on {label} wrong")
+
+						master.safe_psql("DROP TABLE o_bridge;")
+						self.catchup_orioledb(replica)
+
+	def test_replication_move_bridged_table_tablespace_crash(self):
+		"""
+		Replica crash while it replays an ALTER TABLE ... SET
+		TABLESPACE on a table that has a bridged (GiST) index.  The
+		replica starts recovery from a checkpoint predating the move,
+		so handle_o_tables_meta_unlock must replay the tablespace move
+		and bridge rebuild, reading the heap from the old tablespace
+		and writing the orioledb trees to the new one.  Verifies the
+		GiST scan and row counts on the replica after recovery.
+		"""
+		with self.node as master:
+			master.append_conf('postgresql.conf',
+			                   "allow_in_place_tablespaces = true\n")
+			master.start()
+			master.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+			master.safe_psql("CREATE TABLESPACE ts1 LOCATION '';")
+			master.safe_psql("""
+				CREATE TABLE o_test (
+					id int primary key,
+					p point
+				) USING orioledb;
+				INSERT INTO o_test
+					SELECT id, point(id, id) FROM generate_series(1, 100) id;
+				CREATE INDEX o_test_gist ON o_test USING gist (p);
+			""")
+			with self.getReplica().start() as replica:
+				self.catchup_orioledb(replica)
+				master.safe_psql("CHECKPOINT;")
+				replica.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				# move table + insert post-checkpoint batch
+				master.safe_psql("ALTER TABLE o_test SET TABLESPACE ts1;")
+				master.safe_psql("""
+					INSERT INTO o_test
+						SELECT 200 + id, point(200 + id, 200 + id)
+						FROM generate_series(1, 50) id;
+				""")
+
+				# crash the replica before it applies the move
+				replica.stop(['-m', 'immediate'])
+				replica.start()
+				self.catchup_orioledb(replica)
+
+				self.assertEqual(
+				    150, replica.execute("SELECT count(*) FROM o_test;")[0][0])
+				result = replica.execute("""
+					SET enable_indexonlyscan = off;
+					SELECT count(*) FROM o_test
+						WHERE p <@ '((0,0),(250,250))'::box;
+				""")
+				self.assertEqual(150, result[0][0])
+				self.assertEqual(
+				    1,
+				    replica.execute(
+				        "SELECT count(*) FROM o_test WHERE id = 1;")[0][0])
+				self.assertEqual(
+				    1,
+				    replica.execute(
+				        "SELECT count(*) FROM o_test WHERE id = 201;")[0][0])
+
+	def test_replication_move_bridged_table_mixed_tablespaces_crash(self):
+		"""
+		The bridge index lives in ts1 while the table is moved from
+		the default tablespace to ts2, streamed to a replica that
+		crashes before applying the move.  Recovery must rebuild the
+		bridge (which stays in ts1) reading the heap from the old
+		default tablespace and writing the orioledb trees to ts2 on
+		the replica.  Verifies the mixed-tablespace bridge case across
+		replica crash recovery.
+		"""
+		with self.node as master:
+			master.append_conf('postgresql.conf',
+			                   "allow_in_place_tablespaces = true\n")
+			master.start()
+			master.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
+			master.safe_psql("CREATE TABLESPACE ts1 LOCATION '';")
+			master.safe_psql("CREATE TABLESPACE ts2 LOCATION '';")
+			master.safe_psql("""
+				CREATE TABLE o_test (
+					id int primary key,
+					p point
+				) USING orioledb;
+				INSERT INTO o_test
+					SELECT id, point(id, id) FROM generate_series(1, 100) id;
+				CREATE INDEX o_test_gist ON o_test USING gist (p) TABLESPACE ts1;
+			""")
+			bridge_ts = master.execute(
+			    "SELECT reltablespace FROM pg_class "
+			    "WHERE relname = 'o_test_gist';")[0][0]
+			with self.getReplica().start() as replica:
+				self.catchup_orioledb(replica)
+				master.safe_psql("CHECKPOINT;")
+				replica.safe_psql("CHECKPOINT;")
+				self.catchup_orioledb(replica)
+
+				master.safe_psql("ALTER TABLE o_test SET TABLESPACE ts2;")
+				master.safe_psql("""
+					INSERT INTO o_test
+						SELECT 200 + id, point(200 + id, 200 + id)
+						FROM generate_series(1, 50) id;
+				""")
+
+				replica.stop(['-m', 'immediate'])
+				replica.start()
+				self.catchup_orioledb(replica)
+
+				self.assertEqual(
+				    150, replica.execute("SELECT count(*) FROM o_test;")[0][0])
+				result = replica.execute("""
+					SET enable_indexonlyscan = off;
+					SELECT count(*) FROM o_test
+						WHERE p <@ '((0,0),(250,250))'::box;
+				""")
+				self.assertEqual(150, result[0][0])
+				# bridge index stays in its original tablespace on the replica
+				self.assertEqual(
+				    bridge_ts,
+				    replica.execute(
+				        "SELECT reltablespace FROM pg_class "
+				        "WHERE relname = 'o_test_gist';")[0][0])
