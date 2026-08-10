@@ -1081,6 +1081,24 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 		else
 		{
 			int			cmp;
+			bool		old_valid,
+						new_valid;
+
+			/*
+			 * A partial index membership is driven by the predicate, not
+			 * only by the index key.  An UPDATE that leaves every indexed
+			 * key column unchanged (cmp == 0) but alters a column
+			 * referenced in the partial-index predicate still moves the
+			 * row into or out of the index.  Mirror the live path in
+			 * o_update_secondary_index(): only skip when the keys are
+			 * equal AND the predicate membership is unchanged.
+			 */
+			old_valid = o_is_index_predicate_satisfied(tree,
+													   old_slot,
+													   tree->econtext);
+			new_valid = o_is_index_predicate_satisfied(tree,
+													   new_slot,
+													   tree->econtext);
 
 			tts_orioledb_fill_key_bound(new_slot, tree, &new_key);
 			tts_orioledb_fill_key_bound(old_slot, tree, &old_key);
@@ -1089,16 +1107,14 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 							  (Pointer) &new_key, BTreeKeyBound,
 							  (Pointer) &old_key, BTreeKeyBound);
 
-			if (cmp != 0)
+			if (cmp != 0 || old_valid != new_valid)
 			{
 				OTuple		nullTup;
 				BTreeModifyCallbackInfo callbackInfo = nullCallbackInfo;
 
 				O_TUPLE_SET_NULL(nullTup);
 
-				if (o_is_index_predicate_satisfied(tree,
-												   old_slot,
-												   tree->econtext))
+				if (old_valid)
 				{
 					callbackInfo.modifyCallback = recovery_delete_overwrite_callback;
 					(void) o_btree_modify(&tree->desc, BTreeOperationDelete,
@@ -1108,9 +1124,7 @@ apply_tbl_update(OTableDescr *descr, OTuple tuple,
 										  NULL, &callbackInfo);
 				}
 
-				if (o_is_index_predicate_satisfied(tree,
-												   new_slot,
-												   tree->econtext))
+				if (new_valid)
 				{
 					callbackInfo.modifyDeletedCallback = recovery_insert_deleted_overwrite_callback;
 					callbackInfo.modifyCallback = recovery_insert_overwrite_callback;
