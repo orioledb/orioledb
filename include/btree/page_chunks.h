@@ -71,4 +71,25 @@ extern bool page_locator_find_real_item(Page p, PartialPageState *partial,
 										BTreePageItemLocator *locator);
 extern OffsetNumber page_locator_get_offset(Page p, BTreePageItemLocator *locator);
 
+/*
+ * Assert that the item a locator points to lives in a chunk that was actually
+ * loaded into the partial (FETCH-mode) image.  BTREE_PAGE_LOCATOR_IS_VALID()
+ * ignores the page entirely -- it only looks at the locator's own cached chunk
+ * pointer and item count -- so a locator can happily address a region of the
+ * image which no partial_load_chunk() ever filled, and the "tuple" read from
+ * there is whatever the buffer happened to contain (typically another chunk's
+ * item offset array).  Use this right before reading a tuple through a locator
+ * in the places where the matching PartialPageState is at hand: it is silent in
+ * IMAGE mode and on correctly loaded chunks, and fires exactly on the
+ * "unloaded chunk got used" case.
+ */
+#ifdef USE_ASSERT_CHECKING
+extern void assert_partial_chunk_loaded(PartialPageState *partial, Page img,
+										BTreePageItemLocator *locator);
+#define ASSERT_CHUNK_LOADED(partial, img, locator) \
+	assert_partial_chunk_loaded((partial), (img), (locator))
+#else
+#define ASSERT_CHUNK_LOADED(partial, img, locator) ((void) 0)
+#endif
+
 #endif							/* __BTREE_PAGE_CHUNKS_H__ */
