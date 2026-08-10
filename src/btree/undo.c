@@ -1721,6 +1721,7 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 	UndoLocation retainedUndoLocation = get_snapshot_retained_undo_location(undoType);
 	bool		foundFinal;
 	bool		result = false;
+	uint64		chainwalk_iterations = 0;
 
 	finalTuphdr = curTuphdr = *pageTuphdr;
 	finalUndoLocation = curUndoLocation = InvalidUndoLocation;
@@ -1747,6 +1748,33 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 	{
 		bool		prevChainHasLocks = false;
 		bool		delete_record = false;
+
+		/*
+		 * TEMP: the third candidate for the wedge behind the
+		 * 027_stream_regress hangs.  Two gdb samples of the same foreign_key
+		 * DELETE backend caught it inside this function at different points
+		 * (oxid_get_csn -> map_oxid, and
+		 * get_prev_leaf_header_from_undo_if_exists), on CPU, holding the leaf
+		 * page lock the checkpointer was blocked on -- which is what going
+		 * round in circles looks like.  The ROWLOCKSPIN counters in modify.c
+		 * only see loops *around* this call; if the chain walk itself fails
+		 * to advance, neither of them ever fires.  A real chain is bounded by
+		 * the retained undo, so six figures of iterations means it is not
+		 * advancing.
+		 */
+		if (++chainwalk_iterations == 100000)
+			elog(LOG, "ROWLOCKSPIN kind=chainwalk myOxid=" UINT64_FORMAT
+				 " xactInfo_oxid=" UINT64_FORMAT " lockOnly=%d finished=%d"
+				 " chainHasLocks=%d xactIsFinal=%d mode=%d xactMode=%d"
+				 " undoLoc=" UINT64_FORMAT " curUndoLoc=" UINT64_FORMAT
+				 " retainedUndoLoc=" UINT64_FORMAT " blkno=%u",
+				 (uint64) my_oxid, (uint64) XACT_INFO_GET_OXID(xactInfo),
+				 XACT_INFO_IS_LOCK_ONLY(xactInfo) ? 1 : 0,
+				 XACT_INFO_IS_FINISHED(xactInfo) ? 1 : 0,
+				 curTuphdr.chainHasLocks ? 1 : 0, xactIsFinal ? 1 : 0,
+				 (int) mode, (int) xactMode,
+				 (uint64) undoLocation, (uint64) curUndoLocation,
+				 (uint64) retainedUndoLocation, blkno);
 
 		if (XACT_INFO_IS_LOCK_ONLY(xactInfo))
 		{
