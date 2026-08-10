@@ -874,10 +874,25 @@ try_flush_xids_queue(void)
 void
 write_to_xids_queue(XidFileRec *rec)
 {
-	uint64		location = pg_atomic_fetch_add_u64(&checkpoint_state->xidRecLastPos, 1);
-	XidFileRec *target = &checkpoint_state->xidRecQueue[location % XID_RECS_QUEUE_SIZE];
+	uint64		location;
+	XidFileRec *target;
 
 	Assert(OXidIsValid(rec->oxid));
+
+	/*
+	 * The fetch_add below claims a slot, and close_xids_file() waits for
+	 * every claimed slot to be published.  Leaving without publishing would
+	 * strand the checkpointer on a record nobody will ever write, and the
+	 * hole cannot be repaired afterwards: the file is a flat array of
+	 * xidRecLastPos records whose reader feeds every one of them to
+	 * advance_oxids(), so there is no value that means "skip me".  A critical
+	 * section makes that impossible -- an error in here takes the cluster
+	 * down instead of silently abandoning the slot.
+	 */
+	START_CRIT_SECTION();
+
+	location = pg_atomic_fetch_add_u64(&checkpoint_state->xidRecLastPos, 1);
+	target = &checkpoint_state->xidRecQueue[location % XID_RECS_QUEUE_SIZE];
 
 	/*
 	 * Flush queue to the file till our position is available for write.
@@ -893,6 +908,8 @@ write_to_xids_queue(XidFileRec *rec)
 
 	target->oxid = rec->oxid;
 
+	END_CRIT_SECTION();
+
 	VALGRIND_CHECK_MEM_IS_DEFINED(target, sizeof(*target));
 }
 
@@ -902,19 +919,62 @@ write_to_xids_queue(XidFileRec *rec)
 static void
 before_writing_xids_file(int chkpnum)
 {
-	int			i;
+	if (checkpoint_state->xidQueueCheckpointNum >= chkpnum)
+		return;
 
-	if (checkpoint_state->xidQueueCheckpointNum < chkpnum)
+	/*
+	 * Restart the numbering -- but only from a state where the queue is
+	 * provably empty, so that no producer can be holding a position from the
+	 * old numbering.  Resetting unconditionally is what made the positions
+	 * and the slots disagree: write_to_xids_queue() claims with a bare
+	 * fetch_add, so a producer that claimed before the reset stored into a
+	 * slot the new numbering never handed out, and close_xids_file() then
+	 * waited forever on a hole nobody would fill.
+	 *
+	 * The order of the two reads matters.  lastPos is read first, so seeing
+	 * flushPos == lastPos means everything claimed up to that point had been
+	 * flushed -- hence published.  Any claim after that read increments
+	 * lastPos and makes the exchange below fail, and we go round again.  When
+	 * it succeeds, lastPos did not move between the read and the exchange, so
+	 * at that instant nothing was in flight and every slot holds InvalidOXid
+	 * (flush_xids_queue() clears what it flushes).  That is why there is no
+	 * memset here: clearing the queue after the exchange would wipe the
+	 * record of a producer that has already claimed position 0 under the new
+	 * numbering.
+	 *
+	 * Hold the flush lock throughout: flush_xids_queue() requires it, and it
+	 * also keeps a concurrent flusher from moving flushPos while we restart
+	 * it.  Nothing here waits on a producer except by flushing what it
+	 * published, so there is no cycle.
+	 */
+	LWLockAcquire(&checkpoint_state->oXidQueueFlushLock, LW_EXCLUSIVE);
+
+	for (;;)
 	{
-		checkpoint_state->xidQueueCheckpointNum = chkpnum;
-		pg_atomic_write_u64(&checkpoint_state->xidRecLastPos, 0);
-		pg_atomic_write_u64(&checkpoint_state->xidRecFlushPos, 0);
-		memset(checkpoint_state->xidRecQueue,
-			   0,
-			   sizeof(XidFileRec) * XID_RECS_QUEUE_SIZE);
-		for (i = 0; i < XID_RECS_QUEUE_SIZE; i++)
-			checkpoint_state->xidRecQueue[i].oxid = InvalidOXid;
+		uint64		lastPos = pg_atomic_read_u64(&checkpoint_state->xidRecLastPos);
+
+		if (pg_atomic_read_u64(&checkpoint_state->xidRecFlushPos) != lastPos)
+		{
+			/*
+			 * Records queued since the previous checkpoint closed its file
+			 * are drained rather than dropped: flushing is the only way to
+			 * empty the queue that cannot race a producer's publishing store,
+			 * since the scan stops at the first slot that is not published
+			 * yet.
+			 */
+			flush_xids_queue();
+			continue;
+		}
+
+		if (pg_atomic_compare_exchange_u64(&checkpoint_state->xidRecLastPos,
+										   &lastPos, 0))
+			break;
 	}
+
+	pg_atomic_write_u64(&checkpoint_state->xidRecFlushPos, 0);
+	checkpoint_state->xidQueueCheckpointNum = chkpnum;
+
+	LWLockRelease(&checkpoint_state->oXidQueueFlushLock);
 }
 
 /*
