@@ -38,6 +38,7 @@
  * o_btree_modify_internal(), i.e. per modify call, not per retry.
  */
 static uint64 rowlock_retry_spins = 0;
+static uint64 inprogress_retry_spins = 0;
 
 
 #define IsRelationTree(desc) (ORelOidsIsValid(desc->oids) && !IS_SYS_TREE_OIDS(desc->oids))
@@ -166,6 +167,7 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 
 	/* TEMP: see the ROWLOCKSPIN report in o_btree_modify_handle_conflicts() */
 	rowlock_retry_spins = 0;
+	inprogress_retry_spins = 0;
 
 retry:
 
@@ -557,7 +559,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				 * retainedUndoLocation).
 				 */
 				if (++rowlock_retry_spins == 10000)
-					elog(LOG, "ROWLOCKSPIN oxid=" UINT64_FORMAT " myOxid=" UINT64_FORMAT
+					elog(LOG, "ROWLOCKSPIN kind=lockonly-finished oxid=" UINT64_FORMAT " myOxid=" UINT64_FORMAT
 						 " csn=" UINT64_FORMAT " lockMode=%d myLockMode=%d"
 						 " lockOnly=%d finished=%d chainHasLocks=%d"
 						 " conflictUndoLoc=" UINT64_FORMAT
@@ -647,6 +649,34 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				else
 				{
 					Assert(cbAction == OBTreeCallbackActionXidNoWait);
+				}
+
+				/*
+				 * TEMP: the other way out of this function that loops.
+				 * Unlike the finished-lock-only branch above, this one is
+				 * supposed to wait -- but wait_for_oxid() returns immediately
+				 * when the conflicting transaction is already resolved
+				 * (!COMMITSEQNO_IS_SPECIAL) or when its proc slot no longer
+				 * holds that oxid ("concurrently gone").  If the csn we read
+				 * keeps saying in-progress while the owner is gone, the wait
+				 * is a no-op and we spin here at full speed, which is what a
+				 * hang with no lock-manager wait logged looks like.  Report
+				 * the csn we decided on and the csn now, so a stranded
+				 * in-progress csn is visible directly.
+				 */
+				if (++inprogress_retry_spins == 10000)
+				{
+					CommitSeqNo csnNow = oxid_get_csn(oxid, true);
+
+					elog(LOG, "ROWLOCKSPIN kind=inprogress oxid=" UINT64_FORMAT
+						 " myOxid=" UINT64_FORMAT " csnAtDecision=" UINT64_FORMAT
+						 " csnNow=" UINT64_FORMAT " cbAction=%d lockMode=%d"
+						 " lockStatus=%d hwLockMode=%d blkno=%u action=%d",
+						 (uint64) oxid, (uint64) context->opOxid,
+						 (uint64) csn, (uint64) csnNow, (int) cbAction,
+						 (int) context->lockMode, (int) context->lockStatus,
+						 (int) context->hwLockMode, blkno,
+						 (int) context->action);
 				}
 
 				result = refind_page(pageFindContext,
