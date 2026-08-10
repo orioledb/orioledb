@@ -1,0 +1,35 @@
+services:
+  jepsen-client:
+    image: "${IMAGE_REPO}jepsen-client:${IMAGE_TAG}"
+    container_name: jepsen-client
+    hostname: jepsen-client
+    init: true
+    environment:
+      JEPSEN_NODE: orioledb
+      JEPSEN_POSTGRES_USER: "${POSTGRES_USER}"
+      JEPSEN_POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+
+      JEPSEN_WORKLOAD: "${JEPSEN_WORKLOAD:-append}"
+      JEPSEN_CONCURRENCY: "${JEPSEN_CONCURRENCY:-50}"
+      JEPSEN_RATE: "${JEPSEN_RATE:-500}"
+      JEPSEN_MAX_WRITES_PER_KEY: "${JEPSEN_MAX_WRITES_PER_KEY:-4}"
+      JEPSEN_TIME_LIMIT: "${JEPSEN_TIME_LIMIT:-60}"
+
+      JEPSEN_SUPPRESS_STDOUT: "${JEPSEN_SUPPRESS_STDOUT:-}"
+      JEPSEN_JDWP_PORT: "${JEPSEN_JDWP_PORT:-}"
+
+      # JEPSEN_ISOLATION                   sets connection transaction level
+      # JEPSEN_EXPECTED_CONSISTENCY_MODEL  defaults to the isolation level
+      # NB postgres "repeatable-read" is not Adya repeatable read
+      # and instead guarantees snapshot isolation.
+      # Ergo, we must specify the expected consistency model explicitly.
+      JEPSEN_ISOLATION: "${JEPSEN_ISOLATION:-read-committed}"
+      JEPSEN_EXPECTED_CONSISTENCY_MODEL: "${JEPSEN_EXPECTED_CONSISTENCY_MODEL:-read-committed}"
+    # We require a separate value for setting the jepsen's target architecture
+    # because there is a bug in Rosetta emulation preventing jepsen from
+    # executing as a linux/amd64 image on MacOS.
+    platform: "${JEPSEN_PLATFORM}"
+    build: ./jepsen
+    depends_on:
+      test.orioledb:
+        condition: service_healthy
