@@ -619,6 +619,19 @@ page_locator_resize_item(Page p, BTreePageItemLocator *locator,
 
 	Assert(endPtr + dataShift <= (Pointer) p + ORIOLEDB_BLCKSZ);
 
+	/*
+	 * The locator must agree with the page header: if the chunk it describes
+	 * ends past dataSize, the length below goes negative and memmove() reads
+	 * it as a huge size_t -- which does not corrupt this page, it walks the
+	 * whole shared memory segment.  Fail loudly instead.
+	 */
+	if (nextItemPtr > endPtr || endPtr + dataShift > (Pointer) p + ORIOLEDB_BLCKSZ)
+		elog(PANIC, "locator does not fit the page: chunk %u ends at %u, "
+			 "data size %u, shift %d",
+			 (unsigned) locator->chunkOffset,
+			 (unsigned) (nextItemPtr - (Pointer) p),
+			 (unsigned) header->dataSize, dataShift);
+
 	/* Shift the data after the item */
 	memmove(nextItemPtr + dataShift, nextItemPtr, endPtr - nextItemPtr);
 
