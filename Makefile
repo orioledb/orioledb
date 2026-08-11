@@ -208,6 +208,7 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/o_tables_2_test.py \
 						test/t/recovery_test.py \
 						test/t/recovery_opclass_test.py \
+						test/t/recovery_weird_types_test.py \
 						test/t/recovery_worker_test.py \
 						test/t/concurrent_index_test.py \
 						test/t/concurrent_index_stopevents_test.py \
