@@ -269,6 +269,7 @@ extern void o_move_latest_chkp_num(Oid datoid, Oid relnode, Oid old_tablespace,
 								   Oid new_tablespace);
 
 extern void o_perform_checkpoint(XLogRecPtr redo_pos, int flags);
+extern void o_checkpoint_before_database_copy(void);
 extern void o_after_checkpoint_cleanup_hook(XLogRecPtr checkPointRedo,
 											int flags);
 

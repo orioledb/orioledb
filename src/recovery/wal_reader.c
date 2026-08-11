@@ -44,6 +44,7 @@ static WalParseResult wal_parse_rec_switch_logical_xid(WalReaderState *r, WalRec
 static WalParseResult wal_parse_rec_relreplident(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_modify(WalReaderState *r, WalRecord *rec);
 static WalParseResult wal_parse_rec_dbcopy(WalReaderState *r, WalRecord *rec);
+static WalParseResult wal_parse_rec_dbcreate_copy(WalReaderState *r, WalRecord *rec);
 
 const char *
 wal_type_name(WalRecordType type)
@@ -325,6 +326,19 @@ wal_parse_rec_dbcopy(WalReaderState *r, WalRecord *rec)
 	WR_PARSE(r, &rec->u.dbcopy.datOid);
 	WR_PARSE(r, &rec->u.dbcopy.src_tblspc);
 	WR_PARSE(r, &rec->u.dbcopy.dst_tblspc);
+
+	return WALPARSE_OK;
+}
+
+/* Parser for WAL_REC_DATABASE_CREATE_COPY */
+static WalParseResult
+wal_parse_rec_dbcreate_copy(WalReaderState *r, WalRecord *rec)
+{
+	Assert(r);
+	Assert(rec);
+
+	WR_PARSE(r, &rec->u.dbcreate_copy.src_datoid);
+	WR_PARSE(r, &rec->u.dbcreate_copy.dst_datoid);
 
 	return WALPARSE_OK;
 }

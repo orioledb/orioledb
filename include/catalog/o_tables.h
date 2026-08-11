@@ -197,6 +197,15 @@ extern OTable *o_tables_drop_by_oids(ORelOids oids, OXid oxid, CommitSeqNo csn);
 /* Drops all tables from o_tables list */
 extern void o_tables_drop_all(OXid oxid, CommitSeqNo csn, Oid database_id);
 
+/* Copy all tables from template database to a new database */
+extern void o_tables_copy_all(OXid oxid, CommitSeqNo csn, Oid src_datoid, Oid dst_datoid);
+
+/* Copy data files when creating a database from a template*/
+extern void o_tables_copy_database_files(Oid src_datoid, Oid dst_datoid);
+
+/* Remove any orioledb_data/ files already copied to dst_datoid by a failed */
+extern void o_tables_cleanup_database_files(Oid src_datoid, Oid dst_datoid);
+
 /* Move all tables from o_tables list */
 extern void o_tables_move_all(OXid oxid, CommitSeqNo csn, Oid database_id, Oid old_tspcoid, Oid new_tspcoid);
 

@@ -2035,6 +2035,12 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 		next_CheckPoint_hook(redo_pos, flags);
 }
 
+void
+o_checkpoint_before_database_copy(void)
+{
+	RequestCheckpoint(CHECKPOINT_IMMEDIATE | CHECKPOINT_FORCE | CHECKPOINT_WAIT);
+}
+
 static void
 checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 {

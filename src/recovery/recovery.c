@@ -24,6 +24,7 @@
 #include "catalog/indices.h"
 #include "catalog/o_indices.h"
 #include "catalog/o_sys_cache.h"
+#include "catalog/o_tables.h"
 #include "checkpoint/checkpoint.h"
 #include "recovery/recovery.h"
 #include "recovery/internal.h"
@@ -4654,6 +4655,36 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 		case WAL_REC_DATABASE_COPY:
 			handle_movedb(rec->u.dbcopy.datOid, rec->u.dbcopy.src_tblspc, rec->u.dbcopy.dst_tblspc);
 			break;
+
+		case WAL_REC_DATABASE_TEMPLATE_CHECKPOINT:
+			{
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
+
+				if (!ctx->single)
+					workers_synchronize(xlogPtr, true);
+
+				o_checkpoint_before_database_copy();
+
+				if (!ctx->single)
+					workers_synchronize(xlogPtr + 1, true);
+
+				break;
+			}
+
+		case WAL_REC_DATABASE_CREATE_COPY:
+			{
+				XLogRecPtr	xlogPtr = ctx->xlogRecPtr + rec->offset;
+
+				if (!ctx->single)
+					workers_synchronize(xlogPtr, true);
+
+				o_tables_copy_database_files(rec->u.dbcreate_copy.src_datoid, rec->u.dbcreate_copy.dst_datoid);
+
+				if (!ctx->single)
+					workers_synchronize(xlogPtr + 1, true);
+
+				break;
+			}
 
 		case WAL_REC_O_TABLES_META_UNLOCK:
 			{

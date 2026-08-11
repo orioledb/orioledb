@@ -17,10 +17,10 @@ CREATE TABLE oriole_table (i int) USING orioledb;
 
 \c postgres
 
--- This CREATE DATABASE should fail
 CREATE DATABASE orioledb TEMPLATE orioledb_template;
 
 DROP DATABASE orioledb_template;
+DROP DATABASE orioledb;
 DROP DATABASE heapdb;
 DROP DATABASE heapdb_template;
 

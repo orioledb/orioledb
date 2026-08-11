@@ -207,6 +207,13 @@ typedef struct
 	uint8		dst_tblspc[sizeof(Oid)];
 } WALRecDbCopy;
 
+typedef struct
+{
+	uint8		recType;
+	uint8		src_datoid[sizeof(Oid)];
+	uint8		dst_datoid[sizeof(Oid)];
+} WALRecDbCreateCopy;
+
 #define LOCAL_WAL_BUFFER_SIZE	(8192)
 #define ORIOLEDB_WAL_PREFIX	"o_wal"
 #define ORIOLEDB_WAL_PREFIX_SIZE (5)

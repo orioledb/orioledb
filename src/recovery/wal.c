@@ -585,6 +585,49 @@ add_database_copy_wal_record(Oid dboid, Oid src_tblspc, Oid dst_tblspc)
 }
 
 void
+add_database_create_copy_wal_record(Oid src_datoid, Oid dst_datoid)
+{
+	WALRecDbCreateCopy *rec;
+
+	Assert(!is_recovery_process());
+	flush_local_wal_if_needed(sizeof(*rec));
+	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+
+	add_xid_wal_record_if_needed();
+
+	rec = (WALRecDbCreateCopy *) (&local_wal.buffer[local_wal.buffer_offset]);
+
+	rec->recType = WAL_REC_DATABASE_CREATE_COPY;
+	memcpy(rec->src_datoid, &src_datoid, sizeof(Oid));
+	memcpy(rec->dst_datoid, &dst_datoid, sizeof(Oid));
+
+	local_wal.buffer_offset += sizeof(*rec);
+}
+
+void
+add_database_template_checkpoint_wal_record(Oid src_datoid)
+{
+	WALRecDbCreateCopy *rec;
+	Oid					invalid_datoid = InvalidOid;
+
+	Assert(!is_recovery_process());
+	flush_local_wal_if_needed(sizeof(*rec));
+	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
+
+	(void) get_current_oxid();
+	add_xid_wal_record_if_needed();
+
+	rec = (WALRecDbCreateCopy *) (&local_wal.buffer[local_wal.buffer_offset]);
+
+	rec->recType = WAL_REC_DATABASE_TEMPLATE_CHECKPOINT;
+	memcpy(rec->src_datoid, &src_datoid, sizeof(Oid));
+	memcpy(rec->dst_datoid, &invalid_datoid, sizeof(Oid));
+
+	local_wal.buffer_offset += sizeof(*rec);
+}
+
+
+void
 add_switch_logical_xid_wal_record(TransactionId logicalXid_top, TransactionId logicalXid_sub)
 {
 	WALRecSwitchLogicalXid *rec;
