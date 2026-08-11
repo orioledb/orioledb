@@ -1807,7 +1807,19 @@ init_btree_seq_scan(BTreeSeqScan *scan)
 
 	O_TUPLE_SET_NULL(scan->nextKey.tuple);
 
-	init_page_find_context(&scan->context, desc, scan->oSnapshot.csn,
+	/*
+	 * Descend with COMMITSEQNO_INPROGRESS so leaf pages come back live rather
+	 * than rolled back to the snapshot csn through page-level undo.  A
+	 * sequential scan produces the snapshot view itself: it reconstructs the
+	 * historical page in load_first_historical_page() and merges it with the
+	 * live one, and that merge is the only thing that keeps this
+	 * transaction's own uncommitted versions in the result.  Handing it an
+	 * already rolled-back image leaves nothing to merge them back from --
+	 * which is exactly what happened when the whole tree is a single leaf
+	 * page and the descent's image *is* the scan.  Internal pages are
+	 * unaffected: o_btree_read_page() only applies page-level undo to leaves.
+	 */
+	init_page_find_context(&scan->context, desc, COMMITSEQNO_INPROGRESS,
 						   BTREE_PAGE_FIND_IMAGE |
 						   BTREE_PAGE_FIND_KEEP_LOKEY |
 						   BTREE_PAGE_FIND_READ_CSN);

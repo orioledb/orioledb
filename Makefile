@@ -176,6 +176,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  skipundo \
 				  table_lock_test \
 				  concurrent_truncate \
+				  seqscan_own_writes \
 				  uniq
 TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/tablespace_test.py \
