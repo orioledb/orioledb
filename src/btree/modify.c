@@ -710,11 +710,20 @@ o_btree_modify_item_rollback(BTreeModifyInternalContext *context)
 	END_CRIT_SECTION();
 
 	if (!applyResult)
-	{
 		btree_page_search(desc, page, context->key,
 						  context->keyType, NULL, &loc);
-		pageFindContext->items[pageFindContext->index].locator = loc;
-	}
+
+	/*
+	 * Store the locator back unconditionally.  page_item_rollback() reverts
+	 * an update by shrinking the item, and page_locator_resize_item() then
+	 * adjusts both the page header and the locator it was given -- but that
+	 * was our local copy.  Leaving the stale copy in the find context makes
+	 * the caller's next page_locator_resize_item() compute a chunk end past
+	 * header->dataSize, so the memmove() length turns negative and, as a
+	 * size_t, shifts the whole shared memory segment instead of the page
+	 * tail.
+	 */
+	pageFindContext->items[pageFindContext->index].locator = loc;
 
 	return applyResult;
 }
