@@ -1,0 +1,46 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_begin s1_snapshot s2_shrink s2_compact s1_update s1_seqscan_updated s1_insert s1_seqscan_inserted s1_seqscan_count s1_commit
+step s1_begin: 
+	BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+	SET LOCAL enable_indexscan = off;
+	SET LOCAL enable_bitmapscan = off;
+	SET LOCAL enable_indexonlyscan = off;
+	SET LOCAL enable_seqscan = on;
+step s1_snapshot: 
+	SELECT count(*) FROM o_seqscan_own;
+count
+-----
+   22
+(1 row)
+
+step s2_shrink: 
+	UPDATE o_seqscan_own SET val = repeat('z', 10) WHERE id <= 150;
+step s2_compact: 
+	INSERT INTO o_seqscan_own VALUES (115, repeat('w', 1200));
+step s1_update: 
+	UPDATE o_seqscan_own SET val = 'mine' WHERE id = 200;
+step s1_seqscan_updated: 
+	SELECT id, val FROM o_seqscan_own WHERE id = 200;
+ id|val 
+---+----
+200|mine
+(1 row)
+
+step s1_insert: 
+	INSERT INTO o_seqscan_own VALUES (5, 'fresh');
+step s1_seqscan_inserted: 
+	SELECT id, val FROM o_seqscan_own WHERE id = 5;
+id|val  
+--+-----
+ 5|fresh
+(1 row)
+
+step s1_seqscan_count: 
+	SELECT count(*) FROM o_seqscan_own;
+count
+-----
+   23
+(1 row)
+
+step s1_commit: COMMIT;
