@@ -2261,7 +2261,34 @@ static void
 o_load_typcache_tupdesc_hook(TypeCacheEntry *typentry)
 {
 	typentry->tupDesc = o_class_cache_search_tupdesc(typentry->typrelid);
+	/*
+	 * o_class_cache_search_tupdesc() builds the tupdesc via
+	 * CreateTemplateTupleDesc(), which initializes tdtypeid to RECORDOID.
+	 * The real composite type OID must be set here so that datums built
+	 * from this tupdesc carry the correct type id — record_cmp() and
+	 * lookup_rowtype_tupdesc() rely on it to avoid "record type has not
+	 * been registered" errors during recovery.
+	 */
+	typentry->tupDesc->tdtypeid = typentry->type_id;
 	typentry->tupDesc->tdrefcount++;
+}
+
+static void
+o_load_domaintype_info_hook(TypeCacheEntry *typentry)
+{
+	/*
+	 * During recovery (non-transaction state), we can't read pg_constraint
+	 * via table_open() because it asserts IsTransactionState().  Domain
+	 * constraint enforcement isn't needed during recovery because we replay
+	 * already-validated, committed data.  Mark the typecache entry as
+	 * checked with no constraints (domainData stays NULL), which is handled
+	 * gracefully by InitDomainConstraintRef().
+	 *
+	 * TCFLAGS_CHECKED_DOMAIN_CONSTRAINTS (0x080000) is a private #define in
+	 * typcache.c; set it directly so UpdateDomainConstraintRef() skips the
+	 * real load_domaintype_info() call.
+	 */
+	typentry->flags |= 0x080000;
 }
 
 static int
@@ -2733,6 +2760,7 @@ o_set_syscache_hooks(void)
 		GetDefaultOpClass_hook = o_type_cache_default_opclass;
 		load_typcache_tupdesc_hook = o_load_typcache_tupdesc_hook;
 		load_enum_cache_data_hook = o_load_enum_cache_data_hook;
+		load_domaintype_info_hook = o_load_domaintype_info_hook;
 	}
 }
 
@@ -2749,6 +2777,7 @@ o_unset_syscache_hooks(void)
 		GetDefaultOpClass_hook = NULL;
 		load_typcache_tupdesc_hook = NULL;
 		load_enum_cache_data_hook = NULL;
+		load_domaintype_info_hook = NULL;
 		SetUserIdAndSecContext(save_userid, save_sec_context);
 		if (CurrentResourceOwner == my_owner)
 		{
