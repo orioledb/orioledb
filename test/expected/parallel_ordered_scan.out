@@ -1,0 +1,298 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s2_arm s1_setup s1_begin_rr s1_scan_desc s2_insert_mid s2_checkpoint s2_reset s1_commit
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_arm: 
+	SELECT pg_stopevent_set('scan_disk_page', 'true');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET enable_seqscan = off;
+	SET enable_bitmapscan = off;
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 3;
+step s1_begin_rr: BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s1_scan_desc: 
+	SELECT count(*), min(id), max(id),
+		(count(*) = count(*) FILTER (WHERE prev IS NULL OR id <= prev)) AS sorted
+	FROM (SELECT id, lag(id) OVER () AS prev FROM (
+		SELECT id FROM o_ord
+			WHERE id BETWEEN 5000 AND 25000 AND sqrt(val::float8) >= 0
+			ORDER BY id DESC) o) t; <waiting ...>
+step s2_insert_mid: 
+	INSERT INTO o_ord SELECT i, i % 97
+		FROM generate_series(1000000, 1030000) i
+		WHERE i % 3 = 0;
+step s2_checkpoint: CHECKPOINT;
+step s2_reset: 
+	SELECT pg_stopevent_reset('scan_disk_page');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s1_scan_desc: <... completed>
+count| min|  max|sorted
+-----+----+-----+------
+20001|5000|25000|t     
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s2_arm s1_setup s1_begin_rr s1_scan_desc s2_delete_mid s2_checkpoint s2_reset s1_commit
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_arm: 
+	SELECT pg_stopevent_set('scan_disk_page', 'true');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET enable_seqscan = off;
+	SET enable_bitmapscan = off;
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 3;
+step s1_begin_rr: BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s1_scan_desc: 
+	SELECT count(*), min(id), max(id),
+		(count(*) = count(*) FILTER (WHERE prev IS NULL OR id <= prev)) AS sorted
+	FROM (SELECT id, lag(id) OVER () AS prev FROM (
+		SELECT id FROM o_ord
+			WHERE id BETWEEN 5000 AND 25000 AND sqrt(val::float8) >= 0
+			ORDER BY id DESC) o) t; <waiting ...>
+step s2_delete_mid: 
+	DELETE FROM o_ord WHERE id BETWEEN 8000 AND 20000;
+step s2_checkpoint: CHECKPOINT;
+step s2_reset: 
+	SELECT pg_stopevent_reset('scan_disk_page');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s1_scan_desc: <... completed>
+count| min|  max|sorted
+-----+----+-----+------
+20001|5000|25000|t     
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s2_arm s1_setup s1_begin_rr s1_scan_desc s2_update s2_evict s2_reset s1_commit
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_arm: 
+	SELECT pg_stopevent_set('scan_disk_page', 'true');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET enable_seqscan = off;
+	SET enable_bitmapscan = off;
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 3;
+step s1_begin_rr: BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s1_scan_desc: 
+	SELECT count(*), min(id), max(id),
+		(count(*) = count(*) FILTER (WHERE prev IS NULL OR id <= prev)) AS sorted
+	FROM (SELECT id, lag(id) OVER () AS prev FROM (
+		SELECT id FROM o_ord
+			WHERE id BETWEEN 5000 AND 25000 AND sqrt(val::float8) >= 0
+			ORDER BY id DESC) o) t; <waiting ...>
+step s2_update: 
+	UPDATE o_ord SET val = val + 1 WHERE id BETWEEN 5000 AND 25000;
+step s2_evict: 
+	SELECT orioledb_evict_pages('o_ord'::regclass::oid, 0);
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_reset: 
+	SELECT pg_stopevent_reset('scan_disk_page');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s1_scan_desc: <... completed>
+count| min|  max|sorted
+-----+----+-----+------
+20001|5000|25000|t     
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s2_arm s1_setup s1_begin_rr s1_scan_asc s2_insert_mid s2_delete_mid s2_checkpoint s2_reset s1_commit
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_arm: 
+	SELECT pg_stopevent_set('scan_disk_page', 'true');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET enable_seqscan = off;
+	SET enable_bitmapscan = off;
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 3;
+step s1_begin_rr: BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+step s1_scan_asc: 
+	SELECT count(*), min(id), max(id),
+		(count(*) = count(*) FILTER (WHERE prev IS NULL OR id >= prev)) AS sorted
+	FROM (SELECT id, lag(id) OVER () AS prev FROM (
+		SELECT id FROM o_ord
+			WHERE id BETWEEN 5000 AND 25000 AND sqrt(val::float8) >= 0
+			ORDER BY id) o) t; <waiting ...>
+step s2_insert_mid: 
+	INSERT INTO o_ord SELECT i, i % 97
+		FROM generate_series(1000000, 1030000) i
+		WHERE i % 3 = 0;
+step s2_delete_mid: 
+	DELETE FROM o_ord WHERE id BETWEEN 8000 AND 20000;
+step s2_checkpoint: CHECKPOINT;
+step s2_reset: 
+	SELECT pg_stopevent_reset('scan_disk_page');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s1_scan_asc: <... completed>
+count| min|  max|sorted
+-----+----+-----+------
+20001|5000|25000|t     
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s2_arm s1_setup s1_begin_rc s1_scan_desc s2_delete_mid s2_reset s1_commit
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_arm: 
+	SELECT pg_stopevent_set('scan_disk_page', 'true');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET enable_seqscan = off;
+	SET enable_bitmapscan = off;
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 3;
+step s1_begin_rc: BEGIN ISOLATION LEVEL READ COMMITTED;
+step s1_scan_desc: 
+	SELECT count(*), min(id), max(id),
+		(count(*) = count(*) FILTER (WHERE prev IS NULL OR id <= prev)) AS sorted
+	FROM (SELECT id, lag(id) OVER () AS prev FROM (
+		SELECT id FROM o_ord
+			WHERE id BETWEEN 5000 AND 25000 AND sqrt(val::float8) >= 0
+			ORDER BY id DESC) o) t; <waiting ...>
+step s2_delete_mid: 
+	DELETE FROM o_ord WHERE id BETWEEN 8000 AND 20000;
+step s2_reset: 
+	SELECT pg_stopevent_reset('scan_disk_page');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s1_scan_desc: <... completed>
+count| min|  max|sorted
+-----+----+-----+------
+20001|5000|25000|t     
+(1 row)
+
+step s1_commit: COMMIT;
+
+starting permutation: s2_arm s1_setup s1_scan_desc s2_update s2_checkpoint s2_reset
+orioledb_evict_pages
+--------------------
+                    
+(1 row)
+
+step s2_arm: 
+	SELECT pg_stopevent_set('scan_disk_page', 'true');
+pg_stopevent_set
+----------------
+                
+(1 row)
+
+step s1_setup: 
+	SET orioledb.enable_stopevents = true;
+	SET enable_seqscan = off;
+	SET enable_bitmapscan = off;
+	SET parallel_setup_cost = 0;
+	SET parallel_tuple_cost = 0;
+	SET min_parallel_table_scan_size = 0;
+	SET min_parallel_index_scan_size = 0;
+	SET max_parallel_workers_per_gather = 3;
+step s1_scan_desc: 
+	SELECT count(*), min(id), max(id),
+		(count(*) = count(*) FILTER (WHERE prev IS NULL OR id <= prev)) AS sorted
+	FROM (SELECT id, lag(id) OVER () AS prev FROM (
+		SELECT id FROM o_ord
+			WHERE id BETWEEN 5000 AND 25000 AND sqrt(val::float8) >= 0
+			ORDER BY id DESC) o) t; <waiting ...>
+step s2_update: 
+	UPDATE o_ord SET val = val + 1 WHERE id BETWEEN 5000 AND 25000;
+step s2_checkpoint: CHECKPOINT;
+step s2_reset: 
+	SELECT pg_stopevent_reset('scan_disk_page');
+pg_stopevent_reset
+------------------
+t                 
+(1 row)
+
+step s1_scan_desc: <... completed>
+count| min|  max|sorted
+-----+----+-----+------
+20001|5000|25000|t     
+(1 row)
+
