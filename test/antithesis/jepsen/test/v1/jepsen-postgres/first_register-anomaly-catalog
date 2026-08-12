@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+# Register jepsen anomaly property catalog at startup (e.g. :G0 :incompatible-order etc)
+/opt/antithesis/test/v1/jepsen-postgres/finally_jepsen-results declare ||
+	echo "first_register-anomaly-catalog: assertion catalog declaration failed" >&2

@@ -1,5 +1,5 @@
 #!/bin/sh
-set -eu
+set -u
 
 jdwp_option=
 if [ -n "${JEPSEN_JDWP_PORT:-}" ]; then
@@ -46,3 +46,20 @@ fi
 		--postgres-port "$JEPSEN_POSTGRES_PORT" \
 		"$@"
 )
+rc=$?
+
+# jepsen.postgres.cli/test-all exit codes:
+#
+#   0 all passed
+#   1 some test invalid,
+#   2 some test :unknown
+#   254 usage errors
+#   255 crashed.
+#
+# NB invalid results (1) are model failures.
+# Those are reported per-anomaly by finally_jepsen-results,
+# so we return 0 for both case 0 and 1
+case "$rc" in
+0 | 1) exit 0 ;;
+*) exit "$rc" ;;
+esac

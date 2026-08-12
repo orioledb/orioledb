@@ -14,6 +14,7 @@ Build via `make build` (see details under Usage)
 - `jepsen:<sha>` - client workload
     - the append workload is a transactional correctness test for upsert operations. It hammers Postgres with concurrent multi-key transactions that append unique integers to CSV-encoded "lists." After a period of upsert writes and read operations, it reads back the state and analyzes the observed histories for anomalies.
     - because every appended element is unique and lists preserve order, the workload can reconstruct version history and detect transactional anomalies (cycles → serializability violations, lost updates, aborted reads, etc.)
+    - model failures are reported by the `finally_jepsen-results` test command via the [fallback SDK](https://antithesis.com/docs/reference/sdk/fallback/assert/).
 - `health-checker:<sha>` - simulation ready signal (see Appendix)
 - `sk-recovery-race-client:<sha>` - client workload
     - deterministically constructs the PK/SK checkpoint race fixed in [orioledb#855](https://github.com/orioledb/orioledb/issues/855): pins concurrent INSERT/UPDATE/DELETE backends at the PK-applied/SK-pending boundary via `pg_stopevent_set`, forces a `CHECKPOINT` through them, then holds the window open for `RACE_WINDOW_SECONDS` so Antithesis's fault injection has a real chance of landing inside it. Reports via Antithesis SDK assertions (`always`/`reachable`).
