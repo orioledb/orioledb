@@ -33,6 +33,7 @@ typedef struct
 	Oid			datoid;
 	Oid			reloid;
 	Oid			relnode;
+	Oid			spcoid;
 } OrioledbTreeKey;
 
 typedef struct OrioledbTree
@@ -148,6 +149,9 @@ orioledb_key_cmp(const void *k1, const void *k2)
 
 	if (key1->relnode != key2->relnode)
 		return key1->relnode < key2->relnode ? -1 : 1;
+
+	if (key1->spcoid != key2->spcoid)
+		return key1->spcoid < key2->spcoid ? -1 : 1;
 
 	return 0;
 }
@@ -270,8 +274,8 @@ serialize_tree(StringInfo str, OrioledbTree *tree)
 	int			j;
 	StringInfo	keys_str;
 
-	/* type, datoid, reloid, relnode, nkeys, keys */
-	appendHton16StringInfo(str, 6);
+	/* type, datoid, reloid, relnode, spcoid, nkeys, keys */
+	appendHton16StringInfo(str, 7);
 
 	appendHton32StringInfo(str, sizeof(tree->tree_key.type));
 	appendHton32StringInfo(str, tree->tree_key.type);
@@ -279,6 +283,7 @@ serialize_tree(StringInfo str, OrioledbTree *tree)
 	appendOidStringInfo(str, tree->tree_key.datoid);
 	appendOidStringInfo(str, tree->tree_key.reloid);
 	appendOidStringInfo(str, tree->tree_key.relnode);
+	appendOidStringInfo(str, tree->tree_key.spcoid);
 
 	appendHton32StringInfo(str, sizeof(tree->nkeys));
 	appendHton32StringInfo(str, tree->nkeys);
@@ -427,6 +432,7 @@ libpq_create_table_and_copy_data(PGconn *connection,
 					   "	datoid Oid,"
 					   "	reloid Oid,"
 					   "	relnode Oid,"
+					   "	spcoid Oid,"
 					   "	nkeys int4,"
 					   "	keys bytea"
 					   ");",
@@ -932,6 +938,7 @@ pg_rewind_on_record(WalReaderState *r, WalRecord *rec)
 					orioledb_map->tree_key.datoid = rec->oids.datoid;
 					orioledb_map->tree_key.reloid = rec->oids.reloid;
 					orioledb_map->tree_key.relnode = rec->oids.relnode;
+					orioledb_map->tree_key.spcoid = rec->oids.spcoid;
 
 					orioledb_key_map_add_tree(orioledb_map, orioledb_map->tree_key);
 				}
