@@ -1,0 +1,52 @@
+-- A sequential scan pins the OIndexDescr it reads and has to drop that pin
+-- exactly once.  A cursor closed by ROLLBACK TO is released from its
+-- ResourceOwner, which frees the scan but deliberately leaves it on the list
+-- for seq_scans_cleanup() to finish off at COMMIT -- so the free path runs
+-- twice for the same scan.  Every other resource it holds is cleared on the
+-- first pass; the pin used to be dropped on both, taking the counter below
+-- the pins actually held and, one round later, past zero.
+CREATE SCHEMA seq_scan_descr_pin;
+SET SESSION search_path = 'seq_scan_descr_pin';
+CREATE EXTENSION orioledb;
+
+CREATE TABLE o_test_pin (
+	id int PRIMARY KEY,
+	val text
+) USING orioledb;
+INSERT INTO o_test_pin SELECT g, 'val' || g FROM generate_series(1, 20) g;
+
+-- warm the descriptor cache, so the count below is the cache's own pin
+SELECT count(*) FROM o_test_pin;
+SELECT c.relname, d.refcnt
+	FROM orioledb_index_descr d JOIN pg_class c ON c.oid = d.reloid
+	WHERE c.relname = 'o_test_pin_pkey';
+
+BEGIN;
+SAVEPOINT x;
+DECLARE c1 CURSOR FOR SELECT * FROM o_test_pin;
+FETCH FROM c1;
+ROLLBACK TO x;
+COMMIT;
+
+SELECT c.relname, d.refcnt
+	FROM orioledb_index_descr d JOIN pg_class c ON c.oid = d.reloid
+	WHERE c.relname = 'o_test_pin_pkey';
+
+-- a second round: this is where the counter used to wrap past zero
+BEGIN;
+SAVEPOINT x;
+DECLARE c1 CURSOR FOR SELECT * FROM o_test_pin;
+FETCH FROM c1;
+ROLLBACK TO x;
+COMMIT;
+
+SELECT c.relname, d.refcnt
+	FROM orioledb_index_descr d JOIN pg_class c ON c.oid = d.reloid
+	WHERE c.relname = 'o_test_pin_pkey';
+
+-- at refcnt 0 an invalidation deletes the descriptor instead of recreating it
+-- in place, while the table descriptor still points at it
+ALTER TABLE o_test_pin SET (fillfactor = 90);
+SELECT count(*) FROM o_test_pin;
+
+DROP SCHEMA seq_scan_descr_pin CASCADE;

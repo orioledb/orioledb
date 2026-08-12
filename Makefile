@@ -132,6 +132,7 @@ REGRESSCHECKS = btree_sys_check \
 				row_level_locks \
 				row_security \
 				sanitizers \
+				seq_scan_descr_pin \
 				serializable \
 				stats \
 				subquery \
