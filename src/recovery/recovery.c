@@ -1938,77 +1938,121 @@ recovery_finish(int worker_id)
 
 		if (COMMITSEQNO_IS_INPROGRESS(cur_state->csn))
 		{
+			bool		heap_committed = false;
+
 			oxid_needs_wal_flush = cur_state->needs_wal_flush;
 			recovery_oxid = cur_state->oxid;
 			for (i = 0; i < (int) UndoLogsCount; i++)
 				set_cur_undo_locations((UndoLogType) i, cur_state->undo_stacks[i]);
 			if (flush_undo_pos)
 				flush_current_undo_stack();
-			for (i = 0; i < (int) UndoLogsCount; i++)
-				apply_undo_stack((UndoLogType) i, recovery_oxid, NULL, true);
-			walk_checkpoint_stacks(cur_state, COMMITSEQNO_ABORTED,
-								   InvalidSubTransactionId,
-								   flush_undo_pos);
 
 			/*
-			 * Remember this oxid so the after-checkpoint hook can emit a
-			 * WAL_REC_ROLLBACK for it once XLog inserts are allowed. Workers
-			 * don't write WAL: only the main recovery process does. See issue
-			 * #876.
+			 * No finish record ever arrived for this oxid, but it may still
+			 * have committed: an oxid born after XACT_EVENT_PRE_COMMIT gets
+			 * no finish record of its own, and its verdict is the verdict of
+			 * the heap transaction it rode on.  Replay of the clog is
+			 * complete by now, so ask it.  Rolling such a transaction back
+			 * would undo changes PostgreSQL considers committed.
+			 *
+			 * Done here rather than from o_xact_redo_hook() on the heap
+			 * commit record: several oxids can share one heap xid, most of
+			 * them resolve themselves (possibly through the deferred
+			 * finished_list), and settling an already settled oxid again
+			 * spins set_oxid_xlog_ptr() forever.  At this point every oxid
+			 * still INPROGRESS is one nobody resolved.
 			 */
-			if (worker_id < 0)
+			if (TransactionIdIsValid(cur_state->xid) &&
+				TransactionIdDidCommit(cur_state->xid))
 			{
-				if (cur_state->oxid >= recovery_xmin)
-				{
-					MemoryContext oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+				CommitSeqNo csn;
 
-					if (recovery_finish_aborted_count == recovery_finish_aborted_capacity)
+				for (i = 0; i < (int) UndoLogsCount; i++)
+					precommit_undo_stack((UndoLogType) i, recovery_oxid, true);
+				for (i = 0; i < (int) UndoLogsCount; i++)
+					on_commit_undo_stack((UndoLogType) i, recovery_oxid, true);
+				set_oxid_csn(recovery_oxid, COMMITSEQNO_COMMITTING);
+				csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
+				set_oxid_csn(recovery_oxid, csn);
+				walk_checkpoint_stacks(cur_state, csn,
+									   InvalidSubTransactionId,
+									   flush_undo_pos);
+				cur_state->csn = csn;
+				heap_committed = true;
+				elog(LOG, "OrioleDB recovery committed oxid " UINT64_FORMAT
+					 " from the verdict of heap xid %u",
+					 recovery_oxid, cur_state->xid);
+			}
+
+			if (!heap_committed)
+			{
+				for (i = 0; i < (int) UndoLogsCount; i++)
+					apply_undo_stack((UndoLogType) i, recovery_oxid, NULL, true);
+				walk_checkpoint_stacks(cur_state, COMMITSEQNO_ABORTED,
+									   InvalidSubTransactionId,
+									   flush_undo_pos);
+
+				/*
+				 * Remember this oxid so the after-checkpoint hook can emit a
+				 * WAL_REC_ROLLBACK for it once XLog inserts are allowed.
+				 * Workers don't write WAL: only the main recovery process
+				 * does. See issue #876.
+				 */
+				if (worker_id < 0)
+				{
+					if (cur_state->oxid >= recovery_xmin)
 					{
-						int			new_cap = recovery_finish_aborted_capacity == 0
-							? 16 : recovery_finish_aborted_capacity * 2;
+						MemoryContext oldcxt = MemoryContextSwitchTo(TopMemoryContext);
 
-						if (recovery_finish_aborted_oxids == NULL)
-							recovery_finish_aborted_oxids =
-								palloc(new_cap * sizeof(RecoveryFinishAbortedOxid));
-						else
-							recovery_finish_aborted_oxids =
-								repalloc(recovery_finish_aborted_oxids,
-										 new_cap * sizeof(RecoveryFinishAbortedOxid));
-						recovery_finish_aborted_capacity = new_cap;
+						if (recovery_finish_aborted_count == recovery_finish_aborted_capacity)
+						{
+							int			new_cap = recovery_finish_aborted_capacity == 0
+								? 16 : recovery_finish_aborted_capacity * 2;
+
+							if (recovery_finish_aborted_oxids == NULL)
+								recovery_finish_aborted_oxids =
+									palloc(new_cap * sizeof(RecoveryFinishAbortedOxid));
+							else
+								recovery_finish_aborted_oxids =
+									repalloc(recovery_finish_aborted_oxids,
+											 new_cap * sizeof(RecoveryFinishAbortedOxid));
+							recovery_finish_aborted_capacity = new_cap;
+						}
+						recovery_finish_aborted_oxids[recovery_finish_aborted_count].oxid =
+							cur_state->oxid;
+						recovery_finish_aborted_oxids[recovery_finish_aborted_count].xid =
+							cur_state->xid;
+						recovery_finish_aborted_count++;
+						MemoryContextSwitchTo(oldcxt);
 					}
-					recovery_finish_aborted_oxids[recovery_finish_aborted_count].oxid =
-						cur_state->oxid;
-					recovery_finish_aborted_oxids[recovery_finish_aborted_count].xid =
-						cur_state->xid;
-					recovery_finish_aborted_count++;
-					MemoryContextSwitchTo(oldcxt);
-				}
-				else
-				{
-					/*
-					 * Below the floor there is nothing to announce: every
-					 * observer's xmin is already past this oxid, so no
-					 * WAL_REC_ROLLBACK is needed -- and emitting one would
-					 * drag a settled horizon backwards
-					 * (orioledb/orioledb#889).
-					 *
-					 * Such an entry can carry wal_xid, contrary to what this
-					 * used to assert.  The primary emits WAL_REC_XID lazily,
-					 * before the transaction's first record, and can then
-					 * finish with no finish record at all: wal_rollback()
-					 * discards a local buffer that holds no material
-					 * changes.  The floor moves past the oxid as soon as the
-					 * next transaction's finish record reports the primary's
-					 * advanced runXmin.
-					 *
-					 * What must still hold is the reason that fast path was
-					 * taken: only a modify record sets
-					 * has_material_changes, so a transaction whose changes
-					 * we replayed cannot have skipped its finish record.
-					 * Getting here with wal_modify would mean we replayed
-					 * changes for a transaction nobody will ever resolve.
-					 */
-					Assert(!cur_state->wal_modify);
+					else
+					{
+						/*
+						 * Below the floor there is nothing to announce: every
+						 * observer's xmin is already past this oxid, so no
+						 * WAL_REC_ROLLBACK is needed -- and emitting one
+						 * would drag a settled horizon backwards
+						 * (orioledb/orioledb#889).
+						 *
+						 * Such an entry can carry wal_xid, contrary to what
+						 * this used to assert.  The primary emits WAL_REC_XID
+						 * lazily, before the transaction's first record, and
+						 * can then finish with no finish record at all:
+						 * wal_rollback() discards a local buffer that holds
+						 * no material changes.  The floor moves past the oxid
+						 * as soon as the next transaction's finish record
+						 * reports the primary's advanced runXmin.
+						 *
+						 * What must still hold is the reason that fast path
+						 * was taken: only a modify record sets
+						 * has_material_changes, so a transaction whose
+						 * changes we replayed cannot have skipped its finish
+						 * record. Getting here with wal_modify would mean we
+						 * replayed changes for a transaction nobody will ever
+						 * resolve.
+						 */
+						Assert(!cur_state->wal_modify);
+					}
 				}
 			}
 		}
@@ -4432,6 +4476,20 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 		case WAL_REC_XID:
 			advance_oxids(rec->oxid);
 			recovery_switch_to_oxid(rec->oxid, -1);
+
+			/*
+			 * Remember the heap xid this transaction rides on.  A transaction
+			 * that reaches its commit without an oxid -- a read-only
+			 * statement, say -- and only acquires one afterwards, inside
+			 * PreCommit_on_commit_actions(), can never get a finish record of
+			 * its own: wal_joint_commit() is emitted from
+			 * XACT_EVENT_PRE_COMMIT, already past, and XACT_EVENT_COMMIT runs
+			 * after RecordTransactionCommit().  Its verdict lives in the heap
+			 * xid alone, and recovery_finish() reads it from there.
+			 */
+			if (TransactionIdIsValid(rec->heapXid) &&
+				!TransactionIdIsValid(cur_recovery_xid_state->xid))
+				cur_recovery_xid_state->xid = rec->heapXid;
 			break;
 
 		case WAL_REC_SWITCH_LOGICAL_XID:
