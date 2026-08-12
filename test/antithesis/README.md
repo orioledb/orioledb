@@ -28,9 +28,9 @@ Build via `make build` (see details under Usage)
 |:--|:--|
 | [setup/s3](./config/setup/s3)  | additive; runs orioledb in s3 mode with local minio backend; not compatible with `setup/postgres`  |
 | [setup/postgres](./config/setup/postgres)  | replaces orioledb with stock postgres image for sanity checking compatible workloads |
-| [workload/jepsen-append](./config/workload/jepsens-append)  | adds a jepsen client with append workload (RR is default)  |
-| [workload/jepsen-RR](./config/workload/jepsens-RR)  | configures jepsen in repeatable-read mode  |
-| [workload/jepsen-RC](./config/workload/jepsens-RC)  | configures jepsen in read committed mode  |
+| [workload/jepsen](./config/workload/jepsen)  | adds a jepsen client with append workload (RR is default)  |
+| [workload/jepsen-RR](./config/workload/jepsen-RR)  | configures jepsen in repeatable-read mode  |
+| [workload/jepsen-RC](./config/workload/jepsen-RC)  | configures jepsen in read committed mode  |
 | [workload/sk-recovery-race](./config/workload/sk-recovery-race)  | adds a client that deterministically constructs the orioledb#855 PK/SK checkpoint race via stopevents and checks consistency each iteration  |
 | [workload/sk-recovery-race-chaos](./config/workload/sk-recovery-race-chaos)  | adds a client that stresses the same PK/SK checkpoint race with concurrent DML and frequent checkpoints, no stopevents  |
 | flake repro  | todo  |
@@ -52,7 +52,7 @@ These examples assume a working [snouty](https://github.com/antithesishq/snouty)
 #### Jepsen Standalone
 
 ```
-make build push CFG='workload/jepsen-append workload/jepsen-RR'
+make build push CFG='workload/jepsen workload/jepsen-RR'
 
 # optional
 snouty validate target/
@@ -60,7 +60,7 @@ snouty validate target/
 # note the config image built above (make build push ...)
 # TODO: add a convenience for this in the Makefile
 snouty launch \
-  --config-image "$(make config-image CFG='workload/jepsen-append workload/jepsen-RR')"
+  --config-image "$(make config-image CFG='workload/jepsen workload/jepsen-RR')"
   --test-name 'orioledb_jepsen' \
   --description 'pg17_odbmain_jepsen-RR fixed health checker' \
   --duration 20m \
@@ -101,7 +101,7 @@ Before pushing to Antithesis, it's worth running your changes locally.
 make build PG_MAJOR=18 ORIOLEDB_REF=mhamilton/perf-improvements # PG_MAJOR=17 and ORIOLEDB_REF=main are default
 
 # Run jepsen workload against orioledb configured in s3 mode (minio)
-make build CFG='setup/s3 workload/jepsen-append workload/jepsen-RR'
+make build CFG='setup/s3 workload/jepsen workload/jepsen-RR'
 
 # starts simulation locally
 make up # [CFG='...']
@@ -147,7 +147,7 @@ JDWP must be enabled when the Jepsen JVM starts:
 
 ```bash
 JEPSEN_JDWP_PORT=7896 \
-  make up CFG='workload/jepsen-append workload/jepsen-RR'
+  make up CFG='workload/jepsen workload/jepsen-RR'
 ```
 
 The port is bound inside the container, so run the debugger there:
