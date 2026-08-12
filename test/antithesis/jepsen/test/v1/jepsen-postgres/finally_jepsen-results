@@ -1,0 +1,216 @@
+#!/usr/bin/env bb
+;; Emits fallback-SDK assertion JSONL, appended to
+;; $ANTITHESIS_OUTPUT_DIR/sdk.jsonl (stdout when unset):
+;; See https://antithesis.com/docs/reference/sdk/fallback/assert/
+;;
+;; Modes:
+;;
+;;   finally_jepsen-results declare
+;;     Writes the assertion catalog (declaration messages: hit=false).
+;;     This should be run in a `first_` script to ensure it's run before faults.
+;;     
+;;   finally_jepsen-results
+;;     Test composer `finally` command.  Parses the analysis jepsen leaves in
+;;     (relative path) store/latest/results.edn. Emits:
+;;
+;;     - one "Always" assertion per elle anomaly type (e.g. "jepsen: no G1b
+;;       anomalies", ...), so each anomaly is a distinct test property.
+;;       The anomaly set is read from /opt/jepsen/elle-anomalies.edn
+;;     - a catch-all "Always" assertion on the top-level :valid?, covering
+;;       non-anomaly checkers (:critical, :missing-table-column, :stats,
+;;       :exceptions, ...)
+;;
+;;       NB: we may want to categorize this further
+
+(require '[cheshire.core :as json]
+         '[clojure.edn :as edn]
+         '[clojure.java.io :as io]
+         '[babashka.fs :as fs])
+
+(def anomalies-file "/opt/jepsen/elle-anomalies.edn")
+(def results-file "store/latest/results.edn")
+(def script-file (str (fs/canonicalize *file*)))
+
+(def max-sample-chars 4096)
+
+(defn log [& args]
+  (apply println "finally_jepsen-results:" args))
+
+(defn kw-name [k]
+  (if (instance? clojure.lang.Named k) (name k) (str k)))
+
+(defn truncate [s]
+  (if (> (count s) max-sample-chars)
+    (str (subs s 0 max-sample-chars) "...")
+    s))
+
+(defn read-edn-file
+  "Reads an EDN file, mapping unknown tagged literals (#error, #object, ...)
+  to their unwrapped value. Returns {:ok value} or {:error message}."
+  [path]
+  (let [f (io/file path)]
+    (if-not (.exists f)
+      {:missing path}
+      (try
+        {:ok (edn/read-string {:default (fn [_tag value] value)} (slurp f))}
+        (catch Exception e
+          {:error (str path ": " (ex-message e))})))))
+
+(defn found-anomalies
+  "Map of anomaly type -> vector of {:workload .. :count .. :sample ..} drawn
+  from every checker under :workload (any workload key, e.g. :append or
+  :internal-sim)."
+  [results]
+  (reduce
+   (fn [acc [workload-id checker]]
+     (let [anomalies (when (map? checker) (:anomalies checker))]
+       (if (map? anomalies)
+         (reduce
+          (fn [acc [anomaly-type instances]]
+            (update acc anomaly-type (fnil conj [])
+                    {:workload (kw-name workload-id)
+                     :count (if (sequential? instances) (count instances) 1)
+                     :sample (truncate
+                              (pr-str (if (sequential? instances)
+                                        (first instances)
+                                        instances)))}))
+          acc
+          anomalies)
+         acc)))
+   {}
+   (dissoc (:workload results) :valid?)))
+
+(defn invalid-checkers
+  "Names of checkers in map m whose :valid? is not true."
+  [m]
+  (->> (dissoc m :valid?)
+       (keep (fn [[k v]]
+               (when (and (map? v)
+                          (contains? v :valid?)
+                          (not (true? (:valid? v))))
+                 (kw-name k))))
+       sort
+       vec))
+
+(defn assertion
+  "Antithesis fallback-SDK message; defaults to an Always assertion.
+  https://antithesis.com/docs/reference/sdk/fallback/assert/"
+  [{:keys [id hit condition details assert-type display-type must-hit]
+    :or {assert-type "always"
+         display-type "Always"
+         must-hit true}}]
+  {:antithesis_assert
+   {:hit hit
+    :must_hit must-hit
+    :assert_type assert-type
+    :display_type display-type
+    :message id
+    :condition condition
+    :id id
+    :location {:class ""
+               :function "finally_jepsen-results"
+               :file script-file
+               :begin_line 1
+               :begin_column 0}
+    :details details}})
+
+(defn anomaly-assertion-id [anomaly-type]
+  (str "jepsen: no " (kw-name anomaly-type) " anomalies"))
+
+(def catch-all-assertion-id "jepsen: results.edn is valid")
+
+(defn emit! [message]
+  (println (json/generate-string message)))
+
+(defn declaration!
+  "Prints one catalog declaration: hit=false, condition=false, details=null."
+  [id]
+  (emit! (assertion {:id id :hit false :condition false :details nil})))
+
+(defn evaluate-all! [anomaly-types found results]
+  (doseq [anomaly-type anomaly-types]
+    (let [hits (get found anomaly-type)
+          condition (empty? hits)
+          details (when (seq hits)
+                    {:anomaly (kw-name anomaly-type)
+                     :found hits})]
+      (emit! (assertion {:id (anomaly-assertion-id anomaly-type)
+                         :hit true
+                         :condition condition
+                         :details details}))))
+  (let [valid? (:valid? results)
+        ;; :unknown must not fail the catch-all
+        ;; the singleton driver exits non-zero for unknown runs.
+        condition (not (false? valid?))
+        details (when-not condition
+                  {:valid? (pr-str valid?)
+                   :invalid-checkers (invalid-checkers results)
+                   :invalid-workload-checkers (invalid-checkers
+                                               (:workload results))})]
+    (emit! (assertion {:id catch-all-assertion-id
+                       :hit true
+                       :condition condition
+                       :details details}))))
+
+(defn sdk-writer
+  "Writer for $ANTITHESIS_OUTPUT_DIR/sdk.jsonl (append); *out* when running outside Antithesis."
+  []
+  (if-let [dir (System/getenv "ANTITHESIS_OUTPUT_DIR")]
+    (io/writer (io/file dir "sdk.jsonl") :append true)
+    *out*))
+
+(defn read-catalog
+  "Returns the build-time set of elle anomaly types, or nil"
+  []
+  (let [r (read-edn-file anomalies-file)]
+    (when-not (:ok r)
+      (log "WARNING: anomaly catalog unusable:" (pr-str r)))
+    (:ok r)))
+
+(defn run-declare
+  "On startup write the assertion catalog"
+  []
+  (let [catalog (read-catalog)
+        anomaly-types (sort-by kw-name catalog)]
+    (with-open [w (sdk-writer)]
+      (binding [*out* w]
+        (doseq [anomaly-type anomaly-types]
+          (declaration! (anomaly-assertion-id anomaly-type)))
+        (declaration! catch-all-assertion-id)))
+    (if catalog 0 1)))
+
+(defn run-evaluate
+  "Finally mode: evaluate every catalog assertion against results.edn."
+  []
+  (let [catalog-types (set (read-catalog))
+        results-read (read-edn-file results-file)
+        results (:ok results-read)
+        results (when (map? results) results)
+        found (if results (found-anomalies results) {})
+        anomaly-types (->> (concat catalog-types (keys found))
+                           distinct
+                           (sort-by kw-name))]
+    (cond
+      results
+      (with-open [w (sdk-writer)]
+        (binding [*out* w]
+          (evaluate-all! anomaly-types found results)
+          0))
+
+      (:missing results-read)
+      ;; Crashed run. The singleton driver's exit code handles this case
+      (do (log "no results at " results-file ": nothing to evaluate")
+          0)
+
+      :else
+      (do (log "ERROR: unreadable results:"
+               (or (:error results-read) "results.edn is not a map"))
+          1))))
+
+(defn -main [args]
+  (case (first args)
+    nil (run-evaluate)
+    "declare" (run-declare)
+    (do (log "usage: finally_jepsen-results [declare]") 2)))
+
+(System/exit (-main *command-line-args*))
