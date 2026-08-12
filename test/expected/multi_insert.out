@@ -2,6 +2,13 @@ CREATE SCHEMA multi_insert;
 SET SESSION search_path = 'multi_insert';
 CREATE EXTENSION IF NOT EXISTS orioledb;
 \getenv abs_builddir PG_ABS_BUILDDIR
+CREATE FUNCTION generate_string(seed integer, length integer) RETURNS text
+    AS $$
+        SELECT substr(string_agg(
+                          substr(encode(sha256(seed::text::bytea || '_' || i::text::bytea), 'hex'), 1, 21),
+                      ''), 1, length)
+          FROM generate_series(1, (length + 20) / 21) i; $$
+LANGUAGE SQL IMMUTABLE;
 -- The batched same-leaf primary insert path must not change visible
 -- results regardless of the debug GUC.  Each scenario runs both with
 -- the batched path enabled and disabled so a mishap in either branch
@@ -14,9 +21,9 @@ CREATE TABLE t_ord (
 CREATE INDEX t_ord_val_idx ON t_ord(val);
 CREATE INDEX t_ord_grp_idx ON t_ord(grp);
 -- A) Ordered insert: the hot path.  Run with batched on then off.
-SET orioledb.debug_disable_multi_insert = off;
+SET orioledb.debug_disable_multi_insert = 'none';
 INSERT INTO t_ord SELECT i, i * 7, i % 50 FROM generate_series(1, 2000) i;
-SET orioledb.debug_disable_multi_insert = on;
+SET orioledb.debug_disable_multi_insert = 'all';
 INSERT INTO t_ord SELECT i, i * 7, i % 50 FROM generate_series(2001, 4000) i;
 SELECT count(*), min(id), max(id), sum(val) FROM t_ord;
  count | min | max  |   sum    
@@ -38,7 +45,7 @@ SELECT count(*) FROM t_ord WHERE grp = 7;
 
 -- B) Out-of-order insertion: hikey checks must fall back cleanly.
 TRUNCATE t_ord;
-SET orioledb.debug_disable_multi_insert = off;
+SET orioledb.debug_disable_multi_insert = 'none';
 INSERT INTO t_ord
 SELECT i, i * 3, i % 13
 FROM   generate_series(1, 1000) i
@@ -56,7 +63,7 @@ SELECT count(*) FROM t_ord WHERE val < 1500;
 (1 row)
 
 -- C) Unique violation still fires under the optimisation.
-SET orioledb.debug_disable_multi_insert = off;
+SET orioledb.debug_disable_multi_insert = 'none';
 DO $$
 BEGIN
     INSERT INTO t_ord VALUES (1, 99, 99);
@@ -83,7 +90,7 @@ SELECT count(*), min(id), max(id) FROM t_rev;
 CREATE TABLE t_copy_unsorted (id integer PRIMARY KEY, val int) USING orioledb;
 -- Build a multi-leaf tree (about ~80 rows per leaf with the default settings).
 INSERT INTO t_copy_unsorted SELECT i * 10, i FROM generate_series(1, 2000) i;
-SET orioledb.debug_disable_multi_insert = off;
+SET orioledb.debug_disable_multi_insert = 'none';
 COPY t_copy_unsorted FROM stdin;
 SELECT count(*) FROM t_copy_unsorted;
  count 
@@ -119,7 +126,7 @@ CREATE TABLE t_copy_reverse (id integer PRIMARY KEY, val int) USING orioledb;
 INSERT INTO t_copy_reverse SELECT i * 10, i FROM generate_series(1, 5000) i;
 \set copyfile :abs_builddir '/results/copy_reverse.data'
 COPY (SELECT 50001 + i, i FROM generate_series(999, 1, -2) i) TO :'copyfile';
-SET orioledb.debug_disable_multi_insert = off;
+SET orioledb.debug_disable_multi_insert = 'none';
 COPY t_copy_reverse FROM :'copyfile';
 SELECT count(*) FROM t_copy_reverse;
  count 
@@ -137,7 +144,7 @@ SELECT orioledb_tbl_check('t_copy_reverse'::regclass);
 -- unique violation when the conflict is the first probed.
 CREATE TABLE t_dup_existing (id int PRIMARY KEY, v int) USING orioledb;
 INSERT INTO t_dup_existing VALUES (5, 100);
-SET orioledb.debug_disable_multi_insert = off;
+SET orioledb.debug_disable_multi_insert = 'none';
 DO $$
 BEGIN
     INSERT INTO t_dup_existing VALUES (5, 200), (6, 300);
@@ -166,7 +173,7 @@ COPY (SELECT i, i * 3 FROM generate_series(1, 500) i) TO :'copyfile';
 BEGIN;
 CREATE TABLE t_selfcreated (id integer PRIMARY KEY, val int) USING orioledb;
 CREATE INDEX ON t_selfcreated (val);
-SET LOCAL orioledb.debug_disable_multi_insert = off;
+SET LOCAL orioledb.debug_disable_multi_insert = 'none';
 COPY t_selfcreated FROM :'copyfile';
 SELECT count(*) FROM t_selfcreated;
  count 
@@ -193,7 +200,7 @@ SELECT orioledb_tbl_check('t_selfcreated'::regclass);
 CREATE TABLE t_toast (id integer PRIMARY KEY, body text) USING orioledb;
 \set copyfile :abs_builddir '/results/toast.data'
 COPY (SELECT i, repeat('X', 6000) FROM generate_series(1, 200) i) TO :'copyfile';
-SET orioledb.debug_disable_multi_insert = off;
+SET orioledb.debug_disable_multi_insert = 'none';
 COPY t_toast FROM :'copyfile';
 SELECT count(*), min(length(body)), max(length(body)) FROM t_toast;
  count | min  | max  
@@ -224,7 +231,7 @@ CREATE TABLE t_ctid_pk (val int, grp int) USING orioledb;
 CREATE INDEX ON t_ctid_pk (val);
 \set copyfile :abs_builddir '/results/ctid_pk.data'
 COPY (SELECT i, i % 47 FROM generate_series(1, 5000) i) TO :'copyfile';
-SET orioledb.debug_disable_multi_insert = off;
+SET orioledb.debug_disable_multi_insert = 'none';
 COPY t_ctid_pk FROM :'copyfile';
 SELECT count(*), min(val), max(val) FROM t_ctid_pk;
  count | min | max  
@@ -244,6 +251,236 @@ SELECT orioledb_tbl_check('t_ctid_pk'::regclass);
  t
 (1 row)
 
+-- K) Multi-column TOAST per row: several TOAST columns in one row emit N
+-- jobs sharing the same pk_tuple but distinct attn.  Phase 2's sort
+-- interleaves (pk, attn, chunknum) and must produce ascending TOAST keys.
+CREATE TABLE t_toast_multi (
+    id  integer PRIMARY KEY,
+    a   text GENERATED ALWAYS AS (generate_string(id * 3, 3000)) STORED,
+    b   text GENERATED ALWAYS AS (generate_string(id * 3 + 1, 4000)) STORED,
+    c   text GENERATED ALWAYS AS (generate_string(id * 3 + 2, 5000)) STORED
+) USING orioledb;
+\set copyfile :abs_builddir '/results/toast_multi.data'
+COPY (SELECT i FROM generate_series(1, 100) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = 'none';
+COPY t_toast_multi (id) FROM :'copyfile';
+SELECT count(*),
+       sum(length(a)) AS len_a,
+       sum(length(b)) AS len_b,
+       sum(length(c)) AS len_c
+  FROM t_toast_multi;
+ count | len_a  | len_b  | len_c  
+-------+--------+--------+--------
+   100 | 300000 | 400000 | 500000
+(1 row)
+
+SELECT id, length(a), length(b), length(c)
+  FROM t_toast_multi WHERE id IN (1, 50, 100) ORDER BY id;
+ id  | length | length | length 
+-----+--------+--------+--------
+   1 |   3000 |   4000 |   5000
+  50 |   3000 |   4000 |   5000
+ 100 |   3000 |   4000 |   5000
+(3 rows)
+
+SELECT orioledb_tbl_check('t_toast_multi'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- L) Mixed TOAST value sizes in one COPY: the sub-batch packer greedily
+-- accumulates up to O_TOAST_MULTI_MAX_CHUNKS (128) chunks per
+-- sub-batch and cuts at the boundary.  Alternating small and larger
+-- bodies exercises uneven packing.
+CREATE TABLE t_toast_mix (
+    id integer PRIMARY KEY,
+    body text GENERATED ALWAYS AS
+        (generate_string(id, CASE WHEN id % 3 = 0 THEN 12000 ELSE 3000 END)) STORED
+) USING orioledb;
+\set copyfile :abs_builddir '/results/toast_mix.data'
+COPY (SELECT i FROM generate_series(1, 200) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = 'none';
+COPY t_toast_mix (id) FROM :'copyfile';
+SELECT count(*),
+       sum(CASE WHEN length(body) > 6000 THEN 1 ELSE 0 END) AS big,
+       sum(CASE WHEN length(body) <= 6000 THEN 1 ELSE 0 END) AS small
+  FROM t_toast_mix;
+ count | big | small 
+-------+-----+-------
+   200 |  66 |   134
+(1 row)
+
+SELECT orioledb_tbl_check('t_toast_mix'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- M) A huge TOAST value in a multi-row batch must span multiple sub-batches
+-- between smaller neighbours.
+CREATE TABLE t_toast_huge (
+    id integer PRIMARY KEY,
+    body text GENERATED ALWAYS AS
+        (CASE WHEN id = 2 THEN generate_string(id, 300000) ELSE 'tiny' END) STORED
+) USING orioledb;
+\set copyfile :abs_builddir '/results/toast_huge.data'
+COPY (SELECT i FROM generate_series(1, 3) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = 'none';
+COPY t_toast_huge (id) FROM :'copyfile';
+SELECT id, length(body) FROM t_toast_huge ORDER BY id;
+ id | length 
+----+--------
+  1 |      4
+  2 | 300000
+  3 |      4
+(3 rows)
+
+SELECT orioledb_tbl_check('t_toast_huge'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- N) Unsorted-PK COPY into a TOAST-having table: the primary phase sorts
+-- explicitly, and the TOAST phase re-sorts by (pk, attn, chunknum).  A
+-- multi-leaf toast btree makes the drain hit multiple leaves.
+CREATE TABLE t_toast_unsorted (
+    id integer PRIMARY KEY,
+    body text GENERATED ALWAYS AS (generate_string(id, 6000)) STORED
+) USING orioledb;
+INSERT INTO t_toast_unsorted (id) SELECT i * 10 FROM generate_series(1, 200) i;
+SET orioledb.debug_disable_multi_insert = 'none';
+COPY t_toast_unsorted (id) FROM stdin;
+SELECT count(*) FROM t_toast_unsorted;
+ count 
+-------
+   206
+(1 row)
+
+SELECT id, length(body) FROM t_toast_unsorted
+  WHERE id IN (1, 3, 5, 5555, 7777, 9999) ORDER BY id;
+  id  | length 
+------+--------
+    1 |   6000
+    3 |   6000
+    5 |   6000
+ 5555 |   6000
+ 7777 |   6000
+ 9999 |   6000
+(6 rows)
+
+SELECT orioledb_tbl_check('t_toast_unsorted'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- O) debug_disable_multi_insert = 'toast' parity: the batched
+-- o_toast_multi_insert_values path must produce identical
+-- rows to the per-slot o_toast_insert_values fallback.
+CREATE TABLE t_toast_par_a (
+    id integer PRIMARY KEY,
+    body text GENERATED ALWAYS AS (generate_string(id, 4000)) STORED
+) USING orioledb;
+CREATE TABLE t_toast_par_b (
+    id integer PRIMARY KEY,
+    body text GENERATED ALWAYS AS (generate_string(id, 4000)) STORED
+) USING orioledb;
+\set copyfile :abs_builddir '/results/toast_par.data'
+COPY (SELECT i FROM generate_series(1, 300) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = 'none';
+COPY t_toast_par_a (id) FROM :'copyfile';
+SET orioledb.debug_disable_multi_insert = 'toast';
+COPY t_toast_par_b (id) FROM :'copyfile';
+SELECT (SELECT count(*) FROM t_toast_par_a)
+     = (SELECT count(*) FROM t_toast_par_b) AS same_count,
+       (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_toast_par_a)
+     = (SELECT md5(string_agg(body, '' ORDER BY id)) FROM t_toast_par_b) AS same_md5;
+ same_count | same_md5 
+------------+----------
+ t          | t
+(1 row)
+
+SELECT orioledb_tbl_check('t_toast_par_a'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+SELECT orioledb_tbl_check('t_toast_par_b'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- P) CTID-PK + TOAST: primaryIsCtid = true, bridging = false, so
+-- o_toast_multi_insert_values computes ctid_off = 1.
+CREATE TABLE t_toast_ctid (
+    val int,
+    body text GENERATED ALWAYS AS (generate_string(val, 6000)) STORED
+) USING orioledb;
+\set copyfile :abs_builddir '/results/toast_ctid.data'
+COPY (SELECT i FROM generate_series(1, 150) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = 'none';
+COPY t_toast_ctid (val) FROM :'copyfile';
+SELECT count(*), min(val), max(val), min(length(body)), max(length(body))
+  FROM t_toast_ctid;
+ count | min | max | min  | max  
+-------+-----+-----+------+------
+   150 |   1 | 150 | 6000 | 6000
+(1 row)
+
+SELECT val, length(body) FROM t_toast_ctid
+  WHERE val IN (1, 75, 150) ORDER BY val;
+ val | length 
+-----+--------
+   1 |   6000
+  75 |   6000
+ 150 |   6000
+(3 rows)
+
+SELECT orioledb_tbl_check('t_toast_ctid'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
+-- Q) Bridge index + TOAST: a non-btree secondary index (BRIN) makes the
+-- primary bridging, adding one to ctid_off in the multi-toast helper.
+CREATE TABLE t_toast_bridge (
+    id integer PRIMARY KEY,
+    body text GENERATED ALWAYS AS (generate_string(id, 6000)) STORED
+) USING orioledb;
+CREATE INDEX ON t_toast_bridge USING brin(id);
+NOTICE:  index bridging is enabled for orioledb table 't_toast_bridge'
+DETAIL:  index access method 'brin' is supported only via index bridging for OrioleDB table
+\set copyfile :abs_builddir '/results/toast_bridge.data'
+COPY (SELECT i FROM generate_series(1, 150) i) TO :'copyfile';
+SET orioledb.debug_disable_multi_insert = 'none';
+COPY t_toast_bridge (id) FROM :'copyfile';
+SELECT count(*), min(id), max(id), min(length(body)), max(length(body))
+  FROM t_toast_bridge;
+ count | min | max | min  | max  
+-------+-----+-----+------+------
+   150 |   1 | 150 | 6000 | 6000
+(1 row)
+
+SELECT id, length(body) FROM t_toast_bridge
+  WHERE id IN (1, 75, 150) ORDER BY id;
+ id  | length 
+-----+--------
+   1 |   6000
+  75 |   6000
+ 150 |   6000
+(3 rows)
+
+SELECT orioledb_tbl_check('t_toast_bridge'::regclass);
+ orioledb_tbl_check 
+--------------------
+ t
+(1 row)
+
 DROP TABLE t_ord;
 DROP TABLE t_rev;
 DROP TABLE t_copy_unsorted;
@@ -252,5 +489,14 @@ DROP TABLE t_dup_existing;
 DROP TABLE t_selfcreated;
 DROP TABLE t_toast;
 DROP TABLE t_ctid_pk;
+DROP TABLE t_toast_multi;
+DROP TABLE t_toast_mix;
+DROP TABLE t_toast_huge;
+DROP TABLE t_toast_unsorted;
+DROP TABLE t_toast_par_a;
+DROP TABLE t_toast_par_b;
+DROP TABLE t_toast_ctid;
+DROP TABLE t_toast_bridge;
+DROP FUNCTION generate_string(integer, integer);
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA multi_insert CASCADE;

@@ -61,6 +61,7 @@ extern void tts_orioledb_store_non_leaf_tuple(TupleTableSlot *slot,
 extern OTuple tts_orioledb_make_secondary_tuple(TupleTableSlot *slot,
 												OIndexDescr *idx,
 												bool leaf);
+extern OTuple tts_orioledb_make_key(TupleTableSlot *slot, OTableDescr *descr);
 extern void tts_orioledb_fill_key_bound(TupleTableSlot *slot, OIndexDescr *idx,
 										OBTreeKeyBound *bound);
 extern char *tss_orioledb_print_idx_key(TupleTableSlot *slot, OIndexDescr *id);
