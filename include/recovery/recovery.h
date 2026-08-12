@@ -24,6 +24,22 @@ extern void o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn, bool commit);
 extern void o_recovery_finish_hook(bool cleanup);
 extern void o_emit_recovery_finish_rollbacks(void);
 
+/*
+ * Capturing undo of in-progress transactions aborted by recovery_finish()
+ * so o_emit_recovery_finish_undo_wal() can re-emit it as a committed cleanup
+ * transaction.  pg_rewind resets the rewound standby's undo log, so a bare
+ * WAL_REC_ROLLBACK marker replayed there has no undo to apply and leaves the
+ * pre-divergence in-progress rows in place.  Replaying the actual undo as
+ * committed DELETEs removes them.
+ */
+extern bool recovery_finish_undo_capturing;
+extern void recovery_finish_capture_undo_row(ORelOids tableOids, OIndexType indexType,
+											 BTreeOperationType action,
+											 uint8 formatFlags,
+											 LocationIndex tupleLen,
+											 Pointer tupleData);
+extern void o_emit_recovery_finish_undo_wal(void);
+
 extern Size recovery_shmem_needs(void);
 extern void recovery_shmem_init(Pointer ptr, bool found);
 extern bool is_recovery_process(void);

@@ -253,10 +253,10 @@ PG_ISOLATION_REGRESS_ARGS=--no-locale --inputdir=test --outputdir=test/output_is
 ifdef IS_DEV
 override PG_CPPFLAGS += -DIS_DEV
 
-sql/%.sql:
+sql/%.sql: sql/%_prod.sql sql/%_dev.sql
 	@cat sql/$*_prod.sql sql/$*_dev.sql > $@
 else
-sql/%.sql:
+sql/%.sql: sql/%_prod.sql
 	@cat sql/$*_prod.sql > $@
 endif
 

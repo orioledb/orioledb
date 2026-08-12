@@ -218,6 +218,8 @@ typedef struct
 
 extern void add_modify_wal_record(uint8 rec_type, BTreeDescr *desc,
 								  OTuple tuple, OffsetNumber length, char relreplident, uint32 version, uint32 base_version);
+extern void add_xid_wal_record(OXid oxid, TransactionId logicalXid);
+extern void add_finish_wal_record(uint8 rec_type, OXid xmin);
 extern void add_bridge_erase_wal_record(BTreeDescr *desc, ItemPointer iptr, uint32 version, uint32 base_version);
 extern void add_o_tables_meta_lock_wal_record(void);
 extern void add_o_tables_meta_unlock_wal_record(ORelOids oids, Oid oldRelnode);
