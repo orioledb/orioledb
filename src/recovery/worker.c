@@ -105,7 +105,7 @@ o_delete_copy_callback(BTreeDescr *descr,
 
 	if (descr->type == oIndexPrimary || descr->type == oIndexToast)
 	{
-		if (XACT_INFO_OXID_EQ(xactInfo, oxid) &&
+		if (XACT_INFO_WRITTEN_BY(xactInfo, oxid) &&
 			o_tuple_get_version(tup) > o_tuple_get_version(copyArg->key))
 			return OBTreeCallbackActionUndo;
 	}
@@ -136,7 +136,7 @@ o_update_copy_callback(BTreeDescr *descr,
 
 	if (descr->type == oIndexPrimary || descr->type == oIndexToast)
 	{
-		if (XACT_INFO_OXID_EQ(xactInfo, oxid) &&
+		if (XACT_INFO_WRITTEN_BY(xactInfo, oxid) &&
 			o_tuple_get_version(tup) >= o_tuple_get_version(*newtup))
 			return OBTreeCallbackActionUndo;
 	}
