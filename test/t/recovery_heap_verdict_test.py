@@ -25,6 +25,10 @@ class RecoveryHeapVerdictTest(BaseTest):
 		used to handle by aborting.
 		"""
 		node = self.node
+		# A timed checkpoint anywhere after the temp work would move the redo
+		# point past those records and replay would never face the oxid.  The
+		# run is far slower than checkpoint_timeout under valgrind.
+		node.append_conf('postgresql.conf', "checkpoint_timeout = 1d\n")
 		node.start()
 		node.safe_psql("CREATE EXTENSION IF NOT EXISTS orioledb;")
 		node.safe_psql("""
@@ -53,11 +57,16 @@ class RecoveryHeapVerdictTest(BaseTest):
 			con.commit()
 
 		# no checkpoint here: the records above must stay in the replayed
-		# range while the horizon moves past their oxid
-		for i in range(1, 201):
-			node.safe_psql(
-			    "UPDATE o_test_keep SET val = 'r%d' WHERE id = %d;" %
-			    (i, i % 50 + 1))
+		# range while the horizon moves past their oxid.  One connection, one
+		# transaction per statement -- what matters is the number of oxids
+		# consumed, and spawning 200 psql processes costs minutes under
+		# valgrind.
+		with node.connect() as con:
+			for i in range(1, 201):
+				con.execute(
+				    "UPDATE o_test_keep SET val = 'r%d' WHERE id = %d;" %
+				    (i, i % 50 + 1))
+				con.commit()
 
 		node.stop(['-m', 'immediate'])
 		node.start()
