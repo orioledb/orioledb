@@ -169,6 +169,10 @@ int			logical_xid_buffers_guc = 64;
 bool		orioledb_strict_mode = false;
 XLogRecPtr	replay_until_lsn = InvalidXLogRecPtr;
 static char *replay_until_lsn_string;
+#ifdef IS_DEV
+XLogRecPtr	debug_recovery_crash_lsn = InvalidXLogRecPtr;
+static char *debug_recovery_crash_lsn_string;
+#endif
 
 /* For page eviction/read checkpoint test only */
 uint32		min_read_page_checkpoint = UINT32_MAX;
@@ -464,6 +468,39 @@ orioledb_replay_until_lsn_assign_hook(const char *newval, void *extra)
 	if (newval && strcmp(newval, "") != 0)
 		replay_until_lsn = *((XLogRecPtr *) extra);
 }
+
+#ifdef IS_DEV
+/*
+ * GUC check_hook for orioledb.debug_recovery_crash_lsn
+ */
+static bool
+orioledb_debug_recovery_crash_lsn_check_hook(char **newval, void **extra,
+											 GucSource source)
+{
+	if (strcmp(*newval, "") != 0)
+	{
+		XLogRecPtr	lsn;
+		XLogRecPtr *myextra;
+		bool		have_error = false;
+
+		lsn = pg_lsn_in_internal(*newval, &have_error);
+		if (have_error)
+			return false;
+
+		myextra = (XLogRecPtr *) guc_malloc(ERROR, sizeof(XLogRecPtr));
+		*myextra = lsn;
+		*extra = (void *) myextra;
+	}
+	return true;
+}
+
+static void
+orioledb_debug_recovery_crash_lsn_assign_hook(const char *newval, void *extra)
+{
+	if (newval && strcmp(newval, "") != 0)
+		debug_recovery_crash_lsn = *((XLogRecPtr *) extra);
+}
+#endif							/* IS_DEV */
 
 void
 _PG_init(void)
@@ -1140,6 +1177,23 @@ _PG_init(void)
 							   orioledb_replay_until_lsn_check_hook,
 							   orioledb_replay_until_lsn_assign_hook,
 							   NULL);
+
+#ifdef IS_DEV
+	DefineCustomStringVariable("orioledb.debug_recovery_crash_lsn",
+							   "Makes recovery PANIC once replay reaches this"
+							   " write-ahead log location.",
+							   "For tests that need a crash in the middle of"
+							   " replay, so that the next start replays the"
+							   " same range again.  Never set this on a real"
+							   " cluster.",
+							   &debug_recovery_crash_lsn_string,
+							   "",
+							   PGC_POSTMASTER,
+							   0,
+							   orioledb_debug_recovery_crash_lsn_check_hook,
+							   orioledb_debug_recovery_crash_lsn_assign_hook,
+							   NULL);
+#endif							/* IS_DEV */
 
 	if (orioledb_s3_mode)
 	{
