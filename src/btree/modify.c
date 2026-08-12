@@ -613,8 +613,19 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				return ConflictResolutionRetry;
 			}
 
-			/* Update tuple and header pointer after page_item_rollback() */
-			BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, page, loc);
+			/*
+			 * Update tuple and header pointer after page_item_rollback().
+			 *
+			 * Only when the item is still there.  A rollback that reverts an
+			 * insertion deletes the item and reports cmp == -1; the locator
+			 * then points at the following item, which is one past the end
+			 * whenever the deleted item was the last of its chunk.  Reading
+			 * through it picks up chunk->items[chunkItemsCount], now
+			 * overlapping item data, so tuphdr would land at an arbitrary
+			 * offset within the page.
+			 */
+			if (context->cmp == 0)
+				BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, page, loc);
 		}
 	}
 	else if (IsolationUsesXactSnapshot() && IsRelationTree(desc))
@@ -655,7 +666,13 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 								   context->savepointUndoLocation);
 	}
 
-	if (!context->needsUndo)
+	/*
+	 * Inheriting the chain only makes sense while there is an item to inherit
+	 * it from.  After a rollback deleted the item (cmp == -1) the caller goes
+	 * on to insert a fresh one, which starts its own chain -- leafTuphdr
+	 * keeps the InvalidUndoLocation it was initialized with.
+	 */
+	if (!context->needsUndo && context->cmp == 0)
 		context->leafTuphdr.undoLocation = tuphdr->undoLocation;
 	return ConflictResolutionOK;
 }
