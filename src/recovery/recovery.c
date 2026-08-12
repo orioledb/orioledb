@@ -176,6 +176,15 @@ typedef struct
 	bool		checkpoint_xid;
 	/* is started from wal stream */
 	bool		wal_xid;
+
+	/*
+	 * Replay applied an INSERT/UPDATE/DELETE/REINSERT on behalf of this
+	 * transaction.  These are exactly the records that set
+	 * local_wal.has_material_changes on the primary, and therefore exactly
+	 * the ones that guarantee it wrote a finish record -- see the floor
+	 * branch of recovery_finish().
+	 */
+	bool		wal_modify;
 	/* usage map */
 	bool	   *used_by;
 } RecoveryXidState;
@@ -987,6 +996,7 @@ read_xids(int checkpointnum, bool recovery_single, int worker_id)
 			state->o_tables_meta_locked = false;
 			state->checkpoint_xid = true;
 			state->wal_xid = false;
+			state->wal_modify = false;
 			if (!recovery_single && worker_id < 0)
 				state->used_by = palloc0((recovery_pool_size_guc + recovery_idx_pool_size_guc) * sizeof(bool));
 			else
@@ -1975,7 +1985,30 @@ recovery_finish(int worker_id)
 				}
 				else
 				{
-					Assert(!cur_state->wal_xid);
+					/*
+					 * Below the floor there is nothing to announce: every
+					 * observer's xmin is already past this oxid, so no
+					 * WAL_REC_ROLLBACK is needed -- and emitting one would
+					 * drag a settled horizon backwards
+					 * (orioledb/orioledb#889).
+					 *
+					 * Such an entry can carry wal_xid, contrary to what this
+					 * used to assert.  The primary emits WAL_REC_XID lazily,
+					 * before the transaction's first record, and can then
+					 * finish with no finish record at all: wal_rollback()
+					 * discards a local buffer that holds no material
+					 * changes.  The floor moves past the oxid as soon as the
+					 * next transaction's finish record reports the primary's
+					 * advanced runXmin.
+					 *
+					 * What must still hold is the reason that fast path was
+					 * taken: only a modify record sets
+					 * has_material_changes, so a transaction whose changes
+					 * we replayed cannot have skipped its finish record.
+					 * Getting here with wal_modify would mean we replayed
+					 * changes for a transaction nobody will ever resolve.
+					 */
+					Assert(!cur_state->wal_modify);
 				}
 			}
 		}
@@ -2165,6 +2198,7 @@ recovery_switch_to_oxid(OXid oxid, int worker_id)
 			cur_state->invalidate_typcache = false;
 			cur_state->o_tables_meta_locked = false;
 			cur_state->checkpoint_xid = false;
+			cur_state->wal_modify = false;
 			if (worker_id < 0 && !*recovery_single_process)
 				cur_state->used_by = palloc0((recovery_pool_size_guc + recovery_idx_pool_size_guc) *
 											 sizeof(bool));
@@ -4667,6 +4701,18 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				uint16		type = recovery_msg_from_wal_record(rec->type);
 
 				Assert(rec->oxid != InvalidOXid);
+
+				/*
+				 * Record that this transaction actually changed something on
+				 * the wire.  recovery_finish() asserts on it below the xmin
+				 * floor: no such record means the primary took the no-WAL
+				 * fast path out of wal_rollback(), which is the only way an
+				 * entry can get there having streamed a WAL_REC_XID.
+				 */
+				Assert(cur_recovery_xid_state == NULL ||
+					   cur_recovery_xid_state->oxid == rec->oxid);
+				if (cur_recovery_xid_state != NULL)
+					cur_recovery_xid_state->wal_modify = true;
 
 				build_fixed_tuples(rec, &tuple1, &tuple2);
 
