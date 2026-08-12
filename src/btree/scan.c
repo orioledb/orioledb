@@ -144,6 +144,15 @@ struct BTreeSeqScan
 
 	bool		initialized;
 	bool		checkpointNumberSet;
+
+	/*
+	 * Whether this scan still holds the OIndexDescr pin taken below.  Like
+	 * every other resource here, the pin has to be released exactly once:
+	 * free_btree_seq_scan_internal() runs twice for a scan released from a
+	 * ResourceOwner, because that path deliberately leaves the scan on
+	 * listOfScans for seq_scans_cleanup() to finish off.
+	 */
+	bool		descrPinned;
 	OSnapshot	oSnapshot;
 	OBTreeFindPageContext context;
 	OFixedKey	prevHikey;
@@ -1848,7 +1857,8 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 
 	scan->poscan = poscan;
 	scan->desc = desc;
-	if (!IS_SYS_TREE_OIDS(desc->oids))
+	scan->descrPinned = !IS_SYS_TREE_OIDS(desc->oids);
+	if (scan->descrPinned)
 		((OIndexDescr *) desc->arg)->refcnt++;
 	scan->oSnapshot = *oSnapshot;
 	scan->status = BTreeSeqScanInMemory;
@@ -2522,7 +2532,7 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 		scan->diskDownlinks = NULL;
 	}
 
-	if (!IS_SYS_TREE_OIDS(desc->oids))
+	if (scan->descrPinned)
 	{
 		OIndexDescr *indexDescr = (OIndexDescr *) desc->arg;
 
@@ -2534,6 +2544,7 @@ free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 						  "OIndexDescr refcnt is positive when a sequential scan drops its reference",
 						  NULL);
 		indexDescr->refcnt--;
+		scan->descrPinned = false;
 	}
 	scan->status = BTreeSeqScanFinished;
 
