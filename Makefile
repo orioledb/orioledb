@@ -225,6 +225,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/not_supported_yet_test.py \
 						test/t/pg_dump_restore_test.py \
 						test/t/parallel_test.py \
+						test/t/recovery_heap_verdict_test.py \
 						test/t/recovery_item_rollback_test.py \
 						test/t/recovery_row_lock_test.py \
 						test/t/reindex_test.py \
