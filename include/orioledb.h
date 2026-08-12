@@ -503,6 +503,9 @@ extern int	rewind_max_transactions;
 extern int	logical_xid_buffers_guc;
 extern bool orioledb_strict_mode;
 extern XLogRecPtr replay_until_lsn;
+#ifdef IS_DEV
+extern XLogRecPtr debug_recovery_crash_lsn;
+#endif
 
 /* For page eviction/read checkpoint test only */
 extern uint32 min_read_page_checkpoint;

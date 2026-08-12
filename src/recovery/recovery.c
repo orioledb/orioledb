@@ -1216,6 +1216,20 @@ orioledb_redo(XLogReaderState *record)
 	Assert((XLogRecGetInfo(record) & ~XLR_INFO_MASK) == ORIOLEDB_XLOG_CONTAINER);
 	recovery_single = *recovery_single_process;
 
+	/*
+	 * Simulate a crash in the middle of replay.  PANIC leaves the control
+	 * file pointing at the same checkpoint, so the next start replays this
+	 * range again -- which is the window several recovery bugs need and that
+	 * no amount of load can be made to hit on purpose.  Test-only; the GUC
+	 * defaults to unset.
+	 */
+#ifdef IS_DEV
+	if (unlikely(XLogRecPtrIsValid(debug_recovery_crash_lsn)) &&
+		record->ReadRecPtr >= debug_recovery_crash_lsn)
+		elog(PANIC, "orioledb.debug_recovery_crash_lsn reached at %X/%X",
+			 LSN_FORMAT_ARGS(record->ReadRecPtr));
+#endif
+
 	if (unlikely(XLogRecPtrIsValid(replay_until_lsn)))
 	{
 		/* Scoped to the lifetime of the Startup process. */
