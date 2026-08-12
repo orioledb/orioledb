@@ -148,9 +148,12 @@ table_next_row(Relation rel, TableScanDesc scan)
 		result->oids.relnode = DatumGetObjectId(attr);
 
 		attr = heap_getattr(htuple, 5, rel->rd_att, &isnull);
-		result->nkeys = DatumGetUInt32(attr);
+		result->oids.spcoid = DatumGetObjectId(attr);
 
 		attr = heap_getattr(htuple, 6, rel->rd_att, &isnull);
+		result->nkeys = DatumGetUInt32(attr);
+
+		attr = heap_getattr(htuple, 7, rel->rd_att, &isnull);
 		result->keys = DatumGetByteaP(attr);
 	}
 
@@ -298,12 +301,13 @@ orioledb_pg_rewind_sorted_keys(PG_FUNCTION_ARGS)
 
 			new_nkeys = sort_key_array(key_array, row->nkeys);
 
-			appendHton16StringInfo(result_str, 6);
+			appendHton16StringInfo(result_str, 7);
 			appendHton32StringInfo(result_str, sizeof(row->ix_type));
 			appendHton32StringInfo(result_str, row->ix_type);
 			appendOidStringInfo(result_str, row->oids.datoid);
 			appendOidStringInfo(result_str, row->oids.reloid);
 			appendOidStringInfo(result_str, row->oids.relnode);
+			appendOidStringInfo(result_str, row->oids.spcoid);
 			appendHton32StringInfo(result_str, sizeof(new_nkeys));
 			appendHton32StringInfo(result_str, new_nkeys);
 
@@ -583,6 +587,7 @@ orioledb_pg_rewind_new_row_versions(PG_FUNCTION_ARGS)
 		appendHton32StringInfo(result_str, row->oids.datoid);
 		appendHton32StringInfo(result_str, row->oids.reloid);
 		appendHton32StringInfo(result_str, row->oids.relnode);
+		appendHton32StringInfo(result_str, row->oids.spcoid);
 
 		process_tree(result_str, row);
 	}
@@ -744,7 +749,7 @@ replay_rewind(uint32 chkp_num, bool single)
 	ORelOids	cur_oids = {0, 0, 0};
 	off_t		offset = 0;
 	int			readed;
-	const int	tree_header_size = sizeof(OIndexType) + 3 * sizeof(Oid) +
+	const int	tree_header_size = sizeof(OIndexType) + 4 * sizeof(Oid) +
 		sizeof(uint8);
 	uint32		nkeys;
 	uint8		found;
@@ -794,8 +799,10 @@ replay_rewind(uint32 chkp_num, bool single)
 											   sizeof(Oid))));
 		cur_oids.relnode = pg_ntoh32(*((Oid *) (read_buf + sizeof(uint32) +
 												sizeof(Oid) * 2)));
+		cur_oids.spcoid = pg_ntoh32(*((Oid *) (read_buf + sizeof(uint32) +
+											   sizeof(Oid) * 3)));
 		found = *((uint8 *) (read_buf + sizeof(uint32) +
-							 sizeof(Oid) * 3));
+							 sizeof(Oid) * 4));
 
 		elog(LOG, "REWIND TREE: %u %u %u: %c", 
 			 cur_oids.datoid,
