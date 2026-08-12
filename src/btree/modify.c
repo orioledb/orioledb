@@ -55,6 +55,7 @@ typedef struct
 	int			pageReserveKind;
 	int			cmp;
 	BTreeModifyLockStatus lockStatus;
+	bool		haveRedundantRowLocks;
 	bool		pagesAreReserved;
 	bool		undoIsReserved;
 	BTreeOperationType action;
@@ -157,6 +158,15 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 	Assert(OXidIsValid(opOxid) == context.undoIsReserved);
 
 retry:
+
+	/*
+	 * Both describe the undo chain as it is right now, and the chain changes
+	 * while we wait, so they must not survive a retry.  row_lock_conflicts()
+	 * only ever raises lockStatus (Max()), so a stale value would claim we
+	 * still hold a row lock that a previous iteration has since removed.
+	 */
+	context.lockStatus = BTreeModifyNoLock;
+	context.haveRedundantRowLocks = false;
 
 	/*
 	 * Keep the modify retry loop interruptible.  A row-lock conflict against
@@ -299,6 +309,27 @@ retry:
 		}
 
 		Assert((action == BTreeOperationLock) || (context.lockMode >= RowLockNoKeyUpdate));
+
+		/*
+		 * Now that the callback has spoken, the action is final, so it is
+		 * safe to drop our own redundant row-level locks: every remaining
+		 * path from here writes a version that carries our lock mode.  The
+		 * one exception is a lock we are about to rely on instead of writing
+		 * anything.
+		 */
+		if (context.haveRedundantRowLocks &&
+			!(action == BTreeOperationLock &&
+			  context.lockStatus == BTreeModifySameOrStrongerLock))
+		{
+			BTREE_PAGE_READ_LEAF_ITEM(tuphdr, curTuple, page, &loc);
+			remove_redundant_row_locks(tuphdr, &context.conflictTupHdr,
+									   desc->undoType,
+									   &context.conflictUndoLocation,
+									   context.lockMode,
+									   opOxid, blkno,
+									   context.savepointUndoLocation);
+			context.haveRedundantRowLocks = false;
+		}
 
 		if (action == BTreeOperationDelete)
 			return o_btree_modify_delete(&context);
@@ -447,7 +478,6 @@ wait_for_tuple(BTreeDescr *desc, OTuple tuple, OXid oxid,
 static ConflictResolution
 o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 {
-	bool		haveRedundantRowLocks = false;
 	OBTreeFindPageContext *pageFindContext = context->pageFindContext;
 	BTreeDescr *desc = pageFindContext->desc;
 	OInMemoryBlkno blkno;
@@ -468,7 +498,7 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 						   &context->conflictUndoLocation,
 						   context->lockMode, context->opOxid, context->opCsn,
 						   blkno, context->savepointUndoLocation,
-						   &haveRedundantRowLocks, &context->lockStatus))
+						   &context->haveRedundantRowLocks, &context->lockStatus))
 	{
 		OTupleXactInfo xactInfo = context->conflictTupHdr.xactInfo;
 		OXid		oxid = XACT_INFO_GET_OXID(xactInfo);
@@ -641,19 +671,12 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 	}
 
 	/*
-	 * Remove redundant row-level locks if any.
+	 * Redundant row-level locks are dropped by the caller, once the callback
+	 * has settled what this operation actually does.  Doing it here would use
+	 * the action we started with: a modify whose callback then answers
+	 * OBTreeCallbackActionLock would have had its own lock record removed on
+	 * the promise of writing a version that never gets written.
 	 */
-	if (haveRedundantRowLocks &&
-		!(context->action == BTreeOperationLock &&
-		  context->lockStatus == BTreeModifySameOrStrongerLock))
-	{
-		remove_redundant_row_locks(tuphdr, &context->conflictTupHdr,
-								   desc->undoType,
-								   &context->conflictUndoLocation,
-								   context->lockMode,
-								   context->opOxid, blkno,
-								   context->savepointUndoLocation);
-	}
 
 	if (!context->needsUndo)
 		context->leafTuphdr.undoLocation = tuphdr->undoLocation;

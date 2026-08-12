@@ -173,6 +173,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  rll \
 				  rll_deadlock \
 				  rll_mix \
+				  rll_mode_raise \
 				  rll_subtrans \
 				  skipundo \
 				  table_lock_test \
