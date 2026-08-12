@@ -48,6 +48,14 @@ typedef struct OrioledbKeyMap
 	int			ntrees;
 	int			allocated;
 	OXid		divXid;
+	/*
+	 * Smallest OXid carried by a WAL_REC_XID record in the replayed WAL
+	 * range (i.e. the source's first transaction after the divergence
+	 * point).  It is the lowest xid recovery will ever reference during
+	 * replay, so it is a safe -- and tight -- floor for seeding
+	 * globalXmin / checkpointRetainXmin after rewind.
+	 */
+	OXid		minReplayXid;
 	OrioledbTree *trees;
 	bool		fill_map;
 	OrioledbTreeKey tree_key;
@@ -73,6 +81,7 @@ create_orioledb_key_map(XLogRecPtr startpoint)
 	result->allocated = 8;
 	result->ntrees = 0;
 	result->divXid = InvalidOXid;
+	result->minReplayXid = InvalidOXid;
 	result->fill_map = false;
 	result->trees = palloc0(sizeof(OrioledbTree) * result->allocated);
 	return result;
@@ -950,11 +959,19 @@ pg_rewind_on_record(WalReaderState *r, WalRecord *rec)
 				}
 			}
 			break;
-		case WAL_REC_COMMIT:
-		case WAL_REC_ROLLBACK:
+
+		case WAL_REC_XID:
 			{
-				if (!OXidIsValid(orioledb_map->divXid))
-					orioledb_map->divXid = rec->u.finish.xmin;
+				/*
+				 * Track the lowest xid the source emitted after the
+				 * divergence point.  rec->oxid is freshly parsed for every
+				 * WAL_REC_XID record (the first record of each transaction
+				 * container), so this is the minimum xid recovery will have
+				 * to handle.
+				 */
+				if (!OXidIsValid(orioledb_map->minReplayXid) ||
+					rec->oxid < orioledb_map->minReplayXid)
+					orioledb_map->minReplayXid = rec->oxid;
 			}
 			break;
 		default:
@@ -1022,17 +1039,38 @@ _PG_rewind(const char *datadir_target, char *datadir_source,
 	SimpleXLogRead(datadir_target, startpoint, tliIndex, endpoint,
 				   restoreCommand, extract_row_info, orioledb_map);
 	/*
-	 * Use the target's own checkpoint lastXid as divXid - it reflects the
-	 * state at the last checkpoint before divergence, which is always <=
-	 * any xmin that WAL replay will encounter.  The WAL-derived xmin from
-	 * commit records in the diverged segment can be higher than the
-	 * checkpoint floor and is not safe to use for initializing globalXmin.
+	 * Choose the xid floor (divXid) used to seed globalXmin /
+	 * checkpointRetainXmin after rewind.  Recovery pins recovery_xmin to
+	 * checkpointRetainXmin and asserts that runXmin / globalXmin never
+	 * move below their seed, so divXid must be a true floor: it has to be
+	 * <= every xid recovery will reference.
+	 *
+	 * The lowest WAL_REC_XID oxid seen in the replayed range (minReplayXid)
+	 * is exactly that floor: it is the source's first transaction after the
+	 * divergence point, so no replayed xid is below it.  It is also strictly
+	 * above every in-progress oxid named by the common checkpoint's xids
+	 * file (those started before the divergence point), which lets recovery
+	 * drain them via the fast-path-abort path in update_run_xmin().
+	 *
+	 * The target's own checkpoint lastXid (nextXid at the target's last
+	 * checkpoint) is NOT a safe floor in general: if the target
+	 * auto-checkpointed after divergence, its nextXid advances past xids
+	 * that the source's WAL still references, which would trip the
+	 * monotonicity invariant.  It is only used as a fallback when the
+	 * replayed range carries no orioledb transactions at all -- then no
+	 * replayed xid can violate the invariant, and the (necessarily higher)
+	 * lastXid still lets recovery drain any in-progress checkpoint oxids.
 	 */
-	if (OXidIsValid(targetLastXid))
+	if (OXidIsValid(orioledb_map->minReplayXid))
+		orioledb_map->divXid = orioledb_map->minReplayXid;
+	else if (OXidIsValid(targetLastXid))
 		orioledb_map->divXid = targetLastXid;
 	else if (!OXidIsValid(orioledb_map->divXid))
 		pg_fatal("could not determine lastXid for orioledb rewind");
-	pg_log_debug("divXid: %lu", orioledb_map->divXid);
+	pg_log_debug("divXid: %lu (minReplayXid=%lu, targetLastXid=%lu)",
+				 (unsigned long) orioledb_map->divXid,
+				 (unsigned long) orioledb_map->minReplayXid,
+				 (unsigned long) targetLastXid);
 	if (debug)
 		orioledb_key_map_print(orioledb_map);
 	orioledb_process_row_map(orioledb_map, argv0, datadir_target, debug,

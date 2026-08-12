@@ -907,7 +907,25 @@ replay_rewind(uint32 chkp_num, bool single)
 	elog(WARNING, "lastXid: %lu", lastXid);
 	Assert(OXidIsValid(lastXid));
 
-	pg_atomic_init_u64(&xid_meta->nextXid, lastXid + 1);
+	/*
+	 * Seed the xid horizons from divXid (lastXid).  divXid is the lowest
+	 * xid the source's WAL will reference (see pg_rewind_orioledb.c), so it
+	 * is both the runXmin / globalXmin floor and the nextXid to assign:
+	 * the first replayed transaction carries exactly this oxid, and
+	 * advance_oxids() only initialises a slot to INPROGRESS when the
+	 * incoming oxid is >= nextXid.  Seeding nextXid at divXid (rather
+	 * than divXid + 1) is what lets the first replayed transaction get a
+	 * fresh INPROGRESS slot instead of inheriting the stale FROZEN slot
+	 * the target's own xidmap left behind.
+	 *
+	 * checkpointRetainXmin == checkpointRetainXmax == divXid makes the
+	 * xidmap range loaded by checkpoint_shmem_init() empty, so no target
+	 * xidmap slots are trusted: every oxid < divXid is settled below the
+	 * floor (handled via the o_buffers write path, which never trips the
+	 * FROZEN assert), and every oxid >= divXid is initialised fresh by
+	 * advance_oxids() as WAL_REC_XID arrives.
+	 */
+	pg_atomic_init_u64(&xid_meta->nextXid, lastXid);
 	elog(WARNING, "SET runXmin after rewind: %lu", lastXid);
 	pg_atomic_init_u64(&xid_meta->runXmin, lastXid);
 	pg_atomic_init_u64(&xid_meta->globalXmin, lastXid);
@@ -915,10 +933,10 @@ replay_rewind(uint32 chkp_num, bool single)
 	pg_atomic_init_u64(&xid_meta->writtenXmin, lastXid);
 	pg_atomic_init_u64(&xid_meta->writeInProgressXmin, lastXid);
 	pg_atomic_init_u64(&xid_meta->checkpointRetainXmin, lastXid);
-	pg_atomic_init_u64(&xid_meta->checkpointRetainXmax, lastXid + 1);
+	pg_atomic_init_u64(&xid_meta->checkpointRetainXmax, lastXid);
 	pg_atomic_init_u64(&xid_meta->cleanedXmin, lastXid);
 	pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmin, lastXid);
-	pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmax, lastXid + 1);
+	pg_atomic_init_u64(&xid_meta->cleanedCheckpointXmax, lastXid);
 
 	/*
 	 * Reset undo metadata for every undo log type.  All locations start at 0
