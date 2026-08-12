@@ -49,6 +49,7 @@
 #include "btree/btree.h"
 #include "btree/find.h"
 #include "btree/io.h"
+#include "btree/io_aio.h"
 #include "btree/iterator.h"
 #include "btree/page_chunks.h"
 #include "btree/scan.h"
@@ -214,6 +215,15 @@ struct BTreeSeqScan
 
 	/* Ensures scan cleanup on transaction abort or resource owner release */
 	ResourceOwner resowner;
+
+#if PG_VERSION_NUM >= 180000
+
+	/*
+	 * Prefetch ring buffer that overlaps async reads of on-disk leaf pages
+	 * with their consumption by the scan.  NULL when disabled by GUC.
+	 */
+	BTreePrefetchRing *prefetchRing;
+#endif
 };
 
 static dlist_head listOfScans = DLIST_STATIC_INIT(listOfScans);
@@ -1586,21 +1596,22 @@ iterate_internal_page(BTreeSeqScan *scan)
 	return false;
 }
 
+/*
+ * Claim the next on-disk downlink slot from either the serial scan's local
+ * array or the parallel scan's shared atomic counter.  Returns false when
+ * there are no more downlinks to process.
+ */
 static bool
-load_next_disk_leaf_page(BTreeSeqScan *scan)
+claim_next_disk_downlink(BTreeSeqScan *scan, BTreeSeqScanDiskDownlink *out)
 {
-	FileExtent	extent;
-	OReadPageResult read_result;
-	BTreePageHeader *header;
-	BTreeSeqScanDiskDownlink downlink;
 	ParallelOScanDesc poscan = scan->poscan;
 
 	if (!poscan)
 	{
 		if (scan->downlinkIndex >= scan->downlinksCount)
 			return false;
-
-		downlink = scan->diskDownlinks[scan->downlinkIndex];
+		*out = scan->diskDownlinks[scan->downlinkIndex++];
+		return true;
 	}
 	else
 	{
@@ -1615,13 +1626,62 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 			}
 			return false;
 		}
-		downlink = ((BTreeSeqScanDiskDownlink *) dsm_segment_address(scan->dsmSeg))[index];
+		*out = ((BTreeSeqScanDiskDownlink *) dsm_segment_address(scan->dsmSeg))[index];
+		return true;
+	}
+}
+
+static bool
+load_next_disk_leaf_page(BTreeSeqScan *scan)
+{
+	BTreePageHeader *header;
+	BTreeSeqScanDiskDownlink downlink;
+	OReadPageResult read_result;
+
+#if PG_VERSION_NUM >= 180000
+	if (scan->prefetchRing)
+	{
+		BTreePrefetchRing *ring = scan->prefetchRing;
+		int			depth = btree_prefetch_ring_depth(ring);
+		char	   *page;
+		uint64		dlink_raw;
+		CommitSeqNo csn;
+
+		/* Refill: keep up to `depth` reads outstanding. */
+		while (btree_prefetch_ring_inflight(ring) < depth)
+		{
+			BTreeSeqScanDiskDownlink claimed;
+
+			if (!claim_next_disk_downlink(scan, &claimed))
+				break;
+			(void) btree_prefetch_ring_submit(ring, scan->desc,
+											  claimed.downlink, claimed.csn,
+											  scan->checkpointNumber);
+		}
+
+		if (!btree_prefetch_ring_consume(ring, &dlink_raw, &csn, &page))
+			return false;
+
+		memcpy(scan->leafImg, page, ORIOLEDB_BLCKSZ);
+		downlink.downlink = dlink_raw;
+		downlink.csn = csn;
+		/* The prefetch ring hands back a completed, validated page. */
+		read_result = OReadPageResultOk;
+	}
+	else
+#endif
+	{
+		FileExtent	extent;
+
+		if (!claim_next_disk_downlink(scan, &downlink))
+			return false;
+
+		read_result = read_page_from_disk(scan->desc,
+										  scan->leafImg,
+										  downlink.downlink,
+										  &extent);
 	}
 
-	read_result = read_page_from_disk(scan->desc,
-									  scan->leafImg,
-									  downlink.downlink,
-									  &extent);
 	header = (BTreePageHeader *) scan->leafImg;
 	if (header->csn >= downlink.csn)
 		read_page_from_undo(scan->desc, scan->leafImg, header->undoLocation,
@@ -1652,7 +1712,6 @@ load_next_disk_leaf_page(BTreeSeqScan *scan)
 	scan->haveLastLeafKey = false;
 
 	BTREE_PAGE_LOCATOR_FIRST(scan->leafImg, &scan->leafLoc);
-	scan->downlinkIndex++;
 	scan->hint.blkno = OInvalidInMemoryBlkno;
 	scan->hint.pageChangeCount = InvalidOPageChangeCount;
 	O_TUPLE_SET_NULL(scan->nextKey.tuple);
@@ -1885,6 +1944,14 @@ make_btree_seq_scan_internal(BTreeDescr *desc, OSnapshot *oSnapshot,
 	scan->checkpointNumberSet = false;
 	scan->haveHistImg = false;
 	BTREE_PAGE_LOCATOR_SET_INVALID(&scan->leafLoc);
+
+#if PG_VERSION_NUM >= 180000
+	if (btree_prefetch_depth > 0)
+		scan->prefetchRing = btree_prefetch_ring_create(btree_prefetch_depth,
+														btree_seqscan_context);
+	else
+		scan->prefetchRing = NULL;
+#endif
 
 	dlist_push_tail(&listOfScans, &scan->listNode);
 	scan->resowner = NULL;
@@ -2463,6 +2530,14 @@ static void
 free_btree_seq_scan_internal(BTreeSeqScan *scan, bool fromResowner)
 {
 	BTreeDescr *desc = scan->desc;
+
+#if PG_VERSION_NUM >= 180000
+	if (scan->prefetchRing)
+	{
+		btree_prefetch_ring_destroy(scan->prefetchRing);
+		scan->prefetchRing = NULL;
+	}
+#endif
 
 	START_CRIT_SECTION();
 
