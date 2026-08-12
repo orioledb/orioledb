@@ -7,7 +7,7 @@ PLATFORM ?= linux/amd64
 
 export IMAGE_TAG IMAGE_REPO ORIOLEDB_REF ORIOLEDB_REF_TAG PG_MAJOR PLATFORM
 
-CFG ?= workload/jepsen-append workload/jepsen-RR
+CFG ?= workload/jepsen workload/jepsen-RR
 
 .DEFAULT_GOAL := help
 
