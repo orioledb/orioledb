@@ -1,10 +1,16 @@
 #!/bin/sh
 set -eu
 
-# Under Antithesis, sleep indefinitely: Antithesis runs the test template script.
-# Locally, run the test template script.
+# Under Antithesis, sleep indefinitely: Antithesis runs the test template scripts.
 if [ -n "${ANTITHESIS_OUTPUT_DIR:-}" ]; then
 	exec sleep infinity
 fi
 
-exec /opt/antithesis/test/v1/jepsen-postgres/singleton_driver_jepsen-postgres "$@"
+# Outside antithesis, simulate test-driver actions
+cd /opt/antithesis/test/v1/jepsen-postgres
+
+rc=0
+./first_register-anomaly-catalog || rc=$?
+./singleton_driver_jepsen-postgres "$@" || rc=$?
+./finally_jepsen-results || rc=$?
+exit "$rc"
