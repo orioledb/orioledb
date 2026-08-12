@@ -466,6 +466,19 @@ typedef enum RowLockMode
 	((xactInfo) & XACT_INFO_LOCK_OXID_MASK)
 #define XACT_INFO_OXID_EQ(xactInfo, oxid) \
 	(XACT_INFO_GET_OXID((xactInfo)) == (oxid))
+/*
+ * True when the tuple version described by 'xactInfo' was *written* by 'oxid'.
+ *
+ * XACT_INFO_OXID_EQ() alone cannot answer that: a lock-only header carries the
+ * oxid of whoever took the row lock, not of whoever wrote the tuple.  Headers
+ * handed to a modify callback are routinely lock-only -- row_lock_conflicts()
+ * reports a conflicting locker as the conflict header, and its "no conflict"
+ * fallback returns the final version, which is a row lock whenever the chain
+ * walk stops on one (during recovery it stops immediately, since a recovery
+ * process retains no snapshot).
+ */
+#define XACT_INFO_WRITTEN_BY(xactInfo, oxid) \
+	(!XACT_INFO_IS_LOCK_ONLY((xactInfo)) && XACT_INFO_OXID_EQ((xactInfo), (oxid)))
 #define XACT_INFO_OXID_IS_CURRENT(xactInfo) \
 	(XACT_INFO_GET_OXID((xactInfo)) == get_current_oxid_if_any())
 #define	XACT_INFO_IS_FINISHED(xactInfo) \

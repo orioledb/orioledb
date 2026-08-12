@@ -2391,7 +2391,7 @@ recovery_insert_primary_callback(BTreeDescr *descr,
 								 UndoLocation location, RowLockMode *lock_mode,
 								 BTreeLocationHint *hint, void *arg)
 {
-	if (XACT_INFO_OXID_EQ(xactInfo, oxid) &&
+	if (XACT_INFO_WRITTEN_BY(xactInfo, oxid) &&
 		o_tuple_get_version(tup) >= o_tuple_get_version(*newtup))
 		return OBTreeCallbackActionUndo;
 	return OBTreeCallbackActionUpdate;
@@ -2407,7 +2407,7 @@ recovery_delete_primary_callback(BTreeDescr *descr,
 {
 	OTuple	   *key = (OTuple *) arg;
 
-	if (XACT_INFO_OXID_EQ(xactInfo, oxid) &&
+	if (XACT_INFO_WRITTEN_BY(xactInfo, oxid) &&
 		o_tuple_get_version(tup) > o_tuple_get_version(*key))
 		return OBTreeCallbackActionUndo;
 
@@ -2422,7 +2422,7 @@ recovery_insert_overwrite_callback(BTreeDescr *descr,
 								   RowLockMode *lock_mode,
 								   BTreeLocationHint *hint, void *arg)
 {
-	if (XACT_INFO_OXID_EQ(xactInfo, oxid))
+	if (XACT_INFO_WRITTEN_BY(xactInfo, oxid))
 		return OBTreeCallbackActionUndo;
 
 	return OBTreeCallbackActionUpdate;
@@ -2436,7 +2436,7 @@ recovery_delete_overwrite_callback(BTreeDescr *descr,
 								   RowLockMode *lock_mode,
 								   BTreeLocationHint *hint, void *arg)
 {
-	if (XACT_INFO_OXID_EQ(xactInfo, oxid))
+	if (XACT_INFO_WRITTEN_BY(xactInfo, oxid))
 		return OBTreeCallbackActionUndo;
 
 	return OBTreeCallbackActionDelete;
@@ -2460,7 +2460,7 @@ recovery_insert_deleted_primary_callback(BTreeDescr *descr,
 										 UndoLocation location, RowLockMode *lock_mode,
 										 BTreeLocationHint *hint, void *arg)
 {
-	if (XACT_INFO_OXID_EQ(xactInfo, oxid) &&
+	if (XACT_INFO_WRITTEN_BY(xactInfo, oxid) &&
 		o_tuple_get_version(tup) >= o_tuple_get_version(*newtup))
 		return OBTreeCallbackActionUndo;
 	return OBTreeCallbackActionUpdate;
@@ -2477,7 +2477,7 @@ recovery_delete_deleted_primary_callback(BTreeDescr *descr,
 {
 	OTuple	   *key = (OTuple *) arg;
 
-	if (XACT_INFO_OXID_EQ(xactInfo, oxid) &&
+	if (XACT_INFO_WRITTEN_BY(xactInfo, oxid) &&
 		o_tuple_get_version(tup) > o_tuple_get_version(*key))
 		return OBTreeCallbackActionUndo;
 
@@ -2493,7 +2493,7 @@ recovery_insert_deleted_overwrite_callback(BTreeDescr *descr,
 										   RowLockMode *lock_mode,
 										   BTreeLocationHint *hint, void *arg)
 {
-	if (XACT_INFO_OXID_EQ(xactInfo, oxid))
+	if (XACT_INFO_WRITTEN_BY(xactInfo, oxid))
 		return OBTreeCallbackActionUndo;
 
 	return OBTreeCallbackActionUpdate;
@@ -2508,7 +2508,7 @@ recovery_delete_deleted_overwrite_callback(BTreeDescr *descr,
 										   RowLockMode *lock_mode,
 										   BTreeLocationHint *hint, void *arg)
 {
-	if (XACT_INFO_OXID_EQ(xactInfo, oxid))
+	if (XACT_INFO_WRITTEN_BY(xactInfo, oxid))
 		return OBTreeCallbackActionUndo;
 
 	return OBTreeCallbackActionDelete;
