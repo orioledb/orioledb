@@ -1,0 +1,17 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1_begin s1_nku s1_raise s2_begin s2_upd s1_commit s2_commit
+step s1_begin: BEGIN;
+step s1_nku: SELECT * FROM o_rll_mode_raise WHERE id = 1 FOR NO KEY UPDATE;
+id| v
+--+--
+ 1|10
+(1 row)
+
+step s1_raise: UPDATE o_rll_mode_raise SET id = 2 WHERE id = 1;
+step s2_begin: BEGIN;
+step s2_upd: UPDATE o_rll_mode_raise SET v = 99 WHERE id = 1; <waiting ...>
+step s1_commit: COMMIT;
+step s2_upd: <... completed>
+ERROR:  tuple to be locked has its primary key changed due to concurrent update
+step s2_commit: COMMIT;
