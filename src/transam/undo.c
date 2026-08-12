@@ -597,7 +597,24 @@ update_min_undo_locations(UndoLogType undoType,
 
 	meta->minUndoLocationsChangeCount++;
 
-	pg_write_barrier();
+	/*
+	 * A full barrier, not pg_write_barrier(): what needs ordering here is a
+	 * store followed by loads, and a write barrier only orders stores against
+	 * stores.  On x86-64 pg_write_barrier() is a compiler barrier that emits
+	 * no instruction at all, because the one ordering x86 does not give for
+	 * free is exactly StoreLoad.
+	 *
+	 * set_my_reserved_location() publishes its location, fences, waits for
+	 * this counter to be even, and then refuses to proceed if the published
+	 * minimums already run above it.  For that handshake to hold, our loads
+	 * of everyone's locations below must not run until this increment is
+	 * visible to them. Otherwise we read a proc's location from before it
+	 * reserved while that proc reads the counter from before we bumped it,
+	 * and both sides conclude they agreed: the minimum we publish is then too
+	 * high, and undo somebody still needs can be written out or recycled
+	 * underneath them.
+	 */
+	pg_memory_barrier();
 
 	lastUsedLocation = pg_atomic_read_u64(&meta->lastUsedLocation);
 	minTransactionRetainLocation = minRetainLocation = minReservedLocation = lastUsedLocation;
