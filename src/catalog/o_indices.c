@@ -1379,9 +1379,53 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 
 		if (oTable)
 		{
-			o_tupdesc_load_constr(descr->leafTupdesc, oTable, descr);
-			primary_init_nfields = palloc(sizeof(*primary_init_nfields));
-			*primary_init_nfields = oTable->primary_init_nfields;
+			/*
+			 * The leaf tuple descriptor above came from the OIndex record;
+			 * the constraints and primary_init_nfields come from the OTable
+			 * record.  Those are two separate sys-tree rows, and a DDL
+			 * updates them one after the other -- o_indices_update() first,
+			 * o_tables_update() second.
+			 *
+			 * A caller that handed us the OTable it already holds always sees
+			 * the pair whole.  A caller that named the table by OIDs alone
+			 * re-reads it here under o_non_deleted_snapshot, which shows
+			 * uncommitted rows, so it can catch a DDL between those two
+			 * writes and pair the new OIndex with the old OTable.  On the
+			 * primary oTablesMetaLock keeps the checkpointer out of that
+			 * window; recovery applies the enclosed modifies without taking
+			 * it, so on a standby a restartpoint walks right into it.
+			 *
+			 * A torn pair is not merely inaccurate.  o_tupdesc_load_constr()
+			 * would size missing[] from the OTable while FreeTupleDesc()
+			 * frees it by the descriptor, and fillFixedFormatSpec() would
+			 * read primary_init_nfields attributes out of a shorter
+			 * descriptor.  Everything those callers actually need comes from
+			 * the OIndex alone, so build that much and mark the descriptor
+			 * invalid: nobody gets handed it again, and the next fetch
+			 * re-reads a settled pair.
+			 *
+			 * The index incarnation version says whether the pair is whole.
+			 * make_primary_o_index()/make_ctid_o_index() stamp the new OIndex
+			 * and the OTable's primary_ixversion with the same value, and
+			 * every o_indices_update() call site writes the OTable right
+			 * after, so the two rows carry equal versions once both writes
+			 * have landed and unequal ones for exactly the window in between.
+			 * A caller that supplies the OTable it holds fetched the OIndex
+			 * by that same version (see o_table_descr_fill_indices()) and
+			 * oIndicesFetchCallback() returns only an exact version match, so
+			 * the equality holds there by construction.
+			 */
+			if (descr->version == oTable->primary_ixversion)
+			{
+				o_tupdesc_load_constr(descr->leafTupdesc, oTable, descr);
+				primary_init_nfields = palloc(sizeof(*primary_init_nfields));
+				*primary_init_nfields = oTable->primary_init_nfields;
+			}
+			else
+			{
+				Assert(source == oTableSourceContext);
+				descr->valid = false;
+			}
 			if (free_oTable)
 				o_table_free(oTable);
 		}
