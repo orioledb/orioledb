@@ -3292,7 +3292,7 @@ worker_wait_shutdown(RecoveryWorkerState *worker)
 
 	while (true)
 	{
-		CHECK_FOR_INTERRUPTS();
+		O_CHECK_FOR_INTERRUPTS();
 
 		status = GetBackgroundWorkerPid(worker->handle, &not_used);
 
@@ -4652,18 +4652,7 @@ delay_if_queued_for_idxbuild(void)
 		HASH_SEQ_STATUS hash_seq;
 		RecoveryIdxBuildQueueState *cur;
 
-		/*
-		 * This function might be called by a startup process and by a
-		 * recovery worker, therefore check in which worker we are.
-		 */
-		if (AmStartupProcess())
-#if PG_VERSION_NUM >= 180000
-			ProcessStartupProcInterrupts();
-#else
-			HandleStartupProcInterrupts();
-#endif
-		else
-			o_worker_handle_interrupts();
+		O_CHECK_FOR_INTERRUPTS();
 
 		/* Remove hash entries for completed indexes */
 		hash_seq_init(&hash_seq, idxbuild_oids_hash);
@@ -4700,18 +4689,7 @@ delay_rels_queued_for_idxbuild(ORelOids oids)
 	 */
 	while (true)
 	{
-		/*
-		 * This function might be called by a startup process and by a
-		 * recovery worker, therefore check in which worker we are.
-		 */
-		if (AmStartupProcess())
-#if PG_VERSION_NUM >= 180000
-			ProcessStartupProcInterrupts();
-#else
-			HandleStartupProcInterrupts();
-#endif
-		else
-			o_worker_handle_interrupts();
+		O_CHECK_FOR_INTERRUPTS();
 
 		hash_elem = (RecoveryIdxBuildQueueState *) hash_search(idxbuild_oids_hash,
 															   &oids,
@@ -5044,7 +5022,7 @@ workers_synchronize(XLogRecPtr ptr, bool send_synchronize)
 			BgwHandleStatus status;
 			pid_t		pid;
 
-			CHECK_FOR_INTERRUPTS();
+			O_CHECK_FOR_INTERRUPTS();
 
 			pg_usleep(10);
 
