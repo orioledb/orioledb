@@ -117,7 +117,7 @@
 (defn anomaly-assertion-id [anomaly-type]
   (str "jepsen: no " (kw-name anomaly-type) " anomalies"))
 
-(def catch-all-assertion-id "jepsen: results.edn is valid")
+(def catch-all-assertion-id "jepsen: no failures")
 
 (defn emit! [message]
   (println (json/generate-string message)))
