@@ -200,6 +200,11 @@ jobs:
         uses: coverallsapp/github-action@v2
         with:
           files: ./orioledb/coverage.info
+          # The action downloads its own binary at run time; when that
+          # download or its checksum fetch fails ("Failed to download
+          # coveralls binary or checksum") the whole run goes red over a
+          # coverage upload that changes nothing about the tests.
+          fail-on-error: false
 
   cleanup:
     needs: finish
