@@ -779,10 +779,22 @@ s3_header_mark_part_loaded(S3HeaderTag tag, int index)
 	while (true)
 	{
 		uint32		newValue;
-		S3PartStatus status PG_USED_FOR_ASSERTS_ONLY;
+		S3PartStatus status;
 
 		status = S3_PART_GET_STATUS(value);
 
+		/*
+		 * Only whoever moved the part to Loading may declare it loaded.  Say
+		 * which part and which status when that does not hold: the bare
+		 * assertion left nothing to go on, and the caller that broke it (an
+		 * s3 worker finishing a download) is not the one that changed the
+		 * status out from under it.
+		 */
+		if (status != S3PartStatusLoading)
+			elog(WARNING, "part %d of file %u/%u (checkpoint %u, segment %d) "
+				 "is in status %d, expected loading",
+				 index, tag.key.oids.datoid, tag.key.oids.relnode,
+				 tag.checkpointNum, tag.segNum, (int) status);
 		Assert(status == S3PartStatusLoading);
 		newValue = S3_PART_SET_STATUS(value, S3PartStatusLoaded);
 		newValue = S3_PART_SET_USAGE_COUNT(newValue, 1);

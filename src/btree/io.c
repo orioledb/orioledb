@@ -2284,9 +2284,24 @@ perform_page_io_build(BTreeDescr *desc, Page img,
 			tag.checkpointNum = chkpNum;
 			tag.segNum = offset / ORIOLEDB_SEGMENT_SIZE;
 			index = (offset % ORIOLEDB_SEGMENT_SIZE) / ORIOLEDB_S3_PART_SIZE;
-			s3_header_mark_part_loading(tag, index);
-			s3_header_mark_part_loaded(tag, index);
-			s3_headers_increase_loaded_parts(1);
+
+			/*
+			 * The allocation ran into a part the file did not have yet, so
+			 * its contents are here and nothing has to be fetched -- but only
+			 * if we are the ones who claimed it.  After a crash restart the
+			 * datafile length rewinds into a part the previous run had
+			 * already uploaded and evicted, so a reader can have a download
+			 * of exactly this part in flight; forcing it to Loaded from here
+			 * leaves the s3 worker to fail Assert(status ==
+			 * S3PartStatusLoading) when that download finishes, and hands
+			 * eviction a part somebody is still writing into.
+			 *
+			 * s3_header_mark_part_loading() counts the part in
+			 * numberOfLoadedParts on the transition it makes, so there is
+			 * nothing to add here either.
+			 */
+			if (s3_header_mark_part_loading(tag, index) == S3PartStatusNotLoaded)
+				s3_header_mark_part_loaded(tag, index);
 		}
 
 		extent->off |= (uint64) chkpNum << S3_CHKP_NUM_SHIFT;

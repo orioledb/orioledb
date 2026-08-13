@@ -371,7 +371,24 @@ s3process_task(uint64 taskLocation)
 		tag.checkpointNum = task->typeSpecific.filePart.chkpNum;
 		tag.segNum = task->typeSpecific.filePart.segNum;
 
-		s3_header_mark_part_loaded(tag, task->typeSpecific.filePart.partNum);
+		/*
+		 * A worker that errors out is restarted with bgw_restart_time 0 and
+		 * replays the task it left in workers_locations[], so this download
+		 * can be the second one of a part the first attempt already marked
+		 * loaded -- the attempt only has to have died between that mark and
+		 * clearing its slot.  Claiming the part again keeps the replay
+		 * idempotent; without it the restarted worker fails Assert(status ==
+		 * S3PartStatusLoading) the moment it starts, and dies again, on the
+		 * same task.
+		 *
+		 * s3_header_mark_part_loading() returns the status it found: Loading
+		 * means the mark is still ours to make, NotLoaded means the part was
+		 * evicted in between and it just claimed it back for us, and Loaded
+		 * means the first attempt already finished this.
+		 */
+		if (s3_header_mark_part_loading(tag, task->typeSpecific.filePart.partNum) !=
+			S3PartStatusLoaded)
+			s3_header_mark_part_loaded(tag, task->typeSpecific.filePart.partNum);
 
 		pfree(filename);
 		pfree(objectname);
