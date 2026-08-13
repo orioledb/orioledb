@@ -1346,9 +1346,17 @@ reconstruct_split_diff(BTreeDescr *desc, UndoLocation undoLocation,
 	splitKey.tuple.data = splitKey.fixedData;
 
 	/*
-	 * Determine which half `dest` is from its own hikey: the left half's
-	 * hikey is exactly the split key; the right half's hikey is the original
-	 * page's (larger) hikey, or it is rightmost.
+	 * Determine which side of the split `dest` is on from its own hikey.  Its
+	 * key range lies wholly within one half -- a page is a descendant of
+	 * exactly one of them -- so everything left of the split ends at or
+	 * before the split key and everything right of it ends after.  Being
+	 * rightmost means an unbounded hikey, hence the right side.
+	 *
+	 * Testing for a hikey merely *different* from the split key would only
+	 * tell the two halves of this very split apart: once the left half is
+	 * itself split, its left part ends before the split key and would read as
+	 * the right half, taking the split key as a low boundary that lies past
+	 * its whole range.
 	 */
 	if (O_PAGE_IS(dest, RIGHTMOST))
 		rightHalf = true;
@@ -1358,7 +1366,7 @@ reconstruct_split_diff(BTreeDescr *desc, UndoLocation undoLocation,
 
 		BTREE_PAGE_GET_HIKEY(destHikey, dest);
 		rightHalf = (o_btree_cmp(desc, &destHikey, BTreeKeyNonLeafKey,
-								 &splitKey.tuple, BTreeKeyNonLeafKey) != 0);
+								 &splitKey.tuple, BTreeKeyNonLeafKey) > 0);
 	}
 
 	if (is_left != NULL)
@@ -1444,30 +1452,34 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 		undo_read(undoType, left_loc, ORIOLEDB_BLCKSZ, dest);
 		if (page_lokey && header.type == UndoPageImageSplit)
 		{
-			bool		set_page_lokey = false;
+			OFixedKey	splitKey;
 
-			if (!page_hikey || O_TUPLE_IS_NULL(*page_hikey))
-			{
-				set_page_lokey = true;
-			}
-			else if (!O_PAGE_IS(dest, RIGHTMOST))
-			{
-				BTREE_PAGE_GET_HIKEY(hikey, dest);
-				cmp = o_btree_cmp(desc, page_hikey, BTreeKeyNonLeafKey, &hikey, BTreeKeyNonLeafKey);
-				Assert(cmp <= 0);
-				if (cmp == 0)
-					set_page_lokey = true;
-			}
+			undo_read(undoType,
+					  left_loc + ORIOLEDB_BLCKSZ,
+					  header.splitKeyLen,
+					  splitKey.fixedData);
+			splitKey.tuple.formatFlags = header.splitKeyFlags;
+			splitKey.tuple.data = (Pointer) &splitKey.fixedData;
 
-			if (set_page_lokey)
-			{
-				undo_read(undoType,
-						  left_loc + ORIOLEDB_BLCKSZ,
-						  header.splitKeyLen,
-						  page_lokey->fixedData);
-				page_lokey->tuple.formatFlags = header.splitKeyFlags;
-				page_lokey->tuple.data = (Pointer) &page_lokey->fixedData;
-			}
+			/*
+			 * Which side of the split does the caller's page sit on?  Its key
+			 * range lies wholly within one half -- a page is a descendant of
+			 * exactly one of them -- so its hikey answers it: everything left
+			 * of the split ends at or before the split key, everything right
+			 * of it ends after.  Being rightmost means an unbounded hikey,
+			 * hence the right side.
+			 *
+			 * Comparing against the pre-split page's hikey instead only tells
+			 * the two halves of *this* split apart.  After the right half is
+			 * itself split, its left part ends before the pre-split hikey and
+			 * so read as the left half, and the reconstructed page was walked
+			 * from its very first item -- re-emitting every key that belongs
+			 * to a sibling the caller visits separately.
+			 */
+			if (!page_hikey || O_TUPLE_IS_NULL(*page_hikey) ||
+				o_btree_cmp(desc, page_hikey, BTreeKeyNonLeafKey,
+							&splitKey.tuple, BTreeKeyNonLeafKey) > 0)
+				copy_fixed_key(desc, page_lokey, splitKey.tuple);
 		}
 		return;
 	}

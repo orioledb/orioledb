@@ -4,6 +4,9 @@
 import unittest
 import testgres
 import string
+import time
+
+from threading import Event, Thread
 
 from testgres.enums import NodeStatus
 from testgres.connection import NodeConnection
@@ -288,6 +291,90 @@ class MergeTest(BaseTest):
 
 		self.assertTrue(
 		    node.execute("SELECT orioledb_tbl_check('o_split_diff'::regclass)")
+		    [0][0])
+
+	def test_split_diff_scan_during_split(self):
+		"""
+		A sequential scan on an old snapshot must not return a row twice while
+		the leaves under it are splitting.
+
+		Scanning keeps a page-level undo image alive for every split, so each
+		live leaf reconstructs the page it came from.  A leaf produced by two
+		splits sits strictly inside the older image, and the walk has to start
+		at that leaf's own low boundary -- otherwise it re-emits the keys that
+		went to a sibling the scan visits on its own.
+		"""
+		node = self.node
+		node.safe_psql(
+		    'postgres', "CREATE TABLE IF NOT EXISTS o_split_conc ("
+		    "    id int NOT NULL,"
+		    "    payload text NOT NULL,"
+		    "    PRIMARY KEY (id)"
+		    ") USING orioledb;"
+		    "TRUNCATE o_split_conc;")
+		node.execute("INSERT INTO o_split_conc "
+		             "(SELECT id * 2, repeat('x', 100) "
+		             "FROM generate_series(1, 5000) id);")
+
+		# The scan has to be in flight when the pages split -- that is what
+		# makes the split keep a page-level undo image at all -- so it runs
+		# from its own thread, started before the interleaving insert and
+		# stopped after it.
+		stop = Event()
+		outcome = {}
+
+		def scanner():
+			con = node.connect()
+			try:
+				con.begin()
+				con.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+				con.execute("SET enable_indexscan = off;")
+				con.execute("SET enable_bitmapscan = off;")
+				outcome['first'] = con.execute(
+				    "SELECT count(*) FROM o_split_conc;")[0][0]
+				while not stop.is_set():
+					# Any key the scan hands out twice shows up here.
+					dups = con.execute("SELECT id, count(*) FROM o_split_conc "
+					                   "GROUP BY id HAVING count(*) > 1 "
+					                   "ORDER BY id;")
+					if dups:
+						outcome['bad'] = dups[:5]
+						return
+				outcome['last'] = con.execute(
+				    "SELECT count(*), min(id), max(id), sum(id::bigint) "
+				    "FROM o_split_conc;")[0]
+			except Exception as e:
+				outcome['error'] = repr(e)
+			finally:
+				con.rollback()
+				con.close()
+
+		t = Thread(target=scanner)
+		t.start()
+		try:
+			deadline = time.time() + 30
+			while ('first' not in outcome and t.is_alive()
+			       and time.time() < deadline):
+				time.sleep(0.01)
+			time.sleep(0.3)
+
+			node.execute("INSERT INTO o_split_conc "
+			             "(SELECT id * 2 - 1, repeat('y', 100) "
+			             "FROM generate_series(1, 5000) id);")
+			time.sleep(0.2)
+		finally:
+			stop.set()
+			t.join(timeout=60)
+
+		self.assertNotIn('error', outcome)
+		self.assertEqual(outcome.get('first'), 5000)
+		self.assertNotIn('bad', outcome)
+		self.assertEqual(outcome.get('last'), (5000, 2, 10000, 25005000))
+
+		self.assertEqual(
+		    node.execute("SELECT count(*) FROM o_split_conc;")[0][0], 10000)
+		self.assertTrue(
+		    node.execute("SELECT orioledb_tbl_check('o_split_conc'::regclass)")
 		    [0][0])
 
 	def test_split_diff_update_grow(self):
