@@ -1393,7 +1393,8 @@ void
 get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 				   BTreeKeyType kind, Pointer dest,
 				   bool *is_left, bool *is_right, OFixedKey *lokey,
-				   OFixedKey *page_lokey, OTuple *page_hikey)
+				   OFixedKey *page_lokey, OTuple *page_hikey,
+				   bool *is_differential)
 {
 	/*
 	 * Read enough bytes to cover the peek header and (if this is a full
@@ -1412,6 +1413,10 @@ get_page_from_undo(BTreeDescr *desc, UndoLocation undoLocation, Pointer key,
 
 	undo_read(undoType, undoLocation, sizeof(header), (Pointer) &header);
 	left_loc = undoLocation + MAXALIGN(sizeof(header));
+
+	if (is_differential != NULL)
+		*is_differential = (header.type == UndoPageImageMergeDiff ||
+							header.type == UndoPageImageSplitDiff);
 
 	if (header.type == UndoPageImageMergeDiff)
 	{

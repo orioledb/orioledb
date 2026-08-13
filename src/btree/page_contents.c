@@ -38,6 +38,27 @@ static void clear_fixed_tuple(OFixedTuple *dst);
 /*
  * Navigates and reads the page image from undo log according to `key` of
  * `keyType` and `csn`.  Saves lokey of the page to lokey if *lokey != NULL.
+ *
+ * *lokey accumulates the tightest lower bound any record in the chain reported,
+ * never the last one.  A record reports where the half it carried forward
+ * begins *at that record's generation*, and the walk runs newest to oldest, so
+ * the bounds only get looser as it goes: a page split twice yields two
+ * UndoPageImageSplitDiff records that both see the same (narrow) right half
+ * and each name their own split key, the older one lower than the newer.
+ * Overwriting would hand the caller a bound from before the newer split while
+ * the image stays clipped to the newer half -- and a backward scan takes that
+ * bound as the page's own, stepping left past every leaf in between and
+ * silently dropping their rows.
+ *
+ * The returned image location identifies the image the caller ends up with, so
+ * that a caller stepping sideways can tell when several current leaves resolve
+ * to one historical page (find_left_page(), find_right_page()).  For a chain
+ * that goes through a differential record that identity is the first such
+ * record and the side it took, not the record the walk stopped at: the halves
+ * of a differential split keep their own narrow contents, but their chains
+ * converge on the same older history, so the stopping record cannot tell them
+ * apart.  Reporting it would make a caller treat one half as already covered
+ * by the other and skip it whole.
  */
 UndoLocation
 read_page_from_undo(BTreeDescr *desc, Page img, UndoLocation undo_loc,
@@ -48,15 +69,41 @@ read_page_from_undo(BTreeDescr *desc, Page img, UndoLocation undo_loc,
 	CommitSeqNo page_csn;
 	UndoLocation rec_undo_location;
 	bool		is_left = true;
+	bool		is_differential;
+	bool		imageIdentityLatched = false;
+	UndoLocation imageIdentityLoc = InvalidUndoLocation;
+	bool		imageIdentityIsLeft = true;
+	OFixedKey	stepLokey;
 	UndoLogType undoType PG_USED_FOR_ASSERTS_ONLY = GET_PAGE_LEVEL_UNDO_TYPE(desc->undoType);
 
 	Assert(UndoLocationIsValid(undo_loc));
 
+	if (lokey)
+		clear_fixed_key(lokey);
+
 	while (true)
 	{
 		/* Read page image from page-level undo item */
+		clear_fixed_key(&stepLokey);
+		is_differential = false;
 		get_page_from_undo(desc, undo_loc, key, keyType, img,
-						   &is_left, NULL, lokey, NULL, NULL);
+						   &is_left, NULL, lokey ? &stepLokey : NULL,
+						   NULL, NULL, &is_differential);
+
+		/* Latch the image identity at the first differential record */
+		if (is_differential && !imageIdentityLatched)
+		{
+			imageIdentityLatched = true;
+			imageIdentityLoc = undo_loc;
+			imageIdentityIsLeft = is_left;
+		}
+
+		/* Keep the tightest bound reported so far -- see above */
+		if (lokey && !O_TUPLE_IS_NULL(stepLokey.tuple) &&
+			(O_TUPLE_IS_NULL(lokey->tuple) ||
+			 o_btree_cmp(desc, &stepLokey.tuple, BTreeKeyNonLeafKey,
+						 &lokey->tuple, BTreeKeyNonLeafKey) > 0))
+			copy_fixed_key(desc, lokey, stepLokey.tuple);
 
 		header = (BTreePageHeader *) img;
 		page_csn = header->csn;
@@ -79,6 +126,9 @@ read_page_from_undo(BTreeDescr *desc, Page img, UndoLocation undo_loc,
 
 	/* Page-level undo item should be retained */
 	Assert(UNDO_REC_EXISTS(undoType, undo_loc));
+
+	if (imageIdentityLatched)
+		return O_UNDO_GET_IMAGE_LOCATION(imageIdentityLoc, imageIdentityIsLeft);
 
 	return O_UNDO_GET_IMAGE_LOCATION(undo_loc, is_left);
 }
