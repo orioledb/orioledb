@@ -1729,6 +1729,7 @@ o_indices_get_extended(ORelOids oids, OIndexType type,
 	{
 		OIndexChunkBoundKey boundKey;
 		OIndexChunkBoundKey *found_key = NULL;
+		OIndexChunkKey deserKey;
 		Size		dataLength;
 		Pointer		result;
 		OIndex	   *oIndex;
@@ -1746,7 +1747,29 @@ o_indices_get_extended(ORelOids oids, OIndexType type,
 		if (result == NULL)
 			return NULL;
 
-		oIndex = deserialize_o_index(&key, result, dataLength);
+		/*
+		 * Take the incarnation version from the chunk we actually read, and
+		 * everything else from the key we asked with.
+		 *
+		 * A caller that names no particular incarnation asks with
+		 * O_TABLE_INVALID_VERSION; deserializing against that would stamp the
+		 * OIndex -- and every OIndexDescr built from it -- as
+		 * version-unknown, which is no basis for deciding whether an OIndex
+		 * and an OTable are the same incarnation.  *found_key is the key of
+		 * the first chunk returned, so it carries the row's real version.
+		 *
+		 * Its OIDs, though, are not necessarily the ones we asked for.  The
+		 * O_INDICES key comparator does not separate two rows that share
+		 * (datoid, relnode) but differ in reloid, so a lookup for an index
+		 * whose reloid a DDL has just changed lands on the row still keyed by
+		 * the old reloid, and oIndicesFetchCallback() hands that tuple back
+		 * rather than rejecting it.  Callers identify the descriptor by the
+		 * OIDs they asked for, so keep those.  o_tables_get_extended() takes
+		 * the same narrow slice for OTable.
+		 */
+		deserKey = key;
+		deserKey.version = found_key->key.version;
+		oIndex = deserialize_o_index(&deserKey, result, dataLength);
 		pfree(result);
 
 		if (oIndex != NULL)
