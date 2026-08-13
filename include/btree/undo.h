@@ -200,7 +200,8 @@ extern void make_waiter_undo_record(BTreeDescr *desc, OInMemoryBlkno blkno,
 extern void get_page_from_undo(BTreeDescr *desc, UndoLocation undo_loc, Pointer key,
 							   BTreeKeyType kind, Pointer dest,
 							   bool *is_left, bool *is_right, OFixedKey *lokey,
-							   OFixedKey *page_lokey, OTuple *page_hikey);
+							   OFixedKey *page_lokey, OTuple *page_hikey,
+							   bool *is_differential);
 extern UndoLocation page_add_image_to_undo(BTreeDescr *desc, Pointer p,
 										   CommitSeqNo imageCsn,
 										   OTuple *splitKey, LocationIndex splitKeyLen);
