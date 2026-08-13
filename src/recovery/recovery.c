@@ -4446,6 +4446,31 @@ typedef struct
 
 } ReplayWalDescCtx;
 
+/*
+ * Params of the replay_on_record stop event: the record about to be replayed,
+ * and the sys tree it names when it is a WAL_REC_RELATION for one (-1
+ * otherwise, including for user relations).
+ */
+static Jsonb *
+replay_record_stopevent_params(WalRecord *rec)
+{
+	JsonbParseState *state = NULL;
+	Jsonb	   *res;
+	int			sysTreeNum = -1;
+	MemoryContext mctx = MemoryContextSwitchTo(stopevents_cxt);
+
+	if (rec->type == WAL_REC_RELATION && IS_SYS_TREE_OIDS(rec->oids))
+		sysTreeNum = rec->oids.relnode;
+
+	pushJsonbValue(&state, WJB_BEGIN_OBJECT, NULL);
+	jsonb_push_string_key(&state, "type", wal_type_name(rec->type));
+	jsonb_push_int8_key(&state, "systree", sysTreeNum);
+	res = JsonbValueToJsonb(pushJsonbValue(&state, WJB_END_OBJECT, NULL));
+	MemoryContextSwitchTo(mctx);
+
+	return res;
+}
+
 static WalParseResult
 replay_on_record(WalReaderState *r, WalRecord *rec)
 {
@@ -4464,12 +4489,23 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 	 * (dispatch is cheap) far ahead of the workers (apply is not), so
 	 * get_workers_commit_ptr() stays low and the finished_list drain cannot
 	 * remove a resurrected in-flight oxid before the deferred
-	 * WAL_REC_ROLLBACK re-finds it (found=1) on the leader.  The test only
-	 * needs to park on the next record after arming, so no params are pushed;
-	 * arm match-all with pg_stopevent_set('replay_on_record', 'true').
-	 * Runtime-gated by orioledb.enable_stopevents (off in production).
+	 * WAL_REC_ROLLBACK re-finds it (found=1) on the leader.  That test parks
+	 * on the next record after arming, so it arms match-all with
+	 * pg_stopevent_set('replay_on_record', 'true').
+	 *
+	 * The record's type and, for a sys tree, the tree it is about to switch
+	 * to are pushed as params, which is what lets a test park at a chosen
+	 * point inside a DDL's replay -- '$.type == "RELATION" && $.systree == 2'
+	 * stops just before the O_TABLES modifies, with the O_INDICES ones for
+	 * the same statement already applied.  Runtime-gated by
+	 * orioledb.enable_stopevents (off in production).
 	 */
-	STOPEVENT(STOPEVENT_REPLAY_ON_RECORD, NULL);
+	if (STOPEVENTS_ENABLED())
+	{
+		Jsonb	   *params = replay_record_stopevent_params(rec);
+
+		STOPEVENT(STOPEVENT_REPLAY_ON_RECORD, params);
+	}
 
 	switch (rec->type)
 	{
