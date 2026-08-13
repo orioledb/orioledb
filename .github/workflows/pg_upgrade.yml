@@ -9,13 +9,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cpu: [amd64, arm64]
-        compiler: [clang, gcc]
-        # Which major version we migrate from -> to.
+        # Churn harness (churn-pgupgrade-1032): the only cell that has ever hung is
+        # arm64/clang/17->18, so run just that one, many times over, to
+        # measure how often it does.  replica only makes the entries distinct.
+        cpu: [arm64]
+        compiler: [clang]
         version:
-          - { old: 16, new: 17 }
-          - { old: 16, new: 18 }
           - { old: 17, new: 18 }
+        replica: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     runs-on: ${{ matrix.cpu == 'arm64' && 'blacksmith-8vcpu-ubuntu-2404-arm' || 'blacksmith-8vcpu-ubuntu-2404' }}
 
@@ -77,7 +78,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.version.old }}_to_${{ matrix.version.new }}_pg_upgrade.logs
+          name: ${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.version.old }}_to_${{ matrix.version.new }}_r${{ matrix.replica }}_pg_upgrade.logs
           path: |
             ./pg${{ matrix.version.old }}.log
             ./pg${{ matrix.version.new }}.log
