@@ -1133,6 +1133,18 @@ o_index_chunk_cmp(BTreeDescr *desc,
 	if (key1->oids.relnode != key2->oids.relnode)
 		return (key1->oids.relnode < key2->oids.relnode) ? -1 : 1;
 
+	/*
+	 * Relation OID below relnode, above chunknum.  Relfilenumbers are reused,
+	 * so (datoid, spcoid, relnode) does not identify a relation: without this
+	 * a lookup for one index resolves to another index's record that happens
+	 * to sit on the reused relnode, and the caller cannot tell -- the fetch
+	 * callback's reloid check hands the foreign tuple back rather than
+	 * rejecting it.  Keeping reloid below relnode preserves the relnode-major
+	 * ordering that oIndicesGetNextKey() and o_indices_foreach_oids() walk.
+	 */
+	if (key1->oids.reloid != key2->oids.reloid)
+		return (key1->oids.reloid < key2->oids.reloid) ? -1 : 1;
+
 	if (key1->chunknum != key2->chunknum)
 		return (key1->chunknum < key2->chunknum) ? -1 : 1;
 

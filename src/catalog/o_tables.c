@@ -1266,6 +1266,7 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 				i = 0,
 				j = 0;
 	bool		reuse_relnode = false;
+	Oid			reuse_old_reloid = InvalidOid;
 
 	old_keys = o_table_make_index_oids_keys(old_table, &old_keys_num);
 	new_keys = o_table_make_index_oids_keys(new_table, &new_keys_num);
@@ -1297,7 +1298,16 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 					 old_keys[i].oids.reloid != new_keys[j].oids.reloid &&
 					 old_keys[i].oids.relnode == new_keys[j].oids.relnode)
 			{
+				/*
+				 * The same index tree under a freshly created pg_class entry:
+				 * ALTER TABLE reuses the relfilenumber and only the reloid
+				 * changes.  There is nothing to drop and nothing to build,
+				 * but the OIndex record is keyed by the index OIDs, so it
+				 * still has to follow the new reloid -- see the add branch
+				 * below.
+				 */
 				reuse_relnode = true;
+				reuse_old_reloid = old_keys[i].oids.reloid;
 			}
 		}
 
@@ -1345,7 +1355,21 @@ o_tables_oids_indexes(OTable *old_table, OTable *new_table,
 									   oxid, csn);
 				Assert(result);
 			}
+			else
+			{
+				elog(DEBUG2, "o_indices rekey (%u, %u, %u, %u) from reloid %u",
+					 new_keys[j].type,
+					 new_keys[j].oids.datoid,
+					 new_keys[j].oids.reloid,
+					 new_keys[j].oids.relnode,
+					 reuse_old_reloid);
+
+				result = o_indices_rekey(new_table, new_keys[j].ixNum,
+										 reuse_old_reloid, oxid, csn);
+				Assert(result);
+			}
 			reuse_relnode = false;
+			reuse_old_reloid = InvalidOid;
 			j++;
 		}
 	}

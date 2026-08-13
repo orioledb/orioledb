@@ -90,7 +90,20 @@ oIndicesGetNextKey(void *key, void *arg)
 	static OIndexChunkKey nextKey;
 
 	nextKey = *ckey;
-	nextKey.oids.relnode++;
+
+	/*
+	 * The end bound of one record's chunk range.  reloid sorts directly under
+	 * relnode (see o_index_chunk_cmp()), so bumping it lands just past this
+	 * record's last chunk; bounding by relnode instead would take in the
+	 * records of any other index sitting on the same reused relnode.
+	 */
+	if (nextKey.oids.reloid != OID_MAX)
+		nextKey.oids.reloid++;
+	else
+	{
+		nextKey.oids.reloid = 0;
+		nextKey.oids.relnode++;
+	}
 	nextKey.chunknum = 0;
 
 	return &nextKey;
@@ -1883,6 +1896,74 @@ o_indices_move(OTable *table, OIndexNumber ixNum, Oid old_tablespace,
 }
 
 /*
+ * Re-key an OIndex chunk from old_reloid to the reloid currently set on the
+ * table's ixNum entry (used when ALTER TABLE reuses an existing index tree
+ * under a freshly created pg_class entry).
+ *
+ * The reloid is part of OIndexChunkKey, so leaving the record under the old
+ * one strands it: every later lookup names the new reloid, and only finds the
+ * record because the key comparator does not separate two rows that share
+ * (datoid, spcoid, relnode).  That is precisely the aliasing a reused
+ * relfilenumber turns into reading another relation's metadata.  Delete the
+ * old-reloid-keyed chunk and insert a new-reloid-keyed one instead,
+ * preserving createOxid the way o_indices_move() does for tablespaces.
+ *
+ * Unlike o_indices_move(), this runs from inside o_tables_update(), next to
+ * o_indices_add()/o_indices_del() and, like them, under the caller's
+ * systrees_modify_start().
+ */
+bool
+o_indices_rekey(OTable *table, OIndexNumber ixNum, Oid old_reloid,
+				OXid oxid, CommitSeqNo csn)
+{
+	OIndex	   *oIndex;
+	OIndex	   *oIndexOld;
+	OIndexChunkKey oldKey;
+	OIndexChunkKey newKey;
+	bool		result;
+	bool		wal = table->persistence != RELPERSISTENCE_TEMP;
+	Pointer		data;
+	int			len;
+	BTreeDescr *sys_tree;
+
+	/* `table` already carries the destination reloid */
+	oIndex = make_o_index(table, ixNum, OIndexVersionPass);
+	Assert(oIndex->indexOids.reloid != old_reloid);
+
+	oldKey.oids = oIndex->indexOids;
+	oldKey.oids.reloid = old_reloid;
+	oldKey.type = oIndex->indexType;
+	oldKey.chunknum = 0;
+	oldKey.version = oIndex->indexVersion;
+
+	oIndexOld = o_indices_get_extended(oldKey.oids, oIndex->indexType,
+									   default_table_fetch_context);
+	if (oIndexOld)
+	{
+		oIndex->createOxid = oIndexOld->createOxid;
+		free_o_index(oIndexOld);
+	}
+	data = serialize_o_index(oIndex, &len);
+
+	newKey = oldKey;
+	newKey.oids.reloid = oIndex->indexOids.reloid;
+
+	free_o_index(oIndex);
+
+	sys_tree = get_sys_tree(SYS_TREES_O_INDICES);
+	(void) generic_toast_delete_optional_wal(&oIndicesToastAPI,
+											 (Pointer) &oldKey, oxid, csn,
+											 sys_tree, wal);
+	result = generic_toast_insert_optional_wal(&oIndicesToastAPI,
+											   (Pointer) &newKey, data, len,
+											   oxid, csn, sys_tree, wal);
+
+	pfree(data);
+
+	return result;
+}
+
+/*
  * This method is used by o_tables_get_by_tree only, which is unused
  */
 bool
@@ -1968,12 +2049,18 @@ o_indices_foreach_oids(OIndexOidsCallback callback, void *arg)
 		btree_iterator_free(it);
 
 		/*
-		 * Advance to the next tree.  tablespace sorts above relnode, so
-		 * bumping relnode within the current tablespace lands on the next
-		 * tree (a higher relnode in this tablespace, or the first tree of the
-		 * next tablespace).
+		 * Advance to the next tree.  reloid sorts directly under relnode and
+		 * tablespace above it, so bumping reloid lands on the next record:
+		 * another index on this same (reused) relnode, else a higher relnode
+		 * in this tablespace, else the first tree of the next tablespace.
 		 */
-		oids.relnode += 1;
+		if (oids.reloid != OID_MAX)
+			oids.reloid += 1;
+		else
+		{
+			oids.reloid = 0;
+			oids.relnode += 1;
+		}
 		chunkKey.oids = oids;
 		chunkKey.type = type;
 		chunkKey.chunknum = 0;

@@ -124,6 +124,8 @@ extern bool o_indices_update(OTable *table, OIndexNumber ixNum,
 							 OXid oxid, CommitSeqNo csn);
 extern bool o_indices_move(OTable *table, OIndexNumber ixNum,
 						   Oid old_tablespace, OXid oxid, CommitSeqNo csn);
+extern bool o_indices_rekey(OTable *table, OIndexNumber ixNum,
+							Oid old_reloid, OXid oxid, CommitSeqNo csn);
 extern bool o_indices_find_table_oids(ORelOids indexOids, OIndexType type,
 									  OSnapshot *oSnapshot,
 									  ORelOids *tableOids);
