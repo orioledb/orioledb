@@ -993,6 +993,7 @@ o_tupdesc_fields_start(OTable *o_table)
 	return fields_start;
 }
 
+#ifdef USE_ASSERT_CHECKING
 /*
  * Does this leaf tuple descriptor describe exactly the fields of *o_table?
  *
@@ -1000,11 +1001,11 @@ o_tupdesc_fields_start(OTable *o_table)
  * OTable record.  o_tupdesc_load_constr() reads the two together -- it sizes
  * missing[] from the OTable and copies each Datum by the OTable's
  * byval/typlen, while FreeTupleDesc() later frees it by the descriptor's --
- * so they have to be the same incarnation of the relation.  This is what
- * "the same incarnation" means, and callers that cannot guarantee it (see
- * o_index_fill_descr()) must ask before loading the constraints.
+ * so they have to be the same incarnation of the relation.  Callers establish
+ * that from the index incarnation version (see o_index_fill_descr()); this is
+ * what it buys them, and what the assertion below spells out.
  */
-bool
+static bool
 o_tupdesc_matches_o_table(TupleDesc tupdesc, OTable *o_table)
 {
 	int			fields_start = o_tupdesc_fields_start(o_table);
@@ -1024,6 +1025,7 @@ o_tupdesc_matches_o_table(TupleDesc tupdesc, OTable *o_table)
 
 	return true;
 }
+#endif							/* USE_ASSERT_CHECKING */
 
 void
 o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
@@ -1046,10 +1048,11 @@ o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 	 * i)->attbyval. So the array we build here must cover natts exactly, and
 	 * entry i must describe attribute i.  Both hold only while the OTable we
 	 * were handed and the OIndex that produced this tupdesc are the same
-	 * incarnation of the relation -- which is o_tupdesc_matches_o_table(),
-	 * and which o_index_fill_descr() checks for the callers that can catch a
-	 * DDL mid-update.  If they ever diverge the mismatch is silent here and
-	 * only surfaces much later, as a pfree() of a bogus pointer inside
+	 * incarnation of the relation -- which o_index_fill_descr() establishes
+	 * from the index incarnation version before it calls us, and which
+	 * o_tupdesc_matches_o_table() states in terms of the two records
+	 * themselves.  If they ever diverge the mismatch is silent here and only
+	 * surfaces much later, as a pfree() of a bogus pointer inside
 	 * FreeTupleDesc().
 	 */
 	Assert(o_tupdesc_matches_o_table(tupdesc, o_table));

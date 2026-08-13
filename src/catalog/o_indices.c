@@ -1403,8 +1403,19 @@ o_index_fill_descr(OIndexDescr *descr, OIndex *oIndex, void *o_table_source, OTa
 			 * the OIndex alone, so build that much and mark the descriptor
 			 * invalid: nobody gets handed it again, and the next fetch
 			 * re-reads a settled pair.
+			 *
+			 * The index incarnation version says whether the pair is whole.
+			 * make_primary_o_index()/make_ctid_o_index() stamp the new OIndex
+			 * and the OTable's primary_ixversion with the same value, and
+			 * every o_indices_update() call site writes the OTable right
+			 * after, so the two rows carry equal versions once both writes
+			 * have landed and unequal ones for exactly the window in between.
+			 * A caller that supplies the OTable it holds fetched the OIndex
+			 * by that same version (see o_table_descr_fill_indices()) and
+			 * oIndicesFetchCallback() returns only an exact version match, so
+			 * the equality holds there by construction.
 			 */
-			if (o_tupdesc_matches_o_table(descr->leafTupdesc, oTable))
+			if (descr->version == oTable->primary_ixversion)
 			{
 				o_tupdesc_load_constr(descr->leafTupdesc, oTable, descr);
 				primary_init_nfields = palloc(sizeof(*primary_init_nfields));
