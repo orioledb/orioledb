@@ -977,6 +977,54 @@ o_table_fields_make_tupdesc(OTableField *fields, int nfields)
 	return tupdesc;
 }
 
+/*
+ * Where in a leaf tuple descriptor the OTable's own fields begin: after the
+ * synthetic ctid field of a table without a primary key, and after the bridge
+ * ctid field of a table with a bridged index.
+ */
+static inline int
+o_tupdesc_fields_start(OTable *o_table)
+{
+	int			fields_start = o_table->has_primary ? 0 : 1;
+
+	if (o_table->index_bridging)
+		fields_start++;
+
+	return fields_start;
+}
+
+/*
+ * Does this leaf tuple descriptor describe exactly the fields of *o_table?
+ *
+ * The descriptor is built from an OIndex record and the constraints from an
+ * OTable record.  o_tupdesc_load_constr() reads the two together -- it sizes
+ * missing[] from the OTable and copies each Datum by the OTable's
+ * byval/typlen, while FreeTupleDesc() later frees it by the descriptor's --
+ * so they have to be the same incarnation of the relation.  This is what
+ * "the same incarnation" means, and callers that cannot guarantee it (see
+ * o_index_fill_descr()) must ask before loading the constraints.
+ */
+bool
+o_tupdesc_matches_o_table(TupleDesc tupdesc, OTable *o_table)
+{
+	int			fields_start = o_tupdesc_fields_start(o_table);
+	int			i;
+
+	if (tupdesc->natts != o_table->nfields + fields_start)
+		return false;
+
+	for (i = 0; i < o_table->nfields; i++)
+	{
+		Form_pg_attribute att = TupleDescAttr(tupdesc, i + fields_start);
+		OTableField *field = &o_table->fields[i];
+
+		if (att->attbyval != field->byval || att->attlen != field->typlen)
+			return false;
+	}
+
+	return true;
+}
+
 void
 o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 {
@@ -988,10 +1036,7 @@ o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 
 	idx_cxt = OGetIndexContext(descr);
 	oldcxt = MemoryContextSwitchTo(idx_cxt);
-	fields_start = o_table->has_primary ? 0 : 1;
-
-	if (o_table->index_bridging)
-		fields_start++;
+	fields_start = o_tupdesc_fields_start(o_table);
 
 	all_attrs += fields_start;
 
@@ -1001,11 +1046,13 @@ o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table, OIndexDescr *descr)
 	 * i)->attbyval. So the array we build here must cover natts exactly, and
 	 * entry i must describe attribute i.  Both hold only while the OTable we
 	 * were handed and the OIndex that produced this tupdesc are the same
-	 * incarnation of the relation -- see the version check in
-	 * o_index_fill_descr().  If they ever diverge the mismatch is silent here
-	 * and only surfaces much later, as a pfree() of a bogus pointer inside
+	 * incarnation of the relation -- which is o_tupdesc_matches_o_table(),
+	 * and which o_index_fill_descr() checks for the callers that can catch a
+	 * DDL mid-update.  If they ever diverge the mismatch is silent here and
+	 * only surfaces much later, as a pfree() of a bogus pointer inside
 	 * FreeTupleDesc().
 	 */
+	Assert(o_tupdesc_matches_o_table(tupdesc, o_table));
 	Assert(tupdesc->natts == all_attrs);
 
 	tupdesc->constr = (TupleConstr *) palloc0(sizeof(TupleConstr));

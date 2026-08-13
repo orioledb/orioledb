@@ -299,6 +299,7 @@ extern Datum o_eval_default(OTable *o_table, Relation rel,
 extern void o_table_resize_constr(OTable *o_table);
 extern void o_table_fill_constr(OTable *o_table, Relation rel, int fieldnum,
 								OTableField *old_field, OTableField *field);
+extern bool o_tupdesc_matches_o_table(TupleDesc tupdesc, OTable *o_table);
 extern void o_tupdesc_load_constr(TupleDesc tupdesc, OTable *o_table,
 								  OIndexDescr *descr);
 extern char *o_get_type_name(Oid typid, int32 typmod);
