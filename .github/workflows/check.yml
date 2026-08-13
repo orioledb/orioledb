@@ -69,20 +69,52 @@ jobs:
               ("amd64", 18, "clang"),
           ]
 
-          if event_name == "pull_request":
-              with open(os.environ["GITHUB_EVENT_PATH"]) as f:
-                  pr_event = json.load(f)
-              head_repo = pr_event["pull_request"]["head"]["repo"]["full_name"]
-              base_repo = pr_event["pull_request"]["base"]["repo"]["full_name"]
-              # Fork PRs get the full matrix; same-repo PRs get the complementary set
-              combos = full_combos if head_repo != base_repo else pr_combos
-          elif ref == "main":
-              combos = full_combos
+          if ref == "churn-descr-torn-pair":
+              # Churn run for the torn OIndex/OTable pair fix (PR #1032).
+              #
+              # pg_tests is the cell the standby restartpoint assert appeared
+              # in (arm64/PG18), and the only one that runs a standby at all,
+              # so it gets the bulk: 8 replicas x 2 cpu x 2 compiler.
+              #
+              # The same PR reorders the O_INDICES key (reloid now sorts under
+              # relnode), so two more cells matter.  check_page runs the whole
+              # suite with CHECK_PAGE_STRUCT, which is what would catch a
+              # sys-tree walk or chunk range gone wrong; dm_log_writes replays
+              # against every crash point, which is where a re-keyed record
+              # that recovery applies out of order would show up.  It needs a
+              # kernel module the arm64 runners lack, hence amd64 only.
+              matrix = {"include": [
+                  {"cpu": cpu, "pg_version": 18, "compiler": comp,
+                   "check_type": "pg_tests", "replica": r}
+                  for cpu in ("amd64", "arm64")
+                  for comp in ("clang", "gcc")
+                  for r in range(1, 9)
+              ] + [
+                  {"cpu": cpu, "pg_version": 18, "compiler": "clang",
+                   "check_type": "check_page", "replica": r}
+                  for cpu in ("amd64", "arm64")
+                  for r in range(1, 5)
+              ] + [
+                  {"cpu": "amd64", "pg_version": 18, "compiler": "clang",
+                   "check_type": "dm_log_writes", "replica": r}
+                  for r in range(1, 5)
+              ]}
           else:
-              combos = branch_combos
+              if event_name == "pull_request":
+                  with open(os.environ["GITHUB_EVENT_PATH"]) as f:
+                      pr_event = json.load(f)
+                  head_repo = pr_event["pull_request"]["head"]["repo"]["full_name"]
+                  base_repo = pr_event["pull_request"]["base"]["repo"]["full_name"]
+                  # Fork PRs get the full matrix; same-repo PRs get the complementary set
+                  combos = full_combos if head_repo != base_repo else pr_combos
+              elif ref == "main":
+                  combos = full_combos
+              else:
+                  combos = branch_combos
+              matrix = make_matrix(combos)
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"matrix={json.dumps(make_matrix(combos))}\n")
+              f.write(f"matrix={json.dumps(matrix)}\n")
 
   check:
     needs: matrix
@@ -125,6 +157,13 @@ jobs:
       - name: Install post build prerequisites
         run: bash ./orioledb/ci/post_build_prerequisites.sh
 
+      - name: Start hang watchdog
+        if: ${{ matrix.check_type == 'pg_tests' }}
+        run: |
+          nohup bash ./orioledb/ci/hang_watchdog.sh > /tmp/hang_watchdog.log 2>&1 &
+          disown || true
+          echo "hang watchdog launched (pid $!)"
+
       - name: Check
         timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 150 || (matrix.check_type == 'dm_log_writes' && 60 || (matrix.check_type == 'sanitize' && 40 || 30)) }}
         run: bash ./orioledb/ci/check.sh
@@ -137,7 +176,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_test.diffs
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_test.diffs${{ matrix.replica && format('_r{0}', matrix.replica) || '' }}
           path: |
             ./orioledb/test/**/regression.diffs
             ./orioledb/test/**/isolation_filtered.diffs
@@ -151,7 +190,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_test.logs
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_test.logs${{ matrix.replica && format('_r{0}', matrix.replica) || '' }}
           path: |
             ./orioledb/test/tmp_check_t/*/logs/*log
             ./orioledb/test/tmp_check/log/*log
