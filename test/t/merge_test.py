@@ -377,6 +377,57 @@ class MergeTest(BaseTest):
 		    node.execute("SELECT orioledb_tbl_check('o_split_conc'::regclass)")
 		    [0][0])
 
+	def test_split_diff_backward_scan_across_split(self):
+		"""
+		A backward ordered scan must not lose rows to a split under it.
+
+		A cursor holds the scan in flight between two FETCHes, so the split
+		lands at an exactly reproducible point rather than by timing.  While
+		the scan is parked, interleaved keys split every leaf under it, twice
+		over: the leaf the scan is standing on ends up as the right half of one
+		split whose own history is another split.
+
+		Both halves of a differential split image (UndoPageImageSplitDiff) keep
+		their own narrow contents but their undo chains converge on the same
+		older history.  A backward step that identified a historical image by
+		where its chain stopped therefore could not tell the two halves apart,
+		took the left one for already covered, and stepped past it -- dropping
+		every row on it.  Issue #1036.
+		"""
+		node = self.node
+		node.safe_psql(
+		    'postgres', "CREATE TABLE IF NOT EXISTS o_backscan ("
+		    "    id int NOT NULL,"
+		    "    payload text NOT NULL,"
+		    "    PRIMARY KEY (id)"
+		    ") USING orioledb;"
+		    "TRUNCATE o_backscan;")
+		node.execute("INSERT INTO o_backscan "
+		             "(SELECT id * 2, repeat('x', 100) "
+		             "FROM generate_series(1, 2000) id);")
+
+		con = node.connect()
+		try:
+			con.begin()
+			con.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+			con.execute("SET enable_seqscan = off;")
+			con.execute("SET enable_bitmapscan = off;")
+			con.execute("DECLARE c NO SCROLL CURSOR FOR "
+			            "SELECT id FROM o_backscan ORDER BY id DESC;")
+			# Park the scan a few leaves in, still far from the low keys.
+			got = [r[0] for r in con.execute("FETCH 100 FROM c;")]
+
+			# Split every leaf under the parked scan.
+			node.execute("INSERT INTO o_backscan "
+			             "(SELECT id * 2 - 1, repeat('y', 100) "
+			             "FROM generate_series(1, 2000) id);")
+
+			got += [r[0] for r in con.execute("FETCH ALL FROM c;")]
+			self.assertEqual(got, [i * 2 for i in range(2000, 0, -1)])
+		finally:
+			con.rollback()
+			con.close()
+
 	def test_split_diff_update_grow(self):
 		"""
 		A single UPDATE that grows every row, forcing in-statement page splits
