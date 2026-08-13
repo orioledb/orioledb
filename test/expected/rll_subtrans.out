@@ -44,3 +44,45 @@ val_1|val_2
 
 step commit_1: COMMIT;
 step commit_2: COMMIT;
+
+starting permutation: lock_1 savepoint_g insert_g update_2 rollback_g commit_1 commit_2 select_2_all
+step lock_1: SELECT * FROM o_test_1 WHERE val_1 = 1 FOR UPDATE;
+val_1|val_2
+-----+-----
+    1|    1
+(1 row)
+
+step savepoint_g: SAVEPOINT g;
+step insert_g: INSERT INTO o_test_1 VALUES (2, 2);
+step update_2: UPDATE o_test_1 SET val_2 = 100 WHERE val_1 = 1; <waiting ...>
+step rollback_g: ROLLBACK TO g;
+step commit_1: COMMIT;
+step update_2: <... completed>
+step commit_2: COMMIT;
+step select_2_all: SELECT * FROM o_test_1 ORDER BY val_1;
+val_1|val_2
+-----+-----
+    1|  100
+(1 row)
+
+
+starting permutation: lock_1 savepoint_g insert_g upsert_2 rollback_g commit_1 commit_2 select_2_all
+step lock_1: SELECT * FROM o_test_1 WHERE val_1 = 1 FOR UPDATE;
+val_1|val_2
+-----+-----
+    1|    1
+(1 row)
+
+step savepoint_g: SAVEPOINT g;
+step insert_g: INSERT INTO o_test_1 VALUES (2, 2);
+step upsert_2: INSERT INTO o_test_1 VALUES (1, 5) ON CONFLICT (val_1) DO UPDATE SET val_2 = o_test_1.val_2 + 1; <waiting ...>
+step rollback_g: ROLLBACK TO g;
+step commit_1: COMMIT;
+step upsert_2: <... completed>
+step commit_2: COMMIT;
+step select_2_all: SELECT * FROM o_test_1 ORDER BY val_1;
+val_1|val_2
+-----+-----
+    1|    2
+(1 row)
+
