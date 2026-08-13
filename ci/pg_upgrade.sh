@@ -77,12 +77,51 @@ dump_cores_on_exit() {
 }
 trap dump_cores_on_exit EXIT
 
+
+# ----------------------------------------------------------------------
+# Churn harness: a hung shutdown otherwise shows up as nothing but a step
+# timeout.  Bound every stop and, if one does not finish, dump what the
+# cluster is doing -- process states, pg_stat_activity, and a backtrace of
+# every postgres process -- before failing.
+# ----------------------------------------------------------------------
+dump_stuck_cluster() {		# port
+	local port=$1 p
+	echo "======== SHUTDOWN HANG: cluster state ========"
+	ps -eLo pid,ppid,stat,wchan:32,etimes,cmd | grep -E '[p]ostgres|[p]g_ctl' || true
+	echo "======== pg_stat_activity ========"
+	timeout 30 "$NEW_PREFIX/bin/psql" -p "$port" -d postgres -c \
+		"SELECT pid, backend_type, state, wait_event_type, wait_event, xact_start, query FROM pg_stat_activity" || true
+	echo "======== backtraces ========"
+	for p in $(pgrep -f "[p]ostgres" || true); do
+		echo "-------- pid $p: $(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null) --------"
+		cat /proc/$p/stack 2>/dev/null || true
+		sudo timeout 60 gdb -p "$p" --batch -ex 'thread apply all bt' 2>/dev/null | tail -60 || true
+	done
+	echo "======== tail of the server log ========"
+	tail -50 "$GITHUB_WORKSPACE/pg${NEW_VERSION}.log" || true
+	echo "======== end of cluster state ========"
+}
+
+stop_or_dump() {		# datadir mode port label
+	local data=$1 mode=$2 port=$3 label=${4:-}
+	if ! timeout 300 "$NEW_PREFIX/bin/pg_ctl" -D "$data" -m "$mode" -w stop; then
+		echo "ERROR: pg_ctl -m $mode stop did not finish within 300s ($label)"
+		dump_stuck_cluster "$port"
+		exit 1
+	fi
+}
+
 write_pg_conf() {
 	local data=$1
 	cat >> "$data/postgresql.conf" <<EOF
 wal_level = logical
 shared_preload_libraries = 'orioledb'
 default_table_access_method = 'orioledb'
+# Churn harness: the hang under investigation had a *timed* checkpoint in
+# flight when the fast shutdown arrived.  30s is the minimum, so one is
+# almost always running.
+checkpoint_timeout = 30s
+log_checkpoints = on
 EOF
 }
 
@@ -589,7 +628,25 @@ fi
 		echo "[WARN] some installcheck-oriole tests failed on the upgraded cluster; continuing (diffs expected, crashes caught below)"
 )
 
-"$NEW_PREFIX/bin/pg_ctl" -D "$NEW_DATA" -m fast -w stop
+# ----------------------------------------------------------------------
+# Churn harness: take 12 fast shutdowns instead of one, each with a little
+# write load and a checkpoint in flight behind it, since the hang we are
+# after needs a checkpoint running when the stop arrives.
+# ----------------------------------------------------------------------
+for cycle in $(seq 1 12); do
+	echo "======== churn shutdown cycle $cycle ========"
+	timeout 120 "$NEW_PREFIX/bin/psql" -p $PORT_NEW -d "$TEST_DB" -v ON_ERROR_STOP=0 <<SQL || true
+INSERT INTO numbers SELECT i, 'v_' || i
+	FROM generate_series(2000000 + $cycle * 10000, 2000000 + $cycle * 10000 + 5000) i;
+INSERT INTO composite SELECT $cycle * 1000 + i / 100, i % 100, md5(i::text)
+	FROM generate_series(1, 3000) i;
+SQL
+	stop_or_dump "$NEW_DATA" fast $PORT_NEW "cycle $cycle"
+	"$NEW_PREFIX/bin/pg_ctl" -D "$NEW_DATA" \
+		-o "-p $PORT_NEW" -l "$GITHUB_WORKSPACE/pg${NEW_VERSION}.log" -w start
+done
+
+stop_or_dump "$NEW_DATA" fast $PORT_NEW final
 
 # ----------------------------------------------------------------------
 # 11. Fail if any backend dumped core at any point during the test.
