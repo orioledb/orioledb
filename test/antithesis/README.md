@@ -28,6 +28,7 @@ Build via `make build` (see details under Usage)
 |:--|:--|
 | [setup/s3](./config/setup/s3)  | additive; runs orioledb in s3 mode with local minio backend; not compatible with `setup/postgres`  |
 | [setup/postgres](./config/setup/postgres)  | replaces orioledb with stock postgres image for sanity checking compatible workloads |
+| [setup/postgres](./config/setup/patched-postgres)  | runs patched postgres with `default_table_access_method=heap`for sanity checking compatible workloads |
 | [workload/jepsen](./config/workload/jepsen)  | adds a jepsen client with append workload (RR is default)  |
 | [workload/jepsen-RR](./config/workload/jepsen-RR)  | configures jepsen in repeatable-read mode  |
 | [workload/jepsen-RC](./config/workload/jepsen-RC)  | configures jepsen in read committed mode  |

@@ -1,0 +1,5 @@
+services:
+  test.orioledb:
+    volumes:
+      # use orioledb-built and patched postgres, just turn off the orioledb table default
+      - "./config/setup/postgres/postgres.conf:/etc/postgresql/postgresql.conf:ro"
