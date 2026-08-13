@@ -1350,6 +1350,7 @@ _PG_init(void)
 	RegisterXactCallback(undo_xact_callback, NULL);
 	RegisterSubXactCallback(undo_subxact_callback, NULL);
 	get_xidless_commit_lsn_hook = orioledb_get_xidless_commit_lsn;
+	decoding_xid_status_hook = orioledb_logical_xid_status;
 	CacheRegisterUsercacheCallback(orioledb_usercache_hook, PointerGetDatum(NULL));
 	CheckPoint_hook = o_perform_checkpoint;
 	after_checkpoint_cleanup_hook = o_after_checkpoint_cleanup_hook;
