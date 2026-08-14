@@ -48,6 +48,7 @@
 #include "catalog/storage.h"
 #include "storage/smgr.h"
 #include "commands/defrem.h"
+#include "commands/tablespace.h"
 #include "executor/execExpr.h"
 #include "executor/functions.h"
 #include "funcapi.h"
@@ -57,6 +58,7 @@
 #include "parser/parse_relation.h"
 #include "pgstat.h"
 #include "postmaster/bgwriter.h"
+#include "storage/copydir.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"
@@ -67,6 +69,7 @@
 #include "utils/rel.h"
 #include "utils/ruleutils.h"
 #include "utils/syscache.h"
+#include "sys/stat.h"
 
 /*
  * Relation locks from recovery workers may conflict with PostgreSQL WAL locks
@@ -2834,4 +2837,226 @@ o_tables_meta_unlock_no_wal(void)
 		if (--recovery_num_o_tables_meta_locks == 0)
 			LWLockRelease(&checkpoint_state->oTablesMetaLock);
 	}
+}
+
+typedef struct
+{
+	OXid		oxid;
+	CommitSeqNo csn;
+	Oid			src_datoid;
+	Oid			dst_datoid;
+} OTablesCopyAllArg;
+
+typedef struct
+{
+	Oid			src_datoid;
+	List	   *tablespace;
+} OTablesCopyDatabaseFilesArg;
+
+static void
+o_tables_copy_database_files_collect_tablespace(ORelOids oids, void *arg)
+{
+	OTablesCopyDatabaseFilesArg *copy_arg = (OTablesCopyDatabaseFilesArg *) arg;
+	OTable	   *o_table;
+	Oid			tablespace;
+	int			i;
+
+	if (oids.datoid != copy_arg->src_datoid)
+		return;
+
+	o_table = o_tables_get(oids);
+	if (o_table == NULL)
+		return;
+
+	tablespace = OidIsValid(o_table->oids.spcoid) ? o_table->oids.spcoid : DEFAULTTABLESPACE_OID;
+	if (!list_member_oid(copy_arg->tablespace, tablespace))
+		copy_arg->tablespace = lappend_oid(copy_arg->tablespace, tablespace);
+
+	for (i = 0; i < o_table->nindices; i++)
+	{
+		tablespace = OidIsValid(o_table->indices[i].oids.spcoid) ? o_table->indices[i].oids.spcoid : DEFAULTTABLESPACE_OID;
+		if (!list_member_oid(copy_arg->tablespace, tablespace))
+			copy_arg->tablespace = lappend_oid(copy_arg->tablespace, tablespace);
+	}
+
+	o_table_free(o_table);
+}
+
+static void
+o_tables_copy_database_tablespace_files(Oid src_datoid, Oid dst_datoid, Oid tablespace)
+{
+	char	   *src_path = NULL;
+	char	   *dst_path = NULL;
+	char	   *dst_prefix = NULL;
+	struct stat st;
+
+	o_get_prefixes_for_tablespace(src_datoid, tablespace, NULL, &src_path);
+	o_get_prefixes_for_tablespace(dst_datoid, tablespace, &dst_prefix, &dst_path);
+
+	if (stat(src_path, &st) < 0 || !S_ISDIR(st.st_mode) || directory_is_empty(src_path))
+	{
+		pfree(src_path);
+		pfree(dst_path);
+		return;
+	}
+
+	if (stat(dst_path, &st) == 0)
+	{
+		if (!rmtree(dst_path, true))
+			elog(ERROR, "could not remove directory \"%s\": %m",
+				 dst_path);
+	}
+
+	o_verify_dir_exists_or_create(dst_prefix, NULL, NULL);
+	copydir(src_path, dst_path, false);
+
+	pfree(src_path);
+	pfree(dst_path);
+}
+
+typedef struct
+{
+	Oid			src_datoid;
+	Oid			dst_datoid;
+} OTablesCopyDatabaseChkpNumArg;
+
+static void
+o_tables_copy_database_chkp_num_callback(ORelOids oids, void *arg)
+{
+	OTablesCopyDatabaseChkpNumArg *chkp_arg = (OTablesCopyDatabaseChkpNumArg *) arg;
+	OTable	   *o_table;
+	OIndexKey  *trees;
+	int			numTrees;
+	int			i;
+
+	if (oids.datoid != chkp_arg->src_datoid)
+		return;
+
+	o_table = o_tables_get(oids);
+	if (o_table == NULL)
+		return;
+
+	trees = o_table_make_index_keys(o_table, &numTrees);
+	for (i = 0; i < numTrees; i++)
+	{
+		bool		found;
+		uint32		chkp_num;
+
+		chkp_num = o_get_latest_chkp_num(chkp_arg->src_datoid,
+										 trees[i].oids.relnode,
+										 trees[i].oids.spcoid,
+										 checkpoint_state->lastCheckpointNumber,
+										 &found);
+		if (found)
+		{
+			o_update_latest_chkp_num(chkp_arg->dst_datoid,
+									 trees[i].oids.relnode,
+									 trees[i].oids.spcoid,
+									 chkp_num);
+		}
+	}
+
+	pfree(trees);
+	o_table_free(o_table);
+}
+
+void
+o_tables_copy_database_files(Oid src_datoid, Oid dst_datoid)
+{
+	OTablesCopyDatabaseFilesArg arg;
+	OTablesCopyDatabaseChkpNumArg chkp_arg;
+	ListCell   *lc;
+
+	arg.src_datoid = src_datoid;
+	arg.tablespace = NIL;
+
+	o_tables_foreach_oids(o_tables_copy_database_files_collect_tablespace,
+						  &o_non_deleted_snapshot, &arg);
+
+	foreach(lc, arg.tablespace)
+		o_tables_copy_database_tablespace_files(src_datoid, dst_datoid, lfirst_oid(lc));
+
+	list_free(arg.tablespace);
+
+	chkp_arg.src_datoid = src_datoid;
+	chkp_arg.dst_datoid = dst_datoid;
+	o_tables_foreach_oids(o_tables_copy_database_chkp_num_callback,
+						  &o_non_deleted_snapshot, &chkp_arg);
+}
+
+void
+o_tables_cleanup_database_files(Oid src_datoid, Oid dst_datoid)
+{
+	OTablesCopyDatabaseFilesArg arg;
+	ListCell   *lc;
+
+	arg.src_datoid = src_datoid;
+	arg.tablespace = NIL;
+
+	o_tables_foreach_oids(o_tables_copy_database_files_collect_tablespace,
+						  &o_non_deleted_snapshot, &arg);
+
+	foreach(lc, arg.tablespace)
+	{
+		Oid			tablespaces = lfirst_oid(lc);
+		char	   *dst_path = NULL;
+
+		o_get_prefixes_for_tablespace(dst_datoid, tablespaces, NULL, &dst_path);
+		(void) rmtree(dst_path, true);
+		pfree(dst_path);
+	}
+
+	list_free(arg.tablespace);
+}
+
+static void
+o_tables_copy_all_callback(ORelOids oids, void *arg)
+{
+	OTable	   *o_table;
+	OTablesCopyAllArg *copy_arg = (OTablesCopyAllArg *) arg;
+
+	if (copy_arg->src_datoid != oids.datoid)
+		return;
+
+	o_table = o_tables_get(oids);
+	if (o_table)
+	{
+		OIndexKey  *trees;
+		int			numTrees;
+		int			i;
+		bool		is_temp;
+
+		o_table->oids.datoid = copy_arg->dst_datoid;
+		for (i = 0; i < o_table->nindices; i++)
+		{
+			o_table->indices[i].oids.datoid = copy_arg->dst_datoid;
+		}
+		if (ORelOidsIsValid(o_table->bridge_oids))
+			o_table->bridge_oids.datoid = copy_arg->dst_datoid;
+		if (ORelOidsIsValid(o_table->toast_oids))
+			o_table->toast_oids.datoid = copy_arg->dst_datoid;
+
+		trees = o_table_make_index_keys(o_table, &numTrees);
+
+		is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
+		add_undo_create_relnode(o_table->oids, trees, numTrees, !is_temp);
+		o_tables_add(o_table, copy_arg->oxid, copy_arg->csn);
+
+		pfree(trees);
+		o_table_free(o_table);
+	}
+}
+
+void
+o_tables_copy_all(OXid oxid, CommitSeqNo csn, Oid src_datoid, Oid dst_datoid)
+{
+	OTablesCopyAllArg arg;
+
+	arg.oxid = oxid;
+	arg.csn = csn;
+	arg.src_datoid = src_datoid;
+	arg.dst_datoid = dst_datoid;
+
+	o_tables_foreach_oids(o_tables_copy_all_callback,
+						  &o_non_deleted_snapshot, &arg);
 }

@@ -427,6 +427,9 @@ check_stopevent(int event_id, Jsonb *params)
 
 	Assert(event_id >= 0 && event_id < STOPEVENTS_COUNT);
 
+	if (!params)
+		params = make_empty_params();
+
 	if (event->enabled && check_stopevent_condition(event, params))
 		return true;
 

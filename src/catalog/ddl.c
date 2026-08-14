@@ -32,6 +32,7 @@
 #include "transam/undo.h"
 #include "tuple/slot.h"
 #include "utils/compress.h"
+#include "utils/stopevent.h"
 #include "recovery/wal.h"
 
 #include "access/genam.h"
@@ -122,6 +123,12 @@ typedef struct
 	Oid			dest_tsoid;		/* tablespace we are trying to move to */
 } movedb_params;
 
+typedef struct
+{
+	Oid			src_datoid;
+	Oid			dst_datoid;
+} createdb_params;
+
 static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static object_access_hook_type old_objectaccess_hook = NULL;
 
@@ -169,10 +176,12 @@ static void redefine_indices(Relation rel, OTable *new_o_table, bool primary,
 
 static bool get_db_info(const char *name, LOCKMODE lockmode, Oid *dbIdP);
 static Oid	o_createdb(ParseState *pstate, const CreatedbStmt *stmt);
+static void o_copy_orioledb_template(Oid src_dboid, Oid dst_dboid);
 static void o_validate_replica_identity(Relation rel, ReplicaIdentityStmt *stmt);
 static void o_process_added_column(AlterTableCmd *cmd);
 static void o_check_movedb(const AlterDatabaseStmt *stmt, movedb_params *movedb);
 static void o_movedb_failure_callback(int code, Datum arg);
+static void o_createdb_failure_callback(int code, Datum arg);
 
 void
 orioledb_setup_ddl_hooks(void)
@@ -4969,10 +4978,16 @@ o_createdb(ParseState *pstate, const CreatedbStmt *stmt)
 						dbtemplate)));
 
 	if (o_tables_num(src_dboid) > 0)
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("template database \"%s\" has OrioleDB tables",
-						dbtemplate)));
+	{
+		/*
+		 * Flush OrioleDB dirty data to disk before the file copy below.  The
+		 * companion WAL record makes standbys run the same checkpoint before
+		 * replaying DATABASE_CREATE_COPY, since PG's dbase_redo only flushes
+		 * its own shared buffers and leaves orioledb_data/ untouched.
+		 */
+		o_checkpoint_before_database_copy();
+		add_database_template_checkpoint_wal_record(src_dboid);
+	}
 
 	/*
 	 * Call standard PostgreSQL createdb().  It will create and copy
@@ -4983,11 +4998,50 @@ o_createdb(ParseState *pstate, const CreatedbStmt *stmt)
 	 */
 	result = createdb(pstate, stmt);
 
-	/*
-	 * Now we need to copy OrioleDB objects.
-	 */
+	o_copy_orioledb_template(src_dboid, result);
 
 	return result;
+}
+
+static void
+o_copy_orioledb_template(Oid src_dboid, Oid dst_dboid)
+{
+	if (o_tables_num(src_dboid) > 0)
+	{
+		OSnapshot	oSnapshot;
+		OXid		oxid = InvalidOXid;
+		createdb_params fparms;
+
+		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
+
+		fparms.src_datoid = src_dboid;
+		fparms.dst_datoid = dst_dboid;
+
+		PG_ENSURE_ERROR_CLEANUP(o_createdb_failure_callback,
+								PointerGetDatum(&fparms));
+		{
+			o_tables_table_meta_lock(NULL);
+			o_tables_copy_database_files(src_dboid, dst_dboid);
+
+			if (STOPEVENT_CONDITION(STOPEVENT_CREATEDB_COPY_FAIL, NULL))
+				elog(ERROR, "Debug condition: createdb copy failed.");
+
+			add_database_create_copy_wal_record(src_dboid, dst_dboid);
+			o_tables_copy_all(oxid, oSnapshot.csn, src_dboid, dst_dboid);
+			o_sys_caches_copy_datoid(src_dboid, dst_dboid);
+			o_tables_table_meta_unlock(NULL, InvalidOid);
+		}
+		PG_END_ENSURE_ERROR_CLEANUP(o_createdb_failure_callback,
+									PointerGetDatum(&fparms));
+	}
+}
+
+static void
+o_createdb_failure_callback(int code, Datum arg)
+{
+	createdb_params *fparms = (createdb_params *) DatumGetPointer(arg);
+
+	o_tables_cleanup_database_files(fparms->src_datoid, fparms->dst_datoid);
 }
 
 static void

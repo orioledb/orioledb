@@ -1097,6 +1097,8 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 		case WAL_REC_O_TABLES_META_UNLOCK:
 		case WAL_REC_TRUNCATE:
 		case WAL_REC_BRIDGE_ERASE:
+		case WAL_REC_DATABASE_CREATE_COPY:
+		case WAL_REC_DATABASE_TEMPLATE_CHECKPOINT:
 			/* Skip */
 			break;
 

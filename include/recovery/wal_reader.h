@@ -107,6 +107,12 @@ typedef struct WalRecord
 			Oid			dst_tblspc;
 		}			dbcopy;
 
+		struct
+		{
+			Oid			src_datoid;
+			Oid			dst_datoid;
+		}			dbcreate_copy;
+
 	}			u;
 
 } WalRecord;

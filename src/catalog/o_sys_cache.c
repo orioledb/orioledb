@@ -17,6 +17,7 @@
 #include "orioledb.h"
 
 #include "btree/btree.h"
+#include "btree/iterator.h"
 #include "btree/modify.h"
 #include "catalog/o_sys_cache.h"
 #include "catalog/sys_trees.h"
@@ -2762,4 +2763,93 @@ o_reset_syscache_hooks(void)
 {
 	o_sys_cache_hooks_depth = 1;
 	o_unset_syscache_hooks();
+}
+
+static void
+o_sys_cache_copy_tree(OSysCache *sys_cache, Oid src_datoid, Oid dst_datoid)
+{
+	BTreeIterator *it;
+	BTreeDescr *td = get_sys_tree(sys_cache->sys_tree_num);
+	XLogRecPtr	cur_lsn;
+
+	o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
+
+	it = o_btree_iterator_create(td, NULL, BTreeKeyNone, &o_non_deleted_snapshot, ForwardScanDirection);
+
+	do
+	{
+		bool		end;
+		OTuple		tup = btree_iterate_raw(it, NULL, BTreeKeyNone, false, &end, NULL);
+
+		if (O_TUPLE_IS_NULL(tup))
+		{
+			if (end)
+				break;
+			else
+				continue;
+		}
+
+		if (sys_cache->is_toast)
+		{
+			OSysCacheToastChunkKey *toast_key = (OSysCacheToastChunkKey *) tup.data;
+
+			if (toast_key->common.chunknum == 0)
+			{
+				OSysCacheKey *key = &toast_key->sys_cache_key;
+
+				if (key->common.datoid == src_datoid && !key->common.deleted)
+				{
+					int			key_len = offsetof(OSysCacheKey, keys) + sizeof(Datum) * sys_cache->nkeys + key->common.dataLength;
+					OSysCacheKey *dst_key = palloc(key_len);
+					Pointer		entry;
+
+					memcpy(dst_key, key, key_len);
+					dst_key->common.datoid = dst_datoid;
+					dst_key->common.lsn = cur_lsn;
+					dst_key->common.deleted = false;
+
+					entry = o_sys_cache_get_from_toast_tree(sys_cache, key);
+					if (entry != NULL)
+					{
+						(void) o_sys_cache_add(sys_cache, dst_key, entry);
+						sys_cache->funcs->free_entry(entry);
+					}
+					pfree(dst_key);
+				}
+			}
+		}
+		else
+		{
+			OSysCacheKey *key = (OSysCacheKey *) tup.data;
+
+			if (key->common.datoid == src_datoid && !key->common.deleted)
+			{
+				int			tup_len = o_btree_len(td, tup, OTupleLength);
+				Pointer		copy = palloc(tup_len);
+
+				memcpy(copy, tup.data, tup_len);
+				((OSysCacheKey *) copy)->common.datoid = dst_datoid;
+				((OSysCacheKey *) copy)->common.lsn = cur_lsn;
+				((OSysCacheKey *) copy)->common.deleted = false;
+				(void) o_sys_cache_add(sys_cache, (OSysCacheKey *) copy, copy);
+				pfree(copy);
+			}
+		}
+	} while (true);
+	btree_iterator_free(it);
+}
+
+void
+o_sys_caches_copy_datoid(Oid src_datoid, Oid dst_datoid)
+{
+	HASH_SEQ_STATUS hash_seq;
+	OCacheIdMapEntry *entry;
+	XLogRecPtr	cur_lsn;
+
+	o_sys_cache_set_datoid_lsn(&cur_lsn, NULL);
+	o_database_cache_add_if_needed(dst_datoid, dst_datoid, cur_lsn, NULL);
+
+	hash_seq_init(&hash_seq, sys_caches);
+	while ((entry = (OCacheIdMapEntry *) hash_seq_search(&hash_seq)) != NULL)
+		o_sys_cache_copy_tree(entry->sys_cache, src_datoid, dst_datoid);
 }

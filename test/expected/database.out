@@ -9,10 +9,9 @@ CREATE DATABASE orioledb_template;
 CREATE EXTENSION orioledb;
 CREATE TABLE oriole_table (i int) USING orioledb;
 \c postgres
--- This CREATE DATABASE should fail
 CREATE DATABASE orioledb TEMPLATE orioledb_template;
-ERROR:  template database "orioledb_template" has OrioleDB tables
 DROP DATABASE orioledb_template;
+DROP DATABASE orioledb;
 DROP DATABASE heapdb;
 DROP DATABASE heapdb_template;
 -- Check pg_database_size()

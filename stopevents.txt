@@ -37,3 +37,4 @@ undo_flush
 before_o_tables_meta_unlock
 merge_before_free_extent
 iterator_next
+createdb_copy_fail
