@@ -230,6 +230,8 @@ extern void add_savepoint_wal_record(SubTransactionId parentSubid,
 									 TransactionId prentLogicalXid);
 extern void add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid);
 extern void add_database_copy_wal_record(Oid dboid, Oid src_tblspc, Oid dst_tblspc);
+extern void add_database_create_copy_wal_record(Oid src_datoid, Oid dst_datoid);
+extern void add_database_template_checkpoint_wal_record(Oid src_datoid);
 extern bool local_wal_is_empty(void);
 extern XLogRecPtr flush_local_wal(bool isCommit, bool withXactTime);
 extern XLogRecPtr wal_commit(OXid oxid, TransactionId logicalXid,

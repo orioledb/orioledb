@@ -608,7 +608,7 @@ void
 add_database_template_checkpoint_wal_record(Oid src_datoid)
 {
 	WALRecDbCreateCopy *rec;
-	Oid					invalid_datoid = InvalidOid;
+	Oid			invalid_datoid = InvalidOid;
 
 	Assert(!is_recovery_process());
 	flush_local_wal_if_needed(sizeof(*rec));

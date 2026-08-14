@@ -123,7 +123,7 @@ typedef struct
 	Oid			dest_tsoid;		/* tablespace we are trying to move to */
 } movedb_params;
 
-typedef struct 
+typedef struct
 {
 	Oid			src_datoid;
 	Oid			dst_datoid;
@@ -4979,6 +4979,12 @@ o_createdb(ParseState *pstate, const CreatedbStmt *stmt)
 
 	if (o_tables_num(src_dboid) > 0)
 	{
+		/*
+		 * Flush OrioleDB dirty data to disk before the file copy below.  The
+		 * companion WAL record makes standbys run the same checkpoint before
+		 * replaying DATABASE_CREATE_COPY, since PG's dbase_redo only flushes
+		 * its own shared buffers and leaves orioledb_data/ untouched.
+		 */
 		o_checkpoint_before_database_copy();
 		add_database_template_checkpoint_wal_record(src_dboid);
 	}
@@ -5002,8 +5008,8 @@ o_copy_orioledb_template(Oid src_dboid, Oid dst_dboid)
 {
 	if (o_tables_num(src_dboid) > 0)
 	{
-		OSnapshot		oSnapshot;
-		OXid			oxid = InvalidOXid;
+		OSnapshot	oSnapshot;
+		OXid		oxid = InvalidOXid;
 		createdb_params fparms;
 
 		fill_current_oxid_osnapshot(&oxid, &oSnapshot);

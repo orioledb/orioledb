@@ -2799,21 +2799,21 @@ typedef struct
 
 typedef struct
 {
-	Oid		src_datoid;
-	List	*tablespace;
+	Oid			src_datoid;
+	List	   *tablespace;
 } OTablesCopyDatabaseFilesArg;
 
 static void
 o_tables_copy_database_files_collect_tablespace(ORelOids oids, void *arg)
 {
 	OTablesCopyDatabaseFilesArg *copy_arg = (OTablesCopyDatabaseFilesArg *) arg;
-	OTable	*o_table;
-	Oid		tablespace;
-	int		i;
+	OTable	   *o_table;
+	Oid			tablespace;
+	int			i;
 
 	if (oids.datoid != copy_arg->src_datoid)
 		return;
-	
+
 	o_table = o_tables_get(oids);
 	if (o_table == NULL)
 		return;
@@ -2835,9 +2835,9 @@ o_tables_copy_database_files_collect_tablespace(ORelOids oids, void *arg)
 static void
 o_tables_copy_database_tablespace_files(Oid src_datoid, Oid dst_datoid, Oid tablespace)
 {
-	char	*src_path = NULL;
-	char	*dst_path = NULL;
-	char	*dst_prefix = NULL;
+	char	   *src_path = NULL;
+	char	   *dst_path = NULL;
+	char	   *dst_prefix = NULL;
 	struct stat st;
 
 	o_get_prefixes_for_tablespace(src_datoid, tablespace, NULL, &src_path);
@@ -2866,18 +2866,18 @@ o_tables_copy_database_tablespace_files(Oid src_datoid, Oid dst_datoid, Oid tabl
 
 typedef struct
 {
-	Oid		src_datoid;
-	Oid		dst_datoid;
+	Oid			src_datoid;
+	Oid			dst_datoid;
 } OTablesCopyDatabaseChkpNumArg;
 
 static void
 o_tables_copy_database_chkp_num_callback(ORelOids oids, void *arg)
 {
 	OTablesCopyDatabaseChkpNumArg *chkp_arg = (OTablesCopyDatabaseChkpNumArg *) arg;
-	OTable		*o_table;
-	OIndexKey	*trees;
-	int 		 numTrees;
-	int 		 i;
+	OTable	   *o_table;
+	OIndexKey  *trees;
+	int			numTrees;
+	int			i;
 
 	if (oids.datoid != chkp_arg->src_datoid)
 		return;
@@ -2889,8 +2889,8 @@ o_tables_copy_database_chkp_num_callback(ORelOids oids, void *arg)
 	trees = o_table_make_index_keys(o_table, &numTrees);
 	for (i = 0; i < numTrees; i++)
 	{
-		bool 	found;
-		uint32 	chkp_num;
+		bool		found;
+		uint32		chkp_num;
 
 		chkp_num = o_get_latest_chkp_num(chkp_arg->src_datoid,
 										 trees[i].oids.relnode,
@@ -2900,7 +2900,7 @@ o_tables_copy_database_chkp_num_callback(ORelOids oids, void *arg)
 		if (found)
 		{
 			o_update_latest_chkp_num(chkp_arg->dst_datoid,
-									 trees[i].oids.relnode, 
+									 trees[i].oids.relnode,
 									 trees[i].oids.spcoid,
 									 chkp_num);
 		}
@@ -2915,7 +2915,7 @@ o_tables_copy_database_files(Oid src_datoid, Oid dst_datoid)
 {
 	OTablesCopyDatabaseFilesArg arg;
 	OTablesCopyDatabaseChkpNumArg chkp_arg;
-	ListCell	*lc;
+	ListCell   *lc;
 
 	arg.src_datoid = src_datoid;
 	arg.tablespace = NIL;
@@ -2938,7 +2938,7 @@ void
 o_tables_cleanup_database_files(Oid src_datoid, Oid dst_datoid)
 {
 	OTablesCopyDatabaseFilesArg arg;
-	ListCell	*lc;
+	ListCell   *lc;
 
 	arg.src_datoid = src_datoid;
 	arg.tablespace = NIL;
@@ -2948,8 +2948,8 @@ o_tables_cleanup_database_files(Oid src_datoid, Oid dst_datoid)
 
 	foreach(lc, arg.tablespace)
 	{
-		Oid	tablespaces = lfirst_oid(lc);
-		char *dst_path = NULL;
+		Oid			tablespaces = lfirst_oid(lc);
+		char	   *dst_path = NULL;
 
 		o_get_prefixes_for_tablespace(dst_datoid, tablespaces, NULL, &dst_path);
 		(void) rmtree(dst_path, true);
@@ -2962,19 +2962,19 @@ o_tables_cleanup_database_files(Oid src_datoid, Oid dst_datoid)
 static void
 o_tables_copy_all_callback(ORelOids oids, void *arg)
 {
+	OTable	   *o_table;
 	OTablesCopyAllArg *copy_arg = (OTablesCopyAllArg *) arg;
 
 	if (copy_arg->src_datoid != oids.datoid)
 		return;
 
-	OTable		*o_table;
 	o_table = o_tables_get(oids);
 	if (o_table)
 	{
-		OIndexKey	*trees;
-		int			 numTrees;
-		int			 i;
-		bool		 is_temp;
+		OIndexKey  *trees;
+		int			numTrees;
+		int			i;
+		bool		is_temp;
 
 		o_table->oids.datoid = copy_arg->dst_datoid;
 		for (i = 0; i < o_table->nindices; i++)
@@ -2987,11 +2987,11 @@ o_tables_copy_all_callback(ORelOids oids, void *arg)
 			o_table->toast_oids.datoid = copy_arg->dst_datoid;
 
 		trees = o_table_make_index_keys(o_table, &numTrees);
-		
+
 		is_temp = o_table->persistence == RELPERSISTENCE_TEMP;
 		add_undo_create_relnode(o_table->oids, trees, numTrees, !is_temp);
 		o_tables_add(o_table, copy_arg->oxid, copy_arg->csn);
-		
+
 		pfree(trees);
 		o_table_free(o_table);
 	}
