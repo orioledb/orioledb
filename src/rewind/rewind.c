@@ -202,6 +202,14 @@ orioledb_rewind_queue_age(PG_FUNCTION_ARGS)
 Datum
 orioledb_get_complete_oxid(PG_FUNCTION_ARGS)
 {
+	if (!enable_rewind)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("orioledb rewind mode is turned off")),
+				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
+	}
+
 	elog(DEBUG3, "COMPLETE OXid " UINT64_FORMAT " XID %u",
 		 rewindMeta->complete_oxid, rewindMeta->complete_xid);
 	PG_RETURN_DATUM(rewindMeta->complete_oxid);
@@ -211,6 +219,14 @@ orioledb_get_complete_oxid(PG_FUNCTION_ARGS)
 Datum
 orioledb_get_complete_xid(PG_FUNCTION_ARGS)
 {
+	if (!enable_rewind)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("orioledb rewind mode is turned off")),
+				errdetail("to use rewind set orioledb.enable_rewind = on in PostgreSQL config file."));
+	}
+
 	elog(DEBUG3, "COMPLETE Oxid " UINT64_FORMAT " XID %u",
 		 rewindMeta->complete_oxid, rewindMeta->complete_xid);
 	PG_RETURN_DATUM(rewindMeta->complete_xid);

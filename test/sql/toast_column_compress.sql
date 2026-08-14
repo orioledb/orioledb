@@ -156,6 +156,33 @@ INSERT INTO cmdata VALUES(1, repeat('1234567890', 266));
 SELECT length(f1) FROM cmdata WHERE a = 1;
 DROP TABLE cmdata;
 
+-- case 5: a value moved into the primary key.  The key has to be a plain datum
+-- -- it is compared against keys already in the tree, and its length is what
+-- the O_BTREE_MAX_TUPLE_SIZE check measures.  A value arriving still
+-- compressed measured as its compressed length, so an over-long key sailed
+-- past that check and only expanded later: with asserts it tripped
+-- Assert(!VARATT_IS_COMPRESSED(...)), and an external value reached
+-- "PANIC: not enough reserved undo".  An UPDATE must now be rejected exactly
+-- like the equivalent INSERT.
+CREATE TABLE cmpk(k text PRIMARY KEY, body text) USING orioledb;
+INSERT INTO cmpk VALUES ('a', repeat('compressible ', 500));
+-- should error: the key does not fit, same as the INSERT below
+UPDATE cmpk SET k = body;
+-- should error for the same reason
+INSERT INTO cmpk VALUES (repeat('compressible ', 500), 'x');
+-- an incompressible value is rejected too, rather than panicking on undo
+CREATE TABLE cmpk2(k text PRIMARY KEY, body text) USING orioledb;
+INSERT INTO cmpk2 VALUES ('a', (SELECT string_agg(md5(g::text), '')
+                                  FROM generate_series(1, 400) g));
+UPDATE cmpk2 SET k = body;
+-- a key that does fit still works
+CREATE TABLE cmpk3(k text PRIMARY KEY, body text) USING orioledb;
+INSERT INTO cmpk3 VALUES ('a', repeat('x', 2000));
+UPDATE cmpk3 SET k = body;
+SELECT length(k), k = body AS key_matches_body FROM cmpk3;
+SELECT orioledb_tbl_check('cmpk3'::regclass, true);
+DROP TABLE cmpk, cmpk2, cmpk3;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA toast_column_compress CASCADE;
 RESET search_path;
