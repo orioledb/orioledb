@@ -656,6 +656,69 @@ tts_orioledb_materialize(TupleTableSlot *slot)
 	}
 }
 
+/*
+ * Decompress/detoast the primary key attributes in place.
+ *
+ * Key attributes have to be plain values: they are compared against keys
+ * already in the tree, and their length is what O_BTREE_MAX_TUPLE_SIZE is
+ * checked against.  A value that arrives still compressed -- which is what
+ * happens when a statement moves one column into the key, as in
+ * "UPDATE t SET k = body" -- measures as its compressed length, so the tuple
+ * sails past the size check and only expands later, when the key is actually
+ * formed.  Expanding here makes the size the caller computes the real one.
+ */
+static void
+detoast_key_attrs(TupleTableSlot *slot, OTableDescr *descr)
+{
+	OTableSlot *oslot = (OTableSlot *) slot;
+	OIndexDescr *id = GET_PRIMARY(descr);
+	TupleDesc	tupleDesc = slot->tts_tupleDescriptor;
+	int			i;
+	int			ctid_off = id->primaryIsCtid ? 1 : 0;
+
+	if (id->bridging)
+		ctid_off++;
+
+	for (i = 0; i < id->nonLeafTupdesc->natts; i++)
+	{
+		int			attnum = id->tableAttnums[i];
+		int			attindex = attnum - 1 - ctid_off;
+		Form_pg_attribute att;
+		Datum		tmp;
+		MemoryContext mctx;
+
+		/* ctid and bridge ctid are not stored among the slot's values */
+		if (attindex < 0 || attindex >= tupleDesc->natts)
+			continue;
+
+		att = TupleDescAttr(tupleDesc, attindex);
+		if (slot->tts_isnull[attindex] || att->attlen != -1)
+			continue;
+
+		/*
+		 * Only compressed and external values need expanding.  NOT
+		 * VARATT_IS_EXTENDED(): that is also true of a short-header varlena,
+		 * and rewriting those into 4-byte form would change the layout of
+		 * every short key -- which shifted tuple sizes enough to alter
+		 * row-lock and serialization outcomes in the isolation suite.
+		 */
+		if (!VARATT_IS_COMPRESSED(slot->tts_values[attindex]) &&
+			!VARATT_IS_EXTERNAL(slot->tts_values[attindex]))
+			continue;
+
+		if (!oslot->vfree)
+			alloc_to_toast_vfree_detoasted(slot);
+
+		mctx = MemoryContextSwitchTo(slot->tts_mcxt);
+		tmp = PointerGetDatum(PG_DETOAST_DATUM(slot->tts_values[attindex]));
+		MemoryContextSwitchTo(mctx);
+		if (oslot->vfree[attindex])
+			pfree(DatumGetPointer(slot->tts_values[attindex]));
+		slot->tts_values[attindex] = tmp;
+		oslot->vfree[attindex] = true;
+	}
+}
+
 void
 tts_orioledb_detoast(TupleTableSlot *slot)
 {
@@ -1235,6 +1298,9 @@ tts_orioledb_toast(TupleTableSlot *slot, OTableDescr *descr)
 		ctid_off++;
 
 	slot_getallattrs(slot);
+
+	/* the size computed below must be the one the key really occupies */
+	detoast_key_attrs(slot, descr);
 
 	/* temporary, pointers to TupleDesc attributes */
 	natts = tupdesc->natts;
