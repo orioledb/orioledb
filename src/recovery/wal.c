@@ -228,6 +228,47 @@ add_local_modify(uint8 record_type, OTuple record1, OffsetNumber length1, OTuple
 	local_wal.has_material_changes = true;
 }
 
+/*
+ * Put the (oxid, heap xid) binding on the wire.
+ *
+ * A transaction that owns a heap xid writes no finish record of its own: its
+ * verdict reaches replay through the builtin commit record, and replay can
+ * only apply it to the oxid if some record carried the pair.  Two things
+ * normally carry it, and both can be absent at once:
+ *
+ *   - add_xid_wal_record() samples GetTopTransactionIdIfAny() when a
+ *     container's first record is buffered, so a transaction that acquires
+ *     its heap xid after its last OrioleDB change has every WAL_REC_XID
+ *     carrying InvalidTransactionId;
+ *   - wal_joint_commit() is gated on a logical xid, which a released
+ *     subtransaction hands back to a parent that may not have one.
+ *
+ * Replay then has an oxid whose changes it applies and whose verdict it never
+ * learns: recovery_finish() rolls those changes back while the builtin half
+ * of the transaction stays committed.  Emitting a bare WAL_REC_XID here --
+ * after the buffered changes, so the heap xid is sampled once it exists --
+ * closes that, and costs one small record only for transactions that would
+ * otherwise be unsettleable.
+ */
+void
+wal_bind_heap_xid(OXid oxid, TransactionId logicalXid)
+{
+	Assert(!is_recovery_process());
+	Assert(OXidIsValid(oxid));
+	Assert(TransactionIdIsValid(GetTopTransactionIdIfAny()));
+
+	/* nothing of ours will be replayed, so nothing needs settling */
+	if (!local_wal.has_material_changes)
+		return;
+
+	if (!local_wal_is_empty())
+		flush_local_wal(false, false);
+
+	Assert(local_wal_is_empty() && !local_wal.contains_xid);
+	add_xid_wal_record(oxid, logicalXid);
+	flush_local_wal(false, false);
+}
+
 XLogRecPtr
 wal_commit(OXid oxid, TransactionId logicalXid, bool isAutonomous)
 {

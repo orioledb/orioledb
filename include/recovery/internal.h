@@ -61,11 +61,14 @@ typedef enum
 	RecoveryMsgTypeLeaderParallelIndexBuild,
 	RecoveryMsgTypeWorkerParallelIndexBuild,
 	RecoveryMsgTypeInit,
-	RecoveryMsgTypeReinsert
+	RecoveryMsgTypeReinsert,
+	RecoveryMsgTypeBindHeapXid
 } RecoveryMsgType;
 
 #define RECOVERY_MODIFY_OXID (0x0100)
 #define RECOVERY_MODIFY_OIDS (0x0200)
+/* the oxid above rides on a heap xid, which follows it */
+#define RECOVERY_MODIFY_HEAP_XID (0x0400)
 
 #define RECOVERY_QUEUE_BUF_SIZE (8 * 1024)
 
@@ -88,6 +91,20 @@ typedef struct
 	RecoveryMsgHeader header;
 	XLogRecPtr	ptr;
 } RecoveryMsgPtr;
+
+/*
+ * Tells a worker which heap xid an oxid it already works on rides on.
+ *
+ * Sent only when the leader learns the binding after that worker has already
+ * been given modifies for the oxid; when it is known beforehand the binding
+ * travels on the modify message itself (RECOVERY_MODIFY_HEAP_XID).
+ */
+typedef struct
+{
+	RecoveryMsgHeader header;
+	OXid		oxid;
+	TransactionId xid;
+} RecoveryMsgBindXid;
 
 typedef struct
 {

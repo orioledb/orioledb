@@ -417,6 +417,22 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					memcpy(&oxid, data + data_pos, sizeof(OXid));
 					data_pos += sizeof(OXid);
 					recovery_switch_to_oxid(oxid, id);
+
+					if (recovery_header->type & RECOVERY_MODIFY_HEAP_XID)
+					{
+						TransactionId heapXid;
+
+						/*
+						 * Which heap xid this oxid rides on.  We need it
+						 * because such a transaction writes no OrioleDB
+						 * finish record: at the end of replay our
+						 * recovery_finish() reads its fate from the heap xid,
+						 * and without it we would undo changes it committed.
+						 */
+						memcpy(&heapXid, data + data_pos, sizeof(TransactionId));
+						data_pos += sizeof(TransactionId);
+						recovery_bind_heap_xid(oxid, heapXid, id);
+					}
 				}
 
 				if (recovery_header->type & RECOVERY_MODIFY_OIDS)
@@ -589,6 +605,14 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 				MemoryContextSwitchTo(prev_context);
 
 				data_pos += sizeof(RecoveryMsgWorkerIdxBuild);
+			}
+			else if (type == RecoveryMsgTypeBindHeapXid)
+			{
+				RecoveryMsgBindXid *bind;
+
+				bind = (RecoveryMsgBindXid *) (data + data_pos);
+				recovery_bind_heap_xid(bind->oxid, bind->xid, id);
+				data_pos += sizeof(RecoveryMsgBindXid);
 			}
 			else if (type == RecoveryMsgTypeCommit)
 			{

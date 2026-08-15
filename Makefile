@@ -229,7 +229,9 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/pg_dump_restore_test.py \
 						test/t/parallel_test.py \
 						test/t/recovery_heap_verdict_test.py \
+						test/t/recovery_heap_xid_binding_test.py \
 						test/t/recovery_item_rollback_test.py \
+						test/t/recovery_livelock_test.py \
 						test/t/recovery_row_lock_test.py \
 						test/t/reindex_test.py \
 						test/t/restartpoint_ddl_window_test.py \

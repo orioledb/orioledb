@@ -2571,6 +2571,16 @@ undo_xact_callback(XactEvent event, void *arg)
 									 get_current_logical_xid(),
 									 heapXid, false);
 				}
+				else if (TransactionIdIsValid(heapXid))
+				{
+					/*
+					 * No joint commit record will tie this oxid to the heap
+					 * xid, and the WAL_REC_XID records already on the wire
+					 * may predate the xid.  Bind them explicitly, or replay
+					 * has no way to settle this transaction.
+					 */
+					wal_bind_heap_xid(oxid, get_current_logical_xid());
+				}
 
 				break;
 

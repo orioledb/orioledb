@@ -783,6 +783,7 @@ static bool replay_container(Pointer startPtr, Pointer endPtr,
 static void worker_send_modify(int worker_id, BTreeDescr *desc,
 							   RecoveryMsgType recType,
 							   OTuple tuple, int tuple_len);
+static void workers_send_bind_heap_xid(void);
 static void workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback,
 									 bool commit);
 static void workers_send_savepoint(SubTransactionId parentSubId);
@@ -1966,15 +1967,27 @@ recovery_finish(int worker_id)
 			if (TransactionIdIsValid(cur_state->xid) &&
 				TransactionIdDidCommit(cur_state->xid))
 			{
-				CommitSeqNo csn;
+				CommitSeqNo csn = COMMITSEQNO_MAX_NORMAL - 1;
 
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					precommit_undo_stack((UndoLogType) i, recovery_oxid, true);
 				for (i = 0; i < (int) UndoLogsCount; i++)
 					on_commit_undo_stack((UndoLogType) i, recovery_oxid, true);
-				set_oxid_csn(recovery_oxid, COMMITSEQNO_COMMITTING);
-				csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
-				set_oxid_csn(recovery_oxid, csn);
+
+				/*
+				 * Publishing the verdict is the leader's alone.  Workers now
+				 * reach this with a heap xid too -- they are told the binding
+				 * so that they do not undo a committed transaction -- and
+				 * every process settling the same oxid would settle it
+				 * several times over, which spins set_oxid_xlog_ptr()
+				 * forever.
+				 */
+				if (worker_id < 0)
+				{
+					set_oxid_csn(recovery_oxid, COMMITSEQNO_COMMITTING);
+					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
+					set_oxid_csn(recovery_oxid, csn);
+				}
 				walk_checkpoint_stacks(cur_state, csn,
 									   InvalidSubTransactionId,
 									   flush_undo_pos);
@@ -4526,7 +4539,18 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 			 */
 			if (TransactionIdIsValid(rec->heapXid) &&
 				!TransactionIdIsValid(cur_recovery_xid_state->xid))
+			{
 				cur_recovery_xid_state->xid = rec->heapXid;
+
+				/*
+				 * The heap xid can be acquired after some of this
+				 * transaction's changes were already dispatched -- those
+				 * workers adopted the oxid without it.  Top them up; workers
+				 * that have not seen the oxid get it with their first modify.
+				 */
+				if (!ctx->single)
+					workers_send_bind_heap_xid();
+			}
 			break;
 
 		case WAL_REC_SWITCH_LOGICAL_XID:
@@ -5241,6 +5265,7 @@ worker_send_modify(int worker_id, BTreeDescr *desc,
 	delay_rels_queued_for_idxbuild(oids);
 
 	max_msg_size = MAXALIGN(sizeof(RecoveryMsgHeader) + sizeof(OXid)
+							+ sizeof(TransactionId)
 							+ sizeof(ORelOids) + 1
 							+ sizeof(int) + 1) + MAXALIGN(tuple_len);
 
@@ -5268,6 +5293,24 @@ worker_send_modify(int worker_id, BTreeDescr *desc,
 		header->type |= RECOVERY_MODIFY_OXID;
 		state->oxid = cur_recovery_xid_state->oxid;
 		cur_recovery_xid_state->used_by[worker_id] = true;
+
+		/*
+		 * A transaction that owns a heap xid writes no OrioleDB finish
+		 * record, so at the end of replay its fate is read off the heap xid
+		 * -- and only the leader parses that out of WAL.  A worker without it
+		 * sees an in-progress oxid, concludes the transaction cannot have
+		 * committed, and undoes changes it committed.  Hand the binding over
+		 * here, on the message that makes this worker adopt the oxid in the
+		 * first place, so only workers that actually apply something for the
+		 * transaction ever hear about it.
+		 */
+		if (TransactionIdIsValid(cur_recovery_xid_state->xid))
+		{
+			memcpy(data, &cur_recovery_xid_state->xid, sizeof(TransactionId));
+			data += sizeof(TransactionId);
+			state->queue_buf_len += sizeof(TransactionId);
+			header->type |= RECOVERY_MODIFY_HEAP_XID;
+		}
 	}
 
 	if (!ORelOidsIsEqual(state->oids, oids) || state->type != type)
@@ -5417,6 +5460,44 @@ workers_send_rollback_to_savepoint(XLogRecPtr ptr,
 /*
  * Sends commit or rollback message to workers with active the oxid in the pool.
  */
+/*
+ * Record, on this process's recovery xid state, which heap xid an oxid rides
+ * on.  Called by a worker for an oxid it already applies changes for.
+ */
+void
+recovery_bind_heap_xid(OXid oxid, TransactionId xid, int worker_id)
+{
+	recovery_switch_to_oxid(oxid, worker_id);
+	Assert(cur_recovery_xid_state != NULL);
+	if (!TransactionIdIsValid(cur_recovery_xid_state->xid))
+		cur_recovery_xid_state->xid = xid;
+}
+
+/*
+ * Tell the workers that already took on the current oxid which heap xid it
+ * rides on.  Pure information: it waits for nothing and does not change when
+ * anything is applied.
+ */
+static void
+workers_send_bind_heap_xid(void)
+{
+	RecoveryMsgBindXid msg;
+	int			i;
+
+	Assert(cur_recovery_xid_state != NULL);
+	Assert(TransactionIdIsValid(cur_recovery_xid_state->xid));
+
+	msg.header.type = RecoveryMsgTypeBindHeapXid;
+	msg.oxid = cur_recovery_xid_state->oxid;
+	msg.xid = cur_recovery_xid_state->xid;
+
+	for (i = 0; i < recovery_pool_size_guc; i++)
+	{
+		if (cur_recovery_xid_state->used_by[i])
+			worker_send_msg(i, (Pointer) &msg, sizeof(msg));
+	}
+}
+
 static void
 workers_send_oxid_finish(XLogRecPtr ptr, bool needsFeedback, bool commit)
 {

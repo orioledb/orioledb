@@ -236,6 +236,7 @@ extern bool local_wal_is_empty(void);
 extern XLogRecPtr flush_local_wal(bool isCommit, bool withXactTime);
 extern XLogRecPtr wal_commit(OXid oxid, TransactionId logicalXid,
 							 bool isAutonomous);
+extern void wal_bind_heap_xid(OXid oxid, TransactionId logicalXid);
 extern XLogRecPtr wal_joint_commit(OXid oxid, TransactionId logicalXid,
 								   TransactionId xid, bool subTransaction);
 extern void wal_after_commit(void);
