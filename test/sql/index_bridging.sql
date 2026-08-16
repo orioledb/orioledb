@@ -1235,6 +1235,38 @@ UPDATE o_bridge_sec_btree SET ival = ival + 1000
 SELECT count(*) FROM o_bridge_sec_btree WHERE ival BETWEEN 100 AND 200;
 RESET enable_seqscan;
 
+-- ON CONFLICT on a table with a bridged index.  OrioleDB resolves conflicts on
+-- its own indexes by inserting into them, so by the time the bridged arbiters
+-- are checked the row is already in those trees: checking all the arbiters
+-- there used to find our own row and call it a conflict.  DO NOTHING then left
+-- the row in the table but out of every bridged index, and DO UPDATE failed
+-- with "unexpected self-updated tuple".
+CREATE TABLE o_bridge_ioc (
+	id int NOT NULL PRIMARY KEY,
+	tags int[]
+) USING orioledb;
+CREATE INDEX ON o_bridge_ioc USING gin(tags);
+
+INSERT INTO o_bridge_ioc VALUES (1, ARRAY[10]) ON CONFLICT (id) DO NOTHING;
+INSERT INTO o_bridge_ioc VALUES (2, ARRAY[10])
+	ON CONFLICT (id) DO UPDATE SET tags = EXCLUDED.tags;
+INSERT INTO o_bridge_ioc VALUES (3, ARRAY[10]);
+
+-- and again, now that the keys really do conflict
+INSERT INTO o_bridge_ioc VALUES (1, ARRAY[99]) ON CONFLICT (id) DO NOTHING;
+INSERT INTO o_bridge_ioc VALUES (2, ARRAY[20])
+	ON CONFLICT (id) DO UPDATE SET tags = EXCLUDED.tags;
+
+-- without a conflict target, so the arbiter list arrives empty
+INSERT INTO o_bridge_ioc VALUES (4, ARRAY[10]) ON CONFLICT DO NOTHING;
+INSERT INTO o_bridge_ioc VALUES (4, ARRAY[77]) ON CONFLICT DO NOTHING;
+
+SELECT id, tags FROM o_bridge_ioc ORDER BY id;
+SET enable_seqscan = off;
+SELECT id FROM o_bridge_ioc WHERE tags @> ARRAY[10] ORDER BY id;
+SELECT id FROM o_bridge_ioc WHERE tags @> ARRAY[20] ORDER BY id;
+RESET enable_seqscan;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;
