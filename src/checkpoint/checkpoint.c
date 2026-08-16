@@ -1766,6 +1766,26 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	 */
 	checkpoint_state->replayStartPtr = get_checkpoint_xlog_ptr();
 
+	/*
+	 * And wait for every commit stamped at or before it, exactly as
+	 * sysTreesStartPtr does above.  A transaction that owns a heap xid is
+	 * registered for replay by the joint commit record it writes at
+	 * PRE_COMMIT, and replay settles it when the builtin commit record
+	 * arrives.  Without this wait the checkpoint can pin replayStartPtr
+	 * between the two, and then replay applies the transaction's changes --
+	 * they are below the pin, so they come from the page images -- while
+	 * never seeing the record that says whose they are.  The oxid stays
+	 * COMMITSEQNO_INPROGRESS for the rest of replay and the next record
+	 * touching one of its rows spins forever in
+	 * o_btree_modify_handle_conflicts().
+	 *
+	 * commitInProgressXlogLocation is published by flush_local_wal() for the
+	 * joint commit and cleared by wal_after_commit(), so waiting on it means
+	 * every transaction whose joint commit is at or below the pin has already
+	 * finished, and has nothing left to write above it.
+	 */
+	wait_finish_active_commits(checkpoint_state->replayStartPtr);
+
 	acquire_chkp_lock_drain(&checkpoint_state->oTablesMetaLock);
 	o_indices_foreach_oids(checkpoint_tables_callback, &chkp_tbl_arg);
 

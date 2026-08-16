@@ -43,7 +43,8 @@ typedef struct
 static LocalWal local_wal;
 
 static void add_finish_wal_record(uint8 rec_type, OXid xmin);
-static void add_joint_commit_wal_record(TransactionId xid, OXid xmin);
+static void add_joint_commit_wal_record(TransactionId xid, OXid xmin,
+										bool subTransaction);
 static void add_xid_wal_record(OXid oxid, TransactionId logicalXid);
 static void add_xid_wal_record_if_needed(void);
 static void flush_local_wal_if_needed(int required_length);
@@ -272,7 +273,8 @@ wal_joint_commit(OXid oxid, TransactionId logicalXid, TransactionId xid,
 	if (!local_wal.contains_xid)
 		add_xid_wal_record(oxid, logicalXid);
 
-	add_joint_commit_wal_record(xid, pg_atomic_read_u64(&xid_meta->runXmin));
+	add_joint_commit_wal_record(xid, pg_atomic_read_u64(&xid_meta->runXmin),
+								subTransaction);
 	walPos = flush_local_wal(!subTransaction, false);
 	local_wal.has_material_changes = false;
 
@@ -400,7 +402,7 @@ add_finish_wal_record(uint8 rec_type, OXid xmin)
 }
 
 static void
-add_joint_commit_wal_record(TransactionId xid, OXid xmin)
+add_joint_commit_wal_record(TransactionId xid, OXid xmin, bool subTransaction)
 {
 	WALRecJointCommit *rec;
 	CommitSeqNo csn;
@@ -419,6 +421,7 @@ add_joint_commit_wal_record(TransactionId xid, OXid xmin)
 	memcpy(rec->xmin, &xmin, sizeof(xmin));
 	csn = pg_atomic_read_u64(&TRANSAM_VARIABLES->nextCommitSeqNo);
 	memcpy(rec->csn, &csn, sizeof(csn));
+	rec->subTransaction = subTransaction ? 1 : 0;
 	local_wal.buffer_offset += sizeof(*rec);
 
 	local_wal.contains_switch_xid = false;

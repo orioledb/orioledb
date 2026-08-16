@@ -28,7 +28,7 @@
  * ORIOLEDB_COMPRESS_VERSION (see big comment on versioning
  * in include/orioledb.h)
  */
-#define ORIOLEDB_WAL_VERSION (18)
+#define ORIOLEDB_WAL_VERSION (19)
 
 /*
  * Value has been fixed at the moment of introducing WAL versioning.
@@ -58,6 +58,16 @@
  * We should never change this value.
  */
 #define ORIOLEDB_REL_TABLESPACE_WAL_VERSION (18)
+
+/*
+ * WAL_REC_JOINT_COMMIT says whether it was written for a subtransaction.
+ * Replay ignores the subtransaction ones: they are emitted at RELEASE
+ * SAVEPOINT, long before the transaction ends, and treating them as the
+ * transaction's registration leaves it registered across a window in which it
+ * keeps writing -- and in which a checkpoint can pin replayStartPtr past the
+ * record replay needed to see.
+ */
+#define ORIOLEDB_SUBXACT_JOINT_COMMIT_WAL_VERSION (19)
 
 /* Constants for commitInProgressXlogLocation */
 #define OWalTmpCommitPos			(0)
@@ -164,6 +174,8 @@ typedef struct
 	uint8		xid[sizeof(TransactionId)];
 	uint8		xmin[sizeof(OXid)];
 	uint8		csn[sizeof(CommitSeqNo)];
+	/* Since ORIOLEDB_SUBXACT_JOINT_COMMIT_WAL_VERSION */
+	uint8		subTransaction;
 } WALRecJointCommit;
 
 typedef struct
