@@ -463,6 +463,13 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 		elif is_commutative_cond_eq(src_cur_value, target_cur[1]):
 			src_down = True
 			target_down = True
+		elif (test_name == 'aggregates'
+			  and src_cur_value == 'HashAggregate'
+			  and target_cur[1] == 'Group'):
+			# allvisfrac=1 makes IOS cheap enough that the planner picks
+			# an index-only scan path, enabling Group instead of HashAggregate
+			src_down = True
+			target_down = True
 		elif (src_cur_value == 'Unique'
 			  and target_cur[1] == 'HashAggregate'):
 			# As source output uses Unique, it may need to sort values after scan,
@@ -516,6 +523,13 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				src_up = True
 				target_up = True
 			elif (src_cur_value.startswith('Index Only Scan')
+				and target_cur[1].startswith('Parallel Custom Scan')
+				and len(target_cur[2]) > 0
+				and target_cur[2][0].startswith('Forward index only scan')):
+				# Parallel Custom Scan replaces Parallel Index Only Scan
+				src_up = True
+				target_up = True
+			elif (src_cur_value.startswith('Index Only Scan')
 			      and target_cur[1].startswith('Seq Scan')):
 				src_up = True
 				target_up = True
@@ -542,6 +556,31 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 					target_down = True
 				else:
 					equal = False
+			elif (src_cur_value.startswith('Index Scan')
+				 and target_cur[1].startswith('Parallel Custom Scan')
+				 and len(target_cur[2]) > 0
+				 and target_cur[2][0].startswith('Forward index scan')):
+				# Parallel Custom Scan replaces Parallel Index Scan
+				if (len(src_cur[2]) == 0 and len(target_cur[2]) == 1) or is_conds_eq(src_cur[2][0], target_cur[2][1]):
+					src_down = True
+					target_down = True
+				else:
+					equal = False
+			elif (src_cur_value.startswith('Index Scan')
+				 and target_cur[1].startswith('Index Only Scan')):
+				# allvisfrac=1 makes index-only scan cheaper
+				src_up = True
+				target_up = True
+			elif (src_cur_value.startswith('Index Only Scan')
+				 and target_cur[1].startswith('Index Only Scan')):
+				# allvisfrac=1 may cause different index choice
+				src_up = True
+				target_up = True
+			elif (src_cur_value.startswith('Seq Scan')
+				 and target_cur[1].startswith('Index Only Scan')):
+				# allvisfrac=1 may make IOS cheaper than seq scan
+				src_up = True
+				target_up = True
 			elif re.sub(r"_\d+$", "", src_cur_value) == re.sub(r"_\d+$", "", target_cur[1]):
 				# lines differ only by auto-generated alias suffix (e.g. tinner_2 vs tinner_1)
 				src_down = True
