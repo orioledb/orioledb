@@ -28,6 +28,7 @@
 #include "executor/nodeIndexscan.h"
 #include "nodes/execnodes.h"
 #include "utils/memutils.h"
+#include "utils/wait_event.h"
 
 #include <math.h>
 
@@ -1532,6 +1533,83 @@ o_bitmap_stream_fetch(OBitmapScan *scan, CustomScanState *node)
 	return ExecClearTuple(ss->ss_ScanTupleSlot);
 }
 
+/*
+ * Parallel build coordination: the first worker to arrive builds the whole
+ * key bitmap (running the bitmap qual), serializes it into es_query_dsa and
+ * publishes it; the others wait on the condition variable and then attach the
+ * same buffer read-only.  Returns the attached (shared) bitmap, or NULL when
+ * the built bitmap is empty.  The cooperative primary fetch then runs through
+ * pbitmap->poscan.
+ */
+static OKeyBitmap *
+o_bitmap_parallel_prepare(OBitmapHeapPlanState *bitmap_state, OBitmapScan *scan,
+						  PlanState *bitmapqualplanstate)
+{
+	ParallelOBitmapScan pbitmap = bitmap_state->pbitmap;
+	dsa_area   *dsa = bitmap_state->dsa;
+	bool		build;
+
+	SpinLockAcquire(&pbitmap->mutex);
+	build = (pbitmap->stage == OBITMAP_PARALLEL_NEW);
+	if (build)
+		pbitmap->stage = OBITMAP_PARALLEL_BUILDING;
+	SpinLockRelease(&pbitmap->mutex);
+
+	if (build)
+	{
+		OKeyBitmap *local = NULL;
+		TIDBitmap  *tbm = NULL;
+		dsa_pointer dp = InvalidDsaPointer;
+		Size		sz = 0;
+		bool		empty = true;
+
+		o_exec_bitmapqual(bitmap_state, bitmapqualplanstate, &local, &tbm);
+		/* The planner only offers a parallel path for native-index quals. */
+		Assert(tbm == NULL);
+
+		if (local != NULL && !o_keybitmap_is_empty(local))
+		{
+			sz = o_keybitmap_serialized_size(local);
+			dp = dsa_allocate(dsa, sz);
+			o_keybitmap_serialize(local, dsa_get_address(dsa, dp));
+			empty = false;
+		}
+		if (local != NULL)
+			o_keybitmap_free(local);
+
+		SpinLockAcquire(&pbitmap->mutex);
+		pbitmap->bitmap_dsa = dp;
+		pbitmap->bitmap_size = sz;
+		pbitmap->empty = empty;
+		pbitmap->stage = OBITMAP_PARALLEL_READY;
+		SpinLockRelease(&pbitmap->mutex);
+		ConditionVariableBroadcast(&pbitmap->cv);
+	}
+	else
+	{
+		ConditionVariablePrepareToSleep(&pbitmap->cv);
+		for (;;)
+		{
+			OBitmapParallelStage stage;
+
+			SpinLockAcquire(&pbitmap->mutex);
+			stage = pbitmap->stage;
+			SpinLockRelease(&pbitmap->mutex);
+			if (stage == OBITMAP_PARALLEL_READY)
+				break;
+			ConditionVariableSleep(&pbitmap->cv,
+								   WAIT_EVENT_PARALLEL_BITMAP_SCAN);
+		}
+		ConditionVariableCancelSleep();
+	}
+
+	if (pbitmap->empty)
+		return NULL;
+
+	return o_keybitmap_attach(dsa_get_address(dsa, pbitmap->bitmap_dsa),
+							  scan->cxt);
+}
+
 OBitmapScan *
 o_make_bitmap_scan(OBitmapHeapPlanState *bitmap_state, ScanState *ss,
 				   PlanState *bitmapqualplanstate, Relation rel,
@@ -1546,6 +1624,25 @@ o_make_bitmap_scan(OBitmapHeapPlanState *bitmap_state, ScanState *ss,
 	scan->ss = ss;
 	scan->arg.tbl_desc = relation_get_descr(rel);
 	bitmap_state->scan = scan;
+
+	/*
+	 * Parallel bitmap heap scan: build the key bitmap once (cooperatively),
+	 * attach it read-only, and fetch the primary tree cooperatively through
+	 * the shared poscan.  The streaming/bridge fast paths are not used here.
+	 */
+	if (bitmap_state->pbitmap != NULL)
+	{
+		scan->arg.bitmap = o_bitmap_parallel_prepare(bitmap_state, scan,
+													 bitmapqualplanstate);
+		if (scan->arg.bitmap != NULL)
+			scan->seq_scan =
+				make_btree_seq_scan_cb_parallel(&GET_PRIMARY(scan->arg.tbl_desc)->desc,
+												&scan->oSnapshot,
+												&bitmap_seq_scan_callbacks,
+												&scan->arg,
+												&bitmap_state->pbitmap->poscan);
+		return scan;
+	}
 
 	/*
 	 * Fast path: a single primary BitmapIndexScan, or a BitmapOr of only such
@@ -1588,6 +1685,10 @@ o_exec_bitmap_fetch(OBitmapScan *scan, CustomScanState *node)
 
 	if (scan->stream_primary)
 		return o_bitmap_stream_fetch(scan, node);
+
+	/* An empty (parallel) bitmap has no primary scan and no bridge iterator. */
+	if (scan->seq_scan == NULL && bridge_iter->tbmiterator == NULL)
+		return ExecClearTuple(node->ss.ss_ScanTupleSlot);
 
 	do
 	{
