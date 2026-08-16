@@ -616,6 +616,77 @@ DROP TABLE o_test1;
 DROP TABLE o_test2;
 COMMIT;
 
+-- Parallel ordered (key-order) index scan: forward and backward.  An ordered
+-- path reads on-disk downlinks inline so each worker emits a sorted stream that
+-- Gather Merge combines; ORDER BY / ORDER BY DESC should use Gather Merge, and
+-- the result must match the serial scan exactly.
+BEGIN;
+CREATE TABLE o_test_ordered_scan (
+	id int8 PRIMARY KEY,
+	val int8
+) USING orioledb;
+INSERT INTO o_test_ordered_scan
+	SELECT g, g % 777 FROM generate_series(1, 60000) g;
+ANALYZE o_test_ordered_scan;
+
+SET LOCAL max_parallel_workers_per_gather = 3;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL parallel_tuple_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 0;
+SET LOCAL min_parallel_index_scan_size = 0;
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_bitmapscan = off;
+
+-- An always-true but per-row-expensive filter (sqrt) makes the parallel
+-- ordered path cheaper than the naturally-ordered serial index scan, so the
+-- planner picks Gather Merge deterministically.
+
+-- Plan shape: ORDER BY ascending uses Gather Merge over a forward scan
+EXPLAIN (COSTS OFF)
+	SELECT id FROM o_test_ordered_scan
+		WHERE id BETWEEN 10000 AND 50000 AND sqrt(val::float8) >= 0
+		ORDER BY id;
+
+-- Plan shape: ORDER BY DESC uses Gather Merge over a backward scan
+EXPLAIN (COSTS OFF)
+	SELECT id FROM o_test_ordered_scan
+		WHERE id BETWEEN 10000 AND 50000 AND sqrt(val::float8) >= 0
+		ORDER BY id DESC;
+
+-- Correctness: ascending output is fully sorted and matches serial
+SELECT count(*), min(id), max(id),
+	(count(*) = count(*) FILTER (WHERE prev IS NULL OR id >= prev)) AS sorted
+	FROM (SELECT id, lag(id) OVER () AS prev FROM (
+		SELECT id FROM o_test_ordered_scan
+			WHERE id BETWEEN 10000 AND 50000 AND sqrt(val::float8) >= 0
+			ORDER BY id) s) t;
+
+-- Correctness: descending output is fully sorted and matches serial
+SELECT count(*), min(id), max(id),
+	(count(*) = count(*) FILTER (WHERE prev IS NULL OR id <= prev)) AS sorted
+	FROM (SELECT id, lag(id) OVER () AS prev FROM (
+		SELECT id FROM o_test_ordered_scan
+			WHERE id BETWEEN 10000 AND 50000 AND sqrt(val::float8) >= 0
+			ORDER BY id DESC) s) t;
+
+-- Serial vs parallel equivalence (descending), whole ordered vector
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT array_agg(id) AS serial_desc FROM (
+	SELECT id FROM o_test_ordered_scan
+		WHERE id BETWEEN 990 AND 1010 AND sqrt(val::float8) >= 0
+		ORDER BY id DESC) s;
+SET LOCAL max_parallel_workers_per_gather = 3;
+SELECT array_agg(id) AS parallel_desc FROM (
+	SELECT id FROM o_test_ordered_scan
+		WHERE id BETWEEN 990 AND 1010 AND sqrt(val::float8) >= 0
+		ORDER BY id DESC) s;
+
+-- Full ordered scan (no range), descending
+SELECT count(*), min(id), max(id) FROM (
+	SELECT id FROM o_test_ordered_scan
+		WHERE sqrt(val::float8) >= 0 ORDER BY id DESC) s;
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA parallel_scan CASCADE;
 RESET search_path;

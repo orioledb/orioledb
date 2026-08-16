@@ -1055,6 +1055,13 @@ o_exec_parallel_idx_scan_new_seqscan(OScanState *ostate,
 	if (!ostate->curKeyRange.empty)
 		btree_seq_scan_set_range_filter(seqScan, &ostate->curKeyRange);
 
+	/*
+	 * An ordered parallel path reads on-disk downlinks inline in the plan's
+	 * scan direction so each worker emits a sorted stream (for Gather Merge).
+	 */
+	if (ostate->ordered)
+		btree_seq_scan_set_ordered(seqScan, true, ostate->scanDir);
+
 	return seqScan;
 }
 
@@ -1121,7 +1128,8 @@ o_exec_parallel_idx_scan(OScanState *ostate, ScanState *ss)
 	if (ostate->seqScan == NULL)
 	{
 		Assert(ostate->pidxscan != NULL);
-		Assert(ostate->scanDir == ForwardScanDirection);
+		Assert(ostate->scanDir == ForwardScanDirection ||
+			   ostate->scanDir == BackwardScanDirection);
 
 		o_exec_parallel_idx_scan_load_keyrange(ostate, indexDescr, tupleCxt);
 
