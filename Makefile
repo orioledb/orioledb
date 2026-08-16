@@ -237,6 +237,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/recovery_livelock_test.py \
 						test/t/recovery_row_lock_test.py \
 						test/t/reindex_test.py \
+						test/t/reindex_concurrent_test.py \
 						test/t/restartpoint_ddl_window_test.py \
 						test/t/s3_test.py \
 						test/t/schema_test.py \

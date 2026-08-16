@@ -123,6 +123,7 @@ extern void o_define_index_concurrent_finish(Relation heap, Relation index);
 extern void o_index_drop(Relation tbl, OIndexNumber ix_num);
 extern OIndexNumber o_find_ix_num_by_name(OTableDescr *descr,
 										  char *ix_name);
+extern OIndexNumber o_find_ix_num_by_reloid(OTableDescr *descr, Oid reloid);
 extern bool is_in_indexes_rebuild(void);
 
 extern void rebuild_indices_insert_placeholders(OTableDescr *descr);
