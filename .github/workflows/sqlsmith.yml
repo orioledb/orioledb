@@ -1,0 +1,115 @@
+name: sqlsmith
+
+# Random-query fuzzing, looking for crashes.  Every run picks a fresh seed, so
+# each pull request and each commit on main explores query shapes no earlier
+# run reached: the coverage comes from the number of runs, and gating changes
+# on it is what keeps that number up.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: 'Fuzzing budget per job, seconds'
+        required: false
+        default: '600'
+      seed:
+        description: 'RNG seed (blank = derive from the clock)'
+        required: false
+        default: ''
+      writers:
+        description: 'Concurrent writer sessions'
+        required: false
+        default: '4'
+
+concurrency:
+  group: sqlsmith-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sqlsmith:
+    # A fork syncing main should not spend four jobs on it; its own pull
+    # requests and manual dispatches still run.
+    if: github.event_name != 'push' || github.repository == 'orioledb/orioledb'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Assertions are the point of the exercise, so every cell is an
+          # assert-enabled build.  check_page additionally validates page
+          # structure on every access, which catches corruption a plain
+          # assert build walks straight past.
+          - { pg_version: 16, check_type: debug }
+          - { pg_version: 17, check_type: debug }
+          - { pg_version: 18, check_type: debug }
+          - { pg_version: 18, check_type: check_page }
+
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    env:
+      LLVM_VER: 18
+      CPU: amd64
+      COMPILER: gcc
+      CHECK_TYPE: ${{ matrix.check_type }}
+      PG_VERSION: ${{ matrix.pg_version }}
+      SQLSMITH_SECONDS: ${{ github.event.inputs.seconds || '600' }}
+      SQLSMITH_SEED: ${{ github.event.inputs.seed || '' }}
+      SQLSMITH_WRITERS: ${{ github.event.inputs.writers || '4' }}
+
+    steps:
+      - name: Checkout extension code into workspace directory
+        uses: actions/checkout@v6
+        with:
+          path: orioledb
+
+      - name: Get the required tag name
+        shell: bash
+        run: |
+          echo "PGTAG=$(grep '^${{ matrix.pg_version }}: ' orioledb/.pgtags | cut -d' ' -f2-)" >> $GITHUB_ENV
+
+      - name: Checkout PostgreSQL code into workspace directory
+        uses: actions/checkout@v6
+        with:
+          repository: orioledb/postgres
+          ref: ${{ env.PGTAG }}
+          path: postgresql
+
+      - name: Setup prerequisites
+        run: bash ./orioledb/ci/prerequisites.sh
+
+      - name: Install sqlsmith build dependencies
+        run: |
+          # autoconf-archive is not optional: without it the AX_BOOST_* and
+          # AX_CXX_COMPILE_STDCXX_* macros stay unexpanded and autoreconf
+          # emits a configure that fails with a misleading error.
+          sudo apt-get -o Dpkg::Options::="--force-confdef" \
+                       -o Dpkg::Options::="--force-confold" -y install -qq \
+            autoconf automake autoconf-archive libtool pkg-config \
+            libpqxx-dev libboost-dev libboost-regex-dev g++
+
+      - name: Build
+        run: bash ./orioledb/ci/build.sh
+
+      - name: Install post build prerequisites
+        run: bash ./orioledb/ci/post_build_prerequisites.sh
+
+      - name: Fuzz with sqlsmith
+        timeout-minutes: 45
+        run: bash ./orioledb/ci/sqlsmith.sh
+
+      - name: Show stuck processes
+        run: bash ./orioledb/ci/list_stuck.sh
+        if: ${{ always() }}
+
+      - name: Upload logs and generated queries
+        uses: actions/upload-artifact@v7
+        if: ${{ failure() }}
+        with:
+          name: sqlsmith_${{ matrix.pg_version }}_${{ matrix.check_type }}_logs
+          path: |
+            ./sqlsmith_pg.log
+            ./sqlsmith_out.log
+            ./sqlsmith_err.log
+            ./sqlsmith_writer_*.log
+          retention-days: 7
+          if-no-files-found: ignore
