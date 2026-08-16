@@ -52,6 +52,7 @@ typedef struct WalRecord
 			TransactionId xid;
 			OXid		xmin;
 			CommitSeqNo csn;
+			bool		subTransaction;
 		}			joint_commit;
 		struct
 		{

@@ -110,6 +110,22 @@ wal_parse_rec_joint_commit(WalReaderState *r, WalRecord *rec)
 	WR_PARSE(r, &rec->u.joint_commit.xmin);
 	WR_PARSE(r, &rec->u.joint_commit.csn);
 
+	if (r->container.version >= ORIOLEDB_SUBXACT_JOINT_COMMIT_WAL_VERSION)
+	{
+		uint8		subTransaction;
+
+		WR_PARSE(r, &subTransaction);
+		rec->u.joint_commit.subTransaction = (subTransaction != 0);
+	}
+	else
+	{
+		/*
+		 * Older WAL does not say.  Treat it as a top-level joint commit,
+		 * which is how replay handled every one of them before.
+		 */
+		rec->u.joint_commit.subTransaction = false;
+	}
+
 	return WALPARSE_OK;
 }
 

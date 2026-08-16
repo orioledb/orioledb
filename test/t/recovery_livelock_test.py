@@ -5,7 +5,6 @@ import os
 import signal
 import subprocess
 import time
-import unittest
 
 from testgres import NodeStatus
 
@@ -53,9 +52,6 @@ class RecoveryLivelockTest(BaseTest):
 		    'postgresql.conf', "checkpoint_timeout = 1h\n"
 		    "max_wal_size = 10GB\n")
 
-	@unittest.skip("the bug is not fixed yet: a heap-xid transaction whose "
-	               "WAL_REC_JOINT_COMMIT is below replayStartPtr stays "
-	               "COMMITSEQNO_INPROGRESS for the whole replay")
 	def test_recovery_livelock_on_orphaned_joint_commit(self):
 		node = self.node
 		node.start()
@@ -115,6 +111,52 @@ class RecoveryLivelockTest(BaseTest):
 
 		self.assertEqual(
 		    node.execute("SELECT v FROM o_livelock WHERE id = 1;")[0][0], 111)
+
+	def test_recovery_after_on_commit_drop(self):
+		"""The other way an OrioleDB transaction can end up with no joint
+		commit record: it acquires its oxid during commit.
+
+		PostgreSQL runs PreCommit_on_commit_actions() after
+		XACT_EVENT_PRE_COMMIT, so an ON COMMIT DROP of an OrioleDB temp table
+		does its work past the point where wal_joint_commit() is written --
+		and dropping the table touches the system trees, which are persistent
+		and WAL logged, so this is not simply invisible to replay.
+
+		Measured with a probe on the branch that guesses a verdict in
+		recovery_finish(): nothing is left unsettled here.  The test pins that
+		the cluster comes back and the transaction's other half is intact, so
+		a change that starts leaving this oxid in flight shows up as a hang
+		rather than silently.
+		"""
+		node = self.node
+		node.start()
+		node.safe_psql(
+		    'postgres', "CREATE EXTENSION IF NOT EXISTS orioledb;\n"
+		    "CREATE TABLE h_drop (id int NOT NULL, PRIMARY KEY (id));")
+		node.safe_psql('postgres', "CHECKPOINT;")
+
+		con = node.connect()
+		con.begin()
+		con.execute("CREATE TEMP TABLE o_tmp (id int NOT NULL, v int,\n"
+		            "  PRIMARY KEY (id)) USING orioledb ON COMMIT DROP;")
+		con.execute(
+		    "INSERT INTO o_tmp SELECT g, g FROM generate_series(1, 5) g;")
+		con.execute("INSERT INTO h_drop VALUES (1);")
+		con.commit()
+		con.close()
+
+		node.stop(['-m', 'immediate'])
+		try:
+			node.start(params=['-t', '20'])
+			opened = self.wait_until_accepting(node, timeout=20)
+		except Exception:
+			opened = self.wait_until_accepting(node, timeout=20)
+		if not opened:
+			self.report_stuck(node)
+			self.kill_cluster(node)
+		self.assertTrue(opened, "cluster did not finish crash recovery")
+		self.assertEqual(node.execute("SELECT count(*) FROM h_drop;")[0][0], 1)
+		node.stop()
 
 	def wait_until_accepting(self, node, timeout):
 		deadline = time.time() + timeout
