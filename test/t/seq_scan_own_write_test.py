@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
-import unittest
-
 from .base_test import BaseTest
 
 FAT = "x" * 180
@@ -42,8 +40,6 @@ class SeqScanOwnWriteTest(BaseTest):
 	-- the row is ours, and only the raw header says otherwise.
 	"""
 
-	@unittest.skip("the bug is not fixed yet: the merge decides by the raw "
-	               "leaf header instead of resolving the lock-only chain")
 	def test_sequential_scan_sees_own_write_under_a_key_share_lock(self):
 		node = self.node
 		node.start()

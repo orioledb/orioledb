@@ -2193,7 +2193,29 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 
 				if (cmp == 0)
 				{
-					if (XACT_INFO_OXID_IS_CURRENT(tuphdr->xactInfo))
+					BTreeLeafTuphdr nonLockTuphdr = *tuphdr;
+
+					/*
+					 * The live version overrides whatever the historical page
+					 * image holds for this key -- but only if it is ours, and
+					 * the header on the page does not answer that on its own.
+					 * A concurrent transaction may have placed a FOR KEY
+					 * SHARE lock on top of our own version, which the two
+					 * modes allow, and then the header describes the locker.
+					 * Deciding on it emits the historical version instead,
+					 * and the transaction stops seeing its own write.
+					 *
+					 * Resolve the chain first, exactly as
+					 * fetch_our_tuple_from_page() does for the iterator. This
+					 * only runs where both images hold the same key, so it
+					 * costs nothing on a scan with no historical image at
+					 * all.
+					 */
+					(void) find_non_lock_only_undo_record(scan->desc->undoType,
+														  &nonLockTuphdr);
+
+					if (!XACT_INFO_IS_LOCK_ONLY(nonLockTuphdr.xactInfo) &&
+						XACT_INFO_OXID_IS_CURRENT(nonLockTuphdr.xactInfo))
 					{
 						BTREE_PAGE_LOCATOR_NEXT(scan->histImg, &scan->histLoc);
 						break;
