@@ -327,3 +327,41 @@ class ConcurrentIndexTest(BaseTest):
 				master.stop()
 			except Exception:
 				pass
+
+	def test_cic_streaming_replica_failing_expr(self):
+		"""
+		CIC on the primary may fail at validate-scan when the index
+		expression raises on some row (e.g. `a/b` with b=0).  On
+		the primary the index is left in OINDEX_STATE_BUILDING_PHASE_2
+		and PG marks pg_index.indisvalid=false.  The replica must
+		mirror that state without aborting recovery.
+		"""
+		master = self.node
+		master.start()
+		try:
+			with self.getReplica().start() as replica:
+				master.safe_psql("""
+					CREATE EXTENSION orioledb;
+					CREATE TABLE o_cic_bad (a int, b int) USING orioledb;
+					INSERT INTO o_cic_bad VALUES (1, 0);
+				""")
+				self.catchup_orioledb(replica)
+
+				# CIC fails on master; ignore the expected ERROR.
+				_, _, err = master.psql(
+				    "CREATE INDEX CONCURRENTLY o_cic_bad_idx "
+				    "ON o_cic_bad ((a/b));")
+				self.assertIn(b"division by zero", err)
+
+				# After more DML, the replica must still catch up
+				# (i.e. recovery did not stall on the failed build).
+				master.safe_psql("INSERT INTO o_cic_bad VALUES (5, 1);")
+				self.catchup_orioledb(replica)
+
+				cnt = replica.execute("SELECT count(*) FROM o_cic_bad;")[0][0]
+				self.assertEqual(cnt, 2)
+		finally:
+			try:
+				master.stop()
+			except Exception:
+				pass
