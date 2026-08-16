@@ -58,6 +58,16 @@ typedef enum
 } OIndexState;
 ```
 
+Only `VALID` and `BUILDING_PHASE_2` are reached by the code in this revision.
+The other three are defined now because the state is persisted in the sys-tree
+record: adding a value later would be readable by a new binary but not by an
+old one, whereas an unused value that already exists costs nothing and keeps
+the numbering stable.  They are named for the phases a future catchup-mode
+protocol would need, where the build runs against a moving snapshot instead of
+a fixed one: `PHASE_1` to open capture before the scan starts, `PHASE_3` to let
+writers maintain the index directly once the scan is done, and `PHASE_4` for
+the final drain barrier.
+
 `OIndex.state` is persisted as a single trailing byte by `serialize_o_index`;
 records written by pre-CIC versions deserialize as `OINDEX_STATE_VALID`, so
 catalog upgrades are forward-compatible without an explicit migration.
@@ -291,7 +301,18 @@ existing recovery-finish work.
   the writer's own next INSERT errors immediately even for deferred.
 - The `BUILDING_PHASE_1/3/4` states are reserved for a future
   catchup-mode protocol; only `VALID` and `BUILDING_PHASE_2` are
-  used today.
+  used today (see [Index lifecycle](#index-lifecycle-oindexstate)).
+- `REINDEX CONCURRENTLY` on a primary index of an orioledb table is
+  rejected with
+
+  ```
+  ERROR:  cannot REINDEX CONCURRENTLY primary index "<name>" on an orioledb table
+  ```
+
+  because the primary index *is* the table: rebuilding it concurrently
+  would mean rewriting every row rather than building a secondary
+  structure beside it.  `REINDEX TABLE CONCURRENTLY` skips the primary
+  index and rebuilds the secondary ones.
 - Phase-transition WAL records are emitted for observability but
   have no redo-side handling.  Future revisions may use them to
   drive standby-side catchup-mode switches.

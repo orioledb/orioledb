@@ -20,21 +20,22 @@
 #include "tuple/format.h"
 
 /*
- * Lifecycle state of an index.  Non-VALID states are used by
- * CREATE INDEX CONCURRENTLY to expose the index to writers (capture
- * phase) before it becomes available to readers.  Persisted as one
- * trailing byte in serialize_o_index(); records written by versions
- * predating this field are read as OINDEX_STATE_VALID.
+ * Lifecycle state of an index.  A non-VALID state means CREATE INDEX
+ * CONCURRENTLY is still building it: the index row is already visible to
+ * writers, which record their changes into the CIC spool, but not yet to
+ * readers.  Persisted as one trailing byte in serialize_o_index(); a record
+ * written before this field existed reads as OINDEX_STATE_VALID.
  */
 typedef enum
 {
 	OINDEX_STATE_VALID = 0,		/* fully built, available to all readers */
-	OINDEX_STATE_BUILDING_PHASE_1,	/* meta installed, capture started, no DML
-									 * writes to index */
-	OINDEX_STATE_BUILDING_PHASE_2,	/* phase-1 + snapshot scan/build in
-									 * progress */
-	OINDEX_STATE_BUILDING_PHASE_3,	/* build done, catchup phase: writes go to
-									 * index + spool on collisions */
+	OINDEX_STATE_BUILDING_PHASE_1,	/* the OIndex row exists and writers spool
+									 * their changes; nothing is written to
+									 * the index itself */
+	OINDEX_STATE_BUILDING_PHASE_2,	/* phase 1, plus the snapshot scan that
+									 * builds the index */
+	OINDEX_STATE_BUILDING_PHASE_3,	/* build finished; writers write to the
+									 * index and spool only on collisions */
 	OINDEX_STATE_BUILDING_PHASE_4	/* final spool drain under WaitForLockers */
 } OIndexState;
 
