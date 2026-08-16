@@ -38,3 +38,5 @@ before_o_tables_meta_unlock
 merge_before_free_extent
 iterator_next
 createdb_copy_fail
+cic_after_ambuild
+cic_before_flip
