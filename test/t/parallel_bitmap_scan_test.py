@@ -38,16 +38,22 @@ class ParallelBitmapScanTest(BaseTest):
 		self.node.safe_psql('postgres',
 		                    "CREATE EXTENSION IF NOT EXISTS orioledb;")
 
-	def _load(self):
+	def _load(self, bridged=False):
+		# A bridged secondary index builds a shared DSA TIDBitmap; a native one
+		# builds a shared key bitmap.  Both run the same cooperative fetch.
+		table_opts = " WITH (index_bridging)" if bridged else ""
+		index_sql = ("CREATE INDEX o_bm_val ON o_bm USING btree (val) "
+		             "WITH (orioledb_index = off);"
+		             if bridged else "CREATE INDEX o_bm_val ON o_bm (val);")
 		self.node.safe_psql(
 		    'postgres', f"""
 			DROP TABLE IF EXISTS o_bm;
 			CREATE TABLE o_bm (
 				id int8 PRIMARY KEY,
 				val int8
-			) USING orioledb;
+			) USING orioledb{table_opts};
 			INSERT INTO o_bm SELECT i, i % 1000 FROM generate_series(1, {NROWS}) i;
-			CREATE INDEX o_bm_val ON o_bm (val);
+			{index_sql}
 			ANALYZE o_bm;
 			CHECKPOINT;
 		""")
@@ -99,9 +105,9 @@ class ParallelBitmapScanTest(BaseTest):
 	# Core driver: park a parallel bitmap scan at scan_disk_page, run
 	# mutate(dml_con) while it is parked, release it, and assert the result set
 	# equals the pre-mutation reference.
-	def _run_parked(self, cond, mutate):
+	def _run_parked(self, cond, mutate, bridged=False):
 		node = self.node
-		self._load()
+		self._load(bridged=bridged)
 		reference = self._reference(cond)
 		self.assertGreater(len(reference), 500)
 
@@ -177,6 +183,24 @@ class ParallelBitmapScanTest(BaseTest):
 			con.execute("CHECKPOINT;")
 
 		self._run_parked("val < 30 OR val > 970", mutate)
+
+	# Bridged (non-orioledb) index: the shared DSA TIDBitmap is consumed
+	# cooperatively while the primary tree is mutated (page splits from inserts,
+	# checkpoint, re-eviction) under the parked scan.  Row visibility resolves
+	# from the primary key (the per-page primary scan uses the scan snapshot),
+	# while the bridge index is a separate mapping; to keep the compared result
+	# set deterministic the mutation inserts only non-matching rows (val = 500),
+	# reshaping the tree without changing the val < 50 result.
+	def test_bridged_survives_mutation(self):
+
+		def mutate(con):
+			con.execute("INSERT INTO o_bm SELECT i, 500 FROM "
+			            "generate_series(1000000, 1040000) i;")
+			con.execute("CHECKPOINT;")
+			con.execute(
+			    "SELECT orioledb_evict_pages('o_bm'::regclass::oid, 0);")
+
+		self._run_parked("val < 50", mutate, bridged=True)
 
 	# Two parallel bitmap scans parked at once; cross DML lands while both are
 	# parked, then both are released together.

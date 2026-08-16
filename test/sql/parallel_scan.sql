@@ -756,6 +756,47 @@ SELECT count(*), sum(a) FROM o_test_parallel_bitmap_fixed
 	WHERE val < 40 AND sqrt(a::float8) >= 0;
 COMMIT;
 
+-- Parallel bitmap scan over a single bridged (non-orioledb) index.  The bitmap
+-- qual builds a TIDBitmap in es_query_dsa; workers share its iterator and each
+-- resolves its pages to primary keys.
+BEGIN;
+CREATE TABLE o_test_parallel_bitmap_bridged (
+	id int8 PRIMARY KEY,
+	val int8
+) USING orioledb WITH (index_bridging);
+INSERT INTO o_test_parallel_bitmap_bridged
+	SELECT g, g % 1000 FROM generate_series(1, 200000) g;
+CREATE INDEX o_test_parallel_bitmap_bridged_val
+	ON o_test_parallel_bitmap_bridged USING btree (val) WITH (orioledb_index = off);
+ANALYZE o_test_parallel_bitmap_bridged;
+
+SET LOCAL enable_seqscan = off;
+SET LOCAL enable_indexscan = off;
+SET LOCAL enable_indexonlyscan = off;
+SET LOCAL parallel_setup_cost = 0;
+SET LOCAL parallel_tuple_cost = 0;
+SET LOCAL min_parallel_table_scan_size = 0;
+SET LOCAL min_parallel_index_scan_size = 0;
+SET LOCAL max_parallel_workers_per_gather = 3;
+
+-- Plan shape: Gather over a parallel custom bitmap scan on the bridged index.
+EXPLAIN (COSTS OFF)
+	SELECT count(*) FROM o_test_parallel_bitmap_bridged
+		WHERE val < 50 AND sqrt(id::float8) >= 0;
+
+-- Parallel vs serial equivalence.
+SELECT count(*), sum(id) FROM o_test_parallel_bitmap_bridged
+	WHERE val < 50 AND sqrt(id::float8) >= 0;
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT count(*), sum(id) FROM o_test_parallel_bitmap_bridged
+	WHERE val < 50 AND sqrt(id::float8) >= 0;
+
+-- Empty match.
+SET LOCAL max_parallel_workers_per_gather = 3;
+SELECT count(*) FROM o_test_parallel_bitmap_bridged
+	WHERE val = 999999 AND sqrt(id::float8) >= 0;
+COMMIT;
+
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA parallel_scan CASCADE;
 RESET search_path;
