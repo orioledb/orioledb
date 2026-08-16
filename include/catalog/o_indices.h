@@ -150,6 +150,10 @@ extern bool o_indices_update(OTable *table, OIndexNumber ixNum,
 							 OXid oxid, CommitSeqNo csn);
 extern bool o_indices_move(OTable *table, OIndexNumber ixNum,
 						   Oid old_tablespace, OXid oxid, CommitSeqNo csn);
+extern bool o_indices_set_state(ORelOids indexOids, OIndexType type,
+								char table_persistence,
+								OIndexState newState,
+								OXid oxid, CommitSeqNo csn);
 extern bool o_indices_find_table_oids(ORelOids indexOids, OIndexType type,
 									  OSnapshot *oSnapshot,
 									  ORelOids *tableOids);

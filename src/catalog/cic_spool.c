@@ -30,8 +30,11 @@
 #include "orioledb.h"
 #include "catalog/cic_spool.h"
 
+#include "btree/modify.h"
 #include "miscadmin.h"
 #include "storage/fd.h"
+#include "tableam/descr.h"
+#include "tableam/tree.h"
 #include "utils/memutils.h"
 #include "utils/wait_event.h"
 
@@ -474,6 +477,264 @@ cic_spool_close_reader(CICSpoolReader *reader)
 		pfree(reader->tupBuf);
 	pfree(reader->streams);
 	pfree(reader);
+}
+
+/* ---------------------------------------------------------------------------
+ * Abort-side REVERSE-op emission via the orioledb undo stack.
+ * ---------------------------------------------------------------------------
+ *
+ * Each user DML that captures a forward op also pushes a small undo
+ * item carrying the same payload.  On txn / subxact abort,
+ * apply_undo_stack walks the chain and fires cic_capture_undo_callback,
+ * which writes a REVERSE_* entry into the spool.  Forward and reverse
+ * entries share the same undoPosition, so a merge-sort by
+ * (undoPosition, fileSeq) pairs them adjacent and they cancel via the
+ * permissive replay callback.
+ *
+ * If the spool dir is no longer there (e.g. CIC already finished and
+ * cleaned up before this stale undo callback runs, or crash-time
+ * cleanup at startup pre-empted us), we silently skip.
+ */
+typedef struct
+{
+	UndoStackItem header;
+	ORelOids	tableOids;
+	OXid		builderOxid;
+	UndoLocation undoPosition;
+	uint8		opType;
+	uint8		keyFormatFlags;
+	uint8		tupleFormatFlags;
+	uint8		pad0;
+	uint16		keyLength;
+	uint16		tupleLength;
+	/* keyLength bytes, then tupleLength bytes, follow */
+} CICCaptureUndoStackItem;
+
+void
+cic_spool_track_for_abort(ORelOids tableOids, OXid builderOxid,
+						  UndoLocation undoPos, CICOpType opType,
+						  OTuple key, uint16 keyLen,
+						  OTuple tuple, uint16 tupleLen)
+{
+	UndoLocation location;
+	CICCaptureUndoStackItem *item;
+	LocationIndex size;
+	char	   *payload;
+
+	size = MAXALIGN(sizeof(CICCaptureUndoStackItem) + keyLen + tupleLen);
+
+	item = (CICCaptureUndoStackItem *) get_undo_record_unreserved(UndoLogRegular,
+																  &location,
+																  size);
+	item->header.type = CICCaptureUndoItemType;
+	item->header.indexType = 0;
+	item->header.itemSize = size;
+
+	item->tableOids = tableOids;
+	item->builderOxid = builderOxid;
+	item->undoPosition = undoPos;
+	item->opType = (uint8) opType;
+	item->keyFormatFlags = O_TUPLE_IS_NULL(key) ? 0 : key.formatFlags;
+	item->tupleFormatFlags = O_TUPLE_IS_NULL(tuple) ? 0 : tuple.formatFlags;
+	item->pad0 = 0;
+	item->keyLength = keyLen;
+	item->tupleLength = tupleLen;
+
+	payload = (char *) item + sizeof(CICCaptureUndoStackItem);
+	if (keyLen > 0)
+		memcpy(payload, key.data, keyLen);
+	if (tupleLen > 0)
+		memcpy(payload + keyLen, tuple.data, tupleLen);
+
+	add_new_undo_stack_item(UndoLogRegular, location);
+	release_undo_size(UndoLogRegular);
+}
+
+static bool
+cic_dir_exists(ORelOids tableOids, OXid builderOxid)
+{
+	char		dirpath[MAXPGPATH];
+	struct stat st;
+
+	cic_spool_build_dirpath(dirpath, sizeof(dirpath), tableOids, builderOxid);
+	if (stat(dirpath, &st) != 0)
+		return false;
+	return S_ISDIR(st.st_mode);
+}
+
+void
+cic_capture_undo_callback(UndoLogType undoType,
+						  UndoLocation location,
+						  UndoStackItem *baseItem,
+						  OXid oxid,
+						  OUndoCallbackStage stage,
+						  bool changeCountsValid)
+{
+	CICCaptureUndoStackItem *item = (CICCaptureUndoStackItem *) baseItem;
+	OTuple		key;
+	OTuple		tup;
+	CICOpType	reverseOp;
+	char	   *payload;
+
+	if (stage != OUndoCallbackStageAbort)
+		return;
+	if (!cic_dir_exists(item->tableOids, item->builderOxid))
+	{
+		/*
+		 * CIC dir is gone (cleaned at startup after a crash mid-CIC, or CIC
+		 * already finished and we are a late stragglerundo). Nothing to do.
+		 */
+		return;
+	}
+
+	payload = (char *) item + sizeof(CICCaptureUndoStackItem);
+
+	if (item->keyLength > 0)
+	{
+		key.data = payload;
+		key.formatFlags = item->keyFormatFlags;
+	}
+	else
+		O_TUPLE_SET_NULL(key);
+
+	if (item->tupleLength > 0)
+	{
+		tup.data = payload + item->keyLength;
+		tup.formatFlags = item->tupleFormatFlags;
+	}
+	else
+		O_TUPLE_SET_NULL(tup);
+
+	switch ((CICOpType) item->opType)
+	{
+		case CIC_OP_INSERT:
+			reverseOp = CIC_OP_REVERSE_INSERT;
+			break;
+		case CIC_OP_DELETE:
+			reverseOp = CIC_OP_REVERSE_DELETE;
+			break;
+		default:
+			/* Reverse-of-reverse is not meaningful. */
+			return;
+	}
+
+	cic_spool_append(item->tableOids, item->builderOxid,
+					 item->undoPosition, reverseOp,
+					 key, item->keyLength,
+					 tup, item->tupleLength);
+}
+
+/* ---------------------------------------------------------------------------
+ * Spool replay into the new index.
+ * ---------------------------------------------------------------------------
+ */
+
+/*
+ * Permissive insert callback: any collision on the new index during
+ * replay is silently overridden.  We don't need to think about
+ * conflict serialization because (a) the spool entries cancel each
+ * other in pairs (forward + REVERSE), (b) at phase-4 final drain the
+ * SUExclusive barrier has stopped further writers.
+ */
+static OBTreeModifyCallbackAction
+cic_replay_insert_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
+						   OXid oxid, OTupleXactInfo xactInfo,
+						   BTreeLeafTupleDeletedStatus deleted,
+						   UndoLocation location, RowLockMode *lock_mode,
+						   BTreeLocationHint *hint, void *arg)
+{
+	return OBTreeCallbackActionUpdate;
+}
+
+static OBTreeModifyCallbackAction
+cic_replay_delete_callback(BTreeDescr *descr, OTuple tup, OTuple *newtup,
+						   OXid oxid, OTupleXactInfo xactInfo,
+						   UndoLocation location, RowLockMode *lock_mode,
+						   BTreeLocationHint *hint, void *arg)
+{
+	return OBTreeCallbackActionDelete;
+}
+
+uint64
+cic_spool_replay_into(OIndexDescr *idx, OXid replayOxid, CommitSeqNo replayCsn)
+{
+	CICSpoolReader *reader;
+	CICSpoolEntry entry;
+	uint64		applied = 0;
+	BTreeModifyCallbackInfo insertCb = {
+		.waitCallback = NULL,
+		.modifyCallback = NULL,
+		.modifyDeletedCallback = cic_replay_insert_callback,
+		.needsUndoForSelfCreated = false,
+		.arg = NULL,
+	};
+	BTreeModifyCallbackInfo deleteCb = {
+		.waitCallback = NULL,
+		.modifyCallback = cic_replay_delete_callback,
+		.modifyDeletedCallback = NULL,
+		.needsUndoForSelfCreated = false,
+		.arg = NULL,
+	};
+
+	reader = cic_spool_open_reader(idx->tableOids, idx->builderOxid);
+	if (reader == NULL)
+		return 0;
+
+	while (cic_spool_read_next(reader, &entry))
+	{
+		OTuple		leafTup = {.data = entry.tupleData,.formatFlags = entry.hdr.tupleFormatFlags};
+		OBTreeKeyBound bound;
+		bool		isInsert;
+		bool		isDelete;
+
+		if (entry.hdr.tupleLength == 0 || entry.tupleData == NULL)
+			continue;			/* malformed; skip defensively */
+
+		o_fill_key_bound(idx, leafTup, BTreeKeyLeafTuple, &bound);
+
+		switch ((CICOpType) entry.hdr.opType)
+		{
+			case CIC_OP_INSERT:
+			case CIC_OP_REVERSE_DELETE:
+				isInsert = true;
+				isDelete = false;
+				break;
+			case CIC_OP_DELETE:
+			case CIC_OP_REVERSE_INSERT:
+				isInsert = false;
+				isDelete = true;
+				break;
+			default:
+				isInsert = false;
+				isDelete = false;
+				break;
+		}
+
+		if (isInsert)
+		{
+			(void) o_btree_modify(&idx->desc, BTreeOperationInsert,
+								  leafTup, BTreeKeyLeafTuple,
+								  (Pointer) &bound, BTreeKeyBound,
+								  replayOxid, replayCsn, RowLockUpdate,
+								  NULL, &insertCb);
+		}
+		else if (isDelete)
+		{
+			OTuple		nullTup;
+
+			O_TUPLE_SET_NULL(nullTup);
+			(void) o_btree_modify(&idx->desc, BTreeOperationDelete,
+								  nullTup, BTreeKeyNone,
+								  (Pointer) &bound, BTreeKeyBound,
+								  replayOxid, replayCsn, RowLockUpdate,
+								  NULL, &deleteCb);
+		}
+
+		applied++;
+	}
+
+	cic_spool_close_reader(reader);
+	return applied;
 }
 
 /* ---------------------------------------------------------------------------

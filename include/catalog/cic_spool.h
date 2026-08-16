@@ -104,6 +104,31 @@ extern void cic_spool_append(ORelOids tableOids, OXid builderOxid,
 							 OTuple tuple, uint16 tupleLen);
 
 /*
+ * Push a UndoLogRegular item that, when applied (transaction or
+ * subxact abort), will emit a compensating REVERSE_* entry to the
+ * spool.  Forward-op bytes are duplicated into the undo item so the
+ * abort callback can re-emit them verbatim with the op flipped.
+ * Subxact correctness comes for free: orioledb's apply_undo_stack
+ * already segments per subxact.
+ */
+extern void cic_spool_track_for_abort(ORelOids tableOids, OXid builderOxid,
+									  UndoLocation undoPos, CICOpType opType,
+									  OTuple key, uint16 keyLen,
+									  OTuple tuple, uint16 tupleLen);
+
+/*
+ * Public undo callback (registered in undoItemTypeDescrs).  Declared
+ * here so undo.c can grab the function pointer at module init.
+ */
+struct UndoStackItem;
+extern void cic_capture_undo_callback(UndoLogType undoType,
+									  UndoLocation location,
+									  struct UndoStackItem *baseItem,
+									  OXid oxid,
+									  OUndoCallbackStage stage,
+									  bool changeCountsValid);
+
+/*
  * Close this backend's cached fd, if any.  Called at end of CIC
  * (phase 5) and on backend exit.
  */
@@ -125,5 +150,18 @@ extern void cic_spool_close_reader(CICSpoolReader *reader);
  * (success), CIC abort, and startup cleanup for orphan dirs.
  */
 extern void cic_spool_drop_dir(ORelOids tableOids, OXid builderOxid);
+
+/*
+ * Drain the spool into a (still-being-built) index in undoPosition order
+ * using a permissive modify callback (collisions become no-ops).  Both
+ * forward and REVERSE_* entries are applied in their natural order: a
+ * REVERSE_INSERT cancels its INSERT, etc.  Returns the number of spool
+ * entries applied.  Callers run this once after the build snapshot
+ * (phase 4 drain).
+ */
+struct OIndexDescr;
+extern uint64 cic_spool_replay_into(struct OIndexDescr *idx,
+									OXid replayOxid,
+									CommitSeqNo replayCsn);
 
 #endif							/* __CIC_SPOOL_H__ */
