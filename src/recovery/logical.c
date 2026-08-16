@@ -1099,6 +1099,9 @@ decode_on_record(WalReaderState *r, WalRecord *rec)
 		case WAL_REC_BRIDGE_ERASE:
 		case WAL_REC_DATABASE_CREATE_COPY:
 		case WAL_REC_DATABASE_TEMPLATE_CHECKPOINT:
+		case WAL_REC_CIC_PHASE_3_START:
+		case WAL_REC_CIC_PHASE_4:
+		case WAL_REC_CIC_PHASE_FLIP:
 			/* Skip */
 			break;
 

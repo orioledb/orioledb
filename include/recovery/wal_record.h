@@ -60,7 +60,10 @@
 	X(WAL_REC_RELREPLIDENT,         18, "RELREPLIDENT",       wal_parse_rec_relreplident) \
 	X(WAL_REC_DATABASE_COPY,        19, "DATABASE_COPY",      wal_parse_rec_dbcopy) \
 	X(WAL_REC_DATABASE_CREATE_COPY, 20, "DATABASE_CREATE_COPY", wal_parse_rec_dbcreate_copy) \
-	X(WAL_REC_DATABASE_TEMPLATE_CHECKPOINT, 21, "DATABASE_TEMPLATE_CHECKPOINT", wal_parse_rec_dbcreate_copy)
+	X(WAL_REC_DATABASE_TEMPLATE_CHECKPOINT, 21, "DATABASE_TEMPLATE_CHECKPOINT", wal_parse_rec_dbcreate_copy) \
+	X(WAL_REC_CIC_PHASE_3_START,    22, "CIC_PHASE_3_START",  wal_parse_rec_cic_phase) \
+	X(WAL_REC_CIC_PHASE_4,          23, "CIC_PHASE_4",        wal_parse_rec_cic_phase) \
+	X(WAL_REC_CIC_PHASE_FLIP,       24, "CIC_PHASE_FLIP",     wal_parse_rec_cic_phase)
 
 typedef enum
 {
