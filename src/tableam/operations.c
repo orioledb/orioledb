@@ -1080,6 +1080,86 @@ o_check_exclusion_constraint(OTableDescr *descr, OIndexDescr *index, TupleTableS
 	return true;
 }
 
+/*
+ * The arbiter indexes that go through the bridge, as an oid list.
+ *
+ * ON CONFLICT resolves conflicts on OrioleDB's own indexes by inserting into
+ * them directly, so by the time we ask ExecCheckIndexConstraints() about the
+ * bridged ones our row is already in those trees -- and handing it the whole
+ * arbiter list makes it walk them too and report a conflict with the row we
+ * just inserted ourselves.  Only the bridged arbiters are its business.
+ *
+ * The selection mirrors the one ExecCheckIndexConstraints() makes internally,
+ * down to the partial-index predicate: it raises "unexpected failure to find
+ * arbiter index" if it is handed a non-empty list and then skips every entry
+ * in it.  An empty result here means there is nothing for it to check, and the
+ * call is skipped altogether.
+ */
+static List *
+bridged_arbiter_indexes(ResultRelInfo *resultRelInfo, List *arbiterIndexes,
+						TupleTableSlot *slot, EState *estate)
+{
+	List	   *result = NIL;
+	int			i;
+
+	for (i = 0; i < resultRelInfo->ri_NumIndices; i++)
+	{
+		Relation	indexRel = resultRelInfo->ri_IndexRelationDescs[i];
+		IndexInfo  *indexInfo = resultRelInfo->ri_IndexRelationInfo[i];
+		OBTOptions *options;
+
+		if (indexRel == NULL || indexInfo == NULL)
+			continue;
+
+		if (arbiterIndexes != NIL &&
+			!list_member_oid(arbiterIndexes, RelationGetRelid(indexRel)))
+			continue;
+
+		options = (OBTOptions *) indexRel->rd_options;
+		if (indexRel->rd_rel->relam == BTREE_AM_OID &&
+			!(options && !options->orioledb_index))
+			continue;
+
+		if (!indexInfo->ii_ReadyForInserts ||
+			(!indexInfo->ii_Unique && indexInfo->ii_ExclusionOps == NULL))
+			continue;
+
+		/*
+		 * Same refusal the loop over OrioleDB's own indexes makes: a named
+		 * arbiter that is deferred cannot arbitrate anything.
+		 */
+		if (!indexRel->rd_index->indimmediate)
+		{
+			if (arbiterIndexes != NIL)
+				ereport(ERROR,
+						(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+						 errmsg("ON CONFLICT does not support deferrable unique constraints/exclusion constraints as arbiters"),
+						 errtableconstraint(resultRelInfo->ri_RelationDesc,
+											RelationGetRelationName(indexRel))));
+			continue;
+		}
+
+		if (indexInfo->ii_Predicate != NIL)
+		{
+			ExprState  *predicate = indexInfo->ii_PredicateState;
+			ExprContext *econtext = GetPerTupleExprContext(estate);
+
+			if (predicate == NULL)
+			{
+				predicate = ExecPrepareQual(indexInfo->ii_Predicate, estate);
+				indexInfo->ii_PredicateState = predicate;
+			}
+			econtext->ecxt_scantuple = slot;
+			if (!ExecQual(predicate, econtext))
+				continue;
+		}
+
+		result = lappend_oid(result, RelationGetRelid(indexRel));
+	}
+
+	return result;
+}
+
 TupleTableSlot *
 o_tbl_insert_with_arbiter(Relation rel,
 						  OTableDescr *descr,
@@ -1098,6 +1178,12 @@ o_tbl_insert_with_arbiter(Relation rel,
 	CommitSeqNo csn;
 	OXid		oxid;
 	Datum		conflictRowid = PointerGetDatum((void *) 0xB0B);
+	List	   *bridgeArbiterIndexes = NIL;
+
+	if (descr->bridge)
+		bridgeArbiterIndexes = bridged_arbiter_indexes(resultRelInfo,
+													   arbiterIndexes,
+													   slot, estate);
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 	csn = oSnapshot.csn;
@@ -1186,13 +1272,16 @@ o_tbl_insert_with_arbiter(Relation rel,
 				invalidItemPtrDatum = ItemPointerGetDatum(&invalidItemPtr);
 			}
 
-			if (!ExecCheckIndexConstraints(resultRelInfo, slot, estate,
+			if (bridgeArbiterIndexes != NIL &&
+				!ExecCheckIndexConstraints(resultRelInfo, slot, estate,
 										   conflictRowidPtrDatum,
-										   invalidItemPtrDatum, arbiterIndexes))
+										   invalidItemPtrDatum,
+										   bridgeArbiterIndexes))
 #else
-			if (!ExecCheckIndexConstraints(resultRelInfo, slot, estate,
+			if (bridgeArbiterIndexes != NIL &&
+				!ExecCheckIndexConstraints(resultRelInfo, slot, estate,
 										   conflictRowidPtrDatum,
-										   arbiterIndexes))
+										   bridgeArbiterIndexes))
 #endif
 			{
 				if (lockedSlot)
