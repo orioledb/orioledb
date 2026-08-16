@@ -37,6 +37,14 @@
 /*
  * Context for o_btree_modify_internal()
  */
+/*
+ * How many fruitless conflict retries before the modify loop reports itself.
+ * High enough that ordinary contention never trips it -- a real conflict is
+ * resolved within a handful of retries -- and low enough that a loop which
+ * will never converge says so within milliseconds.
+ */
+#define MODIFY_CONFLICT_RETRY_REPORT 10000
+
 typedef struct
 {
 	OBTreeFindPageContext *pageFindContext;
@@ -63,6 +71,7 @@ typedef struct
 	BTreeKeyType keyType;
 	UndoLocation savepointUndoLocation;
 	BTreeModifyCallbackInfo *callbackInfo;
+	int			conflictRetries;
 } BTreeModifyInternalContext;
 
 typedef enum ConflictResolution
@@ -145,6 +154,7 @@ o_btree_modify_internal(OBTreeFindPageContext *pageFindContext,
 	context.savepointUndoLocation = get_subxact_undo_location(desc->undoType);
 	context.pageReserveKind = pageReserveKind;
 	context.callbackInfo = callbackInfo;
+	context.conflictRetries = 0;
 
 	Assert(callbackInfo);
 	Assert((action != BTreeOperationInsert) || (tupleType == BTreeKeyLeafTuple));
@@ -632,6 +642,27 @@ o_btree_modify_handle_conflicts(BTreeModifyInternalContext *context)
 				{
 					Assert(cbAction == OBTreeCallbackActionXidNoWait);
 				}
+
+				/*
+				 * This retry can fail to converge.  If the conflicting
+				 * transaction has no owning process -- which is what every
+				 * transaction that was in flight at crash time looks like --
+				 * wait_for_tuple() above returns without blocking, the
+				 * conflict is still there when we look again, and we come
+				 * straight back here.  A backend can at least be cancelled;
+				 * the startup process cannot, so replay spins on one record
+				 * at 100% CPU and the cluster never opens.
+				 *
+				 * Make that state observable: the loop is otherwise
+				 * completely silent.  The page lock is already dropped here,
+				 * so waiting is safe.
+				 */
+				if (++context->conflictRetries == MODIFY_CONFLICT_RETRY_REPORT)
+					elog(LOG, "orioledb: modify conflict retry is not converging: "
+						 "oxid " UINT64_FORMAT ", conflicting oxid " UINT64_FORMAT
+						 ", %d retries, recovery %d",
+						 (uint64) context->opOxid, (uint64) oxid,
+						 context->conflictRetries, is_recovery_process() ? 1 : 0);
 
 				result = refind_page(pageFindContext,
 									 context->key,

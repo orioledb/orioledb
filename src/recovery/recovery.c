@@ -1956,7 +1956,7 @@ recovery_finish(int worker_id)
 			 * complete by now, so ask it.  Rolling such a transaction back
 			 * would undo changes PostgreSQL considers committed.
 			 *
-			 * Done here rather than from o_xact_redo_hook() on the heap
+			 * Done here rather than from o_xact_redo_hook() on the builtin
 			 * commit record: several oxids can share one heap xid, most of
 			 * them resolve themselves (possibly through the deferred
 			 * finished_list), and settling an already settled oxid again
@@ -2419,6 +2419,24 @@ recovery_finish_current_oxid(CommitSeqNo csn, XLogRecPtr ptr,
 
 	for (i = 0; i < (int) UndoLogsCount; i++)
 		release_undo_size((UndoLogType) i);
+
+	/*
+	 * The transaction is settled, so it must not be settled a second time by
+	 * a builtin commit record naming the same heap xid.  An oxid stays on
+	 * joint_commit_list from its WAL_REC_JOINT_COMMIT until the builtin
+	 * record arrives, and in that window it can perfectly well reach a finish
+	 * record of its own: a subtransaction's joint commit is written long
+	 * before the transaction ends, and the transaction may then abort.
+	 * Deleting the current node here is safe for the dlist_foreach_modify()
+	 * in o_xact_redo_hook(), which is the other caller.
+	 */
+	if (cur_recovery_xid_state->in_joint_commit_list)
+	{
+		dlist_delete_from_thoroughly(&joint_commit_list,
+									 &cur_recovery_xid_state->joint_commit_list_node);
+		cur_recovery_xid_state->in_joint_commit_list = false;
+	}
+
 	check_delete_xid_state(cur_recovery_xid_state, worker_id);
 
 	cur_recovery_xid_state = NULL;
@@ -4552,6 +4570,24 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				Assert(rec->oxid != InvalidOXid);
 				Assert(cur_recovery_xid_state != NULL);
 
+				/*
+				 * A transaction that rides on a heap xid is settled by
+				 * o_xact_redo_hook() on the builtin record, and on the abort
+				 * path that record comes *first*: RecordTransactionAbort()
+				 * runs before XACT_EVENT_ABORT, where wal_rollback() writes
+				 * this record.  Settling it a second time would push the same
+				 * state onto finished_list twice -- which closes that list
+				 * into a cycle, so its drain walks an entry it already freed.
+				 * The verdicts always agree (a builtin abort record and an
+				 * OrioleDB rollback record describe the same abort), so the
+				 * second settle is simply dropped.
+				 */
+				if (!COMMITSEQNO_IS_INPROGRESS(cur_recovery_xid_state->csn))
+				{
+					rec->oxid = InvalidOXid;
+					break;
+				}
+
 				if (!ctx->single)
 				{
 					workers_send_oxid_finish(ctx->xlogRecEndPtr,
@@ -5072,12 +5108,14 @@ o_xact_redo_hook(TransactionId xid, XLogRecPtr lsn, bool commit)
 				invalidate_typcache();
 		}
 
-		dlist_delete_from_thoroughly(&joint_commit_list, miter.cur);
-		state->in_joint_commit_list = false;
-
+		/* unlinks the entry from joint_commit_list */
 		recovery_finish_current_oxid(commit ? COMMITSEQNO_MAX_NORMAL - 1 : COMMITSEQNO_ABORTED,
 									 lsn, -1, sync);
-		break;
+
+		/*
+		 * Keep going: several oxids can ride on one heap xid, and all of them
+		 * are settled by this record.
+		 */
 	}
 }
 
