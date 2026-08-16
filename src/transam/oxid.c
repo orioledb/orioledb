@@ -138,7 +138,7 @@ typedef struct
 {
 	LogicalXidCtx ctx;
 	SubTransactionId subid;
-} PrevLogicalXidEntry;
+}			PrevLogicalXidEntry;
 
 static List *prevLogicalXids = NIL; /* stack of PrevLogicalXidEntry for all
 									 * xids on subxact's chain, for correct
@@ -704,6 +704,24 @@ oxid_subxact_callback(
 								 get_current_oxid_if_any(),
 								 logicalXidContext.xid,
 								 GetTopTransactionIdIfAny());
+
+							/*
+							 * Give back the id this subtransaction assigned
+							 * at its start: the restore below drops it, and
+							 * nothing else ever reclaims it --
+							 * release_assigned_logical_xids() only walks the
+							 * current context and the stacked parents.  Every
+							 * rolled back subtransaction otherwise costs one
+							 * slot of the shared bitmap for good.
+							 *
+							 * Only when this subtransaction pushed something,
+							 * mirroring setup_prev_logical_xid_ctx(): if it
+							 * did not, the current id belongs to the whole
+							 * transaction and has to survive up to the
+							 * top-level commit record.
+							 */
+							if (prev_logical_xid_pushed_by(mySubid))
+								release_logical_xid(&logicalXidContext);
 
 							setup_prev_logical_xid_ctx(mySubid);
 						}
