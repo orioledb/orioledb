@@ -2823,3 +2823,25 @@ orioledb_calculate_database_size(Oid dbOid)
 		 totalsize);
 	return totalsize;
 }
+
+/*
+ * ReindexConcurrentlySkipHook callback.
+ *
+ * Skip the primary index of orioledb tables when REINDEX TABLE CONCURRENTLY
+ * walks the heap's index list.  OrioleDB's primary index is the table itself
+ * -- redefining it rewrites every row under AccessExclusiveLock and is
+ * therefore fundamentally non-concurrent.  Users who need to rebuild the
+ * primary key can use plain REINDEX (without CONCURRENTLY).
+ *
+ * For non-orioledb heaps and for non-primary indexes the callback returns
+ * false, leaving the standard PG behavior intact.
+ */
+bool
+orioledb_reindex_concurrently_skip(Relation heapRelation, Relation indexRelation)
+{
+	if (!is_orioledb_rel(heapRelation))
+		return false;
+	if (!indexRelation->rd_index->indisprimary)
+		return false;
+	return true;
+}
