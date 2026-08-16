@@ -1267,6 +1267,31 @@ SELECT id FROM o_bridge_ioc WHERE tags @> ARRAY[10] ORDER BY id;
 SELECT id FROM o_bridge_ioc WHERE tags @> ARRAY[20] ORDER BY id;
 RESET enable_seqscan;
 
+-- One statement, some rows changing a bridged index column and some not.  The
+-- slot is reused for every row, and the flag saying "this row got a new bridge
+-- ctid" used to survive into the next one -- so a row that kept its ctid was
+-- inserted into the bridged index a second time under it.  GIN's build
+-- accumulator asserts on a repeated tid, so on an assert build the UPDATE
+-- below took the server down at the next pending-list cleanup.
+CREATE TABLE o_bridge_mixed (
+	id int NOT NULL PRIMARY KEY,
+	tags int[],
+	other int
+) USING orioledb;
+CREATE INDEX ON o_bridge_mixed USING gin(tags);
+INSERT INTO o_bridge_mixed
+	SELECT i, ARRAY[i], i FROM generate_series(1, 4) i;
+
+UPDATE o_bridge_mixed
+   SET tags = CASE WHEN id % 2 = 1 THEN tags || 99 ELSE tags END
+ WHERE other > 0;
+VACUUM o_bridge_mixed;
+
+SET enable_seqscan = off;
+SELECT id FROM o_bridge_mixed WHERE tags @> ARRAY[99] ORDER BY id;
+SELECT id FROM o_bridge_mixed WHERE tags @> ARRAY[2] ORDER BY id;
+RESET enable_seqscan;
+
 DROP EXTENSION pageinspect;
 DROP EXTENSION orioledb CASCADE;
 DROP SCHEMA index_bridging CASCADE;
