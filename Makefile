@@ -235,6 +235,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/restartpoint_ddl_window_test.py \
 						test/t/s3_test.py \
 						test/t/schema_test.py \
+						test/t/seq_scan_own_write_test.py \
 						test/t/seq_scan_resowner_test.py \
 						test/t/seq_scan_undo_test.py \
 						test/t/temp_local_pool_test.py \
