@@ -11,7 +11,7 @@ SELECT split_part(setting, '.', 1) major_version
 	FROM pg_settings WHERE name = 'server_version';
  major_version 
 ---------------
- 16
+ 18
 (1 row)
 
 SELECT orioledb_parallel_debug_start();
@@ -958,69 +958,69 @@ SELECT count(*) FROM o_test65;
     60
 (1 row)
 
-SELECT id, val FROM o_test65;
+SELECT id, val FROM o_test65 ORDER BY id;
  id | val 
 ----+-----
- 60 | 61
- 59 | 60
- 58 | 59
- 57 | 58
- 56 | 57
- 55 | 56
- 54 | 55
- 53 | 54
- 52 | 53
- 51 | 52
- 50 | 51
- 49 | 50
- 48 | 49
- 47 | 48
- 46 | 47
- 45 | 46
- 44 | 45
- 43 | 44
- 42 | 43
- 41 | 42
- 40 | 41
- 39 | 40
- 38 | 39
- 37 | 38
- 36 | 37
- 35 | 36
- 34 | 35
- 33 | 34
- 32 | 33
- 31 | 32
- 30 | 31
- 29 | 30
- 28 | 29
- 27 | 28
- 26 | 27
- 25 | 26
- 24 | 25
- 23 | 24
- 22 | 23
- 21 | 22
- 20 | 21
- 19 | 20
- 18 | 19
- 17 | 18
- 16 | 17
- 15 | 16
- 14 | 15
- 13 | 14
- 12 | 13
- 11 | 12
- 10 | 11
-  9 | 10
-  8 | 9
-  7 | 8
-  6 | 7
-  5 | 6
-  4 | 5
-  3 | 4
-  2 | 3
   1 | 2
+  2 | 3
+  3 | 4
+  4 | 5
+  5 | 6
+  6 | 7
+  7 | 8
+  8 | 9
+  9 | 10
+ 10 | 11
+ 11 | 12
+ 12 | 13
+ 13 | 14
+ 14 | 15
+ 15 | 16
+ 16 | 17
+ 17 | 18
+ 18 | 19
+ 19 | 20
+ 20 | 21
+ 21 | 22
+ 22 | 23
+ 23 | 24
+ 24 | 25
+ 25 | 26
+ 26 | 27
+ 27 | 28
+ 28 | 29
+ 29 | 30
+ 30 | 31
+ 31 | 32
+ 32 | 33
+ 33 | 34
+ 34 | 35
+ 35 | 36
+ 36 | 37
+ 37 | 38
+ 38 | 39
+ 39 | 40
+ 40 | 41
+ 41 | 42
+ 42 | 43
+ 43 | 44
+ 44 | 45
+ 45 | 46
+ 46 | 47
+ 47 | 48
+ 48 | 49
+ 49 | 50
+ 50 | 51
+ 51 | 52
+ 52 | 53
+ 53 | 54
+ 54 | 55
+ 55 | 56
+ 56 | 57
+ 57 | 58
+ 58 | 59
+ 59 | 60
+ 60 | 61
 (60 rows)
 
 SET enable_seqscan = off;
@@ -1855,13 +1855,11 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv = '22';
 
 -- Test Result node processing
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idi = 1;
-                      QUERY PLAN                       
--------------------------------------------------------
+        QUERY PLAN        
+--------------------------
  Result
    One-Time Filter: false
-   ->  Index Only Scan using o_test66_reg1 on o_test66
-         Index Cond: (idi = 2)
-(4 rows)
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idi = 1;
  idi | idv 
@@ -2097,12 +2095,11 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -2249,12 +2246,11 @@ SELECT idi, idv FROM o_test66 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -2266,12 +2262,11 @@ SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
  idi | idv 
@@ -2959,12 +2954,11 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -3105,12 +3099,11 @@ SELECT idi, idv FROM o_test67 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -3798,12 +3791,11 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi = ANY ('{2,4}'::integer[])) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -3944,12 +3936,11 @@ SELECT idi, idv FROM o_test68 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
-                    QUERY PLAN                     
----------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -3961,12 +3952,11 @@ SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
-                        QUERY PLAN                        
-----------------------------------------------------------
+                          QUERY PLAN                           
+---------------------------------------------------------------
  Index Only Scan Backward using o_test68_reg1 on o_test68
-   Index Cond: (idi > 1)
-   Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Index Cond: ((idi > 1) AND (idv = ANY ('{12,22}'::text[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
  idi | idv 
@@ -4652,12 +4642,11 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                   QUERY PLAN                    
--------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: (idv = ANY ('{12,22}'::text[]))
-   Filter: (idi = ANY ('{2,4}'::integer[]))
-(3 rows)
+   Index Cond: ((idv = ANY ('{12,22}'::text[])) AND (idi = ANY ('{2,4}'::integer[])))
+(2 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -5685,11 +5674,11 @@ SELECT * FROM o_test_partial_idx_update;
   1 |  100500 |  0
 (1 row)
 
-EXPLAIN SELECT * FROM o_test_partial_idx_update
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_partial_idx_update
 	WHERE user_id=100500 and am > 0;
-                                                      QUERY PLAN                                                      
-----------------------------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_partial_idx_update_idx1 on o_test_partial_idx_update  (cost=0.15..4.19 rows=2 width=24)
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Index Only Scan using o_test_partial_idx_update_idx1 on o_test_partial_idx_update
    Index Cond: ((user_id = 100500) AND (am > 0))
 (2 rows)
 
@@ -5699,11 +5688,11 @@ SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
 (0 rows)
 
 SET enable_bitmapscan = off;
-EXPLAIN SELECT * FROM o_test_partial_idx_update
+EXPLAIN (COSTS OFF) SELECT * FROM o_test_partial_idx_update
 	WHERE user_id=100500 and am > 0;
-                                                      QUERY PLAN                                                      
-----------------------------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_partial_idx_update_idx1 on o_test_partial_idx_update  (cost=0.15..4.19 rows=2 width=24)
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Index Only Scan using o_test_partial_idx_update_idx1 on o_test_partial_idx_update
    Index Cond: ((user_id = 100500) AND (am > 0))
 (2 rows)
 
@@ -5735,6 +5724,10 @@ INSERT INTO o_test_unique_as_pkey (key, val, val2)
 Indexes:
     "o_test_unique_as_pkey_pkey" PRIMARY KEY, btree (key, val)
     "o_test_unique_as_pkey_ix1" UNIQUE, btree (val, key)
+Not-null constraints:
+    "o_test_unique_as_pkey_key_not_null" NOT NULL "key"
+    "o_test_unique_as_pkey_val_not_null" NOT NULL "val"
+    "o_test_unique_as_pkey_val2_not_null" NOT NULL "val2"
 
 SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
               orioledb_tbl_indices              
@@ -5781,6 +5774,10 @@ Indexes:
     "o_test_unique_as_pkey_pkey" PRIMARY KEY, btree (key, val)
     "o_test_unique_as_pkey_ix1" UNIQUE, btree (val, key)
     "o_test_unique_as_pkey_ix2" UNIQUE, btree (val, key)
+Not-null constraints:
+    "o_test_unique_as_pkey_key_not_null" NOT NULL "key"
+    "o_test_unique_as_pkey_val_not_null" NOT NULL "val"
+    "o_test_unique_as_pkey_val2_not_null" NOT NULL "val2"
 
 SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
               orioledb_tbl_indices              
@@ -6081,6 +6078,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 \d+ o_test_reuse_multiple_indices_ix1
       Index "indices.o_test_reuse_multiple_indices_ix1"
@@ -6358,6 +6358,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 EXPLAIN (COSTS OFF)
 	SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
@@ -6376,10 +6379,10 @@ SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
  f
 (5 rows)
 
-EXPLAIN SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
-                                                         QUERY PLAN                                                         
-----------------------------------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices  (cost=0.13..4.21 rows=5 width=8)
+EXPLAIN (COSTS OFF) SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices
 (1 row)
 
 SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
@@ -6438,10 +6441,10 @@ SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
  
 (1 row)
 
-EXPLAIN SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
-                                                         QUERY PLAN                                                         
-----------------------------------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices  (cost=0.13..4.21 rows=5 width=9)
+EXPLAIN (COSTS OFF) SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices
 (1 row)
 
 SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
@@ -6469,6 +6472,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 \d+ o_test_reuse_multiple_indices_ix1
       Index "indices.o_test_reuse_multiple_indices_ix1"
@@ -6867,6 +6873,9 @@ Indexes:
     "o_test_reuse_multiple_indices_ix2" btree (val_3 DESC, val_2 DESC)
     "o_test_reuse_multiple_indices_ix3" btree (val_4) INCLUDE (val_2)
     "o_test_reuse_multiple_indices_ix4" btree (val_5) INCLUDE (val_1, val_2)
+Not-null constraints:
+    "o_test_reuse_multiple_indices_val_1_not_null" NOT NULL "val_1"
+    "o_test_reuse_multiple_indices_val_2_not_null" NOT NULL "val_2"
 
 \d+ o_test_reuse_multiple_indices_ix1
       Index "indices.o_test_reuse_multiple_indices_ix1"
@@ -6950,6 +6959,8 @@ Indexes:
     "o_test_include_like_ix1" btree (key)
     "o_test_include_like_ix2" btree (value)
     "o_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 CREATE TABLE IF NOT EXISTS o_test_include_like_like
 	(LIKE o_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
@@ -6992,6 +7003,8 @@ Indexes:
     "o_test_include_like_like_key_idx" btree (key)
     "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value)
     "o_test_include_like_like_value_idx" btree (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 DROP TABLE o_test_include_like_like;
 ALTER TABLE o_test_include_like DROP CONSTRAINT o_test_include_like_pkey;
@@ -7032,6 +7045,8 @@ Indexes:
     "o_test_include_like_ix1" btree (key)
     "o_test_include_like_ix2" btree (value)
     "o_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 CREATE TABLE IF NOT EXISTS o_test_include_like_like
 	(LIKE o_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
@@ -7073,6 +7088,8 @@ Indexes:
     "o_test_include_like_like_key_idx" btree (key)
     "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value)
     "o_test_include_like_like_value_idx" btree (value)
+Not-null constraints:
+    "o_test_include_like_key_not_null" NOT NULL "key"
 
 DROP TABLE o_test_include_like_like;
 -- Test that fields also added when we create table like postgres table
@@ -7098,6 +7115,8 @@ Indexes:
     "pg_test_include_like_ix1" btree (key)
     "pg_test_include_like_ix2" btree (value)
     "pg_test_include_like_ix_include" UNIQUE, btree (val2) INCLUDE (value)
+Not-null constraints:
+    "pg_test_include_like_key_not_null" NOT NULL "key"
 
 CREATE TABLE IF NOT EXISTS o_test_include_like_like
 	(LIKE pg_test_include_like INCLUDING INDEXES INCLUDING CONSTRAINTS)
@@ -7140,6 +7159,8 @@ Indexes:
     "o_test_include_like_like_key_idx" btree (key)
     "o_test_include_like_like_val2_value_idx" UNIQUE, btree (val2) INCLUDE (value)
     "o_test_include_like_like_value_idx" btree (value)
+Not-null constraints:
+    "pg_test_include_like_key_not_null" NOT NULL "key"
 
 DROP TABLE o_test_include_like_like;
 CREATE TABLE o_test_partial_unique(
@@ -7338,6 +7359,11 @@ CREATE INDEX o_test_pkey_mixed_ix1
 Indexes:
     "o_test_pkey_mixed_pkey" PRIMARY KEY, btree (pk1, pk2, pk3, pk4)
     "o_test_pkey_mixed_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 SELECT orioledb_tbl_indices('o_test_pkey_mixed'::regclass);
@@ -7375,6 +7401,11 @@ Indexes:
     "o_test_pkey_mixed_pkey" PRIMARY KEY, btree (pk1, pk2, pk3, pk4)
     "o_test_pkey_mixed_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
     "o_test_pkey_mixed_uniq1" UNIQUE, btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 -- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
@@ -7419,6 +7450,11 @@ Indexes:
     "o_test_pkey_mixed_ix1" btree (f1, f2, pk1, f3) INCLUDE (i1, pk4, i2)
     "o_test_pkey_mixed_ix3" btree (f3, f2, pk4, f1, pk4) INCLUDE (pk3)
     "o_test_pkey_mixed_uniq1" UNIQUE, btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 -- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
@@ -7470,6 +7506,11 @@ Indexes:
     "o_test_pkey_mixed_ix3" btree (f3, f2, pk4, f1, pk4) INCLUDE (pk3)
     "o_test_pkey_mixed_ix4" btree (i1, f1, pk4, f2, pk4) INCLUDE (pk3, i2)
     "o_test_pkey_mixed_uniq1" UNIQUE, btree (f2, f1, pk1, f3) INCLUDE (i1, pk4, i2)
+Not-null constraints:
+    "o_test_pkey_mixed_pk1_not_null" NOT NULL "pk1"
+    "o_test_pkey_mixed_pk2_not_null" NOT NULL "pk2"
+    "o_test_pkey_mixed_pk3_not_null" NOT NULL "pk3"
+    "o_test_pkey_mixed_pk4_not_null" NOT NULL "pk4"
 
 -- f1 f2 pk1 f3 i1 pk4 i2 pk2 pk3
 -- f2 f1 pk1 f3 i1 pk4 i2 pk2 pk3
@@ -7650,6 +7691,8 @@ CREATE TABLE o_test_pkey_include_box
  f2     | integer |           |          |         | plain   |              | 
 Indexes:
     "o_test_pkey_include_box_pkey" PRIMARY KEY, btree (pk1) INCLUDE (pk2)
+Not-null constraints:
+    "o_test_pkey_include_box_pk1_not_null" NOT NULL "pk1"
 
 SELECT orioledb_tbl_indices('o_test_pkey_include_box'::regclass);
               orioledb_tbl_indices              
@@ -7797,6 +7840,8 @@ Indexes:
     "o_test_include_box_with_pkey_pkey" PRIMARY KEY, btree (val_1)
     "o_test_include_box_with_pkey_ix1" UNIQUE, btree (val_2) INCLUDE (val_4)
     "o_test_include_box_with_pkey_ix2" UNIQUE, btree (val_3)
+Not-null constraints:
+    "o_test_include_box_with_pkey_val_1_not_null" NOT NULL "val_1"
 
 SELECT orioledb_tbl_indices('o_test_include_box_with_pkey'::regclass);
                orioledb_tbl_indices                
@@ -8106,12 +8151,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on o_test_row_searchkey
          Filter: ((val_1 > 1) OR ((val_1 = 1) AND (val_2 > 2)))
          Bitmap heap scan
-         Recheck Cond: (((val_1 = 2) AND (val_2 < 3)) OR (val_1 < 2))
+         Recheck Cond: ((val_1 < 2) OR ((val_1 = 2) AND (val_2 < 3)))
          ->  BitmapOr
                ->  Bitmap Index Scan on o_test_row_searchkey_pkey
-                     Index Cond: ((val_1 = 2) AND (val_2 < 3))
-               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
                      Index Cond: (val_1 < 2)
+               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
+                     Index Cond: ((val_1 = 2) AND (val_2 < 3))
 (11 rows)
 
 SELECT * FROM o_test_row_searchkey
@@ -8164,12 +8209,12 @@ EXPLAIN (COSTS OFF)
    ->  Custom Scan (o_scan) on o_test_row_searchkey
          Filter: ((val_1 > 1) OR ((val_1 = 1) AND (val_2 >= 2)))
          Bitmap heap scan
-         Recheck Cond: (((val_1 = 2) AND (val_2 <= 3)) OR (val_1 < 2))
+         Recheck Cond: ((val_1 < 2) OR ((val_1 = 2) AND (val_2 <= 3)))
          ->  BitmapOr
                ->  Bitmap Index Scan on o_test_row_searchkey_pkey
-                     Index Cond: ((val_1 = 2) AND (val_2 <= 3))
-               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
                      Index Cond: (val_1 < 2)
+               ->  Bitmap Index Scan on o_test_row_searchkey_pkey
+                     Index Cond: ((val_1 = 2) AND (val_2 <= 3))
 (11 rows)
 
 SELECT * FROM o_test_row_searchkey
@@ -8464,6 +8509,8 @@ CREATE INDEX o_test_pkey_include_same_fields_ix1
 Indexes:
     "o_test_pkey_include_same_fields_pkey" PRIMARY KEY, btree (val_1) INCLUDE (val_2, val_2)
     "o_test_pkey_include_same_fields_ix1" btree (val_1) INCLUDE (val_2, val_2)
+Not-null constraints:
+    "o_test_pkey_include_same_fields_val_1_not_null" NOT NULL "val_1"
 
 SELECT orioledb_tbl_indices('o_test_pkey_include_same_fields'::regclass);
               orioledb_tbl_indices              
@@ -8584,12 +8631,12 @@ INSERT INTO o_test_saop
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
-                                   QUERY PLAN                                    
----------------------------------------------------------------------------------
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_saop
-   Filter: ((k > ALL ('{7,8}'::integer[])) AND (j = ANY ('{3,4,5}'::integer[])))
+   Filter: (k > ALL ('{7,8}'::integer[]))
    Forward index only scan of: o_test_saop_pkey
-   Conds: (i < ANY ('{3,4,5}'::integer[]))
+   Conds: ((i < ANY ('{3,4,5}'::integer[])) AND (j = ANY ('{3,4,5}'::integer[])))
 (4 rows)
 
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 5]) AND k > ALL(ARRAY[7, 8]) ORDER BY i, j, k;
@@ -8614,13 +8661,12 @@ SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[3, 4, 5]) AND j = ANY(ARRAY[3, 4, 
 
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) ORDER BY i, j, k;
-                   QUERY PLAN                   
-------------------------------------------------
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_saop
-   Filter: (k = ANY ('{3,5}'::integer[]))
    Forward index only scan of: o_test_saop_pkey
-   Conds: (i = ANY ('{1,3}'::integer[]))
-(4 rows)
+   Conds: ((i = ANY ('{1,3}'::integer[])) AND (k = ANY ('{3,5}'::integer[])))
+(3 rows)
 
 SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) ORDER BY i, j, k;
  i | j | k 
@@ -8669,13 +8715,12 @@ SELECT * FROM o_test_saop WHERE i = ANY(ARRAY[1, 3]) AND k = ANY(ARRAY[3, 5]) OR
 
 EXPLAIN (COSTS OFF)
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
-                   QUERY PLAN                   
-------------------------------------------------
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
  Custom Scan (o_scan) on o_test_saop
-   Filter: (j = ANY ('{1,3}'::integer[]))
    Forward index only scan of: o_test_saop_pkey
-   Conds: (i < ANY ('{1,2}'::integer[]))
-(4 rows)
+   Conds: ((i < ANY ('{1,2}'::integer[])) AND (j = ANY ('{1,3}'::integer[])))
+(3 rows)
 
 SELECT * FROM o_test_saop WHERE i < ANY(ARRAY[1, 2]) AND j = ANY(ARRAY[1, 3]) ORDER BY i, j, k;
  i | j | k 
@@ -8781,10 +8826,11 @@ SELECT conname, contype, conindid::regclass
 FROM pg_constraint
 WHERE conrelid = 'o_test_add_index_constraint'::regclass
 ORDER BY conname;
-  conname  | contype | conindid  
------------+---------+-----------
- o_test_pk | p       | o_test_pk
-(1 row)
+                 conname                 | contype | conindid  
+-----------------------------------------+---------+-----------
+ o_test_add_index_constraint_id_not_null | n       | -
+ o_test_pk                               | p       | o_test_pk
+(2 rows)
 
 -- Test constraint enforcement
 INSERT INTO o_test_add_index_constraint VALUES (4, 'four');  -- Should succeed
@@ -8798,10 +8844,11 @@ SELECT conname, contype, conindid::regclass
 FROM pg_constraint
 WHERE conrelid = 'o_test_add_index_constraint'::regclass
 ORDER BY conname;
-  conname  | contype | conindid  
------------+---------+-----------
- o_test_pk | p       | o_test_pk
-(1 row)
+                 conname                 | contype | conindid  
+-----------------------------------------+---------+-----------
+ o_test_add_index_constraint_id_not_null | n       | -
+ o_test_pk                               | p       | o_test_pk
+(2 rows)
 
 -- Test AT_AddIndexConstraint: Add UNIQUE constraint using existing index
 ALTER TABLE o_test_add_index_constraint
@@ -8812,11 +8859,12 @@ SELECT conname, contype, conindid::regclass
 FROM pg_constraint
 WHERE conrelid = 'o_test_add_index_constraint'::regclass
 ORDER BY conname;
-  conname  | contype | conindid  
------------+---------+-----------
- o_test_pk | p       | o_test_pk
- o_test_uq | u       | o_test_uq
-(2 rows)
+                 conname                 | contype | conindid  
+-----------------------------------------+---------+-----------
+ o_test_add_index_constraint_id_not_null | n       | -
+ o_test_pk                               | p       | o_test_pk
+ o_test_uq                               | u       | o_test_uq
+(3 rows)
 
 -- Test UNIQUE constraint enforcement
 INSERT INTO o_test_add_index_constraint VALUES (5, 'five');  -- Should succeed
@@ -9042,7 +9090,8 @@ EXPLAIN (COSTS OFF)
                       QUERY PLAN                       
 -------------------------------------------------------
  Index Only Scan using o_ios_sk_dup_ix on o_ios_sk_dup
-(1 row)
+   Disabled: true
+(2 rows)
 
 SELECT val_1 FROM o_ios_sk_dup ORDER BY val_1;
  val_1 
@@ -9059,7 +9108,8 @@ EXPLAIN (COSTS OFF)
                       QUERY PLAN                       
 -------------------------------------------------------
  Index Only Scan using o_ios_sk_dup_ix on o_ios_sk_dup
-(1 row)
+   Disabled: true
+(2 rows)
 
 SELECT val_1, val_2 FROM o_ios_sk_dup ORDER BY val_1;
  val_1 | val_2 
@@ -9082,7 +9132,8 @@ EXPLAIN (COSTS OFF) SELECT a, b FROM o_ios_pk_dup ORDER BY a, b;
                       QUERY PLAN                       
 -------------------------------------------------------
  Index Only Scan using o_ios_pk_dup_ix on o_ios_pk_dup
-(1 row)
+   Disabled: true
+(2 rows)
 
 SELECT a, b FROM o_ios_pk_dup ORDER BY a, b;
  a |   b   
@@ -9109,7 +9160,8 @@ EXPLAIN (COSTS OFF) SELECT a, b, c FROM o_ios_pk_sk_dup ORDER BY a, b;
                          QUERY PLAN                          
 -------------------------------------------------------------
  Index Only Scan using o_ios_pk_sk_dup_ix on o_ios_pk_sk_dup
-(1 row)
+   Disabled: true
+(2 rows)
 
 SELECT a, b, c FROM o_ios_pk_sk_dup ORDER BY a, b;
  a | b  |  c  
@@ -9137,7 +9189,8 @@ EXPLAIN (COSTS OFF) SELECT a, b FROM o_ios_pk_include ORDER BY b;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  Index Only Scan using o_ios_pk_include_ix on o_ios_pk_include
-(1 row)
+   Disabled: true
+(2 rows)
 
 SELECT a, b FROM o_ios_pk_include ORDER BY b;
  a | b  
@@ -9161,7 +9214,8 @@ EXPLAIN (COSTS OFF) SELECT a, b, c FROM o_ios_sk_include ORDER BY b;
                           QUERY PLAN                           
 ---------------------------------------------------------------
  Index Only Scan using o_ios_sk_include_ix on o_ios_sk_include
-(1 row)
+   Disabled: true
+(2 rows)
 
 SELECT a, b, c FROM o_ios_sk_include ORDER BY b;
  a | b  |  c  
@@ -9177,6 +9231,151 @@ DROP TABLE o_ios_sk_include;
 RESET enable_seqscan;
 RESET enable_bitmapscan;
 RESET enable_indexscan;
+-- amnblocks: INSERT -> CREATE INDEX (no ANALYZE)
+CREATE TABLE o_test_amnblocks1 (
+	id int8 NOT NULL PRIMARY KEY,
+	k int8 NOT NULL,
+	c char(120) NOT NULL DEFAULT '',
+	pad char(60) NOT NULL DEFAULT ''
+) USING orioledb;
+INSERT INTO o_test_amnblocks1 SELECT i, i, '', '' FROM generate_series(1, 10000) i;
+CREATE INDEX o_test_amnblocks1_k ON o_test_amnblocks1(k);
+SET enable_seqscan = off;
+EXPLAIN (COSTS off)
+	SELECT k FROM o_test_amnblocks1
+		WHERE k IN (1000, 2000, 3000, 4000, 5000,
+					6000, 7000, 8000, 9000, 10000);
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_amnblocks1_k on o_test_amnblocks1
+   Index Cond: (k = ANY ('{1000,2000,3000,4000,5000,6000,7000,8000,9000,10000}'::bigint[]))
+(2 rows)
+
+SELECT relpages > 0 AS idx_pages_ok FROM pg_class
+	WHERE relname = 'o_test_amnblocks1_k';
+ idx_pages_ok 
+--------------
+ t
+(1 row)
+
+RESET enable_seqscan;
+DROP TABLE o_test_amnblocks1;
+-- amnblocks: INSERT -> CREATE INDEX -> ANALYZE
+CREATE TABLE o_test_amnblocks2 (
+	id int8 NOT NULL PRIMARY KEY,
+	k int8 NOT NULL,
+	c char(120) NOT NULL DEFAULT '',
+	pad char(60) NOT NULL DEFAULT ''
+) USING orioledb;
+INSERT INTO o_test_amnblocks2 SELECT i, i, '', '' FROM generate_series(1, 10000) i;
+CREATE INDEX o_test_amnblocks2_k ON o_test_amnblocks2(k);
+ANALYZE o_test_amnblocks2;
+SET enable_seqscan = off;
+EXPLAIN (COSTS off)
+	SELECT k FROM o_test_amnblocks2
+		WHERE k IN (1000, 2000, 3000, 4000, 5000,
+					6000, 7000, 8000, 9000, 10000);
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_amnblocks2_k on o_test_amnblocks2
+   Index Cond: (k = ANY ('{1000,2000,3000,4000,5000,6000,7000,8000,9000,10000}'::bigint[]))
+(2 rows)
+
+SELECT relpages > 0 AS idx_pages_ok FROM pg_class
+	WHERE relname = 'o_test_amnblocks2_k';
+ idx_pages_ok 
+--------------
+ t
+(1 row)
+
+RESET enable_seqscan;
+DROP TABLE o_test_amnblocks2;
+-- amnblocks: CREATE INDEX -> INSERT -> ANALYZE
+CREATE TABLE o_test_amnblocks3 (
+	id int8 NOT NULL PRIMARY KEY,
+	k int8 NOT NULL,
+	c char(120) NOT NULL DEFAULT '',
+	pad char(60) NOT NULL DEFAULT ''
+) USING orioledb;
+CREATE INDEX o_test_amnblocks3_k ON o_test_amnblocks3(k);
+INSERT INTO o_test_amnblocks3 SELECT i, i, '', '' FROM generate_series(1, 10000) i;
+ANALYZE o_test_amnblocks3;
+SET enable_seqscan = off;
+EXPLAIN (COSTS off)
+	SELECT k FROM o_test_amnblocks3
+		WHERE k IN (1000, 2000, 3000, 4000, 5000,
+					6000, 7000, 8000, 9000, 10000);
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_amnblocks3_k on o_test_amnblocks3
+   Index Cond: (k = ANY ('{1000,2000,3000,4000,5000,6000,7000,8000,9000,10000}'::bigint[]))
+(2 rows)
+
+SELECT relpages > 0 AS idx_pages_ok FROM pg_class
+	WHERE relname = 'o_test_amnblocks3_k';
+ idx_pages_ok 
+--------------
+ t
+(1 row)
+
+RESET enable_seqscan;
+DROP TABLE o_test_amnblocks3;
+-- amnblocks: VACUUM ANALYZE updates pg_class.relpages
+CREATE TABLE o_test_amnblocks4 (
+	id int8 NOT NULL PRIMARY KEY,
+	k int8 NOT NULL,
+	c char(120) NOT NULL DEFAULT '',
+	pad char(60) NOT NULL DEFAULT ''
+) USING orioledb;
+CREATE INDEX o_test_amnblocks4_k ON o_test_amnblocks4(k);
+INSERT INTO o_test_amnblocks4 SELECT i, i, '', '' FROM generate_series(1, 10000) i;
+VACUUM ANALYZE o_test_amnblocks4;
+SET enable_seqscan = off;
+EXPLAIN (COSTS off)
+	SELECT k FROM o_test_amnblocks4
+		WHERE k IN (1000, 2000, 3000, 4000, 5000,
+					6000, 7000, 8000, 9000, 10000);
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_amnblocks4_k on o_test_amnblocks4
+   Index Cond: (k = ANY ('{1000,2000,3000,4000,5000,6000,7000,8000,9000,10000}'::bigint[]))
+(2 rows)
+
+SELECT relpages > 0 AS idx_pages_ok FROM pg_class
+	WHERE relname = 'o_test_amnblocks4_k';
+ idx_pages_ok 
+--------------
+ t
+(1 row)
+
+RESET enable_seqscan;
+DROP TABLE o_test_amnblocks4;
+-- allvisfrac: IOS preferred even with low correlation (random insert order)
+-- With allvisfrac=1.0 the IOS heap-fetch cost drops to 0 so IOS wins
+-- over bitmap even when csquared is near 0.
+CREATE TABLE o_test_allvisfrac (
+	id int8 NOT NULL PRIMARY KEY,
+	k int8 NOT NULL,
+	c char(120) NOT NULL DEFAULT '',
+	pad char(60) NOT NULL DEFAULT ''
+) USING orioledb;
+INSERT INTO o_test_allvisfrac
+	SELECT i, (i * 7919) % 10000, '', '' FROM generate_series(1, 10000) i;
+CREATE INDEX o_test_allvisfrac_k ON o_test_allvisfrac(k);
+ANALYZE o_test_allvisfrac;
+SET enable_seqscan = off;
+EXPLAIN (COSTS off)
+	SELECT k FROM o_test_allvisfrac
+		WHERE k IN (1000, 2000, 3000, 4000, 5000,
+					6000, 7000, 8000, 9000, 10000);
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Index Only Scan using o_test_allvisfrac_k on o_test_allvisfrac
+   Index Cond: (k = ANY ('{1000,2000,3000,4000,5000,6000,7000,8000,9000,10000}'::bigint[]))
+(2 rows)
+
+RESET enable_seqscan;
+DROP TABLE o_test_allvisfrac;
 -- Skip scan tests below exercise PG18's _bt_preprocess_keys synthesizing a
 -- skip array on the leading column.  On PG16/PG17 there are no skip arrays;
 -- skip the whole block instead of maintaining version-specific expected
@@ -9203,11 +9402,27 @@ SET enable_seqscan = OFF;
 SET enable_bitmapscan = OFF;
 EXPLAIN (COSTS OFF)
 SELECT x, y FROM o_test_skip_leading_int WHERE y = 42 ORDER BY x, y;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Index Only Scan using o_test_skip_leading_int_idx on o_test_skip_leading_int
+   Index Cond: (y = 42)
+(2 rows)
+
 SELECT x, y FROM o_test_skip_leading_int WHERE y = 42 ORDER BY x, y;
+ x | y  
+---+----
+ 2 | 42
+(1 row)
+
 -- Multiple matching y values across distinct x: every distinct x is
 -- visited exactly once by the skip-array driver.
 SELECT count(*), count(DISTINCT x) FROM o_test_skip_leading_int
 	WHERE y IN (42, 84, 126);
+ count | count 
+-------+-------
+     3 |     3
+(1 row)
+
 RESET enable_bitmapscan;
 RESET enable_seqscan;
 DROP TABLE o_test_skip_leading_int;
@@ -9228,7 +9443,18 @@ SET enable_seqscan = OFF;
 SET enable_bitmapscan = OFF;
 EXPLAIN (COSTS OFF)
 SELECT x, y FROM o_test_skip_leading_text WHERE y = 42 ORDER BY x, y;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Index Only Scan using o_test_skip_leading_text_idx on o_test_skip_leading_text
+   Index Cond: (y = 42)
+(2 rows)
+
 SELECT x, y FROM o_test_skip_leading_text WHERE y = 42 ORDER BY x, y;
+ x | y  
+---+----
+ C | 42
+(1 row)
+
 RESET enable_bitmapscan;
 RESET enable_seqscan;
 DROP TABLE o_test_skip_leading_text;
@@ -9248,7 +9474,18 @@ SET enable_seqscan = OFF;
 SET enable_bitmapscan = OFF;
 EXPLAIN (COSTS OFF)
 SELECT x, y FROM o_test_skip_backward WHERE y = 42 ORDER BY x DESC, y DESC;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Index Only Scan Backward using o_test_skip_backward_idx on o_test_skip_backward
+   Index Cond: (y = 42)
+(2 rows)
+
 SELECT x, y FROM o_test_skip_backward WHERE y = 42 ORDER BY x DESC, y DESC;
+ x | y  
+---+----
+ 2 | 42
+(1 row)
+
 RESET enable_bitmapscan;
 RESET enable_seqscan;
 DROP TABLE o_test_skip_backward;
@@ -9269,6 +9506,11 @@ ANALYZE o_test_skip_multirow;
 SET enable_seqscan = OFF;
 SET enable_bitmapscan = OFF;
 SELECT count(*), count(DISTINCT x) FROM o_test_skip_multirow WHERE y = 42;
+ count | count 
+-------+-------
+    30 |    10
+(1 row)
+
 RESET enable_bitmapscan;
 RESET enable_seqscan;
 DROP TABLE o_test_skip_multirow;
@@ -9290,7 +9532,17 @@ ANALYZE o_test_skip_nullable;
 SET enable_seqscan = OFF;
 SET enable_bitmapscan = OFF;
 SELECT x, y FROM o_test_skip_nullable WHERE y = 25;
+ x | y  
+---+----
+ 0 | 25
+(1 row)
+
 SELECT x, y FROM o_test_skip_nullable WHERE y = 102;
+ x |  y  
+---+-----
+   | 102
+(1 row)
+
 RESET enable_bitmapscan;
 RESET enable_seqscan;
 DROP TABLE o_test_skip_nullable;
@@ -9310,6 +9562,11 @@ SET enable_seqscan = OFF;
 SET enable_bitmapscan = OFF;
 SELECT count(*), count(DISTINCT x) FROM o_test_skip_bounded
 	WHERE x < 5 AND y IN (2, 3, 4);
+ count | count 
+-------+-------
+    15 |     5
+(1 row)
+
 RESET enable_bitmapscan;
 RESET enable_seqscan;
 DROP TABLE o_test_skip_bounded;
