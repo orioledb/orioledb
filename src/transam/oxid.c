@@ -138,7 +138,7 @@ typedef struct
 {
 	LogicalXidCtx ctx;
 	SubTransactionId subid;
-}			PrevLogicalXidEntry;
+} PrevLogicalXidEntry;
 
 static List *prevLogicalXids = NIL; /* stack of PrevLogicalXidEntry for all
 									 * xids on subxact's chain, for correct
