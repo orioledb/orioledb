@@ -686,8 +686,16 @@ add_rollback_to_savepoint_wal_record(SubTransactionId parentSubid)
 	CommitSeqNo csn;
 
 	Assert(!is_recovery_process());
-	flush_local_wal_if_needed(sizeof(*rec));
+
+	/*
+	 * Drop the buffer's xid before sizing the flush, not after.
+	 * XID_RESERVED_LENGTH is what flush_local_wal_if_needed() sets aside for
+	 * the xid record, and it reads as zero while contains_xid is set, so
+	 * clearing the flag afterwards asks add_xid_wal_record_if_needed() for
+	 * sizeof(WALRecXid) bytes that nothing reserved.
+	 */
 	local_wal.contains_xid = false;
+	flush_local_wal_if_needed(sizeof(*rec));
 	Assert(local_wal.buffer_offset + sizeof(*rec) + XID_RESERVED_LENGTH <= LOCAL_WAL_BUFFER_SIZE);
 
 	add_xid_wal_record_if_needed();

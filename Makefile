@@ -242,6 +242,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/seq_scan_resowner_test.py \
 						test/t/seq_scan_undo_test.py \
 						test/t/temp_local_pool_test.py \
+						test/t/wal_savepoint_buffer_test.py \
 						test/t/toast_index_test.py \
 						test/t/trigger_test.py \
 						test/t/unlogged_test.py \
