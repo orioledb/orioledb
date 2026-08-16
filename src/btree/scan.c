@@ -2193,6 +2193,29 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 
 				if (cmp == 0)
 				{
+					/*
+					 * DEBUG PROBE, not for merging.  Reports every decision
+					 * this merge makes between the live and the historical
+					 * image.  The interesting line is
+					 *
+					 *   ORI229PROBE: cmp==0 lockOnly=1 raw=0 resolved=1
+					 *
+					 * i.e. the row is ours, and only the raw leaf header --
+					 * which a concurrent FOR KEY SHARE lock has replaced with
+					 * a lock-only record -- says otherwise, so the scan is
+					 * about to emit the historical version and lose our own
+					 * write.  See test/t/seq_scan_own_write_test.py.
+					 */
+					{
+						BTreeLeafTuphdr h = *tuphdr;
+
+						(void) find_non_lock_only_undo_record(scan->desc->undoType, &h);
+						elog(LOG, "ORI229PROBE: cmp==0 lockOnly=%d raw=%d resolved=%d",
+							 XACT_INFO_IS_LOCK_ONLY(tuphdr->xactInfo) ? 1 : 0,
+							 XACT_INFO_OXID_IS_CURRENT(tuphdr->xactInfo) ? 1 : 0,
+							 (!XACT_INFO_IS_LOCK_ONLY(h.xactInfo) &&
+							  XACT_INFO_OXID_IS_CURRENT(h.xactInfo)) ? 1 : 0);
+					}
 					if (XACT_INFO_OXID_IS_CURRENT(tuphdr->xactInfo))
 					{
 						BTREE_PAGE_LOCATOR_NEXT(scan->histImg, &scan->histLoc);
