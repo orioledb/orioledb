@@ -1708,20 +1708,28 @@ o_tbl_update(OTableDescr *descr, TupleTableSlot *slot,
 		slot->tts_tid = *((ItemPointerData *) DatumGetPointer(oldPkey->keys[0].value));
 	}
 
-	if (bridge_ctid)
-	{
-		OTableSlot *oslot = (OTableSlot *) slot;
-
-		oslot->bridge_ctid = *bridge_ctid;
-	}
-
 	if (descr->bridge)
 	{
+		OTableSlot *oslot = (OTableSlot *) slot;
 		List	   *indexIds;
 		ListCell   *indexId;
 		int			attnum;
 		TupleTableSlot *newSlot;
 		Bitmapset  *changed_attrs = NULL;
+
+		/*
+		 * The row keeps whatever bridge ctid it already has unless the loop
+		 * below finds that a bridged index column changed.  bridgeChanged
+		 * means "this row was given a new ctid", so it has to start out
+		 * false: one slot is reused for every row of the statement, and a
+		 * leftover true makes the next row's rowid claim a ctid it never got
+		 * handed.  Its entries -- unchanged, and already in every bridged
+		 * index under that same ctid -- then get inserted a second time,
+		 * which is a duplicate tid in a GIN posting list.
+		 */
+		if (bridge_ctid)
+			oslot->bridge_ctid = *bridge_ctid;
+		oslot->bridgeChanged = false;
 
 		was_saving = o_start_saving_inval_messages();
 		/* not using simple reindex_relation here anymore, */
