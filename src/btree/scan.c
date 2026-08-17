@@ -2105,6 +2105,57 @@ apply_next_key(BTreeSeqScan *scan)
 	}
 }
 
+#ifndef NO_ANTITHESIS_SDK
+/*
+ * State the invariant the live/historical merge below relies on: where both
+ * page images hold a key, resolving the snapshot's version through either
+ * header gives the same answer.
+ *
+ * The merge keeps the historical copy of such a key and drops the live one, so
+ * if the two disagree the scan hands out a version the snapshot may not see --
+ * or, when the historical side resolves to nothing, drops a row the snapshot
+ * must see, which is what the jepsen workload reports as a read that misses a
+ * row a primary-key lookup finds (#982).  Both headers lead into the same
+ * row-level undo chain, the live one merely from further along it, so an
+ * ordinary build asserts nothing here and pays only for remembering the
+ * locator.
+ *
+ * Costs a second undo-chain walk per shared key, so it is compiled in only
+ * with the Antithesis SDK.
+ */
+static void
+check_shared_key_version(BTreeSeqScan *scan, BTreePageItemLocator *leafLoc,
+						 OTuple histVersion, MemoryContext mctx)
+{
+	OTuple		leafVersion;
+
+	leafVersion = o_find_tuple_version(scan->desc, scan->leafImg, leafLoc,
+									   &scan->oSnapshot, NULL, mctx, NULL,
+									   NULL);
+
+	ANTITHESIS_ALWAYS(O_TUPLE_IS_NULL(leafVersion) == O_TUPLE_IS_NULL(histVersion),
+					  "a sequential scan's page images agree on whether a shared key is visible",
+					  NULL);
+
+	if (!O_TUPLE_IS_NULL(leafVersion) && !O_TUPLE_IS_NULL(histVersion))
+	{
+		int			leafLen = o_btree_len(scan->desc, leafVersion, OTupleLength);
+		int			histLen = o_btree_len(scan->desc, histVersion, OTupleLength);
+
+		ANTITHESIS_ALWAYS(leafLen == histLen &&
+						  memcmp(leafVersion.data, histVersion.data, leafLen) == 0,
+						  "a sequential scan's page images agree on the visible version of a shared key",
+						  NULL);
+	}
+
+	if (!O_TUPLE_IS_NULL(leafVersion))
+		pfree(leafVersion.data);
+}
+#else
+#define check_shared_key_version(scan, leafLoc, histVersion, mctx) \
+	((void) (scan), (void) (leafLoc), (void) (histVersion), (void) (mctx))
+#endif
+
 static OTuple
 btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 								CommitSeqNo *tupleCsn, BTreeLocationHint *hint)
@@ -2120,9 +2171,15 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 
 	while (true)
 	{
+		ANTITHESIS_SOMETIMES(scan->haveHistImg,
+							 "a sequential scan reads through a reconstructed historical page",
+							 NULL);
+
 		while (scan->haveHistImg)
 		{
 			OTuple		histTuple;
+			BTreePageItemLocator sharedKeyLeafLoc;
+			bool		haveSharedKey = false;
 
 			while (!BTREE_PAGE_LOCATOR_IS_VALID(scan->histImg, &scan->histLoc))
 			{
@@ -2222,6 +2279,8 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 					}
 					else
 					{
+						sharedKeyLeafLoc = scan->leafLoc;
+						haveSharedKey = true;
 						BTREE_PAGE_LOCATOR_NEXT(scan->leafImg, &scan->leafLoc);
 					}
 				}
@@ -2235,6 +2294,11 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 										 mctx,
 										 NULL,
 										 NULL);
+			ANTITHESIS_SOMETIMES(haveSharedKey,
+								 "a sequential scan merges a key both of its page images hold",
+								 NULL);
+			if (haveSharedKey)
+				check_shared_key_version(scan, &sharedKeyLeafLoc, tuple, mctx);
 			BTREE_PAGE_LOCATOR_NEXT(scan->histImg, &scan->histLoc);
 			if (!O_TUPLE_IS_NULL(tuple))
 			{
