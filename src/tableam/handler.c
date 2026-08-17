@@ -245,7 +245,18 @@ orioledb_index_fetch_tuple(struct IndexFetchTableData *scan,
 												   (Pointer) &bridge_bound, BTreeKeyBound,
 												   &o_non_deleted_snapshot, &tupleCsn,
 												   slot->tts_mcxt, NULL);
-			O_LOAD_SNAPSHOT(&oSnapshot, snapshot);
+
+			/*
+			 * A non-MVCC snapshot (e.g. SnapshotNonVacuumable, used by the
+			 * planner's get_actual_variable_range() index-endpoint probe) has
+			 * no csnSnapshotData, so O_LOAD_SNAPSHOT() would read an
+			 * uninitialised csn.  Map it the same way orioledb_amgettuple()
+			 * does instead of feeding garbage into the primary-index lookup.
+			 */
+			if (snapshot->snapshot_type == SNAPSHOT_NON_VACUUMABLE)
+				oSnapshot = o_non_deleted_snapshot;
+			else
+				O_LOAD_SNAPSHOT(&oSnapshot, snapshot);
 		}
 		if (O_TUPLE_IS_NULL(bridge_tup))
 			return false;

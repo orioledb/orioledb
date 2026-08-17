@@ -5,7 +5,7 @@ SELECT split_part(setting, '.', 1) major_version
 	FROM pg_settings WHERE name = 'server_version';
  major_version 
 ---------------
- 18
+ 17
 (1 row)
 
 -- Test for integer primary key
@@ -423,9 +423,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 OR  key >  19 AND payloa
                               QUERY PLAN                              
 ----------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key > 10) OR ((key > 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >  10 OR  key >  19 AND payload LIKE '%7*%';
  key | payload 
@@ -452,9 +451,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 OR  key >  19 AND payloa
                               QUERY PLAN                               
 -----------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key >= 10) OR ((key > 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >= 10 OR  key >  19 AND payload LIKE '%7*%';
  key | payload 
@@ -482,9 +480,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 OR  key >= 19 AND payloa
                               QUERY PLAN                               
 -----------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key > 10) OR ((key >= 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >  10 OR  key >= 19 AND payload LIKE '%7*%';
  key | payload 
@@ -511,9 +508,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 OR  key >= 19 AND payloa
                                QUERY PLAN                               
 ------------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key >= 10) OR ((key >= 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >= 10 OR  key >= 19 AND payload LIKE '%7*%';
  key | payload 
@@ -541,9 +537,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 OR  key <  19 AND payloa
                               QUERY PLAN                              
 ----------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key > 10) OR ((key < 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >  10 OR  key <  19 AND payload LIKE '%7*%';
  key | payload 
@@ -571,9 +566,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 OR  key <  19 AND payloa
                               QUERY PLAN                               
 -----------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key >= 10) OR ((key < 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >= 10 OR  key <  19 AND payload LIKE '%7*%';
  key | payload 
@@ -602,9 +596,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >  10 OR  key <= 19 AND payloa
                               QUERY PLAN                               
 -----------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key > 10) OR ((key <= 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >  10 OR  key <= 19 AND payload LIKE '%7*%';
  key | payload 
@@ -632,9 +625,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key >= 10 OR  key <= 19 AND payloa
                                QUERY PLAN                               
 ------------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key >= 10) OR ((key <= 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key >= 10 OR  key <= 19 AND payload LIKE '%7*%';
  key | payload 
@@ -663,9 +655,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 OR  key >  19 AND payloa
                               QUERY PLAN                              
 ----------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key < 10) OR ((key > 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <  10 OR  key >  19 AND payload LIKE '%7*%';
  key | payload 
@@ -680,9 +671,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 OR  key >  19 AND payloa
                               QUERY PLAN                               
 -----------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key <= 10) OR ((key > 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <= 10 OR  key >  19 AND payload LIKE '%7*%';
  key | payload 
@@ -698,9 +688,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 OR  key >= 19 AND payloa
                               QUERY PLAN                               
 -----------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key < 10) OR ((key >= 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <  10 OR  key >= 19 AND payload LIKE '%7*%';
  key | payload 
@@ -715,9 +704,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 OR  key >= 19 AND payloa
                                QUERY PLAN                               
 ------------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key <= 10) OR ((key >= 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <= 10 OR  key >= 19 AND payload LIKE '%7*%';
  key | payload 
@@ -733,9 +721,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 OR  key <  19 AND payloa
                               QUERY PLAN                              
 ----------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key < 10) OR ((key < 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <  10 OR  key <  19 AND payload LIKE '%7*%';
  key | payload 
@@ -749,9 +736,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 OR  key <  19 AND payloa
                               QUERY PLAN                               
 -----------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key <= 10) OR ((key < 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <= 10 OR  key <  19 AND payload LIKE '%7*%';
  key | payload 
@@ -766,9 +752,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <  10 OR  key <= 19 AND payloa
                               QUERY PLAN                               
 -----------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key < 10) OR ((key <= 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <  10 OR  key <= 19 AND payload LIKE '%7*%';
  key | payload 
@@ -782,9 +767,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10 OR  key <= 19 AND payloa
                                QUERY PLAN                               
 ------------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key <= 10) OR ((key <= 19) AND (payload ~~ '%7*%'::text)))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <= 10 OR  key <= 19 AND payload LIKE '%7*%';
  key | payload 
@@ -818,11 +802,10 @@ WHERE key <  10 OR  key >  19 OR key = (SELECT i FROM generate_series(13,13) AS 
                             QUERY PLAN                             
 -------------------------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key < 10) OR (key > 19) OR (key = (InitPlan 1).col1))
    InitPlan 1
      ->  Function Scan on generate_series i
-(5 rows)
+(4 rows)
 
 SELECT * FROM o_pk1
 WHERE key <  10 OR  key >  19 OR key = (SELECT i FROM generate_series(13,13) AS i);
@@ -895,9 +878,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = ALL (ARRAY[4]);
                 QUERY PLAN                
 ------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: (key = ALL ('{4}'::integer[]))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key = ALL (ARRAY[4]);
  key | payload 
@@ -909,9 +891,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = ALL (ARRAY[4,10]);
                  QUERY PLAN                  
 ---------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: (key = ALL ('{4,10}'::integer[]))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key = ALL (ARRAY[4,10]);
  key | payload 
@@ -922,9 +903,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = ALL (ARRAY[4,10, NULL]);
                     QUERY PLAN                    
 --------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: (key = ALL ('{4,10,NULL}'::integer[]))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key = ALL (ARRAY[4,10, NULL]);
  key | payload 
@@ -981,9 +961,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4]);
                 QUERY PLAN                
 ------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: (key < ALL ('{4}'::integer[]))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4]);
  key | payload 
@@ -995,9 +974,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4,10]);
                  QUERY PLAN                  
 ---------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: (key < ALL ('{4,10}'::integer[]))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4,10]);
  key | payload 
@@ -1009,9 +987,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4,5, NULL]);
                    QUERY PLAN                    
 -------------------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: (key < ALL ('{4,5,NULL}'::integer[]))
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key < ALL (ARRAY[4,5, NULL]);
  key | payload 
@@ -1023,9 +1000,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key = 1.0;
             QUERY PLAN            
 ----------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key)::numeric = 1.0)
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key = 1.0;
  key | payload 
@@ -1037,9 +1013,8 @@ EXPLAIN (COSTS off) SELECT * FROM o_pk1 WHERE key <= 10.0;
              QUERY PLAN             
 ------------------------------------
  Seq Scan on o_pk1
-   Disabled: true
    Filter: ((key)::numeric <= 10.0)
-(3 rows)
+(2 rows)
 
 SELECT * FROM o_pk1 WHERE key <= 10.0;
  key | payload 
@@ -2118,9 +2093,8 @@ EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91;
                                  QUERY PLAN                                  
 -----------------------------------------------------------------------------
  Seq Scan on o_pk2
-   Disabled: true
    Filter: ((id <= '71'::double precision) OR (id > '91'::double precision))
-(3 rows)
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id <= 71 OR id > 91;
  id  |   value   
@@ -2397,9 +2371,8 @@ EXPLAIN (COSTS off) SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19;
                                  QUERY PLAN                                  
 -----------------------------------------------------------------------------
  Seq Scan on o_pk2
-   Disabled: true
    Filter: ((id >= '71'::double precision) OR (id < '19'::double precision))
-(3 rows)
+(2 rows)
 
 SELECT id, value FROM o_pk2 WHERE id >= 71 OR id < 19;
  id  |   value   
