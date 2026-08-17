@@ -537,6 +537,104 @@ class MergeTest(BaseTest):
 			con.rollback()
 			con.close()
 
+	def test_split_diff_over_full_image_chain(self):
+		"""
+		A page-level undo chain must not mix a full image with a differential one.
+
+		A full image (UndoPageImageSplit) carries the whole page, so applying it
+		overwrites whatever the chain walk has built.  A differential split
+		(UndoPageImageSplitDiff) carries no page bytes at all and transforms the
+		image the walk is holding, in place.  Mixed, the differential record is
+		applied to a base it was not computed against, and the bound the walk
+		narrowed from its split key survives into a page the full image has
+		since widened back -- so a backward scan re-reads the same leaves and
+		returns every row several times.  Issue #1055.
+
+		page_add_image_to_undo() picks the kind at write time: a split that
+		drops no tuple writes a differential image, unless a sequential scan is
+		registered on the tree, in which case it writes a full one.  So a cursor
+		held open over a sequential scan decides the first split, and closing it
+		decides the second -- no timing involved.  The old REPEATABLE READ
+		snapshot held throughout retains the undo, so neither split may take the
+		branch that writes no image at all.
+		"""
+		node = self.node
+		node.safe_psql(
+		    'postgres', "CREATE TABLE IF NOT EXISTS o_mixed_chain ("
+		    "    id int NOT NULL,"
+		    "    payload text NOT NULL,"
+		    "    PRIMARY KEY (id)"
+		    ") USING orioledb;"
+		    "TRUNCATE o_mixed_chain;")
+		# Two free slots between each pair of keys, so both rounds of
+		# interleaved inserts split the same leaves.
+		node.execute("INSERT INTO o_mixed_chain "
+		             "(SELECT id * 4, repeat('x', 100) "
+		             "FROM generate_series(1, 5000) id);")
+		expected = [i * 4 for i in range(1, 5001)]
+
+		con_snap = node.connect()
+		try:
+			con_snap.begin()
+			con_snap.execute(
+			    "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+			# Takes the snapshot and starts retaining undo.  The read finishes,
+			# so it leaves no sequential scan registered.
+			self.assertEqual(
+			    con_snap.execute("SELECT count(*) FROM o_mixed_chain;")[0][0],
+			    len(expected))
+
+			# Round one: split every leaf while a sequential scan is parked on
+			# the tree, which forces a full image.
+			con_hold = node.connect()
+			try:
+				con_hold.begin()
+				con_hold.execute("SET enable_indexscan = off;")
+				con_hold.execute("SET enable_bitmapscan = off;")
+				con_hold.execute("DECLARE ch NO SCROLL CURSOR FOR "
+				                 "SELECT id FROM o_mixed_chain;")
+				self.assertEqual(len(con_hold.execute("FETCH 1 FROM ch;")), 1)
+				node.execute("INSERT INTO o_mixed_chain "
+				             "(SELECT id * 4 + 1, repeat('y', 100) "
+				             "FROM generate_series(1, 5000) id);")
+				con_hold.execute("CLOSE ch;")
+			finally:
+				con_hold.rollback()
+				con_hold.close()
+
+			# Round two: nothing is parked now, so the same leaves split into
+			# differential images stacked on the full ones.
+			node.execute("INSERT INTO o_mixed_chain "
+			             "(SELECT id * 4 + 2, repeat('z', 100) "
+			             "FROM generate_series(1, 5000) id);")
+
+			con_snap.execute("SET enable_seqscan = off;")
+			con_snap.execute("SET enable_bitmapscan = off;")
+			forward = [
+			    r[0] for r in con_snap.execute(
+			        "SELECT id FROM o_mixed_chain ORDER BY id;")
+			]
+			backward = [
+			    r[0] for r in con_snap.execute(
+			        "SELECT id FROM o_mixed_chain ORDER BY id DESC;")
+			]
+			# Compare the sizes first: the failure is a flood of duplicates, and
+			# the count says so in one line.
+			self.assertEqual(len(forward), len(expected))
+			self.assertEqual(len(backward), len(expected))
+			self.assertEqual(forward, expected)
+			self.assertEqual(backward, list(reversed(expected)))
+		finally:
+			# An assert-enabled build catches the same defect as an ordering
+			# assertion in the backend instead of returning the rows, so the
+			# connection may already be gone by now.  Don't let tearing it down
+			# mask what failed.
+			try:
+				con_snap.rollback()
+				con_snap.close()
+			except Exception:
+				pass
+
 	def test_split_diff_update_grow(self):
 		"""
 		A single UPDATE that grows every row, forcing in-statement page splits
