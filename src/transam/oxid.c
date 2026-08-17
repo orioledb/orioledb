@@ -33,6 +33,7 @@
 #if PG_VERSION_NUM >= 180000
 #include "utils/memutils.h"
 #endif
+#include "utils/antithesis.h"
 #include "utils/snapmgr.h"
 #include "utils/stopevent.h"
 #include "recovery/wal.h"
@@ -2050,6 +2051,80 @@ oxid_get_xlog_ptr(OXid oxid)
 	return ptr;
 }
 
+#ifndef NO_ANTITHESIS_SDK
+
+/*
+ * What a transaction's csn is allowed to do over time: report it in progress
+ * (aborted reads the same way here), then committed at one csn, then frozen
+ * once globalXmin passes it.  Nothing else -- and in particular, never a
+ * different commit csn, and never back to in progress.
+ *
+ * This is the invariant behind every jepsen anomaly Antithesis reports, and it
+ * holds whichever read path produced the row: if two reads disagree about
+ * whether a writer had committed, one of them observes a state that writer
+ * never published, which is what the checker calls G1b, and the version orders
+ * it derives from such reads are what close its G0 cycles.  Under-instrumented
+ * on purpose in one respect: the answers are compared within one backend, so a
+ * cross-backend disagreement is caught only if this backend also sees the
+ * regression.
+ *
+ * A fixed direct-mapped table, so a collision loses a check instead of growing
+ * memory or reporting a false one.  The snapshot->xmin shortcut in the caller
+ * is per-snapshot rather than global, so answers from it are not recorded.
+ */
+#define CSN_HISTORY_SIZE 4096
+
+typedef struct
+{
+	OXid		oxid;
+	CommitSeqNo csn;
+}			CsnHistoryEntry;
+
+static CsnHistoryEntry csnHistory[CSN_HISTORY_SIZE];
+
+static int
+csn_progress(CommitSeqNo csn)
+{
+	if (COMMITSEQNO_IS_FROZEN(csn))
+		return 2;
+	if (COMMITSEQNO_IS_NORMAL(csn))
+		return 1;
+	return 0;
+}
+
+static void
+check_csn_only_moves_forward(OXid oxid, OSnapshot *snapshot, CommitSeqNo csn)
+{
+	CsnHistoryEntry *entry = &csnHistory[oxid % CSN_HISTORY_SIZE];
+
+	/*
+	 * A replica decides visibility by WAL position and rebuilds its oxid map
+	 * from the stream, so its csn readings are not the ones this invariant is
+	 * about.
+	 */
+	if (!XLogRecPtrIsInvalid(snapshot->xlogptr))
+		return;
+
+	if (entry->oxid == oxid && OXidIsValid(oxid))
+	{
+		ANTITHESIS_ALWAYS(csn_progress(csn) > csn_progress(entry->csn) ||
+						  csn == entry->csn,
+						  "a transaction's commit sequence number only moves forward",
+						  NULL);
+
+		/* Keep the furthest answer seen, so one bad reading cannot hide more */
+		if (csn_progress(csn) < csn_progress(entry->csn))
+			return;
+	}
+
+	entry->oxid = oxid;
+	entry->csn = csn;
+}
+#else
+#define check_csn_only_moves_forward(oxid, snapshot, csn) \
+	((void) (oxid), (void) (snapshot), (void) (csn))
+#endif
+
 /*
  * Gets csn for given oxid.  Wrapper over map_oxid_csn(), which loops
  * till "committing bit" is not set.
@@ -2076,7 +2151,10 @@ oxid_match_snapshot(OXid oxid, OSnapshot *snapshot,
 		if (oxid < pg_atomic_read_u64(&xid_meta->globalXmin))
 		{
 			if (outCsn)
+			{
 				*outCsn = COMMITSEQNO_FROZEN;
+				check_csn_only_moves_forward(oxid, snapshot, *outCsn);
+			}
 			if (outPtr)
 				*outPtr = FirstNormalUnloggedLSN;
 			return;
@@ -2090,6 +2168,7 @@ oxid_match_snapshot(OXid oxid, OSnapshot *snapshot,
 		{
 			if (COMMITSEQNO_IS_SPECIAL(*outCsn))
 				*outCsn = COMMITSEQNO_INPROGRESS;
+			check_csn_only_moves_forward(oxid, snapshot, *outCsn);
 			outCsn = NULL;
 		}
 

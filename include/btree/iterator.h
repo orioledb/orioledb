@@ -111,4 +111,10 @@ extern OTuple o_find_tuple_version(BTreeDescr *desc, Page p,
 								   TupleFetchCallback cb,
 								   void *arg);
 
+extern void o_check_shared_key_version(BTreeDescr *desc, Page p,
+									   BTreePageItemLocator *loc,
+									   OTuple otherVersion,
+									   OSnapshot *oSnapshot,
+									   MemoryContext mcxt);
+
 #endif							/* __BTREE_ITERATOR_H__ */

@@ -676,6 +676,57 @@ o_btree_find_tuple_by_key(BTreeDescr *desc, void *key, BTreeKeyType kind,
 										out_csn, mcxt, hint, NULL, NULL, NULL);
 }
 
+/*
+ * State the invariant both live/historical merges rely on: where a live page
+ * image and a reconstructed historical one hold the same key, resolving the
+ * snapshot's version through either header gives the same answer.  Resolve it
+ * through *loc and compare against otherVersion, already resolved from the
+ * other image.
+ *
+ * Both merges then pick one image and drop the other -- the iterator keeps the
+ * live copy, the sequential scan the historical one -- so a disagreement means
+ * one of them hands out a version its snapshot may not see, or, when one side
+ * resolves to nothing, drops a row the snapshot must see.  A row-level undo
+ * chain can only be walked backwards, so an image reconstructed to a moment
+ * before the snapshot cannot reach a version committed after that moment: it
+ * answers with a stale version that is nonetheless committed, and is accepted.
+ * That is what the jepsen workload reports as a read of a value no transaction
+ * ever committed (#982).
+ *
+ * Costs a second undo-chain walk per shared key, so the body is compiled in
+ * only with the Antithesis SDK.
+ */
+void
+o_check_shared_key_version(BTreeDescr *desc, Page p,
+						   BTreePageItemLocator *loc, OTuple otherVersion,
+						   OSnapshot *oSnapshot, MemoryContext mcxt)
+{
+#ifndef NO_ANTITHESIS_SDK
+	OTuple		version;
+
+	version = o_find_tuple_version(desc, p, loc, oSnapshot, NULL, mcxt,
+								   NULL, NULL);
+
+	ANTITHESIS_ALWAYS(O_TUPLE_IS_NULL(version) == O_TUPLE_IS_NULL(otherVersion),
+					  "both page images agree on whether a shared key is visible",
+					  NULL);
+
+	if (!O_TUPLE_IS_NULL(version) && !O_TUPLE_IS_NULL(otherVersion))
+	{
+		int			len = o_btree_len(desc, version, OTupleLength);
+		int			otherLen = o_btree_len(desc, otherVersion, OTupleLength);
+
+		ANTITHESIS_ALWAYS(len == otherLen &&
+						  memcmp(version.data, otherVersion.data, len) == 0,
+						  "both page images agree on the visible version of a shared key",
+						  NULL);
+	}
+
+	if (!O_TUPLE_IS_NULL(version))
+		pfree(version.data);
+#endif
+}
+
 
 /*
  * Finds appropriate tuple version by traversing the undo chain.
@@ -1668,6 +1719,10 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 
 		leaf_item = &context->items[context->index];
 
+		ANTITHESIS_SOMETIMES(it->combinedPage,
+							 "an ordered scan merges a reconstructed historical page",
+							 NULL);
+
 		if (it->combinedPage)
 		{
 			if (!BTREE_PAGE_LOCATOR_IS_VALID(hImg, &it->undoLoc))
@@ -1691,6 +1746,14 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 											  it->tupleCxt,
 											  it->fetchCallback,
 											  it->fetchCallbackArg);
+
+				ANTITHESIS_SOMETIMES(cmp == 0,
+									 "an ordered scan merges a key both of its page images hold",
+									 NULL);
+				if (cmp == 0)
+					o_check_shared_key_version(desc, hImg, &it->undoLoc,
+											   result, &it->oSnapshot,
+											   it->tupleCxt);
 
 				IT_NEXT_OFFSET(it, &leaf_item->locator);
 
