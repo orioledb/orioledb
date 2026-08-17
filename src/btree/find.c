@@ -75,6 +75,28 @@ static bool convert_fastpath_parent_to_img(OBTreeFindPageContext *context,
 		   ((Pointer) (loc).chunk >= (context)->parentImg && \
 			(Pointer) (loc).chunk < (context)->parentImg + ORIOLEDB_BLCKSZ))
 
+#ifdef USE_ASSERT_CHECKING
+/*
+ * Is a parent locator safe to navigate, i.e. does its chunk pointer live in
+ * context->parentImg?
+ *
+ * The descent binds it to whatever image the parent was read from, and the
+ * branches that read the parent through the locked shared page rebind it only
+ * for the cases they know about.  What they miss would reach find_right_page()
+ * and find_left_page() bound to a shared page the descent has since unlocked,
+ * which may have been evicted and reused by then.  Only assertions ask this,
+ * so it does not exist without them.
+ */
+static inline bool
+parent_locator_is_local(OBTreeFindPageContext *context,
+						BTreePageItemLocator loc)
+{
+	return loc.chunk == NULL ||
+		((Pointer) loc.chunk >= context->parentImg &&
+		 (Pointer) loc.chunk < context->parentImg + ORIOLEDB_BLCKSZ);
+}
+#endif
+
 /*
  * Initialize B-tree page find context.
  */
@@ -1502,6 +1524,26 @@ retry:
 	context->items[context->index].locator = loc;
 	context->items[context->index].blkno = intCxt.blkno;
 	context->items[context->index].pageChangeCount = intCxt.pageChangeCount;
+
+	/*
+	 * A caller that steps to siblings navigates the immediate parent's
+	 * locator after this returns and the pages are unlocked, so by then the
+	 * locator has to address context->parentImg.  Two exemptions: the copy
+	 * into parentImg can be deliberately deferred, which find_right_page()
+	 * completes itself, and a MODIFY descent without IMAGE reads its parents
+	 * into context->img, so nothing rebinds the locator.  A MODIFY descent
+	 * *with* IMAGE is checked, because that is what
+	 * btree_find_context_from_modify_to_read() hands to
+	 * slowpath_unique_check(), which does step sideways.
+	 */
+	Assert(!BTREE_PAGE_FIND_IS(context, KEEP_PARENT) ||
+		   (BTREE_PAGE_FIND_IS(context, MODIFY) &&
+			!BTREE_PAGE_FIND_IS(context, IMAGE)) ||
+		   context->index == 0 ||
+		   context->parentImgDeferred ||
+		   parent_locator_is_local(context,
+								   context->items[context->index - 1].locator));
+
 	return OFindPageResultSuccess;
 }
 
@@ -1571,9 +1613,7 @@ find_right_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 	/* Try to get next item from the parent page */
 	loc = context->items[context->index - 1].locator;
 
-	Assert(loc.chunk == NULL ||
-		   ((Pointer) loc.chunk >= context->parentImg &&
-			(Pointer) loc.chunk < context->parentImg + ORIOLEDB_BLCKSZ));
+	ASSERT_PARENT_LOCATOR_LOCAL(context, loc);
 
 	if (BTREE_PAGE_LOCATOR_IS_VALID(context->parentImg, &loc))
 		BTREE_PAGE_LOCATOR_NEXT(context->parentImg, &loc);
@@ -1714,9 +1754,7 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 			BTreePageItemLocator loc = parentItem->locator;
 			bool		next_lokey_loaded = true;
 
-			Assert(loc.chunk == NULL ||
-				   ((Pointer) loc.chunk >= context->parentImg &&
-					(Pointer) loc.chunk < context->parentImg + ORIOLEDB_BLCKSZ));
+			ASSERT_PARENT_LOCATOR_LOCAL(context, loc);
 
 			/*
 			 * Tries to read image from parent downlink without find_page().
@@ -2023,6 +2061,16 @@ btree_find_context_from_modify_to_read(OBTreeFindPageContext *context,
 	Assert(!BTREE_PAGE_FIND_IS(context, DOWNLINK_LOCATION));
 	Assert(BTREE_PAGE_FIND_IS(context, MODIFY));
 	Assert(BTREE_PAGE_FIND_IS(context, IMAGE));
+
+	/*
+	 * Only the target page is re-read below, so the parent locator stays as
+	 * the MODIFY descent left it.  That is navigable because IMAGE makes
+	 * find_page() refresh parentImg and rebind the locator at the target's
+	 * parent -- which is the level slowpath_unique_check() steps along.  A
+	 * KEEP_PARENT caller would want the levels above that too, and there is
+	 * none, so refuse one rather than pretend to serve it.
+	 */
+	Assert(!BTREE_PAGE_FIND_IS(context, KEEP_PARENT));
 	BTREE_PAGE_FIND_UNSET(context, MODIFY);
 
 	success = btree_find_read_page(context,
