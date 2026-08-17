@@ -80,11 +80,26 @@ done
 # show valgrind logs if needed
 if [ $CHECK_TYPE = "valgrind_1" ] || [ $CHECK_TYPE = "valgrind_2" ]; then
 	for f in ` find . -name pid-*.log ` ; do
-		if grep -q 'Command: [^ ]*/postgres' $f && grep -E -q '(Process terminating|ERROR SUMMARY: [1-9])' $f; then
-			echo "========= Contents of $f"
-			cat $f
-			status=1
+		if ! grep -q 'Command: [^ ]*/postgres' $f; then
+			continue
 		fi
+		if ! grep -E -q '(Process terminating|ERROR SUMMARY: [1-9])' $f; then
+			continue
+		fi
+		# A process killed inside posix_spawn is the short-lived child
+		# postgres forked to run an external command (archive_command,
+		# restore_command).  Valgrind follows it, copies the parent's command
+		# line into the header, and reports the SIGTERM that stops the node as
+		# a termination.  With no errors of its own it says nothing about
+		# orioledb, and whether the child is alive at the moment the node stops
+		# is a race, so this failed a job at random.
+		if grep -q '__spawni_child' $f && grep -q 'ERROR SUMMARY: 0 errors' $f; then
+			echo "skipping $f: posix_spawn child killed at node stop, no errors"
+			continue
+		fi
+		echo "========= Contents of $f"
+		cat $f
+		status=1
 	done
 fi
 
