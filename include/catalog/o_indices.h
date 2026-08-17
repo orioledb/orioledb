@@ -19,6 +19,26 @@
 #include "catalog/o_tables.h"
 #include "tuple/format.h"
 
+/*
+ * Lifecycle state of an index.  A non-VALID state means CREATE INDEX
+ * CONCURRENTLY is still building it: the index row is already visible to
+ * writers, which record their changes into the CIC spool, but not yet to
+ * readers.  Persisted as one trailing byte in serialize_o_index(); a record
+ * written before this field existed reads as OINDEX_STATE_VALID.
+ */
+typedef enum
+{
+	OINDEX_STATE_VALID = 0,		/* fully built, available to all readers */
+	OINDEX_STATE_BUILDING_PHASE_1,	/* the OIndex row exists and writers spool
+									 * their changes; nothing is written to
+									 * the index itself */
+	OINDEX_STATE_BUILDING_PHASE_2,	/* phase 1, plus the snapshot scan that
+									 * builds the index */
+	OINDEX_STATE_BUILDING_PHASE_3,	/* build finished; writers write to the
+									 * index and spool only on collisions */
+	OINDEX_STATE_BUILDING_PHASE_4	/* final spool drain under WaitForLockers */
+} OIndexState;
+
 typedef struct
 {
 	ORelOids	indexOids;
@@ -89,6 +109,13 @@ typedef struct
 	 * an error rather than letting access crash on the missing trees.
 	 */
 	bool		refresh_exprs;
+
+	/*
+	 * Lifecycle state for CREATE INDEX CONCURRENTLY.  Stored at the trailing
+	 * end of the serialized record; old records (without the trailing byte)
+	 * deserialize to OINDEX_STATE_VALID.
+	 */
+	OIndexState state;
 } OIndex;
 
 /* callback for o_indices_foreach_oids() */
@@ -102,6 +129,18 @@ typedef enum
 } OIndexVersionMode;
 
 extern OIndex *make_o_index(OTable *table, OIndexNumber ixNum, OIndexVersionMode ixVerMode);
+
+/*
+ * When set to a non-VALID value before calling o_tables_update (or any
+ * other path that eventually invokes make_*_o_index), the newly
+ * fabricated OIndex is initialised with this state instead of the
+ * palloc0 default (VALID).  Reset to VALID immediately after use.
+ *
+ * Used by orioledb_ambuild for CREATE INDEX CONCURRENTLY so writers
+ * never see the new OIndex in VALID state during the brief window
+ * before our explicit state flip would otherwise run.
+ */
+extern OIndexState o_index_initial_state_override;
 
 typedef enum
 {
@@ -124,6 +163,10 @@ extern bool o_indices_update(OTable *table, OIndexNumber ixNum,
 							 OXid oxid, CommitSeqNo csn);
 extern bool o_indices_move(OTable *table, OIndexNumber ixNum,
 						   Oid old_tablespace, OXid oxid, CommitSeqNo csn);
+extern bool o_indices_set_state(ORelOids indexOids, OIndexType type,
+								char table_persistence,
+								OIndexState newState,
+								OXid oxid, CommitSeqNo csn);
 extern bool o_indices_find_table_oids(ORelOids indexOids, OIndexType type,
 									  OSnapshot *oSnapshot,
 									  ORelOids *tableOids);

@@ -30,6 +30,7 @@ OBJS = src/btree/btree.o \
 	   src/btree/scan.o \
 	   src/btree/split.o \
 	   src/btree/undo.o \
+	   src/catalog/cic_spool.o \
 	   src/catalog/ddl.o \
 	   src/catalog/free_extents.o \
 	   src/catalog/indices.o \
@@ -202,6 +203,8 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/recovery_test.py \
 						test/t/recovery_opclass_test.py \
 						test/t/recovery_worker_test.py \
+						test/t/concurrent_index_test.py \
+						test/t/concurrent_index_stopevents_test.py \
 						test/t/replication_test.py \
 						test/t/fuzzy_checkpoint_test.py \
 						test/t/types_test.py \
@@ -240,6 +243,7 @@ TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
 						test/t/recovery_livelock_test.py \
 						test/t/recovery_row_lock_test.py \
 						test/t/reindex_test.py \
+						test/t/reindex_concurrent_test.py \
 						test/t/restartpoint_ddl_window_test.py \
 						test/t/s3_test.py \
 						test/t/schema_test.py \
