@@ -208,7 +208,8 @@ static void checkpoint_lock_page(BTreeDescr *descr, CheckpointState *state,
 								 int level);
 static void checkpoint_tables_callback(OIndexType type, ORelOids treeOids,
 									   ORelOids tableOids, void *arg);
-static inline void init_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared);
+static inline void init_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared,
+									  const char *what);
 static inline void free_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared);
 static FileExtentsArray *file_extents_array_init(void);
 static void file_extents_array_free(FileExtentsArray *array);
@@ -2078,7 +2079,9 @@ checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 
 	ppool_reserve_pages(descr->ppool, PPOOL_RESERVE_META, 4);
 
-	init_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index]);
+	init_seq_buf_pages(descr, &meta_page->tmpBuf[next_chkp_index],
+					   psprintf("newchkp/tmpBuf chkpNum=%d slot=%d",
+								chkpNum, next_chkp_index));
 
 	memset(&next_tmp_tag, 0, sizeof(next_tmp_tag));
 	next_tmp_tag.key.oids = descr->oids;
@@ -2098,7 +2101,9 @@ checkpoint_init_new_seq_bufs(BTreeDescr *descr, int chkpNum)
 	if (descr->storageType == BTreeStorageTemporary)
 		return;
 
-	init_seq_buf_pages(descr, &meta_page->nextChkp[next_chkp_index]);
+	init_seq_buf_pages(descr, &meta_page->nextChkp[next_chkp_index],
+					   psprintf("newchkp/nextChkp chkpNum=%d slot=%d",
+								chkpNum, next_chkp_index));
 
 	memset(&next_chkp_tag, 0, sizeof(next_chkp_tag));
 	next_chkp_tag.key.oids = descr->oids;
@@ -5730,8 +5735,27 @@ can_use_checkpoint_extents(BTreeDescr *desc, uint32 chkp_num)
 }
 
 static inline void
-init_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared)
+init_seq_buf_pages(BTreeDescr *desc, SeqBufDescShared *shared,
+				   const char *what)
 {
+	/*
+	 * Detector for #1053: name the caller, the tree and the checkpoint numbers
+	 * when a slot turns out to be allocated already.  The backtrace of the
+	 * crash cannot say which of the three callers reached here, and that is the
+	 * one fact needed to tell a second tree init from the checkpointer's own
+	 * per-checkpoint allocation.  Reported before the assertions below, so an
+	 * assert-enabled build logs it and then aborts, and a build without them
+	 * logs it and leaks on as it does today.
+	 */
+	if (OInMemoryBlknoIsValid(shared->pages[0]) ||
+		OInMemoryBlknoIsValid(shared->pages[1]))
+		elog(WARNING, "SEQBUFDUP %s tree=(%u,%u,%u) pages={%u,%u} "
+			 "lastChkp=%u reinit=%u",
+			 what, desc->oids.datoid, desc->oids.relnode, desc->oids.spcoid,
+			 shared->pages[0], shared->pages[1],
+			 checkpoint_state->lastCheckpointNumber,
+			 BTREE_GET_META(desc)->reinitCheckpointNum);
+
 	Assert(!OInMemoryBlknoIsValid(shared->pages[0]));
 	Assert(!OInMemoryBlknoIsValid(shared->pages[1]));
 
@@ -5807,7 +5831,9 @@ checkpointable_tree_fill_seq_buffers(BTreeDescr *td, bool init,
 		int			i;
 
 		for (i = 0; i < (is_compressed ? 2 : 3); i++)
-			init_seq_buf_pages(td, shareds[i]);
+			init_seq_buf_pages(td, shareds[i],
+							   psprintf("treeinit/%d chkp_num=%u slot=%d",
+										i, chkp_num, chkp_index));
 	}
 
 	if (is_compressed)
@@ -6165,7 +6191,9 @@ evictable_tree_init(BTreeDescr *desc, bool init_shmem, bool *was_evicted)
 			i = 1;
 
 		for (; i < (is_compressed ? 2 : 3); i++)
-			init_seq_buf_pages(desc, shareds[i]);
+			init_seq_buf_pages(desc, shareds[i],
+							   psprintf("evictinit/%d chkp_num=%u slot=%d",
+										i, chkp_num, chkp_index));
 	}
 
 	if (is_compressed)
