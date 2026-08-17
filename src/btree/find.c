@@ -1396,9 +1396,20 @@ retry:
 
 			if (O_PAGE_IS(p, BROKEN_SPLIT))
 			{
+				/*
+				 * The flag says this page is the *right* half of a split its
+				 * left sibling never finished, so the fix has to run from the
+				 * sibling: that is what the call below does, and it leaves
+				 * nothing for a second one to do.  Handing this same page to
+				 * o_btree_split_fix_and_unlock() treated it as the *left*
+				 * half instead, on a page the call above has already
+				 * unlocked, and read a rightLink it has no reason to hold --
+				 * reaching RIGHTLINK_GET_BLKNO(InvalidRightLink), an invalid
+				 * block number, straight into O_GET_IN_MEMORY_PAGE().
+				 * find_page() has always fixed this the one way.
+				 */
 				o_btree_split_fix_for_right_page_and_unlock(desc, intCxt.blkno);
 				intCxt.haveLock = false;
-				o_btree_split_fix_and_unlock(desc, intCxt.blkno);
 				goto retry;
 			}
 		}
