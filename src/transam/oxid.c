@@ -2087,7 +2087,8 @@ csn_progress(CommitSeqNo csn)
 {
 	if (COMMITSEQNO_IS_FROZEN(csn))
 		return 2;
-	if (COMMITSEQNO_IS_NORMAL(csn))
+	/* Committed at a csn and aborted are both outcomes, and both are final */
+	if (COMMITSEQNO_IS_NORMAL(csn) || COMMITSEQNO_IS_ABORTED(csn))
 		return 1;
 	return 0;
 }
@@ -2107,13 +2108,21 @@ check_csn_only_moves_forward(OXid oxid, OSnapshot *snapshot, CommitSeqNo csn)
 
 	if (entry->oxid == oxid && OXidIsValid(oxid))
 	{
-		ANTITHESIS_ALWAYS(csn_progress(csn) > csn_progress(entry->csn) ||
-						  csn == entry->csn,
+		int			before = csn_progress(entry->csn);
+		int			now = csn_progress(csn);
+
+		/*
+		 * Reaching an outcome is progress; once there, which outcome it was
+		 * may not change.  Two readings of "still running" need not be the
+		 * same value: in progress and not-deleted both mean that.
+		 */
+		ANTITHESIS_ALWAYS(now > before ||
+						  (now == before && (before == 0 || csn == entry->csn)),
 						  "a transaction's commit sequence number only moves forward",
 						  NULL);
 
 		/* Keep the furthest answer seen, so one bad reading cannot hide more */
-		if (csn_progress(csn) < csn_progress(entry->csn))
+		if (now < before)
 			return;
 	}
 

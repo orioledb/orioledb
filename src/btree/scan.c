@@ -2249,7 +2249,8 @@ btree_seq_scan_getnext_internal(BTreeSeqScan *scan, MemoryContext mctx,
 			if (haveSharedKey)
 				o_check_shared_key_version(scan->desc, scan->leafImg,
 										   &sharedKeyLeafLoc, tuple,
-										   &scan->oSnapshot, mctx);
+										   &scan->oSnapshot, mctx,
+										   NULL, NULL, false);
 			BTREE_PAGE_LOCATOR_NEXT(scan->histImg, &scan->histLoc);
 			if (!O_TUPLE_IS_NULL(tuple))
 			{

@@ -115,6 +115,8 @@ extern void o_check_shared_key_version(BTreeDescr *desc, Page p,
 									   BTreePageItemLocator *loc,
 									   OTuple otherVersion,
 									   OSnapshot *oSnapshot,
-									   MemoryContext mcxt);
+									   MemoryContext mcxt,
+									   TupleFetchCallback cb, void *arg,
+									   bool orderedScan);
 
 #endif							/* __BTREE_ITERATOR_H__ */
