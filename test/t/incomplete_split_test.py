@@ -397,6 +397,64 @@ class SplitTest(BaseTest):
 
 		self.stopAll()
 
+	def test_incomplete_leaf_delete_by_hint_fix(self):
+		"""
+		A modify that refinds its leaf by location hint must fix an incomplete
+		split the way a full descent does.
+
+		BROKEN_SPLIT says the page is the *right* half of a split its left
+		sibling never finished, so the fix runs from the sibling and leaves
+		nothing for a second call.  refind_page() used to hand the same page to
+		the left-half fixer as well, which reads a rightLink the page has no
+		reason to hold: RIGHTLINK_GET_BLKNO(InvalidRightLink) is not a block
+		number, and O_GET_IN_MEMORY_PAGE() aborts on it.  Issue #1054.
+
+		Splitting in the *middle* of the committed keys is what makes the state
+		reachable.  A split above them all -- what appending rows does -- leaves
+		the broken half empty, so no hint can ever point at it.  Here the failed
+		insert of a middle key moves four committed rows onto the page that keeps
+		the flag, and a DELETE of one of them arrives by the hint its own index
+		scan produced.
+		"""
+		node = self.node
+		self.insertToSplitTable(node, 10, 50, 4)
+
+		con1 = self.createConnection()
+		con1.execute("SET orioledb.enable_stopevents = true;")
+		con2 = self.createConnection()
+		con2.execute("SELECT pg_stopevent_set('split_fail', 'true');")
+
+		# Fails, and leaves a page carrying BROKEN_SPLIT with an invalid
+		# rightLink of its own, holding the keys 30, 34, 38 and 42.
+		con1.begin()
+		try:
+			con1.execute(
+			    "INSERT INTO o_split VALUES (repeat('x', 708) || '32');")
+			self.assertTrue(False)
+		except AssertionError:
+			raise
+		except Exception:
+			pass
+		finally:
+			con1.commit()
+		con2.execute("SELECT pg_stopevent_reset('split_fail');")
+		self.checkSplitTable(11, False)
+
+		# The DELETE's index scan hands the modify a hint on that page, so the
+		# modify refinds it instead of descending afresh.
+		con3 = self.createConnection()
+		con3.execute("SET enable_seqscan = off;")
+		con3.begin()
+		con3.execute(
+		    "DELETE FROM o_split WHERE id = repeat('x', 708) || '34';")
+		con3.commit()
+
+		self.checkSplitTable(10, True)
+		self.assertEqual(
+		    con3.execute("SELECT count(*) FROM o_split "
+		                 "WHERE id = repeat('x', 708) || '34';")[0][0], 0)
+		self.stopAll()
+
 	def createConnection(self):
 		connection = self.node.connect()
 		self.connections.append(connection)
