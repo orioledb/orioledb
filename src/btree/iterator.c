@@ -2403,10 +2403,10 @@ undo_it_find_internal(UndoIterator *undoIt, void *key, BTreeKeyType kind)
 		/* Load the next page item from page-level undo item */
 		if (undoIt->it->scanDir == ForwardScanDirection)
 			get_page_from_undo(desc, undoLocation, key, kind,
-							   undoIt->image, &left, &right, NULL, NULL, NULL, NULL);
+							   undoIt->image, &left, &right, NULL, NULL, NULL);
 		else
 			get_page_from_undo(desc, undoLocation, key, kind,
-							   undoIt->image, &left, &right, &undoIt->lokey, NULL, NULL, NULL);
+							   undoIt->image, &left, &right, &undoIt->lokey, NULL, NULL);
 
 		undoIt->rightmost = (undoIt->rightmost && right) || O_PAGE_IS(undoIt->image, RIGHTMOST);
 		undoIt->leftmost = (undoIt->leftmost && left) || O_PAGE_IS(undoIt->image, LEFTMOST);
