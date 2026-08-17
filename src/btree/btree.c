@@ -263,20 +263,35 @@ o_btree_check_size_of_tuple(int len, char *relation_name, bool index)
 						relation_name)));
 }
 
+/*
+ * The ctid a given position of a ctid primary key's sequence stands for.
+ *
+ * Offsets run from FirstOffsetNumber to MaxOffsetNumber - 1, so every ctid
+ * this hands out is a valid ItemPointer.  Everything that assigns ctids has
+ * to go through here
+ */
 ItemPointerData
-btree_ctid_get_and_inc(BTreeDescr *desc)
+btree_ctid_from_seq(uint64 ctid)
 {
-	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
 	ItemPointerData result;
-	uint64		ctid = pg_atomic_fetch_add_u64(&metaPageBlkno->ctid, 1);
-
-	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc));
 	Assert(ctid / (MaxOffsetNumber - FirstOffsetNumber) < InvalidBlockNumber);
 
 	ItemPointerSet(&result,
 				   (uint32) (ctid / (MaxOffsetNumber - FirstOffsetNumber)),
 				   (OffsetNumber) (ctid % (MaxOffsetNumber - FirstOffsetNumber) + FirstOffsetNumber));
+
 	return result;
+}
+
+ItemPointerData
+btree_ctid_get_and_inc(BTreeDescr *desc)
+{
+	BTreeMetaPage *metaPageBlkno = BTREE_GET_META(desc);
+	uint64		ctid = pg_atomic_fetch_add_u64(&metaPageBlkno->ctid, 1);
+
+	Assert(ORootPageIsValid(desc) && OMetaPageIsValid(desc));
+
+	return btree_ctid_from_seq(ctid);
 }
 
 void

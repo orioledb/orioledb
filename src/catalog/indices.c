@@ -1929,9 +1929,7 @@ rebuild_indices_worker_heap_scan(OTableDescr *old_descr, OTableDescr *descr,
 				if (idx->primaryIsCtid)
 				{
 					Assert(ctid);
-					primarySlot->tts_tid.ip_posid = (OffsetNumber) (*ctid + 1);
-					BlockIdSet(&primarySlot->tts_tid.ip_blkid,
-							   (uint32) ((*ctid + 1) >> 16));
+					primarySlot->tts_tid = btree_ctid_from_seq(*ctid);
 					(*ctid)++;
 				}
 				if (idx->bridging && bridge_ctid)
