@@ -1688,6 +1688,41 @@ refresh_context_leaf_lokey(OBTreeFindPageContext *context,
 }
 
 /*
+ * Is the page in context->img the same historical page as the one described by
+ * the arguments?
+ *
+ * Several current leaves can resolve to one historical page -- one wide
+ * pre-split image serves all of them -- and its rows have to be emitted once.
+ * What says whether that happened is the range the chain walk arrived at, not
+ * which undo record it stopped on: the walk both overwrites the image and
+ * switches which predecessor's history it follows, so the record it ends on
+ * identifies neither the contents nor the page.
+ *
+ * The hikey is the part of that range which is both available and sufficient.
+ * Available, because it is in the image itself, whatever the walk did to get
+ * there -- unlike the lokey, which a full split image cannot give for its right
+ * half at all.  Sufficient, because every reconstruction in one walk is to the
+ * same csn, and at one moment the tree's page boundaries are unique: equal
+ * hikeys are the same page, different hikeys are different pages.  Being
+ * rightmost is such a boundary too, and at most one page has it.
+ */
+static bool
+img_is_same_historical_page(OBTreeFindPageContext *context, bool rightmost,
+							OTuple hikey)
+{
+	OTuple		imgHikey;
+
+	if (O_PAGE_IS(context->img, RIGHTMOST) != rightmost)
+		return false;
+	if (rightmost)
+		return true;
+
+	BTREE_PAGE_GET_HIKEY(imgHikey, context->img);
+	return o_btree_cmp(context->desc, &imgHikey, BTreeKeyNonLeafKey,
+					   &hikey, BTreeKeyNonLeafKey) == 0;
+}
+
+/*
  * Find the left sibling of the current page.
  *
  * Expected new page hikey (lokey for old page) will be saved to hikey_buf.
@@ -1704,6 +1739,8 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 			   *item;
 	int			level;
 	UndoLocation prevLoc;
+	OFixedKey	prevHikey;
+	bool		prevRightmost;
 	Jsonb	   *params;
 	OTuple		imgHikey;
 	OFindPageResult findResult PG_USED_FOR_ASSERTS_ONLY;
@@ -1730,6 +1767,16 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 	item = &context->items[context->index];
 
 	prevLoc = context->imgUndoLoc;
+	clear_fixed_key(&prevHikey);
+	prevRightmost = O_PAGE_IS(context->img, RIGHTMOST);
+	if (!prevRightmost)
+	{
+		OTuple		leavingHikey;
+
+		BTREE_PAGE_GET_HIKEY(leavingHikey, context->img);
+		copy_fixed_key(desc, &prevHikey, leavingHikey);
+	}
+
 	while (true)
 	{
 		/* Nothing to do with leftmost page */
@@ -1792,8 +1839,10 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 												   true);
 
 					if (success &&
-						context->imgUndoLoc != InvalidUndoLocation &&
-						prevLoc == context->imgUndoLoc)
+						UndoLocationIsValid(prevLoc) &&
+						UndoLocationIsValid(context->imgUndoLoc) &&
+						img_is_same_historical_page(context, prevRightmost,
+													prevHikey.tuple))
 					{
 						parentItem->locator = loc;
 						refresh_context_leaf_lokey(context, &loc);
@@ -1828,7 +1877,10 @@ find_left_page(OBTreeFindPageContext *context, OFixedKey *hikey)
 		parentItem = &context->items[context->index - 1];
 		item = &context->items[context->index];
 
-		if (prevLoc != InvalidUndoLocation && prevLoc == context->imgUndoLoc)
+		if (UndoLocationIsValid(prevLoc) &&
+			UndoLocationIsValid(context->imgUndoLoc) &&
+			img_is_same_historical_page(context, prevRightmost,
+										prevHikey.tuple))
 			continue;
 
 		if (COMMITSEQNO_IS_INPROGRESS(context->csn) &&
