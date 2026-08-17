@@ -125,6 +125,45 @@ class UndoImageChainTest(BaseTest):
 		self.node.execute("UPDATE %s SET payload = repeat('%s', %d);" %
 		                  (table, payload, PAD + 10))
 
+	def _rewrite_by(self, table, payload, pad):
+		"""Rewrite every row at a given length."""
+		self.node.execute("UPDATE %s SET payload = repeat('%s', %d);" %
+		                  (table, payload, pad))
+
+	def _rounds(self, table, pattern, step, first_offset=1):
+		"""
+		One operation per character of `pattern`, in order:
+
+		    'd'  interleave a round of keys: a split that writes a differential
+		         image, nothing having parked a sequential scan
+		    'f'  the same with a cursor parking a sequential scan, so the split
+		         has to write a full image instead
+		    'r'  rewrite every row a little longer: compaction, a full image
+
+		Returns the next free interleave offset, so a caller can split a pattern
+		across two calls without the two colliding.
+		"""
+		offset = first_offset
+		for i, kind in enumerate(pattern, start=first_offset):
+			if kind in 'df':
+				payload = 'v%d' % (i % 10)
+				if kind == 'f':
+					self._parked_interleave(table, offset, step, payload)
+				else:
+					self._interleave(table, offset, step, payload)
+				offset += 1
+			else:
+				self._rewrite_by(table, 'w%d' % (i % 10), PAD + i)
+		return offset
+
+	def _deep(self, table, pattern, step=16):
+		"""Run a pattern as one chain: its first round seeds the full image."""
+		self._run(
+		    table,
+		    seed=lambda t: self._rounds(t, pattern[:1], step),
+		    rest=lambda t: self._rounds(t, pattern[1:], step, first_offset=2),
+		    step=step)
+
 	def _drop_third(self, table):
 		"""Settled deletes, so a later merge has tuples to drop."""
 		self.node.safe_psql('postgres',
@@ -385,6 +424,42 @@ class UndoImageChainTest(BaseTest):
 		          rest=rest,
 		          fillfactor=10,
 		          step=4)
+
+	# --------------------------------------------------- deep chains
+
+	def test_deep_chain_mixed(self):
+		"""
+		Fifteen rounds, alternating differential splits and compactions above the
+		seeding full image.
+
+		Measured walk depth 11, distributed over 2, 4, 5, 6, 8, 9, 10 and 11 --
+		different leaves reach different depths in one run, so a single pass
+		covers a range of them rather than one number.
+		"""
+		self._deep('o_uic_deep_mixed', 'fddrrddrrddrrdd')
+
+	def test_deep_chain_full_in_the_middle(self):
+		"""
+		The same depth with a full split image half way down the chain, so the
+		walk applies differential records, then a record that overwrites the page
+		whole, then more differential ones.
+
+		Measured walk depth 11.  This is the shape a rule keyed on "did the walk
+		pass a differential record" gets wrong: by the time the walk ends, the
+		narrowing those records applied is long overwritten.
+		"""
+		self._deep('o_uic_deep_middle_full', 'fddrrddfrddrrdd')
+
+	def test_deep_chain_all_full(self):
+		"""
+		Control at the same depth with no differential record at all: parked
+		splits and compactions only.
+
+		Measured walk depth 11.  Every leaf that reaches a given record holds its
+		bytes, so the identity is unambiguous -- if this one ever fails, the
+		defect is not in telling differential records apart.
+		"""
+		self._deep('o_uic_deep_all_full', 'frfrfrfrfrfrfrf')
 
 	# --------------------------------------------------- composed helpers
 
