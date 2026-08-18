@@ -506,6 +506,7 @@ extern XLogRecPtr replay_until_lsn;
 #ifdef IS_DEV
 extern XLogRecPtr debug_recovery_crash_lsn;
 extern int	debug_commit_window_ms;
+extern bool debug_checkpoint_error;
 #endif
 
 /* For page eviction/read checkpoint test only */

@@ -184,6 +184,13 @@ static int	file_extents_len_off_cmp(const void *a, const void *b);
 static int	file_extents_off_len_cmp(const void *a, const void *b);
 static int	file_extents_writeback_cmp(const void *a, const void *b);
 
+/*
+ * Set while a checkpoint has rotated part of the trees onto its checkpoint
+ * number and not yet all of them.  See o_perform_checkpoint().
+ */
+static bool checkpoint_rotation_in_progress = false;
+
+static void o_perform_checkpoint_guts(int flags);
 static void sort_checkpoint_map_file(BTreeDescr *descr, int cur_chkp_index);
 static void sort_checkpoint_tmp_file(BTreeDescr *descr, int cur_chkp_index);
 static inline void checkpoint_ix_init_state(CheckpointState *state, BTreeDescr *descr);
@@ -1612,8 +1619,69 @@ get_checkpoint_xlog_ptr(void)
 		return GetXLogInsertRecPtr();
 }
 
+/*
+ * Make a checkpoint of all the OrioleDB trees.
+ *
+ * An error must not escape the part of this that rotates the trees onto the
+ * new checkpoint number.  PostgreSQL's checkpointer treats a failed checkpoint
+ * as "try again in a second", and the retry starts over with the same
+ * checkpoint number -- but in the middle of the rotation part of the trees
+ * have moved onto that number and the rest have not.  Each tree writes the
+ * *.map / *.tmp files of checkpoint N through the seq buf in slot N % 2, whose
+ * pages checkpoint_init_new_seq_bufs() allocates up front and checkpoint_ix()
+ * frees once it has finalized them; a tree the failed attempt got through
+ * therefore has the slots of N and N + 1 the other way round from a tree it
+ * never reached.  The retry then re-allocates a slot that is still allocated
+ * (issue #1053), and concurrent backends, which pick the slot to record a
+ * freed extent in from how far the checkpointer has got, write into pages the
+ * failed attempt has already freed.
+ *
+ * Rolling that back is not possible: for the trees that did complete, the map
+ * file of checkpoint N is written and the seq bufs that produced it are gone.
+ * So report the error and let the process exit instead, which restarts the
+ * cluster and rebuilds all of this state from the last checkpoint on disk.
+ * That is the same stance the seq buf failures below already take, and far
+ * cheaper than the alternative: without assertions the retry silently leaks
+ * the pages it re-allocates and lets backends write through a freed one.
+ *
+ * Outside that window an error is harmless and stays an error: before it
+ * nothing has moved yet, and after it every tree has, so the retry -- with the
+ * next checkpoint number by then -- finds all of them in the same state.
+ */
 void
 o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
+{
+	PG_TRY();
+	{
+		o_perform_checkpoint_guts(flags);
+	}
+	PG_CATCH();
+	{
+		if (!checkpoint_rotation_in_progress)
+			PG_RE_THROW();
+
+		/*
+		 * Log the original error first -- it is the one that says what
+		 * actually went wrong -- and only then give up, so both ends of the
+		 * story are in the log.
+		 */
+		EmitErrorReport();
+		FlushErrorState();
+
+		ereport(FATAL,
+				(errmsg("OrioleDB checkpoint %u failed",
+						checkpoint_state->lastCheckpointNumber + 1),
+				 errdetail("A checkpoint that failed part way through cannot "
+						   "be rolled back or retried.")));
+	}
+	PG_END_TRY();
+
+	if (next_CheckPoint_hook)
+		next_CheckPoint_hook(redo_pos, flags);
+}
+
+static void
+o_perform_checkpoint_guts(int flags)
 {
 	CheckpointTablesArg chkp_tbl_arg;
 	CheckpointControl control;
@@ -1743,7 +1811,16 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	before_writing_xids_file(cur_chkp_num);
 	start_write_xids(cur_chkp_num);
 
+	/* From here on a failure cannot be retried -- see o_perform_checkpoint() */
+	checkpoint_rotation_in_progress = true;
+
 	checkpoint_sys_trees(flags, cur_chkp_num, &chkp_tbl_arg);
+
+#ifdef IS_DEV
+	if (debug_checkpoint_error)
+		ereport(ERROR,
+				(errmsg("orioledb.debug_checkpoint_error is set")));
+#endif
 
 	/*
 	 * Restore stop events (they were suppressed only for the sys-tree
@@ -1924,6 +2001,9 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 	checkpoint_state->completed = false;
 	chkp_inc_changecount_after(checkpoint_state);
 
+	/* Every tree has rotated now, so a failure below is retryable again */
+	checkpoint_rotation_in_progress = false;
+
 	LWLockRelease(&checkpoint_state->oTablesMetaLock);
 
 	/*
@@ -2050,9 +2130,6 @@ o_perform_checkpoint(XLogRecPtr redo_pos, int flags)
 
 	MemoryContextResetOnly(chkp_main_context);
 	MemoryContextSwitchTo(prev_context);
-
-	if (next_CheckPoint_hook)
-		next_CheckPoint_hook(redo_pos, flags);
 }
 
 void

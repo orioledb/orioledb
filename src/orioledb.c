@@ -173,6 +173,7 @@ static char *replay_until_lsn_string;
 XLogRecPtr	debug_recovery_crash_lsn = InvalidXLogRecPtr;
 static char *debug_recovery_crash_lsn_string;
 int			debug_commit_window_ms = 0;
+bool		debug_checkpoint_error = false;
 #endif
 
 /* For page eviction/read checkpoint test only */
@@ -1209,6 +1210,19 @@ _PG_init(void)
 							PGC_USERSET,
 							GUC_UNIT_MS,
 							NULL, NULL, NULL);
+	DefineCustomBoolVariable("orioledb.debug_checkpoint_error",
+							 "Makes every checkpoint fail once it is done with"
+							 " the system trees.",
+							 "For tests of what an error part way through a"
+							 " checkpoint leaves behind.  Never set this on a"
+							 " real cluster.",
+							 &debug_checkpoint_error,
+							 false,
+							 PGC_SIGHUP,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
 #endif							/* IS_DEV */
 
 	if (orioledb_s3_mode)
