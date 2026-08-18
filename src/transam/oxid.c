@@ -580,6 +580,36 @@ acquire_logical_xid_wrapper(bool *isValidHeapXid)
 	return nextLogicalXid;
 }
 
+/*
+ * Make sure the current transaction has a logical xid of its own.
+ *
+ * A subtransaction start needs to name its parent in the savepoint WAL record.
+ * Asking GetTopTransactionId() for that name *assigns* a heap xid to the whole
+ * transaction, which is a far bigger step than naming it: it puts the
+ * transaction's CSN under the heap's control, and the heap assigns that CSN
+ * outside OrioleDB's precommit/commit pair.  A logical xid of our own names the
+ * parent just as well and costs nothing else.
+ *
+ * acquire_logical_xid_wrapper() records the heap -> oriole switch itself when a
+ * heap xid does happen to exist already, so recovery keeps following the same
+ * chain as before in that case.
+ */
+TransactionId
+ensure_current_logical_xid(void)
+{
+	if (!TransactionIdIsValid(logicalXidContext.xid))
+	{
+		bool		isValidHeapXid = false;
+
+		logicalXidContext.xid = acquire_logical_xid_wrapper(&isValidHeapXid);
+		logicalXidContext.useHeap = isValidHeapXid;
+		elog(DEBUG4, "ENSURE logical xid %u useHeap %d",
+			 logicalXidContext.xid, logicalXidContext.useHeap);
+	}
+
+	return logicalXidContext.xid;
+}
+
 void
 assign_subtransaction_logical_xid(SubTransactionId mySubid)
 {
