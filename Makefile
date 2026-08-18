@@ -211,6 +211,7 @@ TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
 						test/t/move_database_test.py \
 						test/t/database_template_test.py
 TESTGRESCHECKS_PART_2 = test/t/checkpoint_concurrent_test.py \
+						test/t/checkpoint_error_test.py \
 						test/t/checkpoint_eviction_test.py \
 						test/t/checkpoint_same_trx_test.py \
 						test/t/checkpoint_split1_test.py \
