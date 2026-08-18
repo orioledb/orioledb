@@ -6,6 +6,7 @@ import time
 from testgres.enums import NodeStatus
 
 from .base_test import BaseTest
+from .base_test import ThreadQueryExecutor
 
 
 class CheckpointErrorTest(BaseTest):
@@ -71,4 +72,75 @@ class CheckpointErrorTest(BaseTest):
 		    node.execute('postgres', "SELECT count(*) FROM o_test;")[0][0],
 		    2000)
 		node.safe_psql('postgres', "CHECKPOINT;")
+		node.stop()
+
+	def fill_lock_table(self, con):
+		"""
+		Leave the shared lock table with no room left.
+
+		Session-level advisory locks live in the same table as the per-tree
+		userlocks the checkpointer takes, and are not released when the
+		transaction that ran out of room aborts, so they stay for as long as
+		the connection does.
+		"""
+		with self.assertRaises(Exception):
+			con.execute("SELECT pg_advisory_lock(i) "
+			            "FROM generate_series(1, 1000000) i;")
+		con.rollback()
+		self.assertGreater(
+		    con.execute(
+		        "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory';")
+		    [0][0], 0)
+
+	def test_checkpoint_with_no_lock_table_room(self):
+		"""
+		A full lock table is what the checkpointer ran into in the wild, and
+		it is transient -- it is other backends\' locks that filled it.  So it
+		has to wait for room rather than fail.
+		"""
+		node = self.node
+		# The smallest lock table the server accepts, so that a single session
+		# can fill it below.
+		node.append_conf(
+		    'postgresql.conf', "max_connections = 10\n"
+		    "max_locks_per_transaction = 10\n")
+		node.start()
+		self.create_table(node)
+		node.safe_psql('postgres', "CHECKPOINT;")
+
+		# Both connections have to be open before the lock table fills up: a
+		# fresh backend cannot lock its own database to log in afterwards.
+		con_hold = node.connect()
+		con_chkp = node.connect()
+
+		self.fill_lock_table(con_hold)
+
+		# The checkpointer gets through the system trees, which take no
+		# heavyweight locks, and then has to wait for room for the lock on the
+		# first user table.
+		t = ThreadQueryExecutor(con_chkp, "CHECKPOINT;")
+		t.start()
+		t.join(2)
+		self.assertTrue(t.is_alive(),
+		                "the checkpoint did not wait for the lock table")
+
+		con_hold.execute("SELECT pg_advisory_unlock_all();")
+		con_hold.commit()
+		t.join()
+
+		# A second one, to show the first left nothing behind for it.
+		con_chkp.execute("CHECKPOINT;")
+		con_hold.close()
+		con_chkp.close()
+
+		self.assertEqual(
+		    node.execute('postgres', "SELECT count(*) FROM o_test;")[0][0],
+		    2000)
+
+		# And what it wrote must still come back after a crash.
+		node.stop(['-m', 'immediate'])
+		node.start()
+		self.assertEqual(
+		    node.execute('postgres', "SELECT count(*) FROM o_test;")[0][0],
+		    2000)
 		node.stop()
