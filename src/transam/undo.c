@@ -2620,9 +2620,30 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				current_oxid_precommit();
 
-				csn = GetCurrentCSN();
-				if (csn == COMMITSEQNO_INPROGRESS)
-					csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
+				/*
+				 * Take our own CSN here rather than reusing the one the heap
+				 * commit already assigned.
+				 *
+				 * GetCurrentCSN() returns a CSN that CommitTransaction() put in
+				 * place before XACT_EVENT_COMMIT fired -- for a transaction that
+				 * owns a heap xid, before an XLogFlush() and a
+				 * SyncRepWaitForLSN() as well.  Reusing it means the CSN is
+				 * already below every snapshot taken from that moment on while
+				 * current_oxid_commit() below has not published it yet, so a
+				 * reader in that window walks back over our row versions and
+				 * answers from the state before us -- and a later read of the
+				 * same key in the same snapshot answers with our data.
+				 *
+				 * Taking the CSN between the precommit and the commit closes
+				 * that window: a snapshot above our CSN is necessarily taken
+				 * after the committing mark, so oxid_match_snapshot() waits for
+				 * the real value instead of reporting us in progress.
+				 *
+				 * The price is deliberate: a transaction that touches both the
+				 * heap and OrioleDB now carries two different CSNs, so the two
+				 * do not order it identically against a concurrent reader.
+				 */
+				csn = pg_atomic_fetch_add_u64(&TRANSAM_VARIABLES->nextCommitSeqNo, 1);
 
 				current_oxid_commit(csn);
 
