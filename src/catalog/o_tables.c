@@ -1815,6 +1815,25 @@ o_tables_rel_try_lock_extended(ORelOids *oids, int lockmode,
 	return false;
 }
 
+/*
+ * LockAcquire() with dontWait, that also declines to raise an error when the
+ * shared lock table has no room left: the caller gets LOCKACQUIRE_NOT_AVAIL
+ * for that too and can retry.
+ */
+static LockAcquireResult
+lock_acquire_no_wait_no_memory_error(const LOCKTAG *locktag, LOCKMODE lockmode)
+{
+	return LockAcquireExtended(locktag, lockmode,
+							   false,	/* sessionLock */
+							   true,	/* dontWait */
+							   false,	/* reportMemoryError */
+							   NULL /* locallockp */
+#if PG_VERSION_NUM >= 180000
+							   ,false	/* logLockFailure */
+#endif
+		);
+}
+
 void
 o_tables_rel_lock_extended(ORelOids *oids, int lockmode, bool checkpoint)
 {
@@ -1835,8 +1854,17 @@ o_tables_rel_lock_extended(ORelOids *oids, int lockmode, bool checkpoint)
 		 * latch wait, so the deadlock detector sees no cycle.  Keep draining
 		 * between attempts, like acquire_chkp_lock_drain() does for the
 		 * checkpoint-coordination LWLocks.
+		 *
+		 * Ask for no memory error either, so that a lock table with no room
+		 * left is one more reason to come back in a moment rather than an
+		 * ERROR.  The checkpointer cannot take one: it would be caught by the
+		 * checkpointer's own sigsetjmp and turned into a retry of the same
+		 * checkpoint number, which o_perform_checkpoint() explains it cannot
+		 * survive.  And the room is transient -- it is other backends' locks
+		 * that filled the table.
 		 */
-		while (LockAcquire(&locktag, lockmode, false, true) == LOCKACQUIRE_NOT_AVAIL)
+		while (lock_acquire_no_wait_no_memory_error(&locktag, lockmode) ==
+			   LOCKACQUIRE_NOT_AVAIL)
 		{
 			AbsorbSyncRequests();
 			pg_usleep(1000L);
