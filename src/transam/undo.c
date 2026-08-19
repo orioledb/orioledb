@@ -2574,6 +2574,34 @@ undo_xact_callback(XactEvent event, void *arg)
 
 				break;
 
+			case XACT_EVENT_PRE_PROC_ARRAY:
+
+				/*
+				 * A transaction that carries a heap xid takes its CSN from
+				 * the heap, and ProcArrayEndTransaction() -- which runs right
+				 * after this callback -- is what makes that CSN visible to
+				 * everybody else.  Mark ourselves as committing here, so that
+				 * a snapshot whose csn is already above ours cannot be taken
+				 * while OrioleDB still answers "in progress" for our oxid.
+				 * Readers of our tuples then wait for the
+				 * current_oxid_commit() in XACT_EVENT_COMMIT instead of
+				 * silently missing them.
+				 *
+				 * The mark cannot leak: the commit is already durable, and
+				 * the only thing standing between here and XACT_EVENT_COMMIT
+				 * is ProcArrayEndTransaction(), which does not throw.
+				 *
+				 * A transaction without a heap xid is not marked here.  It
+				 * allocates its CSN itself in XACT_EVENT_COMMIT, and nothing
+				 * has published it early, so marking it now would only make
+				 * readers spin through the WAL flush and the synchronous
+				 * replication wait that come first.
+				 */
+				if (TransactionIdIsValid(heapXid))
+					current_oxid_precommit();
+
+				break;
+
 			case XACT_EVENT_COMMIT:
 
 				elog(DEBUG4, "XACT_EVENT_COMMIT oxid " UINT64_FORMAT
@@ -2618,7 +2646,25 @@ undo_xact_callback(XactEvent event, void *arg)
 					set_oxid_xlog_ptr(oxid, XactLastCommitEnd);
 				}
 
-				current_oxid_precommit();
+#ifdef IS_DEV
+
+				/*
+				 * PROBE.  ProcArrayEndTransaction() has already made the
+				 * heap's CSN visible; the mark that makes readers wait is
+				 * only set below.  Widen that window on demand so a test can
+				 * land a reader in it.
+				 */
+				if (debug_commit_window_ms > 0)
+					pg_usleep(debug_commit_window_ms * 1000L);
+#endif
+
+				/*
+				 * The heap-xid case marked itself in
+				 * XACT_EVENT_PRE_PROC_ARRAY already, before its CSN became
+				 * visible; see the comment there.
+				 */
+				if (!TransactionIdIsValid(heapXid))
+					current_oxid_precommit();
 
 				csn = GetCurrentCSN();
 				if (csn == COMMITSEQNO_INPROGRESS)
@@ -2954,10 +3000,12 @@ undo_subxact_callback(SubXactEvent event, SubTransactionId mySubid,
 			{
 				(void) get_current_oxid();
 				add_subxact_undo_item(parentSubid);
+
 				/*
-				 * Name the parent with its own logical xid.  GetTopTransactionId()
-				 * would name it too, but only by assigning a heap xid to the
-				 * whole transaction -- see ensure_current_logical_xid().
+				 * Name the parent with its own logical xid.
+				 * GetTopTransactionId() would name it too, but only by
+				 * assigning a heap xid to the whole transaction -- see
+				 * ensure_current_logical_xid().
 				 */
 				prentLogicalXid = ensure_current_logical_xid();
 				assign_subtransaction_logical_xid(mySubid);

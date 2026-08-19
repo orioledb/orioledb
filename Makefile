@@ -182,6 +182,7 @@ ISOLATIONCHECKS = bitmap_hist_scan \
 				  seqscan_own_writes \
 				  uniq
 TESTGRESCHECKS_PART_1 = test/t/amcheck_test.py \
+						test/t/commit_window_test.py \
 						test/t/tablespace_test.py \
 						test/t/checkpointer_test.py \
 						test/t/correlation_test.py \

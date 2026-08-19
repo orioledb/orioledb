@@ -172,6 +172,7 @@ static char *replay_until_lsn_string;
 #ifdef IS_DEV
 XLogRecPtr	debug_recovery_crash_lsn = InvalidXLogRecPtr;
 static char *debug_recovery_crash_lsn_string;
+int			debug_commit_window_ms = 0;
 #endif
 
 /* For page eviction/read checkpoint test only */
@@ -1195,6 +1196,19 @@ _PG_init(void)
 							   orioledb_debug_recovery_crash_lsn_check_hook,
 							   orioledb_debug_recovery_crash_lsn_assign_hook,
 							   NULL);
+
+	DefineCustomIntVariable("orioledb.debug_commit_window_ms",
+							"Sleeps between the heap making our CSN visible and"
+							" OrioleDB marking us as committing.",
+							"For tests of the window in which a transaction's CSN"
+							" is already below a reader's snapshot while OrioleDB"
+							" still reports it in progress.  Never set this on a"
+							" real cluster.",
+							&debug_commit_window_ms,
+							0, 0, 60000,
+							PGC_USERSET,
+							GUC_UNIT_MS,
+							NULL, NULL, NULL);
 #endif							/* IS_DEV */
 
 	if (orioledb_s3_mode)
