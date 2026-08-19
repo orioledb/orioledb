@@ -276,8 +276,8 @@ wal_parse_rec_bridge_erase(WalReaderState *r, WalRecord *rec)
 }
 
 /*
- * Parser for WAL_REC_CIC_PHASE_3_START / WAL_REC_CIC_PHASE_4 /
- * WAL_REC_CIC_PHASE_FLIP -- all three share the same payload.  Index
+ * Parser for WAL_REC_CIC_WRITERS_DIRECT / WAL_REC_CIC_DRAIN_BARRIER /
+ * WAL_REC_CIC_INDEX_VALID -- all three share the same payload.  Index
  * oids land in rec->oids (standard layout); the table identity and
  * index version go into rec->u.cic_phase.
  */

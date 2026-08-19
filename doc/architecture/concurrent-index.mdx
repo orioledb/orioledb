@@ -45,16 +45,21 @@ That side channel is the per-backend **spool**.
 ## Index lifecycle: `OIndexState`
 
 A new column in the `OIndex` sys-tree record carries the index's lifecycle
-state:
+state.  Two terms are used throughout: a writer **captures** a change when it
+appends it to the CIC spool instead of writing it into the index, and
+**catchup mode** is the protocol a later revision would need to build against
+a moving snapshot rather than a fixed one -- there the writers have to be
+handed over to the index while the scan is still running, which is what the
+unused states below are named for.
 
 ```c
 typedef enum
 {
     OINDEX_STATE_VALID = 0,         /* fully built, all readers/writers OK */
-    OINDEX_STATE_BUILDING_PHASE_1,  /* reserved for future catchup-mode */
+    OINDEX_STATE_BUILDING_PHASE_1,  /* not reached: catchup mode opens capture */
     OINDEX_STATE_BUILDING_PHASE_2,  /* build pending, writers capture to spool */
-    OINDEX_STATE_BUILDING_PHASE_3,  /* reserved for future catchup-mode */
-    OINDEX_STATE_BUILDING_PHASE_4   /* reserved for future final-drain barrier */
+    OINDEX_STATE_BUILDING_PHASE_3,  /* not reached: catchup mode writes direct */
+    OINDEX_STATE_BUILDING_PHASE_4   /* not reached: catchup mode drain barrier */
 } OIndexState;
 ```
 
@@ -178,7 +183,7 @@ PG phase 3: validate_index ──────────► orioledb_index_vali
                                           - covering scan (re-insert all
                                             primary rows; no-op on collision)
                                           - o_indices_set_state(VALID)
-                                          - emit WAL_REC_CIC_PHASE_FLIP
+                                          - emit WAL_REC_CIC_INDEX_VALID
                                           - cic_spool_drop_dir
             commit (releases AccessExclusiveLock)
 
@@ -236,9 +241,14 @@ normal index write.
 
 ## Standby replay
 
-CIC emits three WAL phase records for observability
-(`WAL_REC_CIC_PHASE_3_START`, `WAL_REC_CIC_PHASE_4`,
-`WAL_REC_CIC_PHASE_FLIP`), but their redo handler is currently a no-op.
+CIC emits one WAL phase record for observability,
+`WAL_REC_CIC_INDEX_VALID`, when the index becomes visible to readers, and its
+redo handler is a no-op.  `WAL_REC_CIC_WRITERS_DIRECT` and
+`WAL_REC_CIC_DRAIN_BARRIER` are defined alongside it but never written: like
+the unused `OIndexState` values they only reserve the numbering catchup mode
+would need, for the same reason -- a record number added later would not be
+understood by an older binary.
+
 The data-changing operations all use orioledb's standard WAL channel:
 
 - `o_tables_update` (catalog) replays the OTable change.

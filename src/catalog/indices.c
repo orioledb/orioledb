@@ -808,7 +808,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
  *	    pass.  Captures concurrent writes via the spool (their capture
  *	    hook fires because state == BUILDING).
  *	 3. Brief ShareLock window: WaitForLockers + drain spool + flip
- *	    OIndex.state to VALID + emit WAL_REC_CIC_PHASE_FLIP + drop spool
+ *	    OIndex.state to VALID + emit WAL_REC_CIC_INDEX_VALID + drop spool
  *	    dir + drop shared-root placeholder.  ShareLock is released as
  *	    part of the surrounding transaction commit; concurrent writers
  *	    that hit the table after release see state == VALID and write
@@ -1066,7 +1066,7 @@ o_define_index_concurrent_finish(Relation heap, Relation index)
 							 OINDEX_STATE_VALID, oxid, snap.csn))
 		elog(ERROR, "CIC finish: failed to flip OIndex state to VALID");
 
-	add_cic_phase_wal_record(WAL_REC_CIC_PHASE_FLIP,
+	add_cic_phase_wal_record(WAL_REC_CIC_INDEX_VALID,
 							 idx_oids, tableOids, o_table->indices[ix_num].version);
 
 	/*

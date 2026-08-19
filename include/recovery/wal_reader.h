@@ -90,7 +90,7 @@ typedef struct WalRecord
 			ItemPointerData iptr;
 		}			bridge_erase;
 
-		/* CIC phase-transition records (PHASE_3_START / PHASE_4 / PHASE_FLIP) */
+		/* CIC phase records (WRITERS_DIRECT / DRAIN_BARRIER / INDEX_VALID) */
 		struct
 		{
 			ORelOids	tableOids;
