@@ -4976,9 +4976,9 @@ replay_on_record(WalReaderState *r, WalRecord *rec)
 				break;
 			}
 
-		case WAL_REC_CIC_PHASE_3_START:
-		case WAL_REC_CIC_PHASE_4:
-		case WAL_REC_CIC_PHASE_FLIP:
+		case WAL_REC_CIC_WRITERS_DIRECT:
+		case WAL_REC_CIC_DRAIN_BARRIER:
+		case WAL_REC_CIC_INDEX_VALID:
 			{
 				/*
 				 * Phase-transition record for CREATE INDEX CONCURRENTLY. Real

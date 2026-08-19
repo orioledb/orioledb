@@ -61,10 +61,15 @@
 	X(WAL_REC_DATABASE_COPY,        19, "DATABASE_COPY",      wal_parse_rec_dbcopy) \
 	X(WAL_REC_DATABASE_CREATE_COPY, 20, "DATABASE_CREATE_COPY", wal_parse_rec_dbcreate_copy) \
 	X(WAL_REC_DATABASE_TEMPLATE_CHECKPOINT, 21, "DATABASE_TEMPLATE_CHECKPOINT", wal_parse_rec_dbcreate_copy) \
-	X(WAL_REC_CIC_PHASE_3_START,    22, "CIC_PHASE_3_START",  wal_parse_rec_cic_phase) \
-	X(WAL_REC_CIC_PHASE_4,          23, "CIC_PHASE_4",        wal_parse_rec_cic_phase) \
-	X(WAL_REC_CIC_PHASE_FLIP,       24, "CIC_PHASE_FLIP",     wal_parse_rec_cic_phase)
+	X(WAL_REC_CIC_WRITERS_DIRECT,   22, "CIC_WRITERS_DIRECT", wal_parse_rec_cic_phase) \
+	X(WAL_REC_CIC_DRAIN_BARRIER,    23, "CIC_DRAIN_BARRIER",  wal_parse_rec_cic_phase) \
+	X(WAL_REC_CIC_INDEX_VALID,      24, "CIC_INDEX_VALID",    wal_parse_rec_cic_phase)
 
+/*
+ * Of the CIC records above only CIC_INDEX_VALID is emitted; the other two
+ * reserve the numbering a future catchup mode needs.  See OIndexState in
+ * include/catalog/o_indices.h.
+ */
 typedef enum
 {
 #define X(sym, val, name, fn) sym = (val),

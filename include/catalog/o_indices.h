@@ -22,21 +22,33 @@
 /*
  * Lifecycle state of an index.  A non-VALID state means CREATE INDEX
  * CONCURRENTLY is still building it: the index row is already visible to
- * writers, which record their changes into the CIC spool, but not yet to
- * readers.  Persisted as one trailing byte in serialize_o_index(); a record
- * written before this field existed reads as OINDEX_STATE_VALID.
+ * writers, which capture their changes -- that is, append them to the CIC
+ * spool instead of writing them into the index -- but not yet to readers.
+ * Persisted as one trailing byte in serialize_o_index(); a record written
+ * before this field existed reads as OINDEX_STATE_VALID.
+ *
+ * Only VALID and BUILDING_PHASE_2 are reached by this revision.  The other
+ * three are defined now because the state is persisted: an old binary would
+ * not understand a value added later, whereas an unused value that already
+ * exists costs nothing and keeps the numbering stable.  They are named for
+ * the phases a future catchup mode would need -- a build that runs against a
+ * moving snapshot instead of a fixed one, and so has to hand writers over to
+ * the index while the scan is still going.
  */
 typedef enum
 {
 	OINDEX_STATE_VALID = 0,		/* fully built, available to all readers */
-	OINDEX_STATE_BUILDING_PHASE_1,	/* the OIndex row exists and writers spool
-									 * their changes; nothing is written to
-									 * the index itself */
-	OINDEX_STATE_BUILDING_PHASE_2,	/* phase 1, plus the snapshot scan that
-									 * builds the index */
-	OINDEX_STATE_BUILDING_PHASE_3,	/* build finished; writers write to the
-									 * index and spool only on collisions */
-	OINDEX_STATE_BUILDING_PHASE_4	/* final spool drain under WaitForLockers */
+	OINDEX_STATE_BUILDING_PHASE_1,	/* not reached in this revision: reserved
+									 * for catchup mode, where capture opens
+									 * before the scan starts */
+	OINDEX_STATE_BUILDING_PHASE_2,	/* build pending, writers capture to spool */
+	OINDEX_STATE_BUILDING_PHASE_3,	/* not reached in this revision: reserved
+									 * for catchup mode, where the scan is
+									 * done and writers maintain the index
+									 * directly, spooling only on collisions */
+	OINDEX_STATE_BUILDING_PHASE_4	/* not reached in this revision: reserved
+									 * for catchup mode's final spool drain
+									 * under WaitForLockers */
 } OIndexState;
 
 typedef struct

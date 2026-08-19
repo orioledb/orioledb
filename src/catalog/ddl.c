@@ -1689,7 +1689,7 @@ orioledb_utility_command(PlannedStmt *pstmt,
 				 * DML to the spool.  PG's phase-3 validate_index calls
 				 * orioledb_index_validate_scan, which runs the build, drains
 				 * the spool under AccessExclusiveLock, flips state to VALID,
-				 * and emits WAL_REC_CIC_PHASE_FLIP.  UNIQUE is enforced via
+				 * and emits WAL_REC_CIC_INDEX_VALID.  UNIQUE is enforced via
 				 * tuplesort during the build, and a post-drain index walk
 				 * that compares the unique-fields portion of adjacent leaf
 				 * tuples; a duplicate aborts CIC and leaves the OIndex in

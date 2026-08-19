@@ -1011,10 +1011,15 @@ add_truncate_wal_record(ORelOids oids)
 }
 
 /*
- * Emit a CIC phase-transition record.  recType is one of
- * WAL_REC_CIC_PHASE_3_START / WAL_REC_CIC_PHASE_4 / WAL_REC_CIC_PHASE_FLIP.
- * The record rides along on the issuing transaction's oxid, so the
- * usual add_xid_wal_record_if_needed() prefix applies.
+ * Emit a CIC phase-transition record.  The record rides along on the issuing
+ * transaction's oxid, so the usual add_xid_wal_record_if_needed() prefix
+ * applies.
+ *
+ * Only WAL_REC_CIC_INDEX_VALID is emitted by this revision, when the index
+ * becomes visible to readers.  WAL_REC_CIC_WRITERS_DIRECT and
+ * WAL_REC_CIC_DRAIN_BARRIER exist so that the record numbering a future
+ * catchup mode needs is reserved now; nothing writes them yet.  See
+ * OIndexState in include/catalog/o_indices.h.
  */
 void
 add_cic_phase_wal_record(uint8 recType,
@@ -1024,9 +1029,9 @@ add_cic_phase_wal_record(uint8 recType,
 	WALRecCICPhase *rec;
 
 	Assert(!is_recovery_process());
-	Assert(recType == WAL_REC_CIC_PHASE_3_START ||
-		   recType == WAL_REC_CIC_PHASE_4 ||
-		   recType == WAL_REC_CIC_PHASE_FLIP);
+	Assert(recType == WAL_REC_CIC_WRITERS_DIRECT ||
+		   recType == WAL_REC_CIC_DRAIN_BARRIER ||
+		   recType == WAL_REC_CIC_INDEX_VALID);
 	Assert(indexOids.datoid == tableOids.datoid);
 
 	flush_local_wal_if_needed(sizeof(*rec));

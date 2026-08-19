@@ -1326,7 +1326,7 @@ orioledb_index_validate_scan(Relation heapRelation,
 	 *
 	 * We now run the orioledb phased build: build from the snapshot, drain
 	 * the spool of captured concurrent DML, flip OIndex.state to VALID, emit
-	 * WAL_REC_CIC_PHASE_FLIP, drop the spool dir.
+	 * WAL_REC_CIC_INDEX_VALID, drop the spool dir.
 	 *
 	 * UNIQUE is rejected at the ddl.c gate so we never need to perform the
 	 * duplicate-detection validation PG does for unique indexes.

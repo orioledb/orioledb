@@ -195,7 +195,7 @@ typedef struct
 
 /*
  * Phase-transition record for CREATE INDEX CONCURRENTLY.  recType
- * distinguishes PHASE_3_START / PHASE_4 / PHASE_FLIP; payload is the
+ * distinguishes WRITERS_DIRECT / DRAIN_BARRIER / INDEX_VALID; payload is the
  * same in all three.  See spec section 7.
  */
 typedef struct

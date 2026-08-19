@@ -38,8 +38,6 @@ knownErrors = {
     r"ERROR:  tuple to be locked has its primary key changed due to concurrent update":
     ["*"],
     r"ERROR:  Not implemented: orioledb_tuple_tid_valid": ["*"],
-    r"ERROR:  REINDEX CONCURRENTLY is not supported for orioledb tables yet":
-    ["*"],
     r"ERROR:  orioledb tables does not support CLUSTER": ["*"],
     r"ERROR:  orioledb table \"[a-z0-9_]+\" does not support VACUUM FULL":
     ["*"],
