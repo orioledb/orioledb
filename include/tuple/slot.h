@@ -39,6 +39,15 @@ typedef struct OTableSlot
 	OTupleReaderState state;
 	BTreeLocationHint hint;
 	ItemPointerData bridge_ctid;
+
+	/*
+	 * Scratch "has this attribute been filled" flags for
+	 * tts_orioledb_getsomeattrs().  Kept with the slot and grown when a wider
+	 * descriptor needs it: allocating and freeing one per row is a measurable
+	 * share of a scan.
+	 */
+	bool	   *isfilled;
+	int			isfilledLen;
 } OTableSlot;
 
 #define ORIOLEDB_TO_TOAST_OFF ('\0')
