@@ -106,6 +106,34 @@ class IndicesBuildTest(BaseTest):
 		    500)
 		node.stop()
 
+	def test_rebuild_ctid_offset_wraparound(self):
+		node = self.node
+		node.start()
+		node.safe_psql("""
+			CREATE EXTENSION orioledb;
+			CREATE TABLE o_ctid_wrap
+			(
+				key int NOT NULL,
+				val int,
+				PRIMARY KEY (key)
+			) USING orioledb;
+			INSERT INTO o_ctid_wrap
+				SELECT i, i FROM generate_series(1, 66000) i;
+		""")
+
+		# Dropping the primary key rebuilds the table on a ctid primary key, so
+		# every row is handed a freshly generated ctid.
+		node.safe_psql("""
+			ALTER TABLE o_ctid_wrap DROP CONSTRAINT o_ctid_wrap_pkey;
+		""")
+		# Analyze would call for sort for ctids.  For 66000 there was an overflow
+		# before the patch and ctid became invalid (OffsetNumber = 0).  Now this
+		# analyze must be ok.
+		node.safe_psql("""
+			ANALYZE o_ctid_wrap;
+		""")
+		node.stop()
+
 	def test_drop_primary_recovery(self):
 		node = self.node
 		node.start()
