@@ -50,6 +50,8 @@ tts_orioledb_init(TupleTableSlot *slot)
 	oslot->version = 0;
 	oslot->hint.blkno = OInvalidInMemoryBlkno;
 	oslot->hint.pageChangeCount = 0;
+	oslot->isfilled = NULL;
+	oslot->isfilledLen = 0;
 }
 
 static void
@@ -59,6 +61,12 @@ tts_orioledb_release(TupleTableSlot *slot)
 
 	if (oslot->to_toast)
 		pfree(oslot->to_toast);
+	if (oslot->isfilled)
+	{
+		pfree(oslot->isfilled);
+		oslot->isfilled = NULL;
+		oslot->isfilledLen = 0;
+	}
 }
 
 static void
@@ -302,7 +310,20 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		natts = oslot->state.desc->natts;
 	}
 
-	isfilled = MemoryContextAllocZero(slot->tts_mcxt, Max(natts, __natts));
+	{
+		int			needed = Max(natts, __natts);
+
+		if (oslot->isfilledLen < needed)
+		{
+			if (oslot->isfilled)
+				pfree(oslot->isfilled);
+			oslot->isfilled = MemoryContextAlloc(slot->tts_mcxt,
+												 sizeof(bool) * needed);
+			oslot->isfilledLen = needed;
+		}
+		isfilled = oslot->isfilled;
+		memset(isfilled, 0, sizeof(bool) * needed);
+	}
 
 	/* Iterate over the attributes to populate values and null flags. */
 	for (attnum = slot->tts_nvalid; attnum < natts; attnum++)
@@ -490,10 +511,6 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		slot->tts_nvalid = first_unfilled;
 	}
 
-	if (!is_bump_memory_context(slot->tts_mcxt))
-	{
-		pfree(isfilled);
-	}
 }
 
 static Datum
