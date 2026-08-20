@@ -30,17 +30,20 @@ SELECT COUNT(*) FROM test_tbl;
 
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM test_tbl WHERE status_num < 2;
-                                       QUERY PLAN                                       
-----------------------------------------------------------------------------------------
+                              QUERY PLAN                              
+----------------------------------------------------------------------
  Aggregate
    ->  Append
-         ->  Index Only Scan using test_tbl_p1_status_num_idx on test_tbl_p1 test_tbl_1
-               Index Cond: (status_num < '2'::numeric)
-         ->  Index Only Scan using test_tbl_p2_status_num_idx on test_tbl_p2 test_tbl_2
-               Index Cond: (status_num < '2'::numeric)
-         ->  Index Only Scan using test_tbl_p3_status_num_idx on test_tbl_p3 test_tbl_3
-               Index Cond: (status_num < '2'::numeric)
-(8 rows)
+         ->  Custom Scan (o_scan) on test_tbl_p1 test_tbl_1
+               Forward index only scan of: test_tbl_p1_status_num_idx
+               Conds: (status_num < '2'::numeric)
+         ->  Custom Scan (o_scan) on test_tbl_p2 test_tbl_2
+               Forward index only scan of: test_tbl_p2_status_num_idx
+               Conds: (status_num < '2'::numeric)
+         ->  Custom Scan (o_scan) on test_tbl_p3 test_tbl_3
+               Forward index only scan of: test_tbl_p3_status_num_idx
+               Conds: (status_num < '2'::numeric)
+(11 rows)
 
 SELECT COUNT(*) FROM test_tbl WHERE status_num < 2;
  count 

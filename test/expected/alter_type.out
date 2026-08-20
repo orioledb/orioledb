@@ -410,10 +410,11 @@ ALTER TABLE o_ddl_check ALTER f2 TYPE char COLLATE "C" USING substr(f2::text, 1,
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_ddl_check ORDER BY f2, f3;
-                      QUERY PLAN                      
-------------------------------------------------------
- Index Only Scan using o_ddl_check_ix1 on o_ddl_check
-(1 row)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_ddl_check
+   Forward index only scan of: o_ddl_check_ix1
+(2 rows)
 
 SELECT * FROM o_ddl_check ORDER BY f2, f3;
   f1  | f2 | f3 
@@ -446,10 +447,11 @@ ALTER TABLE o_ddl_check ALTER f2 TYPE text COLLATE "C" USING f2::text || 'O' || 
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_ddl_check ORDER BY f2, f3;
-                      QUERY PLAN                      
-------------------------------------------------------
- Index Only Scan using o_ddl_check_ix1 on o_ddl_check
-(1 row)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_ddl_check
+   Forward index only scan of: o_ddl_check_ix1
+(2 rows)
 
 SELECT * FROM o_ddl_check ORDER BY f2, f3;
   f1  | f2  | f3 
@@ -568,12 +570,13 @@ ALTER TABLE o_test_pkey_alter_type ADD PRIMARY KEY (val_1);
 CREATE INDEX o_test_pkey_alter_type_ix1 ON o_test_pkey_alter_type (val_2);
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
-                                    QUERY PLAN                                    
-----------------------------------------------------------------------------------
+                           QUERY PLAN                           
+----------------------------------------------------------------
  Sort
    Sort Key: val_1
-   ->  Index Only Scan using o_test_pkey_alter_type_ix1 on o_test_pkey_alter_type
-(3 rows)
+   ->  Custom Scan (o_scan) on o_test_pkey_alter_type
+         Forward index only scan of: o_test_pkey_alter_type_ix1
+(4 rows)
 
 SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
  val_1 | val_2 
@@ -586,10 +589,11 @@ SELECT * FROM o_test_pkey_alter_type ORDER BY val_1;
 (5 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
-                                 QUERY PLAN                                 
-----------------------------------------------------------------------------
- Index Only Scan using o_test_pkey_alter_type_ix1 on o_test_pkey_alter_type
-(1 row)
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_alter_type
+   Forward index only scan of: o_test_pkey_alter_type_ix1
+(2 rows)
 
 SELECT * FROM o_test_pkey_alter_type ORDER BY val_2;
  val_1 | val_2 
@@ -1128,10 +1132,11 @@ INSERT INTO o_test_alter_type_ix_included_rollback
 EXPLAIN (COSTS OFF)
 	SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback
 		ORDER BY val_3;
-                                                 QUERY PLAN                                                 
-------------------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_alter_type_ix_included_rollback_ix1 on o_test_alter_type_ix_included_rollback
-(1 row)
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_alter_type_ix_included_rollback
+   Forward index only scan of: o_test_alter_type_ix_included_rollback_ix1
+(2 rows)
 
 SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback ORDER BY val_3;
  val_2 | val_3 
@@ -1148,10 +1153,11 @@ ALTER TABLE o_test_alter_type_ix_included_rollback
 EXPLAIN (COSTS OFF)
 	SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback
 		ORDER BY val_3;
-                                                 QUERY PLAN                                                 
-------------------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_alter_type_ix_included_rollback_ix1 on o_test_alter_type_ix_included_rollback
-(1 row)
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_alter_type_ix_included_rollback
+   Forward index only scan of: o_test_alter_type_ix_included_rollback_ix1
+(2 rows)
 
 SELECT val_2, val_3 FROM o_test_alter_type_ix_included_rollback ORDER BY val_3;
  val_2 | val_3 

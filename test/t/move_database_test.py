@@ -124,10 +124,10 @@ class TablespaceTest(BaseTest):
 		self.ensureDataAccess(replica, "testdb", "", check_seq_scan_query,
 		                      "Seq Scan", seq_scan_expected)
 		self.ensureDataAccess(master, "testdb", set_prefix_for_index_scan,
-		                      check_index_scan_query, "Index Scan",
+		                      check_index_scan_query, "index scan of:",
 		                      index_scan_expected)
 		self.ensureDataAccess(replica, "testdb", set_prefix_for_index_scan,
-		                      check_index_scan_query, "Index Scan",
+		                      check_index_scan_query, "index scan of:",
 		                      index_scan_expected)
 
 	def get_relfilenode(self, dbname, relname):
@@ -207,11 +207,11 @@ class TablespaceTest(BaseTest):
 		self.ensureDataAccess(
 		    node, "testdb", "set enable_seqscan = off;",
 		    "SELECT count(*) FROM test_tbl_ctid WHERE mod(j, 3) = 0;",
-		    "Index Only Scan", [(666, )])
+		    "index only scan of:", [(666, )])
 		self.ensureDataAccess(
 		    node, "testdb", "set enable_seqscan = off;",
 		    "SELECT count(*) FROM test_tbl_ctid WHERE t like 'test11%';",
-		    "Index Only Scan", [(111, )])
+		    "index only scan of:", [(111, )])
 		self.ensureDataAccess(
 		    node, "testdb", "",
 		    "SELECT count(*) FROM test_tbl_ctid WHERE mod(i, 10) = 0;",
@@ -219,11 +219,11 @@ class TablespaceTest(BaseTest):
 		self.ensureDataAccess(
 		    node, "testdb", "set enable_seqscan = off;",
 		    "SELECT count(*) FROM test_tbl_pkey WHERE mod(j, 3) = 0;",
-		    "Index Only Scan", [(666, )])
+		    "index only scan of:", [(666, )])
 		self.ensureDataAccess(
 		    node, "testdb", "set enable_seqscan = off;",
 		    "SELECT count(*) FROM test_tbl_pkey WHERE t like 'test11%';",
-		    "Index Only Scan", [(111, )])
+		    "index only scan of:", [(111, )])
 		self.ensureDataAccess(
 		    node, "testdb", "",
 		    "SELECT count(*) FROM test_tbl_pkey WHERE mod(i, 10) = 0;",

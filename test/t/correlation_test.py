@@ -129,5 +129,9 @@ class CorrelationTest(BaseTest):
 			EXPLAIN (COSTS OFF, FORMAT JSON)
 				SELECT k FROM o_foobar WHERE k IN ({rows});
 		""")[0][0][0]["Plan"]
-		self.assertEqual('Index Only Scan', plan["Node Type"])
+		# An ordered secondary index scan runs inside o_scan; what matters here
+		# is still that it is index-only and on that index.
+		self.assertEqual('Custom Scan', plan["Node Type"])
+		self.assertEqual('o_scan', plan["Custom Plan Provider"])
+		self.assertEqual('Index Only Scan', plan["Custom Scan Subtype"])
 		self.assertEqual('o_foobar_ix', plan['Index Name'])

@@ -49,10 +49,11 @@ SELECT id2, id1, id2 FROM o_test_0 ORDER BY id2, id1 LIMIT 5;
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test_0 ORDER BY id1, id2;
-                       QUERY PLAN                        
----------------------------------------------------------
- Index Only Scan Backward using o_test_0_idx on o_test_0
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test_0
+   Backward index only scan of: o_test_0_idx
+(2 rows)
 
 SELECT * FROM o_test_0 ORDER BY id1, id2;
  id1 | id2 
@@ -196,12 +197,13 @@ CREATE TABLE o_test_5 (
 INSERT INTO o_test_5(id, val) VALUES (1, 'hello');
 INSERT INTO o_test_5(id, val) VALUES (2, 'hey');
 EXPLAIN (COSTS off) DELETE FROM o_test_5 where id = 1;
-                       QUERY PLAN                       
---------------------------------------------------------
+                     QUERY PLAN                     
+----------------------------------------------------
  Delete on o_test_5
-   ->  Index Scan using o_test_5_id_val_key on o_test_5
-         Index Cond: (id = 1)
-(3 rows)
+   ->  Custom Scan (o_scan) on o_test_5
+         Forward index scan of: o_test_5_id_val_key
+         Conds: (id = 1)
+(4 rows)
 
 DELETE FROM o_test_5 where id = 1;
 CREATE TABLE o_test_6
@@ -278,10 +280,11 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_7 ORDER BY i;
-                   QUERY PLAN                   
-------------------------------------------------
- Index Only Scan using o_test_7_ix1 on o_test_7
-(1 row)
+                 QUERY PLAN                 
+--------------------------------------------
+ Custom Scan (o_scan) on o_test_7
+   Forward index only scan of: o_test_7_ix1
+(2 rows)
 
 SELECT * FROM o_test_7 ORDER BY i;
    id   |  id2   |   i   
@@ -305,11 +308,12 @@ INSERT INTO o_test_8
 	SELECT repeat('x', a % 3) || repeat ('y', a % 2), a
 		FROM generate_series(1, 5) as a;
 EXPLAIN (COSTS off) SELECT * FROM o_test_8 ORDER BY id2, id1 LIMIT 5;
-                      QUERY PLAN                       
--------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Limit
-   ->  Index Only Scan using o_test_8_idx1 on o_test_8
-(2 rows)
+   ->  Custom Scan (o_scan) on o_test_8
+         Forward index only scan of: o_test_8_idx1
+(3 rows)
 
 SELECT * FROM o_test_8 ORDER BY id2, id1 LIMIT 5;
  id1 | id2 
@@ -322,11 +326,13 @@ SELECT * FROM o_test_8 ORDER BY id2, id1 LIMIT 5;
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT id2, id1, id2 FROM o_test_8 ORDER BY id2, id1 LIMIT 5;
-                      QUERY PLAN                       
--------------------------------------------------------
+                       QUERY PLAN                        
+---------------------------------------------------------
  Limit
-   ->  Index Only Scan using o_test_8_idx1 on o_test_8
-(2 rows)
+   ->  Result
+         ->  Custom Scan (o_scan) on o_test_8
+               Forward index only scan of: o_test_8_idx1
+(4 rows)
 
 SELECT id2, id1, id2 FROM o_test_8 ORDER BY id2, id1 LIMIT 5;
  id2 | id1 | id2 
@@ -339,10 +345,11 @@ SELECT id2, id1, id2 FROM o_test_8 ORDER BY id2, id1 LIMIT 5;
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test_8 ORDER BY id1, id2;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Index Only Scan Backward using o_test_8_idx2 on o_test_8
-(1 row)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test_8
+   Backward index only scan of: o_test_8_idx2
+(2 rows)
 
 SELECT * FROM o_test_8 ORDER BY id1, id2;
  id1 | id2 
@@ -364,11 +371,12 @@ INSERT INTO o_test_9
 	SELECT a, repeat('x', a % 3) || repeat ('y', a % 2)
 		FROM generate_series(1, 5) as a;
 EXPLAIN (COSTS off) SELECT * FROM o_test_9 ORDER BY id1, id2 LIMIT 5;
-                      QUERY PLAN                       
--------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Limit
-   ->  Index Only Scan using o_test_9_idx1 on o_test_9
-(2 rows)
+   ->  Custom Scan (o_scan) on o_test_9
+         Forward index only scan of: o_test_9_idx1
+(3 rows)
 
 SELECT * FROM o_test_9 ORDER BY id1, id2 LIMIT 5;
  id1 | id2 
@@ -389,10 +397,11 @@ CREATE UNIQUE INDEX o_test_10_idx1 ON o_test_10 (val_3, val_2);
 ALTER TABLE o_test_10 DROP COLUMN val_1;
 INSERT INTO o_test_10 VALUES (1, 2), (3, 4);
 EXPLAIN (COSTS off) SELECT * FROM o_test_10 ORDER BY val_3, val_2;
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan using o_test_10_idx1 on o_test_10
-(1 row)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test_10
+   Forward index only scan of: o_test_10_idx1
+(2 rows)
 
 SELECT * FROM o_test_10 ORDER BY val_3, val_2;
  val_2 | val_3 
@@ -408,10 +417,11 @@ CREATE TABLE o_test_11 (
 CREATE UNIQUE INDEX o_test_11_idx1 ON o_test_11 (val_2, val_1);
 INSERT INTO o_test_11 VALUES (1, 2), (3, 4);
 EXPLAIN (COSTS off) SELECT * FROM o_test_11 ORDER BY val_2;
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan using o_test_11_idx1 on o_test_11
-(1 row)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test_11
+   Forward index only scan of: o_test_11_idx1
+(2 rows)
 
 SELECT * FROM o_test_11 ORDER BY val_2;
  val_1 | val_2 
@@ -450,12 +460,13 @@ CREATE UNIQUE INDEX o_test_13_idx2 ON o_test_13 (id, val);
 INSERT INTO o_test_13(id, val) VALUES (1, 'hello');
 INSERT INTO o_test_13(id, val) VALUES (2, 'hey');
 EXPLAIN (COSTS off) DELETE FROM o_test_13 where id = 1;
-                     QUERY PLAN                     
-----------------------------------------------------
+                  QUERY PLAN                   
+-----------------------------------------------
  Delete on o_test_13
-   ->  Index Scan using o_test_13_idx2 on o_test_13
-         Index Cond: (id = 1)
-(3 rows)
+   ->  Custom Scan (o_scan) on o_test_13
+         Forward index scan of: o_test_13_idx2
+         Conds: (id = 1)
+(4 rows)
 
 DELETE FROM o_test_13 where id = 1;
 CREATE TABLE o_test_14
@@ -533,10 +544,11 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_15 ORDER BY i;
-                 QUERY PLAN                  
----------------------------------------------
- Index Scan using o_test_15_ix1 on o_test_15
-(1 row)
+               QUERY PLAN               
+----------------------------------------
+ Custom Scan (o_scan) on o_test_15
+   Forward index scan of: o_test_15_ix1
+(2 rows)
 
 SELECT * FROM o_test_15 ORDER BY i;
    id   |  id2   |   i   

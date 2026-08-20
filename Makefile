@@ -112,6 +112,7 @@ REGRESSCHECKS = btree_sys_check \
 				exclude \
 				explain \
 				fastpath_desc \
+				native_si_scan \
 				fillfactor \
 				foreign_keys \
 				generated \

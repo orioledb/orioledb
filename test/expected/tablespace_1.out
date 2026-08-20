@@ -24,10 +24,11 @@ CREATE INDEX foo_def_ix1 ON foo_def(i) TABLESPACE regress_tblspace;
 BEGIN;
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM foo_def ORDER BY i;
-                  QUERY PLAN                  
-----------------------------------------------
- Index Only Scan using foo_def_ix1 on foo_def
-(1 row)
+                QUERY PLAN                 
+-------------------------------------------
+ Custom Scan (o_scan) on foo_def
+   Forward index only scan of: foo_def_ix1
+(2 rows)
 
 SELECT * FROM foo_def ORDER BY i;
  i  
@@ -128,10 +129,11 @@ TABLE atable;
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan Backward using anindex on atable
-(1 row)
+               QUERY PLAN               
+----------------------------------------
+ Custom Scan (o_scan) on atable
+   Backward index only scan of: anindex
+(2 rows)
 
 SELECT * FROM atable ORDER BY column1;
  column1 
@@ -176,10 +178,11 @@ TABLE atable;
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan Backward using anindex on atable
-(1 row)
+               QUERY PLAN               
+----------------------------------------
+ Custom Scan (o_scan) on atable
+   Backward index only scan of: anindex
+(2 rows)
 
 SELECT * FROM atable ORDER BY column1;
  column1 
@@ -243,10 +246,11 @@ TABLE atable;
 
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan Backward using anindex on atable
-(1 row)
+               QUERY PLAN               
+----------------------------------------
+ Custom Scan (o_scan) on atable
+   Backward index only scan of: anindex
+(2 rows)
 
 SELECT * FROM atable ORDER BY column1;
  column1 
@@ -315,10 +319,11 @@ TABLE atable;
 
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan Backward using anindex on atable
-(1 row)
+               QUERY PLAN               
+----------------------------------------
+ Custom Scan (o_scan) on atable
+   Backward index only scan of: anindex
+(2 rows)
 
 SELECT * FROM atable ORDER BY column1;
  column1 
@@ -441,10 +446,11 @@ SELECT orioledb_tbl_indices('atable'::regclass);
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan Backward using anindex on atable
-(1 row)
+               QUERY PLAN               
+----------------------------------------
+ Custom Scan (o_scan) on atable
+   Backward index only scan of: anindex
+(2 rows)
 
 SELECT * FROM atable ORDER BY column1;
  column1 
@@ -546,10 +552,11 @@ SELECT * FROM atable;
 
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan Backward using anindex on atable
-(1 row)
+               QUERY PLAN               
+----------------------------------------
+ Custom Scan (o_scan) on atable
+   Backward index only scan of: anindex
+(2 rows)
 
 SELECT * FROM atable ORDER BY column1;
  column1 
@@ -625,10 +632,11 @@ TABLE atable;
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM atable ORDER BY column1;
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan Backward using anindex on atable
-(1 row)
+               QUERY PLAN               
+----------------------------------------
+ Custom Scan (o_scan) on atable
+   Backward index only scan of: anindex
+(2 rows)
 
 SELECT * FROM atable ORDER BY column1;
  column1 

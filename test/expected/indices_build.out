@@ -37,11 +37,12 @@ INSERT INTO o_indices0 SELECT 1000 + i, 3000 + i, 3000 + i FROM generate_series(
 SET enable_seqscan = off;
 SET enable_bitmapscan = off;
 EXPLAIN (COSTS off) SELECT val FROM o_indices0 WHERE val > 0 ORDER BY val;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices0_idx1 on o_indices0
-   Index Cond: (val > 0)
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices0
+   Forward index only scan of: o_indices0_idx1
+   Conds: (val > 0)
+(3 rows)
 
 EXPLAIN (COSTS off) SELECT val2 FROM o_indices0 WHERE val2 > 0;
        QUERY PLAN       
@@ -1202,18 +1203,20 @@ SELECT orioledb_tbl_structure('o_indices0'::regclass, 'nue');
 (1 row)
 
 EXPLAIN (COSTS off) SELECT val FROM o_indices0 WHERE val > 0 ORDER BY val;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices0_idx1 on o_indices0
-   Index Cond: (val > 0)
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices0
+   Forward index only scan of: o_indices0_idx1
+   Conds: (val > 0)
+(3 rows)
 
 EXPLAIN (COSTS off) SELECT val2 FROM o_indices0 WHERE val2 > 0 ORDER BY val2;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices0_idx2 on o_indices0
-   Index Cond: (val2 > 0)
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices0
+   Forward index only scan of: o_indices0_idx2
+   Conds: (val2 > 0)
+(3 rows)
 
 SELECT val2 FROM o_indices0 WHERE val2 > 0 ORDER BY val2;
  val2 
@@ -3415,11 +3418,12 @@ SELECT orioledb_tbl_are_indices_equal('o_indices0_idx1'::regclass, 'o_indices0_i
 
 DROP INDEX o_indices0_idx2;
 EXPLAIN (COSTS off) SELECT val FROM o_indices0 WHERE val > 0 ORDER BY val;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices0_idx1 on o_indices0
-   Index Cond: (val > 0)
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices0
+   Forward index only scan of: o_indices0_idx1
+   Conds: (val > 0)
+(3 rows)
 
 EXPLAIN (COSTS off) SELECT val2 FROM o_indices0 WHERE val2 > 0;
        QUERY PLAN       
@@ -4596,18 +4600,20 @@ EXPLAIN (COSTS off) SELECT * FROM o_indices1;
 (1 row)
 
 EXPLAIN (COSTS off) SELECT val2 FROM o_indices1 WHERE val2 > 5 ORDER BY val2;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices1_idx2 on o_indices1
-   Index Cond: (val2 > 5)
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices1
+   Forward index only scan of: o_indices1_idx2
+   Conds: (val2 > 5)
+(3 rows)
 
 EXPLAIN (COSTS off) SELECT key FROM o_indices1 WHERE key > 5 ORDER BY key;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices1_idx3 on o_indices1
-   Index Cond: (key > 5)
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices1
+   Forward index only scan of: o_indices1_idx3
+   Conds: (key > 5)
+(3 rows)
 
 SELECT * FROM o_indices1;
  key | val | val2 
@@ -4880,11 +4886,12 @@ SELECT orioledb_tbl_are_indices_equal('o_indices2_idx1'::regclass, 'o_indices2_i
 (1 row)
 
 EXPLAIN (COSTS off) SELECT val FROM o_indices2 WHERE val > 0 ORDER BY val;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices2_idx1 on o_indices2
-   Index Cond: (val > 0)
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices2
+   Forward index only scan of: o_indices2_idx1
+   Conds: (val > 0)
+(3 rows)
 
 INSERT INTO o_indices2 SELECT 1000 + i, 3000 + i, 3000 + i FROM generate_series(1, 500) AS i;
 SELECT COUNT(val) FROM o_indices2 WHERE val > 0;
@@ -14604,11 +14611,12 @@ SELECT regexp_replace
 (1 row)
 
 EXPLAIN (COSTS off) SELECT val2 FROM o_indices3 WHERE val2 > 0 ORDER BY val2;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices3_idx2 on o_indices3
-   Index Cond: (val2 > 0)
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices3
+   Forward index only scan of: o_indices3_idx2
+   Conds: (val2 > 0)
+(3 rows)
 
 SELECT COUNT(val) FROM o_indices3 WHERE val > 0;
  count 
@@ -14640,27 +14648,30 @@ CREATE INDEX o_indices4_idx1 ON o_indices4 (val DESC);
 INSERT INTO o_indices4 SELECT 1000 + i, 3000 + i, 3000 + i FROM generate_series(500, 1, -1) AS i;
 CREATE INDEX o_indices4_idx2 ON o_indices4 (val2 DESC);
 EXPLAIN (COSTS off) SELECT val FROM o_indices4 WHERE val > 0 ORDER BY val ASC;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Index Only Scan Backward using o_indices4_idx1 on o_indices4
-   Index Cond: (val > 0)
-(2 rows)
+                   QUERY PLAN                   
+------------------------------------------------
+ Custom Scan (o_scan) on o_indices4
+   Backward index only scan of: o_indices4_idx1
+   Conds: (val > 0)
+(3 rows)
 
 EXPLAIN (COSTS off) SELECT val2 FROM o_indices4 WHERE val2 > 0 ORDER BY val2 ASC;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Index Only Scan Backward using o_indices4_idx2 on o_indices4
-   Index Cond: (val2 > 0)
-(2 rows)
+                   QUERY PLAN                   
+------------------------------------------------
+ Custom Scan (o_scan) on o_indices4
+   Backward index only scan of: o_indices4_idx2
+   Conds: (val2 > 0)
+(3 rows)
 
 EXPLAIN (COSTS off) SELECT val FROM o_indices4 WHERE val2 = 3001 AND
 													 val2 > 0
 													 ORDER BY val2;
-                   QUERY PLAN                   
-------------------------------------------------
- Index Scan using o_indices4_idx2 on o_indices4
-   Index Cond: ((val2 > 0) AND (val2 = 3001))
-(2 rows)
+                QUERY PLAN                
+------------------------------------------
+ Custom Scan (o_scan) on o_indices4
+   Forward index scan of: o_indices4_idx2
+   Conds: ((val2 > 0) AND (val2 = 3001))
+(3 rows)
 
 SELECT val FROM o_indices4 WHERE val2 = 3001 AND val2 > 0 ORDER BY val2;
  val  
@@ -17380,22 +17391,24 @@ INSERT INTO o_indices5 SELECT 1000 + i, 3000 + i, 4000 + i,
 						FROM generate_series(500, 1, -1) AS i;
 CREATE INDEX o_indices5_idx2 ON o_indices5 (val3 ASC, val4 DESC);
 EXPLAIN (COSTS off) SELECT val2, val FROM o_indices5 WHERE val BETWEEN 3300 AND 3320 AND val2 > 0 ORDER BY val2 DESC;
-                              QUERY PLAN                              
-----------------------------------------------------------------------
+                           QUERY PLAN                            
+-----------------------------------------------------------------
  Sort
    Sort Key: val2 DESC
-   ->  Index Only Scan using o_indices5_idx1 on o_indices5
-         Index Cond: ((val >= 3300) AND (val <= 3320) AND (val2 > 0))
-(4 rows)
+   ->  Custom Scan (o_scan) on o_indices5
+         Forward index only scan of: o_indices5_idx1
+         Conds: ((val >= 3300) AND (val <= 3320) AND (val2 > 0))
+(5 rows)
 
 EXPLAIN (COSTS off) SELECT val4, val3 FROM o_indices5 WHERE val3 BETWEEN 3300 AND 3320 AND val4 > 0 ORDER BY val4 DESC;
-                               QUERY PLAN                               
-------------------------------------------------------------------------
+                            QUERY PLAN                             
+-------------------------------------------------------------------
  Sort
    Sort Key: val4 DESC
-   ->  Index Only Scan using o_indices5_idx2 on o_indices5
-         Index Cond: ((val3 >= 3300) AND (val3 <= 3320) AND (val4 > 0))
-(4 rows)
+   ->  Custom Scan (o_scan) on o_indices5
+         Forward index only scan of: o_indices5_idx2
+         Conds: ((val3 >= 3300) AND (val3 <= 3320) AND (val4 > 0))
+(5 rows)
 
 SELECT val4, val3 FROM o_indices5 WHERE val3 BETWEEN 3300 AND 3320 ORDER BY val4 DESC;
  val4 | val3 
@@ -17424,10 +17437,11 @@ SELECT val4, val3 FROM o_indices5 WHERE val3 BETWEEN 3300 AND 3320 ORDER BY val4
 (21 rows)
 
 EXPLAIN (COSTS off) SELECT val4, val3 FROM o_indices5 ORDER BY val3 ASC;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices5_idx2 on o_indices5
-(1 row)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices5
+   Forward index only scan of: o_indices5_idx2
+(2 rows)
 
 SELECT val4, val3 FROM o_indices5 ORDER BY val3 ASC;
  val4 | val3 
@@ -19662,11 +19676,12 @@ EXPLAIN (COSTS off) SELECT val FROM o_indices6 WHERE val > 0;
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT val2 FROM o_indices6 WHERE val2 > 0 ORDER BY val2;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices6_idx2 on o_indices6
-   Index Cond: (val2 > 0)
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices6
+   Forward index only scan of: o_indices6_idx2
+   Conds: (val2 > 0)
+(3 rows)
 
 SELECT COUNT(val2) FROM o_indices6 WHERE val2 > 0;
  count 
@@ -21345,11 +21360,12 @@ EXPLAIN (COSTS off) SELECT val FROM o_indices6_ctid WHERE val > 0;
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT val2 FROM o_indices6_ctid WHERE val2 > 0;
-                          QUERY PLAN                           
----------------------------------------------------------------
- Index Only Scan using o_indices6_ctid_idx2 on o_indices6_ctid
-   Index Cond: (val2 > 0)
-(2 rows)
+                     QUERY PLAN                     
+----------------------------------------------------
+ Custom Scan (o_scan) on o_indices6_ctid
+   Forward index only scan of: o_indices6_ctid_idx2
+   Conds: (val2 > 0)
+(3 rows)
 
 SELECT COUNT(val2) FROM o_indices6_ctid WHERE val2 > 0;
  count 
@@ -22555,11 +22571,12 @@ SELECT orioledb_tbl_indices('o_indices7'::regclass);
 (1 row)
 
 EXPLAIN (COSTS off) SELECT val FROM o_indices7 WHERE val = 3400 AND val > 0 ORDER BY val;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices7_idx1 on o_indices7
-   Index Cond: ((val > 0) AND (val = 3400))
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices7
+   Forward index only scan of: o_indices7_idx1
+   Conds: ((val > 0) AND (val = 3400))
+(3 rows)
 
 SELECT val FROM o_indices7 WHERE val = 3400 AND val > 0 ORDER BY val;
  val  
@@ -22587,11 +22604,12 @@ SELECT orioledb_tbl_indices('o_indices7'::regclass);
 (1 row)
 
 EXPLAIN (COSTS off) SELECT val FROM o_indices7 WHERE val = 3400 AND val > 0 ORDER BY val;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices7_idx1 on o_indices7
-   Index Cond: ((val > 0) AND (val = 3400))
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices7
+   Forward index only scan of: o_indices7_idx1
+   Conds: ((val > 0) AND (val = 3400))
+(3 rows)
 
 SELECT val FROM o_indices7 WHERE val = 3400 AND val > 0 ORDER BY val;
  val  
@@ -22715,11 +22733,12 @@ SELECT orioledb_tbl_indices('o_indices7'::regclass);
 
 EXPLAIN (COSTS off) SELECT val FROM o_indices7 WHERE val = 3400 AND val > 0
 	ORDER BY val;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices7_idx5 on o_indices7
-   Index Cond: ((val > 0) AND (val = 3400))
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices7
+   Forward index only scan of: o_indices7_idx5
+   Conds: ((val > 0) AND (val = 3400))
+(3 rows)
 
 SELECT val FROM o_indices7 WHERE val = 3400 AND val > 0
 	ORDER BY val;
@@ -22731,11 +22750,12 @@ SELECT val FROM o_indices7 WHERE val = 3400 AND val > 0
 ANALYZE o_indices7;
 EXPLAIN (COSTS off) SELECT val2 FROM o_indices7 WHERE val2 = 4400 AND val2 > 0
 	ORDER BY val2;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices7_idx1 on o_indices7
-   Index Cond: ((val2 > 0) AND (val2 = 4400))
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices7
+   Forward index only scan of: o_indices7_idx1
+   Conds: ((val2 > 0) AND (val2 = 4400))
+(3 rows)
 
 SELECT val2 FROM o_indices7 WHERE val2 = 4400 AND val2 > 0
 	ORDER BY val2;
@@ -22795,11 +22815,12 @@ SELECT * FROM o_indices7 WHERE val = 3400 AND val > 0
 
 EXPLAIN (COSTS off) SELECT val2 FROM o_indices7 WHERE val2 = 4400 AND val2 > 0
 	ORDER BY val2;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices7_idx1 on o_indices7
-   Index Cond: ((val2 > 0) AND (val2 = 4400))
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices7
+   Forward index only scan of: o_indices7_idx1
+   Conds: ((val2 > 0) AND (val2 = 4400))
+(3 rows)
 
 SELECT val2 FROM o_indices7 WHERE val2 = 4400 AND val2 > 0
 	ORDER BY val2;
@@ -22828,11 +22849,12 @@ SELECT * FROM o_indices7 WHERE val = 3400 AND val > 0
 
 EXPLAIN (COSTS off) SELECT val2 FROM o_indices7 WHERE val2 = 4400 AND val2 > 0
 	ORDER BY val2;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices7_idx1 on o_indices7
-   Index Cond: ((val2 > 0) AND (val2 = 4400))
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices7
+   Forward index only scan of: o_indices7_idx1
+   Conds: ((val2 > 0) AND (val2 = 4400))
+(3 rows)
 
 SELECT val2 FROM o_indices7 WHERE val2 = 4400 AND val2 > 0
 	ORDER BY val2;
@@ -22959,11 +22981,12 @@ SELECT orioledb_tbl_structure('o_indices8'::regclass, 'nue');
 (1 row)
 
 EXPLAIN (COSTS OFF) SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices8_idx1 on o_indices8
-   Index Cond: (val > 'a'::text)
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices8
+   Forward index only scan of: o_indices8_idx1
+   Conds: (val > 'a'::text)
+(3 rows)
 
 SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
     val     | key 
@@ -22976,11 +22999,12 @@ SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
 
 ALTER TABLE o_indices8 DROP CONSTRAINT o_indices8_pkey;
 EXPLAIN (COSTS OFF) SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
-                   QUERY PLAN                   
-------------------------------------------------
- Index Scan using o_indices8_idx1 on o_indices8
-   Index Cond: (val > 'a'::text)
-(2 rows)
+                QUERY PLAN                
+------------------------------------------
+ Custom Scan (o_scan) on o_indices8
+   Forward index scan of: o_indices8_idx1
+   Conds: (val > 'a'::text)
+(3 rows)
 
 SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
     val     | key 
@@ -23139,11 +23163,12 @@ ALTER TABLE o_indices8
   ADD CONSTRAINT o_indices8_pkey
     PRIMARY KEY (key);
 EXPLAIN (COSTS OFF) SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
-                     QUERY PLAN                      
------------------------------------------------------
- Index Only Scan using o_indices8_idx1 on o_indices8
-   Index Cond: (val > 'a'::text)
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_indices8
+   Forward index only scan of: o_indices8_idx1
+   Conds: (val > 'a'::text)
+(3 rows)
 
 SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
     val     | key 
@@ -23254,11 +23279,12 @@ SELECT orioledb_tbl_structure('o_indices8'::regclass, 'nue');
 
 ALTER TABLE o_indices8 DROP CONSTRAINT o_indices8_pkey;
 EXPLAIN (COSTS OFF) SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
-                   QUERY PLAN                   
-------------------------------------------------
- Index Scan using o_indices8_idx1 on o_indices8
-   Index Cond: (val > 'a'::text)
-(2 rows)
+                QUERY PLAN                
+------------------------------------------
+ Custom Scan (o_scan) on o_indices8
+   Forward index scan of: o_indices8_idx1
+   Conds: (val > 'a'::text)
+(3 rows)
 
 SELECT val, key FROM o_indices8 WHERE val > 'a' ORDER BY val;
     val     | key 
@@ -24078,10 +24104,11 @@ SELECT * FROM o_test_pkey_mixed_build;
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build ORDER BY f1;
-                                  QUERY PLAN                                  
-------------------------------------------------------------------------------
- Index Only Scan using o_test_pkey_mixed_build_ix1 on o_test_pkey_mixed_build
-(1 row)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_mixed_build
+   Forward index only scan of: o_test_pkey_mixed_build_ix1
+(2 rows)
 
 SELECT * FROM o_test_pkey_mixed_build ORDER BY f1;
  f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 
@@ -24092,10 +24119,11 @@ SELECT * FROM o_test_pkey_mixed_build ORDER BY f1;
 (3 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build ORDER BY f2;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Index Only Scan using o_test_pkey_mixed_build_uniq1 on o_test_pkey_mixed_build
-(1 row)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_mixed_build
+   Forward index only scan of: o_test_pkey_mixed_build_uniq1
+(2 rows)
 
 SELECT * FROM o_test_pkey_mixed_build ORDER BY f2;
  f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 
@@ -24106,12 +24134,13 @@ SELECT * FROM o_test_pkey_mixed_build ORDER BY f2;
 (3 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build ORDER BY f3;
-                                      QUERY PLAN                                      
---------------------------------------------------------------------------------------
+                            QUERY PLAN                             
+-------------------------------------------------------------------
  Sort
    Sort Key: f3
-   ->  Index Only Scan using o_test_pkey_mixed_build_uniq1 on o_test_pkey_mixed_build
-(3 rows)
+   ->  Custom Scan (o_scan) on o_test_pkey_mixed_build
+         Forward index only scan of: o_test_pkey_mixed_build_uniq1
+(4 rows)
 
 SELECT * FROM o_test_pkey_mixed_build ORDER BY f3;
  f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 
@@ -24122,12 +24151,13 @@ SELECT * FROM o_test_pkey_mixed_build ORDER BY f3;
 (3 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed_build ORDER BY i1;
-                                      QUERY PLAN                                      
---------------------------------------------------------------------------------------
+                            QUERY PLAN                             
+-------------------------------------------------------------------
  Sort
    Sort Key: i1
-   ->  Index Only Scan using o_test_pkey_mixed_build_uniq1 on o_test_pkey_mixed_build
-(3 rows)
+   ->  Custom Scan (o_scan) on o_test_pkey_mixed_build
+         Forward index only scan of: o_test_pkey_mixed_build_uniq1
+(4 rows)
 
 SELECT * FROM o_test_pkey_mixed_build ORDER BY i1;
  f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 
@@ -24334,10 +24364,11 @@ SELECT orioledb_tbl_indices('o_test_include_box_build'::regclass);
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_include_box_build ORDER BY val_1;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Index Only Scan using o_test_include_box_build_ix1 on o_test_include_box_build
-(1 row)
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_include_box_build
+   Forward index only scan of: o_test_include_box_build_ix1
+(2 rows)
 
 SELECT * FROM o_test_include_box_build ORDER BY val_1;
  val_1 |        val_4        
@@ -24492,10 +24523,11 @@ SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_2;
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_3;
-                                          QUERY PLAN                                           
------------------------------------------------------------------------------------------------
- Index Scan using o_test_include_box_with_pkey_build_ix2 on o_test_include_box_with_pkey_build
-(1 row)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_include_box_with_pkey_build
+   Forward index scan of: o_test_include_box_with_pkey_build_ix2
+(2 rows)
 
 SELECT * FROM o_test_include_box_with_pkey_build ORDER BY val_3;
  val_1 | val_2 | val_3 |        val_4        

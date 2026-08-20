@@ -39,7 +39,8 @@ allowedRegexes = {
 	r"ERROR:  orioledb table \"[a-z0-9_]+\" does not support VACUUM FULL": ["*"],
 	r"ERROR:  cannot use PREPARE TRANSACTION in transaction that uses orioledb table": ["*"],
 	r"c1      |(0,1) |0|0|4": ['eval-plan-qual'],
-	r"QUERY PLAN": ['eval-plan-qual', 'merge-join', 'drop-index-concurrently-1'],
+	r"QUERY PLAN": ['eval-plan-qual', 'merge-join', 'drop-index-concurrently-1',
+					'horizons'],
 	r"\s+\d+(|\s+\d+)*": ['vacuum-no-cleanup-lock', 'stats', 'horizons'],
 	r"setup of session s1 failed: ERROR:  current transaction is aborted, commands ignored until end of transaction block": ['stats'],
 	r"key  |data": ['eval-plan-qual-trigger'],
@@ -55,6 +56,12 @@ allowedRegexes = {
 	r"\s*->\s+Custom Scan \(o_scan\) on ios_bitmap": ['index-only-bitmapscan'],
 	r"\s+Bitmap heap scan": ['index-only-bitmapscan'],
 	r"\s*(->\s+)?Index (Only )?Scan\b": ['*'],
+	r"\s*(->\s+)?Custom Scan \(o_scan\)": ['*'],
+	r"\s+(Forward|Backward) index( only)? scan of:": ['*'],
+	r"\s+Conds:": ['*'],
+	# A line of nothing but spaces is column padding: OrioleDB's node text has
+	# a different width, so every line of the plan shifts.
+	r"\s+$": ['*'],
 	r"\s*(->\s+)?Bitmap (Heap|Index) Scan\b": ['*'],
 	r"\s+(Filter|Index Cond|Recheck Cond):": ['*'],
 }

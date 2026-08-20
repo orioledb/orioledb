@@ -67,7 +67,9 @@ class CheckpointSameTrxTest(BaseTest):
 			EXPLAIN (COSTS OFF, FORMAT JSON)
 				SELECT * FROM o_test_1 ORDER BY val_1;
 		""")[0][0][0]["Plan"]
-		self.assertEqual('Index Scan', plan["Node Type"])
+		# An ordered secondary index scan runs inside o_scan.
+		self.assertEqual('Custom Scan', plan["Node Type"])
+		self.assertEqual('Index Scan', plan["Custom Scan Subtype"])
 		self.assertEqual('o_test_1_pkey_like_ix', plan['Index Name'])
 		self.assertEqual([(1, 2, 3, 4, 5, 6, '7', 8, 9, 10, 11, 12),
 		                  (2, 3, 4, 5, 6, 7, '8', 9, 10, 11, 12, 13),
