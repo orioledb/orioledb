@@ -1042,10 +1042,11 @@ SELECT orioledb_tbl_structure('o_test_duplicate_key_fields'::regclass, 'nue');
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT val_1 FROM o_test_duplicate_key_fields ORDER BY val_1;
-                                      QUERY PLAN                                      
---------------------------------------------------------------------------------------
- Index Only Scan using o_test_duplicate_key_fields_ix1 on o_test_duplicate_key_fields
-(1 row)
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_duplicate_key_fields
+   Forward index only scan of: o_test_duplicate_key_fields_ix1
+(2 rows)
 
 SELECT val_1 FROM o_test_duplicate_key_fields ORDER BY val_1;
  val_1 
@@ -1085,10 +1086,11 @@ INSERT INTO o_test_pkey_fields_same_as_index
 	SELECT 1 * 10 ^ v, 2 * 10 ^ v, 3 * 10 ^ v FROM generate_series(0, 2) v;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
-                                              QUERY PLAN                                               
--------------------------------------------------------------------------------------------------------
- Index Scan using o_test_pkey_fields_same_as_index_val_1_val_3_key on o_test_pkey_fields_same_as_index
-(1 row)
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_fields_same_as_index
+   Forward index scan of: o_test_pkey_fields_same_as_index_val_1_val_3_key
+(2 rows)
 
 SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;;
  val_1 | val_2 | val_3 
@@ -1151,10 +1153,11 @@ SELECT orioledb_tbl_indices('o_test_pkey_fields_same_as_index'::regclass);
 
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
-                                              QUERY PLAN                                               
--------------------------------------------------------------------------------------------------------
- Index Scan using o_test_pkey_fields_same_as_index_val_1_val_3_key on o_test_pkey_fields_same_as_index
-(1 row)
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_fields_same_as_index
+   Forward index scan of: o_test_pkey_fields_same_as_index_val_1_val_3_key
+(2 rows)
 
 SELECT * FROM o_test_pkey_fields_same_as_index ORDER BY val_1;
  val_1 | val_2 | val_3 
@@ -1308,10 +1311,11 @@ SELECT orioledb_tbl_indices('o_test_add_pkey_empty_index'::regclass);
 INSERT INTO o_test_add_pkey_empty_index
 	SELECT v, v*10, v*100, v*1000 FROM generate_series(1, 5) v;
 EXPLAIN (COSTS OFF) SELECT a, b, d FROM o_test_add_pkey_empty_index ORDER BY a;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Index Only Scan using o_test_add_pkey_empty_index_a_b_idx on o_test_add_pkey_empty_index
-(1 row)
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_add_pkey_empty_index
+   Forward index only scan of: o_test_add_pkey_empty_index_a_b_idx
+(2 rows)
 
 SELECT a, b, d FROM o_test_add_pkey_empty_index ORDER BY a;
  a | b  |  d   

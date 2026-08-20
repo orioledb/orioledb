@@ -123,14 +123,15 @@ SELECT count(*) AS comp_range_mismatch FROM (
 --   a = c, b DESC      -> o_ab                (forward)
 EXPLAIN (COSTS OFF)
 	SELECT v, id FROM o ORDER BY v DESC NULLS FIRST, id LIMIT 5;
-                   QUERY PLAN                    
--------------------------------------------------
+                     QUERY PLAN                     
+----------------------------------------------------
  Limit
    ->  Incremental Sort
          Sort Key: v DESC, id
          Presorted Key: v
-         ->  Index Only Scan using o_v_desc on o
-(5 rows)
+         ->  Custom Scan (o_scan) on o
+               Forward index only scan of: o_v_desc
+(6 rows)
 
 SELECT v, id FROM o ORDER BY v DESC NULLS FIRST, id LIMIT 5;
  v | id  
@@ -144,14 +145,15 @@ SELECT v, id FROM o ORDER BY v DESC NULLS FIRST, id LIMIT 5;
 
 EXPLAIN (COSTS OFF)
 	SELECT v, id FROM o ORDER BY v ASC NULLS LAST, id LIMIT 5;
-                        QUERY PLAN                        
-----------------------------------------------------------
+                     QUERY PLAN                      
+-----------------------------------------------------
  Limit
    ->  Incremental Sort
          Sort Key: v, id
          Presorted Key: v
-         ->  Index Only Scan Backward using o_v_desc on o
-(5 rows)
+         ->  Custom Scan (o_scan) on o
+               Backward index only scan of: o_v_desc
+(6 rows)
 
 SELECT v, id FROM o ORDER BY v ASC NULLS LAST, id LIMIT 5;
  v |  id   
@@ -165,14 +167,15 @@ SELECT v, id FROM o ORDER BY v ASC NULLS LAST, id LIMIT 5;
 
 EXPLAIN (COSTS OFF)
 	SELECT v, id FROM o ORDER BY v DESC NULLS LAST, id LIMIT 5;
-                     QUERY PLAN                     
-----------------------------------------------------
+                      QUERY PLAN                       
+-------------------------------------------------------
  Limit
    ->  Incremental Sort
          Sort Key: v DESC NULLS LAST, id
          Presorted Key: v
-         ->  Index Only Scan using o_v_desc_nl on o
-(5 rows)
+         ->  Custom Scan (o_scan) on o
+               Forward index only scan of: o_v_desc_nl
+(6 rows)
 
 SELECT v, id FROM o ORDER BY v DESC NULLS LAST, id LIMIT 5;
    v   |  id   
@@ -186,14 +189,15 @@ SELECT v, id FROM o ORDER BY v DESC NULLS LAST, id LIMIT 5;
 
 EXPLAIN (COSTS OFF)
 	SELECT v, id FROM o ORDER BY v ASC NULLS FIRST, id LIMIT 5;
-                         QUERY PLAN                          
--------------------------------------------------------------
+                       QUERY PLAN                       
+--------------------------------------------------------
  Limit
    ->  Incremental Sort
          Sort Key: v NULLS FIRST, id
          Presorted Key: v
-         ->  Index Only Scan Backward using o_v_desc_nl on o
-(5 rows)
+         ->  Custom Scan (o_scan) on o
+               Backward index only scan of: o_v_desc_nl
+(6 rows)
 
 SELECT v, id FROM o ORDER BY v ASC NULLS FIRST, id LIMIT 5;
  v | id  
@@ -207,15 +211,16 @@ SELECT v, id FROM o ORDER BY v ASC NULLS FIRST, id LIMIT 5;
 
 EXPLAIN (COSTS OFF)
 	SELECT b, id FROM o WHERE a = 7 ORDER BY b DESC, id LIMIT 10;
-                 QUERY PLAN                  
----------------------------------------------
+                   QUERY PLAN                   
+------------------------------------------------
  Limit
    ->  Incremental Sort
          Sort Key: b DESC, id
          Presorted Key: b
-         ->  Index Only Scan using o_ab on o
-               Index Cond: (a = 7)
-(6 rows)
+         ->  Custom Scan (o_scan) on o
+               Forward index only scan of: o_ab
+               Conds: (a = 7)
+(7 rows)
 
 SELECT b, id FROM o WHERE a = 7 ORDER BY b DESC, id LIMIT 10;
    b   |  id   

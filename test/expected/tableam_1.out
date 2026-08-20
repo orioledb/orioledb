@@ -135,11 +135,12 @@ SELECT * FROM o_tableam1;
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE key = 5;
-                  QUERY PLAN                   
------------------------------------------------
- Index Scan using o_tableam1_ix1 on o_tableam1
-   Index Cond: (key = 5)
-(2 rows)
+               QUERY PLAN                
+-----------------------------------------
+ Custom Scan (o_scan) on o_tableam1
+   Forward index scan of: o_tableam1_ix1
+   Conds: (key = 5)
+(3 rows)
 
 SELECT * FROM o_tableam1 WHERE key = 5;
  key | value 
@@ -148,10 +149,11 @@ SELECT * FROM o_tableam1 WHERE key = 5;
 (1 row)
 
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1 ORDER BY key DESC;
-                       QUERY PLAN                       
---------------------------------------------------------
- Index Scan Backward using o_tableam1_ix1 on o_tableam1
-(1 row)
+                QUERY PLAN                
+------------------------------------------
+ Custom Scan (o_scan) on o_tableam1
+   Backward index scan of: o_tableam1_ix1
+(2 rows)
 
 SELECT * FROM o_tableam1 ORDER BY key DESC;
  key | value  
@@ -179,11 +181,12 @@ SELECT * FROM o_tableam1 ORDER BY key DESC;
 (20 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE value = '5text';
-                  QUERY PLAN                   
------------------------------------------------
- Index Scan using o_tableam1_ix2 on o_tableam1
-   Index Cond: (value = '5text'::text)
-(2 rows)
+               QUERY PLAN                
+-----------------------------------------
+ Custom Scan (o_scan) on o_tableam1
+   Forward index scan of: o_tableam1_ix2
+   Conds: (value = '5text'::text)
+(3 rows)
 
 SELECT * FROM o_tableam1 WHERE value = '5text';
  key | value 
@@ -192,12 +195,13 @@ SELECT * FROM o_tableam1 WHERE value = '5text';
 (1 row)
 
 EXPLAIN (COSTS off) SELECT * FROM o_tableam1 WHERE value = '5text' AND key = 5;
-                  QUERY PLAN                   
------------------------------------------------
- Index Scan using o_tableam1_ix2 on o_tableam1
-   Index Cond: (value = '5text'::text)
+               QUERY PLAN                
+-----------------------------------------
+ Custom Scan (o_scan) on o_tableam1
    Filter: (key = 5)
-(3 rows)
+   Forward index scan of: o_tableam1_ix2
+   Conds: (value = '5text'::text)
+(4 rows)
 
 SELECT * FROM o_tableam1 WHERE value = '5text' AND key = 5;
  key | value 
@@ -365,11 +369,12 @@ INSERT INTO o_test_partial (SELECT id, id || 'text'
 ANALYZE o_test_partial;
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_test_partial WHERE key BETWEEN 15 AND 25;
-                      QUERY PLAN                       
--------------------------------------------------------
- Index Scan using o_test_partial_ix1 on o_test_partial
-   Index Cond: ((key >= 15) AND (key <= 25))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test_partial
+   Forward index scan of: o_test_partial_ix1
+   Conds: ((key >= 15) AND (key <= 25))
+(3 rows)
 
 SELECT * FROM o_test_partial WHERE key BETWEEN 15 AND 25;
  key | value  
@@ -383,11 +388,12 @@ SELECT * FROM o_test_partial WHERE key BETWEEN 15 AND 25;
 (6 rows)
 
 EXPLAIN (COSTS off) SELECT key FROM o_test_partial WHERE key BETWEEN 15 AND 25;
-                         QUERY PLAN                         
-------------------------------------------------------------
- Index Only Scan using o_test_partial_ix1 on o_test_partial
-   Index Cond: ((key >= 15) AND (key <= 25))
-(2 rows)
+                    QUERY PLAN                    
+--------------------------------------------------
+ Custom Scan (o_scan) on o_test_partial
+   Forward index only scan of: o_test_partial_ix1
+   Conds: ((key >= 15) AND (key <= 25))
+(3 rows)
 
 SELECT key FROM o_test_partial WHERE key BETWEEN 15 AND 25;
  key 
@@ -403,11 +409,12 @@ SELECT key FROM o_test_partial WHERE key BETWEEN 15 AND 25;
 SET enable_seqscan = OFF;
 EXPLAIN (COSTS off) SELECT value FROM o_test_partial
 	WHERE value BETWEEN '6' AND '9';
-                          QUERY PLAN                           
----------------------------------------------------------------
- Index Only Scan using o_test_partial_ix8 on o_test_partial
-   Index Cond: ((value >= '6'::text) AND (value <= '9'::text))
-(2 rows)
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Custom Scan (o_scan) on o_test_partial
+   Forward index only scan of: o_test_partial_ix8
+   Conds: ((value >= '6'::text) AND (value <= '9'::text))
+(3 rows)
 
 SELECT value FROM o_test_partial WHERE value BETWEEN '6' AND '9';
  value 
@@ -421,9 +428,10 @@ EXPLAIN (COSTS off) SELECT value FROM o_test_partial
 	WHERE (value || 'WOW') BETWEEN '6' AND '9' ORDER BY value;
                                          QUERY PLAN                                          
 ---------------------------------------------------------------------------------------------
- Index Only Scan using o_test_partial_ix9 on o_test_partial
+ Custom Scan (o_scan) on o_test_partial
    Filter: (((value || 'WOW'::text) >= '6'::text) AND ((value || 'WOW'::text) <= '9'::text))
-(2 rows)
+   Forward index only scan of: o_test_partial_ix9
+(3 rows)
 
 SELECT value FROM o_test_partial
 	WHERE (value || 'WOW') BETWEEN '6' AND '9';
@@ -846,11 +854,12 @@ SELECT orioledb_tbl_structure('o_test_partial'::regclass, 'ne');
 
 ALTER TABLE o_test_partial DROP CONSTRAINT o_test_partial_pkey;
 EXPLAIN (COSTS off) SELECT * FROM o_test_partial WHERE key > 15;
-                      QUERY PLAN                       
--------------------------------------------------------
- Index Scan using o_test_partial_ix1 on o_test_partial
-   Index Cond: (key > 15)
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test_partial
+   Forward index scan of: o_test_partial_ix1
+   Conds: (key > 15)
+(3 rows)
 
 SELECT * FROM o_test_partial WHERE key > 15;
  key | value  
@@ -1210,11 +1219,12 @@ SELECT smart_explain($$
 	EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
 		WHERE (key * 100) BETWEEN 100 AND 1000;
 $$);
-                           smart_explain                            
---------------------------------------------------------------------
- Index Only Scan using o_test_expression_ix1 on o_test_expression
-   Index Cond: ((((key * 100)) >= 100) AND (((key * 100)) <= 1000))
-(2 rows)
+                         smart_explain                         
+---------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_expression
+   Forward index only scan of: o_test_expression_ix1
+   Conds: ((((key * 100)) >= 100) AND (((key * 100)) <= 1000))
+(3 rows)
 
 SELECT (key * 100) FROM o_test_expression
 	WHERE (key * 100) BETWEEN 100 AND 1000;
@@ -1236,11 +1246,12 @@ SELECT smart_explain($$
 	EXPLAIN (COSTS off) SELECT (value || 'WOW') FROM o_test_expression
 		WHERE (value || 'WOW') BETWEEN '6' AND '9';
 $$);
-                                            smart_explain                                            
------------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_expression_ix4 on o_test_expression
-   Index Cond: ((((value || 'WOW'::text)) >= '6'::text) AND (((value || 'WOW'::text)) <= '9'::text))
-(2 rows)
+                                         smart_explain                                          
+------------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_expression
+   Forward index only scan of: o_test_expression_ix4
+   Conds: ((((value || 'WOW'::text)) >= '6'::text) AND (((value || 'WOW'::text)) <= '9'::text))
+(3 rows)
 
 SELECT (value || 'WOW') FROM o_test_expression
 	WHERE (value || 'WOW') BETWEEN '6' AND '9';
@@ -1257,9 +1268,10 @@ SELECT smart_explain($$
 $$);
                               smart_explain                              
 -------------------------------------------------------------------------
- Index Only Scan using o_test_expression_ix5 on o_test_expression
+ Custom Scan (o_scan) on o_test_expression
    Filter: ((upper(value) >= '6'::text) AND (upper(value) <= '9'::text))
-(2 rows)
+   Forward index only scan of: o_test_expression_ix5
+(3 rows)
 
 SELECT (value || 'WOW') FROM o_test_expression
 	WHERE UPPER(value) BETWEEN '6' AND '9';
@@ -1275,9 +1287,10 @@ EXPLAIN (COSTS off) SELECT * FROM o_test_expression
 		  LOWER(value) BETWEEN '4' AND '7';
                                                                QUERY PLAN                                                                
 -----------------------------------------------------------------------------------------------------------------------------------------
- Index Only Scan using o_test_expression_ix5 on o_test_expression
+ Custom Scan (o_scan) on o_test_expression
    Filter: ((upper(value) >= '1'::text) AND (upper(value) <= '9'::text) AND (lower(value) >= '4'::text) AND (lower(value) <= '7'::text))
-(2 rows)
+   Forward index only scan of: o_test_expression_ix5
+(3 rows)
 
 SELECT * FROM o_test_expression
 	WHERE UPPER(value) BETWEEN '1' AND '9' AND
@@ -1614,11 +1627,12 @@ SELECT smart_explain($$
 	EXPLAIN (COSTS off) SELECT (key * 100) FROM o_test_expression
 		WHERE (key * 100) BETWEEN 100 AND 1000;
 $$);
-                           smart_explain                            
---------------------------------------------------------------------
- Index Only Scan using o_test_expression_ix2 on o_test_expression
-   Index Cond: ((((key * 100)) >= 100) AND (((key * 100)) <= 1000))
-(2 rows)
+                         smart_explain                         
+---------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_expression
+   Forward index only scan of: o_test_expression_ix2
+   Conds: ((((key * 100)) >= 100) AND (((key * 100)) <= 1000))
+(3 rows)
 
 SELECT (key * 100) FROM o_test_expression
 	WHERE (key * 100) BETWEEN 100 AND 1000;
@@ -2027,11 +2041,12 @@ SELECT * FROM o_tableam4 WHERE key = 5;
 (1 row)
 
 EXPLAIN (COSTS off) SELECT * FROM o_tableam4 WHERE key = 5;
-                  QUERY PLAN                   
------------------------------------------------
- Index Scan using o_tableam4_ix1 on o_tableam4
-   Index Cond: (key = 5)
-(2 rows)
+               QUERY PLAN                
+-----------------------------------------
+ Custom Scan (o_scan) on o_tableam4
+   Forward index scan of: o_tableam4_ix1
+   Conds: (key = 5)
+(3 rows)
 
 SELECT * FROM o_tableam4 WHERE value = 5;
  key | value | value2 
@@ -2040,11 +2055,12 @@ SELECT * FROM o_tableam4 WHERE value = 5;
 (1 row)
 
 EXPLAIN (COSTS off) SELECT * FROM o_tableam4 WHERE value = 5;
-                  QUERY PLAN                   
------------------------------------------------
- Index Scan using o_tableam4_ix2 on o_tableam4
-   Index Cond: (value = 5)
-(2 rows)
+               QUERY PLAN                
+-----------------------------------------
+ Custom Scan (o_scan) on o_tableam4
+   Forward index scan of: o_tableam4_ix2
+   Conds: (value = 5)
+(3 rows)
 
 RESET enable_seqscan;
 SELECT * FROM o_tableam4 WHERE value2 = 5;
@@ -2131,11 +2147,12 @@ SELECT id FROM o_tableam5 ORDER BY id DESC;
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT id FROM o_tableam5
 	WHERE id > 0 ORDER BY id DESC;
-                       QUERY PLAN                       
---------------------------------------------------------
- Index Only Scan using o_tableam5_primary on o_tableam5
-   Index Cond: (id > 0)
-(2 rows)
+                    QUERY PLAN                    
+--------------------------------------------------
+ Custom Scan (o_scan) on o_tableam5
+   Forward index only scan of: o_tableam5_primary
+   Conds: (id > 0)
+(3 rows)
 
 SELECT id FROM o_tableam5 ORDER BY val;
  id 
@@ -2179,13 +2196,16 @@ FROM query_to_text('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE)
 					SELECT val2 FROM o_tableam5
 					WHERE val > ''0'' AND val < ''a''
 					ORDER BY val;') as t;
-                                            regexp_replace                                             
--------------------------------------------------------------------------------------------------------
- Index Scan using o_tableamx_ixx on o_tableamx  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
-   Index Cond: ((val > 'x'::text) AND (val < 'a'::text))
+                                       regexp_replace                                       
+--------------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_tableamx  (cost=x rows=x width=x) (actual time=x rows=x loops=x)
+   Forward index scan of: o_tableamx_ixx
+   Conds: ((val > 'x'::text) AND (val < 'a'::text))
+   Primary pages: read=x
+   Secondary index (o_tableamx_ixx) pages: read=x
  Planning Time: x ms
  Execution Time: x ms
-(4 rows)
+(7 rows)
 
 DROP TABLE o_tableam5;
 CREATE TABLE o_tableam_delete1
@@ -2245,20 +2265,22 @@ EXPLAIN (COSTS off) DELETE FROM o_tableam_delete1 WHERE id > 5;
 (4 rows)
 
 EXPLAIN (COSTS off) DELETE FROM o_tableam_delete1 WHERE val = '1text' RETURNING *;
-                            QUERY PLAN                            
-------------------------------------------------------------------
+                     QUERY PLAN                      
+-----------------------------------------------------
  Delete on o_tableam_delete1
-   ->  Index Scan using o_tableam_delete1_ix on o_tableam_delete1
-         Index Cond: (val = '1text'::text)
-(3 rows)
+   ->  Custom Scan (o_scan) on o_tableam_delete1
+         Forward index scan of: o_tableam_delete1_ix
+         Conds: (val = '1text'::text)
+(4 rows)
 
 EXPLAIN (COSTS off) DELETE FROM o_tableam_delete1 WHERE val = '2text' RETURNING val;
-                            QUERY PLAN                            
-------------------------------------------------------------------
+                     QUERY PLAN                      
+-----------------------------------------------------
  Delete on o_tableam_delete1
-   ->  Index Scan using o_tableam_delete1_ix on o_tableam_delete1
-         Index Cond: (val = '2text'::text)
-(3 rows)
+   ->  Custom Scan (o_scan) on o_tableam_delete1
+         Forward index scan of: o_tableam_delete1_ix
+         Conds: (val = '2text'::text)
+(4 rows)
 
 DELETE FROM o_tableam_delete1 WHERE id > 5;
 DELETE FROM o_tableam_delete1 WHERE val = '1text' RETURNING *;
@@ -2309,24 +2331,26 @@ SELECT smart_explain($$
 		UPDATE o_tableam_update1 SET id = id + 100 WHERE val = '1text'
 			RETURNING *;
 $$);
-                          smart_explain                           
-------------------------------------------------------------------
+                    smart_explain                    
+-----------------------------------------------------
  Update on o_tableam_update1
-   ->  Index Scan using o_tableam_update1_ix on o_tableam_update1
-         Index Cond: (val = '1text'::text)
-(3 rows)
+   ->  Custom Scan (o_scan) on o_tableam_update1
+         Forward index scan of: o_tableam_update1_ix
+         Conds: (val = '1text'::text)
+(4 rows)
 
 SELECT smart_explain($$
 	EXPLAIN (COSTS off)
 		UPDATE o_tableam_update1 SET id = id + 100 WHERE val = '2text'
 			RETURNING val;
 $$);
-                          smart_explain                           
-------------------------------------------------------------------
+                    smart_explain                    
+-----------------------------------------------------
  Update on o_tableam_update1
-   ->  Index Scan using o_tableam_update1_ix on o_tableam_update1
-         Index Cond: (val = '2text'::text)
-(3 rows)
+   ->  Custom Scan (o_scan) on o_tableam_update1
+         Forward index scan of: o_tableam_update1_ix
+         Conds: (val = '2text'::text)
+(4 rows)
 
 UPDATE o_tableam_update1 SET id = id + 100 WHERE id > 5;
 UPDATE o_tableam_update1 SET id = id + 100 WHERE val = '1text' RETURNING *;
@@ -4924,10 +4948,11 @@ UPDATE o_test_1 SET b = '-0' WHERE b = '0';
 UPDATE o_test_1 SET a = '-0' WHERE a = '0';
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_1 ORDER BY b;
-                   QUERY PLAN                   
-------------------------------------------------
- Index Only Scan using o_test_1_idx on o_test_1
-(1 row)
+                 QUERY PLAN                 
+--------------------------------------------
+ Custom Scan (o_scan) on o_test_1
+   Forward index only scan of: o_test_1_idx
+(2 rows)
 
 SELECT * FROM o_test_1 ORDER BY b;
  a  | b  

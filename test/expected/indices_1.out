@@ -360,11 +360,12 @@ INSERT INTO o_test54 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 ANALYZE o_test54;
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_test54 WHERE key BETWEEN 100 and 110;
-                   QUERY PLAN                   
-------------------------------------------------
- Index Only Scan using o_test54_sec on o_test54
+                 QUERY PLAN                 
+--------------------------------------------
+ Custom Scan (o_scan) on o_test54
    Filter: ((key >= 100) AND (key <= 110))
-(2 rows)
+   Forward index only scan of: o_test54_sec
+(3 rows)
 
 SELECT * FROM o_test54 WHERE key BETWEEN 100 and 110;
  key | value 
@@ -382,11 +383,12 @@ SELECT * FROM o_test54 WHERE key BETWEEN 100 and 110;
 (10 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test54 WHERE value BETWEEN 200 and 210;
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan using o_test54_sec on o_test54
-   Index Cond: ((value >= 200) AND (value <= 210))
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test54
+   Forward index only scan of: o_test54_sec
+   Conds: ((value >= 200) AND (value <= 210))
+(3 rows)
 
 SELECT * FROM o_test54 WHERE value BETWEEN 200 and 210;
  key | value 
@@ -404,11 +406,12 @@ SELECT * FROM o_test54 WHERE value BETWEEN 200 and 210;
 (10 rows)
 
 EXPLAIN (COSTS off) SELECT value, key FROM o_test54 WHERE value BETWEEN 200 and 210;
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan using o_test54_sec on o_test54
-   Index Cond: ((value >= 200) AND (value <= 210))
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test54
+   Forward index only scan of: o_test54_sec
+   Conds: ((value >= 200) AND (value <= 210))
+(3 rows)
 
 SELECT value, key FROM o_test54 WHERE value BETWEEN 200 and 210;
  value | key 
@@ -465,11 +468,12 @@ SELECT orioledb_tbl_indices('o_test55'::regclass);
 
 INSERT INTO o_test55 VALUES (1, 2);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test55 WHERE key = 1;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test55_uniq on o_test55
-   Index Cond: (key = 1)
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test55
+   Forward index only scan of: o_test55_uniq
+   Conds: (key = 1)
+(3 rows)
 
 SELECT * FROM o_test55 WHERE key = 1;
  key | value 
@@ -536,11 +540,12 @@ SELECT * FROM o_test56 WHERE key = 1;
 (1 row)
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test56 WHERE value = 3;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test56_uniq on o_test56
-   Index Cond: (value = 3)
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test56
+   Forward index only scan of: o_test56_uniq
+   Conds: (value = 3)
+(3 rows)
 
 SELECT * FROM o_test56 WHERE value = 3;
  key | value 
@@ -884,11 +889,12 @@ INSERT INTO o_test61 SELECT 100 + i, 200 + i FROM generate_series(1, 100) AS i;
 ANALYZE o_test61;
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT * FROM o_test61 WHERE key BETWEEN 100 and 110;
-                  QUERY PLAN                   
------------------------------------------------
- Index Scan using o_test61_reg1 on o_test61
-   Index Cond: ((key >= 100) AND (key <= 110))
-(2 rows)
+                QUERY PLAN                
+------------------------------------------
+ Custom Scan (o_scan) on o_test61
+   Forward index scan of: o_test61_reg1
+   Conds: ((key >= 100) AND (key <= 110))
+(3 rows)
 
 SELECT * FROM o_test61 WHERE key BETWEEN 100 and 110;
  key | value 
@@ -906,11 +912,12 @@ SELECT * FROM o_test61 WHERE key BETWEEN 100 and 110;
 (10 rows)
 
 EXPLAIN (COSTS off) SELECT * FROM o_test61 WHERE value BETWEEN 250 and 260;
-                    QUERY PLAN                     
----------------------------------------------------
- Index Scan using o_test61_reg2 on o_test61
-   Index Cond: ((value >= 250) AND (value <= 260))
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test61
+   Forward index scan of: o_test61_reg2
+   Conds: ((value >= 250) AND (value <= 260))
+(3 rows)
 
 SELECT * FROM o_test61 WHERE value BETWEEN 250 and 260;
  key | value 
@@ -1025,10 +1032,11 @@ SELECT id, val FROM o_test65 ORDER BY id;
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT val, id FROM o_test65 ORDER BY id;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Index Only Scan Backward using o_test65_reg1 on o_test65
-(1 row)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test65
+   Backward index only scan of: o_test65_reg1
+(2 rows)
 
 SELECT val, id FROM o_test65 ORDER BY id;
  val | id 
@@ -1096,10 +1104,11 @@ SELECT val, id FROM o_test65 ORDER BY id;
 (60 rows)
 
 EXPLAIN (COSTS off) SELECT id, val FROM o_test65 ORDER BY id;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Index Only Scan Backward using o_test65_reg1 on o_test65
-(1 row)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test65
+   Backward index only scan of: o_test65_reg1
+(2 rows)
 
 SELECT id, val FROM o_test65 ORDER BY id;
  id | val 
@@ -1167,10 +1176,11 @@ SELECT id, val FROM o_test65 ORDER BY id;
 (60 rows)
 
 EXPLAIN (COSTS off) SELECT id, val FROM o_test65 ORDER BY id DESC;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test65_reg1 on o_test65
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test65
+   Forward index only scan of: o_test65_reg1
+(2 rows)
 
 SELECT id, val FROM o_test65 ORDER BY id DESC;
  id | val 
@@ -1238,11 +1248,12 @@ SELECT id, val FROM o_test65 ORDER BY id DESC;
 (60 rows)
 
 EXPLAIN (COSTS off) SELECT id, val FROM o_test65 WHERE id = 30;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test65_reg1 on o_test65
-   Index Cond: (id = 30)
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test65
+   Forward index only scan of: o_test65_reg1
+   Conds: (id = 30)
+(3 rows)
 
 SELECT id, val FROM o_test65 WHERE id = 30;
  id | val 
@@ -1251,11 +1262,12 @@ SELECT id, val FROM o_test65 WHERE id = 30;
 (1 row)
 
 EXPLAIN (COSTS off) SELECT id, val FROM o_test65 WHERE id <= 30 AND id >= 1;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test65_reg1 on o_test65
-   Index Cond: ((id <= 30) AND (id >= 1))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test65
+   Forward index only scan of: o_test65_reg1
+   Conds: ((id <= 30) AND (id >= 1))
+(3 rows)
 
 SELECT id, val FROM o_test65 WHERE id <= 30 AND id >= 1;
  id | val 
@@ -1293,11 +1305,12 @@ SELECT id, val FROM o_test65 WHERE id <= 30 AND id >= 1;
 (30 rows)
 
 EXPLAIN (COSTS off) SELECT id, val FROM o_test65 WHERE id >= 30 AND id < 100;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test65_reg1 on o_test65
-   Index Cond: ((id >= 30) AND (id < 100))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test65
+   Forward index only scan of: o_test65_reg1
+   Conds: ((id >= 30) AND (id < 100))
+(3 rows)
 
 SELECT id, val FROM o_test65 WHERE id >= 30 AND id < 100;
  id | val 
@@ -1336,11 +1349,12 @@ SELECT id, val FROM o_test65 WHERE id >= 30 AND id < 100;
 (31 rows)
 
 EXPLAIN (COSTS off) SELECT id, val FROM o_test65 WHERE id <= 30 AND id > 15;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test65_reg1 on o_test65
-   Index Cond: ((id <= 30) AND (id > 15))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test65
+   Forward index only scan of: o_test65_reg1
+   Conds: ((id <= 30) AND (id > 15))
+(3 rows)
 
 SELECT id, val FROM o_test65 WHERE id <= 30 AND id > 15;
  id | val 
@@ -1363,11 +1377,12 @@ SELECT id, val FROM o_test65 WHERE id <= 30 AND id > 15;
 (15 rows)
 
 EXPLAIN (COSTS off) SELECT id, val FROM o_test65 WHERE id >= 30 AND id < 45;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test65_reg1 on o_test65
-   Index Cond: ((id >= 30) AND (id < 45))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test65
+   Forward index only scan of: o_test65_reg1
+   Conds: ((id >= 30) AND (id < 45))
+(3 rows)
 
 SELECT id, val FROM o_test65 WHERE id >= 30 AND id < 45;
  id | val 
@@ -1390,11 +1405,12 @@ SELECT id, val FROM o_test65 WHERE id >= 30 AND id < 45;
 (15 rows)
 
 EXPLAIN (COSTS off) SELECT id, val FROM o_test65 WHERE id <= 30 OR id > 45;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test65_reg1 on o_test65
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test65
    Filter: ((id <= 30) OR (id > 45))
-(2 rows)
+   Forward index only scan of: o_test65_reg1
+(3 rows)
 
 SELECT id, val FROM o_test65 WHERE id <= 30 OR id > 45;
  id | val 
@@ -1447,11 +1463,12 @@ SELECT id, val FROM o_test65 WHERE id <= 30 OR id > 45;
 (45 rows)
 
 EXPLAIN (COSTS off) SELECT id, val FROM o_test65 WHERE id >= 30 OR id < 15;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test65_reg1 on o_test65
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test65
    Filter: ((id >= 30) OR (id < 15))
-(2 rows)
+   Forward index only scan of: o_test65_reg1
+(3 rows)
 
 SELECT id, val FROM o_test65 WHERE id >= 30 OR id < 15;
  id | val 
@@ -1571,10 +1588,11 @@ SELECT idi, idv FROM o_test66;
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 ORDER BY idi;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test66 ORDER BY idi;
  idi | idv 
@@ -1609,10 +1627,11 @@ SELECT idi, idv FROM o_test66 ORDER BY idi;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 ORDER BY idi DESC;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Index Only Scan Backward using o_test66_reg1 on o_test66
-(1 row)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Backward index only scan of: o_test66_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test66 ORDER BY idi DESC;
  idi | idv 
@@ -1647,10 +1666,11 @@ SELECT idi, idv FROM o_test66 ORDER BY idi DESC;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 ORDER BY idi, idv;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test66 ORDER BY idi, idv;
  idi | idv 
@@ -1685,13 +1705,14 @@ SELECT idi, idv FROM o_test66 ORDER BY idi, idv;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 ORDER BY idi DESC, idv;
-                           QUERY PLAN                           
-----------------------------------------------------------------
+                     QUERY PLAN                     
+----------------------------------------------------
  Incremental Sort
    Sort Key: idi DESC, idv
    Presorted Key: idi
-   ->  Index Only Scan Backward using o_test66_reg1 on o_test66
-(4 rows)
+   ->  Custom Scan (o_scan) on o_test66
+         Backward index only scan of: o_test66_reg1
+(5 rows)
 
 SELECT idi, idv FROM o_test66 ORDER BY idi DESC, idv;
  idi | idv 
@@ -1726,13 +1747,14 @@ SELECT idi, idv FROM o_test66 ORDER BY idi DESC, idv;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 ORDER BY idi, idv DESC;
-                      QUERY PLAN                       
--------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Incremental Sort
    Sort Key: idi, idv DESC
    Presorted Key: idi
-   ->  Index Only Scan using o_test66_reg1 on o_test66
-(4 rows)
+   ->  Custom Scan (o_scan) on o_test66
+         Forward index only scan of: o_test66_reg1
+(5 rows)
 
 SELECT idi, idv FROM o_test66 ORDER BY idi, idv DESC;
  idi | idv 
@@ -1767,10 +1789,11 @@ SELECT idi, idv FROM o_test66 ORDER BY idi, idv DESC;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 ORDER BY idi DESC, idv DESC;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Index Only Scan Backward using o_test66_reg1 on o_test66
-(1 row)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Backward index only scan of: o_test66_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test66 ORDER BY idi DESC, idv DESC;
  idi | idv 
@@ -1805,11 +1828,12 @@ SELECT idi, idv FROM o_test66 ORDER BY idi DESC, idv DESC;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi = 2)
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: (idi = 2)
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2;
  idi | idv 
@@ -1826,11 +1850,12 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2;
 (9 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idv = '22';
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idv = '22'::text)
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: (idv = '22'::text)
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idv = '22';
  idi | idv 
@@ -1841,11 +1866,12 @@ SELECT idi, idv FROM o_test66 WHERE idv = '22';
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv = '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi = 2) AND (idv = '22'::text))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi = 2) AND (idv = '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv = '22';
  idi | idv 
@@ -1855,13 +1881,14 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv = '22';
 
 -- Test Result node processing
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idi = 1;
-                      QUERY PLAN                       
--------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Result
    One-Time Filter: false
-   ->  Index Only Scan using o_test66_reg1 on o_test66
-         Index Cond: (idi = 2)
-(4 rows)
+   ->  Custom Scan (o_scan) on o_test66
+         Forward index only scan of: o_test66_reg1
+         Conds: (idi = 2)
+(5 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idi = 1;
  idi | idv 
@@ -1869,11 +1896,12 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idi = 1;
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv > '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi = 2) AND (idv > '22'::text))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi = 2) AND (idv > '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv > '22';
  idi | idv 
@@ -1885,11 +1913,12 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv > '22';
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv < '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi = 2) AND (idv < '22'::text))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi = 2) AND (idv < '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv < '22';
  idi | idv 
@@ -1901,11 +1930,12 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv < '22';
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv >= '22';
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi = 2) AND (idv >= '22'::text))
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi = 2) AND (idv >= '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv >= '22';
  idi | idv 
@@ -1918,11 +1948,12 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv >= '22';
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv <= '22';
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi = 2) AND (idv <= '22'::text))
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi = 2) AND (idv <= '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv <= '22';
  idi | idv 
@@ -1935,11 +1966,12 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv <= '22';
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv >= '12' AND idv <= '22';
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi = 2) AND (idv >= '12'::text) AND (idv <= '22'::text))
-(2 rows)
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi = 2) AND (idv >= '12'::text) AND (idv <= '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv >= '12' AND idv <= '22';
  idi | idv 
@@ -1951,11 +1983,12 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv >= '12' AND idv <= '22';
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv > '12' AND idv <= '22';
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi = 2) AND (idv > '12'::text) AND (idv <= '22'::text))
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi = 2) AND (idv > '12'::text) AND (idv <= '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv > '12' AND idv <= '22';
  idi | idv 
@@ -1966,11 +1999,12 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv > '12' AND idv <= '22';
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv >= '12' AND idv < '22';
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi = 2) AND (idv >= '12'::text) AND (idv < '22'::text))
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi = 2) AND (idv >= '12'::text) AND (idv < '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv >= '12' AND idv < '22';
  idi | idv 
@@ -1981,11 +2015,12 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv >= '12' AND idv < '22';
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv > '12' AND idv < '22';
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi = 2) AND (idv > '12'::text) AND (idv < '22'::text))
-(2 rows)
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi = 2) AND (idv > '12'::text) AND (idv < '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv > '12' AND idv < '22';
  idi | idv 
@@ -1997,10 +2032,11 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv > '12' AND idv < '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND (idv <= '12' OR idv >= '22');
                                QUERY PLAN                               
 ------------------------------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test66
    Filter: (((idv)::text <= '12'::text) OR ((idv)::text >= '22'::text))
-(3 rows)
+   Forward index only scan of: o_test66_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND (idv <= '12' OR idv >= '22');
  idi | idv 
@@ -2017,10 +2053,11 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND (idv <= '12' OR idv >= '22');
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND (idv < '12' OR idv >= '22');
                               QUERY PLAN                               
 -----------------------------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test66
    Filter: (((idv)::text < '12'::text) OR ((idv)::text >= '22'::text))
-(3 rows)
+   Forward index only scan of: o_test66_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND (idv < '12' OR idv >= '22');
  idi | idv 
@@ -2036,10 +2073,11 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND (idv < '12' OR idv >= '22');
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND (idv <= '12' OR idv > '22');
                               QUERY PLAN                               
 -----------------------------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test66
    Filter: (((idv)::text <= '12'::text) OR ((idv)::text > '22'::text))
-(3 rows)
+   Forward index only scan of: o_test66_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND (idv <= '12' OR idv > '22');
  idi | idv 
@@ -2055,10 +2093,11 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND (idv <= '12' OR idv > '22');
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND (idv < '12' OR idv > '22');
                               QUERY PLAN                              
 ----------------------------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test66
    Filter: (((idv)::text < '12'::text) OR ((idv)::text > '22'::text))
-(3 rows)
+   Forward index only scan of: o_test66_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND (idv < '12' OR idv > '22');
  idi | idv 
@@ -2071,11 +2110,12 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND (idv < '12' OR idv > '22');
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND (idv < '12' AND idv > '22');
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi = 2) AND (idv < '12'::text) AND (idv > '22'::text))
-(2 rows)
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi = 2) AND (idv < '12'::text) AND (idv > '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND (idv < '12' AND idv > '22');
  idi | idv 
@@ -2083,11 +2123,12 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND (idv < '12' AND idv > '22');
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv IN ('12', '22');
-                          QUERY PLAN                           
----------------------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi = 2) AND (idv = ANY ('{12,22}'::text[])))
-(2 rows)
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi = 2) AND (idv = ANY ('{12,22}'::text[])))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv IN ('12', '22');
  idi | idv 
@@ -2099,10 +2140,11 @@ SELECT idi, idv FROM o_test66 WHERE idi = 2 AND idv IN ('12', '22');
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi IN (2, 4) AND idv IN ('12', '22');
                     QUERY PLAN                     
 ---------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
+ Custom Scan (o_scan) on o_test66
    Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Forward index only scan of: o_test66_reg1
+   Conds: (idi = ANY ('{2,4}'::integer[]))
+(4 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -2114,9 +2156,10 @@ SELECT idi, idv FROM o_test66 WHERE idi IN (2, 4) AND idv IN ('12', '22');
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE (idi = 2 AND idv = '12') OR (idi = 4 AND idv = '2_3');
                                               QUERY PLAN                                               
 -------------------------------------------------------------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
+ Custom Scan (o_scan) on o_test66
    Filter: (((idi = 2) AND ((idv)::text = '12'::text)) OR ((idi = 4) AND ((idv)::text = '2_3'::text)))
-(2 rows)
+   Forward index only scan of: o_test66_reg1
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE (idi = 2 AND idv = '12') OR (idi = 4 AND idv = '2_3');
  idi | idv 
@@ -2127,11 +2170,12 @@ SELECT idi, idv FROM o_test66 WHERE (idi = 2 AND idv = '12') OR (idi = 4 AND idv
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND
 														idi < 100 AND
 														idv < '22';
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi > 1) AND (idi < 100) AND (idv < '22'::text))
-(2 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi > 1) AND (idi < 100) AND (idv < '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND
 									idi < 100 AND
@@ -2151,11 +2195,12 @@ SELECT idi, idv FROM o_test66 WHERE idi > 1 AND
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND
 									idi < 100 AND
 									idv > '22';
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi > 1) AND (idi < 100) AND (idv > '22'::text))
-(2 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi > 1) AND (idi < 100) AND (idv > '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND
 									idi < 100 AND
@@ -2173,11 +2218,12 @@ SELECT idi, idv FROM o_test66 WHERE idi > 1 AND
 (8 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv = '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi > 1) AND (idv = '22'::text))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi > 1) AND (idv = '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv = '22';
  idi | idv 
@@ -2189,11 +2235,12 @@ SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv = '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi < 3 AND
 									idi > 0 AND
 									idv < '22';
-                           QUERY PLAN                           
-----------------------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi < 3) AND (idi > 0) AND (idv < '22'::text))
-(2 rows)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi < 3) AND (idi > 0) AND (idv < '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi < 3 AND
 									idi > 0 AND
@@ -2213,11 +2260,12 @@ SELECT idi, idv FROM o_test66 WHERE idi < 3 AND
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi < 3 AND
 									idi > 0 AND
 									idv > '22';
-                           QUERY PLAN                           
-----------------------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi < 3) AND (idi > 0) AND (idv > '22'::text))
-(2 rows)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi < 3) AND (idi > 0) AND (idv > '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi < 3  AND
 									idi > 0 AND
@@ -2235,11 +2283,12 @@ SELECT idi, idv FROM o_test66 WHERE idi < 3  AND
 (8 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi < 3 AND idv = '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: ((idi < 3) AND (idv = '22'::text))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test66
+   Forward index only scan of: o_test66_reg1
+   Conds: ((idi < 3) AND (idv = '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi < 3 AND idv = '22';
  idi | idv 
@@ -2251,10 +2300,11 @@ SELECT idi, idv FROM o_test66 WHERE idi < 3 AND idv = '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
                     QUERY PLAN                     
 ---------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi > 1)
+ Custom Scan (o_scan) on o_test66
    Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Forward index only scan of: o_test66_reg1
+   Conds: (idi > 1)
+(4 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -2268,10 +2318,11 @@ SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22');
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
                     QUERY PLAN                     
 ---------------------------------------------------
- Index Only Scan using o_test66_reg1 on o_test66
-   Index Cond: (idi > 1)
+ Custom Scan (o_scan) on o_test66
    Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Forward index only scan of: o_test66_reg1
+   Conds: (idi > 1)
+(4 rows)
 
 SELECT idi, idv FROM o_test66 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
  idi | idv 
@@ -2444,10 +2495,11 @@ SELECT idi, idv FROM o_test67;
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 ORDER BY idi;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test67 ORDER BY idi;
  idi | idv 
@@ -2482,10 +2534,11 @@ SELECT idi, idv FROM o_test67 ORDER BY idi;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 ORDER BY idi DESC;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Index Only Scan Backward using o_test67_reg1 on o_test67
-(1 row)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Backward index only scan of: o_test67_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test67 ORDER BY idi DESC;
  idi | idv 
@@ -2562,10 +2615,11 @@ SELECT idi, idv FROM o_test67 ORDER BY idi, idv;
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 ORDER BY idi DESC, idv;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Index Only Scan Backward using o_test67_reg1 on o_test67
-(1 row)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Backward index only scan of: o_test67_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test67 ORDER BY idi DESC, idv;
  idi | idv 
@@ -2600,10 +2654,11 @@ SELECT idi, idv FROM o_test67 ORDER BY idi DESC, idv;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 ORDER BY idi, idv DESC;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test67 ORDER BY idi, idv DESC;
  idi | idv 
@@ -2680,11 +2735,12 @@ SELECT idi, idv FROM o_test67 ORDER BY idi DESC, idv DESC;
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi = 2)
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: (idi = 2)
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2;
  idi | idv 
@@ -2718,11 +2774,12 @@ SELECT idi, idv FROM o_test67 WHERE idv = '22';
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv = '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi = 2) AND (idv = '22'::text))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi = 2) AND (idv = '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv = '22';
  idi | idv 
@@ -2731,11 +2788,12 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv = '22';
 (1 row)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv > '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi = 2) AND (idv > '22'::text))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi = 2) AND (idv > '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv > '22';
  idi | idv 
@@ -2747,11 +2805,12 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv > '22';
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv < '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi = 2) AND (idv < '22'::text))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi = 2) AND (idv < '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv < '22';
  idi | idv 
@@ -2763,11 +2822,12 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv < '22';
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv >= '22';
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi = 2) AND (idv >= '22'::text))
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi = 2) AND (idv >= '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv >= '22';
  idi | idv 
@@ -2780,11 +2840,12 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv >= '22';
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv <= '22';
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi = 2) AND (idv <= '22'::text))
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi = 2) AND (idv <= '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv <= '22';
  idi | idv 
@@ -2797,11 +2858,12 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv <= '22';
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv >= '12' AND idv <= '22';
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi = 2) AND (idv >= '12'::text) AND (idv <= '22'::text))
-(2 rows)
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi = 2) AND (idv >= '12'::text) AND (idv <= '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv >= '12' AND idv <= '22';
  idi | idv 
@@ -2813,11 +2875,12 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv >= '12' AND idv <= '22';
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv > '12' AND idv <= '22';
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi = 2) AND (idv > '12'::text) AND (idv <= '22'::text))
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi = 2) AND (idv > '12'::text) AND (idv <= '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv > '12' AND idv <= '22';
  idi | idv 
@@ -2828,11 +2891,12 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv > '12' AND idv <= '22';
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv >= '12' AND idv < '22';
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi = 2) AND (idv >= '12'::text) AND (idv < '22'::text))
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi = 2) AND (idv >= '12'::text) AND (idv < '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv >= '12' AND idv < '22';
  idi | idv 
@@ -2843,11 +2907,12 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv >= '12' AND idv < '22';
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv > '12' AND idv < '22';
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi = 2) AND (idv > '12'::text) AND (idv < '22'::text))
-(2 rows)
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi = 2) AND (idv > '12'::text) AND (idv < '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv > '12' AND idv < '22';
  idi | idv 
@@ -2859,10 +2924,11 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv > '12' AND idv < '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2 AND (idv <= '12' OR idv >= '22');
                                QUERY PLAN                               
 ------------------------------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test67
    Filter: (((idv)::text <= '12'::text) OR ((idv)::text >= '22'::text))
-(3 rows)
+   Forward index only scan of: o_test67_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2 AND (idv <= '12' OR idv >= '22');
  idi | idv 
@@ -2879,10 +2945,11 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND (idv <= '12' OR idv >= '22');
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2 AND (idv < '12' OR idv >= '22');
                               QUERY PLAN                               
 -----------------------------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test67
    Filter: (((idv)::text < '12'::text) OR ((idv)::text >= '22'::text))
-(3 rows)
+   Forward index only scan of: o_test67_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2 AND (idv < '12' OR idv >= '22');
  idi | idv 
@@ -2898,10 +2965,11 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND (idv < '12' OR idv >= '22');
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2 AND (idv <= '12' OR idv > '22');
                               QUERY PLAN                               
 -----------------------------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test67
    Filter: (((idv)::text <= '12'::text) OR ((idv)::text > '22'::text))
-(3 rows)
+   Forward index only scan of: o_test67_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2 AND (idv <= '12' OR idv > '22');
  idi | idv 
@@ -2917,10 +2985,11 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND (idv <= '12' OR idv > '22');
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2 AND (idv < '12' OR idv > '22');
                               QUERY PLAN                              
 ----------------------------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test67
    Filter: (((idv)::text < '12'::text) OR ((idv)::text > '22'::text))
-(3 rows)
+   Forward index only scan of: o_test67_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2 AND (idv < '12' OR idv > '22');
  idi | idv 
@@ -2933,11 +3002,12 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND (idv < '12' OR idv > '22');
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2 AND (idv < '12' AND idv > '22');
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi = 2) AND (idv < '12'::text) AND (idv > '22'::text))
-(2 rows)
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi = 2) AND (idv < '12'::text) AND (idv > '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2 AND (idv < '12' AND idv > '22');
  idi | idv 
@@ -2945,11 +3015,12 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND (idv < '12' AND idv > '22');
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv IN ('12', '22');
-                          QUERY PLAN                           
----------------------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi = 2) AND (idv = ANY ('{12,22}'::text[])))
-(2 rows)
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi = 2) AND (idv = ANY ('{12,22}'::text[])))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv IN ('12', '22');
  idi | idv 
@@ -2961,10 +3032,11 @@ SELECT idi, idv FROM o_test67 WHERE idi = 2 AND idv IN ('12', '22');
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi IN (2, 4) AND idv IN ('12', '22');
                     QUERY PLAN                     
 ---------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
+ Custom Scan (o_scan) on o_test67
    Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Forward index only scan of: o_test67_reg1
+   Conds: (idi = ANY ('{2,4}'::integer[]))
+(4 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -2991,11 +3063,12 @@ SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi > 1 AND
 														idi < 100 AND
 														idv < '22';
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi > 1) AND (idi < 100) AND (idv < '22'::text))
-(2 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi > 1) AND (idi < 100) AND (idv < '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idi < 100 AND idv < '22';
  idi | idv 
@@ -3013,11 +3086,12 @@ SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idi < 100 AND idv < '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi > 1 AND
 														idi < 100 AND
 														idv > '22';
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi > 1) AND (idi < 100) AND (idv > '22'::text))
-(2 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi > 1) AND (idi < 100) AND (idv > '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idi < 100 AND idv > '22';
  idi | idv 
@@ -3033,11 +3107,12 @@ SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idi < 100 AND idv > '22';
 (8 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv = '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi > 1) AND (idv = '22'::text))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi > 1) AND (idv = '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv = '22';
  idi | idv 
@@ -3049,11 +3124,12 @@ SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv = '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi < 3 AND
 														idi > 0 AND
 														idv < '22';
-                           QUERY PLAN                           
-----------------------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi < 3) AND (idi > 0) AND (idv < '22'::text))
-(2 rows)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi < 3) AND (idi > 0) AND (idv < '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi < 3 AND idi > 0 AND idv < '22';
  idi | idv 
@@ -3071,11 +3147,12 @@ SELECT idi, idv FROM o_test67 WHERE idi < 3 AND idi > 0 AND idv < '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi < 3 AND
 														idi > 0 AND
 														idv > '22';
-                           QUERY PLAN                           
-----------------------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi < 3) AND (idi > 0) AND (idv > '22'::text))
-(2 rows)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi < 3) AND (idi > 0) AND (idv > '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi < 3 AND idi > 0 AND idv > '22';
  idi | idv 
@@ -3091,11 +3168,12 @@ SELECT idi, idv FROM o_test67 WHERE idi < 3 AND idi > 0 AND idv > '22';
 (8 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi < 3 AND idv = '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: ((idi < 3) AND (idv = '22'::text))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test67
+   Forward index only scan of: o_test67_reg1
+   Conds: ((idi < 3) AND (idv = '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi < 3 AND idv = '22';
  idi | idv 
@@ -3107,10 +3185,11 @@ SELECT idi, idv FROM o_test67 WHERE idi < 3 AND idv = '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
                     QUERY PLAN                     
 ---------------------------------------------------
- Index Only Scan using o_test67_reg1 on o_test67
-   Index Cond: (idi > 1)
+ Custom Scan (o_scan) on o_test67
    Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Forward index only scan of: o_test67_reg1
+   Conds: (idi > 1)
+(4 rows)
 
 SELECT idi, idv FROM o_test67 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -3283,10 +3362,11 @@ SELECT idi, idv FROM o_test68;
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 ORDER BY idi;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Index Only Scan Backward using o_test68_reg1 on o_test68
-(1 row)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Backward index only scan of: o_test68_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test68 ORDER BY idi;
  idi | idv 
@@ -3321,10 +3401,11 @@ SELECT idi, idv FROM o_test68 ORDER BY idi;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 ORDER BY idi DESC;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test68 ORDER BY idi DESC;
  idi | idv 
@@ -3361,13 +3442,14 @@ SELECT idi, idv FROM o_test68 ORDER BY idi DESC;
 RESET enable_seqscan;
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 ORDER BY idi, idv;
-                           QUERY PLAN                           
-----------------------------------------------------------------
+                     QUERY PLAN                     
+----------------------------------------------------
  Incremental Sort
    Sort Key: idi, idv
    Presorted Key: idi
-   ->  Index Only Scan Backward using o_test68_reg1 on o_test68
-(4 rows)
+   ->  Custom Scan (o_scan) on o_test68
+         Backward index only scan of: o_test68_reg1
+(5 rows)
 
 SELECT idi, idv FROM o_test68 ORDER BY idi, idv;
  idi | idv 
@@ -3402,10 +3484,11 @@ SELECT idi, idv FROM o_test68 ORDER BY idi, idv;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 ORDER BY idi DESC, idv;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test68 ORDER BY idi DESC, idv;
  idi | idv 
@@ -3440,10 +3523,11 @@ SELECT idi, idv FROM o_test68 ORDER BY idi DESC, idv;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 ORDER BY idi, idv DESC;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Index Only Scan Backward using o_test68_reg1 on o_test68
-(1 row)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Backward index only scan of: o_test68_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test68 ORDER BY idi, idv DESC;
  idi | idv 
@@ -3478,13 +3562,14 @@ SELECT idi, idv FROM o_test68 ORDER BY idi, idv DESC;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 ORDER BY idi DESC, idv DESC;
-                      QUERY PLAN                       
--------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Incremental Sort
    Sort Key: idi DESC, idv DESC
    Presorted Key: idi
-   ->  Index Only Scan using o_test68_reg1 on o_test68
-(4 rows)
+   ->  Custom Scan (o_scan) on o_test68
+         Forward index only scan of: o_test68_reg1
+(5 rows)
 
 SELECT idi, idv FROM o_test68 ORDER BY idi DESC, idv DESC;
  idi | idv 
@@ -3519,11 +3604,12 @@ SELECT idi, idv FROM o_test68 ORDER BY idi DESC, idv DESC;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi = 2)
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: (idi = 2)
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2;
  idi | idv 
@@ -3557,11 +3643,12 @@ SELECT idi, idv FROM o_test68 WHERE idv = '22';
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv = '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi = 2) AND (idv = '22'::text))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi = 2) AND (idv = '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv = '22';
  idi | idv 
@@ -3570,11 +3657,12 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv = '22';
 (1 row)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv > '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi = 2) AND (idv > '22'::text))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi = 2) AND (idv > '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv > '22';
  idi | idv 
@@ -3586,11 +3674,12 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv > '22';
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv < '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi = 2) AND (idv < '22'::text))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi = 2) AND (idv < '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv < '22';
  idi | idv 
@@ -3602,11 +3691,12 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv < '22';
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv >= '22';
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi = 2) AND (idv >= '22'::text))
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi = 2) AND (idv >= '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv >= '22';
  idi | idv 
@@ -3619,11 +3709,12 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv >= '22';
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv <= '22';
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi = 2) AND (idv <= '22'::text))
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi = 2) AND (idv <= '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv <= '22';
  idi | idv 
@@ -3636,11 +3727,12 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv <= '22';
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv >= '12' AND idv <= '22';
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi = 2) AND (idv >= '12'::text) AND (idv <= '22'::text))
-(2 rows)
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi = 2) AND (idv >= '12'::text) AND (idv <= '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv >= '12' AND idv <= '22';
  idi | idv 
@@ -3652,11 +3744,12 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv >= '12' AND idv <= '22';
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv > '12' AND idv <= '22';
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi = 2) AND (idv > '12'::text) AND (idv <= '22'::text))
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi = 2) AND (idv > '12'::text) AND (idv <= '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv > '12' AND idv <= '22';
  idi | idv 
@@ -3667,11 +3760,12 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv > '12' AND idv <= '22';
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv >= '12' AND idv < '22';
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi = 2) AND (idv >= '12'::text) AND (idv < '22'::text))
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi = 2) AND (idv >= '12'::text) AND (idv < '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv >= '12' AND idv < '22';
  idi | idv 
@@ -3682,11 +3776,12 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv >= '12' AND idv < '22';
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv > '12' AND idv < '22';
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi = 2) AND (idv > '12'::text) AND (idv < '22'::text))
-(2 rows)
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi = 2) AND (idv > '12'::text) AND (idv < '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv > '12' AND idv < '22';
  idi | idv 
@@ -3698,10 +3793,11 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv > '12' AND idv < '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2 AND (idv <= '12' OR idv >= '22');
                                QUERY PLAN                               
 ------------------------------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test68
    Filter: (((idv)::text <= '12'::text) OR ((idv)::text >= '22'::text))
-(3 rows)
+   Forward index only scan of: o_test68_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2 AND (idv <= '12' OR idv >= '22');
  idi | idv 
@@ -3718,10 +3814,11 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND (idv <= '12' OR idv >= '22');
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2 AND (idv < '12' OR idv >= '22');
                               QUERY PLAN                               
 -----------------------------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test68
    Filter: (((idv)::text < '12'::text) OR ((idv)::text >= '22'::text))
-(3 rows)
+   Forward index only scan of: o_test68_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2 AND (idv < '12' OR idv >= '22');
  idi | idv 
@@ -3737,10 +3834,11 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND (idv < '12' OR idv >= '22');
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2 AND (idv <= '12' OR idv > '22');
                               QUERY PLAN                               
 -----------------------------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test68
    Filter: (((idv)::text <= '12'::text) OR ((idv)::text > '22'::text))
-(3 rows)
+   Forward index only scan of: o_test68_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2 AND (idv <= '12' OR idv > '22');
  idi | idv 
@@ -3756,10 +3854,11 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND (idv <= '12' OR idv > '22');
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2 AND (idv < '12' OR idv > '22');
                               QUERY PLAN                              
 ----------------------------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test68
    Filter: (((idv)::text < '12'::text) OR ((idv)::text > '22'::text))
-(3 rows)
+   Forward index only scan of: o_test68_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2 AND (idv < '12' OR idv > '22');
  idi | idv 
@@ -3772,11 +3871,12 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND (idv < '12' OR idv > '22');
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2 AND (idv < '12' AND idv > '22');
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi = 2) AND (idv < '12'::text) AND (idv > '22'::text))
-(2 rows)
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi = 2) AND (idv < '12'::text) AND (idv > '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2 AND (idv < '12' AND idv > '22');
  idi | idv 
@@ -3784,11 +3884,12 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND (idv < '12' AND idv > '22');
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv IN ('12', '22');
-                          QUERY PLAN                           
----------------------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi = 2) AND (idv = ANY ('{12,22}'::text[])))
-(2 rows)
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi = 2) AND (idv = ANY ('{12,22}'::text[])))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv IN ('12', '22');
  idi | idv 
@@ -3800,10 +3901,11 @@ SELECT idi, idv FROM o_test68 WHERE idi = 2 AND idv IN ('12', '22');
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi IN (2, 4) AND idv IN ('12', '22');
                     QUERY PLAN                     
 ---------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi = ANY ('{2,4}'::integer[]))
+ Custom Scan (o_scan) on o_test68
    Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Forward index only scan of: o_test68_reg1
+   Conds: (idi = ANY ('{2,4}'::integer[]))
+(4 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -3830,11 +3932,12 @@ SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND
 														idi < 100 AND
 														idv < '22';
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi > 1) AND (idi < 100) AND (idv < '22'::text))
-(2 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi > 1) AND (idi < 100) AND (idv < '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idi < 100 AND idv < '22';
  idi | idv 
@@ -3852,11 +3955,12 @@ SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idi < 100 AND idv < '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND
 														idi < 100 AND
 														idv > '22';
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi > 1) AND (idi < 100) AND (idv > '22'::text))
-(2 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi > 1) AND (idi < 100) AND (idv > '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idi < 100 AND idv > '22';
  idi | idv 
@@ -3872,11 +3976,12 @@ SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idi < 100 AND idv > '22';
 (8 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv = '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi > 1) AND (idv = '22'::text))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi > 1) AND (idv = '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv = '22';
  idi | idv 
@@ -3888,11 +3993,12 @@ SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv = '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi < 3 AND
 														idi > 0 AND
 														idv < '22';
-                           QUERY PLAN                           
-----------------------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi < 3) AND (idi > 0) AND (idv < '22'::text))
-(2 rows)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi < 3) AND (idi > 0) AND (idv < '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi < 3 AND idi > 0 AND idv < '22';
  idi | idv 
@@ -3910,11 +4016,12 @@ SELECT idi, idv FROM o_test68 WHERE idi < 3 AND idi > 0 AND idv < '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi < 3 AND
 														idi > 0 AND
 														idv > '22';
-                           QUERY PLAN                           
-----------------------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi < 3) AND (idi > 0) AND (idv > '22'::text))
-(2 rows)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi < 3) AND (idi > 0) AND (idv > '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi < 3 AND idi > 0 AND idv > '22';
  idi | idv 
@@ -3930,11 +4037,12 @@ SELECT idi, idv FROM o_test68 WHERE idi < 3 AND idi > 0 AND idv > '22';
 (8 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi < 3 AND idv = '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: ((idi < 3) AND (idv = '22'::text))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test68
+   Forward index only scan of: o_test68_reg1
+   Conds: ((idi < 3) AND (idv = '22'::text))
+(3 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi < 3 AND idv = '22';
  idi | idv 
@@ -3946,10 +4054,11 @@ SELECT idi, idv FROM o_test68 WHERE idi < 3 AND idv = '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
                     QUERY PLAN                     
 ---------------------------------------------------
- Index Only Scan using o_test68_reg1 on o_test68
-   Index Cond: (idi > 1)
+ Custom Scan (o_scan) on o_test68
    Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Forward index only scan of: o_test68_reg1
+   Conds: (idi > 1)
+(4 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -3961,12 +4070,13 @@ SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22');
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Index Only Scan Backward using o_test68_reg1 on o_test68
-   Index Cond: (idi > 1)
+                    QUERY PLAN                     
+---------------------------------------------------
+ Custom Scan (o_scan) on o_test68
    Filter: ((idv)::text = ANY ('{12,22}'::text[]))
-(3 rows)
+   Backward index only scan of: o_test68_reg1
+   Conds: (idi > 1)
+(4 rows)
 
 SELECT idi, idv FROM o_test68 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
  idi | idv 
@@ -4139,10 +4249,11 @@ SELECT idi, idv FROM o_test69;
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 ORDER BY idv;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test69 ORDER BY idv;
  idi | idv 
@@ -4177,10 +4288,11 @@ SELECT idi, idv FROM o_test69 ORDER BY idv;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 ORDER BY idv DESC;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Index Only Scan Backward using o_test69_reg1 on o_test69
-(1 row)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Backward index only scan of: o_test69_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test69 ORDER BY idv DESC;
  idi | idv 
@@ -4215,10 +4327,11 @@ SELECT idi, idv FROM o_test69 ORDER BY idv DESC;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 ORDER BY idv, idi;
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-(1 row)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test69 ORDER BY idv, idi;
  idi | idv 
@@ -4253,13 +4366,14 @@ SELECT idi, idv FROM o_test69 ORDER BY idv, idi;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 ORDER BY idv DESC, idi;
-                           QUERY PLAN                           
-----------------------------------------------------------------
+                     QUERY PLAN                     
+----------------------------------------------------
  Incremental Sort
    Sort Key: idv DESC, idi
    Presorted Key: idv
-   ->  Index Only Scan Backward using o_test69_reg1 on o_test69
-(4 rows)
+   ->  Custom Scan (o_scan) on o_test69
+         Backward index only scan of: o_test69_reg1
+(5 rows)
 
 SELECT idi, idv FROM o_test69 ORDER BY idv DESC, idi;
  idi | idv 
@@ -4294,13 +4408,14 @@ SELECT idi, idv FROM o_test69 ORDER BY idv DESC, idi;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 ORDER BY idv, idi DESC;
-                      QUERY PLAN                       
--------------------------------------------------------
+                    QUERY PLAN                     
+---------------------------------------------------
  Incremental Sort
    Sort Key: idv, idi DESC
    Presorted Key: idv
-   ->  Index Only Scan using o_test69_reg1 on o_test69
-(4 rows)
+   ->  Custom Scan (o_scan) on o_test69
+         Forward index only scan of: o_test69_reg1
+(5 rows)
 
 SELECT idi, idv FROM o_test69 ORDER BY idv, idi DESC;
  idi | idv 
@@ -4335,10 +4450,11 @@ SELECT idi, idv FROM o_test69 ORDER BY idv, idi DESC;
 (27 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 ORDER BY idv DESC, idi DESC;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Index Only Scan Backward using o_test69_reg1 on o_test69
-(1 row)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Backward index only scan of: o_test69_reg1
+(2 rows)
 
 SELECT idi, idv FROM o_test69 ORDER BY idv DESC, idi DESC;
  idi | idv 
@@ -4396,11 +4512,12 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2;
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idv = '22';
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: (idv = '22'::text)
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: (idv = '22'::text)
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idv = '22';
  idi | idv 
@@ -4411,11 +4528,12 @@ SELECT idi, idv FROM o_test69 WHERE idv = '22';
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv = '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv = '22'::text) AND (idi = 2))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv = '22'::text) AND (idi = 2))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv = '22';
  idi | idv 
@@ -4424,11 +4542,12 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv = '22';
 (1 row)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv > '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv > '22'::text) AND (idi = 2))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv > '22'::text) AND (idi = 2))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv > '22';
  idi | idv 
@@ -4440,11 +4559,12 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv > '22';
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv < '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv < '22'::text) AND (idi = 2))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv < '22'::text) AND (idi = 2))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv < '22';
  idi | idv 
@@ -4456,11 +4576,12 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv < '22';
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv >= '22';
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv >= '22'::text) AND (idi = 2))
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv >= '22'::text) AND (idi = 2))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv >= '22';
  idi | idv 
@@ -4473,11 +4594,12 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv >= '22';
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv <= '22';
-                    QUERY PLAN                     
----------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv <= '22'::text) AND (idi = 2))
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv <= '22'::text) AND (idi = 2))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv <= '22';
  idi | idv 
@@ -4490,11 +4612,12 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv <= '22';
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv >= '12' AND idv <= '22';
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv >= '12'::text) AND (idv <= '22'::text) AND (idi = 2))
-(2 rows)
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv >= '12'::text) AND (idv <= '22'::text) AND (idi = 2))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv >= '12' AND idv <= '22';
  idi | idv 
@@ -4506,11 +4629,12 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv >= '12' AND idv <= '22';
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv > '12' AND idv <= '22';
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv > '12'::text) AND (idv <= '22'::text) AND (idi = 2))
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv > '12'::text) AND (idv <= '22'::text) AND (idi = 2))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv > '12' AND idv <= '22';
  idi | idv 
@@ -4521,11 +4645,12 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv > '12' AND idv <= '22';
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv >= '12' AND idv < '22';
-                                QUERY PLAN                                
---------------------------------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv >= '12'::text) AND (idv < '22'::text) AND (idi = 2))
-(2 rows)
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv >= '12'::text) AND (idv < '22'::text) AND (idi = 2))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv >= '12' AND idv < '22';
  idi | idv 
@@ -4536,11 +4661,12 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv >= '12' AND idv < '22';
 (3 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv > '12' AND idv < '22';
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv > '12'::text) AND (idv < '22'::text) AND (idi = 2))
-(2 rows)
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv > '12'::text) AND (idv < '22'::text) AND (idi = 2))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv > '12' AND idv < '22';
  idi | idv 
@@ -4552,10 +4678,11 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv > '12' AND idv < '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi = 2 AND (idv <= '12' OR idv >= '22') ORDER BY idv;
                                QUERY PLAN                               
 ------------------------------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test69
    Filter: (((idv)::text <= '12'::text) OR ((idv)::text >= '22'::text))
-(3 rows)
+   Forward index only scan of: o_test69_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi = 2 AND (idv <= '12' OR idv >= '22') ORDER BY idv;
  idi | idv 
@@ -4572,10 +4699,11 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND (idv <= '12' OR idv >= '22') ORD
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi = 2 AND (idv < '12' OR idv >= '22') ORDER BY idv;
                               QUERY PLAN                               
 -----------------------------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test69
    Filter: (((idv)::text < '12'::text) OR ((idv)::text >= '22'::text))
-(3 rows)
+   Forward index only scan of: o_test69_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi = 2 AND (idv < '12' OR idv >= '22') ORDER BY idv;
  idi | idv 
@@ -4591,10 +4719,11 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND (idv < '12' OR idv >= '22') ORDE
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi = 2 AND (idv <= '12' OR idv > '22') ORDER BY idv;
                               QUERY PLAN                               
 -----------------------------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test69
    Filter: (((idv)::text <= '12'::text) OR ((idv)::text > '22'::text))
-(3 rows)
+   Forward index only scan of: o_test69_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi = 2 AND (idv <= '12' OR idv > '22') ORDER BY idv;
  idi | idv 
@@ -4610,10 +4739,11 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND (idv <= '12' OR idv > '22') ORDE
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi = 2 AND (idv < '12' OR idv > '22') ORDER BY idv;
                               QUERY PLAN                              
 ----------------------------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: (idi = 2)
+ Custom Scan (o_scan) on o_test69
    Filter: (((idv)::text < '12'::text) OR ((idv)::text > '22'::text))
-(3 rows)
+   Forward index only scan of: o_test69_reg1
+   Conds: (idi = 2)
+(4 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi = 2 AND (idv < '12' OR idv > '22') ORDER BY idv;
  idi | idv 
@@ -4626,11 +4756,12 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND (idv < '12' OR idv > '22') ORDER
 (5 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi = 2 AND (idv < '12' AND idv > '22') ORDER BY idv;
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv < '12'::text) AND (idv > '22'::text) AND (idi = 2))
-(2 rows)
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv < '12'::text) AND (idv > '22'::text) AND (idi = 2))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi = 2 AND (idv < '12' AND idv > '22') ORDER BY idv;
  idi | idv 
@@ -4638,11 +4769,12 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND (idv < '12' AND idv > '22') ORDE
 (0 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv IN ('12', '22');
-                          QUERY PLAN                           
----------------------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv = ANY ('{12,22}'::text[])) AND (idi = 2))
-(2 rows)
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv = ANY ('{12,22}'::text[])) AND (idi = 2))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv IN ('12', '22');
  idi | idv 
@@ -4652,12 +4784,13 @@ SELECT idi, idv FROM o_test69 WHERE idi = 2 AND idv IN ('12', '22');
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi IN (2, 4) AND idv IN ('12', '22');
-                   QUERY PLAN                    
--------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: (idv = ANY ('{12,22}'::text[]))
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test69
    Filter: (idi = ANY ('{2,4}'::integer[]))
-(3 rows)
+   Forward index only scan of: o_test69_reg1
+   Conds: (idv = ANY ('{12,22}'::text[]))
+(4 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi IN (2, 4) AND idv IN ('12', '22');
  idi | idv 
@@ -4684,11 +4817,12 @@ SET enable_seqscan = off;
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi > 1 AND
 														idi < 100 AND
 														idv < '22';
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv < '22'::text) AND (idi > 1) AND (idi < 100))
-(2 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv < '22'::text) AND (idi > 1) AND (idi < 100))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv < '22';
  idi | idv 
@@ -4706,11 +4840,12 @@ SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv < '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi > 1 AND
 														idi < 100 AND
 														idv > '22';
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv > '22'::text) AND (idi > 1) AND (idi < 100))
-(2 rows)
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv > '22'::text) AND (idi > 1) AND (idi < 100))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idi < 100 AND idv > '22';
  idi | idv 
@@ -4726,11 +4861,12 @@ SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idi < 100 AND idv > '22';
 (8 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv = '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv = '22'::text) AND (idi > 1))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv = '22'::text) AND (idi > 1))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idi < 100 AND idv = '22';
  idi | idv 
@@ -4742,11 +4878,12 @@ SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idi < 100 AND idv = '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi < 3 AND
 														idi > 0 AND
 														idv < '22';
-                           QUERY PLAN                           
-----------------------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv < '22'::text) AND (idi < 3) AND (idi > 0))
-(2 rows)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv < '22'::text) AND (idi < 3) AND (idi > 0))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi < 3 AND idi > 0 AND idv < '22';
  idi | idv 
@@ -4764,11 +4901,12 @@ SELECT idi, idv FROM o_test69 WHERE idi < 3 AND idi > 0 AND idv < '22';
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi < 3 AND
 														idi > 0 AND
 														idv > '22';
-                           QUERY PLAN                           
-----------------------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv > '22'::text) AND (idi < 3) AND (idi > 0))
-(2 rows)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv > '22'::text) AND (idi < 3) AND (idi > 0))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi < 3 AND idi > 0 AND idv > '22';
  idi | idv 
@@ -4784,11 +4922,12 @@ SELECT idi, idv FROM o_test69 WHERE idi < 3 AND idi > 0 AND idv > '22';
 (8 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi < 3 AND idv = '22';
-                    QUERY PLAN                    
---------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv = '22'::text) AND (idi < 3))
-(2 rows)
+                 QUERY PLAN                  
+---------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv = '22'::text) AND (idi < 3))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi < 3 AND idv = '22';
  idi | idv 
@@ -4798,11 +4937,12 @@ SELECT idi, idv FROM o_test69 WHERE idi < 3 AND idv = '22';
 (2 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22');
-                          QUERY PLAN                           
----------------------------------------------------------------
- Index Only Scan using o_test69_reg1 on o_test69
-   Index Cond: ((idv = ANY ('{12,22}'::text[])) AND (idi > 1))
-(2 rows)
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Custom Scan (o_scan) on o_test69
+   Forward index only scan of: o_test69_reg1
+   Conds: ((idv = ANY ('{12,22}'::text[])) AND (idi > 1))
+(3 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22');
  idi | idv 
@@ -4814,13 +4954,14 @@ SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22');
 (4 rows)
 
 EXPLAIN (COSTS off) SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
-                             QUERY PLAN                              
----------------------------------------------------------------------
+                           QUERY PLAN                           
+----------------------------------------------------------------
  Sort
    Sort Key: idi
-   ->  Index Only Scan using o_test69_reg1 on o_test69
-         Index Cond: ((idv = ANY ('{12,22}'::text[])) AND (idi > 1))
-(4 rows)
+   ->  Custom Scan (o_scan) on o_test69
+         Forward index only scan of: o_test69_reg1
+         Conds: ((idv = ANY ('{12,22}'::text[])) AND (idi > 1))
+(5 rows)
 
 SELECT idi, idv FROM o_test69 WHERE idi > 1 AND idv IN ('12', '22') ORDER BY idi;
  idi | idv 
@@ -5450,13 +5591,14 @@ SELECT smart_explain(
 		WHERE val2 > 0 AND val > 0
 		ORDER BY val2
 ) SELECT COUNT(*) FROM o_test82_all;');
-                  smart_explain                   
---------------------------------------------------
+                smart_explain                 
+----------------------------------------------
  Aggregate
-   ->  Index Scan using o_test82_idx2 on o_test82
-         Index Cond: (val2 > 0)
+   ->  Custom Scan (o_scan) on o_test82
          Filter: (val > 0)
-(4 rows)
+         Forward index scan of: o_test82_idx2
+         Conds: (val2 > 0)
+(5 rows)
 
 WITH o_test82_all AS (
     SELECT * FROM o_test82
@@ -5498,13 +5640,14 @@ SELECT smart_explain(
 		WHERE val2 > 0 AND val > 0
 		ORDER BY val2
 ) SELECT COUNT(*) FROM o_test82_all;');
-                  smart_explain                   
---------------------------------------------------
+                smart_explain                 
+----------------------------------------------
  Aggregate
-   ->  Index Scan using o_test82_idx2 on o_test82
-         Index Cond: (val2 > 0)
+   ->  Custom Scan (o_scan) on o_test82
          Filter: (val > 0)
-(4 rows)
+         Forward index scan of: o_test82_idx2
+         Conds: (val2 > 0)
+(5 rows)
 
 WITH o_test82_all AS (
     SELECT * FROM o_test82
@@ -5544,13 +5687,14 @@ SELECT smart_explain(
 		WHERE val2 > 0 AND val > 0
 		ORDER BY val2
 ) SELECT COUNT(*) FROM o_test82_all;');
-                      smart_explain                       
-----------------------------------------------------------
+                    smart_explain                     
+------------------------------------------------------
  Aggregate
-   ->  Index Scan using o_test82_idx2_renamed on o_test82
-         Index Cond: (val2 > 0)
+   ->  Custom Scan (o_scan) on o_test82
          Filter: (val > 0)
-(4 rows)
+         Forward index scan of: o_test82_idx2_renamed
+         Conds: (val2 > 0)
+(5 rows)
 
 WITH o_test82_all AS (
     SELECT * FROM o_test82
@@ -5687,11 +5831,12 @@ SELECT * FROM o_test_partial_idx_update;
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_partial_idx_update
 	WHERE user_id=100500 and am > 0;
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
- Index Only Scan using o_test_partial_idx_update_idx1 on o_test_partial_idx_update
-   Index Cond: ((user_id = 100500) AND (am > 0))
-(2 rows)
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_partial_idx_update
+   Forward index only scan of: o_test_partial_idx_update_idx1
+   Conds: ((user_id = 100500) AND (am > 0))
+(3 rows)
 
 SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
  id | user_id | am 
@@ -5701,11 +5846,12 @@ SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
 SET enable_bitmapscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_partial_idx_update
 	WHERE user_id=100500 and am > 0;
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
- Index Only Scan using o_test_partial_idx_update_idx1 on o_test_partial_idx_update
-   Index Cond: ((user_id = 100500) AND (am > 0))
-(2 rows)
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_partial_idx_update
+   Forward index only scan of: o_test_partial_idx_update_idx1
+   Conds: ((user_id = 100500) AND (am > 0))
+(3 rows)
 
 SELECT * FROM o_test_partial_idx_update WHERE user_id=100500 and am > 0;
  id | user_id | am 
@@ -5753,10 +5899,11 @@ SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
 (1 row)
 
 EXPLAIN SELECT * FROM o_test_unique_as_pkey ORDER BY val;
-                                                 QUERY PLAN                                                 
-------------------------------------------------------------------------------------------------------------
- Index Scan using o_test_unique_as_pkey_ix1 on o_test_unique_as_pkey  (cost=0.15..74.87 rows=2048 width=12)
-(1 row)
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_unique_as_pkey  (cost=0.15..74.87 rows=2048 width=12)
+   Forward index scan of: o_test_unique_as_pkey_ix1
+(2 rows)
 
 SELECT * FROM o_test_unique_as_pkey ORDER BY val;
  key | val | val2 
@@ -5804,10 +5951,11 @@ SELECT orioledb_tbl_indices('o_test_unique_as_pkey'::regclass);
 (1 row)
 
 EXPLAIN SELECT * FROM o_test_unique_as_pkey ORDER BY val;
-                                               QUERY PLAN                                               
---------------------------------------------------------------------------------------------------------
- Index Scan using o_test_unique_as_pkey_ix2 on o_test_unique_as_pkey  (cost=0.13..8.21 rows=5 width=12)
-(1 row)
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_unique_as_pkey  (cost=0.13..8.21 rows=5 width=12)
+   Forward index scan of: o_test_unique_as_pkey_ix2
+(2 rows)
 
 SELECT * FROM o_test_unique_as_pkey ORDER BY val;
  key | val | val2 
@@ -5936,10 +6084,11 @@ INSERT INTO o_test_subexpr_collate
 SET enable_seqscan = off;
 CREATE INDEX o_test_subexpr_collate_ix1 ON o_test_subexpr_collate (val_2);
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_subexpr_collate ORDER BY val_2;
-                                 QUERY PLAN                                 
-----------------------------------------------------------------------------
- Index Only Scan using o_test_subexpr_collate_ix1 on o_test_subexpr_collate
-(1 row)
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Custom Scan (o_scan) on o_test_subexpr_collate
+   Forward index only scan of: o_test_subexpr_collate_ix1
+(2 rows)
 
 SELECT * FROM o_test_subexpr_collate ORDER BY val_2;
  val_1 | val_2 
@@ -5955,10 +6104,12 @@ CREATE INDEX o_test_subexpr_collate_ix2
 	ON o_test_subexpr_collate (val_2 COLLATE "C");
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_subexpr_collate ORDER BY val_2 COLLATE "C";
-                                 QUERY PLAN                                 
-----------------------------------------------------------------------------
- Index Only Scan using o_test_subexpr_collate_ix2 on o_test_subexpr_collate
-(1 row)
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Result
+   ->  Custom Scan (o_scan) on o_test_subexpr_collate
+         Forward index only scan of: o_test_subexpr_collate_ix2
+(3 rows)
 
 SELECT * FROM o_test_subexpr_collate ORDER BY val_2 COLLATE "C";
  val_1 | val_2 
@@ -5974,10 +6125,12 @@ CREATE INDEX o_test_subexpr_collate_ix3
 	ON o_test_subexpr_collate ((val_2 COLLATE "C"));
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_subexpr_collate ORDER BY (val_2 COLLATE "C");
-                                 QUERY PLAN                                 
-----------------------------------------------------------------------------
- Index Only Scan using o_test_subexpr_collate_ix3 on o_test_subexpr_collate
-(1 row)
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Result
+   ->  Custom Scan (o_scan) on o_test_subexpr_collate
+         Forward index only scan of: o_test_subexpr_collate_ix3
+(3 rows)
 
 SELECT * FROM o_test_subexpr_collate ORDER BY (val_2 COLLATE "C");
  val_1 | val_2 
@@ -5992,10 +6145,12 @@ SELECT * FROM o_test_subexpr_collate ORDER BY (val_2 COLLATE "C");
 ALTER TABLE o_test_subexpr_collate DROP CONSTRAINT o_test_subexpr_collate_pkey;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_subexpr_collate ORDER BY (val_2 COLLATE "C");
-                              QUERY PLAN                               
------------------------------------------------------------------------
- Index Scan using o_test_subexpr_collate_ix3 on o_test_subexpr_collate
-(1 row)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Result
+   ->  Custom Scan (o_scan) on o_test_subexpr_collate
+         Forward index scan of: o_test_subexpr_collate_ix3
+(3 rows)
 
 SELECT * FROM o_test_subexpr_collate ORDER BY (val_2 COLLATE "C");
  val_1 | val_2 
@@ -6182,10 +6337,11 @@ SELECT orioledb_tbl_structure('o_test_reuse_multiple_indices'::regclass,
 
 EXPLAIN (COSTS OFF)
 	SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix1 on o_test_reuse_multiple_indices
-(1 row)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix1
+(2 rows)
 
 SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
  val_2 
@@ -6200,10 +6356,11 @@ SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
 EXPLAIN (COSTS OFF)
 	SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
 		ORDER BY val_3 DESC;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix2 on o_test_reuse_multiple_indices
-(1 row)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix2
+(2 rows)
 
 SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
 	ORDER BY val_3 DESC;
@@ -6219,10 +6376,11 @@ SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
 EXPLAIN (COSTS OFF)
 	SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices
 		ORDER BY val_4;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix3 on o_test_reuse_multiple_indices
-(1 row)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix3
+(2 rows)
 
 SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices
 	ORDER BY val_4;
@@ -6238,10 +6396,11 @@ SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices
 EXPLAIN (COSTS OFF)
 	SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices
 		ORDER BY val_5;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices
-(1 row)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix4
+(2 rows)
 
 SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
  val_1 | val_2 | val_5 
@@ -6361,10 +6520,12 @@ Indexes:
 
 EXPLAIN (COSTS OFF)
 	SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices
-(1 row)
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Result
+   ->  Custom Scan (o_scan) on o_test_reuse_multiple_indices
+         Forward index only scan of: o_test_reuse_multiple_indices_ix4
+(3 rows)
 
 SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
  chr 
@@ -6377,10 +6538,11 @@ SELECT chr(ASCII('a') + val_5 / 1000) FROM o_test_reuse_multiple_indices;
 (5 rows)
 
 EXPLAIN (COSTS OFF) SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices
-(1 row)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix4
+(2 rows)
 
 SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
  val_1 | val_5 
@@ -6439,10 +6601,11 @@ SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
 (1 row)
 
 EXPLAIN (COSTS OFF) SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices
-(1 row)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix4
+(2 rows)
 
 SELECT val_1, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
  val_1 | val_5 
@@ -6505,10 +6668,11 @@ btree, for table "indices.o_test_reuse_multiple_indices"
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix1 on o_test_reuse_multiple_indices
-(1 row)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix1
+(2 rows)
 
 SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
  val_2 
@@ -6523,10 +6687,11 @@ SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
 EXPLAIN (COSTS OFF)
 	SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
 		ORDER BY val_3 DESC;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix2 on o_test_reuse_multiple_indices
-(1 row)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix2
+(2 rows)
 
 SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
 	ORDER BY val_3 DESC;
@@ -6542,10 +6707,11 @@ SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
 EXPLAIN (COSTS OFF)
 	SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices
 		ORDER BY val_4;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix3 on o_test_reuse_multiple_indices
-(1 row)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix3
+(2 rows)
 
 SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices ORDER BY val_4;
  val_1 | val_2 | val_4 
@@ -6560,10 +6726,11 @@ SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices ORDER BY val_4;
 EXPLAIN (COSTS OFF)
 	SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices
 		ORDER BY val_5;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices
-(1 row)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix4
+(2 rows)
 
 SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
  val_1 | val_2 | val_5 
@@ -6701,10 +6868,11 @@ SELECT orioledb_tbl_indices('o_test_reuse_multiple_indices'::regclass);
 
 EXPLAIN (COSTS OFF)
 	SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix1 on o_test_reuse_multiple_indices
-(1 row)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix1
+(2 rows)
 
 SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
  val_2 
@@ -6719,10 +6887,11 @@ SELECT val_2 FROM o_test_reuse_multiple_indices ORDER BY val_2;
 EXPLAIN (COSTS OFF)
 	SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
 		ORDER BY val_3 DESC;
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
- Index Scan using o_test_reuse_multiple_indices_ix2 on o_test_reuse_multiple_indices
-(1 row)
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index scan of: o_test_reuse_multiple_indices_ix2
+(2 rows)
 
 SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
 	ORDER BY val_3 DESC;
@@ -6738,10 +6907,11 @@ SELECT val_1, val_2, val_3 FROM o_test_reuse_multiple_indices
 EXPLAIN (COSTS OFF)
 	SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices
 		ORDER BY val_4;
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
- Index Scan using o_test_reuse_multiple_indices_ix3 on o_test_reuse_multiple_indices
-(1 row)
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index scan of: o_test_reuse_multiple_indices_ix3
+(2 rows)
 
 SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices ORDER BY val_4;
  val_1 | val_2 | val_4 
@@ -6756,10 +6926,11 @@ SELECT val_1, val_2, val_4 FROM o_test_reuse_multiple_indices ORDER BY val_4;
 EXPLAIN (COSTS OFF)
 	SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices
 		ORDER BY val_5;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Index Only Scan using o_test_reuse_multiple_indices_ix4 on o_test_reuse_multiple_indices
-(1 row)
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_reuse_multiple_indices
+   Forward index only scan of: o_test_reuse_multiple_indices_ix4
+(2 rows)
 
 SELECT val_1, val_2, val_5 FROM o_test_reuse_multiple_indices ORDER BY val_5;
  val_1 | val_2 | val_5 
@@ -7177,10 +7348,11 @@ CREATE UNIQUE INDEX o_test_partial_unique_ix ON o_test_partial_unique(val_1)
 BEGIN;
 	SET LOCAL enable_seqscan = off;
 	EXPLAIN SELECT val_2 FROM o_test_partial_unique WHERE val_2 LIKE '%c';
-                                              QUERY PLAN                                               
--------------------------------------------------------------------------------------------------------
- Index Scan using o_test_partial_unique_ix on o_test_partial_unique  (cost=0.12..8.14 rows=1 width=32)
-(1 row)
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_partial_unique  (cost=0.12..8.14 rows=1 width=32)
+   Forward index scan of: o_test_partial_unique_ix
+(2 rows)
 
 	SELECT val_2 FROM o_test_partial_unique WHERE val_2 LIKE '%c';
  val_2 
@@ -7563,10 +7735,11 @@ SELECT orioledb_tbl_structure('o_test_pkey_mixed'::regclass, 'nue');
 (1 row)
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed;
-                             QUERY PLAN                             
---------------------------------------------------------------------
- Index Only Scan using o_test_pkey_mixed_uniq1 on o_test_pkey_mixed
-(1 row)
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_mixed
+   Forward index only scan of: o_test_pkey_mixed_uniq1
+(2 rows)
 
 SELECT * FROM o_test_pkey_mixed;
  f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 
@@ -7578,10 +7751,11 @@ SELECT * FROM o_test_pkey_mixed;
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed ORDER BY f1;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Index Only Scan using o_test_pkey_mixed_ix1 on o_test_pkey_mixed
-(1 row)
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_mixed
+   Forward index only scan of: o_test_pkey_mixed_ix1
+(2 rows)
 
 SELECT * FROM o_test_pkey_mixed ORDER BY f1;
  f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 
@@ -7592,10 +7766,11 @@ SELECT * FROM o_test_pkey_mixed ORDER BY f1;
 (3 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_pkey_mixed ORDER BY f2;
-                             QUERY PLAN                             
---------------------------------------------------------------------
- Index Only Scan using o_test_pkey_mixed_uniq1 on o_test_pkey_mixed
-(1 row)
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Custom Scan (o_scan) on o_test_pkey_mixed
+   Forward index only scan of: o_test_pkey_mixed_uniq1
+(2 rows)
 
 SELECT * FROM o_test_pkey_mixed ORDER BY f2;
  f1  | f2  | f3  | i1  | i2  | pk1 | pk2 | pk3 | pk4 
@@ -7606,31 +7781,35 @@ SELECT * FROM o_test_pkey_mixed ORDER BY f2;
 (3 rows)
 
 EXPLAIN (COSTS OFF) SELECT f3, f2, pk4, f1, pk4, pk3, pk1, pk2 FROM o_test_pkey_mixed ORDER BY f3;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Index Only Scan using o_test_pkey_mixed_ix3 on o_test_pkey_mixed
-(1 row)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Result
+   ->  Custom Scan (o_scan) on o_test_pkey_mixed
+         Forward index only scan of: o_test_pkey_mixed_ix3
+(3 rows)
 
 SELECT f3, f2, pk4, f1, pk4, pk3, pk1, pk2 FROM o_test_pkey_mixed ORDER BY f3;
  f3  | f2  | pk4 | f1  | pk4 | pk3 | pk1 | pk2 
 -----+-----+-----+-----+-----+-----+-----+-----
-   3 |   2 |   9 |   1 |   9 |   8 |   6 |   7
-  30 |  20 |  90 |  10 |  90 |  80 |  60 |  70
- 300 | 200 | 900 | 100 | 900 | 800 | 600 | 700
+   3 |   2 |   9 |   1 |   9 |   6 |   7 |    
+  30 |  20 |  90 |  10 |  90 |  60 |  70 |    
+ 300 | 200 | 900 | 100 | 900 | 600 | 700 |    
 (3 rows)
 
 EXPLAIN (COSTS OFF) SELECT i1, f1, pk4, f2, pk4, pk3, i2, pk1, pk2 FROM o_test_pkey_mixed ORDER BY i1;
-                            QUERY PLAN                            
-------------------------------------------------------------------
- Index Only Scan using o_test_pkey_mixed_ix4 on o_test_pkey_mixed
-(1 row)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Result
+   ->  Custom Scan (o_scan) on o_test_pkey_mixed
+         Forward index only scan of: o_test_pkey_mixed_ix4
+(3 rows)
 
 SELECT i1, f1, pk4, f2, pk4, pk3, i2, pk1, pk2 FROM o_test_pkey_mixed ORDER BY i1;
  i1  | f1  | pk4 | f2  | pk4 | pk3 | i2  | pk1 | pk2 
 -----+-----+-----+-----+-----+-----+-----+-----+-----
-   4 |   1 |   9 |   2 |   9 |   8 |   5 |   6 |   7
-  40 |  10 |  90 |  20 |  90 |  80 |  50 |  60 |  70
- 400 | 100 | 900 | 200 | 900 | 800 | 500 | 600 | 700
+   4 |   1 |   9 |   2 |   9 |   5 |   6 |   7 |    
+  40 |  10 |  90 |  20 |  90 |  50 |  60 |  70 |    
+ 400 | 100 | 900 | 200 | 900 | 500 | 600 | 700 |    
 (3 rows)
 
 RESET enable_seqscan;
@@ -7761,10 +7940,11 @@ SELECT orioledb_tbl_structure('o_test_include_box'::regclass, 'nue');
 
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_include_box ORDER BY val_1;
-                             QUERY PLAN                             
---------------------------------------------------------------------
- Index Only Scan using o_test_include_box_ix1 on o_test_include_box
-(1 row)
+                      QUERY PLAN                      
+------------------------------------------------------
+ Custom Scan (o_scan) on o_test_include_box
+   Forward index only scan of: o_test_include_box_ix1
+(2 rows)
 
 SELECT * FROM o_test_include_box ORDER BY val_1;
  val_1 |        val_4        
@@ -7874,10 +8054,11 @@ SELECT * FROM o_test_include_box_with_pkey ORDER BY val_1;
 (3 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_include_box_with_pkey ORDER BY val_2;
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
- Index Scan using o_test_include_box_with_pkey_ix1 on o_test_include_box_with_pkey
-(1 row)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Custom Scan (o_scan) on o_test_include_box_with_pkey
+   Forward index scan of: o_test_include_box_with_pkey_ix1
+(2 rows)
 
 SELECT * FROM o_test_include_box_with_pkey ORDER BY val_2;
  val_1 | val_2 | val_3 |        val_4        
@@ -7888,10 +8069,11 @@ SELECT * FROM o_test_include_box_with_pkey ORDER BY val_2;
 (3 rows)
 
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_include_box_with_pkey ORDER BY val_3;
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
- Index Scan using o_test_include_box_with_pkey_ix2 on o_test_include_box_with_pkey
-(1 row)
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Custom Scan (o_scan) on o_test_include_box_with_pkey
+   Forward index scan of: o_test_include_box_with_pkey_ix2
+(2 rows)
 
 SELECT * FROM o_test_include_box_with_pkey ORDER BY val_3;
  val_1 | val_2 | val_3 |        val_4        
@@ -8341,10 +8523,12 @@ INSERT INTO o_test_expr_index_on_conflict(val_1, val_2)
 SET enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_expr_index_on_conflict ORDER BY lower(val_1);
-                                        QUERY PLAN                                         
--------------------------------------------------------------------------------------------
- Index Scan using o_test_expr_index_on_conflict_lower_idx on o_test_expr_index_on_conflict
-(1 row)
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Result
+   ->  Custom Scan (o_scan) on o_test_expr_index_on_conflict
+         Forward index scan of: o_test_expr_index_on_conflict_lower_idx
+(3 rows)
 
 SELECT * FROM o_test_expr_index_on_conflict ORDER BY lower(val_1);
  val_1 |  val_2  
@@ -8371,10 +8555,12 @@ INSERT INTO o_test_expr_include_index(val_1, val_2)
 		DO UPDATE set val_1 = EXCLUDED.val_1;
 EXPLAIN (COSTS OFF)
 	SELECT * FROM o_test_expr_include_index ORDER BY lower(val_1);
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
- Index Scan using o_test_expr_include_index_lower_val_2_idx on o_test_expr_include_index
-(1 row)
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Result
+   ->  Custom Scan (o_scan) on o_test_expr_include_index
+         Forward index scan of: o_test_expr_include_index_lower_val_2_idx
+(3 rows)
 
 SELECT * FROM o_test_expr_include_index ORDER BY lower(val_1);
  val_1 |  val_2  
@@ -8490,12 +8676,14 @@ SELECT * FROM o_test_pkey_include_same_fields;
 
 EXPLAIN (COSTS OFF)
 	UPDATE o_test_pkey_include_same_fields SET val_2 = 2 WHERE val_1 = 1;
-                                          QUERY PLAN                                           
------------------------------------------------------------------------------------------------
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
  Update on o_test_pkey_include_same_fields
-   ->  Index Scan using o_test_pkey_include_same_fields_ix1 on o_test_pkey_include_same_fields
-         Index Cond: (val_1 = 1)
-(3 rows)
+   ->  Result
+         ->  Custom Scan (o_scan) on o_test_pkey_include_same_fields
+               Forward index scan of: o_test_pkey_include_same_fields_ix1
+               Conds: (val_1 = 1)
+(5 rows)
 
 UPDATE o_test_pkey_include_same_fields SET val_2 = 2 WHERE val_1 = 1;
 SELECT * FROM o_test_pkey_include_same_fields;
@@ -8521,12 +8709,14 @@ SELECT * FROM o_test_include_same_as_pkey;
 
 EXPLAIN (COSTS OFF)
 	UPDATE o_test_include_same_as_pkey SET val_2 = 2 WHERE val_1 = 1;
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
+                              QUERY PLAN                              
+----------------------------------------------------------------------
  Update on o_test_include_same_as_pkey
-   ->  Index Scan using o_test_include_same_as_pkey_ix1 on o_test_include_same_as_pkey
-         Index Cond: (val_1 = 1)
-(3 rows)
+   ->  Result
+         ->  Custom Scan (o_scan) on o_test_include_same_as_pkey
+               Forward index scan of: o_test_include_same_as_pkey_ix1
+               Conds: (val_1 = 1)
+(5 rows)
 
 UPDATE o_test_include_same_as_pkey SET val_2 = 2 WHERE val_1 = 1;
 CREATE TABLE o_test_index_already_exists_skip
@@ -8924,11 +9114,12 @@ SET enable_seqscan = off;
 EXPLAIN (COSTS OFF)
 SELECT x, y FROM test_skip_bounds
 WHERE x > 10 AND x < 50 AND y = 42;
-                         QUERY PLAN                         
-------------------------------------------------------------
- Index Only Scan using test_skip_xy_idx on test_skip_bounds
-   Index Cond: ((x > 10) AND (x < 50) AND (y = 42))
-(2 rows)
+                   QUERY PLAN                   
+------------------------------------------------
+ Custom Scan (o_scan) on test_skip_bounds
+   Forward index only scan of: test_skip_xy_idx
+   Conds: ((x > 10) AND (x < 50) AND (y = 42))
+(3 rows)
 
 SELECT x, y FROM test_skip_bounds
 WHERE x > 10 AND x < 50 AND y = 42
@@ -9039,10 +9230,11 @@ CREATE INDEX o_ios_sk_dup_ix ON o_ios_sk_dup (val_1, val_2, val_1) INCLUDE (val_
 INSERT INTO o_ios_sk_dup SELECT v, v * 10 FROM generate_series(1, 5) v;
 EXPLAIN (COSTS OFF)
 	SELECT val_1 FROM o_ios_sk_dup ORDER BY val_1;
-                      QUERY PLAN                       
--------------------------------------------------------
- Index Only Scan using o_ios_sk_dup_ix on o_ios_sk_dup
-(1 row)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_ios_sk_dup
+   Forward index only scan of: o_ios_sk_dup_ix
+(2 rows)
 
 SELECT val_1 FROM o_ios_sk_dup ORDER BY val_1;
  val_1 
@@ -9056,10 +9248,11 @@ SELECT val_1 FROM o_ios_sk_dup ORDER BY val_1;
 
 EXPLAIN (COSTS OFF)
 	SELECT val_1, val_2 FROM o_ios_sk_dup ORDER BY val_1;
-                      QUERY PLAN                       
--------------------------------------------------------
- Index Only Scan using o_ios_sk_dup_ix on o_ios_sk_dup
-(1 row)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_ios_sk_dup
+   Forward index only scan of: o_ios_sk_dup_ix
+(2 rows)
 
 SELECT val_1, val_2 FROM o_ios_sk_dup ORDER BY val_1;
  val_1 | val_2 
@@ -9079,10 +9272,11 @@ CREATE UNIQUE INDEX o_ios_pk_dup_ix ON o_ios_pk_dup (a, b, a);
 INSERT INTO o_ios_pk_dup
 	SELECT v, repeat('x', v) FROM generate_series(1, 5) v;
 EXPLAIN (COSTS OFF) SELECT a, b FROM o_ios_pk_dup ORDER BY a, b;
-                      QUERY PLAN                       
--------------------------------------------------------
- Index Only Scan using o_ios_pk_dup_ix on o_ios_pk_dup
-(1 row)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_ios_pk_dup
+   Forward index only scan of: o_ios_pk_dup_ix
+(2 rows)
 
 SELECT a, b FROM o_ios_pk_dup ORDER BY a, b;
  a |   b   
@@ -9106,10 +9300,11 @@ CREATE INDEX o_ios_pk_sk_dup_ix ON o_ios_pk_sk_dup (a, b);
 INSERT INTO o_ios_pk_sk_dup
 	SELECT v, v * 10, v * 100 FROM generate_series(1, 5) v;
 EXPLAIN (COSTS OFF) SELECT a, b, c FROM o_ios_pk_sk_dup ORDER BY a, b;
-                         QUERY PLAN                          
--------------------------------------------------------------
- Index Only Scan using o_ios_pk_sk_dup_ix on o_ios_pk_sk_dup
-(1 row)
+                    QUERY PLAN                    
+--------------------------------------------------
+ Custom Scan (o_scan) on o_ios_pk_sk_dup
+   Forward index only scan of: o_ios_pk_sk_dup_ix
+(2 rows)
 
 SELECT a, b, c FROM o_ios_pk_sk_dup ORDER BY a, b;
  a | b  |  c  
@@ -9134,10 +9329,11 @@ CREATE INDEX o_ios_pk_include_ix ON o_ios_pk_include (b);
 INSERT INTO o_ios_pk_include
 	SELECT v, v * 10, v * 100 FROM generate_series(1, 5) v;
 EXPLAIN (COSTS OFF) SELECT a, b FROM o_ios_pk_include ORDER BY b;
-                          QUERY PLAN                           
----------------------------------------------------------------
- Index Only Scan using o_ios_pk_include_ix on o_ios_pk_include
-(1 row)
+                    QUERY PLAN                     
+---------------------------------------------------
+ Custom Scan (o_scan) on o_ios_pk_include
+   Forward index only scan of: o_ios_pk_include_ix
+(2 rows)
 
 SELECT a, b FROM o_ios_pk_include ORDER BY b;
  a | b  
@@ -9158,10 +9354,11 @@ CREATE INDEX o_ios_sk_include_ix ON o_ios_sk_include (b) INCLUDE (c);
 INSERT INTO o_ios_sk_include
 	SELECT v, v * 10, v * 100 FROM generate_series(1, 5) v;
 EXPLAIN (COSTS OFF) SELECT a, b, c FROM o_ios_sk_include ORDER BY b;
-                          QUERY PLAN                           
----------------------------------------------------------------
- Index Only Scan using o_ios_sk_include_ix on o_ios_sk_include
-(1 row)
+                    QUERY PLAN                     
+---------------------------------------------------
+ Custom Scan (o_scan) on o_ios_sk_include
+   Forward index only scan of: o_ios_sk_include_ix
+(2 rows)
 
 SELECT a, b, c FROM o_ios_sk_include ORDER BY b;
  a | b  |  c  
@@ -9191,11 +9388,12 @@ EXPLAIN (COSTS off)
 	SELECT k FROM o_test_amnblocks1
 		WHERE k IN (1000, 2000, 3000, 4000, 5000,
 					6000, 7000, 8000, 9000, 10000);
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
- Index Only Scan using o_test_amnblocks1_k on o_test_amnblocks1
-   Index Cond: (k = ANY ('{1000,2000,3000,4000,5000,6000,7000,8000,9000,10000}'::bigint[]))
-(2 rows)
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_amnblocks1
+   Forward index only scan of: o_test_amnblocks1_k
+   Conds: (k = ANY ('{1000,2000,3000,4000,5000,6000,7000,8000,9000,10000}'::bigint[]))
+(3 rows)
 
 SELECT relpages > 0 AS idx_pages_ok FROM pg_class
 	WHERE relname = 'o_test_amnblocks1_k';
@@ -9221,11 +9419,12 @@ EXPLAIN (COSTS off)
 	SELECT k FROM o_test_amnblocks2
 		WHERE k IN (1000, 2000, 3000, 4000, 5000,
 					6000, 7000, 8000, 9000, 10000);
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
- Index Only Scan using o_test_amnblocks2_k on o_test_amnblocks2
-   Index Cond: (k = ANY ('{1000,2000,3000,4000,5000,6000,7000,8000,9000,10000}'::bigint[]))
-(2 rows)
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_amnblocks2
+   Forward index only scan of: o_test_amnblocks2_k
+   Conds: (k = ANY ('{1000,2000,3000,4000,5000,6000,7000,8000,9000,10000}'::bigint[]))
+(3 rows)
 
 SELECT relpages > 0 AS idx_pages_ok FROM pg_class
 	WHERE relname = 'o_test_amnblocks2_k';
@@ -9251,11 +9450,12 @@ EXPLAIN (COSTS off)
 	SELECT k FROM o_test_amnblocks3
 		WHERE k IN (1000, 2000, 3000, 4000, 5000,
 					6000, 7000, 8000, 9000, 10000);
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
- Index Only Scan using o_test_amnblocks3_k on o_test_amnblocks3
-   Index Cond: (k = ANY ('{1000,2000,3000,4000,5000,6000,7000,8000,9000,10000}'::bigint[]))
-(2 rows)
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_amnblocks3
+   Forward index only scan of: o_test_amnblocks3_k
+   Conds: (k = ANY ('{1000,2000,3000,4000,5000,6000,7000,8000,9000,10000}'::bigint[]))
+(3 rows)
 
 SELECT relpages > 0 AS idx_pages_ok FROM pg_class
 	WHERE relname = 'o_test_amnblocks3_k';
@@ -9281,11 +9481,12 @@ EXPLAIN (COSTS off)
 	SELECT k FROM o_test_amnblocks4
 		WHERE k IN (1000, 2000, 3000, 4000, 5000,
 					6000, 7000, 8000, 9000, 10000);
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
- Index Only Scan using o_test_amnblocks4_k on o_test_amnblocks4
-   Index Cond: (k = ANY ('{1000,2000,3000,4000,5000,6000,7000,8000,9000,10000}'::bigint[]))
-(2 rows)
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_amnblocks4
+   Forward index only scan of: o_test_amnblocks4_k
+   Conds: (k = ANY ('{1000,2000,3000,4000,5000,6000,7000,8000,9000,10000}'::bigint[]))
+(3 rows)
 
 SELECT relpages > 0 AS idx_pages_ok FROM pg_class
 	WHERE relname = 'o_test_amnblocks4_k';
@@ -9314,11 +9515,12 @@ EXPLAIN (COSTS off)
 	SELECT k FROM o_test_allvisfrac
 		WHERE k IN (1000, 2000, 3000, 4000, 5000,
 					6000, 7000, 8000, 9000, 10000);
-                                         QUERY PLAN                                         
---------------------------------------------------------------------------------------------
- Index Only Scan using o_test_allvisfrac_k on o_test_allvisfrac
-   Index Cond: (k = ANY ('{1000,2000,3000,4000,5000,6000,7000,8000,9000,10000}'::bigint[]))
-(2 rows)
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_allvisfrac
+   Forward index only scan of: o_test_allvisfrac_k
+   Conds: (k = ANY ('{1000,2000,3000,4000,5000,6000,7000,8000,9000,10000}'::bigint[]))
+(3 rows)
 
 RESET enable_seqscan;
 DROP TABLE o_test_allvisfrac;

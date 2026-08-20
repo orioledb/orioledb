@@ -1,0 +1,119 @@
+-- An ordered scan of a secondary index used to be the one shape OrioleDB left
+-- to the PostgreSQL index AM adapter, which materialises a rowid and a whole
+-- heap or index tuple for every row it returns.  It runs inside o_scan now, so
+-- the plans below name the index and its direction as an o_scan property.
+-- What must not change is a single answer, which is what the queries check.
+CREATE SCHEMA native_si_scan;
+SET SESSION search_path = 'native_si_scan';
+CREATE EXTENSION orioledb;
+CREATE TABLE o_si (
+	id int NOT NULL PRIMARY KEY,
+	k int NOT NULL,
+	v text NOT NULL
+) USING orioledb;
+INSERT INTO o_si SELECT i, i * 2, 'v' || i FROM generate_series(1, 2000) i;
+CREATE INDEX o_si_k_ix ON o_si (k);
+CREATE UNIQUE INDEX o_si_v_ix ON o_si (v);
+ANALYZE o_si;
+SET enable_seqscan = off;
+SET enable_bitmapscan = off;
+-- Covered, not covered, backwards, and by a unique index.
+EXPLAIN (COSTS OFF) SELECT k FROM o_si WHERE k BETWEEN 200 AND 210;
+               QUERY PLAN                
+-----------------------------------------
+ Custom Scan (o_scan) on o_si
+   Forward index only scan of: o_si_k_ix
+   Conds: ((k >= 200) AND (k <= 210))
+(3 rows)
+
+SELECT k FROM o_si WHERE k BETWEEN 200 AND 210;
+  k  
+-----
+ 200
+ 202
+ 204
+ 206
+ 208
+ 210
+(6 rows)
+
+EXPLAIN (COSTS OFF) SELECT k, v FROM o_si WHERE k BETWEEN 200 AND 210;
+              QUERY PLAN              
+--------------------------------------
+ Custom Scan (o_scan) on o_si
+   Forward index scan of: o_si_k_ix
+   Conds: ((k >= 200) AND (k <= 210))
+(3 rows)
+
+SELECT k, v FROM o_si WHERE k BETWEEN 200 AND 210;
+  k  |  v   
+-----+------
+ 200 | v100
+ 202 | v101
+ 204 | v102
+ 206 | v103
+ 208 | v104
+ 210 | v105
+(6 rows)
+
+EXPLAIN (COSTS OFF) SELECT k, v FROM o_si WHERE k BETWEEN 200 AND 210 ORDER BY k DESC;
+              QUERY PLAN              
+--------------------------------------
+ Custom Scan (o_scan) on o_si
+   Backward index scan of: o_si_k_ix
+   Conds: ((k >= 200) AND (k <= 210))
+(3 rows)
+
+SELECT k, v FROM o_si WHERE k BETWEEN 200 AND 210 ORDER BY k DESC;
+  k  |  v   
+-----+------
+ 210 | v105
+ 208 | v104
+ 206 | v103
+ 204 | v102
+ 202 | v101
+ 200 | v100
+(6 rows)
+
+EXPLAIN (COSTS OFF) SELECT id, k FROM o_si WHERE v = 'v100';
+             QUERY PLAN             
+------------------------------------
+ Custom Scan (o_scan) on o_si
+   Forward index scan of: o_si_v_ix
+   Conds: (v = 'v100'::text)
+(3 rows)
+
+SELECT id, k FROM o_si WHERE v = 'v100';
+ id  |  k  
+-----+-----
+ 100 | 200
+(1 row)
+
+-- A range wider than one leaf page, checked by aggregate rather than by eye.
+SELECT count(*), sum(k), min(v), max(v) FROM o_si WHERE k BETWEEN 100 AND 3000;
+ count |   sum   | min  | max  
+-------+---------+------+------
+  1451 | 2249050 | v100 | v999
+(1 row)
+
+-- The primary key is unaffected, and so is a scan that returns nothing.
+EXPLAIN (COSTS OFF) SELECT id FROM o_si WHERE id BETWEEN 100 AND 110;
+               QUERY PLAN                
+-----------------------------------------
+ Custom Scan (o_scan) on o_si
+   Forward index only scan of: o_si_pkey
+   Conds: ((id >= 100) AND (id <= 110))
+(3 rows)
+
+SELECT count(*) FROM o_si WHERE k BETWEEN 100000 AND 100010;
+ count 
+-------
+     0
+(1 row)
+
+RESET enable_seqscan;
+RESET enable_bitmapscan;
+DROP EXTENSION orioledb CASCADE;
+NOTICE:  drop cascades to table o_si
+DROP SCHEMA native_si_scan CASCADE;
+RESET search_path;

@@ -1047,14 +1047,15 @@ INSERT INTO o_joins1 (SELECT id1, id2 FROM o_joins2);
 SET enable_hashjoin = off;
 SET enable_mergejoin = off;
 EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
-                             QUERY PLAN                              
----------------------------------------------------------------------
+                           QUERY PLAN                           
+----------------------------------------------------------------
  Nested Loop
    ->  Custom Scan (o_scan) on o_joins2
          Forward index only scan of: o_joins2_pkey
-   ->  Index Only Scan using o_joins1_idx on o_joins1
-         Index Cond: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
-(5 rows)
+   ->  Custom Scan (o_scan) on o_joins1
+         Forward index only scan of: o_joins1_idx
+         Conds: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
+(6 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -1135,8 +1136,9 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
    ->  Custom Scan (o_scan) on o_joins2
          Forward index only scan of: o_joins2_pkey
    ->  Hash
-         ->  Index Only Scan using o_joins1_idx on o_joins1
-(6 rows)
+         ->  Custom Scan (o_scan) on o_joins1
+               Forward index only scan of: o_joins1_idx
+(7 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -1218,8 +1220,9 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
          Forward index only scan of: o_joins2_pkey
    ->  Sort
          Sort Key: o_joins1.id1, o_joins1.id2
-         ->  Index Only Scan using o_joins1_idx on o_joins1
-(7 rows)
+         ->  Custom Scan (o_scan) on o_joins1
+               Forward index only scan of: o_joins1_idx
+(8 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -1303,14 +1306,15 @@ INSERT INTO o_joins1 (SELECT id2, id1 FROM o_joins2);
 SET enable_hashjoin = off;
 SET enable_mergejoin = off;
 EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
-                             QUERY PLAN                              
----------------------------------------------------------------------
+                           QUERY PLAN                           
+----------------------------------------------------------------
  Nested Loop
    ->  Custom Scan (o_scan) on o_joins2
          Forward index only scan of: o_joins2_pkey
-   ->  Index Only Scan using o_joins1_idx on o_joins1
-         Index Cond: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
-(5 rows)
+   ->  Custom Scan (o_scan) on o_joins1
+         Forward index only scan of: o_joins1_idx
+         Conds: ((id1 = o_joins2.id1) AND (id2 = o_joins2.id2))
+(6 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -1391,8 +1395,9 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
    ->  Custom Scan (o_scan) on o_joins2
          Forward index only scan of: o_joins2_pkey
    ->  Hash
-         ->  Index Only Scan Backward using o_joins1_idx on o_joins1
-(6 rows)
+         ->  Custom Scan (o_scan) on o_joins1
+               Backward index only scan of: o_joins1_idx
+(7 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -1472,8 +1477,9 @@ EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
    Merge Cond: ((o_joins2.id1 = o_joins1.id1) AND (o_joins2.id2 = o_joins1.id2))
    ->  Custom Scan (o_scan) on o_joins2
          Forward index only scan of: o_joins2_pkey
-   ->  Index Only Scan Backward using o_joins1_idx on o_joins1
-(5 rows)
+   ->  Custom Scan (o_scan) on o_joins1
+         Backward index only scan of: o_joins1_idx
+(6 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1, id2);
  id1 |   id2    
@@ -1571,14 +1577,16 @@ SET enable_material = off;
 SET enable_seqscan = off;
 -- Should use Materialize node
 EXPLAIN (COSTS off) SELECT * FROM o_joins2 JOIN o_joins1 USING(id1);
-                         QUERY PLAN                         
-------------------------------------------------------------
+                       QUERY PLAN                       
+--------------------------------------------------------
  Merge Join
    Merge Cond: (o_joins2.id1 = o_joins1.id1)
-   ->  Index Only Scan using o_joins2_idx on o_joins2
+   ->  Custom Scan (o_scan) on o_joins2
+         Forward index only scan of: o_joins2_idx
    ->  Materialize
-         ->  Index Only Scan using o_joins1_idx on o_joins1
-(5 rows)
+         ->  Custom Scan (o_scan) on o_joins1
+               Forward index only scan of: o_joins1_idx
+(7 rows)
 
 SELECT * FROM o_joins2 JOIN o_joins1 USING(id1);
  id1 

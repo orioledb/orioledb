@@ -35,10 +35,11 @@ SELECT * FROM o_test_ioc1 ORDER BY id1;
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_ioc1 ORDER BY id1;
-                        QUERY PLAN                        
-----------------------------------------------------------
- Index Only Scan using o_test_ioc1_id1_key on o_test_ioc1
-(1 row)
+                    QUERY PLAN                     
+---------------------------------------------------
+ Custom Scan (o_scan) on o_test_ioc1
+   Forward index only scan of: o_test_ioc1_id1_key
+(2 rows)
 
 SELECT * FROM o_test_ioc1 ORDER BY id1;
  id1 | id2 

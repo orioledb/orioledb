@@ -1898,10 +1898,11 @@ SELECT orioledb_tbl_structure('o_test_bridging_with_regular_pkey'::regclass, 'ne
 BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF) SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY k;
-                                         QUERY PLAN                                          
----------------------------------------------------------------------------------------------
- Index Scan using o_test_bridging_with_regular_pkey_ix2 on o_test_bridging_with_regular_pkey
-(1 row)
+                           QUERY PLAN                           
+----------------------------------------------------------------
+ Custom Scan (o_scan) on o_test_bridging_with_regular_pkey
+   Forward index scan of: o_test_bridging_with_regular_pkey_ix2
+(2 rows)
 
 SELECT * FROM o_test_bridging_with_regular_pkey ORDER BY k;
    i   |  j  | k  

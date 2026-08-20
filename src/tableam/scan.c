@@ -168,7 +168,11 @@ is_o_custom_scan_state(CustomScanState *scan)
 
 /*
  * Find the OrioleDB index number for an IndexPath's target index.
- * Returns -1 if the index is not an OrioleDB index.
+ *
+ * Returns descr->nIndices when the path's index is not one of them, which is
+ * the case for a bridged index.  OIndexNumber is unsigned, so "not found"
+ * cannot be signalled as -1: every caller's `>= 0` test would pass and the
+ * number would be used as a subscript.
  */
 static OIndexNumber
 o_find_ix_num(IndexPath *ix_path, OTableDescr *descr)
@@ -178,9 +182,9 @@ o_find_ix_num(IndexPath *ix_path, OTableDescr *descr)
 	for (ix_num = 0; ix_num < descr->nIndices; ix_num++)
 	{
 		if (descr->indices[ix_num]->oids.reloid == ix_path->indexinfo->indexoid)
-			return ix_num;
+			break;
 	}
-	return -1;
+	return ix_num;
 }
 
 /*
@@ -256,6 +260,15 @@ transform_path(Path *src_path, OTableDescr *descr, bool ordered)
 	result->path.pathtarget = src_path->pathtarget;
 	result->path.param_info = src_path->param_info;
 	result->path.rows = src_path->rows;
+#if PG_VERSION_NUM >= 180000
+
+	/*
+	 * Carry the disabled-node count over as well.  It is what makes
+	 * enable_indexscan = off take effect: the planner counts disabled nodes
+	 * separately from the cost, so a path that forgets it looks enabled again.
+	 */
+	result->path.disabled_nodes = src_path->disabled_nodes;
+#endif
 	result->path.startup_cost = src_path->startup_cost;
 	result->path.total_cost = src_path->total_cost;
 	result->path.pathkeys = src_path->pathkeys;
@@ -462,9 +475,16 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 					if (IsA(path, IndexPath))
 					{
 						IndexPath  *ix_path = (IndexPath *) path;
-						OIndexDescr *primary = GET_PRIMARY(descr);
-
-						replace = primary->oids.reloid == ix_path->indexinfo->indexoid;
+						/*
+						 * An ordered scan of a secondary index would
+						 * otherwise be left to the PG index AM adapter, which
+						 * materialises a rowid and a whole HeapTuple or
+						 * IndexTuple per row; o_scan needs neither, and
+						 * transform_path() resolves ix_num for any index. A
+						 * bridged index has no entry in descr->indices and
+						 * stays on the adapter.
+						 */
+						replace = o_find_ix_num(ix_path, descr) < descr->nIndices;
 					}
 
 					if (replace)
@@ -514,7 +534,7 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 					 * only to provide descending order, so only its ordered
 					 * variant is useful.
 					 */
-					if (ix_num >= 0 &&
+					if (ix_num < descr->nIndices &&
 						(ix_path->indexscandir == ForwardScanDirection ||
 						 ix_path->indexscandir == BackwardScanDirection))
 					{

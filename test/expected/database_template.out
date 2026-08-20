@@ -115,11 +115,12 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
     SELECT id FROM o_tb_secondary_k WHERE k = 500;
-                           QUERY PLAN                           
-----------------------------------------------------------------
- Index Only Scan using o_tb_secondary_k_idx on o_tb_secondary_k
-   Index Cond: (k = 500)
-(2 rows)
+                     QUERY PLAN                     
+----------------------------------------------------
+ Custom Scan (o_scan) on o_tb_secondary_k
+   Forward index only scan of: o_tb_secondary_k_idx
+   Conds: (k = 500)
+(3 rows)
 
 SELECT id FROM o_tb_secondary_k WHERE k = 500;
  id 
@@ -163,11 +164,12 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
     SELECT id FROM o_tb_toast WHERE t_key = 'k2';
-                     QUERY PLAN                     
-----------------------------------------------------
- Index Only Scan using o_tb_toast_idx on o_tb_toast
-   Index Cond: (t_key = 'k2'::text)
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_tb_toast
+   Forward index only scan of: o_tb_toast_idx
+   Conds: (t_key = 'k2'::text)
+(3 rows)
 
 SELECT id FROM o_tb_toast WHERE t_key = 'k2';
  id 
@@ -215,11 +217,12 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
     SELECT id FROM o_tb_tblspc WHERE n = 222;
-                      QUERY PLAN                      
-------------------------------------------------------
- Index Only Scan using o_tb_tblspc_idx on o_tb_tblspc
-   Index Cond: (n = 222)
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_tb_tblspc
+   Forward index only scan of: o_tb_tblspc_idx
+   Conds: (n = 222)
+(3 rows)
 
 SELECT id FROM o_tb_tblspc WHERE n = 222;
  id 
@@ -286,11 +289,12 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
     SELECT id FROM o_tb_secondary_k WHERE k = 500;
-                           QUERY PLAN                           
-----------------------------------------------------------------
- Index Only Scan using o_tb_secondary_k_idx on o_tb_secondary_k
-   Index Cond: (k = 500)
-(2 rows)
+                     QUERY PLAN                     
+----------------------------------------------------
+ Custom Scan (o_scan) on o_tb_secondary_k
+   Forward index only scan of: o_tb_secondary_k_idx
+   Conds: (k = 500)
+(3 rows)
 
 SELECT id FROM o_tb_secondary_k WHERE k = 500;
  id 
@@ -334,11 +338,12 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
     SELECT id FROM o_tb_toast WHERE t_key = 'k2';
-                     QUERY PLAN                     
-----------------------------------------------------
- Index Only Scan using o_tb_toast_idx on o_tb_toast
-   Index Cond: (t_key = 'k2'::text)
-(2 rows)
+                  QUERY PLAN                  
+----------------------------------------------
+ Custom Scan (o_scan) on o_tb_toast
+   Forward index only scan of: o_tb_toast_idx
+   Conds: (t_key = 'k2'::text)
+(3 rows)
 
 SELECT id FROM o_tb_toast WHERE t_key = 'k2';
  id 
@@ -386,11 +391,12 @@ BEGIN;
 SET LOCAL enable_seqscan = off;
 EXPLAIN (COSTS OFF)
     SELECT id FROM o_tb_tblspc WHERE n = 222;
-                      QUERY PLAN                      
-------------------------------------------------------
- Index Only Scan using o_tb_tblspc_idx on o_tb_tblspc
-   Index Cond: (n = 222)
-(2 rows)
+                  QUERY PLAN                   
+-----------------------------------------------
+ Custom Scan (o_scan) on o_tb_tblspc
+   Forward index only scan of: o_tb_tblspc_idx
+   Conds: (n = 222)
+(3 rows)
 
 SELECT id FROM o_tb_tblspc WHERE n = 222;
  id 

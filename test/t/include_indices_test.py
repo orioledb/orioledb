@@ -30,7 +30,9 @@ class IncludeIndicesTest(BaseTest):
 			EXPLAIN (COSTS OFF, FORMAT JSON)
 				SELECT * FROM o_test_include_box ORDER BY val_1;
 		""")[0][0][0]["Plan"]
-		self.assertEqual('Index Only Scan', plan["Node Type"])
+		# The scan runs inside o_scan; index-only-ness is its subtype now.
+		self.assertEqual('Custom Scan', plan["Node Type"])
+		self.assertEqual('Index Only Scan', plan["Custom Scan Subtype"])
 		self.assertEqual('o_test_include_box_ix1', plan['Index Name'])
 		self.assertEqual(
 		    [(1, '(4,5),(2,3)'), (10, '(40,50),(20,30)'),
@@ -47,7 +49,9 @@ class IncludeIndicesTest(BaseTest):
 			EXPLAIN (COSTS OFF, FORMAT JSON)
 				SELECT * FROM o_test_include_box ORDER BY val_1;
 		""")[0][0][0]["Plan"]
-		self.assertEqual('Index Only Scan', plan["Node Type"])
+		# The scan runs inside o_scan; index-only-ness is its subtype now.
+		self.assertEqual('Custom Scan', plan["Node Type"])
+		self.assertEqual('Index Only Scan', plan["Custom Scan Subtype"])
 		self.assertEqual('o_test_include_box_ix1', plan['Index Name'])
 		self.assertEqual(
 		    [(1, '(4,5),(2,3)'), (10, '(40,50),(20,30)'),
@@ -87,7 +91,8 @@ class IncludeIndicesTest(BaseTest):
 			EXPLAIN (COSTS OFF, FORMAT JSON)
 				SELECT * FROM o_test_include_box ORDER BY val_1;
 		""")[0][0][0]["Plan"]
-		self.assertNotEqual('Index Only Scan', plan["Node Type"])
+		self.assertNotEqual('Index Only Scan',
+		                    plan.get("Custom Scan Subtype", plan["Node Type"]))
 		self.assertEqual(
 		    [(1, '(4,5),(2,3)'), (2, '(8,10),(4,6)'), (3, '(12,15),(6,9)'),
 		     (4, '(16,20),(8,12)')],
@@ -101,7 +106,8 @@ class IncludeIndicesTest(BaseTest):
 			EXPLAIN (COSTS OFF, FORMAT JSON)
 				SELECT * FROM o_test_include_box ORDER BY val_1;
 		""")[0][0][0]["Plan"]
-		self.assertNotEqual('Index Only Scan', plan["Node Type"])
+		self.assertNotEqual('Index Only Scan',
+		                    plan.get("Custom Scan Subtype", plan["Node Type"]))
 		self.assertEqual(
 		    [(1, '(4,5),(2,3)'), (2, '(8,10),(4,6)'), (3, '(12,15),(6,9)'),
 		     (4, '(16,20),(8,12)')],
@@ -136,7 +142,8 @@ class IncludeIndicesTest(BaseTest):
 				""")[0][0][0]["Plan"]
 				if plan["Node Type"] == 'Result':
 					plan = plan['Plans'][0]
-				self.assertEqual('Index Scan', plan["Node Type"])
+				self.assertEqual('Custom Scan', plan["Node Type"])
+				self.assertEqual('Index Scan', plan["Custom Scan Subtype"])
 				self.assertEqual('o_test_expr_include_index_ix1',
 				                 plan['Index Name'])
 				self.assertEqual([('11', '10'), ('15', '50'), ('19', '90'),
@@ -159,7 +166,8 @@ class IncludeIndicesTest(BaseTest):
 				""")[0][0][0]["Plan"]
 				if plan["Node Type"] == 'Result':
 					plan = plan['Plans'][0]
-				self.assertEqual('Index Scan', plan["Node Type"])
+				self.assertEqual('Custom Scan', plan["Node Type"])
+				self.assertEqual('Index Scan', plan["Custom Scan Subtype"])
 				self.assertEqual('o_test_expr_include_index_ix1',
 				                 plan['Index Name'])
 				self.assertEqual([('11', '10'), ('15', '50'), ('19', '90'),

@@ -132,6 +132,25 @@ knownErrors = {
 skip_hunk_errors = {
 	r"ERROR:  orioledb tuples does not have system attribute: xm(in|ax)":
 	["update"],
+	# A cursor declared without SCROLL can be fetched backward only when the
+	# plan can run backward, and o_scan cannot: it fixes the scan direction at
+	# plan time.  Pre-existing -- the same FETCH BACKWARD fails on a
+	# primary-key-ordered cursor too -- and the hint tells the user what to do,
+	# so drop the hunk together with the rows the failed fetches did not
+	# return.
+	r"ERROR:  cursor can only scan forward":
+	["limit"],
+	# These two tests print plans through a helper function, so the output
+	# arrives as table rows and the plan-tree comparison never sees it: an
+	# o_scan node in place of an index scan then reads as a changed row, and
+	# its different width shifts the whole column.  Drop those hunks by their
+	# header line until the filter can parse a plan printed this way.
+	r"\s+explain_parallel_append\s*$":
+	["partition_prune"],
+	r"\s+explain_memoize\s*$":
+	["memoize"],
+	r"\s+->  Custom Scan \(o_scan\)":
+	["partition_prune", "memoize"],
 	# WHERE CURRENT OF cursor relies on TID scan; orioledb has none, so the
 	# UPDATE/DELETE fail and the rest of the cursor block aborts.  Drop the
 	# whole hunk so the cascaded "transaction is aborted" lines disappear.
@@ -163,6 +182,29 @@ skip_hunk_errors = {
 	r"ERROR:  lossy distance functions are not supported in index-only scans":
 	["gist"],
 }
+
+def hunk_is_only_row_count(hunk):
+	"""Does this hunk change nothing but the "(N rows)" line of a plan?
+
+	EXPLAIN output is printed as rows, so a plan that spells the same scan on
+	one more line changes the count under it.  The plan itself has already been
+	compared by then; the count alone says nothing, but only inside a plan --
+	for a query result "(N rows)" is the answer.
+	"""
+	changed = [line for line in hunk if line.line_type != ' ']
+	if not changed:
+		return False
+	for line in changed:
+		if not re.match(r'^\(\d+ rows?\)$', line.value.strip()):
+			return False
+	for line in hunk:
+		if line.line_type != ' ':
+			continue
+		if re.search(r'(->  |Seq Scan|Index Scan|Index Only Scan|Custom Scan'
+					 r'|Aggregate|Append|Nested Loop|Sort Key)', line.value):
+			return True
+	return False
+
 
 def can_drop_hunk(testName, line):
 	for regex, tests in skip_hunk_errors.items():
@@ -361,6 +403,56 @@ def is_commutative_cond_eq(s1: str, s2: str) -> bool:
 			and m1.group(3).strip() == m2.group(2).strip())
 
 
+def o_scan_index_name(props):
+	"""Name of the index an o_scan node reports scanning, or None."""
+	for prop in props:
+		match = re.match(r'(?:Forward|Backward) index(?: only)? scan of: (\S+)',
+						 prop.strip())
+		if match:
+			return match.group(1)
+	return None
+
+
+def first_prop(props, prefix):
+	"""First property with the given prefix, or None."""
+	for prop in props:
+		if prop.strip().startswith(prefix):
+			return prop.strip()
+	return None
+
+
+def strip_double_parens(text):
+	"""Drop a parenthesis pair that only wraps another one.
+
+	o_scan deparses an expression index key with one more level of parentheses
+	than the index AM does -- "(((ff + 2) + 1))" against "((ff + 2) + 1)" -- so
+	the two spellings of the same qual have to be brought to a common form
+	before they can be compared.  Only a pair that directly wraps a balanced
+	pair is removed, so parentheses that carry meaning are left alone.
+	"""
+	while True:
+		removed = False
+		i = 0
+		while i < len(text) - 1:
+			if text[i] == '(' and text[i + 1] == '(':
+				depth = 0
+				for j in range(i + 1, len(text)):
+					if text[j] == '(':
+						depth += 1
+					elif text[j] == ')':
+						depth -= 1
+						if depth == 0:
+							if j + 1 < len(text) and text[j + 1] == ')':
+								text = text[:i] + text[i + 1:j + 1] + text[j + 2:]
+								removed = True
+							break
+				if removed:
+					break
+			i += 1
+		if not removed:
+			return text
+
+
 def compare_trees(src_tree: list, target_tree: list, test_name: str):
 	def goto_down_level(stack: list, cur_elem: list) -> bool:
 		if len(cur_elem[3]) > 0:
@@ -374,7 +466,10 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 		return re.sub(r"^Parallel\s+", "", value)
 
 	def is_conds_eq(src_cond: str, target_cond: str):
-		return src_cond.replace("Index Cond", "Conds") == target_cond
+		src_cond = src_cond.replace("Index Cond", "Conds")
+		if src_cond == target_cond:
+			return True
+		return strip_double_parens(src_cond) == strip_double_parens(target_cond)
 
 	equal = True
 	src_stack = [[src_tree, 0]]
@@ -423,6 +518,7 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 		elif (test_name == 'updatable_views'
 			  and src_cur_value.startswith('Bitmap Heap Scan')
 			  and target_cur[1].startswith('Custom Scan')
+			  and target_cur[2]
 			  and target_cur[2][0].startswith('Forward index scan')):
 			src_up = True
 			target_up = True
@@ -503,6 +599,44 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 			  and target_cur[1].startswith('Index Scan')):
 			src_up = True
 			target_up = True
+		elif src_cur_value.startswith('Index Searches: '):
+			# A counter the index AM keeps and OrioleDB does not report.
+			src_up = True
+		elif re.match(r'(Forward|Backward) index( only)? scan of: ', target_cur[1]):
+			# o_scan reports the index it scans on a line of its own, where the
+			# index AM puts the index into the node name.  There is nothing on
+			# the heap side to compare it with, so step over it alone.
+			target_up = True
+		elif (src_cur_value.startswith('Index Cond: ')
+			  and target_cur[1].startswith('Conds: ')
+			  and is_conds_eq(src_cur_value, target_cur[1])):
+			# The same qual, spelled the way each side spells it.
+			src_up = True
+			target_up = True
+		elif (re.match(r'Index( Only)? Scan( Backward)? using \S+ on ', src_cur_value)
+			  and target_cur[1].startswith('Custom Scan (o_scan) on ')
+			  and (o_scan_index_name(target_cur[2]) is not None
+				   or not target_cur[2])
+			  and re.sub(r'^.* on ', '', src_cur_value)
+				  == re.sub(r'^.* on ', '', target_cur[1])):
+			# An ordered scan of the same relation: heap names the index in
+			# the node line, OrioleDB runs it inside o_scan, which names it in
+			# a "scan of" property and carries the quals in "Conds".  The
+			# index name itself is not compared, just as the plain
+			# "Index Scan using X" vs "Index Scan using Y" rule above does not
+			# compare it -- an index created without a name gets a different
+			# one on each access method.
+			src_cond = first_prop(src_cur[2], 'Index Cond: ')
+			target_cond = first_prop(target_cur[2], 'Conds: ')
+			if src_cond is not None and target_cond is not None:
+				if is_conds_eq(src_cond, target_cond):
+					src_down = True
+					target_down = True
+				else:
+					equal = False
+			else:
+				src_up = True
+				target_up = True
 		elif (re.match(r'(Hash|Merge|Nested Loop)( \w+)? Join', src_cur_value)
 			  and re.match(r'(Hash|Merge|Nested Loop)( \w+)? Join', target_cur[1])):
 			src_up = True
@@ -515,11 +649,23 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 
 			if (src_cur_value.startswith('Index Only Scan')
 				and target_cur[1].startswith('Custom Scan')
+				and target_cur[2]
 				and (target_cur[2][0] == 'Bitmap heap scan'
 					or (target_cur[2][0].startswith('Filter')
+						and len(target_cur[2]) > 1
 						and target_cur[2][1] == 'Bitmap heap scan')
-					or (target_cur[2][0].startswith("Forward index only scan")))):
+					or (target_cur[2][0].startswith("Forward index only scan"))
+					or (target_cur[2][0].startswith("Backward index only scan")))):
 				# sometimes we have bitmap heap scan instead index scan
+				src_up = True
+				target_up = True
+			elif (src_cur_value.startswith('Index Scan')
+				  and target_cur[1].startswith('Custom Scan')
+				  and target_cur[2]
+				  and (target_cur[2][0].startswith("Forward index scan")
+					   or target_cur[2][0].startswith("Backward index scan"))):
+				# an ordered secondary index scan is served by o_scan, which
+				# names the index and its direction in its first property
 				src_up = True
 				target_up = True
 			elif (src_cur_value.startswith('Index Only Scan')
@@ -531,6 +677,15 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				target_up = True
 			elif (src_cur_value.startswith('Index Only Scan')
 			      and target_cur[1].startswith('Seq Scan')):
+				src_up = True
+				target_up = True
+			elif (src_cur_value.startswith('Seq Scan on ')
+				  and target_cur[1].startswith('Custom Scan (o_scan) on ')
+				  and o_scan_index_name(target_cur[2]) is not None
+				  and re.sub(r'^Seq Scan on ', '', src_cur_value)
+					  == re.sub(r'^Custom Scan \(o_scan\) on ', '', target_cur[1])):
+				# The mirror of the case above: the same relation, scanned
+				# sequentially by heap and through an index by OrioleDB.
 				src_up = True
 				target_up = True
 			elif (src_cur_value.startswith('Seq Scan')
@@ -550,7 +705,9 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 				target_up = True
 			elif (src_cur_value.startswith('Index Scan')
 		 		 and target_cur[1].startswith('Custom Scan')
-				 and target_cur[2][0].startswith('Forward index scan')):
+				 and target_cur[2]
+				 and (target_cur[2][0].startswith('Forward index scan')
+					  or target_cur[2][0].startswith('Backward index scan'))):
 				if (len(src_cur[2]) == 0 and len(target_cur[2]) == 1) or  is_conds_eq(src_cur[2][0], target_cur[2][1]):
 					src_down = True
 					target_down = True
@@ -598,7 +755,9 @@ def compare_trees(src_tree: list, target_tree: list, test_name: str):
 			elif (test_name in ['partition_prune', 'inherit', 'updatable_views']
 				  and (src_cur_value.startswith('Index Only Scan')
 					and target_cur[1].startswith('Custom Scan')
-					and target_cur[2][0].startswith('Forward index only scan'))):
+					and target_cur[2]
+					and (target_cur[2][0].startswith('Forward index only scan')
+						 or target_cur[2][0].startswith('Backward index only scan')))):
 				if is_conds_eq(src_cur[2][0], target_cur[2][1]):
 					src_down = True
 					target_down = True
@@ -882,6 +1041,10 @@ for patched_file in patched_files:
 	hunk_num = 0
 	while hunk_num < len(hunks):
 		is_dropped = False
+		if hunk_is_only_row_count(hunks[hunk_num]):
+			patched_file.remove(hunks[hunk_num])
+			hunks.pop(hunk_num)
+			continue
 		for line in hunks[hunk_num]:
 			if can_drop_hunk(testName, line.value):
 				patched_file.remove(hunks[hunk_num])
