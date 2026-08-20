@@ -184,6 +184,18 @@ o_find_ix_num(IndexPath *ix_path, OTableDescr *descr)
 }
 
 /*
+ * Index pages a scan on this path is expected to read.
+ *
+ * Both the worker estimate and the ordered-path penalty below are driven by
+ * this number, so they stay in step.
+ */
+static inline double
+o_index_path_pages(IndexPath *ipath)
+{
+	return (double) ipath->indexinfo->pages * ipath->indexselectivity;
+}
+
+/*
  * Estimate the number of parallel workers for a parallel index scan.
  */
 static int
@@ -209,7 +221,7 @@ o_estimate_parallel_workers(PlannerInfo *root, RelOptInfo *rel,
 	if (RecoveryInProgress())
 		return 0;
 
-	index_pages = (double) ipath->indexinfo->pages * ipath->indexselectivity;
+	index_pages = o_index_path_pages(ipath);
 
 	/*
 	 * For secondary index scans that need a primary index lookup, each
@@ -551,8 +563,7 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 								 * instead of the sequential disk phase,
 								 * spread over the workers.
 								 */
-								pages = ix_path->indexinfo->pages *
-									ix_path->indexselectivity;
+								pages = o_index_path_pages(ix_path);
 								penalty = pages *
 									Max(random_page_cost - seq_page_cost, 0.0) /
 									(parallel_workers + 1);
