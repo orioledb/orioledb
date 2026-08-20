@@ -241,6 +241,7 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	bool		index_order;
 	int			cur_tbl_attnum = 0;
 	bool	   *isfilled = NULL;
+	bool		directMapping;
 
 	/*
 	 * Early return if the requested number of attributes is already valid or
@@ -401,6 +402,21 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		return;
 	}
 
+	/*
+	 * A leaf tuple of the primary index, read in table order, maps position
+	 * for position onto the slot: attribute i of the tuple is attribute i of
+	 * the result.  That is the ordinary case, and knowing it up front keeps
+	 * the mapping decisions out of the loop -- and, because every attribute
+	 * from tts_nvalid up is then filled in turn, removes the need to track
+	 * which ones were.
+	 */
+	directMapping = (oslot->ixnum == PrimaryIndexNumber &&
+					 oslot->leafTuple &&
+					 !index_order &&
+					 ctid_off == 0 &&
+					 idx->duplicates == NIL);
+
+	if (!directMapping)
 	{
 		int			needed = Max(natts, __natts);
 
@@ -422,11 +438,16 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		Form_pg_attribute thisatt;
 		int			res_attnum = 0;
 
+		if (directMapping)
+		{
+			res_attnum = attnum;
+		}
+
 		/*
 		 * Determine the result attribute number based on the index type and
 		 * the order of attributes.
 		 */
-		if (oslot->ixnum == PrimaryIndexNumber)
+		else if (oslot->ixnum == PrimaryIndexNumber)
 		{
 			if (index_order)
 			{
@@ -487,7 +508,8 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 			 */
 			values[res_attnum] = o_tuple_read_next_field(&oslot->state,
 														 &isnull[res_attnum]);
-			isfilled[res_attnum] = true;
+			if (!directMapping)
+				isfilled[res_attnum] = true;
 
 			/* Determine the attribute metadata based on the index and order. */
 			if (oslot->ixnum == PrimaryIndexNumber && !index_order)
@@ -572,7 +594,8 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 															 attnum + 1 + ctid_off,
 															 &toastValue,
 															 oslot->csn);
-					isfilled[attnum] = true;
+					if (!directMapping)
+						isfilled[attnum] = true;
 					oslot->vfree[attnum] = true;
 					MemoryContextSwitchTo(mcxt);
 				}
@@ -586,6 +609,12 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 	/* Ensure the number of processed attributes matches the expected count. */
 	Assert(attnum == natts);
 
+	if (directMapping)
+	{
+		/* Every attribute up to natts was filled in turn */
+		slot->tts_nvalid = natts;
+	}
+	else
 	{
 		int			first_unfilled = slot->tts_nvalid;
 
