@@ -82,6 +82,26 @@ typedef struct OHashFn
 extern OHashFn o_default_hash_fn;
 
 /*
+ * Datum comparisons that can bypass the cached comparator.
+ *
+ * o_call_comparator() has to guard against catalog invalidations and set up a
+ * SortSupportData before every call, which dwarfs the comparison itself for
+ * plain fixed-width types.  When a field's type and operator class are one of
+ * the builtins below, and no cross-type comparison is involved, the datums
+ * can be compared inline instead.  Only types whose btree ordering is the
+ * plain arithmetic one are listed: float and numeric orderings have NaN /
+ * display-scale rules that the comparator implements.
+ */
+typedef enum
+{
+	OIndexFieldFastCmpNone = 0,
+	OIndexFieldFastCmpInt2,
+	OIndexFieldFastCmpInt4,
+	OIndexFieldFastCmpInt8,
+	OIndexFieldFastCmpOid
+} OIndexFieldFastCmp;
+
+/*
  * The index field descriptor
  */
 typedef struct
@@ -100,6 +120,9 @@ typedef struct
 	OComparator *comparator;
 	OExclusionFn *exclusion_fn;
 	OHashFn    *hash_fn;
+
+	/* Inline comparison this field's datums qualify for, if any. */
+	OIndexFieldFastCmp fastCmp;
 } OIndexField;
 
 typedef struct AttrNumberMap
