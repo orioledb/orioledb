@@ -1006,6 +1006,9 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 		/*
 		 * if we should fetch tuple from primary and the current index is
 		 * secondary
+		 *
+		 * o_exec_parallel_idx_scan() repeats this lookup for the parallel
+		 * scan; keep the two in sync.
 		 */
 		if (ostate->ixNum != PrimaryIndexNumber)
 		{
@@ -1182,6 +1185,10 @@ o_exec_parallel_idx_scan(OScanState *ostate, ScanState *ss)
 			OTuple		ptup;
 			OIndexDescr *primary = GET_PRIMARY(descr);
 
+			/*
+			 * Same secondary-to-primary lookup that o_index_scan_getnext()
+			 * performs for the serial scan; keep the two in sync.
+			 */
 			o_fill_pindex_tuple_key_bound(&indexDescr->desc, tuple, &bound);
 
 			ptup = o_btree_find_tuple_by_key(&primary->desc,

@@ -1538,9 +1538,26 @@ check_downlink_in_scan_range(BTreeSeqScan *scan, OTuple keyRangeLow,
 }
 
 /*
+ * Does this side of the scan's qualification range constrain anything?
+ *
+ * The first unbounded key makes the whole bound infinite:
+ * o_idx_cmp_key_bound_to_tuple() answers on it without looking at the rest.
+ */
+static inline bool
+scan_range_side_is_open(OBTreeKeyBound *bound)
+{
+	return bound->nkeys == 0 ||
+		(bound->keys[0].flags & O_VALUE_BOUND_UNBOUNDED) != 0;
+}
+
+/*
  * Checks if a page's entire key range is within the scan's qualification
  * range.  When this returns true, every tuple on the page is guaranteed to
  * be in range, so per-tuple checks can be skipped entirely.
+ *
+ * A page unbounded on one side (the leftmost or the rightmost page of the
+ * tree) is still fully in range when the scan is unbounded on that side too,
+ * which is the common case for a one-sided qualification such as "id > 100".
  */
 static bool
 page_fully_in_scan_range(BTreeSeqScan *scan, OTuple keyRangeLow,
@@ -1561,8 +1578,8 @@ page_fully_in_scan_range(BTreeSeqScan *scan, OTuple keyRangeLow,
 		if (cmp < 0)
 			return false;
 	}
-	else
-		return false;			/* page starts at -infinity */
+	else if (!scan_range_side_is_open(&scanRange->low))
+		return false;			/* page starts at -infinity, the scan does not */
 
 	if (!O_TUPLE_IS_NULL(keyRangeHigh))
 	{
@@ -1574,8 +1591,8 @@ page_fully_in_scan_range(BTreeSeqScan *scan, OTuple keyRangeLow,
 		if (cmp > 0)
 			return false;
 	}
-	else
-		return false;			/* page ends at +infinity */
+	else if (!scan_range_side_is_open(&scanRange->high))
+		return false;			/* page ends at +infinity, the scan does not */
 
 	return true;
 }
