@@ -575,6 +575,44 @@ SET LOCAL max_parallel_workers_per_gather = 0;
 SELECT count(*) AS serial_saop_count FROM o_test_parallel_saop
 	WHERE val IN (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20);
 
+-- Sparse SAOP list: the union range between the smallest and the largest
+-- element covers the whole index, so the scan has to reject the leaves that
+-- hold no element rather than read and filter them.
+CREATE TABLE o_test_parallel_saop_sparse (
+	id SERIAL PRIMARY KEY,
+	val INT
+) USING orioledb;
+INSERT INTO o_test_parallel_saop_sparse (val)
+	SELECT (g % 10) + 1 FROM generate_series(1, 100000) g;
+CREATE INDEX o_test_parallel_saop_sparse_idx
+	ON o_test_parallel_saop_sparse (val);
+ANALYZE o_test_parallel_saop_sparse;
+SET LOCAL max_parallel_workers_per_gather = 2;
+EXPLAIN (COSTS OFF)
+	SELECT count(*) FROM o_test_parallel_saop_sparse WHERE val IN (1, 10);
+SELECT count(*) AS parallel_saop_sparse FROM o_test_parallel_saop_sparse
+	WHERE val IN (1, 10);
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT count(*) AS serial_saop_sparse FROM o_test_parallel_saop_sparse
+	WHERE val IN (1, 10);
+
+-- The same on a DESC index: elements are ordered the other way round, so the
+-- page-level membership test has to compare in index order.
+DROP INDEX o_test_parallel_saop_sparse_idx;
+CREATE INDEX o_test_parallel_saop_sparse_desc_idx
+	ON o_test_parallel_saop_sparse (val DESC);
+ANALYZE o_test_parallel_saop_sparse;
+SET LOCAL max_parallel_workers_per_gather = 2;
+EXPLAIN (COSTS OFF)
+	SELECT count(*) FROM o_test_parallel_saop_sparse WHERE val IN (1, 10);
+SELECT count(*) AS parallel_saop_desc FROM o_test_parallel_saop_sparse
+	WHERE val IN (1, 10);
+SET LOCAL max_parallel_workers_per_gather = 0;
+SELECT count(*) AS serial_saop_desc FROM o_test_parallel_saop_sparse
+	WHERE val IN (1, 10);
+DROP TABLE o_test_parallel_saop_sparse;
+SET LOCAL max_parallel_workers_per_gather = 2;
+
 -- SAOP with full row lookup through secondary index
 SET LOCAL enable_indexonlyscan = off;
 SET LOCAL max_parallel_workers_per_gather = 2;

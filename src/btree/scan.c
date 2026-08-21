@@ -3316,6 +3316,24 @@ btree_seq_scan_set_range_filter(BTreeSeqScan *scan,
 }
 
 /*
+ * Attach scan callbacks after construction.
+ *
+ * make_btree_seq_scan_cb() takes them up front, but a parallel scan is built
+ * by make_btree_seq_scan() and only then learns what it has to filter.  Only
+ * meaningful before the first getnext, and it deliberately does not turn on
+ * the partial-leaf (FETCH) walk: that is reserved for the non-parallel
+ * key-directed scan the constructor recognises.
+ */
+void
+btree_seq_scan_set_callbacks(BTreeSeqScan *scan,
+							 BTreeSeqScanCallbacks *cb, void *arg)
+{
+	Assert(!scan->initialized);
+	scan->cb = cb;
+	scan->arg = arg;
+}
+
+/*
  * Enable ordered (key-order) scanning.  Must be called before the first
  * getnext.  In ordered mode on-disk downlinks are read inline in key order
  * (see BTreeSeqScan.ordered).  Both forward and backward directions are

@@ -1045,11 +1045,171 @@ o_index_scan_getnext(OTableDescr *descr, OScanState *ostate,
 	return tup;
 }
 
+/*
+ * Downlink filter for a parallel scan over "col = ANY (array)".
+ *
+ * A parallel scan hands out level-1 downlinks, so it cannot turn an array
+ * into one descent per element the way the serial scan does (see
+ * switch_to_next_range()); its key range is the union
+ * [smallest element, largest element].  For a sparse array -- IN (1, 1000000)
+ * -- that union spans nearly the whole index, and every leaf in between would
+ * be read only to have all of its rows rejected by is_tuple_valid().
+ *
+ * A leaf whose key range holds no array element cannot hold a matching row,
+ * so it does not have to be read at all.  Rejecting those downlinks brings
+ * the pages read back to what the per-element scan reads, leaving only the
+ * level-1 internal chain -- a small fraction of the tree -- walked in full.
+ *
+ * This applies to an array on the index's leading column.  An array on a
+ * later column is interleaved with every value of the leading column, so page
+ * granularity buys nothing there and the union range stands.
+ */
+typedef struct
+{
+	OIndexDescr *indexDescr;
+	BTArrayKeyInfo *arrayKey;
+	OComparator *comparator;
+	bool		ascending;
+} OArrayDownlinkFilter;
+
+/*
+ * Compare an array element against a boundary value in index order (the order
+ * elem_values is sorted in), mirroring the membership test in
+ * is_tuple_valid().
+ */
+static inline int
+array_elem_cmp(OArrayDownlinkFilter *filter, Datum elem, Datum boundary)
+{
+	int			cmp = o_call_comparator(filter->comparator, elem, boundary);
+
+	return filter->ascending ? cmp : -cmp;
+}
+
+/*
+ * Does the key range [low, high) hold any array element?
+ *
+ * A NULL boundary is the corresponding infinity.  The test is on the leading
+ * key column alone, which makes it conservative on the high side -- high is
+ * an exclusive whole-key bound, while a leading value equal to high's leading
+ * value may still sort below it -- and conservative is the safe direction: it
+ * can admit a page with no match, never reject one with a match.
+ */
+static bool
+o_array_downlink_is_valid(OTuple low, OTuple high, void *arg)
+{
+	OArrayDownlinkFilter *filter = (OArrayDownlinkFilter *) arg;
+	OIndexDescr *id = filter->indexDescr;
+	BTArrayKeyInfo *arrayKey = filter->arrayKey;
+	int			attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyNonLeafKey, id, 1);
+	Datum		boundary;
+	bool		isnull;
+	int			lo = 0,
+				hi = arrayKey->num_elems - 1;
+
+	Assert(arrayKey->num_elems > 0);
+
+	/*
+	 * Find the first element at or after the low boundary.  Elements are
+	 * sorted in index order, so this is a binary search.
+	 */
+	if (!O_TUPLE_IS_NULL(low))
+	{
+		boundary = o_fastgetattr(low, attnum, id->nonLeafTupdesc,
+								 &id->nonLeafSpec, &isnull);
+
+		/* A NULL boundary sorts outside the elements; do not filter on it. */
+		if (isnull)
+			return true;
+
+		while (lo <= hi)
+		{
+			int			mid = lo + (hi - lo) / 2;
+
+			if (array_elem_cmp(filter, arrayKey->elem_values[mid], boundary) < 0)
+				lo = mid + 1;
+			else
+				hi = mid - 1;
+		}
+	}
+
+	/* Every element sorts below the page. */
+	if (lo >= arrayKey->num_elems)
+		return false;
+
+	if (O_TUPLE_IS_NULL(high))
+		return true;
+
+	boundary = o_fastgetattr(high, attnum, id->nonLeafTupdesc,
+							 &id->nonLeafSpec, &isnull);
+	if (isnull)
+		return true;
+
+	return array_elem_cmp(filter, arrayKey->elem_values[lo], boundary) <= 0;
+}
+
+static BTreeSeqScanCallbacks arrayDownlinkCallbacks = {
+	.isRangeValid = o_array_downlink_is_valid,
+	.getNextKey = NULL
+};
+
+/*
+ * Build the downlink filter, or return NULL when this scan cannot use one:
+ * no array on the leading column, or a leading skip array (PG18), whose
+ * elements are not enumerated.
+ */
+static OArrayDownlinkFilter *
+o_make_array_downlink_filter(OScanState *ostate, OIndexDescr *indexDescr)
+{
+	BTScanOpaque so = (BTScanOpaque) ostate->scandesc.opaque;
+	OIndexField *field = &indexDescr->fields[0];
+	OBTreeValueBound *bound = &ostate->curKeyRange.low.keys[0];
+	int			i;
+
+	if (so->numArrayKeys <= 0 || ostate->curKeyRange.empty)
+		return NULL;
+
+	for (i = 0; i < so->numArrayKeys; i++)
+	{
+		BTArrayKeyInfo *arrayKey = &so->arrayKeys[i];
+		ScanKey		key = so->keyData + arrayKey->scan_key;
+		OArrayDownlinkFilter *filter;
+
+		/* Only the leading index column gives page-level selectivity. */
+		if (key->sk_attno != 1)
+			continue;
+
+		/* A skip array does not enumerate its elements. */
+		if (arrayKey->num_elems <= 0)
+			continue;
+
+		/*
+		 * ostate->cxt outlives the scan it is attached to: a rescan frees the
+		 * scan before resetting the context (o_rescan_custom_scan()).
+		 */
+		filter = (OArrayDownlinkFilter *)
+			MemoryContextAlloc(ostate->cxt, sizeof(OArrayDownlinkFilter));
+		filter->indexDescr = indexDescr;
+		filter->arrayKey = arrayKey;
+		filter->ascending = field->ascending;
+
+		/* Same comparator choice as the per-tuple test in is_tuple_valid(). */
+		if (o_bound_is_coercible(bound, field))
+			filter->comparator = field->comparator;
+		else
+			filter->comparator = bound->comparator;
+
+		return filter;
+	}
+
+	return NULL;
+}
+
 static BTreeSeqScan *
 o_exec_parallel_idx_scan_new_seqscan(OScanState *ostate,
 									 OIndexDescr *indexDescr)
 {
 	BTreeSeqScan *seqScan;
+	OArrayDownlinkFilter *filter;
 
 	seqScan = make_btree_seq_scan(&indexDescr->desc,
 								  &ostate->oSnapshot,
@@ -1057,6 +1217,10 @@ o_exec_parallel_idx_scan_new_seqscan(OScanState *ostate,
 
 	if (!ostate->curKeyRange.empty)
 		btree_seq_scan_set_range_filter(seqScan, &ostate->curKeyRange);
+
+	filter = o_make_array_downlink_filter(ostate, indexDescr);
+	if (filter)
+		btree_seq_scan_set_callbacks(seqScan, &arrayDownlinkCallbacks, filter);
 
 	/*
 	 * An ordered parallel path reads on-disk downlinks inline in the plan's
