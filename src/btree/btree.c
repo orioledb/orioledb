@@ -274,6 +274,7 @@ ItemPointerData
 btree_ctid_from_seq(uint64 ctid)
 {
 	ItemPointerData result;
+
 	Assert(ctid / (MaxOffsetNumber - FirstOffsetNumber) < InvalidBlockNumber);
 
 	ItemPointerSet(&result,

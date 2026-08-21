@@ -265,7 +265,8 @@ transform_path(Path *src_path, OTableDescr *descr, bool ordered)
 	/*
 	 * Carry the disabled-node count over as well.  It is what makes
 	 * enable_indexscan = off take effect: the planner counts disabled nodes
-	 * separately from the cost, so a path that forgets it looks enabled again.
+	 * separately from the cost, so a path that forgets it looks enabled
+	 * again.
 	 */
 	result->path.disabled_nodes = src_path->disabled_nodes;
 #endif
@@ -475,6 +476,7 @@ orioledb_set_rel_pathlist_hook(PlannerInfo *root, RelOptInfo *rel,
 					if (IsA(path, IndexPath))
 					{
 						IndexPath  *ix_path = (IndexPath *) path;
+
 						/*
 						 * An ordered scan of a secondary index would
 						 * otherwise be left to the PG index AM adapter, which
