@@ -96,6 +96,19 @@ struct BTreeIterator
 	bool		curKeyReturned;
 
 	/*
+	 * Building the resume key costs a whole tuple construction, so we do not
+	 * pay it per row.  Instead the main fetch loop only records the locator
+	 * of the tuple it consumed and sets curKeyLazy; the key is built from
+	 * context->img on demand by iterator_materialize_cur_key().  The image
+	 * still holds the recorded position at every point that reads the key, so
+	 * the deferred build sees exactly the bytes the eager one would have: a
+	 * partial (FETCH) leaf never reloads an already-loaded chunk, and the key
+	 * is materialized before anything replaces the image.
+	 */
+	BTreePageItemLocator curKeyLoc;
+	bool		curKeyLazy;
+
+	/*
 	 * Optimistic array-advance parking.  When o_btree_iterator_fetch()
 	 * discards a tuple that overshot the end bound -- e.g. the first row of
 	 * the next array element in a "col = ANY" scan -- it rewinds the leaf
@@ -180,6 +193,29 @@ copy_fixed_leaf_key(BTreeDescr *desc, OFixedKey *dst, OTuple leafTup)
 	Assert(!allocated);
 	dst->tuple.formatFlags = key.formatFlags;
 	dst->tuple.data = dst->fixedData;
+}
+
+/*
+ * Build the deferred resume key recorded by the fetch loop.
+ *
+ * Must be called before anything reads it->curKey and before anything
+ * replaces the page image the recorded locator points into.  A no-op unless
+ * a lazy position is outstanding.
+ */
+static inline void
+iterator_materialize_cur_key(BTreeIterator *it)
+{
+	OTuple		tup;
+
+	if (!it->curKeyLazy)
+		return;
+
+	Assert(it->curKeySet);
+	Assert(BTREE_PAGE_LOCATOR_IS_VALID(it->context.img, &it->curKeyLoc));
+
+	BTREE_PAGE_READ_LEAF_TUPLE(tup, it->context.img, &it->curKeyLoc);
+	copy_fixed_leaf_key(it->context.desc, &it->curKey, tup);
+	it->curKeyLazy = false;
 }
 
 #define IT_NEXT_OFFSET(it, loc) \
@@ -352,6 +388,7 @@ o_btree_find_tuples_start(BTreeDescr *desc, void *key,
 	 */
 	it->curKeySet = false;
 	it->curKeyReturned = false;
+	it->curKeyLazy = false;
 	it->startKey = NULL;
 	it->startKind = BTreeKeyNone;
 	it->pageCount = 1;
@@ -966,6 +1003,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	it->fetchCallbackArg = NULL;
 	it->curKeySet = false;
 	it->curKeyReturned = false;
+	it->curKeyLazy = false;
 	it->startKey = NULL;
 	it->startKind = BTreeKeyNone;
 	BTREE_PAGE_LOCATOR_SET_INVALID(&it->undoLoc);
@@ -1050,6 +1088,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 			copy_fixed_leaf_key(desc, &it->curKey, tup);
 			it->curKeySet = true;
 			it->curKeyReturned = false;
+			it->curKeyLazy = false;
 		}
 	}
 
@@ -1133,6 +1172,13 @@ o_btree_iterator_advance(BTreeIterator *it, void *key, BTreeKeyType kind)
 	bool		found_in_page = false;
 
 	Assert(key != NULL && kind != BTreeKeyNone);
+
+	/*
+	 * Advancing can re-descend and replace the page image, which would strand
+	 * a deferred resume key on a locator that no longer describes the tuple
+	 * it was recorded for.  Build it now, while the image still holds it.
+	 */
+	iterator_materialize_cur_key(it);
 
 #ifdef USE_ASSERT_CHECKING
 
@@ -1489,6 +1535,9 @@ iterator_refind_partial_leaf(BTreeIterator *it)
 
 	Assert(!it->combinedResult);
 
+	/* The resume key is read below; build it while the image still holds it. */
+	iterator_materialize_cur_key(it);
+
 	/*
 	 * A partial (FETCH) read just failed because the backing page changed
 	 * under us.  Switch this scan to whole-page images (IMAGE) for the rest
@@ -1719,8 +1768,6 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 		}
 		else
 		{
-			OTuple		posTup;
-
 			if (STOPEVENTS_ENABLED() && it->curKeySet)
 				STOPEVENT(STOPEVENT_ITERATOR_NEXT,
 						  btree_page_stopevent_params(desc, context->img));
@@ -1741,10 +1788,11 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 			/*
 			 * Remember this position in case the page changes later.  We are
 			 * about to consume this tuple, so mark it as returned: a later
-			 * re-find resumes after it.
+			 * re-find resumes after it.  Only the locator is recorded here;
+			 * the key itself is built on demand (see curKeyLoc).
 			 */
-			BTREE_PAGE_READ_LEAF_TUPLE(posTup, context->img, &leaf_item->locator);
-			copy_fixed_leaf_key(desc, &it->curKey, posTup);
+			it->curKeyLoc = leaf_item->locator;
+			it->curKeyLazy = true;
 			it->curKeySet = true;
 			it->curKeyReturned = true;
 
@@ -1900,6 +1948,8 @@ btree_iterator_check_load_next_page(BTreeIterator *it, BtreeIterationEnd *end)
 		 */
 		if (end && page_contains_end(it, img, get_lokey_if_exists(it), end))
 			return false;
+
+		iterator_materialize_cur_key(it);
 
 		if (IT_IS_FORWARD(it))
 			step_result = find_right_page(context, &key_buf);
@@ -2108,6 +2158,7 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 			copy_fixed_leaf_key(context->desc, &it->curKey, result);
 			it->curKeySet = true;
 			it->curKeyReturned = true;
+			it->curKeyLazy = false;
 
 			if (!iterator_advance_leaf(it, loc))
 			{
@@ -2161,6 +2212,8 @@ btree_iterate_raw_internal(BTreeIterator *it, void *end, BTreeKeyType endKind,
 			iterator_refind_partial_leaf(it);
 			continue;
 		}
+
+		iterator_materialize_cur_key(it);
 
 		if (IT_IS_FORWARD(it))
 		{
@@ -2636,6 +2689,7 @@ orioledb_test_back_refind_skip_tail(PG_FUNCTION_ARGS)
 	fakeTup = o_form_tuple(primary->leafTupdesc, &primary->leafSpec, 0,
 						   &fakeValue, &fakeNull, NULL);
 	copy_fixed_leaf_key(&primary->desc, &it->curKey, fakeTup);
+	it->curKeyLazy = false;
 	pfree(fakeTup.data);
 	it->curKeySet = true;
 	it->curKeyReturned = false;
