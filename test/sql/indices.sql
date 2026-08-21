@@ -2145,6 +2145,40 @@ ORDER BY x;
 
 RESET enable_seqscan;
 
+-- Skip scan drives the leading column by probing for its next distinct value.
+-- The probe tuple is read for that value alone, before the trailing-column
+-- qualifiers are applied, so these cases deliberately make the probes land on
+-- rows that do not qualify, and mix in NULLs on both columns.
+CREATE TABLE o_test_skip_probe (
+	a int,
+	b int,
+	c int
+) USING orioledb;
+INSERT INTO o_test_skip_probe
+	SELECT g % 4, g % 7, g FROM generate_series(1, 200) g;
+INSERT INTO o_test_skip_probe VALUES (NULL, 3, 1000), (2, NULL, 1001);
+CREATE INDEX o_test_skip_probe_idx ON o_test_skip_probe (a, b, c);
+
+SET enable_seqscan = off;
+SET enable_bitmapscan = off;
+
+-- leading column skipped, equality on the next one
+SELECT count(*), sum(c) FROM o_test_skip_probe WHERE b = 3;
+-- two columns skipped; only one row qualifies, under one leading value
+SELECT count(*), sum(c) FROM o_test_skip_probe WHERE c = 137;
+-- a skip array together with an array on a trailing column
+SELECT count(*), sum(c) FROM o_test_skip_probe WHERE b IN (0, 6);
+-- NULL on the skipped column, and on the qualified one
+SELECT count(*), sum(c) FROM o_test_skip_probe WHERE b IS NULL;
+SELECT count(*), sum(c) FROM o_test_skip_probe WHERE a IS NULL AND b = 3;
+-- range on the leading column with equality below it
+SELECT count(*), sum(c) FROM o_test_skip_probe
+	WHERE a BETWEEN 1 AND 2 AND b = 5;
+
+RESET enable_seqscan;
+RESET enable_bitmapscan;
+DROP TABLE o_test_skip_probe;
+
 -- Combining "leading_col IS NOT NULL" with a trailing-column IS NULL
 -- qualifier against a unique btree must respect both predicates.  PG18's
 -- _bt_preprocess_keys rewrites a leading IS NOT NULL into a skip array
