@@ -1040,6 +1040,24 @@ btree_relnode_undo_callback(UndoLogType undoType, UndoLocation location,
 				 * ORelOids -- so this is correct in recovery too.  Only on
 				 * commit: an aborted create's marker is removed by the
 				 * register_delete pending-delete instead.
+				 *
+				 * NB: reloid == relnode identifies a bridge only by
+				 * convention -- o_bridge_new_relnode() sets reloid to the
+				 * relnode it allocated -- and an ordinary index matches it
+				 * too until its first rewrite, since CREATE INDEX leaves
+				 * relfilenode == oid.  Dropping such a tree while pg_class
+				 * still points at that relnode unlinks a live relation file:
+				 * that is how issue #906 turned the moved table unreadable
+				 * ("could not open file ..." from every plan over it) on top
+				 * of emptying the index.  Every path that drops an index tree
+				 * at commit now gives the index a fresh relnode first, so the
+				 * locator dropped here is always stale -- but the test itself
+				 * is still a heuristic, not an identity.  Making it exact
+				 * means marking the bridge in RelnodeUndoStackItem, which
+				 * changes the undo record layout and so needs an
+				 * ORIOLEDB_BINARY_VERSION bump; that was left out of the #906
+				 * fix deliberately rather than changing an on-disk format as
+				 * a side effect of a correctness fix.
 				 */
 				dropBridgeMarker = (stage == OUndoCallbackStageCommit &&
 									dropTrees[i].oids.reloid == dropTrees[i].oids.relnode);
