@@ -109,6 +109,18 @@ struct BTreeIterator
 	bool		curKeyLazy;
 
 	/*
+	 * Cached page-level answer to "can the iteration end key fall on the leaf
+	 * we are reading from?".  When it cannot, no tuple of that leaf can
+	 * overshoot the bound and o_btree_iterator_fetch() skips its per-row
+	 * compare.  See iterator_end_may_be_on_page() for how the cache is keyed.
+	 */
+	OInMemoryBlkno endPageBlkno;
+	uint32		endPageChangeCount;
+	void	   *endPageKey;
+	bool		endPageValid;
+	bool		endOnPage;
+
+	/*
 	 * Optimistic array-advance parking.  When o_btree_iterator_fetch()
 	 * discards a tuple that overshot the end bound -- e.g. the first row of
 	 * the next array element in a "col = ANY" scan -- it rewinds the leaf
@@ -160,6 +172,8 @@ static OTuple fetch_tuple_from_page(BTreeDescr *desc, Page p,
 static bool page_contains_key(BTreeIterator *it, void *key,
 							  BTreeKeyType kind, Page p, OTuple lokey);
 static OTuple get_lokey_if_exists(BTreeIterator *it);
+static bool iterator_end_may_be_on_page(BTreeIterator *it,
+										BtreeIterationEnd *end);
 static void get_next_combined_location(BTreeIterator *it);
 static void load_page_from_undo(BTreeIterator *it, void *key, BTreeKeyType kind);
 static bool btree_iterator_check_load_next_page(BTreeIterator *it,
@@ -400,6 +414,7 @@ o_btree_find_tuples_start(BTreeDescr *desc, void *key,
 	it->startKind = BTreeKeyNone;
 	it->pageCount = 1;
 	BTREE_PAGE_LOCATOR_SET_INVALID(&it->undoLoc);
+	it->endPageValid = false;
 #ifdef USE_ASSERT_CHECKING
 	O_TUPLE_SET_NULL(it->prevTuple.tuple);
 #endif
@@ -1021,6 +1036,7 @@ o_btree_iterator_create(BTreeDescr *desc, void *key, BTreeKeyType kind,
 	it->startKey = NULL;
 	it->startKind = BTreeKeyNone;
 	BTREE_PAGE_LOCATOR_SET_INVALID(&it->undoLoc);
+	it->endPageValid = false;
 #ifdef USE_ASSERT_CHECKING
 	O_TUPLE_SET_NULL(it->prevTuple.tuple);
 #endif
@@ -1186,6 +1202,14 @@ o_btree_iterator_advance(BTreeIterator *it, void *key, BTreeKeyType kind)
 	bool		found_in_page = false;
 
 	Assert(key != NULL && kind != BTreeKeyNone);
+
+	/*
+	 * Advancing installs a new key range, and for a "col = ANY" scan the
+	 * caller rewrites the bound in place -- same object, new contents.  The
+	 * cached page-level end-bound answer was computed against the old bound
+	 * and can survive a stay on the same leaf, so drop it here.
+	 */
+	it->endPageValid = false;
 
 	/*
 	 * Advancing can re-descend and replace the page image, which would strand
@@ -1361,7 +1385,9 @@ o_btree_iterator_fetch(BTreeIterator *it, CommitSeqNo *tupleCsn,
 	it->resumeLocValid = false;
 	result = o_btree_iterator_fetch_internal(it, tupleCsn, endPtr);
 
-	if (!O_TUPLE_IS_NULL(result) && endKey != NULL)
+	if (!O_TUPLE_IS_NULL(result) && endKey != NULL &&
+		(endPtr == NULL || it->combinedResult ||
+		 iterator_end_may_be_on_page(it, endPtr)))
 	{
 		int			cmp = o_btree_cmp(desc, &result, BTreeKeyLeafTuple, endKey, endKind);
 
@@ -1897,6 +1923,65 @@ page_contains_end(BTreeIterator *it, Page p,
 			return true;
 	}
 	return false;
+}
+
+/*
+ * Can the iteration end key fall on the leaf the iterator is reading from?
+ *
+ * o_btree_iterator_fetch() compares every returned tuple against the end
+ * bound.  That compare is only ever decided by the last leaf of the scan: on
+ * any earlier leaf the whole page lies within the bound, which is exactly what
+ * page_contains_end() answers, once per page instead of once per row.
+ *
+ * The locator has already advanced past the returned tuple by the time the
+ * caller asks, so this may describe a later leaf than the tuple came from.
+ * That stays safe in both directions: forward, a later leaf's hikey is not
+ * below the tuple's leaf's hikey, so "end is beyond this leaf" implies it is
+ * beyond the tuple's leaf too; backward, the same holds for the lokey.
+ *
+ * Every uncertain case answers true, which only costs the per-row compare the
+ * caller would have made anyway.
+ */
+static bool
+iterator_end_may_be_on_page(BTreeIterator *it, BtreeIterationEnd *end)
+{
+	OBTreeFindPageContext *context = &it->context;
+	OBtreePageFindItem *item = &context->items[context->index];
+
+	/*
+	 * page_contains_end() reads the leaf's hikey, and a partial (FETCH) leaf
+	 * may not have that chunk loaded.  Loading it here can fail and demand a
+	 * re-find, which this point cannot do.  A scan long enough for this to
+	 * matter switches to IMAGE after a few pages anyway.
+	 */
+	if (BTREE_PAGE_FIND_IS(context, FETCH))
+		return true;
+
+	/* The backward case reads the lokey, which is not always available. */
+	if (IT_IS_BACKWARD(it) && !btree_find_context_has_lokey(context))
+		return true;
+
+	/*
+	 * Keyed on the leaf's identity: stepping to a sibling changes blkno, and
+	 * a concurrent reuse of the same buffer changes pageChangeCount.  The
+	 * bound is keyed too, because a caller may hand a different one to the
+	 * next fetch without the leaf changing; o_btree_iterator_advance()
+	 * additionally invalidates, since it rewrites a bound in place.
+	 */
+	if (!it->endPageValid ||
+		it->endPageBlkno != item->blkno ||
+		it->endPageChangeCount != item->pageChangeCount ||
+		it->endPageKey != end->key)
+	{
+		it->endOnPage = page_contains_end(it, context->img,
+										  get_lokey_if_exists(it), end);
+		it->endPageBlkno = item->blkno;
+		it->endPageChangeCount = item->pageChangeCount;
+		it->endPageKey = end->key;
+		it->endPageValid = true;
+	}
+
+	return it->endOnPage;
 }
 
 /*
