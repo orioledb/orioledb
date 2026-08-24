@@ -135,11 +135,24 @@ is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 
 	for (i = numPrefixExactKeys + 1; valid && i < low->nkeys; i++)
 	{
-		int			attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple,
-														  id, i + 1);
+		int			attnum;
 		bool		isnull;
-		Datum		value = o_fastgetattr(tup, attnum, id->leafTupdesc,
-										  &id->leafSpec, &isnull);
+		Datum		value;
+
+		/*
+		 * Both tests below are skipped for an unbounded side, so a key column
+		 * unbounded at both ends has no say in the verdict.  Decoding it
+		 * would still cost a walk of the tuple up to that column, once per
+		 * row -- and the trailing columns of a multi-column index are exactly
+		 * the ones a range query leaves unbounded.
+		 */
+		if ((low->keys[i].flags & O_VALUE_BOUND_UNBOUNDED) &&
+			(high->keys[i].flags & O_VALUE_BOUND_UNBOUNDED))
+			continue;
+
+		attnum = OIndexKeyAttnumToTupleAttnum(BTreeKeyLeafTuple, id, i + 1);
+		value = o_fastgetattr(tup, attnum, id->leafTupdesc,
+							  &id->leafSpec, &isnull);
 
 		if (!(low->keys[i].flags & O_VALUE_BOUND_UNBOUNDED))
 		{
