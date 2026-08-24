@@ -310,6 +310,60 @@ tts_orioledb_getsomeattrs(TupleTableSlot *slot, int __natts)
 		natts = oslot->state.desc->natts;
 	}
 
+	/*
+	 * Fast path for a fixed-format tuple read in index order.
+	 *
+	 * o_tuple_fill() clears O_TUPLE_FLAGS_FIXED_FORMAT as soon as one
+	 * attribute is NULL or falls outside the fixed prefix that
+	 * fillFixedFormatSpec() measured, and that prefix only admits an
+	 * attribute whose attlen is positive.  The flag therefore already means
+	 * the tuple holds every attribute of the descriptor, each fixed width and
+	 * non-NULL.  That leaves nothing for the NULL bitmap, the TOAST pointer
+	 * test or the isfilled array that feeds slot_getmissingattrs(), and
+	 * reduces the offsets to a running sum -- exactly what
+	 * o_tuple_next_field_offset() computes one out-of-line call at a time.
+	 * Doing it inline here is the same arithmetic without the per-attribute
+	 * call and branches.
+	 */
+	if ((oslot->tuple.formatFlags & O_TUPLE_FLAGS_FIXED_FORMAT) &&
+		index_order &&
+		oslot->leafTuple &&
+		oslot->ixnum != PrimaryIndexNumber &&
+		oslot->ixnum != BridgeIndexNumber &&
+		slot->tts_nvalid == 0 &&
+		oslot->state.attnum == 0)
+	{
+		TupleDesc	leafTupdesc = idx->leafTupdesc;
+		char	   *tp = oslot->state.tp;
+		uint32		off = 0;
+		int			nvalues = natts;
+
+		/* The flag guarantees this; the loop below reads the whole prefix. */
+		Assert(natts == idx->leafSpec.natts);
+
+		/*
+		 * The trailing ctid is not a table column; the generic path reads it
+		 * only to assert it against tts_tid, which tts_orioledb_init_reader()
+		 * has already set from the same tuple.
+		 */
+		if (GET_PRIMARY(descr)->primaryIsCtid)
+			nvalues--;
+
+		for (attnum = 0; attnum < nvalues; attnum++)
+		{
+			OTupleAttrCompact *att = OTupleDescAttrFast(leafTupdesc, attnum);
+
+			Assert(att->attlen > 0);
+			off = o_att_align_nominal(att, off);
+			values[attnum] = fetchatt(att, tp + off);
+			isnull[attnum] = false;
+			off += att->attlen;
+		}
+
+		slot->tts_nvalid = nvalues;
+		return;
+	}
+
 	{
 		int			needed = Max(natts, __natts);
 
