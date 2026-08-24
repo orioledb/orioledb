@@ -763,7 +763,14 @@ o_find_tuple_version(BTreeDescr *desc, Page p, BTreePageItemLocator *loc,
 
 	BTREE_PAGE_READ_LEAF_ITEM(tupHdrPtr, curTuple, p, loc);
 	tupHdr = *tupHdrPtr;
-	(void) find_non_lock_only_undo_record(desc->undoType, &tupHdr);
+
+	/*
+	 * find_non_lock_only_undo_record() walks the chain only while the header
+	 * is lock-only, so it leaves an ordinary tuple untouched.  Test that here
+	 * to keep the out-of-line call off the per-tuple path of a scan.
+	 */
+	if (XACT_INFO_IS_LOCK_ONLY(tupHdr.xactInfo))
+		(void) find_non_lock_only_undo_record(desc->undoType, &tupHdr);
 
 	Assert(COMMITSEQNO_IS_NORMAL(oSnapshot->csn) ||
 		   COMMITSEQNO_IS_INPROGRESS(oSnapshot->csn));
