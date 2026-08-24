@@ -34,6 +34,7 @@
 #include "access/xlog.h"
 #include "common/hashfn.h"
 #include "executor/executor.h"
+#include "nodes/tidbitmap.h"
 #include "executor/nodeIndexscan.h"
 #include "executor/nodeModifyTable.h"
 #if PG_VERSION_NUM >= 180000
@@ -1664,9 +1665,22 @@ o_bitmap_scan_reinit_dsm(CustomScanState *node, ParallelContext *pcxt,
 		(OBitmapHeapPlanState *) ocstate->o_plan_state;
 	ParallelOBitmapScan pbitmap = (ParallelOBitmapScan) coordinate;
 
-	/* Drop a bitmap built by the previous scan iteration (rescan). */
-	if (DsaPointerIsValid(pbitmap->bitmap_dsa) && bitmap_state->dsa != NULL)
-		dsa_free(bitmap_state->dsa, pbitmap->bitmap_dsa);
+	/* Drop what the previous scan iteration built (rescan). */
+	if (bitmap_state->dsa != NULL)
+	{
+		if (DsaPointerIsValid(pbitmap->bitmap_dsa))
+			dsa_free(bitmap_state->dsa, pbitmap->bitmap_dsa);
+
+		/*
+		 * The bridged path publishes a shared TIDBitmap iterator for the
+		 * workers to attach to (tbm_prepare_shared_iterate()).  It is a DSA
+		 * allocation of its own, so clearing the pointer below would leak it
+		 * once per rescan; ExecBitmapHeapReInitializeDSM() frees its
+		 * equivalent here for the same reason.
+		 */
+		if (DsaPointerIsValid(pbitmap->tbm_iter))
+			tbm_free_shared_area(bitmap_state->dsa, pbitmap->tbm_iter);
+	}
 
 	orioledb_parallelscan_initialize_inner(&pbitmap->poscan.phs_base);
 	pbitmap->stage = OBITMAP_PARALLEL_NEW;
