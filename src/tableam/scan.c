@@ -1204,6 +1204,16 @@ o_rescan_custom_scan(CustomScanState *node)
 		if (bitmap_state->scan)
 			o_free_bitmap_scan(bitmap_state->scan);
 
+		/*
+		 * The shared bitmap must already be reset by o_bitmap_scan_reinit_dsm
+		 * before we get here.  Gather always calls ReInitializeDSM before
+		 * ReScan on its parallel-aware children, so pbitmap should never
+		 * still be READY at this point; catch it if that ordering is ever
+		 * broken instead of silently reattaching stale shared state.
+		 */
+		Assert(bitmap_state->pbitmap == NULL ||
+			   bitmap_state->pbitmap->stage != OBITMAP_PARALLEL_READY);
+
 		if (is_explain_analyze(ocstate->o_plan_state->plan_state))
 			pfree(bitmap_state->eaCounters);
 		bitmap_state->scan = NULL;

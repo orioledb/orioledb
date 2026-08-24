@@ -754,6 +754,24 @@ SELECT count(*), sum(a) FROM o_test_parallel_bitmap_fixed
 SET LOCAL max_parallel_workers_per_gather = 0;
 SELECT count(*), sum(a) FROM o_test_parallel_bitmap_fixed
 	WHERE val < 40 AND sqrt(a::float8) >= 0;
+
+-- Rescan: put the parallel bitmap scan's Gather on the inner side of a
+-- nested loop (enable_material = off keeps it from being materialized away),
+-- so it is shut down and relaunched once per outer row.  This exercises
+-- o_bitmap_scan_reinit_dsm's dsa_free-then-reset of the shared bitmap
+-- between rescans.
+SET LOCAL max_parallel_workers_per_gather = 3;
+SET LOCAL enable_material = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM
+		(SELECT count(*), sum(id) FROM o_test_parallel_bitmap
+			WHERE val < 50 AND sqrt(id::float8) >= 0) ss
+		RIGHT JOIN (VALUES (1), (2), (3)) v(x) ON true;
+SELECT * FROM
+	(SELECT count(*), sum(id) FROM o_test_parallel_bitmap
+		WHERE val < 50 AND sqrt(id::float8) >= 0) ss
+	RIGHT JOIN (VALUES (1), (2), (3)) v(x) ON true;
+RESET enable_material;
 COMMIT;
 
 -- Parallel bitmap scan over a single bridged (non-orioledb) index.  The bitmap
