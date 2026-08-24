@@ -833,6 +833,34 @@ SELECT count(*), sum(id) FROM o_test_parallel_bitmap_bridged
 SET LOCAL max_parallel_workers_per_gather = 3;
 SELECT count(*) FROM o_test_parallel_bitmap_bridged
 	WHERE val = 999999 AND sqrt(id::float8) >= 0;
+
+-- Rescan of the bridged path.  Putting the Gather on the inner side of a
+-- nested loop (enable_material = off keeps it from being materialized away)
+-- shuts it down and relaunches it once per outer row, so o_bitmap_scan_reinit_
+-- dsm() runs between iterations on a scan that published a shared TIDBitmap
+-- iterator -- the one path where it has a tbm_iter to release, and one no
+-- other test reaches.
+--
+-- What this checks is that reinitializing does not disturb a live scan: a
+-- misplaced free of the shared iterator surfaces here as a crash or a wrong
+-- count.  It cannot check that the shared state was reset at all, because the
+-- bound is the same on every iteration, so a bitmap carried over from the
+-- previous one would still give the right answer.  A correlated bound would
+-- distinguish the two, but the planner does not put a Gather under a
+-- parameterized nested loop, so that plan shape is not reachable from SQL.
+SET LOCAL enable_material = off;
+EXPLAIN (COSTS OFF)
+	SELECT * FROM
+		(SELECT count(*) AS cnt, sum(id) AS total
+			FROM o_test_parallel_bitmap_bridged
+			WHERE val < 50 AND sqrt(id::float8) >= 0) ss
+		RIGHT JOIN (VALUES (1), (2), (3)) v(x) ON true;
+SELECT * FROM
+	(SELECT count(*) AS cnt, sum(id) AS total
+		FROM o_test_parallel_bitmap_bridged
+		WHERE val < 50 AND sqrt(id::float8) >= 0) ss
+	RIGHT JOIN (VALUES (1), (2), (3)) v(x) ON true;
+RESET enable_material;
 COMMIT;
 
 DROP EXTENSION orioledb CASCADE;
