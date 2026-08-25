@@ -120,6 +120,35 @@ row_key_tuple_is_valid(OBtreeRowKeyBound *row_key, OTuple tup, OIndexDescr *id,
 	return valid;
 }
 
+/*
+ * Could is_tuple_valid() reject any tuple of this key range?
+ *
+ * Its loops are driven entirely by the range and the scan keys, so when all of
+ * them would spin zero times the answer is "no" for every row of the range.
+ * The function then does nothing and costs only the call -- which over a
+ * million rows is not nothing.  Decide it once per range instead.
+ */
+static bool
+tuple_valid_check_needed(OBTreeKeyRange *range, BTScanOpaque so,
+						 int numPrefixExactKeys)
+{
+	int			i;
+
+	if (so->numArrayKeys != 0)
+		return true;
+	if (range->low.n_row_keys != 0 || range->high.n_row_keys != 0)
+		return true;
+
+	for (i = numPrefixExactKeys + 1; i < range->low.nkeys; i++)
+	{
+		if (!(range->low.keys[i].flags & O_VALUE_BOUND_UNBOUNDED) ||
+			!(range->high.keys[i].flags & O_VALUE_BOUND_UNBOUNDED))
+			return true;
+	}
+
+	return false;
+}
+
 static bool
 is_tuple_valid(OTuple tup, OIndexDescr *id, OBTreeKeyRange *range,
 			   BTScanOpaque so, int numPrefixExactKeys)
@@ -634,6 +663,9 @@ switch_to_next_range(OIndexDescr *indexDescr, OScanState *ostate,
 										  indexDescr->nonLeafTupdesc->natts,
 										  indexDescr->fields);
 	ostate->curKeyRangeIsLoaded = true;
+	ostate->tupleValidNeeded = tuple_valid_check_needed(&ostate->curKeyRange,
+														so,
+														ostate->numPrefixExactKeys);
 
 	if (!ostate->exact)
 	{
@@ -831,10 +863,11 @@ o_iterate_index(OIndexDescr *indexDescr, OScanState *ostate,
 					tup_is_valid = true;
 				else
 				{
-					tup_is_valid = is_tuple_valid(tup, indexDescr,
-												  &ostate->curKeyRange,
-												  so,
-												  ostate->numPrefixExactKeys);
+					tup_is_valid = !ostate->tupleValidNeeded ||
+						is_tuple_valid(tup, indexDescr,
+									   &ostate->curKeyRange,
+									   so,
+									   ostate->numPrefixExactKeys);
 					if (tup_is_valid && indexDescr->desc.type == oIndexExclusion)
 					{
 						TupleDesc	tupdesc;
@@ -1351,6 +1384,11 @@ o_exec_parallel_idx_scan(OScanState *ostate, ScanState *ss)
 			int			numPrefix = so->numArrayKeys > 0 ? 0 :
 				ostate->numPrefixExactKeys;
 
+			/*
+			 * No tupleValidNeeded shortcut here: this path publishes its key
+			 * range without going through switch_to_next_range(), so the flag
+			 * is not maintained for it.
+			 */
 			if (!is_tuple_valid(tuple, indexDescr, &ostate->curKeyRange,
 								so, numPrefix))
 				continue;
