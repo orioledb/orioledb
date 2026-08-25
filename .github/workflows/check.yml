@@ -49,6 +49,7 @@ jobs:
           SEL_PG: ${{ github.event.inputs.pg_version || 'all' }}
           SEL_COMP: ${{ github.event.inputs.compiler || 'all' }}
           SEL_CT: ${{ github.event.inputs.check_type || 'all' }}
+          REPEATS: ${{ github.event.inputs.repeats || '1' }}
         run: |
           import os, json, itertools
 
@@ -69,6 +70,12 @@ jobs:
           except ValueError:
               fanout = 1
           fanout = max(1, fanout)
+
+          try:
+              repeats = int(os.environ.get("REPEATS") or 1)
+          except ValueError:
+              repeats = 1
+          repeats = max(1, repeats)
 
           # A dispatch may narrow the matrix to the cell being chased.  Any
           # narrowing selects out of the *full* matrix, since the point is to
@@ -99,6 +106,23 @@ jobs:
               ]
               if not cells:
                   raise SystemExit(f"::error::no matrix cell matches {sel}")
+
+              # The check step's budget scales with the repeat count.  It is
+              # computed here because GitHub expressions have no arithmetic:
+              # multiplying in the workflow makes the file fail to parse.
+              for cell in cells:
+                  ct = cell["check_type"]
+                  base = (150 if ct.startswith("valgrind_")
+                          else 60 if ct == "dm_log_writes"
+                          else 40 if ct == "sanitize"
+                          else 30)
+                  budget = base * repeats
+                  if budget > 350:
+                      print(f"::warning::{ct} needs {budget} min for "
+                            f"{repeats} repeats, over the 6h job limit; "
+                            f"capping at 350")
+                      budget = 350
+                  cell["timeout"] = budget
               limit = max(1, 256 // len(cells))
               if fanout > limit:
                   print(f"::warning::jobs={fanout} would need {fanout * len(cells)} "
@@ -206,7 +230,7 @@ jobs:
         run: bash ./orioledb/ci/post_build_prerequisites.sh
 
       - name: Check
-        timeout-minutes: ${{ (startsWith(matrix.check_type, 'valgrind_') && 150 || (matrix.check_type == 'dm_log_writes' && 60 || (matrix.check_type == 'sanitize' && 40 || 30))) * fromJSON(github.event.inputs.repeats || '1') }}
+        timeout-minutes: ${{ matrix.timeout }}
         env:
           REPEATS: ${{ github.event.inputs.repeats || '1' }}
         run: |
