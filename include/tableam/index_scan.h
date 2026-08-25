@@ -40,6 +40,14 @@ typedef struct OScanState
 	bool		onlyCurIx;
 	bool		returning;
 	bool		curKeyRangeIsLoaded;
+
+	/*
+	 * Can is_tuple_valid() reject anything for the current key range?  When
+	 * every trailing key column is unbounded at both ends and there are no
+	 * row keys or array keys it cannot, and calling it per row buys nothing
+	 * but its own prologue and epilogue.  Recomputed wherever the range is.
+	 */
+	bool		tupleValidNeeded;
 	int			numPrefixExactKeys;
 	bool		exact;
 #if PG_VERSION_NUM >= 180000
