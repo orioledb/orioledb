@@ -147,6 +147,7 @@ REGRESSCHECKS = btree_sys_check \
 				trigger \
 				truncate \
 				types \
+				unique_slowpath \
 				database_template
 ISOLATIONCHECKS = bitmap_hist_scan \
 				  bitmap_for_update_epq \
