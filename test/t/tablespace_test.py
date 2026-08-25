@@ -47,67 +47,6 @@ class TablespaceTest(BaseTest):
 		    20000)
 		node.stop()
 
-	def test_secondary_index_survives_table_tablespace_move(self):
-		"""
-		ALTER TABLE ... SET TABLESPACE moves only the table's own storage;
-		a secondary index keeps its own tablespace and must keep working.
-		The move rewrites the table under a new relnode, so the index is
-		rebuilt -- but it must be rebuilt in the tablespace it still lives in
-		instead of being unlinked and left behind, which made even a plain
-		count(*) fail with "could not open file ...".
-		"""
-		ts1_dir = tempfile.mkdtemp(prefix='oriole_ts1_')
-		ts2_dir = tempfile.mkdtemp(prefix='oriole_ts2_')
-		self.addCleanup(shutil.rmtree, ts1_dir, ignore_errors=True)
-		self.addCleanup(shutil.rmtree, ts2_dir, ignore_errors=True)
-
-		node = self.node
-		node.start()
-
-		node.safe_psql('postgres',
-		               f"CREATE TABLESPACE ots1 LOCATION '{ts1_dir}';")
-		node.safe_psql('postgres',
-		               f"CREATE TABLESPACE ots2 LOCATION '{ts2_dir}';")
-		# The database itself lives in ots1, so the table and its index both
-		# default to ots1 and only the table is moved away.
-		node.safe_psql('postgres',
-		               "CREATE DATABASE ts_move_db TABLESPACE ots1;")
-		node.safe_psql('ts_move_db', "CREATE EXTENSION orioledb;")
-		node.safe_psql(
-		    'ts_move_db', """
-			CREATE TABLE test_tbl (id int, val int, data text) USING orioledb;
-			CREATE INDEX test_tbl_data_idx ON test_tbl (data);
-			INSERT INTO test_tbl
-				SELECT x, 2 * x, 'test' || x FROM generate_series(1, 1000) x;
-		""")
-		node.safe_psql('ts_move_db', "CHECKPOINT;")
-
-		node.safe_psql('ts_move_db',
-		               "ALTER TABLE test_tbl SET TABLESPACE ots2;")
-
-		self.assertEqual(
-		    node.execute('ts_move_db', "SELECT count(*) FROM test_tbl;")[0][0],
-		    1000)
-		with node.connect('ts_move_db') as con:
-			con.execute("SET enable_seqscan = off;")
-			self.assertEqual(
-			    con.execute("SELECT count(*) FROM test_tbl "
-			                "WHERE data = 'test500';")[0][0], 1)
-
-		# The rebuilt index must also survive a checkpoint and a restart.
-		node.safe_psql('ts_move_db', "CHECKPOINT;")
-		node.restart()
-
-		self.assertEqual(
-		    node.execute('ts_move_db', "SELECT count(*) FROM test_tbl;")[0][0],
-		    1000)
-		with node.connect('ts_move_db') as con:
-			con.execute("SET enable_seqscan = off;")
-			self.assertEqual(
-			    con.execute("SELECT count(*) FROM test_tbl "
-			                "WHERE data = 'test500';")[0][0], 1)
-		node.stop()
-
 	def test_secondary_index_in_own_tablespace_survives_table_move(self):
 		"""
 		The index's own tablespace is the one it must be rebuilt in, which is
@@ -165,4 +104,122 @@ class TablespaceTest(BaseTest):
 		self.assertEqual(
 		    node.execute('postgres', "SELECT count(*) FROM t_split;")[0][0],
 		    500)
+		node.stop()
+
+	def test_secondary_index_survives_rolled_back_tablespace_move(self):
+		"""
+		A SET TABLESPACE performed inside a subtransaction that is then
+		rolled back must leave the table and every secondary index usable.
+		This exercises the abort path of the relocate: the new primary/toast
+		trees built for the move are dropped on rollback, the old primary is
+		kept, and -- critically -- the secondary index trees and their
+		OIndex sys-tree chunks (shared between the old and the never-committed
+		new o_table) must survive the rollback intact.  A regression here
+		corrupts the secondary index on any rolled-back SET TABLESPACE.
+		"""
+		ts1_dir = tempfile.mkdtemp(prefix='oriole_ts1_')
+		ts2_dir = tempfile.mkdtemp(prefix='oriole_ts2_')
+		self.addCleanup(shutil.rmtree, ts1_dir, ignore_errors=True)
+		self.addCleanup(shutil.rmtree, ts2_dir, ignore_errors=True)
+
+		node = self.node
+		node.start()
+
+		node.safe_psql('postgres',
+		               f"CREATE TABLESPACE ots1 LOCATION '{ts1_dir}';")
+		node.safe_psql('postgres',
+		               f"CREATE TABLESPACE ots2 LOCATION '{ts2_dir}';")
+
+		node.safe_psql('postgres',
+		               "CREATE DATABASE ts_rollback_db TABLESPACE ots1;")
+		node.safe_psql('ts_rollback_db', "CREATE EXTENSION orioledb;")
+		node.safe_psql(
+		    'ts_rollback_db', """
+			CREATE TABLE rb_tbl (id int, val int, data text) USING orioledb;
+			CREATE INDEX rb_tbl_data_idx ON rb_tbl (data);
+			INSERT INTO rb_tbl
+				SELECT x, 2 * x, 'rb' || x FROM generate_series(1, 1000) x;
+		""")
+		node.safe_psql('ts_rollback_db', "CHECKPOINT;")
+
+		# Move the table to ots2 inside a savepoint, then roll it back.
+		# The table must end up unchanged and still in ots1, with its
+		# secondary index fully intact.
+		with node.connect('ts_rollback_db') as con:
+			con.execute("SAVEPOINT sp;")
+			con.execute("ALTER TABLE rb_tbl SET TABLESPACE ots2;")
+			con.execute("ROLLBACK TO sp;")
+
+		# The index must still resolve every row it held before the move.
+		with node.connect('ts_rollback_db') as con:
+			con.execute("SET enable_seqscan = off;")
+			self.assertEqual(
+			    con.execute("SELECT count(*) FROM rb_tbl "
+			                "WHERE data = 'rb500';")[0][0], 1)
+			self.assertEqual(
+			    con.execute("SELECT count(*) FROM rb_tbl;")[0][0], 1000)
+
+		# A subsequent, committing SET TABLESPACE must still work after the
+		# rolled-back one -- the abort must not have left the relocate undo
+		# machinery in a wedged state.
+		node.safe_psql('ts_rollback_db',
+		               "ALTER TABLE rb_tbl SET TABLESPACE ots2;")
+		with node.connect('ts_rollback_db') as con:
+			con.execute("SET enable_seqscan = off;")
+			self.assertEqual(
+			    con.execute("SELECT count(*) FROM rb_tbl "
+			                "WHERE data = 'rb500';")[0][0], 1)
+		self.assertEqual(
+		    node.execute('ts_rollback_db',
+		                 "SELECT count(*) FROM rb_tbl;")[0][0], 1000)
+		node.stop()
+
+	def test_secondary_index_survives_table_move_crash(self):
+		"""
+		Crash (SIGKILL via -m immediate) after SET TABLESPACE and CHECKPOINT,
+		then restart and verify the rebuilt/ relocated primary and the carried
+		secondary index still resolve.  Exercises the relnode-undo callback
+		replay on recovery for the tablespace relocate path.
+		"""
+		ts1_dir = tempfile.mkdtemp(prefix='oriole_ts1_')
+		ts2_dir = tempfile.mkdtemp(prefix='oriole_ts2_')
+		self.addCleanup(shutil.rmtree, ts1_dir, ignore_errors=True)
+		self.addCleanup(shutil.rmtree, ts2_dir, ignore_errors=True)
+
+		node = self.node
+		node.start()
+
+		node.safe_psql('postgres',
+		               f"CREATE TABLESPACE ots1 LOCATION '{ts1_dir}';")
+		node.safe_psql('postgres',
+		               f"CREATE TABLESPACE ots2 LOCATION '{ts2_dir}';")
+		node.safe_psql('postgres',
+		               "CREATE DATABASE ts_crash_db TABLESPACE ots1;")
+		node.safe_psql('ts_crash_db', "CREATE EXTENSION orioledb;")
+		node.safe_psql(
+		    'ts_crash_db', """
+			CREATE TABLE crash_tbl (id int, val int, data text) USING orioledb;
+			CREATE INDEX crash_tbl_data_idx ON crash_tbl (data);
+			INSERT INTO crash_tbl
+				SELECT x, 2 * x, 'cr' || x FROM generate_series(1, 1000) x;
+		""")
+		node.safe_psql('ts_crash_db', "CHECKPOINT;")
+
+		node.safe_psql('ts_crash_db',
+		               "ALTER TABLE crash_tbl SET TABLESPACE ots2;")
+		node.safe_psql('ts_crash_db', "CHECKPOINT;")
+
+		# Crash: -m immediate skips the shutdown checkpoint, forcing WAL
+		# replay (and the relnode undo callback) on restart.
+		node.stop(['-m', 'immediate'])
+		node.start()
+
+		self.assertEqual(
+		    node.execute('ts_crash_db',
+		                 "SELECT count(*) FROM crash_tbl;")[0][0], 1000)
+		with node.connect('ts_crash_db') as con:
+			con.execute("SET enable_seqscan = off;")
+			self.assertEqual(
+			    con.execute("SELECT count(*) FROM crash_tbl "
+			                "WHERE data = 'cr500';")[0][0], 1)
 		node.stop()
