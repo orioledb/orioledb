@@ -2885,7 +2885,44 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary, Oid oldRelnode
 			{
 				o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
 				relation_close(ind, AccessShareLock);
-				o_define_index(rel, NULL, ind->rd_rel->oid, false,
+
+				/*
+				 * "ALTER TABLE ... SET TABLESPACE" (oldRelnode is the table's
+				 * pre-move relnode) rewrote the table under a new relnode, so
+				 * every secondary index is rebuilt just below.  Give it a
+				 * relnode of its own first.
+				 *
+				 * orioledb_relation_set_new_filenode() already queued all of
+				 * the old table's trees -- this index's included -- for
+				 * removal at commit, and an OrioleDB tree is identified by
+				 * (datoid, relnode, tablespace).  A secondary index keeps its
+				 * own tablespace across the move, so rebuilding it in place
+				 * would give the new tree the exact key that is queued for
+				 * the drop: the commit would then delete the index that was
+				 * just built, leaving it empty, and unlink the index's
+				 * relation file while pg_class still points at it.
+				 *
+				 * Only ctid tables need this here.  A table with a primary
+				 * key reaches assign_new_oids() through the primary pass's
+				 * o_define_index(), and that already gives every index a new
+				 * relnode; the primary pass below covers only toast for the
+				 * tables that miss it.
+				 *
+				 * The new relnode stays in the index's own tablespace, which
+				 * is where the index remains: SET TABLESPACE moves only the
+				 * table's storage.
+				 */
+				if (!primary && OidIsValid(oldRelnode) &&
+					!new_o_table->has_primary)
+				{
+					Relation	iRel = index_open(indexOid, AccessExclusiveLock);
+
+					RelationSetNewRelfilenode(iRel, iRel->rd_rel->relpersistence);
+					index_close(iRel, AccessExclusiveLock);
+					CommandCounterIncrement();
+				}
+
+				o_define_index(rel, NULL, indexOid, false,
 							   InvalidIndexNumber, oldRelnode,
 							   false, NULL);
 				closed = true;
