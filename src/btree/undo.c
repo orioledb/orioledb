@@ -1891,8 +1891,26 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			prev_tuphdr = curTuphdr;
 			if (!get_prev_leaf_header_from_undo_if_exists(undoType, &prev_tuphdr))
 			{
-				/* Undo gone — skip deletion, treat as end of chain */
-				goto next_record;
+				/*
+				 * Undo gone — end of chain.  Return like the !delete_record
+				 * path; we cannot advance curTuphdr here, so falling through
+				 * to next_record would spin forever when
+				 * retainedUndoLocation <= undoLocation < minProcRetainLocation.
+				 */
+				if (curTuphdr.chainHasLocks)
+				{
+					clean_chain_has_locks_flag(undoType,
+											   lastLockOnlyUndoLocation,
+											   pageTuphdr,
+											   blkno);
+					lastLockOnlyUndoLocation = InvalidUndoLocation;
+				}
+				if (!result)
+				{
+					*conflictTuphdr = finalTuphdr;
+					*conflictUndoLocation = finalUndoLocation;
+				}
+				return result;
 			}
 			if (!UndoLocationIsValid(curUndoLocation))
 			{
@@ -1927,7 +1945,6 @@ row_lock_conflicts(BTreeLeafTuphdr *pageTuphdr,
 			}
 		}
 
-next_record:
 		if (!UndoLocationIsValid(undoLocation) ||
 			undoLocation < retainedUndoLocation)
 		{
