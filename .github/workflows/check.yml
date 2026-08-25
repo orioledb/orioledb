@@ -5,6 +5,35 @@ on:
     branches: ["main"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      jobs:
+        description: 'Parallel copies of every matrix cell (flake hunting)'
+        required: false
+        default: '1'
+      repeats:
+        description: 'Times to run the check inside one job'
+        required: false
+        default: '1'
+      cpu:
+        description: 'Narrow to one CPU (all = the usual dispatch set)'
+        type: choice
+        options: [all, amd64, arm64]
+        default: all
+      pg_version:
+        description: 'Narrow to one PostgreSQL major'
+        type: choice
+        options: [all, '16', '17', '18']
+        default: all
+      compiler:
+        description: 'Narrow to one compiler'
+        type: choice
+        options: [all, clang, gcc]
+        default: all
+      check_type:
+        description: 'Narrow to one check type'
+        type: choice
+        options: [all, normal, debug, sanitize, check_page, valgrind_1, valgrind_2, pg_tests, dm_log_writes]
+        default: all
 
 jobs:
   matrix:
@@ -14,6 +43,12 @@ jobs:
     steps:
       - id: gen
         shell: python
+        env:
+          FANOUT: ${{ github.event.inputs.jobs || '1' }}
+          SEL_CPU: ${{ github.event.inputs.cpu || 'all' }}
+          SEL_PG: ${{ github.event.inputs.pg_version || 'all' }}
+          SEL_COMP: ${{ github.event.inputs.compiler || 'all' }}
+          SEL_CT: ${{ github.event.inputs.check_type || 'all' }}
         run: |
           import os, json, itertools
 
@@ -25,13 +60,54 @@ jobs:
               "valgrind_1", "valgrind_2", "pg_tests", "dm_log_writes",
           ]
 
+          # workflow_dispatch can ask for several copies of every cell, so a
+          # flaky test gets many independent shots at failing.  GitHub refuses
+          # a matrix above 256 jobs outright, so clamp rather than let the run
+          # die on a number that looked reasonable.
+          try:
+              fanout = int(os.environ.get("FANOUT") or 1)
+          except ValueError:
+              fanout = 1
+          fanout = max(1, fanout)
+
+          # A dispatch may narrow the matrix to the cell being chased.  Any
+          # narrowing selects out of the *full* matrix, since the point is to
+          # reach a cell the abbreviated sets skip; with everything left at
+          # "all" the dispatch keeps the set it has today.
+          sel = {
+              "cpu": os.environ.get("SEL_CPU") or "all",
+              "pg_version": os.environ.get("SEL_PG") or "all",
+              "compiler": os.environ.get("SEL_COMP") or "all",
+              "check_type": os.environ.get("SEL_CT") or "all",
+          }
+          narrowed = any(v != "all" for v in sel.values())
+
+          def keep(cell):
+              return all(v == "all" or str(cell[k]) == v for k, v in sel.items())
+
           # dm-log-writes needs a kernel module unavailable on arm64 runners
           def make_matrix(combos):
+              global fanout
+
+              cells = [
+                  cell
+                  for (cpu, pg, comp), ct in itertools.product(combos, check_types)
+                  if not (cpu == "arm64" and ct == "dm_log_writes")
+                  for cell in [{"cpu": cpu, "pg_version": pg,
+                                "compiler": comp, "check_type": ct}]
+                  if keep(cell)
+              ]
+              if not cells:
+                  raise SystemExit(f"::error::no matrix cell matches {sel}")
+              limit = max(1, 256 // len(cells))
+              if fanout > limit:
+                  print(f"::warning::jobs={fanout} would need {fanout * len(cells)} "
+                        f"matrix jobs, over GitHub's limit of 256; using {limit}")
+                  fanout = limit
               return {
                   "include": [
-                      {"cpu": cpu, "pg_version": pg, "compiler": comp, "check_type": ct}
-                      for (cpu, pg, comp), ct in itertools.product(combos, check_types)
-                      if not (cpu == "arm64" and ct == "dm_log_writes")
+                      dict(cell, run=r)
+                      for r, cell in itertools.product(range(1, fanout + 1), cells)
                   ]
               }
 
@@ -71,7 +147,9 @@ jobs:
               ("amd64", 18, "clang"),
           ]
 
-          if event_name == "pull_request":
+          if event_name == "workflow_dispatch" and narrowed:
+              combos = full_combos
+          elif event_name == "pull_request":
               with open(os.environ["GITHUB_EVENT_PATH"]) as f:
                   pr_event = json.load(f)
               head_repo = pr_event["pull_request"]["head"]["repo"]["full_name"]
@@ -128,8 +206,21 @@ jobs:
         run: bash ./orioledb/ci/post_build_prerequisites.sh
 
       - name: Check
-        timeout-minutes: ${{ startsWith(matrix.check_type, 'valgrind_') && 150 || (matrix.check_type == 'dm_log_writes' && 60 || (matrix.check_type == 'sanitize' && 40 || 30)) }}
-        run: bash ./orioledb/ci/check.sh
+        timeout-minutes: ${{ (startsWith(matrix.check_type, 'valgrind_') && 150 || (matrix.check_type == 'dm_log_writes' && 60 || (matrix.check_type == 'sanitize' && 40 || 30))) * fromJSON(github.event.inputs.repeats || '1') }}
+        env:
+          REPEATS: ${{ github.event.inputs.repeats || '1' }}
+        run: |
+          # Stop at the first failure: its diffs and logs are what the upload
+          # steps below collect, and a later pass would overwrite them.
+          for i in $(seq 1 "$REPEATS"); do
+            if [ "$REPEATS" != "1" ]; then
+              echo "::group::check attempt $i of $REPEATS"
+            fi
+            bash ./orioledb/ci/check.sh
+            if [ "$REPEATS" != "1" ]; then
+              echo "::endgroup::"
+            fi
+          done
 
       - name: Check output
         run: bash ./orioledb/ci/check_output.sh
@@ -139,7 +230,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_test.diffs
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_r${{ matrix.run }}_test.diffs
           path: |
             ./orioledb/test/**/regression.diffs
             ./orioledb/test/**/isolation_filtered.diffs
@@ -153,7 +244,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{ failure() }}
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_test.logs
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_r${{ matrix.run }}_test.logs
           path: |
             ./orioledb/test/tmp_check_t/*/logs/*log
             ./orioledb/test/tmp_check/log/*log
@@ -178,7 +269,7 @@ jobs:
         if: ${{ matrix.check_type != 'sanitize' && matrix.check_type != 'check_page' }}
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_coverage.info
+          name: ${{ matrix.pg_version }}_${{ matrix.cpu }}_${{ matrix.compiler }}_${{ matrix.check_type }}_r${{ matrix.run }}_coverage.info
           path: ./orioledb/coverage.info
           retention-days: 1
           overwrite: true
