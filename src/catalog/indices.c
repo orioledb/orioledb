@@ -1316,6 +1316,7 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 		ConditionVariableInit(&btshared->recoveryjoinedcv);
 	btshared->nrecoveryworkersjoined = 0;
 	btshared->nparticipantsdone = 0;
+	btshared->participantfailed = false;
 	btshared->reltuples = 0.0;
 	memset(btshared->indtuples, 0, INDEX_MAX_KEYS * sizeof(double));
 	orioledb_parallelscan_initialize_inner((ParallelTableScanDesc) &(btshared->poscan));
@@ -1433,6 +1434,17 @@ _o_index_begin_parallel(oIdxBuildState *buildstate, bool isconcurrent, int reque
 								"aborting build to avoid replica hang")));
 
 			/*
+			 * The probe above only catches a worker that died.  A worker
+			 * whose build raised swallows the error and stays alive, so it
+			 * never joins and never will; it reports that here instead.
+			 */
+			if (o_index_parallel_participant_failed(btshared))
+				ereport(ERROR,
+						(errcode(ERRCODE_INTERNAL_ERROR),
+						 errmsg("orioledb: parallel index build failed in a "
+								"participating worker before it joined")));
+
+			/*
 			 * We wait on a condition variable that will wake us as soon as
 			 * the pause ends, but we use a timeout so we can check the
 			 * ShutdownRequestPending periodically too.
@@ -1496,6 +1508,45 @@ _o_index_parallel_estimate_shared(Size o_table_size)
  * as a worker, we should end up here just as workers are finishing).
  *
  */
+/*
+ * Tell the leader that this participant's build raised, so it stops waiting
+ * for a report that is never coming.  Safe to call even when the leader has
+ * already given up: we still hold the DSM mapping, and a leader that is gone
+ * simply never reads the flag.
+ */
+/* Has any participant reported that its build raised? */
+bool
+o_index_parallel_participant_failed(oIdxShared *btshared)
+{
+	bool		failed;
+
+	SpinLockAcquire(&btshared->mutex);
+	failed = btshared->participantfailed;
+	SpinLockRelease(&btshared->mutex);
+
+	return failed;
+}
+
+void
+o_index_parallel_report_participant_failure(shm_toc *toc)
+{
+	oIdxShared *btshared = shm_toc_lookup(toc, PARALLEL_KEY_BTREE_SHARED, true);
+
+	if (btshared == NULL)
+		return;
+
+	SpinLockAcquire(&btshared->mutex);
+	btshared->participantfailed = true;
+	SpinLockRelease(&btshared->mutex);
+
+	/*
+	 * The leader may be parked in either of its two waits -- for participants
+	 * to join, or for them to finish sorting -- so wake both.
+	 */
+	ConditionVariableBroadcast(&btshared->recoveryjoinedcv);
+	ConditionVariableBroadcast(&btshared->workersdonecv);
+}
+
 static void
 _o_index_parallel_heapscan(oIdxBuildState *buildstate)
 {
@@ -1513,6 +1564,22 @@ _o_index_parallel_heapscan(oIdxBuildState *buildstate)
 	for (;;)
 	{
 		SpinLockAcquire(&btshared->mutex);
+		if (btshared->participantfailed)
+		{
+			SpinLockRelease(&btshared->mutex);
+			ConditionVariableCancelSleep();
+
+			/*
+			 * A participant's build raised.  Its sorted output is missing, so
+			 * finishing here would merge an incomplete result into a live
+			 * index; fail the whole build instead.  In recovery the caller
+			 * catches this, leaves the index in its BUILDING state and lets
+			 * replay go on.
+			 */
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("parallel index build failed in a participating worker")));
+		}
 		if (btshared->nparticipantsdone == nparticipanttuplesorts)
 		{
 			SpinLockRelease(&btshared->mutex);
@@ -1546,6 +1613,15 @@ _o_index_leader_participate_as_worker(oIdxBuildState *buildstate)
 	oIdxLeader *btleader = buildstate->btleader;
 	oIdxSpool  *leaderworker;
 	int			worker_sortmem;
+
+	/*
+	 * Holding the leader here lets a test hand the whole heap to the
+	 * participants, so a participant -- not the leader -- is the one that
+	 * evaluates a failing index expression.  That is the ordering that parks
+	 * the leader in _o_index_parallel_heapscan() waiting for a report the
+	 * participant will never send.
+	 */
+	STOPEVENT(STOPEVENT_INDEX_BUILD_LEADER_PARTICIPATE, NULL);
 
 	/* Allocate memory and initialize private spool */
 	leaderworker = (oIdxSpool *) palloc0(sizeof(oIdxSpool));

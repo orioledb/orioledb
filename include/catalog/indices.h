@@ -92,6 +92,14 @@ typedef struct oIdxShared
 	 * indtuples is the total number of tuples that made it into the index.
 	 */
 	int			nparticipantsdone;
+
+	/*
+	 * Set by a participant whose build raised, so the leader stops waiting
+	 * for a report that is never coming.  A participant that swallows its
+	 * error and just leaves would otherwise park the leader in
+	 * _o_index_parallel_heapscan() forever.
+	 */
+	bool		participantfailed;
 	int			nrecoveryworkersjoined;
 
 	double		reltuples;
@@ -107,6 +115,9 @@ typedef struct oIdxShared
 	char		o_table_serialized[FLEXIBLE_ARRAY_MEMBER];
 	/* old_o_table_serialized follows */
 } oIdxShared;
+
+extern void o_index_parallel_report_participant_failure(shm_toc *toc);
+extern bool o_index_parallel_participant_failed(oIdxShared *btshared);
 
 extern void o_define_index_validate(ORelOids oids, Relation index, IndexInfo *indexInfo, OTable *o_table);
 extern void o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
