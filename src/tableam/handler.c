@@ -2681,7 +2681,6 @@ relation_get_descr(Relation rel)
 
 	Assert(rel != NULL);
 
-	ORelOidsSetFromRel(oids, rel);
 	if (!is_orioledb_rel(rel))
 		ereport(ERROR,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -2689,6 +2688,12 @@ relation_get_descr(Relation rel)
 
 	if (rel->rd_amcache)
 		return (OTableDescr *) rel->rd_amcache;
+
+	/*
+	 * Only the lookup below needs the oids, and this runs once per row of a
+	 * custom scan, so do not build them on the cached path.
+	 */
+	ORelOidsSetFromRel(oids, rel);
 
 	result = o_fetch_table_descr(oids);
 	rel->rd_amcache = result;
