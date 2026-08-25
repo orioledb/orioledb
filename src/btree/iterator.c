@@ -1749,7 +1749,18 @@ o_btree_iterator_fetch_internal(BTreeIterator *it, CommitSeqNo *tupleCsn,
 
 	while (true)
 	{
-		if (!btree_iterator_check_load_next_page(it, end))
+		/*
+		 * While the current leaf still has items and we are not merging an
+		 * undo image, btree_iterator_check_load_next_page() has nothing to do
+		 * but return true: its undo pre-check bails out on !combinedPage and
+		 * its loop is this very condition.  Test it here so a row that stays
+		 * on the same leaf -- nearly all of them -- does not pay for the
+		 * call.
+		 */
+		if ((it->combinedPage ||
+			 !BTREE_PAGE_LOCATOR_IS_VALID(context->img,
+										  &context->items[context->index].locator)) &&
+			!btree_iterator_check_load_next_page(it, end))
 		{
 			O_TUPLE_SET_NULL(result);
 			return result;
