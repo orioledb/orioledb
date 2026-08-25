@@ -135,6 +135,8 @@ extern void rebuild_indices(OTable *old_o_table, OTableDescr *old_descr,
 							IndexBuildResult *result);
 extern void assign_new_oids(OTable *oTable, Relation rel, bool drop_pkey);
 extern void recreate_o_table(OTable *old_o_table, OTable *o_table);
+extern void recreate_o_table_ext(OTable *old_o_table, OTable *o_table,
+								bool carry_secondary);
 extern void build_secondary_index(Oid oldTblRelnode, OTable *o_table,
 								  OTableDescr *descr, OIndexNumber ix_num,
 								  bool in_dedicated_recovery_worker,

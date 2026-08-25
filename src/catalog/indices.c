@@ -261,6 +261,23 @@ assign_new_oids(OTable *oTable, Relation rel, bool drop_pkey)
 void
 recreate_o_table(OTable *old_o_table, OTable *o_table)
 {
+	recreate_o_table_ext(old_o_table, o_table, false);
+}
+
+/*
+ * Like recreate_o_table, but when `carry_secondary` is true the secondary
+ * index trees are NOT queued for commit-time drop.  Used by "ALTER TABLE ...
+ * SET TABLESPACE", which relocates only the table's own (primary/toast/ctid/
+ * bridge) storage and leaves the secondary indexes -- referenced by primary
+ * key / ctid, keeping their own tablespace -- untouched.  Queueing a
+ * secondary for drop here while the move's later o_define_index() rebuilds
+ * it under the same (datoid, reloid, relnode, spcoid) key is what made the
+ * commit delete the freshly-built index (issue #906).
+ */
+void
+recreate_o_table_ext(OTable *old_o_table, OTable *o_table,
+					 bool carry_secondary)
+{
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 	int			oldTreesNum,
@@ -278,8 +295,60 @@ recreate_o_table(OTable *old_o_table, OTable *o_table)
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
-	oldTrees = o_table_make_index_keys(old_o_table, &oldTreesNum);
-	newTrees = o_table_make_index_keys(o_table, &newTreesNum);
+	if (carry_secondary)
+	{
+		/*
+		 * Drop only the trees that actually move: primary, toast, ctid and
+		 * bridge.  Secondary index trees stay where they are (their own
+		 * tablespace, unchanged relnode), so omit them from oldTrees.
+		 * newTrees from the freshly-created o_table already excludes
+		 * secondaries (nindices covers only the primary pass here), so the
+		 * two lists match on primary/toast/ctid/bridge while secondaries are
+		 * absent from both -- the undo drop/keep diff leaves them intact.
+		 */
+		int			i,
+					num = 0;
+
+		oldTrees = (OIndexKey *) palloc(sizeof(OIndexKey) *
+									   (old_o_table->nindices + 3));
+		for (i = 0; i < old_o_table->nindices; i++)
+		{
+			OTableIndex *ix = &old_o_table->indices[i];
+
+			if (ix->type == oIndexUnique || ix->type == oIndexRegular ||
+				ix->type == oIndexExclusion)
+				continue;
+			oldTrees[num].oids = ix->oids;
+			oldTrees[num].oids.spcoid = ix->oids.spcoid;
+			num++;
+		}
+		if (ORelOidsIsValid(old_o_table->bridge_oids))
+		{
+			oldTrees[num].oids = old_o_table->bridge_oids;
+			oldTrees[num].oids.spcoid = old_o_table->oids.spcoid;
+			num++;
+		}
+		if (ORelOidsIsValid(old_o_table->toast_oids))
+		{
+			oldTrees[num].oids = old_o_table->toast_oids;
+			oldTrees[num].oids.spcoid = old_o_table->oids.spcoid;
+			num++;
+		}
+		if (old_o_table->nindices == 0 ||
+			old_o_table->indices[PrimaryIndexNumber].type != oIndexPrimary)
+		{
+			oldTrees[num].oids = old_o_table->oids;
+			oldTrees[num].oids.spcoid = old_o_table->oids.spcoid;
+			num++;
+		}
+		oldTreesNum = num;
+		newTrees = o_table_make_index_keys(o_table, &newTreesNum);
+	}
+	else
+	{
+		oldTrees = o_table_make_index_keys(old_o_table, &oldTreesNum);
+		newTrees = o_table_make_index_keys(o_table, &newTreesNum);
+	}
 
 	o_tables_drop_by_oids(old_o_table->oids, oxid, oSnapshot.csn);
 	o_tables_add(o_table, oxid, oSnapshot.csn);
@@ -470,6 +539,16 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	uint8		fillfactor = BTREE_DEFAULT_FILLFACTOR;
 	OBTOptions *options;
 	bool		setting_tbl_tablespace = OidIsValid(oldTblRelnode);
+	/*
+	 * For "ALTER TABLE ... SET TABLESPACE" a secondary index keeps its own
+	 * tablespace and its tree is unchanged, so we must NOT build a new tree
+	 * (which would overwrite the existing one in place and corrupt it on
+	 * rollback) nor queue a create-relnode undo for it (which would drop the
+	 * pre-existing tree on abort).  See recreate_o_table_ext() for why the
+	 * old secondary tree is also not queued for drop.  Only non-primary
+	 * indexes are carried; the primary is rebuilt by rewrite_table().
+	 */
+	bool		carry_secondary = setting_tbl_tablespace;
 
 	Assert(index == NULL || !(OidIsValid(indoid)));
 
@@ -501,6 +580,10 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	indnatts = index->rd_index->indnatts;
 	indnkeyatts = index->rd_index->indnkeyatts;
 	tablespace = index->rd_rel->reltablespace;
+
+	/* Only non-primary indexes are carried across a tablespace move. */
+	if (ix_type == oIndexPrimary)
+		carry_secondary = false;
 
 	if (OidIsValid(indoid))
 		index_close(index, AccessShareLock);
@@ -639,7 +722,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 	 * the table has data -- the actual build runs later from
 	 * orioledb_index_validate_scan.
 	 */
-	if (!reuse_relnode && is_build && !skip_build)
+	if (!reuse_relnode && is_build && !skip_build && !carry_secondary)
 		o_tables_table_meta_lock(NULL);
 	else
 		o_tables_table_meta_lock(o_table);
@@ -651,7 +734,15 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		old_descr = o_fetch_table_descr(old_o_table->oids);
 		ResourceOwnerRememberOTableDescr(CurrentResourceOwner, old_descr);
 
-		recreate_o_table(old_o_table, o_table);
+		/*
+		 * "ALTER TABLE ... SET TABLESPACE" (setting_tbl_tablespace, i.e.
+		 * oldTblRelnode is valid) relocates only the table's own storage;
+		 * secondary indexes keep their own tablespace and trees, so do not
+		 * queue them for commit-time drop (see recreate_o_table_ext).  Any
+		 * other primary recreate (TRUNCATE, ALTER COLUMN TYPE, etc.) drops
+		 * every old tree as before.
+		 */
+		recreate_o_table_ext(old_o_table, o_table, setting_tbl_tablespace);
 	}
 	else
 	{
@@ -661,7 +752,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 
 		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 		o_tables_update(o_table, oxid, oSnapshot.csn);
-		if (!reuse_relnode)
+		if (!reuse_relnode && !carry_secondary)
 		{
 			OIndexKey	key = {.oids = table_index->oids};
 
@@ -756,7 +847,7 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 		o_add_invalidate_undo_item(table_index->oids, O_INVALIDATE_OIDS_ON_ABORT);
 	}
 
-	if (!reuse_relnode && is_build && !skip_build)
+	if (!reuse_relnode && is_build && !skip_build && !carry_secondary)
 	{
 		o_tables_table_meta_unlock(NULL, InvalidOid);
 		if (STOPEVENTS_ENABLED())

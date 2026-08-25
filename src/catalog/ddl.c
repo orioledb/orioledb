@@ -115,6 +115,7 @@
 
 static IndexBuildResult o_pkey_result;
 static void o_drop_table(ORelOids oids);
+static void o_drop_table_ext(ORelOids oids, bool carry_secondary);
 
 typedef struct
 {
@@ -2407,6 +2408,21 @@ CreateOrioledbDestReceiver(Relation rel)
 static void
 o_drop_table(ORelOids oids)
 {
+	o_drop_table_ext(oids, false);
+}
+
+/*
+ * Like o_drop_table, but when `carry_secondary` is true the secondary index
+ * trees are NOT queued for commit-time drop.  Used by the "ALTER TABLE ...
+ * SET TABLESPACE" rewrite path: the secondary indexes keep their own
+ * tablespace and unchanged relnode, so their trees must survive the move.
+ * Queueing them here while the later o_define_index() rebuilds under the
+ * same (datoid, reloid, relnode, spcoid) key is what made the commit delete
+ * the freshly-built index for no-PK tables (issue #906).
+ */
+void
+o_drop_table_ext(ORelOids oids, bool carry_secondary)
+{
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 	OTable	   *table;
@@ -2418,7 +2434,49 @@ o_drop_table(ORelOids oids)
 	o_tables_table_meta_lock(NULL);
 	table = o_tables_drop_by_oids(oids, oxid, oSnapshot.csn);
 	o_tables_table_meta_unlock(NULL, InvalidOid);
-	trees = o_table_make_index_keys(table, &numTrees);
+	if (carry_secondary)
+	{
+		int			i,
+					num = 0;
+
+		trees = (OIndexKey *) palloc(sizeof(OIndexKey) *
+									   (table->nindices + 3));
+		for (i = 0; i < table->nindices; i++)
+		{
+			OTableIndex *ix = &table->indices[i];
+
+			if (ix->type == oIndexUnique || ix->type == oIndexRegular ||
+				ix->type == oIndexExclusion)
+				continue;
+			trees[num].oids = ix->oids;
+			trees[num].oids.spcoid = ix->oids.spcoid;
+			num++;
+		}
+		if (ORelOidsIsValid(table->bridge_oids))
+		{
+			trees[num].oids = table->bridge_oids;
+			trees[num].oids.spcoid = table->oids.spcoid;
+			num++;
+		}
+		if (ORelOidsIsValid(table->toast_oids))
+		{
+			trees[num].oids = table->toast_oids;
+			trees[num].oids.spcoid = table->oids.spcoid;
+			num++;
+		}
+		if (table->nindices == 0 ||
+			table->indices[PrimaryIndexNumber].type != oIndexPrimary)
+		{
+			trees[num].oids = table->oids;
+			trees[num].oids.spcoid = table->oids.spcoid;
+			num++;
+		}
+		numTrees = num;
+	}
+	else
+	{
+		trees = o_table_make_index_keys(table, &numTrees);
+	}
 	add_undo_drop_relnode(oids, trees, numTrees);
 	pfree(trees);
 	o_table_free(table);
@@ -2488,7 +2546,8 @@ rewrite_matview(Relation rel, OTable *old_o_table, OTable *new_o_table)
 }
 
 static void
-rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
+rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table,
+			  bool carry_secondary)
 {
 	OTableDescr *old_descr = NULL;
 	void	   *sscan;
@@ -2851,11 +2910,12 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table)
 	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
 	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, old_descr);
 
-	o_drop_table(old_o_table->oids);
+	o_drop_table_ext(old_o_table->oids, carry_secondary);
 }
 
 static void
-redefine_indices(Relation rel, OTable *new_o_table, bool primary, Oid oldRelnode)
+redefine_indices(Relation rel, OTable *new_o_table, bool primary,
+				 Oid oldRelnode)
 {
 	ListCell   *index;
 
@@ -2885,43 +2945,6 @@ redefine_indices(Relation rel, OTable *new_o_table, bool primary, Oid oldRelnode
 			{
 				o_define_index_validate(new_o_table->oids, ind, NULL, NULL);
 				relation_close(ind, AccessShareLock);
-
-				/*
-				 * "ALTER TABLE ... SET TABLESPACE" (oldRelnode is the table's
-				 * pre-move relnode) rewrote the table under a new relnode, so
-				 * every secondary index is rebuilt just below.  Give it a
-				 * relnode of its own first.
-				 *
-				 * orioledb_relation_set_new_filenode() already queued all of
-				 * the old table's trees -- this index's included -- for
-				 * removal at commit, and an OrioleDB tree is identified by
-				 * (datoid, relnode, tablespace).  A secondary index keeps its
-				 * own tablespace across the move, so rebuilding it in place
-				 * would give the new tree the exact key that is queued for
-				 * the drop: the commit would then delete the index that was
-				 * just built, leaving it empty, and unlink the index's
-				 * relation file while pg_class still points at it.
-				 *
-				 * Only ctid tables need this here.  A table with a primary
-				 * key reaches assign_new_oids() through the primary pass's
-				 * o_define_index(), and that already gives every index a new
-				 * relnode; the primary pass below covers only toast for the
-				 * tables that miss it.
-				 *
-				 * The new relnode stays in the index's own tablespace, which
-				 * is where the index remains: SET TABLESPACE moves only the
-				 * table's storage.
-				 */
-				if (!primary && OidIsValid(oldRelnode) &&
-					!new_o_table->has_primary)
-				{
-					Relation	iRel = index_open(indexOid, AccessExclusiveLock);
-
-					RelationSetNewRelfilenode(iRel, iRel->rd_rel->relpersistence);
-					index_close(iRel, AccessExclusiveLock);
-					CommandCounterIncrement();
-				}
-
 				o_define_index(rel, NULL, indexOid, false,
 							   InvalidIndexNumber, oldRelnode,
 							   false, NULL);
@@ -4366,39 +4389,39 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 					CommandCounterIncrement();
 					tbl = relation_open(o_saved_relrewrite, AccessShareLock);
 
-					/*
-					 * Redefinig primary key here to not do rebuild after
-					 * rewrite_table
-					 */
-					redefine_indices(tbl, new_o_table, true, InvalidOid);
+				/*
+				 * Redefinig primary key here to not do rebuild after
+				 * rewrite_table
+				 */
+				redefine_indices(tbl, new_o_table, true, InvalidOid);
 
-					o_table_free(new_o_table);
-					new_o_table = o_tables_get(new_oids);
-					Assert(new_o_table != NULL);
+				o_table_free(new_o_table);
+				new_o_table = o_tables_get(new_oids);
+				Assert(new_o_table != NULL);
 
-					switch (tbl->rd_rel->relkind)
-					{
-						case RELKIND_RELATION:
-							rewrite_table(tbl, old_o_table, new_o_table);
-							break;
-						case RELKIND_MATVIEW:
-							o_saved_relrewrite = InvalidOid;
-							if (savedDataQuery != NULL)
-								rewrite_matview(tbl, old_o_table, new_o_table);
-							o_drop_table(old_o_table->oids);
-							break;
-						default:
-							Assert(false);
-							break;
-					}
-
-					redefine_indices(tbl, new_o_table, false, InvalidOid);
-
-					o_table_free(old_o_table);
-					o_table_free(new_o_table);
-					o_saved_relrewrite = InvalidOid;
+				switch (tbl->rd_rel->relkind)
+				{
+					case RELKIND_RELATION:
+						rewrite_table(tbl, old_o_table, new_o_table, false);
+						break;
+					case RELKIND_MATVIEW:
+						o_saved_relrewrite = InvalidOid;
+						if (savedDataQuery != NULL)
+							rewrite_matview(tbl, old_o_table, new_o_table);
+						o_drop_table(old_o_table->oids);
+						break;
+					default:
+						Assert(false);
+						break;
 				}
-				table_close(tbl, AccessShareLock);
+
+				redefine_indices(tbl, new_o_table, false, InvalidOid);
+
+				o_table_free(old_o_table);
+				o_table_free(new_o_table);
+				o_saved_relrewrite = InvalidOid;
+			}
+			table_close(tbl, AccessShareLock);
 			}
 			else if (rel->rd_rel->relkind == RELKIND_TOASTVALUE &&
 					 (subId == 0) && !in_cluster_rebuild)
@@ -4443,18 +4466,19 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 
 						set_toast_oids_and_options(tbl, rel, false, old_o_table->index_bridging);
 
-						new_o_table = o_tables_get(oids);
-						Assert(new_o_table != NULL);
+					new_o_table = o_tables_get(oids);
+					Assert(new_o_table != NULL);
 
-						relation_close(tbl, AccessShareLock);
-						CommandCounterIncrement();
-						tbl = relation_open(tbl_oid, AccessShareLock);
+					relation_close(tbl, AccessShareLock);
+					CommandCounterIncrement();
+					tbl = relation_open(tbl_oid, AccessShareLock);
 
-						/*
-						 * Redefinig primary key here to not do rebuild after
-						 * rewrite_table
-						 */
-						redefine_indices(tbl, new_o_table, true, old_o_table->oids.relnode);
+					/*
+					 * Redefinig primary key here to not do rebuild after
+					 * rewrite_table
+					 */
+					redefine_indices(tbl, new_o_table, true,
+								 old_o_table->oids.relnode);
 
 						o_table_free(new_o_table);
 						new_o_table = o_tables_get(oids);
@@ -4469,15 +4493,16 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 								 * for matview we just copy data to not
 								 * recalculate expressions
 								 */
-								Assert(alter_type_exprs == NIL);
-								rewrite_table(tbl, old_o_table, new_o_table);
-								break;
+							Assert(alter_type_exprs == NIL);
+							rewrite_table(tbl, old_o_table, new_o_table, true);
+							break;
 							default:
 								Assert(false);
 								break;
 						}
 
-						redefine_indices(tbl, new_o_table, false, old_o_table->oids.relnode);
+						redefine_indices(tbl, new_o_table, false,
+									 old_o_table->oids.relnode);
 
 						o_table_free(old_o_table);
 						o_table_free(new_o_table);
