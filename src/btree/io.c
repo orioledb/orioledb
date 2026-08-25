@@ -1692,6 +1692,7 @@ load_page(OBTreeFindPageContext *context)
 	bool		was_fetch = false;
 	bool		was_image = false;
 	bool		was_keep_lokey = false;
+	bool		was_keep_parent = false;
 	OReadPageResult read_result;
 	uint32		chkpNum = 0;
 
@@ -1823,6 +1824,21 @@ load_page(OBTreeFindPageContext *context)
 	was_keep_lokey = BTREE_PAGE_FIND_IS(context, KEEP_LOKEY);
 	if (was_keep_lokey)
 		BTREE_PAGE_FIND_UNSET(context, KEEP_LOKEY);
+
+	/*
+	 * The descent below is a scratch use of the caller's context: it re-finds
+	 * the parent of the page being loaded and overwrites the item slots.  A
+	 * caller that navigates siblings (KEEP_PARENT) must not have that flag
+	 * observed here -- it would make find_page() maintain parentImg for a
+	 * descent the caller never asked for, rebinding the caller's parent image
+	 * mid-flight, and it leaves refind_page() returning with a parent slot
+	 * that belongs to neither descent.  Save and clear it like every other
+	 * flag this function borrows.
+	 */
+	was_keep_parent = BTREE_PAGE_FIND_IS(context, KEEP_PARENT);
+	if (was_keep_parent)
+		BTREE_PAGE_FIND_UNSET(context, KEEP_PARENT);
+
 	was_downlink_location = BTREE_PAGE_FIND_IS(context, DOWNLINK_LOCATION);
 	if (!was_downlink_location)
 		BTREE_PAGE_FIND_SET(context, DOWNLINK_LOCATION);
@@ -1882,6 +1898,8 @@ load_page(OBTreeFindPageContext *context)
 		BTREE_PAGE_FIND_SET(context, IMAGE);
 	if (was_keep_lokey)
 		BTREE_PAGE_FIND_SET(context, KEEP_LOKEY);
+	if (was_keep_parent)
+		BTREE_PAGE_FIND_SET(context, KEEP_PARENT);
 	if (!was_downlink_location)
 		BTREE_PAGE_FIND_UNSET(context, DOWNLINK_LOCATION);
 
