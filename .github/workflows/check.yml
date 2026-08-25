@@ -123,6 +123,9 @@ jobs:
                             f"capping at 350")
                       budget = 350
                   cell["timeout"] = budget
+                  # Only used to decide whether the job name needs a copy
+                  # number; see the name: below.
+                  cell["copies"] = fanout
               limit = max(1, 256 // len(cells))
               if fanout > limit:
                   print(f"::warning::jobs={fanout} would need {fanout * len(cells)} "
@@ -190,6 +193,12 @@ jobs:
 
   check:
     needs: matrix
+    # Spelled out because GitHub builds the default name from every matrix
+    # value, and timeout/copies/run are bookkeeping rather than something a
+    # reader of the job list wants to see.  A copy number appears only when
+    # copies were actually asked for.
+    # Quoted: an unquoted " #" would start a YAML comment mid-expression.
+    name: "check (${{ matrix.cpu }}, ${{ matrix.pg_version }}, ${{ matrix.compiler }}, ${{ matrix.check_type }})${{ matrix.copies > 1 && format(' #{0}', matrix.run) || '' }}"
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
