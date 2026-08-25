@@ -706,6 +706,17 @@ recovery_queue_process(shm_mq_handle *queue, int id)
 					edata = CopyErrorData();
 					FlushErrorState();
 
+					/*
+					 * Swallowing the error keeps this worker alive, but the
+					 * leader is still counting reports.  Tell it the build
+					 * failed, or it parks in _o_index_parallel_heapscan()
+					 * forever and the startup process parks behind it in
+					 * delay_if_queued_for_idxbuild() -- replay stops for
+					 * good.  Harmless in the case this catch was written for,
+					 * where the leader has already given up.
+					 */
+					o_index_parallel_report_participant_failure(toc);
+
 					ereport(LOG,
 							(errmsg("orioledb recovery worker %d: parallel index "
 									"build (DSM segment %u) aborted mid-flight: "

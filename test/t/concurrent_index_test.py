@@ -468,6 +468,61 @@ class ConcurrentIndexTest(BaseTest):
 			except Exception:
 				pass
 
+	def test_cic_streaming_replica_participant_fails(self):
+		"""
+		Same failing expression as above, but with the ordering forced so a
+		*participant* of the replica's parallel build evaluates the bad row,
+		not the leader.  The participant swallows the error to survive a
+		leader that already tore the segment down, so it must still report the
+		failure -- otherwise the leader waits for a report that never comes,
+		the startup process waits behind the leader, and replay stops for
+		good.
+		"""
+		master = self.node
+		master.append_conf('orioledb.enable_stopevents = true\n')
+		master.start()
+		try:
+			with self.getReplica().start() as replica:
+				master.safe_psql("""
+					CREATE EXTENSION orioledb;
+					CREATE TABLE o_cic_part (a int, b int) USING orioledb;
+					INSERT INTO o_cic_part VALUES (1, 0);
+				""")
+				self.catchup_orioledb(replica)
+
+				# Hold the replica's build leader out of its own scan, so the
+				# single failing row falls to a participant.
+				replica.safe_psql(
+				    "SELECT pg_stopevent_set('index_build_leader_participate', 'true')"
+				)
+
+				_, _, err = master.psql(
+				    "CREATE INDEX CONCURRENTLY o_cic_part_idx "
+				    "ON o_cic_part ((a/b));")
+				self.assertIn(b"division by zero", err)
+
+				# Wait until the leader is actually parked, then let it go.
+				while replica.execute(
+				    "SELECT count(*) FROM pg_stopevents() "
+				    "WHERE stopevent = 'index_build_leader_participate' "
+				    "AND waiter_pids <> '{}'")[0][0] == 0:
+					time.sleep(0.1)
+				replica.safe_psql(
+				    "SELECT pg_stopevent_reset('index_build_leader_participate')"
+				)
+
+				# Replay must go on.
+				master.safe_psql("INSERT INTO o_cic_part VALUES (5, 1);")
+				self.catchup_orioledb(replica)
+				self.assertEqual(
+				    replica.execute("SELECT count(*) FROM o_cic_part;")[0][0],
+				    2)
+		finally:
+			try:
+				master.stop()
+			except Exception:
+				pass
+
 	def test_cic_streaming_replica_failing_expr(self):
 		"""
 		CIC on the primary may fail at validate-scan when the index

@@ -9,6 +9,7 @@ checkpoint_table_start
 checkpoint_before_post_process
 checkpoint_before_start
 checkpoint_before_replay_start
+index_build_leader_participate
 index_insert
 ioc_before_update
 modify_start
