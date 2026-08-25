@@ -257,7 +257,22 @@ btree_try_merge_pages(BTreeDescr *desc,
 	ppool_free_page(desc->ppool, right_blkno, true);
 
 	if (O_PAGE_IS(left, LEAF))
-		pg_atomic_fetch_sub_u32(&BTREE_GET_META(desc)->leafPagesNum, 1);
+	{
+		uint32		prevLeafPagesNum PG_USED_FOR_ASSERTS_ONLY;
+
+		/*
+		 * This is the only place leafPagesNum is decremented, and it is
+		 * unsigned: one decrement more than the splits that incremented it
+		 * wraps the count to ~4.29e9 pages, which the relation-size functions
+		 * report as tens of terabytes.  The count is also checkpointed into
+		 * the tree's .map header, so a wrapped value survives restart and
+		 * only goes away on REINDEX -- by which point nothing points at the
+		 * merge that caused it.  Catch the imbalance here instead.
+		 */
+		prevLeafPagesNum =
+			pg_atomic_fetch_sub_u32(&BTREE_GET_META(desc)->leafPagesNum, 1);
+		Assert(prevLeafPagesNum > 0);
+	}
 
 	END_CRIT_SECTION();
 
