@@ -393,6 +393,30 @@ o_tables_table_meta_unlock(OTable *o_table, Oid oldRelnode)
 extern Oid	o_saved_relrewrite;
 extern List *o_reuse_indices;
 
+/*
+ * Set by orioledb_begin_heap_rewrite_body and cleared by
+ * orioledb_finish_heap_swap_body.  While true, the insert path does not no-op
+ * on the transient new heap's relrewrite, so PG's native fill
+ * (ATRewriteTable / REFRESH MATVIEW transient receiver) writes tuples into
+ * the primary index tree built in begin_heap_rewrite.
+ */
+extern bool o_rewrite_fill_active;
+
+/*
+ * Set by orioledb_finish_heap_swap_body around the post-swap reindex so that
+ * orioledb_ambuild no-ops the already-adopted primary while PG's
+ * reindex_relation builds the secondaries.
+ */
+extern bool o_skip_primary_ambuild;
+
 extern void redefine_pkey_for_rel(Relation rel);
+
+extern void orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel);
+extern bool orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
+										   bool swap_toast_by_content,
+										   bool is_internal,
+										   TransactionId frozenXid,
+										   MultiXactId cutoffMulti,
+										   char newrelpersistence);
 
 #endif							/* __O_TABLES_H__ */

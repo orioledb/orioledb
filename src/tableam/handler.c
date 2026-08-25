@@ -513,7 +513,7 @@ orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 
-	if (OidIsValid(relation->rd_rel->relrewrite))
+	if (OidIsValid(relation->rd_rel->relrewrite) && !o_rewrite_fill_active)
 		return slot;
 
 	o_serializable_lock_relation(RelationGetRelid(relation));
@@ -1883,7 +1883,14 @@ orioledb_getnextslot(TableScanDesc sscan, ScanDirection direction,
 	OTableDescr *descr;
 	bool		result;
 
-	if (OidIsValid(o_saved_relrewrite))
+	/*
+	 * The transient new heap produced by make_new_heap() carries relrewrite;
+	 * nothing should meaningfully scan it (the native fill writes to it, and
+	 * the real data transfer scans the old heap).  Returning false here keeps
+	 * any incidental scan of the transient heap a no-op.  The old heap is
+	 * scanned normally by ATRewriteTable to drive the native fill.
+	 */
+	if (OidIsValid(sscan->rs_rd->rd_rel->relrewrite))
 		return false;
 
 	do
@@ -1925,7 +1932,7 @@ orioledb_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
 	OXid		oxid;
 	int			i;
 
-	if (OidIsValid(relation->rd_rel->relrewrite))
+	if (OidIsValid(relation->rd_rel->relrewrite) && !o_rewrite_fill_active)
 		return;
 
 	o_serializable_lock_relation(RelationGetRelid(relation));
@@ -2546,6 +2553,9 @@ static const TableAmRoutine orioledb_am_methods = {
 	.relation_size = orioledb_calculate_relation_size,
 	.relation_needs_toast_table = orioledb_relation_needs_toast_table,
 	.relation_toast_am = orioledb_relation_toast_am,
+
+	.relation_begin_heap_rewrite = orioledb_begin_heap_rewrite_body,
+	.relation_finish_heap_swap = orioledb_finish_heap_swap_body,
 
 	.relation_estimate_size = orioledb_estimate_rel_size,
 #if PG_VERSION_NUM < 180000

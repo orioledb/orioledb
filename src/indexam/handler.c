@@ -292,6 +292,15 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	if (IsBinaryUpgrade)
 		return (IndexBuildResult *) palloc0(sizeof(IndexBuildResult));
 
+	/*
+	 * After the post-swap adoption (orioledb_finish_heap_swap_body), the
+	 * primary tree is already filled and owned by the old heap; PG's
+	 * reindex_relation must not rebuild it.  Let secondaries through so PG's
+	 * standard reindex builds them via o_define_index.
+	 */
+	if (o_skip_primary_ambuild && index->rd_index->indisprimary)
+		return (IndexBuildResult *) palloc0(sizeof(IndexBuildResult));
+
 	if (options && !options->orioledb_index)
 	{
 		OTableDescr *descr;
@@ -331,7 +340,7 @@ orioledb_ambuild(Relation heap, Relation index, IndexInfo *indexInfo)
 	result->heap_tuples = 0.0;
 	result->index_tuples = 0.0;
 
-	if (in_nontransactional_truncate || !OidIsValid(o_saved_relrewrite))
+	if (in_nontransactional_truncate || !OidIsValid(heap->rd_rel->relrewrite))
 	{
 		ORelOids	tbl_oids;
 		OTable	   *o_table;
