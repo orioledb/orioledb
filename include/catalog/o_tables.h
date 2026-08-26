@@ -419,4 +419,19 @@ extern bool orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 										   MultiXactId cutoffMulti,
 										   char newrelpersistence);
 
+/*
+ * SET TABLESPACE move state.  orioledb_relation_copy_data() (the tableam
+ * relation_copy_data hook) arms these for the table relation while pg_class
+ * still carries the OLD relfilenode/tablespace; orioledb_relation_set_tablespace_finish()
+ * (the relation_set_tablespace_finish hook) consumes them after PG has moved
+ * the table, its toast table and all toast indexes (so every new relnode is
+ * in pg_class) to perform the orioledb tree move.  See Step 7 Path A.
+ */
+extern ORelOids o_tablemove_old_oids;
+extern bool o_tablemove_active;
+
+extern void orioledb_relation_set_tablespace_finish(Relation rel,
+													const RelFileNode *newrlocator,
+													Oid newTableSpace);
+
 #endif							/* __O_TABLES_H__ */

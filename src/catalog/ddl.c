@@ -141,7 +141,6 @@ static List *o_alter_generated_column_id = NIL;
 static List *dropped_attrs = NIL;
 static bool o_composite_alter_index_safe = false;
 Oid			o_saved_relrewrite = InvalidOid;
-static Oid	o_saved_reltablespace = InvalidOid;
 List	   *o_reuse_indices = NIL;
 static ORelOids saved_oids;
 static bool in_rewrite = false;
@@ -1033,7 +1032,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	{
 		in_rewrite = false;
 		o_saved_relrewrite = InvalidOid;
-		o_saved_reltablespace = InvalidOid;
 		ORelOidsSetInvalid(saved_oids);
 		o_rewrite_fill_active = false;
 		o_skip_primary_ambuild = false;
@@ -3261,6 +3259,131 @@ redefine_pkey_for_rel(Relation rel)
 	o_table_free(o_table);
 }
 
+/*
+ * relation_set_tablespace_finish tableam hook (Step 7 Path A).
+ *
+ * PG's ATExecSetTableSpace calls this after the table, its toast table and all
+ * toast indexes have all been moved (SetRelationTableSpace + CCI applied for
+ * each), so every new relnode is visible in pg_class.  This is the moment the
+ * old OAT heuristic reconstructed by diffing reltablespace across a CCI and by
+ * routing through the toast relation's OAT event (the toast table uses HEAP
+ * AM, so no tableam hook reached orioledb for it).  orioledb_relation_copy_data
+ * armed o_tablemove_active / o_tablemove_old_oids for the table while pg_class
+ * still held the OLD identity; here we perform the orioledb tree move:
+ *
+ *   - old OTable at (datoid, reloid, OLD relnode/spc) -> fetched from
+ *     o_tablemove_old_oids (pg_class already updated, so the OLD identity is
+ *     no longer derivable from the relation).
+ *   - new OTable at (datoid, reloid, NEW relnode/spc) -> created fresh via
+ *     create_o_table_for_rel (pg_class now carries the new relnode/spc).
+ *   - primary rebuilt by rescan (rewrite_table), secondaries carried, old
+ *     primary/bridge/toast trees queued for commit-time drop.  Mirrors the
+ *     former toast-OAT SET-TABLESPACE branch (ddl.c:4703-4764) verbatim.
+ *
+ * `newrlocator`/`newTableSpace` are the table's own new relfilenode + spc; we
+ * assert they match what pg_class now reports and otherwise rely on pg_class
+ * (create_o_table_for_rel / set_toast_oids_and_options read it directly).
+ */
+void
+orioledb_relation_set_tablespace_finish(Relation rel,
+										const RelFileNode *newrlocator,
+										Oid newTableSpace)
+{
+	Oid			tbl_oid;
+	Relation	tbl;
+	ORelOids	new_oids;
+	OTable	   *old_o_table,
+			   *new_o_table;
+
+	/* Only an orioledb SET TABLESPACE arms this (in copy_data). */
+	if (!o_tablemove_active)
+		return;
+	o_tablemove_active = false;
+
+	Assert(ORelOidsIsValid(o_tablemove_old_oids));
+
+	/* OLD OTable at the pre-move identity saved by copy_data(table). */
+	old_o_table = o_tables_get(o_tablemove_old_oids);
+	Assert(old_o_table != NULL);
+
+	tbl_oid = RelationGetRelid(rel);
+
+	/*
+	 * Open a fresh relcache entry: pg_class now holds the NEW relnode + spc.
+	 * Assert the hook args agree with it, then drive everything off pg_class
+	 * (create_o_table_for_rel / set_toast_oids_and_options read it directly).
+	 */
+	tbl = relation_open(tbl_oid, AccessShareLock);
+	Assert(tbl->rd_locator.relNumber == newrlocator->relNumber);
+	Assert(OidIsValid(tbl->rd_rel->reltablespace)
+		   ? tbl->rd_rel->reltablespace == newTableSpace
+		   : newTableSpace == MyDatabaseTableSpace);
+
+	ORelOidsSetFromRel(new_oids, tbl);
+
+	create_o_table_for_rel(tbl);
+
+	if (OidIsValid(tbl->rd_rel->reltoastrelid))
+	{
+		Relation	toast_rel = table_open(tbl->rd_rel->reltoastrelid,
+										  AccessShareLock);
+
+		set_toast_oids_and_options(tbl, toast_rel, false,
+								   old_o_table->index_bridging);
+		table_close(toast_rel, AccessShareLock);
+	}
+
+	new_o_table = o_tables_get(new_oids);
+	Assert(new_o_table != NULL);
+
+	/*
+	 * The sys-tree writes above (create_o_table_for_rel +
+	 * set_toast_oids_and_options) need a CCI before the descr fetches in
+	 * redefine_indices / rewrite_table see them; reopen tbl so its relcache
+	 * drops the stale (pre-move) descr.
+	 */
+	relation_close(tbl, AccessShareLock);
+	CommandCounterIncrement();
+	tbl = relation_open(tbl_oid, AccessShareLock);
+
+	/*
+	 * Redefine the primary first so rewrite_table rescans the old table into
+	 * the already-attached primary at the new relnode.  oldRelnode is the old
+	 * primary's relnode: o_define_index's SET-TABLESPACE carry path keeps the
+	 * secondary trees (indices.c:542-551) and rebuilds only the primary.
+	 */
+	redefine_indices(tbl, new_o_table, true, old_o_table->oids.relnode);
+
+	o_table_free(new_o_table);
+	new_o_table = o_tables_get(new_oids);
+	Assert(new_o_table != NULL);
+
+	switch (tbl->rd_rel->relkind)
+	{
+		case RELKIND_RELATION:
+		case RELKIND_MATVIEW:
+			/*
+			 * SET TABLESPACE copies rows verbatim (no ALTER COLUMN TYPE
+			 * expressions), so alter_type_exprs must be empty.
+			 */
+			Assert(alter_type_exprs == NIL);
+			rewrite_table(tbl, old_o_table, new_o_table, true);
+			break;
+		default:
+			Assert(false);
+			break;
+	}
+
+	/* Carry the secondary indexes (keep their own tablespace + tree). */
+	redefine_indices(tbl, new_o_table, false, old_o_table->oids.relnode);
+
+	o_table_free(old_o_table);
+	o_table_free(new_o_table);
+	relation_close(tbl, AccessShareLock);
+
+	ORelOidsSetInvalid(o_tablemove_old_oids);
+}
+
 static void
 change_bridging_option(Relation rel, bool value, bool isReset)
 {
@@ -4578,38 +4701,20 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				}
 				relation_close(tbl, AccessShareLock);
 			}
+			/*
+			 * OAT_POST_ALTER for a RELATION/MATVIEW with subId == 0 reaches here
+			 * for ALTER COLUMN TYPE rewrites (and historically for SET
+			 * TABLESPACE, now handled by the relation_set_tablespace_finish
+			 * tableam hook).  The tablespace-detection that used to live here
+			 * is gone; what remains load-bearing for the rewrite path is the
+			 * CommandCounterIncrement() so the OTable that finish_heap_swap_body
+			 * wrote becomes visible to the descr fetches in the next event.
+			 */
 			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
 					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
-					 (subId == 0))
+					 (subId == 0) && is_orioledb_rel(rel))
 			{
-				/*
-				 * We reach here at OAT_POST_ALTER for any RELATION/MATVIEW,
-				 * not only "ALTER TABLE ... SET TABLESPACE" after
-				 * orioledb_relation_copy_data -- an ALTER COLUMN TYPE rewrite
-				 * lands here too.  So act only on a genuine tablespace
-				 * change: compare the pre-command reltablespace against the
-				 * value after CommandCounterIncrement() using the raw stored
-				 * oids (0 is the database default).  Normalizing 0 to
-				 * MyDatabaseTableSpace before the comparison would make a
-				 * default-tablespace relation look changed and clobber the
-				 * saved_oids the rewrite path set above; normalize only once
-				 * a real change is confirmed.
-				 */
-				if (is_orioledb_rel(rel))
-				{
-					ORelOids	old_oids;
-					Oid			old_reltablespace = rel->rd_rel->reltablespace;
-
-					ORelOidsSetFromRel(old_oids, rel);
-					CommandCounterIncrement();
-					if (old_reltablespace != rel->rd_rel->reltablespace)
-					{
-						if (!OidIsValid(old_reltablespace))
-							old_reltablespace = MyDatabaseTableSpace;
-						o_saved_reltablespace = old_reltablespace;
-						saved_oids = old_oids;
-					}
-				}
+				CommandCounterIncrement();
 			}
 			else if (rel->rd_rel->relkind == RELKIND_TOASTVALUE &&
 					 OidIsValid(o_saved_relrewrite) &&
@@ -4676,8 +4781,17 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			table_close(tbl, AccessShareLock);
 			}
 			else if (rel->rd_rel->relkind == RELKIND_TOASTVALUE &&
-					 (subId == 0) && !in_cluster_rebuild)
+					 (subId == 0) && !in_cluster_rebuild &&
+					 !o_tablemove_active)
 			{
+				/*
+				 * "ALTER TABLE ... SET <OPTION>" on the toast relation.  A
+				 * SET TABLESPACE move is NOT handled here: it arms
+				 * o_tablemove_active in orioledb_relation_copy_data and the
+				 * move itself runs in the relation_set_tablespace_finish
+				 * tableam hook (which PG calls AFTER this toast OAT event),
+				 * so skip this branch while a move is pending.
+				 */
 				Oid			tbl_oid;
 				Relation	tbl = NULL;
 
@@ -4700,129 +4814,61 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						reltablespace = MyDatabaseTableSpace;
 					CommandCounterIncrement();
 					ORelOidsSetFromRel(oids, tbl);
-					if (OidIsValid(o_saved_reltablespace) &&
-						o_saved_reltablespace != reltablespace)
+					descr = o_fetch_table_descr(oids);
+					Assert(descr);
+					ResourceOwnerRememberOTableDescr(CurrentResourceOwner, descr);
+
+					if (options)
+						new_fillfactor = options->std_options.fillfactor;
+					else
+						new_fillfactor = BTREE_DEFAULT_FILLFACTOR;
+
+					if (options)
+						new_index_bridging = options->index_bridging;
+					else
+						new_index_bridging = false;
+
+					if (GET_PRIMARY(descr)->bridging != new_index_bridging)
 					{
-						/*
-						 * We come here during "ALTER TABLE ... SET
-						 * TABLESPACE"
-						 */
-						OTable	   *old_o_table,
-								   *new_o_table;
+						OTable	   *o_table;
+						ORelOids	table_oids;
+						ListCell   *index;
+						bool		has_bridged = false;
 
-						Assert(ORelOidsIsValid(saved_oids));
-						old_o_table = o_tables_get(saved_oids);
-						Assert(old_o_table != NULL);
-
-						create_o_table_for_rel(tbl);
-
-						set_toast_oids_and_options(tbl, rel, false, old_o_table->index_bridging);
-
-					new_o_table = o_tables_get(oids);
-					Assert(new_o_table != NULL);
-
-					relation_close(tbl, AccessShareLock);
-					CommandCounterIncrement();
-					tbl = relation_open(tbl_oid, AccessShareLock);
-
-					/*
-					 * Redefinig primary key here to not do rebuild after
-					 * rewrite_table
-					 */
-					redefine_indices(tbl, new_o_table, true,
-								 old_o_table->oids.relnode);
-
-						o_table_free(new_o_table);
-						new_o_table = o_tables_get(oids);
-						Assert(new_o_table != NULL);
-
-						switch (tbl->rd_rel->relkind)
+						foreach(index, RelationGetIndexList(tbl))
 						{
-							case RELKIND_RELATION:
-							case RELKIND_MATVIEW:
+							Oid			indexOid = lfirst_oid(index);
+							Relation	ind = relation_open(indexOid, AccessShareLock);
+							OBTOptions *options = (OBTOptions *) ind->rd_options;
 
-								/*
-								 * for matview we just copy data to not
-								 * recalculate expressions
-								 */
-							Assert(alter_type_exprs == NIL);
-							rewrite_table(tbl, old_o_table, new_o_table, true);
-							break;
-							default:
-								Assert(false);
+							if (ind->rd_rel->relam != BTREE_AM_OID || (options && !options->orioledb_index))
+								has_bridged = true;
+							relation_close(ind, AccessShareLock);
+							if (has_bridged)
 								break;
 						}
 
-						redefine_indices(tbl, new_o_table, false,
-									 old_o_table->oids.relnode);
-
-						o_table_free(old_o_table);
-						o_table_free(new_o_table);
-
-						o_saved_reltablespace = InvalidOid;
-						ORelOidsSetInvalid(saved_oids);
-					}
-					else
-					{
-						/*
-						 * We come here during "ALTER TABLE ... SET <OPTION>"
-						 */
-						descr = o_fetch_table_descr(oids);
-						Assert(descr);
-						ResourceOwnerRememberOTableDescr(CurrentResourceOwner, descr);
-
-						if (options)
-							new_fillfactor = options->std_options.fillfactor;
-						else
-							new_fillfactor = BTREE_DEFAULT_FILLFACTOR;
-
-						if (options)
-							new_index_bridging = options->index_bridging;
-						else
-							new_index_bridging = false;
-
-						if (GET_PRIMARY(descr)->bridging != new_index_bridging)
+						ORelOidsSetFromRel(table_oids, tbl);
+						o_table = o_tables_get(table_oids);
+						if (o_table == NULL)
 						{
-							OTable	   *o_table;
-							ORelOids	table_oids;
-							ListCell   *index;
-							bool		has_bridged = false;
-
-							foreach(index, RelationGetIndexList(tbl))
-							{
-								Oid			indexOid = lfirst_oid(index);
-								Relation	ind = relation_open(indexOid, AccessShareLock);
-								OBTOptions *options = (OBTOptions *) ind->rd_options;
-
-								if (ind->rd_rel->relam != BTREE_AM_OID || (options && !options->orioledb_index))
-									has_bridged = true;
-								relation_close(ind, AccessShareLock);
-								if (has_bridged)
-									break;
-							}
-
-							ORelOidsSetFromRel(table_oids, tbl);
-							o_table = o_tables_get(table_oids);
-							if (o_table == NULL)
-							{
-								elog(ERROR, "orioledb table %s not found",
-									 RelationGetRelationName(tbl));
-							}
-
-							if (!has_bridged)
-							{
-								if (new_index_bridging)
-									add_bridge_index(tbl, o_table, true, InvalidOid);
-								else
-									drop_bridge_index(tbl, o_table);
-							}
-							else
-								elog(ERROR, "cannot disable 'index_bridging' for a table with bridged indices");
+							elog(ERROR, "orioledb table %s not found",
+								 RelationGetRelationName(tbl));
 						}
-						if (GET_PRIMARY(descr)->fillfactor != new_fillfactor)
-							set_toast_oids_and_options(tbl, rel, true, false);
-						ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
+
+						if (!has_bridged)
+						{
+							if (new_index_bridging)
+								add_bridge_index(tbl, o_table, true, InvalidOid);
+							else
+								drop_bridge_index(tbl, o_table);
+						}
+						else
+							elog(ERROR, "cannot disable 'index_bridging' for a table with bridged indices");
 					}
+					if (GET_PRIMARY(descr)->fillfactor != new_fillfactor)
+						set_toast_oids_and_options(tbl, rel, true, false);
+					ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
 				}
 				if (tbl)
 					table_close(tbl, AccessShareLock);

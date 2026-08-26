@@ -1069,6 +1069,14 @@ orioledb_relation_nontransactional_truncate(Relation rel)
 		add_truncate_wal_record(oids);
 }
 
+/*
+ * SET TABLESPACE move state.  Defined here (the copy_data producer) and
+ * consumed by orioledb_relation_set_tablespace_finish() in ddl.c.  See
+ * o_tables.h and Step 7 Path A.
+ */
+ORelOids o_tablemove_old_oids;
+bool		o_tablemove_active = false;
+
 static void
 orioledb_relation_copy_data(Relation rel, const RelFileNode *new_relfilenode)
 {
@@ -1082,6 +1090,26 @@ orioledb_relation_copy_data(Relation rel, const RelFileNode *new_relfilenode)
 	dstrel = RelationCreateStorage(*new_relfilenode, rel->rd_rel->relpersistence, true);
 	RelationDropStorage(rel);
 	smgrclose(dstrel);
+
+	/*
+	 * For an orioledb relation this copy_data hook fires BEFORE PG writes the
+	 * new relfilenode/tablespace to pg_class (SetRelationTableSpace runs later
+	 * in ATExecSetTableSpace), so ORelOidsSetFromRel still yields the OLD
+	 * identity.  Save it: orioledb_relation_set_tablespace_finish() (which PG
+	 * calls after the table, its toast and all toast indexes have been moved)
+	 * recovers the old OTable from it.  The actual orioledb tree move runs
+	 * there, not here -- the toast table uses HEAP AM (orioledb_relation_toast_am
+	 * returns HEAP_TABLE_AM_OID), so this hook never fires for the toast
+	 * relation and we cannot learn the new toast relnode until the toast
+	 * recursion completes.
+	 */
+	if ((rel->rd_rel->relkind == RELKIND_RELATION ||
+		 rel->rd_rel->relkind == RELKIND_MATVIEW) &&
+		is_orioledb_rel(rel))
+	{
+		ORelOidsSetFromRel(o_tablemove_old_oids, rel);
+		o_tablemove_active = true;
+	}
 }
 
 static void
@@ -2543,6 +2571,7 @@ static const TableAmRoutine orioledb_am_methods = {
 	.relation_set_new_filelocator = orioledb_relation_set_new_filenode,
 	.relation_nontransactional_truncate = orioledb_relation_nontransactional_truncate,
 	.relation_copy_data = orioledb_relation_copy_data,
+	.relation_set_tablespace_finish = orioledb_relation_set_tablespace_finish,
 	.relation_copy_for_cluster = orioledb_relation_copy_for_cluster,
 	.relation_vacuum = orioledb_vacuum_rel,
 	.scan_analyze_next_block = orioledb_scan_analyze_next_block,
