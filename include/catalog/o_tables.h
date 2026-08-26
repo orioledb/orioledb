@@ -393,15 +393,6 @@ o_tables_table_meta_unlock(OTable *o_table, Oid oldRelnode)
 extern List *o_reuse_indices;
 
 /*
- * Set by orioledb_begin_heap_rewrite_body and cleared by
- * orioledb_finish_heap_swap_body.  While true, the insert path does not no-op
- * on the transient new heap's relrewrite, so PG's native fill
- * (ATRewriteTable / REFRESH MATVIEW transient receiver) writes tuples into
- * the primary index tree built in begin_heap_rewrite.
- */
-extern bool o_rewrite_fill_active;
-
-/*
  * Set by orioledb_finish_heap_swap_body around the post-swap reindex so that
  * orioledb_ambuild no-ops the already-adopted primary while PG's
  * reindex_relation builds the secondaries.

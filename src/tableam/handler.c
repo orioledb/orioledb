@@ -513,9 +513,6 @@ orioledb_tuple_insert(Relation relation, TupleTableSlot *slot,
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 
-	if (OidIsValid(relation->rd_rel->relrewrite) && !o_rewrite_fill_active)
-		return slot;
-
 	o_serializable_lock_relation(RelationGetRelid(relation));
 
 	o_set_current_command(cid);
@@ -1959,9 +1956,6 @@ orioledb_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
 	OSnapshot	oSnapshot;
 	OXid		oxid;
 	int			i;
-
-	if (OidIsValid(relation->rd_rel->relrewrite) && !o_rewrite_fill_active)
-		return;
 
 	o_serializable_lock_relation(RelationGetRelid(relation));
 	o_set_current_command(cid);

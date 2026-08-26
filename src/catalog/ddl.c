@@ -154,7 +154,6 @@ static movedb_params o_movedb_data = {InvalidOid, InvalidOid, InvalidOid};
  * Native tableam-driven rewrite state (Plan B).  begin_heap_rewrite_body sets
  * these; finish_heap_swap_body consumes and clears them.
  */
-bool		o_rewrite_fill_active = false;
 bool		o_skip_primary_ambuild = false;
 static bool o_rewrite_in_progress = false;
 static ORelOids o_rewrite_old_oids;		/* old heap, pre-swap (relnode=Rold) */
@@ -1031,7 +1030,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	if (isTopLevel)
 	{
 		in_rewrite = false;
-		o_rewrite_fill_active = false;
 		o_skip_primary_ambuild = false;
 		o_rewrite_in_progress = false;
 		ORelOidsSetInvalid(o_rewrite_old_oids);
@@ -2402,8 +2400,6 @@ find_primary_index_oid(Relation oldrel)
  *     (columns/opclasses/name) is copied verbatim from oldrel's PK index,
  *     whose columns are unchanged by the rewrite;
  *   - rebuilding newrel's rd_amcache so the fill writes into the primary;
- *   - arming o_rewrite_fill_active so orioledb_tuple_insert/multi_insert do
- *     not no-op on newrel's relrewrite.
  *
  * For a table without a PK the ctid primary is used: it is keyed by the
  * table's own relfilenode (oTable->oids.relnode = Rnew), so the same
@@ -2585,9 +2581,6 @@ orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel)
 	 * refetches the descriptor that now carries the primary.
 	 */
 	orioledb_free_rd_amcache(newrel);
-
-	/* Let the insert path write into the transient new heap. */
-	o_rewrite_fill_active = true;
 }
 
 /*
@@ -2627,7 +2620,6 @@ orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 		return false;
 
 	o_rewrite_in_progress = false;
-	o_rewrite_fill_active = false;
 
 	/* Post-swap catalog relfilenodes: oldrel -> Rnew, newrel -> Rold. */
 	ORelOidsSetFromRel(old_oids, oldrel);
@@ -5686,7 +5678,6 @@ o_ddl_cleanup(void)
 		o_rewrite_bridging = false;
 		o_rewrite_bridge_relnode = InvalidRelFileNumber;
 		in_rewrite = false;
-		o_rewrite_fill_active = false;
 		o_skip_primary_ambuild = false;
 		o_rewrite_in_progress = false;
 	}
