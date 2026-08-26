@@ -922,7 +922,8 @@ o_define_index(Relation heap, Relation index, Oid indoid, bool reindex,
 OTable *
 o_make_table_with_primary(Relation heaprel, Relation index,
 						  RelFileNumber primary_relnode,
-						  bool index_bridging)
+						  bool index_bridging,
+						  RelFileNumber bridge_relnode)
 {
 	ORelOids	oids;
 	OTable	   *o_table;
@@ -953,7 +954,12 @@ o_make_table_with_primary(Relation heaprel, Relation index,
 	/*
 	 * Assign the bridge index's storage oids when bridging is enabled, so the
 	 * native fill (o_tbl_insert) maintains the bridge tree alongside the
-	 * primary.  Mirrors set_toast_oids_and_options() / assign_new_oids().
+	 * primary.  Mirrors set_toast_oids_and_options() / assign_new_oids().  When
+	 * a `bridge_relnode` is passed in (the native-rewrite adoption reusing the
+	 * transient fill's bridge tree Btrans), reuse it instead of allocating a
+	 * fresh one, mirroring how `primary_relnode` reuses the filled primary tree
+	 * Rnew; otherwise allocate a fresh bridge relnode (the transient fill path
+	 * in begin_heap_rewrite_body).
 	 */
 	if (index_bridging)
 	{
@@ -962,9 +968,17 @@ o_make_table_with_primary(Relation heaprel, Relation index,
 
 		o_table->bridge_oids.datoid = MyDatabaseId;
 		o_table->bridge_oids.spcoid = bridge_spcoid;
-		o_table->bridge_oids.relnode = IsBinaryUpgrade ? InvalidOid :
-			o_bridge_new_relnode(bridge_spcoid,
-								 heaprel->rd_rel->relpersistence);
+		if (RelFileNumberIsValid(bridge_relnode))
+		{
+			Assert(!IsBinaryUpgrade);
+			o_table->bridge_oids.relnode = bridge_relnode;
+		}
+		else
+		{
+			o_table->bridge_oids.relnode = IsBinaryUpgrade ? InvalidOid :
+				o_bridge_new_relnode(bridge_spcoid,
+									 heaprel->rd_rel->relpersistence);
+		}
 		o_table->bridge_oids.reloid = o_table->bridge_oids.relnode;
 	}
 
@@ -1031,7 +1045,7 @@ o_build_primary_for_new_heap(Relation newheap, Relation index,
 	bool		is_temp;
 
 	o_table = o_make_table_with_primary(newheap, index, primary_relnode,
-										index_bridging);
+										index_bridging, InvalidRelFileNumber);
 	table_index = &o_table->indices[0];
 
 	is_temp = (o_table->persistence == RELPERSISTENCE_TEMP);
