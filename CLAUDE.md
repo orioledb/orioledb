@@ -23,3 +23,11 @@ Prefer editing source inputs (`stopevents.txt`, `*_prod.sql`, `*_dev.sql`) rathe
 ## Binary compatibility
 
 See `doc/contributing/binary-compatibility.mdx` for the version variables in `include/orioledb.h` (`ORIOLEDB_BINARY_VERSION`, `ORIOLEDB_SYS_TREE_VERSION`, `ORIOLEDB_PAGE_VERSION`, `ORIOLEDB_COMPRESS_VERSION`) and cross-architecture caveats. When changing the on-disk page format, system tree format, compression format, or replication protocol, bump the relevant version and prefer data types with identical representation across architectures.
+
+## Temporary files policy
+When you create any artifacts during exploring,
+please add them to ignored directories if they are not valid tests
+or /tmp if allowed
+If you still need to have them in places that are not ignored by git,
+please add file names without any comments to .git/info/exclude
+Please recheck for non-expected files if it is commited with llm help
