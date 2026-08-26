@@ -1,0 +1,199 @@
+name: Antithesis Jepsen
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: OrioleDB branch to test
+        required: true
+        type: string
+        default: main
+      duration_minutes:
+        description: Antithesis run duration in minutes
+        required: true
+        type: string
+        default: "240"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: antithesis-jepsen-${{ inputs.branch || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  HARNESS_BRANCH: pmbauer/add-initial-antithesis-workload
+  PG_MAJOR: "17"
+  SNOUTY_CONTAINER_ENGINE: docker
+  SNOUTY_VERSION: "0.6.1"
+
+jobs:
+  build-validate-launch:
+    # Scheduled workflows should run only in the upstream repository. Manual
+    # dispatch remains available in forks for workflow testing, although a fork
+    # must configure its own Antithesis secrets before it can launch a run.
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'orioledb/orioledb'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+        working-directory: test/antithesis
+
+    steps:
+      - name: Check out the Antithesis harness branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.HARNESS_BRANCH }}
+          fetch-depth: 1
+
+      - name: Fetch and resolve the OrioleDB target branch
+        id: target
+        env:
+          TARGET_BRANCH: ${{ inputs.branch || github.ref_name }}
+          RUN_DURATION_MINUTES: ${{ inputs.duration_minutes || '240' }}
+        run: |
+          set -euo pipefail
+
+          git check-ref-format --branch "$TARGET_BRANCH" >/dev/null
+          if [[ ! "$RUN_DURATION_MINUTES" =~ ^[1-9][0-9]*$ ]]; then
+            echo "RUN_DURATION_MINUTES must be a positive integer" >&2
+            exit 2
+          fi
+
+          git fetch --force --no-tags origin \
+            "+refs/heads/${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}"
+          orioledb_ref="$(
+            git rev-parse --verify \
+              "refs/remotes/origin/${TARGET_BRANCH}^{commit}"
+          )"
+
+          {
+            echo "branch=$TARGET_BRANCH"
+            echo "duration_minutes=$RUN_DURATION_MINUTES"
+            echo "ref=$orioledb_ref"
+            echo "short_ref=$(git rev-parse --short=12 "$orioledb_ref")"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo '## Antithesis Jepsen'
+            echo
+            echo "- Harness branch: \`$HARNESS_BRANCH\`"
+            echo "- Target branch: \`$TARGET_BRANCH\`"
+            echo "- OrioleDB commit: \`$orioledb_ref\`"
+            echo "- Duration: \`${RUN_DURATION_MINUTES}m\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install snouty release binary
+        run: |
+          set -euo pipefail
+
+          target="x86_64-unknown-linux-gnu"
+          archive="snouty-${target}.tar.xz"
+          release_url="https://github.com/antithesishq/snouty/releases/download/v${SNOUTY_VERSION}"
+          download_dir="$(mktemp -d)"
+          install_dir="${RUNNER_TEMP}/snouty/bin"
+          trap 'rm -rf "$download_dir"' EXIT
+
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "${download_dir}/${archive}" \
+            "${release_url}/${archive}"
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "${download_dir}/${archive}.sha256" \
+            "${release_url}/${archive}.sha256"
+
+          (
+            cd "$download_dir"
+            sha256sum --check "${archive}.sha256"
+          )
+
+          tar --extract --xz \
+            --file "${download_dir}/${archive}" \
+            --directory "$download_dir"
+          mkdir -p "$install_dir"
+          install -m 0755 \
+            "${download_dir}/snouty-${target}/snouty" \
+            "${install_dir}/snouty"
+          echo "$install_dir" >> "$GITHUB_PATH"
+
+      - name: Set up Docker Compose
+        uses: docker/setup-compose-action@4eb059ff7f16592f9c84d5ca339c53cb7c5064e2 # v2.3.0
+
+      # snouty 0.6.1 invokes Compose using the legacy docker-compose name,
+      # while current GitHub runners expose Compose as a Docker CLI plugin.
+      - name: Add docker-compose compatibility command for snouty
+        run: |
+          set -euo pipefail
+
+          install_dir="${RUNNER_TEMP}/docker-compose/bin"
+          mkdir -p "$install_dir"
+          cat > "${install_dir}/docker-compose" <<'EOF'
+          #!/usr/bin/env sh
+          exec docker compose "$@"
+          EOF
+          chmod 0755 "${install_dir}/docker-compose"
+          echo "$install_dir" >> "$GITHUB_PATH"
+
+          docker compose version
+          "${install_dir}/docker-compose" version
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Log in to the Antithesis container registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: us-central1-docker.pkg.dev
+          username: _json_key
+          password: ${{ secrets.ANTITHESIS_REPO_KEY }}
+
+      - name: Check snouty configuration
+        env:
+          ANTITHESIS_API_KEY: ${{ secrets.ANTITHESIS_API_KEY }}
+        run: |
+          set -euo pipefail
+          snouty version
+          snouty doctor
+
+      - name: Generate and validate cached service build definitions
+        env:
+          ORIOLEDB_REF: ${{ steps.target.outputs.ref }}
+        run: |
+          set -euo pipefail
+          make build-config ORIOLEDB_REF="$ORIOLEDB_REF" PG_MAJOR="$PG_MAJOR"
+          docker compose -f target/docker-compose.yaml config --quiet
+
+      # Bake consumes the generated Compose file, preserving the Dockerfiles'
+      # stage boundaries and build arguments. mode=max is important here: it
+      # exports intermediate stages such as the expensive PostgreSQL builder.
+      # This is equivalent to `make build` but with caching for github actions
+      - name: Build service images with the GitHub Actions cache
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
+        with:
+          source: ./test/antithesis
+          files: target/docker-compose.yaml
+          load: true
+          set: |
+            *.platform=linux/amd64
+            test_orioledb.cache-from=type=gha,scope=antithesis-orioledb-pg17-v1
+            test_orioledb.cache-to=type=gha,scope=antithesis-orioledb-pg17-v1,mode=max,ignore-error=true,timeout=30m
+            jepsen-client.cache-from=type=gha,scope=antithesis-jepsen-amd64-v1
+            jepsen-client.cache-to=type=gha,scope=antithesis-jepsen-amd64-v1,mode=max,ignore-error=true,timeout=30m
+            health-checker.cache-from=type=gha,scope=antithesis-health-checker-amd64-v1
+            health-checker.cache-to=type=gha,scope=antithesis-health-checker-amd64-v1,mode=max,ignore-error=true,timeout=30m
+
+      - name: Validate, push, and launch RR and RC runs
+        env:
+          ANTITHESIS_API_KEY: ${{ secrets.ANTITHESIS_API_KEY }}
+          DURATION_MINUTES: ${{ steps.target.outputs.duration_minutes }}
+          ORIOLEDB_REF: ${{ steps.target.outputs.ref }}
+          TARGET_BRANCH: ${{ steps.target.outputs.branch }}
+        run: |
+          set -euo pipefail
+          ./launch-jepsen.sh \
+            --skip-service-build \
+            --resolved-ref "$ORIOLEDB_REF" \
+            "$TARGET_BRANCH" \
+            "$DURATION_MINUTES"
