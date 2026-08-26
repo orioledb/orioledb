@@ -91,6 +91,139 @@ class RewriteTest(BaseTest):
 				    master.execute("SELECT count(*) FROM o_rw_1;")[0][0],
 				    replica.execute("SELECT count(*) FROM o_rw_1;")[0][0])
 
+	def test_replication_alter_type_bridged(self):
+		"""
+		ALTER COLUMN TYPE on a BRIDGED orioledb table (Step 7 Path B).  The
+		native rewrite now carries the bridge tree (Btrans) maintained inline
+		during the fill across the adoption, instead of falling back to the
+		old OAT rewrite_table path.  The replica must replay the adoption to
+		the same state: data, primary, and the stock-PG bridged index (read
+		through the carried bridge tree) all correct.  Covers both the
+		primary-key and the no-primary-key (ctid-primary) bridged cases.
+		"""
+		node = self.node
+		node.start()
+
+		with self.node as master:
+			with self.getReplica().start() as replica:
+				with master.connect() as con1:
+					con1.begin()
+
+					con1.execute("""
+						CREATE EXTENSION IF NOT EXISTS orioledb;
+						CREATE TABLE o_rw_bridge(
+							pk int PRIMARY KEY,
+							j int,
+							val_3 text
+						) USING orioledb;
+
+						-- A stock-PG btree with orioledb_index=off is
+						-- auto-bridged: it points at bridge_ctids resolved
+						-- through the orioledb bridge tree.
+						CREATE INDEX o_rw_bridge_j_idx ON o_rw_bridge
+							USING btree (j) WITH (orioledb_index = off);
+						INSERT INTO o_rw_bridge
+							SELECT x, 2 * x, 'test_data' || x
+							FROM generate_series(1, 1000) x;
+					""")
+					con1.commit()
+
+				# ALTER COLUMN TYPE drives make_new_heap -> native fill (which
+				# maintains the bridge tree inline and stamps fresh
+				# bridge_ctids) -> adoption carrying Btrans on the master.
+				master.execute("ALTER TABLE o_rw_bridge ALTER j TYPE bigint;")
+
+				self.catchup_orioledb(replica)
+
+				set_scan = ("set enable_seqscan = {}; "
+				            "set enable_indexscan = {}; "
+				            "set enable_bitmapscan = {};")
+
+				# Primary-key lookup must find the row on the replica.
+				self.assertEqual(
+				    replica.execute(
+				        f"{set_scan.format('off', 'on', 'on')} "
+				        "SELECT pk, j FROM o_rw_bridge WHERE pk = 500;"
+				    ), [(500, 1000)])
+
+				# The bridged stock-PG btree index must read correctly on the
+				# replica through the carried bridge tree.
+				self.assertEqual(
+				    replica.execute(
+				        f"{set_scan.format('off', 'on', 'off')} "
+				        "SELECT pk FROM o_rw_bridge WHERE j = 1000;"
+				    ), [(500,)])
+
+				# Row counts must match between master and replica.
+				self.assertEqual(
+				    master.execute("SELECT count(*) FROM o_rw_bridge;")[0][0],
+				    replica.execute("SELECT count(*) FROM o_rw_bridge;")[0][0])
+
+				# A bridged index scan must return every row, ordered, on the
+				# replica (exercises the bridge tree end-to-end).
+				self.assertEqual(
+				    replica.execute(
+				        f"{set_scan.format('off', 'on', 'off')} "
+				        "SELECT count(*) FROM o_rw_bridge WHERE j > 0;"
+				    ), [(1000,)])
+
+	def test_replication_alter_type_bridged_no_pk(self):
+		"""
+		The no-primary-key bridged case (mirrors index_bridging.sql's
+		ALTER COLUMN TYPE after dropping the PK): the ctid primary is used,
+		the bridge tree is still carried across the native adoption.  The
+		bridged index must read correctly on the replica after catchup.
+		"""
+		node = self.node
+		node.start()
+
+		with self.node as master:
+			with self.getReplica().start() as replica:
+				with master.connect() as con1:
+					con1.begin()
+
+					con1.execute("""
+						CREATE EXTENSION IF NOT EXISTS orioledb;
+						CREATE TABLE o_rw_bridge_nopk(
+							pk int,
+							j int
+						) USING orioledb;
+
+						CREATE INDEX o_rw_bridge_nopk_j_idx ON o_rw_bridge_nopk
+							USING btree (j) WITH (orioledb_index = off);
+						INSERT INTO o_rw_bridge_nopk
+							SELECT x, 2 * x FROM generate_series(1, 500) x;
+						ALTER TABLE o_rw_bridge_nopk
+							ADD PRIMARY KEY (pk);
+						ALTER TABLE o_rw_bridge_nopk
+							DROP CONSTRAINT o_rw_bridge_nopk_pkey;
+					""")
+					con1.commit()
+
+				# ALTER COLUMN TYPE on a no-PK bridged table drives the native
+				# rewrite via the ctid primary, carrying Btrans.
+				master.execute(
+				    "ALTER TABLE o_rw_bridge_nopk ALTER j TYPE bigint;")
+
+				self.catchup_orioledb(replica)
+
+				set_scan = ("set enable_seqscan = {}; "
+				            "set enable_indexscan = {}; "
+				            "set enable_bitmapscan = {};")
+
+				# The bridged index must read correctly on the replica.
+				self.assertEqual(
+				    replica.execute(
+				        f"{set_scan.format('off', 'on', 'off')} "
+				        "SELECT pk FROM o_rw_bridge_nopk WHERE j = 1000;"
+				    ), [(500,)])
+
+				self.assertEqual(
+				    master.execute(
+				        "SELECT count(*) FROM o_rw_bridge_nopk;")[0][0],
+				    replica.execute(
+				        "SELECT count(*) FROM o_rw_bridge_nopk;")[0][0])
+
 	def test_replication_refresh_matview(self):
 		"""
 		REFRESH MATERIALIZED VIEW on an orioledb matview drives the native

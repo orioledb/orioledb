@@ -147,7 +147,8 @@ extern void _o_index_parallel_build_inner(dsm_segment *seg, shm_toc *toc,
 extern void drop_primary_index(Relation rel, OTable *o_table);
 extern OTable *o_make_table_with_primary(Relation heaprel, Relation index,
 										 RelFileNumber primary_relnode,
-										 bool index_bridging);
+										 bool index_bridging,
+										 RelFileNumber bridge_relnode);
 extern void o_build_primary_for_new_heap(Relation newheap, Relation index,
 										 RelFileNumber primary_relnode,
 										 bool index_bridging);

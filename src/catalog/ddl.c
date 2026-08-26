@@ -116,7 +116,7 @@
 static IndexBuildResult o_pkey_result;
 static void o_drop_table(ORelOids oids);
 static void o_drop_table_ext(ORelOids oids, bool carry_secondary,
-							 bool carry_primary);
+							 bool carry_primary, bool carry_bridge);
 
 typedef struct
 {
@@ -140,9 +140,7 @@ static List *alter_type_exprs = NIL;
 static List *o_alter_generated_column_id = NIL;
 static List *dropped_attrs = NIL;
 static bool o_composite_alter_index_safe = false;
-Oid			o_saved_relrewrite = InvalidOid;
 List	   *o_reuse_indices = NIL;
-static ORelOids saved_oids;
 static bool in_rewrite = false;
 static bool in_cluster_rebuild = false;
 List	   *reindex_list = NIL;
@@ -163,6 +161,8 @@ static ORelOids o_rewrite_old_oids;		/* old heap, pre-swap (relnode=Rold) */
 static ORelOids o_rewrite_new_oids;		/* new heap, pre-swap (relnode=Rnew) */
 static Oid	o_rewrite_old_pk_oid = InvalidOid;	/* oldrel's PK index OID */
 static RelFileNumber o_rewrite_primary_relnode = InvalidRelFileNumber;	/* Rnew */
+static bool o_rewrite_bridging = false;	/* oldrel had index_bridging */
+static RelFileNumber o_rewrite_bridge_relnode = InvalidRelFileNumber;	/* Btrans */
 
 static void orioledb_utility_command(PlannedStmt *pstmt,
 									 const char *queryString,
@@ -1031,8 +1031,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 	if (isTopLevel)
 	{
 		in_rewrite = false;
-		o_saved_relrewrite = InvalidOid;
-		ORelOidsSetInvalid(saved_oids);
 		o_rewrite_fill_active = false;
 		o_skip_primary_ambuild = false;
 		o_rewrite_in_progress = false;
@@ -1040,6 +1038,8 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		ORelOidsSetInvalid(o_rewrite_new_oids);
 		o_rewrite_old_pk_oid = InvalidOid;
 		o_rewrite_primary_relnode = InvalidRelFileNumber;
+		o_rewrite_bridging = false;
+		o_rewrite_bridge_relnode = InvalidRelFileNumber;
 		in_nontransactional_truncate = false;
 		in_cluster_rebuild = false;
 	}
@@ -2418,6 +2418,7 @@ orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel)
 				new_oids;
 	Oid			old_pk_oid;
 	RelFileNumber primary_relnode;
+	bool		bridging;
 
 	if (!is_orioledb_rel(oldrel))
 		return;
@@ -2426,25 +2427,24 @@ orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel)
 	ORelOidsSetFromRel(old_oids, oldrel);
 
 	/*
-	 * Bridged tables fall back to the OAT_POST_ALTER rewrite_table path: the
-	 * bridge index (an orioledb-internal tree not rebuilt by PG's
-	 * reindex_relation) requires rebuild_indices() to repopulate it from the
-	 * primary scan, which the native adoption path does not do.  Set
-	 * o_saved_relrewrite so the OAT hook drives rewrite_table, and leave
-	 * o_rewrite_in_progress false so finish_heap_swap_body is a no-op.
+	 * A bridged table's primary tuples carry a hidden bridge_ctid attribute
+	 * (format.c), so the native fill MUST maintain the bridge tree inline
+	 * (o_tbl_insert stamps bridge_ctids).  o_make_table_with_primary() /
+	 * o_build_primary_for_new_heap() already wire bridge_oids into the
+	 * transient OTable when index_bridging is passed, so the fill maintains
+	 * the bridge tree (Btrans) alongside the primary; finish_heap_swap_body
+	 * then carries Btrans across the adoption (mirroring the primary carry),
+	 * and PG's post-swap reindex_relation() rebuilds the stock-PG bridged
+	 * indexes against the fresh bridge_ctids.  No separate bridge rebuild.
 	 */
 	{
 		OTable	   *old_o_tbl = o_tables_get(old_oids);
-		bool		bridging = old_o_tbl ? old_o_tbl->index_bridging : false;
 
+		bridging = old_o_tbl ? old_o_tbl->index_bridging : false;
 		o_table_free(old_o_tbl);
-		if (bridging)
-		{
-			o_saved_relrewrite = oldrel->rd_id;
-			saved_oids = old_oids;
-			return;
-		}
 	}
+	o_rewrite_bridging = bridging;
+	o_rewrite_bridge_relnode = InvalidRelFileNumber;	/* filled after Btrans alloc */
 
 	o_rewrite_old_oids = old_oids;
 	o_rewrite_in_progress = true;
@@ -2482,7 +2482,7 @@ orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel)
 		 * descr fetch to pair the OTable with a ctid OIndex and trip
 		 * o_tupdesc_matches_o_table().
 		 */
-		o_build_primary_for_new_heap(newrel, oldpk, primary_relnode, false);
+		o_build_primary_for_new_heap(newrel, oldpk, primary_relnode, bridging);
 		index_close(oldpk, AccessShareLock);
 	}
 	else
@@ -2491,8 +2491,11 @@ orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel)
 		 * No PK: create OTable(OIDNewHeap, Rnew) with nindices = 0; the
 		 * implicit ctid primary is keyed by oTable->oids.relnode (Rnew), which
 		 * is correct here (there is no real PK to collide with).  Mirror
-		 * create_o_table_for_rel(), but propagate index_bridging is not needed
-		 * here (bridged tables returned early above).
+		 * create_o_table_for_rel() / o_make_table_with_primary(), but for the
+		 * ctid primary.  When the table is bridged, assign a fresh bridge
+		 * relnode (Btrans) here so the native fill (o_tbl_insert) maintains
+		 * the bridge tree inline and stamps bridge_ctids; finish_heap_swap_body
+		 * then carries Btrans across the adoption.
 		 */
 		ORelOids	npk_oids;
 		OTable	   *o_table;
@@ -2505,8 +2508,20 @@ orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel)
 										 RelationGetFillFactor(newrel,
 																BTREE_DEFAULT_FILLFACTOR),
 										 newrel->rd_rel->reltablespace,
-										 false);
+										 bridging);
 		o_cache_table_types(o_table);
+		if (bridging)
+		{
+			Oid			bridge_spcoid = OidIsValid(newrel->rd_rel->reltablespace) ?
+				newrel->rd_rel->reltablespace : MyDatabaseTableSpace;
+
+			o_table->bridge_oids.datoid = MyDatabaseId;
+			o_table->bridge_oids.spcoid = bridge_spcoid;
+			o_table->bridge_oids.relnode = IsBinaryUpgrade ? InvalidOid :
+				o_bridge_new_relnode(bridge_spcoid,
+									 newrel->rd_rel->relpersistence);
+			o_table->bridge_oids.reloid = o_table->bridge_oids.relnode;
+		}
 		fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 		o_tables_table_meta_lock(NULL);
 		o_tables_add(o_table, oxid, oSnapshot.csn);
@@ -2519,14 +2534,50 @@ orioledb_begin_heap_rewrite_body(Relation oldrel, Relation newrel)
 	 * Wire the toast PG already created in make_new_heap().  Done after the
 	 * primary build so the OTable already has_primary and
 	 * set_toast_oids_and_options() updates the real primary (not a ctid one).
+	 * Pass bridging so a fresh toast tree / bridge is not re-allocated (the
+	 * transient OTable already carries Btrans from the build above).
 	 */
 	if (OidIsValid(newrel->rd_rel->reltoastrelid))
 	{
 		Relation	toast_rel = table_open(newrel->rd_rel->reltoastrelid,
 										  AccessShareLock);
 
-		set_toast_oids_and_options(newrel, toast_rel, false, false);
+		set_toast_oids_and_options(newrel, toast_rel, false, bridging);
 		table_close(toast_rel, AccessShareLock);
+	}
+
+	/*
+	 * Capture the transient OTable's bridge relnode (Btrans), allocated above
+	 * (o_make_table_with_primary / the no-PK branch / set_toast_oids_and_options
+	 * when bridging).  finish_heap_swap_body reuses it for the adopted OTable
+	 * so the bridge tree is carried, not rebuilt.
+	 */
+	if (o_rewrite_bridging)
+	{
+		OTable	   *trans_o_tbl = o_tables_get(o_rewrite_new_oids);
+		bool		is_temp;
+
+		Assert(trans_o_tbl != NULL);
+		Assert(ORelOidsIsValid(trans_o_tbl->bridge_oids));
+		o_rewrite_bridge_relnode = trans_o_tbl->bridge_oids.relnode;
+
+		/*
+		 * Register the bridge tree (Btrans) for abort-cleanup + commit-fsync,
+		 * mirroring the primary tree's add_undo_create_relnode() in
+		 * o_build_primary_for_new_heap() (indices.c).  The primary is already
+		 * tracked there; the bridge is an additional orioledb-internal tree
+		 * created inline during the fill (o_tbl_insert maintains it), so it
+		 * needs its own create-undo: an aborted rewrite drops Btrans, a
+		 * committed one fsyncs it.  Temp tables skip it, like the primary.
+		 */
+		is_temp = (trans_o_tbl->persistence == RELPERSISTENCE_TEMP);
+		if (!is_temp)
+		{
+			OIndexKey	bkey = {.oids = trans_o_tbl->bridge_oids};
+
+			add_undo_create_relnode(o_rewrite_new_oids, &bkey, 1, true);
+		}
+		o_table_free(trans_o_tbl);
 	}
 
 	/*
@@ -2588,7 +2639,7 @@ orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 	 * queued for commit-time delete.  o_drop_table_ext() takes the meta-lock
 	 * itself, so we must not wrap it.
 	 */
-	o_drop_table_ext(o_rewrite_new_oids, false, true);
+	o_drop_table_ext(o_rewrite_new_oids, false, true, o_rewrite_bridging);
 
 	/*
 	 * Adopt the filled primary tree by moving the old heap's OTable from its
@@ -2631,9 +2682,18 @@ orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 		 * pg_index row and the OTable keep agreeing on which index is the
 		 * primary; its relnode is the filled tree Rnew.
 		 */
+		/*
+		 * The primary's reloid stays the old PK index oid so the catalog
+		 * pg_index row and the OTable keep agreeing on which index is the
+		 * primary; its relnode is the filled tree Rnew.  For a bridged table,
+		 * reuse the transient fill's bridge tree (Btrans) instead of allocating
+		 * a fresh bridge relnode, so the bridge tree is carried across the
+		 * adoption (mirroring the primary carry), not rebuilt.
+		 */
 		new_o_table = o_make_table_with_primary(oldrel, oldpk,
 												o_rewrite_primary_relnode,
-												false);
+												o_rewrite_bridging,
+												o_rewrite_bridge_relnode);
 		index_close(oldpk, AccessShareLock);
 	}
 	else
@@ -2644,8 +2704,9 @@ orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 		 * o_make_table_with_primary does not set up -- it assumes a real PK).
 		 * Mirror create_o_table_for_rel(): the ctid primary is implicit and
 		 * created lazily on first access, so just build a plain index-less
-		 * OTable at the post-swap identity.  Bridging is not needed here:
-		 * bridged tables returned early in begin_heap_rewrite_body.
+		 * OTable at the post-swap identity.  For a bridged table, reuse the
+		 * transient fill's bridge tree (Btrans) so the bridge tree is carried
+		 * across the adoption (mirroring the primary carry), not rebuilt.
 		 */
 		ORelOids	new_oids;
 
@@ -2656,8 +2717,17 @@ orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 											 RelationGetFillFactor(oldrel,
 																	BTREE_DEFAULT_FILLFACTOR),
 											 oldrel->rd_rel->reltablespace,
-											 false);
+											 o_rewrite_bridging);
 		o_cache_table_types(new_o_table);
+		if (o_rewrite_bridging)
+		{
+			new_o_table->bridge_oids.datoid = MyDatabaseId;
+			new_o_table->bridge_oids.spcoid = OidIsValid(oldrel->rd_rel->reltablespace) ?
+				oldrel->rd_rel->reltablespace : MyDatabaseTableSpace;
+			Assert(RelFileNumberIsValid(o_rewrite_bridge_relnode));
+			new_o_table->bridge_oids.relnode = o_rewrite_bridge_relnode;
+			new_o_table->bridge_oids.reloid = o_rewrite_bridge_relnode;
+		}
 	}
 
 	/*
@@ -2686,6 +2756,8 @@ orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 	ORelOidsSetInvalid(o_rewrite_new_oids);
 	o_rewrite_old_pk_oid = InvalidOid;
 	o_rewrite_primary_relnode = InvalidRelFileNumber;
+	o_rewrite_bridging = false;
+	o_rewrite_bridge_relnode = InvalidRelFileNumber;
 
 	/*
 	 * Let PG's reindex_relation() build the secondaries.  The primary must be
@@ -2704,7 +2776,7 @@ orioledb_finish_heap_swap_body(Relation oldrel, Relation newrel,
 static void
 o_drop_table(ORelOids oids)
 {
-	o_drop_table_ext(oids, false, false);
+	o_drop_table_ext(oids, false, false, false);
 }
 
 /*
@@ -2721,9 +2793,17 @@ o_drop_table(ORelOids oids)
  * (finish_heap_swap_body): the filled primary tree built on the transient new
  * heap is adopted by the old heap's OTable, so it must survive the drop of the
  * new heap's OTable.
+ *
+ * When `carry_bridge` is true the bridge index tree is ALSO carried (not
+ * queued for commit-time drop).  Used by the native-rewrite adoption of a
+ * bridged table (finish_heap_swap_body): the bridge tree (Btrans) maintained
+ * inline during the fill is adopted by the old heap's OTable, mirroring the
+ * primary carry.  A carried primary implies a carried bridge for a bridged
+ * table, but the flag is explicit so non-bridged adoptions pass false.
  */
 void
-o_drop_table_ext(ORelOids oids, bool carry_secondary, bool carry_primary)
+o_drop_table_ext(ORelOids oids, bool carry_secondary, bool carry_primary,
+				 bool carry_bridge)
 {
 	OSnapshot	oSnapshot;
 	OXid		oxid;
@@ -2756,7 +2836,7 @@ o_drop_table_ext(ORelOids oids, bool carry_secondary, bool carry_primary)
 			trees[num].oids.spcoid = ix->oids.spcoid;
 			num++;
 		}
-		if (ORelOidsIsValid(table->bridge_oids))
+		if (ORelOidsIsValid(table->bridge_oids) && !carry_bridge)
 		{
 			trees[num].oids = table->bridge_oids;
 			trees[num].oids.spcoid = table->oids.spcoid;
@@ -2824,48 +2904,6 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table,
 	old_slot = MakeSingleTupleTableSlot(old_descr->tupdesc, &TTSOpsOrioleDB);
 	new_slot = MakeSingleTupleTableSlot(descr->tupdesc, &TTSOpsOrioleDB);
 	sscan = make_btree_seq_scan(&GET_PRIMARY(old_descr)->desc, &o_in_progress_snapshot, NULL);
-
-	/*
-	 * OrioleDB engine change execution order when relation is rewritten. So
-	 * real data transfer from old relation to the new one executed after
-	 * dropping. So in statements with moving data from one column to another
-	 * via ALTER COLUMN and DROP we gather an error that column already
-	 * dropped. To avoid this behavior mark column dropped in current
-	 * statement as not dropped. This is ugly solution actually need refactor
-	 * handling of ALTER TABLE to avoid global vars and lists that brings a
-	 * lot of bugs.
-	 */
-	if (OidIsValid(o_saved_relrewrite))
-	{
-		for (int i = 0; i < old_slot->tts_tupleDescriptor->natts; i++)
-		{
-			ListCell   *lc;
-#if PG_VERSION_NUM >= 180000
-			bool		attUpdated = false;
-#else
-			bool		attUpdated pg_attribute_unused() = false;
-#endif
-
-			foreach(lc, dropped_attrs)
-			{
-				Oid			relOid = intVal(linitial((List *) lfirst(lc)));
-				AttrNumber	attnum = intVal(lsecond((List *) lfirst(lc)));
-
-				if (relOid == rel->rd_rel->oid && attnum == i + 1)
-				{
-					OTupleDescAttrSlow(old_slot->tts_tupleDescriptor, i)->attisdropped = false;
-					attUpdated = true;
-
-					break;
-				}
-			}
-
-#if PG_VERSION_NUM >= 180000
-			if (attUpdated)
-				populate_compact_attribute(old_slot->tts_tupleDescriptor, i);
-#endif
-		}
-	}
 
 	fill_current_oxid_osnapshot(&oxid, &oSnapshot);
 
@@ -3159,7 +3197,7 @@ rewrite_table(Relation rel, OTable *old_o_table, OTable *new_o_table,
 	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, descr);
 	ResourceOwnerForgetOTableDescr(CurrentResourceOwner, old_descr);
 
-	o_drop_table_ext(old_o_table->oids, carry_secondary, false);
+	o_drop_table_ext(old_o_table->oids, carry_secondary, false, false);
 }
 
 static void
@@ -4169,15 +4207,11 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 				 * A real (non-transient) heap: create its OTable now.  The
 				 * transient rewrite heap (relrewrite set) is prepared by
 				 * orioledb_begin_heap_rewrite_body() instead, which also
-				 * builds its primary tree so the native fill lands in it.
-				 * Bridged tables fall back to the OAT_POST_ALTER
-				 * rewrite_table path: begin_heap_rewrite_body sets
-				 * o_saved_relrewrite for them and returns early, so their
-				 * transient OTable is created here.
+				 * builds its primary tree (and the bridge tree, for bridged
+				 * tables) so the native fill lands in it.  So a relrewrite
+				 * relation is never handled here.
 				 */
 				if (!OidIsValid(rel->rd_rel->relrewrite))
-					create_o_table_for_rel(rel);
-				else if (OidIsValid(o_saved_relrewrite))
 					create_o_table_for_rel(rel);
 			}
 			else if ((rel->rd_rel->relkind == RELKIND_TOASTVALUE) &&
@@ -4705,80 +4739,19 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 			 * OAT_POST_ALTER for a RELATION/MATVIEW with subId == 0 reaches here
 			 * for ALTER COLUMN TYPE rewrites (and historically for SET
 			 * TABLESPACE, now handled by the relation_set_tablespace_finish
-			 * tableam hook).  The tablespace-detection that used to live here
-			 * is gone; what remains load-bearing for the rewrite path is the
-			 * CommandCounterIncrement() so the OTable that finish_heap_swap_body
-			 * wrote becomes visible to the descr fetches in the next event.
+			 * tableam hook).  Bridged rewrites now also go through the native
+			 * begin_heap_rewrite / finish_heap_swap tableam hooks (Step 7
+			 * Path B), so the OAT_POST_ALTER toast fallback that used to drive
+			 * rewrite_table for bridged tables is gone.  What remains
+			 * load-bearing here is the CommandCounterIncrement() so the OTable
+			 * that finish_heap_swap_body wrote becomes visible to the descr
+			 * fetches in the next event.
 			 */
 			else if ((rel->rd_rel->relkind == RELKIND_RELATION ||
 					  rel->rd_rel->relkind == RELKIND_MATVIEW) &&
 					 (subId == 0) && is_orioledb_rel(rel))
 			{
 				CommandCounterIncrement();
-			}
-			else if (rel->rd_rel->relkind == RELKIND_TOASTVALUE &&
-					 OidIsValid(o_saved_relrewrite) &&
-					 OidIsValid(rel->rd_rel->relrewrite) &&
-					 (subId == 0))
-			{
-				Relation	tbl = NULL;
-
-				tbl = table_open(o_saved_relrewrite, AccessShareLock);
-				if (is_orioledb_rel(tbl))
-				{
-					ORelOids	new_oids;
-					OTable	   *old_o_table,
-							   *new_o_table;
-
-					CommandCounterIncrement();
-
-					old_o_table = o_tables_get(saved_oids);
-					Assert(old_o_table != NULL);
-
-					create_o_table_for_rel(tbl);
-
-					set_toast_oids_and_options(tbl, rel, false, old_o_table->index_bridging);
-
-					ORelOidsSetFromRel(new_oids, tbl);
-					new_o_table = o_tables_get(new_oids);
-					Assert(new_o_table != NULL);
-
-					relation_close(tbl, AccessShareLock);
-					CommandCounterIncrement();
-					tbl = relation_open(o_saved_relrewrite, AccessShareLock);
-
-				/*
-				 * Redefinig primary key here to not do rebuild after
-				 * rewrite_table
-				 */
-				redefine_indices(tbl, new_o_table, true, InvalidOid);
-
-				o_table_free(new_o_table);
-				new_o_table = o_tables_get(new_oids);
-				Assert(new_o_table != NULL);
-
-				switch (tbl->rd_rel->relkind)
-				{
-					case RELKIND_RELATION:
-						rewrite_table(tbl, old_o_table, new_o_table, false);
-						break;
-					default:
-						/*
-						 * Matviews are never bridged, so they always take
-						 * the native fill path and never reach this OAT
-						 * fallback (reachable only for bridged relations).
-						 */
-						Assert(false);
-						break;
-				}
-
-				redefine_indices(tbl, new_o_table, false, InvalidOid);
-
-				o_table_free(old_o_table);
-				o_table_free(new_o_table);
-				o_saved_relrewrite = InvalidOid;
-			}
-			table_close(tbl, AccessShareLock);
 			}
 			else if (rel->rd_rel->relkind == RELKIND_TOASTVALUE &&
 					 (subId == 0) && !in_cluster_rebuild &&
@@ -5710,7 +5683,8 @@ o_ddl_cleanup(void)
 	memset(&o_pkey_result, 0, sizeof(o_pkey_result));
 	if (GetCurrentTransactionNestLevel() == 1)
 	{
-		o_saved_relrewrite = InvalidOid;
+		o_rewrite_bridging = false;
+		o_rewrite_bridge_relnode = InvalidRelFileNumber;
 		in_rewrite = false;
 		o_rewrite_fill_active = false;
 		o_skip_primary_ambuild = false;
