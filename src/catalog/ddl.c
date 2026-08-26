@@ -138,7 +138,6 @@ static List *drop_index_list = NIL;
 static List *partition_drop_index_list = NIL;
 static List *alter_type_exprs = NIL;
 static List *o_alter_generated_column_id = NIL;
-static List *dropped_attrs = NIL;
 static bool o_composite_alter_index_safe = false;
 List	   *o_reuse_indices = NIL;
 static bool in_rewrite = false;
@@ -1089,7 +1088,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 		 * isn't freed by us and pointer may be invalid there
 		 */
 		alter_type_exprs = NIL;
-		dropped_attrs = NIL;
 
 		/*
 		 * ALTER TYPE ADD ATTRIBUTE on a composite type does not alter the
@@ -1771,11 +1769,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 			list_free(partition_drop_index_list);
 			partition_drop_index_list = NIL;
 		}
-		if (dropped_attrs)
-		{
-			list_free(dropped_attrs);
-			dropped_attrs = NIL;
-		}
 	}
 	else if (IsA(pstmt->utilityStmt, AlterTableStmt))
 	{
@@ -1791,9 +1784,6 @@ orioledb_utility_command(PlannedStmt *pstmt,
 
 		list_free_deep(o_alter_generated_column_id);
 		o_alter_generated_column_id = NIL;
-
-		list_free(dropped_attrs);
-		dropped_attrs = NIL;
 
 		o_composite_alter_index_safe = false;
 
@@ -3853,8 +3843,6 @@ orioledb_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId,
 						o_tables_update(o_table, oxid, oSnapshot.csn);
 						o_tables_after_update(o_table, oxid, oSnapshot.csn);
 						o_tables_rel_meta_unlock(rel, InvalidOid);
-						/* cppcheck-suppress unknownEvaluationOrder */
-						dropped_attrs = lappend(dropped_attrs, list_make2(makeInteger(objectId), makeInteger(subId)));
 					}
 					o_table_free(o_table);
 				}
@@ -5661,11 +5649,6 @@ o_ddl_cleanup(void)
 	{
 		list_free_deep(reindex_list);
 		reindex_list = NIL;
-	}
-	if (dropped_attrs)
-	{
-		list_free(dropped_attrs);
-		dropped_attrs = NIL;
 	}
 	if (alter_type_exprs)
 	{
