@@ -42,7 +42,20 @@ Build via `make build` (see details under Usage)
     - `compose.yaml` - merged with base compose file
     - `env` - enivronment customizations
 
-### Test Suites
+### Nightly
+
+- [antithesis-jepsen.yml](.github/workflows/antithesis-jepsen.yml) runs nightly
+- Executes two 4h simulation runs, one for `jepsen-RC` and `jepsen-RR`
+- Can be invoked on demand for ad-hoc checks.
+
+``` bash
+gh workflow run antithesis-jepsen.yml \
+    -f duration_minutes=30 \
+    -f branch=my-amazing-feature-branch
+```
+
+
+### Local Test Suites
 
 These examples assume a working [snouty](https://github.com/antithesishq/snouty).  Run `eval "$(mise activate bash)"` and `snouty doctor` for setup instructions.
 
