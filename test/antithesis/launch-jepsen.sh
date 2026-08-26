@@ -151,7 +151,7 @@ done
 for index in "${!modes[@]}"; do
 	mode="${modes[index]}"
 	source_name="${branch_slug}_jepsen-${mode}_${duration_minutes}m"
-	description="branch=${target_branch},sha=${short_ref},workload=jepsen-${mode},time=${duration_minutes}m"
+	description="${target_branch},${short_ref},jepsen-${mode},${duration_minutes}m"
 
 	echo "Launching Jepsen $mode: ${config_images[index]}"
 	launch_output="$(
