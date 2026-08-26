@@ -233,18 +233,10 @@ jobs:
         timeout-minutes: ${{ matrix.timeout }}
         env:
           REPEATS: ${{ github.event.inputs.repeats || '1' }}
-        run: |
-          # Stop at the first failure: its diffs and logs are what the upload
-          # steps below collect, and a later pass would overwrite them.
-          for i in $(seq 1 "$REPEATS"); do
-            if [ "$REPEATS" != "1" ]; then
-              echo "::group::check attempt $i of $REPEATS"
-            fi
-            bash ./orioledb/ci/check.sh
-            if [ "$REPEATS" != "1" ]; then
-              echo "::endgroup::"
-            fi
-          done
+        # check.sh does the repeating: only it knows which part of a check
+        # type is the test and which is scaffolding.  Re-running it whole
+        # would re-initdb pg_tests' cluster on top of itself.
+        run: bash ./orioledb/ci/check.sh
 
       - name: Check output
         run: bash ./orioledb/ci/check_output.sh

@@ -17,11 +17,24 @@ sudo sh -c "echo \"/tmp/cores-$GITHUB_SHA-$TIMESTAMP/%t_%p.core\" > /proc/sys/ke
 
 status=0
 
+# Repeat the tests, not the scaffolding around them.  A dispatch asks for
+# this to shake out flakes; check types that build their own throwaway
+# instances just run again, while pg_tests keeps its clusters up across the
+# passes, which is the more interesting thing to test anyway.
+REPEATS=${REPEATS:-1}
+pass_banner () { [ "$REPEATS" = 1 ] || echo "=== $1: pass $2 of $REPEATS ==="; }
+
 cd orioledb
 if [ $CHECK_TYPE = "valgrind_1" ]; then
+	for pass in $(seq 1 "$REPEATS"); do
+		pass_banner valgrind_1 "$pass"
 	make USE_PGXS=1 IS_DEV=1 VALGRIND=1 regresscheck isolationcheck testgrescheck_part_1 -j $(nproc) || status=$?
+	done
 elif [ $CHECK_TYPE = "valgrind_2" ]; then
+	for pass in $(seq 1 "$REPEATS"); do
+		pass_banner valgrind_2 "$pass"
 	make USE_PGXS=1 IS_DEV=1 VALGRIND=1 testgrescheck_part_2 -j $(nproc) || status=$?
+	done
 elif [ $CHECK_TYPE = "sanitize" ]; then
 	if [ $COMPILER = "clang" ]; then
 		FAKE_STACK=1
@@ -29,6 +42,8 @@ elif [ $CHECK_TYPE = "sanitize" ]; then
 		FAKE_STACK=0 # it is really slow for gcc
 	fi
 
+	for pass in $(seq 1 "$REPEATS"); do
+	pass_banner sanitize "$pass"
 	UBSAN_OPTIONS="log_path=$PWD/ubsan.log" \
 	ASAN_OPTIONS=$(cat <<-END
 		verify_asan_link_order=0:
@@ -45,6 +60,7 @@ elif [ $CHECK_TYPE = "sanitize" ]; then
 	END
 	) \
 		make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?
+	done
 elif [ $CHECK_TYPE = "pg_tests" ]; then
     cd ../postgresql
     cat src/test/regress/parallel_schedule | sed "s/indirect_toast//" >$GITHUB_WORKSPACE/parallel_schedule_no_segfaults
@@ -69,9 +85,12 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
     pg_ctl -D $GITHUB_WORKSPACE/pgsql/pgdata -l pg.log start
 
     # Run the tests
+    for pass in $(seq 1 "$REPEATS"); do
+    pass_banner "pg_tests upstream" "$pass"
     make -C src/test/regress installcheck -j $(nproc) || status=$?
     make -C src/test/isolation installcheck -j $(nproc) || status=$?
     make -C src/test/subscription installcheck -j $(nproc) || status=$?
+    done
 
     if [ $status -eq 0 ]; then
         echo "default_table_access_method = 'orioledb'" >> $GITHUB_WORKSPACE/pgsql/pgdata/postgresql.conf
@@ -89,6 +108,9 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
         echo "primary_conninfo = 'host=/tmp port=5432'" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         echo "allow_in_place_tablespaces = true" >> $GITHUB_WORKSPACE/pgsql/rep_pgdata/postgresql.conf
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log start
+
+        for pass in $(seq 1 "$REPEATS"); do
+        pass_banner "pg_tests orioledb" "$pass"
 
         cd src/test/regress
         make installcheck-tests EXTRA_REGRESS_OPTS="--load-extension=orioledb --schedule=$GITHUB_WORKSPACE/parallel_schedule_no_segfaults" TESTS="" -j $(nproc) || true
@@ -193,6 +215,8 @@ elif [ $CHECK_TYPE = "pg_tests" ]; then
             fi
         done
 
+        done
+
         pg_ctl -D $GITHUB_WORKSPACE/pgsql/rep_pgdata -l rep_pg.log stop
         if [ $PG_VERSION != "16" ]; then
             make -C src/test/subscription installcheck-oriole -j $(nproc) || status=$?
@@ -204,9 +228,15 @@ elif [ $CHECK_TYPE = "dm_log_writes" ]; then
 	# Run only the recovery tests with OS buffer loss simulation enabled.
 	# Each crash point uses dm-log-writes: only writes that reached the
 	# block device before the mark survive, discarding OS-buffered data.
+	for pass in $(seq 1 "$REPEATS"); do
+		pass_banner dm_log_writes "$pass"
 	make USE_PGXS=1 IS_DEV=1 USE_DM_LOG_WRITES=1 test/t/recovery_test.py || status=$?
+	done
 else
+	for pass in $(seq 1 "$REPEATS"); do
+		pass_banner "$CHECK_TYPE" "$pass"
 	make USE_PGXS=1 IS_DEV=1 installcheck -j $(nproc) || status=$?
+	done
 fi
 cd ..
 
