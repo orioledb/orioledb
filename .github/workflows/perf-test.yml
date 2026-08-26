@@ -2,6 +2,8 @@ name: TPC-C Performance Test
 
 on:
   pull_request:
+    paths-ignore:
+      - "test/antithesis/**"
   workflow_dispatch:
     inputs:
       pg_version:

@@ -7,7 +7,11 @@ name: sqlsmith
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "test/antithesis/**"
   pull_request:
+    paths-ignore:
+      - "test/antithesis/**"
   workflow_dispatch:
     inputs:
       seconds:

@@ -2,7 +2,11 @@ name: pg_upgrade
 
 on:
   push:
+    paths-ignore:
+      - "test/antithesis/**"
   pull_request:
+    paths-ignore:
+      - "test/antithesis/**"
 
 jobs:
   pg_upgrade:

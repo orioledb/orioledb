@@ -2,7 +2,11 @@ name: dockerTEST
 
 on:
   push:
+    paths-ignore:
+      - "test/antithesis/**"
   pull_request:
+    paths-ignore:
+      - "test/antithesis/**"
 
 defaults:
   run:
