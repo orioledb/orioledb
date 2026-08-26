@@ -24,7 +24,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  HARNESS_BRANCH: pmbauer/add-initial-antithesis-workload
   PG_MAJOR: "17"
   SNOUTY_CONTAINER_ENGINE: docker
   SNOUTY_VERSION: "0.6.1"
@@ -43,15 +42,13 @@ jobs:
         working-directory: test/antithesis
 
     steps:
-      - name: Check out the Antithesis harness branch
+      - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ env.HARNESS_BRANCH }}
-          fetch-depth: 1
 
       - name: Fetch and resolve the OrioleDB target branch
         id: target
         env:
+          CHECKOUT_REF_NAME: ${{ github.ref_name }}
           TARGET_BRANCH: ${{ inputs.branch || github.ref_name }}
           RUN_DURATION_MINUTES: ${{ inputs.duration_minutes || '240' }}
         run: |
@@ -80,7 +77,7 @@ jobs:
           {
             echo '## Antithesis Jepsen'
             echo
-            echo "- Harness branch: \`$HARNESS_BRANCH\`"
+            echo "- Checkout ref: \`$CHECKOUT_REF_NAME\`"
             echo "- Target branch: \`$TARGET_BRANCH\`"
             echo "- OrioleDB commit: \`$orioledb_ref\`"
             echo "- Duration: \`${RUN_DURATION_MINUTES}m\`"
